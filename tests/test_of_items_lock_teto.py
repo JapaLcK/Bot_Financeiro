@@ -29,8 +29,11 @@ CONTROLES NEGATIVOS, UM POR CONSERTO, cada um rodado e com o vermelho NOMEADO:
   • volte o `except` do `set_config` para a tupla dos três (`LockNotAvailable`,
     `QueryCanceled`, `DeadlockDetected`) →
     `test_set_config_com_conexao_morta_devolve_got_False`;
-  • volte o `except` do `connect` a propagar sem o 503 →
-    `test_connect_que_estoura_devolve_got_False_e_devolve_a_vaga`;
+  • volte o `except` do `connect` a propagar sem o 503, OU tire o
+    `logger.warning(exc_info=True)` de dentro dele (503 MUDO: o usuário retenta
+    para sempre e o operador não vê nada) →
+    `test_connect_que_estoura_devolve_got_False_e_devolve_a_vaga`, 1ª e 3ª
+    afirmações;
   • volte QUALQUER um dos dois `finally` para `conn.close(); release()` em
     sequência → `test_close_que_estoura_no_finally_nao_vaza_a_vaga` (ele cobre o
     plural E o singular, porque é a mesma classe nos dois).
@@ -49,6 +52,9 @@ tem quem cancele, e o `connect_timeout` já passou. Reproduzir exigiria um socke
 falso falando o protocolo do Postgres; este ambiente não o tem.
 """
 from __future__ import annotations
+
+import logging
+import traceback
 
 import psycopg
 import pytest
@@ -183,7 +189,7 @@ def _vagas() -> int:
     return _lock_slots()._value
 
 
-def test_connect_que_estoura_devolve_got_False_e_devolve_a_vaga(monkeypatch):
+def test_connect_que_estoura_devolve_got_False_e_devolve_a_vaga(monkeypatch, caplog):
     """SIMETRIA com o `set_config`: o `connect_timeout` novo trocou "pendura para
     sempre" por exceção, mas a exceção subia crua numa rota SEM try/except — 500
     numa função cuja docstring promete 503. Fechar o 500 do `set_config` e abrir o
@@ -194,18 +200,34 @@ def test_connect_que_estoura_devolve_got_False_e_devolve_a_vaga(monkeypatch):
     `ProgrammingError` NÃO virou 503 silencioso — sem ela este teste passaria num
     `except Exception` que engole config quebrada e responde 503 para sempre.
 
+    O 503 NÃO PODE SER MUDO, e é a 3ª afirmação: usuário/base inexistente também
+    levanta `OperationalError` (medido), é defeito PERMANENTE, e os dois
+    chamadores o traduzem em "sincronização em andamento, tente de novo" — o
+    usuário retenta para sempre e o operador não tem NADA. Antes de `935b2a7`
+    isso era um 500 com traceback; o `logger.warning(exc_info=True)` devolve a
+    causa sem devolver o 500. `exc_info` e não só o tipo porque o `sqlstate` de
+    falha de connect é `None` nos três casos.
+
     Negativo: troque o `except psycopg.OperationalError` do connect de volta por
     `except Exception: raise` → VERMELHO na 1ª metade, com o `OperationalError`
-    escapando do `with`."""
+    escapando do `with`. Tire o `logger.warning` → VERMELHO só na 3ª (medido: 0
+    registros WARNING+, contra 1 com ele)."""
     antes = _vagas()
 
     def morre(url, **kw):
-        raise psycopg.OperationalError("connection to server failed")
+        raise psycopg.OperationalError('FATAL:  role "ninguem" does not exist')
 
     monkeypatch.setattr(psycopg, "connect", morre)
-    with pluggy_items_lock(ITENS) as got:
-        assert got is False, "connect morto tem de virar 503, não 500"
+    with caplog.at_level(logging.WARNING, logger="db.open_finance_state"):
+        with pluggy_items_lock(ITENS) as got:
+            assert got is False, "connect morto tem de virar 503, não 500"
     assert _vagas() == antes, f"vaga vazou: {antes} -> {_vagas()}"
+
+    graves = [r for r in caplog.records if r.levelno >= logging.WARNING]
+    assert len(graves) == 1, f"503 mudo: {len(graves)} registros WARNING+"
+    assert graves[0].exc_info, "sem exc_info o operador não distingue as causas"
+    assert 'role "ninguem"' in "".join(
+        traceback.format_exception(*graves[0].exc_info)), "a causa não chegou ao log"
 
     def defeito(url, **kw):
         raise psycopg.ProgrammingError("invalid dsn")

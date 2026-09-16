@@ -17,6 +17,7 @@ A separação é toda a ideia:
 from __future__ import annotations
 
 import hashlib
+import logging
 import os
 import threading
 import time
@@ -39,6 +40,12 @@ from .connection import get_conn
 # (`:1099`), então não há ciclo — se algum dia ele subir para o topo de lá, este
 # é o import que quebra.
 from .open_finance import _CursorComTeto
+
+# `logging` da stdlib e não o `_log_falha` de `core/observability.py`: aquele
+# helper exige um `user_id` (2º posicional, cobrado por `ast` em
+# `tests/test_log_falha_user_id.py`) e esta camada não tem um. É o mesmo padrão
+# dos vizinhos `db/accounts.py`, `db/mfa.py` e `db/plans.py`.
+logger = logging.getLogger(__name__)
 
 # Estados locais terminais: nenhum resultado de sync pode sobrescrevê-los.
 # PAUSED = trial venceu (o item nem existe mais na Pluggy); DELETED = removido.
@@ -929,11 +936,38 @@ def pluggy_items_lock(item_ids: list[str]):
         # a exceção subia crua numa rota SEM try/except, virando 500 numa função cuja
         # docstring promete 503/"tente de novo". Fechar o 500 do `set_config` e abrir
         # o do `connect` no mesmo commit seria trocar um furo de lugar.
-        # `OperationalError` e não `Exception`: banco inalcançável, timeout de
-        # connect e conexão recusada são "não dá agora, tente de novo" — 503 é a
-        # resposta HONESTA. Já `RuntimeError`/`ProgrammingError` (URL ausente,
-        # credencial malformada) são DEFEITO nosso, continuam subindo, e 500 é a
-        # resposta honesta para eles: um 503 eterno esconderia config quebrada.
+        #
+        # A FRONTEIRA REAL, MEDIDA (psycopg 3.3.5, contra o Postgres local), e não
+        # a que a versão anterior deste comentário imaginava:
+        #   ProgrammingError (sobe → 500): URL malformada, esquema errado (`mysql://`)
+        #   OperationalError (aqui → 503): host inalcançável, banco INEXISTENTE,
+        #                                  usuário/credencial ERRADA
+        # Ou seja, config quebrada NÃO fica toda do lado do 500 — "role does not
+        # exist" e "database does not exist" caem aqui, são defeito PERMANENTE, e
+        # o usuário só vê "sincronização em andamento, tente de novo"
+        # (`frontend/routes/open_finance.py`, `db/privacy.py`). Daí o `warning`:
+        # o 503 continua sendo a resposta certa para o transitório, e o permanente
+        # deixa de ser MUDO — era o único valor que o 500 anterior comprava.
+        #
+        # `exc_info=True` porque o `sqlstate` NÃO discrimina: nas três falhas de
+        # connect acima ele é `None` (medido), então tipo+sqlstate — o formato do
+        # `_log_falha` — sairia idêntico para "servidor caiu" e para "usuário não
+        # existe". Quem separa os dois é a mensagem do libpq, que traz host, porta,
+        # base e papel — infraestrutura, não dado do cliente: não há `DETAIL: Key
+        # (…)=(…)` num erro de connect (é a razão de privacidade que mantém o
+        # traceback desligado por padrão no `_log_falha`), e a senha o libpq não
+        # ecoa (medido).
+        #
+        # NÃO reentra no `_DashboardHandler` (medido, com o handler real no root):
+        # profundidade máxima de `emit` = 1, 1 connect, 3–5 ms. O ciclo não fecha
+        # porque `core/system_event_log.py` desfecha em `print`, não em `logging`;
+        # e com a `DATABASE_URL` quebrada o INSERT do handler também falha e vira
+        # `[observability] failed to record …` no stderr — a causa continua saindo
+        # duas vezes lá, que é o que o operador perdeu em `935b2a7`.
+        logger.warning(
+            "pluggy_items_lock: conexão dedicada falhou, devolvendo 503 (itens=%d)",
+            len(itens), exc_info=True,
+        )
         _lock_slots().release()
         yield False
         return
@@ -975,6 +1009,11 @@ def pluggy_items_lock(item_ids: list[str]):
         # permanente. É a própria classe que a issue #429 nomeia ("a vaga não volta
         # nunca"), uma linha abaixo do conserto dela. O irmão `pluggy_item_lock`
         # tinha o padrão idêntico e foi consertado junto.
+        # TETO CONHECIDO, e fica: com os DOIS levantando, a exceção do `close()`
+        # vira `__context__` da do `release()`. `threading.Semaphore.release()` não
+        # levanta (só a `BoundedSemaphore` levanta, por excesso, e esta não é uma),
+        # então o caso é inalcançável — e o conserto exigiria engolir a do
+        # `release()`, que é trocar um mascaramento impossível por um real.
         try:
             conn.close()
         finally:

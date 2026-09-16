@@ -1186,14 +1186,21 @@ def test_testes_com_cara_de_opcao_nao_libera_a_suite_inteira(tmp_path):
     A segunda metade e o controle positivo, e e obrigatoria: uma guarda que
     recusasse alvo demais (ou um `--` mal posto, antes do `--junitxml`) quebraria
     TODOS os alvos e o negativo acima passaria verde do mesmo jeito."""
-    lab = _lab(tmp_path, {"tests/test_irmao.py": _TESTE_DO_FIX})
+    # `inj.py` nasce no commit ANTIGO, nao no `_commita`: o `cwd` do pytest e o
+    # worktree de CADA coluna, entao um alvo RELATIVO so existe nas duas se o
+    # arquivo estiver no commit de baixo. No `_commita` ele so existiria na coluna
+    # nova e a antiga morreria com `pytest saiu 4` — vermelho pelo motivo errado.
+    lab = _lab(tmp_path, {"tests/test_irmao.py": _TESTE_DO_FIX,
+                          "inj.py": "-k\ntest_irmao\n"})
     _commita(lab, {"lib.py": _LIB_CORRIGIDA,
                    "tests/test_taut.py": "def test_taut():\n    assert True\n"})
 
     # `@` PRECISA de um arquivo que exista: se nao existir, o argparse ja recusa
-    # sozinho e o caso passaria verde sem a guarda. O vazio e o `-k` sao as duas
-    # cargas medidas — a primeira APAGA o alvo, a segunda injeta OPCAO arbitraria,
-    # que e a mesma carga que a recusa de `-` existe para barrar.
+    # sozinho (`No such file or directory`, `pytest saiu 4`) e o caso ficaria
+    # vermelho pelo motivo ERRADO — quem recusou foi o argparse, nao a guarda. O
+    # vazio e o `-k` sao as duas cargas medidas — a primeira APAGA o alvo, a
+    # segunda injeta OPCAO arbitraria, que e a mesma carga que a recusa de `-`
+    # existe para barrar.
     de_arquivo_vazio = tmp_path / "vazio.py"
     de_arquivo_vazio.write_text("")
     de_arquivo_com_k = tmp_path / "injeta.py"
@@ -1202,7 +1209,9 @@ def test_testes_com_cara_de_opcao_nao_libera_a_suite_inteira(tmp_path):
     for alvo in (f"--basetemp={tmp_path / 'base.py'}",
                  f"@{de_arquivo_vazio}",
                  f"@{de_arquivo_com_k}",
-                 "@vazio.py"):  # relativo tambem: `isabs` e `..` nao o pegam
+                 # relativo tambem: `isabs` e `..` nao o pegam. Medido sem a
+                 # guarda: exit 0 e `APROVADO, prova FORTE` citando o irmao.
+                 "@inj.py"):
         r = _gate(lab, f"--testes={alvo}")
         assert r.returncode == 1, f"{alvo}: {r.stdout}{r.stderr}"
         assert "nao aponta para um arquivo de teste .py" in r.stderr, alvo

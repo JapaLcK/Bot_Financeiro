@@ -141,7 +141,14 @@ def test_db_connect_do_painel_continua_sem_teto():
     número não era reproduzível por nada e envelhecia em silêncio. O que sustenta
     a decisão é a MISTURA de usos, que é qualitativa; se você precisar do número,
     meça na hora, e só o `core/admin_dashboard.py` é o escopo certo:
-        grep -n "db_connect()" core/admin_dashboard.py
+        grep -c "await db_connect()" core/admin_dashboard.py
+    O `await` faz parte do comando, não é enfeite: `grep -c "db_connect()"` conta
+    também a própria `async def db_connect()` e a linha de comentário que a cita —
+    2 a mais que os CHAMADORES, que é o que a frase diz medir (o mesmo defeito do
+    "11", em escala menor). Ele tem teto declarado: enxerga só a chamada escrita
+    em UMA linha e com este nome, então um `await  db_connect()` ou um alias
+    escapam — quem precisar de exatidão usa `ast`, como
+    `tests/test_log_falha_user_id.py`.
 
     Sem este caso, um PR futuro (ou um apontamento de revisor) põe teto no painel
     sem discussão, e o efeito só aparece num boot que falha ou numa purga cortada
