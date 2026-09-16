@@ -1096,9 +1096,10 @@ function closeChangeModal(completed) {
 function openChangeModal(plan, continuation) {
   _ensureChangeModal();
   changeModalContinuation = continuation === true;
+  const changeInterval = currentCycle;
   const cur = PLAN_NAMES[subState.plan] || "seu plano atual";
   const novo = PLAN_NAMES[plan] || plan;
-  const preco = (PLAN_PRICES[plan] || {})[currentCycle] || "";
+  const preco = (PLAN_PRICES[plan] || {})[changeInterval] || "";
   const data = fmtBrDate(subState.current_period_end);
   document.getElementById("chg-body").innerHTML =
     `<p style="margin:0 0 10px"><strong>${cur}</strong> → <strong>${novo} (${preco})</strong></p>` +
@@ -1115,8 +1116,19 @@ function openChangeModal(plan, continuation) {
       const r = await fetch("/billing/change-plan", {
         method: "POST", credentials: "same-origin",
         headers: { "Content-Type": "application/json", "x-csrf-token": getCsrfToken() },
-        body: JSON.stringify({ plan: plan, interval: currentCycle }),
+        body: JSON.stringify({ plan: plan, interval: changeInterval }),
       });
+      const continuingPurchase = changeModalContinuation;
+      if (r.status === 401 && continuingPurchase) {
+        preservePurchaseForAuth(plan, changeInterval, "card");
+        closeChangeModal(true);
+        purchaseResumePending = false;
+        purchaseContinuationError(
+          "Sua sessão expirou antes de confirmar a troca. Entre novamente para continuar.",
+          "login",
+        );
+        return;
+      }
       const data2 = await r.json().catch(() => ({}));
       if (!r.ok) {
         const msg = (data2.detail && data2.detail.message) ||
@@ -1126,7 +1138,6 @@ function openChangeModal(plan, continuation) {
         confirm.textContent = "Confirmar troca";
         return;
       }
-      const continuingPurchase = changeModalContinuation;
       closeChangeModal(true);
       showToast(`✓ Troca agendada pra ${fmtBrDate(data2.effective_at)}. Te mandei um e-mail de confirmação.`);
       if (continuingPurchase) {

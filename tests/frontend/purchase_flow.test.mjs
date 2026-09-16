@@ -572,6 +572,75 @@ test("retomada do mesmo plano ativo segue para a conta sem abrir troca", async (
   await page.close();
 });
 
+test("sessão expirada ao confirmar troca preserva a compra e oferece novo login", async () => {
+  const page = await browser.newPage({ viewport: { width: 1280, height: 900 } });
+  let changeCalls = 0;
+  await page.addInitScript(() => {
+    if (location.pathname !== "/continuar-compra") return;
+    sessionStorage.setItem("pb_purchase_intent_v1", JSON.stringify({
+      version: 1,
+      plan: "pro",
+      cycle: "monthly",
+      method: "card",
+      status: "awaiting_auth",
+      createdAt: Date.now(),
+    }));
+  });
+  await page.route("**/continuar-compra", (route) => route.fulfill({
+    contentType: "text/html",
+    body: fs.readFileSync("frontend/precos.html", "utf8"),
+  }));
+  await page.route("**/billing/plans-config", (route) => route.fulfill({
+    contentType: "application/json",
+    body: JSON.stringify({ essencial_available: true, plus_available: true, pro_available: true }),
+  }));
+  await page.route("**/billing/subscription", (route) => route.fulfill({
+    contentType: "application/json",
+    body: JSON.stringify({
+      active: true,
+      plan: "plus",
+      interval: "monthly",
+      current_period_end: "2026-10-15",
+      scheduled_change: null,
+    }),
+  }));
+  await page.route("**/billing/create-checkout", (route) => route.fulfill({
+    status: 409,
+    contentType: "application/json",
+    body: JSON.stringify({
+      detail: { error: "already_subscribed", message: "Você já possui uma assinatura ativa." },
+    }),
+  }));
+  await page.route("**/billing/change-plan", (route) => {
+    changeCalls += 1;
+    return route.fulfill({
+      status: 401,
+      headers: { "WWW-Authenticate": "Bearer" },
+      contentType: "application/json",
+      body: JSON.stringify({ detail: "Sessão expirada." }),
+    });
+  });
+  await page.route("**/auth/refresh", (route) => route.fulfill({ status: 401, body: "{}" }));
+  await page.route("**/login?*", (route) => route.fulfill({
+    contentType: "text/html",
+    body: "<html><body>login</body></html>",
+  }));
+
+  await page.goto(`${ORIGIN}/continuar-compra`);
+  await page.waitForFunction(() => document.getElementById("chg-overlay")?.style.display === "flex");
+  await page.click("#chg-confirm");
+  await page.waitForSelector("#purchase-continuation-actions.show", { timeout: 5000 });
+  assert.equal(changeCalls, 1);
+  assert.equal(await page.textContent("#purchase-continuation-retry"), "Entrar novamente");
+  const restored = await page.evaluate(() => window.PBPurchaseIntent.pending());
+  assert.equal(restored?.plan, "pro");
+  assert.equal(restored?.cycle, "monthly");
+  await page.click("#purchase-continuation-retry");
+  await page.waitForURL("**/login?*");
+  assert.equal(new URL(page.url()).searchParams.get("next"), "/continuar-compra");
+  await page.close();
+});
+
 test("continuação não consulta assinatura nem perde a intenção em sessão expirada", async () => {
   const page = await browser.newPage({ viewport: { width: 390, height: 844 } });
   let subscriptionCalls = 0;
