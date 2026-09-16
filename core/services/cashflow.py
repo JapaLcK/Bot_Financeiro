@@ -17,6 +17,7 @@ não fechamento contábil.
 from __future__ import annotations
 
 import calendar
+import math
 from datetime import date, timedelta
 from typing import Any
 
@@ -32,11 +33,11 @@ def _as_date(v: Any) -> date | None:
         return None
 
 
-def _recurring_value_in_window(day: Any, freq: str, month: Any, start: date | None,
-                               amount: float, after: date, until: date) -> float:
-    """Soma o valor das ocorrências de um recorrente MENSAL/ANUAL em (after, until]."""
-    if until <= after or amount <= 0:
-        return 0.0
+def _recurring_occurrence_dates(day: Any, freq: str, month: Any, start: date | None,
+                                after: date, until: date) -> list[date]:
+    """Datas de ocorrência de um recorrente MENSAL/ANUAL em (after, until]."""
+    if until <= after:
+        return []
     try:
         day = int(day or 1)
     except (TypeError, ValueError):
@@ -46,39 +47,40 @@ def _recurring_value_in_window(day: Any, freq: str, month: Any, start: date | No
         try:
             mnum = int(month)
         except (TypeError, ValueError):
-            return 0.0
-    total = 0.0
+            return []
+    dates: list[date] = []
     y, m = after.year, after.month
     while (y, m) <= (until.year, until.month):
         if not (freq == "annual" and mnum and m != mnum):
             dim = calendar.monthrange(y, m)[1]
             d = date(y, m, min(day, dim))
             if after < d <= until and (start is None or d >= start):
-                total += amount
+                dates.append(d)
         m += 1
         if m > 12:
             m, y = 1, y + 1
-    return total
+    return dates
 
 
-def _open_card_bills_due(user_id: int, until: date) -> float:
-    """Saldo a pagar (total − pago) das faturas de cartão com vencimento até
+def _open_card_bills_detail(user_id: int, until: date) -> list[dict]:
+    """Faturas de cartão com saldo a pagar (total − pago) e vencimento até
     `until` — compromissos que o saldo em conta ainda não reflete (dívida de
     cartão não sai do saldo). Inclui 'open' (fatura corrente) e 'closed' com saldo
     (atrasada, ainda a pagar), mesmo critério de `list_bills_with_debt`: o
-    atrasado também sai do caixa antes do alvo, então conta como saída."""
+    atrasado também sai do caixa antes do alvo, então conta como saída. Cada item:
+    `{"due_date", "remaining", "card_name"}`."""
     from db.connection import get_conn
     from db.cards import card_bill_due_date
 
-    total = 0.0
+    items: list[dict] = []
     with get_conn() as conn:
         with conn.cursor() as cur:
             cur.execute(
                 """
                 select (b.total - coalesce(b.paid_amount, 0)) as remaining,
-                       b.period_end, c.closing_day, c.due_day
+                       b.period_end, c.closing_day, c.due_day, c.name as card_name
                 from credit_bills b
-                join credit_cards c on c.id = b.card_id
+                join credit_cards c on c.id = b.card_id and c.user_id = b.user_id
                 where b.user_id = %s and b.status in ('open', 'closed')
                   and b.total > coalesce(b.paid_amount, 0)
                 """,
@@ -90,24 +92,82 @@ def _open_card_bills_due(user_id: int, until: date) -> float:
                     continue
                 due = card_bill_due_date(pe, int(row["closing_day"] or 1), int(row["due_day"] or 1))
                 if due <= until:
-                    total += float(row["remaining"] or 0)
-    return total
+                    items.append({
+                        "due_date": due,
+                        "remaining": float(row["remaining"] or 0),
+                        "card_name": row["card_name"],
+                    })
+    return items
 
 
-def project(user_id: int, target_date: date, extra_amount: float = 0.0) -> dict[str, Any]:
-    """Projeção de caixa até `target_date`, opcionalmente considerando um boleto
-    novo de `extra_amount`. Ver docstring do módulo."""
-    from db.accounts import get_balance
+def _cashflow_events(user_id: int, today: date, until: date) -> list[tuple[date, str, str, float]]:
+    """Fonte ÚNICA dos compromissos da projeção, `(data, tipo, nome, valor_com_sinal)`,
+    consumida por `project` (soma até a data) e `daily_trajectory` (por dia).
+    Todo filtro mora aqui — filtro fora deste gerador é uma segunda versão da regra.
+
+    - receita fixa ativa com valor > 0: ocorrências em (today, until], +valor;
+    - gasto fixo ativo, autopay, mensal/anual, valor > 0: idem, −valor;
+    - boleto pendente com vencimento até `until` (vencidos inclusive), −valor
+      com QUALQUER valor, até 0 ou negativo — regra herdada de `project`;
+    - fatura de cartão com saldo e vencimento até `until` (vencidas inclusive), −saldo.
+    """
     from db.recurring import list_recurring_expenses
     from db.recurring_income import list_recurring_incomes
     from db.bills import list_bills
 
-    today = date.today()
+    events: list[tuple[date, str, str, float]] = []
+    for inc in list_recurring_incomes(user_id):
+        if not inc.get("is_active"):
+            continue
+        amount = float(inc.get("amount") or 0)
+        if amount <= 0:
+            continue
+        nome = inc.get("name") or "Receita"
+        for d in _recurring_occurrence_dates(
+            inc.get("pay_day"), inc.get("frequency") or "monthly", inc.get("pay_month"),
+            _as_date(inc.get("start_date")), today, until,
+        ):
+            events.append((d, "receita", nome, amount))
 
-    # Saldo de partida: consolidado (carteira + bancos autorizados no Open Finance)
-    # quando o usuário tem banco conectado e o consolidado está liberado — senão a
-    # projeção de quem tem OF partiria só da carteira manual e ficaria errada. Mesmo
-    # critério do dashboard/relatórios (get_consolidated_balance + gate beta).
+    for e in list_recurring_expenses(user_id):
+        if not e.get("is_active"):
+            continue
+        if (e.get("payment_mode") or "autopay") != "autopay":
+            continue  # 'manual' = boleto; já entra nos boletos pendentes
+        if (e.get("frequency") or "monthly") not in ("monthly", "annual"):
+            continue  # weekly/daily/once ficam de fora do v1 da projeção
+        amount = float(e.get("amount") or 0)
+        if amount <= 0:
+            continue
+        nome = e.get("name") or "Gasto fixo"
+        for d in _recurring_occurrence_dates(
+            e.get("due_day"), e.get("frequency") or "monthly", e.get("due_month"),
+            _as_date(e.get("start_date")), today, until,
+        ):
+            events.append((d, "gasto_fixo", nome, -amount))
+
+    for b in list_bills(user_id, include_paid=False, limit=1000):
+        if b.get("status") != "pending":
+            continue
+        d = _as_date(b.get("due_date"))
+        if d and d <= until:
+            events.append((d, "boleto", b.get("name") or "Boleto", -float(b.get("amount") or 0)))
+
+    for fatura in _open_card_bills_detail(user_id, until):
+        events.append((fatura["due_date"], "fatura_cartao", fatura["card_name"] or "Cartão",
+                       -fatura["remaining"]))
+    return events
+
+
+def _starting_balance(user_id: int) -> dict[str, Any]:
+    """Saldo de partida da projeção: consolidado (carteira + bancos autorizados no
+    Open Finance) quando o usuário tem banco conectado e o consolidado está
+    liberado — senão a projeção de quem tem OF partiria só da carteira manual e
+    ficaria errada. Mesmo critério do dashboard/relatórios (get_consolidated_balance
+    + gate beta). Devolve `{"saldo", "balance_source", "of_bank_count",
+    "banks_excluded"}`."""
+    from db.accounts import get_balance
+
     saldo = float(get_balance(user_id))
     balance_source = "manual"  # carteira manual; vira "consolidated" se somar OF
     of_bank_count = 0
@@ -133,42 +193,40 @@ def project(user_id: int, target_date: date, extra_amount: float = 0.0) -> dict[
     # balance_source == "unavailable" cobre o aviso (não sabemos of_bank_count).
     banks_excluded = of_bank_count > 0 and balance_source == "manual"
 
-    receitas = 0.0
-    for inc in list_recurring_incomes(user_id):
-        if not inc.get("is_active"):
-            continue
-        receitas += _recurring_value_in_window(
-            inc.get("pay_day"), inc.get("frequency") or "monthly", inc.get("pay_month"),
-            _as_date(inc.get("start_date")), float(inc.get("amount") or 0), today, target_date,
-        )
+    return {
+        "saldo": saldo,
+        "balance_source": balance_source,
+        "of_bank_count": of_bank_count,
+        "banks_excluded": banks_excluded,
+    }
 
-    gastos_fixos = 0.0
-    for e in list_recurring_expenses(user_id):
-        if not e.get("is_active"):
-            continue
-        if (e.get("payment_mode") or "autopay") != "autopay":
-            continue  # 'manual' = boleto; já entra em boletos_ate
-        if (e.get("frequency") or "monthly") not in ("monthly", "annual"):
-            continue  # weekly/daily/once ficam de fora do v1 da projeção
-        gastos_fixos += _recurring_value_in_window(
-            e.get("due_day"), e.get("frequency") or "monthly", e.get("due_month"),
-            _as_date(e.get("start_date")), float(e.get("amount") or 0), today, target_date,
-        )
 
-    boletos = 0.0
-    n_boletos = 0
-    for b in list_bills(user_id, include_paid=False, limit=1000):
-        if b.get("status") != "pending":
-            continue
-        d = _as_date(b.get("due_date"))
-        if d and d <= target_date:
-            boletos += float(b.get("amount") or 0)
-            n_boletos += 1
+def project(user_id: int, target_date: date, extra_amount: float = 0.0) -> dict[str, Any]:
+    """Projeção de caixa até `target_date`, opcionalmente considerando um boleto
+    novo de `extra_amount`. Ver docstring do módulo."""
+    today = date.today()
 
-    faturas_cartao = _open_card_bills_due(user_id, target_date)
+    sb = _starting_balance(user_id)
+    saldo = sb["saldo"]
+    balance_source = sb["balance_source"]
+    of_bank_count = sb["of_bank_count"]
+    banks_excluded = sb["banks_excluded"]
+
+    valores: dict[str, list[float]] = {"receita": [], "gasto_fixo": [], "boleto": [], "fatura_cartao": []}
+    for _d, tipo, _nome, valor in _cashflow_events(user_id, today, target_date):
+        valores[tipo].append(valor)
+
+    # Soma exata (`math.fsum`), arredondada só na saída: não depende da ordem nem do
+    # agrupamento, e é o que faz `daily_trajectory` (que soma os mesmos eventos por
+    # dia) bater no centavo com os horizontes mesmo com fração de centavo do banco.
+    receitas = math.fsum(valores["receita"])
+    gastos_fixos = math.fsum(-v for v in valores["gasto_fixo"])
+    boletos = math.fsum(-v for v in valores["boleto"])
+    n_boletos = len(valores["boleto"])
+    faturas_cartao = math.fsum(-v for v in valores["fatura_cartao"])
 
     extra = float(extra_amount or 0)
-    projetado = saldo + receitas - gastos_fixos - boletos - faturas_cartao - extra
+    projetado = math.fsum([saldo, *(v for vs in valores.values() for v in vs), -extra])
     return {
         "today": today.isoformat(),
         "target": target_date.isoformat(),
@@ -209,4 +267,101 @@ def forecast_horizons(user_id: int, horizons: tuple[int, ...] = (30, 60, 90)) ->
     }
 
 
-__all__ = ["project", "forecast_horizons"]
+def daily_trajectory(user_id: int, days: int = 90, threshold: float = 0.0) -> dict[str, Any]:
+    """Trajetória diária de saldo projetado (default 90 dias) e o "pior dia" no
+    caminho, com os compromissos que levaram até ele. Mesmos eventos de `project`
+    (`_cashflow_events`), distribuídos dia a dia em vez de somados no horizonte —
+    pensada pra achar aperto de saldo que os marcos de `forecast_horizons` não
+    mostram. Feature Pro+; ver docstring do módulo."""
+    today = date.today()
+    days = max(0, int(days))
+    horizon_end = today + timedelta(days=days)
+    threshold = round(float(threshold), 2)
+
+    # Parcelas do saldo até o dia corrente; o saldo do dia é a soma exata delas,
+    # a mesma conta de `project`.
+    parcelas = [_starting_balance(user_id)["saldo"]]
+    vencidos: list[dict] = []
+    eventos_por_dia: dict[date, list[dict]] = {}
+    valores_por_dia: dict[date, list[float]] = {}
+    for d, tipo, nome, valor in _cashflow_events(user_id, today, horizon_end):
+        # `valor` exposto é o cadastrado; a direção vem do `tipo` (só receita entra).
+        compromisso = {"tipo": tipo, "nome": nome, "valor": round(valor if tipo == "receita" else -valor, 2)}
+        if d <= today:
+            # Boleto/fatura já vencido (ou vencendo hoje): `project()` o soma em
+            # qualquer horizonte, então ele pesa no saldo de partida — e é listado
+            # em `vencidos` pra não sumir da resposta. Recorrente nunca cai aqui
+            # (`_recurring_occurrence_dates` exige `after < d`).
+            parcelas.append(valor)
+            vencidos.append({"date": d.isoformat(), **compromisso})
+            continue
+        eventos_por_dia.setdefault(d, []).append(compromisso)
+        valores_por_dia.setdefault(d, []).append(valor)
+    vencidos.sort(key=lambda v: v["date"])  # mais antigo primeiro; estável no empate
+
+    saldo_projetado = round(math.fsum(parcelas), 2)
+    saldos = [saldo_projetado]  # posição N = saldo no fim do dia N; 0 = partida
+    worst: dict[str, Any] | None = None
+    worst_i = 0
+    trajectory: list[dict] = []
+    for i in range(1, days + 1):
+        d = today + timedelta(days=i)
+        if d in valores_por_dia:  # dia sem evento repete o saldo, sem refazer a soma
+            parcelas.extend(valores_por_dia[d])
+            saldo_projetado = round(math.fsum(parcelas), 2)
+        item = {
+            "date": d.isoformat(),
+            "saldo_projetado": saldo_projetado,
+            "abaixo_do_limite": saldo_projetado < threshold,
+            "compromissos": eventos_por_dia.get(d, []),
+        }
+        trajectory.append(item)
+        saldos.append(saldo_projetado)
+        if worst is None or saldo_projetado < worst["saldo_projetado"]:
+            worst, worst_i = item, i
+
+    worst_day = None
+    if worst is not None:
+        # Causas = saídas desde o último pico: o maior saldo em [dia 0, pior dia),
+        # o mais recente em empate (`topo`). Num patamar (mesmo saldo vários dias
+        # seguidos), `desde` é o dia em que o saldo CHEGOU lá, mas as causas só
+        # contam depois do último dia parado nele: uma saída compensada no mesmo
+        # dia por uma receita, no meio do patamar, não derrubou nada.
+        topo = max(range(worst_i), key=lambda n: (saldos[n], n))
+        if worst["saldo_projetado"] >= saldos[topo]:
+            # Não houve queda (só possível com o pior dia no dia 1, sem cair em
+            # relação à partida): nada a explicar, então sem causas e sem `desde`.
+            causas, desde = [], None
+        else:
+            pico = topo
+            while pico > 0 and saldos[pico - 1] == saldos[pico]:
+                pico -= 1
+            causas = [
+                {"date": it["date"], **c}
+                for it in trajectory[topo:worst_i]  # dias topo+1 .. pior dia
+                for c in it["compromissos"]
+                if c["tipo"] != "receita"
+            ]
+            desde = (today + timedelta(days=pico)).isoformat()
+        # Dict novo: `worst` é o próprio item de `trajectory`, e não pode ganhar chave.
+        worst_day = {**worst, "causas": causas, "desde": desde}
+
+    return {
+        "period": {"start": (today + timedelta(days=1)).isoformat(), "end": horizon_end.isoformat()} if days > 0 else None,
+        "threshold": threshold,
+        "trajectory": trajectory,
+        "worst_day": worst_day,
+        "vencidos": vencidos,
+        "premises": (
+            "Estimativa dia a dia: saldo + receitas fixas − gastos fixos automáticos "
+            "(mensais e anuais) − boletos pendentes − faturas de cartão em aberto, na data "
+            "de vencimento de cada compromisso. Boletos e faturas já vencidos entram no "
+            "saldo de partida e são listados à parte como vencidos. Receitas fixas entram "
+            "uma vez por mês no dia do pagamento (as anuais, só no mês delas), qualquer que "
+            "seja a frequência cadastrada. Não inclui gastos avulsos futuros nem gastos "
+            "fixos semanais, diários ou únicos."
+        ),
+    }
+
+
+__all__ = ["project", "forecast_horizons", "daily_trajectory"]

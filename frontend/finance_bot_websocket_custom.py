@@ -7752,23 +7752,39 @@ async def boleto_projection_route(request: Request, user_id: int, date: str, amo
     _authorize_dashboard_access(request, user_id)
     _require_boletos_access(user_id)
     from datetime import date as _date
+    from math import isfinite
     try:
         target = _date.fromisoformat(str(date)[:10])
     except (ValueError, TypeError):
         raise HTTPException(status_code=400, detail="Data inválida (use AAAA-MM-DD).")
+    # O parser de query aceita `nan`/`inf` num float, e o número não finito
+    # estoura na serialização JSON da resposta (500).
+    if amount is not None and not isfinite(amount):
+        raise HTTPException(status_code=400, detail="Valor inválido.")
     from core.services.cashflow import project
     result = await asyncio.to_thread(project, user_id, target, float(amount or 0))
     return {"ok": True, "projection": result}
 
 
 @app.get("/forecast/{user_id}")
-async def forecast_route(request: Request, user_id: int):
-    """Previsão de saldo a 30/60/90 dias (feature Pro+ da /precos). 403
-    pro_required abaixo de Pro — o dashboard usa isso pra esconder o card."""
+async def forecast_route(request: Request, user_id: int, threshold: float = 0.0):
+    """Previsão de saldo a 30/60/90 dias + trajetória diária dos 90 dias inteiros
+    com o pior dia no caminho (feature Pro+ da /precos). `threshold` (opcional,
+    R$0 default): limite de segurança configurável — saldo positivo abaixo dele
+    ainda conta como aperto; não é persistido. 403 pro_required
+    abaixo de Pro — o dashboard usa isso pra esconder o card."""
     _authorize_dashboard_access(request, user_id)
     _require_pro(user_id, "forecast")
-    from core.services.cashflow import forecast_horizons
+    from math import isfinite
+    # O parser de query aceita `nan`/`inf` num float, e o número não finito
+    # estoura na serialização JSON da resposta (500).
+    if not isfinite(threshold):
+        raise HTTPException(status_code=400, detail="Limite inválido.")
+    from core.services.cashflow import forecast_horizons, daily_trajectory
     result = await asyncio.to_thread(forecast_horizons, user_id)
+    traj = await asyncio.to_thread(daily_trajectory, user_id, 90, threshold)
+    for campo in ("trajectory", "worst_day", "vencidos", "threshold", "period", "premises"):
+        result[campo] = traj[campo]
     return {"ok": True, "forecast": result}
 
 
