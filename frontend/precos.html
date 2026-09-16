@@ -1403,6 +1403,12 @@ async function startCheckout(interval, btn, plan, resuming) {
         if (!subState || !subState.active) await loadSubscription();
         if (subState && subState.active) {
           purchaseResumePending = false;
+          if (subState.plan === plan
+              && (subState.interval || "monthly") === interval) {
+            window.PBPurchaseIntent?.clear();
+            window.location.href = "/home";
+            return;
+          }
           openChangeModal(plan, resuming && purchaseContinuationPage);
           return;
         }

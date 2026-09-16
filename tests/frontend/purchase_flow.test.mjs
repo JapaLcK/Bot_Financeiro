@@ -511,6 +511,67 @@ test("conta já assinante entra no fluxo de troca em vez de repetir o 409", asyn
   await page.close();
 });
 
+test("retomada do mesmo plano ativo segue para a conta sem abrir troca", async () => {
+  const page = await browser.newPage({ viewport: { width: 1280, height: 900 } });
+  let changeCalls = 0;
+  await page.addInitScript(() => {
+    if (location.pathname !== "/continuar-compra") return;
+    sessionStorage.setItem("pb_purchase_intent_v1", JSON.stringify({
+      version: 1,
+      plan: "plus",
+      cycle: "monthly",
+      method: "card",
+      status: "awaiting_auth",
+      createdAt: Date.now(),
+    }));
+  });
+  await page.route("**/continuar-compra", (route) => route.fulfill({
+    contentType: "text/html",
+    body: fs.readFileSync("frontend/precos.html", "utf8"),
+  }));
+  await page.route("**/billing/plans-config", (route) => route.fulfill({
+    contentType: "application/json",
+    body: JSON.stringify({ essencial_available: true, plus_available: true, pro_available: true }),
+  }));
+  await page.route("**/billing/subscription", (route) => route.fulfill({
+    contentType: "application/json",
+    body: JSON.stringify({
+      active: true,
+      plan: "plus",
+      interval: "monthly",
+      current_period_end: "2026-10-15",
+      scheduled_change: null,
+    }),
+  }));
+  await page.route("**/billing/create-checkout", (route) => route.fulfill({
+    status: 409,
+    contentType: "application/json",
+    body: JSON.stringify({
+      detail: { error: "already_subscribed", message: "Você já possui uma assinatura ativa." },
+    }),
+  }));
+  await page.route("**/billing/change-plan", (route) => {
+    changeCalls += 1;
+    return route.fulfill({
+      status: 400,
+      contentType: "application/json",
+      body: JSON.stringify({ detail: { error: "same_plan", message: "Mesmo plano." } }),
+    });
+  });
+  await page.route("**/home", (route) => route.fulfill({
+    contentType: "text/html",
+    body: "<html><body>home</body></html>",
+  }));
+
+  await page.goto(`${ORIGIN}/continuar-compra`);
+  await page.waitForFunction(() => location.pathname === "/home"
+    || document.getElementById("chg-overlay")?.style.display === "flex");
+  assert.equal(new URL(page.url()).pathname, "/home");
+  assert.equal(changeCalls, 0, "o plano já ativo não deve chamar a troca");
+  assert.equal(await page.evaluate(() => sessionStorage.getItem("pb_purchase_intent_v1")), null);
+  await page.close();
+});
+
 test("continuação não consulta assinatura nem perde a intenção em sessão expirada", async () => {
   const page = await browser.newPage({ viewport: { width: 390, height: 844 } });
   let subscriptionCalls = 0;
