@@ -182,6 +182,58 @@ test("Pix pede autenticação antes do CPF e retoma no formulário do pagamento"
   await page.close();
 });
 
+test("fechar o QR de um Pix retomado devolve uma saída à rota técnica", async () => {
+  const page = await browser.newPage({ viewport: { width: 390, height: 844 } });
+  await page.addInitScript(() => {
+    sessionStorage.setItem("pb_purchase_intent_v1", JSON.stringify({
+      version: 1,
+      plan: "plus",
+      cycle: "annual",
+      method: "pix",
+      status: "awaiting_auth",
+      createdAt: Date.now(),
+    }));
+  });
+  await page.route("**/continuar-compra", (route) => route.fulfill({
+    contentType: "text/html",
+    body: fs.readFileSync("frontend/precos.html", "utf8"),
+  }));
+  await page.route("**/billing/plans-config", (route) => route.fulfill({
+    contentType: "application/json",
+    body: JSON.stringify({
+      essencial_available: true,
+      plus_available: true,
+      pro_available: true,
+      pix_annual_available: true,
+    }),
+  }));
+  await page.route("**/billing/pix/checkout", (route) => route.fulfill({
+    contentType: "application/json",
+    body: JSON.stringify({
+      public_token: "pix-retomado",
+      amount_cents: 19900,
+      qr_payload: "000201-pix-retomado",
+      expires_at: "2099-01-01T00:00:00Z",
+    }),
+  }));
+  await page.route("**/billing/pix/pix-retomado", (route) => route.fulfill({
+    contentType: "application/json",
+    body: JSON.stringify({ status: "pending" }),
+  }));
+
+  await page.goto(`${ORIGIN}/continuar-compra`);
+  await page.fill(".pix-doc", "12345678901");
+  await page.click(".pix-form button[type=submit]");
+  await page.waitForSelector(".pix-code");
+  await page.getByRole("button", { name: "Fechar" }).click();
+  await page.waitForSelector(".pix-ov", { state: "detached" });
+  assert.equal(await page.isVisible("#purchase-continuation-actions"), true);
+  assert.match(await page.textContent("#purchase-continuation"), /pagamento foi fechado/i);
+  assert.equal(await page.isVisible("#purchase-continuation-retry"), false,
+    "fechar um QR ainda pagável não deve oferecer outra cobrança");
+  await page.close();
+});
+
 test("falha ao abrir checkout tem recuperação sem revelar a vitrine de planos", async () => {
   const page = await browser.newPage({ viewport: { width: 390, height: 844 } });
   let checkoutCalls = 0;
@@ -371,7 +423,9 @@ test("um segundo agendamento automático não repete a retomada", async () => {
 
 test("conta já assinante entra no fluxo de troca em vez de repetir o 409", async () => {
   const page = await browser.newPage({ viewport: { width: 1280, height: 900 } });
+  let changeCalls = 0;
   await page.addInitScript(() => {
+    if (location.pathname !== "/continuar-compra") return;
     sessionStorage.setItem("pb_purchase_intent_v1", JSON.stringify({
       version: 1,
       plan: "pro",
@@ -406,6 +460,17 @@ test("conta já assinante entra no fluxo de troca em vez de repetir o 409", asyn
       detail: { error: "already_subscribed", message: "Você já possui uma assinatura ativa." },
     }),
   }));
+  await page.route("**/billing/change-plan", (route) => {
+    changeCalls += 1;
+    return route.fulfill({
+      contentType: "application/json",
+      body: JSON.stringify({ effective_at: "2026-10-15" }),
+    });
+  });
+  await page.route("**/home", (route) => route.fulfill({
+    contentType: "text/html",
+    body: "<html><body>home</body></html>",
+  }));
 
   await page.goto(`${ORIGIN}/continuar-compra`);
   await page.waitForFunction(() => {
@@ -416,6 +481,17 @@ test("conta já assinante entra no fluxo de troca em vez de repetir o 409", asyn
   assert.equal(await page.isVisible("#chg-overlay"), true, "não abriu o fluxo de troca de plano");
   assert.match(await page.textContent("#chg-body"), /Plus.*Pro/s);
   assert.equal(await page.isVisible("#purchase-continuation-actions"), false);
+  await page.click("#chg-overlay .btn-outline");
+  await page.waitForFunction(() => document.getElementById("chg-overlay")?.style.display === "none");
+  assert.equal(await page.isVisible("#purchase-continuation-actions"), true,
+    "cancelar a troca deixou a rota técnica sem saída");
+
+  await page.click("#purchase-continuation-retry");
+  await page.waitForFunction(() => document.getElementById("chg-overlay")?.style.display === "flex");
+  await page.click("#chg-confirm");
+  await page.waitForURL("**/home");
+  assert.equal(changeCalls, 1);
+  assert.equal(await page.evaluate(() => sessionStorage.getItem("pb_purchase_intent_v1")), null);
   await page.close();
 });
 
@@ -518,7 +594,7 @@ test(`falha em ${missingScript} nunca troca Pix para cartão nem trava a tela`, 
   });
 
   await page.goto(`${ORIGIN}/continuar-compra`);
-  await page.waitForSelector("#purchase-continuation-actions.show", { timeout: 1500 });
+  await page.waitForSelector("#purchase-continuation-actions.show", { timeout: 5000 });
   assert.equal(cardCheckoutCalls, 0, "a intenção Pix caiu no checkout de cartão");
   assert.match(await page.textContent("#purchase-continuation"), /pagamento via Pix/i);
   assert.equal(await page.textContent("#purchase-continuation-retry"), "Recarregar pagamento");

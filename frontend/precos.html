@@ -60,6 +60,7 @@
   .purchase-continuation-actions { display: none; margin-top: 22px; }
   .purchase-continuation-actions.show { display: grid; gap: 10px; }
   .purchase-continuation-actions .btn { width: 100%; }
+  .purchase-continuation-actions [hidden] { display: none !important; }
   @keyframes purchase-spin { to { transform: rotate(360deg); } }
   @media (prefers-reduced-motion: reduce) {
     .purchase-continuation-mark i { animation: none; }
@@ -848,6 +849,7 @@ function updateCmpFade() {
 // dos cards mudam de "Assinar" pra "Seu plano atual / Trocar / Agendado".
 let subState = null;
 let cancelChangePending = false;
+let changeModalContinuation = false;
 let purchaseResumePending = false;
 let purchaseResumeScheduled = false;
 window.pbPlanAuthState = "unknown";
@@ -1068,17 +1070,27 @@ function _ensureChangeModal() {
     '<button id="chg-confirm" class="btn btn-primary" style="flex:1">Confirmar troca</button>' +
     '<button class="btn btn-outline" style="flex:1" onclick="closeChangeModal()">Cancelar</button>' +
     "</div></div>";
-  el.addEventListener("click", closeChangeModal);
+  el.addEventListener("click", () => closeChangeModal());
   document.body.appendChild(el);
 }
 
-function closeChangeModal() {
+function closeChangeModal(completed) {
   const el = document.getElementById("chg-overlay");
   if (el) el.style.display = "none";
+  const recoverContinuation = changeModalContinuation && completed !== true;
+  changeModalContinuation = false;
+  if (recoverContinuation) {
+    purchaseResumePending = false;
+    purchaseContinuationError(
+      "A troca de plano não foi confirmada. Você pode tentar novamente ou voltar aos planos.",
+      true,
+    );
+  }
 }
 
-function openChangeModal(plan) {
+function openChangeModal(plan, continuation) {
   _ensureChangeModal();
+  changeModalContinuation = continuation === true;
   const cur = PLAN_NAMES[subState.plan] || "seu plano atual";
   const novo = PLAN_NAMES[plan] || plan;
   const preco = (PLAN_PRICES[plan] || {})[currentCycle] || "";
@@ -1109,8 +1121,14 @@ function openChangeModal(plan) {
         confirm.textContent = "Confirmar troca";
         return;
       }
-      closeChangeModal();
+      const continuingPurchase = changeModalContinuation;
+      closeChangeModal(true);
       showToast(`✓ Troca agendada pra ${fmtBrDate(data2.effective_at)}. Te mandei um e-mail de confirmação.`);
+      if (continuingPurchase) {
+        if (window.PBPurchaseIntent) window.PBPurchaseIntent.clear();
+        window.location.href = "/home";
+        return;
+      }
       await loadSubscription();
       refreshPlanButtons();
     } catch {
@@ -1377,7 +1395,7 @@ async function startCheckout(interval, btn, plan, resuming) {
         if (!subState || !subState.active) await loadSubscription();
         if (subState && subState.active) {
           purchaseResumePending = false;
-          openChangeModal(plan);
+          openChangeModal(plan, resuming && purchaseContinuationPage);
           return;
         }
       }

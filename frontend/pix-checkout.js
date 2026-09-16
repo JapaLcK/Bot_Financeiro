@@ -185,15 +185,17 @@ function pixCheckout(plano, retomando) {
   // Um `aoFechar` só para os dois estados: o `pixEncerrar` é inerte sem
   // `pixPoll`, então fechar no formulário limpa o documento e mais nada.
   const ctx = pixOverlay(nome + " anual no Pix", () => {
-    const cancelouFormularioRetomado = retomando && !!pixDoc;
+    const fechouFormulario = !!pixDoc;
     pixApagarDoc();
     pixEncerrar();
-    if (cancelouFormularioRetomado && typeof purchaseContinuationError === "function") {
+    if (retomando && typeof purchaseContinuationError === "function") {
       if (window.PBPurchaseIntent) window.PBPurchaseIntent.markAwaitingAuth();
       purchaseResumePending = false;
       purchaseContinuationError(
-        "O pagamento não foi iniciado. Você pode tentar novamente ou voltar aos planos.",
-        true,
+        fechouFormulario
+          ? "O pagamento não foi iniciado. Você pode tentar novamente ou voltar aos planos."
+          : "O pagamento foi fechado. Volte aos planos para decidir como continuar.",
+        fechouFormulario,
       );
     }
   });
