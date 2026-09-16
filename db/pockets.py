@@ -31,6 +31,20 @@ POCKET_COLUMNS = """
 """
 
 
+def _is_of_mirror(p: dict) -> bool:
+    """Caixinha do banco é read-only: o dinheiro está no banco, não no Pig.
+
+    UMA régua, a mesma da tela (`_isOfPocket`, frontend/dashboard.js): vínculo ativo
+    OU linha criada pelo sync. O `source` sozinho é o dado LEGADO — desconexão
+    anterior ao bloco de `disconnect_open_finance_connection` (db/open_finance.py)
+    deixou caixinha do sync com vínculo NULO e o último saldo espelhado. Decidindo só
+    pelo vínculo, o saque dessa linha materializa o espelho em lote
+    (`_ensure_pocket_lots`) e credita na carteira dinheiro que está no banco. Enquanto
+    esses espelhos não forem migrados, a linha continua read-only.
+    """
+    return bool(p["of_investment_id"]) or p["source"] == "open_finance"
+
+
 def _today() -> date:
     return datetime.now(_tz()).date()
 
@@ -59,6 +73,17 @@ def _insert_pocket_lot(
 
 
 def _ensure_pocket_lots(cur, user_id: int, pocket: dict) -> None:
+    # Vinculada ao Open Finance: `balance` é ESPELHO do banco (escrito pelo sync), não
+    # dinheiro que saiu da carteira. Virar lote transforma o espelho em saldo PRÓPRIO, e
+    # o próprio é sacável: medido pelo `PATCH /pockets/{u}/{p}/meta` de um rename (o
+    # `saveGoal` manda `interest_enabled` em toda edição), lote de 1000 → desvincular →
+    # sacar 1000 que estão no Nubank. A guarda mora AQUI, no caminho compartilhado, e não
+    # em cada chamador — foi exatamente assim que `update_pocket_meta` ficou de fora.
+    # Índice direto, sem `.get`: chamador que não trouxer a coluna quebra alto em vez de
+    # pular a guarda em silêncio.
+    if pocket["of_investment_id"]:
+        return
+
     cur.execute(
         "select count(*) as total from pocket_lots where user_id=%s and pocket_id=%s",
         (user_id, pocket["id"]),
@@ -266,7 +291,8 @@ def update_pocket_meta(
                 cur.execute(
                     """
                     select id, balance, interest_enabled, interest_rate,
-                           interest_period, interest_tax_profile, last_interest_date
+                           interest_period, interest_tax_profile, last_interest_date,
+                           of_investment_id
                       from pockets
                      where user_id=%s and id=%s
                      for update
@@ -342,8 +368,8 @@ def pocket_withdraw_to_account(
             from .bank_movements import _lock_user
             _lock_user(cur, user_id)
             cur.execute(
-                "select id, name, balance, interest_tax_profile, of_investment_id from pockets "
-                "where user_id=%s and lower(name)=lower(%s) for update",
+                "select id, name, balance, interest_tax_profile, of_investment_id, source "
+                "from pockets where user_id=%s and lower(name)=lower(%s) for update",
                 (user_id, pocket_name),
             )
             p = cur.fetchone()
@@ -351,7 +377,7 @@ def pocket_withdraw_to_account(
                 raise LookupError("POCKET_NOT_FOUND")
             # Caixinha do banco (Open Finance) é read-only: o dinheiro está no banco,
             # não no Pig — mover por aqui criaria saldo mentiroso que o sync sobrescreve.
-            if p.get("of_investment_id"):
+            if _is_of_mirror(p):
                 raise ValueError("OF_POCKET_READONLY")
 
             pocket_id = p["id"]
@@ -634,15 +660,15 @@ def pocket_deposit_from_account(
                 assert_bank_covers(cur, user_id, funding_source.get("of_account_id"), v)
 
             cur.execute(
-                "select id, name, of_investment_id from pockets "
+                "select id, name, of_investment_id, source from pockets "
                 "where user_id=%s and lower(name)=lower(%s) for update",
                 (user_id, pocket_name),
             )
             p = cur.fetchone()
             if not p:
                 raise LookupError("POCKET_NOT_FOUND")
-            # Caixinha do banco (Open Finance) é read-only (ver pocket_withdraw_to_account).
-            if p.get("of_investment_id"):
+            # Caixinha do banco (Open Finance) é read-only (ver `_is_of_mirror`).
+            if _is_of_mirror(p):
                 raise ValueError("OF_POCKET_READONLY")
 
             pocket_id, canon = p["id"], p["name"]
