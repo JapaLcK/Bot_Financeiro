@@ -299,9 +299,10 @@ _FIXED_DETAIL = {
 #
 # A mensagem da Pluggy (`message`/`providerMessage`) cita nome, conta e documento
 # do titular e por isso é descartada no `_warning_codes` — decisão que não muda.
-# Só que aí o motivo virava um código que nenhuma superfície mostra: 30 warnings
-# `004` num item do dono, e nem ele nem o suporte souberam por que cartão e
-# investimentos não vieram. Traduzir o código é a saída que não carrega PII.
+# Só que aí o motivo virava um código que nenhuma superfície mostra. Relato do
+# dono (não medido — o SELECT em produção foi negado): investimentos com 30
+# warnings de código relatado como `004`, prefixo não confirmado, e ninguém soube
+# por que não vieram. Traduzir o código é a saída que não carrega PII.
 #
 # Agrupado por AÇÃO do usuário, não por produto: o que muda a frase é o que ele
 # pode fazer, e o mesmo motivo cai em conta, cartão e investimento.
@@ -310,7 +311,7 @@ _FIXED_DETAIL = {
 # antes de reusar). SÓ conector Open Finance entra: os códigos de conector
 # DIRETO são nus (`001`, `002`, `003`) e significam coisa diferente em cada
 # conector — o `001` do Itaú PJ não é o do Santander PJ —, então mapeá-los seria
-# chutar. Eles caem no fallback do `_motivo_do_warning`, que é honesto.
+# chutar. Eles caem no fallback do `_frase_do_codigo`, que é honesto.
 # `LOAN_*` e `ID_*` ficam de fora porque `_PRODUCT_KEYS` não lê esses produtos:
 # entrada para código inalcançável é o código morto que este módulo já proíbe.
 #
@@ -401,9 +402,10 @@ def _frase_do_codigo(code: Any) -> tuple[int, str] | None:
     """`(prioridade, frase)` de UM código — menor vence —, ou None.
 
     O código CRU tem a pior prioridade de todas: ele só aparece quando não há
-    motivo que a gente saiba explicar. Sem isso, o `004` nu que veio no item do
-    dono escondia um `CC_001` no mesmo produto, e a mensagem mudava conforme a
-    ORDEM em que a Pluggy mandou a lista.
+    motivo que a gente saiba explicar. E a escolha é por prioridade, não pela
+    posição: o resultado não pode depender da ORDEM em que a Pluggy manda a lista
+    — com "o primeiro que achar", `[004, CC_001]` e `[CC_001, 004]` davam frases
+    diferentes para o mesmo produto.
     """
     if not isinstance(code, str):
         return None
@@ -458,9 +460,9 @@ def _motivo_do_warning(health: dict | None, produtos) -> str:
         # (docs.pluggy.ai/en/docs/open-finance/rate-limits) diz que conectar o
         # mesmo CPF à mesma instituição com vários itens "you will reach the
         # limitation of Open Finance faster". Com o produto parado pelo limite,
-        # reconectar não o traz de volta e gasta a cota — foi assim que a do dono
-        # acabou. Entre produtos NÃO vale: o outro produto precisa mesmo da
-        # permissão, e a frase já sai nomeada.
+        # reconectar não o traz de volta e gasta a cota. Entre produtos NÃO vale
+        # (decisão do dono): o outro produto precisa mesmo da permissão, e a frase
+        # já sai nomeada.
         if any(frase == _LIMITE_DE_CONSULTAS for _, frase in candidatos):
             candidatos = [c for c in candidatos if c[1] != _RECONECTE]
         # `min`, não "o primeiro": a ordem da lista é da Pluggy, a prioridade é nossa.

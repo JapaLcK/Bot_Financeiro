@@ -159,10 +159,11 @@ def test_warning_chega_ao_health_sem_pii():
 
 
 # ── POR QUE o produto não veio: código do warning → frase nossa ─────────────
-# O item do dono voltou com `updated=false` e 30 warnings `004`, e nem ele nem o
-# suporte souberam o motivo: o código chegava ao navegador dentro do JSON e
-# NENHUMA superfície o mostrava. A mensagem da Pluggy continua descartada (ela
-# cita nome, conta e CPF); quem fala é a frase nossa.
+# Relato do dono, não medido em produção: investimentos com `updated=false` e 30
+# warnings de código relatado como `004` (prefixo não confirmado), e ninguém soube
+# o motivo — o código chegava ao navegador dentro do JSON e NENHUMA superfície o
+# mostrava. A mensagem da Pluggy continua descartada (ela cita nome, conta e
+# CPF); quem fala é a frase nossa.
 
 def _ui_stale(**por_produto) -> dict:
     """UI de um item com estes produtos ATRASADOS desde 12/08 e estes warnings.
@@ -194,7 +195,8 @@ def _detalhe(**por_produto) -> str:
     ("CC_004", "não adianta tentar de novo"),
 ])
 def test_um_produto_atrasado_diz_por_que_ele_nao_veio(code, trecho):
-    """CONTROLE NEGATIVO: esvaziar `_MOTIVO_POR_WARNING` deixa os cinco vermelhos.
+    """CONTROLE NEGATIVO: esvaziar `_MOTIVO_POR_WARNING` deixa todos os casos
+    deste parametrize vermelhos.
 
     Os quatro `CC_00x` são de propósito: eles são a prova de que códigos VIZINHOS
     na mesma tabela da doc dão instruções DIFERENTES. Um mapa que os colapsasse
@@ -218,11 +220,14 @@ def test_investimento_diz_por_que_nao_veio(code, trecho):
 
 
 # ── PRIORIDADE: motivo explicável vence código cru, e a ordem da Pluggy não conta ─
-# O item do dono veio com `004` NU — a separação da doc entre código tipado (Open
-# Finance) e nu (conector direto) não vale em produção, e os dois se misturam.
-# Toda a bateria acima usava só códigos do mapa, então era cega a isto.
-# CONTROLE NEGATIVO: trocar os `min` de `_motivo_do_warning` por "o primeiro"
-# deixa vermelhos os casos em que o cru vem ANTES.
+# A frase não pode depender da ORDEM em que a Pluggy manda a lista, e código cru
+# não pode esconder um motivo que sabemos explicar. Nada na doc impede os dois
+# tipos de código de aparecerem juntos, e uma bateria só com códigos do mapa era
+# cega a isto.
+# CONTROLE NEGATIVO: trocar o `min` DENTRO do produto por "o primeiro" deixa
+# vermelhos a ordem com o cru antes e a ordem com `CC_004` antes; trocar o `min`
+# ENTRE produtos deixa vermelho o caso em que o cru está no produto que vem
+# primeiro em `_PRODUCT_KEYS`.
 
 @pytest.mark.parametrize("ordem", [["004", "CC_001"], ["CC_001", "004"]])
 def test_no_mesmo_produto_o_motivo_vence_o_codigo_cru_em_qualquer_ordem(ordem):
@@ -243,7 +248,7 @@ def test_entre_produtos_o_motivo_vence_o_codigo_cru(contas, cartao):
 def test_autorize_vence_nao_adianta_no_mesmo_produto(ordem):
     """`CC_002` num cartão e `CC_004` noutro, no mesmo produto: vence a instrução
     que ainda RECUPERA dado. Esconder "autorize" atrás de "não adianta" perde o
-    cartão que viria; o contrário custa no máximo um passo a mais."""
+    cartão que viria."""
     detalhe = _detalhe(creditCards=[{"code": c} for c in ordem])
     assert detalhe.endswith("autorize o acesso no app do banco"), detalhe
 
@@ -253,10 +258,10 @@ def test_autorize_vence_nao_adianta_no_mesmo_produto(ordem):
 # consome (docs.pluggy.ai/en/docs/open-finance/rate-limits: "if you connect the
 # same CPF/CNPJ to the same institution by creating multiple items, you will reach
 # the limitation of Open Finance faster"). Com o produto parado pelo limite,
-# mandar reconectar gasta a cota e não traz nada de volta — foi assim que a do
-# dono acabou. Decisão do dono: a exceção vale só DENTRO do produto.
+# mandar reconectar gasta a cota e não traz nada de volta. Decisão do dono: a
+# exceção vale só DENTRO do produto.
 # CONTROLE NEGATIVO: apagar a exceção em `_motivo_do_warning` deixa vermelhos os
-# três casos do mesmo produto, e o controle positivo continua verde.
+# casos do mesmo produto, e o controle positivo continua verde.
 
 @pytest.mark.parametrize("codes", [["INV_002", "INV_004"], ["INV_004", "INV_002"],
                                    ["INV_001", "INV_004"]])
@@ -272,24 +277,6 @@ def test_entre_produtos_o_reconecte_do_outro_produto_continua():
     detalhe = _detalhe(creditCards=[{"code": "CC_001"}], investments=[{"code": "INV_004"}])
     assert detalhe.endswith(" — Cartão: você não liberou esse dado ao conectar o banco, "
                             "reconecte para liberar"), detalhe
-
-
-def test_so_codigo_cru_continua_aparecendo():
-    """CONTROLE POSITIVO da prioridade: sem motivo explicável, o cru É o motivo."""
-    assert _detalhe(creditCards=[{"code": "004"}]).endswith(
-        "o banco avisou com o código 004, sem explicar o motivo")
-
-
-def test_a_instrucao_de_autorizar_no_app_e_a_mesma_do_waiting_user_action():
-    """§0.7: `ACCT_002`/`CC_002` e `WAITING_USER_ACTION` são a mesma família, e a
-    instrução tem de ser UMA. Derivada, não copiada — este teste é o que impede
-    as duas de divergirem no dia em que alguém reescrever uma delas."""
-    from core.services.pluggy_health import (
-        ITEM_STATUS_AUTORIZA_DISPOSITIVO, _DETALHE_POR_STATUS, _MOTIVO_POR_WARNING)
-
-    fixa = _DETALHE_POR_STATUS[ITEM_STATUS_AUTORIZA_DISPOSITIVO]
-    assert _MOTIVO_POR_WARNING["CC_002"] == fixa[0].lower() + fixa[1:]
-    assert _MOTIVO_POR_WARNING["ACCT_002"] == _MOTIVO_POR_WARNING["CC_002"]
 
 
 @pytest.mark.parametrize("code", ["ACCT_005", "CC_005", "CC_006", "CC_007",
@@ -316,9 +303,13 @@ def test_partial_sem_warning_mantem_a_frase_de_hoje():
 
 
 def test_codigo_desconhecido_mostra_o_codigo_cru():
-    """O caso do dono: `004` não está na doc de Open Finance (conector direto usa
-    código nu, que significa coisa diferente em cada conector). Mostrar o código
-    é honesto; adivinhar o significado não."""
+    """`004` nu não está na doc de Open Finance (conector direto usa código nu, que
+    significa coisa diferente em cada conector). Mostrar o código é honesto;
+    adivinhar o significado não. É também o CONTROLE POSITIVO da prioridade: sem
+    motivo explicável, o cru É o motivo.
+
+    Se o dono confirmar que o código dele era `INV_004`, o caso real dele não é
+    este — é o de `test_trinta_warnings_iguais_viram_uma_frase`."""
     detalhe = _detalhe(creditCards=[{"code": "004"}])
     assert "004" in detalhe, detalhe
     assert "você não liberou" not in detalhe and "limite de consultas" not in detalhe, detalhe
@@ -329,8 +320,9 @@ def test_codigo_desconhecido_mostra_o_codigo_cru():
 # Grudar ali a frase do PRIMEIRO código atribuía o motivo de um produto ao outro
 # — e a atribuição errada manda o usuário fazer a coisa errada, que é pior que
 # não dizer nada.
-# CONTROLE NEGATIVO dos três: voltar `_motivo_do_warning` a "devolve a primeira
-# frase que achar, sem nomear" deixa os três vermelhos.
+# CONTROLE NEGATIVO: fazer `_motivo_do_warning` devolver a cláusula sem o nome do
+# produto deixa vermelhos os três testes abaixo (e o controle positivo da exceção
+# do limite, que também afirma o nome).
 
 def test_motivos_diferentes_nomeiam_o_produto_de_quem_e_o_motivo():
     detalhe = _detalhe(creditCards=[{"code": "CC_001"}],
@@ -363,8 +355,7 @@ def test_produto_sem_warning_nenhum_nao_herda_o_motivo_do_vizinho():
 
 def test_motivo_igual_nos_dois_produtos_dispensa_o_nome():
     """CONTROLE POSITIVO do par acima: quando o motivo vale para TODO o sujeito,
-    nomear produto seria ruído. É o caso do dono — 30 warnings iguais nos dois
-    produtos que não vieram."""
+    nomear produto seria ruído."""
     detalhe = _detalhe(creditCards=[{"code": "004"}] * 30,
                        investments=[{"code": "004"}] * 30)
     assert detalhe == ("Cartão e Investimentos desatualizados desde 12/08 — "
@@ -372,18 +363,18 @@ def test_motivo_igual_nos_dois_produtos_dispensa_o_nome():
 
 
 def test_trinta_warnings_iguais_viram_uma_frase():
-    """O item do dono tinha 30 warnings iguais; 30 cláusulas na mesma linha (e no
-    meio do toast) seriam piores que o silêncio de hoje.
+    """30 warnings iguais (o número do relato do dono); 30 cláusulas na mesma
+    linha, no meio do toast, seriam piores que o silêncio de hoje.
 
-    CONTROLE NEGATIVO: trocar o `next(...)` por juntar as cláusulas de todos os
-    códigos deixa este vermelho com 30."""
+    CONTROLE NEGATIVO: trocar o `min(candidatos)` de `_motivo_do_warning` por uma
+    cláusula que junta as frases de todos os candidatos deixa este vermelho."""
     detalhe = _detalhe(investments=[{"code": "INV_004"}] * 30)
     assert detalhe.count("limite de consultas") == 1, detalhe
 
 
 def test_codigo_com_cara_de_conta_nao_vai_pra_tela():
     """CONTROLE NEGATIVO: trocar o `fullmatch(_CODE_EXIBIVEL)` por `if code:`
-    deixa os dois casos vermelhos, com "1234-5" e com o CPF na tela.
+    deixa este teste vermelho, com "1234-5" na tela.
 
     DOIS caminhos, porque são dois riscos:
       • pelo `derive_item_health`, "1234-5" passa pelo `safe_code` (6 caracteres,
@@ -396,7 +387,7 @@ def test_codigo_com_cara_de_conta_nao_vai_pra_tela():
 
     assert safe_code("1234-5") == "1234-5", "o risco que esta guarda cobre sumiu"
     # `[0-9]`, não `\d`: `\d` casa dígito Unicode e este repo já pagou por isso
-    # (issue #365). CONTROLE NEGATIVO: voltar para `\d` deixa estas duas vermelhas.
+    # (issue #365). CONTROLE NEGATIVO: voltar para `\d` deixa este teste vermelho.
     from core.services.pluggy_health import _CODE_EXIBIVEL
     assert _CODE_EXIBIVEL.fullmatch("٠٠٤") is None
     assert _CODE_EXIBIVEL.fullmatch("００４") is None
@@ -414,8 +405,7 @@ def test_codigo_com_cara_de_conta_nao_vai_pra_tela():
 
 # A chave é `BANK` nos casos abaixo, e isso é load-bearing: o ramo `no_accounts`
 # varre só `BANK`/`INVESTMENTS`, então um caso escrito com `CREDIT` NUNCA chega à
-# função e passa verde com a guarda desligada. Medido — com `CREDIT`, a mutação
-# que apaga os `isinstance` deixava 2 vermelhos em vez de 5.
+# função e passa verde com a guarda desligada.
 @pytest.mark.parametrize("health", [
     {"products": 7},
     {"products": [1, 2]},
@@ -432,12 +422,13 @@ def test_health_malformado_nao_derruba_a_tela(health):
     dois. É a mesma classe que o `_warning_codes` já documenta — `{"warnings": 7}`
     matava o sync inteiro.
 
-    CONTROLE NEGATIVO: tirar os `isinstance` de `_motivo_do_warning` deixa 5 dos
-    8 casos vermelhos com TypeError/AttributeError (medido). Os outros três não
-    chegam à função: `7` e `{"products": None}` morrem no `isinstance` que o
-    `connection_ui_state` já fazia, e `{"BANK": None}` no `continue` de produto
-    ausente — eles ficam como controle POSITIVO de que a guarda não recusa o
-    que já era seguro."""
+    CONTROLE NEGATIVO: tirar os `isinstance` de `_motivo_do_warning` deixa
+    vermelhos, com TypeError/AttributeError, todos os casos menos dois:
+    `{"BANK": None}`, que para no `continue` de produto ausente, e a lista com
+    `None`/`404`, que é segurada pelo `isinstance(code, str)` de
+    `_frase_do_codigo`. Atenção: `7` chega à função como `None` (o
+    `connection_ui_state` troca health não-dict por `None`), então é o
+    `isinstance(health, dict)` que o segura."""
     linha = {"status": "ACTIVE", "status_reason": "no_accounts",
              "last_sync_at": AGORA, "health": health}
     ui = connection_ui_state(linha)
@@ -459,8 +450,14 @@ def test_no_accounts_tambem_diz_o_motivo():
                    "products": {"BANK": {"updated": True, "warnings": ["ACCT_001"]}}},
     })
     assert ui["state"] == "no_accounts"
-    assert ui["detail"].startswith("O banco não devolveu contas nem investimentos")
-    assert "você não liberou esse dado ao conectar o banco" in ui["detail"], ui["detail"]
+    # `==` exato, e é ele que prende o `continue` de PRODUTO AUSENTE: este health
+    # não tem `INVESTMENTS`, e sem o `continue` o produto ausente conta como "sem
+    # motivo" e a frase ganha "— Conta:" — o que aconteceria em todo banco sem
+    # investimentos. CONTROLE NEGATIVO: trocar o `continue` por `pass` deixa este
+    # teste vermelho.
+    assert ui["detail"] == ("O banco não devolveu contas nem investimentos — você não "
+                            "liberou esse dado ao conectar o banco, reconecte para "
+                            "liberar"), ui["detail"]
 
 
 @pytest.mark.parametrize("produto, warnings, proibido", [
