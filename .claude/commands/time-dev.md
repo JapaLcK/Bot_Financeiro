@@ -14,6 +14,14 @@ Antes de começar, se o diretório atual for um repo git com CLAUDE.md, leia-o
 — as regras desse arquivo (fluxo de PR, como rodar testes, o que não fazer)
 valem por cima deste fluxo genérico.
 
+## Faixa
+
+Antes de chamar qualquer agente, classifique a mudança pela tabela de faixas do
+`CLAUDE.md` §0 e diga ao usuário qual escolheu. Na faixa **Completo** rode a
+sequência inteira. Na **Leve**, pule o Arquiteto (passo 1 e 2: o plano é o próprio
+pedido, em poucas linhas), faça **uma** passada do Tester e um Manager curto. Na
+**Direto** este fluxo não se aplica.
+
 ## Sequência
 
 1. **Arquiteto**: chame com a ideia completa do usuário. Ele pode fazer
@@ -27,11 +35,20 @@ valem por cima deste fluxo genérico.
 4. **Tester**: chame com o diff/arquivos que o Coder tocou. Saída esperada:
    lista de achados, cada um com severidade e se foi provado rodando ou é
    hipótese.
-5. **Loop Coder ↔ Tester**: se o Tester achou algo real (severidade que
-   bloqueia), volte ao Coder só com os achados novos para corrigir, depois
-   rode o Tester de novo só no que mudou. Repita até o Tester não achar nada
-   novo que bloqueie, ou até 3 rodadas — se ainda houver achado bloqueante na
-   3ª rodada, pare e escale para o usuário em vez de insistir sozinho.
+5. **Loop Coder ↔ Tester, com teto de 2 rodadas**: se o Tester achou algo real
+   (severidade que bloqueia), volte ao Coder só com os achados novos, depois
+   rode o Tester de novo só no que mudou. Se ainda houver achado bloqueante na
+   2ª rodada, pare e leve ao usuário a escolha entre consertar e declarar como
+   limite — não abra a 3ª sozinho.
+   - **Achado improvável vira limite declarado, não rodada nova.** Se o caso
+     exige condição rara (dois toques no mesmo quadro, recriação de tela,
+     falha dupla de hardware) e não toca dinheiro, sessão ou dado de outro
+     usuário, o Tester reporta, o orquestrador registra no relato/PR e segue.
+   - **Agente novo com resumo, não retomada.** Retomar um agente carrega o
+     contexto inteiro dele de novo a cada chamada. Para uma rodada nova, chame
+     um agente novo com o plano, o diff atual e os achados em aberto.
+   - **Mutação só no que mudou.** O Tester ataca e prova com mutação os
+     trechos alterados na rodada; não refaz a bateria inteira das anteriores.
 6. **Manager**: chame por último, passando o plano do Arquiteto, o diff final
    do Coder e todos os achados do Tester (inclusive os já corrigidos). Ele
    audita consistência entre os três, não repete achados do Tester.
@@ -62,9 +79,10 @@ valem por cima deste fluxo genérico.
 
 ## Regras do orquestrador
 
-- Nunca pule uma etapa para economizar tempo — o valor do time é justamente
-  ter um papel adversarial (Tester) e um auditor (Manager) que não confiam no
-  agente anterior.
+- Dentro da faixa escolhida, nunca pule uma etapa para economizar tempo — o
+  valor do time é justamente ter um papel adversarial (Tester) e um auditor
+  (Manager) que não confiam no agente anterior. Economizar é escolher a faixa
+  certa e respeitar o teto de rodadas, não cortar o Tester.
 - Nunca aja como se fosse um dos agentes — sempre delegue via Agent tool,
   mesmo quando a resposta parecer óbvia.
 - No fim, resuma para o usuário: o que foi implementado, o veredito do
