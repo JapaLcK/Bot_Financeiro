@@ -133,7 +133,7 @@ button:disabled { opacity: .6; cursor: wait; }
 /* ── Summary grid ────────────────────────────────────────────────────── */
 .summary {
   display: grid;
-  grid-template-columns: repeat(auto-fit, minmax(190px, 1fr));
+  grid-template-columns: repeat(auto-fit, minmax(min(190px, 100%), 1fr));
   gap: 12px;
   margin-bottom: 16px;
 }
@@ -251,7 +251,7 @@ button:disabled { opacity: .6; cursor: wait; }
 /* Drill-down */
 #user-detail { display: none; flex: 1; overflow: auto; padding: 0 22px 16px; overscroll-behavior: contain; }
 .detail-grid {
-  display: grid; grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
+  display: grid; grid-template-columns: repeat(auto-fit, minmax(min(220px, 100%), 1fr));
   gap: 10px; margin-bottom: 16px;
 }
 .detail-item {
@@ -439,7 +439,7 @@ button, select, .user-chip, .error-item, .card-clickable, .health-item.clickable
   .hero-controls { width: 100%; justify-content: flex-start; }
   /* Health tiles são numéricos e curtos: 1 coluna desperdiça a tela.
      auto-fit dá 2 colunas até ~264px de container e 1 abaixo disso. */
-  .health-grid { grid-template-columns: repeat(auto-fit, minmax(120px, 1fr)); }
+  .health-grid { grid-template-columns: repeat(auto-fit, minmax(min(120px, 100%), 1fr)); }
 
   /* ── Métricas: linha "rótulo → valor" em vez de tile ───────────
      O tile de 190px não caber é matemática, não gosto: "R$ 8.813.402,10"
@@ -448,7 +448,7 @@ button, select, .user-chip, .error-item, .card-clickable, .health-item.clickable
      280px é o piso que faz a conta fechar com folga (valor ≈171px a 21px
      mais rótulo legível). `overflow-wrap` é a rede: se um dia entrar valor
      maior, o texto quebra em vez de empurrar a página. */
-  .summary { grid-template-columns: repeat(auto-fit, minmax(280px, 1fr)); gap: 10px; }
+  .summary { grid-template-columns: repeat(auto-fit, minmax(min(280px, 100%), 1fr)); gap: 10px; }
   .summary .card {
     display: grid; grid-template-columns: 1fr auto; align-items: center;
     gap: 10px; padding: 12px 14px;

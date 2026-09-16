@@ -543,8 +543,9 @@ html.pb-app body.pb-page-app header .month-nav > *:not(.mbtn):not(#month-label) 
 }
 
 /* Header em UMA linha: ☰ | ‹ mês › centralizado | conta compacta.
-   (anula o header-right de largura 100% e o user-menu em linha própria
-   do dashboard-mobile.css) */
+   (anula o header-right de largura 100% do dashboard-mobile.css; o
+   "user-menu em linha própria" que este comentário citava deixou de existir —
+   ≤640px agora ele é um ícone de 44px na mesma faixa dos outros) */
 /* Duas linhas: [☰ + marca | conta] em cima, mês centralizado embaixo */
 html.pb-app body.pb-page-app header { flex-wrap: wrap !important; }
 html.pb-app body.pb-page-app .header-left { flex: 1 1 auto !important; order: 1; }
