@@ -133,7 +133,12 @@ _INVESTMENT_ASSET_PATTERN = (
     rf"(?:{_UNAMBIGUOUS_INVESTMENT_ASSET_PATTERN}|"
     rf"{_AMBIGUOUS_INVESTMENT_ASSET_PATTERN})"
 )
-_INVESTMENT_TICKER_PATTERN = r"[A-Z]{4}\d{1,2}"
+_INVESTMENT_TICKER_PATTERN = r"[A-Z]{4}\d{1,2}F?"
+# Tickers só de letras são indistinguíveis de palavras comuns; use símbolos
+# conhecidos em maiúsculas para não recusar compras como "compre BOLO".
+_COMMON_ALPHABETIC_TICKER_PATTERN = (
+    r"(?:AAPL|MSFT|GOOG|GOOGL|AMZN|NVDA|TSLA|META|NFLX)"
+)
 
 
 def _contextual_help_message(text: str, platform: str) -> str:
@@ -197,13 +202,15 @@ def _is_investment_action_or_advice_request(text: str) -> bool:
             text or "",
             flags=re.IGNORECASE,
         )
+        or re.search(rf"\b{_COMMON_ALPHABETIC_TICKER_PATTERN}\b", text or "")
     )
     if not asset_hint:
         return False
 
     owned_asset_in_portfolio = bool(
         re.search(
-            rf"\b(?:{_INVESTMENT_ASSET_PATTERN}|{_INVESTMENT_TICKER_PATTERN})\b"
+            rf"\b(?:{_INVESTMENT_ASSET_PATTERN}|{_INVESTMENT_TICKER_PATTERN}|"
+            rf"{_COMMON_ALPHABETIC_TICKER_PATTERN})\b"
             r"\s+(?:da|na)\s+minha\s+carteira\b",
             norm,
             flags=re.IGNORECASE,
@@ -212,7 +219,8 @@ def _is_investment_action_or_advice_request(text: str) -> bool:
     possessive_owned_asset = bool(
         re.search(
             rf"\b(?:meu|minha|meus|minhas)\s+"
-            rf"(?:{_INVESTMENT_ASSET_PATTERN}|{_INVESTMENT_TICKER_PATTERN})\b",
+            rf"(?:{_INVESTMENT_ASSET_PATTERN}|{_INVESTMENT_TICKER_PATTERN}|"
+            rf"{_COMMON_ALPHABETIC_TICKER_PATTERN})\b",
             norm,
             flags=re.IGNORECASE,
         )

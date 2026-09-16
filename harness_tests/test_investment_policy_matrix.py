@@ -63,6 +63,10 @@ class InvestmentPolicyMatrixTests(unittest.TestCase):
             "qual fundo de crédito privado você recomenda?",
             "você recomendaria algum fundo?",
             "aplique em um fundo",
+            "Piggy, compre AAPL para mim",
+            "Piggy, venda PETR4F",
+            "compre MSFT para mim",
+            "compre PETR4F",
         ):
             with self.subTest(text=text):
                 self.assertTrue(_policy(text)["refused"])
@@ -84,6 +88,16 @@ class InvestmentPolicyMatrixTests(unittest.TestCase):
             "qual fundo de tela devo aplicar?",
             "qual ativo de software devo aplicar?",
             "qual fundo musical devo aplicar?",
+            "compre BOLO para mim",
+            "compre um livro para mim",
+        ):
+            with self.subTest(text=text):
+                self.assertFalse(_policy(text)["refused"])
+
+    def test_consulta_de_ticker_proprio_nao_e_recomendacao(self) -> None:
+        for text in (
+            "meu AAPL é bom?",
+            "PETR4F da minha carteira é boa?",
         ):
             with self.subTest(text=text):
                 self.assertFalse(_policy(text)["refused"])

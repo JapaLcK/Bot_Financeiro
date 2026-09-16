@@ -25,6 +25,7 @@ def _is_internal_failure_response(response: str) -> bool:
         or "database_url" in normalized
         or "deu erro técnico" in normalized
         or normalized.startswith("deu erro ao ")
+        or normalized.startswith("⚠️ não consegui gerar seu link do dashboard agora")
     )
 
 
