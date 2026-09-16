@@ -971,9 +971,11 @@ function resumePurchaseAfterAuth() {
   // procurar o botão recém-renderizado.
   setTimeout(() => {
     if (intent.method === "pix") {
-      if (typeof pixCheckout === "function") {
+      try {
+        if (typeof pixCheckout !== "function") throw new Error("pix-checkout indisponível");
         pixCheckout(intent.plan, true);
-      } else {
+      } catch (_) {
+        document.querySelector(".pix-ov")?.remove();
         purchaseResumePending = false;
         purchaseContinuationError(
           "Não foi possível carregar o pagamento via Pix. Recarregue para tentar novamente.",
@@ -1269,6 +1271,12 @@ async function cancelChange() {
     // etiqueta é anúncio — anunciar Pix ao vitalício enquanto o Stripe trava é
     // vender o que o backend recusa com 409.
     publicarPix(null, false);
+    // A rota técnica já tenta o checkout assim que o DOM fica pronto. Consultar
+    // a assinatura aqui não ajuda essa decisão e, num access+refresh expirado,
+    // o interceptor limpa a sessionStorage antes de a retomada ler a intenção.
+    // Assinante existente continua coberto pelo 409 `already_subscribed` do
+    // próprio checkout, que consulta a assinatura apenas nesse caso.
+    if (purchaseContinuationPage) return;
     // Assinante logado: botões viram "Seu plano atual / Trocar / Agendado".
     const resolvida = await loadSubscription();
     refreshPlanButtons();
@@ -1363,16 +1371,20 @@ async function startCheckout(interval, btn, plan, resuming) {
         else if (data.detail && data.detail.message) { detail = data.detail.message; code = data.detail.error; }
       } catch {}
       restaurar();
+      // Guarda anti-assinatura-dupla: já assina → abre a TROCA de plano em vez
+      // de deixar o clique morrer num erro.
+      if (code === "already_subscribed" && plan) {
+        if (!subState || !subState.active) await loadSubscription();
+        if (subState && subState.active) {
+          purchaseResumePending = false;
+          openChangeModal(plan);
+          return;
+        }
+      }
       if (resuming && purchaseContinuationPage) {
         purchaseResumePending = false;
         purchaseContinuationError(detail, true);
         return;
-      }
-      // Guarda anti-assinatura-dupla: já assina → abre a TROCA de plano em vez
-      // de deixar o clique morrer num erro.
-      if (code === "already_subscribed" && plan) {
-        await loadSubscription();
-        if (subState && subState.active) { openChangeModal(plan); return; }
       }
       showToast(detail, "err");
       return;

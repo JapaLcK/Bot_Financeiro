@@ -330,11 +330,9 @@ test("sessão expirada no Pix leva ao login e mantém plano, ciclo e meio", asyn
   await page.close();
 });
 
-test("resposta tardia da assinatura não dispara uma segunda retomada", async () => {
+test("um segundo agendamento automático não repete a retomada", async () => {
   const page = await browser.newPage({ viewport: { width: 390, height: 844 } });
   let checkoutCalls = 0;
-  let liberarAssinatura;
-  const assinaturaPendente = new Promise((resolve) => { liberarAssinatura = resolve; });
   await page.addInitScript(() => {
     sessionStorage.setItem("pb_purchase_intent_v1", JSON.stringify({
       version: 1,
@@ -353,10 +351,6 @@ test("resposta tardia da assinatura não dispara uma segunda retomada", async ()
     contentType: "application/json",
     body: JSON.stringify({ essencial_available: true, plus_available: true, pro_available: true }),
   }));
-  await page.route("**/billing/subscription", async (route) => {
-    await assinaturaPendente;
-    return route.fulfill({ contentType: "application/json", body: JSON.stringify({ active: false }) });
-  });
   await page.route("**/billing/create-checkout", (route) => {
     checkoutCalls += 1;
     return route.fulfill({
@@ -369,13 +363,121 @@ test("resposta tardia da assinatura não dispara uma segunda retomada", async ()
   await page.goto(`${ORIGIN}/continuar-compra`);
   await page.waitForSelector("#purchase-continuation-actions.show");
   assert.equal(checkoutCalls, 1);
-  liberarAssinatura();
-  await page.waitForTimeout(300);
-  assert.equal(checkoutCalls, 1, "a consulta tardia repetiu o checkout automaticamente");
+  await page.evaluate(() => schedulePurchaseResume());
+  await page.waitForTimeout(100);
+  assert.equal(checkoutCalls, 1, "um segundo agendamento repetiu o checkout automaticamente");
   await page.close();
 });
 
-test("falha ao carregar o Pix nunca troca a compra para cartão", async () => {
+test("conta já assinante entra no fluxo de troca em vez de repetir o 409", async () => {
+  const page = await browser.newPage({ viewport: { width: 1280, height: 900 } });
+  await page.addInitScript(() => {
+    sessionStorage.setItem("pb_purchase_intent_v1", JSON.stringify({
+      version: 1,
+      plan: "pro",
+      cycle: "monthly",
+      method: "card",
+      status: "awaiting_auth",
+      createdAt: Date.now(),
+    }));
+  });
+  await page.route("**/continuar-compra", (route) => route.fulfill({
+    contentType: "text/html",
+    body: fs.readFileSync("frontend/precos.html", "utf8"),
+  }));
+  await page.route("**/billing/plans-config", (route) => route.fulfill({
+    contentType: "application/json",
+    body: JSON.stringify({ essencial_available: true, plus_available: true, pro_available: true }),
+  }));
+  await page.route("**/billing/subscription", (route) => route.fulfill({
+    contentType: "application/json",
+    body: JSON.stringify({
+      active: true,
+      plan: "plus",
+      interval: "monthly",
+      current_period_end: "2026-10-15",
+      scheduled_change: null,
+    }),
+  }));
+  await page.route("**/billing/create-checkout", (route) => route.fulfill({
+    status: 409,
+    contentType: "application/json",
+    body: JSON.stringify({
+      detail: { error: "already_subscribed", message: "Você já possui uma assinatura ativa." },
+    }),
+  }));
+
+  await page.goto(`${ORIGIN}/continuar-compra`);
+  await page.waitForFunction(() => {
+    const modal = document.getElementById("chg-overlay");
+    const recovery = document.getElementById("purchase-continuation-actions");
+    return modal?.style.display === "flex" || recovery?.classList.contains("show");
+  });
+  assert.equal(await page.isVisible("#chg-overlay"), true, "não abriu o fluxo de troca de plano");
+  assert.match(await page.textContent("#chg-body"), /Plus.*Pro/s);
+  assert.equal(await page.isVisible("#purchase-continuation-actions"), false);
+  await page.close();
+});
+
+test("continuação não consulta assinatura nem perde a intenção em sessão expirada", async () => {
+  const page = await browser.newPage({ viewport: { width: 390, height: 844 } });
+  let subscriptionCalls = 0;
+  let checkoutCalls = 0;
+  await page.addInitScript(() => {
+    sessionStorage.setItem("pb_purchase_intent_v1", JSON.stringify({
+      version: 1,
+      plan: "plus",
+      cycle: "monthly",
+      method: "card",
+      status: "awaiting_auth",
+      createdAt: Date.now(),
+    }));
+  });
+  await page.route("**/continuar-compra", (route) => route.fulfill({
+    contentType: "text/html",
+    body: fs.readFileSync("frontend/precos.html", "utf8"),
+  }));
+  await page.route("**/pix-ui.js*", async (route) => {
+    await new Promise((resolve) => setTimeout(resolve, 250));
+    return route.continue();
+  });
+  await page.route("**/billing/plans-config", (route) => route.fulfill({
+    contentType: "application/json",
+    body: JSON.stringify({ essencial_available: true, plus_available: true, pro_available: true }),
+  }));
+  await page.route("**/billing/subscription", (route) => {
+    subscriptionCalls += 1;
+    return route.fulfill({
+      status: 401,
+      headers: { "WWW-Authenticate": "Bearer" },
+      contentType: "application/json",
+      body: "{}",
+    });
+  });
+  await page.route("**/auth/refresh", (route) => route.fulfill({ status: 401, body: "{}" }));
+  await page.route("**/billing/create-checkout", (route) => {
+    checkoutCalls += 1;
+    return route.fulfill({
+      contentType: "application/json",
+      body: JSON.stringify({ checkout_url: `${ORIGIN}/checkout-ok` }),
+    });
+  });
+  await page.route("**/checkout-ok", (route) => route.fulfill({
+    contentType: "text/html",
+    body: "<html><body>checkout</body></html>",
+  }));
+
+  await page.goto(`${ORIGIN}/continuar-compra`);
+  await page.waitForFunction(() => location.pathname === "/checkout-ok"
+    || document.getElementById("purchase-continuation-actions")?.classList.contains("show"));
+  assert.equal(subscriptionCalls, 0, "a rota técnica consultou a assinatura em paralelo");
+  assert.equal(checkoutCalls, 1);
+  assert.equal(new URL(page.url()).pathname, "/checkout-ok");
+  await page.close();
+});
+
+for (const missingScript of ["pix-checkout.js", "pix-ui.js", "pix-poll.js"]) {
+test(`falha em ${missingScript} nunca troca Pix para cartão nem trava a tela`, async () => {
   const page = await browser.newPage({ viewport: { width: 390, height: 844 } });
   let cardCheckoutCalls = 0;
   await page.addInitScript(() => {
@@ -392,7 +494,7 @@ test("falha ao carregar o Pix nunca troca a compra para cartão", async () => {
     contentType: "text/html",
     body: fs.readFileSync("frontend/precos.html", "utf8"),
   }));
-  await page.route("**/pix-checkout.js*", (route) => route.abort());
+  await page.route(`**/${missingScript}*`, (route) => route.abort());
   await page.route("**/billing/plans-config", (route) => route.fulfill({
     contentType: "application/json",
     body: JSON.stringify({
@@ -416,12 +518,13 @@ test("falha ao carregar o Pix nunca troca a compra para cartão", async () => {
   });
 
   await page.goto(`${ORIGIN}/continuar-compra`);
-  await page.waitForSelector("#purchase-continuation-actions.show");
+  await page.waitForSelector("#purchase-continuation-actions.show", { timeout: 1500 });
   assert.equal(cardCheckoutCalls, 0, "a intenção Pix caiu no checkout de cartão");
   assert.match(await page.textContent("#purchase-continuation"), /pagamento via Pix/i);
   assert.equal(await page.textContent("#purchase-continuation-retry"), "Recarregar pagamento");
   await page.close();
 });
+}
 
 test("onboarding confirma a compra sem criar uma etapa paralela", async () => {
   const page = await browser.newPage({ viewport: { width: 390, height: 844 } });
