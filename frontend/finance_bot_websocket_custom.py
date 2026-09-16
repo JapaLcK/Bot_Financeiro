@@ -5122,14 +5122,17 @@ async def billing_webhook(request: Request, background_tasks: BackgroundTasks):
             return default
         return v if v is not None else default
 
-    def _resolve_user(obj) -> int | None:
+    async def _resolve_user(obj) -> int | None:
         metadata = _g(obj, "metadata", {})
         uid = _g(metadata, "finbot_user_id")
         if uid:
             return int(uid)
         cid = _g(obj, "customer")
         if cid:
-            return get_user_by_stripe_customer(cid)
+            # `to_thread` em toda leitura/escrita `db.*` deste handler: mesma
+            # razão do `retrieve` no ramo `invoice.payment_failed` (I/O
+            # síncrono congela o event loop único do Uvicorn).
+            return await asyncio.to_thread(get_user_by_stripe_customer, cid)
         return None
 
     def _subscription_period_end(sub):
@@ -5293,8 +5296,8 @@ async def billing_webhook(request: Request, background_tasks: BackgroundTasks):
         rodando.
         """
         if not (uid and sub_id and expires_dt):
-            update_user_plan(uid, plan_value, expires_dt)
-            set_payment_status(uid, sub_status)
+            await asyncio.to_thread(update_user_plan, uid, plan_value, expires_dt)
+            await asyncio.to_thread(set_payment_status, uid, sub_status)
             return True
         from core.services.billing_access import recompute_entitlement  # noqa: PLC0415
         from db.plan_grants import upsert_grant  # noqa: PLC0415
@@ -5422,7 +5425,7 @@ async def billing_webhook(request: Request, background_tasks: BackgroundTasks):
 
     if event["type"] == "checkout.session.completed":
         session = event["data"]["object"]
-        user_id = _resolve_user(session)
+        user_id = await _resolve_user(session)
         # Normaliza igual ao invoice.paid: string ou objeto expandido têm de
         # produzir a MESMA external_ref, senão o assinante ganha dois grants.
         sub_id  = _invoice_subscription_id(session)
@@ -5627,7 +5630,7 @@ async def billing_webhook(request: Request, background_tasks: BackgroundTasks):
 
     elif event["type"] in ("invoice.paid", "invoice.payment_succeeded"):
         invoice  = event["data"]["object"]
-        user_id  = _resolve_user(invoice)
+        user_id  = await _resolve_user(invoice)
         sub_id   = _invoice_subscription_id(invoice)
         if user_id and sub_id:
             # `to_thread`: ver a explicação no ramo `invoice.payment_failed`.
@@ -5798,7 +5801,7 @@ async def billing_webhook(request: Request, background_tasks: BackgroundTasks):
         # — fonte primária; scheduler interno fica como fallback se o webhook
         # falhar. Dedup via system_event_logs evita duplicar com o scheduler.
         sub = event["data"]["object"]
-        user_id = _resolve_user(sub)
+        user_id = await _resolve_user(sub)
         if user_id:
             from core.observability import recent_event_exists
             if not await asyncio.to_thread(recent_event_exists, "trial_ending_email_sent", user_id, within_days=6):
@@ -5823,7 +5826,7 @@ async def billing_webhook(request: Request, background_tasks: BackgroundTasks):
         # so marca past_due. O downgrade definitivo acontece em
         # customer.subscription.deleted quando a sub for de fato cancelada.
         invoice = event["data"]["object"]
-        user_id = _resolve_user(invoice)
+        user_id = await _resolve_user(invoice)
         # EVENTO FORA DE ORDEM não pode carimbar o relógio de quem já PAGOU.
         # Medido: falha → `invoice.paid` (relógio zerado, status `active`) → um
         # `payment_failed` atrasado, com `created` ANTERIOR ao do paid, punha
@@ -5888,7 +5891,7 @@ async def billing_webhook(request: Request, background_tasks: BackgroundTasks):
                          "event_version": _event_version(event)},
             )
         elif user_id:
-            set_payment_status(user_id, "past_due")
+            await asyncio.to_thread(set_payment_status, user_id, "past_due")
             # Relógio da inadimplência (core/services/billing_dunning).
             # Idempotente no SQL: a Stripe manda um payment_failed por smart
             # retry e reentrega o mesmo evento em cima de 5xx — nenhum dos dois
@@ -5972,14 +5975,14 @@ async def billing_webhook(request: Request, background_tasks: BackgroundTasks):
 
     elif event["type"] == "customer.subscription.deleted":
         obj     = event["data"]["object"]
-        user_id = _resolve_user(obj)
+        user_id = await _resolve_user(obj)
         if user_id:
             # Captura expires_at ANTES de zerar plan_expires_at (pro email
             # mostrar ate quando o user mantem acesso aos recursos Pro).
             from db import get_auth_user as _gau
             user_snapshot = await asyncio.to_thread(_gau, int(user_id))
             expires_for_email = (user_snapshot or {}).get("plan_expires_at")
-            update_user_plan(user_id, "free", None)
+            await asyncio.to_thread(update_user_plan, user_id, "free", None)
             # O critério em LOCAL NOMEADO, não embutido na expressão do `if`: é
             # a Stripe encerrando a assinatura DE VEZ por inadimplência
             # (esgotou o smart retry), o único desfecho deste ramo que é
@@ -6013,11 +6016,11 @@ async def billing_webhook(request: Request, background_tasks: BackgroundTasks):
                 # a caso". `unpaid` sozinho continua significando "assinatura
                 # VIVA em dunning", que é por isso que ele NÃO saiu de
                 # `_LIVE_PAYMENT_STATUSES`.
-                set_payment_status(user_id, "unpaid")
+                await asyncio.to_thread(set_payment_status, user_id, "unpaid")
                 from db.dunning import encerrar_ciclo_de_atraso
                 await asyncio.to_thread(encerrar_ciclo_de_atraso, int(user_id))
             else:
-                set_payment_status(user_id, "canceled")
+                await asyncio.to_thread(set_payment_status, user_id, "canceled")
                 # A assinatura morreu: o relógio da inadimplência não tem mais o
                 # que medir. NESTA perna o clear é no-op — `canceled` está fora
                 # de `PAST_DUE_PAYMENT_STATUSES`, então o `set_payment_status`

@@ -89,6 +89,9 @@ CONTROLE POSITIVO, em dois casos porque duas dedupes se sobrepõem:
   protege: o `engagement_scheduler` grava `trial_ending_email_sent`
   (`core/services/engagement_scheduler.py:290`), chave que o `_fire_email` não
   consulta. Scheduler já mandou → webhook chega depois → 0 e-mails.
+
+
+TERCEIRA CLASSE (escritas/leituras `db.*`): `tests/test_billing_webhook_event_loop_db.py`.
 """
 from __future__ import annotations
 
@@ -124,34 +127,12 @@ def _event_logs():
 def _espiar_retrieve(fake, status: str) -> list[bool]:
     """Troca o `Subscription.retrieve` do fake por um espião que registra se
     rodou NA THREAD DE UM EVENT LOOP. Devolve a lista de `na_thread_do_loop`.
-
-    O observável é `asyncio.get_running_loop()`, que levanta `RuntimeError`
-    quando NÃO há loop rodando na thread atual. Chamado direto do corpo da
-    corrotina, ele devolve o loop (a chamada bloqueia o loop); despachado por
-    `asyncio.to_thread`, roda numa worker do `ThreadPoolExecutor`, onde não há
-    loop nenhum e ele levanta.
-
-    **A primeira versão disto comparava com `threading.main_thread()` e não
-    media NADA**: o `TestClient` do Starlette roda o ASGI num portal, com o
-    event loop em thread SEPARADA da do teste, então a comparação dava
-    "não é a main" com e sem `to_thread` — o controle negativo ficou verde e
-    denunciou o teste (§3, 1ª pergunta: "quanto isso daria se a correção não
-    fizesse nada?"). `get_running_loop` não depende da topologia de threads do
-    cliente de teste, que é o que torna a medição válida sob `TestClient` e sob
-    `asyncio.run`.
+    O observável e por que não é `threading.main_thread()`: `espiao_no_loop`.
     """
+    from _billing_grants_helpers import espiao_no_loop
     onde: list[bool] = []
-
-    def _retrieve(sub_id):
-        import asyncio
-        try:
-            asyncio.get_running_loop()
-            onde.append(True)      # há loop NESTA thread → a chamada o bloqueia
-        except RuntimeError:
-            onde.append(False)     # thread sem loop → executor
-        return _fake_sub(status)
-
-    fake.Subscription = SimpleNamespace(retrieve=_retrieve)
+    fake.Subscription = SimpleNamespace(
+        retrieve=espiao_no_loop(onde, lambda sub_id: _fake_sub(status)))
     return onde
 
 
@@ -231,20 +212,11 @@ def test_dedupe_do_trial_will_end_nao_roda_na_thread_do_event_loop(user_id, monk
     Exige `len(onde) == 2`: se só uma checagem aparecer, o POST não percorreu o
     ramo inteiro e a medição da outra é vácuo.
     """
-    import asyncio
-    from _billing_grants_helpers import espiao_email
+    from _billing_grants_helpers import espiao_email, espiao_no_loop
     from core.services import email_service
 
     onde: list[bool] = []
-
-    def _espiao(event_type, user_id, within_days=7.0):
-        try:
-            asyncio.get_running_loop()
-            onde.append(True)      # há loop NESTA thread → a query o bloqueia
-        except RuntimeError:
-            onde.append(False)     # thread sem loop → executor
-        return False
-
+    _espiao = espiao_no_loop(onde, lambda event_type, user_id, within_days=7.0: False)
     monkeypatch.setattr("core.observability.recent_event_exists", _espiao)
     monkeypatch.setattr(email_service, "send_trial_ending_email",
                         espiao_email({}, "send_trial_ending_email"))
