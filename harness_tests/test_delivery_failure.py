@@ -12,6 +12,45 @@ SCRIPT = REPO / "scripts" / "whatsapp_harness_safe.py"
 
 
 class DeliveryFailureTests(unittest.TestCase):
+    def test_download_sintetico_bloqueado_tambem_reprova_execucao(self) -> None:
+        result = subprocess.run(
+            [sys.executable, str(SCRIPT), "--attachment"],
+            cwd=REPO,
+            env={
+                "PATH": os.environ.get("PATH", ""),
+                "PYTHONPATH": str(REPO),
+                "PYTHONDONTWRITEBYTECODE": "1",
+            },
+            text=True,
+            capture_output=True,
+            timeout=15,
+            check=False,
+        )
+        self.assertEqual(result.returncode, 70, result.stderr or result.stdout)
+        payload = json.loads(result.stdout)
+        self.assertEqual(payload["outcome"], "safety_violation")
+        self.assertIn("media:download", payload["blocked"])
+
+    def test_guarda_interceptada_nao_aprova_execucao_do_adaptador(self) -> None:
+        result = subprocess.run(
+            [sys.executable, str(SCRIPT), "--handler-behavior", "unsafe-env"],
+            cwd=REPO,
+            env={
+                "PATH": os.environ.get("PATH", ""),
+                "PYTHONPATH": str(REPO),
+                "PYTHONDONTWRITEBYTECODE": "1",
+            },
+            text=True,
+            capture_output=True,
+            timeout=15,
+            check=False,
+        )
+        self.assertEqual(result.returncode, 70, result.stderr or result.stdout)
+        payload = json.loads(result.stdout)
+        self.assertEqual(payload["outcome"], "safety_violation")
+        self.assertFalse(payload["delivered"])
+        self.assertTrue(payload["blocked"])
+
     def test_falha_apos_processamento_nao_manda_repetir_escrita(self) -> None:
         result = subprocess.run(
             [sys.executable, str(SCRIPT), "--send-error-once"],

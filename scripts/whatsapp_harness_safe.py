@@ -21,7 +21,7 @@ def main() -> int:
     parser.add_argument("--probe", choices=("env", "network", "write"))
     parser.add_argument(
         "--handler-behavior",
-        choices=("reply", "empty-output", "error"),
+        choices=("reply", "empty-output", "error", "unsafe-env"),
         default="reply",
     )
     parser.add_argument("--event-log-error", action="store_true")
@@ -99,6 +99,8 @@ def main() -> int:
                     return 0 if result["answered"] else 2
                 if args.layer == "policy":
                     return 0
+                if result["blocked"]:
+                    return 70
                 return 0 if result["delivered"] else 2
     except SafetyViolation as exc:
         print(json.dumps({"error": "SAFETY_VIOLATION", "detail": str(exc)}))

@@ -136,12 +136,17 @@ def install_runtime_boundaries(
     modules: ModuleOverrides,
     replies: list[dict[str, str]],
     *,
+    safety_events: list[str],
     handler_behavior: str = "reply",
     event_log_error: bool = False,
     send_behavior: str = "reply",
 ) -> None:
     """Substitui somente I/O; o parser e o fluxo do adaptador continuam reais."""
     send_attempts = 0
+
+    def deny_boundary(event: str) -> None:
+        safety_events.append(event)
+        raise SafetyViolation(event)
 
     def send_text(*, to: str, body: str, **_: Any) -> dict[str, Any]:
         nonlocal send_attempts
@@ -155,9 +160,7 @@ def install_runtime_boundaries(
 
     modules.install(
         "adapters.whatsapp.wa_client",
-        download_media=lambda *_a, **_k: (_ for _ in ()).throw(
-            SafetyViolation("media:download")
-        ),
+        download_media=lambda *_a, **_k: deny_boundary("media:download"),
         send_interactive_buttons=lambda **_k: None,
         send_interactive_list=lambda **_k: None,
         send_text=send_text,
@@ -200,6 +203,8 @@ def install_runtime_boundaries(
     from core.types import OutgoingMessage
 
     def handle_incoming(incoming: Any, **_kwargs: Any) -> list[OutgoingMessage]:
+        if handler_behavior == "unsafe-env":
+            Path(".env").read_text(encoding="utf-8")
         if handler_behavior == "error":
             raise RuntimeError("falha sintética do núcleo")
         if handler_behavior == "empty-output":
@@ -223,7 +228,7 @@ def install_runtime_boundaries(
         },
         claim_pending_action=lambda *_a, **_k: False,
         consume_pending_action=lambda *_a, **_k: False,
-        get_conn=lambda: (_ for _ in ()).throw(SafetyViolation("database:get_conn")),
+        get_conn=lambda: deny_boundary("database:get_conn"),
         get_or_create_canonical_user=lambda _provider, _external_id: 7,
         get_pending_action=lambda _uid: None,
         restore_pending_on_error=lambda *_a, **_k: RestorePending(),
@@ -268,6 +273,7 @@ def run_adapter_case(
         install_runtime_boundaries(
             modules,
             replies,
+            safety_events=guards.events,
             handler_behavior=handler_behavior,
             event_log_error=event_log_error,
             send_behavior=send_behavior,
@@ -276,13 +282,17 @@ def run_adapter_case(
         from adapters.whatsapp.wa_runtime import process_payload
 
         processed = process_payload(whatsapp_payload(text, attachment=attachment))
-        delivered = bool(replies)
+        blocked = list(guards.events)
+        delivered = bool(replies) and not blocked
+        outcome = (
+            "safety_violation" if blocked else "delivered" if delivered else "delivery_failed"
+        )
         return {
             "extracted": processed,
             "delivered": delivered,
-            "outcome": "delivered" if delivered else "delivery_failed",
+            "outcome": outcome,
             "replies": replies,
-            "blocked": guards.events,
+            "blocked": blocked,
         }
     finally:
         modules.close()

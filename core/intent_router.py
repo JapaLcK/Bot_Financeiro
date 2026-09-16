@@ -117,7 +117,7 @@ NOT_UNDERSTOOD_MSG = (
 )
 
 _UNAMBIGUOUS_INVESTMENT_ASSET_PATTERN = (
-    r"(?:acao|acoes|investimento|investimentos|bitcoin|bitcoins|"
+    r"(?:investimento|investimentos|bitcoin|bitcoins|"
     r"ethereum|ether|solana|cardano|dogecoin|litecoin|"
     r"cripto|criptos|criptomoeda|criptomoedas|petrobras|"
     r"fii|fiis|etf|etfs|tesouro|tesouros|cdb|cdbs|lci|lcis|lca|lcas|"
@@ -128,7 +128,7 @@ _UNAMBIGUOUS_INVESTMENT_ASSET_PATTERN = (
     r"dolar|dolares|euro|euros|cambio|forex|renda fixa)"
 )
 _AMBIGUOUS_INVESTMENT_ASSET_PATTERN = (
-    r"(?:ativo|ativos|fundo|fundos|ouro|prata|moeda|moedas)"
+    r"(?:acao|acoes|ativo|ativos|fundo|fundos|ouro|prata|moeda|moedas)"
 )
 _INVESTMENT_ASSET_PATTERN = (
     rf"(?:{_UNAMBIGUOUS_INVESTMENT_ASSET_PATTERN}|"
@@ -172,7 +172,7 @@ def _is_investment_action_or_advice_request(text: str) -> bool:
     ambiguous_action_context = (
         re.search(
             rf"\b{ambiguous_action}\b\s+"
-            rf"(?:(?:me|em|um|uma|o|a|os|as|meu|minha|meus|minhas|"
+            rf"(?:(?:me|em|um|uma|o|a|os|as|de|da|do|das|dos|meu|minha|meus|minhas|"
             rf"todo|toda|todos|todas|uns|umas|algum|alguma|"
             rf"qual|que|\d+)\s+){{0,4}}"
             rf"{bare_ambiguous_asset}{polite_ending}",
@@ -195,7 +195,8 @@ def _is_investment_action_or_advice_request(text: str) -> bool:
             rf"{bare_ambiguous_asset}\s+"
             rf"(?:(?:e|sao|seria|sera|parece)\s+)?"
             rf"(?:(?:o|a|os|as)\s+)?"
-            rf"(?:melhor|melhores|bom|bons|boa|boas|vale a pena)\b\s*[?.!]*$",
+            rf"(?:melhor|melhores|bom|bons|boa|boas|vale a pena)\b"
+            rf"(?:\s+para\s+(?:mim|meus filhos))?\s*[?.!]*$",
             norm,
         )
     )
