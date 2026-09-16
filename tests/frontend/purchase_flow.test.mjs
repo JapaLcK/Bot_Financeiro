@@ -375,6 +375,54 @@ test("resposta tardia da assinatura não dispara uma segunda retomada", async ()
   await page.close();
 });
 
+test("falha ao carregar o Pix nunca troca a compra para cartão", async () => {
+  const page = await browser.newPage({ viewport: { width: 390, height: 844 } });
+  let cardCheckoutCalls = 0;
+  await page.addInitScript(() => {
+    sessionStorage.setItem("pb_purchase_intent_v1", JSON.stringify({
+      version: 1,
+      plan: "plus",
+      cycle: "annual",
+      method: "pix",
+      status: "awaiting_auth",
+      createdAt: Date.now(),
+    }));
+  });
+  await page.route("**/continuar-compra", (route) => route.fulfill({
+    contentType: "text/html",
+    body: fs.readFileSync("frontend/precos.html", "utf8"),
+  }));
+  await page.route("**/pix-checkout.js*", (route) => route.abort());
+  await page.route("**/billing/plans-config", (route) => route.fulfill({
+    contentType: "application/json",
+    body: JSON.stringify({
+      essencial_available: true,
+      plus_available: true,
+      pro_available: true,
+      pix_annual_available: true,
+    }),
+  }));
+  await page.route("**/billing/subscription", (route) => route.fulfill({
+    contentType: "application/json",
+    body: JSON.stringify({ active: false }),
+  }));
+  await page.route("**/billing/create-checkout", (route) => {
+    cardCheckoutCalls += 1;
+    return route.fulfill({
+      status: 500,
+      contentType: "application/json",
+      body: JSON.stringify({ detail: "Checkout de cartão não deveria ser chamado." }),
+    });
+  });
+
+  await page.goto(`${ORIGIN}/continuar-compra`);
+  await page.waitForSelector("#purchase-continuation-actions.show");
+  assert.equal(cardCheckoutCalls, 0, "a intenção Pix caiu no checkout de cartão");
+  assert.match(await page.textContent("#purchase-continuation"), /pagamento via Pix/i);
+  assert.equal(await page.textContent("#purchase-continuation-retry"), "Recarregar pagamento");
+  await page.close();
+});
+
 test("onboarding confirma a compra sem criar uma etapa paralela", async () => {
   const page = await browser.newPage({ viewport: { width: 390, height: 844 } });
   await page.addInitScript(() => {

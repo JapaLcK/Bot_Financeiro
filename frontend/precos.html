@@ -921,13 +921,19 @@ function purchaseContinuationError(message, recoveryAction) {
   if (actions) actions.classList.add("show");
   if (retry) {
     retry.hidden = !action;
-    retry.textContent = action === "login" ? "Entrar novamente" : "Tentar novamente";
+    retry.textContent = action === "login"
+      ? "Entrar novamente"
+      : action === "reload" ? "Recarregar pagamento" : "Tentar novamente";
     retry.onclick = () => {
       if (action === "login") {
         const next = window.PBPurchaseIntent
           ? window.PBPurchaseIntent.continueUrl()
           : "/continuar-compra";
         window.location.href = "/login?next=" + encodeURIComponent(next);
+        return;
+      }
+      if (action === "reload") {
+        window.location.reload();
         return;
       }
       purchaseResumePending = false;
@@ -964,8 +970,16 @@ function resumePurchaseAfterAuth() {
   // carregados. O pequeno macrotask deixa a troca de ciclo terminar antes de
   // procurar o botão recém-renderizado.
   setTimeout(() => {
-    if (intent.method === "pix" && typeof pixCheckout === "function") {
-      pixCheckout(intent.plan, true);
+    if (intent.method === "pix") {
+      if (typeof pixCheckout === "function") {
+        pixCheckout(intent.plan, true);
+      } else {
+        purchaseResumePending = false;
+        purchaseContinuationError(
+          "Não foi possível carregar o pagamento via Pix. Recarregue para tentar novamente.",
+          "reload",
+        );
+      }
       return;
     }
     const button = document.querySelector(
