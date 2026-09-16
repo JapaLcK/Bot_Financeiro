@@ -4,7 +4,11 @@ import {
   sair,
   verificarMfa,
 } from "@/services/auth";
-import { guardarCredenciais, lerCredenciais } from "@/storage/secure";
+import {
+  FalhaNoCofre,
+  guardarCredenciais,
+  lerCredenciais,
+} from "@/storage/secure";
 
 const cofre = (globalThis as unknown as { __cofreDeTeste: Map<string, string> })
   .__cofreDeTeste;
@@ -14,6 +18,11 @@ const fetchFalso = jest.fn();
 const falharEscrita = (
   globalThis as unknown as { __falharEscritaNoCofre: (v: boolean) => void }
 ).__falharEscritaNoCofre;
+
+/** Faz a LIMPEZA no cofre falhar. */
+const falharApagar = (
+  globalThis as unknown as { __falharApagarNoCofre: (v: boolean) => void }
+).__falharApagarNoCofre;
 
 /** Prende a próxima gravação no cofre até a promessa resolver. */
 const atrasarEscrita = (
@@ -28,6 +37,7 @@ const ACCESS_B = "eyJhbGciOiJIUzI1NiJ9.eyJzdWIiOiAiMSIsICJqdGkiOiAic2Vzc2FvLUIif
 
 beforeEach(() => {
   falharEscrita(false);
+  falharApagar(false);
   fetchFalso.mockReset();
   globalThis.fetch = fetchFalso as unknown as typeof fetch;
   cofre.clear();
@@ -319,18 +329,19 @@ describe("entrar", () => {
     await expect(a).rejects.not.toThrow("E-mail ou senha incorretos.");
   });
 
-  it("falha de GRAVAÇÃO de entrada superada também vira EntradaSuperada", async () => {
-    // O invólucro tem de cobrir até o fim: uma falha de keychain numa tentativa
-    // que já foi superada não é problema do keychain para o usuário, é uma
-    // entrada que perdeu a vez. Mostrar o erro de armazenamento faria a pessoa
-    // achar que o aparelho está com defeito.
+  it("falha ao DESFAZER entrada superada aparece como falha do cofre", async () => {
+    // A tentativa A é superada E o desfazer dela falha. O que precisa aparecer
+    // é a falha do cofre, não a corrida: traduzir uma na outra faria a tela
+    // seguir normalmente com o aparelho possivelmente guardando a sessão
+    // errada. A gravação da A tem de FUNCIONAR para o desfazer ser alcançado —
+    // por isso o portão de atraso, e não o de falha.
     fetchFalso.mockImplementation(async (_u: string, o: RequestInit) => {
       const corpo = JSON.parse(String(o.body)) as { email: string };
       return resposta(200, {
         user_id: 1,
         email: corpo.email,
-        access_token: "access",
-        refresh_token: "rt",
+        access_token: `access-${corpo.email[0]}`,
+        refresh_token: `rt_${corpo.email[0]}`,
         dashboard_token: "d",
         expires_in: 900,
       });
@@ -341,13 +352,15 @@ describe("entrar", () => {
     atrasarEscrita(presa);
     const a = entrar("a@x.com", "s");
     await new Promise<void>((r) => setImmediate(() => r()));
-    falharEscrita(true);
+    // A conta B assume a vez enquanto a gravação da A está presa...
     const b = entrar("b@x.com", "s");
+    // ...e o desfazer da A vai falhar.
+    falharApagar(true);
     soltar();
 
-    await expect(a).rejects.toBeInstanceOf(EntradaSuperada);
-    await expect(b).rejects.toThrow();
-    falharEscrita(false);
+    await expect(a).rejects.toBeInstanceOf(FalhaNoCofre);
+    await expect(b).resolves.toMatchObject({ fase: "pronta" });
+    falharApagar(false);
   });
 
   it("sair invalida entrada em voo", async () => {

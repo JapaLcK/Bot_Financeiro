@@ -10,6 +10,22 @@ import * as SecureStore from "expo-secure-store";
  */
 const PAR = "pb.credenciais";
 
+/**
+ * O cofre falhou de um jeito que deixa o estado da sessão DESCONHECIDO.
+ *
+ * Tem nome próprio porque quem chama precisa distinguir isto de "outra
+ * tentativa assumiu": a segunda é uma corrida normal e silenciosa, esta é um
+ * aparelho que pode ter ficado com a sessão errada guardada. Traduzir uma na
+ * outra esconde a que importa.
+ */
+export class FalhaNoCofre extends Error {
+  constructor(causa: unknown) {
+    super("Não conseguimos guardar sua sessão neste aparelho.");
+    this.name = "FalhaNoCofre";
+    this.cause = causa;
+  }
+}
+
 export type Credenciais = { access: string; refresh: string };
 
 /**
@@ -231,8 +247,12 @@ export function guardarCredenciaisSe(
     // "não persistiu" com a credencial nova ainda no cofre — e quem chamou
     // traduz `false` em "outra entrada assumiu", que é uma mentira tranquila
     // sobre um aparelho que ficou com a sessão errada guardada.
-    if (anterior === null) await SecureStore.deleteItemAsync(PAR);
-    else await SecureStore.setItemAsync(PAR, anterior);
+    try {
+      if (anterior === null) await SecureStore.deleteItemAsync(PAR);
+      else await SecureStore.setItemAsync(PAR, anterior);
+    } catch (causa) {
+      throw new FalhaNoCofre(causa);
+    }
     return false;
   });
 }

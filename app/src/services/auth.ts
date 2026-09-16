@@ -6,6 +6,7 @@ import {
   type Perfil,
 } from "../api/schemas/auth";
 import {
+  FalhaNoCofre,
   guardarCredenciaisSe,
   lerCredenciais,
   limparSessaoDe,
@@ -63,6 +64,12 @@ async function tentativa<T>(executar: (vez: number) => Promise<T>): Promise<T> {
     if (minhaVez !== ultimaTentativa) throw new EntradaSuperada();
     return r;
   } catch (e) {
+    // `FalhaNoCofre` NUNCA vira `EntradaSuperada`. Ela diz que o estado da
+    // sessão no aparelho ficou desconhecido, e traduzi-la em "outra tentativa
+    // assumiu" trocaria um problema que precisa aparecer por uma corrida
+    // silenciosa — a pessoa veria a tela seguir normalmente com o cofre
+    // possivelmente guardando a sessão errada.
+    if (e instanceof FalhaNoCofre) throw e;
     if (minhaVez !== ultimaTentativa) throw new EntradaSuperada();
     throw e;
   }
