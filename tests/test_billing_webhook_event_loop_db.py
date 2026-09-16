@@ -24,11 +24,28 @@ CONTROLES NEGATIVOS DECLARADOS — em `frontend/finance_bot_websocket_custom.py`
         VERMELHO: test_escrita_db_nao_roda_na_thread_do_event_loop[<o sítio>],
                   e SÓ ele
     tirar o `await` de um `await _resolve_user(...)` (coroutine nunca
-    executada → `int(coroutine)` estoura → 500)
-        VERMELHO: test_get_user_by_stripe_customer_nao_roda_na_thread_do_event_loop[<o ramo>]
-                  (nos ramos com `retrieve`, o irmão
-                  `test_retrieve_nao_roda_na_thread_do_event_loop[<o ramo>]`
-                  cai junto, pelo mesmo 500)
+    executada → `int(coroutine)` estoura → 500). VERMELHOS por ramo, medidos
+    em 2026-09-16 (os irmãos em `tests/test_billing_webhook_event_loop.py`
+    valem enquanto aqueles testes existirem; remeça antes de reusar):
+        checkout.session.completed
+            test_get_user_by_stripe_customer_nao_roda_na_thread_do_event_loop[checkout.session.completed]
+            test_escrita_db_nao_roda_na_thread_do_event_loop[checkout_legado]
+            test_retrieve_nao_roda_na_thread_do_event_loop[checkout.session.completed]  (irmão)
+        customer.subscription.trial_will_end
+            test_get_user_by_stripe_customer_nao_roda_na_thread_do_event_loop[customer.subscription.trial_will_end]
+            test_dedupe_do_trial_will_end_nao_roda_na_thread_do_event_loop  (irmão)
+            test_trial_will_end_reentregue_nao_manda_segundo_email  (irmão)
+        invoice.payment_failed
+            test_get_user_by_stripe_customer_nao_roda_na_thread_do_event_loop[invoice.payment_failed]
+            test_escrita_db_nao_roda_na_thread_do_event_loop[payment_failed]
+            test_retrieve_nao_roda_na_thread_do_event_loop[invoice.payment_failed]  (irmão)
+        customer.subscription.deleted
+            test_get_user_by_stripe_customer_nao_roda_na_thread_do_event_loop[customer.subscription.deleted]
+            test_escrita_db_nao_roda_na_thread_do_event_loop[deleted]
+            test_escrita_db_nao_roda_na_thread_do_event_loop[deleted_inadimplencia]
+        invoice.paid
+            test_get_user_by_stripe_customer_nao_roda_na_thread_do_event_loop[invoice.paid]
+            test_retrieve_nao_roda_na_thread_do_event_loop[invoice.paid]  (irmão)
 
 Regra dos controles deste arquivo: citar o predicado a injetar, nomear só os
 VERMELHOS — ver `docs/controles_declarados.md`.

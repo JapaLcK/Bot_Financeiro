@@ -22,7 +22,12 @@ CONTROLES NEGATIVOS DECLARADOS — em `core/services/open_finance_proactive.py`:
 
 CONTROLE POSITIVO: a 2ª chamada de `test_falha_do_envio_nao_grava_marcador_e_deixa_rastro`
 (envio volta a funcionar → o template sai) e `test_marcador_de_um_usuario_nao_cala_outro`
-(o marcador é por `user_id`, isolamento do §0 do CLAUDE.md).
+(isolamento do §0 do CLAUDE.md na LEITURA: o marcador de um usuário não cala
+outro). Esse teste NÃO prova que a escrita usa o `user_id` certo — um marcador
+gravado com `user_id=None` ou com outro uid passa nele, porque a leitura do
+2º usuário continua não achando nada. Quem prova a escrita com o `user_id`
+certo é `test_manda_uma_vez_por_janela`: marcador em outro uid → a 2ª chamada
+manda de novo e ele cai.
 """
 from __future__ import annotations
 

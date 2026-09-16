@@ -5584,9 +5584,13 @@ async def billing_webhook(request: Request, background_tasks: BackgroundTasks):
     async def _fire_email(uid: int, fn, *args, dedup_days: float = 1.0) -> bool:
         """Envia email transacional em background — falha silenciosa pra nao quebrar webhook.
 
-        Devolve True SÓ quando o envio confirmou e a chave interna foi gravada;
-        o ramo `trial_will_end` usa o retorno para gravar o marcador de fora
-        (`trial_ending_email_sent`, o que o scheduler lê) — #441.
+        Devolve True só depois de o envio confirmar e de passar pela gravação
+        da chave interna; a gravação (`log_system_event`,
+        `core/admin_dashboard.py`, `except Exception: print(...)`) engole
+        falha de banco, então True não garante a chave. Nesse caso o marcador
+        de fora (mesmo banco) também não grava e o scheduler reenvia em até
+        6 dias. O ramo `trial_will_end` usa o retorno para gravar esse
+        marcador de fora (`trial_ending_email_sent`, o que o scheduler lê) — #441.
 
         **A chave NÃO inclui os argumentos, e desde a #351 isso custa um caso.**
         Os e-mails desta família passaram a carregar o NOME DO PLANO, então dois
