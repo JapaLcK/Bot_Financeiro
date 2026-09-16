@@ -1,3 +1,4 @@
+/* global preservePurchaseForAuth, purchaseResumePending: writable, purchaseContinuationError, purchaseContinuationPage */
 /**
  * Pix anual na /precos — o CTA nos cards, a etiqueta do toggle e o checkout.
  *
@@ -184,8 +185,19 @@ function pixCheckout(plano, retomando) {
   // Um `aoFechar` só para os dois estados: o `pixEncerrar` é inerte sem
   // `pixPoll`, então fechar no formulário limpa o documento e mais nada.
   const ctx = pixOverlay(nome + " anual no Pix", () => {
+    const fechouFormulario = !!pixDoc;
     pixApagarDoc();
     pixEncerrar();
+    if (retomando && typeof purchaseContinuationError === "function") {
+      if (window.PBPurchaseIntent) window.PBPurchaseIntent.markAwaitingAuth();
+      purchaseResumePending = false;
+      purchaseContinuationError(
+        fechouFormulario
+          ? "O pagamento não foi iniciado. Você pode tentar novamente ou voltar aos planos."
+          : "O pagamento foi fechado. Volte aos planos para decidir como continuar.",
+        fechouFormulario,
+      );
+    }
   });
   pixFormulario(plano, ctx);
 }
@@ -268,7 +280,15 @@ async function pixEnviar(plano, documento, confirmarCancelamentoStripe, ctx, bot
     // criada lá expira sozinha; o que não pode é sobrar aqui.
     if (!ctx.box.isConnected) return;
     if (r.status === 401) {
-      if (window.PBPurchaseIntent) window.PBPurchaseIntent.markAwaitingAuth();
+      preservePurchaseForAuth(plano, "annual", "pix");
+      if (typeof purchaseContinuationPage !== "undefined" && purchaseContinuationPage) {
+        ctx.fechar();
+        purchaseContinuationError(
+          "Sua sessão não foi confirmada. Entre novamente para continuar com o plano salvo.",
+          "login",
+        );
+        return;
+      }
       showToast("Crie sua conta ou entre para continuar com este plano.");
       setTimeout(() => {
         window.location.href = window.PBPurchaseIntent
