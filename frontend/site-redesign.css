@@ -142,6 +142,24 @@
 @media (max-width: 900px) {
   .rd .section { padding: 72px 0; }
 }
+/* No mobile, o título da hero é o LCP. As seções mais distantes têm cards,
+   SVGs e animações que não estão visíveis na primeira tela; deixar o navegador
+   pular layout e pintura delas tira esse trabalho do caminho crítico. A seção
+   de funcionalidades continua no layout normal para que a âncora seguinte não
+   mude de posição quando o navegador materializa o conteúdo adiado. */
+@media (max-width: 760px) {
+  .rd main > section:not(.hero-grid):not(#funcionalidades),
+  .rd > .footer {
+    content-visibility: auto;
+  }
+  .rd #vsl { contain-intrinsic-size: auto 600px; }
+  .rd #como-funciona { contain-intrinsic-size: auto 1450px; }
+  .rd main > .tech-split { contain-intrinsic-size: auto 850px; }
+  .rd #agentes { contain-intrinsic-size: auto 1650px; }
+  .rd #precos { contain-intrinsic-size: auto 950px; }
+  .rd #faq { contain-intrinsic-size: auto 900px; }
+  .rd > .footer { contain-intrinsic-size: auto 550px; }
+}
 @media (max-width: 560px) {
   .rd .hero-title { font-size: clamp(2.2rem, 9vw, 3rem); }
   .rd .plan-solo-amount { font-size: 3rem; }

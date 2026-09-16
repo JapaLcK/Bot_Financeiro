@@ -3212,12 +3212,18 @@ function renderCaixinhas(list) {
       })
     ).join("");
     const cur = c.pocket_id ? Number(c.pocket_id) : "null";
+    // Caixinha criada pelo sync: espelho do banco, vínculo fixo. A rota recusa
+    // soltar ou trocar (OF_POCKET_READONLY), então a linha vira leitura em vez de
+    // oferecer opções que só voltariam como erro.
+    const select = c.pocket_auto
+      ? `<select class="caix-select" disabled aria-label="Vínculo automático, criado pelo seu banco"><option>${esc(c.pocket_name || "Criada pelo banco")}</option></select>`
+      : `<select class="caix-select" onchange="bindCaixinha(${Number(c.of_investment_id)}, this.value, ${cur})">${opts}</select>`;
     return `<div class="caix-row">
       <div class="caix-info">
         <div class="caix-name"><i class="ph ph-piggy-bank" aria-hidden="true"></i> ${esc(c.name)}</div>
-        <div class="caix-bal">${fmt(c.balance)} guardado</div>
+        <div class="caix-bal">${fmt(c.balance)} guardado${c.pocket_auto ? " · vem do seu banco" : ""}</div>
       </div>
-      <select class="caix-select" onchange="bindCaixinha(${Number(c.of_investment_id)}, this.value, ${cur})">${opts}</select>
+      ${select}
     </div>`;
   }).join("");
 }
@@ -3812,6 +3818,8 @@ window.PBRefresh = () => {
   background: var(--surface-2); border: 1px solid var(--border); color: var(--ink); font-size: .8rem;
 }
 .caix-select:focus { border-color: var(--accent); outline: none; }
+/* vínculo fixo (caixinha criada pelo sync): parece leitura, não controle. */
+.caix-select:disabled { opacity: .62; cursor: default; }
 .mfa-overlay {
   position: fixed; inset: 0; background: rgba(0,0,0,.6); z-index: 9999;
   display: none; align-items: center; justify-content: center; padding: 20px;

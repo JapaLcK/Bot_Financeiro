@@ -3226,7 +3226,13 @@ function _renderGoalsView(goals) {
 }
 
 // Caixinha vinda do banco (Open Finance): saldo espelhado, sem rendimento interno.
-function _isOfPocket(p) { return p && (p.source === "open_finance" || p.of_investment_id != null); }
+// Vínculo ativo OU criada pelo sync — a MESMA régua do backend (`_is_of_mirror`,
+// db/pockets.py, que recusa depósito/saque pelos dois). O `source` no OR é o dado
+// LEGADO: desconexão anterior ao bloco de `disconnect_open_finance_connection`
+// (db/open_finance.py) deixou caixinha com `source='open_finance'` e vínculo nulo, e
+// nela o saque materializava o espelho como saldo próprio. Enquanto esses espelhos não
+// forem migrados, a linha é read-only nos dois lados (tests/frontend/pocket_history_of.test.mjs).
+function _isOfPocket(p) { return !!p && (p.of_investment_id != null || p.source === "open_finance"); }
 // No Grátis (pós-trial) o OF não está ativo → a caixinha do banco fica congelada.
 function _isOfStale(p) { return _isOfPocket(p) && p.of_plan_active === false; }
 function _ofPocketBadge(p) {
@@ -3314,7 +3320,7 @@ function _renderGoalCard(g, idx = 0) {
         <div class="ring-pct">${pct.toFixed(0)}%</div>
       </div>
       <div class="goal-info">
-        <div class="goal-name">${phIcon(emoji)} ${escapeHtmlSafe(g.name)}</div>
+        <div class="goal-name">${phIcon(emoji)} ${escapeHtmlSafe(g.name)} ${_ofPocketBadge(g)}</div>
         <div class="goal-amt">${_fmtBRL(g.balance || 0)} / ${_fmtBRL(g.target_amount || 0)}</div>
         <div class="bar-track" style="margin-top:6px"><div class="bar-fill" style="width:${pct}%;background:${color}"></div></div>
         <div class="goal-deadline" style="color:${deadlineColor}">${deadlineText}${g.days_left !== null ? " · " + (g.days_left >= 0 ? "em " + g.days_left + " dias" : "vencido há " + (-g.days_left) + " dias") : ""}</div>
@@ -9123,6 +9129,8 @@ async function openPocketHistory(pocketName) {
   subEl.textContent   = "Depósitos e saques desta caixinha.";
   sumEl.style.display = "none";
   if (actionsEl) actionsEl.style.display = "none";
+  const ofNoteEl = document.getElementById("pkt-of-note");
+  if (ofNoteEl) ofNoteEl.style.display = "none";
   bodyEl.innerHTML    = `<div class="pkt-hist-loading">Carregando…</div>`;
   overlay.classList.add("open");
 
@@ -9146,8 +9154,12 @@ async function openPocketHistory(pocketName) {
     document.getElementById("pkt-hist-deposits").textContent     = fmt(t.deposits || 0);
     document.getElementById("pkt-hist-withdrawals").textContent  = fmt(t.withdrawals || 0);
     sumEl.style.display = "grid";
+    // Caixinha do banco é read-only (db/pockets.py recusa com OF_POCKET_READONLY):
+    // mostrar Depositar/Sacar só adiava o erro pro POST.
+    const ofPocket = _isOfPocket(p);
     const actionsEl = document.getElementById("pkt-move-actions");
-    if (actionsEl) actionsEl.style.display = "flex";
+    if (actionsEl) actionsEl.style.display = ofPocket ? "none" : "flex";
+    if (ofNoteEl) ofNoteEl.style.display = ofPocket ? "" : "none";
 
     const items = data.history || [];
     if (!items.length) {

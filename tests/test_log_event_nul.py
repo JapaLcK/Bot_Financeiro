@@ -8,18 +8,24 @@ faz o INSERT ser recusado e a linha simplesmente não existir. Nos campos
 cannot contain NUL`); no `details` (`jsonb`) é o servidor. Mesma consequência.
 
 São **três tabelas e quatro INSERTs**, não só o `details` de um deles:
-`system_event_logs` (duas cópias do mesmo INSERT — `core/observability.py` e
-`core/admin_dashboard.py`), `audit_events` (`core/audit.py`) e
+`system_event_logs` (duas cópias do mesmo INSERT — `core/system_event_log.py`,
+para onde ele saiu de `core/observability.py`, e `core/admin_dashboard.py`),
+`audit_events` (`core/audit.py`) e
 `auth_login_events` (`core/admin_dashboard.py:150`, o irmão direto que fica
 50 linhas ACIMA do primeiro conserto e que a varredura inicial não pegou).
 
 E são todos os campos `text`, não só o `details` — sanear só o `details`
 deixaria o `core/services/pix_drain.py:170-174` (event_type do webhook do
-Asaas no `message`) e o `_DashboardHandler` (`core/observability.py:59`:
-qualquer `logger.warning(f"…{entrada}")` do repo vira `message`) abertos.
+Asaas no `message`) e o `_DashboardHandler` (`_DashboardHandler.emit` em
+`core/observability.py`: qualquer `logger.warning(f"…{entrada}")` do repo vira
+`message`) abertos.
 
 CONTROLE NEGATIVO do grupo: `limpa_para_pg` → identidade (`lambda v: v`) nos
-três módulos (`observability`, `audit`, `admin_dashboard`). Quem discrimina está NOMEADO: toda a matriz venenosa e o teste
+três módulos (`system_event_log`, `audit`, `admin_dashboard`) — o primeiro é
+`core/system_event_log.py` e NÃO `core/observability.py`, que hoje não importa
+mais `limpa_para_pg`; injetar lá não faria nada (os testes daqui chamam
+`observability.log_system_event_sync`, que é reexportação de fachada e continua
+verde). Quem discrimina está NOMEADO: toda a matriz venenosa e o teste
 anônimo do `wa_verify` ficam vermelhos; os controles positivos continuam verdes.
 Injetar num caso hoje verde (acento, emoji) não discriminaria nada.
 

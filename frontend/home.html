@@ -455,6 +455,7 @@ footer a:hover { color:var(--text); }
 <script src="/static/auth-refresh.js?v=1"></script>
 <script src="/modals.js"></script>
 <script defer src="/launch-type-labels.js?v=1"></script>
+<script src="/purchase-intent.js?v=1"></script>
   <link rel="stylesheet" href="/app-mode.css?v=34" />
   <script src="/app-mode.js?v=34"></script>
   <script src="/pb-nav.js?v=6"></script>
@@ -1425,6 +1426,11 @@ async function awaitCheckoutConfirmation() {
       if (ultimo) me = ultimo;
     }
   } finally {
+    // A continuação da compra só pode avançar para o app/onboarding quando o
+    // último /auth/me confirma que o webhook já liberou o acesso. O evento de
+    // fechamento também ocorre no fail-open, portanto ele sozinho não prova
+    // pagamento concluído.
+    window._pbCheckoutConfirmed = _checkoutSettled(me);
     _closeCheckoutOverlay();
   }
   return me;
@@ -2447,6 +2453,15 @@ function wpInicioValido(s) {
         // relido AGORA, não na hora de agendar: entre os 450ms e o fim do poll
         // a validação pode ter falhado, e aí não se celebra
         if (window._pbAccessDenied) return;
+        // Compra iniciada pelo fluxo contínuo: depois da confirmação, /app usa
+        // os gates existentes para mandar cadastro novo ao onboarding e usuário
+        // já configurado ao dashboard. Retornos antigos, sem intenção na aba,
+        // preservam o modal de boas-vindas abaixo.
+        if (window._pbCheckoutConfirmed && window.PBPurchaseIntent
+            && window.PBPurchaseIntent.complete()) {
+          window.location.replace("/app");
+          return;
+        }
         const dias = Number.parseInt(td, 10);
         const cotaIA = Number.parseInt(ia, 10);
         openWelcomePro({

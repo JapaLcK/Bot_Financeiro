@@ -9,6 +9,12 @@
 <link rel="icon" type="image/png" href="/favicon.png?v=3" />
 <link rel="apple-touch-icon" href="/brand/apple-touch-icon.png?v=3" />
 <meta name="theme-color" content="#0c0c0d" />
+<script>
+  if (window.location.pathname === "/continuar-compra") {
+    document.documentElement.classList.add("purchase-continuation");
+    document.title = "Preparando pagamento · PigBank";
+  }
+</script>
 <link rel="stylesheet" href="/brand.css?v=4" />
 <link rel="stylesheet" href="/phosphor.css?v=1" />
 <link rel="stylesheet" href="/site.css?v=4" />
@@ -21,6 +27,44 @@
   #toast.show { opacity: 1; transform: translateX(-50%) translateY(0); }
   #toast.err { border-color: rgba(255,45,45,.5); }
   .btn.loading { opacity: .7; pointer-events: none; }
+
+  /* A continuação usa o motor de checkout desta página sem devolver a pessoa
+     à vitrine. A classe nasce no <head>, antes do primeiro paint, para os cards
+     nunca piscarem entre o cadastro e o provedor de pagamento. */
+  .purchase-continuation body > .glow,
+  .purchase-continuation body > .nav,
+  .purchase-continuation body > .wrap,
+  .purchase-continuation body > footer { display: none !important; }
+  .purchase-continuation #purchase-continuation { display: grid; }
+  #purchase-continuation {
+    display: none; position: relative; z-index: 1; min-height: 100vh;
+    place-items: center; padding: calc(28px + env(safe-area-inset-top))
+      calc(20px + env(safe-area-inset-right))
+      calc(28px + env(safe-area-inset-bottom))
+      calc(20px + env(safe-area-inset-left));
+  }
+  .purchase-continuation-card {
+    width: min(430px,100%); padding: 34px 30px; text-align: center;
+    background: var(--card); border: 1px solid var(--line-2); border-radius: 16px;
+    box-shadow: 0 24px 70px rgba(0,0,0,.42);
+  }
+  .purchase-continuation-logo { width: 148px; height: auto; margin: 0 auto 28px; }
+  .purchase-continuation-mark {
+    display: grid; place-items: center; width: 46px; height: 46px; margin: 0 auto 18px;
+    border-radius: 50%; background: rgba(255,45,142,.12); color: var(--pink);
+  }
+  .purchase-continuation-mark i { font-size: 24px; animation: purchase-spin 900ms linear infinite; }
+  .purchase-continuation-card h1 { margin: 0 0 9px; font-size: clamp(1.35rem,5vw,1.7rem); letter-spacing: -.025em; }
+  .purchase-continuation-card > p { margin: 0; color: var(--ink-2); line-height: 1.55; }
+  .purchase-continuation-summary { margin-top: 16px !important; color: var(--ink) !important; font-weight: 700; }
+  .purchase-continuation-actions { display: none; margin-top: 22px; }
+  .purchase-continuation-actions.show { display: grid; gap: 10px; }
+  .purchase-continuation-actions .btn { width: 100%; }
+  .purchase-continuation-actions [hidden] { display: none !important; }
+  @keyframes purchase-spin { to { transform: rotate(360deg); } }
+  @media (prefers-reduced-motion: reduce) {
+    .purchase-continuation-mark i { animation: none; }
+  }
 
   /* Rótulo só pra leitor de tela: as células de ✓/— da tabela são ícones, e
      sem isto o leitor anuncia uma célula vazia. */
@@ -336,9 +380,24 @@
      enquanto o dashboard_token do nav dura horas: sem isto o nav mostrava a
      conta logada e o clique em "Assinar" caía em "Faça login". -->
 <script src="/static/auth-refresh.js?v=1"></script>
+<script src="/purchase-intent.js?v=1"></script>
 </head>
 <body>
 <div class="glow"></div>
+
+<main id="purchase-continuation" aria-labelledby="purchase-continuation-title">
+  <section class="purchase-continuation-card" role="status" aria-live="polite">
+    <img class="purchase-continuation-logo" src="/brand/logo.webp?v=1" alt="PigBank" />
+    <div class="purchase-continuation-mark" aria-hidden="true"><i class="ph ph-clock"></i></div>
+    <h1 id="purchase-continuation-title">Preparando seu pagamento</h1>
+    <p id="purchase-continuation-copy">Sua conta está pronta. Estamos abrindo o checkout com o plano que você escolheu.</p>
+    <p class="purchase-continuation-summary" id="purchase-continuation-summary"></p>
+    <div class="purchase-continuation-actions" id="purchase-continuation-actions">
+      <button class="btn btn-primary" id="purchase-continuation-retry" type="button">Tentar novamente</button>
+      <a class="btn btn-outline" id="purchase-continuation-back" href="/precos">Voltar aos planos</a>
+    </div>
+  </section>
+</main>
 
   <nav class="nav">
     <a class="nav-logo" href="/"><img class="logo-full" src="/brand/logo.webp?v=1" alt="PigBank" /></a>
@@ -724,6 +783,7 @@ function getCsrfToken() {
 // carrega o estado da assinatura (troca de plano). Sem flash de conteúdo.
 let currentCycle = "monthly";
 window.pbBillingCycle = currentCycle;
+const purchaseContinuationPage = window.location.pathname === "/continuar-compra";
 
 function setCycle(cycle) {
   currentCycle = cycle;
@@ -789,6 +849,11 @@ function updateCmpFade() {
 // dos cards mudam de "Assinar" pra "Seu plano atual / Trocar / Agendado".
 let subState = null;
 let cancelChangePending = false;
+let changeModalContinuation = false;
+let changeModalPending = false;
+let purchaseResumePending = false;
+let purchaseResumeScheduled = false;
+window.pbPlanAuthState = "unknown";
 const PLAN_NAMES = { essencial: "Essencial", plus: "Plus", pro: "Pro" };
 const PLAN_PRICES = {
   essencial: { monthly: "R$ 9,90/mês", annual: "R$ 99/ano" },
@@ -817,11 +882,145 @@ function fmtBrDate(iso) {
 async function loadSubscription() {
   try {
     const r = await fetch("/billing/subscription", { credentials: "same-origin" });
-    if (!r.ok) { subState = null; return r.status === 401; }
+    if (!r.ok) {
+      subState = null;
+      window.pbPlanAuthState = r.status === 401 ? "anonymous" : "unknown";
+      return r.status === 401;
+    }
     subState = await r.json();   // JSON malformado lança → catch → não resolvida
+    window.pbPlanAuthState = "authenticated";
     return true;
-  } catch { subState = null; return false; }
+  } catch {
+    subState = null;
+    window.pbPlanAuthState = "unknown";
+    return false;
+  }
 }
+
+/** Recria a intenção se o refresh expirado tiver limpado a sessionStorage. */
+function preservePurchaseForAuth(plan, cycle, method) {
+  if (!window.PBPurchaseIntent) return;
+  if (!window.PBPurchaseIntent.read()) {
+    window.PBPurchaseIntent.begin(plan, cycle, method);
+  }
+  window.PBPurchaseIntent.markAwaitingAuth();
+}
+
+/** Retoma uma escolha feita antes do cadastro sem pedir o plano outra vez. */
+function purchaseContinuationError(message, recoveryAction) {
+  if (!purchaseContinuationPage) {
+    showToast(message, "err");
+    return;
+  }
+  const action = recoveryAction === true ? "retry" : recoveryAction;
+  const title = document.getElementById("purchase-continuation-title");
+  const copy = document.getElementById("purchase-continuation-copy");
+  const mark = document.querySelector(".purchase-continuation-mark i");
+  const actions = document.getElementById("purchase-continuation-actions");
+  const retry = document.getElementById("purchase-continuation-retry");
+  if (title) title.textContent = "Não conseguimos abrir o pagamento";
+  if (copy) copy.textContent = message;
+  if (mark) mark.className = "ph ph-warning-circle";
+  if (actions) actions.classList.add("show");
+  if (retry) {
+    retry.hidden = !action;
+    retry.textContent = action === "login"
+      ? "Entrar novamente"
+      : action === "reload" ? "Recarregar pagamento" : "Tentar novamente";
+    retry.onclick = () => {
+      if (action === "login") {
+        const next = window.PBPurchaseIntent
+          ? window.PBPurchaseIntent.continueUrl()
+          : "/continuar-compra";
+        window.location.href = "/login?next=" + encodeURIComponent(next);
+        return;
+      }
+      if (action === "reload") {
+        window.location.reload();
+        return;
+      }
+      purchaseResumePending = false;
+      if (title) title.textContent = "Preparando seu pagamento";
+      if (copy) copy.textContent = "Estamos tentando abrir o checkout novamente.";
+      if (mark) mark.className = "ph ph-clock";
+      if (actions) actions.classList.remove("show");
+      resumePurchaseAfterAuth();
+    };
+  }
+}
+
+document.getElementById("purchase-continuation-back")?.addEventListener("click", () => {
+  window.PBPurchaseIntent?.clear();
+});
+
+function resumePurchaseAfterAuth() {
+  if (purchaseResumePending || !window.PBPurchaseIntent
+      || (!purchaseContinuationPage && window.pbPlanAuthState !== "authenticated")) return;
+  const intent = window.PBPurchaseIntent.pending();
+  if (!intent) {
+    purchaseContinuationError(
+      "Sua escolha não está mais disponível. Volte aos planos para começar novamente.",
+      false,
+    );
+    return;
+  }
+  purchaseResumePending = true;
+  if (currentCycle !== intent.cycle) setCycle(intent.cycle);
+  if (purchaseContinuationPage) {
+    const summary = document.getElementById("purchase-continuation-summary");
+    if (summary) summary.textContent = window.PBPurchaseIntent.summary(intent);
+  } else {
+    showToast("Tudo certo com sua conta. Continuando para o pagamento…");
+  }
+
+  // O DOMContentLoaded garante que pix-checkout.js e a ilha dos cards já foram
+  // carregados. O pequeno macrotask deixa a troca de ciclo terminar antes de
+  // procurar o botão recém-renderizado.
+  setTimeout(() => {
+    if (intent.method === "pix") {
+      try {
+        if (typeof pixCheckout !== "function") throw new Error("pix-checkout indisponível");
+        pixCheckout(intent.plan, true);
+      } catch (_) {
+        document.querySelector(".pix-ov")?.remove();
+        preservePurchaseForAuth(intent.plan, intent.cycle, "pix");
+        purchaseResumePending = false;
+        purchaseContinuationError(
+          "Não foi possível carregar o pagamento via Pix. Recarregue para tentar novamente.",
+          "reload",
+        );
+      }
+      return;
+    }
+    const button = document.querySelector(
+      '#plans-v2 [data-plan-btn="' + intent.plan + '"]:not([disabled])'
+    );
+    if (button) startCheckout(intent.cycle, button, intent.plan, true);
+    else {
+      purchaseResumePending = false;
+      purchaseContinuationError(
+        "Este plano não está disponível agora. Você pode voltar e escolher outra opção.",
+        false,
+      );
+    }
+  }, 0);
+}
+
+function schedulePurchaseResume() {
+  if (purchaseResumeScheduled) return;
+  purchaseResumeScheduled = true;
+  if (document.readyState === "loading") {
+    document.addEventListener("DOMContentLoaded", resumePurchaseAfterAuth, { once: true });
+  } else {
+    resumePurchaseAfterAuth();
+  }
+}
+
+// Nesta rota a própria tentativa de checkout confirma a sessão. Não esperamos
+// /billing/subscription: se essa consulta estiver lenta ou fora do ar, a pessoa
+// ainda segue para o pagamento e recebe o erro específico do checkout se a
+// autenticação tiver falhado.
+if (purchaseContinuationPage) schedulePurchaseResume();
 
 function refreshPlanButtons() {
   document.querySelectorAll("[data-plan-btn]").forEach(btn => {
@@ -875,22 +1074,34 @@ function _ensureChangeModal() {
     '<div id="chg-body" style="color:rgba(255,255,255,.8);font-size:.92rem;line-height:1.65"></div>' +
     '<div style="display:flex;gap:10px;margin-top:22px">' +
     '<button id="chg-confirm" class="btn btn-primary" style="flex:1">Confirmar troca</button>' +
-    '<button class="btn btn-outline" style="flex:1" onclick="closeChangeModal()">Cancelar</button>' +
+    '<button id="chg-cancel" class="btn btn-outline" style="flex:1" onclick="closeChangeModal()">Cancelar</button>' +
     "</div></div>";
-  el.addEventListener("click", closeChangeModal);
+  el.addEventListener("click", () => closeChangeModal());
   document.body.appendChild(el);
 }
 
-function closeChangeModal() {
+function closeChangeModal(completed) {
+  if (changeModalPending && completed !== true) return;
   const el = document.getElementById("chg-overlay");
   if (el) el.style.display = "none";
+  const recoverContinuation = changeModalContinuation && completed !== true;
+  changeModalContinuation = false;
+  if (recoverContinuation) {
+    purchaseResumePending = false;
+    purchaseContinuationError(
+      "A troca de plano não foi confirmada. Você pode tentar novamente ou voltar aos planos.",
+      true,
+    );
+  }
 }
 
-function openChangeModal(plan) {
+function openChangeModal(plan, continuation) {
   _ensureChangeModal();
+  changeModalContinuation = continuation === true;
+  const changeInterval = currentCycle;
   const cur = PLAN_NAMES[subState.plan] || "seu plano atual";
   const novo = PLAN_NAMES[plan] || plan;
-  const preco = (PLAN_PRICES[plan] || {})[currentCycle] || "";
+  const preco = (PLAN_PRICES[plan] || {})[changeInterval] || "";
   const data = fmtBrDate(subState.current_period_end);
   document.getElementById("chg-body").innerHTML =
     `<p style="margin:0 0 10px"><strong>${cur}</strong> → <strong>${novo} (${preco})</strong></p>` +
@@ -898,33 +1109,61 @@ function openChangeModal(plan) {
     `<p style="margin:0 0 6px"><i class="ph ph-check-circle" aria-hidden="true"></i> Você continua no ${cur} até <strong>${data}</strong> (período já pago)</p>` +
     `<p style="margin:0"><i class="ph ph-check-circle" aria-hidden="true"></i> Em ${data} seu plano vira ${novo} e a cobrança de ${preco} acontece no cartão cadastrado</p>`;
   const confirm = document.getElementById("chg-confirm");
+  const cancel = document.getElementById("chg-cancel");
+  changeModalPending = false;
   confirm.disabled = false;
+  cancel.disabled = false;
   confirm.textContent = "Confirmar troca";
   confirm.onclick = async function () {
+    if (changeModalPending) return;
+    changeModalPending = true;
     confirm.disabled = true;
+    cancel.disabled = true;
     confirm.textContent = "Agendando…";
     try {
+      const continuingPurchase = changeModalContinuation;
       const r = await fetch("/billing/change-plan", {
         method: "POST", credentials: "same-origin",
         headers: { "Content-Type": "application/json", "x-csrf-token": getCsrfToken() },
-        body: JSON.stringify({ plan: plan, interval: currentCycle }),
+        body: JSON.stringify({ plan: plan, interval: changeInterval }),
       });
+      if (r.status === 401 && continuingPurchase) {
+        preservePurchaseForAuth(plan, changeInterval, "card");
+        changeModalPending = false;
+        closeChangeModal(true);
+        purchaseResumePending = false;
+        purchaseContinuationError(
+          "Sua sessão expirou antes de confirmar a troca. Entre novamente para continuar.",
+          "login",
+        );
+        return;
+      }
       const data2 = await r.json().catch(() => ({}));
       if (!r.ok) {
         const msg = (data2.detail && data2.detail.message) ||
           (typeof data2.detail === "string" ? data2.detail : "Não consegui agendar a troca.");
         showToast(msg, "err");
+        changeModalPending = false;
         confirm.disabled = false;
+        cancel.disabled = false;
         confirm.textContent = "Confirmar troca";
         return;
       }
-      closeChangeModal();
+      changeModalPending = false;
+      closeChangeModal(true);
       showToast(`✓ Troca agendada pra ${fmtBrDate(data2.effective_at)}. Te mandei um e-mail de confirmação.`);
+      if (continuingPurchase) {
+        if (window.PBPurchaseIntent) window.PBPurchaseIntent.clear();
+        window.location.href = "/home";
+        return;
+      }
       await loadSubscription();
       refreshPlanButtons();
     } catch {
       showToast("Erro de conexão. Tente novamente.", "err");
+      changeModalPending = false;
       confirm.disabled = false;
+      cancel.disabled = false;
       confirm.textContent = "Confirmar troca";
     }
   };
@@ -973,6 +1212,9 @@ async function cancelChange() {
 // dentro do loadPlansState: lá ele ficava serializado atrás do
 // /billing/subscription, que fala com o Stripe. O `if (sub)` também vem de lá.
 (async function applyPlanGateCopy() {
+  // A rota técnica precisa ler a intenção antes de qualquer request autenticada:
+  // se access e refresh expiraram, auth-refresh limpa a sessionStorage.
+  if (purchaseContinuationPage) return;
   let me = null;
   try {
     const r = await fetch("/auth/me", { credentials: "same-origin" });
@@ -1080,6 +1322,12 @@ async function cancelChange() {
     // etiqueta é anúncio — anunciar Pix ao vitalício enquanto o Stripe trava é
     // vender o que o backend recusa com 409.
     publicarPix(null, false);
+    // A rota técnica já tenta o checkout assim que o DOM fica pronto. Consultar
+    // a assinatura aqui não ajuda essa decisão e, num access+refresh expirado,
+    // o interceptor limpa a sessionStorage antes de a retomada ler a intenção.
+    // Assinante existente continua coberto pelo 409 `already_subscribed` do
+    // próprio checkout, que consulta a assinatura apenas nesse caso.
+    if (purchaseContinuationPage) return;
     // Assinante logado: botões viram "Seu plano atual / Trocar / Agendado".
     const resolvida = await loadSubscription();
     refreshPlanButtons();
@@ -1087,11 +1335,15 @@ async function cancelChange() {
     // `subState = null` do 401 do deslogado. Chamar de resolvido revelava a
     // etiqueta ao vitalício indefinidamente sempre que a consulta falhasse.
     publicarPix(subState, resolvida);
+    schedulePurchaseResume();
   } catch {}
 })();
 
-async function startCheckout(interval, btn, plan) {
+async function startCheckout(interval, btn, plan, resuming) {
   if (btn.classList.contains("loading")) return;
+  if (!resuming && window.PBPurchaseIntent) {
+    window.PBPurchaseIntent.begin(plan, interval, "card");
+  }
   const originalText = btn.textContent;
   btn.classList.add("loading");
   btn.textContent = "Carregando…";
@@ -1129,20 +1381,37 @@ async function startCheckout(interval, btn, plan) {
       body: JSON.stringify(payload),
     });
 
-    if (resp.status === 401) {
-      showToast("Faça login pra continuar a assinatura.", "err");
-      setTimeout(() => { window.location.href = "/login?next=" + encodeURIComponent("/precos"); }, 900);
-      return;
-    }
-
     if (resp.status === 403) {
-      await fetch("/precos", { credentials: "same-origin" });
+      await fetch(purchaseContinuationPage ? "/continuar-compra" : "/precos", {
+        credentials: "same-origin",
+      });
       resp = await fetch("/billing/create-checkout", {
         method: "POST",
         credentials: "same-origin",
         headers: { "Content-Type": "application/json", "x-csrf-token": getCsrfToken() },
         body: JSON.stringify(payload),
       });
+    }
+
+    // Vale para a primeira resposta e para o retry depois de renovar o CSRF.
+    if (resp.status === 401) {
+      preservePurchaseForAuth(plan, interval, "card");
+      if (resuming && purchaseContinuationPage) {
+        restaurar();
+        purchaseResumePending = false;
+        purchaseContinuationError(
+          "Sua sessão não foi confirmada. Entre novamente para continuar com o plano salvo.",
+          "login",
+        );
+        return;
+      }
+      showToast("Crie sua conta ou entre para continuar com este plano.");
+      setTimeout(() => {
+        window.location.href = window.PBPurchaseIntent
+          ? window.PBPurchaseIntent.authUrl()
+          : "/cadastro";
+      }, 500);
+      return;
     }
 
     if (!resp.ok) {
@@ -1157,8 +1426,33 @@ async function startCheckout(interval, btn, plan) {
       // Guarda anti-assinatura-dupla: já assina → abre a TROCA de plano em vez
       // de deixar o clique morrer num erro.
       if (code === "already_subscribed" && plan) {
-        await loadSubscription();
-        if (subState && subState.active) { openChangeModal(plan); return; }
+        if (!subState || !subState.active) await loadSubscription();
+        if (window.pbPlanAuthState === "anonymous"
+            && resuming && purchaseContinuationPage) {
+          preservePurchaseForAuth(plan, interval, "card");
+          purchaseResumePending = false;
+          purchaseContinuationError(
+            "Sua sessão expirou antes de confirmar sua assinatura. Entre novamente para continuar.",
+            "login",
+          );
+          return;
+        }
+        if (subState && subState.active) {
+          purchaseResumePending = false;
+          if (subState.plan === plan
+              && (subState.interval || "monthly") === interval) {
+            window.PBPurchaseIntent?.clear();
+            window.location.href = "/home";
+            return;
+          }
+          openChangeModal(plan, resuming && purchaseContinuationPage);
+          return;
+        }
+      }
+      if (resuming && purchaseContinuationPage) {
+        purchaseResumePending = false;
+        purchaseContinuationError(detail, true);
+        return;
       }
       showToast(detail, "err");
       return;
@@ -1166,6 +1460,7 @@ async function startCheckout(interval, btn, plan) {
 
     const data = await resp.json();
     if (data && data.checkout_url) {
+      if (window.PBPurchaseIntent) window.PBPurchaseIntent.markCheckoutStarted();
       // Meta Ads: usuário iniciou o checkout (antes de ir pra Stripe).
       if (window.fbq) fbq("track", "InitiateCheckout", { content_category: plan || "", content_name: interval || "" });
       // GA4: mesmo momento, nome recomendado (alimenta o funil de compra).
@@ -1185,24 +1480,26 @@ async function startCheckout(interval, btn, plan) {
         irPraStripe();
       }
     } else {
-      showToast("Resposta inesperada do servidor.", "err");
       restaurar();
+      purchaseResumePending = false;
+      purchaseContinuationError("Resposta inesperada do servidor.", true);
     }
   } catch (e) {
-    showToast("Erro de conexão. Tente novamente.", "err");
     restaurar();
+    purchaseResumePending = false;
+    purchaseContinuationError("A conexão falhou. Verifique sua internet e tente novamente.", true);
   }
 }
 
 // Meta Ads: visualização da página de planos → público de remarketing
 // "olhou o preço mas não assinou".
-if (window.fbq) fbq("track", "ViewContent", { content_name: "precos", content_category: "plans" });
+if (!purchaseContinuationPage && window.fbq) fbq("track", "ViewContent", { content_name: "precos", content_category: "plans" });
 // GA4: mesma visualização, nome recomendado. Roda na abertura da página e a cada
 // troca de ciclo (chamada no fim do `setCycle`), com o ciclo selecionado AGORA —
 // é o que permite comparar quem olha mensal com quem olha anual.
 // Nada de `pbTrack` aqui: esta página não navega depois do evento.
 function enviarViewItemList() {
-  if (!window.gtag) return;
+  if (purchaseContinuationPage || !window.gtag) return;
   gtag("event", "view_item_list", {
     item_list_id: "precos",
     item_list_name: "Planos",

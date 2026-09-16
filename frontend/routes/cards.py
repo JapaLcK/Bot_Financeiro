@@ -345,7 +345,7 @@ async def delete_card_route(request: Request, user_id: int, card_id: int):
         # traceback LÁ criaria persistência nova de `DETAIL: Key (…)`. Aqui
         # mantê-la não persiste nada novo.
         # `to_thread`: a rota é async e o `_DashboardHandler` grava com
-        # `psycopg.connect()` bloqueante (ver `core/observability.py`).
+        # `psycopg.connect()` bloqueante (ver `core/system_event_log.py`).
         # `rota=`: na `main` o middleware gravava a rota no `source` do evento
         # (`f"{method} {path}"`, `core/admin_dashboard.py`). O `_log_falha` grava
         # o nome do LOGGER dele (`core.observability`) nesse campo, igual para

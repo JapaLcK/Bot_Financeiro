@@ -243,22 +243,6 @@ def init_db():
           on pocket_lots(user_id, pocket_id, status, opened_at, id)
         """,
         """
-        insert into pocket_lots(
-          user_id, pocket_id, principal_initial, principal_remaining,
-          balance, opened_at, last_date, status
-        )
-        select p.user_id, p.id, p.balance, p.balance, p.balance,
-               coalesce(p.last_interest_date, current_date),
-               coalesce(p.last_interest_date, current_date),
-               'open'
-          from pockets p
-         where p.balance > 0
-           and not exists (
-             select 1 from pocket_lots l
-              where l.user_id = p.user_id and l.pocket_id = p.id
-           )
-        """,
-        """
         create table if not exists launches (
           id bigserial primary key,
           user_id bigint not null references users(id) on delete cascade,
@@ -733,6 +717,35 @@ def init_db():
         """
         alter table pockets add column if not exists of_investment_id bigint
           references open_finance_investments(id) on delete set null
+        """,
+        # BACKFILL dos lotes das caixinhas que já existiam quando pocket_lots nasceu.
+        # Mora AQUI, e não junto do `create table pocket_lots` (lá em cima), porque o
+        # filtro `of_investment_id is null` precisa da coluna — em banco NOVO ela só
+        # nasce no `alter` logo acima, centenas de statements depois da criação da
+        # tabela, e o statement estouraria "column does not exist" na primeira subida.
+        #
+        # O filtro é dinheiro: em caixinha vinculada o `balance` é ESPELHO do banco
+        # (escrito pelo sync, que nunca cria lote), e lote é saldo PRÓPRIO, sacável.
+        # Sem ele, `init_db()` — que roda em TODO startup — materializava o espelho a
+        # cada deploy, e desvincular/desconectar devolvia como dinheiro do usuário.
+        # É a mesma guarda do `_ensure_pocket_lots` (db/pockets.py), no outro
+        # materializador; eram DOIS caminhos, não um.
+        """
+        insert into pocket_lots(
+          user_id, pocket_id, principal_initial, principal_remaining,
+          balance, opened_at, last_date, status
+        )
+        select p.user_id, p.id, p.balance, p.balance, p.balance,
+               coalesce(p.last_interest_date, current_date),
+               coalesce(p.last_interest_date, current_date),
+               'open'
+          from pockets p
+         where p.balance > 0
+           and p.of_investment_id is null
+           and not exists (
+             select 1 from pocket_lots l
+              where l.user_id = p.user_id and l.pocket_id = p.id
+           )
         """,
         """
         alter table pockets add column if not exists of_last_seen_balance numeric

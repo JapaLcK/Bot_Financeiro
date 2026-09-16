@@ -1,3 +1,4 @@
+/* global preservePurchaseForAuth, purchaseResumePending: writable, purchaseContinuationError, purchaseContinuationPage */
 /**
  * Pix anual na /precos — o CTA nos cards, a etiqueta do toggle e o checkout.
  *
@@ -158,7 +159,24 @@ const pixFormaOk = (d) => d.length === 11 || d.length === 14;
  * O clique no CTA NÃO cobra mais: ele abre o formulário. O `POST` sai no submit
  * dele, com o documento — sem ele o Asaas recusa a cobrança.
  */
-function pixCheckout(plano) {
+function pixCheckout(plano, retomando) {
+  if (!retomando && window.PBPurchaseIntent) {
+    window.PBPurchaseIntent.begin(plano, "annual", "pix");
+  }
+  // Quando o estado de assinatura já provou que é visitante, autenticamos
+  // antes de pedir CPF/CNPJ. Assim a pessoa não digita um dado sensível para
+  // só então descobrir que precisava criar a conta.
+  if (window.pbPlanAuthState === "anonymous") {
+    if (window.PBPurchaseIntent) window.PBPurchaseIntent.markAwaitingAuth();
+    showToast("Crie sua conta ou entre para continuar com este plano.");
+    setTimeout(() => {
+      window.location.href = window.PBPurchaseIntent
+        ? window.PBPurchaseIntent.authUrl()
+        : "/cadastro";
+    }, 500);
+    return;
+  }
+  if (window.PBPurchaseIntent) window.PBPurchaseIntent.markCheckoutStarted();
   // Um modal por vez, nos DOIS estados. Com o QR na tela cada checkout é uma
   // COBRANÇA NOVA no provedor; com o formulário aberto, um segundo overlay
   // deixaria o primeiro órfão no DOM com o documento digitado dentro dele.
@@ -167,8 +185,19 @@ function pixCheckout(plano) {
   // Um `aoFechar` só para os dois estados: o `pixEncerrar` é inerte sem
   // `pixPoll`, então fechar no formulário limpa o documento e mais nada.
   const ctx = pixOverlay(nome + " anual no Pix", () => {
+    const fechouFormulario = !!pixDoc;
     pixApagarDoc();
     pixEncerrar();
+    if (retomando && typeof purchaseContinuationError === "function") {
+      if (window.PBPurchaseIntent) window.PBPurchaseIntent.markAwaitingAuth();
+      purchaseResumePending = false;
+      purchaseContinuationError(
+        fechouFormulario
+          ? "O pagamento não foi iniciado. Você pode tentar novamente ou voltar aos planos."
+          : "O pagamento foi fechado. Volte aos planos para decidir como continuar.",
+        fechouFormulario,
+      );
+    }
   });
   pixFormulario(plano, ctx);
 }
@@ -251,10 +280,21 @@ async function pixEnviar(plano, documento, confirmarCancelamentoStripe, ctx, bot
     // criada lá expira sozinha; o que não pode é sobrar aqui.
     if (!ctx.box.isConnected) return;
     if (r.status === 401) {
-      showToast("Faça login pra continuar a assinatura.", "err");
+      preservePurchaseForAuth(plano, "annual", "pix");
+      if (typeof purchaseContinuationPage !== "undefined" && purchaseContinuationPage) {
+        ctx.fechar();
+        purchaseContinuationError(
+          "Sua sessão não foi confirmada. Entre novamente para continuar com o plano salvo.",
+          "login",
+        );
+        return;
+      }
+      showToast("Crie sua conta ou entre para continuar com este plano.");
       setTimeout(() => {
-        window.location.href = "/login?next=" + encodeURIComponent("/precos");
-      }, 900);
+        window.location.href = window.PBPurchaseIntent
+          ? window.PBPurchaseIntent.authUrl()
+          : "/cadastro";
+      }, 500);
       return;
     }
     // `detail` STRING é a metade que faltava: o FastAPI manda `{"detail": "<frase>"}`

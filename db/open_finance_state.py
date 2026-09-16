@@ -46,6 +46,94 @@ from .open_finance import _CursorComTeto
 # a UM elemento emitiria `('PAUSED',)` e quebraria o SQL. Ao mexer, vire lista SQL.
 _TERMINAL = ("PAUSED", "DELETED")
 
+# ── O `executionStatus` derivado do `raw` ────────────────────────────────────
+# FONTE ÚNICA (§0.7) da regra "o `raw` ainda descreve a autorização ATUAL". Dois
+# consumidores, formatos diferentes, MESMA condição e MESMO parâmetro: o select
+# do snapshot / `get_connections_by_item_id` (abaixo, via `SQL_EXECUTION_STATUS`)
+# e o predicado do aviso proativo (`list_connections_needing_reconnect`, em
+# `db/open_finance.py`, que precisa da condição CRUA dentro do `coalesce` dele).
+#
+# Por que em SQL e não em Python: `connection_ui_state` se declara "sem banco,
+# sem rede" (`core/services/pluggy_health.py`) e não tem relógio. E aqui o
+# `raw->>'executionStatus'` sai como TEXTO — nenhum `::timestamptz` sobre string
+# vinda do provedor, cujo `InvalidDatetimeFormat` viraria 500 na tela de todos.
+#
+# A ÂNCORA é `coalesce(reconnected_at, created_at)`, e não `updated_at` nem
+# `last_attempt_at`: `mark_sync_attempt` empurra esses dois para frente SEM que o
+# `raw` mude, o que renovaria a validade de um valor congelado. `reconnected_at`
+# tem um escritor só em PRODUÇÃO (o `on conflict` de
+# `save_pluggy_open_finance_item`) e é gravado JUNTO com o `raw` que ele data —
+# "em toda a árvore" seria falso, e por um: `scripts/of_corrida_dois_processos.py`
+# também escreve a coluna (`reconnected_at=null`), e é script de laboratório;
+# `created_at` é `default now()` e o `on conflict` nunca o toca.
+#
+# O `health is null` é obrigatório, não enfeite (mesmo precedente medido do
+# predicado irmão): sem ele, um `health` observado DEPOIS e sem
+# `execution_status` cairia no `raw` VELHO — `mark_sync_result` não toca em
+# `raw`.
+#
+# O intervalo é FECHADO DOS DOIS LADOS, e o teto não é zelo: as duas pontas vêm
+# de RELÓGIOS DIFERENTES — o carimbo é `datetime.now(_tz())` do PYTHON
+# (`save_pluggy_open_finance_item`) e o `now()` aqui é do POSTGRES. Sem teto,
+# qualquer adiantamento do app estende a janela um-para-um e um relógio
+# grosseiramente errado a torna PERMANENTE. Medido com `reconnected_at = now() +
+# interval '10 days'`: a tela devolvia "Autorize o acesso no app do banco" e o
+# aviso proativo ficava calado — os dois para sempre, que é exatamente a falha
+# que o PRAZO existe para fechar.
+#
+# A folga de 5 min é o desvio NORMAL entre app e banco (segundos): com `<= now()`
+# puro, um app 2 s adiantado matava o conserto na RECONEXÃO recém-gravada. E é só
+# na reconexão: no primeiro INSERT o `reconnected_at` nasce NULL e a âncora é o
+# `created_at`, que é `default now()` do POSTGRES e nunca está no futuro — o
+# carimbo do relógio do PYTHON só entra pelo ramo do CONFLITO
+# (`reconnected_at = excluded.updated_at`, `db/open_finance.py`), que é o do
+# widget reconectando. Ela custa 5 min a mais no pior caso legítimo (65 em vez de
+# 60) e continua descartando o relógio errado de verdade.
+SQL_RAW_AINDA_VALE = (
+    "health is null "
+    "and coalesce(reconnected_at, created_at) > now() - make_interval(mins => %s) "
+    "and coalesce(reconnected_at, created_at) <= now() + interval '5 minutes'"
+)
+
+# Só o ESCALAR viaja. O `raw` inteiro nunca sai do Postgres: ele carrega
+# `clientUserId` (e `statusDetail`), e o snapshot vai para o navegador.
+#
+# O `upper` É mudança de comportamento, a MESMA que o predicado irmão do aviso
+# documenta (`list_connections_needing_reconnect`, `db/open_finance.py`) — e
+# agora ela vale também para a TELA: um `executionStatus` em minúscula no `raw`
+# passa a virar a instrução de dispositivo, onde antes caía no detalhe fixo
+# "Reautorize o banco". Hoje é INALCANÇÁVEL pelo caminho de produção — a Pluggy
+# manda `USER_AUTHORIZATION_PENDING` em maiúscula, e `_DETALHE_POR_STATUS` só tem
+# chaves maiúsculas. Fica assim, e não numa comparação sensível a caixa, porque a
+# direção é a barata: se um dia entrar minúscula, a tela erra para o lado de
+# mandar ler o QR em vez de para o de fazer a pessoa PERDER a janela. Sem teste
+# próprio — não há entrada de produção que chegue lá; o que tem teste são as
+# células medidas na varredura em duas colunas
+# (`tests/test_of_connection_state.py`,
+# `test_as_celulas_que_mudaram_na_varredura_ficam_na_instrucao_de_dispositivo`).
+SQL_EXECUTION_STATUS = (
+    f"case when {SQL_RAW_AINDA_VALE} then upper(raw->>'executionStatus') end as execution_status"
+)
+
+
+def janela_device_auth_min() -> int:
+    """O único `%s` de `SQL_RAW_AINDA_VALE` / `SQL_EXECUTION_STATUS`.
+
+    Import local porque `db` -> `core.services` é de mão única neste pacote (ver
+    `connection_ui_state` em `db/open_finance.py`); e função em vez de constante
+    para que os três chamadores não repitam o import.
+
+    SEM VALIDAÇÃO de propósito: o valor é um literal do módulo, sem override por
+    env, então nenhum valor hostil é alcançável e validar aqui seria código
+    defensivo para caso impossível (§0.2). Se um dia ela virar configuração, dois
+    valores medidos quebram e a validação passa a ser devida: `0` NÃO desliga mais
+    o derivado (o teto sozinho ainda admite `(now, now + 5 min]`), e qualquer
+    valor acima de 2³¹−1 estoura `make_interval(mins => bigint) does not exist` —
+    500 na aba de Open Finance E no laço do aviso proativo.
+    """
+    from core.services.pluggy_health import JANELA_DEVICE_AUTH_MIN
+    return JANELA_DEVICE_AUTH_MIN
+
 
 class AmbiguousItemError(RuntimeError):
     """O mesmo provider_item_id aparece em mais de uma conexão (usuários diferentes).
@@ -89,15 +177,23 @@ def get_connections_by_item_id(item_id: str, provider: str = "pluggy", *,
             if budget_ms is not None:
                 cur = _CursorComTeto(cur, budget_ms, t0)
             cur.execute(
-                """
+                f"""
                 select id, user_id, provider, provider_item_id, status, institution_name,
                        last_sync_at, last_attempt_at, status_reason, health,
-                       next_refresh_at, last_refresh_origin, reconnected_at
+                       next_refresh_at, last_refresh_origin, reconnected_at,
+                       -- Para o `connection_ui_state`: sem ele, o toast do
+                       -- /refresh manda "Reautorize o banco" na janela do QR
+                       -- (`_refresh_items_report` lê ESTA linha). `mark_sync_result`
+                       -- recebe `health` como OPCIONAL, então um sync que falhe
+                       -- antes do `GET /items` não grava saúde e cai aqui.
+                       -- Sem `pop` do lado de fora: estas linhas são internas
+                       -- (nenhum consumidor as devolve cruas ao navegador).
+                       {SQL_EXECUTION_STATUS}
                 from open_finance_connections
                 where provider=%s and provider_item_id=%s
                 order by id
                 """,
-                (provider, item),
+                (janela_device_auth_min(), provider, item),
             )
             return [dict(r) for r in (cur.fetchall() or [])]
 

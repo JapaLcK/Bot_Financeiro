@@ -4023,7 +4023,9 @@ async def auth_dashboard_link(response: Response, request: Request, body: Dashbo
 # ─── Login social (Google OAuth) ─────────────────────────────────────────────
 
 GOOGLE_OAUTH_STATE_COOKIE = "google_oauth_state"
+GOOGLE_OAUTH_NEXT_COOKIE = "google_oauth_next"
 GOOGLE_OAUTH_STATE_MAX_AGE = 600  # 10 minutos
+GOOGLE_OAUTH_PURCHASE_CONTINUE_URL = "/continuar-compra"
 
 
 class GoogleSignupCompleteBody(_CorpoSemVeneno):
@@ -4033,15 +4035,31 @@ class GoogleSignupCompleteBody(_CorpoSemVeneno):
     accepted_terms: bool = False
 
 
+def _google_oauth_next_url(value: str | None) -> str | None:
+    """Aceita somente destinos internos conhecidos após o OAuth."""
+    return value if value == GOOGLE_OAUTH_PURCHASE_CONTINUE_URL else None
+
+
+def _clear_google_oauth_cookies(response: Response) -> None:
+    response.delete_cookie(GOOGLE_OAUTH_STATE_COOKIE, path="/auth/google")
+    response.delete_cookie(GOOGLE_OAUTH_NEXT_COOKIE, path="/auth/google")
+
+
 def _google_redirect_to_landing(message: str) -> RedirectResponse:
     """Volta pra landing com flag de erro pra UI mostrar."""
     qs = urllib.parse.urlencode({"google_error": message})
-    return RedirectResponse(url=f"/?{qs}", status_code=302)
+    response = RedirectResponse(url=f"/?{qs}", status_code=302)
+    _clear_google_oauth_cookies(response)
+    return response
 
 
 @app.get("/auth/google/start")
 @limiter.limit("10/minute")
-async def auth_google_start(request: Request, app: int = 0):
+async def auth_google_start(
+    request: Request,
+    app: int = 0,
+    next_url: str | None = Query(default=None, alias="next"),
+):
     """Gera state, salva em cookie short-lived e redireciona pro Google.
 
     `app=1`: fluxo iniciado pelo app iOS (via ASWebAuthenticationSession). O
@@ -4078,6 +4096,20 @@ async def auth_google_start(request: Request, app: int = 0):
         max_age=GOOGLE_OAUTH_STATE_MAX_AGE,
         path="/auth/google",
     )
+    continue_url = _google_oauth_next_url(next_url)
+    if continue_url and app != 1:
+        response.set_cookie(
+            GOOGLE_OAUTH_NEXT_COOKIE,
+            continue_url,
+            httponly=True,
+            secure=COOKIE_SECURE,
+            samesite="lax",
+            max_age=GOOGLE_OAUTH_STATE_MAX_AGE,
+            path="/auth/google",
+        )
+    else:
+        # Evita que uma tentativa abandonada contamine um login posterior.
+        response.delete_cookie(GOOGLE_OAUTH_NEXT_COOKIE, path="/auth/google")
     return response
 
 
@@ -4111,6 +4143,7 @@ async def auth_google_callback(
     _log = _logging.getLogger("auth.google")
 
     cookie_state = request.cookies.get(GOOGLE_OAUTH_STATE_COOKIE) or ""
+    next_url = _google_oauth_next_url(request.cookies.get(GOOGLE_OAUTH_NEXT_COOKIE))
     # Fluxo do app iOS: o state carrega o prefixo "app-" (ver /auth/google/start)
     is_app_flow = bool(state) and state.startswith("app-")
 
@@ -4159,7 +4192,7 @@ async def auth_google_callback(
             onb_url = (f"pigbankai://auth?onboarding={token}" if is_app_flow
                        else f"/completar-cadastro?token={token}")
             signup_response = RedirectResponse(url=onb_url, status_code=302)
-            signup_response.delete_cookie(GOOGLE_OAUTH_STATE_COOKIE, path="/auth/google")
+            _clear_google_oauth_cookies(signup_response)
             return signup_response
 
         # Usuário existente: bloqueia se conta agendada para deletar
@@ -4182,13 +4215,16 @@ async def auth_google_callback(
                 user_agent=request.headers.get("user-agent"),
             )
             app_response = RedirectResponse(url=f"pigbankai://auth?code={code}", status_code=302)
-            app_response.delete_cookie(GOOGLE_OAUTH_STATE_COOKIE, path="/auth/google")
+            _clear_google_oauth_cookies(app_response)
             return app_response
 
         # Login bem-sucedido (web) → cookies + redirect pra home
         jwt_token, jti, refresh = _issue_session_token(user_id, email, request)
-        success_response = RedirectResponse(url=_post_login_url(user_id), status_code=302)
-        success_response.delete_cookie(GOOGLE_OAUTH_STATE_COOKIE, path="/auth/google")
+        success_response = RedirectResponse(
+            url=next_url or _post_login_url(user_id),
+            status_code=302,
+        )
+        _clear_google_oauth_cookies(success_response)
         _set_auth_cookie(success_response, jwt_token)
         _set_refresh_cookie(success_response, refresh)
         _set_dashboard_cookie(success_response, int(user_id), jti=jti)
@@ -6883,7 +6919,7 @@ async def delete_launch_route(
         # `com_traceback=True` aqui não restaura rastro: CRIA persistência nova
         # do `DETAIL: Key (…)=(…)` em `system_event_logs`.
         # `to_thread`: a rota é async e o `_DashboardHandler` grava com
-        # `psycopg.connect()` bloqueante (ver `core/observability.py`).
+        # `psycopg.connect()` bloqueante (ver `core/system_event_log.py`).
         await asyncio.to_thread(_log_falha, "delete_launch", user_id, exc,
                                 launch_id=int(launch_id))
         raise HTTPException(status_code=500, detail=_ERRO_APAGAR_HTTP) from exc

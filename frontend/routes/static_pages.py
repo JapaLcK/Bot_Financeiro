@@ -52,6 +52,7 @@ async def serve_landing():
         FRONTEND_DIR / "index.html",
         clarity=True,
         inline_css=("brand.css", "phosphor.css", "site.css", "site-redesign.css"),
+        defer_tracking=True,
     )
 
 
@@ -331,6 +332,18 @@ async def serve_como_funciona():
 
 @router.get("/precos")
 async def serve_precos():
+    return html_file(FRONTEND_DIR / "precos.html", clarity=True)
+
+
+@router.get("/continuar-compra")
+async def serve_continuar_compra():
+    """Retoma no checkout a escolha feita antes da autenticação.
+
+    Reusa o motor de cobrança da página de preços, mas o próprio HTML reconhece
+    esta rota e mostra somente o estado de preparação do pagamento. Assim a
+    pessoa não volta visualmente à seleção de planos e as regras de cartão/Pix
+    continuam com uma implementação única.
+    """
     return html_file(FRONTEND_DIR / "precos.html", clarity=True)
 
 
@@ -646,6 +659,20 @@ async def serve_comecar_js():
     dessincronizar do HTML (servido no-store) em deploys."""
     return FileResponse(
         FRONTEND_DIR / "comecar.js",
+        media_type="application/javascript",
+        headers={"Cache-Control": "no-cache"},
+    )
+
+
+@router.get("/purchase-intent.js")
+async def serve_purchase_intent_js():
+    """Mantém a escolha de plano durante autenticação e checkout.
+
+    O arquivo guarda somente plano, ciclo e meio de pagamento na aba atual;
+    nenhum dado do cartão, documento ou token de pagamento é persistido.
+    """
+    return FileResponse(
+        FRONTEND_DIR / "purchase-intent.js",
         media_type="application/javascript",
         headers={"Cache-Control": "no-cache"},
     )

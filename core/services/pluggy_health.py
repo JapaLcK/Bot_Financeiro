@@ -108,6 +108,69 @@ _PRODUCT_PT = {
 ITEM_STATUS_AUTORIZA_DISPOSITIVO = "WAITING_USER_ACTION"
 EXEC_STATUS_AUTORIZA_DISPOSITIVO = "USER_AUTHORIZATION_PENDING"
 
+# Por quanto tempo o `executionStatus` do `raw` (o payload cru da Pluggy, gravado
+# pelo upsert) ainda descreve a autorização ATUAL. Mora aqui, ao lado dos dois
+# nomes acima e pelo mesmo motivo: quem o consome é SQL (`db/open_finance_state.py`,
+# e por ele o snapshot e o aviso proativo), e a regra de device/QR é deste módulo.
+# O `raw` é congelado — `mark_sync_result` não o toca —, então sem prazo a
+# supressão do aviso e a instrução de dispositivo durariam para sempre.
+#
+# 60 minutos. O PISO é ESTIMATIVA, e é preciso dizer de onde ela vem antes de
+# derivar qualquer coisa dela:
+#   • NÃO HÁ FONTE NA ÁRVORE PARA OS 30 MIN DA JANELA DO QR. O único registro
+#     anterior a este PR é prosa num comentário vizinho — "a janela do QR
+#     (~30 min)", `db/open_finance.py`, no `where` de
+#     `list_connections_needing_reconnect` —, com til e sem citar página de doc.
+#     O bloco do `_DETALHE_POR_STATUS`, abaixo, diz só "um `userAction.expiresAt`
+#     CURTO": sem número. Escrever aqui "a doc registrada anota 30 min" foi
+#     promover um `~` de um comentário irmão a fato documentado, que é a §0.7
+#     começando ("foi copiando que a regra chegou a ter três versões com três
+#     precisões"). Fica como o que é: número herdado, não medido e não citável.
+#   • PISO: cortar antes da janela do QR tiraria a instrução CERTA de quem ainda
+#     está dentro dela. Como a janela é estimada em ~30 min, o piso tem de
+#     cobrir pelo menos isso.
+#   • FOLGA: 60 é o DOBRO dessa estimativa — margem escolhida sobre um número
+#     incerto, não derivação de um número documentado. Ela paga o fato de o
+#     carimbo ser a ESCRITA do item (`reconnected_at`/`created_at`), não o
+#     `userAction.expiresAt` da Pluggy — campo que NÃO existe nesta árvore
+#     (`grep userAction` acha só um comentário em `frontend/settings.html`), então
+#     ancorar nele seria adivinhação. Quem um dia achar a janela real na doc (ou
+#     o `expiresAt` chegar ao `raw`) troca este número pelo medido: é isso que
+#     fecha a estimativa, não outra rodada de aritmética sobre ela.
+#   • TETO: quem reescreveria `health` é o tique de `OF_REFRESH_INTERVAL_SEC`,
+#     default 6 h (`frontend/finance_bot_websocket_custom.py`). 60 min vence muito
+#     antes: quem encerra a supressão é o PRAZO, não uma corrida com o tique.
+#   • DESVIO DE RELÓGIO: estes 60 min cobrem UM SENTIDO SÓ — o do app ATRASADO,
+#     que carimba no passado e come janela —, e o cobrem só ATÉ 30 MIN DE
+#     ATRASO. Com o app atrasado em L minutos a janela efetiva é `60 - L`, então
+#     em L = 30 ela empata com a estimativa de ~30 min do QR e, para L > 30, a
+#     instrução certa morre com o QR AINDA ABERTO (medido: carimbo em
+#     `now() - 65 min` já devolve "Reautorize o banco" com o aviso proativo
+#     ligado). Com L = 45: o carimbo tem idade 60 EXATOS 15 min depois de
+#     conectar e o predicado é `>` estrito, então a instrução morre aos 15 min,
+#     com os outros ~15 da estimativa ainda abertos. Estes dois 15 são
+#     ARITMÉTICA sobre um número estimado, não medição — e `60 - L` também.
+#     O sentido oposto (app adiantado, carimbo no FUTURO) esta constante não
+#     cobre e não pode cobrir: ela é o piso do intervalo. Quem o cobre é o TETO
+#     do `SQL_RAW_AINDA_VALE` (`db/open_finance_state.py`), e é ele que impede o
+#     carimbo no futuro de tornar a supressão permanente.
+#   • A TOLERÂNCIA A RELÓGIO É ASSIMÉTRICA, 6×: 5 min para o app adiantado (o
+#     teto) contra 30 min para o atrasado (os `60 - 30` de folga do piso). Não é
+#     decisão tomada — é o que cai das duas pontas terem motivos diferentes (o
+#     teto vem do desvio NORMAL entre app e banco, o piso da janela ESTIMADA do
+#     QR). Fica escrito porque a assimetria não estava em lugar nenhum — e o
+#     `6×` herda a incerteza do piso: ele é `30 / 5`, com o 30 estimado.
+#   • DIREÇÃO DO ERRO: vencido o prazo, o detalhe volta a
+#     `_FIXED_DETAIL["needs_user_action"]` ("Reautorize o banco"), que é a ação
+#     correta depois que a janela fechou. Errar curto custa uma instrução
+#     conservadora; errar longo manda a pessoa esperar um QR morto.
+#
+# 60 NÃO é a janela máxima: somado ao teto de 5 min do `SQL_RAW_AINDA_VALE`, o
+# intervalo aceito tem 65 min de largura para um carimbo 5 min adiantado (medido:
+# `now() - 60 min` FORA, `now() - 59 min` DENTRO, `now() + 5 min` DENTRO,
+# `now() + 5 min 1 s` FORA). Quem lê só esta constante infere 60.
+JANELA_DEVICE_AUTH_MIN = 60
+
 # Status do item que significam "a Pluggy ainda está buscando".
 _UPDATING = {"UPDATING", "CREATED"}
 # Status que só o usuário resolve (reautorizar / responder MFA no banco, ou
@@ -172,16 +235,22 @@ def _detalhe_de_acao(item_status: str, execution_status: str = "") -> str | None
     Consulta os DOIS campos porque os dois estados de device/QR chegam por
     campos diferentes (ver acima).
 
-    LIMITE MEDIDO, e ele NÃO é só o caso legado: sem `health` não existe
-    `execution_status`, então o ramo de baixo do `connection_ui_state` só tem o
-    primeiro campo — e ali a Caixa (`status` local `OUTDATED`) continua ouvindo
-    o detalhe fixo "Reautorize o banco". Esse ramo é o caminho de TODA conexão
-    recém-gravada (o upsert zera `health`, e o `POST /pluggy-item` monta o
-    snapshot antes de o sync de fundo escrever saúde), não uma sobra de linha
-    antiga. É defeito PRÉ-EXISTENTE — antes deste PR a Caixa errava nos dois
-    ramos — e fechá-lo exige decidir de onde tirar o `executionStatus` ali
-    (selecionar `raw` no snapshot, gravar saúde no upsert contra a decisão da
-    Onda 2, ou coluna própria). Mexe na máquina de estados: PR próprio.
+    OS DOIS RAMOS CONVERGEM, e o de baixo levou um PR para chegar aqui. Sem
+    `health` não existe `execution_status` na linha, então o ramo sem health do
+    `connection_ui_state` só tinha o primeiro campo — e ali a Caixa (`status`
+    local `OUTDATED`, porque o upsert grava `item['status'] or
+    item['executionStatus']`) ouvia o detalhe fixo "Reautorize o banco": mesmo
+    estado, mesmo rótulo, instrução OPOSTA à do ramo com health. Não era sobra de
+    linha antiga — é o caminho de TODA conexão recém-gravada (o upsert zera
+    `health`, e o `POST /pluggy-item` monta o snapshot antes de o sync de fundo
+    escrever saúde).
+
+    De onde vem o segundo campo agora: de um DERIVADO calculado em SQL
+    (`db/open_finance_state.py`), lido do `raw` que o upsert já persiste e válido
+    só enquanto `health is null` E o carimbo da autorização atual couber em
+    `JANELA_DEVICE_AUTH_MIN`. Esta função continua PURA: recebe `execution_status`
+    na linha, não consulta banco nem relógio. O `raw` inteiro NÃO viaja — só o
+    escalar — porque ele carrega `clientUserId`.
 
     Precedência: o `item_status` ganha. As duas diagonais fora do par medido,
     enumeradas porque enumerar só a inofensiva foi apontado:
@@ -524,7 +593,15 @@ def connection_ui_state(connection_row: dict) -> dict:
         # O status LOCAL também pode trazer `WAITING_USER_ACTION` (o upsert grava
         # `item.get("status") or item.get("executionStatus")`), então o detalhe
         # específico vale nos dois ramos.
-        return out("needs_user_action", _detalhe_de_acao(status))
+        # O SEGUNDO campo é o derivado do `raw` (`db/open_finance_state.py`), que
+        # só existe enquanto `health` é NULL e a autorização atual está dentro de
+        # `JANELA_DEVICE_AUTH_MIN`. É o que faz a Caixa (`status='OUTDATED'` +
+        # `executionStatus='USER_AUTHORIZATION_PENDING'`) dizer "Autorize o acesso
+        # no app do banco" aqui também, e não o oposto do ramo com health.
+        # Ausente (linha de outra query, prazo vencido, `raw` sem o campo) → "",
+        # que é o default do parâmetro: o detalhe cai em "Reautorize o banco".
+        return out("needs_user_action", _detalhe_de_acao(
+            status, str(row.get("execution_status") or "").upper()))
     if status == "ERROR":
         # Mesma classe do ramo com health: o motivo explica melhor que "Erro
         # temporário" (linha legada gravada antes desta onda também cai aqui).

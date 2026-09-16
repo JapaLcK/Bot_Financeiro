@@ -890,3 +890,93 @@ def test_google_callback_com_state_ascii_que_bate_passa_do_portao():
 
     assert response.status_code == 302
     assert _google_error(response) != _ERRO_DE_STATE
+
+
+def test_google_start_guarda_retorno_da_compra_em_cookie_restrito(monkeypatch):
+    import core.services.google_oauth as google_oauth
+
+    monkeypatch.setattr(google_oauth, "is_configured", lambda: True)
+    monkeypatch.setattr(
+        google_oauth,
+        "build_authorization_url",
+        lambda state: f"https://accounts.google.test/auth?state={state}",
+    )
+
+    client = TestClient(dashboard.app)
+    response = client.get(
+        "/auth/google/start?next=%2Fcontinuar-compra",
+        follow_redirects=False,
+    )
+
+    assert response.status_code == 302
+    cookies = _parse_set_cookies(response.headers.get_list("set-cookie"))
+    continuation = cookies[dashboard.GOOGLE_OAUTH_NEXT_COOKIE]
+    assert continuation["value"].strip('"') == "/continuar-compra"
+    assert continuation["path"] == "/auth/google"
+    assert continuation["samesite"].lower() == "lax"
+    assert "httponly" in continuation
+
+
+def test_google_start_recusa_retorno_externo(monkeypatch):
+    import core.services.google_oauth as google_oauth
+
+    monkeypatch.setattr(google_oauth, "is_configured", lambda: True)
+    monkeypatch.setattr(
+        google_oauth,
+        "build_authorization_url",
+        lambda state: f"https://accounts.google.test/auth?state={state}",
+    )
+
+    client = TestClient(dashboard.app)
+    response = client.get(
+        "/auth/google/start?next=https%3A%2F%2Fevil.test%2Froubo",
+        follow_redirects=False,
+    )
+
+    assert response.status_code == 302
+    cookies = _parse_set_cookies(response.headers.get_list("set-cookie"))
+    assert cookies[dashboard.GOOGLE_OAUTH_NEXT_COOKIE]["max-age"] == "0"
+
+
+def test_google_callback_de_conta_existente_retorna_para_compra(monkeypatch):
+    import core.services.google_oauth as google_oauth
+
+    async def exchange(_code):
+        return {"id_token": "token-test"}
+
+    async def noop_log(*_args, **_kwargs):
+        return None
+
+    monkeypatch.setattr(google_oauth, "exchange_code_for_tokens", exchange)
+    monkeypatch.setattr(google_oauth, "verify_id_token", lambda _token: {
+        "sub": "google-sub-existente",
+        "email": "existente@test.local",
+        "email_verified": True,
+    })
+    monkeypatch.setattr(db, "find_user_by_google_sub", lambda _sub: 321)
+    monkeypatch.setattr(dashboard, "_raise_if_account_scheduled_for_deletion", lambda _uid: None)
+    monkeypatch.setattr(
+        dashboard,
+        "_issue_session_token",
+        lambda *_args: ("jwt-test", "jti-test", "refresh-test"),
+    )
+    monkeypatch.setattr(dashboard, "_set_auth_cookie", lambda *_args: None)
+    monkeypatch.setattr(dashboard, "_set_refresh_cookie", lambda *_args: None)
+    monkeypatch.setattr(dashboard, "_set_dashboard_cookie", lambda *_args, **_kwargs: None)
+    monkeypatch.setattr(dashboard, "maybe_record_login_from_new_ip", lambda *_args, **_kwargs: None)
+    monkeypatch.setattr(dashboard, "log_auth_login_event", noop_log)
+    monkeypatch.setattr(dashboard, "_post_login_url", lambda _uid: "/home")
+
+    client = TestClient(dashboard.app)
+    client.cookies.set(dashboard.GOOGLE_OAUTH_STATE_COOKIE, "state-valido")
+    client.cookies.set(
+        dashboard.GOOGLE_OAUTH_NEXT_COOKIE,
+        dashboard.GOOGLE_OAUTH_PURCHASE_CONTINUE_URL,
+    )
+    response = client.get(
+        "/auth/google/callback?code=code-valido&state=state-valido",
+        follow_redirects=False,
+    )
+
+    assert response.status_code == 302
+    assert response.headers["location"] == "/continuar-compra"

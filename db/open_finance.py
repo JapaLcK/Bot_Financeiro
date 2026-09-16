@@ -239,40 +239,46 @@ def create_mock_open_finance_connection(user_id: int, institution_key: str | Non
 
 def get_open_finance_snapshot(user_id: int, limit: int = 8) -> dict:
     ensure_user(user_id)
+    # Import LOCAL: `open_finance_state` importa `_CursorComTeto` daqui no topo,
+    # então a mão única é esta (ver o comentário lá).
+    from .open_finance_state import SQL_EXECUTION_STATUS, janela_device_auth_min
 
     with get_conn() as conn:
         with conn.cursor() as cur:
             cur.execute(
-                """
-                -- `raw` NÃO entra aqui, e isso tem consequência: enquanto o
-                -- `health` é NULL (logo depois de uma reconexão), o
-                -- `connection_ui_state` recebe a linha pronta e não tem como ver
-                -- o `executionStatus` do item. E o que a TELA de quem espera
-                -- device/QR mostra nessa janela NÃO é um rótulo vago — é a MESMA
-                -- instrução errada que o aviso proativo foi calado para não
-                -- mandar. MEDIDO, com `status='OUTDATED'` e `health=None`:
-                --   {'state': 'needs_user_action', 'label': 'Ação necessária',
-                --    'detail': 'Reautorize o banco'}
-                -- ou seja, "Reautorize o banco" no minuto em que a pessoa
-                -- deveria estar lendo o QR (com `health` medido o mesmo estado
-                -- diz 'Autorize o acesso no app do banco', que é o certo).
-                -- Metade PENDENTE do achado do Codex #166, e de PR próprio —
-                -- pendente de TEXTO ERRADO, não de cosmética.
+                f"""
+                -- `raw` NÃO entra aqui, e continua não entrando: ele carrega
+                -- `clientUserId` e `statusDetail`, e esta linha vai para o
+                -- navegador. O que entra é o DERIVADO — um escalar calculado no
+                -- Postgres (`SQL_EXECUTION_STATUS`, fonte única em
+                -- `db/open_finance_state.py`), que o `connection_ui_state` lê
+                -- para não mandar "Reautorize o banco" a quem devia estar lendo
+                -- o QR. Era a metade da TELA do achado do Codex #166; a do aviso
+                -- proativo já estava fechada em `list_connections_needing_reconnect`.
                 --
-                -- O aviso proativo, esse sim, está fechado:
-                -- `list_connections_needing_reconnect` lê o `raw`
-                -- direto (ver lá). Fechar a tela exige uma das duas mudanças de
-                -- contrato: trazer o `raw` (payload inteiro da Pluggy em TODA
-                -- leitura de tela) ou gravar `health` no upsert — contra a
-                -- decisão da Onda 2 de que reconectar ZERA a saúde até um sync
-                -- real provar o contrário.
+                -- Ele vale enquanto `health is null` E a autorização atual couber
+                -- em `JANELA_DEVICE_AUTH_MIN` (60 min). Vencido o prazo, o
+                -- derivado é NULL e o detalhe volta a "Reautorize o banco", que é
+                -- a ação certa depois que a janela fechou — o `raw` é congelado
+                -- (`mark_sync_result` não o toca), então sem prazo a instrução
+                -- duraria para sempre.
+                --
+                -- Gravar `health` no upsert continua VETADO (decisão da Onda 2:
+                -- reconectar ZERA a saúde até um sync real provar o contrário),
+                -- e é por isso que a saída é o derivado e não a coluna.
+                --
+                -- O `execution_status` é REMOVIDO do dict antes de a resposta
+                -- sair (logo abaixo, DENTRO do laço, por item, logo depois do
+                -- `connection_ui_state` que o consome): o corpo HTTP fica
+                -- idêntico em chaves ao de antes deste PR.
                 select id, provider, provider_item_id, status, institution_name, last_sync_at,
-                       last_attempt_at, status_reason, health, reconnected_at
+                       last_attempt_at, status_reason, health, reconnected_at,
+                       {SQL_EXECUTION_STATUS}
                 from open_finance_connections
                 where user_id=%s
                 order by updated_at desc, id desc
                 """,
-                (user_id,),
+                (janela_device_auth_min(), user_id),
             )
             connections = [dict(r) for r in (cur.fetchall() or [])]
             # `ui` é o estado exibível — decidido por `connection_ui_state`, a única
@@ -281,6 +287,12 @@ def get_open_finance_snapshot(user_id: int, limit: int = 8) -> dict:
             from core.services.pluggy_health import connection_ui_state
             for c in connections:
                 c["ui"] = connection_ui_state(c)
+                # Campo de TRABALHO, não de contrato: entrou no select só para o
+                # `connection_ui_state` acima e sai antes da serialização, para o
+                # corpo HTTP ficar byte-idêntico em chaves ao de antes. O `pop`
+                # é o que impede um campo derivado do `raw` de virar API pública
+                # sem ninguém ter decidido isso.
+                c.pop("execution_status", None)
 
             cur.execute(
                 """
@@ -472,7 +484,8 @@ def list_connections_needing_reconnect(user_id: int | None = None, within_days: 
     # Local como o `connection_ui_state` da linha 259: db -> core.services.
     from core.services.pluggy_health import (EXEC_STATUS_AUTORIZA_DISPOSITIVO,
                                              ITEM_STATUS_AUTORIZA_DISPOSITIVO)
-    sql = """
+    from .open_finance_state import SQL_RAW_AINDA_VALE, janela_device_auth_min
+    sql = f"""
         select id, user_id, provider_item_id, institution_name, status,
                consent_expires_at, last_sync_at
         from open_finance_connections
@@ -505,40 +518,73 @@ def list_connections_needing_reconnect(user_id: int | None = None, within_days: 
           -- `health.execution_status` em minúscula passava pelo filtro antes e
           -- agora cala o aviso. Hoje é INALCANÇÁVEL: o único escritor de
           -- `health` é o `derive_item_health`, que já grava em maiúscula
-          -- (`core/services/pluggy_health.py:311-312`, nas DUAS chaves). Fica
+          -- (o `return` de `derive_item_health`,
+          -- `core/services/pluggy_health.py`, nas DUAS chaves). Fica
           -- assim, e não em dois `coalesce` separados, porque a direção é a
           -- barata: se um dia entrar minúscula, calar é errar para o lado de não
           -- mandar "reconecte seu banco" na janela do QR. Sem teste próprio —
           -- não há entrada que chegue lá.
           --
-          -- ALCANCE, para ninguém ler isto como "o buraco fechou": o `raw` fecha
-          -- a superfície do AVISO PROATIVO, e SÓ ela. A TELA continua aberta —
-          -- `get_open_finance_snapshot` (acima, na mesma tabela) NÃO seleciona
-          -- `raw`, então o `connection_ui_state` não enxerga o `executionStatus`
-          -- na mesma janela. O buraco ENCOLHEU; a metade da tela é PR próprio, e
-          -- o motivo está no comentário do snapshot.
+          -- ALCANCE, E ELE É DE UM EIXO SÓ. O que fecha é TELA × AVISO, e
+          -- DENTRO do ramo `health is null`: esta query é o AVISO PROATIVO; a
+          -- TELA é `get_open_finance_snapshot` (acima, na mesma tabela), que
+          -- passou a selecionar o MESMO derivado — o escalar do
+          -- `SQL_EXECUTION_STATUS`, nunca o `raw` inteiro. Uma regra, um prazo,
+          -- um parâmetro, e a condição literalmente compartilhada
+          -- (`SQL_RAW_AINDA_VALE`, §0.7): as duas superfícies não podem mais
+          -- divergir por alguém consertar uma só.
           --
-          -- E o silêncio dura MUITO mais que a janela do QR (~30 min), o que é a
-          -- outra ponta do mesmo trade: quem escreve `health` de volta é o
-          -- `run_of_health_check` (`core/services/pluggy_sync.py:492`), num tique
-          -- de `OF_REFRESH_INTERVAL_SEC` — default **6 h**
-          -- (`frontend/finance_bot_websocket_custom.py:1503`) — que processa
+          -- O EIXO QUE CONTINUA ABERTO é o OUTRO: health-nulo × health-PRESENTE.
+          -- O `SQL_RAW_AINDA_VALE` só governa `health is null`. Assim que o tique
+          -- de saúde grava `health` com o mesmo `execution_status`, a linha passa
+          -- para o ramo de CIMA — o `if health:` de `connection_ui_state` e o
+          -- primeiro braço do `coalesce` logo acima —, e esses DOIS não têm prazo
+          -- nenhum. A oscilação real em produção tem TRÊS fases:
+          --   1. 0–60 min: instrução certa. É o conserto deste PR.
+          --   2. 60 min → tique de saúde: "Reautorize o banco", aviso de volta.
+          --   3. depois do tique, PARA SEMPRE: "Autorize o acesso no app do
+          --      banco" com o QR morto há semanas, e o aviso calado.
+          -- A fase 3 é a que DURA (o tique é ≤6 h no caso comum). Medido pelo
+          -- caminho de produção — `save_pluggy_open_finance_item`, job de saúde
+          -- gravando `health` com o mesmo `execution_status`, 30 dias depois:
+          -- detalhe "Autorize o acesso no app do banco", aviso proativo `False`.
+          -- NÃO é regressão: o ramo com `health` já era assim na `main`, e este
+          -- PR não o toca. Está FORA DE ESCOPO por decisão do dono — fechá-la é
+          -- outra máquina de estados, outro inventário e outro PR. O que precisa
+          -- ser DECIDIDO antes de codar: por quanto tempo um `health` OBSERVADO
+          -- descreve a autorização atual (hoje: para sempre), e qual é a âncora
+          -- desse prazo — `health.observed_at` é o relógio do servidor no momento
+          -- da medição, não o da autorização, então não é o mesmo problema que o
+          -- `SQL_RAW_AINDA_VALE` resolve aqui. Isso vale para TODO `item_status`
+          -- de `_NEEDS_USER`, não só para device/QR, e é o que faz disto trabalho
+          -- próprio. Aqui fica só onde ela teria de ser fechada, sem proposta.
+          --
+          -- O SILÊNCIO FICA LIMITADO NO RAMO SEM `health`, e essa é a mudança —
+          -- a fase 3 acima é o que sobra. Antes ele durava
+          -- MUITO mais que a janela do QR (~30 min): quem escreve `health` de
+          -- volta é o `run_of_health_check` (`core/services/pluggy_sync.py`), num
+          -- tique de `OF_REFRESH_INTERVAL_SEC` — default 6 h
+          -- (`frontend/finance_bot_websocket_custom.py`) — que processa
           -- `limit=200` linhas por passada, `order by id`
           -- (`list_connections_for_health_check`), e PULA a linha sem gravar nada
-          -- quando o `GET /items` falha por algo que não seja 404. Ou seja: o
-          -- piso do silêncio é UM tique (até 6 h), e com mais de 200 linhas de
-          -- saúde vencida ele estica por `ceil(posição/200)` tiques. Enquanto
-          -- isso a TELA repete "Reautorize o banco" (ver o snapshot). O `raw`
-          -- troca um aviso ERRADO em ~30 min por nenhum aviso durante horas —
-          -- escolha deliberada, não empate.
+          -- quando o `GET /items` falha por algo que não seja 404. O piso era UM
+          -- tique (até 6 h) e esticava por `ceil(posição/200)` tiques. Com o
+          -- prazo, quem encerra a supressão é ELE (60 min), não uma corrida com o
+          -- tique: passados os 60 min o aviso volta sozinho, mesmo que nenhum
+          -- health tenha sido medido.
           --
-          -- O `case` NÃO é enfeite: `raw` só vale enquanto `health` é NULL. Com
-          -- `coalesce(health->>…, raw->>…)` puro, um `health` observado DEPOIS
-          -- sem `execution_status` (o usuário autorizou, virou LOGIN_ERROR)
-          -- caía no `raw` VELHO da reconexão — `mark_sync_result` não toca em
-          -- `raw` — e calava o aviso para sempre.
+          -- O `case` NÃO é enfeite, e as DUAS condições dele são load-bearing:
+          --   • `health is null` — com `coalesce(health->>…, raw->>…)` puro, um
+          --     `health` observado DEPOIS sem `execution_status` (o usuário
+          --     autorizou, virou LOGIN_ERROR) caía no `raw` VELHO da reconexão e
+          --     calava o aviso para sempre;
+          --   • o PRAZO — `mark_sync_result` não toca em `raw`, e
+          --     `mark_sync_attempt` empurra `updated_at`/`last_attempt_at` sem
+          --     que o `raw` mude (por isso a âncora é
+          --     `coalesce(reconnected_at, created_at)`). Sem prazo, uma linha que
+          --     nunca mais fosse medida ficaria calada para sempre.
           and upper(coalesce(health->>'execution_status',
-                             case when health is null
+                             case when {SQL_RAW_AINDA_VALE}
                                   then raw->>'executionStatus' end, '')) <> %s
           and (
             upper(coalesce(status, '')) in ('ERROR', 'LOGIN_ERROR', 'OUTDATED', 'WAITING_USER_INPUT')
@@ -546,7 +592,9 @@ def list_connections_needing_reconnect(user_id: int | None = None, within_days: 
                 and consent_expires_at <= now() + make_interval(days => %s))
           )
     """
-    params: list = [ITEM_STATUS_AUTORIZA_DISPOSITIVO,
+    # Ordem POSICIONAL, na ordem em que os `%s` aparecem no SQL acima: o do
+    # `SQL_RAW_AINDA_VALE` fica ENTRE os dois nomes de device/QR.
+    params: list = [ITEM_STATUS_AUTORIZA_DISPOSITIVO, janela_device_auth_min(),
                     EXEC_STATUS_AUTORIZA_DISPOSITIVO, within_days]
     if user_id is not None:
         sql += " and user_id = %s"
@@ -837,24 +885,85 @@ def save_open_finance_investments(connection_id: int, investments: list[dict]) -
 
 # ── Banqueiro (agente cofre): caixinha OF ↔ meta do PigBank ───────────────────
 
+# ── Regra de caixinha — FONTE ÚNICA (sync de auto-import + tela de vínculo) ───
+# AUTOMÁTICO (`_e_caixinha`, usado por `sync_open_finance_caixinhas`):
+#   a) o nome tem cara de caixinha (o que já funcionava antes desta regra); OU
+#   b) é CDB de um par banco × emissor POSITIVAMENTE conhecido como caixinha
+#      (`_CAIXINHA_CDB`). A Pluggy não manda campo que separe caixinha de CDB
+#      comum ("Some banks such as NuBank and PicPay have investment options
+#      called 'Cofrinhos' and 'Caixinhas', which configure as CDBs" — doc da
+#      Pluggy, lida em 2026-09-10), então CDB de qualquer outro banco — inclusive
+#      o CDB comum que o Inter/C6/BTG emite para o próprio cliente — NÃO é
+#      caixinha automática: segue em `list_of_fixed_income`.
+#
+# MANUAL (`list_caixinha_candidates`, a tela do Banqueiro) é mais frouxo DE
+# PROPÓSITO: lá qualquer CDB entra na lista, porque quem decide é o usuário.
+# Automático errado mexe em dinheiro sozinho; a tela, não — e ela é a saída de
+# todo CDB que o automático não reconhece.
+_CAIXINHA_NAME_PATTERNS = ["%caixinha%", "%cofrinho%", "%reserva%", "%objetivo%", "%cofre%"]
+
+# institution_name da conexão (minúsculo, exato) → prefixo de raw.issuer (maiúsculo).
+# Entra só par com fonte escrita ao lado. Nome exato de propósito: "Nubank
+# Empresas" não herda, e corretora do grupo (NU INVEST / NU INVESTIMENTOS, que
+# vende papel de terceiro) não começa pelo prefixo do emissor.
+_CAIXINHA_CDB = {
+    # doc da Pluggy (acima) + issuer medido nas 10 posições do dono, conexão "Nubank"
+    "nubank": "NU FINANCEIRA S.A.",
+    # ponytail: PicPay fica de fora — a doc cita o banco, mas nenhum dado nosso
+    # mostra o issuer do cofrinho, e o prefixo óbvio ("PICPAY") pega a PICPAY
+    # INVEST DTVM. Entra quando houver posição real medida; até lá, vínculo manual.
+}
+
+
+def _e_cdb(inv: dict) -> bool:
+    """Renda fixa do tipo CDB — o universo de onde a caixinha do banco sai."""
+    return (str(inv.get("type") or "").upper() == "FIXED_INCOME"
+            and str(inv.get("subtype") or "").upper() == "CDB")
+
+
+def _nome_de_caixinha(nome) -> bool:
+    """O nome que o banco mandou já diz "caixinha"? (serve de rótulo também)"""
+    minusculo = str(nome or "").lower()
+    return any(p.strip("%") in minusculo for p in _CAIXINHA_NAME_PATTERNS)
+
+
+def _e_caixinha(inv: dict) -> bool:
+    """Regra do AUTO-import. `inv` precisa de name/type/subtype/raw/institution_name."""
+    if _nome_de_caixinha(inv.get("name")):
+        return True
+    if not _e_cdb(inv):
+        return False
+    prefixo = _CAIXINHA_CDB.get(str(inv.get("institution_name") or "").strip().lower())
+    # `raw` é jsonb: o banco (ou um provider novo) pode mandar escalar/lista ali,
+    # e aí `.get` explode. No sync o `except` de pluggy_sync engole; em
+    # `list_caixinha_candidates` NÃO há guarda e o erro vira 500 na tela.
+    raw = inv.get("raw")
+    issuer = raw.get("issuer") if isinstance(raw, dict) else None
+    return bool(prefixo) and " ".join(str(issuer or "").split()).upper().startswith(prefixo)
+
+
 def list_caixinha_candidates(user_id: int) -> list[dict]:
-    """Caixinhas/cofrinhos OF do usuário (CDB de renda fixa OU nome de caixinha),
-    já com a meta vinculada (se houver). Alimenta a UI de vínculo do Banqueiro."""
+    """Caixinhas/cofrinhos OF do usuário, já com a meta vinculada (se houver).
+    Alimenta a UI de vínculo do Banqueiro.
+
+    Regra MAIS FROUXA que a do auto-import de propósito: entra o que o
+    automático reconhece (`_e_caixinha`) MAIS qualquer CDB. Quem decide aqui é o
+    usuário, e esta tela é a única saída de quem o automático não reconhece —
+    CDB de banco fora de `_CAIXINHA_CDB`. Sem este ramo, o papel simplesmente
+    some da tela.
+    """
     with get_conn() as conn:
         with conn.cursor() as cur:
             cur.execute(
                 """
                 select i.id as of_investment_id, i.name, i.balance, i.type, i.subtype,
-                       p.id as pocket_id, p.name as pocket_name, p.target_amount
+                       i.raw, c.institution_name,
+                       p.id as pocket_id, p.name as pocket_name, p.target_amount,
+                       p.source as pocket_source
                 from open_finance_investments i
                 join open_finance_connections c on c.id = i.connection_id
                 left join pockets p on p.of_investment_id = i.id and p.user_id = %s
                 where c.user_id = %s
-                  and (
-                    (upper(coalesce(i.type,'')) = 'FIXED_INCOME'
-                       and upper(coalesce(i.subtype,'')) = 'CDB')
-                    or i.name ilike any (array['%%caixinha%%','%%cofrinho%%','%%reserva%%','%%objetivo%%'])
-                  )
                   -- Nubank devolve toda posição de CDB via OF, inclusive caixinhas já
                   -- esvaziadas (saldo 0). Elas poluem a tela de vínculo sem servir pra
                   -- nada, então só mostramos candidatos com saldo > 0 — exceto os que já
@@ -864,24 +973,78 @@ def list_caixinha_candidates(user_id: int) -> list[dict]:
                 """,
                 (user_id, user_id),
             )
-            return [dict(r) for r in (cur.fetchall() or [])]
+            linhas = [dict(r) for r in (cur.fetchall() or [])]
+
+    saida = []
+    for r in linhas:
+        # já vinculada continua na lista mesmo que nenhuma regra case (deixa desvincular).
+        if not (r["pocket_id"] is not None or _e_cdb(r) or _e_caixinha(r)):
+            continue
+        r.pop("raw", None)
+        r.pop("institution_name", None)
+        saida.append(r)
+    return saida
+
+
+def _unbind_pocket(cur, user_id: int, pocket_id: int) -> int:
+    """Solta o vínculo e devolve a caixinha ao SALDO PRÓPRIO dela. Nome/emoji/meta ficam.
+
+    Enquanto vinculada, a coluna `balance` é espelho do banco (escrita pelo sync) e
+    tem de ir embora com o vínculo: senão o mesmo dinheiro conta DUAS vezes no
+    patrimônio — aqui e na renda fixa do banco, que volta a listar a posição assim
+    que o `of_investment_id` some (`list_of_fixed_income`).
+
+    Mas o que o usuário depositou ANTES do vínculo saiu da carteira dele: está nos
+    lotes abertos, e zerar destruiria dinheiro de verdade. `_sync_pocket_from_lots`
+    (db/pockets.py) recompõe exatamente o próprio — o sync nunca cria lote (só
+    escreve a coluna) e depósito/saque são recusados enquanto vinculado
+    (`_is_of_mirror`, db/pockets.py), então todo lote aberto aqui é aporte do
+    usuário. Sem lote nenhum dá 0, que é o caso do espelho puro.
+
+    Só mexe em quem ESTÁ vinculado (`is not null`), pra um pocket_id solto não virar
+    apagador de saldo."""
+    cur.execute(
+        "update pockets set of_investment_id=null, of_last_seen_balance=null "
+        "where id=%s and user_id=%s and of_investment_id is not null",
+        (pocket_id, user_id),
+    )
+    if not cur.rowcount:
+        return 0
+    from .pockets import _sync_pocket_from_lots
+    _sync_pocket_from_lots(cur, user_id, pocket_id)
+    return 1
 
 
 def bind_pocket_to_caixinha(user_id: int, pocket_id: int, of_investment_id: int | None) -> bool:
     """Vincula (ou desvincula, of_investment_id=None) uma meta a uma caixinha OF.
 
     Inicializa of_last_seen_balance com o saldo ATUAL da caixinha, pra o Banqueiro
-    contar só os aportes daqui pra frente (não o saldo histórico já acumulado)."""
+    contar só os aportes daqui pra frente (não o saldo histórico já acumulado).
+
+    Caixinha CRIADA pelo sync (`source='open_finance'`) nunca solta o vínculo nem
+    TROCA de posição — recusa com OF_POCKET_READONLY, o mesmo código que o guard de
+    depósito/saque usa (`_is_of_mirror`, db/pockets.py). Ela é espelho: o dinheiro
+    está no banco e qualquer posição reconhecida é reimportada no sync seguinte, então
+    "não vincular" só produziria um pocket órfão com saldo mentiroso + uma cópia nova
+    no sync. Trocar A por B é o mesmo estrago por outro caminho: A fica sem vínculo e
+    volta no sync seguinte, e o pocket passa a espelhar B com o NOME de A."""
     with get_conn() as conn:
         with conn.cursor() as cur:
+            cur.execute(
+                "select source, of_investment_id from pockets where id=%s and user_id=%s",
+                (pocket_id, user_id),
+            )
+            alvo = cur.fetchone()
+            if not alvo:
+                return False
+            if alvo["source"] == "open_finance" and (
+                of_investment_id is None or of_investment_id != alvo["of_investment_id"]
+            ):
+                raise ValueError("OF_POCKET_READONLY")
             if of_investment_id is None:
-                cur.execute(
-                    "update pockets set of_investment_id=null, of_last_seen_balance=null "
-                    "where id=%s and user_id=%s",
-                    (pocket_id, user_id),
-                )
+                ok = _unbind_pocket(cur, user_id, pocket_id) > 0
                 conn.commit()
-                return cur.rowcount > 0
+                return ok
             # valida que a caixinha é do usuário e pega o saldo atual
             cur.execute(
                 """
@@ -895,12 +1058,19 @@ def bind_pocket_to_caixinha(user_id: int, pocket_id: int, of_investment_id: int 
             if not row:
                 return False
             bal = row["balance"] or 0
-            # 1 caixinha OF por meta: solta qualquer vínculo anterior dessa caixinha
+            # 1 caixinha OF por meta: solta o vínculo anterior DESSA caixinha. Se
+            # quem o segura é um pocket do sync, soltar deixaria ele órfão — a
+            # mesma coisa que o ramo de cima recusa, então recusa aqui também.
+            # Sendo manual, volta ao saldo próprio dela (o espelho não viaja).
             cur.execute(
-                "update pockets set of_investment_id=null, of_last_seen_balance=null "
-                "where of_investment_id=%s and user_id=%s",
+                "select id, source from pockets where of_investment_id=%s and user_id=%s",
                 (of_investment_id, user_id),
             )
+            anterior = cur.fetchone()
+            if anterior and anterior["id"] != pocket_id:
+                if anterior["source"] == "open_finance":
+                    raise ValueError("OF_POCKET_READONLY")
+                _unbind_pocket(cur, user_id, anterior["id"])
             cur.execute(
                 "update pockets set of_investment_id=%s, of_last_seen_balance=%s "
                 "where id=%s and user_id=%s",
@@ -974,47 +1144,74 @@ def update_pocket_of_last_seen(pocket_id: int, balance, profit=None) -> None:
         conn.commit()
 
 
-# Regra de auto-import de caixinha: só investimentos com CARA de caixinha (nome ~
-# reserva/objetivo/cofrinho). Um CDB comum é investimento, não meta — não vira pocket
-# (evita "caixinha fantasma"). Decisão de produto 2026-08-11.
-_CAIXINHA_NAME_PATTERNS = ["%caixinha%", "%cofrinho%", "%reserva%", "%objetivo%", "%cofre%"]
-
-
 def sync_open_finance_caixinhas(connection_id: int, user_id: int) -> dict:
     """Espelha as caixinhas do Open Finance como caixinhas do Pig. Idempotente.
 
-    1. Auto-cria um pocket pra cada caixinha OF (com cara de caixinha) ainda não
-       vinculada — `source='open_finance'`, read-only, juros interno OFF.
-    2. Dedup: se já existe um pocket de mesmo nome não vinculado, VINCULA nele em
-       vez de duplicar.
+    1. Auto-cria um pocket pra cada caixinha OF (regra `_e_caixinha`: nome de
+       caixinha OU CDB de banco × emissor em `_CAIXINHA_CDB`) ainda não vinculada —
+       `source='open_finance'`, read-only, juros interno OFF, SEMPRE com nome
+       livre.
+    2. Respeita o teto de caixinhas do plano (`pockets_restantes`, a mesma conta
+       da criação manual): o que não couber fica de fora e volta contado em
+       `caixinhas_sem_vaga`.
     3. Espelha o saldo do banco (`open_finance_investments.balance`) em TODAS as
        caixinhas vinculadas (auto-criadas e vinculadas na mão).
 
-    NÃO mexe em `of_last_seen_balance` (baseline do Banqueiro) — o detector de aporte
-    continua funcionando sobre o delta como antes.
+    O que ele NÃO faz mais: adotar um pocket que já existe só porque o nome bate.
+    O rótulo gerado ("Caixinha Nubank") é exatamente o que uma pessoa escolhe, e
+    adotar significava SOBRESCREVER o saldo dela com o do banco e torná-la
+    read-only — dinheiro do usuário sumindo sem ele pedir nada. Juntar as duas é
+    decisão de gente: a tela de vínculo do Banqueiro faz isso num clique.
+
+    NÃO mexe em `of_last_seen_balance` (baseline do Banqueiro) — o detector de
+    aporte continua funcionando sobre o delta como antes.
     """
-    created = linked = mirrored = 0
+    created = mirrored = sem_vaga = sem_nome = 0
+    # Teto do plano — MESMA conta do `check_can_create_pocket`. Lido aqui, com a
+    # transação ainda FECHADA: o gate abre conexão própria, e chamá-lo lá dentro
+    # (a) pegaria uma 2ª conexão do pool sem soltar a 1ª — com DB_POOL_MAX_SYNC
+    # syncs simultâneos isso trava o pool e o rollback leva o import inteiro — e
+    # (b) contaria só o commitado, deixando as 10 do lote passarem como a 1ª.
+    # ponytail: o teto é lido uma vez, fora da transação — dois syncs concorrentes
+    # do mesmo usuário leem as mesmas vagas e importam o dobro (`caixinhas_sem_vaga=0`
+    # nos dois). Melhor que o HEAD, que não tinha gate nenhum; o conserto de verdade
+    # é contar dentro da transação com lock por usuário, se isso aparecer na prática.
+    from core.services.plan_service import pockets_restantes
+    vagas = pockets_restantes(user_id)  # None = tier sem teto
     with get_conn() as conn:
         with conn.cursor() as cur:
-            # 1. caixinhas OF desta conexão com cara de caixinha E SALDO > 0.
-            # Saldo 0 = fundo/reserva vazia (ex.: Nubank "Reserva Planejada" que o
-            # Pluggy devolve zerado) — não vira caixinha fantasma.
+            # 1. posições desta conexão COM SALDO > 0; a regra de caixinha é
+            # aplicada em Python (`_e_caixinha`). Saldo 0 = fundo/reserva vazia
+            # (ex.: Nubank "Reserva Planejada") — não vira caixinha fantasma.
+            # `order by i.id`: a numeração do nome não pode depender do saldo, que
+            # muda a cada sync — ordem de chegada do banco é estável.
             cur.execute(
                 """
-                select i.id as of_id, i.name, coalesce(i.balance, 0) as balance,
-                       nullif(i.raw->>'amountProfit', '')::numeric as profit
+                select i.id as of_id, i.name, i.type, i.subtype, i.raw,
+                       coalesce(i.balance, 0) as balance,
+                       nullif(i.raw->>'amountProfit', '')::numeric as profit,
+                       c.institution_name
                 from open_finance_investments i
+                join open_finance_connections c on c.id = i.connection_id
                 where i.connection_id = %s
-                  and i.name ilike any (%s)
                   and coalesce(i.balance, 0) > 0
+                order by i.id
                 """,
-                (connection_id, _CAIXINHA_NAME_PATTERNS),
+                (connection_id,),
             )
-            of_caixinhas = [dict(r) for r in (cur.fetchall() or [])]
+            of_caixinhas = [dict(r) for r in (cur.fetchall() or []) if _e_caixinha(dict(r))]
 
             for oc in of_caixinhas:
                 of_id = oc["of_id"]
-                name = (oc["name"] or "Caixinha").strip()
+                # Rótulo: o nome do banco, quando ele já é de caixinha. Quando é o
+                # nome jurídico do papel ("CDB - NU FINANCEIRA S.A. - ..."), igual
+                # em TODAS as posições, vira "Caixinha <banco>" + número.
+                # O nome é escolhido UMA VEZ, na criação, e nunca recalculado: o
+                # vínculo é o of_investment_id, então renomear no app sobrevive ao
+                # sync e nenhum saldo mexe no rótulo.
+                of_name = (oc["name"] or "").strip()
+                name = of_name if _nome_de_caixinha(of_name) else \
+                    f"Caixinha {(oc['institution_name'] or 'do banco').strip()}"
                 bal = oc["balance"]
                 profit = oc["profit"]  # baseline de rendimento (amountProfit), p/ o Banqueiro
 
@@ -1026,48 +1223,58 @@ def sync_open_finance_caixinhas(connection_id: int, user_id: int) -> dict:
                 if cur.fetchone():
                     continue
 
-                # dedup: pocket de mesmo nome, ainda sem vínculo → vincula nele
-                cur.execute(
-                    "select id from pockets where user_id=%s and lower(name)=lower(%s) "
-                    "and of_investment_id is null limit 1",
-                    (user_id, name),
-                )
-                same = cur.fetchone()
-                if same:
-                    cur.execute(
-                        "update pockets set of_investment_id=%s, of_last_seen_balance=%s, "
-                        "of_last_seen_profit=%s, balance=%s, interest_enabled=false "
-                        "where id=%s and user_id=%s",
-                        (of_id, bal, profit, bal, same["id"], user_id),
-                    )
-                    linked += 1
+                if vagas is not None and vagas <= 0:
+                    sem_vaga += 1
                     continue
 
-                # cria novo — resolve colisão de nome (unique(user_id,name)) com sufixo
-                new_name = name
-                suffix = 0
-                while True:
+                # Nome livre, via `on conflict do nothing` + nova tentativa. O
+                # SELECT-antes-do-INSERT que existia aqui é TOCTOU, e agora as
+                # posições disputam todas o MESMO nome base: dois syncs
+                # concorrentes colidiam em pockets_user_id_name_key, a transação
+                # inteira rolava pra trás e o `except Exception` de pluggy_sync
+                # engolia — zero caixinhas importadas, sem log.
+                # ponytail: 50 tentativas de sufixo é teto arbitrário; se algum
+                # banco devolver mais posições homônimas que isso, o nome vira
+                # determinístico pelo of_investment_id.
+                for tentativa in range(1, 51):
+                    new_name = name if tentativa == 1 else f"{name} {tentativa}"
+                    # Duas guardas, porque elas cobrem coisas diferentes:
+                    # `not exists` com lower() é a de NOME, porque o unique da
+                    # tabela é `unique(user_id, name)` — CASE-SENSITIVE
+                    # (db/schema.py:115) — enquanto o resto do código de caixinha
+                    # compara `lower(name)`. Sem ela, o usuário com "caixinha
+                    # nubank" ganhava uma "Caixinha Nubank" do banco: duas
+                    # caixinhas de mesmo nome na tela, e o `on conflict` nunca via
+                    # a colisão. `on conflict do nothing` é a de CORRIDA: fecha a
+                    # janela TOCTOU entre o `not exists` e o insert sem abortar a
+                    # transação (era a UniqueViolation que levava o import inteiro).
                     cur.execute(
-                        "select 1 from pockets where user_id=%s and lower(name)=lower(%s)",
-                        (user_id, new_name),
+                        """
+                        insert into pockets(
+                            user_id, name, balance, source, of_investment_id,
+                            of_last_seen_balance, of_last_seen_profit,
+                            interest_enabled, interest_rate, interest_period,
+                            interest_tax_profile, last_interest_date
+                        )
+                        select %s,%s,%s,'open_finance',%s,%s,%s,false,1,'cdi','regressive_ir_iof',current_date
+                        where not exists (
+                            select 1 from pockets where user_id=%s and lower(name)=lower(%s)
+                        )
+                        on conflict (user_id, name) do nothing
+                        """,
+                        (user_id, new_name, bal, of_id, bal, profit, user_id, new_name),
                     )
-                    if not cur.fetchone():
+                    if cur.rowcount:
                         break
-                    suffix += 1
-                    new_name = f"{name} (banco)" if suffix == 1 else f"{name} (banco {suffix})"
-                cur.execute(
-                    """
-                    insert into pockets(
-                        user_id, name, balance, source, of_investment_id,
-                        of_last_seen_balance, of_last_seen_profit,
-                        interest_enabled, interest_rate, interest_period,
-                        interest_tax_profile, last_interest_date
-                    )
-                    values (%s,%s,%s,'open_finance',%s,%s,%s,false,1,'cdi','regressive_ir_iof',current_date)
-                    """,
-                    (user_id, new_name, bal, of_id, bal, profit),
-                )
+                else:
+                    # 50 nomes ocupados: desiste desta posição em vez de estourar
+                    # a transação. Ela volta no próximo sync. Sai contada: sem
+                    # isso a caixinha some da tela sem rastro nenhum.
+                    sem_nome += 1
+                    continue
                 created += 1
+                if vagas is not None:
+                    vagas -= 1
 
             # 3. espelha o saldo do banco em todas as caixinhas vinculadas (auto + manual)
             cur.execute(
@@ -1087,6 +1294,19 @@ def sync_open_finance_caixinhas(connection_id: int, user_id: int) -> dict:
             # 4. Auto-cura: remove caixinhas AUTO-CRIADAS (source='open_finance') cujo
             # investimento do banco está zerado/sumiu — limpa as fantasmas já criadas
             # (ex.: "Reserva Planejada" do Nubank que veio com saldo 0).
+            #
+            # DECISÃO DO DONO, com o custo medido e aceito: apaga a LINHA inteira,
+            # então nome, emoji, meta e data que o usuário escolheu vão junto.
+            # Esvaziar a caixinha no banco e repor (sacar tudo hoje, devolver
+            # amanhã) perde tudo isso A CADA ida e volta — o próximo sync cria
+            # outra do zero com o rótulo padrão.
+            # Alcança só `source='open_finance'`, isto é, o que ESTE import criou.
+            # Isso já foi uma assimetria: o dedup por nome adotava a caixinha do
+            # usuário SEM tocar em `source` — que é `not null default 'manual'`
+            # (db/schema.py:763) —, então a adotada ficava fora deste delete e
+            # duas caixinhas do mesmo banco se comportavam ao contrário. Com o
+            # dedup removido, toda caixinha do banco nasce `source='open_finance'`
+            # e a assimetria acabou.
             cur.execute(
                 """
                 delete from pockets p
@@ -1100,8 +1320,9 @@ def sync_open_finance_caixinhas(connection_id: int, user_id: int) -> dict:
             )
             cleaned = cur.rowcount
         conn.commit()
-    return {"caixinhas_created": created, "caixinhas_linked": linked,
-            "caixinhas_mirrored": mirrored, "caixinhas_cleaned": cleaned}
+    return {"caixinhas_created": created, "caixinhas_mirrored": mirrored,
+            "caixinhas_cleaned": cleaned, "caixinhas_sem_vaga": sem_vaga,
+            "caixinhas_sem_nome": sem_nome}
 
 
 def get_open_finance_connection_by_item_id(provider_item_id: str, provider: str = "pluggy") -> dict | None:
@@ -2442,6 +2663,36 @@ def disconnect_open_finance_connection(
         with conn.cursor() as cur:
             from .bank_movements import _lock_user, reconcile_bank_movements
             _lock_user(cur, user_id)
+            # Caixinha vinculada é ESPELHO: o dinheiro está no banco. Indo embora a
+            # conexão, o FK só zera o `of_investment_id` (`on delete set null`,
+            # db/schema.py:719) e sobrava uma caixinha fantasma com o último saldo
+            # espelhado — que o accrual seguinte transforma em LOTE
+            # (`_ensure_pocket_lots`, db/pockets.py) e o "Sacar" credita na carteira
+            # dinheiro que está no Nubank (medido: 800 + 1000 saíram do nada).
+            # Aqui cada uma volta ao saldo próprio dela, e a criada pelo sync que
+            # fica em zero é apagada — a MESMA regra da auto-cura do sync (caixinha
+            # do banco sem posição sai, não fica zerada). O `balance <= 0` do delete
+            # é o que impede levar junto dinheiro do usuário: linha do sync que tenha
+            # recebido depósito (só dá pra isso sem vínculo) fica, com o que é dela.
+            cur.execute(
+                """
+                select p.id, p.source from pockets p
+                 join open_finance_investments i on i.id = p.of_investment_id
+                 join open_finance_connections c on c.id = i.connection_id
+                 where p.user_id = %s and c.user_id = %s
+                   and (%s::bigint is null or c.id = %s)
+                """,
+                (user_id, user_id, connection_id, connection_id),
+            )
+            espelhos = cur.fetchall()
+            for p in espelhos:
+                _unbind_pocket(cur, user_id, p["id"])
+            do_sync = [p["id"] for p in espelhos if p["source"] == "open_finance"]
+            if do_sync:
+                cur.execute(
+                    "delete from pockets where user_id=%s and id = any(%s) and balance <= 0",
+                    (user_id, do_sync),
+                )
             if connection_id is None:
                 cur.execute(
                     "delete from open_finance_connections where user_id=%s "
