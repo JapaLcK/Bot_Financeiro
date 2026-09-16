@@ -35,15 +35,20 @@ pedido, em poucas linhas), faça **uma** passada do Tester e um Manager curto. N
 4. **Tester**: chame com o diff/arquivos que o Coder tocou. Saída esperada:
    lista de achados, cada um com severidade e se foi provado rodando ou é
    hipótese.
-5. **Loop Coder ↔ Tester, com teto de 2 rodadas**: se o Tester achou algo real
-   (severidade que bloqueia), volte ao Coder só com os achados novos, depois
-   rode o Tester de novo só no que mudou. Se ainda houver achado bloqueante na
-   2ª rodada, pare e leve ao usuário a escolha entre consertar e declarar como
-   limite — não abra a 3ª sozinho.
-   - **Achado improvável vira limite declarado, não rodada nova.** Se o caso
-     exige condição rara (dois toques no mesmo quadro, recriação de tela,
-     falha dupla de hardware) e não toca dinheiro, sessão ou dado de outro
-     usuário, o Tester reporta, o orquestrador registra no relato/PR e segue.
+5. **Loop Coder ↔ Tester** (só na faixa **Completo**), **com teto de 2 rodadas**:
+   se o Tester achou algo real (severidade que bloqueia), volte ao Coder só com
+   os achados novos, depois rode o Tester de novo só no que mudou. Se ainda
+   houver achado bloqueante na 2ª rodada, pare e leve ao usuário a escolha entre
+   consertar e declarar como limite — não abra a 3ª sozinho.
+   - **Na faixa Leve não há segunda passada do Tester.** Achado bloqueante volta
+     ao Coder uma vez e o Manager confere a correção. Se o achado cair numa área
+     da faixa Completo, a tarefa sobe de faixa e segue o loop acima.
+   - **Achado improvável vira limite declarado, não rodada nova — só fora das
+     áreas Completo.** Se o caso exige condição rara (dois toques no mesmo
+     quadro, recriação de tela, falha dupla de hardware) e não toca **nenhuma**
+     área da faixa Completo do `CLAUDE.md` §0, o Tester reporta, o orquestrador
+     registra no relato/PR e segue. Em área Completo, raro não dispensa conserto:
+     leve ao usuário.
    - **Agente novo com resumo, não retomada.** Retomar um agente carrega o
      contexto inteiro dele de novo a cada chamada. Para uma rodada nova, chame
      um agente novo com o plano, o diff atual e os achados em aberto.
