@@ -37,6 +37,17 @@ CONTROLE NEGATIVO, rodado: mova o `logger.warning` de volta para ANTES do
 duas afirmações separadas. Os outros 8 testes do trio seguem verdes sob as duas
 injeções — que é o que separa "fechou este furo" de "quebrou tudo".
 
+E o INVERSO, porque ele não é óbvio: vermelho AQUI não significa "bug de ordem".
+Este teste atravessa os dois `except` inteiros, então as injeções que quebram o
+DESFECHO também o derrubam — medido, ele acompanha o irmão da vaga em cinco delas
+(`set_config` fora do `try`; `except` de volta para a tupla dos três; `except` do
+connect propagando sem 503; sem o `logger.warning` do connect; sem o do não
+rotineiro), porque sem log a lista vira `['release']` e sem `got=False` a exceção
+escapa do `with`. Quem diagnostica pela ordem é a MENSAGEM da asserção, não o
+vermelho. Que ele não é só um alarme geral está medido pelo outro lado: nas
+injeções dos dois `finally` e do `connect_timeout`/`options` ele fica VERDE
+enquanto os testes donos daqueles furos ficam vermelhos.
+
 CONTROLE POSITIVO: as duas metades exigem que o log AINDA SAIA (`"log" in ordem`,
 via a igualdade da lista). Sem isso, este arquivo ficaria verde num código que
 simplesmente apagou os dois WARNING — que é o 503 mudo que `935b2a7` fechou, pior
