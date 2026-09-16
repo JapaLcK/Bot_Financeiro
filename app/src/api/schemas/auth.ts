@@ -29,5 +29,21 @@ export const perfilSchema = z.object({
   app_access: z.boolean().optional(),
 });
 
+/**
+ * O primeiro passo do login de quem tem dois fatores: NÃO vem credencial.
+ *
+ * `frontend/finance_bot_websocket_custom.py` devolve `mfa_required` com um
+ * desafio, e o cliente precisa completar em `/auth/mfa/verify-login`. Sem
+ * modelar isso, todo login com MFA virava erro de contrato.
+ */
+export const desafioMfaSchema = z.object({
+  mfa_required: z.literal(true),
+  mfa_challenge: z.string().min(1),
+  email: z.string(),
+});
+
+/** O que `/auth/login` pode devolver com 200: credencial OU desafio. */
+export const respostaLoginSchema = z.union([desafioMfaSchema, loginSchema]);
+
 export type Credenciais = z.infer<typeof credenciaisSchema>;
 export type Perfil = z.infer<typeof perfilSchema>;

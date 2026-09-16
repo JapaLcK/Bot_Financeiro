@@ -296,7 +296,9 @@ export async function chamar<T>(
       //
       // E só apaga se ainda for a mesma sessão: outra conta pode ter entrado
       // enquanto isto estava no ar, e apagar levaria a sessão dela junto.
-      await limparSe(renovada.refresh);
+      // Melhor esforço, como as outras duas limpezas: uma falha do keychain
+      // não pode engolir o `SessaoExpirada` e deixar a tela sem veredito.
+      await limparSe(renovada.refresh).catch(() => undefined);
       throw new SessaoExpirada();
     }
   }

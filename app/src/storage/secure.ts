@@ -108,3 +108,55 @@ export function limparSe(esperado: string): Promise<boolean> {
     return true;
   });
 }
+
+/**
+ * O identificador de SESSÃO que vive dentro do access token.
+ *
+ * O refresh token muda a cada rotação; o `jti` não. É ele que o servidor usa
+ * para saber que duas credenciais diferentes são a mesma sessão, e é o que o
+ * logout precisa: entre capturar a credencial e apagar, uma renovação pode ter
+ * acontecido, e comparar pelo refresh recusaria apagar a própria sessão.
+ *
+ * Decodifica só a carga do JWT, sem verificar assinatura — não é autenticação,
+ * é leitura de um dado que o próprio app guardou. Token ilegível devolve null,
+ * e aí quem chama cai no critério anterior.
+ */
+export function jtiDe(access: string): string | null {
+  try {
+    const carga = access.split(".")[1];
+    if (!carga) return null;
+    const json = JSON.parse(
+      Buffer.from(carga.replace(/-/g, "+").replace(/_/g, "/"), "base64").toString(
+        "utf8",
+      ),
+    ) as { jti?: unknown };
+    return typeof json.jti === "string" ? json.jti : null;
+  } catch {
+    return null;
+  }
+}
+
+/**
+ * Apaga se a sessão guardada for a MESMA que `access` identifica.
+ *
+ * "Mesma sessão" é o `jti`, não o refresh token: uma renovação entre a captura
+ * e a limpeza troca o refresh e manteria o `jti`, e comparar pelo refresh
+ * deixaria a sessão de pé depois de o usuário sair — com um token rotacionado
+ * e válido no aparelho.
+ *
+ * Sem `jti` legível dos dois lados, cai na comparação por refresh, que é o
+ * critério anterior e nunca apaga a sessão de outra conta.
+ */
+export function limparSessaoDe(access: string, refresh: string): Promise<boolean> {
+  const alvo = jtiDe(access);
+  return naFila(async () => {
+    const atual = decodifica(await SecureStore.getItemAsync(PAR));
+    if (!atual) return false;
+    const mesma = alvo
+      ? jtiDe(atual.access) === alvo
+      : atual.refresh === refresh;
+    if (!mesma) return false;
+    await SecureStore.deleteItemAsync(PAR);
+    return true;
+  });
+}

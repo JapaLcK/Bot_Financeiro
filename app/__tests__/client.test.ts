@@ -413,6 +413,29 @@ describe("renovação em 401", () => {
     });
   });
 
+  it("limpeza que falha DEPOIS do retry não engole o fim de sessão", async () => {
+    // Renovou, repetiu, e o 401 voltou: a sessão morreu entre as duas
+    // requisições. Se a limpeza do keychain falhar aqui, o erro dela não pode
+    // escapar no lugar do `SessaoExpirada` — a tela ficaria sem veredito e a
+    // credencial morta continuaria visível para `temSessao()`.
+    await guardarCredenciais({ access: "velho", refresh: "rt_velho" });
+    fetchFalso
+      .mockResolvedValueOnce(resposta(401, { detail: "expirado" }))
+      .mockResolvedValueOnce(
+        resposta(200, {
+          access_token: "novo",
+          refresh_token: "rt_novo",
+          dashboard_token: "d",
+          expires_in: 900,
+        }),
+      )
+      .mockResolvedValueOnce(resposta(401, { detail: "sessão revogada" }));
+    falharApagar(true);
+
+    await expect(chamar("/x", schema)).rejects.toBeInstanceOf(SessaoExpirada);
+    falharApagar(false);
+  });
+
   it("não tenta renovar quando a rota é pública", async () => {
     fetchFalso.mockResolvedValue(resposta(401, { detail: "nao" }));
     await expect(chamar("/publica", schema, { semAuth: true })).rejects.toBeInstanceOf(
