@@ -538,7 +538,12 @@ def pocket_withdraw_to_account(
 
         conn.commit()
 
-    return launch_id, new_acc, new_pocket, canon, tax_summary, funding_source
+    # Mesma base da guarda e do aporte: o resgate devolve dinheiro à Carteira, e
+    # o número que a resposta mostra é o EXIBIDO, não o cru. Relido depois do
+    # commit, fora do `with`.
+    from .accounts import carteira_exibida
+    return (launch_id, carteira_exibida(user_id, new_acc), new_pocket, canon,
+            tax_summary, funding_source)
 
 
 def create_pocket(
@@ -653,8 +658,13 @@ def pocket_deposit_from_account(
             acc = cur.fetchone()
             if not acc:
                 raise RuntimeError("ACCOUNT_MISSING")
-            if debita_carteira and Decimal(str(acc["balance"])) < v:
-                raise ValueError("INSUFFICIENT_ACCOUNT")
+            if debita_carteira:
+                # Carteira disponível inclui o débito do manual fundido, que o
+                # espelho do banco já conta — senão a guarda recusa dentro da
+                # transação o que list_sources autorizou na tela (§0.7).
+                from .open_finance import merged_wallet_delta
+                if Decimal(str(acc["balance"])) + merged_wallet_delta(cur, user_id) < v:
+                    raise ValueError("INSUFFICIENT_ACCOUNT")
             if not debita_carteira:
                 from .open_finance import assert_bank_covers
                 assert_bank_covers(cur, user_id, funding_source.get("of_account_id"), v)
@@ -704,7 +714,14 @@ def pocket_deposit_from_account(
 
         conn.commit()
 
-    return launch_id, new_acc, new_pocket, canon
+    # A guarda acima autoriza contra a Carteira CORRIGIDA (`merged_wallet_delta`);
+    # devolver o `accounts.balance` cru faria a resposta falar de outra base —
+    # cru 50 + fundido 50, aporte de 80 passava e a resposta dizia -30 com a
+    # Carteira exibindo 20 (Codex, PR #443). Relido DEPOIS do commit, fora do
+    # `with`, para a leitura enxergar a escrita. Consumidores: as rotas do
+    # dashboard (`account_balance` no JSON) e o adaptador do Discord.
+    from .accounts import carteira_exibida
+    return launch_id, carteira_exibida(user_id, new_acc), new_pocket, canon
 
 
 def delete_pocket(user_id: int, pocket_name: str):
