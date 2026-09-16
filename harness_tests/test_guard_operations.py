@@ -134,6 +134,40 @@ class GuardOperationsTests(unittest.TestCase):
             finally:
                 guards.close()
 
+    def test_dir_fd_nao_autoriza_escrita_fora_da_raiz(self) -> None:
+        with tempfile.TemporaryDirectory() as root:
+            directory = Path(root)
+            allowed = directory / "allowed"
+            outside = directory / "outside"
+            allowed.mkdir()
+            outside.mkdir()
+            (outside / "original").write_text("teste", encoding="utf-8")
+            directory_fd = os.open(outside, os.O_RDONLY)
+            previous_cwd = Path.cwd()
+            try:
+                os.chdir(allowed)
+                guards = SafetyGuards(allowed_write_root=allowed)
+                guards.install()
+                try:
+                    with self.assertRaises(SafetyViolation):
+                        os.open("escaped", os.O_WRONLY | os.O_CREAT, dir_fd=directory_fd)
+                    with self.assertRaises(SafetyViolation):
+                        os.mkdir("escaped-dir", dir_fd=directory_fd)
+                    with self.assertRaises(SafetyViolation):
+                        os.rename(
+                            "original", "renamed", src_dir_fd=directory_fd,
+                            dst_dir_fd=directory_fd,
+                        )
+                    self.assertEqual(len(guards.events), 3)
+                    self.assertFalse((outside / "escaped").exists())
+                    self.assertFalse((outside / "escaped-dir").exists())
+                    self.assertTrue((outside / "original").exists())
+                finally:
+                    guards.close()
+            finally:
+                os.chdir(previous_cwd)
+                os.close(directory_fd)
+
 
 if __name__ == "__main__":
     unittest.main()

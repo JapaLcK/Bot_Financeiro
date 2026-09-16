@@ -73,6 +73,7 @@ class SafetyGuards:
         original_os_open = os.open
 
         def guarded_os_open(path: Any, flags: int, *args: Any, **kwargs: Any):
+            self._guard_relative_dir_fd(path, kwargs.get("dir_fd"))
             if self._is_env_path(path):
                 self._deny("env", str(path))
             write_flags = os.O_WRONLY | os.O_RDWR | os.O_CREAT | os.O_APPEND | os.O_TRUNC
@@ -138,9 +139,12 @@ class SafetyGuards:
             original = getattr(os, name)
 
             def guarded(path: Any, *args: Any, **kwargs: Any) -> Any:
-                self._guard_write(path)
+                self._guard_write(path, dir_fd=kwargs.get("src_dir_fd", kwargs.get("dir_fd")))
                 if destination:
-                    self._guard_write(args[0] if args else kwargs["dst"])
+                    self._guard_write(
+                        args[0] if args else kwargs["dst"],
+                        dir_fd=kwargs.get("dst_dir_fd", kwargs.get("dir_fd")),
+                    )
                 return original(path, *args, **kwargs)
 
             self._replace(os, name, guarded)
@@ -152,14 +156,21 @@ class SafetyGuards:
         original_symlink = os.symlink
 
         def guarded_symlink(source: Any, destination: Any, *args: Any, **kwargs: Any) -> Any:
-            self._guard_write(destination)
+            self._guard_write(destination, dir_fd=kwargs.get("dir_fd"))
             return original_symlink(source, destination, *args, **kwargs)
 
         self._replace(os, "symlink", guarded_symlink)
 
-    def _guard_write(self, value: Any) -> None:
+    def _guard_relative_dir_fd(self, value: Any, dir_fd: int | None) -> None:
+        # O diretório real do descritor não é o CWD. Sem resolução confiável
+        # entre plataformas, recusar a operação evita liberar outro diretório.
+        if dir_fd is not None and not os.path.isabs(value):
+            self._deny("dir_fd", str(value))
+
+    def _guard_write(self, value: Any, *, dir_fd: int | None = None) -> None:
         if isinstance(value, int):
-            return
+            self._deny("write", f"fd:{value}")
+        self._guard_relative_dir_fd(value, dir_fd)
         target = Path(value).resolve(strict=False)
         root = self.allowed_write_root.resolve(strict=False)
         if target != root and root not in target.parents:

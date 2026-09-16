@@ -53,6 +53,13 @@ class HelpAliasesTests(unittest.TestCase):
             with self.subTest(text=text):
                 self.assertIn(expected, _response(text).lower())
 
+    def test_ajuda_para_boletos_e_contas_a_pagar(self) -> None:
+        for text in ("como vejo meus boletos?", "como usar contas a pagar?"):
+            with self.subTest(text=text):
+                response = _response(text).lower()
+                self.assertIn("contas a pagar", response)
+                self.assertIn("vencem", response)
+
 
 if __name__ == "__main__":
     unittest.main()

@@ -262,6 +262,16 @@ def _ofx_contextual_fallback() -> str:
     )
 
 
+def _bills_contextual_fallback() -> str:
+    return (
+        "🗓️ Para consultar suas contas a pagar, pergunte por exemplo:\n"
+        "• `quais contas tenho para pagar?`\n"
+        "• `quais boletos vencem amanhã?`\n\n"
+        "Para cadastrar uma conta, informe valor e vencimento, por exemplo: "
+        "`boleto da luz de 150 vence dia 10`."
+    )
+
+
 def help_general(platform: str) -> str:
     return render_full(platform)
 
@@ -407,6 +417,8 @@ def infer_help_from_text(text: str, platform: str) -> str | None:
 
     normalized = normalize_text(raw)
     topic = _financial_topic(normalized)
+    if topic == "bills":
+        return _bills_contextual_fallback()
     if topic == "launches" and re.search(r"\b(recebi|gastei)\b", normalized):
         return _launches_contextual_fallback(normalized)
     section = {
@@ -440,6 +452,8 @@ def _financial_topic(norm: str) -> str | None:
         return "investments"
     if re.search(r"\b(ofx|extrato)\b", norm):
         return "ofx"
+    if re.search(r"\bboletos?\b|\bcontas?\s+(?:a|pra|para)\s+pagar\b", norm):
+        return "bills"
     if _is_statement_file_help(norm):
         return "ofx"
     if re.search(r"\bcategorias?\b", norm) or re.search(
@@ -510,6 +524,9 @@ def infer_financial_contextual_fallback(text: str, platform: str) -> str | None:
 
     if topic == "ofx":
         return _prepend_not_understood("importação de extrato", _ofx_contextual_fallback())
+
+    if topic == "bills":
+        return _prepend_not_understood("contas a pagar", _bills_contextual_fallback())
 
     if topic == "launches":
         return _prepend_not_understood("lançamentos", _launches_contextual_fallback(norm))
