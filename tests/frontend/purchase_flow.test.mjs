@@ -185,6 +185,7 @@ test("Pix pede autenticação antes do CPF e retoma no formulário do pagamento"
 test("fechar o QR de um Pix retomado devolve uma saída à rota técnica", async () => {
   const page = await browser.newPage({ viewport: { width: 390, height: 844 } });
   await page.addInitScript(() => {
+    if (location.pathname !== "/continuar-compra") return;
     sessionStorage.setItem("pb_purchase_intent_v1", JSON.stringify({
       version: 1,
       plan: "plus",
@@ -195,6 +196,10 @@ test("fechar o QR de um Pix retomado devolve uma saída à rota técnica", async
     }));
   });
   await page.route("**/continuar-compra", (route) => route.fulfill({
+    contentType: "text/html",
+    body: fs.readFileSync("frontend/precos.html", "utf8"),
+  }));
+  await page.route("**/precos", (route) => route.fulfill({
     contentType: "text/html",
     body: fs.readFileSync("frontend/precos.html", "utf8"),
   }));
@@ -220,6 +225,10 @@ test("fechar o QR de um Pix retomado devolve uma saída à rota técnica", async
     contentType: "application/json",
     body: JSON.stringify({ status: "pending" }),
   }));
+  await page.route("**/billing/subscription", (route) => route.fulfill({
+    contentType: "application/json",
+    body: JSON.stringify({ active: false }),
+  }));
 
   await page.goto(`${ORIGIN}/continuar-compra`);
   await page.fill(".pix-doc", "12345678901");
@@ -231,6 +240,13 @@ test("fechar o QR de um Pix retomado devolve uma saída à rota técnica", async
   assert.match(await page.textContent("#purchase-continuation"), /pagamento foi fechado/i);
   assert.equal(await page.isVisible("#purchase-continuation-retry"), false,
     "fechar um QR ainda pagável não deve oferecer outra cobrança");
+  await page.getByRole("link", { name: "Voltar aos planos" }).click();
+  await page.waitForURL("**/precos");
+  await page.waitForTimeout(300);
+  assert.equal(await page.evaluate(() => sessionStorage.getItem("pb_purchase_intent_v1")), null,
+    "voltar aos planos deve encerrar a retomada anterior");
+  assert.equal(await page.$(".pix-doc"), null,
+    "voltar aos planos não deve reabrir automaticamente o Pix anterior");
   await page.close();
 });
 
@@ -556,21 +572,27 @@ for (const missingScript of ["pix-checkout.js", "pix-ui.js", "pix-poll.js"]) {
 test(`falha em ${missingScript} nunca troca Pix para cartão nem trava a tela`, async () => {
   const page = await browser.newPage({ viewport: { width: 390, height: 844 } });
   let cardCheckoutCalls = 0;
+  let failedAssetRequests = 0;
   await page.addInitScript(() => {
-    sessionStorage.setItem("pb_purchase_intent_v1", JSON.stringify({
-      version: 1,
-      plan: "plus",
-      cycle: "annual",
-      method: "pix",
-      status: "awaiting_auth",
-      createdAt: Date.now(),
-    }));
+    if (!sessionStorage.getItem("pb_purchase_intent_v1")) {
+      sessionStorage.setItem("pb_purchase_intent_v1", JSON.stringify({
+        version: 1,
+        plan: "plus",
+        cycle: "annual",
+        method: "pix",
+        status: "awaiting_auth",
+        createdAt: Date.now(),
+      }));
+    }
   });
   await page.route("**/continuar-compra", (route) => route.fulfill({
     contentType: "text/html",
     body: fs.readFileSync("frontend/precos.html", "utf8"),
   }));
-  await page.route(`**/${missingScript}*`, (route) => route.abort());
+  await page.route(`**/${missingScript}*`, (route) => {
+    failedAssetRequests += 1;
+    return failedAssetRequests === 1 ? route.abort() : route.continue();
+  });
   await page.route("**/billing/plans-config", (route) => route.fulfill({
     contentType: "application/json",
     body: JSON.stringify({
@@ -598,6 +620,12 @@ test(`falha em ${missingScript} nunca troca Pix para cartão nem trava a tela`, 
   assert.equal(cardCheckoutCalls, 0, "a intenção Pix caiu no checkout de cartão");
   assert.match(await page.textContent("#purchase-continuation"), /pagamento via Pix/i);
   assert.equal(await page.textContent("#purchase-continuation-retry"), "Recarregar pagamento");
+  await page.click("#purchase-continuation-retry");
+  await page.waitForSelector(".pix-doc", { timeout: 5000 });
+  const restored = await page.evaluate(() => window.PBPurchaseIntent.read());
+  assert.equal(restored?.method, "pix", "recarregar deve retomar a intenção Pix");
+  assert.equal(restored?.status, "checkout_started");
+  assert.equal(cardCheckoutCalls, 0, "recarregar não pode trocar Pix por cartão");
   await page.close();
 });
 }

@@ -394,7 +394,7 @@
     <p class="purchase-continuation-summary" id="purchase-continuation-summary"></p>
     <div class="purchase-continuation-actions" id="purchase-continuation-actions">
       <button class="btn btn-primary" id="purchase-continuation-retry" type="button">Tentar novamente</button>
-      <a class="btn btn-outline" href="/precos">Voltar aos planos</a>
+      <a class="btn btn-outline" id="purchase-continuation-back" href="/precos">Voltar aos planos</a>
     </div>
   </section>
 </main>
@@ -948,6 +948,10 @@ function purchaseContinuationError(message, recoveryAction) {
   }
 }
 
+document.getElementById("purchase-continuation-back")?.addEventListener("click", () => {
+  window.PBPurchaseIntent?.clear();
+});
+
 function resumePurchaseAfterAuth() {
   if (purchaseResumePending || !window.PBPurchaseIntent
       || (!purchaseContinuationPage && window.pbPlanAuthState !== "authenticated")) return;
@@ -978,6 +982,7 @@ function resumePurchaseAfterAuth() {
         pixCheckout(intent.plan, true);
       } catch (_) {
         document.querySelector(".pix-ov")?.remove();
+        preservePurchaseForAuth(intent.plan, intent.cycle, "pix");
         purchaseResumePending = false;
         purchaseContinuationError(
           "Não foi possível carregar o pagamento via Pix. Recarregue para tentar novamente.",
