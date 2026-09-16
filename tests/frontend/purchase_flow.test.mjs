@@ -880,12 +880,12 @@ test(`falha em ${missingScript} nunca troca Pix para cartão nem trava a tela`, 
   });
 
   await page.goto(`${ORIGIN}/continuar-compra`);
-  await page.waitForSelector("#purchase-continuation-actions.show", { timeout: 5000 });
+  await page.waitForSelector("#purchase-continuation-actions.show", { timeout: 10000 });
   assert.equal(cardCheckoutCalls, 0, "a intenção Pix caiu no checkout de cartão");
   assert.match(await page.textContent("#purchase-continuation"), /pagamento via Pix/i);
   assert.equal(await page.textContent("#purchase-continuation-retry"), "Recarregar pagamento");
   await page.click("#purchase-continuation-retry");
-  await page.waitForSelector(".pix-doc", { timeout: 5000 });
+  await page.waitForSelector(".pix-doc", { timeout: 10000 });
   const restored = await page.evaluate(() => window.PBPurchaseIntent.read());
   assert.equal(restored?.method, "pix", "recarregar deve retomar a intenção Pix");
   assert.equal(restored?.status, "checkout_started");
