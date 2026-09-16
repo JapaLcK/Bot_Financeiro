@@ -1203,33 +1203,58 @@ def test_reconexao_pelo_ramo_do_CONFLITO_cala_o_aviso_so_ate_o_health_voltar(
 # caminho que quebrava.
 #
 # O grupo tem METADES INDEPENDENTES, e cada uma tem o seu controle negativo —
-# uma injeção só não discrimina todas. As QUATRO foram MEDIDAS, não deduzidas
-# (números da rodada 2, com o arquivo em 62 passed):
+# uma injeção só não discrimina todas. As QUATRO foram MEDIDAS, não deduzidas.
+#
+# Os VERMELHOS vão por NODE ID, e não por apelido ("caso 7", "a perna de +1
+# min"): apelido deixa de bater no dia em que um `parametrize` é renomeado, e o
+# node id é a única parte que sobrevive. Sem `N passed` aqui, de propósito
+# (`docs/controles_declarados.md`) — contagem envelhece em silêncio a cada teste
+# novo do arquivo; o que prende é o nome. Nos ids com parâmetro, o miolo vai
+# abreviado (`…`): o prefixo basta para o `-k`.
 #
 #   (A) desligar o DETALHE: reverter `connection_ui_state` para
-#       `_detalhe_de_acao(status)` (um argumento só) → 10 failed / 52 passed.
-#       Vermelhos: casos 1, 3-GET, 3-POST, 8, a perna de +1 min do 8b e as 5
-#       células da varredura. Verdes: 4, 5, 6, 7, a perna de +10 dias do 8b e o
+#       `_detalhe_de_acao(status)` (um argumento só). Vermelhos:
+#         test_caixa_sem_health_manda_autorizar_o_dispositivo_e_nao_reautorizar
+#         test_rota_do_snapshot_entrega_a_instrucao_de_dispositivo
+#         test_POST_pluggy_item_ja_nasce_com_a_instrucao_certa
+#         test_dentro_do_prazo_o_aviso_continua_calado
+#         test_carimbo_no_futuro_nao_reabre_o_silencio_permanente[1-…-False]
+#         test_a_folga_do_teto_vale_ate_5_minutos_exatos[299-…] e [300-…]
+#         test_as_celulas_que_mudaram_na_varredura_ficam_na_instrucao_de_dispositivo
+#           — os SETE params
+#       Verdes: casos 4, 5, 6, 7, a perna de +10 dias do 8b, a de 5m01s do 8c e o
 #       do vazamento.
 #       O caso 7 fica VERDE de propósito e isso NÃO é buraco: ele afirma
 #       "Reautorize o banco", que é justamente o que o código quebrado devolve.
 #       Quem o discrimina é a injeção (B).
 #   (B) desligar o PISO do prazo: trocar
 #       `coalesce(reconnected_at, created_at) > now() - make_interval(mins => %s)`
-#       por uma tautologia que consome o mesmo `%s` (`(%s::int is not null)` —
-#       tirar a condição inteira quebraria a ARIDADE e faria 39 testes caírem por
-#       `psycopg`, que não é medição de nada) → 1 failed. Vermelho: o caso 7, e
-#       SÓ ele.
-#   (B') desligar o TETO do prazo: tirar
-#       `coalesce(reconnected_at, created_at) <= now() + interval '5 minutes'`
-#       → 1 failed. Vermelha: a perna de +10 dias do caso 8b, e só ela. A perna
-#       de +1 min segue VERDE, que é o que prova a folga ser uma decisão medida e
-#       não um número solto.
-#   (C) desligar o derivado em `get_connections_by_item_id` (`case when %s::int
-#       is null then null end as execution_status`, pela mesma razão de aridade)
-#       → 1 failed: a 2ª asserção do caso 1 — a do TOAST, que passa por
-#       `_refresh_items_report` — e a 1ª, a do snapshot, segue verde. É o que
-#       prova serem DOIS selects.
+#       por uma tautologia que consome o mesmo `%s` (`(%s::int is not null)`).
+#       Vermelho:
+#         test_passado_o_prazo_a_tela_e_o_aviso_voltam_a_mandar_reautorizar
+#       e SÓ ele.
+#   (B') desligar o TETO do prazo: ALARGAR o literal, de `interval '5 minutes'`
+#       para `interval '10 years'`. Vermelhos:
+#         test_carimbo_no_futuro_nao_reabre_o_silencio_permanente[14400-…-True]
+#         test_a_folga_do_teto_vale_ate_5_minutos_exatos[301-…-True]
+#       e as pernas de +1 min, 4m59s e 5m00s seguem VERDES, que é o que prova a
+#       folga ser decisão medida e não número solto.
+#   (C) desligar o derivado em `get_connections_by_item_id`: `case when %s::int
+#       is null then null end as execution_status`, que consome o mesmo `%s`.
+#       Vermelho:
+#         test_caixa_sem_health_manda_autorizar_o_dispositivo_e_nao_reautorizar
+#       — e é a 2ª asserção dele, a do TOAST, que passa por
+#       `_refresh_items_report`; a 1ª, a do snapshot, segue verde. É o que prova
+#       serem DOIS selects.
+#
+# NENHUMA das quatro APAGA texto, e isso não é estilo. Apagar uma das condições
+# do `SQL_RAW_AINDA_VALE` deixa um `and` pendurado no fim da string — e, no piso e
+# no (C), ainda tira o `%s` sem tirar o parâmetro. O SQL não compila, o `psycopg`
+# derruba o ARQUIVO INTEIRO: caem junto os controles POSITIVOS e as pernas que a
+# própria injeção declara VERDES, e quem seguisse o texto concluiria o OPOSTO do
+# que ele afirma. Esta era exatamente a redação anterior da (B'), e o eixo dela
+# foi trocado por isso. É a família que o `docs/controles_declarados.md` nomeia:
+# "o remédio é trocar o eixo da injeção: ALARGUE em vez de apagar".
 #
 # CONTROLE POSITIVO: casos 4, 5 e 6 — o caminho legítimo de "Reautorize o banco"
 # (e o de "Atualizando…") continua funcionando. Sem eles, o grupo passaria num
@@ -1281,25 +1306,29 @@ def _ui_da_tela(uid: int, item_id: str) -> dict:
     return linha["ui"]
 
 
-def _envelhece_autorizacao(connection_id: int, minutos: int) -> None:
-    """Recua a autorização NO BANCO.
+def _envelhece_autorizacao(connection_id: int, minutos: int = 0, segundos: int = 0) -> None:
+    """Recua a autorização NO BANCO (valor negativo = avança para o FUTURO).
 
     Tem de ser em SQL: o prazo é avaliado contra o `now()` do POSTGRES, então
     recuar pelo relógio do Python (o `relogio_fixo` deste arquivo) não mexeria na
     conta — foi o que fez um teste verde deste arquivo ficar vermelho quando o
     prazo entrou, porque o `relogio_fixo` carimbava `reconnected_at` 26 dias atrás.
     Recua as DUAS pontas da âncora `coalesce(reconnected_at, created_at)`.
+
+    Os SEGUNDOS existem para a fronteira do teto (4m59s / 5m00s / 5m01s): em
+    minutos ela não é expressável, e fazer a conta em Python traria de volta o
+    relógio errado. É o mesmo `make_interval`, com o segundo argumento.
     """
     with get_conn() as c:
         with c.cursor() as cur:
             cur.execute(
                 """
                 update open_finance_connections
-                   set created_at = now() - make_interval(mins => %s),
-                       reconnected_at = now() - make_interval(mins => %s)
+                   set created_at = now() - make_interval(mins => %s, secs => %s),
+                       reconnected_at = now() - make_interval(mins => %s, secs => %s)
                  where id = %s
                 """,
-                (minutos, minutos, connection_id),
+                (minutos, segundos, minutos, segundos, connection_id),
             )
         c.commit()
 
@@ -1476,7 +1505,9 @@ def test_dentro_do_prazo_o_aviso_continua_calado(user_id):
 # OS DOIS CASOS SÃO UM PAR, e a folga de 5 min do teto é o que os separa:
 #   • +1 min (app adiantado, desvio NORMAL entre app e banco) → o conserto
 #     legítimo CONTINUA valendo. É o controle POSITIVO do teto: com `<= now()`
-#     puro, um app 2 s adiantado matava o conserto no item recém-gravado;
+#     puro, um app 2 s adiantado matava o conserto na RECONEXÃO recém-gravada
+#     (só nela: no primeiro INSERT a âncora é o `created_at`, `default now()` do
+#     Postgres, que nunca está no futuro — ver `db/open_finance_state.py`);
 #   • +10 dias → fora da folga, o derivado morre e a instrução volta a
 #     "Reautorize o banco", com o aviso proativo de volta.
 
@@ -1497,6 +1528,50 @@ def test_carimbo_no_futuro_nao_reabre_o_silencio_permanente(
     assert ("item-tela-caixa" in _avisadas(user_id)) is avisado, (
         "sem o TETO do intervalo, um carimbo no futuro cala o aviso proativo e "
         "prende a tela na instrução de dispositivo — para sempre")
+
+
+# ── caso 8c: a FRONTEIRA do teto, nos 5 minutos exatos ──────────────────────
+#
+# O par do 8b (+1 min / +10 dias) prende só o intervalo ABERTO `[1 min, 10 dias)`:
+# medido mutando o literal do teto e rodando o arquivo, `'1 minute'`, `'1 hour'`,
+# `'5 hours'` e `'9 days'` passavam TODOS verdes. Um `'5 hours'` — 60× mais frouxo
+# — devolveria a supressão permanente para qualquer app com o relógio errado em
+# HORAS, e nada ficava vermelho. Fronteira sem teste é a próxima regressão.
+#
+# Estes três casos prendem o número: 4m59s e 5m00s DENTRO (o `<=` é inclusivo),
+# 5m01s FORA. Qualquer teto que erre a borda por mais de 1 s derruba uma das
+# pernas — medido, `'10 seconds'`, `'1 minute'`, `'1 hour'`, `'5 hours'`,
+# `'9 days'` e `'10 years'` ficam TODOS vermelhos.
+#
+# Em SEGUNDOS pelo `make_interval` do helper: a aritmética de minuto não expressa
+# a borda, e fazê-la em Python traria de volta o relógio que o teto existe para
+# descartar.
+#
+# ponytail: a perna de 5m01s tem ORÇAMENTO DE 1 s entre o `update` e a leitura —
+# o carimbo é `now() + 5 min 1 s` no instante do update e a condição é reavaliada
+# contra um `now()` posterior. O arquivo inteiro roda em ~3 s, dezenas de ms por
+# caso — duas ordens de grandeza abaixo do orçamento. Se algum dia ficar
+# intermitente, o conserto é 4m30s/5m30s (a borda passa a ficar presa a ±30 s em
+# vez de ±1 s), não remover o caso.
+
+@pytest.mark.parametrize("segundos_no_futuro,detalhe,avisado", [
+    (4 * 60 + 59, DETALHE_DISPOSITIVO, False),
+    (5 * 60, DETALHE_DISPOSITIVO, False),
+    (5 * 60 + 1, DETALHE_REAUTORIZA, True),
+])
+def test_a_folga_do_teto_vale_ate_5_minutos_exatos(
+    user_id, segundos_no_futuro, detalhe, avisado
+):
+    conexao = db.save_pluggy_open_finance_item(user_id, ITEM_CAIXA_QR)
+    _envelhece_autorizacao(conexao["id"], segundos=-segundos_no_futuro)
+
+    assert _ui_da_tela(user_id, "item-tela-caixa")["detail"] == detalhe, (
+        f"carimbo em `now() + {segundos_no_futuro} s`: a folga do teto é de 5 min "
+        "EXATOS, inclusiva — um teto mais frouxo devolve a supressão permanente "
+        "para relógio errado em horas")
+    assert ("item-tela-caixa" in _avisadas(user_id)) is avisado, (
+        "a fronteira tem de valer nas DUAS superfícies: a tela e o aviso "
+        "proativo leem a MESMA condição, por dois selects diferentes")
 
 
 # ── caso 9: isolamento por user_id (CLAUDE.md §0, regra dura) ────────────────
@@ -1591,18 +1666,33 @@ def test_a_resposta_HTTP_nao_ganhou_chave_nova_nem_vazou_o_raw(user_id, monkeypa
 # ── AS CÉLULAS QUE MUDARAM, medidas em DUAS COLUNAS ─────────────────────────
 #
 # Varredura combinatória pelo caminho de produção, base × branch: 12 `status` × 7
-# `executionStatus` × {com health, sem health} = 168 células. 162 IDÊNTICAS — a
-# ordem da máquina de estados não mudou, agora MEDIDO e não lido. As 6 que
+# `executionStatus` × {com health, sem health} = 168 células. 160 IDÊNTICAS — a
+# ordem da máquina de estados não mudou, agora MEDIDO e não lido. As 8 que
 # mudaram são as de baixo, todas com `health` NULL, todas de "Reautorize o banco"
 # para "Autorize o acesso no app do banco".
 #
-# Este teste prende as 5 que NENHUM outro caso deste grupo segura (a 6ª, OUTDATED
+# Foram 6 na primeira varredura: a lista de `status` dela não trazia
+# `INVALID_CREDENTIALS`, que está em `_NEEDS_USER` e é LOAD-BEARING no módulo. Ele
+# entrou depois e trouxe as DUAS últimas células. Estão aqui pelo mesmo argumento
+# que as de caixa minúscula — inalcançáveis em produção, presas assim mesmo —, e
+# deixar de fora justo essas duas seria cobertura decidida pelo acaso de qual
+# `status` entrou na varredura de quem.
+#
+# Este teste prende as 7 que NENHUM outro caso deste grupo segura (a 8ª, OUTDATED
 # + `USER_AUTHORIZATION_PENDING` em maiúscula, é o caso 1). Elas não são efeito
-# colateral: as duas DIAGONAIS (`LOGIN_ERROR`, `WAITING_USER_INPUT` ao lado do
-# `executionStatus` de dispositivo) são as que a docstring de `_detalhe_de_acao`
-# enumera como benignas, e passar a mostrar a instrução de dispositivo nelas é
-# CONVERGIR com o ramo que tem `health`, que já fazia isso. O que faltava era
-# teste: mudança medida e não presa é mudança que volta sozinha.
+# colateral: as DIAGONAIS (`LOGIN_ERROR`, `WAITING_USER_INPUT`,
+# `INVALID_CREDENTIALS` ao lado do `executionStatus` de dispositivo) são as que a
+# docstring de `_detalhe_de_acao` enumera como benignas — "`_NEEDS_USER` +
+# `execution_status` de device/QR" —, e passar a mostrar a instrução de
+# dispositivo nelas é CONVERGIR com o ramo que tem `health`, que já fazia isso. O
+# que faltava era teste: mudança medida e não presa é mudança que volta sozinha.
+#
+# ALCANCE das duas de `INVALID_CREDENTIALS`: nenhum, pelo mesmo mecanismo das de
+# caixa minúscula. `INVALID_CREDENTIALS` é `executionStatus`, nunca `status` de
+# item, e o upsert grava `status = item['status'] or item['executionStatus']` —
+# então um `status` local `INVALID_CREDENTIALS` implica `raw->>'executionStatus'`
+# IGUAL a `INVALID_CREDENTIALS`, nunca o de dispositivo. O par das duas colunas
+# não sai do caminho de produção.
 #
 # A CAIXA (minúscula) é a outra metade. O derivado passa por `upper()`, então um
 # `executionStatus` em minúscula no `raw` agora casa onde antes não casava — hoje
@@ -1610,16 +1700,18 @@ def test_a_resposta_HTTP_nao_ganhou_chave_nova_nem_vazou_o_raw(user_id, monkeypa
 # de ser assim está no comentário do `SQL_EXECUTION_STATUS`
 # (`db/open_finance_state.py`). Presa aqui porque foi a varredura que a achou.
 #
-# CONTROLE: as 162 células inalteradas não cabem num teste, mas os casos 4, 5 e 6
+# CONTROLE: as 160 células inalteradas não cabem num teste, mas os casos 4, 5 e 6
 # deste grupo são três delas (LOGIN_ERROR e OUTDATED sem `executionStatus`,
 # UPDATING com ele) e continuam exigindo o comportamento de antes.
 
 @pytest.mark.parametrize("status,execution_status", [
     ("LOGIN_ERROR", "USER_AUTHORIZATION_PENDING"),
     ("WAITING_USER_INPUT", "USER_AUTHORIZATION_PENDING"),
+    ("INVALID_CREDENTIALS", "USER_AUTHORIZATION_PENDING"),
     ("OUTDATED", "user_authorization_pending"),
     ("LOGIN_ERROR", "user_authorization_pending"),
     ("WAITING_USER_INPUT", "user_authorization_pending"),
+    ("INVALID_CREDENTIALS", "user_authorization_pending"),
 ])
 def test_as_celulas_que_mudaram_na_varredura_ficam_na_instrucao_de_dispositivo(
     user_id, status, execution_status

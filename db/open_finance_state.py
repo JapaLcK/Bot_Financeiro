@@ -80,9 +80,13 @@ _TERMINAL = ("PAUSED", "DELETED")
 # que o PRAZO existe para fechar.
 #
 # A folga de 5 min é o desvio NORMAL entre app e banco (segundos): com `<= now()`
-# puro, um app 2 s adiantado matava o conserto no item RECÉM-GRAVADO, que é o
-# caso que ele existe para cobrir. Ela custa 5 min a mais no pior caso legítimo
-# (65 em vez de 60) e continua descartando o relógio errado de verdade.
+# puro, um app 2 s adiantado matava o conserto na RECONEXÃO recém-gravada. E é só
+# na reconexão: no primeiro INSERT o `reconnected_at` nasce NULL e a âncora é o
+# `created_at`, que é `default now()` do POSTGRES e nunca está no futuro — o
+# carimbo do relógio do PYTHON só entra pelo ramo do CONFLITO
+# (`reconnected_at = excluded.updated_at`, `db/open_finance.py`), que é o do
+# widget reconectando. Ela custa 5 min a mais no pior caso legítimo (65 em vez de
+# 60) e continua descartando o relógio errado de verdade.
 SQL_RAW_AINDA_VALE = (
     "health is null "
     "and coalesce(reconnected_at, created_at) > now() - make_interval(mins => %s) "
@@ -116,6 +120,14 @@ def janela_device_auth_min() -> int:
     Import local porque `db` -> `core.services` é de mão única neste pacote (ver
     `connection_ui_state` em `db/open_finance.py`); e função em vez de constante
     para que os três chamadores não repitam o import.
+
+    SEM VALIDAÇÃO de propósito: o valor é um literal do módulo, sem override por
+    env, então nenhum valor hostil é alcançável e validar aqui seria código
+    defensivo para caso impossível (§0.2). Se um dia ela virar configuração, dois
+    valores medidos quebram e a validação passa a ser devida: `0` NÃO desliga mais
+    o derivado (o teto sozinho ainda admite `(now, now + 5 min]`), e qualquer
+    valor acima de 2³¹−1 estoura `make_interval(mins => bigint) does not exist` —
+    500 na aba de Open Finance E no laço do aviso proativo.
     """
     from core.services.pluggy_health import JANELA_DEVICE_AUTH_MIN
     return JANELA_DEVICE_AUTH_MIN

@@ -128,15 +128,30 @@ EXEC_STATUS_AUTORIZA_DISPOSITIVO = "USER_AUTHORIZATION_PENDING"
 #     default 6 h (`frontend/finance_bot_websocket_custom.py`). 60 min vence muito
 #     antes: quem encerra a supressão é o PRAZO, não uma corrida com o tique.
 #   • DESVIO DE RELÓGIO: estes 60 min cobrem UM SENTIDO SÓ — o do app ATRASADO,
-#     que carimba no passado e come janela. O sentido oposto (app adiantado,
-#     carimbo no FUTURO) esta constante não cobre e não pode cobrir: ela é o piso
-#     do intervalo. Quem o cobre é o TETO do `SQL_RAW_AINDA_VALE`
-#     (`db/open_finance_state.py`), e é ele que impede o carimbo no futuro de
-#     tornar a supressão permanente.
+#     que carimba no passado e come janela —, e o cobrem só ATÉ 30 MIN DE
+#     ATRASO. Com o app atrasado em L minutos a janela efetiva é `60 - L`, então
+#     em L = 30 ela empata com os 30 min de QR e, para L > 30, a instrução certa
+#     morre com o QR AINDA ABERTO (medido: carimbo em `now() - 65 min` já devolve
+#     "Reautorize o banco" com o aviso proativo ligado — um app 45 min atrasado
+#     perde a instrução 16 min depois de conectar, com 14 min de QR válidos).
+#     O sentido oposto (app adiantado, carimbo no FUTURO) esta constante não
+#     cobre e não pode cobrir: ela é o piso do intervalo. Quem o cobre é o TETO
+#     do `SQL_RAW_AINDA_VALE` (`db/open_finance_state.py`), e é ele que impede o
+#     carimbo no futuro de tornar a supressão permanente.
+#   • A TOLERÂNCIA A RELÓGIO É ASSIMÉTRICA, 6×: 5 min para o app adiantado (o
+#     teto) contra 30 min para o atrasado (os `60 - 30` de folga do piso). Não é
+#     decisão tomada — é o que cai das duas pontas terem motivos diferentes (o
+#     teto vem do desvio NORMAL entre app e banco, o piso da janela documentada
+#     do QR). Fica escrito porque a assimetria não estava em lugar nenhum.
 #   • DIREÇÃO DO ERRO: vencido o prazo, o detalhe volta a
 #     `_FIXED_DETAIL["needs_user_action"]` ("Reautorize o banco"), que é a ação
 #     correta depois que a janela fechou. Errar curto custa uma instrução
 #     conservadora; errar longo manda a pessoa esperar um QR morto.
+#
+# 60 NÃO é a janela máxima: somado ao teto de 5 min do `SQL_RAW_AINDA_VALE`, o
+# intervalo aceito tem 65 min de largura para um carimbo 5 min adiantado (medido:
+# `now() - 60 min` FORA, `now() - 59 min` DENTRO, `now() + 5 min` DENTRO,
+# `now() + 5 min 1 s` FORA). Quem lê só esta constante infere 60.
 JANELA_DEVICE_AUTH_MIN = 60
 
 # Status do item que significam "a Pluggy ainda está buscando".
