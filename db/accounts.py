@@ -2172,7 +2172,7 @@ def delete_all_launches_and_rollback(user_id: int) -> dict:
 # OFX import (idempotente)
 # ──────────────────────────────────────────────────────────────────────────────
 
-def carteira_exibida(user_id: int, cru=None):
+def carteira_exibida(user_id: int, fallback=None):
     """A Carteira que a TELA mostra, no lugar do `accounts.balance` cru.
 
     O lançamento manual fundido com o Open Finance continua debitando o cru
@@ -2193,6 +2193,9 @@ def carteira_exibida(user_id: int, cru=None):
     mensagem de caixinha (`core/handlers/pockets.py`). Todos pós-commit: falha
     cai no cru em vez de subir, porque o dinheiro já andou.
 
+    `fallback` é o que devolver SE a leitura do consolidado falhar — não uma
+    base de cálculo: o caminho feliz o ignora. Sem ele, o `except` relê o cru.
+
     Devolve `Decimal`, o mesmo tipo do saldo cru que substitui.
     """
     try:
@@ -2203,7 +2206,7 @@ def carteira_exibida(user_id: int, cru=None):
         # exclusão da conta carregando o id (gate de tests/test_log_falha_user_id.py).
         logger.exception("carteira exibida falhou (user_id=%s)", user_id,
                          extra={"user_id": user_id})
-        return get_balance(user_id) if cru is None else cru
+        return get_balance(user_id) if fallback is None else fallback
 
 
 def get_ofx_import_by_hash(user_id: int, file_hash: str):

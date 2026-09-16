@@ -26,25 +26,31 @@ from tests._fusao_of_helpers import (  # noqa: F401 (uid_pro/ia_fora são fixtur
 def test_preco_fusao_falsa_positiva_superconta_450(uid_pro, ia_fora):
     """FIXA 450,00 (a `main` dá 400,00, certa por acidente).
 
-    A heurística funde dois gastos DIFERENTES de R$ 50 no mesmo dia — um em
-    espécie, um no PIX. Fundidos, a correção devolve o débito do manual e o
-    espelho conta só o PIX: sobra 1 gasto contado onde houve 2.
+    "gastei 50 no almoço" em ESPÉCIE e um `UBER *TRIP SAO PAULO` de R$ 50 no
+    banco, no mesmo dia: gastos DIFERENTES, e a heurística os funde. Fundidos, a
+    correção devolve o débito do manual e o espelho conta só o Uber — sobra um
+    gasto contado onde houve dois.
+
+    O TAMANHO DA PORTA: `almoço` normaliza para `almoco`, que está em
+    `_GENERIC_MERCHANTS` (`db/open_finance.py:1563`) junto de `comida`,
+    `gasto`, `compra`, `lanche`, `jantar`, `cafe`, `diversos`, `outros`,
+    `conta`, `boleto`, `pix` e `""`. Um `alvo` genérico é "similar" a QUALQUER
+    descrição (`_is_generic_merchant`, `:1591`), então basta valor igual
+    (±0,05) com um único candidato elegível para a fusão ser automática.
 
     O erro TROCA DE DIREÇÃO entre as abordagens: a `main` subconta no
     verdadeiro-positivo (o bug deste PR), o branch superconta no
-    falso-positivo. Consertar isto é consertar a HEURÍSTICA de fusão
-    (`_find_manual_candidates`), não a leitura — outro PR.
+    falso-positivo. Consertar é consertar a HEURÍSTICA, não a leitura.
     """
     hoje = today_tz()
     conexao = conecta_banco(uid_pro, "500.00")
-    manda(uid_pro, "gastei 50 no mercado")          # em espécie, não vai ao banco
+    manda(uid_pro, "gastei 50 no almoço")                  # em espécie
     sincroniza(conexao, uid_pro, "450.00",
-               [tx(uid_pro, "-50.00", hoje, "MERCADO")])   # outro gasto, no PIX
+               [tx(uid_pro, "-50.00", hoje, "UBER *TRIP SAO PAULO")])  # outro gasto
     rep = db.import_open_finance_launches(uid_pro, conexao)
-    assert rep["auto_merged"] == 1, "a heurística fundiu os dois (fora do escopo)"
+    assert rep["auto_merged"] == 1, "a porta genérica fundiu os dois (fora do escopo)"
 
-    consol, carteira = consolidado(uid_pro)
-    assert (consol, carteira) == (450.0, 0.0), \
+    assert consolidado(uid_pro) == (450.0, 0.0), \
         "NÚMERO FIXADO, não desejado: a main dá 400,0 aqui"
 
 

@@ -1,12 +1,8 @@
-import logging
-
 from core.types import OutgoingMessage
 from parsers import parse_receita_despesa_natural
 from db import ensure_user, add_launch_and_update_balance
 from utils_text import fmt_brl
 from core.services.category_service import learn_from_inference
-
-logger = logging.getLogger(__name__)
 
 
 def handle_quick_entry(user_id: int, text: str) -> OutgoingMessage | None:
@@ -60,22 +56,15 @@ def handle_quick_entry(user_id: int, text: str) -> OutgoingMessage | None:
 
     emoji = "💸" if tipo == "despesa" else "💰"
     cat_txt = categoria or "outros"
-    # Mesma defasagem do core/handlers/launches.py: `new_balance` é a Carteira
-    # lida ANTES da reconciliação acima. Pós-commit, falha aqui cai na linha de
-    # hoje em vez de subir (o chamador relançaria o gasto).
-    linha_saldo = f"🏦 Conta: {fmt_brl(float(new_balance))}"
-    try:
-        from core.services.plan_service import consolidated_balance_enabled
-        from db import get_consolidated_balance
-        cb = get_consolidated_balance(user_id)
-        if int(cb.get("of_bank_count") or 0) > 0 and consolidated_balance_enabled(user_id):
-            linha_saldo = f"💰 Saldo total: {fmt_brl(float(cb['consolidated'] or 0))}"
-        else:
-            linha_saldo = f"🏦 Conta: {fmt_brl(float(cb['manual'] or 0))}"
-    except Exception:
-        logger.exception(
-            "saldo consolidado falhou depois do commit (user_id=%s, lancamento %s)",
-            user_id, launch_id, extra={"user_id": user_id})
+    # `new_balance` é a Carteira lida ANTES da reconciliação acima, que funde o
+    # lançamento com o espelho do banco. RÓTULO IDÊNTICO — a copy nova
+    # (`💰 Saldo total:`) é só da resposta de lançamento de
+    # `core/handlers/launches.py`; aqui é o caminho de fallback legado
+    # (`core/handlers/pending.py:86`). Só o número é relido.
+    # `carteira_exibida` já trata a falha: pós-commit, cai no cru em vez de
+    # subir (o chamador relançaria o gasto).
+    from db.accounts import carteira_exibida
+    linha_saldo = f"🏦 Conta: {fmt_brl(float(carteira_exibida(user_id, new_balance)))}"
     return OutgoingMessage(
         text=(
             f"{emoji} **{tipo.capitalize()} registrada**: {fmt_brl(valor)}\n"
