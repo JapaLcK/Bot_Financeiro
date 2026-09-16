@@ -179,3 +179,43 @@ def test_conexao_pausada_some_da_lista_e_da_contagem(uid_pro, ia_fora):
     conexao, _, _ = _duas_no_mesmo_x(uid_pro)
     _q("update open_finance_connections set status='PAUSED' where id=%s returning id", (conexao,))
     assert _lista_e_contagem(uid_pro) == ([], 0)
+
+
+# ── casos MISTOS no mesmo usuário: só a não acionável sai ─────────────────
+
+def _segundo_banco_com_pendencia(uid):
+    """Outra conta (outra identidade) com "gastei 50 no mercado" pendente."""
+    item = db.save_pluggy_open_finance_item(uid, {
+        "id": f"item-2-{uid}", "connector": {"id": 77, "name": "Inter"}, "status": "UPDATED"})
+    manda(uid, "gastei 50 no mercado")
+    db.save_open_finance_sync(item["id"], [{
+        "provider_account_id": f"acc-2-{uid}", "name": "Inter Conta", "type": "BANK",
+        "currency": "BRL", "balance": 500, "raw": {},
+        "transactions": [tx(uid, "-50.00", today_tz(), "COMPRA CARTAO 9981 ABCD", ident="b2")]}])
+    assert db.import_open_finance_launches(uid, item["id"])["pending"] == 1
+    of_tx = _q("select id from open_finance_transactions where provider_transaction_id=%s",
+               (f"of-tx-{uid}-b2",))[0]["id"]
+    return item["id"], of_tx
+
+
+def test_acionavel_e_pausada_no_mesmo_usuario(uid_pro, ia_fora):
+    _, acionavel, _, _ = pendencia(uid_pro)
+    conexao2, pausada = _segundo_banco_com_pendencia(uid_pro)
+    assert _lista_e_contagem(uid_pro) == (sorted([acionavel, pausada]), 2)
+
+    _q("update open_finance_connections set status='PAUSED' where id=%s returning id", (conexao2,))
+
+    assert _lista_e_contagem(uid_pro) == ([acionavel], 1)
+
+
+def test_acionavel_e_x_ocupado_no_mesmo_usuario(uid_pro, ia_fora):
+    _, acionavel, _, _ = pendencia(uid_pro)
+    _, ocupada = _segundo_banco_com_pendencia(uid_pro)
+    x = _estado(ocupada)["match_launch_id"]
+    _q("""insert into open_finance_transactions
+            (account_id, provider_transaction_id, description, amount, transaction_date,
+             imported_launch_id, match_launch_id, reconciliation_status)
+          select account_id, 'ocupa-x', 'OUTRA', -50, transaction_date, %s, %s, 'auto_merged'
+            from open_finance_transactions where id=%s returning id""", (x, x, ocupada))
+
+    assert _lista_e_contagem(uid_pro) == ([acionavel], 1)

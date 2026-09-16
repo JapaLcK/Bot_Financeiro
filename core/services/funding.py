@@ -159,15 +159,17 @@ def nota_sync(saida: bool = True) -> str:
 
 def carteira_txt(exibida, disponivel) -> str:
     """A Carteira como a tela mostra, para mensagem de RECUSA. Quando a guarda
-    autoriza menos que o exibido (receita pendente de reconciliação), diz quanto
-    e por quê — senão a mesma conversa mostra R$ 100 no /saldo e R$ 0 na recusa."""
+    autoriza menos que o exibido (receita pendente de reconciliação), mostra o
+    disponível e o motivo À PARTE — senão a mesma conversa diz R$ 100 no /saldo e
+    R$ 0 na recusa. A entrada a conferir não é "parte" do exibido: com gasto
+    depois dela, ela é maior que ele (tela R$ 30, entrada R$ 100)."""
     from utils_text import fmt_brl
 
     txt = fmt_brl(float(_dec(exibida)))
     a_conferir = _dec(exibida) - _dec(disponivel)
     if a_conferir > 0:
-        txt += (f" (sendo {fmt_brl(float(a_conferir))} de entrada a conferir com o banco,"
-                " que não conta para pagar)")
+        txt += (f" (disponível para pagar: {fmt_brl(float(_dec(disponivel)))}, porque"
+                f" {fmt_brl(float(a_conferir))} de entrada ainda está a conferir com o banco)")
     return txt
 
 

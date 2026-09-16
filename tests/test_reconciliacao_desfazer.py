@@ -156,3 +156,18 @@ def test_fusao_antiga_sem_match_aparece_e_desfaz(uid_pro, ia_fora):
     assert db.undo_reconciliation(uid_pro, of_tx)["changed"] is True
     assert consolidado(uid_pro) == (900.0, -50.0)
     assert _sombras(uid_pro) == 1
+
+
+def test_fusao_com_match_em_outro_lancamento_nao_desfaz(uid_pro, ia_fora):
+    """imported = X e match = Y ≠ X: estado incoerente, não é fusão a desfazer."""
+    funde_a(uid_pro)
+    of_tx = _of_tx(uid_pro)
+    db.add_launch_and_update_balance(uid_pro, "despesa", 5, "outro", None)
+    y = ultimo_launch(uid_pro)
+    _q("update open_finance_transactions set match_launch_id=%s where id=%s returning id", (y, of_tx))
+    antes = consolidado(uid_pro)
+
+    assert of_tx not in [r["of_tx_id"] for r in db.list_reconciliations(uid_pro)]
+    assert db.undo_reconciliation(uid_pro, of_tx)["changed"] is False
+    assert consolidado(uid_pro) == antes
+    assert _sombras(uid_pro) == 0

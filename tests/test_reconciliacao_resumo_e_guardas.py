@@ -114,8 +114,6 @@ def test_receita_pendente_nao_autoriza(uid_pro, ia_fora, sem_autorizacao):
     with pytest.raises(HTTPException) as e:
         asyncio.run(pay_bill_route(_Req(), uid_pro, bill, PayBillPayload(amount=50.0)))
     assert e.value.status_code == 400
-    assert ("Saldo atual: R$ 100,00 (sendo R$ 100,00 de entrada a conferir com o banco"
-            in e.value.detail), e.value.detail
     assert _carteira_fonte(uid_pro) == 0
     assert consolidado(uid_pro)[1] == 100.0, "a exibição mudou"
 
@@ -145,13 +143,68 @@ def test_sem_pendencia_autoriza_como_hoje(uid_pro, ia_fora):
     assert saldo_bruto(uid_pro) == Decimal("0")
 
 
-def test_recusa_na_conversa_cita_a_carteira_da_tela(uid_pro, ia_fora):
-    """Mesma conversa: /saldo mostra 100 e a recusa não pode dizer R$ 0,00."""
-    pendencia(uid_pro, "100.00", "recebi 100 do fulano", "30.00", "CREDITO XPTO 9981")
-    db.create_pocket(uid_pro, "viagem")
+def _receita_100(uid, *gastos):
+    pendencia(uid, "100.00", "recebi 100 do fulano", "0.00", "CREDITO XPTO 9981")
+    for g in gastos:
+        manda(uid, g)
 
-    assert "Carteira: R$ 100,00" in manda(uid_pro, "/saldo")
+
+def _receita_e_despesa_pendentes(uid):
+    hoje = today_tz()
+    conexao = conecta_banco(uid, "0.00")
+    manda(uid, "Gastei 1 real com a barbara")
+    manda(uid, "recebi 73,38 do fulano")
+    sincroniza(conexao, uid, "0.00", [
+        tx(uid, "-1.00", hoje, "COMPRA CARTAO 4412 XPTO", ident="1"),
+        tx(uid, "73.38", hoje, "CREDITO XPTO 9981", ident="2"),
+    ])
+    assert db.import_open_finance_launches(uid, conexao)["pending"] == 2
+
+
+@pytest.mark.parametrize("prepara, tela, disponivel, a_conferir", [
+    (lambda u: _receita_100(u), "R$ 100,00", "R$ 0,00", "R$ 100,00"),
+    (lambda u: _receita_100(u, "gastei 70 no mercado"), "R$ 30,00", "R$ -70,00", "R$ 100,00"),
+    (lambda u: _receita_100(u, "gastei 150 no mercado"), "R$ -50,00", "R$ -150,00", "R$ 100,00"),
+    (_receita_e_despesa_pendentes, "R$ 72,38", "R$ -1,00", "R$ 73,38"),
+], ids=["nada_gasto", "entrada_maior_que_a_tela", "tela_negativa", "receita_e_despesa"])
+def test_recusa_cita_a_tela_e_o_disponivel_a_parte(
+        uid_pro, ia_fora, sem_autorizacao, prepara, tela, disponivel, a_conferir):
+    """O número da tela e o disponível, separados; nada diz que um contém o outro."""
+    from fastapi import HTTPException
+    from frontend.routes.cards import PayBillPayload, pay_bill_route
+    prepara(uid_pro)
+    db.create_pocket(uid_pro, "viagem")
+    frase = (f"{tela} (disponível para pagar: {disponivel}, porque {a_conferir} "
+             "de entrada ainda está a conferir com o banco)")
+
+    assert f"Carteira: {tela}" in manda(uid_pro, "/saldo")
     recusa = manda(uid_pro, "guardei 50 na caixinha viagem")
-    assert ("Carteira*: R$ 100,00 (sendo R$ 100,00 de entrada a conferir com o banco, "
-            "que não conta para pagar)") in recusa, recusa
-    assert "✅" in manda(uid_pro, "guardei 20 na caixinha viagem"), "o banco cobre 20"
+    assert f"Carteira*: {frase}\n" in recusa, recusa
+    with pytest.raises(HTTPException) as e:
+        asyncio.run(pay_bill_route(_Req(), uid_pro, _fatura_de(uid_pro, 80.0),
+                                   PayBillPayload(amount=50.0)))
+    assert e.value.detail == f"Saldo insuficiente. Saldo atual: {frase}, valor pedido: R$ 50,00."
+    assert "sendo" not in recusa + e.value.detail
+
+
+def test_recusa_sem_pendencia_nao_muda(uid_pro, ia_fora, sem_autorizacao):
+    """Sem pendência o texto é o de antes deste PR, byte a byte (o do bot; o 400
+    da fatura trocou `R$ 10.00` por `R$ 10,00` na rodada 2)."""
+    from fastapi import HTTPException
+    from frontend.routes.cards import PayBillPayload, pay_bill_route
+    db.add_launch_and_update_balance(uid_pro, "receita", 10, None, "seed")
+    assert funding.msg_insuficiente(uid_pro, 50, acao="depósito") == (
+        "Saldo insuficiente: você tem R$ 10,00 na conta e o depósito é de R$ 50,00.")
+
+    conecta_banco(uid_pro, "0.00")
+    assert funding.msg_insuficiente(uid_pro, 50, acao="depósito") == (
+        "Nenhum dos seus saldos cobre R$ 50,00 de depósito:\n\n"
+        "• **Carteira**: R$ 10,00\n"
+        "• **Nubank · Nubank Conta**: R$ 0,00\n\n"
+        "A **Carteira** é o dinheiro fora dos bancos conectados (espécie e contas "
+        "que você não ligou) — por isso ela costuma ficar zerada depois que você conecta "
+        "um banco.")
+    with pytest.raises(HTTPException) as e:
+        asyncio.run(pay_bill_route(_Req(), uid_pro, _fatura_de(uid_pro, 80.0),
+                                   PayBillPayload(amount=50.0)))
+    assert e.value.detail == "Saldo insuficiente. Saldo atual: R$ 10,00, valor pedido: R$ 50,00."
