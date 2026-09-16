@@ -1113,12 +1113,12 @@ function openChangeModal(plan, continuation) {
     confirm.disabled = true;
     confirm.textContent = "Agendando…";
     try {
+      const continuingPurchase = changeModalContinuation;
       const r = await fetch("/billing/change-plan", {
         method: "POST", credentials: "same-origin",
         headers: { "Content-Type": "application/json", "x-csrf-token": getCsrfToken() },
         body: JSON.stringify({ plan: plan, interval: changeInterval }),
       });
-      const continuingPurchase = changeModalContinuation;
       if (r.status === 401 && continuingPurchase) {
         preservePurchaseForAuth(plan, changeInterval, "card");
         closeChangeModal(true);

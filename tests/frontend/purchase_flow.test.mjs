@@ -476,8 +476,9 @@ test("conta já assinante entra no fluxo de troca em vez de repetir o 409", asyn
       detail: { error: "already_subscribed", message: "Você já possui uma assinatura ativa." },
     }),
   }));
-  await page.route("**/billing/change-plan", (route) => {
+  await page.route("**/billing/change-plan", async (route) => {
     changeCalls += 1;
+    await new Promise((resolve) => setTimeout(resolve, 150));
     return route.fulfill({
       contentType: "application/json",
       body: JSON.stringify({ effective_at: "2026-10-15" }),
@@ -505,7 +506,8 @@ test("conta já assinante entra no fluxo de troca em vez de repetir o 409", asyn
   await page.click("#purchase-continuation-retry");
   await page.waitForFunction(() => document.getElementById("chg-overlay")?.style.display === "flex");
   await page.click("#chg-confirm");
-  await page.waitForURL("**/home");
+  await page.click("#chg-overlay .btn-outline");
+  await page.waitForURL("**/home", { timeout: 5000 });
   assert.equal(changeCalls, 1);
   assert.equal(await page.evaluate(() => sessionStorage.getItem("pb_purchase_intent_v1")), null);
   await page.close();
@@ -611,8 +613,9 @@ test("sessão expirada ao confirmar troca preserva a compra e oferece novo login
       detail: { error: "already_subscribed", message: "Você já possui uma assinatura ativa." },
     }),
   }));
-  await page.route("**/billing/change-plan", (route) => {
+  await page.route("**/billing/change-plan", async (route) => {
     changeCalls += 1;
+    await new Promise((resolve) => setTimeout(resolve, 150));
     return route.fulfill({
       status: 401,
       headers: { "WWW-Authenticate": "Bearer" },
@@ -629,7 +632,10 @@ test("sessão expirada ao confirmar troca preserva a compra e oferece novo login
   await page.goto(`${ORIGIN}/continuar-compra`);
   await page.waitForFunction(() => document.getElementById("chg-overlay")?.style.display === "flex");
   await page.click("#chg-confirm");
-  await page.waitForSelector("#purchase-continuation-actions.show", { timeout: 5000 });
+  await page.click("#chg-overlay .btn-outline");
+  await page.waitForFunction(() => (
+    document.getElementById("purchase-continuation-retry")?.textContent === "Entrar novamente"
+  ), { timeout: 5000 });
   assert.equal(changeCalls, 1);
   assert.equal(await page.textContent("#purchase-continuation-retry"), "Entrar novamente");
   const restored = await page.evaluate(() => window.PBPurchaseIntent.pending());
