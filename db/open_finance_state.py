@@ -983,19 +983,21 @@ def pluggy_items_lock(item_ids: list[str]):
         #
         # A VAGA VOLTA ANTES DO LOG, e a ordem é conserto, não estilo: este
         # WARNING passa pelo `_DashboardHandler` (`core/observability.py`), que
-        # grava abrindo `psycopg.connect` + INSERT. MEDIDO com o handler real
-        # no root (2026-09-16, `logger.warning(…, exc_info=True)` dentro de um
-        # `except psycopg.OperationalError` injetado, banco bom em 127.0.0.1,
-        # `system_event_logs` já criada, 3 processos novos): 7,7–11,5 ms na 1ª
-        # chamada e 4,9–9,9 ms em série — a MESMA ordem dos 11,3 ms / 2,1–3,7 ms
-        # sem `exc_info` de `core/observability.py:38`, que é a outra medição
-        # desta mesma grandeza. Os 390,6 ms que uma versão anterior desta frase
-        # dava para a 1ª chamada NÃO se reproduziram e NÃO se explicam pelo
-        # traceback + `exc_info` + JSONB: `format_exception` custa 0,4 ms, e a
-        # 1ª chamada com e sem `exc_info` sai no mesmo intervalo (7,5–9,8 ms sem);
-        # resolução de nome também não (1º connect por `localhost` 6,3 ms ×
-        # `127.0.0.1` 3,9 ms). Remedir antes de reusar. E 2006,3 ms com o host
-        # INALCANÇÁVEL — o `connect_timeout=2` de `core/system_event_log.py`.
+        # grava abrindo `psycopg.connect` + INSERT — o log é uma ida ao banco.
+        # Com o banco bom ela custa milissegundos: a medição dessa grandeza é o
+        # `ponytail:` do docstring de `_DashboardHandler`, e com `exc_info=True`
+        # a 1ª chamada sai no mesmo intervalo (remedido 2026-09-16) — traceback
+        # + `exc_info` + JSONB não mudam a ordem. Os 390,6 ms que uma versão
+        # anterior desta frase dava para a 1ª chamada vieram de uma medição
+        # feita com a suíte inteira rodando em paralelo na mesma máquina; sob
+        # carga o número sobe (2026-09-16: até 88,3 ms com 12 workers de
+        # connect+INSERT+CPU e CREATE/DROP DATABASE concorrentes), sem chegar a
+        # 390 ms — carga é a causa provável, não confirmada. Remedir antes de
+        # reusar. E com o host INALCANÇÁVEL ela custa ~2 s — o `connect_timeout=2`
+        # de `core/system_event_log.py`; 2006,8 ms em 2026-09-16 com:
+        #   python3 -c "import time,psycopg; t=time.perf_counter()
+        #   try: psycopg.connect('postgresql://u:p@10.255.255.1/db', connect_timeout=2)
+        #   except psycopg.OperationalError: print(f'{(time.perf_counter()-t)*1000:.1f} ms')"
         # É justamente aí que este `except`
         # dispara: quando o banco está indo embora. Logar com a vaga na mão
         # somava 2 s a uma das 8 do `_lock_slots()`, e o disconnect e o
