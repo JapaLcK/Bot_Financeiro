@@ -110,7 +110,7 @@ function servirDoDisco(route, url) {
   try {
     return route.fulfill({ status: 200, contentType: TIPOS[ext] || "application/octet-stream",
                            body: readFileSync(join(FRONTEND, url.pathname.replace(/^\//, ""))) });
-  } catch (_) {
+  } catch {
     return route.fulfill({ status: 404, body: "" });        // asset que o app tolera faltar
   }
 }
@@ -143,7 +143,7 @@ async function abrir(pagina = "dashboard.html", fabPos = null) {
   // SÓ no dashboard: o caso (d) depende de o /settings NÃO tê-la, que é o
   // escopo inteiro da regra em teste.
   await page.addInitScript(({ pos, dash }) => {
-    if (pos) { try { localStorage.setItem("pbFabPos", JSON.stringify(pos)); } catch (_) {} }
+    if (pos) { try { localStorage.setItem("pbFabPos", JSON.stringify(pos)); } catch { /* localStorage indisponivel */ } }
     if (!dash) return;
     const obs = new MutationObserver(() => {
       if (document.body) { document.body.classList.add("pb-page-app"); obs.disconnect(); }
