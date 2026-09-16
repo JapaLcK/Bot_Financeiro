@@ -336,8 +336,14 @@ _AUTORIZE_NO_APP = _DETALHE_POR_STATUS[ITEM_STATUS_AUTORIZA_DISPOSITIVO]
 
 # A ORDEM DOS GRUPOS É A PRIORIDADE quando um produto (ou o sujeito) traz mais de
 # um código: vence a instrução que ainda RECUPERA dado. Esconder "autorize" atrás
-# de "não adianta" faz perder um cartão que viria; o contrário custa no máximo um
-# passo a mais. Por isso: agir agora > reconectar > esperar > desistir.
+# de "não adianta" faz perder um cartão que viria. Por isso: agir agora >
+# reconectar > esperar > desistir — com UMA exceção dentro do mesmo produto, que
+# mora no `_motivo_do_warning` porque reconectar ali não é "um passo a mais": gasta
+# a cota do mês (ver `_RECONECTE`).
+_RECONECTE = "você não liberou esse dado ao conectar o banco, reconecte para liberar"
+_LIMITE_DE_CONSULTAS = ("o banco bateu o limite de consultas do Open Finance, volta "
+                        "sozinho na virada do período")
+
 _MOTIVO_POR_WARNING = {
     code: frase
     for frase, codes in (
@@ -353,12 +359,18 @@ _MOTIVO_POR_WARNING = {
         # CREDIT_CARDS_ALL / ACCOUNTS_TRANSACTIONS / INVESTMENTS_ALL)" e
         # `INV_002` "Investment product permission has not been granted" — é
         # permissão, e reconectar é o caminho que a repara.
-        ("você não liberou esse dado ao conectar o banco, reconecte para liberar",
+        # `INV_002` entra e `CC_005`/`CC_006`/`ACCT_005` não. O que é da doc: os
+        # três nomeiam a permissão de um DADO ANEXO a um registro que vem pela
+        # `_ALL` (CREDIT_CARDS_BILLS, CREDIT_CARDS_TRANSACTIONS, ACCOUNTS_LIMITS),
+        # então não explicam o cartão/conta atrasado; `INV_002` não nomeia dado
+        # anexo nenhum, só "investment product". O que é LEITURA nossa, não da
+        # doc: que esse "product" é o tipo da própria posição de investimento, e
+        # por isso sem a permissão é o dado do produto que falta.
+        (_RECONECTE,
          ("ACCT_001", "CC_001", "TXN_001", "TXN_004", "INV_001", "INV_002")),
         # INV_004 é "Open Finance monthly rate limit reached"; TXN_003/TXN_006 a
         # doc chama só de "rate limit reached" — daí "período", e não "mês".
-        ("o banco bateu o limite de consultas do Open Finance, volta sozinho na "
-         "virada do período",
+        (_LIMITE_DE_CONSULTAS,
          ("INV_004", "TXN_003", "TXN_006")),
         ("o banco não liberou esse dado agora, deve voltar sozinho em algumas horas",
          ("ACCT_003", "CC_003")),
@@ -439,9 +451,20 @@ def _motivo_do_warning(health: dict | None, produtos) -> str:
             # banco sem investimentos.
             continue
         codes = detalhe.get("warnings") if isinstance(detalhe, dict) else None
+        candidatos = [c for c in map(_frase_do_codigo, codes) if c] \
+            if isinstance(codes, list) else []
+        # EXCEÇÃO, só dentro do mesmo produto: limite vence "reconecte". A cota é
+        # por CPF + instituição + produto, CRIAR ITEM a consome, e a doc
+        # (docs.pluggy.ai/en/docs/open-finance/rate-limits) diz que conectar o
+        # mesmo CPF à mesma instituição com vários itens "you will reach the
+        # limitation of Open Finance faster". Com o produto parado pelo limite,
+        # reconectar não o traz de volta e gasta a cota — foi assim que a do dono
+        # acabou. Entre produtos NÃO vale: o outro produto precisa mesmo da
+        # permissão, e a frase já sai nomeada.
+        if any(frase == _LIMITE_DE_CONSULTAS for _, frase in candidatos):
+            candidatos = [c for c in candidatos if c[1] != _RECONECTE]
         # `min`, não "o primeiro": a ordem da lista é da Pluggy, a prioridade é nossa.
-        melhor = min(filter(None, map(_frase_do_codigo, codes)), default=None) \
-            if isinstance(codes, list) else None
+        melhor = min(candidatos, default=None)
         achados.append((produto, melhor))
 
     frases = {m[1] for _, m in achados if m}

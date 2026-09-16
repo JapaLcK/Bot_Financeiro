@@ -248,6 +248,32 @@ def test_autorize_vence_nao_adianta_no_mesmo_produto(ordem):
     assert detalhe.endswith("autorize o acesso no app do banco"), detalhe
 
 
+# ── limite do mês vence "reconecte", SÓ dentro do mesmo produto ─────────────
+# A cota do Open Finance é por CPF + instituição + produto, e criar item a
+# consome (docs.pluggy.ai/en/docs/open-finance/rate-limits: "if you connect the
+# same CPF/CNPJ to the same institution by creating multiple items, you will reach
+# the limitation of Open Finance faster"). Com o produto parado pelo limite,
+# mandar reconectar gasta a cota e não traz nada de volta — foi assim que a do
+# dono acabou. Decisão do dono: a exceção vale só DENTRO do produto.
+# CONTROLE NEGATIVO: apagar a exceção em `_motivo_do_warning` deixa vermelhos os
+# três casos do mesmo produto, e o controle positivo continua verde.
+
+@pytest.mark.parametrize("codes", [["INV_002", "INV_004"], ["INV_004", "INV_002"],
+                                   ["INV_001", "INV_004"]])
+def test_no_mesmo_produto_o_limite_vence_o_reconecte(codes):
+    detalhe = _detalhe(investments=[{"code": c} for c in codes])
+    assert detalhe.endswith("volta sozinho na virada do período"), detalhe
+    assert "reconecte" not in detalhe, detalhe
+
+
+def test_entre_produtos_o_reconecte_do_outro_produto_continua():
+    """CONTROLE POSITIVO: o cartão precisa mesmo de permissão, e a frase sai
+    nomeada — a exceção não pode vazar para fora do produto."""
+    detalhe = _detalhe(creditCards=[{"code": "CC_001"}], investments=[{"code": "INV_004"}])
+    assert detalhe.endswith(" — Cartão: você não liberou esse dado ao conectar o banco, "
+                            "reconecte para liberar"), detalhe
+
+
 def test_so_codigo_cru_continua_aparecendo():
     """CONTROLE POSITIVO da prioridade: sem motivo explicável, o cru É o motivo."""
     assert _detalhe(creditCards=[{"code": "004"}]).endswith(
