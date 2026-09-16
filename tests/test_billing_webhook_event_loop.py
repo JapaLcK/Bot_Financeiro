@@ -52,6 +52,31 @@ passaria na medição de thread e quebraria o contrato. Ele também é o par do
 `test_T7_retrieve_que_estoura_devolve_5xx_sem_escrever_nada`
 (`tests/test_billing_payment_failed.py`), que cobre o ramo `payment_failed` e
 tem de continuar verde.
+
+
+SEGUNDA CLASSE (#440) — a dedupe `recent_event_exists` (abre conexão psycopg
+síncrona, `core/system_event_log.py:299`), chamada DUAS vezes no ramo
+`customer.subscription.trial_will_end`:
+
+| chamada                                  | linha | estado na `main` |
+|------------------------------------------|-------|------------------|
+| ramo `trial_will_end`, dedupe de fora    | :5798 | direta no loop — consertada por este PR |
+| `_fire_email`, dedupe de dentro          | :5399 | já em `to_thread` (o padrão) |
+
+CONTROLE NEGATIVO DECLARADO — em `frontend/finance_bot_websocket_custom.py`:
+    tirar o `await asyncio.to_thread(` de `:5798`
+        VERMELHO: test_dedupe_do_trial_will_end_nao_roda_na_thread_do_event_loop
+                  (`onde[0] is True`)
+    tirar o de `:5399`
+        VERMELHO: o mesmo teste, com `onde[1] is True`
+    tirar SÓ o `await` de `:5798` (coroutine truthy, o ramo nunca entra)
+        VERMELHO: test_trial_will_end_reentregue_nao_manda_segundo_email
+                  (0 chamadas no 1º POST) e o negativo (`len(onde) == 0`)
+
+CONTROLE POSITIVO: `test_trial_will_end_reentregue_nao_manda_segundo_email` —
+a dedupe continua dedupando com o banco REAL: 1ª entrega manda e grava o
+marcador de fora (`:5807`, contrato com o `engagement_scheduler`), 2ª entrega
+do mesmo evento não manda de novo.
 """
 from __future__ import annotations
 
@@ -166,5 +191,95 @@ def test_retrieve_que_estoura_continua_virando_5xx(user_id, monkeypatch, tipo):
         assert r.status_code >= 500, (
             f"ramo {tipo}: erro do retrieve deixou de virar 5xx — a Stripe "
             f"para de reentregar e o evento se perde")
+    finally:
+        _cleanup_trial(uid)
+
+
+# ── segunda classe: a dedupe `recent_event_exists` do ramo trial_will_end ────
+
+def _trial_will_end(uid: int) -> dict:
+    """Evento no formato de `test_billing_email_nome_do_plano.py`: sub em
+    `trialing` a 3 dias do fim, resolvida por `metadata.finbot_user_id`."""
+    from _billing_grants_helpers import sub_stripe
+    sub = sub_stripe("trialing", "price_evl", 3)
+    sub["id"] = "sub_evl_twe"
+    sub["metadata"] = {"finbot_user_id": str(uid)}
+    return {"type": "customer.subscription.trial_will_end", "id": "evt_evl_twe",
+            "created": _T_LIFE, "data": {"object": sub}}
+
+
+def test_dedupe_do_trial_will_end_nao_roda_na_thread_do_event_loop(user_id, monkeypatch):
+    """As DUAS checagens de dedupe do ramo (`:5798` de fora, `:5399` dentro do
+    `_fire_email`) têm de sair da thread do event loop.
+
+    O espião entra em `core.observability` porque os dois call sites fazem
+    `from core.observability import recent_event_exists` DENTRO da função —
+    o atributo do módulo é lido na hora da chamada. Mesmo observável de
+    `_espiar_retrieve` (`get_running_loop`), pela mesma razão de lá.
+    Exige `len(onde) == 2`: se só uma checagem aparecer, o POST não percorreu o
+    ramo inteiro e a medição da outra é vácuo.
+    """
+    import asyncio
+    from _billing_grants_helpers import espiao_email
+    from core.services import email_service
+
+    onde: list[bool] = []
+
+    def _espiao(event_type, user_id, within_days=7.0):
+        try:
+            asyncio.get_running_loop()
+            onde.append(True)      # há loop NESTA thread → a query o bloqueia
+        except RuntimeError:
+            onde.append(False)     # thread sem loop → executor
+        return False
+
+    monkeypatch.setattr("core.observability.recent_event_exists", _espiao)
+    monkeypatch.setattr(email_service, "send_trial_ending_email",
+                        espiao_email({}, "send_trial_ending_email"))
+
+    uid, client, fake = _setup(monkeypatch, f"evl-twe-{user_id}")
+    try:
+        r = _post(client, fake, _trial_will_end(uid))
+        assert r.status_code == 200, r.text
+        assert len(onde) == 2, f"esperava as 2 checagens do ramo, vi {onde}"
+        assert not any(onde), (
+            f"dedupe rodou na thread do event loop (fora={onde[0]}, "
+            f"_fire_email={onde[1]}) — bloqueia request e outros webhooks "
+            f"pelo connect/statement timeout do Postgres")
+    finally:
+        _cleanup_trial(uid)
+
+
+def test_trial_will_end_reentregue_nao_manda_segundo_email(user_id, monkeypatch):
+    """POSITIVO do par: `to_thread` NÃO pode ter mudado a dedupe.
+
+    `recent_event_exists` REAL, mesmo evento entregue duas vezes: 1ª manda o
+    e-mail e grava o marcador de fora (`trial_ending_email_sent`, que é o que o
+    `engagement_scheduler` consulta); 2ª não manda. Sem este caso, um
+    `to_thread(...)` sem `await` (coroutine é truthy → `not` dá False → o ramo
+    nunca entra → zero e-mails para sempre) passaria verde no negativo.
+    """
+    from core.observability import recent_event_exists
+    from core.services import email_service
+
+    chamadas: list[tuple] = []
+
+    def _send(*a, **kw):
+        chamadas.append(a)
+        return True
+    _send.__name__ = "send_trial_ending_email"
+    monkeypatch.setattr(email_service, "send_trial_ending_email", _send)
+
+    uid, client, fake = _setup(monkeypatch, f"evp-twe-{user_id}")
+    try:
+        r = _post(client, fake, _trial_will_end(uid))
+        assert r.status_code == 200, r.text
+        assert len(chamadas) == 1, f"1ª entrega: esperava 1 e-mail, vi {len(chamadas)}"
+        assert recent_event_exists("trial_ending_email_sent", uid, 6), (
+            "marcador de fora não gravado — o scheduler mandaria de novo")
+
+        r = _post(client, fake, _trial_will_end(uid))
+        assert r.status_code == 200, r.text
+        assert len(chamadas) == 1, f"reentrega: esperava ainda 1 e-mail, vi {len(chamadas)}"
     finally:
         _cleanup_trial(uid)
