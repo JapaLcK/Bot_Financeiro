@@ -31,6 +31,12 @@
  *
  * Rodar: NODE_PATH=$(npm root -g) node --test tests/frontend/toast_fab_app_375.test.mjs
  * Precisa de `npm ci` na raiz (playwright) + `npx playwright install chromium`.
+ *
+ * Controle negativo da espera do comToast (CPU do Chromium 50× mais lenta):
+ *   PB_TEST_CPU_THROTTLE=50 NODE_PATH=$(npm root -g) node --test tests/frontend/toast_fab_app_375.test.mjs
+ * Com o `waitForTimeout(300)` antigo no lugar da espera por estado, essa taxa
+ * reproduz os vermelhos do CI (toast em top 622, folga < 8) — ×20 NÃO reproduz
+ * nesta máquina. Leva ~2–3 min por rodada.
  */
 import { test, before, after } from "node:test";
 import assert from "node:assert/strict";
@@ -122,6 +128,11 @@ function servirDoDisco(route, url) {
 async function abrir(pagina = "dashboard.html", fabPos = null) {
   const ctx = await browser.newContext({ viewport: VIEWPORT, userAgent: APP_UA, hasTouch: true });
   const page = await ctx.newPage();
+  // Controle negativo do comToast (ver o cabeçalho): sem a variável não faz nada.
+  if (process.env.PB_TEST_CPU_THROTTLE) {
+    const cdp = await ctx.newCDPSession(page);
+    await cdp.send("Emulation.setCPUThrottlingRate", { rate: Number(process.env.PB_TEST_CPU_THROTTLE) });
+  }
   await page.route("**/*", (route) => {
     const url = new URL(route.request().url());
     if (url.origin !== ORIGIN) return route.abort();        // CDN fora
@@ -174,18 +185,30 @@ async function abrir(pagina = "dashboard.html", fabPos = null) {
 }
 
 /**
- * Acende o toast pelo CAMINHO REAL (`showToast`, dashboard.js:7572) e espera a
- * transição de .22s assentar.
+ * Acende o toast pelo CAMINHO REAL (`showToast`, dashboard.js:7578) e espera a
+ * transição de .22s (`opacity`, `transform`; dashboard.css:1625) ASSENTAR —
+ * por ESTADO, não por relógio. Um `waitForTimeout(300)` fixo media o toast no
+ * meio da animação sob carga (runner do CI; aqui, `PB_TEST_CPU_THROTTLE=50`):
+ * `top` 622 = 612 + os 10px do translateY inicial, e a folga de 8px virava
+ * 5,5–6,9. O critério é `opacity === "1"` (assentou VISÍVEL) + zero animações
+ * pendentes — e NÃO o `transform` final, porque o caso (d) usa este mesmo
+ * helper no settings, cujo toast assenta em `translateX(-50%) translateY(0)`
+ * (settings.html:1056), uma matriz diferente. `getAnimations().length === 0`
+ * cobre as duas propriedades sem conhecer o valor final. Não use
+ * `getAnimations().map(a => a.finished)` como o bank_movements.test.mjs: o
+ * `.finished` REJEITA se o timer de 2s do showToast cancelar a transição.
  *
  * Escrever `textContent` + `.show` na mão parecia equivalente e não é: para
  * mensagem que começa com ✓ — que é o DEFAULT — o showToast monta `innerHTML`
  * com um `<img class="toast-sticker">` de 22px, e a caixa passa de 35px para
  * 42px de altura. Medir a caixa errada é medir outro elemento.
  *
- * O `setInterval` existe porque o showToast se apaga sozinho em 2s
- * (dashboard.js:7583) e o `toastT` que o agenda é `let` de escopo de script,
- * inalcançável daqui. Sob paralelismo uma medição podia cair depois dos 2s e
- * ler a caixa já escondida. Morre com a página.
+ * O `setInterval` existe porque o toast se apaga sozinho, e são DOIS timers,
+ * um por página: `toastT` no dashboard.js (~:7577, 2s) e `_toastTimer` no
+ * settings.html (~:1955, 2,4s). O interval serve às duas sem conhecer nenhum.
+ * Sob paralelismo uma medição podia cair depois do apagão e ler a caixa já
+ * escondida. Re-adicionar `.show` já presente não cria animação, então ele não
+ * atrapalha a espera acima. Morre com a página.
  */
 async function comToast(page, msg) {
   await page.evaluate((m) => {
@@ -194,7 +217,10 @@ async function comToast(page, msg) {
     clearInterval(window.__mantemToast);
     window.__mantemToast = setInterval(() => t.classList.add("show"), 100);
   }, msg);
-  await page.waitForTimeout(300);
+  await page.waitForFunction(() => {
+    const t = document.getElementById("toast");
+    return getComputedStyle(t).opacity === "1" && t.getAnimations().length === 0;
+  }, null, { timeout: 5_000 });
 }
 
 /** Retângulos + área de interseção, tudo medido no navegador. */
