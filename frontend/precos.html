@@ -850,6 +850,7 @@ function updateCmpFade() {
 let subState = null;
 let cancelChangePending = false;
 let changeModalContinuation = false;
+let changeModalPending = false;
 let purchaseResumePending = false;
 let purchaseResumeScheduled = false;
 window.pbPlanAuthState = "unknown";
@@ -1073,13 +1074,14 @@ function _ensureChangeModal() {
     '<div id="chg-body" style="color:rgba(255,255,255,.8);font-size:.92rem;line-height:1.65"></div>' +
     '<div style="display:flex;gap:10px;margin-top:22px">' +
     '<button id="chg-confirm" class="btn btn-primary" style="flex:1">Confirmar troca</button>' +
-    '<button class="btn btn-outline" style="flex:1" onclick="closeChangeModal()">Cancelar</button>' +
+    '<button id="chg-cancel" class="btn btn-outline" style="flex:1" onclick="closeChangeModal()">Cancelar</button>' +
     "</div></div>";
   el.addEventListener("click", () => closeChangeModal());
   document.body.appendChild(el);
 }
 
 function closeChangeModal(completed) {
+  if (changeModalPending && completed !== true) return;
   const el = document.getElementById("chg-overlay");
   if (el) el.style.display = "none";
   const recoverContinuation = changeModalContinuation && completed !== true;
@@ -1107,10 +1109,16 @@ function openChangeModal(plan, continuation) {
     `<p style="margin:0 0 6px"><i class="ph ph-check-circle" aria-hidden="true"></i> Você continua no ${cur} até <strong>${data}</strong> (período já pago)</p>` +
     `<p style="margin:0"><i class="ph ph-check-circle" aria-hidden="true"></i> Em ${data} seu plano vira ${novo} e a cobrança de ${preco} acontece no cartão cadastrado</p>`;
   const confirm = document.getElementById("chg-confirm");
+  const cancel = document.getElementById("chg-cancel");
+  changeModalPending = false;
   confirm.disabled = false;
+  cancel.disabled = false;
   confirm.textContent = "Confirmar troca";
   confirm.onclick = async function () {
+    if (changeModalPending) return;
+    changeModalPending = true;
     confirm.disabled = true;
+    cancel.disabled = true;
     confirm.textContent = "Agendando…";
     try {
       const continuingPurchase = changeModalContinuation;
@@ -1121,6 +1129,7 @@ function openChangeModal(plan, continuation) {
       });
       if (r.status === 401 && continuingPurchase) {
         preservePurchaseForAuth(plan, changeInterval, "card");
+        changeModalPending = false;
         closeChangeModal(true);
         purchaseResumePending = false;
         purchaseContinuationError(
@@ -1134,10 +1143,13 @@ function openChangeModal(plan, continuation) {
         const msg = (data2.detail && data2.detail.message) ||
           (typeof data2.detail === "string" ? data2.detail : "Não consegui agendar a troca.");
         showToast(msg, "err");
+        changeModalPending = false;
         confirm.disabled = false;
+        cancel.disabled = false;
         confirm.textContent = "Confirmar troca";
         return;
       }
+      changeModalPending = false;
       closeChangeModal(true);
       showToast(`✓ Troca agendada pra ${fmtBrDate(data2.effective_at)}. Te mandei um e-mail de confirmação.`);
       if (continuingPurchase) {
@@ -1149,7 +1161,9 @@ function openChangeModal(plan, continuation) {
       refreshPlanButtons();
     } catch {
       showToast("Erro de conexão. Tente novamente.", "err");
+      changeModalPending = false;
       confirm.disabled = false;
+      cancel.disabled = false;
       confirm.textContent = "Confirmar troca";
     }
   };

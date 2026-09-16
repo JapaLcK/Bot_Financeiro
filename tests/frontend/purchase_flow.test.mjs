@@ -506,7 +506,11 @@ test("conta já assinante entra no fluxo de troca em vez de repetir o 409", asyn
   await page.click("#purchase-continuation-retry");
   await page.waitForFunction(() => document.getElementById("chg-overlay")?.style.display === "flex");
   await page.click("#chg-confirm");
-  await page.click("#chg-overlay .btn-outline");
+  await page.evaluate(() => closeChangeModal());
+  assert.equal(await page.isVisible("#chg-overlay"), true,
+    "não deve fechar a troca enquanto o POST está pendente");
+  assert.equal(await page.isVisible("#purchase-continuation-actions"), false,
+    "não deve liberar uma nova tentativa durante o POST");
   await page.waitForURL("**/home", { timeout: 5000 });
   assert.equal(changeCalls, 1);
   assert.equal(await page.evaluate(() => sessionStorage.getItem("pb_purchase_intent_v1")), null);
@@ -632,7 +636,11 @@ test("sessão expirada ao confirmar troca preserva a compra e oferece novo login
   await page.goto(`${ORIGIN}/continuar-compra`);
   await page.waitForFunction(() => document.getElementById("chg-overlay")?.style.display === "flex");
   await page.click("#chg-confirm");
-  await page.click("#chg-overlay .btn-outline");
+  await page.evaluate(() => closeChangeModal());
+  assert.equal(await page.isVisible("#chg-overlay"), true,
+    "não deve fechar a troca enquanto a sessão é confirmada");
+  assert.equal(await page.isVisible("#purchase-continuation-actions"), false,
+    "não deve liberar nova tentativa antes da resposta 401");
   await page.waitForFunction(() => (
     document.getElementById("purchase-continuation-retry")?.textContent === "Entrar novamente"
   ), { timeout: 5000 });
