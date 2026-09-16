@@ -76,7 +76,6 @@ class SafeRuntimeTests(unittest.TestCase):
         ):
             with self.subTest(text=text):
                 result = _run("--layer", "core", "--text", text)
-
                 self.assertEqual(result.returncode, 0, result.stderr or result.stdout)
                 payload = json.loads(result.stdout)
                 self.assertEqual(payload["intent"], "out_of_scope")
@@ -118,7 +117,6 @@ class SafeRuntimeTests(unittest.TestCase):
         for text in cases:
             with self.subTest(text=text):
                 result = _run("--layer", "core", "--text", text)
-
                 self.assertEqual(result.returncode, 0, result.stderr or result.stdout)
                 payload = json.loads(result.stdout)
                 self.assertEqual(payload["intent"], "out_of_scope")
@@ -189,27 +187,32 @@ class SafeRuntimeTests(unittest.TestCase):
         ):
             with self.subTest(text=text):
                 result = _run("--layer", "core", "--text", text)
-
                 self.assertEqual(result.returncode, 0, result.stderr or result.stdout)
                 payload = json.loads(result.stdout)
                 self.assertNotIn("não posso comprar", payload["response"].lower())
 
     def test_erro_interno_nao_e_contabilizado_como_resposta(self) -> None:
-        result = _run("--layer", "core", "--core-error", "--text", "saldo")
-
-        self.assertEqual(result.returncode, 2, result.stderr or result.stdout)
-        payload = json.loads(result.stdout)
-        self.assertTrue(payload["response"])
-        self.assertFalse(payload["answered"])
-        self.assertTrue(payload["internal_error"])
-        self.assertEqual(payload["outcome"], "internal_error")
+        cases = (
+            ("--layer", "core", "--core-error", "--text", "saldo"),
+            ("--layer", "core", "--text", "faturas"),
+            ("--layer", "core", "--text", "criar caixinha viagem"),
+        )
+        for args in cases:
+            with self.subTest(args=args):
+                result = _run(*args)
+                self.assertEqual(result.returncode, 2, result.stderr or result.stdout)
+                payload = json.loads(result.stdout)
+                self.assertTrue(payload["response"])
+                self.assertFalse(payload["answered"])
+                self.assertTrue(payload["internal_error"])
+                self.assertEqual(payload["outcome"], "internal_error")
 
     def test_ajuda_financeira_classificada_fora_do_escopo_continua_util(self) -> None:
         cases = {
             "como faço para criar uma caixinha": "para criar uma caixinha",
-            "como faço para importar um extrato OFX": "extrato, envie",
-            "como faço para importar um CSV?": "arquivo .ofx, .csv ou .pdf",
-            "como faço para anexar um PDF?": "arquivo .ofx, .csv ou .pdf",
+            "como faço para importar um extrato OFX": "para importar um ofx",
+            "como faço para importar um CSV?": "extratos também aceitam .csv ou .pdf",
+            "como faço para anexar um PDF?": "extratos também aceitam .csv ou .pdf",
             "como faço um lançamento": "para fazer um lançamento",
         }
         for text, expected in cases.items():
@@ -233,7 +236,7 @@ class SafeRuntimeTests(unittest.TestCase):
         self.assertIn("conta corrente", payload["response"].lower())
     def test_pergunta_financeira_nao_reconhecida_recebe_ajuda_contextual(self) -> None:
         cases = {
-            "não entendi meu extrato": "arquivo .ofx, .csv ou .pdf",
+            "não entendi meu extrato": "extratos também aceitam .csv ou .pdf",
             "como funciona minha caixinha?": "caixinhas",
             "quero saber de investimentos": "investimentos",
         }
@@ -278,12 +281,12 @@ class SafeRuntimeTests(unittest.TestCase):
             "não consigo vincular minha conta do WhatsApp": "vinculação",
             "não entendi o report diário": "report diário",
             "não entendi as regras de categoria": "categorias",
-            "como usar o report diário?": "report diário",
+            "como usar o relatório mesmo?": "relatórios diários, semanais e mensais",
             "como usar a vinculação da conta?": "vincular",
             "como faço para categorizar meu gasto?": "categorias",
             "como faço para categorizar meus gastos?": "categorias",
-            "como usar o report diário no PigBank?": "report diário",
-            "como usar o report diário de gastos?": "report diário",
+            "como usar relatório semanal?": "resumo semanal",
+            "como usar report mensal?": "resumo mensal",
             "como faço para vincular minhas contas do WhatsApp ao PigBank?": "vincular",
             "como usar o dashboard?": "dashboard",
             "caxinha banana cosmica": "caixinhas",
@@ -313,7 +316,6 @@ class SafeRuntimeTests(unittest.TestCase):
 
     def test_falha_de_envio_nao_e_registrada_como_entrega(self) -> None:
         result = _run("--send-error")
-
         self.assertEqual(result.returncode, 2, result.stderr or result.stdout)
         payload = json.loads(result.stdout)
         self.assertEqual(payload["extracted"], 1)
@@ -323,7 +325,6 @@ class SafeRuntimeTests(unittest.TestCase):
 
     def test_controle_positivo_bloqueia_leitura_de_env(self) -> None:
         result = _run("--probe", "env")
-
         self.assertEqual(result.returncode, 70, result.stderr or result.stdout)
         payload = json.loads(result.stdout)
         self.assertEqual(payload["error"], "SAFETY_VIOLATION")
@@ -331,7 +332,6 @@ class SafeRuntimeTests(unittest.TestCase):
 
     def test_controle_positivo_bloqueia_rede(self) -> None:
         result = _run("--probe", "network")
-
         self.assertEqual(result.returncode, 70, result.stderr or result.stdout)
         payload = json.loads(result.stdout)
         self.assertEqual(payload["error"], "SAFETY_VIOLATION")

@@ -17,6 +17,17 @@ def _empty_balance() -> dict[str, Any]:
     }
 
 
+def _is_internal_failure_response(response: str) -> bool:
+    normalized = response.strip().casefold()
+    return (
+        normalized.startswith(("❌ erro ", "erro ao ", "⚠️ erro ao "))
+        or "ocorreu um erro interno" in normalized
+        or "database_url" in normalized
+        or "deu erro técnico" in normalized
+        or normalized.startswith("deu erro ao ")
+    )
+
+
 def run_core_case(text: str, *, force_internal_error: bool = False) -> dict[str, Any]:
     """Executa o núcleo real com bordas externas e leituras persistentes locais."""
     guards = SafetyGuards(allowed_write_root=Path.cwd())
@@ -76,7 +87,7 @@ def run_core_case(text: str, *, force_internal_error: bool = False) -> dict[str,
                 IncomingMessage(platform="whatsapp", user_id=7, text=text),
             )
         response = responses[0].text if responses else ""
-        internal_error = any(
+        internal_error = _is_internal_failure_response(response) or any(
             call.args
             and isinstance(call.args[0], str)
             and call.args[0].startswith("handle_incoming FAILED")

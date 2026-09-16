@@ -190,6 +190,22 @@ def _categories_contextual_fallback(norm: str) -> str:
 
 
 def _report_contextual_fallback(norm: str) -> str:
+    if re.search(r"\b(semanal|semana)\b", norm):
+        return (
+            "🗓️ Para consultar ou configurar o resumo semanal, use:\n"
+            "• `resumo semanal`\n"
+            "• `ligar resumo semanal`\n"
+            "• `desligar resumo semanal`"
+        )
+
+    if re.search(r"\b(mensal|mes)\b", norm):
+        return (
+            "🗓️ Para consultar ou configurar o resumo mensal, use:\n"
+            "• `resumo mensal`\n"
+            "• `ligar resumo mensal`\n"
+            "• `desligar resumo mensal`"
+        )
+
     if _has_any(norm, "desligar", "parar", "desativar"):
         return (
             "🗓️ Para desligar o report diário, use:\n"
@@ -204,8 +220,10 @@ def _report_contextual_fallback(norm: str) -> str:
         )
 
     return (
-        "🗓️ Posso te ajudar com o report diário assim:\n"
+        "🗓️ Posso te ajudar com relatórios diários, semanais e mensais:\n"
         "• `relatorio`\n"
+        "• `resumo semanal`\n"
+        "• `resumo mensal`\n"
         "• `ligar report diario`\n"
         "• `ligar report diario 20h`\n"
         "• `desligar report diario`"
@@ -238,8 +256,8 @@ def _account_contextual_fallback(norm: str) -> str:
 
 def _ofx_contextual_fallback() -> str:
     return (
-        "🧾 Para importar um extrato, envie ou anexe um arquivo "
-        "`.ofx`, `.csv` ou `.pdf` no chat. Para importar uma fatura, use `.ofx`."
+        "🧾 Para importar um OFX, envie ou anexe o arquivo no chat. "
+        "Extratos também aceitam `.csv` ou `.pdf`; para faturas, use `.ofx`."
     )
 
 
@@ -347,8 +365,8 @@ def _infer_precise_help(norm: str) -> str | None:
         and any(expr in norm for expr in import_terms)
     ) or _is_statement_file_help(norm):
         return (
-            "🧾 Para importar um extrato, envie ou anexe um arquivo "
-            "`.ofx`, `.csv` ou `.pdf` no chat. Para importar uma fatura, use `.ofx`."
+            "🧾 Para importar um OFX, envie ou anexe o arquivo no chat. "
+            "Extratos também aceitam `.csv` ou `.pdf`; para faturas, use `.ofx`."
         )
 
     if "fatura" in norm and any(expr in norm for expr in ("ver", "consultar", "pagar", "registrar")):
@@ -440,7 +458,10 @@ def _financial_topic(norm: str) -> str | None:
         r"\bcategoriz(?:ar|e)\b.*\b(gastos?|despesas?|receitas?|lancamentos?)\b", norm
     ):
         return "categories"
-    if re.search(r"\b(report diario|relatorio financeiro)\b", norm):
+    if re.search(
+        r"\b(?:report|relatorio)(?:\s+(?:diario|semanal|mensal|financeiro))?\b",
+        norm,
+    ):
         return "report"
     if re.search(r"\bvincul(?:ar|acao)\b.*\b(contas?|whatsapp|discord)\b", norm) or re.search(
         r"\bcodigo\s+de\s+vinculacao\b", norm
