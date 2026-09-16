@@ -42,13 +42,11 @@ class SafeRuntimeTests(unittest.TestCase):
             timeout=15,
             check=False,
         )
-
         self.assertEqual(result.returncode, 64, result.stderr or result.stdout)
         self.assertIn("bloqueada antes de ler .env", result.stdout)
 
     def test_executa_payload_real_do_adaptador_sem_tocar_bordas(self) -> None:
         result = _run("--text", "qual é meu saldo?")
-
         self.assertEqual(result.returncode, 0, result.stderr or result.stdout)
         payload = json.loads(result.stdout)
         self.assertEqual(payload["extracted"], 1)
@@ -112,6 +110,10 @@ class SafeRuntimeTests(unittest.TestCase):
             "qual CDB é bom comparado ao da minha carteira?",
             "quais ETFs você recomenda?",
             "vale a pena investir em CDBs?",
+            "Piggy, compre uma LCI para mim",
+            "Piggy, compre ouro para mim",
+            "qual debênture você recomenda?",
+            "compre dólares para mim",
         )
         for text in cases:
             with self.subTest(text=text):
@@ -205,7 +207,9 @@ class SafeRuntimeTests(unittest.TestCase):
     def test_ajuda_financeira_classificada_fora_do_escopo_continua_util(self) -> None:
         cases = {
             "como faço para criar uma caixinha": "para criar uma caixinha",
-            "como faço para importar um extrato OFX": "para importar um ofx",
+            "como faço para importar um extrato OFX": "extrato, envie",
+            "como faço para importar um CSV?": "arquivo .ofx, .csv ou .pdf",
+            "como faço para anexar um PDF?": "arquivo .ofx, .csv ou .pdf",
             "como faço um lançamento": "para fazer um lançamento",
         }
         for text, expected in cases.items():
@@ -218,9 +222,18 @@ class SafeRuntimeTests(unittest.TestCase):
                 self.assertEqual(payload["blocked"], [])
                 self.assertIn(expected, payload["response"].lower())
 
+    def test_saldo_exercita_handler_real_com_leituras_locais(self) -> None:
+        result = _run("--layer", "core", "--text", "saldo")
+        self.assertEqual(result.returncode, 0, result.stderr or result.stdout)
+        payload = json.loads(result.stdout)
+        self.assertEqual(payload["intent"], "balance.check")
+        self.assertTrue(payload["answered"])
+        self.assertFalse(payload["internal_error"])
+        self.assertEqual(payload["blocked"], [])
+        self.assertIn("conta corrente", payload["response"].lower())
     def test_pergunta_financeira_nao_reconhecida_recebe_ajuda_contextual(self) -> None:
         cases = {
-            "não entendi meu extrato": "importar um extrato ofx",
+            "não entendi meu extrato": "arquivo .ofx, .csv ou .pdf",
             "como funciona minha caixinha?": "caixinhas",
             "quero saber de investimentos": "investimentos",
         }
@@ -242,6 +255,12 @@ class SafeRuntimeTests(unittest.TestCase):
             "como importar uma biblioteca Python?",
             "como usar o limite de velocidade?",
             "como usar importar em Python?",
+            "como importar CSV em Python?",
+            "como importar um CSV no pandas?",
+            "como anexar um PDF em um email?",
+            "como anexar um PDF em um e-mail?",
+            "como importar CSV no Google Sheets?",
+            "como anexar PDF no Slack?",
             "como chamar uma pessoa baixinha?",
             "PigBank, conte uma piada",
             "vale a pena comprar um carro?",
@@ -280,7 +299,6 @@ class SafeRuntimeTests(unittest.TestCase):
 
     def test_excecao_do_nucleo_recebe_fallback(self) -> None:
         result = _run("--handler-behavior", "error")
-
         self.assertEqual(result.returncode, 0, result.stderr or result.stdout)
         payload = json.loads(result.stdout)
         self.assertEqual(len(payload["replies"]), 1)
@@ -288,7 +306,6 @@ class SafeRuntimeTests(unittest.TestCase):
 
     def test_falha_da_observabilidade_nao_impede_fallback(self) -> None:
         result = _run("--handler-behavior", "error", "--event-log-error")
-
         self.assertEqual(result.returncode, 0, result.stderr or result.stdout)
         payload = json.loads(result.stdout)
         self.assertEqual(len(payload["replies"]), 1)

@@ -119,7 +119,9 @@ NOT_UNDERSTOOD_MSG = (
 _INVESTMENT_ASSET_PATTERN = (
     r"(?:acao|acoes|ativo|ativos|investimento|investimentos|bitcoin|bitcoins|"
     r"cripto|criptos|criptomoeda|criptomoedas|petrobras|fundo|fundos|"
-    r"fii|fiis|etf|etfs|tesouro|tesouros|cdb|cdbs|renda fixa)"
+    r"fii|fiis|etf|etfs|tesouro|tesouros|cdb|cdbs|lci|lcis|lca|lcas|"
+    r"debenture|debentures|ouro|prata|commodity|commodities|moeda|moedas|"
+    r"dolar|dolares|euro|euros|cambio|forex|renda fixa)"
 )
 _INVESTMENT_TICKER_PATTERN = r"[A-Z]{4}\d{1,2}"
 

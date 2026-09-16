@@ -22,6 +22,22 @@ def _has_hint(norm: str, *terms: str) -> bool:
     return _has_any(norm, *terms) or _has_token_close_to(norm, *terms)
 
 
+def _is_statement_file_help(norm: str) -> bool:
+    """Aceita domínio explícito ou uma pergunta que termina no formato."""
+    norm = normalize_text(norm)
+    if not re.search(r"\b(csv|pdf)\b", norm):
+        return False
+    if re.search(r"\b(extrato|fatura|pigbank)\b", norm):
+        return True
+    return bool(
+        re.fullmatch(
+            r"(?:como(?: faco)?(?: para)? )?"
+            r"(?:importar|enviar|anexar)(?: um| o)?(?: arquivo)? (?:csv|pdf)",
+            norm,
+        )
+    )
+
+
 def _prepend_not_understood(topic: str, body: str) -> str:
     if body.strip().lower().startswith("não entendi"):
         return body
@@ -222,9 +238,8 @@ def _account_contextual_fallback(norm: str) -> str:
 
 def _ofx_contextual_fallback() -> str:
     return (
-        "🧾 Para importar um extrato OFX, envie a mensagem:\n"
-        "• `importar ofx`\n\n"
-        "Junto com o arquivo `.ofx` em anexo."
+        "🧾 Para importar um extrato, envie ou anexe um arquivo "
+        "`.ofx`, `.csv` ou `.pdf` no chat. Para importar uma fatura, use `.ofx`."
     )
 
 
@@ -326,10 +341,14 @@ def _infer_precise_help(norm: str) -> str | None:
                 "• `coloquei 300 na caixinha viagem`"
             )
 
-    if any(expr in norm for expr in ("ofx", "extrato")) and any(expr in norm for expr in ("importar", "enviar")):
+    import_terms = ("importar", "importacao", "enviar", "anexar")
+    if (
+        any(expr in norm for expr in ("ofx", "extrato"))
+        and any(expr in norm for expr in import_terms)
+    ) or _is_statement_file_help(norm):
         return (
-            "🧾 Para importar um OFX, envie o arquivo `.ofx` junto com a mensagem:\n"
-            "• `importar ofx`"
+            "🧾 Para importar um extrato, envie ou anexe um arquivo "
+            "`.ofx`, `.csv` ou `.pdf` no chat. Para importar uma fatura, use `.ofx`."
         )
 
     if "fatura" in norm and any(expr in norm for expr in ("ver", "consultar", "pagar", "registrar")):
@@ -414,6 +433,8 @@ def _financial_topic(norm: str) -> str | None:
     if re.search(r"\b(investimento|investimentos|aporte|resgate|cdb|tesouro|cdi)\b", norm):
         return "investments"
     if re.search(r"\b(ofx|extrato)\b", norm):
+        return "ofx"
+    if _is_statement_file_help(norm):
         return "ofx"
     if re.search(r"\bcategorias?\b", norm) or re.search(
         r"\bcategoriz(?:ar|e)\b.*\b(gastos?|despesas?|receitas?|lancamentos?)\b", norm

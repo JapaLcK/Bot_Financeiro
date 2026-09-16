@@ -44,8 +44,8 @@ def main() -> int:
                 SafetyGuards,
                 SafetyViolation,
                 run_adapter_case,
-                run_core_case,
             )
+            from harness_support.core_runtime import run_core_case
             from harness_support.policy_runtime import run_policy_case
 
             if args.probe:
