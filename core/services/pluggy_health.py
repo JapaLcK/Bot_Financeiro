@@ -546,7 +546,7 @@ def connection_ui_state(connection_row: dict) -> dict:
     # trouxer só `accounts`, o cartão que estava atrasado na foto ANTERIOR some
     # dela, `stale_products` fica vazio e o card vira "Atualizado". Fechar isso
     # exige comparar com a foto anterior — que o job de saúde sobrescreve — e
-    # ficou para issue própria.
+    # ficou para a issue #444.
     coletando_sem_info = (str((health or {}).get("item_status") or "").upper() in _UPDATING
                           and not (health or {}).get("products"))
 

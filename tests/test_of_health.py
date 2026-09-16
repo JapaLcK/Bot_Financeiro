@@ -130,7 +130,7 @@ def test_updating_sem_informacao_de_produto_nao_pode_ficar_verde():
 
     # LIMITE CONHECIDO, NÃO GARANTIA: `_SAUDAVEL` só traz `accounts`. Este verde
     # vale igual para um cartão que estava atrasado na foto anterior e sumiu
-    # desta — o aviso dele desaparece. Ver o comentário de `coletando_sem_info`.
+    # desta — o aviso dele desaparece (issue #444; ver `coletando_sem_info`).
     completo = derive_item_health({**_SAUDAVEL, "status": "UPDATING"}, now=AGORA)
     assert connection_ui_state({"status": "ACTIVE", "health": completo,
                                 "last_sync_at": AGORA})["state"] == "updated"
@@ -650,10 +650,11 @@ def test_todo_estado_nao_verde_tem_mensagem_de_veredito():
 # alguém tirar um dos cinco de `_NEEDS_USER`/`_UPDATING` por engano.
 #
 # CONTROLE NEGATIVO (medido): tirar "OUTDATED" de `_NEEDS_USER` deixa vermelho o
-# caso OUTDATED. Tirar "UPDATING" de `_UPDATING` deixa vermelho o caso UPDATING
-# desta tabela e mais os dois testes dos portões de item em coleta
+# caso OUTDATED. Tirar "UPDATING" de `_UPDATING` deixa vermelho, NESTE arquivo, o
+# caso UPDATING desta tabela e os dois testes dos portões de item em coleta
 # (`test_updating_so_e_updating_enquanto_a_conexao_nao_sincronizou` e
-# `test_updating_sem_informacao_de_produto_nao_pode_ficar_verde`).
+# `test_updating_sem_informacao_de_produto_nao_pode_ficar_verde`) — e fora dele
+# também, porque `ITEM_UPDATING` de `pluggy_sync` é o mesmo objeto.
 # CONTROLE POSITIVO: o caso UPDATED prova que a guarda não recusa tudo.
 
 _STATUS_DOCUMENTADOS = [

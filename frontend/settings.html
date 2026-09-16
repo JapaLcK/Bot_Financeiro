@@ -3406,20 +3406,24 @@ function refreshVerdict(sync) {
   const items = Array.isArray(sync.items) ? sync.items : [];
   for (const [estado, msg] of OF_VERDICT) {
     const achado = items.find((i) => i.state === estado);
-    // UMA entrada é neutra, e é exceção medida, não regra nova: `updating` é o
-    // banco ainda coletando — o estado que o `coletando_sem_info` do backend
-    // devolve quando o health não traz informação de produto, ou seja o caminho
-    // COMUM de um refresh que funcionou. As outras SETE continuam `error` de
-    // propósito: item sumido, removido, pausado e companhia são erro de verdade,
-    // e neutralizá-las apagaria o âmbar de quem precisa reconectar o banco.
+    // UMA entrada é neutra, por decisão do dono: `updating` = a conexão ainda
+    // não tem espelho pronto para mostrar — o item em coleta sem informação de
+    // produto (`coletando_sem_info` do backend) e também a que "Ainda não
+    // sincronizou". Nenhum dos dois é falha. Quão frequente é o primeiro num
+    // refresh que funcionou NÃO foi medido: depende do `statusDetail` que a
+    // Pluggy manda durante `UPDATING`, e nada na árvore diz qual é. Todas as
+    // outras entradas continuam `error` de propósito: item sumido, removido,
+    // pausado e companhia são erro de verdade, e neutralizá-las apagaria o
+    // âmbar de quem precisa reconectar o banco.
     if (achado)
       return { tone: estado === "updating" ? OF_TOM_COLETANDO : "error", msg: msg(achado) };
   }
-  // Tom NEUTRO, não `error`: `still_updating` conta item que a Pluggy ainda não
-  // terminou de coletar no fim da espera de 18s do servidor — coleta de banco
-  // real quase nunca cabe nela, então este ramo é o caminho COMUM de um refresh
-  // que deu certo. Como `error`, ele pintava o toast de vermelho e, no gesto,
-  // o `throw` lá em cima virava âmbar em todo pull-to-refresh bem-sucedido.
+  // Tom NEUTRO, não `error`: `still_updating` conta item que a Pluggy ainda
+  // reporta coletando quando o servidor olha (no fim da espera, ou pelo health
+  // regravado no cooldown). A coleta de um banco pode não caber na espera, e aí
+  // este ramo sai num refresh que deu certo. Como `error`, ele pintava o toast
+  // de vermelho e, no gesto, o `throw` lá em cima virava âmbar num
+  // pull-to-refresh bem-sucedido.
   // A FRASE é a mesma de propósito (decisão do dono) — só o tom muda.
   if (Number(sync.still_updating) > 0)
     return { tone: OF_TOM_COLETANDO, msg: OF_UPDATING_LOTE };

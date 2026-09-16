@@ -145,8 +145,8 @@ test("veredito do refresh: só estado conhecido-bom fica verde", async () => {
 
     // NUNCA verde — inclusive o estado inventado, que é o ponto do teste: o
     // backend pode ganhar um caso novo antes desta tela saber dele.
-    // AS SETE entradas de `OF_VERDICT` que não são `updating`, por nome, mais o
-    // estado inventado. Eram quatro: `needs_user_action`, `partial` e
+    // TODAS as entradas de `OF_VERDICT` que não são `updating`, por nome, mais o
+    // estado inventado. Antes eram só quatro: `needs_user_action`, `partial` e
     // `error_recoverable` só estavam presas como "≠ ok" num laço mais abaixo, e
     // neutralizar as três passava com o arquivo inteiro verde — com o gesto
     // ficando VERDE para "Ação necessária no Nubank: reautorize o acesso".
@@ -158,8 +158,8 @@ test("veredito do refresh: só estado conhecido-bom fica verde", async () => {
           item_id: "i1", institution: "Nubank", state: s, label: s, detail: null }] }), state);
       // `error`, e não só "≠ ok": desde que a entrada `updating` virou tom
       // neutro, "não é verde" deixou de separar erro de neutro — e um refactor
-      // que neutralizasse as OUTRAS SETE entradas passaria sem vermelho.
-      // Estas sete (mais o estado inventado, que cai no default seguro) são
+      // que neutralizasse as OUTRAS entradas passaria sem vermelho.
+      // Estas (mais o estado inventado, que cai no default seguro) são
       // erro de verdade: o usuário precisa reconectar, reativar, agir ou esperar.
       assert.equal(v.tone, "error", `${state} tinha que ser erro (veio "${v.msg}")`);
       assert.notEqual(v.msg, "Tudo em dia!", `${state} devolveu "Tudo em dia!"`);
@@ -240,11 +240,11 @@ test("veredito do refresh: só estado conhecido-bom fica verde", async () => {
     assert.equal(soContador.msg, semDetalhe.msg, "as duas frases de 'atualizando' divergiram");
 
     // ...e o TOM desse ramo não é `error`. `still_updating` conta item que a
-    // Pluggy ainda não terminou de coletar no fim da espera de 18s do servidor:
-    // coleta de banco real quase nunca cabe nela, então este é o caminho COMUM
-    // de um refresh que deu certo. Como `error`, o toast saía vermelho e o
+    // Pluggy ainda reporta coletando quando o servidor olha: a coleta de um banco
+    // pode não caber na espera, e aí este ramo sai num refresh que deu certo.
+    // Como `error`, o toast saía vermelho e o
     // `if (propagate && veredito.tone === "error") throw` de `refreshOpenFinance`
-    // pintava de âmbar TODO pull-to-refresh bem-sucedido.
+    // pintava de âmbar esse pull-to-refresh bem-sucedido.
     // CONTROLE NEGATIVO: repor `tone: "error"` nessa linha do settings.html
     // deixa esta asserção vermelha.
     assert.notEqual(soContador.tone, "error", `still_updating não é erro: ${soContador.msg}`);
@@ -398,8 +398,8 @@ test("PTR do OF chama o refresh real, e settings não abre WebSocket", async () 
     await page.route("**/auth/me", (route) =>
       route.fulfill(json({ app_access: true, plan_tier: "pro", of_ui_enabled: true })));
     const chamadas = [];
-    // `still_updating: 2` de propósito: é o caminho COMUM de um refresh que deu
-    // certo (a coleta do banco não cabe na espera do servidor), e era o único
+    // `still_updating: 2` de propósito: é o refresh que deu certo com a coleta do
+    // banco ainda rodando quando o servidor olhou, e era o único
     // ramo do veredito que o gesto não exercitava — com `still_updating: 0` este
     // teste dava o mesmo resultado com e sem a correção do tom. O `sync` é
     // trocado no meio do teste para exercitar os outros dois caminhos.
@@ -432,15 +432,15 @@ test("PTR do OF chama o refresh real, e settings não abre WebSocket", async () 
     const refresh = chamadas.filter((c) => c.startsWith("POST") && c.endsWith("/refresh"));
 
     // O MESMO, pelo item: `state: "updating"` é o que o backend devolve quando o
-    // health não traz informação de produto — o caminho comum depois do conserto
-    // do card. CONTROLE NEGATIVO: tirar o `estado === "updating" ?
+    // health não traz informação de produto (quão frequente isso é na Pluggy
+    // real não foi medido). CONTROLE NEGATIVO: tirar o `estado === "updating" ?
     // OF_TOM_COLETANDO :` da tabela do settings.html deixa esta asserção
     // vermelha (o `throw` volta e o indicador pinta âmbar).
     sync = { ok: false, still_updating: 0, items: [{ ...NUBANK, state: "updating" }] };
     assert.equal(await gesto(), "resolveu",
                  "banco ainda coletando não pode pintar âmbar no gesto");
 
-    // CONTROLE POSITIVO: as outras SETE entradas continuam erro, e no gesto isso
+    // CONTROLE POSITIVO: as outras entradas continuam erro, e no gesto isso
     // é o âmbar. Sem esta asserção o grupo passaria num código que neutralizou a
     // tabela inteira — que é pior que o bug, porque some o aviso de quem PRECISA
     // reconectar o banco.

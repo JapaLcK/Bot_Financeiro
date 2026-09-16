@@ -1199,13 +1199,11 @@ async def _adota_item_orfao(item_id: str, last_event: str | None = None) -> int 
         #     gate comenta — ainda importa.
         # O RÓTULO, no PRIMEIRO caso, pode mudar na hora — e o que decide é o
         # `statusDetail` que a Pluggy mandar no `GET /items` do próprio sync (o
-        # `derive_item_health` da linha 223 de `pluggy_sync.py`). Com informação
-        # de produto, `last_sync_at` carimbado já tira o card de "Atualizando…" e
-        # passa a palavra ao estado do DADO; SEM ela, `connection_ui_state`
+        # `derive_item_health` que `sync_pluggy_item` faz em `pluggy_sync.py`).
+        # Com informação de produto, `last_sync_at` carimbado já tira o card de
+        # "Atualizando…" e passa a palavra ao estado do DADO; SEM ela, `connection_ui_state`
         # mantém "Atualizando…" de propósito — `products` vazio é "não medi", não
         # é "nada atrasado" (`core/services/pluggy_health.py`).
-        # (Três versões anteriores deste comentário erraram: a 1ª dizia que mudava
-        # quando não mudava, a 2ª que nunca mudava, a 3ª que sempre mudava.)
         # No SEGUNDO caso — `ok=False`, que não carimba — segue "Atualizando…",
         # e quem tira o rótulo de lá é a passada seguinte do job de saúde (medido com
         # `OF_HEALTH_MAX_AGE_SEC=0`: com conta → "Atualizado", sem conta → "Sem
