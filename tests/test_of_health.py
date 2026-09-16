@@ -202,6 +202,58 @@ def test_um_produto_atrasado_diz_por_que_ele_nao_veio(code, trecho):
     assert trecho in _detalhe(creditCards=[{"code": code}]), code
 
 
+@pytest.mark.parametrize("code, trecho", [
+    # "Investment product permission has not been granted": é permissão, e a
+    # ação é a mesma do `INV_001`.
+    ("INV_002", "você não liberou esse dado ao conectar o banco"),
+    # "not supported by the financial institution" / "Specific investment product
+    # type not supported": nunca vem — mas é um TIPO, e a frase diz só isso.
+    ("INV_003", "o banco não oferece esse tipo de investimento por aqui"),
+    ("INV_005", "o banco não oferece esse tipo de investimento por aqui"),
+])
+def test_investimento_diz_por_que_nao_veio(code, trecho):
+    """CONTROLE NEGATIVO: tirar os três do mapa (como estava) deixa os três
+    vermelhos com "o banco avisou com o código INV_00x" no lugar do motivo."""
+    assert trecho in _detalhe(investments=[{"code": code}]), code
+
+
+# ── PRIORIDADE: motivo explicável vence código cru, e a ordem da Pluggy não conta ─
+# O item do dono veio com `004` NU — a separação da doc entre código tipado (Open
+# Finance) e nu (conector direto) não vale em produção, e os dois se misturam.
+# Toda a bateria acima usava só códigos do mapa, então era cega a isto.
+# CONTROLE NEGATIVO: trocar os `min` de `_motivo_do_warning` por "o primeiro"
+# deixa vermelhos os casos em que o cru vem ANTES.
+
+@pytest.mark.parametrize("ordem", [["004", "CC_001"], ["CC_001", "004"]])
+def test_no_mesmo_produto_o_motivo_vence_o_codigo_cru_em_qualquer_ordem(ordem):
+    detalhe = _detalhe(creditCards=[{"code": c} for c in ordem])
+    assert detalhe == ("Cartão desatualizado desde 12/08 — você não liberou esse "
+                       "dado ao conectar o banco, reconecte para liberar"), detalhe
+
+
+@pytest.mark.parametrize("contas, cartao", [(["004"], ["CC_001"]), (["CC_001"], ["004"])])
+def test_entre_produtos_o_motivo_vence_o_codigo_cru(contas, cartao):
+    detalhe = _detalhe(accounts=[{"code": c.replace("CC_", "ACCT_")} for c in contas],
+                       creditCards=[{"code": c} for c in cartao])
+    assert "você não liberou esse dado" in detalhe, detalhe
+    assert "código 004" not in detalhe, detalhe
+
+
+@pytest.mark.parametrize("ordem", [["CC_002", "CC_004"], ["CC_004", "CC_002"]])
+def test_autorize_vence_nao_adianta_no_mesmo_produto(ordem):
+    """`CC_002` num cartão e `CC_004` noutro, no mesmo produto: vence a instrução
+    que ainda RECUPERA dado. Esconder "autorize" atrás de "não adianta" perde o
+    cartão que viria; o contrário custa no máximo um passo a mais."""
+    detalhe = _detalhe(creditCards=[{"code": c} for c in ordem])
+    assert detalhe.endswith("autorize o acesso no app do banco"), detalhe
+
+
+def test_so_codigo_cru_continua_aparecendo():
+    """CONTROLE POSITIVO da prioridade: sem motivo explicável, o cru É o motivo."""
+    assert _detalhe(creditCards=[{"code": "004"}]).endswith(
+        "o banco avisou com o código 004, sem explicar o motivo")
+
+
 def test_a_instrucao_de_autorizar_no_app_e_a_mesma_do_waiting_user_action():
     """§0.7: `ACCT_002`/`CC_002` e `WAITING_USER_ACTION` são a mesma família, e a
     instrução tem de ser UMA. Derivada, não copiada — este teste é o que impede
@@ -215,7 +267,6 @@ def test_a_instrucao_de_autorizar_no_app_e_a_mesma_do_waiting_user_action():
 
 
 @pytest.mark.parametrize("code", ["ACCT_005", "CC_005", "CC_006", "CC_007",
-                                  "INV_002", "INV_003", "INV_005",
                                   "ACCT_006", "TXN_002", "TXN_005"])
 def test_codigo_de_sub_dado_nao_vira_frase_sobre_o_produto(code):
     """A frase fala do PRODUTO; estes códigos falam de um SUB-DADO dele ou de
@@ -372,9 +423,10 @@ def test_no_accounts_tambem_diz_o_motivo():
     ("User hasn't granted permission to collect accounts") preso no JSON.
 
     `isUpdated: true` de propósito: a doc diz que o warning também vem quando "the
-    product was retrieved correctly, but it can be improved with some user action"
-    — é literalmente este caso, a Pluggy devolve a lista VAZIA com o aviso. Um
-    filtro por `updated` aqui apagaria o único caso que existe."""
+    product was retrieved correctly, but it can be improved with some user action",
+    e o exemplo dela é de transações devolvidas VAZIAS com o aviso — este é o
+    análogo numa conta. Um filtro por `updated` aqui apagaria o caso que o ramo
+    existe para explicar."""
     ui = connection_ui_state({
         "status": "ACTIVE", "status_reason": "no_accounts", "last_sync_at": AGORA,
         "health": {"item_status": "UPDATED", "stale_products": [],

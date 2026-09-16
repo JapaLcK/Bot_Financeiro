@@ -316,12 +316,13 @@ _FIXED_DETAIL = {
 #
 # A LINHA QUE DECIDE QUEM ENTRA: a frase fala do PRODUTO ("o cartão não veio"),
 # então só entra código cuja linha da doc também fala do produto ou do recurso
-# inteiro. Código que fala de um SUB-DADO — `ACCT_005` (limites de cheque
-# especial), `CC_005` (faturas), `CC_006` (transações do cartão), `CC_007` (o
-# limite do cartão), `INV_002`/`INV_003`/`INV_005` ("investment product" /
-# "specific investment product type") — fica FORA e cai no fallback, junto de
-# `ACCT_006` (corte acima de 260 contas), `TXN_002` ("no accounts available") e
-# `TXN_005` ("accounts step had errors"), que não têm ação de usuário nenhuma.
+# inteiro — ou tem frase ESTREITA o bastante para dizer só o que a doc diz
+# (`INV_003`/`INV_005`). Código que fala de um SUB-DADO que a frase não nomeia —
+# `ACCT_005` (limites de cheque especial), `CC_005` (faturas), `CC_006`
+# (transações do cartão), `CC_007` (o limite do cartão) — fica FORA e cai no
+# fallback, junto de `ACCT_006` (corte acima de 260 contas), `TXN_002` ("no
+# accounts available") e `TXN_005` ("accounts step had errors"), que não têm
+# ação de usuário nenhuma.
 # Motivo: dizer "não adianta tentar de novo" por causa do `CC_007` condena um
 # cartão cuja fatura e cujas transações vêm normalmente. Frase que mente é pior
 # que código cru — o código cru pelo menos é honesto sobre a ignorância.
@@ -333,19 +334,13 @@ _FIXED_DETAIL = {
 # da frase, igual ao que o `ofInstrucao` do settings.html faz no toast.
 _AUTORIZE_NO_APP = _DETALHE_POR_STATUS[ITEM_STATUS_AUTORIZA_DISPOSITIVO]
 
+# A ORDEM DOS GRUPOS É A PRIORIDADE quando um produto (ou o sujeito) traz mais de
+# um código: vence a instrução que ainda RECUPERA dado. Esconder "autorize" atrás
+# de "não adianta" faz perder um cartão que viria; o contrário custa no máximo um
+# passo a mais. Por isso: agir agora > reconectar > esperar > desistir.
 _MOTIVO_POR_WARNING = {
     code: frase
     for frase, codes in (
-        # "User hasn't granted permission to collect <produto> (ACCOUNTS_ALL /
-        # CREDIT_CARDS_ALL / ACCOUNTS_TRANSACTIONS / INVESTMENTS_ALL)" — permissão
-        # do produto INTEIRO, e reconectar é o caminho que a repara.
-        ("você não liberou esse dado ao conectar o banco, reconecte para liberar",
-         ("ACCT_001", "CC_001", "TXN_001", "TXN_004", "INV_001")),
-        # INV_004 é "Open Finance monthly rate limit reached"; TXN_003/TXN_006 a
-        # doc chama só de "rate limit reached" — daí "período", e não "mês".
-        ("o banco bateu o limite de consultas do Open Finance, volta sozinho na "
-         "virada do período",
-         ("INV_004", "TXN_003", "TXN_006")),
         # "Resource Status" tem TRÊS estados, e ler dois deles como um só foi o
         # defeito da rodada 1: "Pending Authorization: awaiting user
         # authorization at the financial institution" manda AGIR no app do
@@ -354,13 +349,30 @@ _MOTIVO_POR_WARNING = {
         # opostas — colapsá-las deixa o usuário esperando para sempre.
         (_AUTORIZE_NO_APP[0].lower() + _AUTORIZE_NO_APP[1:],
          ("ACCT_002", "CC_002")),
+        # "User hasn't granted permission to collect <produto> (ACCOUNTS_ALL /
+        # CREDIT_CARDS_ALL / ACCOUNTS_TRANSACTIONS / INVESTMENTS_ALL)" e
+        # `INV_002` "Investment product permission has not been granted" — é
+        # permissão, e reconectar é o caminho que a repara.
+        ("você não liberou esse dado ao conectar o banco, reconecte para liberar",
+         ("ACCT_001", "CC_001", "TXN_001", "TXN_004", "INV_001", "INV_002")),
+        # INV_004 é "Open Finance monthly rate limit reached"; TXN_003/TXN_006 a
+        # doc chama só de "rate limit reached" — daí "período", e não "mês".
+        ("o banco bateu o limite de consultas do Open Finance, volta sozinho na "
+         "virada do período",
+         ("INV_004", "TXN_003", "TXN_006")),
         ("o banco não liberou esse dado agora, deve voltar sozinho em algumas horas",
          ("ACCT_003", "CC_003")),
         ("o banco não envia esse dado por aqui, não adianta tentar de novo",
          ("ACCT_004", "CC_004")),
+        # "Investment product not supported by the financial institution" /
+        # "Specific investment product type not supported": nunca vem, mas é um
+        # TIPO de investimento — a frase de cima condenaria os investimentos todos.
+        ("o banco não oferece esse tipo de investimento por aqui",
+         ("INV_003", "INV_005")),
     )
     for code in codes
 }
+_ORDEM_DAS_FRASES = list(dict.fromkeys(_MOTIVO_POR_WARNING.values()))
 
 # A FORMA documentada de um código, e ela decide o que vai pra TELA — não o que
 # se armazena, que continua sendo assunto do `safe_code`. Duas regras de
@@ -373,17 +385,23 @@ _MOTIVO_POR_WARNING = {
 _CODE_EXIBIVEL = re.compile(r"[A-Z]{2,5}_[0-9]{3}|[0-9]{3}")
 
 
-def _frase_do_codigo(code: Any) -> str | None:
-    """A frase de UM código, ou o código cru se ele ao menos tiver forma de código."""
+def _frase_do_codigo(code: Any) -> tuple[int, str] | None:
+    """`(prioridade, frase)` de UM código — menor vence —, ou None.
+
+    O código CRU tem a pior prioridade de todas: ele só aparece quando não há
+    motivo que a gente saiba explicar. Sem isso, o `004` nu que veio no item do
+    dono escondia um `CC_001` no mesmo produto, e a mensagem mudava conforme a
+    ORDEM em que a Pluggy mandou a lista.
+    """
     if not isinstance(code, str):
         return None
     frase = _MOTIVO_POR_WARNING.get(code)
     if frase:
-        return frase
+        return _ORDEM_DAS_FRASES.index(frase), frase
     # Código desconhecido aparece CRU: foi exatamente o que faltou no caso do
     # dono. Sem diagnóstico inventado, e só se tiver forma de código.
     if _CODE_EXIBIVEL.fullmatch(code):
-        return f"o banco avisou com o código {code}, sem explicar o motivo"
+        return len(_ORDEM_DAS_FRASES), f"o banco avisou com o código {code}, sem explicar o motivo"
     return None
 
 
@@ -414,8 +432,6 @@ def _motivo_do_warning(health: dict | None, produtos) -> str:
 
     achados = []
     for produto in produtos:
-        if produto not in _PRODUCT_PT:
-            continue
         detalhe = products.get(produto)
         if detalhe is None:
             # Produto que a Pluggy nem reportou não tem motivo a dar — e contá-lo
@@ -423,20 +439,21 @@ def _motivo_do_warning(health: dict | None, produtos) -> str:
             # banco sem investimentos.
             continue
         codes = detalhe.get("warnings") if isinstance(detalhe, dict) else None
-        frase = next((f for f in map(_frase_do_codigo, codes) if f), None) \
+        # `min`, não "o primeiro": a ordem da lista é da Pluggy, a prioridade é nossa.
+        melhor = min(filter(None, map(_frase_do_codigo, codes)), default=None) \
             if isinstance(codes, list) else None
-        achados.append((produto, frase))
+        achados.append((produto, melhor))
 
-    frases = {f for _, f in achados if f}
+    frases = {m[1] for _, m in achados if m}
     if not frases:
         return ""
-    if len(frases) == 1 and all(f for _, f in achados):
+    if len(frases) == 1 and all(m for _, m in achados):
         return f" — {frases.pop()}"
-    # ponytail: UM motivo por linha, o do primeiro produto que tem um — com dois
-    # a frase vira parágrafo, e ela entra no meio do toast. O que NÃO é aceitável
-    # é atribuí-lo a quem não o produziu, e é isso que o nome resolve. Se aparecer
-    # par recorrente, virar lista.
-    produto, frase = next((a for a in achados if a[1]))
+    # ponytail: UM motivo por linha, o de maior prioridade entre os produtos — com
+    # dois a frase vira parágrafo, e ela entra no meio do toast. O que NÃO é
+    # aceitável é atribuí-lo a quem não o produziu, e é isso que o nome resolve.
+    # Se aparecer par recorrente, virar lista.
+    produto, (_, frase) = min(((p, m) for p, m in achados if m), key=lambda a: a[1][0])
     return f" — {_PRODUCT_PT[produto]}: {frase}"
 
 
@@ -732,9 +749,10 @@ def connection_ui_state(connection_row: dict) -> dict:
         # transações, que não explicam espelho vazio de conta. E não dá para
         # filtrar por `updated` aqui como o `partial` faz: a doc é explícita que
         # o warning também vem com `isUpdated: true` ("the product was retrieved
-        # correctly, but it can be improved with some user action" — o caso do
-        # `ACCT_001`, em que a Pluggy devolve a lista VAZIA com o aviso). Filtrar
-        # por `updated` aqui apagaria justamente o único caso que existe.
+        # correctly, but it can be improved with some user action"), e o exemplo
+        # dela é de TRANSAÇÕES devolvidas vazias com o aviso — o análogo do
+        # `ACCT_001` numa conta, não uma citação sobre contas. Filtrar por
+        # `updated` aqui apagaria o caso que este ramo existe para explicar.
         if state == "no_accounts":
             detail = (detail or _FIXED_DETAIL[state]) + _motivo_do_warning(
                 health, ("BANK", "INVESTMENTS"))
