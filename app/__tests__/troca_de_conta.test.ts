@@ -193,4 +193,48 @@ describe("corrida entre contas", () => {
     );
     expect(usados.filter((u) => u === "Bearer aB1")).toHaveLength(1);
   });
+
+  it("resposta da conta A não é entregue depois de a B assumir", async () => {
+    // A tela renderizaria saldo, transação e nome de outra pessoa com o app já
+    // mostrando a conta nova. Num app financeiro isso é vazamento entre contas,
+    // mesmo sendo o próprio aparelho.
+    await guardarCredenciais({ access: "aA", refresh: "A" });
+    let soltar: () => void = () => {};
+    const portao = new Promise<void>((r) => (soltar = r));
+
+    fetchFalso.mockImplementation(async (url: string) => {
+      if (String(url).includes("/da-A")) await portao;
+      return resposta(200, { ok: true });
+    });
+
+    const daA = chamar("/da-A", schema);
+    await new Promise<void>((r) => setImmediate(() => r()));
+    // A conta B assume enquanto a resposta da A está no ar.
+    await guardarCredenciais({ access: "aB", refresh: "B" });
+    soltar();
+
+    await expect(daA).rejects.toBeInstanceOf(SessaoExpirada);
+  });
+
+  it("renovação legítima da PRÓPRIA sessão não é confundida com troca", async () => {
+    // Controle positivo: a sessão rodou, mas é a mesma linhagem. A resposta tem
+    // de ser entregue — senão a proteção acima viraria logout a cada renovação.
+    await guardarCredenciais({ access: "a0", refresh: "R0" });
+    fetchFalso.mockImplementation(async (url: string, o: RequestInit) => {
+      const auth = (o.headers as Record<string, string>)["Authorization"] ?? "";
+      if (String(url).includes("/auth/refresh")) {
+        return resposta(200, {
+          access_token: "a1",
+          refresh_token: "R1",
+          dashboard_token: "d",
+          expires_in: 900,
+        });
+      }
+      return auth === "Bearer a1"
+        ? resposta(200, { ok: true })
+        : resposta(401, { detail: "expirado" });
+    });
+
+    await expect(chamar("/qualquer", schema)).resolves.toEqual({ ok: true });
+  });
 });

@@ -355,6 +355,26 @@ export async function chamar<T>(
     throw new ErroDeApi(resposta.status, await mensagemDeErro(resposta));
   }
 
+  // A resposta CHEGOU, mas a sessão ainda é a mesma que a pediu?
+  //
+  // Entregar dado da conta A depois de a conta B assumir não é só desconforto:
+  // a tela renderiza saldo, transação e nome de outra pessoa, com o app já
+  // mostrando a conta nova. Num app financeiro isso é vazamento entre contas,
+  // mesmo sendo o próprio aparelho.
+  //
+  // A conferência é para requisição AUTENTICADA: rota pública não tem sessão a
+  // trair. E credencial fixa (logout) também não, porque ali o fim da sessão é
+  // o objetivo.
+  if (guardadas && !opcoes.credencial) {
+    const agora = await lerCredenciais();
+    if (agora?.refresh !== guardadas.refresh && !daMesmaCadeia(
+      guardadas.refresh,
+      agora?.refresh ?? "",
+    )) {
+      throw new SessaoExpirada();
+    }
+  }
+
   const bruto = await resposta.json().catch(() => null);
   const conferido = schema.safeParse(bruto);
   if (!conferido.success) throw new ContratoInvalido(rota, conferido.error);
