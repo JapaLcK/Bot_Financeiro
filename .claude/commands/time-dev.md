@@ -42,7 +42,8 @@ pedido, em poucas linhas), faça **uma** passada do Tester e um Manager curto. N
    consertar e declarar como limite — não abra a 3ª sozinho.
    - **Na faixa Leve não há segunda passada do Tester.** Achado bloqueante volta
      ao Coder uma vez e o Manager confere a correção. Se o achado cair numa área
-     da faixa Completo, a tarefa sobe de faixa e segue o loop acima.
+     da faixa Completo, a tarefa sobe de faixa e **recomeça no passo 1**
+     (Arquiteto), com o diff atual e os achados como entrada.
    - **Achado improvável vira limite declarado, não rodada nova — só fora das
      áreas Completo.** Se o caso exige condição rara (dois toques no mesmo
      quadro, recriação de tela, falha dupla de hardware) e não toca **nenhuma**
@@ -61,7 +62,8 @@ pedido, em poucas linhas), faça **uma** passada do Tester e um Manager curto. N
    apontou (não necessariamente o Coder) com o apontamento exato, e repita a
    partir do passo relevante. **Na faixa Leve**, a correção pedida pelo Manager
    volta direto ao Manager depois do Coder, sem nova passada do Tester — a
-   menos que o apontamento caia numa área Completo, e aí a tarefa sobe de faixa.
+   menos que o apontamento caia numa área Completo, e aí a tarefa sobe de faixa
+   e **recomeça no passo 1** (Arquiteto), como no loop acima.
 
 ## Gates deste repositório
 
