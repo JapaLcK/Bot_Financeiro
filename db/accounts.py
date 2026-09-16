@@ -1273,7 +1273,7 @@ def _data(v) -> bool:
     `date` do Postgres o aceita cortando a hora (medido). Um escritor que
     serialize `datetime.isoformat()` num dos quatro campos não pode virar
     `kept_unsafe` permanente. `last_date` é o único que a reversão converte em
-    Python (com `[:10]`, o recorte que `core/services/cashflow.py:30` já faz);
+    Python (com `[:10]`, o recorte que `core/services/cashflow.py::_as_date` já faz);
     `purchase_date`, `maturity_date` e `before.closed_at` vão CRUS pro Postgres.
 
     Por isso o predicado é a INTERSEÇÃO, não o `date.fromisoformat(v[:10])` que
@@ -1715,7 +1715,7 @@ def delete_launch_and_rollback(user_id: int, launch_id: int, *,
                     # coluna `date` aceita — sem o recorte, `last_date` seria o
                     # ÚNICO dos quatro campos de data que a reversão não sabe
                     # usar. É o recorte que `_data` valida e que o resto do repo
-                    # já faz (`core/services/cashflow.py:30`).
+                    # já faz (`core/services/cashflow.py::_as_date`).
                     ld = _date.fromisoformat(str(last_date_str)[:10]) if last_date_str else datetime.now(_tz()).date()
                     cur.execute(
                         """

@@ -5,7 +5,10 @@
 Aqui garantimos o contrato (chaves + datas-alvo) sem tocar no DB, e a paridade
 entre `project` e a trajetória.
 """
+import json
 from datetime import date, timedelta
+
+import pytest
 
 from _cashflow_helpers import _mock_sources, fontes_que_mudam
 from core.services.cashflow_forecast import forecast_horizons, forecast_with_trajectory
@@ -61,7 +64,7 @@ def test_forecast_horizons_le_as_fontes_uma_vez(monkeypatch):
     out = forecast_horizons(1)
 
     assert [out["horizons"][n]["projetado"] for n in ("30", "60", "90")] == [300.0] * 3
-    assert list(leituras.values()) == [1] * 5
+    assert leituras == dict.fromkeys(("get_consolidated_balance", "list_recurring_expenses", "list_recurring_incomes", "list_bills", "_open_card_bills_detail"), 1)
 
 
 # 6) Paridade com project() nos 3 marcos (30/60/90): os dois blocos do mesmo
@@ -168,13 +171,42 @@ def test_project_fracao_de_centavo_soma_como_o_painel(monkeypatch):
     assert cf.project(1, d(30))["projetado"] == 0.01
 
 
-def test_project_tranquilo_usa_o_valor_exato(monkeypatch):
-    """Tarifa de R$ 0,004 com saldo zero: o projetado exibido arredonda para 0,00,
-    mas o caixa fica abaixo de zero — `tranquilo` é False, como em HEAD."""
+@pytest.mark.parametrize("tarifa, projetado, tranquilo", [
+    pytest.param(0.004, 0.0, True, id="fracao_de_centavo_exibe_zero"),
+    pytest.param(0.006, -0.01, False, id="um_centavo_negativo_aperta"),
+])
+def test_project_tranquilo_olha_o_valor_em_centavos(monkeypatch, tarifa, projetado, tranquilo):
+    """Saldo zero e uma tarifa: `tranquilo` decide pelo projetado em centavos, o valor
+    exibido. R$ 0,004 mostra R$ 0,00 e é tranquilo; R$ 0,006 mostra −R$ 0,01 e aperta.
+    O JSON (tool de IA, dashboard) não leva −0,0 junto de `tranquilo=true`."""
     today = date.today()
     cf = _mock_sources(monkeypatch, saldo=0.0, bills=[
-        {"status": "pending", "due_date": today + timedelta(days=2), "amount": 0.004, "name": "Tarifa"}])
+        {"status": "pending", "due_date": today + timedelta(days=2), "amount": tarifa, "name": "Tarifa"}])
     out = cf.project(1, today + timedelta(days=30))
 
-    assert out["projetado"] == 0.0
-    assert out["tranquilo"] is False
+    assert json.dumps(out["projetado"]) == json.dumps(projetado)
+    assert out["tranquilo"] is tranquilo
+
+
+@pytest.mark.parametrize("saldo, valores, tranquilo", [
+    pytest.param(0.3, (0.1, 0.2), True, id="centavos_com_ruido_de_float"),
+    pytest.param(0.0, (0.004,), True, id="fracao_de_centavo_exibe_zero"),
+    pytest.param(0.0, (0.006,), False, id="um_centavo_negativo"),
+    pytest.param(0.0, (), True, id="zero_exato"),
+])
+def test_trajetoria_com_limite_zero_e_a_mesma_pergunta_do_tranquilo(monkeypatch, saldo, valores, tranquilo):
+    """R$ 0,30 − 0,10 − 0,20 soma −2,8e-17 em float: o caixa é R$ 0,00, tranquilo nos
+    horizontes e fora do aperto na trajetória, no mesmo dia. Com limite 0, os dois
+    olham o mesmo valor em centavos."""
+    today = date.today()
+    _mock_sources(monkeypatch, saldo=saldo, bills=[
+        {"status": "pending", "due_date": today + timedelta(days=2 + 3 * i), "amount": v, "name": f"B{i}"}
+        for i, v in enumerate(valores)])
+    out = forecast_with_trajectory(1, days=90, threshold=0.0)
+
+    for n in (30, 60, 90):
+        horizonte, item = out["horizons"][str(n)], out["trajectory"][n - 1]
+        assert item["saldo_projetado"] == horizonte["projetado"], n
+        assert horizonte["tranquilo"] is tranquilo, n
+        assert item["abaixo_do_limite"] is (not tranquilo), n
+    assert out["worst_day"]["abaixo_do_limite"] is (not tranquilo)

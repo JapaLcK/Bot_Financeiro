@@ -48,6 +48,7 @@ def test_rota_forecast_devolve_trajetoria_causas_vencidos_e_horizons_intactos(mo
     assert fc["horizons"] == esperado["horizons"]
     for campo in ("today", "balance_source", "of_bank_count", "banks_excluded"):
         assert fc[campo] == esperado[campo]
+    assert fc["balance_source"] == "manual"
 
 
 def test_rota_forecast_recusa_threshold_nao_finito(monkeypatch):
@@ -79,7 +80,7 @@ def test_rota_forecast_horizontes_e_trajetoria_da_mesma_leitura(monkeypatch):
     for n in (30, 60, 90):
         assert fc["trajectory"][n - 1]["saldo_projetado"] == fc["horizons"][str(n)]["projetado"] == 300.0, n
     assert fc["worst_day"]["saldo_projetado"] == 300.0
-    assert list(leituras.values()) == [1] * 5
+    assert leituras == dict.fromkeys(("get_consolidated_balance", "list_recurring_expenses", "list_recurring_incomes", "list_bills", "_open_card_bills_detail"), 1)
     assert set(fc) == {"today", "balance_source", "of_bank_count", "banks_excluded", "horizons",
                        "trajectory", "worst_day", "vencidos", "threshold", "period", "premises",
                        "vencem_hoje"}

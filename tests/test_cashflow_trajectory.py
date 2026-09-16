@@ -3,6 +3,8 @@ dia certo, vencidos e o limite de segurança.
 """
 from datetime import date, timedelta
 
+import pytest
+
 from _cashflow_helpers import _mock_sources
 from core.services.cashflow_forecast import forecast_with_trajectory
 
@@ -150,4 +152,21 @@ def test_daily_trajectory_threshold_com_fracao_de_centavo_segue_o_eco(monkeypatc
 
     assert out["threshold"] == 500.0
     assert out["trajectory"][0]["saldo_projetado"] == 500.0
+    assert not any(item["abaixo_do_limite"] for item in out["trajectory"])
+
+
+@pytest.mark.parametrize("saldo, valor, limite", [
+    pytest.param(1.0, 0.9, 0.1, id="centavos_com_ruido_de_float"),
+    pytest.param(1000.0, 500.004, 500.0, id="fracao_de_centavo"),
+])
+def test_daily_trajectory_saldo_exibido_igual_ao_limite_nao_e_aperto(monkeypatch, saldo, valor, limite):
+    """R$ 1,00 − 0,90 soma 0,09999999999999998 em float e R$ 1000 − 500,004 soma
+    499,996: os dois mostram o limite, então não são aperto. Comparar a soma exata
+    marcaria os dois."""
+    today = date.today()
+    _mock_sources(monkeypatch, saldo=saldo, bills=[
+        {"status": "pending", "due_date": today + timedelta(days=3), "amount": valor, "name": "Conta"}])
+    out = forecast_with_trajectory(1, days=5, threshold=limite)
+
+    assert out["trajectory"][2]["saldo_projetado"] == limite
     assert not any(item["abaixo_do_limite"] for item in out["trajectory"])

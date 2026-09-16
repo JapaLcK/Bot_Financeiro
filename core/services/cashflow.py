@@ -10,9 +10,9 @@ projetado(D) = saldo_atual
              − boletos pendentes com vencimento até D
              − (opcional) um boleto novo que ele está considerando
 
-`tranquilo` = projetado >= 0. É uma estimativa: não conta gastos avulsos futuros
-nem recorrentes semanais/diários/únicos (raros); a ideia é dar visão de fôlego,
-não fechamento contábil.
+`tranquilo` = projetado, em centavos (o valor exibido), >= 0. É uma estimativa:
+não conta gastos avulsos futuros nem recorrentes semanais/diários/únicos
+(raros); a ideia é dar visão de fôlego, não fechamento contábil.
 """
 from __future__ import annotations
 
@@ -230,7 +230,10 @@ def _projection(today: date, sb: dict[str, Any], events: list[tuple[date, str, s
     faturas_cartao = math.fsum(-v for v in valores["fatura_cartao"])
 
     extra = float(extra_amount or 0)
-    projetado = math.fsum([saldo, *(v for vs in valores.values() for v in vs), -extra])
+    # `tranquilo` decide pelo valor em centavos, o mesmo que a resposta mostra: R$ 0,30 −
+    # 0,10 − 0,20 soma −2,8e-17 em float e é R$ 0,00. `+ 0.0` troca o −0,0 do
+    # arredondamento por 0,0, que é o que vai no JSON (tool de IA, dashboard).
+    projetado = round(math.fsum([saldo, *(v for vs in valores.values() for v in vs), -extra]), 2) + 0.0
     return {
         "today": today.isoformat(),
         "target": target_date.isoformat(),
@@ -244,7 +247,7 @@ def _projection(today: date, sb: dict[str, Any], events: list[tuple[date, str, s
         "n_boletos": n_boletos,
         "faturas_cartao": round(faturas_cartao, 2),
         "boleto_novo": round(extra, 2),
-        "projetado": round(projetado, 2),
+        "projetado": projetado,
         "tranquilo": projetado >= 0,
     }
 
