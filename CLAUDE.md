@@ -38,12 +38,13 @@ mais específico ganha quando os dois falarem do mesmo assunto.
 **O time `time-dev` (Arquiteto → Coder → Tester → Manager) é proporcional ao risco.**
 Antes de abrir o arquivo, classifique a mudança numa faixa e diga qual escolheu. A
 **área decide antes do tamanho**: uma linha em código de dinheiro ou sessão é
-Completo. Na dúvida entre duas faixas, use a mais alta.
+Completo. Na dúvida entre duas faixas, use a mais alta; o que não casar com nenhuma
+linha é **Leve**.
 
 | Faixa | O que entra | Processo |
 |---|---|---|
 | **Completo** | dinheiro (Pix, cobrança, saldo, fatura, Open Finance), autenticação, sessão, MFA, isolamento entre usuários, migração/schema, concorrência em código compartilhado, segurança | `Skill(skill="time-dev")` com as 4 etapas |
-| **Leve** | feature e tela comuns, correção de bug **que muda lógica** fora das áreas acima | `time-dev` sem Arquiteto: Coder → **uma** passada do Tester → Manager curto |
+| **Leve** | feature e tela comuns, correção de bug **que muda lógica**, refatoração, dependência, CI/ferramenta e configuração — tudo fora das áreas acima | `time-dev` com **uma** passada do Tester e Manager curto; o Arquiteto só é pulado quando a mudança já tem plano aprovado ou cabe num arquivo com um único comportamento possível |
 | **Direto** | texto, CSS pequeno, docs, código provisório, correção **sem mudança de lógica** (typo, nome, constante óbvia) | sem o time: teste do que mudou e `git diff` lido de ponta a ponta |
 
 O time existe para o §4 ("ataque antes de empurrar"): onde há dinheiro ou sessão ele
