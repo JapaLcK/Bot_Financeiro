@@ -28,27 +28,50 @@ html, body { overflow-x: hidden; }
   header h1 { font-size: .92rem; }
   .month-nav { flex: 0 0 auto; }
   .mbtn { width: 34px; height: 34px; }
-  #month-label { min-width: 0; font-size: .74rem; padding: 0 4px; }
+  #month-label { min-width: 0; font-size: .74rem; padding: 0 4px; white-space: nowrap; }
+  /* A 320px a linha 1 pedia ~313px numa caixa de 296: a marca escrita sai e o
+     ícone do Piggy (ao lado) continua identificando a página. */
+  @media (max-width: 360px) { header h1 { display: none; } }
 
-  /* Linha 2: dot de conexão (sem texto) + ações dividindo a largura
-     (os .hbtn têm flex-basis 0 e nunca quebram; o .user-menu, com basis
-     100%, desce pra linha própria) */
-  .header-right { width: 100%; gap: 8px; flex-wrap: wrap; }
-  #status { flex-shrink: 0; }
+  /* Linha 2: dot de conexão (sem texto) + as CINCO ações como ícone de 44px,
+     todas na MESMA faixa. Medido em produção a 375px, o header tinha 206px em
+     4 faixas (206 → mês e "Minha conta" gastavam uma faixa cada) e 258px em 5
+     a 320px. Só-ícone: 5×44 + 4×8 de gap = 252px, cabe em 296 a 320px.
+     O rótulo some por CSS, então cada botão ganhou `aria-label` no HTML — sem
+     ele o botão fica sem nome acessível. */
+  .header-right { width: 100%; gap: 8px; flex-wrap: nowrap; justify-content: flex-end; }
+  #status { flex-shrink: 0; margin-right: auto; } /* dot à esquerda, ações à direita */
   #status-text { display: none; } /* a cor do dot já diz o estado */
-  /* 44px é o alvo de polegar que o próprio “+ Lançar” já usa aqui embaixo;
-     com 38px estes três botões ficavam abaixo dele. */
-  .hbtn {
-    flex: 1 1 0;
+  /* 44px é o alvo de polegar que o próprio “+ Lançar” já usa aqui embaixo.
+     Escopado em `header` de propósito: `.hbtn` também veste os dois botões de
+     navegar fatura (dashboard.html:1282,1284), que são retangulares de 28px. */
+  header .hbtn {
+    flex: 0 0 44px;
+    width: 44px;
     justify-content: center;
     min-height: 44px;
-    padding: 6px 4px;
+    padding: 0;
     font-size: .72rem;
   }
-  .user-menu { flex: 1 1 100%; } /* “Minha conta” continua em linha própria */
-  /* "Minha conta" é .hbtn como os outros quatro: ficava 4px abaixo do alvo de
-     polegar por estar numa regra separada, oito linhas abaixo. */
-  .user-menu-btn { min-height: 44px; }
+  header .hbtn .hbtn-label { display: none; }
+  /* O selo “PigBank+” não cabe num alvo de 44px; o botão continua .pro-locked
+     (esmaecido) e o toque segue abrindo o #upgrade-overlay. */
+  header .hbtn .pro-badge { display: none; }
+  /* `width` E `max-width` juntos: a regra de 600px do dashboard.css (linha 1151)
+     é `.user-menu,.user-menu-btn{width:100%;max-width:none}` — sobrescrever só o
+     BOTÃO deixa o wrapper com a linha inteira (medido: 329px a 375px) e, com o
+     `flex-wrap:nowrap` acima, os outros 4 botões e o dot transbordam para a
+     ESQUERDA, com left negativo, invisíveis sob o `overflow-x:hidden`. */
+  header .user-menu { flex: 0 0 auto; width: auto; max-width: none; }
+  header .user-menu-btn { min-height: 44px; width: 44px; max-width: 44px; }
+  header .user-menu-btn .user-menu-main { display: none; } /* fica só o ☰ */
+  /* O dropdown herdaria left:0/width:100% do pai de 44px (dashboard.css:1151)
+     e viraria uma coluna de 44px com o texto quebrando letra a letra.
+     DUPLICAÇÃO CONSCIENTE: são os mesmos valores de app-mode.css:576-582, que
+     resolve o MESMO sintoma no modo app (lá com !important, escopado em
+     html.pb-app). Não foram unificados porque os dois arquivos têm ciclos de
+     vida e escopos diferentes; mexer num, conferir o outro. */
+  .user-dropdown { left: auto; right: 0; width: min(300px, calc(100vw - 24px)); }
 
   /* ── Botão “+ Lançar” vira alvo de polegar: largura total ────────────── */
   .dashboard-tabs { margin: -4px 0 16px; }
