@@ -239,40 +239,46 @@ def create_mock_open_finance_connection(user_id: int, institution_key: str | Non
 
 def get_open_finance_snapshot(user_id: int, limit: int = 8) -> dict:
     ensure_user(user_id)
+    # Import LOCAL: `open_finance_state` importa `_CursorComTeto` daqui no topo,
+    # então a mão única é esta (ver o comentário lá).
+    from .open_finance_state import SQL_EXECUTION_STATUS, janela_device_auth_min
 
     with get_conn() as conn:
         with conn.cursor() as cur:
             cur.execute(
-                """
-                -- `raw` NÃO entra aqui, e isso tem consequência: enquanto o
-                -- `health` é NULL (logo depois de uma reconexão), o
-                -- `connection_ui_state` recebe a linha pronta e não tem como ver
-                -- o `executionStatus` do item. E o que a TELA de quem espera
-                -- device/QR mostra nessa janela NÃO é um rótulo vago — é a MESMA
-                -- instrução errada que o aviso proativo foi calado para não
-                -- mandar. MEDIDO, com `status='OUTDATED'` e `health=None`:
-                --   {'state': 'needs_user_action', 'label': 'Ação necessária',
-                --    'detail': 'Reautorize o banco'}
-                -- ou seja, "Reautorize o banco" no minuto em que a pessoa
-                -- deveria estar lendo o QR (com `health` medido o mesmo estado
-                -- diz 'Autorize o acesso no app do banco', que é o certo).
-                -- Metade PENDENTE do achado do Codex #166, e de PR próprio —
-                -- pendente de TEXTO ERRADO, não de cosmética.
+                f"""
+                -- `raw` NÃO entra aqui, e continua não entrando: ele carrega
+                -- `clientUserId` e `statusDetail`, e esta linha vai para o
+                -- navegador. O que entra é o DERIVADO — um escalar calculado no
+                -- Postgres (`SQL_EXECUTION_STATUS`, fonte única em
+                -- `db/open_finance_state.py`), que o `connection_ui_state` lê
+                -- para não mandar "Reautorize o banco" a quem devia estar lendo
+                -- o QR. Era a metade da TELA do achado do Codex #166; a do aviso
+                -- proativo já estava fechada em `list_connections_needing_reconnect`.
                 --
-                -- O aviso proativo, esse sim, está fechado:
-                -- `list_connections_needing_reconnect` lê o `raw`
-                -- direto (ver lá). Fechar a tela exige uma das duas mudanças de
-                -- contrato: trazer o `raw` (payload inteiro da Pluggy em TODA
-                -- leitura de tela) ou gravar `health` no upsert — contra a
-                -- decisão da Onda 2 de que reconectar ZERA a saúde até um sync
-                -- real provar o contrário.
+                -- Ele vale enquanto `health is null` E a autorização atual couber
+                -- em `JANELA_DEVICE_AUTH_MIN` (60 min). Vencido o prazo, o
+                -- derivado é NULL e o detalhe volta a "Reautorize o banco", que é
+                -- a ação certa depois que a janela fechou — o `raw` é congelado
+                -- (`mark_sync_result` não o toca), então sem prazo a instrução
+                -- duraria para sempre.
+                --
+                -- Gravar `health` no upsert continua VETADO (decisão da Onda 2:
+                -- reconectar ZERA a saúde até um sync real provar o contrário),
+                -- e é por isso que a saída é o derivado e não a coluna.
+                --
+                -- O `execution_status` é REMOVIDO do dict antes de a resposta
+                -- sair (logo abaixo, DENTRO do laço, por item, logo depois do
+                -- `connection_ui_state` que o consome): o corpo HTTP fica
+                -- idêntico em chaves ao de antes deste PR.
                 select id, provider, provider_item_id, status, institution_name, last_sync_at,
-                       last_attempt_at, status_reason, health, reconnected_at
+                       last_attempt_at, status_reason, health, reconnected_at,
+                       {SQL_EXECUTION_STATUS}
                 from open_finance_connections
                 where user_id=%s
                 order by updated_at desc, id desc
                 """,
-                (user_id,),
+                (janela_device_auth_min(), user_id),
             )
             connections = [dict(r) for r in (cur.fetchall() or [])]
             # `ui` é o estado exibível — decidido por `connection_ui_state`, a única
@@ -281,6 +287,12 @@ def get_open_finance_snapshot(user_id: int, limit: int = 8) -> dict:
             from core.services.pluggy_health import connection_ui_state
             for c in connections:
                 c["ui"] = connection_ui_state(c)
+                # Campo de TRABALHO, não de contrato: entrou no select só para o
+                # `connection_ui_state` acima e sai antes da serialização, para o
+                # corpo HTTP ficar byte-idêntico em chaves ao de antes. O `pop`
+                # é o que impede um campo derivado do `raw` de virar API pública
+                # sem ninguém ter decidido isso.
+                c.pop("execution_status", None)
 
             cur.execute(
                 """
@@ -472,7 +484,8 @@ def list_connections_needing_reconnect(user_id: int | None = None, within_days: 
     # Local como o `connection_ui_state` da linha 259: db -> core.services.
     from core.services.pluggy_health import (EXEC_STATUS_AUTORIZA_DISPOSITIVO,
                                              ITEM_STATUS_AUTORIZA_DISPOSITIVO)
-    sql = """
+    from .open_finance_state import SQL_RAW_AINDA_VALE, janela_device_auth_min
+    sql = f"""
         select id, user_id, provider_item_id, institution_name, status,
                consent_expires_at, last_sync_at
         from open_finance_connections
@@ -505,40 +518,73 @@ def list_connections_needing_reconnect(user_id: int | None = None, within_days: 
           -- `health.execution_status` em minúscula passava pelo filtro antes e
           -- agora cala o aviso. Hoje é INALCANÇÁVEL: o único escritor de
           -- `health` é o `derive_item_health`, que já grava em maiúscula
-          -- (`core/services/pluggy_health.py:311-312`, nas DUAS chaves). Fica
+          -- (o `return` de `derive_item_health`,
+          -- `core/services/pluggy_health.py`, nas DUAS chaves). Fica
           -- assim, e não em dois `coalesce` separados, porque a direção é a
           -- barata: se um dia entrar minúscula, calar é errar para o lado de não
           -- mandar "reconecte seu banco" na janela do QR. Sem teste próprio —
           -- não há entrada que chegue lá.
           --
-          -- ALCANCE, para ninguém ler isto como "o buraco fechou": o `raw` fecha
-          -- a superfície do AVISO PROATIVO, e SÓ ela. A TELA continua aberta —
-          -- `get_open_finance_snapshot` (acima, na mesma tabela) NÃO seleciona
-          -- `raw`, então o `connection_ui_state` não enxerga o `executionStatus`
-          -- na mesma janela. O buraco ENCOLHEU; a metade da tela é PR próprio, e
-          -- o motivo está no comentário do snapshot.
+          -- ALCANCE, E ELE É DE UM EIXO SÓ. O que fecha é TELA × AVISO, e
+          -- DENTRO do ramo `health is null`: esta query é o AVISO PROATIVO; a
+          -- TELA é `get_open_finance_snapshot` (acima, na mesma tabela), que
+          -- passou a selecionar o MESMO derivado — o escalar do
+          -- `SQL_EXECUTION_STATUS`, nunca o `raw` inteiro. Uma regra, um prazo,
+          -- um parâmetro, e a condição literalmente compartilhada
+          -- (`SQL_RAW_AINDA_VALE`, §0.7): as duas superfícies não podem mais
+          -- divergir por alguém consertar uma só.
           --
-          -- E o silêncio dura MUITO mais que a janela do QR (~30 min), o que é a
-          -- outra ponta do mesmo trade: quem escreve `health` de volta é o
-          -- `run_of_health_check` (`core/services/pluggy_sync.py:492`), num tique
-          -- de `OF_REFRESH_INTERVAL_SEC` — default **6 h**
-          -- (`frontend/finance_bot_websocket_custom.py:1503`) — que processa
+          -- O EIXO QUE CONTINUA ABERTO é o OUTRO: health-nulo × health-PRESENTE.
+          -- O `SQL_RAW_AINDA_VALE` só governa `health is null`. Assim que o tique
+          -- de saúde grava `health` com o mesmo `execution_status`, a linha passa
+          -- para o ramo de CIMA — o `if health:` de `connection_ui_state` e o
+          -- primeiro braço do `coalesce` logo acima —, e esses DOIS não têm prazo
+          -- nenhum. A oscilação real em produção tem TRÊS fases:
+          --   1. 0–60 min: instrução certa. É o conserto deste PR.
+          --   2. 60 min → tique de saúde: "Reautorize o banco", aviso de volta.
+          --   3. depois do tique, PARA SEMPRE: "Autorize o acesso no app do
+          --      banco" com o QR morto há semanas, e o aviso calado.
+          -- A fase 3 é a que DURA (o tique é ≤6 h no caso comum). Medido pelo
+          -- caminho de produção — `save_pluggy_open_finance_item`, job de saúde
+          -- gravando `health` com o mesmo `execution_status`, 30 dias depois:
+          -- detalhe "Autorize o acesso no app do banco", aviso proativo `False`.
+          -- NÃO é regressão: o ramo com `health` já era assim na `main`, e este
+          -- PR não o toca. Está FORA DE ESCOPO por decisão do dono — fechá-la é
+          -- outra máquina de estados, outro inventário e outro PR. O que precisa
+          -- ser DECIDIDO antes de codar: por quanto tempo um `health` OBSERVADO
+          -- descreve a autorização atual (hoje: para sempre), e qual é a âncora
+          -- desse prazo — `health.observed_at` é o relógio do servidor no momento
+          -- da medição, não o da autorização, então não é o mesmo problema que o
+          -- `SQL_RAW_AINDA_VALE` resolve aqui. Isso vale para TODO `item_status`
+          -- de `_NEEDS_USER`, não só para device/QR, e é o que faz disto trabalho
+          -- próprio. Aqui fica só onde ela teria de ser fechada, sem proposta.
+          --
+          -- O SILÊNCIO FICA LIMITADO NO RAMO SEM `health`, e essa é a mudança —
+          -- a fase 3 acima é o que sobra. Antes ele durava
+          -- MUITO mais que a janela do QR (~30 min): quem escreve `health` de
+          -- volta é o `run_of_health_check` (`core/services/pluggy_sync.py`), num
+          -- tique de `OF_REFRESH_INTERVAL_SEC` — default 6 h
+          -- (`frontend/finance_bot_websocket_custom.py`) — que processa
           -- `limit=200` linhas por passada, `order by id`
           -- (`list_connections_for_health_check`), e PULA a linha sem gravar nada
-          -- quando o `GET /items` falha por algo que não seja 404. Ou seja: o
-          -- piso do silêncio é UM tique (até 6 h), e com mais de 200 linhas de
-          -- saúde vencida ele estica por `ceil(posição/200)` tiques. Enquanto
-          -- isso a TELA repete "Reautorize o banco" (ver o snapshot). O `raw`
-          -- troca um aviso ERRADO em ~30 min por nenhum aviso durante horas —
-          -- escolha deliberada, não empate.
+          -- quando o `GET /items` falha por algo que não seja 404. O piso era UM
+          -- tique (até 6 h) e esticava por `ceil(posição/200)` tiques. Com o
+          -- prazo, quem encerra a supressão é ELE (60 min), não uma corrida com o
+          -- tique: passados os 60 min o aviso volta sozinho, mesmo que nenhum
+          -- health tenha sido medido.
           --
-          -- O `case` NÃO é enfeite: `raw` só vale enquanto `health` é NULL. Com
-          -- `coalesce(health->>…, raw->>…)` puro, um `health` observado DEPOIS
-          -- sem `execution_status` (o usuário autorizou, virou LOGIN_ERROR)
-          -- caía no `raw` VELHO da reconexão — `mark_sync_result` não toca em
-          -- `raw` — e calava o aviso para sempre.
+          -- O `case` NÃO é enfeite, e as DUAS condições dele são load-bearing:
+          --   • `health is null` — com `coalesce(health->>…, raw->>…)` puro, um
+          --     `health` observado DEPOIS sem `execution_status` (o usuário
+          --     autorizou, virou LOGIN_ERROR) caía no `raw` VELHO da reconexão e
+          --     calava o aviso para sempre;
+          --   • o PRAZO — `mark_sync_result` não toca em `raw`, e
+          --     `mark_sync_attempt` empurra `updated_at`/`last_attempt_at` sem
+          --     que o `raw` mude (por isso a âncora é
+          --     `coalesce(reconnected_at, created_at)`). Sem prazo, uma linha que
+          --     nunca mais fosse medida ficaria calada para sempre.
           and upper(coalesce(health->>'execution_status',
-                             case when health is null
+                             case when {SQL_RAW_AINDA_VALE}
                                   then raw->>'executionStatus' end, '')) <> %s
           and (
             upper(coalesce(status, '')) in ('ERROR', 'LOGIN_ERROR', 'OUTDATED', 'WAITING_USER_INPUT')
@@ -546,7 +592,9 @@ def list_connections_needing_reconnect(user_id: int | None = None, within_days: 
                 and consent_expires_at <= now() + make_interval(days => %s))
           )
     """
-    params: list = [ITEM_STATUS_AUTORIZA_DISPOSITIVO,
+    # Ordem POSICIONAL, na ordem em que os `%s` aparecem no SQL acima: o do
+    # `SQL_RAW_AINDA_VALE` fica ENTRE os dois nomes de device/QR.
+    params: list = [ITEM_STATUS_AUTORIZA_DISPOSITIVO, janela_device_auth_min(),
                     EXEC_STATUS_AUTORIZA_DISPOSITIVO, within_days]
     if user_id is not None:
         sql += " and user_id = %s"

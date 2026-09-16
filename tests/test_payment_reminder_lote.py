@@ -18,7 +18,7 @@ enumerá-la é o ponto deste arquivo. O laço tem estas operações, nesta ordem
 | `row.get("email_enc")`              | `dict.get` não levanta | — |
 | **`decrypt_pii_optional`** (em `_resolver_email`, no ponto do envio) | **SIM** — `RuntimeError` de `core/crypto.py:238` (`InvalidToken`) e de `:115` (env de chave ausente) | `except` próprio |
 | `email = row["email"]`              | `KeyError` só se a coluna sair do `select` | — |
-| `recent_event_exists`               | **NÃO** — `except Exception` → `False` no CALLEE (`core/observability.py:311`) | o callee, medido em `test_dedupe_indisponivel_*` |
+| `recent_event_exists`               | **NÃO** — `except Exception` → `False` no CALLEE (o `except Exception` final de `recent_event_exists`, em `core/system_event_log.py` — saiu de `core/observability.py`, que hoje só reexporta o nome) | o callee, medido em `test_dedupe_indisponivel_*` |
 | `_pago_por_outro_caminho`           | sim | `except` próprio (já existia) |
 | `lembrete_ainda_vale`            | sim | `except` próprio (já existia) |
 | envio + `_wa_lembrete` + log        | sim | `except` próprio (já existia) |
@@ -26,8 +26,8 @@ enumerá-la é o ponto deste arquivo. O laço tem estas operações, nesta ordem
 Ou seja: **um buraco só**, e o segundo candidato óbvio já estava fechado do
 lado de dentro. O teste do `recent_event_exists` aqui não protege o laço — ele
 amarra a DEPENDÊNCIA da decisão de não pôr um `try` lá. Se aquele `except` sair
-de `core/observability.py`, este arquivo fica vermelho antes de o lote começar a
-morrer em produção.
+de `core/system_event_log.py`, este arquivo fica vermelho antes de o lote
+começar a morrer em produção.
 
 **Proveniência**: o padrão desprotegido não nasceu neste PR. O
 `_check_trial_ending` (`core/services/engagement_scheduler.py:260`) tem o mesmo
@@ -209,12 +209,17 @@ def test_dedupe_com_erro_inesperado_devolve_false(monkeypatch):
     """O mesmo para uma falha que não é de conexão: o `except Exception` do
     callee é LARGO, e é dele que a ausência de `try` no laço depende. Sem este
     caso, os dois acima provariam só o caminho de rede."""
+    import psycopg
+
     import core.observability as obs
 
     def _explode(*a, **k):
         raise ValueError("erro inesperado no driver")
 
-    monkeypatch.setattr(obs.psycopg, "connect", _explode)
+    # O `psycopg` do módulo, e não `obs.psycopg`: a implementação de
+    # `recent_event_exists` mudou para `core/system_event_log.py` (`obs` só a
+    # reexporta), e as duas resolvem `psycopg.connect` no MESMO objeto módulo.
+    monkeypatch.setattr(psycopg, "connect", _explode)
     assert obs.recent_event_exists("payment_reminder_sent", 1, 6.0) is False
 
 

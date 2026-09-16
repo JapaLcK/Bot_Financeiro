@@ -154,7 +154,8 @@ def test_script_apply_em_item_congelado_em_updating_agenda_sync(
       • `connection_ui_state` devolve "Atualizando…" na linha recém-escrita: é o
         card do dono, e é PRÉ-CONDIÇÃO, não o discriminante. Medido: o rótulo
         segue "Atualizando…" mesmo depois de um sync que deu certo, porque o ramo
-        do `health` decide antes do `sem_sync` (`pluggy_health.py:498-504`) —
+        do `health` decide antes do `sem_sync` (o ramo `if health:` de
+        `connection_ui_state`, `core/services/pluggy_health.py`) —
         tirá-lo de lá é outro PR;
       • o sync TEM de ser agendado: o assert DISCRIMINANTE, vermelho na `main`,
         onde `webhook_pluggy` volta vazio. O que ele compra é o EXTRATO — contas e

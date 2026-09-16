@@ -4025,7 +4025,7 @@ async def auth_dashboard_link(response: Response, request: Request, body: Dashbo
 GOOGLE_OAUTH_STATE_COOKIE = "google_oauth_state"
 GOOGLE_OAUTH_NEXT_COOKIE = "google_oauth_next"
 GOOGLE_OAUTH_STATE_MAX_AGE = 600  # 10 minutos
-GOOGLE_OAUTH_PURCHASE_CONTINUE_URL = "/precos?compra=continuar"
+GOOGLE_OAUTH_PURCHASE_CONTINUE_URL = "/continuar-compra"
 
 
 class GoogleSignupCompleteBody(_CorpoSemVeneno):
@@ -6919,7 +6919,7 @@ async def delete_launch_route(
         # `com_traceback=True` aqui não restaura rastro: CRIA persistência nova
         # do `DETAIL: Key (…)=(…)` em `system_event_logs`.
         # `to_thread`: a rota é async e o `_DashboardHandler` grava com
-        # `psycopg.connect()` bloqueante (ver `core/observability.py`).
+        # `psycopg.connect()` bloqueante (ver `core/system_event_log.py`).
         await asyncio.to_thread(_log_falha, "delete_launch", user_id, exc,
                                 launch_id=int(launch_id))
         raise HTTPException(status_code=500, detail=_ERRO_APAGAR_HTTP) from exc
