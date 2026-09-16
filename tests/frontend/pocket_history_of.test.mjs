@@ -95,6 +95,17 @@ for (const [rotulo, viewport] of [["desktop", { width: 1280, height: 800 }],
   });
 }
 
+test("sem vínculo ativo, a caixinha volta a aceitar Depositar/Sacar", async () => {
+  // Quem manda é o `of_investment_id`, a mesma régua do backend (db/pockets.py:354
+  // recusa por ele, não por `source`). Decidindo por `source`, a tela escondia os
+  // botões de uma caixinha que o POST aceitaria.
+  const r = await abrirHistorico({ width: 1280, height: 800 },
+                                 pocket({ source: "open_finance", of_investment_id: null }));
+  assert.equal(r.botoes, true, "sem vínculo o saldo é do Pig: os botões têm de aparecer");
+  assert.equal(r.aviso, false);
+  await r.page.context().close();
+});
+
 test("card de META da caixinha do banco mantém o selo 'via banco'", async () => {
   const ctx = await browser.newContext();
   const page = await ctx.newPage();
@@ -107,9 +118,12 @@ test("card de META da caixinha do banco mantém o selo 'via banco'", async () =>
     const meta = { name: "Viagem", balance: 500, target_amount: 1000, pct_complete: 50,
                    source: "open_finance", of_investment_id: 7, interest_enabled: false,
                    days_left: null, indicator: "on_track" };
-    return [_renderGoalCard(meta), _renderGoalCard({ ...meta, source: null, of_investment_id: null })];
+    return [_renderGoalCard(meta),
+            _renderGoalCard({ ...meta, source: null, of_investment_id: null }),
+            _renderGoalCard({ ...meta, of_investment_id: null })];
   });
   assert.match(html[0], /via banco/, "meta vinda do banco perdeu o selo");
   assert.doesNotMatch(html[1], /via banco/, "meta comum ganhou selo que não é dela");
+  assert.doesNotMatch(html[2], /via banco/, "sem vínculo não há 'via banco' a exibir");
   await ctx.close();
 });

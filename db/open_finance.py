@@ -910,7 +910,8 @@ def list_caixinha_candidates(user_id: int) -> list[dict]:
                 """
                 select i.id as of_investment_id, i.name, i.balance, i.type, i.subtype,
                        i.raw, c.institution_name,
-                       p.id as pocket_id, p.name as pocket_name, p.target_amount
+                       p.id as pocket_id, p.name as pocket_name, p.target_amount,
+                       p.source as pocket_source
                 from open_finance_investments i
                 join open_finance_connections c on c.id = i.connection_id
                 left join pockets p on p.of_investment_id = i.id and p.user_id = %s
@@ -937,21 +938,57 @@ def list_caixinha_candidates(user_id: int) -> list[dict]:
     return saida
 
 
+def _unbind_pocket_zerando(cur, user_id: int, pocket_id: int) -> int:
+    """Solta o vínculo de uma meta MANUAL e zera o espelho. Nome, emoji e meta ficam.
+
+    O saldo era cópia do saldo do banco; sem zerar, o mesmo dinheiro passa a contar
+    DUAS vezes no patrimônio — aqui e na renda fixa do banco, que volta a listar a
+    posição assim que o `of_investment_id` some (`list_of_fixed_income`, db/rv.py).
+    Os lotes abertos vão junto porque o saldo do pocket é recomposto a partir deles
+    (`_sync_pocket_from_lots`): zerar só a coluna ressuscitaria o valor no primeiro
+    depósito seguinte. Só mexe em quem ESTÁ vinculado (`is not null`), pra um
+    pocket_id solto não virar apagador de saldo."""
+    cur.execute(
+        "update pockets set of_investment_id=null, of_last_seen_balance=null, balance=0 "
+        "where id=%s and user_id=%s and of_investment_id is not null",
+        (pocket_id, user_id),
+    )
+    afetados = cur.rowcount
+    if afetados:
+        cur.execute(
+            "update pocket_lots set status='closed', balance=0, principal_remaining=0, "
+            "closed_at=%s where user_id=%s and pocket_id=%s and status='open'",
+            (datetime.now(_tz()).date(), user_id, pocket_id),
+        )
+    return afetados
+
+
 def bind_pocket_to_caixinha(user_id: int, pocket_id: int, of_investment_id: int | None) -> bool:
     """Vincula (ou desvincula, of_investment_id=None) uma meta a uma caixinha OF.
 
     Inicializa of_last_seen_balance com o saldo ATUAL da caixinha, pra o Banqueiro
-    contar só os aportes daqui pra frente (não o saldo histórico já acumulado)."""
+    contar só os aportes daqui pra frente (não o saldo histórico já acumulado).
+
+    Caixinha CRIADA pelo sync (`source='open_finance'`) nunca solta o vínculo —
+    recusa com OF_POCKET_READONLY, o mesmo código que o guard de depósito/saque
+    usa (db/pockets.py:354). Ela é espelho: o dinheiro está no banco e qualquer
+    posição reconhecida é reimportada no sync seguinte, então "não vincular" só
+    produziria um pocket órfão com saldo mentiroso + uma cópia nova no sync."""
     with get_conn() as conn:
         with conn.cursor() as cur:
             if of_investment_id is None:
                 cur.execute(
-                    "update pockets set of_investment_id=null, of_last_seen_balance=null "
-                    "where id=%s and user_id=%s",
+                    "select source from pockets where id=%s and user_id=%s",
                     (pocket_id, user_id),
                 )
+                row = cur.fetchone()
+                if not row:
+                    return False
+                if row["source"] == "open_finance":
+                    raise ValueError("OF_POCKET_READONLY")
+                ok = _unbind_pocket_zerando(cur, user_id, pocket_id) > 0
                 conn.commit()
-                return cur.rowcount > 0
+                return ok
             # valida que a caixinha é do usuário e pega o saldo atual
             cur.execute(
                 """
@@ -965,12 +1002,19 @@ def bind_pocket_to_caixinha(user_id: int, pocket_id: int, of_investment_id: int 
             if not row:
                 return False
             bal = row["balance"] or 0
-            # 1 caixinha OF por meta: solta qualquer vínculo anterior dessa caixinha
+            # 1 caixinha OF por meta: solta o vínculo anterior DESSA caixinha. Se
+            # quem o segura é um pocket do sync, soltar deixaria ele órfão — a
+            # mesma coisa que o ramo de cima recusa, então recusa aqui também.
+            # Sendo manual, sai zerado (senão o saldo espelhado vira dobra).
             cur.execute(
-                "update pockets set of_investment_id=null, of_last_seen_balance=null "
-                "where of_investment_id=%s and user_id=%s",
+                "select id, source from pockets where of_investment_id=%s and user_id=%s",
                 (of_investment_id, user_id),
             )
+            anterior = cur.fetchone()
+            if anterior and anterior["id"] != pocket_id:
+                if anterior["source"] == "open_finance":
+                    raise ValueError("OF_POCKET_READONLY")
+                _unbind_pocket_zerando(cur, user_id, anterior["id"])
             cur.execute(
                 "update pockets set of_investment_id=%s, of_last_seen_balance=%s "
                 "where id=%s and user_id=%s",

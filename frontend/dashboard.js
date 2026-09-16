@@ -3226,7 +3226,10 @@ function _renderGoalsView(goals) {
 }
 
 // Caixinha vinda do banco (Open Finance): saldo espelhado, sem rendimento interno.
-function _isOfPocket(p) { return p && (p.source === "open_finance" || p.of_investment_id != null); }
+// Quem decide é o VÍNCULO ativo, não o `source`: é a mesma régua do backend
+// (db/pockets.py:354 e :645 recusam por `of_investment_id`). Com `source` no OR, um
+// pocket sem vínculo ficava read-only na tela enquanto o POST aceitaria o depósito.
+function _isOfPocket(p) { return p && p.of_investment_id != null; }
 // No Grátis (pós-trial) o OF não está ativo → a caixinha do banco fica congelada.
 function _isOfStale(p) { return _isOfPocket(p) && p.of_plan_active === false; }
 function _ofPocketBadge(p) {
