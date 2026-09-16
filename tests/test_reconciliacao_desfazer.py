@@ -126,3 +126,21 @@ def test_fusao_historica_credito_em_conta_fica_intacta(uid_pro, ia_fora):
     manda(uid_pro, "recebi 73,38 do fulano")
 
     assert _estado(of_tx) == antes
+
+
+def test_desfazer_reaproveita_sombra_que_sobreviveu(uid_pro, ia_fora):
+    """A fusão reversa engole a recusa do delete (`except: pass`) e pode deixar a
+    sombra viva com a transação já `auto_merged`. Desfazer reusa essa sombra."""
+    funde_a(uid_pro)
+    of_tx = _of_tx(uid_pro)
+    sobrevivente = _q("""insert into launches(user_id, tipo, valor, categoria, alvo, criado_em, efeitos,
+                                              source, external_id, posted_at, currency)
+                         values (%s,'despesa',50,'outros','MERCADO',now(),'{"delta_conta": 0}',
+                                 'open_finance',%s,%s,'BRL') returning id""",
+                      (uid_pro, f"of-tx-{uid_pro}-1", today_tz()))[0]["id"]
+
+    r = db.undo_reconciliation(uid_pro, of_tx)
+
+    assert r == {"ok": True, "changed": True, "launch_id": sobrevivente}
+    assert _sombras(uid_pro) == 1
+    assert consolidado(uid_pro) == (900.0, -50.0)
