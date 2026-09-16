@@ -20,7 +20,9 @@ Antes de chamar qualquer agente, classifique a mudança pela tabela de faixas do
 `CLAUDE.md` §0 e diga ao usuário qual escolheu. Na faixa **Completo** rode a
 sequência inteira. Na **Leve**, faça **uma** passada do Tester e um Manager curto; o
 Arquiteto (passos 1 e 2) só é pulado quando a mudança já tem plano aprovado ou cabe
-num arquivo com um único comportamento possível — fora disso ele escreve o plano e o
+num arquivo com um único comportamento possível. Nesse caso o orquestrador escreve o
+plano em poucas linhas (o pedido, o arquivo e o comportamento esperado) e o entrega ao
+Coder como plano aprovado no passo 3. Fora disso, o Arquiteto escreve o plano e o
 usuário confirma, como pede o `CLAUDE.md` §1. Na **Direto** este fluxo não se aplica.
 
 ## Sequência
