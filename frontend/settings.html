@@ -3356,6 +3356,15 @@ const OF_VERDICT_OK = ["updated", "rate_limited"];
 // serve de fallback do `updating`, que tem item na mão.
 const OF_UPDATING_LOTE = "O banco ainda está atualizando. Se faltar algo, toque em Atualizar de novo.";
 
+// "Banco ainda coletando" NÃO é erro, e os DOIS caminhos que dizem isso usam
+// este tom: o ramo do lote (`still_updating`) e a entrada `updating` da tabela
+// abaixo. Uma constante e não duas literais porque a decisão é UMA (§0.7) — as
+// duas frases já foram cópias divergentes uma vez. Qualquer valor fora de
+// "ok"/"error" pinta o toast neutro (`#toast` sem classe de cor, ícone
+// `ph-info`) e, o que mais importa, não dispara o `throw` do
+// `refreshOpenFinance` — que é o que virava âmbar no pull-to-refresh.
+const OF_TOM_COLETANDO = "info";
+
 const OF_VERDICT = [
   ["item_missing",      (i) => `A conexão ${ofBanco(i)} foi perdida. Refaça a conexão.`],
   ["removed",           (i) => `A conexão ${ofBanco(i)} foi removida. Reconecte para voltar a sincronizar.`],
@@ -3397,7 +3406,14 @@ function refreshVerdict(sync) {
   const items = Array.isArray(sync.items) ? sync.items : [];
   for (const [estado, msg] of OF_VERDICT) {
     const achado = items.find((i) => i.state === estado);
-    if (achado) return { tone: "error", msg: msg(achado) };
+    // UMA entrada é neutra, e é exceção medida, não regra nova: `updating` é o
+    // banco ainda coletando — o estado que o `coletando_sem_info` do backend
+    // devolve quando o health não traz informação de produto, ou seja o caminho
+    // COMUM de um refresh que funcionou. As outras SETE continuam `error` de
+    // propósito: item sumido, removido, pausado e companhia são erro de verdade,
+    // e neutralizá-las apagaria o âmbar de quem precisa reconectar o banco.
+    if (achado)
+      return { tone: estado === "updating" ? OF_TOM_COLETANDO : "error", msg: msg(achado) };
   }
   // Tom NEUTRO, não `error`: `still_updating` conta item que a Pluggy ainda não
   // terminou de coletar no fim da espera de 18s do servidor — coleta de banco
@@ -3406,7 +3422,7 @@ function refreshVerdict(sync) {
   // o `throw` lá em cima virava âmbar em todo pull-to-refresh bem-sucedido.
   // A FRASE é a mesma de propósito (decisão do dono) — só o tom muda.
   if (Number(sync.still_updating) > 0)
-    return { tone: "info", msg: OF_UPDATING_LOTE };
+    return { tone: OF_TOM_COLETANDO, msg: OF_UPDATING_LOTE };
   // Default SEGURO: qualquer estado fora da lista de permissão, ou um `ok:false`
   // sem item nenhum, não pode terminar em verde.
   const desconhecido = items.find((i) => !OF_VERDICT_OK.includes(i.state));
