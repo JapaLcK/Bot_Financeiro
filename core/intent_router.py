@@ -167,7 +167,8 @@ def _is_investment_action_or_advice_request(text: str) -> bool:
         norm,
     )
     ambiguous_action = (
-        r"(?:aplicar|aplique|comprar|compre|compra|vender|venda|vende|indicar|indica|indique|"
+        r"(?:aplicar|aplique|aplica|investir|invista|investe|comprar|compre|compra|"
+        r"vender|venda|vende|indicar|indica|indique|"
         r"indicaria|recomendar|recomenda|recomende|recomendaria|sugerir|"
         r"sugere|sugira|sugeriria|aconselhar|aconselha|aconselhe|aconselharia)"
     )
@@ -239,7 +240,11 @@ def _is_investment_action_or_advice_request(text: str) -> bool:
         or re.search(rf"\b{_AMBIGUOUS_ALPHABETIC_TICKER_PATTERN}\b", text or "")
     )
     if not asset_hint:
-        return False
+        return bool(re.search(
+            r"\b(?:onde|em que|no que)\s+(?:eu\s+)?"
+            r"(?:devo|devia|deveria)\s+investir\b",
+            norm,
+        ))
 
     owned_asset_in_portfolio = bool(
         re.search(
@@ -341,7 +346,7 @@ def _is_investment_action_or_advice_request(text: str) -> bool:
     )
 
     return bool(
-        re.search(r"\b(aplicar|aplique|compre|comprar|vender|invista)\b", norm)
+        re.search(r"\b(aplicar|aplique|aplica|compre|comprar|vender|invista|investe)\b", norm)
         or sell_command
         or purchase_command
         or purchase_noun_command

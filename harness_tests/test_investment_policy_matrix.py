@@ -77,6 +77,12 @@ class InvestmentPolicyMatrixTests(unittest.TestCase):
             "Piggy, você vende PETR4 para mim agora?",
             "Piggy, qual investimento rende mais?",
             "Piggy, qual CDB tem maior rentabilidade?",
+            "Piggy, onde devo investir meu dinheiro?",
+            "Piggy, em que devo investir?",
+            "Piggy, investe 100 reais em CDB para mim",
+            "Piggy, aplica 100 reais em CDB para mim",
+            "Piggy, investe em um fundo para mim",
+            "Piggy, aplica em um fundo para mim",
             "qual investimento devo fazer?",
             "compre petr4 para mim",
             "qual PETR4 devo comprar?",
@@ -135,6 +141,9 @@ class InvestmentPolicyMatrixTests(unittest.TestCase):
             "todos os meus ativos estão registrados?",
             "qual CDB eu deveria registrar na minha carteira?",
             "qual dos meus investimentos rende mais?",
+            "onde vejo meus investimentos?",
+            "qual comando devo usar para investir?",
+            "aplica um fundo azul para mim",
         ):
             with self.subTest(text=text):
                 self.assertFalse(_policy(text)["refused"])
