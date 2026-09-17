@@ -313,17 +313,25 @@ def _sync_pluggy_item_confirmado(provider_item_id: str, connection: dict, api_ke
             return {"ok": False, "reason": "sync_in_progress", "item_id": provider_item_id,
                     "connection_id": connection["id"], "user_id": connection["user_id"]}
 
-        # GERAÇÃO DA AUTORIZAÇÃO, relida DENTRO do lock e ANTES de qualquer
-        # escrita. O `reconnected_at_visto` do `mark_sync_result` lá embaixo
-        # recusa só o CARIMBO do run velho — o espelho ele já teria sobrescrito.
-        # Com duas réplicas isso é alcançável: o sync pós-reconexão termina
-        # primeiro e carimba um `last_sync_at` legítimo; o run pré-reconexão
+        # GERAÇÃO DA AUTORIZAÇÃO e IDENTIDADE DA LINHA, relidas DENTRO do lock e
+        # ANTES de qualquer escrita. O `reconnected_at_visto` do `mark_sync_result`
+        # lá embaixo recusa só o CARIMBO do run velho — o espelho ele já teria
+        # sobrescrito. Com duas réplicas isso é alcançável: o sync pós-reconexão
+        # termina primeiro e carimba um `last_sync_at` legítimo; o run pré-reconexão
         # chega depois, pega o lock, escreve contas/investimentos/status/health
         # do snapshot VELHO e tem só o carimbo recusado — a tela segue
         # "Atualizado" sobre espelho velho. O `_INFLIGHT` não cobre: é por
         # processo. Run de geração velha morre aqui, sem escrever nada.
+        # O `id` cobre a troca de LINHA: durante os minutos de leitura remota
+        # (fora do lock) a linha original pode ser apagada e o mesmo item ganhar
+        # outra (outro dono) com `reconnected_at` igual (ex. ambos NULL). Sem ele
+        # as escritas miravam o id apagado — sem efeito (medido: nada gravado em
+        # nenhuma das duas carteiras) — e o sync devolvia `ok: True` mentindo.
+        # Linha substituta sempre tem id novo.
         atual = get_open_finance_connection_by_item_id(provider_item_id)
-        if not atual or atual.get("reconnected_at") != connection.get("reconnected_at"):
+        if (not atual
+                or atual.get("id") != connection.get("id")
+                or atual.get("reconnected_at") != connection.get("reconnected_at")):
             return {"ok": False, "reason": "stale_authorization", "item_id": provider_item_id,
                     "connection_id": connection["id"], "user_id": connection["user_id"]}
 

@@ -639,6 +639,51 @@ def test_sync_sem_reconexao_no_meio_carimba_normalmente(user_id, monkeypatch, re
     assert ui["state"] == "updated"
 
 
+# ── 11f. Codex #473 (P1): item trocou de DONO no meio da leitura remota ─────
+# A releitura dentro do lock (`pluggy_sync.py:325`) comparava só `reconnected_at`.
+# Se, durante os minutos de leitura fora do lock, a linha original for apagada e
+# o MESMO item ganhar outra linha (outro user_id) com `reconnected_at` igual
+# (aqui, NULL == NULL), a guarda passava e as escritas miravam o id apagado:
+# nada era gravado (as asserções de espelho abaixo passam com e sem o conserto
+# — são proteção, não o controle), mas o sync devolvia `ok: True`.
+#
+# CONTROLE NEGATIVO: tirar o `atual.get("id") != connection.get("id")` da
+# condição deixa vermelha a asserção do `reason` (`ok` vira True).
+
+def test_item_troca_de_dono_no_meio_do_sync_nao_escreve_em_ninguem(user_id, monkeypatch, relogio_fixo):
+    import uuid
+    outro_user_id = int(uuid.uuid4().int % 10_000_000_000)
+    db.ensure_user(outro_user_id)
+
+    conexao = _conexao(user_id, "item-troca")
+    assert _linha("item-troca")["reconnected_at"] is None
+    _mock_pluggy(monkeypatch, item={**ITEM_SAUDAVEL, "id": "item-troca"},
+                 contas=[_conta_pluggy("acc-troca")], txs=[_tx_pluggy("tx-troca")])
+
+    # No meio da leitura remota (fora do lock): a linha original é apagada e o
+    # MESMO item_id nasce numa linha nova, de outro usuário, com reconnected_at
+    # também NULL — a autorização "bate" mas o dono trocou.
+    real = ps.list_pluggy_transactions
+    def troca_de_dono_no_meio(account_id, api_key=None, **kw):
+        with get_conn() as c:
+            with c.cursor() as cur:
+                cur.execute("delete from open_finance_connections where id=%s", (conexao["id"],))
+            c.commit()
+        db.save_pluggy_open_finance_item(
+            outro_user_id, {"id": "item-troca", "status": "UPDATED",
+                            "connector": {"id": 612, "name": "Nubank"}})
+        return real(account_id, api_key, **kw)
+    monkeypatch.setattr(ps, "list_pluggy_transactions", troca_de_dono_no_meio)
+
+    res = ps.sync_pluggy_item("item-troca")
+
+    assert res["ok"] is False and res["reason"] == "stale_authorization"
+    linha_nova = _linha("item-troca")
+    assert linha_nova["user_id"] == outro_user_id
+    assert _espelho(linha_nova["id"]) == (0, 0), "a linha do novo dono não pode ganhar dado do item velho"
+    assert linha_nova["last_sync_at"] is None, "run de dono trocado não carimba sucesso"
+
+
 # ── 12. RODADA 3: a máquina de estados, evento por evento ───────────────────
 # A tabela vive no topo de `core/services/pluggy_health.py`. Estes testes são a
 # tabela executável — cada um é uma linha dela.
