@@ -2725,6 +2725,9 @@ def disconnect_open_finance_connection(
     with get_conn() as conn:
         with conn.cursor() as cur:
             from .bank_movements import _lock_user, reconcile_bank_movements
+            # Import LOCAL: `open_finance_state` importa este módulo no topo, e a
+            # mão única do import está documentada lá (`:38-42`).
+            from .open_finance_state import mark_items_removed
             _lock_user(cur, user_id)
             # Caixinha vinculada é ESPELHO: o dinheiro está no banco. Indo embora a
             # conexão, o FK só zera o `of_investment_id` (`on delete set null`,
@@ -2770,6 +2773,11 @@ def disconnect_open_finance_connection(
                 )
             varridas = cur.fetchall()
             deleted = len(varridas)
+            # Marca da remoção deliberada, na MESMA transação do delete: sem ela
+            # uma reentrega de `item/created` recria a conexão que o usuário
+            # acabou de remover quando o item não tem linha `pluggy_item` no
+            # registry (falha do `register_item`, ou conexão anterior ao registry).
+            mark_items_removed(cur, user_id, varridas, last_event="disconnect")
             reconcile_bank_movements(cur, user_id)
 
         conn.commit()

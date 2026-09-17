@@ -203,9 +203,9 @@ def test_dry_run_mostra_o_item_que_a_lista_de_orfaos_descarta(monkeypatch, capsy
     usuário que está no único estado sem saída pela tela. Pior no 2º caso: com só
     o r4-i2 no banco, a saída era "Nenhum item órfão no registry.".
 
-    O bloco NÃO promete separar (a) adoção pela metade de (b) banco removido — os
-    dados de hoje não separam (`alvos`, ponytail). Reportar ambíguo
-    é honesto; esconder não é, e era o que acontecia.
+    O bloco NÃO promete separar (a) adoção pela metade de (b) banco removido — o
+    predicado do `alvos` não separa, embora o registry hoje separe a remoção
+    marcada. Reportar ambíguo é honesto; esconder não é, e era o que acontecia.
 
     MUTAÇÃO que fica vermelha AQUI: mover o bloco para DEPOIS do `if not items: …
     return` → o 2º caso cai (é exatamente onde ele estava escondido).

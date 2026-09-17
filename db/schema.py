@@ -551,6 +551,20 @@ def init_db():
         create index if not exists idx_of_item_registry_item
           on open_finance_item_registry(provider, provider_item_id)
         """,
+        # Linha de corte no TEMPO: `true` só em rastro escrito por uma versão que
+        # também marca a remoção deliberada (`origin='removed'`, mark_items_removed).
+        # Rastro anterior fica `false` para sempre — sem backfill, porque não há
+        # como saber se aquele item foi removido pelo usuário
+        # (`OPEN_FINANCE_DISCONNECTED` não guarda `item_id`). A distinção que ela
+        # habilita: última linha com dono sem `removed` e COM `removal_tracked` =
+        # adoção INTERROMPIDA; sem `removal_tracked` = legado AMBÍGUO. A regra
+        # inteira (ordem por `id`, os quatro desfechos e o limite dela) está no
+        # docstring de `db.open_finance_state.mark_items_removed`; quem a consome
+        # é a recuperação por operador, fora desta PR.
+        """
+        alter table open_finance_item_registry
+          add column if not exists removal_tracked boolean not null default false
+        """,
         # report diário (preferências do usuário)
         """
         create table if not exists daily_report_prefs (

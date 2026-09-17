@@ -973,8 +973,13 @@ async def _adota_item_orfao(item_id: str, last_event: str | None = None) -> int 
         da Pluggy devolve 401).
 
     O PREÇO dessa ordem, medido: se a escrita da conexão falhar no meio, sobra
-    rastro COM dono e nenhuma conexão — estado indistinguível de banco removido
-    pelo usuário. Aí NÃO há recuperação automática: o script one-shot deixa de
+    rastro COM dono e nenhuma conexão — para os leitores AUTOMÁTICOS, o mesmo
+    efeito de banco removido pelo usuário. Já não é o mesmo ESTADO: a remoção
+    deliberada grava `origin='removed'` (`db.mark_items_removed`) e esta sobra
+    fica com `pluggy_item`/`webhook_adopt`, então a diferença está gravada — só
+    que nenhuma porta automática a lê (quem lê é a recuperação por operador, e a
+    regra de precedência está no docstring daquela função). Aqui NÃO há
+    recuperação automática: o script one-shot deixa de
     listar o item (o filtro dele exclui rastro com dono, de propósito — a mesma
     regra, `db/open_finance_state.item_registry_origins`) e a retentativa do
     `item/created` não readota (a 1ª guarda acima). É por isso que os TRÊS
