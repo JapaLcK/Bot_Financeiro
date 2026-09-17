@@ -662,8 +662,8 @@ def pocket_deposit_from_account(
                 # Carteira disponível inclui o débito do manual fundido, que o
                 # espelho do banco já conta — senão a guarda recusa dentro da
                 # transação o que list_sources autorizou na tela (§0.7).
-                from .open_finance import merged_wallet_delta
-                if Decimal(str(acc["balance"])) + merged_wallet_delta(cur, user_id) < v:
+                from .reconciliation import wallet_guard_delta
+                if Decimal(str(acc["balance"])) + wallet_guard_delta(cur, user_id) < v:
                     raise ValueError("INSUFFICIENT_ACCOUNT")
             if not debita_carteira:
                 from .open_finance import assert_bank_covers
@@ -714,8 +714,9 @@ def pocket_deposit_from_account(
 
         conn.commit()
 
-    # A guarda acima autoriza contra a Carteira CORRIGIDA (`merged_wallet_delta`);
-    # devolver o `accounts.balance` cru faria a resposta falar de outra base —
+    # A guarda acima autoriza pelo menor (`wallet_guard_delta`: fusão devolvida,
+    # receita pendente fora); a resposta devolve a Carteira EXIBIDA. O cru faria
+    # a resposta falar de outra base —
     # cru 50 + fundido 50, aporte de 80 passava e a resposta dizia -30 com a
     # Carteira exibindo 20 (Codex, PR #443). Relido DEPOIS do commit, fora do
     # `with`, para a leitura enxergar a escrita. Consumidores: as rotas do
