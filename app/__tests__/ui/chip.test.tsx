@@ -44,13 +44,13 @@ describe("Chip", () => {
     expect(estiloVisual(naoSel).backgroundColor).toBe(escuro.surface);
   });
 
-  it("hitSlop garante toque >= 44pt nos 4 lados mesmo com visual compacto", () => {
-    const { claro: c } = renderNosDoisTemas(<Chip rotulo="x" selecionado={false} onPress={jest.fn()} />);
-    const botao = c.getByRole("button");
-    expect(botao.props.hitSlop.top).toBeGreaterThanOrEqual(6);
-    expect(botao.props.hitSlop.bottom).toBeGreaterThanOrEqual(6);
-    expect(botao.props.hitSlop.left).toBeGreaterThanOrEqual(6);
-    expect(botao.props.hitSlop.right).toBeGreaterThanOrEqual(6);
+  it("altura de toque de 44pt vem do tamanho real, não de hitSlop (que o pai recorta)", () => {
+    const { claro: c, escuro: e } = renderNosDoisTemas(
+      <Chip rotulo="x" selecionado={false} onPress={jest.fn()} />,
+    );
+    expect(estiloVisual(c).minHeight).toBeGreaterThanOrEqual(44);
+    expect(estiloVisual(e).minHeight).toBeGreaterThanOrEqual(44);
+    expect(c.getByRole("button").props.hitSlop).toBeUndefined();
   });
 
   it("minWidth 44 no visual, mesmo com rótulo de 1 caractere", () => {

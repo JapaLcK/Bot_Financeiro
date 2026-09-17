@@ -23,14 +23,6 @@ exports[`Chip snapshot (dois temas): claro 1`] = `
   accessible={true}
   collapsable={false}
   focusable={true}
-  hitSlop={
-    {
-      "bottom": 6,
-      "left": 6,
-      "right": 6,
-      "top": 6,
-    }
-  }
   onBlur={[Function]}
   onClick={[Function]}
   onFocus={[Function]}
@@ -49,9 +41,9 @@ exports[`Chip snapshot (dois temas): claro 1`] = `
         "backgroundColor": "#FFE6F1",
         "borderRadius": 12,
         "justifyContent": "center",
+        "minHeight": 44,
         "minWidth": 44,
         "paddingHorizontal": 16,
-        "paddingVertical": 8,
         "transform": [
           {
             "scale": 1,
@@ -106,14 +98,6 @@ exports[`Chip snapshot (dois temas): escuro 1`] = `
   accessible={true}
   collapsable={false}
   focusable={true}
-  hitSlop={
-    {
-      "bottom": 6,
-      "left": 6,
-      "right": 6,
-      "top": 6,
-    }
-  }
   onBlur={[Function]}
   onClick={[Function]}
   onFocus={[Function]}
@@ -132,9 +116,9 @@ exports[`Chip snapshot (dois temas): escuro 1`] = `
         "backgroundColor": "#351827",
         "borderRadius": 12,
         "justifyContent": "center",
+        "minHeight": 44,
         "minWidth": 44,
         "paddingHorizontal": 16,
-        "paddingVertical": 8,
         "transform": [
           {
             "scale": 1,

@@ -14,16 +14,12 @@ interface Props {
 }
 
 /**
- * Visualmente compacto (padding vertical menor que 44pt — o pill de filtro
- * do site) e `hitSlop` fecha a diferença até o toque de 44pt nos 4 LADOS —
- * um rótulo de 1-2 caracteres também fica estreito demais na horizontal, por
- * isso o `minWidth` no visual. Selecionado usa
- * `brandSoft`/`brandInk` (par medido em `PARES`, ≥4,5 nos dois temas).
- *
- * Hipótese não verificável neste ambiente: no iOS o `hitSlop` amplia a área
- * que RECEBE o toque, mas não o `accessibilityFrame` que o VoiceOver desenha
- * — o retângulo do leitor de tela continua do tamanho visual. Só o aparelho
- * com VoiceOver ligado confirma isso.
+ * Alvo de toque de 44pt na ALTURA e na LARGURA pelo tamanho real do
+ * `Pressable`, não por `hitSlop`: o React Native recorta o `hitSlop` nos
+ * limites do pai, e numa linha de chips o pai encolhe para a altura do chip
+ * — a folga prometida não existiria. O `minWidth` cobre o rótulo de 1-2
+ * caracteres. Selecionado usa `brandSoft`/`brandInk` (par medido em `PARES`,
+ * ≥4,5 nos dois temas).
  */
 export function Chip({ rotulo, selecionado, onPress }: Props) {
   const { cores } = useTema();
@@ -41,16 +37,15 @@ export function Chip({ rotulo, selecionado, onPress }: Props) {
       onPressOut={pressao.aoSoltar}
       accessibilityRole="button"
       accessibilityState={{ selected: selecionado }}
-      hitSlop={{ top: 6, bottom: 6, left: 6, right: 6 }}
     >
       <Animated.View
         style={[
           {
-            paddingVertical: espaco.sm,
             paddingHorizontal: espaco.lg,
             borderRadius: raio.md,
             alignItems: "center",
             justifyContent: "center",
+            minHeight: 44,
             minWidth: 44,
             backgroundColor: selecionado ? cores.brandSoft : cores.surface,
           },
