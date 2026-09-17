@@ -94,6 +94,18 @@ class DeliveryFailureTests(unittest.TestCase):
         self.assertIn("pode ter sido concluída", payload["replies"][0]["body"])
         self.assertNotIn("tente novamente", payload["replies"][0]["body"].lower())
 
+    def test_saida_vazia_apos_processamento_nao_manda_repetir_escrita(self) -> None:
+        result = subprocess.run(
+            [sys.executable, str(SCRIPT), "--handler-behavior", "empty-output"],
+            cwd=REPO,
+            env={"PATH": os.environ.get("PATH", ""), "PYTHONPATH": str(REPO)},
+            text=True, capture_output=True, timeout=15, check=False,
+        )
+        self.assertEqual(result.returncode, 0, result.stderr or result.stdout)
+        payload = json.loads(result.stdout)
+        self.assertIn("pode ter sido concluída", payload["replies"][0]["body"])
+        self.assertNotIn("tente novamente", payload["replies"][0]["body"].lower())
+
     def test_falha_ao_confirmar_anexo_antes_do_nucleo_pede_reenvio(self) -> None:
         result = subprocess.run(
             [sys.executable, str(SCRIPT), "--attachment", "--send-error-once"],

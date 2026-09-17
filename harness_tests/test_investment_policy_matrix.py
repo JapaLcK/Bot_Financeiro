@@ -75,6 +75,8 @@ class InvestmentPolicyMatrixTests(unittest.TestCase):
             "Piggy, compra petr4 para mim",
             "Piggy, você compra PETR4 para mim agora?",
             "Piggy, você vende PETR4 para mim agora?",
+            "Piggy, qual investimento rende mais?",
+            "Piggy, qual CDB tem maior rentabilidade?",
             "compre petr4 para mim",
             "qual PETR4 devo comprar?",
             "Piggy, compre Ethereum para mim",
@@ -131,6 +133,7 @@ class InvestmentPolicyMatrixTests(unittest.TestCase):
             "recebi 100 pela venda de todos os meus ativos",
             "todos os meus ativos estão registrados?",
             "qual CDB eu deveria registrar na minha carteira?",
+            "qual dos meus investimentos rende mais?",
         ):
             with self.subTest(text=text):
                 self.assertFalse(_policy(text)["refused"])

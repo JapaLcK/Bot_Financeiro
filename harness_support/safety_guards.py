@@ -91,6 +91,9 @@ class SafetyGuards:
         def deny_create_connection(address: Any, *args: Any, **kwargs: Any) -> None:
             self._deny("network", repr(address))
 
+        def deny_resolution(*args: Any, **kwargs: Any) -> None:
+            self._deny("network", repr(args[0] if args else kwargs))
+
         def deny_process(*args: Any, **kwargs: Any) -> None:
             command = args[0] if args else kwargs.get("args", "unknown")
             self._deny("process", repr(command))
@@ -108,6 +111,10 @@ class SafetyGuards:
             if hasattr(socket.socket, name):
                 self._replace(socket.socket, name, deny_send)
         self._replace(socket, "create_connection", deny_create_connection)
+        for name in (
+            "getaddrinfo", "gethostbyname", "gethostbyname_ex", "gethostbyaddr", "getnameinfo"
+        ):
+            self._replace(socket, name, deny_resolution)
         self._replace(subprocess, "Popen", deny_process)
         process_names = (
             "system", "popen", "fork", "forkpty", "posix_spawn", "posix_spawnp",

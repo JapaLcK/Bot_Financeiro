@@ -1345,7 +1345,7 @@ def process_message(message: InboundMessage) -> None:
                 sent_response = True
         if not sent_response:
             logger.warning("WA outgoing messages had no deliverable text from=%s", message.wa_id)
-            _send_reply(reply_to, _PROCESSING_FAILURE_MESSAGE)
+            _send_reply(reply_to, _DELIVERY_FAILURE_MESSAGE)
     except Exception as exc:
         logger.error("WA message processing failed wa_id=%s error=%s", message.wa_id, exc)
         try:

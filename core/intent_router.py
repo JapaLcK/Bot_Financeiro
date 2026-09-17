@@ -307,6 +307,19 @@ def _is_investment_action_or_advice_request(text: str) -> bool:
         or prospective_quality
         or re.search(r"\b(qual|quais|devo|devia|deveria)\b", norm)
     )
+    yield_advice = bool(
+        re.search(
+            r"\b(?:rende|rendem|renderia|renderiam)\s+mais\b|"
+            r"\b(?:maior|melhor)\s+(?:rentabilidade|rendimento|retorno)\b",
+            norm,
+        )
+        and not portfolio_quality_query
+        and not re.search(
+            r"\b(meus|minhas)\s+(investimentos|acoes|ativos|fundos|fiis|etfs)\b",
+            norm,
+        )
+        and ("?" in text or re.search(r"\b(qual|quais)\b", norm))
+    )
     sell_command = bool(
         re.search(
             r"^(?:(?:piggy|por favor|por gentileza)\s*,?\s*){0,2}"
@@ -341,6 +354,7 @@ def _is_investment_action_or_advice_request(text: str) -> bool:
             norm,
         )
         or quality_advice
+        or yield_advice
         or re.search(r"\b(quais?|qual|que)\b.*\b(devo|devia)\b", norm)
         or re.search(r"\b(devo|devia|deveria)\b.*\b(comprar|vender|investir)\b", norm)
     )

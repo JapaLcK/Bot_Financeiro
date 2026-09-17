@@ -123,6 +123,32 @@ class GuardOperationsTests(unittest.TestCase):
         finally:
             socket.socket.sendto = original_sendto
 
+    def test_resolucao_dns_nao_alcanca_rede(self) -> None:
+        original_getaddrinfo = socket.getaddrinfo
+        original_gethostbyname = socket.gethostbyname
+        calls: list[str] = []
+        socket.getaddrinfo = lambda *_a, **_k: calls.append("getaddrinfo") or []
+        socket.gethostbyname = lambda *_a, **_k: calls.append("gethostbyname") or "127.0.0.1"
+        try:
+            with tempfile.TemporaryDirectory() as root:
+                guards = SafetyGuards(allowed_write_root=Path(root))
+                guards.install()
+                try:
+                    for lookup in (
+                        lambda: socket.getaddrinfo("example.invalid", 443),
+                        lambda: socket.gethostbyname("example.invalid"),
+                    ):
+                        with self.assertRaises(SafetyViolation):
+                            lookup()
+                    self.assertEqual(calls, [])
+                    self.assertEqual(len(guards.events), 2)
+                    self.assertTrue(all(event.startswith("network:") for event in guards.events))
+                finally:
+                    guards.close()
+        finally:
+            socket.getaddrinfo = original_getaddrinfo
+            socket.gethostbyname = original_gethostbyname
+
     def test_mutacoes_fora_da_raiz_sao_bloqueadas(self) -> None:
         with tempfile.TemporaryDirectory() as root:
             directory = Path(root)
