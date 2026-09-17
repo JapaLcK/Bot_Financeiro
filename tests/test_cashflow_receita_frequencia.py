@@ -1,12 +1,24 @@
-"""Receita recorrente única/semanal/diária na previsão de saldo (feature Pro).
+"""Receita recorrente única/semanal/diária: previsão, cadastro e edição (feature Pro).
 
 O cobrador (`core/services/recurring_charger.py`) só credita receita mensal e
 anual, mas a previsão contava as outras três como mensais: uma receita única de
-R$5.000 somava R$15.000 em 90 dias. O conserto tem duas pontas, e as duas são
-medidas aqui pelas rotas de produção, com Postgres real:
+R$5.000 somava R$15.000 em 90 dias. Medido aqui pelas rotas de produção, com
+Postgres real:
 
 * a previsão ignora receita que não seja mensal/anual (registros legados);
-* o cadastro (POST/PATCH `/recurring-incomes`) recusa essas frequências.
+* o cadastro (POST/PATCH `/recurring-incomes`) recusa essas frequências;
+* a edição pelo modal não converte o legado em mensal (issue #454, item 1). O
+  `<select id="recurring-income-frequency">` só tem mensal/anual, então o modal
+  manda `frequency=""` para o legado, e o PATCH antes gravava "monthly": o bônus
+  único passava a ser creditado todo mês. Agora frequência vazia na edição
+  significa "não mudar" (`update_recurring_income`).
+
+Controle NEGATIVO (medido): volte `if frequency is not None and
+str(frequency).strip():` para `if frequency is not None:` em
+`db/recurring_income.py`. Ficam vermelhos o `test_patch_do_modal_mantem_*`, o
+`test_cobrador_nao_credita_*` (credita 5.000 em 10/10 e em 10/11), o
+`test_edicao_aceita_anual_*` e os dois casos de `test_frequencia_vazia_*` (a anual
+vira mensal); o `test_cobrador_credita_*` (positivo) segue verde.
 
 Registro legado = nasce mensal pela rota e tem a frequência forçada por SQL, o
 único jeito de existir depois que o cadastro passou a recusar.
@@ -23,6 +35,7 @@ import core.services.cashflow as cf
 import core.services.cashflow_forecast as cff
 import db
 import frontend.finance_bot_websocket_custom as dashboard
+from core.services.recurring_charger import credit_due_recurring_incomes_once
 from db.recurring import create_recurring_expense
 from db.recurring_income import count_active_recurring_incomes, get_recurring_income
 
@@ -69,6 +82,25 @@ def _receita_legada(uid: int, freq: str, amount: float, pay_day: int, start_date
             )
         conn.commit()
     return inc_id
+
+
+def _patch_do_modal(uid: int, inc_id: int, frequency: str) -> None:
+    """Corpo inteiro de `saveRecurringIncome` (frontend/dashboard.js)."""
+    _edita_receita(uid, inc_id, name="Bônus ajustado", amount=5000, category="salário",
+                   pay_day=10, start_date="2026-10-10", frequency=frequency, pay_month=None,
+                   is_primary=False, notes=None)
+
+
+def _creditos_e_lancamentos(uid: int, inc_id: int) -> tuple[list[float], int]:
+    with db.get_conn() as conn:
+        with conn.cursor() as cur:
+            cur.execute(
+                "select amount from recurring_income_credits where user_id=%s and income_id=%s order by ym",
+                (uid, inc_id),
+            )
+            creditos = [float(r["amount"]) for r in cur.fetchall()]
+            cur.execute("select count(*) as n from launches where user_id=%s", (uid,))
+            return creditos, int(cur.fetchone()["n"])
 
 
 def _previsao(uid: int, chave: str) -> tuple[float, float, float]:
@@ -146,24 +178,67 @@ def test_edicao_recusa_frequencia_fora_de_mensal_anual(pro_user_id, freq):
 
 def test_edicao_aceita_anual_e_o_patch_vazio_do_modal(pro_user_id):
     """POSITIVO. PATCH mensal→anual grava. E o PATCH que o modal manda ao salvar
-    uma receita legada (`frequency=""`: o `<select id="recurring-income-frequency">`
-    só tem mensal/anual, então o `.value` sai vazio) continua gravando o que o
-    usuário editou, sem 400. O modal diz "atualizada" com qualquer 200.
-
-    NÃO é garantia deste conserto o que esse PATCH faz com a frequência do legado:
-    ele o converte em mensal, e um `once` editado passa a ser creditado todo mês.
-    Comportamento PREEXISTENTE, registrado para correção separada; por isso não é
-    afirmado aqui."""
+    uma receita legada (`frequency=""`) grava o que o usuário editou, sem 400, e
+    mantém a frequência do legado."""
     mensal = _cria_receita(pro_user_id, 2000, 5)
-    legada = _receita_legada(pro_user_id, "once", 5000, 10, "2026-10-10")
+    legada = _receita_legada(pro_user_id, "once", 4500, 10, "2026-10-10")
 
     _edita_receita(pro_user_id, mensal, frequency="annual", pay_month=3)
-    # corpo inteiro de `saveRecurringIncome` (frontend/dashboard.js)
-    _edita_receita(pro_user_id, legada, name="Bônus ajustado", amount=5500, category="salário",
-                   pay_day=10, start_date="2026-10-10", frequency="", pay_month=None,
-                   is_primary=False, notes=None)
+    _patch_do_modal(pro_user_id, legada, "")
 
     rec = get_recurring_income(pro_user_id, mensal)
     assert (rec["frequency"], rec["pay_month"]) == ("annual", 3)
     rec = get_recurring_income(pro_user_id, legada)
-    assert (rec["name"], rec["amount"]) == ("Bônus ajustado", 5500.0)
+    assert (rec["name"], rec["amount"], rec["frequency"]) == ("Bônus ajustado", 5000.0, "once")
+
+
+@pytest.mark.parametrize("vazio", ["", "  "])
+@pytest.mark.parametrize("freq", ["once", "weekly", "daily"])
+def test_patch_do_modal_mantem_frequencia_do_legado(pro_user_id, freq, vazio):
+    inc_id = _receita_legada(pro_user_id, freq, 300, 10, "2026-10-10")
+
+    _patch_do_modal(pro_user_id, inc_id, vazio)
+
+    rec = get_recurring_income(pro_user_id, inc_id)
+    assert (rec["frequency"], rec["pay_month"]) == (freq, None)
+    assert (rec["name"], rec["amount"]) == ("Bônus ajustado", 5000.0)
+
+
+def test_cobrador_nao_credita_receita_unica_editada_pelo_modal(pro_user_id):
+    """O dano do bug: a única de R$5.000 virava mensal e o cobrador real creditava
+    em 10/10, 10/11... O cobrador varre o banco inteiro; toda checagem filtra o user."""
+    inc_id = _receita_legada(pro_user_id, "once", 5000, 10, "2026-10-10")
+    _patch_do_modal(pro_user_id, inc_id, "")
+
+    credit_due_recurring_incomes_once(date(2026, 10, 10))
+    credit_due_recurring_incomes_once(date(2026, 11, 10))
+
+    assert _creditos_e_lancamentos(pro_user_id, inc_id) == ([], 0)
+
+
+def test_cobrador_credita_receita_unica_que_o_usuario_muda_para_mensal(pro_user_id):
+    """POSITIVO: a mesma receita, mudada de propósito para mensal, é creditada. Sem
+    isto, o teste acima passaria com um cobrador que não credita nada."""
+    inc_id = _receita_legada(pro_user_id, "once", 5000, 10, "2026-10-10")
+    _patch_do_modal(pro_user_id, inc_id, "monthly")
+
+    credit_due_recurring_incomes_once(date(2026, 10, 10))
+
+    assert get_recurring_income(pro_user_id, inc_id)["frequency"] == "monthly"
+    assert _creditos_e_lancamentos(pro_user_id, inc_id) == ([5000.0], 1)
+
+
+@pytest.mark.parametrize("pay_month, esperado", [(None, ("annual", 3)), (5, ("annual", 5))])
+def test_frequencia_vazia_mantem_anual_e_mensal(pro_user_id, pay_month, esperado):
+    """POSITIVO + mudança de contrato: `frequency=""` numa anual antes virava mensal.
+    Com `pay_month` preenchido, só o mês muda (o `elif` de `update_recurring_income`)."""
+    anual = _cria_receita(pro_user_id, 1200, 20, frequency="annual", pay_month=3)
+    mensal = _cria_receita(pro_user_id, 2000, 5)
+
+    _edita_receita(pro_user_id, anual, frequency="", pay_month=pay_month)
+    _edita_receita(pro_user_id, mensal, name="Salário novo")
+
+    rec = get_recurring_income(pro_user_id, anual)
+    assert (rec["frequency"], rec["pay_month"]) == esperado
+    rec = get_recurring_income(pro_user_id, mensal)
+    assert (rec["name"], rec["frequency"], rec["pay_month"]) == ("Salário novo", "monthly", None)
