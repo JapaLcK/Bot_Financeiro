@@ -276,6 +276,19 @@ def mark_sync_result(
                 owner = cur.fetchone()
                 if owner:
                     _lock_user(cur, owner["user_id"])
+            # #444: uma foto de health tirada com o item ainda em coleta
+            # (`_UPDATING`) pode não trazer todo produto — mescla com a foto
+            # anterior antes de gravar, pra um produto atrasado não sumir da tela
+            # só porque o item voltou a "buscar". `for update` porque a leitura e
+            # a gravação do health precisam ser a MESMA transação: sem o lock,
+            # dois syncs concorrentes do mesmo item poderiam mesclar sobre uma
+            # foto já superada.
+            from core.services.pluggy_health import _UPDATING, mesclar_health_em_coleta
+            if health is not None and str(health.get("item_status") or "").upper() in _UPDATING:
+                cur.execute("select health from open_finance_connections where id=%s for update",
+                            (connection_id,))
+                linha = cur.fetchone()
+                health = mesclar_health_em_coleta(linha["health"] if linha else None, health)
             cur.execute(
                 f"""
                 update open_finance_connections

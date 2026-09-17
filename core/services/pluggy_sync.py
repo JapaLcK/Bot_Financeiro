@@ -182,7 +182,7 @@ def normalize_pluggy_investment(raw: dict) -> dict:
     }
 
 
-def sync_pluggy_item(provider_item_id: str) -> dict:
+def sync_pluggy_item(provider_item_id: str, *, expected_user_id: int | None = None) -> dict:
     """Sincroniza um item Pluggy: contas + transações → tabelas OF. Idempotente.
 
     Máquina de estados (explícita, porque remendá-la um caso por vez foi como o
@@ -191,9 +191,17 @@ def sync_pluggy_item(provider_item_id: str) -> dict:
     consultado → saudável → sync executado → concluído.
 
     Este é o ÚNICO lugar do sistema que carimba ACTIVE/last_sync_at.
+
+    `expected_user_id`: quando informado, recusa ANTES de qualquer leitura
+    remota ou escrita se o item pertencer a outro usuário (#446, mesmo
+    `item_id` ligado a conexões de usuários diferentes). O webhook de produção
+    não passa este parâmetro — ele precisa sincronizar o dono real da linha.
     """
     connection = get_open_finance_connection_by_item_id(provider_item_id)
     if not connection:
+        return {"ok": False, "reason": "connection_not_found", "item_id": provider_item_id}
+
+    if expected_user_id is not None and int(connection["user_id"]) != int(expected_user_id):
         return {"ok": False, "reason": "connection_not_found", "item_id": provider_item_id}
 
     status_local = str(connection.get("status") or "").upper()
@@ -305,17 +313,25 @@ def _sync_pluggy_item_confirmado(provider_item_id: str, connection: dict, api_ke
             return {"ok": False, "reason": "sync_in_progress", "item_id": provider_item_id,
                     "connection_id": connection["id"], "user_id": connection["user_id"]}
 
-        # GERAÇÃO DA AUTORIZAÇÃO, relida DENTRO do lock e ANTES de qualquer
-        # escrita. O `reconnected_at_visto` do `mark_sync_result` lá embaixo
-        # recusa só o CARIMBO do run velho — o espelho ele já teria sobrescrito.
-        # Com duas réplicas isso é alcançável: o sync pós-reconexão termina
-        # primeiro e carimba um `last_sync_at` legítimo; o run pré-reconexão
+        # GERAÇÃO DA AUTORIZAÇÃO e IDENTIDADE DA LINHA, relidas DENTRO do lock e
+        # ANTES de qualquer escrita. O `reconnected_at_visto` do `mark_sync_result`
+        # lá embaixo recusa só o CARIMBO do run velho — o espelho ele já teria
+        # sobrescrito. Com duas réplicas isso é alcançável: o sync pós-reconexão
+        # termina primeiro e carimba um `last_sync_at` legítimo; o run pré-reconexão
         # chega depois, pega o lock, escreve contas/investimentos/status/health
         # do snapshot VELHO e tem só o carimbo recusado — a tela segue
         # "Atualizado" sobre espelho velho. O `_INFLIGHT` não cobre: é por
         # processo. Run de geração velha morre aqui, sem escrever nada.
+        # O `id` cobre a troca de LINHA: durante os minutos de leitura remota
+        # (fora do lock) a linha original pode ser apagada e o mesmo item ganhar
+        # outra (outro dono) com `reconnected_at` igual (ex. ambos NULL). Sem ele
+        # as escritas miravam o id apagado — sem efeito (medido: nada gravado em
+        # nenhuma das duas carteiras) — e o sync devolvia `ok: True` mentindo.
+        # Linha substituta sempre tem id novo.
         atual = get_open_finance_connection_by_item_id(provider_item_id)
-        if not atual or atual.get("reconnected_at") != connection.get("reconnected_at"):
+        if (not atual
+                or atual.get("id") != connection.get("id")
+                or atual.get("reconnected_at") != connection.get("reconnected_at")):
             return {"ok": False, "reason": "stale_authorization", "item_id": provider_item_id,
                     "connection_id": connection["id"], "user_id": connection["user_id"]}
 
@@ -611,7 +627,7 @@ def _hold_aggregate_emails(user_id: int, origem: str) -> None:
         print(f"[pluggy_sync] hold agregados ({origem}): {exc}")
 
 
-def _sync_item_contido(connection: dict) -> dict:
+def _sync_item_contido(connection: dict, user_id: int) -> dict:
     """`sync_pluggy_item` de UM item que NUNCA derruba o lote.
 
     `sync_pluggy_item` re-levanta o que não é 404 de propósito (é o que faz o
@@ -624,10 +640,14 @@ def _sync_item_contido(connection: dict) -> dict:
 
     Mesma escolha já feita para a leitura de `/investments` (READ_FAILED, ver
     `_sync_pluggy_item_confirmado`): leitura que falhou não é dado ausente.
+
+    O isolamento por usuário (#446) mora em `sync_pluggy_item`
+    (`expected_user_id`): recusa ANTES de qualquer leitura remota ou escrita,
+    não depois — aqui só se passa o dono adiante.
     """
     item_id = connection["provider_item_id"]
     try:
-        return sync_pluggy_item(item_id)
+        return sync_pluggy_item(item_id, expected_user_id=user_id)
     except Exception as exc:
         print(f"[pluggy_sync] item {item_id} falhou no lote: {type(exc).__name__}: {exc}")
         try:
@@ -664,7 +684,7 @@ def sync_pluggy_user(user_id: int) -> dict:
     if items:
         _hold_aggregate_emails(user_id, "sync_user")
 
-    results = [_sync_item_contido(c) for c in conns]
+    results = [_sync_item_contido(c, user_id) for c in conns]
 
     # Agentes whole-portfolio: rodam UMA vez, depois de TODOS os itens sincronizarem,
     # pra não gravar um retrato parcial que o dedupe por período congelaria. Ficam
@@ -761,7 +781,7 @@ def refresh_and_sync_pluggy_user(
         # bastava o tick periódico passar para o botão do usuário virar um
         # "já está tudo em dia" sem ter olhado nada.
         result = sync_pluggy_user(user_id)
-        parado = _refresh_items_report(items, institutions, {},
+        parado = _refresh_items_report(user_id, items, institutions, {},
                                        _reasons_do_sync(result), set(),
                                        rate_limited=rate_limited)
         # `still_updating` MEDIDO, não `0` fixo: o `sync_pluggy_user` acima fez
@@ -820,7 +840,7 @@ def refresh_and_sync_pluggy_user(
     result = sync_pluggy_user(user_id)
     reasons.update(_reasons_do_sync(result))
 
-    items_out = _refresh_items_report(items, institutions, patch_ok, reasons, pending,
+    items_out = _refresh_items_report(user_id, items, institutions, patch_ok, reasons, pending,
                                       rate_limited=rate_limited)
     # `**result` PRIMEIRO: ele traz um `ok` próprio (o de sync_pluggy_user, que é
     # sempre True) e sobrescreveria o veredito por item se viesse depois.
@@ -872,14 +892,21 @@ def _product_state(info: dict) -> str:
     return f"stale_since_{last}" if last else "stale"
 
 
-def _refresh_items_report(items, institutions, patch_ok, reasons, pending,
+def _refresh_items_report(user_id, items, institutions, patch_ok, reasons, pending,
                           *, rate_limited=()) -> list[dict]:
     """Estado por item DEPOIS do sync, lido do banco — que é onde o `mark_sync_result`
     acabou de gravar status, motivo e saúde. `connection_ui_state` é quem decide o
-    estado; aqui só se junta com o resultado do PATCH e da espera."""
+    estado; aqui só se junta com o resultado do PATCH e da espera.
+
+    `user_id` filtra `get_connections_by_item_id`: o mesmo `item_id` pode estar
+    ligado a conexões de usuários DIFERENTES (índice único ausente ou webhook
+    de item com dois donos — ver `tests/test_of_item_ownership.py`), e sem o
+    filtro este relatório vazava products/state/detail/reason do OUTRO usuário
+    (issue #446).
+    """
     out = []
     for item_id in items:
-        rows = get_connections_by_item_id(item_id)
+        rows = [r for r in get_connections_by_item_id(item_id) if int(r["user_id"]) == int(user_id)]
         row = rows[0] if len(rows) == 1 else {}
         ui = connection_ui_state(row)
         health = row.get("health") if isinstance(row.get("health"), dict) else {}
