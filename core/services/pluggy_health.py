@@ -173,6 +173,9 @@ JANELA_DEVICE_AUTH_MIN = 60
 
 # Status do item que significam "a Pluggy ainda está buscando".
 _UPDATING = {"UPDATING", "CREATED"}
+# Lista de permissão de `mesclar_health_em_coleta`: só uma foto ANTERIOR nestes
+# estados pode doar produto para a coleta nova — status desconhecido não mescla.
+_MESCLA_PERMITE_ANTERIOR = _UPDATING | {"UPDATED"}
 # Status que só o usuário resolve (reautorizar / responder MFA no banco, ou
 # autorizar o dispositivo / ler o QR — ver `_DETALHE_POR_STATUS` abaixo).
 _NEEDS_USER = {"LOGIN_ERROR", "WAITING_USER_INPUT", "INVALID_CREDENTIALS",
@@ -574,6 +577,51 @@ def derive_item_health(item: dict, *, now: datetime | None = None) -> dict:
     }
 
 
+def mesclar_health_em_coleta(anterior: Any, novo: Any) -> Any:
+    """Preserva os produtos da foto ANTERIOR que a foto NOVA omite, quando a nova
+    é de uma coleta em andamento (issue #444) — o último estado conhecido de cada um.
+
+    O job de saúde e o sync sobrescrevem `health` inteiro a cada observação. Uma
+    foto tirada com o item em `_UPDATING` pode trazer só um subconjunto de
+    produtos — ou nenhum —, e sem mesclar um produto que já estava atrasado
+    (ex.: CREDIT parado desde 12/08) some da tela assim que o item volta a
+    "buscar", mesmo sem ter sido resolvido.
+
+    Só mescla quando a foto nova está em coleta E existe foto anterior com
+    produtos — do contrário devolve `novo` sem tocar. Uma foto FINAL
+    (item_status fora de `_UPDATING`) é sempre a verdade corrente e nunca é
+    mesclada: ela é o que ZERA a coleta.
+
+    A foto ANTERIOR também precisa estar numa lista de permissão
+    (`_UPDATING`/`UPDATED`): sem isto, produtos de uma foto anterior doente
+    (LOGIN_ERROR/ERROR/WAITING_USER_ACTION/MISSING) vazavam para a coleta nova
+    e o card podia virar verde a partir de uma medição feita com o item em erro.
+
+    Pura: não muta `anterior` nem `novo`.
+    """
+    if not isinstance(novo, dict):
+        return novo
+    if str(novo.get("item_status") or "").upper() not in _UPDATING:
+        return novo
+    if not isinstance(anterior, dict):
+        return novo
+    if str(anterior.get("item_status") or "").upper() not in _MESCLA_PERMITE_ANTERIOR:
+        return novo
+    produtos_anteriores = anterior.get("products")
+    if not isinstance(produtos_anteriores, dict):
+        return novo
+
+    produtos_novos = novo.get("products") if isinstance(novo.get("products"), dict) else {}
+    products = {k: v for k, v in produtos_anteriores.items() if isinstance(v, dict)}
+    products.update({k: v for k, v in produtos_novos.items() if isinstance(v, dict)})
+    stale = [name for name in _PRODUCT_KEYS if name in products and not products[name].get("updated")]
+
+    merged = dict(novo)
+    merged["products"] = products
+    merged["stale_products"] = stale
+    return merged
+
+
 # Motivo de quem leu pela metade. Não está em `_LABELS` de propósito: o `out()`
 # do `connection_ui_state` manda motivo desconhecido para `error_recoverable`
 # ("Erro temporário / Tentaremos de novo automaticamente"), que é a verdade.
@@ -729,12 +777,18 @@ def connection_ui_state(connection_row: dict) -> dict:
     # sumiria com a tela dizendo "Atualizado". Só o VERDE é interceptado (no
     # `out()`, depois do motivo pendente): "Atualizando…" é o que a base dizia
     # e é a resposta honesta para o que não se mediu.
-    # LIMITE CONHECIDO, e é o mesmo cenário por outra porta: a guarda pega
-    # "nenhuma informação de produto", não "informação a menos". Se a foto nova
-    # trouxer só `accounts`, o cartão que estava atrasado na foto ANTERIOR some
-    # dela, `stale_products` fica vazio e o card vira "Atualizado". Fechar isso
-    # exige comparar com a foto anterior — que o job de saúde sobrescreve — e
-    # ficou para a issue #444.
+    # A mescla com a foto anterior (issue #444: cartão atrasado que some quando a
+    # foto nova traz só `accounts`) mora na ESCRITA, não aqui — `mark_sync_result`
+    # (`db/open_finance_state.py`) chama `mesclar_health_em_coleta` antes de
+    # gravar, então o `health` que esta função lê já vem mesclado quando a coleta
+    # está em andamento. Esta guarda continua valendo para o caso que a mescla
+    # não cobre: quando NÃO HÁ foto anterior com produto (1ª coleta) ou ela não
+    # está na lista de permissão (item em erro), não há o que mesclar, e
+    # `products` vazio ainda é "não sei", não "nada atrasado".
+    #
+    # DECISÃO DO DONO (2026-09-16): durante a coleta, com foto anterior
+    # UPDATED/UPDATING, o card mostra o último estado conhecido — inclusive
+    # "Atualizado" quando a foto anterior estava toda em dia.
     coletando_sem_info = (str((health or {}).get("item_status") or "").upper() in _UPDATING
                           and not (health or {}).get("products"))
 

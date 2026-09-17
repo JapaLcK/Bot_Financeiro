@@ -84,7 +84,7 @@ export default function Inicio() {
           {estado.aviso ? (
             <Text
               accessibilityLiveRegion="polite"
-              style={[texto.corpo, { color: paleta.negative }]}
+              style={[texto.corpo, { color: paleta.danger }]}
             >
               {estado.aviso}
             </Text>
@@ -113,7 +113,7 @@ export default function Inicio() {
 
       {estado.fase === "erro" && (
         <>
-          <Text style={[texto.corpo, { color: paleta.negative }]}>{estado.mensagem}</Text>
+          <Text style={[texto.corpo, { color: paleta.danger }]}>{estado.mensagem}</Text>
           <Botao
             rotulo="Tentar de novo"
             paleta={paleta}
@@ -154,30 +154,36 @@ function Botao(props: {
         { backgroundColor: paleta.ink, opacity: desativado ? 0.4 : pressed ? 0.8 : 1 },
       ]}
     >
-      <Text style={[texto.corpo, { color: paleta.bg, fontWeight: "600" }]}>{rotulo}</Text>
+      <Text style={[texto.corpo, { color: paleta.bg, fontFamily: "Inter-SemiBold" }]}>{rotulo}</Text>
     </Pressable>
   );
 }
 
 const estilos = StyleSheet.create({
+  // A escala de espaço mudou de valor por chave na Fase 2 (`md` 16→12, `lg`
+  // 24→16, ...). Estas quatro chaves são as que dão os MESMOS pixels da tela
+  // provisória original (`xxl`=24 no lugar do `lg` antigo, `lg`=16 no lugar
+  // do `md` antigo) — a tela não ganhou espaçamento novo, só acompanhou o
+  // renome dos tokens.
   tela: {
     flex: 1,
     justifyContent: "center",
-    padding: espaco.lg,
-    gap: espaco.md,
+    padding: espaco.xxl,
+    gap: espaco.lg,
   },
   campo: {
     minHeight: 48,
     borderWidth: 1,
     borderRadius: raio.md,
-    paddingHorizontal: espaco.md,
+    paddingHorizontal: espaco.lg,
     fontSize: texto.corpo.fontSize,
+    fontFamily: texto.corpo.fontFamily,
   },
   botao: {
     minHeight: 48,
     borderRadius: raio.md,
     alignItems: "center",
     justifyContent: "center",
-    paddingHorizontal: espaco.lg,
+    paddingHorizontal: espaco.xxl,
   },
 });

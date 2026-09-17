@@ -16,6 +16,7 @@ def _carteira_com(saldo: float):
     return patch("db.get_consolidated_balance", return_value={
         "manual": saldo, "open_finance_bank": 0, "of_bank_count": 0,
         "consolidated": saldo,
+        "reconciliation": {"pending_count": 0, "delta_se_confirmar": 0, "receita_back": 0},
     })
 
 
