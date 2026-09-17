@@ -1273,7 +1273,7 @@ def _data(v) -> bool:
     `date` do Postgres o aceita cortando a hora (medido). Um escritor que
     serialize `datetime.isoformat()` num dos quatro campos não pode virar
     `kept_unsafe` permanente. `last_date` é o único que a reversão converte em
-    Python (com `[:10]`, o recorte que `core/services/cashflow.py:30` já faz);
+    Python (com `[:10]`, o recorte que `core/services/cashflow.py::_as_date` já faz);
     `purchase_date`, `maturity_date` e `before.closed_at` vão CRUS pro Postgres.
 
     Por isso o predicado é a INTERSEÇÃO, não o `date.fromisoformat(v[:10])` que
@@ -1532,21 +1532,24 @@ def delete_launch_and_rollback(user_id: int, launch_id: int, *,
     investimento é apagado), e a partir daí o lançamento cai em `kept_unsafe`
     em TODA tentativa, sem caminho de saída pro usuário. É a troca deliberada:
     recusar para sempre não perde dinheiro; seguir perde (R$300 em 5 toques de
-    produto, medido). Nas 3 portas do Open Finance a recusa é SILÊNCIO — em
-    `db/open_finance.py:1545` e `:1634` o código segue e marca `auto_merged`
-    mesmo com o delete recusado. Consertar isso é o PR dos `except`, não este.
+    produto, medido). Nas portas do Open Finance que chamam isto dentro de
+    `except Exception: pass` a recusa é SILÊNCIO — `reconcile_manual_launch`
+    segue e marca `auto_merged` mesmo com o delete recusado. Consertar isso é o
+    PR dos `except`, não este.
 
     `escopo_conta_corrente=True` — usado SÓ pelo "apagar tudo" — recusa também
     o que mexe em caixinha/investimento (`_EFEITOS_FORA_DO_APAGAR_TUDO`).
 
-    QUEM CHAMA — são OITO pontos, não as 4 portas de usuário. A recusa chega ao
-    usuário como frase de produto em cinco deles e como SILÊNCIO em três:
+    QUEM CHAMA — mais pontos que as portas de usuário. A recusa chega ao usuário
+    como frase de produto em uns e como SILÊNCIO em outros:
       - `core/handlers/pending.py:170` (WhatsApp, singular) e `:230` (bulk);
       - `core/services/ai_chat/tools/launches.py:433` (/ai/chat);
       - `frontend/finance_bot_websocket_custom.py:5749` (DELETE /launches);
       - `delete_all_launches_and_rollback` (abaixo), que classifica em baldes;
-      - `db/open_finance.py:44`, `:1545` e `:1634` — os três dentro de
-        `except Exception: pass`. Ali uma recusa não vira mensagem nem log: o
+      - `db/open_finance.py`: `_rollback_imported_of` e `reconcile_manual_launch`,
+        dentro de `except Exception: pass` (o confirmar da reconciliação saiu
+        para `db/reconciliation.py`, que apaga a sombra direto e não passa por
+        aqui). Ali uma recusa não vira mensagem nem log: o
         lançamento duplicado do Open Finance sobrevive à reconciliação e o saldo
         conta duas vezes, calado. HOJE inalcançável (as chaves que o importador
         do OF grava estão todas em `_EFEITOS_REVERSIVEIS`, e ele não grava delta
@@ -1715,7 +1718,7 @@ def delete_launch_and_rollback(user_id: int, launch_id: int, *,
                     # coluna `date` aceita — sem o recorte, `last_date` seria o
                     # ÚNICO dos quatro campos de data que a reversão não sabe
                     # usar. É o recorte que `_data` valida e que o resto do repo
-                    # já faz (`core/services/cashflow.py:30`).
+                    # já faz (`core/services/cashflow.py::_as_date`).
                     ld = _date.fromisoformat(str(last_date_str)[:10]) if last_date_str else datetime.now(_tz()).date()
                     cur.execute(
                         """
@@ -2178,8 +2181,9 @@ def carteira_exibida(user_id: int, fallback=None):
     O lançamento manual fundido com o Open Finance continua debitando o cru
     enquanto o espelho do banco já conta o mesmo gasto; `get_consolidated_balance`
     devolve esse débito na leitura. Fonte ÚNICA para toda superfície que só
-    EXIBE o saldo (§0.7) — quem AUTORIZA usa `merged_wallet_delta` dentro da
-    própria transação, que é outra coisa.
+    EXIBE o saldo (§0.7) — quem AUTORIZA usa `wallet_guard_delta`
+    (`db/reconciliation.py`) dentro da própria transação, que é outra coisa: além
+    da fusão, ela tira a receita pendente de reconciliação.
 
     RESSALVA, e a fronteira já nasce com um violador: `frontend/routes/cards.py`
     (`pay_bill_route`) autoriza o pagamento de fatura numa conexão que FECHA
@@ -2192,8 +2196,9 @@ def carteira_exibida(user_id: int, fallback=None):
     Chamadores, TODOS na fonte e depois do commit: o relatório de importação
     (aqui, `ofx_import.py` e `statement_import.py`), `pay_bill_amount`
     (`db/cards.py`) e o retorno de aporte/resgate de caixinha e de investimento
-    (`db/pockets.py`, `db/investments.py`) — é a mesma base da guarda que
-    autorizou. Falha cai no cru em vez de subir, porque o dinheiro já andou.
+    (`db/pockets.py`, `db/investments.py`) — a base exibida, que é a da guarda
+    somada à receita pendente de reconciliação (sem pendência, as duas coincidem).
+    Falha cai no cru em vez de subir, porque o dinheiro já andou.
 
     `fallback` é o que devolver SE a leitura do consolidado falhar — não uma
     base de cálculo: o caminho feliz o ignora. Sem ele, o `except` relê o cru.

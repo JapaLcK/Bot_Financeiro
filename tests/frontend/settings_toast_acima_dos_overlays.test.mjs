@@ -32,6 +32,7 @@ import { readFileSync } from "node:fs";
 import { fileURLToPath } from "node:url";
 import { dirname, join } from "node:path";
 import { chromium } from "playwright";
+import { comToast } from "./_toast.mjs";
 
 const REPO = join(dirname(fileURLToPath(import.meta.url)), "..", "..");
 const FRONTEND = join(REPO, "frontend");
@@ -76,12 +77,6 @@ async function abrir(view) {
   return page;
 }
 
-/** Dispara o toast de verdade e espera a transição de .2s assentar. */
-async function comToast(page) {
-  await page.evaluate(() => window.showToast("Código inválido", "error"));
-  await page.waitForFunction(() => getComputedStyle(document.getElementById("toast")).opacity === "1");
-}
-
 /** Quem o navegador pinta no CENTRO DO PRÓPRIO TOAST (ele fica em bottom:28px). */
 const quemPinta = (page) => page.evaluate(() => {
   const t = document.getElementById("toast");
@@ -99,7 +94,7 @@ const quemPinta = (page) => page.evaluate(() => {
 test("MFA setup aberto: o toast pinta na frente", async () => {
   const page = await abrir("security");
   await page.evaluate(() => window.openMfaSetupModal());
-  await comToast(page);
+  await comToast(page, "Código inválido", "error");
   assert.equal(await quemPinta(page), "toast");
   await page.__ctx.close();
 });
@@ -108,7 +103,7 @@ test("MFA regenerar códigos aberto: o toast pinta na frente", async () => {
   // Os códigos de backup aparecem UMA vez; um toast escondido aqui some pra sempre.
   const page = await abrir("security");
   await page.evaluate(() => window.openMfaRegenerateModal());
-  await comToast(page);
+  await comToast(page, "Código inválido", "error");
   assert.equal(await quemPinta(page), "toast");
   await page.__ctx.close();
 });
@@ -116,7 +111,7 @@ test("MFA regenerar códigos aberto: o toast pinta na frente", async () => {
 test("modal de atividade aberto: o toast pinta na frente", async () => {
   const page = await abrir("security");
   await page.evaluate(() => window.openActivityModal());
-  await comToast(page);
+  await comToast(page, "Código inválido", "error");
   assert.equal(await quemPinta(page), "toast");
   await page.__ctx.close();
 });
@@ -135,7 +130,7 @@ test("picker de bancos aberto: o toast pinta na frente", async () => {
     const el = document.getElementById("bankpick-overlay");
     return !!el && getComputedStyle(el).display !== "none";
   });
-  await comToast(page);
+  await comToast(page, "Código inválido", "error");
   assert.equal(await quemPinta(page), "toast");
   await page.__ctx.close();
 });
@@ -148,7 +143,7 @@ test("pig-modal aberto: o toast NÃO pode tapá-lo", async () => {
   const page = await abrir("security");
   await page.evaluate(() => { window.__confirm = window.confirmModal("Tem certeza?"); });
   await page.waitForFunction(() => !!document.querySelector(".pig-modal-overlay.open"));
-  await comToast(page);
+  await comToast(page, "Código inválido", "error");
   assert.equal(await quemPinta(page), "pig-modal-overlay");
   await page.__ctx.close();
 });

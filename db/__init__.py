@@ -237,8 +237,6 @@ from .open_finance import (
     classify_open_finance_launch,
     merchant_similarity,
     pick_reconciliation_match,
-    confirm_reconciliation,
-    reject_reconciliation,
     reconcile_manual_launch,
     detect_recurring_income_matches,
     detect_open_finance_salary,
@@ -540,6 +538,7 @@ __all__ = [
     "delete_open_finance_transactions", "classify_open_finance_launch",
     "merchant_similarity", "pick_reconciliation_match",
     "confirm_reconciliation", "reject_reconciliation", "reconcile_manual_launch",
+    "undo_reconciliation", "list_reconciliations", "reconciliation_summary",
     "detect_recurring_income_matches", "detect_open_finance_salary",
     "detect_bill_increase", "detect_open_finance_bill_increase",
     "import_open_finance_launches", "import_open_finance_credit",
@@ -621,3 +620,7 @@ __all__ = [
 ]
 
 from .bank_movements import bank_movement_summary, list_bank_movements, confirm_bank_movement
+from .reconciliation import (
+    confirm_reconciliation, reject_reconciliation, undo_reconciliation,
+    list_reconciliations, reconciliation_summary,
+)

@@ -305,7 +305,7 @@ def _forecast_balance(user_id: int, args: dict[str, Any]) -> dict[str, Any]:
             "message": ("A previsão de saldo 30/60/90 dias faz parte do plano Pro. "
                         "Quer que eu te mostre como assinar?"),
         }
-    from core.services.cashflow import forecast_horizons
+    from core.services.cashflow_forecast import forecast_horizons
     fc = forecast_horizons(user_id)
     fc["note"] = ("cada horizonte (30/60/90 dias) traz o saldo PROJETADO (saldo + receitas "
                   "previstas − gastos fixos − boletos até a data) e 'tranquilo' (bool). "

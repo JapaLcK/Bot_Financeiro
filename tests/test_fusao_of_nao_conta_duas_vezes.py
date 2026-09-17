@@ -91,6 +91,10 @@ def test_caminho_2_confirmacao_devolve_o_debito(uid_pro, ia_fora):
 
     of_tx_id = _tx_pendente(uid_pro)
     assert db.confirm_reconciliation(uid_pro, of_tx_id)["ok"] is True
+    with db.connection.get_conn() as conn, conn.cursor() as cur:
+        cur.execute("select reconciliation_status from open_finance_transactions where id=%s",
+                    (of_tx_id,))
+        assert cur.fetchone()["reconciliation_status"] == "confirmed"
 
     assert consolidado(uid_pro) == (113.88, 0.0)
     assert delta_conta(uid_pro, manual_id) == Decimal("-1"), \

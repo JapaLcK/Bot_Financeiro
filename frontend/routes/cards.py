@@ -14,6 +14,9 @@ from core.observability import _log_falha
 from db import create_card
 from db.cards import MAX_CARD_NAME_LEN
 from db.open_finance import merged_wallet_delta_async
+from db.reconciliation import wallet_guard_delta_async
+from core.services.funding import carteira_txt
+from utils_text import fmt_brl
 from frontend.routes import shared
 
 router = APIRouter()
@@ -679,9 +682,13 @@ async def pay_bill_route(
             acc = await cur.fetchone()
             # A guarda lê o MESMO número que a tela mostra: contra o cru ela
             # recusa o pagamento que o dashboard autoriza (mesma classe que o
-            # `pocket_deposit_from_account` já corrigiu).
-            delta_fundido = await merged_wallet_delta_async(cur, int(user_id))
+            # `pocket_deposit_from_account` já corrigiu). Receita pendente de
+            # reconciliação não autoriza (`wallet_guard_delta`); a recusa cita
+            # a Carteira da tela (`balance_tela`) e explica a diferença.
+            delta_fundido = await wallet_guard_delta_async(cur, int(user_id))
+            delta_tela = await merged_wallet_delta_async(cur, int(user_id))
     balance = (float(acc["balance"]) if acc else 0.0) + float(delta_fundido)
+    balance_tela = (float(acc["balance"]) if acc else 0.0) + float(delta_tela)
 
     total = float(bill["total"] or 0)
     paid = float(bill["paid_amount"] or 0)
@@ -709,7 +716,8 @@ async def pay_bill_route(
     if balance < amount - 0.005:
         raise HTTPException(
             status_code=400,
-            detail=f"Saldo insuficiente. Saldo atual: R$ {balance:.2f}, valor pedido: R$ {amount:.2f}.",
+            detail=(f"Saldo insuficiente. Saldo atual: {carteira_txt(balance_tela, balance)}, "
+                    f"valor pedido: {fmt_brl(amount)}."),
         )
 
     card_name = bill["card_name"] or "cartão"

@@ -128,9 +128,15 @@ def _pergunta_origem(user_id: int, fontes: list, amount: float, retomar: dict) -
         },
         minutes=10,
     )
+    from core.services import funding
+
     linhas = [f"De onde sai {fmt_brl(float(amount))}?", ""]
     for i, f in enumerate(fontes, start=1):
-        linhas.append(f"{i}. **{f['label']}** — {fmt_brl(float(f['balance']))}")
+        # Carteira: o número da tela, com o disponível à parte quando há entrada a
+        # conferir (a mesma frase da recusa, `funding.carteira_txt`).
+        saldo = (funding.carteira_txt(f["espelho"], f["balance"]) if f["kind"] == funding.CARTEIRA
+                 else fmt_brl(float(f["balance"])))
+        linhas.append(f"{i}. **{f['label']}** — {saldo}")
     linhas += ["", "Responda com o número (ex: *1*) ou *cancelar*."]
     return "\n".join(linhas)
 

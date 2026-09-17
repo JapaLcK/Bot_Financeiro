@@ -904,7 +904,7 @@ def list_history(
             # Origem (Open Finance): de onde veio e o estado da conciliação.
             "origin": r["origin"],                                # manual | open_finance | ofx
             "bank_name": r["bank_name"],                          # banco, se veio/casou com OF
-            "reconciliation_status": r["reconciliation_status"],  # imported | pending | auto_merged | None
+            "reconciliation_status": r["reconciliation_status"],  # imported | pending | auto_merged | confirmed | None
         }
         for r in rows
     ]
