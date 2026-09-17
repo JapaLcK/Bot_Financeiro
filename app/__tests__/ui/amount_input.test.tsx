@@ -226,6 +226,35 @@ describe("AmountInput — apagar tudo zera", () => {
   });
 });
 
+describe("AmountInput — substituição total sem dígito recusa", () => {
+  it.each(["R$", "--", "  "])(
+    "selecionar tudo e digitar %p sobre 1,23 não chama onChange nem muda o valor exibido",
+    (substituto) => {
+      const espiao = jest.fn();
+      const resultado = renderInterativo(<AmountInput centavos={123} onChange={espiao} rotulo="Valor" />);
+      const campo = resultado.getByTestId("valor-input");
+      // Não começa com "1,23" (valorExibido): é substituição total, não sufixo.
+      fireEvent.changeText(campo, substituto);
+      expect(espiao).not.toHaveBeenCalled();
+      expect(campo.props.value).toBe("1,23");
+    },
+  );
+
+  it("substituição total por 50 continua dando 50 (dígito puro não é afetado pela guarda)", () => {
+    const resultado = renderInterativo(<Formulario inicial={123} />);
+    const campo = resultado.getByTestId("valor-input");
+    fireEvent.changeText(campo, "50");
+    expect(resultado.getByTestId("valor-input").props.value).toBe("0,50");
+  });
+
+  it("substituição total por R$ 1.234,56 continua dando 123456", () => {
+    const resultado = renderInterativo(<Formulario inicial={123} />);
+    const campo = resultado.getByTestId("valor-input");
+    fireEvent.changeText(campo, "R$ 1.234,56");
+    expect(resultado.getByTestId("valor-input").props.value).toBe("1.234,56");
+  });
+});
+
 describe("AmountInput — prop centavos inválida mostra placeholder", () => {
   it.each([NaN, -5, 1.5, TETO_CENTAVOS + 1, 2 ** 53])(
     "%p: campo vazio, placeholder '—', label 'valor indisponível', sem onChange",

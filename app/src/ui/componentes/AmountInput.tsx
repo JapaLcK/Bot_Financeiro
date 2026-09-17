@@ -54,7 +54,10 @@ export function AmountInput({ centavos, onChange, rotulo, erro, desativado = fal
    *   "0,00" pelo fallback de `digitosParaCentavos` para string sem dígito).
    * Fora desse caso (`novoTexto` não começa com `valorExibido` — seleção
    * total e cola, ou encolheu por apagar) → `novoTexto` inteiro, como antes;
-   * `""` continua zerando.
+   * `""` continua zerando. Mesma recusa do sufixo se aplica aqui: um
+   * `novoTexto` não vazio sem nenhum dígito (ex.: colar "R$" ou "--" por
+   * cima de um valor já digitado) não chama `onChange` — sem a guarda,
+   * `digitosParaCentavos` devolveria 0 para essa string e apagaria o valor.
    * Limite conhecido, não resolvido: selecionar tudo e colar um
    * texto que por coincidência começa igual ao `valorExibido` (ex.: colar
    * "1,234.56" sobre "1,23") é lido como colagem do sufixo, não como
@@ -75,6 +78,7 @@ export function AmountInput({ centavos, onChange, rotulo, erro, desativado = fal
         return;
       }
     } else {
+      if (novoTexto.length > 0 && ![...novoTexto].some(digitoAscii)) return;
       paraAnalisar = novoTexto;
     }
 
