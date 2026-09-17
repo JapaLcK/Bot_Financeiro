@@ -41,4 +41,57 @@ export default tseslint.config(
     languageOptions: { globals: { jest: "readonly" } },
     rules: { "@typescript-eslint/no-explicit-any": "off" },
   },
+  {
+    // `require()` de fonte estática é o jeito do Metro resolver o asset (ver
+    // comentário em `app/_layout.tsx`); `import` dinâmico não bundla o TTF.
+    files: ["app/_layout.tsx"],
+    rules: { "@typescript-eslint/no-require-imports": "off" },
+  },
+  {
+    // As duas áreas onde o design system é DESENHADO: os próprios componentes
+    // e o catálogo que os exibe. O gate SÓ vale aqui — uma tela de produto
+    // fora destes dois caminhos (`app/index.tsx`, por exemplo) não herda nada
+    // disto: ela pode importar `Text`/`TextInput` crus e colar hex à vontade
+    // sem o lint acusar. "Herdar por só ter acesso ao Texto/Input" seria
+    // convenção, não regra: nada aqui barra o import fora desses dois globs.
+    files: ["src/ui/componentes/**/*.ts?(x)", "app/_ds/**/*.ts?(x)"],
+    rules: {
+      "no-restricted-imports": [
+        "error",
+        {
+          paths: [
+            {
+              name: "react-native",
+              importNames: ["Text", "TextInput"],
+              message: "Use `Texto`/`Input` do design system — são o único lugar com o teto de fonte e o tabular-nums resolvidos.",
+            },
+            {
+              name: "phosphor-react-native",
+              message: "Importe o ícone específico (`phosphor-react-native/src/icons/<Nome>`); a raiz do pacote pesa 23 MB.",
+            },
+          ],
+        },
+      ],
+      "no-restricted-syntax": [
+        "error",
+        {
+          selector: "Literal[value=/^#([0-9a-fA-F]{3,4}|[0-9a-fA-F]{6}|[0-9a-fA-F]{8})$/]",
+          message: "Cor hex fora de `tokens.ts`. Use um token semântico (`cores.<nome>`).",
+        },
+        {
+          // O literal acima não pega hex dentro de um template string
+          // (`` `#${x}` `` ou até `` `#FF2D8E` ``): ali o valor não é um
+          // `Literal`, é um `TemplateElement`. Mesmo hex, nó de AST diferente.
+          selector: "TemplateElement[value.raw=/#[0-9a-fA-F]{3,8}/]",
+          message: "Cor hex fora de `tokens.ts`. Use um token semântico (`cores.<nome>`).",
+        },
+      ],
+    },
+  },
+  {
+    // `Texto`/`Input` são o ÚNICO lugar autorizado a chamar `Text`/`TextInput`
+    // crus — é o que a regra acima protege.
+    files: ["src/ui/componentes/Texto.tsx", "src/ui/componentes/Input.tsx"],
+    rules: { "no-restricted-imports": "off" },
+  },
 );
