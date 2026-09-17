@@ -147,9 +147,15 @@ test("o ciclo usa um switch único, animado e reversível", async () => {
     };
   });
 
+  // O knob anda por `transition: transform .3s` (precos.html:108): espera o
+  // aria virar E a transição assentar, em vez de um relógio de 350ms.
+  const knobAssentado = (esperado) => page.waitForFunction((v) =>
+    document.getElementById("cycle-annual").getAttribute("aria-checked") === v
+    && document.querySelector(".cycle-switch-thumb").getAnimations().length === 0, esperado);
+
   const mensal = await estado();
   await page.click("#cycle-annual");
-  await page.waitForTimeout(350); // transição do knob: 300ms
+  await knobAssentado("true");
   const anual = await estado();
   assert.equal(anual.checked, "true");
   assert.equal(anual.mensalAtivo, false);
@@ -160,7 +166,7 @@ test("o ciclo usa um switch único, animado e reversível", async () => {
     `o knob moveu só ${anual.xKnob - mensal.xKnob}px`);
 
   await page.click("#cycle-annual");
-  await page.waitForTimeout(350);
+  await knobAssentado("false");
   assert.deepEqual(await estado(), mensal, "o segundo clique não restaurou o ciclo mensal");
   await page.close();
 });

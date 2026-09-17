@@ -137,6 +137,41 @@ def espiao_email(vistos: dict, nome: str):
     return _fn
 
 
+def espiao_no_loop(onde: list[bool], fn):
+    """Embrulha `fn` num espião que registra em `onde` se a chamada rodou NA
+    THREAD DE UM EVENT LOOP (True = a chamada bloqueia o loop; False = executor)
+    e então chama `fn` por baixo. `__name__` preservado (`functools.wraps`): é a
+    chave da dedupe do `_fire_email` quando o embrulhado é um remetente.
+
+    O observável é `asyncio.get_running_loop()`, que levanta `RuntimeError`
+    quando NÃO há loop rodando na thread atual. Chamado direto do corpo da
+    corrotina, ele devolve o loop (a chamada bloqueia o loop); despachado por
+    `asyncio.to_thread`, roda numa worker do `ThreadPoolExecutor`, onde não há
+    loop nenhum e ele levanta.
+
+    **A primeira versão disto comparava com `threading.main_thread()` e não
+    media NADA**: o `TestClient` do Starlette roda o ASGI num portal, com o
+    event loop em thread SEPARADA da do teste, então a comparação dava
+    "não é a main" com e sem `to_thread` — o controle negativo ficou verde e
+    denunciou o teste (§3, 1ª pergunta: "quanto isso daria se a correção não
+    fizesse nada?"). `get_running_loop` não depende da topologia de threads do
+    cliente de teste, que é o que torna a medição válida sob `TestClient` e sob
+    `asyncio.run`.
+    """
+    import asyncio
+    import functools
+
+    @functools.wraps(fn)
+    def _espiao(*a, **kw):
+        try:
+            asyncio.get_running_loop()
+            onde.append(True)      # há loop NESTA thread → a chamada o bloqueia
+        except RuntimeError:
+            onde.append(False)     # thread sem loop → executor
+        return fn(*a, **kw)
+    return _espiao
+
+
 class FakeStripeSubs:
     """Só o `Subscription.list` que o `_find_active_subscription` usa.
 

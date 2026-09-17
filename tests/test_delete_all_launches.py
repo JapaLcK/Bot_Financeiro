@@ -1518,7 +1518,7 @@ def test_positivo_delete_investment_com_data_iso_completa_recria(user_id: int, c
     """`date.fromisoformat` recusa ISO com hora no 3.13 (medido) e a coluna
     `date` do Postgres aceita, cortando a hora (medido). O `91493d8` recusava os
     três campos; `last_date` era o único que a reversão de fato não sabia usar,
-    e o `[:10]` (padrão já usado em `core/services/cashflow.py:30`) fecha."""
+    e o `[:10]` (padrão já usado em `core/services/cashflow.py::_as_date`) fecha."""
     add_launch_and_update_balance(user_id, "receita", 1000, None, "seed")
     lid, _seq, _b = add_launch_and_update_balance(user_id, "despesa", 0, None, "apaguei cdb")
     _set_efeitos(user_id, lid,
