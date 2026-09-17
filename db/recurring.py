@@ -36,11 +36,13 @@ def _parse_start_date(value: Any, default: date | None = None) -> date | None:
 VALID_FREQUENCIES = ("once", "daily", "weekly", "monthly", "annual")
 
 
-def validate_frequency(frequency: Any, month: Any) -> tuple[str, int | None]:
-    """Valida frequency (once|daily|weekly|monthly|annual) + o mês. Anual exige
-    mês 1-12; as demais ignoram o mês (retorna None). Levanta ValueError se inválido."""
+def validate_frequency(frequency: Any, month: Any,
+                       allowed: tuple[str, ...] = VALID_FREQUENCIES) -> tuple[str, int | None]:
+    """Valida frequency (once|daily|weekly|monthly|annual, ou o subconjunto `allowed`)
+    + o mês. Anual exige mês 1-12; as demais ignoram o mês (retorna None). Levanta
+    ValueError se inválido."""
     freq = (str(frequency) if frequency is not None else "monthly").strip().lower() or "monthly"
-    if freq not in VALID_FREQUENCIES:
+    if freq not in allowed:
         raise ValueError("FREQUENCIA_INVALIDA")
     if freq == "annual":
         try:

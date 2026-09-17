@@ -639,6 +639,51 @@ def test_sync_sem_reconexao_no_meio_carimba_normalmente(user_id, monkeypatch, re
     assert ui["state"] == "updated"
 
 
+# ── 11f. Codex #473 (P1): item trocou de DONO no meio da leitura remota ─────
+# A releitura dentro do lock (`pluggy_sync.py:325`) comparava só `reconnected_at`.
+# Se, durante os minutos de leitura fora do lock, a linha original for apagada e
+# o MESMO item ganhar outra linha (outro user_id) com `reconnected_at` igual
+# (aqui, NULL == NULL), a guarda passava e as escritas miravam o id apagado:
+# nada era gravado (as asserções de espelho abaixo passam com e sem o conserto
+# — são proteção, não o controle), mas o sync devolvia `ok: True`.
+#
+# CONTROLE NEGATIVO: tirar o `atual.get("id") != connection.get("id")` da
+# condição deixa vermelha a asserção do `reason` (`ok` vira True).
+
+def test_item_troca_de_dono_no_meio_do_sync_nao_escreve_em_ninguem(user_id, monkeypatch, relogio_fixo):
+    import uuid
+    outro_user_id = int(uuid.uuid4().int % 10_000_000_000)
+    db.ensure_user(outro_user_id)
+
+    conexao = _conexao(user_id, "item-troca")
+    assert _linha("item-troca")["reconnected_at"] is None
+    _mock_pluggy(monkeypatch, item={**ITEM_SAUDAVEL, "id": "item-troca"},
+                 contas=[_conta_pluggy("acc-troca")], txs=[_tx_pluggy("tx-troca")])
+
+    # No meio da leitura remota (fora do lock): a linha original é apagada e o
+    # MESMO item_id nasce numa linha nova, de outro usuário, com reconnected_at
+    # também NULL — a autorização "bate" mas o dono trocou.
+    real = ps.list_pluggy_transactions
+    def troca_de_dono_no_meio(account_id, api_key=None, **kw):
+        with get_conn() as c:
+            with c.cursor() as cur:
+                cur.execute("delete from open_finance_connections where id=%s", (conexao["id"],))
+            c.commit()
+        db.save_pluggy_open_finance_item(
+            outro_user_id, {"id": "item-troca", "status": "UPDATED",
+                            "connector": {"id": 612, "name": "Nubank"}})
+        return real(account_id, api_key, **kw)
+    monkeypatch.setattr(ps, "list_pluggy_transactions", troca_de_dono_no_meio)
+
+    res = ps.sync_pluggy_item("item-troca")
+
+    assert res["ok"] is False and res["reason"] == "stale_authorization"
+    linha_nova = _linha("item-troca")
+    assert linha_nova["user_id"] == outro_user_id
+    assert _espelho(linha_nova["id"]) == (0, 0), "a linha do novo dono não pode ganhar dado do item velho"
+    assert linha_nova["last_sync_at"] is None, "run de dono trocado não carimba sucesso"
+
+
 # ── 12. RODADA 3: a máquina de estados, evento por evento ───────────────────
 # A tabela vive no topo de `core/services/pluggy_health.py`. Estes testes são a
 # tabela executável — cada um é uma linha dela.
@@ -1371,7 +1416,7 @@ def test_caixa_sem_health_manda_autorizar_o_dispositivo_e_nao_reautorizar(user_i
     # e é ele que roda aqui: os dicionários vazios são o resultado do PATCH, dos
     # motivos e da espera, que este caso não exercita.
     rel = ps._refresh_items_report(
-        ["item-tela-caixa"], {"item-tela-caixa": "Caixa"}, {}, {}, set())
+        user_id, ["item-tela-caixa"], {"item-tela-caixa": "Caixa"}, {}, {}, set())
 
     assert [r["detail"] for r in rel] == [DETALHE_DISPOSITIVO], (
         "o toast do /refresh lê outro select: sem o derivado lá também, ele "
@@ -1825,3 +1870,110 @@ def test_as_celulas_que_mudaram_na_varredura_ficam_na_instrucao_de_dispositivo(
         f"célula ({status}, {execution_status}) com `health` NULL: o ramo com "
         "health já mandava autorizar o dispositivo, e é com ele que este aqui "
         f"converge — veio {ui['detail']!r}")
+
+
+# ── mesclar_health_em_coleta via mark_sync_result — banco real (issue #444) ──
+# `mark_sync_result` (`db/open_finance_state.py`) chama `mesclar_health_em_coleta`
+# antes de gravar, quando a foto NOVA está em coleta. Diferente do teste da
+# função pura (`tests/test_of_health.py`), este passa pela ESCRITA de verdade,
+# DUAS vezes seguidas — é o caminho real (sync completo, depois job de saúde
+# no meio de uma coleta nova).
+#
+# CONTROLE NEGATIVO do grupo: tirar a chamada a `mesclar_health_em_coleta` de
+# `mark_sync_result` deixa os dois primeiros vermelhos (o `health = coalesce`
+# do UPDATE sobrescreve `health` com a foto pobre inteira). Medido à mão antes
+# deste commit.
+
+_CREDIT_ATRASADO_12_08 = {
+    "isUpdated": False, "lastUpdatedAt": "2026-08-12T03:10:00.000Z", "warnings": [],
+}
+
+
+def test_health_parcial_sobrevive_a_uma_2a_foto_updating(user_id):
+    """(1) sync completo com CREDIT atrasado desde 12/08. (2) job de saúde no
+    meio de uma coleta nova, que só mede `accounts`. O cartão continua
+    aparecendo — a mescla preserva o que a 2ª foto não mediu."""
+    conexao = _conexao(user_id, "item-444-integra-1")
+    health1 = derive_item_health({
+        "status": "UPDATED",
+        "statusDetail": {"accounts": {"isUpdated": True, "lastUpdatedAt": "2026-08-20T11:00:00Z",
+                                      "warnings": []},
+                         "creditCards": _CREDIT_ATRASADO_12_08}})
+    db.mark_sync_result(conexao["id"], ok=True, status="ACTIVE", status_reason="", health=health1)
+
+    health2 = derive_item_health({"status": "UPDATING",
+                                  "statusDetail": {"accounts": {"isUpdated": True}}})
+    db.mark_sync_result(conexao["id"], ok=None, status="ACTIVE", status_reason="", health=health2)
+
+    ui = _ui("item-444-integra-1")
+    assert ui["state"] == "partial", ui
+    assert "12/08" in ui["detail"], ui["detail"]
+
+
+def test_health_parcial_sobrevive_a_uma_2a_foto_updating_sem_statusdetail(user_id):
+    """Mesmo caso, mas a 2ª foto não traz `statusDetail` NENHUM (item entrou em
+    UPDATING sem a Pluggy ter devolvido nada ainda) — mescla do mesmo jeito."""
+    conexao = _conexao(user_id, "item-444-integra-2")
+    health1 = derive_item_health({
+        "status": "UPDATED",
+        "statusDetail": {"accounts": {"isUpdated": True, "lastUpdatedAt": "2026-08-20T11:00:00Z",
+                                      "warnings": []},
+                         "creditCards": _CREDIT_ATRASADO_12_08}})
+    db.mark_sync_result(conexao["id"], ok=True, status="ACTIVE", status_reason="", health=health1)
+
+    health2 = derive_item_health({"status": "UPDATING"})
+    db.mark_sync_result(conexao["id"], ok=None, status="ACTIVE", status_reason="", health=health2)
+
+    ui = _ui("item-444-integra-2")
+    assert ui["state"] == "partial", ui
+    assert "12/08" in ui["detail"], ui["detail"]
+
+
+def test_2a_foto_updated_sem_credit_vira_updated_CONTROLE_POSITIVO(user_id):
+    """POSITIVO: a 2ª foto é FINAL (UPDATED), não UPDATING — a mescla não se
+    aplica a foto final, e um `statusDetail` só com `accounts` em dia é o que
+    manda: "updated". Isto prova que o conserto só age em coleta, não trava a
+    tela em "partial" para sempre."""
+    conexao = _conexao(user_id, "item-444-integra-3")
+    health1 = derive_item_health({
+        "status": "UPDATED",
+        "statusDetail": {"accounts": {"isUpdated": True, "lastUpdatedAt": "2026-08-20T11:00:00Z",
+                                      "warnings": []},
+                         "creditCards": _CREDIT_ATRASADO_12_08}})
+    db.mark_sync_result(conexao["id"], ok=True, status="ACTIVE", status_reason="", health=health1)
+
+    health2 = derive_item_health({"status": "UPDATED",
+                                  "statusDetail": {"accounts": {"isUpdated": True}}})
+    db.mark_sync_result(conexao["id"], ok=True, status="ACTIVE", status_reason="", health=health2)
+
+    ui = _ui("item-444-integra-3")
+    assert ui["state"] == "updated", ui
+
+
+def test_updating_seguido_de_foto_final_limpa_o_cartao_CONTROLE_POSITIVO(user_id):
+    """POSITIVO: UPDATING intermediário preserva o cartão atrasado (mescla), mas
+    a foto FINAL que resolve o cartão (CREDIT atualizado) some com o "Parcial" —
+    a mescla não gruda o motivo velho para sempre."""
+    conexao = _conexao(user_id, "item-444-integra-4")
+    health1 = derive_item_health({
+        "status": "UPDATED",
+        "statusDetail": {"accounts": {"isUpdated": True, "lastUpdatedAt": "2026-08-20T11:00:00Z",
+                                      "warnings": []},
+                         "creditCards": _CREDIT_ATRASADO_12_08}})
+    db.mark_sync_result(conexao["id"], ok=True, status="ACTIVE", status_reason="", health=health1)
+
+    health2 = derive_item_health({"status": "UPDATING",
+                                  "statusDetail": {"accounts": {"isUpdated": True}}})
+    db.mark_sync_result(conexao["id"], ok=None, status="ACTIVE", status_reason="", health=health2)
+    assert _ui("item-444-integra-4")["state"] == "partial", "checagem intermediária"
+
+    health3 = derive_item_health({
+        "status": "UPDATED",
+        "statusDetail": {"accounts": {"isUpdated": True, "lastUpdatedAt": "2026-08-20T15:00:00Z",
+                                      "warnings": []},
+                         "creditCards": {"isUpdated": True, "lastUpdatedAt": "2026-08-20T15:00:00Z",
+                                        "warnings": []}}})
+    db.mark_sync_result(conexao["id"], ok=True, status="ACTIVE", status_reason="", health=health3)
+
+    ui = _ui("item-444-integra-4")
+    assert ui["state"] == "updated", ui

@@ -150,12 +150,12 @@ def test_label_acompanha_o_state_sobreposto(user_id, monkeypatch):
     monkeypatch.setattr(ps, "get_connections_by_item_id", db.get_connections_by_item_id)
 
     out = ps._refresh_items_report(
-        ["item-label"], {"item-label": "Nubank"},
+        user_id, ["item-label"], {"item-label": "Nubank"},
         {"item-label": False}, {}, set(), rate_limited=set())
     assert (out[0]["state"], out[0]["label"]) == ("partial", "Parcial"), out
 
     out = ps._refresh_items_report(
-        ["item-label"], {"item-label": "Nubank"},
+        user_id, ["item-label"], {"item-label": "Nubank"},
         {}, {}, set(), rate_limited={"item-label"})
     assert out[0]["state"] == "rate_limited"
     assert out[0]["label"] == "Atualizado" and out[0]["detail"] == "Atualizado há pouco"
@@ -174,7 +174,7 @@ def test_detalhe_do_parcial_de_verdade_nao_e_sobrescrito(user_id, monkeypatch):
                                 "warnings": []}}})
     monkeypatch.setattr(ps, "get_connections_by_item_id", db.get_connections_by_item_id)
 
-    out = ps._refresh_items_report(["item-parcial-real"], {}, {}, {}, set())
+    out = ps._refresh_items_report(user_id, ["item-parcial-real"], {}, {}, {}, set())
     assert out[0]["state"] == "partial"
     assert out[0]["detail"] == "Cartão desatualizado desde 12/08", out[0]
 
@@ -192,7 +192,7 @@ def test_detalhe_da_acao_necessaria_chega_inteiro_na_resposta_do_refresh(user_id
         "execution_status": "WAITING_USER_ACTION", "products": {}, "stale_products": []})
     monkeypatch.setattr(ps, "get_connections_by_item_id", db.get_connections_by_item_id)
 
-    out = ps._refresh_items_report(["item-espera-usuario"], {}, {}, {}, set())
+    out = ps._refresh_items_report(user_id, ["item-espera-usuario"], {}, {}, {}, set())
     assert out[0]["state"] == "needs_user_action", out[0]
     assert out[0]["detail"] == "Autorize o acesso no app do banco", out[0]
 
