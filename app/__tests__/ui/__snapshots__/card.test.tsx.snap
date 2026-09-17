@@ -1,0 +1,50 @@
+// Jest Snapshot v1, https://goo.gl/fbAQLP
+
+exports[`Card snapshot (dois temas): claro 1`] = `
+<View
+  style={
+    [
+      {
+        "backgroundColor": "#FFFFFF",
+        "borderRadius": 12,
+        "padding": 16,
+      },
+      {
+        "borderColor": "#E6E6E9",
+        "borderWidth": 1,
+        "elevation": 2,
+        "shadowColor": "#000000",
+        "shadowOffset": {
+          "height": 1,
+          "width": 0,
+        },
+        "shadowOpacity": 0.06,
+        "shadowRadius": 2,
+      },
+    ]
+  }
+>
+  <Text>
+    conteúdo
+  </Text>
+</View>
+`;
+
+exports[`Card snapshot (dois temas): escuro 1`] = `
+<View
+  style={
+    [
+      {
+        "backgroundColor": "#202024",
+        "borderRadius": 12,
+        "padding": 16,
+      },
+      null,
+    ]
+  }
+>
+  <Text>
+    conteúdo
+  </Text>
+</View>
+`;

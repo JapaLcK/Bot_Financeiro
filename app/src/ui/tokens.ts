@@ -34,6 +34,8 @@ export interface Paleta {
   warning: string;
   danger: string;
   onDanger: string;
+  /** Só `shadowColor` (Card raised no claro) — nunca texto nem contorno, por isso sem par em `PARES`. */
+  shadow: string;
 }
 
 export const claro: Paleta = {
@@ -53,6 +55,7 @@ export const claro: Paleta = {
   warning: "#B54708",
   danger: "#B42318",
   onDanger: "#FFFFFF",
+  shadow: "#000000",
 };
 
 export const escuro: Paleta = {
@@ -74,6 +77,7 @@ export const escuro: Paleta = {
   warning: "#FDB022",
   danger: "#F97066",
   onDanger: "#0E0E10",
+  shadow: "#000000",
 };
 
 /** Grade de 4pt. */
