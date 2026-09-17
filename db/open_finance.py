@@ -1380,10 +1380,26 @@ def delete_open_finance_transactions(
 
     with get_conn() as conn:
         with conn.cursor() as cur:
-            from .bank_movements import _lock_user, reconcile_bank_movements
+            from .bank_movements import _lock_user, delete_if_shadow, reconcile_bank_movements
             owners = sorted({row["user_id"] for row in rows})
             for owner in owners:
                 _lock_user(cur, owner)
+            # Reler AGORA, sob o lock: entre a leitura de cima e aqui, um undo
+            # concorrente pode ter trocado o imported_launch_id por uma sombra
+            # nova (`_insert_of_shadow`) — sem reler, ela vira órfã.
+            cur.execute(
+                """
+                select t.id, c.user_id, t.imported_launch_id
+                from open_finance_transactions t
+                join open_finance_accounts a on a.id = t.account_id
+                join open_finance_connections c on c.id = a.connection_id
+                where t.id = any(%s)
+                for update of t
+                """,
+                ([r["id"] for r in rows],),
+            )
+            for row in cur.fetchall():
+                delete_if_shadow(cur, row["user_id"], row["imported_launch_id"])
             cur.execute(
                 "delete from open_finance_transactions where id = any(%s)",
                 ([r["id"] for r in rows],),
@@ -2724,7 +2740,7 @@ def disconnect_open_finance_connection(
     # Exclusão da conexão e invalidação das provas permanecem atômicas.
     with get_conn() as conn:
         with conn.cursor() as cur:
-            from .bank_movements import _lock_user, reconcile_bank_movements
+            from .bank_movements import _lock_user, delete_if_shadow, reconcile_bank_movements
             _lock_user(cur, user_id)
             # Caixinha vinculada é ESPELHO: o dinheiro está no banco. Indo embora a
             # conexão, o FK só zera o `of_investment_id` (`on delete set null`,
@@ -2756,6 +2772,22 @@ def disconnect_open_finance_connection(
                     "delete from pockets where user_id=%s and id = any(%s) and balance <= 0",
                     (user_id, do_sync),
                 )
+            # Reler AGORA, sob o lock: entre a leitura do passo 1 e aqui, um undo
+            # concorrente pode ter trocado o imported_launch_id por uma sombra
+            # nova (`_insert_of_shadow`) — sem reler, ela sobra órfã do cascade.
+            cur.execute(
+                """
+                select t.id, c.user_id, t.imported_launch_id
+                from open_finance_transactions t
+                join open_finance_accounts a on a.id = t.account_id
+                join open_finance_connections c on c.id = a.connection_id
+                where c.user_id = %s and (%s::bigint is null or c.id = %s)
+                for update of t
+                """,
+                (user_id, connection_id, connection_id),
+            )
+            for row in cur.fetchall():
+                delete_if_shadow(cur, row["user_id"], row["imported_launch_id"])
             if connection_id is None:
                 cur.execute(
                     "delete from open_finance_connections where user_id=%s "

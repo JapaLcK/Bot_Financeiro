@@ -20,7 +20,7 @@ from psycopg import errors as pg_errors
 
 from utils_date import today_tz
 
-from .bank_movements import _lock_user, is_of_shadow
+from .bank_movements import _lock_user, delete_if_shadow
 from .connection import get_conn
 from .open_finance import (
     ACTIONABLE_PENDING_SQL, MERGED_WALLET_DELTA_SQL, PENDING_RECONCILIATION_SQL, _insert_of_shadow,
@@ -91,12 +91,7 @@ def confirm_reconciliation(user_id: int, of_tx_id: int) -> dict:
         # desfizer esta — gravar nelas tiraria a reversibilidade.
         shadow_id = o["imported_launch_id"]
         if shadow_id and shadow_id != x:
-            cur.execute("select source, efeitos from launches where id=%s and user_id=%s",
-                        (shadow_id, user_id))
-            shadow = cur.fetchone()
-            if shadow and isinstance(shadow["efeitos"], dict) and is_of_shadow(
-                    shadow["source"], shadow["efeitos"].get("delta_conta")):
-                cur.execute("delete from launches where id=%s and user_id=%s", (shadow_id, user_id))
+            delete_if_shadow(cur, user_id, shadow_id)
         return {"ok": True, "changed": True, "launch_id": x}
     return _write(user_id, of_tx_id, fn)
 

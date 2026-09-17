@@ -21,6 +21,21 @@ def is_of_shadow(source, delta):
     return source == "open_finance" and _amount(delta) == Decimal(0)
 
 
+def delete_if_shadow(cur, user_id, launch_id) -> bool:
+    """Trava e apaga `launch_id` só se ainda for sombra OF; preserva lançamento
+    manual (auto-merge) ou sombra alheia. Chamador precisa estar dentro da
+    transação que já trava o usuário (`_lock_user`) — NÃO abre conexão própria."""
+    if not launch_id:
+        return False
+    cur.execute("select source,efeitos from launches where id=%s and user_id=%s for update",
+                (launch_id, user_id))
+    s = cur.fetchone()
+    if s and isinstance(s["efeitos"], dict) and is_of_shadow(s["source"], s["efeitos"].get("delta_conta")):
+        cur.execute("delete from launches where id=%s and user_id=%s", (launch_id, user_id))
+        return True
+    return False
+
+
 def uses_bank_movement_lock(source, effects):
     if not isinstance(effects, dict):
         return False
@@ -112,10 +127,7 @@ def _bind(cur, user_id, declaration, tx, method):
         (declaration["launch_id"], declaration["launch_id"], tx["id"], user_id))
     if old_id and old_id != declaration["launch_id"]:
         # OF analytics-only: jamais undo, jamais alterar efeitos/lotes do manual.
-        cur.execute("select source,efeitos from launches where id=%s and user_id=%s for update", (old_id, user_id))
-        shadow = cur.fetchone()
-        if shadow and isinstance(shadow["efeitos"], dict) and is_of_shadow(shadow["source"], shadow["efeitos"].get("delta_conta")):
-            cur.execute("delete from launches where id=%s and user_id=%s", (old_id, user_id))
+        delete_if_shadow(cur, user_id, old_id)
 
 
 def reconcile_bank_movements(cur, user_id):
