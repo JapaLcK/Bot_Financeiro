@@ -355,7 +355,15 @@ def _is_investment_action_or_advice_request(text: str) -> bool:
         )
         or quality_advice
         or yield_advice
-        or re.search(r"\b(quais?|qual|que)\b.*\b(devo|devia)\b", norm)
+        or re.search(
+            r"\b(quais?|qual|que)\b.*\b(devo|devia)\s+(?:escolher|selecionar)\b",
+            norm,
+        )
+        or re.search(
+            rf"\b(?:qual|quais)\s+{_INVESTMENT_ASSET_PATTERN}\s+"
+            r"(?:devo|devia)\s+fazer\b",
+            norm,
+        )
         or re.search(r"\b(devo|devia|deveria)\b.*\b(comprar|vender|investir)\b", norm)
     )
 

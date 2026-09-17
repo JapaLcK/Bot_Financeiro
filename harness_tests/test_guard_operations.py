@@ -149,6 +149,30 @@ class GuardOperationsTests(unittest.TestCase):
             socket.getaddrinfo = original_getaddrinfo
             socket.gethostbyname = original_gethostbyname
 
+    def test_truncamento_fora_da_raiz_e_bloqueado(self) -> None:
+        with tempfile.TemporaryDirectory() as root:
+            directory = Path(root)
+            allowed = directory / "allowed"
+            allowed.mkdir()
+            outside = directory / "outside"
+            outside.write_text("conteúdo", encoding="utf-8")
+            descriptor = os.open(outside, os.O_WRONLY)
+            guards = SafetyGuards(allowed_write_root=allowed)
+            guards.install()
+            try:
+                for truncate in (
+                    lambda: os.truncate(outside, 0),
+                    lambda: os.truncate(descriptor, 0),
+                    lambda: os.ftruncate(descriptor, 0),
+                ):
+                    with self.assertRaises(SafetyViolation):
+                        truncate()
+                self.assertEqual(outside.read_text(encoding="utf-8"), "conteúdo")
+                self.assertEqual(len(guards.events), 3)
+            finally:
+                guards.close()
+                os.close(descriptor)
+
     def test_mutacoes_fora_da_raiz_sao_bloqueadas(self) -> None:
         with tempfile.TemporaryDirectory() as root:
             directory = Path(root)

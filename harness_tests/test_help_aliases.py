@@ -64,6 +64,16 @@ class HelpAliasesTests(unittest.TestCase):
         self.assertIn("cartões, crédito", _response("como vejo meu limite?").lower())
         self.assertIn("regras de categoria", _response("como vejo minhas regras?").lower())
 
+    def test_qual_comando_usar_para_ver_investimentos(self) -> None:
+        for text in (
+            "que comando devo usar para listar investimentos?",
+            "qual comando devo usar para ver meu CDB?",
+        ):
+            with self.subTest(text=text):
+                response = _response(text).lower()
+                self.assertIn("investimentos", response)
+                self.assertNotIn("não posso comprar, vender", response)
+
     def test_limite_e_regras_externos_continuam_fora(self) -> None:
         for text in ("como vejo o limite de velocidade?", "como vejo as regras do jogo?"):
             with self.subTest(text=text):

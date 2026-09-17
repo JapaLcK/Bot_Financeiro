@@ -169,10 +169,16 @@ class SafetyGuards:
 
             self._replace(os, name, guarded)
 
-        for name in ("mkdir", "rmdir", "remove", "unlink", "chmod", "utime"):
+        for name in ("mkdir", "rmdir", "remove", "unlink", "chmod", "utime", "truncate"):
             guard_os_mutation(name)
         for name in ("rename", "replace", "link"):
             guard_os_mutation(name, destination=True)
+        if hasattr(os, "ftruncate"):
+            # Sem caminho portátil para resolver o descritor, negar todo truncamento por fd.
+            def guarded_ftruncate(fd: int, *args: Any, **kwargs: Any) -> None:
+                self._guard_write(fd)
+
+            self._replace(os, "ftruncate", guarded_ftruncate)
         original_symlink = os.symlink
 
         def guarded_symlink(source: Any, destination: Any, *args: Any, **kwargs: Any) -> Any:

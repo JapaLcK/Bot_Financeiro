@@ -397,7 +397,7 @@ _HELP_MARKERS = (
     "como faco", "como faço", "como usar", "como registro", "como registrar",
     "como crio", "como criar", "como vejo", "como consultar", "como apago",
     "com apago", "como apagar", "como removo", "como excluir", "me ensina",
-    "me explica", "me explique", "qual comando", "quero ajuda", "tenho duvida",
+    "me explica", "me explique", "qual comando", "que comando", "quero ajuda", "tenho duvida",
     "tenho dúvida", "nao sei como", "não sei como",
 )
 
