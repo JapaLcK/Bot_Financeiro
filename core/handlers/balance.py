@@ -1,6 +1,7 @@
 # core/handlers/balance.py
 from __future__ import annotations
 import db
+from core.services.funding import aviso_conferir
 from db.accounts import _TIPO_ALIASES
 from utils_text import fmt_brl
 from utils_date import today_tz
@@ -22,8 +23,12 @@ def check(user_id: int) -> str:
         lines.append(f"💰 *Saldo total*: {fmt_brl(float(cb['consolidated'] or 0))}")
         lines.append(f"  👛 Carteira: {fmt_brl(float(cb['manual'] or 0))}")
         lines.append(f"  🏦 Bancos conectados: {fmt_brl(float(cb['open_finance_bank'] or 0))}")
+        aviso = aviso_conferir(cb["consolidated"], cb.get("reconciliation"))
     else:
         lines.append(f"🏦 *Conta Corrente*: {fmt_brl(float(cb['manual'] or 0))}")
+        aviso = aviso_conferir(cb["manual"], cb.get("reconciliation"))
+    if aviso:
+        lines.append(f"{aviso} Confira no dashboard.")
 
     # ── Gastos de hoje ───────────────────────────────────────────────────
     today_launches = db.get_launches_by_period(user_id, today, today)

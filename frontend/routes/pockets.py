@@ -339,6 +339,9 @@ async def pocket_deposit_route(request: Request, user_id: int, pocket_name: str,
     except LookupError as exc:
         raise HTTPException(status_code=404, detail="Caixinha não encontrada.") from exc
     except ValueError as exc:
+        if str(exc) == "INSUFFICIENT_ACCOUNT":
+            detail = funding.msg_insuficiente(int(user_id), payload.amount, acao="depósito", plain=True)
+            raise HTTPException(status_code=400, detail=detail) from exc
         raise _pocket_move_error(exc) from exc
 
     shared.invalidate_dashboard_current_cache(int(user_id))

@@ -1226,15 +1226,19 @@ def add_from_entities(
     # Pós-commit: qualquer falha aqui cai na linha de hoje em vez de subir exceção
     # (a fila de multi-lançamento devolveria o item e lançaria o gasto de novo).
     linha_saldo = f"🏦 Saldo: {fmt_brl(float(new_balance))}"
+    linha_aviso = ""
     try:
         from core.services.plan_service import consolidated_balance_enabled
+        from core.services.funding import aviso_conferir
         cb = db.get_consolidated_balance(user_id)
         if int(cb.get("of_bank_count") or 0) > 0 and consolidated_balance_enabled(user_id):
             linha_saldo = f"💰 Saldo total: {fmt_brl(float(cb['consolidated'] or 0))}"
+            linha_aviso = aviso_conferir(cb["consolidated"], cb.get("reconciliation"))
         else:
             # MESMA string de hoje, número RELIDO: o gate desligado congela o
             # formato, não autoriza imprimir a Carteira de antes da fusão.
             linha_saldo = f"🏦 Saldo: {fmt_brl(float(cb['manual'] or 0))}"
+            linha_aviso = aviso_conferir(cb["manual"], cb.get("reconciliation"))
     except Exception:
         logger.exception(
             "saldo consolidado falhou depois do commit (user_id=%s, lancamento %s)",
@@ -1243,7 +1247,8 @@ def add_from_entities(
         f"{emoji} **{tipo.capitalize()} registrada**: {fmt_brl(valor)}\n"
         f"🏷️ Categoria: {categoria_final}\n"
         f"{linha_saldo}\n"
-        f"ID: #{user_seq}"
+        + (f"{linha_aviso}\n" if linha_aviso else "")
+        + f"ID: #{user_seq}"
     )
 
     if tipo == "despesa" and not is_int and categoria_final:
