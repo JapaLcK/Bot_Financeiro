@@ -103,12 +103,19 @@
   // libera, ela assume esse lugar (no lugar de "O que pedir") e some do menu
   // lateral. Free mantém "O que pedir". A decisão fica em cache (localStorage)
   // pra montar instantâneo; /auth/me só reconcilia depois.
+  // A PÁGINA vem antes do plano: aberta em uma das duas, é ela que ocupa o 4º
+  // lugar (Pro em "O que pedir" vê "O que pedir"). Senão a página ficava sem
+  // aba e a bolha caía em Início. livePage, não page: o /auth/me pode voltar
+  // depois de uma troca do pb-nav.
   const NEWS_TAB = { href: "/changelog", label: "Notícias", icon:
     '<svg viewBox="0 0 24 24" width="24" height="24"><path d="M3 6a1 1 0 0 1 1-1h13a1 1 0 0 1 1 1v12a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2z"/><path d="M18 9h2a1 1 0 0 1 1 1v8a2 2 0 0 1-2 2"/><path d="M7 9h7M7 12h7M7 15h4"/></svg>' };
   function newsAllowed() {
     try { return localStorage.getItem("pbNewsTab") === "1"; } catch (_) { return false; }
   }
-  function fourthTab() { return newsAllowed() ? NEWS_TAB : TABS[2]; } // TABS[2] = "O que pedir"
+  function fourthTab() { // TABS[2] = "O que pedir"
+    const doPage = [TABS[2], NEWS_TAB].find(t => PAGES[t.href] === livePage);
+    return doPage || (newsAllowed() ? NEWS_TAB : TABS[2]);
+  }
 
   // Pergunta o plano e reconcilia o 4º tab + o item do menu lateral. Como o
   // swap não muda posição nem quantidade de abas, atualiza o tab NO LUGAR
@@ -343,7 +350,9 @@
       if (i === live) return;
       live = i;
       tabs.forEach((a, k) => a.classList.toggle("pb-live", k === i));
-      beadIco.innerHTML = TABS[i].icon;      // reinicia o pop do ícone
+      // ícone da aba DESENHADA, não de TABS por posição: o 4º lugar pode ser
+      // Notícias. Trocar o innerHTML reinicia o pop do ícone.
+      beadIco.innerHTML = tabs[i].querySelector(".pb-tab-ico").innerHTML;
     }
     const nearest = px => {
       let best = 0;
@@ -367,7 +376,7 @@
       }
     }
 
-    beadIco.innerHTML = TABS[home].icon;
+    beadIco.innerHTML = tabs[home].querySelector(".pb-tab-ico").innerHTML;
 
     tabs.forEach((a, i) => {
       a.addEventListener("click", ev => {
