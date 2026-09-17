@@ -53,11 +53,15 @@ function iniciais(nome: string): string {
  *
  * Imagem que FALHA cai no mesmo fallback: a foto vem de fora (provedor de
  * conta, banco), e uma URL inalcançável deixaria o círculo vazio — que é
- * indistinguível de "sem foto" e pior que a inicial.
+ * indistinguível de "sem foto" e pior que a inicial. A falha fica presa À
+ * URI que falhou, então uma foto nova ainda é tentada.
  */
 export function Avatar({ nome, imagem, tamanho = 40 }: Props) {
   const { cores } = useTema();
-  const [falhou, setFalhou] = useState(false);
+  // Guarda a URI que falhou, não um booleano: com booleano, trocar de foto
+  // (outra conta, perfil atualizado) ou a linha ser reaproveitada numa lista
+  // manteria as iniciais para sempre, porque o estado não volta.
+  const [uriQueFalhou, setUriQueFalhou] = useState<string | null>(null);
   const letras = iniciais(nome);
   const rotulo = nome.trim() || "Sem nome";
 
@@ -75,11 +79,11 @@ export function Avatar({ nome, imagem, tamanho = 40 }: Props) {
         overflow: "hidden",
       }}
     >
-      {imagem && !falhou ? (
+      {imagem && uriQueFalhou !== imagem ? (
         <Image
           source={{ uri: imagem }}
           style={{ width: tamanho, height: tamanho }}
-          onError={() => setFalhou(true)}
+          onError={() => setUriQueFalhou(imagem)}
           accessibilityIgnoresInvertColors
         />
       ) : (

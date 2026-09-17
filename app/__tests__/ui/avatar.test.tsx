@@ -2,6 +2,7 @@ import { fireEvent } from "@testing-library/react-native";
 import { Image } from "react-native";
 
 import { Avatar } from "@/ui/componentes/Avatar";
+import { TemaProvider } from "@/ui/tema";
 
 import { renderInterativo, renderNosDoisTemas } from "./_render";
 
@@ -55,6 +56,18 @@ describe("Avatar", () => {
     fireEvent(tela.UNSAFE_getByType(Image), "error");
     expect(tela.getByText("AS")).toBeTruthy();
     expect(tela.UNSAFE_queryByType(Image)).toBeNull();
+  });
+
+  it("foto nova depois de uma falha é tentada de novo", () => {
+    const tela = renderInterativo(<Avatar nome="Ana Souza" imagem="https://x/ruim.png" />);
+    fireEvent(tela.UNSAFE_getByType(Image), "error");
+    expect(tela.getByText("AS")).toBeTruthy();
+    tela.update(
+      <TemaProvider esquema="light">
+        <Avatar nome="Ana Souza" imagem="https://x/nova.png" />
+      </TemaProvider>,
+    );
+    expect(tela.UNSAFE_getByType(Image).props.source).toEqual({ uri: "https://x/nova.png" });
   });
 
   it("tamanho custom vira largura/altura/borderRadius do círculo", () => {
