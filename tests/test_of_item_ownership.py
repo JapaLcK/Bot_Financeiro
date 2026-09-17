@@ -24,6 +24,7 @@ from fastapi.testclient import TestClient
 os.environ.setdefault("MFA_ENCRYPTION_KEY", Fernet.generate_key().decode())
 
 import db
+import core.services.pluggy_sync as ps
 import frontend.finance_bot_websocket_custom as dashboard
 import frontend.routes.open_finance as of_routes
 from db.connection import get_conn
@@ -206,3 +207,143 @@ def test_webhook_de_item_desconhecido_registra_e_nao_sincroniza(monkeypatch, eve
         c.commit()
     assert [l["origin"] for l in linhas] == ["webhook"]
     assert linhas[0]["user_id"] is None, "item desconhecido não tem dono a atribuir"
+
+
+# ── 29, 30 e 31. isolamento em `_refresh_items_report` e `_sync_item_contido`
+# (#446) — o mesmo `item_id` pode estar ligado a conexões de usuários
+# diferentes (sem o índice único, ou por webhook), e as duas funções faziam a
+# leitura por item_id SEM filtrar por quem está pedindo.
+#
+# CONTROLE NEGATIVO do grupo: tirar o `if int(r["user_id"]) == int(user_id)`
+# de `_refresh_items_report` (core/services/pluggy_sync.py) deixa os DOIS
+# primeiros vermelhos — medido. O terceiro (`test_sync_pluggy_user_nao_devolve_
+# dono_alheio`) não passa por `_refresh_items_report`; quem o prende é o
+# filtro de `_sync_item_contido`, no mesmo arquivo.
+
+def _health_parcial() -> dict:
+    return {
+        "observed_at": "2026-09-16T12:00:00-03:00", "item_status": "UPDATED",
+        "execution_status": "PARTIAL_SUCCESS", "stale_products": ["CREDIT"],
+        "products": {"CREDIT": {"updated": False, "last_updated_at": "2026-08-12T03:10:00Z",
+                                "warnings": []}},
+    }
+
+
+def test_refresh_report_nao_traz_health_de_conexao_de_outro_usuario(user_id, monkeypatch):
+    """Só o OUTRO usuário tem a linha do item: o relatório do MEU refresh não
+    pode trazer o `health` dele — `products` tem que voltar vazio."""
+    outro = user_id + 1
+    db.ensure_user(outro)
+    try:
+        conexao_outro = db.save_pluggy_open_finance_item(outro, {
+            "id": "item-so-do-outro", "status": "UPDATED",
+            "connector": {"id": 612, "name": "Nubank"}})
+        db.mark_sync_result(conexao_outro["id"], ok=True, status="ACTIVE", status_reason="",
+                            health=_health_parcial())
+        monkeypatch.setattr(ps, "get_connections_by_item_id", db.get_connections_by_item_id)
+
+        out = ps._refresh_items_report(user_id, ["item-so-do-outro"], {}, {}, {}, set())
+
+        assert out[0]["products"] == {}, f"vazou health de outro usuário: {out[0]}"
+        assert out[0]["state"] != "partial", out[0]
+    finally:
+        db.disconnect_open_finance_connection(outro)
+        with get_conn() as c:
+            c.execute("delete from users where id=%s", (outro,))
+            c.commit()
+
+
+def test_refresh_report_com_dois_donos_devolve_a_PROPRIA_linha(user_id, monkeypatch, sem_indice_unico):
+    """CONTROLE POSITIVO: com duas conexões do mesmo item (índice derrubado), o
+    requerente recebe a PRÓPRIA linha — hoje (sem filtro) `len(rows) == 2` cai
+    no `row = {}` do `_refresh_items_report`, mesmo a minha linha existindo."""
+    outro = user_id + 1
+    db.ensure_user(outro)
+    try:
+        conexao_minha = db.save_pluggy_open_finance_item(user_id, {
+            "id": "item-2donos-refresh", "status": "UPDATED",
+            "connector": {"id": 612, "name": "Nubank"}})
+        db.save_pluggy_open_finance_item(outro, {
+            "id": "item-2donos-refresh", "status": "UPDATED",
+            "connector": {"id": 612, "name": "Nubank"}})
+        assert len(db.get_connections_by_item_id("item-2donos-refresh")) == 2
+        db.mark_sync_result(conexao_minha["id"], ok=True, status="ACTIVE", status_reason="",
+                            health=_health_parcial())
+        monkeypatch.setattr(ps, "get_connections_by_item_id", db.get_connections_by_item_id)
+
+        out = ps._refresh_items_report(user_id, ["item-2donos-refresh"], {}, {}, {}, set())
+
+        assert out[0]["state"] == "partial", (
+            f"esperava a MINHA linha (partial); {out[0]}")
+    finally:
+        db.disconnect_open_finance_connection(outro)
+        with get_conn() as c:
+            c.execute("delete from users where id=%s", (outro,))
+            c.commit()
+
+
+def test_sync_pluggy_user_nao_devolve_dono_alheio(user_id, monkeypatch):
+    """`sync_pluggy_item` faz a PRÓPRIA busca por item_id (sem filtro de
+    usuário). Se a minha conexão sumiu do banco e o item hoje só existe para
+    OUTRO usuário, o lote não pode devolver `user_id`/`connection_id` alheios —
+    passa pelo caminho real, `sync_pluggy_user`."""
+    outro = user_id + 1
+    db.ensure_user(outro)
+    try:
+        db.save_pluggy_open_finance_item(outro, {
+            "id": "item-vazamento-2", "status": "UPDATED",
+            "connector": {"id": 612, "name": "Nubank"}})
+
+        # snapshot "velho": ainda enxerga a MINHA conexão com este item, embora
+        # ela já não exista mais no banco (apagada / nunca existiu de verdade
+        # nesta rodada) — é o estado que a corrida descrita na issue produz.
+        monkeypatch.setattr(ps, "get_open_finance_snapshot", lambda uid: {
+            "connections": [{"provider": "pluggy", "provider_item_id": "item-vazamento-2"}]})
+        monkeypatch.setattr(ps, "_hold_aggregate_emails", lambda *a, **kw: None)
+        # a busca REAL de `sync_pluggy_item` (por item_id, sem filtro de
+        # usuário) acharia hoje só a conexão do `outro` — é isso que o mock
+        # reproduz, sem precisar da Pluggy de verdade.
+        monkeypatch.setattr(ps, "sync_pluggy_item", lambda item_id: {
+            "ok": True, "item_id": item_id, "user_id": outro,
+            "connection_id": 999999, "accounts_synced": 3})
+
+        resultado = ps.sync_pluggy_user(user_id)
+
+        assert resultado["results"] == [
+            {"ok": False, "reason": "connection_not_found", "item_id": "item-vazamento-2"}], (
+            f"vazou dado de outro usuário: {resultado['results']}")
+        assert resultado["accounts_synced"] == 0
+    finally:
+        db.disconnect_open_finance_connection(outro)
+        with get_conn() as c:
+            c.execute("delete from users where id=%s", (outro,))
+            c.commit()
+
+
+def test_sync_pluggy_user_nao_traz_reason_de_conexao_paused_alheia(user_id, monkeypatch):
+    """Corrida: a MINHA conexão real sumiu (ou nunca existiu) e hoje o item só
+    existe, PAUSADO, para o OUTRO usuário. Só o `user_id` no retorno de
+    `sync_pluggy_item` permite ao `_sync_item_contido` filtrar.
+    CONTROLE NEGATIVO: tirar `"user_id": connection["user_id"]` dos dois
+    `return` de `sync_pluggy_item` deixa este vermelho, com
+    `reason == "connection_paused"` no resultado."""
+    outro = user_id + 1
+    db.ensure_user(outro)
+    try:
+        conexao_outro = db.save_pluggy_open_finance_item(outro, {
+            "id": "item-paused-alheio", "status": "UPDATED",
+            "connector": {"id": 612, "name": "Nubank"}})
+        db.pause_open_finance_connection(conexao_outro["id"])
+        monkeypatch.setattr(ps, "get_open_finance_snapshot", lambda uid: {
+            "connections": [{"provider": "pluggy", "provider_item_id": "item-paused-alheio"}]})
+        monkeypatch.setattr(ps, "_hold_aggregate_emails", lambda *a, **kw: None)
+        resultado = ps.sync_pluggy_user(user_id)
+
+        assert resultado["results"] == [
+            {"ok": False, "reason": "connection_not_found", "item_id": "item-paused-alheio"}], (
+            f"vazou reason de conexão alheia: {resultado['results']}")
+    finally:
+        db.disconnect_open_finance_connection(outro)
+        with get_conn() as c:
+            c.execute("delete from users where id=%s", (outro,))
+            c.commit()

@@ -197,14 +197,21 @@ def sync_pluggy_item(provider_item_id: str) -> dict:
         return {"ok": False, "reason": "connection_not_found", "item_id": provider_item_id}
 
     status_local = str(connection.get("status") or "").upper()
+    # `user_id` vai nos dois retornos abaixo porque `_sync_item_contido` filtra
+    # por ele (#446): sem o campo, o `reason` de uma conexão TERMINAL de outro
+    # usuário (mesmo item_id, sem índice único) vazava para `sync.results` e
+    # `items[].reason` do requerente.
+    #
     # Trial venceu sem virar assinatura: dados importados ficam, mas o sync PARA
     # (o item nem existe mais na Pluggy). Barra webhook atrasado/replay.
     if status_local == "PAUSED":
-        return {"ok": False, "reason": "connection_paused", "item_id": provider_item_id}
+        return {"ok": False, "reason": "connection_paused", "item_id": provider_item_id,
+                "user_id": connection["user_id"]}
     # Desconectado: terminal do mesmo jeito. Sem isto, um webhook atrasado
     # (item/updated chega depois do item/deleted) ressuscitava a conexão.
     if status_local == "DELETED":
-        return {"ok": False, "reason": "connection_deleted", "item_id": provider_item_id}
+        return {"ok": False, "reason": "connection_deleted", "item_id": provider_item_id,
+                "user_id": connection["user_id"]}
 
     # PERGUNTA PELO ITEM ANTES DE DAR POR BOM. O `/accounts?itemId=<deletado>`
     # devolve 200 com results:[] — só o `GET /items/{id}` devolve 404. Sem esta
@@ -611,7 +618,7 @@ def _hold_aggregate_emails(user_id: int, origem: str) -> None:
         print(f"[pluggy_sync] hold agregados ({origem}): {exc}")
 
 
-def _sync_item_contido(connection: dict) -> dict:
+def _sync_item_contido(connection: dict, user_id: int) -> dict:
     """`sync_pluggy_item` de UM item que NUNCA derruba o lote.
 
     `sync_pluggy_item` re-levanta o que não é 404 de propósito (é o que faz o
@@ -627,7 +634,7 @@ def _sync_item_contido(connection: dict) -> dict:
     """
     item_id = connection["provider_item_id"]
     try:
-        return sync_pluggy_item(item_id)
+        res = sync_pluggy_item(item_id)
     except Exception as exc:
         print(f"[pluggy_sync] item {item_id} falhou no lote: {type(exc).__name__}: {exc}")
         try:
@@ -651,6 +658,18 @@ def _sync_item_contido(connection: dict) -> dict:
         return {"ok": False, "reason": READ_FAILED, "item_id": item_id,
                 "connection_id": connection.get("id"), "error": type(exc).__name__}
 
+    # #446, segundo vazamento: `sync_pluggy_item` faz a PRÓPRIA busca por
+    # `item_id` (sem filtro de usuário — o mesmo item pode estar ligado a
+    # conexões de usuários diferentes, ver `tests/test_of_item_ownership.py`).
+    # Se ela achou a conexão de OUTRO usuário, o resultado é da carteira
+    # alheia — filtra DEPOIS da chamada, sem mudar a assinatura de
+    # `sync_pluggy_item` (mocks em `test_piggy_agents.py` usam `lambda item:`).
+    # `user_id` vem de fora (não de `connection["user_id"]`): a linha do
+    # snapshot que alimenta este lote não carrega esse campo.
+    if res.get("user_id") is not None and int(res["user_id"]) != int(user_id):
+        return {"ok": False, "reason": "connection_not_found", "item_id": item_id}
+    return res
+
 
 def sync_pluggy_user(user_id: int) -> dict:
     """Sincroniza todos os itens Pluggy de um usuário (útil pra sync manual/testes)."""
@@ -664,7 +683,7 @@ def sync_pluggy_user(user_id: int) -> dict:
     if items:
         _hold_aggregate_emails(user_id, "sync_user")
 
-    results = [_sync_item_contido(c) for c in conns]
+    results = [_sync_item_contido(c, user_id) for c in conns]
 
     # Agentes whole-portfolio: rodam UMA vez, depois de TODOS os itens sincronizarem,
     # pra não gravar um retrato parcial que o dedupe por período congelaria. Ficam
@@ -761,7 +780,7 @@ def refresh_and_sync_pluggy_user(
         # bastava o tick periódico passar para o botão do usuário virar um
         # "já está tudo em dia" sem ter olhado nada.
         result = sync_pluggy_user(user_id)
-        parado = _refresh_items_report(items, institutions, {},
+        parado = _refresh_items_report(user_id, items, institutions, {},
                                        _reasons_do_sync(result), set(),
                                        rate_limited=rate_limited)
         # `still_updating` MEDIDO, não `0` fixo: o `sync_pluggy_user` acima fez
@@ -820,7 +839,7 @@ def refresh_and_sync_pluggy_user(
     result = sync_pluggy_user(user_id)
     reasons.update(_reasons_do_sync(result))
 
-    items_out = _refresh_items_report(items, institutions, patch_ok, reasons, pending,
+    items_out = _refresh_items_report(user_id, items, institutions, patch_ok, reasons, pending,
                                       rate_limited=rate_limited)
     # `**result` PRIMEIRO: ele traz um `ok` próprio (o de sync_pluggy_user, que é
     # sempre True) e sobrescreveria o veredito por item se viesse depois.
@@ -872,14 +891,21 @@ def _product_state(info: dict) -> str:
     return f"stale_since_{last}" if last else "stale"
 
 
-def _refresh_items_report(items, institutions, patch_ok, reasons, pending,
+def _refresh_items_report(user_id, items, institutions, patch_ok, reasons, pending,
                           *, rate_limited=()) -> list[dict]:
     """Estado por item DEPOIS do sync, lido do banco — que é onde o `mark_sync_result`
     acabou de gravar status, motivo e saúde. `connection_ui_state` é quem decide o
-    estado; aqui só se junta com o resultado do PATCH e da espera."""
+    estado; aqui só se junta com o resultado do PATCH e da espera.
+
+    `user_id` filtra `get_connections_by_item_id`: o mesmo `item_id` pode estar
+    ligado a conexões de usuários DIFERENTES (índice único ausente ou webhook
+    de item com dois donos — ver `tests/test_of_item_ownership.py`), e sem o
+    filtro este relatório vazava products/state/detail/reason do OUTRO usuário
+    (issue #446).
+    """
     out = []
     for item_id in items:
-        rows = get_connections_by_item_id(item_id)
+        rows = [r for r in get_connections_by_item_id(item_id) if int(r["user_id"]) == int(user_id)]
         row = rows[0] if len(rows) == 1 else {}
         ui = connection_ui_state(row)
         health = row.get("health") if isinstance(row.get("health"), dict) else {}

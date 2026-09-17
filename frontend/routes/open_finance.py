@@ -95,6 +95,11 @@ _DIRTY: set[str] = set()
 # 3x é o mesmo erro 3x — e ainda esconde o defeito no log.
 _SYNC_MAX_ATTEMPTS = 3
 
+# `reason` de conexão TERMINAL (#446): esses returns só carregam `user_id` por
+# causa do filtro de isolamento, não porque sincronizaram algo — um webhook
+# atrasado/replay não pode mandar o dashboard recarregar à toa.
+_SYNC_REASONS_SEM_BROADCAST = ("connection_paused", "connection_deleted")
+
 # Tentativas de pegar o lock ao gravar uma reconexão. A janela do lock é só a
 # fase de escrita e passa em segundos, então a segunda quase sempre entra.
 _RECONNECT_LOCK_ATTEMPTS = 2
@@ -853,7 +858,7 @@ async def _run_pluggy_sync_bg(item_id: str) -> None:
         result = result if isinstance(result, dict) else {}
         # Atualização ao vivo (PWA): avisa o cliente conectado pra recarregar saldo/timeline.
         uid = result.get("user_id")
-        if uid:
+        if uid and result.get("reason") not in _SYNC_REASONS_SEM_BROADCAST:
             try:
                 from frontend.finance_bot_websocket_custom import manager
                 await manager.broadcast_to_user(
