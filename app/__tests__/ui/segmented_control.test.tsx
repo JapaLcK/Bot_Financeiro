@@ -47,7 +47,7 @@ describe("SegmentedControl", () => {
     expect(tabs[1]!.props.accessibilityState).toMatchObject({ selected: true });
   });
 
-  it("dois rótulos iguais: só o primeiro marca selected, e tocar o segundo dispara onChange (sem segmento morto)", () => {
+  it("dois rótulos iguais: só o primeiro marca selected, e tocar o segundo chama onChange — mas NÃO fica selecionável (rótulo repetido não é suportado, ver JSDoc de `opcoes`)", () => {
     const onChange = jest.fn();
     const erroConsole = jest.spyOn(console, "error").mockImplementation(() => {});
     const { getAllByRole } = renderInterativo(<SegmentedControl opcoes={["Mês", "Mês"]} valor="Mês" onChange={onChange} />);
@@ -55,6 +55,10 @@ describe("SegmentedControl", () => {
     expect(tabs[0]!.props.accessibilityState).toMatchObject({ selected: true });
     expect(tabs[1]!.props.accessibilityState).toMatchObject({ selected: false });
 
+    // Tocar no segundo chama onChange com o MESMO texto que já está em
+    // `valor` — não é prova de que ele vira selecionável: um pai controlado
+    // por `useState("Mês")` recebe esse mesmo valor de volta, não re-renderiza,
+    // e o destaque continua preso no primeiro.
     fireEvent.press(tabs[1]!);
     expect(onChange).toHaveBeenCalledWith("Mês");
     expect(Haptics.selectionAsync).toHaveBeenCalledTimes(1);

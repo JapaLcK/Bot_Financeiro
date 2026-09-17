@@ -30,6 +30,16 @@ describe("Avatar", () => {
     expect(c.getByText("😀S")).toBeTruthy();
   });
 
+  it("acento DECOMPOSTO (E + marca combinante separada) mantém a marca, não só a base", () => {
+    const { claro: c } = renderNosDoisTemas(<Avatar nome={"Élida"} />);
+    expect(c.getByText("É")).toBeTruthy();
+  });
+
+  it("bandeira (par de indicadores regionais) sai inteira, não pela metade", () => {
+    const { claro: c } = renderNosDoisTemas(<Avatar nome="🇧🇷 Silva" />);
+    expect(c.getByText("🇧🇷S")).toBeTruthy();
+  });
+
   it("com imagem, mostra Image em vez das iniciais", () => {
     const { claro: c } = renderNosDoisTemas(<Avatar nome="Ana Souza" imagem="https://x/y.png" />);
     expect(c.UNSAFE_getByType(Image).props.source).toEqual({ uri: "https://x/y.png" });

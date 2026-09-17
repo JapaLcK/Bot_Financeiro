@@ -9,6 +9,15 @@ import { espaco, raio } from "@/ui/tokens";
 import { Texto } from "./Texto";
 
 interface Props {
+  /**
+   * O rótulo É A IDENTIDADE da opção — é o que vai para `valor` e o que
+   * `onChange` devolve. Por isso precisa ser único na lista. Com rótulos
+   * repetidos (`["Mês", "Mês"]`) a segunda ocorrência nunca fica selecionável:
+   * `opcoes.indexOf(valor)` sempre resolve para a primeira, então tocar na
+   * segunda até chama `onChange` (com o mesmo texto), mas um pai controlado
+   * por `useState` não muda de estado — já está no valor recebido — e o
+   * destaque permanece preso na primeira.
+   */
   opcoes: string[];
   valor: string;
   onChange: (v: string) => void;

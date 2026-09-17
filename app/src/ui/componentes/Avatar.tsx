@@ -11,13 +11,28 @@ interface Props {
 }
 
 /**
- * `[0]` indexa por unidade UTF-16: um emoji fora do plano básico (ex.: "😀")
- * é um par substituto, e `[0]` pega só a METADE dele — um caractere solto que
- * quebra a exibição. `Array.from(s)[0]` itera por PONTO DE CÓDIGO, então o
- * par sempre sai inteiro.
+ * Primeiro GRAFEMA visível, não o primeiro ponto de código. `Array.from(s)[0]`
+ * resolve o par substituto ("😀"), mas ainda quebra em dois casos: um acento
+ * DECOMPOSTO ("Élida" = E + U+0301 separado) perde a marca, e uma bandeira
+ * ("🇧🇷" = dois indicadores regionais) sai cortada pela metade.
+ *
+ * `Intl.Segmenter` resolveria os dois, mas o app roda em Hermes, e não há como
+ * provar aqui que esta versão o implementa (não há vestígio dele no hermes
+ * vendorizado por este react-native, e o Jest roda em Node — que TEM
+ * Segmenter e mascararia a ausência). Por isso: regex com propriedades
+ * Unicode (base + marcas combinantes, e par de indicadores regionais à
+ * parte para bandeira). `@react-native/babel-preset` sempre inclui
+ * `plugin-transform-unicode-regex`, que compila `\p{...}` num equivalente que
+ * não depende de suporte nativo do motor — funciona em Hermes e em Node.
+ *
+ * ponytail: não cobre sequência ZWJ (emoji de família, "👨‍👩‍👧" ainda sai
+ * como "👨" solto) — exigiria um regex de emoji completo, e Avatar recebe
+ * nome de pessoa, não emoji de família como nome.
  */
+const REGRA_GRAFEMA = /^(?:\p{Regional_Indicator}\p{Regional_Indicator}|\P{M}\p{M}*)/u;
+
 function primeiraLetra(s: string): string {
-  return Array.from(s)[0] ?? "";
+  return REGRA_GRAFEMA.exec(s)?.[0] ?? "";
 }
 
 /** Primeira letra do primeiro nome + primeira do último (duas+ palavras); uma palavra só, uma letra; vazio, sem iniciais. */
