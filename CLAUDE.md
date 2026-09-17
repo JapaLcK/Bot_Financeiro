@@ -47,6 +47,14 @@ linha é **Leve**.
 | **Leve** | feature e tela comuns, correção de bug **que muda lógica**, refatoração, dependência, CI/ferramenta e configuração — tudo fora das áreas acima | `time-dev` com **uma** passada do Tester e Manager curto; o Arquiteto só é pulado quando a mudança já tem plano aprovado ou cabe num arquivo com um único comportamento possível |
 | **Direto** | texto, CSS pequeno, docs, código provisório, correção **sem mudança de lógica** (typo, nome, constante óbvia) | sem o time: teste do que mudou e `git diff` lido de ponta a ponta |
 
+**Experimento temporário (desde 2026-09-16).** Na faixa **Leve**, os PRs alternam
+com e sem o time, na ordem que `python scripts/medir_time_dev.py <PRs Leve
+recentes>` indicar em "próximo PR Leve". Sem o time: o próprio agente implementa,
+roda a suíte (skill `baseline-testes`) e lê o `git diff` inteiro, e grava
+`<!-- time-dev: grupo=sem faixa=Leve internos=0 bloqueantes=0 -->` no PR.
+**Completo continua sempre com o time.** O experimento termina com 10 PRs Leve em
+cada grupo; aí roda-se o script, o dono decide, e este bloco sai.
+
 O time existe para o §4 ("ataque antes de empurrar"): onde há dinheiro ou sessão ele
 pagou a conta várias vezes (PR #133, #384/#386, o logout no-op do #433). Onde o risco
 é baixo, ele consumia uso em rodadas que consertavam o próprio conserto anterior — foi
