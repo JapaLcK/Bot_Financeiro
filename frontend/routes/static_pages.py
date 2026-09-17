@@ -954,3 +954,9 @@ async def health(request: Request):
 async def serve_bank_movements_js():
     return FileResponse(FRONTEND_DIR / "bank-movements.js", media_type="application/javascript",
                         headers={"Cache-Control": "no-cache"})
+
+
+@router.get("/reconciliations.js")
+async def serve_reconciliations_js():
+    return FileResponse(FRONTEND_DIR / "reconciliations.js", media_type="application/javascript",
+                        headers={"Cache-Control": "no-cache"})

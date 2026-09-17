@@ -183,6 +183,7 @@
     ],
     "variaveis": [
       "BankMovements",
+      "Reconciliations",
       "USER_ID",
       "refreshDashboardAfterInvestment"
     ]

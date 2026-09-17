@@ -6358,6 +6358,7 @@ function _historyRowHTML(i) {
   if (i.categoria) meta.push(i.categoria);
   if (isCredito && i.alvo)  meta.push(`Cartão ${i.alvo}`);
   if (!isCredito && i.nota && i.alvo && i.nota !== i.alvo) meta.push(i.nota);
+  if (i.reconciliation_of_tx_id) meta.push("Unido ao extrato");
   if (time) meta.push(time);
   const clickable = i._ldx != null ? ` style="cursor:pointer" onclick="openHistoryDetail(${i._ldx})"` : "";
   return `
@@ -8052,6 +8053,7 @@ function _ensureLaunchDetailModal() {
         <div class="modal-acts ld-acts">
           <button type="button" class="ld-del" id="ld-delete"><i class="ph ph-trash" aria-hidden="true"></i> Excluir</button>
           <span class="ld-acts-right">
+            <button type="button" class="btn-cancel" id="ld-undo">Desfazer</button>
             <button type="button" class="btn-cancel" id="ld-edit"><i class="ph ph-pencil-simple" aria-hidden="true"></i> Editar</button>
             <button type="button" class="btn-save" id="ld-close">Fechar</button>
           </span>
@@ -8064,6 +8066,7 @@ function _ensureLaunchDetailModal() {
   document.getElementById("ld-close").addEventListener("click", closeLaunchDetail);
   document.getElementById("ld-edit").addEventListener("click", _launchDetailEdit);
   document.getElementById("ld-delete").addEventListener("click", _launchDetailDelete);
+  document.getElementById("ld-undo").addEventListener("click", _launchDetailUndo);
   document.addEventListener("keydown", e => {
     if (!ov.classList.contains("open")) return;
     if (e.key === "Escape") { closeLaunchDetail(); return; }
@@ -8109,8 +8112,30 @@ function _renderLaunchDetail(l) {
   const editable = l.id != null && !l.is_internal_movement;
   document.getElementById("ld-edit").style.display = editable ? "" : "none";
   document.getElementById("ld-delete").style.display = editable ? "" : "none";
+  // Desfazer só existe na origem do Histórico e só quando o lançamento está
+  // unido a uma transação do banco (decisão do dono: fica no DETALHE, não na
+  // linha da timeline — a linha só ganha o selo "Unido ao extrato").
+  document.getElementById("ld-undo").style.display =
+    (_launchDetailSource === "history" && l.reconciliation_of_tx_id) ? "" : "none";
 
   document.getElementById("launch-detail-overlay").classList.add("open");
+}
+
+async function _launchDetailUndo() {
+  const l = _launchDetailCurrent;
+  if (!l || !l.reconciliation_of_tx_id) return;
+  const confirmed = await confirmModal(
+    "Ao desfazer, este par não volta a ser sugerido automaticamente. Desfazer mesmo assim?",
+    { title: "Desfazer união", okText: "Desfazer", danger: true });
+  if (!confirmed) return;
+  try {
+    await Reconciliations.act(USER_ID, l.reconciliation_of_tx_id, "undo");
+  } catch (err) {
+    if (err.status !== 404) await alertModal(err.message);
+  }
+  closeLaunchDetail();
+  _historyResetAndReload();
+  sendRefresh();
 }
 
 function openLaunchDetail(idx) {
@@ -9848,10 +9873,9 @@ async function submitPayBill() {
     showPayBillError(`Valor maior que o em aberto (${fmtBillValue(b.due_amount)}).`);
     return;
   }
-  if (valor > payBillState.balance + 0.005) {
-    showPayBillError(`Saldo insuficiente. Saldo atual: ${fmtBillValue(payBillState.balance)}.`);
-    return;
-  }
+  // Saldo insuficiente é recusado pelo servidor (frontend/routes/cards.py),
+  // que já sabe da entrada a conferir da reconciliação — checagem no
+  // cliente aqui duplicava a regra (CLAUDE.md §0.7) e divergia dela.
 
   // Confirmação extra ao antecipar fatura futura — comum em parcelamento
   // (paga 3/3 antes de 1/3 e 2/3). Não bloqueia, só avisa pra evitar erro.
@@ -10419,6 +10443,13 @@ function render(d) {
   const patrimonyHtml = movementsPending
     ? `A conferir · <button type="button" class="ov-adjust-lnk" onclick="BankMovements.open(USER_ID, refreshDashboardAfterInvestment)">${movementsPending} movimentação(ões) não confirmada(s)</button>`
     : `<span data-num="pat" data-val="${pat}">${fmt(pat)}</span>`;
+  // Reconciliação OF x lançamento manual pendente: aviso é a mesma fonte do
+  // /saldo e do relatório (CLAUDE.md §0.7 — Reconciliations.aviso espelha
+  // core/services/funding.py::aviso_conferir). Porta de entrada da tela.
+  const recPending = Number(d.reconciliation?.pending_count || 0);
+  const recHtml = recPending
+    ? `<div class="ov-delta"><button type="button" class="ov-adjust-lnk" onclick="Reconciliations.open(USER_ID, refreshDashboardAfterInvestment)">${escapeHtmlSafe(Reconciliations.aviso(saldoAtual, d.reconciliation))}</button></div>`
+    : "";
 
   // Detalhamento do "Sobrou este mês" pro modal explicativo (clique no card).
   // Guarda exatamente o que está na tela, inclusive em mês histórico.
@@ -10518,8 +10549,8 @@ function render(d) {
         <div class="ov-val"><span data-num="balance" data-val="${saldoAtual}">${fmt(saldoAtual)}</span></div>
         ${hasBanks
           ? `<div class="ov-delta"><i class="ph ph-wallet" aria-hidden="true"></i> Carteira <b style="color:var(--text-2)">${fmt(carteira)}</b> · <i class="ph ph-bank" aria-hidden="true"></i> Bancos <b style="color:var(--text-2)">${fmt(ofBank)}</b> · <button type="button" class="ov-adjust-lnk" onclick="openAdjustWalletModal()">ajustar</button></div>
-             <div class="ov-delta" style="opacity:.8">Patrimônio total <b style="color:var(--text-2)">${patrimonyHtml}</b></div>`
-          : `<div class="ov-delta">Patrimônio total <b style="color:var(--text-2)">${patrimonyHtml}</b></div>`}
+             <div class="ov-delta" style="opacity:.8">Patrimônio total <b style="color:var(--text-2)">${patrimonyHtml}</b></div>${recHtml}`
+          : `<div class="ov-delta">Patrimônio total <b style="color:var(--text-2)">${patrimonyHtml}</b></div>${recHtml}`}
       </div>
       <div class="ov-stat ov-stat-clickable" style="animation-delay:60ms" role="button" tabindex="0" aria-label="${escapeHtmlSafe((sav>=0?'Sobrou este mês':'Déficit do mês') + ': ' + fmt(sav) + '. ' + savDeltaTxt + '. Toque para ver como este valor foi calculado.')}" onclick="openSobrouDetail()" onkeydown="if(event.key==='Enter'||event.key===' '){event.preventDefault();openSobrouDetail();}">
         <div class="ov-ico neon">${svgTrend}</div>
