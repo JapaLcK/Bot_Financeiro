@@ -1,8 +1,9 @@
+import { fireEvent } from "@testing-library/react-native";
 import { Image } from "react-native";
 
 import { Avatar } from "@/ui/componentes/Avatar";
 
-import { renderNosDoisTemas } from "./_render";
+import { renderInterativo, renderNosDoisTemas } from "./_render";
 
 describe("Avatar", () => {
   it("duas ou mais palavras: primeira letra do primeiro nome + do último", () => {
@@ -44,6 +45,16 @@ describe("Avatar", () => {
     const { claro: c } = renderNosDoisTemas(<Avatar nome="Ana Souza" imagem="https://x/y.png" />);
     expect(c.UNSAFE_getByType(Image).props.source).toEqual({ uri: "https://x/y.png" });
     expect(c.queryByText("AS")).toBeNull();
+  });
+
+  it("imagem que falha cai nas iniciais: círculo vazio é indistinguível de erro", () => {
+    // `renderInterativo`: o `fireEvent` só alcança a ÚLTIMA árvore montada, e
+    // `renderNosDoisTemas` monta duas.
+    const tela = renderInterativo(<Avatar nome="Ana Souza" imagem="https://x/indisponivel.png" />);
+    expect(tela.queryByText("AS")).toBeNull();
+    fireEvent(tela.UNSAFE_getByType(Image), "error");
+    expect(tela.getByText("AS")).toBeTruthy();
+    expect(tela.UNSAFE_queryByType(Image)).toBeNull();
   });
 
   it("tamanho custom vira largura/altura/borderRadius do círculo", () => {

@@ -1,3 +1,4 @@
+import { useState } from "react";
 import { Image, View } from "react-native";
 
 import { useTema } from "@/ui/tema";
@@ -49,9 +50,14 @@ function iniciais(nome: string): string {
  * "quadrado colorido" por pessoa (identidade pigbank-frontend) — a cor não
  * carrega significado aqui. Nome vazio ou sem letra cai no fallback "?" em
  * vez de um círculo em branco, que pareceria erro de carregamento.
+ *
+ * Imagem que FALHA cai no mesmo fallback: a foto vem de fora (provedor de
+ * conta, banco), e uma URL inalcançável deixaria o círculo vazio — que é
+ * indistinguível de "sem foto" e pior que a inicial.
  */
 export function Avatar({ nome, imagem, tamanho = 40 }: Props) {
   const { cores } = useTema();
+  const [falhou, setFalhou] = useState(false);
   const letras = iniciais(nome);
   const rotulo = nome.trim() || "Sem nome";
 
@@ -69,8 +75,13 @@ export function Avatar({ nome, imagem, tamanho = 40 }: Props) {
         overflow: "hidden",
       }}
     >
-      {imagem ? (
-        <Image source={{ uri: imagem }} style={{ width: tamanho, height: tamanho }} accessibilityIgnoresInvertColors />
+      {imagem && !falhou ? (
+        <Image
+          source={{ uri: imagem }}
+          style={{ width: tamanho, height: tamanho }}
+          onError={() => setFalhou(true)}
+          accessibilityIgnoresInvertColors
+        />
       ) : (
         <Texto variante="rotulo" tom="inkMuted" style={{ fontSize: tamanho * 0.4, lineHeight: tamanho * 0.5 }}>
           {letras || "?"}
