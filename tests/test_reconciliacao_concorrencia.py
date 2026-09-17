@@ -78,7 +78,13 @@ def test_duplo_clique_em_desfazer(uid_pro, ia_fora):
     assert consolidado(uid_pro) == (900.0, -50.0)
 
 
-def test_confirmar_enquanto_apaga_x(uid_pro, ia_fora):
+def test_confirmar_enquanto_apaga_x_preserva_o_saldo_cru(uid_pro, ia_fora):
+    """Prova SÓ o invariante: saldo cru == soma dos `delta_conta`, com qualquer
+    vencedor. NÃO prova o 409 por `ForeignKeyViolation`: com a transação OF
+    travada pelo confirmar, o `on delete set null` do delete de X espera por ela,
+    então a FK violada não tem caminho determinístico. O resultado do confirmar é
+    só filtrado para não ser exceção inesperada (medido: o Postgres costuma
+    escolher o confirmar como vítima do deadlock → `ReconciliationConflict`)."""
     _, of_tx, manual, _ = pendencia(uid_pro)
     s = _corre(confirm=lambda: db.confirm_reconciliation(uid_pro, of_tx),
                delete=lambda: db.delete_launch_and_rollback(uid_pro, manual))

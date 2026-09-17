@@ -1559,8 +1559,9 @@ def investment_deposit_from_account(
 
         conn.commit()
 
-    # A guarda acima autoriza contra a Carteira CORRIGIDA (`merged_wallet_delta`);
-    # devolver o `accounts.balance` cru faria a resposta falar de outra base —
+    # A guarda acima autoriza pelo menor (`wallet_guard_delta`: fusão devolvida,
+    # receita pendente fora); a resposta devolve a Carteira EXIBIDA. O cru faria
+    # a resposta falar de outra base —
     # cru 50 + fundido 50, aporte de 80 passava e a resposta dizia -30 com a
     # Carteira exibindo 20 (Codex, PR #443). Relido DEPOIS do commit, fora do
     # `with`, para a leitura enxergar a escrita. Consumidores: as rotas do

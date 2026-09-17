@@ -86,16 +86,9 @@ def confirm_reconciliation(user_id: int, of_tx_id: int) -> dict:
                   set imported_launch_id=%s, reconciliation_status='confirmed'
                 where id=%s""",
             (x, o["id"]))
-        # X foi usado: as outras pendências em X virariam botão que sempre dá
-        # ALREADY_LINKED. Voltam a `imported`, com a sombra delas contando.
-        cur.execute(
-            """update open_finance_transactions t
-                  set reconciliation_status='imported', match_launch_id=null
-                 from open_finance_accounts a, open_finance_connections c
-                where a.id = t.account_id and c.id = a.connection_id and c.user_id = %s
-                  and t.match_launch_id = %s and t.reconciliation_status = 'pending'
-                  and t.id <> %s""",
-            (user_id, x, o["id"]))
+        # As outras pendências em X NÃO são tocadas: enquanto X está ocupado elas
+        # saem da lista sozinhas (`ACTIONABLE_PENDING_SQL`) e voltam se o usuário
+        # desfizer esta — gravar nelas tiraria a reversibilidade.
         shadow_id = o["imported_launch_id"]
         if shadow_id and shadow_id != x:
             cur.execute("select source, efeitos from launches where id=%s and user_id=%s",

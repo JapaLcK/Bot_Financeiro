@@ -163,16 +163,25 @@ def test_duas_pendencias_no_mesmo_x_lista_e_contagem_batem(uid_pro, ia_fora):
     assert db.reconciliation_summary(uid_pro)["delta_se_confirmar"] == 1, "X conta uma vez só"
 
 
-def test_confirmar_a_primeira_resolve_a_irma(uid_pro, ia_fora):
+def test_irma_sai_enquanto_x_ocupado_e_volta_ao_desfazer(uid_pro, ia_fora):
+    """Decisão do dono: confirmar não grava nas irmãs. Elas somem da lista só
+    enquanto X está ocupado e voltam — confirmáveis — se o usuário desfizer."""
     _, manual, (primeira, irma) = _duas_no_mesmo_x(uid_pro)
-    sombra_irma = _estado(irma)["imported_launch_id"]
+    assert (consolidado(uid_pro), _gasto_do_mes(uid_pro)) == ((111.88, -1.0), 3.0)
 
     db.confirm_reconciliation(uid_pro, primeira)
-
+    assert _estado(irma)["reconciliation_status"] == "pending"
+    assert _estado(irma)["match_launch_id"] == manual
     assert _lista_e_contagem(uid_pro) == ([], 0)
-    assert _estado(irma) == {"imported_launch_id": sombra_irma, "match_launch_id": None,
-                             "reconciliation_status": "imported"}
-    assert consolidado(uid_pro) == (112.88, 0.0)
+    assert (consolidado(uid_pro), _gasto_do_mes(uid_pro)) == ((112.88, 0.0), 2.0)
+
+    assert db.undo_reconciliation(uid_pro, primeira)["changed"] is True
+    assert _lista_e_contagem(uid_pro) == ([irma], 1)
+    assert (consolidado(uid_pro), _gasto_do_mes(uid_pro)) == ((111.88, -1.0), 3.0)
+
+    assert db.confirm_reconciliation(uid_pro, irma)["changed"] is True
+    assert _lista_e_contagem(uid_pro) == ([], 0)
+    assert (consolidado(uid_pro), _gasto_do_mes(uid_pro)) == ((112.88, 0.0), 2.0)
 
 
 def test_conexao_pausada_some_da_lista_e_da_contagem(uid_pro, ia_fora):

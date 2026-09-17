@@ -208,3 +208,43 @@ def test_recusa_sem_pendencia_nao_muda(uid_pro, ia_fora, sem_autorizacao):
         asyncio.run(pay_bill_route(_Req(), uid_pro, _fatura_de(uid_pro, 80.0),
                                    PayBillPayload(amount=50.0)))
     assert e.value.detail == "Saldo insuficiente. Saldo atual: R$ 10,00, valor pedido: R$ 50,00."
+
+
+# ── investimento: as duas guardas de Carteira com receita pendente ─────────
+
+def test_investimento_com_receita_pendente_nao_autoriza(uid_pro, ia_fora):
+    _, of_tx, _, _ = pendencia(uid_pro, "100.00", "recebi 100 do fulano", "214.88",
+                               "CREDITO XPTO 9981")
+    with pytest.raises(ValueError, match="INSUFFICIENT_ACCOUNT"):
+        db.create_investment_db(uid_pro, "CDB Inicial", 0.01, "monthly", initial_amount=50)
+    db.create_investment_db(uid_pro, "CDB Aporte", 0.01, "monthly")
+    with pytest.raises(ValueError, match="INSUFFICIENT_ACCOUNT"):
+        db.investment_deposit_from_account(uid_pro, "CDB Aporte", 50)
+
+    db.reject_reconciliation(uid_pro, of_tx)  # POSITIVO: rejeitada, a receita autoriza
+    db.investment_deposit_from_account(uid_pro, "CDB Aporte", 50)
+    assert saldo_bruto(uid_pro) == Decimal("50")
+
+
+# ── a pergunta "De onde sai?" ──────────────────────────────────────────────
+
+def test_pergunta_de_origem_cita_a_carteira_da_tela(uid_pro, ia_fora):
+    """Carteira na tela 300, 100 dela é receita a conferir, banco também cobre."""
+    db.add_launch_and_update_balance(uid_pro, "receita", 200, None, "seed")
+    pendencia(uid_pro, "100.00", "recebi 100 do fulano", "500.00", "CREDITO XPTO 9981")
+    db.create_pocket(uid_pro, "viagem")
+
+    assert "Carteira: R$ 300,00" in manda(uid_pro, "/saldo")
+    pergunta = manda(uid_pro, "guardei 50 na caixinha viagem")
+    assert ("1. *Carteira* — R$ 300,00 (disponível para pagar: R$ 200,00, porque "
+            "R$ 100,00 de entrada ainda está a conferir com o banco)\n") in pergunta, pergunta
+
+
+def test_pergunta_de_origem_sem_pendencia_nao_muda(uid_pro, ia_fora):
+    db.add_launch_and_update_balance(uid_pro, "receita", 300, None, "seed")
+    conecta_banco(uid_pro, "500.00")
+    db.create_pocket(uid_pro, "viagem")
+    assert manda(uid_pro, "guardei 50 na caixinha viagem") == (
+        "De onde sai R$ 50,00?\n\n1. *Carteira* — R$ 300,00\n"
+        "2. *Nubank · Nubank Conta* — R$ 500,00\n\n"
+        "Responda com o número (ex: *1*) ou *cancelar*.")
