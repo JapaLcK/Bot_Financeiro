@@ -2314,7 +2314,7 @@ function _clRowsHtml(rows, base) {
     const desc = describeLaunch(l).replace(/<[^>]+>/g, "").trim() || "—";
     // Mesma convenção de cor da Visão Geral: entrada verde, saída vermelha,
     // movimentação interna apagada (não é gasto, é dinheiro que mudou de lugar).
-    const valClass = l.is_internal_movement ? "" : (isIn ? "g" : "r");
+    const valClass = l.is_internal_movement ? "" : _toneClass(isIn ? l.valor : -l.valor, "g", "r");
     // Índice, não o objeto: nenhum texto de usuário entra no atributo onclick.
     return `
       <div class="bar-row cl-row" role="button" tabindex="0"
@@ -4949,16 +4949,19 @@ async function simularPrazo() {
   const q = new URLSearchParams({ date: d });
   if (Number.isFinite(amount) && amount > 0) q.set("amount", String(amount));
   // MICRO-ESTADO, não painel: é a tira de resultado DENTRO do card (simulação
-  // de boleto / previsão de saldo), não a carga da view. Fica no `.empty` de uma
-  // linha de propósito — o `_clBox` com sticker é o estado vazio de PAINEL e
-  // aqui estouraria a altura do card. Decisão consciente, não pendência.
+  // de boleto / previsão de saldo), não a carga da view. O erro COMUM fica no
+  // `.empty` de uma linha de propósito, porque é uma tira estreita e o estado
+  // vazio de PAINEL traz sticker. A ÚNICA exceção é o 401: sem a ação de entrar
+  // de novo, a tira fica dizendo "Não consegui calcular agora" para quem não
+  // tem sessão, e a instrução é falsa.
   resEl.innerHTML = `<div class="empty" style="color:var(--text-3);padding:8px">Calculando…</div>`;
   try {
     const resp = await fetch(`${API}/recurring-bills/${USER_ID}/projection?${q.toString()}`, { credentials: "same-origin" });
-    if (!resp.ok) throw new Error(await resp.text());
+    if (!resp.ok) throw _erroHttp(resp.status, "", await resp.text());
     const data = await resp.json();
     _renderProjection(data.projection);
-  } catch (_) {
+  } catch (err) {
+    if (_sessaoExpirou(err, resEl)) return;
     resEl.innerHTML = `<div class="empty" style="color:var(--text-3);padding:8px">Não consegui calcular agora.</div>`;
   }
 }
@@ -5009,17 +5012,20 @@ async function loadForecast() {
   if (!resEl) return;
   if (!featureAllowed("forecast")) { resEl.innerHTML = _forecastLockedMsg; return; }
   // MICRO-ESTADO, não painel: é a tira de resultado DENTRO do card (simulação
-  // de boleto / previsão de saldo), não a carga da view. Fica no `.empty` de uma
-  // linha de propósito — o `_clBox` com sticker é o estado vazio de PAINEL e
-  // aqui estouraria a altura do card. Decisão consciente, não pendência.
+  // de boleto / previsão de saldo), não a carga da view. O erro COMUM fica no
+  // `.empty` de uma linha de propósito, porque é uma tira estreita e o estado
+  // vazio de PAINEL traz sticker. A ÚNICA exceção é o 401: sem a ação de entrar
+  // de novo, a tira fica dizendo "Não consegui calcular agora" para quem não
+  // tem sessão, e a instrução é falsa.
   resEl.innerHTML = `<div class="empty" style="color:var(--text-3);padding:8px">Calculando…</div>`;
   try {
     const resp = await fetch(`${API}/forecast/${USER_ID}`, { credentials: "same-origin" });
     if (resp.status === 403) { resEl.innerHTML = _forecastLockedMsg; return; }
-    if (!resp.ok) throw new Error(await resp.text());
+    if (!resp.ok) throw _erroHttp(resp.status, "", await resp.text());
     const data = await resp.json();
     _renderForecast(data.forecast);
-  } catch (_) {
+  } catch (err) {
+    if (_sessaoExpirou(err, resEl)) return;
     resEl.innerHTML = `<div class="empty" style="color:var(--text-3);padding:8px">Não consegui calcular agora.</div>`;
   }
 }
@@ -5653,7 +5659,10 @@ function renderAnalyticsView(data) {
   renderAnalyticsPatterns(data.patterns);
 }
 
-/* A cor de um VALOR de dinheiro, uma regra só pra todas as telas: verde é
+/* A cor de um VALOR — dinheiro, e desde o histórico também CONTAGEM ("0
+   receitas" não é notícia boa nem "0 despesas" é notícia má; a contagem de
+   despesa entra negada para o >0 cair no vermelho). Uma regra só pra todas as
+   telas: verde é
    ganho, vermelho é perda e ZERO não é nenhum dos dois — sai neutro. Antes
    cada tela repetia `x >= 0 ? verde : vermelho`, e o zero (parcelamento
    quitado, orçamento não usado, sobra exata) saía verde com cara de notícia
@@ -5675,6 +5684,10 @@ function _toneMoney(v) {
   // NaN (valor não-numérico) cai no neutro: nenhum ramo de comparação aceita.
   const n = Number(v);
   const centavos = Math.sign(n) * Math.round(Math.abs(n) * 100);
+  // O neutro é `--text-2`, mais apagado que o `--text` de um valor sem tom
+  // nenhum: no histórico, o tile zerado fica um degrau abaixo do "Total no
+  // período" ao lado. É consequência aceita — zero é informação de menor peso —,
+  // não descuido; se um dia incomodar, o lugar de mudar é aqui, uma vez só.
   return centavos > 0 ? "var(--green)" : (centavos < 0 ? "var(--red)" : "var(--text-2)");
 }
 
@@ -6405,15 +6418,20 @@ function renderHistoryStats(s) {
       sub: "lançamentos / mês",
       color: "#FF2D8E",
     },
+    // Contagem é superfície de cor como qualquer valor: "0 receitas" não é boa
+    // notícia verde nem "0 despesas" é má notícia vermelha. Mesma regra do zero
+    // do `_toneMoney` (despesa entra negada, pra cair no vermelho quando > 0).
+    // A negação inverteria a semântica com contagem NEGATIVA — que não existe:
+    // os dois campos são `COUNT()` do backend, e `COUNT()` nunca é < 0.
     {
       value: s.receitas_count != null ? s.receitas_count : "—",
       sub: "no período",
-      color: "var(--green)",
+      color: _toneMoney(s.receitas_count),
     },
     {
       value: s.despesas_count != null ? s.despesas_count : "—",
       sub: "débito + cartão",
-      color: "var(--red)",
+      color: _toneMoney(-s.despesas_count),
     },
     {
       value: s.total_count != null ? s.total_count : "—",
@@ -7466,7 +7484,7 @@ function renderInvestmentsPanel(d) {
   document.getElementById("invest-summary").innerHTML = `
     <div class="chips" style="margin-top:0;margin-bottom:6px">
       <div class="chip"><div class="chip-lbl">Patrimônio</div><div class="chip-val b">${Number(d.bank_movements?.pending_count || 0) ? "A conferir" : fmt(total)}</div></div>
-      <div class="chip"><div class="chip-lbl">Rend. bruto/mês <span style="opacity:.6;font-weight:400">(simulado)</span></div><div class="chip-val g">${fmt(grossMonth)}</div></div>
+      <div class="chip"><div class="chip-lbl">Rend. bruto/mês <span style="opacity:.6;font-weight:400">(simulado)</span></div><div class="chip-val ${_toneClass(grossMonth, "g", "")}">${fmt(grossMonth)}</div></div>
       <div class="chip"><div class="chip-lbl">Líquido estimado <span style="opacity:.6;font-weight:400">(simulado)</span></div><div class="chip-val">${fmt(netMonth)}</div></div>
     </div>
     <div style="color:var(--text-3);font-size:.75rem;margin-bottom:12px;line-height:1.35"><i class="ph ph-lightbulb" aria-hidden="true"></i> Rendimentos exibidos são simulações baseadas na taxa informada. O PigBank não custodia os valores aplicados.</div>
@@ -7544,12 +7562,18 @@ function renderOfFixedIncomePanel(d) {
 // Renda variável (ações/FIIs) vinda do Open Finance — read-only, marcada a mercado.
 const RV_KIND_LABELS = { stock: "Ação", fii: "FII", etf: "ETF", bdr: "BDR", crypto: "Cripto", fund: "Fundo" };
 
+/* Resultado de uma posição. A SETA sai junto com a cor no neutro, e isso é
+   decisão, não descuido: "↑" afirma o mesmo que o verde, então "↑ R$ 0,00" em
+   preto continuaria mentindo. Zero aqui é o DEFAULT do código, não borda — os
+   dois chamadores passam `sum.pnl || 0`, e renda variável sem posição (ou
+   posição exatamente no preço de compra) cai nele. Antes: `Number(v) >= 0`
+   cru, que pintava o zero de verde com seta pra cima e o resíduo de float de
+   vermelho. */
 function fmtPnl(v, pct) {
-  const up = Number(v) >= 0;
-  const arrow = up ? "↑" : "↓";
-  const cls = up ? "pnl-up" : "pnl-down";
+  const arrow = _toneClass(v, "↑ ", "↓ ");
+  const cls = _toneClass(v, "pnl-up", "pnl-down");
   const pctTxt = (pct != null) ? ` (${(Number(pct) * 100).toFixed(2).replace(".", ",")}%)` : "";
-  return `<span class="${cls}">${arrow} ${fmt(Math.abs(Number(v)))}${pctTxt}</span>`;
+  return `<span class="${cls}">${arrow}${fmt(Math.abs(Number(v)))}${pctTxt}</span>`;
 }
 
 function renderVariableIncomePanel(d) {
@@ -8413,7 +8437,9 @@ function openSobrouDetail() {
   const s = _sobrouDetail;
   if (!s) return;
   _ensureSobrouDetailModal();
-  const deficit = s.sav < 0;
+  // MESMO corte do card (`savNeg` no `render`): o rótulo do modal não pode
+  // discordar do rótulo do card que o abriu, nem da cor do próprio valor.
+  const deficit = _toneMoney(s.sav) === "var(--red)";
   const monthLbl = (PT_MONTHS[(s.month || 1) - 1] || "") +
     (s.year ? "/" + String(s.year).slice(-2) : "");
 
@@ -8426,11 +8452,11 @@ function openSobrouDetail() {
     `<span class="ld-v ${cls || ""}">${v}</span></div>`;
 
   document.getElementById("sd-rows").innerHTML =
-    row("Receitas do mês", "+ " + fmt(s.inc), "sd-plus") +
+    row("Receitas do mês", "+ " + fmt(s.inc), _toneClass(s.inc, "sd-plus", "")) +
     row("Gastos do mês", "− " + fmt(s.exp), "sd-minus") +
     row("Aportes (investimentos + caixinhas)", "− " + fmt(s.apt), "sd-minus") +
     `<div class="ld-row sd-total"><span class="ld-k">${deficit ? "Déficit do mês" : "Sobrou este mês"}</span>` +
-    `<span class="ld-v ${deficit ? "neg" : "pos"}">${fmt(s.sav)}</span></div>`;
+    `<span class="ld-v ${_toneClass(s.sav, "pos", "neg")}">${fmt(s.sav)}</span></div>`;
 
   // Explica a divergência que confunde: saldo (acumulado) vs sobrou (só o mês).
   // Em mês histórico NÃO comparamos com o saldo: o snapshot só traz o saldo
@@ -10661,11 +10687,24 @@ function render(d) {
   const apt  = (allocSrc.investments?.total || 0) + (allocSrc.pockets?.total || 0);
   const sav  = inc - exp - apt;
   const rate = inc > 0 ? Math.round(apt/inc*100) : 0;
-  // Déficit (sav<0): despesas+aportes passaram da renda. Nesse caso NÃO exibir
+  // Déficit: despesas+aportes passaram da renda. Nesse caso NÃO exibir
   // "X% da renda poupada" — soa positivo num mês negativo (você aportou puxando
   // do saldo, não é poupança sustentável). Mostra o motivo, em vermelho.
-  const savDeltaCls = sav < 0 ? "down" : (rate>=20?"up":rate>=10?"":"down");
-  const savDeltaTxt = sav < 0 ? "Aportes e gastos passaram da renda" : `${rate}% da renda poupada`;
+  //
+  // UMA pergunta só para o rótulo, o aria-label e a cor do card, e para o
+  // modal que ele abre (`openSobrouDetail`, mesmo `sav` via `_sobrouDetail`):
+  // `sav < 0` CRU discordava do que a tela escreve. Resíduo de float (-2e-13 de
+  // uma soma de reduce) dava "Déficit do mês" em VERMELHO sobre "R$ -0,00", e
+  // `sav === 0` caía no else e pintava "R$ 0,00" de verde. O corte em centavos
+  // do `_toneMoney` é o mesmo que decide o texto do `_fmtBRL`, então cor, rótulo
+  // e valor passam a dizer a mesma coisa.
+  const savNeg = _toneMoney(sav) === "var(--red)";
+  // O DELTA tem escada própria, de TAXA: com `rate` 0 ele termina em "down"
+  // (vermelho) mesmo com o valor neutro. É cor de "poupou pouco", não do valor,
+  // é anterior a este trabalho e fica como está — não leia a linha de baixo como
+  // se o `savNeg` mandasse no delta inteiro.
+  const savDeltaCls = savNeg ? "down" : (rate>=20?"up":rate>=10?"":"down");
+  const savDeltaTxt = savNeg ? "Aportes e gastos passaram da renda" : `${rate}% da renda poupada`;
   const hist = d.is_current_month !== undefined
     ? !d.is_current_month
     : (ry !== NOW.getFullYear() || rm !== NOW.getMonth() + 1);
@@ -10787,10 +10826,10 @@ function render(d) {
              <div class="ov-delta" style="opacity:.8">Patrimônio total <b style="color:var(--text-2)">${patrimonyHtml}</b></div>`
           : `<div class="ov-delta">Patrimônio total <b style="color:var(--text-2)">${patrimonyHtml}</b></div>`}
       </div>
-      <div class="ov-stat ov-stat-clickable" style="animation-delay:60ms" role="button" tabindex="0" aria-label="${escapeHtmlSafe((sav>=0?'Sobrou este mês':'Déficit do mês') + ': ' + fmt(sav) + '. ' + savDeltaTxt + '. Toque para ver como este valor foi calculado.')}" onclick="openSobrouDetail()" onkeydown="if(event.key==='Enter'||event.key===' '){event.preventDefault();openSobrouDetail();}">
+      <div class="ov-stat ov-stat-clickable" style="animation-delay:60ms" role="button" tabindex="0" aria-label="${escapeHtmlSafe((savNeg?'Déficit do mês':'Sobrou este mês') + ': ' + fmt(sav) + '. ' + savDeltaTxt + '. Toque para ver como este valor foi calculado.')}" onclick="openSobrouDetail()" onkeydown="if(event.key==='Enter'||event.key===' '){event.preventDefault();openSobrouDetail();}">
         <div class="ov-ico neon">${svgTrend}</div>
-        <div class="ov-lbl">${sav>=0?'Sobrou este mês':'Déficit do mês'} <i class="ph ph-info ov-lbl-info" aria-hidden="true"></i></div>
-        <div class="ov-val ${sav>=0?'pos':'neg'}"><span data-num="sav" data-val="${sav}">${fmt(sav)}</span></div>
+        <div class="ov-lbl">${savNeg?'Déficit do mês':'Sobrou este mês'} <i class="ph ph-info ov-lbl-info" aria-hidden="true"></i></div>
+        <div class="ov-val ${_toneClass(sav, "pos", "neg")}"><span data-num="sav" data-val="${sav}">${fmt(sav)}</span></div>
         <div class="ov-delta ${savDeltaCls}">${savDeltaTxt}</div>
       </div>
       <div class="ov-stat" style="animation-delay:120ms">
@@ -10922,7 +10961,7 @@ async function _fetchAffiliate({ force = false } = {}) {
   return _affiliateChannel.run(async (signal) => {
     const res = await fetch(`${API}/api/affiliate/me`, { credentials: "same-origin", signal });
     const data = await readResponsePayload(res);
-    if (!res.ok) throw new Error(data.detail || "Não foi possível carregar seus dados de afiliado.");
+    if (!res.ok) throw _erroHttp(res.status, "", data.detail || "Não foi possível carregar seus dados de afiliado.");
     return data;
   }, { force });
 }
@@ -10950,6 +10989,15 @@ async function loadAffiliateView(forceFresh = false, { background = false } = {}
   // durante o fetch; um snapshot tirado antes descartaria o que foi digitado).
   // Antes esse caminho vivia inline no _pbDashboardRefresh; agora mora aqui, no
   // canal, junto com os outros loaders.
+  //
+  // SEM tratamento de 401 DE PROPÓSITO, aqui e no `loadAgentesView`: o puxão
+  // rejeita para o dispatcher, que acende o indicador âmbar e MANTÉM o dado que
+  // já está na tela. Pintar "Sua sessão expirou" por cima de dado bom repetiria
+  // o defeito do achado 1 no gesto mais frequente do app. E o preço é real, não
+  // hipotético: quem FICA nesta view e só puxa nunca vê "Entrar de novo" — a
+  // carga normal só roda na troca de seção —, então o puxão fica em âmbar por
+  // tempo indefinido, mostrando dado velho. Assimetria aceita e declarada, não
+  // esquecida; se mudar, mude nos dois.
   if (background) {
     const data = await _fetchAffiliate({ force: true });
     if (data === undefined) return;
@@ -10964,9 +11012,23 @@ async function loadAffiliateView(forceFresh = false, { background = false } = {}
     return;
   }
 
+  // O irmão — #affiliate-stats aqui, #agentes-feed e #agentes-counters nos
+  // agentes — só é limpo no 401 se o que está nele for ESQUELETO desta carga. Com cache quente o ramo de cima já pintou
+  // número de verdade, e apagá-lo é pior que o skeleton pendurado: a revalidação
+  // de `initDashboard` roda sem `forceFresh`, então o 401 chegava DEPOIS de a
+  // tela estar certa e zerava "Indicados/Disponível/Já recebido". Mesma regra
+  // nos agentes, onde o ramo de esqueleto já esvazia o feed — lá não sobra nada
+  // para limpar, e feed e contadores com dado FICAM.
+  //
+  // A assimetria com o painel PRINCIPAL (que é apagado e recebe a caixa) é
+  // deliberada: era ele que estava carregando, então o estado terminal é a
+  // resposta ao que o usuário pediu. O irmão não estava carregando nada — apagá-lo
+  // destrói dado que ninguém mandou recarregar.
+  let esqueleto = false;
   if (_affiliateCache && !forceFresh) {
     _renderAffiliateView(_affiliateCache);
   } else {
+    esqueleto = true;
     stats.innerHTML = `
       <div class="stat-tile"><div class="stat-label">Indicados</div><div class="sk sk-h2"></div></div>
       <div class="stat-tile"><div class="stat-label">Disponível</div><div class="sk sk-h2"></div></div>
@@ -10982,6 +11044,7 @@ async function loadAffiliateView(forceFresh = false, { background = false } = {}
     _affiliateCache = data;
     _renderAffiliateView(data);
   } catch (err) {
+    if (_sessaoExpirou(err, body)) { if (esqueleto) stats.innerHTML = ""; return; }
     body.innerHTML = `<div class="empty" style="grid-column:1/-1;padding:30px;color:var(--red)">Erro: ${esc(String(err.message || err))}</div>`;
   }
 }
@@ -11306,7 +11369,7 @@ async function _fetchAgentes({ force = false } = {}) {
       fetch(`${API}/agents/${USER_ID}/feed?limit=20`, { credentials: "same-origin", signal }),
     ]);
     const data = await readResponsePayload(shelfRes);
-    if (!shelfRes.ok) throw new Error(data.detail || "Não foi possível carregar os agentes.");
+    if (!shelfRes.ok) throw _erroHttp(shelfRes.status, "", data.detail || "Não foi possível carregar os agentes.");
     const feed = await readResponsePayload(feedRes);
     data.events = feedRes.ok ? (feed.events || []) : [];
     return data;
@@ -11328,6 +11391,11 @@ async function loadAgentesView(forceFresh = false, { background = false } = {}) 
 
   // Puxão: sem "Chamando os porquinhos…", fetch antes de render, falha real
   // rejeita sem tocar DOM (indicador âmbar). Superado sai neutro.
+  //
+  // SEM tratamento de 401 DE PROPÓSITO — o mesmo de `loadAffiliateView`, pelo
+  // mesmo motivo e com o mesmo preço: o dado na tela vale mais que a caixa, e
+  // quem fica aqui puxando segue em âmbar indefinido, sem "Entrar de novo", até
+  // trocar de seção. Declarado, não esquecido.
   if (background) {
     const data = await _fetchAgentes({ force: true });
     if (data === undefined) return;
@@ -11351,6 +11419,7 @@ async function loadAgentesView(forceFresh = false, { background = false } = {}) 
     _renderAgentes(data);
     _markAgentesFeedSeen();
   } catch (err) {
+    if (_sessaoExpirou(err, shelf)) return;
     shelf.innerHTML = `<div class="empty" style="grid-column:1/-1;padding:30px;color:var(--red)">Erro: ${esc(String(err.message || err))}</div>`;
   }
 }
