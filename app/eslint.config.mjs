@@ -119,6 +119,14 @@ export default tseslint.config(
         {
           paths: [
             {
+              // `TextInput` continua barrado AQUI: a redeclaração substitui a
+              // regra geral inteira, então omitir esta entrada liberaria o
+              // `TextInput` cru neste arquivo sem ninguém notar.
+              name: "react-native",
+              importNames: ["TextInput"],
+              message: "Use `Input` do design system — é o único lugar com o teto de fonte e o aviso de erro resolvidos.",
+            },
+            {
               name: "phosphor-react-native",
               message: "Importe o ícone específico (`phosphor-react-native/src/icons/<Nome>`); a raiz do pacote pesa 23 MB.",
             },
