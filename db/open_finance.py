@@ -2380,10 +2380,14 @@ ACTIONABLE_PENDING_SQL = _fused_join_sql("match_launch_id", """
 # O que mudaria na Carteira exibida se o usuário confirmasse: mesmo sinal da
 # fusão, somado uma vez por X (duas pendências no mesmo X só fundem uma).
 # `receita_back` (≤ 0) é a receita pendente tirada da guarda de cobertura.
+# `pending_count` usa o MESMO filtro `rn = 1`: decisão do dono é contar só o
+# que move o número — duas transações do banco casando o mesmo lançamento
+# valem 1 no aviso "N lançamento(s) a conferir", não 2 (a lista de
+# `list_reconciliations`, que é por transação, continua mostrando as duas).
 PENDING_RECONCILIATION_SQL = f"""
     select coalesce(sum(-d) filter (where rn = 1), 0) as delta_se_confirmar,
            coalesce(sum(-d) filter (where rn = 1 and d > 0), 0) as receita_back,
-           count(*) as pending_count
+           count(*) filter (where rn = 1) as pending_count
       from (select p.*, row_number() over (partition by p.id) as rn
               from ({ACTIONABLE_PENDING_SQL}) p) x
 """

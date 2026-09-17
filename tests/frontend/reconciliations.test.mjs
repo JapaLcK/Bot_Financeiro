@@ -45,7 +45,7 @@ async function pageFor(width, initialRows, { actionHandler, billPay } = {}) {
   const page = await browser.newPage({ viewport: { width, height: 900 } });
   const rows = initialRows.slice();
   const posts = [];
-  await page.route("**/*", route => {
+  await page.route("**/*", async route => {
     const url = new URL(route.request().url());
     if (url.origin !== origin) return route.abort();
     if (/\.[a-z0-9]+$/i.test(url.pathname)) return route.continue();
@@ -54,7 +54,9 @@ async function pageFor(width, initialRows, { actionHandler, billPay } = {}) {
     if (m && route.request().method() === "POST") {
       const ofTxId = Number(m[1]), action = m[2];
       posts.push({ ofTxId, action, csrf: route.request().headers()["x-csrf-token"] });
-      const outcome = actionHandler ? actionHandler(ofTxId, action) : null;
+      // `actionHandler` pode devolver uma Promise (ex.: segurar a resposta pra
+      // simular um POST em voo) — await aqui é no-op pra quem já devolve objeto.
+      const outcome = actionHandler ? await actionHandler(ofTxId, action) : null;
       if (outcome) return route.fulfill(json(outcome.body, outcome.status));
       const idx = rows.findIndex(r => r.of_tx_id === ofTxId);
       if (idx >= 0) rows.splice(idx, 1);
@@ -80,6 +82,13 @@ for (const width of [1365, 390]) {
     try {
       await page.evaluate(() => window.Reconciliations.open(1));
       await page.getByText("Farmácia", { exact: false }).first().waitFor();
+      // Achado do Tester: `money()` (Intl, "-R$ 50,00") e `fmtBRL()` (sinal
+      // depois do "R$ ", "R$ -50,00") coexistiam na mesma tela — a linha do
+      // banco usava o Intl. Um formatador só (o valor da linha PigBank usa
+      // um prefixo de sinal próprio p/ receita/despesa, fora de escopo aqui).
+      const linhaBanco = await page.getByText("Banco:", { exact: false }).first().innerText();
+      assert.ok(linhaBanco.includes("R$ -50,00"), `formato do fmtBRL não apareceu: ${linhaBanco}`);
+      assert.ok(!linhaBanco.includes("-R$"), `formato antigo do Intl (sinal antes do "R$") ainda aparece: ${linhaBanco}`);
       assert.equal(await page.locator("#reconciliations-overlay script").count(), 0);
       const bounds = await page.locator("#reconciliations-overlay .modal").boundingBox();
       assert.ok(bounds.x >= 0 && bounds.x + bounds.width <= width);
@@ -186,6 +195,30 @@ test("cartão de saldo mostra o aviso da fixture e abre a conferência; sem pend
   } finally { await page.close(); }
 });
 
+test("SÉRIO (achado do Tester): render() sem window.Reconciliations não estoura e os cartões do overview aparecem", async () => {
+  // /reconciliations.js é arquivo novo — sem cache prévio, um 503 do
+  // service-worker no fallback ou um 404 logo após deploy deixam
+  // `window.Reconciliations` indefinido. `render()` não pode confiar que ele
+  // existe (mesma guarda que já existe em frontend/home.html:1001).
+  const { page } = await pageFor(1365, []);
+  try {
+    await page.evaluate(() => { delete window.Reconciliations; });
+    await page.evaluate(() => {
+      render({ user_id: 1, year: 2026, month: 9, is_current_month: true, balance: 300,
+        of_bank_count: 0, of_bank_balance: 0,
+        pockets: [{ name: "Viagem", balance: 100 }], investments: [], credit_cards: [],
+        bank_movements: { pending_count: 0 },
+        reconciliation: { pending_count: 2, delta_se_confirmar: 5 } });
+    });
+    // Sem a guarda, a linha acima já teria lançado ReferenceError e o teste
+    // falharia aqui — chegar até este ponto já é metade da prova.
+    assert.equal(await page.locator(".ov-pk", { hasText: "Viagem" }).count(), 1,
+      "cartão da caixinha sumiu: render() parou no meio por causa do aviso de reconciliação");
+    assert.equal(await page.getByText("lançamento(s) a conferir", { exact: false }).count(), 0,
+      "sem window.Reconciliations não dá pra montar o aviso clicável — não deveria aparecer nenhum");
+  } finally { await page.close(); }
+});
+
 test("timeline: selo 'Unido ao extrato' e Desfazer no detalhe; sem id nenhum dos dois", async () => {
   const { page, posts } = await pageFor(800, []);
   try {
@@ -219,6 +252,42 @@ test("timeline: selo 'Unido ao extrato' e Desfazer no detalhe; sem id nenhum dos
     const resp = page.waitForResponse(r => new URL(r.url()).pathname === "/open-finance/1/reconciliations/501/undo");
     await page.locator("#generic-confirm-ok").click();
     await resp;
+    await page.waitForFunction(() => document.getElementById("launch-detail-overlay").classList.contains("open") === false);
+    assert.deepEqual(posts, [{ ofTxId: 501, action: "undo", csrf: "tok123" }]);
+  } finally { await page.close(); }
+});
+
+test("Desfazer: 2º clique em #ld-undo durante o POST em voo não reabre a confirmação (achado do Tester)", async () => {
+  let releaseUndo;
+  const undoHeld = new Promise(r => { releaseUndo = r; });
+  const { page, posts } = await pageFor(800, [], {
+    actionHandler: (_id, action) => action === "undo"
+      ? undoHeld.then(() => ({ body: { ok: true, changed: true }, status: 200 }))
+      : null,
+  });
+  try {
+    await page.evaluate(() => {
+      document.getElementById("history-view").classList.add("active");
+      renderHistoryTimeline({ ok: true, items: [
+        { id: 301, tipo: "despesa", valor: 50, alvo: "Mercado", nota: null, criado_em: "2026-09-10T10:00:00", reconciliation_of_tx_id: 501 },
+      ] }, false);
+    });
+    await page.locator(".tx-row", { hasText: "Mercado" }).click();
+    await page.getByText("Detalhe do lançamento", { exact: false }).waitFor();
+    await page.locator("#ld-undo").click();
+    await page.getByText("Ao desfazer", { exact: false }).waitFor();
+    const firstReq = page.waitForRequest(r => new URL(r.url()).pathname === "/open-finance/1/reconciliations/501/undo");
+    await page.locator("#generic-confirm-ok").click();
+    await firstReq;
+    // 1º POST em voo (segurado por `undoHeld`): o modal de detalhe segue
+    // aberto com #ld-undo visível — é a janela do clique duplo do achado.
+    // .click() nativo (não o do Playwright) pra não esperar "actionable":
+    // um botão desabilitado é justamente o que este teste verifica.
+    await page.evaluate(() => document.getElementById("ld-undo").click());
+    assert.equal(
+      await page.locator("#generic-confirm-overlay.open").count(), 0,
+      "2º clique em #ld-undo reabriu a confirmação — sem o `btn.disabled`, isso manda um 2º POST de undo");
+    releaseUndo();
     await page.waitForFunction(() => document.getElementById("launch-detail-overlay").classList.contains("open") === false);
     assert.deepEqual(posts, [{ ofTxId: 501, action: "undo", csrf: "tok123" }]);
   } finally { await page.close(); }

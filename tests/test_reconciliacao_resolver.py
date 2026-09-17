@@ -158,8 +158,13 @@ def _duas_no_mesmo_x(uid):
 
 
 def test_duas_pendencias_no_mesmo_x_lista_e_contagem_batem(uid_pro, ia_fora):
+    """Decisão do dono: `pending_count` conta só o que move o número. A lista
+    (uma linha por transação do banco) mostra as duas; a contagem do aviso
+    ("N lançamento(s) a conferir") é 1, igual ao `delta_se_confirmar`."""
     _, _, ids = _duas_no_mesmo_x(uid_pro)
-    assert _lista_e_contagem(uid_pro) == (ids, 2)
+    pend, count = _lista_e_contagem(uid_pro)
+    assert pend == ids, "a lista continua uma linha por transação"
+    assert count == 1, "o aviso conta uma vez só, como o delta"
     assert db.reconciliation_summary(uid_pro)["delta_se_confirmar"] == 1, "X conta uma vez só"
 
 

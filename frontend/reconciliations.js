@@ -8,10 +8,11 @@
   let previousFocus;
   let activeUser;
   let afterSave;
-  const money = value => new Intl.NumberFormat("pt-BR", { style: "currency", currency: "BRL" }).format(value);
   // Mesmo formato de utils_text.fmt_brl: "R$ " sempre na frente, sinal DEPOIS
   // do "R$ " (Intl faz "-R$ 70,00"; fmt_brl faz "R$ -70,00" — a fixture prova
-  // o segundo, então não dá pra usar o Intl aqui).
+  // o segundo). Único formatador de dinheiro do arquivo — antes havia também
+  // um `money()` via Intl, com o outro formato, lado a lado na mesma tela
+  // (achado do Tester).
   function fmtBRL(v) {
     const n = Number(v) || 0;
     const [intPart, dec] = Math.abs(n).toFixed(2).split(".");
@@ -50,12 +51,12 @@
   }
   function launchAmount(l) {
     const sign = l.tipo === "receita" ? "+" : "-";
-    return `${sign}${money(Math.abs(l.valor))}`;
+    return `${sign}${fmtBRL(Math.abs(l.valor))}`;
   }
   function _side(r) {
     const section = element("div", null, "modal-row");
     section.style.cssText = "border-top:1px solid var(--glass-border);padding-top:16px;overflow-wrap:anywhere";
-    section.append(element("p", `Banco: ${r.bank.description} · ${money(r.bank.amount)} · ${r.bank.date} · ${r.bank.institution || "—"}`, "msub"));
+    section.append(element("p", `Banco: ${r.bank.description} · ${fmtBRL(r.bank.amount)} · ${r.bank.date} · ${r.bank.institution || "—"}`, "msub"));
     section.append(element("p", `PigBank: ${r.launch.alvo || r.launch.nota || "—"} · ${launchAmount(r.launch)} · ${r.launch.date}`, "msub"));
     return section;
   }

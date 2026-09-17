@@ -28,7 +28,7 @@ def check(user_id: int) -> str:
         lines.append(f"🏦 *Conta Corrente*: {fmt_brl(float(cb['manual'] or 0))}")
         aviso = aviso_conferir(cb["manual"], cb.get("reconciliation"))
     if aviso:
-        lines.append(f"{aviso} Confira no dashboard.")
+        lines.append(f"{aviso}. Confira no dashboard.")
 
     # ── Gastos de hoje ───────────────────────────────────────────────────
     today_launches = db.get_launches_by_period(user_id, today, today)

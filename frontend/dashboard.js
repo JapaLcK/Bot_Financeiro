@@ -8115,8 +8115,12 @@ function _renderLaunchDetail(l) {
   // Desfazer só existe na origem do Histórico e só quando o lançamento está
   // unido a uma transação do banco (decisão do dono: fica no DETALHE, não na
   // linha da timeline — a linha só ganha o selo "Unido ao extrato").
-  document.getElementById("ld-undo").style.display =
+  const ldUndoBtn = document.getElementById("ld-undo");
+  ldUndoBtn.style.display =
     (_launchDetailSource === "history" && l.reconciliation_of_tx_id) ? "" : "none";
+  // Reabre sempre destravado — sem isto, um "Desfazer" concluído com sucesso
+  // deixaria o botão desabilitado pra sempre nos próximos detalhes abertos.
+  ldUndoBtn.disabled = false;
 
   document.getElementById("launch-detail-overlay").classList.add("open");
 }
@@ -8124,14 +8128,23 @@ function _renderLaunchDetail(l) {
 async function _launchDetailUndo() {
   const l = _launchDetailCurrent;
   if (!l || !l.reconciliation_of_tx_id) return;
+  // O modal fica aberto (com #ld-undo visível) durante o confirmModal e
+  // durante o POST — sem desabilitar, um segundo clique nessa janela manda
+  // 2 POSTs de "undo" e o 2º volta 409. Mesmo padrão de
+  // frontend/reconciliations.js::_run (button.disabled).
+  const btn = document.getElementById("ld-undo");
+  if (btn.disabled) return;
+  btn.disabled = true;
   const confirmed = await confirmModal(
     "Ao desfazer, este par não volta a ser sugerido automaticamente. Desfazer mesmo assim?",
     { title: "Desfazer união", okText: "Desfazer", danger: true });
-  if (!confirmed) return;
+  if (!confirmed) { btn.disabled = false; return; }
   try {
     await Reconciliations.act(USER_ID, l.reconciliation_of_tx_id, "undo");
   } catch (err) {
+    btn.disabled = false;
     if (err.status !== 404) await alertModal(err.message);
+    return;
   }
   closeLaunchDetail();
   _historyResetAndReload();
@@ -9873,9 +9886,10 @@ async function submitPayBill() {
     showPayBillError(`Valor maior que o em aberto (${fmtBillValue(b.due_amount)}).`);
     return;
   }
-  // Saldo insuficiente é recusado pelo servidor (frontend/routes/cards.py),
-  // que já sabe da entrada a conferir da reconciliação — checagem no
-  // cliente aqui duplicava a regra (CLAUDE.md §0.7) e divergia dela.
+  // Saldo insuficiente é recusado pelo servidor (frontend/routes/cards.py:716),
+  // que usa o mesmo `balance` (GET /bills/{u}) e a mesma margem (0.005) — a
+  // checagem removida daqui não divergia da regra do servidor, era exatamente
+  // ela duplicada no cliente (CLAUDE.md §0.7: uma fonte de verdade).
 
   // Confirmação extra ao antecipar fatura futura — comum em parcelamento
   // (paga 3/3 antes de 1/3 e 2/3). Não bloqueia, só avisa pra evitar erro.
@@ -10446,8 +10460,13 @@ function render(d) {
   // Reconciliação OF x lançamento manual pendente: aviso é a mesma fonte do
   // /saldo e do relatório (CLAUDE.md §0.7 — Reconciliations.aviso espelha
   // core/services/funding.py::aviso_conferir). Porta de entrada da tela.
+  // `window.Reconciliations` pode não existir ainda (/reconciliations.js é
+  // arquivo novo, sem cache prévio; 503 do service-worker no fallback ou 404
+  // logo após deploy) — sem a guarda, `Reconciliations.aviso(...)` estoura o
+  // render() inteiro e nenhum cartão do overview aparece (mesma guarda de
+  // frontend/home.html).
   const recPending = Number(d.reconciliation?.pending_count || 0);
-  const recHtml = recPending
+  const recHtml = (recPending && window.Reconciliations)
     ? `<div class="ov-delta"><button type="button" class="ov-adjust-lnk" onclick="Reconciliations.open(USER_ID, refreshDashboardAfterInvestment)">${escapeHtmlSafe(Reconciliations.aviso(saldoAtual, d.reconciliation))}</button></div>`
     : "";
 

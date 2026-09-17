@@ -21,6 +21,7 @@ dela (conferido manualmente, ver relato do Coder).
 from __future__ import annotations
 
 import json
+from decimal import Decimal
 from pathlib import Path
 
 import pytest
@@ -70,6 +71,22 @@ def test_saldo_despesa_pendente_pode_ser_maior(uid_pro, ia_fora):
     resp = manda(uid_pro, "/saldo")
     assert "⚠ 1 lançamento(s) a conferir · pode ser R$ 113,88" in resp
     assert " Confira no dashboard." in resp
+    # Achado do Tester: sem o ponto, "R$ 113,88 Confira no dashboard." gruda
+    # as duas frases. Prova o ponto exatamente onde o aviso termina.
+    assert "R$ 113,88. Confira no dashboard." in resp
+
+
+def test_saldo_aviso_sem_delta_tambem_pontua_antes_do_confira(monkeypatch, uid_pro):
+    """delta_se_confirmar == 0: `aviso_conferir` não tem "pode ser", termina
+    em "a conferir" — a colagem com "Confira no dashboard." tem o mesmo bug."""
+    from core.handlers import balance as balance_handler
+
+    monkeypatch.setattr(db, "get_consolidated_balance", lambda _uid: {
+        "of_bank_count": 0, "manual": Decimal("100.00"),
+        "reconciliation": {"pending_count": 1, "delta_se_confirmar": 0},
+    })
+    resp = balance_handler.check(uid_pro)
+    assert "⚠ 1 lançamento(s) a conferir. Confira no dashboard." in resp
 
 
 def test_saldo_receita_pendente_pode_ser_menor(uid_pro, ia_fora):
