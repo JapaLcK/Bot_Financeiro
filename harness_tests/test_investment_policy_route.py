@@ -18,6 +18,7 @@ class InvestmentPolicyRouteTests(unittest.TestCase):
             "Piggy, em que devo investir?",
             "Piggy, investe 100 reais em CDB para mim",
             "Piggy, aplica 100 reais em CDB para mim",
+            "Piggy, qual CDB você compraria?",
         ):
             with self.subTest(text=text):
                 result = subprocess.run(

@@ -83,6 +83,8 @@ class InvestmentPolicyMatrixTests(unittest.TestCase):
             "Piggy, aplica 100 reais em CDB para mim",
             "Piggy, investe em um fundo para mim",
             "Piggy, aplica em um fundo para mim",
+            "Piggy, qual CDB você compraria?",
+            "Piggy, em qual ETF você investiria?",
             "qual investimento devo fazer?",
             "compre petr4 para mim",
             "qual PETR4 devo comprar?",

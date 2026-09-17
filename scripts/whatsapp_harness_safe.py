@@ -44,6 +44,9 @@ def main() -> int:
             }
             os.environ.clear()
             os.environ.update(safe_environment)
+            # urllib3 testa IPv6 com bind local durante o import. Carregue a
+            # dependência confiável antes de instalar a guarda de código exercitado.
+            import urllib3.util.connection  # noqa: F401
             from harness_support.safe_runtime import (
                 SafetyGuards,
                 SafetyViolation,

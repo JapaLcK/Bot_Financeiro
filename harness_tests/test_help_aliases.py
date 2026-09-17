@@ -34,11 +34,14 @@ class HelpAliasesTests(unittest.TestCase):
     def test_painel_e_link_recebem_ajuda_do_bot(self) -> None:
         self.assertIn("dashboard", _response("como usar o painel?").lower())
         self.assertIn("link 123456", _response("como usar o comando link?").lower())
+        self.assertIn("link 123456", _response("não consigo usar o link").lower())
+        self.assertIn("link 123456", _response("meu link não funciona").lower())
 
     def test_assuntos_externos_com_as_mesmas_palavras_continuam_fora(self) -> None:
         for text in (
             "como usar o painel do carro?",
             "como usar o link do meu site?",
+            "não consigo usar o link do meu site",
             "como vejo o histórico do navegador?",
         ):
             with self.subTest(text=text):

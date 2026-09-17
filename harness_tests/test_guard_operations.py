@@ -13,6 +13,30 @@ from harness_support.safe_runtime import SafetyGuards, SafetyViolation
 
 
 class GuardOperationsTests(unittest.TestCase):
+    def test_bind_de_socket_nao_pode_criar_inode_fora_da_raiz(self) -> None:
+        original_bind = socket.socket.bind
+        calls: list[object] = []
+        socket.socket.bind = lambda _sock, address: calls.append(address)
+        try:
+            with tempfile.TemporaryDirectory() as root:
+                allowed = Path(root) / "allowed"
+                allowed.mkdir()
+                guards = SafetyGuards(allowed_write_root=allowed)
+                guards.install()
+                try:
+                    with socket.socket(socket.AF_UNIX) as unix_socket:
+                        with self.assertRaises(SafetyViolation):
+                            unix_socket.bind(str(Path(root) / "outside.sock"))
+                    with socket.socket(socket.AF_INET) as inet_socket:
+                        with self.assertRaises(SafetyViolation):
+                            inet_socket.bind(("127.0.0.1", 0))
+                    self.assertEqual(calls, [])
+                    self.assertEqual(len(guards.events), 2)
+                finally:
+                    guards.close()
+        finally:
+            socket.socket.bind = original_bind
+
     def test_threads_de_baixo_nivel_nao_iniciam(self) -> None:
         with tempfile.TemporaryDirectory() as root:
             guards = SafetyGuards(allowed_write_root=Path(root))

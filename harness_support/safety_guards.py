@@ -107,6 +107,7 @@ class SafetyGuards:
         self._replace(os, "open", guarded_os_open)
         self._replace(socket.socket, "connect", deny_network)
         self._replace(socket.socket, "connect_ex", deny_network)
+        self._replace(socket.socket, "bind", deny_network)
         for name in ("send", "sendall", "sendto", "sendmsg", "sendfile"):
             if hasattr(socket.socket, name):
                 self._replace(socket.socket, name, deny_send)

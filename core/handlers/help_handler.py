@@ -477,8 +477,8 @@ def _financial_topic(norm: str) -> str | None:
         r"\bcodigo\s+de\s+vinculacao\b", norm
     ):
         return "account"
-    if any(marker in norm for marker in _HELP_MARKERS) and re.search(
-        r"\bcomando\s+link\b", norm
+    if re.search(r"\blink\s*[?.!]*$", norm) or re.search(
+        r"\b(?:meu|o|esse)\s+link\s+(?:nao\s+)?funciona\b", norm
     ):
         return "account"
     if re.search(

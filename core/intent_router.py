@@ -168,7 +168,8 @@ def _is_investment_action_or_advice_request(text: str) -> bool:
     )
     ambiguous_action = (
         r"(?:aplicar|aplique|aplica|investir|invista|investe|comprar|compre|compra|"
-        r"vender|venda|vende|indicar|indica|indique|"
+        r"vender|venda|vende|compraria|investiria|aplicaria|venderia|"
+        r"indicar|indica|indique|"
         r"indicaria|recomendar|recomenda|recomende|recomendaria|sugerir|"
         r"sugere|sugira|sugeriria|aconselhar|aconselha|aconselhe|aconselharia)"
     )
@@ -346,7 +347,11 @@ def _is_investment_action_or_advice_request(text: str) -> bool:
     )
 
     return bool(
-        re.search(r"\b(aplicar|aplique|aplica|compre|comprar|vender|invista|investe)\b", norm)
+        re.search(
+            r"\b(aplicar|aplique|aplica|compre|comprar|compraria|"
+            r"vender|venderia|invista|investe|investiria|aplicaria)\b",
+            norm,
+        )
         or sell_command
         or purchase_command
         or purchase_noun_command
