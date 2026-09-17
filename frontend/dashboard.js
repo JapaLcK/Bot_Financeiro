@@ -5242,7 +5242,7 @@ function openRecurringIncomeEditModal(rec) {
   document.getElementById("recurring-income-pay-day").value = isEdit ? rec.pay_day : "";
   document.getElementById("recurring-income-start-date").value = isEdit ? (rec.start_date || "") : new Date().toLocaleDateString("en-CA");
   document.getElementById("recurring-income-category").value = isEdit ? rec.category : "";
-  document.getElementById("recurring-income-frequency").value = isEdit ? (rec.frequency || "monthly") : "monthly";
+  document.getElementById("recurring-income-frequency").value = isEdit ? (rec.frequency ?? "monthly") : "monthly";
   document.getElementById("recurring-income-month").value = (isEdit && rec.pay_month) ? rec.pay_month : (new Date().getMonth() + 1);
   document.getElementById("recurring-income-is-primary").checked = isEdit ? !!rec.is_primary : false;
   document.getElementById("recurring-income-notes").value = isEdit ? (rec.notes || "") : "";

@@ -11,8 +11,8 @@ projetado(D) = saldo_atual
              − (opcional) um boleto novo que ele está considerando
 
 `tranquilo` = projetado, em centavos (o valor exibido), >= 0. É uma estimativa:
-não conta gastos avulsos futuros nem recorrentes semanais/diários/únicos
-(raros); a ideia é dar visão de fôlego, não fechamento contábil.
+não conta gastos avulsos futuros nem receitas e gastos fixos
+semanais/diários/únicos; a ideia é dar visão de fôlego, não fechamento contábil.
 """
 from __future__ import annotations
 
@@ -105,7 +105,7 @@ def _cashflow_events(user_id: int, today: date, until: date) -> list[tuple[date,
     consumida por `project` (soma até a data) e `forecast_with_trajectory` (por dia).
     Todo filtro mora aqui — filtro fora deste gerador é uma segunda versão da regra.
 
-    - receita fixa ativa com valor > 0: ocorrências em (today, until], +valor;
+    - receita fixa ativa, mensal/anual, valor > 0: ocorrências em (today, until], +valor;
     - gasto fixo ativo, autopay, mensal/anual, valor > 0: idem, −valor;
     - boleto pendente com vencimento até `until` (vencidos inclusive), −valor
       com QUALQUER valor, até 0 ou negativo — regra herdada de `project`;
@@ -118,6 +118,10 @@ def _cashflow_events(user_id: int, today: date, until: date) -> list[tuple[date,
     events: list[tuple[date, str, str, float]] = []
     for inc in list_recurring_incomes(user_id):
         if not inc.get("is_active"):
+            continue
+        if (inc.get("frequency") or "monthly") not in ("monthly", "annual"):
+            # O cobrador de receitas só lança mensal e anual: contar once/weekly/daily
+            # (registros legados) como mensal inflava a previsão.
             continue
         amount = float(inc.get("amount") or 0)
         if amount <= 0:
