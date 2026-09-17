@@ -116,7 +116,12 @@ export function ToastProvider({ children }: { children: ReactNode }) {
         // teste que "está visível": um toast pode ter conteúdo e já estar a
         // meio caminho de sumir. Só MARCA aqui — quem chama `.start()` é o
         // `useEffect` abaixo, depois que `ToastVisual` já montou.
-        precisaAnimarEntrada.current = !atual || haviaSaidaEmAndamento;
+        // Acumula com `||`, nunca sobrescreve: dois `mostrar()` no MESMO
+        // evento são agrupados pelo React, e o segundo updater já vê o valor
+        // do primeiro na fila (`atual` não nulo). Sobrescrevendo, a marca do
+        // primeiro se perdia e o toast ficava com opacidade 0 até o tempo
+        // acabar — invisível, sem erro nenhum.
+        precisaAnimarEntrada.current = precisaAnimarEntrada.current || !atual || haviaSaidaEmAndamento;
         if (!atual) posicao.setValue(0);
         return { mensagem, tom };
       });

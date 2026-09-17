@@ -1,5 +1,5 @@
 import { act, fireEvent, render } from "@testing-library/react-native";
-import { useEffect } from "react";
+import { useEffect, type ReactElement } from "react";
 import { AccessibilityInfo, Animated, Pressable, StyleSheet, Text } from "react-native";
 import { SafeAreaProvider } from "react-native-safe-area-context";
 
@@ -19,6 +19,22 @@ declare const global: typeof globalThis & { __definirReduzirMovimento: (v: boole
  * ("abrir A"/"abrir B" vs. "A"/"B") — os dois textos apareceriam juntos na
  * árvore e um `getByText`/`queryByText` na mensagem colidiria com o rótulo.
  */
+/** Dispara dois `mostrar()` no MESMO evento: o React agrupa os dois updaters. */
+function GatilhoDuplo() {
+  const { mostrar } = useToast();
+  return (
+    <Pressable
+      accessibilityRole="button"
+      onPress={() => {
+        mostrar({ mensagem: "A", tom: "sucesso" });
+        mostrar({ mensagem: "B", tom: "erro" });
+      }}
+    >
+      <Text>abrir dois</Text>
+    </Pressable>
+  );
+}
+
 function DoisGatilhos() {
   const { mostrar } = useToast();
   return (
@@ -43,13 +59,11 @@ function DoisGatilhos() {
  * interativa, com área segura" — extrair um terceiro helper para o único
  * arquivo que precisa dessa combinação seria abstração de uso único.
  */
-function montar() {
+function montar(gatilhos: ReactElement = <DoisGatilhos />) {
   return render(
     <SafeAreaProvider initialMetrics={{ frame: { x: 0, y: 0, width: 390, height: 844 }, insets: { top: 47, bottom: 34, left: 0, right: 0 } }}>
       <TemaProvider esquema="light">
-        <ToastProvider>
-          <DoisGatilhos />
-        </ToastProvider>
+        <ToastProvider>{gatilhos}</ToastProvider>
       </TemaProvider>
     </SafeAreaProvider>,
   );
@@ -211,6 +225,34 @@ describe("Toast", () => {
    * `useEffect` — sem tocar em `Animated.timing`/`useNativeDriver`, que o
    * dublê já mocka e por isso não vê a corrida real do driver nativo.
    */
+  it("dois mostrar() no mesmo evento ainda animam a entrada (updaters agrupados)", async () => {
+    const tela = montar(<GatilhoDuplo />);
+    await act(async () => {});
+
+    let animouEntrada = false;
+    (Animated.timing as jest.Mock).mockImplementation((_valor: unknown, config: { toValue: number }) => {
+      if (config.toValue === 1) animouEntrada = true;
+      const chamada: { callback?: Animated.EndCallback } = {};
+      pendentes.push(chamada);
+      return {
+        start: (callback?: Animated.EndCallback) => {
+          chamada.callback = callback;
+        },
+        stop: () => {
+          pendentes = pendentes.filter((p) => p !== chamada);
+          chamada.callback?.({ finished: false });
+        },
+      } as unknown as Animated.CompositeAnimation;
+    });
+
+    fireEvent.press(tela.getByText("abrir dois"));
+
+    // Sem isto, o segundo updater apagava a marca do primeiro e o toast ficava
+    // com opacidade 0 até o tempo acabar — visível para ninguém.
+    expect(animouEntrada).toBe(true);
+    expect(tela.getByText("B")).toBeTruthy();
+  });
+
   it("a animação de entrada só começa depois que o toast já está montado (nunca durante o próprio render)", async () => {
     const { getByText, queryByTestId } = montar();
     await act(async () => {});
