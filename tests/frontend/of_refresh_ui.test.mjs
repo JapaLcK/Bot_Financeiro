@@ -145,12 +145,23 @@ test("veredito do refresh: só estado conhecido-bom fica verde", async () => {
 
     // NUNCA verde — inclusive o estado inventado, que é o ponto do teste: o
     // backend pode ganhar um caso novo antes desta tela saber dele.
-    for (const state of ["no_accounts", "paused", "removed", "item_missing",
+    // TODAS as entradas de `OF_VERDICT` que não são `updating`, por nome, mais o
+    // estado inventado. Antes eram só quatro: `needs_user_action`, `partial` e
+    // `error_recoverable` só estavam presas como "≠ ok" num laço mais abaixo, e
+    // neutralizar as três passava com o arquivo inteiro verde — com o gesto
+    // ficando VERDE para "Ação necessária no Nubank: reautorize o acesso".
+    for (const state of ["item_missing", "removed", "paused", "needs_user_action",
+                         "no_accounts", "partial", "error_recoverable",
                          "estado_que_ninguem_implementou_ainda"]) {
       const v = await page.evaluate((s) =>
         window.refreshVerdict({ ok: true, still_updating: 0, items: [{
           item_id: "i1", institution: "Nubank", state: s, label: s, detail: null }] }), state);
-      assert.notEqual(v.tone, "ok", `${state} não pode ser verde (veio "${v.msg}")`);
+      // `error`, e não só "≠ ok": desde que a entrada `updating` virou tom
+      // neutro, "não é verde" deixou de separar erro de neutro — e um refactor
+      // que neutralizasse as OUTRAS entradas passaria sem vermelho.
+      // Estas (mais o estado inventado, que cai no default seguro) são
+      // erro de verdade: o usuário precisa reconectar, reativar, agir ou esperar.
+      assert.equal(v.tone, "error", `${state} tinha que ser erro (veio "${v.msg}")`);
       assert.notEqual(v.msg, "Tudo em dia!", `${state} devolveu "Tudo em dia!"`);
     }
 
@@ -158,6 +169,64 @@ test("veredito do refresh: só estado conhecido-bom fica verde", async () => {
     const misto = await page.evaluate(() => window.refreshVerdict({ ok: true, items: [
       { item_id: "a", state: "updated" }, { item_id: "b", state: "coisa_nova" }] }));
     assert.notEqual(misto.tone, "ok", "um item desconhecido derruba o verde do outro");
+
+    // Codex #455, 2º apontamento: `updating` também sai do backend para a 1ª
+    // conexão/reconexão cujo sync FALHOU — o portão devolve `updating` sem olhar o
+    // motivo. Neutro só sem motivo de falha; com ele é erro, senão o gesto mostra
+    // sucesso em cima de `read_failed`.
+    for (const reason of ["read_failed", "refresh_failed", "motivo_que_ninguem_implementou"]) {
+      const v = await page.evaluate((r) => window.refreshVerdict({ ok: false, still_updating: 0,
+        items: [{ item_id: "a", institution: "Nubank", state: "updating", reason: r, detail: null }] }),
+        reason);
+      assert.equal(v.tone, "error", `updating com ${reason} saiu neutro ("${v.msg}")`);
+    }
+    // Codex #455, 3º apontamento no MESMO trecho → enumeração (CLAUDE.md §4):
+    // TODO erro decide antes de QUALQUER neutro. Os três jeitos de um caminho
+    // neutro sair antes de um erro — (a) e (b) do Codex, (c) achado enumerando:
+    const COLETA = { item_id: "a", institution: "Nubank", state: "updating", reason: null, detail: null };
+    const casos = [
+      ["(a) coleta + estado desconhecido", { ok: false, still_updating: 0, items: [
+        COLETA, { item_id: "b", institution: "Itaú", state: "estado_que_ninguem_implementou" }] }],
+      ["(b) lote coletando + estado desconhecido", { ok: false, still_updating: 2, items: [
+        { item_id: "b", institution: "Itaú", state: "estado_que_ninguem_implementou" }] }],
+      ["(c) coleta sem falha antes de coleta com falha", { ok: false, still_updating: 0, items: [
+        COLETA, { item_id: "b", institution: "Itaú", state: "updating", reason: "read_failed", detail: null }] }],
+    ];
+    for (const [nome, sync] of casos) {
+      for (const inverte of [false, true]) {
+        const s = { ...sync, items: inverte ? [...sync.items].reverse() : sync.items };
+        const v = await page.evaluate((x) => window.refreshVerdict(x), s);
+        assert.equal(v.tone, "error", `${nome}${inverte ? " (ordem invertida)" : ""} saiu "${v.tone}": "${v.msg}"`);
+      }
+    }
+
+    // CONTROLE POSITIVO: sem motivo de falha, a coleta continua neutra.
+    for (const reason of [null, "", "ok"]) {
+      const v = await page.evaluate((r) => window.refreshVerdict({ ok: false, still_updating: 0,
+        items: [{ item_id: "a", institution: "Nubank", state: "updating", reason: r, detail: null }] }),
+        reason);
+      assert.notEqual(v.tone, "error", `updating sem falha (reason=${JSON.stringify(reason)}) virou erro`);
+    }
+
+    // Codex #455: com DOIS bancos, um coletando não pode esconder o erro do
+    // outro. O laço do `refreshVerdict` devolve a PRIMEIRA entrada da tabela que
+    // algum item tem; desde que `updating` virou neutro, se ela vier antes de um
+    // estado de erro, o toast sai neutro e o gesto não pinta âmbar — com o Itaú
+    // precisando de ação. Varre TODOS os estados de erro, nas duas ordens de item.
+    for (const erro of ["item_missing", "removed", "paused", "needs_user_action",
+                        "no_accounts", "partial", "error_recoverable"]) {
+      for (const inverte of [false, true]) {
+        const itens = [
+          { item_id: "a", institution: "Nubank", state: "updating", detail: null },
+          { item_id: "b", institution: "Itaú", state: erro, detail: null }];
+        if (inverte) itens.reverse();
+        const v = await page.evaluate((items) =>
+          window.refreshVerdict({ ok: false, still_updating: 1, items }), itens);
+        assert.equal(v.tone, "error",
+          `Nubank coletando escondeu ${erro} do Itaú (veio "${v.msg}")`);
+        assert.match(v.msg, /Itaú/, `a mensagem tem de falar do banco com erro: "${v.msg}"`);
+      }
+    }
 
     // CONTROLE POSITIVO: o caminho legítimo continua verde — sem isto o teste
     // passaria num código que recusa tudo.
@@ -185,6 +254,11 @@ test("veredito do refresh: só estado conhecido-bom fica verde", async () => {
       ["needs_user_action", "Reautorize o banco", null],
       ["updating",          "Ainda não sincronizou", null],
       ["partial",           "Cartão desatualizado desde 12/08", null],
+      // Saída real do backend para `no_accounts` + `ACCT_001`. A frase fixa que o
+      // `OF_VERDICT` tinha aqui apagava o motivo que o backend anexa.
+      ["no_accounts",       "O banco não devolveu contas nem investimentos — você "
+                            + "não liberou esse dado ao conectar o banco, reconecte "
+                            + "para liberar", null],
     ]) {
       const v = await page.evaluate(([s, d]) => window.refreshVerdict({ ok: false, items: [{
         item_id: "a", institution: "Nubank", state: s, label: "x", detail: d }] }), [state, detail]);
@@ -227,6 +301,34 @@ test("veredito do refresh: só estado conhecido-bom fica verde", async () => {
     const soContador = await page.evaluate(() => window.refreshVerdict({
       ok: false, still_updating: 2, items: [] }));
     assert.equal(soContador.msg, semDetalhe.msg, "as duas frases de 'atualizando' divergiram");
+
+    // ...e o TOM desse ramo não é `error`. `still_updating` conta item que a
+    // Pluggy ainda reporta coletando quando o servidor olha: a coleta de um banco
+    // pode não caber na espera, e aí este ramo sai num refresh que deu certo.
+    // Como `error`, o toast saía vermelho e o
+    // `if (propagate && veredito.tone === "error") throw` de `refreshOpenFinance`
+    // pintava de âmbar esse pull-to-refresh bem-sucedido.
+    // CONTROLE NEGATIVO: repor `tone: "error"` nessa linha do settings.html
+    // deixa esta asserção vermelha.
+    assert.notEqual(soContador.tone, "error", `still_updating não é erro: ${soContador.msg}`);
+    assert.notEqual(soContador.tone, "ok", "...e também não é 'tudo em dia' verde");
+
+    // O MESMO tom na entrada `updating` da tabela (decisão do dono, rodada 3):
+    // banco ainda coletando não é erro, venha o aviso do lote ou do item. A
+    // igualdade é o que prende a fonte única (`OF_TOM_COLETANDO`): dois tons
+    // neutros diferentes nos dois caminhos passam nas duas asserções de cima e
+    // morrem aqui.
+    assert.equal(semDetalhe.tone, soContador.tone,
+                 `os dois caminhos de 'coletando' divergiram no tom: ${semDetalhe.tone}`);
+
+    // CONTROLE POSITIVO: o `still_updating` não atropela item com problema — o
+    // `OF_VERDICT` roda antes e continua mandando, em vermelho e com a frase do
+    // item. Sem isto o ramo neutro poderia engolir a conexão perdida.
+    const comProblema = await page.evaluate(() => window.refreshVerdict({
+      ok: false, still_updating: 2,
+      items: [{ item_id: "a", institution: "Nubank", state: "item_missing" }] }));
+    assert.equal(comProblema.tone, "error", comProblema.msg);
+    assert.match(comProblema.msg, /Nubank/, comProblema.msg);
 
     // Só cooldown: verde, mas dizendo que não pediu coleta nova.
     const cooldown = await page.evaluate(() => window.refreshVerdict({
@@ -282,7 +384,7 @@ test("toast do refresh: cabe na LARGURA da tela e o texto cabe na caixa, de 320 
                   "refreshVerdict existir na página");
 
     const CASOS = [
-      // A instrução mais longa do Open Finance, a que mais cortava.
+      // A instrução mais longa do `_DETALHE_POR_STATUS`, a que mais cortava.
       ["needs_user_action", "Autorize o acesso no app do banco", null],
       ["paused", null, null],
       // CONTROLE POSITIVO da asserção: copy curta é legítima e não pode reprovar.
@@ -359,11 +461,17 @@ test("PTR do OF chama o refresh real, e settings não abre WebSocket", async () 
     await page.route("**/auth/me", (route) =>
       route.fulfill(json({ app_access: true, plan_tier: "pro", of_ui_enabled: true })));
     const chamadas = [];
+    // `still_updating: 2` de propósito: é o refresh que deu certo com a coleta do
+    // banco ainda rodando quando o servidor olhou, e era o único
+    // ramo do veredito que o gesto não exercitava — com `still_updating: 0` este
+    // teste dava o mesmo resultado com e sem a correção do tom. O `sync` é
+    // trocado no meio do teste para exercitar os outros dois caminhos.
+    let sync = { ok: true, still_updating: 2, items: [] };
+    const NUBANK = { item_id: "i1", institution: "Nubank", detail: null };
     await page.route("**/open-finance/**", (route) => {
       const req = route.request();
       chamadas.push(`${req.method()} ${new URL(req.url()).pathname}`);
-      return route.fulfill(json({ sync: { ok: true, still_updating: 0, items: [] },
-                                  connections: [], accounts: [], transactions: [] }));
+      return route.fulfill(json({ sync, connections: [], accounts: [], transactions: [] }));
     });
 
     await page.goto(`${ORIGIN}/settings.html?view=open-finance`);
@@ -374,9 +482,36 @@ test("PTR do OF chama o refresh real, e settings não abre WebSocket", async () 
       "a aba de Open Finance ficar ativa");
     await sleep(300);
     chamadas.length = 0;                       // ignora o load inicial
-    await page.evaluate(() => window.PBRefresh());
-
+    // O gesto NÃO pode rejeitar num refresh que deu certo: `refreshOpenFinance`
+    // faz `if (propagate && veredito.tone === "error") throw`, e o `finish(ok)`
+    // do app-mode.js pinta o indicador de ÂMBAR quando a promise rejeita. Este é
+    // o caminho que o veredito puro (`window.refreshVerdict`) não prova.
+    // CONTROLE NEGATIVO: repor `tone: "error"` no ramo `still_updating > 0` do
+    // settings.html deixa esta asserção vermelha.
+    const gesto = () => page.evaluate(() =>
+      window.PBRefresh().then(() => "resolveu", (e) => `rejeitou: ${e && e.message}`));
+    assert.equal(await gesto(), "resolveu", "o PTR virou âmbar num refresh bem-sucedido");
+    // Contado AQUI: os gestos abaixo somariam POSTs a este mesmo `chamadas`.
     const refresh = chamadas.filter((c) => c.startsWith("POST") && c.endsWith("/refresh"));
+
+    // O MESMO, pelo item: `state: "updating"` é o que o backend devolve quando o
+    // health não traz informação de produto (quão frequente isso é na Pluggy
+    // real não foi medido). CONTROLE NEGATIVO: tirar o `estado === "updating" ?
+    // OF_TOM_COLETANDO :` da tabela do settings.html deixa esta asserção
+    // vermelha (o `throw` volta e o indicador pinta âmbar).
+    sync = { ok: false, still_updating: 0, items: [{ ...NUBANK, state: "updating" }] };
+    assert.equal(await gesto(), "resolveu",
+                 "banco ainda coletando não pode pintar âmbar no gesto");
+
+    // CONTROLE POSITIVO: as outras entradas continuam erro, e no gesto isso
+    // é o âmbar. Sem esta asserção o grupo passaria num código que neutralizou a
+    // tabela inteira — que é pior que o bug, porque some o aviso de quem PRECISA
+    // reconectar o banco.
+    sync = { ok: false, still_updating: 0, items: [{ ...NUBANK, state: "item_missing" }] };
+    const perdido = await gesto();
+    assert.match(perdido, /^rejeitou:/, `conexão perdida tem que pintar âmbar: ${perdido}`);
+    assert.match(perdido, /Nubank/, perdido);
+
     assert.equal(refresh.length, 1, `o gesto tem que pedir refresh real, veio: ${chamadas.join(", ")}`);
 
     // (b) nenhuma das duas portas: nem WebSocket nativo, nem socket.io.

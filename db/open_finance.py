@@ -2346,6 +2346,92 @@ BANK_ACCOUNTS_SQL = """
     where connection_status not in ('PAUSED', 'DELETED')
 """
 
+# Correção da fusão, na LEITURA: quando o espelho do banco já conta o gasto, o
+# lançamento MANUAL fundido continua debitando a Carteira e o mesmo real conta
+# duas vezes. Em vez de escrever (zerar o delta no banco exigiria desfazer a
+# supressão em todo evento que tira o espelho do recorte — pausa por trial,
+# enforce_of_bank_limits, DELETED, type/currency — e nenhum deles passa por uma
+# porta só), soma o delta de volta aqui. Params: `merged_wallet_delta_params`,
+# a fonte ÚNICA da contagem (§0.7) — nenhum chamador monta a tupla à mão.
+#
+# Cada cláusula tem razão:
+# - o join com BANK_ACCOUNTS_SQL é o coração: conta fora do recorte (PAUSED,
+#   DELETED, type<>BANK, currency<>BRL, conexão apagada) faz a correção evaporar;
+# - a transação casa pela IDENTIDADE da conta (`provider_account_id`), não pelo
+#   `id` da linha. `BANK_ACCOUNTS_SQL` deduplica por identidade e fica só com a
+#   linha da conexão MAIS NOVA; uma reconexão por item novo (trial vencido e
+#   assinatura de volta, adoção de item órfão) cria outra linha para a mesma
+#   conta, e a transação fundida fica presa à ANTIGA. Casando pelo `id`, ela
+#   saía do recorte e o gasto voltava a contar duas vezes (Codex, PR #443 —
+#   medido: (112.88, -1.0), igual à `main`). `ra` é a linha ATIVA do recorte;
+#   `ta` são TODAS as linhas da mesma conta, inclusive as de conexões antigas;
+# - `tc.user_id = %s`: `provider_account_id` é identificador do PROVEDOR, não
+#   nosso, e casar por ele abre `ta` para linhas de OUTROS usuários com o mesmo
+#   id. Quem impede o VAZAMENTO hoje é o `l.user_id` abaixo — MEDIDO: sem o
+#   `tc.user_id` o teste de isolamento continua verde. O filtro fica pelo §0
+#   (defesa em profundidade: a regra não pode depender de uma cláusula só) e
+#   porque limita o trabalho às transações DESTE usuário — sem ele, um id
+#   colidente varreria as transações do outro antes de o `l.user_id` descartar;
+# - `imported_launch_id` é `on delete set null` (db/schema.py), então apagar o
+#   lançamento desfaz o vínculo sem código nenhum;
+# - `l.user_id = %s` é redundante de propósito (§0, isolamento por usuário);
+# - o filtro de `source` é o discriminador: nas três portas de fusão o
+#   sobrevivente é o manual;
+# - `jsonb_typeof(...) = 'number'` é validação em fronteira: `efeitos` é jsonb
+#   livre e um `::numeric` estourando derrubaria a query mais quente de dinheiro;
+# - `distinct l.id` porque `imported_launch_id` NÃO é único (db/bank_movements.py
+#   `_bind` é um quarto escritor) — duas tx no mesmo lançamento somariam 2x.
+#
+# SINAL: `d` é o que se SOMA de volta, por isso `sum(-d)`. Uma despesa de R$ 1
+# grava `delta_conta` -1 e `accounts.balance = balance + delta`
+# (db/accounts.py:94); devolver o débito é somar +1, como já faz o rollback do
+# delete (`balance - delta_conta`, db/accounts.py:1766).
+MERGED_WALLET_DELTA_SQL = f"""
+    select coalesce(sum(-d), 0) as d from (
+      select distinct l.id, (l.efeitos ->> 'delta_conta')::numeric as d
+        from ({BANK_ACCOUNTS_SQL}) a
+        join open_finance_accounts ra on ra.id = a.id
+        join open_finance_accounts ta on ta.provider_account_id = ra.provider_account_id
+        join open_finance_connections tc on tc.id = ta.connection_id and tc.user_id = %s
+        join open_finance_transactions t on t.account_id = ta.id
+        join launches l on l.id = t.imported_launch_id
+       where l.user_id = %s
+         and coalesce(l.source, 'manual') <> 'open_finance'
+         and jsonb_typeof(l.efeitos -> 'delta_conta') = 'number'
+    ) x
+"""
+
+
+def merged_wallet_delta_params(user_id: int) -> tuple:
+    """Os parâmetros de `MERGED_WALLET_DELTA_SQL`, na ordem do texto: o de
+    `BANK_ACCOUNTS_SQL`, o de `tc.user_id` e o de `l.user_id`. Fonte única da
+    contagem — os três chamadores leem daqui em vez de montar a tupla (§0.7)."""
+    return (user_id, user_id, user_id)
+
+
+def merged_wallet_delta(cur, user_id: int) -> Decimal:
+    """Carteira exibível = `accounts.balance` + isto. Ver `MERGED_WALLET_DELTA_SQL`.
+
+    Recebe `cur` para poder rodar DENTRO da transação das guardas de cobertura
+    (db/pockets.py, db/investments.py) — sem isso elas recusariam o aporte que a
+    tela autoriza. Ordem accounts → OF, a mesma de `assert_bank_covers`.
+    """
+    cur.execute(MERGED_WALLET_DELTA_SQL, merged_wallet_delta_params(user_id))
+    row = cur.fetchone()
+    return (row["d"] if row else None) or Decimal("0")
+
+
+async def merged_wallet_delta_async(cur, user_id: int) -> Decimal:
+    """`merged_wallet_delta` para os cursores async de `frontend/routes/`.
+
+    Duas implementações porque os cursores são de APIs diferentes, NUNCA duas
+    versões do SQL: as duas executam a mesma `MERGED_WALLET_DELTA_SQL` (§0.7).
+    """
+    await cur.execute(MERGED_WALLET_DELTA_SQL, merged_wallet_delta_params(user_id))
+    row = await cur.fetchone()
+    return (row["d"] if row else None) or Decimal("0")
+
+
 # Ordem canônica das contas do banco: é ela que define qual banco é "o banco" na
 # regra de sempre. `list_bank_accounts` (fora da transação) e `_regra_de_sempre`
 # (dentro) leem a MESMA — sem isso as duas escolheriam contas diferentes (§0.7).
@@ -2576,6 +2662,10 @@ def get_consolidated_balance(user_id: int) -> dict:
             cur.execute("select coalesce(balance, 0) as b from accounts where user_id=%s", (user_id,))
             row = cur.fetchone()
             manual = row["b"] if row else Decimal("0")
+
+            # O manual fundido continua debitando `accounts.balance`, e o espelho
+            # do banco já conta o mesmo gasto: devolve o delta na leitura.
+            manual = (manual or Decimal("0")) + merged_wallet_delta(cur, user_id)
 
             cur.execute(
                 f"select coalesce(sum(balance), 0) as b, count(*) as n from ({BANK_ACCOUNTS_SQL}) s",

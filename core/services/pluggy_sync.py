@@ -54,6 +54,9 @@ from db import (
     save_open_finance_sync,
     sync_imported_open_finance_updates,
 )
+# "Conexão terminal" (PAUSED/DELETED) pela lista que o `claim_manual_refresh`
+# usa — é ela que decide quem cai em `rate_limited` sem ser cooldown (§0.7).
+from db.open_finance_state import _TERMINAL as CONEXAO_TERMINAL
 
 
 def _HEALTH_MISSING() -> dict:
@@ -761,8 +764,14 @@ def refresh_and_sync_pluggy_user(
         parado = _refresh_items_report(items, institutions, {},
                                        _reasons_do_sync(result), set(),
                                        rate_limited=rate_limited)
+        # `still_updating` MEDIDO, não `0` fixo: o `sync_pluggy_user` acima fez
+        # GET em cada item e regravou o `health` — a foto que o relatório lê.
+        # O `0` fixo jogava essa medição fora, e com o item `updated` virando
+        # `rate_limited` o veredito caía em "já está tudo em dia" logo depois de
+        # o 1º aperto ter dito "o banco ainda está atualizando", com a coleta
+        # que nós mesmos pedimos ainda rodando.
         return {**result, "ok": _todos_ok(parado), "refreshed": 0, "waited": False,
-                "still_updating": 0, "items": parado,
+                "still_updating": sum(i["still_updating"] for i in parado), "items": parado,
                 "duration_ms": int((time.monotonic() - t0) * 1000)}
 
     # Segura o e-mail dos agregados ANTES do PATCH: a espera do passo 2 leva até
@@ -820,7 +829,7 @@ def refresh_and_sync_pluggy_user(
         "ok": _todos_ok(items_out),
         "refreshed": triggered,
         "waited": True,
-        "still_updating": len(pending),
+        "still_updating": sum(i["still_updating"] for i in items_out),
         "items": items_out,
         "duration_ms": int((time.monotonic() - t0) * 1000),
     }
@@ -893,6 +902,16 @@ def _refresh_items_report(items, institutions, patch_ok, reasons, pending,
             "reason": ("rate_limited" if state == "rate_limited"
                        else (reasons.get(item_id) or row.get("status_reason"))),
             "patch_ok": bool(patch_ok.get(item_id, False)),
-            "still_updating": item_id in pending,
+            # As duas pontas medem A MESMA coisa: "a Pluggy ainda reporta este
+            # item coletando quando olhamos". Quem levou PATCH foi olhado pelo
+            # laço de espera (`pending`); quem ficou no cooldown não levou PATCH
+            # nem espera, e o que o mede é o `health` que o sync acabou de
+            # regravar. Sem o segundo termo o cooldown mentia `False` aqui.
+            # `rate_limited` também carrega conexão TERMINAL (o claim a exclui),
+            # e essa o sync NÃO regrava: a foto dela é velha e não mede nada.
+            "still_updating": item_id in pending or (
+                item_id in rate_limited
+                and str(row.get("status") or "").upper() not in CONEXAO_TERMINAL
+                and str(health.get("item_status") or "").upper() in ITEM_UPDATING),
         })
     return out

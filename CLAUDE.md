@@ -35,14 +35,24 @@ implementação, correção, refatoração, arquivo novo. Não são um checklist
 `CLAUDE.md` mais específico dentro da área que você vai mexer, ele também vale — e o
 mais específico ganha quando os dois falarem do mesmo assunto.
 
-**Toda alteração de código passa pela skill `time-dev`** (Arquiteto → Coder → Tester
-→ Manager). Não é "para trabalho não-trivial" nem "quando pedirem por nome": vale
-para correção de uma linha também. Invoque `Skill(skill="time-dev")` **antes** de
-abrir o arquivo, não depois de já ter editado. É o §4 ("ataque antes de empurrar")
-virado em rotina: o Arquiteto levanta as perguntas de escopo enquanto ainda dá para
-mudar de plano, e o Tester acha o defeito antes do revisor — quando isso não é feito,
-a descoberta é terceirizada para o Codex e cada rodada dele revela um irmão que a
-varredura anterior descartou com justificativa errada.
+**O time `time-dev` (Arquiteto → Coder → Tester → Manager) é proporcional ao risco.**
+Antes de abrir o arquivo, classifique a mudança numa faixa e diga qual escolheu. A
+**área decide antes do tamanho**: uma linha em código de dinheiro ou sessão é
+Completo. Na dúvida entre duas faixas, use a mais alta; o que não casar com nenhuma
+linha é **Leve**.
+
+| Faixa | O que entra | Processo |
+|---|---|---|
+| **Completo** | dinheiro (Pix, cobrança, saldo, fatura, Open Finance), autenticação, sessão, MFA, isolamento entre usuários, migração/schema, concorrência em código compartilhado, segurança | `Skill(skill="time-dev")` com as 4 etapas |
+| **Leve** | feature e tela comuns, correção de bug **que muda lógica**, refatoração, dependência, CI/ferramenta e configuração — tudo fora das áreas acima | `time-dev` com **uma** passada do Tester e Manager curto; o Arquiteto só é pulado quando a mudança já tem plano aprovado ou cabe num arquivo com um único comportamento possível |
+| **Direto** | texto, CSS pequeno, docs, código provisório, correção **sem mudança de lógica** (typo, nome, constante óbvia) | sem o time: teste do que mudou e `git diff` lido de ponta a ponta |
+
+O time existe para o §4 ("ataque antes de empurrar"): onde há dinheiro ou sessão ele
+pagou a conta várias vezes (PR #133, #384/#386, o logout no-op do #433). Onde o risco
+é baixo, ele consumia uso em rodadas que consertavam o próprio conserto anterior — foi
+o caso da tela de entrada provisória do #449 (quatro rodadas num canto de concorrência
+improvável).
+Os freios de custo moram na skill (`.claude/commands/time-dev.md`).
 
 **O Coder invoca a skill `pigbank-frontend` antes de escrever código de frontend.**
 Ela carrega a identidade visual (rosa `#FF2D8E` como principal e não em toda

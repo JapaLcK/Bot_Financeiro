@@ -1273,7 +1273,7 @@ def _data(v) -> bool:
     `date` do Postgres o aceita cortando a hora (medido). Um escritor que
     serialize `datetime.isoformat()` num dos quatro campos não pode virar
     `kept_unsafe` permanente. `last_date` é o único que a reversão converte em
-    Python (com `[:10]`, o recorte que `core/services/cashflow.py:30` já faz);
+    Python (com `[:10]`, o recorte que `core/services/cashflow.py::_as_date` já faz);
     `purchase_date`, `maturity_date` e `before.closed_at` vão CRUS pro Postgres.
 
     Por isso o predicado é a INTERSEÇÃO, não o `date.fromisoformat(v[:10])` que
@@ -1715,7 +1715,7 @@ def delete_launch_and_rollback(user_id: int, launch_id: int, *,
                     # coluna `date` aceita — sem o recorte, `last_date` seria o
                     # ÚNICO dos quatro campos de data que a reversão não sabe
                     # usar. É o recorte que `_data` valida e que o resto do repo
-                    # já faz (`core/services/cashflow.py:30`).
+                    # já faz (`core/services/cashflow.py::_as_date`).
                     ld = _date.fromisoformat(str(last_date_str)[:10]) if last_date_str else datetime.now(_tz()).date()
                     cur.execute(
                         """
@@ -2172,6 +2172,45 @@ def delete_all_launches_and_rollback(user_id: int) -> dict:
 # OFX import (idempotente)
 # ──────────────────────────────────────────────────────────────────────────────
 
+def carteira_exibida(user_id: int, fallback=None):
+    """A Carteira que a TELA mostra, no lugar do `accounts.balance` cru.
+
+    O lançamento manual fundido com o Open Finance continua debitando o cru
+    enquanto o espelho do banco já conta o mesmo gasto; `get_consolidated_balance`
+    devolve esse débito na leitura. Fonte ÚNICA para toda superfície que só
+    EXIBE o saldo (§0.7) — quem AUTORIZA usa `merged_wallet_delta` dentro da
+    própria transação, que é outra coisa.
+
+    RESSALVA, e a fronteira já nasce com um violador: `frontend/routes/cards.py`
+    (`pay_bill_route`) autoriza o pagamento de fatura numa conexão que FECHA
+    antes de `pay_bill_amount` abrir a dela — check-then-act. O TOCTOU é
+    PRÉ-EXISTENTE (a `main` lia `accounts.balance` na mesma forma, conferido em
+    duas colunas) e não foi movido para dentro da transação aqui de propósito:
+    mexer na autorização de pagamento num PR de leitura é refatoração fora de
+    escopo (§0.3). Fica nomeado para quem for fechá-lo.
+
+    Chamadores, TODOS na fonte e depois do commit: o relatório de importação
+    (aqui, `ofx_import.py` e `statement_import.py`), `pay_bill_amount`
+    (`db/cards.py`) e o retorno de aporte/resgate de caixinha e de investimento
+    (`db/pockets.py`, `db/investments.py`) — é a mesma base da guarda que
+    autorizou. Falha cai no cru em vez de subir, porque o dinheiro já andou.
+
+    `fallback` é o que devolver SE a leitura do consolidado falhar — não uma
+    base de cálculo: o caminho feliz o ignora. Sem ele, o `except` relê o cru.
+
+    Devolve `Decimal`, o mesmo tipo do saldo cru que substitui.
+    """
+    try:
+        from .open_finance import get_consolidated_balance
+        return get_consolidated_balance(user_id)["manual"]
+    except Exception:
+        # `extra=` na MESMA chamada: sem a coluna `user_id` a linha sobrevive à
+        # exclusão da conta carregando o id (gate de tests/test_log_falha_user_id.py).
+        logger.exception("carteira exibida falhou (user_id=%s)", user_id,
+                         extra={"user_id": user_id})
+        return get_balance(user_id) if fallback is None else fallback
+
+
 def get_ofx_import_by_hash(user_id: int, file_hash: str):
     ensure_user(user_id)
     with get_conn() as conn:
@@ -2208,7 +2247,7 @@ def import_ofx_launches_bulk(
 
     prev = get_ofx_import_by_hash(user_id, file_hash)
     if prev:
-        bal = get_balance(user_id)
+        bal = carteira_exibida(user_id)
         return {
             "skipped_same_file": True,
             "total": prev["total_transactions"],
@@ -2281,5 +2320,8 @@ def import_ofx_launches_bulk(
         "duplicates": duplicates,
         "dt_start": dt_start,
         "dt_end": dt_end,
-        "new_balance": new_bal,
+        # Carteira EXIBIDA: este número aparece em três telas
+        # (`ofx_service.format_ofx_report`, `statement_service` e
+        # `handle_incoming:774`) e tem de falar o mesmo que o dashboard.
+        "new_balance": carteira_exibida(user_id, new_bal),
     }

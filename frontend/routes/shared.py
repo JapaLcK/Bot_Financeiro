@@ -86,6 +86,13 @@ GA4_MEASUREMENT_ID = os.getenv("GA4_MEASUREMENT_ID", "G-0H8FHNQ3C4").strip()
 # entram por acidente nas telas de conta, autenticação ou erro.
 CLARITY_PROJECT_ID = os.getenv("CLARITY_PROJECT_ID", "ygqwjmx49a").strip()
 
+# Atraso do download de Meta Pixel/GA4 na landing (ver `inject_tracking`).
+# HIPÓTESE inicial, NÃO medida em produção — vem do diagnóstico de PageSpeed
+# (fbevents.js/gtag.js terminando perto do LCP), não de um teste A/B. Reavaliar
+# depois do deploy comparando PageSpeed real e a taxa de PageView/conversão da
+# landing antes/depois; o valor pode precisar subir ou descer.
+MARKETING_DEFER_DELAY_MS = 1_200
+
 # Parâmetros de query que NUNCA podem viajar dentro do `page_location` do GA4:
 #   token — é credencial. `/completar-cadastro?token=` (cadastro via Google) e o
 #           `/unsubscribe?token=` do rodapé de todo e-mail são páginas rastreadas;
@@ -98,6 +105,30 @@ CLARITY_PROJECT_ID = os.getenv("CLARITY_PROJECT_ID", "ygqwjmx49a").strip()
 # roda depois — quando o evento já foi enviado.
 GA4_PARAMS_FORA_DA_URL = ("token", "sid")
 
+# default_limits exige SlowAPIMiddleware (nunca registrado) — hoje é inerte;
+# só os @limiter.limit() explícitos valem. Ligar o middleware é decisão aberta.
+# O teto continua por IP, como sempre foi.
+#
+# A chave por USUÁRIO saiu deste PR depois de quatro rodadas de revisão, e o
+# motivo é a forma da solução, não o objetivo. O problema é real: num CGNAT de
+# operadora móvel a antena inteira compartilha um endereço, e o app cai
+# exatamente nesse cenário. A tentativa foi "usuário em tudo, menos numa lista
+# de prefixos" — e a lista cresceu a cada rodada: `/auth`, depois `/admin`,
+# depois `/d/`, depois `/contact` e `/api/prospect/status`. Quatro descobertas
+# seguidas de uma enumeração que se dizia completa.
+#
+# A regra que elas revelam não é um prefixo: é "só vale a chave do token quando
+# a AUTORIZAÇÃO da rota usa aquele token". `/contact` não autentica ninguém,
+# `/api/prospect/status` autentica por outro header, `/admin` por outra sessão,
+# `/d/{code}` pelo próprio código. Em todas, trocar a chave multiplica o teto
+# por quantas contas o atacante quiser criar — e o cadastro é self-service.
+#
+# Invertido, isso é opt-in por rota: `@limiter.limit(..., key_func=...)` aceita
+# chave própria, então o dia em que uma rota de dados precisar de balde por
+# usuário ela pede, com evidência, e a revisão vê a decisão no lugar onde ela
+# vale. Enquanto não há usuário de app em produção, o ganho é zero e o risco de
+# uma quinta rota esquecida não é.
+#
 # default_limits exige SlowAPIMiddleware (nunca registrado) — hoje é inerte;
 # só os @limiter.limit() explícitos valem. Ligar o middleware é decisão aberta.
 limiter = Limiter(key_func=get_remote_address, default_limits=["200/minute"])
@@ -119,7 +150,7 @@ def meta_pixel_snippet(defer_external: bool = False) -> str:
             "!function(f,n){if(f.fbq)return;n=f.fbq=function(){n.callMethod?\n"
             "n.callMethod.apply(n,arguments):n.queue.push(arguments)};if(!f._fbq)f._fbq=n;\n"
             "n.push=n;n.loaded=!0;n.version='2.0';n.queue=[]}(window);\n"
-            "window.pbAdiarTracking(function(){\n"
+            "window.pbAdiarMarketing(function(){\n"
             "  var t=document.createElement('script');t.async=!0;\n"
             "  t.src='https://connect.facebook.net/en_US/fbevents.js';\n"
             "  document.head.appendChild(t);\n"
@@ -164,7 +195,7 @@ def ga4_snippet(defer_external: bool = False) -> str:
     mid = GA4_MEASUREMENT_ID
     carregador = (
         "<script>\n"
-        "window.pbAdiarTracking(function(){\n"
+        "window.pbAdiarMarketing(function(){\n"
         "  var s=document.createElement('script');s.async=!0;\n"
         f"  s.src='https://www.googletagmanager.com/gtag/js?id={mid}';\n"
         "  document.head.appendChild(s);\n"
@@ -271,13 +302,17 @@ def clarity_snippet(defer_external: bool = False) -> str:
     )
 
 
-def _deferred_tracking_bootstrap(delay_ms: int = 5_000) -> str:
+def _deferred_tracking_bootstrap(delay_ms: int = 5_000, nome_fn: str = "pbAdiarTracking") -> str:
     """Agenda SDKs de marketing fora do caminho crítico da landing.
 
     As filas (`fbq`, `dataLayer` e `clarity`) continuam sendo criadas no head;
     somente download e execução dos SDKs externos aguardam a primeira interação
     ou alguns segundos depois do load. Assim eventos disparados cedo ficam
     enfileirados, sem disputar CPU e rede com FCP/LCP.
+
+    `nome_fn` isola a fila: Clarity (`pbAdiarTracking`) e Meta+GA4
+    (`pbAdiarMarketing`, ver `inject_tracking`) precisam de delays diferentes,
+    e uma fila só tem um timer só — duas chamadas deste helper, uma para cada.
     """
     return (
         '<script data-pb-tracking="deferred">\n'
@@ -288,7 +323,7 @@ def _deferred_tracking_bootstrap(delay_ms: int = 5_000) -> str:
         "    var atual=fila.splice(0);\n"
         "    for(var i=0;i<atual.length;i++){try{atual[i]();}catch(e){}}\n"
         "  }\n"
-        "  w.pbAdiarTracking=function(fn){liberado?fn():fila.push(fn);};\n"
+        f"  w.{nome_fn}=function(fn){{liberado?fn():fila.push(fn);}};\n"
         f"  function depoisDoLoad(){{w.setTimeout(carregar,{delay_ms});}}\n"
         "  if(d.readyState==='complete')depoisDoLoad();\n"
         "  else w.addEventListener('load',depoisDoLoad,{once:true});\n"
@@ -317,21 +352,26 @@ def inject_tracking(
     para ser apropriada a uma gravação (cadastro e login, por exemplo, têm campos
     de credencial e identificação).
 
+    `defer_external=True` (só a landing, ver `static_pages.serve_landing`) adia o
+    DOWNLOAD dos SDKs externos — nunca as chamadas síncronas (`fbq('init'...)`,
+    `fbq('track','PageView')`, `gtag('config'...)`), que continuam imediatas para
+    o page_view sobreviver a uma navegação rápida. Marketing (Meta+GA4) e Clarity
+    usam filas SEPARADAS (`pbAdiarMarketing`/`pbAdiarTracking`), cada uma com seu
+    próprio bootstrap e delay — uma fila só teria um timer só, e os dois grupos
+    têm requisitos de delay diferentes.
+
     No-op para o que não estiver configurado, ou se a página não tiver </head>.
     """
-    # Meta e GA4 precisam registrar o page_view mesmo quando o visitante clica
-    # num CTA antes do timer da landing. As filas desses SDKs vivem apenas no
-    # documento atual e seriam destruídas pela navegação; por isso somente o
-    # Clarity (que não alimenta atribuição/conversão) pode aguardar.
-    snippet = meta_pixel_snippet() + ga4_snippet()
-    deferred_snippet = ""
+    snippet = meta_pixel_snippet(defer_external) + ga4_snippet(defer_external)
+    if defer_external and snippet:
+        snippet = _deferred_tracking_bootstrap(MARKETING_DEFER_DELAY_MS, "pbAdiarMarketing") + snippet
     if clarity:
-        deferred_snippet = clarity_snippet(defer_external)
-        snippet += deferred_snippet
+        clarity_html = clarity_snippet(defer_external)
+        if defer_external and clarity_html:
+            clarity_html = _deferred_tracking_bootstrap(5_000, "pbAdiarTracking") + clarity_html
+        snippet += clarity_html
     if not snippet:
         return html_text
-    if defer_external and deferred_snippet:
-        snippet = _deferred_tracking_bootstrap() + snippet
     idx = html_text.lower().find("</head>")
     if idx == -1:
         return html_text
@@ -429,9 +469,11 @@ def html_file(
     estiver configurado. `clarity=True` é opt-in explícito para páginas públicas
     sem campos sensíveis. `inline_css` elimina viagens de rede bloqueantes em
     páginas selecionadas, mantendo os mesmos arquivos como fonte única.
-    `defer_tracking=True` posterga somente o Clarity até a primeira interação
-    ou depois do load. Meta e GA4 continuam imediatos porque seus page views
-    precisam sobreviver a uma navegação rápida. As
+    `defer_tracking=True` posterga o DOWNLOAD dos SDKs de Meta, GA4 e Clarity até a
+    primeira interação ou depois do load — só as chamadas síncronas de page view
+    (`fbq('init'...)`, `fbq('track','PageView')`, `gtag('config'...)`) continuam
+    imediatas, porque precisam sobreviver a uma navegação rápida (ver
+    `inject_tracking` para o detalhe das filas). As
     páginas da área logada (dashboard, settings, onboarding) passam
     `pixel=False`: o rastreio fica nas páginas públicas e na /home, que é onde a
     volta do checkout (?upgrade=success) dispara a conversão.
@@ -874,8 +916,25 @@ def get_auth_token_from_request(
     request: Request,
     creds: HTTPAuthorizationCredentials | None = None,
 ) -> str | None:
+    """Access token da requisição: `Authorization: Bearer` primeiro, cookie depois.
+
+    O `creds` chega preenchido quando a rota declara o `Depends(HTTPBearer)`.
+    Quem chama com `creds=None` — logout e o ramo de "sessão viva" do refresh —
+    lia SÓ o cookie, e por isso o logout do app era no-op TOTAL: sem cookie, o
+    token saía `None`, a sessão não era revogada, o refresh não era revogado, e
+    a rota devolvia 200 com cara de sucesso. Janela de 14 dias num aparelho que
+    o usuário acha que deslogou.
+
+    O `extract_bearer_token` abaixo lê o mesmo header que o `HTTPBearer` leria,
+    então a fonte passa a ser a mesma nos dois caminhos — que é o ponto: a
+    correção é aqui, na função que todos os chamadores atravessam, e não um
+    remendo no logout (§2: achar o caso não é resolver a categoria).
+    """
     if creds and creds.credentials:
         return creds.credentials
+    header_token = extract_bearer_token(request)
+    if header_token:
+        return header_token
     cookie_token = (request.cookies.get(AUTH_COOKIE_NAME) or "").strip()
     return cookie_token or None
 
@@ -905,12 +964,44 @@ def raise_if_account_scheduled_for_deletion(user_id: int) -> None:
         )
 
 
+def payload_de_sessao(token: str) -> dict | None:
+    """Identidade a partir de um token de dashboard (12h) **ou** do access JWT (15min).
+
+    O app nativo carrega UM token, não dois. Hoje o site tem os dois cookies e
+    nem percebe a diferença, mas obrigar um cliente sem cookie jar a guardar,
+    rotacionar e renovar dois segredos para o mesmo usuário e a mesma sessão é
+    complexidade sem contrapartida.
+
+    Não é ampliação de privilégio: os dois tokens são assinados pelo MESMO
+    segredo, apontam para o mesmo `sub` e carregam o mesmo `jti`, então a
+    revogação por sessão continua valendo igual para os dois — quem valida o
+    `jti` é o chamador, logo abaixo, e ele não sabe (nem precisa saber) por
+    qual dos dois formatos a identidade chegou. O access token ainda é o mais
+    curto dos dois: aceitar 15 minutos onde 12 horas já valiam não afrouxa nada.
+
+    Devolve `{"user_id": int, "jti": str | None}` ou None.
+    """
+    if not token:
+        return None
+    dashboard = decode_dashboard_token_full(token)
+    if dashboard:
+        return dashboard
+    auth = decode_jwt(token) or {}
+    if auth.get("type") != "auth":
+        return None
+    try:
+        return {"user_id": int(auth["sub"]), "jti": auth.get("jti")}
+    except (KeyError, TypeError, ValueError):
+        # `sub` ausente ou não numérico: token malformado é token inválido.
+        return None
+
+
 def resolve_dashboard_user_id(request: Request) -> int:
     token = (
         extract_bearer_token(request)
         or (request.cookies.get(DASHBOARD_COOKIE_NAME) or "").strip()
     )
-    payload = decode_dashboard_token_full(token or "")
+    payload = payload_de_sessao(token or "")
     if not payload:
         raise HTTPException(status_code=401, detail="Token de dashboard inválido ou expirado.",
                             headers=WWW_AUTHENTICATE_401)

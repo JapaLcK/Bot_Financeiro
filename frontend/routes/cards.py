@@ -13,6 +13,7 @@ from pydantic import BaseModel
 from core.observability import _log_falha
 from db import create_card
 from db.cards import MAX_CARD_NAME_LEN
+from db.open_finance import merged_wallet_delta_async
 from frontend.routes import shared
 
 router = APIRouter()
@@ -570,13 +571,17 @@ async def list_bills_route(
                 "SELECT balance FROM accounts WHERE user_id=%s", (int(user_id),)
             )
             bal_row = await cur.fetchone()
+            # Carteira EXIBIDA: `dashboard.js` mostra este número em
+            # `#pay-bill-balance`, e sem isto o modal de pagar fatura segue
+            # exibindo o `R$ -1,00` do gasto fundido (§0.7, §2).
+            delta_fundido = await merged_wallet_delta_async(cur, int(user_id))
 
     bills = [_serialize_bill(dict(r)) for r in (rows or [])]
     if not include_closed:
         # Comportamento original — só esconde bills "vazias" no fluxo padrão.
         bills = [b for b in bills if b["due_amount"] > 0 or b["total"] > 0]
 
-    balance = float(bal_row["balance"]) if bal_row else 0.0
+    balance = (float(bal_row["balance"]) if bal_row else 0.0) + float(delta_fundido)
     return {"ok": True, "balance": balance, "bills": bills}
 
 
@@ -672,7 +677,11 @@ async def pay_bill_route(
                 "SELECT balance FROM accounts WHERE user_id=%s", (int(user_id),)
             )
             acc = await cur.fetchone()
-    balance = float(acc["balance"]) if acc else 0.0
+            # A guarda lê o MESMO número que a tela mostra: contra o cru ela
+            # recusa o pagamento que o dashboard autoriza (mesma classe que o
+            # `pocket_deposit_from_account` já corrigiu).
+            delta_fundido = await merged_wallet_delta_async(cur, int(user_id))
+    balance = (float(acc["balance"]) if acc else 0.0) + float(delta_fundido)
 
     total = float(bill["total"] or 0)
     paid = float(bill["paid_amount"] or 0)

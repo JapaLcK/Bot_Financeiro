@@ -1122,8 +1122,12 @@ def create_investment_db(
                 acc = cur.fetchone()
                 if not acc:
                     raise RuntimeError("ACCOUNT_MISSING")
-                if debita_carteira and acc["balance"] < initial:
-                    raise ValueError("INSUFFICIENT_ACCOUNT")
+                if debita_carteira:
+                    # ver db/pockets.py: a guarda soma o manual fundido, que o
+                    # espelho do banco já conta.
+                    from .open_finance import merged_wallet_delta
+                    if Decimal(str(acc["balance"])) + merged_wallet_delta(cur, user_id) < initial:
+                        raise ValueError("INSUFFICIENT_ACCOUNT")
                 if not debita_carteira:
                     from .open_finance import assert_bank_covers
                     assert_bank_covers(cur, user_id, funding_source.get("of_account_id"), initial)
@@ -1488,8 +1492,11 @@ def investment_deposit_from_account(
             acc = cur.fetchone()
             if not acc:
                 raise RuntimeError("ACCOUNT_MISSING")
-            if debita_carteira and acc["balance"] < v:
-                raise ValueError("INSUFFICIENT_ACCOUNT")
+            if debita_carteira:
+                # idem: Carteira disponível = balance + delta do manual fundido.
+                from .open_finance import merged_wallet_delta
+                if Decimal(str(acc["balance"])) + merged_wallet_delta(cur, user_id) < v:
+                    raise ValueError("INSUFFICIENT_ACCOUNT")
             if not debita_carteira:
                 from .open_finance import assert_bank_covers
                 assert_bank_covers(cur, user_id, funding_source.get("of_account_id"), v)
@@ -1552,7 +1559,14 @@ def investment_deposit_from_account(
 
         conn.commit()
 
-    return launch_id, new_acc, new_inv, canon
+    # A guarda acima autoriza contra a Carteira CORRIGIDA (`merged_wallet_delta`);
+    # devolver o `accounts.balance` cru faria a resposta falar de outra base —
+    # cru 50 + fundido 50, aporte de 80 passava e a resposta dizia -30 com a
+    # Carteira exibindo 20 (Codex, PR #443). Relido DEPOIS do commit, fora do
+    # `with`, para a leitura enxergar a escrita. Consumidores: as rotas do
+    # dashboard (`account_balance` no JSON) e o adaptador do Discord.
+    from .accounts import carteira_exibida
+    return launch_id, carteira_exibida(user_id, new_acc), new_inv, canon
 
 
 def investment_withdraw_to_account(
@@ -1763,4 +1777,9 @@ def investment_withdraw_to_account(
 
         conn.commit()
 
-    return launch_id, new_acc, new_inv, canon, tax_summary, funding_source
+    # Mesma base da guarda e do aporte: o resgate devolve dinheiro à Carteira, e
+    # o número que a resposta mostra é o EXIBIDO, não o cru. Relido depois do
+    # commit, fora do `with`.
+    from .accounts import carteira_exibida
+    return (launch_id, carteira_exibida(user_id, new_acc), new_inv, canon,
+            tax_summary, funding_source)

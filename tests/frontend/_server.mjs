@@ -42,10 +42,25 @@ const PY = process.env.PB_PYTHON || (process.platform === "win32" ? "python" : "
  */
 export function startServer() {
   return new Promise((resolve, reject) => {
+    // A fila de conexões pendentes do socketserver é pequena por padrão
+    // (python3 -c "import socketserver; print(socketserver.TCPServer.request_queue_size)")
+    // e o http.server fala HTTP/1.0: cada asset é uma conexão nova. Com os arquivos
+    // desta pasta em paralelo, o Python não chega ao accept a tempo e, no macOS, a
+    // conexão que não cabe leva RST do kernel. O Chromium loga ERR_CONNECTION_RESET /
+    // ERR_SOCKET_NOT_CONNECTED, não tenta de novo, e a página fica sem JS ou CSS: o teste
+    // morre por timeout (ou layout errado) num arquivo diferente a cada rodada. Timeout
+    // maior não conserta. A fila vai a socket.SOMAXCONN (constante de compilação do
+    // Python; o kernel ainda aplica o limite dele). Tem de ser no socketserver.TCPServer:
+    // o runpy reexecuta o módulo e cria classes novas, então mexer em
+    // http.server.ThreadingHTTPServer não pega. "http.server 0" continua contíguo na
+    // linha de comando, e o pgrep do cabeçalho segue achando órfãos.
+    const FILA = "import runpy, socket, socketserver, sys; "
+      + "socketserver.TCPServer.request_queue_size = socket.SOMAXCONN; "
+      + "runpy.run_module(sys.argv.pop(1), run_name='__main__', alter_sys=True)";
     // `-u` não é enfeite: com stdout num pipe o Python bufferiza por BLOCO, e a
     // linha da porta ficaria presa no buffer até o processo morrer — o helper
     // esperaria para sempre por uma porta que já está servindo.
-    const proc = spawn(PY, ["-u", "-m", "http.server", "0", "--bind", "127.0.0.1",
+    const proc = spawn(PY, ["-u", "-c", FILA, "http.server", "0", "--bind", "127.0.0.1",
                             "--directory", FRONTEND],
                        { stdio: ["ignore", "pipe", "pipe"] });
 
