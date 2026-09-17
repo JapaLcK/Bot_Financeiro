@@ -60,6 +60,15 @@ class HelpAliasesTests(unittest.TestCase):
                 self.assertIn("contas a pagar", response)
                 self.assertIn("vencem", response)
 
+    def test_ajuda_para_limite_e_regras(self) -> None:
+        self.assertIn("cartões, crédito", _response("como vejo meu limite?").lower())
+        self.assertIn("regras de categoria", _response("como vejo minhas regras?").lower())
+
+    def test_limite_e_regras_externos_continuam_fora(self) -> None:
+        for text in ("como vejo o limite de velocidade?", "como vejo as regras do jogo?"):
+            with self.subTest(text=text):
+                self.assertIn("Só consigo ajudar com finanças pessoais", _response(text))
+
 
 if __name__ == "__main__":
     unittest.main()

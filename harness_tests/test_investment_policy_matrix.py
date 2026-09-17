@@ -74,6 +74,7 @@ class InvestmentPolicyMatrixTests(unittest.TestCase):
             "compra um fundo para mim",
             "Piggy, compra petr4 para mim",
             "Piggy, você compra PETR4 para mim agora?",
+            "Piggy, você vende PETR4 para mim agora?",
             "compre petr4 para mim",
             "qual PETR4 devo comprar?",
             "Piggy, compre Ethereum para mim",

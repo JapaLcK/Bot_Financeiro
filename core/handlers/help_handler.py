@@ -444,6 +444,10 @@ def _financial_topic(norm: str) -> str | None:
     """Classifica somente sinais inequívocos do domínio do PigBank."""
     if re.search(r"\b(cartao|cartoes|fatura|credito|parcela|parcelamento)\b", norm):
         return "credit"
+    if any(marker in norm for marker in _HELP_MARKERS) and re.search(
+        r"\b(?:(?:meu|o)\s+)?limite\s*[?.!]*$", norm
+    ):
+        return "credit"
     if re.search(r"\b(caixinha|caixinhas)\b", norm):
         return "pockets"
     if re.search(r"\bcaxinhas?\b", norm):
@@ -458,6 +462,10 @@ def _financial_topic(norm: str) -> str | None:
         return "ofx"
     if re.search(r"\bcategorias?\b", norm) or re.search(
         r"\bcategoriz(?:ar|e)\b.*\b(gastos?|despesas?|receitas?|lancamentos?)\b", norm
+    ):
+        return "categories"
+    if any(marker in norm for marker in _HELP_MARKERS) and re.search(
+        r"\b(?:(?:minha|minhas|a|as)\s+)?regras?\s*[?.!]*$", norm
     ):
         return "categories"
     if re.search(

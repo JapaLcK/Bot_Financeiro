@@ -309,7 +309,8 @@ def _is_investment_action_or_advice_request(text: str) -> bool:
     )
     sell_command = bool(
         re.search(
-            r"^(?:(?:piggy|por favor|por gentileza)\s*){0,2}(?:me\s+)?(?:venda|vende)\b",
+            r"^(?:(?:piggy|por favor|por gentileza)\s*,?\s*){0,2}"
+            r"(?:(?:voce|vc)\s+)?(?:me\s+)?(?:venda|vende)\b",
             norm,
         )
         or re.search(
