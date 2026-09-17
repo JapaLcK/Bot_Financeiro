@@ -329,7 +329,7 @@ def test_sync_completo_roda_os_agregados_uma_vez(monkeypatch):
     monkeypatch.setattr(ps, "get_open_finance_snapshot", lambda uid: {
         "connections": [{"provider": "pluggy", "provider_item_id": "i1"},
                         {"provider": "pluggy", "provider_item_id": "i2"}]})
-    monkeypatch.setattr(ps, "sync_pluggy_item", lambda item: {"ok": True})
+    monkeypatch.setattr(ps, "sync_pluggy_item", lambda item, **_: {"ok": True})
     monkeypatch.setattr(pa, "run_faria_limer_once",
                         lambda **kw: chamados.append(("faria", kw.get("user_id"))) or {"ok": True})
     monkeypatch.setattr(pa, "run_barao_once",
@@ -347,7 +347,7 @@ def test_sync_completo_um_agregado_nao_derruba_o_outro(monkeypatch):
     chamados = []
     monkeypatch.setattr(ps, "get_open_finance_snapshot", lambda uid: {
         "connections": [{"provider": "pluggy", "provider_item_id": "i1"}]})
-    monkeypatch.setattr(ps, "sync_pluggy_item", lambda item: {"ok": True})
+    monkeypatch.setattr(ps, "sync_pluggy_item", lambda item, **_: {"ok": True})
     monkeypatch.setattr(pa, "run_faria_limer_once",
                         lambda **kw: (_ for _ in ()).throw(RuntimeError("boom")))
     monkeypatch.setattr(pa, "run_barao_once",
@@ -752,7 +752,7 @@ def test_sync_completo_sobrevive_a_import_quebrado(monkeypatch):
 
     monkeypatch.setattr(ps, "get_open_finance_snapshot", lambda uid: {
         "connections": [{"provider": "pluggy", "provider_item_id": "i1"}]})
-    monkeypatch.setattr(ps, "sync_pluggy_item", lambda item: {"ok": True, "accounts_synced": 1})
+    monkeypatch.setattr(ps, "sync_pluggy_item", lambda item, **_: {"ok": True, "accounts_synced": 1})
 
     real_import = builtins.__import__
 
@@ -978,7 +978,7 @@ def test_sync_pluggy_user_segura_email_antes_dos_itens(monkeypatch):
         "connections": [{"provider": "pluggy", "provider_item_id": "i1"},
                         {"provider": "pluggy", "provider_item_id": "i2"}]})
     monkeypatch.setattr(ps, "sync_pluggy_item",
-                        lambda item: ordem.append(f"item:{item}") or {"ok": True})
+                        lambda item, **_: ordem.append(f"item:{item}") or {"ok": True})
     monkeypatch.setattr(db, "hold_agent_emails",
                         lambda uid, kinds, mins: ordem.append(("hold", uid, sorted(kinds))) or 1)
     import core.services.piggy_agents as pa
@@ -1057,7 +1057,7 @@ def test_hold_agregados_e_fail_soft(monkeypatch):
 
     monkeypatch.setattr(ps, "get_open_finance_snapshot", lambda uid: {
         "connections": [{"provider": "pluggy", "provider_item_id": "i1"}]})
-    monkeypatch.setattr(ps, "sync_pluggy_item", lambda item: {"ok": True})
+    monkeypatch.setattr(ps, "sync_pluggy_item", lambda item, **_: {"ok": True})
     import core.services.piggy_agents as pa
     monkeypatch.setattr(pa, "run_faria_limer_once", lambda **k: {"ok": True})
     monkeypatch.setattr(pa, "run_barao_once", lambda **k: {"ok": True})

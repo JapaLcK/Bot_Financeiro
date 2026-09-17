@@ -1560,7 +1560,7 @@ body.light .rv-badge-stale { background:rgba(180,120,0,.1); color:#8a5a00; borde
 body.light .chip { background:rgba(255,255,255,0.85); }
 .chip-lbl { font-size:.66rem;color:var(--text-3);text-transform:uppercase;letter-spacing:.08em;margin-bottom:6px;font-weight:600; }
 .chip-val { font-size:1.35rem;font-weight:800;color:var(--text);font-variant-numeric:tabular-nums;letter-spacing:-.01em; }
-.chip-val.g { color:#22c55e; }
+.chip-val.g { color:var(--green); }   /* token, nunca hex: o hex não virava no tema claro */
 .chip-val.b {
   background:linear-gradient(135deg, #FF2D8E, #FF80B8);
   -webkit-background-clip:text; background-clip:text; -webkit-text-fill-color:transparent;
@@ -2534,9 +2534,18 @@ body.balance-hidden #bill-detail-summary .v {
            padding-top:14px; margin-top:2px; }
 .cl-count { font-size:.72rem; color:var(--text-2); min-width:0;
             overflow:hidden; text-overflow:ellipsis; }
+/* `grid-column` porque 5 painéis que recebem a caixa são `display:grid` e as
+   linhas de erro que ela substitui traziam `grid-column:1/-1` inline; em
+   container de fluxo a propriedade é ignorada. */
 .cl-box { padding:34px 18px; text-align:center; color:var(--text-2); font-size:.84rem;
           background:var(--glass-bg); border:1px dashed var(--glass-border);
-          border-radius:var(--radius); margin:16px 0; }
+          border-radius:var(--radius); margin:16px 0; grid-column:1/-1; }
+/* Estado vazio / sessão expirada de gráfico: SOBREPOSTO ao wrap do canvas — o
+   canvas fica `display:none` e não pode ser removido, senão o gráfico não volta.
+   O `min-height` é pelo `.chart-wrap.donut`, único wrap sem altura própria. */
+.chart-empty { position:absolute; inset:0; min-height:180px;
+               display:flex; align-items:center; justify-content:center; }
+.chart-empty .cl-box { margin:0; width:100%; }
 .cl-box-t { font-size:1.02rem; font-weight:700; color:var(--text); margin-bottom:6px; }
 .cl-box b { color:var(--text); font-weight:600; }
 @media (max-width:560px) {

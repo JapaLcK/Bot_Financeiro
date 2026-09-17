@@ -40,8 +40,15 @@ register_whatsapp.json
 !.claude/skills/ponytail/
 skills-lock.json
 
+# Scaffolding local dos agentes (worktrees e estado do `time-dev`): não viaja.
+.claude/worktrees/
+.time-dev/
+
 # Harness de testes de frontend (tests/frontend/): dependência local, não viaja.
-node_modules/
+# SEM barra final, e ela não pode voltar: nas worktrees o `node_modules` é um
+# SYMLINK, e padrão terminado em `/` só casa diretório — o symlink escapava e
+# aparecia como `??` em toda worktree.
+node_modules
 .qa_ai_cost.jsonl
 
 # Cópias que o sincronizador do macOS cria ao resolver conflito ("nome 2.ext").
