@@ -6,7 +6,9 @@ import { texto, type Paleta } from "@/ui/tokens";
 type Variante = keyof typeof texto;
 type Tom = keyof Paleta;
 
-interface Props extends TextProps {
+// Sem `maxFontSizeMultiplier` no tipo: o teto é fixo, e aceitar a prop para
+// ignorá-la em silêncio faria o chamador achar que o ajuste valeu.
+interface Props extends Omit<TextProps, "maxFontSizeMultiplier"> {
   variante?: Variante;
   tom?: Tom;
   /** Só para valor numérico: liga `tabular-nums`, para dígito não "dançar" ao trocar. */

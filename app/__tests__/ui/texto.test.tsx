@@ -14,11 +14,12 @@ describe("Texto", () => {
   });
 
   it("o teto não pode ser sobrescrito pelo chamador", () => {
-    // `maxFontSizeMultiplier` não é uma prop de `Texto` (TextProps do RN a
-    // tem, mas o componente a ignora de propósito) — `any` só para forçar a
-    // tentativa de sobrescrita aqui no teste.
-    const props = { maxFontSizeMultiplier: 5 } as unknown as { children: string };
-    const { claro } = renderNosDoisTemas(<Texto {...props}>x</Texto>);
+    // O tipo recusa a prop (o `@ts-expect-error` vira erro de typecheck se ela
+    // voltar a ser aceita), e em runtime, forçada, ela continua sem efeito.
+    const { claro } = renderNosDoisTemas(
+      // @ts-expect-error `maxFontSizeMultiplier` não é prop de `Texto`.
+      <Texto maxFontSizeMultiplier={5}>x</Texto>,
+    );
     expect(claro.getByText("x").props.maxFontSizeMultiplier).toBe(1.3);
   });
 
