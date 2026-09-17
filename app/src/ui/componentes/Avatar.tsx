@@ -53,15 +53,24 @@ function iniciais(nome: string): string {
  *
  * Imagem que FALHA cai no mesmo fallback: a foto vem de fora (provedor de
  * conta, banco), e uma URL inalcançável deixaria o círculo vazio — que é
- * indistinguível de "sem foto" e pior que a inicial. A falha fica presa À
- * URI que falhou, então uma foto nova ainda é tentada.
+ * indistinguível de "sem foto" e pior que a inicial. A falha vale só enquanto
+ * a `imagem` for a mesma: qualquer troca de URI tenta de novo.
  */
 export function Avatar({ nome, imagem, tamanho = 40 }: Props) {
   const { cores } = useTema();
-  // Guarda a URI que falhou, não um booleano: com booleano, trocar de foto
-  // (outra conta, perfil atualizado) ou a linha ser reaproveitada numa lista
-  // manteria as iniciais para sempre, porque o estado não volta.
+  // A falha vale só para a URI ATUAL: zera a cada troca de `imagem`. Guardar
+  // um booleano manteria as iniciais para sempre; guardar só "qual URI falhou"
+  // ainda prenderia o ciclo A → B → A (linha reaproveitada numa lista longa),
+  // que nunca tentaria A de novo mesmo que a falha tivesse sido passageira.
   const [uriQueFalhou, setUriQueFalhou] = useState<string | null>(null);
+  const [uriVista, setUriVista] = useState(imagem);
+  if (imagem !== uriVista) {
+    // Ajuste de estado durante o render (padrão do React para estado derivado
+    // de prop): sem isto, o reset só aconteceria depois de um render extra
+    // mostrando as iniciais da foto anterior.
+    setUriVista(imagem);
+    setUriQueFalhou(null);
+  }
   const letras = iniciais(nome);
   const rotulo = nome.trim() || "Sem nome";
 
@@ -79,7 +88,7 @@ export function Avatar({ nome, imagem, tamanho = 40 }: Props) {
         overflow: "hidden",
       }}
     >
-      {imagem && uriQueFalhou !== imagem ? (
+      {imagem && uriQueFalhou === null ? (
         <Image
           source={{ uri: imagem }}
           style={{ width: tamanho, height: tamanho }}

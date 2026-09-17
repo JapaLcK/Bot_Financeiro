@@ -70,6 +70,21 @@ describe("Avatar", () => {
     expect(tela.UNSAFE_getByType(Image).props.source).toEqual({ uri: "https://x/nova.png" });
   });
 
+  it("voltar para a URI que falhou tenta de novo (linha reaproveitada em lista)", () => {
+    const comFoto = (uri: string) => (
+      <TemaProvider esquema="light">
+        <Avatar nome="Ana Souza" imagem={uri} />
+      </TemaProvider>
+    );
+    const tela = renderInterativo(<Avatar nome="Ana Souza" imagem="https://x/a.png" />);
+    fireEvent(tela.UNSAFE_getByType(Image), "error");
+    expect(tela.getByText("AS")).toBeTruthy();
+    tela.update(comFoto("https://x/b.png"));
+    expect(tela.UNSAFE_getByType(Image).props.source).toEqual({ uri: "https://x/b.png" });
+    tela.update(comFoto("https://x/a.png"));
+    expect(tela.UNSAFE_getByType(Image).props.source).toEqual({ uri: "https://x/a.png" });
+  });
+
   it("tamanho custom vira largura/altura/borderRadius do círculo", () => {
     const { claro: c } = renderNosDoisTemas(<Avatar nome="Ana Souza" tamanho={64} />);
     const container = c.getByLabelText("Ana Souza");
