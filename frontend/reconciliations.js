@@ -49,9 +49,13 @@
     err.status = response.status;
     throw err;
   }
+  // Mesmo formatador que a linha "Banco:" (fmtBRL) — o sinal precisa entrar
+  // NO NÚMERO passado a fmtBRL, não concatenado por fora, senão o sinal cai
+  // antes do "R$ " (formato do Intl) em vez de depois dele (formato do
+  // fmt_brl, achado do Tester: "-R$ 0,01" vs "R$ -0,01" no mesmo par).
   function launchAmount(l) {
-    const sign = l.tipo === "receita" ? "+" : "-";
-    return `${sign}${fmtBRL(Math.abs(l.valor))}`;
+    const valor = Math.abs(l.valor);
+    return fmtBRL(l.tipo === "receita" ? valor : -valor);
   }
   function _side(r) {
     const section = element("div", null, "modal-row");

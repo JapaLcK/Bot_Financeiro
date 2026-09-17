@@ -83,7 +83,8 @@ const snapshot = (launches) => ({
  * `seed`: quando presente, pré-carrega `sessionStorage.pb_home_1` ANTES do
  * boot, para exercer o repaint instantâneo do `restoreHomeCache`.
  */
-async function abrirHome(launches, { seed = null, semMapa = false, mapaPendurado = false } = {}) {
+async function abrirHome(launches, { seed = null, semMapa = false, mapaPendurado = false,
+                                     reconciliationsPendurado = false } = {}) {
   const ctx = await browser.newContext();
   const page = await ctx.newPage();
   page.__errs = [];
@@ -107,6 +108,9 @@ async function abrirHome(launches, { seed = null, semMapa = false, mapaPendurado
   // PENDURADO != 404. O handler que NUNCA resolve a rota deixa a request aberta,
   // que é o caso que o 404 não alcança: o 404 volta rápido e o parser segue.
   if (mapaPendurado) await page.route(/launch-type-labels\.js/, () => { /* nunca resolve */ });
+  // Mesma técnica do mapa pendurado, pra /reconciliations.js: prende a tag
+  // (home.html:457) enquanto ela ainda não tem `defer`.
+  if (reconciliationsPendurado) await page.route(/reconciliations\.js/, () => { /* nunca resolve */ });
 
   if (seed) {
     await page.addInitScript((entrada) => {
@@ -117,7 +121,8 @@ async function abrirHome(launches, { seed = null, semMapa = false, mapaPendurado
   // `commit` é obrigatório com o asset pendurado: o "load" (padrão do goto)
   // nunca chega enquanto a request estiver aberta, e o goto estouraria por
   // timeout antes de qualquer assert — sintoma errado da causa certa.
-  await page.goto(`${ORIGIN}/home.html`, mapaPendurado ? { waitUntil: "commit" } : undefined);
+  const pendurado = mapaPendurado || reconciliationsPendurado;
+  await page.goto(`${ORIGIN}/home.html`, pendurado ? { waitUntil: "commit" } : undefined);
   page.__ctx = ctx;
   return page;
 }
@@ -371,6 +376,21 @@ test("com /launch-type-labels.js PENDURADO, a Início ainda renderiza", async ()
     assert.equal(forte, "Lançamento",
                  `mapa pendurado devia degradar o rótulo, veio "${forte}"`);
     assert.deepEqual(page.__errs, [], "a Início estourou com o mapa pendurado");
+  } finally { await fechar(page); }
+});
+
+/* Mesma categoria acima (PENDURADO ≠ 404), agora na tag de home.html:457
+ * (`<script defer src="/reconciliations.js">`). Mutação: tirar o `defer`
+ * desta tag deixa este teste vermelho — a página fica sem `<body>` enquanto
+ * a request não volta, e nem `#activity-list` nem `#greeting-sub` existem. */
+test("com /reconciliations.js PENDURADO, a Início ainda renderiza (defer)", async () => {
+  const page = await abrirHome([lancamento({ tipo: "despesa", valor: 50 })],
+                               { reconciliationsPendurado: true });
+  try {
+    const linhas = await linhasDaAtividade(page);
+    assert.equal(linhas.length, 1,
+                 `reconciliations.js pendurado travou a Início: ${linhas.length} linhas de atividade`);
+    assert.deepEqual(page.__errs, [], "a Início estourou com reconciliations.js pendurado");
   } finally { await fechar(page); }
 });
 

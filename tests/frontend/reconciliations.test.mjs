@@ -57,6 +57,9 @@ async function pageFor(width, initialRows, { actionHandler, billPay } = {}) {
       // `actionHandler` pode devolver uma Promise (ex.: segurar a resposta pra
       // simular um POST em voo) — await aqui é no-op pra quem já devolve objeto.
       const outcome = actionHandler ? await actionHandler(ofTxId, action) : null;
+      // "abort": simula falha de rede (fetch rejeita, sem status) — diferente
+      // de um 4xx/5xx, que chega como resposta.
+      if (outcome === "abort") return route.abort();
       if (outcome) return route.fulfill(json(outcome.body, outcome.status));
       const idx = rows.findIndex(r => r.of_tx_id === ofTxId);
       if (idx >= 0) rows.splice(idx, 1);
@@ -89,6 +92,12 @@ for (const width of [1365, 390]) {
       const linhaBanco = await page.getByText("Banco:", { exact: false }).first().innerText();
       assert.ok(linhaBanco.includes("R$ -50,00"), `formato do fmtBRL não apareceu: ${linhaBanco}`);
       assert.ok(!linhaBanco.includes("-R$"), `formato antigo do Intl (sinal antes do "R$") ainda aparece: ${linhaBanco}`);
+      // Achado do Tester: o teste anterior só olhava "Banco:" — "PigBank:" tinha
+      // o sinal fora do fmtBRL (launchAmount montava "-R$ 0,01" à mão) e ficava
+      // cego. pendingRow.launch = despesa de 50, mesmo par da linha do banco.
+      const linhaPig = await page.getByText("PigBank:", { exact: false }).first().innerText();
+      assert.ok(linhaPig.includes("R$ -50,00"), `formato do fmtBRL não apareceu na linha PigBank: ${linhaPig}`);
+      assert.ok(!linhaPig.includes("-R$"), `sinal antes do "R$" ainda aparece na linha PigBank: ${linhaPig}`);
       assert.equal(await page.locator("#reconciliations-overlay script").count(), 0);
       const bounds = await page.locator("#reconciliations-overlay .modal").boundingBox();
       assert.ok(bounds.x >= 0 && bounds.x + bounds.width <= width);
@@ -290,6 +299,107 @@ test("Desfazer: 2º clique em #ld-undo durante o POST em voo não reabre a confi
     releaseUndo();
     await page.waitForFunction(() => document.getElementById("launch-detail-overlay").classList.contains("open") === false);
     assert.deepEqual(posts, [{ ofTxId: 501, action: "undo", csrf: "tok123" }]);
+  } finally { await page.close(); }
+});
+
+// As 3 respostas de `_launchDetailUndo` (SÉRIO — o `return` do conserto
+// anterior deixava 404 mudo e sem reload, e 409/erro sem reload nenhum).
+// Mesmo contrato provado pra reconciliations.js::_run no teste "409 mostra
+// o detail do servidor... 404 só recarrega, sem alerta", lá em cima.
+async function abreDetalheEClicaUndo(page, items = [
+  { id: 301, tipo: "despesa", valor: 50, alvo: "Mercado", nota: null, criado_em: "2026-09-10T10:00:00", reconciliation_of_tx_id: 501 },
+]) {
+  await page.evaluate((its) => {
+    document.getElementById("history-view").classList.add("active");
+    renderHistoryTimeline({ ok: true, items: its }, false);
+  }, items);
+  await page.locator(".tx-row", { hasText: "Mercado" }).click();
+  await page.getByText("Detalhe do lançamento", { exact: false }).waitFor();
+  await page.locator("#ld-undo").click();
+  await page.getByText("Ao desfazer", { exact: false }).waitFor();
+  await page.locator("#generic-confirm-ok").click();
+}
+
+test("Desfazer no detalhe: 404 fecha e recarrega o histórico, sem alerta", async () => {
+  const { page, posts } = await pageFor(800, [], {
+    actionHandler: () => ({ status: 404, body: { detail: "Não encontrado." } }),
+  });
+  try {
+    await abreDetalheEClicaUndo(page);
+    await page.waitForFunction(() => document.getElementById("launch-detail-overlay").classList.contains("open") === false);
+    assert.equal(await page.locator("#generic-confirm-overlay.open").count(), 0,
+      "404 não pode mostrar alerta — é o par já desfeito noutra aba");
+    assert.deepEqual(posts, [{ ofTxId: 501, action: "undo", csrf: "tok123" }]);
+  } finally { await page.close(); }
+});
+
+test("Desfazer no detalhe: 409 mostra o detail do servidor e ainda assim fecha e recarrega", async () => {
+  const { page, posts } = await pageFor(800, [], {
+    actionHandler: () => ({ status: 409, body: { detail: "Não foi possível concluir. Atualize a lista e confira novamente." } }),
+  });
+  try {
+    await abreDetalheEClicaUndo(page);
+    await page.getByText("Não foi possível concluir. Atualize a lista", { exact: false }).waitFor();
+    await page.locator("#generic-confirm-ok").click();
+    await page.waitForFunction(() => document.getElementById("launch-detail-overlay").classList.contains("open") === false);
+    assert.deepEqual(posts, [{ ofTxId: 501, action: "undo", csrf: "tok123" }]);
+  } finally { await page.close(); }
+});
+
+test("Desfazer no detalhe: falha de rede também mostra alerta e fecha/recarrega", async () => {
+  const { page, posts } = await pageFor(800, [], { actionHandler: () => "abort" });
+  try {
+    await abreDetalheEClicaUndo(page);
+    // `fetch()` rejeita (TypeError sem `.status`) antes de existir `response` —
+    // a mensagem é a do navegador ("Failed to fetch"), não a de `act()`; o que
+    // importa aqui é o mesmo ramo do 409 (não-404): mostra ALGUM alerta e segue.
+    await page.locator("#generic-confirm-overlay.open").waitFor();
+    await page.locator("#generic-confirm-ok").click();
+    await page.waitForFunction(() => document.getElementById("launch-detail-overlay").classList.contains("open") === false);
+    assert.equal(posts.length, 1);
+  } finally { await page.close(); }
+});
+
+test("Desfazer no detalhe: sucesso reseta o botão pro próximo detalhe aberto (achado do Tester)", async () => {
+  // Mutação: apagar `ldUndoBtn.disabled = false;` (dashboard.js, dentro de
+  // _renderLaunchDetail) deixa este teste vermelho — o botão do 2º lançamento
+  // nasce travado pelo undo do 1º, que nunca reabilitou o próprio botão no
+  // caminho de sucesso (só o de cancelar/erro faz `btn.disabled = false`).
+  const { page } = await pageFor(800, []);
+  try {
+    await abreDetalheEClicaUndo(page, [
+      { id: 301, tipo: "despesa", valor: 50, alvo: "Mercado", nota: null, criado_em: "2026-09-10T10:00:00", reconciliation_of_tx_id: 501 },
+      { id: 302, tipo: "despesa", valor: 30, alvo: "Padaria", nota: null, criado_em: "2026-09-10T09:00:00", reconciliation_of_tx_id: 502 },
+    ]);
+    await page.waitForFunction(() => document.getElementById("launch-detail-overlay").classList.contains("open") === false);
+    // `_historyResetAndReload()` refaz o fetch (não mockado aqui) e substitui o
+    // DOM da timeline — `_renderedHistoryItems` sobrevive, então abre pelo
+    // índice em vez de clicar a linha, que pode não estar mais desenhada.
+    await page.evaluate(() => openHistoryDetail(1));
+    await page.waitForFunction(() => document.getElementById("launch-detail-overlay").classList.contains("open"));
+    assert.equal(await page.locator("#ld-undo").isDisabled(), false,
+      "o botão do 2º detalhe nasceu travado pelo undo do 1º");
+  } finally { await page.close(); }
+});
+
+test("Desfazer no detalhe: sem window.Reconciliations o botão some (achado do Tester)", async () => {
+  // Mesma categoria da guarda de render() (teste "SÉRIO" acima): sem o script,
+  // o botão continuava desenhado e o clique estourava "Reconciliations is not
+  // defined". Mutação: tirar `&& window.Reconciliations` de _renderLaunchDetail
+  // deixa este teste vermelho.
+  const { page } = await pageFor(800, []);
+  try {
+    await page.evaluate(() => { delete window.Reconciliations; });
+    await page.evaluate(() => {
+      document.getElementById("history-view").classList.add("active");
+      renderHistoryTimeline({ ok: true, items: [
+        { id: 301, tipo: "despesa", valor: 50, alvo: "Mercado", nota: null, criado_em: "2026-09-10T10:00:00", reconciliation_of_tx_id: 501 },
+      ] }, false);
+    });
+    await page.locator(".tx-row", { hasText: "Mercado" }).click();
+    await page.getByText("Detalhe do lançamento", { exact: false }).waitFor();
+    assert.equal(await page.locator("#ld-undo").isVisible(), false,
+      "sem window.Reconciliations o botão Desfazer não pode aparecer");
   } finally { await page.close(); }
 });
 

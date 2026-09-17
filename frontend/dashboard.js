@@ -8116,8 +8116,12 @@ function _renderLaunchDetail(l) {
   // unido a uma transação do banco (decisão do dono: fica no DETALHE, não na
   // linha da timeline — a linha só ganha o selo "Unido ao extrato").
   const ldUndoBtn = document.getElementById("ld-undo");
+  // `window.Reconciliations` pode não existir ainda (/reconciliations.js é
+  // arquivo novo, pode 503/404 no fallback do service worker logo após
+  // deploy) — sem a guarda, o botão desenha e o clique estoura
+  // "Reconciliations is not defined" (mesma guarda de recHtml, mais abaixo).
   ldUndoBtn.style.display =
-    (_launchDetailSource === "history" && l.reconciliation_of_tx_id) ? "" : "none";
+    (_launchDetailSource === "history" && l.reconciliation_of_tx_id && window.Reconciliations) ? "" : "none";
   // Reabre sempre destravado — sem isto, um "Desfazer" concluído com sucesso
   // deixaria o botão desabilitado pra sempre nos próximos detalhes abertos.
   ldUndoBtn.disabled = false;
@@ -8142,9 +8146,10 @@ async function _launchDetailUndo() {
   try {
     await Reconciliations.act(USER_ID, l.reconciliation_of_tx_id, "undo");
   } catch (err) {
-    btn.disabled = false;
+    // 404 é idempotente (o par já foi desfeito noutra aba/dispositivo) — sem
+    // alerta, mas fecha e recarrega igual. Outro erro mostra o detail E
+    // recarrega (mesmo contrato de frontend/reconciliations.js::_run).
     if (err.status !== 404) await alertModal(err.message);
-    return;
   }
   closeLaunchDetail();
   _historyResetAndReload();

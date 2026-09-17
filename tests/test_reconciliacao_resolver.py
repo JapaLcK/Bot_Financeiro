@@ -157,7 +157,7 @@ def _duas_no_mesmo_x(uid):
     return conexao, manual, ids
 
 
-def test_duas_pendencias_no_mesmo_x_lista_e_contagem_batem(uid_pro, ia_fora):
+def test_duas_pendencias_no_mesmo_x_lista_mostra_2_contagem_conta_1(uid_pro, ia_fora):
     """Decisão do dono: `pending_count` conta só o que move o número. A lista
     (uma linha por transação do banco) mostra as duas; a contagem do aviso
     ("N lançamento(s) a conferir") é 1, igual ao `delta_se_confirmar`."""
