@@ -169,6 +169,7 @@ def _is_investment_action_or_advice_request(text: str) -> bool:
     ambiguous_action = (
         r"(?:aplicar|aplique|aplica|investir|invista|investe|comprar|compre|compra|"
         r"vender|venda|vende|compraria|investiria|aplicaria|venderia|"
+        r"escolheria|selecionaria|optaria|preferiria|"
         r"indicar|indica|indique|"
         r"indicaria|recomendar|recomenda|recomende|recomendaria|sugerir|"
         r"sugere|sugira|sugeriria|aconselhar|aconselha|aconselhe|aconselharia)"
@@ -329,7 +330,8 @@ def _is_investment_action_or_advice_request(text: str) -> bool:
     sell_command = bool(
         re.search(
             r"^(?:(?:piggy|por favor|por gentileza)\s*,?\s*){0,2}"
-            r"(?:(?:voce|vc)\s+)?(?:me\s+)?(?:venda|vende)\b",
+            r"(?:(?:voce|vc)\s+)?(?:me\s+)?(?:venda|vende)\b"
+            r"(?!\s+d(?:e|a|o|as|os)\b)",
             norm,
         )
         or re.search(
@@ -349,7 +351,8 @@ def _is_investment_action_or_advice_request(text: str) -> bool:
     return bool(
         re.search(
             r"\b(aplicar|aplique|aplica|compre|comprar|compraria|"
-            r"vender|venderia|invista|investe|investiria|aplicaria)\b",
+            r"vender|venderia|invista|investe|investiria|aplicaria|"
+            r"escolheria|selecionaria|optaria|preferiria)\b",
             norm,
         )
         or sell_command
