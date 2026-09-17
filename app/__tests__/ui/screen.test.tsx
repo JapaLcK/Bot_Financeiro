@@ -6,7 +6,7 @@ import { Screen } from "@/ui/componentes/Screen";
 import { TemaProvider } from "@/ui/tema";
 import { claro, escuro, espaco } from "@/ui/tokens";
 
-import { renderComAreaSegura } from "./_render";
+import { METRICAS_DE_TESTE, renderComAreaSegura } from "./_render";
 
 describe("Screen", () => {
   it("rola por padrão: usa ScrollView, sem RefreshControl sem onAtualizar", () => {
@@ -39,6 +39,9 @@ describe("Screen", () => {
     const refresh = c.UNSAFE_getByType(RefreshControl);
     expect(refresh.props.refreshing).toBe(true);
     expect(refresh.props.onRefresh).toBe(onAtualizar);
+    // Sem o deslocamento, o indicador nasce sob a barra de status: o padding
+    // de área segura está no conteúdo, não no ScrollView.
+    expect(refresh.props.progressViewOffset).toBe(METRICAS_DE_TESTE.insets.top);
   });
 
   it("fundo muda de cor entre os dois temas", () => {

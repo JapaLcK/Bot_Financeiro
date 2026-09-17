@@ -61,7 +61,16 @@ export function Screen(props: Props) {
       keyboardShouldPersistTaps="handled"
       refreshControl={
         onAtualizar ? (
-          <RefreshControl refreshing={atualizando} onRefresh={onAtualizar} tintColor={cores.brand} />
+          // `progressViewOffset`: o padding da área segura está no
+          // `contentContainerStyle`, mas o `RefreshControl` se posiciona pelo
+          // ScrollView INTEIRO — sem o deslocamento, o indicador aparece sob a
+          // barra de status e a ilha. Só o aparelho confirma a aparência.
+          <RefreshControl
+            refreshing={atualizando}
+            onRefresh={onAtualizar}
+            tintColor={cores.brand}
+            progressViewOffset={insets.top}
+          />
         ) : undefined
       }
     >

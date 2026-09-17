@@ -27,7 +27,7 @@ export function renderNosDoisTemas(el: ReactElement) {
  * misturar mudaria o snapshot de TODO componente já existente (Money,
  * AmountInput) por causa de um hook que só o `Screen` chama.
  */
-const METRICAS_DE_TESTE: Metrics = {
+export const METRICAS_DE_TESTE: Metrics = {
   frame: { x: 0, y: 0, width: 390, height: 844 },
   insets: { top: 47, bottom: 34, left: 0, right: 0 },
 };
