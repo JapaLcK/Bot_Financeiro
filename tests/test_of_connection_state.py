@@ -227,8 +227,7 @@ def test_webhook_item_updated_nao_ressuscita_deleted(user_id, monkeypatch, relog
     # na suíte: se ele tentasse, o teste estouraria alto).
     res = ps.sync_pluggy_item("item-g1")
 
-    assert res == {"ok": False, "reason": "connection_deleted", "item_id": "item-g1",
-                   "user_id": user_id}
+    assert res == {"ok": False, "reason": "connection_deleted", "item_id": "item-g1"}
     assert _linha()["status"] == "DELETED"
 
 
@@ -261,7 +260,6 @@ def test_paused_barra_o_sync(user_id, relogio_fixo):
 
     assert ps.sync_pluggy_item("item-g1") == {
         "ok": False, "reason": "connection_paused", "item_id": "item-g1",
-        "user_id": user_id,
     }
 
 

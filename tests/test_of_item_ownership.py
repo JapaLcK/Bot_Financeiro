@@ -209,16 +209,17 @@ def test_webhook_de_item_desconhecido_registra_e_nao_sincroniza(monkeypatch, eve
     assert linhas[0]["user_id"] is None, "item desconhecido não tem dono a atribuir"
 
 
-# ── 29, 30 e 31. isolamento em `_refresh_items_report` e `_sync_item_contido`
+# ── 29, 30 e 31. isolamento em `_refresh_items_report` e `sync_pluggy_item`
 # (#446) — o mesmo `item_id` pode estar ligado a conexões de usuários
-# diferentes (sem o índice único, ou por webhook), e as duas funções faziam a
-# leitura por item_id SEM filtrar por quem está pedindo.
+# diferentes (sem o índice único, ou por webhook), e as duas faziam a leitura
+# por item_id SEM filtrar por quem está pedindo.
 #
 # CONTROLE NEGATIVO do grupo: tirar o `if int(r["user_id"]) == int(user_id)`
 # de `_refresh_items_report` (core/services/pluggy_sync.py) deixa os DOIS
-# primeiros vermelhos — medido. O terceiro (`test_sync_pluggy_user_nao_devolve_
-# dono_alheio`) não passa por `_refresh_items_report`; quem o prende é o
-# filtro de `_sync_item_contido`, no mesmo arquivo.
+# primeiros vermelhos — medido. Os dois últimos passam pelo caminho REAL,
+# `sync_pluggy_user` → `sync_pluggy_item(expected_user_id=...)`: tirar essa
+# checagem (ou o parâmetro) deixa a leitura remota da carteira alheia
+# acontecer — vermelho.
 
 def _health_parcial() -> dict:
     return {
@@ -282,66 +283,66 @@ def test_refresh_report_com_dois_donos_devolve_a_PROPRIA_linha(user_id, monkeypa
             c.commit()
 
 
-def test_sync_pluggy_user_nao_devolve_dono_alheio(user_id, monkeypatch):
-    """`sync_pluggy_item` faz a PRÓPRIA busca por item_id (sem filtro de
-    usuário). Se a minha conexão sumiu do banco e o item hoje só existe para
-    OUTRO usuário, o lote não pode devolver `user_id`/`connection_id` alheios —
-    passa pelo caminho real, `sync_pluggy_user`."""
+def _espia_isolamento(monkeypatch):
+    """Espiões de leitura remota (1ª chamada) e escrita — zero de cada um é o
+    que prova que a recusa veio ANTES do `GET /items` e do `mark_sync_*`."""
+    chamadas_remotas: list[str] = []
+    escritas: list[int] = []
+    monkeypatch.setattr(ps, "create_pluggy_api_key",
+                        lambda: chamadas_remotas.append("api_key") or "k")
+    monkeypatch.setattr(ps, "mark_sync_attempt",
+                        lambda connection_id, **kw: escritas.append(connection_id))
+    monkeypatch.setattr(ps, "mark_sync_result",
+                        lambda connection_id, **kw: escritas.append(connection_id))
+    return chamadas_remotas, escritas
+
+
+@pytest.mark.parametrize("status_remoto", ["ACTIVE", "PAUSED", "DELETED"])
+def test_sync_pluggy_user_nao_toca_conexao_alheia(user_id, monkeypatch, status_remoto):
+    """A MINHA conexão sumiu do banco (ou nunca existiu) e o item hoje só
+    existe, em qualquer status, para o OUTRO usuário — a corrida da issue.
+    Caminho REAL: `sync_pluggy_user` → `sync_pluggy_item(expected_user_id=...)`;
+    a recusa vem ANTES de qualquer leitura/escrita alheia, e o `reason` nunca
+    é `connection_paused`/`connection_deleted` dele.
+
+    CONTROLE POSITIVO (ACTIVE): o webhook (sem `expected_user_id`) ainda lê
+    o item — prova que quem recusa é o isolamento, não o sync em si."""
     outro = user_id + 1
     db.ensure_user(outro)
     try:
-        db.save_pluggy_open_finance_item(outro, {
-            "id": "item-vazamento-2", "status": "UPDATED",
-            "connector": {"id": 612, "name": "Nubank"}})
-
-        # snapshot "velho": ainda enxerga a MINHA conexão com este item, embora
-        # ela já não exista mais no banco (apagada / nunca existiu de verdade
-        # nesta rodada) — é o estado que a corrida descrita na issue produz.
-        monkeypatch.setattr(ps, "get_open_finance_snapshot", lambda uid: {
-            "connections": [{"provider": "pluggy", "provider_item_id": "item-vazamento-2"}]})
-        monkeypatch.setattr(ps, "_hold_aggregate_emails", lambda *a, **kw: None)
-        # a busca REAL de `sync_pluggy_item` (por item_id, sem filtro de
-        # usuário) acharia hoje só a conexão do `outro` — é isso que o mock
-        # reproduz, sem precisar da Pluggy de verdade.
-        monkeypatch.setattr(ps, "sync_pluggy_item", lambda item_id: {
-            "ok": True, "item_id": item_id, "user_id": outro,
-            "connection_id": 999999, "accounts_synced": 3})
-
-        resultado = ps.sync_pluggy_user(user_id)
-
-        assert resultado["results"] == [
-            {"ok": False, "reason": "connection_not_found", "item_id": "item-vazamento-2"}], (
-            f"vazou dado de outro usuário: {resultado['results']}")
-        assert resultado["accounts_synced"] == 0
-    finally:
-        db.disconnect_open_finance_connection(outro)
-        with get_conn() as c:
-            c.execute("delete from users where id=%s", (outro,))
-            c.commit()
-
-
-def test_sync_pluggy_user_nao_traz_reason_de_conexao_paused_alheia(user_id, monkeypatch):
-    """Corrida: a MINHA conexão real sumiu (ou nunca existiu) e hoje o item só
-    existe, PAUSADO, para o OUTRO usuário. Só o `user_id` no retorno de
-    `sync_pluggy_item` permite ao `_sync_item_contido` filtrar.
-    CONTROLE NEGATIVO: tirar `"user_id": connection["user_id"]` dos dois
-    `return` de `sync_pluggy_item` deixa este vermelho, com
-    `reason == "connection_paused"` no resultado."""
-    outro = user_id + 1
-    db.ensure_user(outro)
-    try:
+        item_id = f"item-alheio-{status_remoto.lower()}"
         conexao_outro = db.save_pluggy_open_finance_item(outro, {
-            "id": "item-paused-alheio", "status": "UPDATED",
-            "connector": {"id": 612, "name": "Nubank"}})
-        db.pause_open_finance_connection(conexao_outro["id"])
+            "id": item_id, "status": "UPDATED", "connector": {"id": 612, "name": "Nubank"}})
+        if status_remoto == "PAUSED":
+            db.pause_open_finance_connection(conexao_outro["id"])
+        elif status_remoto == "DELETED":
+            with get_conn() as c:
+                c.execute("update open_finance_connections set status='DELETED' where id=%s",
+                          (conexao_outro["id"],))
+                c.commit()
+
+        chamadas_remotas, escritas = _espia_isolamento(monkeypatch)
+        monkeypatch.setattr(ps, "get_pluggy_item", lambda i, api_key=None:
+                            chamadas_remotas.append("get_item") or
+                            (_ for _ in ()).throw(RuntimeError("não devia chegar aqui")))
+        # snapshot "velho": ainda enxerga a MINHA conexão com este item, embora
+        # ela já não exista mais no banco — é o estado que a corrida produz.
         monkeypatch.setattr(ps, "get_open_finance_snapshot", lambda uid: {
-            "connections": [{"provider": "pluggy", "provider_item_id": "item-paused-alheio"}]})
+            "connections": [{"provider": "pluggy", "provider_item_id": item_id}]})
         monkeypatch.setattr(ps, "_hold_aggregate_emails", lambda *a, **kw: None)
+
         resultado = ps.sync_pluggy_user(user_id)
 
         assert resultado["results"] == [
-            {"ok": False, "reason": "connection_not_found", "item_id": "item-paused-alheio"}], (
-            f"vazou reason de conexão alheia: {resultado['results']}")
+            {"ok": False, "reason": "connection_not_found", "item_id": item_id}], (
+            f"vazou dado/reason de outro usuário: {resultado['results']}")
+        assert chamadas_remotas == [], f"leu a Pluggy da carteira alheia: {chamadas_remotas}"
+        assert conexao_outro["id"] not in escritas, "escreveu na linha do outro usuário"
+
+        if status_remoto == "ACTIVE":
+            with pytest.raises(RuntimeError):
+                ps.sync_pluggy_item(item_id)   # controle positivo: webhook, sem filtro
+            assert chamadas_remotas == ["api_key", "get_item"]
     finally:
         db.disconnect_open_finance_connection(outro)
         with get_conn() as c:

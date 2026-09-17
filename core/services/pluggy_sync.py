@@ -182,7 +182,7 @@ def normalize_pluggy_investment(raw: dict) -> dict:
     }
 
 
-def sync_pluggy_item(provider_item_id: str) -> dict:
+def sync_pluggy_item(provider_item_id: str, *, expected_user_id: int | None = None) -> dict:
     """Sincroniza um item Pluggy: contas + transações → tabelas OF. Idempotente.
 
     Máquina de estados (explícita, porque remendá-la um caso por vez foi como o
@@ -191,27 +191,28 @@ def sync_pluggy_item(provider_item_id: str) -> dict:
     consultado → saudável → sync executado → concluído.
 
     Este é o ÚNICO lugar do sistema que carimba ACTIVE/last_sync_at.
+
+    `expected_user_id`: quando informado, recusa ANTES de qualquer leitura
+    remota ou escrita se o item pertencer a outro usuário (#446, mesmo
+    `item_id` ligado a conexões de usuários diferentes). O webhook de produção
+    não passa este parâmetro — ele precisa sincronizar o dono real da linha.
     """
     connection = get_open_finance_connection_by_item_id(provider_item_id)
     if not connection:
         return {"ok": False, "reason": "connection_not_found", "item_id": provider_item_id}
 
+    if expected_user_id is not None and int(connection["user_id"]) != int(expected_user_id):
+        return {"ok": False, "reason": "connection_not_found", "item_id": provider_item_id}
+
     status_local = str(connection.get("status") or "").upper()
-    # `user_id` vai nos dois retornos abaixo porque `_sync_item_contido` filtra
-    # por ele (#446): sem o campo, o `reason` de uma conexão TERMINAL de outro
-    # usuário (mesmo item_id, sem índice único) vazava para `sync.results` e
-    # `items[].reason` do requerente.
-    #
     # Trial venceu sem virar assinatura: dados importados ficam, mas o sync PARA
     # (o item nem existe mais na Pluggy). Barra webhook atrasado/replay.
     if status_local == "PAUSED":
-        return {"ok": False, "reason": "connection_paused", "item_id": provider_item_id,
-                "user_id": connection["user_id"]}
+        return {"ok": False, "reason": "connection_paused", "item_id": provider_item_id}
     # Desconectado: terminal do mesmo jeito. Sem isto, um webhook atrasado
     # (item/updated chega depois do item/deleted) ressuscitava a conexão.
     if status_local == "DELETED":
-        return {"ok": False, "reason": "connection_deleted", "item_id": provider_item_id,
-                "user_id": connection["user_id"]}
+        return {"ok": False, "reason": "connection_deleted", "item_id": provider_item_id}
 
     # PERGUNTA PELO ITEM ANTES DE DAR POR BOM. O `/accounts?itemId=<deletado>`
     # devolve 200 com results:[] — só o `GET /items/{id}` devolve 404. Sem esta
@@ -631,10 +632,14 @@ def _sync_item_contido(connection: dict, user_id: int) -> dict:
 
     Mesma escolha já feita para a leitura de `/investments` (READ_FAILED, ver
     `_sync_pluggy_item_confirmado`): leitura que falhou não é dado ausente.
+
+    O isolamento por usuário (#446) mora em `sync_pluggy_item`
+    (`expected_user_id`): recusa ANTES de qualquer leitura remota ou escrita,
+    não depois — aqui só se passa o dono adiante.
     """
     item_id = connection["provider_item_id"]
     try:
-        res = sync_pluggy_item(item_id)
+        return sync_pluggy_item(item_id, expected_user_id=user_id)
     except Exception as exc:
         print(f"[pluggy_sync] item {item_id} falhou no lote: {type(exc).__name__}: {exc}")
         try:
@@ -657,18 +662,6 @@ def _sync_item_contido(connection: dict, user_id: int) -> dict:
             print(f"[pluggy_sync] mark_sync_result falhou ({item_id}): {exc2}")
         return {"ok": False, "reason": READ_FAILED, "item_id": item_id,
                 "connection_id": connection.get("id"), "error": type(exc).__name__}
-
-    # #446, segundo vazamento: `sync_pluggy_item` faz a PRÓPRIA busca por
-    # `item_id` (sem filtro de usuário — o mesmo item pode estar ligado a
-    # conexões de usuários diferentes, ver `tests/test_of_item_ownership.py`).
-    # Se ela achou a conexão de OUTRO usuário, o resultado é da carteira
-    # alheia — filtra DEPOIS da chamada, sem mudar a assinatura de
-    # `sync_pluggy_item` (mocks em `test_piggy_agents.py` usam `lambda item:`).
-    # `user_id` vem de fora (não de `connection["user_id"]`): a linha do
-    # snapshot que alimenta este lote não carrega esse campo.
-    if res.get("user_id") is not None and int(res["user_id"]) != int(user_id):
-        return {"ok": False, "reason": "connection_not_found", "item_id": item_id}
-    return res
 
 
 def sync_pluggy_user(user_id: int) -> dict:

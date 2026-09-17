@@ -187,7 +187,6 @@ class TestPausedState:
             "ok": False,
             "reason": "connection_paused",
             "item_id": connection["provider_item_id"],
-            "user_id": user_id,
         }
 
     def test_webhook_atrasado_nao_sobrescreve_paused(self, user_id):
