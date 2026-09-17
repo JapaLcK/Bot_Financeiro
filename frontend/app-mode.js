@@ -117,6 +117,23 @@
     return doPage || (newsAllowed() ? NEWS_TAB : TABS[2]);
   }
 
+  // Reescreve NO LUGAR a aba do 4º lugar (href, ícone, rótulo, active/aria-current)
+  // pra bater com fourthTab() e a página viva. Duas fontes podem tirar a aba do
+  // estado certo — o /auth/me mudando o plano (syncNewsTab) e o pb-nav trocando a
+  // página por SPA (onNavigate) — e as duas chamam esta função em vez de duplicar
+  // a reescrita.
+  function reconcileFourthTab(bar) {
+    const t = fourthTab();
+    const a = bar.querySelector('.pb-tab[href="/comandos-app"], .pb-tab[href="/changelog"]');
+    if (!a) return;
+    a.setAttribute("href", t.href);
+    const ico = a.querySelector(".pb-tab-ico"); if (ico) ico.innerHTML = t.icon;
+    const lbl = a.querySelector("span:last-child"); if (lbl) lbl.textContent = t.label;
+    const active = PAGES[t.href] === livePage; // viva, não a de boot (SPA)
+    a.classList.toggle("active", active);
+    if (active) a.setAttribute("aria-current", "page"); else a.removeAttribute("aria-current");
+  }
+
   // Pergunta o plano e reconcilia o 4º tab + o item do menu lateral. Como o
   // swap não muda posição nem quantidade de abas, atualiza o tab NO LUGAR
   // (sem remexer no dock). Pro: "Notícias" no rodapé, fora do menu.
@@ -132,15 +149,7 @@
         const sidenavNews = document.querySelector('.sidenav-item[href="/changelog"]');
         if (sidenavNews) sidenavNews.style.display = isPro ? "none" : "";
         if (isPro === prev) return; // cache já estava certo
-        const t = fourthTab();
-        const a = bar.querySelector('.pb-tab[href="/comandos-app"], .pb-tab[href="/changelog"]');
-        if (!a) return;
-        a.setAttribute("href", t.href);
-        const ico = a.querySelector(".pb-tab-ico"); if (ico) ico.innerHTML = t.icon;
-        const lbl = a.querySelector("span:last-child"); if (lbl) lbl.textContent = t.label;
-        const active = PAGES[t.href] === livePage; // viva, não a de boot (SPA)
-        a.classList.toggle("active", active);
-        if (active) a.setAttribute("aria-current", "page"); else a.removeAttribute("aria-current");
+        reconcileFourthTab(bar);
       })
       .catch(() => {});
   }
@@ -433,6 +442,11 @@
         // Glifos de texto (☰, ▾) da página recém-montada: o hardenGlyphs do
         // boot não alcança DOM que chegou por swap — re-roda (é idempotente).
         hardenGlyphs();
+        // A 4ª aba (comandos × changelog) é disputada por página, não só por
+        // plano (fourthTab()) — sem isto, trocar de página por SPA sem o
+        // /auth/me rodar de novo deixava a aba do lugar errado (o índice era
+        // achado pelo href ANTIGO) ou sem aba nenhuma ativa.
+        reconcileFourthTab(bar);
         const i = tabs.findIndex(a => PAGES[a.getAttribute("href")] === key);
         if (i < 0) return;
         home = i;
