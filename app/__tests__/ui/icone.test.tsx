@@ -16,7 +16,19 @@ describe("Icone", () => {
     expect(c.UNSAFE_getByType(IconeStub).props).toMatchObject({ size: 20, color: claro.inkFaint });
   });
 
-  it.each(["CaretRight", "Wallet", "Bell"] as const)("resolve o ícone %s sem lançar", (nome) => {
+  it.each([
+    "CaretRight",
+    "Wallet",
+    "Bell",
+    "CheckCircle",
+    "Info",
+    "WarningCircle",
+    "WarningOctagon",
+    "LinkBreak",
+    "PauseCircle",
+    "Trash",
+    "Question",
+  ] as const)("resolve o ícone %s sem lançar", (nome) => {
     const { claro: c } = renderNosDoisTemas(<Icone nome={nome} />);
     expect(c.UNSAFE_getByType(IconeStub)).toBeTruthy();
   });
@@ -45,6 +57,14 @@ describe("Icone - exports reais do pacote (sem passar pelo stub)", () => {
     ["CaretRight", "CaretRightIcon"],
     ["Wallet", "WalletIcon"],
     ["Bell", "BellIcon"],
+    ["CheckCircle", "CheckCircleIcon"],
+    ["Info", "InfoIcon"],
+    ["WarningCircle", "WarningCircleIcon"],
+    ["WarningOctagon", "WarningOctagonIcon"],
+    ["LinkBreak", "LinkBreakIcon"],
+    ["PauseCircle", "PauseCircleIcon"],
+    ["Trash", "TrashIcon"],
+    ["Question", "QuestionIcon"],
   ] as const)("o módulo real de %s exporta %s (nomeado, existe de fato no pacote)", (arquivo, nomeado) => {
     const caminho = `${__dirname}/../../node_modules/phosphor-react-native/src/icons/${arquivo}`;
     // eslint-disable-next-line @typescript-eslint/no-require-imports -- mesmo motivo do Icone.tsx: caminho estático, fora do grafo do tsc.

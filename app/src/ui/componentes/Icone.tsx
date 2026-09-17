@@ -4,11 +4,22 @@ import { useTema } from "@/ui/tema";
 import type { Paleta } from "@/ui/tokens";
 
 /**
- * União restrita aos ícones que C1 usa de fato (chevron do `ListRow` e as
- * duas amostras do catálogo) — nada de pré-popular a lista inteira do
- * pacote.
+ * União restrita aos ícones que C1/C2 usam de fato — nada de pré-popular a
+ * lista inteira do pacote. Os 8 novos (C2) vêm de `Banner`, `ConnectionStatus`
+ * (mapa `estado→ícone`, ver o próprio componente) e `Toast`.
  */
-export type NomeIcone = "CaretRight" | "Wallet" | "Bell";
+export type NomeIcone =
+  | "CaretRight"
+  | "Wallet"
+  | "Bell"
+  | "CheckCircle"
+  | "Info"
+  | "WarningCircle"
+  | "WarningOctagon"
+  | "LinkBreak"
+  | "PauseCircle"
+  | "Trash"
+  | "Question";
 
 /** Forma mínima que todo ícone do Phosphor e o stub de teste têm em comum. */
 type ComponenteIcone = ComponentType<{ size?: number; color?: string; weight?: string }>;
@@ -40,6 +51,14 @@ const ICONES: Record<NomeIcone, ComponenteIcone> = {
   CaretRight: resolver(require("phosphor-react-native/src/icons/CaretRight"), "CaretRightIcon"),
   Wallet: resolver(require("phosphor-react-native/src/icons/Wallet"), "WalletIcon"),
   Bell: resolver(require("phosphor-react-native/src/icons/Bell"), "BellIcon"),
+  CheckCircle: resolver(require("phosphor-react-native/src/icons/CheckCircle"), "CheckCircleIcon"),
+  Info: resolver(require("phosphor-react-native/src/icons/Info"), "InfoIcon"),
+  WarningCircle: resolver(require("phosphor-react-native/src/icons/WarningCircle"), "WarningCircleIcon"),
+  WarningOctagon: resolver(require("phosphor-react-native/src/icons/WarningOctagon"), "WarningOctagonIcon"),
+  LinkBreak: resolver(require("phosphor-react-native/src/icons/LinkBreak"), "LinkBreakIcon"),
+  PauseCircle: resolver(require("phosphor-react-native/src/icons/PauseCircle"), "PauseCircleIcon"),
+  Trash: resolver(require("phosphor-react-native/src/icons/Trash"), "TrashIcon"),
+  Question: resolver(require("phosphor-react-native/src/icons/Question"), "QuestionIcon"),
 };
 
 interface Props {

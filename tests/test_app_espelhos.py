@@ -10,13 +10,18 @@ Compara estrutura (glyph order, cmap, versão) em vez de bytes crus: o TTF não
 """
 from __future__ import annotations
 
+import hashlib
 import pathlib
+import re
 
 from fontTools.ttLib import TTFont
 
 RAIZ = pathlib.Path(__file__).resolve().parent.parent
 FONTES_APP = RAIZ / "app" / "assets" / "fonts"
 FONTES_SITE = RAIZ / "frontend" / "fonts"
+STICKERS_APP = RAIZ / "app" / "assets" / "stickers"
+STICKERS_SITE = RAIZ / "frontend" / "brand" / "stickers"
+CONNECTION_STATUS_TS = RAIZ / "app" / "src" / "ui" / "componentes" / "ConnectionStatus.tsx"
 
 PESOS = ["Regular", "Medium", "SemiBold", "Bold"]
 
@@ -83,3 +88,42 @@ def test_ttf_tem_os_glifos_que_o_app_usa_fora_do_alfabeto_comum():
         cmap = TTFont(ttf_path).getBestCmap()
         faltando = [nome for codepoint, nome in GLIFOS_OBRIGATORIOS.items() if codepoint not in cmap]
         assert not faltando, f"{ttf_path.name} sem glifo(s) {faltando}"
+
+
+def _sha256(caminho: pathlib.Path) -> str:
+    return hashlib.sha256(caminho.read_bytes()).hexdigest()
+
+
+def test_stickers_do_app_sao_byte_a_byte_iguais_aos_do_site():
+    """`EmptyState`/`InsightCard` (PR C2) usam `app/assets/stickers/`, cópia
+    dos 12 `.webp` de `frontend/brand/stickers/` — sem este teste as duas
+    árvores podem divergir em silêncio (arte trocada, versão velha)."""
+    arquivos_site = sorted(p.name for p in STICKERS_SITE.glob("*.webp"))
+    assert arquivos_site, f"nenhum sticker em {STICKERS_SITE}"
+    for nome in arquivos_site:
+        app_path = STICKERS_APP / nome
+        assert app_path.is_file(), f"falta {app_path}"
+        assert _sha256(app_path) == _sha256(STICKERS_SITE / nome), f"{nome} diverge do site"
+
+    # Espelho de mão única antes: só ia site → app. Sticker a MAIS no app
+    # (não removido do site, ou nunca existiu lá) passava em silêncio.
+    arquivos_app = sorted(p.name for p in STICKERS_APP.glob("*.webp"))
+    assert arquivos_app == arquivos_site, (
+        f"app tem sticker(s) a mais/a menos que o site: app={arquivos_app} × site={arquivos_site}"
+    )
+
+
+def test_estados_do_connection_status_batem_com_pluggy_health():
+    """`ConnectionStatus.tsx` mapeia estado→(tom, ícone) para as mesmas
+    chaves de `_LABELS` — uma chave nova lá sem entrada aqui não pode passar
+    em silêncio (CLAUDE.md §0.7: uma fonte de verdade é o backend)."""
+    from core.services.pluggy_health import _LABELS
+
+    texto = CONNECTION_STATUS_TS.read_text()
+    # Ancorado no bloco do `VISUAL`, não no arquivo inteiro: uma regex solta
+    # casava qualquer `chave: {` no arquivo, então mover uma chave para um
+    # objeto morto no MESMO arquivo passava verde (medido).
+    bloco = re.search(r"const VISUAL[^=]*=\s*\{(.*?)\n\};", texto, re.S)
+    assert bloco, f"bloco `const VISUAL = {{...}}` não encontrado em {CONNECTION_STATUS_TS}"
+    estados_ts = set(re.findall(r"^\s*(\w+):\s*\{", bloco.group(1), re.MULTILINE))
+    assert estados_ts == set(_LABELS), f"TS: {sorted(estados_ts)} × Python: {sorted(_LABELS)}"

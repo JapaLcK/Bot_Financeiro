@@ -1,4 +1,4 @@
-import { falado, partes } from "@/ui/dinheiro";
+import { faladoComSinal, partes, VALOR_INDISPONIVEL_FALADO } from "@/ui/dinheiro";
 import type { Paleta } from "@/ui/tokens";
 
 import { Texto } from "./Texto";
@@ -37,8 +37,13 @@ export function Money({ centavos, tipo = "saldo", variante = "corpo", oculto = f
 
   const p = partes(centavos);
   if (!p) {
+    // Mesmo texto de `VALOR_INDISPONIVEL_FALADO` (fonte única, CLAUDE.md
+    // §0.7) — capitalizado aqui porque este rótulo é a frase INTEIRA e
+    // isolada (início), diferente do uso dentro de `faladoComSinal`/
+    // `AmountInput`, que o embutem no MEIO de uma frase maior.
+    const rotulo = VALOR_INDISPONIVEL_FALADO.charAt(0).toUpperCase() + VALOR_INDISPONIVEL_FALADO.slice(1);
     return (
-      <Texto variante={variante} tom="ink" numerico accessible accessibilityLabel="Valor indisponível">
+      <Texto variante={variante} tom="ink" numerico accessible accessibilityLabel={rotulo}>
         —
       </Texto>
     );
@@ -58,8 +63,10 @@ export function Money({ centavos, tipo = "saldo", variante = "corpo", oculto = f
     }
   }
 
-  const prefixoFala = sinal === SINAL_MENOS ? "menos " : sinal === "+" ? "mais " : "";
-  const label = `${prefixoFala}${falado(centavos) ?? ""}`;
+  // Mesma função que `TransactionRow` usa para o rótulo do container
+  // `accessible` (CLAUDE.md §0.7) — antes cada um remontava "sinal + falado"
+  // a seu próprio jeito, e já tinham divergido em zero/valor inválido.
+  const label = faladoComSinal(centavos, tipo);
   const antesDaVirgula = `${sinal}R$ ${p.inteiro},`;
 
   if (variante !== "display") {
