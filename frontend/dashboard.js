@@ -2168,6 +2168,14 @@ function _clBox(sticker, titulo, corpo, classe = "empty-sticker") {
    — o chamador para ali. Handler por `addEventListener` e não `onclick=`:
    atributo de evento em markup gerado entra no levantamento do
    `handlers_inline.test.mjs`. */
+/* Painel com estado terminal de sessão expirada: a marca `data-terminal` fica
+   num FILHO DIRETO do container — a `.chart-empty` dentro do wrap do canvas, ou
+   a `.cl-box` escrita no painel sem canvas (`analytics-stats`). Consultada POR
+   PAINEL pelo `applyTheme`, nunca globalmente. */
+function _painelExpirado(container) {
+  return !!(container && container.querySelector(":scope > [data-terminal]"));
+}
+
 function _sessaoExpirou(motivo, el) {
   const status = typeof motivo === "number" ? motivo : (motivo && motivo.status);
   if (status !== 401) return false;
@@ -2181,15 +2189,18 @@ function _sessaoExpirou(motivo, el) {
     const canvas = el.tagName === "CANVAS" ? el : el.querySelector("canvas");
     if (canvas) {
       _chartVazio(canvas, true, "Sua sessão expirou", corpo, "thinking");
-      // A caixa fica MARCADA como terminal, e é isso que a protege do
-      // `applyTheme`: trocar o tema reconstruía os gráficos a partir do cache
-      // (`_lastHistory`, `_expenseSeries`, `_analyticsCache`), e o
-      // `_chartVazio(el, false)` de dentro do build* apagava a caixa e
-      // instanciava o Chart com a série VELHA — a sessão expirada sumia da tela
-      // sozinha, por uma troca de tema. Medido nos dois gráficos do overview.
+      // A caixa fica MARCADA como terminal (nos dois ramos), e é isso que a
+      // protege do `applyTheme`: trocar o tema reconstruía a partir do cache
+      // (`_lastHistory`, `_expenseSeries`, `_analyticsCache`), e o build*
+      // apagava a caixa e redesenhava a série VELHA. A guarda é POR PAINEL
+      // (`_painelExpirado`): os outros gráficos seguem pegando o tema novo.
       const box = canvas.parentElement && canvas.parentElement.querySelector(":scope > .chart-empty");
       if (box) box.dataset.terminal = "1";
-    } else el.innerHTML = _clBox("thinking", "Sua sessão expirou", corpo);
+    } else {
+      el.innerHTML = _clBox("thinking", "Sua sessão expirou", corpo);
+      // `firstElementChild`, não `firstChild`: o template começa com espaço.
+      if (el.firstElementChild) el.firstElementChild.dataset.terminal = "1";
+    }
     const btn = (canvas ? canvas.parentElement : el).querySelector("[data-relogin]");
     if (btn) btn.addEventListener("click", () => location.assign("/login"));
   }
@@ -2258,6 +2269,9 @@ function _chartVazio(el, vazio, titulo, corpo, sticker = "point") {
   el.style.display = "none";
   wrap.style.minHeight = "180px";
   const alvo = box || wrap.appendChild(document.createElement("div"));
+  // Vazio comum reaproveitando a caixa de um 401 não herda a marca terminal:
+  // senão o `applyTheme` seguia pulando este gráfico com a sessão já de volta.
+  alvo.removeAttribute("data-terminal");
   alvo.className = "chart-empty";
   alvo.innerHTML = _clBox(sticker, titulo, corpo, "empty-sticker sm");
   return true;
@@ -5649,14 +5663,21 @@ async function _fetchAnalyticsAll(months, { force = false } = {}) {
 function renderAnalyticsView(data) {
   _destroyAnalyticsCharts();
   renderAnalyticsKPIs(data.kpis, data.months);
-  renderAnalyticsEvolution(data.evolution);
-  renderAnalyticsIncomeExpense(data.evolution);
-  renderAnalyticsCategoryDonut(data.categories);
-  renderAnalyticsWeekday(data.weekday);
+  _renderAnalyticsCharts(data);
   renderAnalyticsComparative(data.evolution);
   renderAnalyticsMerchants(data.merchants, data.months);
   renderAnalyticsInsights(data.insights);
   renderAnalyticsPatterns(data.patterns);
+}
+
+// Só os gráficos (canvas `mock-*`) — o `applyTheme` repinta as cores com eles
+// mesmo quando o `analytics-stats` está com a caixa de sessão expirada.
+function _renderAnalyticsCharts(data) {
+  _destroyAnalyticsCharts();
+  renderAnalyticsEvolution(data.evolution);
+  renderAnalyticsIncomeExpense(data.evolution);
+  renderAnalyticsCategoryDonut(data.categories);
+  renderAnalyticsWeekday(data.weekday);
 }
 
 /* A cor de um VALOR — dinheiro, e desde o histórico também CONTAGEM ("0
@@ -6704,22 +6725,18 @@ function applyTheme(theme) {
     : '<i class="ph ph-moon" aria-hidden="true"></i>';
   if (label) label.textContent = isLight ? "Modo claro" : "Modo escuro";
 
-  // Sessão expirada não se repinta com cache: enquanto existir caixa terminal
-  // na tela, o toggle de tema NÃO reconstrói gráfico nenhum. Um ponto só, e
-  // vale pros seis gráficos (overview + Análises) e pros futuros — o alternativo
-  // seria zerar `_lastHistory`/`_expenseSeries`/`_analyticsCache` no 401, que
-  // pede uma linha nova a cada gráfico que nascer. A marca some sozinha quando
-  // a sessão volta: a carga com 200 chama `_chartVazio(el, false)`, que REMOVE
-  // a caixa — por isso o teste "quando a sessão volta, o gráfico volta" segue
-  // verde sem nenhum código de limpeza aqui.
-  if (document.querySelector(".chart-empty[data-terminal]")) return;
-
-  // Re-renderiza os gráficos da view Análises pra pegar as cores novas do tema.
-  // Se o user está na view Análises, força re-fetch (cores dependem de tema,
-  // mas dados são os mesmos — usa cache).
+  // Reconstrói os gráficos a partir do cache pra pegar as cores do tema novo
+  // (Chart.js não relê cor no toggle). Sessão expirada não se repinta com
+  // cache, e a guarda é POR PAINEL (`_painelExpirado`): uma caixa terminal só
+  // segura o próprio painel — os outros gráficos seguem trocando de cor. A
+  // marca some quando a sessão volta: o 200 chama `_chartVazio` (que remove a
+  // caixa ou a marca) ou reescreve o `analytics-stats`.
   const analyticsVisible = document.getElementById("analytics-view")?.classList.contains("active");
   if (analyticsVisible && _analyticsCache) {
-    renderAnalyticsView(_analyticsCache);
+    // Com KPIs expirados, o render inteiro apagaria o aviso; os gráficos
+    // `mock-*` não levam a caixa e são repintados mesmo assim.
+    if (_painelExpirado(document.getElementById("analytics-stats"))) _renderAnalyticsCharts(_analyticsCache);
+    else renderAnalyticsView(_analyticsCache);
   }
 
   // Idem pros gráficos do overview: Chart.js não relê as cores no toggle,
@@ -6727,9 +6744,14 @@ function applyTheme(theme) {
   const overviewVisible = document.getElementById("overview-view")?.classList.contains("active");
   if (overviewVisible && lastData) {
     const d = lastData;
-    buildCatChart(d.expense_categories || []);   // idem render(): sem guarda de .length
-    if (_expenseSeries) buildExpenseChart(_expenseSeries, _expensePeriod);
-    if (_lastHistory && _lastHistory.length) buildHistoryChart(_lastHistory);
+    const livre = id => { const c = document.getElementById(id); return !_painelExpirado(c && c.parentElement); };
+    // `livre("chart-cat")` está aqui por SIMETRIA: hoje nenhum 401 tem como
+    // alvo o wrap do `chart-cat` (o 401 do mês vai para o `launches-card`,
+    // `:7802`), então a guarda não tem caminho alcançável — não refaça a
+    // varredura, e não a remova se um 401 novo passar a mirar este painel.
+    if (livre("chart-cat")) buildCatChart(d.expense_categories || []);   // idem render(): sem guarda de .length
+    if (_expenseSeries && livre("chart-day")) buildExpenseChart(_expenseSeries, _expensePeriod);
+    if (_lastHistory && _lastHistory.length && livre("chart-history")) buildHistoryChart(_lastHistory);
   }
 }
 function toggleTheme() {
@@ -10449,6 +10471,23 @@ function loadExpenseChart(days) {
   const promise = (async () => {
     try {
       const r = await fetch(`${API}/expenses/daily/${USER_ID}?days=${days}`, { credentials: "same-origin" });
+      // A guarda de geração vem ANTES do ramo do 401: o dedup de voo só junta
+      // chamadas do MESMO `days`, então 7D→30D deixa dois voos no ar e um 401
+      // atrasado do 7D estampava a caixa por cima do gráfico do 30D já pintado
+      // — e, com a marca por painel, travava o `applyTheme` do `chart-day` até
+      // a carga seguinte. `_expensePeriod` basta como geração aqui (é o último
+      // período pedido); não precisa do `_historyPintadoSeq` do histórico,
+      // porque ali o problema era outro: carga que FALHA bloqueando quem tinha
+      // dado, com a seção nascendo escondida. Este painel está sempre visível e
+      // uma falha aqui não bloqueia ninguém.
+      // O que esta guarda NÃO fecha: `_expensePeriod` é identidade de período,
+      // não de voo. Em 7D→30D→7D com o primeiro fetch ainda pendente, o dedup
+      // deixa dois voos de 7D no ar e os dois passam por aqui — se o 401 do
+      // primeiro chegar depois do 200 do terceiro, a caixa estampa por cima de
+      // dado fresco. Janela estreita (três toques na mesma pendência, com a
+      // sessão se recuperando no meio) e o estado se desfaz na carga seguinte;
+      // ficou aberta de propósito, não por descuido.
+      if (days !== _expensePeriod) return;
       if (r.status === 401) {
         const el = document.getElementById("chart-day");
         _sessaoExpirou(401, el && el.parentElement);
@@ -10571,12 +10610,27 @@ function _isLightMode() {
 }
 
 let _lastHistory = null;
+// Cargas SOBREPOSTAS do histórico (`ws.onopen` + puxar-pra-atualizar, refresh de
+// aba, troca de mês) não se resolvem por ordem de CHEGADA: se resolvessem, uma
+// carga que não pinta nada (5xx, rede) barraria para sempre o 200 com dado que
+// chegou "atrasado" — e a seção nasce `display:none`, então o resultado era
+// seção EM BRANCO com `_lastHistory` null, fora do alcance do `applyTheme`.
+// A regra é comparar com o que ESTÁ NA TELA: `_historyPintadoSeq` guarda a
+// geração do resultado pintado, e um resultado só entra se for MAIS NOVO que
+// ele. Quem falha não pinta, não marca e não bloqueia ninguém; o 401 pinta como
+// qualquer outro resultado, e por isso continua vencendo um 200 mais VELHO em
+// qualquer ordem — e perdendo para um 200 mais NOVO.
+let _historySeq = 0;
+let _historyPintadoSeq = 0;
 async function fetchHistory() {
+  const seq = ++_historySeq;
   try {
     const r = await fetch(`${API}/history/${USER_ID}`, {
       credentials: "same-origin"
     });
     if (r.status === 401) {
+      if (seq <= _historyPintadoSeq) return;
+      _historyPintadoSeq = seq;
       const titulo = document.getElementById("history-title");
       if (titulo) titulo.style.display = "";
       const wrap = document.getElementById("history-wrap");
@@ -10587,6 +10641,8 @@ async function fetchHistory() {
     if (!r.ok) return;
 
     const payload = await r.json();
+    if (seq <= _historyPintadoSeq) return;
+    _historyPintadoSeq = seq;
     const history = payload.data || [];
     _lastHistory = history;
 
@@ -10605,7 +10661,10 @@ async function fetchHistory() {
     if (titulo) titulo.style.display = "";
     if (wrap)   wrap.style.display   = "";
 
-    setTimeout(() => buildHistoryChart(history), 50);
+    // O build espera a seção sair do `display:none` pra medir o canvas. O timer
+    // tem DONO: só constrói se o que está na tela ainda for este resultado —
+    // se um mais novo pintou no meio, ele é que manda, e nada fica pendurado.
+    setTimeout(() => { if (seq === _historyPintadoSeq) buildHistoryChart(history); }, 50);
   } catch(e) {
     console.warn("[history] fetch error:", e);
   }

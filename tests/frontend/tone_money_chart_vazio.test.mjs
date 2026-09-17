@@ -87,7 +87,7 @@ async function bootPage() {
   await page.setContent(
     IDS.map((i) => `<div id="${i}"></div>`).join("") +
     GRAFICOS.map(([id]) => wrapperDe(id)).join("") +
-    wrapperDe("chart-history", "history-wrap"),
+    `<div id="history-wrap" style="display:none"><div class="card">${wrapperDe("chart-history")}</div></div>`,
   );
   await page.addStyleTag({ path: DASHBOARD_CSS });   // geometria real, não fabricada
   await page.evaluate(() => { window.fetch = () => new Promise(() => {}); });
@@ -234,7 +234,7 @@ test("401 nas cargas com canvas: caixa com ação, e o canvas SOBREVIVE", async 
       // O wrap do chart-day não tem id no HTML: pega pelo canvas, que é como o
       // `loadExpenseChart` também o alcança.
       expense: olha("chart-day", document.getElementById("chart-day").parentElement),
-      history: olha("chart-history", document.getElementById("history-wrap")),
+      history: olha("chart-history", document.getElementById("chart-history").parentElement),
       wrapVisivel: document.getElementById("history-wrap").style.display,
     };
   });
@@ -258,12 +258,13 @@ test("401 no histórico: quando a sessão volta, o gráfico volta", async () => 
   // o gráfico só voltava com reload.
   const { page, errs } = await bootPage();
   const r = await page.evaluate(async () => {
-    const wrap = document.getElementById("history-wrap");
+    const secao = document.getElementById("history-wrap");
+    const wrap = document.getElementById("chart-history").parentElement;
     const estado = () => ({
       display: document.getElementById("chart-history").style.display,
       minH: wrap.style.minHeight,
       caixa: !!wrap.querySelector(":scope > .chart-empty"),
-      secao: wrap.style.display,
+      secao: secao.style.display,
     });
     window.fetch = async () => ({ ok: false, status: 401, json: async () => ({}), text: async () => "" });
     await fetchHistory();
@@ -447,8 +448,8 @@ test("trocar o tema NÃO apaga a caixa de sessão expirada (chart-day e chart-hi
   // false)` de dentro do build* — o ANTÍDOTO do teste acima — apagava a caixa e
   // instanciava o Chart com a série VELHA. A sessão expirada sumia da tela por
   // uma troca de tema, nos DOIS gráficos.
-  // NEGATIVO: tire o `if (document.querySelector(".chart-empty[data-terminal]")) return;`
-  // do `applyTheme` (ou o `dataset.terminal` do `_sessaoExpirou`) e os quatro
+  // NEGATIVO: tire as guardas por painel `livre(...)`/`_painelExpirado` do
+  // `applyTheme` (ou o `dataset.terminal` do `_sessaoExpirou`) e os
   // `depois.*` caem.
   // POSITIVO: `curado` prova que a marca não prende nada — o 200 seguinte
   // devolve os dois gráficos.
@@ -989,6 +990,287 @@ test("fmtPnl: resultado zerado não tem cor NEM seta", async () => {
   assert.match(byName.ganho.texto, /^↑ R\$ 50,00$/, `ganho: "${byName.ganho.texto}"`);
   assert.equal(byName.perda.classe, "pnl-down", "perda real perdeu o vermelho");
   assert.match(byName.perda.texto, /^↓ R\$ 50,00$/, `perda: "${byName.perda.texto}"`);
+  await semErros(page, errs);
+  await page.close();
+});
+
+/* Guarda do tema POR PAINEL e geração do histórico (#435, apontamentos 4-7).
+   CONTROLES NEGATIVOS deste grupo:
+   - tire o `alvo.removeAttribute("data-terminal")` do `_chartVazio` → T1 cai;
+   - volte a guarda global `if (document.querySelector(".chart-empty[data-terminal]")) return;`
+     no `applyTheme` → T2 cai;
+   - chame `renderAnalyticsView` sem olhar `_painelExpirado(analytics-stats)` → T3 cai
+     (aviso apagado); tire o `_renderAnalyticsCharts` desse ramo → T3 cai (sem cor nova);
+   - tire a guarda `if (seq <= _historyPintadoSeq) return;` do ramo 401 do
+     `fetchHistory` → T4 "401 velho cobriu o gráfico novo" cai;
+   - tire a MESMA guarda do ramo do json → T4 "200 velho apagou o 401 novo" cai;
+   - tire o dono do timer (`seq === _historyPintadoSeq`) → T4 "build atrasado do
+     200 velho apagou o 401 novo" cai;
+   - mova o `if (days !== _expensePeriod) return;` do `loadExpenseChart` para
+     DEPOIS do ramo do 401 → T4 "401 atrasado do 7D" cai.
+   Trocar `<=` por `<` nessas guardas é mutante EQUIVALENTE (cada `seq` é único e
+   só pinta uma vez), não um buraco de teste — não "conserte" isso.
+   POSITIVO: T5 (a sessão volta em Análises e o tema redesenha tudo). */
+
+const ANALYTICS_HTML =
+  '<div id="analytics-view" class="dash-view active"><div id="analytics-stats"></div></div>';
+const ANALYTICS_CACHE = `({
+  kpis: { total_expense: 60, total_income: 90, savings_rate: .2, delta_pct: {}, peak_day: null },
+  evolution: [{ month: "2026-01", income: 9, expense: 3 }],
+  categories: [{ name: "mercado", total: 80 }],
+  weekday: [{ label: "seg", dow: 1, avg: 7 }],
+  merchants: [], patterns: [], insights: [], months: _analyticsCurrentMonths,
+})`;
+const MOCKS = ["mock-evolution-chart", "mock-income-expense-chart", "mock-category-donut", "mock-weekday-chart"];
+
+test("T1: 200 zerado depois de 401 tira a marca terminal do chart-day", async () => {
+  const { page, errs } = await bootPage();
+  const r = await page.evaluate(async () => {
+    document.body.insertAdjacentHTML("beforeend", '<div id="overview-view" class="active"></div>');
+    USER_ID = 1;
+    lastData = { expense_categories: [] };
+    _lastHistory = [{ month: "2026-01", income: 9, expense: 3 }];
+    const wrapDia = document.getElementById("chart-day").parentElement;
+    window.fetch = async () => ({ ok: false, status: 401, json: async () => ({}), text: async () => "" });
+    await loadExpenseChart(7);
+    const marcou = !!wrapDia.querySelector(":scope > [data-terminal]");
+    window.fetch = async () => ({ ok: true, status: 200, json: async () => ({ data: [{ date: "2026-01-01", total: 0 }] }) });
+    await loadExpenseChart(7);
+    window._charts = [];
+    applyTheme("light");
+    return { marcou, marca: !!wrapDia.querySelector(":scope > [data-terminal]"), charts: window._charts.slice() };
+  });
+  assert.equal(r.marcou, true, "premissa: o 401 marca a caixa");
+  assert.equal(r.marca, false, "vazio comum depois do 401 manteve a marca terminal");
+  assert.ok(r.charts.includes("chart-history"), `tema não redesenhou o histórico: ${JSON.stringify(r.charts)}`);
+  await semErros(page, errs);
+  await page.close();
+});
+
+test("T2: caixa terminal no chart-day não impede o tema nos outros gráficos", async () => {
+  const { page, errs } = await bootPage();
+  const r = await page.evaluate(async () => {
+    document.body.insertAdjacentHTML("beforeend", '<div id="overview-view" class="active"></div>');
+    USER_ID = 1;
+    lastData = { expense_categories: [{ categoria: "mercado", total: 80 }] };
+    _lastHistory = [{ month: "2026-01", income: 9, expense: 3 }];
+    _expenseSeries = [{ date: "2026-01-01", total: 12 }];
+    window.fetch = async () => ({ ok: false, status: 401, json: async () => ({}), text: async () => "" });
+    await loadExpenseChart(7);
+    window._charts = [];
+    applyTheme("light");
+    const wrapDia = document.getElementById("chart-day").parentElement;
+    return { charts: window._charts.slice(), caixa: !!wrapDia.querySelector(":scope > .chart-empty[data-terminal]") };
+  });
+  assert.ok(r.charts.includes("chart-cat") && r.charts.includes("chart-history"),
+    `uma caixa terminal segurou o tema dos outros gráficos: ${JSON.stringify(r.charts)}`);
+  assert.ok(!r.charts.includes("chart-day"), "o tema redesenhou o chart-day expirado com a série velha");
+  assert.equal(r.caixa, true, "a caixa do chart-day tem de ficar");
+  await semErros(page, errs);
+  await page.close();
+});
+
+test("T3: Análises com sessão expirada — tema mantém o aviso e repinta os gráficos", async () => {
+  const { page, errs } = await bootPage();
+  const r = await page.evaluate(async ([html, cache]) => {
+    document.body.insertAdjacentHTML("beforeend", html);
+    USER_ID = 1;
+    _analyticsCache = eval(cache);
+    window.fetch = async () => ({ ok: false, status: 401, json: async () => ({}), text: async () => "" });
+    await loadAnalyticsView(false);
+    await new Promise((res) => setTimeout(res, 50));
+    const stats = document.getElementById("analytics-stats");
+    const antes = !!stats.querySelector("[data-relogin]");
+    window._charts = [];
+    applyTheme("light");
+    return { antes, depois: !!stats.querySelector("[data-relogin]"), charts: window._charts.slice() };
+  }, [ANALYTICS_HTML, ANALYTICS_CACHE]);
+  assert.equal(r.antes, true, "premissa: a revalidação com 401 pinta o aviso");
+  assert.equal(r.depois, true, "trocar o tema apagou o aviso de sessão expirada das Análises");
+  for (const id of MOCKS) assert.ok(r.charts.includes(id), `${id} não pegou o tema novo: ${JSON.stringify(r.charts)}`);
+  await semErros(page, errs);
+  await page.close();
+});
+
+test("T4: fetchHistory sobreposto — resposta ou build de carga superada não pinta", async () => {
+  const { page, errs } = await bootPage();
+  const r = await page.evaluate(async () => {
+    USER_ID = 1;
+    const secao = document.getElementById("history-wrap");
+    const wrap = document.getElementById("chart-history").parentElement;
+    const espera = (ms) => new Promise((res) => setTimeout(res, ms));
+    const resp = (status) => status === 401
+      ? { ok: false, status, json: async () => ({}), text: async () => "" }
+      : { ok: true, status, json: async () => ({ data: [{ month: "2026-01", income: 9, expense: 3 }] }) };
+    let pend = [];
+    window.fetch = () => new Promise((res) => pend.push(res));
+    const zera = () => {
+      _chartVazio(document.getElementById("chart-history"), false);
+      window._charts = []; _lastHistory = null;
+      secao.style.display = "none";
+      window.fetch = () => new Promise((res) => pend.push(res));
+    };
+    const foto = () => ({ caixa: !!wrap.querySelector(":scope > .chart-empty"), desenhou: window._charts.includes("chart-history") });
+    const out = {};
+
+    // 200 velho chega depois do 401 novo.
+    window._charts = []; pend = [];
+    let a = fetchHistory(), b = fetchHistory();
+    pend[1](resp(401)); await b;
+    pend[0](resp(200)); await a; await espera(120);
+    out.velho200 = foto();
+
+    // 200 resolve primeiro, 401 chega dentro dos 50 ms do timer.
+    _chartVazio(document.getElementById("chart-history"), false);
+    window._charts = []; pend = [];
+    a = fetchHistory(); pend[0](resp(200)); await a;
+    b = fetchHistory(); pend[1](resp(401)); await b; await espera(120);
+    out.timer = foto();
+
+    // 401 velho chega depois do 200 novo.
+    _chartVazio(document.getElementById("chart-history"), false);
+    window._charts = []; pend = [];
+    a = fetchHistory(); b = fetchHistory();
+    pend[1](resp(200)); await b; await espera(120);
+    pend[0](resp(401)); await a; await espera(20);
+    out.velho401 = foto();
+
+    // 401 novo chega enquanto o json do 200 velho ainda está lendo.
+    _chartVazio(document.getElementById("chart-history"), false);
+    window._charts = []; _lastHistory = null; pend = [];
+    let soltaJson;
+    const lento = { ok: true, status: 200, json: () => new Promise((res) => { soltaJson = res; }) };
+    a = fetchHistory(); pend[0](lento); await espera(0);
+    b = fetchHistory(); pend[1](resp(401)); await b;
+    soltaJson({ data: [{ month: "2026-01", income: 9, expense: 3 }] }); await a; await espera(120);
+    out.jsonVelho = { ...foto(), cache: _lastHistory };
+
+    // A carga VENCEDORA falha sem pintar (500) — o 200 da superada, que chega
+    // depois, tem de pintar em vez de deixar a seção em branco.
+    _chartVazio(document.getElementById("chart-history"), false);
+    window._charts = []; _lastHistory = null; pend = [];
+    a = fetchHistory(); b = fetchHistory();
+    pend[1]({ ok: false, status: 500, json: async () => ({}), text: async () => "" }); await b;
+    pend[0](resp(200)); await a; await espera(120);
+    out.vencedora500 = { ...foto(), cache: _lastHistory && _lastHistory.length, secao: secao.style.display };
+
+    // Idem com a vencedora caindo na REDE (o `catch`).
+    _chartVazio(document.getElementById("chart-history"), false);
+    window._charts = []; _lastHistory = null; pend = []; const rej = [];
+    window.fetch = () => new Promise((res, rjt) => { pend.push(res); rej.push(rjt); });
+    a = fetchHistory(); b = fetchHistory();
+    rej[1](new TypeError("Failed to fetch")); await b.catch(() => {});
+    pend[0](resp(200)); await a; await espera(120);
+    out.vencedoraRede = { ...foto(), cache: _lastHistory && _lastHistory.length, secao: secao.style.display };
+
+    // B1: ORDEM INVERSA — a superada responde 200 ANTES de a vencedora falhar.
+    // Nada do que já está pintado pode ser desfeito por uma falha posterior.
+    zera(); pend = [];
+    window.fetch = () => new Promise((res) => pend.push(res));
+    a = fetchHistory(); b = fetchHistory();
+    pend[0](resp(200)); await a; await espera(120);
+    pend[1]({ ok: false, status: 500, json: async () => ({}), text: async () => "" }); await b; await espera(20);
+    out.b1 = { ...foto(), cache: _lastHistory && _lastHistory.length, secao: secao.style.display };
+
+    // B2: a 2ª carga entra DENTRO dos 50 ms do timer da 1ª e falha. O timer não
+    // pode ficar barrado por uma carga que não pintou nada: seção revelada com
+    // canvas vazio é o pior estado (parece carregada e não tem gráfico).
+    zera(); pend = [];
+    a = fetchHistory(); pend[0](resp(200)); await a;
+    b = fetchHistory(); pend[1]({ ok: false, status: 500, json: async () => ({}), text: async () => "" }); await b;
+    await espera(120);
+    out.b2 = { ...foto(), cache: _lastHistory && _lastHistory.length, secao: secao.style.display };
+
+    // B6: a SUPERADA cai na rede DEPOIS de a vencedora ter pintado o 401 — uma
+    // falha de carga velha não derruba o estado terminal da nova, e a carga
+    // SEGUINTE com 200 ainda consegue pintar por cima dele.
+    zera(); pend = []; const rej2 = [];
+    window.fetch = () => new Promise((res, rjt) => { pend.push(res); rej2.push(rjt); });
+    a = fetchHistory(); b = fetchHistory();
+    pend[1](resp(401)); await b;
+    rej2[0](new TypeError("Failed to fetch")); await a.catch(() => {}); await espera(20);
+    const caixaDepoisDaRede = foto().caixa;
+    pend = []; window.fetch = () => new Promise((res) => pend.push(res));
+    const c = fetchHistory(); pend[0](resp(200)); await c; await espera(120);
+    out.b6 = { caixaDepoisDaRede, ...foto(), secao: secao.style.display };
+
+    // M1 (painel IRMÃO): o dedup de voo do `loadExpenseChart` só junta o MESMO
+    // `days`, então 7D→30D deixa dois voos no ar. O 200 do 30D pinta; o 401
+    // atrasado do 7D não pode estampar a caixa por cima — nem deixar a marca
+    // terminal, que travaria o tema deste painel até a carga seguinte.
+    const wrapDia = document.getElementById("chart-day").parentElement;
+    _chartVazio(document.getElementById("chart-day"), false);
+    window._charts = []; _expensePeriod = null; pend = [];
+    window.fetch = () => new Promise((res) => pend.push(res));
+    const p7 = loadExpenseChart(7), p30 = loadExpenseChart(30);
+    pend[1]({ ok: true, status: 200, json: async () => ({ data: [{ date: "2026-01-01", total: 12 }] }) });
+    await p30;
+    pend[0](resp(401)); await p7; await espera(20);
+    const depoisDo401 = {
+      caixa: !!wrapDia.querySelector(":scope > .chart-empty"),
+      marca: !!wrapDia.querySelector(":scope > [data-terminal]"),
+      desenhou: window._charts.includes("chart-day"),
+    };
+    // ...e o tema continua alcançando o painel (a marca não ficou pendurada).
+    document.body.insertAdjacentHTML("beforeend", '<div id="overview-view" class="active"></div>');
+    lastData = { expense_categories: [] };
+    window._charts = [];
+    applyTheme("light");
+    out.m1 = { ...depoisDo401, temaRedesenhou: window._charts.includes("chart-day") };
+    return out;
+  });
+  assert.deepEqual(r.velho200, { caixa: true, desenhou: false }, "200 velho apagou o 401 novo");
+  assert.deepEqual(r.jsonVelho, { caixa: true, desenhou: false, cache: null },
+    "json do 200 velho gravou _lastHistory/pintou por cima do 401 novo");
+  assert.deepEqual(r.vencedora500, { caixa: false, desenhou: true, cache: 1, secao: "" },
+    "500 na carga vencedora deixou o histórico EM BRANCO com o 200 da superada descartado");
+  assert.deepEqual(r.vencedoraRede, { caixa: false, desenhou: true, cache: 1, secao: "" },
+    "falha de rede na carga vencedora deixou o histórico EM BRANCO");
+  assert.deepEqual(r.b1, { caixa: false, desenhou: true, cache: 1, secao: "" },
+    "B1: 500 posterior desfez o que o 200 da carga superada já tinha pintado");
+  assert.deepEqual(r.b2, { caixa: false, desenhou: true, cache: 1, secao: "" },
+    "B2: seção revelada com canvas VAZIO — o timer ficou barrado por uma carga que não pintou");
+  assert.deepEqual(r.b6, { caixaDepoisDaRede: true, caixa: false, desenhou: true, secao: "" },
+    "B6: a falha de rede da superada derrubou o 401 da vencedora (ou travou a carga seguinte)");
+  assert.deepEqual(r.m1, { caixa: false, marca: false, desenhou: true, temaRedesenhou: true },
+    "M1: 401 atrasado do 7D cobriu o gráfico do 30D (e/ou deixou marca travando o tema)");
+  assert.deepEqual(r.timer, { caixa: true, desenhou: false }, "build atrasado do 200 velho apagou o 401 novo");
+  assert.deepEqual(r.velho401, { caixa: false, desenhou: true }, "401 velho cobriu o gráfico novo");
+  await semErros(page, errs);
+  await page.close();
+});
+
+test("T5: sessão volta em Análises — KPIs voltam, sem marca, tema redesenha tudo", async () => {
+  const { page, errs } = await bootPage();
+  const r = await page.evaluate(async ([html, cache]) => {
+    document.body.insertAdjacentHTML("beforeend", html);
+    USER_ID = 1;
+    _analyticsCache = eval(cache);
+    window.fetch = async () => ({ ok: false, status: 401, json: async () => ({}), text: async () => "" });
+    await loadAnalyticsView(false);
+    await new Promise((res) => setTimeout(res, 50));
+    const fresco = eval(cache);
+    window.fetch = async (u) => {
+      const s = String(u);
+      const body = s.includes("/kpis") ? { kpis: fresco.kpis }
+        : s.includes("/evolution") ? { evolution: fresco.evolution }
+        : s.includes("/categories") ? { categories: fresco.categories }
+        : s.includes("/weekday") ? { weekdays: fresco.weekday } : {};
+      return { ok: true, status: 200, json: async () => body };
+    };
+    await loadAnalyticsView(true);
+    const stats = document.getElementById("analytics-stats");
+    window._charts = [];
+    applyTheme("light");
+    return {
+      kpis: stats.querySelectorAll(".stat-tile").length,
+      marca: !!stats.querySelector("[data-terminal]"),
+      charts: window._charts.slice(),
+    };
+  }, [ANALYTICS_HTML, ANALYTICS_CACHE]);
+  assert.equal(r.kpis, 4, "os KPIs não voltaram com a sessão");
+  assert.equal(r.marca, false, "a marca terminal ficou nas Análises depois do 200");
+  for (const id of MOCKS) assert.ok(r.charts.includes(id), `${id} não redesenhou: ${JSON.stringify(r.charts)}`);
   await semErros(page, errs);
   await page.close();
 });
