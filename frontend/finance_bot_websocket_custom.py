@@ -965,8 +965,11 @@ async def get_financial_data(
 
     from db.bank_movements import bank_movement_summary
     movement_summary = await asyncio.to_thread(bank_movement_summary, user_id)
+    from db.reconciliation import reconciliation_summary
+    recon_summary = await asyncio.to_thread(reconciliation_summary, user_id)
     return {
         "bank_movements": movement_summary,
+        "reconciliation": recon_summary,
         "user_id":            user_id,
         "timestamp":          datetime.now(timezone.utc).isoformat(),
         "year":               y,
