@@ -42,6 +42,9 @@ describe("Screen", () => {
     // Sem o deslocamento, o indicador nasce sob a barra de status: o padding
     // de área segura está no conteúdo, não no ScrollView.
     expect(refresh.props.progressViewOffset).toBe(METRICAS_DE_TESTE.insets.top);
+    // As duas cores: `tintColor` só vale no iOS, `colors` só no Android.
+    expect(refresh.props.tintColor).toBe(claro.brand);
+    expect(refresh.props.colors).toEqual([claro.brand]);
   });
 
   it("fundo muda de cor entre os dois temas", () => {

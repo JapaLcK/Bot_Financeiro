@@ -68,7 +68,12 @@ export function Screen(props: Props) {
           <RefreshControl
             refreshing={atualizando}
             onRefresh={onAtualizar}
+            // `tintColor` é iOS; no Android o RN descarta essa prop antes de
+            // repassar ao nativo (RefreshControl.js, ramo do
+            // AndroidSwipeRefreshLayout) e quem pinta é `colors`. Sem as duas,
+            // um dos sistemas cai no indicador padrão da plataforma.
             tintColor={cores.brand}
+            colors={[cores.brand]}
             progressViewOffset={insets.top}
           />
         ) : undefined
