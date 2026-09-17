@@ -15,9 +15,11 @@ não-None — prova que o filtro de status está fazendo trabalho real.
 """
 from __future__ import annotations
 
+import uuid
+
 import db
 
-from tests._fusao_of_helpers import ia_fora, uid_pro  # noqa: F401 (fixtures)
+from tests._fusao_of_helpers import ia_fora, manda, uid_pro  # noqa: F401 (fixtures)
 from tests.test_reconciliacao_resolver import _q, pendencia
 
 
@@ -59,3 +61,42 @@ def test_bank_movement_confirmed_nao_conta_como_fundido(uid_pro, ia_fora, monkey
     monkeypatch.setattr(analytics, "_FUSED_STATUSES_SQL",
                          "('auto_merged','confirmed','bank_movement_confirmed')")
     assert _timeline_item(uid_pro, manual)["reconciliation_of_tx_id"] == outra
+
+
+# ── ISOLAMENTO: a otimização (LEFT JOIN em vez de subquery correlacionada,
+# CLAUDE.md §0/§2) hoisteou `c.user_id = launches.user_id` pra fora da
+# correlação. `imported_launch_id` já é FK pra um launch.id globalmente único,
+# então um of_tx legítimo nunca casa com o launch de outro usuário — o caso
+# que discrimina é dado CORROMPIDO: uma transação da CONEXÃO de A com
+# `imported_launch_id` apontando pro launch de B (só alcançável se outro bug
+# já tiver escrito isso). O filtro de user_id é a última linha de defesa
+# contra esse vazamento — sem ele, o join casaria mesmo assim.
+
+def test_of_tx_de_a_com_launch_id_de_b_nao_vaza_para_b(uid_pro, ia_fora):
+    conexao, of_tx, manual, _ = pendencia(uid_pro)
+    db.confirm_reconciliation(uid_pro, of_tx)
+    assert _timeline_item(uid_pro, manual)["reconciliation_of_tx_id"] == of_tx
+
+    from tests.conftest import promote_to_pro
+    outro = int(uuid.uuid4().int % 1_000_000_000)
+    db.ensure_user(outro)
+    promote_to_pro(outro)
+    manda(outro, "Gastei 1 real com a barbara")
+    manual_b = _q("select id from launches where user_id=%s order by id desc limit 1",
+                  (outro,))[0]["id"]
+
+    # Dado corrompido: transação na CONEXÃO de A (uid_pro), mas
+    # `imported_launch_id`/`match_launch_id` apontando pro launch de B.
+    forjada = _q(
+        """insert into open_finance_transactions
+             (account_id, provider_transaction_id, description, amount, transaction_date,
+              imported_launch_id, match_launch_id, reconciliation_status)
+           select account_id, 'forjada-cross-user', 'FORJADA', -1, transaction_date,
+                  %s, %s, 'confirmed'
+             from open_finance_transactions where id=%s returning id""",
+        (manual_b, manual_b, of_tx),
+    )[0]["id"]
+
+    item_b = _timeline_item(outro, manual_b)
+    assert item_b["reconciliation_of_tx_id"] is None
+    assert item_b["reconciliation_of_tx_id"] != forjada

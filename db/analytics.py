@@ -811,17 +811,33 @@ def list_history(
                  -- id da transação OF do outro lado da fusão, só quando ainda
                  -- fundida (mesma condição do undo, db/reconciliation.py:119-120)
                  -- — usada pelo front pra oferecer "Desfazer" no detalhe.
-                 (SELECT o.id
-                    FROM open_finance_transactions o
-                    JOIN open_finance_accounts a ON a.id = o.account_id
-                    JOIN open_finance_connections c ON c.id = a.connection_id
-                   WHERE o.imported_launch_id = launches.id AND c.user_id = launches.user_id
-                     AND o.reconciliation_status IN {_FUSED_STATUSES_SQL}
-                     AND (o.match_launch_id IS NULL OR o.match_launch_id = launches.id)
-                   ORDER BY o.id LIMIT 1) AS reconciliation_of_tx_id
+                 fused.of_tx_id AS reconciliation_of_tx_id
           FROM launches
+          -- Antes: subquery correlacionada por linha de launches, com
+          -- Seq Scan de open_finance_transactions em cada uma (O(launches ×
+          -- tx_OF) — medido 8701 loops × 400 linhas). `user_id` é constante
+          -- pro list_history inteiro (um único parâmetro), então `c.user_id =
+          -- launches.user_id` pode sair da correlação sem mudar o resultado:
+          -- filtra as transações fundidas DESTE usuário uma vez só e faz um
+          -- LEFT JOIN por `imported_launch_id` (O(tx_OF) + hash join).
+          -- Mesma condição de match do undo (db/reconciliation.py:119-120):
+          -- `match_launch_id IS NULL OR match_launch_id = imported_launch_id`
+          -- substitui `= launches.id` porque só sobra linha aqui quando os
+          -- dois já são iguais, pelo ON do join.
+          LEFT JOIN (
+            SELECT DISTINCT ON (o.imported_launch_id)
+                   o.imported_launch_id, o.id AS of_tx_id
+              FROM open_finance_transactions o
+              JOIN open_finance_accounts a ON a.id = o.account_id
+              JOIN open_finance_connections c ON c.id = a.connection_id
+             WHERE c.user_id = %s
+               AND o.reconciliation_status IN {_FUSED_STATUSES_SQL}
+               AND (o.match_launch_id IS NULL OR o.match_launch_id = o.imported_launch_id)
+             ORDER BY o.imported_launch_id, o.id
+          ) fused ON fused.imported_launch_id = launches.id
           WHERE {" AND ".join(clauses)}
         """
+        launches_params = [user_id] + launches_params
 
     # ── Sub-query de credit_transactions ─────────────────────────────────────
     credit_sql = ""
