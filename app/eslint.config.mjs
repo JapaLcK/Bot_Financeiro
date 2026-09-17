@@ -48,13 +48,14 @@ export default tseslint.config(
     rules: { "@typescript-eslint/no-require-imports": "off" },
   },
   {
-    // As duas áreas onde o design system é DESENHADO: os próprios componentes
-    // e o catálogo que os exibe. O gate SÓ vale aqui — uma tela de produto
-    // fora destes dois caminhos (`app/index.tsx`, por exemplo) não herda nada
-    // disto: ela pode importar `Text`/`TextInput` crus e colar hex à vontade
-    // sem o lint acusar. "Herdar por só ter acesso ao Texto/Input" seria
-    // convenção, não regra: nada aqui barra o import fora desses dois globs.
-    files: ["src/ui/componentes/**/*.ts?(x)", "app/_ds/**/*.ts?(x)"],
+    // As três áreas onde o design system é DESENHADO: os próprios componentes,
+    // o catálogo que os exibe e as seções do catálogo extraídas por tamanho
+    // (`src/ui/ds/`, CLAUDE.md §0.5). O gate SÓ vale aqui — uma tela de
+    // produto fora destes caminhos (`app/index.tsx`, por exemplo) não herda
+    // nada disto: ela pode importar `Text`/`TextInput` crus e colar hex à
+    // vontade sem o lint acusar. "Herdar por só ter acesso ao Texto/Input"
+    // seria convenção, não regra: nada aqui barra o import fora desses globs.
+    files: ["src/ui/componentes/**/*.ts?(x)", "app/_ds/**/*.ts?(x)", "src/ui/ds/**/*.ts?(x)"],
     rules: {
       "no-restricted-imports": [
         "error",
@@ -93,5 +94,30 @@ export default tseslint.config(
     // crus — é o que a regra acima protege.
     files: ["src/ui/componentes/Texto.tsx", "src/ui/componentes/Input.tsx"],
     rules: { "no-restricted-imports": "off" },
+  },
+  {
+    // `AmountInput` precisa do `TextInput` cru (não compõe sobre `Input` —
+    // nasce no C1, ver plano do PR B): a regra geral bloqueia `Text` E
+    // `TextInput`; aqui ela é REDECLARADA (não desligada) liberando só
+    // `TextInput`, então `Text` e a raiz do phosphor continuam barrados.
+    files: ["src/ui/componentes/AmountInput.tsx"],
+    rules: {
+      "no-restricted-imports": [
+        "error",
+        {
+          paths: [
+            {
+              name: "react-native",
+              importNames: ["Text"],
+              message: "Use `Texto` do design system — é o único lugar com o teto de fonte e o tabular-nums resolvidos.",
+            },
+            {
+              name: "phosphor-react-native",
+              message: "Importe o ícone específico (`phosphor-react-native/src/icons/<Nome>`); a raiz do pacote pesa 23 MB.",
+            },
+          ],
+        },
+      ],
+    },
   },
 );
