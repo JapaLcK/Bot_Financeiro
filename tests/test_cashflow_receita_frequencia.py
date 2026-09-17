@@ -20,6 +20,7 @@ import pytest
 from fastapi import HTTPException
 
 import core.services.cashflow as cf
+import core.services.cashflow_forecast as cff
 import db
 import frontend.finance_bot_websocket_custom as dashboard
 from db.recurring import create_recurring_expense
@@ -38,6 +39,9 @@ def _relogio_e_rotas(monkeypatch):
             return HOJE
 
     monkeypatch.setattr(cf, "date", _Hoje)
+    # A rota /forecast lê o dia em cashflow_forecast (#445); sem isto o teste só
+    # passa quando o relógio real coincide com HOJE.
+    monkeypatch.setattr(cff, "date", _Hoje)
     monkeypatch.setattr(dashboard, "_authorize_dashboard_access", lambda *_: None)
 
 
