@@ -33,6 +33,7 @@
 import { test, before, after } from "node:test";
 import assert from "node:assert/strict";
 import { startServer } from "./_server.mjs";
+import { toastAssentado, toastVisivel } from "./_toast.mjs";
 import { chromium } from "playwright";
 
 let ORIGIN, server, browser;
@@ -1312,7 +1313,7 @@ for (const [tela, viewport] of TELAS) {
       pix: { httpStatus: 503, corpo: { detail: FALHA_503 } },
     });
     await enviarDoc(page);
-    await page.waitForTimeout(500);          // o toast entra com transição de .25s
+    await toastVisivel(page);
     const visto = await page.evaluate(() => ({
       inline: document.getElementById("pix-doc-erro").textContent,
       toast: document.getElementById("toast").textContent,
@@ -1334,13 +1335,12 @@ for (const [tela, viewport] of TELAS) {
     const pix = { httpStatus: 503, corpo: { detail: FALHA_503 } };
     const { page } = await abrirForm({ viewport, pix });
     await enviarDoc(page);
-    await page.waitForTimeout(500);
-    assert.ok(await page.$eval("#toast", (e) => e.classList.contains("show")),
-      "o 503 nem chegou a mostrar o toast: o cenário das duas mensagens não foi montado");
+    await toastVisivel(page);
     pix.httpStatus = 400;
     pix.corpo = { detail: "Informe um CPF ou CNPJ válido." };
     await enviarDoc(page, CPF);            // dentro dos 3800 ms do timer do showToast
-    await page.waitForTimeout(400);        // > .25s da transição de opacidade
+    await page.waitForFunction(() => document.getElementById("pix-doc-erro").textContent !== "");
+    await toastAssentado(page);            // o assert de opacidade abaixo é quem decide se ele sumiu
     const visto = await page.evaluate(() => {
       const t = document.getElementById("toast");
       return {
@@ -1370,14 +1370,12 @@ for (const [tela, viewport] of TELAS) {
       const pix = { httpStatus: 503, corpo: { detail: FALHA_503 } };
       const { page } = await abrirForm({ viewport, pix });
       await enviarDoc(page);
-      await page.waitForTimeout(500);
-      assert.ok(await page.$eval("#toast", (e) => e.classList.contains("show")),
-        "o 503 nem mostrou o toast: o cenário das duas mensagens não foi montado");
+      await toastVisivel(page);
       pix.httpStatus = 200;
       pix.corpo = null;                    // volta ao corpo padrão do harness: o QR
       await enviarDoc(page, CPF);          // dentro dos 3800 ms do timer do showToast
       await page.waitForSelector(".pix-code");
-      await page.waitForTimeout(400);
+      await toastAssentado(page);
       const brilho = await brilhoMax(page, "#toast");
       assert.ok(brilho < 100,
         `o QR está na tela e o toast do 503 ("${await page.textContent("#toast")}")`
@@ -1400,15 +1398,14 @@ for (const [tela, viewport] of TELAS) {
         const pix = { httpStatus: 503, corpo: { detail: FALHA_503 } };
         const { page } = await abrirForm({ viewport, pix });
         await enviarDoc(page);
-        await page.waitForTimeout(500);
-        assert.ok(await page.$eval("#toast", (e) => e.classList.contains("show")),
-          "o 503 nem mostrou o toast: o cenário das duas mensagens não foi montado");
+        await toastVisivel(page);
         pix.httpStatus = 409;
         pix.corpo = corpo;
         await enviarDoc(page, CPF);
-        await page.waitForTimeout(400);
-        assert.match(await page.textContent(".pix-box"), marca,
-          `o 409 de ${caso} não trocou o corpo do modal: o cenário não foi montado`);
+        await page.waitForFunction((src) => new RegExp(src, "i").test(document.querySelector(".pix-box")?.textContent || ""),
+          marca.source, { timeout: 5_000 }).catch(() => assert.fail(
+            `o 409 de ${caso} não trocou o corpo do modal: o cenário não foi montado`));
+        await toastAssentado(page);
         const brilho = await brilhoMax(page, "#toast");
         assert.ok(brilho < 100,
           `a caixa de ${caso} está na tela e o toast do 503 continua por cima:`
@@ -1428,11 +1425,10 @@ test("PT18g: a recusa de FORMA também apaga o toast do 503, sem POST nenhum", a
   const pix = { httpStatus: 503, corpo: { detail: FALHA_503 } };
   const { page, chamadas } = await abrirForm({ pix });
   await enviarDoc(page);
-  await page.waitForTimeout(500);
-  assert.ok(await page.$eval("#toast", (e) => e.classList.contains("show")),
-    "o 503 nem mostrou o toast: o cenário das duas mensagens não foi montado");
+  await toastVisivel(page);
   await enviarDoc(page, "1112223334");     // 10 dígitos: nem chega a sair
-  await page.waitForTimeout(400);
+  await page.waitForFunction(() => document.getElementById("pix-doc-erro").textContent !== "");
+  await toastAssentado(page);
   assert.equal(chamadas.pixCheckout, 1,
     `o documento malformado foi para o servidor (${chamadas.pixCheckout} chamadas)`);
   const visto = await page.evaluate(() => ({
