@@ -85,6 +85,18 @@ describe("Avatar", () => {
     expect(tela.UNSAFE_getByType(Image).props.source).toEqual({ uri: "https://x/a.png" });
   });
 
+  it("trocar a URI monta outro Image (erro atrasado da anterior não atinge a nova)", () => {
+    const comFoto = (uri: string) => (
+      <TemaProvider esquema="light">
+        <Avatar nome="Ana Souza" imagem={uri} />
+      </TemaProvider>
+    );
+    const tela = renderInterativo(<Avatar nome="Ana Souza" imagem="https://x/a.png" />);
+    const antes = tela.UNSAFE_getByType(Image);
+    tela.update(comFoto("https://x/b.png"));
+    expect(tela.UNSAFE_getByType(Image)).not.toBe(antes);
+  });
+
   it("tamanho custom vira largura/altura/borderRadius do círculo", () => {
     const { claro: c } = renderNosDoisTemas(<Avatar nome="Ana Souza" tamanho={64} />);
     const container = c.getByLabelText("Ana Souza");

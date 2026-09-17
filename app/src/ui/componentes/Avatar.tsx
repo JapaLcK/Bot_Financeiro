@@ -90,6 +90,11 @@ export function Avatar({ nome, imagem, tamanho = 40 }: Props) {
     >
       {imagem && uriQueFalhou === null ? (
         <Image
+          // `key` por URI: cada foto é um elemento próprio, então o erro
+          // atrasado de uma imagem que já saiu da tela não chega ao handler da
+          // imagem nova (sem isso, trocar A por B enquanto A ainda carregava
+          // deixaria o erro de A marcar B como falha).
+          key={imagem}
           source={{ uri: imagem }}
           style={{ width: tamanho, height: tamanho }}
           onError={() => setUriQueFalhou(imagem)}
