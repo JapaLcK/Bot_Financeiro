@@ -102,23 +102,30 @@ e só mudou de cor de erro (`negative` virou `danger`) e de família de fonte.
 
 ## Como conferir no aparelho
 
-O build nativo (`npx expo run:ios`) **não compila nesta máquina** com o Xcode
-26.3, então o caminho é o Expo Go no iPhone, pela rede local:
+Hoje **não há caminho pronto para o iPhone**. O Expo Go no iPhone pela rede
+local foi descartado pelo dono, e o build nativo (`npx expo run:ios`) **não
+compila nesta máquina** com o Xcode 26.3. As saídas reais são o EAS Build na
+nuvem ou um Xcode 16.x instalado ao lado, com o `xcode-select` apontando para
+ele.
+
+O caminho que funciona é o **Expo Go no simulador iOS**, usado em toda a
+verificação visual desta fase:
 
 ```bash
-ipconfig getifaddr en0                      # o IP da máquina no Wi-Fi
-cd app && REACT_NATIVE_PACKAGER_HOSTNAME=<IP> npx expo start --go
+cd app && npx expo start --go --port 8081
 ```
 
-O iPhone precisa estar no **mesmo Wi-Fi**. Abra o Expo Go, leia o QR do
-terminal, e vá para `exp://<IP>:8081/--/_ds` — o catálogo só existe em
-desenvolvimento, que é exatamente este modo. As telas-modelo estão em
-`/_ds/inicio`, `/_ds/lista` e `/_ds/formulario`.
+```bash
+xcrun simctl openurl booted "exp://127.0.0.1:8081/--/_ds"
+```
 
-Se a rede do Wi-Fi bloquear a porta (rede de empresa, isolamento de cliente),
-use `npx expo start --go --tunnel`, que passa por fora da LAN e é mais lento.
+O catálogo só existe em desenvolvimento, que é exatamente este modo. As
+telas-modelo estão em `/_ds/inicio`, `/_ds/lista` e `/_ds/formulario`. O
+`xcrun simctl` precisa rodar fora do sandbox do agente, senão dá
+`CoreSimulatorService connection became invalid`.
 
-O que **só o aparelho** prova, e que eu não pude verificar:
+O simulador **não prova** nenhum dos itens abaixo. O que **só o aparelho**
+prova, e que eu não pude verificar:
 
 1. **Haptic.** Toque nos chips e no SegmentedControl da seção "Controles":
    deve haver o toque leve de seleção. Em `/_ds/formulario`, deixe o campo
@@ -197,4 +204,6 @@ O que a Fase 2 deixa pronto para ela:
 - Continua aberta a issue #458 (logout esperando a revogação com tempo limite),
   que é da Fase 3 por natureza.
 
-Ordem sugerida: mergear os três PRs, conferir no aparelho, e só então começar.
+Os PRs da Fase 2 já estão todos na `main`. Antes de começar, confirme com o
+dono que a Fase 3 abre; a conferência no aparelho continua pendente e depende
+de um build que rode no iPhone (seção "Como conferir no aparelho").
