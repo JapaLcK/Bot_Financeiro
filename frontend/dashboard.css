@@ -2390,13 +2390,20 @@ html.pb-app #piggy-fab { touch-action: none; }
 
 .ag-shelf { display: grid; grid-template-columns: repeat(auto-fill, minmax(215px, 1fr)); gap: 14px; }
 .ag-card {
+  position: relative;
   background: var(--glass-bg); border: 1px solid var(--glass-border);
   border-radius: var(--radius); padding: 14px;
   display: flex; flex-direction: column; gap: 9px;
   transition: transform .15s var(--ease), border-color .15s var(--ease);
 }
-.ag-card:hover { transform: translateY(-3px); border-color: rgba(255, 45, 142, .35); }
+.ag-card:not(.ag-card-soon):hover { transform: translateY(-3px); border-color: rgba(255, 45, 142, .35); }
 .ag-card-soon { opacity: .62; }
+.ag-card-open {
+  position: absolute; inset: 0; z-index: 1; width: 100%; height: 100%;
+  padding: 0; border: 0; border-radius: inherit; background: transparent; cursor: pointer;
+}
+.ag-card-open:focus-visible { outline: 2px solid var(--purple); outline-offset: 3px; }
+.ag-card > .ag-btn { position: relative; z-index: 2; }
 .ag-card h3 { margin: 0; font-size: 16px; }
 .ag-desc { margin: 0; font-size: 12.5px; color: var(--text-2); line-height: 1.45; min-height: 36px; }
 .ag-chips { display: flex; gap: 6px; flex-wrap: wrap; }
@@ -2559,6 +2566,3 @@ body.light #categories-distribution .bar-row[role="button"]:hover { background:r
   .cl-row, .cl-more-btn,
   #categories-distribution .bar-row[role="button"] { transition:none; }
 }
-
-/* Conversas dos agentes: painel com a mesma linguagem do dashboard. */
-.ag-chat-btn { margin-top: 8px; background: var(--glass-bg); color: var(--text); border: 1px solid var(--glass-border); }

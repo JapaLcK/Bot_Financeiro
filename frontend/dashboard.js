@@ -11080,10 +11080,9 @@ function _renderAgentes(data) {
   shelf.innerHTML = (data.catalog || []).map(card => {
     const active = card.status === "active";
     const cost = Number(card.energy_cost || 0);
-    const chips = [
-      `<span class="ag-chip">${esc(card.freq)}</span>`,
-      (energyOn && card.disponivel && cost > 0) ? `<span class="ag-chip ag-chip-energy"><i class="ph ph-lightning" aria-hidden="true"></i> ${cost}</span>` : "",
-    ].filter(Boolean).join("");
+    const chips = (energyOn && card.disponivel && cost > 0)
+      ? `<span class="ag-chip ag-chip-energy"><i class="ph ph-lightning" aria-hidden="true"></i> ${cost}</span>`
+      : "";
     // can_activate vem do backend (Grátis/Essencial: orçamento 0 → sem agentes).
     // Gate visível: o botão vira cadeado que abre o upgrade direto.
     const canActivate = data.can_activate !== false;
@@ -11099,16 +11098,6 @@ function _renderAgentes(data) {
           : affordable
             ? `<button class="ag-btn ag-btn-on" onclick="activateAgent('${card.kind}')">Ativar${energyOn && cost > 0 ? ` · <i class="ph ph-lightning" aria-hidden="true"></i> ${cost}` : ""}</button>`
             : `<button class="ag-btn ag-btn-noenergy" disabled title="Pause um agente ou vá pro Pro"><i class="ph ph-lightning-slash" aria-hidden="true"></i> Sem energia</button>`;
-    // Opt-out por agente: quando ativo, deixa ligar/desligar o e-mail (o feed
-    // continua). Padrão = ligado. Estilo inline pra não exigir bump de cache CSS.
-    const emailOn = ((card.config || {}).email_enabled) !== false;
-    const emailToggle = (active && card.disponivel)
-      ? `<button onclick="toggleAgentEmail('${card.kind}', ${emailOn ? "false" : "true"})"
-           title="Receber os avisos deste agente por e-mail"
-           style="margin-top:8px;width:100%;padding:7px 10px;border-radius:9px;border:1px solid rgba(255,255,255,.12);background:transparent;color:rgba(255,255,255,.6);font-size:.72rem;cursor:pointer">
-           <i class="ph ph-envelope" aria-hidden="true"></i> E-mail: <b style="color:${emailOn ? "var(--green)" : "rgba(255,255,255,.4)"}">${emailOn ? "ligado" : "desligado"}</b>
-         </button>`
-      : "";
     return `
       <div class="ag-card${!card.disponivel ? " ag-card-soon" : ""}">
         <div class="ag-avatar ag-bg-${esc(card.kind)}">
@@ -11116,10 +11105,9 @@ function _renderAgentes(data) {
         </div>
         <h3>${esc(card.nome)}</h3>
         <p class="ag-desc">${esc(card.desc)}</p>
-        <div class="ag-chips">${chips}</div>
+        ${chips ? `<div class="ag-chips">${chips}</div>` : ""}
+        ${card.disponivel ? `<button type="button" class="ag-card-open" data-agent-chat="${esc(card.kind)}" aria-label="Conversar com ${esc(card.nome)}"></button>` : ""}
         ${btn}
-        ${card.disponivel ? `<button type="button" class="ag-btn ag-chat-btn" data-agent-chat="${esc(card.kind)}"><i class="ph ph-chat-circle" aria-hidden="true"></i> Conversar</button>` : ""}
-        ${emailToggle}
       </div>
     `;
   }).join("");
@@ -11215,20 +11203,6 @@ async function pauseAgent(kind) {
       method: "POST", credentials: "same-origin", headers: csrfHeaders(),
     });
     if (!res.ok) throw new Error("Não deu pra pausar o agente.");
-    await loadAgentesView(true, { background: true });
-  } catch (err) {
-    alert(String(err.message || err));
-  }
-}
-
-async function toggleAgentEmail(kind, enabled) {
-  try {
-    const res = await fetch(`${API}/agents/${USER_ID}/${kind}/email`, {
-      method: "POST", credentials: "same-origin",
-      headers: csrfHeaders({ "Content-Type": "application/json" }),
-      body: JSON.stringify({ enabled }),
-    });
-    if (!res.ok) throw new Error("Não deu pra mudar o e-mail do agente.");
     await loadAgentesView(true, { background: true });
   } catch (err) {
     alert(String(err.message || err));
