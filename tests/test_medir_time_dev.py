@@ -76,8 +76,22 @@ def test_somar_tokens_branch_none_nao_filtra():
 def test_extrair_mapa_agentes():
     linhas = [
         {"type": "assistant", "message": {}},
-        {"type": "user", "toolUseResult": {"agentId": "id1", "agentType": "coder"}},
-        {"type": "user", "toolUseResult": {"agentId": "id2", "agentType": "tester"}},
+        {"type": "user", "message": {"content": [{"type": "tool_result"}]},
+         "toolUseResult": {"agentId": "id1", "agentType": "coder"}},
+        {"type": "user", "message": {"content": [{"type": "tool_result"}]},
+         "toolUseResult": {"agentId": "id2", "agentType": "tester"}},
         {"type": "user", "toolUseResult": "não é dict"},
     ]
     assert extrair_mapa_agentes(linhas) == {"id1": "coder", "id2": "tester"}
+
+
+def test_extrair_mapa_agentes_sem_agenttype_usa_a_chamada():
+    # Forma real de metade dos transcripts: o resultado não traz agentType.
+    linhas = [
+        {"type": "assistant", "message": {"content": [
+            {"type": "tool_use", "id": "tu1", "input": {"subagent_type": "tester"}}]}},
+        {"type": "user", "message": {"content": [
+            {"type": "tool_result", "tool_use_id": "tu1"}]},
+         "toolUseResult": {"agentId": "a1"}},
+    ]
+    assert extrair_mapa_agentes(linhas) == {"a1": "tester"}

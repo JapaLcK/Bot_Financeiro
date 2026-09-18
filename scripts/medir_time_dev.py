@@ -38,9 +38,7 @@ MARCADOR_RE = re.compile(
     r"bloqueantes=(\d+)\s*-->"
 )
 
-# --------------------------------------------------------------------------
 # Puro: marcador
-# --------------------------------------------------------------------------
 
 
 def parse_marcador(corpo: str) -> dict | None:
@@ -62,20 +60,28 @@ def parse_marcador(corpo: str) -> dict | None:
     }
 
 
-# --------------------------------------------------------------------------
 # Puro: tokens de um transcript já parseado (lista de dicts = linhas do jsonl)
-# --------------------------------------------------------------------------
 
 
 def extrair_mapa_agentes(linhas: list[dict]) -> dict[str, str]:
-    """agentId -> agentType, das linhas `type=="user"` com `toolUseResult`."""
+    """agentId -> papel. O papel vem do `subagent_type` da chamada do Agent,
+    ligada ao resultado pelo `tool_use_id`; `toolUseResult.agentType` só existe
+    em parte dos transcripts (medido 2026-09-17: falta em ~metade)."""
+    papel_da_chamada: dict[str, str] = {}
     mapa: dict[str, str] = {}
     for obj in linhas:
-        if obj.get("type") != "user":
-            continue
-        tur = obj.get("toolUseResult")
-        if isinstance(tur, dict) and tur.get("agentId") and tur.get("agentType"):
-            mapa[tur["agentId"]] = tur["agentType"]
+        conteudo = (obj.get("message") or {}).get("content")
+        for b in conteudo if isinstance(conteudo, list) else []:
+            if not isinstance(b, dict):
+                continue
+            if b.get("type") == "tool_use" and isinstance(b.get("input"), dict):
+                if b["input"].get("subagent_type"):
+                    papel_da_chamada[b.get("id")] = b["input"]["subagent_type"]
+            tur = obj.get("toolUseResult")
+            if b.get("type") == "tool_result" and isinstance(tur, dict) and tur.get("agentId"):
+                papel = papel_da_chamada.get(b.get("tool_use_id")) or tur.get("agentType")
+                if papel:
+                    mapa[tur["agentId"]] = papel
     return mapa
 
 
@@ -114,9 +120,7 @@ def agregar_papel(destino: dict[str, dict[str, int]], papel: str, soma: dict[str
     d["saida"] += soma["saida"]
 
 
-# --------------------------------------------------------------------------
 # I/O: gh
-# --------------------------------------------------------------------------
 
 
 def _gh(caminho: str) -> list:
@@ -145,7 +149,6 @@ def medir_codex(pr: int) -> dict:
         (r for r in _gh(f"repos/{REPO}/pulls/{pr}/reviews") if _e_codex(r["user"]["login"])),
         key=lambda r: r["submitted_at"],
     )
-    rodadas = len(reviews_codex)
     primeira_id = reviews_codex[0]["id"] if reviews_codex else None
     achados_1a_rodada = sum(1 for a in achados if a.get("pull_request_review_id") == primeira_id)
     p1 = sum(1 for a in achados if "P1-" in a.get("body", ""))
@@ -159,7 +162,9 @@ def medir_codex(pr: int) -> dict:
         for c in _gh(f"repos/{REPO}/issues/{pr}/comments")
     )
     aprovado = reacoes_ok or comentario_ok
-    sem_revisao = rodadas == 0 and not aprovado
+    # A execução que aprova não vira review no GitHub, mas é uma rodada.
+    rodadas = len(reviews_codex) + int(aprovado)
+    sem_revisao = rodadas == 0
 
     return {
         "head_ref": pr_obj["head"]["ref"],
@@ -174,9 +179,7 @@ def medir_codex(pr: int) -> dict:
     }
 
 
-# --------------------------------------------------------------------------
 # I/O: transcripts
-# --------------------------------------------------------------------------
 
 
 def _tem_campo(path: str, campo: str) -> bool:
@@ -234,9 +237,7 @@ def medir_tokens(branch: str) -> tuple[dict[str, dict[str, int]], bool]:
     return tokens, achou_transcript
 
 
-# --------------------------------------------------------------------------
 # Saída
-# --------------------------------------------------------------------------
 
 PAPEIS_TIME = ("arquiteto", "coder", "tester", "manager")
 
@@ -290,7 +291,8 @@ def main(argv: list[str]) -> int:
         # Só Leve se compara: Completo é sempre "com", misturá-lo enviesa o grupo.
         if marcador and marcador["faixa"] == "Leve":
             leve_por_grupo[marcador["grupo"]] += 1
-            if not codex["sem_revisao"]:
+            # Sem transcript fica fora: custo e achados vêm da mesma coorte.
+            if not codex["sem_revisao"] and achou:
                 grupos[marcador["grupo"]].append({**linha, **marcador})
 
     print(f"{'PR':>5} {'grupo':6} {'faixa':9} {'int':>3} {'bloq':>4} {'cx1a':>4} "
@@ -307,8 +309,6 @@ def main(argv: list[str]) -> int:
               f"{obs}")
 
     def media(lst, chave):
-        if chave.startswith("tokens"):  # sem transcript = dado ausente, não zero
-            lst = [x for x in lst if x["transcript"]]
         return sum(x[chave] for x in lst) / len(lst) if lst else None
 
     campos_media = ("codex_1a", "codex_total", "p1", "rodadas", "tokens_entrada", "tokens_saida")

@@ -421,8 +421,8 @@ CI verde deixam o PR *pronto*; não autorizam o merge. Avise e pergunte.
 
 **Depois do merge, apague a branch — se estiver limpa e sem uso.** Antes de apagar,
 confira: o PR está `MERGED` (`gh pr view <n> --json state`); `git status --short` vazio;
-nenhum worktree nem sessão usa a branch (`git worktree list`); nenhum PR aberto a usa
-como base (`gh pr list --base <branch>`). Então `git branch -d <branch>` e
+nenhum worktree nem sessão usa a branch (`git worktree list`); nenhum outro PR aberto a usa
+como base nem como head (`gh pr list --base <branch>` e `gh pr list --head <branch>`). Então `git branch -d <branch>` e
 `git push origin --delete <branch>`. Merge por squash faz o `-d` recusar: use `-D` só se
 o HEAD local for igual ao `headRefOid` do PR. Qualquer item falhou → não force, avise.
 
