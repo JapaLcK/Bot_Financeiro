@@ -287,10 +287,11 @@ def main(argv: list[str]) -> int:
         }
         linhas_tabela.append(linha)
 
-        if marcador and not codex["sem_revisao"]:
-            grupos[marcador["grupo"]].append({**linha, **marcador})
+        # Só Leve se compara: Completo é sempre "com", misturá-lo enviesa o grupo.
         if marcador and marcador["faixa"] == "Leve":
             leve_por_grupo[marcador["grupo"]] += 1
+            if not codex["sem_revisao"]:
+                grupos[marcador["grupo"]].append({**linha, **marcador})
 
     print(f"{'PR':>5} {'grupo':6} {'faixa':9} {'int':>3} {'bloq':>4} {'cx1a':>4} "
           f"{'cxtot':>5} {'P1':>3} {'rod':>3} {'tok_in':>10} {'tok_out':>9} "
@@ -306,6 +307,8 @@ def main(argv: list[str]) -> int:
               f"{obs}")
 
     def media(lst, chave):
+        if chave.startswith("tokens"):  # sem transcript = dado ausente, não zero
+            lst = [x for x in lst if x["transcript"]]
         return sum(x[chave] for x in lst) / len(lst) if lst else None
 
     campos_media = ("codex_1a", "codex_total", "p1", "rodadas", "tokens_entrada", "tokens_saida")
@@ -327,8 +330,9 @@ def main(argv: list[str]) -> int:
         if denom <= 0:
             print("tokens a mais por achado do Codex evitado: n/d (o grupo 'com' não achou menos)")
         else:
-            custo = (m_com["tokens_entrada"] - m_sem["tokens_entrada"]) / denom
-            print(f"tokens a mais por achado do Codex evitado: {_fmt_num(custo)}")
+            for c in ("tokens_entrada", "tokens_saida"):
+                custo = (m_com[c] - m_sem[c]) / denom
+                print(f"{c} a mais por achado do Codex evitado: {_fmt_num(custo)}")
 
     print()
     n_com_leve, n_sem_leve = leve_por_grupo["com"], leve_por_grupo["sem"]
