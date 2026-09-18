@@ -30,7 +30,8 @@ from pathlib import Path
 REPO = "JapaLcK/Bot_Financeiro"
 _RAIZ = Path(subprocess.run(["git", "rev-parse", "--path-format=absolute", "--git-common-dir"],
     capture_output=True, text=True, cwd=Path(__file__).parent).stdout.strip()).parent
-PROJETOS_GLOB = os.path.expanduser("~/.claude/projects/") + re.sub(r"[^A-Za-z0-9]", "-", str(_RAIZ)) + "*"
+_COD = re.sub(r"[^A-Za-z0-9]", "-", str(_RAIZ))  # como o Claude Code nomeia a pasta
+PROJETOS_GLOBS = [os.path.expanduser(f"~/.claude/projects/{_COD}{s}") for s in ("", "--*")]
 GRUPOS_VALIDOS = {"com", "sem"}
 FAIXAS_VALIDAS = {"Leve", "Completo"}
 MARCADOR_RE = re.compile(
@@ -124,8 +125,7 @@ def agregar_papel(destino: dict[str, dict[str, int]], papel: str, soma: dict[str
 
 
 def _gh(caminho: str) -> list:
-    """`gh api --paginate --slurp <caminho>` achatado: lista de itens (objeto
-    único endpoint vira lista de 1)."""
+    """`gh api --paginate --slurp <caminho>` achatado numa lista de itens."""
     saida = subprocess.run(
         ["gh", "api", "--paginate", "--slurp", caminho],
         capture_output=True, text=True, check=True,
@@ -149,21 +149,19 @@ def medir_codex(pr: int) -> dict:
         (r for r in _gh(f"repos/{REPO}/pulls/{pr}/reviews") if _e_codex(r["user"]["login"])),
         key=lambda r: r["submitted_at"],
     )
-    primeira_id = reviews_codex[0]["id"] if reviews_codex else None
-    achados_1a_rodada = sum(1 for a in achados if a.get("pull_request_review_id") == primeira_id)
     p1 = sum(1 for a in achados if "P1-" in a.get("body", ""))
-
-    reacoes_ok = any(
-        _e_codex(r["user"]["login"]) and r.get("content") == "+1"
-        for r in _gh(f"repos/{REPO}/issues/{pr}/reactions")
-    )
-    comentario_ok = any(
-        _e_codex(c["user"]["login"]) and "Didn't find any major issues" in c.get("body", "")
-        for c in _gh(f"repos/{REPO}/issues/{pr}/comments")
-    )
-    aprovado = reacoes_ok or comentario_ok
-    # A execução que aprova não vira review no GitHub, mas é uma rodada.
-    rodadas = len(reviews_codex) + int(aprovado)
+    reacao_ok = [r["created_at"] for r in _gh(f"repos/{REPO}/issues/{pr}/reactions")
+                 if _e_codex(r["user"]["login"]) and r.get("content") == "+1"]
+    comentarios_ok = [c["created_at"] for c in _gh(f"repos/{REPO}/issues/{pr}/comments")
+                      if _e_codex(c["user"]["login"]) and "Didn't find any major issues" in c.get("body", "")]
+    oks = reacao_ok + comentarios_ok
+    aprovado = bool(oks)
+    # Rodada limpa não vira review no GitHub, mas é rodada — e se veio antes da 1ª
+    # review, a 1ª rodada não achou nada.
+    limpa_antes = bool(oks and reviews_codex) and min(oks) < reviews_codex[0]["submitted_at"]
+    primeira_id = reviews_codex[0]["id"] if reviews_codex and not limpa_antes else None
+    achados_1a_rodada = sum(1 for a in achados if a.get("pull_request_review_id") == primeira_id)
+    rodadas = len(reviews_codex) + max(len(comentarios_ok), len(reacao_ok))
     sem_revisao = rodadas == 0
 
     return {
@@ -211,7 +209,7 @@ def _linhas_candidatas(path: str, branch: str | None) -> list[dict]:
 def medir_tokens(branch: str) -> tuple[dict[str, dict[str, int]], bool]:
     tokens: dict[str, dict[str, int]] = {}
     achou_transcript = False
-    for projeto_dir in glob.glob(PROJETOS_GLOB):
+    for projeto_dir in (d for g in PROJETOS_GLOBS for d in glob.glob(g)):
         if not os.path.isdir(projeto_dir):
             continue
         for main_path in glob.glob(os.path.join(projeto_dir, "*.jsonl")):
