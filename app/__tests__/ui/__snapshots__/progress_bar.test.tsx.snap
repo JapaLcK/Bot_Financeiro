@@ -1,0 +1,73 @@
+// Jest Snapshot v1, https://goo.gl/fbAQLP
+
+exports[`ProgressBar snapshot (dois temas): claro 1`] = `
+<View
+  accessibilityRole="progressbar"
+  accessibilityValue={
+    {
+      "max": 100,
+      "min": 0,
+      "now": 70,
+    }
+  }
+  style={
+    {
+      "backgroundColor": "#F6F6F7",
+      "borderRadius": 8,
+      "height": 8,
+      "overflow": "hidden",
+    }
+  }
+>
+  <View
+    style={
+      {
+        "backgroundColor": "#067647",
+        "flex": 1,
+        "transform": [
+          {
+            "scaleX": 0.7,
+          },
+        ],
+        "transformOrigin": "left",
+      }
+    }
+  />
+</View>
+`;
+
+exports[`ProgressBar snapshot (dois temas): escuro 1`] = `
+<View
+  accessibilityRole="progressbar"
+  accessibilityValue={
+    {
+      "max": 100,
+      "min": 0,
+      "now": 70,
+    }
+  }
+  style={
+    {
+      "backgroundColor": "#17171A",
+      "borderRadius": 8,
+      "height": 8,
+      "overflow": "hidden",
+    }
+  }
+>
+  <View
+    style={
+      {
+        "backgroundColor": "#47CD89",
+        "flex": 1,
+        "transform": [
+          {
+            "scaleX": 0.7,
+          },
+        ],
+        "transformOrigin": "left",
+      }
+    }
+  />
+</View>
+`;

@@ -1,5 +1,4 @@
 import { fireEvent, render } from "@testing-library/react-native";
-import type { ReactElement } from "react";
 import { useState } from "react";
 import { StyleSheet } from "react-native";
 import * as Haptics from "expo-haptics";
@@ -9,20 +8,7 @@ import { TETO_CENTAVOS } from "@/ui/dinheiro";
 import { TemaProvider } from "@/ui/tema";
 import { claro as coresClaras } from "@/ui/tokens";
 
-import { renderNosDoisTemas } from "./_render";
-
-/**
- * SÓ para os testes que disparam `fireEvent`: a RNTL marca a última árvore
- * renderizada como "a tela ativa" (`screen.UNSAFE_root`), e `fireEvent`
- * recusa evento em qualquer elemento fora dela — `isElementMounted()` em
- * `component-tree.js`. Renderizar claro+escuro (`renderNosDoisTemas`) deixa
- * o claro "inativo" pra sempre depois que o escuro nasce por cima: o evento
- * vira no-op silencioso (medido: nenhum erro, só `onChange` nunca chamado).
- * Interação não muda com o tema, então aqui um render só resolve.
- */
-function renderInterativo(el: ReactElement) {
-  return render(<TemaProvider esquema="light">{el}</TemaProvider>);
-}
+import { renderInterativo, renderNosDoisTemas } from "./_render";
 
 /**
  * Espelha o `AmountInput` real: `centavos` é estado do CHAMADOR, o

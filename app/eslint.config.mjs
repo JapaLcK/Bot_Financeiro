@@ -48,6 +48,24 @@ export default tseslint.config(
     rules: { "@typescript-eslint/no-require-imports": "off" },
   },
   {
+    // `Icone.tsx` usa `require()` por um motivo diferente do `_layout.tsx`:
+    // não é sobre o bundler, é sobre o `tsc` (ver comentário no arquivo) —
+    // um `import` estático do ícone arrasta o typecheck para dentro de um
+    // arquivo interno do `phosphor-react-native` com erro de tipo real
+    // contra a versão instalada do `react-native-svg`.
+    files: ["src/ui/componentes/Icone.tsx"],
+    rules: { "@typescript-eslint/no-require-imports": "off" },
+  },
+  {
+    // `_ds/index.tsx` usa `require()` por um motivo diferente dos dois
+    // acima: nem bundler, nem `tsc` — é sobre QUANDO o custo das três seções
+    // do catálogo é pago (ver comentário no arquivo). `import` estático
+    // executaria o require na hora em que qualquer coisa importa este
+    // módulo, inclusive o roteador montando a tabela de rotas em produção.
+    files: ["app/_ds/index.tsx"],
+    rules: { "@typescript-eslint/no-require-imports": "off" },
+  },
+  {
     // As três áreas onde o design system é DESENHADO: os próprios componentes,
     // o catálogo que os exibe e as seções do catálogo extraídas por tamanho
     // (`src/ui/ds/`, CLAUDE.md §0.5). O gate SÓ vale aqui — uma tela de
@@ -90,17 +108,39 @@ export default tseslint.config(
     },
   },
   {
-    // `Texto`/`Input` são o ÚNICO lugar autorizado a chamar `Text`/`TextInput`
-    // crus — é o que a regra acima protege.
-    files: ["src/ui/componentes/Texto.tsx", "src/ui/componentes/Input.tsx"],
-    rules: { "no-restricted-imports": "off" },
+    // `Texto` é o ÚNICO lugar autorizado a chamar `Text` cru — é o que a
+    // regra acima protege. REDECLARADA (não desligada): libera só `Text`,
+    // então a raiz do phosphor continua barrada aqui também (nenhum
+    // componente do design system precisa dela).
+    files: ["src/ui/componentes/Texto.tsx"],
+    rules: {
+      "no-restricted-imports": [
+        "error",
+        {
+          paths: [
+            {
+              // `TextInput` continua barrado AQUI: a redeclaração substitui a
+              // regra geral inteira, então omitir esta entrada liberaria o
+              // `TextInput` cru neste arquivo sem ninguém notar.
+              name: "react-native",
+              importNames: ["TextInput"],
+              message: "Use `Input` do design system — é o único lugar com o teto de fonte e o aviso de erro resolvidos.",
+            },
+            {
+              name: "phosphor-react-native",
+              message: "Importe o ícone específico (`phosphor-react-native/src/icons/<Nome>`); a raiz do pacote pesa 23 MB.",
+            },
+          ],
+        },
+      ],
+    },
   },
   {
-    // `AmountInput` precisa do `TextInput` cru (não compõe sobre `Input` —
-    // nasce no C1, ver plano do PR B): a regra geral bloqueia `Text` E
-    // `TextInput`; aqui ela é REDECLARADA (não desligada) liberando só
-    // `TextInput`, então `Text` e a raiz do phosphor continuam barrados.
-    files: ["src/ui/componentes/AmountInput.tsx"],
+    // `Input` e `AmountInput` precisam do `TextInput` cru (não compõem um
+    // sobre o outro — casca própria de cada um): a regra geral bloqueia
+    // `Text` E `TextInput`; aqui ela é REDECLARADA liberando só `TextInput`,
+    // então `Text` e a raiz do phosphor continuam barrados.
+    files: ["src/ui/componentes/Input.tsx", "src/ui/componentes/AmountInput.tsx"],
     rules: {
       "no-restricted-imports": [
         "error",

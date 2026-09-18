@@ -1,11 +1,27 @@
 import { useState } from "react";
-import { Pressable, ScrollView, useColorScheme, View } from "react-native";
-import { useSafeAreaInsets } from "react-native-safe-area-context";
+import { Pressable, useColorScheme, View } from "react-native";
 
+import { Screen } from "@/ui/componentes/Screen";
 import { Texto } from "@/ui/componentes/Texto";
-import { SecaoDinheiro } from "@/ui/ds/dinheiro";
 import { TemaProvider, useTema } from "@/ui/tema";
 import { claro, espaco, raio, texto as escalas, type Paleta } from "@/ui/tokens";
+
+// `require()`, não `import`, para as três seções: um `import` estático faz
+// este módulo puxar os 11 componentes do design system e os ícones reais do
+// Phosphor assim que ALGUÉM requer `_ds/index.tsx` — inclusive o roteador,
+// que avalia o arquivo de toda rota para montar a tabela de rotas mesmo com
+// o `Stack.Protected` guardando o acesso (`app/_layout.tsx`), mesmo em
+// produção onde a tela nunca abre. Com o require adiado, esse custo só é
+// pago quando o catálogo é DE FATO montado.
+// O que motivou a mudança foi uma suspeita de lentidão em `layout.test.tsx`
+// (o teste que prova a guarda) que NÃO se sustentou ao remedir: as duas
+// formas deram tempos equivalentes, e os 5–18s vistos uma vez foram carga da
+// máquina, não este import. O require fica porque é mais barato de qualquer
+// forma; se alguém preferir o import estático, não vai encontrar regressão
+// de teste por isso.
+type SecaoDinheiroModulo = typeof import("@/ui/ds/dinheiro");
+type SecaoControlesModulo = typeof import("@/ui/ds/controles");
+type SecaoExibicaoModulo = typeof import("@/ui/ds/exibicao");
 
 type Esquema = "light" | "dark";
 
@@ -30,63 +46,68 @@ export default function DsIndex() {
 
 function Catalogo(props: { esquema: Esquema; onTrocar: () => void }) {
   const { cores } = useTema();
-  // A raiz não tem header: sem os insets, o topo do catálogo fica sob o relógio
-  // e a Dynamic Island (visto no iPhone 17 Pro). O `Screen` do C1 assume isto.
-  const insets = useSafeAreaInsets();
+  const { SecaoDinheiro } = require("@/ui/ds/dinheiro") as SecaoDinheiroModulo;
+  const { SecaoControles } = require("@/ui/ds/controles") as SecaoControlesModulo;
+  const { SecaoExibicao } = require("@/ui/ds/exibicao") as SecaoExibicaoModulo;
   return (
-    <ScrollView
-      style={{ flex: 1, backgroundColor: cores.bg }}
-      contentContainerStyle={{
-        paddingTop: insets.top + espaco.lg,
-        paddingBottom: insets.bottom + espaco.xxl,
-        paddingHorizontal: espaco.xxl,
-        gap: espaco.lg,
-      }}
-    >
-      <Pressable
-        accessibilityRole="button"
-        onPress={props.onTrocar}
-        style={{
-          alignSelf: "flex-start",
-          minHeight: 44,
-          justifyContent: "center",
-          paddingHorizontal: espaco.lg,
-          borderRadius: raio.lg,
-          backgroundColor: cores.brandSoft,
-        }}
-      >
-        <Texto variante="rotulo" tom="brandInk">
-          Ver em {props.esquema === "light" ? "escuro" : "claro"}
-        </Texto>
-      </Pressable>
-
-      <Texto variante="secao">Cor</Texto>
-      {NOMES_COR.map((nome) => (
-        <View key={nome} style={{ flexDirection: "row", alignItems: "center", gap: 12 }}>
-          <View
-            style={{
-              width: 32,
-              height: 32,
-              borderRadius: raio.sm,
-              backgroundColor: cores[nome],
-              borderWidth: 1,
-              borderColor: cores.border,
-            }}
-          />
-          <Texto variante="legenda" tom="inkMuted">
-            {nome} · {cores[nome]}
+    <Screen>
+      {/*
+       * Respiro do CATÁLOGO, não do `Screen`: antes de adotar o `Screen` do
+       * C1, esta tela tinha padding próprio (insets + `espaco.lg`/`xxl`
+       * vertical, `espaco.xxl` horizontal — ver histórico do PR A). O
+       * `Screen` compartilhado só dá `espaco.lg` (16) horizontal e os
+       * insets crus verticalmente — menos do que este catálogo tinha. O
+       * extra some AQUI (não no `Screen`, que é usado por outras telas sem
+       * pedir o mesmo respiro).
+       */}
+      <View style={{ gap: espaco.lg, paddingTop: espaco.lg, paddingBottom: espaco.xxl, paddingHorizontal: espaco.sm }}>
+        <Pressable
+          accessibilityRole="button"
+          onPress={props.onTrocar}
+          style={{
+            alignSelf: "flex-start",
+            minHeight: 44,
+            justifyContent: "center",
+            paddingHorizontal: espaco.lg,
+            borderRadius: raio.lg,
+            backgroundColor: cores.brandSoft,
+          }}
+        >
+          <Texto variante="rotulo" tom="brandInk">
+            Ver em {props.esquema === "light" ? "escuro" : "claro"}
           </Texto>
-        </View>
-      ))}
+        </Pressable>
 
-      <Texto variante="secao">Tipografia</Texto>
-      {VARIANTES_TEXTO.map((variante) => (
-        <Texto key={variante} variante={variante}>
-          {variante}
-        </Texto>
-      ))}
+        <Texto variante="secao">Cor</Texto>
+        {NOMES_COR.map((nome) => (
+          <View key={nome} style={{ flexDirection: "row", alignItems: "center", gap: 12 }}>
+            <View
+              style={{
+                width: 32,
+                height: 32,
+                borderRadius: raio.sm,
+                backgroundColor: cores[nome],
+                borderWidth: 1,
+                borderColor: cores.border,
+              }}
+            />
+            <Texto variante="legenda" tom="inkMuted">
+              {nome} · {cores[nome]}
+            </Texto>
+          </View>
+        ))}
 
-      <SecaoDinheiro />
-    </ScrollView>
+        <Texto variante="secao">Tipografia</Texto>
+        {VARIANTES_TEXTO.map((variante) => (
+          <Texto key={variante} variante={variante}>
+            {variante}
+          </Texto>
+        ))}
+
+        <SecaoDinheiro />
+        <SecaoControles />
+        <SecaoExibicao />
+      </View>
+    </Screen>
   );
 }
