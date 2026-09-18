@@ -3,6 +3,22 @@ import assert from 'node:assert/strict';
 import { join } from 'node:path';
 import { setup, ask, screenshots } from './agent_chat_fixture.mjs';
 
+test('chat dos agentes acompanha o visualViewport quando teclado muda só a área visível', async () => {
+  const { page } = await setup({ viewport: { width: 390, height: 844 } });
+  try {
+    const panel = page.locator('#agent-chat-panel');
+    await panel.evaluate(el => {
+      el.style.setProperty('--pc-viewport-top', '12px');
+      el.style.setProperty('--pc-viewport-height', '420px');
+    });
+    const bounds = await panel.boundingBox();
+    assert.equal(bounds.y, 12);
+    assert.equal(bounds.height, 420);
+    const send = await page.locator('#agent-chat-send').boundingBox();
+    assert.ok(send.y + send.height <= bounds.y + bounds.height, 'envio permanece acima do teclado');
+  } finally { await page.close(); }
+});
+
 for (const light of [false, true]) {
   test(`agentes ocupam a página e Piggy mantém painel no tema ${light ? 'claro' : 'escuro'}`, async () => {
     const { page } = await setup();
