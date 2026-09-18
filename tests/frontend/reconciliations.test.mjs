@@ -271,9 +271,16 @@ test("cartão de saldo mostra o aviso da fixture e abre a conferência; sem pend
     const esperado = `⚠ ${caso.pending_count} lançamento(s) a conferir · pode ser ${caso.esperado_pode_ser}`;
     const btn = page.getByRole("button", { name: esperado, exact: true });
     await btn.waitFor();
-    const requested = page.waitForRequest(r => new URL(r.url()).pathname === "/open-finance/1/reconciliations");
-    await btn.click();
-    await requested;
+    // Falhou UMA vez no CI (run 35301756299) com o waitForRequest estourando em
+    // 30s como unhandledRejection, e não reproduz local nem com CPU 20x mais
+    // lenta. O click sem timeout espera para sempre um botão coberto, e quem
+    // estoura é o waitForRequest, sem dizer por quê. Com timeout próprio e os
+    // dois no mesmo Promise.all, a próxima falha sai do click e o Playwright
+    // nomeia o elemento que intercepta o ponteiro.
+    await Promise.all([
+      page.waitForRequest(r => new URL(r.url()).pathname === "/open-finance/1/reconciliations"),
+      btn.click({ timeout: 10000 }),
+    ]);
     await page.getByRole("dialog", { name: "Conferência com o extrato" }).waitFor();
 
     await page.evaluate(() => {
