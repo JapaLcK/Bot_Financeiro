@@ -62,6 +62,12 @@ const FUNDOS: Chave[] = ["bg", "surface", "surfaceRaised"];
  * `SegmentedControl.tsx` já usa. Longe de qualquer teto de contraste, por
  * isso o indicador ganhou uma borda de `inkMuted` à parte para marcar o
  * selecionado.
+ *
+ * `surface`×`bg` = 1,08 no escuro — o halo do `EmptyState` (disco `surface`
+ * atrás do sticker, só no tema escuro). Decorativo: o sticker é o único
+ * sinal (nenhuma informação depende do halo sozinho), então nenhum teto de
+ * contraste se aplica. Medido com a `contraste()` acima, hex de
+ * `tokens.ts`, 2026-09-17 — remeça se a paleta mudar.
  */
 export const PARES: ParDeContraste[] = [
   ...TEXTO.flatMap((primeiro) => FUNDOS.map((segundo) => ({ primeiro, segundo, minimo: 4.5 as const }))),

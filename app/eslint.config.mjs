@@ -66,6 +66,14 @@ export default tseslint.config(
     rules: { "@typescript-eslint/no-require-imports": "off" },
   },
   {
+    // `stickers.ts` usa `require()` de imagem pelo mesmo motivo do
+    // `_layout.tsx`: não existe declaração de módulo `*.webp` neste projeto,
+    // então um `import` estático falharia no `tsc`. Metro resolve
+    // `require()` de asset estático normalmente.
+    files: ["src/ui/stickers.ts"],
+    rules: { "@typescript-eslint/no-require-imports": "off" },
+  },
+  {
     // As três áreas onde o design system é DESENHADO: os próprios componentes,
     // o catálogo que os exibe e as seções do catálogo extraídas por tamanho
     // (`src/ui/ds/`, CLAUDE.md §0.5). O gate SÓ vale aqui — uma tela de

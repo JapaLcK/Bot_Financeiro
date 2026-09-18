@@ -1,3 +1,4 @@
+import { Link } from "expo-router";
 import { useState } from "react";
 import { Pressable, useColorScheme, View } from "react-native";
 
@@ -6,8 +7,8 @@ import { Texto } from "@/ui/componentes/Texto";
 import { TemaProvider, useTema } from "@/ui/tema";
 import { claro, espaco, raio, texto as escalas, type Paleta } from "@/ui/tokens";
 
-// `require()`, não `import`, para as três seções: um `import` estático faz
-// este módulo puxar os 11 componentes do design system e os ícones reais do
+// `require()`, não `import`, para as cinco seções: um `import` estático faz
+// este módulo puxar os componentes do design system e os ícones reais do
 // Phosphor assim que ALGUÉM requer `_ds/index.tsx` — inclusive o roteador,
 // que avalia o arquivo de toda rota para montar a tabela de rotas mesmo com
 // o `Stack.Protected` guardando o acesso (`app/_layout.tsx`), mesmo em
@@ -22,6 +23,8 @@ import { claro, espaco, raio, texto as escalas, type Paleta } from "@/ui/tokens"
 type SecaoDinheiroModulo = typeof import("@/ui/ds/dinheiro");
 type SecaoControlesModulo = typeof import("@/ui/ds/controles");
 type SecaoExibicaoModulo = typeof import("@/ui/ds/exibicao");
+type SecaoComposicaoModulo = typeof import("@/ui/ds/composicao");
+type SecaoEstadoModulo = typeof import("@/ui/ds/estado");
 
 type Esquema = "light" | "dark";
 
@@ -49,6 +52,8 @@ function Catalogo(props: { esquema: Esquema; onTrocar: () => void }) {
   const { SecaoDinheiro } = require("@/ui/ds/dinheiro") as SecaoDinheiroModulo;
   const { SecaoControles } = require("@/ui/ds/controles") as SecaoControlesModulo;
   const { SecaoExibicao } = require("@/ui/ds/exibicao") as SecaoExibicaoModulo;
+  const { SecaoComposicao } = require("@/ui/ds/composicao") as SecaoComposicaoModulo;
+  const { SecaoEstado } = require("@/ui/ds/estado") as SecaoEstadoModulo;
   return (
     <Screen>
       {/*
@@ -107,6 +112,30 @@ function Catalogo(props: { esquema: Esquema; onTrocar: () => void }) {
         <SecaoDinheiro />
         <SecaoControles />
         <SecaoExibicao />
+        <SecaoComposicao />
+        <SecaoEstado />
+
+        <Texto variante="secao">Telas</Texto>
+        <View style={{ gap: espaco.sm }}>
+          {(["inicio", "lista", "formulario", "sheet-exemplo"] as const).map((rota) => (
+            <Link key={rota} href={`/_ds/${rota}`} asChild>
+              <Pressable
+                accessibilityRole="button"
+                style={{
+                  minHeight: 44,
+                  justifyContent: "center",
+                  paddingHorizontal: espaco.lg,
+                  borderRadius: raio.md,
+                  backgroundColor: cores.surface,
+                }}
+              >
+                <Texto variante="rotulo" tom="ink">
+                  {rota}
+                </Texto>
+              </Pressable>
+            </Link>
+          ))}
+        </View>
       </View>
     </Screen>
   );

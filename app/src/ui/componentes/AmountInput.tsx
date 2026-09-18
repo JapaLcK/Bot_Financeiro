@@ -1,6 +1,6 @@
 import { TextInput, View } from "react-native";
 
-import { digitoAscii, digitosParaCentavos, falado, partes, TETO_CENTAVOS } from "@/ui/dinheiro";
+import { digitoAscii, digitosParaCentavos, falado, partes, TETO_CENTAVOS, VALOR_INDISPONIVEL_FALADO } from "@/ui/dinheiro";
 import { useAvisoAoErrar } from "@/ui/haptics";
 import { useTema } from "@/ui/tema";
 import { espaco, texto as escalas } from "@/ui/tokens";
@@ -90,7 +90,7 @@ export function AmountInput({ centavos, onChange, rotulo, erro, desativado = fal
     if (n !== null && n !== centavos) onChange(n);
   }
 
-  const fala = p ? (falado(centavos) ?? "zero reais") : "valor indisponível";
+  const fala = p ? (falado(centavos) ?? "zero reais") : VALOR_INDISPONIVEL_FALADO;
   const label = `${rotulo}, ${fala}${erro ? `, erro: ${erro}` : ""}`;
   const tom = desativado ? "inkMuted" : "ink";
 

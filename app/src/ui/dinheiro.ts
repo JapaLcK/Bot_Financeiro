@@ -112,9 +112,9 @@ function contarCentavo(quantidade: number): string {
 
 /**
  * Módulo falado em pt-BR, SEM separador de milhar ("1234567 reais", não
- * "1.234.567 reais" — quem lê em voz alta não lê pontos). Sinal fica por
- * conta de quem chama (`Money` prefixa "menos "/"mais "), porque o sinal
- * falado depende do TIPO (decisão 2), não só do valor.
+ * "1.234.567 reais" — quem lê em voz alta não lê pontos). Nunca leva sinal:
+ * quem prefixa "menos "/"mais " é `faladoComSinal`, porque o sinal falado
+ * depende do TIPO (decisão 2), não só do valor.
  */
 export function falado(centavos: number): string | null {
   if (!Number.isSafeInteger(centavos)) return null;
@@ -128,4 +128,34 @@ export function falado(centavos: number): string | null {
   if (reais === 0) return contarCentavo(restoCentavos);
   if (restoCentavos === 0) return contarReal(reais);
   return `${contarReal(reais)} e ${contarCentavo(restoCentavos)}`;
+}
+
+export type TipoValorFalado = "saldo" | "entrada" | "saida";
+
+/**
+ * Fonte única do texto "sem valor" falado (CLAUDE.md §0.7) — minúsculo
+ * porque é a forma usada NO MEIO de uma frase (`AmountInput`, e aqui mesmo
+ * dentro de `faladoComSinal`). Quem precisa dele como rótulo isolado, no
+ * INÍCIO (`Money`), capitaliza a primeira letra no próprio ponto de uso —
+ * o texto é o mesmo, só a posição na frase muda a capitalização.
+ */
+export const VALOR_INDISPONIVEL_FALADO = "valor indisponível";
+
+/**
+ * Fala do valor já com o sinal falado ("mais "/"menos ") aplicado — MESMA
+ * regra do `Money` (decisão 2 do dono): `entrada`/`saida` falam o sinal do
+ * TIPO, não o do número; só `saldo` segue o sinal do próprio valor. Zero e
+ * valor inválido nunca levam sinal ("zero reais", "valor indisponível"), nunca
+ * "menos zero reais"/"mais valor indisponível" — fonte única para `Money`
+ * (rótulo visual) e `TransactionRow` (rótulo do container `accessible`), que
+ * antes remontavam essa regra cada um a seu jeito e já tinham divergido.
+ */
+export function faladoComSinal(centavos: number, tipo: TipoValorFalado = "saldo"): string {
+  const moduloFalado = falado(centavos);
+  if (moduloFalado === null) return VALOR_INDISPONIVEL_FALADO;
+  if (centavos === 0) return moduloFalado;
+
+  if (tipo === "entrada") return `mais ${moduloFalado}`;
+  if (tipo === "saida") return `menos ${moduloFalado}`;
+  return centavos < 0 ? `menos ${moduloFalado}` : moduloFalado;
 }
