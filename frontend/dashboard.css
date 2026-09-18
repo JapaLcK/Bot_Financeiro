@@ -1997,6 +1997,7 @@ html.pb-app #piggy-fab { touch-action: none; }
   animation: piggyPanelOpen .28s cubic-bezier(.16,1,.3,1);
 }
 #piggy-panel.open { display: flex; }
+#piggy-panel.has-portfolio { width: min(640px, calc(100vw - 32px)); }
 @keyframes piggyPanelOpen { from { transform: scale(.92) translateY(20px); opacity: 0; } to { transform: scale(1) translateY(0); opacity: 1; } }
 .piggy-head {
   display: flex; align-items: center; gap: 12px; padding: 16px 18px;
@@ -2066,6 +2067,30 @@ html.pb-app #piggy-fab { touch-action: none; }
 .piggy-msg b { font-weight: 700; }
 .piggy-msg code { background: rgba(0,0,0,.3); padding: 1px 5px; border-radius: 4px; font-size: .82em; }
 .piggy-msg a { color: #FF2D8E; text-decoration: underline; }
+.piggy-portfolio { width: 100%; max-width: none; padding: 18px; }
+.piggy-portfolio-heading { display: flex; flex-direction: column; gap: 4px; }
+.piggy-portfolio-heading span, .piggy-portfolio-note { color: rgba(255,255,255,.58); font-size: .75rem; }
+.piggy-portfolio-heading strong { font-size: 1.65rem; font-variant-numeric: tabular-nums; }
+.piggy-portfolio-bar { display: flex; height: 8px; margin: 17px 0; overflow: hidden; border-radius: 999px; }
+.piggy-portfolio-segment-0 { background: #FF2D8E; }
+.piggy-portfolio-segment-1 { background: #a3a3b0; }
+.piggy-portfolio-segment-2 { background: #675d68; }
+.piggy-portfolio-group { border-top: 1px solid rgba(255,255,255,.1); }
+.piggy-portfolio-group summary { display: flex; align-items: center; justify-content: space-between; gap: 8px; padding: 12px 0; cursor: pointer; list-style: none; }
+.piggy-portfolio-group summary::-webkit-details-marker { display: none; }
+.piggy-portfolio-group summary span { min-width: 0; }
+.piggy-portfolio-group summary b { flex: none; font-variant-numeric: tabular-nums; }
+.piggy-portfolio-group summary::after { content: '⌄'; font-size: 1.25rem; color: #FF2D8E; }
+.piggy-portfolio-group[open] summary::after { transform: rotate(180deg); }
+.piggy-portfolio-row { display: flex; align-items: center; justify-content: space-between; gap: 12px; padding: 8px 0; border-top: 1px solid rgba(255,255,255,.06); font-size: .79rem; }
+.piggy-portfolio-row > span { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.piggy-portfolio-row small { display: block; color: rgba(255,255,255,.54); }
+.piggy-portfolio-row > b { flex: none; font-variant-numeric: tabular-nums; }
+.piggy-portfolio-note { margin: 14px 0 0; }
+.piggy-portfolio-followups { display: flex; flex-wrap: wrap; gap: 7px; margin-top: 14px; }
+.piggy-portfolio-followups button { min-height: 36px; padding: 7px 10px; border: 1px solid rgba(255,255,255,.22); border-radius: 999px; background: transparent; color: #fff; cursor: pointer; font: inherit; font-size: .76rem; }
+.piggy-portfolio-followups button:hover { border-color: #FF2D8E; background: rgba(255,45,142,.12); }
+.piggy-portfolio summary:focus-visible, .piggy-portfolio button:focus-visible { outline: 2px solid #FF2D8E; outline-offset: 2px; }
 
 .piggy-typing {
   align-self: flex-start; padding: 12px 14px;
@@ -2116,7 +2141,11 @@ html.pb-app #piggy-fab { touch-action: none; }
     width: auto;
     height: calc(100vh - 100px);
   }
+  #piggy-panel.has-portfolio { width: auto; }
   #piggy-fab { right: 14px; bottom: 14px; }
+}
+@media (prefers-reduced-motion: reduce) {
+  #piggy-panel, .piggy-msg { animation: none; }
 }
 
 /* ─── Stickers do Piggy (empty states, insight, toast, loading) ──────── */

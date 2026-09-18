@@ -312,7 +312,7 @@ def get_open_finance_snapshot(user_id: int, limit: int = 8) -> dict:
 
             cur.execute(
                 """
-                select c.institution_name, i.id, i.name, i.type, i.subtype, i.balance
+                select c.institution_name, i.id, i.name, i.type, i.subtype, i.balance, i.currency
                 from open_finance_investments i
                 join open_finance_connections c on c.id = i.connection_id
                 where c.user_id=%s

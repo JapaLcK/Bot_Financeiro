@@ -1,5 +1,6 @@
 /* dashboard-chat.js — widget de chat IA (Piggy), extraído de dashboard.html.
    Servido em /dashboard-chat.js. */
+/* global USER_ID */
 (function(){
   let piggyLoaded = false;
   let piggyBusy = false;
@@ -107,6 +108,9 @@
       const data = await r.json();
       renderPiggyMsg("assistant", data.reply || "Sem resposta.", true);
       updateUsage(data.usage);
+      if (window.piggyPortfolio?.applies(text)) {
+        await window.piggyPortfolio.render(USER_ID, window.piggyAsk);
+      }
     } catch (e) {
       hideTyping();
       console.error("[piggy] erro no send:", e);

@@ -568,6 +568,15 @@ async def serve_dashboard_chat_js():
     )
 
 
+@router.get("/dashboard-chat-portfolio.js")
+async def serve_dashboard_chat_portfolio_js():
+    return FileResponse(
+        FRONTEND_DIR / "dashboard-chat-portfolio.js",
+        media_type="application/javascript",
+        headers={"Cache-Control": "no-cache"},
+    )
+
+
 @router.get("/dashboard.css")
 async def serve_dashboard_css():
     """CSS do dashboard, extraído do inline de dashboard.html.
