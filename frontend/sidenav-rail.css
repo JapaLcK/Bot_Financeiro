@@ -1,0 +1,56 @@
+/* Navegação compacta nas páginas principais do site com mouse. O app/PWA
+   continua usando a gaveta e a barra inferior próprias. */
+@media (min-width: 901px) and (hover: hover) and (pointer: fine) {
+  html:not(.pb-app) body { padding-left: 68px; }
+
+  html:not(.pb-app) .sidenav {
+    width: 68px;
+    padding-left: 10px;
+    padding-right: 10px;
+    transform: none;
+    overflow-x: hidden;
+    box-shadow: 1px 0 12px rgba(0, 0, 0, .24);
+    transition: width .22s var(--ease), box-shadow .22s var(--ease);
+  }
+  html:not(.pb-app) .sidenav:hover,
+  html:not(.pb-app) .sidenav:has(.sidenav-item:focus-visible) {
+    width: 260px;
+    box-shadow: 4px 0 24px rgba(0, 0, 0, .5);
+  }
+  html:not(.pb-app) .sidenav-brand {
+    gap: 0;
+    padding-left: 5px;
+    padding-right: 5px;
+  }
+  html:not(.pb-app) .sidenav:hover .sidenav-brand,
+  html:not(.pb-app) .sidenav:has(.sidenav-item:focus-visible) .sidenav-brand { gap: 10px; }
+
+  html:not(.pb-app) .sidenav .brand-text,
+  html:not(.pb-app) .sidenav .sn-label,
+  html:not(.pb-app) .sidenav .sn-tag,
+  html:not(.pb-app) .sidenav .sidenav-section {
+    opacity: 0;
+    transition: opacity .12s var(--ease);
+  }
+  html:not(.pb-app) .sidenav:hover .brand-text,
+  html:not(.pb-app) .sidenav:hover .sn-label,
+  html:not(.pb-app) .sidenav:hover .sn-tag,
+  html:not(.pb-app) .sidenav:hover .sidenav-section,
+  html:not(.pb-app) .sidenav:has(.sidenav-item:focus-visible) .brand-text,
+  html:not(.pb-app) .sidenav:has(.sidenav-item:focus-visible) .sn-label,
+  html:not(.pb-app) .sidenav:has(.sidenav-item:focus-visible) .sn-tag,
+  html:not(.pb-app) .sidenav:has(.sidenav-item:focus-visible) .sidenav-section { opacity: 1; }
+
+  html:not(.pb-app) .sidenav .brand-text { white-space: nowrap; }
+  html:not(.pb-app) .sidenav .sidenav-item { white-space: nowrap; }
+  html:not(.pb-app) .sidenav-toggle { display: none !important; }
+  html:not(.pb-app) .sidenav-backdrop.open { display: none; }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  html:not(.pb-app) .sidenav,
+  html:not(.pb-app) .sidenav .brand-text,
+  html:not(.pb-app) .sidenav .sn-label,
+  html:not(.pb-app) .sidenav .sn-tag,
+  html:not(.pb-app) .sidenav .sidenav-section { transition: none; }
+}

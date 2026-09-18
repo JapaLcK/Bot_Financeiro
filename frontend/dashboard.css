@@ -155,10 +155,9 @@ body::before { content:""; position:fixed; inset:0; z-index:1; pointer-events:no
    estava cobrindo a última linha de tabela e o último card. 96px = 80 + folga. */
 .page { position:relative; z-index:2; max-width:1400px; margin:0 auto; padding:24px 20px 96px; }
 
-/* ─── Side navigation (estilo YouTube — overlay full-height) ────────── */
-/* Sidebar oculta por padrão. Click no hamburger abre overlay sobre o
-   conteúdo, com backdrop escuro escurecendo o resto. Brand PigBank fica
-   DENTRO do sidebar no topo. Background opaco pra contraste. */
+/* ─── Gaveta lateral no toque ──────────────────────────────────────────── */
+/* No desktop, sidenav-rail.css mantém a barra de ícones visível e expande
+   sobre o conteúdo. Aqui fica a base da gaveta aberta pelo botão de menu. */
 .sidenav {
   position:fixed; top:0; left:0; bottom:0;
   width:260px; box-sizing:border-box;
@@ -176,9 +175,7 @@ body.light .sidenav { background:#fff; box-shadow:4px 0 24px rgba(15,23,42,.18);
 .sidenav.peek, .sidenav.open {
   transform:translateX(0);
 }
-/* Hamburger no header (estilo YouTube): integrado ao header-left, ao lado
-   do logo Finance Dashboard. Quando clicado, abre sidebar overlay com
-   backdrop escuro cobrindo o resto da tela. */
+/* Botão da gaveta no header, oculto quando a barra compacta está ativa. */
 .sidenav-toggle {
   display:inline-flex !important; align-items:center; justify-content:center;
   width:38px; height:38px; border-radius:50%;
