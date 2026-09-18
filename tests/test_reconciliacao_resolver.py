@@ -222,6 +222,36 @@ def test_acionavel_e_pausada_no_mesmo_usuario(uid_pro, ia_fora):
     assert _lista_e_contagem(uid_pro) == ([acionavel], 1)
 
 
+# ── `tipo` canônico na lista (Codex P2): legado não pode sair com sinal trocado ──
+
+def test_tipo_legado_entrada_sai_como_receita(uid_pro, ia_fora):
+    """Receita gravada como `tipo='entrada'` (legado) tem de listar 'receita'.
+    Sem TIPO_CANON_SQL o front faz `fmtBRL(tipo === "receita" ? valor : -valor)`
+    e desenha negativo um valor que o banco mostra positivo."""
+    conexao = conecta_banco(uid_pro, "114.88")
+    manda(uid_pro, "Recebi 1 real da barbara")
+    manual = ultimo_launch(uid_pro)
+    _q("update launches set tipo='entrada' where id=%s returning id", (manual,))
+    sincroniza(conexao, uid_pro, "115.88",
+               [tx(uid_pro, "1.00", today_tz(), "PIX RECEBIDO XPTO LTDA")])
+    assert db.import_open_finance_launches(uid_pro, conexao)["pending"] == 1
+    rows = db.list_reconciliations(uid_pro)
+    assert rows and rows[0]["launch"]["tipo"] == "receita"
+
+
+def test_tipo_despesa_moderna_continua_despesa(uid_pro, ia_fora):
+    _, of_tx, _, _ = pendencia(uid_pro)
+    rows = db.list_reconciliations(uid_pro)
+    assert rows[0]["launch"]["tipo"] == "despesa"
+
+
+def test_tipo_legado_saida_vira_despesa(uid_pro, ia_fora):
+    _, of_tx, manual, _ = pendencia(uid_pro)
+    _q("update launches set tipo='saida' where id=%s returning id", (manual,))
+    rows = db.list_reconciliations(uid_pro)
+    assert rows[0]["launch"]["tipo"] == "despesa"
+
+
 def test_acionavel_e_x_ocupado_no_mesmo_usuario(uid_pro, ia_fora):
     _, acionavel, _, _ = pendencia(uid_pro)
     _, ocupada = _segundo_banco_com_pendencia(uid_pro)

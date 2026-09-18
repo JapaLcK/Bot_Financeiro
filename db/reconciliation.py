@@ -21,7 +21,7 @@ from psycopg import errors as pg_errors
 from utils_date import today_tz
 
 from .bank_movements import _lock_user, delete_if_shadow
-from .connection import get_conn
+from .connection import TIPO_CANON_SQL, get_conn
 from .open_finance import (
     ACTIONABLE_PENDING_SQL, MERGED_WALLET_DELTA_SQL, PENDING_RECONCILIATION_SQL, _insert_of_shadow,
     classify_open_finance_launch, merged_wallet_delta_params,
@@ -137,7 +137,7 @@ def list_reconciliations(user_id: int) -> list[dict]:
     with get_conn() as conn, conn.cursor() as cur:
         cur.execute(
             f"""select o.id, o.reconciliation_status, o.description, o.amount, o.transaction_date,
-                      c.institution_name, l.id as launch_id, l.tipo, l.valor, l.alvo, l.nota,
+                      c.institution_name, l.id as launch_id, {TIPO_CANON_SQL} as tipo, l.valor, l.alvo, l.nota,
                       coalesce(l.posted_at, l.criado_em::date) as launch_date
                  from open_finance_transactions o
                  join open_finance_accounts a on a.id = o.account_id
