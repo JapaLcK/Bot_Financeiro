@@ -11,7 +11,7 @@ const renderAgents = source.slice(source.indexOf('function _renderAgentes(data)'
 const chat = readFileSync(join(frontend, 'dashboard-agent-chat.js'), 'utf8');
 const styles = readFileSync(join(frontend, 'dashboard.css'), 'utf8');
 
-test('card disponível abre conversa por mouse e teclado sem acionar pausa', async () => {
+test('card abre conversa e switch alterna agente sem abrir chat', async () => {
   const browser = await chromium.launch();
   try {
     for (const viewport of [{ width: 1280, height: 900 }, { width: 390, height: 844 }]) {
@@ -19,6 +19,7 @@ test('card disponível abre conversa por mouse e teclado sem acionar pausa', asy
       try {
         await page.setContent('<!doctype html><meta name="viewport" content="width=device-width,initial-scale=1"><div id="agentes-counters"></div><div id="agentes-shelf" class="ag-shelf"></div><div id="agentes-feed"></div>');
         await page.addStyleTag({ content: styles });
+        if (viewport.width < 500) await page.evaluate(() => document.body.classList.add('light'));
         await page.addScriptTag({ content: `const esc = value => String(value); const fmtDate = value => value; let _agentesCache = null; ${renderAgents}` });
         await page.evaluate(() => {
           window.pauseCalls = [];
@@ -62,8 +63,18 @@ test('card disponível abre conversa por mouse e teclado sem acionar pausa', asy
         await page.mouse.click(point.x, point.y);
         assert.deepEqual(await page.evaluate(() => window.chatCalls), ['detetive', 'detetive', 'detetive', 'barao']);
 
-        await page.getByRole('button', { name: /Ativo.*Pausar/ }).click();
-        await page.getByRole('button', { name: /^Ativar/ }).click();
+        assert.equal(await page.locator('.ag-toggle[role="switch"]').count(), 2);
+        const activeSwitch = page.getByRole('switch', { name: 'Agente Detetive' });
+        const pausedSwitch = page.getByRole('switch', { name: 'Agente Barão' });
+        assert.equal(await activeSwitch.getAttribute('aria-checked'), 'true');
+        assert.equal(await pausedSwitch.getAttribute('aria-checked'), 'false');
+        assert.ok((await activeSwitch.boundingBox()).height >= 44);
+        assert.ok((await pausedSwitch.boundingBox()).height >= 44);
+        const trackColors = await page.locator('.ag-toggle-track').evaluateAll(tracks => tracks.map(track => getComputedStyle(track).backgroundColor));
+        assert.notEqual(trackColors[0], trackColors[1], 'ligado e desligado precisam ser distinguíveis');
+        await activeSwitch.click();
+        await pausedSwitch.focus();
+        await pausedSwitch.press('Space');
         assert.deepEqual(await page.evaluate(() => window.pauseCalls), ['detetive']);
         assert.deepEqual(await page.evaluate(() => window.activateCalls), ['barao']);
         assert.equal(await page.evaluate(() => window.chatCalls.length), 4);
