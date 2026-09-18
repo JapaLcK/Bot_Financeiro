@@ -3,6 +3,18 @@ import assert from 'node:assert/strict';
 import { join } from 'node:path';
 import { setup, ask, screenshots } from './agent_chat_fixture.mjs';
 
+test('fixture mantém o botão de abrir agente clicável com menu expandido', async () => {
+  const { page } = await setup({ openAgent: false });
+  try {
+    await page.mouse.move(32, 145);
+    await page.waitForFunction(() => Math.round(document.getElementById('sidenav').getBoundingClientRect().width) === 260);
+    assert.equal(await page.locator('#open').evaluate(button => {
+      const rect = button.getBoundingClientRect();
+      return document.elementFromPoint(rect.left + rect.width / 2, rect.top + rect.height / 2) === button;
+    }), true);
+  } finally { await page.close(); }
+});
+
 test('mantém contexto ao reabrir, separa agentes e limpa no reload', async () => {
   const { page, requests, errors } = await setup();
   try {

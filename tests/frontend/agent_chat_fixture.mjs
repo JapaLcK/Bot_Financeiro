@@ -82,7 +82,7 @@ async function setup({ budget = 14, active = ['detetive', 'barao'], viewport, ho
       const file = new URL(path.slice(1), root);
       return route.fulfill({ contentType: path.endsWith('.webp') ? 'image/webp' : 'image/png', body: await readFile(file) });
     }
-    return route.fulfill({ contentType: 'text/html', body: `<!doctype html><meta charset="UTF-8"><meta name="viewport" content="width=device-width,initial-scale=1">${styles}<body class="has-sidenav">${sidenav}<button id="piggy-fab" aria-label="Abrir Piggy IA">Piggy</button><div id="agentes-shelf"><button id="open" data-agent-chat="detetive">Conversar com Detetive</button></div>${panel}<script>
+    return route.fulfill({ contentType: 'text/html', body: `<!doctype html><meta charset="UTF-8"><meta name="viewport" content="width=device-width,initial-scale=1">${styles}<body class="has-sidenav">${sidenav}<button id="piggy-fab" aria-label="Abrir Piggy IA">Piggy</button><div id="agentes-shelf" style="display:flex;justify-content:center"><button id="open" data-agent-chat="detetive">Conversar com Detetive</button></div>${panel}<script>
       const API=''; const USER_ID=42; let _agentesCache=null;
       function csrfHeaders(h={}){return h;}
       function _agentName(k){return k;}
