@@ -179,6 +179,69 @@ test("409 mostra o detail do servidor e recarrega; 404 só recarrega, sem alerta
   } finally { await page.close(); }
 });
 
+// Achado do Codex (P2, reconciliations.js:73): só o botão clicado travava —
+// com o confirmar em voo, "São gastos diferentes" da MESMA linha seguia
+// clicável. Se o confirmar commita primeiro (status vira "confirmed" no
+// servidor), reject_reconciliation trata isso como no-op de sucesso
+// (db/reconciliation.py::reject_reconciliation) — a UI parecia aceitar a
+// rejeição com o par continuando confirmado.
+test("confirmar em voo trava 'São gastos diferentes' da mesma linha (P2 Codex)", async () => {
+  let releaseConfirm;
+  const confirmHeld = new Promise(r => { releaseConfirm = r; });
+  const { page, posts, rows } = await pageFor(800, [pendingRow], {
+    // Splice manual: com `actionHandler` presente o splice automático do
+    // `pageFor` (sucesso remove a linha) não roda — sem isto o `load()` de
+    // depois do release recarregaria a MESMA pendência e "Nada pendente"
+    // nunca apareceria (contrato de _server.mjs, comentado em `pageFor`).
+    actionHandler: (ofTxId, action) => action === "confirm"
+      ? confirmHeld.then(() => {
+          const idx = rows.findIndex(r => r.of_tx_id === ofTxId);
+          if (idx >= 0) rows.splice(idx, 1);
+          return { body: { ok: true, changed: true }, status: 200 };
+        })
+      : null,
+  });
+  try {
+    await page.evaluate(() => window.Reconciliations.open(1));
+    await page.locator("#reconciliations-overlay").getByText("Mercado", { exact: false }).first().waitFor();
+    const posted = page.waitForRequest(r => r.url().endsWith("/confirm"));
+    await page.getByRole("button", { name: "É o mesmo gasto" }).click();
+    await posted;
+    assert.equal(await page.getByRole("button", { name: "São gastos diferentes" }).isDisabled(), true,
+      "'São gastos diferentes' devia travar enquanto o confirm da mesma linha está em voo");
+    // .click() nativo (não o do Playwright, que recusa clicar num elemento
+    // desabilitado): um botão disabled não dispara onclick — é isso que se
+    // verifica. Só há 1 linha (pendingRow), então a classe é única na tela.
+    await page.evaluate(() => document.querySelector(".btn-cancel").click());
+    assert.equal(await page.locator("#generic-confirm-overlay.open").count(), 0,
+      "clique em 'São gastos diferentes' travado abriu a confirmação de rejeitar");
+    releaseConfirm();
+    await page.waitForFunction(() => document.getElementById("reconciliations-overlay").textContent.includes("Nada pendente"));
+    assert.deepEqual(posts, [{ ofTxId: 501, action: "confirm", csrf: "tok123" }],
+      "nenhum POST de reject pode ter saído enquanto o confirm estava em voo");
+  } finally { await page.close(); }
+});
+
+// Controle positivo do teste acima: erro no confirmar reabilita OS DOIS
+// botões da linha (não só o clicado) — verificado ANTES do reload de load(),
+// que substituiria a linha por botões novos (já nascidos habilitados) e
+// mascararia uma falta de reabilitação.
+test("confirmar com erro reabilita os dois botões da linha antes do reload (controle positivo, P2 Codex)", async () => {
+  const { page } = await pageFor(800, [pendingRow], {
+    actionHandler: () => ({ status: 409, body: { detail: "Não foi possível concluir. Atualize a lista e confira novamente." } }),
+  });
+  try {
+    await page.evaluate(() => window.Reconciliations.open(1));
+    await page.locator("#reconciliations-overlay").getByText("Mercado", { exact: false }).first().waitFor();
+    await page.getByRole("button", { name: "É o mesmo gasto" }).click();
+    await page.getByText("Não foi possível concluir. Atualize a lista", { exact: false }).waitFor();
+    assert.equal(await page.getByRole("button", { name: "É o mesmo gasto" }).isDisabled(), false);
+    assert.equal(await page.getByRole("button", { name: "São gastos diferentes" }).isDisabled(), false,
+      "'São gastos diferentes' devia voltar a ficar clicável depois do erro no confirmar");
+    await page.locator("#generic-confirm-ok").click();
+  } finally { await page.close(); }
+});
+
 test("Reconciliations.aviso espelha a fixture inteira (pytest e node leem o mesmo arquivo)", async () => {
   const { page } = await pageFor(800, []);
   try {

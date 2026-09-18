@@ -69,14 +69,20 @@
   // aviso mudaram de verdade) mesmo sem lista para recarregar; se falhou, não
   // há diálogo para alertar nem lista para recarregar, e o dashboard não é
   // tocado — a ação não deu certo.
-  async function _run(ofTxId, action, button) {
-    button.disabled = true;
+  // `buttons`: TODOS os botões de ação da MESMA linha (achado do Codex, P2) —
+  // travar só o botão clicado deixava o outro (ex.: "São gastos diferentes")
+  // disparar por cima de um confirm ainda em voo. Se o confirm commitar
+  // primeiro, o servidor já não está mais "pending" e reject_reconciliation
+  // trata isso como no-op de sucesso (db/reconciliation.py) — a UI parecia
+  // aceitar a rejeição com o par continuando confirmado.
+  async function _run(ofTxId, action, buttons) {
+    buttons.forEach(b => { b.disabled = true; });
     try {
       await act(activeUser, ofTxId, action);
       if (overlay) await load();
       if (afterSave) await afterSave();
     } catch (err) {
-      button.disabled = false;
+      buttons.forEach(b => { b.disabled = false; });
       if (!overlay) return;
       if (err.status !== 404) await window.alertModal(err.message);
       await load();
@@ -86,9 +92,10 @@
     const section = _side(r);
     const confirmBtn = element("button", "É o mesmo gasto", "btn-save");
     confirmBtn.type = "button";
-    confirmBtn.addEventListener("click", () => _run(r.of_tx_id, "confirm", confirmBtn));
     const rejectBtn = element("button", "São gastos diferentes", "btn-cancel");
     rejectBtn.type = "button";
+    const rowButtons = [confirmBtn, rejectBtn];
+    confirmBtn.addEventListener("click", () => _run(r.of_tx_id, "confirm", rowButtons));
     rejectBtn.addEventListener("click", async () => {
       overlay.classList.remove("open");
       const confirmed = await window.confirmModal(
@@ -98,7 +105,7 @@
       overlay.classList.add("open");
       rejectBtn.focus();
       if (!confirmed) return;
-      _run(r.of_tx_id, "reject", rejectBtn);
+      _run(r.of_tx_id, "reject", rowButtons);
     });
     const acts = element("div", null, "modal-acts");
     acts.style.marginTop = "12px";
@@ -119,7 +126,7 @@
       overlay.classList.add("open");
       undoBtn.focus();
       if (!confirmed) return;
-      _run(r.of_tx_id, "undo", undoBtn);
+      _run(r.of_tx_id, "undo", [undoBtn]);
     });
     const acts = element("div", null, "modal-acts");
     acts.style.marginTop = "12px";
