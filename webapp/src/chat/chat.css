@@ -131,14 +131,16 @@ html.pb-agent-chat-open #piggy-fab { visibility: hidden; }
   --pc-surface: #111112; --pc-raised: #1c1c1f; --pc-bubble: #202023;
   --pc-ink: #f0f0f2; --pc-muted: #a0a0a9; --pc-line: #343439;
   --pc-accent: #ff80b8; --pc-button: #f5f5f7;
-  inset: 0; display: grid; grid-template-columns: 68px minmax(0, 1fr);
+  inset: 0; display: grid; grid-template-columns: minmax(0, 1fr);
   width: 100%; height: 100vh; height: 100dvh; max-height: none;
   border: 0; border-radius: 0; background: #111112; box-shadow: none;
   color: var(--pc-ink); font-size: 14px; line-height: 1.5; z-index: 1200;
 }
 #pigbank-chat-root #agent-chat-panel[hidden] { display: none; }
-#pigbank-chat-root .pc-agent-page { grid-column: 2; min-width: 0; min-height: 0; }
+#pigbank-chat-root .pc-agent-page { grid-column: 1; min-width: 0; min-height: 0; }
 @media (min-width: 901px) and (hover: hover) and (pointer: fine) {
+  html:not(.pb-app) #pigbank-chat-root #agent-chat-panel { grid-template-columns: 68px minmax(0, 1fr); }
+  html:not(.pb-app) #pigbank-chat-root .pc-agent-page { grid-column: 2; }
   html.pb-agent-chat-open:not(.pb-app) #sidenav {
     --text: #f0f0f2; --text-2: #b7b7c0; --text-3: #9b9ba5; --div: #303035;
     z-index: 1300; background: #101011; box-shadow: none;

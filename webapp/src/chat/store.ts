@@ -85,7 +85,14 @@ export const chatUI = {
 
 document.getElementById("sidenav")?.addEventListener("click", event => {
   if (snapshot.active !== "agent") return;
-  if (event.target instanceof Element && event.target.closest(".sidenav-item")) chatUI.close("agent", false);
+  const item = event.target instanceof Element ? event.target.closest(".sidenav-item") : null;
+  if (!item || item.classList.contains("pro-locked")) return;
+  if (item instanceof HTMLButtonElement && item.dataset.nav) {
+    chatUI.close("agent", false);
+  } else if (item instanceof HTMLAnchorElement && (!item.target || item.target === "_self")
+    && !event.defaultPrevented && !event.metaKey && !event.ctrlKey && !event.shiftKey && !event.altKey) {
+    chatUI.close("agent", false);
+  }
 });
 
 declare global {

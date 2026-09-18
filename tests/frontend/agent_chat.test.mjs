@@ -173,6 +173,51 @@ test('menu lateral não cobre o chat de agentes no celular', async () => {
   } finally { await page.close(); }
 });
 
+test('chat não reserva espaço para menu lateral indisponível', async () => {
+  for (const options of [
+    { viewport: { width: 820, height: 900 } },
+    { viewport: { width: 1280, height: 900 }, hasTouch: true },
+  ]) {
+    const { page } = await setup(options);
+    try {
+      assert.equal(await page.locator('#sidenav').evaluate(el => el.inert), true);
+      assert.equal((await page.locator('.pc-agent-page').boundingBox()).x, 0);
+      assert.equal((await page.locator('.pc-agent-page').boundingBox()).width, options.viewport.width);
+    } finally { await page.close(); }
+  }
+  const { page } = await setup({ viewport: { width: 1280, height: 900 } });
+  try {
+    await page.evaluate(() => {
+      PigBankChatUI.close('agent');
+      document.documentElement.classList.add('pb-app');
+      openAgentChat('detetive');
+    });
+    assert.equal(await page.locator('#sidenav').evaluate(el => el.inert), true);
+    assert.equal((await page.locator('.pc-agent-page').boundingBox()).x, 0);
+  } finally { await page.close(); }
+});
+
+test('ações auxiliares da barra lateral não fecham a conversa', async () => {
+  const { page } = await setup({ viewport: { width: 1280, height: 900 } });
+  try {
+    await page.evaluate(() => {
+      window.toggleTheme = () => { window.themeToggled = true; };
+      window.connectWhatsAppFromDashboard = () => { window.whatsAppOpened = true; };
+    });
+    await page.locator('#theme-toggle-btn').click();
+    assert.equal(await page.evaluate(() => window.themeToggled), true);
+    assert.equal(await page.locator('#agent-chat-panel').isVisible(), true);
+    await page.locator('#sidenav button:has(.ph-whatsapp-logo)').click();
+    assert.equal(await page.evaluate(() => window.whatsAppOpened), true);
+    assert.equal(await page.locator('#agent-chat-panel').isVisible(), true);
+    await page.locator('#sidenav a[href="/suporte"]').evaluate(link => {
+      link.addEventListener('click', event => event.preventDefault(), { once: true });
+      link.click();
+    });
+    assert.equal(await page.locator('#agent-chat-panel').isVisible(), true);
+  } finally { await page.close(); }
+});
+
 test('sugestões são perguntas dos agentes e trocam de agente sem envio', async () => {
   const { page, requests, errors } = await setup({ active: ['detetive', 'barao', 'xerife'] });
   try {
