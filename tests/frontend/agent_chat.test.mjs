@@ -3,6 +3,18 @@ import assert from 'node:assert/strict';
 import { join } from 'node:path';
 import { setup, ask, screenshots } from './agent_chat_fixture.mjs';
 
+test('fixture mantém o botão de abrir agente clicável com menu expandido', async () => {
+  const { page } = await setup({ openAgent: false });
+  try {
+    await page.mouse.move(32, 145);
+    await page.waitForFunction(() => Math.round(document.getElementById('sidenav').getBoundingClientRect().width) === 260);
+    assert.equal(await page.locator('#open').evaluate(button => {
+      const rect = button.getBoundingClientRect();
+      return document.elementFromPoint(rect.left + rect.width / 2, rect.top + rect.height / 2) === button;
+    }), true);
+  } finally { await page.close(); }
+});
+
 test('mantém contexto ao reabrir, separa agentes e limpa no reload', async () => {
   const { page, requests, errors } = await setup();
   try {
@@ -136,6 +148,115 @@ test('chat dos agentes ocupa a página em desktop e celular, tema claro e escuro
       assert.equal(await page.evaluate(() => document.activeElement.id), 'open');
     } finally { await page.close(); }
   }
+});
+
+test('chat reutiliza o menu lateral do dashboard com expansão e navegação', async () => {
+  const { page, errors } = await setup({ viewport: { width: 1280, height: 900 } });
+  try {
+    await page.mouse.move(900, 500);
+    const sidebar = page.locator('#sidenav');
+    assert.equal(await sidebar.evaluate(el => el.inert), false);
+    assert.equal(await page.locator('#agent-chat-panel .pc-agent-rail').count(), 0);
+    await page.waitForFunction(() => Math.round(document.getElementById('sidenav').getBoundingClientRect().width) === 68);
+    assert.equal(Math.round((await sidebar.boundingBox()).width), 68);
+    assert.equal(Math.round((await page.locator('.pc-agent-page').boundingBox()).x), 68);
+    assert.ok(Number(await sidebar.evaluate(el => getComputedStyle(el).zIndex)) > Number(await page.locator('#agent-chat-panel').evaluate(el => getComputedStyle(el).zIndex)));
+    assert.match(await sidebar.locator('[data-nav="agentes"]').getAttribute('class'), /\bactive\b/);
+    await page.screenshot({ path: join(screenshots, 'agent-sidebar-collapsed.png') });
+    await sidebar.locator('[data-nav="overview"] .sn-icon').hover();
+    await page.waitForFunction(() => Math.round(document.getElementById('sidenav').getBoundingClientRect().width) === 260);
+    assert.equal(await sidebar.locator('[data-nav="overview"] .sn-label').evaluate(el => getComputedStyle(el).opacity), '1');
+    await page.screenshot({ path: join(screenshots, 'agent-sidebar-expanded.png') });
+    await sidebar.locator('[data-nav="overview"]').click();
+    assert.equal(await page.evaluate(() => window.lastNavigation), 'overview');
+    assert.equal(await page.locator('#agent-chat-panel').isHidden(), true);
+    assert.equal(await sidebar.evaluate(el => el.inert), false);
+    assert.deepEqual(errors, []);
+  } finally { await page.close(); }
+});
+
+test('menu lateral não cobre o chat de agentes no celular', async () => {
+  const { page } = await setup({ viewport: { width: 390, height: 844 }, hasTouch: true });
+  try {
+    assert.equal(await page.locator('#sidenav').evaluate(el => el.inert), true);
+    assert.ok((await page.locator('#sidenav').boundingBox()).x < 0);
+    assert.equal((await page.locator('#agent-chat-panel').boundingBox()).width, 390);
+    await page.screenshot({ path: join(screenshots, 'agent-sidebar-mobile.png') });
+  } finally { await page.close(); }
+});
+
+test('chat não reserva espaço para menu lateral indisponível', async () => {
+  for (const options of [
+    { viewport: { width: 820, height: 900 } },
+    { viewport: { width: 1280, height: 900 }, hasTouch: true },
+  ]) {
+    const { page } = await setup(options);
+    try {
+      assert.equal(await page.locator('#sidenav').evaluate(el => el.inert), true);
+      assert.equal((await page.locator('.pc-agent-page').boundingBox()).x, 0);
+      assert.equal((await page.locator('.pc-agent-page').boundingBox()).width, options.viewport.width);
+    } finally { await page.close(); }
+  }
+  const { page } = await setup({ viewport: { width: 1280, height: 900 } });
+  try {
+    await page.evaluate(() => {
+      PigBankChatUI.close('agent');
+      document.documentElement.classList.add('pb-app');
+      openAgentChat('detetive');
+    });
+    assert.equal(await page.locator('#sidenav').evaluate(el => el.inert), true);
+    assert.equal((await page.locator('.pc-agent-page').boundingBox()).x, 0);
+  } finally { await page.close(); }
+});
+
+test('ações auxiliares da barra lateral não fecham a conversa', async () => {
+  const { page } = await setup({ viewport: { width: 1280, height: 900 } });
+  try {
+    await page.evaluate(() => {
+      window.toggleTheme = () => { window.themeToggled = true; };
+      window.connectWhatsAppFromDashboard = () => { window.whatsAppOpened = true; };
+    });
+    await page.locator('#theme-toggle-btn').click();
+    assert.equal(await page.evaluate(() => window.themeToggled), true);
+    assert.equal(await page.locator('#agent-chat-panel').isVisible(), true);
+    await page.locator('#sidenav button:has(.ph-whatsapp-logo)').click();
+    assert.equal(await page.evaluate(() => window.whatsAppOpened), true);
+    assert.equal(await page.locator('#agent-chat-panel').isVisible(), true);
+    await page.locator('#sidenav a[href="/suporte"]').evaluate(link => {
+      link.addEventListener('click', event => event.preventDefault(), { once: true });
+      link.click();
+    });
+    assert.equal(await page.locator('#agent-chat-panel').isVisible(), true);
+  } finally { await page.close(); }
+});
+
+test('barra lateral usa o modo atual da janela ao fechar a conversa', async () => {
+  for (const [initialWidth, finalWidth, expectedInert] of [
+    [820, 1280, false],
+    [1280, 820, true],
+  ]) {
+    const { page } = await setup({ viewport: { width: initialWidth, height: 900 } });
+    try {
+      await page.setViewportSize({ width: finalWidth, height: 900 });
+      await page.waitForFunction(width => innerWidth === width, finalWidth);
+      await page.locator('#agent-chat-close').click();
+      assert.equal(await page.locator('#sidenav').evaluate(el => el.inert), expectedInert);
+    } finally { await page.close(); }
+  }
+});
+
+test('item bloqueado do menu mostra upgrade sem deixar modal atrás do chat', async () => {
+  const { page } = await setup({ lockedUpgrade: true, viewport: { width: 1280, height: 900 } });
+  try {
+    await page.locator('#sidenav [data-nav="investments"]').click();
+    assert.equal(await page.evaluate(() => window.upgradeOpened), true);
+    assert.equal(await page.locator('#agent-chat-panel').isHidden(), true);
+    assert.equal(await page.locator('#upgrade-overlay').evaluate(el => el.inert), false);
+    assert.equal(await page.locator('#upgrade-overlay').evaluate(el => {
+      const center = document.elementFromPoint(innerWidth / 2, innerHeight / 2);
+      return center === el;
+    }), true);
+  } finally { await page.close(); }
 });
 
 test('sugestões são perguntas dos agentes e trocam de agente sem envio', async () => {
