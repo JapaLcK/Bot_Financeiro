@@ -1,0 +1,221 @@
+// Jest Snapshot v1, https://goo.gl/fbAQLP
+
+exports[`AmountInput — snapshot (dois temas) com valor e com erro: claro 1`] = `
+<View>
+  <Text
+    maxFontSizeMultiplier={1.3}
+    style={
+      [
+        {
+          "fontFamily": "Inter-Medium",
+          "fontSize": 14,
+          "lineHeight": 18,
+        },
+        {
+          "color": "#111113",
+        },
+        {},
+        null,
+      ]
+    }
+  >
+    Valor
+  </Text>
+  <View
+    style={
+      {
+        "alignItems": "center",
+        "flexDirection": "row",
+        "gap": 8,
+      }
+    }
+  >
+    <Text
+      maxFontSizeMultiplier={1.3}
+      style={
+        [
+          {
+            "fontFamily": "Inter-Bold",
+            "fontSize": 28,
+            "lineHeight": 34,
+          },
+          {
+            "color": "#111113",
+          },
+          {},
+          null,
+        ]
+      }
+    >
+      R$
+    </Text>
+    <TextInput
+      accessibilityLabel="Valor, 1234567 reais e 89 centavos, erro: Saldo insuficiente"
+      accessibilityState={
+        {
+          "disabled": false,
+        }
+      }
+      autoCorrect={false}
+      editable={true}
+      keyboardType="number-pad"
+      maxFontSizeMultiplier={1.3}
+      onChangeText={[Function]}
+      placeholder="—"
+      selection={
+        {
+          "end": 12,
+          "start": 12,
+        }
+      }
+      style={
+        [
+          {
+            "fontFamily": "Inter-Bold",
+            "fontSize": 28,
+            "lineHeight": 34,
+          },
+          {
+            "color": "#111113",
+            "flex": 1,
+            "fontVariant": [
+              "tabular-nums",
+            ],
+          },
+        ]
+      }
+      testID="valor-input"
+      value="1.234.567,89"
+    />
+  </View>
+  <Text
+    maxFontSizeMultiplier={1.3}
+    style={
+      [
+        {
+          "fontFamily": "Inter-Regular",
+          "fontSize": 12,
+          "lineHeight": 16,
+        },
+        {
+          "color": "#B42318",
+        },
+        {},
+        null,
+      ]
+    }
+  >
+    Saldo insuficiente
+  </Text>
+</View>
+`;
+
+exports[`AmountInput — snapshot (dois temas) com valor e com erro: escuro 1`] = `
+<View>
+  <Text
+    maxFontSizeMultiplier={1.3}
+    style={
+      [
+        {
+          "fontFamily": "Inter-Medium",
+          "fontSize": 14,
+          "lineHeight": 18,
+        },
+        {
+          "color": "#F2F2F3",
+        },
+        {},
+        null,
+      ]
+    }
+  >
+    Valor
+  </Text>
+  <View
+    style={
+      {
+        "alignItems": "center",
+        "flexDirection": "row",
+        "gap": 8,
+      }
+    }
+  >
+    <Text
+      maxFontSizeMultiplier={1.3}
+      style={
+        [
+          {
+            "fontFamily": "Inter-Bold",
+            "fontSize": 28,
+            "lineHeight": 34,
+          },
+          {
+            "color": "#F2F2F3",
+          },
+          {},
+          null,
+        ]
+      }
+    >
+      R$
+    </Text>
+    <TextInput
+      accessibilityLabel="Valor, 1234567 reais e 89 centavos, erro: Saldo insuficiente"
+      accessibilityState={
+        {
+          "disabled": false,
+        }
+      }
+      autoCorrect={false}
+      editable={true}
+      keyboardType="number-pad"
+      maxFontSizeMultiplier={1.3}
+      onChangeText={[Function]}
+      placeholder="—"
+      selection={
+        {
+          "end": 12,
+          "start": 12,
+        }
+      }
+      style={
+        [
+          {
+            "fontFamily": "Inter-Bold",
+            "fontSize": 28,
+            "lineHeight": 34,
+          },
+          {
+            "color": "#F2F2F3",
+            "flex": 1,
+            "fontVariant": [
+              "tabular-nums",
+            ],
+          },
+        ]
+      }
+      testID="valor-input"
+      value="1.234.567,89"
+    />
+  </View>
+  <Text
+    maxFontSizeMultiplier={1.3}
+    style={
+      [
+        {
+          "fontFamily": "Inter-Regular",
+          "fontSize": 12,
+          "lineHeight": 16,
+        },
+        {
+          "color": "#F97066",
+        },
+        {},
+        null,
+      ]
+    }
+  >
+    Saldo insuficiente
+  </Text>
+</View>
+`;

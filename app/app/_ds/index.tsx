@@ -3,6 +3,7 @@ import { Pressable, ScrollView, useColorScheme, View } from "react-native";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 
 import { Texto } from "@/ui/componentes/Texto";
+import { SecaoDinheiro } from "@/ui/ds/dinheiro";
 import { TemaProvider, useTema } from "@/ui/tema";
 import { claro, espaco, raio, texto as escalas, type Paleta } from "@/ui/tokens";
 
@@ -84,6 +85,8 @@ function Catalogo(props: { esquema: Esquema; onTrocar: () => void }) {
           {variante}
         </Texto>
       ))}
+
+      <SecaoDinheiro />
     </ScrollView>
   );
 }
