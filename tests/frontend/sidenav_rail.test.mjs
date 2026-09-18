@@ -54,6 +54,35 @@ for (const path of ["dashboard.html", "home.html"]) {
     } finally { await context.close(); }
   });
 
+  test(`${path}: destaque rosa só aparece ao passar o mouse no item ativo`, async () => {
+    const { page, context } = await openPage(path, { viewport: { width: 1440, height: 900 } });
+    try {
+      const nav = page.locator("#sidenav");
+      const active = nav.locator(".sidenav-item.active");
+      const visual = () => active.evaluate(el => ({
+        background: getComputedStyle(el).backgroundImage,
+        border: getComputedStyle(el).borderTopColor,
+        shadow: getComputedStyle(el).boxShadow,
+        icon: getComputedStyle(el.querySelector(".sn-icon")).backgroundImage,
+      }));
+      await page.mouse.move(900, 500);
+      await page.waitForFunction(() => Math.round(document.querySelector("#sidenav").getBoundingClientRect().width) === 68);
+      assert.equal((await visual()).background, "none");
+      assert.match((await visual()).border, /,\s*0\)$/);
+      assert.equal((await visual()).shadow, "none");
+      assert.equal((await visual()).icon, "none");
+
+      await active.locator(".sn-icon").hover();
+      await page.waitForFunction(() => Math.round(document.querySelector("#sidenav").getBoundingClientRect().width) === 260);
+      assert.match((await visual()).background, /gradient/);
+      assert.match((await visual()).icon, /gradient/);
+
+      await nav.locator(".sidenav-item:not(.active)").first().hover();
+      assert.equal((await visual()).background, "none");
+      assert.equal((await visual()).icon, "none");
+    } finally { await context.close(); }
+  });
+
   test(`${path}: indicador da rolagem aparece apenas enquanto o menu rola`, async () => {
     const { page, context } = await openPage(path, { viewport: { width: 1024, height: 440 } });
     try {
