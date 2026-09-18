@@ -8444,7 +8444,11 @@ async function _launchDetailUndo() {
   // aberto outro — fechar incondicionalmente fecharia o lançamento ERRADO.
   if (_launchDetailCurrent === l) closeLaunchDetail();
   _historyResetAndReload();
-  sendRefresh();
+  // sendRefresh() sozinho só atualiza saldo/aviso com WS aberto (_doRefresh só
+  // age em WebSocket.OPEN). refreshDashboardAfterInvestment já tem o fallback
+  // HTTP (fetchMonthHttp) que a tela de conferência usa como onSave — mesmo
+  // toast "✓ Atualizado" dela para os dois ficarem consistentes.
+  await refreshDashboardAfterInvestment();
 }
 
 function openLaunchDetail(idx) {

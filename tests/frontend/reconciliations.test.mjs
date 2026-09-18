@@ -41,10 +41,29 @@ const siblingRow = {
 
 // `rows` é mutável: a ação padrão (sucesso) remove a linha da lista, como o
 // servidor faria — prova que o reload é uma busca nova, não remendo local.
-async function pageFor(width, initialRows, { actionHandler, billPay } = {}) {
+// `fakeWs`: mesmo FakeWS de of_refresh_ui.test.mjs (readyState OPEN desde o
+// construtor) — o `http.server` estático desta suíte não fala WebSocket, e
+// sem isso `ws` nunca chega a WebSocket.OPEN em teste nenhum (é assim que o
+// caminho HTTP de fallback é hoje o único exercitado por acidente).
+async function pageFor(width, initialRows, { actionHandler, billPay, fakeWs = false } = {}) {
   const page = await browser.newPage({ viewport: { width, height: 900 } });
   const rows = initialRows.slice();
   const posts = [];
+  if (fakeWs) {
+    await page.addInitScript(() => {
+      window.__sent = [];
+      class FakeWS {
+        constructor(url) {
+          this.url = url; this.readyState = 1; window.__ws = this;
+          setTimeout(() => this.onopen && this.onopen(), 0);
+        }
+        send(data) { window.__sent.push(JSON.parse(data)); }
+        close() {}
+      }
+      FakeWS.OPEN = 1;
+      window.WebSocket = FakeWS;
+    });
+  }
   await page.route("**/*", async route => {
     const url = new URL(route.request().url());
     if (url.origin !== origin) return route.abort();
@@ -379,6 +398,39 @@ test("Desfazer no detalhe: sucesso reseta o botão pro próximo detalhe aberto (
     await page.waitForFunction(() => document.getElementById("launch-detail-overlay").classList.contains("open"));
     assert.equal(await page.locator("#ld-undo").isDisabled(), false,
       "o botão do 2º detalhe nasceu travado pelo undo do 1º");
+  } finally { await page.close(); }
+});
+
+// Achado do Codex (P2, dashboard.js:8447): sendRefresh() sozinho só atualiza
+// saldo/aviso com WS aberto (_doRefresh só age em WebSocket.OPEN). O
+// `http.server` estático desta suíte nunca deixa `ws` chegar a OPEN, então
+// este é o estado "de fábrica" de todo teste daqui — sem o fallback
+// `fetchMonthHttp` (o mesmo que refreshDashboardAfterInvestment já usa como
+// onSave da tela de conferência), o undo bem-sucedido nunca refaz o /data/1.
+test("Desfazer no detalhe: sem WebSocket aberto, o undo cai no fallback HTTP do mês (P2 Codex)", async () => {
+  const { page } = await pageFor(800, []);
+  try {
+    const monthReq = page.waitForRequest(r =>
+      new URL(r.url()).pathname === "/data/1" && r.method() === "GET");
+    await abreDetalheEClicaUndo(page);
+    const req = await monthReq;
+    assert.equal(new URL(req.url()).pathname, "/data/1");
+  } finally { await page.close(); }
+});
+
+// Controle positivo do par acima: com WS aberto, o caminho por WebSocket
+// continua sendo o usado — nada de fallback HTTP disparando por cima dele.
+test("Desfazer no detalhe: com WebSocket aberto, o refresh vai pelo WS (controle positivo)", async () => {
+  const { page } = await pageFor(800, [], { fakeWs: true });
+  const httpMonthReqs = [];
+  page.on("request", r => { if (new URL(r.url()).pathname === "/data/1") httpMonthReqs.push(r.url()); });
+  try {
+    await page.waitForFunction(() => Boolean(window.__ws));
+    const antes = await page.evaluate(() => window.__sent.filter(m => m.type === "get_month").length);
+    await abreDetalheEClicaUndo(page);
+    await page.waitForFunction(
+      (n) => window.__sent.filter(m => m.type === "get_month").length > n, antes);
+    assert.deepEqual(httpMonthReqs, [], "com WS aberto não devia cair no fallback HTTP /data/1");
   } finally { await page.close(); }
 });
 
