@@ -6693,14 +6693,43 @@ document.addEventListener("click", async (e) => {
   }
 });
 
+const sidenavRailMedia = window.matchMedia("(min-width: 901px) and (hover: hover) and (pointer: fine)");
+
+function usesSidenavRail() {
+  return sidenavRailMedia.matches && !document.documentElement.classList.contains("pb-app");
+}
+
+function syncSidenavMode() {
+  const nav = document.getElementById("sidenav");
+  const bd = document.getElementById("sidenav-backdrop");
+  if (!nav) return;
+  if (usesSidenavRail()) {
+    nav.classList.remove("open");
+    if (bd) bd.classList.remove("open");
+    nav.removeAttribute("inert");
+    document.querySelector(".sidenav-toggle")?.setAttribute("aria-expanded", "false");
+  } else {
+    nav.toggleAttribute("inert", !nav.classList.contains("open"));
+  }
+}
+
 function toggleSidenav(force) {
+  if (usesSidenavRail()) return;
   const nav = document.getElementById("sidenav");
   const bd  = document.getElementById("sidenav-backdrop");
   if (!nav) return;
   const open = (typeof force === "boolean") ? force : !nav.classList.contains("open");
   nav.classList.toggle("open", open);
+  nav.toggleAttribute("inert", !open);
   if (bd) bd.classList.toggle("open", open);
+  const toggle = document.querySelector(".sidenav-toggle");
+  if (toggle) toggle.setAttribute("aria-expanded", String(open));
+  if (open) nav.querySelector(".sidenav-item")?.focus();
+  else if (nav.contains(document.activeElement)) toggle?.focus();
 }
+
+sidenavRailMedia.addEventListener("change", syncSidenavMode);
+syncSidenavMode();
 
 // Fechar sidebar com ESC
 document.addEventListener("keydown", (e) => {

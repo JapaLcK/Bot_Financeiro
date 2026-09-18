@@ -22,6 +22,7 @@
 <link rel="stylesheet" href="/phosphor.css?v=1" />
 <link rel="stylesheet" href="/dashboard.css?v=8" />
 <link rel="stylesheet" href="/dashboard-mobile.css" media="(max-width: 900px)" />
+<link rel="stylesheet" href="/sidenav-rail.css?v=1" />
 <!-- defer preserva a ordem: auth-refresh (patch do fetch) → modals → app-mode →
      dashboard.js. Nenhum script inline depende deles durante o parse. -->
 <script defer src="/static/auth-refresh.js?v=1"></script>
@@ -39,7 +40,7 @@
 </div>
 
 <div class="sidenav-backdrop" id="sidenav-backdrop" onclick="toggleSidenav(false)"></div>
-<aside class="sidenav" id="sidenav" aria-label="Navegação principal">
+<aside class="sidenav" id="sidenav" aria-label="Navegação principal" inert>
   <div class="sidenav-brand">
     <img class="logo" src="/brand/icon.png?v=2" alt="" />
     <div class="brand-text">
@@ -49,6 +50,9 @@
   </div>
 
   <div class="sidenav-section">Geral</div>
+  <a class="sidenav-item" href="/home">
+    <span class="sn-icon" style="color:#FF80B8"><i class="ph ph-house" aria-hidden="true"></i></span><span class="sn-label">Início</span>
+  </a>
   <button class="sidenav-item active" type="button" data-nav="overview" onclick="navigateTo('overview')">
     <span class="sn-icon" style="color:#3B82F6"><i class="ph ph-chart-bar" aria-hidden="true"></i></span><span class="sn-label">Visão Geral</span>
   </button>
@@ -115,7 +119,7 @@
 
   <header>
     <div class="header-left">
-      <button class="sidenav-toggle" type="button" aria-label="Abrir menu" onclick="toggleSidenav()"><i class="ph ph-list" aria-hidden="true"></i></button>
+      <button class="sidenav-toggle" type="button" aria-label="Abrir menu" aria-controls="sidenav" aria-expanded="false" onclick="toggleSidenav()"><i class="ph ph-list" aria-hidden="true"></i></button>
       <img class="logo-img" src="/brand/icon.png?v=2" alt="Piggy" />
       <h1>PigBank</h1>
     </div>
