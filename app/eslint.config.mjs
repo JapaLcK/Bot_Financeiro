@@ -29,7 +29,7 @@ export default tseslint.config(
   },
   {
     // Config de ferramenta roda no Node (CommonJS), não no aparelho.
-    files: ["jest.config.js", "jest.setup.js", "metro.config.js"],
+    files: ["jest.config.js", "jest.setup.js", "jest.css-stub.js", "metro.config.js", "babel.config.js"],
     languageOptions: {
       sourceType: "commonjs",
       globals: { module: "readonly", require: "readonly", jest: "readonly", __dirname: "readonly" },
@@ -40,5 +40,203 @@ export default tseslint.config(
     files: ["__tests__/**/*.ts?(x)", "jest.setup.js"],
     languageOptions: { globals: { jest: "readonly" } },
     rules: { "@typescript-eslint/no-explicit-any": "off" },
+  },
+  {
+    // `require()` de fonte estática é o jeito do Metro resolver o asset (ver
+    // comentário em `app/_layout.tsx`); `import` dinâmico não bundla o TTF.
+    files: ["app/_layout.tsx"],
+    rules: { "@typescript-eslint/no-require-imports": "off" },
+  },
+  {
+    // `Icone.tsx` usa `require()` por um motivo diferente do `_layout.tsx`:
+    // não é sobre o bundler, é sobre o `tsc` (ver comentário no arquivo) —
+    // um `import` estático do ícone arrasta o typecheck para dentro de um
+    // arquivo interno do `phosphor-react-native` com erro de tipo real
+    // contra a versão instalada do `react-native-svg`.
+    files: ["src/ui/componentes/Icone.tsx"],
+    rules: { "@typescript-eslint/no-require-imports": "off" },
+  },
+  {
+    // `_ds/index.tsx` usa `require()` por um motivo diferente dos dois
+    // acima: nem bundler, nem `tsc` — é sobre QUANDO o custo das três seções
+    // do catálogo é pago (ver comentário no arquivo). `import` estático
+    // executaria o require na hora em que qualquer coisa importa este
+    // módulo, inclusive o roteador montando a tabela de rotas em produção.
+    files: ["app/_ds/index.tsx"],
+    rules: { "@typescript-eslint/no-require-imports": "off" },
+  },
+  {
+    // `stickers.ts` usa `require()` de imagem pelo mesmo motivo do
+    // `_layout.tsx`: não existe declaração de módulo `*.webp` neste projeto,
+    // então um `import` estático falharia no `tsc`. Metro resolve
+    // `require()` de asset estático normalmente.
+    files: ["src/ui/stickers.ts"],
+    rules: { "@typescript-eslint/no-require-imports": "off" },
+  },
+  {
+    // As três áreas onde o design system é DESENHADO: os próprios componentes,
+    // o catálogo que os exibe e as seções do catálogo extraídas por tamanho
+    // (`src/ui/ds/`, CLAUDE.md §0.5). O gate SÓ vale aqui — uma tela de
+    // produto fora destes caminhos (`app/index.tsx`, por exemplo) não herda
+    // nada disto: ela pode importar `Text`/`TextInput` crus e colar hex à
+    // vontade sem o lint acusar. "Herdar por só ter acesso ao Texto/Input"
+    // seria convenção, não regra: nada aqui barra o import fora desses globs.
+    files: ["src/ui/componentes/**/*.ts?(x)", "app/_ds/**/*.ts?(x)", "src/ui/ds/**/*.ts?(x)"],
+    rules: {
+      "no-restricted-imports": [
+        "error",
+        {
+          paths: [
+            {
+              name: "react-native",
+              importNames: ["Text", "TextInput"],
+              message: "Use `Texto`/`Input` do design system — são o único lugar com o teto de fonte e o tabular-nums resolvidos.",
+            },
+            {
+              name: "phosphor-react-native",
+              message: "Importe o ícone específico (`phosphor-react-native/src/icons/<Nome>`); a raiz do pacote pesa 23 MB.",
+            },
+          ],
+        },
+      ],
+      "no-restricted-syntax": [
+        "error",
+        {
+          selector: "Literal[value=/^#([0-9a-fA-F]{3,4}|[0-9a-fA-F]{6}|[0-9a-fA-F]{8})$/]",
+          message: "Cor hex fora de `tokens.ts`. Use um token semântico (`cores.<nome>`).",
+        },
+        {
+          // O literal acima não pega hex dentro de um template string
+          // (`` `#${x}` `` ou até `` `#FF2D8E` ``): ali o valor não é um
+          // `Literal`, é um `TemplateElement`. Mesmo hex, nó de AST diferente.
+          selector: "TemplateElement[value.raw=/#[0-9a-fA-F]{3,8}/]",
+          message: "Cor hex fora de `tokens.ts`. Use um token semântico (`cores.<nome>`).",
+        },
+      ],
+    },
+  },
+  {
+    // Nativewind chega com `className`, e hex também vaza como valor
+    // arbitrário do Tailwind (`bg-[#FF2D8E]`) — um nó `Literal` cuja STRING
+    // inteira é `"bg-[#FF2D8E]"`, não `"#FF2D8E"`: o seletor ancorado
+    // (`^#...$`) do bloco acima não bate nisso. Bloco à parte, com glob mais
+    // largo que o dos componentes do design system — inclui `src/ui/ds/**` e
+    // `src/ui/componentes/**` (mesmos dois do bloco acima; a versão anterior
+    // deste bloco deixava-os de fora: `app/**`/`src/features/**` não casam
+    // com caminho iniciado em `src/ui/`), `app/**` e `src/features/**` (telas
+    // de produto também vão usar `className`). NÃO uso `src/ui/**` inteiro:
+    // isso pegaria `src/ui/tokens.ts`, a própria fonte de verdade do hex —
+    // aí a regra bloquearia a definição dos tokens que ela existe para
+    // proteger. SEM o `no-restricted-imports` de `Text`/`TextInput`: aquela
+    // redação continua valendo só dentro do design system (comentário logo
+    // acima). Superset dos dois seletores do bloco de componentes + o de
+    // valor arbitrário: por vir depois no array, ele SUBSTITUI o
+    // `no-restricted-syntax` do bloco anterior para todo caminho em que os
+    // dois batem (mesma mecânica de "REDECLARADA, não somada" já usada abaixo
+    // para `Texto`/`Input`), e por isso carrega os dois seletores antigos
+    // também, não só o novo.
+    files: [
+      "app/**/*.ts?(x)",
+      "src/features/**/*.ts?(x)",
+      "src/ui/ds/**/*.ts?(x)",
+      "src/ui/componentes/**/*.ts?(x)",
+    ],
+    rules: {
+      "no-restricted-syntax": [
+        "error",
+        {
+          selector: "Literal[value=/^#([0-9a-fA-F]{3,4}|[0-9a-fA-F]{6}|[0-9a-fA-F]{8})$/]",
+          message: "Cor hex fora de `tokens.ts`. Use um token semântico (`cores.<nome>`).",
+        },
+        {
+          selector: "TemplateElement[value.raw=/#[0-9a-fA-F]{3,8}/]",
+          message: "Cor hex fora de `tokens.ts`. Use um token semântico (`cores.<nome>`).",
+        },
+        {
+          // Valor arbitrário do Tailwind, qualquer forma: `bg-[#FF2D8E]`,
+          // `bg-[color:#FF2D8E]`, `bg-[red]`, `bg-[rgb(255,45,142)]`,
+          // `text-[hsl(...)]`, `text-[20px]`. Os tokens são a única fonte de
+          // verdade do design system: qualquer `-[valor]` é por definição uma
+          // segunda fonte. Ancorado em `JSXAttribute[name.name="className"]`
+          // (não em `Literal`/`TemplateElement` soltos, como antes) por dois
+          // motivos medidos: (1) sem o ancoramento, QUALQUER string literal
+          // do arquivo com `-[` no meio vira erro — `"algo-[teste]"` que não
+          // tem nada a ver com Tailwind; (2) o `[\\w:-]*` antes do `-\\[` só
+          // existia para tentar capturar o "prefixo" (`bg`, `text`) preso ao
+          // MESMO nó, e falhava exatamente no bypass que a forma existe para
+          // pegar — `` `bg-[${cor}]` `` quebra em duas `TemplateElement`
+          // (`"bg-["` e `"]"`), então o prefixo nunca está colado ao `-[` num
+          // template com interpolação. Bastando o `className` como âncora, o
+          // regex vira só "tem `-[` em algum lugar" — simples e sem os dois
+          // buracos.
+          selector: 'JSXAttribute[name.name="className"] Literal[value=/-\\[/]',
+          message:
+            "Valor arbitrário do Tailwind (`-[...]`) não é permitido. Tokens (`espaco`, `raio`, `texto`, `cores.<nome>`) são a única fonte de verdade de espaçamento, forma, tipografia e cor — um valor solto entre colchetes seria uma segunda fonte.",
+        },
+        {
+          // Mesmo caso dentro de template string (`` `bg-[${x}]` `` ou
+          // `` `bg-[red]` ``): ali o valor é `TemplateElement`, não `Literal`
+          // — o combinador descendente do seletor alcança as duas formas
+          // dentro do `className`, inclusive dentro de `JSXExpressionContainer`
+          // e de ternário (`className={cond ? "..." : "text-[20px]"}`).
+          selector: 'JSXAttribute[name.name="className"] TemplateElement[value.raw=/-\\[/]',
+          message:
+            "Valor arbitrário do Tailwind (`-[...]`) não é permitido. Tokens (`espaco`, `raio`, `texto`, `cores.<nome>`) são a única fonte de verdade de espaçamento, forma, tipografia e cor — um valor solto entre colchetes seria uma segunda fonte.",
+        },
+      ],
+    },
+  },
+  {
+    // `Texto` é o ÚNICO lugar autorizado a chamar `Text` cru — é o que a
+    // regra acima protege. REDECLARADA (não desligada): libera só `Text`,
+    // então a raiz do phosphor continua barrada aqui também (nenhum
+    // componente do design system precisa dela).
+    files: ["src/ui/componentes/Texto.tsx"],
+    rules: {
+      "no-restricted-imports": [
+        "error",
+        {
+          paths: [
+            {
+              // `TextInput` continua barrado AQUI: a redeclaração substitui a
+              // regra geral inteira, então omitir esta entrada liberaria o
+              // `TextInput` cru neste arquivo sem ninguém notar.
+              name: "react-native",
+              importNames: ["TextInput"],
+              message: "Use `Input` do design system — é o único lugar com o teto de fonte e o aviso de erro resolvidos.",
+            },
+            {
+              name: "phosphor-react-native",
+              message: "Importe o ícone específico (`phosphor-react-native/src/icons/<Nome>`); a raiz do pacote pesa 23 MB.",
+            },
+          ],
+        },
+      ],
+    },
+  },
+  {
+    // `Input` e `AmountInput` precisam do `TextInput` cru (não compõem um
+    // sobre o outro — casca própria de cada um): a regra geral bloqueia
+    // `Text` E `TextInput`; aqui ela é REDECLARADA liberando só `TextInput`,
+    // então `Text` e a raiz do phosphor continuam barrados.
+    files: ["src/ui/componentes/Input.tsx", "src/ui/componentes/AmountInput.tsx"],
+    rules: {
+      "no-restricted-imports": [
+        "error",
+        {
+          paths: [
+            {
+              name: "react-native",
+              importNames: ["Text"],
+              message: "Use `Texto` do design system — é o único lugar com o teto de fonte e o tabular-nums resolvidos.",
+            },
+            {
+              name: "phosphor-react-native",
+              message: "Importe o ícone específico (`phosphor-react-native/src/icons/<Nome>`); a raiz do pacote pesa 23 MB.",
+            },
+          ],
+        },
+      ],
+    },
   },
 );

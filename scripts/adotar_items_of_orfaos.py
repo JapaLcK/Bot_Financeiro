@@ -149,7 +149,8 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
                          "(libera o avoidDuplicates). É irreversível.")
     # A ÚNICA saída para o item que ficou com rastro COM dono e SEM conexão (a
     # adoção que falhou entre o `register_item` e a escrita da conexão): a lista
-    # não o mostra — é indistinguível de banco removido — e a retentativa do
+    # não o mostra — o predicado dela não o separa de banco removido, embora o
+    # registry hoje separe (`origin='removed'`) — e a retentativa do
     # `item/created` não o readota (guarda do `_adota_item_orfao`). Adotar por
     # aqui também é recusado, de propósito: `--apply --delete` apaga o item na
     # Pluggy, o `avoidDuplicates` libera, e o usuário reconecta pelo widget.

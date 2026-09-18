@@ -18,6 +18,7 @@ import os
 import random
 import time
 from datetime import datetime, timedelta, timezone
+from typing import Literal
 
 import psycopg
 from psycopg_pool import PoolClosed, PoolTimeout
@@ -972,8 +973,13 @@ async def _adota_item_orfao(item_id: str, last_event: str | None = None) -> int 
         da Pluggy devolve 401).
 
     O PREÇO dessa ordem, medido: se a escrita da conexão falhar no meio, sobra
-    rastro COM dono e nenhuma conexão — estado indistinguível de banco removido
-    pelo usuário. Aí NÃO há recuperação automática: o script one-shot deixa de
+    rastro COM dono e nenhuma conexão — para os leitores AUTOMÁTICOS, o mesmo
+    efeito de banco removido pelo usuário. Já não é o mesmo ESTADO: a remoção
+    deliberada grava `origin='removed'` (`db.mark_items_removed`) e esta sobra
+    fica com `pluggy_item`/`webhook_adopt`, então a diferença está gravada — só
+    que nenhuma porta automática a lê (quem lê é a recuperação por operador, e a
+    regra de precedência está no docstring daquela função). Aqui NÃO há
+    recuperação automática: o script one-shot deixa de
     listar o item (o filtro dele exclui rastro com dono, de propósito — a mesma
     regra, `db/open_finance_state.item_registry_origins`) e a retentativa do
     `item/created` não readota (a 1ª guarda acima). É por isso que os TRÊS
@@ -2150,3 +2156,34 @@ async def bank_movement_confirm_route(request: Request, user_id: int, body: Bank
         raise HTTPException(status_code=409, detail="Esses registros não podem ser vinculados. Atualize a lista e confira novamente.") from exc
     shared.invalidate_dashboard_current_cache(user_id)
     return {"ok": True}
+
+
+# `shared_limit(scope=)` e não `limit()`: com o `key_style="url"` do slowapi cada
+# `of_tx_id`/`action` abriria um balde próprio e o teto seria decorativo (ver o
+# `GET /d/{code}` no monólito e `tests/test_d_rate_limit.py`).
+@router.get("/open-finance/{user_id}/reconciliations")
+@shared.limiter.shared_limit("60/minute", scope="reconciliations_list")
+async def reconciliations_route(request: Request, user_id: int):
+    shared.authorize_dashboard_access(request, user_id)
+    from db.reconciliation import list_reconciliations
+    rows = await asyncio.to_thread(list_reconciliations, user_id)
+    return {"ok": True, "reconciliations": rows}
+
+
+@router.post("/open-finance/{user_id}/reconciliations/{of_tx_id}/{action}")
+@shared.limiter.shared_limit("30/minute", scope="reconciliations_action")
+async def reconciliation_action_route(
+    request: Request, user_id: int, of_tx_id: int, action: Literal["confirm", "reject", "undo"],
+):
+    shared.authorize_dashboard_access(request, user_id)
+    from db import reconciliation as recon
+    fn = {"confirm": recon.confirm_reconciliation, "reject": recon.reject_reconciliation,
+          "undo": recon.undo_reconciliation}[action]
+    try:
+        result = await asyncio.to_thread(fn, user_id, of_tx_id)
+    except LookupError as exc:
+        raise HTTPException(status_code=404, detail="Transação não encontrada.") from exc
+    except (ValueError, recon.ReconciliationConflict) as exc:
+        raise HTTPException(status_code=409, detail="Não foi possível concluir. Atualize a lista e confira novamente.") from exc
+    shared.invalidate_dashboard_current_cache(user_id)
+    return result

@@ -966,8 +966,11 @@ async def get_financial_data(
 
     from db.bank_movements import bank_movement_summary
     movement_summary = await asyncio.to_thread(bank_movement_summary, user_id)
+    from db.reconciliation import reconciliation_summary
+    recon_summary = await asyncio.to_thread(reconciliation_summary, user_id)
     return {
         "bank_movements": movement_summary,
+        "reconciliation": recon_summary,
         "user_id":            user_id,
         "timestamp":          datetime.now(timezone.utc).isoformat(),
         "year":               y,
@@ -8461,7 +8464,7 @@ async def create_investment_route(request: Request, user_id: int, payload: Inves
         )
     except Exception as exc:
         message = (_funding.msg_insuficiente(user_id, payload.initial_amount or 0,
-                                             acao="aporte inicial")
+                                             acao="aporte inicial", plain=True)
                    if str(exc) == "INSUFFICIENT_ACCOUNT" else str(exc))
         raise HTTPException(status_code=400, detail=message) from exc
 
@@ -8501,7 +8504,7 @@ async def deposit_investment_route(request: Request, user_id: int, payload: Inve
         raise HTTPException(status_code=404, detail="Investimento não encontrado.") from exc
     except ValueError as exc:
         if str(exc) == "INSUFFICIENT_ACCOUNT":
-            message = "Saldo insuficiente na conta."
+            message = funding.msg_insuficiente(user_id, payload.amount, plain=True)
         elif str(exc) == "INVALID_RATE":
             message = "Taxa inválida para este aporte."
         elif str(exc) == "INVALID_PERIOD":

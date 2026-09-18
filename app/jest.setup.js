@@ -52,3 +52,50 @@ jest.mock("posthog-react-native", () => ({
   __esModule: true,
   default: class { capture() {} identify() {} reset() {} },
 }));
+
+// expo-haptics é nativo: no Jest a chamada precisa existir como espiã (para o
+// teste conferir SE disparou), não travar por módulo ausente. Usado pelos
+// componentes de PR C1 (Chip, SegmentedControl, Input).
+jest.mock("expo-haptics", () => ({
+  selectionAsync: jest.fn(() => Promise.resolve()),
+  notificationAsync: jest.fn(() => Promise.resolve()),
+  NotificationFeedbackType: { Success: "success", Warning: "warning", Error: "error" },
+}));
+
+// expo-font: controlável por teste. `layout.test.tsx` precisa dos três
+// estados do `_layout.tsx` (carregando, carregado, erro) sem depender de TTF
+// de verdade — o padrão default é "carregado", o caso comum.
+const mockFonte = { carregado: true, erro: null };
+global.__definirEstadoDaFonte = (v) => Object.assign(mockFonte, v);
+jest.mock("expo-font", () => ({
+  useFonts: () => [mockFonte.carregado, mockFonte.erro],
+}));
+
+// AccessibilityInfo: `motion.test.ts` prova `useReduzirMovimento` controlando
+// a leitura e disparando o evento, sem sistema operacional real por trás.
+const mockAcessibilidade = { valor: false, ouvintes: new Set() };
+global.__definirReduzirMovimento = (v) => {
+  mockAcessibilidade.valor = v;
+};
+global.__dispararReduzirMovimento = (v) => {
+  mockAcessibilidade.valor = v;
+  mockAcessibilidade.ouvintes.forEach((fn) => fn(v));
+};
+jest.mock("react-native/Libraries/Components/AccessibilityInfo/AccessibilityInfo", () => ({
+  // O módulo real é `export default AccessibilityInfo`; `react-native/index.js`
+  // lê `require(caminho).default` (getter, ver `get AccessibilityInfo()`).
+  // Sem o `default`, o dublê fica invisível e `AccessibilityInfo` chega
+  // `undefined` em quem importa de `"react-native"` — foi o que aconteceu
+  // antes deste comentário existir.
+  __esModule: true,
+  default: {
+    isReduceMotionEnabled: () => Promise.resolve(mockAcessibilidade.valor),
+    addEventListener: (_evento, fn) => {
+      mockAcessibilidade.ouvintes.add(fn);
+      return { remove: () => mockAcessibilidade.ouvintes.delete(fn) };
+    },
+    // `Toast` (PR C2) anuncia cada mensagem — sem espiã aqui a chamada
+    // lançaria "não é uma função" no Jest (o módulo real é nativo).
+    announceForAccessibility: jest.fn(),
+  },
+}));

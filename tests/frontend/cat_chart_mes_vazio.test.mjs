@@ -5,8 +5,11 @@
  * — num mês sem despesas ela simplesmente NÃO chamava nada, e a instância do
  * Chart.js do mês anterior continuava pintada no canvas. O usuário trocava de
  * mês e via os gastos do mês passado como se fossem do mês aberto. O conserto é
- * `renderCatChart()` (dashboard.js:10069): mês vazio DESTRÓI a instância, zera
- * `chartCat` e revela `#chart-cat-empty`.
+ * o próprio `buildCatChart()`: ele SEMPRE destrói a instância e zera `chartCat`,
+ * e o mês vazio cai no `_chartVazio()` — a caixa `.chart-empty` com o sticker do
+ * Piggy, a MESMA dos outros 6 gráficos (uma fonte de verdade, CLAUDE.md §0.7).
+ * O `<div id="chart-cat-empty">` que a main tinha foi removido junto com o
+ * wrapper `renderCatChart()`: eram um segundo mecanismo para o mesmo estado.
  *
  * Por que o stub de Chart registra `destroyed` em vez de contar chamadas: o
  * sintoma não é "buildCatChart rodou de menos", é "sobrou pixel do mês anterior".
@@ -15,7 +18,7 @@
  * devolve ([100]) quando a guarda antiga volta.
  *
  * Os DOIS caminhos são cobertos porque são dois call sites independentes:
- * render() (:10614) e o re-render do toggle de tema (:6483), que reconstruía o
+ * render() e o re-render do toggle de tema (applyTheme), que reconstruía o
  * donut a partir de `lastData` com a mesma guarda.
  *
  * Rodar: NODE_PATH=$(npm root -g) node --test tests/frontend/cat_chart_mes_vazio.test.mjs
@@ -45,8 +48,9 @@ const IDS = [
 
 const HTML = IDS.map((i) => `<div id="${i}"></div>`).join("")
   + `<div id="overview-view" class="active"></div>`
-  + `<canvas id="chart-cat"></canvas>`
-  + `<div id="chart-cat-empty" class="empty" hidden>Sem despesas este mês.</div>`;
+  // O wrap é obrigatório: `_chartVazio` pinta a caixa no `parentElement` do
+  // canvas e mede o `min-height` por ele.
+  + `<div class="chart-wrap donut"><canvas id="chart-cat"></canvas></div>`;
 
 const COM_DADOS  = [{ categoria: "mercado", total: 100 }];
 const OUTROS     = [{ categoria: "transporte", total: 42 }];
@@ -108,8 +112,14 @@ const sonda = (page) => page.evaluate(() => ({
   chartValues: chartCat ? chartCat.values : null,
   vivas: window._charts.filter((c) => !c.destroyed).length,
   destruidas: window._charts.map((c) => c.destroyed),
-  emptyVisivel: !document.getElementById("chart-cat-empty").hidden,
-  canvasEscondido: document.getElementById("chart-cat").hidden,
+  emptyVisivel: !!document.querySelector(".chart-wrap.donut > .chart-empty"),
+  // O estado vazio TEM DE SER o do Piggy (`_clBox`), o mesmo dos outros 6
+  // gráficos — não o `<div id="chart-cat-empty">` de texto puro que a main
+  // trazia. Sticker + título discriminam um mecanismo do outro.
+  emptySticker: document.querySelector(".chart-empty img")?.getAttribute("src") || null,
+  emptyTitulo: document.querySelector(".chart-empty .cl-box-t")?.textContent || null,
+  divDaMain: !!document.getElementById("chart-cat-empty"),
+  canvasEscondido: document.getElementById("chart-cat").style.display === "none",
 }));
 
 test("render(): dados → mês VAZIO → dados (o vazio não conserva o mês anterior)", async () => {
@@ -128,7 +138,12 @@ test("render(): dados → mês VAZIO → dados (o vazio não conserva o mês ant
   assert.equal(p2.chartCatNulo, true, "chartCat tinha que voltar a null no mês vazio");
   assert.deepEqual(p2.destruidas, [true], "a instância anterior tinha que ser destruída");
   assert.equal(p2.vivas, 0, "nenhuma instância viva no mês vazio");
-  assert.equal(p2.emptyVisivel, true, "#chart-cat-empty tinha que aparecer");
+  assert.equal(p2.emptyVisivel, true, "a caixa .chart-empty do Piggy tinha que aparecer");
+  assert.equal(p2.emptySticker, "/brand/stickers/point.webp",
+    "o vazio do donut tem de ser o do Piggy (_clBox), igual aos outros 6 gráficos");
+  assert.equal(p2.emptyTitulo, "Sem gastos neste mês");
+  assert.equal(p2.divDaMain, false,
+    "o <div id=chart-cat-empty> da main não pode voltar: eram duas fontes de verdade");
   assert.equal(p2.canvasEscondido, true, "o canvas fica escondido (mas permanece no DOM)");
 
   await renderCom(page, OUTROS);
@@ -152,7 +167,7 @@ test("toggle de tema no mês VAZIO não ressuscita o donut do mês anterior", as
   // encadear `renderCom(page, [])` aqui já zeraria o chartCat pelo OUTRO call
   // site, e o toggle partiria de chartCat===null com o estado vazio na tela.
   // Aí a guarda antiga (pular a chamada) produz resultado IDÊNTICO ao do
-  // conserto, e reverter só o :6483 fica verde — foi exatamente o que a
+  // conserto, e reverter só o applyTheme fica verde — foi exatamente o que a
   // revisão mediu. O que discrimina é o toggle encontrar o donut do mês
   // anterior VIVO e o dado corrente já vazio, que é o que acontece no app
   // quando o mês vira: `lastData` é trocado e só depois o tema é alternado.
@@ -169,7 +184,7 @@ test("toggle de tema no mês VAZIO não ressuscita o donut do mês anterior", as
   assert.equal(antes.emptyVisivel, false, "e do estado vazio ainda escondido");
 
   // toggleTheme() → applyTheme() → re-render dos gráficos do overview a partir
-  // de `lastData` (dashboard.js:6483), o segundo call site da mesma guarda.
+  // de `lastData`, o segundo call site da mesma guarda.
   await page.evaluate(() => toggleTheme());
   await page.waitForTimeout(50);
 

@@ -1,5 +1,6 @@
 # core/handlers/help_handler.py
 from __future__ import annotations
+import re
 from difflib import get_close_matches
 from core.help_text import render_full, render_help, resolve_section
 from utils_text import normalize_text
@@ -19,6 +20,22 @@ def _has_token_close_to(norm: str, *terms: str) -> bool:
 
 def _has_hint(norm: str, *terms: str) -> bool:
     return _has_any(norm, *terms) or _has_token_close_to(norm, *terms)
+
+
+def _is_statement_file_help(norm: str) -> bool:
+    """Aceita domínio explícito ou uma pergunta que termina no formato."""
+    norm = normalize_text(norm)
+    if not re.search(r"\b(csv|pdf)\b", norm):
+        return False
+    if re.search(r"\b(extrato|fatura|pigbank)\b", norm):
+        return True
+    return bool(
+        re.fullmatch(
+            r"(?:como(?: faco)?(?: para)? )?"
+            r"(?:importar|enviar|anexar)(?: um| o)?(?: arquivo)? (?:csv|pdf)",
+            norm,
+        )
+    )
 
 
 def _prepend_not_understood(topic: str, body: str) -> str:
@@ -173,6 +190,22 @@ def _categories_contextual_fallback(norm: str) -> str:
 
 
 def _report_contextual_fallback(norm: str) -> str:
+    if re.search(r"\b(semanal|semana)\b", norm):
+        return (
+            "🗓️ Para consultar ou configurar o resumo semanal, use:\n"
+            "• `resumo semanal`\n"
+            "• `ligar resumo semanal`\n"
+            "• `desligar resumo semanal`"
+        )
+
+    if re.search(r"\b(mensal|mes)\b", norm):
+        return (
+            "🗓️ Para consultar ou configurar o resumo mensal, use:\n"
+            "• `resumo mensal`\n"
+            "• `ligar resumo mensal`\n"
+            "• `desligar resumo mensal`"
+        )
+
     if _has_any(norm, "desligar", "parar", "desativar"):
         return (
             "🗓️ Para desligar o report diário, use:\n"
@@ -187,8 +220,10 @@ def _report_contextual_fallback(norm: str) -> str:
         )
 
     return (
-        "🗓️ Posso te ajudar com o report diário assim:\n"
+        "🗓️ Posso te ajudar com relatórios diários, semanais e mensais:\n"
         "• `relatorio`\n"
+        "• `resumo semanal`\n"
+        "• `resumo mensal`\n"
         "• `ligar report diario`\n"
         "• `ligar report diario 20h`\n"
         "• `desligar report diario`"
@@ -221,9 +256,19 @@ def _account_contextual_fallback(norm: str) -> str:
 
 def _ofx_contextual_fallback() -> str:
     return (
-        "🧾 Para importar um extrato OFX, envie a mensagem:\n"
-        "• `importar ofx`\n\n"
-        "Junto com o arquivo `.ofx` em anexo."
+        "🧾 Para importar um OFX, envie ou anexe o arquivo no chat.\n"
+        "• `importar ofx`\n"
+        "Extratos também aceitam `.csv` ou `.pdf`; para faturas, use `.ofx`."
+    )
+
+
+def _bills_contextual_fallback() -> str:
+    return (
+        "🗓️ Para consultar suas contas a pagar, pergunte por exemplo:\n"
+        "• `quais contas tenho para pagar?`\n"
+        "• `quais boletos vencem amanhã?`\n\n"
+        "Para cadastrar uma conta, informe valor e vencimento, por exemplo: "
+        "`boleto da luz de 150 vence dia 10`."
     )
 
 
@@ -325,10 +370,15 @@ def _infer_precise_help(norm: str) -> str | None:
                 "• `coloquei 300 na caixinha viagem`"
             )
 
-    if any(expr in norm for expr in ("ofx", "extrato")) and any(expr in norm for expr in ("importar", "enviar")):
+    import_terms = ("importar", "importacao", "enviar", "anexar")
+    if (
+        any(expr in norm for expr in ("ofx", "extrato"))
+        and any(expr in norm for expr in import_terms)
+    ) or _is_statement_file_help(norm):
         return (
-            "🧾 Para importar um OFX, envie o arquivo `.ofx` junto com a mensagem:\n"
-            "• `importar ofx`"
+            "🧾 Para importar um OFX, envie ou anexe o arquivo no chat.\n"
+            "• `importar ofx`\n"
+            "Extratos também aceitam `.csv` ou `.pdf`; para faturas, use `.ofx`."
         )
 
     if "fatura" in norm and any(expr in norm for expr in ("ver", "consultar", "pagar", "registrar")):
@@ -343,90 +393,159 @@ def _infer_precise_help(norm: str) -> str | None:
     return None
 
 
+_HELP_MARKERS = (
+    "como faco", "como faço", "como usar", "como registro", "como registrar",
+    "como crio", "como criar", "como vejo", "como consultar", "como apago",
+    "com apago", "como apagar", "como removo", "como excluir", "me ensina",
+    "me explica", "me explique", "qual comando", "que comando", "quero ajuda", "tenho duvida",
+    "tenho dúvida", "nao sei como", "não sei como",
+)
+
+
 def infer_help_from_text(text: str, platform: str) -> str | None:
     raw = (text or "").strip()
     if not raw:
         return None
 
     norm = raw.casefold()
-    help_markers = (
-        "como faco",
-        "como faço",
-        "como usar",
-        "como registro",
-        "como registrar",
-        "como crio",
-        "como criar",
-        "como vejo",
-        "como consultar",
-        "como apago",
-        "com apago",
-        "como apagar",
-        "como removo",
-        "como excluir",
-        "me ensina",
-        "me explica",
-        "me explique",
-        "qual comando",
-        "quero ajuda",
-        "tenho duvida",
-        "tenho dúvida",
-        "nao sei como",
-        "não sei como",
-    )
-    if not any(marker in norm for marker in help_markers):
+    if not any(marker in norm for marker in _HELP_MARKERS):
         return None
 
     precise = _infer_precise_help(norm)
     if precise is not None:
         return precise
 
-    topic_hints = {
-        "credit": ("cartao", "cartão", "cartoes", "cartões", "credito", "crédito", "fatura", "parcela", "parcelamento", "limite"),
-        "pockets": ("caixinha", "caixinhas"),
-        "invest": ("investimento", "investimentos", "aporte", "resgate", "cdb", "tesouro"),
-        "ofx": ("ofx", "extrato", "importar"),
-        "dashboard": ("dashboard", "painel"),
-        "categories": ("categoria", "categorias", "regra", "regras", "linkar"),
-        "launches": ("lancamento", "lançamentos", "lancamentos", "gasto", "gastos", "despesa", "despesas", "receita", "receitas", "saldo"),
-    }
-
-    for section, hints in topic_hints.items():
-        if any(hint in norm for hint in hints):
-            return render_help(section, platform)
+    normalized = normalize_text(raw)
+    topic = _financial_topic(normalized)
+    if topic == "bills":
+        return _bills_contextual_fallback()
+    if topic == "launches" and re.search(r"\b(recebi|gastei)\b", normalized):
+        return _launches_contextual_fallback(normalized)
+    section = {
+        "credit": "credit",
+        "pockets": "pockets",
+        "investments": "invest",
+        "ofx": "ofx",
+        "dashboard": "dashboard",
+        "categories": "categories",
+        "launches": "launches",
+    }.get(topic)
+    if section is not None:
+        return render_help(section, platform)
+    if topic == "report":
+        return _report_contextual_fallback(normalized)
+    if topic == "account":
+        return _account_contextual_fallback(normalized)
 
     return render_help("start", platform)
 
 
-def infer_contextual_fallback(text: str, platform: str) -> str:
-    norm = normalize_text(text)
+def _financial_topic(norm: str) -> str | None:
+    """Classifica somente sinais inequívocos do domínio do PigBank."""
+    if re.search(r"\b(cartao|cartoes|fatura|credito|parcela|parcelamento)\b", norm):
+        return "credit"
+    if any(marker in norm for marker in _HELP_MARKERS) and re.search(
+        r"\b(?:(?:meu|o)\s+)?limite\s*[?.!]*$", norm
+    ):
+        return "credit"
+    if re.search(r"\b(caixinha|caixinhas)\b", norm):
+        return "pockets"
+    if re.search(r"\bcaxinhas?\b", norm):
+        return "pockets"
+    if re.search(r"\b(investimento|investimentos|aporte|resgate|cdb|tesouro|cdi)\b", norm):
+        return "investments"
+    if re.search(r"\b(ofx|extrato)\b", norm):
+        return "ofx"
+    if re.search(r"\bboletos?\b|\bcontas?\s+(?:a|pra|para)\s+pagar\b", norm):
+        return "bills"
+    if _is_statement_file_help(norm):
+        return "ofx"
+    if re.search(r"\bcategorias?\b", norm) or re.search(
+        r"\bcategoriz(?:ar|e)\b.*\b(gastos?|despesas?|receitas?|lancamentos?)\b", norm
+    ):
+        return "categories"
+    if any(marker in norm for marker in _HELP_MARKERS) and re.search(
+        r"\b(?:(?:minha|minhas|a|as)\s+)?regras?\s*[?.!]*$", norm
+    ):
+        return "categories"
+    if re.search(
+        r"\b(?:report|relatorio)(?:\s+(?:diario|semanal|mensal|financeiro))?\b",
+        norm,
+    ):
+        return "report"
+    if re.search(r"\bvincul(?:ar|acao)\b.*\b(contas?|whatsapp|discord)\b", norm) or re.search(
+        r"\bcodigo\s+de\s+vinculacao\b", norm
+    ):
+        return "account"
+    if re.search(r"\blink\s*[?.!]*$", norm) or re.search(
+        r"\b(?:meu|o|esse)\s+link\s+(?:nao\s+)?funciona\b", norm
+    ):
+        return "account"
+    if re.search(
+        r"\b(saldo|lancamento|lancamentos|gasto|gastos|gastei|"
+        r"despesa|despesas|receita|receitas|recebi)\b",
+        norm,
+    ):
+        return "launches"
+    if re.search(r"\bhistorico\s*[?.!]*$", norm):
+        return "launches"
+    if re.search(r"\bdashboard\b", norm) or re.search(
+        r"\bpainel\s+(?:financeiro|do\s+pigbank)\b", norm
+    ):
+        return "dashboard"
+    if any(marker in norm for marker in _HELP_MARKERS) and re.search(
+        r"\bpainel\s*[?.!]*$", norm
+    ):
+        return "dashboard"
+    return None
 
-    if _has_hint(norm, "cartao", "cartoes", "fatura", "credito", "parcela", "parcelamento", "vence", "fecha", "limite", "pagar", "paguei"):
+
+def has_financial_context(text: str) -> bool:
+    return _financial_topic(normalize_text(text)) is not None
+
+
+def infer_financial_contextual_fallback(text: str, platform: str) -> str | None:
+    """Retorna ajuda apenas quando o texto contém um tópico financeiro conhecido."""
+    norm = normalize_text(text)
+    topic = _financial_topic(norm)
+
+    if topic == "credit":
         return _prepend_not_understood("cartões", _credit_contextual_fallback(text, platform))
 
-    if _has_hint(norm, "caixinha", "caixinhas"):
+    if topic == "pockets":
         return _prepend_not_understood("caixinhas", _pockets_contextual_fallback(norm))
 
-    if _has_hint(norm, "investimento", "investimentos", "aporte", "aplicar", "apliquei", "resgate", "resgatar", "cdb", "tesouro", "cdi"):
+    if topic == "investments":
         return _prepend_not_understood("investimentos", _investments_contextual_fallback(norm))
 
-    if _has_hint(norm, "categoria", "categorias", "regra", "regras", "linkar", "destinatario", "destinatário"):
+    if topic == "categories":
         return _prepend_not_understood("categorias", _categories_contextual_fallback(norm))
 
-    if _has_hint(norm, "dashboard", "painel"):
+    if topic == "dashboard":
         return _prepend_not_understood("dashboard", _dashboard_contextual_fallback())
 
-    if _has_hint(norm, "report", "relatorio", "relatório"):
+    if topic == "report":
         return _prepend_not_understood("report diário", _report_contextual_fallback(norm))
 
-    if _has_hint(norm, "link", "vincular", "codigo", "código", "whatsapp", "discord"):
+    if topic == "account":
         return _prepend_not_understood("vinculação de conta", _account_contextual_fallback(norm))
 
-    if _has_hint(norm, "ofx", "extrato", "importar"):
+    if topic == "ofx":
         return _prepend_not_understood("importação de extrato", _ofx_contextual_fallback())
 
-    if _has_hint(norm, "saldo", "lancamento", "lancamentos", "gastei", "gasto", "gastos", "despesa", "despesas", "recebi", "receita", "receitas", "historico", "histórico", "extrato"):
+    if topic == "bills":
+        return _prepend_not_understood("contas a pagar", _bills_contextual_fallback())
+
+    if topic == "launches":
         return _prepend_not_understood("lançamentos", _launches_contextual_fallback(norm))
+
+    return None
+
+
+def infer_contextual_fallback(text: str, platform: str) -> str:
+    financial_help = infer_financial_contextual_fallback(text, platform)
+    if financial_help is not None:
+        return financial_help
 
     return (
         "Não entendi exatamente o que você quer fazer.\n"

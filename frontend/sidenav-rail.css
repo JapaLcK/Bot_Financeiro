@@ -1,0 +1,92 @@
+/* Navegação compacta nas páginas principais do site com mouse. O app/PWA
+   continua usando a gaveta e a barra inferior próprias. */
+.sidenav {
+  scrollbar-width: thin;
+  scrollbar-color: transparent transparent;
+}
+.sidenav::-webkit-scrollbar-track,
+.sidenav::-webkit-scrollbar-thumb { background: transparent; }
+.sidenav.is-scrolling { scrollbar-color: rgba(255, 255, 255, .36) transparent; }
+.sidenav.is-scrolling::-webkit-scrollbar-thumb { background: rgba(255, 255, 255, .36); }
+body.light .sidenav.is-scrolling { scrollbar-color: rgba(15, 23, 42, .32) transparent; }
+body.light .sidenav.is-scrolling::-webkit-scrollbar-thumb { background: rgba(15, 23, 42, .32); }
+
+@media (min-width: 901px) and (hover: hover) and (pointer: fine) {
+  html:not(.pb-app) body { padding-left: 68px; }
+
+  html:not(.pb-app) .sidenav {
+    width: 68px;
+    padding-left: 10px;
+    padding-right: 10px;
+    transform: none;
+    overflow-x: hidden;
+    box-shadow: 1px 0 12px rgba(0, 0, 0, .24);
+    transition: width .22s var(--ease), box-shadow .22s var(--ease);
+  }
+  html:not(.pb-app) .sidenav .sidenav-item.active:not(:hover):not(:focus-visible) {
+    background: transparent;
+    border-color: transparent;
+    box-shadow: none;
+    color: var(--text-2);
+  }
+  html:not(.pb-app) .sidenav .sidenav-item.active:not(:hover):not(:focus-visible) .sn-icon {
+    background: rgba(255, 255, 255, .04);
+  }
+  html:not(.pb-app) body.light .sidenav .sidenav-item.active:not(:hover):not(:focus-visible) .sn-icon {
+    background: rgba(15, 23, 42, .04);
+  }
+  html:not(.pb-app) .sidenav .sidenav-item.active:is(:hover, :focus-visible) {
+    background: linear-gradient(135deg, rgba(255, 45, 142, .22), rgba(199, 24, 107, .18));
+    border-color: rgba(255, 45, 142, .4);
+    box-shadow: inset 0 1px 0 rgba(255, 255, 255, .1), 0 4px 14px rgba(255, 45, 142, .18);
+    color: #fff;
+  }
+  html:not(.pb-app) .sidenav .sidenav-item.active:is(:hover, :focus-visible) .sn-icon {
+    background: linear-gradient(135deg, rgba(255, 45, 142, .35), rgba(255, 128, 184, .25));
+  }
+  html:not(.pb-app) body.light .sidenav .sidenav-item.active:is(:hover, :focus-visible) {
+    background: linear-gradient(135deg, rgba(255, 45, 142, .12), rgba(199, 24, 107, .08));
+    color: #5b21b6;
+  }
+  html:not(.pb-app) .sidenav:hover,
+  html:not(.pb-app) .sidenav:has(.sidenav-item:focus-visible) {
+    width: 260px;
+    box-shadow: 4px 0 24px rgba(0, 0, 0, .5);
+  }
+  html:not(.pb-app) .sidenav-brand {
+    gap: 0;
+    padding-left: 5px;
+    padding-right: 5px;
+  }
+  html:not(.pb-app) .sidenav:hover .sidenav-brand,
+  html:not(.pb-app) .sidenav:has(.sidenav-item:focus-visible) .sidenav-brand { gap: 10px; }
+
+  html:not(.pb-app) .sidenav .brand-text,
+  html:not(.pb-app) .sidenav .sn-label,
+  html:not(.pb-app) .sidenav .sn-tag,
+  html:not(.pb-app) .sidenav .sidenav-section {
+    opacity: 0;
+    transition: opacity .12s var(--ease);
+  }
+  html:not(.pb-app) .sidenav:hover .brand-text,
+  html:not(.pb-app) .sidenav:hover .sn-label,
+  html:not(.pb-app) .sidenav:hover .sn-tag,
+  html:not(.pb-app) .sidenav:hover .sidenav-section,
+  html:not(.pb-app) .sidenav:has(.sidenav-item:focus-visible) .brand-text,
+  html:not(.pb-app) .sidenav:has(.sidenav-item:focus-visible) .sn-label,
+  html:not(.pb-app) .sidenav:has(.sidenav-item:focus-visible) .sn-tag,
+  html:not(.pb-app) .sidenav:has(.sidenav-item:focus-visible) .sidenav-section { opacity: 1; }
+
+  html:not(.pb-app) .sidenav .brand-text { white-space: nowrap; }
+  html:not(.pb-app) .sidenav .sidenav-item { white-space: nowrap; }
+  html:not(.pb-app) .sidenav-toggle { display: none !important; }
+  html:not(.pb-app) .sidenav-backdrop.open { display: none; }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  html:not(.pb-app) .sidenav,
+  html:not(.pb-app) .sidenav .brand-text,
+  html:not(.pb-app) .sidenav .sn-label,
+  html:not(.pb-app) .sidenav .sn-tag,
+  html:not(.pb-app) .sidenav .sidenav-section { transition: none; }
+}

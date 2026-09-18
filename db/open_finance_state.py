@@ -276,6 +276,19 @@ def mark_sync_result(
                 owner = cur.fetchone()
                 if owner:
                     _lock_user(cur, owner["user_id"])
+            # #444: uma foto de health tirada com o item ainda em coleta
+            # (`_UPDATING`) pode não trazer todo produto — mescla com a foto
+            # anterior antes de gravar, pra um produto atrasado não sumir da tela
+            # só porque o item voltou a "buscar". `for update` porque a leitura e
+            # a gravação do health precisam ser a MESMA transação: sem o lock,
+            # dois syncs concorrentes do mesmo item poderiam mesclar sobre uma
+            # foto já superada.
+            from core.services.pluggy_health import _UPDATING, mesclar_health_em_coleta
+            if health is not None and str(health.get("item_status") or "").upper() in _UPDATING:
+                cur.execute("select health from open_finance_connections where id=%s for update",
+                            (connection_id,))
+                linha = cur.fetchone()
+                health = mesclar_health_em_coleta(linha["health"] if linha else None, health)
             cur.execute(
                 f"""
                 update open_finance_connections
@@ -466,8 +479,22 @@ def item_registry_origins(provider_item_id: str, *, provider: str = "pluggy",
     Uma pergunta, uma fonte (CLAUDE.md §0.7). Vazio = o item nunca foi atribuído
     a ninguém, e é isso que separa ADOTAR de RESSUSCITAR: nem o disconnect nem o
     reset apagam o registry (`db/privacy.py` o preserva), então banco REMOVIDO
-    fica para sempre "sem conexão local" e só o rastro com dono
-    (`pluggy_item`/`webhook_adopt`) conta que ele existiu. Os leitores:
+    fica para sempre "sem conexão local", e é o rastro com dono que conta que ele
+    existiu. São TRÊS as origens com dono, e AQUI elas valem igual — qualquer uma
+    não-vazia recusa a adoção:
+
+      • `pluggy_item` — o NAVEGADOR registrou o item (`POST /pluggy-item`);
+      • `webhook_adopt` — a adoção pelo `item/created` registrou;
+      • `removed` — o usuário mandou TIRAR o banco: disconnect e reset gravam a
+        marca na mesma transação do delete (`mark_items_removed`). É ela que faz
+        esta pergunta responder "teve dono" para a conexão que nunca teve linha
+        `pluggy_item` — anterior ao registry, ou cujo `register_item` falhou —,
+        que era o buraco por onde a reentrega de `item/created` ressuscitava
+        banco removido.
+
+    Quem precisa SEPARAR as três (nenhum leitor automático precisa; é a
+    recuperação por operador, fora desta PR) usa a regra de precedência escrita
+    no docstring de `mark_items_removed`. Os leitores daqui:
 
       • `_adota_item_orfao` — só adota item sem NENHUM dono no rastro (duplicata
         de `item/created`, entrega at-least-once, ressuscitava o removido), e a
@@ -565,6 +592,11 @@ def register_item(
     O `GET /items` da Pluggy devolve 401, então o universo remoto NÃO é
     enumerável: sem este rastro não há como descobrir um item órfão. Guarda
     HASH do token, nunca o token — ele autoriza abrir a conexão.
+
+    `removal_tracked` é literal `true` e NÃO é parâmetro: toda linha escrita por
+    esta versão é da era em que a remoção deliberada também deixa marca
+    (`mark_items_removed`), inclusive a de `user_id` nulo. Um parâmetro obrigaria
+    os quatro chamadores a decidir a mesma coisa (CLAUDE.md §0.2).
     """
     with get_conn() as conn:
         with conn.cursor() as cur:
@@ -572,8 +604,8 @@ def register_item(
                 """
                 insert into open_finance_item_registry
                     (user_id, provider, provider_item_id, connect_token_hash,
-                     origin, status, last_event)
-                values (%s,%s,%s,%s,%s,%s,%s)
+                     origin, status, last_event, removal_tracked)
+                values (%s,%s,%s,%s,%s,%s,%s,true)
                 returning id
                 """,
                 (user_id, provider, provider_item_id, token_hash, origin, status, last_event),
@@ -581,6 +613,87 @@ def register_item(
             new_id = cur.fetchone()["id"]
         conn.commit()
     return new_id
+
+
+def mark_items_removed(cur, user_id: int, linhas, *, last_event: str) -> int:
+    """Grava a marca da remoção DELIBERADA, no cursor de quem apagou a conexão.
+
+    `linhas` são as do `returning provider, provider_item_id, status` do DELETE
+    de `open_finance_connections` — disconnect (`db/open_finance.py`) e reset
+    (`db/privacy.py`), os dois lugares onde o usuário diz "tire este banco".
+    A marca é `origin='removed'`, e é o que faz a 1ª guarda de
+    `_adota_item_orfao` recusar uma reentrega de `item/created` de um item
+    REMOVIDO que não tem (ou perdeu) a linha `pluggy_item`: a guarda já recusa
+    qualquer origem COM DONO, e a marca é a que passa a existir.
+
+    ESCREVE NO CURSOR RECEBIDO, nunca em `get_conn()` próprio: a atomicidade com
+    o delete é o ponto. Marca fora da transação = delete que commita sem marca
+    (ou marca de um delete que deu rollback), e a ressurreição volta.
+
+    `user_id` vem do PARÂMETRO (o mesmo do `where user_id = %s` do delete), nunca
+    das linhas — isolamento por usuário, CLAUDE.md §0.
+
+    `PAUSED` entra (ao contrário do `swept_out`, que alimenta o 2º passe de delete
+    REMOTO): a marca é sobre a INTENÇÃO do usuário, não sobre o item ainda existir
+    na Pluggy — e o delete remoto do trial expiry é best-effort, então item pausado
+    pode estar vivo lá e mandando evento.
+
+    PRECEDÊNCIA (a regra, escrita aqui porque é aqui que a linha nasce; nenhum
+    leitor de HOJE a usa — `item_registry_origins` trata as três origens com dono
+    igual, e é isso que recusa a adoção). O registry é log de APPEND: depois de
+    "conectou → removeu → reconectou" o item tem, em ordem de `id`,
+    `pluggy_item`, `removed`, `pluggy_item`. Para decidir o ESTADO de um item sem
+    conexão local, ordene as linhas com `user_id is not null` por `id` crescente
+    e olhe a ÚLTIMA:
+
+      • `origin='removed'`                                  → REMOVIDO pelo usuário;
+      • `pluggy_item`/`webhook_adopt` COM `removal_tracked`  → INTERROMPIDO (adoção
+        ou POST que não completou: a era já marca remoção, então a ausência de
+        `removed` é informação);
+      • `pluggy_item`/`webhook_adopt` SEM `removal_tracked`  → LEGADO AMBÍGUO (rastro
+        anterior à marca: não dá para saber);
+      • nenhuma linha com dono                              → NUNCA ATRIBUÍDO (adotável).
+
+    Por `id` e não por `created_at`: `now()` é o tempo de INÍCIO da transação,
+    empata entre duas escritas da mesma transação e pode inverter entre sessões
+    concorrentes; `id` é `bigserial`, alocado no INSERT.
+
+    LIMITE CONHECIDO da regra (declarado, não consertado): ordem de ALOCAÇÃO não
+    é ordem de COMMIT. O caso que importaria — disconnect × reconexão do mesmo
+    item — é serializado pelo `pluggy_items_lock`, porque o item está em
+    `list_pluggy_item_ids(user_id)` enquanto a conexão existe. SOBRA uma janela:
+    o `register_item` do `POST /pluggy-item` roda FORA do lock (em
+    `frontend/routes/open_finance.py`, logo DEPOIS de `_grava_reconexao`
+    devolver), então um `DELETE /open-finance/{uid}` que caia entre o commit da
+    conexão e esse insert deixa a última linha como `pluggy_item` com o banco
+    REMOVIDO — o item sai classificado "interrompido". Janela de ms e exige o
+    clique do usuário dentro dela; quem consumir a regra põe um humano item a
+    item, então o desfecho é revisável.
+
+    Devolve quantas marcas gravou.
+    """
+    # O `or "pluggy"` e o filtro de `provider_item_id` não podem disparar — as duas
+    # colunas são `not null` em `open_finance_connections` (`db/schema.py:415-416`).
+    # Ficam porque ESPELHAM, linha a linha, o filtro do `swept_out` que lê o MESMO
+    # `returning` nos mesmos dois chamadores (`db/open_finance.py:2786-2789`,
+    # `db/privacy.py:743-746`): duas leituras divergentes da mesma tupla é o que
+    # custa caro depois. Só `status` e `PAUSED` divergem, de propósito (acima).
+    valores = [
+        (user_id, r["provider"] or "pluggy", r["provider_item_id"], r["status"], last_event)
+        for r in (linhas or []) if r["provider_item_id"]
+    ]
+    if not valores:
+        return 0
+    cur.executemany(
+        """
+        insert into open_finance_item_registry
+            (user_id, provider, provider_item_id, origin, status, last_event,
+             removal_tracked)
+        values (%s,%s,%s,'removed',%s,%s,true)
+        """,
+        valores,
+    )
+    return len(valores)
 
 
 def token_hash(access_token: str) -> str:

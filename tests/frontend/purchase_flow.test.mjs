@@ -833,7 +833,8 @@ test("continuação não consulta assinatura nem perde a intenção em sessão e
 });
 
 for (const missingScript of ["pix-checkout.js", "pix-ui.js", "pix-poll.js"]) {
-test(`falha em ${missingScript} nunca troca Pix para cartão nem trava a tela`, async () => {
+for (const ordem of ["cfg antes do DOMContentLoaded", "cfg depois do DOMContentLoaded"]) {
+test(`falha em ${missingScript} nunca troca Pix para cartão nem trava a tela (${ordem})`, async () => {
   const page = await browser.newPage({ viewport: { width: 390, height: 844 } });
   let cardCheckoutCalls = 0;
   let failedAssetRequests = 0;
@@ -849,6 +850,13 @@ test(`falha em ${missingScript} nunca troca Pix para cartão nem trava a tela`, 
       }));
     }
   });
+  // Assevera a ordem que o nome do caso promete, em vez de confiar só no hold
+  // do nav-burger.js: o listener do addInitScript roda antes do da página.
+  await page.addInitScript(() => {
+    document.addEventListener("DOMContentLoaded", () => {
+      window.__ordemCfgAntes = !!window.pbPixState;
+    });
+  });
   await page.route("**/continuar-compra", (route) => route.fulfill({
     contentType: "text/html",
     body: fs.readFileSync("frontend/precos.html", "utf8"),
@@ -857,15 +865,37 @@ test(`falha em ${missingScript} nunca troca Pix para cartão nem trava a tela`, 
     failedAssetRequests += 1;
     return failedAssetRequests === 1 ? route.abort() : route.continue();
   });
-  await page.route("**/billing/plans-config", (route) => route.fulfill({
-    contentType: "application/json",
-    body: JSON.stringify({
-      essencial_available: true,
-      plus_available: true,
-      pro_available: true,
-      pix_annual_available: true,
-    }),
-  }));
+  if (ordem === "cfg antes do DOMContentLoaded") {
+    // nav-burger.js é `defer` (precos.html:1538), e o DOMContentLoaded espera
+    // os scripts defer terminarem. Segurar este request até window.pbPixState
+    // existir garante que o /billing/plans-config já respondeu (e publicou o
+    // estado que resumePurchaseAfterAuth lê) antes da retomada rodar — é o
+    // caso que reproduzia o pixRotular is not defined.
+    await page.route("**/nav-burger.js*", async (route) => {
+      // Se window.pbPixState nunca aparecer (regressão no loadPlansState), não
+      // pendure o teste no timeout padrão de 30s: solta o request e deixa o
+      // waitForSelector abaixo falhar com a mensagem certa.
+      await page.waitForFunction(() => !!window.pbPixState, null, { timeout: 5000 }).catch(() => {});
+      return route.continue();
+    });
+  }
+  await page.route("**/billing/plans-config", async (route) => {
+    if (ordem === "cfg depois do DOMContentLoaded") {
+      // Segura a resposta até o parser terminar, garantindo que a retomada
+      // (disparada no DOMContentLoaded) já rodou com pixCfg ainda null — a
+      // ordem em que o defeito nunca aparecia.
+      await page.waitForFunction(() => document.readyState !== "loading", null, { timeout: 5000 }).catch(() => {});
+    }
+    return route.fulfill({
+      contentType: "application/json",
+      body: JSON.stringify({
+        essencial_available: true,
+        plus_available: true,
+        pro_available: true,
+        pix_annual_available: true,
+      }),
+    });
+  });
   await page.route("**/billing/subscription", (route) => route.fulfill({
     contentType: "application/json",
     body: JSON.stringify({ active: false }),
@@ -880,10 +910,16 @@ test(`falha em ${missingScript} nunca troca Pix para cartão nem trava a tela`, 
   });
 
   await page.goto(`${ORIGIN}/continuar-compra`);
-  // A suíte de frontend roda muitos navegadores em paralelo no CI. O fallback
-  // depende do DOMContentLoaded depois da falha do script, então use o teto
-  // padrão do Playwright em vez de um limite curto sensível à contenção.
+  // A ordem entre a resposta do plans-config e o DOMContentLoaded decide se
+  // pixCfg já está fixado quando a retomada chama setCycle → pbPixRefresh:
+  // se sim, o `pbPixRefresh` conseguia rodar com o trio do Pix incompleto e
+  // lançar antes do try/catch que mostra este fallback. Por isso as duas
+  // ordens são exercitadas por sinal de estado, e não um único cenário.
+  // Teto padrão do Playwright: não há mais contenção a esperar aqui, a
+  // corrida agora é forçada por `waitForFunction`, não por tempo.
   await page.waitForSelector("#purchase-continuation-actions.show");
+  const cfgAntes = await page.evaluate(() => window.__ordemCfgAntes);
+  assert.equal(cfgAntes, ordem === "cfg antes do DOMContentLoaded", "a ordem prometida pelo nome não ocorreu");
   assert.equal(cardCheckoutCalls, 0, "a intenção Pix caiu no checkout de cartão");
   assert.match(await page.textContent("#purchase-continuation"), /pagamento via Pix/i);
   assert.equal(await page.textContent("#purchase-continuation-retry"), "Recarregar pagamento");
@@ -895,6 +931,7 @@ test(`falha em ${missingScript} nunca troca Pix para cartão nem trava a tela`, 
   assert.equal(cardCheckoutCalls, 0, "recarregar não pode trocar Pix por cartão");
   await page.close();
 });
+}
 }
 
 test("onboarding confirma a compra sem criar uma etapa paralela", async () => {

@@ -50,10 +50,13 @@ let pixSubResolvida = false;
 /**
  * Pix está à venda para ESTE usuário? Fonte única do CTA dos cards e da etiqueta
  * do toggle (§0.7). `!== true` e não `!`: portão de venda não abre com truthy
- * qualquer. Vitalício não compra — o backend recusa com 409 `lifetime`.
+ * qualquer. Vitalício não compra — o backend recusa com 409 `lifetime`. Os dois
+ * `typeof` provam que pix-ui.js e pix-poll.js rodaram: sem eles o `pbPixRefresh`
+ * do `setCycle` travava a /continuar-compra (`pixPoll` não serve: `let` tem TDZ).
  */
 function pixAVenda() {
-  return !!pixCfg && pixCfg.pix_annual_available === true && !(pixSub && pixSub.lifetime === true);
+  return typeof pixRotular === "function" && typeof pixModalQr === "function"
+    && !!pixCfg && pixCfg.pix_annual_available === true && !(pixSub && pixSub.lifetime === true);
 }
 
 /**

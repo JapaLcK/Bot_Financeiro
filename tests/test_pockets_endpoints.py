@@ -83,7 +83,10 @@ def test_deposit_endpoint_rejects_when_account_insufficient(user_id):
         headers=_csrf_headers(client),
     )
     assert resp.status_code == 400
-    assert "conta principal" in resp.json()["detail"]
+    # Passou a nomear o saldo (funding.msg_insuficiente, PR 2 etapa 2d) em vez
+    # da frase genérica "conta principal não cobre esse valor".
+    assert resp.json()["detail"] == (
+        "Saldo insuficiente: você tem R$ 100,00 na conta e o depósito é de R$ 500,00.")
 
 
 def test_withdraw_endpoint_moves_balance(user_id):

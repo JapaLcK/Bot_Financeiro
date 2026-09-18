@@ -1,0 +1,91 @@
+// Jest Snapshot v1, https://goo.gl/fbAQLP
+
+exports[`SheetConteudo snapshot (dois temas): claro 1`] = `
+<RNCSafeAreaProvider
+  onInsetsChange={[Function]}
+  style={
+    [
+      {
+        "flex": 1,
+      },
+      undefined,
+    ]
+  }
+>
+  <View
+    style={
+      {
+        "backgroundColor": "#FFFFFF",
+        "flex": 1,
+        "paddingBottom": 50,
+        "paddingHorizontal": 16,
+      }
+    }
+    testID="sheet-conteudo"
+  >
+    <View
+      accessibilityElementsHidden={true}
+      importantForAccessibility="no-hide-descendants"
+      style={
+        {
+          "alignSelf": "center",
+          "backgroundColor": "#E6E6E9",
+          "borderRadius": 8,
+          "height": 4,
+          "marginBottom": 16,
+          "marginTop": 8,
+          "width": 36,
+        }
+      }
+    />
+    <Text>
+      conteúdo
+    </Text>
+  </View>
+</RNCSafeAreaProvider>
+`;
+
+exports[`SheetConteudo snapshot (dois temas): escuro 1`] = `
+<RNCSafeAreaProvider
+  onInsetsChange={[Function]}
+  style={
+    [
+      {
+        "flex": 1,
+      },
+      undefined,
+    ]
+  }
+>
+  <View
+    style={
+      {
+        "backgroundColor": "#0E0E10",
+        "flex": 1,
+        "paddingBottom": 50,
+        "paddingHorizontal": 16,
+      }
+    }
+    testID="sheet-conteudo"
+  >
+    <View
+      accessibilityElementsHidden={true}
+      importantForAccessibility="no-hide-descendants"
+      style={
+        {
+          "alignSelf": "center",
+          "backgroundColor": "#2A2A2F",
+          "borderRadius": 8,
+          "height": 4,
+          "marginBottom": 16,
+          "marginTop": 8,
+          "width": 36,
+        }
+      }
+    />
+    <Text>
+      conteúdo
+    </Text>
+  </View>
+</RNCSafeAreaProvider>
+`;

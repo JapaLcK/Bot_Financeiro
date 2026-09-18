@@ -1380,10 +1380,26 @@ def delete_open_finance_transactions(
 
     with get_conn() as conn:
         with conn.cursor() as cur:
-            from .bank_movements import _lock_user, reconcile_bank_movements
+            from .bank_movements import _lock_user, delete_if_shadow, reconcile_bank_movements
             owners = sorted({row["user_id"] for row in rows})
             for owner in owners:
                 _lock_user(cur, owner)
+            # Reler AGORA, sob o lock: entre a leitura de cima e aqui, um undo
+            # concorrente pode ter trocado o imported_launch_id por uma sombra
+            # nova (`_insert_of_shadow`) — sem reler, ela vira órfã.
+            cur.execute(
+                """
+                select t.id, c.user_id, t.imported_launch_id
+                from open_finance_transactions t
+                join open_finance_accounts a on a.id = t.account_id
+                join open_finance_connections c on c.id = a.connection_id
+                where t.id = any(%s)
+                for update of t
+                """,
+                ([r["id"] for r in rows],),
+            )
+            for row in cur.fetchall():
+                delete_if_shadow(cur, row["user_id"], row["imported_launch_id"])
             cur.execute(
                 "delete from open_finance_transactions where id = any(%s)",
                 ([r["id"] for r in rows],),
@@ -1665,6 +1681,55 @@ def _find_manual_candidates(cur, user_id: int, tipo: str, valor, tx_date) -> lis
     return cur.fetchall()
 
 
+def _insert_of_shadow(cur, user_id: int, r, cls) -> tuple[int | None, bool]:
+    """Cria a sombra da transação OF (`delta_conta=0`) ou reaproveita a que já
+    existe pelo `external_id`. Devolve `(launch_id, criou)`. Chamadores: o import
+    e o desfazer de `db/reconciliation.py`.
+
+    `criado_em` (timestamptz) dirige a exibição na lista:
+      - banco mandou hora real (transacted_at) → usa o instante exato;
+      - só data → meia-dia no fuso local (evita o "escorrega 1 dia"
+        que acontecia gravando `date` cru como meia-noite UTC).
+    `time_known` sinaliza pro front mostrar HH:MM só quando é real.
+    """
+    has_real_time = r["transacted_at"] is not None
+    criado_em = (
+        r["transacted_at"] if has_real_time
+        else datetime.combine(r["transaction_date"], time(12, 0), tzinfo=_tz())
+    )
+    efeitos = {
+        "delta_conta": 0,  # analytics-only: não mexe no saldo manual
+        "open_finance": {"provider_transaction_id": r["provider_transaction_id"]},
+        "time_known": has_real_time,
+    }
+    cur.execute(
+        """
+        insert into launches(
+            user_id, tipo, valor, categoria, alvo, nota, criado_em, efeitos,
+            source, external_id, posted_at, currency, imported_at, is_internal_movement
+        )
+        values (%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,now(),%s)
+        on conflict (user_id, source, external_id) do nothing
+        returning id
+        """,
+        (
+            user_id, cls["tipo"], cls["valor"], (r["category"] or "outros"),
+            r["description"], None, criado_em, Jsonb(efeitos),
+            "open_finance", r["provider_transaction_id"], r["transaction_date"], "BRL",
+            cls["is_internal_movement"],
+        ),
+    )
+    got = cur.fetchone()
+    if got:
+        return got["id"], True
+    cur.execute(
+        "select id from launches where user_id=%s and source='open_finance' and external_id=%s",
+        (user_id, r["provider_transaction_id"]),
+    )
+    ex = cur.fetchone()
+    return (ex["id"] if ex else None), False
+
+
 def import_open_finance_launches(user_id: int, connection_id: int | None = None) -> dict:
     """Importa transações OF (ainda não importadas) de contas BANK como `launches`.
 
@@ -1737,50 +1802,8 @@ def import_open_finance_launches(user_id: int, connection_id: int | None = None)
                     continue
 
                 # Sem match ('none') ou ambíguo ('ask'): cria o OF launch.
-                #
-                # `criado_em` (timestamptz) dirige a exibição na lista:
-                #   - banco mandou hora real (transacted_at) → usa o instante exato;
-                #   - só data → meia-dia no fuso local (evita o "escorrega 1 dia"
-                #     que acontecia gravando `date` cru como meia-noite UTC).
-                # `time_known` sinaliza pro front mostrar HH:MM só quando é real.
-                has_real_time = r["transacted_at"] is not None
-                criado_em = (
-                    r["transacted_at"] if has_real_time
-                    else datetime.combine(r["transaction_date"], time(12, 0), tzinfo=_tz())
-                )
-                efeitos = {
-                    "delta_conta": 0,  # analytics-only: não mexe no saldo manual
-                    "open_finance": {"provider_transaction_id": r["provider_transaction_id"]},
-                    "time_known": has_real_time,
-                }
-                cur.execute(
-                    """
-                    insert into launches(
-                        user_id, tipo, valor, categoria, alvo, nota, criado_em, efeitos,
-                        source, external_id, posted_at, currency, imported_at, is_internal_movement
-                    )
-                    values (%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,now(),%s)
-                    on conflict (user_id, source, external_id) do nothing
-                    returning id
-                    """,
-                    (
-                        user_id, cls["tipo"], cls["valor"], (r["category"] or "outros"),
-                        r["description"], None, criado_em, Jsonb(efeitos),
-                        "open_finance", r["provider_transaction_id"], r["transaction_date"], "BRL",
-                        cls["is_internal_movement"],
-                    ),
-                )
-                got = cur.fetchone()
-                if got:
-                    launch_id = got["id"]
-                    inserted += 1
-                else:
-                    cur.execute(
-                        "select id from launches where user_id=%s and source='open_finance' and external_id=%s",
-                        (user_id, r["provider_transaction_id"]),
-                    )
-                    ex = cur.fetchone()
-                    launch_id = ex["id"] if ex else None
+                launch_id, created = _insert_of_shadow(cur, user_id, r, cls)
+                inserted += created
 
                 if launch_id is not None:
                     status = "pending" if verdict == "ask" else "imported"
@@ -1800,69 +1823,6 @@ def import_open_finance_launches(user_id: int, connection_id: int | None = None)
         "pending": pending,
         "skipped_non_bank": skipped_non_bank,
     }
-
-
-def confirm_reconciliation(user_id: int, of_tx_id: int) -> dict:
-    """Usuário confirma que a OF tx pendente é a MESMA do candidato: funde.
-
-    Apaga o OF launch (delta_conta=0, não mexe no saldo) e revincula a OF tx no lançamento
-    manual. Resultado: 1 transação real = 1 linha.
-    """
-    ensure_user(user_id)
-    with get_conn() as conn:
-        with conn.cursor() as cur:
-            cur.execute(
-                """
-                select o.imported_launch_id, o.match_launch_id, o.reconciliation_status
-                from open_finance_transactions o
-                join open_finance_accounts a on a.id = o.account_id
-                join open_finance_connections c on c.id = a.connection_id
-                where o.id = %s and c.user_id = %s
-                """,
-                (of_tx_id, user_id),
-            )
-            row = cur.fetchone()
-
-    if not row or row["reconciliation_status"] != "pending" or not row["match_launch_id"]:
-        return {"ok": False, "reason": "not_pending"}
-
-    of_launch_id = row["imported_launch_id"]
-    manual_id = row["match_launch_id"]
-    if of_launch_id:
-        try:
-            delete_launch_and_rollback(user_id, of_launch_id)
-        except Exception:
-            pass
-
-    with get_conn() as conn:
-        with conn.cursor() as cur:
-            cur.execute(
-                "update open_finance_transactions "
-                "set imported_launch_id=%s, reconciliation_status='auto_merged' where id=%s",
-                (manual_id, of_tx_id),
-            )
-        conn.commit()
-    return {"ok": True, "merged_into": manual_id}
-
-
-def reject_reconciliation(user_id: int, of_tx_id: int) -> dict:
-    """Usuário diz que são DIFERENTES: mantém os dois lançamentos, limpa o estado pendente."""
-    ensure_user(user_id)
-    with get_conn() as conn:
-        with conn.cursor() as cur:
-            cur.execute(
-                """
-                update open_finance_transactions o
-                set reconciliation_status='imported', match_launch_id=null
-                from open_finance_accounts a, open_finance_connections c
-                where o.account_id = a.id and a.connection_id = c.id
-                  and o.id = %s and c.user_id = %s and o.reconciliation_status = 'pending'
-                """,
-                (of_tx_id, user_id),
-            )
-            n = cur.rowcount
-        conn.commit()
-    return {"ok": n > 0}
 
 
 def reconcile_manual_launch(user_id: int, launch_id: int) -> dict:
@@ -2386,19 +2346,50 @@ BANK_ACCOUNTS_SQL = """
 # grava `delta_conta` -1 e `accounts.balance = balance + delta`
 # (db/accounts.py:94); devolver o débito é somar +1, como já faz o rollback do
 # delete (`balance - delta_conta`, db/accounts.py:1766).
-MERGED_WALLET_DELTA_SQL = f"""
-    select coalesce(sum(-d), 0) as d from (
-      select distinct l.id, (l.efeitos ->> 'delta_conta')::numeric as d
+def _fused_join_sql(link_col: str, extra_where: str,
+                    cols: str = "distinct l.id, (l.efeitos ->> 'delta_conta')::numeric as d") -> str:
+    """O miolo acima: lançamentos manuais ligados por `t.<link_col>` a transações
+    das contas no recorte. Params: `merged_wallet_delta_params`."""
+    return f"""
+      select {cols}
         from ({BANK_ACCOUNTS_SQL}) a
         join open_finance_accounts ra on ra.id = a.id
         join open_finance_accounts ta on ta.provider_account_id = ra.provider_account_id
         join open_finance_connections tc on tc.id = ta.connection_id and tc.user_id = %s
         join open_finance_transactions t on t.account_id = ta.id
-        join launches l on l.id = t.imported_launch_id
+        join launches l on l.id = t.{link_col}
        where l.user_id = %s
          and coalesce(l.source, 'manual') <> 'open_finance'
-         and jsonb_typeof(l.efeitos -> 'delta_conta') = 'number'
-    ) x
+         and jsonb_typeof(l.efeitos -> 'delta_conta') = 'number'{extra_where}
+"""
+
+
+MERGED_WALLET_DELTA_SQL = f"""
+    select coalesce(sum(-d), 0) as d from ({_fused_join_sql("imported_launch_id", "")}    ) x
+"""
+
+# Pendência ACIONÁVEL (`pending`: imported = sombra, match = X), uma linha por
+# transação: conta no recorte, X existente e X não ocupado por outra transação
+# (confirmar daria ALREADY_LINKED). Regra única da lista e do resumo (§0.7).
+ACTIONABLE_PENDING_SQL = _fused_join_sql("match_launch_id", """
+         and t.reconciliation_status = 'pending'
+         and not exists (select 1 from open_finance_transactions o
+                          where o.imported_launch_id = l.id)""",
+                                         cols="t.id as of_tx_id, l.id, (l.efeitos ->> 'delta_conta')::numeric as d")
+
+# O que mudaria na Carteira exibida se o usuário confirmasse: mesmo sinal da
+# fusão, somado uma vez por X (duas pendências no mesmo X só fundem uma).
+# `receita_back` (≤ 0) é a receita pendente tirada da guarda de cobertura.
+# `pending_count` usa o MESMO filtro `rn = 1`: decisão do dono é contar só o
+# que move o número — duas transações do banco casando o mesmo lançamento
+# valem 1 no aviso "N lançamento(s) a conferir", não 2 (a lista de
+# `list_reconciliations`, que é por transação, continua mostrando as duas).
+PENDING_RECONCILIATION_SQL = f"""
+    select coalesce(sum(-d) filter (where rn = 1), 0) as delta_se_confirmar,
+           coalesce(sum(-d) filter (where rn = 1 and d > 0), 0) as receita_back,
+           count(*) filter (where rn = 1) as pending_count
+      from (select p.*, row_number() over (partition by p.id) as rn
+              from ({ACTIONABLE_PENDING_SQL}) p) x
 """
 
 
@@ -2676,8 +2667,10 @@ def get_consolidated_balance(user_id: int) -> dict:
             of_count = int(of_row["n"] or 0)
 
     from .bank_movements import bank_movement_summary
+    from .reconciliation import reconciliation_summary
     return {
         "bank_movements": bank_movement_summary(user_id),
+        "reconciliation": reconciliation_summary(user_id),
         "manual": manual,
         "open_finance_bank": of_bank,
         "of_bank_count": of_count,
@@ -2751,7 +2744,10 @@ def disconnect_open_finance_connection(
     # Exclusão da conexão e invalidação das provas permanecem atômicas.
     with get_conn() as conn:
         with conn.cursor() as cur:
-            from .bank_movements import _lock_user, reconcile_bank_movements
+            from .bank_movements import _lock_user, delete_if_shadow, reconcile_bank_movements
+            # Import LOCAL: `open_finance_state` importa este módulo no topo, e a
+            # mão única do import está documentada lá (`:38-42`).
+            from .open_finance_state import mark_items_removed
             _lock_user(cur, user_id)
             # Caixinha vinculada é ESPELHO: o dinheiro está no banco. Indo embora a
             # conexão, o FK só zera o `of_investment_id` (`on delete set null`,
@@ -2783,6 +2779,22 @@ def disconnect_open_finance_connection(
                     "delete from pockets where user_id=%s and id = any(%s) and balance <= 0",
                     (user_id, do_sync),
                 )
+            # Reler AGORA, sob o lock: entre a leitura do passo 1 e aqui, um undo
+            # concorrente pode ter trocado o imported_launch_id por uma sombra
+            # nova (`_insert_of_shadow`) — sem reler, ela sobra órfã do cascade.
+            cur.execute(
+                """
+                select t.id, c.user_id, t.imported_launch_id
+                from open_finance_transactions t
+                join open_finance_accounts a on a.id = t.account_id
+                join open_finance_connections c on c.id = a.connection_id
+                where c.user_id = %s and (%s::bigint is null or c.id = %s)
+                for update of t
+                """,
+                (user_id, connection_id, connection_id),
+            )
+            for row in cur.fetchall():
+                delete_if_shadow(cur, row["user_id"], row["imported_launch_id"])
             if connection_id is None:
                 cur.execute(
                     "delete from open_finance_connections where user_id=%s "
@@ -2797,6 +2809,11 @@ def disconnect_open_finance_connection(
                 )
             varridas = cur.fetchall()
             deleted = len(varridas)
+            # Marca da remoção deliberada, na MESMA transação do delete: sem ela
+            # uma reentrega de `item/created` recria a conexão que o usuário
+            # acabou de remover quando o item não tem linha `pluggy_item` no
+            # registry (falha do `register_item`, ou conexão anterior ao registry).
+            mark_items_removed(cur, user_id, varridas, last_event="disconnect")
             reconcile_bank_movements(cur, user_id)
 
         conn.commit()

@@ -47,6 +47,15 @@ linha é **Leve**.
 | **Leve** | feature e tela comuns, correção de bug **que muda lógica**, refatoração, dependência, CI/ferramenta e configuração — tudo fora das áreas acima | `time-dev` com **uma** passada do Tester e Manager curto; o Arquiteto só é pulado quando a mudança já tem plano aprovado ou cabe num arquivo com um único comportamento possível |
 | **Direto** | texto, CSS pequeno, docs, código provisório, correção **sem mudança de lógica** (typo, nome, constante óbvia) | sem o time: teste do que mudou e `git diff` lido de ponta a ponta |
 
+**Experimento temporário (desde 2026-09-16).** Na faixa **Leve**, os PRs alternam
+com e sem o time, na ordem que `python scripts/medir_time_dev.py <PRs>` indicar em
+"próximo PR Leve" — passe **todos** os PRs marcados desde o início do experimento, não
+só os recentes: a alternância é contada só sobre a lista recebida. Sem o time: o próprio agente implementa,
+roda a suíte (skill `baseline-testes`) e lê o `git diff` inteiro, e grava
+`<!-- time-dev: grupo=sem faixa=Leve internos=0 bloqueantes=0 -->` no PR.
+**Completo continua sempre com o time.** O experimento termina com 10 PRs Leve em
+cada grupo; aí roda-se o script, o dono decide, e este bloco sai.
+
 O time existe para o §4 ("ataque antes de empurrar"): onde há dinheiro ou sessão ele
 pagou a conta várias vezes (PR #133, #384/#386, o logout no-op do #433). Onde o risco
 é baixo, ele consumia uso em rodadas que consertavam o próprio conserto anterior — foi
@@ -410,6 +419,14 @@ olhar para nada ser encontrado.
 
 **Merge só com autorização explícita do dono do repositório.** Aprovação do Codex e
 CI verde deixam o PR *pronto*; não autorizam o merge. Avise e pergunte.
+
+**Depois do merge, apague a branch — se estiver limpa e sem uso.** Antes de apagar,
+confira: o PR está `MERGED` (`gh pr view <n> --json state`); `git status --short` vazio;
+nenhum worktree nem sessão usa a branch (`git worktree list`); nenhum outro PR aberto a usa
+como base nem como head (`gh pr list --base <branch>` e `gh pr list --head <branch>`). Então `git branch -d <branch>` e
+`git push origin --delete --force-with-lease=<branch>:<headRefOid> <branch>` — o lease
+recusa se a remota recebeu commit depois do merge. Merge por squash faz o `-d` recusar: use `-D` só se
+o HEAD local for igual ao `headRefOid` do PR. Qualquer item falhou → não force, avise.
 
 **O ciclo de correção também precisa de inventário — senão vira gerador de bug.**
 Registro do PR #60 (puxar pra atualizar): 14 rodadas de revisão, 21 apontamentos,

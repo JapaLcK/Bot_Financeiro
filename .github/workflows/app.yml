@@ -48,6 +48,18 @@ jobs:
       # diferente da que foi testada na máquina.
       - run: npm ci
 
+      # `expo install --check` só confere as dependências DECLARADAS em
+      # `package.json` (`dependencies`) contra o SDK — não entra no lockfile.
+      # Hoje reanimated/gesture-handler/worklets estão instalados como
+      # TRANSITIVOS (peer opcional do expo-router; entram no
+      # `package-lock.json`, mas não em `dependencies`) em versão errada para
+      # o Expo Go 57, e este passo dá "up to date" porque nem olha para eles.
+      # Só passa a importar quando alguém IMPORTAR um dos três: aí precisa
+      # declarar via `expo install` (o pacote entra em `dependencies`), e a
+      # partir daí este passo pega a versão errada.
+      - name: Confere versões nativas contra o SDK do Expo
+        run: npx expo install --check
+
       - name: Lint
         run: npm run lint
 

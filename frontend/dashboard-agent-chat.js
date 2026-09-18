@@ -17,6 +17,15 @@
     barao: 'O que considerar ao avaliar renda fixa?',
     faria_limer: 'Como está a concentração da minha carteira?',
   };
+  const suggestionTitles = {
+    xerife: 'Xerife · Gasto incomum?',
+    detetive: 'Detetive · Lançamentos duplicados?',
+    carteiro: 'Carteiro · Próximas contas?',
+    reporter: 'Repórter · Resumo do mês?',
+    cofre: 'Banqueiro · Quanto falta para a meta?',
+    barao: 'Barão · Como avaliar renda fixa?',
+    faria_limer: 'Faria Limer · Carteira concentrada?',
+  };
 
   function state(kind) {
     if (!sessions.has(kind)) sessions.set(kind, { messages: [], context: null, draft: '', busy: false, access: 'loading', error: '', usage: null });
@@ -73,16 +82,33 @@
       avatar: `/brand/agents/${kind}.png?v=3`, messages, draft: s.draft,
       disabled: s.busy || s.access !== 'ready', status: s.error || note, actions,
       emptyText: card?.desc || 'Posso ajudar com perguntas sobre meu tema.',
-      suggestions: [{ label: questions[kind], onClick: () => {
-        s.draft = questions[kind];
-        render();
-        ui.focusInput('agent');
-      } }],
+      greeting: (() => {
+        const label = document.getElementById('user-label')?.textContent?.trim();
+        const firstName = label && label !== 'Minha conta' && !label.includes('@') ? label.split(/\s+/)[0] : '';
+        return firstName ? `Olá, ${firstName}` : 'Olá!';
+      })(),
+      suggestions: [...new Set([kind, 'xerife', 'detetive', 'carteiro', 'reporter'])].slice(0, 4).map(target => ({
+        label: suggestionTitles[target], onClick: () => {
+          if (target !== kind) window.openAgentChat(target, questions[target]);
+          else {
+            s.draft = questions[target];
+            render();
+            ui.focusInput('agent');
+          }
+        },
+      })),
       usage: s.usage
         ? `${s.usage.used.toLocaleString('pt-BR')} de ${s.usage.limit.toLocaleString('pt-BR')} mensagens da cota compartilhada. Recarregar limpa a conversa.`
         : 'Cota compartilhada com o Piggy. Recarregar limpa a conversa.',
       onDraftChange: value => { s.draft = value; render(); },
       onSend: submit,
+      onFeedback: (messageId, value) => {
+        const message = s.messages.find(item => item.id === messageId);
+        if (message?.role !== 'assistant' || message.state !== 'complete' || message.feedback === 'dismissed') return;
+        if (message.feedback && value !== 'dismissed') return;
+        message.feedback = value;
+        render();
+      },
       onHidden: () => { ++openGeneration; },
     };
   }

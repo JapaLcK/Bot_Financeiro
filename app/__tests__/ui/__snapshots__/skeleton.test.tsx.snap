@@ -1,0 +1,35 @@
+// Jest Snapshot v1, https://goo.gl/fbAQLP
+
+exports[`Skeleton snapshot (dois temas): claro 1`] = `
+<View
+  accessibilityLabel="Carregando"
+  accessible={true}
+  collapsable={false}
+  style={
+    {
+      "backgroundColor": "#E6E6E9",
+      "borderRadius": 8,
+      "height": 24,
+      "opacity": 0.5,
+      "width": 200,
+    }
+  }
+/>
+`;
+
+exports[`Skeleton snapshot (dois temas): escuro 1`] = `
+<View
+  accessibilityLabel="Carregando"
+  accessible={true}
+  collapsable={false}
+  style={
+    {
+      "backgroundColor": "#2A2A2F",
+      "borderRadius": 8,
+      "height": 24,
+      "opacity": 0.5,
+      "width": 200,
+    }
+  }
+/>
+`;

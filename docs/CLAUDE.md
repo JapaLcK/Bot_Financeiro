@@ -210,7 +210,9 @@ Via **Pluggy**. Endpoints em `frontend/routes/open_finance.py`
 `open_finance*.py`; tabelas `open_finance_connections/accounts/transactions/investments` mais
 `open_finance_item_registry` — o rastro de todo item que passou por aqui, inclusive o
 que nunca virou conexão (token emitido e abandonado, webhook de item desconhecido); o
-`GET /items` da Pluggy devolve 401, então sem ela o universo remoto não é enumerável.
+`GET /items` da Pluggy devolve 401, então sem ela o universo remoto não é enumerável;
+ela guarda também a marca de remoção deliberada (`origin='removed'`), escrita na mesma
+transação do delete pelo disconnect e pelo reset.
 
 Boa parte do comportamento é regida por flags `OF_*` (beta por e-mail/user_id, limite
 de bancos no free, refresh proativo). Antes de mexer, leia as flags — o

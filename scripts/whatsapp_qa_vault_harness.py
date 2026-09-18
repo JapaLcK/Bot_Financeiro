@@ -21,7 +21,7 @@ O QUE FAZ
 COMO RODAR
     cd /Users/lucaskuramoti/Desktop/bot/bot_wa/.claude/worktrees/wa-qa-vault-pilot
     /Users/lucaskuramoti/Desktop/bot/bot_wa/.venv/bin/python \
-        scripts/whatsapp_qa_vault_harness.py
+        scripts/whatsapp_qa_vault_harness.py --allow-real-services
 
 PRÉ-REQUISITOS
   - Postgres local rodando em localhost:5432, aceitando conexão sem senha
@@ -42,6 +42,16 @@ import time
 import traceback
 import uuid as _uuid
 from datetime import datetime, timedelta
+
+_LIVE_OPT_IN = "--allow-real-services"
+if _LIVE_OPT_IN not in sys.argv:
+    print(
+        "[harness] Execução bloqueada antes de ler .env ou acessar serviços reais. "
+        "Use scripts/whatsapp_harness_safe.py para testes herméticos. "
+        f"Para autorizar conscientemente este harness ao vivo, passe {_LIVE_OPT_IN}."
+    )
+    raise SystemExit(64)
+sys.argv.remove(_LIVE_OPT_IN)
 
 WORKTREE_ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 REAL_CHECKOUT_ENV = "/Users/lucaskuramoti/Desktop/bot/bot_wa/.env"

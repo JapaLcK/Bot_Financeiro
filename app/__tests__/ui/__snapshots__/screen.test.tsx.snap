@@ -1,0 +1,78 @@
+// Jest Snapshot v1, https://goo.gl/fbAQLP
+
+exports[`Screen snapshot (dois temas): claro, rolando 1`] = `
+<RNCSafeAreaProvider
+  onInsetsChange={[Function]}
+  style={
+    [
+      {
+        "flex": 1,
+      },
+      undefined,
+    ]
+  }
+>
+  <RCTScrollView
+    contentContainerStyle={
+      {
+        "flexGrow": 1,
+        "paddingBottom": 34,
+        "paddingLeft": 16,
+        "paddingRight": 16,
+        "paddingTop": 47,
+      }
+    }
+    keyboardShouldPersistTaps="handled"
+    style={
+      {
+        "backgroundColor": "#FFFFFF",
+        "flex": 1,
+      }
+    }
+    testID="tela"
+  >
+    <View>
+      <Text>
+        conteúdo
+      </Text>
+    </View>
+  </RCTScrollView>
+</RNCSafeAreaProvider>
+`;
+
+exports[`Screen snapshot (dois temas): escuro, sem rolar 1`] = `
+<RNCSafeAreaProvider
+  onInsetsChange={[Function]}
+  style={
+    [
+      {
+        "flex": 1,
+      },
+      undefined,
+    ]
+  }
+>
+  <View
+    style={
+      [
+        {
+          "backgroundColor": "#0E0E10",
+          "flex": 1,
+        },
+        {
+          "flexGrow": 1,
+          "paddingBottom": 34,
+          "paddingLeft": 16,
+          "paddingRight": 16,
+          "paddingTop": 47,
+        },
+      ]
+    }
+    testID="tela"
+  >
+    <Text>
+      conteúdo
+    </Text>
+  </View>
+</RNCSafeAreaProvider>
+`;

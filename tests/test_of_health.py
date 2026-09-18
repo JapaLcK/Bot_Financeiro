@@ -128,9 +128,16 @@ def test_updating_sem_informacao_de_produto_nao_pode_ficar_verde():
     ui = connection_ui_state({"status": "ACTIVE", "health": cego, "last_sync_at": AGORA})
     assert (ui["state"], ui["detail"]) == ("updating", None), ui
 
-    # LIMITE CONHECIDO, NÃO GARANTIA: `_SAUDAVEL` só traz `accounts`. Este verde
-    # vale igual para um cartão que estava atrasado na foto anterior e sumiu
-    # desta — o aviso dele desaparece (issue #444; ver `coletando_sem_info`).
+    # `_SAUDAVEL` só traz `accounts`: SE esta fosse a foto que chega até
+    # `connection_ui_state` sem passar pela escrita, o cartão atrasado na foto
+    # anterior sumiria daqui (issue #444). No caminho real ela não chega crua —
+    # `mark_sync_result` mescla com a foto anterior (`mesclar_health_em_coleta`,
+    # `core/services/pluggy_health.py`) ANTES de gravar, então o `health` que
+    # esta função lê já vem completo. Este teste chama `connection_ui_state`
+    # direto, sem passar pela escrita — por isso ainda testa o portão
+    # `coletando_sem_info` isoladamente, não a mescla (essa tem tabela própria
+    # em `test_mesclar_health_em_coleta_*` e teste de integração via
+    # `mark_sync_result` em `tests/test_of_connection_state.py`).
     completo = derive_item_health({**_SAUDAVEL, "status": "UPDATING"}, now=AGORA)
     assert connection_ui_state({"status": "ACTIVE", "health": completo,
                                 "last_sync_at": AGORA})["state"] == "updated"
@@ -1346,3 +1353,125 @@ def test_estado_de_detalhe_variavel_le_i_detail_no_of_verdict():
         f"instrução do backend por frase fixa): {sorted(variaveis - lidos)}; "
         "estado que o JS lê `i.detail` mas cujo detalhe é sempre o fixo (a "
         f"leitura não serve para nada): {sorted(lidos - variaveis)}")
+
+
+# ── mesclar_health_em_coleta (issue #444) ────────────────────────────────────
+# Função PURA: `mark_sync_result` (`db/open_finance_state.py`) chama antes de
+# gravar, quando a foto NOVA está em coleta (`item_status in _UPDATING`). Sem
+# ela, um produto atrasado (ex.: CREDIT parado desde 12/08) sumia da tela assim
+# que o item voltava a "buscar" — mesmo sem o atraso ter sido resolvido.
+#
+# CONTROLE NEGATIVO do grupo: fazer `mesclar_health_em_coleta` sempre devolver
+# `novo` sem tocar (o comportamento de antes do #444) deixa
+# `test_mescla_preserva_produto_que_sumiu_da_foto_nova` e
+# `test_mescla_recalcula_stale_products_na_ordem_dos_produtos` vermelhos.
+#
+# CONTROLE NEGATIVO da lista de permissão da foto ANTERIOR (Tester, rodada
+# seguinte): tirar o `if ... not in _MESCLA_PERMITE_ANTERIOR: return novo`
+# deixa `test_mescla_nao_ocorre_com_foto_anterior_doente` vermelho nos 5 casos.
+
+from core.services.pluggy_health import mesclar_health_em_coleta
+
+_CREDIT_ATRASADO = {"updated": False, "last_updated_at": "2026-08-12T03:10:00Z", "warnings": []}
+_ACCOUNTS_OK = {"updated": True, "last_updated_at": "2026-08-20T11:00:00Z", "warnings": []}
+
+
+def _foto(item_status: str, products: dict, **extra) -> dict:
+    stale = [k for k, v in products.items() if not v.get("updated")]
+    return {"observed_at": "2026-08-20T12:00:00-03:00", "item_status": item_status,
+            "execution_status": None, "products": products, "stale_products": stale, **extra}
+
+
+@pytest.mark.parametrize("item_status", ["UPDATED", "ERROR", "LOGIN_ERROR", None])
+def test_mescla_nao_mexe_em_foto_final(item_status):
+    """Foto nova FINAL (fora de `_UPDATING`) é sempre a verdade — devolvida sem
+    mudança, mesmo com uma anterior rica em produtos."""
+    anterior = _foto("UPDATING", {"CREDIT": _CREDIT_ATRASADO})
+    novo = _foto(item_status, {"BANK": _ACCOUNTS_OK})
+    assert mesclar_health_em_coleta(anterior, novo) == novo
+
+
+def test_mescla_preserva_produto_que_sumiu_da_foto_nova():
+    """CONTROLE POSITIVO do grupo: a foto nova (UPDATING) só traz `accounts`; o
+    `CREDIT` atrasado da foto anterior continua na mesclada."""
+    anterior = _foto("UPDATING", {"CREDIT": _CREDIT_ATRASADO, "BANK": _ACCOUNTS_OK})
+    novo = _foto("UPDATING", {"BANK": _ACCOUNTS_OK})
+
+    mesclado = mesclar_health_em_coleta(anterior, novo)
+
+    assert mesclado["products"]["CREDIT"] == _CREDIT_ATRASADO
+    assert mesclado["products"]["BANK"] == _ACCOUNTS_OK
+    assert mesclado["item_status"] == "UPDATING", "o resto vem da foto NOVA"
+
+
+@pytest.mark.parametrize("item_status", ["LOGIN_ERROR", "ERROR", "WAITING_USER_ACTION",
+                                         "MISSING", "algo_que_este_modulo_nao_conhece"])
+def test_mescla_nao_ocorre_com_foto_anterior_doente(item_status):
+    """A foto ANTERIOR também está numa lista de PERMISSÃO — não só a nova.
+
+    Sem isto, um produto atrasado de uma foto anterior DOENTE (item exigindo o
+    usuário, em erro, ou sumido) vazava para a coleta nova e pintava o card de
+    verde em cima de um item que nunca chegou a sincronizar de verdade."""
+    anterior = _foto(item_status, {"CREDIT": _CREDIT_ATRASADO})
+    novo = _foto("UPDATING", {"BANK": _ACCOUNTS_OK})
+    assert mesclar_health_em_coleta(anterior, novo) == novo, item_status
+
+
+def test_mescla_ocorre_com_foto_anterior_updated():
+    """CONTROLE POSITIVO: `UPDATED` está na lista de permissão — uma foto
+    anterior saudável ainda doa produto atrasado para a coleta nova."""
+    anterior = _foto("UPDATED", {"CREDIT": _CREDIT_ATRASADO, "BANK": _ACCOUNTS_OK})
+    novo = _foto("UPDATING", {"BANK": _ACCOUNTS_OK})
+
+    mesclado = mesclar_health_em_coleta(anterior, novo)
+
+    assert mesclado["products"]["CREDIT"] == _CREDIT_ATRASADO
+
+
+def test_mescla_foto_nova_sem_products_nenhum_ainda_mescla():
+    """A foto nova pode não trazer `products` NENHUM (o caso que
+    `coletando_sem_info` cobria sozinho) — mescla do mesmo jeito, com a
+    anterior inteira."""
+    anterior = _foto("UPDATING", {"CREDIT": _CREDIT_ATRASADO})
+    novo = {"observed_at": "2026-08-20T13:00:00-03:00", "item_status": "UPDATING",
+            "execution_status": None, "products": {}, "stale_products": []}
+
+    mesclado = mesclar_health_em_coleta(anterior, novo)
+
+    assert mesclado["products"] == {"CREDIT": _CREDIT_ATRASADO}
+    assert mesclado["stale_products"] == ["CREDIT"]
+
+
+@pytest.mark.parametrize("anterior", [None, {}, {"products": None}, {"status": "x"}])
+def test_mescla_sem_foto_anterior_utilizavel_nao_mexe(anterior):
+    """Sem anterior (None), anterior não-dict, ou anterior sem `products` dict:
+    nada para mesclar — devolve a foto nova como veio."""
+    novo = _foto("UPDATING", {"BANK": _ACCOUNTS_OK})
+    assert mesclar_health_em_coleta(anterior, novo) == novo
+
+
+def test_mescla_recalcula_stale_products_na_ordem_dos_produtos():
+    """`stale_products` sai recalculado do resultado da mescla, na ordem de
+    `_PRODUCT_KEYS` (BANK, CREDIT, INVESTMENTS, TRANSACTIONS) — não na ordem em
+    que os produtos foram inseridos nos dicionários de entrada."""
+    anterior = _foto("UPDATING", {
+        "TRANSACTIONS": {"updated": False, "last_updated_at": None, "warnings": []},
+        "CREDIT": _CREDIT_ATRASADO,
+    })
+    novo = _foto("UPDATING", {"BANK": {"updated": False, "last_updated_at": None, "warnings": []}})
+
+    mesclado = mesclar_health_em_coleta(anterior, novo)
+
+    assert mesclado["stale_products"] == ["BANK", "CREDIT", "TRANSACTIONS"], mesclado
+
+
+def test_mescla_nao_muta_os_argumentos():
+    anterior = _foto("UPDATING", {"CREDIT": _CREDIT_ATRASADO})
+    novo = _foto("UPDATING", {"BANK": _ACCOUNTS_OK})
+    anterior_antes = {k: (dict(v) if isinstance(v, dict) else v) for k, v in anterior.items()}
+    novo_antes = {k: (dict(v) if isinstance(v, dict) else v) for k, v in novo.items()}
+
+    mesclar_health_em_coleta(anterior, novo)
+
+    assert anterior == anterior_antes, "mesclar não pode mutar a foto anterior"
+    assert novo == novo_antes, "mesclar não pode mutar a foto nova"

@@ -49,7 +49,8 @@ def list_sources(user_id: int) -> list[dict]:
         "kind": CARTEIRA,
         "of_account_id": None,
         "label": "Carteira",
-        "balance": _dec(cb.get("manual")),
+        # Mesma conta da guarda (`wallet_guard_delta`): receita pendente não autoriza.
+        "balance": _dec(cb.get("manual")) + _dec(cb["reconciliation"]["receita_back"]),
         "espelho": _dec(cb.get("manual")),
         "comprometido": Decimal("0"),
     }]
@@ -156,25 +157,70 @@ def nota_sync(saida: bool = True) -> str:
     )
 
 
-def msg_insuficiente(user_id: int, amount, acao: str = "aporte", sources: list | None = None) -> str:
+def carteira_txt(exibida, disponivel) -> str:
+    """A Carteira como a tela mostra, para mensagem de RECUSA. Quando a guarda
+    autoriza menos que o exibido (receita pendente de reconciliação), mostra o
+    disponível e o motivo À PARTE — senão a mesma conversa diz R$ 100 no /saldo e
+    R$ 0 na recusa. A entrada a conferir não é "parte" do exibido: com gasto
+    depois dela, ela é maior que ele (tela R$ 30, entrada R$ 100)."""
+    from utils_text import fmt_brl
+
+    txt = fmt_brl(float(_dec(exibida)))
+    a_conferir = _dec(exibida) - _dec(disponivel)
+    if a_conferir > 0:
+        txt += (f" (disponível para pagar: {fmt_brl(float(_dec(disponivel)))}, porque"
+                f" {fmt_brl(float(a_conferir))} de entrada ainda está a conferir com o banco)")
+    return txt
+
+
+def aviso_conferir(exibido, rec: dict | None) -> str:
+    """Aviso de pendência de reconciliação (Open Finance × lançamento manual) —
+    fonte única do texto que aparece em /saldo, na resposta de lançamento, na
+    IA e nos relatórios. `reconciliations.js` espelha isto em JS (CLAUDE.md
+    §0.7 — a fixture `tests/fixtures/aviso_conferir.json` é lida pelos dois).
+
+    "pode ser" é o exibido + `delta_se_confirmar`, que já vem com o sinal
+    certo (db/open_finance.py): confirmar uma despesa pendente sobe o exibido
+    (o dinheiro que "saiu" no banco ainda não saiu da Carteira), confirmar
+    uma receita desce.
+    """
+    n = int((rec or {}).get("pending_count") or 0)
+    if n <= 0:
+        return ""
+    from utils_text import fmt_brl
+
+    txt = f"⚠ {n} lançamento(s) a conferir"
+    delta = _dec(rec.get("delta_se_confirmar"))
+    if delta != 0:
+        txt += f" · pode ser {fmt_brl(float(_dec(exibido) + delta))}"
+    return txt
+
+
+def msg_insuficiente(user_id: int, amount, acao: str = "aporte", sources: list | None = None,
+                      plain: bool = False) -> str:
     """"Saldo insuficiente na conta" era vago, e foi o que enganou: o usuário via
     R$ 1.387,76 na tela e o bot dizia que não tinha saldo. Agora a resposta nomeia
-    cada saldo e mostra o número."""
+    cada saldo e mostra o número.
+
+    `plain=True` tira os `**` (negrito Markdown) — o dashboard mostra o texto
+    cru, sem renderizar Markdown; o WhatsApp e a IA continuam com negrito."""
     from utils_text import fmt_brl
 
     v = _dec(amount)
     fontes = sources if sources is not None else list_sources(user_id)
     bancos = [f for f in fontes if f["kind"] == BANK]
     carteira = next((f for f in fontes if f["kind"] == CARTEIRA), None)
-    saldo_carteira = carteira["balance"] if carteira else Decimal("0")
+    saldo_carteira = (carteira_txt(carteira["espelho"], carteira["balance"])
+                      if carteira else fmt_brl(0.0))
 
     if not bancos:
-        return (
-            f"Saldo insuficiente: você tem {fmt_brl(float(saldo_carteira))} na conta "
+        msg = (
+            f"Saldo insuficiente: você tem {saldo_carteira} na conta "
             f"e o {acao} é de {fmt_brl(float(v))}."
         )
+        return msg.replace("**", "") if plain else msg
 
-    linhas = [f"• **Carteira**: {fmt_brl(float(saldo_carteira))}"]
+    linhas = [f"• **Carteira**: {saldo_carteira}"]
     tem_comprometido = False
     for b in bancos:
         comprometido = b.get("comprometido") or Decimal("0")
@@ -198,8 +244,9 @@ def msg_insuficiente(user_id: int, amount, acao: str = "aporte", sources: list |
             "\n\nO valor declarado sai do disponível até ser confirmado no extrato, para você "
             "não comprometer o mesmo dinheiro duas vezes."
         )
-    return (
+    msg = (
         f"Nenhum dos seus saldos cobre {fmt_brl(float(v))} de {acao}:\n\n"
         + "\n".join(linhas)
         + rodape
     )
+    return msg.replace("**", "") if plain else msg
