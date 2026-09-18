@@ -30,6 +30,13 @@ from .connection import (
     get_conn, cat_norm_sql, cat_key_sql, CAT_META_SQL,
     TIPO_CANON_SQL, TIPO_DESPESA_SQL, TIPO_RECEITA_SQL,
 )
+# Fonte única do que conta como "fundido" (db/reconciliation.py) — o mesmo
+# filtro que o undo usa pra decidir se ainda há o que desfazer.
+from .reconciliation import FUSED_STATUSES
+
+# Fragmento literal (constante fixa do módulo, não entrada do usuário) —
+# mesmo estilo de TIPO_DESPESA_SQL/TIPO_RECEITA_SQL acima.
+_FUSED_STATUSES_SQL = "(" + ",".join(f"'{s}'" for s in FUSED_STATUSES) + ")"
 
 # Casamento de categoria pela `cat_key_sql` (fonte única, db/connection.py). Isto
 # aqui já colapsava o vazio por conta própria, mas sob o rótulo `''` — então a
@@ -800,10 +807,37 @@ def list_history(
                    WHERE o.imported_launch_id = launches.id LIMIT 1) AS bank_name,
                  (SELECT o.reconciliation_status
                     FROM open_finance_transactions o
-                   WHERE o.imported_launch_id = launches.id LIMIT 1) AS reconciliation_status
+                   WHERE o.imported_launch_id = launches.id LIMIT 1) AS reconciliation_status,
+                 -- id da transação OF do outro lado da fusão, só quando ainda
+                 -- fundida (mesma condição do undo, db/reconciliation.py:119-120)
+                 -- — usada pelo front pra oferecer "Desfazer" no detalhe.
+                 fused.of_tx_id AS reconciliation_of_tx_id
           FROM launches
+          -- Antes: subquery correlacionada por linha de launches, com
+          -- Seq Scan de open_finance_transactions em cada uma (O(launches ×
+          -- tx_OF) — medido 8701 loops × 400 linhas). `user_id` é constante
+          -- pro list_history inteiro (um único parâmetro), então `c.user_id =
+          -- launches.user_id` pode sair da correlação sem mudar o resultado:
+          -- filtra as transações fundidas DESTE usuário uma vez só e faz um
+          -- LEFT JOIN por `imported_launch_id` (O(tx_OF) + hash join).
+          -- Mesma condição de match do undo (db/reconciliation.py:119-120):
+          -- `match_launch_id IS NULL OR match_launch_id = imported_launch_id`
+          -- substitui `= launches.id` porque só sobra linha aqui quando os
+          -- dois já são iguais, pelo ON do join.
+          LEFT JOIN (
+            SELECT DISTINCT ON (o.imported_launch_id)
+                   o.imported_launch_id, o.id AS of_tx_id
+              FROM open_finance_transactions o
+              JOIN open_finance_accounts a ON a.id = o.account_id
+              JOIN open_finance_connections c ON c.id = a.connection_id
+             WHERE c.user_id = %s
+               AND o.reconciliation_status IN {_FUSED_STATUSES_SQL}
+               AND (o.match_launch_id IS NULL OR o.match_launch_id = o.imported_launch_id)
+             ORDER BY o.imported_launch_id, o.id
+          ) fused ON fused.imported_launch_id = launches.id
           WHERE {" AND ".join(clauses)}
         """
+        launches_params = [user_id] + launches_params
 
     # ── Sub-query de credit_transactions ─────────────────────────────────────
     credit_sql = ""
@@ -846,7 +880,8 @@ def list_history(
                     FROM open_finance_accounts a
                     JOIN open_finance_connections conn ON conn.id = a.connection_id
                    WHERE a.id = c.open_finance_account_id LIMIT 1) AS bank_name,
-                 NULL AS reconciliation_status
+                 NULL AS reconciliation_status,
+                 NULL::bigint AS reconciliation_of_tx_id
           FROM credit_transactions ct
           JOIN credit_cards c ON c.id = ct.card_id
           JOIN credit_bills b ON b.id = ct.bill_id
@@ -879,7 +914,7 @@ def list_history(
                 f"""
                 SELECT id, tipo, valor, alvo, nota, categoria, criado_em,
                        installments_total, installment_no,
-                       origin, bank_name, reconciliation_status
+                       origin, bank_name, reconciliation_status, reconciliation_of_tx_id
                 FROM ({union_sql}) merged
                 ORDER BY criado_em DESC, id ASC
                 LIMIT %s OFFSET %s
@@ -905,6 +940,8 @@ def list_history(
             "origin": r["origin"],                                # manual | open_finance | ofx
             "bank_name": r["bank_name"],                          # banco, se veio/casou com OF
             "reconciliation_status": r["reconciliation_status"],  # imported | pending | auto_merged | confirmed | None
+            # id da transação OF do outro lado, só enquanto fundida (None fora disso).
+            "reconciliation_of_tx_id": r["reconciliation_of_tx_id"],
         }
         for r in rows
     ]

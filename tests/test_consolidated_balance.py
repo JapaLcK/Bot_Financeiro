@@ -227,7 +227,12 @@ def test_gate_off_ai_chat_tool_formato_antigo(user_id, monkeypatch):
     _connect_fake_bank(user_id, "900.00")
 
     res = _get_balance(user_id, {})
-    assert res == {"balance": 100.0}
+    # O gate cobre só a VISIBILIDADE do saldo de banco conectado — o aviso de
+    # reconciliação (que não tem nada a ver com o gate) entra nos dois ramos
+    # (plano aprovado, PR 2 etapa 2c). Sem pendência aqui, vem vazio/zerado.
+    assert res == {"balance": 100.0,
+                   "reconciliation": {"pending_count": 0, "delta_se_confirmar": 0.0},
+                   "aviso_conferir": ""}
 
 
 def test_gate_lancado_default_geral(user_id, monkeypatch):

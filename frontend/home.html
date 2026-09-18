@@ -457,6 +457,7 @@ footer a:hover { color:var(--text); }
 <script defer src="/sidenav-scrollbar.js?v=1"></script>
 <script src="/static/auth-refresh.js?v=1"></script>
 <script src="/modals.js"></script>
+<script defer src="/reconciliations.js"></script>
 <script defer src="/launch-type-labels.js?v=1"></script>
 <script src="/purchase-intent.js?v=1"></script>
   <link rel="stylesheet" href="/app-mode.css?v=34" />
@@ -1024,9 +1025,18 @@ function renderStats(snapshot, history) {
   document.getElementById("stat-balance").textContent = fmtBRL(saldoAtual);
   const balSub = document.getElementById("stat-balance-sub");
   if (balSub) {
-    balSub.textContent = (Number(snapshot.of_bank_count || 0) > 0)
-      ? `Carteira ${fmtBRL(carteira)} · Bancos ${fmtBRL(ofBank)}`
-      : "Conta corrente";
+    // Reconciliação OF x lançamento manual pendente: aviso é a mesma fonte do
+    // /saldo e do relatório (CLAUDE.md §0.7 — Reconciliations.aviso espelha
+    // core/services/funding.py::aviso_conferir). Na home é só texto com link
+    // pro dashboard, que tem a tela de conferência (decisão do dono).
+    const recPending = Number(snapshot.reconciliation?.pending_count || 0);
+    if (recPending > 0 && window.Reconciliations) {
+      balSub.innerHTML = `${escapeHtml(Reconciliations.aviso(saldoAtual, snapshot.reconciliation))} · <a href="/app" style="color:#FF2D8E;text-decoration:underline">conferir</a>`;
+    } else {
+      balSub.textContent = (Number(snapshot.of_bank_count || 0) > 0)
+        ? `Carteira ${fmtBRL(carteira)} · Bancos ${fmtBRL(ofBank)}`
+        : "Conta corrente";
+    }
   }
 
   // Gastos do mês + delta vs mês anterior

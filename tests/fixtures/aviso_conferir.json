@@ -1,0 +1,44 @@
+[
+  {
+    "nome": "despesa_fica_maior",
+    "exibido": 400,
+    "pending_count": 1,
+    "delta_se_confirmar": 50,
+    "esperado_pode_ser": "R$ 450,00"
+  },
+  {
+    "nome": "receita_fica_menor",
+    "exibido": 500,
+    "pending_count": 1,
+    "delta_se_confirmar": -100,
+    "esperado_pode_ser": "R$ 400,00"
+  },
+  {
+    "nome": "delta_zero_sem_pode_ser",
+    "exibido": 300,
+    "pending_count": 2,
+    "delta_se_confirmar": 0,
+    "esperado_pode_ser": null
+  },
+  {
+    "nome": "sem_pendencia",
+    "exibido": 300,
+    "pending_count": 0,
+    "delta_se_confirmar": 0,
+    "esperado_pode_ser": null
+  },
+  {
+    "nome": "negativo",
+    "exibido": -50,
+    "pending_count": 1,
+    "delta_se_confirmar": -20,
+    "esperado_pode_ser": "R$ -70,00"
+  },
+  {
+    "nome": "milhar",
+    "exibido": 1000,
+    "pending_count": 3,
+    "delta_se_confirmar": 234.5,
+    "esperado_pode_ser": "R$ 1.234,50"
+  }
+]
