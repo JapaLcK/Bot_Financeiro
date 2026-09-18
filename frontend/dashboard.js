@@ -11176,7 +11176,7 @@ async function activateAgent(kind) {
       return;
     }
     if (!res.ok) throw new Error((data.detail && data.detail.error) || data.detail || "Não deu pra ativar o agente.");
-    loadAgentesView(true);
+    await loadAgentesView(true, { background: true });
   } catch (err) {
     alert(String(err.message || err));
   }
@@ -11188,7 +11188,7 @@ async function pauseAgent(kind) {
       method: "POST", credentials: "same-origin", headers: csrfHeaders(),
     });
     if (!res.ok) throw new Error("Não deu pra pausar o agente.");
-    loadAgentesView(true);
+    await loadAgentesView(true, { background: true });
   } catch (err) {
     alert(String(err.message || err));
   }
@@ -11202,7 +11202,7 @@ async function toggleAgentEmail(kind, enabled) {
       body: JSON.stringify({ enabled }),
     });
     if (!res.ok) throw new Error("Não deu pra mudar o e-mail do agente.");
-    loadAgentesView(true);
+    await loadAgentesView(true, { background: true });
   } catch (err) {
     alert(String(err.message || err));
   }
