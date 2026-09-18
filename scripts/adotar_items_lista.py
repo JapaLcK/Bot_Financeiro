@@ -157,12 +157,14 @@ def alvos(item: str | None, sem_conexao: dict[str, set[str]]) -> list[str]:
 
     ponytail: o teto é a adoção que falhou DEPOIS do `register_item` (a ordem é de
     propósito, ver `_adota_item_orfao`) — ela deixa rastro com dono e sem conexão,
-    indistinguível de banco removido, e o modo LISTA deixa de oferecê-la. Deixar
-    de VER é outra coisa: o dry-run a reporta em bloco próprio, junto com o banco
-    removido e dizendo que não separa os dois (`main`). Trocar "não ressuscita o
+    que ESTE predicado não separa de banco removido, e o modo LISTA deixa de
+    oferecê-la. Deixar de VER é outra coisa: o dry-run a reporta em bloco próprio,
+    junto com o banco removido e dizendo que não separa os dois (`main`). Trocar "não ressuscita o
     que o usuário removeu" por "não perde o item de uma adoção que falhou" seria o
-    negócio errado. Separar os dois exige o disconnect deixar o próprio rastro no
-    registry (`origin='disconnect'`) — mudança de escrita em outro fluxo, outro PR.
+    negócio errado. O rastro que separa os dois JÁ EXISTE: disconnect e reset
+    gravam `origin='removed'` na mesma transação do delete, e o modo LISTA a trata
+    como origem com dono (item removido daqui pra frente nunca entra na lista).
+    Separar os dois grupos no dry-run é a PR-E — aqui nada muda de comportamento.
     A saída para esse item é operacional e explícita: `--item ID --apply --delete`
     (ver `parse_args`), e o dry-run só a prescreve para id que a régua aceita.
     """

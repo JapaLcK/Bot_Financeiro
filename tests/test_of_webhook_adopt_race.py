@@ -109,8 +109,11 @@ def test_entrega_atrasada_nao_ressuscita_o_banco_desconectado(
         assert len(skips) == 1 and "abortada sob o lock" in skips[0]["error"], skips
         # A entrega atrasada apagou a reivindicação DELA e só ela: o rastro da
         # adoção que valeu continua lá, e é ele que recusa a próxima duplicata
-        # (senão o conserto do P0 reabriria justamente este bug).
-        assert [r["origin"] for r in _registry("z-tarde")] == ["webhook_adopt"], \
+        # (senão o conserto do P0 reabriria justamente este bug). `removed` é a
+        # marca que o disconnect DESTE teste grava na transação do delete (Onda
+        # 4 / PR-D) — parte do desfecho, e é ela que recusa o item que não tem
+        # rastro nenhum.
+        assert [r["origin"] for r in _registry("z-tarde")] == ["webhook_adopt", "removed"], \
             _registry("z-tarde")
     finally:
         db.disconnect_open_finance_connection(user_id)
