@@ -45,19 +45,14 @@ def forecast_horizons(user_id: int, horizons: tuple[int, ...] = HORIZONS) -> dic
     return _horizons(today, sb, events, horizons)
 
 
-def forecast_with_trajectory(user_id: int, days: int = 90, threshold: float = 0.0) -> dict[str, Any]:
-    """Trajetória diária de saldo projetado (default 90 dias) e o "pior dia" no
-    caminho, com os compromissos que levaram até ele, mais os horizontes de
-    `forecast_horizons` — tudo da mesma leitura. Mesmos eventos de `project`
-    (`_cashflow_events`), distribuídos dia a dia em vez de somados no horizonte —
-    pensada pra achar aperto de saldo que os marcos não mostram. Feature Pro+."""
-    today = date.today()
+def _trajectory(today: date, sb: dict[str, Any], events: list[tuple[date, str, str, float]],
+                days: int, threshold: float) -> dict[str, Any]:
+    """Parte pura de `forecast_with_trajectory`: trajetória dia a dia, pior dia,
+    vencidos e vencem hoje sobre saldo e eventos já lidos. Aceita tipo de evento
+    que `_projection` não conhece (o simulador de decisão acrescenta os dele)."""
     days = max(0, int(days))
     horizon_end = today + timedelta(days=days)
     threshold = round(float(threshold), 2)
-
-    sb = cashflow._starting_balance(user_id)
-    events = cashflow._cashflow_events(user_id, today, today + timedelta(days=max(days, *HORIZONS)))
     # Parcelas do saldo até o dia corrente; o saldo do dia é a soma exata delas,
     # a mesma conta de `project`.
     parcelas = [sb["saldo"]]
@@ -128,13 +123,27 @@ def forecast_with_trajectory(user_id: int, days: int = 90, threshold: float = 0.
         worst_day = {**worst, "causas": causas, "desde": desde}
 
     return {
-        **_horizons(today, sb, events, HORIZONS),
         "period": {"start": (today + timedelta(days=1)).isoformat(), "end": horizon_end.isoformat()} if days > 0 else None,
         "threshold": threshold,
         "trajectory": trajectory,
         "worst_day": worst_day,
         "vencidos": vencidos,
         "vencem_hoje": vencem_hoje,
+    }
+
+
+def forecast_with_trajectory(user_id: int, days: int = 90, threshold: float = 0.0) -> dict[str, Any]:
+    """Trajetória diária de saldo projetado (default 90 dias) e o "pior dia" no
+    caminho, com os compromissos que levaram até ele, mais os horizontes de
+    `forecast_horizons` — tudo da mesma leitura. Mesmos eventos de `project`
+    (`_cashflow_events`), distribuídos dia a dia em vez de somados no horizonte —
+    pensada pra achar aperto de saldo que os marcos não mostram. Feature Pro+."""
+    today = date.today()
+    sb = cashflow._starting_balance(user_id)
+    events = cashflow._cashflow_events(user_id, today, today + timedelta(days=max(int(days), *HORIZONS)))
+    return {
+        **_horizons(today, sb, events, HORIZONS),
+        **_trajectory(today, sb, events, days, threshold),
         "premises": (
             "Estimativa dia a dia: saldo + receitas fixas − gastos fixos automáticos "
             "(mensais e anuais) − boletos pendentes − faturas de cartão em aberto, na data "

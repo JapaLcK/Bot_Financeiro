@@ -512,6 +512,11 @@
               <li><span class="tick"><i class="ph ph-check" aria-hidden="true"></i></span> <span><strong>5&nbsp;bancos conectados</strong></span></li>
               <li><span class="tick"><i class="ph ph-check" aria-hidden="true"></i></span> <span><strong>Todos os 7 agentes</strong>: energia pra rodar a equipe inteira</span></li>
               <li><span class="tick"><i class="ph ph-check" aria-hidden="true"></i></span> Previsão de saldo 30/60/90 dias</li>
+              <!-- Este texto é MEDIDO: o PO2 (tests/frontend/precos_ilha_react.test.mjs) exige
+                   40px de degrau entre Plus e Pro, e um item que quebre em DUAS linhas derruba o
+                   pódio. Em 1024px cabem ~220px numa linha; "Simulador de compras" mede 153px
+                   (folga de 30%, ~8 caracteres). Encompridar a copy aqui quebra o teste: meça antes. -->
+              <li><span class="tick"><i class="ph ph-check" aria-hidden="true"></i></span> Simulador de compras</li>
               <li><span class="tick"><i class="ph ph-check" aria-hidden="true"></i></span> Histórico de 24 meses</li>
               <li><span class="tick"><i class="ph ph-check" aria-hidden="true"></i></span> Relatórios semanais</li>
               <li><span class="tick"><i class="ph ph-check" aria-hidden="true"></i></span> Piggy IA · 1.000 mensagens/mês</li>
