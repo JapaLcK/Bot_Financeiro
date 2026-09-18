@@ -86,9 +86,13 @@ async function abrirPrecos({
   const page = await browser.newPage({ viewport });
   if (initScript) await page.addInitScript(initScript);
   // Relógio falso: o teto do CLIENTE é de 15 minutos, e a única forma de medir
-  // que ele existe sem esperar 15 minutos é adiantar o relógio da página. Com
-  // ele instalado o setTimeout do poll só anda por `fastForward` — nenhuma
-  // requisição sai em tempo real.
+  // que ele existe sem esperar 15 minutos é adiantar o relógio da página.
+  // `clock.install()` sozinho NÃO congela o relógio — ele segue andando junto
+  // com o real, e o `fastForward` só adianta por CIMA disso. Os casos que usam
+  // `relogio` medem estados longe de qualquer fronteira que esse avanço extra
+  // derrubaria (o teto de 15 min do cliente, o teto — bem mais longo — do
+  // servidor no PT2d, o teto de 10 s por pergunta no PT19). Um caso novo que
+  // precise do relógio PARADO usa `page.clock.pauseAt()`.
   if (relogio) await page.clock.install();
   const chamadas = { checkout: 0, pixCheckout: 0, poll: 0, changePlan: 0 };
   const corposPix = [];
@@ -150,7 +154,8 @@ async function abrirPrecos({
   // Atraso artificial por pedaço de URL, e por ÚLTIMO de propósito: o Playwright
   // usa a rota registrada mais tarde, e o `fallback()` devolve o pedido para a
   // registrada antes (ou para a rede). É o que permite medir corrida de carga —
-  // script que chega depois das requisições, /billing/subscription lento.
+  // script que chega depois das requisições (PT16). Para prender uma rota até
+  // um sinal explícito (em vez de por tempo fixo), use `subPresa`.
   if (Object.keys(atrasos).length) {
     await page.route("**/*", async (r) => {
       const k = Object.keys(atrasos).find((x) => r.request().url().includes(x));
@@ -166,6 +171,31 @@ async function abrirPrecos({
 }
 
 const contarCtas = (page) => page.$$eval("[data-pix-cta]", (e) => e.length);
+
+// Espera os 3 CTAs nascerem, sem decidir nada sozinha: quem decide é o
+// `assert.equal` de cada caso, com a mensagem que já existe lá. Usada só nos
+// casos em que a assinatura está PRESA (`subPresa`): nenhum CTA pode vir
+// dela, os 3 só nascem do `/billing/plans-config`, e esperar por eles não
+// esconde o que o caso mede — nos demais o assert roda direto, sem espera.
+async function esperarCtas(page) {
+  await page.waitForFunction(() => document.querySelectorAll("[data-pix-cta]").length === 3,
+    null, { timeout: 10_000 }).catch(() => {});
+}
+
+/**
+ * Prende o `/billing/subscription` até `soltar()` ser chamado: é a janela "a
+ * assinatura ainda não chegou" sem depender da velocidade da máquina (sonos
+ * fixos como `waitForTimeout` viram vermelho ou verde conforme a carga da
+ * máquina). O PT14 solta para a assinatura chegar e medir o depois; nos
+ * outros casos o `soltar()` só libera a rota antes de fechar a página —
+ * fechar com ela ainda presa também não trava.
+ */
+function subPresa(sub) {
+  let soltar;
+  const presa = new Promise((ok) => { soltar = ok; });
+  return { soltar, subRoute: async (r) => { await presa;
+    return r.fulfill({ contentType: "application/json", body: JSON.stringify(sub) }); } };
+}
 
 /**
  * Estado 1 do modal: o CPF/CNPJ. É AQUI que o POST sai — o clique no CTA só abre
@@ -790,23 +820,47 @@ for (const [rotulo, encerrar] of [
  * nada mais remove o `<input>` por cima) e o que prova a segunda metade do P1-1:
  * sem confirmação do servidor a tela **não** diz "nada foi cobrado" e **não**
  * oferece "Gerar novo código", que cancelaria uma cobrança talvez paga.
+ *
+ * Os dois momentos são medidos por `waitForFunction` contra o `vence` real, não
+ * por um `waitForTimeout` fixo: sob carga a desistência (3 falhas seguidas) e o
+ * vencimento (aos 15 s) podem atrasar o suficiente para um sono fixo ler o
+ * estado errado — foi assim que a versão com `waitForTimeout(9000)` deu
+ * vermelho falso em execução paralela.
  */
 test("PT10: rede fora — no vencimento o payload sai da tela e a mensagem não mente",
   async () => {
+    let vence = 0;
+    const FOLGA_MS = 10_000;
     const { page } = await abrirQr({
-      pix: { expiresAt: () => new Date(Date.now() + 15000).toISOString() },
+      pix: { expiresAt: () => { vence = Date.now() + 15000; return new Date(vence).toISOString(); } },
       status: () => null,                    // toda consulta ABORTA
     });
     assert.equal(await page.inputValue(".pix-code"), PAYLOAD);
 
-    // 3 falhas em 3 s cada -> desiste. Aqui o código AINDA vale: não some.
-    await page.waitForTimeout(9000);
-    assert.match(await page.textContent(".pix-box"), /não consegui confirmar/i);
-    assert.equal(await page.$$eval(".pix-code", (e) => e.length), 1,
+    // Momento 1: a desistência (3 falhas). A leitura do texto e a contagem dos
+    // campos saem da MESMA execução dentro da página — o vencimento não cabe
+    // entre duas chamadas do Playwright, e duas leituras separadas poderiam
+    // pegar a tela em dois instantes diferentes.
+    const foto = await page.waitForFunction(() => {
+      const st = document.querySelector(".pix-box .pix-status");
+      if (st && !/não consegui confirmar/i.test(st.textContent)) return false;
+      return { texto: document.querySelector(".pix-box")?.textContent || "",
+               campos: document.querySelectorAll(".pix-code").length };
+    }, null, { timeout: Math.max(0, vence - Date.now()) + FOLGA_MS })
+      .then((h) => h.jsonValue(), (e) => assert.fail(
+        `nem desistência nem vencimento até 10 s depois de vencer: o poll morreu: ${e.message}`));
+    assert.match(foto.texto, /não consegui confirmar/i,
+      `a tela pulou a desistência: "${foto.texto}"`);
+    assert.equal(foto.campos, 1,
       "apagou o copia-e-cola de uma cobrança que ainda era pagável");
 
-    // Passado o vencimento, sai — com o modal ainda ABERTO.
-    await page.waitForTimeout(9000);
+    // Momento 2: passado o vencimento, o `.pix-status` (e o resto de `vivo`) sai
+    // do DOM quando `pixExpirou` troca o corpo da caixa — com o modal ainda
+    // ABERTO.
+    await page.waitForFunction(() => !document.querySelector(".pix-box .pix-status"), null,
+      { timeout: Math.max(0, vence - Date.now()) + FOLGA_MS })
+      .catch((e) => assert.fail(
+        `10 s depois do vencimento o poll não tinha encerrado: o copia-e-cola ficou na tela: ${e.message}`));
     const v = await vestigios(page);
     assert.equal(v.campos, 0, "o <input> do copia-e-cola ficou na tela depois de vencer");
     for (const [onde, texto] of [["DOM", v.dom], ["valor dos campos", v.valores],
@@ -1084,24 +1138,37 @@ test("PT13: resposta do poll da cobrança velha não decide sobre o modal novo",
  * /billing/subscription (PT15), o caso que importa é o da assinatura ATRASADA:
  * ele aparece e tem de SAIR.
  *
+ * A rota do `/billing/subscription` fica PRESA (`subPresa`) em vez de atrasada
+ * por tempo fixo: um `waitForTimeout` mede a velocidade da máquina, não o
+ * comportamento — a mesma janela que fica vermelha ou verde conforme a carga.
+ *
  * Positivo (já no arquivo): o PT4 prova que assinante de Pix não-vitalício
  * continua vendo os três CTAs, com "Renovar" no plano dele.
  *
  * *Negativo: tire o `&& !(pixSub && pixSub.lifetime === true)` do
- * `pbPixRefresh` → sobram os 3 CTAs depois da assinatura chegar.*
+ * `pixAVenda()` (pix-checkout.js) → sobram os 3 CTAs depois da assinatura
+ * chegar, porque a guarda do vitalício é essa condição, não o `pbPixRefresh`
+ * em si.*
  */
 test("PT14: vitalício não fica com CTA de Pix nenhum", async () => {
-  const { page } = await abrirPrecos({
-    sub: { active: true, lifetime: true },
-    atrasos: { "/billing/subscription": 1200 },
-  });
+  const { soltar, subRoute } = subPresa({ active: true, lifetime: true });
+  const { page } = await abrirPrecos({ subRoute });
   await page.click("#cycle-annual");
+  await esperarCtas(page);
   assert.equal(await contarCtas(page), 3,
     "âncora do caso: antes da assinatura chegar os CTAs existem");
-  await page.waitForTimeout(1500);
+  soltar();
+  // O SINAL é o texto do botão, não um `await` a mais aqui no teste. O risco
+  // real está em frontend/precos.html, dentro do `loadPlansState`: um `await`
+  // entre `refreshPlanButtons()` e `publicarPix(subState, resolvida)` faria
+  // o texto do botão aparecer antes de os CTAs saírem, e este caso ficaria
+  // vermelho em código certo. E não é corrida: o caso mede o estado quando a
+  // assinatura JÁ está na tela.
+  await page.waitForFunction(() => document.querySelector('[data-plan-btn="plus"]')?.textContent
+    === "Você tem acesso vitalício", null, { timeout: 10_000 })
+    .catch(() => assert.fail("a assinatura vitalícia não chegou à tela: o cenário não foi montado"));
   assert.equal(await contarCtas(page), 0,
     "o vitalício ficou com CTA de compra de Pix depois da assinatura chegar");
-  assert.equal(await page.textContent('[data-plan-btn="plus"]'), "Você tem acesso vitalício");
   await page.close();
 });
 
@@ -1112,17 +1179,23 @@ test("PT14: vitalício não fica com CTA de Pix nenhum", async () => {
  * pode demorar ou travar. Enquanto ele não voltava, NENHUM CTA de Pix existia —
  * escondendo a migração cartão → Pix exatamente quando o Stripe está ruim.
  *
+ * A rota fica PRESA (`subPresa`), não atrasada por tempo fixo: o que este caso
+ * mede é que os CTAs já existem ANTES de o servidor responder, e um sono fixo
+ * é medição indireta disso (pode passar mesmo se o conserto sumir, contanto
+ * que a máquina responda dentro do prazo).
+ *
  * *Negativo: volte o `publicarPix(null)` da precos.html para depois do
  * `await loadSubscription()` → zero CTA aqui.*
  */
 test("PT15: com /billing/subscription lento, os CTAs de Pix já estão na tela", async () => {
-  const { page } = await abrirPrecos({
-    sub: { active: true, gateway: "stripe", plan: "plus", interval: "monthly" },
-    atrasos: { "/billing/subscription": 2500 },
-  });
+  const { soltar, subRoute } = subPresa(
+    { active: true, gateway: "stripe", plan: "plus", interval: "monthly" });
+  const { page } = await abrirPrecos({ subRoute });
   await page.click("#cycle-annual");
+  await esperarCtas(page);
   assert.equal(await contarCtas(page), 3,
     "os CTAs de Pix esperaram o /billing/subscription para nascer");
+  soltar();
   await page.close();
 });
 
@@ -1590,20 +1663,23 @@ test("PT19c: a etiqueta é anunciável, e o vínculo com o Anual entra e sai com
  * volta por `(subState, true)` — PT19g fica VERMELHO e PT19d/e/f seguem verdes.
  */
 test("PT19d: com /billing/subscription pendurado, o vitalício não vê a etiqueta", async () => {
-  const { page } = await abrirPrecos({
-    sub: { active: true, lifetime: true },
-    atrasos: { "/billing/subscription": 4000 },
-  });
+  const { soltar, subRoute } = subPresa({ active: true, lifetime: true });
+  const { page } = await abrirPrecos({ subRoute });
   assert.equal(await etiquetaVisivel(page), false,
     "a etiqueta anunciou Pix antes de saber se este usuário pode comprar");
+  // Com a rota PRESA (nunca vai responder sozinha) este sono não mede uma
+  // corrida contra o servidor — é a janela de "nada acontece enquanto a
+  // consulta não volta", e sobrevive a qualquer carga da máquina.
   await page.waitForTimeout(1500);
   assert.equal(await etiquetaVisivel(page), false,
     "a etiqueta subiu durante a janela do /billing/subscription (1,5 s depois)");
   // Âncora do PT15: o que espera é a ETIQUETA, não o CTA. Se este 3 virar 0, o
   // conserto atropelou a migração cartão → Pix com o Stripe ruim.
   await page.click("#cycle-annual");
+  await esperarCtas(page);
   assert.equal(await contarCtas(page), 3,
     "o CTA de Pix passou a esperar o /billing/subscription");
+  soltar();
   await page.close();
 });
 
