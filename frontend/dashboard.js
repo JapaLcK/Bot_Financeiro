@@ -6694,14 +6694,43 @@ document.addEventListener("click", async (e) => {
   }
 });
 
+const sidenavRailMedia = window.matchMedia("(min-width: 901px) and (hover: hover) and (pointer: fine)");
+
+function usesSidenavRail() {
+  return sidenavRailMedia.matches && !document.documentElement.classList.contains("pb-app");
+}
+
+function syncSidenavMode() {
+  const nav = document.getElementById("sidenav");
+  const bd = document.getElementById("sidenav-backdrop");
+  if (!nav) return;
+  if (usesSidenavRail()) {
+    nav.classList.remove("open");
+    if (bd) bd.classList.remove("open");
+    nav.removeAttribute("inert");
+    document.querySelector(".sidenav-toggle")?.setAttribute("aria-expanded", "false");
+  } else {
+    nav.toggleAttribute("inert", !nav.classList.contains("open"));
+  }
+}
+
 function toggleSidenav(force) {
+  if (usesSidenavRail()) return;
   const nav = document.getElementById("sidenav");
   const bd  = document.getElementById("sidenav-backdrop");
   if (!nav) return;
   const open = (typeof force === "boolean") ? force : !nav.classList.contains("open");
   nav.classList.toggle("open", open);
+  nav.toggleAttribute("inert", !open);
   if (bd) bd.classList.toggle("open", open);
+  const toggle = document.querySelector(".sidenav-toggle");
+  if (toggle) toggle.setAttribute("aria-expanded", String(open));
+  if (open) nav.querySelector(".sidenav-item")?.focus();
+  else if (nav.contains(document.activeElement)) toggle?.focus();
 }
+
+sidenavRailMedia.addEventListener("change", syncSidenavMode);
+syncSidenavMode();
 
 // Fechar sidebar com ESC
 document.addEventListener("keydown", (e) => {
@@ -11572,35 +11601,25 @@ function _renderAgentes(data) {
   shelf.innerHTML = (data.catalog || []).map(card => {
     const active = card.status === "active";
     const cost = Number(card.energy_cost || 0);
-    const chips = [
-      `<span class="ag-chip">${esc(card.freq)}</span>`,
-      (energyOn && card.disponivel && cost > 0) ? `<span class="ag-chip ag-chip-energy"><i class="ph ph-lightning" aria-hidden="true"></i> ${cost}</span>` : "",
-    ].filter(Boolean).join("");
+    const chips = (energyOn && card.disponivel && cost > 0)
+      ? `<span class="ag-chip ag-chip-energy"><i class="ph ph-lightning" aria-hidden="true"></i> ${cost}</span>`
+      : "";
     // can_activate vem do backend (Grátis/Essencial: orçamento 0 → sem agentes).
     // Gate visível: o botão vira cadeado que abre o upgrade direto.
     const canActivate = data.can_activate !== false;
     // Energia: com plano, todos os agentes ficam liberados, mas só ativa quem
     // ainda cabe no orçamento. Com v2 off (energyOn false), nunca trava por aqui.
     const affordable = !energyOn || (used + cost <= budget);
+    const toggleContent = `<span aria-hidden="true">${active ? "Ativo" : "Pausado"}</span><span class="ag-toggle-track" aria-hidden="true"><span class="ag-toggle-thumb"></span></span>`;
     const btn = !card.disponivel
       ? `<button class="ag-btn ag-btn-soon" disabled>Em breve</button>`
       : active
-        ? `<button class="ag-btn ag-btn-active" onclick="pauseAgent('${card.kind}')"><i class="ph ph-check" aria-hidden="true"></i> Ativo · Pausar</button>`
+        ? `<button type="button" class="ag-toggle" role="switch" aria-checked="true" aria-label="Agente ${esc(card.nome)}" title="Pausar ${esc(card.nome)}" onclick="pauseAgent('${card.kind}')">${toggleContent}</button>`
         : !canActivate
           ? `<button class="ag-btn ag-btn-on" onclick="showUpgradeModal('agents')"><i class="ph ph-lock" aria-hidden="true"></i> Ativar</button>`
           : affordable
-            ? `<button class="ag-btn ag-btn-on" onclick="activateAgent('${card.kind}')">Ativar${energyOn && cost > 0 ? ` · <i class="ph ph-lightning" aria-hidden="true"></i> ${cost}` : ""}</button>`
+            ? `<button type="button" class="ag-toggle" role="switch" aria-checked="false" aria-label="Agente ${esc(card.nome)}" title="Ativar ${esc(card.nome)}" onclick="activateAgent('${card.kind}')">${toggleContent}</button>`
             : `<button class="ag-btn ag-btn-noenergy" disabled title="Pause um agente ou vá pro Pro"><i class="ph ph-lightning-slash" aria-hidden="true"></i> Sem energia</button>`;
-    // Opt-out por agente: quando ativo, deixa ligar/desligar o e-mail (o feed
-    // continua). Padrão = ligado. Estilo inline pra não exigir bump de cache CSS.
-    const emailOn = ((card.config || {}).email_enabled) !== false;
-    const emailToggle = (active && card.disponivel)
-      ? `<button onclick="toggleAgentEmail('${card.kind}', ${emailOn ? "false" : "true"})"
-           title="Receber os avisos deste agente por e-mail"
-           style="margin-top:8px;width:100%;padding:7px 10px;border-radius:9px;border:1px solid rgba(255,255,255,.12);background:transparent;color:rgba(255,255,255,.6);font-size:.72rem;cursor:pointer">
-           <i class="ph ph-envelope" aria-hidden="true"></i> E-mail: <b style="color:${emailOn ? "var(--green)" : "rgba(255,255,255,.4)"}">${emailOn ? "ligado" : "desligado"}</b>
-         </button>`
-      : "";
     return `
       <div class="ag-card${!card.disponivel ? " ag-card-soon" : ""}">
         <div class="ag-avatar ag-bg-${esc(card.kind)}">
@@ -11608,10 +11627,9 @@ function _renderAgentes(data) {
         </div>
         <h3>${esc(card.nome)}</h3>
         <p class="ag-desc">${esc(card.desc)}</p>
-        <div class="ag-chips">${chips}</div>
+        ${chips ? `<div class="ag-chips">${chips}</div>` : ""}
+        ${card.disponivel ? `<button type="button" class="ag-card-open" data-agent-chat="${esc(card.kind)}" aria-label="Conversar com ${esc(card.nome)}"></button>` : ""}
         ${btn}
-        ${card.disponivel ? `<button type="button" class="ag-btn ag-chat-btn" data-agent-chat="${esc(card.kind)}"><i class="ph ph-chat-circle" aria-hidden="true"></i> Conversar</button>` : ""}
-        ${emailToggle}
       </div>
     `;
   }).join("");
@@ -11695,7 +11713,7 @@ async function activateAgent(kind) {
       return;
     }
     if (!res.ok) throw new Error((data.detail && data.detail.error) || data.detail || "Não deu pra ativar o agente.");
-    loadAgentesView(true);
+    await loadAgentesView(true, { background: true });
   } catch (err) {
     alert(String(err.message || err));
   }
@@ -11707,21 +11725,7 @@ async function pauseAgent(kind) {
       method: "POST", credentials: "same-origin", headers: csrfHeaders(),
     });
     if (!res.ok) throw new Error("Não deu pra pausar o agente.");
-    loadAgentesView(true);
-  } catch (err) {
-    alert(String(err.message || err));
-  }
-}
-
-async function toggleAgentEmail(kind, enabled) {
-  try {
-    const res = await fetch(`${API}/agents/${USER_ID}/${kind}/email`, {
-      method: "POST", credentials: "same-origin",
-      headers: csrfHeaders({ "Content-Type": "application/json" }),
-      body: JSON.stringify({ enabled }),
-    });
-    if (!res.ok) throw new Error("Não deu pra mudar o e-mail do agente.");
-    loadAgentesView(true);
+    await loadAgentesView(true, { background: true });
   } catch (err) {
     alert(String(err.message || err));
   }

@@ -29,7 +29,7 @@ export default tseslint.config(
   },
   {
     // Config de ferramenta roda no Node (CommonJS), não no aparelho.
-    files: ["jest.config.js", "jest.setup.js", "metro.config.js"],
+    files: ["jest.config.js", "jest.setup.js", "jest.css-stub.js", "metro.config.js", "babel.config.js"],
     languageOptions: {
       sourceType: "commonjs",
       globals: { module: "readonly", require: "readonly", jest: "readonly", __dirname: "readonly" },
@@ -111,6 +111,77 @@ export default tseslint.config(
           // `Literal`, é um `TemplateElement`. Mesmo hex, nó de AST diferente.
           selector: "TemplateElement[value.raw=/#[0-9a-fA-F]{3,8}/]",
           message: "Cor hex fora de `tokens.ts`. Use um token semântico (`cores.<nome>`).",
+        },
+      ],
+    },
+  },
+  {
+    // Nativewind chega com `className`, e hex também vaza como valor
+    // arbitrário do Tailwind (`bg-[#FF2D8E]`) — um nó `Literal` cuja STRING
+    // inteira é `"bg-[#FF2D8E]"`, não `"#FF2D8E"`: o seletor ancorado
+    // (`^#...$`) do bloco acima não bate nisso. Bloco à parte, com glob mais
+    // largo que o dos componentes do design system — inclui `src/ui/ds/**` e
+    // `src/ui/componentes/**` (mesmos dois do bloco acima; a versão anterior
+    // deste bloco deixava-os de fora: `app/**`/`src/features/**` não casam
+    // com caminho iniciado em `src/ui/`), `app/**` e `src/features/**` (telas
+    // de produto também vão usar `className`). NÃO uso `src/ui/**` inteiro:
+    // isso pegaria `src/ui/tokens.ts`, a própria fonte de verdade do hex —
+    // aí a regra bloquearia a definição dos tokens que ela existe para
+    // proteger. SEM o `no-restricted-imports` de `Text`/`TextInput`: aquela
+    // redação continua valendo só dentro do design system (comentário logo
+    // acima). Superset dos dois seletores do bloco de componentes + o de
+    // valor arbitrário: por vir depois no array, ele SUBSTITUI o
+    // `no-restricted-syntax` do bloco anterior para todo caminho em que os
+    // dois batem (mesma mecânica de "REDECLARADA, não somada" já usada abaixo
+    // para `Texto`/`Input`), e por isso carrega os dois seletores antigos
+    // também, não só o novo.
+    files: [
+      "app/**/*.ts?(x)",
+      "src/features/**/*.ts?(x)",
+      "src/ui/ds/**/*.ts?(x)",
+      "src/ui/componentes/**/*.ts?(x)",
+    ],
+    rules: {
+      "no-restricted-syntax": [
+        "error",
+        {
+          selector: "Literal[value=/^#([0-9a-fA-F]{3,4}|[0-9a-fA-F]{6}|[0-9a-fA-F]{8})$/]",
+          message: "Cor hex fora de `tokens.ts`. Use um token semântico (`cores.<nome>`).",
+        },
+        {
+          selector: "TemplateElement[value.raw=/#[0-9a-fA-F]{3,8}/]",
+          message: "Cor hex fora de `tokens.ts`. Use um token semântico (`cores.<nome>`).",
+        },
+        {
+          // Valor arbitrário do Tailwind, qualquer forma: `bg-[#FF2D8E]`,
+          // `bg-[color:#FF2D8E]`, `bg-[red]`, `bg-[rgb(255,45,142)]`,
+          // `text-[hsl(...)]`, `text-[20px]`. Os tokens são a única fonte de
+          // verdade do design system: qualquer `-[valor]` é por definição uma
+          // segunda fonte. Ancorado em `JSXAttribute[name.name="className"]`
+          // (não em `Literal`/`TemplateElement` soltos, como antes) por dois
+          // motivos medidos: (1) sem o ancoramento, QUALQUER string literal
+          // do arquivo com `-[` no meio vira erro — `"algo-[teste]"` que não
+          // tem nada a ver com Tailwind; (2) o `[\\w:-]*` antes do `-\\[` só
+          // existia para tentar capturar o "prefixo" (`bg`, `text`) preso ao
+          // MESMO nó, e falhava exatamente no bypass que a forma existe para
+          // pegar — `` `bg-[${cor}]` `` quebra em duas `TemplateElement`
+          // (`"bg-["` e `"]"`), então o prefixo nunca está colado ao `-[` num
+          // template com interpolação. Bastando o `className` como âncora, o
+          // regex vira só "tem `-[` em algum lugar" — simples e sem os dois
+          // buracos.
+          selector: 'JSXAttribute[name.name="className"] Literal[value=/-\\[/]',
+          message:
+            "Valor arbitrário do Tailwind (`-[...]`) não é permitido. Tokens (`espaco`, `raio`, `texto`, `cores.<nome>`) são a única fonte de verdade de espaçamento, forma, tipografia e cor — um valor solto entre colchetes seria uma segunda fonte.",
+        },
+        {
+          // Mesmo caso dentro de template string (`` `bg-[${x}]` `` ou
+          // `` `bg-[red]` ``): ali o valor é `TemplateElement`, não `Literal`
+          // — o combinador descendente do seletor alcança as duas formas
+          // dentro do `className`, inclusive dentro de `JSXExpressionContainer`
+          // e de ternário (`className={cond ? "..." : "text-[20px]"}`).
+          selector: 'JSXAttribute[name.name="className"] TemplateElement[value.raw=/-\\[/]',
+          message:
+            "Valor arbitrário do Tailwind (`-[...]`) não é permitido. Tokens (`espaco`, `raio`, `texto`, `cores.<nome>`) são a única fonte de verdade de espaçamento, forma, tipografia e cor — um valor solto entre colchetes seria uma segunda fonte.",
         },
       ],
     },

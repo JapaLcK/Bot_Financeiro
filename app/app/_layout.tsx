@@ -7,6 +7,8 @@ import { rastrear } from "@/services/analytics";
 import { TemaProvider } from "@/ui/tema";
 import { claro, escuro } from "@/ui/tokens";
 
+import "../global.css";
+
 // O Sentry e o analytics NÃO sobem aqui: sobem em `index.ts`, antes do import
 // do roteador. Aqui já seria tarde — os imports deste arquivo são avaliados
 // antes do corpo dele, e uma exceção em qualquer um deles aconteceria com o

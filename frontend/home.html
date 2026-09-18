@@ -63,8 +63,7 @@ header {
 }
 .header-left { display:flex; align-items:center; gap:12px; flex-wrap:wrap; }
 .logo-img { width:36px;height:36px;object-fit:contain;display:block; }
-/* só no app: na web a home já tem nav-links + botão de conta, então o ☰
-   (que abre o mesmo dropdown) seria um controle duplicado. */
+/* No site com mouse a barra compacta substitui o ☰; no app ele abre a gaveta. */
 .sidenav-toggle {
   display:none;align-items:center;justify-content:center;
   width:38px;height:38px;border-radius:50%;
@@ -74,7 +73,7 @@ header {
 .sidenav-toggle:hover { background:rgba(255,255,255,.08); color:var(--text); }
 html.pb-app body.pb-page-home .sidenav-toggle { display:inline-flex; }
 
-/* ─── Gaveta lateral (portada da dashboard.css) ───────────────────────── */
+/* ─── Base da gaveta lateral; sidenav-rail.css cuida do desktop ───────── */
 .sidenav {
   position:fixed; top:0; left:0; bottom:0; width:260px; box-sizing:border-box;
   z-index:60; display:flex; flex-direction:column; padding:18px 14px 14px;
@@ -99,7 +98,9 @@ html.pb-app body.pb-page-home .sidenav-toggle { display:inline-flex; }
   cursor:pointer; transition:all .18s var(--ease); text-decoration:none; font-family:inherit;
 }
 .sidenav-item:hover:not([disabled]) { background:rgba(255,255,255,.06); color:var(--text); border-color:rgba(255,255,255,.07); }
+.sidenav-item.active { background:linear-gradient(135deg, rgba(255,45,142,.22), rgba(199,24,107,.18)); color:#fff; border-color:rgba(255,45,142,.4); }
 .sidenav-item .sn-icon { width:22px; height:22px; border-radius:7px; display:inline-flex; align-items:center; justify-content:center; font-size:.92rem; flex-shrink:0; background:rgba(255,255,255,.04); color:var(--text-2); }
+.sidenav-item.active .sn-icon { background:linear-gradient(135deg, rgba(255,45,142,.35), rgba(255,128,184,.25)); color:#fff; }
 .sidenav-item .sn-label { flex:1; min-width:0; white-space:nowrap; overflow:hidden; text-overflow:ellipsis; }
 .sidenav-item .sn-tag { font-size:.55rem; font-weight:700; padding:2px 6px; border-radius:6px; letter-spacing:.06em; text-transform:uppercase; background:rgba(251,191,36,.18); color:#fbbf24; }
 .sidenav-item .sn-tag.new { background:rgba(198,241,26,.18); color:#C6F11A; }
@@ -452,6 +453,8 @@ footer a:hover { color:var(--text); }
 .checkout-confirm-overlay .cc-text { color: rgba(255,255,255,.92); font-size: 16px; font-weight: 600; }
 .checkout-confirm-overlay .cc-sub { color: rgba(255,255,255,.6); font-size: 13px; max-width: 320px; line-height: 1.4; }
 </style>
+<link rel="stylesheet" href="/sidenav-rail.css?v=3" />
+<script defer src="/sidenav-scrollbar.js?v=1"></script>
 <script src="/static/auth-refresh.js?v=1"></script>
 <script src="/modals.js"></script>
 <script defer src="/reconciliations.js"></script>
@@ -484,9 +487,8 @@ footer a:hover { color:var(--text); }
   <div class="orb orb-4"></div>
 </div>
 
-<!-- Gaveta lateral (igual à do dashboard). Só é alcançável no app: o ☰ que a
-     abre fica escondido na web. Os itens são as views do dashboard, então
-     deep-linkam pra /app?view=X (o dashboard.js abre a view certa no load). -->
+<!-- Menu lateral: barra compacta na web com mouse, gaveta no app/toque.
+     As views do dashboard levam a /app?view=X, aberto pelo dashboard.js. -->
 <div class="sidenav-backdrop" id="sidenav-backdrop" onclick="toggleSidenav(false)"></div>
 <aside class="sidenav" id="sidenav" aria-label="Navegação principal" inert>
   <div class="sidenav-brand">
@@ -498,6 +500,7 @@ footer a:hover { color:var(--text); }
   </div>
 
   <div class="sidenav-section">Geral</div>
+  <a class="sidenav-item active" href="/home" aria-current="page"><span class="sn-icon" style="color:#FF80B8"><i class="ph ph-house" aria-hidden="true"></i></span><span class="sn-label">Início</span></a>
   <a class="sidenav-item" href="/app?view=overview"><span class="sn-icon" style="color:#3B82F6"><i class="ph ph-chart-bar" aria-hidden="true"></i></span><span class="sn-label">Visão Geral</span></a>
   <a class="sidenav-item" href="/app?view=analytics"><span class="sn-icon" style="color:#06B6D4"><i class="ph ph-chart-line-up" aria-hidden="true"></i></span><span class="sn-label">Análises</span></a>
   <a class="sidenav-item" href="/app?view=history"><span class="sn-icon" style="color:#94A3B8"><i class="ph ph-clock-counter-clockwise" aria-hidden="true"></i></span><span class="sn-label">Histórico</span></a>
@@ -832,8 +835,35 @@ document.addEventListener("click", e => {
 });
 document.addEventListener("keydown", e => { if (e.key === "Escape") closeUserMenu(); });
 
-/* ─── Gaveta lateral (mesma lógica do dashboard.js) ───────────────────── */
+/* ─── Gaveta no toque, barra compacta no desktop ──────────────────────── */
+const sidenavRailMedia = window.matchMedia("(min-width: 901px) and (hover: hover) and (pointer: fine)");
+
+function usesSidenavRail() {
+  return sidenavRailMedia.matches && !document.documentElement.classList.contains("pb-app");
+}
+
+function syncSidenavMode() {
+  const nav = document.getElementById("sidenav");
+  const bd = document.getElementById("sidenav-backdrop");
+  if (!nav) return;
+  const wasOpen = nav.classList.contains("open");
+  if (usesSidenavRail()) {
+    nav.classList.remove("open");
+    if (bd) bd.classList.remove("open");
+    nav.removeAttribute("inert");
+    if (wasOpen) {
+      Array.from(document.body.children).forEach(el => {
+        if (el !== nav && el !== bd) el.removeAttribute("inert");
+      });
+    }
+    document.querySelector(".sidenav-toggle")?.setAttribute("aria-expanded", "false");
+  } else {
+    nav.toggleAttribute("inert", !wasOpen);
+  }
+}
+
 function toggleSidenav(force) {
+  if (usesSidenavRail()) return;
   const nav = document.getElementById("sidenav");
   const bd  = document.getElementById("sidenav-backdrop");
   if (!nav) return;
@@ -861,6 +891,8 @@ function toggleSidenav(force) {
     tog.focus();
   }
 }
+sidenavRailMedia.addEventListener("change", syncSidenavMode);
+syncSidenavMode();
 document.addEventListener("keydown", e => {
   if (e.key === "Escape") {
     const nav = document.getElementById("sidenav");

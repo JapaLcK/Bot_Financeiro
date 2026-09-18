@@ -92,6 +92,11 @@ usuário confirma, como pede o `CLAUDE.md` §1. Na **Direto** este fluxo não se
 
 ## Regras do orquestrador
 
+- **Ao abrir o PR, grave no corpo o marcador**
+  `<!-- time-dev: grupo=com faixa=<Leve|Completo> internos=N bloqueantes=M -->`,
+  onde `internos` = defeitos achados pelo Tester e pelo Manager durante a tarefa
+  (inclusive os já corrigidos) e `bloqueantes` = os que impediam o push. É o dado
+  que `scripts/medir_time_dev.py` lê para medir se o time vale o custo em tokens.
 - Dentro da faixa escolhida, nunca pule uma etapa para economizar tempo — o
   valor do time é justamente ter um papel adversarial (Tester) e um auditor
   (Manager) que não confiam no agente anterior. Economizar é escolher a faixa

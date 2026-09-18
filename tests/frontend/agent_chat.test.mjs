@@ -75,7 +75,7 @@ test('ativa agente inativo; sem energia apresenta upsell', async () => {
   } finally { await second.page.close(); }
 });
 
-test('painel utilizável em desktop e celular, tema claro e escuro', async () => {
+test('chat dos agentes ocupa a página em desktop e celular, tema claro e escuro', async () => {
   for (const [name, viewport, light] of [
     ['desktop-escuro', { width: 1280, height: 900 }, false],
     ['desktop-claro', { width: 1280, height: 900 }, true],
@@ -87,10 +87,15 @@ test('painel utilizável em desktop e celular, tema claro e escuro', async () =>
     } });
     try {
       if (light) await page.evaluate(() => document.body.classList.add('light'));
+      await page.locator('#agent-chat-panel').screenshot({ path: join(screenshots, `agent-chat-empty-${name}.png`) });
       await ask(page, 'Analisar cobranças');
       const bounds = await page.locator('#agent-chat-panel').boundingBox();
-      assert.ok(bounds.x >= 0 && bounds.y >= 0 && bounds.x + bounds.width <= viewport.width);
-      assert.ok(bounds.y + bounds.height <= viewport.height);
+      assert.equal(bounds.x, 0);
+      assert.equal(bounds.y, 0);
+      assert.equal(bounds.width, viewport.width);
+      assert.equal(bounds.height, viewport.height);
+      assert.equal(await page.locator('html').evaluate(el => el.classList.contains('pb-agent-chat-open')), true);
+      assert.equal(await page.locator('#agentes-shelf').evaluate(el => el.inert), true);
       assert.equal(await page.locator('#agent-chat-send').isVisible(), true);
       await page.locator('#agent-chat-panel').screenshot({ path: join(screenshots, `agent-chat-${name}.png`) });
       await ask(page, 'Há mais algum indício de duplicidade?');
@@ -127,9 +132,42 @@ test('painel utilizável em desktop e celular, tema claro e escuro', async () =>
       assert.ok(Math.min(...contrast) >= 4.5, `${name}: contraste mínimo ${Math.min(...contrast)}`);
       await page.press('#agent-chat-input', 'Escape');
       assert.equal(await page.locator('#agent-chat-panel').isHidden(), true);
+      assert.equal(await page.locator('#agentes-shelf').evaluate(el => el.inert), false);
       assert.equal(await page.evaluate(() => document.activeElement.id), 'open');
     } finally { await page.close(); }
   }
+});
+
+test('sugestões são perguntas dos agentes e trocam de agente sem envio', async () => {
+  const { page, requests, errors } = await setup({ active: ['detetive', 'barao', 'xerife'] });
+  try {
+    await page.getByRole('button', { name: 'Detetive · Lançamentos duplicados?' }).click();
+    assert.equal(await page.inputValue('#agent-chat-input'), 'Há lançamentos que parecem duplicados?');
+    await page.getByRole('button', { name: 'Xerife · Gasto incomum?' }).click();
+    await page.waitForFunction(() => !document.getElementById('agent-chat-input').disabled);
+    assert.equal(await page.inputValue('#agent-chat-input'), 'Algum gasto fugiu do meu padrão?');
+    assert.equal(await page.textContent('#agent-chat-title'), 'Xerife');
+    assert.equal(requests.length, 0);
+    assert.deepEqual(errors, []);
+  } finally { await page.close(); }
+});
+
+test('compositor rosado cresce e avaliação da resposta fica na sessão', async () => {
+  const { page, requests } = await setup();
+  try {
+    await page.fill('#agent-chat-input', 'Analisar cobranças');
+    await page.waitForFunction(() => getComputedStyle(document.querySelector('.pc-agent-compose')).boxShadow.includes('255, 45, 142'));
+    const shadow = await page.locator('.pc-agent-compose').evaluate(el => getComputedStyle(el).boxShadow);
+    assert.match(shadow, /255, 45, 142/);
+    await page.click('#agent-chat-send');
+    await page.waitForFunction(() => !document.getElementById('agent-chat-input').disabled);
+    await page.getByRole('button', { name: 'Não ajudou' }).click();
+    assert.match(await page.locator('.pc-agent-response-feedback').textContent(), /Obrigado pelo retorno nesta conversa/);
+    await page.click('#agent-chat-close');
+    await page.click('#open');
+    assert.match(await page.locator('.pc-agent-response-feedback').textContent(), /Obrigado pelo retorno nesta conversa/);
+    assert.equal(requests.length, 1);
+  } finally { await page.close(); }
 });
 
 
