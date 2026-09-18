@@ -16,6 +16,10 @@
   const status = document.getElementById('agent-chat-status');
   const actions = document.getElementById('agent-chat-actions');
   const usage = document.getElementById('agent-chat-usage');
+  const suggestions = document.getElementById('agent-chat-suggestions');
+  const compose = document.querySelector('.agent-chat-compose');
+  const background = () => [document.querySelector('.page'), document.getElementById('sidenav'), document.getElementById('piggy-fab'), document.getElementById('piggy-panel'), document.querySelector('.pb-tabbar')].filter(Boolean);
+  const previousInert = new Map();
   const questions = {
     xerife: 'Algum gasto fugiu do meu padrão?',
     detetive: 'Há lançamentos que parecem duplicados?',
@@ -24,6 +28,15 @@
     cofre: 'Quanto falta para minhas metas?',
     barao: 'O que considerar ao avaliar renda fixa?',
     faria_limer: 'Como está a concentração da minha carteira?',
+  };
+  const suggestionTitles = {
+    xerife: 'Xerife · Gasto incomum?',
+    detetive: 'Detetive · Lançamentos duplicados?',
+    carteiro: 'Carteiro · Próximas contas?',
+    reporter: 'Repórter · Resumo do mês?',
+    cofre: 'Banqueiro · Quanto falta para a meta?',
+    barao: 'Barão · Como avaliar renda fixa?',
+    faria_limer: 'Faria Limer · Carteira concentrada?',
   };
 
   function state(kind) {
@@ -41,15 +54,92 @@
   function saveDraft() {
     if (currentKind) state(currentKind).draft = input.value;
   }
-  function close() {
+  function resizeInput() {
+    input.style.height = 'auto';
+    input.style.height = `${Math.min(input.scrollHeight, 132)}px`;
+    send.disabled = input.disabled || !input.value.trim();
+  }
+  function close(restoreFocus = true) {
     saveDraft();
     ++openGeneration;
     panel.hidden = true;
-    if (opener?.isConnected) opener.focus();
+    document.body.classList.remove('agent-chat-open');
+    for (const [element, wasInert] of previousInert) element.inert = wasInert;
+    previousInert.clear();
+    if (restoreFocus && opener?.isConnected) opener.focus();
   }
   function upgrade() {
     close();
     showUpgradeModal('agents');
+  }
+  function renderSuggestions() {
+    suggestions.replaceChildren();
+    const kinds = [...new Set([currentKind, 'xerife', 'detetive', 'carteiro', 'reporter'])].slice(0, 4);
+    for (const kind of kinds) {
+      const option = document.createElement('button');
+      option.type = 'button';
+      option.className = 'agent-chat-suggestion';
+      option.textContent = suggestionTitles[kind];
+      option.addEventListener('click', () => {
+        if (kind !== currentKind) {
+          window.openAgentChat(kind, questions[kind]);
+          return;
+        }
+        input.value = questions[kind];
+        state(kind).draft = input.value;
+        resizeInput();
+        if (!input.disabled) input.focus();
+      });
+      suggestions.append(option);
+    }
+  }
+  function feedbackBar(message) {
+    if (message.feedback === 'dismissed') return null;
+    const bar = document.createElement('div');
+    bar.className = 'agent-response-feedback';
+    bar.setAttribute('role', 'group');
+    bar.setAttribute('aria-label', 'Avaliar resposta');
+    const caption = document.createElement('span');
+    caption.textContent = message.feedback ? 'Obrigado pelo retorno nesta conversa' : 'Esta resposta ajudou?';
+    const controls = document.createElement('div');
+    controls.className = 'agent-response-feedback-actions';
+    const add = (label, value) => {
+      const control = document.createElement('button');
+      control.type = 'button';
+      control.setAttribute('aria-label', label);
+      if (value === 'dismissed') {
+        control.textContent = '×';
+      } else {
+        const svg = document.createElementNS('http://www.w3.org/2000/svg', 'svg');
+        svg.setAttribute('viewBox', '0 0 24 24');
+        svg.setAttribute('fill', 'none');
+        svg.setAttribute('stroke', 'currentColor');
+        svg.setAttribute('stroke-width', '1.7');
+        svg.setAttribute('stroke-linecap', 'round');
+        svg.setAttribute('stroke-linejoin', 'round');
+        if (value === 'down') svg.classList.add('thumb-down');
+        const path = document.createElementNS('http://www.w3.org/2000/svg', 'path');
+        path.setAttribute('d', 'M7 10v12M15 5.9 14 10h5.8a2 2 0 0 1 1.9 2.6l-2.3 8A2 2 0 0 1 17.5 22H4a2 2 0 0 1-2-2v-8a2 2 0 0 1 2-2h2.8a2 2 0 0 0 1.8-1.1L12 2a3.1 3.1 0 0 1 3 3.9Z');
+        svg.append(path);
+        control.append(svg);
+      }
+      control.addEventListener('click', () => {
+        message.feedback = value;
+        if (value === 'dismissed') bar.remove();
+        else {
+          caption.textContent = 'Obrigado pelo retorno nesta conversa';
+          controls.querySelectorAll('button:not(:last-child)').forEach(button => button.remove());
+        }
+      });
+      controls.append(control);
+    };
+    if (!message.feedback) {
+      add('Sim, ajudou', 'up');
+      add('Não ajudou', 'down');
+    }
+    add('Dispensar avaliação', 'dismissed');
+    bar.append(caption, controls);
+    return bar;
   }
   function render() {
     if (!currentKind) return;
@@ -59,17 +149,26 @@
     subtitle.textContent = 'Consultas e ideias sobre o meu tema';
     avatar.src = `/brand/agents/${currentKind}.png?v=3`;
     log.replaceChildren();
+    suggestions.hidden = s.messages.length > 0;
     if (!s.messages.length) {
       const empty = document.createElement('div');
       empty.className = 'agent-chat-empty';
+      const mark = document.createElement('img');
+      mark.src = '/brand/icon.png?v=2';
+      mark.alt = '';
+      const greeting = document.createElement('h3');
+      const accountLabel = document.getElementById('user-label')?.textContent?.trim();
+      const firstName = accountLabel && accountLabel !== 'Minha conta' && !accountLabel.includes('@') ? accountLabel.split(/\s+/)[0] : '';
+      greeting.textContent = firstName ? `Olá, ${firstName}` : 'Olá!';
       const intro = document.createElement('p');
-      intro.textContent = card?.desc || 'Posso ajudar com perguntas sobre meu tema.';
-      empty.append(intro, button(questions[currentKind] || 'Como você pode me ajudar?', () => {
-        input.value = questions[currentKind] || 'Como você pode me ajudar?';
-        s.draft = input.value;
-        input.focus();
-      }));
+      intro.textContent = 'Como eu posso te ajudar hoje?';
+      const detail = document.createElement('small');
+      detail.textContent = card?.desc || 'Escolha uma pergunta abaixo ou escreva para o agente.';
+      empty.append(mark, greeting, intro, detail);
       log.append(empty);
+      renderSuggestions();
+    } else {
+      suggestions.replaceChildren();
     }
     for (const message of s.messages) {
       const row = document.createElement('div');
@@ -84,6 +183,10 @@
           : destination.access === 'activate' ? `Ativar ${destination.name} e conversar`
           : `Ver acesso a ${destination.name}`;
         row.append(button(label, () => window.openAgentChat(destination.kind, destination.question)));
+      }
+      if (message.role === 'assistant') {
+        const feedback = feedbackBar(message);
+        if (feedback) row.append(feedback);
       }
       log.append(row);
     }
@@ -106,8 +209,8 @@
       window.openAgentChat(currentKind);
     }));
     input.disabled = s.busy || s.access !== 'ready';
-    send.disabled = input.disabled;
     input.value = s.draft;
+    resizeInput();
     usage.textContent = s.usage
       ? `${s.usage.used.toLocaleString('pt-BR')} de ${s.usage.limit.toLocaleString('pt-BR')} mensagens da cota compartilhada. Recarregar limpa a conversa.`
       : 'Cota compartilhada com o Piggy. Recarregar limpa a conversa.';
@@ -117,15 +220,23 @@
   window.openAgentChat = async function (kind, question = '') {
     if (!Object.hasOwn(questions, kind)) return;
     saveDraft();
-    if (panel.hidden) opener = document.activeElement;
+    if (panel.hidden) {
+      opener = document.activeElement;
+      for (const element of background()) {
+        previousInert.set(element, element.inert);
+        element.inert = true;
+      }
+    }
     currentKind = kind;
     const generation = ++openGeneration;
     const s = state(kind);
     if (question) s.draft = question;
     s.access = 'loading';
     s.error = '';
+    document.body.classList.add('agent-chat-open');
     panel.hidden = false;
     if (window.closePiggy) window.closePiggy();
+    if (window.toggleSidenav) window.toggleSidenav(false);
     render();
     try {
       const response = await fetch(`${API}/agents/${USER_ID}`, { credentials: 'same-origin' });
@@ -219,11 +330,23 @@
     const trigger = event.target.closest('[data-agent-chat]');
     if (trigger) window.openAgentChat(trigger.dataset.agentChat);
   });
-  document.getElementById('agent-chat-close').addEventListener('click', close);
+  document.getElementById('agent-chat-close').addEventListener('click', () => close());
+  document.getElementById('agent-chat-agents').addEventListener('click', () => close());
+  document.getElementById('agent-chat-overview').addEventListener('click', () => { close(false); navigateTo('overview'); });
   document.getElementById('agent-chat-form').addEventListener('submit', submit);
-  input.addEventListener('input', saveDraft);
+  input.addEventListener('input', () => { saveDraft(); resizeInput(); });
   input.addEventListener('keydown', event => {
     if (event.key === 'Enter' && !event.shiftKey && !event.isComposing) submit(event);
+  });
+  input.addEventListener('pointerdown', event => {
+    if (window.matchMedia('(prefers-reduced-motion: reduce)').matches) return;
+    const rect = compose.getBoundingClientRect();
+    const ripple = document.createElement('span');
+    ripple.className = 'agent-chat-ripple';
+    ripple.style.left = `${event.clientX - rect.left}px`;
+    ripple.style.top = `${event.clientY - rect.top}px`;
+    compose.append(ripple);
+    ripple.addEventListener('animationend', () => ripple.remove(), { once: true });
   });
   panel.addEventListener('keydown', event => {
     if (event.key === 'Escape') { event.stopPropagation(); close(); }

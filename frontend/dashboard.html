@@ -20,7 +20,7 @@
 <script defer src="https://cdnjs.cloudflare.com/ajax/libs/Chart.js/4.4.1/chart.umd.min.js" integrity="sha512-CQBWl4fJHWbryGE+Pc7UAxWMUMNMWzWxF4SQo9CgkJIN1kx6djDQZjh3Y8SZ1d+6I+1zze6Z7kHXO7q3UyZAWw==" crossorigin="anonymous"></script>
 <link rel="stylesheet" href="/brand.css" />
 <link rel="stylesheet" href="/phosphor.css?v=1" />
-<link rel="stylesheet" href="/dashboard.css?v=8" />
+<link rel="stylesheet" href="/dashboard.css?v=9" />
 <link rel="stylesheet" href="/dashboard-mobile.css" media="(max-width: 900px)" />
 <link rel="stylesheet" href="/sidenav-rail.css?v=1" />
 <!-- defer preserva a ordem: auth-refresh (patch do fetch) → modals → app-mode →
@@ -1623,24 +1623,41 @@
 
 <script defer src="/dashboard-chat.js"></script>
 
-<section id="agent-chat-panel" class="agent-chat-panel" role="dialog" aria-modal="false" aria-labelledby="agent-chat-title" hidden>
-  <header class="agent-chat-head">
-    <img id="agent-chat-avatar" alt="" width="48" height="48">
-    <div><h2 id="agent-chat-title">Conversa com agente</h2><p id="agent-chat-subtitle"></p></div>
-    <button id="agent-chat-close" type="button" aria-label="Fechar conversa"><i class="ph ph-x" aria-hidden="true"></i></button>
-  </header>
-  <div id="agent-chat-log" class="agent-chat-log" role="log" aria-label="Mensagens da conversa" aria-live="polite" aria-relevant="additions"></div>
-  <div class="agent-chat-feedback"><p id="agent-chat-status" role="status"></p><div id="agent-chat-actions"></div></div>
-  <form id="agent-chat-form" class="agent-chat-foot">
-    <label for="agent-chat-input">Sua pergunta</label>
-    <div class="agent-chat-compose">
-      <textarea id="agent-chat-input" rows="2" maxlength="2000" placeholder="Pergunte sobre o meu tema…"></textarea>
-      <button id="agent-chat-send" type="submit" aria-label="Enviar pergunta"><i class="ph ph-paper-plane-tilt" aria-hidden="true"></i></button>
+<section id="agent-chat-panel" class="agent-chat-panel" role="main" aria-labelledby="agent-chat-title" hidden>
+  <nav class="agent-chat-rail" aria-label="Navegação do chat">
+    <a class="agent-chat-brand" href="/home" aria-label="Início do PigBank"><img src="/brand/icon.png?v=2" alt=""></a>
+    <span class="agent-chat-rail-item active" role="img" aria-label="Chat dos agentes"><i class="ph ph-chat-circle" aria-hidden="true"></i></span>
+    <button id="agent-chat-agents" class="agent-chat-rail-item" type="button" aria-label="Voltar aos agentes"><i class="ph ph-piggy-bank" aria-hidden="true"></i></button>
+    <button id="agent-chat-overview" class="agent-chat-rail-item" type="button" aria-label="Ir para visão geral"><i class="ph ph-chart-bar" aria-hidden="true"></i></button>
+    <a class="agent-chat-rail-profile" href="/settings?view=security" aria-label="Abrir conta"><i class="ph ph-user" aria-hidden="true"></i></a>
+  </nav>
+  <div class="agent-chat-page">
+    <header class="agent-chat-head">
+      <div class="agent-chat-context">
+        <img id="agent-chat-avatar" alt="" width="40" height="40">
+        <div><span class="agent-chat-eyebrow">Chat dos agentes</span><h2 id="agent-chat-title">Conversa com agente</h2><p id="agent-chat-subtitle"></p></div>
+      </div>
+      <button id="agent-chat-close" type="button" aria-label="Voltar aos agentes"><i class="ph ph-arrow-left" aria-hidden="true"></i><span>Agentes</span></button>
+    </header>
+    <div id="agent-chat-log" class="agent-chat-log" role="log" aria-label="Mensagens da conversa" aria-live="polite" aria-relevant="additions"></div>
+    <div class="agent-chat-bottom">
+      <div id="agent-chat-suggestions" class="agent-chat-suggestions" aria-label="Perguntas dos agentes"></div>
+      <div class="agent-chat-feedback"><p id="agent-chat-status" role="status"></p><div id="agent-chat-actions"></div></div>
+      <form id="agent-chat-form" class="agent-chat-foot">
+        <label class="agent-chat-sr-only" for="agent-chat-input">Sua pergunta para o agente</label>
+        <div class="agent-chat-compose">
+          <textarea id="agent-chat-input" rows="1" maxlength="2000" placeholder="Pergunte ao seu agente…"></textarea>
+          <div class="agent-chat-compose-actions">
+            <button class="agent-chat-add" type="button" aria-label="Anexos indisponíveis" title="Anexos indisponíveis" disabled><i class="ph ph-plus" aria-hidden="true"></i></button>
+            <button id="agent-chat-send" type="submit" aria-label="Enviar pergunta" disabled><i class="ph ph-arrow-up" aria-hidden="true"></i></button>
+          </div>
+        </div>
+        <p id="agent-chat-usage"></p>
+      </form>
     </div>
-    <p id="agent-chat-usage"></p>
-  </form>
+  </div>
 </section>
-<script defer src="/dashboard-agent-chat.js"></script>
+<script defer src="/dashboard-agent-chat.js?v=2"></script>
 
 </body>
 </html>

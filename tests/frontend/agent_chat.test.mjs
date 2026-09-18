@@ -45,13 +45,16 @@ async function setup({ budget = 14, active = ['detetive', 'barao'], viewport, ho
       })),
     } });
     if (path === '/chat.js') return route.fulfill({ contentType: 'application/javascript', body: script });
+    if (path === '/app-mode.css') return route.fulfill({ contentType: 'text/css', body: await readFile(new URL('app-mode.css', root)) });
+    if (path === '/sidenav-rail.css') return route.fulfill({ contentType: 'text/css', body: await readFile(new URL('sidenav-rail.css', root)) });
     if (['/dashboard-mobile.css', '/phosphor.css', '/fonts/Phosphor.woff2'].includes(path)) return route.fulfill({ contentType: path.endsWith('.css') ? 'text/css' : 'font/woff2', body: await readFile(new URL(path.slice(1), root)) });
     if (path === '/dashboard.css') return route.fulfill({ contentType: 'text/css', body: css });
     if (path.startsWith('/brand/agents/')) {
       const file = new URL(`brand/agents/${path.split('/').pop()}`, root);
       return route.fulfill({ contentType: 'image/png', body: await readFile(file) });
     }
-    return route.fulfill({ contentType: 'text/html', body: `<!doctype html><meta charset="UTF-8"><meta name="viewport" content="width=device-width,initial-scale=1"><link rel="stylesheet" href="/dashboard.css"><link rel="stylesheet" href="/dashboard-mobile.css" media="(max-width:900px)"><link rel="stylesheet" href="/phosphor.css"><body><div id="agentes-shelf"><button id="open" data-agent-chat="detetive">Conversar com Detetive</button></div>${panel}<script>
+    if (path === '/brand/icon.png') return route.fulfill({ contentType: 'image/png', body: await readFile(new URL('brand/icon.png', root)) });
+    return route.fulfill({ contentType: 'text/html', body: `<!doctype html><meta charset="UTF-8"><meta name="viewport" content="width=device-width,initial-scale=1"><link rel="stylesheet" href="/dashboard.css"><link rel="stylesheet" href="/dashboard-mobile.css" media="(max-width:900px)"><link rel="stylesheet" href="/phosphor.css"><link rel="stylesheet" href="/sidenav-rail.css"><body class="has-sidenav"><div class="page"><div id="agentes-shelf"><button id="open" data-agent-chat="detetive">Conversar com Detetive</button></div></div>${panel}<script>
       const API=''; const USER_ID=42; let _agentesCache=null;
       function csrfHeaders(h={}){return h;}
       function _agentName(k){return k;}
@@ -141,7 +144,7 @@ test('ativa agente inativo; sem energia apresenta upsell', async () => {
   } finally { await second.page.close(); }
 });
 
-test('painel utilizável em desktop e celular, tema claro e escuro', async () => {
+test('chat ocupa a tela inteira em desktop e celular, tema claro e escuro', async () => {
   for (const [name, viewport, light] of [
     ['desktop', { width: 1280, height: 900 }, false],
     ['mobile', { width: 390, height: 844 }, true],
@@ -149,17 +152,86 @@ test('painel utilizável em desktop e celular, tema claro e escuro', async () =>
     const { page } = await setup({ viewport });
     try {
       if (light) await page.evaluate(() => document.body.classList.add('light'));
+      await page.screenshot({ path: `/private/tmp/agent-chat-empty-${name}.png` });
       await ask(page, 'Analisar cobranças');
       const bounds = await page.locator('#agent-chat-panel').boundingBox();
-      assert.ok(bounds.x >= 0 && bounds.y >= 0 && bounds.x + bounds.width <= viewport.width);
-      assert.ok(bounds.y + bounds.height <= viewport.height);
+      assert.equal(bounds.x, 0);
+      assert.equal(bounds.y, 0);
+      assert.equal(bounds.width, viewport.width);
+      assert.equal(bounds.height, viewport.height);
+      assert.equal(await page.locator('body').evaluate(body => body.classList.contains('agent-chat-open')), true);
       assert.equal(await page.locator('#agent-chat-send').isVisible(), true);
       await page.screenshot({ path: `/private/tmp/agent-chat-${name}.png` });
       await page.press('#agent-chat-input', 'Escape');
       assert.equal(await page.locator('#agent-chat-panel').isHidden(), true);
+      assert.equal(await page.locator('body').evaluate(body => body.classList.contains('agent-chat-open')), false);
       assert.equal(await page.evaluate(() => document.activeElement.id), 'open');
     } finally { await page.close(); }
   }
+});
+
+test('sugestões usam perguntas dos agentes e trocam de agente sem enviar', async () => {
+  const { page, requests, errors } = await setup({ active: ['detetive', 'barao', 'xerife'] });
+  try {
+    await page.getByRole('button', { name: 'Detetive · Lançamentos duplicados?' }).click();
+    assert.equal(await page.inputValue('#agent-chat-input'), 'Há lançamentos que parecem duplicados?');
+    await page.getByRole('button', { name: 'Xerife · Gasto incomum?' }).click();
+    await page.waitForFunction(() => !document.getElementById('agent-chat-input').disabled);
+    assert.equal(await page.inputValue('#agent-chat-input'), 'Algum gasto fugiu do meu padrão?');
+    assert.equal(await page.textContent('#agent-chat-title'), 'Xerife');
+    assert.equal(requests.length, 0);
+    assert.deepEqual(errors, []);
+  } finally { await page.close(); }
+});
+
+test('campo rosado cresce e feedback da resposta fica só na sessão', async () => {
+  const { page, requests } = await setup();
+  try {
+    await page.fill('#agent-chat-input', 'Analisar cobranças');
+    await page.waitForFunction(() => getComputedStyle(document.getElementById('agent-chat-form')).boxShadow.includes('255, 45, 142'));
+    const shadow = await page.locator('#agent-chat-form').evaluate(form => getComputedStyle(form).boxShadow);
+    assert.match(shadow, /255, 45, 142/);
+    await page.click('#agent-chat-send');
+    await page.waitForFunction(() => !document.getElementById('agent-chat-input').disabled);
+    await page.getByRole('button', { name: 'Não ajudou' }).click();
+    assert.match(await page.locator('.agent-response-feedback').textContent(), /Obrigado pelo retorno nesta conversa/);
+    await page.click('#agent-chat-close');
+    await page.click('#open');
+    assert.match(await page.locator('.agent-response-feedback').textContent(), /Obrigado pelo retorno nesta conversa/);
+    assert.equal(requests.length, 1);
+  } finally { await page.close(); }
+});
+
+test('modo app mantém cabeçalho e compositor visíveis na tela inteira', async () => {
+  const { page } = await setup({ viewport: { width: 390, height: 844 } });
+  try {
+    await page.addStyleTag({ url: '/app-mode.css' });
+    await page.evaluate(() => {
+      document.documentElement.classList.add('pb-app');
+      document.body.classList.add('pb-page-app');
+    });
+    assert.equal(await page.locator('#agent-chat-title').isVisible(), true);
+    assert.equal(await page.locator('#agent-chat-close').isVisible(), true);
+    assert.equal(await page.locator('#agent-chat-input').isVisible(), true);
+    const bounds = await page.locator('#agent-chat-panel').boundingBox();
+    assert.equal(bounds.x, 0);
+    assert.equal(bounds.width, 390);
+    assert.equal(bounds.height, 844);
+  } finally { await page.close(); }
+});
+
+test('histórico longo rola sem esconder o compositor', async () => {
+  const { page } = await setup({ viewport: { width: 390, height: 844 } });
+  try {
+    for (let index = 0; index < 12; index++) await ask(page, `Pergunta ${index + 1}`);
+    const result = await page.evaluate(() => {
+      const log = document.getElementById('agent-chat-log');
+      const send = document.getElementById('agent-chat-send').getBoundingClientRect();
+      return { scrollable: log.scrollHeight > log.clientHeight, sendBottom: send.bottom, viewport: window.innerHeight };
+    });
+    assert.equal(result.scrollable, true);
+    assert.ok(result.sendBottom <= result.viewport);
+  } finally { await page.close(); }
 });
 
 
