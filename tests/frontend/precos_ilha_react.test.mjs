@@ -771,7 +771,9 @@ test("PO2: em 1024px os cards formam três degraus, com bases alinhadas", async 
     `há espaço demais entre título e preço: ${r.espacosTituloPreco.join("/")}px`);
   assert.deepEqual(r.listas.map((l) => l.gap), ["16px", "16px", "16px"],
     `o espaçamento dos benefícios divergiu: ${JSON.stringify(r.listas)}`);
-  assert.deepEqual(r.listas.map((l) => l.itens), [6, 8, 7],
+  // Pro tem 8 desde o simulador de compra; o degrau do pódio exige que o item
+  // novo caiba em UMA linha em 1024px (medido: em duas, Plus−Pro cai a 39px).
+  assert.deepEqual(r.listas.map((l) => l.itens), [6, 8, 8],
     `a seleção enxuta de benefícios divergiu: ${JSON.stringify(r.listas)}`);
   assert.ok(r.listas.every((l) => l.ctaAntes && l.vao >= 20 && l.vao <= 24),
     `o CTA não ficou logo após o preço e antes dos benefícios: ${JSON.stringify(r.listas)}`);
