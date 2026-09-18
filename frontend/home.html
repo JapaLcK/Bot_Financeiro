@@ -999,7 +999,7 @@ function renderStats(snapshot, history) {
     // pro dashboard, que tem a tela de conferência (decisão do dono).
     const recPending = Number(snapshot.reconciliation?.pending_count || 0);
     if (recPending > 0 && window.Reconciliations) {
-      balSub.innerHTML = `${escapeHtml(Reconciliations.aviso(saldoAtual, snapshot.reconciliation))} · <a href="/dashboard" style="color:#FF2D8E;text-decoration:underline">conferir</a>`;
+      balSub.innerHTML = `${escapeHtml(Reconciliations.aviso(saldoAtual, snapshot.reconciliation))} · <a href="/app" style="color:#FF2D8E;text-decoration:underline">conferir</a>`;
     } else {
       balSub.textContent = (Number(snapshot.of_bank_count || 0) > 0)
         ? `Carteira ${fmtBRL(carteira)} · Bancos ${fmtBRL(ofBank)}`
