@@ -1,3 +1,4 @@
+import { useEffect, useRef } from "react";
 import * as Haptics from "expo-haptics";
 
 /**
@@ -19,4 +20,19 @@ export function sucesso(): void {
 
 export function aviso(): void {
   disparar(Haptics.notificationAsync(Haptics.NotificationFeedbackType.Warning));
+}
+
+/**
+ * Dispara `aviso()` só na TRANSIÇÃO falso→verdadeiro — nunca na montagem
+ * (campo que já nasce com erro não vibra sozinho), nunca de um erro para
+ * outro (trocar a mensagem não é um novo erro) e nunca a cada render (um
+ * componente controlado rerenderiza a cada tecla). `AmountInput` usa este
+ * hook; `Input` do C1 reusa o mesmo.
+ */
+export function useAvisoAoErrar(comErro: boolean): void {
+  const anterior = useRef(comErro);
+  useEffect(() => {
+    if (comErro && !anterior.current) aviso();
+    anterior.current = comErro;
+  }, [comErro]);
 }

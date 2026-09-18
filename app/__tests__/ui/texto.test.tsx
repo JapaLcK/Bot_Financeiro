@@ -55,6 +55,16 @@ describe("Texto", () => {
     expect(claro.UNSAFE_getByType(Text)).toBeTruthy();
   });
 
+  it("snapshot (dois temas)", () => {
+    const { claro, escuro } = renderNosDoisTemas(
+      <Texto variante="secao" tom="brandInk" numerico>
+        R$ 1.234,56
+      </Texto>,
+    );
+    expect(claro.toJSON()).toMatchSnapshot("claro");
+    expect(escuro.toJSON()).toMatchSnapshot("escuro");
+  });
+
   it("cor muda entre os dois temas para o mesmo tom", () => {
     const { claro, escuro } = renderNosDoisTemas(<Texto tom="ink">x</Texto>);
     const corClara = claro.getByText("x").props.style.find((s: { color?: string }) => s?.color)?.color;

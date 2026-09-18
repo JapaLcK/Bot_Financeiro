@@ -94,5 +94,8 @@ jest.mock("react-native/Libraries/Components/AccessibilityInfo/AccessibilityInfo
       mockAcessibilidade.ouvintes.add(fn);
       return { remove: () => mockAcessibilidade.ouvintes.delete(fn) };
     },
+    // `Toast` (PR C2) anuncia cada mensagem — sem espiã aqui a chamada
+    // lançaria "não é uma função" no Jest (o módulo real é nativo).
+    announceForAccessibility: jest.fn(),
   },
 }));
