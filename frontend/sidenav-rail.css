@@ -1,5 +1,16 @@
 /* Navegação compacta nas páginas principais do site com mouse. O app/PWA
    continua usando a gaveta e a barra inferior próprias. */
+.sidenav {
+  scrollbar-width: thin;
+  scrollbar-color: transparent transparent;
+}
+.sidenav::-webkit-scrollbar-track,
+.sidenav::-webkit-scrollbar-thumb { background: transparent; }
+.sidenav.is-scrolling { scrollbar-color: rgba(255, 255, 255, .36) transparent; }
+.sidenav.is-scrolling::-webkit-scrollbar-thumb { background: rgba(255, 255, 255, .36); }
+body.light .sidenav.is-scrolling { scrollbar-color: rgba(15, 23, 42, .32) transparent; }
+body.light .sidenav.is-scrolling::-webkit-scrollbar-thumb { background: rgba(15, 23, 42, .32); }
+
 @media (min-width: 901px) and (hover: hover) and (pointer: fine) {
   html:not(.pb-app) body { padding-left: 68px; }
 

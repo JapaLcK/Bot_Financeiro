@@ -53,6 +53,23 @@ for (const path of ["dashboard.html", "home.html"]) {
       assert.equal(await page.evaluate(() => document.activeElement?.getAttribute("href")), "/home");
     } finally { await context.close(); }
   });
+
+  test(`${path}: indicador da rolagem aparece apenas enquanto o menu rola`, async () => {
+    const { page, context } = await openPage(path, { viewport: { width: 1024, height: 440 } });
+    try {
+      const nav = page.locator("#sidenav");
+      const thumbColor = () => nav.evaluate(el => getComputedStyle(el, "::-webkit-scrollbar-thumb").backgroundColor);
+      assert.ok(await nav.evaluate(el => el.scrollHeight > el.clientHeight));
+      assert.match(await thumbColor(), /,\s*0\)$/);
+
+      await nav.evaluate(el => { el.scrollTop = 80; });
+      await page.waitForFunction(() => document.querySelector("#sidenav").classList.contains("is-scrolling"));
+      assert.doesNotMatch(await thumbColor(), /,\s*0\)$/);
+
+      await page.waitForFunction(() => !document.querySelector("#sidenav").classList.contains("is-scrolling"));
+      assert.match(await thumbColor(), /,\s*0\)$/);
+    } finally { await context.close(); }
+  });
 }
 
 test("home marca Início como ativo; dashboard mantém a gaveta no toque", async () => {
