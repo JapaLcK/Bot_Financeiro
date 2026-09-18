@@ -28,7 +28,11 @@ function publish(next: Snapshot) {
       child.inert = child.id === "sidenav" ? !showsSidebarRail() : true;
     }
   } else if (next.active !== "agent" && snapshot.active === "agent") {
-    for (const [child, inert] of previousInert) child.inert = inert;
+    for (const [child, inert] of previousInert) {
+      child.inert = child.id === "sidenav"
+        ? !showsSidebarRail() && !child.classList.contains("open")
+        : inert;
+    }
     previousInert.clear();
   }
   snapshot = next;
@@ -94,6 +98,13 @@ document.getElementById("sidenav")?.addEventListener("click", event => {
     chatUI.close("agent", false);
   }
 });
+
+document.addEventListener("click", event => {
+  if (snapshot.active !== "agent" || !(event.target instanceof Element)) return;
+  if (event.target.closest("#sidenav .sidenav-item.pro-locked[data-pro-feature]")) {
+    chatUI.close("agent", false);
+  }
+}, true);
 
 declare global {
   interface Window { PigBankChatUI: typeof chatUI; }

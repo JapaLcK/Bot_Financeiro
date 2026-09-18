@@ -230,6 +230,35 @@ test('ações auxiliares da barra lateral não fecham a conversa', async () => {
   } finally { await page.close(); }
 });
 
+test('barra lateral usa o modo atual da janela ao fechar a conversa', async () => {
+  for (const [initialWidth, finalWidth, expectedInert] of [
+    [820, 1280, false],
+    [1280, 820, true],
+  ]) {
+    const { page } = await setup({ viewport: { width: initialWidth, height: 900 } });
+    try {
+      await page.setViewportSize({ width: finalWidth, height: 900 });
+      await page.waitForFunction(width => innerWidth === width, finalWidth);
+      await page.locator('#agent-chat-close').click();
+      assert.equal(await page.locator('#sidenav').evaluate(el => el.inert), expectedInert);
+    } finally { await page.close(); }
+  }
+});
+
+test('item bloqueado do menu mostra upgrade sem deixar modal atrás do chat', async () => {
+  const { page } = await setup({ lockedUpgrade: true, viewport: { width: 1280, height: 900 } });
+  try {
+    await page.locator('#sidenav [data-nav="investments"]').click();
+    assert.equal(await page.evaluate(() => window.upgradeOpened), true);
+    assert.equal(await page.locator('#agent-chat-panel').isHidden(), true);
+    assert.equal(await page.locator('#upgrade-overlay').evaluate(el => el.inert), false);
+    assert.equal(await page.locator('#upgrade-overlay').evaluate(el => {
+      const center = document.elementFromPoint(innerWidth / 2, innerHeight / 2);
+      return center === el;
+    }), true);
+  } finally { await page.close(); }
+});
+
 test('sugestões são perguntas dos agentes e trocam de agente sem envio', async () => {
   const { page, requests, errors } = await setup({ active: ['detetive', 'barao', 'xerife'] });
   try {

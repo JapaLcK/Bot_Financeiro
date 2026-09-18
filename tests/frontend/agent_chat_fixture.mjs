@@ -26,7 +26,7 @@ after(async () => {
   if (screenshots && !process.env.PIGBANK_CHAT_SCREENSHOTS) await rm(screenshots, { recursive: true, force: true });
 });
 
-async function setup({ budget = 14, active = ['detetive', 'barao'], viewport, holdFirst = false, accessOverride = {}, failAt = [], failureDetail, failureStatus = 503, openAgent = true, piggyReply = "**Seu resumo** está pronto.", holdPiggy = false, pro = true, reducedMotion, hasTouch = false } = {}) {
+async function setup({ budget = 14, active = ['detetive', 'barao'], viewport, holdFirst = false, accessOverride = {}, failAt = [], failureDetail, failureStatus = 503, openAgent = true, piggyReply = "**Seu resumo** está pronto.", holdPiggy = false, pro = true, reducedMotion, hasTouch = false, lockedUpgrade = false } = {}) {
   const page = await browser.newPage({ viewport: viewport || { width: 1280, height: 900 }, reducedMotion, hasTouch });
   const requests = [];
   const activations = [];
@@ -82,7 +82,7 @@ async function setup({ budget = 14, active = ['detetive', 'barao'], viewport, ho
       const file = new URL(path.slice(1), root);
       return route.fulfill({ contentType: path.endsWith('.webp') ? 'image/webp' : 'image/png', body: await readFile(file) });
     }
-    return route.fulfill({ contentType: 'text/html', body: `<!doctype html><meta charset="UTF-8"><meta name="viewport" content="width=device-width,initial-scale=1">${styles}<body class="has-sidenav">${sidenav}<button id="piggy-fab" aria-label="Abrir Piggy IA">Piggy</button><div id="agentes-shelf" style="display:flex;justify-content:center"><button id="open" data-agent-chat="detetive">Conversar com Detetive</button></div>${panel}<script>
+    return route.fulfill({ contentType: 'text/html', body: `<!doctype html><meta charset="UTF-8"><meta name="viewport" content="width=device-width,initial-scale=1">${styles}<body class="has-sidenav">${sidenav}<button id="piggy-fab" aria-label="Abrir Piggy IA">Piggy</button><div id="agentes-shelf" style="display:flex;justify-content:center"><button id="open" data-agent-chat="detetive">Conversar com Detetive</button></div>${lockedUpgrade ? '<div class="overlay" id="upgrade-overlay"></div>' : ''}${panel}<script>
       const API=''; const USER_ID=42; let _agentesCache=null;
       function csrfHeaders(h={}){return h;}
       function _agentName(k){return k;}
@@ -92,6 +92,16 @@ async function setup({ budget = 14, active = ['detetive', 'barao'], viewport, ho
       function isProUser(){return ${pro};}
       async function loadAgentesView(){}
       function showUpgradeModal(){window.upgradeOpened=true;}
+      if (${lockedUpgrade}) {
+        document.querySelector('#sidenav [data-nav="investments"]').classList.add('pro-locked');
+        document.addEventListener('click', event => {
+          if (!event.target.closest('#sidenav .pro-locked[data-pro-feature]')) return;
+          event.preventDefault();
+          event.stopPropagation();
+          document.getElementById('upgrade-overlay').classList.add('open');
+          window.upgradeOpened = true;
+        }, true);
+      }
       </script>${scripts}</body>` });
   });
   await page.goto('https://agents.test/');
