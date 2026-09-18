@@ -1,6 +1,6 @@
 import { useEffect, useLayoutEffect, useRef, useState } from "react";
 import { motion } from "framer-motion";
-import { ArrowDown, ArrowLeft, ArrowUp, ArrowUpRight, House, LayoutDashboard, Plus, Send, ThumbsDown, ThumbsUp, UsersRound, X } from "lucide-react";
+import { ArrowDown, ArrowLeft, ArrowUp, ArrowUpRight, Plus, Send, ThumbsDown, ThumbsUp, X } from "lucide-react";
 import { cn } from "@/lib/utils";
 import type { ChatAction, ChatId, ChatMessage, ChatView } from "@/chat/types";
 import { ChatContent } from "./chat-content";
@@ -143,12 +143,6 @@ export function ChatMessages({ id, view, active, onClose }: {
       if (event.shiftKey && document.activeElement === first) { event.preventDefault(); final?.focus(); }
       else if (!event.shiftKey && document.activeElement === final) { event.preventDefault(); first?.focus(); }
     }}>
-    {id === "agent" && <nav className="pc-agent-rail" aria-label="Navegação do chat">
-      <a className="pc-agent-rail-brand" href="/home" aria-label="Início do PigBank"><img src="/brand/icon.png?v=2" alt="" /></a>
-      <a className="pc-agent-rail-link" href="/home" aria-label="Início"><House size={20} /></a>
-      <a className="pc-agent-rail-link" href="/app?view=overview" aria-label="Dashboard"><LayoutDashboard size={20} /></a>
-      <button className="pc-agent-rail-link active" type="button" onClick={onClose} aria-label="Voltar aos agentes"><UsersRound size={20} /></button>
-    </nav>}
     <div className={id === "agent" ? "pc-agent-page pc-flex pc-flex-col pc-min-h-0" : "pc-flex pc-flex-col pc-min-h-0 pc-flex-1"}>
     <div className="pc-chat-head pc-flex pc-items-center pc-gap-3">
       <img id={`${prefix}-avatar`} className="pc-head-avatar" src={view.avatar} alt="" width="44" height="50" />

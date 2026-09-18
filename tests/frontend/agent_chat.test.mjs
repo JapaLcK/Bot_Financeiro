@@ -138,6 +138,41 @@ test('chat dos agentes ocupa a página em desktop e celular, tema claro e escuro
   }
 });
 
+test('chat reutiliza o menu lateral do dashboard com expansão e navegação', async () => {
+  const { page, errors } = await setup({ viewport: { width: 1280, height: 900 } });
+  try {
+    await page.mouse.move(900, 500);
+    const sidebar = page.locator('#sidenav');
+    assert.equal(await sidebar.evaluate(el => el.inert), false);
+    assert.equal(await page.locator('#agent-chat-panel .pc-agent-rail').count(), 0);
+    await page.waitForFunction(() => Math.round(document.getElementById('sidenav').getBoundingClientRect().width) === 68);
+    assert.equal(Math.round((await sidebar.boundingBox()).width), 68);
+    assert.equal(Math.round((await page.locator('.pc-agent-page').boundingBox()).x), 68);
+    assert.ok(Number(await sidebar.evaluate(el => getComputedStyle(el).zIndex)) > Number(await page.locator('#agent-chat-panel').evaluate(el => getComputedStyle(el).zIndex)));
+    assert.match(await sidebar.locator('[data-nav="agentes"]').getAttribute('class'), /\bactive\b/);
+    await page.screenshot({ path: join(screenshots, 'agent-sidebar-collapsed.png') });
+    await sidebar.locator('[data-nav="overview"] .sn-icon').hover();
+    await page.waitForFunction(() => Math.round(document.getElementById('sidenav').getBoundingClientRect().width) === 260);
+    assert.equal(await sidebar.locator('[data-nav="overview"] .sn-label').evaluate(el => getComputedStyle(el).opacity), '1');
+    await page.screenshot({ path: join(screenshots, 'agent-sidebar-expanded.png') });
+    await sidebar.locator('[data-nav="overview"]').click();
+    assert.equal(await page.evaluate(() => window.lastNavigation), 'overview');
+    assert.equal(await page.locator('#agent-chat-panel').isHidden(), true);
+    assert.equal(await sidebar.evaluate(el => el.inert), false);
+    assert.deepEqual(errors, []);
+  } finally { await page.close(); }
+});
+
+test('menu lateral não cobre o chat de agentes no celular', async () => {
+  const { page } = await setup({ viewport: { width: 390, height: 844 }, hasTouch: true });
+  try {
+    assert.equal(await page.locator('#sidenav').evaluate(el => el.inert), true);
+    assert.ok((await page.locator('#sidenav').boundingBox()).x < 0);
+    assert.equal((await page.locator('#agent-chat-panel').boundingBox()).width, 390);
+    await page.screenshot({ path: join(screenshots, 'agent-sidebar-mobile.png') });
+  } finally { await page.close(); }
+});
+
 test('sugestões são perguntas dos agentes e trocam de agente sem envio', async () => {
   const { page, requests, errors } = await setup({ active: ['detetive', 'barao', 'xerife'] });
   try {
