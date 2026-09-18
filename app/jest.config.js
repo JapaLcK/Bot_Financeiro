@@ -11,6 +11,10 @@ module.exports = {
     // devolve um `View` vazio, e o comportamento (nome, tamanho) é do
     // componente, não do ícone.
     "^phosphor-react-native/src/icons/.*$": "<rootDir>/__tests__/ui/__mocks__/iconeStub.tsx",
+    // `global.css` (Nativewind): quem processa `@tailwind` é o PostCSS via
+    // Metro. Jest não tem esse transform, e sem o mock o `require` do CSS cru
+    // quebra todo teste que monta `app/_layout.tsx` (ver `layout.test.tsx`).
+    "\\.css$": "<rootDir>/jest.css-stub.js",
   },
   // Definido aqui e não deixado no default do preset porque `jest-expo` SUBSTITUI
   // (não estende) essa lista quando ela é dada no config do projeto — copiamos o

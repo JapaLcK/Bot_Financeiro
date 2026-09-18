@@ -11,10 +11,14 @@ import { espaco } from "@/ui/tokens";
  * Catálogo de `Banner`, `TransactionRow` e `InsightCard` (PR C2) — fora de
  * `app/_ds/index.tsx` por tamanho, mesmo motivo de `controles.tsx`/
  * `exibicao.tsx`/`dinheiro.tsx` (CLAUDE.md §0.5).
+ *
+ * O `gap` do container raiz usa `className` (Nativewind) em vez de `style`,
+ * de propósito: prova o motor no Expo Go sem mudar o visual — `gap-lg` bate
+ * no mesmo `espaco.lg` (16px) que o `style` inline usava.
  */
 export function SecaoComposicao() {
   return (
-    <View style={{ gap: espaco.lg }}>
+    <View className="gap-lg">
       <Texto variante="secao">Composição</Texto>
 
       <View style={{ gap: espaco.sm }}>
