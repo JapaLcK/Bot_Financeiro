@@ -579,6 +579,15 @@ async def serve_dashboard_css():
     )
 
 
+@router.get("/sidenav-rail.css")
+async def serve_sidenav_rail_css():
+    return FileResponse(
+        FRONTEND_DIR / "sidenav-rail.css",
+        media_type="text/css",
+        headers={"Cache-Control": "no-cache"},
+    )
+
+
 @router.get("/comecar.js")
 async def serve_comecar_js():
     """Comportamento do wizard de primeira configuração servido em /onboarding.
