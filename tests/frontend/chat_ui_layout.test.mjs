@@ -3,8 +3,24 @@ import assert from 'node:assert/strict';
 import { join } from 'node:path';
 import { setup, ask, screenshots } from './agent_chat_fixture.mjs';
 
+test('chat dos agentes acompanha o visualViewport quando teclado muda só a área visível', async () => {
+  const { page } = await setup({ viewport: { width: 390, height: 844 } });
+  try {
+    const panel = page.locator('#agent-chat-panel');
+    await panel.evaluate(el => {
+      el.style.setProperty('--pc-viewport-top', '12px');
+      el.style.setProperty('--pc-viewport-height', '420px');
+    });
+    const bounds = await panel.boundingBox();
+    assert.equal(bounds.y, 12);
+    assert.equal(bounds.height, 420);
+    const send = await page.locator('#agent-chat-send').boundingBox();
+    assert.ok(send.y + send.height <= bounds.y + bounds.height, 'envio permanece acima do teclado');
+  } finally { await page.close(); }
+});
+
 for (const light of [false, true]) {
-  test(`ambos chats cabem no desktop e ocupam viewport móvel no tema ${light ? 'claro' : 'escuro'}`, async () => {
+  test(`agentes ocupam a página e Piggy mantém painel no tema ${light ? 'claro' : 'escuro'}`, async () => {
     const { page } = await setup();
     try {
       if (light) await page.evaluate(() => document.body.classList.add('light'));
@@ -23,7 +39,12 @@ for (const light of [false, true]) {
           const bounds = await panel.boundingBox();
           assert.ok(bounds.x >= -1 && bounds.y >= -1, JSON.stringify(bounds));
           assert.ok(bounds.x + bounds.width <= width + 1 && bounds.y + bounds.height <= 845, JSON.stringify(bounds));
-          if (width <= 600) {
+          if (mode === 'agent-chat') {
+            assert.ok(Math.abs(bounds.width - width) <= 1, 'agentes ocupam toda a largura');
+            assert.ok(Math.abs(bounds.height - 844) <= 1, 'agentes ocupam toda a altura');
+            assert.equal(await panel.getAttribute('role'), 'main');
+            assert.equal(await panel.getAttribute('aria-modal'), null);
+          } else if (width <= 600) {
             assert.ok(Math.abs(bounds.width - width) <= 1, 'no celular a conversa ocupa toda a largura');
             assert.ok(Math.abs(bounds.height - 844) <= 1, 'no celular a conversa ocupa toda a altura');
             assert.equal(await panel.getAttribute('aria-modal'), 'true');
@@ -106,7 +127,7 @@ for (const mode of ['agent-chat', 'piggy']) {
       });
       if (mode === 'piggy') await page.evaluate(() => togglePiggy());
       await page.fill(`#${mode}-input`, 'Rascunho em paisagem');
-      assert.equal(await page.locator(`#${mode}-panel`).getAttribute('aria-modal'), 'true');
+      assert.equal(await page.locator(`#${mode}-panel`).getAttribute('aria-modal'), mode === 'piggy' ? 'true' : null);
       for (const height of [390, 220]) {
         await page.setViewportSize({ width: 844, height });
         await page.waitForFunction(({ mode, height }) => {
