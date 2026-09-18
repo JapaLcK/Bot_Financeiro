@@ -423,7 +423,8 @@ CI verde deixam o PR *pronto*; não autorizam o merge. Avise e pergunte.
 confira: o PR está `MERGED` (`gh pr view <n> --json state`); `git status --short` vazio;
 nenhum worktree nem sessão usa a branch (`git worktree list`); nenhum outro PR aberto a usa
 como base nem como head (`gh pr list --base <branch>` e `gh pr list --head <branch>`). Então `git branch -d <branch>` e
-`git push origin --delete <branch>`. Merge por squash faz o `-d` recusar: use `-D` só se
+`git push origin --delete --force-with-lease=<branch>:<headRefOid> <branch>` — o lease
+recusa se a remota recebeu commit depois do merge. Merge por squash faz o `-d` recusar: use `-D` só se
 o HEAD local for igual ao `headRefOid` do PR. Qualquer item falhou → não force, avise.
 
 **O ciclo de correção também precisa de inventário — senão vira gerador de bug.**
