@@ -1685,7 +1685,8 @@ def _find_manual_candidates(cur, user_id: int, tipo: str, valor, tx_date) -> lis
     cur.execute(
         f"""
         select id, valor, coalesce(posted_at, criado_em::date) as ref_date, alvo, nota,
-               coalesce(source, 'manual') as source
+               coalesce(source, 'manual') as source,
+               (efeitos ? 'of_recurring') as of_recurring
         from launches
         where user_id = %s
           and {TIPO_CANON_SQL} = %s
@@ -1812,12 +1813,15 @@ def import_open_finance_launches(user_id: int, connection_id: int | None = None)
                         # confirmação do usuário: rebaixa 'auto' → 'ask' (vira
                         # pendência; confirm/reject decide). A absorção automática
                         # era o que drenava a Carteira. Outras fontes (`ofx`)
-                        # seguem AUTO-fundindo normalmente.
-                        match_src = next(
-                            (c.get("source") for c in candidates if c["id"] == match_id),
-                            None,
-                        )
-                        if match_src == "manual":
+                        # seguem AUTO-fundindo normalmente. EXCEÇÃO: cobrança
+                        # recorrente em conta (`of_recurring`) — o lançamento É o
+                        # débito bancário previsto, não dinheiro em espécie: funde
+                        # direto, sem 'ask' (review Codex P1 — dobrava no mês e
+                        # nos orçamentos até a pendência ser resolvida).
+                        match = next((c for c in candidates if c["id"] == match_id), None)
+                        if match and match.get("of_recurring"):
+                            verdict = "auto"
+                        elif match and match.get("source") == "manual":
                             verdict = "ask"
 
                 if verdict == "auto":

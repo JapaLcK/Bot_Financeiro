@@ -190,6 +190,35 @@ def test_credit_launch_blocked_for_covered_card(user_id):
         assert cur.fetchone()["n"] == 0
 
 
+@pytest.mark.parametrize("como", ["pausar", "deletar"])
+def test_credit_launch_allowed_when_covered_connection_inactive(user_id, como):
+    """P2 (review Codex): `open_finance_account_id` não é prova de sync ativo.
+    Conexão PAUSED (trial vencido) ou DELETED mantém o vínculo e para de
+    importar — compra manual no cartão tem de ser PERMITIDA (API e bot), senão
+    o usuário fica sem registrar gasto nenhum."""
+    from core.handlers import credit as h_credit
+
+    conn_id = _connect_fake_bank(user_id)
+    card_id = db.create_card(user_id, "Nubank", closing_day=10, due_day=17)
+    _cobertura_open_finance(user_id, card_id)
+    if como == "pausar":
+        db.pause_open_finance_connection(conn_id)
+    else:
+        with db.get_conn() as conn, conn.cursor() as cur:
+            cur.execute("update open_finance_connections set status='DELETED' where id=%s",
+                        (conn_id,))
+            conn.commit()
+
+    msg = h_credit.add_credit_from_entities(user_id, valor=50, card_name="Nubank")
+    assert "🪪" in msg
+
+    client, headers = _dashboard_client(user_id, f"inactive-{como}@t.com")
+    r = client.post(f"/launches/{user_id}",
+                    json={"tipo": "credito", "valor": 80, "card_id": card_id},
+                    headers=headers)
+    assert r.status_code == 200, r.text
+
+
 def test_credit_launch_allowed_for_uncovered_card(user_id):
     """Cartão manual (`open_finance_account_id` NULL) continua lançável — MESMO
     com Open Finance ativo em outros produtos (aqui, a conta bancária)."""
@@ -379,3 +408,31 @@ def test_recurring_charge_account_sem_open_finance_continua_debitando(pro_user_i
     assert cobrancas, "a cobrança não rodou"
 
     assert float(db.get_balance(pro_user_id)) == 100.0
+
+
+def test_recurring_of_charge_funde_direto_sem_pendencia(pro_user_id):
+    """P1 (review Codex): cobrança recorrente em conta para usuário com OF é o
+    DÉBITO BANCÁRIO PREVISTO — não dinheiro em espécie. Quando a tx do banco
+    chega, o importador FUNDE direto (marcador `of_recurring`): sem 'ask', sem
+    pendência, e o mês não conta em dobro."""
+    from core.services.recurring_charger import charge_due_recurring_expenses_once
+    from db.recurring import create_recurring_expense
+
+    _connect_fake_bank(pro_user_id)
+    hoje = today_tz()
+    create_recurring_expense(
+        pro_user_id, "Netflix", 21.90, "streaming", hoje.day, "account",
+        start_date=hoje)
+    cobrancas = charge_due_recurring_expenses_once(hoje)
+    assert cobrancas, "a cobrança não rodou"
+    assert float(db.get_balance(pro_user_id)) == 0.0, "a Carteira foi drenada"
+
+    rep = _importa_of_tx(pro_user_id, hoje, "21.90", "NETFLIX COBRANCA",
+                         f"tx-rec-{pro_user_id}")
+
+    assert rep["auto_merged"] == 1, rep
+    assert rep["pending"] == 0, rep
+    assert rep["inserted"] == 0, rep
+    with db.get_conn() as conn, conn.cursor() as cur:
+        cur.execute("select count(*) as n from launches where user_id=%s", (pro_user_id,))
+        assert cur.fetchone()["n"] == 1, "a fusão tem de deixar UMA linha"

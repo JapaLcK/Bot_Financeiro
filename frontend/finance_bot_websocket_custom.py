@@ -6908,10 +6908,12 @@ async def create_launch_route(request: Request, user_id: int, payload: LaunchCre
             raise HTTPException(status_code=400, detail="Cartão não encontrado.")
         card_name = card.get("name") or "cartão"
 
-        # Cartão coberto pelo Open Finance: as compras chegam pela importação
-        # automática — lançamento manual duplicaria (e o manual agora é só
-        # dinheiro em espécie ou cartão fora do OF).
-        if card.get("open_finance_account_id") is not None:
+        # Cartão coberto pelo Open Finance com sync ATIVO: as compras chegam
+        # pela importação automática — lançamento manual duplicaria (e o manual
+        # agora é só dinheiro em espécie ou cartão fora do OF). O vínculo sozinho
+        # não prova sync: conexão PAUSED/DELETED mantém o link e para de
+        # importar — aí a compra manual tem de passar (review Codex P2).
+        if card.get("of_sync_active"):
             raise HTTPException(
                 status_code=400,
                 detail="Lançamentos manuais não são permitidos para cartões sincronizados "

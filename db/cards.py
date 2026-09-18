@@ -391,7 +391,14 @@ def get_card_by_id(user_id: int, card_id: int):
                        c.reminders_enabled, c.reminders_days_before, c.reminder_last_sent_on,
                        c.credit_limit, c.color, c.flag, c.last4,
                        c.open_finance_account_id,
-                       (u.default_card_id = c.id) as is_default
+                       (u.default_card_id = c.id) as is_default,
+                       (c.open_finance_account_id is not null
+                        and exists (
+                            select 1 from open_finance_accounts oa
+                            join open_finance_connections oc on oc.id = oa.connection_id
+                            where oa.id = c.open_finance_account_id
+                              and upper(coalesce(oc.status, '')) not in ('PAUSED', 'DELETED')
+                        )) as of_sync_active
                 from credit_cards c
                 left join users u on u.id = c.user_id
                 where c.user_id = %s and c.id = %s

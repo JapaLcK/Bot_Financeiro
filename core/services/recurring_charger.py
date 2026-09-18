@@ -345,11 +345,17 @@ def _charge_one(
         # bancária (o extrato OF já o reflete): registrar com `delta_conta: 0`
         # impede que a cobrança drene a Carteira Piggy e conte o gasto duas
         # vezes. Sem OF, o débito da Carteira continua como sempre.
+        #
+        # O marcador `of_recurring` tira a cobrança do caminho do dinheiro em
+        # espécie: quando a tx do banco chega, o importador FUNDE direto
+        # (sem 'ask'/pendência e sem duplicar no mês/orçamentos) — o lançamento
+        # É o débito bancário previsto, não um lançamento manual do usuário.
         of_ativo = has_open_finance_connections(user_id)
         launch_id, _seq, _bal = add_launch_and_update_balance(
             user_id, "despesa", amount, alvo=f"recorrente:{name}", nota=nota,
             categoria=category, is_internal_movement=False,
             apply_delta=not of_ativo,
+            extra_efeitos={"of_recurring": True} if of_ativo else None,
         )
     else:  # credit_card
         card_id = rec.get("card_id")
