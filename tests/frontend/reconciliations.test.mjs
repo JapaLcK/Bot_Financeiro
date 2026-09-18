@@ -95,6 +95,14 @@ async function pageFor(width, initialRows, { actionHandler, billPay, fakeWs = fa
   await page.addInitScript(() => { document.cookie = "csrf_token=tok123"; });
   await page.goto(`${origin}/dashboard.html`);
   await page.waitForFunction(() => Boolean(window.Reconciliations) && USER_ID === 1);
+  // Menu lateral compacto (frontend/sidenav-rail.css): em desktop é uma barra
+  // de 68px que ABRE para 260px por cima do conteúdo no :hover. No CI (Linux)
+  // o cursor fica parado em (0,0), dentro da barra, e ela cobria o aviso do
+  // cartão de saldo (centro em x~240): o clique era interceptado pela
+  // .sidenav-section. Parte de (0,0) de propósito, para a rodada local ser
+  // igual à do CI, e tira o cursor da barra como um usuário vindo do conteúdo.
+  await page.mouse.move(0, 0);
+  await page.mouse.move(width - 20, 450);
   return { page, posts, rows };
 }
 
