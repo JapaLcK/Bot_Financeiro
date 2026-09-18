@@ -338,9 +338,10 @@ def main(argv: list[str]) -> int:
     n_com_leve, n_sem_leve = leve_por_grupo["com"], leve_por_grupo["sem"]
     proximo = "com" if n_com_leve <= n_sem_leve else "sem"
     print(f"PRs Leve marcados: com={n_com_leve} sem={n_sem_leve}")
-    print(f"próximo PR Leve: {proximo}")
     if n_com_leve >= 10 and n_sem_leve >= 10:
-        print("experimento encerrado")
+        print("experimento encerrado — nenhum PR Leve novo entra; o dono decide")
+    else:
+        print(f"próximo PR Leve: {proximo}")
 
     return 0
 
