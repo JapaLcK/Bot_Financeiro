@@ -125,6 +125,114 @@ body.light #pigbank-chat-root {
   padding: 8px 14px; border: 1px solid var(--pc-line); border-radius: 24px;
   background: var(--pc-bubble); color: var(--pc-ink); font-size: 12px;
 }
+html.pb-agent-chat-open, html.pb-agent-chat-open body { overflow: hidden; overscroll-behavior: none; }
+html.pb-agent-chat-open #piggy-fab { visibility: hidden; }
+#pigbank-chat-root #agent-chat-panel {
+  --pc-surface: #111112; --pc-raised: #1c1c1f; --pc-bubble: #202023;
+  --pc-ink: #f0f0f2; --pc-muted: #a0a0a9; --pc-line: #343439;
+  --pc-accent: #ff80b8; --pc-button: #f5f5f7;
+  inset: 0; display: grid; grid-template-columns: 74px minmax(0, 1fr);
+  width: 100%; height: 100vh; height: 100dvh; max-height: none;
+  border: 0; border-radius: 0; background: #111112; box-shadow: none;
+  color: var(--pc-ink); font-size: 14px; line-height: 1.5; z-index: 1200;
+}
+#pigbank-chat-root #agent-chat-panel[hidden] { display: none; }
+#pigbank-chat-root .pc-agent-rail {
+  display: flex; flex-direction: column; align-items: center; gap: 9px;
+  padding: 20px 0 14px; border-right: 1px solid #28282c; background: #101011;
+}
+#pigbank-chat-root .pc-agent-rail-brand { display: grid; place-items: center; width: 38px; height: 38px; margin-bottom: 26px; }
+#pigbank-chat-root .pc-agent-rail-brand img { width: 27px; height: 32px; object-fit: contain; }
+#pigbank-chat-root .pc-agent-rail-link {
+  display: grid; place-items: center; width: 38px; height: 38px; padding: 0;
+  border: 0; border-radius: 10px; background: transparent; color: #9999a2; text-decoration: none;
+}
+#pigbank-chat-root .pc-agent-rail-link:hover, #pigbank-chat-root .pc-agent-rail-link.active { background: #222225; color: #f4f4f6; }
+#pigbank-chat-root .pc-agent-page { min-width: 0; min-height: 0; }
+#pigbank-chat-root #agent-chat-panel .pc-chat-head {
+  min-height: 68px; padding: 10px 26px; border-bottom: 0; background: transparent;
+}
+#pigbank-chat-root #agent-chat-panel .pc-head-avatar { width: 40px; height: 44px; }
+#pigbank-chat-root #agent-chat-panel .pc-chat-head h2 { color: #f0f0f2; font-size: 15px; font-weight: 600; }
+#pigbank-chat-root #agent-chat-panel .pc-chat-head p { color: #a0a0a9; font-size: 11px; }
+#pigbank-chat-root #agent-chat-close {
+  display: flex; gap: 8px; width: auto; min-width: 44px; height: 38px; padding: 0 13px;
+  border: 1px solid #303035; border-radius: 999px; background: #1c1c1f; color: #f0f0f2;
+  font-size: 13px; white-space: nowrap;
+}
+#pigbank-chat-root #agent-chat-close:hover { background: #2a2a2e; }
+#pigbank-chat-root #agent-chat-panel .pc-chat-log {
+  padding: 0 max(24px, calc((100% - 970px) / 2)) 24px;
+  scrollbar-color: #4b4b50 transparent;
+}
+#pigbank-chat-root #agent-chat-panel .pc-chat-empty {
+  display: flex; flex-direction: column; align-items: center; justify-content: center;
+  min-height: 100%; padding: 6vh 0 0; text-align: center;
+}
+#pigbank-chat-root #agent-chat-panel .pc-chat-empty img { width: 48px; height: 56px; margin-bottom: 22px; }
+#pigbank-chat-root #agent-chat-panel .pc-chat-empty h3 { color: #f0f0f2; font-size: 25px; font-weight: 600; letter-spacing: -.035em; }
+#pigbank-chat-root #agent-chat-panel .pc-chat-empty p { color: #a0a0a9; font-size: 19px; }
+#pigbank-chat-root #agent-chat-panel .pc-chat-empty small { max-width: 450px; margin-top: 14px; color: #85858e; font-size: 12px; }
+#pigbank-chat-root #agent-chat-panel .pc-chat-message { max-width: 76%; margin: 24px 0 0; font-size: 15px; line-height: 1.7; }
+#pigbank-chat-root #agent-chat-panel .agent-chat-user { width: fit-content; margin-left: auto; }
+#pigbank-chat-root #agent-chat-panel .pc-message-avatar { width: 32px; height: 36px; }
+#pigbank-chat-root #agent-chat-panel .pc-message-bubble { border-color: #343439; background: #1b1b1e; }
+#pigbank-chat-root #agent-chat-panel .pc-message-user { background: #242427; color: #f0f0f2; }
+#pigbank-chat-root #agent-chat-panel .pc-message-author { color: #c6f11a; font-size: 12px; }
+#pigbank-chat-root #agent-chat-panel .pc-message-user .pc-message-author { color: #f0f0f2; }
+#pigbank-chat-root .pc-agent-suggestions {
+  display: flex; flex-wrap: wrap; justify-content: center; gap: 10px;
+  width: min(100%, 1018px); margin: 0 auto 24px; padding: 0 24px;
+}
+#pigbank-chat-root .pc-agent-suggestions .pc-chat-action {
+  width: auto; min-height: 47px; padding: 0 18px; border-color: #303034;
+  border-radius: 999px; background: linear-gradient(145deg, #1b1b1d, #131315 60%, #252527);
+  color: #dedee0; font-size: 14px; white-space: nowrap;
+}
+#pigbank-chat-root .pc-agent-suggestions .pc-chat-action svg { display: none; }
+#pigbank-chat-root .pc-agent-suggestions .pc-chat-action:hover { border-color: #55555b; background: #29292c; transform: translateY(-2px); }
+#pigbank-chat-root #agent-chat-panel .pc-chat-feedback, #pigbank-chat-root #agent-chat-panel .pc-chat-foot {
+  width: min(100%, 1018px); margin: 0 auto; padding-left: 24px; padding-right: 24px;
+}
+#pigbank-chat-root #agent-chat-panel .pc-chat-feedback p:not(:empty) { padding-top: 0; }
+#pigbank-chat-root #agent-chat-panel .pc-chat-foot { padding-top: 8px; padding-bottom: 24px; }
+#pigbank-chat-root #agent-chat-panel .pc-agent-compose {
+  display: flex; flex-direction: column; min-height: 118px; padding: 17px 20px 13px;
+  overflow: hidden; border: 1px solid #343438; border-radius: 34px;
+  background: #131315 radial-gradient(circle at 50% 100%, rgba(255,45,142,.11), transparent 68%);
+  transition: min-height .28s ease, border-color .28s ease, box-shadow .28s ease;
+}
+#pigbank-chat-root #agent-chat-panel .pc-agent-compose:focus-within {
+  min-height: 142px; border-color: #77405e;
+  background: #171317 radial-gradient(circle at 50% 100%, rgba(255,45,142,.2), rgba(247,215,227,.05) 42%, transparent 68%);
+  box-shadow: 0 0 0 1px rgba(255,45,142,.13), 0 0 23px rgba(255,45,142,.12), 0 0 45px rgba(255,45,142,.06);
+}
+#pigbank-chat-root #agent-chat-panel .pc-agent-compose textarea {
+  min-height: 32px; max-height: 132px; padding: 0; border-radius: 0;
+  color: #f0f0f2; caret-color: #ff80b8; font-size: 17px; line-height: 28px;
+}
+#pigbank-chat-root #agent-chat-panel .pc-agent-compose textarea::placeholder { color: #85858e; }
+#pigbank-chat-root .pc-agent-compose-actions { display: flex; align-items: center; justify-content: space-between; margin-top: 15px; }
+#pigbank-chat-root .pc-agent-add, #pigbank-chat-root #agent-chat-send {
+  display: grid; place-items: center; width: 39px; height: 39px; padding: 0; border-radius: 50%;
+}
+#pigbank-chat-root .pc-agent-add { border: 1px solid #343438; background: #1e1e20; color: #e5e5e7; }
+#pigbank-chat-root .pc-agent-add:disabled { opacity: .6; }
+#pigbank-chat-root #agent-chat-send { background: #f5f5f7; color: #1d1d20; }
+#pigbank-chat-root #agent-chat-send:hover:not(:disabled) { background: #fff; transform: translateY(-1px); }
+#pigbank-chat-root #agent-chat-send:disabled { background: #535359; color: #e9e9eb; opacity: .55; }
+#pigbank-chat-root #agent-chat-usage { margin-top: 9px; color: #85858e; text-align: center; }
+#pigbank-chat-root .pc-agent-response-feedback {
+  display: flex; align-items: center; gap: 11px; width: fit-content; max-width: 100%;
+  margin-top: 15px; padding: 8px 10px 8px 13px; border: 1px solid #34343a;
+  border-radius: 12px; background: #242427; color: #dcdce0; font-size: 12px;
+}
+#pigbank-chat-root .pc-agent-response-feedback-actions { display: flex; gap: 2px; padding-left: 6px; border-left: 1px solid #3b3b40; }
+#pigbank-chat-root .pc-agent-response-feedback button {
+  display: grid; place-items: center; width: 28px; height: 28px; padding: 0;
+  border: 0; border-radius: 7px; background: transparent; color: #a7a7ae;
+}
+#pigbank-chat-root .pc-agent-response-feedback button:hover { background: #303035; color: #fff; }
 @media (max-width: 600px), (max-width: 960px) and (pointer: coarse) and (orientation: landscape) {
   html.pb-chat-open, html.pb-chat-open body { overflow: hidden; overscroll-behavior: none; }
   #pigbank-chat-root .pc-chat-panel {
@@ -139,6 +247,23 @@ body.light #pigbank-chat-root {
   #pigbank-chat-root .pc-chat-foot { padding: 10px 12px max(12px, env(safe-area-inset-bottom)); }
   #pigbank-chat-root .pc-chat-compose textarea { font-size: 16px; }
   html.pb-chat-open #piggy-fab { visibility: hidden; }
+  #pigbank-chat-root #agent-chat-panel { top: 0; height: 100vh; height: 100dvh; padding: 0; grid-template-columns: minmax(0, 1fr); }
+  #pigbank-chat-root .pc-agent-rail { display: none; }
+  #pigbank-chat-root #agent-chat-panel .pc-chat-head { min-height: 60px; padding: 8px 16px; }
+  #pigbank-chat-root #agent-chat-panel .pc-head-avatar { width: 32px; height: 36px; }
+  #pigbank-chat-root #agent-chat-panel .pc-chat-head p, #pigbank-chat-root #agent-chat-close span { display: none; }
+  #pigbank-chat-root #agent-chat-close { width: 38px; padding: 0 9px; }
+  #pigbank-chat-root #agent-chat-panel .pc-chat-log { padding: 0 16px 16px; }
+  #pigbank-chat-root #agent-chat-panel .pc-chat-empty { padding-top: 0; }
+  #pigbank-chat-root #agent-chat-panel .pc-chat-empty h3 { font-size: 22px; }
+  #pigbank-chat-root #agent-chat-panel .pc-chat-empty p { font-size: 16px; }
+  #pigbank-chat-root #agent-chat-panel .pc-chat-message { max-width: 95%; }
+  #pigbank-chat-root .pc-agent-suggestions { flex-wrap: nowrap; justify-content: flex-start; overflow-x: auto; margin-bottom: 18px; padding: 0 16px 3px; }
+  #pigbank-chat-root .pc-agent-suggestions .pc-chat-action { flex: 0 0 auto; min-height: 40px; padding: 0 14px; font-size: 13px; }
+  #pigbank-chat-root #agent-chat-panel .pc-chat-feedback, #pigbank-chat-root #agent-chat-panel .pc-chat-foot { padding-left: 16px; padding-right: 16px; }
+  #pigbank-chat-root #agent-chat-panel .pc-chat-foot { padding-bottom: calc(16px + env(safe-area-inset-bottom)); }
+  #pigbank-chat-root #agent-chat-panel .pc-agent-compose { min-height: 106px; padding: 15px; border-radius: 25px; }
+  #pigbank-chat-root #agent-chat-panel .pc-agent-compose textarea { font-size: 16px; }
 }
 @media (prefers-reduced-motion: reduce) {
   #pigbank-chat-root *, #pigbank-chat-root *::before, #pigbank-chat-root *::after {

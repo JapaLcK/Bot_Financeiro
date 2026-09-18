@@ -5,10 +5,22 @@ type Snapshot = { active: ChatId | null; views: Partial<Record<ChatId, ChatView>
 let snapshot: Snapshot = { active: null, views: {} };
 let opener: HTMLElement | null = null;
 const listeners = new Set<() => void>();
+const previousInert = new Map<HTMLElement, boolean>();
 
 function publish(next: Snapshot) {
+  if (next.active === "agent" && snapshot.active !== "agent") {
+    for (const child of document.body.children) {
+      if (!(child instanceof HTMLElement) || child.id === "pigbank-chat-root") continue;
+      previousInert.set(child, child.inert);
+      child.inert = true;
+    }
+  } else if (next.active !== "agent" && snapshot.active === "agent") {
+    for (const [child, inert] of previousInert) child.inert = inert;
+    previousInert.clear();
+  }
   snapshot = next;
   document.documentElement.classList.toggle("pb-chat-open", Boolean(next.active));
+  document.documentElement.classList.toggle("pb-agent-chat-open", next.active === "agent");
   document.getElementById("piggy-fab")?.classList.toggle("open", next.active === "piggy");
   flushSync(() => listeners.forEach(listener => listener()));
 }
