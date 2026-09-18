@@ -426,6 +426,125 @@ test("pagar fatura: sem checagem de saldo no cliente — o POST sempre sai e a r
   } finally { await page.close(); }
 });
 
+// Achado do Tester (P2 Codex, dashboard.js:8440): a continuação de
+// _launchDetailUndo fechava (e no erro, alertava) o detalhe INCONDICIONALMENTE.
+// Com o POST em voo, o usuário podia fechar o detalhe e abrir OUTRO
+// lançamento antes de a resposta voltar — a continuação então mexia no
+// detalhe errado. Pior: o alertModal do undo velho sequestrava um
+// confirmModal já aberto sobre o novo lançamento (mesmo _genericModalResolver
+// pros dois, dashboard.js:3124).
+const doisItensLD = [
+  { id: 301, tipo: "despesa", valor: 50, alvo: "Mercado", nota: null, criado_em: "2026-09-10T10:00:00", reconciliation_of_tx_id: 501 },
+  { id: 302, tipo: "despesa", valor: 30, alvo: "Padaria", nota: null, criado_em: "2026-09-10T09:00:00", reconciliation_of_tx_id: null },
+];
+
+async function abreEDisparaUndoLD(page, idx = 0) {
+  await page.evaluate((its) => {
+    document.getElementById("history-view").classList.add("active");
+    renderHistoryTimeline({ ok: true, items: its }, false);
+  }, doisItensLD);
+  await page.evaluate((i) => openHistoryDetail(i), idx);
+  await page.getByText("Detalhe do lançamento", { exact: false }).waitFor();
+  await page.locator("#ld-undo").click();
+  await page.getByText("Ao desfazer", { exact: false }).waitFor();
+  const req = page.waitForRequest(r => new URL(r.url()).pathname === "/open-finance/1/reconciliations/501/undo");
+  await page.locator("#generic-confirm-ok").click();
+  await req;
+}
+
+const fechadoresLD = {
+  "botão Fechar": page => page.locator("#ld-close").click(),
+  "clique no backdrop": page => page.locator("#launch-detail-overlay").click({ position: { x: 5, y: 5 } }),
+  "Esc": page => page.keyboard.press("Escape"),
+};
+
+for (const [nome, fechar] of Object.entries(fechadoresLD)) {
+  test(`Desfazer: fechar por ${nome} com POST em voo + abrir outro lançamento -> detalhe NOVO continua aberto (P2 Codex)`, async () => {
+    let release;
+    const held = new Promise(r => { release = r; });
+    const { page, posts } = await pageFor(800, [], {
+      actionHandler: (_id, a) => a === "undo" ? held.then(() => ({ body: { ok: true, changed: true }, status: 200 })) : null,
+    });
+    try {
+      await abreEDisparaUndoLD(page, 0);
+      await fechar(page);
+      await page.waitForFunction(() => !document.getElementById("launch-detail-overlay").classList.contains("open"));
+      await page.evaluate(() => openHistoryDetail(1));
+      await page.getByText("Padaria", { exact: false }).first().waitFor();
+      release();
+      await page.waitForTimeout(300);
+      assert.equal(
+        await page.locator("#launch-detail-overlay").evaluate(el => el.classList.contains("open")), true,
+        "o detalhe NOVO (Padaria) foi fechado pela continuação do undo do lançamento antigo");
+      assert.equal(await page.locator("#ld-desc").innerText(), "Padaria");
+      assert.equal(posts.length, 1);
+    } finally { await page.close(); }
+  });
+
+  test(`Desfazer: fechar por ${nome} com erro (409) + abrir outro lançamento -> sem alerta sobre o detalhe novo (P2 Codex)`, async () => {
+    let release;
+    const held = new Promise(r => { release = r; });
+    const { page } = await pageFor(800, [], {
+      actionHandler: () => held.then(() => ({ body: { detail: "Par 501 já foi desfeito." }, status: 409 })),
+    });
+    try {
+      await abreEDisparaUndoLD(page, 0);
+      await fechar(page);
+      await page.waitForFunction(() => !document.getElementById("launch-detail-overlay").classList.contains("open"));
+      await page.evaluate(() => openHistoryDetail(1));
+      await page.getByText("Padaria", { exact: false }).first().waitFor();
+      release();
+      await page.waitForTimeout(300);
+      assert.equal(await page.locator("#generic-confirm-overlay.open").count(), 0,
+        "o alerta do undo de OUTRO lançamento apareceu por cima do detalhe novo");
+      assert.equal(
+        await page.locator("#launch-detail-overlay").evaluate(el => el.classList.contains("open")), true,
+        "o detalhe novo (Padaria) foi fechado pela continuação do undo antigo");
+    } finally { await page.close(); }
+  });
+}
+
+test("Desfazer: o 409 de um undo antigo não sequestra a confirmação de 'Apagar lançamento' de outro detalhe (P2 Codex)", async () => {
+  let release;
+  const held = new Promise(r => { release = r; });
+  const { page } = await pageFor(800, [], {
+    actionHandler: () => held.then(() => ({ body: { detail: "Par 501 já foi desfeito." }, status: 409 })),
+  });
+  const deletes = [];
+  await page.route("**/launches/1/302", route => {
+    deletes.push(route.request().method());
+    return route.fulfill(json({ ok: true }));
+  });
+  try {
+    await abreEDisparaUndoLD(page, 0);               // POST undo 501 em voo
+    await page.locator("#ld-close").click();          // usuário fecha o detalhe
+    await page.evaluate(() => openHistoryDetail(1));   // abre o detalhe da Padaria
+    await page.locator("#ld-delete").click();          // e pede pra apagar
+    await page.getByText("Apagar lançamento", { exact: false }).waitFor();
+    release();                                          // chega o 409 do undo velho
+    await page.waitForTimeout(300);
+    const dialogo = await page.locator("#generic-confirm-overlay").innerText();
+    assert.ok(dialogo.includes("Apagar lançamento"),
+      `o 409 do undo de outro lançamento reescreveu a confirmação de exclusão: ${JSON.stringify(dialogo)}`);
+    await page.locator("#generic-confirm-ok").click();
+    await page.waitForTimeout(200);
+    assert.deepEqual(deletes, ["DELETE"], "o DELETE da Padaria não saiu depois da confirmação");
+  } finally { await page.close(); }
+});
+
+test("Desfazer: sem trocar de detalhe, o fluxo normal continua igual — fecha, recarrega e no erro alerta (controle positivo)", async () => {
+  const { page, posts } = await pageFor(800, [], {
+    actionHandler: () => ({ status: 409, body: { detail: "Não foi possível concluir. Atualize a lista e confira novamente." } }),
+  });
+  try {
+    await abreEDisparaUndoLD(page, 0);
+    await page.getByText("Não foi possível concluir. Atualize a lista", { exact: false }).waitFor();
+    await page.locator("#generic-confirm-ok").click();
+    await page.waitForFunction(() => document.getElementById("launch-detail-overlay").classList.contains("open") === false);
+    assert.deepEqual(posts, [{ ofTxId: 501, action: "undo", csrf: "tok123" }]);
+  } finally { await page.close(); }
+});
+
 // Achado do Codex, confirmado pelo Tester (P2): fechar o diálogo (Esc, botão
 // "Fechar" ou clique no backdrop) com o POST de confirmar/rejeitar/desfazer
 // ainda em voo. `close()` põe `overlay` em null antes da Promise do fetch

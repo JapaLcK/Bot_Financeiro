@@ -8435,9 +8435,14 @@ async function _launchDetailUndo() {
     // 404 é idempotente (o par já foi desfeito noutra aba/dispositivo) — sem
     // alerta, mas fecha e recarrega igual. Outro erro mostra o detail E
     // recarrega (mesmo contrato de frontend/reconciliations.js::_run).
-    if (err.status !== 404) await alertModal(err.message);
+    // Só mostra o alerta se o detalhe na tela ainda é ESTE — senão a
+    // continuação de um undo velho sequestra um confirmModal/alertModal já
+    // aberto sobre outro lançamento (mesmo _genericModalResolver).
+    if (err.status !== 404 && _launchDetailCurrent === l) await alertModal(err.message);
   }
-  closeLaunchDetail();
+  // Enquanto este POST estava em voo o usuário pode ter fechado o detalhe e
+  // aberto outro — fechar incondicionalmente fecharia o lançamento ERRADO.
+  if (_launchDetailCurrent === l) closeLaunchDetail();
   _historyResetAndReload();
   sendRefresh();
 }
