@@ -11546,14 +11546,15 @@ function _renderAgentes(data) {
     // Energia: com plano, todos os agentes ficam liberados, mas só ativa quem
     // ainda cabe no orçamento. Com v2 off (energyOn false), nunca trava por aqui.
     const affordable = !energyOn || (used + cost <= budget);
+    const toggleContent = `<span aria-hidden="true">${active ? "Ativo" : "Pausado"}</span><span class="ag-toggle-track" aria-hidden="true"><span class="ag-toggle-thumb"></span></span>`;
     const btn = !card.disponivel
       ? `<button class="ag-btn ag-btn-soon" disabled>Em breve</button>`
       : active
-        ? `<button class="ag-btn ag-btn-active" onclick="pauseAgent('${card.kind}')"><i class="ph ph-check" aria-hidden="true"></i> Ativo · Pausar</button>`
+        ? `<button type="button" class="ag-toggle" role="switch" aria-checked="true" aria-label="Agente ${esc(card.nome)}" title="Pausar ${esc(card.nome)}" onclick="pauseAgent('${card.kind}')">${toggleContent}</button>`
         : !canActivate
           ? `<button class="ag-btn ag-btn-on" onclick="showUpgradeModal('agents')"><i class="ph ph-lock" aria-hidden="true"></i> Ativar</button>`
           : affordable
-            ? `<button class="ag-btn ag-btn-on" onclick="activateAgent('${card.kind}')">Ativar${energyOn && cost > 0 ? ` · <i class="ph ph-lightning" aria-hidden="true"></i> ${cost}` : ""}</button>`
+            ? `<button type="button" class="ag-toggle" role="switch" aria-checked="false" aria-label="Agente ${esc(card.nome)}" title="Ativar ${esc(card.nome)}" onclick="activateAgent('${card.kind}')">${toggleContent}</button>`
             : `<button class="ag-btn ag-btn-noenergy" disabled title="Pause um agente ou vá pro Pro"><i class="ph ph-lightning-slash" aria-hidden="true"></i> Sem energia</button>`;
     return `
       <div class="ag-card${!card.disponivel ? " ag-card-soon" : ""}">

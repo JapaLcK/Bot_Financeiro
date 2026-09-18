@@ -2400,7 +2400,7 @@ html.pb-app #piggy-fab { touch-action: none; }
   padding: 0; border: 0; border-radius: inherit; background: transparent; cursor: pointer;
 }
 .ag-card-open:focus-visible { outline: 2px solid var(--purple); outline-offset: 3px; }
-.ag-card > .ag-btn { position: relative; z-index: 2; }
+.ag-card > .ag-btn, .ag-card > .ag-toggle { position: relative; z-index: 2; }
 .ag-card h3 { margin: 0; font-size: 16px; }
 .ag-desc { margin: 0; font-size: 12.5px; color: var(--text-2); line-height: 1.45; min-height: 36px; }
 .ag-chips { display: flex; gap: 6px; flex-wrap: wrap; }
@@ -2433,9 +2433,32 @@ html.pb-app #piggy-fab { touch-action: none; }
    --purple sólido sob texto. O rosa fica, a tinta escurece. */
 .ag-btn-on { background: var(--purple); color: var(--on-purple); }
 .ag-btn-on:hover { filter: brightness(1.08); }
-.ag-btn-active { background: transparent; border-color: var(--neon); color: var(--neon); }
 .ag-btn-soon { background: var(--glass-bg); color: var(--text-3); cursor: default; }
 .ag-btn-noenergy { background: var(--glass-bg); color: var(--text-3); border-color: var(--glass-border); cursor: not-allowed; }
+.ag-toggle {
+  align-self: flex-end; display: inline-flex; align-items: center; gap: 8px;
+  min-height: 44px; margin-top: auto; padding: 6px 0 6px 10px;
+  border: 0; background: transparent; color: var(--text-2);
+  font-family: inherit; font-size: 12px; font-weight: 600; line-height: 1; cursor: pointer;
+}
+.ag-toggle:hover { color: var(--text); }
+.ag-toggle:focus-visible { outline: 2px solid var(--purple); outline-offset: 2px; border-radius: 8px; }
+.ag-toggle-track {
+  position: relative; flex: none; width: 44px; height: 26px; border-radius: 999px;
+  border: 1px solid var(--glass-border); background: rgba(255,255,255,.23);
+  transition: background .15s var(--ease);
+}
+body.light .ag-toggle-track { background: rgba(15,23,42,.24); }
+.ag-toggle[aria-checked="true"] .ag-toggle-track { background: var(--purple); border-color: var(--purple); }
+.ag-toggle-thumb {
+  position: absolute; top: 3px; left: 3px; width: 18px; height: 18px;
+  border-radius: 50%; background: #fff; box-shadow: 0 1px 2px rgba(0,0,0,.25);
+  transition: transform .15s var(--ease);
+}
+.ag-toggle[aria-checked="true"] .ag-toggle-thumb { transform: translateX(20px); }
+@media (prefers-reduced-motion: reduce) {
+  .ag-toggle-track, .ag-toggle-thumb { transition: none; }
+}
 
 .ag-feed-title { margin: 26px 0 12px; }
 .ag-feed { display: flex; flex-direction: column; gap: 10px; max-width: 760px; }
