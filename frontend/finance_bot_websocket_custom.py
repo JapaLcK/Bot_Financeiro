@@ -6825,15 +6825,18 @@ class LaunchCreatePayload(BaseModel):
     categoria: str | None = None
     card_id: int | None = None    # obrigatório quando tipo='credito'
     parcelas: int | None = None   # opcional pra tipo='credito' (1 ou null = à vista)
+    funding_source: str | None = None  # só receita/despesa: 'carteira' | 'piggy'
 
 
 @app.post("/launches/{user_id}")
 async def create_launch_route(request: Request, user_id: int, payload: LaunchCreatePayload):
     """Cria um lançamento manual.
 
-    - `receita` / `despesa` → cria em `launches` + atualiza saldo (mesmo fluxo do bot)
+    - `receita` / `despesa` → cria em `launches` + atualiza saldo (mesmo fluxo do bot);
+      lançamento manual é dinheiro em espécie (Carteira Piggy)
     - `credito` → cria em `credit_transactions` na fatura aberta do cartão
-      escolhido (mesmo fluxo do `gastei X no cartao Y` do WhatsApp)
+      escolhido (mesmo fluxo do `gastei X no cartao Y` do WhatsApp); recusado
+      para cartão coberto por Open Finance (compras importadas automaticamente)
     """
     _authorize_dashboard_access(request, user_id)
 
@@ -6866,6 +6869,18 @@ async def create_launch_route(request: Request, user_id: int, payload: LaunchCre
 
     alvo = (payload.alvo or "").strip() or None
     nota_in = (payload.nota or "").strip() or None
+    funding_source = (payload.funding_source or "").strip().lower() or None
+
+    # `funding_source` só vale para dinheiro (receita/despesa). Compra no
+    # crédito não tem origem de funding — quem paga é a fatura, e ela tem a
+    # própria regra (com/sem Open Finance).
+    if tipo == "credito" and funding_source:
+        raise HTTPException(status_code=400, detail="funding_source não se aplica a compras no crédito.")
+    if tipo in ("receita", "despesa") and funding_source not in (None, "carteira", "piggy"):
+        raise HTTPException(
+            status_code=400,
+            detail="Lançamentos manuais só podem ser feitos na Carteira Piggy (dinheiro em espécie).",
+        )
 
     # Resolve categoria — explícita do form ou inferência (mesmo fluxo do bot).
     explicit = (payload.categoria or "").strip() or None
@@ -6892,6 +6907,16 @@ async def create_launch_route(request: Request, user_id: int, payload: LaunchCre
         if not card:
             raise HTTPException(status_code=400, detail="Cartão não encontrado.")
         card_name = card.get("name") or "cartão"
+
+        # Cartão coberto pelo Open Finance: as compras chegam pela importação
+        # automática — lançamento manual duplicaria (e o manual agora é só
+        # dinheiro em espécie ou cartão fora do OF).
+        if card.get("open_finance_account_id") is not None:
+            raise HTTPException(
+                status_code=400,
+                detail="Lançamentos manuais não são permitidos para cartões sincronizados "
+                       "via Open Finance. Suas compras neste cartão são importadas automaticamente.",
+            )
 
         nota = nota_in or alvo or f"compra no crédito ({card_name})"
         # Sinal de aprendizado: SÓ o que o usuário escreveu. A nota acima e o
@@ -7019,14 +7044,6 @@ async def create_launch_route(request: Request, user_id: int, payload: LaunchCre
     except Exception as exc:
         raise HTTPException(status_code=500, detail=f"Erro ao registrar lançamento: {exc}") from exc
 
-    # Reconciliação reversa (Open Finance): se o banco já importou esse gasto, funde (não duplica).
-    if not is_internal:
-        try:
-            from db import reconcile_manual_launch
-            await asyncio.to_thread(reconcile_manual_launch, int(user_id), int(launch_id))
-        except Exception:
-            pass
-
     return {
         "ok": True,
         "launch_id": int(launch_id),
@@ -7036,14 +7053,15 @@ async def create_launch_route(request: Request, user_id: int, payload: LaunchCre
         "categoria": categoria,
         "alvo": alvo,
         "nota": nota,
-        # `new_balance` foi lido ANTES do `reconcile_manual_launch` acima, que
-        # funde o lançamento com o espelho do banco — mesma defasagem de
-        # `core/handlers/launches.py:1223` e `core/services/quick_entry.py:63`,
-        # terceiro chamador. Aqui é contrato JSON, sem copy: reusa
-        # `carteira_exibida` em vez de um helper novo.
+        # `new_balance` é a Carteira lida na gravação do lançamento. Não há mais
+        # fusão reversa silenciosa com o espelho do banco (decisão "lançamentos
+        # manuais exclusivos para dinheiro") — reusa `carteira_exibida` pro
+        # mesmo recorte do /saldo, como `core/handlers/launches.py` e
+        # `core/services/quick_entry.py`.
         "new_balance": float(await asyncio.to_thread(
             carteira_exibida, int(user_id), new_balance)),
         "is_internal_movement": is_internal,
+        "funding_source": {"kind": "carteira", "label": "Carteira Piggy"},
     }
 
 

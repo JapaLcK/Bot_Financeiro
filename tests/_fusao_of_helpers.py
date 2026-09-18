@@ -105,6 +105,21 @@ def ultimo_launch(uid: int) -> int:
     return row["id"]
 
 
+def of_tx_pendente(uid: int) -> int:
+    """Id da tx OF em reconciliação pendente do usuário (o 'ask' do importador)."""
+    with db.connection.get_conn() as conn:
+        with conn.cursor() as cur:
+            cur.execute(
+                """select o.id from open_finance_transactions o
+                     join open_finance_accounts a on a.id = o.account_id
+                     join open_finance_connections c on c.id = a.connection_id
+                    where c.user_id=%s and o.reconciliation_status='pending'
+                    limit 1""",
+                (uid,),
+            )
+            return cur.fetchone()["id"]
+
+
 def delta_conta(uid: int, launch_id: int):
     with db.connection.get_conn() as conn:
         with conn.cursor() as cur:

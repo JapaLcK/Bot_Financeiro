@@ -24,20 +24,22 @@ from utils_text import fmt_brl as _brl
 from utils_date import today_tz
 
 from tests._fusao_of_helpers import (  # noqa: F401 (uid_pro/ia_fora são fixtures)
-    conecta_banco, consolidado, ia_fora, manda, saldo_bruto, sincroniza, tx,
-    uid_pro,
+    conecta_banco, consolidado, ia_fora, manda, of_tx_pendente, saldo_bruto,
+    sincroniza, tx, uid_pro,
 )
 
 
 def _funde_cinquenta(uid: int) -> int:
-    """Carteira exibida 100,00 = cru 50,00 + os 50,00 do gasto fundido."""
+    """Carteira exibida 100,00 = cru 50,00 + os 50,00 do gasto fundido (com a
+    confirmação do usuário — lançamento manual nunca funde em silêncio)."""
     hoje = today_tz()
     conexao = conecta_banco(uid, "1000.00")
     db.add_launch_and_update_balance(uid, "receita", 100, None, "seed")
     manda(uid, "gastei 50 no mercado")
     sincroniza(conexao, uid, "950.00", [tx(uid, "-50.00", hoje, "MERCADO")])
     rep = db.import_open_finance_launches(uid, conexao)
-    assert rep["auto_merged"] == 1, rep
+    assert rep["pending"] == 1 and rep["auto_merged"] == 0, rep
+    db.confirm_reconciliation(uid, of_tx_pendente(uid))
     assert saldo_bruto(uid) == Decimal("50"), "a correção é de LEITURA"
     return conexao
 

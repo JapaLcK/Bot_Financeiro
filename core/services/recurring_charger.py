@@ -339,9 +339,17 @@ def _charge_one(
 
     if payment_type == "account":
         from db.accounts import add_launch_and_update_balance
+        from db import has_open_finance_connections
+
+        # Com Open Finance ativo o débito do gasto fixo ocorre na conta
+        # bancária (o extrato OF já o reflete): registrar com `delta_conta: 0`
+        # impede que a cobrança drene a Carteira Piggy e conte o gasto duas
+        # vezes. Sem OF, o débito da Carteira continua como sempre.
+        of_ativo = has_open_finance_connections(user_id)
         launch_id, _seq, _bal = add_launch_and_update_balance(
             user_id, "despesa", amount, alvo=f"recorrente:{name}", nota=nota,
             categoria=category, is_internal_movement=False,
+            apply_delta=not of_ativo,
         )
     else:  # credit_card
         card_id = rec.get("card_id")

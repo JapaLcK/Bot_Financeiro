@@ -49,9 +49,11 @@ def test_com_banco_a_resposta_traz_o_mesmo_numero_do_saldo(uid_pro, ia_fora):
     assert _LINHA_DE_HOJE.search(resp) is None, resp
 
 
-def test_o_numero_vale_DEPOIS_da_fusao_na_mesma_mensagem(uid_pro, ia_fora):
-    """A releitura é o ponto: a fusão reversa roda ANTES da montagem da resposta
-    e muda a Carteira. `new_balance` sai obsoleto na linha em que é impresso."""
+def test_o_numero_vale_DEPOIS_do_lancamento_na_mesma_mensagem(uid_pro, ia_fora):
+    """A releitura é o ponto: `new_balance` sai obsoleto na linha em que é
+    impresso. NO CONTRATO NOVO não há mais fusão reversa — o lançamento manual
+    fica na Carteira (👛) e o total consolidado (💰) é o do /saldo; a tx OF
+    pré-importada permanece como lançamento separado."""
     hoje = today_tz()
     conexao = conecta_banco(uid_pro, "113.88",
                             [tx(uid_pro, "-1.00", hoje, "PIX ENVIADO BARBARA")])
@@ -62,7 +64,8 @@ def test_o_numero_vale_DEPOIS_da_fusao_na_mesma_mensagem(uid_pro, ia_fora):
     m = _LINHA_NOVA.search(resp)
     assert m, resp
     assert m.group(1) == _saldo_total_do_comando(uid_pro)
-    assert consolidado(uid_pro) == (113.88, 0.0)
+    assert "👛 Saldo (Carteira Piggy): R$ -1,00" in resp, resp
+    assert consolidado(uid_pro) == (112.88, -1.0)
 
 
 # ── POSITIVOS: sem banco, ou com o gate desligado, nada muda ───────────────
@@ -75,9 +78,12 @@ def test_sem_banco_conectado_a_linha_continua_a_de_hoje(uid_pro, ia_fora):
     assert "🏦 Saldo: R$ -50,00" in resp, resp
 
 
-def test_com_banco_mas_gate_desligado_a_linha_continua_a_de_hoje(
+def test_com_banco_mas_gate_desligado_a_carteira_piggy_e_nomeada(
         uid_pro, ia_fora, monkeypatch):
-    """Freio de emergência puxado e user fora da allowlist."""
+    """Freio de emergência puxado e user fora da allowlist: o GATE congela só a
+    linha 💰 Saldo total. A linha da Carteira segue nomeada 👛 Saldo (Carteira
+    Piggy) com banco conectado (decisão "lançamentos manuais exclusivos para
+    dinheiro") — número relido."""
     monkeypatch.setenv("OF_CONSOLIDATED_BALANCE_ENABLED", "0")
     monkeypatch.setenv("OF_CONSOLIDATED_BETA_EMAILS", "ninguem@test.local")
     monkeypatch.setenv("OF_CONSOLIDATED_BETA_USER_IDS", "")
@@ -85,16 +91,16 @@ def test_com_banco_mas_gate_desligado_a_linha_continua_a_de_hoje(
 
     resp = manda(uid_pro, "gastei 50 no mercado")
 
-    assert _LINHA_DE_HOJE.search(resp), resp
-    assert _LINHA_NOVA.search(resp) is None, resp
-    assert "🏦 Saldo: R$ -50,00" in resp, resp
+    assert "👛 Saldo (Carteira Piggy): R$ -50,00" in resp, resp
+    assert _LINHA_NOVA.search(resp) is None
+    assert _LINHA_DE_HOJE.search(resp) is None, resp
 
 
-def test_gate_desligado_com_fusao_traz_a_carteira_RELIDA(uid_pro, ia_fora, monkeypatch):
-    """O gate congela o FORMATO, não autoriza número defasado. Com a fusão
-    acontecendo na mesma mensagem, `new_balance` vale -1,00 e a Carteira real
-    vale 0,00 — imprimir o primeiro é o sintoma do relato original no ramo em
-    que ninguém quer o saldo mentindo."""
+def test_gate_desligado_sem_fusao_a_carteira_e_a_lancada(uid_pro, ia_fora, monkeypatch):
+    """O gate congela o FORMATO, não autoriza número defasado. NO CONTRATO NOVO
+    não há fusão reversa: com a tx pré-importada, o lançamento manual fica na
+    Carteira e ela é relida na resposta — `new_balance` obsoleto era o sintoma
+    do relato original."""
     monkeypatch.setenv("OF_CONSOLIDATED_BALANCE_ENABLED", "0")
     monkeypatch.setenv("OF_CONSOLIDATED_BETA_EMAILS", "ninguem@test.local")
     monkeypatch.setenv("OF_CONSOLIDATED_BETA_USER_IDS", "")
@@ -105,7 +111,7 @@ def test_gate_desligado_com_fusao_traz_a_carteira_RELIDA(uid_pro, ia_fora, monke
 
     resp = manda(uid_pro, "Gastei 1 real com a barbara")
 
-    # formato caractere por caractere igual ao de hoje, número relido
-    assert "🏦 Saldo: R$ 0,00" in resp, resp
-    assert _LINHA_NOVA.search(resp) is None, resp
-    assert consolidado(uid_pro) == (113.88, 0.0)
+    # linha da Carteira nomeada, número relido (sem fusão: -1,00)
+    assert "👛 Saldo (Carteira Piggy): R$ -1,00" in resp, resp
+    assert _LINHA_NOVA.search(resp) is None
+    assert consolidado(uid_pro) == (112.88, -1.0)

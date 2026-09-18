@@ -111,9 +111,12 @@ def test_receita_pendente_nao_autoriza(uid_pro, ia_fora, sem_autorizacao):
     with pytest.raises(ValueError, match="INSUFFICIENT_ACCOUNT"):
         _aporte(uid_pro, 50)
     bill = _fatura_de(uid_pro, 80.0)
-    with pytest.raises(HTTPException) as e:
-        asyncio.run(pay_bill_route(_Req(), uid_pro, bill, PayBillPayload(amount=50.0)))
-    assert e.value.status_code == 400
+    # NO CONTRATO NOVO o pagamento da fatura com Open Finance ativo NÃO usa a
+    # Carteira (o débito ocorre no banco): autoriza sem depender da receita
+    # pendente e sem drenar o dinheiro em espécie.
+    r = asyncio.run(pay_bill_route(_Req(), uid_pro, bill, PayBillPayload(amount=50.0)))
+    assert r.get("ok") is True, r
+    assert saldo_bruto(uid_pro) == Decimal("100"), "a Carteira foi drenada"
     assert _carteira_fonte(uid_pro) == 0
     assert consolidado(uid_pro)[1] == 100.0, "a exibição mudou"
 
@@ -167,10 +170,12 @@ def _receita_e_despesa_pendentes(uid):
     (lambda u: _receita_100(u, "gastei 150 no mercado"), "R$ -50,00", "R$ -150,00", "R$ 100,00"),
     (_receita_e_despesa_pendentes, "R$ 72,38", "R$ -1,00", "R$ 73,38"),
 ], ids=["nada_gasto", "entrada_maior_que_a_tela", "tela_negativa", "receita_e_despesa"])
-def test_recusa_cita_a_tela_e_o_disponivel_a_parte(
+def test_caixinha_recusa_citando_a_tela_e_fatura_com_of_nao_drena(
         uid_pro, ia_fora, sem_autorizacao, prepara, tela, disponivel, a_conferir):
-    """O número da tela e o disponível, separados; nada diz que um contém o outro."""
-    from fastapi import HTTPException
+    """O número da tela e o disponível, separados; nada diz que um contém o outro
+    (guarda da CAIXINHA, que continua valendo). Já o pagamento de fatura com
+    Open Finance ativo NÃO recusa por saldo nem drena a Carteira no contrato
+    novo — o débito ocorre no banco."""
     from frontend.routes.cards import PayBillPayload, pay_bill_route
     prepara(uid_pro)
     db.create_pocket(uid_pro, "viagem")
@@ -180,17 +185,18 @@ def test_recusa_cita_a_tela_e_o_disponivel_a_parte(
     assert f"Carteira: {tela}" in manda(uid_pro, "/saldo")
     recusa = manda(uid_pro, "guardei 50 na caixinha viagem")
     assert f"Carteira*: {frase}\n" in recusa, recusa
-    with pytest.raises(HTTPException) as e:
-        asyncio.run(pay_bill_route(_Req(), uid_pro, _fatura_de(uid_pro, 80.0),
+    antes = saldo_bruto(uid_pro)
+    r = asyncio.run(pay_bill_route(_Req(), uid_pro, _fatura_de(uid_pro, 80.0),
                                    PayBillPayload(amount=50.0)))
-    assert e.value.detail == f"Saldo insuficiente. Saldo atual: {frase}, valor pedido: R$ 50,00."
-    assert "sendo" not in recusa + e.value.detail
+    assert r.get("ok") is True, r
+    assert saldo_bruto(uid_pro) == antes, "a Carteira foi drenada pelo pagamento"
+    assert "sendo" not in recusa
 
 
 def test_recusa_sem_pendencia_nao_muda(uid_pro, ia_fora, sem_autorizacao):
-    """Sem pendência o texto é o de antes deste PR, byte a byte (o do bot; o 400
-    da fatura trocou `R$ 10.00` por `R$ 10,00` na rodada 2)."""
-    from fastapi import HTTPException
+    """Sem pendência o texto é o de antes deste PR, byte a byte (o do bot). Já o
+    pagamento de fatura com Open Finance ativo mudou de contrato: autoriza sem
+    saldo na Carteira e sem drená-la (o débito ocorre no banco)."""
     from frontend.routes.cards import PayBillPayload, pay_bill_route
     db.add_launch_and_update_balance(uid_pro, "receita", 10, None, "seed")
     assert funding.msg_insuficiente(uid_pro, 50, acao="depósito") == (
@@ -204,10 +210,10 @@ def test_recusa_sem_pendencia_nao_muda(uid_pro, ia_fora, sem_autorizacao):
         "A **Carteira** é o dinheiro fora dos bancos conectados (espécie e contas "
         "que você não ligou) — por isso ela costuma ficar zerada depois que você conecta "
         "um banco.")
-    with pytest.raises(HTTPException) as e:
-        asyncio.run(pay_bill_route(_Req(), uid_pro, _fatura_de(uid_pro, 80.0),
+    r = asyncio.run(pay_bill_route(_Req(), uid_pro, _fatura_de(uid_pro, 80.0),
                                    PayBillPayload(amount=50.0)))
-    assert e.value.detail == "Saldo insuficiente. Saldo atual: R$ 10,00, valor pedido: R$ 50,00."
+    assert r.get("ok") is True, r
+    assert saldo_bruto(uid_pro) == Decimal("10"), "a Carteira foi drenada pelo pagamento"
 
 
 # ── investimento: as duas guardas de Carteira com receita pendente ─────────

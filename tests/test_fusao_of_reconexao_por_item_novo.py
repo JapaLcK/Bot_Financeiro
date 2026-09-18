@@ -36,7 +36,7 @@ import db
 from utils_date import today_tz
 
 from tests._fusao_of_helpers import (  # noqa: F401 (uid_pro/ia_fora são fixtures)
-    consolidado, ia_fora, manda, tx, uid_pro,
+    consolidado, ia_fora, manda, of_tx_pendente, tx, uid_pro,
 )
 
 
@@ -60,7 +60,11 @@ def _funde_um_real_no_item_a(uid: int) -> int:
     manda(uid, "Gastei 1 real com a barbara")
     _item(uid, f"item-A-{uid}", conta, "113.88",
           [tx(uid, "-1.00", hoje, "PIX ENVIADO BARBARA")])
-    assert db.import_open_finance_launches(uid, a)["auto_merged"] == 1
+    # o casamento é rebaixado a pendência (candidato manual) e a confirmação tem
+    # de acontecer AGORA, antes de qualquer evento de reconexão do teste
+    rep = db.import_open_finance_launches(uid, a)
+    assert rep["pending"] == 1 and rep["auto_merged"] == 0, rep
+    db.confirm_reconciliation(uid, of_tx_pendente(uid))
     assert consolidado(uid) == (113.88, 0.0)
     return a
 
@@ -132,12 +136,14 @@ def test_mesmo_provider_account_id_em_dois_usuarios_nao_vaza(uid_pro, ia_fora):
     conta_compartilhada = f"acc-colide-{uid_pro}"
     hoje = today_tz()
 
-    # o dono funde 1 real numa conta com o id colidente
+    # o dono funde 1 real numa conta com o id colidente (com confirmação)
     a = _item(uid_pro, f"item-colide-A-{uid_pro}", conta_compartilhada, "114.88")
     manda(uid_pro, "Gastei 1 real com a barbara")
     _item(uid_pro, f"item-colide-A-{uid_pro}", conta_compartilhada, "113.88",
           [tx(uid_pro, "-1.00", hoje, "PIX ENVIADO BARBARA")])
-    assert db.import_open_finance_launches(uid_pro, a)["auto_merged"] == 1
+    rep = db.import_open_finance_launches(uid_pro, a)
+    assert rep["pending"] == 1 and rep["auto_merged"] == 0, rep
+    db.confirm_reconciliation(uid_pro, of_tx_pendente(uid_pro))
 
     # o outro usuário: banco com o MESMO provider_account_id, Carteira intocada
     _item(outro, f"item-colide-B-{outro}", conta_compartilhada, "500.00")
