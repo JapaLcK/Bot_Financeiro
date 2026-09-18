@@ -64,14 +64,20 @@
     section.append(element("p", `PigBank: ${r.launch.alvo || r.launch.nota || "—"} · ${launchAmount(r.launch)} · ${r.launch.date}`, "msub"));
     return section;
   }
+  // Overlay fechado durante o POST é conclusão válida, não erro (achado do
+  // Tester/Codex): se deu certo, o dashboard ainda precisa atualizar (saldo e
+  // aviso mudaram de verdade) mesmo sem lista para recarregar; se falhou, não
+  // há diálogo para alertar nem lista para recarregar, e o dashboard não é
+  // tocado — a ação não deu certo.
   async function _run(ofTxId, action, button) {
     button.disabled = true;
     try {
       await act(activeUser, ofTxId, action);
-      await load();
+      if (overlay) await load();
       if (afterSave) await afterSave();
     } catch (err) {
       button.disabled = false;
+      if (!overlay) return;
       if (err.status !== 404) await window.alertModal(err.message);
       await load();
     }

@@ -425,3 +425,82 @@ test("pagar fatura: sem checagem de saldo no cliente — o POST sempre sai e a r
     assert.equal(posts.filter(p => p.bill).length, 1);
   } finally { await page.close(); }
 });
+
+// Achado do Codex, confirmado pelo Tester (P2): fechar o diálogo (Esc, botão
+// "Fechar" ou clique no backdrop) com o POST de confirmar/rejeitar/desfazer
+// ainda em voo. `close()` põe `overlay` em null antes da Promise do fetch
+// resolver; sem guarda em `_run`, a continuação chama `load()` — que faz
+// `overlay.querySelector` — e estoura, para os TRÊS caminhos de fechamento:
+// alerta técnico cru pro usuário, TypeError não tratada, e `onSave` (refresh
+// do dashboard) nunca roda mesmo quando a ação DEU CERTO no servidor.
+function sleep(ms) { return new Promise(r => setTimeout(r, ms)); }
+async function raced(promise, ms) {
+  return Promise.race([promise.then(() => true), sleep(ms).then(() => false)]);
+}
+const fechamentos = {
+  "Esc": page => page.keyboard.press("Escape"),
+  "botão Fechar": page => page.getByRole("button", { name: "Fechar" }).click(),
+  "clique no backdrop": page => page.locator("#reconciliations-overlay").click({ position: { x: 4, y: 4 } }),
+};
+
+for (const [nome, fechar] of Object.entries(fechamentos)) {
+  test(`fechar por ${nome} com POST em voo + sucesso: sem alerta técnico e onSave é chamado (P2 Codex)`, async () => {
+    let release;
+    const held = new Promise(r => { release = r; });
+    const { page, posts } = await pageFor(800, [pendingRow], { actionHandler: () => held.then(() => null) });
+    const erros = [];
+    page.on("pageerror", e => erros.push(e.message));
+    let onSaveCalls = 0, resolveOnSave;
+    const onSaveCalled = new Promise(r => { resolveOnSave = r; });
+    await page.exposeFunction("__onSave", () => { onSaveCalls++; resolveOnSave(); });
+    try {
+      await page.evaluate(() => window.Reconciliations.open(1, window.__onSave));
+      await page.locator("#reconciliations-overlay").getByText("Mercado", { exact: false }).first().waitFor();
+      const posted = page.waitForRequest(r => r.url().endsWith("/confirm"));
+      await page.getByRole("button", { name: "É o mesmo gasto" }).click();
+      await posted;
+      await fechar(page);
+      assert.equal(await page.locator("#reconciliations-overlay").count(), 0, "overlay devia estar fechado");
+      release();
+      const chamou = await raced(onSaveCalled, 1000);
+      assert.ok(chamou, "onSave não foi chamado a tempo — a ação deu certo no servidor mas o dashboard não é atualizado");
+      assert.equal(onSaveCalls, 1);
+      assert.equal(await page.locator("#generic-confirm-overlay.open").count(), 0,
+        "alerta técnico apareceu pra uma ação que deu certo (overlay.querySelector em null)");
+      assert.deepEqual(erros, [], `pageerror não tratado: ${erros.join(" | ")}`);
+      assert.deepEqual(posts, [{ ofTxId: 501, action: "confirm", csrf: "tok123" }]);
+    } finally { await page.close(); }
+  });
+
+  test(`fechar por ${nome} com POST em voo + falha do servidor: sem alerta técnico e dashboard não é tocado (P2 Codex)`, async () => {
+    let release;
+    const held = new Promise(r => { release = r; });
+    const { page, posts } = await pageFor(800, [pendingRow], {
+      actionHandler: () => held.then(() => ({ status: 409, body: { detail: "Não foi possível concluir. Atualize a lista e confira novamente." } })),
+    });
+    const erros = [];
+    page.on("pageerror", e => erros.push(e.message));
+    let onSaveCalls = 0;
+    await page.exposeFunction("__onSave", () => { onSaveCalls++; });
+    try {
+      await page.evaluate(() => window.Reconciliations.open(1, window.__onSave));
+      await page.locator("#reconciliations-overlay").getByText("Mercado", { exact: false }).first().waitFor();
+      const posted = page.waitForRequest(r => r.url().endsWith("/confirm"));
+      await page.getByRole("button", { name: "É o mesmo gasto" }).click();
+      await posted;
+      await fechar(page);
+      assert.equal(await page.locator("#reconciliations-overlay").count(), 0, "overlay devia estar fechado");
+      const resp = page.waitForResponse(r => r.url().endsWith("/confirm"));
+      release();
+      await resp;
+      // Sem mais nada esperando o quê: dá tempo pra continuação de `_run`
+      // rodar (ou travar num alerta que não devia existir) antes de olhar.
+      await page.waitForTimeout(200);
+      assert.equal(await page.locator("#generic-confirm-overlay.open").count(), 0,
+        "alerta técnico apareceu pra um diálogo que já não está na tela");
+      assert.equal(onSaveCalls, 0, "dashboard foi atualizado como se a ação tivesse dado certo");
+      assert.deepEqual(erros, [], `pageerror não tratado: ${erros.join(" | ")}`);
+      assert.deepEqual(posts, [{ ofTxId: 501, action: "confirm", csrf: "tok123" }]);
+    } finally { await page.close(); }
+  });
+}
