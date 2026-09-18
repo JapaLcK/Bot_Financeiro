@@ -28,9 +28,9 @@ import sys
 from pathlib import Path
 
 REPO = "JapaLcK/Bot_Financeiro"
-PROJETOS_GLOB = os.path.expanduser(
-    "~/.claude/projects/-Users-lucaskuramoti-Desktop-bot-bot-wa*"
-)
+_RAIZ = Path(subprocess.run(["git", "rev-parse", "--path-format=absolute", "--git-common-dir"],
+    capture_output=True, text=True, cwd=Path(__file__).parent).stdout.strip()).parent
+PROJETOS_GLOB = os.path.expanduser("~/.claude/projects/") + re.sub(r"[^A-Za-z0-9]", "-", str(_RAIZ)) + "*"
 GRUPOS_VALIDOS = {"com", "sem"}
 FAIXAS_VALIDAS = {"Leve", "Completo"}
 MARCADOR_RE = re.compile(
