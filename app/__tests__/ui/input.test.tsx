@@ -1,6 +1,7 @@
 import { fireEvent, render } from "@testing-library/react-native";
 import * as Haptics from "expo-haptics";
 
+import { Icone } from "@/ui/componentes/Icone";
 import { Input } from "@/ui/componentes/Input";
 import { TemaProvider } from "@/ui/tema";
 import { claro, escuro } from "@/ui/tokens";
@@ -86,5 +87,30 @@ describe("Input", () => {
     const { claro: c, escuro: e } = renderNosDoisTemas(<Input rotulo="Nome" erro="Obrigatório" />);
     expect(c.toJSON()).toMatchSnapshot("claro");
     expect(e.toJSON()).toMatchSnapshot("escuro");
+  });
+
+  describe("icone", () => {
+    it("sem icone: o campo permanece com o MESMO estilo de antes (o snapshot acima não muda)", () => {
+      const { claro: c } = renderNosDoisTemas(<Input rotulo="Nome" />);
+      expect(c.UNSAFE_queryAllByType(Icone)).toHaveLength(0);
+    });
+
+    it("com icone: renderiza o ícone em tom inkMuted, dentro de um contorno próprio", () => {
+      const { claro: c } = renderNosDoisTemas(<Input rotulo="E-mail" icone="Envelope" />);
+      expect(c.UNSAFE_getByType(Icone).props).toMatchObject({ nome: "Envelope", tom: "inkMuted" });
+    });
+
+    it("com icone: o TextInput não tem mais o próprio contorno — quem borda é a linha ao redor do ícone", () => {
+      const { claro: c } = renderNosDoisTemas(<Input rotulo="E-mail" icone="Envelope" />);
+      const campo = c.getByLabelText("E-mail");
+      expect(campo.props.style[1].borderWidth).toBeUndefined();
+    });
+
+    it("aceita digitação normalmente com icone", () => {
+      const onChangeText = jest.fn();
+      const { getByLabelText } = renderInterativo(<Input rotulo="E-mail" icone="Envelope" onChangeText={onChangeText} />);
+      fireEvent.changeText(getByLabelText("E-mail"), "ana@x.com");
+      expect(onChangeText).toHaveBeenCalledWith("ana@x.com");
+    });
   });
 });

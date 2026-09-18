@@ -1,10 +1,14 @@
 /**
- * Apoio dos testes da tela de entrada (`inicio.test.ts` e
- * `inicio_corridas.test.ts`). Não termina em `.test.ts`, então o Jest não o
- * roda como suíte.
+ * Apoio dos testes de `entrar.ts`/`entrar_mfa.test.ts`/`sessao.test.tsx`.
+ * Não termina em `.test.ts`, então o Jest não o roda como suíte.
+ *
+ * Migrado de `__tests__/inicio_apoio.ts` (Fase 1, removido junto com
+ * `src/ui/inicio.ts` — CLAUDE.md §0.1): os dublês de rede e cofre são os
+ * mesmos, só o `_resetTela` de `inicio.ts` virou `_resetEntrar` de
+ * `entrar.ts`.
  */
 import { _resetRenovacao } from "@/api/client";
-import { _resetTela, type Estado } from "@/ui/inicio";
+import { _resetEntrar } from "@/features/auth/entrar";
 
 export const cofre = (globalThis as unknown as { __cofreDeTeste: Map<string, string> })
   .__cofreDeTeste;
@@ -17,8 +21,6 @@ export const atrasarEscrita = (
 ).__atrasarEscritaNoCofre;
 export const fetchFalso = jest.fn();
 
-export const C: Estado = { fase: "carregando" };
-export const E: Estado = { fase: "entrada" };
 export const GENERICO = "Algo deu errado. Tente de novo.";
 export const S = { access: "access-s", refresh: "rt_s" };
 
@@ -34,7 +36,7 @@ export function falharLeitura(sim: boolean) {
 }
 
 export function prepararCaso() {
-  _resetTela();
+  _resetEntrar();
   _resetRenovacao();
   falharLeitura(false);
   cofre.clear();
@@ -63,9 +65,9 @@ export function segurar() {
   return { promessa, soltar: () => soltar() };
 }
 
-export function gravador() {
-  const aplicados: Estado[] = [];
-  return { aplicados, aplicar: (e: Estado) => void aplicados.push(e) };
+export function gravador<T>() {
+  const aplicados: T[] = [];
+  return { aplicados, aplicar: (e: T) => void aplicados.push(e) };
 }
 
 export type Rota = (o: RequestInit) => Response | Promise<Response>;

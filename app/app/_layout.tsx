@@ -3,9 +3,12 @@ import { Stack } from "expo-router";
 import { useEffect } from "react";
 import { useColorScheme, View } from "react-native";
 
+import { SessaoProvider, useSessao } from "@/features/auth/sessao";
 import { rastrear } from "@/services/analytics";
-import { TemaProvider } from "@/ui/tema";
-import { claro, escuro } from "@/ui/tokens";
+import { Button } from "@/ui/componentes/Button";
+import { Texto } from "@/ui/componentes/Texto";
+import { TemaProvider, useTema } from "@/ui/tema";
+import { claro, escuro, espaco } from "@/ui/tokens";
 
 import "../global.css";
 
@@ -48,17 +51,64 @@ export default function Layout() {
 
   return (
     <TemaProvider>
-      <Stack
-        screenOptions={{
-          headerShown: false,
-          contentStyle: { backgroundColor: paleta.bg },
-        }}
-      >
-        {/* Catálogo interno do design system: só existe em build de dev. */}
-        <Stack.Protected guard={__DEV__}>
-          <Stack.Screen name="_ds" />
-        </Stack.Protected>
-      </Stack>
+      <SessaoProvider>
+        <Roteador />
+      </SessaoProvider>
     </TemaProvider>
+  );
+}
+
+/**
+ * Lê a sessão e decide entre a mesma View de espera (enquanto ela verifica o
+ * cofre), uma tela de erro plana (cofre ilegível) ou a pilha de rotas — as
+ * duas primeiras não podem entrar como `Stack.Screen`: sem sessão decidida
+ * ainda não há como saber se o guard de `(auth)` ou `(app)` vale.
+ */
+function Roteador() {
+  const { estado, tentarDeNovo } = useSessao();
+  const { cores } = useTema();
+
+  if (estado.fase === "verificando") {
+    return <View style={{ flex: 1, backgroundColor: cores.bg }} />;
+  }
+
+  if (estado.fase === "erro") {
+    return (
+      <View style={{ flex: 1, backgroundColor: cores.bg, alignItems: "center", justifyContent: "center", gap: espaco.lg, padding: espaco.xxl }}>
+        <Texto variante="corpo" tom="danger" style={{ textAlign: "center" }}>
+          {estado.mensagem}
+        </Texto>
+        <Button rotulo="Tentar de novo" onPress={tentarDeNovo} />
+      </View>
+    );
+  }
+
+  return (
+    <Stack
+      screenOptions={{
+        headerShown: false,
+        contentStyle: { backgroundColor: cores.bg },
+      }}
+    >
+      {/*
+        (auth)/(app) vêm ANTES de `_ds`, de propósito: quando mais de um
+        `Stack.Protected` está com o guard verdadeiro ao mesmo tempo (em dev,
+        `__DEV__` é sempre true, e ele não olha para a sessão), o
+        `Stack.Protected` resolve a rota padrão pelo PRIMEIRO grupo
+        verdadeiro na ordem em que aparecem aqui — medido com `renderRouter`.
+        Com `_ds` primeiro, todo cold start em build de dev caía no catálogo
+        interno em vez da tela de Entrar/da tela autenticada.
+      */}
+      <Stack.Protected guard={estado.fase === "anonimo"}>
+        <Stack.Screen name="(auth)" />
+      </Stack.Protected>
+      <Stack.Protected guard={estado.fase === "autenticado"}>
+        <Stack.Screen name="(app)" />
+      </Stack.Protected>
+      {/* Catálogo interno do design system: só existe em build de dev. */}
+      <Stack.Protected guard={__DEV__}>
+        <Stack.Screen name="_ds" />
+      </Stack.Protected>
+    </Stack>
   );
 }
