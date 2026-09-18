@@ -42,6 +42,32 @@ const FUNDOS: Chave[] = ["bg", "surface", "surfaceRaised"];
  * `brand` sobre `brandSoft` NÃO entra: é o par proibido do plano (2,96 —
  * reprova mesmo o teto de 3 de não-texto), documentado para nunca ser usado
  * como texto/ícone sobre aquele fundo.
+ *
+ * Pares NOVOS que o C1 passou a sobrepor e que também ficam de fora — não
+ * por reprovar, mas por serem só DECORAÇÃO, nunca o único sinal de um
+ * estado (nenhum comunica informação sozinho, então nenhum teto de
+ * contraste se aplica). Medido com a própria `contraste()` acima, hex de
+ * `tokens.ts`, 2026-09-17 — remeça se a paleta mudar:
+ *
+ * `border`×`surfaceRaised` = 1,25 no claro — o friso real do Card `raised`
+ * (`Card.tsx`: fundo `surfaceRaised` quando `elevacao="raised"`, borda
+ * `border`). No claro isso empata com `border`×`bg` (1,25) porque
+ * `surfaceRaised === bg === "#FFFFFF"`. `border`×`surface` NÃO é um par do
+ * produto: `border` só aparece como preenchimento sólido do `Skeleton`,
+ * nunca como contorno sobre `surface`.
+ *
+ * `surfaceRaised`×`surface` = 1,08 no claro, 1,10 no escuro — o par real por
+ * trás do indicador do `SegmentedControl` (fundo `surfaceRaised` sobre o
+ * trilho `surface`), mesmo número que o comentário em
+ * `SegmentedControl.tsx` já usa. Longe de qualquer teto de contraste, por
+ * isso o indicador ganhou uma borda de `inkMuted` à parte para marcar o
+ * selecionado.
+ *
+ * `surface`×`bg` = 1,08 no escuro — o halo do `EmptyState` (disco `surface`
+ * atrás do sticker, só no tema escuro). Decorativo: o sticker é o único
+ * sinal (nenhuma informação depende do halo sozinho), então nenhum teto de
+ * contraste se aplica. Medido com a `contraste()` acima, hex de
+ * `tokens.ts`, 2026-09-17 — remeça se a paleta mudar.
  */
 export const PARES: ParDeContraste[] = [
   ...TEXTO.flatMap((primeiro) => FUNDOS.map((segundo) => ({ primeiro, segundo, minimo: 4.5 as const }))),

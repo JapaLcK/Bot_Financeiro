@@ -172,7 +172,6 @@
       "syncParcUI",
       "syncPocketInterestConfig",
       "toggleAffiliateList",
-      "toggleAgentEmail",
       "toggleHideBalance",
       "toggleSidenav",
       "toggleTheme",
@@ -183,6 +182,7 @@
     ],
     "variaveis": [
       "BankMovements",
+      "Reconciliations",
       "USER_ID",
       "refreshDashboardAfterInvestment"
     ]

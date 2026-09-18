@@ -567,6 +567,11 @@ def reset_user_data(
     plan_trials, push_tokens, open_finance_item_registry, audit_events,
     pii_access_log, system_event_logs, affiliate*, checkout_funnel_events.
 
+    O `open_finance_item_registry` é preservado E GANHA uma linha por conexão
+    apagada (`origin='removed'`, `last_event='reset'`, na mesma transação do
+    delete): é ela que impede uma reentrega de `item/created` de recriar pelo
+    webhook o banco que o reset acabou de remover.
+
     Uma transação só: falha no meio → nada mudou (sem carência, sem meio-termo).
 
     SEM a re-varredura pós-commit que delete_user_data faz: por decisão do
@@ -739,6 +744,15 @@ def reset_user_data(
                         if r["provider"] == "pluggy" and r["provider_item_id"]
                         and str(r["status"] or "").upper() != "PAUSED"
                     })
+                    # Marca da remoção deliberada, na MESMA transação do delete
+                    # (o registry é preservado pelo reset, então ela sobrevive):
+                    # sem ela uma reentrega de `item/created` recria pelo webhook
+                    # a conexão que o reset apagou. Mesma regra e mesma função do
+                    # disconnect — CLAUDE.md §0.7.
+                    if _table_exists(cur, "open_finance_item_registry"):
+                        from .open_finance_state import mark_items_removed
+
+                        mark_items_removed(cur, user_id, rows, last_event="reset")
 
                 # Crédito: transações → faturas (via card E via coluna user_id,
                 # padrão de delete_user_data) → cartões.

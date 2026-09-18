@@ -1380,10 +1380,26 @@ def delete_open_finance_transactions(
 
     with get_conn() as conn:
         with conn.cursor() as cur:
-            from .bank_movements import _lock_user, reconcile_bank_movements
+            from .bank_movements import _lock_user, delete_if_shadow, reconcile_bank_movements
             owners = sorted({row["user_id"] for row in rows})
             for owner in owners:
                 _lock_user(cur, owner)
+            # Reler AGORA, sob o lock: entre a leitura de cima e aqui, um undo
+            # concorrente pode ter trocado o imported_launch_id por uma sombra
+            # nova (`_insert_of_shadow`) — sem reler, ela vira órfã.
+            cur.execute(
+                """
+                select t.id, c.user_id, t.imported_launch_id
+                from open_finance_transactions t
+                join open_finance_accounts a on a.id = t.account_id
+                join open_finance_connections c on c.id = a.connection_id
+                where t.id = any(%s)
+                for update of t
+                """,
+                ([r["id"] for r in rows],),
+            )
+            for row in cur.fetchall():
+                delete_if_shadow(cur, row["user_id"], row["imported_launch_id"])
             cur.execute(
                 "delete from open_finance_transactions where id = any(%s)",
                 ([r["id"] for r in rows],),
@@ -2364,10 +2380,14 @@ ACTIONABLE_PENDING_SQL = _fused_join_sql("match_launch_id", """
 # O que mudaria na Carteira exibida se o usuário confirmasse: mesmo sinal da
 # fusão, somado uma vez por X (duas pendências no mesmo X só fundem uma).
 # `receita_back` (≤ 0) é a receita pendente tirada da guarda de cobertura.
+# `pending_count` usa o MESMO filtro `rn = 1`: decisão do dono é contar só o
+# que move o número — duas transações do banco casando o mesmo lançamento
+# valem 1 no aviso "N lançamento(s) a conferir", não 2 (a lista de
+# `list_reconciliations`, que é por transação, continua mostrando as duas).
 PENDING_RECONCILIATION_SQL = f"""
     select coalesce(sum(-d) filter (where rn = 1), 0) as delta_se_confirmar,
            coalesce(sum(-d) filter (where rn = 1 and d > 0), 0) as receita_back,
-           count(*) as pending_count
+           count(*) filter (where rn = 1) as pending_count
       from (select p.*, row_number() over (partition by p.id) as rn
               from ({ACTIONABLE_PENDING_SQL}) p) x
 """
@@ -2724,7 +2744,10 @@ def disconnect_open_finance_connection(
     # Exclusão da conexão e invalidação das provas permanecem atômicas.
     with get_conn() as conn:
         with conn.cursor() as cur:
-            from .bank_movements import _lock_user, reconcile_bank_movements
+            from .bank_movements import _lock_user, delete_if_shadow, reconcile_bank_movements
+            # Import LOCAL: `open_finance_state` importa este módulo no topo, e a
+            # mão única do import está documentada lá (`:38-42`).
+            from .open_finance_state import mark_items_removed
             _lock_user(cur, user_id)
             # Caixinha vinculada é ESPELHO: o dinheiro está no banco. Indo embora a
             # conexão, o FK só zera o `of_investment_id` (`on delete set null`,
@@ -2756,6 +2779,22 @@ def disconnect_open_finance_connection(
                     "delete from pockets where user_id=%s and id = any(%s) and balance <= 0",
                     (user_id, do_sync),
                 )
+            # Reler AGORA, sob o lock: entre a leitura do passo 1 e aqui, um undo
+            # concorrente pode ter trocado o imported_launch_id por uma sombra
+            # nova (`_insert_of_shadow`) — sem reler, ela sobra órfã do cascade.
+            cur.execute(
+                """
+                select t.id, c.user_id, t.imported_launch_id
+                from open_finance_transactions t
+                join open_finance_accounts a on a.id = t.account_id
+                join open_finance_connections c on c.id = a.connection_id
+                where c.user_id = %s and (%s::bigint is null or c.id = %s)
+                for update of t
+                """,
+                (user_id, connection_id, connection_id),
+            )
+            for row in cur.fetchall():
+                delete_if_shadow(cur, row["user_id"], row["imported_launch_id"])
             if connection_id is None:
                 cur.execute(
                     "delete from open_finance_connections where user_id=%s "
@@ -2770,6 +2809,11 @@ def disconnect_open_finance_connection(
                 )
             varridas = cur.fetchall()
             deleted = len(varridas)
+            # Marca da remoção deliberada, na MESMA transação do delete: sem ela
+            # uma reentrega de `item/created` recria a conexão que o usuário
+            # acabou de remover quando o item não tem linha `pluggy_item` no
+            # registry (falha do `register_item`, ou conexão anterior ao registry).
+            mark_items_removed(cur, user_id, varridas, last_event="disconnect")
             reconcile_bank_movements(cur, user_id)
 
         conn.commit()

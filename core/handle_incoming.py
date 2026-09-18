@@ -21,7 +21,7 @@ import traceback
 import db
 from core.types import IncomingMessage, OutgoingMessage
 from core.intent_classifier import classify
-from core.intent_router import route
+from core.intent_router import investment_action_refusal, route
 from core.response_formatter import format_for_platform
 from core.services.open_finance import handle_open_finance_whatsapp_command
 from core.services.media_service import (
@@ -862,6 +862,13 @@ def handle_incoming(msg: IncomingMessage, *,
         billing_reply = handle_billing_command(uid, text, platform=platform)
         if billing_reply is not None:
             return [OutgoingMessage(text=billing_reply)]
+
+        # Esta política antecede qualquer entrada da IA, inclusive comandos
+        # explícitos como "piggy, ..." e conversas pendentes. Nenhum pedido
+        # para operar ou recomendar ativos deve alcançar ferramentas do modelo.
+        policy_refusal = investment_action_refusal(text)
+        if policy_refusal is not None:
+            return [OutgoingMessage(text=format_for_platform(policy_refusal, platform))]
 
         # Chat IA (Pro v1 Fase 2): roteia pra IA se houver pending action
         # ou se a msg comecar com 'pergunta', 'piggy', 'ia'. Senao retorna None

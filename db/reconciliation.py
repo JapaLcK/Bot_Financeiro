@@ -20,8 +20,8 @@ from psycopg import errors as pg_errors
 
 from utils_date import today_tz
 
-from .bank_movements import _lock_user, is_of_shadow
-from .connection import get_conn
+from .bank_movements import _lock_user, delete_if_shadow
+from .connection import TIPO_CANON_SQL, get_conn
 from .open_finance import (
     ACTIONABLE_PENDING_SQL, MERGED_WALLET_DELTA_SQL, PENDING_RECONCILIATION_SQL, _insert_of_shadow,
     classify_open_finance_launch, merged_wallet_delta_params,
@@ -91,12 +91,7 @@ def confirm_reconciliation(user_id: int, of_tx_id: int) -> dict:
         # desfizer esta — gravar nelas tiraria a reversibilidade.
         shadow_id = o["imported_launch_id"]
         if shadow_id and shadow_id != x:
-            cur.execute("select source, efeitos from launches where id=%s and user_id=%s",
-                        (shadow_id, user_id))
-            shadow = cur.fetchone()
-            if shadow and isinstance(shadow["efeitos"], dict) and is_of_shadow(
-                    shadow["source"], shadow["efeitos"].get("delta_conta")):
-                cur.execute("delete from launches where id=%s and user_id=%s", (shadow_id, user_id))
+            delete_if_shadow(cur, user_id, shadow_id)
         return {"ok": True, "changed": True, "launch_id": x}
     return _write(user_id, of_tx_id, fn)
 
@@ -142,7 +137,7 @@ def list_reconciliations(user_id: int) -> list[dict]:
     with get_conn() as conn, conn.cursor() as cur:
         cur.execute(
             f"""select o.id, o.reconciliation_status, o.description, o.amount, o.transaction_date,
-                      c.institution_name, l.id as launch_id, l.tipo, l.valor, l.alvo, l.nota,
+                      c.institution_name, l.id as launch_id, {TIPO_CANON_SQL} as tipo, l.valor, l.alvo, l.nota,
                       coalesce(l.posted_at, l.criado_em::date) as launch_date
                  from open_finance_transactions o
                  join open_finance_accounts a on a.id = o.account_id

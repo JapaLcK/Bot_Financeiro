@@ -101,6 +101,12 @@ OUT_OF_SCOPE_MSG = (
     "Digite *ajuda* para ver o que posso fazer."
 )
 
+INVESTMENT_ACTION_REFUSAL_MSG = (
+    "Não posso comprar, vender nem recomendar ativos por você. "
+    "Posso ajudar a registrar aportes e resgates e a acompanhar sua carteira de investimentos.\n"
+    "Digite *investimentos* para ver as opções disponíveis."
+)
+
 NOT_UNDERSTOOD_MSG = (
     "Não entendi bem o que você quis fazer. 🤔\n"
     "Tenta assim:\n"
@@ -110,9 +116,276 @@ NOT_UNDERSTOOD_MSG = (
     "Ou digite *ajuda* pra ver tudo que eu faço."
 )
 
+_UNAMBIGUOUS_INVESTMENT_ASSET_PATTERN = (
+    r"(?:investimento|investimentos|bitcoin|bitcoins|"
+    r"ethereum|ether|solana|cardano|dogecoin|litecoin|"
+    r"cripto|criptos|criptomoeda|criptomoedas|petrobras|"
+    r"fii|fiis|etf|etfs|tesouro|tesouros|cdb|cdbs|lci|lcis|lca|lcas|"
+    r"debenture|debentures|commodity|commodities|"
+    r"fundo imobiliario|fundo multimercado|fundo cambial|fundo di|"
+    r"fundo de investimento|fundo de credito privado|"
+    r"ativo financeiro|moeda estrangeira|"
+    r"dolar|dolares|euro|euros|cambio|forex|renda fixa)"
+)
+_AMBIGUOUS_INVESTMENT_ASSET_PATTERN = (
+    r"(?:acao|acoes|ativo|ativos|fundo|fundos|ouro|prata|moeda|moedas)"
+)
+_INVESTMENT_ASSET_PATTERN = (
+    rf"(?:{_UNAMBIGUOUS_INVESTMENT_ASSET_PATTERN}|"
+    rf"{_AMBIGUOUS_INVESTMENT_ASSET_PATTERN})"
+)
+_INVESTMENT_TICKER_PATTERN = r"[A-Z]{4}\d{1,2}F?"
+# O formato genérico vale apenas na convenção maiúscula da B3; para mensagens
+# informais em minúsculas, reconheça somente símbolos conhecidos.
+_KNOWN_B3_TICKER_PATTERN = (
+    r"(?:PETR[34]F?|VALE3F?|ITUB4F?|BBDC4F?|BBAS3F?|WEGE3F?|"
+    r"MGLU3F?|ABEV3F?|B3SA3F?|MXRF11|HGLG11|GGRC11)"
+)
+# Alguns tickers alfabéticos são palavras comuns. Esses só contam como ativos
+# em maiúsculas; os demais aceitam a grafia informal usada no WhatsApp.
+_UNAMBIGUOUS_ALPHABETIC_TICKER_PATTERN = (
+    r"(?:AAPL|MSFT|GOOG|GOOGL|AMZN|NVDA|TSLA|NFLX|"
+    r"BTC|ETH|XRP|USDT|USDC|BNB|DOGE|LTC)"
+)
+_AMBIGUOUS_ALPHABETIC_TICKER_PATTERN = r"(?:META|SOL)"
+_COMMON_ALPHABETIC_TICKER_PATTERN = (
+    rf"(?:{_UNAMBIGUOUS_ALPHABETIC_TICKER_PATTERN}|"
+    rf"{_AMBIGUOUS_ALPHABETIC_TICKER_PATTERN})"
+)
+
 
 def _contextual_help_message(text: str, platform: str) -> str:
     return h_help.infer_contextual_fallback(text, platform)
+
+
+def _is_investment_action_or_advice_request(text: str) -> bool:
+    """Reconhece pedido para operar ou indicar um ativo, fora do papel do bot."""
+    norm = normalize_text(text)
+    financial_context = re.search(
+        r"\b(investir|investimento|carteira|aporte|resgate|rendimento|"
+        r"rentabilidade|cota)\b",
+        norm,
+    )
+    ambiguous_action = (
+        r"(?:aplicar|aplique|aplica|investir|invista|investe|comprar|compre|compra|"
+        r"vender|venda|vende|compraria|investiria|aplicaria|venderia|"
+        r"escolheria|selecionaria|optaria|preferiria|"
+        r"indicar|indica|indique|"
+        r"indicaria|recomendar|recomenda|recomende|recomendaria|sugerir|"
+        r"sugere|sugira|sugeriria|aconselhar|aconselha|aconselhe|aconselharia)"
+    )
+    bare_ambiguous_asset = (
+        rf"(?<!de )(?<!da )(?<!do )\b{_AMBIGUOUS_INVESTMENT_ASSET_PATTERN}\b"
+    )
+    polite_ending = r"(?:\s+(?:para mim|por favor|agora|hoje|amanha|ja))*\s*[?.!]*$"
+    purchase_noun_command = bool(
+        re.search(r"\b(?:faca|realize|execute)\s+(?:a|uma)\s+compra\b", norm)
+    )
+    ambiguous_purchase_noun_context = purchase_noun_command and re.search(
+        rf"\bcompra\s+(?:de\s+)?"
+        rf"(?:(?:um|uma|o|a|os|as|\d+)\s+){{0,2}}"
+        rf"{_AMBIGUOUS_INVESTMENT_ASSET_PATTERN}{polite_ending}",
+        norm,
+    )
+    ambiguous_action_context = (
+        re.search(
+            rf"\b{ambiguous_action}\b\s+"
+            rf"(?:(?:me|em|um|uma|o|a|os|as|de|da|do|das|dos|meu|minha|meus|minhas|"
+            rf"todo|toda|todos|todas|uns|umas|algum|alguma|"
+            rf"qual|que|\d+)\s+){{0,4}}"
+            rf"{bare_ambiguous_asset}{polite_ending}",
+            norm,
+        )
+        or re.search(
+            rf"{bare_ambiguous_asset}\s+"
+            rf"(?:(?:voce|me|eu|devo|devia|deveria)\s+){{0,3}}"
+            rf"\b{ambiguous_action}\b{polite_ending}",
+            norm,
+        )
+    )
+    ambiguous_quality_context = (
+        re.search(
+            rf"\b(?:melhor|melhores|bom|bons|boa|boas)\s+"
+            rf"{bare_ambiguous_asset}\s*[?.!]*$",
+            norm,
+        )
+        or re.search(
+            rf"{bare_ambiguous_asset}\s+"
+            rf"(?:(?:e|sao|seria|sera|parece)\s+)?"
+            rf"(?:(?:o|a|os|as)\s+)?"
+            rf"(?:melhor|melhores|bom|bons|boa|boas|vale a pena)\b"
+            rf"(?:\s+para\s+(?:mim|meus filhos))?\s*[?.!]*$",
+            norm,
+        )
+    )
+    asset_hint = (
+        re.search(rf"\b{_UNAMBIGUOUS_INVESTMENT_ASSET_PATTERN}\b", norm)
+        or (
+            (financial_context or ambiguous_action_context or ambiguous_quality_context
+             or ambiguous_purchase_noun_context)
+            and re.search(rf"\b{_AMBIGUOUS_INVESTMENT_ASSET_PATTERN}\b", norm)
+        )
+        or re.search(
+            rf"\b{_INVESTMENT_TICKER_PATTERN}\b",
+            text or "",
+        )
+        or re.search(
+            rf"\b{_KNOWN_B3_TICKER_PATTERN}\b",
+            text or "",
+            flags=re.IGNORECASE,
+        )
+        or re.search(
+            rf"\b{_UNAMBIGUOUS_ALPHABETIC_TICKER_PATTERN}\b",
+            text or "",
+            flags=re.IGNORECASE,
+        )
+        or re.search(rf"\b{_AMBIGUOUS_ALPHABETIC_TICKER_PATTERN}\b", text or "")
+    )
+    if not asset_hint:
+        return bool(re.search(
+            r"\b(?:onde|em que|no que)\s+(?:eu\s+)?"
+            r"(?:devo|devia|deveria)\s+investir\b",
+            norm,
+        ))
+
+    owned_asset_in_portfolio = bool(
+        re.search(
+            rf"\b(?:{_INVESTMENT_ASSET_PATTERN}|{_INVESTMENT_TICKER_PATTERN}|"
+            rf"{_COMMON_ALPHABETIC_TICKER_PATTERN})\b"
+            r"\s+(?:da|na)\s+minha\s+carteira\b",
+            norm,
+            flags=re.IGNORECASE,
+        )
+    )
+    possessive_owned_asset = bool(
+        re.search(
+            rf"\b(?:meu|minha|meus|minhas)\s+"
+            rf"(?:{_INVESTMENT_ASSET_PATTERN}|{_INVESTMENT_TICKER_PATTERN}|"
+            rf"{_COMMON_ALPHABETIC_TICKER_PATTERN})\b",
+            norm,
+            flags=re.IGNORECASE,
+        )
+    )
+    portfolio_quality_query = bool(
+        owned_asset_in_portfolio
+        or possessive_owned_asset
+        or re.search(
+            r"\b(meu|minha)\s+melhor\s+"
+            r"(investimento|acao|ativo|fundo|fii|etf)\b",
+            norm,
+        )
+        or re.search(
+            r"\b(meus|minhas)\s+(investimentos|acoes|ativos|fundos|fiis|etfs)\b"
+            r".*\b(melhor|pior)\b",
+            norm,
+        )
+        or re.search(
+            r"\b(melhor|pior)\b.*\b(meus|minhas)\s+"
+            r"(investimentos|acoes|ativos|fundos|fiis|etfs)\b",
+            norm,
+        )
+        or re.search(
+            r"\b(meu|minha)\s+(investimento|acao|ativo|fundo|fii|etf)\s+"
+            r"(e|esta|foi)\s+(bom|boa)\b",
+            norm,
+        )
+        or re.search(
+            r"\b(investimento|acao|ativo|fundo|fii|etf)\s+que\s+(?:eu\s+)?"
+            r"(fiz|comprei|adquiri|apliquei)\b",
+            norm,
+        )
+    )
+    prospective_quality = bool(
+        re.search(
+            r"\b(seria|sera)\b.*\b(melhor|boa|bom)\b",
+            norm,
+        )
+        or re.search(
+            r"\b(deve|deveria|poderia)\s+ser\b.*\b(melhor|boa|bom)\b",
+            norm,
+        )
+    )
+    quality_advice = bool(
+        re.search(r"\b(melhor|melhores|boa|boas|bom|bons|vale a pena)\b", norm)
+    ) and (
+        prospective_quality or not portfolio_quality_query
+    ) and (
+        "?" in text
+        or prospective_quality
+        or re.search(r"\b(qual|quais|devo|devia|deveria)\b", norm)
+    )
+    yield_advice = bool(
+        re.search(
+            r"\b(?:rende|rendem|renderia|renderiam)\s+mais\b|"
+            r"\b(?:maior|melhor)\s+(?:rentabilidade|rendimento|retorno)\b",
+            norm,
+        )
+        and not portfolio_quality_query
+        and not re.search(
+            r"\b(meus|minhas)\s+(investimentos|acoes|ativos|fundos|fiis|etfs)\b",
+            norm,
+        )
+        and ("?" in text or re.search(r"\b(qual|quais)\b", norm))
+    )
+    sell_command = bool(
+        re.search(
+            r"^(?:(?:piggy|por favor|por gentileza)\s*,?\s*){0,2}"
+            r"(?:(?:voce|vc)\s+)?(?:me\s+)?(?:venda|vende)\b"
+            r"(?!\s+d(?:e|a|o|as|os)\b)",
+            norm,
+        )
+        or re.search(
+            r"\b(quero|preciso|peco|gostaria)\s+(?:que\s+)?(?:voce\s+)?(?:venda|vendesse)\b",
+            norm,
+        )
+        or re.search(r"\b(faca|realize|execute)\s+(?:a\s+)?venda\b", norm)
+    )
+    purchase_command = bool(
+        re.search(
+            r"^(?:(?:piggy|por favor|por gentileza)\s*,?\s*){0,2}"
+            r"(?:(?:voce|vc)\s+)?(?:me\s+)?compra\b(?!\s+d(?:e|a|o|as|os)\b)",
+            norm,
+        )
+    )
+
+    return bool(
+        re.search(
+            r"\b(aplicar|aplique|aplica|compre|comprar|compraria|"
+            r"vender|venderia|invista|investe|investiria|aplicaria|"
+            r"escolheria|selecionaria|optaria|preferiria)\b",
+            norm,
+        )
+        or sell_command
+        or purchase_command
+        or purchase_noun_command
+        or re.search(r"\bvale\s+a\s+pena\b.*\b(investir|comprar|vender)\b", norm)
+        or re.search(r"\b(investir|comprar|vender)\b.*\bvale\s+a\s+pena\b", norm)
+        or re.search(
+            r"\b(indicar|indica|indique|indicaria|recomendar|recomenda|"
+            r"recomende|recomendaria|sugerir|sugere|sugira|sugeriria|"
+            r"aconselhar|aconselha|aconselhe|aconselharia)\b",
+            norm,
+        )
+        or quality_advice
+        or yield_advice
+        or re.search(
+            r"\b(quais?|qual|que)\b.*\b(devo|devia)\s+(?:escolher|selecionar)\b",
+            norm,
+        )
+        or re.search(
+            rf"\b(?:qual|quais)\s+{_INVESTMENT_ASSET_PATTERN}\s+"
+            r"(?:devo|devia)\s+fazer\b",
+            norm,
+        )
+        or re.search(r"\b(devo|devia|deveria)\b.*\b(comprar|vender|investir)\b", norm)
+    )
+
+
+def investment_action_refusal(text: str) -> str | None:
+    """Aplica a política determinística antes de qualquer fallback de IA."""
+    if _is_investment_action_or_advice_request(text):
+        return INVESTMENT_ACTION_REFUSAL_MSG
+    return None
 
 
 def _should_redirect_launches_list_to_help(text: str) -> bool:
@@ -585,7 +858,21 @@ def route(result: IntentResult, msg: IncomingMessage, *,
             if resp is not None:
                 return resp
 
-    inferred_help = h_help.infer_help_from_text(text, platform)
+    # Pedidos de operação ou recomendação de ativos precisam de uma recusa
+    # explícita. O bot acompanha a carteira, mas não atua como corretora nem
+    # escolhe investimentos pelo usuário.
+    policy_refusal = investment_action_refusal(text)
+    if policy_refusal is not None:
+        return policy_refusal
+
+    # Perguntas sobre como usar recursos financeiros podem cair no fallback
+    # `out_of_scope` do classificador. A ajuda precisa ter a chance de
+    # reconhecê-las antes da resposta final de fora do domínio.
+    inferred_help = (
+        None
+        if intent == "out_of_scope" and not h_help.has_financial_context(text)
+        else h_help.infer_help_from_text(text, platform)
+    )
     if inferred_help is not None:
         norm = normalize_text(text)
         if (
@@ -817,7 +1104,10 @@ def route(result: IntentResult, msg: IncomingMessage, *,
     # 2. Fora do escopo
     # -----------------------------------------------------------------------
     if intent == "out_of_scope":
-        return _contextual_help_message(text, platform)
+        if not h_help.has_financial_context(text):
+            return OUT_OF_SCOPE_MSG
+        financial_help = h_help.infer_financial_contextual_fallback(text, platform)
+        return financial_help if financial_help is not None else OUT_OF_SCOPE_MSG
 
     # -----------------------------------------------------------------------
     # 3. Confiança muito baixa

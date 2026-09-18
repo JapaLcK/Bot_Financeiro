@@ -47,6 +47,7 @@ export default defineConfig([
         isProUser: "readonly",
         showUpgradeModal: "readonly",
         csrfHeaders: "readonly",
+        Reconciliations: "readonly",
       },
     },
   },

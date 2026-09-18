@@ -42,6 +42,7 @@
  */
 import { test, before, after } from "node:test";
 import assert from "node:assert/strict";
+import { readFileSync } from "node:fs";
 import { startServer } from "./_server.mjs";
 import { chromium } from "playwright";
 
@@ -83,7 +84,8 @@ const snapshot = (launches) => ({
  * `seed`: quando presente, pré-carrega `sessionStorage.pb_home_1` ANTES do
  * boot, para exercer o repaint instantâneo do `restoreHomeCache`.
  */
-async function abrirHome(launches, { seed = null, semMapa = false, mapaPendurado = false } = {}) {
+async function abrirHome(launches, { seed = null, semMapa = false, mapaPendurado = false,
+                                     reconciliationsPendurado = false, snap = {} } = {}) {
   const ctx = await browser.newContext();
   const page = await ctx.newPage();
   page.__errs = [];
@@ -96,7 +98,7 @@ async function abrirHome(launches, { seed = null, semMapa = false, mapaPendurado
     return acaoSegura(() => route.fulfill(json({})));                     // /auth/me etc.
   });
   await page.route("**/auth/validate", (r) => acaoSegura(() => r.fulfill(json({ user_id: 1 }))));
-  await page.route("**/data/**",       (r) => acaoSegura(() => r.fulfill(json(snapshot(launches)))));
+  await page.route("**/data/**",       (r) => acaoSegura(() => r.fulfill(json({ ...snapshot(launches), ...snap }))));
   await page.route("**/history/**",    (r) => acaoSegura(() => r.fulfill(json({ data: [] }))));
   // Rota registrada DEPOIS de propósito: no Playwright a última vence, e a
   // `**/*` acima deixaria o arquivo real passar (`route.continue()`).
@@ -107,6 +109,9 @@ async function abrirHome(launches, { seed = null, semMapa = false, mapaPendurado
   // PENDURADO != 404. O handler que NUNCA resolve a rota deixa a request aberta,
   // que é o caso que o 404 não alcança: o 404 volta rápido e o parser segue.
   if (mapaPendurado) await page.route(/launch-type-labels\.js/, () => { /* nunca resolve */ });
+  // Mesma técnica do mapa pendurado, pra /reconciliations.js: prende a tag
+  // (home.html:457) enquanto ela ainda não tem `defer`.
+  if (reconciliationsPendurado) await page.route(/reconciliations\.js/, () => { /* nunca resolve */ });
 
   if (seed) {
     await page.addInitScript((entrada) => {
@@ -117,7 +122,8 @@ async function abrirHome(launches, { seed = null, semMapa = false, mapaPendurado
   // `commit` é obrigatório com o asset pendurado: o "load" (padrão do goto)
   // nunca chega enquanto a request estiver aberta, e o goto estouraria por
   // timeout antes de qualquer assert — sintoma errado da causa certa.
-  await page.goto(`${ORIGIN}/home.html`, mapaPendurado ? { waitUntil: "commit" } : undefined);
+  const pendurado = mapaPendurado || reconciliationsPendurado;
+  await page.goto(`${ORIGIN}/home.html`, pendurado ? { waitUntil: "commit" } : undefined);
   page.__ctx = ctx;
   return page;
 }
@@ -371,6 +377,41 @@ test("com /launch-type-labels.js PENDURADO, a Início ainda renderiza", async ()
     assert.equal(forte, "Lançamento",
                  `mapa pendurado devia degradar o rótulo, veio "${forte}"`);
     assert.deepEqual(page.__errs, [], "a Início estourou com o mapa pendurado");
+  } finally { await fechar(page); }
+});
+
+/* Mesma categoria acima (PENDURADO ≠ 404), agora na tag de home.html:457
+ * (`<script defer src="/reconciliations.js">`). Mutação: tirar o `defer`
+ * desta tag deixa este teste vermelho — a página fica sem `<body>` enquanto
+ * a request não volta, e nem `#activity-list` nem `#greeting-sub` existem. */
+test("com /reconciliations.js PENDURADO, a Início ainda renderiza (defer)", async () => {
+  const page = await abrirHome([lancamento({ tipo: "despesa", valor: 50 })],
+                               { reconciliationsPendurado: true });
+  try {
+    const linhas = await linhasDaAtividade(page);
+    assert.equal(linhas.length, 1,
+                 `reconciliations.js pendurado travou a Início: ${linhas.length} linhas de atividade`);
+    assert.deepEqual(page.__errs, [], "a Início estourou com reconciliations.js pendurado");
+  } finally { await fechar(page); }
+});
+
+/* O "conferir" do aviso de reconciliação (home.html, renderStats) tem de levar a
+ * uma PÁGINA registrada. O servidor de teste é estático e não conhece as rotas
+ * do FastAPI, então a prova é contra a lista de `@router.get` de
+ * frontend/routes/static_pages.py: o link nasceu apontando `/dashboard`, que não
+ * existe (a página do dashboard é `/app`) e caía no 404. Mutação: voltar o href
+ * para `/dashboard` deixa este teste vermelho. */
+test("aviso de reconciliação na Início: o link 'conferir' leva a uma página registrada", async () => {
+  const rotas = new Set([...readFileSync("frontend/routes/static_pages.py", "utf8")
+    .matchAll(/@router\.get\("([^"]+)"\)/g)].map((m) => m[1]));
+  const page = await abrirHome([lancamento({ tipo: "despesa", valor: 50 })], {
+    snap: { reconciliation: { pending_count: 1, delta_se_confirmar: 50, receita_back: 0 } },
+  });
+  try {
+    const link = page.locator("#stat-balance-sub a", { hasText: "conferir" });
+    await link.waitFor({ timeout: 15000 });
+    const destino = new URL(await link.getAttribute("href"), ORIGIN).pathname;
+    assert.ok(rotas.has(destino), `"conferir" aponta ${destino}, que não é página registrada`);
   } finally { await fechar(page); }
 });
 

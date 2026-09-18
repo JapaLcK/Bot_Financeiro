@@ -1,6 +1,6 @@
 import { useEffect, useLayoutEffect, useRef, useState } from "react";
 import { motion } from "framer-motion";
-import { ArrowDown, ArrowUpRight, Send, X } from "lucide-react";
+import { ArrowDown, ArrowLeft, ArrowUp, ArrowUpRight, Plus, Send, ThumbsDown, ThumbsUp, X } from "lucide-react";
 import { cn } from "@/lib/utils";
 import type { ChatAction, ChatId, ChatMessage, ChatView } from "@/chat/types";
 import { ChatContent } from "./chat-content";
@@ -38,6 +38,17 @@ function MessageBubble({ message, view, id, reduced }: {
       {pending ? <><span className="pc-sr-only">{message.content}</span><TypingIndicator reduced={reduced} /></>
         : <p className="pc-message-content"><ChatContent content={message.content} markdown={message.markdown} /></p>}
       <Actions actions={message.actions} />
+      {id === "agent" && !user && message.state === "complete" && message.feedback !== "dismissed" &&
+        <div className="pc-agent-response-feedback" role="group" aria-label="Avaliar resposta">
+          <span>{message.feedback ? "Obrigado pelo retorno nesta conversa" : "Esta resposta ajudou?"}</span>
+          <div className="pc-agent-response-feedback-actions">
+            {!message.feedback && <>
+              <button type="button" aria-label="Sim, ajudou" onClick={() => view.onFeedback?.(message.id, "up")}><ThumbsUp size={16} /></button>
+              <button type="button" aria-label="Não ajudou" onClick={() => view.onFeedback?.(message.id, "down")}><ThumbsDown size={16} /></button>
+            </>}
+            <button type="button" aria-label="Dispensar avaliação" onClick={() => view.onFeedback?.(message.id, "dismissed")}><X size={16} /></button>
+          </div>
+        </div>}
     </div>
   </motion.div>;
 }
@@ -91,8 +102,8 @@ export function ChatMessages({ id, view, active, onClose }: {
   useLayoutEffect(() => {
     if (!active || !inputRef.current) return;
     inputRef.current.style.height = "auto";
-    inputRef.current.style.height = `${Math.min(120, inputRef.current.scrollHeight)}px`;
-  }, [active, view.draft]);
+    inputRef.current.style.height = `${Math.min(id === "agent" ? 132 : 120, inputRef.current.scrollHeight)}px`;
+  }, [active, id, view.draft]);
 
   useLayoutEffect(() => {
     if (active && follow.current && scrollRef.current) scrollRef.current.scrollTop = scrollRef.current.scrollHeight;
@@ -111,8 +122,17 @@ export function ChatMessages({ id, view, active, onClose }: {
     view.onSend();
   }
 
-  return <section ref={panelRef} id={`${prefix}-panel`} hidden={!active} role="dialog"
-    aria-modal={active && mobile} aria-labelledby={`${prefix}-title`}
+  const input = <textarea ref={inputRef} id={`${prefix}-input`} value={view.draft} rows={1} maxLength={2000}
+    placeholder={id === "agent" ? "Pergunte ao seu agente…" : `Converse com ${view.title}…`} disabled={view.disabled}
+    onChange={event => view.onDraftChange(event.target.value)}
+    onKeyDown={event => {
+      if (event.key === "Enter" && !event.shiftKey && !event.nativeEvent.isComposing) {
+        event.preventDefault(); submit();
+      }
+    }} />;
+
+  return <section ref={panelRef} id={`${prefix}-panel`} hidden={!active} role={id === "agent" ? "main" : "dialog"}
+    aria-modal={id === "piggy" ? active && mobile : undefined} aria-labelledby={`${prefix}-title`}
     className={cn("pc-chat-panel pc-flex pc-flex-col pc-overflow-hidden", active && "open")}
     onKeyDown={event => {
       if (event.key === "Escape") { event.stopPropagation(); onClose(); }
@@ -123,6 +143,7 @@ export function ChatMessages({ id, view, active, onClose }: {
       if (event.shiftKey && document.activeElement === first) { event.preventDefault(); final?.focus(); }
       else if (!event.shiftKey && document.activeElement === final) { event.preventDefault(); first?.focus(); }
     }}>
+    <div className={id === "agent" ? "pc-agent-page pc-flex pc-flex-col pc-min-h-0" : "pc-flex pc-flex-col pc-min-h-0 pc-flex-1"}>
     <div className="pc-chat-head pc-flex pc-items-center pc-gap-3">
       <img id={`${prefix}-avatar`} className="pc-head-avatar" src={view.avatar} alt="" width="44" height="50" />
       <div className="pc-min-w-0 pc-flex-1">
@@ -130,7 +151,7 @@ export function ChatMessages({ id, view, active, onClose }: {
         <p id={`${prefix}-subtitle`}>{view.subtitle}</p>
       </div>
       <button id={`${prefix}-close`} className="pc-close" type="button" onClick={onClose} data-chat-close
-        aria-label="Fechar conversa"><X size={20} aria-hidden="true" /></button>
+        aria-label={id === "agent" ? "Voltar aos agentes" : "Fechar conversa"}>{id === "agent" ? <><ArrowLeft size={18} aria-hidden="true" /><span>Agentes</span></> : <X size={20} aria-hidden="true" />}</button>
     </div>
     <div className="pc-chat-history pc-relative pc-flex pc-min-h-0 pc-flex-1 pc-flex-col">
       <div ref={scrollRef} id={id === "piggy" ? "piggy-body" : "agent-chat-log"}
@@ -141,10 +162,11 @@ export function ChatMessages({ id, view, active, onClose }: {
           setScrolledAway(!follow.current);
         }}>
         {!view.messages.length && <div className="pc-chat-empty" id={id === "piggy" ? "piggy-empty" : undefined}>
-          <img src={view.avatar} alt="" width="76" height="84" />
-          <h3>Converse com {id === "piggy" ? "o Piggy" : view.title}</h3>
-          <p>{view.emptyText}</p>
-          <div className="pc-suggestions"><Actions actions={view.suggestions} /></div>
+          <img src={id === "agent" ? "/brand/icon.png?v=2" : view.avatar} alt="" width="76" height="84" />
+          <h3>{id === "agent" ? view.greeting || "Olá!" : "Converse com o Piggy"}</h3>
+          <p>{id === "agent" ? "Como eu posso te ajudar hoje?" : view.emptyText}</p>
+          {id === "agent" && <small>{view.emptyText}</small>}
+          {id === "piggy" && <div className="pc-suggestions"><Actions actions={view.suggestions} /></div>}
         </div>}
         {view.messages.map(message => <MessageBubble key={message.id} message={message} view={view} id={id} reduced={reduced} />)}
       </div>
@@ -152,28 +174,25 @@ export function ChatMessages({ id, view, active, onClose }: {
         <ArrowDown size={16} aria-hidden="true" /><span>Mensagens recentes</span>
       </button>}
     </div>
+    {id === "agent" && !view.messages.length && <div className="pc-agent-suggestions" aria-label="Perguntas dos agentes"><Actions actions={view.suggestions} /></div>}
     <div className="pc-chat-feedback">
       <p id={`${prefix}-status`} role="status">{view.status}</p>
       <div id={`${prefix}-actions`}><Actions actions={view.actions} /></div>
     </div>
     <form id={`${prefix}-form`} className="pc-chat-foot" onSubmit={event => { event.preventDefault(); submit(); }}>
       <label className="pc-sr-only" htmlFor={`${prefix}-input`}>Sua mensagem para {view.title}</label>
-      <div className="pc-chat-compose pc-flex pc-items-end pc-gap-2">
-        <textarea ref={inputRef} id={`${prefix}-input`} value={view.draft} rows={1} maxLength={2000}
-          placeholder={`Converse com ${view.title}…`} disabled={view.disabled}
-          onChange={event => view.onDraftChange(event.target.value)}
-          onKeyDown={event => {
-            if (event.key === "Enter" && !event.shiftKey && !event.nativeEvent.isComposing) {
-              event.preventDefault(); submit();
-            }
-          }} />
-        <motion.button id={`${prefix}-send`} type="submit" className="pc-chat-send" aria-label="Enviar mensagem"
-          disabled={view.disabled || !view.draft.trim()} whileTap={reduced ? undefined : { scale: 0.94 }}>
-          <Send size={19} aria-hidden="true" />
-        </motion.button>
+      <div className={cn("pc-chat-compose", id === "agent" ? "pc-agent-compose" : "pc-flex pc-items-end pc-gap-2")}>
+        {input}
+        {id === "agent" ? <div className="pc-agent-compose-actions">
+          <button className="pc-agent-add" type="button" disabled title="Anexos em breve" aria-label="Adicionar anexo (em breve)"><Plus size={20} /></button>
+          <motion.button id={`${prefix}-send`} type="submit" className="pc-chat-send" aria-label="Enviar mensagem"
+            disabled={view.disabled || !view.draft.trim()} whileTap={reduced ? undefined : { scale: 0.94 }}><ArrowUp size={21} aria-hidden="true" /></motion.button>
+        </div> : <motion.button id={`${prefix}-send`} type="submit" className="pc-chat-send" aria-label="Enviar mensagem"
+          disabled={view.disabled || !view.draft.trim()} whileTap={reduced ? undefined : { scale: 0.94 }}><Send size={19} aria-hidden="true" /></motion.button>}
       </div>
       <p id={`${prefix}-usage`} className="pc-chat-usage" data-tone={view.usageTone || "normal"}>{view.usage}</p>
     </form>
+    </div>
   </section>;
 }
 

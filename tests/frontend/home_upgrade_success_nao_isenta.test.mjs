@@ -32,11 +32,11 @@
  * Sem ele, um conserto que redirecionasse todo mundo passaria nos dois
  * negativos — e barrar quem pagou é pior que o furo.
  *
- * O QUE ESTE ARQUIVO NÃO ALCANÇA: o caminho em que o webhook demora MAIS que os
- * ~20 s do `_checkoutDeadline`. Exercitá-lo custa 20 s de relógio de parede por
- * caso, e a decisão que ele toma é a MESMA linha que os casos abaixo medem —
- * o que muda é só quanto tempo se espera antes. O resíduo está declarado no
- * comentário de `home.html`: esse usuário passa a cair na /precos.
+ * O QUE ESTE ARQUIVO NÃO ALCANÇA: o timeout de rede real dentro do orçamento
+ * de `_boundedAuthMe`/`_raceBudget`. A bateria de `comWebhookEm` roda com
+ * relógio FALSO e cobre webhook depois do deadline de `_checkoutDeadline`
+ * (22 s, 25 s) — mas com o relógio congelado durante toda request real, essa
+ * corrida contra timeout nunca vence lá (limite declarado na doc da função).
  */
 import { test, before, after } from "node:test";
 import assert from "node:assert/strict";
@@ -174,63 +174,199 @@ test("quem PAGOU e teve o webhook confirmado continua na Início", async () => {
  * Roda o retorno de checkout com relógio FALSO, avançando em passos de 250 ms,
  * e vira o `/auth/me` para "pago" quando o relógio chega em `webhookMs`.
  *
+ * `page.clock.install()` deixa o relógio falso andar em tempo real fora de um
+ * `runFor` — só existe `pauseAt`, não existe "pausado" por padrão. Sem
+ * congelar, a fase da cadeia de polls varia com a latência real do arranque
+ * (goto, `/auth/validate`, primeiro `/auth/me`). Medido 2026-09-17 com `node
+ * --test --test-name-pattern="webhook em" tests/frontend/home_upgrade_success_nao_isenta.test.mjs`
+ * sob 5 processos Playwright em paralelo mais 14 laços de CPU saturando as
+ * CPUs (14 laços sozinhos não reproduzem: 2/2 verde): com a lista ESTENDIDA
+ * de 8 instantes, os casos 19000/19750/20000/20250 ficaram vermelhos em 5 de
+ * 5 rodadas; com a lista REAL do arquivo (4 instantes), só `webhook em 20000`
+ * ficou vermelho, também em 5 de 5 — não porque o conserto falhasse, mas
+ * porque o relógio de fundo empurrava a fase. `pauseAt(Date.now() + 60000)`
+ * congela de vez: dali em diante o relógio só anda quando o teste manda com
+ * `runFor`.
+ *
+ * Sem carga, o relógio congelado não emperra a página nem trava um
+ * `/auth/me` em voo: medido, com `pauseAt` puro (sem `ociosa()`), a lista
+ * estendida de 8 instantes deu 4/4 verde em 3 de 3 rodadas (vermelho só em
+ * 20250 e 21000, que já não discriminam o conserto — ver a tabela abaixo). O
+ * que a `ociosa()` cobre é CARGA. Medido 2026-09-17 com o mesmo comando, sob
+ * a mesma carga de 5 processos mais 14 laços de CPU: com a lista ESTENDIDA
+ * de 8 instantes, sem `ociosa`, 6 de 40 casos ficaram vermelhos (20000,
+ * 20250 três vezes, 21000, 22000); com a lista REAL do arquivo (4
+ * instantes), sem `ociosa`, 1 vermelho em 72 slots contra 0 em 60 com ela. O
+ * efeito real de um `/auth/me` em voo quando o `runFor` avança não é travar
+ * a página: é deslocar a fase da cadeia de polls em um passo. O gancho em
+ * `window.fetch` (via `addInitScript`) conta requests de
+ * `/auth/(me|validate)` em voo; `ociosa()` espera esse contador zerar — em
+ * tempo REAL, fora do relógio falso — antes de cada `runFor`. Sem o gancho a
+ * espera não tem o que observar e falha alto (contador ausente).
+ *
  * **O passo pequeno é o que faz o caso medir.** A primeira versão deste teste
  * dava `runFor(19000)` de uma vez: nesse salto ainda cabia um poll DEPOIS do
  * flip, então o 1,2 s morto no fim da janela nunca era exercido e o caso
  * passava COM E SEM o conserto — tautológico, a 1ª das três regras do §3.
+ *
+ * LIMITE: com o relógio congelado durante toda request real, os orçamentos de
+ * `_boundedAuthMe`/`_raceBudget` (a corrida contra timeout) nunca vencem a
+ * corrida — este harness não mede timeout de rede real, só a decisão que
+ * `awaitCheckoutConfirmation` toma depois da espera. Também não cobre
+ * resposta `!ok`/nula do `/auth/me`: toda rota aqui responde 200 com corpo
+ * válido, e uma mutação como `if (ultimo) me = ultimo;` → `me = ultimo;` (o
+ * guard cai e `me` fica nulo quando a releitura falha/estoura) passa verde
+ * neste arquivo — em produção isso deixaria ninguém redirecionado e reabriria
+ * o bypass do `?upgrade=success` para o cortado, sem `_limparSnapshots()`.
  */
+// Só a navegação (o redirect pra /precos, no meio do laço) é erro tolerado
+// aqui; qualquer outro — página fechada, crash, erro de protocolo, bug no
+// callback — sobe com o motivo, em vez de virar sucesso por acidente.
+//
+// As duas leituras de localização do laço abaixo usam `page.url()` direto —
+// não executa JS, não lança, e não depende de TEXTO de erro do Playwright
+// (travado em 1.62.1, `package.json` declara `^1.56.0`; observado
+// 2026-09-17). Só dentro de `ociosa()` o `evaluate` é necessário (lê
+// `window.__authEmVoo`); o porquê do `waitForURL` no catch dela está no
+// comentário logo abaixo.
+function localizacao(page) {
+  const u = new URL(page.url());
+  return { home: u.pathname.replace(/\.html$/, "") === "/home", url: u.pathname + u.search };
+}
+async function evaluateOuNavegou(page, fn) {
+  try {
+    return { navegou: false, valor: await page.evaluate(fn) };
+  } catch (e) {
+    // `page.url()` só reflete a URL nova quando o frame navega de fato, e sob
+    // carga isso pode ficar defasado por um tempo real depois do contexto já
+    // ter sido destruído (medido: `localizacao(page).home` ainda via "/home"
+    // no instante do throw e um erro DE NAVEGAÇÃO virava falso-negativo).
+    // `waitForLoadState` não serve aqui: se o novo ciclo de navegação ainda
+    // não começou no rastreio do Playwright, ele acha que já está em "load"
+    // (o estado do documento ANTIGO) e resolve na hora sem esperar nada.
+    // `waitForURL` é diferente — espera o EVENTO de navegação de verdade, com
+    // teto curto: se não navegar dentro dele, não era isso, sobe o erro.
+    const saiu = await page
+      .waitForURL((url) => url.pathname.replace(/\.html$/, "") !== "/home", { timeout: 5000 })
+      .then(() => true, () => false);
+    if (saiu) return { navegou: true };
+    throw new Error(`evaluate falhou fora de navegação: ${e?.message ?? e}`);
+  }
+}
+
 async function comWebhookEm(webhookMs) {
   let confirmado = false;
   const page = await abrirHome(null, async (p) => {
+    await p.addInitScript(() => {
+      window.__authEmVoo = 0;
+      const nativo = window.fetch;
+      window.fetch = function (input, init) {
+        if (!/\/auth\/(me|validate)\b/.test(String(input?.url ?? input))) return nativo.call(this, input, init);
+        window.__authEmVoo++;
+        return nativo.call(this, input, init).then((r) => {
+          // `loadAuthMe` (home.html) só lê `.json()` no caminho 200 — o
+          // `if (!res.ok) return null;` devolve sem tocar no corpo. Sem este
+          // ramo o contador vazava em toda resposta não-2xx (medido: rota500,
+          // `/auth/me`→500, 30 s por caso antes deste fix).
+          if (!r.ok) { window.__authEmVoo--; return r; }
+          const ler = r.json.bind(r);
+          r.json = () => ler().finally(() => { window.__authEmVoo--; });
+          return r;
+        }, (e) => { window.__authEmVoo--; throw e; });
+      };
+    });
     await p.clock.install();
+    // Margem de orçamento de LATÊNCIA DE ENTREGA do comando (CDP), não de
+    // simulação: `pauseAt(t)` lança "Cannot fast-forward to the past" se `t`
+    // já passou no relógio real da página quando o comando chega. Medido
+    // 2026-09-17 com `node --test --test-name-pattern="webhook em"
+    // tests/frontend/home_upgrade_success_nao_isenta.test.mjs` sob a mesma
+    // carga da doc da função acima: chamadas CDP de até 2337 ms (`runFor`) e
+    // 1462 ms (`evaluate`) — 60 s cobre isso com folga e não custa nada
+    // porque nenhum timer existe antes do `goto`.
+    await p.clock.pauseAt(Date.now() + 60000);
     await p.route("**/auth/me", (route) => route.fulfill(json(
       confirmado ? { ...PAGO, app_access: true }
                  : { user_id: 1, plan: "free", plan_expires_at: null,
                      app_access: false })));
   });
+  const ociosa = async () => {
+    // Teto de tempo REAL, não de simulação — guarda de deadlock (contador
+    // que nunca zera), não desempenho. 10 s dá ~7× de margem sobre os 1462 ms
+    // de `evaluate` sob carga medidos acima; os 30 s antigos só existiam por
+    // causa do vazamento do gancho, já corrigido acima. Pior caso real: um
+    // erro que NÃO é navegação perto do fim do orçamento ainda paga o teto de
+    // 5 s do `waitForURL` acima antes de subir, então este caminho de erro
+    // pode levar até ~15 s — o veredito não muda, só o relógio de parede.
+    const limite = Date.now() + 10000;
+    for (;;) {
+      const r = await evaluateOuNavegou(page, () => window.__authEmVoo);
+      if (r.navegou) return; // trocando de documento — deixa o laço decidir
+      if (typeof r.valor !== "number") throw new Error("contador de /auth/* ausente");
+      if (r.valor === 0) return;
+      if (Date.now() > limite) throw new Error(`contador de /auth/* não zerou (${r.valor})`);
+      await new Promise((res) => setTimeout(res, 2));
+    }
+  };
+  await ociosa();
   for (let t = 0; t < 40000; t += 250) {
     if (!confirmado && t >= webhookMs) confirmado = true;
     await page.clock.runFor(250);
-    // Tempo REAL entre os passos: o relógio é falso, mas o `/auth/me` é um
-    // fetch de verdade (roteado) e precisa de ms reais para resolver. Sem esta
-    // pausa a página fica parada esperando uma promessa que nunca ganha CPU, e
-    // TODOS os casos terminam em /home — inclusive sem o conserto, que é como
-    // esta bateria nasceu tautológica pela segunda vez.
-    await new Promise((r) => setTimeout(r, 15));
-    const saiu = await page.evaluate(
-      () => location.pathname.replace(/\.html$/, "") !== "/home").catch(() => true);
-    if (saiu) break;
+    await ociosa();
+    if (!localizacao(page).home) break;  // saiu de /home == navegou
   }
-  const url = await page.evaluate(() => location.pathname + location.search)
-    .catch(() => "/precos");
+  const url = localizacao(page).url;
   await page.close();
   return url;
 }
 
 // O caso de DINHEIRO, e a tabela abaixo é MEDIDA em duas colunas, não esperada.
 //
-// Antes do conserto os polls saíam em 571…18795 ms e o redirect em 21140 ms: o
-// último 1,2 s da janela era tempo morto em que nada era observado, e um
-// webhook em 19 s — DENTRO da janela que o comentário promete — caía em
-// `/precos?escolha=1` segundos depois de a pessoa pagar, numa tela que diz
-// "sua conta está sem plano ativo" com o checkout ao lado.
+// Com o relógio congelado e a espera ociosa, o cronograma da página deixa de
+// depender de latência real e vira CONTA sobre as constantes de `home.html`
+// (o `wait(1500)` do polling e o deadline de 20000 ms em `_checkoutDeadline`):
+// `/auth/me` em 0, 1.5, 3, …, 19.5 s; deadline cruzado em 20 s; a releitura
+// final de `awaitCheckoutConfirmation` sai em 21 s (o `wait(1500)` que estava
+// em curso quando o deadline foi cruzado termina de 19.5 + 1.5 = 21 s). Se
+// essas duas constantes mudarem, os instantes abaixo têm de ser remedidos —
+// e o mesmo vale para qualquer mudança na CADÊNCIA do polling, não só nas
+// constantes: medido 2026-09-17 com `node --test --test-name-pattern="webhook
+// em" tests/frontend/home_upgrade_success_nao_isenta.test.mjs` depois de trocar
+// `wait(1500)` por `wait(Math.min(1500, deadline - Date.now()))` em
+// `frontend/home.html` (refatoração legítima que não altera nenhuma das duas
+// constantes, revertida com `git checkout -- frontend/home.html` em seguida):
+// também desloca o caso de 20000 ms para vermelho.
 //
 // | webhook | sem o conserto | com o conserto |
 // |---|---|---|
 // | 1 s  | /home   | /home   |
-// | 19 s | /precos | **/home**  ← é ESTE caso que mede o conserto |
-// | 21 s | /precos | /precos |
+// | 20 s | /precos | **/home**  ← é ESTE caso que mede o conserto |
+// | 22 s | /precos | /precos |
 // | 25 s | /precos | /precos |
+// Medido 2026-09-17 com `node --test --test-name-pattern="webhook em"
+// tests/frontend/home_upgrade_success_nao_isenta.test.mjs` (coluna "sem o
+// conserto" com o bloco de releitura apagado de `awaitCheckoutConfirmation`,
+// revertido com `git checkout -- frontend/home.html` em seguida).
 //
-// Os de 1 s, 21 s e 25 s não mudam de coluna, e ficam de propósito: 1 s é o
-// positivo (quem pagou e confirmou rápido não pode ser expulso) e os outros
-// dois prendem o RESÍDUO — o conserto estende a janela, não a elimina, e um
-// "conserto" que mandasse todo mundo para /home passaria sem eles.
+// 1 s é o positivo (quem pagou e confirmou rápido não pode ser expulso); 22 s
+// e 25 s prendem o RESÍDUO — o conserto estende a janela, não a elimina, e um
+// "conserto" que mandasse todo mundo para /home passaria sem eles. 20 s é o
+// único que muda de coluna porque cai exatamente entre o último poll regular
+// (19.5 s) e a releitura (21 s): sem a releitura, o veredito fica preso no
+// poll de 19.5 s, que ainda não viu o webhook.
 //
-// CONTROLE: apague o bloco `if (!_checkoutSettled(me))` do fim de
-// `awaitCheckoutConfirmation`. VERMELHO: `webhook em 19000 ms`.
+// 19 s e 21 s saíram da lista anterior: 19 s é pego pelo poll de 19.5 s COM
+// OU SEM o conserto (o webhook já está confirmado quando aquele poll roda, a
+// releitura nem entra em jogo) e não discrimina; 21 s coincide com o instante
+// da própria releitura, então o resultado depende só da ordem de operações
+// dentro do laço de teste (flip de `confirmado` → `runFor` → `ociosa`), não
+// do conserto em si.
+//
+// CONTROLE: apague o bloco `if (!_checkoutSettled(me)) { ... }` do fim de
+// `awaitCheckoutConfirmation`. VERMELHO: `webhook em 20000 ms`. Os outros três
+// ficam verdes — confirmado por medição.
 for (const [ms, destinoEsperado] of [
-  [1000, /^\/home/], [19000, /^\/home/], [21000, /^\/precos/],
+  [1000, /^\/home/], [20000, /^\/home/], [22000, /^\/precos/],
   [25000, /^\/precos/],
 ]) {
   test(`webhook em ${ms} ms`, async () => {

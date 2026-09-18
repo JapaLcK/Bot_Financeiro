@@ -464,6 +464,20 @@ def test_reset_preserva_conta_login_seguranca_e_vinculos(user_id):
         reset_user_data(user_id, SENHA)
 
         contagens_depois, conta_depois = _estado()
+        # O registry é o ÚNICO que muda, e para mais: ele é preservado E ganha a
+        # marca da remoção deliberada que o reset grava na transação do delete
+        # (Onda 4 / PR-D, `origin='removed'`). A igualdade continua valendo para
+        # todas as outras tabelas — trocar o dicionário inteiro por `>=` apagaria
+        # a garantia que este teste existe para dar.
+        registro = "open_finance_item_registry"
+        assert contagens_depois.pop(registro) == contagens_antes.pop(registro) + 1
+        with get_conn() as conn:
+            with conn.cursor() as cur:
+                cur.execute("select origin from open_finance_item_registry "
+                            "where user_id = %s order by id", (user_id,))
+                origens = [r["origin"] for r in cur.fetchall()]
+            conn.commit()
+        assert origens == ["connect_token", "removed"], origens
         assert contagens_depois == contagens_antes, "o reset apagou algo que devia preservar"
         assert conta_depois == conta_antes, "o reset mexeu em coluna da conta que devia preservar"
     finally:

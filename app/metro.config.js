@@ -4,5 +4,6 @@
 // produção não casa com o source map que o CI/build sobe — o Sentry mostra o
 // erro sem dizer onde.
 const { getSentryExpoConfig } = require("@sentry/react-native/metro");
+const { withNativeWind } = require("nativewind/metro");
 
-module.exports = getSentryExpoConfig(__dirname);
+module.exports = withNativeWind(getSentryExpoConfig(__dirname), { input: "./global.css" });

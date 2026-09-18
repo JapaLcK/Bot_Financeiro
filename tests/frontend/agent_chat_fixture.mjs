@@ -8,8 +8,10 @@ const root = new URL('../../frontend/', import.meta.url);
 const source = await readFile(new URL('dashboard.html', root), 'utf8');
 const panel = source.match(/<div id="pigbank-chat-root"><\/div>/)?.[0];
 if (!panel) throw new Error('Dashboard não inclui a ilha React do chat.');
+const sidenav = source.match(/<aside class="sidenav"[\s\S]*?<\/aside>/)?.[0];
+if (!sidenav) throw new Error('Dashboard não inclui o menu lateral compartilhado.');
 const scripts = [...source.matchAll(/<script\b[^>]*src="\/(?:chat-app|dashboard-chat|dashboard-agent-chat)\.js[^"\s]*"[^>]*><\/script>/g)].map(match => match[0]).join('');
-const styles = [...source.matchAll(/<link\b[^>]*href="\/(?:dashboard|dashboard-mobile|phosphor|app-mode|chat-app)\.css[^"\s]*"[^>]*>/g)].map(match => match[0]).join('');
+const styles = [...source.matchAll(/<link\b[^>]*href="\/(?:dashboard|dashboard-mobile|sidenav-rail|phosphor|app-mode|chat-app)\.css[^"\s]*"[^>]*>/g)].map(match => match[0]).join('');
 const script = await readFile(new URL('dashboard-agent-chat.js', root), 'utf8');
 const css = await readFile(new URL('dashboard.css', root), 'utf8');
 let browser;
@@ -24,7 +26,7 @@ after(async () => {
   if (screenshots && !process.env.PIGBANK_CHAT_SCREENSHOTS) await rm(screenshots, { recursive: true, force: true });
 });
 
-async function setup({ budget = 14, active = ['detetive', 'barao'], viewport, holdFirst = false, accessOverride = {}, failAt = [], failureDetail, failureStatus = 503, openAgent = true, piggyReply = "**Seu resumo** está pronto.", holdPiggy = false, pro = true, reducedMotion, hasTouch = false } = {}) {
+async function setup({ budget = 14, active = ['detetive', 'barao'], viewport, holdFirst = false, accessOverride = {}, failAt = [], failureDetail, failureStatus = 503, openAgent = true, piggyReply = "**Seu resumo** está pronto.", holdPiggy = false, pro = true, reducedMotion, hasTouch = false, lockedUpgrade = false } = {}) {
   const page = await browser.newPage({ viewport: viewport || { width: 1280, height: 900 }, reducedMotion, hasTouch });
   const requests = [];
   const activations = [];
@@ -74,20 +76,32 @@ async function setup({ budget = 14, active = ['detetive', 'barao'], viewport, ho
     if (path === '/dashboard-agent-chat.js') return route.fulfill({ contentType: 'application/javascript', body: script });
     if (['/chat-app.js', '/dashboard-chat.js'].includes(path)) return route.fulfill({ contentType: 'application/javascript', body: await readFile(new URL(path.slice(1), root)) });
     if (path === '/chat-app.css') return route.fulfill({ contentType: 'text/css', body: await readFile(new URL('chat-app.css', root)) });
-    if (['/dashboard-mobile.css', '/app-mode.css', '/phosphor.css', '/fonts/Phosphor.woff2'].includes(path)) return route.fulfill({ contentType: path.endsWith('.css') ? 'text/css' : 'font/woff2', body: await readFile(new URL(path.slice(1), root)) });
+    if (['/dashboard-mobile.css', '/sidenav-rail.css', '/app-mode.css', '/phosphor.css', '/fonts/Phosphor.woff2'].includes(path)) return route.fulfill({ contentType: path.endsWith('.css') ? 'text/css' : 'font/woff2', body: await readFile(new URL(path.slice(1), root)) });
     if (path === '/dashboard.css') return route.fulfill({ contentType: 'text/css', body: css });
     if (path.startsWith('/brand/')) {
       const file = new URL(path.slice(1), root);
       return route.fulfill({ contentType: path.endsWith('.webp') ? 'image/webp' : 'image/png', body: await readFile(file) });
     }
-    return route.fulfill({ contentType: 'text/html', body: `<!doctype html><meta charset="UTF-8"><meta name="viewport" content="width=device-width,initial-scale=1">${styles}<body><button id="piggy-fab" aria-label="Abrir Piggy IA">Piggy</button><div id="agentes-shelf"><button id="open" data-agent-chat="detetive">Conversar com Detetive</button></div>${panel}<script>
+    return route.fulfill({ contentType: 'text/html', body: `<!doctype html><meta charset="UTF-8"><meta name="viewport" content="width=device-width,initial-scale=1">${styles}<body class="has-sidenav">${sidenav}<button id="piggy-fab" aria-label="Abrir Piggy IA">Piggy</button><div id="agentes-shelf" style="display:flex;justify-content:center"><button id="open" data-agent-chat="detetive">Conversar com Detetive</button></div>${lockedUpgrade ? '<div class="overlay" id="upgrade-overlay"></div>' : ''}${panel}<script>
       const API=''; const USER_ID=42; let _agentesCache=null;
       function csrfHeaders(h={}){return h;}
       function _agentName(k){return k;}
-      function navigateTo(){}
+      function navigateTo(view){window.lastNavigation=view;document.querySelectorAll('.sidenav-item[data-nav]').forEach(item=>item.classList.toggle('active',item.dataset.nav===view));}
+      document.getElementById('sidenav').inert = !window.matchMedia('(min-width: 901px) and (hover: hover) and (pointer: fine)').matches;
+      navigateTo('agentes');
       function isProUser(){return ${pro};}
       async function loadAgentesView(){}
       function showUpgradeModal(){window.upgradeOpened=true;}
+      if (${lockedUpgrade}) {
+        document.querySelector('#sidenav [data-nav="investments"]').classList.add('pro-locked');
+        document.addEventListener('click', event => {
+          if (!event.target.closest('#sidenav .pro-locked[data-pro-feature]')) return;
+          event.preventDefault();
+          event.stopPropagation();
+          document.getElementById('upgrade-overlay').classList.add('open');
+          window.upgradeOpened = true;
+        }, true);
+      }
       </script>${scripts}</body>` });
   });
   await page.goto('https://agents.test/');

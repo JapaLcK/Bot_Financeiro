@@ -22,6 +22,8 @@
 <link rel="stylesheet" href="/phosphor.css?v=1" />
 <link rel="stylesheet" href="/dashboard.css?v=8" />
 <link rel="stylesheet" href="/dashboard-mobile.css" media="(max-width: 900px)" />
+<link rel="stylesheet" href="/sidenav-rail.css?v=3" />
+<script defer src="/sidenav-scrollbar.js?v=1"></script>
 <!-- defer preserva a ordem: auth-refresh (patch do fetch) → modals → app-mode →
      dashboard.js. Nenhum script inline depende deles durante o parse. -->
 <script defer src="/static/auth-refresh.js?v=1"></script>
@@ -29,7 +31,7 @@
 <script defer src="/launch-type-labels.js?v=1"></script>
   <link rel="stylesheet" href="/app-mode.css?v=34" />
   <script defer src="/app-mode.js?v=34"></script>
-<link rel="stylesheet" href="/chat-app.css?v=1" />
+<link rel="stylesheet" href="/chat-app.css?v=5" />
 </head>
 <body class="has-sidenav">
 
@@ -39,7 +41,7 @@
 </div>
 
 <div class="sidenav-backdrop" id="sidenav-backdrop" onclick="toggleSidenav(false)"></div>
-<aside class="sidenav" id="sidenav" aria-label="Navegação principal">
+<aside class="sidenav" id="sidenav" aria-label="Navegação principal" inert>
   <div class="sidenav-brand">
     <img class="logo" src="/brand/icon.png?v=2" alt="" />
     <div class="brand-text">
@@ -49,6 +51,9 @@
   </div>
 
   <div class="sidenav-section">Geral</div>
+  <a class="sidenav-item" href="/home">
+    <span class="sn-icon" style="color:#FF80B8"><i class="ph ph-house" aria-hidden="true"></i></span><span class="sn-label">Início</span>
+  </a>
   <button class="sidenav-item active" type="button" data-nav="overview" onclick="navigateTo('overview')">
     <span class="sn-icon" style="color:#3B82F6"><i class="ph ph-chart-bar" aria-hidden="true"></i></span><span class="sn-label">Visão Geral</span>
   </button>
@@ -115,7 +120,7 @@
 
   <header>
     <div class="header-left">
-      <button class="sidenav-toggle" type="button" aria-label="Abrir menu" onclick="toggleSidenav()"><i class="ph ph-list" aria-hidden="true"></i></button>
+      <button class="sidenav-toggle" type="button" aria-label="Abrir menu" aria-controls="sidenav" aria-expanded="false" onclick="toggleSidenav()"><i class="ph ph-list" aria-hidden="true"></i></button>
       <img class="logo-img" src="/brand/icon.png?v=2" alt="Piggy" />
       <h1>PigBank</h1>
     </div>
@@ -231,7 +236,7 @@
       </div>
       <div class="chart-wrap line"><canvas id="chart-day"></canvas></div>
     </div>
-    <div class="card"><h2>Gastos por categoria</h2><div class="chart-wrap donut"><canvas id="chart-cat"></canvas><div id="chart-cat-empty" class="empty" hidden>Sem despesas este mês.</div></div></div>
+    <div class="card"><h2>Gastos por categoria</h2><div class="chart-wrap donut"><canvas id="chart-cat"></canvas></div></div>
   </div>
 
   <p class="section-title" id="history-title" style="display:none">Histórico Mensal</p>
@@ -1583,6 +1588,7 @@
 </div>
 
 <script defer src="/bank-movements.js"></script>
+<script defer src="/reconciliations.js"></script>
 <script defer src="/dashboard.js?v=16"></script>
 
 <!-- ─── Chat IA widget (Piggy) — Item #49 ──────────────────────────────── -->
@@ -1593,9 +1599,9 @@
 </button>
 
 <div id="pigbank-chat-root"></div>
-<script defer src="/chat-app.js?v=1"></script>
+<script defer src="/chat-app.js?v=5"></script>
 <script defer src="/dashboard-chat.js?v=1"></script>
-<script defer src="/dashboard-agent-chat.js?v=1"></script>
+<script defer src="/dashboard-agent-chat.js?v=2"></script>
 
 </body>
 </html>

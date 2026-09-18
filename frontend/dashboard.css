@@ -155,10 +155,9 @@ body::before { content:""; position:fixed; inset:0; z-index:1; pointer-events:no
    estava cobrindo a última linha de tabela e o último card. 96px = 80 + folga. */
 .page { position:relative; z-index:2; max-width:1400px; margin:0 auto; padding:24px 20px 96px; }
 
-/* ─── Side navigation (estilo YouTube — overlay full-height) ────────── */
-/* Sidebar oculta por padrão. Click no hamburger abre overlay sobre o
-   conteúdo, com backdrop escuro escurecendo o resto. Brand PigBank fica
-   DENTRO do sidebar no topo. Background opaco pra contraste. */
+/* ─── Gaveta lateral no toque ──────────────────────────────────────────── */
+/* No desktop, sidenav-rail.css mantém a barra de ícones visível e expande
+   sobre o conteúdo. Aqui fica a base da gaveta aberta pelo botão de menu. */
 .sidenav {
   position:fixed; top:0; left:0; bottom:0;
   width:260px; box-sizing:border-box;
@@ -176,9 +175,7 @@ body.light .sidenav { background:#fff; box-shadow:4px 0 24px rgba(15,23,42,.18);
 .sidenav.peek, .sidenav.open {
   transform:translateX(0);
 }
-/* Hamburger no header (estilo YouTube): integrado ao header-left, ao lado
-   do logo Finance Dashboard. Quando clicado, abre sidebar overlay com
-   backdrop escuro cobrindo o resto da tela. */
+/* Botão da gaveta no header, oculto quando a barra compacta está ativa. */
 .sidenav-toggle {
   display:inline-flex !important; align-items:center; justify-content:center;
   width:38px; height:38px; border-radius:50%;
@@ -1560,7 +1557,7 @@ body.light .rv-badge-stale { background:rgba(180,120,0,.1); color:#8a5a00; borde
 body.light .chip { background:rgba(255,255,255,0.85); }
 .chip-lbl { font-size:.66rem;color:var(--text-3);text-transform:uppercase;letter-spacing:.08em;margin-bottom:6px;font-weight:600; }
 .chip-val { font-size:1.35rem;font-weight:800;color:var(--text);font-variant-numeric:tabular-nums;letter-spacing:-.01em; }
-.chip-val.g { color:#22c55e; }
+.chip-val.g { color:var(--green); }   /* token, nunca hex: o hex não virava no tema claro */
 .chip-val.b {
   background:linear-gradient(135deg, #FF2D8E, #FF80B8);
   -webkit-background-clip:text; background-clip:text; -webkit-text-fill-color:transparent;
@@ -2390,13 +2387,20 @@ html.pb-app #piggy-fab { touch-action: none; }
 
 .ag-shelf { display: grid; grid-template-columns: repeat(auto-fill, minmax(min(215px, 100%), 1fr)); gap: 14px; }
 .ag-card {
+  position: relative;
   background: var(--glass-bg); border: 1px solid var(--glass-border);
   border-radius: var(--radius); padding: 14px;
   display: flex; flex-direction: column; gap: 9px;
   transition: transform .15s var(--ease), border-color .15s var(--ease);
 }
-.ag-card:hover { transform: translateY(-3px); border-color: rgba(255, 45, 142, .35); }
+.ag-card:not(.ag-card-soon):hover { transform: translateY(-3px); border-color: rgba(255, 45, 142, .35); }
 .ag-card-soon { opacity: .62; }
+.ag-card-open {
+  position: absolute; inset: 0; z-index: 1; width: 100%; height: 100%;
+  padding: 0; border: 0; border-radius: inherit; background: transparent; cursor: pointer;
+}
+.ag-card-open:focus-visible { outline: 2px solid var(--purple); outline-offset: 3px; }
+.ag-card > .ag-btn, .ag-card > .ag-toggle { position: relative; z-index: 2; }
 .ag-card h3 { margin: 0; font-size: 16px; }
 .ag-desc { margin: 0; font-size: 12.5px; color: var(--text-2); line-height: 1.45; min-height: 36px; }
 .ag-chips { display: flex; gap: 6px; flex-wrap: wrap; }
@@ -2429,9 +2433,32 @@ html.pb-app #piggy-fab { touch-action: none; }
    --purple sólido sob texto. O rosa fica, a tinta escurece. */
 .ag-btn-on { background: var(--purple); color: var(--on-purple); }
 .ag-btn-on:hover { filter: brightness(1.08); }
-.ag-btn-active { background: transparent; border-color: var(--neon); color: var(--neon); }
 .ag-btn-soon { background: var(--glass-bg); color: var(--text-3); cursor: default; }
 .ag-btn-noenergy { background: var(--glass-bg); color: var(--text-3); border-color: var(--glass-border); cursor: not-allowed; }
+.ag-toggle {
+  align-self: flex-end; display: inline-flex; align-items: center; gap: 8px;
+  min-height: 44px; margin-top: auto; padding: 6px 0 6px 10px;
+  border: 0; background: transparent; color: var(--text-2);
+  font-family: inherit; font-size: 12px; font-weight: 600; line-height: 1; cursor: pointer;
+}
+.ag-toggle:hover { color: var(--text); }
+.ag-toggle:focus-visible { outline: 2px solid var(--purple); outline-offset: 2px; border-radius: 8px; }
+.ag-toggle-track {
+  position: relative; flex: none; width: 44px; height: 26px; border-radius: 999px;
+  border: 1px solid var(--glass-border); background: rgba(255,255,255,.23);
+  transition: background .15s var(--ease);
+}
+body.light .ag-toggle-track { background: rgba(15,23,42,.24); }
+.ag-toggle[aria-checked="true"] .ag-toggle-track { background: var(--purple); border-color: var(--purple); }
+.ag-toggle-thumb {
+  position: absolute; top: 3px; left: 3px; width: 18px; height: 18px;
+  border-radius: 50%; background: #fff; box-shadow: 0 1px 2px rgba(0,0,0,.25);
+  transition: transform .15s var(--ease);
+}
+.ag-toggle[aria-checked="true"] .ag-toggle-thumb { transform: translateX(20px); }
+@media (prefers-reduced-motion: reduce) {
+  .ag-toggle-track, .ag-toggle-thumb { transition: none; }
+}
 
 .ag-feed-title { margin: 26px 0 12px; }
 .ag-feed { display: flex; flex-direction: column; gap: 10px; max-width: 760px; }
@@ -2534,9 +2561,18 @@ body.balance-hidden #bill-detail-summary .v {
            padding-top:14px; margin-top:2px; }
 .cl-count { font-size:.72rem; color:var(--text-2); min-width:0;
             overflow:hidden; text-overflow:ellipsis; }
+/* `grid-column` porque 5 painéis que recebem a caixa são `display:grid` e as
+   linhas de erro que ela substitui traziam `grid-column:1/-1` inline; em
+   container de fluxo a propriedade é ignorada. */
 .cl-box { padding:34px 18px; text-align:center; color:var(--text-2); font-size:.84rem;
           background:var(--glass-bg); border:1px dashed var(--glass-border);
-          border-radius:var(--radius); margin:16px 0; }
+          border-radius:var(--radius); margin:16px 0; grid-column:1/-1; }
+/* Estado vazio / sessão expirada de gráfico: SOBREPOSTO ao wrap do canvas — o
+   canvas fica `display:none` e não pode ser removido, senão o gráfico não volta.
+   O `min-height` é pelo `.chart-wrap.donut`, único wrap sem altura própria. */
+.chart-empty { position:absolute; inset:0; min-height:180px;
+               display:flex; align-items:center; justify-content:center; }
+.chart-empty .cl-box { margin:0; width:100%; }
 .cl-box-t { font-size:1.02rem; font-weight:700; color:var(--text); margin-bottom:6px; }
 .cl-box b { color:var(--text); font-weight:600; }
 @media (max-width:560px) {
@@ -2559,6 +2595,3 @@ body.light #categories-distribution .bar-row[role="button"]:hover { background:r
   .cl-row, .cl-more-btn,
   #categories-distribution .bar-row[role="button"] { transition:none; }
 }
-
-/* Conversas dos agentes: painel com a mesma linguagem do dashboard. */
-.ag-chat-btn { margin-top: 8px; background: var(--glass-bg); color: var(--text); border: 1px solid var(--glass-border); }

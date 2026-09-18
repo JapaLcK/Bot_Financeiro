@@ -85,9 +85,14 @@ test("patrimônio não soma uma declaração sem prova", async () => {
     assert.equal(await page.locator("[data-num=pat]").count(), 0);
     // Inventário inline: BankMovements é o módulo público; USER_ID vem da
     // sessão validada; refreshDashboardAfterInvestment atualiza após conferência.
-    const requested = page.waitForRequest(request => new URL(request.url()).pathname === "/open-finance/1/movements");
-    await page.getByRole("button", { name: "1 movimentação(ões) não confirmada(s)" }).click();
-    await requested;
+    // O cursor nasce sobre a barra lateral e pode expandi-la sobre este botão.
+    // Afasta-o para que a ação teste o botão, não a sobreposição do menu.
+    await page.mouse.move(800, 0);
+    await page.waitForFunction(() => document.querySelector(".sidenav").getBoundingClientRect().width <= 70);
+    await Promise.all([
+      page.waitForRequest(request => new URL(request.url()).pathname === "/open-finance/1/movements"),
+      page.getByRole("button", { name: "1 movimentação(ões) não confirmada(s)" }).click(),
+    ]);
     await page.getByRole("dialog", { name: "Movimentações bancárias" }).waitFor();
     await page.getByText("Nenhuma declaração aguardando confirmação.").waitFor();
   } finally { await page.close(); }

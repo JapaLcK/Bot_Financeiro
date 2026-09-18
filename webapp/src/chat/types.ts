@@ -12,6 +12,7 @@ export interface ChatMessage {
   author?: string;
   markdown?: boolean;
   actions?: ChatAction[];
+  feedback?: "up" | "down" | "dismissed";
 }
 
 export interface ChatView {
@@ -23,6 +24,7 @@ export interface ChatView {
   messages: ChatMessage[];
   disabled: boolean;
   emptyText: string;
+  greeting?: string;
   suggestions?: ChatAction[];
   status?: string;
   actions?: ChatAction[];
@@ -30,6 +32,7 @@ export interface ChatView {
   usageTone?: "normal" | "warning" | "error";
   onDraftChange: (value: string) => void;
   onSend: () => void;
+  onFeedback?: (messageId: string, value: "up" | "down" | "dismissed") => void;
   onHidden?: () => void;
 }
 
