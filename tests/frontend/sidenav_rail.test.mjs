@@ -30,7 +30,12 @@ for (const path of ["dashboard.html", "home.html"]) {
       const nav = page.locator("#sidenav");
       const icon = nav.locator('.sidenav-item[href="/home"] .sn-icon');
       const label = nav.locator('.sidenav-item[href="/home"] .sn-label');
-      await page.waitForFunction(() => !document.querySelector("#sidenav").inert);
+      // O ponteiro inicial pode estar sobre a barra e iniciar a expansão.
+      await page.mouse.move(900, 500);
+      await page.waitForFunction(() => {
+        const menu = document.querySelector("#sidenav");
+        return !menu.inert && Math.round(menu.getBoundingClientRect().width) === 68;
+      });
       assert.equal(Math.round((await nav.boundingBox()).width), 68);
       assert.equal(await label.evaluate(el => getComputedStyle(el).opacity), "0");
       assert.equal(await page.locator("body").evaluate(el => getComputedStyle(el).paddingLeft), "68px");
