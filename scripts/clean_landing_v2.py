@@ -21,10 +21,14 @@ ROOT = Path(__file__).resolve().parent.parent
 LANDING = ROOT / "frontend" / "landing-v2"
 
 TRIAL_SUBS = [("7 DIAS", "15 DIAS"), ("7 dias", "15 dias")]
+# Os CTAs da build apontam pra âncora `#comecar` da própria página (placeholder
+# do template do Lovable — o clique não leva a lugar nenhum). No PigBank o
+# funil de conversão começa no cadastro (mesmo destino do CTA da landing v1).
+CTA_SUBS = [('href="#comecar"', 'href="/cadastro"'), ("href:`#comecar`", "href:`/cadastro`")]
 
 
-def replace_trial(text: str) -> str:
-    for old, new in TRIAL_SUBS:
+def align_pigbank(text: str) -> str:
+    for old, new in TRIAL_SUBS + CTA_SUBS:
         text = text.replace(old, new)
     return text
 
@@ -58,7 +62,7 @@ def clean_html(html: str) -> str:
     html = re.sub(r"<script[^>]*>(.*?)</script>", _strip_badge_block("script"), html, flags=re.S)
 
     html = html.replace('lang="en"', 'lang="pt-BR"', 1)
-    html = replace_trial(html)
+    html = align_pigbank(html)
     return html, {"flock": n_flock, "badge_aside": n_aside, **removed}
 
 
@@ -71,21 +75,23 @@ def main() -> int:
 
     for js in sorted((LANDING / "assets").glob("*.js")):
         raw = js.read_text(encoding="utf-8")
-        fixed = replace_trial(raw)
+        fixed = align_pigbank(raw)
         if fixed != raw:
             js.write_text(fixed, encoding="utf-8")
 
+    padroes = [r"7 [dD][iI][aA][sS]", r'href=["`]#comecar']
     rest = [
-        p
+        (p, pat)
         for p in LANDING.rglob("*")
         if p.is_file() and p.suffix in {".html", ".js"}
-        and re.search(r"7 [dD][iI][aA][sS]", p.read_text(encoding="utf-8", errors="ignore"))
+        for pat in padroes
+        if re.search(pat, p.read_text(encoding="utf-8", errors="ignore"))
     ]
     if rest:
-        for p in rest:
-            print(f"ERRO: '7 dias' restante em {p.relative_to(ROOT)}", file=sys.stderr)
+        for p, pat in rest:
+            print(f"ERRO: padrão {pat!r} restante em {p.relative_to(ROOT)}", file=sys.stderr)
         return 1
-    print("landing-v2 limpa: badge/flock removidos, lang=pt-BR, trial=15 dias")
+    print("landing-v2 limpa: badge/flock removidos, lang=pt-BR, trial=15 dias, CTAs→/cadastro")
     return 0
 
 
