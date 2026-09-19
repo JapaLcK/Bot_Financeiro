@@ -82,16 +82,12 @@ def test_whatsapp_nao_garante_quando_a_primeira_cobranca_vem():
 
 
 def test_index_nao_inverte_o_fluxo_do_trial():
-    """O CTA do "como funciona" da landing v1 é NOSSO (1ca0c44) e dizia o fluxo ao contrário.
+    """O CTA do "como funciona" da / é NOSSO (1ca0c44) e dizia o fluxo ao contrário.
 
     O texto era "você testa 15 dias grátis antes de escolher um plano", mas o
     gate deste PR faz o oposto: escolher o plano é o que ATIVA o trial
     (`needs_plan_selection` bloqueia o app até a assinatura). O mesmo commit
     escreveu a ordem certa na /whatsapp e na /como-funciona e a inversa aqui.
-
-    A página saiu da `/` (landing v2, espelho do Lovable, entrou no lugar) mas
-    continua servida em `/landing-v1` — o standby preserva a copy, então a
-    asserção continua valendo lá. Repontar a rota é a única mudança.
 
     A asserção é presa ao bloco `.hiw-cta` de propósito: as garantias de data
     ("primeira cobrança", "sem pagar nada") também existem nas linhas 504 e
@@ -102,7 +98,7 @@ def test_index_nao_inverte_o_fluxo_do_trial():
     Controle positivo dentro do próprio bloco: ele continua oferecendo o teste
     e deferindo ao checkout, senão o caso passaria num CTA que apagou a oferta.
     """
-    html = " ".join(client.get("/landing-v1").text.split())
+    html = " ".join(client.get("/").text.split())
     bloco = re.search(r'class="hiw-cta".*?</div>', html)
     assert bloco, "o bloco .hiw-cta sumiu da / — a asserção abaixo ficou cega"
     cta = bloco.group(0)
@@ -118,63 +114,9 @@ def test_index_nao_inverte_o_fluxo_do_trial():
             f"o CTA da / garante a data/ausência da cobrança: {garantia!r}"
         )
 
-    assert "15 dias grátis" in cta, "o CTA da /landing-v1 deixou de oferecer o teste"
+    assert "15 dias grátis" in cta, "o CTA da / deixou de oferecer o teste"
     assert "checkout" in cta.lower(), (
-        "o CTA da /landing-v1 não defere ao checkout quem confirma a cobrança"
-    )
-
-
-def test_landing_v2_na_raiz_alinhada_e_sem_badge():
-    """A / é a landing v2 (espelho self-hosted da build do Lovable).
-
-    Três invariantes da limpeza (scripts/clean_landing_v2.py): trial de 15 dias
-    (oferta vigente do produto — a página no Lovable dizia 7), zero badge /
-    analytics do host deles, e lang pt-BR. Sem estes, a limpeza regrediu.
-    """
-    html = client.get("/").text
-    assert "15 dias" in html
-    assert "lovable-badge" not in html
-    assert "~flock" not in html
-    assert 'lang="pt-BR"' in html
-    # CTAs de conversão apontam pro funil do PigBank (o template do Lovable
-    # apontava pra âncora placeholder `#comecar` — clique não ia a lugar nenhum).
-    assert 'href="#comecar"' not in html
-    assert 'href="/cadastro"' in html
-
-
-def test_landing_v1_noindex_no_standby():
-    """Standby não é indexável: as duas landings com o mesmo conteúdo no Google
-    seriam conteúdo duplicado. A meta noindex vive no <head> da v1."""
-    resp = client.get("/landing-v1")
-    assert resp.status_code == 200
-    assert '<meta name="robots" content="noindex" />' in resp.text
-
-
-def test_landing_v2_assets_servidos_com_cache_imutavel():
-    for path, ctype in (
-        ("/assets/index-C7puP08d.js", "javascript"),
-        ("/assets/precos-BlOJhx9-.js", "javascript"),
-        ("/assets/styles-Rgs8_YIn.css", "text/css"),
-        ("/assets/pigbank-ambient-Ci1cTuh4.jpg", "image/jpeg"),
-        (
-            "/__l5e/assets-v1/aad908cd-8dc8-434a-b844-a2e70d71edcf/pigbank-logo.webp",
-            "image/webp",
-        ),
-    ):
-        resp = client.get(path)
-        assert resp.status_code == 200, path
-        assert ctype in resp.headers["content-type"], path
-        assert "max-age=31536000" in resp.headers["cache-control"], path
-
-
-def test_landing_v2_assets_rejeitam_desconhecido_e_aninhado():
-    assert client.get("/assets/inexistente-AbC123.js").status_code == 404
-    assert client.get("/assets/subpasta/index-C7puP08d.js").status_code == 404
-    assert client.get("/assets/styles-Rgs8_YIn.css/extra").status_code == 404
-    assert client.get("/__l5e/assets-v1/nao-e-uuid/pig.png").status_code == 404
-    assert (
-        client.get("/__l5e/assets-v1/aad908cd-8dc8-434a-b844-a2e70d71edcf/x.svg").status_code
-        == 404
+        "o CTA da / não defere ao checkout quem confirma a cobrança"
     )
 
 
