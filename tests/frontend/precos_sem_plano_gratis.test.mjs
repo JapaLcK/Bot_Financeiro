@@ -277,14 +277,14 @@ test("a tabela comparativa tem só os três planos do bloco, e as 4 colunas fech
 
   assert.ok(!t.nomes.some((n) => /Grátis|Premium/.test(n)),
     `thead ainda tem plano removido: ${JSON.stringify(t.nomes)}`);
-  assert.deepEqual(t.nomes, ["Features", "Starter", "Growth", "Enterprise"],
+  assert.deepEqual(t.nomes, ["Recursos", "Essencial", "Plus", "Pro"],
     `cabeçalhos: ${JSON.stringify(t.nomes)}`);
 
-  // Consistência: a MESMA contagem no thead e em cada linha do tbody (12 de
-  // recurso + 3 de grupo + 1 de CTA). Cada linha entra na asserção, não só
+  // Consistência: a MESMA contagem no thead e em cada linha do tbody (20 de
+  // recurso + 5 de grupo + 1 de CTA). Cada linha entra na asserção, não só
   // uma amostra.
   assert.deepEqual(t.thead, [COLUNAS], `thead: ${JSON.stringify(t.thead)}`);
-  assert.equal(t.tbody.length, 16, `tbody com ${t.tbody.length} linhas`);
+  assert.equal(t.tbody.length, 26, `tbody com ${t.tbody.length} linhas`);
   assert.deepEqual([...new Set(t.tbody)], [COLUNAS],
     `linhas do tbody fora das ${COLUNAS} colunas: ${JSON.stringify(t.tbody)}`);
   await page.close();
@@ -322,12 +322,19 @@ test("controle positivo: a ilha montou com as seções e os dados nas colunas ce
       if (!tr) throw new Error(`linha "${nome}" não existe na tabela`);
       return [...tr.children].slice(1).map(txt);
     };
-    return { secoes, projects: linha("Projects"), api: linha("API access") };
+    return {
+      secoes,
+      bancos: linha("Bancos conectados (Open Finance)"),
+      previsao: linha("Previsão de saldo 30/60/90 dias"),
+    };
   });
 
-  assert.deepEqual(dados.secoes, ["Core", "Collaboration", "Support"]);
-  assert.deepEqual(dados.projects, ["3", "Unlimited", "Unlimited"]);
-  assert.deepEqual(dados.api, ["Not included", "Included", "Included"]);
+  assert.deepEqual(dados.secoes, [
+    "Registro no WhatsApp", "Contas e organização", "Piggy IA",
+    "Agentes do Piggy", "Histórico e relatórios",
+  ]);
+  assert.deepEqual(dados.bancos, ["1", "2", "5"]);
+  assert.deepEqual(dados.previsao, ["Não incluído", "Não incluído", "Incluído"]);
   await page.close();
 });
 
@@ -500,45 +507,51 @@ test("controle positivo: 'Assinar Plus' dispara exatamente 1 POST /billing/creat
   await page.close();
 });
 
-test("controle positivo: os 3 CTAs pagos continuam habilitados", async () => {
-  // Clicar nos três não dá: o primeiro clique bem-sucedido NAVEGA pro Stripe.
+test("controle positivo: os 6 CTAs pagos continuam habilitados (card e tabela)", async () => {
+  // Clicar nos seis não dá: o primeiro clique bem-sucedido NAVEGA pro Stripe.
   // Então a prova de "não quebrei os outros" é o estado do DOM — o clique de
-  // verdade é o teste acima. Cada plano pago tem UM botão, o do card (a
-  // comparação virou a ilha #cmp-v2, sem CTAs de plano).
+  // verdade é o teste acima. Cada plano pago tem DOIS botões (card + linha de
+  // CTA da ilha #cmp-v2).
   const { page } = await abrirPrecos({ me: { user_id: 42, needs_plan_selection: true } });
   const estado = await page.$$eval("[data-plan-btn]", (els) => els.map((e) => ({
     plano: e.dataset.planBtn,
-    onde: e.closest("#plans-v2") ? "card" : "fora",
+    onde: e.closest("#plans-v2") ? "card" : "tabela",
     desabilitado: e.disabled === true,
     texto: e.textContent.trim(),
   })));
   assert.deepEqual(estado, [
-    { plano: "essencial", onde: "card", desabilitado: false, texto: "Assinar Essencial" },
-    { plano: "plus",      onde: "card", desabilitado: false, texto: "Assinar Plus" },
-    { plano: "pro",       onde: "card", desabilitado: false, texto: "Assinar Pro" },
+    { plano: "essencial", onde: "card",   desabilitado: false, texto: "Assinar Essencial" },
+    { plano: "plus",      onde: "card",   desabilitado: false, texto: "Assinar Plus" },
+    { plano: "pro",       onde: "card",   desabilitado: false, texto: "Assinar Pro" },
+    { plano: "essencial", onde: "tabela", desabilitado: false, texto: "Assinar Essencial" },
+    { plano: "plus",      onde: "tabela", desabilitado: false, texto: "Assinar Plus" },
+    { plano: "pro",       onde: "tabela", desabilitado: false, texto: "Assinar Pro" },
   ]);
   await page.close();
 });
 
 // ── degradação parcial do Stripe: só o Plus sem price configurado ───────────
 // Sem o Grátis na página, um botão do Plus clicável só produz um toast de erro
-// e nenhuma saída. O par positivo deste caso é o teste dos 3 CTAs habilitados
-// acima: lá o mesmo DOM, com plus_available:true, tem os 3 clicáveis.
-test("plus_available:false marca EXATAMENTE o botão do Plus como indisponível", async () => {
+// e nenhuma saída. O par positivo deste caso é o teste dos 6 CTAs habilitados
+// acima: lá o mesmo DOM, com plus_available:true, tem os 6 clicáveis.
+test("plus_available:false marca EXATAMENTE os 2 botões do Plus como indisponíveis", async () => {
   const { page } = await abrirPrecos({
     me: { user_id: 42, needs_plan_selection: true },
     plansConfig: { essencial_available: true, plus_available: false, pro_available: true },
   });
   const estado = await page.$$eval("[data-plan-btn]", (els) => els.map((e) => ({
     plano: e.dataset.planBtn,
-    onde: e.closest("#plans-v2") ? "card" : "fora",
+    onde: e.closest("#plans-v2") ? "card" : "tabela",
     desabilitado: e.disabled === true,
     texto: e.textContent.trim(),
   })));
   assert.deepEqual(estado, [
-    { plano: "essencial", onde: "card", desabilitado: false, texto: "Assinar Essencial" },
-    { plano: "plus",      onde: "card", desabilitado: true,  texto: "Indisponível" },
-    { plano: "pro",       onde: "card", desabilitado: false, texto: "Assinar Pro" },
+    { plano: "essencial", onde: "card",   desabilitado: false, texto: "Assinar Essencial" },
+    { plano: "plus",      onde: "card",   desabilitado: true,  texto: "Indisponível" },
+    { plano: "pro",       onde: "card",   desabilitado: false, texto: "Assinar Pro" },
+    { plano: "essencial", onde: "tabela", desabilitado: false, texto: "Assinar Essencial" },
+    { plano: "plus",      onde: "tabela", desabilitado: true,  texto: "Indisponível" },
+    { plano: "pro",       onde: "tabela", desabilitado: false, texto: "Assinar Pro" },
   ]);
   await page.close();
 });

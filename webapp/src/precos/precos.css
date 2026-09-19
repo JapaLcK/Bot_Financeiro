@@ -18,31 +18,36 @@
  * ordem desta folha em relação às utilities não muda nada para a ilha — o que
  * manda lá dentro é a especificidade do `#cmp-v2`.
  *
- * As variáveis são os tokens shadcn (baseColor zinc do components.json) em
- * canal HSL cru, porque as cores do config usam `hsl(var(--x) / <alpha-value>)`
- * — `bg-primary/5` precisa do canal separado para aplicar a opacidade. Só o
- * tema escuro: o site de marketing não tem modo claro (não existe body.light
- * no site.css; quem tem é o dashboard, coberto pelo chat.css).
+ * As variáveis são os tokens shadcn em canal HSL cru, porque as cores do
+ * tailwind.precos.config.js usam `hsl(var(--x) / <alpha-value>)` —
+ * `bg-primary/5` precisa do canal separado para aplicar a opacidade. Os
+ * VALORES são os da marca (ver o bloco abaixo). Só o tema escuro: o site de
+ * marketing não tem modo claro (não existe body.light no site.css; quem tem
+ * é o dashboard, coberto pelo chat.css).
  */
 @tailwind utilities;
 
 #cmp-v2 {
-  --background: 240 10% 3.9%;
-  --foreground: 0 0% 98%;
-  --muted: 240 3.7% 15.9%;
-  --muted-foreground: 240 5% 64.9%;
-  --primary: 0 0% 98%;
-  --primary-foreground: 240 5.9% 10%;
-  --secondary: 240 3.7% 15.9%;
-  --secondary-foreground: 0 0% 98%;
-  --destructive: 0 62.8% 30.6%;
-  --destructive-foreground: 0 0% 98%;
-  --border: 240 3.7% 15.9%;
-  --input: 240 3.7% 15.9%;
-  --ring: 240 4.9% 83.9%;
-  --accent: 240 3.7% 15.9%;
-  --accent-foreground: 0 0% 98%;
-  --radius: 0.5rem;
+  /* Paleta PigBank, não a zinc de fábrica: --primary é o --pink-dark
+     (#C7186B) e não o --pink (#FF2D8E) porque branco sobre #FF2D8E dá 3,49:1
+     (reprova AA em texto pequeno — a mesma medição do badge do card, acima);
+     sobre #C7186B dá 5,57:1. */
+  --background: 240 4% 5%;          /* --bg #0c0c0d */
+  --foreground: 0 0% 100%;          /* --ink */
+  --muted: 240 6% 10%;              /* --card #17171a */
+  --muted-foreground: 0 0% 62%;     /* --ink-2 */
+  --primary: 337 77% 44%;           /* --pink-dark #C7186B */
+  --primary-foreground: 0 0% 100%;
+  --secondary: 240 5% 12%;          /* --card-2 #1d1d21 */
+  --secondary-foreground: 0 0% 100%;
+  --destructive: 0 72% 51%;
+  --destructive-foreground: 0 0% 100%;
+  --border: 240 5% 15%;             /* --line (branco a 8%) sobre o --bg */
+  --input: 240 5% 15%;
+  --ring: 337 77% 44%;
+  --accent: 240 6% 10%;
+  --accent-foreground: 0 0% 100%;
+  --radius: 0.75rem;
 }
 
 /* O preflight está desligado (é global demais para uma página servida), então
