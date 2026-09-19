@@ -173,7 +173,7 @@ def handle_ai_chat_command(user_id: int, text: str, platform: str) -> str | None
             from core.services.plan_service import plans_v2_enabled, get_user_limits
             if plans_v2_enabled() and get_user_limits(user_id)["ai_conversational_enabled"]:
                 return (
-                    "🐷 Suas mensagens com a Piggy deste mês acabaram!\n"
+                    "🐷 Suas mensagens com o Piggy deste mês acabaram!\n"
                     "Nos planos pagos a conversa continua: https://pigbankai.com/precos"
                 )
         except Exception:

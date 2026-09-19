@@ -130,7 +130,7 @@ def resolve_delete(user_id: int, confirmed: bool) -> str | None:
         return (
             f"✅ Pronto! *{rec['name']}* agora é *gasto fixo*: "
             f"{fmt_brl(rec['amount'])} todo dia {rec['due_day']}. "
-            f"A Piggy lança sozinha. 🐷"
+            f"O Piggy lança sozinho. 🐷"
         )
 
     # só trata deletes abaixo

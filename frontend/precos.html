@@ -88,6 +88,9 @@
      os quatro (medido 2026-09-02, Chromium headless: 44,2px com ela contra
      41,0px sem, nos dois viewports). Isso é mudança visual fora deste escopo. */
   #plans-v2 .plan .btn { line-height: 1.4; margin-top: 8px; }
+  #plans-v2 .plan > ul { gap: 12px; align-content: start; grid-auto-rows: max-content; margin: 20px 0 0; padding: 0; }
+  #plans-v2 .plan > ul > li { margin: 0; line-height: 1.5; }
+  #plans-v2 .plan > ul > li .tick { flex-shrink: 0; }
   /* .btn-outline tem borda de 1px e .btn-primary não tem nenhuma: o CTA do Plus
      nascia 2px mais baixo que os outros três. Borda transparente iguala. */
   #plans-v2 .plan .btn-primary, .cmp-table tfoot .btn-primary { border: 1px solid transparent; }
@@ -403,6 +406,9 @@
                    ali. Mudou a env, muda aqui e na tabela comparativa também. -->
               <li><span class="tick"><i class="ph ph-check" aria-hidden="true"></i></span> Piggy IA · 1.000 mensagens/mês</li>
               <li><span class="tick"><i class="ph ph-check" aria-hidden="true"></i></span> Alertas de gastos fora do padrão</li>
+              <li><span class="tick"><i class="ph ph-check" aria-hidden="true"></i></span> Categorização automática dos gastos</li>
+              <li><span class="tick"><i class="ph ph-check" aria-hidden="true"></i></span> Controle de gastos recorrentes</li>
+              <li><span class="tick"><i class="ph ph-check" aria-hidden="true"></i></span> Importação de extratos OFX, CSV e PDF</li>
               <li><span class="tick"><i class="ph ph-check" aria-hidden="true"></i></span> Histórico de 12 meses + tudo do Essencial</li>
             </ul>
           </article>
@@ -420,6 +426,9 @@
               <li><span class="tick"><i class="ph ph-check" aria-hidden="true"></i></span> <span><strong>Todos os 7 agentes</strong>: energia pra rodar a equipe inteira</span></li>
               <li><span class="tick"><i class="ph ph-check" aria-hidden="true"></i></span> Previsão de saldo 30/60/90 dias</li>
               <li><span class="tick"><i class="ph ph-check" aria-hidden="true"></i></span> Histórico de 24 meses</li>
+              <li><span class="tick"><i class="ph ph-check" aria-hidden="true"></i></span> Piggy IA · 1.000 mensagens/mês</li>
+              <li><span class="tick"><i class="ph ph-check" aria-hidden="true"></i></span> Investimentos no painel</li>
+              <li><span class="tick"><i class="ph ph-check" aria-hidden="true"></i></span> Exportação dos seus dados</li>
               <li><span class="tick"><i class="ph ph-check" aria-hidden="true"></i></span> Relatórios semanais + tudo do Plus</li>
             </ul>
           </article>
@@ -444,7 +453,7 @@
 
         <p class="plans-note"><i class="ph ph-piggy-bank" aria-hidden="true"></i> <strong>Preço de fundador:</strong> assinando agora, seu valor fica congelado pra sempre: enquanto a assinatura estiver ativa, ele nunca sobe.</p>
       </div>
-      <p class="plans-note" id="plans-note-v2"><i class="ph ph-confetti" aria-hidden="true"></i> Todo plano vem com <strong>15 dias grátis pra testar</strong> (um teste por número). A primeira cobrança só acontece depois do trial. Cancele antes pelo dashboard e não paga nada. Pagamentos processados pela Stripe. A PigBank nunca vê os dados do seu cartão.</p>
+      <p class="plans-note" id="plans-note-v2"><i class="ph ph-confetti" aria-hidden="true"></i> Todo plano vem com <strong>15 dias grátis pra testar</strong>, com ativação por cartão (um teste por número). A primeira cobrança só acontece depois do trial. Cancele antes pelo dashboard e não paga nada. Pagamentos processados pela Stripe. A PigBank nunca vê os dados do seu cartão.</p>
       <p class="plans-cta"><a href="#comparar">Ver a comparação completa, recurso por recurso <i class="ph ph-caret-right" aria-hidden="true"></i></a></p>
     </section>
 
@@ -577,7 +586,7 @@
 
                 <tr class="cmp-group"><th colspan="5" scope="colgroup"><span>Piggy IA</span></th></tr>
                 <tr>
-                  <th scope="row" class="cmp-feat">Mensagens com a Piggy</th>
+                  <th scope="row" class="cmp-feat">Mensagens com o Piggy</th>
                   <td><span class="c-val">200<small>por mês</small></span></td>
                   <!-- Plus/Pro/Premium: `ai_monthly_messages: None` cai no teto GLOBAL
                        AI_CHAT_MONTHLY_LIMIT, não em "ilimitado" (ver o card do Plus). -->
@@ -697,7 +706,7 @@
     <div class="wrap footer-inner">
       <div class="footer-brand">
         <a class="nav-logo" href="/"><img class="logo-icon" src="/brand/icon.png?v=2" alt="" /> <span>PigBank</span></a>
-        <p>Seu dinheiro, suas regras, direto no WhatsApp, com a IA da Piggy.</p>
+        <p>Seu dinheiro, suas regras, direto no WhatsApp, com a IA do Piggy.</p>
       </div>
       <div class="footer-cols">
         <div class="footer-col"><span class="footer-title">Navegue</span>
@@ -705,6 +714,7 @@
           <a href="/como-funciona">Como funciona</a>
           <a href="/precos">Planos</a>
           <a href="/agents">Agentes</a>
+          <a href="/blog">Blog</a>
           
         </div>
         <div class="footer-col"><span class="footer-title">Produto</span>

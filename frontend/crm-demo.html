@@ -1,0 +1,128 @@
+<!DOCTYPE html>
+<html lang="pt-BR">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
+  <meta name="theme-color" content="#080c12" />
+  <meta name="robots" content="noindex, nofollow" />
+  <title>PigBank CRM — Demonstração</title>
+  <link rel="icon" type="image/png" href="/favicon.png" />
+  <link rel="stylesheet" href="/brand.css" />
+  <link rel="stylesheet" href="/phosphor.css" />
+  <link rel="stylesheet" href="/crm-demo.css" />
+  <script defer src="/safe-area.js"></script>
+  <script defer src="/crm-demo-data.js"></script>
+  <script defer src="/crm-demo-views.js"></script>
+  <script defer src="/crm-demo.js"></script>
+</head>
+<body class="crm-shell">
+  <a class="skip-link" href="#crm-content">Pular para o conteúdo</a>
+  <div class="command-grid" aria-hidden="true"></div>
+  <div class="mobile-scrim" data-action="close-sidebar"></div>
+
+  <aside class="crm-sidebar" aria-label="Navegação do CRM">
+    <div class="brand-lockup">
+      <img src="/brand/icon.png" alt="" width="38" height="38" />
+      <div class="brand-copy">
+        <strong>PigBank <span>CRM</span></strong>
+        <small>Centro comercial</small>
+      </div>
+      <span class="demo-chip">Demonstração</span>
+    </div>
+
+    <label class="org-picker">
+      <span>Organização ativa</span>
+      <select id="organization-select" aria-label="Trocar organização"></select>
+    </label>
+
+    <nav class="primary-nav" id="primary-nav">
+      <div class="nav-group">
+        <p>Operação</p>
+        <a href="#overview" data-route="overview"><i class="ph ph-chart-bar"></i><span>Visão geral</span></a>
+        <a href="#companies" data-route="companies"><i class="ph ph-buildings"></i><span>Empresas</span></a>
+        <a href="#contacts" data-route="contacts"><i class="ph ph-users-three"></i><span>Contatos</span></a>
+        <a href="#pipeline" data-route="pipeline"><i class="ph ph-arrows-horizontal"></i><span>Funil</span><b id="pipeline-badge">0</b></a>
+        <a href="#tasks" data-route="tasks"><i class="ph ph-check-circle"></i><span>Tarefas</span><b id="tasks-badge">0</b></a>
+        <a href="#inbox" data-route="inbox"><i class="ph ph-chat-circle"></i><span>Inbox compartilhada</span><b id="inbox-badge">0</b></a>
+      </div>
+      <div class="nav-group">
+        <p>Canais</p>
+        <a href="#whatsapp" data-route="whatsapp"><i class="ph ph-whatsapp-logo"></i><span>WhatsApp</span></a>
+        <a href="#support" data-route="support"><i class="ph ph-lifebuoy"></i><span>Suporte interno</span></a>
+      </div>
+      <div class="nav-group">
+        <p>Performance</p>
+        <a href="#goals" data-route="goals"><i class="ph ph-target"></i><span>Metas e conquistas</span></a>
+        <a href="#team" data-route="team"><i class="ph ph-trophy"></i><span>Equipe</span></a>
+      </div>
+      <div class="nav-group">
+        <p>Conta</p>
+        <a href="#profile" data-route="profile"><i class="ph ph-user"></i><span>Meu perfil</span></a>
+        <a href="#billing" data-route="billing"><i class="ph ph-credit-card"></i><span>Planos e pagamentos</span></a>
+      </div>
+    </nav>
+
+    <div class="operator-card">
+      <div class="avatar">LM</div>
+      <div><strong>Lucas Martins</strong><span>Nível 18 · Estrategista</span></div>
+      <button type="button" data-action="open-profile" aria-label="Editar perfil"><i class="ph ph-gear"></i></button>
+    </div>
+    <button class="collapse-control" type="button" data-action="collapse-sidebar" aria-expanded="true">
+      <i class="ph ph-caret-right"></i><span>Recolher menu</span>
+    </button>
+  </aside>
+
+  <main class="crm-main">
+    <header class="crm-topbar">
+      <div class="topbar-left">
+        <button class="mobile-menu" type="button" data-action="open-sidebar" aria-label="Abrir menu"><i class="ph ph-list"></i></button>
+        <div><p id="route-context">Comando comercial</p><h1 id="route-title">Visão geral</h1></div>
+      </div>
+      <div class="global-search">
+        <i class="ph ph-magnifying-glass"></i>
+        <label class="sr-only" for="crm-search">Buscar no CRM</label>
+        <input id="crm-search" type="search" autocomplete="off" placeholder="Buscar empresa, contato ou negócio" />
+        <kbd>⌘ K</kbd>
+        <div class="search-results" id="search-results" hidden></div>
+      </div>
+      <div class="topbar-actions">
+        <span class="sync-status"><i></i> Sincronizado agora</span>
+        <button type="button" class="icon-button" data-action="notifications" aria-label="Notificações"><i class="ph ph-bell"></i><span>3</span></button>
+        <button type="button" class="button primary" data-action="quick-create"><i class="ph ph-plus"></i> Criar</button>
+      </div>
+    </header>
+
+    <div class="crm-content" id="crm-content" tabindex="-1"></div>
+  </main>
+
+  <div class="toast-region" id="toast-region" role="status" aria-live="polite"></div>
+
+  <dialog id="invite-dialog">
+    <form method="dialog" class="dialog-card" id="invite-form">
+      <div class="dialog-head"><div><h2>Convidar para a equipe</h2><p>O acesso ficará restrito à organização ativa.</p></div><button value="cancel" formnovalidate aria-label="Fechar"><i class="ph ph-x"></i></button></div>
+      <label>E-mail corporativo<input name="email" type="email" placeholder="nome@empresa.com" required /></label>
+      <label>Função<select name="role"><option>Vendedor</option><option>Gestor</option><option>Atendimento</option><option>Leitura</option></select></label>
+      <menu><button value="cancel" formnovalidate class="button quiet">Cancelar</button><button value="default" class="button primary"><i class="ph ph-envelope"></i> Enviar convite</button></menu>
+    </form>
+  </dialog>
+
+  <dialog id="goal-dialog">
+    <form method="dialog" class="dialog-card" id="goal-form">
+      <div class="dialog-head"><div><h2>Nova meta</h2><p>Transforme um resultado comercial em progresso visível.</p></div><button value="cancel" formnovalidate aria-label="Fechar"><i class="ph ph-x"></i></button></div>
+      <label>Nome da meta<input name="title" maxlength="54" placeholder="Ex.: R$ 180 mil em vendas" required /></label>
+      <label>Escopo<select name="scope"><option>Equipe</option><option>Individual</option></select></label>
+      <label>Valor-alvo<input name="target" type="number" min="1" step="1" placeholder="180000" required /></label>
+      <menu><button value="cancel" formnovalidate class="button quiet">Cancelar</button><button value="default" class="button primary"><i class="ph ph-target"></i> Criar meta</button></menu>
+    </form>
+  </dialog>
+
+  <dialog id="upgrade-dialog">
+    <div class="dialog-card upgrade-dialog">
+      <div class="dialog-head"><div><h2>Ativar plano Enterprise</h2><p>Simulação sem cobrança ou alteração real.</p></div><button type="button" data-action="close-upgrade" aria-label="Fechar"><i class="ph ph-x"></i></button></div>
+      <div class="upgrade-summary"><i class="ph ph-rocket-launch"></i><div><strong>Capacidade para crescer sem ruído</strong><span>Usuários ilimitados, governança avançada e canais prioritários.</span></div></div>
+      <dl><div><dt>Plano atual</dt><dd id="current-plan-label">Growth</dd></div><div><dt>Novo plano</dt><dd>Enterprise</dd></div><div><dt>Valor demonstrativo</dt><dd>R$ 1.490/mês</dd></div></dl>
+      <button type="button" class="button primary full" data-action="confirm-upgrade"><i class="ph ph-lightning"></i> Confirmar upgrade simulado</button>
+    </div>
+  </dialog>
+</body>
+</html>

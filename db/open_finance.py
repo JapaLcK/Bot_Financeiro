@@ -351,6 +351,26 @@ def count_open_finance_connections(user_id: int, provider: str = "pluggy") -> in
             return cur.fetchone()["n"]
 
 
+def has_open_finance_connections(user_id: int) -> bool:
+    """True se o usuário tem ao menos uma conexão Open Finance ativa
+    (status não PAUSED/DELETED, qualquer provider).
+
+    É o switch do mundo "banco conectado": com OF, lançamentos manuais
+    representam só dinheiro em espécie (Carteira Piggy) e fluxos que o banco
+    cobre — pagamento de fatura, débito de gasto fixo em conta — não podem
+    drenar `accounts.balance` (o extrato OF já reflete o movimento)."""
+    ensure_user(user_id)
+    with get_conn() as conn:
+        with conn.cursor() as cur:
+            cur.execute(
+                "select 1 from open_finance_connections"
+                " where user_id=%s and upper(coalesce(status,'')) not in ('PAUSED','DELETED')"
+                " limit 1",
+                (user_id,),
+            )
+            return cur.fetchone() is not None
+
+
 def list_open_finance_user_ids() -> list[int]:
     """user_ids distintos com pelo menos 1 banco Pluggy conectado (pros ticks proativos)."""
     with get_conn() as conn:
@@ -1371,7 +1391,14 @@ def pick_reconciliation_match(valor, tx_date, description, candidates) -> dict:
 
 
 def _find_manual_candidates(cur, user_id: int, tipo: str, valor, tx_date) -> list[dict]:
-    """Lançamentos manuais/OFX (não-OF) elegíveis a casar, ainda não vinculados a nenhuma OF tx.
+    """Lançamentos não-OF elegíveis a casar com uma tx OF, ainda não vinculados.
+
+    Candidatos = fontes BANCÁRIAS não-OF (ex.: `ofx`): elas descrevem a mesma
+    realidade que o extrato Open Finance, então fundir evita a dupla contagem.
+    `source = 'manual'` FICA DE FORA de propósito: lançamento manual é dinheiro
+    em espécie (Carteira Piggy), não transação bancária — se o banco importar
+    depois um movimento de mesmo valor/data, são dois fatos distintos e o OF
+    launch entra separado (decisão "Lançamentos Manuais Exclusivos p/ Dinheiro").
 
     `TIPO_CANON_SQL` e não `tipo = %s` cru, pela mesma razão de
     `list_launches_by_tipo` (db/accounts.py:172): o tipo aqui é PARÂMETRO — vem
@@ -1382,20 +1409,14 @@ def _find_manual_candidates(cur, user_id: int, tipo: str, valor, tx_date) -> lis
     `list_launches_by_tipo`: 'saida'/'entrada' passadas como ARGUMENTO passam a
     não casar nada (antes casavam as linhas legadas). Inalcançável daqui — o
     único produtor do argumento é `classify_open_finance_launch` — mas quem
-    ligar outro chamador precisa saber.
-
-    Sem isto o gêmeo legado do lançamento não era candidato, o dedupe falhava e
-    o gasto contava DUAS vezes. Medido (mesma transação OF de -50, mesmo dia,
-    mesmo estabelecimento): manual 'saida' → `inserted=1, auto_merged=0` e
-    `monthly_expense=100.0`; o mesmo manual na forma moderna 'despesa' →
-    `inserted=0, auto_merged=1` e `monthly_expense=50.0`."""
+    ligar outro chamador precisa saber."""
     cur.execute(
         f"""
         select id, valor, coalesce(posted_at, criado_em::date) as ref_date, alvo, nota
         from launches
         where user_id = %s
           and {TIPO_CANON_SQL} = %s
-          and coalesce(source, 'manual') <> 'open_finance'
+          and coalesce(source, 'manual') not in ('open_finance', 'manual')
           and is_internal_movement = false
           and abs(valor - %s) <= %s
           and coalesce(posted_at, criado_em::date) between %s and %s

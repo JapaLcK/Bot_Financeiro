@@ -1,6 +1,6 @@
 from core.types import OutgoingMessage
 from parsers import parse_receita_despesa_natural
-from db import ensure_user, add_launch_and_update_balance
+from db import ensure_user, add_launch_and_update_balance, has_open_finance_connections
 from utils_text import fmt_brl
 from core.services.category_service import learn_from_inference
 
@@ -45,13 +45,11 @@ def handle_quick_entry(user_id: int, text: str) -> OutgoingMessage | None:
         reason=category_reason,
     )
 
-    # Reconciliação reversa (Open Finance): funde com o gasto que o banco já importou.
-    if not is_internal:
-        try:
-            from db import reconcile_manual_launch
-            reconcile_manual_launch(user_id, launch_id)
-        except Exception:
-            pass
+    # Lançamento manual é dinheiro em espécie: sem reconciliação com transações
+    # do Open Finance (a tx do banco, se existir, é outro fato e entra separada
+    # pelo sync). Com banco conectado, o rótulo do saldo deixa claro que a
+    # Conta é a Carteira Piggy.
+    saldo_label = "👛 Saldo (Carteira Piggy)" if has_open_finance_connections(user_id) else "🏦 Conta"
 
     emoji = "💸" if tipo == "despesa" else "💰"
     cat_txt = categoria or "outros"
@@ -59,7 +57,7 @@ def handle_quick_entry(user_id: int, text: str) -> OutgoingMessage | None:
         text=(
             f"{emoji} **{tipo.capitalize()} registrada**: {fmt_brl(valor)}\n"
             f"🏷️ Categoria: {cat_txt}\n"
-            f"🏦 Conta: {fmt_brl(float(new_balance))}\n"
+            f"{saldo_label}: {fmt_brl(float(new_balance))}\n"
             f"ID:#{user_seq}"
         )
     )

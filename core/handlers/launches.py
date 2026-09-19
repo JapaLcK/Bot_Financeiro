@@ -1152,13 +1152,10 @@ def add_from_entities(
             "learn_from_inference falhou depois do commit (user %s, lancamento %s)",
             user_id, launch_id)
 
-    # Reconciliação reversa (Open Finance): se o banco já importou esse gasto, funde
-    # com o lançamento que o usuário acabou de fazer — não duplica no "sobrou".
-    if not is_int:
-        try:
-            db.reconcile_manual_launch(user_id, launch_id)
-        except Exception:
-            pass
+    # Lançamento manual é dinheiro em espécie (Carteira Piggy): não há
+    # reconciliação com transações do Open Finance — a tx do banco, se existir,
+    # é outro fato e entra separada pelo sync (decisão "lançamentos manuais
+    # exclusivos para dinheiro").
 
     # Detecção "essa despesa se repete → sugere gasto fixo". Só para despesa
     # real (não movimentação interna). A oferta divide a linha de pending_actions
@@ -1219,11 +1216,23 @@ def add_from_entities(
                 user_id, launch_id, exc_info=True,
             )
 
+    # Pós-commit: o rótulo do saldo consulta o Open Finance, e como tudo após
+    # o commit, não pode subir exceção (ver o comentário do learn_from_inference
+    # acima) — falhou, segue com o rótulo antigo.
+    try:
+        of_conectado = db.has_open_finance_connections(user_id)
+    except Exception:
+        logger.warning(
+            "has_open_finance_connections falhou depois do commit (user %s) — seguindo sem o rótulo da Carteira Piggy",
+            user_id, exc_info=True)
+        of_conectado = False
+    saldo_label = "👛 Saldo (Carteira Piggy)" if of_conectado else "🏦 Saldo"
+
     emoji = "💸" if tipo == "despesa" else "💰"
     resposta = (
         f"{emoji} **{tipo.capitalize()} registrada**: {fmt_brl(valor)}\n"
         f"🏷️ Categoria: {categoria_final}\n"
-        f"🏦 Saldo: {fmt_brl(float(new_balance))}\n"
+        f"{saldo_label}: {fmt_brl(float(new_balance))}\n"
         f"ID: #{user_seq}"
     )
 
@@ -1244,7 +1253,7 @@ def add_from_entities(
     if recurring_offer:
         resposta += (
             f"\n\n💡 Você já lançou *{recurring_offer['name']}* de {fmt_brl(valor)} "
-            f"em outro mês. Quer marcar como *gasto fixo* (a Piggy lança sozinha "
+            f"em outro mês. Quer marcar como *gasto fixo* (o Piggy lança sozinho "
             f"todo mês)? Responda *sim* ou *não*."
         )
 

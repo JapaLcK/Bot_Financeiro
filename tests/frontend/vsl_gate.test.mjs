@@ -96,7 +96,7 @@ async function abrirLanding({ midia = true, logado = false } = {}) {
 }
 
 const travados = page => page.$$eval('a[href="/cadastro"]',
-  as => as.map(a => a.classList.contains("is-locked") && a.getAttribute("aria-disabled") === "true"));
+  as => as.map(a => a.classList.contains("is-locked") && a.getAttribute("aria-describedby") === "vsl-status" && !a.hasAttribute("aria-disabled")));
 
 /** Assiste do começo ao fim, de verdade. `muted` porque a política de autoplay
  *  do Chromium recusa `play()` com som sem gesto do usuário. */
@@ -116,11 +116,9 @@ test("os CTAs de /cadastro nascem travados, e o clique não navega", async () =>
   assert.match(await page.textContent("#vsl-cta"), /Assista ao vídeo/);
   assert.ok(estados.every(Boolean), "todo CTA de /cadastro nasce travado");
 
-  // `force` porque o Playwright recusa clicar em [aria-disabled=true] por conta
-  // própria — e é justo o navegador de verdade que NÃO recusa: o atributo diz
-  // ao leitor de tela que o CTA está indisponível, não impede o clique. Sem o
-  // force, o caso mediria a regra do Playwright em vez do portão.
-  await page.click('.hero-cta a[href="/cadastro"]', { force: true });
+  // O link permanece acionável para conduzir ao vídeo. O requisito é descrito
+  // ao leitor de tela, sem anunciar um controle desabilitado que aceita clique.
+  await page.click('.hero-cta a[href="/cadastro"]');
   await page.waitForTimeout(300);
   assert.ok(page.url().endsWith("/index.html"), `clique travado navegou: ${page.url()}`);
   assert.match(await page.textContent("#vsl-status"), /até o fim/);
@@ -199,15 +197,16 @@ test("quem já tem conta não fica com os CTAs travados", async () => {
   await ctx.close();
 });
 
-test("sem JavaScript o botão continua travado", async () => {
+test("sem JavaScript o botão informa o requisito do vídeo", async () => {
   const ctx = await browser.newContext({ javaScriptEnabled: false });
   const page = await ctx.newPage();
   await page.goto(`${ORIGIN}/index.html`, { waitUntil: "domcontentloaded" });
   const b = await page.$eval("#vsl-cta", el => ({
-    classe: el.className, aria: el.getAttribute("aria-disabled"), texto: el.textContent.trim(),
+    classe: el.className, descricao: el.getAttribute("aria-describedby"), desabilitado: el.hasAttribute("aria-disabled"), texto: el.textContent.trim(),
   }));
   assert.ok(b.classe.includes("is-locked"), `o botão veio destravado do servidor: ${b.classe}`);
-  assert.equal(b.aria, "true");
+  assert.equal(b.descricao, "vsl-status");
+  assert.equal(b.desabilitado, false);
   assert.match(b.texto, /Assista ao vídeo/);
   await ctx.close();
 });

@@ -376,7 +376,7 @@ def init_db():
         )
         """,
         # Sugestões de "gasto fixo" que o usuário recusou. Quando uma despesa se
-        # repete (mesma descrição + valor em meses distintos) a Piggy oferece
+        # repete (mesma descrição + valor em meses distintos) o Piggy oferece
         # marcar como recorrente; se o user diz "não", grava aqui pra não
         # re-perguntar a mesma combinação (merchant + valor). Ver
         # find_recurring_candidate em db/recurring.py.
@@ -1354,7 +1354,7 @@ def init_db():
 
         # migration: modo de pagamento do recorrente.
         #   'autopay' (default, comportamento antigo) → o charger LANÇA sozinho no dia.
-        #   'manual'  (conta a pagar / boleto)        → NÃO lança; a Piggy lembra e
+        #   'manual'  (conta a pagar / boleto)        → NÃO lança; o Piggy lembra e
         #     só lança quando o user confirma o pagamento. Aparece na sub-aba
         #     "Contas a pagar". Cada ciclo vira uma linha em bill_instances.
         """alter table recurring_expenses add column if not exists payment_mode text not null default 'autopay'""",

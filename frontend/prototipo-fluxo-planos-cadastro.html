@@ -1,0 +1,265 @@
+<!DOCTYPE html>
+<html lang="pt-BR">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <meta name="theme-color" content="#0c0c0d" />
+  <title>Prévia do fluxo de compra · PigBank</title>
+  <link rel="icon" type="image/png" href="brand/favicon.png" />
+  <link rel="stylesheet" href="brand.css?v=4" />
+  <link rel="stylesheet" href="phosphor.css?v=1" />
+  <link rel="stylesheet" href="site.css?v=4" />
+  <link rel="stylesheet" href="precos-app.css?v=1" />
+  <link rel="stylesheet" href="comecar.css?v=1" />
+  <style>
+    [hidden] { display: none !important; }
+    html { scroll-behavior: smooth; }
+    body { min-height: 100vh; padding-bottom: 74px; }
+    ::selection { background: var(--pink); color: #111; }
+    button, input { caret-color: var(--pink); }
+    button:focus-visible, input:focus-visible, a:focus-visible { outline: 2px solid var(--pink); outline-offset: 3px; }
+    .prototype-view { min-height: calc(100vh - 74px); }
+    .prototype-view.is-changing { animation: pb-view-in 220ms cubic-bezier(.16, 1, .3, 1); }
+    @keyframes pb-view-in { from { opacity: .72; clip-path: inset(0 0 16px 0); } to { opacity: 1; clip-path: inset(0); } }
+
+    .cycle-wrap { display: flex; flex-direction: column; align-items: center; margin: 0 0 30px; }
+    .cycle-toggle { display: inline-flex; gap: 4px; padding: 4px; background: var(--card); border: 1px solid var(--line); border-radius: 15px; }
+    .cycle-btn { display: inline-flex; align-items: center; gap: 8px; font-family: var(--font); font-size: .9rem; font-weight: 700; color: var(--ink-2); background: transparent; border: 0; border-radius: 11px; padding: 10px 22px; cursor: pointer; transition: color var(--dur) var(--ease), background var(--dur) var(--ease), transform var(--dur-fast) var(--ease); }
+    .cycle-btn:hover { color: var(--ink); }
+    .cycle-btn:active { transform: scale(.98); }
+    .cycle-btn.is-active { background: linear-gradient(135deg, var(--pink), var(--pink-dark)); color: #fff; box-shadow: 0 6px 18px rgba(255,45,142,.3); }
+    .cycle-save { background: rgba(198,241,26,.16); color: var(--neon); font-weight: 700; padding: 2px 8px; border-radius: 999px; font-size: .78em; }
+    .cycle-btn.is-active .cycle-save { background: rgba(255,255,255,.22); color: #fff; }
+    .pix-available { margin-top: 10px; color: var(--neon); font-size: .78rem; font-weight: 700; }
+    #plans-v2-wrap { width: min(1560px, calc(100vw - 48px)); margin-left: 50%; transform: translateX(-50%); }
+    #plans-v2 { grid-template-columns: repeat(auto-fit, minmax(220px, 1fr)); align-items: end; }
+    #plans-v2 .plan { min-width: 0; }
+    #plans-v2 .plan .plan-sub { min-height: 3em; }
+    #plans-v2 .price-block { min-height: 94px; display: flex; flex-direction: column; justify-content: center; margin: 4px 0; }
+    #plans-v2 .price-block .price { margin: 0; }
+    #plans-v2 .price .per { font-size: .95rem; font-weight: 600; color: var(--ink-2); letter-spacing: 0; }
+    #plans-v2 .price-eq { color: var(--ink-3); font-size: .78rem; font-weight: 500; margin-top: 6px; font-variant-numeric: tabular-nums; }
+    #plans-v2 .plan > ul { align-content: start; margin: 20px 0 0; padding: 0; }
+    #plans-v2 .plan .plan-actions { display: grid; gap: 8px; }
+    #plans-v2 .plan .btn { width: 100%; line-height: 1.4; white-space: normal; }
+    #plans-v2 .plan .btn-primary { border: 1px solid transparent; }
+    .pix-btn { border-color: rgba(198,241,26,.42); color: var(--neon); }
+    .plan-unavailable { opacity: .66; }
+
+    .intent-box { display: flex; align-items: flex-start; gap: 12px; padding: 14px 15px; margin: -8px 0 22px; border: 1px solid rgba(255,45,142,.28); border-radius: 12px; background: rgba(255,45,142,.07); }
+    .intent-box i { flex: 0 0 auto; color: var(--pink); font-size: 1.2rem; margin-top: 1px; }
+    .intent-box strong { display: block; color: var(--ink); font-size: .88rem; }
+    .intent-box span { display: block; color: var(--ink-2); font-size: .78rem; line-height: 1.45; margin-top: 2px; }
+    .auth-error { display: none; background: rgba(255,45,45,.1); border: 1px solid rgba(255,45,45,.3); color: #ffb4b4; padding: 10px 13px; border-radius: 10px; font-size: .82rem; margin-bottom: 14px; line-height: 1.4; }
+    .field .hint { font-size: .74rem; color: var(--ink-3); margin-top: 6px; }
+    .email-pill { display: flex; align-items: center; gap: 9px; padding: 11px 14px; margin-bottom: 18px; border: 1px solid var(--line-2); border-radius: 12px; background: var(--bg-elev); color: var(--ink-2); font-size: .86rem; }
+    .email-pill i { color: var(--pink); flex-shrink: 0; font-size: 1.1rem; }
+    .email-pill strong { color: var(--ink); }
+    .back { display: inline-block; width: 100%; margin-top: 16px; border: 0; background: none; color: var(--ink-3); font: inherit; font-size: .84rem; text-align: center; cursor: pointer; }
+    .back:hover { color: var(--pink); }
+    .link-button { padding: 0; border: 0; background: none; color: var(--pink); font: inherit; font-weight: 600; cursor: pointer; }
+
+    .checkout-page { min-height: calc(100vh - 74px); display: grid; place-items: center; padding: 42px 22px; position: relative; z-index: 1; }
+    .checkout-shell { width: min(860px, 100%); display: grid; grid-template-columns: .88fr 1.12fr; overflow: hidden; border-radius: var(--radius-lg); background: #fff; color: #222; box-shadow: 0 28px 80px rgba(0,0,0,.48); }
+    .checkout-summary { padding: 42px 38px; background: #f5f5f7; border-right: 1px solid #dddde2; }
+    .checkout-summary img { height: 30px; width: auto; filter: brightness(0); margin-bottom: 44px; }
+    .checkout-summary .checkout-back { display: block; color: #59595f; font-size: .8rem; margin-bottom: 16px; }
+    .checkout-summary h1 { font-size: 1.3rem; margin: 0 0 8px; }
+    .checkout-total { font-size: 2rem; font-weight: 800; letter-spacing: -.03em; margin-bottom: 24px; }
+    .checkout-total small { display: block; color: #59595f; font-size: .78rem; font-weight: 500; letter-spacing: 0; }
+    .checkout-line { display: flex; justify-content: space-between; gap: 18px; padding: 12px 0; border-top: 1px solid #dddde2; color: #55555c; font-size: .85rem; }
+    .checkout-line strong { color: #222; text-align: right; }
+    .checkout-form { padding: 42px 38px; }
+    .checkout-form h2 { font-size: 1.05rem; margin: 0 0 20px; }
+    .stripe-field { margin-bottom: 15px; }
+    .stripe-field label { display: block; color: #4e4e55; font-size: .76rem; font-weight: 650; margin-bottom: 6px; }
+    .stripe-input { width: 100%; min-height: 46px; display: flex; align-items: center; padding: 0 13px; border: 1px solid #c7c7cd; border-radius: 8px; background: #fff; color: #222; font-family: inherit; font-size: .88rem; }
+    .stripe-row { display: grid; grid-template-columns: 1fr 1fr; }
+    .stripe-row .stripe-input:first-child { border-radius: 8px 0 0 8px; }
+    .stripe-row .stripe-input:last-child { border-left: 0; border-radius: 0 8px 8px 0; }
+    .checkout-pay { width: 100%; min-height: 48px; border: 0; border-radius: 8px; background: #111; color: #fff; font-weight: 750; cursor: pointer; margin-top: 6px; }
+    .checkout-secure { color: #59595f; font-size: .72rem; text-align: center; margin: 12px 0 0; }
+
+    .pix-overlay { min-height: calc(100vh - 74px); display: grid; place-items: center; padding: 24px; position: relative; z-index: 2; }
+    .pix-overlay::before { content: ""; position: fixed; inset: 0 0 74px; background: rgba(0,0,0,.72); backdrop-filter: blur(4px); z-index: -1; }
+    .pix-box { width: min(400px, 100%); max-height: calc(100vh - 122px); overflow-y: auto; padding: 26px; border: 1px solid var(--line-2); border-radius: 18px; background: var(--card); text-align: center; box-shadow: var(--shadow); }
+    .pix-box img { height: 27px; width: auto; margin-bottom: 22px; }
+    .pix-box h1 { font-size: 1.18rem; margin-bottom: 8px; }
+    .pix-box > p { color: var(--ink-2); font-size: .86rem; line-height: 1.55; }
+    .pix-box .field { text-align: left; margin-top: 18px; }
+    .pix-code { padding: 13px; margin: 16px 0; border: 1px solid var(--line-2); border-radius: 10px; background: rgba(255,255,255,.05); color: var(--ink-2); font-size: .72rem; overflow-wrap: anywhere; }
+
+    .confirm-page { min-height: calc(100vh - 74px); display: grid; place-items: center; padding: 32px 20px; position: relative; z-index: 1; }
+    .confirm-card { width: min(460px, 100%); padding: 36px 32px; border: 1px solid var(--line); border-radius: var(--radius-lg); background: var(--card); box-shadow: var(--shadow); text-align: center; }
+    .confirm-card .brand-logo { height: 27px; width: auto; margin-bottom: 30px; }
+    .confirm-mark { width: 66px; height: 66px; display: grid; place-items: center; margin: 0 auto 20px; border-radius: 50%; border: 2px solid var(--neon); color: var(--neon); font-size: 1.7rem; }
+    .confirm-mark.loading { border-color: var(--line-2); border-top-color: var(--pink); animation: pb-spin 900ms linear infinite; }
+    @keyframes pb-spin { to { transform: rotate(360deg); } }
+    .confirm-card h1 { font-size: 1.55rem; margin-bottom: 8px; }
+    .confirm-card > p { max-width: 36ch; margin: 0 auto 18px; color: var(--ink-2); font-size: .9rem; }
+    .confirm-actions { display: grid; gap: 9px; margin-top: 20px; }
+
+    .preview-bar { position: fixed; inset: auto 0 0; min-height: 64px; z-index: 3000; display: flex; align-items: center; gap: 14px; padding: 10px max(18px, env(safe-area-inset-right)) calc(10px + env(safe-area-inset-bottom)) max(18px, env(safe-area-inset-left)); border-top: 1px solid #39393d; background: rgba(12,12,13,.97); box-shadow: 0 -14px 36px rgba(0,0,0,.34); }
+    .preview-label { display: flex; align-items: center; gap: 9px; white-space: nowrap; font-size: .78rem; font-weight: 750; }
+    .preview-label i { color: var(--pink); font-size: 1.05rem; }
+    .preview-label small { color: var(--ink-3); font-weight: 500; }
+    .preview-spacer { flex: 1; }
+    .preview-bar .btn { min-height: 38px; padding: 8px 13px; font-size: .78rem; }
+    .preview-select { min-height: 38px; max-width: 190px; padding: 7px 31px 7px 11px; border: 1px solid var(--line-2); border-radius: 9px; background: var(--card); color: var(--ink); font-family: inherit; font-size: .78rem; }
+    .debug-panel { position: fixed; right: 18px; bottom: 76px; z-index: 2999; width: min(340px, calc(100vw - 36px)); padding: 17px; border: 1px solid var(--line-2); border-radius: 14px; background: #17171a; box-shadow: var(--shadow); }
+    .debug-panel h2 { font-size: .9rem; margin: 0 0 10px; }
+    .debug-grid { display: grid; grid-template-columns: auto 1fr; gap: 7px 12px; margin: 0; font-size: .78rem; }
+    .debug-grid dt { color: var(--ink-3); }
+    .debug-grid dd { margin: 0; text-align: right; color: var(--ink-2); font-weight: 650; }
+
+    @media (max-width: 760px) {
+      body { padding-bottom: 116px; }
+      .prototype-view, .checkout-page, .pix-overlay, .confirm-page { min-height: calc(100vh - 116px); }
+      .nav-links { display: none; }
+      #plans-v2-wrap { width: min(100% - 24px, 520px); }
+      #plans-v2 { grid-template-columns: 1fr; }
+      .checkout-shell { grid-template-columns: 1fr; }
+      .checkout-summary { padding: 28px 24px; border-right: 0; border-bottom: 1px solid #dddde2; }
+      .checkout-summary img { margin-bottom: 22px; }
+      .checkout-form { padding: 28px 24px; }
+      .preview-bar { min-height: 106px; flex-wrap: wrap; gap: 8px; }
+      .preview-label { flex: 1 1 200px; order: 1; }
+      .preview-label small { display: none; }
+      .preview-spacer { display: none; }
+      #preview-reset { order: 2; }
+      .preview-select { flex: 1 1 190px; max-width: none; order: 3; }
+      #preview-state { order: 4; }
+      .debug-panel { bottom: 118px; }
+      .pix-overlay::before { bottom: 116px; }
+    }
+    @media (max-width: 480px) {
+      .auth-card { border: 0; border-radius: 0; padding: 28px 20px; box-shadow: none; }
+      .auth-wrap { padding: 0; min-height: calc(100vh - 116px); }
+      .checkout-page { padding: 0; }
+      .checkout-shell { min-height: calc(100vh - 116px); border-radius: 0; }
+      .section-head.center img { width: 104px !important; }
+    }
+    @media (prefers-reduced-motion: reduce) { html { scroll-behavior: auto; } .prototype-view.is-changing { animation: none; } .confirm-mark.loading { animation-duration: 1.8s; } }
+  </style>
+</head>
+<body>
+  <div class="glow" aria-hidden="true"></div>
+  <main id="prototype" class="prototype-view"></main>
+  <div class="preview-bar" aria-label="Controles da prévia">
+    <div class="preview-label"><i class="ph ph-flask" aria-hidden="true"></i><span>Prévia do fluxo</span><small>nenhuma ação real</small></div>
+    <div class="preview-spacer"></div>
+    <select id="preview-scenario" class="preview-select" aria-label="Ir para um cenário"><option value="pricing">Começar nos planos</option><option value="slow">Testar confirmação lenta</option><option value="direct">Testar cadastro direto</option></select>
+    <button class="btn btn-outline" id="preview-state" type="button"><i class="ph ph-info" aria-hidden="true"></i> Ver estado</button>
+    <button class="btn btn-primary" id="preview-reset" type="button"><i class="ph ph-arrow-counter-clockwise" aria-hidden="true"></i> Reiniciar</button>
+  </div>
+  <aside id="debug-panel" class="debug-panel" hidden aria-live="polite"></aside>
+
+  <script>
+  const Journey = (() => {
+    const initial = () => ({ stage: "pricing", cycle: "monthly", intent: null, user: "visitante", payment: "não iniciado" });
+    const checkoutStage = intent => intent && intent.method === "pix" ? "pix_details" : "card_checkout";
+    function resume(state) { return state.intent ? { ...state, stage: checkoutStage(state.intent), user: "conta autenticada" } : { ...state, stage: "pricing", user: "conta autenticada" }; }
+    const transition = (state, action) => {
+      switch (action.type) {
+        case "RESET": return initial();
+        case "SET_CYCLE": return state.stage === "pricing" ? { ...state, cycle: action.cycle } : state;
+        case "SELECT_PLAN": return state.stage === "pricing" ? { ...state, stage: state.user === "conta autenticada" ? checkoutStage(action) : "signup", intent: { plan: action.plan, cycle: state.cycle, method: action.method, status: "guardada" } } : state;
+        case "DIRECT_SIGNUP": return { ...initial(), stage: "signup" };
+        case "EMAIL_SUBMITTED": return state.stage === "signup" ? { ...state, stage: "verify", user: "cadastro pendente" } : state;
+        case "GOOGLE_STARTED": return state.stage === "signup" ? { ...state, stage: "google_complete", user: "Google pendente" } : state;
+        case "GOOGLE_COMPLETED": return state.stage === "google_complete" ? resume(state) : state;
+        case "EMAIL_VERIFIED": return state.stage === "verify" ? resume(state) : state;
+        case "SHOW_LOGIN": return ["pricing", "signup"].includes(state.stage) ? { ...state, stage: "login" } : state;
+        case "SHOW_SIGNUP": return ["login", "verify"].includes(state.stage) ? { ...state, stage: "signup" } : state;
+        case "LOGGED_IN": return state.stage === "login" ? resume(state) : state;
+        case "PIX_DETAILS_SUBMITTED": return state.stage === "pix_details" ? { ...state, stage: "pix_checkout", payment: "aguardando Pix" } : state;
+        case "PAYMENT_SUBMITTED": return ["card_checkout", "pix_checkout"].includes(state.stage) ? { ...state, stage: "confirmation", payment: state.intent.method === "pix" ? "confirmando pagamento Pix" : "confirmando ativação do trial" } : state;
+        case "PAYMENT_PENDING": return state.stage === "confirmation" ? { ...state, payment: "ainda confirmando" } : state;
+        case "PAYMENT_CONFIRMED": return state.stage === "confirmation" ? { ...state, stage: "onboarding", payment: "confirmado", intent: state.intent ? { ...state.intent, status: "consumida" } : null } : state;
+        case "GOOGLE_LOGGED_IN": return state.stage === "login" ? resume(state) : state;
+        case "ONBOARD_NEXT": return state.stage === "onboarding" ? { ...state, stage: "onboarding_step2" } : state;
+        case "APP_READY": return ["onboarding", "onboarding_step2"].includes(state.stage) ? { ...state, stage: "app_ready" } : state;
+        case "CANCEL": return ["card_checkout", "pix_details", "pix_checkout", "confirmation"].includes(state.stage) ? { ...state, stage: "pricing", payment: "cancelado" } : state;
+        default: return state;
+      }
+    };
+    return { initial, transition };
+  })();
+
+  const planData = {
+    essencial: { name: "Essencial", sub: "Organize tudo, sem limites", monthly: "R$ 9,90", annual: "R$ 99", equivalent: "Equivale a R$ 8,25 por mês", benefits: ["1 banco conectado (Open Finance)", "Lançamentos ilimitados: áudio, foto de cupom, OFX", "Histórico de 90 dias", "Caixinhas, metas e cartões ilimitados", "Boletos com lembrete de vencimento"] },
+    plus: { name: "Plus", sub: "Seu dinheiro no automático", monthly: "R$ 19,90", annual: "R$ 199", equivalent: "Equivale a R$ 16,58 por mês", benefits: ["2 bancos conectados (Open Finance)", "Agentes: energia pra até 3", "Piggy IA · 1.000 mensagens/mês", "Alertas de gastos fora do padrão", "Categorização automática dos gastos", "Controle de gastos recorrentes", "Importação de extratos OFX, CSV e PDF", "Histórico de 12 meses + tudo do Essencial"] },
+    pro: { name: "Pro", sub: "Planejamento e previsão", monthly: "R$ 49,90", annual: "R$ 499", equivalent: "Equivale a R$ 41,58 por mês", benefits: ["5 bancos conectados", "Todos os 7 agentes: energia pra equipe inteira", "Previsão de saldo 30/60/90 dias", "Histórico de 24 meses", "Piggy IA · 1.000 mensagens/mês", "Investimentos no painel", "Exportação dos seus dados", "Relatórios semanais + tudo do Plus"] }
+  };
+  let state = Journey.initial();
+  let debugOpen = false;
+  const app = document.getElementById("prototype");
+  const planLabel = () => state.intent ? planData[state.intent.plan].name : "—";
+  const cycleLabel = () => state.intent && state.intent.cycle === "annual" ? "Anual" : "Mensal";
+  const methodLabel = () => state.intent && state.intent.method === "pix" ? "Pix" : "Cartão";
+  const priceLabel = () => state.intent ? planData[state.intent.plan][state.intent.cycle] : "—";
+
+  function dispatch(type, data = {}) { state = Journey.transition(state, { type, ...data }); render(true); }
+  function nav(active) { return `<nav class="nav"><a class="nav-logo" href="#" data-static><img class="logo-full" src="brand/logo.webp?v=1" alt="PigBank" /></a><div class="nav-links"><a href="#" data-static>Funcionalidades</a><a href="#" data-static>Como funciona</a><a href="#" class="${active === "plans" ? "active" : ""}" data-static>Planos</a><a href="#" data-static>WhatsApp</a><a href="#" data-static>Agentes</a></div><div class="nav-right"><button class="link-button link-entrar" type="button" data-action="show-login">Entrar</button><button class="btn btn-primary" type="button" data-action="direct-signup">Começar agora</button></div></nav>`; }
+  function intentBox(context = "auth") { const detail = context === "auth" ? "Sua escolha está guardada. Depois de confirmar a conta, você seguirá direto para o pagamento." : `${priceLabel()} · escolha preservada durante a confirmação.`; return state.intent ? `<div class="intent-box"><i class="ph ph-check-circle" aria-hidden="true"></i><div><strong>${planLabel()} ${cycleLabel()} · ${methodLabel()}</strong><span>${detail}</span></div></div>` : ""; }
+
+  function pricingView() {
+    const annual = state.cycle === "annual";
+    const cards = Object.entries(planData).map(([key, plan]) => `<article class="plan ${key === "plus" ? "featured" : ""}">${key === "plus" ? '<span class="plan-badge"><i class="ph ph-star" aria-hidden="true"></i> Mais popular</span>' : ""}<h3>${plan.name}</h3><div class="plan-sub">${plan.sub}</div><div class="price-block"><div class="price">${annual ? plan.annual : plan.monthly}<small class="per">/${annual ? "ano" : "mês"}</small></div>${annual ? `<div class="price-eq">${plan.equivalent}</div>` : ""}</div><div class="plan-actions"><button class="btn ${key === "plus" ? "btn-primary" : "btn-outline"}" type="button" data-plan="${key}" data-method="card">Assinar ${plan.name}</button>${annual ? `<button class="btn btn-outline pix-btn" type="button" data-plan="${key}" data-method="pix"><i class="ph ph-lightning" aria-hidden="true"></i> Pagar no Pix (à vista)</button>` : ""}</div><ul>${plan.benefits.map(item => `<li><span class="tick"><i class="ph ph-check" aria-hidden="true"></i></span><span>${item}</span></li>`).join("")}</ul></article>`).join("");
+    return `${nav("plans")}<div class="wrap"><section class="section"><div class="section-head center"><img src="brand/mascot.webp" alt="" style="width:132px;height:auto;display:block;margin:0 auto 18px;filter:drop-shadow(0 10px 26px rgba(0,0,0,.5))" /><h2>Escolha seu <span class="grad">PigBank</span></h2><p>15 dias grátis pra testar o plano que você escolher. Cancele antes do fim e não paga nada.</p></div><div id="plans-v2-wrap"><div class="cycle-wrap"><div class="cycle-toggle" role="group" aria-label="Ciclo de cobrança"><button class="cycle-btn ${annual ? "" : "is-active"}" type="button" data-cycle="monthly" aria-pressed="${annual ? "false" : "true"}">Mensal</button><button class="cycle-btn ${annual ? "is-active" : ""}" type="button" data-cycle="annual" aria-pressed="${annual ? "true" : "false"}">Anual <span class="cycle-save">−17%</span></button></div>${annual ? '<span class="pix-available"><i class="ph ph-lightning" aria-hidden="true"></i> Pix disponível no anual</span>' : ""}</div><div class="plans" id="plans-v2">${cards}<article class="plan plan-unavailable"><span class="plan-badge" style="background:rgba(255,255,255,.14)"><i class="ph ph-diamond" aria-hidden="true"></i> Em breve</span><h3>Premium</h3><div class="plan-sub">O máximo do PigBank</div><div class="price-block"><div class="price" style="font-size:1.15rem">Aguarde</div></div><button class="btn btn-outline btn-block" type="button" disabled>Em breve</button><ul><li><span class="tick"><i class="ph ph-check"></i></span> Bancos ilimitados</li><li><span class="tick"><i class="ph ph-check"></i></span> Todos os agentes + crie o seu</li><li><span class="tick"><i class="ph ph-check"></i></span> Modo família</li><li><span class="tick"><i class="ph ph-check"></i></span> Visão completa do patrimônio</li><li><span class="tick"><i class="ph ph-check"></i></span> Suporte exclusivo</li></ul></article></div><p class="plans-note"><i class="ph ph-piggy-bank" aria-hidden="true"></i> <strong>Preço de fundador:</strong> assinando agora, seu valor fica congelado pra sempre: enquanto a assinatura estiver ativa, ele nunca sobe.</p></div><p class="plans-note"><i class="ph ph-confetti" aria-hidden="true"></i> Todo plano vem com <strong>15 dias grátis pra testar</strong>, com ativação por cartão (um teste por número). A primeira cobrança só acontece depois do trial. Cancele antes pelo dashboard e não paga nada. Pagamentos processados pela Stripe. A PigBank nunca vê os dados do seu cartão.</p></section></div>`;
+  }
+
+  function signupView(mode = "signup") {
+    const login = mode === "login", verify = mode === "verify", google = mode === "google_complete";
+    let form;
+    if (verify) form = `<form data-form="verify" novalidate><h1>Confirme seu e-mail</h1><p class="auth-sub">Enviamos um código de 6 dígitos para <b>voce@email.com</b>.</p>${intentBox()}<div id="mock-notice" class="auth-error" role="status"></div><div class="field"><label for="verify-code">Código de verificação</label><input type="text" id="verify-code" inputmode="numeric" autocomplete="one-time-code" maxlength="6" pattern="[0-9]{6}" placeholder="000000" value="123456" required style="letter-spacing:.4em;text-align:center;font-size:1.2rem" /></div><button class="btn btn-primary btn-block btn-lg" type="submit">Confirmar e continuar</button><p class="auth-alt"><button class="link-button" type="button" data-action="resend">Reenviar código</button> · <button class="link-button" type="button" data-action="back-signup">Voltar</button></p></form>`;
+    else if (google) form = `<h1>Quase lá!</h1><p class="auth-sub">Só precisamos de mais alguns dados pra criar sua conta.</p><div class="email-pill"><i class="ph ph-envelope" aria-hidden="true"></i><span>Conectado como <strong>voce@gmail.com</strong></span></div>${intentBox()}<form data-form="google" novalidate><div class="field"><label for="google-name">Nome</label><input type="text" id="google-name" value="Lucas" placeholder="Como podemos te chamar?" autocomplete="given-name" maxlength="50" required /></div><div class="field"><label for="google-phone">WhatsApp</label><input type="tel" id="google-phone" value="(11) 99999-9999" placeholder="(11) 99999-9999" autocomplete="tel" inputmode="tel" required /><div class="hint">Use o mesmo número de WhatsApp com que você vai falar com o Piggy.</div></div><label class="checkbox-row"><input type="checkbox" id="google-terms" checked required /><span>Li e aceito os Termos e a Política de Privacidade do PigBank.</span></label><button class="btn btn-primary btn-block btn-lg" type="submit">Criar minha conta e continuar</button></form><button class="back" type="button" data-action="back-signup">Cancelar</button>`;
+    else if (login) form = `<form data-form="login" novalidate><h1>Bem-vindo de volta!</h1><p class="auth-sub">${state.intent ? "Entre para continuar com o plano escolhido." : "Entre na sua conta para continuar."}</p>${intentBox()}<div id="mock-notice" class="auth-error" role="status"></div><div class="field"><label for="login-email">E-mail</label><input type="email" id="login-email" value="voce@email.com" placeholder="seu@email.com" autocomplete="email" required /></div><div class="field"><label for="login-password">Senha</label><input type="password" id="login-password" value="pigbank123" placeholder="Sua senha" autocomplete="current-password" required /></div><div class="forgot"><button class="link-button" type="button" data-action="forgot">Esqueci minha senha</button></div><button class="btn btn-primary btn-block btn-lg" type="submit" style="margin-top:8px">${state.intent ? "Entrar e continuar" : "Entrar"}</button><div class="auth-divider">ou continue com</div><button class="social-btn" type="button" data-action="google-login"><svg width="18" height="18" viewBox="0 0 24 24" aria-hidden="true"><path fill="#4285F4" d="M22.56 12.25c0-.78-.07-1.53-.2-2.25H12v4.26h5.92a5.06 5.06 0 0 1-2.2 3.32v2.77h3.57c2.08-1.92 3.28-4.74 3.28-8.1z"/><path fill="#34A853" d="M12 23c2.97 0 5.46-.98 7.28-2.66l-3.57-2.77c-.98.66-2.23 1.06-3.71 1.06-2.86 0-5.29-1.93-6.16-4.53H2.18v2.84A11 11 0 0 0 12 23z"/><path fill="#FBBC05" d="M5.84 14.1a6.6 6.6 0 0 1 0-4.2V7.06H2.18a11 11 0 0 0 0 9.88l3.66-2.84z"/><path fill="#EA4335" d="M12 5.38c1.62 0 3.06.56 4.21 1.64l3.15-3.15C17.45 2.09 14.97 1 12 1A11 11 0 0 0 2.18 7.06l3.66 2.84C6.71 7.3 9.14 5.38 12 5.38z"/></svg>Continuar com Google</button><p class="auth-alt">Não tem uma conta? <button class="link-button" type="button" data-action="back-signup">Cadastre-se</button></p></form>`;
+    else form = `<form data-form="signup" novalidate><h1>Crie sua conta</h1><p class="auth-sub">Comece sua jornada financeira agora.</p>${intentBox()}<div class="field"><label for="signup-name">Nome completo</label><input type="text" id="signup-name" value="Lucas Kuramoti" placeholder="Seu nome completo" autocomplete="name" required /></div><div class="field"><label for="signup-email">E-mail</label><input type="email" id="signup-email" value="voce@email.com" placeholder="seu@email.com" autocomplete="email" required /></div><div class="field"><label for="signup-phone">WhatsApp</label><input type="tel" id="signup-phone" value="(11) 99999-9999" placeholder="(11) 99999-9999" autocomplete="tel" required /><div class="hint">Use o mesmo número com que você vai falar com o Piggy.</div></div><div class="field"><label for="signup-password">Senha</label><input type="password" id="signup-password" value="pigbank123" placeholder="Mínimo 8 caracteres" autocomplete="new-password" minlength="8" required /></div><div class="field"><label for="signup-confirm">Confirmar senha</label><input type="password" id="signup-confirm" value="pigbank123" placeholder="Confirme sua senha" autocomplete="new-password" minlength="8" required /></div><label class="checkbox-row"><input type="checkbox" id="signup-terms" checked required /><span>Eu aceito os Termos de Uso e a Política de Privacidade.</span></label><button class="btn btn-primary btn-block btn-lg" type="submit">Criar conta</button><div class="auth-divider">ou cadastre-se com</div><button class="social-btn" type="button" data-action="google"><svg width="18" height="18" viewBox="0 0 24 24" aria-hidden="true"><path fill="#4285F4" d="M22.56 12.25c0-.78-.07-1.53-.2-2.25H12v4.26h5.92a5.06 5.06 0 0 1-2.2 3.32v2.77h3.57c2.08-1.92 3.28-4.74 3.28-8.1z"/><path fill="#34A853" d="M12 23c2.97 0 5.46-.98 7.28-2.66l-3.57-2.77c-.98.66-2.23 1.06-3.71 1.06-2.86 0-5.29-1.93-6.16-4.53H2.18v2.84A11 11 0 0 0 12 23z"/><path fill="#FBBC05" d="M5.84 14.1a6.6 6.6 0 0 1 0-4.2V7.06H2.18a11 11 0 0 0 0 9.88l3.66-2.84z"/><path fill="#EA4335" d="M12 5.38c1.62 0 3.06.56 4.21 1.64l3.15-3.15C17.45 2.09 14.97 1 12 1A11 11 0 0 0 2.18 7.06l3.66 2.84C6.71 7.3 9.14 5.38 12 5.38z"/></svg>Continuar com Google</button><p class="auth-alt">Já tem uma conta? <button class="link-button" type="button" data-action="show-login">Entrar</button></p></form>`;
+    const brand = google ? '<img src="brand/mascot.webp" alt="" style="width:120px;height:auto;display:block;margin:0 auto 6px;filter:drop-shadow(0 8px 22px rgba(0,0,0,.45))" />' : '<div class="auth-logo"><img src="brand/icon.png?v=2" alt="" /><span>PigBank</span></div>';
+    return `${nav()}<div class="wrap auth-wrap"><div class="auth-card">${brand}${form}</div></div>`;
+  }
+
+  function cardCheckoutView() { return `<div class="checkout-page"><div class="checkout-shell"><section class="checkout-summary"><img src="brand/logo.webp?v=1" alt="PigBank" /><span class="checkout-back">Assinatura PigBank</span><h1>${planLabel()} · ${cycleLabel()}</h1><div class="checkout-total">${priceLabel()}<small>${state.intent.cycle === "annual" ? "cobrado uma vez por ano" : "por mês após o período grátis"}</small></div><div class="checkout-line"><span>Período grátis</span><strong>15 dias</strong></div><div class="checkout-line"><span>Total hoje</span><strong>R$ 0,00</strong></div></section><form class="checkout-form" data-form="card"><h2>Dados do cartão</h2><div class="stripe-field"><label for="card-email">E-mail</label><input class="stripe-input" id="card-email" type="email" value="voce@email.com" autocomplete="email" required /></div><div class="stripe-field"><label for="card-number">Informações do cartão</label><input class="stripe-input" id="card-number" inputmode="numeric" value="1234 1234 1234 1234" autocomplete="cc-number" required /><div class="stripe-row"><input class="stripe-input" aria-label="Validade do cartão" value="12 / 30" autocomplete="cc-exp" required /><input class="stripe-input" aria-label="Código de segurança" inputmode="numeric" value="123" autocomplete="cc-csc" required /></div></div><div class="stripe-field"><label for="card-name">Nome no cartão</label><input class="stripe-input" id="card-name" value="NOME COMPLETO" autocomplete="cc-name" required /></div><button class="checkout-pay" type="submit">Iniciar período grátis</button><p class="checkout-secure">Checkout Stripe simulado · nenhum pagamento será feito</p><button class="link-button" style="display:block;margin:18px auto 0;color:#59595f" type="button" data-action="cancel">Cancelar e voltar</button></form></div></div>`; }
+  function pixView(qr = false) { return `<div class="pix-overlay"><div class="pix-box"><img src="brand/logo.webp?v=1" alt="PigBank" /><h1>${qr ? "Pague com Pix" : `${planLabel()} anual no Pix`}</h1><p>${qr ? "Use o código abaixo. A confirmação aparece automaticamente." : `Pagamento à vista de ${priceLabel()}.`}</p>${qr ? `<div class="pix-code">00020126...PIGBANK...PLANO-${state.intent.plan.toUpperCase()}...6304</div><button class="btn btn-primary btn-block" type="button" data-action="pay">Simular Pix pago</button>` : `<form data-form="pix-details"><div class="field"><label for="pix-document">CPF ou CNPJ de quem paga</label><input type="text" id="pix-document" inputmode="numeric" autocomplete="off" value="123.456.789-00" required /></div><button class="btn btn-primary btn-block" type="submit">Gerar código Pix</button></form>`}<button class="btn btn-outline btn-block" style="margin-top:10px" type="button" data-action="cancel">Cancelar</button></div></div>`; }
+  function confirmationView() { const pending = state.payment === "ainda confirmando", pix = state.intent.method === "pix"; const heading = pending ? (pix ? "O Pix ainda está sendo confirmado" : "A ativação ainda está sendo confirmada") : (pix ? "Confirmando seu pagamento Pix" : "Ativando seu período grátis"); const copy = pending ? "Pode levar mais alguns instantes. Você continua aqui e não precisa escolher o plano de novo." : (pix ? "O pagamento foi identificado e estamos liberando sua conta." : "Estamos confirmando a ativação do seu trial com a Stripe. Nenhuma cobrança foi feita hoje."); return `<div class="confirm-page"><section class="confirm-card"><img class="brand-logo" src="brand/logo.webp?v=1" alt="PigBank" /><div class="confirm-mark loading" aria-hidden="true"></div><h1>${heading}</h1><p>${copy}</p>${intentBox("summary")}<div class="confirm-actions"><button class="btn btn-primary btn-block" type="button" data-action="confirm"><i class="ph ph-check-circle" aria-hidden="true"></i> Simular confirmação</button><button class="btn btn-outline btn-block" type="button" data-action="pending"><i class="ph ph-clock" aria-hidden="true"></i> Simular demora</button></div></section></div>`; }
+  function onboardingView() { const success = state.intent.method === "pix" ? "Pagamento confirmado" : "Período grátis ativado"; return `<div class="wrap onb-wrap"><div class="onb-card"><header class="onb-head"><img class="onb-logo" src="brand/logo.webp?v=1" alt="PigBank" /><p class="onb-stepline">PASSO 1 DE 5</p><div class="onb-bar"><div class="onb-bar-fill" style="width:20%"></div></div></header><section class="onb-step"><img class="onb-mascot" src="brand/mascot.webp" alt="" /><h1>Bem-vindo!</h1><p class="onb-sub">Em alguns passos rápidos sua conta fica pronta pra usar. Dá pra pular qualquer um e ajustar depois.</p><div class="onb-done"><i class="ph ph-check-circle" aria-hidden="true"></i> ${success} · ${planLabel()} ${cycleLabel()}</div><div class="onb-acts"><button class="btn btn-primary btn-block btn-lg" type="button" data-action="onboard-next">Vamos lá →</button></div></section><footer class="onb-foot"><button class="onb-skip-all" type="button" data-action="skip-all">Pular tudo e ir para o app</button></footer></div></div>`; }
+  function onboardingStep2View() { return `<div class="wrap onb-wrap"><div class="onb-card"><header class="onb-head"><img class="onb-logo" src="brand/logo.webp?v=1" alt="PigBank" /><p class="onb-stepline">PASSO 2 DE 5</p><div class="onb-bar"><div class="onb-bar-fill" style="width:40%"></div></div></header><section class="onb-step"><h1>Onde está seu dinheiro?</h1><p class="onb-sub">Assim eu sei de onde sai e pra onde vai cada lançamento que você me mandar no WhatsApp.</p><div class="onb-block"><h2 class="onb-block-title">Saldo de hoje</h2><div class="field"><label for="onb-balance-preview">Quanto você tem na conta agora (R$)</label><input type="number" id="onb-balance-preview" min="0" step="0.01" inputmode="decimal" placeholder="0,00" /></div></div><div class="onb-acts"><button class="btn btn-primary btn-block btn-lg" type="button" data-action="skip-all">Continuar →</button><button class="onb-skip" type="button" data-action="skip-all">Pular por enquanto</button></div></section><footer class="onb-foot"><button class="onb-skip-all" type="button" data-action="skip-all">Pular tudo e ir para o app</button></footer></div></div>`; }
+  function appReadyView() { return `<div class="confirm-page"><section class="confirm-card"><img class="brand-logo" src="brand/logo.webp?v=1" alt="PigBank" /><div class="confirm-mark"><i class="ph ph-check" aria-hidden="true"></i></div><h1>Tudo pronto!</h1><p>A prévia termina aqui. No produto, a pessoa seguiria para o app.</p><button class="btn btn-primary btn-block" type="button" data-action="restart">Voltar ao início da prévia</button></section></div>`; }
+
+  function render(changing = false) {
+    const views = { pricing: pricingView, signup: () => signupView("signup"), verify: () => signupView("verify"), google_complete: () => signupView("google_complete"), login: () => signupView("login"), card_checkout: cardCheckoutView, pix_details: () => pixView(false), pix_checkout: () => pixView(true), confirmation: confirmationView, onboarding: onboardingView, onboarding_step2: onboardingStep2View, app_ready: appReadyView };
+    app.innerHTML = (views[state.stage] || pricingView)();
+    if (changing) { app.classList.remove("is-changing"); void app.offsetWidth; app.classList.add("is-changing"); window.scrollTo({ top: 0, behavior: "auto" }); }
+    bindView(); renderDebug();
+  }
+  function resetPreview() {
+    document.getElementById("preview-scenario").value = "pricing";
+    dispatch("RESET");
+  }
+  function bindView() {
+    app.querySelectorAll("[data-static]").forEach(el => el.addEventListener("click", e => e.preventDefault()));
+    app.querySelectorAll("[data-cycle]").forEach(btn => btn.addEventListener("click", () => dispatch("SET_CYCLE", { cycle: btn.dataset.cycle })));
+    app.querySelectorAll("[data-plan]").forEach(btn => btn.addEventListener("click", () => dispatch("SELECT_PLAN", { plan: btn.dataset.plan, method: btn.dataset.method })));
+    app.querySelectorAll("[data-action]").forEach(btn => btn.addEventListener("click", () => {
+      const action = btn.dataset.action;
+      const notices = { resend: "Novo código enviado!", forgot: "Se o e-mail existir, enviamos um link por e-mail." };
+      if (notices[action]) {
+        const notice = document.getElementById("mock-notice");
+        if (notice) { notice.textContent = notices[action]; notice.classList.add("show"); }
+        return;
+      }
+      if (action === "restart") { resetPreview(); return; }
+      const map = { "direct-signup": "DIRECT_SIGNUP", "show-login": "SHOW_LOGIN", "back-signup": "SHOW_SIGNUP", google: "GOOGLE_STARTED", "google-login": "GOOGLE_LOGGED_IN", cancel: "CANCEL", pay: "PAYMENT_SUBMITTED", pending: "PAYMENT_PENDING", confirm: "PAYMENT_CONFIRMED", "onboard-next": "ONBOARD_NEXT", "skip-all": "APP_READY" };
+      if (map[action]) dispatch(map[action]);
+    }));
+    app.querySelectorAll("form").forEach(form => form.addEventListener("submit", e => { e.preventDefault(); if (!form.reportValidity()) return; const map = { signup: "EMAIL_SUBMITTED", verify: "EMAIL_VERIFIED", google: "GOOGLE_COMPLETED", login: "LOGGED_IN", card: "PAYMENT_SUBMITTED", "pix-details": "PIX_DETAILS_SUBMITTED" }; if (map[form.dataset.form]) dispatch(map[form.dataset.form]); }));
+  }
+  function renderDebug() { const panel = document.getElementById("debug-panel"); panel.hidden = !debugOpen; if (!debugOpen) return; panel.innerHTML = `<h2>Estado preservado</h2><dl class="debug-grid"><dt>Tela</dt><dd>${state.stage}</dd><dt>Plano</dt><dd>${planLabel()}</dd><dt>Ciclo</dt><dd>${state.intent ? cycleLabel() : state.cycle}</dd><dt>Meio</dt><dd>${state.intent ? methodLabel() : "—"}</dd><dt>Escolha</dt><dd>${state.intent ? state.intent.status : "ausente"}</dd><dt>Pagamento</dt><dd>${state.payment}</dd></dl>`; }
+  document.getElementById("preview-reset").addEventListener("click", resetPreview);
+  document.getElementById("preview-state").addEventListener("click", () => { debugOpen = !debugOpen; renderDebug(); });
+  document.getElementById("preview-scenario").addEventListener("change", e => { if (e.target.value === "direct") state = Journey.transition(Journey.initial(), { type: "DIRECT_SIGNUP" }); else if (e.target.value === "slow") state = { stage: "confirmation", cycle: "monthly", intent: { plan: "plus", cycle: "monthly", method: "card", status: "guardada" }, user: "conta autenticada", payment: "ainda confirmando" }; else state = Journey.initial(); render(true); });
+  render();
+  </script>
+</body>
+</html>

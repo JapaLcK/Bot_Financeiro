@@ -50,6 +50,12 @@ async def serve_landing_v1():
     return html_file(FRONTEND_DIR / "index.html", clarity=True)
 
 
+@router.get("/crm-demo")
+async def serve_crm_demo():
+    """Demonstração pública e isolada do conceito de CRM."""
+    return html_file(FRONTEND_DIR / "crm-demo.html")
+
+
 @router.get("/app")
 async def serve_dashboard(request: Request):
     # Gate server-side: cadastro sem plano escolhido é mandado pra /precos antes
@@ -205,6 +211,17 @@ def _guide_card_html(g: dict) -> str:
         f'<div class="meta">Leitura de {_html.escape(g["read_time"])}</div>'
         f'</div></a>'
     )
+
+
+@router.get("/blog")
+async def serve_blog_index():
+    """Índice público do blog — embed do Soro (app.trysoro.com).
+
+    Distinto de /blog/{slug}: aqueles são guias evergreen PRÓPRIOS (Pro-only,
+    renderizados de core.blog_guides). Esta página é o blog público de marketing,
+    cujo conteúdo é servido pelo script do Soro dentro da div #soro-blog.
+    """
+    return html_file(FRONTEND_DIR / "blog.html", clarity=True)
 
 
 @router.get("/blog/{slug}")
@@ -605,6 +622,42 @@ async def serve_sidenav_rail_css():
     )
 
 
+@router.get("/crm-demo.css")
+async def serve_crm_demo_css():
+    return FileResponse(
+        FRONTEND_DIR / "crm-demo.css",
+        media_type="text/css",
+        headers={"Cache-Control": "no-cache"},
+    )
+
+
+@router.get("/crm-demo-data.js")
+async def serve_crm_demo_data_js():
+    return FileResponse(
+        FRONTEND_DIR / "crm-demo-data.js",
+        media_type="application/javascript",
+        headers={"Cache-Control": "no-cache"},
+    )
+
+
+@router.get("/crm-demo-views.js")
+async def serve_crm_demo_views_js():
+    return FileResponse(
+        FRONTEND_DIR / "crm-demo-views.js",
+        media_type="application/javascript",
+        headers={"Cache-Control": "no-cache"},
+    )
+
+
+@router.get("/crm-demo.js")
+async def serve_crm_demo_js():
+    return FileResponse(
+        FRONTEND_DIR / "crm-demo.js",
+        media_type="application/javascript",
+        headers={"Cache-Control": "no-cache"},
+    )
+
+
 @router.get("/comecar.js")
 async def serve_comecar_js():
     """Comportamento do wizard de primeira configuração servido em /onboarding.
@@ -880,7 +933,7 @@ async def serve_landing_v2_media(uuid: str, file: str):
 
 @router.get("/wa")
 async def open_whatsapp_bot():
-    """Abre o chat DIRETO com a Piggy no WhatsApp (deep link), com saudação
+    """Abre o chat DIRETO com o Piggy no WhatsApp (deep link), com saudação
     pré-preenchida. Botões do site apontam pra cá — o número real fica no
     servidor (WHATSAPP_NUMBER), nada hardcoded no HTML. Serve pra reencontrar
     o bot rápido. Sem número configurado, cai no seletor genérico do WhatsApp."""

@@ -17,7 +17,7 @@ from utils_text import fmt_brl
 
 _INCOME_WORDS = ("receita", "recebimento", "entrada", "renda", "salario", "salário")
 
-# Marcadores de "conta a pagar / boleto" (payment_mode='manual'): a Piggy só
+# Marcadores de "conta a pagar / boleto" (payment_mode='manual'): o Piggy só
 # LEMBRA e o débito só entra quando o usuário confirma o pagamento — diferente
 # do gasto fixo (autopay), que debita sozinho no dia. Ver [[db/bills.py]].
 _MANUAL_MARKERS = (
@@ -66,8 +66,8 @@ def add(user_id: int, text: str, entities: dict) -> str:
     try:
         from core.services.plan_service import is_pro
         if not is_pro(user_id):
-            return ("📅 Gastos e receitas fixas são do *PigBank+*. Assine pra Piggy "
-                    "lançar tudo sozinha todo mês, no dia certo. 🐷")
+            return ("📅 Gastos e receitas fixas são do *PigBank+*. Assine pro Piggy "
+                    "lançar tudo sozinho todo mês, no dia certo. 🐷")
     except Exception:
         pass
 
@@ -159,7 +159,7 @@ def add(user_id: int, text: str, entities: dict) -> str:
             f"✅ *Receita fixa criada:* {rec['name']}\n"
             f"💰 {fmt_brl(valor)} · {_fmt_quando(frequency, dia, mes)}\n"
             f"📅 {_fmt_start(rec.get('start_date'))}\n"
-            f"É só o cadastro — a Piggy credita sozinha no dia. Edite na aba *Recorrentes* do dashboard."
+            f"É só o cadastro — o Piggy credita sozinho no dia. Edite na aba *Recorrentes* do dashboard."
         )
 
     from db.recurring import create_recurring_expense
@@ -193,7 +193,7 @@ def add(user_id: int, text: str, entities: dict) -> str:
             f"🧾 *Conta a pagar criada:* {rec['name']}\n"
             f"💸 {valor_txt} · vence {_fmt_quando(frequency, dia, mes)}\n"
             f"📅 {_fmt_start(rec.get('start_date'))}\n"
-            f"A Piggy vai *te lembrar* — nada é debitado até você confirmar. "
+            f"O Piggy vai *te lembrar* — nada é debitado até você confirmar. "
             f"Quando pagar, é só mandar *paguei {rec['name'].lower()}*. 🐷"
         )
     return (

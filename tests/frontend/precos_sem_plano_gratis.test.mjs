@@ -221,7 +221,7 @@ test("controle positivo: os dados dos planos pagos seguem nas colunas certas", a
     ["Ilimitados", "Ilimitados", "Ilimitados", "Ilimitados"]);
   assert.deepEqual(await linha("Histórico que você enxerga"),
     ["90 dias", "12 meses", "24 meses", "Completo"]);
-  assert.deepEqual(await linha("Mensagens com a Piggy"),
+  assert.deepEqual(await linha("Mensagens com o Piggy"),
     ["200por mês", "1.000por mês", "1.000por mês", "1.000por mês"]);
   assert.deepEqual(await linha("Bancos conectados (Open Finance)"),
     ["1", "2", "5", "Ilimitados"]);

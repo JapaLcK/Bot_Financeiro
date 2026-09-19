@@ -60,6 +60,7 @@ def add_launch_and_update_balance(
     criado_em: datetime | None = None,
     is_internal_movement: bool = False,
     extra_efeitos: dict | None = None,
+    apply_delta: bool = True,
 ):
     """
     Lança em launches e atualiza saldo em accounts na mesma transação.
@@ -68,6 +69,12 @@ def add_launch_and_update_balance(
     `extra_efeitos` é mesclado dentro de `efeitos` jsonb. Use pra que
     `delete_launch_and_rollback` consiga reverter side-effects além do
     saldo (ex: `bill_id` pra pagamento de fatura).
+
+    `apply_delta=False` grava o lançamento com `delta_conta: 0` SEM mover
+    `accounts.balance` — o dinheiro já moveu fora do Pig (ex.: usuário com
+    Open Finance: pagamento de fatura e débito de gasto fixo em conta já
+    constam no extrato bancário; debitar a Carteira Piggy esvaziaria o
+    dinheiro em espécie e contaria o gasto duas vezes).
     """
     ensure_user(user_id)
 
@@ -78,6 +85,9 @@ def add_launch_and_update_balance(
         delta = +v
     else:
         raise ValueError(f"tipo inválido: {tipo}")
+
+    if not apply_delta:
+        delta = Decimal(0)
 
     if criado_em is None:
         criado_em = datetime.now(_tz())

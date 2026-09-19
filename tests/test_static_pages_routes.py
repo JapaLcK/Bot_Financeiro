@@ -16,6 +16,7 @@ client = TestClient(dashboard.app)
 
 HTML_PAGES = [
     "/",
+    "/blog",
     "/app",
     "/home",
     "/settings",
@@ -139,6 +140,25 @@ def test_landing_v2_na_raiz_alinhada_e_sem_badge():
     # apontava pra âncora placeholder `#comecar` — clique não ia a lugar nenhum).
     assert 'href="#comecar"' not in html
     assert 'href="/cadastro"' in html
+
+
+def test_blog_index_publico_com_embed_soro():
+    """A /blog é o índice público do blog de marketing — embed do Soro
+    (div alvo + script defer), servido de frontend/blog.html. Distinto de
+    /blog/{slug}, que são guias evergreen próprios e Pro-only (gate
+    redireciona deslogado pro login — por isso o 200 aqui importa)."""
+    resp = client.get("/blog")
+    assert resp.status_code == 200
+    html = resp.text
+    assert '<div id="soro-blog"></div>' in html
+    assert (
+        'src="https://app.trysoro.com/api/embed/c5aeed30-cd76-4644-9ac3-39d386392580"'
+        in html
+    )
+    # A <div> tem que vir ANTES do <script> (o embed a usa como alvo de render).
+    assert html.index('<div id="soro-blog">') < html.index("app.trysoro.com/api/embed")
+    # A landing principal não leva o embed (a seção mora na página /blog).
+    assert "soro-blog" not in client.get("/").text
 
 
 def test_landing_v1_noindex_no_standby():

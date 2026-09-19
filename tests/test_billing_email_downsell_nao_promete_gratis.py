@@ -9,7 +9,7 @@ TRIAL. **A tabela de varredura da categoria mora lá** e cobre os dois — não
 duplicar (§0.7).
 
 `send_trial_downsell_email` dizia: "Sua conta continua no plano Grátis: seus
-dados estão todos guardados, mas o banco conectado ficou pausado e a Piggy
+dados estão todos guardados, mas o banco conectado ficou pausado e o Piggy
 voltou pro modo básico." Depois do corte isso é falso do jeito mais direto —
 quem termina o teste sem assinar fica SEM ACESSO, não "no básico". E é
 automático, uma vez por conta (`trial_downsell_sent_at`), então começaria a
@@ -35,7 +35,7 @@ conjuntos de vermelhos não se repetem. Todas medidas em 2026-09-11.
 **(a) a frase antiga de volta** — troque o parágrafo novo por::
 
       <p>Sua conta continua no plano Grátis: seus dados estão todos guardados,
-      mas o banco conectado ficou <strong>pausado</strong> e a Piggy voltou pro modo básico.</p>
+      mas o banco conectado ficou <strong>pausado</strong> e o Piggy voltou pro modo básico.</p>
 
 VERMELHOS: `test_o_downsell_nao_diz_que_a_conta_continua_no_gratis`,
            `test_o_downsell_diz_que_o_acesso_fica_bloqueado`
