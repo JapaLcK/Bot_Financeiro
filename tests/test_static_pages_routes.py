@@ -136,6 +136,10 @@ def test_landing_v2_na_raiz_alinhada_e_sem_badge():
     assert "lovable-badge" not in html
     assert "~flock" not in html
     assert 'lang="pt-BR"' in html
+    # CTAs de conversão apontam pro funil do PigBank (o template do Lovable
+    # apontava pra âncora placeholder `#comecar` — clique não ia a lugar nenhum).
+    assert 'href="#comecar"' not in html
+    assert 'href="/cadastro"' in html
 
 
 def test_landing_v1_noindex_no_standby():
