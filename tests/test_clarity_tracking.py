@@ -112,6 +112,9 @@ def test_html_so_injeta_clarity_por_opt_in(monkeypatch):
 
 
 def test_rotas_institucionais_e_precos_fazem_opt_in():
+    # blog.html entra por decisão explícita: a /blog é página pública de
+    # marketing (conteúdo do Soro, sem credencial nem formulário do usuário) —
+    # mesmo critério das institucionais e da /precos.
     assert _paginas_com_clarity() == {
         "index.html",
         "whatsapp.html",
@@ -120,6 +123,7 @@ def test_rotas_institucionais_e_precos_fazem_opt_in():
         "agents.html",
         "como-funciona.html",
         "precos.html",
+        "blog.html",
     }
 
 
