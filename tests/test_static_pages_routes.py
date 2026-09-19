@@ -60,7 +60,11 @@ def test_blog_index_publico_com_embed_soro():
     # A <div> tem que vir ANTES do <script> (o embed a usa como alvo de render).
     assert html.index('<div id="soro-blog">') < html.index("app.trysoro.com/api/embed")
     # E a landing principal não leva o embed (a seção mora na página /blog).
-    assert "soro-blog" not in client.get("/").text
+    # Checa o MARKUP do embed, não a string solta "soro-blog": o site.css (que
+    # tem os overrides do tema escuro do embed) é inlined na / pela landing v1.
+    landing = client.get("/").text
+    assert '<div id="soro-blog"></div>' not in landing
+    assert "app.trysoro.com/api/embed" not in landing
 
 
 def test_whatsapp_nao_garante_quando_a_primeira_cobranca_vem():
