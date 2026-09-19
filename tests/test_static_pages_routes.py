@@ -63,6 +63,17 @@ def test_blog_index_publico_com_embed_soro():
     assert "soro-blog" not in client.get("/").text
 
 
+def test_csp_libera_o_host_do_embed_soro():
+    """Sem `app.trysoro.com` no `script-src` da CSP, o navegador bloqueia o
+    script do embed e a /blog fica com a seção vazia — o único sinal fica no
+    console do usuário (mesmo modo de falha do GA4 no teste do gtag)."""
+    from frontend.finance_bot_websocket_custom import _SECURITY_HEADERS
+
+    csp = _SECURITY_HEADERS["Content-Security-Policy"]
+    script_src = csp.split("script-src", 1)[1].split(";", 1)[0]
+    assert "https://app.trysoro.com" in script_src
+
+
 def test_whatsapp_nao_garante_quando_a_primeira_cobranca_vem():
     """A trilha de passos da /whatsapp é NOSSA (1ca0c44) e não pode prometer a data.
 
