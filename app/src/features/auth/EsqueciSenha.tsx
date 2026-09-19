@@ -1,0 +1,77 @@
+import { useState } from "react";
+import { View } from "react-native";
+import { z } from "zod";
+
+import { chamar } from "@/api/client";
+import { textoDaFalha } from "@/features/auth/entrar";
+import { Banner } from "@/ui/componentes/Banner";
+import { Button } from "@/ui/componentes/Button";
+import { Input } from "@/ui/componentes/Input";
+import { Texto } from "@/ui/componentes/Texto";
+import { espaco } from "@/ui/tokens";
+
+const MENSAGEM_NEUTRA =
+  "Se o e-mail estiver cadastrado, enviamos um link para redefinir a senha.";
+
+/**
+ * `/auth/forgot-password` SEMPRE responde 200 com uma mensagem neutra (o
+ * backend não revela se o e-mail existe — CLAUDE.md, isolamento de conta). O
+ * app repete essa neutralidade: em qualquer 200, mostra o MESMO texto fixo,
+ * nunca o `message` que o servidor devolveu. Falha de rede/limite (429/5xx) é
+ * outra categoria — não é sobre revelar conta, e mostra erro de verdade com
+ * chance de tentar de novo.
+ */
+type Estado = { fase: "formulario" } | { fase: "enviando" } | { fase: "enviado" } | { fase: "erro"; mensagem: string };
+
+export function EsqueciSenha() {
+  const [email, setEmail] = useState("");
+  const [estado, setEstado] = useState<Estado>({ fase: "formulario" });
+
+  const enviar = async () => {
+    setEstado({ fase: "enviando" });
+    try {
+      await chamar("/auth/forgot-password", z.unknown(), {
+        metodo: "POST",
+        corpo: { email: email.trim() },
+        semAuth: true,
+      });
+      setEstado({ fase: "enviado" });
+    } catch (e) {
+      setEstado({ fase: "erro", mensagem: textoDaFalha(e) });
+    }
+  };
+
+  if (estado.fase === "enviado") {
+    return (
+      <View style={{ gap: espaco.lg }}>
+        <Texto variante="secao">Verifique seu e-mail</Texto>
+        <Texto variante="corpo" tom="inkMuted">
+          {MENSAGEM_NEUTRA}
+        </Texto>
+      </View>
+    );
+  }
+
+  const enviando = estado.fase === "enviando";
+  return (
+    <View style={{ gap: espaco.lg }}>
+      <Texto variante="secao">Esqueci a senha</Texto>
+      <Texto variante="corpo" tom="inkMuted">
+        Digite seu e-mail: se ele estiver cadastrado, enviamos um link para redefinir a senha.
+      </Texto>
+      <Input
+        rotulo="E-mail"
+        icone="Envelope"
+        value={email}
+        onChangeText={setEmail}
+        autoCapitalize="none"
+        autoCorrect={false}
+        keyboardType="email-address"
+        textContentType="username"
+        desativado={enviando}
+      />
+      {estado.fase === "erro" ? <Banner tom="danger" mensagem={estado.mensagem} /> : null}
+      <Button rotulo="Enviar" onPress={() => void enviar()} desativado={!email.trim() || enviando} carregando={enviando} />
+    </View>
+  );
+}

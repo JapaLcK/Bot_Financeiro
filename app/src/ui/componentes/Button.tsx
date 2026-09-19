@@ -1,9 +1,10 @@
-import { ActivityIndicator, Animated, Pressable } from "react-native";
+import { ActivityIndicator, Animated, Pressable, View } from "react-native";
 
 import { usePressao } from "@/ui/motion";
 import { useTema } from "@/ui/tema";
 import { espaco, raio, type Paleta } from "@/ui/tokens";
 
+import { Icone, type NomeIcone } from "./Icone";
 import { Texto } from "./Texto";
 
 type Variante = "primary" | "secondary" | "ghost" | "danger";
@@ -16,6 +17,8 @@ interface Props {
   carregando?: boolean;
   desativado?: boolean;
   onPress: () => void;
+  /** Ícone à esquerda do rótulo (logo social do login, por exemplo). Sem ele, o botão é IDÊNTICO ao de antes. */
+  icone?: NomeIcone;
 }
 
 const ALTURA: Record<Tamanho, number> = { M: 44, L: 52 };
@@ -40,6 +43,7 @@ export function Button({
   carregando = false,
   desativado = false,
   onPress,
+  icone,
 }: Props) {
   const { cores } = useTema();
   const pressao = usePressao();
@@ -71,9 +75,21 @@ export function Button({
           pressao.estilo,
         ]}
       >
-        <Texto variante="rotulo" tom={v.tom} style={{ opacity: carregando ? 0 : 1 }}>
-          {rotulo}
-        </Texto>
+        {icone ? (
+          // Só quando há ícone a árvore ganha uma `View` a mais — sem ele o
+          // botão renderiza EXATAMENTE como antes (o teste de `carregando`
+          // lê `opacity` direto no estilo do `Texto`, não de um invólucro).
+          <View style={{ flexDirection: "row", alignItems: "center", gap: espaco.sm, opacity: carregando ? 0 : 1 }}>
+            <Icone nome={icone} tom={v.tom} tamanho={20} />
+            <Texto variante="rotulo" tom={v.tom}>
+              {rotulo}
+            </Texto>
+          </View>
+        ) : (
+          <Texto variante="rotulo" tom={v.tom} style={{ opacity: carregando ? 0 : 1 }}>
+            {rotulo}
+          </Texto>
+        )}
         {/* Absoluto sobre o texto invisível: a largura do botão não pula ao trocar para o spinner. */}
         {carregando ? <ActivityIndicator color={cores[v.tom]} style={{ position: "absolute" }} /> : null}
       </Animated.View>
