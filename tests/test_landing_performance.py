@@ -19,16 +19,12 @@ from frontend.routes.shared import (
 from frontend.routes.static_pages import (
     _CACHE_IMUTAVEL,
     _cache_asset_versionado,
-    serve_landing_v1,
+    serve_landing,
 )
 
 
 def _landing_servida() -> str:
-    # Os guardas deste arquivo medem o perfil de performance da LANDING V1
-    # (CSS inline, preload da fonte, orçamento de imagens). Ela saiu da `/`
-    # quando a v2 entrou, mas segue servida em `/landing-v1` em standby —
-    # é lá que o perfil continua sendo medido.
-    return asyncio.run(serve_landing_v1()).body.decode("utf-8")
+    return asyncio.run(serve_landing()).body.decode("utf-8")
 
 
 def _landing_com_links_versionados() -> str:
