@@ -36,6 +36,16 @@ PAGINAS_SEM_ROTA_OK = {
     # Preview de desenvolvimento da arte dos agentes; `docs/agente_faria_limer.md`
     # a cita como o lugar onde o set `_AGENT_ART` é conferido a olho.
     "preview_agentes.html",
+    # Assets da landing v2 (build espelhada do Lovable). São servidos pela rota
+    # parametrizada `/assets/{path}` (anti-traversal, cache imutável), que monta
+    # o caminho em runtime — este guarda só enxerga literais `FRONTEND_DIR / ...`.
+    # Os nomes carregam hash de conteúdo e MUDAM a cada re-sync
+    # (scripts/sync_landing_v2.sh): atualize o conjunto junto.
+    "landing-v2/assets/index-C7puP08d.js",
+    "landing-v2/assets/pigbank-snout.png.asset-CsmR-u6_.js",
+    "landing-v2/assets/precos-BlOJhx9-.js",
+    "landing-v2/assets/routes-BgmvrBee.js",
+    "landing-v2/assets/styles-Rgs8_YIn.css",
 }
 
 # `FRONTEND_DIR / "a" / "b"` e a variante em minúsculas do `core/admin_dashboard.py`.

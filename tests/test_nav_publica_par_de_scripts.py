@@ -67,7 +67,7 @@ def test_as_mesmas_paginas_carregam_os_dois_scripts_da_nav():
 
 def test_o_par_sai_versionado_por_hash_do_conteudo():
     """`?v=1` literal não chega ao navegador: sai o hash do conteúdo de cada um."""
-    html = client.get("/").text
+    html = client.get("/landing-v1").text
     for nome in PAR:
         esperado = _asset_hash(nome, (FRONTEND_DIR / nome).stat().st_mtime_ns)
         # A lista INTEIRA, não o primeiro `search`: `== [esperado]` reprova de uma
@@ -75,7 +75,7 @@ def test_o_par_sai_versionado_por_hash_do_conteudo():
         # de cache de antes) e o `?v=x` que o `_ASSET_VER_RE` não casa (`["x"]`).
         achados = re.findall(rf"/{re.escape(nome)}\?v=([0-9A-Za-z]+)", html)
         assert achados == [esperado], (
-            f"na / o /{nome} devia sair exatamente uma vez com o hash "
+            f"na /landing-v1 o /{nome} devia sair exatamente uma vez com o hash "
             f"{esperado}, e saiu {achados}. Lista vazia = URL sem `?v=` (ou com "
             "`?v=` não-numérico, que o `_ASSET_VER_RE` não reescreve): o "
             "cache-buster morre e um cliente roda meio par velho."
