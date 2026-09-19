@@ -12,6 +12,59 @@
  * escada de preços — não de todo card que reuse `.plan`.
  */
 
+/* ── Ilha de comparação (`#cmp-v2`, bloco shadcn comparison-3) ───────────────
+ * O `@tailwind utilities` é expandido pelo postcss do vite.config.js com o
+ * tailwind.precos.config.js: toda utility sai como `#cmp-v2 .classe`, então a
+ * ordem desta folha em relação às utilities não muda nada para a ilha — o que
+ * manda lá dentro é a especificidade do `#cmp-v2`.
+ *
+ * As variáveis são os tokens shadcn (baseColor zinc do components.json) em
+ * canal HSL cru, porque as cores do config usam `hsl(var(--x) / <alpha-value>)`
+ * — `bg-primary/5` precisa do canal separado para aplicar a opacidade. Só o
+ * tema escuro: o site de marketing não tem modo claro (não existe body.light
+ * no site.css; quem tem é o dashboard, coberto pelo chat.css).
+ */
+@tailwind utilities;
+
+#cmp-v2 {
+  --background: 240 10% 3.9%;
+  --foreground: 0 0% 98%;
+  --muted: 240 3.7% 15.9%;
+  --muted-foreground: 240 5% 64.9%;
+  --primary: 0 0% 98%;
+  --primary-foreground: 240 5.9% 10%;
+  --secondary: 240 3.7% 15.9%;
+  --secondary-foreground: 0 0% 98%;
+  --destructive: 0 62.8% 30.6%;
+  --destructive-foreground: 0 0% 98%;
+  --border: 240 3.7% 15.9%;
+  --input: 240 3.7% 15.9%;
+  --ring: 240 4.9% 83.9%;
+  --accent: 240 3.7% 15.9%;
+  --accent-foreground: 0 0% 98%;
+  --radius: 0.5rem;
+}
+
+/* O preflight está desligado (é global demais para uma página servida), então
+ * as três premissas dele que o bloco shadcn usa vão aqui, escopadas: borda
+ * zerada com estilo sólido (a utility `border` só define LARGURA — sem isto
+ * nenhuma borda aparece), tabela colapsada e fonte herdada nos controles. */
+#cmp-v2 *, #cmp-v2 *::before, #cmp-v2 *::after {
+  border: 0 solid hsl(var(--border));
+}
+#cmp-v2 table { border-collapse: collapse; border-spacing: 0; }
+#cmp-v2 button { font: inherit; }
+
+/* Os ícones do @remixicon/react nascem com width/height="24" e o button/badge
+ * clássicos do shadcn não dimensionam svg: sem isto o ícone do badge e o da
+ * seta dos CTAs renderizam em 24px. `1em` é o tamanho que o `data-icon` dos
+ * componentes novos receberia. */
+#cmp-v2 [data-icon="inline-start"], #cmp-v2 [data-icon="inline-end"] {
+  width: 1em; height: 1em; flex-shrink: 0;
+}
+#cmp-v2 [data-icon="inline-start"] { margin-right: 4px; }
+#cmp-v2 [data-icon="inline-end"] { margin-left: 4px; }
+
 /* ── O pódio ─────────────────────────────────────────────────────────────────
  * O trio só vira pódio quando os três cards cabem na mesma linha. As bases
  * ficam alinhadas e os três preservam o mesmo padding: o degrau vem da altura
