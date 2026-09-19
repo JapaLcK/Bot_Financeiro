@@ -11,13 +11,12 @@
  *   · asserção do conserto — nenhum CTA de Grátis, nenhum card "Grátis", e
  *     nenhuma requisição pro /billing/select-free em nenhum dos dois estados
  *     (deslogado e needs_plan_selection);
- *   · asserção do conserto na tabela — nenhum <th> "Grátis" e a contagem de
- *     colunas IGUAL (5) no colgroup, no thead, em CADA <tr> do tbody (contando
- *     colspan) e no tfoot;
- *   · asserção de ALINHAMENTO — o `left` de cada <th> do thead contra o de
- *     cada <td> do tfoot, listas idênticas. É a que pega o bug de verdade:
- *     esquecer um `colspan` ou uma célula desloca a tabela sem mudar contagem
- *     nenhuma que um teste de células veria;
+ *   · asserção do conserto na comparação — a tabela agora é a ilha React
+ *     `#cmp-v2` (bloco shadcn comparison-3): nenhum plano removido no
+ *     cabeçalho e a contagem de colunas IGUAL (4) no thead e em CADA <tr>
+ *     do tbody (contando colspan);
+ *   · asserção de LARGURA — a ilha não pode alargar o documento nos dois
+ *     viewports: quem rola é o overflow-x-auto do próprio bloco;
  *   · copy do gate — as 6 células de {deslogado, logado sem gate, logado com
  *     gate} × {com ?escolha=1, sem marcador}: quem decide é o
  *     needs_plan_selection do /auth/me, não a URL (o marcador se perde num
@@ -55,21 +54,11 @@ after(async () => { await browser?.close(); server?.kill(); });
 async function abrirPrecos({ me = null, query = "", app = false,
                              viewport = { width: 1280, height: 900 },
                              plansConfig = { essencial_available: true, plus_available: true, pro_available: true },
-                             semOverflowClip = false,
                            } = {}) {
   const page = await browser.newPage({ viewport,
                                        ...(app ? { userAgent: APP_UA } : {}) });
   const chamadas = { selectFree: 0, checkout: 0 };
   const corposCheckout = [];
-  let removeuClip = false;
-
-  if (semOverflowClip) await page.route("**/precos.html*", async (route) => {
-    const response = await route.fetch();
-    const html = await response.text();
-    const legado = html.replaceAll("overflow-x: clip", "overflow-x: valor-invalido");
-    removeuClip = legado !== html;
-    await route.fulfill({ response, body: legado });
-  });
 
   await page.route("**/auth/me", (route) => (me
     ? route.fulfill({ contentType: "application/json", body: JSON.stringify(me) })
@@ -114,7 +103,7 @@ async function abrirPrecos({ me = null, query = "", app = false,
   // Grátis. Sem esperar, "não existe CTA" passaria antes de o JS rodar — e o
   // teste ficaria verde por corrida, não pelo conserto.
   await page.waitForTimeout(600);
-  return { page, chamadas, corposCheckout, removeuClip };
+  return { page, chamadas, corposCheckout };
 }
 
 test("o ciclo usa um switch único, animado e reversível", async () => {
@@ -261,118 +250,84 @@ for (const [rotulo, ctx] of [
   });
 }
 
-// ── a coluna Grátis saiu da tabela comparativa ──────────────────────────────
-// A tabela é o par obrigatório do CLAUDE.md §2: colgroup, thead, os 23 <tr> de
-// dado, os 6 colspan das linhas de grupo e o tfoot só ficam alinhados se TODOS
-// mudarem juntos. Uma célula sobrando desloca a tabela inteira.
-const COLUNAS = 4;   // 1 de recursos + Essencial, Plus e Pro
+// ── a comparação virou a ilha React `#cmp-v2` (bloco shadcn comparison-3) ────
+// A tabela servida (`.cmp-table`, com colgroup, véus de scroll e dica de
+// arrastar) saiu junto com o markup; quem renderiza é o precos-app.js. O que
+// o grupo continua garantindo: nenhum plano removido no cabeçalho, a MESMA
+// contagem de colunas em todas as linhas (contando colspan — uma célula
+// sobrando desloca a tabela inteira) e nenhum alargamento do documento.
+const COLUNAS = 4;   // 1 de recursos + Starter, Growth e Enterprise
 
-/** Contagem de colunas de cada parte da tabela, contando `colspan`. */
+/** Contagem de colunas de cada parte da tabela da ilha, contando `colspan`. */
 function lerColunas(page) {
   return page.evaluate(() => {
     const somaLinha = (tr) => [...tr.children].reduce((a, c) => a + (c.colSpan || 1), 0);
     return {
-      colgroup: document.querySelectorAll(".cmp-table colgroup col").length,
-      thead: [...document.querySelectorAll(".cmp-table thead tr")].map(somaLinha),
-      tbody: [...document.querySelectorAll(".cmp-table tbody tr")].map(somaLinha),
-      tfoot: [...document.querySelectorAll(".cmp-table tfoot tr")].map(somaLinha),
-      nomes: [...document.querySelectorAll(".cmp-table thead tr th")].map((t) => t.textContent.trim()),
-      celulas: [...document.querySelectorAll(".cmp-table tfoot tr td")].map((t) => t.textContent.trim()),
+      thead: [...document.querySelectorAll("#cmp-v2 table thead tr")].map(somaLinha),
+      tbody: [...document.querySelectorAll("#cmp-v2 table tbody tr")].map(somaLinha),
+      nomes: [...document.querySelectorAll("#cmp-v2 table thead tr th")]
+        .map((t) => t.querySelector("span")?.textContent.trim()),
     };
   });
 }
 
-test("a tabela comparativa tem só os três planos à venda, e as 4 colunas fecham", async () => {
+test("a tabela comparativa tem só os três planos do bloco, e as 4 colunas fecham", async () => {
   const { page } = await abrirPrecos();
   const t = await lerColunas(page);
 
   assert.ok(!t.nomes.some((n) => /Grátis|Premium/.test(n)),
     `thead ainda tem plano removido: ${JSON.stringify(t.nomes)}`);
-  assert.deepEqual(t.nomes.slice(1).map((n) => n.split(/R\$/)[0].replace("Mais popular", "").trim()),
-    ["Essencial", "Plus", "Pro"], `cabeçalhos: ${JSON.stringify(t.nomes)}`);
+  assert.deepEqual(t.nomes, ["Features", "Starter", "Growth", "Enterprise"],
+    `cabeçalhos: ${JSON.stringify(t.nomes)}`);
 
-  // Consistência: a MESMA contagem em todas as partes, e uma menos que as 6 de
-  // antes do conserto (colgroup 6, thead 6, cada tbody 6, tfoot 6 — medido em
-  // 7a87ae7). Cada linha entra na asserção, não só uma amostra.
-  assert.equal(t.colgroup, COLUNAS, `colgroup com ${t.colgroup} <col>`);
+  // Consistência: a MESMA contagem no thead e em cada linha do tbody (12 de
+  // recurso + 3 de grupo + 1 de CTA). Cada linha entra na asserção, não só
+  // uma amostra.
   assert.deepEqual(t.thead, [COLUNAS], `thead: ${JSON.stringify(t.thead)}`);
-  assert.equal(t.tbody.length, 25, `tbody com ${t.tbody.length} linhas (20 de dado + 5 de grupo)`);
+  assert.equal(t.tbody.length, 16, `tbody com ${t.tbody.length} linhas`);
   assert.deepEqual([...new Set(t.tbody)], [COLUNAS],
     `linhas do tbody fora das ${COLUNAS} colunas: ${JSON.stringify(t.tbody)}`);
-  assert.deepEqual(t.tfoot, [COLUNAS], `tfoot: ${JSON.stringify(t.tfoot)}`);
-
-  // Rodapé: rótulo vazio + os 3 CTAs, sem célula órfã de plano removido.
-  assert.deepEqual(t.celulas, ["", "Assinar Essencial", "Assinar Plus", "Assinar Pro"]);
   await page.close();
 });
 
-// A asserção que um teste de contagem de células NUNCA pegaria: se thead e
-// tfoot discordarem de uma célula, os `left` deslizam e o CTA do Plus fica
-// embaixo da coluna do Pro. Nos dois viewports porque a tabela troca de regime
-// aos 900px (scroller horizontal + min-width no celular, fixed no desktop).
+// O scroller é INTERNO ao bloco (overflow-x-auto): em nenhuma das duas
+// larguras a comparação pode empurrar o documento para o lado. É a classe de
+// bug que um teste de células não vê — a tabela renderiza certa e a página
+// inteira ganha scroll horizontal.
 for (const viewport of [{ width: 390, height: 844 }, { width: 1560, height: 900 }]) {
-  test(`thead e tfoot alinhados coluna a coluna em ${viewport.width}x${viewport.height}`, async () => {
+  test(`a ilha da comparação não alarga o documento em ${viewport.width}x${viewport.height}`, async () => {
     const { page } = await abrirPrecos({ viewport });
-    const { thead, tfoot, larguraViewport, documento } = await page.evaluate(() => {
-      const lefts = (sel) => [...document.querySelectorAll(sel)]
-        .map((e) => +e.getBoundingClientRect().left.toFixed(1));
-      return { thead: lefts(".cmp-table thead tr th"), tfoot: lefts(".cmp-table tfoot tr td"),
-        larguraViewport: innerWidth, documento: document.documentElement.scrollWidth };
-    });
-    assert.equal(thead.length, COLUNAS, `thead com ${thead.length} células`);
-    assert.deepEqual(tfoot, thead,
-      `rodapé desalinhado do cabeçalho: thead=${JSON.stringify(thead)} tfoot=${JSON.stringify(tfoot)}`);
-    assert.ok(documento <= larguraViewport,
-      `a tabela alargou o documento: viewport=${larguraViewport}px, documento=${documento}px`);
+    const medida = await page.evaluate(() => ({
+      larguraViewport: innerWidth, documento: document.documentElement.scrollWidth,
+    }));
+    assert.ok(medida.documento <= medida.larguraViewport,
+      `a comparação alargou o documento: viewport=${medida.larguraViewport}px, documento=${medida.documento}px`);
     await page.close();
   });
 }
 
-test("Safari 14: sem overflow:clip, o cabeçalho desktop continua sticky", async () => {
-  const { page, removeuClip } = await abrirPrecos({
-    viewport: { width: 1024, height: 800 }, semOverflowClip: true,
-  });
-  assert.ok(removeuClip, "o controle não encontrou `overflow-x: clip` para invalidar");
-
-  const yTabela = await page.$eval(".cmp-table thead",
-    (e) => e.getBoundingClientRect().top + scrollY);
-  await page.evaluate((y) => scrollTo(0, y + 240), yTabela);
-  const posicao = await page.$eval(".cmp-table thead th", (e) => ({
-    topo: Math.round(e.getBoundingClientRect().top),
-    esperado: Math.round(parseFloat(getComputedStyle(e).top)),
-    overflowWrapper: getComputedStyle(document.querySelector(".cmp-scrollwrap")).overflowX,
-  }));
-
-  assert.ok(Math.abs(posicao.topo - posicao.esperado) <= 1,
-    `thead não grudou: topo=${posicao.topo}px, esperado=${posicao.esperado}px, `
-    + `overflow do wrapper=${posicao.overflowWrapper}`);
-  await page.close();
-});
-
-// Controle POSITIVO da remoção: os dados dos planos PAGOS continuam na tabela,
-// nas colunas certas. Sem ele, uma tabela que perdeu a coluna errada (ou duas)
-// passaria nas asserções de contagem acima.
-test("controle positivo: os dados dos planos pagos seguem nas colunas certas", async () => {
+// Controle POSITIVO da troca: a ilha montou de verdade, com as três seções e
+// os valores nas colunas certas. Sem ele, um #cmp-v2 vazio (bundle quebrado,
+// id errado no HTML) passaria nas asserções de contagem acima.
+test("controle positivo: a ilha montou com as seções e os dados nas colunas certas", async () => {
   const { page } = await abrirPrecos();
-  // O ` ` dos `&nbsp;` do HTML ("Open&nbsp;Finance") não é o espaço que se
-  // digita aqui: sem normalizar, o `find` não acha a linha e o teste passaria a
-  // estourar em vez de comparar.
-  const linha = (nome) => page.evaluate((n) => {
+  const dados = await page.evaluate(() => {
     const txt = (e) => e.textContent.replace(/\u00a0/g, " ").trim();
-    const th = [...document.querySelectorAll(".cmp-table tbody th.cmp-feat")].find((t) => txt(t) === n);
-    if (!th) throw new Error(`linha "${n}" não existe na tabela`);
-    return [...th.parentElement.querySelectorAll("td")].map(txt);
-  }, nome);
+    const linhas = [...document.querySelectorAll("#cmp-v2 table tbody tr")];
+    const secoes = linhas
+      .filter((tr) => tr.children.length === 1 && tr.children[0].colSpan === 4)
+      .map((tr) => txt(tr));
+    const linha = (nome) => {
+      const tr = linhas.find((t) => txt(t.children[0]) === nome);
+      if (!tr) throw new Error(`linha "${nome}" não existe na tabela`);
+      return [...tr.children].slice(1).map(txt);
+    };
+    return { secoes, projects: linha("Projects"), api: linha("API access") };
+  });
 
-  // Valores de core/services/plan_limits.py, na ordem Essencial/Plus/Pro.
-  assert.deepEqual(await linha("Lançamentos por mês"),
-    ["Ilimitados", "Ilimitados", "Ilimitados"]);
-  assert.deepEqual(await linha("Histórico que você enxerga"),
-    ["90 dias", "12 meses", "24 meses"]);
-  assert.deepEqual(await linha("Mensagens com a Piggy"),
-    ["200por mês", "1.000por mês", "1.000por mês"]);
-  assert.deepEqual(await linha("Bancos conectados (Open Finance)"),
-    ["1", "2", "5"]);
+  assert.deepEqual(dados.secoes, ["Core", "Collaboration", "Support"]);
+  assert.deepEqual(dados.projects, ["3", "Unlimited", "Unlimited"]);
+  assert.deepEqual(dados.api, ["Not included", "Included", "Included"]);
   await page.close();
 });
 
@@ -488,11 +443,11 @@ for (const [tela, viewport] of TELAS) {
       // mais longa das três da página.
       //
       // Aqui havia também `documentElement.scrollWidth <= clientWidth`, e ela
-      // SAIU por medição, não por conveniência: em 390px ela dá 544 nos TRÊS
+      // SAIU por medição, não por conveniência: em 390px ela dava 544 nos TRÊS
       // estados do subtítulo (visitante, gate de escolha, corte), porque quem
-      // rola é a tabela comparativa — de propósito, e o caso "dica de arrastar
-      // — 390px" logo abaixo existe para exigir que ela role. Um número igual
-      // com e sem a mudança não mede nada (§3).
+      // rolava era a tabela comparativa servida — hoje a ilha #cmp-v2, com o
+      // scroller interno coberto pelo caso "não alarga o documento" acima. Um
+      // número igual com e sem a mudança não media nada (§3).
       const medida = await page.evaluate(() => {
         const el = document.getElementById("precos-sub");
         return { sub: el.scrollWidth, caixa: el.parentElement.clientWidth,
@@ -545,89 +500,48 @@ test("controle positivo: 'Assinar Plus' dispara exatamente 1 POST /billing/creat
   await page.close();
 });
 
-test("controle positivo: os 6 CTAs pagos continuam habilitados (card e tabela)", async () => {
-  // Clicar nos seis não dá: o primeiro clique bem-sucedido NAVEGA pro Stripe.
+test("controle positivo: os 3 CTAs pagos continuam habilitados", async () => {
+  // Clicar nos três não dá: o primeiro clique bem-sucedido NAVEGA pro Stripe.
   // Então a prova de "não quebrei os outros" é o estado do DOM — o clique de
-  // verdade é o teste acima. Cada plano pago tem DOIS botões (card + rodapé da
-  // tabela) e o do rodapé já tinha ficado clicável rumo ao erro uma vez.
+  // verdade é o teste acima. Cada plano pago tem UM botão, o do card (a
+  // comparação virou a ilha #cmp-v2, sem CTAs de plano).
   const { page } = await abrirPrecos({ me: { user_id: 42, needs_plan_selection: true } });
   const estado = await page.$$eval("[data-plan-btn]", (els) => els.map((e) => ({
     plano: e.dataset.planBtn,
-    onde: e.closest("#plans-v2") ? "card" : "tabela",
+    onde: e.closest("#plans-v2") ? "card" : "fora",
     desabilitado: e.disabled === true,
     texto: e.textContent.trim(),
   })));
   assert.deepEqual(estado, [
-    { plano: "essencial", onde: "card",   desabilitado: false, texto: "Assinar Essencial" },
-    { plano: "plus",      onde: "card",   desabilitado: false, texto: "Assinar Plus" },
-    { plano: "pro",       onde: "card",   desabilitado: false, texto: "Assinar Pro" },
-    { plano: "essencial", onde: "tabela", desabilitado: false, texto: "Assinar Essencial" },
-    { plano: "plus",      onde: "tabela", desabilitado: false, texto: "Assinar Plus" },
-    { plano: "pro",       onde: "tabela", desabilitado: false, texto: "Assinar Pro" },
+    { plano: "essencial", onde: "card", desabilitado: false, texto: "Assinar Essencial" },
+    { plano: "plus",      onde: "card", desabilitado: false, texto: "Assinar Plus" },
+    { plano: "pro",       onde: "card", desabilitado: false, texto: "Assinar Pro" },
   ]);
   await page.close();
 });
 
 // ── degradação parcial do Stripe: só o Plus sem price configurado ───────────
 // Sem o Grátis na página, um botão do Plus clicável só produz um toast de erro
-// e nenhuma saída. O par positivo deste caso é o teste dos 6 CTAs habilitados
-// acima: lá o mesmo DOM, com plus_available:true, tem os 6 clicáveis.
-test("plus_available:false marca EXATAMENTE os 2 botões do Plus como indisponíveis", async () => {
+// e nenhuma saída. O par positivo deste caso é o teste dos 3 CTAs habilitados
+// acima: lá o mesmo DOM, com plus_available:true, tem os 3 clicáveis.
+test("plus_available:false marca EXATAMENTE o botão do Plus como indisponível", async () => {
   const { page } = await abrirPrecos({
     me: { user_id: 42, needs_plan_selection: true },
     plansConfig: { essencial_available: true, plus_available: false, pro_available: true },
   });
   const estado = await page.$$eval("[data-plan-btn]", (els) => els.map((e) => ({
     plano: e.dataset.planBtn,
-    onde: e.closest("#plans-v2") ? "card" : "tabela",
+    onde: e.closest("#plans-v2") ? "card" : "fora",
     desabilitado: e.disabled === true,
     texto: e.textContent.trim(),
   })));
   assert.deepEqual(estado, [
-    { plano: "essencial", onde: "card",   desabilitado: false, texto: "Assinar Essencial" },
-    { plano: "plus",      onde: "card",   desabilitado: true,  texto: "Indisponível" },
-    { plano: "pro",       onde: "card",   desabilitado: false, texto: "Assinar Pro" },
-    { plano: "essencial", onde: "tabela", desabilitado: false, texto: "Assinar Essencial" },
-    { plano: "plus",      onde: "tabela", desabilitado: true,  texto: "Indisponível" },
-    { plano: "pro",       onde: "tabela", desabilitado: false, texto: "Assinar Pro" },
+    { plano: "essencial", onde: "card", desabilitado: false, texto: "Assinar Essencial" },
+    { plano: "plus",      onde: "card", desabilitado: true,  texto: "Indisponível" },
+    { plano: "pro",       onde: "card", desabilitado: false, texto: "Assinar Pro" },
   ]);
   await page.close();
 });
-
-// ── a dica de arrastar só aparece onde a tabela realmente rola ───────────────
-// O media query de 900px não sabe medir overflow. Com 4 colunas a tabela cabe
-// a partir de ~610px, então entre ~610 e 900 a página pedia pra arrastar o que
-// não arrasta — faixa que ESTE PR alargou (antes o corte era ~712px). Quem sabe
-// é o updateCmpFade, que já mede o mesmo `max > 2` dos véus das bordas.
-//
-// O par é obrigatório: sem o caso de 390px, a asserção passaria numa página que
-// escondeu a dica pra sempre, que é pior que mostrá-la demais.
-for (const [rotulo, largura, deveAparecer] of [
-  ["390px: a tabela rola, a dica aparece", 390, true],
-  ["800px: a tabela cabe, a dica some", 800, false],
-]) {
-  test(`dica de arrastar — ${rotulo}`, async () => {
-    const { page } = await abrirPrecos({ viewport: { width: largura, height: 844 } });
-
-    const { oculto, visivel } = await page.evaluate(() => {
-      const sc = document.getElementById("cmp-scroll");
-      const hint = document.querySelector(".cmp-hint");
-      return {
-        oculto: sc.scrollWidth - sc.clientWidth,
-        // getComputedStyle, não a classe: é o que o usuário enxerga.
-        visivel: getComputedStyle(hint).display !== "none",
-      };
-    });
-
-    // Âncora do próprio caso: se o overflow não for o esperado, a asserção de
-    // baixo mediria outra coisa e passaria por acidente.
-    assert.equal(oculto > 2, deveAparecer,
-      `${largura}px devia ${deveAparecer ? "" : "não "}ter overflow e tem ${oculto}px`);
-    assert.equal(visivel, deveAparecer,
-      `${largura}px: overflow=${oculto}px mas a dica está ${visivel ? "visível" : "escondida"}`);
-    await page.close();
-  });
-}
 
 // ── A NOTA DOS PLANOS, o SEGUNDO texto que prometia o trial ─────────────────
 //

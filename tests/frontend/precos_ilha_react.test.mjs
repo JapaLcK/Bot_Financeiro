@@ -454,8 +454,8 @@ test("PI8: com o bundle lento, o botão de TROCA não vira checkout novo", async
  *   `pixCriarCta`          2º `<button>` no card → o card sai do contrato e NÃO se
  *                          monta (é o PI6); e ele carrega depois do bundle.
  *   `startCheckout`        guarda a REFERÊNCIA do nó através do fetch → este caso.
- *   `cancelChange`         operação compartilhada entre card e tabela; a guarda
- *                          cancelChangePending sobrevive ao mount (PI11).
+ *   `cancelChange`         operação do card; a guarda cancelChangePending
+ *                          sobrevive ao mount (PI11).
  *   `document.activeElement`  o FOCO, que não é escrita de ninguém desta lista:
  *                          é estado do NAVEGADOR e some quando o `createRoot`
  *                          limpa o container → é o PI10, com a varredura do
@@ -838,8 +838,6 @@ for (const [atrasoBundle, largura] of [[0, 1280], [1200, 1280], [1200, 390]]) {
         await pagina.waitForLoadState("load");
         assert.equal(await pagina.evaluate(() => window.__noDoServidor.isConnected), false);
         await pagina.$eval(alvo, (b) => b.click());
-        // O botão equivalente na tabela também não pode duplicar a operação.
-        await pagina.$eval('.cmp-table [data-plan-btn="pro"]', (b) => b.click());
         await pagina.waitForTimeout(100);
         assert.equal(posts, 1, "o cancelamento foi reenviado durante a mesma operação");
         liberar();
@@ -854,7 +852,7 @@ for (const [atrasoBundle, largura] of [[0, 1280], [1200, 1280], [1200, 390]]) {
             await pagina.locator("#cycle-annual").click();
             assert.equal(await pagina.locator("#cycle-annual").getAttribute("aria-checked"),
               ciclo === "annual" ? "true" : "false", `o switch não entrou no ciclo ${ciclo}`);
-            for (const sel of [alvo, '.cmp-table [data-plan-btn="pro"]']) {
+            for (const sel of [alvo]) {
               assert.equal(await pagina.locator(sel).innerText(), "Trocar pro Pro");
               await pagina.$eval(sel, (b) => b.click());
               assert.equal(await pagina.locator("#chg-overlay").isVisible(), true,

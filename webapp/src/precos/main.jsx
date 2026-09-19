@@ -13,9 +13,21 @@ import { createRoot } from "react-dom/client";
 
 import "./precos.css";
 
+import ComparisonBlock from "@/components/ui/comparison-3";
+
 import { Planos } from "./Planos.jsx";
 import { montarPriceFlows } from "./PriceFlow.jsx";
 import { lerPlanos } from "./lerPlanos.js";
+
+// Ilha da tabela comparativa (`#cmp-v2`): bloco shadcn estático, sem contrato
+// com o markup do servidor — a tabela antiga (`.cmp-table`) foi substituída
+// por ele, então não há nada para ler nem para preservar. `flushSync` pelo
+// mesmo motivo do `#plans-v2`: scripts clássicos posteriores podem inspecionar
+// o DOM logo após este bundle.
+const cmpRaiz = document.getElementById("cmp-v2");
+if (cmpRaiz) {
+  flushSync(() => createRoot(cmpRaiz).render(<ComparisonBlock />));
+}
 
 const raiz = document.getElementById("plans-v2");
 // `null` = o markup saiu do contrato enumerado no lerPlanos.js, e aí NÃO se
