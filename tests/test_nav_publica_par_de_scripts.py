@@ -58,10 +58,10 @@ def test_as_mesmas_paginas_carregam_os_dois_scripts_da_nav():
     )
     # Controle positivo: sem ele, `set() == set()` passa verde numa árvore em que
     # alguém apagou as DUAS tags de todas as páginas — o pior caso possível.
-    assert len(auth) == 12, (
+    assert len(auth) == 13, (
         f"são {len(auth)} páginas públicas com o par da nav, e este controle "
-        "espera 12. Se você criou ou apagou uma página pública com .nav, "
-        f"atualize o 12. Senão, alguém perdeu as duas tags de uma página: {sorted(auth)}"
+        "espera 13. Se você criou ou apagou uma página pública com .nav, "
+        f"atualize o 13. Senão, alguém perdeu as duas tags de uma página: {sorted(auth)}"
     )
 
 
