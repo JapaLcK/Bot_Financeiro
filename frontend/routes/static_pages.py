@@ -219,6 +219,17 @@ def _guide_card_html(g: dict) -> str:
     )
 
 
+@router.get("/blog")
+async def serve_blog_index():
+    """Índice público do blog — embed do Soro (app.trysoro.com).
+
+    Distinto de /blog/{slug}: aqueles são guias evergreen PRÓPRIOS (Pro-only,
+    renderizados de core.blog_guides). Esta página é o blog público de marketing,
+    cujo conteúdo é servido pelo script do Soro dentro da div #soro-blog.
+    """
+    return html_file(FRONTEND_DIR / "blog.html", clarity=True)
+
+
 @router.get("/blog/{slug}")
 async def serve_blog_guide(slug: str, request: Request):
     """Página de um guia/dica evergreen (conteúdo próprio do PigBank).
