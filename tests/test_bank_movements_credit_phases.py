@@ -75,9 +75,18 @@ def test_pagamento_e_fase_credit_progridem_sem_ciclo(user_id, monkeypatch, opera
     with ThreadPoolExecutor(max_workers=2) as pool:
         paid = pool.submit(db.pay_bill_amount, user_id, linked["card_id"], "Cartão", 100, linked["bill_id"])
         changed = pool.submit(update)
-        assert paid.result(timeout=10)
+        res_pago = paid.result(timeout=10)
+        assert res_pago
         assert changed.result(timeout=10)
-    assert db.get_balance(user_id) == 900
+    # NO CONTRATO NOVO o pagamento da fatura com Open Finance ativo NÃO debita
+    # a Carteira Piggy (o débito ocorre no banco): saldo intacto e o lançamento
+    # do pagamento carrega `delta_conta: 0` + origem `bank`. O que este teste
+    # mede é a ordenação de travas (pagamento × fase credit sem ciclo) — a
+    # aritmética do saldo é só o efeito observável do pagamento ter passado.
+    assert db.get_balance(user_id) == 1000
+    efeitos = _row("select efeitos from launches where id=%s", (res_pago["launch_id"],))["efeitos"]
+    assert efeitos["delta_conta"] == 0
+    assert efeitos["funding_source"]["kind"] == "bank"
     if operation == "sync":
         bill = _row("select total,paid_amount from credit_bills where id=%s", (linked["bill_id"],))
         assert bill == {"total": 200, "paid_amount": 100}
