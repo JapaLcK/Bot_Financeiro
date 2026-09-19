@@ -801,3 +801,121 @@ section[id] { scroll-margin-top: 96px; }
   .field select,
   .field textarea { font-size: 16px; }
 }
+
+/* ── Embed do blog Soro na /blog ────────────────────────────────────────────
+   O embed injeta a folha CLARA `soro-blog-styles-light` (texto #1a1a1a sobre
+   fundo transparente) — sobre o fundo escuro do site o texto some. Os
+   seletores com #soro-blog na frente ganham da especificidade da folha deles
+   e traduzem tudo pros tokens do site. */
+#soro-blog .soro-blog {
+  color: var(--ink);
+  font-family: var(--font);
+  max-width: 760px;
+}
+#soro-blog .soro-blog-list { gap: 16px; }
+
+/* Card de artigo (vista de lista) — no molde dos cards .article do site */
+#soro-blog .soro-blog-card {
+  background: var(--card);
+  border: 1px solid var(--line);
+  border-radius: var(--radius);
+  padding: 20px;
+  transition: transform .15s, border-color .15s;
+}
+#soro-blog .soro-blog-card:hover {
+  transform: translateY(-3px);
+  border-color: var(--line-2);
+  box-shadow: none;
+}
+#soro-blog .soro-blog-card:focus-visible {
+  outline: 2px solid var(--pink);
+  outline-offset: 3px;
+}
+#soro-blog .soro-blog-card-image {
+  width: 168px;
+  height: 118px;
+  border-radius: var(--radius-sm);
+  border: 1px solid var(--line);
+}
+#soro-blog .soro-blog-card-title {
+  color: var(--ink);
+  font-size: 1.06rem;
+  font-weight: 700;
+  letter-spacing: -.01em;
+}
+#soro-blog .soro-blog-card-excerpt {
+  color: var(--ink-2);
+  -webkit-line-clamp: 3;
+}
+#soro-blog .soro-blog-card-date {
+  color: var(--ink-3);
+  font-size: .74rem;
+  font-weight: 700;
+  letter-spacing: .07em;
+  text-transform: uppercase;
+}
+
+/* Vista de artigo — no molde do .guide dos guias próprios */
+#soro-blog .soro-blog-back {
+  background: var(--card-2);
+  border: 1px solid var(--line-2);
+  border-radius: 999px;
+  color: var(--ink-2);
+  font-weight: 600;
+}
+#soro-blog .soro-blog-back:hover {
+  background: var(--card);
+  border-color: var(--pink);
+  color: var(--ink);
+}
+#soro-blog .soro-blog-article-title {
+  color: var(--ink);
+  font-size: clamp(1.7rem, 3.4vw, 2.3rem);
+  font-weight: 800;
+  letter-spacing: -.015em;
+  text-wrap: balance;
+}
+#soro-blog .soro-blog-article-date {
+  color: var(--ink-3);
+  font-weight: 600;
+}
+#soro-blog .soro-blog-article-image {
+  border: 1px solid var(--line);
+  border-radius: var(--radius);
+}
+#soro-blog .soro-blog-article-content {
+  color: var(--ink-2);
+  font-size: 1.07rem;
+  line-height: 1.75;
+}
+#soro-blog .soro-blog-article-content h1,
+#soro-blog .soro-blog-article-content h2,
+#soro-blog .soro-blog-article-content h3 { color: var(--ink); font-weight: 800; }
+#soro-blog .soro-blog-article-content h2 { font-size: 1.4rem; }
+#soro-blog .soro-blog-article-content h3 { font-size: 1.2rem; }
+#soro-blog .soro-blog-article-content strong { color: var(--ink); }
+#soro-blog .soro-blog-article-content a { color: var(--pink); font-weight: 600; }
+#soro-blog .soro-blog-article-content a:hover { text-decoration: underline; text-underline-offset: 3px; }
+#soro-blog .soro-blog-article-content blockquote,
+#soro-blog .soro-blog-article-content pre {
+  background: var(--card-2);
+  border: 1px solid var(--line);
+  border-radius: 16px;
+  margin: 0 0 16px;
+  padding: 16px 20px;
+}
+#soro-blog .soro-blog-article-content blockquote { color: var(--ink); }
+#soro-blog .soro-blog-article-content pre { overflow-x: auto; }
+#soro-blog .soro-blog-article-content img { border: 1px solid var(--line); border-radius: var(--radius-sm); }
+
+/* Loading / vazio / erro / spinner */
+#soro-blog .soro-blog-empty,
+#soro-blog .soro-blog-loading,
+#soro-blog .soro-blog-error { color: var(--ink-3); }
+#soro-blog .soro-blog-spinner { border-color: var(--line-2); border-top-color: var(--pink); }
+
+/* Mobile: card vira coluna com foto 16:9, como os .article do site */
+@media (max-width: 640px) {
+  #soro-blog .soro-blog-card { flex-direction: column; gap: 14px; }
+  #soro-blog .soro-blog-card-image { width: 100%; height: auto; aspect-ratio: 16/9; }
+}
