@@ -48,6 +48,21 @@ class ContactBody(BaseModel):
 
 @router.get("/")
 async def serve_landing():
+    # Landing v2: espelho self-hosted da build do Lovable
+    # (frontend/landing-v2/, sincronizada por scripts/sync_landing_v2.sh).
+    # Sem inline_css de propósito: a v2 carrega o CSS próprio da build
+    # (/assets/styles-*.css) — inlinear o CSS da v1 só ia inchacar o primeiro
+    # carregamento com centenas de KB de CSS morto.
+    return html_file(
+        FRONTEND_DIR / "landing-v2" / "index.html",
+        clarity=True,
+        defer_tracking=True,
+    )
+
+
+@router.get("/landing-v1")
+async def serve_landing_v1():
+    """Landing anterior em standby: fora do ar na /, mas preservada e acessível."""
     return html_file(
         FRONTEND_DIR / "index.html",
         clarity=True,
@@ -869,6 +884,70 @@ async def serve_brand_asset(path: str):
     if base not in target.parents or not target.is_file():
         return Response(status_code=404)
     media = _BRAND_MEDIA.get(target.suffix.lower())
+    if media is None:
+        return Response(status_code=404)
+    return FileResponse(
+        target,
+        media_type=media,
+        headers={"Cache-Control": "public, max-age=31536000, immutable"},
+    )
+
+
+# ─── Assets da landing v2 (espelho da build do Lovable) ──────────────────────
+# A landing v2 referencia esses caminhos com URL absoluta na build (/assets/…,
+# /__l5e/assets-v1/…), então as rotas espelham o mesmo path a partir de
+# frontend/landing-v2/. Nomes com hash de conteúdo → cache imutável. O prefixo
+# /assets só serve a landing v2: nenhuma outra rota do app o usa (idem /__l5e).
+_LANDING_V2_MEDIA = {
+    ".js": "text/javascript",
+    ".css": "text/css",
+    ".jpg": "image/jpeg",
+    ".jpeg": "image/jpeg",
+    ".png": "image/png",
+    ".webp": "image/webp",
+}
+
+
+@router.get("/assets/{path:path}")
+async def serve_landing_v2_asset(path: str):
+    """Serve frontend/landing-v2/assets/ (js/css/imagens da build espelhada).
+    Sem path traversal: nome único [A-Za-z0-9_.-] (ex.: index-C7puP08d.js)."""
+    import re
+
+    parts = [p for p in path.split("/") if p]
+    if len(parts) != 1 or not re.fullmatch(r"[A-Za-z0-9_.-]+", parts[0]):
+        return Response(status_code=404)
+
+    base = (FRONTEND_DIR / "landing-v2" / "assets").resolve()
+    target = (base / parts[0]).resolve()
+    if base not in target.parents or not target.is_file():
+        return Response(status_code=404)
+    media = _LANDING_V2_MEDIA.get(target.suffix.lower())
+    if media is None:
+        return Response(status_code=404)
+    return FileResponse(
+        target,
+        media_type=media,
+        headers={"Cache-Control": "public, max-age=31536000, immutable"},
+    )
+
+
+@router.get("/__l5e/assets-v1/{uuid}/{file}")
+async def serve_landing_v2_media(uuid: str, file: str):
+    """Serve as imagens de frontend/landing-v2/l5e/<uuid>/ (mascotes e logo da
+    build espelhada, originalmente em /__l5e/assets-v1/<uuid>/ no host do Lovable)."""
+    import re
+
+    if not re.fullmatch(r"[0-9a-fA-F-]{36}", uuid) or not re.fullmatch(
+        r"[A-Za-z0-9_.-]+", file
+    ):
+        return Response(status_code=404)
+
+    base = (FRONTEND_DIR / "landing-v2" / "l5e").resolve()
+    target = (base / uuid / file).resolve()
+    if base not in target.parents or not target.is_file():
+        return Response(status_code=404)
+    media = _LANDING_V2_MEDIA.get(target.suffix.lower())
     if media is None:
         return Response(status_code=404)
     return FileResponse(

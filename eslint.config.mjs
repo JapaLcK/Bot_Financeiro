@@ -263,6 +263,13 @@ export default defineConfig([
     // contrato. Quem prende o artefato é o step de build do CI (ele reprova se o
     // `.js` commitado divergir do `webapp/src`), não o eslint.
     "webapp/**",
+    // Landing v2 (frontend/landing-v2/): build espelhada do Lovable — artefato
+    // minificado de terceiros, igual ao `frontend/precos-app.*` acima. É módulo
+    // ES (`import`/`export`), então nem o parser do tier `frontend/**/*.js`
+    // (script clássico) descreve esse código. Quem prende o espelho são os
+    // testes de rota (tests/test_static_pages_routes.py) e o
+    // scripts/clean_landing_v2.py, não o eslint.
+    "frontend/landing-v2/**",
     // App nativo (Expo/React Native): projeto npm PRÓPRIO, TypeScript, com
     // `app/eslint.config.mjs` e regras que descrevem aquele código. Este
     // arquivo aqui mira `frontend/**/*.js` (script clássico de navegador) e
