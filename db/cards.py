@@ -390,7 +390,15 @@ def get_card_by_id(user_id: int, card_id: int):
                 select c.id, c.name, c.closing_day, c.due_day,
                        c.reminders_enabled, c.reminders_days_before, c.reminder_last_sent_on,
                        c.credit_limit, c.color, c.flag, c.last4,
-                       (u.default_card_id = c.id) as is_default
+                       c.open_finance_account_id,
+                       (u.default_card_id = c.id) as is_default,
+                       (c.open_finance_account_id is not null
+                        and exists (
+                            select 1 from open_finance_accounts oa
+                            join open_finance_connections oc on oc.id = oa.connection_id
+                            where oa.id = c.open_finance_account_id
+                              and upper(coalesce(oc.status, '')) not in ('PAUSED', 'DELETED')
+                        )) as of_sync_active
                 from credit_cards c
                 left join users u on u.id = c.user_id
                 where c.user_id = %s and c.id = %s
@@ -1581,6 +1589,14 @@ def pay_bill_amount(
         # carrega `bill_id` + `paid_amount_added` pra `delete_launch_and_
         # rollback` reverter o `paid_amount` da bill se o user apagar o
         # lançamento de pagamento do histórico.
+        #
+        # Com Open Finance ativo o pagamento ocorre no banco (o extrato OF já
+        # reflete a saída), então o registro interno NÃO debita a Carteira
+        # Piggy: `apply_delta=False` grava `delta_conta: 0` e marca a origem
+        # `bank`. Sem OF, o débito da Carteira continua como sempre.
+        from .open_finance import has_open_finance_connections
+
+        of_ativo = has_open_finance_connections(user_id)
         launch_id, _user_seq, new_balance = add_launch_and_update_balance(
             user_id=user_id,
             tipo="despesa",
@@ -1592,7 +1608,9 @@ def pay_bill_amount(
             extra_efeitos={
                 "bill_id": int(bill["id"]),
                 "paid_amount_added": float(pay),
+                **({"funding_source": {"kind": "bank"}} if of_ativo else {}),
             },
+            apply_delta=not of_ativo,
         )
 
     with get_conn() as conn:

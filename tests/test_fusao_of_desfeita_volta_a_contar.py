@@ -10,7 +10,7 @@ sozinha quando a conta sai de `BANK_ACCOUNTS_SQL`. Os números esperados são os
 MESMOS das duas abordagens — é por isso que estes casos continuam valendo.
 
 Medição em `(consolidado, carteira)` do roteiro (conectar 114,88 → "Gastei 1
-real com a barbara" → sync funde → desconectar):
+real com a barbara" → sync propõe o casamento e o usuário confirma → desconectar):
 
     antes = (113.88, 0.0)   depois = (-1.0, -1.0)
 
@@ -28,13 +28,14 @@ import db
 from utils_date import today_tz
 
 from tests._fusao_of_helpers import (  # noqa: F401 (uid_pro/ia_fora são fixtures)
-    conecta_banco, consolidado, delta_conta, ia_fora, manda, saldo_bruto,
-    sincroniza, tx, uid_pro, ultimo_launch,
+    conecta_banco, consolidado, delta_conta, ia_fora, manda, of_tx_pendente,
+    saldo_bruto, sincroniza, tx, uid_pro, ultimo_launch,
 )
 
 
 def _funde_um_real(uid: int) -> tuple[int, int]:
-    """Cenário do relato: banco com 114,88, 1 real gasto à mão, o Pix chega."""
+    """Cenário do relato: banco com 114,88, 1 real gasto à mão, o Pix chega e o
+    usuário confirma o casamento (lançamento manual nunca funde em silêncio)."""
     hoje = today_tz()
     conexao = conecta_banco(uid, "114.88")
     manda(uid, "Gastei 1 real com a barbara")
@@ -42,7 +43,8 @@ def _funde_um_real(uid: int) -> tuple[int, int]:
     sincroniza(conexao, uid, "113.88",
                [tx(uid, "-1.00", hoje, "PIX ENVIADO BARBARA")])
     rep = db.import_open_finance_launches(uid, conexao)
-    assert rep["auto_merged"] == 1, rep
+    assert rep["pending"] == 1 and rep["auto_merged"] == 0, rep
+    db.confirm_reconciliation(uid, of_tx_pendente(uid))
     assert consolidado(uid) == (113.88, 0.0)
     return conexao, manual_id
 
@@ -61,7 +63,9 @@ def test_desconectar_o_banco_devolve_o_gasto(uid_pro, ia_fora):
 
 def test_reconectar_depois_de_desconectar_nao_debita_duas_vezes(uid_pro, ia_fora):
     """POSITIVO: a restauração não pode virar um débito extra no caminho de
-    quem troca de banco e volta."""
+    quem troca de banco e volta. O disconnect some com a tx fundida; na conexão
+    nova o importador propõe o casamento de novo (candidato manual → pendência,
+    nunca fusão silenciosa) e o dono confirma."""
     hoje = today_tz()
     conexao, manual_id = _funde_um_real(uid_pro)
     db.disconnect_open_finance_connection(uid_pro, conexao)
@@ -69,7 +73,9 @@ def test_reconectar_depois_de_desconectar_nao_debita_duas_vezes(uid_pro, ia_fora
 
     nova = conecta_banco(uid_pro, "113.88",
                          [tx(uid_pro, "-1.00", hoje, "PIX ENVIADO BARBARA")])
-    db.import_open_finance_launches(uid_pro, nova)
+    rep = db.import_open_finance_launches(uid_pro, nova)
+    assert rep["pending"] == 1 and rep["auto_merged"] == 0, rep
+    db.confirm_reconciliation(uid_pro, of_tx_pendente(uid_pro))
 
     assert saldo_bruto(uid_pro) == Decimal("-1"), "a correção é de LEITURA"
     assert consolidado(uid_pro) == (113.88, 0.0)
@@ -95,8 +101,9 @@ def test_transacao_apagada_no_provedor_devolve_o_gasto(uid_pro, ia_fora):
 
 def test_fusao_falsa_positiva_devolve_o_gasto_ao_desfazer(uid_pro, ia_fora):
     """Dois gastos DIFERENTES de R$50 no mesmo dia (um do bolso, um do banco) a
-    heurística funde — não é o escopo consertá-la, mas o dinheiro não pode ser
-    perdido de forma irreversível por causa dela."""
+    heurística marca como casamento — não é o escopo consertá-la, mas o dinheiro
+    não pode ser perdido de forma irreversível por causa dela. O dono confirma
+    a pendência (lançamento manual só funde com confirmação) e a desfaz."""
     hoje = today_tz()
     conexao = conecta_banco(uid_pro, "1000.00")
     manda(uid_pro, "gastei 50 no mercado")
@@ -105,7 +112,8 @@ def test_fusao_falsa_positiva_devolve_o_gasto_ao_desfazer(uid_pro, ia_fora):
     sincroniza(conexao, uid_pro, "950.00",
                [tx(uid_pro, "-50.00", hoje, "MERCADO")])
     rep = db.import_open_finance_launches(uid_pro, conexao)
-    assert rep["auto_merged"] == 1, rep
+    assert rep["pending"] == 1 and rep["auto_merged"] == 0, rep
+    db.confirm_reconciliation(uid_pro, of_tx_pendente(uid_pro))
     assert consolidado(uid_pro) == (950.0, 0.0), "a heurística fundiu (fora do escopo)"
 
     db.disconnect_open_finance_connection(uid_pro, conexao)

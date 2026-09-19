@@ -35,9 +35,27 @@ from tests._fusao_of_helpers import (  # noqa: F401 (uid_pro/ia_fora são fixtur
 )
 
 
+def _of_tx_pendente(uid: int) -> int:
+    with db.connection.get_conn() as conn:
+        with conn.cursor() as cur:
+            cur.execute(
+                """select o.id from open_finance_transactions o
+                     join open_finance_accounts a on a.id = o.account_id
+                     join open_finance_connections c on c.id = a.connection_id
+                    where c.user_id=%s and o.reconciliation_status='pending'
+                    limit 1""",
+                (uid,),
+            )
+            return cur.fetchone()["id"]
+
+
 def _funde_cinquenta(uid: int) -> int:
     """Carteira exibida 100,00 = cru 50,00 + os 50,00 do gasto fundido.
 
+    NO CONTRATO NOVO a fusão de um lançamento MANUAL só acontece com
+    confirmação do usuário: o importador rebaixa 'auto' → 'ask' para candidato
+    manual, e o teste confirma a pendência explicitamente — mesmo estado final
+    do antigo auto-merge (tx OF confirmada no lançamento, sombra apagada).
     Valor gordo de propósito: com 1 real a guarda da fatura não teria como
     recusar nada, e o caso do pagamento perderia o sentido.
     """
@@ -47,7 +65,8 @@ def _funde_cinquenta(uid: int) -> int:
     manda(uid, "gastei 50 no mercado")
     sincroniza(conexao, uid, "950.00", [tx(uid, "-50.00", hoje, "MERCADO")])
     rep = db.import_open_finance_launches(uid, conexao)
-    assert rep["auto_merged"] == 1, rep
+    assert rep["pending"] == 1 and rep["auto_merged"] == 0, rep
+    db.confirm_reconciliation(uid, _of_tx_pendente(uid))
     assert saldo_bruto(uid) == Decimal("50"), "a correção é de LEITURA"
     return conexao
 
@@ -111,8 +130,10 @@ def test_bills_mostra_a_mesma_carteira_do_dashboard(uid_pro, ia_fora, sem_autori
 
 # ── 2. a guarda do pagamento: recusava o que o dashboard autoriza ─────────
 
-def test_pagar_fatura_autoriza_o_que_o_dashboard_mostra(uid_pro, ia_fora, sem_autorizacao):
-    """80,00 cabe na Carteira exibida (100,00) e NÃO no cru (50,00)."""
+def test_pagar_fatura_autoriza_sem_drenar_a_carteira(uid_pro, ia_fora, sem_autorizacao):
+    """NO CONTRATO NOVO pagar fatura com Open Finance ativo NÃO debita a Carteira
+    Piggy — o débito ocorre no banco (já refletido no extrato OF). A rota autoriza
+    sem guarda de saldo e `pay_bill_amount` grava `delta_conta: 0`."""
     from frontend.routes.cards import pay_bill_route, PayBillPayload
 
     _funde_cinquenta(uid_pro)
@@ -122,16 +143,23 @@ def test_pagar_fatura_autoriza_o_que_o_dashboard_mostra(uid_pro, ia_fora, sem_au
         _Req(), uid_pro, bill_id, PayBillPayload(amount=80.0)))
 
     assert r.get("ok") is True, r
-    # o pagamento debitou a Carteira de verdade: 50 - 80 no cru
-    assert saldo_bruto(uid_pro) == Decimal("-30")
+    assert saldo_bruto(uid_pro) == Decimal("50"), "a Carteira foi drenada"
+    with db.connection.get_conn() as conn:
+        with conn.cursor() as cur:
+            cur.execute("select efeitos from launches where id=%s", (r["launch_id"],))
+            efeitos = cur.fetchone()["efeitos"]
+    assert efeitos["delta_conta"] == 0
+    assert efeitos["funding_source"]["kind"] == "bank"
 
 
-def test_pagar_fatura_continua_recusando_o_que_nao_cabe(uid_pro, ia_fora, sem_autorizacao):
-    """POSITIVO: a guarda não virou peneira. 100,01 não cabe em 100,00."""
+def test_pagar_fatura_sem_of_continua_recusando_o_que_nao_cabe(
+        uid_pro, ia_fora, sem_autorizacao):
+    """POSITIVO: sem Open Finance a guarda continua valendo — 100,01 não cabe
+    em 100,00. (Com OF a rota não recusa mais: o pagamento ocorre no banco.)"""
     from fastapi import HTTPException
     from frontend.routes.cards import pay_bill_route, PayBillPayload
 
-    _funde_cinquenta(uid_pro)
+    db.add_launch_and_update_balance(uid_pro, "receita", 100, None, "seed")
     bill_id = _fatura_de(uid_pro, 500.0)
 
     with pytest.raises(HTTPException) as e:
@@ -246,8 +274,10 @@ def test_mensagem_de_resgate_de_caixinha_tambem(uid_pro, ia_fora):
 # ── 7. pagamento de fatura pelo WhatsApp: "Conta agora" ───────────────────
 
 def test_pay_bill_amount_devolve_a_carteira_exibida(uid_pro, ia_fora):
-    """`db/cards.py:pay_bill_amount` alimenta `core/handlers/credit.py:133`
-    ("Conta agora") e `:2718` ("Saldo da conta") — duas telas, um produtor."""
+    """`db/cards.py:pay_bill_amount` alimenta `core/handlers/credit.py` ("Conta
+    agora") — devolve a Carteira EXIBIDA. NO CONTRATO NOVO, com Open Finance,
+    o pagamento não move a Carteira (`delta_conta: 0`): o retorno é a exibida,
+    intacta."""
     from db.cards import pay_bill_amount
 
     _funde_cinquenta(uid_pro)
@@ -260,19 +290,18 @@ def test_pay_bill_amount_devolve_a_carteira_exibida(uid_pro, ia_fora):
 
     res = pay_bill_amount(uid_pro, int(card_id), "Nubank", 30.0, bill_id)
 
-    assert float(res["new_balance"]) == pytest.approx(70.0), \
-        "sem o conserto: 20,00 (o cru), com o dashboard mostrando 70,00"
+    assert float(res["new_balance"]) == pytest.approx(100.0), \
+        "com OF o pagamento não drena: devolve a Carteira exibida, intacta"
     assert float(res["new_balance"]) == pytest.approx(
         float(db.get_consolidated_balance(uid_pro)["manual"]))
 
 
 # ── 9. rota POST /launches: o TERCEIRO chamador da mesma defasagem ────────
 
-def test_rota_de_lancamento_devolve_a_carteira_depois_da_fusao(uid_pro, ia_fora, sem_autorizacao):
-    """`new_balance` é lido antes do `reconcile_manual_launch` da própria rota.
-    Contrato de JSON, sem tela hoje (`dashboard.js` só lê `new_balance` em
-    `:9889`, que vem da rota de fatura) — mas a mesma severidade do
-    `adjust_balance_route`. Medido antes: `new_balance=-1,0 dash=0,0`."""
+def test_rota_de_lancamento_devolve_a_carteira_sem_fusao(uid_pro, ia_fora, sem_autorizacao):
+    """NO CONTRATO NOVO não há fusão reversa: `new_balance` da rota é a Carteira
+    real do lançamento manual (a tx OF pré-importada segue como lançamento
+    separado) e bate com o exibido pelo dashboard — mesmo recorte, mesmo número."""
     import frontend.finance_bot_websocket_custom as mono
 
     conecta_banco(uid_pro, "113.88",
@@ -284,8 +313,8 @@ def test_rota_de_lancamento_devolve_a_carteira_depois_da_fusao(uid_pro, ia_fora,
             tipo="despesa", valor=1.0, nota="Gastei 1 real com a barbara")))
 
     exibido = asyncio.run(mono.get_financial_data(uid_pro))["balance"]
-    assert r["new_balance"] == pytest.approx(exibido), "sem o conserto: -1,0 contra 0,0"
-    assert r["new_balance"] == pytest.approx(0.0)
+    assert r["new_balance"] == pytest.approx(exibido), "rota e dashboard divergem"
+    assert r["new_balance"] == pytest.approx(-1.0)
 
 
 def _conexao_de(uid: int) -> int:

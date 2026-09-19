@@ -19,7 +19,8 @@ import db
 from utils_date import today_tz
 
 from tests._fusao_of_helpers import (  # noqa: F401 (uid_pro/ia_fora são fixtures)
-    conecta_banco, consolidado, ia_fora, manda, sincroniza, tx, uid_pro,
+    conecta_banco, consolidado, ia_fora, manda, of_tx_pendente, sincroniza, tx,
+    uid_pro,
 )
 
 
@@ -36,7 +37,8 @@ def test_preco_fusao_falsa_positiva_superconta_450(uid_pro, ia_fora):
     `gasto`, `compra`, `lanche`, `jantar`, `cafe`, `diversos`, `outros`,
     `conta`, `boleto`, `pix` e `""`. Um `alvo` genérico é "similar" a QUALQUER
     descrição (`_is_generic_merchant`, `:1591`), então basta valor igual
-    (±0,05) com um único candidato elegível para a fusão ser automática.
+    (±0,05) com um único candidato elegível para o casamento ser proposto —
+    e, com a confirmação do usuário, a fusão acontece.
 
     O erro TROCA DE DIREÇÃO entre as abordagens: a `main` subconta no
     verdadeiro-positivo (o bug deste PR), o branch superconta no
@@ -48,7 +50,9 @@ def test_preco_fusao_falsa_positiva_superconta_450(uid_pro, ia_fora):
     sincroniza(conexao, uid_pro, "450.00",
                [tx(uid_pro, "-50.00", hoje, "UBER *TRIP SAO PAULO")])  # outro gasto
     rep = db.import_open_finance_launches(uid_pro, conexao)
-    assert rep["auto_merged"] == 1, "a porta genérica fundiu os dois (fora do escopo)"
+    assert rep["pending"] == 1 and rep["auto_merged"] == 0, \
+        "a porta genérica propôs o casamento (fora do escopo)"
+    db.confirm_reconciliation(uid_pro, of_tx_pendente(uid_pro))
 
     assert consolidado(uid_pro) == (450.0, 0.0), \
         "NÚMERO FIXADO, não desejado: a main dá 400,0 aqui"
@@ -75,10 +79,14 @@ def test_preco_espelho_atrasado_superconta_ate_o_proximo_sync(uid_pro, ia_fora):
     conexao = conecta_banco(uid_pro, "114.88")
     manda(uid_pro, "Gastei 1 real com a barbara")
 
-    # espelho AINDA cheio (114,88), transação já entregue: a janela do relato
+    # espelho AINDA cheio (114,88), transação já entregue: a janela do relato.
+    # o casamento é rebaixado a pendência (candidato manual) e o dono confirma:
+    # só a fusão confirmada devolve o débito na leitura.
     sincroniza(conexao, uid_pro, "114.88",
                [tx(uid_pro, "-1.00", hoje, "PIX ENVIADO BARBARA")])
-    db.import_open_finance_launches(uid_pro, conexao)
+    rep = db.import_open_finance_launches(uid_pro, conexao)
+    assert rep["pending"] == 1 and rep["auto_merged"] == 0, rep
+    db.confirm_reconciliation(uid_pro, of_tx_pendente(uid_pro))
 
     assert consolidado(uid_pro) == (114.88, 0.0), \
         "NÚMERO FIXADO, não desejado: a main dá 113,88 aqui"
@@ -112,7 +120,9 @@ def test_preco_extrato_reconciliado_fica_50_acima_do_ledgerbal(uid_pro, ia_fora,
     db.add_launch_and_update_balance(uid_pro, "receita", 100, None, "seed")
     manda(uid_pro, "gastei 50 no mercado")
     sincroniza(conexao, uid_pro, "950.00", [tx(uid_pro, "-50.00", hoje, "MERCADO")])
-    assert db.import_open_finance_launches(uid_pro, conexao)["auto_merged"] == 1
+    rep = db.import_open_finance_launches(uid_pro, conexao)
+    assert rep["pending"] == 1 and rep["auto_merged"] == 0, rep
+    db.confirm_reconciliation(uid_pro, of_tx_pendente(uid_pro))
 
     monkeypatch.setattr(si, "_extract_pdf_text", lambda _d: "extrato falso")
     monkeypatch.setattr(si, "parse_pdf_statement_text", lambda _t: [
