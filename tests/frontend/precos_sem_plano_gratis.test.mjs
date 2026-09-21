@@ -280,11 +280,11 @@ test("a tabela comparativa tem só os três planos do bloco, e as 4 colunas fech
   assert.deepEqual(t.nomes, ["Recursos", "Essencial", "Plus", "Pro"],
     `cabeçalhos: ${JSON.stringify(t.nomes)}`);
 
-  // Consistência: a MESMA contagem no thead e em cada linha do tbody (6 de
-  // recurso — só diferenciais, o que é igual nos três ficou no bloco acima —
-  // + 3 de grupo + 1 de CTA). Cada linha entra na asserção, não só amostra.
+  // Consistência: a MESMA contagem no thead e em cada linha do tbody (1 de
+  // escada + 6 de recurso — só diferenciais, o que é igual nos três ficou no
+  // bloco acima — + 3 de grupo + 1 de CTA). Cada linha entra, não só amostra.
   assert.deepEqual(t.thead, [COLUNAS], `thead: ${JSON.stringify(t.thead)}`);
-  assert.equal(t.tbody.length, 10, `tbody com ${t.tbody.length} linhas`);
+  assert.equal(t.tbody.length, 11, `tbody com ${t.tbody.length} linhas`);
   assert.deepEqual([...new Set(t.tbody)], [COLUNAS],
     `linhas do tbody fora das ${COLUNAS} colunas: ${JSON.stringify(t.tbody)}`);
   await page.close();
@@ -324,7 +324,9 @@ test("controle positivo: a ilha montou com as seções e os dados nas colunas ce
     };
     return {
       secoes,
+      escada: linha("No seu plano entra"),
       bancos: linha("Bancos conectados (Open Finance)"),
+      mensagens: linha("Mensagens com a Piggy"),
       previsao: linha("Previsão de saldo 30/60/90 dias"),
       agentes: linha("Agentes ligados ao mesmo tempo"),
       comuns: [...document.querySelectorAll("#cmp-v2 ul li")].map(txt),
@@ -332,7 +334,13 @@ test("controle positivo: a ilha montou com as seções e os dados nas colunas ce
   });
 
   assert.deepEqual(dados.secoes, ["Essenciais", "Agentes do Piggy", "Planejamento e previsão"]);
+  // A escada cumulativa: cada degrau carrega o anterior — a linha diz o que a
+  // grade de diferenciais não diz.
+  assert.deepEqual(dados.escada,
+    ["Tudo do bloco acima", "Tudo do Essencial, e mais:", "Tudo do Plus, e mais:"]);
   assert.deepEqual(dados.bancos, ["1", "2", "5"]);
+  // Onde o Pro só herda do Plus, a célula diz isso em vez de repetir o valor.
+  assert.deepEqual(dados.mensagens, ["200/mês", "1.000/mês", "Igual ao Plus"]);
   assert.deepEqual(dados.previsao, ["Não incluído", "Não incluído", "Incluído"]);
   assert.deepEqual(dados.agentes, ["Não incluído", "3 · você escolhe quais", "Os 7 · a equipe inteira"]);
   // O bloco "em todos os planos" abre com o trial — é a oferta que destrava a

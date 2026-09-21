@@ -89,7 +89,7 @@ const groups: FeatureGroup[] = [
       { label: "Bancos conectados (Open Finance)", values: ["1", "2", "5"] },
       // Plus/Pro: `ai_monthly_messages: None` cai no teto GLOBAL
       // AI_CHAT_MONTHLY_LIMIT, não em "ilimitado" (ver o card do Plus).
-      { label: "Mensagens com a Piggy", values: ["200/mês", "1.000/mês", "1.000/mês"] },
+      { label: "Mensagens com a Piggy", values: ["200/mês", "1.000/mês", "Igual ao Plus"] },
       { label: "Histórico que você enxerga", values: ["90 dias", "12 meses", "24 meses"] },
     ],
   },
@@ -243,6 +243,30 @@ export default function ComparisonBlock() {
               </TableHeader>
 
               <TableBody>
+                {/* A escada cumulativa: a grade mostra só diferenciais, então
+                    ela não diz que cada degrau carrega o anterior inteiro —
+                    esta linha diz ("Tudo do Plus +", como na referência). */}
+                <TableRow className="hover:bg-transparent">
+                  <TableCell className="py-2.5 text-xs font-semibold tracking-wide text-muted-foreground uppercase">
+                    No seu plano entra
+                  </TableCell>
+                  {plans.map((plan, i) => (
+                    <TableCell
+                      key={`ladder-${plan.name}`}
+                      className={cn(
+                        "py-2.5 text-center",
+                        plan.highlighted && "bg-primary/5",
+                      )}
+                    >
+                      <span className="inline-flex items-center justify-center gap-1 text-xs font-medium text-foreground">
+                        <RiCheckLine className="size-3.5 shrink-0 text-primary" aria-hidden />
+                        {i === 0
+                          ? "Tudo do bloco acima"
+                          : `Tudo do ${plans[i - 1].name}, e mais:`}
+                      </span>
+                    </TableCell>
+                  ))}
+                </TableRow>
                 {groups.map((group) => (
                   <React.Fragment key={group.section}>
                     <TableRow className="bg-muted/40 hover:bg-muted/40">
