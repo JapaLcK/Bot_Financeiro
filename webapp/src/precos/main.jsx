@@ -19,14 +19,26 @@ import { Planos } from "./Planos.jsx";
 import { montarPriceFlows } from "./PriceFlow.jsx";
 import { lerPlanos } from "./lerPlanos.js";
 
-// Ilha da tabela comparativa (`#cmp-v2`): bloco shadcn estático, sem contrato
-// com o markup do servidor — a tabela antiga (`.cmp-table`) foi substituída
-// por ele, então não há nada para ler nem para preservar. `flushSync` pelo
-// mesmo motivo do `#plans-v2`: scripts clássicos posteriores podem inspecionar
-// o DOM logo após este bundle.
+// Ilha da tabela comparativa (`#cmp-v2`): bloco shadcn comparison-3 com os
+// dados do PigBank, sem contrato com markup do servidor — a tabela antiga
+// (`.cmp-table`) foi substituída por ele, então não há nada para ler nem para
+// preservar. `flushSync` pelo mesmo motivo do `#plans-v2`: scripts clássicos
+// posteriores podem inspecionar o DOM logo após este bundle.
 const cmpRaiz = document.getElementById("cmp-v2");
 if (cmpRaiz) {
   flushSync(() => createRoot(cmpRaiz).render(<ComparisonBlock />));
+  // A janela do PI8 vale para os botões da ilha também: se o plans-config ou a
+  // assinatura resolveram ANTES deste mount, o markUnavailable/refreshPlanButtons
+  // marcaram só os cards. O refresh é idempotente e cobre todo [data-plan-btn];
+  // o "Indisponível" não é re-aplicado por ele, então copia-se do card.
+  document.querySelectorAll('#plans-v2 [data-plan-btn][data-unavailable="1"]').forEach((card) => {
+    cmpRaiz.querySelectorAll(`[data-plan-btn="${card.dataset.planBtn}"]`).forEach((b) => {
+      b.disabled = true;
+      b.textContent = "Indisponível";
+      b.dataset.unavailable = "1";
+    });
+  });
+  globalThis.refreshPlanButtons?.();
 }
 
 const raiz = document.getElementById("plans-v2");

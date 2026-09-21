@@ -30,59 +30,81 @@ type FeatureGroup = {
   features: Feature[];
 };
 
+// A MESMA fonte da tabela servida que este bloco substituiu: cada linha está
+// ancorada em core/services/plan_limits.py — mudou lá, muda aqui.
 const plans = [
   {
-    name: "Starter",
-    price: "$0",
-    cadence: "Free Forever",
+    id: "essencial",
+    name: "Essencial",
+    mensal: "R$ 9,90/mês",
+    anual: "R$ 99/ano",
+    sub: "Organize tudo, sem limites",
     highlighted: false,
   },
   {
-    name: "Growth",
-    price: "$24",
-    cadence: "Per User / Month",
+    id: "plus",
+    name: "Plus",
+    mensal: "R$ 19,90/mês",
+    anual: "R$ 199/ano",
+    sub: "Seu dinheiro no automático",
     highlighted: true,
   },
   {
-    name: "Enterprise",
-    price: "Custom",
-    cadence: "Talk to Sales",
+    id: "pro",
+    name: "Pro",
+    mensal: "R$ 49,90/mês",
+    anual: "R$ 499/ano",
+    sub: "Planejamento e previsão",
     highlighted: false,
   },
 ] as const;
 
 const groups: FeatureGroup[] = [
   {
-    section: "Core",
+    section: "Registro no WhatsApp",
     features: [
-      { label: "Projects", values: ["3", "Unlimited", "Unlimited"] },
-      { label: "Storage", values: ["2 GB", "100 GB", "1 TB+"] },
-      { label: "API access", values: [false, true, true] },
-      { label: "Custom workflows", values: [false, true, true] },
+      { label: "Registro por texto", values: [true, true, true] },
+      { label: "Lançamentos por mês", values: ["Ilimitados", "Ilimitados", "Ilimitados"] },
+      { label: "Registro por áudio", values: [true, true, true] },
+      { label: "Foto de cupom e comprovante", values: [true, true, true] },
+      { label: "Importar extrato (OFX, CSV, PDF)", values: [true, true, true] },
     ],
   },
   {
-    section: "Collaboration",
+    section: "Contas e organização",
     features: [
-      { label: "Team members", values: ["Up to 3", "Up to 50", "Unlimited"] },
-      { label: "Real-time editing", values: [true, true, true] },
-      { label: "Guest access", values: [false, true, true] },
-      {
-        label: "Roles & permissions",
-        values: ["Basic", "Advanced", "Granular"],
-      },
+      { label: "Bancos conectados (Open Finance)", values: ["1", "2", "5"] },
+      { label: "Investimentos no painel", values: [true, true, true] },
+      { label: "Caixinhas e metas", values: ["Ilimitadas", "Ilimitadas", "Ilimitadas"] },
+      { label: "Cartões", values: ["Ilimitados", "Ilimitados", "Ilimitados"] },
+      { label: "Boletos com lembrete de vencimento", values: [true, true, true] },
+      { label: "Gastos recorrentes", values: [true, true, true] },
     ],
   },
   {
-    section: "Support",
+    section: "Piggy IA",
     features: [
-      {
-        label: "Response time",
-        values: ["Community", "Under 24h", "Under 1h"],
-      },
-      { label: "Priority queue", values: [false, true, true] },
-      { label: "Dedicated manager", values: [false, false, true] },
-      { label: "99.99% uptime SLA", values: [false, false, true] },
+      // Plus/Pro: `ai_monthly_messages: None` cai no teto GLOBAL
+      // AI_CHAT_MONTHLY_LIMIT, não em "ilimitado" (ver o card do Plus).
+      { label: "Mensagens com a Piggy", values: ["200/mês", "1.000/mês", "1.000/mês"] },
+      { label: "Categorização automática", values: [true, true, true] },
+    ],
+  },
+  {
+    section: "Agentes do Piggy",
+    features: [
+      { label: "Agentes liberados", values: [false, "Os 7", "Os 7"] },
+      { label: "Energia para manter ligados", values: [false, "⚡ 4 · até 3 agentes", "⚡ 14 · a equipe inteira"] },
+      { label: "Criar o seu próprio agente", values: [false, false, false] },
+    ],
+  },
+  {
+    section: "Histórico e relatórios",
+    features: [
+      { label: "Histórico que você enxerga", values: ["90 dias", "12 meses", "24 meses"] },
+      { label: "Exportar seus dados", values: [true, true, true] },
+      { label: "Previsão de saldo 30/60/90 dias", values: [false, false, true] },
+      { label: "Relatórios semanais", values: [false, false, true] },
     ],
   },
 ];
@@ -109,12 +131,12 @@ function Cell({
           )}
           aria-hidden
         />
-        <span className="sr-only">Included</span>
+        <span className="sr-only">Incluído</span>
       </span>
     ) : (
       <span className="mx-auto flex size-5 items-center justify-center bg-muted">
         <RiCloseLine className="size-3.5 text-muted-foreground" aria-hidden />
-        <span className="sr-only">Not included</span>
+        <span className="sr-only">Não incluído</span>
       </span>
     );
   }
@@ -138,31 +160,34 @@ export default function ComparisonBlock() {
         <div className="mb-6 max-w-2xl">
           <Badge variant="outline" className="mb-4">
             <RiSparkling2Line data-icon="inline-start" />
-            Compare plans
+            Compare os planos
           </Badge>
           <h2 className="text-3xl font-bold tracking-tight sm:text-4xl">
-            Find the right plan for your team
+            Compare os planos lado a lado
           </h2>
           <p className="mt-3 text-sm text-muted-foreground">
-            Every Acme plan scales with you. Compare features side by side and
-            upgrade the moment you need more.
+            A mesma linha para todos os planos, para você ver exatamente o que
+            ganha (e o que deixa de ter) em cada degrau.
           </p>
         </div>
 
         <div className="relative">
           <Badge
             variant="default"
-            className="absolute bottom-full left-[68%] z-20 mb-2 -translate-x-1/2"
+            className="absolute bottom-full left-[68%] z-20 mb-2 -translate-x-1/2 whitespace-nowrap"
           >
-            Most Popular
+            Mais popular
           </Badge>
           <div className="overflow-x-auto border border-border">
-            <Table className="table-fixed text-sm">
+            {/* min-w: sem ela o table-fixed espremeria as colunas no celular em
+                vez de deixar o overflow-x-auto rolar (era o min-width:460px da
+                tabela antiga). */}
+            <Table className="table-fixed text-sm min-w-[560px]">
               <TableHeader>
                 <TableRow className="hover:bg-transparent">
                   <TableHead className="sticky top-0 z-20 w-[36%] border-b border-border bg-background align-bottom">
                     <span className="inline-block pb-3 text-sm font-semibold tracking-wide text-muted-foreground uppercase">
-                      Features
+                      Recursos
                     </span>
                   </TableHead>
                   {plans.map((plan) => (
@@ -177,11 +202,17 @@ export default function ComparisonBlock() {
                         <span className="text-sm font-semibold text-foreground">
                           {plan.name}
                         </span>
-                        <span className="text-lg font-bold text-foreground">
-                          {plan.price}
+                        {/* Os dois preços ficam no DOM e o `setCycle` da página
+                            alterna pelo `style.display` — o mesmo contrato dos
+                            [data-price-*] dos cards. */}
+                        <span className="text-lg font-bold text-foreground whitespace-nowrap">
+                          <span data-price-monthly>{plan.mensal}</span>
+                          <span data-price-annual style={{ display: "none" }}>
+                            {plan.anual}
+                          </span>
                         </span>
                         <span className="text-xs font-normal text-muted-foreground">
-                          {plan.cadence}
+                          {plan.sub}
                         </span>
                       </div>
                     </TableHead>
@@ -234,16 +265,27 @@ export default function ComparisonBlock() {
                         plan.highlighted && "bg-primary/5",
                       )}
                     >
+                      {/* O onclick vai por ATRIBUTO, como nos cards (ver o
+                          `crus` do Planos.jsx): o `refreshPlanButtons` troca o
+                          handler pela PROPRIEDADE `btn.onclick`, e atributo e
+                          propriedade dividem o mesmo slot — um onClick do
+                          React (delegado na raiz) dispararia JUNTO com o da
+                          troca de plano e abriria checkout + modal no mesmo
+                          clique. */}
                       <Button
-                        asChild
                         size="sm"
                         variant={plan.highlighted ? "default" : "secondary"}
                         className="w-full"
+                        data-plan-btn={plan.id}
+                        ref={(el) =>
+                          el?.setAttribute(
+                            "onclick",
+                            `startCheckout(window.pbBillingCycle || "monthly", this, '${plan.id}')`,
+                          )
+                        }
                       >
-                        <a href="#">
-                          {plan.price === "Custom" ? "Contact us" : "Choose"}
-                          <RiArrowRightLine data-icon="inline-end" />
-                        </a>
+                        Assinar {plan.name}
+                        <RiArrowRightLine data-icon="inline-end" />
                       </Button>
                     </TableCell>
                   ))}
