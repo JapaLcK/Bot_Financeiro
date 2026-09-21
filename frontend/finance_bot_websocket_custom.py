@@ -3213,10 +3213,12 @@ async def auth_register(request: Request, body: RegisterBody):
             body.email, body.password, body.phone, display_name=name,
         )
     except AccountAlreadyExistsError as exc:
-        # Anti-enumeração: e-mail/telefone já existe. NÃO revela isso — responde
-        # exatamente como no caminho normal e avisa o dono da conta por e-mail
-        # (out-of-band). O visitante não consegue distinguir "existe" de "novo".
-        # O rate-limit de cadastro (3/h por IP+e-mail) já limita spam do aviso.
+        # E-mail já cadastrado: avisa na TELA (409). A anti-enumeração aqui foi
+        # abandonada de propósito — ela jogava o dono legítimo numa tela de
+        # código de verificação que nunca chegava, e ele só descobria pelo
+        # e-mail de aviso. O aviso por e-mail continua: se NÃO foi o dono quem
+        # tentou, ele fica sabendo (rate-limit 3/h por IP+e-mail limita spam).
+        # Telefone duplicado segue SEM revelação — ver create_email_verification_impl.
         try:
             owner = await asyncio.to_thread(get_auth_user, exc.existing_user_id) if exc.existing_user_id else None
             owner_email = (owner or {}).get("email")
@@ -3225,7 +3227,15 @@ async def auth_register(request: Request, body: RegisterBody):
                 await asyncio.to_thread(send_account_exists_notice, owner_email, f"{DASHBOARD_URL}/login")
         except Exception as notice_exc:
             logging.getLogger(__name__).warning("account_exists_notice falhou: %s", notice_exc)
-        return {"status": "verification_sent", "email": body.email.strip().lower()}
+        if exc.reason == "email_google":
+            raise HTTPException(
+                status_code=409,
+                detail="Esse e-mail já tem conta criada com o Google. Entre pelo botão 'Continuar com Google'.",
+            )
+        raise HTTPException(
+            status_code=409,
+            detail="Esse e-mail já tem conta. Entre nela ou recupere a senha.",
+        )
     except ValueError as e:
         raise HTTPException(status_code=409, detail=detalhe_seguro(e))
 

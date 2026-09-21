@@ -128,7 +128,14 @@
     try{
       var res=await fetch('/auth/register',{method:'POST',credentials:'same-origin',headers:csrfHeaders({'Content-Type':'application/json'}),body:JSON.stringify({email:email,password:pass,phone:phone,name:name})});
       var d=await payload(res);
-      if(!res.ok){err('reg-error',d.detail||'Erro ao enviar código.');return}
+      if(!res.ok){
+        if(res.status===409){
+          // E-mail já cadastrado: além da frase, um link direto pro login.
+          err('reg-error',(d.detail||'Esse e-mail já tem conta.')+' ');
+          var a=document.createElement('a');a.href='/login';a.textContent='Entrar';a.style.cssText='color:inherit;text-decoration:underline;font-weight:600';
+          document.getElementById('reg-error').appendChild(a);return
+        }
+        err('reg-error',d.detail||'Erro ao enviar código.');return}
       _email=email;_phone=phone;
       document.getElementById('form-register').style.display='none';
       document.getElementById('verify-email-display').textContent=email;
