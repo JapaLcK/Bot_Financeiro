@@ -38,6 +38,7 @@ const plans = [
     name: "Essencial",
     mensal: "R$ 9,90/mês",
     anual: "R$ 99/ano",
+    eq: "R$ 8,25",
     sub: "Organize tudo, sem limites",
     highlighted: false,
   },
@@ -46,6 +47,7 @@ const plans = [
     name: "Plus",
     mensal: "R$ 19,90/mês",
     anual: "R$ 199/ano",
+    eq: "R$ 16,58",
     sub: "Seu dinheiro no automático",
     highlighted: true,
   },
@@ -54,55 +56,52 @@ const plans = [
     name: "Pro",
     mensal: "R$ 49,90/mês",
     anual: "R$ 499/ano",
+    eq: "R$ 41,58",
     sub: "Planejamento e previsão",
     highlighted: false,
   },
 ] as const;
 
+// O que é IDÊNTICO nos três planos sai da grade: uma linha ✓✓✓ não ajuda a
+// decidir e dilui os diferenciais. O trial vem primeiro de propósito — é o
+// redutor de fricção que antes só aparecia nas notas pequenas da página.
+const commons = [
+  "15 dias grátis pra testar · cancele antes e não paga nada",
+  "Registro por texto, áudio e foto de cupom no WhatsApp",
+  "Lançamentos ilimitados",
+  "Importar extrato (OFX, CSV, PDF)",
+  "Investimentos no painel",
+  "Caixinhas, metas e cartões ilimitados",
+  "Boletos e gastos recorrentes com lembretes",
+  "Categorização automática",
+  "Exportar seus dados",
+];
+
+// Só os DIFERENCIAIS ficam na grade. "Agentes liberados" e "Energia" viraram
+// uma linha só, porque a promessa era dos 7 e a energia é quem manda: a linha
+// agora diz exatamente o que cada plano entrega. "Criar o seu próprio agente"
+// saiu — era ✗ nos TRÊS, uma linha inteira anunciando ausência; quando a
+// feature existir, ela volta (idealmente como exclusivo do Pro).
 const groups: FeatureGroup[] = [
   {
-    section: "Registro no WhatsApp",
-    features: [
-      { label: "Registro por texto", values: [true, true, true] },
-      { label: "Lançamentos por mês", values: ["Ilimitados", "Ilimitados", "Ilimitados"] },
-      { label: "Registro por áudio", values: [true, true, true] },
-      { label: "Foto de cupom e comprovante", values: [true, true, true] },
-      { label: "Importar extrato (OFX, CSV, PDF)", values: [true, true, true] },
-    ],
-  },
-  {
-    section: "Contas e organização",
+    section: "Essenciais",
     features: [
       { label: "Bancos conectados (Open Finance)", values: ["1", "2", "5"] },
-      { label: "Investimentos no painel", values: [true, true, true] },
-      { label: "Caixinhas e metas", values: ["Ilimitadas", "Ilimitadas", "Ilimitadas"] },
-      { label: "Cartões", values: ["Ilimitados", "Ilimitados", "Ilimitados"] },
-      { label: "Boletos com lembrete de vencimento", values: [true, true, true] },
-      { label: "Gastos recorrentes", values: [true, true, true] },
-    ],
-  },
-  {
-    section: "Piggy IA",
-    features: [
       // Plus/Pro: `ai_monthly_messages: None` cai no teto GLOBAL
       // AI_CHAT_MONTHLY_LIMIT, não em "ilimitado" (ver o card do Plus).
       { label: "Mensagens com a Piggy", values: ["200/mês", "1.000/mês", "1.000/mês"] },
-      { label: "Categorização automática", values: [true, true, true] },
+      { label: "Histórico que você enxerga", values: ["90 dias", "12 meses", "24 meses"] },
     ],
   },
   {
     section: "Agentes do Piggy",
     features: [
-      { label: "Agentes liberados", values: [false, "Os 7", "Os 7"] },
-      { label: "Energia para manter ligados", values: [false, "⚡ 4 · até 3 agentes", "⚡ 14 · a equipe inteira"] },
-      { label: "Criar o seu próprio agente", values: [false, false, false] },
+      { label: "Agentes ligados ao mesmo tempo", values: [false, "3 · você escolhe quais", "Os 7 · a equipe inteira"] },
     ],
   },
   {
-    section: "Histórico e relatórios",
+    section: "Planejamento e previsão",
     features: [
-      { label: "Histórico que você enxerga", values: ["90 dias", "12 meses", "24 meses"] },
-      { label: "Exportar seus dados", values: [true, true, true] },
       { label: "Previsão de saldo 30/60/90 dias", values: [false, false, true] },
       { label: "Relatórios semanais", values: [false, false, true] },
     ],
@@ -171,6 +170,23 @@ export default function ComparisonBlock() {
           </p>
         </div>
 
+        {/* O que é igual nos três fica FORA da grade: 12 linhas ✓✓✓ diluíam os
+            diferenciais. O trial abre a lista porque é o que destrava a
+            primeira decisão. */}
+        <div className="mb-8 border border-border px-5 py-4">
+          <p className="text-xs font-semibold tracking-wide text-muted-foreground uppercase">
+            Tudo isso, em todos os planos
+          </p>
+          <ul className="mt-3 grid list-none grid-cols-1 gap-x-8 gap-y-2 text-sm sm:grid-cols-2">
+            {commons.map((item) => (
+              <li key={item} className="flex items-center gap-2">
+                <RiCheckLine className="size-4 shrink-0 text-primary" aria-hidden />
+                {item}
+              </li>
+            ))}
+          </ul>
+        </div>
+
         <div className="relative">
           <Badge
             variant="default"
@@ -211,8 +227,14 @@ export default function ComparisonBlock() {
                             {plan.anual}
                           </span>
                         </span>
+                        {/* No ciclo anual a tagline cede lugar à equivalência
+                            mensal — o mesmo argumento que os cards fazem com
+                            o "Equivale a …". */}
                         <span className="text-xs font-normal text-muted-foreground">
-                          {plan.sub}
+                          <span data-price-monthly>{plan.sub}</span>
+                          <span data-price-annual style={{ display: "none" }}>
+                            Equivale a {plan.eq}/mês
+                          </span>
                         </span>
                       </div>
                     </TableHead>
