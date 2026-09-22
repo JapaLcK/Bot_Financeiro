@@ -73,9 +73,10 @@ def test_despesa_mensal_nova_comeca_um_mes_depois_e_vai_para_o_contrato():
 
 
 def test_contrato_nao_devolve_menos_zero():
-    """100,004 em 12x sem juros: soma das parcelas (100,00) − financiado dá −0,004,
-    que arredonda para −0,0 sem o `+ 0.0`."""
-    _, contrato = _decision_events(Cenario(nome="x", preco=100.004, parcelas=12), HOJE, date(2030, 1, 1))
+    """100,01 − 0,02 = 99,99000000000001 em float: subtrair o principal da soma
+    das parcelas (99,99) produz um resíduo negativo, embora os valores sejam centavos."""
+    _, contrato = _decision_events(Cenario(nome="x", preco=100.01, entrada=0.02, parcelas=12),
+                                   HOJE, date(2030, 1, 1))
     assert contrato["juros_totais"] == 0.0 and math.copysign(1, contrato["juros_totais"]) == 1
     assert "-0.0" not in json.dumps(contrato)
 

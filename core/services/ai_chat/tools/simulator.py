@@ -86,7 +86,9 @@ TOOLS: list[Tool] = [
                     "financiado com juros (tabela Price), comparando 1 a 3 cenários com o cenário "
                     "atual. Use quando o usuário pergunta 'e se eu comprar X?', 'compensa dar mais "
                     "entrada?', 'à vista ou parcelado?'. Não invente números: pergunte preço, entrada, "
-                    "parcelas e juros que faltarem. Só o preço, sem parcelas, é à vista. Responda mostrando os dois efeitos de cada "
+                    "parcelas e juros que faltarem. Valores monetários devem ter no máximo duas "
+                    "casas decimais; se vierem frações de centavo, peça o valor em centavos ao usuário. "
+                    "A taxa de juros pode ter mais casas. Só o preço, sem parcelas, é à vista. Responda mostrando os dois efeitos de cada "
                     "cenário (saldo em 90 dias e custo do contrato) SEM recomendar um cenário. Se "
                     "vier 'pro_required', ofereça o upgrade com jeitinho, não despeje número nenhum."
                 ),

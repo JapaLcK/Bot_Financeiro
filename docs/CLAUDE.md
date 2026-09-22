@@ -95,6 +95,9 @@ com o atual sobre a mesma leitura da previsão de saldo, 90 dias + resumo do con
 O pior dia e a reserva incluem hoje após a compra e os 90 dias seguintes (91 datas);
 o saldo final continua sendo o do dia 90. A tool avisa antes dos números se os
 bancos conectados estiverem excluídos ou o saldo consolidado não for confirmado.
+Preço, entrada, custos, despesa mensal nova e reserva aceitam no máximo duas casas
+decimais; frações de centavo são recusadas na validação comum da API e da tool.
+Taxas percentuais mantêm precisão livre, inclusive valores muito pequenos.
 Sem persistência e sem tela ainda; lógica em `core/services/decision_simulator.py`.
 
 **Rota nova vai para um router de `frontend/routes/`**, não para o monólito. Ao

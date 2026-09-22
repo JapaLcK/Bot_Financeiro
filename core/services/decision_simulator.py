@@ -11,6 +11,7 @@ from __future__ import annotations
 import calendar
 import math
 from datetime import date, timedelta
+from decimal import Decimal
 from typing import Any, Optional
 
 from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
@@ -47,6 +48,17 @@ def _add_months(d: date, k: int) -> date:
 
 class _Corpo(BaseModel):
     model_config = ConfigDict(extra="forbid")  # `juros_mensal` errado não vira 0 % calado
+
+    @field_validator("preco", "entrada", "custos_unicos", "despesa_mensal_nova",
+                     "reserva_minima", check_fields=False)
+    @classmethod
+    def _dinheiro_em_centavos(cls, v: float) -> float:
+        # Após strict/range. Decimal(str(...)) evita confundir 0.29 com subcentavos
+        # por causa da representação binária; taxa percentual não é dinheiro.
+        valor = Decimal(str(v))
+        if valor != valor.quantize(Decimal("0.01")):
+            raise ValueError("valores monetários devem ter no máximo duas casas decimais")
+        return v
 
     @model_validator(mode="before")
     @classmethod
@@ -209,7 +221,7 @@ PREMISSAS = (
     "mensal nova, que não tem fim contratado. Receitas e gastos fixos só entram quando "
     "mensais ou anuais; recorrências semanais, diárias e únicas não são projetadas. "
     "Não inclui gastos avulsos futuros nem IOF, "
-    "seguro ou tarifas não informados."
+    "seguro ou tarifas não informados. Valores monetários aceitam no máximo duas casas decimais."
 )
 
 

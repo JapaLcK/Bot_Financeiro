@@ -161,6 +161,32 @@ def test_tool_no_pro_simula_e_valida_como_a_rota(cliente):
         assert tool.execute(1, args)["error"] == "invalid_args", args
 
 
+@pytest.mark.parametrize("campo", [
+    "preco", "entrada", "custos_unicos", "despesa_mensal_nova", "reserva_minima",
+])
+def test_subcentavos_recusados_na_rota_e_no_dispatch_antes_de_ler_fontes(cliente, monkeypatch, campo):
+    from core.services import decision_simulator
+    from core.services.ai_chat import runner
+
+    client, _, _ = cliente
+    # Mesmo caminho com dinheiro válido continua disponível no Pro.
+    assert _post(client, VALIDO).status_code == 200
+    assert "cenarios" in json.loads(runner._dispatch_tool(1, "simulate_purchase", dict(VALIDO))[0])
+    corpo = {"cenarios": [{"nome": "Compra", "preco": 200, "parcelas": 2}]}
+    (corpo if campo == "reserva_minima" else corpo["cenarios"][0])[campo] = 100.025
+
+    def nao_calcular(*args):
+        pytest.fail("corpo inválido chegou à leitura das fontes financeiras")
+    monkeypatch.setattr(decision_simulator, "simulate", nao_calcular)
+    r = _post(client, corpo)
+    assert r.status_code == 400, r.text
+    assert r.json()["detail"]["error"] == "invalid_simulation"
+    erro = json.loads(runner._dispatch_tool(1, "simulate_purchase", corpo)[0])
+    assert erro["error"] == "invalid_args"
+    for erros in (r.json()["detail"]["errors"], erro["errors"]):
+        assert any(e["loc"][-1] == campo and "duas casas decimais" in e["msg"] for e in erros)
+
+
 def test_note_da_tool_manda_os_dois_efeitos_e_proibe_apontar_vencedor(cliente):
     """O contrato "mostre os dois efeitos e não recomende" só existe no texto da
     `note` — é ele que o LLM lê. `"note" in out` não prendia nada disso, e um
