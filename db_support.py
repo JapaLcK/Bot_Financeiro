@@ -768,8 +768,9 @@ class AccountAlreadyExistsError(Exception):
     """Cadastro tentado com e-mail/telefone que já pertence a uma conta.
 
     Carrega o `existing_user_id` pra que o endpoint avise o dono da conta por
-    e-mail (out-of-band) e responda de forma GENÉRICA — sem revelar ao visitante
-    que a conta existe (anti-enumeração). `reason` ∈ {email, email_google, phone}.
+    e-mail. O endpoint responde 409 com mensagem clara pro visitante (a
+    anti-enumeração de e-mail foi abandonada — ver auth_register); o de
+    TELEFONE segue sem revelação. `reason` ∈ {email, email_google, phone}.
     """
     def __init__(self, reason: str, existing_user_id: int | None = None):
         super().__init__(reason)
@@ -799,9 +800,8 @@ def create_email_verification_impl(
             )
             existing = cur.fetchone()
             if existing:
-                # Anti-enumeração: não vaza "já existe" pro visitante. O endpoint
-                # trata AccountAlreadyExistsError respondendo genericamente e
-                # avisando o dono por e-mail.
+                # E-mail já cadastrado: o endpoint (auth_register) responde 409
+                # com mensagem clara e avisa o dono por e-mail.
                 reason = "email_google" if existing["password_hash"] is None else "email"
                 raise AccountAlreadyExistsError(reason, existing_user_id=existing["user_id"])
             _phone_hashes = [hash_pii_optional(c, kind="phone") for c in phone_candidates if c]

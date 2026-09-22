@@ -866,9 +866,9 @@ def send_password_reset_email(to: str, reset_url: str, has_password: bool = True
 
 
 def send_account_exists_notice(to: str, login_url: str = "", reset_url: str = "") -> bool:
-    """Aviso out-of-band enviado quando alguém tenta se cadastrar com e-mail/
-    telefone que já pertence a esta conta. Enviado NO LUGAR de revelar "já
-    existe" na resposta do cadastro (anti-enumeração)."""
+    """Aviso de segurança enviado quando alguém tenta se cadastrar com e-mail/
+    telefone que já pertence a esta conta. O visitante já vê o 409 na tela;
+    este e-mail é pro dono saber caso NÃO tenha sido ele quem tentou."""
     login_url = login_url or "https://pigbankai.com/login"
     reset_url = reset_url or login_url
     content = f"""
