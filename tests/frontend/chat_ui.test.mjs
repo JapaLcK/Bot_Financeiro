@@ -45,6 +45,7 @@ test('Piggy e agentes usam o mesmo padrão de mensagem', async () => {
     const agentReply = page.locator('.agent-chat-assistant[data-state="complete"]');
     assert.equal(await agentReply.locator('[data-slot="bubble"][data-variant="ghost"]').count(), 1);
     assert.equal(await page.locator('.agent-chat-user [data-slot="bubble"][data-variant="muted"]').count(), 1);
+    assert.equal(await page.locator('.agent-chat-user [data-slot="message-footer"] .pc-message-author').textContent(), 'Você');
     assert.equal(await agentReply.locator('[data-slot="message-footer"] time').count(), 1);
 
     await openPiggy(page);
@@ -52,6 +53,7 @@ test('Piggy e agentes usam o mesmo padrão de mensagem', async () => {
     const piggyReply = page.locator('.piggy-msg.assistant[data-state="complete"]');
     assert.equal(await piggyReply.locator('[data-slot="bubble"][data-variant="ghost"]').count(), 1);
     assert.equal(await page.locator('.piggy-msg.user [data-slot="bubble"][data-variant="muted"]').count(), 1);
+    assert.equal(await page.locator('.piggy-msg.user [data-slot="message-footer"] .pc-message-author').textContent(), 'Você');
     assert.equal(await piggyReply.locator('[data-slot="message-footer"] time').count(), 1);
   } finally { await page.close(); }
 });

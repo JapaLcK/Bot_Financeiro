@@ -55,7 +55,7 @@ function MessageBubble({ message, view, id }: {
         </BubbleContent>
       </Bubble>
       <MessageFooter>
-        {!user && <b className="pc-message-author">{author}</b>}
+        <b className="pc-message-author">{author}</b>
         {time && <time dateTime={message.createdAt}>{time}</time>}
       </MessageFooter>
       <Actions actions={message.actions} />

@@ -200,6 +200,7 @@ html.pb-agent-chat-open #piggy-fab { visibility: hidden; }
 #pigbank-chat-root #agent-chat-panel .pc-chat-message { margin: 24px 0 0; font-size: 15px; line-height: 1.7; }
 #pigbank-chat-root #agent-chat-panel .pc-message-user { background: #242427; color: #f0f0f2; }
 #pigbank-chat-root #agent-chat-panel .pc-message-author { color: #c6f11a; font-size: 12px; }
+#pigbank-chat-root #agent-chat-panel .agent-chat-user .pc-message-author { color: #a0a0a9; }
 #pigbank-chat-root .pc-agent-suggestions {
   display: flex; flex-wrap: wrap; justify-content: center; gap: 10px;
   width: min(100%, 1018px); margin: 0 auto 24px; padding: 0 24px;
