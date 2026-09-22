@@ -328,6 +328,7 @@ def get_open_finance_snapshot(user_id: int, limit: int = 8) -> dict:
                 from open_finance_investments i
                 join open_finance_connections c on c.id = i.connection_id
                 where c.user_id=%s
+                  and upper(coalesce(c.status,'')) not in ('PAUSED', 'DELETED')
                 order by i.balance desc nulls last, i.id
                 """,
                 (user_id,),

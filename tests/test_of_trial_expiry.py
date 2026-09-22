@@ -26,6 +26,7 @@ from db import (
     list_pluggy_connections_for_trial_sweep,
     list_pluggy_item_ids,
     pause_open_finance_connection,
+    save_open_finance_investments,
     save_open_finance_sync,
     save_pluggy_open_finance_item,
     update_pluggy_open_finance_item_status,
@@ -105,6 +106,12 @@ class TestSweep:
     def test_free_expirado_pausa_e_preserva_dados(self, sweep_env):
         uid, connection, deleted = sweep_env
         _seed_synced_data(connection["id"])
+        save_open_finance_investments(connection["id"], [{
+            "provider_investment_id": f"inv-{connection['id']}",
+            "name": "CDB de teste", "type": "FIXED_INCOME", "subtype": "CDB",
+            "currency": "BRL", "balance": "123.45",
+        }])
+        assert len(get_open_finance_snapshot(uid)["investments"]) == 1
         # user_id do fixture não tem auth_accounts nem trial → get_plan_tier real = 'free'
         assert plan_service.get_plan_tier(uid) == "free"
 
@@ -117,6 +124,11 @@ class TestSweep:
         snapshot = get_open_finance_snapshot(uid)
         assert len(snapshot["accounts"]) == 1
         assert len(snapshot["transactions"]) == 1
+        assert snapshot["investments"] == [], "saldo sem sincronização não pode parecer atual"
+        with get_conn() as conn:
+            with conn.cursor() as cur:
+                cur.execute("select count(*) as n from open_finance_investments where connection_id=%s", (connection["id"],))
+                assert cur.fetchone()["n"] == 1, "pausar preserva o espelho para uma futura reconexão"
 
     def test_tier_pago_ou_trial_ativo_nao_pausa(self, sweep_env, monkeypatch):
         _, connection, deleted = sweep_env
