@@ -1,21 +1,12 @@
 """
 tests/test_household_budget.py — Orçamento Doméstico (método dos potes).
 
-Cobre `db/household_budget.py` e as rotas `/household-budget/...`:
-
-- seed lazy dos 6 percentuais default (soma 100) na 1ª leitura;
-- save_config: rejeita soma ≠ 100, bucket desconhecido, pct fora de 0–100;
-  persiste quando válido; é tudo-ou-nada (config inválida não suja a anterior);
-- renda do mês: computada (soma de receitas) × override manual × limpeza do
-  override; amount < 0 → RENDA_INVALIDA sem erro vindo do banco;
-- status: gasto por pote via CATEGORY_BUCKET (launch + cartão), movimentos
-  internos excluídos EXCETO aporte (investimento_aporte conta em Liberdade
-  financeira mesmo com is_internal_movement=true), categoria sem mapeamento
-  cai no fallback 'conforto';
-- budget_amount = renda × pct/100; used_pct=None quando a renda é 0;
-- validação de month ('2026-13', 'abc', '09-2026' rejeitados);
-- rotas: 403 pro_required pra Free, 200 pra Pro, PUT income com amount null
-  limpa o override pelo HTTP de verdade.
+Cobre `db/household_budget.py` e as rotas `/household-budget/...`: seed lazy
+dos defaults (soma 100); save_config (validações + tudo-ou-nada); renda
+computada × override × limpeza e RENDA_INVALIDA; gasto por pote (launch +
+cartão, interno excluído EXCETO aporte, fallback 'conforto'); budget_amount e
+used_pct (None com renda 0); validação de month; rotas 403 Free / 200 Pro /
+PUT income com amount null pelo HTTP de verdade.
 """
 from __future__ import annotations
 
@@ -298,20 +289,15 @@ def test_rota_income_override_e_amount_null_limpa(user_id):
     _receita(user_id, 5000.0)
     client, headers = _cliente(user_id)
     mes = _mes_atual()
+    url = f"/household-budget/{user_id}/income"
 
-    r = client.put(
-        f"/household-budget/{user_id}/income",
-        json={"month": mes, "amount": 9000.0}, headers=headers,
-    )
+    r = client.put(url, json={"month": mes, "amount": 9000.0}, headers=headers)
     assert r.status_code == 200, r.text
     assert client.get(f"/household-budget/{user_id}/status?month={mes}").json()[
         "income"
     ] == {"amount": 9000.0, "source": "override"}
 
-    r = client.put(
-        f"/household-budget/{user_id}/income",
-        json={"month": mes, "amount": None}, headers=headers,
-    )
+    r = client.put(url, json={"month": mes, "amount": None}, headers=headers)
     assert r.status_code == 200, r.text
     assert client.get(f"/household-budget/{user_id}/status?month={mes}").json()[
         "income"
@@ -344,19 +330,14 @@ def test_rota_mes_invalido_400(user_id):
 def test_rota_config_valida_e_soma_invalida(user_id):
     promote_to_pro(user_id)
     client, headers = _cliente(user_id)
+    url = f"/household-budget/{user_id}/config"
 
     boa = {b["key"]: float(b["default_pct"]) for b in BUCKETS}
-    r = client.put(
-        f"/household-budget/{user_id}/config",
-        json={"buckets": boa}, headers=headers,
-    )
+    r = client.put(url, json={"buckets": boa}, headers=headers)
     assert r.status_code == 200, r.text
 
     ruim = dict(boa, custos_fixos=60.0)  # soma 105
-    r = client.put(
-        f"/household-budget/{user_id}/config",
-        json={"buckets": ruim}, headers=headers,
-    )
+    r = client.put(url, json={"buckets": ruim}, headers=headers)
     assert r.status_code == 400, r.text
     # a config anterior continua intacta
     r = client.get(f"/household-budget/{user_id}/status")

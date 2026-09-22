@@ -1,32 +1,18 @@
 """
 db/household_budget.py — Orçamento Doméstico (método dos potes).
 
-Modelo SEPARADO de `db/budgets.py` (category_budgets) de propósito: lá o limite
-é um valor absoluto por categoria; aqui é um PERCENTUAL da renda do mês por pote
-(Custos fixos, Conforto, Metas, Prazeres, Liberdade financeira, Conhecimento) —
-a aba "Orçamento Doméstico" do dashboard. Os dois conceitos convivem sem se
-tocar.
+Modelo SEPARADO de `db/budgets.py` de propósito: lá o limite é valor absoluto
+por categoria; aqui é PERCENTUAL da renda do mês por pote. Decisões:
 
-Decisões registradas:
-
-- Percentuais são GLOBAIS por usuário (`household_budget_config`); só a renda
-  tem override por mês (`household_budget_income`, chave 'YYYY-MM').
-- Os 6 potes são fixos; o usuário edita só os percentuais. Defaults inspirados
-  no método dos potes de T. Harv Eker, adaptados aos 6 potes do PigBank.
-- Mapeamento categoria → pote é fixo (`CATEGORY_BUCKET`). Categoria custom/sem
-  mapeamento cai em `DEFAULT_BUCKET = 'conforto'` — consequência conhecida e
-  aceita na V1 (mapeamento editável é melhoria futura, fora de escopo).
-- EXCEÇÃO DE MOVIMENTO INTERNO: aportes (`investimento_aporte`) são gravados
-  como `is_internal_movement = true` (ver comentário em db/accounts.py sobre
-  "categoria de movimento interno (pagamento_fatura, aporte)"). Na query de
-  gasto daqui eles ENTRAM mesmo assim — no método dos potes o aporte É a
-  alocação do pote Liberdade financeira; sem a exceção o pote ficaria sempre
-  em R$ 0. `investimento_resgate` continua fora (é retorno, não alocação).
-- Gasto do mês segue o mesmo critério de `get_budgets_status_for_month`
-  (db/budgets.py): launches despesa por `criado_em` + credit_transactions pela
-  fatura cujo `period_end` cai no mês, categoria casada via `cat_key_sql`.
-- `save_config` é tudo-ou-nada: valida as 6 chaves, a faixa 0–100 e a soma 100
-  ANTES de escrever, e faz o upsert das 6 rows numa única transação.
+- Percentuais globais por usuário; só a renda tem override por mês ('YYYY-MM').
+- 6 potes fixos, defaults inspirados no método de T. Harv Eker; mapeamento
+  categoria → pote fixo (`CATEGORY_BUCKET`), sem mapeamento cai em 'conforto'.
+- EXCEÇÃO: aportes são `is_internal_movement = true` (ver db/accounts.py), mas
+  ENTRAM no gasto daqui — o aporte É a alocação do pote Liberdade financeira;
+  sem a exceção o pote ficaria sempre em R$ 0. Resgate continua fora.
+- Gasto do mês = critério de `get_budgets_status_for_month` (launches por
+  criado_em + credit_transactions pela fatura do mês, `cat_key_sql`).
+- `save_config` é tudo-ou-nada: valida ANTES, upsert das 6 rows numa transação.
 """
 from __future__ import annotations
 
@@ -42,8 +28,7 @@ from .users import ensure_user
 
 
 # ─── Potes ───────────────────────────────────────────────────────────────────
-# Ordem de exibição = ordem da aba. Cores da referência visual (print do
-# Orçamento Doméstico): azul claro, menta, amarelo, rosa, azul, laranja.
+# Ordem de exibição = ordem da aba; cores da referência visual do produto.
 BUCKETS: list[dict[str, Any]] = [
     {"key": "custos_fixos",          "label": "Custos fixos",          "color": "#7dd3fc", "default_pct": 55},
     {"key": "conforto",              "label": "Conforto",              "color": "#6ee7b7", "default_pct": 5},
@@ -54,12 +39,10 @@ BUCKETS: list[dict[str, Any]] = [
 ]
 BUCKET_KEYS: set[str] = {b["key"] for b in BUCKETS}
 
-# Mapeamento fixo categoria canônica → pote (semente: db/categories.py
-# SYSTEM_CATEGORIES_SEED). Categoria fora deste mapa (custom, 'sem categoria')
-# cai em DEFAULT_BUCKET. As chaves são NORMALIZADAS na montagem do dict (lower
-# + sem acento, mesma tabela do `cat_key_sql` em db/connection.py) porque o
+# Mapeamento fixo categoria canônica → pote. As chaves são NORMALIZADAS na
+# montagem do dict (lower + sem acento, mesma tabela do `cat_key_sql`) porque o
 # gasto chega agregado por `cat_key_sql` — sem isso 'educação' nunca casava com
-# a chave 'educacao' devolvida pela query e caía no fallback (medido).
+# a chave 'educacao' da query e caía no fallback (medido).
 _CATEGORY_BUCKET_DISPLAY: dict[str, str] = {
     "alimentação":         "custos_fixos",
     "mercado":             "custos_fixos",
@@ -216,11 +199,9 @@ def clear_income_override(user_id: int, month: str) -> None:
 
 
 def get_monthly_income(user_id: int, month: str | None = None) -> tuple[float, str]:
-    """Renda do mês → (amount, source): override se existir; senão a computada.
-
-    A computada soma `launches` de receita do mês excluindo movimentos internos
-    — mesmo critério do `monthly_income` de `get_financial_data` no dashboard,
-    pra os dois números baterem.
+    """Renda do mês → (amount, source): override se existir; senão a computada
+    (soma de `launches` de receita do mês sem movimentos internos — mesmo
+    critério do `monthly_income` do dashboard, pra os dois números baterem).
     """
     ensure_user(user_id)
     month = _validate_month(month) if month else _current_month()
@@ -298,20 +279,11 @@ def _spent_by_bucket(user_id: int, year: int, mon: int) -> dict[str, float]:
 def get_household_budget_status(
     user_id: int, month: str | None = None
 ) -> dict[str, Any]:
-    """Status do Orçamento Doméstico no mês: por pote, quanto da renda cabe ao
-    pote vs quanto já foi gasto nele.
+    """Status do mês: por pote, quanto da renda cabe a ele vs quanto já se gastou.
 
-    Retorna:
-      {
-        "month": "YYYY-MM",
-        "income": {"amount": 5000.0, "source": "override"|"computed"},
-        "buckets": [
-          {"key", "label", "color", "pct", "budget_amount", "spent",
-           "remaining", "used_pct"},  # used_pct=None se budget_amount == 0
-          ...
-        ],
-        "totals": {"spent", "budget_amount", "remaining", "used_pct"}
-      }
+    Retorna {"month", "income": {amount, source}, "buckets": [{key, label,
+    color, pct, budget_amount, spent, remaining, used_pct}], "totals": {spent,
+    budget_amount, remaining, used_pct}} — used_pct=None se budget_amount == 0.
     """
     ensure_user(user_id)
     month = _validate_month(month) if month else _current_month()
