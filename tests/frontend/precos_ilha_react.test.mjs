@@ -838,8 +838,9 @@ for (const [atrasoBundle, largura] of [[0, 1280], [1200, 1280], [1200, 390]]) {
         await pagina.waitForLoadState("load");
         assert.equal(await pagina.evaluate(() => window.__noDoServidor.isConnected), false);
         await pagina.$eval(alvo, (b) => b.click());
-        // O botão equivalente na tabela também não pode duplicar a operação.
-        await pagina.$eval('.cmp-table [data-plan-btn="pro"]', (b) => b.click());
+        // O botão equivalente na tabela (ilha #cmp-v2) também não pode
+        // duplicar a operação.
+        await pagina.$eval('#cmp-v2 [data-plan-btn="pro"]', (b) => b.click());
         await pagina.waitForTimeout(100);
         assert.equal(posts, 1, "o cancelamento foi reenviado durante a mesma operação");
         liberar();
@@ -854,7 +855,7 @@ for (const [atrasoBundle, largura] of [[0, 1280], [1200, 1280], [1200, 390]]) {
             await pagina.locator("#cycle-annual").click();
             assert.equal(await pagina.locator("#cycle-annual").getAttribute("aria-checked"),
               ciclo === "annual" ? "true" : "false", `o switch não entrou no ciclo ${ciclo}`);
-            for (const sel of [alvo, '.cmp-table [data-plan-btn="pro"]']) {
+            for (const sel of [alvo, '#cmp-v2 [data-plan-btn="pro"]']) {
               assert.equal(await pagina.locator(sel).innerText(), "Trocar pro Pro");
               await pagina.$eval(sel, (b) => b.click());
               assert.equal(await pagina.locator("#chg-overlay").isVisible(), true,

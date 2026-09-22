@@ -1,6 +1,8 @@
 import { resolve } from "node:path";
 
 import react from "@vitejs/plugin-react";
+import tailwindcss from "tailwindcss";
+import autoprefixer from "autoprefixer";
 import { defineConfig } from "vite";
 
 /**
@@ -20,6 +22,22 @@ import { defineConfig } from "vite";
  */
 export default defineConfig({
   plugins: [react()],
+  // O alias `@` vale para os DOIS bundles (o do chat redeclara o mesmo no
+  // merge): os blocos shadcn em `src/components/ui` importam `@/lib/utils`.
+  resolve: { alias: { "@": resolve(import.meta.dirname, "src") } },
+  // Tailwind só no bundle de preços, com o config próprio dele (sem prefixo,
+  // escopo `#cmp-v2` — ver tailwind.precos.config.js). O build do chat NÃO
+  // herda isto: o vite.chat.config.ts sobrescreve `css` depois do merge,
+  // porque o mergeConfig CONCATENA arrays de plugins e dois tailwinds na
+  // mesma folha quebrariam os dois bundles.
+  css: {
+    postcss: {
+      plugins: [
+        tailwindcss({ config: resolve(import.meta.dirname, "tailwind.precos.config.js") }),
+        autoprefixer(),
+      ],
+    },
+  },
   build: {
     // `safari14` nos DOIS, e não o default (`ios16.4`) em nenhum: este
     // repositório suporta iOS 14 explicitamente
