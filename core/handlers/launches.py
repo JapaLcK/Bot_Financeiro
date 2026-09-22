@@ -1152,13 +1152,11 @@ def add_from_entities(
             "learn_from_inference falhou depois do commit (user %s, lancamento %s)",
             user_id, launch_id)
 
-    # Reconciliação reversa (Open Finance): se o banco já importou esse gasto, funde
-    # com o lançamento que o usuário acabou de fazer — não duplica no "sobrou".
-    if not is_int:
-        try:
-            db.reconcile_manual_launch(user_id, launch_id)
-        except Exception:
-            pass
+    # Lançamento manual é dinheiro em espécie (Carteira Piggy): a FUSÃO
+    # SILENCIOSA com transações do Open Finance foi removida (decisão
+    # "lançamentos manuais exclusivos para dinheiro"). A reconciliação que
+    # permanece é só a confirmável pelo usuário, criada no importador
+    # ('ask' → pending → confirm/reject) — nada roda aqui.
 
     # Detecção "essa despesa se repete → sugere gasto fixo". Só para despesa
     # real (não movimentação interna). A oferta divide a linha de pending_actions
@@ -1231,9 +1229,19 @@ def add_from_entities(
         from core.services.plan_service import consolidated_balance_enabled
         from core.services.funding import aviso_conferir
         cb = db.get_consolidated_balance(user_id)
-        if int(cb.get("of_bank_count") or 0) > 0 and consolidated_balance_enabled(user_id):
-            linha_saldo = f"💰 Saldo total: {fmt_brl(float(cb['consolidated'] or 0))}"
-            linha_aviso = aviso_conferir(cb["consolidated"], cb.get("reconciliation"))
+        if int(cb.get("of_bank_count") or 0) > 0:
+            # Lançamento manual é dinheiro em espécie (decisão "lançamentos
+            # manuais exclusivos para dinheiro"): com banco conectado o saldo
+            # da linha é a Carteira Piggy, NOMEADA — o mesmo recorte do /saldo
+            # (cb['manual']), relido agora.
+            linha_saldo = (
+                f"👛 Saldo (Carteira Piggy): {fmt_brl(float(cb['manual'] or 0))}"
+            )
+            linha_aviso = aviso_conferir(cb["manual"], cb.get("reconciliation"))
+            if consolidated_balance_enabled(user_id):
+                linha_saldo += (
+                    f"\n💰 Saldo total: {fmt_brl(float(cb['consolidated'] or 0))}"
+                )
         else:
             # MESMA string de hoje, número RELIDO: o gate desligado congela o
             # formato, não autoriza imprimir a Carteira de antes da fusão.
@@ -1268,7 +1276,7 @@ def add_from_entities(
     if recurring_offer:
         resposta += (
             f"\n\n💡 Você já lançou *{recurring_offer['name']}* de {fmt_brl(valor)} "
-            f"em outro mês. Quer marcar como *gasto fixo* (a Piggy lança sozinha "
+            f"em outro mês. Quer marcar como *gasto fixo* (o Piggy lança sozinho "
             f"todo mês)? Responda *sim* ou *não*."
         )
 

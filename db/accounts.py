@@ -60,6 +60,7 @@ def add_launch_and_update_balance(
     criado_em: datetime | None = None,
     is_internal_movement: bool = False,
     extra_efeitos: dict | None = None,
+    apply_delta: bool = True,
 ):
     """
     Lança em launches e atualiza saldo em accounts na mesma transação.
@@ -68,6 +69,12 @@ def add_launch_and_update_balance(
     `extra_efeitos` é mesclado dentro de `efeitos` jsonb. Use pra que
     `delete_launch_and_rollback` consiga reverter side-effects além do
     saldo (ex: `bill_id` pra pagamento de fatura).
+
+    `apply_delta=False` grava o lançamento com `delta_conta: 0` SEM mover
+    `accounts.balance` — o dinheiro já moveu fora do Pig (ex.: usuário com
+    Open Finance: pagamento de fatura e débito de gasto fixo em conta já
+    constam no extrato bancário; debitar a Carteira Piggy esvaziaria o
+    dinheiro em espécie e contaria o gasto duas vezes).
     """
     ensure_user(user_id)
 
@@ -78,6 +85,9 @@ def add_launch_and_update_balance(
         delta = +v
     else:
         raise ValueError(f"tipo inválido: {tipo}")
+
+    if not apply_delta:
+        delta = Decimal(0)
 
     if criado_em is None:
         criado_em = datetime.now(_tz())
@@ -1534,8 +1544,11 @@ def delete_launch_and_rollback(user_id: int, launch_id: int, *,
     recusar para sempre não perde dinheiro; seguir perde (R$300 em 5 toques de
     produto, medido). Nas portas do Open Finance que chamam isto dentro de
     `except Exception: pass` a recusa é SILÊNCIO — `reconcile_manual_launch`
-    segue e marca `auto_merged` mesmo com o delete recusado. Consertar isso é o
-    PR dos `except`, não este.
+    segue e marca `auto_merged` mesmo com o delete recusado. (Os escritores do
+    lançamento manual — rota do dashboard, handler do bot, entrada rápida — não
+    chamam mais essa função desde a decisão "lançamentos manuais exclusivos
+    para dinheiro" de 2026-09; o caminho silencioso ficou inalcançável de
+    fato.) Consertar isso é o PR dos `except`, não este.
 
     `escopo_conta_corrente=True` — usado SÓ pelo "apagar tudo" — recusa também
     o que mexe em caixinha/investimento (`_EFEITOS_FORA_DO_APAGAR_TUDO`).

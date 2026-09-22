@@ -1,8 +1,11 @@
 """Desfazer uma fusão devolve o gasto à Carteira e a sombra do banco à timeline.
 
-Sentido A: o manual veio antes e o import fundiu. Sentido B: o banco veio antes
-e o manual novo fundiu (`reconcile_manual_launch` apagou a sombra). Nos dois o
-cenário é "gastei 50 no mercado" × MERCADO -50 com o banco em 1000 → 950.
+Sentido A: o manual veio antes, o import propôs o casamento e o usuário
+confirmou (`confirm_reconciliation` apagou a sombra). CONTRATO NOVO: o sentido B
+(fusão reversa silenciosa, `reconcile_manual_launch`) foi removido — um
+lançamento manual criado depois da importação OF permanece SEPARADO, coberto
+pelo teste de separação explícita abaixo. No sentido A o cenário é "gastei 50
+no mercado" × MERCADO -50 com o banco em 1000 → 950.
 """
 from __future__ import annotations
 
@@ -12,8 +15,8 @@ import db
 from utils_date import today_tz
 
 from tests._fusao_of_helpers import (  # noqa: F401 (uid_pro/ia_fora são fixtures)
-    conecta_banco, consolidado, ia_fora, manda, saldo_bruto, sincroniza, tx, uid_pro,
-    ultimo_launch,
+    conecta_banco, consolidado, ia_fora, manda, of_tx_pendente, saldo_bruto,
+    sincroniza, tx, uid_pro, ultimo_launch,
 )
 from tests.test_reconciliacao_resolver import _estado, _gasto_do_mes, _q, pendencia
 
@@ -35,21 +38,15 @@ def funde_a(uid):
     conexao = conecta_banco(uid, "1000.00")
     manda(uid, "gastei 50 no mercado")
     sincroniza(conexao, uid, "950.00", [tx(uid, "-50.00", today_tz(), "MERCADO")])
-    assert db.import_open_finance_launches(uid, conexao)["auto_merged"] == 1
-    return conexao
-
-
-def funde_b(uid):
-    conexao = conecta_banco(uid, "950.00", [tx(uid, "-50.00", today_tz(), "MERCADO")])
-    assert db.import_open_finance_launches(uid, conexao)["inserted"] == 1
-    manda(uid, "gastei 50 no mercado")
-    assert _sombras(uid) == 0, "a fusão reversa não aconteceu"
+    rep = db.import_open_finance_launches(uid, conexao)
+    assert rep["pending"] == 1 and rep["auto_merged"] == 0, rep
+    db.confirm_reconciliation(uid, of_tx_pendente(uid))
     return conexao
 
 
 def _desfaz_e_confere(uid, conexao):
     of_tx = _of_tx(uid)
-    assert _estado(of_tx)["reconciliation_status"] == "auto_merged"
+    assert _estado(of_tx)["reconciliation_status"] == "confirmed"
     assert consolidado(uid) == (950.0, 0.0)
     assert _gasto_do_mes(uid) == 50.0
 
@@ -77,8 +74,36 @@ def test_desfazer_fusao_do_import(uid_pro, ia_fora):
     _desfaz_e_confere(uid_pro, funde_a(uid_pro))
 
 
-def test_desfazer_fusao_reversa(uid_pro, ia_fora):
-    _desfaz_e_confere(uid_pro, funde_b(uid_pro))
+def test_manual_criado_depois_do_import_permance_separado_e_o_delete_nao_toca_a_tx_of(uid_pro, ia_fora):
+    """CONTRATO NOVO (decisão "Lançamentos Manuais Exclusivos para Dinheiro"):
+    substitui o antigo `test_desfazer_fusao_reversa`. A fusão reversa silenciosa
+    (`reconcile_manual_launch`) saiu dos escritores — um lançamento manual
+    criado depois da importação OF NUNCA funde sozinho.
+
+    O que vale agora é a separação explícita: a tx OF permanece 'imported' na
+    PRÓPRIA sombra (não é revinculada no manual), o manual fica lançamento
+    separado debitando a Carteira, e desfazer (apagar) o manual devolve a
+    Carteira sem tocar na tx OF nem na sombra."""
+    conexao = conecta_banco(uid_pro, "950.00", [tx(uid_pro, "-50.00", today_tz(), "MERCADO")])
+    assert db.import_open_finance_launches(uid_pro, conexao)["inserted"] == 1
+    assert _sombras(uid_pro) == 1
+    assert consolidado(uid_pro) == (950.0, 0.0)
+
+    # o dono lança o MESMO gasto à mão depois: nada funde em silêncio
+    manda(uid_pro, "gastei 50 no mercado")
+    manual_id = ultimo_launch(uid_pro)
+
+    # a sombra OF continua viva e a tx OF NÃO foi revinculada no manual
+    assert _sombras(uid_pro) == 1
+    assert _estado(_of_tx(uid_pro))["reconciliation_status"] == "imported"
+    # sombra (delta 0) + manual (-50): o consolidado some os dois
+    assert consolidado(uid_pro) == (900.0, -50.0)
+
+    # desfazer o manual: a Carteira volta, a tx OF e a sombra intactas
+    db.delete_launch_and_rollback(uid_pro, manual_id)
+    assert consolidado(uid_pro) == (950.0, 0.0)
+    assert _sombras(uid_pro) == 1
+    assert _estado(_of_tx(uid_pro))["reconciliation_status"] == "imported"
 
 
 def test_desfazer_confirmada(uid_pro, ia_fora):
@@ -129,8 +154,10 @@ def test_fusao_historica_credito_em_conta_fica_intacta(uid_pro, ia_fora):
 
 
 def test_desfazer_reaproveita_sombra_que_sobreviveu(uid_pro, ia_fora):
-    """A fusão reversa engole a recusa do delete (`except: pass`) e pode deixar a
-    sombra viva com a transação já `auto_merged`. Desfazer reusa essa sombra."""
+    """Dado histórico: uma sombra pode sobreviver com a transação já fundida (a
+    antiga fusão reversa engolia a recusa do delete, `except: pass`). Desfazer
+    reusa essa sombra em vez de criar outra — o cenário agora chega na fusão
+    por confirmação e semeia a sobrevivente com o mesmo `external_id`."""
     funde_a(uid_pro)
     of_tx = _of_tx(uid_pro)
     sobrevivente = _q("""insert into launches(user_id, tipo, valor, categoria, alvo, criado_em, efeitos,
@@ -147,10 +174,13 @@ def test_desfazer_reaproveita_sombra_que_sobreviveu(uid_pro, ia_fora):
 
 
 def test_fusao_antiga_sem_match_aparece_e_desfaz(uid_pro, ia_fora):
-    """Dado antigo: `auto_merged` com imported = X e `match_launch_id` nulo."""
+    """Dado antigo: `auto_merged` com imported = X e `match_launch_id` nulo.
+    `funde_a` chega na fusão via confirmação (status 'confirmed'); o update
+    regride o status para simular a linha legítima de dados antigos."""
     funde_a(uid_pro)
     of_tx = _of_tx(uid_pro)
-    _q("update open_finance_transactions set match_launch_id=null where id=%s returning id", (of_tx,))
+    _q("update open_finance_transactions set match_launch_id=null, "
+       "reconciliation_status='auto_merged' where id=%s returning id", (of_tx,))
 
     assert [r["of_tx_id"] for r in db.list_reconciliations(uid_pro)] == [of_tx]
     assert db.undo_reconciliation(uid_pro, of_tx)["changed"] is True

@@ -198,8 +198,9 @@
     s.busy = true;
     s.error = '';
     if (!reply) {
-      s.messages.push({ id: `agent-${++messageSequence}`, role: 'user', content: text });
-      reply = { id: `agent-${++messageSequence}`, role: 'assistant', question: text };
+      const createdAt = new Date().toISOString();
+      s.messages.push({ id: `agent-${++messageSequence}`, role: 'user', content: text, createdAt });
+      reply = { id: `agent-${++messageSequence}`, role: 'assistant', question: text, createdAt };
       s.messages.push(reply);
     }
     Object.assign(reply, { state: 'pending', content: 'Preparando a resposta…', errorCode: '', redirects: [] });

@@ -57,44 +57,78 @@
   <button class="sidenav-item active" type="button" data-nav="overview" onclick="navigateTo('overview')">
     <span class="sn-icon" style="color:#3B82F6"><i class="ph ph-chart-bar" aria-hidden="true"></i></span><span class="sn-label">Visão Geral</span>
   </button>
-  <button class="sidenav-item" type="button" data-nav="analytics" onclick="navigateTo('analytics')">
-    <span class="sn-icon" style="color:#06B6D4"><i class="ph ph-chart-line-up" aria-hidden="true"></i></span><span class="sn-label">Análises</span>
-  </button>
-  <button class="sidenav-item" type="button" data-nav="history" onclick="navigateTo('history')">
-    <span class="sn-icon" style="color:#94A3B8"><i class="ph ph-clock-counter-clockwise" aria-hidden="true"></i></span><span class="sn-label">Histórico</span>
-  </button>
   <button class="sidenav-item" type="button" data-nav="agentes" onclick="navigateTo('agentes')">
     <span class="sn-icon" style="color:#FF2D8E"><i class="ph ph-piggy-bank" aria-hidden="true"></i></span><span class="sn-label">Agentes</span><span class="sn-tag new">novo</span>
   </button>
 
-  <div class="sidenav-section">Planejamento</div>
-  <button class="sidenav-item" type="button" data-nav="fixed" onclick="navigateTo('fixed')">
-    <span class="sn-icon" style="color:#14B8A6"><i class="ph ph-arrows-clockwise" aria-hidden="true"></i></span><span class="sn-label">Recorrentes</span>
-  </button>
-  <button class="sidenav-item" type="button" data-nav="budgets" onclick="navigateTo('budgets')">
-    <span class="sn-icon" style="color:#F59E0B"><i class="ph ph-note-pencil" aria-hidden="true"></i></span><span class="sn-label">Orçamentos</span><span class="sn-tag new">novo</span>
-  </button>
-  <button class="sidenav-item" type="button" data-nav="goals" onclick="navigateTo('goals')">
-    <span class="sn-icon" style="color:#10B981"><i class="ph ph-target" aria-hidden="true"></i></span><span class="sn-label">Caixinhas e metas</span><span class="sn-tag new">novo</span>
-  </button>
-  <button class="sidenav-item" type="button" data-nav="categories" onclick="navigateTo('categories')">
-    <span class="sn-icon" style="color:#A855F7"><i class="ph ph-tag" aria-hidden="true"></i></span><span class="sn-label">Categorias</span>
-  </button>
+  <!-- Menus colapsáveis: só Início/Visão Geral/Agentes ficam sempre visíveis.
+       Estado persiste em localStorage e o menu da view ativa abre sozinho
+       (toggleSidenavGroup/initSidenavGroups em dashboard.js). -->
+  <div class="sidenav-group" data-group="acompanhamento">
+    <button class="sidenav-item sidenav-group-toggle" type="button" aria-expanded="false" aria-controls="sn-sub-acompanhamento" onclick="toggleSidenavGroup('acompanhamento')">
+      <span class="sn-icon" style="color:#06B6D4"><i class="ph ph-chart-line-up" aria-hidden="true"></i></span><span class="sn-label">Acompanhamento</span><i class="ph ph-caret-right sn-caret" aria-hidden="true"></i>
+    </button>
+    <div class="sidenav-subitems" id="sn-sub-acompanhamento">
+      <button class="sidenav-item" type="button" data-nav="analytics" onclick="navigateTo('analytics')">
+        <span class="sn-icon" style="color:#06B6D4"><i class="ph ph-chart-line-up" aria-hidden="true"></i></span><span class="sn-label">Análises</span>
+      </button>
+      <button class="sidenav-item" type="button" data-nav="history" onclick="navigateTo('history')">
+        <span class="sn-icon" style="color:#94A3B8"><i class="ph ph-clock-counter-clockwise" aria-hidden="true"></i></span><span class="sn-label">Histórico</span>
+      </button>
+    </div>
+  </div>
 
-  <div class="sidenav-section">Crédito</div>
-  <button class="sidenav-item" type="button" data-nav="installments" onclick="navigateTo('installments')">
-    <span class="sn-icon" style="color:#FB923C"><i class="ph ph-credit-card" aria-hidden="true"></i></span><span class="sn-label">Parcelamentos</span>
-  </button>
-  <button class="sidenav-item" type="button" data-nav="cards" onclick="navigateTo('cards')">
-    <span class="sn-icon" style="color:#6366F1"><i class="ph ph-cards" aria-hidden="true"></i></span><span class="sn-label">Cartões</span><span class="sn-tag new">novo</span>
-  </button>
-  <button class="sidenav-item" type="button" data-nav="investments" data-pro-feature="investments" onclick="navigateTo('investments')">
-    <span class="sn-icon" style="color:#22C55E"><i class="ph ph-chart-line-up" aria-hidden="true"></i></span><span class="sn-label">Investimentos</span><span class="sn-tag">Pro</span>
-  </button>
-  <!-- Só aparece pra quem é afiliado (initAffiliateNav mostra se /api/affiliate/me responder 200) -->
-  <button class="sidenav-item" type="button" data-nav="affiliate" id="sidenav-affiliate" style="display:none" onclick="navigateTo('affiliate')">
-    <span class="sn-icon" style="color:#F43F5E"><i class="ph ph-handshake" aria-hidden="true"></i></span><span class="sn-label">Afiliados</span>
-  </button>
+  <div class="sidenav-group" data-group="planejamento">
+    <button class="sidenav-item sidenav-group-toggle" type="button" aria-expanded="false" aria-controls="sn-sub-planejamento" onclick="toggleSidenavGroup('planejamento')">
+      <span class="sn-icon" style="color:#14B8A6"><i class="ph ph-clipboard-text" aria-hidden="true"></i></span><span class="sn-label">Planejamento</span><i class="ph ph-caret-right sn-caret" aria-hidden="true"></i>
+    </button>
+    <div class="sidenav-subitems" id="sn-sub-planejamento">
+      <button class="sidenav-item" type="button" data-nav="fixed" onclick="navigateTo('fixed')">
+        <span class="sn-icon" style="color:#14B8A6"><i class="ph ph-arrows-clockwise" aria-hidden="true"></i></span><span class="sn-label">Recorrentes</span>
+      </button>
+      <button class="sidenav-item" type="button" data-nav="goals" onclick="navigateTo('goals')">
+        <span class="sn-icon" style="color:#10B981"><i class="ph ph-target" aria-hidden="true"></i></span><span class="sn-label">Caixinhas e metas</span><span class="sn-tag new">novo</span>
+      </button>
+      <button class="sidenav-item" type="button" data-nav="categories" onclick="navigateTo('categories')">
+        <span class="sn-icon" style="color:#A855F7"><i class="ph ph-tag" aria-hidden="true"></i></span><span class="sn-label">Categorias</span>
+      </button>
+    </div>
+  </div>
+
+  <div class="sidenav-group" data-group="ferramentas">
+    <button class="sidenav-item sidenav-group-toggle" type="button" aria-expanded="false" aria-controls="sn-sub-ferramentas" onclick="toggleSidenavGroup('ferramentas')">
+      <span class="sn-icon" style="color:#F59E0B"><i class="ph ph-wrench" aria-hidden="true"></i></span><span class="sn-label">Ferramentas</span><i class="ph ph-caret-right sn-caret" aria-hidden="true"></i>
+    </button>
+    <div class="sidenav-subitems" id="sn-sub-ferramentas">
+      <button class="sidenav-item" type="button" data-nav="budgets" onclick="navigateTo('budgets')">
+        <span class="sn-icon" style="color:#F59E0B"><i class="ph ph-note-pencil" aria-hidden="true"></i></span><span class="sn-label">Orçamentos</span><span class="sn-tag new">novo</span>
+      </button>
+      <button class="sidenav-item" type="button" data-nav="orcamento-domestico" data-pro-feature="household_budget" onclick="navigateTo('orcamento-domestico')">
+        <span class="sn-icon" style="color:#38BDF8"><i class="ph ph-bank" aria-hidden="true"></i></span><span class="sn-label">Orçamento Doméstico</span><span class="sn-tag">Pro</span>
+      </button>
+      <button class="sidenav-item" type="button" data-nav="investments" data-pro-feature="investments" onclick="navigateTo('investments')">
+        <span class="sn-icon" style="color:#22C55E"><i class="ph ph-chart-line-up" aria-hidden="true"></i></span><span class="sn-label">Investimentos</span><span class="sn-tag">Pro</span>
+      </button>
+      <!-- Só aparece pra quem é afiliado (initAffiliateNav mostra se /api/affiliate/me responder 200) -->
+      <button class="sidenav-item" type="button" data-nav="affiliate" id="sidenav-affiliate" style="display:none" onclick="navigateTo('affiliate')">
+        <span class="sn-icon" style="color:#F43F5E"><i class="ph ph-handshake" aria-hidden="true"></i></span><span class="sn-label">Afiliados</span>
+      </button>
+    </div>
+  </div>
+
+  <div class="sidenav-group" data-group="credito">
+    <button class="sidenav-item sidenav-group-toggle" type="button" aria-expanded="false" aria-controls="sn-sub-credito" onclick="toggleSidenavGroup('credito')">
+      <span class="sn-icon" style="color:#FB923C"><i class="ph ph-credit-card" aria-hidden="true"></i></span><span class="sn-label">Crédito</span><i class="ph ph-caret-right sn-caret" aria-hidden="true"></i>
+    </button>
+    <div class="sidenav-subitems" id="sn-sub-credito">
+      <button class="sidenav-item" type="button" data-nav="installments" onclick="navigateTo('installments')">
+        <span class="sn-icon" style="color:#FB923C"><i class="ph ph-credit-card" aria-hidden="true"></i></span><span class="sn-label">Parcelamentos</span>
+      </button>
+      <button class="sidenav-item" type="button" data-nav="cards" onclick="navigateTo('cards')">
+        <span class="sn-icon" style="color:#6366F1"><i class="ph ph-cards" aria-hidden="true"></i></span><span class="sn-label">Cartões</span><span class="sn-tag new">novo</span>
+      </button>
+    </div>
+  </div>
 
   <div class="sidenav-footer">
     <div class="sidenav-section" style="padding-top:0">Conta</div>
@@ -546,6 +580,50 @@
     </div>
   </div>
 
+  <div id="orcamento-domestico-view" class="dash-view">
+    <div class="hb-header">
+      <div>
+        <p class="section-title" style="margin:0">Orçamento Doméstico</p>
+        <p class="hb-subtitle">Controle seu orçamento doméstico com base nas suas metas e rendimentos.</p>
+      </div>
+      <div class="hb-controls">
+        <div class="month-nav">
+          <button class="mbtn" id="hb-prev" onclick="hbChangeMonth(-1)" aria-label="Mês anterior">‹</button>
+          <span id="hb-month-label">—</span>
+          <button class="mbtn" id="hb-next" onclick="hbChangeMonth(1)" aria-label="Próximo mês">›</button>
+        </div>
+        <div class="hb-income">
+          <label for="hb-income-input">Renda do mês</label>
+          <div class="hb-income-row">
+            <input type="number" id="hb-income-input" min="0" step="0.01" placeholder="0,00"
+                   onkeydown="if(event.key==='Enter'){event.preventDefault();this.blur();}"
+                   onblur="saveHouseholdIncome()" />
+            <span id="hb-income-hint"></span>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <div class="hb-grid">
+      <div class="mock-card" id="hb-gastos">
+        <h3>Gastos</h3>
+        <div class="chart-wrap donut hb-donut-wrap"><canvas id="hb-donut"></canvas></div>
+        <div id="hb-legend" class="hb-legend"></div>
+      </div>
+      <div class="mock-card" id="hb-resumo">
+        <h3>Resumo</h3>
+        <div id="hb-resumo-body"></div>
+      </div>
+      <div class="mock-card" id="hb-metas">
+        <div class="hb-metas-head">
+          <h3 style="margin:0">Metas</h3>
+          <button class="mock-cta outline" id="hb-metas-edit-btn" onclick="openHouseholdBudgetModal()">Editar</button>
+        </div>
+        <div id="hb-metas-list"></div>
+      </div>
+    </div>
+  </div>
+
   <div id="goals-view" class="dash-view">
     <div class="mock-header">
       <p class="section-title" style="margin:0">Caixinhas e metas</p>
@@ -898,6 +976,21 @@
       <button class="btn-cancel" onclick="closeBudget()">Cancelar</button>
       <button class="btn-save"   onclick="saveBudget()">Salvar</button>
     </div>
+  </div>
+</div>
+
+<div class="overlay" id="hb-metas-overlay" onclick="if(event.target===this) closeHouseholdBudgetModal()">
+  <div class="modal" role="dialog" aria-labelledby="hb-metas-title" aria-modal="true">
+    <h3 id="hb-metas-title">Metas do orçamento</h3>
+    <p class="msub">Distribua 100% da sua renda entre os potes.</p>
+    <form id="hb-metas-form" onsubmit="event.preventDefault(); saveHouseholdBudgetMetas();">
+      <div class="invest-form" id="hb-metas-inputs"></div>
+      <div class="hb-soma" id="hb-metas-soma"></div>
+      <div class="modal-acts" style="margin-top:18px">
+        <button class="btn-cancel" type="button" onclick="closeHouseholdBudgetModal()">Cancelar</button>
+        <button class="btn-save" type="submit" id="hb-metas-save-btn">Salvar</button>
+      </div>
+    </form>
   </div>
 </div>
 

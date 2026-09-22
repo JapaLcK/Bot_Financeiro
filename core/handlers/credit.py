@@ -843,6 +843,20 @@ def add_credit_from_entities(
     card = get_card_by_id(user_id, card_id)
     card_label = card["name"] if card else (card_name_clean or "cartão")
 
+    # Cartão coberto pelo Open Finance COM SYNC ATIVO: as compras chegam pela
+    # importação automática, e lançamento manual duplicaria — o manual agora é
+    # exclusivo de dinheiro em espécie (Carteira Piggy) ou cartão fora do OF.
+    # `open_finance_account_id` sozinho não basta: conexão PAUSED (trial
+    # vencido) ou DELETED mantém o vínculo e para o sync — nesses estados o
+    # cartão não importa nada e a compra manual tem de ser permitida (review
+    # Codex P2).
+    if card and card.get("of_sync_active"):
+        return (
+            f"⚠️ O cartão {card_label} é sincronizado via Open Finance e suas compras são "
+            f"importadas automaticamente. Lançamentos manuais são reservados para dinheiro "
+            f"em espécie (Carteira Piggy) ou cartões não conectados."
+        )
+
     limit_error = _validate_credit_limit_before_purchase(user_id, card_id, float(valor))
     if limit_error is not None:
         return limit_error

@@ -712,8 +712,15 @@ async def pay_bill_route(
                 detail=f"Valor maior que o em aberto. Em aberto: R$ {due:.2f}",
             )
 
-    # Saldo insuficiente bloqueia
-    if balance < amount - 0.005:
+    # Saldo insuficiente bloqueia — mas só no mundo sem Open Finance. Com OF
+    # ativo o pagamento ocorre no banco (já refletido no extrato) e o registro
+    # interno não debita a Carteira Piggy (`pay_bill_amount` grava
+    # `delta_conta: 0`), então exigir saldo na carteira manual bloquearia um
+    # pagamento legítimo.
+    from db import has_open_finance_connections
+
+    tem_of = await asyncio.to_thread(has_open_finance_connections, int(user_id))
+    if not tem_of and balance < amount - 0.005:
         raise HTTPException(
             status_code=400,
             detail=(f"Saldo insuficiente. Saldo atual: {carteira_txt(balance_tela, balance)}, "

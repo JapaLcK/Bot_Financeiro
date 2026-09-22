@@ -15,9 +15,12 @@ A MEDIÇÃO É O CONSOLIDADO: é o número que o dono vê no dashboard e no /sal
 Sem o conserto o caso 1 fecha em 112,88 em vez de 113,88.
 
 Controle negativo (CLAUDE.md §3): `MERGED_WALLET_DELTA_SQL` devolvendo 0 tem de
-deixar vermelhos os casos dos três caminhos de fusão. Controle positivo: o
-lançamento que NÃO funde continua debitando a Carteira e devolvendo o dinheiro
-no delete — sem ele, um conserto que zerasse TUDO passaria.
+deixar vermelhos os casos dos caminhos de fusão (1: import + confirmação;
+2: "ask" + confirmação). Controle positivo: o lançamento que NÃO funde continua
+debitando a Carteira e devolvendo o dinheiro no delete — sem ele, um conserto
+que zerasse TUDO passaria. O caminho 3 fixa o contrato novo: lançamento manual
+criado DEPOIS da importação OF permanece SEPARADO (a fusão reversa saiu dos
+escritores).
 """
 from __future__ import annotations
 
@@ -27,16 +30,17 @@ import db
 from utils_date import today_tz
 
 from tests._fusao_of_helpers import (  # noqa: F401 (uid_pro/ia_fora são fixtures)
-    conecta_banco, consolidado, delta_conta, ia_fora, manda, saldo_bruto,
-    sincroniza, soma_delta_conta, tx, uid_pro, ultimo_launch,
+    conecta_banco, consolidado, delta_conta, ia_fora, manda, of_tx_pendente,
+    saldo_bruto, sincroniza, soma_delta_conta, tx, uid_pro, ultimo_launch,
 )
 
 
-# ── caminho 1: import_open_finance_launches (verdict "auto") ────────────────
+# ── caminho 1: import_open_finance_launches (casamento rebaixado a 'ask') ───
 
 def test_caminho_1_import_devolve_o_debito(uid_pro, ia_fora):
     """Ponta a ponta, com a frase do relato: maiúscula, valor por extenso,
-    nome sem acento."""
+    nome sem acento. O casamento que daria 'auto' é rebaixado a 'ask' (candidato
+    manual) e só funde com a confirmação do usuário."""
     hoje = today_tz()
     conexao = conecta_banco(uid_pro, "114.88")
     assert consolidado(uid_pro) == (114.88, 0.0)
@@ -50,14 +54,15 @@ def test_caminho_1_import_devolve_o_debito(uid_pro, ia_fora):
                [tx(uid_pro, "-1.00", hoje, "PIX ENVIADO BARBARA")])
     rep = db.import_open_finance_launches(uid_pro, conexao)
 
-    assert rep["auto_merged"] == 1, rep
+    assert rep["pending"] == 1 and rep["auto_merged"] == 0, rep
+    db.confirm_reconciliation(uid_pro, of_tx_pendente(uid_pro))
     # sem o conserto: (112.88, -1.0) — o mesmo real contado duas vezes
     assert consolidado(uid_pro) == (113.88, 0.0)
 
 
 def test_caminho_1_depois_de_outro_assunto_na_mesma_conversa(uid_pro, ia_fora):
     """Estado que OUTRO fluxo deixou no banco (CLAUDE.md §3): um gasto sem banco
-    envolvido antes, e só então o que funde."""
+    envolvido antes, e só então o que funde (com confirmação do usuário)."""
     hoje = today_tz()
     conexao = conecta_banco(uid_pro, "114.88")
 
@@ -69,7 +74,8 @@ def test_caminho_1_depois_de_outro_assunto_na_mesma_conversa(uid_pro, ia_fora):
                [tx(uid_pro, "-1.00", hoje, "PIX ENVIADO BARBARA")])
     rep = db.import_open_finance_launches(uid_pro, conexao)
 
-    assert rep["auto_merged"] == 1, rep
+    assert rep["pending"] == 1 and rep["auto_merged"] == 0, rep
+    db.confirm_reconciliation(uid_pro, of_tx_pendente(uid_pro))
     # os 50 do mercado continuam debitados (não fundiram); só o 1 real voltou
     assert consolidado(uid_pro) == (63.88, -50.0)
 
@@ -101,9 +107,18 @@ def test_caminho_2_confirmacao_devolve_o_debito(uid_pro, ia_fora):
         "a correção é de LEITURA: o banco não pode ter mudado"
 
 
-# ── caminho 3: reconcile_manual_launch (manual criado DEPOIS do import) ─────
+# ── caminho 3: manual criado DEPOIS do import NUNCA funde sozinho ───────────
 
-def test_caminho_3_fusao_reversa_devolve_o_debito(uid_pro, ia_fora):
+def test_caminho_3_manual_depois_do_import_permance_separado(uid_pro, ia_fora):
+    """CONTRATO NOVO (decisão "Lançamentos Manuais Exclusivos para Dinheiro"):
+    a fusão reversa (`reconcile_manual_launch`) saiu dos escritores — um
+    lançamento manual criado depois da importação OF NUNCA funde em silêncio.
+
+    A tx OF permanece 'imported' na PRÓPRIA sombra (delta 0) e o manual fica
+    separado, debitando a Carteira: os dois números se somam. Antes do conserto
+    da leitura este cenário era o "caminho 3" da fusão; hoje é o teste da
+    separação explícita — quem quiser fundir, confirma a pendência (caminho 2).
+    """
     hoje = today_tz()
     conexao = conecta_banco(uid_pro, "113.88",
                             [tx(uid_pro, "-1.00", hoje, "PIX ENVIADO BARBARA")])
@@ -111,11 +126,20 @@ def test_caminho_3_fusao_reversa_devolve_o_debito(uid_pro, ia_fora):
     assert rep["inserted"] == 1, rep
     assert consolidado(uid_pro) == (113.88, 0.0)
 
-    # o dono lança o MESMO gasto à mão depois; add_from_entities chama a fusão reversa
+    # o dono lança o MESMO gasto à mão depois: fica SEPARADO, sem fusão reversa
     manda(uid_pro, "Gastei 1 real com a barbara")
+    manual_id = ultimo_launch(uid_pro)
 
-    # sem o conserto: (112.88, -1.0)
-    assert consolidado(uid_pro) == (113.88, 0.0)
+    # sombra OF (delta 0) + manual (-1): a Carteira conta o gasto, o espelho não
+    assert consolidado(uid_pro) == (112.88, -1.0)
+    assert delta_conta(uid_pro, manual_id) == Decimal("-1")
+    with db.connection.get_conn() as conn, conn.cursor() as cur:
+        cur.execute(
+            "select reconciliation_status from open_finance_transactions "
+            "where provider_transaction_id=%s",
+            (f"of-tx-{uid_pro}-1",),
+        )
+        assert cur.fetchone()["reconciliation_status"] == "imported"
 
 
 # ── receita: o delta positivo volta pelo mesmo caminho, sem sinal cravado ───
@@ -131,7 +155,8 @@ def test_receita_fundida_nao_derruba_o_consolidado(uid_pro, ia_fora):
                [tx(uid_pro, "100.00", hoje, "PIX RECEBIDO FULANO")])
     rep = db.import_open_finance_launches(uid_pro, conexao)
 
-    assert rep["auto_merged"] == 1, rep
+    assert rep["pending"] == 1 and rep["auto_merged"] == 0, rep
+    db.confirm_reconciliation(uid_pro, of_tx_pendente(uid_pro))
     # sem o conserto: 314,88 — 100 contados duas vezes, para CIMA
     assert consolidado(uid_pro) == (214.88, 0.0)
 
@@ -150,6 +175,7 @@ def test_apagar_o_lancamento_fundido_nao_cria_dinheiro(uid_pro, ia_fora):
     sincroniza(conexao, uid_pro, "113.88",
                [tx(uid_pro, "-1.00", hoje, "PIX ENVIADO BARBARA")])
     db.import_open_finance_launches(uid_pro, conexao)
+    db.confirm_reconciliation(uid_pro, of_tx_pendente(uid_pro))
     assert consolidado(uid_pro) == (113.88, 0.0)
 
     db.delete_launch_and_rollback(uid_pro, manual_id)

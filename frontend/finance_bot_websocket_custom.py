@@ -2196,7 +2196,8 @@ _SECURITY_HEADERS = {
         "script-src 'self' 'unsafe-inline' "
         "https://cdnjs.cloudflare.com https://cdn.pluggy.ai https://cdn.jsdelivr.net "
         "https://static.cloudflareinsights.com https://connect.facebook.net "
-        "https://www.googletagmanager.com https://www.clarity.ms https://scripts.clarity.ms; "
+        "https://www.googletagmanager.com https://www.clarity.ms https://scripts.clarity.ms "
+        "https://app.trysoro.com; "
         "style-src 'self' 'unsafe-inline' "
         "https://cdnjs.cloudflare.com https://cdn.jsdelivr.net; "
         "img-src 'self' data: blob: https:; "
@@ -3107,10 +3108,13 @@ async def auth_dashboard_profile(request: Request, response: Response):
     # is_pro já resolvem os casos que o valor cru do plano esconde: assinatura
     # expirada (webhook perdido) e o freio de emergência PLANS_V2_ENABLED. O front
     # consome isto direto em vez de reconstruir tier do plano cru (que divergiria).
-    from core.services.plan_service import get_user_limits, is_pro, require_min_tier
+    from core.services.plan_service import (
+        get_user_limits, is_pro, require_min_tier, plan_gate_ok,
+    )
     limits = await asyncio.to_thread(get_user_limits, int(user_id))
     _is_pro = await asyncio.to_thread(is_pro, int(user_id))
     _forecast_ok = await asyncio.to_thread(require_min_tier, int(user_id), "pro")
+    _hb_ok = await asyncio.to_thread(plan_gate_ok, int(user_id), "household_budget")
     feature_gates = {
         "investments": bool(limits["investments_enabled"]),
         "export": bool(limits["export_enabled"]),
@@ -3122,6 +3126,7 @@ async def auth_dashboard_profile(request: Request, response: Response):
         "changelog": _is_pro,                        # Novidades: gate is_pro (Plus+)
         "agents": limits["agents_energy_budget"] > 0,  # agentes: Plus+
         "forecast": bool(_forecast_ok),              # previsão de saldo 30/60/90: Pro+
+        "household_budget": bool(_hb_ok),            # orçamento doméstico: Plus+
     }
     _no_store(response)
     return {
@@ -6826,15 +6831,18 @@ class LaunchCreatePayload(BaseModel):
     categoria: str | None = None
     card_id: int | None = None    # obrigatório quando tipo='credito'
     parcelas: int | None = None   # opcional pra tipo='credito' (1 ou null = à vista)
+    funding_source: str | None = None  # só receita/despesa: 'carteira' | 'piggy'
 
 
 @app.post("/launches/{user_id}")
 async def create_launch_route(request: Request, user_id: int, payload: LaunchCreatePayload):
     """Cria um lançamento manual.
 
-    - `receita` / `despesa` → cria em `launches` + atualiza saldo (mesmo fluxo do bot)
+    - `receita` / `despesa` → cria em `launches` + atualiza saldo (mesmo fluxo do bot);
+      lançamento manual é dinheiro em espécie (Carteira Piggy)
     - `credito` → cria em `credit_transactions` na fatura aberta do cartão
-      escolhido (mesmo fluxo do `gastei X no cartao Y` do WhatsApp)
+      escolhido (mesmo fluxo do `gastei X no cartao Y` do WhatsApp); recusado
+      para cartão coberto por Open Finance (compras importadas automaticamente)
     """
     _authorize_dashboard_access(request, user_id)
 
@@ -6867,6 +6875,18 @@ async def create_launch_route(request: Request, user_id: int, payload: LaunchCre
 
     alvo = (payload.alvo or "").strip() or None
     nota_in = (payload.nota or "").strip() or None
+    funding_source = (payload.funding_source or "").strip().lower() or None
+
+    # `funding_source` só vale para dinheiro (receita/despesa). Compra no
+    # crédito não tem origem de funding — quem paga é a fatura, e ela tem a
+    # própria regra (com/sem Open Finance).
+    if tipo == "credito" and funding_source:
+        raise HTTPException(status_code=400, detail="funding_source não se aplica a compras no crédito.")
+    if tipo in ("receita", "despesa") and funding_source not in (None, "carteira", "piggy"):
+        raise HTTPException(
+            status_code=400,
+            detail="Lançamentos manuais só podem ser feitos na Carteira Piggy (dinheiro em espécie).",
+        )
 
     # Resolve categoria — explícita do form ou inferência (mesmo fluxo do bot).
     explicit = (payload.categoria or "").strip() or None
@@ -6893,6 +6913,18 @@ async def create_launch_route(request: Request, user_id: int, payload: LaunchCre
         if not card:
             raise HTTPException(status_code=400, detail="Cartão não encontrado.")
         card_name = card.get("name") or "cartão"
+
+        # Cartão coberto pelo Open Finance com sync ATIVO: as compras chegam
+        # pela importação automática — lançamento manual duplicaria (e o manual
+        # agora é só dinheiro em espécie ou cartão fora do OF). O vínculo sozinho
+        # não prova sync: conexão PAUSED/DELETED mantém o link e para de
+        # importar — aí a compra manual tem de passar (review Codex P2).
+        if card.get("of_sync_active"):
+            raise HTTPException(
+                status_code=400,
+                detail="Lançamentos manuais não são permitidos para cartões sincronizados "
+                       "via Open Finance. Suas compras neste cartão são importadas automaticamente.",
+            )
 
         nota = nota_in or alvo or f"compra no crédito ({card_name})"
         # Sinal de aprendizado: SÓ o que o usuário escreveu. A nota acima e o
@@ -7020,14 +7052,6 @@ async def create_launch_route(request: Request, user_id: int, payload: LaunchCre
     except Exception as exc:
         raise HTTPException(status_code=500, detail=f"Erro ao registrar lançamento: {exc}") from exc
 
-    # Reconciliação reversa (Open Finance): se o banco já importou esse gasto, funde (não duplica).
-    if not is_internal:
-        try:
-            from db import reconcile_manual_launch
-            await asyncio.to_thread(reconcile_manual_launch, int(user_id), int(launch_id))
-        except Exception:
-            pass
-
     return {
         "ok": True,
         "launch_id": int(launch_id),
@@ -7037,14 +7061,15 @@ async def create_launch_route(request: Request, user_id: int, payload: LaunchCre
         "categoria": categoria,
         "alvo": alvo,
         "nota": nota,
-        # `new_balance` foi lido ANTES do `reconcile_manual_launch` acima, que
-        # funde o lançamento com o espelho do banco — mesma defasagem de
-        # `core/handlers/launches.py:1223` e `core/services/quick_entry.py:63`,
-        # terceiro chamador. Aqui é contrato JSON, sem copy: reusa
-        # `carteira_exibida` em vez de um helper novo.
+        # `new_balance` é a Carteira lida na gravação do lançamento. Não há mais
+        # fusão reversa silenciosa com o espelho do banco (decisão "lançamentos
+        # manuais exclusivos para dinheiro") — reusa `carteira_exibida` pro
+        # mesmo recorte do /saldo, como `core/handlers/launches.py` e
+        # `core/services/quick_entry.py`.
         "new_balance": float(await asyncio.to_thread(
             carteira_exibida, int(user_id), new_balance)),
         "is_internal_movement": is_internal,
+        "funding_source": {"kind": "carteira", "label": "Carteira Piggy"},
     }
 
 
@@ -7695,6 +7720,83 @@ async def budgets_status_route(request: Request, user_id: int, month: str | None
 
     status = await asyncio.to_thread(get_budgets_status_for_month, user_id, month)
     return {"ok": True, **status}
+
+
+# ─── Orçamento Doméstico (método dos potes) ──────────────────────────────────
+# Modelo separado de category_budgets (db/household_budget.py): limite = % da
+# renda do mês por pote, não valor absoluto por categoria. Pago apenas (Plus+).
+
+class HouseholdBudgetConfigPayload(BaseModel):
+    buckets: dict[str, float]
+
+
+class HouseholdBudgetIncomePayload(BaseModel):
+    month: str
+    amount: float | None = None  # null = limpa o override (volta à computada)
+
+
+def _hb_400(exc: ValueError) -> HTTPException:
+    return HTTPException(status_code=400, detail=str(exc))
+
+
+@app.get("/household-budget/{user_id}/status")
+async def household_budget_status_route(
+    request: Request, user_id: int, month: str | None = None
+):
+    """Status do Orçamento Doméstico: por pote, % da renda vs gasto real do mês.
+
+    `month` no formato 'YYYY-MM' (default = mês corrente); inválido → 400.
+    """
+    _authorize_dashboard_access(request, user_id)
+    _require_pro(user_id, "household_budget")
+    from db.household_budget import get_household_budget_status
+
+    try:
+        status = await asyncio.to_thread(get_household_budget_status, user_id, month)
+    except ValueError as exc:
+        raise _hb_400(exc)
+    return {"ok": True, **status}
+
+
+@app.put("/household-budget/{user_id}/config")
+async def household_budget_config_route(
+    request: Request, user_id: int, payload: HouseholdBudgetConfigPayload
+):
+    """Salva os 6 percentuais (tudo-ou-nada; soma tem que ser 100)."""
+    _authorize_dashboard_access(request, user_id)
+    _require_pro(user_id, "household_budget")
+    from db.household_budget import save_config
+
+    try:
+        buckets = await asyncio.to_thread(save_config, user_id, payload.buckets)
+    except ValueError as exc:
+        raise _hb_400(exc)
+    _invalidate_dashboard_current_cache(user_id)
+    return {"ok": True, "buckets": buckets}
+
+
+@app.put("/household-budget/{user_id}/income")
+async def household_budget_income_route(
+    request: Request, user_id: int, payload: HouseholdBudgetIncomePayload
+):
+    """Override manual da renda do mês. `amount: null` limpa (volta à computada).
+    `amount < 0` → 400 (RENDA_INVALIDA, validado no service, não no banco)."""
+    _authorize_dashboard_access(request, user_id)
+    _require_pro(user_id, "household_budget")
+    from db.household_budget import clear_income_override, set_income_override
+
+    try:
+        if payload.amount is None:
+            await asyncio.to_thread(clear_income_override, user_id, payload.month)
+            amount = None
+        else:
+            amount = await asyncio.to_thread(
+                set_income_override, user_id, payload.month, payload.amount
+            )
+    except ValueError as exc:
+        raise _hb_400(exc)
+    _invalidate_dashboard_current_cache(user_id)
+    return {"ok": True, "month": payload.month, "amount": amount}
 
 
 # ─── Category metadata routes (Sprint 3) ─────────────────────────────────────

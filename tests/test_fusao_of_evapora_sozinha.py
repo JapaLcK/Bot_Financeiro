@@ -28,15 +28,18 @@ import frontend.finance_bot_websocket_custom as dashboard
 from utils_date import today_tz
 
 from tests._fusao_of_helpers import (  # noqa: F401 (uid_pro/ia_fora são fixtures)
-    conecta_banco, consolidado, ia_fora, manda, saldo_bruto, sincroniza, tx,
-    uid_pro, ultimo_launch,
+    conecta_banco, consolidado, ia_fora, manda, of_tx_pendente, saldo_bruto,
+    sincroniza, tx, uid_pro, ultimo_launch,
 )
 
 
 def _funde_um_real(uid: int) -> int:
-    """Cenário do relato, já fundido. Devolve a connection_id.
+    """Cenário do relato, já fundido (com confirmação do usuário). Devolve a
+    connection_id.
 
-    As pré-condições aqui são de propósito INSENSÍVEIS à correção (a fusão
+    Lançamento manual nunca funde em silêncio: o importador rebaixa o casamento
+    a 'ask' e a fusão só acontece com `confirm_reconciliation`. As
+    pré-condições aqui são de propósito INSENSÍVEIS à correção (a fusão
     aconteceu; o banco não foi escrito): é o que deixa os casos 1–5 verdes com e
     sem ela, provando a evaporação em vez de medi-la de novo (CLAUDE.md §3).
     """
@@ -46,7 +49,8 @@ def _funde_um_real(uid: int) -> int:
     sincroniza(conexao, uid, "113.88",
                [tx(uid, "-1.00", hoje, "PIX ENVIADO BARBARA")])
     rep = db.import_open_finance_launches(uid, conexao)
-    assert rep["auto_merged"] == 1, rep
+    assert rep["pending"] == 1 and rep["auto_merged"] == 0, rep
+    db.confirm_reconciliation(uid, of_tx_pendente(uid))
     assert saldo_bruto(uid) == Decimal("-1"), "a abordagem por LEITURA não escreve"
     return conexao
 

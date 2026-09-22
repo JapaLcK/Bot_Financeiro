@@ -65,7 +65,10 @@ def test_desfazer_na_janela_do_delete_do_provedor(uid_pro, ia_fora, monkeypatch)
     conexao = funde_a(uid_pro)
     of_tx = _of_tx(uid_pro)
     manual = _estado(of_tx)["imported_launch_id"]
-    assert _estado(of_tx)["reconciliation_status"] == "auto_merged"
+    # NO CONTRATO NOVO a fusão do `funde_a` é a CONFIRMADA (o 'auto' em
+    # candidato manual virou 'ask' e o teste confirma) — mesma classe de
+    # estado fundido que o 'auto_merged' de antes.
+    assert _estado(of_tx)["reconciliation_status"] == "confirmed"
 
     _na_janela_do_rollback(
         monkeypatch, lambda: db.undo_reconciliation(uid_pro, of_tx))
@@ -114,8 +117,10 @@ def test_import_na_janela_do_delete_do_provedor(uid_pro, ia_fora, monkeypatch):
 
 
 def test_delete_preserva_manual_e_sombra_alheia(uid_pro, ia_fora):
-    """Positivo: apagar só T1 (auto_merged com X manual) não mexe em T2 (sombra
-    de outra transação, sem relação nenhuma com T1)."""
+    """Positivo: apagar só T1 (fundida com X manual) não mexe em T2 (sombra de
+    outra transação, sem relação nenhuma com T1). NO CONTRATO NOVO o casamento
+    de T1 com o manual vira pendência e o usuário confirma — o estado fundido
+    é o mesmo do antigo auto-merge."""
     conexao = conecta_banco(uid_pro, "1000.00")
     manda(uid_pro, "gastei 50 no mercado")
     sincroniza(conexao, uid_pro, "850.00", [
@@ -123,7 +128,11 @@ def test_delete_preserva_manual_e_sombra_alheia(uid_pro, ia_fora):
         tx(uid_pro, "-100.00", today_tz(), "OUTRO", ident="2"),
     ])
     rep = db.import_open_finance_launches(uid_pro, conexao)
-    assert (rep["auto_merged"], rep["inserted"]) == (1, 1), rep
+    assert (rep["auto_merged"], rep["pending"], rep["inserted"]) == (0, 1, 2), rep
+
+    t1_pre = _q("select o.id from open_finance_transactions o "
+                "where o.provider_transaction_id=%s", (f"of-tx-{uid_pro}-1",))[0]
+    db.confirm_reconciliation(uid_pro, t1_pre["id"])
 
     t1 = _q("select o.id, o.imported_launch_id from open_finance_transactions o "
             "where o.provider_transaction_id=%s", (f"of-tx-{uid_pro}-1",))[0]

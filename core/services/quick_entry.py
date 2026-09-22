@@ -1,6 +1,6 @@
 from core.types import OutgoingMessage
 from parsers import parse_receita_despesa_natural
-from db import ensure_user, add_launch_and_update_balance
+from db import ensure_user, add_launch_and_update_balance, has_open_finance_connections
 from utils_text import fmt_brl
 from core.services.category_service import learn_from_inference
 
@@ -46,25 +46,22 @@ def handle_quick_entry(user_id: int, text: str) -> OutgoingMessage | None:
         reason=category_reason,
     )
 
-    # Reconciliação reversa (Open Finance): funde com o gasto que o banco já importou.
-    if not is_internal:
-        try:
-            from db import reconcile_manual_launch
-            reconcile_manual_launch(user_id, launch_id)
-        except Exception:
-            pass
+    # Lançamento manual é dinheiro em espécie: a fusão SILENCIOSA com tx do
+    # Open Finance foi removida (a tx do banco, se existir, é tratada só como
+    # pendência confirmável no importador — nunca some com o lançamento aqui).
+    # Com banco conectado, o rótulo do saldo deixa claro que a Conta é a
+    # Carteira Piggy.
+    saldo_label = "👛 Saldo (Carteira Piggy)" if has_open_finance_connections(user_id) else "🏦 Conta"
 
     emoji = "💸" if tipo == "despesa" else "💰"
     cat_txt = categoria or "outros"
-    # `new_balance` é a Carteira lida ANTES da reconciliação acima, que funde o
-    # lançamento com o espelho do banco. RÓTULO IDÊNTICO — a copy nova
-    # (`💰 Saldo total:`) é só da resposta de lançamento de
-    # `core/handlers/launches.py`; aqui é o caminho de fallback legado
-    # (`core/handlers/pending.py:86`). Só o número é relido.
-    # `carteira_exibida` já trata a falha: pós-commit, cai no cru em vez de
-    # subir (o chamador relançaria o gasto).
+    # Rótulo igual ao da resposta de lançamento (`core/handlers/launches.py`):
+    # com Open Finance conectado o saldo da Conta é o dinheiro em espécie
+    # (Carteira Piggy), e o nome precisa deixar isso claro. `carteira_exibida`
+    # já trata a falha: pós-commit, cai no cru em vez de subir (o chamador
+    # relançaria o gasto).
     from db.accounts import carteira_exibida
-    linha_saldo = f"🏦 Conta: {fmt_brl(float(carteira_exibida(user_id, new_balance)))}"
+    linha_saldo = f"{saldo_label}: {fmt_brl(float(carteira_exibida(user_id, new_balance)))}"
     return OutgoingMessage(
         text=(
             f"{emoji} **{tipo.capitalize()} registrada**: {fmt_brl(valor)}\n"
