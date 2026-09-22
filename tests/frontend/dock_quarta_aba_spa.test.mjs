@@ -213,3 +213,34 @@ test("S4 (SPA): montar a Início instala o CSS externo dos grupos da sidenav",
     ).evaluate((el) => getComputedStyle(el).display), "block");
   } finally { await ctx.close(); }
 });
+
+test("S5 (SPA): segundo toque espera o stylesheet já inserido e ainda pendente",
+  LIMITE, async () => {
+  const { ctx, page } = await abrirSpa(browser, "/comandos-app.html", "0", FREE);
+  let liberarCss;
+  let avisarCss;
+  const cssLiberado = new Promise((ok) => { liberarCss = ok; });
+  const cssChegou = new Promise((ok) => { avisarCss = ok; });
+  try {
+    await page.route("**/sidenav-rail.css*", async (route) => {
+      avisarCss();
+      await cssLiberado;
+      await route.fulfill({ path: join(FRONTEND, "sidenav-rail.css") });
+    });
+
+    await page.evaluate(() => window.PBNav.go("/home"));
+    await cssChegou;
+    await page.evaluate(() => window.PBNav.go("/home"));
+
+    const montouSemCss = await page.waitForFunction(
+      () => location.pathname === "/home", null, { timeout: 800 },
+    ).then(() => true, () => false);
+    assert.equal(montouSemCss, false, "a segunda navegação montou /home antes do CSS terminar");
+
+    liberarCss();
+    await page.waitForFunction(() => location.pathname === "/home", null, ESPERA);
+    assert.equal(await page.locator(
+      '.sidenav-group[data-group="acompanhamento"] .sidenav-subitems',
+    ).evaluate((el) => getComputedStyle(el).display), "none");
+  } finally { liberarCss(); await ctx.close(); }
+});

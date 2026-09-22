@@ -99,6 +99,7 @@
 
   const cache = {};        // key → {nodes, styles, title, scrollY, refresh, bodyClass}
   const booted = new Set(); // keys cujos scripts inline já executaram (nunca 2x: let/const)
+  const loadingStyles = new Map(); // URL absoluta → Promise do <link> ainda em carga
   let currentKey = null;
   let seq = 0;             // geração: só a navegação mais recente monta
 
@@ -275,22 +276,29 @@
       .map(source => ({
         source,
         url: new URL(source.getAttribute("href"), location.origin).href,
-      }))
-      .filter(({ url }) => {
-        if (have.has(url)) return false;
-        have.add(url);
-        return true;
-      });
-    return Promise.all(need.map(({ source, url }) => new Promise((ok, bad) => {
+      }));
+    return Promise.all(need.map(({ source, url }) => {
+      const pending = loadingStyles.get(url);
+      if (pending) return pending;
+      if (have.has(url)) return Promise.resolve();
+      have.add(url);
       const link = document.createElement("link");
       Array.prototype.forEach.call(source.attributes, attr => {
         if (attr.name !== "href") link.setAttribute(attr.name, attr.value);
       });
       link.href = url;
-      link.onload = ok;
-      link.onerror = () => bad(new Error("stylesheet " + url));
+      const promise = new Promise((ok, bad) => {
+        link.onload = () => { loadingStyles.delete(url); ok(); };
+        link.onerror = () => {
+          loadingStyles.delete(url);
+          link.remove();
+          bad(new Error("stylesheet " + url));
+        };
+      });
+      loadingStyles.set(url, promise);
       document.head.appendChild(link);
-    })));
+      return promise;
+    }));
   }
 
   async function mountNew(key, path, html, push, my, sw) {
