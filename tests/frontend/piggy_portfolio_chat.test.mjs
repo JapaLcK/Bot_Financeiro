@@ -59,7 +59,10 @@ test('mantém o chat bloqueado enquanto carrega a carteira', async () => {
   } finally { await page.close(); }
 });
 
-for (const question of ['Meus investimentos', 'Meus investimentos do Open Finance']) {
+for (const question of [
+  'Meus investimentos', 'Meus investimentos do Open Finance',
+  'Meus CDBs', 'Minhas ações', 'Minha renda fixa',
+]) {
   test(`reconhece pedido direto de carteira: ${question}`, async () => {
     const { page, errors, piggyRequests } = await setup({ openAgent: false, investments });
     try {

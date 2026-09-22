@@ -26,7 +26,14 @@ def _conn(user_id: int) -> int:
 
 def _linked_pocket(user_id, cid, raw, *, name, target=None, last_bal, last_profit):
     """Cria (ou atualiza) o investimento OF e um pocket vinculado com baselines dados."""
-    db.save_open_finance_investments(cid, [normalize_pluggy_investment(raw)])
+    with get_conn() as conn:
+        with conn.cursor() as cur:
+            cur.execute(
+                "select raw from open_finance_investments where connection_id=%s",
+                (cid,),
+            )
+            snapshot = [normalize_pluggy_investment(r["raw"]) for r in (cur.fetchall() or [])]
+    db.save_open_finance_investments(cid, [*snapshot, normalize_pluggy_investment(raw)])
     with get_conn() as conn:
         with conn.cursor() as cur:
             cur.execute(

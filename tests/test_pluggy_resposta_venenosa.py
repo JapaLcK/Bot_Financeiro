@@ -178,3 +178,43 @@ def test_investimentos_recusam_snapshot_sem_lista_de_resultados(pluggy_responde,
 
     with pytest.raises(pluggy.PluggyApiError, match="Resposta inválida"):
         pluggy.list_pluggy_investments("item-limpo", "k")
+
+
+def test_investimentos_percorrem_todas_as_paginas(monkeypatch):
+    respostas = {
+        1: {"page": 1, "total": 3, "totalPages": 2,
+            "results": [{"id": "inv-1"}, {"id": "inv-2"}]},
+        2: {"page": 2, "total": 3, "totalPages": 2,
+            "results": [{"id": "inv-3"}]},
+    }
+    chamadas = []
+
+    def _get(path, key, params=None):
+        chamadas.append(dict(params or {}))
+        return respostas[params["page"]]
+
+    monkeypatch.setattr(pluggy, "_pluggy_get", _get)
+
+    assert [i["id"] for i in pluggy.list_pluggy_investments("item-limpo", "k")] == [
+        "inv-1", "inv-2", "inv-3"]
+    assert [c["page"] for c in chamadas] == [1, 2]
+    assert all(c["pageSize"] == 500 for c in chamadas)
+
+
+@pytest.mark.parametrize("entry", [{}, {"id": ""}, [], "inv-1"])
+def test_investimentos_recusam_item_sem_id_do_provedor(monkeypatch, entry):
+    monkeypatch.setattr(pluggy, "_pluggy_get", lambda *args, **kwargs: {
+        "page": 1, "total": 1, "totalPages": 1, "results": [entry],
+    })
+
+    with pytest.raises(pluggy.PluggyApiError, match="Investimento inválido"):
+        pluggy.list_pluggy_investments("item-limpo", "k")
+
+
+def test_investimentos_recusam_paginacao_incompleta(monkeypatch):
+    monkeypatch.setattr(pluggy, "_pluggy_get", lambda *args, **kwargs: {
+        "page": 1, "total": 2, "totalPages": 1, "results": [{"id": "inv-1"}],
+    })
+
+    with pytest.raises(pluggy.PluggyApiError, match="Paginação incompleta"):
+        pluggy.list_pluggy_investments("item-limpo", "k")

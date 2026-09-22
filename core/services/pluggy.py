@@ -11,6 +11,7 @@ import httpx
 
 from core.pg_text import limpa_para_pg
 from core.services.pluggy_health import safe_code
+from core.services.pluggy_pages import collect_investment_pages
 
 
 class PluggyConfigError(RuntimeError):
@@ -232,16 +233,19 @@ def list_pluggy_connectors(
     return out
 
 
-def list_pluggy_investments(item_id: str, api_key: str | None = None) -> list[dict]:
-    """Investimentos do item — inclui Caixinha do Nubank/PicPay (FIXED_INCOME/CDB)."""
+def list_pluggy_investments(
+    item_id: str, api_key: str | None = None, *, max_pages: int = 100
+) -> list[dict]:
+    """Investimentos completos do item, percorrendo a paginação da Pluggy."""
     key = api_key or create_pluggy_api_key()
-    data = _pluggy_get("/investments", key, params={"itemId": item_id})
-    results = data.get("results")
-    if not isinstance(results, list):
-        # `/investments` é snapshot completo: tratar payload incompleto como
-        # lista vazia autorizaria a reconciliação a zerar toda a carteira.
-        raise PluggyApiError("Resposta inválida ao consultar investimentos na Pluggy.")
-    return list(results)
+    return collect_investment_pages(
+        lambda page: _pluggy_get(
+            "/investments", key,
+            params={"itemId": item_id, "page": page, "pageSize": 500},
+        ),
+        PluggyApiError,
+        max_pages=max_pages,
+    )
 
 
 def _extract_after_cursor(next_value: Any) -> str | None:
