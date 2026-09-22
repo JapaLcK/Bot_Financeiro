@@ -320,15 +320,13 @@ def _sync_pluggy_item_confirmado(provider_item_id: str, connection: dict, api_ke
     # autoriza `no_accounts`.
     investments: list[dict] = []
     investment_health = (health.get("products") or {}).get("INVESTMENTS")
-    coleta_em_andamento = str(health.get("item_status") or "").upper() in ITEM_UPDATING
-    # Em CREATED/UPDATING, `statusDetail` pode omitir produtos ainda não
-    # concluídos. Omitido aí é desconhecido, não um snapshot vazio confiável:
-    # só a confirmação explícita autoriza substituir o último espelho. Em uma
-    # foto final, a Pluggy historicamente pode omitir o detalhe inteiro; nesse
-    # caso preservamos a compatibilidade e bloqueamos apenas `isUpdated=false`.
+    item_atualizado = str(health.get("item_status") or "").upper() == "UPDATED"
+    # Produto omitido só permite reconciliação quando o item terminou em
+    # UPDATED. Em coleta ou falha, a omissão não confirma um snapshot vazio;
+    # nesses estados, exigimos `investments.isUpdated=true` explícito.
     investments_ok = (
         "INVESTMENTS" not in (health.get("stale_products") or [])
-        and (not coleta_em_andamento
+        and (item_atualizado
              or (isinstance(investment_health, dict)
                  and investment_health.get("updated") is True))
     )
