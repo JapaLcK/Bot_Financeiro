@@ -14,6 +14,7 @@ import {
   MessageFooter,
 } from "./c-message-7";
 import { ChatContent } from "./chat-content";
+import { PortfolioCard } from "./portfolio-card";
 import { Spinner } from "./spinner";
 
 export type { ChatMessage } from "@/chat/types";
@@ -54,6 +55,8 @@ function MessageBubble({ message, view, id }: {
           </Marker> : <p className="pc-message-content"><ChatContent content={message.content} markdown={message.markdown} /></p>}
         </BubbleContent>
       </Bubble>
+      {id === "piggy" && message.portfolio && view.onPortfolioAsk &&
+        <PortfolioCard portfolio={message.portfolio} onAsk={view.onPortfolioAsk} />}
       <MessageFooter>
         <b className="pc-message-author">{author}</b>
         {time && <time dateTime={message.createdAt}>{time}</time>}

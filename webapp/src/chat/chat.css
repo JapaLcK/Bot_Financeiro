@@ -42,6 +42,8 @@ body.light #pigbank-chat-root {
   font-size: 14px; line-height: 1.55; text-align: left;
 }
 #pigbank-chat-root .pc-chat-panel[hidden] { display: none; }
+#pigbank-chat-root #piggy-panel.pc-has-portfolio { width: min(660px, calc(100vw - 48px)); }
+#pigbank-chat-root .pc-has-portfolio .piggy-msg.assistant .pc-message-content-wrap { max-width: 100%; }
 #pigbank-chat-root .pc-chat-head {
   position: static; margin: 0; padding: 14px 16px; flex-shrink: 0;
   border: 0; border-bottom: 1px solid var(--pc-line); border-radius: 0;
@@ -107,6 +109,41 @@ body.light #pigbank-chat-root {
 #pigbank-chat-root .pc-chat-action:hover:not(:disabled) { background: var(--pc-raised); border-color: var(--pc-accent); }
 #pigbank-chat-root .pc-chat-action:disabled { color: var(--pc-muted); }
 #pigbank-chat-root .pc-message-content-wrap > .pc-chat-action { margin-top: 2px; }
+#pigbank-chat-root .pc-portfolio { width: 100%; min-width: 0; }
+#pigbank-chat-root .pc-portfolio-heading { display: flex; align-items: flex-end; justify-content: space-between; gap: 12px; margin: 0 0 12px; }
+#pigbank-chat-root .pc-portfolio-heading span { color: var(--pc-muted); font-size: 12px; }
+#pigbank-chat-root .pc-portfolio-heading strong { font-size: 23px; font-variant-numeric: tabular-nums; white-space: nowrap; }
+#pigbank-chat-root .pc-portfolio-bar { display: flex; height: 8px; overflow: hidden; gap: 2px; border-radius: 20px; background: var(--pc-raised); }
+#pigbank-chat-root .pc-portfolio-segment { display: block; height: 100%; }
+#pigbank-chat-root .pc-portfolio-segment-0 { background: #efac45; }
+#pigbank-chat-root .pc-portfolio-segment-1 { background: #20b48f; }
+#pigbank-chat-root .pc-portfolio-segment-2 { background: var(--pc-accent); }
+#pigbank-chat-root .pc-portfolio-group { border-bottom: 1px solid var(--pc-line); }
+#pigbank-chat-root .pc-portfolio-group summary { display: flex; align-items: center; justify-content: space-between; gap: 8px; min-height: 54px; cursor: pointer; list-style: none; }
+#pigbank-chat-root .pc-portfolio-group summary::-webkit-details-marker { display: none; }
+#pigbank-chat-root .pc-portfolio-group summary span { min-width: 0; }
+#pigbank-chat-root .pc-portfolio-group summary span::before { content: '▸'; display: inline-block; margin-right: 9px; color: var(--pc-accent); transition: transform .16s; }
+#pigbank-chat-root .pc-portfolio-group[open] summary span::before { transform: rotate(90deg); }
+#pigbank-chat-root .pc-portfolio-group summary b, #pigbank-chat-root .pc-portfolio-row b { flex-shrink: 0; font-variant-numeric: tabular-nums; white-space: nowrap; }
+#pigbank-chat-root .pc-portfolio-rows { padding-bottom: 8px; }
+#pigbank-chat-root .pc-portfolio-row { display: flex; align-items: center; justify-content: space-between; gap: 8px; padding: 8px 0 8px 21px; }
+#pigbank-chat-root .pc-portfolio-row > span { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+#pigbank-chat-root .pc-portfolio-row small { display: block; color: var(--pc-muted); font-size: 11px; overflow: hidden; text-overflow: ellipsis; }
+#pigbank-chat-root .pc-portfolio-help { margin-top: 14px; padding: 0 12px; border: 1px solid var(--pc-line); border-radius: 12px; background: var(--pc-raised); }
+#pigbank-chat-root .pc-portfolio-help summary { min-height: 44px; display: flex; align-items: center; color: var(--pc-ink); cursor: pointer; font-size: 12px; font-weight: 650; list-style: none; }
+#pigbank-chat-root .pc-portfolio-help summary::-webkit-details-marker { display: none; }
+#pigbank-chat-root .pc-portfolio-help summary::before { content: '?'; display: grid; place-items: center; width: 19px; height: 19px; margin-right: 8px; border: 1px solid var(--pc-accent); border-radius: 50%; color: var(--pc-accent); font-size: 11px; }
+#pigbank-chat-root .pc-portfolio-help summary::after { content: '▸'; margin-left: auto; color: var(--pc-muted); transition: transform .16s; }
+#pigbank-chat-root .pc-portfolio-help[open] summary::after { transform: rotate(90deg); }
+#pigbank-chat-root .pc-portfolio-help > div { padding: 0 0 12px; color: var(--pc-muted); font-size: 12px; line-height: 1.5; }
+#pigbank-chat-root .pc-portfolio-help p { margin: 0 0 8px; }
+#pigbank-chat-root .pc-portfolio-help ul { margin: 0; padding-left: 18px; }
+#pigbank-chat-root .pc-portfolio-help li + li { margin-top: 5px; }
+#pigbank-chat-root .pc-portfolio-help b { color: var(--pc-ink); }
+#pigbank-chat-root .pc-portfolio-note { margin: 14px 0; font-size: 12px; color: var(--pc-muted); }
+#pigbank-chat-root .pc-portfolio-followups { display: flex; flex-wrap: wrap; gap: 8px; }
+#pigbank-chat-root .pc-portfolio-followups button { min-height: 40px; padding: 7px 10px; border: 1px solid var(--pc-line); border-radius: 20px; background: var(--pc-raised); color: var(--pc-ink); font-size: 12px; }
+#pigbank-chat-root .pc-portfolio-followups button:hover { border-color: var(--pc-accent); }
 #pigbank-chat-root .pc-chat-feedback { flex-shrink: 0; padding: 0 16px; }
 #pigbank-chat-root .pc-chat-feedback p { color: var(--pc-muted); font-size: 12px; margin: 0; }
 #pigbank-chat-root .pc-chat-feedback p:not(:empty) { padding-top: 10px; }
@@ -263,6 +300,11 @@ html.pb-agent-chat-open #piggy-fab { visibility: hidden; }
     padding-top: env(safe-area-inset-top); padding-left: env(safe-area-inset-left);
     padding-right: env(safe-area-inset-right);
   }
+  #pigbank-chat-root #piggy-panel.pc-has-portfolio { width: 100%; }
+  #pigbank-chat-root .pc-portfolio-heading { align-items: flex-start; flex-direction: column; gap: 3px; }
+  #pigbank-chat-root .pc-portfolio-heading strong { font-size: 21px; }
+  #pigbank-chat-root .pc-portfolio-group summary { font-size: 12px; }
+  #pigbank-chat-root .pc-portfolio-row { font-size: 12px; }
   #pigbank-chat-root .pc-chat-head { padding: 10px 14px; }
   #pigbank-chat-root .pc-chat-log { padding: 20px 12px; }
   #pigbank-chat-root .pc-chat-foot { padding: 10px 12px max(12px, env(safe-area-inset-bottom)); }

@@ -26,7 +26,7 @@ after(async () => {
   if (screenshots && !process.env.PIGBANK_CHAT_SCREENSHOTS) await rm(screenshots, { recursive: true, force: true });
 });
 
-async function setup({ budget = 14, active = ['detetive', 'barao'], viewport, holdFirst = false, accessOverride = {}, failAt = [], failureDetail, failureStatus = 503, openAgent = true, piggyReply = "**Seu resumo** está pronto.", holdPiggy = false, pro = true, reducedMotion, hasTouch = false, lockedUpgrade = false } = {}) {
+async function setup({ budget = 14, active = ['detetive', 'barao'], viewport, holdFirst = false, accessOverride = {}, failAt = [], failureDetail, failureStatus = 503, openAgent = true, piggyReply = "**Seu resumo** está pronto.", investments = [], holdPiggy = false, pro = true, reducedMotion, hasTouch = false, lockedUpgrade = false } = {}) {
   const page = await browser.newPage({ viewport: viewport || { width: 1280, height: 900 }, reducedMotion, hasTouch });
   const requests = [];
   const activations = [];
@@ -50,6 +50,7 @@ async function setup({ budget = 14, active = ['detetive', 'barao'], viewport, ho
       if (holdPiggy) await piggyPending;
       return route.fulfill({ json: { reply: piggyReply, usage: { used: 82, limit: 100 } } });
     }
+    if (path === '/open-finance/42') return route.fulfill({ json: { ok: true, investments } });
     if (path.endsWith('/chat')) {
       const body = route.request().postDataJSON();
       requests.push({ path, ...body });

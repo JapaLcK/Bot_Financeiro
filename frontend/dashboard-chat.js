@@ -15,7 +15,55 @@
     'Quais minhas maiores categorias de gasto?',
     'Quanto tenho de saldo?',
     'Mostra meus últimos lançamentos',
+    'Como está minha carteira no Open Finance?',
   ];
+
+  function asksAboutPortfolio(text) {
+    return /\b(quanto|quais|como|mostr\w*|list\w*|detalh\w*|ver|veja|tenho|saldo|carteira|posi[cç][aã]o)\b/i.test(text)
+      && /caixinh|investiment|carteira|renda fixa|renda vari[aá]vel|a[cç][oõ]es|ativos|cdb|tesouro/i.test(text);
+  }
+
+  function portfolioFromSnapshot(data) {
+    const items = (Array.isArray(data.investments) ? data.investments : [])
+      .filter(item => (item.currency || 'BRL').toUpperCase() === 'BRL'
+        && Number.isFinite(Number(item.balance)) && Number(item.balance) > 0)
+      .map(item => ({ name: item.name || item.subtype || 'Investimento',
+        institution: item.institution_name || 'Instituição não informada',
+        subtype: item.subtype || '', type: (item.type || '').toUpperCase(), amount: Number(item.balance) }));
+    const definitions = [
+      ['Renda fixa', item => item.type === 'FIXED_INCOME'],
+      ['Ações e FIIs', item => item.type === 'EQUITY'],
+      ['Outros ativos', item => !['FIXED_INCOME', 'EQUITY'].includes(item.type)],
+    ];
+    return {
+      groups: definitions.map(([title, matches]) => {
+        const assets = items.filter(matches);
+        return { title, items: assets, amount: assets.reduce((sum, item) => sum + item.amount, 0) };
+      }).filter(group => group.items.length),
+      count: items.length,
+      amount: items.reduce((sum, item) => sum + item.amount, 0),
+      note: items.some(item => /nubank|nu financeira/i.test(item.institution) && item.subtype.toUpperCase() === 'CDB')
+        ? 'Saldos da última sincronização. CDBs do Nubank podem incluir caixinhas; o Open Finance não identifica o apelido de cada uma.'
+        : 'Saldos da última sincronização do Open Finance. A lista não inclui investimentos cadastrados manualmente.',
+    };
+  }
+
+  async function loadPortfolio(message) {
+    try {
+      if (typeof USER_ID === 'undefined' || !Number.isInteger(Number(USER_ID)) || Number(USER_ID) <= 0) throw new Error('Usuário indisponível');
+      const response = await fetch(`/open-finance/${USER_ID}`, { credentials: 'same-origin' });
+      if (!response.ok) throw new Error(`Open Finance: ${response.status}`);
+      const portfolio = portfolioFromSnapshot(await response.json());
+      Object.assign(message, { state: 'complete', content: portfolio.count
+        ? 'Carteira conectada · Open Finance'
+        : 'Nenhum investimento em reais foi compartilhado pelo Open Finance até agora.',
+        portfolio: portfolio.count ? portfolio : undefined });
+    } catch (error) {
+      console.warn('[piggy] carteira Open Finance:', error);
+      Object.assign(message, { state: 'error', content: 'Não consegui carregar a carteira do Open Finance agora. Tente novamente mais tarde.' });
+    }
+    render();
+  }
 
   function view() {
     const pct = usage?.limit > 0 ? usage.used / usage.limit : 0;
@@ -29,6 +77,7 @@
       usageTone: pct >= 1 ? 'error' : pct >= 0.8 ? 'warning' : 'normal',
       onDraftChange: value => { draft = value; status = ''; render(); },
       onSend: () => window.piggySend(),
+      onPortfolioAsk: question => window.piggyAsk(question),
       onHidden: () => { fab?.classList.remove('open'); },
     };
   }
@@ -87,6 +136,12 @@
     messages.push({ id: `piggy-${++sequence}`, role: 'user', content: text, createdAt });
     const reply = { id: `piggy-${++sequence}`, role: 'assistant', content: 'Preparando a resposta…', createdAt, state: 'pending', markdown: true };
     messages.push(reply);
+    if (asksAboutPortfolio(text)) {
+      const card = { id: `piggy-${++sequence}`, role: 'assistant', author: 'Open Finance',
+        content: 'Carregando carteira do Open Finance…', state: 'pending' };
+      messages.push(card);
+      void loadPortfolio(card);
+    }
     render();
     try {
       const response = await fetch('/ai/chat', {

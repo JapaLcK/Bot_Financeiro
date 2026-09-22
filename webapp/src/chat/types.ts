@@ -14,6 +14,12 @@ export interface ChatMessage {
   markdown?: boolean;
   actions?: ChatAction[];
   feedback?: "up" | "down" | "dismissed";
+  portfolio?: {
+    count: number;
+    amount: number;
+    note: string;
+    groups: { title: string; amount: number; items: { name: string; institution: string; amount: number }[] }[];
+  };
 }
 
 export interface ChatView {
@@ -33,6 +39,7 @@ export interface ChatView {
   usageTone?: "normal" | "warning" | "error";
   onDraftChange: (value: string) => void;
   onSend: () => void;
+  onPortfolioAsk?: (question: string) => void;
   onFeedback?: (messageId: string, value: "up" | "down" | "dismissed") => void;
   onHidden?: () => void;
 }
