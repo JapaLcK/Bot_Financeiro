@@ -249,6 +249,30 @@ body.light .sidenav-toggle:hover { background:rgba(15,23,42,.05); color:var(--te
    identifica o selo, a tinta do texto passa a ser a do resto da interface. */
 body.light .sidenav-item .sn-tag { color:var(--text); }
 
+/* ── Menus colapsáveis da sidenav ─────────────────────────────────────────
+   Redução da barra: só Início/Visão Geral/Agentes ficam sempre visíveis; o
+   resto vive em 4 grupos (.sidenav-group). O toggle é um .sidenav-item comum
+   (mesmo hover/tipografia), com o caret à direita girando quando abre. Sem
+   transição de altura de propósito: display none/block é instantâneo e não
+   prende o clique em animação; o giro do caret já dá o feedback. */
+.sidenav-group-toggle .sn-caret {
+  margin-left:auto; color:var(--text-3); font-size:.78rem;
+  transition:transform .18s var(--ease);
+}
+.sidenav-group.open .sidenav-group-toggle .sn-caret { transform:rotate(90deg); }
+.sidenav-subitems { display:none; }
+.sidenav-group.open .sidenav-subitems { display:block; }
+/* Sub-item indentado com trilha à esquerda: lê-se como "dentro do menu" sem
+   ocupar a largura de um segundo ícone. */
+.sidenav-subitems .sidenav-item { padding-left:22px; position:relative; }
+.sidenav-subitems .sidenav-item::before {
+  content:""; position:absolute; left:9px; top:50%; width:5px; height:5px;
+  border-radius:50%; background:var(--text-3); opacity:.5; transform:translateY(-50%);
+}
+/* O menu que contém a view ativa ganha um leve destaque no rótulo mesmo
+   fechado — senão, com tudo recolhido, nada indica onde o usuário está. */
+.sidenav-group:has(.sidenav-item.active) > .sidenav-group-toggle { color:var(--text); }
+
 .sidenav-footer {
   margin-top:auto; padding-top:12px; border-top:1px solid var(--div);
   display:flex; flex-direction:column; gap:2px;
@@ -2595,3 +2619,83 @@ body.light #categories-distribution .bar-row[role="button"]:hover { background:r
   .cl-row, .cl-more-btn,
   #categories-distribution .bar-row[role="button"] { transition:none; }
 }
+
+/* ═══════════════════════════════════════════════════════════════════════
+   Orçamento Doméstico (método dos potes) — view `orcamento-domestico`
+
+   Tudo tokenizado: a view nasceu DEPOIS dos dois temas, então não existe
+   desculpa de legado pra hex solto — quem precisa de ajuste no claro ganha
+   um `body.light` ao lado da regra, não uma varredura meses depois.
+═══════════════════════════════════════════════════════════════════════ */
+.hb-header { display:flex; justify-content:space-between; align-items:flex-end;
+             gap:14px 18px; flex-wrap:wrap; margin-bottom:14px; }
+.hb-subtitle { margin:4px 0 0; font-size:.8rem; color:var(--text-3); max-width:460px; }
+.hb-controls { display:flex; align-items:flex-end; gap:16px; flex-wrap:wrap; }
+/* Espelho do `#month-label` do header global, com largura um pouco menor:
+   "Setembro/2026" não precisa dos 128px de "setembro de 2026". */
+#hb-month-label { min-width:118px; text-align:center; font-size:.8rem; font-weight:600;
+                  letter-spacing:.04em; color:var(--text); padding:0 8px; text-transform:capitalize; }
+.hb-income label { display:block; font-size:.62rem; color:var(--text-3); text-transform:uppercase;
+                   letter-spacing:.07em; margin:0 0 5px 2px; }
+.hb-income-row { display:flex; align-items:center; gap:8px; }
+.hb-income-row input { width:132px; background:rgba(255,255,255,.06);
+                       border:1px solid var(--glass-border); border-radius:10px;
+                       padding:8px 12px; color:var(--text); font-size:.86rem;
+                       font-variant-numeric:tabular-nums; transition:border-color .18s var(--ease); }
+.hb-income-row input:focus { outline:none; border-color:rgba(255,45,142,.55); }
+body.light .hb-income-row input { background:rgba(15,23,42,.04); }
+.hb-badge-auto { font-size:.66rem; color:var(--text-3); white-space:nowrap;
+                 background:rgba(255,255,255,.06); border:1px solid var(--glass-border);
+                 border-radius:999px; padding:4px 10px; }
+body.light .hb-badge-auto { background:rgba(15,23,42,.05); }
+/* Link de ação no lugar de botão: "Usar renda automática" é correção de
+   caminho, não protagonista — botão competiria com o input ao lado. */
+.hb-link { background:none; border:none; padding:0; cursor:pointer;
+           font-size:.72rem; color:var(--neon-ink); text-decoration:underline;
+           white-space:nowrap; }
+
+.hb-grid { display:grid; grid-template-columns:repeat(auto-fit, minmax(min(300px, 100%), 1fr));
+           gap:14px; align-items:start; }
+.hb-donut-wrap { margin-bottom:14px; }
+
+/* Legenda própria (a do Chart.js ficou desligada): a do print mostra o VALOR
+   gasto por pote, não só o nome — e alinhada à direita, coisa que a legend
+   nativa não faz. */
+.hb-legend { display:flex; flex-direction:column; gap:6px; }
+.hb-legend-item { display:flex; align-items:center; gap:8px; font-size:.76rem; }
+.hb-dot { display:inline-block; width:9px; height:9px; border-radius:50%;
+          flex-shrink:0; margin-right:2px; }
+.hb-legend-label { flex:1; color:var(--text-2); overflow:hidden;
+                   text-overflow:ellipsis; white-space:nowrap; }
+.hb-legend-val { font-weight:600; color:var(--text); font-variant-numeric:tabular-nums; }
+
+/* Resumo: divisores TRACEJADOS, como no print de referência — sólido deixava
+   a tabela pesada demais ao lado do donut. Rodapé com divisor sólido, porque
+   total é fechamento, não item. */
+.hb-table { width:100%; border-collapse:collapse; font-size:.78rem; }
+.hb-table th { font-size:.62rem; font-weight:700; text-transform:uppercase;
+               letter-spacing:.06em; color:var(--text-3); text-align:right;
+               padding:6px 8px; border-bottom:1px dashed var(--glass-border); }
+.hb-table td { padding:9px 8px; text-align:right; color:var(--text-2);
+               font-variant-numeric:tabular-nums;
+               border-bottom:1px dashed var(--glass-border); }
+.hb-table th:first-child, .hb-table td:first-child { text-align:left; }
+.hb-table tbody tr:last-child td { border-bottom:none; }
+.hb-table tfoot td { border-bottom:none; border-top:1px solid var(--glass-border);
+                     font-weight:700; color:var(--text); }
+
+.hb-metas-head { display:flex; justify-content:space-between; align-items:center;
+                 margin-bottom:14px; }
+.hb-meta-row { display:flex; align-items:center; gap:8px; padding:9px 2px;
+               border-bottom:1px dashed var(--glass-border); font-size:.8rem; }
+.hb-meta-row:last-child { border-bottom:none; }
+.hb-meta-label { flex:1; color:var(--text-2); overflow:hidden;
+                 text-overflow:ellipsis; white-space:nowrap; }
+.hb-meta-pct { font-weight:700; color:var(--text); font-variant-numeric:tabular-nums; }
+
+/* Soma ao vivo do modal de metas: nasce vermelha ("ainda não fecha") e vira
+   verde só no 100% exato — é o estado que habilita o Salvar, então a cor é
+   a mensagem. */
+.hb-soma { margin-top:12px; font-size:.78rem; font-weight:600; text-align:right;
+           color:var(--red); }
+.hb-soma.ok { color:var(--green); }

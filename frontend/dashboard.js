@@ -700,9 +700,56 @@ function taxProfileForAsset(assetType) {
 
 // Mapa view-id → elemento. Inclui as novas seções acessíveis pelo sidebar.
 const DASH_VIEWS = [
-  "overview", "analytics", "history", "fixed", "budgets", "goals",
+  "overview", "analytics", "history", "fixed", "budgets", "orcamento-domestico", "goals",
   "categories", "installments", "cards", "investments", "affiliate", "agentes"
 ];
+
+// ── Menus colapsáveis da sidenav ──────────────────────────────────────────
+// Só Início/Visão Geral/Agentes ficam sempre visíveis; o resto vive nos 4
+// .sidenav-group do dashboard.html. Estado persiste em localStorage. O menu
+// da view ativa abre sozinho — fechado, o item ativo ficaria invisível e
+// nada indicaria onde o usuário está.
+const SN_GROUPS_KEY = "pb_sidenav_groups";
+
+function _snGroupStates() {
+  try { return JSON.parse(localStorage.getItem(SN_GROUPS_KEY) || "{}") || {}; }
+  catch(_) { return {}; }
+}
+
+function _snSetGroup(name, open, persist = true) {
+  const g = document.querySelector(`.sidenav-group[data-group="${name}"]`);
+  if (!g) return;
+  g.classList.toggle("open", open);
+  const toggle = g.querySelector(".sidenav-group-toggle");
+  if (toggle) toggle.setAttribute("aria-expanded", open ? "true" : "false");
+  if (!persist) return;
+  const states = _snGroupStates();
+  states[name] = open;
+  try { localStorage.setItem(SN_GROUPS_KEY, JSON.stringify(states)); } catch(_) {}
+}
+
+function toggleSidenavGroup(name) {
+  const g = document.querySelector(`.sidenav-group[data-group="${name}"]`);
+  if (!g) return;
+  _snSetGroup(name, !g.classList.contains("open"));
+}
+
+// Abre (e persiste) o menu que contém o item da view, se houver e estiver
+// fechado. Chamado por setMainView — cobre clique, deep link e botão voltar.
+function _snOpenGroupForView(view) {
+  const item = document.querySelector(`.sidenav-item[data-nav="${view}"]`);
+  const g = item && item.closest(".sidenav-group");
+  if (g && !g.classList.contains("open")) _snSetGroup(g.dataset.group, true);
+}
+
+// Boot: aplica o estado persistido (default = tudo fechado). dashboard.js é
+// defer, então o DOM já está pronto aqui.
+(function initSidenavGroups() {
+  const states = _snGroupStates();
+  document.querySelectorAll(".sidenav-group").forEach(g => {
+    _snSetGroup(g.dataset.group, !!states[g.dataset.group], false);
+  });
+})();
 
 function setMainView(view) {
   // Free: bloqueia navegacao pra tela inteira de investimentos. Botao fica
@@ -711,8 +758,15 @@ function setMainView(view) {
     showUpgradeModal("investments");
     return;
   }
+  // Orçamento Doméstico segue o MESMO portão: tela inteira paga (Plus+),
+  // click no item visível abre o upgrade em vez de navegar.
+  if (view === "orcamento-domestico" && !featureAllowed("household_budget")) {
+    showUpgradeModal("household_budget");
+    return;
+  }
   document.querySelectorAll(".main-tab").forEach(b => b.classList.toggle("active", b.dataset.view === view));
   document.querySelectorAll(".sidenav-item[data-nav]").forEach(b => b.classList.toggle("active", b.dataset.nav === view));
+  _snOpenGroupForView(view);
 
   DASH_VIEWS.forEach(v => {
     const el = document.getElementById(`${v}-view`);
@@ -744,6 +798,7 @@ function navigateTo(view) {
   if (view === "installments") loadInstallmentsView();
   if (view === "categories") loadCategoriesView();
   if (view === "budgets") loadBudgetsView();
+  if (view === "orcamento-domestico") loadHouseholdBudgetView();
   // View Recorrentes: abre sempre na Visão geral (resumo das 3 áreas).
   if (view === "fixed") setRecurringTab("overview");
   if (view === "goals") loadGoalsView();
@@ -3114,6 +3169,392 @@ async function budgetDeleteFromModal() {
     closeBudgetEditModal();
     showToast("✓ Orçamento excluído");
     await loadBudgetsView(true);
+  } catch (err) { await alertModal(String(err.message || err), { title: "Erro" }); }
+}
+
+// ══════════════════════════════════════════════════════════════════════
+// Orçamento Doméstico (método dos potes — 6 potes fixos, % da renda; Pro)
+// ══════════════════════════════════════════════════════════════════════
+
+let _hbMonth = _mesCorrente();          // "YYYY-MM" — mês em exibição na view
+const _hbCache = new Map();             // mês → último payload do status
+const _hbChannel = makeFetchChannel();  // dedup + abort + geração
+let _hbChart = null;                    // donut Chart.js — destruir antes de recriar
+let _hbIncomeRendered = null;           // renda pintada no input (pula PUT sem mudança)
+
+function _mesCorrente() {
+  const d = new Date();
+  return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}`;
+}
+
+function _hbMonthLong(ym) {
+  const m = /^(\d{4})-(\d{2})$/.exec(String(ym || ""));
+  if (!m) return ym || "—";
+  return `${PT_MONTHS[parseInt(m[2], 10) - 1]}/${m[1]}`;
+}
+
+async function _fetchHouseholdBudget(month, { force = false } = {}) {
+  return _hbChannel.run(async (signal) => {
+    const q = month ? `?month=${encodeURIComponent(month)}` : "";
+    const resp = await fetch(`${API}/household-budget/${USER_ID}/status${q}`, {
+      credentials: "same-origin",
+      headers: csrfHeaders(),
+      signal,
+    });
+    if (!resp.ok) {
+      const txt = await resp.text();
+      let detail = txt, proRequired = false;
+      try {
+        const parsed = JSON.parse(txt);
+        // Free batendo na rota paga (perfil velho em cache): o erro já vem
+        // tipado — sobe a flag pro catch abrir o modal de upgrade em vez de
+        // pintar uma faixa vermelha de "Erro: pro_required".
+        if (parsed.detail && parsed.detail.error === "pro_required") proRequired = true;
+        detail = typeof parsed.detail === "string" ? parsed.detail
+          : (parsed.detail ? JSON.stringify(parsed.detail) : txt);
+      } catch(_) {}
+      const err = _erroHttp(resp.status, detail);
+      if (proRequired) err.proRequired = true;
+      throw err;
+    }
+    return await resp.json();
+  }, { force });
+}
+
+async function loadHouseholdBudgetView(forceFresh = false) {
+  const resumo = document.getElementById("hb-resumo-body");
+  if (!resumo) return;
+  if (!USER_ID) {
+    resumo.innerHTML = '<div class="empty" style="padding:20px">Conectando…</div>';
+    setTimeout(() => loadHouseholdBudgetView(forceFresh), 300);
+    return;
+  }
+
+  // O mês fica capturado: uma navegação no meio do voo aborta este pedido
+  // (data === undefined), mas a chave certa do cache não depende de timing.
+  const month = _hbMonth;
+
+  // Stale-while-revalidate: cache do mês pinta na hora e revalida atrás.
+  // O force na revalidação NÃO é descuido: o canal deduplica por promise, não
+  // por mês — sem ele, voltar pro mês A com o fetch do mês B em voo juntava
+  // os dois e gravava o payload de B na chave de A.
+  const cached = _hbCache.get(month);
+  if (cached && !forceFresh) {
+    renderHouseholdBudgetView(cached);
+    _fetchHouseholdBudget(month, { force: true }).then(fresh => {
+      if (fresh) { _hbCache.set(month, fresh); renderHouseholdBudgetView(fresh); }
+    }).catch(_revalidacaoExpirou(resumo));
+    return;
+  }
+
+  await _hbColdLoad(month, resumo);
+}
+
+async function _hbColdLoad(month, resumo) {
+  resumo.innerHTML = '<div class="empty" style="padding:20px">Carregando orçamento…</div>';
+  try {
+    const data = await _fetchHouseholdBudget(month, { force: true });
+    if (data === undefined) return;
+    _hbCache.set(month, data);
+    renderHouseholdBudgetView(data);
+  } catch (err) {
+    if (err && err.proRequired) { showUpgradeModal("household_budget"); return; }
+    if (!_sessaoExpirou(err, resumo)) {
+      resumo.innerHTML = `<div class="empty" style="padding:20px;color:var(--red)">Erro: ${escapeHtmlSafe(String(err.message || err))}</div>`;
+    }
+  }
+}
+
+function hbChangeMonth(delta) {
+  const [y, m] = _hbMonth.split("-").map(Number);
+  const d = new Date(y, m - 1 + delta, 1);
+  _hbMonth = `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}`;
+  loadHouseholdBudgetView();
+}
+
+function renderHouseholdBudgetView(payload) {
+  const buckets = payload.buckets || [];
+  const totals = payload.totals || {};
+  const income = payload.income || {};
+
+  const label = document.getElementById("hb-month-label");
+  if (label) label.textContent = _hbMonthLong(payload.month || _hbMonth);
+
+  // Renda: não sobrescreve o que o usuário está digitando — o render da
+  // revalidação SWR pode chegar no meio da edição.
+  const input = document.getElementById("hb-income-input");
+  if (input) {
+    const amt = Number(income.amount || 0);
+    _hbIncomeRendered = amt;
+    if (document.activeElement !== input) input.value = amt ? amt.toFixed(2) : "";
+  }
+  const hint = document.getElementById("hb-income-hint");
+  if (hint) {
+    hint.innerHTML = income.source === "override"
+      ? '<button type="button" class="hb-link" onclick="clearHouseholdIncome()">Usar renda automática</button>'
+      : '<span class="hb-badge-auto">calculada automaticamente</span>';
+  }
+
+  _renderHbDonut(buckets, totals);
+  _renderHbLegenda(buckets);
+  _renderHbResumo(buckets, totals);
+  _renderHbMetas(buckets);
+}
+
+// "Total" + valor no miolo do donut. Plugin inline e não registrado global:
+// só este gráfico tem centro de texto.
+function _hbPluginCentro(total, light) {
+  return {
+    id: "hb-centro-total",
+    afterDraw(chart) {
+      const area = chart.chartArea;
+      if (!area) return;
+      const x = (area.left + area.right) / 2;
+      const y = (area.top + area.bottom) / 2;
+      const ctx = chart.ctx;
+      ctx.save();
+      ctx.textAlign = "center";
+      ctx.textBaseline = "middle";
+      ctx.fillStyle = light ? "rgba(15,23,42,.55)" : "rgba(255,255,255,.5)";
+      ctx.font = "600 10px sans-serif";
+      ctx.fillText("Total", x, y - 9);
+      ctx.fillStyle = light ? "#0f172a" : "#ffffff";
+      ctx.font = "700 14px sans-serif";
+      ctx.fillText(_fmtBRLshort(total), x, y + 9);
+      ctx.restore();
+    },
+  };
+}
+
+function _renderHbDonut(buckets, totals) {
+  const el = document.getElementById("hb-donut");
+  if (!el) return;
+  if (_hbChart) { _hbChart.destroy(); _hbChart = null; }
+  // Donut de zeros se lê como "gastei zero em tudo" — a caixa vazia assume o
+  // lugar do canvas. A legenda dos 6 potes continua logo abaixo (como no print).
+  if (_chartVazio(el, _serieVazia(buckets.map(b => Number(b.spent || 0))),
+                  "Você não possui gastos cadastrados",
+                  "Lance seus gastos com o Piggy que cada um cai no pote certo aqui.")) return;
+  const light = _isLightMode();
+  _hbChart = new Chart(el, {
+    type: "doughnut",
+    data: {
+      labels: buckets.map(b => b.label),
+      datasets: [{
+        data: buckets.map(b => Number(b.spent || 0)),
+        backgroundColor: buckets.map(b => b.color + "bb"),
+        borderColor: buckets.map(b => b.color),
+        borderWidth: 1.5,
+        hoverOffset: 8,
+      }],
+    },
+    options: {
+      cutout: "68%",
+      plugins: {
+        legend: { display: false },   // legenda própria em #hb-legend, com valores
+        tooltip: {
+          backgroundColor: "rgba(10,12,24,.88)", borderColor: "rgba(255,255,255,.1)", borderWidth: 1,
+          titleColor: "rgba(255,255,255,.9)", bodyColor: "rgba(255,255,255,.6)",
+          callbacks: { label: ctx => " " + _fmtBRL(ctx.parsed) },
+        },
+      },
+      animation: { duration: 700, easing: "easeInOutQuart" },
+    },
+    plugins: [_hbPluginCentro(Number(totals.spent || 0), light)],
+  });
+}
+
+function _renderHbLegenda(buckets) {
+  const legend = document.getElementById("hb-legend");
+  if (!legend) return;
+  legend.innerHTML = buckets.map(b => `
+    <div class="hb-legend-item">
+      <span class="hb-dot" style="background:${escapeHtmlSafe(b.color)}"></span>
+      <span class="hb-legend-label">${escapeHtmlSafe(b.label)}</span>
+      <span class="hb-legend-val">${_fmtBRL(b.spent)}</span>
+    </div>`).join("");
+}
+
+function _renderHbResumo(buckets, totals) {
+  const el = document.getElementById("hb-resumo-body");
+  if (!el) return;
+  // used_pct vem null quando a renda do mês é 0 — "—", não "NaN%".
+  const fmtPct = p => p == null ? "—" : Number(p).toFixed(1).replace(".", ",") + "%";
+  const rows = buckets.map(b => `
+    <tr>
+      <td><span class="hb-dot" style="background:${escapeHtmlSafe(b.color)}"></span>${escapeHtmlSafe(b.label)}</td>
+      <td>${_fmtBRL(b.spent)}</td>
+      <td>${_fmtBRL(b.budget_amount)}</td>
+      <td>${fmtPct(b.used_pct)}</td>
+      <td style="color:${_toneMoney(b.remaining)}">${_fmtBRL(b.remaining)}</td>
+    </tr>`).join("");
+  el.innerHTML = `
+    <table class="hb-table">
+      <thead><tr><th>Pote</th><th>Valor gasto</th><th>Devo gastar</th><th>Utilizado</th><th>Restante</th></tr></thead>
+      <tbody>${rows}</tbody>
+      <tfoot><tr>
+        <td>Total</td>
+        <td>${_fmtBRL(totals.spent)}</td>
+        <td>${_fmtBRL(totals.budget_amount)}</td>
+        <td>${fmtPct(totals.used_pct)}</td>
+        <td style="color:${_toneMoney(totals.remaining)}">${_fmtBRL(totals.remaining)}</td>
+      </tr></tfoot>
+    </table>`;
+}
+
+function _renderHbMetas(buckets) {
+  const el = document.getElementById("hb-metas-list");
+  if (!el) return;
+  el.innerHTML = buckets.map(b => `
+    <div class="hb-meta-row">
+      <span class="hb-dot" style="background:${escapeHtmlSafe(b.color)}"></span>
+      <span class="hb-meta-label">${escapeHtmlSafe(b.label)}</span>
+      <span class="hb-meta-pct">${Number(b.pct).toFixed(1).replace(".", ",")}%</span>
+    </div>`).join("");
+}
+
+// ── Renda do mês (override manual × calculada) ────────────────────────
+
+async function saveHouseholdIncome() {
+  const input = document.getElementById("hb-income-input");
+  if (!input || !USER_ID) return;
+  const raw = String(input.value || "").trim().replace(",", ".");
+  // Campo esvaziado no blur = desistiu de editar, NÃO "limpa o override":
+  // repõe o valor que já estava. Limpar de verdade é pelo "Usar renda
+  // automática" — caminho explícito, sem acidente de foco.
+  if (raw === "") {
+    input.value = _hbIncomeRendered ? _hbIncomeRendered.toFixed(2) : "";
+    return;
+  }
+  const amount = Number(raw);
+  if (!Number.isFinite(amount) || amount < 0) {
+    await alertModal("Digite uma renda válida (maior ou igual a zero).", { title: "Valor inválido" });
+    return;
+  }
+  // Blur sem mudança (clicou e saiu): pula o PUT.
+  if (_hbIncomeRendered !== null && Math.abs(amount - _hbIncomeRendered) < 0.005) return;
+  await _putHouseholdIncome(amount);
+}
+
+async function clearHouseholdIncome() {
+  await _putHouseholdIncome(null);
+}
+
+// Detalhe de erro dos PUTs da view: o backend manda string ("A soma dos
+// percentuais...") e o FastAPI pode mandar objeto — nunca "[object Object]".
+async function _hbDetalheErro(resp) {
+  const txt = await resp.text();
+  try {
+    const parsed = JSON.parse(txt).detail;
+    return typeof parsed === "string" ? parsed : (parsed ? JSON.stringify(parsed) : txt);
+  } catch(_) { return txt; }
+}
+
+async function _putHouseholdIncome(amount) {
+  try {
+    const resp = await fetch(`${API}/household-budget/${USER_ID}/income`, {
+      method: "PUT",
+      credentials: "same-origin",
+      headers: csrfHeaders({ "Content-Type": "application/json" }),
+      body: JSON.stringify({ month: _hbMonth, amount }),
+    });
+    if (!resp.ok) throw new Error(await _hbDetalheErro(resp));
+    showToast(amount === null ? "✓ Renda automática restaurada" : "✓ Renda do mês salva");
+    // O sendRefresh atualiza o snapshot do overview, NÃO o cache local da
+    // view — sem este delete o mês seguia mostrando a renda velha.
+    _hbCache.delete(_hbMonth);
+    await loadHouseholdBudgetView(true);
+    sendRefresh();
+  } catch (err) { await alertModal(String(err.message || err), { title: "Erro" }); }
+}
+
+// ── Modal de metas (percentuais dos 6 potes — soma tem que fechar 100) ──
+// O markup do modal é ESTÁTICO no dashboard.html (como o `export-overlay`),
+// não `_ensure*` no JS: a trava dos 18 modais do `modal_claro_veu.test.mjs`
+// conta `<div class="modal"` gerado em JS, e modal novo lá exigiria editar o
+// teste. Aqui só os inputs são gerados — e caem dentro de um `.modal` real,
+// então o harness de véu mede os dois lados mesmo assim.
+
+async function openHouseholdBudgetModal() {
+  // Editar antes do primeiro fetch terminar: espera a carga em vez de abrir
+  // o modal com zero inputs (e a soma travada em 0%).
+  if (!_hbCache.get(_hbMonth)) await loadHouseholdBudgetView();
+  const payload = _hbCache.get(_hbMonth);
+  const buckets = (payload && payload.buckets) || [];
+  const wrap = document.getElementById("hb-metas-inputs");
+  wrap.innerHTML = buckets.map(b => `
+    <div class="field">
+      <label for="hb-meta-${escapeHtmlSafe(b.key)}">${escapeHtmlSafe(b.label)} (%)</label>
+      <input type="number" id="hb-meta-${escapeHtmlSafe(b.key)}" data-hb-key="${escapeHtmlSafe(b.key)}"
+             min="0" max="100" step="0.5" value="${Number(b.pct)}" required />
+    </div>`).join("");
+  // Listener, não oninput=: atributo gerado entra no levantamento do
+  // handlers_inline.test.mjs e a soma ao vivo não precisa de nome global.
+  wrap.querySelectorAll("input").forEach(inp => inp.addEventListener("input", _hbAtualizaSomaMetas));
+  document.getElementById("hb-metas-overlay").classList.add("open");
+  _hbAtualizaSomaMetas();
+}
+
+function closeHouseholdBudgetModal() {
+  const el = document.getElementById("hb-metas-overlay");
+  if (el) el.classList.remove("open");
+}
+
+function _hbAtualizaSomaMetas() {
+  let soma = 0;
+  document.querySelectorAll("#hb-metas-inputs input").forEach(inp => { soma += Number(inp.value) || 0; });
+  soma = Math.round(soma * 100) / 100;
+  const ok = Math.abs(soma - 100) < 0.001;
+  const el = document.getElementById("hb-metas-soma");
+  if (el) {
+    el.textContent = ok
+      ? "Total: 100% — certinho!"
+      : `Total: ${String(soma).replace(".", ",")}% — a soma precisa fechar em 100%`;
+    el.classList.toggle("ok", ok);
+  }
+  const btn = document.getElementById("hb-metas-save-btn");
+  if (btn) btn.disabled = !ok;
+}
+
+function _hbLerMetasDoModal() {
+  const buckets = {};
+  let soma = 0, invalido = false;
+  document.querySelectorAll("#hb-metas-inputs input").forEach(inp => {
+    const v = Number(inp.value);
+    if (!Number.isFinite(v) || v < 0) invalido = true;
+    buckets[inp.dataset.hbKey] = v;
+    soma += v;
+  });
+  return { buckets, soma: Math.round(soma * 100) / 100, invalido };
+}
+
+async function saveHouseholdBudgetMetas() {
+  const { buckets, soma, invalido } = _hbLerMetasDoModal();
+  if (invalido) {
+    await alertModal("Todos os percentuais precisam ser números maiores ou iguais a zero.", { title: "Percentual inválido" });
+    return;
+  }
+  // Cinto e suspensório: o botão já fica desabilitado fora de 100%, mas o
+  // Enter no form não passa pelo disabled — o backend devolveria 400 mesmo.
+  if (Math.abs(soma - 100) > 0.001) {
+    await alertModal(`A soma está em ${String(soma).replace(".", ",")}%. Ajuste para fechar em 100%.`, { title: "Soma diferente de 100%" });
+    return;
+  }
+  try {
+    const resp = await fetch(`${API}/household-budget/${USER_ID}/config`, {
+      method: "PUT",
+      credentials: "same-origin",
+      headers: csrfHeaders({ "Content-Type": "application/json" }),
+      body: JSON.stringify({ buckets }),
+    });
+    if (!resp.ok) throw new Error(await _hbDetalheErro(resp));
+    closeHouseholdBudgetModal();
+    showToast("✓ Metas salvas");
+    // Mesmo motivo do `_putHouseholdIncome`: o WebSocket não invalida o cache
+    // local — apaga e recarrega, senão a view segue com os % velhos.
+    _hbCache.delete(_hbMonth);
+    await loadHouseholdBudgetView(true);
+    sendRefresh();
   } catch (err) { await alertModal(String(err.message || err), { title: "Erro" }); }
 }
 
@@ -6834,6 +7275,7 @@ function isProUser() {
 
 const UPGRADE_MESSAGES = {
   investments: "Acompanhe sua carteira de investimentos com cálculo automático de rendimento, IR e IOF. Disponível nos planos pagos.",
+  household_budget: "O Orçamento Doméstico divide sua renda do mês em potes — custos fixos, conforto, metas, prazeres — e mostra quanto cabe em cada um, sem planilha. Disponível nos planos pagos.",
   export: "Exportar seus lançamentos (PDF, planilha) por email faz parte dos planos pagos.",
   pockets_unlimited: "No Grátis você cria 1 caixinha. Com um plano pago fica ilimitado: separe sua reserva, viagens, presentes…",
   cards_unlimited: "No Grátis você cadastra 1 cartão. Com um plano pago fica ilimitado: controle todos os seus cartões em um lugar.",
