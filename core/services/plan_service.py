@@ -596,6 +596,9 @@ FEATURE_MIN_TIER_V2 = {
     "export": "essencial",
     "custom_categories": "essencial",
     "forecast": "pro",
+    # Orçamento Doméstico: pago apenas, mesmo nível funcional do Pro atual
+    # (is_pro = tier >= "plus"). Não usar "essencial": abriria no tier de entrada.
+    "household_budget": "plus",
     "generic": "essencial",
 }
 

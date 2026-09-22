@@ -1277,6 +1277,34 @@ def init_db():
         )
         """,
 
+        # ─── Orcamento Domestico (metodo dos potes) ───────────────────────────
+        # Modelo separado de category_budgets de proposito: aqui o limite e um
+        # PERCENTUAL da renda do mes por pote (custos_fixos, conforto, ...), nao
+        # um valor absoluto por categoria. Percentuais sao globais por usuario;
+        # so a renda tem override por mes ('YYYY-MM', com CHECK de formato).
+        """
+        create table if not exists household_budget_config (
+          id         bigserial primary key,
+          user_id    bigint  not null references users(id) on delete cascade,
+          bucket     text    not null check (bucket in
+            ('custos_fixos','conforto','metas','prazeres',
+             'liberdade_financeira','conhecimento')),
+          pct        numeric not null check (pct >= 0 and pct <= 100),
+          updated_at timestamptz not null default now(),
+          unique (user_id, bucket)
+        )
+        """,
+        """
+        create table if not exists household_budget_income (
+          id         bigserial primary key,
+          user_id    bigint  not null references users(id) on delete cascade,
+          month      text    not null check (month ~ '^[0-9]{4}-(0[1-9]|1[0-2])$'),
+          amount     numeric not null check (amount >= 0),
+          updated_at timestamptz not null default now(),
+          unique (user_id, month)
+        )
+        """,
+
         # ─── Metadata visual das categorias (Sprint 3) ──────────────────────────
         # name = chave funcional lowercase, batendo com launches.categoria (sem FK).
         # is_system = seed lazy das 14 canonicas (controle de idempotencia).

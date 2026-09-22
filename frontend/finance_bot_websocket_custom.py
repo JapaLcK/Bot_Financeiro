@@ -3106,10 +3106,13 @@ async def auth_dashboard_profile(request: Request, response: Response):
     # is_pro já resolvem os casos que o valor cru do plano esconde: assinatura
     # expirada (webhook perdido) e o freio de emergência PLANS_V2_ENABLED. O front
     # consome isto direto em vez de reconstruir tier do plano cru (que divergiria).
-    from core.services.plan_service import get_user_limits, is_pro, require_min_tier
+    from core.services.plan_service import (
+        get_user_limits, is_pro, require_min_tier, plan_gate_ok,
+    )
     limits = await asyncio.to_thread(get_user_limits, int(user_id))
     _is_pro = await asyncio.to_thread(is_pro, int(user_id))
     _forecast_ok = await asyncio.to_thread(require_min_tier, int(user_id), "pro")
+    _hb_ok = await asyncio.to_thread(plan_gate_ok, int(user_id), "household_budget")
     feature_gates = {
         "investments": bool(limits["investments_enabled"]),
         "export": bool(limits["export_enabled"]),
@@ -3121,6 +3124,7 @@ async def auth_dashboard_profile(request: Request, response: Response):
         "changelog": _is_pro,                        # Novidades: gate is_pro (Plus+)
         "agents": limits["agents_energy_budget"] > 0,  # agentes: Plus+
         "forecast": bool(_forecast_ok),              # previsão de saldo 30/60/90: Pro+
+        "household_budget": bool(_hb_ok),            # orçamento doméstico: Plus+
     }
     _no_store(response)
     return {
@@ -7710,6 +7714,83 @@ async def budgets_status_route(request: Request, user_id: int, month: str | None
 
     status = await asyncio.to_thread(get_budgets_status_for_month, user_id, month)
     return {"ok": True, **status}
+
+
+# ─── Orçamento Doméstico (método dos potes) ──────────────────────────────────
+# Modelo separado de category_budgets (db/household_budget.py): limite = % da
+# renda do mês por pote, não valor absoluto por categoria. Pago apenas (Plus+).
+
+class HouseholdBudgetConfigPayload(BaseModel):
+    buckets: dict[str, float]
+
+
+class HouseholdBudgetIncomePayload(BaseModel):
+    month: str
+    amount: float | None = None  # null = limpa o override (volta à computada)
+
+
+def _hb_400(exc: ValueError) -> HTTPException:
+    return HTTPException(status_code=400, detail=str(exc))
+
+
+@app.get("/household-budget/{user_id}/status")
+async def household_budget_status_route(
+    request: Request, user_id: int, month: str | None = None
+):
+    """Status do Orçamento Doméstico: por pote, % da renda vs gasto real do mês.
+
+    `month` no formato 'YYYY-MM' (default = mês corrente); inválido → 400.
+    """
+    _authorize_dashboard_access(request, user_id)
+    _require_pro(user_id, "household_budget")
+    from db.household_budget import get_household_budget_status
+
+    try:
+        status = await asyncio.to_thread(get_household_budget_status, user_id, month)
+    except ValueError as exc:
+        raise _hb_400(exc)
+    return {"ok": True, **status}
+
+
+@app.put("/household-budget/{user_id}/config")
+async def household_budget_config_route(
+    request: Request, user_id: int, payload: HouseholdBudgetConfigPayload
+):
+    """Salva os 6 percentuais (tudo-ou-nada; soma tem que ser 100)."""
+    _authorize_dashboard_access(request, user_id)
+    _require_pro(user_id, "household_budget")
+    from db.household_budget import save_config
+
+    try:
+        buckets = await asyncio.to_thread(save_config, user_id, payload.buckets)
+    except ValueError as exc:
+        raise _hb_400(exc)
+    _invalidate_dashboard_current_cache(user_id)
+    return {"ok": True, "buckets": buckets}
+
+
+@app.put("/household-budget/{user_id}/income")
+async def household_budget_income_route(
+    request: Request, user_id: int, payload: HouseholdBudgetIncomePayload
+):
+    """Override manual da renda do mês. `amount: null` limpa (volta à computada).
+    `amount < 0` → 400 (RENDA_INVALIDA, validado no service, não no banco)."""
+    _authorize_dashboard_access(request, user_id)
+    _require_pro(user_id, "household_budget")
+    from db.household_budget import clear_income_override, set_income_override
+
+    try:
+        if payload.amount is None:
+            await asyncio.to_thread(clear_income_override, user_id, payload.month)
+            amount = None
+        else:
+            amount = await asyncio.to_thread(
+                set_income_override, user_id, payload.month, payload.amount
+            )
+    except ValueError as exc:
+        raise _hb_400(exc)
+    _invalidate_dashboard_current_cache(user_id)
+    return {"ok": True, "month": payload.month, "amount": amount}
 
 
 # ─── Category metadata routes (Sprint 3) ─────────────────────────────────────
