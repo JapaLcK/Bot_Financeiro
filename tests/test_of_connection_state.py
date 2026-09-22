@@ -805,6 +805,37 @@ def test_produto_investimentos_desatualizado_preserva_ultimo_espelho(
     assert db.get_open_finance_snapshot(user_id)["investments"][0]["balance"] == 700
 
 
+@pytest.mark.parametrize("item_status", ["CREATED", "UPDATING"])
+def test_coleta_sem_saude_de_investimentos_preserva_ultimo_espelho(
+    user_id, monkeypatch, relogio_fixo, item_status,
+):
+    item_id = f"item-investimentos-{item_status.lower()}"
+    conexao = _conexao(user_id, item_id, status=item_status)
+    db.save_open_finance_investments(conexao["id"], [{
+        "provider_investment_id": "inv-preservado", "name": "CDB preservado",
+        "type": "FIXED_INCOME", "subtype": "CDB", "currency": "BRL",
+        "balance": "700.00", "raw": {},
+    }])
+    item = {
+        **ITEM_SAUDAVEL,
+        "id": item_id,
+        "status": item_status,
+        # Durante a coleta, produto omitido significa estado desconhecido.
+        "statusDetail": {"accounts": ITEM_SAUDAVEL["statusDetail"]["accounts"]},
+    }
+    _mock_pluggy(monkeypatch, item=item, contas=[])
+    chamadas = []
+    monkeypatch.setattr(ps, "list_pluggy_investments",
+                        lambda *args: chamadas.append(args) or [])
+
+    res = ps.sync_pluggy_item(item_id)
+
+    assert chamadas == [], "produto desconhecido durante coleta não autoriza snapshot vazio"
+    assert res["ok"] is False and res["reason"] == "read_failed"
+    assert res["investments_reconciled"] == 0
+    assert db.get_open_finance_snapshot(user_id)["investments"][0]["balance"] == 700
+
+
 def test_leitura_incompleta_com_zero_contas_nao_vira_no_accounts(user_id, monkeypatch, relogio_fixo):
     """'não consegui ler' ≠ 'li e veio vazio' (linhas D × E da tabela). Sem esta
     distinção, um 429 em `/investments` acusaria o banco de não ter dado nenhum —
