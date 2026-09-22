@@ -20,12 +20,12 @@
 
   function asksAboutPortfolio(text) {
     const subject = /caixinh|investiment|carteira|renda fixa|renda vari[aá]vel|a[cç][oõ]es|ativos|cdb|tesouro|\bfiis?\b/i;
-    const statusRequest = /^(?:quanto\s+(?:tenho|possuo)\b|como\s+(?:est[aá]|est[aã]o)(?=\s|[?!.,]|$)|quais\b|mostr\w*\b|list\w*\b|detalh\w*\b|veja\b|ver\b)/i;
+    const statusRequest = /^(?:quanto\s+(?:tenho|possuo)\b|como\s+(?:est[aá]|est[aã]o)(?=\s|[?!.,]|$)|quais\b|(?:me\s+)?mostr\w*\b|quero\s+ver\b|list\w*\b|detalh\w*\b|veja\b|ver\b)/i;
     const directList = /^(?:meu|minha|meus|minhas)\s+(?:pr[oó]prios?\s+)?(?:investimentos?|ativos?|carteira|caixinhas?|cdbs?|tesouros?|renda\s+(?:fixa|vari[aá]vel)|a[cç][oõ]es|fiis?)(?:\s+(?:do|da|no)\s+open finance)?[.!?]?$/i;
     const personal = /\b(?:meu|minha|meus|minhas|tenho|possuo|saldo|posi[cç][aã]o)\b/i;
     const financialContext = /caixinh|investiment|renda fixa|renda vari[aá]vel|cdb|tesouro|\bfiis?\b|\bopen finance\b|\bbolsa\b|\bmercado financeiro\b|\bfinanceir\w*\b/i;
     const barePortfolio = /^(?:minhas\s+a[cç][oõ]es|minha\s+carteira)[.!?]?$/i;
-    const operation = /\b(?:aport\w*|aplic\w*|deposit\w*|resgat\w*|sac\w*|compr\w*|vend\w*|transfer\w*|moviment\w*|retir\w*|contribui\w*|hist[oó]ric\w*|extrato|invist\w*|investir|investi)\b/i;
+    const operation = /\b(?:aport\w*|aplic\w*|deposit\w*|resgat\w*|sac\w*|compr\w*|vend\w*|transfer\w*|moviment\w*|retir\w*|contribui\w*|hist[oó]ric\w*|extrato|invist\w*|investir|investi|rendimento|rendeu|rentabilidade|retorno|performance|desempenho|lucro|valoriza[cç][aã]o)\b/i;
     return !operation.test(text) && subject.test(text)
       && (financialContext.test(text) || barePortfolio.test(text))
       && (directList.test(text) || (personal.test(text) && statusRequest.test(text)));
