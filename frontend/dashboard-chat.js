@@ -25,7 +25,8 @@
     const personal = /\b(?:meu|minha|meus|minhas|tenho|possuo|saldo|posi[cç][aã]o)\b/i;
     const openFinance = /\bopen finance\b/i;
     const unrelatedWallet = /\bcarteira\s+(?:de\s+)?(?:motorista|habilita[cç][aã]o|trabalho|estudante|vacina)\b/i;
-    return !unrelatedWallet.test(text) && subject.test(text)
+    const unrelatedSubject = /\ba[cç][oõ]es\s+(?:judiciais|judici[aá]rias|penais|civis|trabalhistas)\b|\bativos?\s+(?:de\s+)?(?:software|ti|inform[aá]tica)\b/i;
+    return !unrelatedWallet.test(text) && !unrelatedSubject.test(text) && subject.test(text)
       && (directList.test(text) || openFinance.test(text) || (personal.test(text) && action.test(text)));
   }
 

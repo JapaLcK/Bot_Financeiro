@@ -81,7 +81,11 @@ for (const question of [
   });
 }
 
-for (const question of ['Como funcionam ações?', 'Quais ações devo tomar para reduzir gastos?', 'Como está minha carteira de motorista?']) {
+for (const question of [
+  'Como funcionam ações?', 'Quais ações devo tomar para reduzir gastos?',
+  'Como está minha carteira de motorista?', 'Como estão minhas ações judiciais?',
+  'Como estão meus ativos de software?',
+]) {
   test(`não expõe a carteira em pergunta ambígua: ${question}`, async () => {
     const { page, errors, piggyRequests } = await setup({ openAgent: false, investments });
     try {
