@@ -246,6 +246,77 @@ for (const available of [false, true]) {
   });
 }
 
+test("downgrade permite apagar preferência semanal sem ligar envios nem perder outras notificações", async () => {
+  const page = await newPage();
+  let stored = true, available = false;
+  const patches = [];
+  const prefs = () => ({ ...NOTIF_OK, daily_report_enabled: false, monthly_report_enabled: false,
+    weekly_report_available: available, weekly_report_stored_enabled: stored,
+    weekly_report_enabled: available && stored });
+  try {
+    await page.route("**/settings/1/notifications", route => {
+      if (route.request().method() === "PATCH") {
+        const body = route.request().postDataJSON();
+        patches.push(body);
+        stored = body.weekly_report_enabled;
+      }
+      return route.fulfill(json(prefs()));
+    });
+    await page.goto(`${ORIGIN}/settings.html?view=notifications`);
+    await waitFor(async () => (await page.locator("#notif-email-value").textContent()).includes("a@b.com"), "preferências carregarem");
+    assert.equal(await page.locator("#notif-weekly-report").isChecked(), true);
+    assert.equal(await page.locator("#notif-weekly-report").isDisabled(), false);
+    assert.equal(await page.locator("#notif-daily-hour").isDisabled(), true, "preferência suspensa não agenda envio");
+    assert.match(await page.locator("#notif-weekly-description").textContent(), /Desmarque/);
+    assert.match(await page.locator("#notif-status-value").textContent(), /semanal pausado pelo plano/);
+    await page.locator("#notif-weekly-report").uncheck();
+    await waitFor(async () => !(await page.locator("#notif-daily-report").isDisabled())
+      && await page.locator("#notif-weekly-report").isDisabled(), "opt-out ser salvo");
+    assert.deepEqual(patches, [{ weekly_report_enabled: false }]);
+    assert.equal(await page.locator("#notif-weekly-report").isChecked(), false);
+    for (const id of ["notif-daily-report", "notif-monthly-report"]) {
+      assert.equal(await page.locator(`#${id}`).isChecked(), false);
+      assert.equal(await page.locator(`#${id}`).isDisabled(), false);
+    }
+    assert.equal(await page.locator("#notif-tip-email").isChecked(), true);
+    available = true;
+    await startPtr(page);
+    await waitFor(() => page.evaluate(() => window.__done !== null), "upgrade atualizar permissões");
+    assert.equal(await page.locator("#notif-weekly-report").isChecked(), false, "upgrade não deve reviver preferência apagada");
+    assert.equal(await page.locator("#notif-weekly-report").isDisabled(), false);
+  } finally { await page.close(); }
+});
+
+test("opt-out semanal: evento repetido não duplica PATCH e falha restaura checkbox mesmo sem GET", async () => {
+  const page = await newPage();
+  let release, failReads = false, calls = 0;
+  try {
+    await page.route("**/settings/1/notifications", async route => {
+      if (route.request().method() === "PATCH") {
+        calls++;
+        await new Promise(resolve => { release = resolve; });
+        failReads = true;
+        return route.fulfill({ ...json({ detail: "Indisponível" }), status: 503 });
+      }
+      if (failReads) return route.fulfill({ ...json({}), status: 503 });
+      return route.fulfill(json({ ...NOTIF_OK, weekly_report_available: false,
+        weekly_report_stored_enabled: true, weekly_report_enabled: false }));
+    });
+    await page.goto(`${ORIGIN}/settings.html?view=notifications`);
+    await waitFor(async () => (await page.locator("#notif-email-value").textContent()).includes("a@b.com"), "preferências carregarem");
+    assert.equal(await page.locator("#notif-weekly-report").isChecked(), true);
+    await page.locator("#notif-weekly-report").uncheck();
+    await waitFor(() => calls === 1, "PATCH começar");
+    assert.equal(await page.locator("#notif-weekly-report").isDisabled(), true);
+    await page.locator("#notif-weekly-report").dispatchEvent("change");
+    assert.equal(calls, 1, "save em voo precisa ignorar evento repetido");
+    release();
+    await waitFor(async () => !(await page.locator("#notif-weekly-report").isDisabled()), "falha terminar");
+    assert.equal(await page.locator("#notif-weekly-report").isChecked(), true, "falha não pode fingir opt-out persistido");
+    assert.equal(calls, 1);
+  } finally { release?.(); await page.close(); }
+});
+
 test("readApiError não lê o Object.prototype", async () => {
   const page = await newPage();
   try {

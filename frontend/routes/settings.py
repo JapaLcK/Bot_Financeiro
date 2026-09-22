@@ -93,6 +93,7 @@ async def _get_notification_settings(user_id: int) -> dict:
         "daily_report_hour": int(daily_prefs.get("hour", 9)),
         "daily_report_minute": int(daily_prefs.get("minute", 0)),
         "weekly_report_enabled": weekly_available and bool(daily_prefs.get("weekly_enabled", True)),
+        "weekly_report_stored_enabled": bool(daily_prefs.get("weekly_enabled", True)),
         "weekly_report_available": weekly_available,
         "monthly_report_enabled": bool(daily_prefs.get("monthly_enabled", True)),
     }

@@ -198,9 +198,31 @@ def test_weekly_ativacao_e_downgrade_preservam_desligar(tier, client, user_id):
     assert r.status_code == 200, r.text
     assert r.json()["weekly_report_available"] is False
     assert r.json()["weekly_report_enabled"] is False
+    assert r.json()["weekly_report_stored_enabled"] is True
     r = client.patch(url, json={"weekly_report_enabled": False})
     assert r.status_code == 200, r.text
+    assert r.json()["weekly_report_stored_enabled"] is False
     assert "desligado" in report.disable_weekly(user_id).lower()
+    tier("pro")
+    assert client.get(url).json()["weekly_report_enabled"] is False
+
+
+@pytest.mark.parametrize("value,v2", [("essencial", "1"), ("plus", "1"), ("pro", "1"), ("free", "0")])
+def test_preferencia_semanal_separa_intencao_e_envio(tier, value, v2, client, user_id, monkeypatch):
+    tier(value)
+    monkeypatch.setenv("PLANS_V2_ENABLED", v2)
+    url = f"/settings/{user_id}/notifications"
+    assert client.patch(url, json={"weekly_report_enabled": False,
+        "daily_report_enabled": False, "monthly_report_enabled": True}).status_code == 200
+    available = value in {"plus", "pro"} or v2 == "0"
+    r = client.patch(url, json={"weekly_report_enabled": True})
+    assert r.status_code == (200 if available else 403)
+    prefs = client.get(url).json()
+    assert prefs["weekly_report_available"] is available
+    assert prefs["weekly_report_stored_enabled"] is available
+    assert prefs["weekly_report_enabled"] is available
+    assert prefs["daily_report_enabled"] is False
+    assert prefs["monthly_report_enabled"] is True
 
 
 def test_legado_mantem_capacidades_anteriores(monkeypatch):
