@@ -92,6 +92,9 @@ saiu para routers em `frontend/routes/`, registrados com `include_router`:
 `POST /simulator/{user_id}` (`frontend/routes/simulator.py`) é o simulador de compra
 do Pro: 1 a 3 cenários (à vista, parcelado, financiado pela tabela Price) comparados
 com o atual sobre a mesma leitura da previsão de saldo, 90 dias + resumo do contrato.
+O pior dia e a reserva incluem hoje após a compra e os 90 dias seguintes (91 datas);
+o saldo final continua sendo o do dia 90. A tool avisa antes dos números se os
+bancos conectados estiverem excluídos ou o saldo consolidado não for confirmado.
 Sem persistência e sem tela ainda; lógica em `core/services/decision_simulator.py`.
 
 **Rota nova vai para um router de `frontend/routes/`**, não para o monólito. Ao

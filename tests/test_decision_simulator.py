@@ -27,7 +27,7 @@ def test_entrada_maior_que_o_saldo_deixa_o_pior_dia_negativo_sem_erro(monkeypatc
     assert r["pior_dia"]["saldo"] == -4000.0
     assert r["saldo_final_90"] == -4000.0
     assert r["delta_vs_atual"] == -5000.0
-    assert r["dias_abaixo_da_reserva"] == 90
+    assert r["dias_abaixo_da_reserva"] == 91
     assert out["atual"]["dias_abaixo_da_reserva"] == 0 and out["atual"]["primeiro_dia_abaixo"] is None
 
 
@@ -38,8 +38,8 @@ def test_reserva_vale_para_os_cenarios_e_primeiro_dia_e_o_primeiro(monkeypatch):
     out = simulate(1, _sim({"nome": "TV", "preco": 500.0}, reserva=800.0))
     r = out["cenarios"][0]["resumo"]
     assert r["saldo_final_90"] == 500.0
-    assert r["dias_abaixo_da_reserva"] == 90
-    assert r["primeiro_dia_abaixo"] == (date.today() + timedelta(days=1)).isoformat()
+    assert r["dias_abaixo_da_reserva"] == 91
+    assert r["primeiro_dia_abaixo"] == date.today().isoformat()
 
 
 def test_48x_hoje_conta_parcelas_dentro_e_fora_dos_90_dias(monkeypatch):

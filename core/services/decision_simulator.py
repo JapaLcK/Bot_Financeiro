@@ -198,13 +198,17 @@ DIAS = 90  # janela do saldo diário; a chave `saldo_final_90` do resumo assume 
 
 PREMISSAS = (
     "Saldo de 90 dias: o mesmo da previsão de saldo (saldo + receitas fixas − gastos fixos "
-    "automáticos − boletos − faturas em aberto), mais a compra simulada. pago_na_compra é tudo "
+    "automáticos − boletos − faturas em aberto), mais a compra simulada. O pior dia e os dias "
+    "abaixo da reserva incluem hoje após os compromissos e a compra, até o dia 90 inclusive "
+    "(91 datas). pago_na_compra é tudo "
     "o que sai na data da compra: o preço cheio (à vista) ou a entrada (parcelado), mais os "
     "custos únicos; no à vista, entrada é 0. A primeira parcela e a despesa mensal nova saem "
     "um mês depois, no mesmo dia (ajustado ao fim do mês). Parcelado com juros usa a tabela "
     "Price; o arredondamento em centavos vai para a última parcela. total_pago é pago_na_compra "
     "mais todas as parcelas, inclusive as que caem depois do dia 90, e NÃO inclui a despesa "
-    "mensal nova, que não tem fim contratado. Não inclui gastos avulsos futuros nem IOF, "
+    "mensal nova, que não tem fim contratado. Receitas e gastos fixos só entram quando "
+    "mensais ou anuais; recorrências semanais, diárias e únicas não são projetadas. "
+    "Não inclui gastos avulsos futuros nem IOF, "
     "seguro ou tarifas não informados."
 )
 
@@ -219,11 +223,15 @@ def simulate(user_id: int, simulacao: Simulacao) -> dict[str, Any]:
     sb = cashflow._starting_balance(user_id)
     events = cashflow._cashflow_events(user_id, today, until)
 
-    atual = _resumo(_trajectory(today, sb, events, days, reserva))
+    # O motor puro inicia no dia seguinte à âncora. Ancorar em ontem inclui HOJE
+    # como primeiro ponto, sem reler saldo nem mover o fim (hoje + 90 dias).
+    # Compra hoje pode violar a reserva e ser encoberta por um salário amanhã.
+    anchor = today - timedelta(days=1)
+    atual = _resumo(_trajectory(anchor, sb, events, days + 1, reserva))
     cenarios = []
     for cen in simulacao.cenarios:
         extra, contrato = _decision_events(cen, today, until)
-        resumo = _resumo(_trajectory(today, sb, events + extra, days, reserva))
+        resumo = _resumo(_trajectory(anchor, sb, events + extra, days + 1, reserva))
         resumo["delta_vs_atual"] = _duas_casas(resumo["saldo_final_90"] - atual["saldo_final_90"])
         # Compra datada depois da janela: o saldo de 90 dias é igual ao atual, e sem
         # este marcador a resposta pareceria "não muda nada".

@@ -204,3 +204,32 @@ def test_tool_simula_o_user_da_conversa_e_nunca_um_id_vindo_dos_args(cliente, mo
     # e o LLM não consegue escolher a conta: `user_id` no corpo é recusado
     ruim = runner._dispatch_tool(42, "simulate_purchase", {"user_id": 1, **VALIDO})
     assert json.loads(ruim[0])["error"] == "invalid_args"
+
+
+# ─── aviso de saldo de partida incompleto (apontamento P2 do Codex, PR #496) ──
+
+@pytest.mark.parametrize("cb,gate,erro,esperado", [
+    # controle positivo: banco conectado e consolidado liberado → sem aviso
+    ({"of_bank_count": 1, "manual": 100.0, "consolidated": 50000.0}, True, False, ""),
+    # banco conectado com o consolidado desligado → só a Carteira
+    ({"of_bank_count": 1, "manual": 100.0, "consolidated": 50000.0}, False, False, "usa só o saldo da sua Carteira"),
+    # consulta ao consolidado falhou → não dá pra confirmar
+    (None, True, True, "Não foi possível confirmar seu saldo consolidado"),
+])
+def test_tool_avisa_quando_o_saldo_de_partida_nao_e_o_consolidado(cliente, monkeypatch, cb, gate, erro, esperado):
+    import db
+    import core.services.plan_service as plan_service
+    from core.services.ai_chat import runner
+
+    def consolidado(uid):
+        if erro:
+            raise RuntimeError("OF fora do ar")
+        return dict(cb)
+    monkeypatch.setattr(db, "get_consolidated_balance", consolidado, raising=False)
+    monkeypatch.setattr(plan_service, "consolidated_balance_enabled", lambda uid, email=None: gate)
+    out = json.loads(runner._dispatch_tool(1, "simulate_purchase", dict(VALIDO))[0])
+    if esperado:
+        assert esperado in out["aviso_saldo"], out["aviso_saldo"]
+    else:
+        assert out["aviso_saldo"] == "" and out["balance_source"] == "consolidated"
+    assert "aviso_saldo" in out["note"]  # a note manda repetir o aviso
