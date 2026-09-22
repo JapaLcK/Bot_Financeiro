@@ -71,6 +71,7 @@
     waPollCount: 0,
     reportChoice: null,
     reportCurrent: null,
+    weeklyReportAvailable: false,
   };
 
   /* ─── Funções puras (testáveis sem DOM) ───────────────────────────────── */
@@ -514,22 +515,31 @@
   /* ─── Passo 4: resumo ─────────────────────────────────────────────────── */
 
   async function loadReport() {
+    let loaded = false;
     try {
       state.reportCurrent = await apiGet("/settings/" + state.userId + "/notifications");
+      if (typeof state.reportCurrent.weekly_report_available === "boolean") {
+        state.weeklyReportAvailable = state.reportCurrent.weekly_report_available;
+      }
+      loaded = true;
     } catch (_) {
       state.reportCurrent = null;
+      state.weeklyReportAvailable = false;
     }
+    if (!state.weeklyReportAvailable && state.reportChoice === "semanal") state.reportChoice = null;
     renderReportCurrent();
     renderReportChoices();
     fillHourSelect();
+    return loaded;
   }
 
   function renderReportCurrent() {
     const box = el("report-current");
-    if (!box || !state.reportCurrent) return;
+    if (!box) return;
+    if (!state.reportCurrent) { box.textContent = ""; return; }
     const on = [];
     if (state.reportCurrent.daily_report_enabled) on.push("diário");
-    if (state.reportCurrent.weekly_report_enabled) on.push("semanal");
+    if (state.weeklyReportAvailable && state.reportCurrent.weekly_report_enabled) on.push("semanal");
     if (state.reportCurrent.monthly_report_enabled) on.push("mensal");
     box.textContent = on.length
       ? "Hoje você recebe: " + on.join(", ") + "."
@@ -543,23 +553,27 @@
    */
   function renderReportChoices() {
     const wrap = el("report-choices");
-    if (!wrap || wrap.children.length) return;
+    if (!wrap) return;
+    wrap.innerHTML = "";
     REPORT_CHOICES.forEach(function (choice) {
       const button = document.createElement("button");
       button.type = "button";
       button.className = "onb-choice";
       button.setAttribute("role", "radio");
-      button.setAttribute("aria-checked", "false");
+      button.setAttribute("aria-checked", state.reportChoice === choice.id ? "true" : "false");
+      button.disabled = choice.weekly && !state.weeklyReportAvailable;
       button.setAttribute("data-action", "pick-report");
       button.setAttribute("data-choice", choice.id);
       const label = document.createElement("strong");
       label.textContent = choice.label;
       const hint = document.createElement("small");
-      hint.textContent = choice.hint;
+      hint.textContent = button.disabled ? "Disponível nos planos Plus e Pro" : choice.hint;
       button.appendChild(label);
       button.appendChild(hint);
       wrap.appendChild(button);
     });
+    const save = el("save-report");
+    if (save) save.disabled = state.inFlight || !state.reportChoice;
   }
 
   function fillHourSelect() {
@@ -576,6 +590,7 @@
   }
 
   function pickReport(choiceId) {
+    if (state.inFlight || (choiceId === "semanal" && !state.weeklyReportAvailable)) return;
     state.reportChoice = choiceId;
     els("report-choices").forEach(function (wrap) {
       Array.prototype.slice.call(wrap.children).forEach(function (node) {
@@ -585,6 +600,13 @@
     show(el("report-hour-wrap"), choiceId === "diario");
     const save = el("save-report");
     if (save) save.disabled = false;
+  }
+
+  function weeklyReportUnavailable() {
+    state.weeklyReportAvailable = false;
+    state.reportChoice = null;
+    renderReportChoices();
+    text(el("report-current"), "O resumo semanal automático está disponível no Plus e Pro. Escolha outra frequência ou continue sem mudar.");
   }
 
   async function saveReport(button) {
@@ -602,12 +624,20 @@
         if (!isNaN(hour)) { body.daily_report_hour = hour; body.daily_report_minute = 0; }
       }
       try {
+        // O plano pode mudar enquanto o wizard está aberto. Revalida só a
+        // escolha paga; diário, mensal e desligar continuam salvando direto.
+        if (prefs.weekly_report_enabled) {
+          if (!await loadReport()) { showError("Não consegui conferir seu plano agora. Tente novamente."); return; }
+          if (!state.weeklyReportAvailable) { weeklyReportUnavailable(); return; }
+        }
         await apiSend("PATCH", "/settings/" + state.userId + "/notifications", body);
         next();
       } catch (err) {
-        showError(err.message);
+        if (err.status === 403 && err.detail && err.detail.feature === "weekly_report") weeklyReportUnavailable();
+        else showError(err.message);
       }
     });
+    if (!state.inFlight && button && !state.reportChoice) button.disabled = true;
   }
 
   /* ─── Carregamento por passo ──────────────────────────────────────────── */
@@ -670,6 +700,7 @@
       return;
     }
     state.userId = profile.user_id;
+    state.weeklyReportAvailable = !!(profile.feature_gates && profile.feature_gates.weekly_report);
     const name = (profile.display_name || "").trim();
     state.firstName = name ? name.split(/\s+/)[0] : "";
     if (state.firstName) {
