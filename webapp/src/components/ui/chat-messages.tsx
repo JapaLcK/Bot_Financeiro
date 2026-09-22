@@ -90,6 +90,7 @@ export function ChatMessages({ id, view, active, onClose }: {
   const [mobile, setMobile] = useState(() => window.matchMedia("(max-width: 600px), (max-width: 960px) and (pointer: coarse) and (orientation: landscape)").matches);
   const last = view.messages[view.messages.length - 1];
   const signature = `${view.messages.length}:${last?.id}:${last?.state}:${last?.content.length}`;
+  const hasPortfolio = id === "piggy" && view.messages.some(message => Boolean(message.portfolio));
 
   useEffect(() => {
     const query = window.matchMedia("(max-width: 600px), (max-width: 960px) and (pointer: coarse) and (orientation: landscape)");
@@ -157,7 +158,7 @@ export function ChatMessages({ id, view, active, onClose }: {
 
   return <section ref={panelRef} id={`${prefix}-panel`} hidden={!active} role={id === "agent" ? "main" : "dialog"}
     aria-modal={id === "piggy" ? active && mobile : undefined} aria-labelledby={`${prefix}-title`}
-    className={cn("pc-chat-panel pc-flex pc-flex-col pc-overflow-hidden", active && "open")}
+    className={cn("pc-chat-panel pc-flex pc-flex-col pc-overflow-hidden", active && "open", hasPortfolio && "pc-has-portfolio")}
     onKeyDown={event => {
       if (event.key === "Escape") { event.stopPropagation(); onClose(); }
       if (event.key !== "Tab" || !mobile) return;

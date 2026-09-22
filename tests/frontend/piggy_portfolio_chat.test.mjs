@@ -18,6 +18,10 @@ for (const viewport of [{ width: 1280, height: 900 }, { width: 390, height: 844 
       await page.fill('#piggy-input', 'Quanto tenho nas caixinhas?');
       await page.click('#piggy-send');
       await page.locator('.pc-portfolio').waitFor();
+      assert.equal(await page.locator('#piggy-panel').evaluate(el => el.classList.contains('pc-has-portfolio')), true);
+      if (viewport.width === 1280) {
+        assert.equal(await page.locator('#piggy-panel').evaluate(el => Math.round(el.getBoundingClientRect().width)), 660);
+      }
       assert.match(await page.locator('.pc-portfolio').textContent(), /R\$\s*2\.400,55/);
       assert.match(await page.locator('.pc-portfolio').textContent(), /4 ativos/);
       assert.equal(await page.locator('.pc-portfolio-row:visible').count(), 0);
@@ -61,7 +65,7 @@ test('mantém o chat bloqueado enquanto carrega a carteira', async () => {
 
 for (const question of [
   'Meus investimentos', 'Meus investimentos do Open Finance',
-  'Meus CDBs', 'Minhas ações', 'Minha renda fixa',
+  'Meus CDBs', 'Minhas ações', 'Minha renda fixa', 'Meus FIIs', 'Meu FII',
 ]) {
   test(`reconhece pedido direto de carteira: ${question}`, async () => {
     const { page, errors, piggyRequests } = await setup({ openAgent: false, investments });

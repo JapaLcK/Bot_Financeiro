@@ -19,9 +19,9 @@
   ];
 
   function asksAboutPortfolio(text) {
-    const subject = /caixinh|investiment|carteira|renda fixa|renda vari[aá]vel|a[cç][oõ]es|ativos|cdb|tesouro/i;
+    const subject = /caixinh|investiment|carteira|renda fixa|renda vari[aá]vel|a[cç][oõ]es|ativos|cdb|tesouro|\bfiis?\b/i;
     const action = /\b(quanto|quais|como|mostr\w*|list\w*|detalh\w*|ver|veja|tenho|saldo|carteira|posi[cç][aã]o)\b/i;
-    const directList = /\b(?:meu|minha|meus|minhas)\s+(?:pr[oó]prios?\s+)?(?:investimentos?|ativos?|carteira|caixinhas?|cdbs?|tesouros?|renda\s+(?:fixa|vari[aá]vel)|a[cç][oõ]es)\b/i;
+    const directList = /\b(?:meu|minha|meus|minhas)\s+(?:pr[oó]prios?\s+)?(?:investimentos?|ativos?|carteira|caixinhas?|cdbs?|tesouros?|renda\s+(?:fixa|vari[aá]vel)|a[cç][oõ]es|fiis?)\b/i;
     const personal = /\b(?:meu|minha|meus|minhas|tenho|possuo|saldo|posi[cç][aã]o)\b/i;
     const openFinance = /\bopen finance\b/i;
     const unrelatedWallet = /\bcarteira\s+(?:de\s+)?(?:motorista|habilita[cç][aã]o|trabalho|estudante|vacina)\b/i;
