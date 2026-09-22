@@ -68,6 +68,7 @@ for (const question of [
   'Meus CDBs', 'Minhas ações', 'Minha renda fixa', 'Meus FIIs', 'Meu FII',
   'Como está minha carteira de investimentos?', 'Como estão minhas ações na bolsa?',
   'Me mostre meus investimentos', 'Quero ver meus investimentos',
+  'Me mostre minha carteira', 'Quero ver minhas ações',
 ]) {
   test(`reconhece pedido direto de carteira: ${question}`, async () => {
     const { page, errors, piggyRequests } = await setup({ openAgent: false, investments });
@@ -93,6 +94,8 @@ for (const question of [
   'Invista R$ 100 nos meus investimentos',
   'Mostre o rendimento dos meus investimentos',
   'Como está a rentabilidade dos meus investimentos?',
+  'Mostre os rendimentos dos meus investimentos',
+  'Me mostre meus retornos de investimentos',
 ]) {
   test(`não expõe a carteira em pergunta ambígua: ${question}`, async () => {
     const { page, errors, piggyRequests } = await setup({ openAgent: false, investments });
