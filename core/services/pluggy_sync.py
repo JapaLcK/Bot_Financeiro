@@ -261,6 +261,22 @@ def _sync_caixinhas_da_conexao(connection: dict) -> dict:
     return result
 
 
+def _investment_snapshot_ready(health: dict) -> bool:
+    product = (health.get("products") or {}).get("INVESTMENTS")
+    return (
+        "INVESTMENTS" not in (health.get("stale_products") or [])
+        and (str(health.get("item_status") or "").upper() == "UPDATED"
+             or (isinstance(product, dict) and product.get("updated") is True))
+    )
+
+
+def _investment_read_state(health: dict) -> tuple:
+    """Campos do item/produto que mudam quando a coleta cruza a leitura."""
+    product = (health.get("products") or {}).get("INVESTMENTS") or {}
+    return (health.get("item_status"), health.get("execution_status"),
+            product.get("updated"), product.get("last_updated_at"))
+
+
 def _sync_pluggy_item_confirmado(provider_item_id: str, connection: dict, api_key: str,
                                  health: dict) -> dict:
     """O sync em si, com o item já confirmado vivo.
@@ -324,30 +340,34 @@ def _sync_pluggy_item_confirmado(provider_item_id: str, connection: dict, api_ke
     # é confundir "li e veio vazio" com "não consegui ler": só o primeiro
     # autoriza `no_accounts`.
     investments: list[dict] = []
-    investment_health = (health.get("products") or {}).get("INVESTMENTS")
-    item_atualizado = str(health.get("item_status") or "").upper() == "UPDATED"
-    # Produto omitido só permite reconciliação quando o item terminou em
-    # UPDATED. Em coleta ou falha, a omissão não confirma um snapshot vazio;
-    # nesses estados, exigimos `investments.isUpdated=true` explícito.
-    investments_ok = (
-        "INVESTMENTS" not in (health.get("stale_products") or [])
-        and (item_atualizado
-             or (isinstance(investment_health, dict)
-                 and investment_health.get("updated") is True))
-    )
+    investments_ok = False
     investment_read_version: int | None = None
-    if investments_ok:
-        # Contas/transações podem paginar por minutos. Reservar aqui, logo antes
-        # de /investments, ordena a leitura DESTE produto pelo início real dela.
-        investment_read_version = reserve_sync_read_version()
-        try:
-            investments = [normalize_pluggy_investment(i)
-                           for i in list_pluggy_investments(provider_item_id, api_key)]
-        except Exception as exc:
-            investments_ok = False
-            print(f"[pluggy_sync] investimentos indisponíveis item={provider_item_id} "
-                  f"erro={type(exc).__name__}", flush=True)
+    try:
+        # A primeira saúde foi medida ANTES da paginação de contas, que pode
+        # levar minutos. Uma nova coleta pode começar nesse intervalo.
+        health_before = derive_item_health(get_pluggy_item(provider_item_id, api_key))
+        health = health_before
+    except Exception as exc:
+        print(f"[pluggy_sync] saúde de investimentos indisponível item={provider_item_id} "
+              f"erro={type(exc).__name__}", flush=True)
     else:
+        # Produto omitido só autoriza snapshot vazio com item UPDATED. Em coleta
+        # ou falha, exigimos investments.isUpdated=true explícito.
+        if _investment_snapshot_ready(health_before):
+            # A versão pertence à leitura do produto, após a paginação de contas.
+            investment_read_version = reserve_sync_read_version()
+            try:
+                investments = [normalize_pluggy_investment(i)
+                               for i in list_pluggy_investments(provider_item_id, api_key)]
+                health_after = derive_item_health(get_pluggy_item(provider_item_id, api_key))
+                health = health_after
+                investments_ok = (_investment_snapshot_ready(health_after)
+                                  and _investment_read_state(health_before)
+                                  == _investment_read_state(health_after))
+            except Exception as exc:
+                print(f"[pluggy_sync] investimentos indisponíveis item={provider_item_id} "
+                      f"erro={type(exc).__name__}", flush=True)
+    if not investments_ok:
         print(f"[pluggy_sync] investimentos desatualizados item={provider_item_id}", flush=True)
     heartbeat()
 

@@ -908,6 +908,58 @@ def test_produto_investimentos_desatualizado_preserva_ultimo_espelho(
     assert db.get_open_finance_snapshot(user_id)["investments"][0]["balance"] == 700
 
 
+@pytest.mark.parametrize("mudanca", ["antes", "durante", "nova_coleta_concluida"])
+def test_saude_muda_perto_da_leitura_e_nao_zerra_investimentos(
+    user_id, monkeypatch, relogio_fixo, mudanca,
+):
+    item_id = f"item-saude-investimentos-{mudanca}"
+    conexao = _conexao(user_id, item_id)
+    db.save_open_finance_investments(conexao["id"], [{
+        "provider_investment_id": "inv-preservado", "name": "CDB preservado",
+        "type": "FIXED_INCOME", "subtype": "CDB", "currency": "BRL",
+        "balance": "700.00", "raw": {},
+    }])
+    item_atualizado = {
+        **ITEM_SAUDAVEL, "id": item_id,
+        "statusDetail": {**ITEM_SAUDAVEL["statusDetail"],
+                         "investments": {"isUpdated": True,
+                                         "lastUpdatedAt": "2026-08-20T11:00:00Z"}},
+    }
+    item_coletando = {
+        **item_atualizado, "status": "UPDATING",
+        "statusDetail": {**item_atualizado["statusDetail"],
+                         "investments": {"isUpdated": False,
+                                         "lastUpdatedAt": "2026-08-20T11:00:00Z"}},
+    }
+    item_outra_coleta = {
+        **item_atualizado,
+        "statusDetail": {**item_atualizado["statusDetail"],
+                         "investments": {"isUpdated": True,
+                                         "lastUpdatedAt": "2026-08-20T12:00:00Z"}},
+    }
+    respostas = {
+        "antes": [item_atualizado, item_coletando],
+        "durante": [item_atualizado, item_atualizado, item_coletando],
+        "nova_coleta_concluida": [item_atualizado, item_atualizado, item_outra_coleta],
+    }[mudanca]
+    leituras_item = []
+    def ler_item(*_args):
+        leituras_item.append(1)
+        return respostas[min(len(leituras_item) - 1, len(respostas) - 1)]
+    leituras_investimentos = []
+    monkeypatch.setattr(ps, "create_pluggy_api_key", lambda: "k")
+    monkeypatch.setattr(ps, "get_pluggy_item", ler_item)
+    monkeypatch.setattr(ps, "list_pluggy_accounts", lambda *_args: [])
+    monkeypatch.setattr(ps, "list_pluggy_investments",
+                        lambda *_args: leituras_investimentos.append(1) or [])
+
+    res = ps.sync_pluggy_item(item_id)
+
+    assert len(leituras_investimentos) == (0 if mudanca == "antes" else 1)
+    assert res["investments_reconciled"] == 0
+    assert db.get_open_finance_snapshot(user_id)["investments"][0]["balance"] == 700
+
+
 @pytest.mark.parametrize("item_status", ["CREATED", "UPDATING"])
 def test_coleta_sem_saude_de_investimentos_preserva_ultimo_espelho(
     user_id, monkeypatch, relogio_fixo, item_status,
