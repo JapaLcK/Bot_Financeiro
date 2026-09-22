@@ -337,6 +337,27 @@ def test_item_sem_conta_e_sem_investimento_continua_no_accounts(user_id, monkeyp
     assert _linha("item-vazio")["last_sync_at"] == ANTES
 
 
+def test_leitura_completa_reconcilia_investimento_resgatado(user_id, monkeypatch, relogio_fixo):
+    conexao = _conexao(user_id, "item-resgate")
+    db.save_open_finance_investments(conexao["id"], [{
+        "provider_investment_id": "inv-resgatado", "name": "CDB antigo",
+        "type": "FIXED_INCOME", "subtype": "CDB", "currency": "BRL",
+        "balance": "900.00",
+    }])
+    _mock_pluggy(monkeypatch, item={**ITEM_SAUDAVEL, "id": "item-resgate"}, contas=[])
+
+    res = ps.sync_pluggy_item("item-resgate")
+
+    assert res["ok"] is False and res["reason"] == "no_accounts"
+    assert res["investments_reconciled"] == 1
+    assert db.get_open_finance_snapshot(user_id)["investments"] == []
+    with get_conn() as c:
+        with c.cursor() as cur:
+            cur.execute("select balance from open_finance_investments where connection_id=%s",
+                        (conexao["id"],))
+            assert cur.fetchone()["balance"] == 0, "a linha fica vinculável, mas sem saldo velho"
+
+
 # ── 10. `no_accounts` não pode virar "Atualizado" na tela ────────────────────
 
 def test_no_accounts_nunca_vira_estado_verde(user_id, monkeypatch, relogio_fixo):
@@ -699,6 +720,11 @@ def test_429_em_investimentos_nao_descarta_as_contas_ja_lidas(user_id, monkeypat
     já lidas (até 60 requisições paginadas por conta). Fail-soft: o espelho das
     contas não pode custar isso."""
     conexao = _conexao(user_id)
+    db.save_open_finance_investments(conexao["id"], [{
+        "provider_investment_id": "inv-preservado", "name": "CDB preservado",
+        "type": "FIXED_INCOME", "subtype": "CDB", "currency": "BRL",
+        "balance": "700.00",
+    }])
     _mock_pluggy(monkeypatch, item=ITEM_SAUDAVEL,
                  contas=[_conta_pluggy()], txs=[_tx_pluggy()])
     monkeypatch.setattr(ps, "list_pluggy_investments", lambda i, k=None: (_ for _ in ()).throw(
@@ -710,6 +736,7 @@ def test_429_em_investimentos_nao_descarta_as_contas_ja_lidas(user_id, monkeypat
     assert res["ok"] is True
     assert res["investments_ok"] is False, "o sync tem que dizer que leu pela metade"
     assert _linha()["last_sync_at"] == AGORA
+    assert db.get_open_finance_snapshot(user_id)["investments"][0]["balance"] == 700
 
 
 def test_leitura_incompleta_com_zero_contas_nao_vira_no_accounts(user_id, monkeypatch, relogio_fixo):

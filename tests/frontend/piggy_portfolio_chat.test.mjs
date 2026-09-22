@@ -71,3 +71,18 @@ for (const question of ['Meus investimentos', 'Meus investimentos do Open Financ
     } finally { await page.close(); }
   });
 }
+
+for (const question of ['Como funcionam ações?', 'Quais ações devo tomar para reduzir gastos?', 'Como está minha carteira de motorista?']) {
+  test(`não expõe a carteira em pergunta ambígua: ${question}`, async () => {
+    const { page, errors, piggyRequests } = await setup({ openAgent: false, investments });
+    try {
+      await page.click('#piggy-fab');
+      await page.fill('#piggy-input', question);
+      await page.click('#piggy-send');
+      await page.waitForFunction(() => !document.getElementById('piggy-input').disabled);
+      assert.equal(await page.locator('.pc-portfolio').count(), 0);
+      assert.equal(piggyRequests.length, 1);
+      assert.deepEqual(errors, []);
+    } finally { await page.close(); }
+  });
+}

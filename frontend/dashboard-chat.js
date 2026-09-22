@@ -22,8 +22,11 @@
     const subject = /caixinh|investiment|carteira|renda fixa|renda vari[aá]vel|a[cç][oõ]es|ativos|cdb|tesouro/i;
     const action = /\b(quanto|quais|como|mostr\w*|list\w*|detalh\w*|ver|veja|tenho|saldo|carteira|posi[cç][aã]o)\b/i;
     const directList = /\b(?:meus|minhas)\s+(?:pr[oó]prios?\s+)?(?:investimentos?|ativos?|carteira|caixinhas?)\b/i;
-    const openFinanceList = /\b(?:investimentos?|ativos?|carteira)\s+(?:do|no)\s+open finance\b/i;
-    return subject.test(text) && (action.test(text) || directList.test(text) || openFinanceList.test(text));
+    const personal = /\b(?:meu|minha|meus|minhas|tenho|possuo|saldo|posi[cç][aã]o)\b/i;
+    const openFinance = /\bopen finance\b/i;
+    const unrelatedWallet = /\bcarteira\s+(?:de\s+)?(?:motorista|habilita[cç][aã]o|trabalho|estudante|vacina)\b/i;
+    return !unrelatedWallet.test(text) && subject.test(text)
+      && (directList.test(text) || openFinance.test(text) || (personal.test(text) && action.test(text)));
   }
 
   const formatMoney = value => new Intl.NumberFormat('pt-BR', { style: 'currency', currency: 'BRL' }).format(value);

@@ -339,6 +339,12 @@ def _sync_pluggy_item_confirmado(provider_item_id: str, connection: dict, api_ke
         # tentou sincronizar, e antes o perdedor da corrida já mexia na linha.
         mark_sync_attempt(connection["id"], origin="sync")
 
+        # `/investments` é um snapshot completo. Reconcilia antes do early-return
+        # de item vazio para que um resgate total zere posições antigas até em
+        # corretoras sem `/accounts`. Falha de leitura preserva o último espelho.
+        inv_result = save_open_finance_investments(connection["id"], investments) \
+            if investments_ok else {"investments_synced": 0, "investments_reconciled": 0}
+
         # Item vivo que não espelhou NADA — nem conta nem investimento — não é
         # sucesso. Só que a decisão vem depois da leitura de investimentos: item
         # de corretora é exatamente isto, zero contas e a carteira toda em
@@ -351,10 +357,9 @@ def _sync_pluggy_item_confirmado(provider_item_id: str, connection: dict, api_ke
                              status_reason=reason, health=health)
             return {"ok": False, "reason": reason, "item_id": provider_item_id,
                     "connection_id": connection["id"], "user_id": connection["user_id"],
-                    "accounts_synced": 0, "transactions_synced": 0}
+                    "accounts_synced": 0, "transactions_synced": 0, **inv_result}
 
         result = save_open_finance_sync(connection["id"], accounts)
-        inv_result = save_open_finance_investments(connection["id"], investments)
 
         # Caixinhas do OF viram caixinhas do Pig automaticamente (auto-create + dedup) e o
         # saldo do banco é espelhado nas vinculadas — mas SÓ pra planos pagos (Essencial+).

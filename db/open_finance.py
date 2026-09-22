@@ -329,6 +329,7 @@ def get_open_finance_snapshot(user_id: int, limit: int = 8) -> dict:
                 join open_finance_connections c on c.id = i.connection_id
                 where c.user_id=%s
                   and upper(coalesce(c.status,'')) not in ('PAUSED', 'DELETED')
+                  and coalesce(i.balance, 0) > 0
                 order by i.balance desc nulls last, i.id
                 """,
                 (user_id,),
@@ -875,14 +876,16 @@ def update_pluggy_open_finance_item_status(provider_item_id: str, status: str, r
 
 
 def save_open_finance_investments(connection_id: int, investments: list[dict]) -> dict:
-    """Grava (upsert) os investimentos OF — inclui Caixinha (CDB). Espelho, não vira pocket ainda."""
+    """Substitui o espelho de investimentos de uma leitura completa da Pluggy."""
     now = datetime.now(_tz())
     count = 0
+    seen_ids = []
     with get_conn() as conn:
         with conn.cursor() as cur:
             for inv in investments:
                 if not inv.get("provider_investment_id"):
                     continue
+                seen_ids.append(inv["provider_investment_id"])
                 cur.execute(
                     """
                     insert into open_finance_investments (
@@ -900,8 +903,30 @@ def save_open_finance_investments(connection_id: int, investments: list[dict]) -
                      Jsonb(inv.get("raw") or {}), now),
                 )
                 count += 1
+            if seen_ids:
+                cur.execute(
+                    """
+                    update open_finance_investments
+                       set balance=0, updated_at=%s
+                     where connection_id=%s
+                       and not (provider_investment_id = any(%s))
+                       and coalesce(balance, 0) <> 0
+                    """,
+                    (now, connection_id, seen_ids),
+                )
+            else:
+                cur.execute(
+                    """
+                    update open_finance_investments
+                       set balance=0, updated_at=%s
+                     where connection_id=%s
+                       and coalesce(balance, 0) <> 0
+                    """,
+                    (now, connection_id),
+                )
+            reconciled = cur.rowcount
         conn.commit()
-    return {"investments_synced": count}
+    return {"investments_synced": count, "investments_reconciled": reconciled}
 
 
 # ── Banqueiro (agente cofre): caixinha OF ↔ meta do PigBank ───────────────────
