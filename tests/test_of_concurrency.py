@@ -97,11 +97,17 @@ def test_dois_syncs_do_mesmo_item_serializam_a_escrita(user_id, monkeypatch):
     conexao = _conexao(user_id)
     janelas: list[tuple[float, float]] = []
     real_save = db.save_open_finance_sync
+    primeira_escrita = threading.Event()
+    segunda_leitura = threading.Event()
 
     def _save_lento(connection_id, accounts):
         inicio = time.monotonic()
         try:
-            return real_save(connection_id, accounts)
+            result = real_save(connection_id, accounts)
+            if threading.current_thread().name == "sync-a":
+                primeira_escrita.set()
+                assert segunda_leitura.wait(10), "B precisa ler enquanto A segura o lock"
+            return result
         finally:
             time.sleep(0.4)          # segura a fase de ESCRITA
             janelas.append((inicio, time.monotonic()))
@@ -112,25 +118,28 @@ def test_dois_syncs_do_mesmo_item_serializam_a_escrita(user_id, monkeypatch):
     monkeypatch.setattr(ps, "list_pluggy_accounts", lambda i, k=None: [
         {"id": "acc-conc", "name": "Conta", "type": "BANK", "currencyCode": "BRL",
          "balance": "10.00"}])
-    monkeypatch.setattr(ps, "list_pluggy_transactions",
-                        lambda acc, k=None, **kw: [{"id": "tx-conc", "description": "M",
-                                                    "amount": "-1.00", "date": "2026-08-19"}])
+    def _transactions(acc, k=None, **kw):
+        if threading.current_thread().name == "sync-b":
+            segunda_leitura.set()
+        return [{"id": "tx-conc", "description": "M",
+                 "amount": "-1.00", "date": "2026-08-19"}]
+    monkeypatch.setattr(ps, "list_pluggy_transactions", _transactions)
     monkeypatch.setattr(ps, "list_pluggy_investments", lambda i, k=None: [])
 
-    barreira = threading.Barrier(2, timeout=10)
     resultados: list[dict] = []
     erros: list[BaseException] = []
 
     def _roda():
         try:
-            barreira.wait()
             resultados.append(ps.sync_pluggy_item("item-conc"))
         except BaseException as exc:   # noqa: BLE001 — o teste decide o que fazer
             erros.append(exc)
 
-    threads = [threading.Thread(target=_roda) for _ in range(2)]
-    for t in threads:
-        t.start()
+    threads = [threading.Thread(target=_roda, name="sync-a"),
+               threading.Thread(target=_roda, name="sync-b")]
+    threads[0].start()
+    assert primeira_escrita.wait(10), "A precisa começar a escrever"
+    threads[1].start()
     for t in threads:
         t.join(timeout=30)
 

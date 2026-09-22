@@ -508,6 +508,16 @@ def init_db():
         """
         alter table open_finance_connections add column if not exists reconnected_at timestamptz
         """,
+        # A leitura remota ocorre fora do lock por item. O número vem do banco,
+        # antes da leitura, para ordenar runs de réplicas com relógios diferentes;
+        # inclusive snapshots vazios, que não avançam `last_sync_at`.
+        """
+        create sequence if not exists open_finance_sync_read_seq
+        """,
+        """
+        alter table open_finance_connections
+          add column if not exists applied_sync_read_version bigint not null default 0
+        """,
         """
         create index if not exists idx_of_conn_refresh_due
           on open_finance_connections(next_refresh_at)

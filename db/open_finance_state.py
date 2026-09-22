@@ -225,6 +225,31 @@ def mark_sync_attempt(connection_id: int, *, origin: str = "sync") -> int:
     return updated
 
 
+def reserve_sync_read_version() -> int:
+    """Ordena o início das leituras remotas entre réplicas, sem relógio local."""
+    with get_conn() as conn, conn.cursor() as cur:
+        cur.execute("select nextval('open_finance_sync_read_seq') as version")
+        return int(cur.fetchone()["version"])
+
+
+def claim_sync_read_version(connection_id: int, version: int) -> bool:
+    """Recusa uma leitura antiga antes de qualquer escrita no espelho do item."""
+    with get_conn() as conn:
+        with conn.cursor() as cur:
+            cur.execute(
+                """
+                update open_finance_connections
+                   set applied_sync_read_version=%s
+                 where id=%s and applied_sync_read_version < %s
+                   and upper(coalesce(status,'')) not in ('PAUSED', 'DELETED')
+                """,
+                (version, connection_id, version),
+            )
+            claimed = cur.rowcount == 1
+        conn.commit()
+    return claimed
+
+
 # Sentinela: `None` é um valor VÁLIDO de `reconnected_at` (nunca reconectou),
 # então não serve de "não checar".
 _SEM_CHECAGEM: Any = object()

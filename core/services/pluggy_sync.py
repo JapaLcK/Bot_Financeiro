@@ -56,7 +56,11 @@ from db import (
 )
 # "Conexão terminal" (PAUSED/DELETED) pela lista que o `claim_manual_refresh`
 # usa — é ela que decide quem cai em `rate_limited` sem ser cooldown (§0.7).
-from db.open_finance_state import _TERMINAL as CONEXAO_TERMINAL
+from db.open_finance_state import (
+    _TERMINAL as CONEXAO_TERMINAL,
+    claim_sync_read_version,
+    reserve_sync_read_version,
+)
 
 
 def _HEALTH_MISSING() -> dict:
@@ -282,6 +286,7 @@ def _sync_pluggy_item_confirmado(provider_item_id: str, connection: dict, api_ke
     # do hold inicial. Sem renovar, o hold expiraria no meio de um item longo — e
     # como last_sync_at só é carimbado no fim, nada seguraria o e-mail nessa janela.
     # Chamado a cada conta e a cada página. Expira sozinho se o processo morrer.
+    read_version = reserve_sync_read_version()
     heartbeat = lambda: _hold_aggregate_emails(connection["user_id"], "sync_item")
     heartbeat()
 
@@ -368,6 +373,15 @@ def _sync_pluggy_item_confirmado(provider_item_id: str, connection: dict, api_ke
                 or atual.get("id") != connection.get("id")
                 or atual.get("reconnected_at") != connection.get("reconnected_at")):
             return {"ok": False, "reason": "stale_authorization", "item_id": provider_item_id,
+                    "connection_id": connection["id"], "user_id": connection["user_id"]}
+
+        # O lock serializa apenas as ESCRITAS. Se B iniciou a leitura depois de A
+        # e gravou primeiro, A precisa morrer aqui; senão um snapshot antigo
+        # (inclusive vazio) reverte investimentos e caixinhas. A sequência do
+        # Postgres ordena réplicas sem depender de seus relógios. Carimbar antes
+        # das escritas mantém a ordem mesmo se o processo cair no meio delas.
+        if not claim_sync_read_version(connection["id"], read_version):
+            return {"ok": False, "reason": "stale_snapshot", "item_id": provider_item_id,
                     "connection_id": connection["id"], "user_id": connection["user_id"]}
 
         # Tentativa carimbada DEPOIS do lock: quem não conseguiu escrever não

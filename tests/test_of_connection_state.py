@@ -359,6 +359,49 @@ def test_leitura_completa_reconcilia_investimento_resgatado(user_id, monkeypatch
             assert cur.fetchone()["balance"] == 0, "a linha fica vinculável, mas sem saldo velho"
 
 
+@pytest.mark.parametrize("antigo_vazio", [True, False])
+def test_sync_atrasado_nao_sobrescreve_snapshot_novo_de_investimentos(
+    user_id, monkeypatch, relogio_fixo, antigo_vazio,
+):
+    item_id = f"item-corrida-investimentos-{antigo_vazio}"
+    conexao = _conexao(user_id, item_id)
+    db.save_open_finance_investments(conexao["id"], [{
+        "provider_investment_id": "inv-corrida", "name": "CDB",
+        "type": "FIXED_INCOME", "subtype": "CDB", "currency": "BRL",
+        "balance": "700.00",
+    }])
+    _mock_pluggy(monkeypatch, item={**ITEM_SAUDAVEL, "id": item_id}, contas=[])
+    def investimento(saldo):
+        return [{"id": "inv-corrida", "name": "CDB", "type": "FIXED_INCOME",
+                 "subtype": "CDB", "currencyCode": "BRL", "balance": str(saldo)}]
+
+    novo = investimento(1500) if antigo_vazio else []
+    antigo = [] if antigo_vazio else investimento(700)
+    resultados = []
+    leituras = 0
+
+    def ler_investimentos(*_args):
+        nonlocal leituras
+        leituras += 1
+        if leituras == 1:
+            # A começou a leitura, B leu e gravou primeiro em outra réplica.
+            resultados.append(ps.sync_pluggy_item(item_id))
+            return antigo
+        return novo
+
+    monkeypatch.setattr(ps, "list_pluggy_investments", ler_investimentos)
+    atrasado = ps.sync_pluggy_item(item_id)
+
+    assert leituras == 2
+    assert atrasado["ok"] is False and atrasado["reason"] == "stale_snapshot"
+    assert resultados[0].get("reason") == (None if antigo_vazio else "no_accounts")
+    with get_conn() as c, c.cursor() as cur:
+        cur.execute("select balance from open_finance_investments "
+                    "where connection_id=%s and provider_investment_id='inv-corrida'",
+                    (conexao["id"],))
+        assert cur.fetchone()["balance"] == (1500 if antigo_vazio else 0)
+
+
 def test_resgate_total_limpa_caixinha_antes_do_retorno_vazio(user_id, monkeypatch, relogio_fixo):
     """O snapshot vazio ainda precisa propagar o saldo reconciliado aos pockets."""
     promote_to_pro(user_id)
