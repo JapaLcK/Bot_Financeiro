@@ -4,7 +4,7 @@ type Portfolio = NonNullable<ChatMessage["portfolio"]>;
 const money = new Intl.NumberFormat("pt-BR", { style: "currency", currency: "BRL" });
 
 export function PortfolioCard({ portfolio, onAsk, disabled }: {
-  portfolio: Portfolio; onAsk: (question: string) => void; disabled: boolean;
+  portfolio: Portfolio; onAsk: (question: string, portfolio: Portfolio) => void; disabled: boolean;
 }) {
   return <section className="pc-portfolio" aria-label="Carteira compartilhada pelo Open Finance">
     <div className="pc-portfolio-heading"><span>{portfolio.count} {portfolio.count === 1 ? "ativo" : "ativos"} · Open Finance</span>
@@ -34,6 +34,6 @@ export function PortfolioCard({ portfolio, onAsk, disabled }: {
     </details>
     <p className="pc-portfolio-note">{portfolio.note}</p>
     <div className="pc-portfolio-followups">{["Quais são meus maiores CDBs?", "Como está minha renda variável?"].map(question =>
-      <button key={question} type="button" disabled={disabled} onClick={() => onAsk(question)}>{question}</button>)}</div>
+      <button key={question} type="button" disabled={disabled} onClick={() => onAsk(question, portfolio)}>{question}</button>)}</div>
   </section>;
 }

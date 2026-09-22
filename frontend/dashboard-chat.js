@@ -19,8 +19,37 @@
   ];
 
   function asksAboutPortfolio(text) {
-    return /\b(quanto|quais|como|mostr\w*|list\w*|detalh\w*|ver|veja|tenho|saldo|carteira|posi[cç][aã]o)\b/i.test(text)
-      && /caixinh|investiment|carteira|renda fixa|renda vari[aá]vel|a[cç][oõ]es|ativos|cdb|tesouro/i.test(text);
+    const subject = /caixinh|investiment|carteira|renda fixa|renda vari[aá]vel|a[cç][oõ]es|ativos|cdb|tesouro/i;
+    const action = /\b(quanto|quais|como|mostr\w*|list\w*|detalh\w*|ver|veja|tenho|saldo|carteira|posi[cç][aã]o)\b/i;
+    const directList = /\b(?:meus|minhas)\s+(?:pr[oó]prios?\s+)?(?:investimentos?|ativos?|carteira|caixinhas?)\b/i;
+    const openFinanceList = /\b(?:investimentos?|ativos?|carteira)\s+(?:do|no)\s+open finance\b/i;
+    return subject.test(text) && (action.test(text) || directList.test(text) || openFinanceList.test(text));
+  }
+
+  const formatMoney = value => new Intl.NumberFormat('pt-BR', { style: 'currency', currency: 'BRL' }).format(value);
+
+  function answerPortfolioQuestion(question, portfolio) {
+    if (busy || !portfolio) return;
+    const items = portfolio.groups.flatMap(group => group.items);
+    let content;
+    if (/cdb/i.test(question)) {
+      const cdbs = items.filter(item => item.subtype === 'CDB' || /\bcdb\b/i.test(item.name))
+        .sort((a, b) => b.amount - a.amount).slice(0, 3);
+      content = cdbs.length
+        ? `Seus maiores CDBs compartilhados pelo Open Finance são:\n\n${cdbs.map((item, index) => `${index + 1}. **${item.name}** — ${formatMoney(item.amount)} (${item.institution})`).join('\n')}`
+        : 'Não encontrei CDBs entre os investimentos compartilhados pelo Open Finance.';
+    } else {
+      const variableIncome = portfolio.groups.find(group => group.title === 'Ações e FIIs');
+      if (!variableIncome?.items.length) {
+        content = 'Não encontrei ações ou FIIs entre os investimentos compartilhados pelo Open Finance.';
+      } else {
+        const largest = [...variableIncome.items].sort((a, b) => b.amount - a.amount).slice(0, 3);
+        content = `Sua renda variável compartilhada pelo Open Finance soma **${formatMoney(variableIncome.amount)}** em ${variableIncome.items.length} ${variableIncome.items.length === 1 ? 'ativo' : 'ativos'}.\n\nMaiores posições:\n${largest.map((item, index) => `${index + 1}. **${item.name}** — ${formatMoney(item.amount)} (${item.institution})`).join('\n')}`;
+      }
+    }
+    messages.push({ id: `piggy-${++sequence}`, role: 'user', content: question });
+    messages.push({ id: `piggy-${++sequence}`, role: 'assistant', author: 'Open Finance', content, state: 'complete', markdown: true });
+    render();
   }
 
   function portfolioFromSnapshot(data) {
@@ -77,7 +106,7 @@
       usageTone: pct >= 1 ? 'error' : pct >= 0.8 ? 'warning' : 'normal',
       onDraftChange: value => { draft = value; status = ''; render(); },
       onSend: () => window.piggySend(),
-      onPortfolioAsk: question => window.piggyAsk(question),
+      onPortfolioAsk: answerPortfolioQuestion,
       onHidden: () => { fab?.classList.remove('open'); },
     };
   }

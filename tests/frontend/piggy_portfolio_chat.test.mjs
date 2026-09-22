@@ -30,8 +30,10 @@ for (const viewport of [{ width: 1280, height: 900 }, { width: 390, height: 844 
       assert.match(await page.locator('.pc-portfolio-help').textContent(), /Nu Financeira/);
       assert.equal(await page.locator('#piggy-body').evaluate(el => el.scrollWidth <= el.clientWidth), true);
       await page.getByRole('button', { name: 'Quais são meus maiores CDBs?' }).click();
-      await page.waitForFunction(() => document.querySelectorAll('.pc-portfolio').length === 2);
-      assert.equal(piggyRequests.length, 2);
+      await page.getByText(/Seus maiores CDBs compartilhados/).waitFor();
+      assert.match(await page.locator('#piggy-body').textContent(), /R\$\s*1\.100,55/);
+      assert.equal(await page.locator('.pc-portfolio').count(), 1);
+      assert.equal(piggyRequests.length, 1, 'o atalho deve responder com o snapshot, sem consultar a carteira manual');
       assert.deepEqual(errors, []);
     } finally { await page.close(); }
   });
@@ -50,7 +52,22 @@ test('bloqueia perguntas da carteira enquanto a resposta principal está pendent
     await page.waitForFunction(() => !document.getElementById('piggy-input').disabled);
     assert.equal(await followup.isEnabled(), true, 'a pergunta deve ser liberada quando o envio termina');
     await followup.click();
-    await page.waitForFunction(() => document.querySelectorAll('.pc-portfolio').length === 2);
-    assert.equal(piggyRequests.length, 2);
+    await page.getByText(/Seus maiores CDBs compartilhados/).waitFor();
+    assert.equal(await page.locator('.pc-portfolio').count(), 1);
+    assert.equal(piggyRequests.length, 1);
   } finally { await page.close(); }
 });
+
+for (const question of ['Meus investimentos', 'Meus investimentos do Open Finance']) {
+  test(`reconhece pedido direto de carteira: ${question}`, async () => {
+    const { page, errors } = await setup({ openAgent: false, investments });
+    try {
+      await page.click('#piggy-fab');
+      await page.fill('#piggy-input', question);
+      await page.click('#piggy-send');
+      await page.locator('.pc-portfolio').waitFor();
+      assert.match(await page.locator('.pc-portfolio').textContent(), /R\$\s*2\.400,55/);
+      assert.deepEqual(errors, []);
+    } finally { await page.close(); }
+  });
+}
