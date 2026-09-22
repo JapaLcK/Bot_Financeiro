@@ -191,3 +191,25 @@ test("S3 (SPA, caso D): /auth/me chega com o toque em Início EM VOO — a Iníc
   } finally { liberarMe(); liberarMontagem(); await ctx.close(); }
   assert.deepEqual(erros, []);
 });
+
+test("S4 (SPA): montar a Início instala o CSS externo dos grupos da sidenav",
+  LIMITE, async () => {
+  const { ctx, page } = await abrirSpa(browser, "/comandos-app.html", "0", FREE);
+  try {
+    await tocar(page, "/home", "/home");
+    const fechado = await page.evaluate(() => {
+      const grupo = document.querySelector('.sidenav-group[data-group="acompanhamento"]');
+      const itens = grupo?.querySelector(".sidenav-subitems");
+      return {
+        css: !!document.querySelector('link[rel~="stylesheet"][href*="sidenav-rail.css"]'),
+        display: itens ? getComputedStyle(itens).display : null,
+      };
+    });
+    assert.deepEqual(fechado, { css: true, display: "none" });
+
+    await page.evaluate(() => window.toggleSidenavGroup("acompanhamento"));
+    assert.equal(await page.locator(
+      '.sidenav-group[data-group="acompanhamento"] .sidenav-subitems',
+    ).evaluate((el) => getComputedStyle(el).display), "block");
+  } finally { await ctx.close(); }
+});

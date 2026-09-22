@@ -265,10 +265,40 @@
     })));
   }
 
+  // Folhas externas da página nova que ainda não existem no documento. Assim
+  // como os scripts externos, ficam instaladas uma vez e são deduplicadas pela
+  // URL absoluta. O mount espera o load para nunca revelar a página sem CSS.
+  function ensureExternalStyles(doc) {
+    const have = new Set(Array.prototype.map.call(
+      document.querySelectorAll('link[rel~="stylesheet"][href]'), link => link.href));
+    const need = Array.prototype.slice.call(doc.querySelectorAll('link[rel~="stylesheet"][href]'))
+      .map(source => ({
+        source,
+        url: new URL(source.getAttribute("href"), location.origin).href,
+      }))
+      .filter(({ url }) => {
+        if (have.has(url)) return false;
+        have.add(url);
+        return true;
+      });
+    return Promise.all(need.map(({ source, url }) => new Promise((ok, bad) => {
+      const link = document.createElement("link");
+      Array.prototype.forEach.call(source.attributes, attr => {
+        if (attr.name !== "href") link.setAttribute(attr.name, attr.value);
+      });
+      link.href = url;
+      link.onload = ok;
+      link.onerror = () => bad(new Error("stylesheet " + url));
+      document.head.appendChild(link);
+    })));
+  }
+
   async function mountNew(key, path, html, push, my, sw) {
     const doc = new DOMParser().parseFromString(html, "text/html");
     sw.mark("parse");
 
+    await ensureExternalStyles(doc);
+    sw.mark("styles");
     await ensureExternalScripts(doc);
     sw.mark("scripts");
     if (my !== seq) return;
