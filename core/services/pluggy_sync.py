@@ -270,11 +270,18 @@ def _investment_snapshot_ready(health: dict) -> bool:
     )
 
 
-def _investment_read_state(health: dict) -> tuple:
-    """Campos do item/produto que mudam quando a coleta cruza a leitura."""
+def _investment_read_state(item: dict, health: dict) -> tuple | None:
+    """Geração observável da coleta e estado que precisa ficar estável."""
     product = (health.get("products") or {}).get("INVESTMENTS") or {}
+    product_updated_at = product.get("last_updated_at")
+    item_updated_at = str(item.get("lastUpdatedAt") or "").strip() or None
+    # `statusDetail` pode vir null num item UPDATED. A Pluggy fornece também
+    # `lastUpdatedAt` no item; sem nenhum dos dois carimbos, duas respostas
+    # UPDATED iguais não provam que a coleta não começou e terminou entre elas.
+    if not product_updated_at and not item_updated_at:
+        return None
     return (health.get("item_status"), health.get("execution_status"),
-            product.get("updated"), product.get("last_updated_at"))
+            product.get("updated"), product_updated_at, item_updated_at)
 
 
 def _sync_pluggy_item_confirmado(provider_item_id: str, connection: dict, api_key: str,
@@ -345,7 +352,8 @@ def _sync_pluggy_item_confirmado(provider_item_id: str, connection: dict, api_ke
     try:
         # A primeira saúde foi medida ANTES da paginação de contas, que pode
         # levar minutos. Uma nova coleta pode começar nesse intervalo.
-        health_before = derive_item_health(get_pluggy_item(provider_item_id, api_key))
+        item_before = get_pluggy_item(provider_item_id, api_key)
+        health_before = derive_item_health(item_before)
         health = health_before
     except Exception as exc:
         print(f"[pluggy_sync] saúde de investimentos indisponível item={provider_item_id} "
@@ -353,17 +361,19 @@ def _sync_pluggy_item_confirmado(provider_item_id: str, connection: dict, api_ke
     else:
         # Produto omitido só autoriza snapshot vazio com item UPDATED. Em coleta
         # ou falha, exigimos investments.isUpdated=true explícito.
-        if _investment_snapshot_ready(health_before):
+        read_state_before = _investment_read_state(item_before, health_before)
+        if _investment_snapshot_ready(health_before) and read_state_before is not None:
             # A versão pertence à leitura do produto, após a paginação de contas.
             investment_read_version = reserve_sync_read_version()
             try:
                 investments = [normalize_pluggy_investment(i)
                                for i in list_pluggy_investments(provider_item_id, api_key)]
-                health_after = derive_item_health(get_pluggy_item(provider_item_id, api_key))
+                item_after = get_pluggy_item(provider_item_id, api_key)
+                health_after = derive_item_health(item_after)
                 health = health_after
                 investments_ok = (_investment_snapshot_ready(health_after)
-                                  and _investment_read_state(health_before)
-                                  == _investment_read_state(health_after))
+                                  and read_state_before
+                                  == _investment_read_state(item_after, health_after))
             except Exception as exc:
                 print(f"[pluggy_sync] investimentos indisponíveis item={provider_item_id} "
                       f"erro={type(exc).__name__}", flush=True)

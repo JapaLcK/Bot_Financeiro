@@ -49,6 +49,7 @@ ITEM_SAUDAVEL = {
     "id": "item-g1",
     "status": "UPDATED",
     "executionStatus": "SUCCESS",
+    "lastUpdatedAt": "2026-08-20T11:00:00.000Z",
     "clientUserId": "1",
     "statusDetail": {
         "accounts": {"isUpdated": True, "lastUpdatedAt": "2026-08-20T11:00:00.000Z", "warnings": []},
@@ -908,7 +909,8 @@ def test_produto_investimentos_desatualizado_preserva_ultimo_espelho(
     assert db.get_open_finance_snapshot(user_id)["investments"][0]["balance"] == 700
 
 
-@pytest.mark.parametrize("mudanca", ["antes", "durante", "nova_coleta_concluida"])
+@pytest.mark.parametrize("mudanca", ["antes", "durante", "nova_coleta_concluida",
+                                    "geracao_do_item_mudou"])
 def test_saude_muda_perto_da_leitura_e_nao_zerra_investimentos(
     user_id, monkeypatch, relogio_fixo, mudanca,
 ):
@@ -937,10 +939,13 @@ def test_saude_muda_perto_da_leitura_e_nao_zerra_investimentos(
                          "investments": {"isUpdated": True,
                                          "lastUpdatedAt": "2026-08-20T12:00:00Z"}},
     }
+    item_outra_geracao = {**item_atualizado,
+                          "lastUpdatedAt": "2026-08-20T12:00:00.000Z"}
     respostas = {
         "antes": [item_atualizado, item_coletando],
         "durante": [item_atualizado, item_atualizado, item_coletando],
         "nova_coleta_concluida": [item_atualizado, item_atualizado, item_outra_coleta],
+        "geracao_do_item_mudou": [item_atualizado, item_atualizado, item_outra_geracao],
     }[mudanca]
     leituras_item = []
     def ler_item(*_args):
@@ -956,6 +961,35 @@ def test_saude_muda_perto_da_leitura_e_nao_zerra_investimentos(
     res = ps.sync_pluggy_item(item_id)
 
     assert len(leituras_investimentos) == (0 if mudanca == "antes" else 1)
+    assert res["investments_reconciled"] == 0
+    assert db.get_open_finance_snapshot(user_id)["investments"][0]["balance"] == 700
+
+
+@pytest.mark.parametrize("produto_sem_data", [False, True])
+def test_snapshot_sem_geracao_nao_zerra_investimentos(
+    user_id, monkeypatch, relogio_fixo, produto_sem_data,
+):
+    item_id = f"item-sem-geracao-{produto_sem_data}"
+    conexao = _conexao(user_id, item_id)
+    db.save_open_finance_investments(conexao["id"], [{
+        "provider_investment_id": "inv-preservado", "name": "CDB preservado",
+        "type": "FIXED_INCOME", "subtype": "CDB", "currency": "BRL",
+        "balance": "700.00", "raw": {},
+    }])
+    item = {k: v for k, v in ITEM_SAUDAVEL.items() if k != "lastUpdatedAt"}
+    item["id"] = item_id
+    if produto_sem_data:
+        item["statusDetail"] = {**item["statusDetail"],
+                                "investments": {"isUpdated": True}}
+    _mock_pluggy(monkeypatch, item=item, contas=[])
+    leituras = []
+    monkeypatch.setattr(ps, "list_pluggy_investments",
+                        lambda *_args: leituras.append(1) or [])
+
+    res = ps.sync_pluggy_item(item_id)
+
+    assert leituras == [], "sem geração observável, a lista não autoriza substituição"
+    assert res["reason"] == "read_failed"
     assert res["investments_reconciled"] == 0
     assert db.get_open_finance_snapshot(user_id)["investments"][0]["balance"] == 700
 
