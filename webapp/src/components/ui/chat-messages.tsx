@@ -3,7 +3,18 @@ import { motion } from "framer-motion";
 import { ArrowDown, ArrowLeft, ArrowUp, ArrowUpRight, Plus, Send, ThumbsDown, ThumbsUp, X } from "lucide-react";
 import { cn } from "@/lib/utils";
 import type { ChatAction, ChatId, ChatMessage, ChatView } from "@/chat/types";
+import {
+  Bubble,
+  BubbleContent,
+  Marker,
+  MarkerContent,
+  MarkerIcon,
+  Message,
+  MessageContent,
+  MessageFooter,
+} from "./c-message-7";
 import { ChatContent } from "./chat-content";
+import { Spinner } from "./spinner";
 
 export type { ChatMessage } from "@/chat/types";
 
@@ -14,29 +25,39 @@ function Actions({ actions }: { actions?: ChatAction[] }) {
   </button>);
 }
 
-function TypingIndicator({ reduced }: { reduced: boolean }) {
-  return <span className="pc-typing" aria-hidden="true">{[0, 1, 2].map(i =>
-    <motion.span key={i} animate={reduced ? { opacity: 0.7 } : { opacity: [0.45, 1, 0.45], y: [0, -3, 0] }}
-      transition={{ duration: 0.9, repeat: reduced ? 0 : Infinity, delay: i * 0.14 }} />
-  )}</span>;
+function timeLabel(createdAt?: string) {
+  if (!createdAt) return null;
+  const date = new Date(createdAt);
+  if (Number.isNaN(date.getTime())) return null;
+  return new Intl.DateTimeFormat("pt-BR", { hour: "2-digit", minute: "2-digit" }).format(date);
 }
 
-function MessageBubble({ message, view, id, reduced }: {
-  message: ChatMessage; view: ChatView; id: ChatId; reduced: boolean;
+function MessageBubble({ message, view, id }: {
+  message: ChatMessage; view: ChatView; id: ChatId;
 }) {
   const user = message.role === "user";
   const pending = message.state === "pending";
   const author = message.author || (user ? "Você" : message.state === "error" ? "Resposta não concluída" : view.title);
-  return <motion.div initial={reduced ? false : { opacity: 0, y: 8 }} animate={{ opacity: 1, y: 0 }}
-    transition={{ duration: reduced ? 0 : 0.22, ease: [0.22, 1, 0.36, 1] }}
-    className={cn("pc-chat-message pc-flex pc-w-full", user ? "pc-justify-end" : "pc-justify-start",
-      id === "agent" ? `agent-chat-message agent-chat-${message.role}` : `piggy-msg ${message.role}`)}
-    data-state={message.state || "complete"} aria-busy={pending || undefined}>
-    {!user && <img className="pc-message-avatar" src={view.avatar} alt="" width="30" height="36" />}
-    <div className={cn("pc-message-bubble", user && "pc-message-user")}>
-      <b className="pc-message-author">{author}</b>
-      {pending ? <><span className="pc-sr-only">{message.content}</span><TypingIndicator reduced={reduced} /></>
-        : <p className="pc-message-content"><ChatContent content={message.content} markdown={message.markdown} /></p>}
+  const time = timeLabel(message.createdAt);
+  return <Message align={user ? "end" : "start"}
+    className={cn(id === "agent" ? `agent-chat-message agent-chat-${message.role}` : `piggy-msg ${message.role}`)}
+    data-state={message.state || "complete"}>
+    <MessageContent>
+      <span role="status" className="pc-sr-only">
+        {pending ? `${author} está preparando a resposta` : !user && message.state === "complete" ? "Resposta pronta" : ""}
+      </span>
+      <Bubble variant={user ? "muted" : "ghost"} aria-busy={pending || undefined}>
+        <BubbleContent>
+          {pending ? <Marker>
+            <MarkerIcon><Spinner aria-hidden="true" /></MarkerIcon>
+            <MarkerContent>{message.content}</MarkerContent>
+          </Marker> : <p className="pc-message-content"><ChatContent content={message.content} markdown={message.markdown} /></p>}
+        </BubbleContent>
+      </Bubble>
+      <MessageFooter>
+        {!user && <b className="pc-message-author">{author}</b>}
+        {time && <time dateTime={message.createdAt}>{time}</time>}
+      </MessageFooter>
       <Actions actions={message.actions} />
       {id === "agent" && !user && message.state === "complete" && message.feedback !== "dismissed" &&
         <div className="pc-agent-response-feedback" role="group" aria-label="Avaliar resposta">
@@ -49,8 +70,8 @@ function MessageBubble({ message, view, id, reduced }: {
             <button type="button" aria-label="Dispensar avaliação" onClick={() => view.onFeedback?.(message.id, "dismissed")}><X size={16} /></button>
           </div>
         </div>}
-    </div>
-  </motion.div>;
+    </MessageContent>
+  </Message>;
 }
 
 export function ChatMessages({ id, view, active, onClose }: {
@@ -168,7 +189,7 @@ export function ChatMessages({ id, view, active, onClose }: {
           {id === "agent" && <small>{view.emptyText}</small>}
           {id === "piggy" && <div className="pc-suggestions"><Actions actions={view.suggestions} /></div>}
         </div>}
-        {view.messages.map(message => <MessageBubble key={message.id} message={message} view={view} id={id} reduced={reduced} />)}
+        {view.messages.map(message => <MessageBubble key={message.id} message={message} view={view} id={id} />)}
       </div>
       {scrolledAway && <button type="button" className="pc-latest" onClick={toBottom} aria-label="Ir para as mensagens recentes">
         <ArrowDown size={16} aria-hidden="true" /><span>Mensagens recentes</span>

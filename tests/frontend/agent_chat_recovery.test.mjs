@@ -17,8 +17,9 @@ test('envio mostra bolha do agente em andamento e substitui pelo conteúdo da re
     const bubble = page.locator('.agent-chat-assistant[data-state="complete"]');
     assert.equal(await bubble.count(), 1);
     const style = await bubble.locator('.pc-message-bubble').evaluate(el => ({ background: getComputedStyle(el).backgroundColor, radius: getComputedStyle(el).borderRadius }));
-    assert.notEqual(style.background, 'rgba(0, 0, 0, 0)');
-    assert.notEqual(style.radius, '0px');
+    assert.equal(style.background, 'rgba(0, 0, 0, 0)');
+    assert.equal(style.radius, '0px');
+    assert.equal(await bubble.locator('[data-slot="message-footer"] time').count(), 1);
     assert.equal(await page.locator('.agent-chat-message').count(), 2);
   } finally { release(); await page.close(); }
 });
