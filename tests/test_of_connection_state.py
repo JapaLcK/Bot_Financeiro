@@ -402,6 +402,66 @@ def test_sync_atrasado_nao_sobrescreve_snapshot_novo_de_investimentos(
         assert cur.fetchone()["balance"] == (1500 if antigo_vazio else 0)
 
 
+@pytest.mark.parametrize("novo_vazio", [True, False])
+def test_versao_do_investimento_comeca_na_leitura_do_produto(
+    user_id, monkeypatch, relogio_fixo, novo_vazio,
+):
+    item_id = f"item-leitura-investimentos-{novo_vazio}"
+    conexao = _conexao(user_id, item_id)
+    db.save_open_finance_investments(conexao["id"], [{
+        "provider_investment_id": "inv-corrida", "name": "CDB",
+        "type": "FIXED_INCOME", "subtype": "CDB", "currency": "BRL",
+        "balance": "700.00",
+    }])
+    _mock_pluggy(monkeypatch, item={**ITEM_SAUDAVEL, "id": item_id},
+                 contas=[_conta_pluggy()], txs=[])
+    chamadas_contas = 0
+    def ler_contas(*_args):
+        nonlocal chamadas_contas
+        chamadas_contas += 1
+        return [{**_conta_pluggy(), "balance": "500" if chamadas_contas == 1 else "1000"}]
+    monkeypatch.setattr(ps, "list_pluggy_accounts", ler_contas)
+    saldo_novo = [] if novo_vazio else [{
+        "id": "inv-corrida", "name": "CDB", "type": "FIXED_INCOME",
+        "subtype": "CDB", "currencyCode": "BRL", "balance": "1500.00",
+    }]
+    saldo_antigo = [] if not novo_vazio else [{
+        "id": "inv-corrida", "name": "CDB", "type": "FIXED_INCOME",
+        "subtype": "CDB", "currencyCode": "BRL", "balance": "700.00",
+    }]
+    chamadas_tx = 0
+    resultados = []
+    def ler_txs(*_args, **_kwargs):
+        nonlocal chamadas_tx
+        chamadas_tx += 1
+        if chamadas_tx == 1:
+            # A iniciou a paginação. B alcança /investments antes de A e grava.
+            resultados.append(ps.sync_pluggy_item(item_id))
+        return []
+    chamadas_investimentos = 0
+    def ler_investimentos(*_args):
+        nonlocal chamadas_investimentos
+        chamadas_investimentos += 1
+        return saldo_antigo if chamadas_investimentos == 1 else saldo_novo
+    monkeypatch.setattr(ps, "list_pluggy_transactions", ler_txs)
+    monkeypatch.setattr(ps, "list_pluggy_investments", ler_investimentos)
+
+    atrasado_nas_contas = ps.sync_pluggy_item(item_id)
+
+    assert chamadas_contas == chamadas_tx == chamadas_investimentos == 2
+    assert resultados[0]["ok"] is True
+    assert atrasado_nas_contas["reason"] == "stale_snapshot"
+    with get_conn() as c, c.cursor() as cur:
+        cur.execute("select balance from open_finance_investments "
+                    "where connection_id=%s and provider_investment_id='inv-corrida'",
+                    (conexao["id"],))
+        assert cur.fetchone()["balance"] == (0 if novo_vazio else 1500)
+        cur.execute("select balance from open_finance_accounts "
+                    "where connection_id=%s and provider_account_id='acc-g1'",
+                    (conexao["id"],))
+        assert cur.fetchone()["balance"] == 1000
+
+
 def test_resgate_total_limpa_caixinha_antes_do_retorno_vazio(user_id, monkeypatch, relogio_fixo):
     """O snapshot vazio ainda precisa propagar o saldo reconciliado aos pockets."""
     promote_to_pro(user_id)

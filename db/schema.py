@@ -519,6 +519,10 @@ def init_db():
           add column if not exists applied_sync_read_version bigint not null default 0
         """,
         """
+        alter table open_finance_connections
+          add column if not exists applied_investment_read_version bigint not null default 0
+        """,
+        """
         create index if not exists idx_of_conn_refresh_due
           on open_finance_connections(next_refresh_at)
           where provider='pluggy'

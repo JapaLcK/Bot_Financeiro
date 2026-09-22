@@ -232,15 +232,17 @@ def reserve_sync_read_version() -> int:
         return int(cur.fetchone()["version"])
 
 
-def claim_sync_read_version(connection_id: int, version: int) -> bool:
-    """Recusa uma leitura antiga antes de qualquer escrita no espelho do item."""
+def claim_sync_read_version(connection_id: int, version: int, *, product: str) -> bool:
+    """Recusa uma leitura antiga do produto antes de escrever seu espelho."""
+    column = {"accounts": "applied_sync_read_version",
+              "investments": "applied_investment_read_version"}[product]
     with get_conn() as conn:
         with conn.cursor() as cur:
             cur.execute(
-                """
+                f"""
                 update open_finance_connections
-                   set applied_sync_read_version=%s
-                 where id=%s and applied_sync_read_version < %s
+                   set {column}=%s
+                 where id=%s and {column} < %s
                    and upper(coalesce(status,'')) not in ('PAUSED', 'DELETED')
                 """,
                 (version, connection_id, version),

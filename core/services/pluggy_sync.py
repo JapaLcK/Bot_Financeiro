@@ -286,7 +286,7 @@ def _sync_pluggy_item_confirmado(provider_item_id: str, connection: dict, api_ke
     # do hold inicial. Sem renovar, o hold expiraria no meio de um item longo — e
     # como last_sync_at só é carimbado no fim, nada seguraria o e-mail nessa janela.
     # Chamado a cada conta e a cada página. Expira sozinho se o processo morrer.
-    read_version = reserve_sync_read_version()
+    account_read_version = reserve_sync_read_version()
     heartbeat = lambda: _hold_aggregate_emails(connection["user_id"], "sync_item")
     heartbeat()
 
@@ -335,7 +335,11 @@ def _sync_pluggy_item_confirmado(provider_item_id: str, connection: dict, api_ke
              or (isinstance(investment_health, dict)
                  and investment_health.get("updated") is True))
     )
+    investment_read_version: int | None = None
     if investments_ok:
+        # Contas/transações podem paginar por minutos. Reservar aqui, logo antes
+        # de /investments, ordena a leitura DESTE produto pelo início real dela.
+        investment_read_version = reserve_sync_read_version()
         try:
             investments = [normalize_pluggy_investment(i)
                            for i in list_pluggy_investments(provider_item_id, api_key)]
@@ -375,12 +379,15 @@ def _sync_pluggy_item_confirmado(provider_item_id: str, connection: dict, api_ke
             return {"ok": False, "reason": "stale_authorization", "item_id": provider_item_id,
                     "connection_id": connection["id"], "user_id": connection["user_id"]}
 
-        # O lock serializa apenas as ESCRITAS. Se B iniciou a leitura depois de A
-        # e gravou primeiro, A precisa morrer aqui; senão um snapshot antigo
-        # (inclusive vazio) reverte investimentos e caixinhas. A sequência do
-        # Postgres ordena réplicas sem depender de seus relógios. Carimbar antes
-        # das escritas mantém a ordem mesmo se o processo cair no meio delas.
-        if not claim_sync_read_version(connection["id"], read_version):
+        # A ordem de leitura é POR PRODUTO: A pode ter lido contas primeiro e
+        # investimentos depois de B. Cada espelho aceita apenas seu snapshot
+        # mais novo; o lock impede que as decisões e escritas se intercalem.
+        accounts_current = claim_sync_read_version(
+            connection["id"], account_read_version, product="accounts")
+        investments_current = bool(investments_ok and claim_sync_read_version(
+            connection["id"], investment_read_version, product="investments"))
+        partial_stale = not accounts_current or (investments_ok and not investments_current)
+        if not accounts_current and not investments_current:
             return {"ok": False, "reason": "stale_snapshot", "item_id": provider_item_id,
                     "connection_id": connection["id"], "user_id": connection["user_id"]}
 
@@ -392,14 +399,14 @@ def _sync_pluggy_item_confirmado(provider_item_id: str, connection: dict, api_ke
         # de item vazio para que um resgate total zere posições antigas até em
         # corretoras sem `/accounts`. Falha de leitura preserva o último espelho.
         inv_result = save_open_finance_investments(connection["id"], investments) \
-            if investments_ok else {"investments_synced": 0, "investments_reconciled": 0}
+            if investments_current else {"investments_synced": 0, "investments_reconciled": 0}
 
         # Item vivo que não espelhou NADA — nem conta nem investimento — não é
         # sucesso. Só que a decisão vem depois da leitura de investimentos: item
         # de corretora é exatamente isto, zero contas e a carteira toda em
         # `/investments`. `health` é carimbado (é a saúde medida agora, e ela
         # vale); o que não pode é ACTIVE/last_sync_at.
-        if not accounts and not investments:
+        if not partial_stale and not accounts and not investments:
             # O espelho de caixinhas depende do saldo reconciliado acima. Precisa
             # rodar antes deste retorno: um resgate total chega como snapshot
             # válido sem contas nem investimentos positivos.
@@ -413,41 +420,49 @@ def _sync_pluggy_item_confirmado(provider_item_id: str, connection: dict, api_ke
                     "accounts_synced": 0, "transactions_synced": 0, **inv_result,
                     **caixinha_result}
 
-        result = save_open_finance_sync(connection["id"], accounts)
+        result = save_open_finance_sync(connection["id"], accounts) if accounts_current \
+            else {"accounts_synced": 0, "transactions_synced": 0}
 
         # Caixinhas do OF viram caixinhas do Pig automaticamente (auto-create + dedup) e o
         # saldo do banco é espelhado nas vinculadas — mas SÓ pra planos pagos (Essencial+).
         # No Grátis (pós-trial) o OF nem sincroniza (conexão PAUSED barra acima); este gate é
         # a segunda trava: se o usuário caiu de plano, as caixinhas congelam (não atualizam).
         # Renda variável (ações/FIIs) é lida à parte no snapshot, também gated. Fail-soft.
-        caixinha_result = _sync_caixinhas_da_conexao(connection)
+        caixinha_result = _sync_caixinhas_da_conexao(connection) \
+            if investments_current or (accounts_current and not investments_ok) else {}
 
         # Fase 1: conta BANK → launches (analytics, sem mover saldo); cartão → faturas (opção a).
-        imported = import_open_finance_launches(connection["user_id"], connection["id"])
-        imported_credit = import_open_finance_credit(connection["user_id"], connection["id"])
+        imported = import_open_finance_launches(connection["user_id"], connection["id"]) \
+            if accounts_current else {}
+        imported_credit = import_open_finance_credit(connection["user_id"], connection["id"]) \
+            if accounts_current else {}
         # Propaga correções da Pluggy (transactions/updated) pros já importados (não deixa stale).
-        updated = sync_imported_open_finance_updates(connection["user_id"], connection["id"])
+        updated = sync_imported_open_finance_updates(connection["user_id"], connection["id"]) \
+            if accounts_current else {}
 
         # Concluído: ESTE é o único carimbo de sucesso do sistema. Dentro do
-        # lock de propósito — ele afirma que as escritas acima valeram.
-        status, reason = resolve_connection_state(health=health, has_data=True,
-                                                  leitura_completa=investments_ok)
-        # `reconnected_at_visto`: o valor lido em `sync_pluggy_item`, ANTES da
-        # fase de leitura. A relectura lá em cima já matou o run de geração
-        # velha; este parâmetro fecha a janela que sobra — a rota de reconexão
-        # (`/pluggy/item`) NÃO pega o `pluggy_item_lock`, então uma reconexão
-        # ainda pode cair entre a relectura e este carimbo. Aí o espelho fica (o
-        # dado é real) e o carimbo não; a rota de reconexão agenda um sync novo,
-        # então o âmbar é transitório.
-        #
-        # SÃO TRÊS MECANISMOS INDEPENDENTES, e quem simplificar um achando que o
-        # outro cobre reabre o buraco: a relectura recusa o run inteiro, este
-        # parâmetro recusa só `last_sync_at` na janela residual, e quem impede a
-        # tela de ficar verde com um `health` velho é o `sem_sync` de
-        # `connection_ui_state`.
-        mark_sync_result(connection["id"], ok=True, status=status, status_reason=reason,
-                         health=health, at=datetime.now(_tz()),
-                         reconnected_at_visto=connection.get("reconnected_at"))
+        # lock de propósito — ele afirma que as escritas acima valeram. Quando
+        # um produto foi recusado como stale, preserva o carimbo do run que o
+        # gravou; a resposta desta tentativa declara o resultado parcial.
+        if not partial_stale:
+            status, reason = resolve_connection_state(health=health, has_data=True,
+                                                      leitura_completa=investments_ok)
+            # `reconnected_at_visto`: o valor lido em `sync_pluggy_item`, ANTES da
+            # fase de leitura. A relectura lá em cima já matou o run de geração
+            # velha; este parâmetro fecha a janela que sobra — a rota de reconexão
+            # (`/pluggy/item`) NÃO pega o `pluggy_item_lock`, então uma reconexão
+            # ainda pode cair entre a relectura e este carimbo. Aí o espelho fica (o
+            # dado é real) e o carimbo não; a rota de reconexão agenda um sync novo,
+            # então o âmbar é transitório.
+            #
+            # SÃO TRÊS MECANISMOS INDEPENDENTES, e quem simplificar um achando que o
+            # outro cobre reabre o buraco: a relectura recusa o run inteiro, este
+            # parâmetro recusa só `last_sync_at` na janela residual, e quem impede a
+            # tela de ficar verde com um `health` velho é o `sem_sync` de
+            # `connection_ui_state`.
+            mark_sync_result(connection["id"], ok=True, status=status, status_reason=reason,
+                             health=health, at=datetime.now(_tz()),
+                             reconnected_at_visto=connection.get("reconnected_at"))
 
     # Agentes do Piggy — gatilho pós-sync: Xerife roda só sobre o delta deste
     # usuário. IMPORTANTE: depois da reconciliação/import acima (merge-silencioso
@@ -461,7 +476,8 @@ def _sync_pluggy_item_confirmado(provider_item_id: str, connection: dict, api_ke
             print(f"[pluggy_sync] agents hook: {exc}")
 
     return {
-        "ok": True,
+        "ok": not partial_stale,
+        **({"reason": "stale_snapshot"} if partial_stale else {}),
         "item_id": provider_item_id,
         "connection_id": connection["id"],
         "user_id": connection["user_id"],
