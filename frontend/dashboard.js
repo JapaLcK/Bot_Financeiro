@@ -704,52 +704,15 @@ const DASH_VIEWS = [
   "categories", "installments", "cards", "investments", "affiliate", "agentes"
 ];
 
-// ── Menus colapsáveis da sidenav ──────────────────────────────────────────
-// Só Início/Visão Geral/Agentes ficam sempre visíveis; o resto vive nos 4
-// .sidenav-group do dashboard.html. Estado persiste em localStorage. O menu
-// da view ativa abre sozinho — fechado, o item ativo ficaria invisível e
-// nada indicaria onde o usuário está.
-const SN_GROUPS_KEY = "pb_sidenav_groups";
-
-function _snGroupStates() {
-  try { return JSON.parse(localStorage.getItem(SN_GROUPS_KEY) || "{}") || {}; }
-  catch(_) { return {}; }
-}
-
-function _snSetGroup(name, open, persist = true) {
-  const g = document.querySelector(`.sidenav-group[data-group="${name}"]`);
-  if (!g) return;
-  g.classList.toggle("open", open);
-  const toggle = g.querySelector(".sidenav-group-toggle");
-  if (toggle) toggle.setAttribute("aria-expanded", open ? "true" : "false");
-  if (!persist) return;
-  const states = _snGroupStates();
-  states[name] = open;
-  try { localStorage.setItem(SN_GROUPS_KEY, JSON.stringify(states)); } catch(_) {}
-}
-
-function toggleSidenavGroup(name) {
-  const g = document.querySelector(`.sidenav-group[data-group="${name}"]`);
-  if (!g) return;
-  _snSetGroup(name, !g.classList.contains("open"));
-}
-
 // Abre (e persiste) o menu que contém o item da view, se houver e estiver
 // fechado. Chamado por setMainView — cobre clique, deep link e botão voltar.
 function _snOpenGroupForView(view) {
-  const item = document.querySelector(`.sidenav-item[data-nav="${view}"]`);
-  const g = item && item.closest(".sidenav-group");
-  if (g && !g.classList.contains("open")) _snSetGroup(g.dataset.group, true);
+  window.PigBankSidenavGroups?.openForView?.(view);
 }
 
 // Boot: aplica o estado persistido (default = tudo fechado). dashboard.js é
 // defer, então o DOM já está pronto aqui.
-(function initSidenavGroups() {
-  const states = _snGroupStates();
-  document.querySelectorAll(".sidenav-group").forEach(g => {
-    _snSetGroup(g.dataset.group, !!states[g.dataset.group], false);
-  });
-})();
+window.PigBankSidenavGroups?.init?.();
 
 function setMainView(view) {
   // Free: bloqueia navegacao pra tela inteira de investimentos. Botao fica
