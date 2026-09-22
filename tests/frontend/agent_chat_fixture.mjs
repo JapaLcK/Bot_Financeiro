@@ -26,7 +26,7 @@ after(async () => {
   if (screenshots && !process.env.PIGBANK_CHAT_SCREENSHOTS) await rm(screenshots, { recursive: true, force: true });
 });
 
-async function setup({ budget = 14, active = ['detetive', 'barao'], viewport, holdFirst = false, accessOverride = {}, failAt = [], failureDetail, failureStatus = 503, openAgent = true, piggyReply = "**Seu resumo** está pronto.", investments = [], holdPiggy = false, pro = true, reducedMotion, hasTouch = false, lockedUpgrade = false } = {}) {
+async function setup({ budget = 14, active = ['detetive', 'barao'], viewport, holdFirst = false, accessOverride = {}, failAt = [], failureDetail, failureStatus = 503, openAgent = true, piggyReply = "**Seu resumo** está pronto.", investments = [], holdPiggy = false, holdPortfolio = false, pro = true, reducedMotion, hasTouch = false, lockedUpgrade = false } = {}) {
   const page = await browser.newPage({ viewport: viewport || { width: 1280, height: 900 }, reducedMotion, hasTouch });
   const requests = [];
   const activations = [];
@@ -34,6 +34,8 @@ async function setup({ budget = 14, active = ['detetive', 'barao'], viewport, ho
   const usageRequests = [];
   let releasePiggy;
   const piggyPending = new Promise(resolve => { releasePiggy = resolve; });
+  let releasePortfolio;
+  const portfolioPending = new Promise(resolve => { releasePortfolio = resolve; });
   let release;
   const pending = new Promise(resolve => { release = resolve; });
   const errors = [];
@@ -50,7 +52,10 @@ async function setup({ budget = 14, active = ['detetive', 'barao'], viewport, ho
       if (holdPiggy) await piggyPending;
       return route.fulfill({ json: { reply: piggyReply, usage: { used: 82, limit: 100 } } });
     }
-    if (path === '/open-finance/42') return route.fulfill({ json: { ok: true, investments } });
+    if (path === '/open-finance/42') {
+      if (holdPortfolio) await portfolioPending;
+      return route.fulfill({ json: { ok: true, investments } });
+    }
     if (path.endsWith('/chat')) {
       const body = route.request().postDataJSON();
       requests.push({ path, ...body });
@@ -115,7 +120,7 @@ async function setup({ budget = 14, active = ['detetive', 'barao'], viewport, ho
     await page.click('#open');
     await page.waitForFunction(() => document.getElementById('agent-chat-status') && !document.getElementById('agent-chat-status').textContent.includes('Verificando'));
   }
-  return { page, requests, errors, release, activations, piggyRequests, usageRequests, releasePiggy };
+  return { page, requests, errors, release, activations, piggyRequests, usageRequests, releasePiggy, releasePortfolio };
 }
 
 async function ask(page, text) {

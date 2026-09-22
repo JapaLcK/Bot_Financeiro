@@ -166,14 +166,19 @@
     draft = '';
     const createdAt = new Date().toISOString();
     messages.push({ id: `piggy-${++sequence}`, role: 'user', content: text, createdAt });
-    const reply = { id: `piggy-${++sequence}`, role: 'assistant', content: 'Preparando a resposta…', createdAt, state: 'pending', markdown: true };
-    messages.push(reply);
     if (asksAboutPortfolio(text)) {
       const card = { id: `piggy-${++sequence}`, role: 'assistant', author: 'Open Finance',
         content: 'Carregando carteira do Open Finance…', state: 'pending' };
       messages.push(card);
-      void loadPortfolio(card);
+      render();
+      await loadPortfolio(card);
+      busy = false;
+      render();
+      if (ui.isOpen('piggy')) ui.focusInput('piggy');
+      return;
     }
+    const reply = { id: `piggy-${++sequence}`, role: 'assistant', content: 'Preparando a resposta…', createdAt, state: 'pending', markdown: true };
+    messages.push(reply);
     render();
     try {
       const response = await fetch('/ai/chat', {

@@ -35,6 +35,7 @@ import frontend.finance_bot_websocket_custom as dashboard
 import frontend.routes.open_finance as of_routes
 from core.services.pluggy import PluggyApiError
 from core.services.pluggy_health import derive_item_health
+from conftest import promote_to_pro
 from psycopg.types.json import Jsonb
 
 from db.connection import get_conn
@@ -356,6 +357,42 @@ def test_leitura_completa_reconcilia_investimento_resgatado(user_id, monkeypatch
             cur.execute("select balance from open_finance_investments where connection_id=%s",
                         (conexao["id"],))
             assert cur.fetchone()["balance"] == 0, "a linha fica vinculável, mas sem saldo velho"
+
+
+def test_resgate_total_limpa_caixinha_antes_do_retorno_vazio(user_id, monkeypatch, relogio_fixo):
+    """O snapshot vazio ainda precisa propagar o saldo reconciliado aos pockets."""
+    promote_to_pro(user_id)
+    conexao = _conexao(user_id, "item-caixinha-resgatada")
+    db.save_open_finance_investments(conexao["id"], [{
+        "provider_investment_id": "inv-caixinha", "name": "Caixinha Viagem",
+        "type": "FIXED_INCOME", "subtype": "CDB", "currency": "BRL",
+        "balance": "900.00", "raw": {},
+    }, {
+        "provider_investment_id": "inv-manual", "name": "CDB comum",
+        "type": "FIXED_INCOME", "subtype": "CDB", "currency": "BRL",
+        "balance": "600.00", "raw": {},
+    }])
+    db.sync_open_finance_caixinhas(conexao["id"], user_id)
+    _, pocket_manual, _ = db.create_pocket(user_id, "Meta manual", interest_enabled=False)
+    with get_conn() as c, c.cursor() as cur:
+        cur.execute(
+            "select id from open_finance_investments "
+            "where connection_id=%s and provider_investment_id='inv-manual'",
+            (conexao["id"],),
+        )
+        investimento_manual = cur.fetchone()["id"]
+    assert db.bind_pocket_to_caixinha(user_id, pocket_manual, investimento_manual) is True
+    db.sync_open_finance_caixinhas(conexao["id"], user_id)
+    assert sorted(float(p["balance"]) for p in db.list_pockets(user_id, accrue=False)) == [600, 900]
+    _mock_pluggy(monkeypatch, item={**ITEM_SAUDAVEL, "id": "item-caixinha-resgatada"}, contas=[])
+
+    res = ps.sync_pluggy_item("item-caixinha-resgatada")
+
+    assert res["ok"] is False and res["reason"] == "no_accounts"
+    assert res["caixinhas_cleaned"] == 1
+    pockets = db.list_pockets(user_id, accrue=False)
+    assert len(pockets) == 1 and pockets[0]["name"] == "Meta manual"
+    assert float(pockets[0]["balance"]) == 0
 
 
 # ── 10. `no_accounts` não pode virar "Atualizado" na tela ────────────────────

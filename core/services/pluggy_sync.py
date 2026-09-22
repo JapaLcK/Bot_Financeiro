@@ -235,6 +235,28 @@ def sync_pluggy_item(provider_item_id: str, *, expected_user_id: int | None = No
     return _sync_pluggy_item_confirmado(provider_item_id, connection, api_key, health)
 
 
+def _sync_caixinhas_da_conexao(connection: dict) -> dict:
+    """Atualiza os pockets ligados ao espelho OF sem derrubar o sync principal."""
+    result = {"caixinhas_created": 0, "caixinhas_mirrored": 0,
+              "caixinhas_cleaned": 0, "caixinhas_sem_vaga": 0,
+              "caixinhas_sem_nome": 0}
+    try:
+        from core.services.plan_service import require_min_tier
+        if require_min_tier(connection["user_id"], "essencial"):
+            result = sync_open_finance_caixinhas(connection["id"], connection["user_id"])
+            if result.get("caixinhas_sem_vaga"):
+                print(f"[pluggy_sync] caixinha auto-import: "
+                      f"{result['caixinhas_sem_vaga']} fora do teto do plano "
+                      f"(user={connection['user_id']})")
+            if result.get("caixinhas_sem_nome"):
+                print(f"[pluggy_sync] caixinha auto-import: "
+                      f"{result['caixinhas_sem_nome']} sem nome livre "
+                      f"(user={connection['user_id']})")
+    except Exception as exc:
+        print(f"[pluggy_sync] caixinha auto-import: {exc}")
+    return result
+
+
 def _sync_pluggy_item_confirmado(provider_item_id: str, connection: dict, api_key: str,
                                  health: dict) -> dict:
     """O sync em si, com o item já confirmado vivo.
@@ -351,13 +373,18 @@ def _sync_pluggy_item_confirmado(provider_item_id: str, connection: dict, api_ke
         # `/investments`. `health` é carimbado (é a saúde medida agora, e ela
         # vale); o que não pode é ACTIVE/last_sync_at.
         if not accounts and not investments:
+            # O espelho de caixinhas depende do saldo reconciliado acima. Precisa
+            # rodar antes deste retorno: um resgate total chega como snapshot
+            # válido sem contas nem investimentos positivos.
+            caixinha_result = _sync_caixinhas_da_conexao(connection) if investments_ok else {}
             status, reason = resolve_connection_state(
                 health=health, has_data=False, leitura_completa=investments_ok)
             mark_sync_result(connection["id"], ok=False, status=status,
                              status_reason=reason, health=health)
             return {"ok": False, "reason": reason, "item_id": provider_item_id,
                     "connection_id": connection["id"], "user_id": connection["user_id"],
-                    "accounts_synced": 0, "transactions_synced": 0, **inv_result}
+                    "accounts_synced": 0, "transactions_synced": 0, **inv_result,
+                    **caixinha_result}
 
         result = save_open_finance_sync(connection["id"], accounts)
 
@@ -366,27 +393,7 @@ def _sync_pluggy_item_confirmado(provider_item_id: str, connection: dict, api_ke
         # No Grátis (pós-trial) o OF nem sincroniza (conexão PAUSED barra acima); este gate é
         # a segunda trava: se o usuário caiu de plano, as caixinhas congelam (não atualizam).
         # Renda variável (ações/FIIs) é lida à parte no snapshot, também gated. Fail-soft.
-        caixinha_result = {"caixinhas_created": 0, "caixinhas_mirrored": 0,
-                           "caixinhas_sem_vaga": 0}
-        try:
-            from core.services.plan_service import require_min_tier
-            if require_min_tier(connection["user_id"], "essencial"):
-                caixinha_result = sync_open_finance_caixinhas(connection["id"], connection["user_id"])
-                # O import obedece ao teto de caixinhas do plano. O que não coube
-                # não aparece em lugar nenhum da tela (a caixinha simplesmente não
-                # existe) — este log é o único rastro, até haver aviso de upgrade.
-                if caixinha_result.get("caixinhas_sem_vaga"):
-                    print(f"[pluggy_sync] caixinha auto-import: "
-                          f"{caixinha_result['caixinhas_sem_vaga']} fora do teto do plano "
-                          f"(user={connection['user_id']})")
-                # 50 nomes ocupados na mesma base: a posição fica de fora sem
-                # nada na tela. Implausível, e por isso mesmo tem de aparecer.
-                if caixinha_result.get("caixinhas_sem_nome"):
-                    print(f"[pluggy_sync] caixinha auto-import: "
-                          f"{caixinha_result['caixinhas_sem_nome']} sem nome livre "
-                          f"(user={connection['user_id']})")
-        except Exception as exc:
-            print(f"[pluggy_sync] caixinha auto-import: {exc}")
+        caixinha_result = _sync_caixinhas_da_conexao(connection)
 
         # Fase 1: conta BANK → launches (analytics, sem mover saldo); cartão → faturas (opção a).
         imported = import_open_finance_launches(connection["user_id"], connection["id"])

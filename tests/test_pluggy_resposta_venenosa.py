@@ -169,3 +169,12 @@ def test_positivo_resposta_limpa_grava_igual(user_id, pluggy_responde):
 
     assert linha["name"] == "Conta Corrênte ção"
     assert linha["raw"] == conta_com_acento, "o jsonb mudou com a resposta limpa"
+
+
+@pytest.mark.parametrize("payload", [{}, {"results": None}, {"results": {"id": "inv-1"}}])
+def test_investimentos_recusam_snapshot_sem_lista_de_resultados(pluggy_responde, payload):
+    """Payload 200 incompleto não pode ser confundido com carteira vazia."""
+    pluggy_responde(payload)
+
+    with pytest.raises(pluggy.PluggyApiError, match="Resposta inválida"):
+        pluggy.list_pluggy_investments("item-limpo", "k")

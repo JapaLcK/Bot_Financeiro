@@ -237,7 +237,11 @@ def list_pluggy_investments(item_id: str, api_key: str | None = None) -> list[di
     key = api_key or create_pluggy_api_key()
     data = _pluggy_get("/investments", key, params={"itemId": item_id})
     results = data.get("results")
-    return list(results) if isinstance(results, list) else []
+    if not isinstance(results, list):
+        # `/investments` é snapshot completo: tratar payload incompleto como
+        # lista vazia autorizaria a reconciliação a zerar toda a carteira.
+        raise PluggyApiError("Resposta inválida ao consultar investimentos na Pluggy.")
+    return list(results)
 
 
 def _extract_after_cursor(next_value: Any) -> str | None:
