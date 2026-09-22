@@ -20,14 +20,15 @@
 
   function asksAboutPortfolio(text) {
     const subject = /caixinh|investiment|carteira|renda fixa|renda vari[aá]vel|a[cç][oõ]es|ativos|cdb|tesouro|\bfiis?\b/i;
-    const action = /\b(quanto|quais|como|mostr\w*|list\w*|detalh\w*|ver|veja|tenho|saldo|carteira|posi[cç][aã]o)\b/i;
-    const directList = /\b(?:meu|minha|meus|minhas)\s+(?:pr[oó]prios?\s+)?(?:investimentos?|ativos?|carteira|caixinhas?|cdbs?|tesouros?|renda\s+(?:fixa|vari[aá]vel)|a[cç][oõ]es|fiis?)\b/i;
+    const statusRequest = /^(?:quanto\s+(?:tenho|possuo)\b|como\s+(?:est[aá]|est[aã]o)(?=\s|[?!.,]|$)|quais\b|mostr\w*\b|list\w*\b|detalh\w*\b|veja\b|ver\b)/i;
+    const directList = /^(?:meu|minha|meus|minhas)\s+(?:pr[oó]prios?\s+)?(?:investimentos?|ativos?|carteira|caixinhas?|cdbs?|tesouros?|renda\s+(?:fixa|vari[aá]vel)|a[cç][oõ]es|fiis?)(?:\s+(?:do|da|no)\s+open finance)?[.!?]?$/i;
     const personal = /\b(?:meu|minha|meus|minhas|tenho|possuo|saldo|posi[cç][aã]o)\b/i;
-    const openFinance = /\bopen finance\b/i;
-    const unrelatedWallet = /\bcarteira\s+(?:de\s+)?(?:motorista|habilita[cç][aã]o|trabalho|estudante|vacina)\b/i;
-    const unrelatedSubject = /\ba[cç][oõ]es\s+(?:judiciais|judici[aá]rias|penais|civis|trabalhistas)\b|\bativos?\s+(?:de\s+)?(?:software|ti|inform[aá]tica)\b/i;
-    return !unrelatedWallet.test(text) && !unrelatedSubject.test(text) && subject.test(text)
-      && (directList.test(text) || openFinance.test(text) || (personal.test(text) && action.test(text)));
+    const financialContext = /caixinh|investiment|renda fixa|renda vari[aá]vel|cdb|tesouro|\bfiis?\b|\bopen finance\b|\bbolsa\b|\bmercado financeiro\b|\bfinanceir\w*\b/i;
+    const barePortfolio = /^(?:minhas\s+a[cç][oõ]es|minha\s+carteira)[.!?]?$/i;
+    const operation = /\b(?:aport\w*|aplic\w*|deposit\w*|resgat\w*|sac\w*|compr\w*|vend\w*|transfer\w*|moviment\w*|retir\w*|contribui\w*|hist[oó]ric\w*|extrato|invist\w*|investir|investi)\b/i;
+    return !operation.test(text) && subject.test(text)
+      && (financialContext.test(text) || barePortfolio.test(text))
+      && (directList.test(text) || (personal.test(text) && statusRequest.test(text)));
   }
 
   const formatMoney = value => new Intl.NumberFormat('pt-BR', { style: 'currency', currency: 'BRL' }).format(value);

@@ -202,7 +202,10 @@ def test_investimentos_percorrem_todas_as_paginas(monkeypatch):
     assert all(c["pageSize"] == 500 for c in chamadas)
 
 
-@pytest.mark.parametrize("entry", [{}, {"id": ""}, [], "inv-1"])
+@pytest.mark.parametrize("entry", [
+    {}, {"id": ""}, {"id": True}, {"id": 123}, {"id": {"value": "inv-1"}},
+    [], "inv-1",
+])
 def test_investimentos_recusam_item_sem_id_do_provedor(monkeypatch, entry):
     monkeypatch.setattr(pluggy, "_pluggy_get", lambda *args, **kwargs: {
         "page": 1, "total": 1, "totalPages": 1,

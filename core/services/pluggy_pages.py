@@ -53,11 +53,12 @@ def collect_investment_pages(
 
         for investment in results:
             provider_id = investment.get("id") if isinstance(investment, dict) else None
-            if not str(provider_id or "").strip() or str(provider_id) in seen_ids:
+            if (not isinstance(provider_id, str) or not provider_id.strip()
+                    or provider_id in seen_ids):
                 raise error_type("Investimento inválido na resposta da Pluggy.")
             if not _valid_balance(investment.get("balance")):
                 raise error_type("Saldo de investimento inválido na resposta da Pluggy.")
-            seen_ids.add(str(provider_id))
+            seen_ids.add(provider_id)
             out.append(investment)
 
         if requested_page >= total_pages:

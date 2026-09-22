@@ -66,6 +66,7 @@ test('mantém o chat bloqueado enquanto carrega a carteira', async () => {
 for (const question of [
   'Meus investimentos', 'Meus investimentos do Open Finance',
   'Meus CDBs', 'Minhas ações', 'Minha renda fixa', 'Meus FIIs', 'Meu FII',
+  'Como está minha carteira de investimentos?', 'Como estão minhas ações na bolsa?',
 ]) {
   test(`reconhece pedido direto de carteira: ${question}`, async () => {
     const { page, errors, piggyRequests } = await setup({ openAgent: false, investments });
@@ -84,7 +85,11 @@ for (const question of [
 for (const question of [
   'Como funcionam ações?', 'Quais ações devo tomar para reduzir gastos?',
   'Como está minha carteira de motorista?', 'Como estão minhas ações judiciais?',
-  'Como estão meus ativos de software?',
+  'Como estão meus ativos de software?', 'Como está minha carteira de clientes?',
+  'Meus ativos de marca', 'Como estão as minhas ações na Justiça?',
+  'Aporte R$ 100 no meu CDB Nubank', 'Quanto aportei nos meus investimentos este mês?',
+  'Quanto rendeu meu CDB?', 'Como resgatar meus investimentos?',
+  'Invista R$ 100 nos meus investimentos',
 ]) {
   test(`não expõe a carteira em pergunta ambígua: ${question}`, async () => {
     const { page, errors, piggyRequests } = await setup({ openAgent: false, investments });
