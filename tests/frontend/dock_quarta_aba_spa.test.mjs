@@ -214,18 +214,30 @@ test("S4 (SPA): montar a Início instala o CSS externo dos grupos da sidenav",
   } finally { await ctx.close(); }
 });
 
-test("S5 (SPA): segundo toque espera o stylesheet já inserido e ainda pendente",
+test("S5 (SPA): segundo toque espera CSS e scripts externos ainda pendentes",
   LIMITE, async () => {
   const { ctx, page } = await abrirSpa(browser, "/comandos-app.html", "0", FREE);
   let liberarCss;
   let avisarCss;
+  let liberarScript;
+  let avisarScript;
   const cssLiberado = new Promise((ok) => { liberarCss = ok; });
   const cssChegou = new Promise((ok) => { avisarCss = ok; });
+  const scriptLiberado = new Promise((ok) => { liberarScript = ok; });
+  const scriptChegou = new Promise((ok) => { avisarScript = ok; });
   try {
+    await page.evaluate(() => localStorage.setItem(
+      "pb_sidenav_groups", JSON.stringify({ acompanhamento: true }),
+    ));
     await page.route("**/sidenav-rail.css*", async (route) => {
       avisarCss();
       await cssLiberado;
       await route.fulfill({ path: join(FRONTEND, "sidenav-rail.css") });
+    });
+    await page.route("**/sidenav-groups.js*", async (route) => {
+      avisarScript();
+      await scriptLiberado;
+      await route.fulfill({ path: join(FRONTEND, "sidenav-groups.js") });
     });
 
     await page.evaluate(() => window.PBNav.go("/home"));
@@ -238,9 +250,16 @@ test("S5 (SPA): segundo toque espera o stylesheet já inserido e ainda pendente"
     assert.equal(montouSemCss, false, "a segunda navegação montou /home antes do CSS terminar");
 
     liberarCss();
+    await scriptChegou;
+    const montouSemScript = await page.waitForFunction(
+      () => location.pathname === "/home", null, { timeout: 800 },
+    ).then(() => true, () => false);
+    assert.equal(montouSemScript, false, "a segunda navegação montou /home antes dos scripts terminarem");
+
+    liberarScript();
     await page.waitForFunction(() => location.pathname === "/home", null, ESPERA);
     assert.equal(await page.locator(
       '.sidenav-group[data-group="acompanhamento"] .sidenav-subitems',
-    ).evaluate((el) => getComputedStyle(el).display), "none");
-  } finally { liberarCss(); await ctx.close(); }
+    ).evaluate((el) => getComputedStyle(el).display), "block");
+  } finally { liberarCss(); liberarScript(); await ctx.close(); }
 });

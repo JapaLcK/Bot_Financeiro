@@ -99,6 +99,7 @@
 
   const cache = {};        // key → {nodes, styles, title, scrollY, refresh, bodyClass}
   const booted = new Set(); // keys cujos scripts inline já executaram (nunca 2x: let/const)
+  const loadingScripts = new Map(); // URL absoluta → Promise do <script> ainda em carga
   const loadingStyles = new Map(); // URL absoluta → Promise do <link> ainda em carga
   let currentKey = null;
   let seq = 0;             // geração: só a navegação mais recente monta
@@ -257,13 +258,26 @@
   function ensureExternalScripts(doc) {
     const have = new Set(Array.prototype.map.call(document.scripts, s => s.src).filter(Boolean));
     const need = Array.prototype.slice.call(doc.querySelectorAll("script[src]"))
-      .map(s => new URL(s.getAttribute("src"), location.origin).href)
-      .filter(u => !have.has(u));
-    return Promise.all(need.map(u => new Promise((ok, bad) => {
+      .map(s => new URL(s.getAttribute("src"), location.origin).href);
+    return Promise.all(need.map(u => {
+      const pending = loadingScripts.get(u);
+      if (pending) return pending;
+      if (have.has(u)) return Promise.resolve();
+      have.add(u);
       const s = document.createElement("script");
-      s.src = u; s.onload = ok; s.onerror = () => bad(new Error("script " + u));
+      s.src = u;
+      const promise = new Promise((ok, bad) => {
+        s.onload = () => { loadingScripts.delete(u); ok(); };
+        s.onerror = () => {
+          loadingScripts.delete(u);
+          s.remove();
+          bad(new Error("script " + u));
+        };
+      });
+      loadingScripts.set(u, promise);
       document.head.appendChild(s);
-    })));
+      return promise;
+    }));
   }
 
   // Folhas externas da página nova que ainda não existem no documento. Assim
