@@ -273,12 +273,23 @@ def _investment_snapshot_ready(health: dict) -> bool:
 def _investment_read_state(item: dict, health: dict) -> tuple | None:
     """Geração observável da coleta e estado que precisa ficar estável."""
     product = (health.get("products") or {}).get("INVESTMENTS") or {}
-    product_updated_at = product.get("last_updated_at")
-    item_updated_at = str(item.get("lastUpdatedAt") or "").strip() or None
+    detail = (item.get("statusDetail") or {}).get("investments") or {}
+
+    def valid_generation(value: Any) -> datetime | None:
+        if not isinstance(value, str) or "T" not in value:
+            return None
+        try:
+            timestamp = _dateutil_parser.isoparse(value.strip())
+        except (ValueError, TypeError, OverflowError):
+            return None
+        return timestamp if timestamp.utcoffset() is not None else None
+
+    product_updated_at = valid_generation(detail.get("lastUpdatedAt"))
+    item_updated_at = valid_generation(item.get("lastUpdatedAt"))
     # `statusDetail` pode vir null num item UPDATED. A Pluggy fornece também
     # `lastUpdatedAt` no item; sem nenhum dos dois carimbos, duas respostas
     # UPDATED iguais não provam que a coleta não começou e terminou entre elas.
-    if not product_updated_at and not item_updated_at:
+    if product_updated_at is None and item_updated_at is None:
         return None
     return (health.get("item_status"), health.get("execution_status"),
             product.get("updated"), product_updated_at, item_updated_at)

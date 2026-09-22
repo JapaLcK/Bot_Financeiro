@@ -994,6 +994,35 @@ def test_snapshot_sem_geracao_nao_zerra_investimentos(
     assert db.get_open_finance_snapshot(user_id)["investments"][0]["balance"] == 700
 
 
+@pytest.mark.parametrize("campo", ["item", "produto"])
+@pytest.mark.parametrize("data_invalida", [True, 123, "unknown", "2026-08-20T11:00:00"])
+def test_geracao_invalida_nao_autoriza_reconciliacao(
+    user_id, monkeypatch, relogio_fixo, campo, data_invalida,
+):
+    item_id = f"item-geracao-invalida-{campo}-{str(data_invalida)}"
+    conexao = _conexao(user_id, item_id)
+    db.save_open_finance_investments(conexao["id"], [{
+        "provider_investment_id": "inv-preservado", "name": "CDB preservado",
+        "type": "FIXED_INCOME", "subtype": "CDB", "currency": "BRL",
+        "balance": "700.00", "raw": {},
+    }])
+    item = {k: v for k, v in ITEM_SAUDAVEL.items() if k != "lastUpdatedAt"}
+    item["id"] = item_id
+    if campo == "item":
+        item["lastUpdatedAt"] = data_invalida
+    else:
+        item["statusDetail"] = {**item["statusDetail"],
+                                "investments": {"isUpdated": True,
+                                                "lastUpdatedAt": data_invalida}}
+    _mock_pluggy(monkeypatch, item=item, contas=[])
+    monkeypatch.setattr(ps, "list_pluggy_investments", lambda *_args: [])
+
+    res = ps.sync_pluggy_item(item_id)
+
+    assert res["investments_reconciled"] == 0
+    assert db.get_open_finance_snapshot(user_id)["investments"][0]["balance"] == 700
+
+
 @pytest.mark.parametrize("item_status", ["CREATED", "UPDATING"])
 def test_coleta_sem_saude_de_investimentos_preserva_ultimo_espelho(
     user_id, monkeypatch, relogio_fixo, item_status,
