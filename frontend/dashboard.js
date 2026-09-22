@@ -117,6 +117,7 @@ function applyUserMenuState(email, plan, displayName, gates) {
   // Reaplicar gates Pro sempre que o plano for atualizado (login, refresh,
   // upgrade no meio da sessao). Idempotente.
   applyProGates();
+  if (gates && typeof gates === "object") loadPiggyInsight();
 }
 
 /* ─── Cache do chrome do header (instant paint no cold start) ─────────────
@@ -11213,14 +11214,21 @@ async function fetchHistory() {
 // preenche pra não deixar vazio. Falha silenciosa: log no console, card escondido.
 let _piggyInsightLoaded = false;
 async function loadPiggyInsight() {
-  if (!USER_ID || _piggyInsightLoaded || !featureAllowed("insights")) return;
-  _piggyInsightLoaded = true;
   const card = document.getElementById("piggy-insight-card");
   if (!card) return;
+  if (!featureAllowed("insights")) {
+    _piggyInsightLoaded = false;
+    card.style.display = "none";
+    return;
+  }
+  if (!USER_ID || _piggyInsightLoaded) return;
+  _piggyInsightLoaded = true;
   try {
     const r = await fetch(`${API}/insights/${USER_ID}/current`, { credentials: "same-origin" });
     if (!r.ok) { card.style.display = "none"; return; }
     const data = await r.json();
+    // Um downgrade enquanto o request estava em voo não pode repintar o card.
+    if (!featureAllowed("insights")) { card.style.display = "none"; return; }
     const list = (data && data.insights) || [];
     if (!list.length) { card.style.display = "none"; return; }
 

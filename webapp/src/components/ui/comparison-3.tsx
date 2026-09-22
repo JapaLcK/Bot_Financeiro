@@ -31,7 +31,7 @@ type FeatureGroup = {
 };
 
 // A MESMA fonte da tabela servida que este bloco substituiu: cada linha está
-// ancorada em core/services/plan_limits.py — mudou lá, muda aqui.
+// ancorada em core/services/plan_limits.py e plan_service.py — mudou lá, muda aqui.
 const plans = [
   {
     id: "essencial",
@@ -73,7 +73,8 @@ const commons = [
   "Investimentos no painel",
   "Caixinhas, metas e cartões ilimitados",
   "Boletos e gastos recorrentes com lembretes",
-  "Categorização automática",
+  "Categorização automática com IA",
+  "Orçamento por categoria",
   "Exportar seus dados",
 ];
 
@@ -102,8 +103,10 @@ const groups: FeatureGroup[] = [
   {
     section: "Planejamento e previsão",
     features: [
-      { label: "Previsão de saldo 30/60/90 dias", values: [false, false, true] },
-      { label: "Relatórios semanais", values: [false, false, true] },
+      { label: "Previsão de saldo", values: [false, "30 dias", "30/60/90 dias"] },
+      { label: "Resumo semanal automático", values: [false, true, true] },
+      { label: "Insights e comparações", values: [false, true, true] },
+      { label: "Trajetória diária e pior dia do caixa", values: [false, false, true] },
     ],
   },
 ];

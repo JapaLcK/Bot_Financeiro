@@ -69,3 +69,49 @@ test("dashboard real oculta cards avançados e mantém categorias/estabeleciment
   assert.ok((await page.locator("[data-plan-content]").evaluateAll(els => els.map(el => el.style.display))).every(display => display === ""));
   await page.close();
 });
+
+async function insightPage() {
+  const page = await loadDashboardJs();
+  await page.evaluate(() => {
+    USER_ID = 1;
+    document.body.insertAdjacentHTML("beforeend", '<div id="user-label"></div><div id="user-email"></div><div id="user-plan"></div><div id="piggy-insight-card" style="display:none"><div id="piggy-insight-title"></div><div id="piggy-insight-message"></div><button id="piggy-insight-cta"></button></div>');
+    window.__calls = 0;
+    window.fetch = () => {
+      window.__calls++;
+      return new Promise(resolve => { window.__resolveInsight = () => resolve({ ok: true, json: async () => ({ insights: [{ title: "Insight permitido" }] }) }); });
+    };
+  });
+  return page;
+}
+
+for (const tier of ["essencial", "plus", "pro"]) {
+  test(`perfil ${tier} após primeiro render: insight respeita gates confirmados`, async () => {
+    const page = await insightPage();
+    await page.evaluate(() => loadPiggyInsight());
+    assert.equal(await page.evaluate(() => window.__calls), 0);
+    await page.evaluate(tier => applyUserMenuState("a@test", tier, "A", { insights: tier !== "essencial" }), tier);
+    assert.equal(await page.evaluate(() => window.__calls), tier === "essencial" ? 0 : 1);
+    if (tier !== "essencial") {
+      await page.evaluate(() => window.__resolveInsight());
+      await page.waitForFunction(() => document.getElementById("piggy-insight-title").textContent === "Insight permitido");
+      assert.equal(await page.locator("#piggy-insight-card").isVisible(), true);
+      await page.evaluate(() => applyUserMenuState("a@test", "essencial", "A", { insights: false }));
+    }
+    assert.equal(await page.locator("#piggy-insight-card").isVisible(), false);
+    await page.close();
+  });
+}
+
+test("resposta de insight em voo não repinta card depois do downgrade", async () => {
+  const page = await insightPage();
+  await page.evaluate(() => {
+    applyUserMenuState("a@test", "plus", "A", { insights: true });
+    applyUserMenuState("a@test", "essencial", "A", { insights: false });
+    window.__resolveInsight();
+  });
+  // Uma leitura de DOM após o evaluate deixa as promises já resolvidas assentarem.
+  assert.equal(await page.locator("#piggy-insight-title").textContent(), "");
+  assert.equal(await page.locator("#piggy-insight-card").isVisible(), false);
+  assert.equal(await page.evaluate(() => window.__calls), 1);
+  await page.close();
+});
