@@ -203,7 +203,8 @@
       "mfaOnboardingActivate",
       "mfaOnboardingDismiss",
       "toggleHideBalance",
-      "toggleSidenav"
+      "toggleSidenav",
+      "toggleSidenavGroup"
     ],
     "variaveis": []
   },
