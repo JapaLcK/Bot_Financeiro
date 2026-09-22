@@ -4,7 +4,7 @@ Cria gastos e receitas RECORRENTES (gastos fixos / rendas fixas) a partir de
 linguagem natural no bot — ex: "gasto fixo de 100 todo dia 10 a partir de 10/09",
 "salário de 3000 todo dia 5".
 
-Pro-only (mesma feature `recurring_expenses` do dashboard). Não tira/credita nada
+Essencial+ (mesma feature `recurring_expenses` do dashboard). Não tira/credita nada
 na hora — só cadastra; o charger (core/services/recurring_charger.py) lança no dia.
 Ver [[project_recurring_start_date]] pra semântica de start_date.
 """
@@ -62,14 +62,14 @@ def _is_variable_amount(text: str, entities: dict) -> bool:
 
 def add(user_id: int, text: str, entities: dict) -> str:
     """Cadastra um recorrente a partir das entities classificadas pela IA."""
-    # Gate Pro — recorrentes é feature do PigBank+ (igual ao dashboard).
+    # Mesmo gate do dashboard: Essencial+; Pro no modo legado.
     try:
-        from core.services.plan_service import is_pro
-        if not is_pro(user_id):
-            return ("📅 Gastos e receitas fixas são do *PigBank+*. Assine pra Piggy "
+        from core.services.plan_service import plan_gate_ok
+        if not plan_gate_ok(user_id, "recurring_expenses"):
+            return ("📅 Gastos e receitas fixas estão disponíveis a partir do *Essencial*. Assine pra Piggy "
                     "lançar tudo sozinha todo mês, no dia certo. 🐷")
     except Exception:
-        pass
+        return "Não consegui conferir seu plano agora. Tente novamente em instantes."
 
     tipo = (entities.get("tipo") or "despesa").strip().lower()
     is_income = tipo in _INCOME_WORDS

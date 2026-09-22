@@ -279,10 +279,18 @@ def _add_boleto_execute(user_id: int, args: dict[str, Any]) -> str:
 
 def _check_cashflow(user_id: int, args: dict[str, Any]) -> dict[str, Any]:
     from core.services.cashflow import project
+    from core.services.plan_service import plan_gate_ok, plans_v2_enabled, forecast_horizons_for
+
+    if plans_v2_enabled() and not plan_gate_ok(user_id, "forecast"):
+        return {"error": "pro_required", "message": "Previsões estão disponíveis no Plus (30 dias) e Pro (até 90 dias)."}
 
     target = _resolve_date(args.get("date"), args.get("days"))
     if target is None:
         return {"error": "informe a data do prazo (ex: 16/08) ou 'daqui N dias'."}
+    if plans_v2_enabled():
+        cap = max(forecast_horizons_for(user_id), default=0)
+        if target > date.today() + timedelta(days=cap):
+            return {"error": "pro_required", "message": f"Seu plano permite previsões de até {cap} dias. Escolha uma data nesse intervalo."}
     extra = args.get("amount")
     try:
         extra = float(extra) if extra is not None else 0.0
@@ -296,20 +304,20 @@ def _check_cashflow(user_id: int, args: dict[str, Any]) -> dict[str, Any]:
 
 
 def _forecast_balance(user_id: int, args: dict[str, Any]) -> dict[str, Any]:
-    """Previsão de saldo a 30/60/90 dias — feature Pro+ (ver /precos). Gate soft:
-    abaixo de Pro devolve convite de upgrade em vez do dado."""
-    from core.services.plan_service import require_min_tier
-    if not require_min_tier(user_id, "pro"):
+    """Previsão de saldo: 30 dias no Plus, 30/60/90 no Pro."""
+    from core.services.plan_service import plan_gate_ok, forecast_horizons_for
+    if not plan_gate_ok(user_id, "forecast"):
         return {
             "error": "pro_required",
-            "message": ("A previsão de saldo 30/60/90 dias faz parte do plano Pro. "
+            "message": ("A previsão de saldo começa no Plus, com 30 dias; o Pro inclui 60 e 90 dias. "
                         "Quer que eu te mostre como assinar?"),
         }
     from core.services.cashflow_forecast import forecast_horizons
-    fc = forecast_horizons(user_id)
-    fc["note"] = ("cada horizonte (30/60/90 dias) traz o saldo PROJETADO (saldo + receitas "
+    horizons = forecast_horizons_for(user_id)
+    fc = forecast_horizons(user_id, horizons)
+    fc["note"] = ("cada horizonte disponível traz o saldo PROJETADO (saldo + receitas "
                   "previstas − gastos fixos − boletos até a data) e 'tranquilo' (bool). "
-                  "Responda com a visão dos três horizontes, destacando onde aperta.")
+                  "Responda somente com os horizontes retornados, sem extrapolar outros prazos.")
     return fc
 
 
@@ -432,10 +440,10 @@ TOOLS: list[Tool] = [
             "function": {
                 "name": "forecast_balance",
                 "description": (
-                    "Previsão de saldo em 30/60/90 dias (feature Pro). Use quando o usuário quer "
+                    "Previsão de saldo: 30 dias no Plus; 30/60/90 no Pro. Use quando o usuário quer "
                     "uma visão do FUTURO em horizontes, sem citar uma data específica — ex: 'como "
                     "vou estar de saldo nos próximos meses?', 'me dá a previsão de saldo', 'vou "
-                    "ter fôlego daqui pra frente?'. Retorna 'horizons' com 30/60/90 dias, cada um "
+                    "ter fôlego daqui pra frente?'. Retorna apenas os horizontes do plano, cada um "
                     "com o saldo projetado e 'tranquilo'. Se o usuário citar UMA data/prazo "
                     "específico ('tô tranquilo dia 16?'), use check_cashflow. Se vier "
                     "'pro_required', ofereça o upgrade com jeitinho, não despeje número nenhum."

@@ -1602,7 +1602,7 @@ body.balance-hidden .account-balance {
                 <div class="notification-row">
                   <div class="notification-copy">
                     <div class="notification-title">Resumo semanal</div>
-                    <div class="notification-sub">Receba um resumo dos seus gastos toda segunda-feira, referente à semana anterior.</div>
+                    <div class="notification-sub" id="notif-weekly-description">Receba um resumo dos seus gastos toda segunda-feira, referente à semana anterior.</div>
                   </div>
                   <label class="switch" aria-label="Ativar resumo semanal">
                     <input type="checkbox" id="notif-weekly-report" onchange="updateNotificationSettings({ weekly_report_enabled: this.checked })">
@@ -2493,14 +2493,16 @@ async function sendPasswordResetEmail() {
   }
 }
 
+let _weeklyReportAvailable = false;
 function setNotificationControlsDisabled(disabled) {
   ["notif-tip-email", "notif-insight-email", "notif-whatsapp-updates", "notif-daily-report", "notif-weekly-report", "notif-monthly-report", "notif-daily-hour"].forEach(id => {
     const el = document.getElementById(id);
-    if (el) el.disabled = disabled;
+    if (el) el.disabled = disabled || (id === "notif-weekly-report" && !_weeklyReportAvailable);
   });
 }
 
 function applyNotificationSettings(data) {
+  _weeklyReportAvailable = Boolean(data.weekly_report_available);
   const email = data.email || "E-mail não vinculado";
   const whatsappDestination = data.whatsapp_destination ? formatPhoneBR(data.whatsapp_destination) : "WhatsApp não vinculado";
   const tipEmail = Boolean(data.tip_email_enabled ?? data.engagement_email_enabled);
@@ -2524,6 +2526,10 @@ function applyNotificationSettings(data) {
   document.getElementById("notif-whatsapp-updates").disabled = !whatsappAvailable;
   document.getElementById("notif-daily-report").checked = daily;
   document.getElementById("notif-weekly-report").checked = weekly;
+  document.getElementById("notif-weekly-report").disabled = !_weeklyReportAvailable;
+  document.getElementById("notif-weekly-description").textContent = _weeklyReportAvailable
+    ? "Receba um resumo toda segunda-feira, referente à semana anterior."
+    : "O resumo semanal automático está disponível nos planos Plus e Pro.";
   document.getElementById("notif-monthly-report").checked = monthly;
   document.getElementById("notif-daily-hour").value = String(hour);
   document.getElementById("notif-daily-hour").disabled = !anyScheduled;

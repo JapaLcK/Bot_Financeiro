@@ -226,6 +226,26 @@ test("pagante não vê 'Indisponível' em seção nenhuma (positivo)", async () 
   } finally { await page.close(); }
 });
 
+for (const available of [false, true]) {
+  test(`resumo semanal disponível=${available}: controle respeita plano depois do load e refresh`, async () => {
+    const page = await newPage();
+    try {
+      await page.route("**/settings/1/notifications", route => route.fulfill(json({
+        ...NOTIF_OK, weekly_report_available: available, weekly_report_enabled: available,
+      })));
+      await page.goto(`${ORIGIN}/settings.html?view=notifications`);
+      await waitFor(async () => (await page.locator("#notif-email-value").textContent()).includes("a@b.com"), "preferências carregarem");
+      await startPtr(page);
+      await waitFor(() => page.evaluate(() => window.__done !== null), "refresh terminar");
+      assert.equal(await page.locator("#notif-weekly-report").isDisabled(), !available);
+      assert.equal(await page.locator("#notif-weekly-report").isChecked(), available);
+      assert.equal(await page.locator("#notif-daily-report").isDisabled(), false);
+      assert.equal(await page.locator("#notif-monthly-report").isDisabled(), false);
+      if (!available) assert.match(await page.locator("#notif-weekly-description").textContent(), /Plus e Pro/);
+    } finally { await page.close(); }
+  });
+}
+
 test("readApiError não lê o Object.prototype", async () => {
   const page = await newPage();
   try {

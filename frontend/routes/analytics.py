@@ -32,6 +32,10 @@ async def analytics_kpis_route(
     from db import compute_kpis
     fd, td = shared.resolve_analytics_window(months, from_, to)
     result = await asyncio.to_thread(compute_kpis, user_id, fd, td)
+    from core.services.plan_service import plan_gate_ok
+    if not await asyncio.to_thread(plan_gate_ok, user_id, "financial_comparison"):
+        result.pop("prev", None)
+        result.pop("delta_pct", None)
     return {"ok": True, "kpis": result}
 
 
@@ -45,6 +49,7 @@ async def analytics_evolution_route(
     buckets mensais terminando no mês atual)."""
     shared.authorize_dashboard_access(request, user_id)
     from db import compute_evolution
+    await asyncio.to_thread(shared.require_plan_feature, user_id, "financial_comparison")
     n = max(1, min(int(months or 6), 36))
     result = await asyncio.to_thread(compute_evolution, user_id, n)
     return {"ok": True, "evolution": result, "months": n}
@@ -82,6 +87,7 @@ async def analytics_weekday_route(
     (não bill.period_end — aqui interessa o dia da compra real)."""
     shared.authorize_dashboard_access(request, user_id)
     from db import compute_weekday_pattern
+    await asyncio.to_thread(shared.require_plan_feature, user_id, "financial_comparison")
     fd, td = shared.resolve_analytics_window(months, from_, to)
     result = await asyncio.to_thread(compute_weekday_pattern, user_id, fd, td)
     return {"ok": True, "weekdays": result, "window": {"from": fd.isoformat(), "to": td.isoformat()}}
@@ -124,6 +130,7 @@ async def insights_current_route(request: Request, user_id: int):
     """
     shared.authorize_dashboard_access(request, user_id)
     from core.ai_patterns import generate_ai_insights
+    await asyncio.to_thread(shared.require_plan_feature, user_id, "insights")
     result = await asyncio.to_thread(generate_ai_insights, user_id, force=False)
     return {"ok": True, "insights": result or []}
 
@@ -149,5 +156,6 @@ async def analytics_patterns_route(
     """
     shared.authorize_dashboard_access(request, user_id)
     from core.ai_patterns import generate_ai_patterns
+    await asyncio.to_thread(shared.require_plan_feature, user_id, "insights")
     result = await asyncio.to_thread(generate_ai_patterns, user_id, force=False)
     return {"ok": True, "patterns": result or []}

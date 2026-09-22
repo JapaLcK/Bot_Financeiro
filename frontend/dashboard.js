@@ -5394,6 +5394,7 @@ async function deleteBoleto(id, name) {
 
 // Simulador "tô tranquilo nesse prazo?" — projeta o caixa até uma data.
 async function simularPrazo() {
+  if (!featureAllowed("forecast")) { showUpgradeModal("forecast"); return; }
   const dateEl = document.getElementById("boleto-sim-date");
   const amtEl = document.getElementById("boleto-sim-amount");
   const resEl = document.getElementById("boleto-sim-result");
@@ -5412,6 +5413,11 @@ async function simularPrazo() {
   resEl.innerHTML = `<div class="empty" style="color:var(--text-3);padding:8px">Calculando…</div>`;
   try {
     const resp = await fetch(`${API}/recurring-bills/${USER_ID}/projection?${q.toString()}`, { credentials: "same-origin" });
+    if (resp.status === 403) {
+      const error = await resp.json();
+      resEl.textContent = error.detail?.message || "Previsões estão disponíveis no Plus (30 dias) e Pro (até 90 dias).";
+      return;
+    }
     if (!resp.ok) throw _erroHttp(resp.status, "", await resp.text());
     const data = await resp.json();
     _renderProjection(data.projection);
@@ -5458,9 +5464,8 @@ function _renderProjection(p) {
     </div>`;
 }
 
-// Previsão de saldo 30/60/90 dias (feature Pro). Só busca se o gate liberar; pro
-// não-Pro o card fica com o teaser travado (applyProGates + click→upgrade modal).
-const _forecastLockedMsg = `<div class="empty" style="padding:8px;color:var(--text-3)">Assine o <b>Pro</b> pra ver a previsão do seu saldo a 30, 60 e 90 dias.</div>`;
+// Plus recebe 30 dias; Pro recebe 30/60/90. O backend controla os horizontes.
+const _forecastLockedMsg = `<div class="empty" style="padding:8px;color:var(--text-3)">Previsão de saldo: 30 dias no <b>Plus</b>; 60 e 90 dias no <b>Pro</b>.</div>`;
 
 async function loadForecast() {
   const resEl = document.getElementById("forecast-result");
@@ -6081,12 +6086,12 @@ async function _fetchAnalyticsAll(months, { force = false } = {}) {
     };
     const [k, ev, cat, wk, tm, pat, ins] = await Promise.all([
       getJson(`${base}/kpis${qs}`),
-      getJson(`${base}/evolution${qs}`),
+      featureAllowed("financial_comparison") ? getJson(`${base}/evolution${qs}`) : {},
       getJson(`${base}/categories${qs}`),
-      getJson(`${base}/weekday-pattern${qs}`),
+      featureAllowed("financial_comparison") ? getJson(`${base}/weekday-pattern${qs}`) : {},
       getJson(`${base}/top-merchants${qs}&limit=8`),
-      optional(`${base}/patterns${qs}`),
-      optional(`/insights/${USER_ID}/current`),
+      featureAllowed("insights") ? optional(`${base}/patterns${qs}`) : {},
+      featureAllowed("insights") ? optional(`/insights/${USER_ID}/current`) : {},
     ]);
     return {
       kpis:       k.kpis       || null,
@@ -7284,7 +7289,10 @@ const UPGRADE_MESSAGES = {
   changelog: "As notícias e resumos do mercado feitos pela Piggy fazem parte dos planos Plus e Pro. Assine pra desbloquear.",
   recurring_expenses: "A agenda de boletos e os gastos fixos fazem parte dos planos pagos. Cadastre suas contas a pagar e nunca mais perca um vencimento.",
   agents: "Seu plano atual não ativa mais agentes. Fazendo upgrade, a equipe de porquinhos trabalha pra você: Xerife, Repórter, Carteiro e os próximos que chegarem.",
-  forecast: "A previsão de saldo a 30, 60 e 90 dias é do plano Pro. Veja pra onde seu caixa caminha e planeje com folga antes do aperto chegar.",
+  forecast: "O Plus prevê seu saldo em 30 dias. O Pro inclui 60 e 90 dias e a análise da trajetória do caixa.",
+  insights: "Insights e padrões personalizados estão disponíveis nos planos Plus e Pro.",
+  financial_comparison: "Compare períodos e acompanhe tendências nos planos Plus e Pro.",
+  weekly_report: "Receba o resumo semanal automático nos planos Plus e Pro.",
   generic: "Essa feature faz parte dos planos pagos do PigBank. Escolha o que faz mais sentido pra você."
 };
 
@@ -7335,6 +7343,9 @@ function closeUpgradeModal() {
 // Aplica estado visual disabled em todos os elementos com data-pro-feature
 // quando o user e Free. Idempotente — pode ser chamada varias vezes.
 function applyProGates() {
+  document.querySelectorAll("[data-plan-content]").forEach(el => {
+    el.style.display = featureAllowed(el.dataset.planContent) ? "" : "none";
+  });
   // Gate POR FEATURE: cada controle libera no seu tier mínimo (Essencial já
   // solta investimentos/OFX/export/etc; Novidades só do Plus pra cima). Antes
   // era um único booleano is_pro, que trancava tudo pra quem era Essencial.
@@ -11202,7 +11213,7 @@ async function fetchHistory() {
 // preenche pra não deixar vazio. Falha silenciosa: log no console, card escondido.
 let _piggyInsightLoaded = false;
 async function loadPiggyInsight() {
-  if (!USER_ID || _piggyInsightLoaded) return;
+  if (!USER_ID || _piggyInsightLoaded || !featureAllowed("insights")) return;
   _piggyInsightLoaded = true;
   const card = document.getElementById("piggy-insight-card");
   if (!card) return;

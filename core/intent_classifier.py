@@ -914,22 +914,24 @@ EXEMPLOS:
 
 
 def _classify_llm_call(user_content: str, user_id: int | None) -> IntentResult:
-    """Núcleo da classificação via IA (Tier 3): aplica gate Pro + rate limit e
+    """Núcleo da classificação via IA (Tier 3): aplica gate pago + rate limit e
     chama o LLM com `_SYSTEM_PROMPT`. `user_content` é a mensagem de usuário
     (pode ser o texto cru OU um bloco de contexto de esclarecimento)."""
     from core.ai_rate_limiter import is_allowed
 
-    # Gate Pro: IA conversacional é Pro v1
+    # A classificação também produz registros básicos, inclusive recorrentes.
+    # Essencial+ no v2; o gate preserva Pro no modo legado.
     if user_id is not None:
         try:
-            from core.services.plan_service import is_pro
-            if not is_pro(int(user_id)):
+            from core.services.plan_service import plan_gate_ok
+            if not plan_gate_ok(int(user_id), "generic"):
                 return IntentResult(intent="out_of_scope", confidence=0.0)
         except Exception:
             logger.warning(
-                "gate Pro do tier-3 falhou pro user %s — seguindo fail-open (classify IA liberado)",
+                "gate pago do tier-3 falhou pro user %s — classificação indisponível",
                 user_id, exc_info=True,
             )
+            return IntentResult(intent="out_of_scope", confidence=0.0)
 
     if user_id is not None and not is_allowed(user_id):
         print(f"[intent_classifier] rate limit atingido para user_id={user_id}")
