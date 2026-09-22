@@ -87,7 +87,18 @@ docs/open_finance_validacao_manual.md — o que do Open Finance só se valida em
 O `app` FastAPI vive em `frontend/finance_bot_websocket_custom.py`. Parte das rotas já
 saiu para routers em `frontend/routes/`, registrados com `include_router`:
 `static_pages`, `settings`, `pockets`, `cards`, `analytics`, `affiliates`, `agents`,
-`open_finance`, `push`.
+`open_finance`, `push`, `simulator`.
+
+`POST /simulator/{user_id}` (`frontend/routes/simulator.py`) é o simulador de compra
+do Pro: 1 a 3 cenários (à vista, parcelado, financiado pela tabela Price) comparados
+com o atual sobre a mesma leitura da previsão de saldo, 90 dias + resumo do contrato.
+O pior dia e a reserva incluem hoje após a compra e os 90 dias seguintes (91 datas);
+o saldo final continua sendo o do dia 90. A tool avisa antes dos números se os
+bancos conectados estiverem excluídos ou o saldo consolidado não for confirmado.
+Preço, entrada, custos, despesa mensal nova e reserva aceitam no máximo duas casas
+decimais; frações de centavo são recusadas na validação comum da API e da tool.
+Taxas percentuais mantêm precisão livre, inclusive valores muito pequenos.
+Sem persistência e sem tela ainda; lógica em `core/services/decision_simulator.py`.
 
 **Rota nova vai para um router de `frontend/routes/`**, não para o monólito. Ao
 procurar uma rota existente, procure nos dois lugares:
@@ -220,6 +231,8 @@ categorização determinística. Há rate limiting próprio (`core/ai_rate_limit
 limite mensal de chat (`AI_CHAT_MONTHLY_LIMIT`), chat "Piggy" no dashboard
 (`core/services/ai_chat/`) e agentes proativos (`core/services/piggy_agents.py`,
 atrás de `AGENTS_ENABLED` + listas de beta).
+A tool `simulate_purchase` (`core/services/ai_chat/tools/simulator.py`) usa o mesmo
+simulador e a mesma validação da rota `/simulator`, com gate soft de Pro.
 
 Categorização tem uma armadilha própria: **categoria e regra de categoria são tabelas
 diferentes** (`user_categories` × `user_category_rules`) e a regra ganha da categoria

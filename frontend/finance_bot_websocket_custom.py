@@ -124,6 +124,7 @@ from frontend.routes.prospects import router as prospects_router
 from frontend.routes.push import router as push_router
 from frontend.routes.onboarding import router as onboarding_router
 from frontend.routes.settings import router as settings_router
+from frontend.routes.simulator import router as simulator_router
 from frontend.routes.shared import (
     AUTH_COOKIE_NAME,
     DASHBOARD_COOKIE_NAME,
@@ -7360,6 +7361,10 @@ app.include_router(agents_router)
 # /categories/{user_id}/{cat_id}, então não há colisão hoje — registrar aqui
 # garante que um catch-all futuro não engula esta rota.
 app.include_router(categories_router)
+
+
+# ─── Simulador de decisão financeira (Pro) → frontend/routes/simulator.py ────
+app.include_router(simulator_router)
 
 
 @app.get("/debug/ai/{user_id}/payload")
