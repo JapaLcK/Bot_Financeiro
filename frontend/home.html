@@ -104,6 +104,14 @@ html.pb-app body.pb-page-home .sidenav-toggle { display:inline-flex; }
 .sidenav-item .sn-label { flex:1; min-width:0; white-space:nowrap; overflow:hidden; text-overflow:ellipsis; }
 .sidenav-item .sn-tag { font-size:.55rem; font-weight:700; padding:2px 6px; border-radius:6px; letter-spacing:.06em; text-transform:uppercase; background:rgba(251,191,36,.18); color:#fbbf24; }
 .sidenav-item .sn-tag.new { background:rgba(198,241,26,.18); color:#C6F11A; }
+/* Menus colapsáveis — mesmas regras do dashboard.css (as duas sidenavs têm
+   que abrir/fechar igual; o estado vem do localStorage "pb_sidenav_groups"). */
+.sidenav-group-toggle .sn-caret { margin-left:auto; color:var(--text-3); font-size:.78rem; transition:transform .18s var(--ease); }
+.sidenav-group.open .sidenav-group-toggle .sn-caret { transform:rotate(90deg); }
+.sidenav-subitems { display:none; }
+.sidenav-group.open .sidenav-subitems { display:block; }
+.sidenav-subitems .sidenav-item { padding-left:22px; position:relative; }
+.sidenav-subitems .sidenav-item::before { content:""; position:absolute; left:9px; top:50%; width:5px; height:5px; border-radius:50%; background:var(--text-3); opacity:.5; transform:translateY(-50%); }
 .sidenav-footer { margin-top:auto; padding-top:12px; border-top:1px solid var(--div); display:flex; flex-direction:column; gap:2px; }
 .sidenav-backdrop { display:none; }
 .sidenav-backdrop.open { display:block; position:fixed; inset:0; z-index:59; background:rgba(0,0,0,.55); backdrop-filter:blur(1px); }
@@ -499,23 +507,45 @@ footer a:hover { color:var(--text); }
     </div>
   </div>
 
-  <div class="sidenav-section">Geral</div>
   <a class="sidenav-item active" href="/home" aria-current="page"><span class="sn-icon" style="color:#FF80B8"><i class="ph ph-house" aria-hidden="true"></i></span><span class="sn-label">Início</span></a>
   <a class="sidenav-item" href="/app?view=overview"><span class="sn-icon" style="color:#3B82F6"><i class="ph ph-chart-bar" aria-hidden="true"></i></span><span class="sn-label">Visão Geral</span></a>
-  <a class="sidenav-item" href="/app?view=analytics"><span class="sn-icon" style="color:#06B6D4"><i class="ph ph-chart-line-up" aria-hidden="true"></i></span><span class="sn-label">Análises</span></a>
-  <a class="sidenav-item" href="/app?view=history"><span class="sn-icon" style="color:#94A3B8"><i class="ph ph-clock-counter-clockwise" aria-hidden="true"></i></span><span class="sn-label">Histórico</span></a>
   <a class="sidenav-item" data-nav="agentes" href="/app?view=agentes"><span class="sn-icon" style="color:#FF2D8E"><i class="ph ph-piggy-bank" aria-hidden="true"></i></span><span class="sn-label">Agentes</span><span class="sn-tag new">novo</span></a>
 
-  <div class="sidenav-section">Planejamento</div>
-  <a class="sidenav-item" href="/app?view=fixed"><span class="sn-icon" style="color:#14B8A6"><i class="ph ph-arrows-clockwise" aria-hidden="true"></i></span><span class="sn-label">Recorrentes</span></a>
-  <a class="sidenav-item" href="/app?view=budgets"><span class="sn-icon" style="color:#F59E0B"><i class="ph ph-note-pencil" aria-hidden="true"></i></span><span class="sn-label">Orçamentos</span><span class="sn-tag new">novo</span></a>
-  <a class="sidenav-item" href="/app?view=goals"><span class="sn-icon" style="color:#10B981"><i class="ph ph-target" aria-hidden="true"></i></span><span class="sn-label">Caixinhas e metas</span><span class="sn-tag new">novo</span></a>
-  <a class="sidenav-item" href="/app?view=categories"><span class="sn-icon" style="color:#A855F7"><i class="ph ph-tag" aria-hidden="true"></i></span><span class="sn-label">Categorias</span></a>
+  <!-- Menus colapsáveis: mesma estrutura da sidenav do dashboard (o estado
+       aberto/fechado é compartilhado via localStorage "pb_sidenav_groups"). -->
+  <div class="sidenav-group" data-group="acompanhamento">
+    <button class="sidenav-item sidenav-group-toggle" type="button" aria-expanded="false" aria-controls="sn-sub-acompanhamento" onclick="toggleSidenavGroup('acompanhamento')"><span class="sn-icon" style="color:#06B6D4"><i class="ph ph-chart-line-up" aria-hidden="true"></i></span><span class="sn-label">Acompanhamento</span><i class="ph ph-caret-right sn-caret" aria-hidden="true"></i></button>
+    <div class="sidenav-subitems" id="sn-sub-acompanhamento">
+      <a class="sidenav-item" href="/app?view=analytics"><span class="sn-icon" style="color:#06B6D4"><i class="ph ph-chart-line-up" aria-hidden="true"></i></span><span class="sn-label">Análises</span></a>
+      <a class="sidenav-item" href="/app?view=history"><span class="sn-icon" style="color:#94A3B8"><i class="ph ph-clock-counter-clockwise" aria-hidden="true"></i></span><span class="sn-label">Histórico</span></a>
+    </div>
+  </div>
 
-  <div class="sidenav-section">Crédito</div>
-  <a class="sidenav-item" href="/app?view=installments"><span class="sn-icon" style="color:#FB923C"><i class="ph ph-credit-card" aria-hidden="true"></i></span><span class="sn-label">Parcelamentos</span></a>
-  <a class="sidenav-item" href="/app?view=cards"><span class="sn-icon" style="color:#6366F1"><i class="ph ph-cards" aria-hidden="true"></i></span><span class="sn-label">Cartões</span><span class="sn-tag new">novo</span></a>
-  <a class="sidenav-item" href="/app?view=investments"><span class="sn-icon" style="color:#22C55E"><i class="ph ph-chart-line-up" aria-hidden="true"></i></span><span class="sn-label">Investimentos</span><span class="sn-tag">Pro</span></a>
+  <div class="sidenav-group" data-group="planejamento">
+    <button class="sidenav-item sidenav-group-toggle" type="button" aria-expanded="false" aria-controls="sn-sub-planejamento" onclick="toggleSidenavGroup('planejamento')"><span class="sn-icon" style="color:#14B8A6"><i class="ph ph-clipboard-text" aria-hidden="true"></i></span><span class="sn-label">Planejamento</span><i class="ph ph-caret-right sn-caret" aria-hidden="true"></i></button>
+    <div class="sidenav-subitems" id="sn-sub-planejamento">
+      <a class="sidenav-item" href="/app?view=fixed"><span class="sn-icon" style="color:#14B8A6"><i class="ph ph-arrows-clockwise" aria-hidden="true"></i></span><span class="sn-label">Recorrentes</span></a>
+      <a class="sidenav-item" href="/app?view=goals"><span class="sn-icon" style="color:#10B981"><i class="ph ph-target" aria-hidden="true"></i></span><span class="sn-label">Caixinhas e metas</span><span class="sn-tag new">novo</span></a>
+      <a class="sidenav-item" href="/app?view=categories"><span class="sn-icon" style="color:#A855F7"><i class="ph ph-tag" aria-hidden="true"></i></span><span class="sn-label">Categorias</span></a>
+    </div>
+  </div>
+
+  <div class="sidenav-group" data-group="ferramentas">
+    <button class="sidenav-item sidenav-group-toggle" type="button" aria-expanded="false" aria-controls="sn-sub-ferramentas" onclick="toggleSidenavGroup('ferramentas')"><span class="sn-icon" style="color:#F59E0B"><i class="ph ph-wrench" aria-hidden="true"></i></span><span class="sn-label">Ferramentas</span><i class="ph ph-caret-right sn-caret" aria-hidden="true"></i></button>
+    <div class="sidenav-subitems" id="sn-sub-ferramentas">
+      <a class="sidenav-item" href="/app?view=budgets"><span class="sn-icon" style="color:#F59E0B"><i class="ph ph-note-pencil" aria-hidden="true"></i></span><span class="sn-label">Orçamentos</span><span class="sn-tag new">novo</span></a>
+      <a class="sidenav-item" href="/app?view=orcamento-domestico"><span class="sn-icon" style="color:#38BDF8"><i class="ph ph-bank" aria-hidden="true"></i></span><span class="sn-label">Orçamento Doméstico</span><span class="sn-tag">Pro</span></a>
+      <a class="sidenav-item" href="/app?view=investments"><span class="sn-icon" style="color:#22C55E"><i class="ph ph-chart-line-up" aria-hidden="true"></i></span><span class="sn-label">Investimentos</span><span class="sn-tag">Pro</span></a>
+    </div>
+  </div>
+
+  <div class="sidenav-group" data-group="credito">
+    <button class="sidenav-item sidenav-group-toggle" type="button" aria-expanded="false" aria-controls="sn-sub-credito" onclick="toggleSidenavGroup('credito')"><span class="sn-icon" style="color:#FB923C"><i class="ph ph-credit-card" aria-hidden="true"></i></span><span class="sn-label">Crédito</span><i class="ph ph-caret-right sn-caret" aria-hidden="true"></i></button>
+    <div class="sidenav-subitems" id="sn-sub-credito">
+      <a class="sidenav-item" href="/app?view=installments"><span class="sn-icon" style="color:#FB923C"><i class="ph ph-credit-card" aria-hidden="true"></i></span><span class="sn-label">Parcelamentos</span></a>
+      <a class="sidenav-item" href="/app?view=cards"><span class="sn-icon" style="color:#6366F1"><i class="ph ph-cards" aria-hidden="true"></i></span><span class="sn-label">Cartões</span><span class="sn-tag new">novo</span></a>
+    </div>
+  </div>
 
   <div class="sidenav-footer">
     <div class="sidenav-section" style="padding-top:0">Conta</div>
@@ -893,6 +923,38 @@ function toggleSidenav(force) {
 }
 sidenavRailMedia.addEventListener("change", syncSidenavMode);
 syncSidenavMode();
+
+/* ── Menus colapsáveis da sidenav ─────────────────────────────────────────
+   Mesma mecânica do dashboard.js (toggleSidenavGroup lá): grupos fechados por
+   padrão, estado persistido na MESMA chave — abrir Ferramentas aqui e ela já
+   vem aberta no /app. Aqui não há "menu da view ativa": a página ativa é o
+   Início, que fica fora dos grupos. */
+function _snGroupStates() {
+  try { return JSON.parse(localStorage.getItem("pb_sidenav_groups") || "{}") || {}; }
+  catch(_) { return {}; }
+}
+
+function toggleSidenavGroup(name) {
+  const g = document.querySelector(`.sidenav-group[data-group="${name}"]`);
+  if (!g) return;
+  const open = !g.classList.contains("open");
+  g.classList.toggle("open", open);
+  const toggle = g.querySelector(".sidenav-group-toggle");
+  if (toggle) toggle.setAttribute("aria-expanded", open ? "true" : "false");
+  const states = _snGroupStates();
+  states[name] = open;
+  try { localStorage.setItem("pb_sidenav_groups", JSON.stringify(states)); } catch(_) {}
+}
+
+(function initSidenavGroups() {
+  const states = _snGroupStates();
+  document.querySelectorAll(".sidenav-group").forEach(g => {
+    const open = !!states[g.dataset.group];
+    g.classList.toggle("open", open);
+    const toggle = g.querySelector(".sidenav-group-toggle");
+    if (toggle) toggle.setAttribute("aria-expanded", open ? "true" : "false");
+  });
+})();
 document.addEventListener("keydown", e => {
   if (e.key === "Escape") {
     const nav = document.getElementById("sidenav");
@@ -1849,7 +1911,7 @@ async function mfaOnboardingDismiss() {
 /* Handlers chamados por onclick= no HTML: dentro do init eles deixaram de
    nascer globais — expõe exatamente os que o markup usa. */
 Object.assign(window, {
-  toggleHideBalance, toggleSidenav, logoutFromHome, connectWhatsAppFromHome,
+  toggleHideBalance, toggleSidenav, toggleSidenavGroup, logoutFromHome, connectWhatsAppFromHome,
   mfaOnboardingActivate, mfaOnboardingDismiss,
 });
 });

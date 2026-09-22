@@ -64,6 +64,7 @@ body.light .sidenav.is-scrolling::-webkit-scrollbar-thumb { background: rgba(15,
   html:not(.pb-app) .sidenav .brand-text,
   html:not(.pb-app) .sidenav .sn-label,
   html:not(.pb-app) .sidenav .sn-tag,
+  html:not(.pb-app) .sidenav .sn-caret,
   html:not(.pb-app) .sidenav .sidenav-section {
     opacity: 0;
     transition: opacity .12s var(--ease);
@@ -71,10 +72,12 @@ body.light .sidenav.is-scrolling::-webkit-scrollbar-thumb { background: rgba(15,
   html:not(.pb-app) .sidenav:hover .brand-text,
   html:not(.pb-app) .sidenav:hover .sn-label,
   html:not(.pb-app) .sidenav:hover .sn-tag,
+  html:not(.pb-app) .sidenav:hover .sn-caret,
   html:not(.pb-app) .sidenav:hover .sidenav-section,
   html:not(.pb-app) .sidenav:has(.sidenav-item:focus-visible) .brand-text,
   html:not(.pb-app) .sidenav:has(.sidenav-item:focus-visible) .sn-label,
   html:not(.pb-app) .sidenav:has(.sidenav-item:focus-visible) .sn-tag,
+  html:not(.pb-app) .sidenav:has(.sidenav-item:focus-visible) .sn-caret,
   html:not(.pb-app) .sidenav:has(.sidenav-item:focus-visible) .sidenav-section { opacity: 1; }
 
   html:not(.pb-app) .sidenav .brand-text { white-space: nowrap; }
@@ -88,5 +91,6 @@ body.light .sidenav.is-scrolling::-webkit-scrollbar-thumb { background: rgba(15,
   html:not(.pb-app) .sidenav .brand-text,
   html:not(.pb-app) .sidenav .sn-label,
   html:not(.pb-app) .sidenav .sn-tag,
+  html:not(.pb-app) .sidenav .sn-caret,
   html:not(.pb-app) .sidenav .sidenav-section { transition: none; }
 }
