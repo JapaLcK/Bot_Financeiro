@@ -183,9 +183,10 @@ def test_investimentos_recusam_snapshot_sem_lista_de_resultados(pluggy_responde,
 def test_investimentos_percorrem_todas_as_paginas(monkeypatch):
     respostas = {
         1: {"page": 1, "total": 3, "totalPages": 2,
-            "results": [{"id": "inv-1"}, {"id": "inv-2"}]},
+            "results": [{"id": "inv-1", "balance": 10},
+                        {"id": "inv-2", "balance": "20.50"}]},
         2: {"page": 2, "total": 3, "totalPages": 2,
-            "results": [{"id": "inv-3"}]},
+            "results": [{"id": "inv-3", "balance": 0}]},
     }
     chamadas = []
 
@@ -204,7 +205,8 @@ def test_investimentos_percorrem_todas_as_paginas(monkeypatch):
 @pytest.mark.parametrize("entry", [{}, {"id": ""}, [], "inv-1"])
 def test_investimentos_recusam_item_sem_id_do_provedor(monkeypatch, entry):
     monkeypatch.setattr(pluggy, "_pluggy_get", lambda *args, **kwargs: {
-        "page": 1, "total": 1, "totalPages": 1, "results": [entry],
+        "page": 1, "total": 1, "totalPages": 1,
+        "results": [{**entry, "balance": 10}] if isinstance(entry, dict) else [entry],
     })
 
     with pytest.raises(pluggy.PluggyApiError, match="Investimento inválido"):
@@ -213,8 +215,20 @@ def test_investimentos_recusam_item_sem_id_do_provedor(monkeypatch, entry):
 
 def test_investimentos_recusam_paginacao_incompleta(monkeypatch):
     monkeypatch.setattr(pluggy, "_pluggy_get", lambda *args, **kwargs: {
-        "page": 1, "total": 2, "totalPages": 1, "results": [{"id": "inv-1"}],
+        "page": 1, "total": 2, "totalPages": 1,
+        "results": [{"id": "inv-1", "balance": 10}],
     })
 
     with pytest.raises(pluggy.PluggyApiError, match="Paginação incompleta"):
+        pluggy.list_pluggy_investments("item-limpo", "k")
+
+
+@pytest.mark.parametrize("balance", [None, "", "invalido", float("nan"), float("inf"), True])
+def test_investimentos_recusam_saldo_invalido(monkeypatch, balance):
+    monkeypatch.setattr(pluggy, "_pluggy_get", lambda *args, **kwargs: {
+        "page": 1, "total": 1, "totalPages": 1,
+        "results": [{"id": "inv-1", "balance": balance}],
+    })
+
+    with pytest.raises(pluggy.PluggyApiError, match="Saldo de investimento inválido"):
         pluggy.list_pluggy_investments("item-limpo", "k")

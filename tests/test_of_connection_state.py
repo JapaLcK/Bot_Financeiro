@@ -776,6 +776,35 @@ def test_429_em_investimentos_nao_descarta_as_contas_ja_lidas(user_id, monkeypat
     assert db.get_open_finance_snapshot(user_id)["investments"][0]["balance"] == 700
 
 
+def test_produto_investimentos_desatualizado_preserva_ultimo_espelho(
+    user_id, monkeypatch, relogio_fixo,
+):
+    conexao = _conexao(user_id, "item-investimentos-stale")
+    db.save_open_finance_investments(conexao["id"], [{
+        "provider_investment_id": "inv-preservado", "name": "CDB preservado",
+        "type": "FIXED_INCOME", "subtype": "CDB", "currency": "BRL",
+        "balance": "700.00", "raw": {},
+    }])
+    item = {
+        **ITEM_SAUDAVEL,
+        "id": "item-investimentos-stale",
+        "statusDetail": {
+            **ITEM_SAUDAVEL["statusDetail"],
+            "investments": {"isUpdated": False, "warnings": []},
+        },
+    }
+    _mock_pluggy(monkeypatch, item=item, contas=[])
+    chamadas = []
+    monkeypatch.setattr(ps, "list_pluggy_investments", lambda *args: chamadas.append(args))
+
+    res = ps.sync_pluggy_item("item-investimentos-stale")
+
+    assert chamadas == [], "produto stale não autoriza nem a leitura como snapshot atual"
+    assert res["ok"] is False and res["reason"] == "read_failed"
+    assert res["investments_reconciled"] == 0
+    assert db.get_open_finance_snapshot(user_id)["investments"][0]["balance"] == 700
+
+
 def test_leitura_incompleta_com_zero_contas_nao_vira_no_accounts(user_id, monkeypatch, relogio_fixo):
     """'não consegui ler' ≠ 'li e veio vazio' (linhas D × E da tabela). Sem esta
     distinção, um 429 em `/investments` acusaria o banco de não ter dado nenhum —

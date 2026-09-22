@@ -319,14 +319,17 @@ def _sync_pluggy_item_confirmado(provider_item_id: str, connection: dict, api_ke
     # é confundir "li e veio vazio" com "não consegui ler": só o primeiro
     # autoriza `no_accounts`.
     investments: list[dict] = []
-    investments_ok = True
-    try:
-        investments = [normalize_pluggy_investment(i)
-                       for i in list_pluggy_investments(provider_item_id, api_key)]
-    except Exception as exc:
-        investments_ok = False
-        print(f"[pluggy_sync] investimentos indisponíveis item={provider_item_id} "
-              f"erro={type(exc).__name__}", flush=True)
+    investments_ok = "INVESTMENTS" not in (health.get("stale_products") or [])
+    if investments_ok:
+        try:
+            investments = [normalize_pluggy_investment(i)
+                           for i in list_pluggy_investments(provider_item_id, api_key)]
+        except Exception as exc:
+            investments_ok = False
+            print(f"[pluggy_sync] investimentos indisponíveis item={provider_item_id} "
+                  f"erro={type(exc).__name__}", flush=True)
+    else:
+        print(f"[pluggy_sync] investimentos desatualizados item={provider_item_id}", flush=True)
     heartbeat()
 
     # ── FASE 2: escrita, serializada por item ────────────────────────────────
