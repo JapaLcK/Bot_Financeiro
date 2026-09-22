@@ -36,3 +36,21 @@ for (const viewport of [{ width: 1280, height: 900 }, { width: 390, height: 844 
     } finally { await page.close(); }
   });
 }
+
+test('bloqueia perguntas da carteira enquanto a resposta principal está pendente', async () => {
+  const { page, releasePiggy, piggyRequests } = await setup({ openAgent: false, investments, holdPiggy: true });
+  try {
+    await page.click('#piggy-fab');
+    await page.fill('#piggy-input', 'Quanto tenho nas caixinhas?');
+    await page.click('#piggy-send');
+    await page.locator('.pc-portfolio').waitFor();
+    const followup = page.getByRole('button', { name: 'Quais são meus maiores CDBs?' });
+    assert.equal(await followup.isDisabled(), true, 'a pergunta não pode aceitar um clique que será descartado');
+    releasePiggy();
+    await page.waitForFunction(() => !document.getElementById('piggy-input').disabled);
+    assert.equal(await followup.isEnabled(), true, 'a pergunta deve ser liberada quando o envio termina');
+    await followup.click();
+    await page.waitForFunction(() => document.querySelectorAll('.pc-portfolio').length === 2);
+    assert.equal(piggyRequests.length, 2);
+  } finally { await page.close(); }
+});

@@ -56,7 +56,7 @@ function MessageBubble({ message, view, id }: {
         </BubbleContent>
       </Bubble>
       {id === "piggy" && message.portfolio && view.onPortfolioAsk &&
-        <PortfolioCard portfolio={message.portfolio} onAsk={view.onPortfolioAsk} />}
+        <PortfolioCard portfolio={message.portfolio} onAsk={view.onPortfolioAsk} disabled={view.disabled} />}
       <MessageFooter>
         <b className="pc-message-author">{author}</b>
         {time && <time dateTime={message.createdAt}>{time}</time>}

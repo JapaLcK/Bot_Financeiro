@@ -52,6 +52,13 @@ export default defineConfig([
     },
   },
   {
+    // `USER_ID` é `let` de topo do dashboard.js. Como os dois arquivos são
+    // scripts clássicos na mesma página, dashboard-chat.js lê o nome pelo
+    // escopo léxico global; ele não existe como propriedade de `window`.
+    files: ["frontend/dashboard-chat.js"],
+    languageOptions: { globals: { USER_ID: "readonly" } },
+  },
+  {
     // Bloco PRÓPRIO pelo mesmo motivo do bloco abaixo: `LAUNCH_TYPE_LABELS` é
     // `const` de topo de script clássico (frontend/launch-type-labels.js), vai
     // para o escopo léxico global e NÃO vira propriedade de `window`.

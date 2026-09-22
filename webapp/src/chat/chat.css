@@ -144,6 +144,7 @@ body.light #pigbank-chat-root {
 #pigbank-chat-root .pc-portfolio-followups { display: flex; flex-wrap: wrap; gap: 8px; }
 #pigbank-chat-root .pc-portfolio-followups button { min-height: 40px; padding: 7px 10px; border: 1px solid var(--pc-line); border-radius: 20px; background: var(--pc-raised); color: var(--pc-ink); font-size: 12px; }
 #pigbank-chat-root .pc-portfolio-followups button:hover { border-color: var(--pc-accent); }
+#pigbank-chat-root .pc-portfolio-followups button:disabled { cursor: default; opacity: .5; }
 #pigbank-chat-root .pc-chat-feedback { flex-shrink: 0; padding: 0 16px; }
 #pigbank-chat-root .pc-chat-feedback p { color: var(--pc-muted); font-size: 12px; margin: 0; }
 #pigbank-chat-root .pc-chat-feedback p:not(:empty) { padding-top: 10px; }
