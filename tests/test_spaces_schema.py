@@ -1,9 +1,9 @@
-"""Espaços financeiros — Fase 1: schema, default lazy e CRUD básico.
+"""Espaços financeiros — invariantes do schema.
 
-Cobre os invariantes do modelo antes de qualquer leitura/escrita por espaço:
-- exatamente 1 espaço default por usuário (idempotente);
-- unicidade de nome por usuário;
-- isolamento entre usuários;
+A API CRUD de espaços saiu sem chamador; o schema ficou. Estes testes
+travam as proteções dele, com as linhas inseridas direto por SQL:
+- exatamente 1 espaço default por usuário (índice parcial);
+- isolamento entre usuários (FK composta e trigger de open_finance_accounts);
 - `on delete set null`: apagar um espaço NÃO apaga o lançamento associado.
 """
 from decimal import Decimal
@@ -15,46 +15,22 @@ import db
 from db import get_conn
 
 
-def test_ensure_default_space_idempotente(user_id: int):
-    a = db.ensure_default_space(user_id)
-    b = db.ensure_default_space(user_id)
-    assert a == b
-
-    spaces = db.list_spaces(user_id)
-    defaults = [s for s in spaces if s["is_default"]]
-    assert len(defaults) == 1
-    assert defaults[0]["id"] == a
-    assert defaults[0]["name"] == db.spaces.DEFAULT_SPACE_NAME
-
-
-def test_create_space_unico_por_nome(user_id: int):
-    db.ensure_default_space(user_id)
-    s1 = db.create_space(user_id, "Fazenda", emoji="🚜")
-    s2 = db.create_space(user_id, "Fazenda")  # mesmo nome → mesma linha
-    assert s1["id"] == s2["id"]
-    assert not s1["is_default"]
-
-    names = {s["name"] for s in db.list_spaces(user_id)}
-    assert {"Fazenda", db.spaces.DEFAULT_SPACE_NAME} <= names
-
-
-def test_espacos_isolados_por_usuario(user_id: int):
-    other = user_id + 1
-    db.ensure_user(other)
-    try:
-        db.create_space(user_id, "Empresa")
-        mine = {s["name"] for s in db.list_spaces(user_id)}
-        theirs = {s["name"] for s in db.list_spaces(other)}
-        assert "Empresa" in mine
-        assert "Empresa" not in theirs
-    finally:
-        from tests.conftest import _cleanup_user
-        _cleanup_user(other)
+def _espaco(user_id: int, nome: str, default: bool = False) -> int:
+    with get_conn() as conn:
+        with conn.cursor() as cur:
+            cur.execute(
+                "insert into financial_spaces (user_id, name, is_default) "
+                "values (%s, %s, %s) returning id",
+                (user_id, nome, default),
+            )
+            space_id = cur.fetchone()["id"]
+        conn.commit()
+    return space_id
 
 
 def test_on_delete_set_null_preserva_launch(user_id: int):
     """Apagar o espaço zera o space_id do lançamento, mas não apaga o lançamento."""
-    space = db.create_space(user_id, "Casa")
+    space_id = _espaco(user_id, "Casa")
     with get_conn() as conn:
         with conn.cursor() as cur:
             cur.execute(
@@ -63,12 +39,12 @@ def test_on_delete_set_null_preserva_launch(user_id: int):
                 values (%s, 'despesa', 10, 'teste', %s)
                 returning id
                 """,
-                (user_id, space["id"]),
+                (user_id, space_id),
             )
             launch_id = cur.fetchone()["id"]
             conn.commit()
 
-            cur.execute("delete from financial_spaces where id=%s", (space["id"],))
+            cur.execute("delete from financial_spaces where id=%s", (space_id,))
             conn.commit()
 
             cur.execute("select space_id from launches where id=%s", (launch_id,))
@@ -85,27 +61,11 @@ def test_init_db_idempotente_2x():
 
 # ── Isolamento por usuário (P1 da revisão) ───────────────────────────────────
 
-def test_create_space_recusa_nome_reservado(user_id: int):
-    with pytest.raises(ValueError):
-        db.create_space(user_id, "Pessoal")
-    with pytest.raises(ValueError):
-        db.create_space(user_id, "  pessoal  ")  # casefold + strip
-
-
 def test_banco_bloqueia_dois_defaults(user_id: int):
     """O índice parcial uq_financial_spaces_one_default garante 1 default."""
-    db.ensure_default_space(user_id)
-    with pytest.raises(pg_errors.UniqueViolation):
-        with get_conn() as conn:
-            with conn.cursor() as cur:
-                cur.execute(
-                    """
-                    insert into financial_spaces(user_id, name, is_default)
-                    values (%s, 'Outro Default', true)
-                    """,
-                    (user_id,),
-                )
-                conn.commit()
+    _espaco(user_id, "Pessoal", default=True)
+    with pytest.raises(pg_errors.UniqueViolation, match='"uq_financial_spaces_one_default"'):
+        _espaco(user_id, "Outro Default", default=True)
 
 
 def test_launch_nao_referencia_espaco_de_outro_usuario(user_id: int):
@@ -113,8 +73,8 @@ def test_launch_nao_referencia_espaco_de_outro_usuario(user_id: int):
     other = user_id + 1
     db.ensure_user(other)
     try:
-        alheio = db.create_space(other, "Fazenda")
-        with pytest.raises(pg_errors.ForeignKeyViolation):
+        alheio = _espaco(other, "Fazenda")
+        with pytest.raises(pg_errors.ForeignKeyViolation, match='"fk_launches_space"'):
             with get_conn() as conn:
                 with conn.cursor() as cur:
                     cur.execute(
@@ -122,7 +82,7 @@ def test_launch_nao_referencia_espaco_de_outro_usuario(user_id: int):
                         insert into launches(user_id, tipo, valor, categoria, space_id)
                         values (%s, 'despesa', 10, 'teste', %s)
                         """,
-                        (user_id, alheio["id"]),  # espaço de OUTRO usuário
+                        (user_id, alheio),  # espaço de OUTRO usuário
                     )
                     conn.commit()
     finally:
@@ -135,7 +95,7 @@ def test_of_account_trigger_bloqueia_espaco_de_outro_usuario(user_id: int):
     other = user_id + 1
     db.ensure_user(other)
     try:
-        alheio = db.create_space(other, "Empresa")
+        alheio = _espaco(other, "Empresa")
         connection = db.save_pluggy_open_finance_item(
             user_id,
             {"id": f"item-space-{user_id}", "connector": {"id": 612, "name": "Nubank"}, "status": "UPDATED"},
@@ -161,12 +121,12 @@ def test_of_account_trigger_bloqueia_espaco_de_outro_usuario(user_id: int):
                 )
                 acc_id = cur.fetchone()["id"]
 
-        with pytest.raises(pg_errors.RaiseException):
+        with pytest.raises(pg_errors.RaiseException, match="nao pertence ao dono"):
             with get_conn() as conn:
                 with conn.cursor() as cur:
                     cur.execute(
                         "update open_finance_accounts set space_id=%s where id=%s",
-                        (alheio["id"], acc_id),  # espaço de OUTRO usuário
+                        (alheio, acc_id),  # espaço de OUTRO usuário
                     )
                     conn.commit()
     finally:
