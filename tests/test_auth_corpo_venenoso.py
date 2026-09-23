@@ -23,7 +23,7 @@ São DOIS mecanismos, e um conserto só fecha metade:
    cinto para o que sobra no erro (`tests/test_422_nao_ecoa_corpo.py`).
 2. **validação na borda** (`_CorpoSemVeneno`): sem ela o veneno chega ao
    `INSERT` do `_check_persistent_rate_limit` (coluna `text`), ao `hash_pii` e
-   ao `consume_password_reset_token`/`mfa_consume_login_challenge`.
+   ao `consume_password_reset_token`/`mfa_reserve_login_challenge_attempt`.
 
 CONTROLES NEGATIVOS — os TRÊS, medidos em 2026-09-10 com
 `pytest tests/test_auth_corpo_venenoso.py tests/test_422_nao_ecoa_corpo.py`
