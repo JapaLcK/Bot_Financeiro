@@ -20,7 +20,8 @@ o bug.
 """
 import pytest
 
-from core.services.pluggy import PluggyApiError, list_pluggy_investments
+from core.services.pluggy import PluggyApiError
+from core.services.pluggy_investments import list_pluggy_investments
 
 
 def _pos(pid: str) -> dict:

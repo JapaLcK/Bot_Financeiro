@@ -23,7 +23,6 @@ from core.services.pluggy import (
     create_pluggy_api_key,
     get_pluggy_item,
     list_pluggy_accounts,
-    list_pluggy_investments,
     list_pluggy_transactions,
     update_pluggy_item,
 )
@@ -37,6 +36,7 @@ from core.services.pluggy_health import (
     derive_item_health,
     resolve_connection_state,
 )
+from core.services.pluggy_investments import list_pluggy_investments
 from db import (
     claim_items_for_refresh,
     claim_manual_refresh,

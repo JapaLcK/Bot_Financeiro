@@ -899,7 +899,8 @@ def save_open_finance_investments(connection_id: int, investments: list[dict], *
             cur.execute("select user_id from open_finance_connections where id=%s", (connection_id,))
             owner = cur.fetchone()
             if not owner:
-                return {"investments_synced": 0, "investments_removed": 0}
+                return {"investments_synced": 0, "investments_removed": 0,
+                        "caixinhas_removidas": 0}
             # Mesma ordem de aquisição do `save_open_finance_sync` e do disconnect:
             # o lock do usuário ANTES de qualquer escrita.
             from .bank_movements import _lock_user
