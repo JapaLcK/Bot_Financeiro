@@ -2098,24 +2098,41 @@ def test_sync_com_investimentos_stale_nao_remove_nada(user_id, monkeypatch, relo
     assert {"Caixinha Viagem", "Caixinha Carro"} <= _nomes_de_caixinha(user_id)
 
 
-@pytest.mark.parametrize("item_2, removidas", [
-    # sem `statusDetail.investments` e o item ainda buscando: nada prova que a
-    # coleta de investimentos terminou → a omissão NÃO remove
-    ({**ITEM_SAUDAVEL, "status": "UPDATING"}, 0),
-    # POSITIVO: ainda buscando, mas com prova explícita → remove
-    ({**ITEM_SAUDAVEL, "status": "UPDATING",
-      "statusDetail": {**ITEM_SAUDAVEL["statusDetail"],
-                       "investments": {"isUpdated": True, "warnings": []}}}, 1),
-    # POSITIVO: coleta terminada sem `statusDetail` nenhum → remove (decisão do dono)
-    ({k: v for k, v in ITEM_SAUDAVEL.items() if k != "statusDetail"}, 1),
-], ids=["updating_sem_sinal", "updating_com_prova", "updated_sem_statusdetail"])
-def test_sync_item_em_updating_so_reconcilia_com_prova(user_id, monkeypatch, relogio_fixo,
-                                                      item_2, removidas):
-    """Refresh manual que estoura `OF_REFRESH_WAIT_SEC` sincroniza com o item em
-    UPDATING: `/investments` válido mas ainda parcial não pode apagar posição.
+_PROVA_INV = {**ITEM_SAUDAVEL["statusDetail"],
+              "investments": {"isUpdated": True, "warnings": []}}
+_SEM_DETAIL = {k: v for k, v in ITEM_SAUDAVEL.items() if k != "statusDetail"}
+_SEM_INV = {**ITEM_SAUDAVEL, "executionStatus": "PARTIAL_SUCCESS"}  # formato de ITEM_PARCIAL
 
-    CONTROLE NEGATIVO (medido): tirar a condição de `ITEM_UPDATING` do gate deixa
-    `updating_sem_sinal` vermelho."""
+
+@pytest.mark.parametrize("item_2, removidas", [
+    ({**ITEM_SAUDAVEL, "status": "UPDATING"}, 0),
+    ({**ITEM_SAUDAVEL, "status": "UPDATING", "statusDetail": _PROVA_INV}, 1),
+    (_SEM_INV, 0),
+    ({**_SEM_INV, "statusDetail": _PROVA_INV}, 1),
+    ({**ITEM_SAUDAVEL, "executionStatus": "ALGO_NOVO"}, 0),
+    ({**_SEM_DETAIL, "status": "OUTDATED", "executionStatus": "ERROR"}, 0),
+    ({**_SEM_DETAIL, "executionStatus": "MERGE_ERROR"}, 0),
+    (_SEM_DETAIL, 1),   # UPDATED + SUCCESS sem statusDetail: a decisão do dono
+], ids=["updating_sem_sinal", "updating_com_prova", "partial_sem_sinal", "partial_com_prova",
+        "exec_desconhecido_sem_sinal", "outdated_error_sem_sinal",
+        "updated_merge_error_sem_sinal", "updated_sem_statusdetail"])
+def test_sync_so_reconcilia_item_saudavel_ou_com_prova(user_id, monkeypatch, relogio_fixo,
+                                                       item_2, removidas):
+    """O gate é LISTA DE PERMISSÃO: sem `statusDetail.investments.isUpdated=true`,
+    só `UPDATED` + `SUCCESS` autoriza remover. Qualquer outro par (coleta em
+    andamento, parcial, erro, estado desconhecido) com `/investments` válido mas
+    curto NÃO apaga posição nem caixinha.
+
+    CONTROLES NEGATIVOS (medidos, por backup de arquivo):
+      1. gate do da263459 (só `ITEM_UPDATING` exige prova): `partial_sem_sinal`,
+         `exec_desconhecido_sem_sinal`, `outdated_error_sem_sinal` e
+         `updated_merge_error_sem_sinal` ficam vermelhos;
+      2. forma de exclusão (fora de `ITEM_UPDATING` e != `PARTIAL_SUCCESS`, ou
+         prova): SÓ `exec_desconhecido_sem_sinal`, `outdated_error_sem_sinal` e
+         `updated_merge_error_sem_sinal` ficam vermelhos — é o que prova que o
+         grupo mede a lista de permissão;
+      3. sem o termo `("UPDATED", "SUCCESS")` (prova sempre): `updated_sem_statusdetail`
+         fica vermelho — controle positivo da decisão do dono."""
     from conftest import promote_to_pro
     promote_to_pro(user_id)
     conexao = _conexao(user_id)
