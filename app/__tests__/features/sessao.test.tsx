@@ -275,4 +275,33 @@ describe("(app)/index.tsx — Sair espera a revogação no servidor (#458)", () 
     await act(respirar);
     expect(aplicados.at(-1)).toEqual({ fase: "anonimo" });
   });
+
+  it("logout termina antes do refresh pendurado: a expiração atrasada não põe aviso falso em Entrar", async () => {
+    await guardarCredenciais({ access: "vencido", refresh: "rt_x" });
+    const chegouAoRefresh = segurar();
+    const portaoRefresh = segurar();
+    rotear({
+      "/auth/me": () => resposta(401, { detail: "expirado" }),
+      "/auth/refresh": async () => {
+        chegouAoRefresh.soltar();
+        await portaoRefresh.promessa;
+        return resposta(401, { detail: "invalid_refresh_token" });
+      },
+    });
+    const { getByRole, aplicados } = montar(true);
+    await act(() => chegouAoRefresh.promessa);
+
+    fireEvent.press(getByRole("button", { name: "Sair" }));
+    await act(respirar);
+    expect(aplicados.at(-1)).toEqual({ fase: "anonimo" });
+    const aposLogout = aplicados.length;
+
+    // O refresh de antes da saída só volta agora, com a saída já terminada.
+    portaoRefresh.soltar();
+    await act(respirar);
+    await act(respirar);
+
+    expect(aplicados.slice(aposLogout).filter((e) => e.fase === "anonimo" && e.aviso)).toEqual([]);
+    expect(aplicados.at(-1)).toEqual({ fase: "anonimo" });
+  });
 });

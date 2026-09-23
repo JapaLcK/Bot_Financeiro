@@ -19,7 +19,7 @@ interface Sessao {
   estado: EstadoSessao;
   /** Chamado assim que uma credencial é gravada (login ou MFA). */
   autenticar: () => void;
-  /** `/auth/me` (ou qualquer chamada autenticada) tomou `SessaoExpirada`. */
+  /** `/auth/me` (ou qualquer chamada autenticada) tomou `SessaoExpirada`; só age em `autenticado`. */
   expirou: (aviso: string) => void;
   /**
    * Toque duplo é ignorado (guarda por `ref`, único provider da árvore), e
@@ -84,8 +84,10 @@ export function SessaoProvider({ children }: { children: ReactNode }) {
         // Com a saída em voo, um `SessaoExpirada` é efeito dela (o cofre já foi
         // limpo): virar anônimo aqui abriria Entrar antes de `sair()` terminar,
         // e o `.then` abaixo apagaria o estado de quem entrasse nesse meio.
+        // E só age a partir de `autenticado`: um `SessaoExpirada` que chega
+        // depois da saída terminar poria "sessão expirou" num logout limpo.
         if (saindoEmVoo.current) return;
-        setEstado({ fase: "anonimo", aviso });
+        setEstado((s) => (s.fase === "autenticado" ? { fase: "anonimo", aviso } : s));
       },
       sair: () => {
         if (saindoEmVoo.current) return Promise.resolve(true);
