@@ -31,7 +31,7 @@ Regras deste roteiro:
 | P1 | Criar a conta de teste em `/cadastro` com um e-mail próprio para isto (ex.: alias `+pl01`), sem MFA — a sonda de UI (`scripts/smoke_prod_ui.mjs`) não passa por MFA | dono |
 | P2 | Vincular um número de WhatsApp de teste à conta (um número só serve para os três planos) | dono |
 | P3 | Anotar o `user_id`: `python -m scripts.whoami <email>` ou `GET /auth/dashboard-profile` logado | dono ou Claude |
-| P4 | Conferir no Railway, sem copiar valores para cá, que existem: `WA_BILL_REMINDER_TEMPLATE_NAME`, `WA_WEEKLY_TEMPLATE_NAME`, `WA_MONTHLY_TEMPLATE_NAME`, `RUN_BACKGROUND_TASKS` ≠ `0`, `PLANS_V2_ENABLED` ausente ou `1`. Registrar só "definida / ausente" | dono |
+| P4 | Conferir no Railway, sem copiar valores para cá, que existem: `WA_BILL_REMINDER_TEMPLATE_NAME`, `WA_WEEKLY_TEMPLATE_NAME`, `WA_MONTHLY_TEMPLATE_NAME`, `RUN_BACKGROUND_TASKS` ≠ `0`, `PLANS_V2_ENABLED` ausente ou `1`, `PLUGGY_WEBHOOK_URL` definida (F3). Registrar só "definida / ausente". Registrar também o **valor**, que não é segredo, de: `WA_BILL_REMINDER_HOUR` (padrão 9), `WA_BILL_REMINDER_DAYS_BEFORE` (padrão 3), `REPORT_TIMEZONE` e `TZ` (padrão `America/Sao_Paulo`, `utils_date.py`) e `PLANS_TRIAL_DAYS` (padrão 15). D1, D4, a sonda A e a seção I usam esses valores, não os padrões | dono |
 | P4b | No WhatsApp Manager da Meta, conferir que os templates cujos **nomes** estão nessas três variáveis existem, estão **aprovados** e no idioma de `WA_BILL_REMINDER_TEMPLATE_LANGUAGE` / `WA_PROACTIVE_TEMPLATE_LANGUAGE` (padrão `pt_BR`). Conferir também o **formato** que o código envia, com variáveis **nomeadas**: lembrete de conta = `{{conta}}`, `{{valor}}`, `{{vencimento}}` e um botão de resposta rápida no índice 0 (é o "Já paguei" do D3; `_bill_reminder_tick`); resumos semanal e mensal = `{{periodo}}`, `{{saldo}}`, `{{gastos}}`, `{{receita}}`, `{{lancamentos}}` (`_periodic_template_named_body_params`, modelo em `docs/whatsapp_templates_resumos.md`), e botão de resposta rápida só se `WA_PERIODIC_TEMPLATE_STOP_BUTTON=1`. Registrar só "aprovado e compatível / pendente / rejeitado / formato diferente / não existe" por template | dono |
 | P4c | No Railway, registrar se `OF_CONSOLIDATED_BALANCE_ENABLED` está ausente/ligado (padrão: saldo consolidado ligado para todos) ou em `0`. Se estiver em `0`, registrar se o e-mail ou o `user_id` da conta de teste está em `OF_CONSOLIDATED_BETA_EMAILS` / `OF_CONSOLIDATED_BETA_USER_IDS`, sem copiar a lista. Decide o esperado de F9 e G6 (`plan_service.consolidated_balance_enabled`) | dono |
 | P5 | Ligar `PLUGGY_INCLUDE_SANDBOX=1` no Railway **só durante a seção F** e desligar assim que F terminar. A variável é global e lida na subida do processo (`frontend/routes/open_finance.py:74`): enquanto ligada, **todos** os usuários veem os conectores sandbox no widget, e cada troca reinicia o serviço | dono |
@@ -79,9 +79,10 @@ em `/analytics/.../patterns`) evita custo nas repetições.
   const j = (r) => r.json().catch(() => null);
   const prof = await fetch('/auth/dashboard-profile', {credentials: 'same-origin'}).then(j);
   const uid = prof.user_id;
-  // "Hoje" no fuso do app (o servidor roda com TZ=America/Sao_Paulo): em UTC,
-  // entre 21h e 23h59 de Brasília, a data já seria a de amanhã e o proj30 pediria 31 dias.
-  const hoje = new Intl.DateTimeFormat('en-CA', {timeZone: 'America/Sao_Paulo'}).format(new Date());
+  // "Hoje" no fuso do servidor (P4: REPORT_TIMEZONE/TZ; padrão America/Sao_Paulo).
+  // Em UTC, entre 21h e 23h59 de Brasília, a data já seria a de amanhã e o proj30 pediria 31 dias.
+  const TZ_APP = 'America/Sao_Paulo';  // trocar se o P4 mostrar outro fuso
+  const hoje = new Intl.DateTimeFormat('en-CA', {timeZone: TZ_APP}).format(new Date());
   const d = (n) => { const t = new Date(hoje + 'T00:00:00Z'); t.setUTCDate(t.getUTCDate() + n); return t.toISOString().slice(0, 10); };
   const sim = {reserva_minima: 500, cenarios: [
     {nome: 'À vista', preco: 3000},
@@ -207,16 +208,17 @@ matriz mantém em todos os planos.
 ## D. Lembrete de vencimento (todos os planos)
 
 Como o código decide (`_bill_reminder_tick`): roda a cada 5 min, só a partir de
-`WA_BILL_REMINDER_HOUR` (padrão 9 h, fuso `America/Sao_Paulo`), envia quando
-faltam `WA_BILL_REMINDER_DAYS_BEFORE` dias (padrão 3), no dia do vencimento e 1
-dia depois, uma vez por dia por conta (`bill_instances.reminder_last_sent_on`).
+`WA_BILL_REMINDER_HOUR` (padrão 9 h, no fuso do P4), envia quando faltam
+`WA_BILL_REMINDER_DAYS_BEFORE` dias (padrão 3), no dia do vencimento e 1 dia
+depois, uma vez por dia por conta (`bill_instances.reminder_last_sent_on`).
+Abaixo, **H** = hora e **N** = dias registrados no P4.
 
 | caso | passo | esperado | observado | resultado |
 |---|---|---|---|---|
-| D1 | Em S1, criar conta a pagar `Teste PL01`, R$ 12,34, vencimento hoje + 3 dias, depois das 9 h | template chega no WhatsApp em até ~5 min com nome, valor e data | | |
+| D1 | Em S1, depois das **H** h, criar conta a pagar `Teste PL01`, R$ 12,34, vencimento hoje + **N** dias | template chega no WhatsApp em até ~5 min com nome, valor e data | | |
 | D2 | Esperar 30 min | nenhum segundo envio no mesmo dia | | |
-| D3 | Tocar "Já paguei" | conta marcada paga no dashboard **e** uma despesa "Pagamento · Teste PL01" de R$ 12,34 lançada na Carteira (`mark_bill_paid`); nenhum lembrete dessa conta em D0 nem D+1 (a janela é só D-3, D0 e D+1) | | |
-| D4 | Nova conta vencendo hoje | lembrete do dia chega | | |
+| D3 | Tocar "Já paguei" | conta marcada paga no dashboard **e** uma despesa "Pagamento · Teste PL01" de R$ 12,34 lançada na Carteira (`mark_bill_paid`); o "Já paguei" quita a conta, então nenhum lembrete dela chega depois, inclusive em D0 e D+1 (a janela é só D-**N**, D0 e D+1) | | |
+| D4 | Depois das **H** h, nova conta vencendo hoje | lembrete do dia chega em até ~5 min | | |
 
 ---
 
@@ -316,8 +318,7 @@ Prova o que o admin não prova: checkout, webhook e troca agendada. Se o
 telefone da conta ainda não usou o período grátis, o checkout abre um **trial
 sem cobrança** com a duração de `PLANS_TRIAL_DAYS` (padrão 15 dias; com os
 planos v2 ligados é esta a variável lida, via `plan_service.trial_days_total()`;
-`PRO_TRIAL_DAYS` só vale no modo legado). Registrar no P4 se `PLANS_TRIAL_DAYS`
-está definida e o valor (não é segredo). Com trial não há cobrança nem
+`PRO_TRIAL_DAYS` só vale no modo legado). O valor de `PLANS_TRIAL_DAYS` vem do P4. Com trial não há cobrança nem
 reembolso, e o I4 cancela dentro dele. Registrar qual dos dois aconteceu.
 
 | caso | passo | esperado |
