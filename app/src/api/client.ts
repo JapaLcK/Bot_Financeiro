@@ -393,7 +393,11 @@ async function executar<T>(
   }
 
   if (!resposta.ok) {
-    throw new ErroDeApi(resposta.status, await mensagemDeErro(resposta));
+    // O corpo é lido UMA vez: num `Response` real a segunda leitura rejeita, e
+    // o `code` do corpo (ex.: `mfa_code_invalid`) sumiria. 5xx não é lido
+    // (ver `mensagemDeErro`).
+    const corpo = resposta.status >= 500 ? undefined : await resposta.json().catch(() => undefined);
+    throw new ErroDeApi(resposta.status, mensagemDeErro(resposta.status, corpo), corpo);
   }
 
   const bruto = await resposta.json().catch(() => null);
@@ -478,15 +482,14 @@ async function superada(refresh: string, fimDeSessao: boolean): Promise<boolean>
  * `error`/`message`, lista de erros do Pydantic. Mostrar o JSON na tela é um
  * defeito que o produto já viveu no site (o modal que exibia `{"detail":...}`).
  */
-async function mensagemDeErro(resposta: Response): Promise<string> {
+function mensagemDeErro(status: number, corpo: unknown): string {
   // 5xx ANTES de olhar o corpo, e não depois: em erro de servidor o `detail`
   // carrega a exceção crua (`psycopg.OperationalError`, um traceback), e a
   // ordem inversa entregava isso à tela do usuário. Foi o teste de 500 que
   // pegou — a versão anterior confiava no `detail` primeiro.
-  if (resposta.status >= 500) {
+  if (status >= 500) {
     return "Tivemos um problema aqui. Tente de novo em instantes.";
   }
-  const corpo = await resposta.json().catch(() => null);
   const detalhe = (corpo as { detail?: unknown } | null)?.detail;
   if (typeof detalhe === "string") return detalhe;
   if (detalhe && typeof detalhe === "object") {

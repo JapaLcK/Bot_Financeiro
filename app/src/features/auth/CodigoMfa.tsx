@@ -36,6 +36,16 @@ export function CodigoMfa({ estado, autenticar, aplicar }: Props) {
     setCodigo("");
   }, [modo]);
 
+  // Verificação que volta com erro esvazia o campo TOTP: com "000000" ainda
+  // lá, o próximo dígito ("0000001") passaria no filtro, seria cortado de
+  // volta para "000000" e reenviaria sozinho o código errado. A dependência é
+  // o `estado` (objeto novo a cada `aplicar`), não o `aviso`: dois erros
+  // iguais seguidos podem chegar no mesmo commit que o "verificando", e o
+  // texto do aviso não muda. Backup fica como foi digitado.
+  useEffect(() => {
+    if (estado.fase === "mfa" && estado.aviso && estado.modo === "totp") setCodigo("");
+  }, [estado]);
+
   // Aplica a fase "verificando" ANTES de chamar `tocar()`, não depois: sem
   // isso, o busy só aparecia quando a promise da requisição já tivesse
   // resolvido — tarde demais para desativar campo e botões durante a espera
@@ -44,9 +54,9 @@ export function CodigoMfa({ estado, autenticar, aplicar }: Props) {
   // inofensivo (mesmo valor, já é o estado corrente).
   // Defesa no CAMINHO, não só no `desativado` do botão: TOTP com menos de 6
   // dígitos nunca sai daqui, venha o toque de onde vier (botão, Enter do
-  // teclado, um futuro `onSubmitEditing`) — evita queimar o desafio com um
-  // código que o servidor recusaria de qualquer forma (db/mfa.py:351 consome
-  // antes de conferir).
+  // teclado, um futuro `onSubmitEditing`) — evita gastar uma das 5 tentativas
+  // do desafio com um código que o servidor recusaria de qualquer forma
+  // (`reserve_login_challenge_attempt` gasta antes de conferir).
   //
   // ponytail: sem teste que discrimine ESTA linha isoladamente — hoje o
   // único chamador é o botão "Verificar", e o `desativado` dele (mesma
@@ -70,27 +80,27 @@ export function CodigoMfa({ estado, autenticar, aplicar }: Props) {
         // `db/mfa.py` — um teto de 11 caracteres cortava um colado com um
         // espaço a mais na ponta (" ABCDE-FGHIJ") ou em volta do hífen
         // ("ABCDE - FGHIJ") ANTES de qualquer normalização, perdendo o
-        // último caractere e queimando o desafio com um código mutilado. O
-        // servidor já normaliza hífen/espaço (em qualquer posição) e caixa —
-        // não há necessidade de um teto aqui.
+        // último caractere e gastando uma das 5 tentativas do desafio com um
+        // código mutilado. O servidor já normaliza hífen/espaço (em qualquer
+        // posição) e caixa — não há necessidade de um teto aqui.
         onChangeText={(v) => {
           // TOTP: mantém só dígitos ASCII (0-9) — descarta espaço, hífen,
           // letra e qualquer separador, inclusive dígito arábico-índico
           // ("١٢٣٤٥٦"): o servidor até aceita a FORMA (Python `isdigit()`
           // conta esses como dígito), mas a comparação do TOTP é contra uma
-          // string só de ASCII e nunca bate — deixar passar só queimaria o
-          // desafio à toa. Corta em 6 mesmo colando mais, para não mandar o
-          // 7º dígito de um autofill ao servidor (400 QUEIMA o desafio —
-          // db/mfa.py:351 consome antes de conferir).
+          // string só de ASCII e nunca bate — deixar passar só gastaria uma
+          // das 5 tentativas do desafio à toa. Corta em 6 mesmo colando mais,
+          // para não mandar o 7º dígito de um autofill ao servidor (cada 400
+          // gasta uma das 5 tentativas do desafio).
           const valor = modo === "totp" ? v.replace(/\D+/g, "").slice(0, TAMANHO_TOTP) : v;
           setCodigo(valor);
           // Auto-envia só quando a ENTRADA EM SI já eram 6 dígitos puros —
           // não o valor FILTRADO. Um colado com lixo ("123-456", "Código:
           // 123456", "G-123456", "123 456") pode virar 6 dígitos DEPOIS do
-          // filtro por coincidência, e auto-enviar isso queimaria o desafio
-          // com um código que a pessoa nunca digitou por completo. O
-          // autofill de SMS entrega uma string só de dígitos — é esse caso
-          // que continua disparando sozinho.
+          // filtro por coincidência, e auto-enviar isso gastaria uma das 5
+          // tentativas do desafio com um código que a pessoa nunca digitou
+          // por completo. O autofill de SMS entrega uma string só de dígitos
+          // — é esse caso que continua disparando sozinho.
           if (modo === "totp" && !verificando && /^[0-9]+$/.test(v) && valor.length === TAMANHO_TOTP) {
             enviar(valor);
           }
@@ -106,8 +116,9 @@ export function CodigoMfa({ estado, autenticar, aplicar }: Props) {
         rotulo="Verificar"
         onPress={() => enviar(codigo)}
         // TOTP só habilita com os 6 dígitos completos — tocar com código
-        // parcial (ex.: 3 dígitos) mandava ao servidor e queimava o desafio
-        // à toa. Backup mantém a regra de "não vazio" (formato livre).
+        // parcial (ex.: 3 dígitos) mandava ao servidor e gastava uma das 5
+        // tentativas do desafio à toa. Backup mantém a regra de "não vazio"
+        // (formato livre).
         desativado={verificando || (modo === "totp" ? codigo.length !== TAMANHO_TOTP : !codigo.trim())}
         carregando={verificando}
       />
