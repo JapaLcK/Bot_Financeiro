@@ -303,3 +303,22 @@ def test_desafio_vazio_ou_inexistente_responde_expirada():
     client = TestClient(dashboard.app)
     _recusa(_verify(client, "", "123456"), "mfa_challenge_expired", EXPIRADA)
     _recusa(_verify(client, "nao-existe", "123456"), "mfa_challenge_expired", EXPIRADA)
+
+
+# ── 9. navegação pede HTML → página de erro, como o 400 via HTTPException ─────
+
+def test_recusa_pedida_como_html_devolve_a_pagina_de_erro():
+    client = TestClient(dashboard.app)
+    limiter._storage.reset()
+    corpo = {"challenge": "nao-existe", "code": "123456", "use_backup": False}
+
+    html = client.post("/auth/mfa/verify-login", json=corpo,
+                       headers={**_csrf_headers(client), "Accept": "text/html"})
+    assert html.status_code == 400
+    assert html.headers["content-type"].startswith("text/html")
+    assert "Accept" in html.headers.get("vary", "")
+
+    # O ramo JSON (o que o site e o app pedem) não muda.
+    _recusa(client.post("/auth/mfa/verify-login", json=corpo,
+                        headers={**_csrf_headers(client), "Accept": "application/json"}),
+            "mfa_challenge_expired", EXPIRADA)

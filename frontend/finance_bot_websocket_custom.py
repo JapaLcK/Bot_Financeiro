@@ -3979,7 +3979,9 @@ async def auth_mfa_verify_login(request: Request, response: Response, body: MFAV
     )
 
     # Desafio morto é 400, nunca 401: 401 é "renove a sessão" no interceptor.
-    def _recusa(texto: str, code: str) -> JSONResponse:
+    def _recusa(texto: str, code: str) -> Response:
+        if wants_html(request):
+            return error_page_response(400)
         return vary_accept(JSONResponse(status_code=400, content={"detail": texto, "code": code}))
 
     # Reserva a tentativa ANTES de conferir e só consome o desafio com o código
