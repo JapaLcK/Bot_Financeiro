@@ -377,7 +377,14 @@ def _sync_pluggy_item_confirmado(provider_item_id: str, connection: dict, api_ke
         try:
             inv_result = save_open_finance_investments(
                 connection["id"], investments, leitura_completa=investimentos_confiaveis)
-            investimentos_gravados = bool(investments)
+            # O que foi PERSISTIDO, lido do retorno — não `bool(investments)`, que
+            # era a lista LIDA e desmentia o comentário do early-return logo
+            # abaixo. Duas portas passavam por ali sem gravar nada e mesmo assim
+            # contavam como dado: posição sem `id` usável, que o upsert pula no
+            # `continue` (em produção a paginação já a barra como `item_invalido`,
+            # mas a coerência não pode depender disso), e `if not owner` em
+            # `save_open_finance_investments`, que devolve zeros sem levantar.
+            investimentos_gravados = bool(inv_result.get("investments_synced"))
         except Exception as exc:
             investments_ok = False
             print(f"[pluggy_sync] investimentos não gravados item={provider_item_id} "

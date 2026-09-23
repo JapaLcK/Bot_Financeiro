@@ -2197,6 +2197,36 @@ def test_falha_ao_gravar_investimentos_de_corretora_vira_read_failed(user_id, mo
     assert linha["last_sync_at"] == ANTES, "gravação pela metade não é sucesso"
 
 
+def test_corretora_que_nao_gravou_nada_nao_carimba_sucesso(user_id, monkeypatch,
+                                                          relogio_fixo):
+    """O early-return decide pelo que foi PERSISTIDO, não pela lista LIDA.
+
+    A posição chega sem `id` usável: o `normalize` põe `provider_investment_id=""`
+    e o upsert a pula no `continue`. Com `bool(investments)`, a corretora (zero
+    contas) saía daqui `ok: True`, ACTIVE e `last_sync_at` carimbado sobre espelho
+    (0, 0) e ZERO investimentos — "Atualizado agora" sobre nada.
+
+    O monkeypatch em `ps.list_pluggy_investments` é necessário porque em PRODUÇÃO
+    este item é barrado antes, na paginação (`item_invalido`,
+    core/services/pluggy_investments.py). O que o teste guarda, então, é a
+    coerência do early-return — não um caminho comum. A segunda porta, também
+    rara, é o `if not owner` de `save_open_finance_investments`, que devolve zeros
+    sem levantar; as duas passam pelo mesmo `investments_synced`."""
+    from conftest import promote_to_pro
+    promote_to_pro(user_id)
+    conexao = _conexao(user_id, "item-sem-id")
+    _mock_pluggy(monkeypatch, item={**ITEM_SAUDAVEL, "id": "item-sem-id"}, contas=[])
+    _mock_investimentos(monkeypatch, [{**_CX_A, "id": ""}])
+
+    res = ps.sync_pluggy_item("item-sem-id")
+
+    assert res["ok"] is False, "nada foi gravado: não é sucesso"
+    assert res.get("investments_synced") == 0
+    linha = _linha("item-sem-id")
+    assert linha["last_sync_at"] == ANTES, "carimbo de sucesso não pode andar"
+    assert _espelho_investimentos(conexao["id"]) == set()
+
+
 def test_amount_profit_nao_numerico_nao_derruba_o_sync(user_id, monkeypatch, relogio_fixo):
     """`amountProfit` é campo de TERCEIRO. Com `::numeric` cru, um "n/d" abortava
     a transação e — pelo caminho do M1 — derrubava o item inteiro a CADA sync,
