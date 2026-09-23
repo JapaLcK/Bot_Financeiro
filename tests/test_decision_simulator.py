@@ -8,6 +8,7 @@ import pytest
 from pydantic import ValidationError
 
 from _cashflow_helpers import _mock_sources, fontes_que_mudam
+from core.services import cashflow_forecast, decision_simulator
 from core.services.cashflow_forecast import forecast_with_trajectory
 from core.services.decision_simulator import DIAS, Simulacao, _add_months, simulate
 
@@ -56,8 +57,18 @@ def test_48x_hoje_conta_parcelas_dentro_e_fora_dos_90_dias(monkeypatch):
     assert r["saldo_final_90"] == round(50000.0 - 36000.0 - dentro * 4220.98, 2)
 
 
-def test_atual_bate_com_a_previsao_de_saldo_nas_mesmas_fontes(monkeypatch):
-    today = date.today()
+# 23/09: o boleto (hoje + 12) cai junto com o salário e o saldo nunca desce abaixo
+# do de hoje — o pior dia é HOJE, que só o simulador vê. 22/09: o boleto vence um
+# dia antes do salário e o pior dia é futuro, visto pelos dois lados.
+@pytest.mark.parametrize("today", [date(2026, 9, 23), date(2026, 9, 22)], ids=str)
+def test_atual_bate_com_a_previsao_de_saldo_nas_mesmas_fontes(monkeypatch, today):
+    class Data(date):
+        @classmethod
+        def today(cls):
+            return cls(today.year, today.month, today.day)
+
+    monkeypatch.setattr(decision_simulator, "date", Data)
+    monkeypatch.setattr(cashflow_forecast, "date", Data)
     _mock_sources(
         monkeypatch, saldo=800.0,
         incomes=[{"is_active": True, "amount": 3000.0, "name": "Salário", "pay_day": 5}],
@@ -66,9 +77,15 @@ def test_atual_bate_com_a_previsao_de_saldo_nas_mesmas_fontes(monkeypatch):
     )
     out = simulate(1, _sim({"nome": "TV", "preco": 2000.0, "parcelas": 10}, reserva=500.0))
     fc = forecast_with_trajectory(1, 90, 500.0)
+    # O simulador inclui hoje (91 datas); a previsão começa amanhã. Nada vence hoje
+    # nestas fontes, então hoje vale o saldo de partida da previsão.
+    assert fc["vencidos"] == fc["vencem_hoje"] == []
+    dias = [{"date": today.isoformat(), "saldo_projetado": fc["horizons"]["90"]["saldo_atual"]},
+            *fc["trajectory"]]
+    pior = min(dias, key=lambda it: it["saldo_projetado"])  # empate: o mais cedo, como o motor
     assert out["atual"]["saldo_final_90"] == fc["trajectory"][-1]["saldo_projetado"]
-    assert out["atual"]["pior_dia"] == {"date": fc["worst_day"]["date"], "saldo": fc["worst_day"]["saldo_projetado"]}
-    assert out["atual"]["dias_abaixo_da_reserva"] == sum(it["abaixo_do_limite"] for it in fc["trajectory"])
+    assert out["atual"]["pior_dia"] == {"date": pior["date"], "saldo": pior["saldo_projetado"]}
+    assert out["atual"]["dias_abaixo_da_reserva"] == sum(it["saldo_projetado"] < 500.0 for it in dias)
 
 
 def test_menor_entrada_melhora_o_saldo_de_90_dias_e_paga_mais_juros(monkeypatch):
