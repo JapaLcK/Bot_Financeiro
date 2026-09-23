@@ -2,8 +2,7 @@
 
 Módulo próprio, e não mais um trecho de `core/services/pluggy.py`, porque o
 arquivo passou do teto de 350 linhas (`tests/test_max_lines_python.py`) e a
-divisão por assunto é o que o CLAUDE.md §0.5 manda. Movimento puro: o código
-abaixo é byte a byte o que estava lá.
+divisão por assunto é o que o CLAUDE.md §0.5 manda.
 
 `/accounts`, `/v2/transactions`, `/connectors` e o CRUD de item continuam em
 `core/services/pluggy.py` — só o assunto "investimentos" saiu.
@@ -16,11 +15,20 @@ from core.services.pluggy import PluggyApiError, _pluggy_get, create_pluggy_api_
 
 
 def _inv_int(value: Any) -> int | None:
-    """int() tolerante para a metadata do /investments (a Pluggy manda número ou string)."""
-    try:
-        return int(value)
-    except (TypeError, ValueError):
+    """Metadata de paginação em int, ESTRITO: `int` que não seja `bool`, ou `str`
+    só de dígitos. `None` para o resto, e quem chama trata como incoerência.
+
+    `int()` cru aceitava três coisas que não são número de página e mentiam sem
+    barulho: `1.7` virava 1 (uma página lida no lugar de duas), `True` virava 1
+    (eco de `page` aprovado por um booleano) e `1.9` passava como eco da página 1.
+    """
+    if isinstance(value, bool):
         return None
+    if isinstance(value, int):
+        return value
+    if isinstance(value, str) and value.strip().isdigit():
+        return int(value.strip())
+    return None
 
 
 def list_pluggy_investments(item_id: str, api_key: str | None = None, *,
@@ -45,11 +53,26 @@ def list_pluggy_investments(item_id: str, api_key: str | None = None, *,
     """
     key = api_key or create_pluggy_api_key()
     out: list[dict] = []
-    total: Any = None
+    vistos: set[str] = set()
+    contrato: dict[str, int | None] = {}
 
     def incompleta(motivo: str) -> PluggyApiError:
         # Sem o corpo da resposta, mesma régua de `_raise_for_pluggy_response`.
         return PluggyApiError(f"Leitura de /investments incompleta: {motivo}")
+
+    def fixa(data: dict, campo: str) -> int | None:
+        """A PRIMEIRA PÁGINA É O CONTRATO. `totalPages` e `total` valem o que ela
+        disse: página seguinte que OMITE o campo segue valendo aquele valor, e
+        página que manda valor DIFERENTE é a janela mudando debaixo da leitura —
+        um `totalPages` que encolhe de 3 para 2 faz a página 3 nunca ser pedida, e
+        o que estava nela vira posição "ausente" → caixinha removida."""
+        if campo not in data:
+            return contrato.get(campo)
+        valor = _inv_int(data.get(campo))
+        if campo in contrato and valor != contrato[campo]:
+            raise incompleta("metadata_divergente")
+        contrato[campo] = valor
+        return valor
 
     pagina = 1
     while True:
@@ -75,15 +98,33 @@ def list_pluggy_investments(item_id: str, api_key: str | None = None, *,
         # ambiente para isso de propósito.
         if "page" in data and _inv_int(data.get("page")) != pagina:
             raise incompleta("page_incoerente")
-        total_pages = _inv_int(data.get("totalPages"))
+        total_pages = fixa(data, "totalPages")
         if total_pages is None or total_pages < 0:
             raise incompleta("total_pages_ausente")
+        fixa(data, "total")
+        for item in results:
+            # Posição sem `id` usável não pode sair daqui: ela cairia no `continue`
+            # de `save_open_finance_investments` e a leitura seguiria valendo como
+            # completa — se TODOS os ids viessem vazios, a reconciliação apagaria a
+            # carteira inteira achando que o banco não tem mais nada.
+            if not isinstance(item, dict):
+                raise incompleta("item_invalido")
+            pid = str(item.get("id") or "").strip()
+            if not pid:
+                raise incompleta("item_invalido")
+            # Id repetido é janela DESLIZANTE: a página nova devolveu o que a
+            # anterior já tinha, e o que estava no fim da carteira nunca foi lido.
+            # Vale com ou sem `total` — é sinal próprio, não só aritmética.
+            if pid in vistos:
+                raise incompleta("id_repetido")
+            vistos.add(pid)
         out.extend(results)
-        total = data.get("total")
         if pagina >= total_pages:
             break
         pagina += 1
 
-    if total is not None and _inv_int(total) != len(out):
+    # Contra ids DISTINTOS (`vistos`), não contra a contagem bruta: com repetição
+    # o total batia enquanto uma posição de verdade faltava.
+    if "total" in contrato and contrato["total"] != len(vistos):
         raise incompleta("total_incoerente")
     return out
