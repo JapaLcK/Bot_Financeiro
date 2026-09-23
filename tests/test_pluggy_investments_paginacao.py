@@ -219,3 +219,16 @@ def test_digito_nao_ascii_nao_e_numero_de_pagina(pluggy_responde, page):
 
     with pytest.raises(PluggyApiError, match="page_incoerente"):
         list_pluggy_investments("item-1", "k")
+
+
+@pytest.mark.parametrize("payload", [
+    {"page": 1, "totalPages": 0, "total": 2, "results": [_pos("a"), _pos("b")]},
+    {"page": 1, "totalPages": 0, "results": [_pos("a"), _pos("b")]},
+])
+def test_total_pages_zero_com_posicoes_e_incoerente(pluggy_responde, payload):
+    """`totalPages: 0` com posições na página: o laço parava na página 1 como se
+    fosse a última, e a reconciliação removia o que estivesse nas outras."""
+    pluggy_responde(payload)
+
+    with pytest.raises(PluggyApiError, match="pagina_alem_do_total"):
+        list_pluggy_investments("item-1", "k")

@@ -109,6 +109,11 @@ def list_pluggy_investments(item_id: str, api_key: str | None = None, *,
         total_pages = fixa(data, "totalPages")
         if total_pages is None or total_pages < 0:
             raise incompleta("total_pages_ausente")
+        # Resultado de página além de `totalPages` é metadata incoerente: com
+        # `totalPages: 0` e posições na página 1, o laço pararia aqui achando que
+        # leu tudo. Só a carteira vazia (`totalPages: 0`, `results: []`) passa.
+        if pagina > total_pages and results:
+            raise incompleta("pagina_alem_do_total")
         fixa(data, "total")
         for item in results:
             # Posição sem `id` usável não pode sair daqui: ela cairia no `continue`
