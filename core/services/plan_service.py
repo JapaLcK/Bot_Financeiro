@@ -595,7 +595,12 @@ FEATURE_MIN_TIER_V2 = {
     "investments": "essencial",
     "export": "essencial",
     "custom_categories": "essencial",
-    "forecast": "pro",
+    "ai_categorization": "essencial",
+    "forecast": "plus",
+    "cashflow": "pro",
+    "insights": "plus",
+    "financial_comparison": "plus",
+    "weekly_report": "plus",
     "simulator": "pro",
     # Orçamento Doméstico: pago apenas, mesmo nível funcional do Pro atual
     # (is_pro = tier >= "plus"). Não usar "essencial": abriria no tier de entrada.
@@ -608,10 +613,20 @@ def plan_gate_ok(user_id: int, feature: str) -> bool:
     """True se o usuário pode usar `feature`. v1: Pro binário. v2: tier mínimo
     da escada; 'ai_chat' é cota mensal, não tier."""
     if not plans_v2_enabled():
+        # Estas capacidades não tinham corte por tier no modo legado.
+        if feature in {"insights", "financial_comparison", "weekly_report"}:
+            return True
         return is_pro(user_id)
     if feature == "ai_chat":
         return ai_chat_allowed(user_id)
     return require_min_tier(user_id, FEATURE_MIN_TIER_V2.get(feature, "essencial"))
+
+
+def forecast_horizons_for(user_id: int) -> tuple[int, ...]:
+    """Horizontes entregues por API e IA: Plus 30 dias, Pro 30/60/90."""
+    if not plans_v2_enabled() or plan_gate_ok(user_id, "cashflow"):
+        return (30, 60, 90)
+    return (30,) if plan_gate_ok(user_id, "forecast") else ()
 
 
 def require_min_tier(user_id: int, minimum: str) -> bool:

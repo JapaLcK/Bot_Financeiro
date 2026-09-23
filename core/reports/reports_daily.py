@@ -320,7 +320,8 @@ async def _periodic_reports_discord(bot):
         # polling a cada 30s e precisa do dedup atômico — se o Discord também
         # consumisse o claim, usuários com os dois canais receberiam em um só.
         messages = []
-        if uid in weekly_users:
+        from core.services.plan_service import plan_gate_ok
+        if uid in weekly_users and plan_gate_ok(uid, "weekly_report"):
             messages.append(build_weekly_report_text(uid, closed=True))
         if uid in monthly_users:
             messages.append(build_monthly_report_text(uid, closed=True))

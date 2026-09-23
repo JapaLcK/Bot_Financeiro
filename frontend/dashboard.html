@@ -319,11 +319,11 @@
     </div>
 
     <div class="mock-grid cols-2" style="margin-bottom:14px">
-      <div class="mock-card">
+      <div class="mock-card" data-plan-content="financial_comparison">
         <h3>Evolução de gastos</h3>
         <div style="height:240px;position:relative"><canvas id="mock-evolution-chart"></canvas></div>
       </div>
-      <div class="mock-card">
+      <div class="mock-card" data-plan-content="financial_comparison">
         <h3>Receita vs Despesa</h3>
         <div style="height:240px;position:relative"><canvas id="mock-income-expense-chart"></canvas></div>
       </div>
@@ -331,21 +331,21 @@
         <h3>Distribuição por categoria</h3>
         <div style="height:240px;position:relative"><canvas id="mock-category-donut"></canvas></div>
       </div>
-      <div class="mock-card">
+      <div class="mock-card" data-plan-content="financial_comparison">
         <h3>Gasto por dia da semana</h3>
         <div style="height:240px;position:relative"><canvas id="mock-weekday-chart"></canvas></div>
       </div>
     </div>
 
     <div class="mock-grid cols-2">
-      <div class="mock-card">
+      <div class="mock-card" data-plan-content="insights">
         <h3>Insights do Piggy</h3>
         <div id="analytics-insights-list" class="tx-list">
           <div class="empty" style="padding:16px;text-align:center;color:var(--text-3);font-size:.85rem">Carregando…</div>
         </div>
       </div>
 
-      <div class="mock-card">
+      <div class="mock-card" data-plan-content="financial_comparison">
         <h3 id="analytics-comparative-title">Comparativo mês a mês</h3>
         <div id="analytics-comparative-list" class="tx-list">
           <div class="bar-row"><div class="bar-icon"><i class="ph ph-calendar-dots" aria-hidden="true"></i></div><div class="bar-body"><div class="bar-head"><span class="name sk sk-text" style="width:120px"></span></div><div class="bar-track"><div class="bar-fill blue" style="width:40%"></div></div></div></div>
@@ -361,7 +361,7 @@
         </div>
       </div>
 
-      <div class="mock-card">
+      <div class="mock-card" data-plan-content="insights">
         <h3>Padrões detectados pela IA</h3>
         <div id="analytics-patterns-list">
           <div class="empty" style="padding:16px;text-align:center;color:var(--text-3);font-size:.85rem">Carregando…</div>
@@ -537,15 +537,15 @@
             <label for="boleto-sim-amount">Boleto novo (opcional)</label>
             <input type="number" id="boleto-sim-amount" min="0" step="0.01" placeholder="R$ do novo" onkeydown="if(event.key==='Enter')simularPrazo()" />
           </div>
-          <button class="mock-cta" id="boleto-sim-btn" onclick="simularPrazo()">Simular</button>
+          <button class="mock-cta" id="boleto-sim-btn" data-pro-feature="forecast" onclick="simularPrazo()">Simular</button>
         </div>
         <div id="boleto-sim-result" style="margin-top:12px"></div>
       </div>
 
-      <!-- Previsão de saldo 30/60/90 (Pro): pra onde o caixa caminha nos próximos meses -->
+      <!-- Previsão: 30 dias Plus; 60/90 e trajetória Pro. -->
       <div class="mock-card" id="forecast-card" data-pro-feature="forecast" style="margin-bottom:14px">
         <h3 style="margin-bottom:6px"><i class="ph ph-chart-line-up" aria-hidden="true"></i> Previsão de saldo</h3>
-        <p style="font-size:.78rem;color:var(--text-3);margin:0 0 10px">Pra onde seu caixa caminha em 30, 60 e 90 dias, no ritmo atual de receitas fixas e boletos.</p>
+        <p style="font-size:.78rem;color:var(--text-3);margin:0 0 10px">Plus: previsão de 30 dias. Pro: também 60 e 90 dias. Estimativa com receitas fixas e boletos.</p>
         <div id="forecast-result"></div>
       </div>
 

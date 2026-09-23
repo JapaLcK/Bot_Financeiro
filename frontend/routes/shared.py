@@ -1153,6 +1153,13 @@ def authorize_account_access(request: Request, user_id: int) -> int:
     return current_user_id
 
 
+def require_plan_feature(user_id: int, feature: str) -> None:
+    """Gate por capacidade, depois da autorização de sessão e dono."""
+    from core.services.plan_service import plan_gate_ok
+    if not plan_gate_ok(user_id, feature):
+        raise HTTPException(status_code=403, detail={"error": "pro_required", "feature": feature})
+
+
 def authorize_dashboard_access(request: Request, user_id: int) -> int:
     """Gate completo das rotas de DADOS: a conta (`authorize_account_access`)
     MAIS a perna do DIREITO. É o DEFAULT — descer para

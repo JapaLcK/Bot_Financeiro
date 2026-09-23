@@ -1240,37 +1240,60 @@ test("T4: fetchHistory sobreposto — resposta ou build de carga superada não p
   await page.close();
 });
 
-test("T5: sessão volta em Análises — KPIs voltam, sem marca, tema redesenha tudo", async () => {
-  const { page, errs } = await bootPage();
-  const r = await page.evaluate(async ([html, cache]) => {
-    document.body.insertAdjacentHTML("beforeend", html);
-    USER_ID = 1;
-    _analyticsCache = eval(cache);
-    window.fetch = async () => ({ ok: false, status: 401, json: async () => ({}), text: async () => "" });
-    await loadAnalyticsView(false);
-    await new Promise((res) => setTimeout(res, 50));
-    const fresco = eval(cache);
-    window.fetch = async (u) => {
-      const s = String(u);
-      const body = s.includes("/kpis") ? { kpis: fresco.kpis }
-        : s.includes("/evolution") ? { evolution: fresco.evolution }
-        : s.includes("/categories") ? { categories: fresco.categories }
-        : s.includes("/weekday") ? { weekdays: fresco.weekday } : {};
-      return { ok: true, status: 200, json: async () => body };
-    };
-    await loadAnalyticsView(true);
-    const stats = document.getElementById("analytics-stats");
-    window._charts = [];
-    applyTheme("light");
-    return {
-      kpis: stats.querySelectorAll(".stat-tile").length,
-      marca: !!stats.querySelector("[data-terminal]"),
-      charts: window._charts.slice(),
-    };
-  }, [ANALYTICS_HTML, ANALYTICS_CACHE]);
-  assert.equal(r.kpis, 4, "os KPIs não voltaram com a sessão");
-  assert.equal(r.marca, false, "a marca terminal ficou nas Análises depois do 200");
-  for (const id of MOCKS) assert.ok(r.charts.includes(id), `${id} não redesenhou: ${JSON.stringify(r.charts)}`);
-  await semErros(page, errs);
-  await page.close();
-});
+for (const tier of ["essencial", "plus", "pro"]) {
+  test(`T5: sessão volta em Análises — ${tier} recupera KPIs e gráficos permitidos`, async () => {
+    const { page, errs } = await bootPage();
+    const r = await page.evaluate(async ([html, cache, tier]) => {
+      document.body.insertAdjacentHTML("beforeend", html);
+      document.body.insertAdjacentHTML("beforeend", '<div id="user-label"></div><div id="user-email"></div><div id="user-plan"></div>');
+      USER_ID = 1;
+      // Mesma entrada do perfil real; gates vazios representam perfil pendente,
+      // não um Plus/Pro já autorizado a comparar períodos.
+      const advanced = tier !== "essencial";
+      applyUserMenuState("ana@test.local", tier, "Ana", {
+        financial_comparison: advanced, insights: advanced,
+      });
+      _analyticsCache = eval(cache);
+      if (!advanced) {
+        _analyticsCache.evolution = [];
+        _analyticsCache.weekday = [];
+        delete _analyticsCache.kpis.delta_pct;
+      }
+      window.fetch = async () => ({ ok: false, status: 401, json: async () => ({}), text: async () => "" });
+      await loadAnalyticsView(false);
+      await new Promise((res) => setTimeout(res, 50));
+      const fresco = eval(cache);
+      const requests = [];
+      window.fetch = async (u) => {
+        const s = String(u);
+        requests.push(s);
+        const body = s.includes("/kpis") ? { kpis: fresco.kpis }
+          : s.includes("/evolution") ? { evolution: fresco.evolution }
+          : s.includes("/categories") ? { categories: fresco.categories }
+          : s.includes("/weekday") ? { weekdays: fresco.weekday } : {};
+        return { ok: true, status: 200, json: async () => body };
+      };
+      await loadAnalyticsView(true);
+      const stats = document.getElementById("analytics-stats");
+      window._charts = [];
+      applyTheme("light");
+      return {
+        kpis: stats.querySelectorAll(".stat-tile").length,
+        marca: !!stats.querySelector("[data-terminal]"),
+        charts: window._charts.slice(), requests,
+      };
+    }, [ANALYTICS_HTML, ANALYTICS_CACHE, tier]);
+    assert.equal(r.kpis, 4, "os KPIs não voltaram com a sessão");
+    assert.equal(r.marca, false, "a marca terminal ficou nas Análises depois do 200");
+    if (tier === "essencial") {
+      assert.deepEqual(r.charts, ["mock-category-donut"], "Essencial deve redesenhar só a distribuição por categoria");
+      assert.equal(r.requests.length, 3);
+      assert.ok(r.requests.every(url => !/evolution|weekday|patterns|insights/.test(url)), "Essencial pediu dados avançados");
+    } else {
+      for (const id of MOCKS) assert.ok(r.charts.includes(id), `${id} não redesenhou: ${JSON.stringify(r.charts)}`);
+      assert.equal(r.requests.length, 7);
+    }
+    await semErros(page, errs);
+    await page.close();
+  });
+}

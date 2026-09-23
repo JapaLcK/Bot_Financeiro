@@ -3109,11 +3109,11 @@ async def auth_dashboard_profile(request: Request, response: Response):
     # expirada (webhook perdido) e o freio de emergência PLANS_V2_ENABLED. O front
     # consome isto direto em vez de reconstruir tier do plano cru (que divergiria).
     from core.services.plan_service import (
-        get_user_limits, is_pro, require_min_tier, plan_gate_ok,
+        get_user_limits, is_pro, plan_gate_ok,
     )
     limits = await asyncio.to_thread(get_user_limits, int(user_id))
     _is_pro = await asyncio.to_thread(is_pro, int(user_id))
-    _forecast_ok = await asyncio.to_thread(require_min_tier, int(user_id), "pro")
+    _forecast_ok = await asyncio.to_thread(plan_gate_ok, int(user_id), "forecast")
     _hb_ok = await asyncio.to_thread(plan_gate_ok, int(user_id), "household_budget")
     feature_gates = {
         "investments": bool(limits["investments_enabled"]),
@@ -3125,9 +3125,11 @@ async def auth_dashboard_profile(request: Request, response: Response):
         "history_unlimited": not limits["history_current_month_only"],
         "changelog": _is_pro,                        # Novidades: gate is_pro (Plus+)
         "agents": limits["agents_energy_budget"] > 0,  # agentes: Plus+
-        "forecast": bool(_forecast_ok),              # previsão de saldo 30/60/90: Pro+
+        "forecast": bool(_forecast_ok),              # Plus 30 dias; Pro 60/90
         "household_budget": bool(_hb_ok),            # orçamento doméstico: Plus+
     }
+    for feature in ("cashflow", "insights", "financial_comparison", "weekly_report"):
+        feature_gates[feature] = await asyncio.to_thread(plan_gate_ok, int(user_id), feature)
     _no_store(response)
     return {
         "user_id": user_id,
@@ -7401,6 +7403,7 @@ async def debug_ai_payload_route(
         raise HTTPException(status_code=404, detail="Not found")
     _authorize_dashboard_access(request, user_id)
     from core.ai_patterns import _collect_patterns_data, _collect_insights_data
+    _require_pro(user_id, "insights")
     if kind == "insights":
         data = await asyncio.to_thread(_collect_insights_data, user_id)
     else:
@@ -7668,13 +7671,13 @@ async def set_budget(request: Request, user_id: int, payload: BudgetPayload):
     if payload.budget <= 0:
         raise HTTPException(status_code=400, detail="budget must be > 0")
 
-    from core.services.plan_service import is_pro
+    from core.services.plan_service import plan_gate_ok
 
     async with await db_connect() as conn:
         async with conn.cursor() as cur:
             # Pro gate: Free pode ter até FREE_BUDGETS_LIMIT orçamentos.
             # Update de orçamento existente não conta — só novo INSERT.
-            if not is_pro(user_id):
+            if not plan_gate_ok(user_id, "generic"):
                 await cur.execute(
                     "SELECT 1 FROM category_budgets "
                     "WHERE user_id=%s AND lower(categoria)=lower(%s)",
@@ -8163,13 +8166,21 @@ async def boleto_projection_route(request: Request, user_id: int, date: str, amo
     """Projeção de caixa até uma data ('tô tranquilo nesse prazo?'). `date`=alvo
     (YYYY-MM-DD), `amount`=boleto novo em consideração (opcional)."""
     _authorize_dashboard_access(request, user_id)
-    _require_boletos_access(user_id)
+    _require_pro(user_id, "forecast")
     from datetime import date as _date
     from math import isfinite
     try:
         target = _date.fromisoformat(str(date)[:10])
     except (ValueError, TypeError):
         raise HTTPException(status_code=400, detail="Data inválida (use AAAA-MM-DD).")
+    from core.services.plan_service import plans_v2_enabled, forecast_horizons_for
+    if plans_v2_enabled():
+        cap = max(await asyncio.to_thread(forecast_horizons_for, user_id), default=0)
+        if target > _date.today() + timedelta(days=cap):
+            raise HTTPException(status_code=403, detail={
+                "error": "pro_required", "feature": "forecast",
+                "message": f"Seu plano permite previsões de até {cap} dias.",
+            })
     # O parser de query aceita `nan`/`inf` num float, e o número não finito
     # estoura na serialização JSON da resposta (500).
     if amount is not None and not isfinite(amount):
@@ -8181,11 +8192,11 @@ async def boleto_projection_route(request: Request, user_id: int, date: str, amo
 
 @app.get("/forecast/{user_id}")
 async def forecast_route(request: Request, user_id: int, threshold: float = 0.0):
-    """Previsão de saldo a 30/60/90 dias + trajetória diária dos 90 dias inteiros
-    com o pior dia no caminho (feature Pro+ da /precos). `threshold` (opcional,
+    """Plus: saldo a 30 dias. Pro: 30/60/90 dias e trajetória diária.
+    `threshold` (opcional,
     R$0 default): limite de segurança configurável — saldo positivo abaixo dele
     ainda conta como aperto; não é persistido. 403 pro_required
-    abaixo de Pro — o dashboard usa isso pra esconder o card."""
+    abaixo de Plus — o dashboard usa isso pra esconder o card."""
     _authorize_dashboard_access(request, user_id)
     _require_pro(user_id, "forecast")
     from math import isfinite
@@ -8193,8 +8204,13 @@ async def forecast_route(request: Request, user_id: int, threshold: float = 0.0)
     # estoura na serialização JSON da resposta (500).
     if not isfinite(threshold):
         raise HTTPException(status_code=400, detail="Limite inválido.")
-    from core.services.cashflow_forecast import forecast_with_trajectory
-    result = await asyncio.to_thread(forecast_with_trajectory, user_id, 90, threshold)
+    from core.services.plan_service import forecast_horizons_for
+    from core.services.cashflow_forecast import forecast_horizons, forecast_with_trajectory
+    horizons = await asyncio.to_thread(forecast_horizons_for, user_id)
+    if 90 in horizons:
+        result = await asyncio.to_thread(forecast_with_trajectory, user_id, 90, threshold)
+    else:
+        result = await asyncio.to_thread(forecast_horizons, user_id, horizons)
     return {"ok": True, "forecast": result}
 
 
