@@ -10,7 +10,8 @@ const DAY = 86400000;
 // Compromissos dos últimos 5 dias (já pagos) e dos próximos `span` dias.
 export function Bills({ s, days: span = 30 }: { s: DashState; days?: number }) {
   const items = useMemo(() => scheduled(addDays(TODAY, -5), addDays(TODAY, span)), [span]);
-  const due = items.filter((b) => b.date > TODAY && b.kind === "expense" && !b.transfer);
+  // Assinatura no cartão é paga pela fatura, que já tem linha própria.
+  const due = items.filter((b) => b.date > TODAY && b.kind === "expense" && !b.transfer && b.source !== "cartao");
   const known = due.reduce((a, b) => a + (b.amount ?? 0), 0);
   const focus = (b: Launch | null) => set({ highlight: b ? dayKey(b.date) : null });
 
@@ -20,19 +21,20 @@ export function Bills({ s, days: span = 30 }: { s: DashState; days?: number }) {
       <ol className="bills" onPointerLeave={() => focus(null)}>
         {items.map((b, i) => {
           const days = Math.round((b.date.getTime() - TODAY.getTime()) / DAY);
+          const card = b.source === "cartao";
           const paid = days <= 0;
-          const status = paid ? (b.kind === "income" ? "recebido" : "pago") : b.estimated || b.amount == null ? "estimado" : relativeDays(days);
+          const status = card ? "no cartão" : paid ? (b.kind === "income" ? "recebido" : "pago") : b.estimated || b.amount == null ? "estimado" : relativeDays(days);
           return (
             <li key={i}>
               <button type="button" className="bill" data-paid={paid || undefined} data-on={s.highlight === dayKey(b.date) || undefined}
                 onPointerEnter={() => focus(b)} onFocus={() => focus(b)} onBlur={() => focus(null)}
                 aria-label={`${b.label}, ${b.date.getDate()}/${b.date.getMonth() + 1}, ${b.amount == null ? "valor a definir" : money(b.amount)}, ${status}. Mostrar no gráfico.`}
-                onClick={() => { set({ month: MONTHS[MONTHS.length - 1], horizon: days > 7 ? "30" : "mes" }); focus(b); }}>
+                onClick={() => { set({ month: MONTHS[MONTHS.length - 1], horizon: days > 30 ? "90" : days > 7 ? "30" : "mes" }); focus(b); }}>
                 <span className="bill-date"><b>{b.date.getDate()}</b><span>{weekday(b.date)}</span></span>
                 <span className="bill-name">
                   {b.label}
-                  <span className={`bill-status ${!paid && days <= 3 ? "warn" : "faint"}`}>
-                    {paid && <i className="ph ph-check" aria-hidden="true" />}{status}
+                  <span className={`bill-status ${!card && !paid && days <= 3 ? "warn" : "faint"}`}>
+                    {card ? <i className="ph ph-credit-card" aria-hidden="true" /> : paid && <i className="ph ph-check" aria-hidden="true" />}{status}
                   </span>
                 </span>
                 <span className={`bill-amt num ${b.kind === "income" ? "gain" : ""}`}>

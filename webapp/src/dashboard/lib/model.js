@@ -97,7 +97,7 @@ export function scheduled(from, to) {
   const out = [];
   for (let d = new Date(from); d <= to; d = addDays(d, 1)) {
     const day = d.getDate();
-    for (const r of RECURRING) if (r.day === day) out.push({ date: d, kind: "expense", label: r.label, amount: r.amount, category: r.category, estimated: r.label === "Conta de luz" });
+    for (const r of RECURRING) if (r.day === day) out.push({ date: d, kind: "expense", label: r.label, amount: r.amount, category: r.category, source: r.source, estimated: r.label === "Conta de luz" });
     for (const i of INCOMES) if (i.day === day) out.push({ date: d, kind: "income", label: i.label, amount: i.amount });
     if (day === TRANSFER_DAY) out.push({ date: d, kind: "expense", transfer: true, label: "Guardado nas caixinhas", amount: GOALS.reduce((a, g) => a + g.monthly, 0) });
     if (day === CARD.dueDay) {

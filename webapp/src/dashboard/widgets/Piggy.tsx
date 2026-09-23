@@ -42,7 +42,7 @@ function insights(s: DashState): Insight[] {
         action: { label: "Ver 90 dias", run: () => { set({ horizon: "90" }); go("/previsao"); } },
       });
     }
-    const next = scheduled(addDays(TODAY, 1), addDays(TODAY, 30)).find((b) => b.kind === "expense" && !b.transfer && b.amount != null);
+    const next = scheduled(addDays(TODAY, 1), addDays(TODAY, 30)).find((b) => b.kind === "expense" && !b.transfer && b.source !== "cartao" && b.amount != null);
     if (next) {
       const days = Math.round((next.date.getTime() - TODAY.getTime()) / 86400000);
       out.push({
