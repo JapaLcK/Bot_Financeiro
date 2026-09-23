@@ -20,10 +20,12 @@ CONTROLE NEGATIVO (medido, ver relato): tirar o UPDATE de religação deixa B9,
 B13, B14, B16 e o E2E vermelhos; tirar `grava_lapide=True` deixa B9, B11, B13 e
 B16 vermelhos; tirar `p.user_id` do UPDATE deixa B13 vermelho; tirar
 `p.of_investment_id is null` deixa B14 vermelho; tirar o `not exists` deixa B12
-vermelho; tirar a inicialização de `of_last_seen_*` deixa B9 vermelho; tirar a
-inicialização de `of_last_seen_*` deixa B9 vermelho.
+vermelho; tirar a inicialização de `of_last_seen_*` deixa B9 vermelho; desligar a
+escotilha deixa B15 (metade 1) vermelho; tirar a checagem de lote deixa B15
+(metade 2) vermelho.
 
-CONTROLE POSITIVO: B14 (o vínculo que o usuário fez na mão sobrevive à volta da posição
+CONTROLE POSITIVO: B15 metade 2 (espelho COM aporte continua recusando, e o lote
+fica) e B14 (o vínculo que o usuário fez na mão sobrevive à volta da posição
 antiga) — sem eles o grupo passaria num código que religasse tudo por cima de
 qualquer coisa.
 """
@@ -263,6 +265,47 @@ def test_vinculo_manual_durante_a_ausencia_ganha_da_lapide(user_id):
     assert _reconcilia(conn_id, [CDB, CX_AUTO])["caixinhas_religadas"] == 0
     assert _pockets(user_id)["Viagem"]["of_investment_id"] == outra, (
         "pocket já vinculado não é roubado por uma lápide sobrevivente")
+
+
+# B15 ─────────── a escotilha do bind (as duas metades) ──────────────────────
+
+def test_meta_manual_toma_espelho_puro_mas_nao_caixinha_com_aporte(user_id):
+    """Metade 1: espelho PURO (zero lote) não é dinheiro de ninguém — a meta manual
+    toma a posição e o espelho é apagado na mesma transação.
+    Metade 2 (CONTROLE POSITIVO): com lote aberto continua `OF_POCKET_READONLY`, e
+    o lote fica onde está. É a mesma régua do `_unbind_pocket`."""
+    conn_id = _seed_connection(user_id)
+    _save(conn_id, [CX_AUTO, CDB])
+    db.sync_open_finance_caixinhas(conn_id, user_id)
+    espelho = _pockets(user_id)["Caixinha Nubank"]
+    meta = _meta_manual(user_id)
+
+    assert db.bind_pocket_to_caixinha(user_id, meta, espelho["of_investment_id"]) is True
+    db.sync_open_finance_caixinhas(conn_id, user_id)
+
+    pk = _pockets(user_id)
+    assert "Caixinha Nubank" not in pk, "o espelho puro sai"
+    assert pk["Viagem"]["of_investment_id"] == espelho["of_investment_id"]
+    assert float(pk["Viagem"]["balance"]) == 800.0
+    assert _total(user_id) == 1800.0, "800 na meta + 1000 do CDB solto, cada um uma vez"
+
+    # metade 2: o mesmo pedido contra um pocket do sync COM aporte do usuário
+    outra = _meta_manual(user_id, "Outra meta")
+    db.pocket_deposit_from_account(user_id, "Outra meta", 300.0)
+    db.bind_pocket_to_caixinha(user_id, outra, _of_id(conn_id, "cdb-vinc"))
+    with get_conn() as conn:                                   # a adotada do legado
+        with conn.cursor() as cur:
+            cur.execute("update pockets set source='open_finance' where id=%s and user_id=%s",
+                        (outra, user_id))
+        conn.commit()
+    terceira = _meta_manual(user_id, "Terceira meta")
+
+    with pytest.raises(ValueError, match="OF_POCKET_READONLY"):
+        db.bind_pocket_to_caixinha(user_id, terceira, _of_id(conn_id, "cdb-vinc"))
+
+    assert _lotes_abertos(user_id, outra) == 1, "o lote do usuário não foi levado"
+    assert _pockets(user_id)["Outra meta"]["of_investment_id"] == _of_id(conn_id, "cdb-vinc")
+    assert _pockets(user_id)["Terceira meta"]["of_investment_id"] is None
 
 
 # B16 ─────────── desconectar mata a lápide (o `on delete set null`) ─────────

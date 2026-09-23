@@ -1244,7 +1244,27 @@ def bind_pocket_to_caixinha(user_id: int, pocket_id: int, of_investment_id: int 
             anterior = cur.fetchone()
             if anterior and anterior["id"] != pocket_id:
                 if anterior["source"] == "open_finance":
-                    raise ValueError("OF_POCKET_READONLY")
+                    # ESCOTILHA: espelho PURO (sem lote aberto) não é dinheiro de
+                    # ninguém — é a cópia que o auto-import fez da posição. Se uma
+                    # meta manual quer a posição de volta, o espelho é apagado
+                    # nesta mesma transação e a meta fica com ela. Sem isto, a meta
+                    # que perdeu o vínculo por ausência e não foi religada ficava
+                    # presa para sempre: a posição voltou no nome de uma caixinha
+                    # automática, e `OF_POCKET_READONLY` recusava tudo.
+                    #
+                    # Com lote aberto, NÃO: lote é saldo próprio, sacável, aporte
+                    # que saiu da carteira do usuário (a mesma régua do
+                    # `_unbind_pocket`). Aí continua `OF_POCKET_READONLY`, e o lote
+                    # fica onde está.
+                    cur.execute(
+                        "select 1 from pocket_lots where user_id=%s and pocket_id=%s "
+                        "and status='open' limit 1",
+                        (user_id, anterior["id"]),
+                    )
+                    if cur.fetchone():
+                        raise ValueError("OF_POCKET_READONLY")
+                    cur.execute("delete from pockets where id=%s and user_id=%s",
+                                (anterior["id"], user_id))
                 else:
                     _unbind_pocket(cur, user_id, anterior["id"])
             cur.execute(

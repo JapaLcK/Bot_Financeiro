@@ -2013,8 +2013,12 @@ def _espelho_investimentos(connection_id: int) -> set[str]:
 
 
 def _nomes_de_caixinha(user_id: int) -> set[str]:
+    return set(_pockets_por_nome(user_id))
+
+
+def _pockets_por_nome(user_id: int) -> dict:
     from db.pockets import accrue_all_pockets
-    return {p["name"] for p in accrue_all_pockets(user_id)}
+    return {p["name"]: p for p in accrue_all_pockets(user_id)}
 
 
 def test_sync_reconcilia_posicao_que_sumiu_do_banco(user_id, monkeypatch, relogio_fixo):
@@ -2093,3 +2097,39 @@ def test_sync_com_investimentos_stale_nao_remove_nada(user_id, monkeypatch, relo
     assert _espelho_investimentos(conexao["id"]) == {"cx-a", "cx-b"}
     assert {"Caixinha Viagem", "Caixinha Carro"} <= _nomes_de_caixinha(user_id)
 
+
+def test_sync_religa_a_caixinha_quando_a_posicao_volta(user_id, monkeypatch, relogio_fixo):
+    """O bloqueante da passada 1 do Tester, pelo `sync_pluggy_item` inteiro.
+
+    Três syncs: a posição está, some, volta. Ela volta com id NOVO (a linha foi
+    apagada na reconciliação), e sem a lápide o auto-import criava uma caixinha
+    AUTOMÁTICA duplicada que o usuário não conseguia desfazer — a meta dele ficava
+    presa atrás de `OF_POCKET_READONLY`."""
+    from conftest import promote_to_pro
+    promote_to_pro(user_id)
+    conexao = _conexao(user_id)
+    _mock_pluggy(monkeypatch, item=ITEM_SAUDAVEL, contas=[])
+    _mock_investimentos(monkeypatch, [_CX_A])
+    assert ps.sync_pluggy_item("item-g1")["ok"] is True
+
+    # a meta MANUAL do usuário toma a posição (o espelho puro do auto-import sai)
+    _, meta, _ = db.create_pocket(user_id, "Viagem dos sonhos", interest_enabled=False)
+    posicao_1 = _pockets_por_nome(user_id)["Caixinha Viagem"]["of_investment_id"]
+    assert db.bind_pocket_to_caixinha(user_id, meta, posicao_1) is True
+
+    _mock_investimentos(monkeypatch, [])            # o banco omite a posição
+    assert ps.sync_pluggy_item("item-g1")["ok"] is False   # sem contas e sem investimento
+    assert _espelho_investimentos(conexao["id"]) == set()
+    assert _pockets_por_nome(user_id)["Viagem dos sonhos"]["of_investment_id"] is None
+
+    _mock_investimentos(monkeypatch, [_CX_A])       # e volta
+    res = ps.sync_pluggy_item("item-g1")
+
+    assert res["ok"] is True
+    assert res["caixinhas_religadas"] == 1
+    pk = _pockets_por_nome(user_id)
+    posicao_2 = pk["Viagem dos sonhos"]["of_investment_id"]
+    assert posicao_2 is not None and posicao_2 != posicao_1, "id novo, mesma meta"
+    assert float(pk["Viagem dos sonhos"]["balance"]) == 800.0, "espelho do banco"
+    assert "Caixinha Viagem" not in pk, "nenhuma caixinha automática duplicada"
+    assert _linha()["status"] == "ACTIVE"
