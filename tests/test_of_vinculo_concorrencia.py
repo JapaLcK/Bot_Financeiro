@@ -30,12 +30,17 @@ outros três.
 Postgres real e threads de verdade (`threading.Barrier`), como o resto da suíte
 de concorrência do repositório (`tests/test_of_concurrency.py`).
 """
+import subprocess
+import sys
 import threading
+from contextlib import contextmanager
+from pathlib import Path
 
 import pytest
 
 import db
 from db import get_conn
+from db import open_finance
 from test_of_caixinha_autoimport import _pockets, _save, _seed_connection
 from test_of_caixinha_vinculo import CDB, _meta_manual, _of_id, _total
 from test_of_investimento_reconciliacao import CX_AUTO, _reconcilia
@@ -190,3 +195,128 @@ def test_par_duplicado_existente_e_curado_e_nao_renovado(user_id):
     assert _donos(user_id, _of_id(conn_id, "cx-auto")) == [min(a, b)]
     db.sync_open_finance_caixinhas(conn_id, user_id)
     assert _total(user_id) == 800.0
+
+
+# --- auto-import × bind ------------------------------------------------------
+# `sync_open_finance_caixinhas` lia "ninguém é dono desta posição" e só DEPOIS
+# inseria o espelho, com guarda só de NOME. Um bind manual que fizesse commit
+# entre os dois deixava DOIS pockets na posição, e o passo 3 espelhava o saldo
+# nos dois. A janela é de microssegundos; o proxy abaixo a estica para até 3s,
+# então a intercalação é determinística. CONTROLE NEGATIVO (medido, ver relato):
+# tirar o `_lock_user` do auto-import deixa os dois testes abaixo vermelhos com
+# dois donos. Com ele, o bind espera o lock, o Event sai por timeout, o
+# auto-import faz commit e o bind toma o espelho puro pela escotilha.
+
+class _Pausa:
+    """Conexão/cursor reais; pausa UMA vez antes do `insert into pockets`."""
+
+    def __init__(self, alvo, na_janela, libera):
+        self._alvo, self._na_janela, self._libera = alvo, na_janela, libera
+
+    def __getattr__(self, nome):
+        return getattr(self._alvo, nome)
+
+    def __enter__(self):
+        self._alvo.__enter__()
+        return self
+
+    def __exit__(self, *exc):
+        return self._alvo.__exit__(*exc)
+
+    def cursor(self, *a, **k):
+        return _Pausa(self._alvo.cursor(*a, **k), self._na_janela, self._libera)
+
+    def execute(self, sql, *a, **k):
+        if "insert into pockets" in sql and not self._na_janela.is_set():
+            self._na_janela.set()
+            self._libera.wait(3)
+        return self._alvo.execute(sql, *a, **k)
+
+
+def _pausa_no_insert(get_conn_real, na_janela, libera):
+    @contextmanager
+    def get_conn_pausado(*a, **k):
+        with get_conn_real(*a, **k) as conn:
+            yield _Pausa(conn, na_janela, libera)
+    return get_conn_pausado
+
+
+def _cenario(user_id: int) -> tuple[int, int, int]:
+    conn_id = _seed_connection(user_id)
+    _save(conn_id, [CX_AUTO])                        # posição sem dono ainda
+    return conn_id, _of_id(conn_id, "cx-auto"), _meta_manual(user_id, "Viagem")
+
+
+def _uma_dona_e_dinheiro_uma_vez(user_id, conn_id, posicao, meta):
+    # A meta fica com a posição: o espelho que o auto-import criou é puro (sem
+    # lote), e a escotilha do bind o apaga na mesma transação.
+    assert _donos(user_id, posicao) == [meta], "dois pockets na mesma posição"
+    db.sync_open_finance_caixinhas(conn_id, user_id)
+    assert _donos(user_id, posicao) == [meta]
+    assert _total(user_id) == 800.0, "os R$800 do banco apareceram mais de uma vez"
+
+
+def test_auto_import_nao_duplica_o_vinculo_de_um_bind_concorrente(user_id, monkeypatch):
+    conn_id, posicao, meta = _cenario(user_id)
+    na_janela, libera = threading.Event(), threading.Event()
+    monkeypatch.setattr(open_finance, "get_conn",
+                        _pausa_no_insert(open_finance.get_conn, na_janela, libera))
+
+    sync = threading.Thread(target=db.sync_open_finance_caixinhas, args=(conn_id, user_id))
+    sync.start()
+    assert na_janela.wait(10), "o auto-import nunca chegou ao insert"
+    vinculou: list = []
+
+    def vincula():
+        vinculou.append(db.bind_pocket_to_caixinha(user_id, meta, posicao))
+        libera.set()
+
+    bind = threading.Thread(target=vincula)
+    bind.start()
+    bind.join(30)
+    sync.join(30)
+    assert not bind.is_alive() and not sync.is_alive(), "thread travou (deadlock?)"
+    assert vinculou == [True], "o bind não terminou vinculando"
+    _uma_dona_e_dinheiro_uma_vez(user_id, conn_id, posicao, meta)
+
+
+_FILHO = """
+import sys, threading
+sys.path[:0] = ['.', 'tests']
+from test_of_vinculo_concorrencia import _pausa_no_insert
+from db import open_finance as of
+na_janela, libera = threading.Event(), threading.Event()
+of.get_conn = _pausa_no_insert(of.get_conn, na_janela, libera)
+def ponte():
+    na_janela.wait()
+    print('NA_JANELA', flush=True)
+    sys.stdin.readline()
+    libera.set()
+threading.Thread(target=ponte, daemon=True).start()
+of.sync_open_finance_caixinhas(int(sys.argv[1]), int(sys.argv[2]))
+"""
+
+
+def test_auto_import_x_bind_em_dois_processos(user_id):
+    """O mesmo, com o auto-import em OUTRO processo: sem pool, GIL nem conexão
+    compartilhados — só o Postgres entre os dois."""
+    conn_id, posicao, meta = _cenario(user_id)
+    filho = subprocess.Popen(
+        [sys.executable, "-c", _FILHO, str(conn_id), str(user_id)],
+        cwd=Path(__file__).resolve().parents[1], text=True,
+        stdin=subprocess.PIPE, stdout=subprocess.PIPE, stderr=subprocess.STDOUT)
+    try:
+        saida = []
+        for linha in filho.stdout:
+            if linha.strip() == "NA_JANELA":
+                break
+            saida.append(linha)
+        else:
+            pytest.fail("o filho não chegou ao insert:\n" + "".join(saida))
+        assert db.bind_pocket_to_caixinha(user_id, meta, posicao) is True
+        resto, _ = filho.communicate("\n", timeout=60)
+    finally:
+        if filho.poll() is None:
+            filho.kill()
+    assert filho.returncode == 0, resto
+    _uma_dona_e_dinheiro_uma_vez(user_id, conn_id, posicao, meta)

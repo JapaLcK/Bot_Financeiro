@@ -1452,6 +1452,15 @@ def sync_open_finance_caixinhas(connection_id: int, user_id: int) -> dict:
     vagas = pockets_restantes(user_id)  # None = tier sem teto
     with get_conn() as conn:
         with conn.cursor() as cur:
+            # O mesmo lock do bind (ver `bind_pocket_to_caixinha`), antes do passo
+            # 1: sem ele, um bind manual que fizesse commit entre o "ninguém é dono"
+            # e o insert abaixo (cuja guarda só olha NOME) deixava dois pockets na
+            # posição, e o passo 3 espelhava o saldo nos dois — dinheiro em dobro.
+            # Ordem: quem chama (pluggy_sync) já segura o `pluggy_item_lock`
+            # (advisory, conexão dedicada) e pega este depois; o bind só pega
+            # este. Não há ciclo.
+            from .bank_movements import _lock_user
+            _lock_user(cur, user_id)
             # 1. posições desta conexão COM SALDO > 0; a regra de caixinha é
             # aplicada em Python (`_e_caixinha`). Saldo 0 = fundo/reserva vazia
             # (ex.: Nubank "Reserva Planejada") — não vira caixinha fantasma.
