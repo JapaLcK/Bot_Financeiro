@@ -405,6 +405,19 @@ def _zera_rate_limit_em_memoria():
 
 
 @pytest.fixture(autouse=True)
+def _zera_rate_limit_persistente():
+    """O par do de cima para o teto que mora no BANCO (`auth_rate_limits`): o de
+    login é 5/60s por IP, e o TestClient é sempre `ip:testclient`. Sem isto, as
+    tentativas de um arquivo contam no seguinte dentro da mesma janela — com o
+    xdist os arquivos de login caem juntos no mesmo worker e o `test_mfa` levava
+    429 (`KeyError: 'mfa_challenge'`). Cada worker tem o próprio database, então
+    apagar a tabela inteira não alcança ninguém de fora."""
+    with get_conn() as conn:
+        conn.execute("delete from auth_rate_limits")
+        conn.commit()
+
+
+@pytest.fixture(autouse=True)
 def _auto_cleanup_orphan_users():
     """Salva quem ja existia em `users` antes do teste e apaga qualquer
     novo registro depois — pega ids secundarios criados manualmente

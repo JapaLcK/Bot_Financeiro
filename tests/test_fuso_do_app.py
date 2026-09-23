@@ -205,6 +205,13 @@ def _no_pool_do_dashboard(chamada):
             # exatamente a mina que esta função existe para desarmar. Nesta ordem
             # o pool corrente continua sendo fechado: `reset_db_pool()` DEVOLVE
             # o que estava em `shared._db_pool`, que é o mesmo objeto de antes.
+            # A fila do lock precisa esvaziar antes do reset. Se o primeiro
+            # `open()` falhou (PoolTimeout, "too many clients"), o gather propaga
+            # mas as outras consultas seguem na fila — o reset acusaria "em voo"
+            # e o `asyncio.run` penduraria cancelando o worker do psycopg_pool,
+            # que engole CancelledError. Pendurou com `-n auto` (#525).
+            async with shared._db_pool_lock:
+                pass
             atual = shared.reset_db_pool()
             shared._db_pool = anterior
             if atual is not None:

@@ -11,12 +11,18 @@ description: Como rodar a suíte do PigBank e ler o resultado — qual interpret
 export DATABASE_URL=$(grep -m1 '^DATABASE_URL=' .env | cut -d= -f2- | tr -d "\"'")
 export PYTHONPATH=.
 .venv/bin/python -m pytest -q        # suíte inteira, sem exclusão nenhuma
-.venv/bin/python -m pytest -q -n auto   # a mesma, em paralelo (pytest-xdist), como o CI roda
+.venv/bin/python -m pytest -q -n 4      # a mesma, em paralelo (pytest-xdist)
 ```
 
 Com `-n`, cada worker cria o próprio database `pytest_*` (o `pytest_configure` do
 `conftest.py` roda em cada um), então o isolamento abaixo vale igual. Para um
 arquivo só, rode sem `-n`: subir os workers custa mais que o arquivo.
+
+**`-n 4` aqui, não `-n auto`.** Cada worker chega a ~10 conexões no pico, e o
+Postgres local tem `max_connections=100`: numa máquina de 11 núcleos o `auto`
+passa do teto sozinho, e duas suítes em paralelo (outra sessão, o Tester)
+estouram com `too many clients` — medido em 2026-09-23. O CI roda `-n auto`
+porque lá são 4 vCPUs e o Postgres é só dele. Remeça antes de subir o número.
 
 **Não há número esperado aqui, de propósito.** Rode e anote o SEU resultado: ele é a
 baseline deste trabalho. Um número guardado neste arquivo envelhece em silêncio e
