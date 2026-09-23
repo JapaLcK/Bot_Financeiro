@@ -170,12 +170,22 @@ def handle_ai_chat_command(user_id: int, text: str, platform: str) -> str | None
             except Exception:
                 pass
         try:
-            from core.services.plan_service import plans_v2_enabled, get_user_limits
+            from core.services.plan_service import (
+                plans_v2_enabled, get_user_limits, get_plan_tier, tier_at_least,
+            )
             if plans_v2_enabled() and get_user_limits(user_id)["ai_conversational_enabled"]:
-                return (
-                    "🐷 Suas mensagens com a Piggy deste mês acabaram!\n"
-                    "Nos planos pagos a conversa continua: https://pigbankai.com/precos"
-                )
+                tier = get_plan_tier(user_id)
+                acabou = "🐷 Suas mensagens com a Piggy deste mês acabaram!\n"
+                # A cota vira no dia 1º (db/ai_quota._current_month_start).
+                # Plus e Pro têm o mesmo teto: subir de um pro outro não dá mais mensagens.
+                if tier_at_least(tier, "plus"):
+                    return acabou + "Elas renovam no dia 1º."
+                if tier == "essencial":
+                    return (
+                        acabou + "Elas renovam no dia 1º. No Plus você tem mais mensagens: "
+                        "https://pigbankai.com/precos"
+                    )
+                return acabou + "Nos planos pagos a conversa continua: https://pigbankai.com/precos"
         except Exception:
             pass
         return (
