@@ -3959,6 +3959,9 @@ async def auth_mfa_regenerate(request: Request, body: MFADisableBody, user_id: i
     return {"backup_codes": codes}
 
 
+_MFA_SESSAO_EXPIRADA = "Sessão MFA expirada. Faça login novamente."
+
+
 @app.post("/auth/mfa/verify-login")
 # 5/min é apertado mas não atrapalha usuário legítimo (que erra 1-2 vezes).
 # TOTP tem só 10^6 valores — 10/min seria brute-force viável em ~16 dias.
@@ -3969,26 +3972,37 @@ async def auth_mfa_verify_login(request: Request, response: Response, body: MFAV
     O cliente envia (challenge, code). Se OK, emite JWT auth + cookie.
     """
     from db import (
-        mfa_consume_login_challenge,
-        mfa_verify_totp,
-        mfa_consume_backup_code,
+        mfa_reserve_login_challenge_attempt,
+        mfa_consume_login_challenge_with_code,
         get_auth_user,
         create_link_code,
     )
 
-    user_id = await asyncio.to_thread(mfa_consume_login_challenge, body.challenge)
-    if not user_id:
-        raise HTTPException(status_code=400, detail="Sessão MFA expirada. Faça login novamente.")
+    # Desafio morto é 400, nunca 401: 401 é "renove a sessão" no interceptor.
+    def _recusa(texto: str, code: str) -> JSONResponse:
+        return vary_accept(JSONResponse(status_code=400, content={"detail": texto, "code": code}))
 
-    code = (body.code or "").strip()
-    verified = False
-    if body.use_backup:
-        verified = await asyncio.to_thread(mfa_consume_backup_code, user_id, code)
-    else:
-        verified = await asyncio.to_thread(mfa_verify_totp, user_id, code)
+    # Reserva a tentativa ANTES de conferir e só consome o desafio com o código
+    # certo — consumir primeiro fazia um dígito errado queimar o login.
+    reservado = await asyncio.to_thread(mfa_reserve_login_challenge_attempt, body.challenge)
+    if not reservado:
+        return _recusa(_MFA_SESSAO_EXPIRADA, "mfa_challenge_expired")
+    user_id = reservado["user_id"]
+    # Teto por CONTA, no banco: o 5/min acima é por IP e em memória, e com 5
+    # tentativas por desafio quem troca de IP e de desafio chutaria ~25/min.
+    # Depois da reserva (a tentativa já conta no desafio), antes de conferir.
+    await _check_persistent_rate_limit("mfa-verify", f"user:{user_id}", 5, 60)
 
-    if not verified:
-        raise HTTPException(status_code=400, detail="Código inválido.")
+    verificado = await asyncio.to_thread(
+        mfa_consume_login_challenge_with_code,
+        body.challenge, (body.code or "").strip(), body.use_backup,
+    )
+    if verificado is None:
+        return _recusa(_MFA_SESSAO_EXPIRADA, "mfa_challenge_expired")
+    if not verificado:
+        if reservado["restantes"] == 0:
+            return _recusa("Muitas tentativas. Faça login novamente.", "mfa_challenge_expired")
+        return _recusa("Código inválido.", "mfa_code_invalid")
 
     user = await asyncio.to_thread(get_auth_user, user_id)
     if not user:

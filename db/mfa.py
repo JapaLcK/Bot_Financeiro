@@ -30,6 +30,7 @@ logger = logging.getLogger(__name__)
 _BACKUP_CODE_COUNT = 10
 _BACKUP_CODE_LENGTH = 10  # caracteres (alfanumerico legivel)
 _CHALLENGE_TTL_MINUTES = 5
+_CHALLENGE_MAX_ATTEMPTS = 5
 _TOTP_WINDOW = 1  # tolera +/- 30s de skew
 
 
@@ -264,57 +265,67 @@ def regenerate_backup_codes(user_id: int) -> list[str]:
     return backup_codes
 
 
-def verify_totp(user_id: int, code: str) -> bool:
-    """Valida codigo TOTP (sem consumir nada). True se OK."""
+def _verify_totp(cur, user_id: int, code: str) -> bool:
+    """Confere o TOTP no cursor dado; o commit e de quem chama."""
     code = (code or "").strip().replace(" ", "")
     if not code or not code.isdigit() or len(code) != 6:
         return False
+    cur.execute(
+        "select secret_encrypted, enabled from user_mfa where user_id = %s",
+        (user_id,),
+    )
+    row = cur.fetchone()
+    if not row or not row["enabled"]:
+        return False
+    secret = _decrypt_secret(row["secret_encrypted"])
+    ok = pyotp.TOTP(secret).verify(code, valid_window=_TOTP_WINDOW)
+    if ok:
+        cur.execute(
+            "update user_mfa set last_used_at = now() where user_id = %s",
+            (user_id,),
+        )
+    return ok
+
+
+def _consume_backup_code(cur, user_id: int, code: str) -> bool:
+    """Marca o backup como usado no cursor dado; o commit e de quem chama."""
+    code = (code or "").strip()
+    if not code:
+        return False
+    cur.execute(
+        """
+        select id, code_hash from user_mfa_backup_codes
+        where user_id = %s and used_at is null
+        for update
+        """,
+        (user_id,),
+    )
+    for row in cur.fetchall():
+        if _check_backup_code(code, row["code_hash"]):
+            cur.execute(
+                "update user_mfa_backup_codes set used_at = now() where id = %s",
+                (row["id"],),
+            )
+            return True
+    return False
+
+
+def verify_totp(user_id: int, code: str) -> bool:
+    """Valida codigo TOTP (sem consumir nada). True se OK."""
     with get_conn() as conn:
         with conn.cursor() as cur:
-            cur.execute(
-                "select secret_encrypted, enabled from user_mfa where user_id = %s",
-                (user_id,),
-            )
-            row = cur.fetchone()
-            if not row or not row["enabled"]:
-                return False
-            secret = _decrypt_secret(row["secret_encrypted"])
-            totp = pyotp.TOTP(secret)
-            ok = totp.verify(code, valid_window=_TOTP_WINDOW)
-            if ok:
-                cur.execute(
-                    "update user_mfa set last_used_at = now() where user_id = %s",
-                    (user_id,),
-                )
-                conn.commit()
-            return ok
+            ok = _verify_totp(cur, user_id, code)
+        conn.commit()
+    return ok
 
 
 def consume_backup_code(user_id: int, code: str) -> bool:
     """Consome um codigo de backup (single-use). True se valido e nao usado."""
-    code = (code or "").strip()
-    if not code:
-        return False
     with get_conn() as conn:
         with conn.cursor() as cur:
-            cur.execute(
-                """
-                select id, code_hash from user_mfa_backup_codes
-                where user_id = %s and used_at is null
-                for update
-                """,
-                (user_id,),
-            )
-            rows = cur.fetchall()
-            for row in rows:
-                if _check_backup_code(code, row["code_hash"]):
-                    cur.execute(
-                        "update user_mfa_backup_codes set used_at = now() where id = %s",
-                        (row["id"],),
-                    )
-                    conn.commit()
-                    return True
-    return False
+            ok = _consume_backup_code(cur, user_id, code)
+        conn.commit()
+    return ok
 
 
 def disable_mfa(user_id: int) -> None:
@@ -348,8 +359,13 @@ def create_login_challenge(user_id: int) -> str:
     return token
 
 
-def consume_login_challenge(token: str) -> int | None:
-    """Marca o challenge como usado e retorna user_id se valido. None caso contrario."""
+def reserve_login_challenge_attempt(token: str) -> dict | None:
+    """Gasta uma tentativa do challenge ANTES de conferir o codigo.
+
+    Retorna {'user_id', 'restantes'} ou None se o challenge nao existe, venceu,
+    ja foi usado ou esgotou as tentativas. Um UPDATE so: o WHERE e reavaliado
+    na linha travada, entao tentativas simultaneas nunca passam do teto.
+    """
     if not token:
         return None
     with get_conn() as conn:
@@ -357,17 +373,60 @@ def consume_login_challenge(token: str) -> int | None:
             cur.execute(
                 """
                 update mfa_login_challenges
-                set used_at = now()
+                set attempts = attempts + 1
                 where token = %s
                   and used_at is null
                   and expires_at > now()
-                returning user_id
+                  and attempts < %s
+                returning user_id, attempts
+                """,
+                (token, _CHALLENGE_MAX_ATTEMPTS),
+            )
+            row = cur.fetchone()
+        conn.commit()
+    if not row:
+        return None
+    return {
+        "user_id": int(row["user_id"]),
+        "restantes": _CHALLENGE_MAX_ATTEMPTS - int(row["attempts"]),
+    }
+
+
+def consume_login_challenge_with_code(token: str, code: str, use_backup: bool) -> bool | None:
+    """Confere o codigo e consome o challenge NUMA transacao, com ele travado.
+
+    None: challenge morto (vencido, inexistente ou ja consumido por outro
+    pedido). False: codigo errado, nada gasto. True: challenge consumido.
+    O backup so e gasto no mesmo commit que consome o challenge: separado, o
+    pedido que perdia a corrida para um TOTP certo gastava o backup e dava 400.
+    """
+    if not token:
+        return None
+    # Os `return` de dentro do `with` também fecham a transação: o `with` da
+    # conexão commita ao sair (ou faz rollback na exceção) e solta o `for update`.
+    with get_conn() as conn:
+        with conn.cursor() as cur:
+            cur.execute(
+                """
+                select user_id from mfa_login_challenges
+                where token = %s and used_at is null and expires_at > now()
+                for update
                 """,
                 (token,),
             )
             row = cur.fetchone()
+            if not row:
+                return None
+            user_id = int(row["user_id"])
+            conferir = _consume_backup_code if use_backup else _verify_totp
+            if not conferir(cur, user_id, code):
+                return False
+            cur.execute(
+                "update mfa_login_challenges set used_at = now() where token = %s",
+                (token,),
+            )
         conn.commit()
-    return int(row["user_id"]) if row else None
+    return True
 
 
 def cleanup_expired_challenges() -> int:

@@ -399,7 +399,8 @@ from .mfa import (
     consume_backup_code as mfa_consume_backup_code,
     disable_mfa,
     create_login_challenge as mfa_create_login_challenge,
-    consume_login_challenge as mfa_consume_login_challenge,
+    reserve_login_challenge_attempt as mfa_reserve_login_challenge_attempt,
+    consume_login_challenge_with_code as mfa_consume_login_challenge_with_code,
     cleanup_expired_challenges as mfa_cleanup_expired_challenges,
     should_show_mfa_onboarding,
     mark_mfa_onboarding_shown,
@@ -594,7 +595,8 @@ __all__ = [
     # mfa (totp)
     "get_mfa_status", "mfa_setup_secret", "mfa_verify_and_enable",
     "mfa_regenerate_backup_codes", "mfa_verify_totp", "mfa_consume_backup_code",
-    "disable_mfa", "mfa_create_login_challenge", "mfa_consume_login_challenge",
+    "disable_mfa", "mfa_create_login_challenge",
+    "mfa_reserve_login_challenge_attempt", "mfa_consume_login_challenge_with_code",
     "mfa_cleanup_expired_challenges",
     "should_show_mfa_onboarding", "mark_mfa_onboarding_shown",
     # ai chat
