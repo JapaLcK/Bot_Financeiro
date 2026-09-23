@@ -935,8 +935,21 @@ def handle_incoming(msg: IncomingMessage, *,
         # caiu num help genérico ("Posso te ajudar com X assim..."). Pra Pro,
         # tenta a IA — ela tem tools pra executar de fato ou dar resposta
         # contextual melhor. Pra Free mantém o help (não tem IA mesmo).
+        #
+        # Saudação nunca é help: o detector é por TEXTO, e tanto uma frase fixa
+        # de "olá" quanto a saudação gerada pela IA ("diga que pode ajudar com
+        # gastos…") podiam conter "Posso te ajudar com" — a saudação virava
+        # chamada ao agente, gastando cota e engolindo o aviso de pendência
+        # abandonada (tests/test_saudacao_nao_cai_na_ia.py). Mas "oi, como usar
+        # relatório" também é `greeting`, e ali o `route()` responde a AJUDA
+        # inferida antes do handler de saudação — a mesma pergunta decide aqui.
         # ------------------------------------------------------------------
-        if _looks_like_help_fallback(raw_response):
+        from core.handlers.help_handler import infer_help_from_text
+        resposta_de_saudacao = (
+            intent_result.intent == "greeting"
+            and infer_help_from_text(text, platform) is None
+        )
+        if not resposta_de_saudacao and _looks_like_help_fallback(raw_response):
             try:
                 from core.services.plan_service import ai_chat_allowed, ai_monthly_limit_for
                 if ai_chat_allowed(uid):
