@@ -82,10 +82,9 @@ def list_pluggy_investments(item_id: str, api_key: str | None = None, *,
         contrato[campo] = valor
         return valor
 
-    pagina = 1
-    while True:
-        if pagina > max_pages:
-            raise incompleta("teto_de_paginas")
+    def le_pagina(pagina: int) -> tuple[list[str], list, int]:
+        """Uma página lida e VALIDADA: (ids na ordem, results, totalPages). A
+        primeira passada e a releitura passam por aqui, com a mesma régua."""
         data = _pluggy_get("/investments", key, params={"itemId": item_id, "page": pagina})
         if not isinstance(data, dict):
             raise incompleta("resposta_nao_dict")
@@ -115,6 +114,7 @@ def list_pluggy_investments(item_id: str, api_key: str | None = None, *,
         if pagina > total_pages and results:
             raise incompleta("pagina_alem_do_total")
         fixa(data, "total")
+        ids: list[str] = []
         for item in results:
             # Posição sem `id` usável não pode sair daqui: ela cairia no `continue`
             # de `save_open_finance_investments` e a leitura seguiria valendo como
@@ -125,6 +125,17 @@ def list_pluggy_investments(item_id: str, api_key: str | None = None, *,
             pid = str(item.get("id") or "").strip()
             if not pid:
                 raise incompleta("item_invalido")
+            ids.append(pid)
+        return ids, results, total_pages
+
+    ids_por_pagina: list[list[str]] = []
+    pagina = 1
+    while True:
+        if pagina > max_pages:
+            raise incompleta("teto_de_paginas")
+        ids, results, total_pages = le_pagina(pagina)
+        ids_por_pagina.append(ids)
+        for pid in ids:
             # Id repetido é janela DESLIZANTE: a página nova devolveu o que a
             # anterior já tinha, e o que estava no fim da carteira nunca foi lido.
             # Vale com ou sem `total` — é sinal próprio, não só aritmética.
@@ -140,4 +151,16 @@ def list_pluggy_investments(item_id: str, api_key: str | None = None, *,
     # o total batia enquanto uma posição de verdade faltava.
     if "total" in contrato and contrato["total"] != len(vistos):
         raise incompleta("total_incoerente")
+    # A paginação é por deslocamento, sem snapshot estável: se `A` sai da página 1
+    # e `E` entra no fim ENTRE as requisições, a página 2 começa em `D` e o `C` nunca
+    # é lido — ids distintos, `total` batendo, e a reconciliação apaga o `C`. Reler
+    # as páginas 1..N−1 DEPOIS da primeira passada prova que nenhuma posição mudou
+    # de lugar antes do deslocamento de uma página já lida (a página N não tem
+    # ninguém depois dela para perder). Custo: N−1 chamadas a mais (o `max_pages`
+    # conta só a primeira passada), e zero com uma página só. Mudança entre as
+    # duas passadas vira falso positivo = leitura incompleta, que é o lado que não
+    # remove nada.
+    for n, ids in enumerate(ids_por_pagina[:-1], start=1):
+        if le_pagina(n)[0] != ids:
+            raise incompleta("janela_moveu")
     return out

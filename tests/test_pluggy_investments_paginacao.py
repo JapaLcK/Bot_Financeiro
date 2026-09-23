@@ -34,13 +34,16 @@ def test_le_todas_as_paginas(pluggy_responde):
         {"page": 1, "totalPages": 3, "total": 5, "results": [_pos("a"), _pos("b")]},
         {"page": 2, "totalPages": 3, "total": 5, "results": [_pos("c"), _pos("d")]},
         {"page": 3, "totalPages": 3, "total": 5, "results": [_pos("e")]},
+        # Releitura das páginas 1..N−1, estável: devolve o mesmo.
+        {"page": 1, "totalPages": 3, "total": 5, "results": [_pos("a"), _pos("b")]},
+        {"page": 2, "totalPages": 3, "total": 5, "results": [_pos("c"), _pos("d")]},
     ])
 
     out = list_pluggy_investments("item-1", "k")
 
     assert [i["id"] for i in out] == ["a", "b", "c", "d", "e"]
-    assert [c["page"] for c in pluggy_responde.chamadas] == [1, 2, 3]
-    assert len(pluggy_responde.chamadas) == 3, "nem uma requisição a mais"
+    assert [c["page"] for c in pluggy_responde.chamadas] == [1, 2, 3, 1, 2]
+    assert len(pluggy_responde.chamadas) == 5, "N páginas + N−1 relidas, nem uma a mais"
     assert all(c["itemId"] == "item-1" for c in pluggy_responde.chamadas)
     # `pageSize` fica no default do servidor: o irmão /v2/transactions devolve 400 com ele.
     assert all("pageSize" not in c for c in pluggy_responde.chamadas)
@@ -205,6 +208,7 @@ def test_metadata_em_string_de_digitos_e_aceita(pluggy_responde):
     pluggy_responde([
         {"page": "1", "totalPages": "2", "total": "3", "results": [_pos("a"), _pos("b")]},
         {"page": "2", "totalPages": "2", "total": "3", "results": [_pos("c")]},
+        {"page": "1", "totalPages": "2", "total": "3", "results": [_pos("a"), _pos("b")]},
     ])
 
     assert [i["id"] for i in list_pluggy_investments("item-1", "k")] == ["a", "b", "c"]
@@ -232,3 +236,27 @@ def test_total_pages_zero_com_posicoes_e_incoerente(pluggy_responde, payload):
 
     with pytest.raises(PluggyApiError, match="pagina_alem_do_total"):
         list_pluggy_investments("item-1", "k")
+
+
+def test_janela_que_move_sem_mudar_de_tamanho_e_incoerente(pluggy_responde):
+    """O cenário do Codex: `A` sai e `E` entra no fim entre as requisições. A
+    página 2 começa em `D`, o `C` nunca é lido, e ids distintos + `total` batendo
+    não denunciam nada — só a releitura da página 1 mostra que ela mudou."""
+    pluggy_responde([
+        {"page": 1, "totalPages": 2, "total": 4, "results": [_pos("a"), _pos("b")]},
+        {"page": 2, "totalPages": 2, "total": 4, "results": [_pos("d"), _pos("e")]},
+        {"page": 1, "totalPages": 2, "total": 4, "results": [_pos("b"), _pos("c")]},
+    ])
+
+    with pytest.raises(PluggyApiError, match="janela_moveu"):
+        list_pluggy_investments("item-1", "k")
+
+
+def test_uma_pagina_so_nao_rele(pluggy_responde):
+    """CONTROLE POSITIVO: a releitura custa zero no caso de todo usuário real."""
+    pluggy_responde([
+        {"page": 1, "totalPages": 1, "total": 2, "results": [_pos("a"), _pos("b")]},
+    ])
+
+    assert [i["id"] for i in list_pluggy_investments("item-1", "k")] == ["a", "b"]
+    assert len(pluggy_responde.chamadas) == 1
