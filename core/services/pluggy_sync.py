@@ -357,7 +357,8 @@ def _sync_pluggy_item_confirmado(provider_item_id: str, connection: dict, api_ke
         # ausência de sinal. Qualquer outro par é indício de leitura parcial e sem prova
         # não remove: `UPDATING`/`CREATED` (refresh que estourou a espera),
         # `PARTIAL_SUCCESS` (a tela já o trata como "Parcial", `pluggy_health.py`),
-        # `OUTDATED` e `MERGE_ERROR` (dados coletados, erro ao gravar).
+        # `OUTDATED` (execução com erro inesperado; par documentado `OUTDATED` + `ERROR`) e
+        # `MERGE_ERROR` (dados coletados, erro ao gravar).
         # Sem `.upper()`: `health` vem de `derive_item_health`, que já normaliza.
         #
         # AQUI e não lá embaixo, por dois motivos: dentro do lock (ela apaga linha
