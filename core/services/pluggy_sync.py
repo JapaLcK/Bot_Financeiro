@@ -351,6 +351,9 @@ def _sync_pluggy_item_confirmado(provider_item_id: str, connection: dict, api_ke
         #      coleta falha + resposta 200 vazia apagaria caixinha com dinheiro.
         # `statusDetail` ausente não bloqueia: aí `stale_products` vem vazio e a
         # reconciliação segue — não se inventa defeito na ausência de sinal.
+        # Isso vale para coleta TERMINADA: com o item ainda em `ITEM_UPDATING`
+        # (refresh manual que estourou a espera), sinal ausente não prova nada, e
+        # só `products.INVESTMENTS.updated is True` autoriza remover.
         #
         # AQUI e não lá embaixo, por dois motivos: dentro do lock (ela apaga linha
         # de `pockets` e de `open_finance_investments` do item que outro webhook
@@ -359,7 +362,9 @@ def _sync_pluggy_item_confirmado(provider_item_id: str, connection: dict, api_ke
         # `no_accounts`, senão corretora — conexão sem contas, carteira toda em
         # `/investments` — nunca reconciliaria.
         investimentos_confiaveis = (
-            investments_ok and "INVESTMENTS" not in (health.get("stale_products") or []))
+            investments_ok and "INVESTMENTS" not in (health.get("stale_products") or [])
+            and (str(health.get("item_status") or "").upper() not in ITEM_UPDATING
+                 or (health.get("products") or {}).get("INVESTMENTS", {}).get("updated") is True))
         # FAIL-SOFT, e pelo mesmo motivo que a LEITURA é fail-soft logo acima: esta
         # chamada subiu para ANTES de `save_open_finance_sync`, então uma exceção
         # aqui — sem este `try` — jogava fora as contas e transações já lidas (até

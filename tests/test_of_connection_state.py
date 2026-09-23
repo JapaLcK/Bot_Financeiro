@@ -2098,6 +2098,42 @@ def test_sync_com_investimentos_stale_nao_remove_nada(user_id, monkeypatch, relo
     assert {"Caixinha Viagem", "Caixinha Carro"} <= _nomes_de_caixinha(user_id)
 
 
+@pytest.mark.parametrize("item_2, removidas", [
+    # sem `statusDetail.investments` e o item ainda buscando: nada prova que a
+    # coleta de investimentos terminou → a omissão NÃO remove
+    ({**ITEM_SAUDAVEL, "status": "UPDATING"}, 0),
+    # POSITIVO: ainda buscando, mas com prova explícita → remove
+    ({**ITEM_SAUDAVEL, "status": "UPDATING",
+      "statusDetail": {**ITEM_SAUDAVEL["statusDetail"],
+                       "investments": {"isUpdated": True, "warnings": []}}}, 1),
+    # POSITIVO: coleta terminada sem `statusDetail` nenhum → remove (decisão do dono)
+    ({k: v for k, v in ITEM_SAUDAVEL.items() if k != "statusDetail"}, 1),
+], ids=["updating_sem_sinal", "updating_com_prova", "updated_sem_statusdetail"])
+def test_sync_item_em_updating_so_reconcilia_com_prova(user_id, monkeypatch, relogio_fixo,
+                                                      item_2, removidas):
+    """Refresh manual que estoura `OF_REFRESH_WAIT_SEC` sincroniza com o item em
+    UPDATING: `/investments` válido mas ainda parcial não pode apagar posição.
+
+    CONTROLE NEGATIVO (medido): tirar a condição de `ITEM_UPDATING` do gate deixa
+    `updating_sem_sinal` vermelho."""
+    from conftest import promote_to_pro
+    promote_to_pro(user_id)
+    conexao = _conexao(user_id)
+    _mock_pluggy(monkeypatch, item=ITEM_SAUDAVEL, contas=[])
+    _mock_investimentos(monkeypatch, [_CX_A, _CX_B])
+    assert ps.sync_pluggy_item("item-g1")["ok"] is True
+
+    _mock_pluggy(monkeypatch, item=item_2, contas=[])
+    _mock_investimentos(monkeypatch, [_CX_A])
+    res = ps.sync_pluggy_item("item-g1")
+
+    assert res["investments_ok"] is True
+    assert res["investments_removed"] == removidas
+    esperado = {"cx-a", "cx-b"} if removidas == 0 else {"cx-a"}
+    assert _espelho_investimentos(conexao["id"]) == esperado
+    assert ("Caixinha Carro" in _nomes_de_caixinha(user_id)) is (removidas == 0)
+
+
 def test_sync_religa_a_caixinha_quando_a_posicao_volta(user_id, monkeypatch, relogio_fixo):
     """O bloqueante da passada 1 do Tester, pelo `sync_pluggy_item` inteiro.
 
