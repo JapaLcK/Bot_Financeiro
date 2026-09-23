@@ -100,6 +100,7 @@ repetições.
     if (k === 'forecast' && r.ok) out.forecast_keys = {
       horizons: Object.keys(b.forecast.horizons || {}),
       trajectory: 'trajectory' in b.forecast, worst_day: 'worst_day' in b.forecast};
+    if (k === 'simulator' && r.ok) out.simulator_body = b.simulacao;  // evidência de G1–G4
   }
   console.log(JSON.stringify(out, null, 1));
   return out;
@@ -142,10 +143,10 @@ Em cada estado, desktop **e** mobile (390 px):
 
 | caso | onde | S1/S5 Essencial | S2/S4 Plus | S3 Pro |
 |---|---|---|---|---|
-| B1 | card de previsão no `/app` | escondido ou convite de upgrade, sem erro | só 30 dias | 30/60/90 |
-| B2 | Insights e padrões | análises básicas visíveis; avançado com convite, sem card vazio quebrado | visíveis | visíveis |
-| B3 | comparações (evolução, dia da semana) | convite | visíveis | visíveis |
-| B4 | Orçamento Doméstico | convite | acessível | acessível |
+| B1 | card de previsão no `/app` | card travado (`pro-locked`) com a mensagem de bloqueio; o botão "Simular" abre o modal de upgrade; sem erro | só 30 dias | 30/60/90 |
+| B2 | Insights e padrões (cards `data-plan-content="insights"` e card do Piggy) | **ocultos**, sem espaço vazio no lugar; totais, categorias e estabelecimentos visíveis | visíveis | visíveis |
+| B3 | comparações (cards `data-plan-content="financial_comparison"`) | **ocultos**; KPIs aparecem sem variação percentual | visíveis, KPIs com variação | visíveis |
+| B4 | Orçamento Doméstico (menu lateral) | item travado; clicar abre o modal de upgrade e não navega | acessível | acessível |
 | B5 | Ajustes → notificações → resumo semanal | ligar é recusado com mensagem; desligar funciona | liga e persiste após F5 | liga e persiste |
 | B6 | gastos fixos / contas a pagar | criar e listar funcionam | idem | idem |
 | B7 | console do navegador | nenhum erro não tratado | idem | idem |
@@ -173,7 +174,8 @@ real — a conta é de teste, então os valores podem ir).
 | C3 | `ligar resumo semanal` | recusa com convite, sem ligar | liga | liga |
 | C4 | `quanto vou ter de saldo daqui 30 dias?` | recusa com convite | responde | responde |
 | C5 | `e daqui 60 dias?` | recusa | explica o limite de 30 dias, sem inventar número | responde |
-| C6 | `gastei mais esse mês que no passado?` | responde só com totais básicos, sem comparação avançada | compara | compara |
+| C6 | `gastei mais esse mês que no passado?` | recusa com convite: a IA chama `compare_periods`, que devolve `pro_required` no Essencial | compara | compara |
+| C6b | `quanto gastei esse mês?` | responde com o total do mês (análise básica, liberada) | idem | idem |
 | C7 | `se eu comprar um celular de 3 mil em 12x com 600 de entrada e juros de 1,49% ao mês, como fica meu caixa?` | recusa | recusa com convite ao Pro | simula (conferir contra G2) |
 | C8 | `resumo da semana` (pedido manual) | responde | responde | responde |
 
@@ -186,7 +188,7 @@ matriz mantém em todos os planos.
 | C1–C8 | S2 | | | |
 | C1–C8 | S3 | | | |
 | C3, C5, C7 | S4 | | | |
-| C3, C4, C6 | S5 | | | |
+| C3, C4, C6, C6b | S5 | | | |
 
 ---
 
@@ -267,13 +269,27 @@ banco), para ver o aviso de saldo incompleto.
 
 | caso | passo | esperado |
 |---|---|---|
-| G1 | Sonda A em S3: `simulator` = 200 | resposta com `atual`, `cenarios` (2), `premissas`, `reserva_minima` = 500 |
+| G1 | Sonda A em S3: `simulator` = 200 e `simulator_body` preenchido | `simulator_body` com `atual`, `cenarios` (2), `premissas`, `reserva_minima` = 500. G2–G4 se conferem nesse mesmo objeto |
 | G2 | Conferir o cenário `12x` | financiado R$ 2.400 em 12 parcelas a 1,49% a.m. (Price) ≈ **R$ 219,89**/mês; custo total ≈ **R$ 3.238,7x** com a entrada (a última parcela absorve o arredondamento) |
 | G3 | Conferir o cenário `À vista` | saída única de R$ 3.000 hoje; pior saldo cai R$ 3.000 contra o `atual` |
 | G4 | Nenhum cenário marcado como "melhor" | a resposta compara liquidez e custo sem eleger vencedor |
 | G5 | Mesmo pedido pelo chat (C7) | números iguais aos de G2/G3 |
 | G6 | Sem conexão bancária (antes de F) | `aviso_saldo` presente na resposta do chat |
-| G7 | Payload inválido: `parcelas: 0` | 400 `invalid_simulation` com `errors`, sem 500 |
+| G7 | Payload inválido: `parcelas: 0` (pedido abaixo) | 400 `invalid_simulation` com `errors`, sem 500 |
+
+Pedido do G7, no console, logado em S3:
+
+```js
+(async () => {
+  const {user_id: uid} = await fetch('/auth/dashboard-profile', {credentials: 'same-origin'}).then(r => r.json());
+  const r = await fetch(`/simulator/${uid}`, {method: 'POST', credentials: 'same-origin',
+    headers: {'Content-Type': 'application/json'},
+    body: JSON.stringify({reserva_minima: 500, cenarios: [{nome: 'Inválido', preco: 3000, parcelas: 0}]})});
+  const out = {status: r.status, body: await r.json().catch(() => null)};
+  console.log(JSON.stringify(out, null, 1));
+  return out;
+})();
+```
 
 | caso | observado | resultado | PR |
 |---|---|---|---|
