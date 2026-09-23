@@ -17,8 +17,7 @@ metades da resposta.
     `OperationalError`) e as leituras das duas revalidações. Preservar a
     reivindicação nessas reconstruía o estado TERMINAL que o P0 fechou: zero
     conexões + rastro com dono, a 1ª guarda de `_adota_item_orfao` recusando a
-    retentativa e o `scripts/adotar_items_of_orfaos.py` sem enxergar a linha
-    (o filtro dele exclui rastro com dono).
+    retentativa.
 
 CONTROLES do grupo (medidos, não deduzidos):
   • negativo (a PRECISÃO) — voltar o latch para "todo `OperationalError` é

@@ -466,8 +466,7 @@ def _salva_item_sob_lock(user_id: int, remote: dict, item_id: str,
         # PIOR (medido pelo Tester, 30/30): duas entregas concorrentes gravam o
         # rastro antes de qualquer uma pegar o lock, cada uma enxerga o rastro
         # da OUTRA, as duas abortam, e sobra rastro com dono e ZERO conexão —
-        # estado terminal, do qual nem a retentativa (1ª guarda) nem o script
-        # one-shot (o filtro dele exclui rastro com dono) tiram o usuário.
+        # estado terminal, do qual a retentativa (1ª guarda) não tira o usuário.
         # Apagando a linha AQUI, com o lock na mão, quem entrar depois não vê
         # mais reivindicação nenhuma e adota: com N entregas simultâneas, o
         # último a pegar o lock ganha e os outros saem sem deixar rastro. São
@@ -602,9 +601,8 @@ async def _grava_reconexao(
     # —, as leituras das revalidações) e do próprio `get_conn` da escrita,
     # e nessas a escrita PROVADAMENTE não aconteceu. Preservar a reivindicação
     # ali reconstruía o estado terminal que o P0 fechou: zero conexões + rastro
-    # com dono, a 1ª guarda de `_adota_item_orfao` recusando toda retentativa e
-    # o `scripts/adotar_items_of_orfaos.py` sem enxergar a linha — o usuário sem
-    # banco e sem saída pelo produto.
+    # com dono, a 1ª guarda de `_adota_item_orfao` recusando toda retentativa —
+    # o usuário sem banco e sem saída pelo produto.
     escrita_tentada: list = []
     for tentativa in range(1, _RECONNECT_LOCK_ATTEMPTS + 1):
         folga_ms = int((fim - time.monotonic()) * 1000)
@@ -769,9 +767,9 @@ async def _grava_reconexao(
     # duas entregas concorrentes, a que pega o lock aborta e apaga a linha dela,
     # a que PERDE o lock deixava a dela para trás — 1 conexão saudável na `main`
     # virava 0 conexões + reivindicação abandonada, que é o estado terminal (a 1ª
-    # guarda de `_adota_item_orfao` recusa a retentativa e o script one-shot não
-    # lista rastro com dono). Com o desfazimento, ninguém escreveu e ninguém
-    # reivindicou: a próxima entrega do `item/created` adota.
+    # guarda de `_adota_item_orfao` recusa a retentativa). Com o desfazimento,
+    # ninguém escreveu e ninguém reivindicou: a próxima entrega do
+    # `item/created` adota.
     #
     # "Provadamente" é medido, não deduzido do tipo do erro: `escrita_tentada` só
     # tem item se a execução CHEGOU ao `save_pluggy_open_finance_item`, e a marca
@@ -787,7 +785,7 @@ async def _grava_reconexao(
     #
     # AQUI e não no `if not locked`: apagar entre as tentativas deixaria a
     # tentativa que enfim pega o lock gravar a conexão sem rastro com dono — item
-    # com banco conectado que o one-shot lista como órfão e a entrega seguinte
+    # com banco conectado e sem rastro com dono, que a entrega seguinte
     # readota. O desfazimento é do desfecho, não da tentativa.
     #
     # DEPOIS dos logs: o diagnóstico do 503 já está gravado se este delete
@@ -979,9 +977,7 @@ async def _adota_item_orfao(item_id: str, last_event: str | None = None) -> int 
     fica com `pluggy_item`/`webhook_adopt`, então a diferença está gravada — só
     que nenhuma porta automática a lê (quem lê é a recuperação por operador, e a
     regra de precedência está no docstring daquela função). Aqui NÃO há
-    recuperação automática: o script one-shot deixa de
-    listar o item (o filtro dele exclui rastro com dono, de propósito — a mesma
-    regra, `db/open_finance_state.item_registry_origins`) e a retentativa do
+    recuperação automática: a retentativa do
     `item/created` não readota (a 1ª guarda acima). É por isso que os TRÊS
     desfechos em que a escrita provadamente não aconteceu apagam o rastro que a
     adoção acabou de gravar, em vez de deixá-lo: os DOIS abortos sob o lock de
@@ -1010,11 +1006,17 @@ async def _adota_item_orfao(item_id: str, last_event: str | None = None) -> int 
     não é escolha: `open_finance_item_registry.user_id` é `on delete cascade`
     (`db/schema.py`), então o mesmo `delete from users` que faz a FK estourar já
     levou o rastro `webhook_adopt` junto — não sobra reivindicação nenhuma
-    (`test_conta_apagada_no_meio_da_adocao_nao_ressuscita`). Aí a saída é
-    OPERACIONAL:
-    `python -m scripts.adotar_items_of_orfaos --item ID --apply --delete` apaga o
-    item na Pluggy, o `avoidDuplicates` libera, e o usuário reconecta pelo
-    widget. Fechar isso sozinho exigiria o disconnect deixar rastro próprio
+    (`test_conta_apagada_no_meio_da_adocao_nao_ressuscita`). Na adoção que morreu
+    no meio, o `DELETE /open-finance/{uid}` não alcança o item na Pluggy: ele só
+    apaga lá os items que têm conexão aqui (`list_pluggy_item_ids`). Se reconectar
+    pelo widget recupera a conexão depende do `avoidDuplicates` da Pluggy neste
+    cenário — NÃO verificado. O one-shot
+    que apagava o item por id saiu do repositório porque o `--apply` dele não
+    tinha guarda contra item duplicado da mesma conta (dobraria saldo e
+    lançamentos); se precisar, ele volta do histórico — os DOIS arquivos, porque
+    ele importa o módulo da lista — com
+    `git checkout bda3ee7 -- scripts/adotar_items_of_orfaos.py scripts/adotar_items_lista.py`.
+    Fechar isso sozinho exigiria o disconnect deixar rastro próprio
     (`origin='disconnect'`) para separar "removido" de "adoção que falhou" —
     escrita em outro fluxo, outro PR.
 
@@ -1033,23 +1035,24 @@ async def _adota_item_orfao(item_id: str, last_event: str | None = None) -> int 
     comum uma entrega grava e fica com o rastro, e as outras abortam apagando o
     que gravaram; na intercalação em que a entrega que pega o
     lock é justamente a que aborta, ninguém grava e ninguém reivindica — o item
-    volta a ser órfão e a PRÓXIMA entrega (ou o script one-shot) adota. Sobra uma
+    volta a ser órfão e a PRÓXIMA entrega adota. Sobra uma
     janela de LEITURA, não de estado: enquanto a perdedora não chega ao lock, o
-    rastro dela existe e um leitor concorrente (o painel de saúde, o script
-    one-shot) vê uma linha a mais desse item. E sobra o desfecho DESCONHECIDO —
+    rastro dela existe e um leitor concorrente (o painel de saúde) vê uma linha
+    a mais desse item. E sobra o desfecho DESCONHECIDO —
     infra no meio da escrita mantém a reivindicação de propósito, e aí vale o
     parágrafo de cima. Três rodadas erraram este parágrafo — a 1ª chamou a janela
     de "só auditoria duplicada" (era ressurreição de banco desconectado, o P1 do
     Codex #313), a 2ª deu o rastro extra como permanente e não viu que ele
-    RECUSAVA toda retentativa e sumia do script, deixando o usuário com 0 bancos
+    RECUSAVA toda retentativa, deixando o usuário com 0 bancos
     e sem saída (o P0 do Tester, 30/30 rodadas), a 3ª consertou só o aborto sob o
     lock e criou esse MESMO estado terminal pela porta do 503. Também fica aberto:
     SÓ `item/created` adota (o gate é `event_name == "item/created"` no webhook, e
     `test_so_item_created_adota` prende), então item cujo `item/created` se perdeu
     ou nunca foi entregue não é adotado por evento NENHUM depois — nem pelo
-    `item/updated` —, e a única recuperação é o one-shot
-    (`scripts/adotar_items_of_orfaos.py`). Nenhum dos dois é regressão contra a
-    `main`.
+    `item/updated` —; se reconectar pelo widget o recupera NÃO foi verificado
+    (o one-shot saiu; ver "Na adoção que morreu no meio", acima). Nenhum dos
+    dois é regressão
+    contra a `main`.
 
     ponytail: custa uma chamada HTTP a mais dentro do webhook no ramo de item
     desconhecido — inclusive quando ele acaba recusado por já ter dono, que é o
@@ -1187,7 +1190,7 @@ async def _adota_item_orfao(item_id: str, last_event: str | None = None) -> int 
         # máquina de estados do `pluggy_health`, que é outro PR.
         #
         # ADOÇÃO RETROATIVA NÃO TEM ESSE EVENTO (defeito de produção, relato do
-        # dono): o item do `scripts/adotar_items_of_orfaos` foi abandonado dias
+        # dono): o item adotado pelo one-shot (já removido) foi abandonado dias
         # atrás e está congelado no status daquela sessão. Sem sync agendado e sem
         # evento nenhum a caminho, NADA lê a Pluggy por essa conexão — e o que
         # falta é o EXTRATO: zero conta, zero transação, carteira vazia.
