@@ -800,9 +800,9 @@ def init_db():
         """,
         # FK sem índice é defeito neste repositório (tests/test_privacy_deletion.py):
         # sem ele, apagar uma conexão varre `pockets` inteira. PARCIAL porque a
-        # lápide é exceção — quase toda linha tem `null` aqui —, e NÃO ÚNICO de
-        # propósito: `unique` falharia no startup se produção já tiver um par
-        # duplicado de antes do `_lock_user` do bind, e o app não subiria.
+        # lápide é exceção — quase toda linha tem `null` aqui —, e NÃO ÚNICO
+        # porque várias lápides apontam para a mesma conexão (metas que perderam
+        # vínculo a posições diferentes dela).
         """
         create index if not exists idx_pockets_of_tombstone_conn
           on pockets(of_tombstone_connection_id)
