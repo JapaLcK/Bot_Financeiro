@@ -33,7 +33,8 @@ Regras deste roteiro:
 | P3 | Anotar o `user_id`: `python -m scripts.whoami <email>` ou `GET /auth/dashboard-profile` logado | dono ou Claude |
 | P4 | Conferir no Railway, sem copiar valores para cá, que existem: `WA_BILL_REMINDER_TEMPLATE_NAME`, `WA_WEEKLY_TEMPLATE_NAME`, `WA_MONTHLY_TEMPLATE_NAME`, `RUN_BACKGROUND_TASKS` ≠ `0`, `PLANS_V2_ENABLED` ausente ou `1`. Registrar só "definida / ausente" | dono |
 | P4b | No WhatsApp Manager da Meta, conferir que os templates cujos **nomes** estão nessas três variáveis existem, estão **aprovados** e no idioma de `WA_BILL_REMINDER_TEMPLATE_LANGUAGE` / `WA_PROACTIVE_TEMPLATE_LANGUAGE` (padrão `pt_BR`). Registrar só "aprovado / pendente / rejeitado / não existe" por template | dono |
-| P5 | Ligar `PLUGGY_INCLUDE_SANDBOX=1` no Railway **só durante a seção F** e desligar ao fim (seção H) | dono |
+| P4c | No Railway, registrar se `OF_CONSOLIDATED_BALANCE_ENABLED` está ausente/ligado (padrão: saldo consolidado ligado para todos) ou em `0`. Se estiver em `0`, registrar se o e-mail ou o `user_id` da conta de teste está em `OF_CONSOLIDATED_BETA_EMAILS` / `OF_CONSOLIDATED_BETA_USER_IDS`, sem copiar a lista. Decide o esperado de F9 e G6 (`plan_service.consolidated_balance_enabled`) | dono |
+| P5 | Ligar `PLUGGY_INCLUDE_SANDBOX=1` no Railway **só durante a seção F** e desligar assim que F terminar. A variável é global e lida na subida do processo (`frontend/routes/open_finance.py:74`): enquanto ligada, **todos** os usuários veem os conectores sandbox no widget, e cada troca reinicia o serviço | dono |
 | P6 | Painel admin (`/admin`) aberto numa aba: é por ele que o plano muda nas seções A–C (botão de plano do usuário → `POST /admin/api/users/{id}/plan`) | dono |
 
 Se P4 mostrar template ausente, ou P4b mostrar template que não está aprovado,
@@ -263,7 +264,7 @@ credencial de ambiente próprio).
 | F6 | Confirmar o par | gasto conta uma vez só nos totais do mês |
 | F7 | Desfazer o par confirmado em F6 | o par **sai** da Conciliação (estado `imported`); a transação do banco volta a ser lançamento próprio e o gasto manual volta à Carteira, então os dois contam separados, como em F8 (`db/reconciliation.py::undo_reconciliation`) |
 | F8 | Rejeitar outro par | os dois lançamentos ficam separados e contam como dois |
-| F9 | Previsão (S3) antes e depois de F2 | saldo de partida da previsão muda junto com o saldo sincronizado |
+| F9 | Previsão (S3) antes e depois de F2 | **com saldo consolidado ligado para a conta (P4c):** saldo de partida da previsão muda junto com o saldo sincronizado. **Com o freio ligado e a conta fora da allowlist:** o saldo de partida continua só a Carteira, de propósito (`cashflow._starting_balance`), e o G6 mostra o aviso de bancos fora da soma |
 
 | caso | observado | resultado | PR |
 |---|---|---|---|
@@ -283,7 +284,7 @@ banco), para ver o aviso de saldo incompleto.
 | G3 | Conferir o cenário `À vista` | saída única de R$ 3.000 hoje; pior saldo cai R$ 3.000 contra o `atual` |
 | G4 | Nenhum cenário marcado como "melhor" | a resposta compara liquidez e custo sem eleger vencedor |
 | G5 | Mesmo pedido pelo chat (C7, que descreve só o 12x) | um cenário só, com os números de G2 |
-| G6 | Aviso de saldo no chat, antes e depois de F | sem banco conectado: **sem** `aviso_saldo` (o saldo manual é tratado como confiável). Com banco conectado e saldo consolidado desligado para a conta (`consolidated_balance_enabled` falso): aviso "Seus bancos conectados não estão somados…". Com saldo consolidado ligado: sem aviso. Registrar qual dos três ocorreu (`core/services/cashflow.py:203`, `tools/simulator.py::_aviso_saldo`) |
+| G6 | Aviso de saldo no chat, antes e depois de F | sem banco conectado: **sem** `aviso_saldo` (o saldo manual é tratado como confiável). Com banco conectado e saldo consolidado desligado para a conta (P4c; `consolidated_balance_enabled` falso): aviso "Seus bancos conectados não estão somados…". Com saldo consolidado ligado: sem aviso. Registrar qual dos três ocorreu (`core/services/cashflow.py:203`, `tools/simulator.py::_aviso_saldo`) |
 | G7 | Payload inválido: `parcelas: 0` (pedido abaixo) | 400 com `{"detail": {"error": "invalid_simulation", "errors": [...]}}`, sem 500 |
 
 Pedido do G7, no console, logado em S3:
@@ -306,15 +307,6 @@ Pedido do G7, no console, logado em S3:
 
 ---
 
-## H. Encerramento
-
-- [ ] `PLUGGY_INCLUDE_SANDBOX` desligado no Railway
-- [ ] conexão sandbox removida da conta de teste
-- [ ] conta de teste de volta a Essencial (ou excluída, se não for mais usada)
-- [ ] contas a pagar e gastos fixos de teste removidos
-
----
-
 ## I. Ciclo real da Stripe (último)
 
 Prova o que o admin não prova: checkout, webhook e troca agendada. Se o
@@ -328,6 +320,17 @@ reembolso, e o I4 cancela dentro do trial. Registrar qual dos dois aconteceu.
 | I2 | Pedir troca para Essencial em `/precos` (chama `/billing/change-plan`) | troca **agendada** para o fim do período pago; plano atual continua Plus |
 | I3 | Cancelar a troca agendada | agendamento some; Plus segue |
 | I4 | Mandar `cancelar assinatura` no WhatsApp (o app não tem botão; a resposta traz o link do portal da Stripe) e cancelar **no fim do período** | acesso Plus segue até o fim do período. Quando a assinatura termina, o webhook `customer.subscription.deleted` grava `plan = 'free'`: a sonda A dá **402 `subscription_required`** em tudo e o bot bloqueia. **Não** fica igual a S5. Cancelar "agora" ou reembolsar com cancelamento pelo painel da Stripe corta o acesso na hora. Depois do I4, voltar a conta ao Essencial pelo admin se ela ainda for usada |
+
+---
+
+## H. Encerramento (depois de I)
+
+Roda por último, depois do ciclo da Stripe: I1 precisa da mesma conta de teste.
+
+- [ ] `PLUGGY_INCLUDE_SANDBOX` confirmado desligado no Railway (desligado ao fim de F, P5)
+- [ ] conexão sandbox removida da conta de teste
+- [ ] conta de teste de volta a Essencial pelo admin (depois de I4 ela fica em `free`), ou excluída se não for mais usada
+- [ ] contas a pagar e gastos fixos de teste removidos
 
 ---
 
