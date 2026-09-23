@@ -32,12 +32,16 @@ Regras deste roteiro:
 | P2 | Vincular um número de WhatsApp de teste à conta (um número só serve para os três planos) | dono |
 | P3 | Anotar o `user_id`: `python -m scripts.whoami <email>` ou `GET /auth/dashboard-profile` logado | dono ou Claude |
 | P4 | Conferir no Railway, sem copiar valores para cá, que existem: `WA_BILL_REMINDER_TEMPLATE_NAME`, `WA_WEEKLY_TEMPLATE_NAME`, `WA_MONTHLY_TEMPLATE_NAME`, `RUN_BACKGROUND_TASKS` ≠ `0`, `PLANS_V2_ENABLED` ausente ou `1`. Registrar só "definida / ausente" | dono |
+| P4b | No WhatsApp Manager da Meta, conferir que os templates cujos **nomes** estão nessas três variáveis existem, estão **aprovados** e no idioma de `WA_BILL_REMINDER_TEMPLATE_LANGUAGE` / `WA_PROACTIVE_TEMPLATE_LANGUAGE` (padrão `pt_BR`). Registrar só "aprovado / pendente / rejeitado / não existe" por template | dono |
 | P5 | Ligar `PLUGGY_INCLUDE_SANDBOX=1` no Railway **só durante a seção F** e desligar ao fim (seção H) | dono |
 | P6 | Painel admin (`/admin`) aberto numa aba: é por ele que o plano muda nas seções A–C (botão de plano do usuário → `POST /admin/api/users/{id}/plan`) | dono |
 
-Se P4 mostrar template ausente, os casos D e E ficam **bloqueados**, não
-reprovados: o código fica dormente sem template (`adapters/whatsapp/wa_app.py`,
-`_bill_reminder_tick`) e isso é configuração, não defeito.
+Se P4 mostrar template ausente, ou P4b mostrar template que não está aprovado,
+os casos D e E ficam **bloqueados**, não reprovados. O código fica dormente sem
+template (`adapters/whatsapp/wa_app.py`, `_bill_reminder_tick`). E uma falha de
+`send_template` com template não aprovado só vai para o log, sem aviso na tela.
+Nos dois casos é configuração, não defeito. Resolver P4/P4b **antes** das datas
+marcadas de E: um template recusado só aparece depois de perder a segunda-feira.
 
 ---
 
@@ -147,9 +151,12 @@ Em cada estado, desktop **e** mobile (390 px):
 | B2 | Insights e padrões (cards `data-plan-content="insights"` e card do Piggy) | **ocultos**, sem espaço vazio no lugar; totais, categorias e estabelecimentos visíveis | visíveis | visíveis |
 | B3 | comparações (cards `data-plan-content="financial_comparison"`) | **ocultos**; KPIs aparecem sem variação percentual | visíveis, KPIs com variação | visíveis |
 | B4 | Orçamento Doméstico (menu lateral) | item travado; clicar abre o modal de upgrade e não navega | acessível | acessível |
-| B5 | Ajustes → notificações → resumo semanal | ligar é recusado com mensagem; desligar funciona | liga e persiste após F5 | liga e persiste |
+| B5 | Ajustes → notificações → resumo semanal | switch aparece **marcado** com "Pausado no seu plano…" (a preferência nasce ligada); desmarcar funciona e depois o switch fica travado com "disponível nos planos Plus e Pro". A recusa 403 só existe pela API | liga e persiste depois de recarregar a página | liga e persiste |
 | B6 | gastos fixos / contas a pagar | criar e listar funcionam | idem | idem |
 | B7 | console do navegador | nenhum erro não tratado | idem | idem |
+
+**B5 em S5: só observar, não desmarcar** antes do caso E3 (05/10). Desmarcar
+apaga a preferência antiga que o E3 precisa encontrar ligada.
 
 Na transição S3 → S4 e S4 → S5, recarregar a página **sem** sair da conta: o
 estado novo tem de aparecer sem logout (os gates vêm de `/auth/dashboard-profile`
@@ -171,10 +178,11 @@ real — a conta é de teste, então os valores podem ir).
 |---|---|---|---|---|
 | C1 | `gastei 47,90 no ifood` | registra com categoria (IA liberada no Essencial) | idem | idem |
 | C2 | `todo mês pago 39,90 de spotify dia 10` | cria gasto fixo (bloqueio legado removido no #518) | idem | idem |
-| C3 | `ligar resumo semanal` | recusa com convite, sem ligar | liga | liga |
+| C3 | `ligar resumo semanal` | responde "O resumo semanal automático está disponível nos planos Plus e Pro." e não muda a preferência | liga | liga |
 | C4 | `quanto vou ter de saldo daqui 30 dias?` | recusa com convite | responde | responde |
 | C5 | `e daqui 60 dias?` | recusa | explica o limite de 30 dias, sem inventar número | responde |
-| C6 | `gastei mais esse mês que no passado?` | recusa com convite: a IA chama `compare_periods`, que devolve `pro_required` no Essencial | compara | compara |
+| C6 | `compara esse mês com o mês passado` | recusa com convite: a frase vai para a IA, que chama `compare_periods`, e ele devolve `pro_required` no Essencial | compara | compara |
+| C6c | `gastei mais esse mês que no passado?` | **candidato a defeito, todos os planos:** o classificador determinístico lê "gastei" como lançamento (`launches.add`, confiança 0,95, conferido rodando `classify`) e pergunta o valor, deixando uma pendência gravada. Registrar a resposta observada | idem | idem |
 | C6b | `quanto gastei esse mês?` | responde com o total do mês (análise básica, liberada) | idem | idem |
 | C7 | `se eu comprar um celular de 3 mil em 12x com 600 de entrada e juros de 1,49% ao mês, como fica meu caixa?` | recusa | recusa com convite ao Pro | simula (conferir contra G2) |
 | C8 | `resumo da semana` (pedido manual) | responde | responde | responde |
@@ -188,7 +196,7 @@ matriz mantém em todos os planos.
 | C1–C8 | S2 | | | |
 | C1–C8 | S3 | | | |
 | C3, C5, C7 | S4 | | | |
-| C3, C4, C6, C6b | S5 | | | |
+| C3, C4, C6, C6b, C6c | S5 | | | |
 
 ---
 
@@ -203,7 +211,7 @@ dia depois, uma vez por dia por conta (`bill_instances.reminder_last_sent_on`).
 |---|---|---|---|---|
 | D1 | Em S1, criar conta a pagar `Teste PL01`, R$ 12,34, vencimento hoje + 3 dias, depois das 9 h | template chega no WhatsApp em até ~5 min com nome, valor e data | | |
 | D2 | Esperar 30 min | nenhum segundo envio no mesmo dia | | |
-| D3 | Tocar "Já paguei" | conta marcada paga no dashboard; nenhum lembrete no dia seguinte | | |
+| D3 | Tocar "Já paguei" | conta marcada paga no dashboard **e** uma despesa "Pagamento · Teste PL01" de R$ 12,34 lançada na Carteira (`mark_bill_paid`); nenhum lembrete dessa conta em D0 nem D+1 (a janela é só D-3, D0 e D+1) | | |
 | D4 | Nova conta vencendo hoje | lembrete do dia chega | | |
 
 ---
@@ -216,8 +224,8 @@ têm data marcada:
 
 | caso | data | estado da conta | preferência | esperado |
 |---|---|---|---|---|
-| E1 | seg 28/09/2026 | Plus (S2 ou S4) | semanal ligado | resumo chega uma vez, no horário escolhido |
-| E2 | qui 01/10/2026 | qualquer | mensal ligado | resumo mensal chega uma vez |
+| E1 | seg 28/09/2026 | Plus (S2 ou S4) | semanal ligado | resumo chega uma vez, no horário do report diário; se a conta passar a Plus depois desse horário, sai no ciclo seguinte (até 30 s), ainda uma vez só |
+| E2 | qui 01/10/2026 | qualquer plano com acesso ativo (o mensal não depende do plano) | mensal ligado | resumo mensal chega uma vez |
 | E3 | seg 05/10/2026 | Essencial (S5), **preferência ainda ligada** desde o Plus | ligado | **nenhum** envio — o downgrade barra o job mesmo com a preferência antiga |
 
 E3 é o caso que o #518 prometeu e só produção prova: a preferência continua
@@ -246,19 +254,20 @@ credencial de ambiente próprio).
 
 | caso | passo | esperado |
 |---|---|---|
-| F1 | Conectar um conector sandbox em Ajustes → Open Finance | conexão aparece; pílula âmbar "Ainda não sincronizou" até o primeiro sync, nunca "Tudo em dia!" antes dele (B8) |
+| F1 | Conectar um conector sandbox em Ajustes → Open Finance | conexão aparece; pílula âmbar **"Atualizando…"** com a linha de detalhe "Ainda não sincronizou" até o primeiro sync; nunca a pílula verde "Atualizado" antes dele (B8, `core/services/pluggy_health.py`) |
 | F2 | Aguardar o sync ou tocar "↻ Atualizar" | "Última sync" muda de horário; contas e saldo aparecem (B7/B9) |
-| F3 | Com o dashboard aberto numa segunda aba, disparar F2 | dashboard repinta sozinho, sem F5 (B10) |
-| F4 | Comparar saldo exibido com o do conector sandbox | mesmo valor |
-| F5 | Pelo WhatsApp, registrar um gasto com **mesmo valor** (±R$ 0,05) e **data** (±3 dias) de uma transação sandbox, com o nome do estabelecimento dela | vira par em Conciliação: automático se candidato único, data ±1 e nome parecido; senão "pendente" pedindo decisão (`pick_reconciliation_match`) |
+| F3 | Com o dashboard aberto numa segunda aba, esperar o sync disparado pelo **webhook** da Pluggy | dashboard repinta sozinho, cerca de 1,5 s depois do evento `open_finance_synced`, sem recarregar a página (B10). O botão "↻ Atualizar" **não** emite esse evento; sem webhook da sandbox não há repintura, e isso fica **bloqueado**, não reprovado |
+| F4 | Comparar o saldo **por conta** em Ajustes → Open Finance → "Contas sincronizadas" com o do conector sandbox | mesmo valor por conta. Não comparar com o saldo total do dashboard: ele soma a Carteira, que já tem os lançamentos de C1 e D3 |
+| F5 | Depois de F2, anotar **duas** saídas do sandbox (valor, data, descrição). Desconectar o banco (a desconexão desfaz o que foi importado). Pelo WhatsApp, lançar dois gastos com o mesmo valor (±R$ 0,05), data (±3 dias) e nome de cada saída. Reconectar e sincronizar | cada par aparece em Conciliação como **pendente**: o importador rebaixa o casamento automático para "perguntar" quando o lançamento é manual (`import_open_finance_launches`). Mesclagem automática não acontece com lançamento manual |
+| F5b | Com o banco já sincronizado, lançar pelo WhatsApp um gasto igual a outra saída sandbox **já importada** | **nenhum par é criado**: o casamento só roda quando o importador recebe transação nova, e `reconcile_manual_launch` não tem chamador em produção. Conferir os totais do mês: se o gasto contar duas vezes (manual + banco), registrar como **candidato a defeito** |
 | F6 | Confirmar o par | gasto conta uma vez só nos totais do mês |
-| F7 | Desfazer | volta a pendente/importado; totais corretos, sem sumir nem duplicar |
+| F7 | Desfazer o par confirmado em F6 | o par **sai** da Conciliação (estado `imported`); a transação do banco volta a ser lançamento próprio e o gasto manual volta à Carteira, então os dois contam separados, como em F8 (`db/reconciliation.py::undo_reconciliation`) |
 | F8 | Rejeitar outro par | os dois lançamentos ficam separados e contam como dois |
 | F9 | Previsão (S3) antes e depois de F2 | saldo de partida da previsão muda junto com o saldo sincronizado |
 
 | caso | observado | resultado | PR |
 |---|---|---|---|
-| F1–F9 | | | |
+| F1–F9, F5b | | | |
 
 ---
 
@@ -270,12 +279,12 @@ banco), para ver o aviso de saldo incompleto.
 | caso | passo | esperado |
 |---|---|---|
 | G1 | Sonda A em S3: `simulator` = 200 e `simulator_body` preenchido | `simulator_body` com `atual`, `cenarios` (2), `premissas`, `reserva_minima` = 500. G2–G4 se conferem nesse mesmo objeto |
-| G2 | Conferir o cenário `12x` | financiado R$ 2.400 em 12 parcelas a 1,49% a.m. (Price) ≈ **R$ 219,89**/mês; custo total ≈ **R$ 3.238,7x** com a entrada (a última parcela absorve o arredondamento) |
+| G2 | Conferir o cenário `12x` | financiado R$ 2.400 em 12 parcelas a 1,49% a.m. (Price): `contrato.parcela` = **R$ 219,90**, última parcela **R$ 219,84**, total financiado **R$ 2.638,74**, total pago com a entrada **R$ 3.238,74** (conferido executando `installments(2400, 0.0149, 12)`) |
 | G3 | Conferir o cenário `À vista` | saída única de R$ 3.000 hoje; pior saldo cai R$ 3.000 contra o `atual` |
 | G4 | Nenhum cenário marcado como "melhor" | a resposta compara liquidez e custo sem eleger vencedor |
-| G5 | Mesmo pedido pelo chat (C7) | números iguais aos de G2/G3 |
-| G6 | Sem conexão bancária (antes de F) | `aviso_saldo` presente na resposta do chat |
-| G7 | Payload inválido: `parcelas: 0` (pedido abaixo) | 400 `invalid_simulation` com `errors`, sem 500 |
+| G5 | Mesmo pedido pelo chat (C7, que descreve só o 12x) | um cenário só, com os números de G2 |
+| G6 | Aviso de saldo no chat, antes e depois de F | sem banco conectado: **sem** `aviso_saldo` (o saldo manual é tratado como confiável). Com banco conectado e saldo consolidado desligado para a conta (`consolidated_balance_enabled` falso): aviso "Seus bancos conectados não estão somados…". Com saldo consolidado ligado: sem aviso. Registrar qual dos três ocorreu (`core/services/cashflow.py:203`, `tools/simulator.py::_aviso_saldo`) |
+| G7 | Payload inválido: `parcelas: 0` (pedido abaixo) | 400 com `{"detail": {"error": "invalid_simulation", "errors": [...]}}`, sem 500 |
 
 Pedido do G7, no console, logado em S3:
 
@@ -308,15 +317,17 @@ Pedido do G7, no console, logado em S3:
 
 ## I. Ciclo real da Stripe (último)
 
-Cobrança real no cartão do dono, com reembolso pelo painel da Stripe depois.
-Prova o que o admin não prova: checkout, webhook e troca agendada.
+Prova o que o admin não prova: checkout, webhook e troca agendada. Se o
+telefone da conta ainda não usou o período grátis, o checkout abre **15 dias de
+trial sem cobrança** (`PRO_TRIAL_DAYS`). Nesse caso não há cobrança nem
+reembolso, e o I4 cancela dentro do trial. Registrar qual dos dois aconteceu.
 
 | caso | passo | esperado |
 |---|---|---|
-| I1 | Com a conta em Essencial pelo admin e **sem** assinatura, assinar Plus mensal pelo `/precos` | webhook grava `plan = 'pro'`; sonda A igual a S2 em até 1 min |
+| I1 | Com a conta em Essencial pelo admin e **sem** assinatura, assinar Plus mensal pelo `/precos` | webhook grava `plan = 'pro'`, com ou sem trial; sonda A igual a S2 em até 1 min |
 | I2 | Pedir troca para Essencial em `/precos` (chama `/billing/change-plan`) | troca **agendada** para o fim do período pago; plano atual continua Plus |
 | I3 | Cancelar a troca agendada | agendamento some; Plus segue |
-| I4 | Cancelar a assinatura e reembolsar pela Stripe | acesso segue até o fim do período; depois disso, sonda A igual a S5 |
+| I4 | Mandar `cancelar assinatura` no WhatsApp (o app não tem botão; a resposta traz o link do portal da Stripe) e cancelar **no fim do período** | acesso Plus segue até o fim do período. Quando a assinatura termina, o webhook `customer.subscription.deleted` grava `plan = 'free'`: a sonda A dá **402 `subscription_required`** em tudo e o bot bloqueia. **Não** fica igual a S5. Cancelar "agora" ou reembolsar com cancelamento pelo painel da Stripe corta o acesso na hora. Depois do I4, voltar a conta ao Essencial pelo admin se ela ainda for usada |
 
 ---
 
@@ -324,12 +335,14 @@ Prova o que o admin não prova: checkout, webhook e troca agendada.
 
 | caso | sintoma | causa | PR |
 |---|---|---|---|
-| | | | |
+| C6c | *candidato, visto só no código:* "gastei mais esse mês que no passado?" vira pedido de valor de lançamento | classificador determinístico casa "gastei" com `launches.add` antes da IA | — confirmar em produção |
+| F5b | *candidato, visto só no código:* gasto manual lançado depois da transação do banco não vira par | `reconcile_manual_launch` sem chamador em produção; resta medir se o total conta duas vezes | — confirmar em produção |
 
 ## O que este roteiro não cobre
 
 - App iOS/PWA: continua no roteiro A de `open_finance_validacao_manual.md`.
 - Estados de erro da Pluggy (B1–B6, B12–B15 daquele roteiro): exigem forçar
   falhas no provedor.
-- Aprovação dos templates pela Meta: pré-requisito verificado em P4, não testado.
+- Envio de template pela Meta além do que D e E observam: P4b confere a aprovação, mas não testa
+  outros idiomas nem outros templates.
 - Carga, concorrência e multiusuário: fora do escopo de uma conta de teste.
