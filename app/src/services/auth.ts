@@ -1,4 +1,4 @@
-import { ErroDeApi, _esquecerRotacoes, chamar } from "../api/client";
+import { ErroDeApi, TEMPO_LIMITE_AUTH_MS, _esquecerRotacoes, chamar, comLimite } from "../api/client";
 import {
   loginSchema,
   perfilSchema,
@@ -44,6 +44,13 @@ export type Entrada =
   | { fase: "mfa"; desafio: string; email: string };
 
 /**
+ * O `AbortController` da tentativa de entrada EM VOO agora, se houver.
+ * `abandonarEntrada` usa isto para não deixar a requisição pendurada até o
+ * tempo limite de 15s quando a pessoa desiste (Voltar) antes disso.
+ */
+let controladorEmVoo: AbortController | null = null;
+
+/**
  * Envolve uma tentativa de entrada INTEIRA — requisição, decisão e gravação.
  *
  * Cobre os dois desfechos, e isso é o ponto. O erro de uma tentativa superada
@@ -56,11 +63,19 @@ export type Entrada =
  * conferência espalhada por cada ponto de saída foi exatamente como o ramo do
  * desafio ficou de fora antes, nesta mesma revisão — com um lugar só, não há
  * saída para esquecer.
+ *
+ * `executar` recebe o `sinal` desta tentativa (não chama `comLimite()`
+ * sozinho): é o mesmo `AbortSignal` que `controladorEmVoo` referencia, para
+ * que `abandonarEntrada()` consiga abortar a requisição de fora.
  */
-async function tentativa<T>(executar: (vez: number) => Promise<T>): Promise<T> {
+async function tentativa<T>(
+  executar: (vez: number, sinal: AbortSignal) => Promise<T>,
+): Promise<T> {
   const minhaVez = ++ultimaTentativa;
+  const controlador = new AbortController();
+  controladorEmVoo = controlador;
   try {
-    const r = await executar(minhaVez);
+    const r = await executar(minhaVez, comLimite(TEMPO_LIMITE_AUTH_MS, controlador));
     if (minhaVez !== ultimaTentativa) throw new EntradaSuperada();
     return r;
   } catch (e) {
@@ -72,15 +87,34 @@ async function tentativa<T>(executar: (vez: number) => Promise<T>): Promise<T> {
     if (e instanceof FalhaNoCofre) throw e;
     if (minhaVez !== ultimaTentativa) throw new EntradaSuperada();
     throw e;
+  } finally {
+    if (controladorEmVoo === controlador) controladorEmVoo = null;
   }
 }
 
+/**
+ * Abandona a tentativa de entrada em voo (chamada por "Voltar" na tela de
+ * MFA — `features/auth/entrar.ts`): avança `ultimaTentativa`, então a
+ * resposta atrasada dela (se chegar) vira `EntradaSuperada` — sem gravar
+ * credencial (o `guardarCredenciaisSe` de `entrar`/`verificarMfa` já cobre
+ * essa corrida) — e aborta a requisição em voo, para ela não ficar pendurada
+ * até os 15s de `comLimite`.
+ *
+ * Sem tentativa em voo, é inofensivo: só avança o contador (o que o próximo
+ * login/verify já faria sozinho) e não há controlador para abortar.
+ */
+export function abandonarEntrada(): void {
+  ultimaTentativa += 1;
+  controladorEmVoo?.abort();
+}
+
 export async function entrar(email: string, senha: string): Promise<Entrada> {
-  return tentativa(async (minhaVez): Promise<Entrada> => {
+  return tentativa(async (minhaVez, sinal): Promise<Entrada> => {
     const r = await chamar("/auth/login", respostaLoginSchema, {
       metodo: "POST",
       corpo: { email, password: senha },
       semAuth: true,
+      sinal,
     });
     if ("mfa_required" in r) {
       return { fase: "mfa", desafio: r.mfa_challenge, email: r.email };
@@ -107,11 +141,12 @@ export async function verificarMfa(
   codigo: string,
   backup = false,
 ): Promise<Perfil> {
-  return tentativa(async (minhaVez) => {
+  return tentativa(async (minhaVez, sinal) => {
     const r = await chamar("/auth/mfa/verify-login", loginSchema, {
       metodo: "POST",
       corpo: { challenge: desafio, code: codigo, use_backup: backup },
       semAuth: true,
+      sinal,
     });
     const gravou = await guardarCredenciaisSe(
       () => minhaVez === ultimaTentativa,
@@ -124,7 +159,7 @@ export async function verificarMfa(
 }
 
 export async function perfil(): Promise<Perfil> {
-  return chamar("/auth/me", perfilSchema);
+  return chamar("/auth/me", perfilSchema, { sinal: comLimite() });
 }
 
 export async function temSessao(): Promise<boolean> {

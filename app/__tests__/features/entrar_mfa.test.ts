@@ -162,6 +162,51 @@ describe("verificar (M/V)", () => {
       expect(autenticar).toHaveBeenCalledTimes(1);
     });
   });
+
+  describe("Voltar durante uma verificação em voo (B2 — geração + abandono invalidam o resultado tardio)", () => {
+    it("CONTROLE POSITIVO — 429 chega DEPOIS do Voltar: a fase mfa não ressuscita, fica formulário", async () => {
+      const portao = segurar();
+      rotear({
+        "/auth/mfa/verify-login": async () => {
+          await portao.promessa;
+          return resposta(429, { detail: "Muitas tentativas." });
+        },
+      });
+      const { aplicados, aplicar } = gravador<EstadoEntrar>();
+
+      const emVoo = tocar(() => verificar(M.desafio, M.email, M.modo, "000000", jest.fn()), aplicar);
+      // Mesma chamada que o botão "Voltar" do CodigoMfa faz — por fora da fila.
+      aplicar(voltar());
+      portao.soltar();
+      await emVoo;
+
+      // Só o `voltar()` chegou a `aplicados`; o 429 tardio nunca voltou a mostrar M.
+      expect(aplicados).toEqual([{ fase: "formulario" }]);
+    });
+
+    // Não há "CONTROLE NEGATIVO" aqui chamando `verificar()` direto: essa
+    // versão foi removida porque não discriminava nada — `verificar()`
+    // sozinho nunca passa pela checagem de geração de `enfileirar` (ela vive
+    // em `entrar.ts`, não em `verificar()`), então aplicar o resultado à mão
+    // "sem checar geração" dá o mesmo resultado com ou sem a guarda real no
+    // código (CLAUDE.md §3: "se o resultado sai igual com e sem o conserto,
+    // o grupo não mede nada").
+    //
+    // A verificação de que a guarda importa é MANUAL, e precisa desligar as
+    // DUAS proteções ao mesmo tempo — hoje elas se sobrepõem para este
+    // cenário: `abandonarEntrada()` (chamada por `voltar()`) já faz o 429
+    // tardio virar `EntradaSuperada` nos services ANTES de `enfileirar`
+    // sequer olhar a geração, então desligar só uma das duas não basta para
+    // ver vermelho. Comentar (a) `geracao === minhaGeracao` em `enfileirar`
+    // E (b) a chamada a `abandonarEntrada()` dentro de `voltar()`, ao mesmo
+    // tempo, e rodar o teste ACIMA — aí sim ele fica vermelho (aplicados
+    // termina com `{...M, aviso: "Muitas tentativas."}` por cima do
+    // formulário). Restaurar os dois devolve o verde.
+    //
+    // Verificado manualmente nesta tarefa: comentando as DUAS, o teste
+    // acima falha (`aplicados.at(-1)` volta a ser `{...M, aviso: "Muitas
+    // tentativas."}`); restaurando as duas, volta a passar.
+  });
 });
 
 describe("alternarModo (M -> M)", () => {

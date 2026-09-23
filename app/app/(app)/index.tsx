@@ -5,11 +5,14 @@ import { RequisicaoSuperada, SessaoExpirada } from "@/api/client";
 import { textoDaFalha } from "@/features/auth/entrar";
 import { useSessao } from "@/features/auth/sessao";
 import { perfil } from "@/services/auth";
+import { Banner } from "@/ui/componentes/Banner";
 import { Button } from "@/ui/componentes/Button";
 import { Screen } from "@/ui/componentes/Screen";
 import { Texto } from "@/ui/componentes/Texto";
 import { useTema } from "@/ui/tema";
 import { espaco } from "@/ui/tokens";
+
+const MENSAGEM_ERRO_SAIR = "Não conseguimos sair. Tente de novo.";
 
 type Estado = { fase: "carregando" } | { fase: "pronto"; nome: string } | { fase: "erro"; mensagem: string };
 
@@ -22,6 +25,17 @@ export default function Inicio() {
   const { cores } = useTema();
   const sessao = useSessao();
   const [estado, setEstado] = useState<Estado>({ fase: "carregando" });
+  // Erro do Sair é um estado À PARTE de `estado`: uma falha ao sair não
+  // invalida o perfil já carregado, então não troca a tela para "erro" (isso
+  // perderia "Olá, nome" à toa) — só soma um aviso com "Tentar de novo" por
+  // cima do que já está na tela.
+  const [erroSaida, setErroSaida] = useState<string | null>(null);
+
+  const sair = useCallback(async () => {
+    setErroSaida(null);
+    const ok = await sessao.sair();
+    if (!ok) setErroSaida(MENSAGEM_ERRO_SAIR);
+  }, [sessao]);
 
   const carregar = useCallback(async () => {
     setEstado({ fase: "carregando" });
@@ -56,12 +70,28 @@ export default function Inicio() {
   return (
     <Screen rolar={false}>
       <View style={{ flex: 1, justifyContent: "center", gap: espaco.lg }}>
-        {estado.fase === "carregando" && <ActivityIndicator color={cores.brand} accessibilityLabel="Carregando" />}
+        {estado.fase === "carregando" && (
+          <>
+            <ActivityIndicator color={cores.brand} accessibilityLabel="Carregando" />
+            {/* Sem isto, um `/auth/refresh` pendurado (I-E — token vencido +
+                servidor que nunca responde nem falha) prendia a tela aqui
+                para sempre, sem NENHUMA saída: `sair()` já limpa o cofre
+                ANTES de falar com a rede, então não depende deste
+                `perfil()` terminar. */}
+            {erroSaida ? (
+              <Banner tom="danger" mensagem={erroSaida} acao={{ rotulo: "Tentar de novo", onPress: () => void sair() }} />
+            ) : null}
+            <Button rotulo="Sair" variante="secondary" onPress={() => void sair()} />
+          </>
+        )}
 
         {estado.fase === "pronto" && (
           <>
             <Texto variante="titulo">Olá, {estado.nome}</Texto>
-            <Button rotulo="Sair" variante="secondary" onPress={sessao.sair} />
+            {erroSaida ? (
+              <Banner tom="danger" mensagem={erroSaida} acao={{ rotulo: "Tentar de novo", onPress: () => void sair() }} />
+            ) : null}
+            <Button rotulo="Sair" variante="secondary" onPress={() => void sair()} />
           </>
         )}
 
@@ -71,7 +101,8 @@ export default function Inicio() {
               {estado.mensagem}
             </Texto>
             <Button rotulo="Tentar de novo" onPress={() => void carregar()} />
-            <Button rotulo="Sair" variante="secondary" onPress={sessao.sair} />
+            {erroSaida ? <Banner tom="danger" mensagem={erroSaida} /> : null}
+            <Button rotulo="Sair" variante="secondary" onPress={() => void sair()} />
           </>
         )}
       </View>

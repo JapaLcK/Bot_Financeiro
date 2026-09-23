@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useRef, useState } from "react";
 import { View } from "react-native";
 import { z } from "zod";
 
@@ -26,8 +26,15 @@ type Estado = { fase: "formulario" } | { fase: "enviando" } | { fase: "enviado" 
 export function EsqueciSenha() {
   const [email, setEmail] = useState("");
   const [estado, setEstado] = useState<Estado>({ fase: "formulario" });
+  // Guarda por `ref`, mesmo padrão do `saindoEmVoo` de `sessao.tsx`: dois
+  // toques no MESMO frame chamam `enviar()` duas vezes antes de o
+  // `setEstado({fase:"enviando"})` do primeiro chegar a re-renderizar (o
+  // backend limita 3/h — dois POSTs por um toque duplo custam 2 dessas 3).
+  const emVoo = useRef(false);
 
   const enviar = async () => {
+    if (emVoo.current) return;
+    emVoo.current = true;
     setEstado({ fase: "enviando" });
     try {
       await chamar("/auth/forgot-password", z.unknown(), {
@@ -36,7 +43,11 @@ export function EsqueciSenha() {
         semAuth: true,
       });
       setEstado({ fase: "enviado" });
+      // Sem reabrir a guarda aqui: a fase "enviado" substitui o formulário
+      // inteiro (nem o botão continua na árvore), não há um segundo toque a
+      // temer.
     } catch (e) {
+      emVoo.current = false;
       setEstado({ fase: "erro", mensagem: textoDaFalha(e) });
     }
   };

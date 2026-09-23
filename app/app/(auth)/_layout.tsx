@@ -14,6 +14,14 @@ import { OPCOES_SHEET } from "@/ui/componentes/Sheet";
  * padrão do grupo quando `/(auth)` vira o único ramo disponível — medido com
  * `renderRouter`.
  */
+/**
+ * Deep link frio para `/esqueci-senha` (sem sessão) montava a pilha só com a
+ * sheet — `canGoBack()` falso, sem `entrar` embaixo dela. `initialRouteName`
+ * manda o expo-router inserir `entrar` como base da pilha do grupo ANTES de
+ * empurrar a rota pedida, mesmo quando ela não é a primeira da URL.
+ */
+export const unstable_settings = { initialRouteName: "entrar" };
+
 export default function LayoutAuth() {
   return (
     <Stack screenOptions={{ headerShown: false }}>

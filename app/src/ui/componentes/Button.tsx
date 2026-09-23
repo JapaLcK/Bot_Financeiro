@@ -19,6 +19,8 @@ interface Props {
   onPress: () => void;
   /** Ícone à esquerda do rótulo (logo social do login, por exemplo). Sem ele, o botão é IDÊNTICO ao de antes. */
   icone?: NomeIcone;
+  /** Anunciado pelo leitor de tela depois do rótulo — "Em breve" nos botões sociais desativados, por exemplo. Sem ele, o botão é IDÊNTICO ao de antes. */
+  accessibilityHint?: string;
 }
 
 const ALTURA: Record<Tamanho, number> = { M: 44, L: 52 };
@@ -44,6 +46,7 @@ export function Button({
   desativado = false,
   onPress,
   icone,
+  accessibilityHint,
 }: Props) {
   const { cores } = useTema();
   const pressao = usePressao();
@@ -58,6 +61,7 @@ export function Button({
       disabled={bloqueado}
       accessibilityRole="button"
       accessibilityState={{ disabled: desativado, busy: carregando }}
+      accessibilityHint={accessibilityHint}
     >
       <Animated.View
         style={[

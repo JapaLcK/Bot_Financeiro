@@ -3,8 +3,9 @@ import { useState } from "react";
 import { KeyboardAvoidingView, Platform, View } from "react-native";
 
 import { CodigoMfa } from "@/features/auth/CodigoMfa";
-import { enviar, tocar, type EstadoEntrar } from "@/features/auth/entrar";
+import { MENSAGEM_ERRO_COFRE, enviar, tentarDeNovo, tocar, type EstadoEntrar } from "@/features/auth/entrar";
 import { useSessao } from "@/features/auth/sessao";
+import { Banner } from "@/ui/componentes/Banner";
 import { Button } from "@/ui/componentes/Button";
 import { Card } from "@/ui/componentes/Card";
 import { Input } from "@/ui/componentes/Input";
@@ -35,7 +36,13 @@ export default function Entrar() {
         <View style={{ gap: espaco.xl, paddingTop: espaco.xxl }}>
           <Texto variante="titulo">Entrar</Texto>
 
-          {estado.fase === "mfa" || estado.fase === "verificando" ? (
+          {estado.fase === "erro-cofre" ? (
+            <Banner
+              tom="danger"
+              mensagem={MENSAGEM_ERRO_COFRE}
+              acao={{ rotulo: "Tentar de novo", onPress: () => setEstado(tentarDeNovo()) }}
+            />
+          ) : estado.fase === "mfa" || estado.fase === "verificando" ? (
             <CodigoMfa estado={estado} autenticar={sessao.autenticar} aplicar={setEstado} />
           ) : (
             <>
@@ -80,6 +87,12 @@ export default function Entrar() {
                       // formulário nunca a mostra preenchida.
                       const s = senha;
                       setSenha("");
+                      // Fase "enviando" aplicada AQUI, antes de `tocar()`: sem
+                      // isto o busy só aparecia quando a resposta já tivesse
+                      // chegado — tarde demais para desativar campo/botões
+                      // durante a espera de verdade (B1). A guarda de UMA
+                      // requisição continua sendo o `pendentes` de `tocar()`.
+                      setEstado({ fase: "enviando" });
                       void tocar(() => enviar(email, s, sessao.autenticar), setEstado);
                     }}
                   />
@@ -95,8 +108,22 @@ export default function Entrar() {
               </View>
 
               <View style={{ gap: espaco.sm }}>
-                <Button rotulo="Continuar com Google" variante="secondary" icone="GoogleLogo" desativado onPress={() => {}} />
-                <Button rotulo="Continuar com Apple" variante="secondary" icone="AppleLogo" desativado onPress={() => {}} />
+                <Button
+                  rotulo="Continuar com Google"
+                  variante="secondary"
+                  icone="GoogleLogo"
+                  desativado
+                  accessibilityHint="Em breve"
+                  onPress={() => {}}
+                />
+                <Button
+                  rotulo="Continuar com Apple"
+                  variante="secondary"
+                  icone="AppleLogo"
+                  desativado
+                  accessibilityHint="Em breve"
+                  onPress={() => {}}
+                />
                 <Texto variante="legenda" tom="inkMuted" style={{ textAlign: "center" }}>
                   Em breve
                 </Texto>

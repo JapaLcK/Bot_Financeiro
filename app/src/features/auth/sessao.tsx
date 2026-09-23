@@ -21,8 +21,16 @@ interface Sessao {
   autenticar: () => void;
   /** `/auth/me` (ou qualquer chamada autenticada) tomou `SessaoExpirada`. */
   expirou: (aviso: string) => void;
-  /** Toque duplo é ignorado (guarda por `ref`, único provider da árvore). */
-  sair: () => void;
+  /**
+   * Toque duplo é ignorado (guarda por `ref`, único provider da árvore).
+   *
+   * Resolve `true` quando a saída terminou (ou o toque foi ignorado porque já
+   * havia uma saída em andamento) e `false` quando a chamada ao servidor OU a
+   * limpeza local falharam — sem isto, a falha era engolida em silêncio: o
+   * provider continuava `autenticado` (correto, o invariante de pé) mas quem
+   * tocou "Sair" não via nada, nem um erro nem uma segunda chance óbvia.
+   */
+  sair: () => Promise<boolean>;
   /** Só vale em `erro`: refaz a checagem de sessão do início. */
   tentarDeNovo: () => void;
 }
@@ -71,16 +79,21 @@ export function SessaoProvider({ children }: { children: ReactNode }) {
       autenticar: () => setEstado({ fase: "autenticado" }),
       expirou: (aviso) => setEstado({ fase: "anonimo", aviso }),
       sair: () => {
-        if (saindoEmVoo.current) return;
+        if (saindoEmVoo.current) return Promise.resolve(true);
         saindoEmVoo.current = true;
-        void sairNoServidor()
-          .then(() => setEstado({ fase: "anonimo" }))
+        return sairNoServidor()
+          .then(() => {
+            setEstado({ fase: "anonimo" });
+            return true;
+          })
           .catch(() => {
             // Não afirma logout: a credencial pode ter ficado no aparelho
             // (`sair()` de services/auth.ts pode rejeitar por falha do
             // cofre). Fica autenticado — a tela pode tentar Sair de novo, e
             // o invariante (cofre tem credencial ⇔ provider autenticado)
-            // continua de pé.
+            // continua de pé. O `false` é o que deixa a TELA mostrar isso,
+            // em vez de o toque em "Sair" parecer não ter feito nada.
+            return false;
           })
           .finally(() => {
             saindoEmVoo.current = false;

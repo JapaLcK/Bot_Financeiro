@@ -8,7 +8,7 @@ import { act, fireEvent } from "@testing-library/react-native";
 import { EsqueciSenha } from "@/features/auth/EsqueciSenha";
 
 import { renderInterativo } from "../ui/_render";
-import { chamadas, prepararCaso, resposta, rotear } from "./auth_apoio";
+import { chamadas, prepararCaso, resposta, rotear, segurar } from "./auth_apoio";
 
 const respirar = () => new Promise((r) => setTimeout(r, 0));
 
@@ -49,5 +49,60 @@ describe("EsqueciSenha", () => {
   it("botão Enviar desativado com e-mail vazio", () => {
     const { getByRole } = renderInterativo(<EsqueciSenha />);
     expect(getByRole("button").props.accessibilityState).toMatchObject({ disabled: true });
+  });
+
+  it("I-C — CONTROLE POSITIVO: depois de um 5xx, um NOVO toque em Enviar manda outro POST (a guarda reabre no erro)", async () => {
+    let chamadasForgot = 0;
+    rotear({
+      "/auth/forgot-password": () => {
+        chamadasForgot += 1;
+        return chamadasForgot === 1
+          ? resposta(500, { detail: "boom" })
+          : resposta(200, {});
+      },
+    });
+    const { getByLabelText, getByText } = renderInterativo(<EsqueciSenha />);
+    fireEvent.changeText(getByLabelText("E-mail"), "ana@x.com");
+
+    await act(async () => {
+      fireEvent.press(getByText("Enviar"));
+      await respirar();
+    });
+    expect(getByText("Tivemos um problema aqui. Tente de novo em instantes.")).toBeTruthy();
+
+    await act(async () => {
+      fireEvent.press(getByText("Enviar"));
+      await respirar();
+    });
+
+    expect(chamadasForgot).toBe(2);
+    expect(getByText("Se o e-mail estiver cadastrado, enviamos um link para redefinir a senha.")).toBeTruthy();
+  });
+
+  it("M2 — CONTROLE POSITIVO: toque duplo no MESMO instante (antes do re-render) manda só UM POST", async () => {
+    const portao = segurar();
+    let chamadasForgot = 0;
+    rotear({
+      "/auth/forgot-password": async () => {
+        chamadasForgot += 1;
+        await portao.promessa;
+        return resposta(200, {});
+      },
+    });
+    const { getByLabelText, getByText } = renderInterativo(<EsqueciSenha />);
+    fireEvent.changeText(getByLabelText("E-mail"), "ana@x.com");
+
+    // As DUAS chamadas de `onPress` acontecem no MESMO `act()`, antes de
+    // qualquer re-render — é o toque duplo no mesmo frame que o backend
+    // (3/h) não perdoa.
+    await act(async () => {
+      fireEvent.press(getByText("Enviar"));
+      fireEvent.press(getByText("Enviar"));
+      portao.soltar();
+      await respirar();
+    });
+
+    expect(chamadasForgot).toBe(1);
+    expect(chamadas().filter((c) => c.caminho === "/auth/forgot-password")).toHaveLength(1);
   });
 });

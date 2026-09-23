@@ -36,7 +36,14 @@ export function CodigoMfa({ estado, autenticar, aplicar }: Props) {
     setCodigo("");
   }, [modo]);
 
+  // Aplica a fase "verificando" ANTES de chamar `tocar()`, não depois: sem
+  // isso, o busy só aparecia quando a promise da requisição já tivesse
+  // resolvido — tarde demais para desativar campo e botões durante a espera
+  // de verdade (B1). A guarda de UMA requisição continua sendo o `emVoo` de
+  // `tocar()`/`entrar.ts`; aplicar de novo aqui num toque redundante é
+  // inofensivo (mesmo valor, já é o estado corrente).
   const enviar = (valor: string) => {
+    aplicar({ fase: "verificando", desafio, email, modo });
     void tocar(() => verificar(desafio, email, modo, valor, autenticar), aplicar);
   };
 
@@ -46,11 +53,33 @@ export function CodigoMfa({ estado, autenticar, aplicar }: Props) {
         rotulo={modo === "totp" ? "Código de 6 dígitos" : "Código de backup"}
         icone="Lock"
         value={codigo}
+        // Backup: SEM maxLength nativo, no formato "XXXXX-XXXXX" de
+        // `db/mfa.py` — um teto de 11 caracteres cortava um colado com um
+        // espaço a mais na ponta (" ABCDE-FGHIJ") ou em volta do hífen
+        // ("ABCDE - FGHIJ") ANTES de qualquer normalização, perdendo o
+        // último caractere e queimando o desafio com um código mutilado. O
+        // servidor já normaliza hífen/espaço (em qualquer posição) e caixa —
+        // não há necessidade de um teto aqui.
         onChangeText={(v) => {
-          setCodigo(v);
-          // Só o modo TOTP auto-envia: código de backup não tem tamanho fixo.
-          if (modo === "totp" && !verificando && v.replace(/\s+/g, "").length === TAMANHO_TOTP) {
-            enviar(v);
+          // TOTP: mantém só dígitos ASCII (0-9) — descarta espaço, hífen,
+          // letra e qualquer separador, inclusive dígito arábico-índico
+          // ("١٢٣٤٥٦"): o servidor até aceita a FORMA (Python `isdigit()`
+          // conta esses como dígito), mas a comparação do TOTP é contra uma
+          // string só de ASCII e nunca bate — deixar passar só queimaria o
+          // desafio à toa. Corta em 6 mesmo colando mais, para não mandar o
+          // 7º dígito de um autofill ao servidor (400 QUEIMA o desafio —
+          // db/mfa.py:351 consome antes de conferir).
+          const valor = modo === "totp" ? v.replace(/\D+/g, "").slice(0, TAMANHO_TOTP) : v;
+          setCodigo(valor);
+          // Auto-envia só quando a ENTRADA EM SI já eram 6 dígitos puros —
+          // não o valor FILTRADO. Um colado com lixo ("123-456", "Código:
+          // 123456", "G-123456", "123 456") pode virar 6 dígitos DEPOIS do
+          // filtro por coincidência, e auto-enviar isso queimaria o desafio
+          // com um código que a pessoa nunca digitou por completo. O
+          // autofill de SMS entrega uma string só de dígitos — é esse caso
+          // que continua disparando sozinho.
+          if (modo === "totp" && !verificando && /^[0-9]+$/.test(v) && valor.length === TAMANHO_TOTP) {
+            enviar(valor);
           }
         }}
         keyboardType={modo === "totp" ? "number-pad" : "default"}

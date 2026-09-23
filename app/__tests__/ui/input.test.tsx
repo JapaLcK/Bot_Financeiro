@@ -1,5 +1,6 @@
 import { fireEvent, render } from "@testing-library/react-native";
 import * as Haptics from "expo-haptics";
+import { AccessibilityInfo } from "react-native";
 
 import { Icone } from "@/ui/componentes/Icone";
 import { Input } from "@/ui/componentes/Input";
@@ -68,6 +69,31 @@ describe("Input", () => {
       </TemaProvider>,
     );
     expect(Haptics.notificationAsync).toHaveBeenCalledTimes(1);
+  });
+
+  it("M3 — erro anuncia para o leitor de tela (AccessibilityInfo), não só o accessibilityLabel", () => {
+    const resultado = render(
+      <TemaProvider esquema="light">
+        <Input rotulo="Senha" />
+      </TemaProvider>,
+    );
+    expect(AccessibilityInfo.announceForAccessibility).not.toHaveBeenCalled();
+    resultado.rerender(
+      <TemaProvider esquema="light">
+        <Input rotulo="Senha" erro="E-mail ou senha incorretos." />
+      </TemaProvider>,
+    );
+    expect(AccessibilityInfo.announceForAccessibility).toHaveBeenCalledWith("E-mail ou senha incorretos.");
+
+    // Uma SEGUNDA falha (texto diferente) também precisa ser ouvida — não só
+    // a transição de "sem erro" para "com erro".
+    resultado.rerender(
+      <TemaProvider esquema="light">
+        <Input rotulo="Senha" erro="Muitas tentativas." />
+      </TemaProvider>,
+    );
+    expect(AccessibilityInfo.announceForAccessibility).toHaveBeenCalledWith("Muitas tentativas.");
+    expect(AccessibilityInfo.announceForAccessibility).toHaveBeenCalledTimes(2);
   });
 
   it("aceita TextInputProps (ex.: onChangeText) e chama de verdade", () => {

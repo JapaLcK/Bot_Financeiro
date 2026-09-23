@@ -17,7 +17,7 @@ import { TemaProvider } from "@/ui/tema";
 
 import { METRICAS_DE_TESTE } from "../ui/_render";
 import Inicio from "../../app/(app)/index";
-import { falharLeitura, gravador, prepararCaso, resposta, rotear, S, segurar } from "./auth_apoio";
+import { falharApagar, falharLeitura, gravador, prepararCaso, resposta, rotear, S, segurar } from "./auth_apoio";
 
 function Harness({ onEstado }: { onEstado: (e: EstadoSessao) => void }) {
   const sessao = useSessao();
@@ -125,6 +125,62 @@ describe("SessaoProvider — ações", () => {
     await act(respirar);
 
     expect(chamadasLogout).toBe(1);
+  });
+});
+
+describe("(app)/index.tsx — Sair que falha no cofre expõe erro, sem deslogar em silêncio", () => {
+  afterEach(() => falharApagar(false));
+
+  it("CONTROLE POSITIVO — SecureStore recusa apagar: fica autenticado, mostra erro com 'Tentar de novo', e um novo Sair (sem falha) desloga", async () => {
+    await guardarCredenciais(S);
+    rotear();
+    const { getByText } = montar(true);
+    await act(respirar);
+    expect(getByText("Olá, S")).toBeTruthy();
+
+    falharApagar(true);
+    await act(async () => {
+      fireEvent.press(getByText("Sair"));
+      await respirar();
+    });
+
+    // Nada de silêncio: erro visível, e o invariante (cofre com credencial ⇔
+    // autenticado) continua de pé — a tela não afirma um logout que não
+    // aconteceu.
+    expect(getByText("Não conseguimos sair. Tente de novo.")).toBeTruthy();
+    expect(getByText("Olá, S")).toBeTruthy();
+    await expect(lerCredenciais()).resolves.toEqual(S);
+
+    falharApagar(false);
+    await act(async () => {
+      fireEvent.press(getByText("Tentar de novo"));
+      await respirar();
+    });
+    await expect(lerCredenciais()).resolves.toBeNull();
+  });
+});
+
+describe("(app)/index.tsx — Sair disponível durante o carregamento (I-E)", () => {
+  it("access vencido + /auth/refresh pendurado (nunca responde): 'Carregando' fica para sempre, mas Sair aparece e desloga", async () => {
+    await guardarCredenciais({ access: "vencido", refresh: "rt_x" });
+    rotear({
+      "/auth/me": () => resposta(401, { detail: "expirado" }),
+      // Nunca resolve nem rejeita — o mesmo cenário do achado (refresh
+      // pendurado, sem timeout: `renovar()` não usa `comLimite`/sinal).
+      "/auth/refresh": () => new Promise<Response>(() => {}),
+    });
+    const { getByLabelText, getByText, aplicados } = montar(true);
+    await act(respirar);
+    await act(respirar);
+
+    // Ainda "carregando" — é o próprio cenário do achado.
+    expect(getByLabelText("Carregando")).toBeTruthy();
+
+    fireEvent.press(getByText("Sair"));
+    await act(respirar);
+
+    expect(aplicados.at(-1)).toEqual({ fase: "anonimo" });
+    await expect(lerCredenciais()).resolves.toBeNull();
   });
 });
 

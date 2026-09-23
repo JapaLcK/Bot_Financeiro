@@ -1,5 +1,5 @@
 import { ContratoInvalido, ErroDeApi } from "@/api/client";
-import { entrar as entrarNoServidor, verificarMfa, EntradaSuperada } from "@/services/auth";
+import { abandonarEntrada, entrar as entrarNoServidor, verificarMfa, EntradaSuperada } from "@/services/auth";
 import { FalhaNoCofre } from "@/storage/secure";
 
 /**
@@ -21,6 +21,9 @@ export type EstadoVerificando = Extract<EstadoEntrar, { fase: "verificando" }>;
 
 const GENERICO = "Algo deu errado. Tente de novo.";
 
+/** Mensagem da fase X (cofre do aparelho recusou ler ou gravar). */
+export const MENSAGEM_ERRO_COFRE = "Não conseguimos abrir sua sessão neste aparelho. Tente de novo.";
+
 /** Texto para a pessoa: nunca `TypeError`, rota ou JSON cru. Movido de `inicio.ts` (CLAUDE.md §0.1). */
 export function textoDaFalha(e: unknown): string {
   // Antes do `ErroDeApi`, de quem é subclasse: o detalhe dele cita a rota.
@@ -39,19 +42,55 @@ export function textoDaFalha(e: unknown): string {
  * `acao` pode devolver `null` (EntradaSuperada): "nada" na tabela de
  * estados×eventos — outra tentativa mais nova já decidiu o resultado, e
  * reaplicar aqui pisaria em cima dela.
+ *
+ * `emVoo` é a geração da ação em voo, ou `null` com a fila ociosa. Substitui
+ * um contador (`pendentes`): como só cabe UMA ação por vez — a guarda de
+ * `tocar()` logo abaixo impede a segunda —, a geração sozinha já identifica
+ * qual ação está rodando, e é o que permite `abandonar()` (chamado por
+ * `voltar()`) liberar A FILA JÁ, sem esperar essa ação terminar: sem isto,
+ * "Voltar" só trocava a fase local, e a verificação abandonada continuava
+ * contando como "em voo" até a própria requisição responder — um toque
+ * legítimo logo depois (outra conta) era engolido em silêncio, com a tela
+ * presa em "enviando"/"verificando" sem nenhuma requisição no ar.
  */
-let pendentes = 0;
+let emVoo: number | null = null;
 let fila: Promise<void> = Promise.resolve();
 
+/**
+ * A "origem" corrente. `voltar()` e `alternarModo()` a abandonam (mudam a
+ * fase por fora da fila, sem passar por `tocar()`) incrementando este
+ * contador — é o "id da tentativa" da tabela de estados: uma ação que já
+ * estava em voo quando a origem foi abandonada tem a SUA geração antiga, e o
+ * resultado dela deixa de valer para `aplicar`, mesmo chegando depois (M/V
+ * atrasado por 429/5xx não ressuscita o desafio depois de um Voltar).
+ *
+ * `autenticar()`, dentro de `acao()`, NÃO passa por aqui: a gravação da
+ * credencial já aconteceu antes deste retorno (ver `enviar`/`verificar`
+ * abaixo), e é o `ultimaTentativa` de `services/auth.ts` — não este contador
+ * — quem decide se ELA vale, comparando com a tentativa de login mais nova.
+ */
+let geracao = 0;
+
 function enfileirar(
+  minhaGeracao: number,
   acao: () => Promise<EstadoEntrar | null>,
   aplicar: (e: EstadoEntrar) => void,
 ): Promise<void> {
-  pendentes += 1;
-  fila = fila.then(async () => {
-    const proximo = await acao();
-    pendentes -= 1;
-    if (proximo) aplicar(proximo);
+  emVoo = minhaGeracao;
+  // `acao()` roda NA HORA, não dentro de uma continuação (`fila.then(async
+  // () => acao())`): como só cabe UMA ação em voo por vez, não há fila de
+  // verdade para esperar, e adiar a chamada abria uma janela real — "Voltar"
+  // no MESMO lote do toque (I-A/I-B) rodava ANTES desta continuação, e o
+  // `AbortController` que `services/auth.ts` cria só existe depois que a
+  // cadeia síncrona de `acao()` chega até o `fetch()`. Chamando na hora, essa
+  // cadeia (verificar → verificarMfa → tentativa → cria o controlador →
+  // chama a rede) já rodou quando `abandonarEntrada()` tenta abortar.
+  fila = acao().then((proximo) => {
+    // Só libera SE ainda for esta ação: `abandonar()` já pode ter zerado
+    // `emVoo` (ou uma ação mais nova já pode estar rodando) antes desta
+    // promise terminar — não pisa em cima de nenhum dos dois casos.
+    if (emVoo === minhaGeracao) emVoo = null;
+    if (proximo && geracao === minhaGeracao) aplicar(proximo);
   });
   return fila;
 }
@@ -61,13 +100,14 @@ export function tocar(
   acao: () => Promise<EstadoEntrar | null>,
   aplicar: (e: EstadoEntrar) => void,
 ): Promise<void> {
-  return pendentes > 0 ? fila : enfileirar(acao, aplicar);
+  return emVoo !== null ? fila : enfileirar(geracao, acao, aplicar);
 }
 
 /** Só para teste: zera a fila entre casos, como o `_resetTela` que este módulo substitui. */
 export function _resetEntrar(): void {
-  pendentes = 0;
+  emVoo = null;
   fila = Promise.resolve();
+  geracao = 0;
 }
 
 /**
@@ -146,8 +186,16 @@ export async function verificar(
   }
 }
 
-/** M → M: troca o modo, `aviso` e o campo (o campo é responsabilidade do componente, que observa `modo`). */
+/**
+ * M → M: troca o modo, `aviso` e o campo (o campo é responsabilidade do
+ * componente, que observa `modo`). O botão que chama isto fica desativado
+ * enquanto uma verificação está em voo, então na prática não há o que
+ * abandonar aqui — mas a geração sobe do mesmo jeito: defesa contra qualquer
+ * chamada que escape dessa guarda (ex.: um toque que já estava em trânsito
+ * quando o botão desativou).
+ */
 export function alternarModo(estado: EstadoMfa): EstadoEntrar {
+  geracao += 1;
   return {
     fase: "mfa",
     desafio: estado.desafio,
@@ -156,8 +204,27 @@ export function alternarModo(estado: EstadoMfa): EstadoEntrar {
   };
 }
 
-/** M → F: descarta o desafio localmente. Sem aviso; o e-mail do formulário não é tocado por este módulo (é estado da tela). */
+/**
+ * M → F: descarta o desafio localmente. Sem aviso; o e-mail do formulário não
+ * é tocado por este módulo (é estado da tela).
+ *
+ * Sobe a geração: uma verificação que ainda estava em voo quando a pessoa
+ * voltou (429/5xx demora a responder) é da geração ANTERIOR — o resultado
+ * dela chega depois e `enfileirar` descarta, em vez de ressuscitar a tela de
+ * código com o desafio que a pessoa já abandonou.
+ *
+ * E abandona a ação em voo (se houver): libera `emVoo` JÁ — não espera a
+ * verificação responder — e chama `abandonarEntrada()` (services/auth.ts),
+ * que avança `ultimaTentativa` (a resposta atrasada vira `EntradaSuperada`,
+ * sem gravar credencial) e aborta a requisição em rede. Sem isto, um toque
+ * legítimo logo após "Voltar" (outra conta) era engolido pela guarda de
+ * `tocar()` até a verificação abandonada terminar sozinha — na prática, até
+ * o tempo limite de 15s (I-A/I-B).
+ */
 export function voltar(): EstadoEntrar {
+  geracao += 1;
+  emVoo = null;
+  abandonarEntrada();
   return { fase: "formulario" };
 }
 

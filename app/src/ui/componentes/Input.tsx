@@ -1,4 +1,5 @@
-import { TextInput, View, type TextInputProps } from "react-native";
+import { useEffect } from "react";
+import { AccessibilityInfo, TextInput, View, type TextInputProps } from "react-native";
 
 import { useAvisoAoErrar } from "@/ui/haptics";
 import { useTema } from "@/ui/tema";
@@ -33,6 +34,14 @@ interface Props
 export function Input({ rotulo, erro, desativado = false, icone, ...resto }: Props) {
   const { cores } = useTema();
   useAvisoAoErrar(!!erro);
+  // Quem não está com o dedo neste campo (ou usa leitor de tela sem foco
+  // nele) não veria o erro sem isto — o texto some/aparece na árvore sem
+  // nenhum aviso sonoro. Dispara a cada MUDANÇA de mensagem (não só na
+  // transição de "sem erro" para "com erro"): um segundo erro diferente no
+  // mesmo campo (ex.: 401 depois de outro 401) também precisa ser ouvido.
+  useEffect(() => {
+    if (erro) AccessibilityInfo.announceForAccessibility(erro);
+  }, [erro]);
 
   // Desativado usa tokens diferentes (não opacity): texto e erro continuam
   // sendo tons semânticos distintos (`inkMuted`/`danger`) em vez de uma
