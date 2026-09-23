@@ -81,13 +81,17 @@ def asaas_falso(monkeypatch):
         estado["n"] += 1
         estado["ordem"].append("create")
         estado["descricoes"].append(kw.get("descricao"))
+        estado["vence"] = kw["due_date"]
         return {"id": f"pay_{marca}_{estado['n']}"}
 
     def _qr(pid):
         estado["ordem"].append("qr")
         if estado["qr_falha"]:
             raise a.AsaasApiError("QR nao veio", status_code=502)
-        return {"payload": f"000201-{pid}", "expirationDate": "2026-12-31 23:59:59"}
+        # O Asaas real devolve `dueDate` + " 23:59:59"; data fixa aqui vira
+        # bomba no dia seguinte a ela.
+        return {"payload": f"000201-{pid}",
+                "expirationDate": f"{estado['vence']} 23:59:59"}
 
     def _por_referencia(ref):
         estado["ordem"].append("consulta")
