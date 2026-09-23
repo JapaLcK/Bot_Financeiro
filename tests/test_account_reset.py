@@ -788,6 +788,61 @@ def test_falha_da_pluggy_nao_impede_o_reset_local(user_id, monkeypatch):
         "falha remota (best-effort) não podia impedir o reset local"
 
 
+def test_reset_com_falha_de_auth_loga_o_dono_na_coluna(user_id, monkeypatch):
+    """TERCEIRO chamador de `delete_pluggy_items_best_effort`. O reset preserva a
+    conta E `system_event_logs` (a lista de intactos no docstring de
+    `reset_user_data`), então o dono da falha de apiKey vai na COLUNA `user_id` —
+    é ela que a exportação LGPD lê e que a cascata leva no dia da exclusão.
+
+    Os irmãos da mesma classe, pelos outros dois chamadores:
+    `test_open_finance_disconnect_route.py::test_disconnect_com_falha_de_auth_
+    loga_o_dono_na_coluna` e, do único que pede `log_user_id=False`,
+    `test_account_deletion_pluggy.py::test_t12_sem_credenciais_pluggy_nao_sobra_
+    user_id_em_log_nenhum`.
+
+    MUTAÇÃO (verificada nesta sessão): passar `log_user_id=False` no chamador do
+    reset (`frontend/routes/settings.py`, dentro de `_limpeza_remota`) → vermelho.
+
+    O log é o REAL (`log_system_event_sync`, sem mock): mede-se a linha no banco.
+    """
+    import asyncio
+
+    from core.admin_dashboard import ensure_admin_tables
+
+    asyncio.run(ensure_admin_tables())  # `system_event_logs` não vem de db/schema.py
+    _semeia(user_id)
+
+    def _pluggy_fora():
+        raise RuntimeError("PLUGGY_CLIENT_ID/SECRET ausentes")
+
+    monkeypatch.setattr(of_routes, "create_pluggy_api_key", _pluggy_fora)
+
+    with get_conn() as conn, conn.cursor() as cur:
+        cur.execute("select coalesce(max(id), 0) as m from system_event_logs")
+        marca = int(cur.fetchone()["m"])
+        conn.commit()
+
+    client = TestClient(dashboard.app)
+    headers = _auth(client, user_id)
+    resp = client.post("/settings/reset", json={"password": SENHA}, headers=headers)
+
+    assert resp.status_code == 200, resp.text
+    with get_conn() as conn, conn.cursor() as cur:
+        cur.execute(
+            "select user_id, message, details::text as det from system_event_logs "
+            "where id > %s and event_type = 'pluggy_disconnect_auth_failed' order by id",
+            (marca,),
+        )
+        linhas = cur.fetchall()
+        conn.commit()
+
+    assert len(linhas) == 1, f"esperava 1 rastro do ramo de auth falhada, veio {linhas}"
+    assert linhas[0]["user_id"] == user_id, \
+        f"reset de conta VIVA virou log sem dono: {dict(linhas[0])}"
+    # A linha é limpa pela cascata no teardown da fixture `user_id` — o mesmo
+    # mecanismo que preencher a coluna compra.
+
+
 # ── 7b. contrato do lock: ocupado → nada local E nada remoto ────────────────
 # CONTROLE NEGATIVO destes dois: com o aborto por lock trocado por no-op
 # (`raise ResetLockUnavailableError` → pular o item), os dois ficam vermelhos —

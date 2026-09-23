@@ -106,7 +106,16 @@ def run(limit: int, *, dry_run: bool = False) -> int:
     }
 
     level = "error" if errors or email_failed else "info"
-    _log_event(level, f"Job de exclusão de contas concluído: {summary}", summary)
+    # `errors` NÃO é persistido, só contado: cada item carrega o `user_id` e o
+    # texto do erro o interpola de novo (`db/privacy.py`, a `RuntimeError` da
+    # verificação pós-commit) — e tudo depois do `conn.commit()` de
+    # `delete_user_data` roda com a conta JÁ APAGADA. Como `system_event_logs`
+    # não tem coluna `user_id` nessa linha, cascata nenhuma a leva: o
+    # identificador de uma conta excluída ficaria no banco para sempre. O
+    # detalhe (uid + erro) segue no `print` abaixo — log de aplicação, retenção
+    # finita, que é o que o operador usa para investigar.
+    persistido = {**summary, "errors": len(errors)}
+    _log_event(level, f"Job de exclusão de contas concluído: {persistido}", persistido)
     print(f"[account_deletion_job] concluído: {summary}", flush=True)
 
     return 1 if errors or email_failed else 0

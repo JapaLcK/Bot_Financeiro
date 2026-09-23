@@ -551,6 +551,11 @@ def reset_user_data(
     a Pluggy não foi tocada. O hook é responsável pelo próprio best-effort
     (exceção dele aborta o reset com nada apagado localmente).
 
+    CONTRASTE com o parâmetro de MESMO NOME em `delete_user_data`: lá o hook é
+    chamado sob `try/except` e lock ocupado só loga, porque a exclusão não pode
+    ser bloqueada pela Pluggy (decisão do dono, D4). Aqui o aborto é o correto:
+    a conta sobrevive ao reset e a retentativa é do usuário.
+
     A linha de `accounts` é PRESERVADA (não é apagada) e o saldo é zerado na
     PRIMEIRA escrita da transação — ver o comentário no início dela: é esse
     `update` que serializa o reset contra um lançamento concorrente (#246).
@@ -805,7 +810,42 @@ def reset_user_data(
             "pluggy_items_swept": pluggy_items_swept}
 
 
-def delete_user_data(user_id: int) -> dict:
+def delete_user_data(
+    user_id: int,
+    remote_cleanup: "Callable[[], None] | None" = None,
+) -> dict:
+    """Exclusão definitiva: apaga a conta e tudo que pertence a ela.
+
+    `remote_cleanup` (opcional) roda DEPOIS dos locks dos items Pluggy e ANTES
+    de qualquer delete local — é onde o chamador deleta os items na Pluggy.
+
+    DIVERGE do hook de `reset_user_data` de propósito (decisão do dono, D4):
+    aqui a exclusão NUNCA é bloqueada pela Pluggy. Exceção do hook é engolida e
+    logada por ESTA função (no reset ela aborta o reset com nada apagado
+    localmente), e lock de item ocupado loga e SEGUE (no reset ele levanta
+    `ResetLockUnavailableError` e a Pluggy não é tocada). O prazo da LGPD ganha
+    do lock — a mesma palavra `remote_cleanup` tem, de propósito, duas
+    semânticas nas duas funções.
+
+    Os logs DESTA função vão com a COLUNA `user_id = None`, sempre: esta mesma
+    transação faz `delete from system_event_logs where user_id = %s` e a FK é
+    `on delete cascade` — log com dono é log que se apaga sozinho (ou cujo
+    INSERT viola a FK, se escrito depois do commit). A lista `items` em `details`
+    é a chave operacional (`scripts/adotar_items_of_orfaos.py --item <ID>`); o
+    `user_id` não vai nem para `details`, porque a exclusão existe justamente
+    para remover identificadores da conta (mesma regra de `plan_trials`).
+
+    JANELA RESIDUAL, a mesma do reset (o comentário em :628-640) e sem log
+    próprio: exceção no delete LOCAL depois de o `remote_cleanup` ter dado certo
+    deixa o item já apagado na Pluggy, a conexão local viva apontando para ele, a
+    conta reagendada — e nada registrado (não há log aqui nesse caminho). Não é
+    terminal: a rodada seguinte re-enumera o mesmo item e o 404-como-sucesso de
+    `delete_pluggy_item` (core/services/pluggy.py) torna a retentativa idempotente.
+
+    Devolve, além de `{"user_id", "deleted", "email"}`, o `pluggy_items_swept`:
+    os items que o DELETE local varreu, para o chamador comparar com o que a
+    limpeza remota enumerou e fazer o 2º passe.
+    """
     primary_email = None
     user_owned_tables = (
         # Tabelas com coluna user_id e ON DELETE CASCADE (verificado em prod).
@@ -847,183 +887,263 @@ def delete_user_data(user_id: int) -> dict:
         "user_identities",
         "auth_accounts",
     )
-    deleted = 0
+    # Import na função: db/privacy não importa módulos irmãos no topo (ciclo).
+    from core.observability import log_system_event_sync
 
-    with get_conn() as conn:
-        with conn.cursor() as cur:
-            cur.execute(
-                "select email, email_enc from auth_accounts where user_id = %s",
-                (user_id,),
+    from .open_finance import list_pluggy_item_ids
+    from .open_finance_state import pluggy_items_lock
+
+    # Enumeração SÓ por `list_pluggy_item_ids` (que filtra `user_id` E provider).
+    # NUNCA pelo `open_finance_item_registry`: ele tem linhas com `user_id NULL` e
+    # linhas de outros donos do MESMO item — enumerar por ele deletaria o banco de
+    # um vizinho. A `uq_of_conn_provider_item` nasce num bloco que só emite warning
+    # (db/schema.py:521-528) e pode não existir num DB antigo: a garantia real é o
+    # filtro por user_id, não o índice.
+    # ponytail: PAUSED fica de fora (regra do `list_pluggy_item_ids`). Hoje a pausa
+    # só acontece DEPOIS de o delete remoto ter dado certo (trial expiry). Se um dia
+    # pausar sem deletar, item pausado de conta excluída fica órfão lá para sempre.
+    itens_pluggy = list_pluggy_item_ids(user_id)
+
+    # A enumeração acima e o `pluggy_items_lock` abaixo ficam FORA do best-effort
+    # de propósito: exceção neles é falha de BANCO, não da Pluggy, e engoli-la
+    # seria excluir a conta com a limpeza remota silenciosamente pulada (item
+    # órfão e pago). Solta, ela sobe para o `except` de
+    # `process_due_account_deletions`, que restaura o agendamento e devolve
+    # `{"error": ...}` — o cron loga `account_deletion_job` em nível error e sai 1.
+    #
+    # Locks dos items ANTES de qualquer delete, mesma ordem do reset e do
+    # disconnect: sem eles um sync na fase de escrita re-insere contas/transações
+    # no meio da limpeza, e a deleção remota acontece com o item sendo lido.
+    with pluggy_items_lock(itens_pluggy) as locked:
+        if not locked:
+            # NÃO aborta (decisão do dono, D4): o prazo da LGPD ganha do lock —
+            # é o INVERSO do reset, que levanta `ResetLockUnavailableError`. O que
+            # um sync concorrente escrever no meio não fica órfão, e o mecanismo
+            # NÃO é a re-varredura pós-commit: `open_finance_connections` não está
+            # em `user_owned_tables`, e tanto a re-varredura quanto a `RuntimeError`
+            # de sobras só percorrem essa tupla. Quem protege é (a) DENTRO da
+            # transação, o `RETURNING` do delete + o 2º passe remoto do chamador,
+            # que pega item salvo antes do commit; e (b) DEPOIS do commit, a FK
+            # `open_finance_connections_user_id_fkey`: sem a linha de `users`, a
+            # re-inserção estoura `ForeignKeyViolation` (medido) — o sync perde a
+            # escrita em vez de deixar conexão de conta excluída no banco.
+            log_system_event_sync(
+                "warning", "account_deletion_of_lock_busy",
+                f"Exclusão de conta seguiu SEM os locks dos items Pluggy: {itens_pluggy}",
+                source="db.privacy", user_id=None,
+                details={"items": itens_pluggy},
             )
-            ctx_del = PiiAccessContext(
-                purpose="account_deletion_lookup",
-                actor="system:account_deletion_job",
-                subject_user_id=user_id,
-                field="email",
-            )
-            emails: list[str] = []
-            for row in cur.fetchall():
-                enc = row.get("email_enc")
-                if enc:
-                    val = decrypt_pii_optional(enc, ctx=ctx_del)
-                else:
-                    val = row.get("email")
-                if val:
-                    emails.append(val)
-            primary_email = emails[0] if emails else None
 
-            if _table_exists(cur, "auth_login_events"):
-                cur.execute("delete from auth_login_events where user_id = %s", (user_id,))
-                if emails:
-                    cur.execute("delete from auth_login_events where email = any(%s)", (emails,))
+        if remote_cleanup is not None:
+            # O `try` é ESTRUTURAL, não cortesia com o chamador: é ele que faz
+            # "falha remota não bloqueia a exclusão" valer sem depender de o
+            # chamador lembrar (`reset_user_data` chama o hook CRU de propósito).
+            # Cobre também o `ImportError` do import db/ -> frontend/ do hook.
+            try:
+                remote_cleanup()
+            except Exception as exc:  # noqa: BLE001 — best-effort; a exclusão segue
+                log_system_event_sync(
+                    "warning", "account_deletion_pluggy_cleanup_failed",
+                    f"Limpeza remota na Pluggy falhou na exclusão de conta: {exc}",
+                    source="db.privacy", user_id=None,
+                    details={"items": itens_pluggy, "error": str(exc)[:200]},
+                )
 
-            if _table_exists(cur, "system_event_logs"):
-                cur.execute("delete from system_event_logs where user_id = %s", (user_id,))
+        deleted = 0
 
-            if _table_exists(cur, "email_verification_codes") and emails:
-                cur.execute("delete from email_verification_codes where email = any(%s)", (emails,))
-
-            if _table_exists(cur, "auth_rate_limits"):
-                identifiers = [f"email:{email.strip().lower()}" for email in emails]
-                identifiers.append(f"user:{user_id}")  # teto por conta (mfa-verify)
-                cur.execute("delete from auth_rate_limits where identifier = any(%s)", (identifiers,))
-
-            if _table_exists(cur, "open_finance_transactions"):
+        with get_conn() as conn:
+            with conn.cursor() as cur:
                 cur.execute(
-                    """
-                    delete from open_finance_transactions t
-                    using open_finance_accounts a, open_finance_connections c
-                    where t.account_id = a.id
-                      and a.connection_id = c.id
-                      and c.user_id = %s
-                    """,
+                    "select email, email_enc from auth_accounts where user_id = %s",
                     (user_id,),
                 )
-            if _table_exists(cur, "open_finance_accounts"):
-                cur.execute(
-                    """
-                    delete from open_finance_accounts a
-                    using open_finance_connections c
-                    where a.connection_id = c.id
-                      and c.user_id = %s
-                    """,
-                    (user_id,),
+                ctx_del = PiiAccessContext(
+                    purpose="account_deletion_lookup",
+                    actor="system:account_deletion_job",
+                    subject_user_id=user_id,
+                    field="email",
                 )
+                emails: list[str] = []
+                for row in cur.fetchall():
+                    enc = row.get("email_enc")
+                    if enc:
+                        val = decrypt_pii_optional(enc, ctx=ctx_del)
+                    else:
+                        val = row.get("email")
+                    if val:
+                        emails.append(val)
+                primary_email = emails[0] if emails else None
 
-            for table in (
-                "open_finance_connections",
-                "credit_transactions",
-            ):
-                if _table_exists(cur, table):
-                    cur.execute(f"delete from {table} where user_id = %s", (user_id,))
+                if _table_exists(cur, "auth_login_events"):
+                    cur.execute("delete from auth_login_events where user_id = %s", (user_id,))
+                    if emails:
+                        cur.execute("delete from auth_login_events where email = any(%s)", (emails,))
 
-            if _table_exists(cur, "credit_bills"):
-                if _table_exists(cur, "credit_cards"):
+                if _table_exists(cur, "system_event_logs"):
+                    cur.execute("delete from system_event_logs where user_id = %s", (user_id,))
+
+                if _table_exists(cur, "email_verification_codes") and emails:
+                    cur.execute("delete from email_verification_codes where email = any(%s)", (emails,))
+
+                if _table_exists(cur, "auth_rate_limits"):
+                    identifiers = [f"email:{email.strip().lower()}" for email in emails]
+                    identifiers.append(f"user:{user_id}")  # teto por conta (mfa-verify)
+                    cur.execute("delete from auth_rate_limits where identifier = any(%s)", (identifiers,))
+
+                if _table_exists(cur, "open_finance_transactions"):
                     cur.execute(
                         """
-                        delete from credit_bills b
-                        using credit_cards c
-                        where b.card_id = c.id
+                        delete from open_finance_transactions t
+                        using open_finance_accounts a, open_finance_connections c
+                        where t.account_id = a.id
+                          and a.connection_id = c.id
                           and c.user_id = %s
                         """,
                         (user_id,),
                     )
-                if _column_exists(cur, "credit_bills", "user_id"):
-                    cur.execute("delete from credit_bills where user_id = %s", (user_id,))
+                if _table_exists(cur, "open_finance_accounts"):
+                    cur.execute(
+                        """
+                        delete from open_finance_accounts a
+                        using open_finance_connections c
+                        where a.connection_id = c.id
+                          and c.user_id = %s
+                        """,
+                        (user_id,),
+                    )
 
-            # `plan_trials` não aparece em `user_owned_tables` de propósito: a
-            # linha é keyed por phone_hash e segura a trava de 15 dias de teste
-            # por telefone, na vida — apagar devolveria um trial novo a cada
-            # conta recriada com o mesmo número. O `user_id` dela é desvinculado
-            # pela FK `on delete set null` (db/schema_repairs.py), e não por um
-            # UPDATE aqui: um UPDATE perde a corrida com um
-            # `claim_trial_for_user` que commite depois dele, e a varredura
-            # pós-commit nunca revisita esta tabela.
+                # RETURNING: o que ESTE delete varreu. Item salvo ENTRE a
+                # enumeração do `remote_cleanup` e este delete não foi deletado
+                # na Pluggy — o chamador compara os dois conjuntos e faz um 2º
+                # passe. Mesmo filtro, palavra por palavra, do reset (:743-747)
+                # e do disconnect (db/open_finance.py:2860-2864): PAUSED fica
+                # fora porque o item já foi deletado lá (CLAUDE.md §0.7).
+                pluggy_items_swept: list[str] = []
+                if _table_exists(cur, "open_finance_connections"):
+                    cur.execute(
+                        """
+                        delete from open_finance_connections
+                        where user_id = %s
+                        returning provider, provider_item_id, status
+                        """,
+                        (user_id,),
+                    )
+                    pluggy_items_swept = sorted({
+                        r["provider_item_id"] for r in cur.fetchall()
+                        if r["provider"] == "pluggy" and r["provider_item_id"]
+                        and str(r["status"] or "").upper() != "PAUSED"
+                    })
+                if _table_exists(cur, "credit_transactions"):
+                    cur.execute("delete from credit_transactions where user_id = %s", (user_id,))
 
-            # `pix_charges` NÃO entra em `user_owned_tables` pelo mesmo motivo
-            # da `plan_trials`: a linha SOBREVIVE à exclusão — é o registro do
-            # dinheiro que entrou, e reconciliar pagamento é obrigação fiscal.
-            # Quem desfaz o vínculo é a FK `on delete set null` (§13.2), não um
-            # UPDATE aqui, porque UPDATE perde a corrida com um webhook que
-            # commite depois e a varredura pós-commit não revisita a tabela.
-            #
-            # O que este UPDATE faz é o outro lado: apagar o que NÃO é registro
-            # financeiro. `ga_client_id`, `fbp` e `fbc` são os identificadores
-            # com que GA e Meta reidentificam a pessoa e não reconciliam
-            # centavo nenhum; `qr_payload_enc` é instrumento de pagamento ao
-            # portador (§13.6); `asaas_customer_id` liga a linha ao cadastro da
-            # pessoa no provedor. Valores, ids e datas ficam. Sem `where
-            # purged_at is null` de propósito: aqui a conta está sendo excluída
-            # AGORA e reescrever o carimbo de uma linha já purgada não tem
-            # custo, enquanto pular uma linha teria — a varredura diária do
-            # §13.2 é que precisa do filtro, para não reescrever todo dia.
-            if _table_exists(cur, "pix_charges"):
-                cur.execute(
-                    """
-                    update pix_charges
-                       set ga_client_id = null, fbp = null, fbc = null,
-                           qr_payload_enc = null, asaas_customer_id = null,
-                           purged_at = now()
-                     where user_id = %s
-                    """,
-                    (user_id,),
-                )
+                if _table_exists(cur, "credit_bills"):
+                    if _table_exists(cur, "credit_cards"):
+                        cur.execute(
+                            """
+                            delete from credit_bills b
+                            using credit_cards c
+                            where b.card_id = c.id
+                              and c.user_id = %s
+                            """,
+                            (user_id,),
+                        )
+                    if _column_exists(cur, "credit_bills", "user_id"):
+                        cur.execute("delete from credit_bills where user_id = %s", (user_id,))
 
-            for table in user_owned_tables:
-                if _table_exists(cur, table) and _column_exists(cur, table, "user_id"):
-                    cur.execute(f"delete from {table} where user_id = %s", (user_id,))
+                # `plan_trials` não aparece em `user_owned_tables` de propósito: a
+                # linha é keyed por phone_hash e segura a trava de 15 dias de teste
+                # por telefone, na vida — apagar devolveria um trial novo a cada
+                # conta recriada com o mesmo número. O `user_id` dela é desvinculado
+                # pela FK `on delete set null` (db/schema_repairs.py), e não por um
+                # UPDATE aqui: um UPDATE perde a corrida com um
+                # `claim_trial_for_user` que commite depois dele, e a varredura
+                # pós-commit nunca revisita esta tabela.
 
-            cur.execute("delete from users where id = %s", (user_id,))
-            deleted += cur.rowcount
+                # `pix_charges` NÃO entra em `user_owned_tables` pelo mesmo motivo
+                # da `plan_trials`: a linha SOBREVIVE à exclusão — é o registro do
+                # dinheiro que entrou, e reconciliar pagamento é obrigação fiscal.
+                # Quem desfaz o vínculo é a FK `on delete set null` (§13.2), não um
+                # UPDATE aqui, porque UPDATE perde a corrida com um webhook que
+                # commite depois e a varredura pós-commit não revisita a tabela.
+                #
+                # O que este UPDATE faz é o outro lado: apagar o que NÃO é registro
+                # financeiro. `ga_client_id`, `fbp` e `fbc` são os identificadores
+                # com que GA e Meta reidentificam a pessoa e não reconciliam
+                # centavo nenhum; `qr_payload_enc` é instrumento de pagamento ao
+                # portador (§13.6); `asaas_customer_id` liga a linha ao cadastro da
+                # pessoa no provedor. Valores, ids e datas ficam. Sem `where
+                # purged_at is null` de propósito: aqui a conta está sendo excluída
+                # AGORA e reescrever o carimbo de uma linha já purgada não tem
+                # custo, enquanto pular uma linha teria — a varredura diária do
+                # §13.2 é que precisa do filtro, para não reescrever todo dia.
+                if _table_exists(cur, "pix_charges"):
+                    cur.execute(
+                        """
+                        update pix_charges
+                           set ga_client_id = null, fbp = null, fbc = null,
+                               qr_payload_enc = null, asaas_customer_id = null,
+                               purged_at = now()
+                         where user_id = %s
+                        """,
+                        (user_id,),
+                    )
 
-            # Bancos antigos podem não ter todas as FKs/cascades esperadas.
-            # A segunda passada remove qualquer resíduo órfão que tenha ficado.
-            for table in user_owned_tables:
-                if _table_exists(cur, table) and _column_exists(cur, table, "user_id"):
-                    cur.execute(f"delete from {table} where user_id = %s", (user_id,))
+                for table in user_owned_tables:
+                    if _table_exists(cur, table) and _column_exists(cur, table, "user_id"):
+                        cur.execute(f"delete from {table} where user_id = %s", (user_id,))
 
-            cur.execute("delete from users where id = %s", (user_id,))
-            deleted += cur.rowcount
+                cur.execute("delete from users where id = %s", (user_id,))
+                deleted += cur.rowcount
 
-            cur.execute("select 1 from users where id = %s", (user_id,))
-            if cur.fetchone():
-                raise RuntimeError(f"Falha ao remover usuário {user_id}: registro ainda existe após a limpeza final.")
+                # Bancos antigos podem não ter todas as FKs/cascades esperadas.
+                # A segunda passada remove qualquer resíduo órfão que tenha ficado.
+                for table in user_owned_tables:
+                    if _table_exists(cur, table) and _column_exists(cur, table, "user_id"):
+                        cur.execute(f"delete from {table} where user_id = %s", (user_id,))
 
-        conn.commit()
+                cur.execute("delete from users where id = %s", (user_id,))
+                deleted += cur.rowcount
 
-    # Verificação pós-commit: garante que outra conexão também enxerga a conta
-    # como removida antes de o job considerar a exclusão concluída.
-    with get_conn() as conn:
-        with conn.cursor() as cur:
-            for table in user_owned_tables:
-                if _table_exists(cur, table) and _column_exists(cur, table, "user_id"):
-                    cur.execute(f"delete from {table} where user_id = %s", (user_id,))
+                cur.execute("select 1 from users where id = %s", (user_id,))
+                if cur.fetchone():
+                    raise RuntimeError(f"Falha ao remover usuário {user_id}: registro ainda existe após a limpeza final.")
 
-            cur.execute("delete from users where id = %s", (user_id,))
-            deleted += cur.rowcount
+            conn.commit()
 
-            cur.execute("select 1 from users where id = %s", (user_id,))
-            user_still_exists = cur.fetchone() is not None
+        # Verificação pós-commit: garante que outra conexão também enxerga a conta
+        # como removida antes de o job considerar a exclusão concluída.
+        with get_conn() as conn:
+            with conn.cursor() as cur:
+                for table in user_owned_tables:
+                    if _table_exists(cur, table) and _column_exists(cur, table, "user_id"):
+                        cur.execute(f"delete from {table} where user_id = %s", (user_id,))
 
-            leftovers: dict[str, int] = {}
-            for table in user_owned_tables:
-                if _table_exists(cur, table) and _column_exists(cur, table, "user_id"):
-                    cur.execute(f"select count(*) as total from {table} where user_id = %s", (user_id,))
-                    total = int(cur.fetchone()["total"])
-                    if total:
-                        leftovers[table] = total
+                cur.execute("delete from users where id = %s", (user_id,))
+                deleted += cur.rowcount
 
-        conn.commit()
+                cur.execute("select 1 from users where id = %s", (user_id,))
+                user_still_exists = cur.fetchone() is not None
 
-    if user_still_exists or leftovers:
-        raise RuntimeError(
-            f"Falha ao confirmar exclusão do usuário {user_id}: "
-            f"user_exists={user_still_exists}; leftovers={leftovers}"
-        )
+                leftovers: dict[str, int] = {}
+                for table in user_owned_tables:
+                    if _table_exists(cur, table) and _column_exists(cur, table, "user_id"):
+                        cur.execute(f"select count(*) as total from {table} where user_id = %s", (user_id,))
+                        total = int(cur.fetchone()["total"])
+                        if total:
+                            leftovers[table] = total
 
-    from db_support import invalidate_auth_user_cache
-    invalidate_auth_user_cache(user_id)  # a conta saiu do banco; sai do cache junto
-    return {"user_id": user_id, "deleted": bool(deleted), "email": primary_email}
+            conn.commit()
+
+        if user_still_exists or leftovers:
+            raise RuntimeError(
+                f"Falha ao confirmar exclusão do usuário {user_id}: "
+                f"user_exists={user_still_exists}; leftovers={leftovers}"
+            )
+
+        from db_support import invalidate_auth_user_cache
+        invalidate_auth_user_cache(user_id)  # a conta saiu do banco; sai do cache junto
+        return {"user_id": user_id, "deleted": bool(deleted), "email": primary_email,
+                "pluggy_items_swept": pluggy_items_swept}
 
 
 def _claim_due_account_deletions(limit: int, stale_after_minutes: int) -> list[int]:
@@ -1095,9 +1215,56 @@ def process_due_account_deletions(limit: int = 50, stale_after_minutes: int = 12
 
     results = []
     for user_id in due_user_ids:
+        # O que a limpeza remota ENUMEROU — comparado adiante com o que o DELETE
+        # local varreu (RETURNING), para o 2º passe pegar item salvo na janela
+        # entre as duas coisas. Mesma regra de POST /settings/reset
+        # (frontend/routes/settings.py) e do disconnect.
+        enumerados: list[str] = []
+
+        def _limpeza_remota() -> None:
+            # Closure sobre o `user_id`/`enumerados` DESTA volta do laço: o hook
+            # é chamado sincronamente dentro do `delete_user_data` logo abaixo,
+            # então não há late binding a temer.
+            # Import DENTRO da função: `db/` não importa `frontend/` no topo
+            # (precedente: core/services/billing_access.py:243). Um ImportError
+            # aqui não bloqueia a exclusão — o `try` de `delete_user_data` em
+            # volta do hook cobre a categoria inteira (LGPD ganha do import).
+            from frontend.routes.open_finance import delete_pluggy_items_best_effort
+
+            # `log_user_id=False`: só a exclusão desliga o dono do log de apiKey
+            # falhada — a linha tem de sobreviver à cascata sem o identificador
+            # de uma conta apagada (o disconnect e o reset seguem com a coluna).
+            enumerados.extend(delete_pluggy_items_best_effort(user_id, log_user_id=False))
+
         try:
-            results.append(delete_user_data(user_id))
+            resultado = delete_user_data(user_id, remote_cleanup=_limpeza_remota)
         except Exception as exc:
             _restore_account_deletion_schedule(user_id)
             results.append({"user_id": user_id, "deleted": False, "error": str(exc)})
+            continue
+
+        # 2º passe remoto: item salvo ENTRE a enumeração acima e o DELETE local
+        # foi varrido do banco sem ser deletado na Pluggy — órfão pago, com os
+        # dados bancários do titular, DEPOIS de uma exclusão LGPD. `tardios` é
+        # normalmente vazio. Best-effort como o 1º passe: o helper já loga por
+        # item; este `try` cobre a falha do helper inteiro.
+        tardios = sorted(set(resultado.pop("pluggy_items_swept", None) or []) - set(enumerados))
+        if tardios:
+            try:
+                from frontend.routes.open_finance import delete_pluggy_items_best_effort
+
+                delete_pluggy_items_best_effort(user_id, tardios, log_user_id=False)
+            except Exception as exc:  # noqa: BLE001 — a conta já foi excluída
+                from core.observability import log_system_event_sync
+
+                # `user_id=None`: a conta não existe mais e a FK é on delete
+                # cascade — ver o docstring de `delete_user_data`.
+                log_system_event_sync(
+                    "warning", "account_deletion_pluggy_cleanup_failed",
+                    f"2º passe remoto da exclusão de conta falhou: {exc}",
+                    source="db.privacy", user_id=None,
+                    details={"items": tardios, "error": str(exc)[:200]},
+                )
+
+        results.append(resultado)
     return results

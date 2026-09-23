@@ -2022,7 +2022,8 @@ async def open_finance_mock_connect_route(request: Request, user_id: int, payloa
     return json.loads(shared.jdump({"ok": True, "sync": result, **snapshot}))
 
 
-def delete_pluggy_items_best_effort(user_id: int, item_ids: list[str] | None = None) -> list[str]:
+def delete_pluggy_items_best_effort(user_id: int, item_ids: list[str] | None = None,
+                                    *, log_user_id: bool = True) -> list[str]:
     """Deleta os items do usuário na Pluggy (best-effort). Sem isso, remover
     a conexão apagava só o nosso registro e o item ficava órfão na Pluggy,
     bloqueando a reconexão ("já possui conexão com este acesso"). Falha por
@@ -2032,6 +2033,22 @@ def delete_pluggy_items_best_effort(user_id: int, item_ids: list[str] | None = N
     com o que o DELETE local varreu e faz um 2º passe no que ficou de fora
     (item salvo entre a enumeração e o DELETE — Codex PR #217, 11º).
     `item_ids` explícito é esse 2º passe: pula a enumeração e deleta os dados.
+
+    `log_user_id=False` tira o dono do log de apiKey falhada — e existe por um
+    único chamador, a EXCLUSÃO de conta (`db/privacy.process_due_account_deletions`):
+    lá a linha PRECISA sobreviver (é o único rastro do item que ficou órfão, e
+    pago, na Pluggy depois de a conta sumir), então ela não pode carregar o
+    identificador de uma conta apagada. Default `True`: no disconnect
+    (DELETE /open-finance/{user_id}) e no reset (POST /settings/reset) a conta
+    CONTINUA viva e o dono vai na COLUNA `user_id`, que a cascata leva junto no
+    dia da exclusão.
+
+    Os três chamadores têm regressão, uma para cada:
+    `tests/test_open_finance_disconnect_route.py::test_disconnect_com_falha_de_auth_loga_o_dono_na_coluna`,
+    `tests/test_account_reset.py::test_reset_com_falha_de_auth_loga_o_dono_na_coluna`
+    e `tests/test_account_deletion_pluggy.py::test_t12_sem_credenciais_pluggy_nao_sobra_user_id_em_log_nenhum`
+    (o único com `log_user_id=False`). `tests/test_log_falha_user_id.py` é o
+    mesmo PADRÃO noutro helper (`_log_falha`), não cobre este.
 
     SÍNCRONO de propósito: o reset de conta (POST /settings/reset) o roda como
     hook de `reset_user_data`, DENTRO dos locks de item e numa thread — rota
@@ -2048,10 +2065,18 @@ def delete_pluggy_items_best_effort(user_id: int, item_ids: list[str] | None = N
     try:
         api_key = create_pluggy_api_key()
     except Exception as exc:  # noqa: BLE001 — best-effort; segue pra limpeza local
+        # O dono vai na COLUNA `user_id` (nunca no texto nem em `details`): é o
+        # padrão do repositório, e é o que a cascata de `system_event_logs` leva.
+        # Sob `log_user_id=False` (só a exclusão de conta) a coluna fica NULL, a
+        # linha sobrevive à cascata e a chave operacional que resta é o item
+        # (`scripts/adotar_items_of_orfaos.py --item <ID>`). Ramo alcançado sempre
+        # que faltar PLUGGY_CLIENT_ID/SECRET.
         log_system_event_sync(
             "warning", "pluggy_disconnect_auth_failed",
-            f"Sem apiKey pra deletar items no disconnect do user {user_id}: {exc}",
-            source="open_finance", details={"user_id": user_id, "error": str(exc)[:200]},
+            f"Sem apiKey pra deletar {len(pluggy_item_ids)} item(s) na Pluggy: {exc}",
+            source="open_finance",
+            user_id=user_id if log_user_id else None,
+            details={"items": pluggy_item_ids, "error": str(exc)[:200]},
         )
     if api_key:
         for item_id in pluggy_item_ids:

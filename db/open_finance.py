@@ -391,22 +391,31 @@ def list_open_finance_user_ids() -> list[int]:
             return [r["user_id"] for r in cur.fetchall()]
 
 
-def list_pluggy_item_ids(user_id: int | None = None) -> list[str]:
-    """Item ids Pluggy ativos (todos, ou de um usuário). Usado no refresh periódico.
+def list_pluggy_item_ids(user_id: int) -> list[str]:
+    """Item ids Pluggy ativos de UM usuário. Usado no refresh periódico.
 
     Conexões PAUSED ficam de fora: o item já foi deletado na Pluggy (trial venceu),
     então não há o que refrescar/deletar de novo.
+
+    `user_id` é OBRIGATÓRIO, e o `None` que antes significava "de todos" foi
+    recusado: o filtro `user_id` é a garantia de isolamento (CLAUDE.md §0) desta
+    enumeração, e o chamador de maior consequência é a limpeza remota da exclusão
+    de conta (`delete_pluggy_items_best_effort`), que DELETA na Pluggy tudo o que
+    esta função devolver — num laço em lote (`process_due_account_deletions`).
+    Um `None` ali apagaria o item de TODOS os clientes. Ninguém usava o modo
+    "todos" (0 chamadas sem argumento em 23/09/2026,
+    `grep -rn "list_pluggy_item_ids()" --include="*.py"`).
     """
-    sql = (
-        "select provider_item_id from open_finance_connections "
-        "where provider='pluggy' and upper(coalesce(status,'')) <> 'PAUSED'"
-    )
+    if user_id is None:
+        raise ValueError("list_pluggy_item_ids exige user_id: sem ele o DELETE na Pluggy alcançaria todos os clientes")
     with get_conn() as conn:
         with conn.cursor() as cur:
-            if user_id is None:
-                cur.execute(sql)
-            else:
-                cur.execute(sql + " and user_id=%s", (user_id,))
+            cur.execute(
+                "select provider_item_id from open_finance_connections "
+                "where provider='pluggy' and upper(coalesce(status,'')) <> 'PAUSED' "
+                "and user_id=%s",
+                (user_id,),
+            )
             return [r["provider_item_id"] for r in cur.fetchall() if r["provider_item_id"]]
 
 
