@@ -1,0 +1,11 @@
+@import "./base.css";
+@import "./shell.css";
+@import "./controls.css";
+@import "./widgets.css";
+@import "./panels.css";
+@import "./ledger.css";
+@import "./pages.css";
+
+/* Só os utilitários: o grid arrastável é escrito em Tailwind. Sem base (preflight
+   desligado no config) e sem components. */
+@tailwind utilities;

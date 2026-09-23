@@ -13,7 +13,9 @@
  * do Tailwind no meio dela reescreveria elementos alheios.
  */
 export default {
-  content: ["./src/precos/**/*.{js,jsx,ts,tsx}", "./src/components/ui/**/*.{ts,tsx}"],
+  // O grid arrastável é do dashboard-v2 (tailwind.dashboard.config.js); fora daqui
+  // para não mudar o CSS desta ilha.
+  content: ["./src/precos/**/*.{js,jsx,ts,tsx}", "./src/components/ui/**/*.{ts,tsx}", "!./src/components/ui/draggable-widget-grid.tsx"],
   important: "#cmp-v2",
   corePlugins: { preflight: false },
   theme: {
