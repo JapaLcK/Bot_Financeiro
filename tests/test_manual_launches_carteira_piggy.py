@@ -26,6 +26,7 @@ from decimal import Decimal
 import pytest
 
 import db
+from conftest import promote_to_pro
 import frontend.finance_bot_websocket_custom as dashboard
 from utils_date import today_tz
 
@@ -75,6 +76,7 @@ def _importa_of_tx(user_id: int, dia, valor: str, descricao: str, tx_id: str) ->
 
 
 def _dashboard_client(user_id: int, email: str):
+    promote_to_pro(user_id)  # atravessa o gate de acesso do v2
     from fastapi.testclient import TestClient
 
     client = TestClient(dashboard.app)

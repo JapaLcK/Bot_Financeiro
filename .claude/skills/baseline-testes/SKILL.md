@@ -70,8 +70,11 @@ tem pytest, psycopg nem nada — `python3 -m pytest` morre no import e o erro *n
 **`DATABASE_URL` é a única variável que você precisa fornecer.** O
 `tests/conftest.py` define sozinho, via `setdefault`, o `JWT_SECRET`, o
 `PII_ENCRYPTION_KEY` (Fernet gerada na hora), o `PII_HASH_PEPPER`, o
-`PII_AUDIT_DISABLED` e o `PLANS_V2_ENABLED=0`. Não exporte essas à mão — você só
-sobrescreveria o default com um valor pior.
+`PII_AUDIT_DISABLED`. Não exporte essas à mão — você só sobrescreveria o default
+com um valor pior. O mundo do plano também é do conftest: a fixture autouse
+`_mundo_do_plano` roda a suíte no v2 (o padrão de produção) e os arquivos de
+`_AINDA_EM_V1` no v1, e apaga `PLANS_V2_ENABLED` e `ACCESS_GATE_ENABLED` do
+shell a cada teste — exportá-las não muda nada.
 
 **Não passe `--ignore`.** Nenhum. A suíte roda inteira, com zero erros de coleta.
 

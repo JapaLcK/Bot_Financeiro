@@ -15,6 +15,7 @@ import uuid
 from fastapi.testclient import TestClient
 
 import frontend.finance_bot_websocket_custom as dashboard
+from conftest import promote_to_pro
 from core.crypto import hash_pii_optional
 from db import attempt_whatsapp_phone_link
 from db.connection import get_conn
@@ -51,6 +52,7 @@ def test_patch_contact_phone_resyncs_hash_e_bot_reconhece(user_id):
     with get_conn() as conn, conn.cursor() as cur:
         insert_auth_account_pii(cur, user_id, email, phone=old_phone, phone_status="confirmed")
         conn.commit()
+    promote_to_pro(user_id)
 
     client, csrf_headers = _client_for(user_id, email)
     resp = client.patch(
@@ -79,6 +81,7 @@ def test_patch_contact_email_resyncs_hash(user_id):
     with get_conn() as conn, conn.cursor() as cur:
         insert_auth_account_pii(cur, user_id, email)
         conn.commit()
+    promote_to_pro(user_id)
 
     client, csrf_headers = _client_for(user_id, email)
     resp = client.patch(
