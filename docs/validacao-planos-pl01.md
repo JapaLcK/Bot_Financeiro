@@ -224,21 +224,21 @@ real — a conta é de teste, então os valores podem ir).
 | C4 | `quanto vou ter de saldo daqui 30 dias?` | recusa com convite | responde | responde |
 | C5 | `quanto vou ter de saldo daqui 60 dias?` (frase completa, sem depender da mensagem anterior) | recusa | explica o limite de 30 dias, sem inventar número | responde |
 | C6 | `compara esse mês com o mês passado` | recusa com convite: a frase vai para a IA, que chama `compare_periods`, e ele devolve `pro_required` no Essencial | compara | compara |
-| C6c | `gastei mais esse mês que no passado?` | **candidato a defeito, todos os planos:** o classificador determinístico lê "gastei" como lançamento (`launches.add`, confiança 0,95, conferido rodando `classify`) e pergunta o valor, deixando uma pendência gravada. Registrar a resposta observada | idem | idem |
 | C6b | `quanto gastei esse mês?` | responde com o total do mês (análise básica, liberada) | idem | idem |
 | C7 | `se eu comprar um celular de 3 mil em 12x com 600 de entrada e juros de 1,49% ao mês, como fica meu caixa?` | recusa | recusa com convite ao Pro | simula (conferir contra G2) |
 | C8 | `resumo da semana` (pedido manual) | responde | responde | responde |
+| C6c | `gastei mais esse mês que no passado?` | **candidato a defeito, todos os planos:** o classificador determinístico lê "gastei" como lançamento (`launches.add`, confiança 0,95, conferido rodando `classify`) e pergunta o valor, deixando uma pendência gravada por 10 min (`db/pending.py`). **Mandar por último no estado e esperar 10 min antes de qualquer outra mensagem**: até lá, a próxima mensagem com número (como o C1 do estado seguinte) vira o valor desse lançamento. Registrar a resposta observada | idem | idem |
 
 C3 e C8 separam o resumo **automático** (Plus+) do resumo **pedido**, que a
 matriz mantém em todos os planos.
 
 | caso | estado | resposta observada | resultado | PR |
 |---|---|---|---|---|
-| C1–C8 | S1 | | | |
-| C1–C8 | S2 | | | |
-| C1–C8 | S3 | | | |
+| C1–C8, depois C6c | S1 | | | |
+| C1–C8, depois C6c | S2 | | | |
+| C1–C8, depois C6c | S3 | | | |
 | C3, C5, C7 | S4 | | | |
-| C3, C4, C6, C6b, C6c | S5 | | | |
+| C3, C4, C6, C6b e, por último, C6c | S5 | | | |
 
 ---
 
