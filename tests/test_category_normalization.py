@@ -628,7 +628,8 @@ def test_invisivel_nao_fica_gravado(pro_user_id):
 
 @pytest.mark.parametrize("pago", [False, True])
 def test_gate_de_categoria_custom_com_planos_v2(user_id, monkeypatch, pago):
-    """O `conftest` força PLANS_V2_ENABLED="0", mas o DEFAULT de produção é
+    """O `conftest` roda este arquivo no v1 (ele está em `_AINDA_EM_V1`), mas o
+    DEFAULT de produção é
     LIGADO — e o gate saiu do monólito pro `plan_service.plan_gate_ok` neste
     PR. Este é o único teste do PR que roda o ramo v2.
 

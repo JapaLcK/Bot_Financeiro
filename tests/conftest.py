@@ -14,11 +14,9 @@ os.environ.setdefault("PII_ENCRYPTION_KEY", _Fernet.generate_key().decode())
 os.environ.setdefault("PII_HASH_PEPPER", "test-pepper-for-pytest-only-must-be-32-chars-long")
 # Não polui pii_access_log durante testes (cada decrypt registra uma row).
 os.environ.setdefault("PII_AUDIT_DISABLED", "1")
-# Escada de planos v2 lançada com default LIGADO (2026-08-06). A suíte foi
-# escrita no mundo v1 (gates binários Free×Pro, mocks de is_pro), então os
-# testes rodam com o freio puxado por padrão — os testes da escada
-# (test_plan_tiers, test_of_trial_expiry, etc.) ligam com setenv("...", "1").
-os.environ.setdefault("PLANS_V2_ENABLED", "0")
+# Escada de planos v2: a suíte roda o mundo de PRODUÇÃO (v2 e gate de acesso
+# ligados, que é o padrão do código sem env). Os arquivos ainda escritos para o
+# v1 ficam em `_AINDA_EM_V1`, na fixture `_mundo_do_plano` mais abaixo.
 
 # Bcrypt no custo mínimo — só nos testes. O custo padrão é calibrado para ser
 # lento de propósito, e a suíte hasheia senha/código de backup o tempo todo:
@@ -447,6 +445,78 @@ def _auto_cleanup_orphan_users():
             pass
 
 
+# Arquivos (basename) que ainda falham no v2 e rodam com o freio puxado até a
+# migração deles. Medido em 2026-09-23 na main 9cf5c8f: union das falhas de
+# duas rodadas completas com PLANS_V2_ENABLED=1 (`-n 4`), menos os arquivos já
+# migrados. Cada PR da migração tira os seus; a lista só encolhe.
+_AINDA_EM_V1 = {
+    "test_agent_chat_eval_fixtures.py",
+    "test_ai_chat_commands.py",
+    "test_ai_chat_tier2.py",
+    "test_audio_clarification.py",
+    "test_audio_multi_launch_ask_value.py",
+    "test_bill_amount_pending.py",
+    "test_billing_checkout.py",
+    "test_card_name_limite.py",
+    "test_cashflow_forecast_rotas.py",
+    "test_cashflow_receita_frequencia.py",
+    "test_category_normalization.py",
+    "test_credit_help_escala_pra_ia.py",
+    "test_full_handler_smoke.py",
+    "test_handle_incoming_routing.py",
+    "test_household_budget.py",
+    "test_log_falha_user_id.py",
+    "test_of_concurrency.py",
+    "test_of_connection_state.py",
+    "test_of_item_ownership.py",
+    "test_of_item_ownership_race.py",
+    "test_of_marca_removido.py",
+    "test_of_marca_removido_escrita.py",
+    "test_of_prazo_leituras_sob_o_lock.py",
+    "test_of_refresh_response.py",
+    "test_of_webhook_adopt.py",
+    "test_of_webhook_adopt_503.py",
+    "test_of_webhook_adopt_dupe.py",
+    "test_of_webhook_adopt_guards.py",
+    "test_of_webhook_adopt_race.py",
+    "test_ofx_import_route.py",
+    "test_open_finance_disconnect_route.py",
+    "test_pendencia_credito_abandono.py",
+    "test_pendencia_credito_escolha_de_mes.py",
+    "test_pendencia_credito_portoes.py",
+    "test_pendencia_credito_respostas_legitimas.py",
+    "test_pendencia_credito_steps_legitimos.py",
+    "test_pendencia_credito_vocabulario.py",
+    "test_pending_registry.py",
+    "test_pending_rollback.py",
+    "test_perguntas_guardam_contexto.py",
+    "test_piggy_agents.py",
+    "test_reconciliacao_rotas.py",
+    "test_recurring_value.py",
+    "test_virada_de_mes.py",
+    "test_whatsapp_daily_report.py",
+    "test_whatsapp_markup_escape.py",
+    "test_ws_subscription_gate.py",
+}
+
+
+def _aplica_mundo_do_plano(nome_arquivo: str, monkeypatch) -> None:
+    """Sem env é o padrão de produção (v2 e gate ligados); `_AINDA_EM_V1` puxa o
+    freio do v2. Os dois `delenv` impedem que uma env do shell de quem roda
+    decida o mundo. `setenv` no corpo do teste ou numa fixture do arquivo roda
+    depois desta e continua ganhando."""
+    monkeypatch.delenv("ACCESS_GATE_ENABLED", raising=False)
+    if nome_arquivo in _AINDA_EM_V1:
+        monkeypatch.setenv("PLANS_V2_ENABLED", "0")
+    else:
+        monkeypatch.delenv("PLANS_V2_ENABLED", raising=False)
+
+
+@pytest.fixture(autouse=True)
+def _mundo_do_plano(request, monkeypatch):
+    _aplica_mundo_do_plano(request.path.name, monkeypatch)
+
+
 @pytest.fixture()
 def user_id():
     uid = int(uuid.uuid4().int % 10_000_000_000)  # bigint ok
@@ -455,9 +525,12 @@ def user_id():
     _cleanup_user(uid)
 
 
-def promote_to_pro(user_id: int) -> int:
+def promote_to_pro(user_id: int, plan: str = "pro") -> int:
     """Mesma promoção da fixture `pro_user_id`, chamável no meio de um teste
-    (quando o user vem de outra fixture, ex.: id pequeno pro WhatsApp)."""
+    (quando o user vem de outra fixture, ex.: id pequeno pro WhatsApp).
+
+    `plan` é o valor gravado em `auth_accounts.plan`: o padrão `'pro'` é o Plus
+    no v2; quem precisa do tier mais alto pede `plan="pro_max"`."""
     import uuid as _uuid
     from db.connection import get_conn
     fake_email = f"pro-{_uuid.uuid4().hex[:8]}@test.local"
@@ -467,13 +540,13 @@ def promote_to_pro(user_id: int) -> int:
             row = cur.fetchone()
             if row:
                 cur.execute(
-                    "update auth_accounts set plan='pro', plan_expires_at=null where user_id = %s",
-                    (user_id,),
+                    "update auth_accounts set plan=%s, plan_expires_at=null where user_id = %s",
+                    (plan, user_id),
                 )
             else:
                 cur.execute(
-                    "insert into auth_accounts(user_id, email, password_hash, plan) values (%s, %s, 'x', 'pro')",
-                    (user_id, fake_email),
+                    "insert into auth_accounts(user_id, email, password_hash, plan) values (%s, %s, 'x', %s)",
+                    (user_id, fake_email, plan),
                 )
         conn.commit()
     return user_id
@@ -484,3 +557,17 @@ def pro_user_id(user_id: int):
     """user_id já promovido para plano Pro — use em testes que precisam criar
     múltiplas caixinhas/cartões ou exercem features Pro."""
     return promote_to_pro(user_id)
+
+
+def usuario_pagante(plan: str = "pro") -> int:
+    """Usuário novo, com id PEQUENO, já com plano. Acima de ~2e9 o handler do
+    bot troca o id por hash (`_normalize_user_id`) e o lançamento cai noutro
+    usuário. A limpeza é a do `_auto_cleanup_orphan_users`."""
+    uid = int(uuid.uuid4().int % 900_000_000) + 1
+    ensure_user(uid)
+    return promote_to_pro(uid, plan)
+
+
+@pytest.fixture()
+def pro_small_uid() -> int:
+    return usuario_pagante()

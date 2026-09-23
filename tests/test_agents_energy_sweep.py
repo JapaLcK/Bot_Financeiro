@@ -40,9 +40,10 @@ def _ativos(user_id: int) -> set[str]:
 def so_este_usuario(user_id, monkeypatch):
     """v2 ON + lister escopado ao usuário de teste.
 
-    O `PLANS_V2_ENABLED=1` não é decoração: o `tests/conftest.py:21` põe `0` na
-    suíte inteira, então sem isto a varredura sai no primeiro `if` e TODO teste
-    daqui passaria por vazio — inclusive os que afirmam que ela pausou algo.
+    O `PLANS_V2_ENABLED=1` repete o `tests/conftest.py`, que já roda este
+    arquivo no v2 (ele não está em `_AINDA_EM_V1`), e o segura se ele entrar na
+    lista: no v1 a varredura sai no primeiro `if` e TODO teste daqui passaria
+    por vazio — inclusive os que afirmam que ela pausou algo.
     A varredura real percorre a tabela toda e o DB de teste é compartilhado.
     """
     monkeypatch.setenv("PLANS_V2_ENABLED", "1")

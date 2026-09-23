@@ -39,6 +39,7 @@ from fastapi.testclient import TestClient
 
 import frontend.finance_bot_websocket_custom as dashboard
 import frontend.routes.shared as shared
+from conftest import promote_to_pro
 from core.services.email_service import send_password_reset_email
 from db.connection import get_conn
 from tests._helpers_pii import insert_auth_account_pii
@@ -128,6 +129,7 @@ def test_email_com_senha_mantem_redefinir(spy_email):
 
 def test_password_reset_route_conta_google(user_id, spy_email, sem_rate_limit):
     email = _cria_conta(user_id, com_senha=False)
+    promote_to_pro(user_id)
     client, headers = _client_for(user_id, email)
 
     resp = client.post(f"/settings/{user_id}/password-reset", headers=headers)
@@ -141,6 +143,7 @@ def test_password_reset_route_conta_google(user_id, spy_email, sem_rate_limit):
 def test_password_reset_route_conta_com_senha(user_id, spy_email, sem_rate_limit):
     """POSITIVO: quem TEM senha continua lendo "redefinir" nos dois pontos."""
     email = _cria_conta(user_id, com_senha=True)
+    promote_to_pro(user_id)
     client, headers = _client_for(user_id, email)
 
     resp = client.post(f"/settings/{user_id}/password-reset", headers=headers)
