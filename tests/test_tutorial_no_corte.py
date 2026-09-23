@@ -3,7 +3,7 @@ tests/test_tutorial_no_corte.py — o tutorial não convida quem foi cortado a
 fazer o que a próxima mensagem recusa.
 
 Sem o prefixo `wa_` de propósito: metade do conserto mora no `_paywall_gate`,
-que é dos DOIS canais, e o caso do Discord está aqui embaixo.
+que é do `handle_incoming`, não do adaptador do WhatsApp.
 
 Arquivo próprio porque `tests/test_wa_botao_velho_no_corte.py` passou de 350
 linhas (`tests/test_max_lines_python.py`) e porque o assunto é outro: lá é o
@@ -30,7 +30,6 @@ from __future__ import annotations
 # módulo que a define, e sem ela o `conftest` roda com `PLANS_V2_ENABLED=0` — o
 # gate se auto-desliga, nada é barrado e os dois negativos daqui ficariam verdes
 # medindo NADA. Custou dois vermelhos antes de eu notar.
-from _paywall_gate_helpers import diga as _diga
 from test_wa_botao_velho_no_corte import (  # noqa: F401  (fixtures por import)
     _clique, _conta, _gate_ligado, _texto, bancada,
 )
@@ -65,8 +64,6 @@ from test_wa_botao_velho_no_corte import (  # noqa: F401  (fixtures por import)
 # `h_help.answer_help(ajuda, texto, platform)` (a forma anterior; nada apagado).
 # VERMELHOS, e são OUTROS:
 #   `test_cortado_digitando_tutorial_tambem_e_barrado`
-#   `test_cortado_digitando_tutorial_no_DISCORD_tambem_e_barrado`
-# É a perna dos DOIS canais; o Discord só cai por esta.
 #
 # **(c) a superfície de ajuda do WhatsApp** — em `_ajuda_do_cortado`, troque a
 # ÚLTIMA linha (`return True`) por `return False`. **Não** "troque o corpo": há
@@ -81,8 +78,8 @@ from test_wa_botao_velho_no_corte import (  # noqa: F401  (fixtures por import)
 # e o registro seguinte é recusado — a pior ordem possível das duas mensagens.
 #
 # Positivos do grupo, VERDES sob a injeção:
-#   `test_cortado_ainda_alcanca_o_menu_de_ajuda`
-#   `test_pagante_continua_vendo_o_tutorial`
+#   `test_pagante_digitando_tutorial_recebe_o_tour`
+#   `test_pagante_tocando_o_botao_do_tutorial_segue_no_tour`
 
 
 def test_cortado_tocando_o_botao_do_tutorial_nao_e_convidado_a_tentar(monkeypatch, bancada):
@@ -216,38 +213,35 @@ def test_cortado_dizendo_oi_depois_do_autolink_nao_recebe_o_tour(monkeypatch, ba
     assert respostas and "sem plano ativo" in respostas[0].lower(), respostas
 
 
-def test_cortado_digitando_tutorial_no_DISCORD_tambem_e_barrado():
-    """A prova de que o conserto do `help.tutorial` vale para os DOIS canais.
-
-    Isto estava DEDUZIDO ("os dois entram no mesmo `_paywall_gate`") e virou
-    medição, porque o Discord tem ordenação própria: `discord_bot.py:180` chama
-    `core_handle_incoming(incoming)` ANTES dos cogs e, se ele responder, os cogs
-    não rodam. A dedução estava certa — mas a razão de escrever o caso é que uma
-    ordenação diferente a teria invalidado sem nenhum teste ficar vermelho.
-
-    Vai pelo `handle_incoming` com `platform="discord"`, que é o mesmo objeto
-    que o adapter monta (§3: rode a conversa, não a função). Não sobe o bot: o
-    que muda entre os canais é o despacho, e o despacho está lido acima.
-    """
-    uid = _conta(cortada=True)
-
-    resposta = _diga(uid, "tutorial", plataforma="discord")
-
-    baixa = resposta.lower()
-    assert "plano" in baixa, f"o cortado leu o tutorial no Discord: {resposta!r}"
-    assert "gastei" not in baixa, (
-        f"o cortado foi convidado a registrar um gasto no Discord: {resposta!r}")
-
-
-def test_pagante_continua_lendo_o_tutorial_no_DISCORD():
-    """POSITIVO do par acima: o conserto tirou o tutorial de quem NÃO tem
-    acesso, não de todo mundo. Sem ele, um gate que recusasse tudo passaria."""
+def test_pagante_digitando_tutorial_recebe_o_tour(monkeypatch, bancada):
+    """POSITIVO de `test_cortado_digitando_tutorial_tambem_e_barrado`: o gate
+    tirou o tutorial de quem NÃO tem acesso, não de todo mundo. Sem ele, um gate
+    que recusasse tudo passaria nos negativos."""
+    respostas, _ = bancada
     uid = _conta(cortada=False)
+    abriu = []
 
-    resposta = _diga(uid, "tutorial", plataforma="discord")
+    import adapters.whatsapp.wa_runtime as wr
+    monkeypatch.setattr(wr, "send_welcome", lambda *a, **k: abriu.append(a))
 
-    assert "gastei" in resposta.lower(), (
-        f"o pagante perdeu o tutorial no Discord: {resposta!r}")
+    _texto(uid, monkeypatch, "tutorial")
+
+    assert abriu, f"o pagante digitou `tutorial` e não recebeu o tour: {respostas}"
+
+
+def test_pagante_tocando_o_botao_do_tutorial_segue_no_tour(monkeypatch, bancada):
+    """POSITIVO de `test_cortado_tocando_o_botao_do_tutorial_nao_e_convidado_a_tentar`."""
+    respostas, _ = bancada
+    uid = _conta(cortada=False)
+    tocados = []
+
+    import adapters.whatsapp.wa_runtime as wr
+    monkeypatch.setattr(wr, "handle_tutorial_button", lambda to, bid: tocados.append(bid))
+    monkeypatch.setattr(wr, "get_tutorial_button_id", lambda raw: "tut_skip")
+
+    _clique(uid, monkeypatch, "tut_skip")
+
+    assert tocados == ["tut_skip"], f"o pagante tocou o tutorial e parou no gate: {respostas}"
 
 
 # ── O menu de COMANDOS, a porta que a MEDIÇÃO ERRADA manteve aberta ──────────

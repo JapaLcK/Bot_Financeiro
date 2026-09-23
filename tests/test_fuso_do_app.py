@@ -387,7 +387,7 @@ def test_a_conversa_responde_pelo_dia_de_sao_paulo():
            "mercado ontem", valor=90)
 
     def fala(texto: str) -> str:
-        out = handle_incoming(IncomingMessage(platform="discord", user_id=uid, text=texto))
+        out = handle_incoming(IncomingMessage(platform="whatsapp", user_id=uid, text=texto))
         assert out, f"sem resposta para {texto!r}"
         return out[0].text
 

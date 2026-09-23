@@ -137,7 +137,7 @@ def test_classify_apagar_compra_vai_para_credito():
 def test_route_gasto_no_cartao_nao_debita_saldo(user_id):
     card_id = create_card(user_id=user_id, name="Nubank", closing_day=1, due_day=8)
     set_default_card(user_id, card_id)
-    msg = IncomingMessage(platform="discord", user_id=user_id, text="gastei 150 no cartao nubank")
+    msg = IncomingMessage(platform="whatsapp", user_id=user_id, text="gastei 150 no cartao nubank")
 
     response = route(classify(msg.text), msg)
 
@@ -172,7 +172,7 @@ def test_route_apagar_ct_remove_compra_da_fatura(user_id):
         nota="teste",
         purchased_at=date.today(),
     )
-    msg = IncomingMessage(platform="discord", user_id=user_id, text=f"apagar CC{tx_id}")
+    msg = IncomingMessage(platform="whatsapp", user_id=user_id, text=f"apagar CC{tx_id}")
 
     response = route(classify(msg.text), msg)
 
@@ -191,7 +191,7 @@ def test_route_apagar_compra_com_codigo_simples_remove_da_fatura(user_id):
         nota="teste",
         purchased_at=date.today(),
     )
-    msg = IncomingMessage(platform="discord", user_id=user_id, text=f"apagar CC{tx_id}")
+    msg = IncomingMessage(platform="whatsapp", user_id=user_id, text=f"apagar CC{tx_id}")
 
     response = route(classify(msg.text), msg)
 
@@ -206,7 +206,7 @@ def test_route_compra_acima_do_limite_e_bloqueada(user_id):
 
     set_card_limit(user_id, card_id, 100.0)
     set_default_card(user_id, card_id)
-    msg = IncomingMessage(platform="discord", user_id=user_id, text="gastei 150 no cartao teste")
+    msg = IncomingMessage(platform="whatsapp", user_id=user_id, text="gastei 150 no cartao teste")
 
     response = route(classify(msg.text), msg)
 
@@ -221,7 +221,7 @@ def test_route_cartoes_lista_pelo_fluxo_central(user_id):
     from db import set_card_limit
 
     set_card_limit(user_id, card_id, 1000.0)
-    msg = IncomingMessage(platform="discord", user_id=user_id, text="Cartões")
+    msg = IncomingMessage(platform="whatsapp", user_id=user_id, text="Cartões")
     result = classify("Cartões")
 
     response = route(result, msg)
@@ -253,7 +253,7 @@ def test_classify_vocabulario_cartao_principal():
 
 def test_route_frase_natural_lista_cartoes(user_id):
     create_card(user_id=user_id, name="Nubank", closing_day=1, due_day=8)
-    msg = IncomingMessage(platform="discord", user_id=user_id, text="quais sao meus cartoes?")
+    msg = IncomingMessage(platform="whatsapp", user_id=user_id, text="quais sao meus cartoes?")
 
     response = route(classify(msg.text), msg)
 
@@ -266,7 +266,7 @@ def test_route_pergunta_cartao_principal(user_id):
     from db import set_default_card
 
     set_default_card(user_id, card_id)
-    msg = IncomingMessage(platform="discord", user_id=user_id, text="qual meu cartao principal?")
+    msg = IncomingMessage(platform="whatsapp", user_id=user_id, text="qual meu cartao principal?")
 
     response = route(classify(msg.text), msg)
 
@@ -287,7 +287,7 @@ def test_route_pergunta_fatura_do_cartao(user_id):
         nota="teste",
         purchased_at=date(2026, 4, 5),
     )
-    msg = IncomingMessage(platform="discord", user_id=user_id, text="quanto tenho na fatura do nubank?")
+    msg = IncomingMessage(platform="whatsapp", user_id=user_id, text="quanto tenho na fatura do nubank?")
 
     response = route(classify(msg.text), msg)
 
@@ -308,7 +308,7 @@ def test_route_pergunta_fatura_deste_cartao_usa_principal(user_id):
         nota="teste",
         purchased_at=date(2026, 4, 5),
     )
-    msg = IncomingMessage(platform="discord", user_id=user_id, text="quanto tenho na fatura deste cartao?")
+    msg = IncomingMessage(platform="whatsapp", user_id=user_id, text="quanto tenho na fatura deste cartao?")
 
     response = route(classify(msg.text), msg)
 
@@ -320,11 +320,11 @@ def test_free_user_segundo_cartao_recebe_mensagem_amigavel(user_id):
     """Free pode criar 1 cartão; ao tentar o 2º, bot devolve CTA pra upgrade."""
     create_card(user_id=user_id, name="Nubank", closing_day=1, due_day=8)
     # Inicia fluxo de criar cartão e avança até o ponto que chama create_card
-    msg = IncomingMessage(platform="discord", user_id=user_id, text="criar cartao Visa")
+    msg = IncomingMessage(platform="whatsapp", user_id=user_id, text="criar cartao Visa")
     route(classify(msg.text), msg)
-    route(classify("dia 5"), IncomingMessage(platform="discord", user_id=user_id, text="dia 5"))
+    route(classify("dia 5"), IncomingMessage(platform="whatsapp", user_id=user_id, text="dia 5"))
     # Esta é a chamada que dispara create_card → PlanLimitExceeded
-    response = route(classify("dia 10"), IncomingMessage(platform="discord", user_id=user_id, text="dia 10"))
+    response = route(classify("dia 10"), IncomingMessage(platform="whatsapp", user_id=user_id, text="dia 10"))
     assert "plano pago" in response
     assert "/precos" in response or "upgrade" in response.lower()
 
@@ -332,7 +332,7 @@ def test_free_user_segundo_cartao_recebe_mensagem_amigavel(user_id):
 def test_free_user_segunda_caixinha_recebe_mensagem_amigavel(user_id):
     """Free pode criar 1 caixinha; ao tentar a 2ª, bot devolve CTA pra upgrade."""
     create_pocket(user_id, "viagem")
-    msg = IncomingMessage(platform="discord", user_id=user_id, text="criar caixinha presente")
+    msg = IncomingMessage(platform="whatsapp", user_id=user_id, text="criar caixinha presente")
     response = route(classify(msg.text), msg)
     assert "plano pago" in response
     assert "/precos" in response or "upgrade" in response.lower()
@@ -342,7 +342,7 @@ def test_route_trocar_cartao_principal_abre_fluxo(pro_user_id):
     user_id = pro_user_id
     create_card(user_id=user_id, name="Nubank", closing_day=1, due_day=8)
     create_card(user_id=user_id, name="Visa", closing_day=5, due_day=10)
-    msg = IncomingMessage(platform="discord", user_id=user_id, text="quero mudar meu cartao principal")
+    msg = IncomingMessage(platform="whatsapp", user_id=user_id, text="quero mudar meu cartao principal")
 
     response = route(classify(msg.text), msg)
 
@@ -351,7 +351,7 @@ def test_route_trocar_cartao_principal_abre_fluxo(pro_user_id):
 
 def test_route_pergunta_quando_vence_cartao_existente(user_id):
     create_card(user_id=user_id, name="Nubank", closing_day=1, due_day=8)
-    msg = IncomingMessage(platform="discord", user_id=user_id, text="meu nubank vence quando?")
+    msg = IncomingMessage(platform="whatsapp", user_id=user_id, text="meu nubank vence quando?")
 
     response = route(classify(msg.text), msg)
 
@@ -361,7 +361,7 @@ def test_route_pergunta_quando_vence_cartao_existente(user_id):
 
 def test_route_pergunta_quando_vence_cartao_inexistente_oferece_cadastro(user_id):
     create_card(user_id=user_id, name="Nubank", closing_day=1, due_day=8)
-    msg = IncomingMessage(platform="discord", user_id=user_id, text="meu visa vence quando?")
+    msg = IncomingMessage(platform="whatsapp", user_id=user_id, text="meu visa vence quando?")
 
     response = route(classify(msg.text), msg)
 
@@ -371,7 +371,7 @@ def test_route_pergunta_quando_vence_cartao_inexistente_oferece_cadastro(user_id
 
 def test_route_qual_cartao_fecha_dia_30(user_id):
     create_card(user_id=user_id, name="Mastercard", closing_day=30, due_day=31)
-    msg = IncomingMessage(platform="discord", user_id=user_id, text="qual cartao fecha dia 30?")
+    msg = IncomingMessage(platform="whatsapp", user_id=user_id, text="qual cartao fecha dia 30?")
 
     response = route(classify(msg.text), msg)
 
@@ -380,7 +380,7 @@ def test_route_qual_cartao_fecha_dia_30(user_id):
 
 
 def test_contextual_help_para_cartao_quando_nao_entende(user_id):
-    msg = IncomingMessage(platform="discord", user_id=user_id, text="cartao banana extraterrestre")
+    msg = IncomingMessage(platform="whatsapp", user_id=user_id, text="cartao banana extraterrestre")
     result = classify(msg.text)
 
     response = route(result, msg)
@@ -392,7 +392,7 @@ def test_contextual_help_para_cartao_quando_nao_entende(user_id):
 
 
 def test_contextual_help_para_caixinha_quando_nao_entende(user_id):
-    msg = IncomingMessage(platform="discord", user_id=user_id, text="caixinha banana cosmica")
+    msg = IncomingMessage(platform="whatsapp", user_id=user_id, text="caixinha banana cosmica")
 
     response = route(classify(msg.text), msg)
 
@@ -402,7 +402,7 @@ def test_contextual_help_para_caixinha_quando_nao_entende(user_id):
 
 
 def test_contextual_help_para_caixinha_com_erro_de_digitacao(user_id):
-    msg = IncomingMessage(platform="discord", user_id=user_id, text="caxinha banana cosmica")
+    msg = IncomingMessage(platform="whatsapp", user_id=user_id, text="caxinha banana cosmica")
 
     response = route(classify(msg.text), msg)
 
@@ -412,7 +412,7 @@ def test_contextual_help_para_caixinha_com_erro_de_digitacao(user_id):
 
 
 def test_contextual_help_para_investimento_quando_nao_entende(user_id):
-    msg = IncomingMessage(platform="discord", user_id=user_id, text="investimento maluco intergalactico")
+    msg = IncomingMessage(platform="whatsapp", user_id=user_id, text="investimento maluco intergalactico")
 
     response = route(classify(msg.text), msg)
 
@@ -431,7 +431,7 @@ def test_route_saque_generico_reconhece_investimento_pelo_nome(user_id):
     db.add_launch_and_update_balance(user_id, "receita", 1000, None, "seed saldo")
     db.investment_deposit_from_account(user_id, "Nu Reserva Planejada", 1000, "seed deposit")
 
-    msg = IncomingMessage(platform="discord", user_id=user_id, text="saquei 100 de Nu Reserva Planejada")
+    msg = IncomingMessage(platform="whatsapp", user_id=user_id, text="saquei 100 de Nu Reserva Planejada")
     result = classify(msg.text)
     response = route(result, msg)
 
@@ -440,7 +440,7 @@ def test_route_saque_generico_reconhece_investimento_pelo_nome(user_id):
 
 
 def test_contextual_help_para_lancamentos_quando_nao_entende(user_id):
-    msg = IncomingMessage(platform="discord", user_id=user_id, text="gastos banana quanticos")
+    msg = IncomingMessage(platform="whatsapp", user_id=user_id, text="gastos banana quanticos")
 
     response = route(classify(msg.text), msg)
 
@@ -452,7 +452,7 @@ def test_contextual_help_para_lancamentos_quando_nao_entende(user_id):
 def test_gastos_com_texto_solto_nao_lista_lancamentos(user_id):
     add_launch_and_update_balance(user_id, "receita", 1000, None, "seed")
     add_launch_and_update_balance(user_id, "despesa", 50, "mercado", "gastei 50 mercado")
-    msg = IncomingMessage(platform="discord", user_id=user_id, text="gastos bana quanticos")
+    msg = IncomingMessage(platform="whatsapp", user_id=user_id, text="gastos bana quanticos")
 
     response = route(classify(msg.text), msg)
 
@@ -461,7 +461,7 @@ def test_gastos_com_texto_solto_nao_lista_lancamentos(user_id):
 
 
 def test_contextual_help_para_categorias_quando_nao_entende(user_id):
-    msg = IncomingMessage(platform="discord", user_id=user_id, text="categoria marciana aleatoria")
+    msg = IncomingMessage(platform="whatsapp", user_id=user_id, text="categoria marciana aleatoria")
 
     response = route(classify(msg.text), msg)
 
@@ -471,7 +471,7 @@ def test_contextual_help_para_categorias_quando_nao_entende(user_id):
 
 
 def test_listar_regras_usa_fluxo_de_categorias(user_id):
-    msg = IncomingMessage(platform="discord", user_id=user_id, text="listar regras")
+    msg = IncomingMessage(platform="whatsapp", user_id=user_id, text="listar regras")
 
     response = route(classify(msg.text), msg)
 
@@ -479,7 +479,7 @@ def test_listar_regras_usa_fluxo_de_categorias(user_id):
 
 
 def test_aprender_como_cria_regra(user_id):
-    msg = IncomingMessage(platform="discord", user_id=user_id, text="aprender ifood como alimentacao")
+    msg = IncomingMessage(platform="whatsapp", user_id=user_id, text="aprender ifood como alimentacao")
 
     response = route(classify(msg.text), msg)
 
@@ -488,7 +488,7 @@ def test_aprender_como_cria_regra(user_id):
 
 
 def test_regras_de_categorias_plural_lista_regras(user_id):
-    msg = IncomingMessage(platform="discord", user_id=user_id, text="regras de categorias")
+    msg = IncomingMessage(platform="whatsapp", user_id=user_id, text="regras de categorias")
 
     response = route(classify(msg.text), msg)
 
@@ -498,9 +498,9 @@ def test_regras_de_categorias_plural_lista_regras(user_id):
 def test_remover_regra_remove_regra_existente(user_id):
     route(
         classify("aprender ifood como alimentacao"),
-        IncomingMessage(platform="discord", user_id=user_id, text="aprender ifood como alimentacao"),
+        IncomingMessage(platform="whatsapp", user_id=user_id, text="aprender ifood como alimentacao"),
     )
-    msg = IncomingMessage(platform="discord", user_id=user_id, text="remover regra ifood")
+    msg = IncomingMessage(platform="whatsapp", user_id=user_id, text="remover regra ifood")
 
     response = route(classify(msg.text), msg)
 
@@ -511,9 +511,9 @@ def test_remover_regra_remove_regra_existente(user_id):
 def test_remove_regra_sem_r_funciona(user_id):
     route(
         classify("aprender money como investimentos"),
-        IncomingMessage(platform="discord", user_id=user_id, text="aprender money como investimentos"),
+        IncomingMessage(platform="whatsapp", user_id=user_id, text="aprender money como investimentos"),
     )
-    msg = IncomingMessage(platform="discord", user_id=user_id, text="remove regra money")
+    msg = IncomingMessage(platform="whatsapp", user_id=user_id, text="remove regra money")
 
     response = route(classify(msg.text), msg)
 
@@ -524,9 +524,9 @@ def test_remove_regra_sem_r_funciona(user_id):
 def test_remover_regra_por_nome_da_categoria_remove_regras_associadas(user_id):
     route(
         classify("aprender bitcoin como criptomoedas"),
-        IncomingMessage(platform="discord", user_id=user_id, text="aprender bitcoin como criptomoedas"),
+        IncomingMessage(platform="whatsapp", user_id=user_id, text="aprender bitcoin como criptomoedas"),
     )
-    msg = IncomingMessage(platform="discord", user_id=user_id, text="remover regra criptomoedas")
+    msg = IncomingMessage(platform="whatsapp", user_id=user_id, text="remover regra criptomoedas")
 
     response = route(classify(msg.text), msg)
 
@@ -537,12 +537,12 @@ def test_remover_regra_por_nome_da_categoria_remove_regras_associadas(user_id):
 def test_regra_aprendida_de_investimentos_vira_movimentacao_interna(user_id):
     route(
         classify("aprender bitcoin como criptomoedas"),
-        IncomingMessage(platform="discord", user_id=user_id, text="aprender bitcoin como criptomoedas"),
+        IncomingMessage(platform="whatsapp", user_id=user_id, text="aprender bitcoin como criptomoedas"),
     )
 
     response = route(
         classify("gastei 1598,97 em bitcoin"),
-        IncomingMessage(platform="discord", user_id=user_id, text="gastei 1598,97 em bitcoin"),
+        IncomingMessage(platform="whatsapp", user_id=user_id, text="gastei 1598,97 em bitcoin"),
     )
 
     summary = get_summary_by_period(user_id, date.today().replace(day=1), date.today())
@@ -553,7 +553,7 @@ def test_regra_aprendida_de_investimentos_vira_movimentacao_interna(user_id):
 
 
 def test_lancamento_manual_ensina_categoria_automaticamente(user_id):
-    msg = IncomingMessage(platform="discord", user_id=user_id, text="gastei 35 na farmacia sao jose")
+    msg = IncomingMessage(platform="whatsapp", user_id=user_id, text="gastei 35 na farmacia sao jose")
 
     response = route(classify(msg.text), msg)
 
@@ -562,7 +562,7 @@ def test_lancamento_manual_ensina_categoria_automaticamente(user_id):
 
 
 def test_contextual_help_para_dashboard_quando_nao_entende(user_id):
-    msg = IncomingMessage(platform="discord", user_id=user_id, text="dashboard estranho demais")
+    msg = IncomingMessage(platform="whatsapp", user_id=user_id, text="dashboard estranho demais")
 
     response = route(classify(msg.text), msg)
 
@@ -572,7 +572,7 @@ def test_contextual_help_para_dashboard_quando_nao_entende(user_id):
 
 
 def test_contextual_help_generico_quando_nao_entende_nada(user_id):
-    msg = IncomingMessage(platform="discord", user_id=user_id, text="banana radioativo do espaco")
+    msg = IncomingMessage(platform="whatsapp", user_id=user_id, text="banana radioativo do espaco")
 
     response = route(classify(msg.text), msg)
 
@@ -582,7 +582,7 @@ def test_contextual_help_generico_quando_nao_entende_nada(user_id):
 
 def test_route_pergunta_como_registrar_compra_no_credito(user_id):
     msg = IncomingMessage(
-        platform="discord",
+        platform="whatsapp",
         user_id=user_id,
         text="como faço para registrar compras no cartao de credito",
     )
@@ -601,7 +601,7 @@ def test_classify_sinonimos_de_cadastro_de_cartao():
 
 
 def test_route_cadastrar_cartao_abre_fluxo_guiado(user_id):
-    msg = IncomingMessage(platform="discord", user_id=user_id, text="cadastrar cartao")
+    msg = IncomingMessage(platform="whatsapp", user_id=user_id, text="cadastrar cartao")
 
     response = route(classify(msg.text), msg)
     pending = get_pending_action(user_id)
@@ -612,7 +612,7 @@ def test_route_cadastrar_cartao_abre_fluxo_guiado(user_id):
 
 
 def test_route_registrar_cartao_nubank_pergunta_fechamento(user_id):
-    msg = IncomingMessage(platform="discord", user_id=user_id, text="registrar cartao nubank")
+    msg = IncomingMessage(platform="whatsapp", user_id=user_id, text="registrar cartao nubank")
 
     response = route(classify(msg.text), msg)
     pending = get_pending_action(user_id)
@@ -624,7 +624,7 @@ def test_route_registrar_cartao_nubank_pergunta_fechamento(user_id):
 
 def test_route_registrar_cartao_com_dados_completos(user_id):
     msg = IncomingMessage(
-        platform="discord",
+        platform="whatsapp",
         user_id=user_id,
         text="registrar cartao Nubank fecha 1 vence 8",
     )
@@ -636,7 +636,7 @@ def test_route_registrar_cartao_com_dados_completos(user_id):
 
 def test_route_pergunta_como_criar_caixinha(user_id):
     msg = IncomingMessage(
-        platform="discord",
+        platform="whatsapp",
         user_id=user_id,
         text="como faço para criar uma caixinha",
     )
@@ -649,7 +649,7 @@ def test_route_pergunta_como_criar_caixinha(user_id):
 
 def test_route_pergunta_como_importar_ofx(user_id):
     msg = IncomingMessage(
-        platform="discord",
+        platform="whatsapp",
         user_id=user_id,
         text="como faço para importar um extrato ofx",
     )
@@ -662,7 +662,7 @@ def test_route_pergunta_como_importar_ofx(user_id):
 
 def test_route_pergunta_como_fazer_um_lancamento(user_id):
     msg = IncomingMessage(
-        platform="discord",
+        platform="whatsapp",
         user_id=user_id,
         text="como faço para fazer um lançamento",
     )
@@ -675,7 +675,7 @@ def test_route_pergunta_como_fazer_um_lancamento(user_id):
 
 def test_route_pergunta_como_faco_um_lancamento(user_id):
     msg = IncomingMessage(
-        platform="discord",
+        platform="whatsapp",
         user_id=user_id,
         text="como faco um lancamento?",
     )
@@ -688,7 +688,7 @@ def test_route_pergunta_como_faco_um_lancamento(user_id):
 
 def test_route_pergunta_como_apagar_compra_no_credito(user_id):
     msg = IncomingMessage(
-        platform="discord",
+        platform="whatsapp",
         user_id=user_id,
         text="como faço para apagar tal compra no crédito",
     )
@@ -701,7 +701,7 @@ def test_route_pergunta_como_apagar_compra_no_credito(user_id):
 
 def test_route_pergunta_com_apago_um_cartao(user_id):
     msg = IncomingMessage(
-        platform="discord",
+        platform="whatsapp",
         user_id=user_id,
         text="com apago um cartao?",
     )
@@ -714,7 +714,7 @@ def test_route_pergunta_com_apago_um_cartao(user_id):
 
 def test_route_pergunta_como_apagar_uma_parcela(user_id):
     msg = IncomingMessage(
-        platform="discord",
+        platform="whatsapp",
         user_id=user_id,
         text="como faço para apagar uma parcela",
     )
@@ -729,7 +729,7 @@ def test_route_pergunta_como_apagar_uma_parcela(user_id):
 def test_route_excluir_cartao_abre_confirmacao(user_id):
     create_card(user_id=user_id, name="Nubank", closing_day=1, due_day=8)
     msg = IncomingMessage(
-        platform="discord",
+        platform="whatsapp",
         user_id=user_id,
         text="excluir cartao Nubank",
     )
@@ -743,7 +743,7 @@ def test_route_excluir_cartao_abre_confirmacao(user_id):
 
 def test_route_criar_cartao_pelo_fluxo_central(user_id):
     msg = IncomingMessage(
-        platform="discord",
+        platform="whatsapp",
         user_id=user_id,
         text="Criar cartão Nubank fecha 1 vence 8",
     )
@@ -755,7 +755,7 @@ def test_route_criar_cartao_pelo_fluxo_central(user_id):
 
 
 def test_route_criar_cartao_abre_fluxo_guiado(user_id):
-    msg = IncomingMessage(platform="discord", user_id=user_id, text="criar cartao")
+    msg = IncomingMessage(platform="whatsapp", user_id=user_id, text="criar cartao")
 
     response = route(classify(msg.text), msg)
     pending = get_pending_action(user_id)
@@ -766,7 +766,7 @@ def test_route_criar_cartao_abre_fluxo_guiado(user_id):
 
 
 def test_route_criar_cartao_nubank_pergunta_fechamento(user_id):
-    msg = IncomingMessage(platform="discord", user_id=user_id, text="criar cartao nubank")
+    msg = IncomingMessage(platform="whatsapp", user_id=user_id, text="criar cartao nubank")
 
     response = route(classify(msg.text), msg)
     pending = get_pending_action(user_id)
@@ -777,26 +777,26 @@ def test_route_criar_cartao_nubank_pergunta_fechamento(user_id):
 
 
 def test_fluxo_completo_primeiro_cartao_define_principal_e_lembrete(user_id):
-    msg = IncomingMessage(platform="discord", user_id=user_id, text="criar cartao nubank")
+    msg = IncomingMessage(platform="whatsapp", user_id=user_id, text="criar cartao nubank")
     route(classify(msg.text), msg)
 
-    response = route(classify("dia 1"), IncomingMessage(platform="discord", user_id=user_id, text="dia 1"))
+    response = route(classify("dia 1"), IncomingMessage(platform="whatsapp", user_id=user_id, text="dia 1"))
     assert "Quando vence a fatura" in response
 
-    response = route(classify("dia 8"), IncomingMessage(platform="discord", user_id=user_id, text="dia 8"))
+    response = route(classify("dia 8"), IncomingMessage(platform="whatsapp", user_id=user_id, text="dia 8"))
     assert "registrado com sucesso" in response
     assert "já foi definido como principal" in response
     assert "Gostaria de receber notificações" in response
 
-    response = route(classify("sim"), IncomingMessage(platform="discord", user_id=user_id, text="sim"))
+    response = route(classify("sim"), IncomingMessage(platform="whatsapp", user_id=user_id, text="sim"))
     assert "Quantos dias antes" in response
 
     # Após informar os dias, o bot pergunta sobre limite de crédito
-    response = route(classify("3"), IncomingMessage(platform="discord", user_id=user_id, text="3"))
+    response = route(classify("3"), IncomingMessage(platform="whatsapp", user_id=user_id, text="3"))
     assert "limite de crédito" in response.lower()
 
     # Usuário pula o limite — bot finaliza e mostra resumo do cartão
-    response = route(classify("não"), IncomingMessage(platform="discord", user_id=user_id, text="não"))
+    response = route(classify("não"), IncomingMessage(platform="whatsapp", user_id=user_id, text="não"))
     assert "Cartão principal: Sim" in response
     assert "Lembrete: 3 dia(s) antes" in response
 
@@ -808,22 +808,22 @@ def test_fluxo_completo_primeiro_cartao_define_principal_e_lembrete(user_id):
 def test_fluxo_segundo_cartao_pergunta_se_vira_principal(pro_user_id):
     user_id = pro_user_id
     create_card(user_id=user_id, name="Nubank", closing_day=1, due_day=8)
-    msg = IncomingMessage(platform="discord", user_id=user_id, text="criar cartao Visa")
+    msg = IncomingMessage(platform="whatsapp", user_id=user_id, text="criar cartao Visa")
     route(classify(msg.text), msg)
-    route(classify("dia 5"), IncomingMessage(platform="discord", user_id=user_id, text="dia 5"))
-    response = route(classify("dia 10"), IncomingMessage(platform="discord", user_id=user_id, text="dia 10"))
+    route(classify("dia 5"), IncomingMessage(platform="whatsapp", user_id=user_id, text="dia 5"))
+    response = route(classify("dia 10"), IncomingMessage(platform="whatsapp", user_id=user_id, text="dia 10"))
 
     assert "Gostaria de receber notificações" in response
 
     # Sem notificação → bot pergunta sobre limite antes de oferecer trocar principal
-    response = route(classify("nao"), IncomingMessage(platform="discord", user_id=user_id, text="nao"))
+    response = route(classify("nao"), IncomingMessage(platform="whatsapp", user_id=user_id, text="nao"))
     assert "limite de crédito" in response.lower()
 
     # Sem limite → bot pergunta se quer trocar cartão principal
-    response = route(classify("não"), IncomingMessage(platform="discord", user_id=user_id, text="não"))
+    response = route(classify("não"), IncomingMessage(platform="whatsapp", user_id=user_id, text="não"))
     assert "Deseja tornar o **Visa** seu cartão principal" in response
 
-    response = route(classify("sim"), IncomingMessage(platform="discord", user_id=user_id, text="sim"))
+    response = route(classify("sim"), IncomingMessage(platform="whatsapp", user_id=user_id, text="sim"))
     assert "agora é o seu principal" in response
 
 
@@ -842,7 +842,7 @@ def test_classify_variacao_saudacao_viram_greeting():
 
 def test_route_saudacao_retorna_mensagem_amigavel(user_id):
     for texto in ("oi", "bom dia", "boa noite"):
-        msg = IncomingMessage(platform="discord", user_id=user_id, text=texto)
+        msg = IncomingMessage(platform="whatsapp", user_id=user_id, text=texto)
         response = route(classify(msg.text), msg)
         # Qualquer saudação deve retornar algo não-vazio e sem "Não entendi"
         assert response, f"Resposta vazia para '{texto}'"
@@ -856,7 +856,7 @@ def test_classify_parcelas_vai_para_credit_handle():
 
 
 def test_route_parcelas_sem_registros_retorna_mensagem_vazia(user_id):
-    msg = IncomingMessage(platform="discord", user_id=user_id, text="parcelas")
+    msg = IncomingMessage(platform="whatsapp", user_id=user_id, text="parcelas")
     response = route(classify(msg.text), msg)
     assert "parcelamento" in response.lower()
 
@@ -878,7 +878,7 @@ def test_route_apagar_grupo_parcelamento(user_id):
     raw = str(group_id).replace("-", "").upper()
     code = f"PC{raw[:8]}"
 
-    msg = IncomingMessage(platform="discord", user_id=user_id, text=f"apagar {code}")
+    msg = IncomingMessage(platform="whatsapp", user_id=user_id, text=f"apagar {code}")
     response = route(classify(msg.text), msg)
 
     assert "Parcelamento desfeito" in response
@@ -986,7 +986,7 @@ def test_classify_valor_primeiro_com_cartao_vai_para_credito():
 
 def test_route_valor_primeiro_debita_saldo(user_id):
     """Ponta-a-ponta: '77,90 mercado' registra DESPESA e debita o saldo."""
-    msg = IncomingMessage(platform="discord", user_id=user_id, text="77,90 mercado")
+    msg = IncomingMessage(platform="whatsapp", user_id=user_id, text="77,90 mercado")
 
     response = route(classify(msg.text), msg)
 
@@ -997,11 +997,11 @@ def test_route_valor_primeiro_debita_saldo(user_id):
 def test_route_receita_exige_palavra_chave(user_id):
     """'recebi 300 salario' credita (+300); depois '50 mercado' debita (-50).
     Confirma que receita só acontece com a palavra-chave."""
-    msg_in = IncomingMessage(platform="discord", user_id=user_id, text="recebi 300 salario")
+    msg_in = IncomingMessage(platform="whatsapp", user_id=user_id, text="recebi 300 salario")
     route(classify(msg_in.text), msg_in)
     assert round(float(get_balance(user_id)), 2) == 300.00
 
-    msg_out = IncomingMessage(platform="discord", user_id=user_id, text="50 mercado")
+    msg_out = IncomingMessage(platform="whatsapp", user_id=user_id, text="50 mercado")
     route(classify(msg_out.text), msg_out)
     assert round(float(get_balance(user_id)), 2) == 250.00
 
@@ -1019,12 +1019,12 @@ def test_route_clarification_valor_completa_lancamento(user_id):
             "orig_text": "lavagem carro 02/06",
         },
     )
-    msg = IncomingMessage(platform="discord", user_id=user_id, text="150")
+    msg = IncomingMessage(platform="whatsapp", user_id=user_id, text="150")
     response = route(classify(msg.text), msg)
 
     assert "despesa registrada" in response.lower()
     assert round(float(get_balance(user_id)), 2) == -150.00
-    assert get_pending_action(user_id) is None  # clarification consumida
+    assert (get_pending_action(user_id) or {}).get("action_type") != "clarification"  # consumida
     # data preservada (02/06) — normaliza pro fuso do app. O driver devolve o
     # timestamptz no fuso da SESSÃO, que desde `utils_date.align_process_tz` é o
     # do app em qualquer máquina; a conversão explícita fica porque o que se
@@ -1046,7 +1046,7 @@ def test_route_clarification_receita_preserva_tipo(user_id):
             "orig_text": "recebi salario",
         },
     )
-    msg = IncomingMessage(platform="discord", user_id=user_id, text="5000")
+    msg = IncomingMessage(platform="whatsapp", user_id=user_id, text="5000")
     response = route(classify(msg.text), msg)
 
     assert "receita registrada" in response.lower()
@@ -1066,12 +1066,12 @@ def test_route_clarification_descricao_completa_lancamento(user_id):
             "orig_text": "gastei 50",
         },
     )
-    msg = IncomingMessage(platform="discord", user_id=user_id, text="mercado")
+    msg = IncomingMessage(platform="whatsapp", user_id=user_id, text="mercado")
     response = route(classify(msg.text), msg)
 
     assert "despesa registrada" in response.lower()
     assert round(float(get_balance(user_id)), 2) == -50.00
-    assert get_pending_action(user_id) is None
+    assert (get_pending_action(user_id) or {}).get("action_type") != "clarification"  # consumida
 
 
 def test_route_clarification_sem_valor_refaz_pergunta(user_id):
@@ -1083,7 +1083,7 @@ def test_route_clarification_sem_valor_refaz_pergunta(user_id):
         "orig_text": "uber",
     }
     set_pending_action(user_id, "clarification", payload)
-    msg = IncomingMessage(platform="discord", user_id=user_id, text="sei la")
+    msg = IncomingMessage(platform="whatsapp", user_id=user_id, text="sei la")
     response = route(classify(msg.text), msg)
 
     assert response == "Qual foi o valor do uber?"
@@ -1141,14 +1141,14 @@ def test_handle_incoming_clarification_tem_precedencia_sobre_fallback_ia():
         },
     )
 
-    msg = IncomingMessage(platform="discord", user_id=uid, text="cinema")
+    msg = IncomingMessage(platform="whatsapp", user_id=uid, text="cinema")
     out = handle_incoming(msg)
 
     assert out, "handle_incoming não retornou resposta"
     response = out[0].text
     assert "despesa registrada" in response.lower(), f"esperava lançamento, veio: {response!r}"
     assert round(float(get_balance(uid)), 2) == -77.90
-    assert get_pending_action(uid) is None  # clarification consumida
+    assert (get_pending_action(uid) or {}).get("action_type") != "clarification"  # consumida
 
 
 # ───────────────────────────────────────────────────────────────────────────
@@ -1175,12 +1175,12 @@ def test_route_comando_claro_cancela_delete_pendente_orfao(user_id):
     )
 
     # Comando claro no meio (balance.check, confiança alta) → abandona o pending.
-    msg_saldo = IncomingMessage(platform="discord", user_id=user_id, text="saldo")
+    msg_saldo = IncomingMessage(platform="whatsapp", user_id=user_id, text="saldo")
     route(classify(msg_saldo.text), msg_saldo)
     assert get_pending_action(user_id) is None, "comando claro deve limpar o pending órfão"
 
     # 'sim' depois não acha nada pra confirmar — o lançamento sobrevive.
-    msg_sim = IncomingMessage(platform="discord", user_id=user_id, text="sim")
+    msg_sim = IncomingMessage(platform="whatsapp", user_id=user_id, text="sim")
     route(classify(msg_sim.text), msg_sim)
 
     assert get_pending_action(user_id) is None
@@ -1201,7 +1201,7 @@ def test_route_sim_imediato_apaga_normalmente(user_id):
         {"launch_id": int(launch_id), "display_id": int(user_seq)},
     )
 
-    msg_sim = IncomingMessage(platform="discord", user_id=user_id, text="sim")
+    msg_sim = IncomingMessage(platform="whatsapp", user_id=user_id, text="sim")
     response = route(classify(msg_sim.text), msg_sim)
 
     assert "apagado" in response.lower()
@@ -1222,7 +1222,7 @@ def test_route_frase_ambigua_nao_cancela_delete_pendente(user_id):
         {"launch_id": int(launch_id), "display_id": int(user_seq)},
     )
 
-    msg = IncomingMessage(platform="discord", user_id=user_id, text="na verdade deixa quieto")
+    msg = IncomingMessage(platform="whatsapp", user_id=user_id, text="na verdade deixa quieto")
     route(classify(msg.text), msg)
 
     pend = get_pending_action(user_id)

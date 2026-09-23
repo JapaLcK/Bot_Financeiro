@@ -64,7 +64,7 @@ def free_small_uid():
 
 def _msg(uid: int, text: str) -> IncomingMessage:
     return IncomingMessage(
-        platform="discord", user_id=uid, text=text,
+        platform="whatsapp", user_id=uid, text=text,
         message_id="1", attachments=[], external_id="", raw={},
     )
 
