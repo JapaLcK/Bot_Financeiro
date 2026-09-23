@@ -6403,6 +6403,27 @@ async def billing_webhook(request: Request, background_tasks: BackgroundTasks):
     return {"received": True}
 
 
+async def _create_billing_portal(user_id: int, customer_id: str, return_path: str, route: str):
+    import stripe
+
+    stripe.api_key = STRIPE_SECRET_KEY
+    try:
+        return await asyncio.to_thread(
+            stripe.billing_portal.Session.create,
+            customer=customer_id,
+            return_url=f"{DASHBOARD_URL}{return_path}",
+        )
+    except stripe.error.StripeError as exc:
+        await asyncio.to_thread(
+            _log_falha, "billing_portal", user_id, exc,
+            route=route, request_id=getattr(exc, "request_id", None),
+        )
+        raise HTTPException(
+            status_code=502,
+            detail="Não foi possível abrir o gerenciamento da assinatura agora. Tente novamente em instantes.",
+        ) from None
+
+
 @app.post("/billing/portal")
 @limiter.limit("30/hour")
 async def billing_portal(request: Request, user_id: int = Depends(_get_current_user)):
@@ -6413,19 +6434,16 @@ async def billing_portal(request: Request, user_id: int = Depends(_get_current_u
     if not STRIPE_SECRET_KEY:
         raise HTTPException(status_code=503, detail="Pagamentos ainda não configurados.")
 
-    import stripe
     import sys
     sys.path.insert(0, str(pathlib.Path(__file__).parent.parent))
     from db import get_auth_user
 
-    stripe.api_key = STRIPE_SECRET_KEY
     user = get_auth_user(user_id)
     if not user or not user.get("stripe_customer_id"):
         raise HTTPException(status_code=404, detail="Sem assinatura ativa.")
 
-    portal = stripe.billing_portal.Session.create(
-        customer=user["stripe_customer_id"],
-        return_url=f"{DASHBOARD_URL}/app",
+    portal = await _create_billing_portal(
+        user_id, user["stripe_customer_id"], "/app", "/billing/portal",
     )
     return {"portal_url": portal.url}
 
@@ -6548,19 +6566,24 @@ async def conta_redirect(request: Request):
     if not STRIPE_SECRET_KEY:
         return RedirectResponse(url=_dashboard_url("/precos"), status_code=302)
 
-    import stripe
     sys.path.insert(0, str(pathlib.Path(__file__).parent.parent))
     from db import get_auth_user
 
-    stripe.api_key = STRIPE_SECRET_KEY
     user = get_auth_user(user_id)
     if not user or not user.get("stripe_customer_id"):
         return RedirectResponse(url=_dashboard_url("/precos"), status_code=302)
 
-    portal = stripe.billing_portal.Session.create(
-        customer=user["stripe_customer_id"],
-        return_url=f"{DASHBOARD_URL}/settings",
-    )
+    try:
+        portal = await _create_billing_portal(
+            user_id, user["stripe_customer_id"], "/settings", "/conta",
+        )
+    except HTTPException as exc:
+        if exc.status_code != 502:
+            raise
+        return error_page_response(502, text=(
+            "Gerenciamento indisponível",
+            "Não foi possível abrir o gerenciamento da assinatura agora. Tente novamente em instantes.",
+        ), actions=(("Tentar novamente", "/conta"), ("Voltar para configurações", "/settings")))
     return RedirectResponse(url=portal.url, status_code=302)
 
 
