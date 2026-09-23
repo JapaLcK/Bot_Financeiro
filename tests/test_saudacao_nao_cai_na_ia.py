@@ -52,3 +52,12 @@ def test_help_generico_de_verdade_continua_indo_para_o_agente(monkeypatch):
 
     assert diga(uid, "cartao principal") == "resposta do agente"
     assert chamadas == ["cartao principal"]
+
+
+def test_saudacao_com_pedido_de_ajuda_continua_indo_para_o_agente(monkeypatch):
+    """"oi, como usar relatório" é `greeting` no classificador, mas o `route()`
+    responde a AJUDA inferida — e essa ajuda genérica é o que o 6b escala."""
+    uid, chamadas = _pagante_com_ia(monkeypatch)
+
+    assert diga(uid, "oi como usar relatório") == "resposta do agente"
+    assert chamadas == ["oi como usar relatório"]
