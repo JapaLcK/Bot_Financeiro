@@ -1,5 +1,5 @@
 import { useMemo, type ReactNode } from "react";
-import { GOALS, MONTHS, goalEta, isCurrentMonth, keyDate, monthlySaving, trajectory } from "./lib/api";
+import { BANK_CDB, BANK_CDB_TOTAL, GOALS, MONTHS, caixinhasTotal, goalEta, goalsTotal, isCurrentMonth, keyDate, monthlySaving, trajectory } from "./lib/api";
 import { money0, monthName, monthYear, signedBig, tone } from "./lib/format.js";
 import { simActive } from "./lib/store.js";
 import type { DashState } from "./lib/types";
@@ -7,7 +7,6 @@ import { Frame } from "./parts/Frame";
 import { Board } from "./parts/Board";
 import { Ledger } from "./parts/Ledger";
 import { go, route, type Path } from "./router";
-import { BankCdb } from "./widgets/BankCdb";
 import { Bills } from "./widgets/Bills";
 import { Calendar } from "./widgets/Calendar";
 import { Categories } from "./widgets/Categories";
@@ -101,7 +100,6 @@ function Simulate({ s }: { s: DashState }) {
 }
 
 function GoalsPage({ s }: { s: DashState }) {
-  const total = GOALS.reduce((a, g) => a + g.saved, 0);
   const monthly = GOALS.reduce((a, g) => a + g.monthly, 0);
   const saving = simActive(s) ? monthlySaving(s.sim) : 0;
   const next = [...GOALS].map((g) => ({ g, eta: goalEta(g) })).sort((a, b) => a.eta.months - b.eta.months)[0];
@@ -115,7 +113,9 @@ function GoalsPage({ s }: { s: DashState }) {
         <div className="panel">
           <Frame id="caixinhas" title="Caixinhas">
             <dl className="detail-facts col">
-              <div><dt>Guardado no total</dt><dd className="num">{money0(total)}</dd></div>
+              <div><dt>Guardado no total</dt><dd className="num">{money0(caixinhasTotal())}</dd></div>
+              <div className="fact-sub"><dt>Nas metas</dt><dd className="num">{money0(goalsTotal())}</dd></div>
+              <div className="fact-sub"><dt>No {BANK_CDB.bank} · via {BANK_CDB.via}</dt><dd className="num">{money0(BANK_CDB_TOTAL)}</dd></div>
               <div><dt>Entra por mês</dt><dd className="num">{money0(monthly)}{saving > 0 && <span className="gain"> +{money0(saving)}</span>}</dd></div>
               <div><dt>Próxima a chegar</dt><dd>{next.g.label} <span className="faint num">· {monthYear(next.eta.date)}</span></dd></div>
             </dl>
@@ -124,7 +124,6 @@ function GoalsPage({ s }: { s: DashState }) {
             </button>
           </Frame>
         </div>
-        <div className="panel"><BankCdb /></div>
       </div>
     </Page>
   );

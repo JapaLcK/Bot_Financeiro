@@ -1,7 +1,7 @@
 // Cálculos derivados dos dados: resumo do mês, saldo dia a dia, previsão e simulação.
 // Regra de caixa: compra no cartão não sai do saldo no dia; entra na fatura, paga no
 // dia 10 do mês seguinte. Pix, débito e Open Finance saem no dia.
-import { CATEGORIES, CARD, GOALS, INCOMES, LAUNCHES, MONTHS, NET_WORTH, OPENING_BALANCE, RECURRING, TODAY, TRANSFER_DAY, daysIn } from "./data.js";
+import { BANK_CDB_TOTAL, CATEGORIES, CARD, GOALS, INCOMES, LAUNCHES, MONTHS, NET_WORTH, OPENING_BALANCE, RECURRING, TODAY, TRANSFER_DAY, daysIn } from "./data.js";
 
 const DAY = 86400000;
 const JUNE_INVOICE = 612.4; // fatura de junho, paga em 10/07 (antes do período dos dados)
@@ -150,7 +150,10 @@ export function goalEta(goal, extraMonthly = 0) {
 export function netWorth() {
   const rows = NET_WORTH.map((r) => ({ ...r }));
   rows.at(-1).conta = BALANCE_TODAY;
+  rows.at(-1).caixinhas = caixinhasTotal();
   return rows.map((r) => ({ ...r, total: round2(r.conta + r.caixinhas + r.investimentos) }));
 }
 
 export const goalsTotal = () => GOALS.reduce((s, g) => s + g.saved, 0);
+// Caixinhas = metas + o que o banco guarda (via Open Finance), que entra só pelo total.
+export const caixinhasTotal = () => round2(goalsTotal() + BANK_CDB_TOTAL);

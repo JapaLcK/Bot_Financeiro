@@ -1,4 +1,4 @@
-import { BALANCE_TODAY, GOALS, INVESTMENTS } from "../lib/api";
+import { BALANCE_TODAY, BANK_CDB, BANK_CDB_TOTAL, GOALS, INVESTMENTS, caixinhasTotal } from "../lib/api";
 import { money0 } from "../lib/format.js";
 import { Frame } from "../parts/Frame";
 
@@ -11,13 +11,14 @@ export const PARTS = [
 ];
 
 export function Wealth() {
-  const caixinhas = GOALS.reduce((a, g) => a + g.saved, 0);
+  const caixinhas = caixinhasTotal();
   const invest = INVESTMENTS.reduce((a: number, x: { amount: number }) => a + x.amount, 0);
   const values = [BALANCE_TODAY, caixinhas, invest];
   const total = values.reduce((a, b) => a + b, 0);
   const rows = [
     { label: "Conta corrente", group: 0, v: BALANCE_TODAY },
     ...GOALS.map((g) => ({ label: g.label, group: 1, v: g.saved })),
+    { label: `Caixinhas no ${BANK_CDB.bank}`, group: 1, v: BANK_CDB_TOTAL },
     ...INVESTMENTS.map((x: { label: string; amount: number }) => ({ label: x.label, group: 2, v: x.amount })),
   ];
 

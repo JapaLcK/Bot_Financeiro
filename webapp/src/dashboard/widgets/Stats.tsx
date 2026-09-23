@@ -1,6 +1,6 @@
 import NumberFlow from "@number-flow/react";
 import type { ReactNode } from "react";
-import { CARD, GOALS, TODAY, isCurrentMonth, keyDate, previousKey, spentUntil, summary } from "../lib/api";
+import { CARD, GOALS, TODAY, caixinhasTotal, isCurrentMonth, keyDate, previousKey, spentUntil, summary } from "../lib/api";
 import { monthName, money0, tone } from "../lib/format.js";
 import type { DashState } from "../lib/types";
 import { Frame } from "../parts/Frame";
@@ -85,7 +85,7 @@ function Invoice({ s }: { s: DashState }) {
 
 function Saved({ s }: { s: DashState }) {
   const m = summary(s.month);
-  const total = GOALS.reduce((a, g) => a + g.saved, 0);
+  const total = caixinhasTotal();
   return (
     <Stat title="Guardado no mês" tone="#9085e9" value={m.saved} delta={{ text: `automático nas ${GOALS.length} caixinhas`, good: null }}>
       <p className="stat-note"><span className="faint">Total nas caixinhas</span> <b className="num">{money0(total)}</b></p>

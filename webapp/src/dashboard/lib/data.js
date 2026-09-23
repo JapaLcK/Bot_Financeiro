@@ -62,13 +62,13 @@ export const GOALS = [
   { id: "festival", label: "Festival em dezembro", icon: "ph-ticket", color: "#c98500", target: 1200, saved: 960, monthly: 80 },
 ];
 
-// Caixinhas do Nubank como chegam pelo Open Finance: cada posição é um CDB com o mesmo
-// nome e emissor, sem nada que diga de qual caixinha ela é. Ordem de chegada, nunca por saldo.
+// Caixinhas do Nubank como chegam pelo Open Finance: cada depósito é um CDB com o mesmo
+// nome e emissor. As posições são só o dado cru: a tela mostra apenas o total, como caixinhas.
 export const BANK_CDB = { bank: "Nubank", via: "Open Finance", name: "CDB - NU FINANCEIRA S.A.", positions: [612.4, 388.15, 201.73, 150, 96.52, 64] };
+export const BANK_CDB_TOTAL = Math.round(BANK_CDB.positions.reduce((a, b) => a + b, 0) * 100) / 100;
 
 export const INVESTMENTS = [
   { label: "Tesouro Selic", amount: 2310.45 },
-  { label: `CDB no ${BANK_CDB.bank} · ${BANK_CDB.positions.length} posições`, amount: Math.round(BANK_CDB.positions.reduce((a, b) => a + b, 0) * 100) / 100 },
   { label: "Bitcoin", amount: 418.3 },
 ];
 
@@ -140,7 +140,6 @@ export const NET_WORTH = (() => {
     rows.push({ date: d, conta: round2(conta), caixinhas: round2(caixinhas), investimentos: round2(invest) });
   }
   const last = rows[rows.length - 1];
-  last.caixinhas = GOALS.reduce((s, g) => s + g.saved, 0);
   last.investimentos = round2(INVESTMENTS.reduce((s, x) => s + x.amount, 0));
   return rows;
 })();

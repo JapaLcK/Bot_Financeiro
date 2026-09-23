@@ -1,9 +1,10 @@
 // Protótipo dashboard-v2: formato compacto a partir de R$ 1 milhão e o CDB do banco
-// como uma linha só do patrimônio, somando exatamente as posições.
+// contado só pelo total, como caixinhas (nunca como investimento).
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import { axisMoney, money, money0, moneyBig, signed, signed0, signedBig, tone } from "../../webapp/src/dashboard/lib/format.js";
-import { BANK_CDB, INVESTMENTS } from "../../webapp/src/dashboard/lib/data.js";
+import { BANK_CDB, BANK_CDB_TOTAL, INVESTMENTS } from "../../webapp/src/dashboard/lib/data.js";
+import { caixinhasTotal, goalsTotal, netWorth } from "../../webapp/src/dashboard/lib/model.js";
 
 test("abaixo de 1 milhão o texto é idêntico ao de hoje", () => {
   for (const n of [0, 120, -1440, 511.4, 999999.4, -999999]) {
@@ -41,9 +42,15 @@ test("tom da simulação: o que aparece como R$ 0 é neutro", () => {
   assert.deepEqual([12, 0.6, 0.02, 0, -0.4, -0.6, -12].map(tone), ["gain", "gain", "", "", "", "warn", "warn"]);
 });
 
-test("CDB do banco: uma linha, soma igual ao valor antigo, posições na ordem de chegada", () => {
-  const rows = INVESTMENTS.filter((x) => x.label.includes(BANK_CDB.bank));
-  assert.equal(rows.length, 1);
-  assert.equal(rows[0].amount, 1512.8);
+test("CDB do banco: só o total, contado em caixinhas e fora dos investimentos", () => {
+  assert.equal(BANK_CDB_TOTAL, 1512.8); // soma exata das posições
   assert.deepEqual(BANK_CDB.positions, [612.4, 388.15, 201.73, 150, 96.52, 64]);
+  assert.equal(INVESTMENTS.filter((x) => /nubank|cdb/i.test(x.label)).length, 0);
+  assert.equal(goalsTotal(), 12730);
+  assert.equal(caixinhasTotal(), 12730 + 1512.8);
+  const today = netWorth().at(-1);
+  assert.equal(today.caixinhas, caixinhasTotal());
+  assert.equal(today.investimentos, 2728.75);
+  // Só a divisão entre caixinhas e investimentos muda: o patrimônio segue o de antes (R$ 19.807).
+  assert.equal(today.total, 19806.97);
 });
