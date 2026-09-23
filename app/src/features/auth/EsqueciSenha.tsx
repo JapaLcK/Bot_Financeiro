@@ -2,7 +2,7 @@ import { useRef, useState } from "react";
 import { View } from "react-native";
 import { z } from "zod";
 
-import { chamar } from "@/api/client";
+import { chamar, comLimite } from "@/api/client";
 import { textoDaFalha } from "@/features/auth/entrar";
 import { Banner } from "@/ui/componentes/Banner";
 import { Button } from "@/ui/componentes/Button";
@@ -41,6 +41,10 @@ export function EsqueciSenha() {
         metodo: "POST",
         corpo: { email: email.trim() },
         semAuth: true,
+        // Sem isto, um `fetch` pendurado (Android sem timeout — mesmo caso de
+        // `sair()`/`services/auth.ts`) deixava `emVoo` preso em `true` para
+        // sempre: a sheet ficava em "enviando" e o botão nunca reabria.
+        sinal: comLimite(),
       });
       setEstado({ fase: "enviado" });
       // Sem reabrir a guarda aqui: a fase "enviado" substitui o formulário

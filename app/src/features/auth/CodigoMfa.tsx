@@ -42,7 +42,20 @@ export function CodigoMfa({ estado, autenticar, aplicar }: Props) {
   // de verdade (B1). A guarda de UMA requisição continua sendo o `emVoo` de
   // `tocar()`/`entrar.ts`; aplicar de novo aqui num toque redundante é
   // inofensivo (mesmo valor, já é o estado corrente).
+  // Defesa no CAMINHO, não só no `desativado` do botão: TOTP com menos de 6
+  // dígitos nunca sai daqui, venha o toque de onde vier (botão, Enter do
+  // teclado, um futuro `onSubmitEditing`) — evita queimar o desafio com um
+  // código que o servidor recusaria de qualquer forma (db/mfa.py:351 consome
+  // antes de conferir).
+  //
+  // ponytail: sem teste que discrimine ESTA linha isoladamente — hoje o
+  // único chamador é o botão "Verificar", e o `desativado` dele (mesma
+  // condição) já impede o toque de chegar aqui com código parcial; a RNTL
+  // nem invoca `onPress` de um `Pressable` desativado (medido). A guarda
+  // fica porque é o único ponto por onde um `onSubmitEditing`/Enter futuro
+  // teria que passar; mexer aqui sem entender isso não vai ver vermelho.
   const enviar = (valor: string) => {
+    if (modo === "totp" && valor.length !== TAMANHO_TOTP) return;
     aplicar({ fase: "verificando", desafio, email, modo });
     void tocar(() => verificar(desafio, email, modo, valor, autenticar), aplicar);
   };
@@ -89,7 +102,15 @@ export function CodigoMfa({ estado, autenticar, aplicar }: Props) {
         desativado={verificando}
         erro={aviso}
       />
-      <Button rotulo="Verificar" onPress={() => enviar(codigo)} desativado={!codigo.trim() || verificando} carregando={verificando} />
+      <Button
+        rotulo="Verificar"
+        onPress={() => enviar(codigo)}
+        // TOTP só habilita com os 6 dígitos completos — tocar com código
+        // parcial (ex.: 3 dígitos) mandava ao servidor e queimava o desafio
+        // à toa. Backup mantém a regra de "não vazio" (formato livre).
+        desativado={verificando || (modo === "totp" ? codigo.length !== TAMANHO_TOTP : !codigo.trim())}
+        carregando={verificando}
+      />
       <Button
         rotulo={modo === "totp" ? "Usar código de backup" : "Usar código do aplicativo"}
         variante="ghost"

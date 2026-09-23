@@ -85,6 +85,33 @@ describe("CodigoMfa — duplo envio pela UI de verdade (controle positivo)", () 
   });
 });
 
+describe("CodigoMfa — Verificar só habilita com código completo (apontamento Codex #1)", () => {
+  it("TOTP com 3 dígitos: Verificar fica desativado (não envia com código parcial)", () => {
+    const { getByLabelText, getByRole } = renderInterativo(<Harness inicial={M} autenticar={jest.fn()} />);
+
+    fireEvent.changeText(getByLabelText("Código de 6 dígitos"), "123");
+
+    expect(getByRole("button", { name: "Verificar" }).props.accessibilityState).toMatchObject({ disabled: true });
+  });
+
+  // "6 dígitos habilita E envia" já está coberto por testes existentes: o
+  // auto-envio dispara exatamente nesse limite (M4, "duplo envio pela UI de
+  // verdade") e autentica com sucesso (entrar_mfa.test.ts, "200: autentica")
+  // — testar "habilitado" isolado aqui exigiria digitar 6 dígitos SEM
+  // auto-enviar, o que o próprio TOTP não permite (CLAUDE.md §3: não duplicar
+  // o que já mede).
+
+  it("backup com 1 caractere: Verificar habilita (regra é 'não vazio', não 6 dígitos)", () => {
+    const { getByLabelText, getByRole } = renderInterativo(
+      <Harness inicial={{ ...M, modo: "backup" }} autenticar={jest.fn()} />,
+    );
+
+    fireEvent.changeText(getByLabelText("Código de backup"), "A");
+
+    expect(getByRole("button", { name: "Verificar" }).props.accessibilityState).toMatchObject({ disabled: false });
+  });
+});
+
 describe("CodigoMfa — M4 (teto de dígitos)", () => {
   it("TOTP: colar 7 dígitos corta em 6 antes de enviar — não manda o 7º ao servidor", async () => {
     let corpoEnviado: unknown;

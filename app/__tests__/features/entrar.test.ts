@@ -230,11 +230,13 @@ describe("timeout de auth (I1): fetch pendurado não trava a fila para sempre", 
     await jest.advanceTimersByTimeAsync(TEMPO_LIMITE_AUTH_MS);
     await Promise.all([pendurado, engolido]);
 
-    // Sem abandono, o timeout trata o abort como falha de rede comum: o
-    // desafio segue vivo, a tela volta a "mfa" para nova tentativa — nunca
-    // autentica sozinha.
+    // Sem abandono, o timeout do `comLimite()` (AbortError, apontamento Codex
+    // #3) é tratado como resposta HTTP provável: a requisição chegou ao
+    // servidor e o desafio já foi consumido, então a tela volta ao
+    // FORMULÁRIO — nunca autentica sozinha, e nunca reapresenta um `mfa` com
+    // desafio morto.
     expect(autenticarVelho).not.toHaveBeenCalled();
-    expect(aplicados.at(-1)).toEqual({ fase: "mfa", desafio: "d-1", email: "velho@x.com", modo: "totp", aviso: GENERICO });
+    expect(aplicados.at(-1)).toEqual({ fase: "formulario", aviso: `${GENERICO} Entre de novo.` });
   });
 
   it("CONTROLE POSITIVO (I-A/I-B) — verify pendurado; Voltar; a fila libera NA HORA (sem esperar o timeout), e a conta NOVA autentica sem tocar a antiga", async () => {

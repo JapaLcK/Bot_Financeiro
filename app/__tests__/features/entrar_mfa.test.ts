@@ -54,13 +54,34 @@ describe("verificar (M/V)", () => {
     expect(aplicados).toEqual([{ ...M, aviso: "Muitas tentativas. Tente de novo em instantes." }]);
   });
 
-  it("5xx/rede: o desafio continua vivo, aviso genérico", async () => {
+  it("rede sem resposta (fetch rejeita antes de chegar): ambíguo, o desafio continua vivo — fica em M", async () => {
     rotear({ "/auth/mfa/verify-login": () => Promise.reject(new TypeError("Network request failed")) });
     const { aplicados, aplicar } = gravador<EstadoEntrar>();
 
     await tocar(() => verificar(M.desafio, M.email, M.modo, "000000", jest.fn()), aplicar);
 
     expect(aplicados).toEqual([{ ...M, aviso: "Algo deu errado. Tente de novo." }]);
+  });
+
+  it("500 (apontamento Codex #3): resposta HTTP do servidor — o desafio já foi consumido, volta ao FORMULÁRIO", async () => {
+    rotear({ "/auth/mfa/verify-login": () => resposta(500, { detail: "boom, traceback cru" }) });
+    const { aplicados, aplicar } = gravador<EstadoEntrar>();
+
+    await tocar(() => verificar(M.desafio, M.email, M.modo, "000000", jest.fn()), aplicar);
+
+    // client.ts força a mensagem genérica em qualquer 5xx (nunca o traceback cru).
+    expect(aplicados).toEqual([
+      { fase: "formulario", aviso: "Tivemos um problema aqui. Tente de novo em instantes. Entre de novo." },
+    ]);
+  });
+
+  it("tempo limite (AbortError do comLimite, 15s): a requisição provavelmente chegou — volta ao FORMULÁRIO", async () => {
+    rotear({ "/auth/mfa/verify-login": () => Promise.reject(new DOMException("The operation was aborted.", "AbortError")) });
+    const { aplicados, aplicar } = gravador<EstadoEntrar>();
+
+    await tocar(() => verificar(M.desafio, M.email, M.modo, "000000", jest.fn()), aplicar);
+
+    expect(aplicados).toEqual([{ fase: "formulario", aviso: "Algo deu errado. Tente de novo. Entre de novo." }]);
   });
 
   it("200 com forma errada (ContratoInvalido): abandona o MFA, volta ao formulário genérico", async () => {

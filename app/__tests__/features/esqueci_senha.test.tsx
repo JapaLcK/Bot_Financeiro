@@ -5,6 +5,7 @@
  */
 import { act, fireEvent } from "@testing-library/react-native";
 
+import { TEMPO_LIMITE_AUTH_MS } from "@/api/client";
 import { EsqueciSenha } from "@/features/auth/EsqueciSenha";
 
 import { renderInterativo } from "../ui/_render";
@@ -77,6 +78,51 @@ describe("EsqueciSenha", () => {
 
     expect(chamadasForgot).toBe(2);
     expect(getByText("Se o e-mail estiver cadastrado, enviamos um link para redefinir a senha.")).toBeTruthy();
+  });
+
+  describe("apontamento Codex #2 — fetch pendurado não trava a sheet em 'enviando' para sempre", () => {
+    beforeEach(() => jest.useFakeTimers());
+    afterEach(() => jest.useRealTimers());
+
+    it("CONTROLE POSITIVO — tempo limite de 15s libera a guarda; um NOVO toque em Enviar manda outro POST", async () => {
+      let chamadasForgot = 0;
+      rotear({
+        // Simula o `fetch` real: só resolve/rejeita quando o `AbortSignal` do
+        // `comLimite()` dispara — sem isto o dublê ignoraria `signal` e o
+        // teste não discriminaria nada (mesmo raciocínio de entrar.test.ts).
+        "/auth/forgot-password": (o) => {
+          chamadasForgot += 1;
+          if (chamadasForgot === 1) {
+            return new Promise((_resolve, reject) => {
+              o.signal?.addEventListener("abort", () => reject(new DOMException("Abortado", "AbortError")));
+            });
+          }
+          return resposta(200, {});
+        },
+      });
+      const { getByLabelText, getByText, getByRole } = renderInterativo(<EsqueciSenha />);
+      fireEvent.changeText(getByLabelText("E-mail"), "ana@x.com");
+
+      await act(async () => {
+        fireEvent.press(getByText("Enviar"));
+      });
+      // Ainda pendurado: sem o `sinal`, o botão ficaria "carregando" para sempre.
+      expect(getByRole("button").props.accessibilityState).toMatchObject({ busy: true, disabled: true });
+
+      await act(async () => {
+        await jest.advanceTimersByTimeAsync(TEMPO_LIMITE_AUTH_MS);
+      });
+
+      expect(getByText("Algo deu errado. Tente de novo.")).toBeTruthy();
+      expect(getByRole("button").props.accessibilityState).toMatchObject({ disabled: false });
+
+      await act(async () => {
+        fireEvent.press(getByText("Enviar"));
+      });
+
+      expect(chamadasForgot).toBe(2);
+      expect(chamadas().filter((c) => c.caminho === "/auth/forgot-password")).toHaveLength(2);
+    });
   });
 
   it("M2 — CONTROLE POSITIVO: toque duplo no MESMO instante (antes do re-render) manda só UM POST", async () => {

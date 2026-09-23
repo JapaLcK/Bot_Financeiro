@@ -145,6 +145,18 @@ export async function enviar(
  * trocou a fase para "formulario" antes de qualquer resposta desta chegar, e
  * quem chama `aplicar` não tem mais nada em `M`/`V` para atualizar. O
  * resultado positivo (autenticação) segue o mesmo raciocínio de `enviar`.
+ *
+ * A tabela da falha (`frontend/finance_bot_websocket_custom.py`,
+ * `auth_mfa_verify_login`: consome o desafio ANTES de conferir o código, só
+ * depois responde 400/404/2xx — o limitador 429 roda antes do consumo):
+ *
+ * | falha                          | desafio no servidor | resultado |
+ * |---------------------------------|----------------------|-----------|
+ * | 400/404 (código errado/expirado)| consumido            | F         |
+ * | 5xx (qualquer resposta HTTP)     | consumido (quase sempre) | F     |
+ * | tempo limite (abort do comLimite, 15s) | provavelmente consumido | F |
+ * | 429                              | vivo (nunca chegou a consumir) | M |
+ * | erro de rede sem resposta (fetch rejeita antes de chegar) | ambíguo | M |
  */
 export async function verificar(
   desafio: string,
@@ -173,7 +185,12 @@ export async function verificar(
       // conferir o código, então mesmo um código ERRADO já queima o desafio).
       // Insistir em `M` reapresentaria um desafio morto; só o formulário, com
       // um login novo, dá um desafio vivo.
-      if (e.status === 400 || e.status === 404) {
+      //
+      // 5xx é a MESMA categoria: é resposta HTTP do servidor, então o
+      // `mfa_consume_login_challenge` já rodou (primeira linha do handler,
+      // antes de qualquer chance de falhar) — só o limitador (429) roda
+      // ANTES do consumo, e por isso fica de fora daqui.
+      if (e.status === 400 || e.status === 404 || e.status >= 500) {
         const base = e.detalhe.trim() || GENERICO;
         return { fase: "formulario", aviso: `${base} Entre de novo.` };
       }
@@ -181,7 +198,17 @@ export async function verificar(
       // tentar de novo sem refazer o login.
       return { fase: "mfa", desafio, email, modo, aviso: e.detalhe.trim() || GENERICO };
     }
-    // Rede fora: mesma lógica — o desafio não foi tocado, tenta de novo aqui mesmo.
+    // Tempo limite do `comLimite` (15s): a requisição provavelmente CHEGOU ao
+    // servidor e o desafio já foi consumido — mesmo raciocínio do 5xx, mesmo
+    // sem resposta em mãos. `AbortError` é o único jeito de o `fetch`
+    // rejeitar SEM resposta que ainda assim quer dizer "provavelmente
+    // chegou"; qualquer outra rejeição sem resposta (rede fora antes de sair
+    // do aparelho) é ambígua e fica em M.
+    if (typeof e === "object" && e !== null && "name" in e && e.name === "AbortError") {
+      return { fase: "formulario", aviso: `${GENERICO} Entre de novo.` };
+    }
+    // Rede fora, sem resposta e sem abort: ambíguo, o desafio pode estar
+    // vivo — tenta de novo aqui mesmo.
     return { fase: "mfa", desafio, email, modo, aviso: GENERICO };
   }
 }
