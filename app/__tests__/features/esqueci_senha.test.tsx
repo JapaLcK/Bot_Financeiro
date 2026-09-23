@@ -152,3 +152,10 @@ describe("EsqueciSenha", () => {
     expect(chamadas().filter((c) => c.caminho === "/auth/forgot-password")).toHaveLength(1);
   });
 });
+
+describe("EsqueciSenha — dica de preenchimento automático", () => {
+  it("o e-mail leva autoComplete e textContentType", () => {
+    const { getByLabelText } = renderInterativo(<EsqueciSenha />);
+    expect(getByLabelText("E-mail").props).toMatchObject({ autoComplete: "email", textContentType: "username" });
+  });
+});

@@ -56,6 +56,7 @@ export default function Entrar() {
                     autoCapitalize="none"
                     autoCorrect={false}
                     keyboardType="email-address"
+                    autoComplete="email"
                     textContentType="username"
                     desativado={enviando}
                   />
@@ -65,6 +66,7 @@ export default function Entrar() {
                     value={senha}
                     onChangeText={setSenha}
                     secureTextEntry
+                    autoComplete="current-password"
                     textContentType="password"
                     desativado={enviando}
                     erro={avisoFormulario}

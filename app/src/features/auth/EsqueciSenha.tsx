@@ -82,6 +82,7 @@ export function EsqueciSenha() {
         autoCapitalize="none"
         autoCorrect={false}
         keyboardType="email-address"
+        autoComplete="email"
         textContentType="username"
         desativado={enviando}
       />

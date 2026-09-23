@@ -227,3 +227,20 @@ describe("(auth)/entrar — tela real", () => {
     expect(screen).toHavePathname("/entrar");
   });
 });
+
+// Apontamento do Codex no #494: a tela provisória da Fase 1 passava
+// `autoComplete`, e sem ele o Android pode não oferecer a senha salva.
+describe("(auth)/entrar — dicas de preenchimento automático", () => {
+  beforeEach(() => {
+    prepararCaso();
+    rotear();
+  });
+
+  it("e-mail e senha levam autoComplete e textContentType", async () => {
+    renderRouter("./app", { initialUrl: "/entrar" });
+    await waitFor(() => expect(screen).toHavePathname("/entrar"));
+
+    expect(screen.getByLabelText("E-mail").props).toMatchObject({ autoComplete: "email", textContentType: "username" });
+    expect(screen.getByLabelText("Senha").props).toMatchObject({ autoComplete: "current-password", textContentType: "password" });
+  });
+});
