@@ -63,6 +63,8 @@ class NotificationSettingsPayload(BaseModel):
 
 
 async def _get_notification_settings(user_id: int) -> dict:
+    from core.services.plan_service import plan_gate_ok
+    weekly_available = await asyncio.to_thread(plan_gate_ok, user_id, "weekly_report")
     auth_user, daily_prefs = await asyncio.gather(
         asyncio.to_thread(get_auth_user, user_id),
         asyncio.to_thread(get_daily_report_prefs, user_id),
@@ -90,7 +92,9 @@ async def _get_notification_settings(user_id: int) -> dict:
         "daily_report_enabled": bool(daily_prefs.get("enabled", True)),
         "daily_report_hour": int(daily_prefs.get("hour", 9)),
         "daily_report_minute": int(daily_prefs.get("minute", 0)),
-        "weekly_report_enabled": bool(daily_prefs.get("weekly_enabled", True)),
+        "weekly_report_enabled": weekly_available and bool(daily_prefs.get("weekly_enabled", True)),
+        "weekly_report_stored_enabled": bool(daily_prefs.get("weekly_enabled", True)),
+        "weekly_report_available": weekly_available,
         "monthly_report_enabled": bool(daily_prefs.get("monthly_enabled", True)),
     }
 
@@ -486,6 +490,9 @@ async def update_notification_settings_route(
     payload: NotificationSettingsPayload,
 ):
     shared.authorize_dashboard_access(request, user_id)
+    # Verifica antes de qualquer escrita; desligar permanece disponível após downgrade.
+    if payload.weekly_report_enabled is True:
+        await asyncio.to_thread(shared.require_plan_feature, user_id, "weekly_report")
 
     touches_email_prefs = (
         payload.engagement_email_enabled is not None

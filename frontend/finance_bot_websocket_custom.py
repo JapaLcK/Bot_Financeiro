@@ -3109,11 +3109,11 @@ async def auth_dashboard_profile(request: Request, response: Response):
     # expirada (webhook perdido) e o freio de emergência PLANS_V2_ENABLED. O front
     # consome isto direto em vez de reconstruir tier do plano cru (que divergiria).
     from core.services.plan_service import (
-        get_user_limits, is_pro, require_min_tier, plan_gate_ok,
+        get_user_limits, is_pro, plan_gate_ok,
     )
     limits = await asyncio.to_thread(get_user_limits, int(user_id))
     _is_pro = await asyncio.to_thread(is_pro, int(user_id))
-    _forecast_ok = await asyncio.to_thread(require_min_tier, int(user_id), "pro")
+    _forecast_ok = await asyncio.to_thread(plan_gate_ok, int(user_id), "forecast")
     _hb_ok = await asyncio.to_thread(plan_gate_ok, int(user_id), "household_budget")
     feature_gates = {
         "investments": bool(limits["investments_enabled"]),
@@ -3125,9 +3125,11 @@ async def auth_dashboard_profile(request: Request, response: Response):
         "history_unlimited": not limits["history_current_month_only"],
         "changelog": _is_pro,                        # Novidades: gate is_pro (Plus+)
         "agents": limits["agents_energy_budget"] > 0,  # agentes: Plus+
-        "forecast": bool(_forecast_ok),              # previsão de saldo 30/60/90: Pro+
+        "forecast": bool(_forecast_ok),              # Plus 30 dias; Pro 60/90
         "household_budget": bool(_hb_ok),            # orçamento doméstico: Plus+
     }
+    for feature in ("cashflow", "insights", "financial_comparison", "weekly_report"):
+        feature_gates[feature] = await asyncio.to_thread(plan_gate_ok, int(user_id), feature)
     _no_store(response)
     return {
         "user_id": user_id,
@@ -3959,6 +3961,9 @@ async def auth_mfa_regenerate(request: Request, body: MFADisableBody, user_id: i
     return {"backup_codes": codes}
 
 
+_MFA_SESSAO_EXPIRADA = "Sessão MFA expirada. Faça login novamente."
+
+
 @app.post("/auth/mfa/verify-login")
 # 5/min é apertado mas não atrapalha usuário legítimo (que erra 1-2 vezes).
 # TOTP tem só 10^6 valores — 10/min seria brute-force viável em ~16 dias.
@@ -3969,26 +3974,39 @@ async def auth_mfa_verify_login(request: Request, response: Response, body: MFAV
     O cliente envia (challenge, code). Se OK, emite JWT auth + cookie.
     """
     from db import (
-        mfa_consume_login_challenge,
-        mfa_verify_totp,
-        mfa_consume_backup_code,
+        mfa_reserve_login_challenge_attempt,
+        mfa_consume_login_challenge_with_code,
         get_auth_user,
         create_link_code,
     )
 
-    user_id = await asyncio.to_thread(mfa_consume_login_challenge, body.challenge)
-    if not user_id:
-        raise HTTPException(status_code=400, detail="Sessão MFA expirada. Faça login novamente.")
+    # Desafio morto é 400, nunca 401: 401 é "renove a sessão" no interceptor.
+    def _recusa(texto: str, code: str) -> Response:
+        if wants_html(request):
+            return error_page_response(400)
+        return vary_accept(JSONResponse(status_code=400, content={"detail": texto, "code": code}))
 
-    code = (body.code or "").strip()
-    verified = False
-    if body.use_backup:
-        verified = await asyncio.to_thread(mfa_consume_backup_code, user_id, code)
-    else:
-        verified = await asyncio.to_thread(mfa_verify_totp, user_id, code)
+    # Reserva a tentativa ANTES de conferir e só consome o desafio com o código
+    # certo — consumir primeiro fazia um dígito errado queimar o login.
+    reservado = await asyncio.to_thread(mfa_reserve_login_challenge_attempt, body.challenge)
+    if not reservado:
+        return _recusa(_MFA_SESSAO_EXPIRADA, "mfa_challenge_expired")
+    user_id = reservado["user_id"]
+    # Teto por CONTA, no banco: o 5/min acima é por IP e em memória, e com 5
+    # tentativas por desafio quem troca de IP e de desafio chutaria ~25/min.
+    # Depois da reserva (a tentativa já conta no desafio), antes de conferir.
+    await _check_persistent_rate_limit("mfa-verify", f"user:{user_id}", 5, 60)
 
-    if not verified:
-        raise HTTPException(status_code=400, detail="Código inválido.")
+    verificado = await asyncio.to_thread(
+        mfa_consume_login_challenge_with_code,
+        body.challenge, (body.code or "").strip(), body.use_backup,
+    )
+    if verificado is None:
+        return _recusa(_MFA_SESSAO_EXPIRADA, "mfa_challenge_expired")
+    if not verificado:
+        if reservado["restantes"] == 0:
+            return _recusa("Muitas tentativas. Faça login novamente.", "mfa_challenge_expired")
+        return _recusa("Código inválido.", "mfa_code_invalid")
 
     user = await asyncio.to_thread(get_auth_user, user_id)
     if not user:
@@ -6387,6 +6405,27 @@ async def billing_webhook(request: Request, background_tasks: BackgroundTasks):
     return {"received": True}
 
 
+async def _create_billing_portal(user_id: int, customer_id: str, return_path: str, route: str):
+    import stripe
+
+    stripe.api_key = STRIPE_SECRET_KEY
+    try:
+        return await asyncio.to_thread(
+            stripe.billing_portal.Session.create,
+            customer=customer_id,
+            return_url=f"{DASHBOARD_URL}{return_path}",
+        )
+    except stripe.error.StripeError as exc:
+        await asyncio.to_thread(
+            _log_falha, "billing_portal", user_id, exc,
+            route=route, request_id=getattr(exc, "request_id", None),
+        )
+        raise HTTPException(
+            status_code=502,
+            detail="Não foi possível abrir o gerenciamento da assinatura agora. Tente novamente em instantes.",
+        ) from None
+
+
 @app.post("/billing/portal")
 @limiter.limit("30/hour")
 async def billing_portal(request: Request, user_id: int = Depends(_get_current_user)):
@@ -6397,19 +6436,16 @@ async def billing_portal(request: Request, user_id: int = Depends(_get_current_u
     if not STRIPE_SECRET_KEY:
         raise HTTPException(status_code=503, detail="Pagamentos ainda não configurados.")
 
-    import stripe
     import sys
     sys.path.insert(0, str(pathlib.Path(__file__).parent.parent))
     from db import get_auth_user
 
-    stripe.api_key = STRIPE_SECRET_KEY
     user = get_auth_user(user_id)
     if not user or not user.get("stripe_customer_id"):
         raise HTTPException(status_code=404, detail="Sem assinatura ativa.")
 
-    portal = stripe.billing_portal.Session.create(
-        customer=user["stripe_customer_id"],
-        return_url=f"{DASHBOARD_URL}/app",
+    portal = await _create_billing_portal(
+        user_id, user["stripe_customer_id"], "/app", "/billing/portal",
     )
     return {"portal_url": portal.url}
 
@@ -6532,19 +6568,24 @@ async def conta_redirect(request: Request):
     if not STRIPE_SECRET_KEY:
         return RedirectResponse(url=_dashboard_url("/precos"), status_code=302)
 
-    import stripe
     sys.path.insert(0, str(pathlib.Path(__file__).parent.parent))
     from db import get_auth_user
 
-    stripe.api_key = STRIPE_SECRET_KEY
     user = get_auth_user(user_id)
     if not user or not user.get("stripe_customer_id"):
         return RedirectResponse(url=_dashboard_url("/precos"), status_code=302)
 
-    portal = stripe.billing_portal.Session.create(
-        customer=user["stripe_customer_id"],
-        return_url=f"{DASHBOARD_URL}/settings",
-    )
+    try:
+        portal = await _create_billing_portal(
+            user_id, user["stripe_customer_id"], "/settings", "/conta",
+        )
+    except HTTPException as exc:
+        if exc.status_code != 502:
+            raise
+        return error_page_response(502, text=(
+            "Gerenciamento indisponível",
+            "Não foi possível abrir o gerenciamento da assinatura agora. Tente novamente em instantes.",
+        ), actions=(("Tentar novamente", "/conta"), ("Voltar para configurações", "/settings")))
     return RedirectResponse(url=portal.url, status_code=302)
 
 
@@ -7385,6 +7426,7 @@ async def debug_ai_payload_route(
         raise HTTPException(status_code=404, detail="Not found")
     _authorize_dashboard_access(request, user_id)
     from core.ai_patterns import _collect_patterns_data, _collect_insights_data
+    _require_pro(user_id, "insights")
     if kind == "insights":
         data = await asyncio.to_thread(_collect_insights_data, user_id)
     else:
@@ -7652,13 +7694,13 @@ async def set_budget(request: Request, user_id: int, payload: BudgetPayload):
     if payload.budget <= 0:
         raise HTTPException(status_code=400, detail="budget must be > 0")
 
-    from core.services.plan_service import is_pro
+    from core.services.plan_service import plan_gate_ok
 
     async with await db_connect() as conn:
         async with conn.cursor() as cur:
             # Pro gate: Free pode ter até FREE_BUDGETS_LIMIT orçamentos.
             # Update de orçamento existente não conta — só novo INSERT.
-            if not is_pro(user_id):
+            if not plan_gate_ok(user_id, "generic"):
                 await cur.execute(
                     "SELECT 1 FROM category_budgets "
                     "WHERE user_id=%s AND lower(categoria)=lower(%s)",
@@ -8147,13 +8189,21 @@ async def boleto_projection_route(request: Request, user_id: int, date: str, amo
     """Projeção de caixa até uma data ('tô tranquilo nesse prazo?'). `date`=alvo
     (YYYY-MM-DD), `amount`=boleto novo em consideração (opcional)."""
     _authorize_dashboard_access(request, user_id)
-    _require_boletos_access(user_id)
+    _require_pro(user_id, "forecast")
     from datetime import date as _date
     from math import isfinite
     try:
         target = _date.fromisoformat(str(date)[:10])
     except (ValueError, TypeError):
         raise HTTPException(status_code=400, detail="Data inválida (use AAAA-MM-DD).")
+    from core.services.plan_service import plans_v2_enabled, forecast_horizons_for
+    if plans_v2_enabled():
+        cap = max(await asyncio.to_thread(forecast_horizons_for, user_id), default=0)
+        if target > _date.today() + timedelta(days=cap):
+            raise HTTPException(status_code=403, detail={
+                "error": "pro_required", "feature": "forecast",
+                "message": f"Seu plano permite previsões de até {cap} dias.",
+            })
     # O parser de query aceita `nan`/`inf` num float, e o número não finito
     # estoura na serialização JSON da resposta (500).
     if amount is not None and not isfinite(amount):
@@ -8165,11 +8215,11 @@ async def boleto_projection_route(request: Request, user_id: int, date: str, amo
 
 @app.get("/forecast/{user_id}")
 async def forecast_route(request: Request, user_id: int, threshold: float = 0.0):
-    """Previsão de saldo a 30/60/90 dias + trajetória diária dos 90 dias inteiros
-    com o pior dia no caminho (feature Pro+ da /precos). `threshold` (opcional,
+    """Plus: saldo a 30 dias. Pro: 30/60/90 dias e trajetória diária.
+    `threshold` (opcional,
     R$0 default): limite de segurança configurável — saldo positivo abaixo dele
     ainda conta como aperto; não é persistido. 403 pro_required
-    abaixo de Pro — o dashboard usa isso pra esconder o card."""
+    abaixo de Plus — o dashboard usa isso pra esconder o card."""
     _authorize_dashboard_access(request, user_id)
     _require_pro(user_id, "forecast")
     from math import isfinite
@@ -8177,8 +8227,13 @@ async def forecast_route(request: Request, user_id: int, threshold: float = 0.0)
     # estoura na serialização JSON da resposta (500).
     if not isfinite(threshold):
         raise HTTPException(status_code=400, detail="Limite inválido.")
-    from core.services.cashflow_forecast import forecast_with_trajectory
-    result = await asyncio.to_thread(forecast_with_trajectory, user_id, 90, threshold)
+    from core.services.plan_service import forecast_horizons_for
+    from core.services.cashflow_forecast import forecast_horizons, forecast_with_trajectory
+    horizons = await asyncio.to_thread(forecast_horizons_for, user_id)
+    if 90 in horizons:
+        result = await asyncio.to_thread(forecast_with_trajectory, user_id, 90, threshold)
+    else:
+        result = await asyncio.to_thread(forecast_horizons, user_id, horizons)
     return {"ok": True, "forecast": result}
 
 

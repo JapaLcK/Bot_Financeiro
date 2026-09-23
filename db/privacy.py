@@ -883,8 +883,9 @@ def delete_user_data(user_id: int) -> dict:
             if _table_exists(cur, "email_verification_codes") and emails:
                 cur.execute("delete from email_verification_codes where email = any(%s)", (emails,))
 
-            if _table_exists(cur, "auth_rate_limits") and emails:
+            if _table_exists(cur, "auth_rate_limits"):
                 identifiers = [f"email:{email.strip().lower()}" for email in emails]
+                identifiers.append(f"user:{user_id}")  # teto por conta (mfa-verify)
                 cur.execute("delete from auth_rate_limits where identifier = any(%s)", (identifiers,))
 
             if _table_exists(cur, "open_finance_transactions"):

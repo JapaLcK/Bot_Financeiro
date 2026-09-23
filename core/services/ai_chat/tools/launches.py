@@ -125,6 +125,9 @@ def _get_largest_expenses(user_id: int, args: dict[str, Any]) -> dict[str, Any]:
 
 def _compare_periods(user_id: int, args: dict[str, Any]) -> dict[str, Any]:
     """Compara totais de receita/despesa entre 2 períodos."""
+    from core.services.plan_service import plan_gate_ok
+    if not plan_gate_ok(user_id, "financial_comparison"):
+        return {"error": "pro_required", "message": "Comparações entre períodos estão disponíveis nos planos Plus e Pro."}
     a_start = _parse_iso_date(args.get("period_a_start"))
     a_end = _parse_iso_date(args.get("period_a_end"))
     b_start = _parse_iso_date(args.get("period_b_start"))
@@ -159,6 +162,9 @@ def _compare_periods(user_id: int, args: dict[str, Any]) -> dict[str, Any]:
 
 
 def _get_spending_trend(user_id: int, args: dict[str, Any]) -> dict[str, Any]:
+    from core.services.plan_service import plan_gate_ok
+    if not plan_gate_ok(user_id, "financial_comparison"):
+        return {"error": "pro_required", "message": "Tendências e comparações estão disponíveis nos planos Plus e Pro."}
     try:
         months = int(args.get("months") or 6)
     except (TypeError, ValueError):
@@ -219,6 +225,9 @@ def _forecast_month_end(user_id: int, args: dict[str, Any]) -> dict[str, Any]:
     anteriores também).
     """
     from calendar import monthrange
+    from core.services.plan_service import plans_v2_enabled, plan_gate_ok
+    if plans_v2_enabled() and not plan_gate_ok(user_id, "forecast"):
+        return {"error": "pro_required", "message": "A projeção de fechamento está disponível nos planos Plus e Pro."}
 
     today = date.today()
     month_start = today.replace(day=1)

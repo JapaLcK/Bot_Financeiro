@@ -734,7 +734,8 @@ def _periodic_report_tick() -> None:
 
         # claim atômico por período: o loop faz polling a cada 30s, o claim garante
         # que cada resumo saia uma única vez (mesmo com reinício / múltiplas instâncias)
-        if uid in weekly_users and claim_weekly_report_send(uid, today):
+        from core.services.plan_service import plan_gate_ok
+        if uid in weekly_users and plan_gate_ok(uid, "weekly_report") and claim_weekly_report_send(uid, today):
             summary = build_weekly_report_summary(uid, closed=True)
             _send_periodic_template(uid, wa_targets, weekly_cfg, summary, "weekly", instance)
 

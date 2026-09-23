@@ -11,7 +11,7 @@ Cobre:
 from __future__ import annotations
 
 import os
-from unittest.mock import patch
+from unittest.mock import Mock, patch
 
 import pyotp
 from cryptography.fernet import Fernet
@@ -250,29 +250,68 @@ def test_dispatch_new_login_email_swallows_errors(user_id):
             _dispatch_new_login_email(real_user_id, "198.51.100.7", "ua")  # nao deve raise
 
 
-def test_ipgeo_returns_none_for_private_ip():
-    """Loopback / RFC1918 nao tem geolocalizacao publica."""
-    from core.services.ipgeo import lookup_city
-
-    assert lookup_city("127.0.0.1") is None
-    assert lookup_city("10.0.0.5") is None
-    assert lookup_city("192.168.1.1") is None
-    assert lookup_city("172.16.0.1") is None
-    assert lookup_city(None) is None
-    assert lookup_city("") is None
+def _ipgeo_spy(status_code=200, payload=None):
+    """`requests.get` falso que devolveria uma cidade válida: se a guarda deixar
+    passar, o teste vê a chamada (e a cidade), não um `None` vindo da rede."""
+    payload = payload or {
+        "city": "Mountain View", "region": "California", "country_code": "US"}
+    return Mock(return_value=Mock(status_code=status_code, json=lambda: payload))
 
 
-def test_ipgeo_returns_none_when_request_fails():
-    """Erro de rede / timeout retorna None silenciosamente."""
+def test_ipgeo_returns_none_for_private_ip(monkeypatch):
+    """IP não-global ou malformado nunca sai para a rede.
+
+    O conftest liga `IPGEO_DISABLED=1` em todo teste, e a função retorna antes
+    do filtro — daí o `delenv`: sem ele este teste passa com o filtro apagado.
+    """
     from core.services import ipgeo
 
-    with patch.object(ipgeo.requests, "get", side_effect=RuntimeError("network unreachable")):
-        assert ipgeo.lookup_city("8.8.8.8") is None
+    monkeypatch.delenv("IPGEO_DISABLED", raising=False)
+    get = _ipgeo_spy()
+    monkeypatch.setattr(ipgeo.requests, "get", get)
+
+    for ip in ("127.0.0.1", "10.0.0.5", "192.168.1.1", "172.16.0.1",
+               "169.254.1.1", "100.64.0.1", "::1", "fe80::1",
+               "8.8.8.8/../x", "nao-e-ip", None, ""):
+        assert ipgeo.lookup_city(ip) is None, ip
+    get.assert_not_called()
+
+    # Positivo: sem ele, um filtro que recusa tudo passaria acima.
+    assert ipgeo.lookup_city("8.8.8.8") == "Mountain View, California, US"
+    get.assert_called_once()
+    assert "8.8.8.8" in get.call_args.args[0]
+
+
+def test_ipgeo_returns_none_on_request_or_response_error(monkeypatch):
+    """Timeout, HTTP != 200 ou erro no corpo do ipapi.co: None, sem virar cidade."""
+    from core.services import ipgeo
+
+    monkeypatch.delenv("IPGEO_DISABLED", raising=False)
+    get = Mock(side_effect=ipgeo.requests.Timeout())
+    monkeypatch.setattr(ipgeo.requests, "get", get)
+    assert ipgeo.lookup_city("8.8.8.8") is None
+    assert get.called
+
+    # HTTP != 200 com corpo de cidade válido: sem a guarda, viraria cidade.
+    get = _ipgeo_spy(status_code=500)
+    monkeypatch.setattr(ipgeo.requests, "get", get)
+    assert ipgeo.lookup_city("8.8.8.8") is None
+    assert get.called
+
+    # 200 com o erro do ipapi.co (rate limit): não é cidade.
+    get = _ipgeo_spy(payload={"error": True, "reason": "RateLimited",
+                              "city": "Mountain View"})
+    monkeypatch.setattr(ipgeo.requests, "get", get)
+    assert ipgeo.lookup_city("8.8.8.8") is None
+    assert get.called
 
 
 def test_ipgeo_disabled_via_env(monkeypatch):
     """IPGEO_DISABLED=1 desliga totalmente o lookup (privacidade/cost)."""
-    from core.services.ipgeo import lookup_city
+    from core.services import ipgeo
 
     monkeypatch.setenv("IPGEO_DISABLED", "1")
-    assert lookup_city("8.8.8.8") is None
+    get = _ipgeo_spy()
+    monkeypatch.setattr(ipgeo.requests, "get", get)
+    assert ipgeo.lookup_city("8.8.8.8") is None
+    get.assert_not_called()

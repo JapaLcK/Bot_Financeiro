@@ -1077,6 +1077,9 @@ def init_db():
         create index if not exists idx_mfa_login_challenges_expires
           on mfa_login_challenges (expires_at)
         """,
+        # Tentativas de codigo por challenge (teto em db/mfa.py). Errar um
+        # digito nao pode queimar o challenge, mas o chute tambem tem limite.
+        "alter table mfa_login_challenges add column if not exists attempts int not null default 0",
 
         # ─── Engagement tracking ──────────────────────────────────────────────────
         """

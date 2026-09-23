@@ -517,6 +517,7 @@ _ERROR_TEXTS = {
 }
 _ERROR_DEFAULT_4XX = ("Não deu pra abrir", "Algo nesse pedido não está certo.")
 _ERROR_DEFAULT_5XX = ("Algo deu errado do nosso lado", "Já registramos o problema. Tente de novo em instantes.")
+_ERROR_DEFAULT_ACTIONS = (("← Página inicial", "/"),)
 
 _error_template: str | None = None
 # Já logamos a queda pro fallback? Sem isto o warning sai POR REQUISIÇÃO, e no
@@ -548,10 +549,11 @@ _ERROR_PASSTHROUGH_HEADERS = frozenset({"allow", "www-authenticate", "retry-afte
 _ERROR_FALLBACK_HTML = (
     '<!DOCTYPE html><html lang="pt-BR" style="background:#050506"><head><meta charset="UTF-8">'
     '<meta name="viewport" content="width=device-width,initial-scale=1">'
-    '<meta name="robots" content="noindex"><title>{{CODE}} — {{TITLE}} | PigBank</title></head>'
+    '<meta name="robots" content="noindex"><title>{{CODE}} — {{TITLE}} | PigBank</title>'
+    '<style>a{color:#FF2D8E;display:inline-block;margin:8px}a:focus-visible{outline:2px solid;outline-offset:4px}</style></head>'
     '<body style="background:#050506;color:#fff;font-family:sans-serif;text-align:center;padding:64px 24px">'
     "<h1>{{CODE}}</h1><h2>{{TITLE}}</h2><p>{{MESSAGE}}</p>"
-    '<p><a href="/" style="color:#FF2D8E">← Página inicial</a></p></body></html>'
+    '<p>{{ACTIONS}}</p></body></html>'
 )
 
 
@@ -590,7 +592,8 @@ def vary_accept(response: Response) -> Response:
 
 
 def error_page_response(status_code: int, headers: dict | None = None,
-                        text: tuple[str, str] | None = None) -> Response:
+                        text: tuple[str, str] | None = None, *,
+                        actions: tuple[tuple[str, str], ...] | None = None) -> Response:
     """Página de erro HTML preservando o status (nada de soft-404) e no-store.
 
     `{{CODE}}`/`{{TITLE}}`/`{{MESSAGE}}` do error.html saem do mapa fixo
@@ -600,9 +603,8 @@ def error_page_response(status_code: int, headers: dict | None = None,
     e a garantia deixa de depender de quem lê este parágrafo.
 
     `text=(titulo, mensagem)` sobrepõe o mapa para o caso em que o status já está
-    tomado por outra coisa e a tela ficaria sem instrução — hoje só o `/unsubscribe`
-    com token inválido, que é 400 como qualquer 422 de validação mas precisa dizer o
-    que fazer. Continua sendo para constante do servidor (é texto de produto, não
+    tomado por outra coisa e a tela ficaria sem instrução. Continua sendo para
+    constante do servidor (é texto de produto, não
     eco de entrada), só que agora um deslize ali sai escapado em vez de virar HTML.
 
     NÃO passa pelo `html_file`: aquele funil injeta o Meta Pixel, e a página de erro
@@ -624,13 +626,27 @@ def error_page_response(status_code: int, headers: dict | None = None,
             and all(isinstance(t, str) for t in text)):
         text = _ERROR_TEXTS.get(status_code, default)
     title, message = text
+    # Ações são pares (rótulo, caminho interno), nunca HTML fornecido pelo caller.
+    # Entrada malformada preserva a saída de último recurso e a navegação padrão.
+    if not (isinstance(actions, tuple) and actions and all(
+        isinstance(action, tuple) and len(action) == 2
+        and all(isinstance(value, str) for value in action)
+        and action[1].startswith("/") and not action[1].startswith("//")
+        and not re.search(r"[\\\s\x00-\x1f\x7f]", action[1])
+        for action in actions
+    )):
+        actions = _ERROR_DEFAULT_ACTIONS
+    action_links = "".join(
+        f'<a href="{escape(href, quote=True)}">{escape(label)}</a>'
+        for label, href in actions
+    )
     template = _error_template
     if template is None:
         try:
             # Contrato do error.html — esta função é o único consumidor dele, e a
             # nota mora aqui e não lá dentro porque comentário em HTML VIAJA no
             # corpo de toda resposta de erro (era o caso; saiu). Quem for editar o
-            # arquivo precisa saber de duas coisas: os três placeholders abaixo são
+            # arquivo precisa saber de duas coisas: os quatro placeholders abaixo são
             # obrigatórios (a validação seguinte rejeita o arquivo sem eles), e nada
             # de CDN — só CSS inline e o `/safe-area.js` do próprio domínio, porque
             # esta página roda justamente quando algo já quebrou.
@@ -640,11 +656,11 @@ def error_page_response(status_code: int, headers: dict | None = None,
             # Arquivo que ABRE mas veio pela metade (deploy interrompido, rsync
             # cortado, disco cheio) é o mesmo problema do arquivo ausente — e sem
             # esta checagem viraria cache envenenado até o restart. `</html>` é a
-            # última linha (pega truncamento no fim, e o vazio de graça) e os TRÊS
+            # última linha (pega truncamento no fim, e o vazio de graça) e os QUATRO
             # placeholders precisam estar lá: truncamento não é a única corrupção —
             # lixo no meio, ou um `{{MESSAGE}}</html>` de 50 bytes, passava sem
             # {{CODE}}/{{TITLE}} e ia ao usuário sem o código do erro na tela.
-            if not all(p in raw for p in ("{{CODE}}", "{{TITLE}}", "{{MESSAGE}}")) \
+            if not all(p in raw for p in ("{{CODE}}", "{{TITLE}}", "{{MESSAGE}}", "{{ACTIONS}}")) \
                     or not raw.rstrip().endswith("</html>"):
                 raise ValueError(f"error.html incompleto ({len(raw)} bytes)")
             # Stamp aqui, JUNTO do cache, e não na montagem do corpo: o
@@ -679,8 +695,9 @@ def error_page_response(status_code: int, headers: dict | None = None,
     # resolve o (2): `html.escape` não toca em chaves. A passagem única resolve os
     # dois. `re` e não `str.format`/`Template`: o template tem CSS cheia de chaves.
     valores = {"{{CODE}}": str(status_code),
-               "{{TITLE}}": escape(title), "{{MESSAGE}}": escape(message)}
-    body = re.sub(r"\{\{(?:CODE|TITLE|MESSAGE)\}\}", lambda m: valores[m.group()], template)
+               "{{TITLE}}": escape(title), "{{MESSAGE}}": escape(message),
+               "{{ACTIONS}}": action_links}
+    body = re.sub(r"\{\{(?:CODE|TITLE|MESSAGE|ACTIONS)\}\}", lambda m: valores[m.group()], template)
     response = Response(content=body, status_code=status_code, media_type="text/html; charset=utf-8")
     for key, value in (headers or {}).items():
         if key.lower() in _ERROR_PASSTHROUGH_HEADERS:
@@ -1151,6 +1168,13 @@ def authorize_account_access(request: Request, user_id: int) -> int:
     raise_if_account_scheduled_for_deletion(current_user_id)
     _enforce_subscription_gate(request, current_user_id, exige_direito=False)
     return current_user_id
+
+
+def require_plan_feature(user_id: int, feature: str) -> None:
+    """Gate por capacidade, depois da autorização de sessão e dono."""
+    from core.services.plan_service import plan_gate_ok
+    if not plan_gate_ok(user_id, feature):
+        raise HTTPException(status_code=403, detail={"error": "pro_required", "feature": feature})
 
 
 def authorize_dashboard_access(request: Request, user_id: int) -> int:

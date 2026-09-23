@@ -238,7 +238,7 @@ def infer_category(user_id: int, text_base: str, explicit_category: str | None =
       B) regra do usuário (user_category_rules via get_memorized_category)
       C) ticker brasileiro detectado (PETR4, MXRF11, …)
       D) heurística local (LOCAL_RULES)
-      E) fallback IA (só se allow_ai e Pro)
+      E) fallback IA (Essencial+; Pro no modo legado)
       default: 'outros'
 
     `allow_ai=False` pula o passo E — usado quando já existe uma categoria da
@@ -353,11 +353,11 @@ def infer_category(user_id: int, text_base: str, explicit_category: str | None =
     if local_cat:
         return InferResult(category=local_cat, reason="local_rule")
 
-    # D) fallback IA (só se OPENAI_API_KEY configurada e usuário Pro)
+    # D) fallback IA (chave configurada e permissão de categorização)
     if allow_ai and os.getenv("OPENAI_API_KEY"):
         try:
-            from core.services.plan_service import is_pro
-            allow_ai = is_pro(int(user_id))
+            from core.services.plan_service import plan_gate_ok
+            allow_ai = plan_gate_ok(int(user_id), "ai_categorization")
         except Exception:
             allow_ai = False
 

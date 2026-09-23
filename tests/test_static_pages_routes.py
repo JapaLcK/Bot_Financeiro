@@ -117,42 +117,25 @@ def test_whatsapp_nao_garante_quando_a_primeira_cobranca_vem():
 
 
 def test_index_nao_inverte_o_fluxo_do_trial():
-    """O CTA do "como funciona" da / é NOSSO (1ca0c44) e dizia o fluxo ao contrário.
+    """O fluxo oficial continua conta → plano → WhatsApp, sem prometer cobrança.
 
-    O texto era "você testa 15 dias grátis antes de escolher um plano", mas o
-    gate deste PR faz o oposto: escolher o plano é o que ATIVA o trial
-    (`needs_plan_selection` bloqueia o app até a assinatura). O mesmo commit
-    escreveu a ordem certa na /whatsapp e na /como-funciona e a inversa aqui.
-
-    A asserção é presa ao bloco `.hiw-cta` de propósito: as garantias de data
-    ("primeira cobrança", "sem pagar nada") também existem nas linhas 504 e
-    536 desta página, mas são PREEXISTENTES (d5e299f, anterior à merge-base
-    c779837) e não são deste PR. Guarda de página inteira, como o da
-    /whatsapp, é impossível aqui — ficaria vermelho por código de terceiro.
-
-    Controle positivo dentro do próprio bloco: ele continua oferecendo o teste
-    e deferindo ao checkout, senão o caso passaria num CTA que apagou a oferta.
+    A landing aprovada substitui o trilho antigo por demonstrações estáticas e
+    remete aos planos reais; não anuncia oferta de trial própria.
     """
     html = " ".join(client.get("/").text.split())
-    bloco = re.search(r'class="hiw-cta".*?</div>', html)
-    assert bloco, "o bloco .hiw-cta sumiu da / — a asserção abaixo ficou cega"
+    bloco = re.search(r'class="lp-cta-copy".*?</div>', html)
+    assert bloco, "o convite final precisa explicar a ordem de entrada"
     cta = bloco.group(0)
-
+    assert "Crie sua conta, escolha seu plano e conecte o WhatsApp." in cta
+    assert 'href="/cadastro"' in cta
+    assert 'href="/precos"' in cta
     assert not re.search(
         r"test\w*[^.]{0,60}antes de (?:escolher|assinar|pegar|pagar)[^.]{0,25}plano",
-        cta,
+        html,
         re.I,
-    ), f"o CTA da / diz que se testa antes de escolher o plano: {cta!r}"
-
+    ), "a landing diz que se testa antes de escolher o plano"
     for garantia in ("primeira cobrança", "sem pagar nada", "não paga nada"):
-        assert garantia not in cta, (
-            f"o CTA da / garante a data/ausência da cobrança: {garantia!r}"
-        )
-
-    assert "15 dias grátis" in cta, "o CTA da / deixou de oferecer o teste"
-    assert "checkout" in cta.lower(), (
-        "o CTA da / não defere ao checkout quem confirma a cobrança"
-    )
+        assert garantia not in cta
 
 
 def test_stamp_asset_versions_usa_hash_de_conteudo():
