@@ -1,5 +1,5 @@
-import { useEffect, useState } from "react";
-import { View } from "react-native";
+import { useEffect, useRef, useState } from "react";
+import { View, type TextInput } from "react-native";
 
 import { Button } from "@/ui/componentes/Button";
 import { Input } from "@/ui/componentes/Input";
@@ -26,6 +26,7 @@ interface Props {
  */
 export function CodigoMfa({ estado, autenticar, aplicar }: Props) {
   const [codigo, setCodigo] = useState("");
+  const campo = useRef<TextInput>(null);
   const verificando = estado.fase === "verificando";
   const { desafio, email, modo } = estado;
   const aviso = estado.fase === "mfa" ? estado.aviso : undefined;
@@ -42,8 +43,12 @@ export function CodigoMfa({ estado, autenticar, aplicar }: Props) {
   // o `estado` (objeto novo a cada `aplicar`), não o `aviso`: dois erros
   // iguais seguidos podem chegar no mesmo commit que o "verificando", e o
   // texto do aviso não muda. Backup fica como foi digitado.
+  // O foco volta ao campo nos dois modos: o `editable={false}` da verificação
+  // tira o foco no iOS, e sem isto a pessoa tinha de tocar no campo de novo.
   useEffect(() => {
-    if (estado.fase === "mfa" && estado.aviso && estado.modo === "totp") setCodigo("");
+    if (estado.fase !== "mfa" || !estado.aviso) return;
+    if (estado.modo === "totp") setCodigo("");
+    campo.current?.focus();
   }, [estado]);
 
   // Aplica a fase "verificando" ANTES de chamar `tocar()`, não depois: sem
@@ -73,6 +78,7 @@ export function CodigoMfa({ estado, autenticar, aplicar }: Props) {
   return (
     <View style={{ gap: espaco.lg }}>
       <Input
+        ref={campo}
         rotulo={modo === "totp" ? "Código de 6 dígitos" : "Código de backup"}
         icone="Lock"
         value={codigo}
