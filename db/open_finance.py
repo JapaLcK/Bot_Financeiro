@@ -1035,6 +1035,32 @@ def _unbind_pocket(cur, user_id: int, pocket_id: int) -> int:
     return 1
 
 
+def _desvincula_e_limpa_caixinhas(cur, user_id: int, of_investment_ids: list[int]) -> int:
+    """Política de "a posição do banco saiu": devolve cada caixinha vinculada ao
+    saldo PRÓPRIO dela (`_unbind_pocket`) e apaga só a que o sync criou e ficou
+    em zero. Devolve quantas linhas o delete levou.
+
+    NÃO depende do `on delete set null` do FK (db/schema.py): rodar isto ANTES do
+    delete da posição, na MESMA transação, é o que impede a caixinha fantasma com
+    saldo bancário (ver o disconnect: 800 + 1000 do nada).
+    """
+    if not of_investment_ids:
+        return 0
+    cur.execute(
+        "select id, source from pockets where user_id=%s and of_investment_id = any(%s)",
+        (user_id, list(of_investment_ids)),
+    )
+    espelhos = cur.fetchall()
+    for p in espelhos:
+        _unbind_pocket(cur, user_id, p["id"])
+    do_sync = [p["id"] for p in espelhos if p["source"] == "open_finance"]
+    if not do_sync:
+        return 0
+    cur.execute("delete from pockets where user_id=%s and id = any(%s) and balance <= 0",
+                (user_id, do_sync))
+    return cur.rowcount
+
+
 def bind_pocket_to_caixinha(user_id: int, pocket_id: int, of_investment_id: int | None) -> bool:
     """Vincula (ou desvincula, of_investment_id=None) uma meta a uma caixinha OF.
 
@@ -2802,23 +2828,13 @@ def disconnect_open_finance_connection(
             # recebido depósito (só dá pra isso sem vínculo) fica, com o que é dela.
             cur.execute(
                 """
-                select p.id, p.source from pockets p
-                 join open_finance_investments i on i.id = p.of_investment_id
+                select i.id from open_finance_investments i
                  join open_finance_connections c on c.id = i.connection_id
-                 where p.user_id = %s and c.user_id = %s
-                   and (%s::bigint is null or c.id = %s)
+                 where c.user_id = %s and (%s::bigint is null or c.id = %s)
                 """,
-                (user_id, user_id, connection_id, connection_id),
+                (user_id, connection_id, connection_id),
             )
-            espelhos = cur.fetchall()
-            for p in espelhos:
-                _unbind_pocket(cur, user_id, p["id"])
-            do_sync = [p["id"] for p in espelhos if p["source"] == "open_finance"]
-            if do_sync:
-                cur.execute(
-                    "delete from pockets where user_id=%s and id = any(%s) and balance <= 0",
-                    (user_id, do_sync),
-                )
+            _desvincula_e_limpa_caixinhas(cur, user_id, [r["id"] for r in cur.fetchall()])
             # Reler AGORA, sob o lock: entre a leitura do passo 1 e aqui, um undo
             # concorrente pode ter trocado o imported_launch_id por uma sombra
             # nova (`_insert_of_shadow`) — sem reler, ela sobra órfã do cascade.
