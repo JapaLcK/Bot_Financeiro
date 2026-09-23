@@ -2,7 +2,7 @@
  * A VSL da landing é opcional: nenhum caminho para /cadastro depende do vídeo.
  *
  * O grupo protege três contratos:
- *   · os seis CTAs são links acionáveis no HTML, inclusive sem JavaScript;
+ *   · os quatro CTAs são links acionáveis no HTML, inclusive sem JavaScript;
  *   · o vídeo continua `preload="none"` e permite busca livre;
  *   · play e progresso continuam disponíveis para a análise do funil.
  *
@@ -55,14 +55,14 @@ test("todos os CTAs levam ao cadastro sem exigir o vídeo", async () => {
     travado: a.classList.contains("is-locked"),
     aria: a.getAttribute("aria-disabled"),
   })));
-  assert.equal(estados.length, 6, "a landing tem 6 CTAs de /cadastro");
+  assert.equal(estados.length, 4, "a landing tem 4 CTAs de /cadastro");
   assert.ok(estados.every(e => !e.travado && e.aria === null),
             "nenhum CTA pode nascer bloqueado");
-  assert.equal((await page.textContent("#vsl-cta")).trim(), "COMECE JÁ");
+  assert.equal((await page.textContent("#vsl-cta")).trim(), "Criar minha conta");
 
   await Promise.all([
     page.waitForURL(/\/cadastro$/, { timeout: 5000 }),
-    page.click('.hero-cta a[href="/cadastro"]'),
+    page.click('.lp-hero .lp-actions a[href="/cadastro"]'),
   ]);
   await ctx.close();
 });
@@ -148,6 +148,6 @@ test("sem JavaScript o cadastro também fica disponível", async () => {
   assert.equal(b.href, "/cadastro");
   assert.ok(!b.classe.includes("is-locked"));
   assert.equal(b.aria, null);
-  assert.equal(b.texto, "COMECE JÁ");
+  assert.equal(b.texto, "Criar minha conta");
   await ctx.close();
 });
