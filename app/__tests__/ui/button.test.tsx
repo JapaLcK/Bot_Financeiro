@@ -2,6 +2,7 @@ import { fireEvent } from "@testing-library/react-native";
 import { ActivityIndicator, Animated, StyleSheet } from "react-native";
 
 import { Button } from "@/ui/componentes/Button";
+import { Icone } from "@/ui/componentes/Icone";
 import { claro, escuro } from "@/ui/tokens";
 
 import { renderInterativo, renderNosDoisTemas } from "./_render";
@@ -84,5 +85,22 @@ describe("Button", () => {
     const { claro: c, escuro: e } = renderNosDoisTemas(<Button rotulo="Confirmar" onPress={jest.fn()} variante="primary" />);
     expect(c.toJSON()).toMatchSnapshot("claro");
     expect(e.toJSON()).toMatchSnapshot("escuro");
+  });
+
+  describe("icone", () => {
+    it("sem icone: nenhum Icone na árvore (o snapshot acima não muda)", () => {
+      const { claro: c } = renderNosDoisTemas(<Button rotulo="x" onPress={jest.fn()} />);
+      expect(c.UNSAFE_queryAllByType(Icone)).toHaveLength(0);
+    });
+
+    it("com icone: renderiza no mesmo tom do rótulo da variante", () => {
+      const { claro: c } = renderNosDoisTemas(<Button rotulo="Continuar com Google" onPress={jest.fn()} variante="secondary" icone="GoogleLogo" />);
+      expect(c.UNSAFE_getByType(Icone).props).toMatchObject({ nome: "GoogleLogo", tom: "ink" });
+    });
+
+    it("carregando com icone: o rótulo E o ícone ficam invisíveis, sem sumir o ActivityIndicator", () => {
+      const { claro: c } = renderNosDoisTemas(<Button rotulo="Continuar com Google" onPress={jest.fn()} icone="GoogleLogo" carregando />);
+      expect(c.UNSAFE_getByType(ActivityIndicator)).toBeTruthy();
+    });
   });
 });

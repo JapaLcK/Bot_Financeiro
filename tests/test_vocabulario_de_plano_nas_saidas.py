@@ -120,9 +120,10 @@ def logado(monkeypatch, user_id):
     o monólito por `Depends(_get_current_user)`), e o POSITIVO deste arquivo
     compara as duas — com uma só logada ele mediria 401.
 
-    `app` é lido AQUI e não no topo do módulo: `tests/test_pix_rota_registrada.py`
-    faz `importlib.reload` do monólito, e um `TestClient` de import-time fica
-    preso ao app ANTIGO enquanto o override cai no novo (efeito de ORDEM).
+    `app` é lido AQUI e não no topo do módulo: um `importlib.reload` do monólito
+    deixa um `TestClient` de import-time preso ao app ANTIGO enquanto o override
+    cai no novo (efeito de ORDEM; `tests/test_pix_rota_registrada.py` fazia isso
+    até importar o app num subprocesso).
     """
     conta(user_id, "free", None)
     monkeypatch.setattr(rotas.shared, "resolve_dashboard_user_id",

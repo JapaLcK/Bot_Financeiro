@@ -259,6 +259,35 @@ async function renovar(refreshDeOrigem: string): Promise<Renovacao> {
   }
 }
 
+/**
+ * Tempo máximo de uma chamada de auth. Sem ele, um `fetch` que nunca responde
+ * nem falha (Android sem timeout — mesmo caso real do `sair()` de
+ * services/auth.ts) trava para sempre a fila de "ação por vez" do login: a
+ * tentativa antiga nunca SE RESOLVE, então nenhuma nova consegue começar.
+ */
+export const TEMPO_LIMITE_AUTH_MS = 15_000;
+
+/**
+ * `AbortSignal` que aborta sozinho depois de `ms` — para passar em `sinal`.
+ *
+ * `controlador` é opcional: quem precisa abortar a requisição de FORA (uma
+ * tentativa de entrada abandonada por "Voltar" — `services/auth.ts`,
+ * `abandonarEntrada`) passa o próprio `AbortController` para guardar a
+ * referência; sem uso externo, um novo é criado por chamada, como antes.
+ */
+export function comLimite(
+  ms: number = TEMPO_LIMITE_AUTH_MS,
+  controlador: AbortController = new AbortController(),
+): AbortSignal {
+  // `unref` (Node/Jest) tira o cronômetro da contagem que mantém o processo
+  // vivo — a requisição normal resolve muito antes dos 15s, e sem isto cada
+  // teste deixava um timer pendurado até o fim do prazo. Não existe em
+  // Hermes (RN real); `?.()` não quebra lá, só não faz nada.
+  const cronometro = setTimeout(() => controlador.abort(), ms) as unknown as { unref?: () => void };
+  cronometro.unref?.();
+  return controlador.signal;
+}
+
 type Opcoes = {
   metodo?: "GET" | "POST" | "PATCH" | "PUT" | "DELETE";
   corpo?: unknown;

@@ -89,7 +89,7 @@ jobs:
 
       - name: Run tests
         run: |
-          PYTHONPATH=. pytest -q
+          PYTHONPATH=. pytest -q -n auto
 
   # Testes de frontend (tests/frontend/): Playwright + Chromium contra as páginas
   # reais de frontend/. Job SEPARADO de propósito — não depende de Postgres nem
