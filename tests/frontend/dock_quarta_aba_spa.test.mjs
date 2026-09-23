@@ -191,3 +191,75 @@ test("S3 (SPA, caso D): /auth/me chega com o toque em Início EM VOO — a Iníc
   } finally { liberarMe(); liberarMontagem(); await ctx.close(); }
   assert.deepEqual(erros, []);
 });
+
+test("S4 (SPA): montar a Início instala o CSS externo dos grupos da sidenav",
+  LIMITE, async () => {
+  const { ctx, page } = await abrirSpa(browser, "/comandos-app.html", "0", FREE);
+  try {
+    await tocar(page, "/home", "/home");
+    const fechado = await page.evaluate(() => {
+      const grupo = document.querySelector('.sidenav-group[data-group="acompanhamento"]');
+      const itens = grupo?.querySelector(".sidenav-subitems");
+      return {
+        css: !!document.querySelector('link[rel~="stylesheet"][href*="sidenav-rail.css"]'),
+        display: itens ? getComputedStyle(itens).display : null,
+      };
+    });
+    assert.deepEqual(fechado, { css: true, display: "none" });
+
+    await page.evaluate(() => window.toggleSidenavGroup("acompanhamento"));
+    assert.equal(await page.locator(
+      '.sidenav-group[data-group="acompanhamento"] .sidenav-subitems',
+    ).evaluate((el) => getComputedStyle(el).display), "block");
+  } finally { await ctx.close(); }
+});
+
+test("S5 (SPA): segundo toque espera CSS e scripts externos ainda pendentes",
+  LIMITE, async () => {
+  const { ctx, page } = await abrirSpa(browser, "/comandos-app.html", "0", FREE);
+  let liberarCss;
+  let avisarCss;
+  let liberarScript;
+  let avisarScript;
+  const cssLiberado = new Promise((ok) => { liberarCss = ok; });
+  const cssChegou = new Promise((ok) => { avisarCss = ok; });
+  const scriptLiberado = new Promise((ok) => { liberarScript = ok; });
+  const scriptChegou = new Promise((ok) => { avisarScript = ok; });
+  try {
+    await page.evaluate(() => localStorage.setItem(
+      "pb_sidenav_groups", JSON.stringify({ acompanhamento: true }),
+    ));
+    await page.route("**/sidenav-rail.css*", async (route) => {
+      avisarCss();
+      await cssLiberado;
+      await route.fulfill({ path: join(FRONTEND, "sidenav-rail.css") });
+    });
+    await page.route("**/sidenav-groups.js*", async (route) => {
+      avisarScript();
+      await scriptLiberado;
+      await route.fulfill({ path: join(FRONTEND, "sidenav-groups.js") });
+    });
+
+    await page.evaluate(() => window.PBNav.go("/home"));
+    await cssChegou;
+    await page.evaluate(() => window.PBNav.go("/home"));
+
+    const montouSemCss = await page.waitForFunction(
+      () => location.pathname === "/home", null, { timeout: 800 },
+    ).then(() => true, () => false);
+    assert.equal(montouSemCss, false, "a segunda navegação montou /home antes do CSS terminar");
+
+    liberarCss();
+    await scriptChegou;
+    const montouSemScript = await page.waitForFunction(
+      () => location.pathname === "/home", null, { timeout: 800 },
+    ).then(() => true, () => false);
+    assert.equal(montouSemScript, false, "a segunda navegação montou /home antes dos scripts terminarem");
+
+    liberarScript();
+    await page.waitForFunction(() => location.pathname === "/home", null, ESPERA);
+    assert.equal(await page.locator(
+      '.sidenav-group[data-group="acompanhamento"] .sidenav-subitems',
+    ).evaluate((el) => getComputedStyle(el).display), "block");
+  } finally { liberarCss(); liberarScript(); await ctx.close(); }
+});

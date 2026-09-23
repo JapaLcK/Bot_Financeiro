@@ -104,14 +104,6 @@ html.pb-app body.pb-page-home .sidenav-toggle { display:inline-flex; }
 .sidenav-item .sn-label { flex:1; min-width:0; white-space:nowrap; overflow:hidden; text-overflow:ellipsis; }
 .sidenav-item .sn-tag { font-size:.55rem; font-weight:700; padding:2px 6px; border-radius:6px; letter-spacing:.06em; text-transform:uppercase; background:rgba(251,191,36,.18); color:#fbbf24; }
 .sidenav-item .sn-tag.new { background:rgba(198,241,26,.18); color:#C6F11A; }
-/* Menus colapsáveis — mesmas regras do dashboard.css (as duas sidenavs têm
-   que abrir/fechar igual; o estado vem do localStorage "pb_sidenav_groups"). */
-.sidenav-group-toggle .sn-caret { margin-left:auto; color:var(--text-3); font-size:.78rem; transition:transform .18s var(--ease); }
-.sidenav-group.open .sidenav-group-toggle .sn-caret { transform:rotate(90deg); }
-.sidenav-subitems { display:none; }
-.sidenav-group.open .sidenav-subitems { display:block; }
-.sidenav-subitems .sidenav-item { padding-left:22px; position:relative; }
-.sidenav-subitems .sidenav-item::before { content:""; position:absolute; left:9px; top:50%; width:5px; height:5px; border-radius:50%; background:var(--text-3); opacity:.5; transform:translateY(-50%); }
 .sidenav-footer { margin-top:auto; padding-top:12px; border-top:1px solid var(--div); display:flex; flex-direction:column; gap:2px; }
 .sidenav-backdrop { display:none; }
 .sidenav-backdrop.open { display:block; position:fixed; inset:0; z-index:59; background:rgba(0,0,0,.55); backdrop-filter:blur(1px); }
@@ -462,6 +454,7 @@ footer a:hover { color:var(--text); }
 .checkout-confirm-overlay .cc-sub { color: rgba(255,255,255,.6); font-size: 13px; max-width: 320px; line-height: 1.4; }
 </style>
 <link rel="stylesheet" href="/sidenav-rail.css?v=3" />
+<script src="/sidenav-groups.js?v=1"></script>
 <script defer src="/sidenav-scrollbar.js?v=1"></script>
 <script src="/static/auth-refresh.js?v=1"></script>
 <script src="/modals.js"></script>
@@ -924,37 +917,7 @@ function toggleSidenav(force) {
 sidenavRailMedia.addEventListener("change", syncSidenavMode);
 syncSidenavMode();
 
-/* ── Menus colapsáveis da sidenav ─────────────────────────────────────────
-   Mesma mecânica do dashboard.js (toggleSidenavGroup lá): grupos fechados por
-   padrão, estado persistido na MESMA chave — abrir Ferramentas aqui e ela já
-   vem aberta no /app. Aqui não há "menu da view ativa": a página ativa é o
-   Início, que fica fora dos grupos. */
-function _snGroupStates() {
-  try { return JSON.parse(localStorage.getItem("pb_sidenav_groups") || "{}") || {}; }
-  catch(_) { return {}; }
-}
-
-function toggleSidenavGroup(name) {
-  const g = document.querySelector(`.sidenav-group[data-group="${name}"]`);
-  if (!g) return;
-  const open = !g.classList.contains("open");
-  g.classList.toggle("open", open);
-  const toggle = g.querySelector(".sidenav-group-toggle");
-  if (toggle) toggle.setAttribute("aria-expanded", open ? "true" : "false");
-  const states = _snGroupStates();
-  states[name] = open;
-  try { localStorage.setItem("pb_sidenav_groups", JSON.stringify(states)); } catch(_) {}
-}
-
-(function initSidenavGroups() {
-  const states = _snGroupStates();
-  document.querySelectorAll(".sidenav-group").forEach(g => {
-    const open = !!states[g.dataset.group];
-    g.classList.toggle("open", open);
-    const toggle = g.querySelector(".sidenav-group-toggle");
-    if (toggle) toggle.setAttribute("aria-expanded", open ? "true" : "false");
-  });
-})();
+window.PigBankSidenavGroups?.init?.();
 document.addEventListener("keydown", e => {
   if (e.key === "Escape") {
     const nav = document.getElementById("sidenav");
@@ -1911,7 +1874,7 @@ async function mfaOnboardingDismiss() {
 /* Handlers chamados por onclick= no HTML: dentro do init eles deixaram de
    nascer globais — expõe exatamente os que o markup usa. */
 Object.assign(window, {
-  toggleHideBalance, toggleSidenav, toggleSidenavGroup, logoutFromHome, connectWhatsAppFromHome,
+  toggleHideBalance, toggleSidenav, logoutFromHome, connectWhatsAppFromHome,
   mfaOnboardingActivate, mfaOnboardingDismiss,
 });
 });

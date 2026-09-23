@@ -249,26 +249,6 @@ body.light .sidenav-toggle:hover { background:rgba(15,23,42,.05); color:var(--te
    identifica o selo, a tinta do texto passa a ser a do resto da interface. */
 body.light .sidenav-item .sn-tag { color:var(--text); }
 
-/* ── Menus colapsáveis da sidenav ─────────────────────────────────────────
-   Redução da barra: só Início/Visão Geral/Agentes ficam sempre visíveis; o
-   resto vive em 4 grupos (.sidenav-group). O toggle é um .sidenav-item comum
-   (mesmo hover/tipografia), com o caret à direita girando quando abre. Sem
-   transição de altura de propósito: display none/block é instantâneo e não
-   prende o clique em animação; o giro do caret já dá o feedback. */
-.sidenav-group-toggle .sn-caret {
-  margin-left:auto; color:var(--text-3); font-size:.78rem;
-  transition:transform .18s var(--ease);
-}
-.sidenav-group.open .sidenav-group-toggle .sn-caret { transform:rotate(90deg); }
-.sidenav-subitems { display:none; }
-.sidenav-group.open .sidenav-subitems { display:block; }
-/* Sub-item indentado com trilha à esquerda: lê-se como "dentro do menu" sem
-   ocupar a largura de um segundo ícone. */
-.sidenav-subitems .sidenav-item { padding-left:22px; position:relative; }
-.sidenav-subitems .sidenav-item::before {
-  content:""; position:absolute; left:9px; top:50%; width:5px; height:5px;
-  border-radius:50%; background:var(--text-3); opacity:.5; transform:translateY(-50%);
-}
 /* O menu que contém a view ativa ganha um leve destaque no rótulo mesmo
    fechado — senão, com tudo recolhido, nada indica onde o usuário está. */
 .sidenav-group:has(.sidenav-item.active) > .sidenav-group-toggle { color:var(--text); }

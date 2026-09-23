@@ -692,6 +692,15 @@ async def serve_sidenav_scrollbar_js():
     )
 
 
+@router.get("/sidenav-groups.js")
+async def serve_sidenav_groups_js():
+    return FileResponse(
+        FRONTEND_DIR / "sidenav-groups.js",
+        media_type="application/javascript",
+        headers={"Cache-Control": "no-cache"},
+    )
+
+
 @router.get("/comecar.js")
 async def serve_comecar_js():
     """Comportamento do wizard de primeira configuração servido em /onboarding.
