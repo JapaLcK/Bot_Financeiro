@@ -457,3 +457,53 @@ def pro_user_id(user_id: int):
     """user_id já promovido para plano Pro — use em testes que precisam criar
     múltiplas caixinhas/cartões ou exercem features Pro."""
     return promote_to_pro(user_id)
+
+
+@pytest.fixture()
+def pluggy_responde(monkeypatch):
+    """Faz o `httpx.Client.get` devolver o que o teste mandar — o caminho real
+    passa por `_pluggy_get`, que é onde o saneamento e a conferência de
+    paginação moram.
+
+    Chamada com um DICT, ele vale para todas as chamadas (o comportamento
+    original, usado por `test_pluggy_resposta_venenosa.py`). Chamada com uma
+    LISTA, cada entrada responde a um GET, na ordem — é o que permite testar
+    paginação. Entrada em forma de tupla `(status_code, payload)` simula HTTP de
+    erro, passando pelo `_raise_for_pluggy_response` REAL em vez de mockar a
+    exceção.
+
+    O objeto devolvido expõe `.chamadas` com os `params` recebidos por GET.
+    """
+    import core.services.pluggy as pluggy
+
+    estado: dict = {"respostas": None}
+    chamadas: list = []
+
+    class _Resp:
+        def __init__(self, entrada):
+            if isinstance(entrada, tuple):
+                self.status_code, self._payload = entrada
+            else:
+                self.status_code, self._payload = 200, entrada
+            self.is_success = 200 <= self.status_code < 300
+
+        def json(self):
+            return self._payload
+
+    def _fake_get(self, url, headers=None, params=None):
+        chamadas.append(params)
+        respostas = estado["respostas"]
+        if isinstance(respostas, list):
+            i = len(chamadas) - 1
+            assert i < len(respostas), f"GET nº {i + 1} sem resposta programada"
+            return _Resp(respostas[i])
+        return _Resp(respostas)
+
+    monkeypatch.setattr(pluggy.httpx.Client, "get", _fake_get)
+
+    def programa(respostas):
+        estado["respostas"] = respostas
+        chamadas.clear()
+
+    programa.chamadas = chamadas
+    return programa

@@ -339,6 +339,30 @@ def _sync_pluggy_item_confirmado(provider_item_id: str, connection: dict, api_ke
         # tentou sincronizar, e antes o perdedor da corrida já mexia na linha.
         mark_sync_attempt(connection["id"], origin="sync")
 
+        # RECONCILIAÇÃO do espelho de investimentos — posição que não veio saiu do
+        # banco, e a caixinha dela vai junto. Só pode rodar com a leitura PROVADA
+        # inteira, e são duas provas independentes:
+        #   1. `investments_ok` — `list_pluggy_investments` não levantou (ela
+        #      confere a metadata de paginação e levanta em leitura parcial);
+        #   2. INVESTMENTS fora de `stale_products` — `statusDetail.investments.
+        #      isUpdated == false` diz que a coleta de investimentos NO BANCO
+        #      falhou nesta execução, e mesmo assim o `/investments` responde 200
+        #      com o que tiver, possivelmente vazio. Sem esta segunda prova,
+        #      coleta falha + resposta 200 vazia apagaria caixinha com dinheiro.
+        # `statusDetail` ausente não bloqueia: aí `stale_products` vem vazio e a
+        # reconciliação segue — não se inventa defeito na ausência de sinal.
+        #
+        # AQUI e não lá embaixo, por dois motivos: dentro do lock (ela apaga linha
+        # de `pockets` e de `open_finance_investments` do item que outro webhook
+        # pode estar escrevendo) e depois da relectura de autorização (run de
+        # geração velha não remove posição nenhuma); e ACIMA do early-return de
+        # `no_accounts`, senão corretora — conexão sem contas, carteira toda em
+        # `/investments` — nunca reconciliaria.
+        investimentos_confiaveis = (
+            investments_ok and "INVESTMENTS" not in (health.get("stale_products") or []))
+        inv_result = save_open_finance_investments(
+            connection["id"], investments, leitura_completa=investimentos_confiaveis)
+
         # Item vivo que não espelhou NADA — nem conta nem investimento — não é
         # sucesso. Só que a decisão vem depois da leitura de investimentos: item
         # de corretora é exatamente isto, zero contas e a carteira toda em
@@ -351,10 +375,9 @@ def _sync_pluggy_item_confirmado(provider_item_id: str, connection: dict, api_ke
                              status_reason=reason, health=health)
             return {"ok": False, "reason": reason, "item_id": provider_item_id,
                     "connection_id": connection["id"], "user_id": connection["user_id"],
-                    "accounts_synced": 0, "transactions_synced": 0}
+                    "accounts_synced": 0, "transactions_synced": 0, **inv_result}
 
         result = save_open_finance_sync(connection["id"], accounts)
-        inv_result = save_open_finance_investments(connection["id"], investments)
 
         # Caixinhas do OF viram caixinhas do Pig automaticamente (auto-create + dedup) e o
         # saldo do banco é espelhado nas vinculadas — mas SÓ pra planos pagos (Essencial+).

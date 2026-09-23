@@ -324,7 +324,8 @@ def get_open_finance_snapshot(user_id: int, limit: int = 8) -> dict:
 
             cur.execute(
                 """
-                select c.institution_name, i.id, i.name, i.type, i.subtype, i.balance
+                select c.institution_name, i.id, i.name, i.type, i.subtype, i.balance,
+                       i.currency, i.updated_at
                 from open_finance_investments i
                 join open_finance_connections c on c.id = i.connection_id
                 where c.user_id=%s
@@ -873,12 +874,36 @@ def update_pluggy_open_finance_item_status(provider_item_id: str, status: str, r
     return updated
 
 
-def save_open_finance_investments(connection_id: int, investments: list[dict]) -> dict:
-    """Grava (upsert) os investimentos OF — inclui Caixinha (CDB). Espelho, não vira pocket ainda."""
+def save_open_finance_investments(connection_id: int, investments: list[dict], *,
+                                  leitura_completa: bool = False) -> dict:
+    """Grava (upsert) os investimentos OF — inclui Caixinha (CDB). Espelho, não vira pocket ainda.
+
+    `leitura_completa=True` RECONCILIA: posição da conexão que não veio nesta
+    chamada saiu do banco, então some daqui e a caixinha dela vai ao destino do
+    `_desvincula_e_limpa_caixinhas` (volta ao saldo próprio; a do sync que ficar
+    em zero é apagada) — tudo no MESMO commit do upsert.
+
+    O default é `False` de propósito: só quem PROVOU que leu a carteira inteira
+    (`list_pluggy_investments` sem exceção E investimentos não-stale no item,
+    core/services/pluggy_sync.py) pode remover. Quem chama sem o argumento
+    continua sendo upsert puro — leitura pela metade que apagasse posição levaria
+    caixinha com dinheiro dentro.
+    """
     now = datetime.now(_tz())
     count = 0
+    vistos: list[str] = []
+    removed = 0
+    caixinhas_removidas = 0
     with get_conn() as conn:
         with conn.cursor() as cur:
+            cur.execute("select user_id from open_finance_connections where id=%s", (connection_id,))
+            owner = cur.fetchone()
+            if not owner:
+                return {"investments_synced": 0, "investments_removed": 0}
+            # Mesma ordem de aquisição do `save_open_finance_sync` e do disconnect:
+            # o lock do usuário ANTES de qualquer escrita.
+            from .bank_movements import _lock_user
+            _lock_user(cur, owner["user_id"])
             for inv in investments:
                 if not inv.get("provider_investment_id"):
                     continue
@@ -899,8 +924,32 @@ def save_open_finance_investments(connection_id: int, investments: list[dict]) -
                      Jsonb(inv.get("raw") or {}), now),
                 )
                 count += 1
+                vistos.append(str(inv["provider_investment_id"]))
+
+            if leitura_completa:
+                # `vistos` VAZIO com leitura completa casa com tudo — e é o
+                # comportamento desejado: leitura válida que devolveu zero posição
+                # significa carteira vazia, e a conexão inteira é reconciliada. O
+                # `::text[]` explícito existe porque o Postgres recusa array vazio
+                # sem tipo.
+                cur.execute(
+                    "select id from open_finance_investments "
+                    "where connection_id=%s and provider_investment_id <> all(%s::text[])",
+                    (connection_id, vistos),
+                )
+                ausentes = [r["id"] for r in cur.fetchall()]
+                if ausentes:
+                    caixinhas_removidas = _desvincula_e_limpa_caixinhas(
+                        cur, owner["user_id"], ausentes)
+                    cur.execute(
+                        "delete from open_finance_investments "
+                        "where connection_id=%s and id = any(%s)",
+                        (connection_id, ausentes),
+                    )
+                    removed = cur.rowcount
         conn.commit()
-    return {"investments_synced": count}
+    return {"investments_synced": count, "investments_removed": removed,
+            "caixinhas_removidas": caixinhas_removidas}
 
 
 # ── Banqueiro (agente cofre): caixinha OF ↔ meta do PigBank ───────────────────

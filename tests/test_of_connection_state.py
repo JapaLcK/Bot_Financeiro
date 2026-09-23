@@ -1977,3 +1977,118 @@ def test_updating_seguido_de_foto_final_limpa_o_cartao_CONTROLE_POSITIVO(user_id
 
     ui = _ui("item-444-integra-4")
     assert ui["state"] == "updated", ui
+
+
+# ── 13. OF-01: a reconciliação do espelho de investimentos ──────────────────
+# A conversa inteira pelo `sync_pluggy_item`, não o `save_...` isolado: o que
+# decide se posição sai é o GATE (leitura completa E investimentos não-stale),
+# e ele mora aqui, dentro do lock e depois da relectura de autorização.
+#
+# CONTROLE NEGATIVO (medido, ver relato): tirar `leitura_completa=` da chamada
+# de `save_open_finance_investments` deixa o primeiro vermelho; tirar a condição
+# de stale do gate deixa o terceiro vermelho.
+
+def _mock_investimentos(monkeypatch, retorno):
+    """`_mock_pluggy` fixa `list_pluggy_investments` em `[]`; aqui ela devolve
+    carteira de verdade (ou levanta, se `retorno` for uma exceção)."""
+    def _lista(item_id, api_key=None, **kw):
+        if isinstance(retorno, Exception):
+            raise retorno
+        return list(retorno)
+    monkeypatch.setattr(ps, "list_pluggy_investments", _lista)
+
+
+_CX_A = {"id": "cx-a", "name": "Caixinha Viagem", "type": "FIXED_INCOME",
+         "subtype": "CDB", "balance": "800.00"}
+_CX_B = {"id": "cx-b", "name": "Caixinha Carro", "type": "FIXED_INCOME",
+         "subtype": "CDB", "balance": "500.00"}
+
+
+def _espelho_investimentos(connection_id: int) -> set[str]:
+    with get_conn() as c:
+        with c.cursor() as cur:
+            cur.execute("select provider_investment_id from open_finance_investments "
+                        "where connection_id=%s", (connection_id,))
+            return {r["provider_investment_id"] for r in (cur.fetchall() or [])}
+
+
+def _nomes_de_caixinha(user_id: int) -> set[str]:
+    from db.pockets import accrue_all_pockets
+    return {p["name"] for p in accrue_all_pockets(user_id)}
+
+
+def test_sync_reconcilia_posicao_que_sumiu_do_banco(user_id, monkeypatch, relogio_fixo):
+    """Sync 1 espelha duas caixinhas; no sync 2 o banco devolve só uma. A que
+    sumiu sai do espelho E a caixinha dela sai junto — sem virar fantasma com o
+    último saldo espelhado.
+
+    `contas=[]` de propósito: é o item de corretora, o caso que nunca
+    reconciliava enquanto a chamada ficava depois do early-return de
+    `no_accounts`."""
+    from conftest import promote_to_pro
+    promote_to_pro(user_id)
+    conexao = _conexao(user_id)
+    _mock_pluggy(monkeypatch, item=ITEM_SAUDAVEL, contas=[])
+    _mock_investimentos(monkeypatch, [_CX_A, _CX_B])
+    assert ps.sync_pluggy_item("item-g1")["ok"] is True
+    assert _espelho_investimentos(conexao["id"]) == {"cx-a", "cx-b"}
+    assert {"Caixinha Viagem", "Caixinha Carro"} <= _nomes_de_caixinha(user_id)
+
+    _mock_investimentos(monkeypatch, [_CX_A])
+    res = ps.sync_pluggy_item("item-g1")
+
+    assert res["ok"] is True
+    assert res["investments_removed"] == 1
+    assert _espelho_investimentos(conexao["id"]) == {"cx-a"}
+    nomes = _nomes_de_caixinha(user_id)
+    assert "Caixinha Carro" not in nomes, "espelho sem posição não fica"
+    assert "Caixinha Viagem" in nomes
+    linha = _linha()
+    assert linha["status"] == "ACTIVE"
+    assert linha["last_sync_at"] == AGORA
+
+
+def test_sync_com_leitura_de_investimentos_falha_nao_remove_nada(user_id, monkeypatch, relogio_fixo):
+    """429 em `/investments`: `investments_ok=False` e NADA sai — nem posição nem
+    caixinha. É o caminho que `list_pluggy_investments` toma em toda leitura
+    parcial (metadata incoerente, página que falhou, teto de páginas)."""
+    from conftest import promote_to_pro
+    promote_to_pro(user_id)
+    conexao = _conexao(user_id)
+    _mock_pluggy(monkeypatch, item=ITEM_SAUDAVEL, contas=[_conta_pluggy()], txs=[_tx_pluggy()])
+    _mock_investimentos(monkeypatch, [_CX_A, _CX_B])
+    assert ps.sync_pluggy_item("item-g1")["ok"] is True
+
+    _mock_investimentos(monkeypatch, PluggyApiError("rate limit", status_code=429))
+    res = ps.sync_pluggy_item("item-g1")
+
+    assert res["investments_ok"] is False
+    assert res["investments_removed"] == 0
+    assert _espelho_investimentos(conexao["id"]) == {"cx-a", "cx-b"}
+    assert {"Caixinha Viagem", "Caixinha Carro"} <= _nomes_de_caixinha(user_id)
+
+
+def test_sync_com_investimentos_stale_nao_remove_nada(user_id, monkeypatch, relogio_fixo):
+    """A segunda prova do gate: `statusDetail.investments.isUpdated=false` diz que
+    a coleta de investimentos NO BANCO falhou nesta execução — e mesmo assim
+    `/investments` responde 200 com o que tiver, possivelmente a metade. Resposta
+    VÁLIDA e curta, então, não autoriza remover."""
+    from conftest import promote_to_pro
+    promote_to_pro(user_id)
+    conexao = _conexao(user_id)
+    _mock_pluggy(monkeypatch, item=ITEM_SAUDAVEL, contas=[])
+    _mock_investimentos(monkeypatch, [_CX_A, _CX_B])
+    assert ps.sync_pluggy_item("item-g1")["ok"] is True
+
+    item_stale = {**ITEM_SAUDAVEL,
+                  "statusDetail": {**ITEM_SAUDAVEL["statusDetail"],
+                                   "investments": {"isUpdated": False, "warnings": []}}}
+    _mock_pluggy(monkeypatch, item=item_stale, contas=[])
+    _mock_investimentos(monkeypatch, [_CX_A])
+    res = ps.sync_pluggy_item("item-g1")
+
+    assert "INVESTMENTS" in res["stale_products"]
+    assert res["investments_ok"] is True, "a leitura em si foi válida — quem barra é o stale"
+    assert res["investments_removed"] == 0
+    assert _espelho_investimentos(conexao["id"]) == {"cx-a", "cx-b"}
+    assert {"Caixinha Viagem", "Caixinha Carro"} <= _nomes_de_caixinha(user_id)
