@@ -74,6 +74,12 @@ cobrança; resolver o que for deles **antes** de começar.
 | `PLANS_TRIAL_DAYS` | I1 | registrar o **valor** (padrão 15). No modo v2 é esta a variável; `PRO_TRIAL_DAYS` só vale no legado | trial de outra duração | `plan_service.trial_days_total()` |
 | `ADMIN_DASHBOARD_PASSWORD_HASH` | P6, I0 | definida (produção não aceita senha em texto) | painel admin responde 503 | `core/admin_dashboard.py` |
 
+Registro da conferência (segredo: só "definida / ausente"; o resto, o valor):
+
+| data | quem conferiu | itens ok | itens faltando ou diferentes | seções bloqueadas |
+|---|---|---|---|---|
+| | | | | |
+
 Limites de taxa que um executor pode encontrar sem ser defeito: Insights e padrões
 20/min por IP, perfil 60/min, checkout 20/h, troca e cancelamento de troca 15/h.
 
@@ -366,6 +372,15 @@ reembolso, e o I4 cancela dentro dele. Registrar qual dos dois aconteceu.
 | I2 | Pedir troca para Essencial em `/precos` (chama `/billing/change-plan`) | troca **agendada** para o fim do período pago; plano atual continua Plus |
 | I3 | Cancelar a troca agendada | agendamento some; Plus segue |
 | I4 | Mandar `cancelar assinatura` no WhatsApp (o app não tem botão; a resposta traz um link `/d/...?next=/conta` válido por 1 h, que leva ao portal da Stripe) e cancelar **no fim do período** | acesso Plus segue até o fim do período. Quando a assinatura termina, o webhook `customer.subscription.deleted` revoga só os grants `stripe`/`legacy` e reprojeta. Como o I0 já revogou o grant `admin`, sobra `free`: a sonda A dá **402 `subscription_required`** em tudo e o bot bloqueia. **Não** fica igual a S5. Sem o I0, o grant `admin` que sobrevivesse projetaria a conta de volta ao Essencial. Cancelar "agora" ou reembolsar com cancelamento pelo painel da Stripe corta o acesso na hora. Depois do I4, voltar a conta ao Essencial pelo admin se ela ainda for usada |
+
+
+| caso | observado (status da sonda, plano gravado, horário do webhook, com ou sem trial) | resultado | PR |
+|---|---|---|---|
+| I0 | | | |
+| I1 | | | |
+| I2 | | | |
+| I3 | | | |
+| I4 | | | |
 
 ---
 
