@@ -20,6 +20,20 @@ os.environ.setdefault("PII_AUDIT_DISABLED", "1")
 # (test_plan_tiers, test_of_trial_expiry, etc.) ligam com setenv("...", "1").
 os.environ.setdefault("PLANS_V2_ENABLED", "0")
 
+# Bcrypt no custo mínimo — só nos testes. O custo padrão é calibrado para ser
+# lento de propósito, e a suíte hasheia senha/código de backup o tempo todo:
+# é o maior item do tempo de rodada. `checkpw` lê o custo de dentro do próprio
+# hash, então a verificação continua funcionando igual. Produção não muda —
+# `db/users.py` e `db/mfa.py` seguem chamando `bcrypt.gensalt()` sem argumento,
+# e `tests/test_bcrypt_custo.py` prova que os dois hasheiam no custo padrão.
+# O original fica no próprio módulo (e não numa global daqui) porque o conftest
+# é importado duas vezes — como `conftest` e como `tests.conftest`; o `hasattr`
+# impede a segunda passada de guardar a lambda da primeira como "padrão".
+import bcrypt as _bcrypt  # noqa: E402
+if not hasattr(_bcrypt, "gensalt_padrao"):
+    _bcrypt.gensalt_padrao = _bcrypt.gensalt
+    _bcrypt.gensalt = lambda rounds=12, prefix=b"2b": _bcrypt.gensalt_padrao(4, prefix)
+
 from db import init_db, ensure_user, get_conn
 
 
