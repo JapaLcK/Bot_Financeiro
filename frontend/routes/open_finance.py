@@ -1013,8 +1013,9 @@ async def _adota_item_orfao(item_id: str, last_event: str | None = None) -> int 
     cenário — NÃO verificado. O one-shot
     que apagava o item por id saiu do repositório porque o `--apply` dele não
     tinha guarda contra item duplicado da mesma conta (dobraria saldo e
-    lançamentos); se precisar, ele volta do histórico com
-    `git show bda3ee7:scripts/adotar_items_of_orfaos.py`.
+    lançamentos); se precisar, ele volta do histórico — os DOIS arquivos, porque
+    ele importa o módulo da lista — com
+    `git checkout bda3ee7 -- scripts/adotar_items_of_orfaos.py scripts/adotar_items_lista.py`.
     Fechar isso sozinho exigiria o disconnect deixar rastro próprio
     (`origin='disconnect'`) para separar "removido" de "adoção que falhou" —
     escrita em outro fluxo, outro PR.
