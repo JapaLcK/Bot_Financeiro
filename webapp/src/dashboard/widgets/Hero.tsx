@@ -1,7 +1,7 @@
 import NumberFlow from "@number-flow/react";
 import { useMemo } from "react";
 import { BALANCE_TODAY, HORIZONS, isCurrentMonth, trajectory } from "../lib/api";
-import { longDate, money0, signed0 } from "../lib/format.js";
+import { longDate, money0, signed0, signedBig, tone } from "../lib/format.js";
 import { set, simActive } from "../lib/store.js";
 import type { DashState } from "../lib/types";
 import { Frame } from "../parts/Frame";
@@ -38,7 +38,7 @@ export function Hero({ s }: { s: DashState }) {
         <dl className="hero-facts">
           <div>
             <dt>{current ? "Até lá" : "No mês"}</dt>
-            <dd className={change >= 0 ? "gain" : ""}>{signed0(change)}</dd>
+            <dd className={tone(change) === "gain" ? "gain" : ""}>{signed0(change)}</dd>
           </div>
           {current && end.lo != null && end.hi != null && (
             <div>
@@ -49,7 +49,7 @@ export function Hero({ s }: { s: DashState }) {
           {simOn && (
             <div className="hero-sim">
               <dt>Com a simulação</dt>
-              <dd className={simGain >= 0 ? "gain" : "warn"}>{signed0(simGain)}</dd>
+              <dd className={tone(simGain)}>{signedBig(simGain)}</dd>
             </div>
           )}
         </dl>
@@ -58,7 +58,7 @@ export function Hero({ s }: { s: DashState }) {
         <li><span className="key real" />Realizado</li>
         {current && <li><span className="key forecast" />Previsão</li>}
         {current && <li><span className="key band" />Faixa provável</li>}
-        {simOn && <li><span className="key sim" />Simulação</li>}
+        {simOn && <li><span className={`key sim ${tone(simGain)}`} />Simulação</li>}
       </ul>
       <TrajectoryChart traj={traj} simOn={simOn} highlight={s.highlight} drawKey={s.month} />
     </Frame>

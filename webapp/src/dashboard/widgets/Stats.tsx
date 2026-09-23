@@ -1,7 +1,7 @@
 import NumberFlow from "@number-flow/react";
 import type { ReactNode } from "react";
 import { CARD, GOALS, TODAY, isCurrentMonth, keyDate, previousKey, spentUntil, summary } from "../lib/api";
-import { monthName, money0 } from "../lib/format.js";
+import { monthName, money0, tone } from "../lib/format.js";
 import type { DashState } from "../lib/types";
 import { Frame } from "../parts/Frame";
 import { BRL } from "./Hero";
@@ -49,11 +49,12 @@ function Spent({ s }: { s: DashState }) {
   const day = current ? TODAY.getDate() : 31;
   const before = prev ? spentUntil(prev, day) : 0;
   const diff = m.expense - before;
+  const diffTone = tone(-diff); // gastar menos é ganho; empate (R$ 0) fica neutro
   const scale = Math.max(m.expense, before) || 1;
   const prevName = prev ? monthName(keyDate(prev)) : "";
   return (
     <Stat title="Saiu" tone="var(--alert)" value={m.expense}
-      delta={prev ? { text: `${money0(Math.abs(diff))} ${diff <= 0 ? "a menos" : "a mais"} que ${prevName}${current ? ` até dia ${day}` : ""}`, good: diff <= 0 } : undefined}>
+      delta={prev ? { text: `${money0(Math.abs(diff))} ${diff <= 0 ? "a menos" : "a mais"} que ${prevName}${current ? ` até dia ${day}` : ""}`, good: diffTone ? diffTone === "gain" : null } : undefined}>
       {prev && (
         <div className="pace" role="img" aria-label={`Gasto até agora ${money0(m.expense)}; ${prevName} no mesmo período ${money0(before)}`}>
           <span className="pace-bar"><i style={{ transform: `scaleX(${m.expense / scale})` }} /></span>

@@ -3,7 +3,7 @@ import { money0 } from "../lib/format.js";
 import { Frame } from "../parts/Frame";
 
 // Onde o patrimônio está hoje: uma barra de composição e a lista por lugar.
-const PARTS = [
+export const PARTS = [
   // Cores de identidade da paleta categórica validada (verde é só para ganho; rosa, para agora).
   { label: "Conta", tone: "#3987e5" },
   { label: "Caixinhas", tone: "#9085e9" },

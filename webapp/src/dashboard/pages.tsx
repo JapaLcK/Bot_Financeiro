@@ -1,12 +1,13 @@
 import { useMemo, type ReactNode } from "react";
 import { GOALS, MONTHS, goalEta, isCurrentMonth, keyDate, monthlySaving, trajectory } from "./lib/api";
-import { money0, monthName, monthYear } from "./lib/format.js";
+import { money0, monthName, monthYear, signedBig, tone } from "./lib/format.js";
 import { simActive } from "./lib/store.js";
 import type { DashState } from "./lib/types";
 import { Frame } from "./parts/Frame";
 import { Board } from "./parts/Board";
 import { Ledger } from "./parts/Ledger";
 import { go, route, type Path } from "./router";
+import { BankCdb } from "./widgets/BankCdb";
 import { Bills } from "./widgets/Bills";
 import { Calendar } from "./widgets/Calendar";
 import { Categories } from "./widgets/Categories";
@@ -75,12 +76,12 @@ function SimChart({ s }: { s: DashState }) {
   const gain = on && traj.end.sim != null ? traj.end.sim - traj.end.value : 0;
   return (
     <Frame id="sim-grafico" title="Saldo nos próximos 90 dias" className="w-hero"
-      aside={on ? <span className={`w-aside-num num ${gain >= 0 ? "gain" : "warn"}`}>{gain >= 0 ? "+" : "−"}{money0(Math.abs(gain))} em 90 dias</span> : null}>
+      aside={on ? <span className={`w-aside-num num ${tone(gain)}`}>{signedBig(gain)} em 90 dias</span> : null}>
       <ul className="legend" aria-label="Legenda do gráfico">
         <li><span className="key real" />Realizado</li>
         <li><span className="key forecast" />Sem mudar nada</li>
         <li><span className="key band" />Faixa provável</li>
-        {on && <li><span className="key sim" />Com a simulação</li>}
+        {on && <li><span className={`key sim ${tone(gain)}`} />Com a simulação</li>}
       </ul>
       <TrajectoryChart traj={traj} simOn={on} highlight={null} drawKey="sim" />
     </Frame>
@@ -110,18 +111,21 @@ function GoalsPage({ s }: { s: DashState }) {
         <div className="panel"><Goals s={s} detailed title="Suas metas" /></div>
         <div className="panel"><GoalsTimeline s={s} /></div>
       </div>
-      <Panel span={4}>
-        <Frame id="caixinhas" title="Caixinhas">
-          <dl className="detail-facts col">
-            <div><dt>Guardado no total</dt><dd className="num">{money0(total)}</dd></div>
-            <div><dt>Entra por mês</dt><dd className="num">{money0(monthly)}{saving > 0 && <span className="gain"> +{money0(saving)}</span>}</dd></div>
-            <div><dt>Próxima a chegar</dt><dd>{next.g.label} <span className="faint num">· {monthYear(next.eta.date)}</span></dd></div>
-          </dl>
-          <button type="button" className="btn btn-ghost" onClick={() => go("/simulador")}>
-            <i className="ph ph-lightning" aria-hidden="true" />Chegar antes: simular
-          </button>
-        </Frame>
-      </Panel>
+      <div className="span-4 stack">
+        <div className="panel">
+          <Frame id="caixinhas" title="Caixinhas">
+            <dl className="detail-facts col">
+              <div><dt>Guardado no total</dt><dd className="num">{money0(total)}</dd></div>
+              <div><dt>Entra por mês</dt><dd className="num">{money0(monthly)}{saving > 0 && <span className="gain"> +{money0(saving)}</span>}</dd></div>
+              <div><dt>Próxima a chegar</dt><dd>{next.g.label} <span className="faint num">· {monthYear(next.eta.date)}</span></dd></div>
+            </dl>
+            <button type="button" className="btn btn-ghost" onClick={() => go("/simulador")}>
+              <i className="ph ph-lightning" aria-hidden="true" />Chegar antes: simular
+            </button>
+          </Frame>
+        </div>
+        <div className="panel"><BankCdb /></div>
+      </div>
     </Page>
   );
 }

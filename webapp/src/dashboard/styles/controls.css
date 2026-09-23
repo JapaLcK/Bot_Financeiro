@@ -177,6 +177,6 @@ select.field { padding-right: 28px; appearance: none; background-image: linear-g
 .tip-title { color: var(--ink-2); margin-bottom: 6px; }
 .tip-value { font-size: 15px; font-weight: 600; letter-spacing: -0.01em; font-variant-numeric: tabular-nums; }
 .tip-row { display: flex; align-items: center; gap: 8px; margin-top: 4px; color: var(--ink-2); }
-.tip-row b { margin-left: auto; color: var(--ink); font-weight: 500; font-variant-numeric: tabular-nums; }
+.tip-row b { margin-left: auto; color: var(--ink); font-weight: 500; font-variant-numeric: tabular-nums; white-space: nowrap; }
 .tip-key { width: 10px; height: 2px; border-radius: 2px; flex: none; }
 .meter.warn > span { background: var(--warn); }

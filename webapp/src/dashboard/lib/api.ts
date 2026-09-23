@@ -9,6 +9,7 @@ export const CATEGORIES = D.CATEGORIES as Category[];
 export const GOALS = D.GOALS as Goal[];
 export const CARD = D.CARD;
 export const INVESTMENTS = D.INVESTMENTS;
+export const BANK_CDB = D.BANK_CDB as { bank: string; via: string; name: string; positions: number[] };
 export const BALANCE_TODAY: number = M.BALANCE_TODAY;
 export const PACE = M.PACE as { perCat: Record<string, number>; std: number };
 export const HORIZONS = M.HORIZONS as Record<"mes" | "30" | "90", string>;

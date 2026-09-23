@@ -62,9 +62,13 @@ export const GOALS = [
   { id: "festival", label: "Festival em dezembro", icon: "ph-ticket", color: "#c98500", target: 1200, saved: 960, monthly: 80 },
 ];
 
+// Caixinhas do Nubank como chegam pelo Open Finance: cada posição é um CDB com o mesmo
+// nome e emissor, sem nada que diga de qual caixinha ela é. Ordem de chegada, nunca por saldo.
+export const BANK_CDB = { bank: "Nubank", via: "Open Finance", name: "CDB - NU FINANCEIRA S.A.", positions: [612.4, 388.15, 201.73, 150, 96.52, 64] };
+
 export const INVESTMENTS = [
   { label: "Tesouro Selic", amount: 2310.45 },
-  { label: "CDB 102% do CDI", amount: 1512.8 },
+  { label: `CDB no ${BANK_CDB.bank} · ${BANK_CDB.positions.length} posições`, amount: Math.round(BANK_CDB.positions.reduce((a, b) => a + b, 0) * 100) / 100 },
   { label: "Bitcoin", amount: 418.3 },
 ];
 

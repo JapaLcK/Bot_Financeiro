@@ -48,7 +48,9 @@
 .key { display: inline-block; width: 16px; height: 2px; border-radius: 2px; background: var(--ink); }
 .key.forecast { height: 0; background: none; border-top: 2px dashed rgba(244, 244, 246, 0.6); border-radius: 0; }
 .key.band { height: 8px; background: rgba(255, 45, 142, 0.22); }
-.key.sim { background: var(--gain); }
+.key.sim { background: var(--ink-2); }
+.key.sim.gain { background: var(--gain); }
+.key.sim.warn { background: var(--warn); }
 
 .chart { position: relative; flex: 1; min-height: 120px; }
 .chart svg, .nw-chart svg { position: absolute; inset: 0; outline: none; touch-action: pan-y; }
@@ -59,9 +61,12 @@
 .line { fill: none; stroke-width: 2; stroke-linejoin: round; stroke-linecap: round; }
 .line.real { stroke: var(--ink); }
 .line.forecast { stroke: rgba(244, 244, 246, 0.55); stroke-dasharray: 4 5; }
-.line.sim { stroke: var(--gain); }
+.line.sim { stroke: var(--ink-2); }
+.line.sim.gain { stroke: var(--gain); }
+.line.sim.warn { stroke: var(--warn); }
 .band { fill: rgba(255, 45, 142, 0.08); }
 .gain-area { fill: var(--gain-wash); }
+.gain-area.warn { fill: var(--warn-wash); }
 .mark { fill: var(--ink-2); stroke: rgb(var(--tw-card)); stroke-width: 2; }
 .mark.in { fill: var(--gain); }
 .mark.inv { fill: var(--warn); }
@@ -79,7 +84,9 @@
 }
 .cross line, .cross-line { stroke: rgba(255, 255, 255, 0.32); stroke-width: 1; }
 .cross circle, .cross-dot { fill: var(--ink); stroke: rgb(var(--tw-card)); stroke-width: 2; }
-.cross circle.sim { fill: var(--gain); }
+.cross circle.sim { fill: var(--ink-2); }
+.cross circle.sim.gain { fill: var(--gain); }
+.cross circle.sim.warn { fill: var(--warn); }
 
 @container (max-width: 440px) {
   .w-hero .w-head { flex-wrap: wrap; }

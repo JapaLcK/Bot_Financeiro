@@ -60,7 +60,7 @@ export function NetWorth({ title = "Patrimônio" }: { title?: string }) {
             {hover != null && <circle cx={x(hover)} cy={y(ROWS[hover].total)} r={4.5} className="cross-dot" />}
             <circle cx={x(ROWS.length - 1)} cy={y(last.total)} r={4} className="today-dot" />
             {[0, Math.floor((ROWS.length - 1) / 2), ROWS.length - 1].map((i) => (
-              <text key={i} x={x(i)} y={height - 2} className="axis" textAnchor={i === 0 ? "start" : i === ROWS.length - 1 ? "end" : "middle"}>{monthYear(ROWS[i].date)}</text>
+              <text key={i} x={x(i)} y={height - 4} className="axis" textAnchor={i === 0 ? "start" : i === ROWS.length - 1 ? "end" : "middle"}>{monthYear(ROWS[i].date)}</text>
             ))}
           </svg>
         )}
