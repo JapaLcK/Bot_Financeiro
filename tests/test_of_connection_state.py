@@ -2133,3 +2133,101 @@ def test_sync_religa_a_caixinha_quando_a_posicao_volta(user_id, monkeypatch, rel
     assert float(pk["Viagem dos sonhos"]["balance"]) == 800.0, "espelho do banco"
     assert "Caixinha Viagem" not in pk, "nenhuma caixinha automática duplicada"
     assert _linha()["status"] == "ACTIVE"
+
+
+# ── 14. M1: a GRAVAÇÃO de investimentos também é fail-soft ──────────────────
+# Irmão de `test_429_em_investimentos_nao_descarta_as_contas_ja_lidas`, que cobre
+# só o lado da LEITURA. A chamada de `save_open_finance_investments` subiu para
+# antes de `save_open_finance_sync` (ela precisa rodar acima do early-return de
+# `no_accounts`, senão corretora nunca reconcilia), e sem `try` uma falha nela
+# passou a jogar fora as contas e transações já lidas — medido: espelho (0, 0)
+# onde antes do PR ficava (1, 1), e a linha sem carimbo nenhum.
+
+def test_falha_ao_gravar_investimentos_nao_descarta_as_contas(user_id, monkeypatch,
+                                                              relogio_fixo):
+    from conftest import promote_to_pro
+    promote_to_pro(user_id)
+    conexao = _conexao(user_id)
+    _mock_pluggy(monkeypatch, item=ITEM_SAUDAVEL,
+                 contas=[_conta_pluggy()], txs=[_tx_pluggy()])
+    _mock_investimentos(monkeypatch, [_CX_A, _CX_B])
+    assert ps.sync_pluggy_item("item-g1")["ok"] is True
+    assert _espelho_investimentos(conexao["id"]) == {"cx-a", "cx-b"}
+
+    # sync 2: a leitura vai bem, a GRAVAÇÃO estoura
+    _mock_investimentos(monkeypatch, [_CX_A])
+    monkeypatch.setattr(ps, "save_open_finance_investments",
+                        lambda *a, **kw: (_ for _ in ()).throw(RuntimeError("boom")))
+
+    res = ps.sync_pluggy_item("item-g1")
+
+    assert _espelho(conexao["id"]) == (1, 1), "contas e transações lidas TÊM que ficar"
+    assert res["ok"] is True, "o que deu certo, deu certo — contas e transações"
+    assert res["investments_ok"] is False, "leitura incompleta é o que sobra"
+    # `read_failed` é o motivo do ESPELHO VAZIO (`has_data=False`, ver
+    # `resolve_connection_state`): com contas gravadas a conexão segue ACTIVE sem
+    # motivo, exatamente como no irmão do 429. O caso de espelho vazio está no
+    # teste abaixo.
+    assert _linha()["status"] == "ACTIVE"
+    assert _espelho_investimentos(conexao["id"]) == {"cx-a", "cx-b"}, (
+        "nenhuma posição removida: a transação de investimentos desfez inteira")
+    assert {"Caixinha Viagem", "Caixinha Carro"} <= _nomes_de_caixinha(user_id)
+
+
+def test_falha_ao_gravar_investimentos_de_corretora_vira_read_failed(user_id, monkeypatch,
+                                                                    relogio_fixo):
+    """O caminho do early-return: corretora (zero contas, carteira toda em
+    `/investments`). Aqui a gravação que falha deixa o espelho VAZIO, e é o caso
+    em que `resolve_connection_state` dá `read_failed` — "não consegui" e não "o
+    banco não tem nada". O que não pode, dos dois lados, é estourar."""
+    from conftest import promote_to_pro
+    promote_to_pro(user_id)
+    _conexao(user_id, "item-corretora")
+    _mock_pluggy(monkeypatch, item={**ITEM_SAUDAVEL, "id": "item-corretora"}, contas=[])
+    _mock_investimentos(monkeypatch, [_CX_A])
+    monkeypatch.setattr(ps, "save_open_finance_investments",
+                        lambda *a, **kw: (_ for _ in ()).throw(RuntimeError("boom")))
+
+    res = ps.sync_pluggy_item("item-corretora")
+
+    assert res["ok"] is False
+    assert res["reason"] == "read_failed", "não é `no_accounts`: não conseguimos gravar"
+    linha = _linha("item-corretora")
+    assert linha["status_reason"] == "read_failed"
+    assert linha["last_sync_at"] == ANTES, "gravação pela metade não é sucesso"
+
+
+def test_amount_profit_nao_numerico_nao_derruba_o_sync(user_id, monkeypatch, relogio_fixo):
+    """`amountProfit` é campo de TERCEIRO. Com `::numeric` cru, um "n/d" abortava
+    a transação e — pelo caminho do M1 — derrubava o item inteiro a CADA sync,
+    junto com as contas. Aqui ele chega na posição que VOLTA, que é onde o UPDATE
+    de religação o lê."""
+    from conftest import promote_to_pro
+    promote_to_pro(user_id)
+    conexao = _conexao(user_id)
+    sujo = {**_CX_A, "amountProfit": "n/d"}
+    _mock_pluggy(monkeypatch, item=ITEM_SAUDAVEL,
+                 contas=[_conta_pluggy()], txs=[_tx_pluggy()])
+    _mock_investimentos(monkeypatch, [sujo])
+    assert ps.sync_pluggy_item("item-g1")["ok"] is True
+
+    _, meta, _ = db.create_pocket(user_id, "Viagem dos sonhos", interest_enabled=False)
+    assert db.bind_pocket_to_caixinha(
+        user_id, meta, _pockets_por_nome(user_id)["Caixinha Viagem"]["of_investment_id"]) is True
+
+    _mock_investimentos(monkeypatch, [])            # some
+    ps.sync_pluggy_item("item-g1")
+    _mock_investimentos(monkeypatch, [sujo])        # e volta, com o campo sujo
+
+    res = ps.sync_pluggy_item("item-g1")
+
+    assert res["ok"] is True
+    assert res["caixinhas_religadas"] == 1
+    assert _espelho(conexao["id"]) == (1, 1), "as contas não podem cair junto"
+    pk = _pockets_por_nome(user_id)
+    assert pk["Viagem dos sonhos"]["of_investment_id"] is not None
+    with get_conn() as c:
+        with c.cursor() as cur:
+            cur.execute("select of_last_seen_profit as p from pockets where id=%s", (meta,))
+            assert cur.fetchone()["p"] is None, (
+                "valor não numérico vira NULL, que é o que o Banqueiro já sabe tratar")

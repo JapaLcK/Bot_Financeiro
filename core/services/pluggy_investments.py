@@ -26,7 +26,11 @@ def _inv_int(value: Any) -> int | None:
         return None
     if isinstance(value, int):
         return value
-    if isinstance(value, str) and value.strip().isdigit():
+    # `isascii()` junto com `isdigit()`: sozinho, o `isdigit()` aceita `"²"` (e
+    # `int("²")` LEVANTA ValueError, que sairia daqui como erro não tratado) e
+    # `"٢"` (dígito arábico-índico, que `int()` converte para 2 em silêncio).
+    # Nenhum dos dois é número de página vindo de uma API.
+    if isinstance(value, str) and value.strip().isascii() and value.strip().isdigit():
         return int(value.strip())
     return None
 
@@ -43,7 +47,11 @@ def list_pluggy_investments(item_id: str, api_key: str | None = None, *,
     `investments_ok=False` (core/services/pluggy_sync.py) e não remove nada.
 
     Não manda `pageSize`: fica no default do servidor (500) — o irmão
-    `/v2/transactions` devolve HTTP 400 quando ele é enviado.
+    `/v2/transactions` devolve HTTP 400 quando ele é enviado. A doc oficial da
+    Pluggy descreve `page`/`pageSize` com padrão 500 e a resposta com `page`,
+    `total`, `totalPages` e `results`:
+      https://docs.pluggy.ai/pt/reference/investment/investments-list
+      https://docs.pluggy.ai/en/reference/basic-concepts
 
     `max_pages=20` → 20 × 500 = 10.000 posições por conexão; a maior carteira PF
     medida neste repositório tem 10 (ver `_CAIXINHA_CDB`, db/open_finance.py). O

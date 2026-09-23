@@ -16,13 +16,21 @@ A remoção continua IMEDIATA e atômica — a lápide não é carência, e B11 
 Ela só guarda a chave natural (conexão + `provider_investment_id`) para reconhecer
 a mesma posição quando ela voltar.
 
-CONTROLE NEGATIVO (medido, ver relato): tirar o UPDATE de religação deixa B9,
-B13, B14, B16 e o E2E vermelhos; tirar `grava_lapide=True` deixa B9, B11, B13 e
-B16 vermelhos; tirar `p.user_id` do UPDATE deixa B13 vermelho; tirar
-`p.of_investment_id is null` deixa B14 vermelho; tirar o `not exists` deixa B12
-vermelho; tirar a inicialização de `of_last_seen_*` deixa B9 vermelho; desligar a
-escotilha deixa B15 (metade 1) vermelho; tirar a checagem de lote deixa B15
-(metade 2) vermelho.
+CONTROLE NEGATIVO (medido, ver relato), pelo CAMINHO REAL: tirar o UPDATE de
+religação deixa B9, B13, B14, B16 e o E2E vermelhos; tirar `grava_lapide=True`
+deixa B9, B11, B13 e B16 vermelhos; tirar a inicialização de `of_last_seen_*`
+deixa B9 vermelho; tirar a limpeza da lápide no disconnect deixa B16 vermelho;
+desligar a escotilha deixa B15 (metade 1) vermelho; tirar a checagem de lote
+deixa B15 (metade 2) vermelho.
+
+E TRÊS que só discriminam com ESTADO FORJADO por SQL, o que está dito em cada
+docstring e é o que elas medem de fato: `p.user_id` (B13), `p.of_investment_id
+is null` (B14) e o `not exists` (B12). Pelo caminho normal as três são
+redundantes — a lápide guarda o `connection_id`, que já pertence a um dono só, e
+o bind apaga a lápide —, e tirar qualquer uma sozinha não deixa nada vermelho sem
+o estado forjado. Elas ficam porque isolamento é regra dura (CLAUDE.md §0) e
+porque a rede não pode depender de um argumento de estrutura; as três partes
+forjadas existem para que ninguém as apague achando que são enfeite.
 
 CONTROLE POSITIVO: B15 metade 2 (espelho COM aporte continua recusando, e o lote
 fica) e B14 (o vínculo que o usuário fez na mão sobrevive à volta da posição
@@ -149,8 +157,14 @@ def test_lapide_nao_poe_dois_pockets_na_mesma_posicao(user_id):
     Estado FORJADO, como em B13/B14: uma lápide viva apontando para uma posição
     que OUTRO pocket já ocupa. No caminho normal a lápide é consumida ou apagada
     antes disso, e medido: tirar esta guarda sozinha não deixa nada vermelho sem
-    este teste. Ela é a rede contra o defeito mais caro deste PR — duas caixinhas
-    espelhando o mesmo dinheiro do banco, que é o patrimônio contado em dobro."""
+    este teste.
+
+    O que ele prova é ESTREITO, e vale dizer: um pocket com lápide não toma uma
+    posição que já tem dono. Ele NÃO é rede contra duas caixinhas no mesmo
+    dinheiro — o `not exists` lê o snapshot de antes do statement e não vê a irmã
+    da MESMA rodada, que era justamente o buraco do par duplicado. Quem fecha
+    aquilo são o `_lock_user` do bind e a regra de uma religação por chave
+    natural, medidos em `tests/test_of_vinculo_concorrencia.py`."""
     conn_id = _seed_connection(user_id)
     _save(conn_id, [CX_AUTO])
     db.sync_open_finance_caixinhas(conn_id, user_id)
@@ -318,7 +332,9 @@ def test_desconectar_o_banco_mata_a_lapide(user_id):
 
     db.disconnect_open_finance_connection(user_id, conn_id)
 
-    assert _lapide(user_id, pocket_id) == (None, "cx-auto"), "o FK zerou a conexão"
+    assert _lapide(user_id, pocket_id) == (None, None), (
+        "as DUAS colunas: o FK zera só a conexão, e o id da posição no provedor "
+        "ficava para sempre numa linha que nunca mais vai religar")
 
     novo = _seed_connection(user_id, item="test-cx-item-reconectado")
     res = _reconcilia(novo, [CX_AUTO])

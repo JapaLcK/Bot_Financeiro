@@ -798,6 +798,16 @@ def init_db():
         """
         alter table pockets add column if not exists of_tombstone_provider_id text
         """,
+        # FK sem índice é defeito neste repositório (tests/test_privacy_deletion.py):
+        # sem ele, apagar uma conexão varre `pockets` inteira. PARCIAL porque a
+        # lápide é exceção — quase toda linha tem `null` aqui —, e NÃO ÚNICO de
+        # propósito: `unique` falharia no startup se produção já tiver um par
+        # duplicado de antes do `_lock_user` do bind, e o app não subiria.
+        """
+        create index if not exists idx_pockets_of_tombstone_conn
+          on pockets(of_tombstone_connection_id)
+          where of_tombstone_connection_id is not null
+        """,
         # source='open_finance' marca caixinhas AUTO-CRIADAS a partir do banco (via
         # sync do Open Finance): read-only, saldo espelhado, sem juros interno. As
         # criadas pelo usuário ficam 'manual' (mesmo quando vinculadas a uma caixinha OF).

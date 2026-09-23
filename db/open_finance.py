@@ -874,6 +874,18 @@ def update_pluggy_open_finance_item_status(provider_item_id: str, status: str, r
     return updated
 
 
+# FONTE ÚNICA do cast de `amountProfit` (o rendimento acumulado que a Pluggy manda
+# dentro do `raw`). Ele é campo de TERCEIRO, não nosso: já chegou como texto não
+# numérico, e `::numeric` cru levanta `invalid_input_syntax`, que aborta a
+# transação INTEIRA — pelo caminho do sync isso derrubava o item todo, a cada
+# sync, junto com as contas e transações já gravadas. O regex devolve NULL no
+# lugar do estouro, e NULL aqui é o que o Banqueiro já sabe tratar ("o banco não
+# reportou rendimento"): o `rendimento` só é calculado quando os dois lados
+# existem (core/services/piggy_agents.py). Espera o alias `i` da posição.
+_SQL_PROFIT = (r"case when i.raw->>'amountProfit' ~ '^-?[0-9]+(\.[0-9]+)?$' "
+               r"then (i.raw->>'amountProfit')::numeric end")
+
+
 def save_open_finance_investments(connection_id: int, investments: list[dict], *,
                                   leitura_completa: bool = False) -> dict:
     """Grava (upsert) os investimentos OF — inclui Caixinha (CDB). Espelho, não vira pocket ainda.
@@ -944,11 +956,11 @@ def save_open_finance_investments(connection_id: int, investments: list[dict], *
             # auto-import faz: sem isso o Banqueiro leria a carteira inteira como
             # aporte desta rodada e dispararia evento falso.
             cur.execute(
-                """
+                f"""
                 update pockets p
                    set of_investment_id = i.id,
                        of_last_seen_balance = i.balance,
-                       of_last_seen_profit = nullif(i.raw->>'amountProfit', '')::numeric,
+                       of_last_seen_profit = {_SQL_PROFIT},
                        of_tombstone_connection_id = null,
                        of_tombstone_provider_id = null
                   from open_finance_investments i
@@ -960,10 +972,41 @@ def save_open_finance_investments(connection_id: int, investments: list[dict], *
                    and not exists (
                        select 1 from pockets q where q.of_investment_id = i.id
                    )
+                   -- UMA por chave natural, a de menor id. Duas lápides iguais
+                   -- existem quando um par duplicado foi criado antes do
+                   -- `_lock_user` do bind (produção pode ter): religar as duas no
+                   -- mesmo UPDATE renovava o par a cada ciclo some→volta, porque
+                   -- o `not exists` acima lê o snapshot de ANTES do statement e
+                   -- não vê a irmã da mesma rodada. A excedente é limpa logo
+                   -- abaixo, o que CURA o par em vez de eternizá-lo.
+                   and p.id = (
+                       select min(q2.id) from pockets q2
+                        where q2.user_id = p.user_id
+                          and q2.of_investment_id is null
+                          and q2.of_tombstone_connection_id = p.of_tombstone_connection_id
+                          and q2.of_tombstone_provider_id = p.of_tombstone_provider_id
+                   )
                 """,
                 (owner["user_id"], connection_id),
             )
             religadas = cur.rowcount
+            # As excedentes da mesma chave perdem a lápide na MESMA transação: a
+            # posição já tem dona, e lápide que nunca religa é só um ponteiro
+            # velho para o id do investimento no provedor.
+            cur.execute(
+                """
+                update pockets p
+                   set of_tombstone_connection_id = null,
+                       of_tombstone_provider_id = null
+                  from open_finance_investments i
+                 where i.connection_id = p.of_tombstone_connection_id
+                   and i.provider_investment_id = p.of_tombstone_provider_id
+                   and p.user_id = %s
+                   and i.connection_id = %s
+                   and p.of_investment_id is null
+                """,
+                (owner["user_id"], connection_id),
+            )
 
             if leitura_completa:
                 # `vistos` VAZIO com leitura completa casa com tudo — e é o
@@ -1110,10 +1153,18 @@ def _unbind_pocket(cur, user_id: int, pocket_id: int) -> int:
     (`_is_of_mirror`, db/pockets.py), então todo lote aberto aqui é aporte do
     usuário. Sem lote nenhum dá 0, que é o caso do espelho puro.
 
+    `of_last_seen_profit` sai junto com o `of_last_seen_balance`, e isso é evento
+    falso do Banqueiro: os dois são baseline da MESMA posição. Deixar o profit para
+    trás fazia o delta da posição SEGUINTE ser medido contra o rendimento da
+    anterior — medido: baseline 5, posição nova com `amountProfit` 1000, e o
+    Banqueiro anunciava "você tirou R$995,00 da Viagem", de uma meta onde o usuário
+    não tocou.
+
     Só mexe em quem ESTÁ vinculado (`is not null`), pra um pocket_id solto não virar
     apagador de saldo."""
     cur.execute(
-        "update pockets set of_investment_id=null, of_last_seen_balance=null "
+        "update pockets set of_investment_id=null, of_last_seen_balance=null, "
+        "of_last_seen_profit=null "
         "where id=%s and user_id=%s and of_investment_id is not null",
         (pocket_id, user_id),
     )
@@ -1192,8 +1243,12 @@ def _limpa_lapide(cur, user_id: int, pocket_id: int) -> None:
 def bind_pocket_to_caixinha(user_id: int, pocket_id: int, of_investment_id: int | None) -> bool:
     """Vincula (ou desvincula, of_investment_id=None) uma meta a uma caixinha OF.
 
-    Inicializa of_last_seen_balance com o saldo ATUAL da caixinha, pra o Banqueiro
-    contar só os aportes daqui pra frente (não o saldo histórico já acumulado).
+    Inicializa os DOIS baselines do Banqueiro — `of_last_seen_balance` e
+    `of_last_seen_profit` — com o estado ATUAL da posição, pra ele contar só os
+    aportes daqui pra frente (não o saldo nem o rendimento já acumulados). Os dois
+    juntos, como o insert do auto-import e a religação: só o saldo deixava o
+    rendimento da posição ANTERIOR servindo de régua para a nova, e o Banqueiro
+    anunciava saque que não existiu.
 
     Caixinha CRIADA pelo sync (`source='open_finance'`) nunca solta o vínculo nem
     TROCA de posição — recusa com OF_POCKET_READONLY, o mesmo código que o guard de
@@ -1201,9 +1256,24 @@ def bind_pocket_to_caixinha(user_id: int, pocket_id: int, of_investment_id: int 
     está no banco e qualquer posição reconhecida é reimportada no sync seguinte, então
     "não vincular" só produziria um pocket órfão com saldo mentiroso + uma cópia nova
     no sync. Trocar A por B é o mesmo estrago por outro caminho: A fica sem vínculo e
-    volta no sync seguinte, e o pocket passa a espelhar B com o NOME de A."""
+    volta no sync seguinte, e o pocket passa a espelhar B com o NOME de A.
+
+    SERIALIZADO por usuário (`_lock_user`, o mesmo lock do
+    `save_open_finance_investments` e do disconnect), e isso é dinheiro: sem ele,
+    dois binds simultâneos — duas abas, duplo clique — liam `anterior=None` e
+    vinculavam DUAS metas à MESMA posição. Medido com dois threads e uma
+    `Barrier`: colidia na primeira tentativa, e o saldo do banco passava a
+    aparecer duas vezes no patrimônio. O lock cobre as três corridas do mesmo
+    par: bind × bind, escotilha × escotilha e bind × reconciliação (esta última
+    gravando `of_investment_id` numa linha que a reconciliação está apagando).
+
+    Uma trava só, e é a de baixo na ordem: esta função nunca pega o
+    `pluggy_item_lock`, então não há ciclo com o sync (que pega o do item antes e
+    o do usuário depois)."""
     with get_conn() as conn:
         with conn.cursor() as cur:
+            from .bank_movements import _lock_user
+            _lock_user(cur, user_id)
             cur.execute(
                 "select source, of_investment_id from pockets where id=%s and user_id=%s",
                 (pocket_id, user_id),
@@ -1222,8 +1292,9 @@ def bind_pocket_to_caixinha(user_id: int, pocket_id: int, of_investment_id: int 
                 return ok
             # valida que a caixinha é do usuário e pega o saldo atual
             cur.execute(
-                """
-                select i.balance from open_finance_investments i
+                f"""
+                select i.balance, {_SQL_PROFIT} as profit
+                from open_finance_investments i
                 join open_finance_connections c on c.id = i.connection_id
                 where i.id=%s and c.user_id=%s
                 """,
@@ -1233,6 +1304,7 @@ def bind_pocket_to_caixinha(user_id: int, pocket_id: int, of_investment_id: int 
             if not row:
                 return False
             bal = row["balance"] or 0
+            profit = row["profit"]
             # 1 caixinha OF por meta: solta o vínculo anterior DESSA caixinha. Se
             # quem o segura é um pocket do sync, soltar deixaria ele órfão — a
             # mesma coisa que o ramo de cima recusa, então recusa aqui também.
@@ -1268,9 +1340,9 @@ def bind_pocket_to_caixinha(user_id: int, pocket_id: int, of_investment_id: int 
                 else:
                     _unbind_pocket(cur, user_id, anterior["id"])
             cur.execute(
-                "update pockets set of_investment_id=%s, of_last_seen_balance=%s "
-                "where id=%s and user_id=%s",
-                (of_investment_id, bal, pocket_id, user_id),
+                "update pockets set of_investment_id=%s, of_last_seen_balance=%s, "
+                "of_last_seen_profit=%s where id=%s and user_id=%s",
+                (of_investment_id, bal, profit, pocket_id, user_id),
             )
             ok = cur.rowcount > 0
             # A decisão explícita do usuário ganha da lápide: vinculou na mão, não
@@ -1287,11 +1359,11 @@ def list_banqueiro_pockets(user_id: int) -> list[dict]:
     with get_conn() as conn:
         with conn.cursor() as cur:
             cur.execute(
-                """
+                f"""
                 select p.id as pocket_id, p.name, p.emoji, p.target_amount, p.target_date,
                        p.of_last_seen_balance, p.of_last_seen_profit, p.of_investment_id,
                        i.balance as of_balance,
-                       nullif(i.raw->>'amountProfit', '')::numeric as of_profit
+                       {_SQL_PROFIT} as of_profit
                 from pockets p
                 join open_finance_investments i on i.id = p.of_investment_id
                 where p.user_id = %s and p.of_investment_id is not null
@@ -1385,10 +1457,10 @@ def sync_open_finance_caixinhas(connection_id: int, user_id: int) -> dict:
             # `order by i.id`: a numeração do nome não pode depender do saldo, que
             # muda a cada sync — ordem de chegada do banco é estável.
             cur.execute(
-                """
+                f"""
                 select i.id as of_id, i.name, i.type, i.subtype, i.raw,
                        coalesce(i.balance, 0) as balance,
-                       nullif(i.raw->>'amountProfit', '')::numeric as profit,
+                       {_SQL_PROFIT} as profit,
                        c.institution_name
                 from open_finance_investments i
                 join open_finance_connections c on c.id = i.connection_id
@@ -2988,6 +3060,23 @@ def disconnect_open_finance_connection(
                 (user_id, connection_id, connection_id),
             )
             _desvincula_e_limpa_caixinhas(cur, user_id, [r["id"] for r in cur.fetchall()])
+            # A LÁPIDE morre com a conexão, e as DUAS colunas: o FK zera só o
+            # `of_tombstone_connection_id` (`on delete set null`) e deixava o
+            # `of_tombstone_provider_id` — o id da posição no PROVEDOR — para
+            # sempre numa linha que nunca mais vai religar. Aqui, na mesma
+            # transação e ANTES do delete da conexão, com `user_id`.
+            cur.execute(
+                """
+                update pockets set of_tombstone_connection_id = null,
+                                   of_tombstone_provider_id = null
+                 where user_id = %s
+                   and of_tombstone_connection_id in (
+                       select c.id from open_finance_connections c
+                        where c.user_id = %s and (%s::bigint is null or c.id = %s)
+                   )
+                """,
+                (user_id, user_id, connection_id, connection_id),
+            )
             # Reler AGORA, sob o lock: entre a leitura do passo 1 e aqui, um undo
             # concorrente pode ter trocado o imported_launch_id por uma sombra
             # nova (`_insert_of_shadow`) — sem reler, ela sobra órfã do cascade.

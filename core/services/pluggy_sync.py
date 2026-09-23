@@ -360,15 +360,40 @@ def _sync_pluggy_item_confirmado(provider_item_id: str, connection: dict, api_ke
         # `/investments` — nunca reconciliaria.
         investimentos_confiaveis = (
             investments_ok and "INVESTMENTS" not in (health.get("stale_products") or []))
-        inv_result = save_open_finance_investments(
-            connection["id"], investments, leitura_completa=investimentos_confiaveis)
+        # FAIL-SOFT, e pelo mesmo motivo que a LEITURA é fail-soft logo acima: esta
+        # chamada subiu para ANTES de `save_open_finance_sync`, então uma exceção
+        # aqui — sem este `try` — jogava fora as contas e transações já lidas (até
+        # 60 requisições paginadas por conta) e ainda deixava a linha sem carimbo
+        # nenhum. Medido: espelho (0, 0) onde antes do PR ficava (1, 1).
+        #
+        # `save_open_finance_investments` tem transação própria, então o que falha
+        # desfaz os writes de investimento INTEIROS (upsert, reconciliação e
+        # religação juntos) — nunca meio espelho gravado. O que sobra é o mesmo
+        # estado de "não consegui ler a carteira": `investments_ok = False` leva
+        # `resolve_connection_state` a READ_FAILED, e leitura incompleta não
+        # remove nada.
+        inv_result: dict = {}
+        investimentos_gravados = False
+        try:
+            inv_result = save_open_finance_investments(
+                connection["id"], investments, leitura_completa=investimentos_confiaveis)
+            investimentos_gravados = bool(investments)
+        except Exception as exc:
+            investments_ok = False
+            print(f"[pluggy_sync] investimentos não gravados item={provider_item_id} "
+                  f"erro={type(exc).__name__}", flush=True)
 
         # Item vivo que não espelhou NADA — nem conta nem investimento — não é
         # sucesso. Só que a decisão vem depois da leitura de investimentos: item
         # de corretora é exatamente isto, zero contas e a carteira toda em
         # `/investments`. `health` é carimbado (é a saúde medida agora, e ela
         # vale); o que não pode é ACTIVE/last_sync_at.
-        if not accounts and not investments:
+        # `investimentos_gravados` e não `investments`: o que decide é o que foi
+        # PERSISTIDO. Numa corretora (zero contas, carteira toda em
+        # `/investments`), ler a carteira e falhar ao gravá-la deixaria o espelho
+        # vazio e mesmo assim `has_data=True` — "Atualizado agora" sobre nada, que
+        # é exatamente a mentira que este grupo de testes existe para impedir.
+        if not accounts and not investimentos_gravados:
             status, reason = resolve_connection_state(
                 health=health, has_data=False, leitura_completa=investments_ok)
             mark_sync_result(connection["id"], ok=False, status=status,

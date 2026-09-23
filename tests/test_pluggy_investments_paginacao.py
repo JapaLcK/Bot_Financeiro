@@ -208,3 +208,14 @@ def test_metadata_em_string_de_digitos_e_aceita(pluggy_responde):
     ])
 
     assert [i["id"] for i in list_pluggy_investments("item-1", "k")] == ["a", "b", "c"]
+
+
+@pytest.mark.parametrize("page", ["²", "٢"])
+def test_digito_nao_ascii_nao_e_numero_de_pagina(pluggy_responde, page):
+    """`"²".isdigit()` é True e `int("²")` LEVANTA — o erro sairia da função como
+    exceção não tratada, não como leitura incompleta. `"٢"` (arábico-índico) é
+    pior: `int()` converte para 2 em silêncio, e o eco da página passaria."""
+    pluggy_responde({"page": page, "totalPages": 1, "total": 1, "results": [_pos("a")]})
+
+    with pytest.raises(PluggyApiError, match="page_incoerente"):
+        list_pluggy_investments("item-1", "k")
