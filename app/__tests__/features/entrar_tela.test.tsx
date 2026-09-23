@@ -100,6 +100,24 @@ describe("(auth)/entrar — tela real", () => {
     expect(router.canGoBack()).toBe(true);
   });
 
+  it("senha errada: o aviso aparece e some quando a pessoa volta a digitar", async () => {
+    rotear({ "/auth/login": () => resposta(401, { detail: "E-mail ou senha incorretos." }) });
+    renderRouter("./app", { initialUrl: "/entrar" });
+    await waitFor(() => expect(screen).toHavePathname("/entrar"));
+
+    fireEvent.changeText(screen.getByLabelText("E-mail"), "ana@x.com");
+    fireEvent.changeText(screen.getByLabelText("Senha"), "errada");
+    await act(async () => {
+      fireEvent.press(screen.getByRole("button", { name: "Entrar" }));
+      await respirar();
+    });
+    expect(screen.getByText("E-mail ou senha incorretos.")).toBeTruthy();
+
+    fireEvent.changeText(screen.getByLabelText(/^Senha/), "errad");
+    expect(screen.queryByText("E-mail ou senha incorretos.")).toBeNull();
+    expect(screen.getByLabelText("Senha")).toBeTruthy();
+  });
+
   it("código errado e depois o certo autentica sem pedir a senha de novo (400 mfa_code_invalid mantém o desafio)", async () => {
     rotear({
       "/auth/login": () => resposta(200, MFA_ANA),

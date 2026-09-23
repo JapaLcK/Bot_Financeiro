@@ -29,6 +29,11 @@ export default function Entrar() {
 
   const enviando = estado.fase === "enviando";
   const avisoFormulario = estado.fase === "formulario" ? estado.aviso : undefined;
+  // Voltar a digitar é uma tentativa nova: o aviso da anterior sai da tela.
+  const digitar = (definir: (v: string) => void) => (v: string) => {
+    definir(v);
+    if (avisoFormulario) setEstado({ fase: "formulario" });
+  };
 
   return (
     <KeyboardAvoidingView behavior={Platform.OS === "ios" ? "padding" : undefined} style={{ flex: 1 }}>
@@ -52,7 +57,7 @@ export default function Entrar() {
                     rotulo="E-mail"
                     icone="Envelope"
                     value={email}
-                    onChangeText={setEmail}
+                    onChangeText={digitar(setEmail)}
                     autoCapitalize="none"
                     autoCorrect={false}
                     keyboardType="email-address"
@@ -64,7 +69,7 @@ export default function Entrar() {
                     rotulo="Senha"
                     icone="Lock"
                     value={senha}
-                    onChangeText={setSenha}
+                    onChangeText={digitar(setSenha)}
                     secureTextEntry
                     autoComplete="current-password"
                     textContentType="password"
