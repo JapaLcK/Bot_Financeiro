@@ -122,18 +122,19 @@ def test_lcp_nao_fica_em_animacao_nao_composta():
     assert "background-position:" not in regra.group(1)
 
 
-def test_mobile_nao_renderiza_secoes_abaixo_da_dobra_no_caminho_do_lcp():
-    css = (FRONTEND_DIR / "site-redesign.css").read_text(encoding="utf-8")
-    regra = re.search(
-        r"@media \(max-width: 760px\)\s*\{[^{}]*"
-        r"body\.lp:not\(:has\(:target\)\) main > section:not\(\.lp-hero\):not\(#vsl\),\s*"
-        r"body\.lp:not\(:has\(:target\)\) > \.lp-footer\s*\{([^}]+)\}",
-        css,
-        re.DOTALL,
+def test_artes_abaixo_da_dobra_preservam_carregamento_lazy_e_espaco_reservado():
+    # A geometria é calculada desde o primeiro layout para manter o scroll
+    # estável. Só a transferência das artes grandes fica adiada pelo navegador.
+    html = _landing_servida()
+    artes = re.findall(
+        r'<img\b[^>]*src="/brand/landing-(?:agents-cartoon|piggy-cta)\.webp[^"]*"[^>]*>',
+        html,
     )
-    assert regra
-    assert "content-visibility: auto" in regra.group(1)
-    assert "contain-intrinsic-size: auto 600px" in regra.group(1)
+    assert len(artes) == 5  # panorama, três recortes mobile e convite final
+    for arte in artes:
+        assert 'loading="lazy"' in arte
+        assert re.search(r'width="[1-9][0-9]*"', arte)
+        assert re.search(r'height="[1-9][0-9]*"', arte)
 
 
 def test_safe_area_critica_e_inicializada_inline_antes_da_primeira_pintura():

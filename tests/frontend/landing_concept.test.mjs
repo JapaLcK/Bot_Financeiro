@@ -71,7 +71,7 @@ test('agentes mostram panorama desktop e três recortes quadrados no celular', a
     assert.equal(await mobile.count(), 3);
     for (let i = 0; i < 3; i++) {
       if (width <= 640) {
-        // Cada arte é revelada pelo scroll real; content-visibility adia o layout.
+        // Percorre as três artes antes de verificar seus recortes e espaçamentos.
         await mobile.nth(i).scrollIntoViewIfNeeded();
         await mobile.nth(i).waitFor({ state: 'visible' });
       }
@@ -149,5 +149,43 @@ test('âncora direta no celular posiciona a seção após o layout inicial', asy
     assert.ok(position.top >= position.nav - 1 && position.top < 422,
       `#${id}: alvo fora da área visível após o layout: ${JSON.stringify(position)}`);
   }
+  await page.close();
+});
+
+test('rolar a landing sem fragmento mantém a altura documental estável', async () => {
+  for (const width of [320, 390, 640]) {
+    const page = await openPage(width, { reducedMotion: 'reduce' });
+    const initial = await page.evaluate(() => document.documentElement.scrollHeight);
+    const sections = page.locator('main > section');
+    for (let i = 0; i < await sections.count(); i++) {
+      await sections.nth(i).scrollIntoViewIfNeeded();
+      const height = await page.evaluate(async () => {
+        await new Promise(resolve => requestAnimationFrame(() => requestAnimationFrame(resolve)));
+        return document.documentElement.scrollHeight;
+      });
+      assert.ok(Math.abs(height - initial) <= 2,
+        `${width}px: revelar a seção ${i + 1} mudou a altura da página de ${initial}px para ${height}px`);
+    }
+    await page.close();
+  }
+});
+
+
+test('recarregar sem fragmento preserva a posição de leitura nos agentes', async () => {
+  const page = await openPage(390, { reducedMotion: 'reduce' });
+  const position = () => page.evaluate(async () => {
+    await document.fonts.ready;
+    await new Promise(resolve => requestAnimationFrame(() => requestAnimationFrame(resolve)));
+    return { height: document.documentElement.scrollHeight, y: scrollY,
+      top: document.getElementById('agentes').getBoundingClientRect().top };
+  });
+  await page.locator('#agentes').evaluate(el => el.scrollIntoView({ block: 'start', behavior: 'instant' }));
+  const before = await position();
+  assert.ok(before.y > 1000, 'o teste precisa começar longe do topo');
+  assert.equal(new URL(page.url()).hash, '');
+  await page.reload();
+  const after = await position();
+  assert.ok(Math.abs(after.height - before.height) <= 2, `altura mudou: ${JSON.stringify({ before, after })}`);
+  assert.ok(Math.abs(after.top - before.top) <= 2, `posição de leitura mudou: ${JSON.stringify({ before, after })}`);
   await page.close();
 });

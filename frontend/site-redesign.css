@@ -716,9 +716,3 @@ body.lp .nav a:focus-visible { outline: 3px solid var(--pig-pink); outline-offse
 @media (max-width: 340px) {
   body.lp .nav { padding-inline: 8px; }
 }
-@media (max-width: 760px) {
-  /* Uma âncora exige a altura real das seções anteriores para posicionar o alvo.
-     Sem :has(), navegadores antigos apenas deixam de aplicar esta otimização. */
-  body.lp:not(:has(:target)) main > section:not(.lp-hero):not(#vsl),
-  body.lp:not(:has(:target)) > .lp-footer { content-visibility: auto; contain-intrinsic-size: auto 600px; }
-}
