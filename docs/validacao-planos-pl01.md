@@ -222,7 +222,7 @@ real — a conta é de teste, então os valores podem ir).
 | C2 | `todo mês pago 39,90 de spotify dia 10` | cria gasto fixo (bloqueio legado removido no #518) | idem | idem |
 | C3 | `ligar resumo semanal` | responde "🐷 O resumo semanal automático está disponível nos planos Plus e Pro." e não muda a preferência | liga | liga |
 | C4 | `quanto vou ter de saldo daqui 30 dias?` | recusa com convite | responde | responde |
-| C5 | `e daqui 60 dias?` | recusa | explica o limite de 30 dias, sem inventar número | responde |
+| C5 | `quanto vou ter de saldo daqui 60 dias?` (frase completa, sem depender da mensagem anterior) | recusa | explica o limite de 30 dias, sem inventar número | responde |
 | C6 | `compara esse mês com o mês passado` | recusa com convite: a frase vai para a IA, que chama `compare_periods`, e ele devolve `pro_required` no Essencial | compara | compara |
 | C6c | `gastei mais esse mês que no passado?` | **candidato a defeito, todos os planos:** o classificador determinístico lê "gastei" como lançamento (`launches.add`, confiança 0,95, conferido rodando `classify`) e pergunta o valor, deixando uma pendência gravada. Registrar a resposta observada | idem | idem |
 | C6b | `quanto gastei esse mês?` | responde com o total do mês (análise básica, liberada) | idem | idem |
