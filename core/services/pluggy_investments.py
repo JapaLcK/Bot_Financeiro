@@ -114,6 +114,13 @@ def list_pluggy_investments(item_id: str, api_key: str | None = None, *,
         if pagina > total_pages and results:
             raise incompleta("pagina_alem_do_total")
         fixa(data, "total")
+        # Página VAZIA só passa com prova explícita de carteira vazia
+        # (`totalPages: 0` ou `total: 0` do contrato). Sem ela, `[]` na última
+        # página — ou numa página única sem `total` — era aceito como fim da
+        # carteira, e a reconciliação removia o que não veio, ou a carteira
+        # inteira quando nada veio.
+        if not results and total_pages != 0 and contrato.get("total") != 0:
+            raise incompleta("vazia_sem_prova")
         ids: list[str] = []
         for item in results:
             # Posição sem `id` usável não pode sair daqui: ela cairia no `continue`

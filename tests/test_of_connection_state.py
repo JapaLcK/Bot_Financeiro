@@ -49,6 +49,10 @@ ITEM_SAUDAVEL = {
     "status": "UPDATED",
     "executionStatus": "SUCCESS",
     "clientUserId": "1",
+    # Marca de geração (`updatedAt`, `lastUpdatedAt`): sem `updatedAt` o gate da
+    # reconciliação não remove nada (`_sync_pluggy_item_confirmado`).
+    "updatedAt": "2026-08-20T11:00:00.000Z",
+    "lastUpdatedAt": "2026-08-20T11:00:00.000Z",
     "statusDetail": {
         "accounts": {"isUpdated": True, "lastUpdatedAt": "2026-08-20T11:00:00.000Z", "warnings": []},
         "creditCards": {"isUpdated": True, "lastUpdatedAt": "2026-08-20T11:00:00.000Z", "warnings": []},
@@ -2149,6 +2153,86 @@ def test_sync_so_reconcilia_item_saudavel_ou_com_prova(user_id, monkeypatch, rel
     esperado = {"cx-a", "cx-b"} if removidas == 0 else {"cx-a"}
     assert _espelho_investimentos(conexao["id"]) == esperado
     assert ("Caixinha Carro" in _nomes_de_caixinha(user_id)) is (removidas == 0)
+
+
+# ── Duas fotos do item: a mesma geração antes e depois da leitura ─────────
+# A foto 1 (`GET /items` no começo de `sync_pluggy_item`) vem ANTES da leitura
+# remota, que leva minutos e roda fora do lock. Um refresh que começa depois dela
+# pode servir `/investments` pela metade. A foto 2, pedida depois da leitura, tem
+# de ser saudável E da mesma geração (`updatedAt`, `lastUpdatedAt`).
+#
+# CONTROLES NEGATIVOS (medidos por backup de arquivo, ver relato):
+#   (i)   gate só pela foto 1 (a foto 2 é pedida e ignorada): `foto2_updating`,
+#         `foto2_success_outra_geracao`, `foto2_outdated` e `sem_marca` ficam
+#         vermelhos;
+#   (ii)  foto 2 sem a igualdade da marca (só status + `updatedAt` presente): SÓ
+#         `foto2_success_outra_geracao` fica vermelho — é o que prova a marca;
+#   (iii) sem a exigência de `updatedAt` presente: SÓ `sem_marca` fica vermelho;
+#   (iv)  exceção no segundo GET sem negar a reconciliação: SÓ `foto2_429`.
+# CONTROLE POSITIVO: `foto2_identica` remove 1.
+
+_U2 = "2026-08-20T11:30:00.000Z"
+_SEM_MARCA = {k: v for k, v in ITEM_SAUDAVEL.items() if k != "updatedAt"}
+
+
+@pytest.mark.parametrize("foto1, foto2, removidas", [
+    (ITEM_SAUDAVEL, ITEM_SAUDAVEL, 1),
+    (ITEM_SAUDAVEL, {**ITEM_SAUDAVEL, "status": "UPDATING", "updatedAt": _U2}, 0),
+    (ITEM_SAUDAVEL, {**ITEM_SAUDAVEL, "updatedAt": _U2, "lastUpdatedAt": _U2}, 0),
+    (ITEM_SAUDAVEL, {**ITEM_SAUDAVEL, "status": "OUTDATED", "executionStatus": "ERROR"}, 0),
+    (ITEM_SAUDAVEL, PluggyApiError("rate limit", status_code=429), 0),
+    (_SEM_MARCA, _SEM_MARCA, 0),
+], ids=["foto2_identica", "foto2_updating", "foto2_success_outra_geracao",
+        "foto2_outdated", "foto2_429", "sem_marca"])
+def test_sync_so_reconcilia_com_a_mesma_geracao_nas_duas_fotos(
+        user_id, monkeypatch, relogio_fixo, foto1, foto2, removidas):
+    from conftest import promote_to_pro
+    promote_to_pro(user_id)
+    conexao = _conexao(user_id)
+    _mock_pluggy(monkeypatch, item=ITEM_SAUDAVEL, contas=[_conta_pluggy()], txs=[_tx_pluggy()])
+    _mock_investimentos(monkeypatch, [_CX_A, _CX_B])
+    assert ps.sync_pluggy_item("item-g1")["ok"] is True
+
+    fotos = [foto1, foto2]
+    chamadas = []
+
+    def _get_item(item_id, api_key=None):
+        chamadas.append(item_id)
+        foto = fotos[len(chamadas) - 1]
+        if isinstance(foto, Exception):
+            raise foto
+        return foto
+    monkeypatch.setattr(ps, "get_pluggy_item", _get_item)
+    _mock_investimentos(monkeypatch, [_CX_A])
+    res = ps.sync_pluggy_item("item-g1")
+
+    assert len(chamadas) == 2, "a foto 1 autoriza, então a foto 2 é pedida"
+    assert res["ok"] is True
+    assert res["investments_ok"] is True
+    assert res["investments_removed"] == removidas
+    esperado = {"cx-a", "cx-b"} if removidas == 0 else {"cx-a"}
+    assert _espelho_investimentos(conexao["id"]) == esperado
+    assert ("Caixinha Carro" in _nomes_de_caixinha(user_id)) is (removidas == 0)
+    assert _contas_espelhadas(conexao["id"]) == {"acc-g1"}, "as contas são gravadas"
+
+
+def test_investimentos_falhos_nao_pedem_a_segunda_foto(user_id, monkeypatch, relogio_fixo):
+    from conftest import promote_to_pro
+    promote_to_pro(user_id)
+    _conexao(user_id)
+    chamadas = []
+
+    def _get_item(item_id, api_key=None):
+        chamadas.append(item_id)
+        return ITEM_SAUDAVEL
+    _mock_pluggy(monkeypatch, item=ITEM_SAUDAVEL, contas=[_conta_pluggy()], txs=[_tx_pluggy()])
+    monkeypatch.setattr(ps, "get_pluggy_item", _get_item)
+    _mock_investimentos(monkeypatch, PluggyApiError("rate limit", status_code=429))
+
+    res = ps.sync_pluggy_item("item-g1")
+
+    assert res["investments_ok"] is False
+    assert len(chamadas) == 1
 
 
 def test_sync_religa_a_caixinha_quando_a_posicao_volta(user_id, monkeypatch, relogio_fixo):

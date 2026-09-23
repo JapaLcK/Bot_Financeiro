@@ -897,7 +897,8 @@ def save_open_finance_investments(connection_id: int, investments: list[dict], *
 
     O default é `False` de propósito: só quem PROVOU que leu a carteira inteira
     (`list_pluggy_investments` sem exceção E investimentos não-stale no item,
-    core/services/pluggy_sync.py) pode remover. Quem chama sem o argumento
+    core/services/pluggy_sync.py) pode remover. A prova inclui a mesma geração
+    do item antes e depois da leitura. Quem chama sem o argumento
     continua sendo upsert puro — leitura pela metade que apagasse posição levaria
     caixinha com dinheiro dentro.
     """

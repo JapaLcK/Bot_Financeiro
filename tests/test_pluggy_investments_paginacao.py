@@ -146,11 +146,13 @@ def test_total_pages_que_encolhe_no_meio_e_incoerente(pluggy_responde):
 
 def test_total_ausente_na_ultima_pagina_nao_desliga_a_conferencia(pluggy_responde):
     """2b: sem o `total` da última resposta a conferência final sumia, e uma
-    página vazia no fim devolvia 2 de 4 afirmando leitura completa. O `total` da
-    PRIMEIRA continua valendo."""
+    página curta no fim devolvia 3 de 4 afirmando leitura completa. O `total` da
+    PRIMEIRA continua valendo. (A página 2 era `[]`; página vazia sem prova hoje
+    cai antes, em `vazia_sem_prova`, então ela ganhou uma posição para o caso
+    seguir medindo o `total`.)"""
     pluggy_responde([
         {"page": 1, "totalPages": 2, "total": 4, "results": [_pos("a"), _pos("b")]},
-        {"page": 2, "totalPages": 2, "results": []},
+        {"page": 2, "totalPages": 2, "results": [_pos("c")]},
     ])
 
     with pytest.raises(PluggyApiError, match="total_incoerente"):
@@ -277,3 +279,42 @@ def test_uma_pagina_so_nao_rele(pluggy_responde):
 
     assert [i["id"] for i in list_pluggy_investments("item-1", "k")] == ["a", "b"]
     assert len(pluggy_responde.chamadas) == 1
+
+
+# ── Página vazia só com prova de carteira vazia ─────────────────────────────
+# `[]` numa página só vale com `totalPages: 0` ou `total: 0`. Sem isso, a última
+# página vazia (ou a única, sem `total`) passava como fim da carteira, e a
+# reconciliação removia o que não veio — a carteira inteira, no caso da única.
+# CONTROLE NEGATIVO (medido, ver relato): tirar a regra deixa os 3 primeiros
+# vermelhos; os 2 positivos seguem verdes com e sem ela.
+
+# As leituras de várias páginas vêm programadas em dobro (passada + releitura
+# estável): sem a regra, a função DEVOLVE `[a]` em vez de esbarrar no fim da
+# fixture — é isso que o controle negativo tem de mostrar.
+_P1 = {"page": 1, "totalPages": 2, "results": [_pos("a")]}
+_P2 = {"page": 2, "totalPages": 2, "results": []}
+_P1_T = {**_P1, "total": 1}
+_P2_T = {**_P2, "total": 1}
+
+
+@pytest.mark.parametrize("paginas", [
+    [{"page": 1, "totalPages": 1, "results": []}],
+    [_P1, _P2, _P1, _P2],
+    [_P1_T, _P2_T, _P1_T, _P2_T],
+], ids=["unica_vazia_sem_total", "ultima_vazia_sem_total", "ultima_vazia_com_total_1"])
+def test_pagina_vazia_sem_prova_levanta(pluggy_responde, paginas):
+    pluggy_responde(paginas)
+
+    with pytest.raises(PluggyApiError, match="vazia_sem_prova"):
+        list_pluggy_investments("item-1", "k")
+
+
+@pytest.mark.parametrize("payload", [
+    {"page": 1, "totalPages": 0, "results": []},
+    {"page": 1, "totalPages": 1, "total": 0, "results": []},
+], ids=["total_pages_zero_sem_total", "total_zero"])
+def test_carteira_vazia_com_prova_nao_levanta(pluggy_responde, payload):
+    """CONTROLE POSITIVO: a regra restringe, e a carteira vazia de verdade continua `[]`."""
+    pluggy_responde(payload)
+
+    assert list_pluggy_investments("item-1", "k") == []

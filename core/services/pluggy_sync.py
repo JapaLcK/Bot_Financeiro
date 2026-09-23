@@ -182,6 +182,17 @@ def normalize_pluggy_investment(raw: dict) -> dict:
     }
 
 
+def _investimentos_confiaveis(health: dict) -> bool:
+    """A parte de SAÚDE do gate da reconciliação (o comentário do gate, em
+    `_sync_pluggy_item_confirmado`, diz por quê): INVESTMENTS fora de
+    `stale_products` e, sem a prova explícita `products.INVESTMENTS.updated is
+    True`, só o par `UPDATED` + `SUCCESS`. Sem `.upper()`: `health` vem de
+    `derive_item_health`, que já normaliza."""
+    return ("INVESTMENTS" not in (health.get("stale_products") or [])
+            and ((health.get("item_status"), health.get("execution_status")) == ("UPDATED", "SUCCESS")
+                 or (health.get("products") or {}).get("INVESTMENTS", {}).get("updated") is True))
+
+
 def sync_pluggy_item(provider_item_id: str, *, expected_user_id: int | None = None) -> dict:
     """Sincroniza um item Pluggy: contas + transações → tabelas OF. Idempotente.
 
@@ -232,11 +243,12 @@ def sync_pluggy_item(provider_item_id: str, *, expected_user_id: int | None = No
                 "connection_id": connection["id"], "user_id": connection["user_id"]}
 
     health = derive_item_health(item)
-    return _sync_pluggy_item_confirmado(provider_item_id, connection, api_key, health)
+    geracao = (item.get("updatedAt"), item.get("lastUpdatedAt"))
+    return _sync_pluggy_item_confirmado(provider_item_id, connection, api_key, health, geracao)
 
 
 def _sync_pluggy_item_confirmado(provider_item_id: str, connection: dict, api_key: str,
-                                 health: dict) -> dict:
+                                 health: dict, geracao: tuple) -> dict:
     """O sync em si, com o item já confirmado vivo.
 
     Duas fases, e a fronteira entre elas é o lock:
@@ -304,8 +316,61 @@ def _sync_pluggy_item_confirmado(provider_item_id: str, connection: dict, api_ke
     except Exception as exc:
         investments_ok = False
         print(f"[pluggy_sync] investimentos indisponíveis item={provider_item_id} "
-              f"erro={type(exc).__name__}", flush=True)
+              f"erro={type(exc).__name__}: {exc}", flush=True)
     heartbeat()
+
+    # RECONCILIAÇÃO do espelho de investimentos — posição que não veio saiu do
+    # banco, e a caixinha dela vai junto. Só pode rodar com a leitura PROVADA
+    # inteira:
+    #   1. `investments_ok` — `list_pluggy_investments` não levantou (ela
+    #      confere a metadata de paginação e levanta em leitura parcial);
+    #   2. a SAÚDE do item, em DUAS fotos do `GET /items/{id}`: a do começo de
+    #      `sync_pluggy_item` (foto 1, antes de qualquer leitura remota) e uma
+    #      segunda, pedida AQUI, depois da leitura de `/investments`. As duas
+    #      têm de passar em `_investimentos_confiaveis`:
+    #        - INVESTMENTS fora de `stale_products` — `statusDetail.investments.
+    #          isUpdated == false` diz que a coleta de investimentos NO BANCO
+    #          falhou nesta execução, e mesmo assim o `/investments` responde
+    #          200 com o que tiver, possivelmente vazio;
+    #        - sem a prova explícita (`products.INVESTMENTS.updated is True`),
+    #          só o par `UPDATED` + `SUCCESS`. É LISTA DE PERMISSÃO — um estado
+    #          que este arquivo não conhece nasce sem autorizar remoção. Pela doc
+    #          da Pluggy, `SUCCESS` vem com `statusDetail: null` ("every product
+    #          was retrieved"), então `statusDetail` ausente nesse par não
+    #          bloqueia. Qualquer outro par sem prova não remove:
+    #          `UPDATING`/`CREATED` (refresh que estourou a espera),
+    #          `PARTIAL_SUCCESS` (a tela já o trata como "Parcial",
+    #          `pluggy_health.py`), `OUTDATED` (execução com erro inesperado; par
+    #          documentado `OUTDATED` + `ERROR`) e `MERGE_ERROR` (dados
+    #          coletados, erro ao gravar);
+    #   3. a MESMA GERAÇÃO nas duas fotos: a marca (`updatedAt`,
+    #      `lastUpdatedAt`) da foto 2 igual à da foto 1, e `updatedAt` presente.
+    #      A leitura remota leva minutos e roda fora do lock; um refresh que
+    #      começa depois da foto 1 pode servir `/investments` pela metade
+    #      enquanto a foto 1 ainda diz `UPDATED` + `SUCCESS`. Status igual nas
+    #      duas fotos não basta: um refresh inteiro entre elas termina de novo
+    #      em `UPDATED` + `SUCCESS`, e só a marca pode denunciá-lo.
+    # O QUE ISTO NÃO PROVA: que as duas fotos são da mesma coleta é INFERIDO
+    # pela marca. A doc da Pluggy descreve `updatedAt` como "Date of last
+    # modification" e `lastUpdatedAt` como "Date of last syncronization"; nada
+    # disso foi medido contra a Pluggy real — nem que o campo vem preenchido,
+    # nem que ele muda quando a coleta COMEÇA. Marca ausente (`updatedAt` nulo)
+    # não autoriza remover. A foto 2 só alimenta este gate: o `health` gravado
+    # em `mark_sync_result`/`resolve_connection_state` continua sendo o da foto 1.
+    # Qualquer exceção no segundo GET (inclusive 404 e 429) só nega a
+    # reconciliação; item que sumiu fica para o próximo sync, pela foto 1.
+    # Custo: uma chamada a mais por sync, e só quando a foto 1 já autorizaria.
+    confiavel = investments_ok and _investimentos_confiaveis(health)
+    if confiavel:
+        try:
+            item2 = get_pluggy_item(provider_item_id, api_key)
+            confiavel = (geracao[0] is not None
+                         and (item2.get("updatedAt"), item2.get("lastUpdatedAt")) == geracao
+                         and _investimentos_confiaveis(derive_item_health(item2)))
+        except Exception as exc:
+            confiavel = False
+            print(f"[pluggy_sync] segunda foto do item falhou item={provider_item_id} "
+                  f"erro={type(exc).__name__}", flush=True)
 
     # ── FASE 2: escrita, serializada por item ────────────────────────────────
     with pluggy_item_lock(provider_item_id) as locked:
@@ -339,38 +404,15 @@ def _sync_pluggy_item_confirmado(provider_item_id: str, connection: dict, api_ke
         # tentou sincronizar, e antes o perdedor da corrida já mexia na linha.
         mark_sync_attempt(connection["id"], origin="sync")
 
-        # RECONCILIAÇÃO do espelho de investimentos — posição que não veio saiu do
-        # banco, e a caixinha dela vai junto. Só pode rodar com a leitura PROVADA
-        # inteira, e são duas provas independentes:
-        #   1. `investments_ok` — `list_pluggy_investments` não levantou (ela
-        #      confere a metadata de paginação e levanta em leitura parcial);
-        #   2. INVESTMENTS fora de `stale_products` — `statusDetail.investments.
-        #      isUpdated == false` diz que a coleta de investimentos NO BANCO
-        #      falhou nesta execução, e mesmo assim o `/investments` responde 200
-        #      com o que tiver, possivelmente vazio. Sem esta segunda prova,
-        #      coleta falha + resposta 200 vazia apagaria caixinha com dinheiro.
-        # Sem a prova explícita (`products.INVESTMENTS.updated is True`), só reconcilia o
-        # item comprovadamente saudável: `UPDATED` + `SUCCESS`. É LISTA DE PERMISSÃO — um
-        # estado que este arquivo não conhece nasce sem autorizar remoção. Pela doc da
-        # Pluggy, `SUCCESS` vem com `statusDetail: null` ("every product was retrieved"),
-        # então `statusDetail` ausente nesse par não bloqueia — não se inventa defeito na
-        # ausência de sinal. Qualquer outro par é indício de leitura parcial e sem prova
-        # não remove: `UPDATING`/`CREATED` (refresh que estourou a espera),
-        # `PARTIAL_SUCCESS` (a tela já o trata como "Parcial", `pluggy_health.py`),
-        # `OUTDATED` (execução com erro inesperado; par documentado `OUTDATED` + `ERROR`) e
-        # `MERGE_ERROR` (dados coletados, erro ao gravar).
-        # Sem `.upper()`: `health` vem de `derive_item_health`, que já normaliza.
+        # A reconciliação (gate `confiavel`, calculado depois da leitura de
+        # `/investments`, lá em cima) roda AQUI e não lá embaixo, por dois
+        # motivos: dentro do lock (ela apaga linha de `pockets` e de
+        # `open_finance_investments` do item que outro webhook pode estar
+        # escrevendo) e depois da relectura de autorização (run de geração velha
+        # não remove posição nenhuma); e ACIMA do early-return de `no_accounts`,
+        # senão corretora — conexão sem contas, carteira toda em `/investments` —
+        # nunca reconciliaria.
         #
-        # AQUI e não lá embaixo, por dois motivos: dentro do lock (ela apaga linha
-        # de `pockets` e de `open_finance_investments` do item que outro webhook
-        # pode estar escrevendo) e depois da relectura de autorização (run de
-        # geração velha não remove posição nenhuma); e ACIMA do early-return de
-        # `no_accounts`, senão corretora — conexão sem contas, carteira toda em
-        # `/investments` — nunca reconciliaria.
-        investimentos_confiaveis = (
-            investments_ok and "INVESTMENTS" not in (health.get("stale_products") or [])
-            and ((health.get("item_status"), health.get("execution_status")) == ("UPDATED", "SUCCESS")
-                 or (health.get("products") or {}).get("INVESTMENTS", {}).get("updated") is True))
         # FAIL-SOFT, e pelo mesmo motivo que a LEITURA é fail-soft logo acima: esta
         # chamada subiu para ANTES de `save_open_finance_sync`, então uma exceção
         # aqui — sem este `try` — jogava fora as contas e transações já lidas (até
@@ -399,7 +441,7 @@ def _sync_pluggy_item_confirmado(provider_item_id: str, connection: dict, api_ke
         investimentos_gravados = False
         try:
             inv_result = save_open_finance_investments(
-                connection["id"], investments, leitura_completa=investimentos_confiaveis)
+                connection["id"], investments, leitura_completa=confiavel)
             # O que foi PERSISTIDO, lido do retorno — não `bool(investments)`, que
             # era a lista LIDA e desmentia o comentário do early-return logo
             # abaixo. Duas portas passavam por ali sem gravar nada e mesmo assim
