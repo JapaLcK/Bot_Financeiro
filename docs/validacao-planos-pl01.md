@@ -79,7 +79,10 @@ repetições.
   const j = (r) => r.json().catch(() => null);
   const prof = await fetch('/auth/dashboard-profile', {credentials: 'same-origin'}).then(j);
   const uid = prof.user_id;
-  const d = (n) => new Date(Date.now() + n * 864e5).toISOString().slice(0, 10);
+  // "Hoje" no fuso do app (o servidor roda com TZ=America/Sao_Paulo): em UTC,
+  // entre 21h e 23h59 de Brasília, a data já seria a de amanhã e o proj30 pediria 31 dias.
+  const hoje = new Intl.DateTimeFormat('en-CA', {timeZone: 'America/Sao_Paulo'}).format(new Date());
+  const d = (n) => { const t = new Date(hoje + 'T00:00:00Z'); t.setUTCDate(t.getUTCDate() + n); return t.toISOString().slice(0, 10); };
   const sim = {reserva_minima: 500, cenarios: [
     {nome: 'À vista', preco: 3000},
     {nome: '12x', preco: 3000, entrada: 600, parcelas: 12, juros_mensal_pct: 1.49}]};
@@ -316,10 +319,11 @@ reembolso, e o I4 cancela dentro do trial. Registrar qual dos dois aconteceu.
 
 | caso | passo | esperado |
 |---|---|---|
-| I1 | Com a conta em Essencial pelo admin e **sem** assinatura, assinar Plus mensal pelo `/precos` | webhook grava `plan = 'pro'`, com ou sem trial; sonda A igual a S2 em até 1 min |
+| I0 | No admin, pôr a conta em `free`. A escrita do admin revoga **todos** os grants ativos, inclusive o `admin` das seções A–G (`core/admin_dashboard.py::_gravar_grant_do_admin`) | sonda A: 402 `subscription_required` em tudo |
+| I1 | Com a conta em `free` (I0) e **sem** assinatura, assinar Plus mensal pelo `/precos` | webhook grava `plan = 'pro'`, com ou sem trial; sonda A igual a S2 em até 1 min |
 | I2 | Pedir troca para Essencial em `/precos` (chama `/billing/change-plan`) | troca **agendada** para o fim do período pago; plano atual continua Plus |
 | I3 | Cancelar a troca agendada | agendamento some; Plus segue |
-| I4 | Mandar `cancelar assinatura` no WhatsApp (o app não tem botão; a resposta traz o link do portal da Stripe) e cancelar **no fim do período** | acesso Plus segue até o fim do período. Quando a assinatura termina, o webhook `customer.subscription.deleted` grava `plan = 'free'`: a sonda A dá **402 `subscription_required`** em tudo e o bot bloqueia. **Não** fica igual a S5. Cancelar "agora" ou reembolsar com cancelamento pelo painel da Stripe corta o acesso na hora. Depois do I4, voltar a conta ao Essencial pelo admin se ela ainda for usada |
+| I4 | Mandar `cancelar assinatura` no WhatsApp (o app não tem botão; a resposta traz o link do portal da Stripe) e cancelar **no fim do período** | acesso Plus segue até o fim do período. Quando a assinatura termina, o webhook `customer.subscription.deleted` revoga só os grants `stripe`/`legacy` e reprojeta. Como o I0 já revogou o grant `admin`, sobra `free`: a sonda A dá **402 `subscription_required`** em tudo e o bot bloqueia. **Não** fica igual a S5. Sem o I0, o grant `admin` que sobrevivesse projetaria a conta de volta ao Essencial. Cancelar "agora" ou reembolsar com cancelamento pelo painel da Stripe corta o acesso na hora. Depois do I4, voltar a conta ao Essencial pelo admin se ela ainda for usada |
 
 ---
 
