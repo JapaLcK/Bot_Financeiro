@@ -246,3 +246,58 @@ def test_snapshot_de_investimento_traz_moeda_e_data(user_id):
     assert invs["CDB Banco Inter"]["currency"] == "BRL"
     assert invs["Treasury"]["currency"] == "USD"
     assert invs["Treasury"]["updated_at"] is not None
+
+
+# ── a transação de investimentos é UMA só ───────────────────────────────────
+
+def test_falha_no_meio_da_gravacao_nao_deixa_nada_pela_metade(user_id, monkeypatch):
+    """Atomicidade medida POR DENTRO: a falha é injetada depois do upsert e da
+    religação, com a transação já suja.
+
+    O irmão em `tests/test_of_connection_state.py` troca a função inteira por um
+    `throw` — ele prova que a falha não descarta as contas, e NÃO a atomicidade,
+    porque ali a função nem chega a executar SQL. Aqui ela executa: o upsert grava
+    o saldo novo, e o `_desvincula_e_limpa_caixinhas` levanta. Nada disso pode
+    sobreviver — senão o `investments_ok=False` do sync (que diz "não removi
+    nada") estaria mentindo sobre um espelho meio escrito.
+
+    CONTROLE NEGATIVO (medido, ver relato): partir a função em duas transações
+    (um `conn.commit()` logo depois do laço de upsert) deixa este teste vermelho.
+    """
+    conn_id = _seed_connection(user_id)
+    _save(conn_id, [CDB, CX_AUTO])
+    pocket_id = _meta_manual(user_id)
+    db.bind_pocket_to_caixinha(user_id, pocket_id, _of_id(conn_id, "cdb-vinc"))
+    db.sync_open_finance_caixinhas(conn_id, user_id)
+    antes_cdb = _of_id(conn_id, "cdb-vinc")
+
+    def _lapide_de(pid: int) -> tuple:
+        with get_conn() as conn:
+            with conn.cursor() as cur:
+                cur.execute("select of_tombstone_connection_id as c, "
+                            "of_tombstone_provider_id as p from pockets where id=%s", (pid,))
+                r = cur.fetchone()
+                return (r["c"], r["p"])
+
+    monkeypatch.setattr("db.open_finance._desvincula_e_limpa_caixinhas",
+                        lambda *a, **kw: (_ for _ in ()).throw(RuntimeError("boom")))
+
+    with pytest.raises(RuntimeError, match="boom"):
+        # saldo NOVO no upsert (1000 → 1234) + a cx-auto ausente, que dispararia
+        # a remoção: as duas escritas na mesma transação que vai morrer
+        db.save_open_finance_investments(
+            conn_id,
+            [normalize_pluggy_investment({**CDB, "balance": 1234.0})],
+            leitura_completa=True,
+        )
+
+    assert _posicoes(conn_id) == {"cdb-vinc", "cx-auto"}, "a posição ausente NÃO foi removida"
+    assert _of_id(conn_id, "cdb-vinc") == antes_cdb, "a linha é a mesma"
+    with get_conn() as conn:
+        with conn.cursor() as cur:
+            cur.execute("select balance from open_finance_investments where id=%s", (antes_cdb,))
+            assert float(cur.fetchone()["balance"]) == 1000.0, (
+                "o saldo do upsert não podia persistir")
+    assert _lapide_de(pocket_id) == (None, None), "nenhuma lápide gravada"
+    assert _pockets(user_id)["Viagem"]["of_investment_id"] == antes_cdb, "o vínculo ficou"
+    assert float(_pockets(user_id)["Caixinha Nubank"]["balance"]) == 800.0

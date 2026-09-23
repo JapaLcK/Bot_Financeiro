@@ -2170,7 +2170,11 @@ def test_falha_ao_gravar_investimentos_nao_descarta_as_contas(user_id, monkeypat
     # teste abaixo.
     assert _linha()["status"] == "ACTIVE"
     assert _espelho_investimentos(conexao["id"]) == {"cx-a", "cx-b"}, (
-        "nenhuma posição removida: a transação de investimentos desfez inteira")
+        "o espelho de investimentos fica como estava — aqui a função nem chegou a "
+        "rodar (o mock levanta na entrada), então o que isto prova é que a falha "
+        "não descarta nada, não a atomicidade dela. Quem mede a transação por "
+        "dentro é `tests/test_of_investimento_reconciliacao.py`, injetando a falha "
+        "DEPOIS do upsert")
     assert {"Caixinha Viagem", "Caixinha Carro"} <= _nomes_de_caixinha(user_id)
 
 

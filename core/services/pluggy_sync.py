@@ -369,9 +369,21 @@ def _sync_pluggy_item_confirmado(provider_item_id: str, connection: dict, api_ke
         # `save_open_finance_investments` tem transação própria, então o que falha
         # desfaz os writes de investimento INTEIROS (upsert, reconciliação e
         # religação juntos) — nunca meio espelho gravado. O que sobra é o mesmo
-        # estado de "não consegui ler a carteira": `investments_ok = False` leva
-        # `resolve_connection_state` a READ_FAILED, e leitura incompleta não
-        # remove nada.
+        # estado de "não consegui ler a carteira": `investments_ok = False`, e
+        # leitura incompleta não remove nada.
+        #
+        # O QUE O USUÁRIO VÊ, nos dois casos, porque não é a mesma coisa:
+        #   - espelho VAZIO (corretora, zero contas): cai no early-return abaixo,
+        #     `has_data=False`, e o `investments_ok=False` vira `read_failed` —
+        #     "não consegui ler", não "o banco não tem nada";
+        #   - COM contas (o caso comum): `resolve_connection_state` devolve
+        #     ("ACTIVE", "") no `if has_data:` ANTES de olhar `leitura_completa`
+        #     (core/services/pluggy_health.py), então a conexão fica ACTIVE sem
+        #     motivo e a falha dos investimentos só aparece no log abaixo. É o
+        #     MESMO comportamento pré-existente do 429 na leitura
+        #     (`test_429_em_investimentos_nao_descarta_as_contas_ja_lidas`), e
+        #     mudá-lo seria mexer na semântica de estado da conexão, que este PR
+        #     não toca.
         inv_result: dict = {}
         investimentos_gravados = False
         try:

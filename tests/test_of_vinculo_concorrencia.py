@@ -100,7 +100,10 @@ def test_dois_binds_na_mesma_posicao_nao_criam_dinheiro_em_dobro(user_id):
                       lambda: db.bind_pocket_to_caixinha(user_id, b, posicao)])
 
         donos = _donos(user_id, posicao)
-        assert len(donos) <= 1, f"rodada {rodada}: {len(donos)} metas na mesma posição"
+        # `== 1` e não `<= 1`: zero dono passaria num conserto que simplesmente
+        # RECUSASSE os dois binds, que é pior que o bug. Serializado, o segundo
+        # desvincula o primeiro e assume — sempre sobra exatamente uma dona.
+        assert len(donos) == 1, f"rodada {rodada}: {len(donos)} metas na mesma posição"
         db.sync_open_finance_caixinhas(conn_id, user_id)
         assert _total(user_id) == 1000.0, (
             f"rodada {rodada}: os R$1000 do banco apareceram mais de uma vez")
@@ -124,7 +127,8 @@ def test_duas_escotilhas_contra_o_mesmo_espelho_puro(user_id):
                       lambda: db.bind_pocket_to_caixinha(user_id, b, posicao)])
 
         donos = _donos(user_id, posicao)
-        assert len(donos) <= 1, f"rodada {rodada}: {len(donos)} pockets na mesma posição"
+        # `== 1` pelo mesmo motivo do teste acima: recusar os dois não é conserto.
+        assert len(donos) == 1, f"rodada {rodada}: {len(donos)} pockets na mesma posição"
         db.sync_open_finance_caixinhas(conn_id, user_id)
         assert _total(user_id) == 800.0, (
             f"rodada {rodada}: os R$800 do banco apareceram mais de uma vez")
