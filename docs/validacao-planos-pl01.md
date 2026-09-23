@@ -31,18 +31,50 @@ Regras deste roteiro:
 | P1 | Criar a conta de teste em `/cadastro` com um e-mail próprio para isto (ex.: alias `+pl01`), sem MFA — a sonda de UI (`scripts/smoke_prod_ui.mjs`) não passa por MFA | dono |
 | P2 | Vincular um número de WhatsApp de teste à conta (um número só serve para os três planos) | dono |
 | P3 | Anotar o `user_id`: `python -m scripts.whoami <email>` ou `GET /auth/dashboard-profile` logado | dono ou Claude |
-| P4 | Conferir no Railway, sem copiar valores para cá, que existem: `WA_BILL_REMINDER_TEMPLATE_NAME`, `WA_WEEKLY_TEMPLATE_NAME`, `WA_MONTHLY_TEMPLATE_NAME`, `RUN_BACKGROUND_TASKS` ≠ `0`, `PLANS_V2_ENABLED` ausente ou `1`, `PLUGGY_WEBHOOK_URL` definida (F3). Registrar só "definida / ausente". Registrar também o **valor**, que não é segredo, de: `WA_BILL_REMINDER_HOUR` (padrão 9), `WA_BILL_REMINDER_DAYS_BEFORE` (padrão 3), `REPORT_TIMEZONE` e `TZ` (padrão `America/Sao_Paulo`, `utils_date.py`) e `PLANS_TRIAL_DAYS` (padrão 15). D1, D4, a sonda A e a seção I usam esses valores, não os padrões | dono |
-| P4b | No WhatsApp Manager da Meta, conferir que os templates cujos **nomes** estão nessas três variáveis existem, estão **aprovados** e no idioma de `WA_BILL_REMINDER_TEMPLATE_LANGUAGE` / `WA_PROACTIVE_TEMPLATE_LANGUAGE` (padrão `pt_BR`). Conferir também o **formato** que o código envia, com variáveis **nomeadas**: lembrete de conta = `{{conta}}`, `{{valor}}`, `{{vencimento}}` e um botão de resposta rápida no índice 0 (é o "Já paguei" do D3; `_bill_reminder_tick`); resumos semanal e mensal = `{{periodo}}`, `{{saldo}}`, `{{gastos}}`, `{{receita}}`, `{{lancamentos}}` (`_periodic_template_named_body_params`, modelo em `docs/whatsapp_templates_resumos.md`), e botão de resposta rápida só se `WA_PERIODIC_TEMPLATE_STOP_BUTTON=1`. Registrar só "aprovado e compatível / pendente / rejeitado / formato diferente / não existe" por template | dono |
-| P4c | No Railway, registrar se `OF_CONSOLIDATED_BALANCE_ENABLED` está ausente/ligado (padrão: saldo consolidado ligado para todos) ou em `0`. Se estiver em `0`, registrar se o e-mail ou o `user_id` da conta de teste está em `OF_CONSOLIDATED_BETA_EMAILS` / `OF_CONSOLIDATED_BETA_USER_IDS`, sem copiar a lista. Decide o esperado de F9 e G6 (`plan_service.consolidated_balance_enabled`) | dono |
+| P4 | Conferir a configuração da seção **0.1** abaixo, no Railway e nos painéis da Meta, Pluggy e Stripe. Segredo se registra só como "definida / ausente"; valores que não são segredo se registram por extenso | dono |
 | P5 | Ligar `PLUGGY_INCLUDE_SANDBOX=1` no Railway **só durante a seção F** e desligar assim que F terminar. A variável é global e lida na subida do processo (`frontend/routes/open_finance.py:74`): enquanto ligada, **todos** os usuários veem os conectores sandbox no widget, e cada troca reinicia o serviço | dono |
 | P6 | Painel admin (`/admin`) aberto numa aba: é por ele que o plano muda nas seções A–C (botão de plano do usuário → `POST /admin/api/users/{id}/plan`) | dono |
 
-Se P4 mostrar template ausente, ou P4b mostrar template não aprovado ou com formato diferente,
-os casos D e E ficam **bloqueados**, não reprovados. O código fica dormente sem
-template (`adapters/whatsapp/wa_app.py`, `_bill_reminder_tick`). E uma falha de
-`send_template` com template não aprovado só vai para o log, sem aviso na tela.
-Nos dois casos é configuração, não defeito. Resolver P4/P4b **antes** das datas
-marcadas de E: um template recusado só aparece depois de perder a segunda-feira.
+### 0.1 Configuração de que os casos dependem
+
+Levantada no código dos caminhos que cada seção exercita. Um item que falte ou
+esteja diferente do esperado deixa os casos da coluna **bloqueados**, não
+reprovados: é configuração, não defeito do produto. D, E e I têm datas ou
+cobrança; resolver o que for deles **antes** de começar.
+
+| item | casos | esperado | o que acontece se faltar | onde é lido |
+|---|---|---|---|---|
+| `PLANS_V2_ENABLED` | todos | ausente ou `1` | matriz legada de permissões | `core/services/plan_service.py` |
+| `ACCESS_GATE_ENABLED` | I0, I4 | ausente ou `1` | sem 402, bot não bloqueia | `plan_service.py` |
+| `RUN_BACKGROUND_TASKS` | C, D, E, I4 | ≠ `0` | além dos lembretes e resumos, desliga o worker que processa as mensagens recebidas do WhatsApp: o bot fica mudo | `frontend/finance_bot_websocket_custom.py` (lifespan) |
+| `DASHBOARD_URL` | F3, I1, I4 | `https://` do domínio de produção | webhook da Pluggy não é montado; links `/d/`, retorno do checkout e do portal apontam para localhost | `frontend/routes/shared.py`, `core/dashboard_links.py` |
+| `REPORT_TIMEZONE` / `TZ` | A, D | registrar o **valor** (padrão `America/Sao_Paulo`) | a sonda e o horário dos lembretes usam outro "hoje" | `utils_date.py` |
+| Réplicas do serviço no Railway | F3 | 1 | o evento `open_finance_synced` vai só para o processo que sincronizou; o repaint pode não chegar | `frontend/routes/open_finance.py` |
+| `WA_ACCESS_TOKEN` (tem precedência) ou `WA_TOKEN`, `WA_PHONE_NUMBER_ID` | C, D, E, I4 | definidos; um `WA_ACCESS_TOKEN` velho vence um `WA_TOKEN` bom | erro só no log, nenhuma mensagem sai | `adapters/whatsapp/wa_client.py` |
+| `WA_GRAPH_VERSION` | C, D, E | registrar o **valor** (padrão `v21.0`) e confirmar que a Meta ainda aceita | envios falham | `wa_client.py` |
+| `WA_APP_SECRET`, `WA_VERIFY_TOKEN` e webhook da Meta assinando `messages` para `/webhook` | C, D3, I4 | definidos e assinados | bot não recebe nada | `adapters/whatsapp/wa_app.py` |
+| `WA_BILL_REMINDER_TEMPLATE_NAME` e `_LANGUAGE`, `WA_BILL_REMINDER_HOUR`, `WA_BILL_REMINDER_DAYS_BEFORE` | D | nome definido; registrar o **valor** da hora **H** (padrão 9) e dos dias **N** (padrão 3) | sem nome, o lembrete fica dormente | `_bill_reminder_tick` |
+| `WA_WEEKLY_TEMPLATE_NAME`, `WA_MONTHLY_TEMPLATE_NAME`, `WA_PROACTIVE_TEMPLATE_LANGUAGE`, `WA_PERIODIC_TEMPLATE_STOP_BUTTON` | E | nomes definidos; registrar o valor do botão | resumo não sai | `_periodic_report_tick` |
+| Templates na Meta | D, E | cada nome acima existe, está **aprovado**, no idioma configurado e com as variáveis **nomeadas** que o código envia: lembrete = `{{conta}}`, `{{valor}}`, `{{vencimento}}` e um botão de resposta rápida no índice 0 (o "Já paguei" do D3); resumos = `{{periodo}}`, `{{saldo}}`, `{{gastos}}`, `{{receita}}`, `{{lancamentos}}` (modelo em `docs/whatsapp_templates_resumos.md`) e botão só se `WA_PERIODIC_TEMPLATE_STOP_BUTTON=1`. Registrar "aprovado e compatível / pendente / rejeitado / formato diferente / não existe" | falha de `send_template` só vai para o log. Um template recusado só aparece depois de perder a segunda-feira do E1 | Meta |
+| Pagamento e categoria dos templates na conta WhatsApp Business (Meta) | D, E | método de pagamento ativo | envio recusado, só no log | Meta |
+| `OPENAI_API_KEY`, `OPENAI_MODEL` | C1, C4–C7, G5 | chave definida; modelo com suporte a tools (padrão `gpt-4o-mini`) | chat devolve mensagem de erro; C1 perde a categoria por IA. A sonda A continua 200 (Insights cai na heurística) | `core/services/ai_chat/runner.py`, `core/ai_patterns.py` |
+| `AI_CHAT_MONTHLY_LIMIT`, `AI_RATE_LIMIT_MAX_CALLS` / `_WINDOW_SEC` | C | registrar os **valores** (padrões 1000 por mês, com o Essencial em no máximo 200; 10 chamadas em 60 s) | IA cortada com convite de upgrade, ou `out_of_scope` se as mensagens forem rápidas demais. Mandar as mensagens de C com alguns segundos entre elas | `core/services/ai_chat_commands.py`, `core/ai_rate_limiter.py` |
+| `PLUGGY_CLIENT_ID` / `_SECRET` (ou `PLUGGY_API_KEY`, que tem precedência e expira) | F | definidos | 503 no widget; com `PLUGGY_API_KEY` vencida, 502 | `core/services/pluggy.py` |
+| `PLUGGY_PRODUCTS` | F2, F4 | ausente ou com `ACCOUNTS,TRANSACTIONS` | produto não coletado | `pluggy.py` |
+| **`PLUGGY_WEBHOOK_SECRET`** | F3 | definida | o webhook responde **503** | `frontend/routes/open_finance.py` |
+| `PLUGGY_WEBHOOK_URL` | F3 | opcional: sem ela o código usa `{DASHBOARD_URL}/open-finance/pluggy/webhook`. A URL é gravada no item ao conectar; trocar depois exige reconectar | — | `open_finance.py` |
+| `PLUGGY_INCLUDE_SANDBOX` | F | ver P5 | conector sandbox não aparece | `open_finance.py:74` |
+| `OF_MANUAL_REFRESH_COOLDOWN_SEC`, `OF_HEALTH_CHECK_ENABLED` | F2 | registrar os **valores** (padrões 120 s e ligado) | dois toques em "↻ Atualizar" em menos do cooldown voltam `rate_limited` e "Última sync" não muda | `core/services/pluggy_sync.py` |
+| `OF_CONSOLIDATED_BALANCE_ENABLED` | F9, G6 | registrar se está ausente/ligado (padrão) ou em `0`. Em `0`, vale a allowlist: env ausente usa uma lista **fixa no código**, e env definida substitui essa lista (`OF_CONSOLIDATED_BETA_EMAILS` / `_USER_IDS`); a comparação de e-mail é exata, então o alias `+pl01` não entra por semelhança. Registrar só se a conta de teste está ou não na lista | ver F9 e G6 | `plan_service.consolidated_balance_enabled` |
+| `STRIPE_SECRET_KEY` | I | definida (modo live) | 503 no checkout e no webhook | `finance_bot_websocket_custom.py` |
+| `STRIPE_PRICE_ID_PRO_MENSAL` (Plus mensal; ou o legado `STRIPE_PRICE_ID_PRO`) e `STRIPE_PRICE_ID_ESSENCIAL_MENSAL` | I1; I2, I3 | definidos | botão indisponível, 503; sem o preço do Essencial, o agendamento também não aparece | idem |
+| `STRIPE_WEBHOOK_SECRET` e endpoint `/billing/webhook` em live, assinando `checkout.session.completed`, `invoice.paid`, `invoice.payment_succeeded`, `invoice.payment_failed`, `customer.subscription.trial_will_end`, `customer.subscription.deleted` | I1, I4 | definidos e assinados | 400 e o plano não muda, sem aviso na tela | idem |
+| Customer Portal da Stripe (live) | I4 | configuração padrão salva, com cancelamento **no fim do período** | sem configuração, `/conta` dá 500; com cancelamento imediato, o acesso cai na hora | Stripe |
+| `PLANS_TRIAL_DAYS` | I1 | registrar o **valor** (padrão 15). No modo v2 é esta a variável; `PRO_TRIAL_DAYS` só vale no legado | trial de outra duração | `plan_service.trial_days_total()` |
+| `ADMIN_DASHBOARD_PASSWORD_HASH` | P6, I0 | definida (produção não aceita senha em texto) | painel admin responde 503 | `core/admin_dashboard.py` |
+
+Limites de taxa que um executor pode encontrar sem ser defeito: Insights e padrões
+20/min por IP, perfil 60/min, checkout 20/h, troca e cancelamento de troca 15/h.
 
 ---
 
@@ -62,8 +94,9 @@ A conta passa por cinco estados. As seções A, B e C se repetem em cada um.
 `core/services/plan_service.py` — não é erro de digitação.
 
 O ciclo da Stripe (seção I) fica **por último**: com assinatura Stripe ativa, o
-próximo webhook dela prevalece sobre o que o admin gravou, e a varredura de
-downgrade (a cada 6 h) pode reverter a troca manual no meio de outra seção.
+próximo webhook dela prevalece sobre o que o admin gravou, e a reprojeção de
+direitos (a cada 60 s, com varredura completa a cada 24 h) pode reverter a troca
+manual no meio de outra seção.
 
 ---
 
@@ -99,13 +132,16 @@ em `/analytics/.../patterns`) evita custo nas repetições.
     recurring: ['GET', `/recurring-expenses/${uid}`],
     simulator: ['POST', `/simulator/${uid}`, sim],
   };
+  // POST com cookie exige o header CSRF; sem ele o 403 "Token CSRF inválido" se confunde com o de plano.
+  const csrf = decodeURIComponent((document.cookie.match(/(?:^|;\s*)csrf_token=([^;]+)/) || [])[1] || '');
   const out = {plan: prof.plan, gates: prof.feature_gates};
   for (const [k, [m, url, body]] of Object.entries(calls)) {
     const r = await fetch(url, {method: m, credentials: 'same-origin',
-      headers: body ? {'Content-Type': 'application/json'} : {},
+      headers: body ? {'Content-Type': 'application/json', 'X-CSRF-Token': csrf} : {},
       body: body ? JSON.stringify(body) : undefined});
     const b = await j(r);
-    out[k] = r.status;
+    // Status mais o motivo: um 403 de plano (`pro_required`) não pode passar por um de CSRF.
+    out[k] = r.ok ? r.status : `${r.status} ${b?.detail?.error ?? JSON.stringify(b?.detail ?? b)}`;
     if (k === 'forecast' && r.ok) out.forecast_keys = {
       horizons: Object.keys(b.forecast.horizons || {}),
       trajectory: 'trajectory' in b.forecast, worst_day: 'worst_day' in b.forecast};
@@ -116,21 +152,21 @@ em `/analytics/.../patterns`) evita custo nas repetições.
 })();
 ```
 
-Esperado (403 = recusa por plano, corpo `{"detail": {"error": "pro_required", "feature": "<feature>"}}`; o `proj60` recusado no Plus traz também `message` com o limite de dias):
+Esperado. A sonda grava o status e, quando não é 2xx, o motivo (`detail.error`). Recusa por plano = `403 pro_required` (corpo `{"detail": {"error": "pro_required", "feature": "<feature>"}}`; o `proj60` recusado no Plus traz também `message`). Qualquer outro 403, como `"Token CSRF inválido ou ausente."`, é falha da execução, não resultado:
 
 | chave | S1/S5 Essencial | S2/S4 Plus | S3 Pro |
 |---|---|---|---|
 | `gates.forecast` / `insights` / `financial_comparison` / `weekly_report` / `household_budget` | `false` | `true` | `true` |
 | `gates.cashflow` | `false` | `false` | `true` |
 | `gates.recurring_expenses` | `true` | `true` | `true` |
-| `forecast` | 403 | 200 | 200 |
+| `forecast` | 403 pro_required | 200 | 200 |
 | `forecast_keys.horizons` | — | `["30"]` | `["30","60","90"]` |
 | `forecast_keys.trajectory` / `worst_day` | — | `false` | `true` |
-| `proj30` | 403 | 200 | 200 |
-| `proj60` | 403 | 403 | 200 |
-| `evolution`, `weekday`, `insights`, `patterns`, `household` | 403 | 200 | 200 |
+| `proj30` | 403 pro_required | 200 | 200 |
+| `proj60` | 403 pro_required | 403 pro_required | 200 |
+| `evolution`, `weekday`, `insights`, `patterns`, `household` | 403 pro_required | 200 | 200 |
 | `recurring` | 200 | 200 | 200 |
-| `simulator` | 403 | 403 | 200 |
+| `simulator` | 403 pro_required | 403 pro_required | 200 |
 
 | caso | estado | observado (colar a saída) | resultado | PR |
 |---|---|---|---|---|
@@ -269,7 +305,7 @@ credencial de ambiente próprio).
 | F6 | Confirmar o primeiro par no modal | gasto conta uma vez só nos totais do mês |
 | F7 | Desfazer o par confirmado em F6 | o par **sai** da lista "Unidos nos últimos 60 dias" do modal (estado `imported`); a transação do banco volta a ser lançamento próprio e o gasto manual volta à Carteira, então os dois contam separados, como em F8 (`db/reconciliation.py::undo_reconciliation`) |
 | F8 | No segundo par, marcar **"São diferentes"** | os dois lançamentos ficam separados e contam como dois |
-| F9 | Previsão (S3) antes e depois de F2 | **com saldo consolidado ligado para a conta (P4c):** saldo de partida da previsão muda junto com o saldo sincronizado. **Com o freio ligado e a conta fora da allowlist:** o saldo de partida continua só a Carteira, de propósito (`cashflow._starting_balance`), e o G6 mostra o aviso de bancos fora da soma |
+| F9 | Previsão (S3) antes e depois de F2 | **com saldo consolidado ligado para a conta (seção 0.1, `OF_CONSOLIDATED_BALANCE_ENABLED`):** saldo de partida da previsão muda junto com o saldo sincronizado. **Com o freio ligado e a conta fora da allowlist:** o saldo de partida continua só a Carteira, de propósito (`cashflow._starting_balance`), e o G6 mostra o aviso de bancos fora da soma |
 
 | caso | observado | resultado | PR |
 |---|---|---|---|
@@ -289,7 +325,7 @@ banco), para ver o aviso de saldo incompleto.
 | G3 | Conferir o cenário `À vista` | saída única de R$ 3.000 hoje; pior saldo cai R$ 3.000 contra o `atual` |
 | G4 | Nenhum cenário marcado como "melhor" | a resposta compara liquidez e custo sem eleger vencedor |
 | G5 | Mesmo pedido pelo chat (C7, que descreve só o 12x) | um cenário só, com os números de G2 |
-| G6 | Aviso de saldo no chat, antes e depois de F | sem banco conectado: `aviso_saldo` **vazio** (o saldo manual é tratado como confiável). Com banco conectado e saldo consolidado desligado para a conta (P4c; `consolidated_balance_enabled` falso): aviso "Seus bancos conectados não estão somados…". Com saldo consolidado ligado: sem aviso. Registrar qual dos três ocorreu (`core/services/cashflow.py:203`, `core/services/ai_chat/tools/simulator.py::_aviso_saldo`) |
+| G6 | Aviso de saldo no chat, antes e depois de F | sem banco conectado: `aviso_saldo` **vazio** (o saldo manual é tratado como confiável). Com banco conectado e saldo consolidado desligado para a conta (seção 0.1; `consolidated_balance_enabled` falso): aviso "Seus bancos conectados não estão somados…". Com saldo consolidado ligado: sem aviso. Registrar qual dos três ocorreu (`core/services/cashflow.py:203`, `core/services/ai_chat/tools/simulator.py::_aviso_saldo`) |
 | G7 | Payload inválido: `parcelas: 0` (pedido abaixo) | 400 com `{"detail": {"error": "invalid_simulation", "errors": [...]}}`, sem 500 |
 
 Pedido do G7, no console, logado em S3:
@@ -297,8 +333,9 @@ Pedido do G7, no console, logado em S3:
 ```js
 (async () => {
   const {user_id: uid} = await fetch('/auth/dashboard-profile', {credentials: 'same-origin'}).then(r => r.json());
+  const csrf = decodeURIComponent((document.cookie.match(/(?:^|;\s*)csrf_token=([^;]+)/) || [])[1] || '');
   const r = await fetch(`/simulator/${uid}`, {method: 'POST', credentials: 'same-origin',
-    headers: {'Content-Type': 'application/json'},
+    headers: {'Content-Type': 'application/json', 'X-CSRF-Token': csrf},
     body: JSON.stringify({reserva_minima: 500, cenarios: [{nome: 'Inválido', preco: 3000, parcelas: 0}]})});
   const out = {status: r.status, body: await r.json().catch(() => null)};
   console.log(JSON.stringify(out, null, 1));
@@ -327,7 +364,7 @@ reembolso, e o I4 cancela dentro dele. Registrar qual dos dois aconteceu.
 | I1 | Com a conta em `free` (I0) e **sem** assinatura, assinar Plus mensal pelo `/precos` | webhook grava `plan = 'pro'`, com ou sem trial; sonda A igual a S2 em até 1 min |
 | I2 | Pedir troca para Essencial em `/precos` (chama `/billing/change-plan`) | troca **agendada** para o fim do período pago; plano atual continua Plus |
 | I3 | Cancelar a troca agendada | agendamento some; Plus segue |
-| I4 | Mandar `cancelar assinatura` no WhatsApp (o app não tem botão; a resposta traz o link do portal da Stripe) e cancelar **no fim do período** | acesso Plus segue até o fim do período. Quando a assinatura termina, o webhook `customer.subscription.deleted` revoga só os grants `stripe`/`legacy` e reprojeta. Como o I0 já revogou o grant `admin`, sobra `free`: a sonda A dá **402 `subscription_required`** em tudo e o bot bloqueia. **Não** fica igual a S5. Sem o I0, o grant `admin` que sobrevivesse projetaria a conta de volta ao Essencial. Cancelar "agora" ou reembolsar com cancelamento pelo painel da Stripe corta o acesso na hora. Depois do I4, voltar a conta ao Essencial pelo admin se ela ainda for usada |
+| I4 | Mandar `cancelar assinatura` no WhatsApp (o app não tem botão; a resposta traz um link `/d/...?next=/conta` válido por 1 h, que leva ao portal da Stripe) e cancelar **no fim do período** | acesso Plus segue até o fim do período. Quando a assinatura termina, o webhook `customer.subscription.deleted` revoga só os grants `stripe`/`legacy` e reprojeta. Como o I0 já revogou o grant `admin`, sobra `free`: a sonda A dá **402 `subscription_required`** em tudo e o bot bloqueia. **Não** fica igual a S5. Sem o I0, o grant `admin` que sobrevivesse projetaria a conta de volta ao Essencial. Cancelar "agora" ou reembolsar com cancelamento pelo painel da Stripe corta o acesso na hora. Depois do I4, voltar a conta ao Essencial pelo admin se ela ainda for usada |
 
 ---
 
@@ -354,6 +391,6 @@ Roda por último, depois do ciclo da Stripe: I1 precisa da mesma conta de teste.
 - App iOS/PWA: continua no roteiro A de `open_finance_validacao_manual.md`.
 - Estados de erro da Pluggy (B1–B6, B12–B15 daquele roteiro): exigem forçar
   falhas no provedor.
-- Envio de template pela Meta além do que D e E observam: P4b confere a aprovação, mas não testa
+- Envio de template pela Meta além do que D e E observam: a seção 0.1 confere a aprovação, mas não testa
   outros idiomas nem outros templates.
 - Carga, concorrência e multiusuário: fora do escopo de uma conta de teste.
