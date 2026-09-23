@@ -271,10 +271,8 @@ def test_inundacao_de_log_por_d_envenenado_grava_zero_linhas():
 
     Com a guarda, o 500 some e o middleware não grava nada. O teto de `/d/`
     (30/min) mora em `tests/test_d_rate_limit.py`; daí o reset do storage do
-    limiter, em memória e compartilhado entre testes. Na suíte inteira parte
-    destas 25 volta 429 — o `importlib.reload` do monólito em
-    `test_pix_rota_registrada.py` duplica o limite e o teto efetivo cai para 15
-    (medido) —, e isso não muda o que se mede aqui: 429 não é 500 nem grava.
+    limiter, em memória e compartilhado entre testes. Se parte destas 25 voltar
+    429, isso não muda o que se mede aqui: 429 não é 500 nem grava.
     """
     import asyncio
 
