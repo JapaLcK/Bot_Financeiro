@@ -11,7 +11,12 @@ description: Como rodar a suíte do PigBank e ler o resultado — qual interpret
 export DATABASE_URL=$(grep -m1 '^DATABASE_URL=' .env | cut -d= -f2- | tr -d "\"'")
 export PYTHONPATH=.
 .venv/bin/python -m pytest -q        # suíte inteira, sem exclusão nenhuma
+.venv/bin/python -m pytest -q -n auto   # a mesma, em paralelo (pytest-xdist), como o CI roda
 ```
+
+Com `-n`, cada worker cria o próprio database `pytest_*` (o `pytest_configure` do
+`conftest.py` roda em cada um), então o isolamento abaixo vale igual. Para um
+arquivo só, rode sem `-n`: subir os workers custa mais que o arquivo.
 
 **Não há número esperado aqui, de propósito.** Rode e anote o SEU resultado: ele é a
 baseline deste trabalho. Um número guardado neste arquivo envelhece em silêncio e
