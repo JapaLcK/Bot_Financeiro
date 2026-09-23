@@ -151,16 +151,20 @@ def list_pluggy_investments(item_id: str, api_key: str | None = None, *,
     # o total batia enquanto uma posição de verdade faltava.
     if "total" in contrato and contrato["total"] != len(vistos):
         raise incompleta("total_incoerente")
-    # A paginação é por deslocamento, sem snapshot estável: se `A` sai da página 1
-    # e `E` entra no fim ENTRE as requisições, a página 2 começa em `D` e o `C` nunca
-    # é lido — ids distintos, `total` batendo, e a reconciliação apaga o `C`. Reler
-    # as páginas 1..N−1 DEPOIS da primeira passada prova que nenhuma posição mudou
-    # de lugar antes do deslocamento de uma página já lida (a página N não tem
-    # ninguém depois dela para perder). Custo: N−1 chamadas a mais (o `max_pages`
-    # conta só a primeira passada), e zero com uma página só. Mudança entre as
-    # duas passadas vira falso positivo = leitura incompleta, que é o lado que não
-    # remove nada.
-    for n, ids in enumerate(ids_por_pagina[:-1], start=1):
-        if le_pagina(n)[0] != ids:
-            raise incompleta("janela_moveu")
+    # A paginação é por deslocamento, sem snapshot estável: uma posição que sai
+    # de uma página já lida ENTRE as requisições empurra a seguinte para trás da
+    # fronteira, e ela nunca é lida — ids distintos, `total` batendo, e a
+    # reconciliação apaga a posição pulada com a caixinha. Isto NÃO é prova: é
+    # exigir que duas passadas completas devolvam os mesmos ids, na mesma ordem,
+    # página a página, INCLUSIVE a última (a posição perdida pode ser da própria
+    # página N). Para pular uma posição sem sinal, a mesma mudança teria de
+    # acontecer nas duas passadas, na mesma fronteira; deslocamento sem snapshot
+    # não admite garantia mais forte. Mudança entre as passadas vira leitura
+    # incompleta, que é o lado que não remove nada. Custo: N chamadas a mais com
+    # mais de uma página (o `max_pages` conta só a primeira passada), e zero com
+    # uma página só, que não tem fronteira entre requisições.
+    if len(ids_por_pagina) > 1:
+        for n, ids in enumerate(ids_por_pagina, start=1):
+            if le_pagina(n)[0] != ids:
+                raise incompleta("janela_moveu")
     return out

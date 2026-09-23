@@ -34,16 +34,17 @@ def test_le_todas_as_paginas(pluggy_responde):
         {"page": 1, "totalPages": 3, "total": 5, "results": [_pos("a"), _pos("b")]},
         {"page": 2, "totalPages": 3, "total": 5, "results": [_pos("c"), _pos("d")]},
         {"page": 3, "totalPages": 3, "total": 5, "results": [_pos("e")]},
-        # Releitura das páginas 1..N−1, estável: devolve o mesmo.
+        # Releitura de TODAS as páginas, estável: devolve o mesmo.
         {"page": 1, "totalPages": 3, "total": 5, "results": [_pos("a"), _pos("b")]},
         {"page": 2, "totalPages": 3, "total": 5, "results": [_pos("c"), _pos("d")]},
+        {"page": 3, "totalPages": 3, "total": 5, "results": [_pos("e")]},
     ])
 
     out = list_pluggy_investments("item-1", "k")
 
     assert [i["id"] for i in out] == ["a", "b", "c", "d", "e"]
-    assert [c["page"] for c in pluggy_responde.chamadas] == [1, 2, 3, 1, 2]
-    assert len(pluggy_responde.chamadas) == 5, "N páginas + N−1 relidas, nem uma a mais"
+    assert [c["page"] for c in pluggy_responde.chamadas] == [1, 2, 3, 1, 2, 3]
+    assert len(pluggy_responde.chamadas) == 6, "N páginas + N relidas, nem uma a mais"
     assert all(c["itemId"] == "item-1" for c in pluggy_responde.chamadas)
     # `pageSize` fica no default do servidor: o irmão /v2/transactions devolve 400 com ele.
     assert all("pageSize" not in c for c in pluggy_responde.chamadas)
@@ -209,6 +210,7 @@ def test_metadata_em_string_de_digitos_e_aceita(pluggy_responde):
         {"page": "1", "totalPages": "2", "total": "3", "results": [_pos("a"), _pos("b")]},
         {"page": "2", "totalPages": "2", "total": "3", "results": [_pos("c")]},
         {"page": "1", "totalPages": "2", "total": "3", "results": [_pos("a"), _pos("b")]},
+        {"page": "2", "totalPages": "2", "total": "3", "results": [_pos("c")]},
     ])
 
     assert [i["id"] for i in list_pluggy_investments("item-1", "k")] == ["a", "b", "c"]
@@ -247,6 +249,21 @@ def test_janela_que_move_sem_mudar_de_tamanho_e_incoerente(pluggy_responde):
         {"page": 2, "totalPages": 2, "total": 4, "results": [_pos("d"), _pos("e")]},
         {"page": 1, "totalPages": 2, "total": 4, "results": [_pos("b"), _pos("c")]},
     ])
+
+    with pytest.raises(PluggyApiError, match="janela_moveu"):
+        list_pluggy_investments("item-1", "k")
+
+
+def test_posicao_perdida_na_fronteira_da_ultima_pagina_e_incoerente(pluggy_responde):
+    """O contraexemplo do Manager: entre a página 2 e a 3, `d` sai e `f` entra no
+    fim, então a página 3 lê `[f]` e o `e` nunca é lido; antes da releitura a
+    carteira volta ao original. Reler só 1..N−1 batia e o `e` sumia — a posição
+    perdida era da própria página N, então a última página também é relida."""
+    def pg(n, *ids):
+        return {"page": n, "totalPages": 3, "total": 5, "results": [_pos(i) for i in ids]}
+
+    pluggy_responde([pg(1, "a", "b"), pg(2, "c", "d"), pg(3, "f"),
+                     pg(1, "a", "b"), pg(2, "c", "d"), pg(3, "e")])
 
     with pytest.raises(PluggyApiError, match="janela_moveu"):
         list_pluggy_investments("item-1", "k")
