@@ -283,8 +283,7 @@ def test_adocao_com_dono_novo_no_lock_desfaz_a_reivindicacao(
         user_id, monkeypatch, eventos, webhook_pluggy):
     """A adoção grava o rastro COM dono antes da conexão; se o 409 não apagar a
     própria linha, sobra rastro reivindicado e ZERO conexão nossa — o estado
-    terminal do P0, do qual nem a retentativa (1ª guarda) nem o script one-shot
-    (que filtra fora rastro com dono) tiram o usuário.
+    terminal do P0, do qual a retentativa (1ª guarda) não tira o usuário.
 
     `HTTPException` não é `psycopg.OperationalError`: ela atravessa o `except`
     de infra de `_grava_reconexao` e o desfazimento do 503 nunca roda.
