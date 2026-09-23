@@ -157,16 +157,23 @@ Python por `tests/test_max_lines_python.py`, que roda no `pytest` e cuja lista d
 legado mora em `tests/_max_lines_baseline.py`.
 
 **Os dois NÃO isentam do mesmo jeito, e a diferença importa.** No **Python** a
-isenção é **só por caminho exato**: `LEGADOS` é um `frozenset` de strings e a
-varredura compara por igualdade, então glob e sufixo não são sequer
-representáveis, e **arquivo de teste não tem tratamento especial** — os ~45 de
-`tests/` estão na lista nominalmente, e teste novo acima de 350 **reprova**. No
-**JavaScript** sobram duas frouxidões: o baseline casa **caminho inteiro ou
-sufixo** (`eslint-rules/utils.cjs:53-55`), e arquivo de teste continua sendo
-reconhecido **por regex** (`isTestFile`, `/\.(test|spec)\.[cm]?[jt]sx?$/`,
-`utils.cjs:49-51`), com `tests/frontend/**/*.mjs` em **`warn`** — que não reprova,
-porque o `eslint` só sai != 0 com erro. **O portão de Python é o mais estrito dos
-dois, de propósito.**
+isenção de LEGADO é **só por caminho exato**: `LEGADOS` é um `frozenset` de
+strings e a varredura compara por igualdade, então glob e sufixo não são sequer
+representáveis. **Arquivo de teste (primeiro componente do caminho em `tests/`
+ou `harness_tests/`) acima do teto é AVISO, não reprovação** — `_varrer` separa
+`faltando` (produção) de `avisos` (teste), e o segundo só aparece no warnings
+summary do `pytest`; por isso `LEGADOS` não tem mais entrada de `tests/`. No
+**JavaScript** sobram duas frouxidões: o baseline casa **caminho
+inteiro ou sufixo** (`eslint-rules/utils.cjs:53-55`) — mais frouxo que o
+`LEGADOS` do Python, que só aceita igualdade exata —, e arquivo de teste
+continua sendo reconhecido **por regex** (`isTestFile`,
+`/\.(test|spec)\.[cm]?[jt]sx?$/`, `utils.cjs:49-51`), com
+`tests/frontend/**/*.mjs` em **`warn`** — que não reprova, porque o `eslint` só
+sai != 0 com erro. **Só o tratamento de teste como aviso ficou equivalente ao
+Python** (embora o Python reconheça teste por diretório de topo e o JS por
+regex/padrão de arquivo); **o casamento por sufixo não tem par no Python e
+continua mais frouxo. O que o Python mantém mais estrito é código de
+PRODUÇÃO**, onde a isenção continua exigindo caminho exato em `LEGADOS`.
 
 O que os dois têm em comum é o que foi REMOVIDO: as isenções por *basename* (`index`, `constants`, `types`,
 `*.config.*`) e por *diretório* (`generated/`, `fixtures/`, `mocks/`) vieram de um
@@ -178,13 +185,16 @@ um.** Basename e diretório, que são exatamente os do template. Devolver qualqu
 um deles deixa vermelho na hora.
 
 **O que elas NÃO prendem: predicado arbitrário.** Isto é medição, não hipótese —
-três pontos de inserção, com as 8 sondas do arquivo VERDES:
+três pontos de inserção, com todas as sondas do arquivo VERDES (registro da
+medição de 2026-09-07, com as sondas daquela época; o número de sondas muda com
+o arquivo, remeça com
+`.venv/bin/python -m pytest tests/test_max_lines_python.py -q` antes de reusar):
 
-| onde | predicado | resultado |
+| onde | predicado | resultado (2026-09-07) |
 |---|---|---|
-| `_lidos` | `rel.startswith("handlers/")` | 8 passed |
-| `_lidos` | `rel.startswith("adapters/discord/")` | 8 passed |
-| `_estoura` | `caminho.startswith("scripts/")` | 8 passed |
+| `_lidos` | `rel.startswith("handlers/")` | todas passam |
+| `_lidos` | `rel.startswith("adapters/discord/")` | todas passam |
+| `_estoura` | `caminho.startswith("scripts/")` | todas passam |
 
 Com a segunda, `adapters/discord/enorme_novo.py` com 400 linhas entra sem uma
 linha vermelha.
