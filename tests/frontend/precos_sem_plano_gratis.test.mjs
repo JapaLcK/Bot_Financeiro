@@ -202,10 +202,11 @@ test("o switch troca os preços e explica a cobrança com movimento", async () =
   assert.ok(anual.cobrancas.every((texto) =>
     texto.startsWith("Cobrado em um único pagamento anual")),
   `copy anual ausente: ${JSON.stringify(anual.cobrancas)}`);
+  // A identidade aprovada usa 42px; ciclo, quadros e valores continuam contratos funcionais.
   assert.deepEqual(anual.fluxos, [
-    { ciclo: "annual", direcao: "up", numberFlow: true, sufixo: "/ano", quadros: ["translateY(0px)", "translateY(-50%)"], fade: false, tamanho: "40px", peso: "850" },
-    { ciclo: "annual", direcao: "up", numberFlow: true, sufixo: "/ano", quadros: ["translateY(0px)", "translateY(-50%)"], fade: false, tamanho: "40px", peso: "850" },
-    { ciclo: "annual", direcao: "up", numberFlow: true, sufixo: "/ano", quadros: ["translateY(0px)", "translateY(-50%)"], fade: false, tamanho: "40px", peso: "850" },
+    { ciclo: "annual", direcao: "up", numberFlow: true, sufixo: "/ano", quadros: ["translateY(0px)", "translateY(-50%)"], fade: false, tamanho: "42px", peso: "850" },
+    { ciclo: "annual", direcao: "up", numberFlow: true, sufixo: "/ano", quadros: ["translateY(0px)", "translateY(-50%)"], fade: false, tamanho: "42px", peso: "850" },
+    { ciclo: "annual", direcao: "up", numberFlow: true, sufixo: "/ano", quadros: ["translateY(0px)", "translateY(-50%)"], fade: false, tamanho: "42px", peso: "850" },
   ]);
   assert.equal(anual.copiasEmMovimento, 3);
 
@@ -213,9 +214,9 @@ test("o switch troca os preços e explica a cobrança com movimento", async () =
   await page.click("#cycle-annual");
   await page.waitForTimeout(80);
   assert.deepEqual((await lerCards()).fluxos, [
-    { ciclo: "monthly", direcao: "down", numberFlow: true, sufixo: "/mês", quadros: ["translateY(-50%)", "translateY(0px)"], fade: false, tamanho: "40px", peso: "850" },
-    { ciclo: "monthly", direcao: "down", numberFlow: true, sufixo: "/mês", quadros: ["translateY(-50%)", "translateY(0px)"], fade: false, tamanho: "40px", peso: "850" },
-    { ciclo: "monthly", direcao: "down", numberFlow: true, sufixo: "/mês", quadros: ["translateY(-50%)", "translateY(0px)"], fade: false, tamanho: "40px", peso: "850" },
+    { ciclo: "monthly", direcao: "down", numberFlow: true, sufixo: "/mês", quadros: ["translateY(-50%)", "translateY(0px)"], fade: false, tamanho: "42px", peso: "850" },
+    { ciclo: "monthly", direcao: "down", numberFlow: true, sufixo: "/mês", quadros: ["translateY(-50%)", "translateY(0px)"], fade: false, tamanho: "42px", peso: "850" },
+    { ciclo: "monthly", direcao: "down", numberFlow: true, sufixo: "/mês", quadros: ["translateY(-50%)", "translateY(0px)"], fade: false, tamanho: "42px", peso: "850" },
   ]);
 
   await page.close();

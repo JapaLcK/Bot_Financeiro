@@ -1,71 +1,96 @@
-<!DOCTYPE html>
+<!doctype html>
 <html lang="pt-BR">
 <head>
-<meta charset="UTF-8" />
-<meta name="viewport" content="width=device-width, initial-scale=1.0" />
+<meta charset="utf-8"/>
+<meta content="width=device-width, initial-scale=1.0" name="viewport"/>
 <title>Finalize seu cadastro · PigBank</title>
-<meta name="robots" content="noindex" />
-<link rel="icon" type="image/png" href="/favicon.png?v=3" />
-<link rel="apple-touch-icon" href="/brand/apple-touch-icon.png?v=3" />
-<meta name="theme-color" content="#0c0c0d" />
-<link rel="stylesheet" href="/brand.css?v=4" />
-<link rel="stylesheet" href="/site.css?v=4" />
-<style>
-  .auth-error { display: none; background: rgba(255,45,45,.1); border: 1px solid rgba(255,45,45,.3); color: #ffb4b4; padding: 10px 13px; border-radius: 10px; font-size: .82rem; margin-bottom: 14px; line-height: 1.4; }
-  .auth-error.show { display: block; }
-  .email-pill { display: flex; align-items: center; gap: 9px; background: var(--bg-elev); border: 1px solid var(--line-2); border-radius: 12px; padding: 11px 14px; color: var(--ink-2); font-size: .86rem; margin-bottom: 18px; }
-  .email-pill svg { color: var(--pink); flex-shrink: 0; }
-  .email-pill strong { color: var(--ink); }
-  .email-pill .skeleton { color: var(--ink-3); }
-  .field .help { font-size: .74rem; color: var(--ink-3); margin-top: 6px; }
-  .back { display: inline-block; text-align: center; width: 100%; color: var(--ink-3); font-size: .84rem; margin-top: 16px; }
-  .back:hover { color: var(--pink); }
-</style>
-<script src="/safe-area.js?v=1"></script>
-<script src="/purchase-intent.js?v=1" defer></script>
+<meta content="noindex" name="robots"/>
+<link href="/favicon.png?v=3" rel="icon" type="image/png"/>
+<link href="/brand/apple-touch-icon.png?v=3" rel="apple-touch-icon"/>
+<meta content="#111111" name="theme-color"/>
+<link href="/brand.css?v=4" rel="stylesheet"/>
+<link href="/site.css?v=4" rel="stylesheet"/>
+
+<link href="/site-redesign.css?v=1" rel="stylesheet"/>
+<link href="/site-auth.css?v=1" rel="stylesheet"/>
+<script src="/safe-area.js?v=1">
+</script>
+<script defer="" src="/purchase-intent.js?v=1">
+</script>
+<link href="/phosphor.css?v=1" rel="stylesheet"/>
 </head>
-<body>
-<div class="glow"></div>
+<body class="lp lp-auth lp-auth-page">
+<a class="lp-skip-link" href="#conteudo">Pular para o conteúdo</a>
+<nav class="nav" aria-label="Navegação principal">
+<a class="nav-logo" href="/" aria-label="PigBank, início">
+<img class="logo-full" src="/brand/landing-logo.webp?v=1" alt="PigBank" width="142" height="42">
+</a>
+<div class="nav-right">
+<a class="link-entrar" href="/">Voltar ao site</a>
+<a class="btn btn-primary" href="/login">Entrar</a>
+</div>
+</nav>
+<main class="lp-auth-layout lp-shell" id="conteudo">
+<aside aria-label="PigBank" class="lp-auth-story">
+<div class="lp-auth-story-copy">
+<p class="lp-eyebrow">Clareza pra suas contas</p>
+<h2>Sua grana.<br/>Seu ritmo.<br/>Tudo mais claro.</h2>
+<p>Retome seus planos.<br/>O Piggy cuida da organização com você.</p>
+</div>
+<div class="lp-auth-piggy-wrap">
+<img alt="Piggy, o porquinho rosa de óculos escuros e moletom preto, com um celular" class="lp-auth-piggy" height="1200" src="/brand/landing-piggy-four-digits.webp?v=1" width="800"/>
+<div class="lp-auth-story-stamp">
+<i aria-hidden="true" class="ph ph-chat-circle">
+</i>
+<span>Organização que<br/>começa na conversa.</span>
+</div>
+</div>
+</aside>
+<div class="lp-auth-form-column">
+<div class="auth-card">
 
-  <nav class="nav">
-    <a class="nav-logo" href="/"><img class="logo-full" src="/brand/logo.webp?v=1" alt="PigBank" /></a>
-    <div class="nav-right"><a class="link-entrar" href="/login">Entrar</a></div>
-  </nav>
-
-  <div class="wrap auth-wrap">
-    <div class="auth-card">
-      <img src="/brand/mascot.webp" alt="" style="width:120px;height:auto;display:block;margin:0 auto 6px;filter:drop-shadow(0 8px 22px rgba(0,0,0,.45))" />
-      <h1>Quase lá!</h1>
-      <p class="auth-sub">Só precisamos de mais alguns dados pra criar sua conta.</p>
-
-      <div class="email-pill">
-        <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M4 4h16c1.1 0 2 .9 2 2v12c0 1.1-.9 2-2 2H4c-1.1 0-2-.9-2-2V6c0-1.1.9-2 2-2z"/><polyline points="22,6 12,13 2,6"/></svg>
-        <span>Conectado como <strong id="email-display" class="skeleton">carregando…</strong></span>
-      </div>
-
-      <div class="auth-error" id="msg-error"></div>
-
-      <form id="signup-form" novalidate>
-        <div class="field">
-          <label for="name">Nome</label>
-          <input type="text" id="name" placeholder="Como podemos te chamar?" autocomplete="given-name" maxlength="50" required />
-        </div>
-        <div class="field">
-          <label for="phone">WhatsApp</label>
-          <input type="tel" id="phone" placeholder="(11) 99999-9999" autocomplete="tel" inputmode="tel" required />
-          <div class="help">Use o mesmo número de WhatsApp com que você vai falar com a Piggy.</div>
-        </div>
-        <label class="checkbox-row">
-          <input type="checkbox" id="accept-terms" />
-          <span>Li e aceito os <a href="/termos" target="_blank" rel="noopener" style="color:var(--pink)">Termos</a> e a <a href="/privacy" target="_blank" rel="noopener" style="color:var(--pink)">Política de Privacidade</a> do PigBank.</span>
-        </label>
-        <button type="submit" class="btn btn-primary btn-block btn-lg" id="submit-btn" disabled>Criar minha conta</button>
-      </form>
-
-      <a href="/" class="back">Cancelar</a>
-    </div>
-  </div>
-
+<h1>Quase lá!</h1>
+<p class="auth-sub">Só precisamos de mais alguns dados pra criar sua conta.</p>
+<div class="email-pill">
+<svg fill="none" height="18" stroke="currentColor" stroke-linecap="round" stroke-linejoin="round" stroke-width="2" viewbox="0 0 24 24" width="18">
+<path d="M4 4h16c1.1 0 2 .9 2 2v12c0 1.1-.9 2-2 2H4c-1.1 0-2-.9-2-2V6c0-1.1.9-2 2-2z">
+</path>
+<polyline points="22,6 12,13 2,6">
+</polyline>
+</svg>
+<span>Conectado como <strong class="skeleton" id="email-display">carregando…</strong>
+</span>
+</div>
+<div class="auth-error" id="msg-error" role="alert">
+</div>
+<form id="signup-form" novalidate="">
+<div class="field">
+<label for="name">Nome</label>
+<input autocomplete="given-name" id="name" maxlength="50" placeholder="Como podemos te chamar?" required="" type="text"/>
+</div>
+<div class="field">
+<label for="phone">WhatsApp</label>
+<input autocomplete="tel" id="phone" inputmode="tel" placeholder="(11) 99999-9999" required="" type="tel"/>
+<div class="help">Use o mesmo número de WhatsApp com que você vai falar com a Piggy.</div>
+</div>
+<label class="checkbox-row">
+<input id="accept-terms" type="checkbox"/>
+<span>Li e aceito os <a href="/termos" rel="noopener" style="color:var(--pink)" target="_blank">Termos</a> e a <a href="/privacy" rel="noopener" style="color:var(--pink)" target="_blank">Política de Privacidade</a> do PigBank.</span>
+</label>
+<button class="btn btn-primary btn-block btn-lg" disabled="" id="submit-btn" type="submit">Criar minha conta</button>
+</form>
+<a class="back" href="/">Cancelar</a>
+</div>
+</div>
+</main>
+<footer class="lp-auth-footer lp-shell">
+<p>© 2026 PigBank</p>
+<nav aria-label="Informações e ajuda">
+<a href="/suporte">Precisa de ajuda?</a>
+<a href="/privacy">Privacidade</a>
+<a href="/termos">Termos de uso</a>
+</nav>
+</footer>
 <script>
 const params = new URLSearchParams(window.location.search);
 const signupToken = params.get("token") || "";
@@ -137,6 +162,8 @@ document.getElementById("signup-form").addEventListener("submit", async function
 });
 
 loadPending();
+</script>
+<script src="/auth-presentation.js?v=1" defer>
 </script>
 </body>
 </html>

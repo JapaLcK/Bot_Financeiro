@@ -253,15 +253,14 @@ def test_pagina_reset_nao_promete_redefinicao():
 
 
 def test_pagina_login_nao_promete_redefinicao():
-    """A primeira coisa que o usuário só-Google lê ao clicar "Esqueci minha senha"
-    é o toast de `login.html`, ANTES de qualquer resposta do servidor. Ele não pode
-    saber se a conta tem senha (seria enumeração), então tem de ser genérico.
-
-    Mira o corpo de `doForgot` — as mensagens desse fluxo — e não o arquivo inteiro."""
-    resp = TestClient(dashboard.app).get("/login")
+    """O link de login abre a recuperação real, que também atende contas só-Google."""
+    client = TestClient(dashboard.app)
+    login = client.get("/login")
+    assert 'href="/recuperar-senha"' in login.text
+    resp = client.get("/recuperar-senha")
     assert resp.status_code == 200
-
     corpo = re.search(r"async function doForgot\(.*?\n  \}", resp.text, re.S)
-    assert corpo, "doForgot não encontrado — o teste deixou de medir o toast"
-    assert "err('login-error'" in corpo.group(0)  # o toast está mesmo dentro do trecho
+    assert corpo, "doForgot não encontrado — o teste deixou de medir a solicitação"
+    assert "/auth/forgot-password" in corpo.group(0)
     assert "redefin" not in corpo.group(0).lower(), corpo.group(0)
+    assert "Se houver uma conta associada" in resp.text
