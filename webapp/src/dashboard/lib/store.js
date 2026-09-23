@@ -16,7 +16,10 @@ export const get = () => state;
 
 /** @param {Partial<import("./types").DashState>} patch */
 export function set(patch) {
-  state = { ...state, ...patch };
+  const next = { ...state, ...patch };
+  // O dia filtrado é uma data do mês anterior: no mês novo ele esvaziaria a lista.
+  if (next.month !== state.month) next.filter = { ...next.filter, day: null };
+  state = next;
   for (const fn of listeners) fn();
 }
 
