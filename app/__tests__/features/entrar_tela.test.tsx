@@ -100,6 +100,45 @@ describe("(auth)/entrar — tela real", () => {
     expect(router.canGoBack()).toBe(true);
   });
 
+  it("código errado e depois o certo autentica sem pedir a senha de novo (400 mfa_code_invalid mantém o desafio)", async () => {
+    rotear({
+      "/auth/login": () => resposta(200, MFA_ANA),
+      "/auth/mfa/verify-login": (o) =>
+        (JSON.parse(String(o.body)) as { code: string }).code === "123456"
+          ? resposta(200, credencialDe("ana@x.com"))
+          : resposta(400, { detail: "Código inválido.", code: "mfa_code_invalid" }),
+    });
+    renderRouter("./app", { initialUrl: "/entrar" });
+    await waitFor(() => expect(screen).toHavePathname("/entrar"));
+
+    fireEvent.changeText(screen.getByLabelText("E-mail"), "ana@x.com");
+    fireEvent.changeText(screen.getByLabelText("Senha"), "s3nha");
+    await act(async () => {
+      fireEvent.press(screen.getByRole("button", { name: "Entrar" }));
+      await respirar();
+    });
+    await waitFor(() => screen.getByLabelText("Código de 6 dígitos"));
+
+    await act(async () => {
+      fireEvent.changeText(screen.getByLabelText("Código de 6 dígitos"), "000000");
+      await respirar();
+    });
+    // Regex: com erro o rótulo vira "<rótulo>, erro: <aviso>" (Input.tsx).
+    expect(screen.getByLabelText(/^Código de 6 dígitos/)).toBeTruthy();
+    expect(screen.queryByLabelText(/^Senha/)).toBeNull();
+    expect(screen.getByText("Código inválido.")).toBeTruthy();
+
+    await act(async () => {
+      fireEvent.changeText(screen.getByLabelText(/^Código de 6 dígitos/), "123456");
+      await respirar();
+    });
+
+    await waitFor(() => expect(screen.getByText(/Olá, Ana/)).toBeTruthy());
+    expect(chamadas().filter((c) => c.caminho === "/auth/login")).toHaveLength(1);
+    const verifies = chamadas().filter((c) => c.caminho === "/auth/mfa/verify-login");
+    expect(verifies.map((c) => c.corpo.challenge)).toEqual(["ch-1", "ch-1"]);
+  });
+
   it("I-A — verify em voo + Voltar (mesmo lote) + login de OUTRA conta: a fila libera e a conta nova autentica, sem busy pendurado", async () => {
     const portao = segurar();
     rotear({
