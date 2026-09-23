@@ -84,7 +84,9 @@ _FALLBACK_OI = [
 ]
 
 _FALLBACK_OLA = [
-    "😊 Olá! Bem-vindo! Posso te ajudar com gastos, saldo, cartões e muito mais!\nPor onde começamos?",
+    # Sem "Posso te ajudar com": é marcador do help genérico no `handle_incoming`,
+    # e a saudação ia parar na IA (tests/test_saudacao_nao_cai_na_ia.py).
+    "😊 Olá! Bem-vindo! Te ajudo com gastos, saldo, cartões e muito mais!\nPor onde começamos?",
     "🐷 Olá! Sou o Piggy — aqui pra facilitar sua vida financeira!\nO que você precisa?",
     "👋 Olá! Que bom ter você aqui. Me conta, o que posso fazer por você hoje?",
     "🌟 Olá! Pronto pra colocar as finanças em ordem?\nDigite *ajuda* pra ver tudo que posso fazer.",
