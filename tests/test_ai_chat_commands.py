@@ -147,7 +147,7 @@ def test_pro_msg_complexa_sem_prefix_tambem_retorna_none(patches):
     # pra IA acontece no fallback de baixa confiança em handle_incoming, não
     # neste gate.
     patches["is_pro"] = True
-    out = mod.handle_ai_chat_command(42, "quanto gastei em alimentação esse mês?", platform="discord")
+    out = mod.handle_ai_chat_command(42, "quanto gastei em alimentação esse mês?", platform="whatsapp")
     assert out is None
     assert patches["ai_called_with"] is None
 
