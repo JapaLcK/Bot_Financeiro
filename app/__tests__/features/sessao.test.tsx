@@ -213,3 +213,66 @@ describe("(app)/index.tsx — SessaoExpirada desloga, RenovacaoIndisponivel não
     expect(getByText("Tentar de novo")).toBeTruthy();
   });
 });
+
+describe("(app)/index.tsx — Sair espera a revogação no servidor (#458)", () => {
+  it("Sair em voo: o botão fica em carregando e a tela continua até a revogação responder", async () => {
+    await guardarCredenciais(S);
+    const portao = segurar();
+    rotear({
+      "/auth/logout": async () => {
+        await portao.promessa;
+        return resposta(200, {});
+      },
+    });
+    const { getByRole, getByText, aplicados } = montar(true);
+    await act(respirar);
+    expect(getByText("Olá, S")).toBeTruthy();
+
+    fireEvent.press(getByRole("button", { name: "Sair" }));
+    await act(respirar);
+
+    expect(aplicados.at(-1)).toEqual({ fase: "autenticado" });
+    expect(getByRole("button", { name: "Sair" }).props.accessibilityState).toMatchObject({ busy: true });
+    await expect(lerCredenciais()).resolves.toBeNull();
+
+    portao.soltar();
+    await act(respirar);
+    expect(aplicados.at(-1)).toEqual({ fase: "anonimo" });
+  });
+
+  it("a sessão expira durante a saída: não vai para Entrar com 'sessão expirou' e termina anônima sem aviso", async () => {
+    await guardarCredenciais({ access: "vencido", refresh: "rt_x" });
+    const chegouAoRefresh = segurar();
+    const portaoRefresh = segurar();
+    const portaoLogout = segurar();
+    rotear({
+      "/auth/me": () => resposta(401, { detail: "expirado" }),
+      "/auth/refresh": async () => {
+        chegouAoRefresh.soltar();
+        await portaoRefresh.promessa;
+        return resposta(401, { detail: "invalid_refresh_token" });
+      },
+      "/auth/logout": async () => {
+        await portaoLogout.promessa;
+        return resposta(200, {});
+      },
+    });
+    const { getByRole, aplicados } = montar(true);
+    await act(() => chegouAoRefresh.promessa);
+
+    fireEvent.press(getByRole("button", { name: "Sair" }));
+    await act(respirar);
+    portaoRefresh.soltar();
+    await act(respirar);
+    await act(respirar);
+
+    // O `SessaoExpirada` do `perfil()` é efeito da própria saída: nada de
+    // Entrar com aviso de sessão expirada enquanto a revogação está no ar.
+    expect(aplicados.filter((e) => e.fase === "anonimo" && e.aviso)).toEqual([]);
+    expect(aplicados.at(-1)).toEqual({ fase: "autenticado" });
+
+    portaoLogout.soltar();
+    await act(respirar);
+    expect(aplicados.at(-1)).toEqual({ fase: "anonimo" });
+  });
+});
