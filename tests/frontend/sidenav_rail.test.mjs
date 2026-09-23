@@ -23,6 +23,19 @@ async function openPage(path, options = {}) {
   return { page, context };
 }
 
+// Entre as transições do menu, largura (sidenav-rail.css:24, .22s), opacidade dos
+// rótulos (:70, .12s) e cores do item (`all .18s`, dashboard.css:214 e home.html:98)
+// são SEPARADAS: um hover interrompido reverte a opacidade depois da largura, e a
+// largura já era 68 com o `.sn-label` em 0,09–0,16 (medido em 2026-09-23). Espera a
+// largura E nenhuma transição no menu; quem decide o estilo continua sendo o assert
+// seguinte. O giro do `.sn-caret` (dashboard.css:260, home.html:109) também está no
+// subtree, mas só dispara ao clicar num grupo, e nenhum caso que espera aqui clica.
+const menuAssentado = (page, largura) => page.waitForFunction(w => {
+  const menu = document.querySelector("#sidenav");
+  return !menu.inert && Math.round(menu.getBoundingClientRect().width) === w
+    && menu.getAnimations({ subtree: true }).length === 0;
+}, largura);
+
 for (const path of ["dashboard.html", "home.html"]) {
   test(`${path}: barra de ícones abre sobre o conteúdo e fecha ao sair`, async () => {
     const { page, context } = await openPage(path, { viewport: { width: 1440, height: 900 } });
@@ -32,24 +45,21 @@ for (const path of ["dashboard.html", "home.html"]) {
       const label = nav.locator('.sidenav-item[href="/home"] .sn-label');
       // O ponteiro inicial pode estar sobre a barra e iniciar a expansão.
       await page.mouse.move(900, 500);
-      await page.waitForFunction(() => {
-        const menu = document.querySelector("#sidenav");
-        return !menu.inert && Math.round(menu.getBoundingClientRect().width) === 68;
-      });
+      await menuAssentado(page, 68);
       assert.equal(Math.round((await nav.boundingBox()).width), 68);
       assert.equal(await label.evaluate(el => getComputedStyle(el).opacity), "0");
       assert.equal(await page.locator("body").evaluate(el => getComputedStyle(el).paddingLeft), "68px");
 
       await icon.hover();
-      await page.waitForFunction(() => Math.round(document.querySelector("#sidenav").getBoundingClientRect().width) === 260);
+      await menuAssentado(page, 260);
       assert.equal(await label.evaluate(el => getComputedStyle(el).opacity), "1");
       await page.mouse.move(900, 500);
-      await page.waitForFunction(() => Math.round(document.querySelector("#sidenav").getBoundingClientRect().width) === 68);
+      await menuAssentado(page, 68);
       assert.equal(await page.locator("#sidenav-backdrop").evaluate(el => getComputedStyle(el).display), "none");
       assert.equal(await page.locator(".sidenav-toggle").evaluate(el => getComputedStyle(el).display), "none");
 
       await page.keyboard.press("Tab");
-      await page.waitForFunction(() => Math.round(document.querySelector("#sidenav").getBoundingClientRect().width) === 260);
+      await menuAssentado(page, 260);
       assert.equal(await page.evaluate(() => document.activeElement?.getAttribute("href")), "/home");
     } finally { await context.close(); }
   });
@@ -66,14 +76,14 @@ for (const path of ["dashboard.html", "home.html"]) {
         icon: getComputedStyle(el.querySelector(".sn-icon")).backgroundImage,
       }));
       await page.mouse.move(900, 500);
-      await page.waitForFunction(() => Math.round(document.querySelector("#sidenav").getBoundingClientRect().width) === 68);
+      await menuAssentado(page, 68);
       assert.equal((await visual()).background, "none");
       assert.match((await visual()).border, /,\s*0\)$/);
       assert.equal((await visual()).shadow, "none");
       assert.equal((await visual()).icon, "none");
 
       await active.locator(".sn-icon").hover();
-      await page.waitForFunction(() => Math.round(document.querySelector("#sidenav").getBoundingClientRect().width) === 260);
+      await menuAssentado(page, 260);
       assert.match((await visual()).background, /gradient/);
       assert.match((await visual()).icon, /gradient/);
 
