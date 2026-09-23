@@ -784,6 +784,20 @@ def init_db():
         """
         alter table pockets add column if not exists of_last_seen_profit numeric
         """,
+        # LÁPIDE do vínculo perdido por AUSÊNCIA da posição. Quando a reconciliação
+        # remove uma posição que o banco deixou de mandar, a meta vinculada volta ao
+        # saldo próprio dela (sem espelho, sem fantasma) — e a posição, ao voltar,
+        # volta com id NOVO, porque a linha foi apagada. Guardar a CHAVE NATURAL
+        # (conexão + id do investimento no provedor) é o que permite religar a mesma
+        # meta em vez de o auto-import criar uma caixinha duplicada que o usuário não
+        # consegue desfazer. `null` é o estado de todo mundo hoje: sem backfill.
+        """
+        alter table pockets add column if not exists of_tombstone_connection_id bigint
+          references open_finance_connections(id) on delete set null
+        """,
+        """
+        alter table pockets add column if not exists of_tombstone_provider_id text
+        """,
         # source='open_finance' marca caixinhas AUTO-CRIADAS a partir do banco (via
         # sync do Open Finance): read-only, saldo espelhado, sem juros interno. As
         # criadas pelo usuário ficam 'manual' (mesmo quando vinculadas a uma caixinha OF).

@@ -2092,3 +2092,4 @@ def test_sync_com_investimentos_stale_nao_remove_nada(user_id, monkeypatch, relo
     assert res["investments_removed"] == 0
     assert _espelho_investimentos(conexao["id"]) == {"cx-a", "cx-b"}
     assert {"Caixinha Viagem", "Caixinha Carro"} <= _nomes_de_caixinha(user_id)
+

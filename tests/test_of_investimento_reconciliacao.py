@@ -10,6 +10,12 @@ Irmão direto de `tests/test_of_caixinha_dinheiro.py`, de onde vêm os helpers e
 os cenários — aqui a mesma política, disparada pela RECONCILIAÇÃO em vez do
 disconnect. Postgres real, como os irmãos.
 
+O que acontece quando a posição VOLTA (a lápide, a religação da meta manual, a
+escotilha do bind) mora no outro irmão, `tests/test_of_lapide_religacao.py`, que
+reaproveita os helpers daqui. A divisão é o teto de 350 linhas por arquivo
+(`tests/test_max_lines_python.py`), e o corte é por assunto: aqui o que SAI, lá o
+que VOLTA.
+
 CONTROLE NEGATIVO (medido, ver relato): tirar o bloco `if leitura_completa:` de
 `save_open_finance_investments` deixa B1, B2, B5, B6 e B7 vermelhos; fixar o
 gate em `True` (ignorar o argumento) deixa B4 vermelho; tirar `i.currency,

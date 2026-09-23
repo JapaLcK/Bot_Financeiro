@@ -382,7 +382,16 @@ def _sync_pluggy_item_confirmado(provider_item_id: str, connection: dict, api_ke
         # Caixinhas do OF viram caixinhas do Pig automaticamente (auto-create + dedup) e o
         # saldo do banco é espelhado nas vinculadas — mas SÓ pra planos pagos (Essencial+).
         # No Grátis (pós-trial) o OF nem sincroniza (conexão PAUSED barra acima); este gate é
-        # a segunda trava: se o usuário caiu de plano, as caixinhas congelam (não atualizam).
+        # a segunda trava: se o usuário caiu de plano, o que congela é ESTE passo —
+        # espelhar o saldo do banco nas vinculadas e criar caixinha nova.
+        #
+        # O que o gate NÃO alcança, de propósito, porque roda em
+        # `save_open_finance_investments` (acima, em qualquer plano): a REMOÇÃO por
+        # integridade da posição que sumiu do banco, e a RELIGAÇÃO da meta quando ela
+        # volta. Congelar posição ausente seria manter saldo bancário que não existe
+        # mais — dinheiro fantasma, que o "Sacar" transformaria em saldo próprio. E
+        # não religar deixaria a meta do usuário presa atrás de uma caixinha
+        # automática que ele não consegue desfazer. Integridade não é feature de plano.
         # Renda variável (ações/FIIs) é lida à parte no snapshot, também gated. Fail-soft.
         caixinha_result = {"caixinhas_created": 0, "caixinhas_mirrored": 0,
                            "caixinhas_sem_vaga": 0}
