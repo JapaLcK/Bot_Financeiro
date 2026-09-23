@@ -167,19 +167,30 @@ export async function temSessao(): Promise<boolean> {
 }
 
 /**
- * Sair: apaga o que está no aparelho e dispara o aviso ao servidor sem
- * esperar por ele.
+ * Sair: apaga o que está no aparelho e SÓ ENTÃO avisa o servidor, esperando a
+ * resposta dele por no máximo `TEMPO_LIMITE_AUTH_MS`.
  *
- * A limpeza vem PRIMEIRO e não depende da rede: um logout feito no metrô, com
- * o fetch do Android sem timeout, podia ficar pendurado para sempre — e com a
- * limpeza no `finally` de depois da resposta, a credencial continuava no
- * keychain enquanto isso, e o próximo a abrir o app entraria na conta de quem
- * achou que tinha saído.
+ * A limpeza vem PRIMEIRO e não depende da rede (#433): um logout feito no
+ * metrô, com o fetch do Android sem timeout, podia ficar pendurado para sempre
+ * — e com a limpeza depois da resposta, a credencial continuava no keychain
+ * enquanto isso, e o próximo a abrir o app entraria na conta de quem achou que
+ * tinha saído.
  *
- * A revogação é disparada e esquecida (`void ... .catch`): esperar a resposta
- * não dava durabilidade nenhuma (ela já era engolida antes) e tinha custo
- * concreto — a tela ficaria em "carregando" até a rede resolver, com o cofre
- * já vazio.
+ * A revogação é esperada (#458), com tempo limite: disparada e esquecida, a
+ * tela ia para Entrar na hora, e o app podia ir para o fundo ou ser fechado
+ * com a requisição ainda no ar — a sessão ficava viva no servidor sem ninguém
+ * saber. Esperar mantém a tela em
+ * "carregando" até a resposta ou o tempo limite, com o cofre já vazio. A falha
+ * da revogação (401/403, 5xx/429, rede fora, tempo limite) é engolida: não há
+ * nada que a pessoa possa fazer com ela, e o aparelho já saiu.
+ *
+ * Resíduo aceito (decisão do dono): se o app morre ou é suspenso durante a
+ * espera, ou se o servidor devolve 5xx/429 ou a rede está fora, a sessão pode
+ * continuar viva no servidor até o refresh expirar (14 dias). Não há
+ * retentativa. O inverso também: se o cofre recusa apagar, o `finally` pede a
+ * revogação mesmo assim, e a credencial, morta se ela vingar, fica no cofre.
+ * O provider segue autenticado, com o erro na tela; tocar Sair de novo refaz
+ * a saída.
  *
  * A requisição fala pela sessão que INICIOU a saída, e a limpeza identifica
  * essa sessão pelo `jti`, não pelo refresh token. Os dois detalhes vêm do mesmo
@@ -213,13 +224,12 @@ export async function sair(): Promise<void> {
       _esquecerRotacoes();
     }
   } finally {
-    // Sem `await`: a resposta não muda nada por aqui (a rejeição é engolida) e
-    // esperá-la só atrasaria a tela, com o cofre já limpo. O `.catch` evita a
-    // rejeição não tratada — o `fetch` em si já saiu de forma síncrona, dentro
-    // de `enviar`, então os testes que contam chamadas logo após `await
-    // sair()` continuam vendo o logout.
-    void chamar("/auth/logout", perfilSchema.partial(), {
+    // Esperada, mas com tempo limite: um `fetch` pendurado não prende a tela
+    // além de `TEMPO_LIMITE_AUTH_MS`. O `.catch` engole a falha da revogação —
+    // o cofre já está limpo, e `sair()` só rejeita por falha do cofre.
+    await chamar("/auth/logout", perfilSchema.partial(), {
       metodo: "POST",
+      sinal: comLimite(),
       // O REFRESH token como credencial, não o access. O servidor revoga a
       // sessão por qualquer um dos dois, mas o access pode estar expirado — e é
       // o caso mais comum de todos, um app parado por mais de quinze minutos.
