@@ -116,7 +116,7 @@ for (const outcome of ["json", "error"]) {
     await page.evaluate(outcome => {
       USER_GATES = gates("pro");
       const realFetch = window.fetch;
-      window.fetch = async url => {
+      window.fetch = async () => {
         window.fetch = realFetch;
         const stale = payload();
         if (outcome === "error") return new Promise((_, reject) => { window.releaseOld = () => reject(new Error("antigo")); });
