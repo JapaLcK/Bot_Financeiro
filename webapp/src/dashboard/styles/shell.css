@@ -129,7 +129,7 @@
   .topbar .btn-primary i { font-size: 18px; }
   .cmd-trigger { width: 40px; padding: 0; justify-content: center; }
   .month-switch, .topbar-spacer { flex: 1; }
-  .topbar-spacer { display: none; }
+  .month-switch ~ .topbar-spacer { display: none; } /* sem o seletor (NO_MONTH), o espaçador empurra os botões à direita */
   .month-title { min-width: 0; flex: 1; }
   .page { padding-bottom: calc(96px + env(safe-area-inset-bottom)); }
 

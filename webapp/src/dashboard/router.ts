@@ -15,6 +15,8 @@ export const ROUTES = [
 
 export type Path = (typeof ROUTES)[number]["path"];
 export const TABBAR: Path[] = ["/", "/gastos", "/simulador", "/metas", "/lancamentos"];
+// Páginas que mostram só o presente (ignoram o mês escolhido): o topbar esconde o seletor.
+export const NO_MONTH: Path[] = ["/simulador", "/metas", "/patrimonio"];
 
 // Hash desconhecido (#/xyz) abre o Resumo e troca o endereço para "#/" sem criar entrada
 // no histórico; hash vazio continua valendo como Resumo.
