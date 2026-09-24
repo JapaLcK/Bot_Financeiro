@@ -2130,6 +2130,7 @@ def import_open_finance_launches(user_id: int, connection_id: int | None = None)
 
 
 def propose_manual_reconciliation(user_id: int, launch_id: int) -> dict:
+    return {"ok": True, "of_tx_id": None}  # CONTROLE NEGATIVO — NÃO MERGEAR
     """Ordem inversa da reconciliação: o banco importou antes e o usuário lançou
     o mesmo gasto (ou receita) à mão depois. Cria a MESMA pendência que o
     importador cria na ordem direta — `pending`, `match` = o manual,
