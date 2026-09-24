@@ -971,7 +971,10 @@ async def _adota_item_orfao(item_id: str, last_event: str | None = None) -> int 
         janela sai pela cascata do `delete from users` sem passar pelo `RETURNING`
         que alimenta o delete remoto — `is_account_scheduled_for_deletion` recusa
         ali (log `exclusao_agendada`), alinhando esta porta com o 403 que o
-        `POST /pluggy-item` já dava;
+        `POST /pluggy-item` já dava, E apaga o item na Pluggy
+        (`delete_pluggy_items_best_effort`, item explícito): recusar sem apagar
+        deixava o item fora de TODA enumeração nossa e vivo lá depois da
+        exclusão, que é o desfecho que esta PR remove;
       • o rastro (`register_item`) vai ANTES da conexão, e a ordem inversa é pior:
         ela deixava conexão commitada com registry VAZIO — item adotado sem
         nenhum rastro, e o rastro é a única enumeração que existe (`GET /items`
@@ -1147,10 +1150,38 @@ async def _adota_item_orfao(item_id: str, last_event: str | None = None) -> int 
         if await asyncio.to_thread(is_account_scheduled_for_deletion, dono):
             await log_system_event(
                 "warning", "of_webhook_adopt_skipped",
-                "Item órfão de conta com exclusão agendada",
+                "Item órfão de conta com exclusão agendada: apagando na Pluggy",
                 source="open_finance", user_id=dono,
                 details={"item_id": item_id, "motivo": "exclusao_agendada"},
             )
+            # Recusar e ir embora deixava o item VIVO e pago na Pluggy, com os
+            # dados bancários do titular, depois da exclusão LGPD: sem conexão em
+            # `open_finance_connections`, ele não aparece em `list_pluggy_item_ids`
+            # nem no `RETURNING` da exclusão — nada mais o alcança, e
+            # `_adota_item_orfao` só roda em `item/created`, que não repete. É o
+            # MESMO desfecho que esta PR existe para remover, então quem recusa
+            # apaga. Ação IRREVERSÍVEL disparada por evento externo, logo:
+            # • gatilho estreito — só ESTE ramo (o predicado de exclusão
+            #   agendada/em processamento). O teto do plano
+            #   (`_enforce_bank_limit`, 402), a posse e o usuário inexistente
+            #   recusam sem apagar nada, e esta guarda vem ANTES de todos eles de
+            #   propósito: se viesse depois, o 402 roubaria o caminho e o item
+            #   sumiria do ramo errado — o controle de gatilho é
+            #   `test_t18c_recusa_por_outro_motivo_nao_apaga_o_item_na_pluggy`
+            #   (tests/test_account_deletion_adocao_corrida.py);
+            # • `item_ids` EXPLÍCITO — a enumeração (`item_ids=None`) apagaria os
+            #   outros items da conta, que não são deste evento e saem pelo
+            #   pipeline da exclusão, com rastro próprio;
+            # • best-effort — falha de provedor fica no log do helper
+            #   (`pluggy_item_delete_failed`/`pluggy_disconnect_auth_failed`) e o
+            #   webhook segue 200; a Pluggy fora do ar nesse instante devolve o
+            #   estado ANTERIOR a este commit (item órfão e pago lá), não um 5xx;
+            # • `log_user_id` fica no default `True`: aqui a conta AINDA existe,
+            #   então o dono vai na COLUNA (o mesmo que o skip acima), e a cascata
+            #   de `system_event_logs` o leva no dia da exclusão.
+            # Depois da decisão e SEM gravar conexão nem rastro de adoção: o item
+            # não é nosso para adotar, é nosso para remover.
+            await asyncio.to_thread(delete_pluggy_items_best_effort, dono, [item_id])
             return None
         await _enforce_bank_limit(dono, item_id)
         # O rastro DUPLICA de propósito quando o navegador volta depois (o POST

@@ -18,7 +18,9 @@ LGPD. Porta única em produção: o webhook `item/created` → `_adota_item_orfa
 (o `POST /pluggy-item` já morria em 403).
 
 O conserto tem duas metades, e cada teste aqui mede UMA:
-  • T18 = a PORTA: a adoção por webhook recusa conta com exclusão agendada;
+  • T18 = a PORTA: a adoção por webhook recusa conta com exclusão agendada — e
+    APAGA o item na Pluggy ao recusar, porque item recusado nunca vira conexão e
+    some de toda enumeração nossa (decisão do dono, 24/09);
   • T17 = o CINTO: a exclusão reconsulta `open_finance_connections` antes do
     `delete from users` e soma ao `pluggy_items_swept`, então o 2º passe deleta o
     item mesmo que a conexão tenha entrado por outro caminho.
@@ -38,6 +40,13 @@ CONTROLES DO GRUPO (CLAUDE.md §3), cada mutação injetada em caso VERDE:
     `save_pluggy_open_finance_item`, a MESMA escrita da adoção, sem passar pelo
     webhook), e com só o CINTO desligado T18 fica VERDE. Com as DUAS desligadas:
     T17 e T18 vermelhos, T18b verde;
+  • negativo — apagar o `await asyncio.to_thread(delete_pluggy_items_best_effort,
+    dono, [item_id])` dessa MESMA guarda: T18 vermelho (a recusa volta a deixar o
+    item vivo e pago na Pluggy), T18b e T18c verdes;
+  • GATILHO — `test_t18c_recusa_por_outro_motivo_nao_apaga_o_item_na_pluggy` é o
+    controle da ação IRREVERSÍVEL: alargar o gatilho (apagar em qualquer recusa,
+    p.ex. mover o delete para o `except` genérico) deixa T18 verde e T18c
+    VERMELHO. Sem ele, o grupo aprovaria um delete que vaza para o teto de plano;
   • positivo — `test_t18b_conta_sem_exclusao_agendada_continua_sendo_adotada`: sem
     ele o grupo passaria num código que recusa TODA adoção. O positivo canônico da
     adoção mora em
@@ -70,9 +79,9 @@ CONTROLES de T20 (mesma regra, cada mutação injetada em caso VERDE):
     vermelho em `parada_em == 'commitou'` — a escrita ATRAVESSA a janela, commita
     e sai pela cascata sem entrar no `pluggy_items_swept`. T17 fica VERDE nas
     duas mutações, que é a prova de que T20 mede o que ele não mede;
-  • positivo — T18b continua provando que a adoção legítima grava; e T20 exige o
-    item ENUMERADO deletado na Pluggy, então uma exclusão que recusasse tudo não
-    passa.
+  • positivo — T18b continua provando que a adoção legítima grava (e que ela NÃO
+    apaga nada na Pluggy); e T20 exige o item ENUMERADO deletado na Pluggy, então
+    uma exclusão que recusasse tudo não passa.
 
 CLASSE CEGA declarada: não há Pluggy de verdade em nenhum caso (o
 `delete_pluggy_item` é dublê).
@@ -136,17 +145,20 @@ def _conexoes_do_item(item_id: str) -> list[dict]:
     return linhas
 
 
-def _skips(item_id: str) -> list[dict]:
+def _skips(item_id: str, event_type: str = "of_webhook_adopt_skipped") -> list[dict]:
+    """`event_type` existe pelo 2º chamador (T18d lê `pluggy_item_delete_failed`,
+    que o `delete_pluggy_items_best_effort` escreve) — estender serve os dois
+    chamadores, copiar a query seria a mesma regra em dois lugares (§0.1)."""
     with get_conn() as conn:
         with conn.cursor() as cur:
             cur.execute(
                 """
                 select user_id, details from system_event_logs
-                where event_type = 'of_webhook_adopt_skipped'
+                where event_type = %s
                   and details::text like %s
                 order by id
                 """,
-                (f"%{item_id}%",),
+                (event_type, f"%{item_id}%"),
             )
             linhas = [dict(r) for r in cur.fetchall()]
         conn.commit()
@@ -414,6 +426,7 @@ def test_t18_webhook_nao_adota_item_de_conta_com_exclusao_agendada(user_id, monk
     # o caso ficaria VERDE sem a guarda nenhuma, medindo o teto do plano.
     # Com plano que TEM vaga, quem recusa só pode ser a exclusão agendada.
     promote_to_pro(user_id)
+    deletados = _mocka_pluggy(monkeypatch)
     item_novo = f"{_item_de(user_id)}-t18-{estado}"
     try:
         r = _webhook_de_item_criado(monkeypatch, user_id, item_novo)
@@ -430,6 +443,15 @@ def test_t18_webhook_nao_adota_item_de_conta_com_exclusao_agendada(user_id, monk
             "o dono tinha que ir na COLUNA (a conta existe e a cascata a leva)"
         assert "user_id" not in skips[0]["details"], \
             "uid em `details` sobrevive à exclusão: a cascata não alcança o JSON"
+        assert deletados == [item_novo], (
+            "recusar sem apagar deixa o item VIVO e pago na Pluggy: ele nunca vira "
+            "linha em `open_finance_connections`, então nem `list_pluggy_item_ids` "
+            "nem o `RETURNING` da exclusão o alcançam, e `_adota_item_orfao` só roda "
+            f"em `item/created`, que não repete. Deletados: {deletados}"
+        )
+        # A conta tem ZERO conexões (`_semeia(item=None)`), então a ENUMERAÇÃO
+        # (`item_ids=None`) apagaria NADA: o id acima só aparece porque a chamada
+        # passa o item EXPLÍCITO. Este assert é o que prende esse argumento.
     finally:
         _limpa_item(item_novo)
 
@@ -447,6 +469,7 @@ def test_t18b_conta_sem_exclusao_agendada_continua_sendo_adotada(user_id, monkey
     # ausência de plano, não a guarda. Mesma promoção do positivo canônico
     # (`tests/test_of_webhook_adopt_guards.py`).
     promote_to_pro(user_id)
+    deletados = _mocka_pluggy(monkeypatch)
     item_novo = f"{_item_de(user_id)}-t18b"
     try:
         r = _webhook_de_item_criado(monkeypatch, user_id, item_novo)
@@ -456,5 +479,66 @@ def test_t18b_conta_sem_exclusao_agendada_continua_sendo_adotada(user_id, monkey
             "a adoção legítima parou de funcionar"
         assert _skips(item_novo) == [], \
             f"a adoção legítima gravou skip: {_skips(item_novo)}"
+        assert deletados == [], (
+            "a adoção legítima apagou o item na Pluggy — o delete é IRREVERSÍVEL e "
+            f"só pode sair do ramo da exclusão agendada: {deletados}"
+        )
+    finally:
+        _limpa_item(item_novo)
+
+
+def test_t18c_recusa_por_outro_motivo_nao_apaga_o_item_na_pluggy(user_id, monkeypatch):
+    """CONTROLE DE GATILHO: recusa que NÃO é exclusão agendada não apaga nada.
+
+    Conta viva, plano Grátis (`of_banks_max=0` com `PLANS_V2_ENABLED=1`, o default
+    da suíte): quem recusa aqui é o `_enforce_bank_limit`, com 402. O desfecho
+    correto é o de sempre — 200, sem conexão, rastro de skip — e ZERO delete: o
+    usuário continua existindo, o item é dele e a vaga volta quando ele assinar.
+
+    Sem este caso, alargar o gatilho (apagar em QUALQUER recusa) ficaria verde, e
+    é o vazamento mais caro possível de uma ação irreversível.
+    """
+    _semeia(user_id, agendada=False, item=None)  # conta VIVA, sem exclusão nenhuma
+    deletados = _mocka_pluggy(monkeypatch)
+    item_novo = f"{_item_de(user_id)}-t18c"
+    try:
+        r = _webhook_de_item_criado(monkeypatch, user_id, item_novo)
+
+        assert r.status_code == 200, r.text
+        assert _conexoes_do_item(item_novo) == [], "o Grátis adotou com `of_banks_max=0`"
+        skips = _skips(item_novo)
+        assert [x["details"].get("motivo") for x in skips] == ["HTTPException"], (
+            "a recusa tinha que vir do teto do plano (402), não da exclusão "
+            f"agendada — o caso não estaria medindo o gatilho: {skips}"
+        )
+        assert deletados == [], (
+            "recusa por TETO DE PLANO apagou o item do usuário na Pluggy: o delete "
+            f"vazou para fora do ramo da exclusão agendada: {deletados}"
+        )
+    finally:
+        _limpa_item(item_novo)
+
+
+@pytest.mark.parametrize("erro", [RuntimeError("Pluggy 503"), ValueError("item sumiu")])
+def test_t18d_falha_do_provedor_no_delete_nao_derruba_o_webhook(user_id, monkeypatch, erro):
+    """Best-effort: a Pluggy fora do ar no instante da recusa NÃO vira 5xx (a
+    Pluggy retentaria em laço) e deixa rastro. O item fica órfão lá — o MESMO
+    estado de antes deste conserto, nunca pior.
+    """
+    from conftest import promote_to_pro
+
+    _semeia(user_id, item=None)
+    promote_to_pro(user_id)  # como em T18: sem plano, quem recusaria era o 402
+    deletados = _mocka_pluggy(monkeypatch, erro=erro)
+    item_novo = f"{_item_de(user_id)}-t18d"
+    try:
+        r = _webhook_de_item_criado(monkeypatch, user_id, item_novo)
+
+        assert r.status_code == 200, r.text
+        assert _conexoes_do_item(item_novo) == [], "recusou e mesmo assim adotou"
+        assert deletados == [item_novo], f"nem tentou apagar: {deletados}"
+        falhas = _skips(item_novo, "pluggy_item_delete_failed")
+        assert len(falhas) == 1, f"a falha do provedor ficou sem rastro nenhum: {falhas}"
+        assert str(erro) in falhas[0]["details"].get("error", ""), falhas[0]
     finally:
         _limpa_item(item_novo)
