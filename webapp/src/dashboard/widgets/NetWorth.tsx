@@ -64,6 +64,15 @@ export function NetWorth({ title = "Patrimônio" }: { title?: string }) {
             ))}
           </svg>
         )}
+        <div className="sr-only"><table>
+          <caption>Patrimônio por mês</caption>
+          <thead><tr><th scope="col">Mês</th>{PARTS.map((p) => <th key={p.key} scope="col">{p.label}</th>)}<th scope="col">Total</th></tr></thead>
+          <tbody>
+            {ROWS.map((r) => (
+              <tr key={monthYear(r.date)}><th scope="row">{monthYear(r.date)}</th>{PARTS.map((p) => <td key={p.key}>{money0(r[p.key])}</td>)}<td>{money(r.total)}</td></tr>
+            ))}
+          </tbody>
+        </table></div>
       </div>
     </Frame>
   );

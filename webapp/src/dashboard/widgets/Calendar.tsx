@@ -35,16 +35,19 @@ export function Calendar({ s }: { s: DashState }) {
       const future = i + 1 > last;
       const step = future || t === 0 ? 0 : Math.max(1, Math.ceil((t / max) * STEPS));
       const on = s.filter.day === key;
+      // Tooltip e nome acessível leem a mesma lista: teclado e leitor de tela não têm hover.
+      const rows = [...byDay[i]].sort((a, b) => (b.amount ?? 0) - (a.amount ?? 0)).slice(0, 3)
+        .map((l) => ({ label: l.label, value: money(l.amount ?? 0), color: catById(l.category)?.color }));
       const tip = (e: PointerEvent) => showTip(e.clientX, e.clientY, {
         title: longDate(date),
         value: future ? "ainda não aconteceu" : money(t),
-        rows: [...byDay[i]].sort((a, b) => (b.amount ?? 0) - (a.amount ?? 0)).slice(0, 3)
-          .map((l) => ({ label: l.label, value: money(l.amount ?? 0), color: catById(l.category)?.color })),
+        rows,
       });
+      const maiores = !future && t > 0 ? `. Maiores: ${rows.map((r) => `${r.label} ${r.value}`).join(", ")}` : "";
       return (
         <button key={key} type="button" className="cal-day" data-step={step} data-future={future || undefined}
           data-today={isCurrentMonth(s.month) && i + 1 === last ? "true" : undefined} aria-pressed={on} disabled={future}
-          aria-label={`${longDate(date)}: ${future ? "futuro" : money(t)}`}
+          aria-label={`${longDate(date)}: ${future ? "futuro" : money(t)}${maiores}`}
           onPointerMove={tip} onPointerLeave={hideTip}
           onClick={() => setFilter({ day: on ? null : key })}>
           <span>{i + 1}</span>

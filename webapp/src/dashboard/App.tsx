@@ -7,9 +7,9 @@ import { useDash } from "./useDash";
 import { Command } from "./parts/Command";
 import { Tip } from "./parts/Tip";
 import { PAGES } from "./pages";
-import { ROUTES, TABBAR, href, route, useRoute } from "./router";
+import { NO_MONTH, ROUTES, TABBAR, href, route, useRoute, type Path } from "./router";
 
-function Topbar({ s }: { s: DashState }) {
+function Topbar({ s, path }: { s: DashState; path: Path }) {
   const [stuck, setStuck] = useState(false);
   useEffect(() => {
     const on = () => setStuck(window.scrollY > 4);
@@ -19,11 +19,11 @@ function Topbar({ s }: { s: DashState }) {
   const i = MONTHS.indexOf(s.month);
   return (
     <header className="topbar" data-stuck={stuck}>
-      <div className="month-switch" role="group" aria-label="Mês exibido">
+      {!NO_MONTH.includes(path) && <div className="month-switch" role="group" aria-label="Mês exibido">
         <button className="icon-btn" type="button" aria-label="Mês anterior" disabled={i === 0} onClick={() => set({ month: MONTHS[i - 1] })}><i className="ph ph-arrow-left" aria-hidden="true" /></button>
         <p className="month-title" aria-live="polite">{monthTitle(s.month)}</p>
         <button className="icon-btn" type="button" aria-label="Próximo mês" disabled={i === MONTHS.length - 1} onClick={() => set({ month: MONTHS[i + 1] })}><i className="ph ph-arrow-right" aria-hidden="true" /></button>
-      </div>
+      </div>}
       <span className="tag-demo">Demonstração</span>
       <span className="topbar-spacer" />
       <button className="cmd-trigger" type="button" aria-label="Buscar ou ir para" aria-keyshortcuts="Meta+K Control+K /" onClick={() => window.dispatchEvent(new Event("dash:command"))}>
@@ -73,7 +73,7 @@ export function App() {
           </div>
         </nav>
         <div className="main-col">
-          <Topbar s={s} />
+          <Topbar s={s} path={path} />
           <main id="main" className="page" data-page={path}>
             <Page s={s} />
             <p className="foot">Protótipo com dados sintéticos. Nenhum valor aqui pertence a um usuário real.</p>
