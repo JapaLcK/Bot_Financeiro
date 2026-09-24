@@ -108,12 +108,12 @@ def get_recent_messages(user_id: int, limit: int = DEFAULT_CONTEXT_WINDOW) -> li
 
 
 def get_last_message(user_id: int) -> Optional[dict[str, Any]]:
-    """Última mensagem do histórico do user: `role`, `content` e `age` (timedelta
+    """Última mensagem do histórico do user: `id`, `role`, `content` e `age` (timedelta
     medido pelo relógio do banco, o mesmo que gravou `created_at`)."""
     with get_conn() as conn, conn.cursor() as cur:
         cur.execute(
             """
-            select role, content, now() - created_at as age
+            select id, role, content, now() - created_at as age
             from ai_messages
             where user_id = %s
             order by created_at desc, id desc

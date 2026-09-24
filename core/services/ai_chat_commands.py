@@ -80,8 +80,9 @@ def _strip_ai_prefix(text: str) -> str | None:
 _JANELA_DA_PERGUNTA = timedelta(minutes=10)
 
 
-def ia_acabou_de_perguntar(user_id: int) -> bool:
-    """A última mensagem do histórico é uma pergunta da IA, feita há pouco.
+def pergunta_aberta_da_ia(user_id: int) -> int | None:
+    """Id da última mensagem do histórico, se ela é uma pergunta da IA feita há
+    pouco; senão None.
 
     A IA oferece coisas sem guardar pendência ("Quer que eu mostre suas maiores
     despesas?"), e o "sim" classifica como `confirm.yes` com confiança alta —
@@ -89,12 +90,12 @@ def ia_acabou_de_perguntar(user_id: int) -> bool:
     entendi". Aqui o `handle_incoming` descobre que o "sim" é da IA.
     """
     last = db.ai_get_last_message(user_id)
-    return bool(
-        last
-        and last["role"] == "assistant"
-        and last["age"] < _JANELA_DA_PERGUNTA
-        and re.search(r"\?\W*$", last["content"] or "")
-    )
+    if (last
+            and last["role"] == "assistant"
+            and last["age"] < _JANELA_DA_PERGUNTA
+            and re.search(r"\?\W*$", last["content"] or "")):
+        return last["id"]
+    return None
 
 
 # `system` porque o widget do app (/ai/messages) não mostra essa role, e a IA
@@ -105,12 +106,14 @@ _PERGUNTA_ENCERRADA = (
 )
 
 
-def encerra_pergunta_da_ia(user_id: int) -> None:
-    """Um turno fora da IA (ex.: "saldo") encerra a pergunta dela: o `ai_messages`
-    só vê os turnos da IA, e sem isto um "sim" depois do "saldo" voltaria para
-    a oferta antiga."""
+def encerra_pergunta_da_ia(user_id: int, pergunta_id: int) -> None:
+    """Fim de um turno do `handle_incoming`: se a pergunta que estava aberta
+    continua sendo a última mensagem, a IA não atendeu este turno (ex.: "saldo",
+    "plano", um OFX) — então ela deixa de estar em aberto. O `ai_messages` só vê
+    os turnos da IA, e sem isto um "sim" depois voltaria para a oferta antiga."""
     try:
-        if ia_acabou_de_perguntar(user_id):
+        last = db.ai_get_last_message(user_id)
+        if last and last["id"] == pergunta_id:
             db.ai_append_message(user_id, "system", _PERGUNTA_ENCERRADA)
     except Exception as exc:
         logger.warning("encerra_pergunta_da_ia falhou pra user %s: %s", user_id, exc)

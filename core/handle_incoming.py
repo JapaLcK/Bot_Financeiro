@@ -144,8 +144,6 @@ def _process_audio_transaction(uid: int, transcription: str, msg: IncomingMessag
         external_id=msg.external_id,
         raw=msg.raw,
     )
-    from core.services.ai_chat_commands import encerra_pergunta_da_ia
-    encerra_pergunta_da_ia(uid)
     raw_response = route(intent_result, msg_from_audio)
     return format_for_platform(raw_response, platform)
 
@@ -718,6 +716,18 @@ def handle_incoming(msg: IncomingMessage, *,
     # linha. Ver a docstring do `route()`.
     platform = msg.platform
 
+    # Pergunta que a IA deixou em aberto antes deste turno. Um "sim" a ela vai
+    # para a IA (5b); qualquer turno que a IA não atender a encerra (`finally`).
+    from core.services.ai_chat_commands import (
+        encerra_pergunta_da_ia, pergunta_aberta_da_ia,
+    )
+    pergunta_uid = pergunta_ia = None
+    try:
+        pergunta_uid = _normalize_user_id(msg)
+        pergunta_ia = pergunta_aberta_da_ia(pergunta_uid)
+    except Exception as exc:
+        logger.warning("pergunta_aberta_da_ia falhou: %s", exc)
+
     try:
         # ------------------------------------------------------------------
         # 0. Paywall — sem assinatura ativa, o bot não processa nada
@@ -904,10 +914,11 @@ def handle_incoming(msg: IncomingMessage, *,
             _pend = db.get_pending_action(uid)
             if _pend and suprime_fallback_de_ia(_pend.get("action_type")):
                 has_resumable_pending = True
-            if (_pend is None
-                    and intent_result.intent in ("confirm.yes", "confirm.no")):
-                from core.services.ai_chat_commands import ia_acabou_de_perguntar
-                responde_a_ia = ia_acabou_de_perguntar(uid)
+            responde_a_ia = (
+                pergunta_ia is not None
+                and _pend is None
+                and intent_result.intent in ("confirm.yes", "confirm.no")
+            )
         except Exception:
             has_resumable_pending = False
 
@@ -938,8 +949,6 @@ def handle_incoming(msg: IncomingMessage, *,
         # ------------------------------------------------------------------
         # 6. Roteia → executa → obtém resposta bruta
         # ------------------------------------------------------------------
-        from core.services.ai_chat_commands import encerra_pergunta_da_ia
-        encerra_pergunta_da_ia(uid)
         raw_response = route(intent_result, msg_normalized,
                              ignora_pendencias=ignora_pendencias)
 
@@ -1025,3 +1034,7 @@ def handle_incoming(msg: IncomingMessage, *,
         return [OutgoingMessage(
             text="⚠️ Ocorreu um erro interno ao processar sua mensagem. Tente novamente em instantes."
         )]
+
+    finally:
+        if pergunta_ia is not None:
+            encerra_pergunta_da_ia(pergunta_uid, pergunta_ia)

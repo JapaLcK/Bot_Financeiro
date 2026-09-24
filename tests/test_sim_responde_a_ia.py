@@ -87,3 +87,29 @@ def test_comando_no_meio_encerra_a_pergunta_da_ia(monkeypatch):
     assert diga(uid, "saldo") != "resposta do agente"
     assert diga(uid, "sim") == NOT_UNDERSTOOD_MSG
     assert chamadas == []
+
+
+def test_comando_que_responde_antes_do_route_tambem_encerra(monkeypatch):
+    """2º achado do Codex no #574: `plano` (cobrança) sai antes do `route()`."""
+    uid, chamadas = _com_ia(monkeypatch)
+    _ia_disse(uid, OFERTA)
+
+    assert diga(uid, "plano") != "resposta do agente"
+    assert diga(uid, "sim") == NOT_UNDERSTOOD_MSG
+    assert chamadas == []
+
+
+def test_a_oferta_continua_aberta_depois_de_o_sim_ir_para_a_ia(monkeypatch):
+    """O `finally` não pode encerrar a pergunta no mesmo turno em que a IA a
+    atendeu (com a IA de verdade, ela grava a própria resposta)."""
+    uid, chamadas = _com_ia(monkeypatch)
+    _ia_disse(uid, OFERTA)
+    monkeypatch.setattr(
+        "core.services.ai_chat.chat",
+        lambda u, t, **k: (chamadas.append(t), db.ai_append_message(u, "user", t),
+                           db.ai_append_message(u, "assistant", "Top 3: ..."))
+        and "resposta do agente",
+    )
+
+    assert diga(uid, "sim") == "resposta do agente"
+    assert db.ai_get_last_message(uid)["content"] == "Top 3: ..."
