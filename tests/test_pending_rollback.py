@@ -29,6 +29,7 @@ import pytest
 
 import db
 import db.cards
+from conftest import usuario_pagante
 from core.handlers import credit as H_credit
 from core.handlers import investments as H_inv
 
@@ -44,11 +45,10 @@ def _uid() -> int:
     (regra dos ids gigantes do WhatsApp), então um uid da fixture `user_id`
     (`% 10_000_000_000`) roteia para OUTRO usuário: o `handle_incoming` não vê a
     pendência, responde o fallback genérico e o teste passa sem exercitar nada.
-    Mesma escolha de tests/test_bill_amount_pending.py.
+    Mesma escolha de tests/test_bill_amount_pending.py. É pagante porque, em v2
+    sem plano, o gate barra a mensagem antes do trabalho que o teste mede.
     """
-    uid = int(uuid.uuid4().int % 1_000_000_000)
-    db.ensure_user(uid)
-    return uid
+    return usuario_pagante()
 
 
 def _diga(uid: int, texto: str) -> str:

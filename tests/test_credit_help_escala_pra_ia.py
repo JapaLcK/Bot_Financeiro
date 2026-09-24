@@ -12,12 +12,12 @@ from core.handle_incoming import handle_incoming
 from core.types import IncomingMessage
 
 
-def test_fatura_sem_cartao_vai_pra_ia(user_id, monkeypatch):
+def test_fatura_sem_cartao_vai_pra_ia(pro_small_uid, monkeypatch):
     monkeypatch.setattr("core.services.plan_service.ai_chat_allowed", lambda _uid: True)
     chat = Mock(return_value="resposta da IA")
     monkeypatch.setattr("core.services.ai_chat.chat", chat)
 
-    msg = IncomingMessage(platform="whatsapp", user_id=user_id, text="como pago minha fatura")
+    msg = IncomingMessage(platform="whatsapp", user_id=pro_small_uid, text="como pago minha fatura")
     out = handle_incoming(msg)
 
     chat.assert_called_once()
