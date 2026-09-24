@@ -1,12 +1,15 @@
 import Constants from "expo-constants";
 import { z } from "zod";
 
+import { USER_AGENT } from "./aparelho";
 import { credenciaisSchema } from "./schemas/auth";
 import { lerCredenciais, limparSe, trocarSe } from "../storage/secure";
 
 /** Header que faz o servidor entregar token no corpo e NENHUM cookie. */
 const HEADER_CLIENTE = "X-PigBank-Client";
 const CLIENTE = "app";
+/** Vão em TODA requisição — a comum (`enviar`) e a renovação (`renovar`). */
+const CABECALHOS_DO_APP = { [HEADER_CLIENTE]: CLIENTE, "User-Agent": USER_AGENT };
 
 export class ErroDeApi extends Error {
   constructor(
@@ -183,7 +186,7 @@ async function renovar(refreshDeOrigem: string): Promise<Renovacao> {
         method: "POST",
         headers: {
           Authorization: `Bearer ${refreshDeOrigem}`,
-          [HEADER_CLIENTE]: CLIENTE,
+          ...CABECALHOS_DO_APP,
           "Content-Type": "application/json",
         },
         credentials: "omit",
@@ -324,7 +327,7 @@ type Opcoes = {
 
 async function enviar(rota: string, opcoes: Opcoes, access: string | null) {
   const metodo = opcoes.metodo ?? "GET";
-  const cabecalhos: Record<string, string> = { [HEADER_CLIENTE]: CLIENTE };
+  const cabecalhos: Record<string, string> = { ...CABECALHOS_DO_APP };
   if (access) cabecalhos["Authorization"] = `Bearer ${access}`;
   // Toda ESCRITA declara JSON, inclusive a que não tem corpo (logout). É a 2ª
   // condição da isenção de CSRF do servidor: um `<form>` cross-site só emite
