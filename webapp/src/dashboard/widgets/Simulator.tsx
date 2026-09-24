@@ -49,7 +49,7 @@ export function Simulator({ s, full = false }: { s: DashState; full?: boolean })
           const active = Object.entries(p.cuts).every(([k, v]) => s.sim.cuts[k] === v);
           return (
             <button key={p.label} type="button" className="chip" aria-pressed={active}
-              onClick={() => setSim({ cuts: active ? {} : { ...p.cuts } })}>{p.label}</button>
+              onClick={() => setSim({ cuts: active ? Object.fromEntries(Object.entries(s.sim.cuts).filter(([k]) => !(k in p.cuts))) : { ...p.cuts } })}>{p.label}</button>
           );
         })}
       </div>

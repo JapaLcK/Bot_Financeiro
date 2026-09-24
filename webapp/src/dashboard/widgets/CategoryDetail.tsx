@@ -26,7 +26,6 @@ export function CategoryDetail({ s }: { s: DashState }) {
   }
   const places = [...byPlace.entries()].sort((a, b) => b[1].v - a[1].v).slice(0, 5);
   const placePeak = Math.max(...places.map(([, p]) => p.v), 1);
-  const partial = isCurrentMonth(s.month);
 
   return (
     <Frame id="cat-detalhe" title={<span className="detail-title"><i className={`ph ${c.icon}`} style={{ color: c.color }} aria-hidden="true" />{c.label}{!picked && <span className="faint detail-auto">maior gasto do dia a dia</span>}</span>}
@@ -46,7 +45,7 @@ export function CategoryDetail({ s }: { s: DashState }) {
               <li key={k} data-on={k === s.month || undefined}>
                 <span className="months-bar"><i style={{ background: c.color, transform: `scaleY(${v / peak})` }} /></span>
                 <b className="num">{money0(v)}</b>
-                <span className="faint">{monthShort(keyDate(k))}{partial && k === MONTHS[MONTHS.length - 1] ? ` até ${TODAY.getDate()}` : ""}</span>
+                <span className="faint">{monthShort(keyDate(k))}{isCurrentMonth(k) ? ` até ${TODAY.getDate()}` : ""}</span>
               </li>
             ))}
           </ul>

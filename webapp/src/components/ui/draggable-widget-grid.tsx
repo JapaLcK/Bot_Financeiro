@@ -899,21 +899,18 @@ export function DraggableWidgetGrid({
 		[items],
 	)
 
+	const visual = [...placements]
+		.sort((a, b) => a.row - b.row || a.col - b.col)
+		.map((p) => p.id)
+	const visualIndex = new Map(visual.map((id, i) => [id, i]))
 	/*
-	 * DOM order stays fixed; only grid placement changes. Moving elements in
-	 * the DOM restarts Motion's mount animation in some React versions, which
-	 * made rearranged widgets fade out and back in. The visual position is
-	 * exposed through aria-posinset instead.
+	 * DOM order follows the visual order (Tab and screen readers read the DOM),
+	 * except while a widget is held: moving nodes mid-gesture would drop the
+	 * pointer capture. Same keys, so React moves nodes instead of remounting.
 	 */
-	const domOrder = useRef(items.map((item) => item.id))
-	for (const item of items)
-		if (!domOrder.current.includes(item.id)) domOrder.current.push(item.id)
+	const domOrder = useRef(visual)
+	if (!held) domOrder.current = visual
 	const placementById = new Map(placements.map((p) => [p.id, p]))
-	const visualIndex = new Map(
-		[...placements]
-			.sort((a, b) => a.row - b.row || a.col - b.col)
-			.map((p, i) => [p.id, i]),
-	)
 
 	return (
 		<MotionConfig reducedMotion="user">
