@@ -158,7 +158,7 @@ const ALFABETO =
  * O `atob` também não é garantido em toda versão do runtime. Doze linhas de
  * decodificação não dependem de nenhum dos dois.
  */
-function deBase64Url(texto: string): string {
+export function deBase64Url(texto: string): string {
   const limpo = texto.replace(/-/g, "+").replace(/_/g, "/").replace(/=+$/, "");
   let bits = 0;
   let acumulado = 0;
