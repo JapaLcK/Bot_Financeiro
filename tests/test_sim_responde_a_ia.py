@@ -113,3 +113,15 @@ def test_a_oferta_continua_aberta_depois_de_o_sim_ir_para_a_ia(monkeypatch):
 
     assert diga(uid, "sim") == "resposta do agente"
     assert db.ai_get_last_message(uid)["content"] == "Top 3: ..."
+
+
+def test_encerrar_so_grava_se_a_pergunta_ainda_e_a_ultima():
+    """3º achado do Codex no #574: conferência e gravação no mesmo statement.
+    Uma resposta da IA gravada depois da pergunta lida não é encerrada."""
+    uid = novo_uid()
+    velha = db.ai_append_message(uid, "assistant", OFERTA)
+    nova = db.ai_append_message(uid, "assistant", "Quer ver as categorias?")
+
+    assert db.ai_append_message_if_last(uid, velha, "system", "x") is False
+    assert db.ai_get_last_message(uid)["id"] == nova
+    assert db.ai_append_message_if_last(uid, nova, "system", "x") is True

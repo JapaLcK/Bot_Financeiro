@@ -402,6 +402,7 @@ from .ai_chat import (
     append_message as ai_append_message,
     get_recent_messages as ai_get_recent_messages,
     get_last_message as ai_get_last_message,
+    append_message_if_last as ai_append_message_if_last,
     set_pending_action as ai_set_pending_action,
     get_pending_action as ai_get_pending_action,
     clear_pending_action as ai_clear_pending_action,
@@ -590,7 +591,7 @@ __all__ = [
     "mfa_cleanup_expired_challenges",
     "should_show_mfa_onboarding", "mark_mfa_onboarding_shown",
     # ai chat
-    "ai_append_message", "ai_get_recent_messages", "ai_get_last_message",
+    "ai_append_message", "ai_get_recent_messages", "ai_get_last_message", "ai_append_message_if_last",
     "ai_set_pending_action", "ai_get_pending_action", "ai_clear_pending_action",
     "ai_consume_pending_action",
     "ai_get_usage_this_month", "ai_increment_usage", "log_ai_fallback",

@@ -112,9 +112,7 @@ def encerra_pergunta_da_ia(user_id: int, pergunta_id: int) -> None:
     "plano", um OFX) — então ela deixa de estar em aberto. O `ai_messages` só vê
     os turnos da IA, e sem isto um "sim" depois voltaria para a oferta antiga."""
     try:
-        last = db.ai_get_last_message(user_id)
-        if last and last["id"] == pergunta_id:
-            db.ai_append_message(user_id, "system", _PERGUNTA_ENCERRADA)
+        db.ai_append_message_if_last(user_id, pergunta_id, "system", _PERGUNTA_ENCERRADA)
     except Exception as exc:
         logger.warning("encerra_pergunta_da_ia falhou pra user %s: %s", user_id, exc)
 

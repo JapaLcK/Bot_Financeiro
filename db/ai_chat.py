@@ -124,6 +124,26 @@ def get_last_message(user_id: int) -> Optional[dict[str, Any]]:
         return cur.fetchone()
 
 
+def append_message_if_last(user_id: int, last_id: int, role: str, content: str) -> bool:
+    """Grava a mensagem SÓ SE `last_id` ainda é a última do user — conferência e
+    gravação no mesmo statement, para uma resposta da IA gravada por outra
+    requisição no meio não virar a penúltima. True se gravou."""
+    with get_conn() as conn, conn.cursor() as cur:
+        cur.execute(
+            """
+            insert into ai_messages (user_id, role, content)
+            select %s, %s, %s
+            where (select id from ai_messages where user_id = %s
+                   order by created_at desc, id desc limit 1) = %s
+            returning id
+            """,
+            (int(user_id), role, content, int(user_id), int(last_id)),
+        )
+        gravou = cur.fetchone() is not None
+        conn.commit()
+        return gravou
+
+
 # ─── Pending action (write aguardando confirmação) ──────────────────────────
 
 def set_pending_action(
