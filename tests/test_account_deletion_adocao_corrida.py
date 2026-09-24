@@ -20,7 +20,8 @@ LGPD. Porta única em produção: o webhook `item/created` → `_adota_item_orfa
 O conserto tem duas metades, e cada teste aqui mede UMA:
   • T18 = a PORTA: a adoção por webhook recusa conta com exclusão agendada — e
     APAGA o item na Pluggy ao recusar, porque item recusado nunca vira conexão e
-    some de toda enumeração nossa (decisão do dono, 24/09);
+    some de toda enumeração nossa (decisão do dono, 24/09). T18e é o ramo IRMÃO,
+    a conta JÁ apagada, com o mesmo desfecho e o mesmo remédio;
   • T17 = o CINTO: a exclusão reconsulta `open_finance_connections` antes do
     `delete from users` e soma ao `pluggy_items_swept`, então o 2º passe deleta o
     item mesmo que a conexão tenha entrado por outro caminho.
@@ -43,6 +44,15 @@ CONTROLES DO GRUPO (CLAUDE.md §3), cada mutação injetada em caso VERDE:
   • negativo — apagar o `await asyncio.to_thread(delete_pluggy_items_best_effort,
     dono, [item_id])` dessa MESMA guarda: T18 vermelho (a recusa volta a deixar o
     item vivo e pago na Pluggy), T18b e T18c verdes;
+  • negativo — apagar o delete do ramo IRMÃO (`user_exists`, o `item/created` que
+    chega depois de a conta já ter sido apagada, decisão do dono de 24/09): T18e
+    vermelho, T18 verde. Os dois deletes se medem separados de propósito: eles
+    saem de guardas diferentes e T18e é o único que passa por `log_user_id=False`;
+  • negativo — trocar esse `log_user_id=False` pelo default `True`: T18f vermelho
+    (a coluna leva uid de conta apagada, a FK `system_event_logs_user_id_fkey`
+    derruba o INSERT inteiro e o ÚNICO rastro do item se PERDE — o teto está
+    escrito no `except` de `core/system_event_log.log_system_event_sync`). T18e
+    fica VERDE nessa mutação: lá a apiKey funciona e o helper não loga nada;
   • GATILHO — `test_t18c_recusa_por_outro_motivo_nao_apaga_o_item_na_pluggy` é o
     controle da ação IRREVERSÍVEL: alargar o gatilho (apagar em qualquer recusa,
     p.ex. mover o delete para o `except` genérico) deixa T18 verde e T18c
@@ -446,8 +456,8 @@ def test_t18_webhook_nao_adota_item_de_conta_com_exclusao_agendada(user_id, monk
         assert deletados == [item_novo], (
             "recusar sem apagar deixa o item VIVO e pago na Pluggy: ele nunca vira "
             "linha em `open_finance_connections`, então nem `list_pluggy_item_ids` "
-            "nem o `RETURNING` da exclusão o alcançam, e `_adota_item_orfao` só roda "
-            f"em `item/created`, que não repete. Deletados: {deletados}"
+            "nem o `RETURNING` da exclusão o alcançam, e não existe listagem de "
+            f"items na Pluggy para enumerar por fora. Deletados: {deletados}"
         )
         # A conta tem ZERO conexões (`_semeia(item=None)`), então a ENUMERAÇÃO
         # (`item_ids=None`) apagaria NADA: o id acima só aparece porque a chamada
@@ -540,5 +550,83 @@ def test_t18d_falha_do_provedor_no_delete_nao_derruba_o_webhook(user_id, monkeyp
         falhas = _skips(item_novo, "pluggy_item_delete_failed")
         assert len(falhas) == 1, f"a falha do provedor ficou sem rastro nenhum: {falhas}"
         assert str(erro) in falhas[0]["details"].get("error", ""), falhas[0]
+    finally:
+        _limpa_item(item_novo)
+
+
+def test_t18e_item_created_de_conta_ja_apagada_apaga_o_item_na_pluggy(monkeypatch):
+    """O ramo IRMÃO do T18: o `item/created` que chega DEPOIS da exclusão.
+
+    Aqui não há corrida nenhuma — a conta já não existe e quem recusa é o
+    `user_exists`. O desfecho da recusa era o MESMO do T18 (item vivo e pago na
+    Pluggy, com os dados bancários do titular, depois de uma exclusão LGPD) e
+    agora tem o mesmo remédio (decisão do dono, 24/09). Este ramo é ainda mais
+    terminal que o do T18: lá a exclusão ainda vai rodar, aqui ela JÁ rodou, então
+    nem o `RETURNING` volta a passar por perto — e não existe listagem de items no
+    provedor (`core/services/pluggy.py`) para enumerar por fora.
+
+    Sem conta, o uid não pode ir na COLUNA (`system_event_logs.user_id` é FK) nem
+    em `details` (nenhuma purga alcança o JSON) — os dois últimos asserts são isso,
+    e é a mesma regra do `log_user_id=False` da exclusão de conta.
+    """
+    fantasma = 987654321987
+    deletados = _mocka_pluggy(monkeypatch)
+    item_novo = f"{_item_de(fantasma)}-t18e"
+    try:
+        assert not _existe_usuario(fantasma), "pré-condição: a conta não existe"
+
+        r = _webhook_de_item_criado(monkeypatch, fantasma, item_novo)
+
+        assert r.status_code == 200, r.text  # nunca 5xx: a Pluggy retentaria
+        assert not _existe_usuario(fantasma), \
+            "o webhook RECRIOU a conta apagada (a ressurreição do Codex #313)"
+        assert _conexoes_do_item(item_novo) == [], "adotou item para conta inexistente"
+        skips = _skips(item_novo)
+        assert len(skips) == 1, f"esperava 1 rastro de skip, veio {skips}"
+        assert skips[0]["details"]["motivo"] == "usuario_inexistente", skips[0]
+        assert deletados == [item_novo], (
+            "recusar sem apagar deixa o item VIVO e pago na Pluggy depois de a conta "
+            "ter sido apagada: sem conexão local ele não aparece em "
+            "`list_pluggy_item_ids`, a exclusão dele já passou e não há listagem de "
+            f"items no provedor — nada mais o alcança. Deletados: {deletados}"
+        )
+        assert skips[0]["user_id"] is None, \
+            "a coluna é FK: uid de conta apagada não entra (e a linha tem de sobreviver)"
+        assert "user_id" not in skips[0]["details"], \
+            "uid de conta APAGADA em `details`: nenhuma purga alcança o JSON"
+    finally:
+        _limpa_item(item_novo)
+
+
+def test_t18f_sem_credencial_pluggy_o_rastro_do_item_sobrevive_sem_uid(monkeypatch):
+    """O par do T18e no ramo de FALHA: sem `PLUGGY_CLIENT_ID/SECRET` o item fica
+    órfão na Pluggy e o log é a única coisa que sobra — e ele tem de SOBREVIVER.
+
+    É o que `log_user_id=False` compra aqui: a conta não existe, então uid na
+    COLUNA derruba o INSERT inteiro pela `system_event_logs_user_id_fkey` e o
+    evento se perde em silêncio (o teto está no `except` de
+    `core/system_event_log.log_system_event_sync`). Mesma regra do
+    `db/privacy.process_due_account_deletions`, medida por
+    `tests/test_account_deletion_pluggy.py::test_t12_...` no outro chamador.
+    """
+    fantasma = 987654321987
+    monkeypatch.setattr(
+        of_routes, "create_pluggy_api_key",
+        lambda: (_ for _ in ()).throw(RuntimeError("PLUGGY_CLIENT_ID ausente")),
+    )
+    item_novo = f"{_item_de(fantasma)}-t18f"
+    try:
+        r = _webhook_de_item_criado(monkeypatch, fantasma, item_novo)
+
+        assert r.status_code == 200, r.text
+        falhas = _skips(item_novo, "pluggy_disconnect_auth_failed")
+        assert len(falhas) == 1, (
+            "o rastro da falha SUMIU: com uid de conta apagada na coluna, a FK "
+            f"derruba o INSERT e não resta nada que nomeie o item órfão: {falhas}"
+        )
+        assert falhas[0]["user_id"] is None, falhas[0]
+        assert falhas[0]["details"]["items"] == [item_novo], falhas[0]
+        assert "user_id" not in falhas[0]["details"], \
+            "uid de conta APAGADA em `details`: nenhuma purga alcança o JSON"
     finally:
         _limpa_item(item_novo)

@@ -957,8 +957,9 @@ async def _adota_item_orfao(item_id: str, last_event: str | None = None) -> int 
         abandonada que fica para trás é o que torna o aborto terminal (ver o
         LIMITE CONHECIDO);
       • o usuário TEM de existir, e são DUAS defesas para o mesmo estrago.
-        `user_exists` recusa por IDENTIDADE (o log diz `usuario_inexistente`), e
-        é ele que responde quando a conta já não existia — mas é leitura em
+        `user_exists` recusa por IDENTIDADE (o log diz `usuario_inexistente`) e
+        APAGA o item na Pluggy ao recusar, pelo mesmo motivo da exclusão agendada
+        logo abaixo; é ele que responde quando a conta já não existia — mas é leitura em
         transação própria, então sozinho ele só cobre a foto do instante em que
         leu. Quem cobre a JANELA (exclusão da conta commitando entre a leitura e
         a escrita) é a FK, e só porque as duas escritas desta função passaram a
@@ -974,7 +975,9 @@ async def _adota_item_orfao(item_id: str, last_event: str | None = None) -> int 
         `POST /pluggy-item` já dava, E apaga o item na Pluggy
         (`delete_pluggy_items_best_effort`, item explícito): recusar sem apagar
         deixava o item fora de TODA enumeração nossa e vivo lá depois da
-        exclusão, que é o desfecho que esta PR remove;
+        exclusão, que é o desfecho que esta PR remove. Os DOIS deletes de recusa
+        só são seguros porque NÃO existe cancelamento de exclusão agendada — o
+        acoplamento está escrito ao lado deles, no ramo do `user_exists`;
       • o rastro (`register_item`) vai ANTES da conexão, e a ordem inversa é pior:
         ela deixava conexão commitada com registry VAZIO — item adotado sem
         nenhum rastro, e o rastro é a única enumeração que existe (`GET /items`
@@ -1123,10 +1126,37 @@ async def _adota_item_orfao(item_id: str, last_event: str | None = None) -> int 
         if not await asyncio.to_thread(user_exists, dono):
             await log_system_event(
                 "warning", "of_webhook_adopt_skipped",
-                "Item órfão de usuário que não existe mais",
+                "Item órfão de usuário que não existe mais: apagando na Pluggy",
                 source="open_finance",
-                details={"item_id": item_id, "user_id": dono, "motivo": "usuario_inexistente"},
+                details={"item_id": item_id, "motivo": "usuario_inexistente"},
             )
+            # Recusar sem apagar deixava aqui o MESMO desfecho do ramo de baixo —
+            # item vivo e pago na Pluggy com os dados bancários do titular depois de
+            # uma exclusão LGPD —, e ainda mais terminal: a exclusão desta conta JÁ
+            # rodou, então o `RETURNING` não volta a passar por perto. Decisão do
+            # dono (24/09): quem recusa apaga. Guardas e trade-offs são os do ramo
+            # de baixo (gatilho estreito, `item_ids` EXPLÍCITO, best-effort que não
+            # derruba o webhook), com UMA diferença: `log_user_id=False`, porque a
+            # conta NÃO existe e `system_event_logs.user_id` é FK — uid na coluna
+            # derruba o INSERT e o ÚNICO rastro do item se PERDE
+            # (`core/system_event_log.log_system_event_sync`, o `except`). É o mesmo
+            # que a exclusão de conta faz (`db/privacy.process_due_account_deletions`).
+            # O uid saiu de `details` junto: a purga não alcança o JSON, e
+            # identificador de conta apagada não sobrevive ali (mesma regra de
+            # `tests/test_account_deletion_pii_logs.py`). Resta o `item_id`.
+            # EFEITO COLATERAL aceito pelo dono: `user_exists` não separa "conta
+            # apagada" de "id que nunca existiu", então item cujo `clientUserId`
+            # aponta para um uid inventado também passa a ser apagado na Pluggy.
+            # ACOPLAMENTO dos DOIS deletes de recusa desta função (este e o do ramo
+            # de exclusão agendada, logo abaixo): apagar na recusa só é seguro
+            # porque NÃO existe cancelamento de exclusão agendada — não há
+            # `cancel_account_deletion` no repositório, e o único caminho que sai de
+            # `processing` volta para `scheduled` (`_restore_account_deletion_schedule`,
+            # db/privacy.py:1255). No dia em que existir "cancelar exclusão", estas
+            # duas linhas viram PERDA DE DADO: o usuário cancela e o banco dele já
+            # foi apagado na Pluggy.
+            await asyncio.to_thread(delete_pluggy_items_best_effort, dono, [item_id],
+                                    log_user_id=False)
             return None
         # A conta pode EXISTIR e já estar a caminho do fim: `user_exists` responde
         # True durante a exclusão agendada de propósito (db/users.py:34, "LIMITE
@@ -1141,8 +1171,8 @@ async def _adota_item_orfao(item_id: str, last_event: str | None = None) -> int 
         # 403 a levantar para a Pluggy, então o que se reusa é a fonte única
         # (`is_account_scheduled_for_deletion`, db/privacy.py:243) e o desfecho é
         # o skip. O `user_exists` fica: ele responde por conta JÁ apagada, que é
-        # outro estado (e o único que tem `user_id` em `details`, porque a coluna
-        # não aceita FK de conta inexistente). Aqui a conta existe, então o dono
+        # outro estado (e apaga na Pluggy pelo mesmo motivo, sem uid em lugar
+        # nenhum — ver o ramo acima). Aqui a conta existe, então o dono
         # vai na COLUNA `user_id` — a cascata de `system_event_logs` a leva no dia
         # da exclusão, e `details` (que a cascata não alcança) não guarda uid.
         # Se o PREDICADO levantar, o `except` genérico lá embaixo ainda grava uid
@@ -1157,16 +1187,16 @@ async def _adota_item_orfao(item_id: str, last_event: str | None = None) -> int 
             # Recusar e ir embora deixava o item VIVO e pago na Pluggy, com os
             # dados bancários do titular, depois da exclusão LGPD: sem conexão em
             # `open_finance_connections`, ele não aparece em `list_pluggy_item_ids`
-            # nem no `RETURNING` da exclusão — nada mais o alcança, e
-            # `_adota_item_orfao` só roda em `item/created`, que não repete. É o
-            # MESMO desfecho que esta PR existe para remover, então quem recusa
+            # nem no `RETURNING` da exclusão — e não há listagem de items na Pluggy
+            # para enumerar por fora (core/services/pluggy.py não tem essa função).
+            # É o MESMO desfecho que esta PR existe para remover, então quem recusa
             # apaga. Ação IRREVERSÍVEL disparada por evento externo, logo:
-            # • gatilho estreito — só ESTE ramo (o predicado de exclusão
-            #   agendada/em processamento). O teto do plano
-            #   (`_enforce_bank_limit`, 402), a posse e o usuário inexistente
-            #   recusam sem apagar nada, e esta guarda vem ANTES de todos eles de
-            #   propósito: se viesse depois, o 402 roubaria o caminho e o item
-            #   sumiria do ramo errado — o controle de gatilho é
+            # • gatilho estreito — só os DOIS ramos de conta que não pode adotar
+            #   (este predicado e o `user_exists` acima). O teto do plano
+            #   (`_enforce_bank_limit`, 402) e a posse recusam sem apagar nada, e
+            #   esta guarda vem ANTES deles de propósito: se viesse depois, o 402
+            #   roubaria o caminho e o item sumiria do ramo errado — o controle de
+            #   gatilho é
             #   `test_t18c_recusa_por_outro_motivo_nao_apaga_o_item_na_pluggy`
             #   (tests/test_account_deletion_adocao_corrida.py);
             # • `item_ids` EXPLÍCITO — a enumeração (`item_ids=None`) apagaria os
@@ -1175,7 +1205,11 @@ async def _adota_item_orfao(item_id: str, last_event: str | None = None) -> int 
             # • best-effort — falha de provedor fica no log do helper
             #   (`pluggy_item_delete_failed`/`pluggy_disconnect_auth_failed`) e o
             #   webhook segue 200; a Pluggy fora do ar nesse instante devolve o
-            #   estado ANTERIOR a este commit (item órfão e pago lá), não um 5xx;
+            #   estado ANTERIOR a este commit (item órfão e pago lá), não um 5xx.
+            #   NÃO há retentativa e não há ferramenta: o log guarda o `item_id`, e
+            #   a única ação possível é apagar o item À MÃO no painel da Pluggy —
+            #   não existe listagem de items no provedor aqui e o one-shot que a
+            #   decisão D-C2 prometia ao operador foi apagado em `924aee3f`;
             # • `log_user_id` fica no default `True`: aqui a conta AINDA existe,
             #   então o dono vai na COLUNA (o mesmo que o skip acima), e a cascata
             #   de `system_event_logs` o leva no dia da exclusão.
