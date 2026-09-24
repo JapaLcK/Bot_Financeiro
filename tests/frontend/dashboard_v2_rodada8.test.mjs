@@ -2,7 +2,8 @@
  * Protótipo dashboard-v2, três correções da revisão do PR #546:
  *
  *   · Simulador (widgets/Simulator.tsx): desligar um chip de simulação pronta desfaz só
- *     as alavancas daquele chip; o ajuste feito à mão em outra alavanca fica;
+ *     as alavancas daquele chip, e ligar um chip soma às alavancas já mexidas (à mão ou
+ *     por outro chip) em vez de zerá-las (idem "Simular: <pronta>" da paleta e a ação do Piggy);
  *   · Detalhe da categoria (widgets/CategoryDetail.tsx): a barra do mês corrente diz
  *     "até <dia>" qualquer que seja o mês selecionado;
  *   · Organizar (components/ui/draggable-widget-grid.tsx): depois de mover um item,
@@ -71,6 +72,60 @@ test("positivo: o chip sozinho liga e desliga", async () => {
   await ctx.close();
   assert.deepEqual(ligado, ["true", "50"]);
   assert.deepEqual(desligado, ["false", "0"]);
+});
+
+test("Simulador: ligar um chip mantém o ajuste feito à mão em outra alavanca", async () => {
+  const { ctx, page } = await abrir();
+  await alavanca(page, "Lazer").focus();
+  await page.keyboard.press("ArrowRight");
+  await page.keyboard.press("ArrowRight");
+  const chip = page.locator(`${SIM} .chip`, { hasText: "Delivery pela metade" });
+  await chip.click();
+  const r = [await chip.getAttribute("aria-pressed"), await alavanca(page, "Delivery").inputValue(), await alavanca(page, "Lazer").inputValue()];
+  await ctx.close();
+  assert.deepEqual(r, ["true", "50", "10"]);
+});
+
+test("Simulador: dois chips ligados juntos; desligar um mantém o outro", async () => {
+  const { ctx, page } = await abrir();
+  const delivery = page.locator(`${SIM} .chip`, { hasText: "Delivery pela metade" });
+  const role = page.locator(`${SIM} .chip`, { hasText: "Um rolê a menos" });
+  await delivery.click();
+  await role.click();
+  const ambos = [await delivery.getAttribute("aria-pressed"), await role.getAttribute("aria-pressed")];
+  await delivery.click();
+  const r = [await delivery.getAttribute("aria-pressed"), await role.getAttribute("aria-pressed"), await alavanca(page, "Delivery").inputValue(), await alavanca(page, "Lazer").inputValue()];
+  await ctx.close();
+  assert.deepEqual(ambos, ["true", "true"]);
+  assert.deepEqual(r, ["false", "true", "0", "25"]);
+});
+
+test("Paleta: 'Simular: <pronta>' mantém o ajuste feito à mão em outra alavanca", async () => {
+  const { ctx, page } = await abrir();
+  await alavanca(page, "Lazer").focus();
+  await page.keyboard.press("ArrowRight");
+  await page.keyboard.press("ArrowRight");
+  await page.keyboard.press("Control+k");
+  await page.keyboard.type("delivery pela metade");
+  await page.keyboard.press("Enter");
+  await page.waitForFunction(() => location.hash === "#/simulador");
+  const naPagina = (nome) => page.locator(".lever", { hasText: nome }).locator("input[type=range]"); // /simulador não tem data-widget-id
+  const r = [await naPagina("Delivery").inputValue(), await naPagina("Lazer").inputValue()];
+  await ctx.close();
+  assert.deepEqual(r, ["50", "10"]);
+});
+
+test("Piggy: 'Simular delivery −30%' mantém o ajuste feito à mão em outra alavanca", async () => {
+  const { ctx, page } = await abrir();
+  await alavanca(page, "Lazer").focus();
+  await page.keyboard.press("ArrowRight");
+  await page.keyboard.press("ArrowRight");
+  await page.locator(".insights").getByRole("button", { name: /Simular delivery/ }).click(); // mês atual: Delivery subiu 20%
+  await page.waitForFunction(() => location.hash === "#/simulador");
+  const naPagina = (nome) => page.locator(".lever", { hasText: nome }).locator("input[type=range]");
+  const r = [await naPagina("Delivery").inputValue(), await naPagina("Lazer").inputValue()];
+  await ctx.close();
+  assert.deepEqual(r, ["30", "10"]);
 });
 
 const rotulos = (page) => page.locator(".months li .faint").allTextContents();

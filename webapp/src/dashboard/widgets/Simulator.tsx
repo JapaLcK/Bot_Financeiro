@@ -46,10 +46,12 @@ export function Simulator({ s, full = false }: { s: DashState; full?: boolean })
       aside={on && <button type="button" className="btn btn-quiet" onClick={() => { setDraft(null); resetSim(); }}>Zerar</button>}>
       <div className="presets" role="group" aria-label="Simulações prontas">
         {PRESETS.map((p) => {
+          // Ligar aplica os valores do preset por cima dos cortes atuais; desligar zera só as alavancas dele
+          // (um valor manual anterior nessas alavancas não volta: não guardamos histórico).
           const active = Object.entries(p.cuts).every(([k, v]) => s.sim.cuts[k] === v);
           return (
             <button key={p.label} type="button" className="chip" aria-pressed={active}
-              onClick={() => setSim({ cuts: active ? Object.fromEntries(Object.entries(s.sim.cuts).filter(([k]) => !(k in p.cuts))) : { ...p.cuts } })}>{p.label}</button>
+              onClick={() => setSim({ cuts: active ? Object.fromEntries(Object.entries(s.sim.cuts).filter(([k]) => !(k in p.cuts))) : { ...s.sim.cuts, ...p.cuts } })}>{p.label}</button>
           );
         })}
       </div>

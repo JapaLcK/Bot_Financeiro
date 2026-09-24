@@ -2,7 +2,7 @@ import type { ReactNode } from "react";
 import { BALANCE_TODAY, CATEGORIES, MONTHS, TODAY, addDays, isCurrentMonth, keyDate, previousKey, scheduled, summary, trajectory } from "../lib/api";
 import { LAUNCHES } from "../lib/data.js";
 import { monthName, money0, relativeDays, signed0 } from "../lib/format.js";
-import { set, setSim } from "../lib/store.js";
+import { set, setCut } from "../lib/store.js";
 import type { DashState, Launch } from "../lib/types";
 import { Frame } from "../parts/Frame";
 import { go } from "../router";
@@ -28,7 +28,7 @@ function insights(s: DashState): Insight[] {
       out.push({
         key: "rise", icon: "ph-trend-up", tone: "var(--warn)",
         text: <><b>{rise.c.label}</b> subiu {Math.round(rise.d * 100)}%: {money0(rise.now)} contra {money0(rise.then)} em {monthName(keyDate(prev))}{current ? ` até o dia ${day}` : ""}.</>,
-        action: { label: `Simular ${rise.c.label.toLowerCase()} −30%`, run: () => { setSim({ cuts: { [rise.c.id]: 0.3 } }); go("/simulador"); } },
+        action: { label: `Simular ${rise.c.label.toLowerCase()} −30%`, run: () => { setCut(rise.c.id, 0.3); go("/simulador"); } },
       });
     }
   }
