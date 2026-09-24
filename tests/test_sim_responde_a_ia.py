@@ -125,3 +125,33 @@ def test_encerrar_so_grava_se_a_pergunta_ainda_e_a_ultima():
     assert db.ai_append_message_if_last(uid, velha, "system", "x") is False
     assert db.ai_get_last_message(uid)["id"] == nova
     assert db.ai_append_message_if_last(uid, nova, "system", "x") is True
+
+
+def test_encerrar_espera_a_resposta_da_ia_que_ainda_nao_commitou():
+    """4º achado do Codex no #574: em READ COMMITTED, uma resposta da IA ainda
+    não commitada escapa do snapshot da conferência. Com a trava do histórico, o
+    encerramento espera o commit e então vê que a pergunta lida não é a última."""
+    import threading
+    from db.ai_chat import _TRAVA_DO_HISTORICO
+
+    uid = novo_uid()
+    velha = db.ai_append_message(uid, "assistant", OFERTA)
+    resultado = {}
+
+    with get_conn() as conn, conn.cursor() as cur:
+        # A "outra requisição": gravou a pergunta nova e ainda não commitou.
+        cur.execute(_TRAVA_DO_HISTORICO, (str(uid),))
+        cur.execute(
+            "insert into ai_messages (user_id, role, content) values (%s, 'assistant', %s)",
+            (uid, "Quer ver as categorias?"),
+        )
+        t = threading.Thread(target=lambda: resultado.update(
+            gravou=db.ai_append_message_if_last(uid, velha, "system", "x")))
+        t.start()
+        t.join(timeout=1.0)
+        assert t.is_alive(), "o encerramento não esperou a trava"
+        conn.commit()
+    t.join(timeout=5.0)
+
+    assert resultado == {"gravou": False}
+    assert db.ai_get_last_message(uid)["content"] == "Quer ver as categorias?"

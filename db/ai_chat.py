@@ -28,6 +28,11 @@ from .ai_quota import (
 PENDING_TTL_MINUTES = 10
 DEFAULT_CONTEXT_WINDOW = 20
 
+# Toda gravação no histórico de um user passa por esta trava (até o commit),
+# para o `append_message_if_last` enxergar a última linha de verdade: sem ela,
+# uma resposta da IA ainda não commitada escapa do snapshot da conferência.
+_TRAVA_DO_HISTORICO = "select pg_advisory_xact_lock(hashtext('ai_messages:' || %s))"
+
 
 # ─── Mensagens do chat ──────────────────────────────────────────────────────
 
@@ -42,6 +47,7 @@ def append_message(
 ) -> int:
     """Grava uma mensagem no histórico. Retorna o id da linha criada."""
     with get_conn() as conn, conn.cursor() as cur:
+        cur.execute(_TRAVA_DO_HISTORICO, (str(int(user_id)),))
         cur.execute(
             """
             insert into ai_messages
@@ -125,10 +131,12 @@ def get_last_message(user_id: int) -> Optional[dict[str, Any]]:
 
 
 def append_message_if_last(user_id: int, last_id: int, role: str, content: str) -> bool:
-    """Grava a mensagem SÓ SE `last_id` ainda é a última do user — conferência e
-    gravação no mesmo statement, para uma resposta da IA gravada por outra
-    requisição no meio não virar a penúltima. True se gravou."""
+    """Grava a mensagem SÓ SE `last_id` ainda é a última do user. A trava do
+    histórico serializa com o `append_message`: a conferência roda depois de
+    qualquer gravação concorrente commitar, então uma resposta nova da IA não
+    vira a penúltima. True se gravou."""
     with get_conn() as conn, conn.cursor() as cur:
+        cur.execute(_TRAVA_DO_HISTORICO, (str(int(user_id)),))
         cur.execute(
             """
             insert into ai_messages (user_id, role, content)
