@@ -10,7 +10,10 @@ CONTEÚDO do filtro não estava. Os testes daqui prendem o conteúdo, e os dois
 irmãos de fiação continuam onde estão (`tests/test_account_deletion_pluggy.py`,
 `tests/test_account_reset.py`, `tests/test_open_finance_disconnect_route.py`).
 
-Unitário e sem banco de propósito: a função é pura, recebe as linhas prontas.
+Unitário e sem banco de propósito: a função é pura, recebe as linhas prontas. A
+ÚNICA exceção é o último caso do arquivo, que passa as MESMAS linhas pela irmã SQL
+(`list_pluggy_item_ids`) e exige o mesmo resultado — é o que o §0.7 pede quando a
+duplicação da regra é inevitável, e sem banco ela não tem como ser feita.
 
 ASSIMETRIA DELIBERADA, e por isso tem caso nomeado: `status` é normalizado com
 `.upper()` e `provider` NÃO. `status` chega do payload da Pluggy (ela é quem
@@ -25,6 +28,8 @@ from __future__ import annotations
 
 import pytest
 
+import db
+from db.connection import get_conn
 from db.open_finance_state import pluggy_items_a_deletar
 
 
@@ -66,3 +71,42 @@ def test_ordena_e_deduplica():
     linhas = [_linha(item="b"), _linha(item="a"), _linha(item="b"),
               _linha(item="z", status="PAUSED")]
     assert pluggy_items_a_deletar(linhas) == ["a", "b"]
+
+
+def test_a_irma_sql_le_a_mesma_regra(user_id):
+    """§0.7: `list_pluggy_item_ids` (SQL, `db/open_finance.py:416-425`) repete a
+    regra em outra linguagem e alimenta o MESMO delete remoto — o 1º passe da
+    exclusão de conta. Nada comparava as duas leituras: a tabela acima prende só o
+    lado Python, e trocar o `<> 'PAUSED'` ou o `provider='pluggy'` do SQL passava
+    limpo por ela.
+
+    UNIVERSO: as linhas da `TABELA` que o SCHEMA aceita. `provider`, `status` e
+    `provider_item_id` são `not null` em `open_finance_connections`
+    (`db/schema.py`), então os casos de `None` existem só do lado Python e não têm
+    irmã SQL — os outros vão para o banco com item id próprio, porque a unique é
+    por `(user_id, provider, provider_item_id)`.
+    """
+    linhas = [
+        dict(linha, provider_item_id=(linha["provider_item_id"] and f"item-sql-{i}"))
+        for i, (linha, _, _) in enumerate(TABELA)
+        if all(linha[c] is not None for c in ("provider", "status", "provider_item_id"))
+    ]
+    esperado = pluggy_items_a_deletar(linhas)
+    # Sem os dois, a comparação passaria com as duas leituras devolvendo lista vazia
+    # (ou tudo), que é o teste que não mede nada.
+    assert esperado, "o universo precisa de linha que ENTRA no delete remoto"
+    assert len(esperado) < len(linhas), "e de linha que fica de FORA"
+
+    with get_conn() as conn:
+        with conn.cursor() as cur:
+            for linha in linhas:
+                cur.execute(
+                    "insert into open_finance_connections (user_id, provider,"
+                    " provider_item_id, status, institution_id, institution_name)"
+                    " values (%s, %s, %s, %s, '612', 'Nubank')",
+                    (user_id, linha["provider"], linha["provider_item_id"], linha["status"]),
+                )
+        conn.commit()
+
+    assert sorted(db.list_pluggy_item_ids(user_id)) == esperado, \
+        "a irmã SQL e a Python divergiram sobre as MESMAS linhas"

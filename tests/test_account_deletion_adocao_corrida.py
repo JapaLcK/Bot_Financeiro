@@ -23,6 +23,10 @@ O conserto tem duas metades, e cada teste aqui mede UMA:
     `delete from users` e soma ao `pluggy_items_swept`, então o 2º passe deleta o
     item mesmo que a conexão tenha entrado por outro caminho.
 
+E T20 prende o que sobra dessas duas: a ORDEM `accounts → users` de
+`delete_user_data`, que é o que fecha a janela entre a reconsulta e o `delete from
+users` para a escrita REAL (ver abaixo).
+
 CONTROLES DO GRUPO (CLAUDE.md §3), cada mutação injetada em caso VERDE:
   • negativo — apagar o bloco da reconsulta (o `if _table_exists(cur,
     "open_finance_connections")` imediatamente ANTES do `delete from users`, em
@@ -42,12 +46,36 @@ CONTROLES DO GRUPO (CLAUDE.md §3), cada mutação injetada em caso VERDE:
     `deletion_status` muda) e é o que separa "recusa por exclusão agendada" de
     "recusa por qualquer motivo".
 
-CLASSE CEGA declarada: a janela que SOBRA entre a reconsulta e o `delete from
-users` não é medida aqui. Ela JÁ FOI medida fora desta suíte (sondas do Tester na
-PR-C): está fisicamente aberta para INSERT cru e fechada para a escrita real pela
-ordem `accounts → users` — o motivo está no comentário de `db/privacy.py`,
-imediatamente antes da reconsulta. Também não há Pluggy de verdade em nenhum caso
-(o `delete_pluggy_item` é dublê).
+A janela que SOBRA entre a reconsulta e o `delete from users` é medida por T20, e
+o mecanismo tem DUAS metades (o comentário de `db/privacy.py`, imediatamente antes
+da reconsulta, traz a versão longa): o laço de `user_owned_tables` já apagou a
+linha de `accounts`, então o `_lock_user` do escritor (`select ... from accounts
+... for update`, `db/bank_movements.py:58`) BLOQUEIA no lock da tupla apagada até
+o commit — ele não levanta nada, e depois do commit só devolve zero linhas — e
+quem MATA a escrita é o INSERT da conexão, na FK `open_finance_connections.user_id
+references users(id)` (`db/schema.py:414`). Segura `accounts`, mata `users`.
+
+CONTROLES de T20 (mesma regra, cada mutação injetada em caso VERDE):
+  • negativo — tirar o `_lock_user` de `save_pluggy_open_finance_item`
+    (`db/open_finance.py`): T20 vermelho, e a MEDIÇÃO mostra a inversão de ordem
+    em pessoa — `DeadlockDetected ... while locking tuple in relation "accounts"`
+    na sessão 2. Sem o `_lock_user` a escrita chega ao INSERT primeiro (que pega
+    `FOR KEY SHARE` na linha de `users`, pela FK) e só DEPOIS pede `accounts`, no
+    `reconcile_bank_movements` da mesma transação: `users` antes de `accounts`,
+    ciclo fechado com a exclusão. A escrita não vaza nesse mundo, mas quem a
+    recusa deixa de ser a FK e passa a ser o deadlock — e o segundo assert do
+    caso é exatamente esse;
+  • negativo — mover o bloco da reconsulta para ANTES do laço de
+    `user_owned_tables` (`accounts` ainda viva quando a barreira abre): T20
+    vermelho em `parada_em == 'commitou'` — a escrita ATRAVESSA a janela, commita
+    e sai pela cascata sem entrar no `pluggy_items_swept`. T17 fica VERDE nas
+    duas mutações, que é a prova de que T20 mede o que ele não mede;
+  • positivo — T18b continua provando que a adoção legítima grava; e T20 exige o
+    item ENUMERADO deletado na Pluggy, então uma exclusão que recusasse tudo não
+    passa.
+
+CLASSE CEGA declarada: não há Pluggy de verdade em nenhum caso (o
+`delete_pluggy_item` é dublê).
 """
 from __future__ import annotations
 
@@ -55,6 +83,7 @@ import asyncio
 import json
 import os
 import threading
+from time import monotonic, sleep
 
 import pytest
 from cryptography.fernet import Fernet
@@ -63,6 +92,7 @@ from fastapi.testclient import TestClient
 os.environ.setdefault("MFA_ENCRYPTION_KEY", Fernet.generate_key().decode())
 
 import db
+import db.open_finance_state as open_finance_state
 import db.privacy as privacy
 import frontend.finance_bot_websocket_custom as dashboard
 import frontend.routes.open_finance as of_routes
@@ -193,6 +223,140 @@ def test_t17_conexao_commitada_entre_o_returning_e_o_delete_users(user_id, monke
             "sem entrar no `pluggy_items_swept` — o 2º passe nunca deletou o item"
         )
     finally:
+        _limpa_item(item_novo)
+        _limpa_item(item_velho)
+
+
+# ── T20 (a ORDEM `accounts → users`) ────────────────────────────────────────
+
+def _travado_no_lock_de_accounts() -> bool:
+    """Alguma sessão DESTE banco está bloqueada AGORA no `select ... from accounts
+    ... for update` do `_lock_user`?
+
+    Espera por ESTADO, não por tempo: `pg_stat_activity.wait_event_type` diz o que
+    a sessão está fazendo neste instante. `datname = current_database()` porque a
+    view é do cluster inteiro e a suíte roda num banco próprio.
+    """
+    with get_conn() as conn:
+        with conn.cursor() as cur:
+            cur.execute(
+                """
+                select count(*) as n from pg_stat_activity
+                 where datname = current_database()
+                   and wait_event_type = 'Lock'
+                   and query ilike '%from accounts where user_id%for update%'
+                """
+            )
+            n = int(cur.fetchone()["n"])
+        conn.commit()
+    return n > 0
+
+
+def test_t20_escrita_real_na_janela_residual_morre_na_fk(user_id, monkeypatch):
+    """A ORDEM `accounts → users` é o que fecha a janela que SOBRA depois do cinto.
+
+    Sem este caso, tirar o `_lock_user` de `save_pluggy_open_finance_item` — ou
+    mover a reconsulta para antes do laço de `user_owned_tables` — reabre o
+    vazamento sem uma linha vermelha: T17 continua verde porque ele mede a escrita
+    ANTES da reconsulta, e a que passa DEPOIS dela não entra no `pluggy_items_swept`.
+
+    As DUAS metades do mecanismo, e cada assert mede uma:
+      • `accounts` SEGURA — a linha já foi apagada por esta transação (aberta), e o
+        `FOR UPDATE` do escritor bloqueia no lock da tupla até o commit. Ele não
+        levanta nada: depois do commit devolve zero linhas e segue;
+      • `users` MATA — quem recusa a escrita é o INSERT da conexão, na FK
+        `open_finance_connections.user_id references users(id)` (`db/schema.py:414`),
+        já com a linha de `users` apagada. É NA conexão, não antes dela.
+
+    Barreira REAL, sem sono fixo: a 2ª chamada de `pluggy_items_a_deletar` é a
+    reconsulta (a 1ª é o `RETURNING`), ou seja, o começo exato da janela residual.
+    Ancorar nela faz a barreira ANDAR JUNTO com o código: quem mover a reconsulta
+    para antes do laço abre a barreira com `accounts` ainda viva, a escrita passa e
+    o caso fica vermelho. O `delete_user_data` dublado só limita a barreira à
+    exclusão DESTE usuário (o job roda em lote).
+    """
+    _semeia(user_id)
+    item_velho = _item_de(user_id)
+    item_novo = f"{item_velho}-t20"
+    deletados = _mocka_pluggy(monkeypatch)
+
+    porta = threading.Event()
+    concluiu = threading.Event()
+    sessao2: dict = {}
+
+    def _sessao2():
+        if not porta.wait(30):
+            sessao2["erro"] = "porta nunca abriu"
+            concluiu.set()
+            return
+        try:
+            # A MESMA escrita de `_adota_item_orfao` (`criar_usuario=False`).
+            db.save_pluggy_open_finance_item(
+                user_id,
+                {"id": item_novo, "status": "UPDATED",
+                 "connector": {"id": 613, "name": "Inter"}},
+                criar_usuario=False,
+            )
+        except Exception as exc:  # noqa: BLE001 — é isso que o caso mede
+            sessao2["erro"] = f"{type(exc).__name__}: {exc}"
+        finally:
+            concluiu.set()
+
+    t = threading.Thread(target=_sessao2, name="sessao2-t20", daemon=True)
+    t.start()
+
+    real_filtro = open_finance_state.pluggy_items_a_deletar
+    real_delete = privacy.delete_user_data
+    alvo = {"nosso": False}
+    chamadas = {"n": 0}
+
+    def _delete_user_data(uid, *args, **kwargs):
+        alvo["nosso"] = uid == user_id
+        try:
+            return real_delete(uid, *args, **kwargs)
+        finally:
+            alvo["nosso"] = False
+
+    def _filtro(linhas):
+        if alvo["nosso"]:
+            chamadas["n"] += 1
+            if chamadas["n"] == 2:
+                porta.set()
+                limite = monotonic() + 30
+                while monotonic() < limite:
+                    if concluiu.is_set():
+                        sessao2["parada_em"] = "commitou"
+                        break
+                    if _travado_no_lock_de_accounts():
+                        sessao2["parada_em"] = "lock"
+                        break
+                    sleep(0.02)
+        return real_filtro(linhas)
+
+    monkeypatch.setattr(privacy, "delete_user_data", _delete_user_data)
+    monkeypatch.setattr(open_finance_state, "pluggy_items_a_deletar", _filtro)
+    try:
+        db.process_due_account_deletions(limit=10)
+        t.join(30)
+
+        assert chamadas["n"] >= 2, "a barreira não foi acionada — o caso não mediu nada"
+        assert sessao2.get("parada_em") == "lock", (
+            "a escrita concorrente ATRAVESSOU a janela residual em vez de ficar presa "
+            f"no lock da tupla de `accounts` já apagada: {sessao2}"
+        )
+        assert "ForeignKeyViolation" in (sessao2.get("erro") or ""), (
+            "quem mata a escrita é o INSERT da conexão na FK para `users`; veio outra "
+            f"coisa: {sessao2}"
+        )
+        assert not _existe_usuario(user_id), "a conta tinha que ter sido excluída"
+        assert _conexoes_do_item(item_novo) == [], \
+            "a escrita da janela residual chegou a existir no banco"
+        assert deletados == [item_velho], (
+            "o item ENUMERADO tinha que sair na Pluggy (positivo) e o da janela nunca "
+            f"chegou a existir: {deletados}"
+        )
+    finally:
+        porta.set()
         _limpa_item(item_novo)
         _limpa_item(item_velho)
 

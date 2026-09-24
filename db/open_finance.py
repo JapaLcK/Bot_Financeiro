@@ -21,8 +21,16 @@ from .connection import TIPO_CANON_SQL, get_conn
 from .users import ensure_user, ensure_user_tx
 
 # `logging` da stdlib, mesmo padrão (e mesmo motivo) de `db/open_finance_state.py`:
-# `_log_falha` exige uma exceção e um `user_id`, e `log_system_event_sync` custaria
-# outra aquisição de conexão do pool dentro de uma escrita com prazo (`budget_ms`).
+# `_log_falha` exige uma `Exception` no 3º posicional (`core/observability.py:102`)
+# e aqui não há exceção — o que se loga é um VALOR recusado na fronteira.
+#
+# NÃO é por custo, e a justificativa anterior dizia isso errado: um `warning()` da
+# stdlib NÃO é barato aqui. O `_DashboardHandler` mora no ROOT logger
+# (`core/observability.py:29-46`) e espelha todo WARNING em `system_event_logs`
+# chamando o MESMO `log_system_event_sync`, que abre `psycopg.connect()` próprio
+# (sem pool nenhum) e faz o INSERT bloqueante. A conta é a mesma dos dois lados —
+# inclusive dentro de uma escrita com prazo (`budget_ms`) — e o que a limita são o
+# `connect_timeout=2` e o `statement_timeout` de `core/system_event_log.py`.
 logger = logging.getLogger(__name__)
 
 

@@ -590,7 +590,7 @@ def test_t16_enumeracao_sem_dono_e_recusada(user_id):
         "a enumeração com dono é o caminho legítimo dos três chamadores"
 
 
-# ── T17 (fronteira do status remoto) ─────────────────────────────────────────
+# ── T19 (fronteira do status remoto) ─────────────────────────────────────────
 
 def _status_da_conexao(item_id: str) -> str | None:
     with get_conn() as conn:
@@ -607,10 +607,12 @@ def _status_da_conexao(item_id: str) -> str | None:
 @pytest.mark.parametrize("status_remoto, na_coluna", [
     ("PAUSED", "UPDATING"),      # sentinela local vinda do provedor
     ("paused", "UPDATING"),      # a leitura faz `.upper()`, a caixa não protege
+    ("DELETED", "UPDATING"),     # a OUTRA sentinela local, e terminal (ver docstring)
+    ("MERGE_ERROR", "UPDATING"),  # desconhecido NÃO-sentinela: `executionStatus` fora da lista
     ("UPDATED", "UPDATED"),      # POSITIVO: o status legítimo dos outros testes
     ("LOGIN_ERROR", "LOGIN_ERROR"),  # POSITIVO: status de erro real continua cru
 ])
-def test_t17_status_do_payload_remoto_nunca_vira_a_sentinela_local(
+def test_t19_status_do_payload_remoto_nunca_vira_a_sentinela_local(
         user_id, monkeypatch, status_remoto, na_coluna):
     """`save_pluggy_open_finance_item` é o ÚNICO ponto que grava status REMOTO, e
     ele gravava o valor cru. `PAUSED` é sentinela LOCAL ("o item já foi deletado
@@ -627,13 +629,22 @@ def test_t17_status_do_payload_remoto_nunca_vira_a_sentinela_local(
     vocabulário legítimo — sem eles o grupo passaria numa versão que gravasse
     `UPDATING` para tudo, que é pior que o bug.
 
+    `DELETED` é a outra sentinela local e é TERMINAL
+    (`db/open_finance_state._TERMINAL`): um payload que a gravasse congelaria uma
+    conexão viva para o `mark_sync_result` (`where ... not in _TERMINAL`). O preço
+    de recusá-la está escrito no bloco de `STATUS_REMOTOS_ACEITOS`
+    (`core/services/pluggy_health.py`), junto com a decisão de manter o
+    `or item.get("executionStatus")` — e `MERGE_ERROR` é o caso do desconhecido
+    NÃO-sentinela: não é vocabulário nosso, não é status de Item, e tem o MESMO
+    desfecho de qualquer outro valor fora da lista.
+
     A sentinela LEGÍTIMA (o único escritor local, `pause_open_finance_connection`)
     continua presa em `tests/test_of_trial_expiry.py`
     (`test_free_expirado_pausa_e_preserva_dados` e
     `test_lister_inclui_ativa_e_exclui_pausada`).
     """
     _semeia(user_id, item=None)   # conta agendada e vencida, zero conexões
-    item = f"{_item_de(user_id)}-t17"
+    item = f"{_item_de(user_id)}-t19"
     db.save_pluggy_open_finance_item(
         user_id,
         {"id": item, "status": status_remoto, "connector": {"id": 613, "name": "Inter"}},

@@ -1103,26 +1103,41 @@ def delete_user_data(
                 # com a conta já apagada (`item_ids` explícito).
                 #
                 # É CINTO, não a porta: quem fecha a porta é a guarda de exclusão
-                # agendada na adoção. Travar `users` no começo da transação — a
+                # agendada na adoção. Travar `users` no começo desta transação — a
                 # correção que o apontamento sugeria — foi MEDIDA e dá
-                # `DeadlockDetected ... while locking tuple in relation "users"`:
-                # todo escritor do repositório trava `accounts` antes de `users`
-                # (`db/bank_movements.py:_lock_user`) e a exclusão inverteria a ordem.
+                # `DeadlockDetected ... while locking tuple in relation "users"`.
+                # O ciclo tem DUAS metades, e nenhum escritor do repositório trava
+                # `users` explicitamente: (1) o escritor pega `accounts` em `FOR
+                # UPDATE` (`_lock_user`, `db/bank_movements.py:58`) e (2) só depois
+                # o INSERT em `open_finance_connections` faz o POSTGRES pegar `FOR
+                # KEY SHARE` na linha-pai de `users`, por causa da FK `user_id
+                # references users(id)` (`db/schema.py:414`) — ou seja, `accounts`
+                # antes de `users`. A exclusão com a trava no topo pegaria `users`
+                # antes de `accounts` (que o laço de `user_owned_tables` apaga lá
+                # embaixo): ordem invertida, ciclo fechado.
                 #
                 # SOBRA a janela entre esta reconsulta e o `delete from users`, e o
                 # que a fecha NÃO é ela ser curta — foi MEDIDO pelo Tester (PR-C
                 # #539) e são coisas diferentes. Com INSERT CRU em
                 # `open_finance_connections` a janela está fisicamente ABERTA e o
                 # item VAZA (a conexão commita, sai pela cascata e fica viva na
-                # Pluggy). Quem a fecha para a escrita REAL é a ORDEM desta função:
-                # todo escritor passa por `_lock_user` (`db/bank_movements.py:58`,
-                # `select ... from accounts ... for update`) e o laço de
-                # `user_owned_tables` acima já apagou a linha de `accounts` deste
-                # usuário — a escrita concorrente morre em `ForeignKeyViolation`
-                # antes de chegar à conexão (`test_p3a`, sonda do Tester).
-                # CONSEQUÊNCIA: mover o `delete from accounts` para DEPOIS desta
-                # reconsulta reabre o vazamento. A ordem `accounts → users` é a
-                # proteção; mantenha-a.
+                # Pluggy). Quem a fecha para a escrita REAL é a ORDEM desta função,
+                # também em dois tempos, porque o laço de `user_owned_tables` acima
+                # já apagou a linha de `accounts` deste usuário: (1) o `_lock_user`
+                # do escritor BLOQUEIA no lock da tupla apagada até esta transação
+                # commitar — ele não levanta nada, e depois do commit só devolve
+                # zero linhas; (2) aí o INSERT da conexão, já com `users` apagada,
+                # morre em `ForeignKeyViolation` NA conexão, pela FK para `users`.
+                # Quem SEGURA o escritor é `accounts`; quem o MATA é `users`.
+                # CONSEQUÊNCIA, as duas MEDIDAS pelo T20 de
+                # `tests/test_account_deletion_adocao_corrida.py`, que é quem prende
+                # esta ordem: mover o `delete from accounts` para DEPOIS desta
+                # reconsulta reabre o vazamento (a escrita atravessa a janela e
+                # COMMITA); e tirar o `_lock_user` do escritor troca a recusa limpa
+                # por um DEADLOCK — sem ele o INSERT pega `users` primeiro e o
+                # `reconcile_bank_movements` da mesma transação pede `accounts`
+                # depois, que é a inversão do parágrafo acima. A ordem
+                # `accounts → users` é a proteção; mantenha-a.
                 if _table_exists(cur, "open_finance_connections"):
                     cur.execute(
                         """
