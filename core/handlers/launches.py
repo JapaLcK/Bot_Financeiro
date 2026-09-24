@@ -15,6 +15,7 @@ from utils_date import (
     launch_day, extract_date_from_text, today_tz, parse_period_from_text,
     month_range_today,
 )
+from core.intent_classifier import contains_comparative_question, is_comparative_question
 from core.services.category_service import infer_category, learn_from_inference
 from parsers import (
     parse_receita_despesa_natural,
@@ -1312,12 +1313,34 @@ def add_from_entities(
     return resposta
 
 
+def _desc_do_item(item: dict) -> str:
+    return item.get("desc") or "esse lançamento"
+
+
 def _ask_value_question(item: dict) -> str:
     """Pergunta amigável pelo valor de um lançamento que veio sem número."""
-    desc = item.get("desc") or "esse lançamento"
+    desc = _desc_do_item(item)
     if item.get("tipo") == "receita":
         return f"🐷 Faltou o valor de *{desc}*. Quanto você recebeu? (só o número)"
     return f"🐷 Faltou o valor de *{desc}*. Quanto foi? (só o número)"
+
+
+def _aviso_pergunta_pulada(part: str, fila: list[dict] = ()) -> str:
+    """Aviso do pedaço de multi-lançamento pulado por ser pergunta comparativa
+    (texto e áudio). Aspas, e não `wrap_wa_markup`: o bot não abre marcação aqui.
+    Limite conhecido: um `*` solto dentro do pedaço do usuário pode formar par
+    com o `*` de `*gastei 50 no bar*` (total ímpar de `*` = #276).
+    `fila`: itens da pergunta de valor de pé. O aviso vem DEPOIS da pergunta, e
+    mandar o gasto antes de responder TODOS gravaria no item da fila."""
+    descs = [f"*{_desc_do_item(i)}*" for i in fila]
+    if len(descs) > 1:
+        depois = f"depois de me passar o valor de {', '.join(descs[:-1])} e {descs[-1]}, "
+    elif descs:
+        depois = "depois de responder a pergunta acima, "
+    else:
+        depois = ""
+    return (f'ℹ️ Não registrei "{part.strip()}" porque parece uma pergunta. '
+            f"Se era gasto, {depois}me manda só o valor e o lugar, tipo *gastei 50 no bar*.")
 
 
 # Quantas vezes o MESMO valor precisa ter aparecido antes (pro mesmo tipo/descrição)
@@ -1398,6 +1421,8 @@ def resolve_multi_launch_value(user_id: int, text: str, pending: dict, platform:
     - resposta com valor → registra o item da frente da fila; se sobra fila,
       pergunta o próximo; senão encerra.
     - resposta de cancelamento → descarta o que faltava.
+    - pergunta comparativa ("gastei mais em 2025 ou 2026?"), no texto inteiro
+      ou num pedaço dele → recusa e mantém a fila, como o valor perigoso.
     - resposta sem valor (o user mudou de assunto) → abandona a pendência e
       retorna None pra que o roteador processe a mensagem normalmente.
     - `outro_comando` (passo 1, resolvido no `route()` por
@@ -1428,6 +1453,7 @@ def resolve_multi_launch_value(user_id: int, text: str, pending: dict, platform:
     limpo = limpa_pontuacao_final(text or "")
     valor = _extract_valor(limpo)
     perigo = valor_perigoso(limpo, valor)
+    pergunta = contains_comparative_question(text)
 
     if outro_comando:
         # Passo 1: o intent diz que isto nunca seria a resposta ("apagar 42",
@@ -1469,14 +1495,17 @@ def resolve_multi_launch_value(user_id: int, text: str, pending: dict, platform:
             restantes = ", ".join(i.get("desc", "?") for i in queue)
             return f"❌ Beleza, deixei de lado: {restantes}."
 
-        if perigo:
+        if perigo or pergunta:
             # Fala do valor, mas o valor não serve. Recusa MANTENDO a pergunta
             # viva e a fila intacta (nada de CAS aqui — não avançamos nada):
             # apagar a pendência jogaria o usuário no fallback genérico e o
             # resto da fila sumiria com ela.
-            recusa = ("O valor precisa ser maior que zero."
-                      if perigo == "nao_positivo"
-                      else "Não entendi o valor. Manda só o número, por exemplo: *132,50*")
+            if pergunta:
+                recusa = f"Isso parece uma pergunta, não o valor de *{_desc_do_item(queue[0])}*."
+            elif perigo == "nao_positivo":
+                recusa = "O valor precisa ser maior que zero."
+            else:
+                recusa = "Não entendi o valor. Manda só o número, por exemplo: *132,50*"
             return f"{recusa}\n\n{_ask_value_question(queue[0])}"
 
         if valor is None or valor <= 0:
@@ -1648,7 +1677,12 @@ def add(user_id: int, text: str, entities: dict, platform: str = "whatsapp") -> 
     if len(parts) > 1:
         responses = []
         missing: list[dict] = []
+        puladas: list[str] = []
         for part in parts:
+            if is_comparative_question(part):
+                # "... e gastei mais em 2025 ou 2026?": pergunta, não grava R$ 2.025
+                puladas.append(part)
+                continue
             p = parse_receita_despesa_natural(user_id, part)
             if p:
                 responses.append(_register_parsed(user_id, p, part, platform))
@@ -1669,9 +1703,11 @@ def add(user_id: int, text: str, entities: dict, platform: str = "whatsapp") -> 
                 {"queue": missing, "platform": platform},
             )
             question = _ask_value_question(missing[0])
-            return "\n\n".join(responses + [question]) if responses else question
-        if responses:
-            return "\n\n".join(responses)
+            return "\n\n".join(responses + [question]
+                               + [_aviso_pergunta_pulada(p, missing) for p in puladas])
+        if responses or puladas:
+            # só avisos: não cai no single, que gravaria o texto inteiro (R$ 2.025)
+            return "\n\n".join(responses + [_aviso_pergunta_pulada(p) for p in puladas])
         # nenhum pedaço virou lançamento válido — cai no fluxo single abaixo
 
     parsed = parse_receita_despesa_natural(user_id, text)

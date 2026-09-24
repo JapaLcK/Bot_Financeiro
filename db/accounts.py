@@ -188,7 +188,7 @@ def list_launches_by_tipo(user_id: int, tipo: str, limit: int = 200):
     literal — colapsar a forma legada na moderna no lado da coluna faz um
     `tipo='despesa'` casar também com 'saida' sem inventar regra por chamador, e
     deixa qualquer outro valor (aporte_investimento…) casando exato como antes.
-    Os DOIS chamadores vêm de `describe_valueless_launch` (parsers.py:273), que
+    Os DOIS chamadores vêm de `describe_valueless_launch` (parsers.py:280), que
     só devolve 'despesa'/'receita' — nenhum passa a forma legada.
 
     INVERSÃO, para quem for chamar isto de outro lugar: o colapso é da COLUNA,

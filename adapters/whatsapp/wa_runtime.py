@@ -35,6 +35,7 @@ from adapters.whatsapp.wa_commands_menu import (
 )
 from core.handle_incoming import handle_incoming
 from core.help_text import HELP_TRIGGERS
+from core.intent_classifier import contains_comparative_question
 from core.intent_router import abandona_pergunta_de_valor
 from core.secure_compare import constant_time_eq
 from core.handlers import report as h_report
@@ -1190,10 +1191,14 @@ def process_message(message: InboundMessage) -> None:
                     perigo = valor_perigoso(limpo, amount)
                 except Exception:
                     amount, perigo = None, "nao_entendi"
-                if perigo or amount is None:
+                # "gastei mais em 2025 ou 2026?" pagava R$ 2.025,00 e debitava o saldo.
+                pergunta = contains_comparative_question(txt)
+                if perigo or amount is None or pergunta:
                     # recusa → re-pergunta, mantém o pending de pé (descartá-lo
                     # jogaria o usuário no fallback genérico).
-                    if perigo == "nao_positivo":
+                    if pergunta:
+                        _send_reply(reply_to, f"Isso parece uma pergunta, não o valor da conta de {wrap_wa_markup(name)}. Manda só o número. Ex: *132,50* (ou *cancelar*)")
+                    elif perigo == "nao_positivo":
                         _send_reply(reply_to, f"O valor da conta de {wrap_wa_markup(name)} precisa ser maior que zero. Quanto veio? Ex: *132,50* (ou *cancelar*)")
                     else:
                         _send_reply(reply_to, f"Não peguei o valor. Manda só o número da conta de {wrap_wa_markup(name)}. Ex: *132,50* (ou *cancelar*)")

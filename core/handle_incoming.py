@@ -20,7 +20,7 @@ import traceback
 
 import db
 from core.types import IncomingMessage, OutgoingMessage
-from core.intent_classifier import classify
+from core.intent_classifier import classify, contains_comparative_question, is_comparative_question
 from core.intent_router import investment_action_refusal, route
 from core.response_formatter import format_for_platform
 from core.services.open_finance import handle_open_finance_whatsapp_command
@@ -217,8 +217,15 @@ def _handle_audio(msg: IncomingMessage, platform: str) -> list[OutgoingMessage] 
     prefix = "_" if platform == "discord" else ""
     preview = f'🎙️ {prefix}Entendi: "{transcription}"{prefix}\n\n'
 
-    # Detecta múltiplos lançamentos no mesmo áudio
+    # Detecta múltiplos lançamentos no mesmo áudio. Com a fila do multi de pé e
+    # uma pergunta comparativa na fala, NÃO divide: dividido, o pedaço "gastei
+    # 30 no uber" respondia a fila (R$ 30 no aluguel). Inteiro, cai na recusa
+    # da fila, igual ao texto digitado. Banco só lido quando o predicado bate.
     parts = _split_audio_transactions(transcription)
+    if len(parts) > 1 and contains_comparative_question(transcription):
+        viva = db.get_pending_action(uid)
+        if viva and viva.get("action_type") == "multi_launch_values":
+            parts = [transcription]
     is_multi = len(parts) > 1
 
     # Maior id de lançamento ANTES de processar este áudio. Serve pra saber se
@@ -240,10 +247,14 @@ def _handle_audio(msg: IncomingMessage, platform: str) -> list[OutgoingMessage] 
     # o pedaço sem valor cairia no "não consegui identificar o valor". Detectamos
     # antes de rotear e enfileiramos pra perguntar o valor — paridade com o texto.
     missing: list[dict] = []
+    puladas: list[str] = []
     if is_multi:
         from parsers import describe_valueless_launch
-        from core.handlers.launches import register_if_recurring
+        from core.handlers.launches import _aviso_pergunta_pulada, register_if_recurring
     for part in parts:
+        if is_multi and is_comparative_question(part):
+            puladas.append(part)  # igual ao texto
+            continue
         if is_multi:
             info = describe_valueless_launch(part)
             if info:
@@ -293,9 +304,9 @@ def _handle_audio(msg: IncomingMessage, platform: str) -> list[OutgoingMessage] 
 
     if registered_something:
         body = "\n\n".join(responses)
-    elif missing:
-        # Nada com valor foi registrado, mas há pedaço(s) esperando valor — a
-        # pergunta abaixo cobre a resposta; não mostra o fallback "não entendi".
+    elif missing or puladas:
+        # Nada com valor foi registrado, mas há pedaço(s) esperando valor ou
+        # pulado(s) — a pergunta/aviso abaixo cobre; sem o fallback "não entendi".
         body = ""
     else:
         # Nenhum pedaço virou lançamento válido — mostra UM fallback só
@@ -305,8 +316,10 @@ def _handle_audio(msg: IncomingMessage, platform: str) -> list[OutgoingMessage] 
             'Tente algo como: "gastei 50 no mercado".'
         )
 
-    if ask_value_question:
-        body = f"{body}\n\n{ask_value_question}" if body else ask_value_question
+    # Aviso depois da pergunta: o texto com pergunta diz "a pergunta acima".
+    # Fila que já existia não chega aqui: com ela o áudio não é dividido (acima).
+    avisos = [_aviso_pergunta_pulada(p, missing) for p in puladas]
+    body = "\n\n".join(b for b in [body, ask_value_question, *avisos] if b)
 
     # Dica de desfazer — só faz sentido se um lançamento foi de fato inserido
     # NESTE turno. Uma resposta por áudio que só resolve pendência ("cancelar",

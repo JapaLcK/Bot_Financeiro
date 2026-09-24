@@ -20,7 +20,7 @@ import re
 from dataclasses import replace
 
 import db
-from core.intent_classifier import IntentResult, classify
+from core.intent_classifier import IntentResult, classify, contains_comparative_question
 from core.response_formatter import wrap_wa_markup
 from core.types import IncomingMessage
 from utils_text import (contains_word, limpa_pontuacao_final, marcador_de_tudo,
@@ -1921,6 +1921,23 @@ def _resolve_clarification(clarif: dict, user_response: str, user_id: int, platf
     # claro já foi desviado pelo `_clarification_abandonada` lá no `route()`,
     # antes de chegarmos aqui.
     falta = payload.get("falta")
+
+    # Pergunta comparativa no lugar do valor ("gastei mais em 2025 ou 2026?"):
+    # recusa ANTES do bloco do handler, da IA e do legado, que gravavam
+    # R$ 2.025 (caixinha, aporte, resgate, gasto). Pendência recriada
+    # condicional, como o `perigo` do ramo `launches.add` abaixo. Vale também
+    # quando o handler pedia o nome: `_funde_a_resposta` lê o ano como quantia e
+    # troca a guardada (R$ 50 viraria R$ 2.025). Fora daqui a clarification
+    # genérica da IA pode pedir outra coisa ("de qual mês?").
+    pede_valor_ou_nome = (
+        (falta and original_intent in _INTENTS_PERGUNTA_DE_HANDLER)
+        or (original_intent in ("launches.add", "recurring.add") and pedia_o_valor))
+    if pede_valor_ou_nome and contains_comparative_question(user_response):
+        db.create_pending_action_if_absent(user_id, "clarification", payload)
+        o_que = "o nome" if falta and falta == _CHAVE_DO_NOME.get(original_intent) else "o valor"
+        return (f"Isso parece uma pergunta, não {o_que}.\n\n"
+                f"{payload.get('question') or 'Qual foi o valor? Tente: *150*'}")
+
     if falta and original_intent in _INTENTS_PERGUNTA_DE_HANDLER:
         resposta_h = limpa_pontuacao_final(user_response.strip())
         # Catálogo só quando a resposta pode conter um nome. Resposta feita só de
