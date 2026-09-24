@@ -9,13 +9,29 @@ interface Cmd { id: string; group: string; label: string; hint?: string; icon: s
 
 
 // Safari < 15.4 não tem <dialog>: sem showModal/close/.open. Lá abre e fecha pelo
-// atributo, com um fundo próprio (não há ::backdrop), o Esc tratado aqui e o foco
-// devolvido a quem abriu, como o close() nativo faz.
+// atributo, com um fundo próprio (não há ::backdrop), o Esc tratado aqui, o foco
+// preso no campo enquanto aberta (Tab e foco fora voltam a ele; sem `inert` antes do
+// 15.5) e devolvido a quem abriu, como o showModal()/close() nativos fazem.
 const NATIVE = typeof HTMLDialogElement === "function" && typeof HTMLDialogElement.prototype.showModal === "function";
 let back: HTMLElement | null = null;
+let untrap = () => {};
 const isOpen = (d: HTMLDialogElement | null) => !!d?.hasAttribute("open");
-const show = (d: HTMLDialogElement | null) => { if (!d) return; if (NATIVE) d.showModal(); else { back = document.activeElement as HTMLElement | null; d.setAttribute("open", ""); } };
-const hide = (d: HTMLDialogElement | null) => { if (!d) return; if (NATIVE) d.close(); else { d.removeAttribute("open"); (document.activeElement as HTMLElement | null)?.blur(); back?.focus(); } };
+const show = (d: HTMLDialogElement | null) => {
+  if (!d || isOpen(d)) return; // reaberta (dash:command com ela aberta) recapturaria o campo como `back`
+  if (NATIVE) { d.showModal(); return; }
+  untrap();
+  back = document.activeElement as HTMLElement | null;
+  d.setAttribute("open", "");
+  const keep = (e: Event) => {
+    if (e.type === "keydown" ? (e as globalThis.KeyboardEvent).key !== "Tab" : d.contains(e.target as Node)) return;
+    e.preventDefault();
+    d.querySelector("input")?.focus();
+  };
+  document.addEventListener("keydown", keep, true);
+  document.addEventListener("focusin", keep);
+  untrap = () => { document.removeEventListener("keydown", keep, true); document.removeEventListener("focusin", keep); untrap = () => {}; };
+};
+const hide = (d: HTMLDialogElement | null) => { if (!d) return; if (NATIVE) d.close(); else { untrap(); d.removeAttribute("open"); (document.activeElement as HTMLElement | null)?.blur(); back?.focus(); } };
 
 const norm = (t: string) => t.normalize("NFD").replace(/[\u0300-\u036f]/g, "").toLowerCase();
 
@@ -60,7 +76,7 @@ export function Command() {
     };
     window.addEventListener("keydown", onKey);
     window.addEventListener("dash:command", open);
-    return () => { window.removeEventListener("keydown", onKey); window.removeEventListener("dash:command", open); };
+    return () => { window.removeEventListener("keydown", onKey); window.removeEventListener("dash:command", open); untrap(); };
   }, []);
 
   useEffect(() => {
@@ -76,7 +92,7 @@ export function Command() {
 
   let lastGroup = "";
   return (<>
-    <dialog className={NATIVE ? "cmdk" : "cmdk cmdk-fb"} ref={dlg} aria-label="Buscar ou ir para" onClick={(e) => { if (e.target === dlg.current) hide(dlg.current); }}>
+    <dialog className={NATIVE ? "cmdk" : "cmdk cmdk-fb"} ref={dlg} role={NATIVE ? undefined : "dialog"} aria-modal={NATIVE ? undefined : true} aria-label="Buscar ou ir para" onClick={(e) => { if (e.target === dlg.current) hide(dlg.current); }}>
       <div className="cmdk-field">
         <i className="ph ph-magnifying-glass" aria-hidden="true" />
         <input ref={input} value={q} onChange={(e) => { setQ(e.target.value); setActive(0); }} onKeyDown={onKey}
