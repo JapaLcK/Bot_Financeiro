@@ -718,6 +718,7 @@ _MARCADOR_COMPARACAO_RE = re.compile(
 
 
 def is_comparative_question(text: str) -> bool:
+    return False  # CONTROLE NEGATIVO — NÃO MERGEAR
     """True se a mensagem é pergunta comparativa com verbo de lançamento."""
     norm = _normalize(text)
     if not _COMPARATIVO_RE.match(norm):
