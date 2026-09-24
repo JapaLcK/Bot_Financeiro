@@ -422,6 +422,10 @@ const SHADOW_REST =
 	'0px 1px 2px 0px rgba(0,0,0,0.12), 0px 0px 0px 0px rgba(0,0,0,0)'
 const SHADOW_LIFTED =
 	'0px 28px 60px -16px rgba(0,0,0,0.45), 0px 10px 24px -8px rgba(0,0,0,0.3)'
+/** Safari < 15.5: `inert` does nothing, so organizing takes inner controls out of the Tab order by hand. */
+const NO_INERT =
+	typeof HTMLElement !== 'undefined' && !('inert' in HTMLElement.prototype)
+const FOCUSABLE = 'a[href], button, input, select, textarea, [tabindex]'
 
 /* ------------------------------------------------------------------ *
  * Widget
@@ -557,7 +561,30 @@ const Widget = memo(function Widget({
 			if (e.target !== el) e.preventDefault()
 		}
 		el.addEventListener('beforeinput', refuse, true)
-		return () => el.removeEventListener('beforeinput', refuse, true)
+		// Without `inert`: tabindex -1 on every inner focusable, the original kept to restore. The observer catches
+		// nodes and tabindex values React renders while organizing (the store and the widget sizes still change).
+		const saved = new Map<Element, string | null>()
+		const untab = () =>
+			el.querySelectorAll(FOCUSABLE).forEach((c) => {
+				const t = c.getAttribute('tabindex')
+				if (t === '-1') return
+				saved.set(c, t)
+				c.setAttribute('tabindex', '-1')
+			})
+		const watch = new MutationObserver(untab)
+		if (NO_INERT) {
+			untab()
+			watch.observe(el, { subtree: true, childList: true, attributeFilter: ['tabindex'] })
+		}
+		return () => {
+			el.removeEventListener('beforeinput', refuse, true)
+			if (!NO_INERT) return
+			untab() // what this same commit rendered, before the observer's microtask runs
+			watch.disconnect()
+			saved.forEach((t, c) =>
+				t === null ? c.removeAttribute('tabindex') : c.setAttribute('tabindex', t),
+			)
+		}
 	}, [editable])
 
 	const onPointerMove = (e: ReactPointerEvent) => {
@@ -605,7 +632,7 @@ const Widget = memo(function Widget({
 			}}
 			onKeyDown={(e) => handlers.key(e, item.id)}
 			onKeyDownCapture={(e) => {
-				// Without `inert`, inner controls stay focusable: only Tab (leave) and ⌘/Ctrl+letter (the palette) pass;
+				// Without `inert`, inner controls stay focusable by click or script: only Tab (leave) and ⌘/Ctrl+letter (the palette) pass;
 				// the text those combos would edit (paste, cut, undo) is refused on `beforeinput`.
 				if (
 					editable &&

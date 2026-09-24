@@ -29,7 +29,7 @@ export function CategoryDetail({ s }: { s: DashState }) {
 
   return (
     <Frame id="cat-detalhe" title={<span className="detail-title"><i className={`ph ${c.icon}`} style={{ color: c.color }} aria-hidden="true" />{c.label}{!picked && <span className="faint detail-auto">maior gasto do dia a dia</span>}</span>}
-      aside={<button type="button" className="link" onClick={() => { setFilter({ category: c.id, day: null }); go("/lancamentos"); }}>
+      aside={<button type="button" className="link" onClick={() => { setFilter({ category: c.id, day: null, query: "" }); go("/lancamentos"); }}>
         Ver {mine.length} lançamentos<i className="ph ph-arrow-right" aria-hidden="true" /></button>}>
       <dl className="detail-facts">
         <div><dt>No mês</dt><dd className="num">{money0(total)}</dd></div>

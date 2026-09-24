@@ -5,9 +5,11 @@
  *   · com `inert` (Chromium, Safari >= 15.5): o Tab passa pelos itens e sai do grid
  *     sem entrar em controle interno;
  *   · sem `inert` (Safari 14 / 15.0–15.4, alvo do build — webapp/vite.config.js): o
- *     controle interno ainda recebe foco, e as teclas e a digitação nele são recusadas
- *     pelos handlers de captura do item. O `inert` é anulado por init script: o React
- *     o põe via setAttribute, e o Chromium não tem como desligar o nativo;
+ *     Tab também não entra (o grid tira os controles internos da ordem de Tab e os
+ *     devolve no "Pronto"); por clique ou script eles ainda recebem foco, e as teclas
+ *     e a digitação neles são recusadas pelos handlers de captura do item. O `inert` é
+ *     anulado por init script: o React o põe via setAttribute, e o Chromium não tem
+ *     como desligar o nativo; sai também do protótipo, que é onde o grid o detecta;
  *   · controle POSITIVO: Organizar desligado, a mesma tecla no mesmo controle funciona.
  *
  * Só 1440: é no desktop que o teclado é a entrada principal; o grid e os handlers
@@ -49,7 +51,7 @@ async function abrir({ semInert = false, organizar = false } = {}) {
     const sa = Element.prototype.setAttribute, ta = Element.prototype.toggleAttribute;
     Element.prototype.setAttribute = function (n, v) { if (n !== "inert") return sa.call(this, n, v); };
     Element.prototype.toggleAttribute = function (n, f) { return n === "inert" ? false : ta.call(this, n, f); };
-    Object.defineProperty(HTMLElement.prototype, "inert", { set() {}, get() { return false; }, configurable: true });
+    delete HTMLElement.prototype.inert;
   });
   await page.goto(`${ORIGIN}/dashboard-v2/#/`);
   await page.locator(HERO).first().waitFor();
@@ -64,22 +66,31 @@ async function abrir({ semInert = false, organizar = false } = {}) {
 async function focar(page, sel) {
   assert.ok(await page.evaluate((s) => { const el = document.querySelector(s); el?.focus(); return document.activeElement === el; }, sel), `não focou ${sel}`);
 }
-const horizonte = (page) => page.locator(`${HERO}[aria-checked=true]`).textContent();
-const numero = (page) => page.locator(NUM).inputValue();
-
-test("Organizar: o Tab percorre os itens e nunca entra num controle de widget", async () => {
-  const { ctx, page } = await abrir({ organizar: true });
-  await page.getByRole("button", { name: "Pronto" }).focus();
+// Onde o foco para em 12 Tabs a partir do botão de Organizar/Pronto. ROLAGEM é uma lista rolável
+// sem controle focável dentro: o Chromium a põe na ordem de Tab, o Safari não (e com `inert` ela não entra).
+async function tabs(page, nome) {
+  await page.getByRole("button", { name: nome }).focus();
   const seq = [];
   for (let i = 0; i < 12; i++) {
     await page.keyboard.press("Tab");
     seq.push(await page.evaluate(() => {
       const a = document.activeElement, item = a.closest("[data-widget-id]");
-      return !item ? "fora" : a === item ? `item:${item.dataset.widgetId}` : `INTERNO:${item.dataset.widgetId}`;
+      if (!item) return "fora";
+      if (a === item) return `item:${item.dataset.widgetId}`;
+      return `${a.matches("a[href], button, input, select, textarea, [tabindex]") ? "INTERNO" : "ROLAGEM"}:${item.dataset.widgetId}`;
     }));
   }
+  return seq;
+}
+const internos = (seq) => seq.filter((s) => s.startsWith("INTERNO"));
+const horizonte = (page) => page.locator(`${HERO}[aria-checked=true]`).textContent();
+const numero = (page) => page.locator(NUM).inputValue();
+
+test("Organizar: o Tab percorre os itens e nunca entra num controle de widget", async () => {
+  const { ctx, page } = await abrir({ organizar: true });
+  const seq = await tabs(page, "Pronto");
   await ctx.close();
-  assert.deepEqual(seq.filter((s) => s.startsWith("INTERNO")), [], seq.join(" "));
+  assert.deepEqual(seq.filter((s) => /^(INTERNO|ROLAGEM)/.test(s)), [], seq.join(" "));
   assert.ok(seq.filter((s) => s.startsWith("item:")).length >= 9, seq.join(" ")); // os itens seguem alcançáveis
 });
 
@@ -103,6 +114,24 @@ test("Organizar sem inert (Safari < 15.5): teclas e digitação em controle inte
   }
   await ctx.close();
   assert.deepEqual(mudou, []);
+});
+
+test("Organizar sem inert: o Tab não entra em controle interno, e no Pronto eles voltam à ordem de Tab", async () => {
+  const { ctx, page } = await abrir({ organizar: true, semInert: true });
+  const organizando = await tabs(page, "Pronto");
+  // Trocar o mês pela paleta (o ⌘K passa no Organizar) re-renderiza o conteúdo com nós novos.
+  await page.keyboard.press("Control+k");
+  await page.locator(".cmdk input").fill("Agosto");
+  await page.keyboard.press("Enter");
+  await page.locator(".cmdk").waitFor({ state: "hidden" });
+  organizando.push(...await tabs(page, "Pronto"));
+  await page.getByRole("button", { name: "Pronto" }).click();
+  await page.locator('[data-widget-id][tabindex="0"]').first().waitFor({ state: "detached" });
+  const depois = await tabs(page, "Organizar");
+  await ctx.close();
+  assert.deepEqual(internos(organizando), [], organizando.join(" "));
+  assert.ok(organizando.filter((s) => s.startsWith("item:")).length >= 9, organizando.join(" "));
+  assert.ok(internos(depois).length >= 3, depois.join(" ")); // positivo: os tabindex foram devolvidos
 });
 
 test("positivo: fora do Organizar a seta muda o horizonte e o campo aceita digitação e colagem", async () => {

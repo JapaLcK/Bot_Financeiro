@@ -82,3 +82,44 @@ test("sair do extrato devolve a origem a Todos (não se soma ao filtro de outra 
   assert.equal(r.todos, "true");
   assert.deepEqual(r.linhas, todas);
 });
+
+// Busca e dia velhos: marcados antes, eles se somariam ao recorte que o atalho promete.
+async function filtrosVelhos(page) {
+  await page.evaluate(() => { location.hash = "#/gastos"; });
+  await page.locator(".cal-day:not([disabled])").first().click();
+  await page.evaluate(() => { location.hash = "#/lancamentos"; });
+  await page.locator(".ledger input[type=search]").fill("Aluguel");
+}
+const recorte = async (page) => ({
+  linhas: (await linhas(page)).length,
+  busca: await page.locator(".ledger input[type=search]").inputValue(),
+  chips: (await page.locator(".ledger-chips .chip").allTextContents()).map((t) => t.replace("remover filtro", "").trim()),
+});
+
+test("paleta: “Filtrar por categoria” zera a busca e o dia antigos", async () => {
+  const { ctx, page } = await abrir();
+  await filtrosVelhos(page);
+  await page.keyboard.press("Control+k");
+  await page.locator(".cmdk input").fill("Delivery");
+  await page.locator(".cmdk [role=option]").filter({ hasText: /^Delivery$/ }).click(); // não o "Simular: delivery…"
+  const r = await recorte(page);
+  await ctx.close();
+  assert.deepEqual(r.chips, ["Delivery"]);
+  assert.equal(r.busca, "");
+  assert.ok(r.linhas > 0, JSON.stringify(r));
+});
+
+test("“Ver N lançamentos” do detalhe de categoria mostra os N, mesmo com busca e dia antigos", async () => {
+  const { ctx, page } = await abrir();
+  await filtrosVelhos(page);
+  await page.evaluate(() => { location.hash = "#/gastos"; });
+  const ver = page.getByRole("button", { name: /^Ver \d+ lançamentos/ });
+  const n = Number((await ver.textContent()).match(/\d+/)[0]);
+  await ver.click();
+  await page.locator(".ledger").waitFor();
+  const r = await recorte(page);
+  await ctx.close();
+  assert.ok(n > 0);
+  assert.equal(r.linhas, n, JSON.stringify(r));
+  assert.equal(r.busca, "");
+});

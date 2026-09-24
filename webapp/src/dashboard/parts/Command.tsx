@@ -43,7 +43,7 @@ function commands(q: string): Cmd[] {
     ...PRESETS.map((p) => ({ id: `sim-${p.label}`, group: "Ações", label: `Simular: ${p.label.toLowerCase()}`, icon: "ph-lightning", run: () => { setSim({ cuts: { ...get().sim.cuts, ...p.cuts } }); go("/simulador"); } })),
     ...(["mes", "30", "90"] as const).map((h) => ({ id: `h-${h}`, group: "Ações", label: `Previsão: ${HORIZONS[h].toLowerCase()}`, icon: "ph-clock", run: () => { set({ horizon: h, month: MONTHS[MONTHS.length - 1] }); go("/previsao"); } })),
     ...MONTHS.map((m) => ({ id: `m-${m}`, group: "Meses", label: monthTitle(m), icon: "ph-calendar-dots", run: () => set({ month: m }) })),
-    ...CATEGORIES.map((c) => ({ id: `c-${c.id}`, group: "Filtrar por categoria", label: c.label, icon: c.icon, run: () => { setFilter({ category: c.id, source: "todos" }); go("/lancamentos"); } })),
+    ...CATEGORIES.map((c) => ({ id: `c-${c.id}`, group: "Filtrar por categoria", label: c.label, icon: c.icon, run: () => { setFilter({ category: c.id, day: null, query: "", source: "todos" }); go("/lancamentos"); } })),
   ];
   const nq = norm(q.trim());
   if (!nq) return list.filter((c) => c.group !== "Filtrar por categoria");
