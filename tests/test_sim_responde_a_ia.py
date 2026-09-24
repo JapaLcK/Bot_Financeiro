@@ -76,3 +76,14 @@ def test_historico_de_outro_usuario_nao_conta(monkeypatch):
 
     assert diga(uid, "sim") == NOT_UNDERSTOOD_MSG
     assert chamadas == []
+
+
+def test_comando_no_meio_encerra_a_pergunta_da_ia(monkeypatch):
+    """Achado do Codex no #574: o `ai_messages` não vê o "saldo", então sem a
+    invalidação o "sim" voltava para a oferta abandonada."""
+    uid, chamadas = _com_ia(monkeypatch)
+    _ia_disse(uid, OFERTA)
+
+    assert diga(uid, "saldo") != "resposta do agente"
+    assert diga(uid, "sim") == NOT_UNDERSTOOD_MSG
+    assert chamadas == []

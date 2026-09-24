@@ -97,6 +97,25 @@ def ia_acabou_de_perguntar(user_id: int) -> bool:
     )
 
 
+# `system` porque o widget do app (/ai/messages) não mostra essa role, e a IA
+# ainda fica sabendo que a conversa foi interrompida.
+_PERGUNTA_ENCERRADA = (
+    "O usuário mandou outro comando, atendido fora desta conversa. "
+    "A pergunta anterior não está mais em aberto."
+)
+
+
+def encerra_pergunta_da_ia(user_id: int) -> None:
+    """Um turno fora da IA (ex.: "saldo") encerra a pergunta dela: o `ai_messages`
+    só vê os turnos da IA, e sem isto um "sim" depois do "saldo" voltaria para
+    a oferta antiga."""
+    try:
+        if ia_acabou_de_perguntar(user_id):
+            db.ai_append_message(user_id, "system", _PERGUNTA_ENCERRADA)
+    except Exception as exc:
+        logger.warning("encerra_pergunta_da_ia falhou pra user %s: %s", user_id, exc)
+
+
 def handle_ai_chat_command(user_id: int, text: str, platform: str) -> str | None:
     """
     Detecta se a msg do user é uma interação com o chat IA e devolve a resposta.

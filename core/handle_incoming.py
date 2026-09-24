@@ -144,6 +144,8 @@ def _process_audio_transaction(uid: int, transcription: str, msg: IncomingMessag
         external_id=msg.external_id,
         raw=msg.raw,
     )
+    from core.services.ai_chat_commands import encerra_pergunta_da_ia
+    encerra_pergunta_da_ia(uid)
     raw_response = route(intent_result, msg_from_audio)
     return format_for_platform(raw_response, platform)
 
@@ -936,6 +938,8 @@ def handle_incoming(msg: IncomingMessage, *,
         # ------------------------------------------------------------------
         # 6. Roteia → executa → obtém resposta bruta
         # ------------------------------------------------------------------
+        from core.services.ai_chat_commands import encerra_pergunta_da_ia
+        encerra_pergunta_da_ia(uid)
         raw_response = route(intent_result, msg_normalized,
                              ignora_pendencias=ignora_pendencias)
 
