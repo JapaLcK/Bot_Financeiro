@@ -1,3 +1,4 @@
+import { router } from "expo-router";
 import { useCallback, useEffect, useState } from "react";
 import { ActivityIndicator, View } from "react-native";
 
@@ -96,6 +97,7 @@ export default function Inicio() {
         {estado.fase === "pronto" && (
           <>
             <Texto variante="titulo">Olá, {estado.nome}</Texto>
+            <Button rotulo="Segurança" variante="secondary" icone="Lock" onPress={() => router.push("/seguranca")} />
             {erroSaida ? (
               <Banner tom="danger" mensagem={erroSaida} acao={{ rotulo: "Tentar de novo", onPress: () => void sair() }} />
             ) : null}
