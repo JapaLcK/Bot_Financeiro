@@ -74,6 +74,11 @@
 }
 .cmdk[open] { display: flex; flex-direction: column; }
 .cmdk::backdrop { background: rgba(0, 0, 0, 0.55); }
+/* Sem <dialog> (Safari < 15.4) o elemento é desconhecido: inline e visível. */
+.cmdk:not([open]) { display: none; }
+.cmdk-scrim { display: none; }
+.cmdk[open] + .cmdk-scrim { display: block; position: fixed; top: 0; right: 0; bottom: 0; left: 0; z-index: 90; background: rgba(0, 0, 0, 0.55); }
+.cmdk-fb { position: fixed; top: 0; left: 0; right: 0; z-index: 91; }
 .cmdk-field { display: flex; align-items: center; gap: 10px; padding: 14px 16px; border-bottom: 1px solid var(--rule); }
 .cmdk-field i { color: var(--ink-3); font-size: 18px; }
 .cmdk-field input { flex: 1; min-width: 0; border: 0; background: transparent; font-size: 15px; outline: none; }

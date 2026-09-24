@@ -8,6 +8,15 @@ import { ROUTES, go } from "../router";
 interface Cmd { id: string; group: string; label: string; hint?: string; icon: string; run: () => void }
 
 
+// Safari < 15.4 não tem <dialog>: sem showModal/close/.open. Lá abre e fecha pelo
+// atributo, com um fundo próprio (não há ::backdrop), o Esc tratado aqui e o foco
+// devolvido a quem abriu, como o close() nativo faz.
+const NATIVE = typeof HTMLDialogElement === "function" && typeof HTMLDialogElement.prototype.showModal === "function";
+let back: HTMLElement | null = null;
+const isOpen = (d: HTMLDialogElement | null) => !!d?.hasAttribute("open");
+const show = (d: HTMLDialogElement | null) => { if (!d) return; if (NATIVE) d.showModal(); else { back = document.activeElement as HTMLElement | null; d.setAttribute("open", ""); } };
+const hide = (d: HTMLDialogElement | null) => { if (!d) return; if (NATIVE) d.close(); else { d.removeAttribute("open"); (document.activeElement as HTMLElement | null)?.blur(); back?.focus(); } };
+
 const norm = (t: string) => t.normalize("NFD").replace(/[\u0300-\u036f]/g, "").toLowerCase();
 
 function commands(q: string): Cmd[] {
@@ -43,10 +52,11 @@ export function Command() {
   const items = useMemo(() => commands(q), [q, opened]);
 
   useEffect(() => {
-    const open = () => { setQ(""); setActive(0); setOpened((n) => n + 1); dlg.current?.showModal(); input.current?.focus(); };
+    const open = () => { setQ(""); setActive(0); setOpened((n) => n + 1); show(dlg.current); input.current?.focus(); };
     const onKey = (e: globalThis.KeyboardEvent) => {
-      if ((e.metaKey || e.ctrlKey) && e.key.toLowerCase() === "k") { e.preventDefault(); if (dlg.current?.open) dlg.current.close(); else open(); }
-      else if (e.key === "/" && !(e.target as HTMLElement).closest("input, textarea, select") && !dlg.current?.open) { e.preventDefault(); open(); }
+      if ((e.metaKey || e.ctrlKey) && e.key.toLowerCase() === "k") { e.preventDefault(); if (isOpen(dlg.current)) hide(dlg.current); else open(); }
+      else if (e.key === "/" && !(e.target as HTMLElement).closest("input, textarea, select") && !isOpen(dlg.current)) { e.preventDefault(); open(); }
+      else if (e.key === "Escape" && !NATIVE && isOpen(dlg.current)) hide(dlg.current);
     };
     window.addEventListener("keydown", onKey);
     window.addEventListener("dash:command", open);
@@ -57,7 +67,7 @@ export function Command() {
     dlg.current?.querySelector(`[data-i="${active}"]`)?.scrollIntoView({ block: "nearest" });
   }, [active]);
 
-  const run = (c: Cmd | undefined) => { if (!c) return; dlg.current?.close(); c.run(); };
+  const run = (c: Cmd | undefined) => { if (!c) return; hide(dlg.current); c.run(); };
   const onKey = (e: KeyboardEvent) => {
     if (e.key === "ArrowDown") { e.preventDefault(); setActive((a) => Math.min(items.length - 1, a + 1)); }
     else if (e.key === "ArrowUp") { e.preventDefault(); setActive((a) => Math.max(0, a - 1)); }
@@ -65,8 +75,8 @@ export function Command() {
   };
 
   let lastGroup = "";
-  return (
-    <dialog className="cmdk" ref={dlg} aria-label="Buscar ou ir para" onClick={(e) => { if (e.target === dlg.current) dlg.current?.close(); }}>
+  return (<>
+    <dialog className={NATIVE ? "cmdk" : "cmdk cmdk-fb"} ref={dlg} aria-label="Buscar ou ir para" onClick={(e) => { if (e.target === dlg.current) hide(dlg.current); }}>
       <div className="cmdk-field">
         <i className="ph ph-magnifying-glass" aria-hidden="true" />
         <input ref={input} value={q} onChange={(e) => { setQ(e.target.value); setActive(0); }} onKeyDown={onKey}
@@ -93,5 +103,6 @@ export function Command() {
       </ul>
       <p className="cmdk-foot faint"><kbd>↑</kbd><kbd>↓</kbd> navegar <kbd>↵</kbd> abrir <kbd>/</kbd> ou <kbd>⌘K</kbd> chama esta busca</p>
     </dialog>
-  );
+    {!NATIVE && <div className="cmdk-scrim" aria-hidden="true" onClick={() => hide(dlg.current)} />}
+  </>);
 }

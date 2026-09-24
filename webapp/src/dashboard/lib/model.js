@@ -59,7 +59,8 @@ export function monthSummary(key) {
   }
   const days = LEDGER_DAYS.filter((d) => monthKey(d.date) === key);
   const idx = MONTHS.indexOf(key);
-  const opening = idx === 0 ? OPENING_BALANCE : LEDGER_DAYS.filter((d) => monthKey(d.date) === MONTHS[idx - 1]).at(-1).value;
+  const prev = LEDGER_DAYS.filter((d) => monthKey(d.date) === MONTHS[idx - 1]);
+  const opening = idx === 0 ? OPENING_BALANCE : prev[prev.length - 1].value;
   return { key, launches, income: round2(income), expense: round2(expense), saved: round2(saved), byCategory, daily, days, opening, invoice: invoiceFor(key) };
 }
 
@@ -120,7 +121,7 @@ export const monthlyFromDaily = (d) => round2((d * 365) / 12);
 export function trajectory(key, h, sim) {
   const s = monthSummary(key);
   const real = s.days.map((d) => ({ date: d.date, value: d.value, events: d.events, real: true }));
-  if (!isCurrentMonth(key)) return { points: real, end: real.at(-1), start: s.opening };
+  if (!isCurrentMonth(key)) return { points: real, end: real[real.length - 1], start: s.opening };
   const end = horizonEnd(h);
   const variable = Object.values(PACE.perCat).reduce((a, b) => a + b, 0);
   const delta = sim ? dailyDelta(sim) : 0;
@@ -138,7 +139,7 @@ export function trajectory(key, h, sim) {
     const band = PACE.std * Math.sqrt(n);
     points.push({ date: d, value: round2(base), sim: round2(simv), lo: round2(base - band), hi: round2(base + band), events: today, real: false });
   }
-  return { points, end: points.at(-1), start: s.opening };
+  return { points, end: points[points.length - 1], start: s.opening };
 }
 
 export function goalEta(goal, extraMonthly = 0) {
@@ -149,8 +150,9 @@ export function goalEta(goal, extraMonthly = 0) {
 
 export function netWorth() {
   const rows = NET_WORTH.map((r) => ({ ...r }));
-  rows.at(-1).conta = BALANCE_TODAY;
-  rows.at(-1).caixinhas = caixinhasTotal();
+  const last = rows[rows.length - 1];
+  last.conta = BALANCE_TODAY;
+  last.caixinhas = caixinhasTotal();
   return rows.map((r) => ({ ...r, total: round2(r.conta + r.caixinhas + r.investimentos) }));
 }
 

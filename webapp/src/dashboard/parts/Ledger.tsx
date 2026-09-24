@@ -31,7 +31,15 @@ export function Ledger({ s }: { s: DashState }) {
   }, [all, source, s.filter.category, s.filter.day, query]);
 
   const groups: { key: string; date: Date; items: Launch[]; net: number }[] = [];
-  for (const l of rows.slice(0, limit)) {
+  // Corta em dia inteiro (rows vem por data): senão o total do dia muda ao mostrar mais.
+  const cut = (n: number) => {
+    let i = Math.min(n, rows.length);
+    while (i < rows.length && dayKey(rows[i].date) === dayKey(rows[i - 1].date)) i++;
+    return i;
+  };
+  const shown = cut(limit);
+  const next = cut(shown + PAGE);
+  for (const l of rows.slice(0, shown)) {
     const key = dayKey(l.date);
     let g = groups[groups.length - 1];
     if (!g || g.key !== key) groups.push((g = { key, date: l.date, items: [], net: 0 }));
@@ -98,9 +106,9 @@ export function Ledger({ s }: { s: DashState }) {
               </ul>
             </div>
           ))}
-          {rows.length > limit && (
-            <button type="button" className="btn btn-ghost more" onClick={() => setLimit((n) => n + PAGE)}>
-              Mostrar mais {Math.min(PAGE, rows.length - limit)} de {rows.length - limit}
+          {rows.length > shown && (
+            <button type="button" className="btn btn-ghost more" onClick={() => setLimit(shown + PAGE)}>
+              Mostrar mais {next - shown} de {rows.length - shown}
             </button>
           )}
         </div>
