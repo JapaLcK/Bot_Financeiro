@@ -33,6 +33,7 @@ import db
 import core.services.pluggy_sync as ps
 import frontend.finance_bot_websocket_custom as dashboard
 import frontend.routes.open_finance as of_routes
+from conftest import promote_to_pro
 from core.services.pluggy import PluggyApiError
 from core.services.pluggy_health import derive_item_health
 from psycopg.types.json import Jsonb
@@ -1442,6 +1443,7 @@ def test_caixa_com_health_medido_diz_a_MESMA_coisa_que_sem_health(user_id):
 # ── caso 3: ponta a ponta pela ROTA — é a PRIMEIRA tela ──────────────────────
 
 def test_rota_do_snapshot_entrega_a_instrucao_de_dispositivo(user_id):
+    promote_to_pro(user_id)
     db.save_pluggy_open_finance_item(user_id, ITEM_CAIXA_QR)
     client = TestClient(dashboard.app)
 
@@ -1456,6 +1458,7 @@ def test_POST_pluggy_item_ja_nasce_com_a_instrucao_certa(user_id, monkeypatch):
     # O `POST /pluggy-item` monta o snapshot ANTES de o sync de fundo escrever
     # saúde: é exatamente a janela em que `health` é NULL, e é a PRIMEIRA tela
     # que a pessoa vê depois de fechar o widget.
+    promote_to_pro(user_id)
     remoto = {**ITEM_CAIXA_QR, "id": "item-tela-post", "clientUserId": str(user_id)}
     monkeypatch.setattr(of_routes, "get_pluggy_item",
                         lambda item_id, api_key=None: remoto)
@@ -1777,6 +1780,7 @@ def test_raw_do_webhook_nao_vira_instrucao_de_dispositivo(user_id):
 
 @pytest.mark.parametrize("via", ["get", "post"])
 def test_a_resposta_HTTP_nao_ganhou_chave_nova_nem_vazou_o_raw(user_id, monkeypatch, via):
+    promote_to_pro(user_id)
     remoto = {**ITEM_CAIXA_QR, "id": "item-vaza", "clientUserId": str(user_id)}
     client = TestClient(dashboard.app)
     headers = _auth(client, user_id)

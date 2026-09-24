@@ -65,6 +65,7 @@ import pytest
 
 import db
 import frontend.routes.open_finance as of_routes
+from conftest import promote_to_pro
 from test_of_item_ownership import SEGREDO, _auth, _item_remoto, _webhook, eventos  # noqa: F401
 from test_of_webhook_adopt_guards import _limpa_item, _mock_item, _registry, webhook_pluggy  # noqa: F401
 
@@ -77,6 +78,7 @@ def test_entrega_atrasada_nao_ressuscita_o_banco_desconectado(
     num `asyncio.to_thread`, o loop segue livre) já com o rastro lido; a outra
     roda inteira e adota; o usuário desconecta; só então a presa escreve.
     """
+    promote_to_pro(user_id)
     _mock_item(monkeypatch, user_id)
     real, chamadas, chegou, liberar = (of_routes.user_exists, [],
                                        threading.Event(), threading.Event())
@@ -131,6 +133,7 @@ def test_aborto_mutuo_nao_deixa_o_item_reivindicado_e_sem_conexao(
     revalidação sozinha (sem o desfazimento) o resultado era `[None, None]` e
     zero conexão em 30/30 rodadas do Tester.
     """
+    promote_to_pro(user_id)
     _mock_item(monkeypatch, user_id)
 
     async def duas(item_id):
@@ -182,6 +185,7 @@ def test_quem_aborta_sob_o_lock_some_do_rastro(user_id, monkeypatch, eventos, we
     Com a reivindicação abandonada de volta ao registry, este mesmo item é
     inalcançável: a 1ª guarda recusa toda retentativa.
     """
+    promote_to_pro(user_id)
     _mock_item(monkeypatch, user_id)
     real, rival = of_routes.user_exists, []
 
@@ -255,6 +259,7 @@ def test_quem_perde_o_lock_tambem_some_do_rastro(user_id, monkeypatch, eventos, 
     seguinte e por que os dois asserts moram juntos: docstring do módulo);
     positivo — a retentativa exige UMA conexão, e derruba quem recusar tudo.
     """
+    promote_to_pro(user_id)
     _mock_item(monkeypatch, user_id)
     monkeypatch.setattr(of_routes, "_RECONNECT_DEADLINE_MS", 2000)
     real_lock, real_user = of_routes._salva_item_sob_lock, of_routes.user_exists

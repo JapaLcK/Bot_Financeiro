@@ -5,6 +5,7 @@ from fastapi.testclient import TestClient
 
 import db
 import frontend.finance_bot_websocket_custom as dashboard
+from conftest import promote_to_pro
 
 from tests._fusao_of_helpers import ia_fora, uid_pro  # noqa: F401 (fixtures)
 from tests.test_reconciliacao_resolver import _estado, pendencia
@@ -39,8 +40,11 @@ def test_rotas_confere_sessao_csrf_isolamento_e_erros(uid_pro, ia_fora):
 
     outro = uid_pro + 1
     db.ensure_user(outro)
+    promote_to_pro(outro)
     alheio = _cliente(outro)
-    assert alheio.get(f"/open-finance/{outro}/reconciliations").json()["reconciliations"] == []
+    r = alheio.get(f"/open-finance/{outro}/reconciliations")
+    assert r.status_code == 200, r.text
+    assert r.json()["reconciliations"] == []
     for acao in ("confirm", "reject", "undo"):
         r = alheio.post(f"/open-finance/{outro}/reconciliations/{of_tx}/{acao}", headers=H)
         assert r.status_code == 404, (acao, r.text)
