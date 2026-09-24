@@ -1,0 +1,72 @@
+/* Safari 14.0 (iOS 14.0–14.4) lê `gap` e o ignora em contêiner flex; grid gap ele tem.
+   `inset` chegou no mesmo Safari 14.1 que o flex gap, então este bloco só vale onde o
+   flex gap falta. As margens repetem o `gap` de cada contêiner nos arquivos irmãos:
+   tests/frontend/dashboard_v2_flexgap.test.mjs compara as duas geometrias (§0.7).
+   ponytail: Chrome 84–86 e Firefox 63–65 têm flex gap sem `inset` e somam margem ao gap
+   nos contêineres da parte 2 e 3; versões de 2020, fora do alvo. */
+@supports not (inset: 0) {
+  /* 1. Linha sem filho que cresça: vira grid e o `gap` de origem passa a valer (inclusive
+        ao lado de texto solto, que margem não alcança). A coluna vai do mínimo ao
+        max-content como item flex: texto quebra e reticência encolhe quando falta espaço. */
+  .btn, .chip, .link, .legend li, .bill-status, .cat-delta, .detail-title, .piggy-title, .row-src {
+    display: inline-grid; grid-auto-flow: column; grid-auto-columns: minmax(auto, max-content);
+  }
+  .ledger-head h2, .stat-title, .cmdk-foot, .rail-sync, .cat-name, .tl-name, .row-sub,
+  .board-actions, .detail-facts .fact-sub, .hero-facts, .day-head,
+  .ramp, .brand, .rail-list a, .ledger-chips {
+    display: grid; grid-auto-flow: column; grid-auto-columns: minmax(auto, max-content);
+  }
+  .more { display: grid; }
+  /* o display acima não pode reacender quem a tela esconde */
+  @media (max-width: 760px) { .row-src, .cmdk-foot { display: none; } }
+
+  /* 2. Linha com filho que cresce (flex: 1, margem auto): margem entre os filhos. */
+  .w-head > * + * { margin-left: 10px; }
+  .board-head > * + * { margin-left: 12px; }
+  .w-aside > * + * { margin-left: 8px; }
+  .nw-parts > * + * { margin-left: 18px; } /* em grid venceria o display: none da consulta de contêiner */
+  .lever-name > i { margin-right: 7px; }
+  .topbar > * + * { margin-left: 12px; }
+  .cmd-trigger > * + *, .cmdk-field > * + * { margin-left: 10px; }
+  .month-switch > * + *, .comp-bar > * + * { margin-left: 2px; }
+  .cmdk-item > :not(:last-child) { margin-right: 10px; }
+  .tip-row > :not(:last-child) { margin-right: 8px; }
+
+  /* Coluna: margem embaixo de cada filho, menos o último. */
+  .w > :not(:last-child), .w-body > :not(:last-child) { margin-bottom: 12px; }
+  .rail > :not(:last-child) { margin-bottom: 28px; }
+  .stat > :not(:last-child) { margin-bottom: 8px; }
+  .detail-facts.col > :not(:last-child) { margin-bottom: 14px; }
+
+  /* 3. Com quebra de linha: margem nos dois eixos, e o contêiner recua o mesmo tanto. */
+  .ledger-head, .inv-top { margin-top: -12px; margin-left: -12px; }
+  .ledger-head > *, .inv-top > * { margin-top: 12px; margin-left: 12px; }
+  .ledger-tools { margin-top: -10px; margin-left: -10px; }
+  .ledger-tools > * { margin-top: 10px; margin-left: 10px; }
+  .detail-facts:not(.col) { margin-top: -12px; margin-left: -32px; }
+  .detail-facts:not(.col) > * { margin-top: 12px; margin-left: 32px; }
+  .presets { margin-top: -6px; margin-left: -6px; }
+  .presets > * { margin-top: 6px; margin-left: 6px; }
+  .sim-facts { margin-top: -8px; margin-left: -18px; }
+  .sim-facts > * { margin-top: 8px; margin-left: 18px; }
+  .nw-top { margin-top: -8px; margin-left: -20px; }
+  .nw-top > * { margin-top: 8px; margin-left: 20px; }
+  .hero-top { margin-top: -12px; margin-left: -24px; }
+  .hero-top > * { margin-top: 12px; margin-left: 24px; }
+  .legend { margin-top: -6px; margin-left: -16px; }
+  .legend > * { margin-top: 6px; margin-left: 16px; }
+  .ledger-head > .ledger-tools { margin-top: 2px; margin-left: 2px; } /* 12 de filho − 10 de contêiner */
+  .mini-rows div { margin-left: -8px; }
+  .mini-rows div > * { margin-left: 8px; }
+
+  @media (max-width: 760px) {
+    .topbar > * + * { margin-left: 6px; }
+    .ledger-tools { width: calc(100% - 2px); }
+    .search { width: calc(100% - 10px); }
+  }
+  /* no celular o cabeçalho do bloco principal quebra: título numa linha, controles na outra */
+  @media (max-width: 508px) {
+    .w-hero .w-title { flex-basis: 100%; }
+    .w-hero .w-head > * + * { margin-left: 0; margin-top: 10px; }
+  }
+}
