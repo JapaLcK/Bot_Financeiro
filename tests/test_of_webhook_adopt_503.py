@@ -66,6 +66,7 @@ from psycopg_pool import PoolTimeout
 
 import db
 import frontend.routes.open_finance as of_routes
+from conftest import promote_to_pro
 from db.open_finance import save_pluggy_open_finance_item
 from test_of_item_ownership import SEGREDO, _item_remoto, eventos  # noqa: F401
 from test_of_webhook_adopt_guards import _limpa_item, _mock_item, _registry, webhook_pluggy  # noqa: F401
@@ -129,6 +130,7 @@ def test_infra_ANTES_da_escrita_nao_deixa_reivindicacao(user_id, monkeypatch, ev
 
     O 2º ato é o que mede isso: com a infra de volta, a MESMA entrega adota.
     """
+    promote_to_pro(user_id)
     _mock_item(monkeypatch, user_id)
     monkeypatch.setattr(of_routes, "_RECONNECT_DEADLINE_MS", 1000)
     real_lock, quebrado = of_routes.pluggy_item_lock, [True]
@@ -166,6 +168,7 @@ def test_infra_DENTRO_da_escrita_preserva_a_reivindicacao(user_id, monkeypatch, 
     por cima de uma conexão que existe. CONTROLE POSITIVO do grupo: um conserto
     que apagasse sempre deixa este teste vermelho.
     """
+    promote_to_pro(user_id)
     _mock_item(monkeypatch, user_id)
     monkeypatch.setattr(of_routes, "_RECONNECT_DEADLINE_MS", 1000)
 
@@ -198,6 +201,7 @@ def test_pool_esgotado_no_get_conn_nao_deixa_reivindicacao(user_id, monkeypatch,
 
     O 2º ato mede o que importa: com o pool de volta, a MESMA entrega adota.
     """
+    promote_to_pro(user_id)
     _mock_item(monkeypatch, user_id)
     monkeypatch.setattr(of_routes, "_RECONNECT_DEADLINE_MS", 1000)
     real_save, sem_pool = of_routes.save_pluggy_open_finance_item, [True]
@@ -242,6 +246,7 @@ def test_pool_na_2a_tentativa_nao_apaga_a_marca_AMBIGUA_da_1a(user_id, monkeypat
     O `assert` das DUAS chamadas é o que impede o teste de passar à toa: com uma
     tentativa só, `pop()` e `clear()` dão o mesmo resultado.
     """
+    promote_to_pro(user_id)
     _mock_item(monkeypatch, user_id)
     monkeypatch.setattr(of_routes, "_RECONNECT_DEADLINE_MS", 2000)
     chamadas = []
