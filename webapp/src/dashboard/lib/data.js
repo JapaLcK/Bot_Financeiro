@@ -4,6 +4,12 @@
 
 export const TODAY = new Date(2026, 8, 23);
 
+// Plano da demonstração, pela URL (?plano=essencial|plus|pro); qualquer outra coisa é o
+// Pro, que vê tudo. O `typeof` deixa o módulo carregar no node (testes).
+export const TIERS = ["essencial", "plus", "pro"];
+const asked = typeof location === "undefined" ? null : new URLSearchParams(location.search).get("plano");
+export const PLAN = TIERS.includes(asked) ? asked : "pro";
+
 export const CATEGORIES = [
   { id: "mercado", label: "Mercado", icon: "ph-shopping-cart", color: "#3987e5", variable: true },
   { id: "delivery", label: "Delivery", icon: "ph-hamburger", color: "#d95926", variable: true },

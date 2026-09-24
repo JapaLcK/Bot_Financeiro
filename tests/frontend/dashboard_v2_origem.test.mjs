@@ -32,6 +32,8 @@ async function abrir() {
     const path = decodeURIComponent(url.pathname).replace(/\/$/, "/index.html");
     return r.fulfill({ path: join(ROOT, path) }).catch(() => r.fulfill({ status: 404, body: "" }));
   });
+  // já escolheu o perfil (Pular): sem isso o modal da 1ª visita cobre o Resumo
+  await ctx.addInitScript(() => localStorage.setItem("pigbank.dashboard.profile.v1", '"padrao"'));
   const page = await ctx.newPage();
   await page.goto(`${ORIGIN}/dashboard-v2/#/lancamentos`);
   await page.locator(".ledger").waitFor();
