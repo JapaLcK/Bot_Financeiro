@@ -549,6 +549,17 @@ const Widget = memo(function Widget({
 		}
 	}
 
+	useEffect(() => {
+		const el = node.current
+		if (!editable || !el) return
+		// Typing, paste, cut, drop and undo in inner fields, including via menus (no keydown to catch).
+		const refuse = (e: Event) => {
+			if (e.target !== el) e.preventDefault()
+		}
+		el.addEventListener('beforeinput', refuse, true)
+		return () => el.removeEventListener('beforeinput', refuse, true)
+	}, [editable])
+
 	const onPointerMove = (e: ReactPointerEvent) => {
 		const p = press.current
 		if (
@@ -593,11 +604,22 @@ const Widget = memo(function Widget({
 				if (phase !== 'idle') e.preventDefault()
 			}}
 			onKeyDown={(e) => handlers.key(e, item.id)}
-			onClickCapture={(e) => {
+			onKeyDownCapture={(e) => {
+				// Without `inert`, inner controls stay focusable: only Tab (leave) and ⌘/Ctrl+letter (the palette) pass;
+				// the text those combos would edit (paste, cut, undo) is refused on `beforeinput`.
 				if (
-					handlers.swallow() ||
-					(editable && (e.target as HTMLElement).closest('a'))
+					editable &&
+					e.target !== e.currentTarget &&
+					e.key !== 'Tab' &&
+					!((e.metaKey || e.ctrlKey) && e.key.length === 1)
 				) {
+					e.preventDefault()
+					e.stopPropagation()
+				}
+			}}
+			onClickCapture={(e) => {
+				// Organizing: the content is inert; this also covers browsers without `inert` (Safari < 15.5).
+				if (handlers.swallow() || (editable && e.target !== e.currentTarget)) {
 					e.preventDefault()
 					e.stopPropagation()
 				}
@@ -623,6 +645,7 @@ const Widget = memo(function Widget({
 				zIndex: held ? 20 : raised ? 10 : 0,
 			}}>
 			<motion.div
+				inert={editable}
 				initial={{ opacity: 0, y: 18, scale: 0.97 }}
 				animate={{ opacity: 1, y: 0, scale: 1 }}
 				transition={{
