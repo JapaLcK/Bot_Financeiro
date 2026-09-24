@@ -5,7 +5,6 @@
  *   · o layout salvo é entrada que o usuário (ou uma versão velha do painel) deixou no
  *     navegador: JSON ruim, formato errado, id desconhecido ou repetido caem para o preset
  *     ou somem, sem quebrar; o id travado some da tela e continua salvo;
- *   · os ids do PR B (renda, rendimento, parcelas) já estão nos presets e somem na leitura;
  *   · storage que lança não derruba nada: tudo segue em memória;
  *   · o plano mínimo de cada bloco pago é cópia de FEATURE_MIN_TIER_V2
  *     (core/services/plan_service.py) e a ordem dos planos, de TIER_ORDER
@@ -29,7 +28,7 @@ const P = await import("../../webapp/src/dashboard/lib/profiles.js");
 const { PROFILES, FEATURE_TIER, WIDGET_FEATURE, TIERS, locked, readLayout, saveLayout, readProfile, saveProfile } = P;
 
 // Os blocos que o painel conhece hoje (DEFAULT + EXTRA de parts/Board.tsx).
-const KNOWN = ["hero", "resumo", "categorias", "calendario", "simulador", "compromissos", "piggy", "metas", "patrimonio", "fatura", "wealth"];
+const KNOWN = ["hero", "resumo", "categorias", "calendario", "simulador", "compromissos", "piggy", "metas", "patrimonio", "fatura", "wealth", "renda", "rendimento", "parcelas"];
 const PRESET = ["resumo", "hero", "metas"];
 // Cada caso usa um perfil próprio: o módulo lembra em memória o que ele mesmo escreveu.
 const salvo = (perfil, raw) => store.set(`pigbank.dashboard.layout.v1.${perfil}`, raw);
@@ -43,11 +42,11 @@ test("layout salvo ilegível ou fora do formato: vale o preset", () => {
   assert.deepEqual(readLayout("nunca-salvou", PRESET, KNOWN, "pro"), PRESET);
 });
 
-test("id desconhecido (inclusive os do PR B) e repetido somem; o ausente do salvo não aparece", () => {
-  salvo("sujo", JSON.stringify(["renda", "metas", "hero", "metas", "xyz", 7, null, "parcelas", "hero"]));
-  assert.deepEqual(readLayout("sujo", PRESET, KNOWN, "pro"), ["metas", "hero"]);
+test("id desconhecido e repetido somem; o ausente do salvo não aparece", () => {
+  salvo("sujo", JSON.stringify(["gastador", "metas", "hero", "metas", "xyz", 7, null, "renda", "hero"]));
+  assert.deepEqual(readLayout("sujo", PRESET, KNOWN, "pro"), ["metas", "hero", "renda"]);
   const investir = PROFILES.find((p) => p.id === "investir");
-  assert.deepEqual(readLayout("investir-preset", investir.preset, KNOWN, "pro"), ["patrimonio", "wealth", "simulador", "metas", "resumo", "piggy"]);
+  assert.deepEqual(readLayout("investir-preset", investir.preset, KNOWN, "pro"), ["patrimonio", "rendimento", "wealth", "simulador", "metas", "resumo", "piggy"]);
 });
 
 test("[] é um painel vazio válido, não o preset", () => {

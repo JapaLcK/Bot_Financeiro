@@ -26,7 +26,7 @@ const ROOT = join(dirname(fileURLToPath(import.meta.url)), "..", "..");
 const ORIGIN = "http://127.0.0.1:1"; // fictícia: a rota atende da raiz do repositório (como em dashboard_v2_organizar)
 const PERFIL = "pigbank.dashboard.profile.v1";
 const PADRAO = ["hero", "resumo", "categorias", "calendario", "simulador", "compromissos", "piggy", "metas", "patrimonio"];
-const INVESTIR = ["patrimonio", "wealth", "simulador", "metas", "resumo", "piggy"]; // sem "rendimento" (PR B)
+const INVESTIR = ["patrimonio", "rendimento", "wealth", "simulador", "metas", "resumo", "piggy"];
 const ECONOMIZAR = ["resumo", "metas", "piggy", "categorias", "simulador", "compromissos"];
 
 let browser;
@@ -255,4 +255,44 @@ test("390: modal, seletor e catálogo sem rolagem horizontal; ✕ com 44 × 44",
   await ctx.close();
   assert.deepEqual([modal, seletor, cat], [[0, true], [0, true], [0, true]]);
   assert.ok(xs.length >= 5 && xs.every(([w, h]) => w >= 44 && h >= 44), JSON.stringify(xs));
+});
+
+// Os três blocos novos: cada um abre o painel do seu perfil (1º ou 2º na leitura), o
+// perfil ladrilha sem buraco fora da última linha, e o conteúdo cabe na célula.
+for (const [perfil, bloco] of [["investir", "rendimento"], ["dividas", "parcelas"], ["autonomo", "renda"]]) {
+  test(`1440: ${bloco} abre o painel ${perfil}, sem buraco e sem estourar a célula`, async () => {
+    const { ctx, page, erros } = await abrir({ perfil });
+    const r = await page.evaluate((id) => {
+      const ws = [...document.querySelectorAll("[data-widget-id]")];
+      const cells = new Set();
+      let rows = 0;
+      for (const w of ws) {
+        const [c, cw] = w.style.gridColumn.split(" / span ").map(Number);
+        const [l, lh] = w.style.gridRow.split(" / span ").map(Number);
+        for (let y = l; y < l + lh; y++) for (let x = c; x < c + cw; x++) cells.add(`${y}:${x}`);
+        rows = Math.max(rows, l + lh - 1);
+      }
+      const holes = [];
+      for (let y = 1; y < rows; y++) for (let x = 1; x <= 4; x++) if (!cells.has(`${y}:${x}`)) holes.push(`${y}:${x}`);
+      const el = document.querySelector(`[data-widget-id="${id}"]`);
+      const art = el.querySelector("article.w");
+      return { pos: Number(el.getAttribute("aria-posinset")), holes, sobra: art.scrollHeight - art.clientHeight };
+    }, bloco);
+    await ctx.close();
+    assert.ok(r.pos <= 2, `posição ${r.pos}`);
+    assert.deepEqual(r.holes, []);
+    assert.ok(r.sobra <= 1, `conteúdo passa ${r.sobra}px da célula`);
+    assert.deepEqual(erros, []);
+  });
+}
+
+test("320 e 390: os blocos novos não rolam para o lado", async () => {
+  for (const width of [320, 390]) for (const perfil of ["investir", "dividas", "autonomo"]) {
+    const { ctx, page } = await abrir({ width, perfil });
+    const r = await page.evaluate(() => [...document.querySelectorAll("#w-renda, #w-rendimento, #w-parcelas")]
+      .map((w) => [w.id, w.scrollWidth - w.clientWidth, document.scrollingElement.scrollWidth - document.scrollingElement.clientWidth]));
+    await ctx.close();
+    assert.equal(r.length, 1, `${width} ${perfil}`);
+    assert.deepEqual(r[0].slice(1), [0, 0], `${width} ${JSON.stringify(r)}`);
+  }
 });

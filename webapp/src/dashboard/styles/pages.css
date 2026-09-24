@@ -66,6 +66,32 @@
 .months-bar { display: flex; align-items: flex-end; width: 24px; height: 140px; border-radius: 4px 4px 0 0; background: var(--plane-2); overflow: hidden; }
 .months-bar i { display: block; width: 100%; height: 100%; border-radius: 4px 4px 0 0; transform-origin: bottom; opacity: 0.45; transition: transform 500ms var(--ease-out); }
 .months li[data-on] .months-bar i { opacity: 1; }
+/* Seis meses (renda, parcelas) e o rendimento × CDI */
+.months.m6 { grid-template-columns: repeat(6, minmax(0, 1fr)); gap: 8px; }
+.months.m6 .months-bar { width: 100%; max-width: 28px; height: 110px; }
+.months.m6 li:not([data-on]) .months-bar i { opacity: 0.6; }
+.income-when { font-size: 13px; font-weight: 500; }
+.income-reserve { font-size: 13px; color: var(--ink-2); }
+.income-reserve b { color: var(--ink); font-weight: 600; }
+.income-reserve span { display: block; margin-top: 4px; font-size: 12px; }
+.yield { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 24px; }
+.yield .detail-h { margin-bottom: 6px; }
+.yield-cdi { margin: 2px 0 8px; font-size: 13px; }
+.yield-rates { margin-top: 8px; font-size: 12px; }
+.inst { flex: 1; display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 1.4fr); gap: 20px; align-items: end; }
+.inst .months-bar { height: 80px; }
+.inst-note { margin-top: 4px; font-size: 12.5px; }
+.inst-end { margin-top: 14px; font-size: 13px; color: var(--ink-2); }
+.inst-end b { color: var(--ink); font-weight: 600; }
+/* Safari < 16 ignora o @container: no celular a tela decide (bloco = tela − 68px). */
+@media (max-width: 508px) {
+  .months.m6 b { display: none; }
+  .yield, .inst { grid-template-columns: minmax(0, 1fr); gap: 16px; }
+}
+@container (max-width: 440px) {
+  .months.m6 b { display: none; }
+  .yield, .inst { grid-template-columns: minmax(0, 1fr); gap: 16px; }
+}
 .places { display: grid; gap: 12px; }
 .places li { display: grid; grid-template-columns: minmax(0, 1fr) auto 76px; grid-template-areas: "name n v" "bar bar bar"; align-items: center; gap: 6px 10px; font-size: 13px; }
 .place-name { grid-area: name; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; font-weight: 500; }
