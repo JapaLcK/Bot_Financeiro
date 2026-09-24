@@ -47,3 +47,25 @@ export const respostaLoginSchema = z.union([desafioMfaSchema, loginSchema]);
 
 export type Credenciais = z.infer<typeof credenciaisSchema>;
 export type Perfil = z.infer<typeof perfilSchema>;
+
+/** `/auth/mfa/status` (`db/mfa.py`, `get_mfa_status`). */
+export const mfaStatusSchema = z.object({
+  enabled: z.boolean(),
+  has_pending_secret: z.boolean(),
+  backup_codes_remaining: z.number().int(),
+});
+
+/** `/auth/mfa/setup`: o QR vem pronto, como SVG em data URI. */
+export const mfaSetupSchema = z.object({
+  secret: z.string().min(1),
+  uri: z.string().startsWith("otpauth://"),
+  qr_code: z.string().startsWith("data:image/svg+xml;base64,"),
+});
+
+/** `/auth/mfa/enable` (que manda também `ok`) e `/auth/mfa/regenerate-backup-codes`. */
+export const codigosBackupSchema = z.object({
+  backup_codes: z.array(z.string()).min(1),
+});
+
+export type MfaStatus = z.infer<typeof mfaStatusSchema>;
+export type MfaSetup = z.infer<typeof mfaSetupSchema>;

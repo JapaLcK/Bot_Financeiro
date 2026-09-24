@@ -7,7 +7,7 @@
 import { z } from "zod";
 
 import { USER_AGENT } from "@/api/aparelho";
-import { _resetRenovacao, chamar } from "@/api/client";
+import { ErroDeApi, SessaoExpirada, _resetRenovacao, chamar } from "@/api/client";
 import {
   guardarCredenciais,
   lerCredenciais,
@@ -16,10 +16,11 @@ import {
 
 const schema = z.object({ ok: z.boolean() });
 
-function resposta(status: number, corpo: unknown): Response {
+function resposta(status: number, corpo: unknown, cabecalhos: Record<string, string> = {}): Response {
   return {
     ok: status >= 200 && status < 300,
     status,
+    headers: new Headers(cabecalhos),
     json: async () => corpo,
   } as Response;
 }
@@ -78,23 +79,66 @@ describe("credencial na requisição", () => {
     expect(fetchFalso.mock.calls[0][1].headers["Authorization"]).toBeUndefined();
   });
 
-  it("semRenovar: 401 de credencial secundária não vira fim de sessão", async () => {
-    // Rotas que usam 401 para uma credencial SECUNDÁRIA — a senha numa
-    // configuração de dois fatores — não podem renovar nada: o 401 diz "esse
-    // dado está errado", e renovar mandaria o usuário para a tela de entrada
-    // por ter digitado a senha errada num formulário já autenticado.
-    await guardarCredenciais({ access: "a1", refresh: "rt_1" });
+});
+
+/**
+ * `credencialSecundaria`: rotas em que o 401 pode ser da SENHA digitada, não
+ * da sessão. Só o 401 de sessão leva `WWW-Authenticate` (frontend/routes/
+ * shared.py, `WWW_AUTHENTICATE_401`).
+ */
+describe("credencialSecundaria", () => {
+  const MARCA = { "WWW-Authenticate": 'Bearer realm="pigbank", error="invalid_token"' };
+  const NOVAS = { access_token: "a2", refresh_token: "rt_2", dashboard_token: "d", expires_in: 900 };
+  const setup = () => chamar("/auth/mfa/setup", schema, { metodo: "POST", credencialSecundaria: true });
+
+  beforeEach(() => guardarCredenciais({ access: "a1", refresh: "rt_1" }));
+
+  it("T1: 401 SEM a marca é erro da senha — uma requisição só, sessão de pé", async () => {
     fetchFalso.mockResolvedValue(resposta(401, { detail: "Senha incorreta." }));
 
-    await expect(
-      chamar("/auth/mfa/setup", schema, { metodo: "POST", semRenovar: true }),
-    ).rejects.toThrow("Senha incorreta.");
-    // Uma requisição só: nenhuma renovação foi tentada.
+    const erro = await setup().catch((e: unknown) => e);
+
+    expect(erro).toBeInstanceOf(ErroDeApi);
+    expect(erro).not.toBeInstanceOf(SessaoExpirada);
+    expect((erro as ErroDeApi).detalhe).toBe("Senha incorreta.");
     expect(fetchFalso).toHaveBeenCalledTimes(1);
-    // E a sessão continua de pé.
-    await expect(lerCredenciais()).resolves.toEqual({
-      access: "a1",
-      refresh: "rt_1",
-    });
+    await expect(lerCredenciais()).resolves.toEqual({ access: "a1", refresh: "rt_1" });
+  });
+
+  it("T2: 401 COM a marca (access vencido) renova, repete e entrega o 200", async () => {
+    fetchFalso
+      .mockResolvedValueOnce(resposta(401, { detail: "Token inválido ou expirado." }, MARCA))
+      .mockResolvedValueOnce(resposta(200, NOVAS))
+      .mockResolvedValueOnce(resposta(200, { ok: true }));
+
+    await expect(setup()).resolves.toEqual({ ok: true });
+    expect(fetchFalso.mock.calls.map(([u]) => String(u).replace("http://backend.teste", ""))).toEqual([
+      "/auth/mfa/setup",
+      "/auth/refresh",
+      "/auth/mfa/setup",
+    ]);
+    expect(fetchFalso.mock.calls[2][1].headers["Authorization"]).toBe("Bearer a2");
+  });
+
+  it("T3: renovou e a repetição tomou 401 SEM a marca — erro da senha, e o cofre guarda o par NOVO", async () => {
+    fetchFalso
+      .mockResolvedValueOnce(resposta(401, { detail: "Token inválido ou expirado." }, MARCA))
+      .mockResolvedValueOnce(resposta(200, NOVAS))
+      .mockResolvedValueOnce(resposta(401, { detail: "Senha incorreta." }));
+
+    const erro = await setup().catch((e: unknown) => e);
+
+    expect(erro).not.toBeInstanceOf(SessaoExpirada);
+    expect((erro as ErroDeApi).detalhe).toBe("Senha incorreta.");
+    await expect(lerCredenciais()).resolves.toEqual({ access: "a2", refresh: "rt_2" });
+  });
+
+  it("T4: 401 com a marca e refresh recusado — fim de sessão de verdade", async () => {
+    fetchFalso
+      .mockResolvedValueOnce(resposta(401, { detail: "Token inválido ou expirado." }, MARCA))
+      .mockResolvedValueOnce(resposta(401, { detail: "invalid_refresh_token" }));
+
+    await expect(setup()).rejects.toBeInstanceOf(SessaoExpirada);
+    await expect(lerCredenciais()).resolves.toBeNull();
   });
 });

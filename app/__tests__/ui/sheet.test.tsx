@@ -1,7 +1,7 @@
-import { Text } from "react-native";
+import { ScrollView, Text } from "react-native";
 
 import { OPCOES_SHEET, SheetConteudo } from "@/ui/componentes/Sheet";
-import { raio } from "@/ui/tokens";
+import { espaco, raio } from "@/ui/tokens";
 
 import { renderComAreaSegura } from "./_render";
 
@@ -40,6 +40,22 @@ describe("SheetConteudo", () => {
     const alca = c.getByTestId("sheet-conteudo").props.children[0];
     expect(alca.props.accessibilityElementsHidden).toBe(true);
     expect(alca.props.importantForAccessibility).toBe("no-hide-descendants");
+  });
+
+  // O Jest não mede layout nativo; isto trava só o contrato de estrutura. O
+  // `formSheet` do iOS impõe o frame da tela ao 1º ScrollView descendente
+  // (ver Sheet.tsx): ele tem de ser a RAIZ, com o respiro no content container.
+  it("rolar: o ScrollView é a raiz e o respiro vai no contentContainerStyle", () => {
+    const { claro: c } = renderComAreaSegura(
+      <SheetConteudo rolar>
+        <Text>x</Text>
+      </SheetConteudo>,
+    );
+    const raiz = c.UNSAFE_getByType(ScrollView);
+    expect(raiz.props.testID).toBe("sheet-conteudo");
+    expect(raiz.props.keyboardShouldPersistTaps).toBe("handled");
+    expect(raiz.props.contentContainerStyle).toMatchObject({ paddingHorizontal: espaco.lg });
+    expect(raiz.props.children[0].props.accessibilityElementsHidden).toBe(true);
   });
 
   it("snapshot (dois temas)", () => {
