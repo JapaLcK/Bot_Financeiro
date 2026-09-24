@@ -16,6 +16,23 @@ export type EstadoEntrar =
   | { fase: "verificando"; desafio: string; email: string; modo: "totp" | "backup" }
   | { fase: "erro-cofre" };
 
+/**
+ * Quais fases apagam o campo Senha ao entrar nelas. O iOS só oferece "Salvar
+ * senha" se o campo sai da tela PREENCHIDO; e voltar ao formulário nunca pode
+ * mostrá-lo preenchido. `Record` por fase: uma fase nova não compila sem decidir.
+ */
+const APAGA_SENHA: Record<EstadoEntrar["fase"], boolean> = {
+  formulario: true, // retorno ao formulário (falha, "Voltar", "Tentar de novo"): nunca mostra a senha de antes
+  "erro-cofre": true, // falha: o retorno ao formulário é o "Tentar de novo", que já tem de achar o campo vazio
+  enviando: false, // o campo continua na tela (desativado) durante o envio, e no sucesso ele sai daqui preenchido
+  mfa: false, // o campo sai da tela nesta troca: é ELA que o iOS lê para oferecer salvar
+  verificando: false, // o campo já não está na tela; o sucesso segue para o app, a falha volta por "formulario"
+};
+
+export function apagaSenhaNaFase(fase: EstadoEntrar["fase"]): boolean {
+  return APAGA_SENHA[fase];
+}
+
 export type EstadoMfa = Extract<EstadoEntrar, { fase: "mfa" }>;
 export type EstadoVerificando = Extract<EstadoEntrar, { fase: "verificando" }>;
 

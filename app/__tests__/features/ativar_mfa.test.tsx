@@ -204,14 +204,14 @@ describe("AtivarMfa — passo do código", () => {
     expect(rota).toContain(`raise HTTPException(status_code=400, detail="${SETUP_EXPIRADO}")`);
   });
 
-  it("Abrir no app autenticador: chama o Linking com a uri; se falhar, pede para copiar a chave", async () => {
+  it("Adicionar ao app Senhas: chama o Linking com a uri; se falhar, pede para copiar a chave", async () => {
     rotear({ "/auth/mfa/setup": () => resposta(200, SETUP) });
     const abrir = jest.mocked(Linking.openURL).mockRejectedValueOnce(new Error("sem app"));
     const tela = montar();
     await passarDaSenha(tela);
 
     await act(async () => {
-      fireEvent.press(tela.getByRole("button", { name: "Abrir no app autenticador" }));
+      fireEvent.press(tela.getByRole("button", { name: "Adicionar ao app Senhas" }));
       await respirar();
     });
 
