@@ -630,6 +630,14 @@ def pluggy_items_a_deletar(linhas) -> list[str]:
     cada, cada uma num lugar só.
 
     Ordenado e sem repetição: o chamador compara conjuntos (1º passe × 2º passe).
+
+    ASSIMETRIA DELIBERADA: `status` normaliza a caixa (`.upper()`) porque vem do
+    payload da Pluggy; `provider` compara IGUAL porque é literal nosso (os dois
+    únicos inserts, `db/open_finance.py:125` e `:770`, escrevem `'pluggy'`) e a
+    irmã SQL que alimenta o MESMO delete remoto compara do mesmo jeito
+    (`list_pluggy_item_ids`, `where provider='pluggy'`, :416). Normalizar só aqui
+    faria as duas leituras divergirem (§0.7). As regras estão presas caso a caso
+    em `tests/test_of_pluggy_items_a_deletar.py`.
     """
     return sorted({
         r["provider_item_id"] for r in (linhas or [])

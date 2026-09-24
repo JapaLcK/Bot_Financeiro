@@ -828,9 +828,14 @@ def delete_user_data(
     transação faz `delete from system_event_logs where user_id = %s` e a FK é
     `on delete cascade` — log com dono é log que se apaga sozinho (ou cujo
     INSERT viola a FK, se escrito depois do commit). A lista `items` em `details`
-    é a chave operacional (`scripts/adotar_items_of_orfaos.py --item <ID>`); o
-    `user_id` não vai nem para `details`, porque a exclusão existe justamente
-    para remover identificadores da conta (mesma regra de `plan_trials`).
+    é a chave operacional: com ela o operador acha o item na Pluggy e no log,
+    sem precisar do dono. Não há ferramenta no repositório que consuma esses ids
+    — o one-shot que fazia isso saiu em `924aee3f` e volta do histórico com
+    `git checkout bda3ee7 -- scripts/adotar_items_of_orfaos.py scripts/adotar_items_lista.py`
+    (os DOIS arquivos, ver `frontend/routes/open_finance.py`,
+    `_adota_item_orfao`, para por que ele saiu). O `user_id` não vai nem para
+    `details`, porque a exclusão existe justamente para remover identificadores
+    da conta (mesma regra de `plan_trials`).
 
     JANELA RESIDUAL, a mesma do reset (o comentário em :628-640) e sem log
     próprio: exceção no delete LOCAL depois de o `remote_cleanup` ter dado certo
@@ -1104,11 +1109,20 @@ def delete_user_data(
                 # todo escritor do repositório trava `accounts` antes de `users`
                 # (`db/bank_movements.py:_lock_user`) e a exclusão inverteria a ordem.
                 #
-                # ponytail: SOBRA a janela entre esta reconsulta e o `delete from
-                # users` — mais estreita (dois statements da mesma transação, sem
-                # round-trip de HTTP no meio) e do mesmo tamanho para a linha de
-                # `users`. Fechá-la é ordenar o lock de todo o repositório
-                # (`accounts` antes de `users` em quem exclui também), que é outro PR.
+                # SOBRA a janela entre esta reconsulta e o `delete from users`, e o
+                # que a fecha NÃO é ela ser curta — foi MEDIDO pelo Tester (PR-C
+                # #539) e são coisas diferentes. Com INSERT CRU em
+                # `open_finance_connections` a janela está fisicamente ABERTA e o
+                # item VAZA (a conexão commita, sai pela cascata e fica viva na
+                # Pluggy). Quem a fecha para a escrita REAL é a ORDEM desta função:
+                # todo escritor passa por `_lock_user` (`db/bank_movements.py:58`,
+                # `select ... from accounts ... for update`) e o laço de
+                # `user_owned_tables` acima já apagou a linha de `accounts` deste
+                # usuário — a escrita concorrente morre em `ForeignKeyViolation`
+                # antes de chegar à conexão (`test_p3a`, sonda do Tester).
+                # CONSEQUÊNCIA: mover o `delete from accounts` para DEPOIS desta
+                # reconsulta reabre o vazamento. A ordem `accounts → users` é a
+                # proteção; mantenha-a.
                 if _table_exists(cur, "open_finance_connections"):
                     cur.execute(
                         """

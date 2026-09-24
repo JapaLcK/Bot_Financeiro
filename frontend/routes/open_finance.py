@@ -1142,6 +1142,8 @@ async def _adota_item_orfao(item_id: str, last_event: str | None = None) -> int 
         # não aceita FK de conta inexistente). Aqui a conta existe, então o dono
         # vai na COLUNA `user_id` — a cascata de `system_event_logs` a leva no dia
         # da exclusão, e `details` (que a cascata não alcança) não guarda uid.
+        # Se o PREDICADO levantar, o `except` genérico lá embaixo ainda grava uid
+        # em `details` — classe pré-existente de TODAS as guardas daqui, issue #541.
         if await asyncio.to_thread(is_account_scheduled_for_deletion, dono):
             await log_system_event(
                 "warning", "of_webhook_adopt_skipped",
@@ -2105,9 +2107,12 @@ def delete_pluggy_items_best_effort(user_id: int, item_ids: list[str] | None = N
         # O dono vai na COLUNA `user_id` (nunca no texto nem em `details`): é o
         # padrão do repositório, e é o que a cascata de `system_event_logs` leva.
         # Sob `log_user_id=False` (só a exclusão de conta) a coluna fica NULL, a
-        # linha sobrevive à cascata e a chave operacional que resta é o item
-        # (`scripts/adotar_items_of_orfaos.py --item <ID>`). Ramo alcançado sempre
-        # que faltar PLUGGY_CLIENT_ID/SECRET.
+        # linha sobrevive à cascata e a chave operacional que resta é o item: é
+        # com ele que o operador acha a conexão na Pluggy, sem o dono. Não há
+        # ferramenta no repositório que consuma esses ids — o one-shot saiu em
+        # `924aee3f` e volta do histórico pelo `git checkout bda3ee7 -- ...` do
+        # docstring de `_adota_item_orfao`. Ramo alcançado sempre que faltar
+        # PLUGGY_CLIENT_ID/SECRET.
         log_system_event_sync(
             "warning", "pluggy_disconnect_auth_failed",
             f"Sem apiKey pra deletar {len(pluggy_item_ids)} item(s) na Pluggy: {exc}",

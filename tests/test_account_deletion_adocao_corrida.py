@@ -43,9 +43,11 @@ CONTROLES DO GRUPO (CLAUDE.md §3), cada mutação injetada em caso VERDE:
     "recusa por qualquer motivo".
 
 CLASSE CEGA declarada: a janela que SOBRA entre a reconsulta e o `delete from
-users` não é medida aqui — é a mesma barreira de `_table_exists` apontada para o
-statement seguinte, e o Tester a declarou raciocínio, não medição. Também não há
-Pluggy de verdade em nenhum caso (o `delete_pluggy_item` é dublê).
+users` não é medida aqui. Ela JÁ FOI medida fora desta suíte (sondas do Tester na
+PR-C): está fisicamente aberta para INSERT cru e fechada para a escrita real pela
+ordem `accounts → users` — o motivo está no comentário de `db/privacy.py`,
+imediatamente antes da reconsulta. Também não há Pluggy de verdade em nenhum caso
+(o `delete_pluggy_item` é dublê).
 """
 from __future__ import annotations
 
@@ -218,21 +220,37 @@ def _webhook_de_item_criado(monkeypatch, dono: int, item_id: str):
     )
 
 
-def test_t18_webhook_nao_adota_item_de_conta_com_exclusao_agendada(user_id, monkeypatch):
+@pytest.mark.parametrize("estado", ["scheduled", "processing"])
+def test_t18_webhook_nao_adota_item_de_conta_com_exclusao_agendada(user_id, monkeypatch, estado):
     """A porta que o P2 usava. `user_exists` responde True nessa janela, então é
     `is_account_scheduled_for_deletion` que recusa — e o rastro leva o dono na
     COLUNA `user_id` (a conta existe, e a cascata de `system_event_logs` a levará
     no dia da exclusão), nunca em `details`, que a cascata não alcança.
+
+    OS DOIS ESTADOS, e `processing` é o que importa: a corrida do P2 acontece
+    DENTRO da exclusão, e ali o `deletion_status` já é `processing` — é o que
+    `_claim_due_account_deletions` grava (`db/privacy.py:1219`) antes de chamar
+    `delete_user_data`. `scheduled` é a janela de carência, ANTES do job. O
+    predicado aceita os dois (`deletion_status in ('scheduled','processing')`,
+    db/privacy.py:250) e o caso só com `scheduled` deixava metade da guarda —
+    justamente a metade em que a corrida existe — sem nenhum teste.
     """
     from conftest import promote_to_pro
 
     _semeia(user_id, item=None)  # conta agendada, ZERO conexões
+    if estado != "scheduled":
+        with get_conn() as conn:
+            conn.execute(
+                "update auth_accounts set deletion_status = %s where user_id = %s",
+                (estado, user_id),
+            )
+            conn.commit()
     # Pro, e é ESSENCIAL: a suíte roda com `PLANS_V2_ENABLED=1` por default e no
     # Grátis o `_enforce_bank_limit` já recusaria com 402 (`of_banks_max=0`) —
     # o caso ficaria VERDE sem a guarda nenhuma, medindo o teto do plano.
     # Com plano que TEM vaga, quem recusa só pode ser a exclusão agendada.
     promote_to_pro(user_id)
-    item_novo = f"{_item_de(user_id)}-t18"
+    item_novo = f"{_item_de(user_id)}-t18-{estado}"
     try:
         r = _webhook_de_item_criado(monkeypatch, user_id, item_novo)
 
