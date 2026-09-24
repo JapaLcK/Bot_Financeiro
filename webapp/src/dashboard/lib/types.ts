@@ -44,7 +44,7 @@ export interface DashState {
   month: string;
   horizon: "mes" | "30" | "90";
   sim: Sim;
-  filter: { category: string | null; day: string | null; query: string };
+  filter: { category: string | null; day: string | null; query: string; source: NonNullable<Launch["source"]> | "todos" };
   highlight: string | null;
   editing: boolean;
 }

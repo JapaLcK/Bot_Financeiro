@@ -1,4 +1,4 @@
-import { useDeferredValue, useMemo, useState } from "react";
+import { useDeferredValue, useEffect, useMemo, useState } from "react";
 import { catById, summary } from "../lib/api";
 import { longDate, money, tint } from "../lib/format.js";
 import { dayKey, setFilter } from "../lib/store.js";
@@ -10,14 +10,17 @@ const SOURCES = {
   openfinance: { label: "Open Finance", icon: "ph-bank" },
   cartao: { label: "Cartão", icon: "ph-credit-card" },
 } as const;
-type Source = keyof typeof SOURCES | "todos";
+type Source = DashState["filter"]["source"];
 const PAGE = 30;
 
 const norm = (t: string) => t.normalize("NFD").replace(/[\u0300-\u036f]/g, "").toLowerCase();
 
 export function Ledger({ s }: { s: DashState }) {
-  const [source, setSource] = useState<Source>("todos");
+  const source = s.filter.source;
   const [limit, setLimit] = useState(PAGE);
+  // A origem vale só enquanto o extrato está aberto: sair da tela a devolve a "Todos",
+  // senão ela se somaria em silêncio ao dia/categoria escolhidos noutra tela.
+  useEffect(() => () => setFilter({ source: "todos" }), []);
   const query = useDeferredValue(s.filter.query);
   const all = summary(s.month).launches;
 
@@ -47,7 +50,7 @@ export function Ledger({ s }: { s: DashState }) {
     g.net += l.kind === "income" ? l.amount ?? 0 : -(l.amount ?? 0);
   }
   const filtered = !!(s.filter.category || s.filter.day || s.filter.query || source !== "todos");
-  const clear = () => { setFilter({ category: null, day: null, query: "" }); setSource("todos"); };
+  const clear = () => setFilter({ category: null, day: null, query: "", source: "todos" });
 
   return (
     <section id="lancamentos" className="ledger" aria-labelledby="ledger-h">
@@ -60,7 +63,7 @@ export function Ledger({ s }: { s: DashState }) {
             <input type="search" placeholder="Buscar por nome ou mensagem" value={s.filter.query}
               onChange={(e) => { setFilter({ query: e.target.value }); setLimit(PAGE); }} />
           </label>
-          <Seg label="Origem" value={source} onChange={(v) => { setSource(v); setLimit(PAGE); }}
+          <Seg label="Origem" value={source} onChange={(v) => { setFilter({ source: v }); setLimit(PAGE); }}
             options={[{ value: "todos", label: "Todos" }, ...Object.entries(SOURCES).map(([k, v]) => ({ value: k as Source, label: v.label }))]} />
         </div>
       </header>

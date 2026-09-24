@@ -5,7 +5,7 @@ let state = {
   month: "2026-09",
   horizon: "mes",
   sim: { cuts: {}, extra: 0, goal: "intercambio" },
-  filter: { category: null, day: null, query: "" },
+  filter: { category: null, day: null, query: "", source: "todos" },
   highlight: null, // dia (yyyy-mm-dd) em foco, compartilhado entre gráfico e listas
   editing: false,
 };
@@ -18,6 +18,8 @@ export const get = () => state;
 export function set(patch) {
   const next = { ...state, ...patch };
   // O dia filtrado é uma data do mês anterior: no mês novo ele esvaziaria a lista.
+  // A origem fica: vale em qualquer mês enquanto o extrato está aberto (o Ledger a
+  // zera ao desmontar).
   if (next.month !== state.month) next.filter = { ...next.filter, day: null };
   state = next;
   for (const fn of listeners) fn();
