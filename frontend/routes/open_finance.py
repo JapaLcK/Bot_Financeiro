@@ -55,6 +55,7 @@ from db import (
     get_connections_by_item_id,
     get_open_finance_connection_by_item_id,
     get_open_finance_snapshot,
+    is_account_scheduled_for_deletion,
     item_registry_origins,
     list_pluggy_item_ids,
     pluggy_item_lock,
@@ -966,7 +967,13 @@ async def _adota_item_orfao(item_id: str, last_event: str | None = None) -> int 
         ser incapazes de criar usuário: `register_item` nunca criou, e a conexão
         vai com `criar_usuario=False`. Antes, `ensure_user_tx` RESSUSCITAVA a
         conta apagada por LGPD (`db/privacy.py`) cujo item sobreviveu ao delete
-        best-effort — pelo evento da Pluggy, e depois pela corrida (Codex #313);
+        best-effort — pelo evento da Pluggy, e depois pela corrida (Codex #313).
+        EXISTIR não basta, e essa é a TERCEIRA defesa: `user_exists` responde True
+        durante a exclusão AGENDADA (db/users.py:34), e a conexão adotada nessa
+        janela sai pela cascata do `delete from users` sem passar pelo `RETURNING`
+        que alimenta o delete remoto — `is_account_scheduled_for_deletion` recusa
+        ali (log `exclusao_agendada`), alinhando esta porta com o 403 que o
+        `POST /pluggy-item` já dava;
       • o rastro (`register_item`) vai ANTES da conexão, e a ordem inversa é pior:
         ela deixava conexão commitada com registry VAZIO — item adotado sem
         nenhum rastro, e o rastro é a única enumeração que existe (`GET /items`
@@ -1113,6 +1120,31 @@ async def _adota_item_orfao(item_id: str, last_event: str | None = None) -> int 
                 "Item órfão de usuário que não existe mais",
                 source="open_finance",
                 details={"item_id": item_id, "user_id": dono, "motivo": "usuario_inexistente"},
+            )
+            return None
+        # A conta pode EXISTIR e já estar a caminho do fim: `user_exists` responde
+        # True durante a exclusão agendada de propósito (db/users.py:34, "LIMITE
+        # CONHECIDO"), e adotar nessa janela pendura uma conexão nova que o
+        # `delete from users` leva pela CASCATA — sem ter passado pelo `RETURNING`
+        # da exclusão, que é o que alimenta o delete remoto. Desfecho medido:
+        # item vivo (e pago) na Pluggy, com os dados bancários do titular, depois
+        # de uma exclusão LGPD (P2 do Codex na PR #539, reproduzido pelo Tester).
+        # Esta é a porta que ALCANÇA em produção; o `POST /pluggy-item` já morre em
+        # 403 pelo `raise_if_account_scheduled_for_deletion`
+        # (frontend/routes/shared.py:971), que é o MESMO predicado — aqui não há
+        # 403 a levantar para a Pluggy, então o que se reusa é a fonte única
+        # (`is_account_scheduled_for_deletion`, db/privacy.py:243) e o desfecho é
+        # o skip. O `user_exists` fica: ele responde por conta JÁ apagada, que é
+        # outro estado (e o único que tem `user_id` em `details`, porque a coluna
+        # não aceita FK de conta inexistente). Aqui a conta existe, então o dono
+        # vai na COLUNA `user_id` — a cascata de `system_event_logs` a leva no dia
+        # da exclusão, e `details` (que a cascata não alcança) não guarda uid.
+        if await asyncio.to_thread(is_account_scheduled_for_deletion, dono):
+            await log_system_event(
+                "warning", "of_webhook_adopt_skipped",
+                "Item órfão de conta com exclusão agendada",
+                source="open_finance", user_id=dono,
+                details={"item_id": item_id, "motivo": "exclusao_agendada"},
             )
             return None
         await _enforce_bank_limit(dono, item_id)

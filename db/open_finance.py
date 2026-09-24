@@ -2796,7 +2796,7 @@ def disconnect_open_finance_connection(
             from .bank_movements import _lock_user, delete_if_shadow, reconcile_bank_movements
             # Import LOCAL: `open_finance_state` importa este módulo no topo, e a
             # mão única do import está documentada lá (`:38-42`).
-            from .open_finance_state import mark_items_removed
+            from .open_finance_state import mark_items_removed, pluggy_items_a_deletar
             _lock_user(cur, user_id)
             # Caixinha vinculada é ESPELHO: o dinheiro está no banco. Indo embora a
             # conexão, o FK só zera o `of_investment_id` (`on delete set null`,
@@ -2868,11 +2868,7 @@ def disconnect_open_finance_connection(
         conn.commit()
 
     if swept_out is not None:
-        swept_out.extend(sorted({
-            r["provider_item_id"] for r in varridas
-            if r["provider"] == "pluggy" and r["provider_item_id"]
-            and str(r["status"] or "").upper() != "PAUSED"
-        }))
+        swept_out.extend(pluggy_items_a_deletar(varridas))
 
     return deleted
 

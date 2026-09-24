@@ -729,11 +729,12 @@ def reset_user_data(
                 # RETURNING: o que ESTE delete varreu. Item salvo entre a
                 # enumeração do remote_cleanup e este delete não foi deletado
                 # na Pluggy — o chamador compara os dois conjuntos e faz um 2º
-                # passe (Codex PR #217, 11º). PAUSED fica fora do capture: o
-                # item já foi deletado na Pluggy (mesma regra do
-                # list_pluggy_item_ids).
+                # passe (Codex PR #217, 11º). Quem decide o que entra é
+                # `pluggy_items_a_deletar`, fonte única do filtro (§0.7).
                 pluggy_items_swept: list[str] = []
                 if _table_exists(cur, "open_finance_connections"):
+                    from .open_finance_state import pluggy_items_a_deletar
+
                     cur.execute(
                         """
                         delete from open_finance_connections
@@ -744,11 +745,7 @@ def reset_user_data(
                     )
                     rows = cur.fetchall()
                     counts["open_finance_connections"] = len(rows)
-                    pluggy_items_swept = sorted({
-                        r["provider_item_id"] for r in rows
-                        if r["provider"] == "pluggy" and r["provider_item_id"]
-                        and str(r["status"] or "").upper() != "PAUSED"
-                    })
+                    pluggy_items_swept = pluggy_items_a_deletar(rows)
                     # Marca da remoção deliberada, na MESMA transação do delete
                     # (o registry é preservado pelo reset, então ela sobrevive):
                     # sem ela uma reentrega de `item/created` recria pelo webhook
@@ -891,7 +888,7 @@ def delete_user_data(
     from core.observability import log_system_event_sync
 
     from .open_finance import list_pluggy_item_ids
-    from .open_finance_state import pluggy_items_lock
+    from .open_finance_state import pluggy_items_a_deletar, pluggy_items_lock
 
     # Enumeração SÓ por `list_pluggy_item_ids` (que filtra `user_id` E provider).
     # NUNCA pelo `open_finance_item_registry`: ele tem linhas com `user_id NULL` e
@@ -1015,9 +1012,9 @@ def delete_user_data(
                 # RETURNING: o que ESTE delete varreu. Item salvo ENTRE a
                 # enumeração do `remote_cleanup` e este delete não foi deletado
                 # na Pluggy — o chamador compara os dois conjuntos e faz um 2º
-                # passe. Mesmo filtro, palavra por palavra, do reset (:743-747)
-                # e do disconnect (db/open_finance.py:2860-2864): PAUSED fica
-                # fora porque o item já foi deletado lá (CLAUDE.md §0.7).
+                # passe. O filtro é o do reset e o do disconnect, e agora é UMA
+                # função (`pluggy_items_a_deletar`, CLAUDE.md §0.7): PAUSED fica
+                # fora porque o item já foi deletado lá.
                 pluggy_items_swept: list[str] = []
                 if _table_exists(cur, "open_finance_connections"):
                     cur.execute(
@@ -1028,11 +1025,7 @@ def delete_user_data(
                         """,
                         (user_id,),
                     )
-                    pluggy_items_swept = sorted({
-                        r["provider_item_id"] for r in cur.fetchall()
-                        if r["provider"] == "pluggy" and r["provider_item_id"]
-                        and str(r["status"] or "").upper() != "PAUSED"
-                    })
+                    pluggy_items_swept = pluggy_items_a_deletar(cur.fetchall())
                 if _table_exists(cur, "credit_transactions"):
                     cur.execute("delete from credit_transactions where user_id = %s", (user_id,))
 
@@ -1091,6 +1084,43 @@ def delete_user_data(
                 for table in user_owned_tables:
                     if _table_exists(cur, table) and _column_exists(cur, table, "user_id"):
                         cur.execute(f"delete from {table} where user_id = %s", (user_id,))
+
+                # CINTO (P2 do Codex na PR #539, reproduzido pelo Tester). O
+                # `RETURNING` acima é a foto do instante do DELETE. Entre ele e o
+                # `delete from users` logo abaixo, outra sessão AINDA consegue
+                # commitar uma conexão nova: a linha de `users` existe até aqui, e
+                # a porta de produção é o webhook `item/created`
+                # (`_adota_item_orfao`). O `delete from users` leva essa conexão
+                # pela CASCATA — sem `RETURNING`, então o item ficava vivo (e pago)
+                # na Pluggy depois da exclusão LGPD. A reconsulta enxerga a linha
+                # (READ COMMITTED: o commit da outra sessão é visível ao statement
+                # seguinte) e soma ao 2º passe, que roda depois do commit e funciona
+                # com a conta já apagada (`item_ids` explícito).
+                #
+                # É CINTO, não a porta: quem fecha a porta é a guarda de exclusão
+                # agendada na adoção. Travar `users` no começo da transação — a
+                # correção que o apontamento sugeria — foi MEDIDA e dá
+                # `DeadlockDetected ... while locking tuple in relation "users"`:
+                # todo escritor do repositório trava `accounts` antes de `users`
+                # (`db/bank_movements.py:_lock_user`) e a exclusão inverteria a ordem.
+                #
+                # ponytail: SOBRA a janela entre esta reconsulta e o `delete from
+                # users` — mais estreita (dois statements da mesma transação, sem
+                # round-trip de HTTP no meio) e do mesmo tamanho para a linha de
+                # `users`. Fechá-la é ordenar o lock de todo o repositório
+                # (`accounts` antes de `users` em quem exclui também), que é outro PR.
+                if _table_exists(cur, "open_finance_connections"):
+                    cur.execute(
+                        """
+                        select provider, provider_item_id, status
+                        from open_finance_connections
+                        where user_id = %s
+                        """,
+                        (user_id,),
+                    )
+                    pluggy_items_swept = sorted(
+                        set(pluggy_items_swept) | set(pluggy_items_a_deletar(cur.fetchall()))
+                    )
 
                 cur.execute("delete from users where id = %s", (user_id,))
                 deleted += cur.rowcount

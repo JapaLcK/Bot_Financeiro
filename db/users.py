@@ -40,11 +40,17 @@ def user_exists(user_id: int) -> bool:
     (`db/privacy.py`) cujo item sobreviveu ao delete best-effort voltava a
     existir no banco por causa de um evento da Pluggy.
 
-    LIMITE CONHECIDO: responde True durante a janela da exclusão AGENDADA
-    (`auth_accounts.deletion_status in ('scheduled','processing')`) — a linha de
-    `users` só some no fim. Fechar isso é join com `auth_accounts`, outra tabela,
-    dentro do que hoje é um `select 1 from users`; não vale o custo aqui: nessa
-    janela a conta ainda EXISTE, e a exclusão, quando roda, leva a conexão junto.
+    LIMITE CONHECIDO, e ele NÃO é inofensivo: responde True durante a janela da
+    exclusão AGENDADA (`auth_accounts.deletion_status in ('scheduled','processing')`)
+    — a linha de `users` só some no fim. "A exclusão leva a conexão junto" é
+    verdade e não basta: ela leva pela CASCATA do `delete from users`, fora do
+    `RETURNING` que alimenta o delete remoto na Pluggy, então o item fica vivo (e
+    pago) depois da exclusão LGPD (P2 do Codex na PR #539). Continua não valendo o
+    join aqui — o predicado tem fonte única em `db.is_account_scheduled_for_deletion`
+    e QUEM CHAMA decide: a adoção por webhook o consulta logo depois deste
+    `user_exists` (`frontend/routes/open_finance.py`), e o
+    `scripts/cleanup_poisoned_category_rules.py` segue querendo só "a conta
+    existe?", que é o que esta função responde.
     """
     with get_conn() as conn:
         with conn.cursor() as cur:
