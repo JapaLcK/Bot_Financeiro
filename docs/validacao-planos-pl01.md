@@ -401,7 +401,7 @@ Roda por último, depois do ciclo da Stripe: I1 precisa da mesma conta de teste.
 | caso | sintoma | causa | PR |
 |---|---|---|---|
 | C6c | *candidato, visto só no código:* "gastei mais esse mês que no passado?" vira pedido de valor de lançamento | classificador determinístico casa "gastei" com `launches.add` antes da IA | — confirmar em produção |
-| F5b | *visto só no código:* gasto manual lançado depois da transação do banco não virava par e contava duas vezes, calado | a fusão reversa não tinha chamador em produção; o lançamento manual agora cria a pendência (`propose_manual_reconciliation`) | corrigido no PR (a abrir) da branch `fix/f5b-par-pendente-manual-depois` |
+| F5b | *visto só no código:* gasto manual lançado depois da transação do banco não virava par e contava duas vezes, calado | a fusão reversa não tinha chamador em produção; o lançamento manual agora cria a pendência (`propose_manual_reconciliation`) | corrigido no PR JapaLcK/Bot_Financeiro#563 |
 
 ## O que este roteiro não cobre
 
