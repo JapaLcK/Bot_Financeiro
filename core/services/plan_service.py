@@ -4,9 +4,9 @@ expõe checagens simples para o resto do app.
 
 Dois mundos atrás do flag PLANS_V2_ENABLED (lido dinâmico, sem redeploy):
 
-  • OFF (default, produção atual): binário Free × Pro + paywall obrigatório
-    (PAYWALL_ENABLED). Comportamento 100% preservado.
-  • ON (escada v2): 4 tiers free < essencial < plus < pro. O valor 'pro' no
+  • OFF (freio de emergência, `PLANS_V2_ENABLED=0`): binário Free × Pro +
+    paywall obrigatório (PAYWALL_ENABLED) — o mundo de antes da escada.
+  • ON (default desde 2026-08-06, produção; ver `plans_v2_enabled`): 4 tiers free < essencial < plus < pro. O valor 'pro' no
     banco é ALIAS LEGADO do tier plus (R$ 19,90 — antigo "Pro", hoje "Plus");
     o tier pro novo (R$ 39,90) usa o valor 'pro_max'. Desde o CORTE DO GRÁTIS
     (#274/#354) o tier free NÃO entra no app: has_app_access consulta

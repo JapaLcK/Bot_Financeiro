@@ -19,7 +19,8 @@ from core.types import IncomingMessage
 
 @pytest.fixture(autouse=True)
 def v2_ligado(monkeypatch):
-    """O conftest roda a suíte com PLANS_V2_ENABLED=0. Sem este setenv,
+    """O conftest já roda no v2 quem está fora de `_AINDA_EM_V1`; este setenv
+    garante o v2 mesmo se o arquivo entrar na lista. Sem v2,
     needs_plan_selection devolve False sempre e os dois arquivos são teatro.
 
     Importado por cada arquivo de teste do assunto (o pytest só aplica a fixture

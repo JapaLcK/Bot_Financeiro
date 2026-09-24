@@ -18,6 +18,8 @@ import { Spinner } from "./spinner";
 
 export type { ChatMessage } from "@/chat/types";
 
+const MotionMessage = motion.create(Message);
+
 function Actions({ actions }: { actions?: ChatAction[] }) {
   return actions?.map((action, index) => <button key={`${action.label}-${index}`} type="button"
     className="pc-chat-action agent-chat-action" onClick={action.onClick} disabled={action.disabled}>
@@ -32,20 +34,19 @@ function timeLabel(createdAt?: string) {
   return new Intl.DateTimeFormat("pt-BR", { hour: "2-digit", minute: "2-digit" }).format(date);
 }
 
-function MessageBubble({ message, view, id }: {
-  message: ChatMessage; view: ChatView; id: ChatId;
+function MessageBubble({ message, view, id, reduced }: {
+  message: ChatMessage; view: ChatView; id: ChatId; reduced: boolean;
 }) {
   const user = message.role === "user";
   const pending = message.state === "pending";
   const author = message.author || (user ? "Você" : message.state === "error" ? "Resposta não concluída" : view.title);
   const time = timeLabel(message.createdAt);
-  return <Message align={user ? "end" : "start"}
+  return <MotionMessage align={user ? "end" : "start"}
+    initial={reduced ? false : { opacity: 0, y: 8 }} animate={{ opacity: 1, y: 0 }}
+    transition={{ duration: reduced ? 0 : 0.22, ease: [0.22, 1, 0.36, 1] }}
     className={cn(id === "agent" ? `agent-chat-message agent-chat-${message.role}` : `piggy-msg ${message.role}`)}
     data-state={message.state || "complete"}>
     <MessageContent>
-      <span role="status" className="pc-sr-only">
-        {pending ? `${author} está preparando a resposta` : !user && message.state === "complete" ? "Resposta pronta" : ""}
-      </span>
       <Bubble variant={user ? "muted" : "ghost"} aria-busy={pending || undefined}>
         <BubbleContent>
           {pending ? <Marker>
@@ -71,7 +72,7 @@ function MessageBubble({ message, view, id }: {
           </div>
         </div>}
     </MessageContent>
-  </Message>;
+  </MotionMessage>;
 }
 
 export function ChatMessages({ id, view, active, onClose }: {
@@ -87,6 +88,10 @@ export function ChatMessages({ id, view, active, onClose }: {
   const [mobile, setMobile] = useState(() => window.matchMedia("(max-width: 600px), (max-width: 960px) and (pointer: coarse) and (orientation: landscape)").matches);
   const last = view.messages[view.messages.length - 1];
   const signature = `${view.messages.length}:${last?.id}:${last?.state}:${last?.content.length}`;
+  const messageStatus = last?.role !== "assistant" ? ""
+    : last.state === "pending" ? `${last.author || view.title} está preparando a resposta`
+    : last.state === "complete" ? "Resposta pronta"
+    : last.state === "error" ? "Resposta não concluída" : "";
 
   useEffect(() => {
     const query = window.matchMedia("(max-width: 600px), (max-width: 960px) and (pointer: coarse) and (orientation: landscape)");
@@ -164,6 +169,7 @@ export function ChatMessages({ id, view, active, onClose }: {
       if (event.shiftKey && document.activeElement === first) { event.preventDefault(); final?.focus(); }
       else if (!event.shiftKey && document.activeElement === final) { event.preventDefault(); first?.focus(); }
     }}>
+    <span data-slot="message-status" role="status" className="pc-sr-only">{messageStatus}</span>
     <div className={id === "agent" ? "pc-agent-page pc-flex pc-flex-col pc-min-h-0" : "pc-flex pc-flex-col pc-min-h-0 pc-flex-1"}>
     <div className="pc-chat-head pc-flex pc-items-center pc-gap-3">
       <img id={`${prefix}-avatar`} className="pc-head-avatar" src={view.avatar} alt="" width="44" height="50" />
@@ -189,7 +195,7 @@ export function ChatMessages({ id, view, active, onClose }: {
           {id === "agent" && <small>{view.emptyText}</small>}
           {id === "piggy" && <div className="pc-suggestions"><Actions actions={view.suggestions} /></div>}
         </div>}
-        {view.messages.map(message => <MessageBubble key={message.id} message={message} view={view} id={id} />)}
+        {view.messages.map(message => <MessageBubble key={message.id} message={message} view={view} id={id} reduced={reduced} />)}
       </div>
       {scrolledAway && <button type="button" className="pc-latest" onClick={toBottom} aria-label="Ir para as mensagens recentes">
         <ArrowDown size={16} aria-hidden="true" /><span>Mensagens recentes</span>

@@ -231,10 +231,10 @@ describe("timeout de auth (I1): fetch pendurado não trava a fila para sempre", 
     await Promise.all([pendurado, engolido]);
 
     // Sem abandono, o timeout do `comLimite()` (AbortError, apontamento Codex
-    // #3) é tratado como resposta HTTP provável: a requisição chegou ao
-    // servidor e o desafio já foi consumido, então a tela volta ao
-    // FORMULÁRIO — nunca autentica sozinha, e nunca reapresenta um `mfa` com
-    // desafio morto.
+    // #3) é ambíguo: a requisição provavelmente chegou ao servidor, e o que
+    // ela fez com o desafio não se sabe, então a tela volta ao FORMULÁRIO —
+    // nunca autentica sozinha, e nunca prende a pessoa num `mfa` com desafio
+    // que pode estar morto.
     expect(autenticarVelho).not.toHaveBeenCalled();
     expect(aplicados.at(-1)).toEqual({ fase: "formulario", aviso: `${GENERICO} Entre de novo.` });
   });

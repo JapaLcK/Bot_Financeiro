@@ -85,7 +85,7 @@
     draft = '';
     const createdAt = new Date().toISOString();
     messages.push({ id: `piggy-${++sequence}`, role: 'user', content: text, createdAt });
-    const reply = { id: `piggy-${++sequence}`, role: 'assistant', content: 'Preparando a resposta…', createdAt, state: 'pending', markdown: true };
+    const reply = { id: `piggy-${++sequence}`, role: 'assistant', content: 'Preparando a resposta…', state: 'pending', markdown: true };
     messages.push(reply);
     render();
     try {
@@ -117,6 +117,7 @@
       // Não reenviar automaticamente, oferecer replay ou afirmar que não houve cobrança.
       Object.assign(reply, { state: 'error', content: 'A conexão foi interrompida antes de recebermos a resposta. Se você pediu uma alteração, confira seus dados antes de repetir o pedido.' });
     } finally {
+      reply.createdAt = new Date().toISOString();
       busy = false;
       render();
       if (ui.isOpen('piggy')) ui.focusInput('piggy');

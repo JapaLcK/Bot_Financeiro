@@ -1,12 +1,15 @@
 import Constants from "expo-constants";
 import { z } from "zod";
 
+import { USER_AGENT } from "./aparelho";
 import { credenciaisSchema } from "./schemas/auth";
 import { lerCredenciais, limparSe, trocarSe } from "../storage/secure";
 
 /** Header que faz o servidor entregar token no corpo e NENHUM cookie. */
 const HEADER_CLIENTE = "X-PigBank-Client";
 const CLIENTE = "app";
+/** Vão em TODA requisição — a comum (`enviar`) e a renovação (`renovar`). */
+const CABECALHOS_DO_APP = { [HEADER_CLIENTE]: CLIENTE, "User-Agent": USER_AGENT };
 
 export class ErroDeApi extends Error {
   constructor(
@@ -183,7 +186,7 @@ async function renovar(refreshDeOrigem: string): Promise<Renovacao> {
         method: "POST",
         headers: {
           Authorization: `Bearer ${refreshDeOrigem}`,
-          [HEADER_CLIENTE]: CLIENTE,
+          ...CABECALHOS_DO_APP,
           "Content-Type": "application/json",
         },
         credentials: "omit",
@@ -324,7 +327,7 @@ type Opcoes = {
 
 async function enviar(rota: string, opcoes: Opcoes, access: string | null) {
   const metodo = opcoes.metodo ?? "GET";
-  const cabecalhos: Record<string, string> = { [HEADER_CLIENTE]: CLIENTE };
+  const cabecalhos: Record<string, string> = { ...CABECALHOS_DO_APP };
   if (access) cabecalhos["Authorization"] = `Bearer ${access}`;
   // Toda ESCRITA declara JSON, inclusive a que não tem corpo (logout). É a 2ª
   // condição da isenção de CSRF do servidor: um `<form>` cross-site só emite
@@ -393,7 +396,11 @@ async function executar<T>(
   }
 
   if (!resposta.ok) {
-    throw new ErroDeApi(resposta.status, await mensagemDeErro(resposta));
+    // O corpo é lido UMA vez: num `Response` real a segunda leitura rejeita, e
+    // o `code` do corpo (ex.: `mfa_code_invalid`) sumiria. 5xx não é lido
+    // (ver `mensagemDeErro`).
+    const corpo = resposta.status >= 500 ? undefined : await resposta.json().catch(() => undefined);
+    throw new ErroDeApi(resposta.status, mensagemDeErro(resposta.status, corpo), corpo);
   }
 
   const bruto = await resposta.json().catch(() => null);
@@ -478,15 +485,14 @@ async function superada(refresh: string, fimDeSessao: boolean): Promise<boolean>
  * `error`/`message`, lista de erros do Pydantic. Mostrar o JSON na tela é um
  * defeito que o produto já viveu no site (o modal que exibia `{"detail":...}`).
  */
-async function mensagemDeErro(resposta: Response): Promise<string> {
+function mensagemDeErro(status: number, corpo: unknown): string {
   // 5xx ANTES de olhar o corpo, e não depois: em erro de servidor o `detail`
   // carrega a exceção crua (`psycopg.OperationalError`, um traceback), e a
   // ordem inversa entregava isso à tela do usuário. Foi o teste de 500 que
   // pegou — a versão anterior confiava no `detail` primeiro.
-  if (resposta.status >= 500) {
+  if (status >= 500) {
     return "Tivemos um problema aqui. Tente de novo em instantes.";
   }
-  const corpo = await resposta.json().catch(() => null);
   const detalhe = (corpo as { detail?: unknown } | null)?.detail;
   if (typeof detalhe === "string") return detalhe;
   if (detalhe && typeof detalhe === "object") {

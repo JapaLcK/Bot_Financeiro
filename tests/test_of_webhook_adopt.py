@@ -24,6 +24,7 @@ from fastapi.testclient import TestClient
 import db
 import frontend.finance_bot_websocket_custom as dashboard
 import frontend.routes.open_finance as of_routes
+from conftest import promote_to_pro
 from db.connection import get_conn
 from test_of_item_ownership import _auth, _webhook, eventos  # noqa: F401
 # Helpers de _guards, como o `_dupe.py` já fazia: eram cópias byte a byte aqui
@@ -35,6 +36,7 @@ from test_of_webhook_adopt_guards import (  # noqa: F401
 
 def test_webhook_adota_item_orfao_e_a_tela_passa_a_mostrar_o_banco(
         user_id, monkeypatch, eventos, webhook_pluggy):
+    promote_to_pro(user_id)
     _mock_item(monkeypatch, user_id)
     client = TestClient(dashboard.app)
     try:
@@ -73,8 +75,10 @@ def test_adocao_desligada_volta_a_deixar_o_dono_sem_linha(
 def test_adocao_respeita_o_dono_remoto_e_nao_vaza_para_o_usuario_errado(
         user_id, monkeypatch, eventos, webhook_pluggy):
     """O dono vem do `clientUserId` REMOTO — o corpo do webhook não decide posse."""
+    promote_to_pro(user_id)
     dono = user_id + 1
     db.ensure_user(dono)
+    promote_to_pro(dono)
     _mock_item(monkeypatch, dono)
     client = TestClient(dashboard.app)
     try:
@@ -83,8 +87,9 @@ def test_adocao_respeita_o_dono_remoto_e_nao_vaza_para_o_usuario_errado(
         linhas = db.get_connections_by_item_id("item-do-outro")
         assert len(linhas) == 1 and int(linhas[0]["user_id"]) == dono, linhas
 
-        snap = client.get(f"/open-finance/{user_id}", headers=_auth(client, user_id)).json()
-        assert snap["connections"] == [], "item de outra conta não pode aparecer aqui"
+        r = client.get(f"/open-finance/{user_id}", headers=_auth(client, user_id))
+        assert r.status_code == 200, r.text
+        assert r.json()["connections"] == [], "item de outra conta não pode aparecer aqui"
     finally:
         db.disconnect_open_finance_connection(dono)
         with get_conn() as c:
@@ -142,6 +147,7 @@ def test_adotado_o_delete_enumera_e_apaga_o_item_na_pluggy(
     Sem a linha local, `list_pluggy_item_ids` devolvia `[]`, o item continuava
     vivo na Pluggy e o `avoidDuplicates` do connect token recusava item novo.
     """
+    promote_to_pro(user_id)
     _mock_item(monkeypatch, user_id)
     apagados: list[str] = []
     monkeypatch.setattr(of_routes, "create_pluggy_api_key", lambda: "api-key-fake")
@@ -173,6 +179,7 @@ def test_pluggy_item_depois_da_adocao_nao_duplica_a_conexao(
     porque o POST sozinho também escreve uma linha. O assert do MEIO é o que
     discrimina: sem adoção, ali há zero linhas.
     """
+    promote_to_pro(user_id)
     _mock_item(monkeypatch, user_id)
     client = TestClient(dashboard.app)
     try:
@@ -201,6 +208,7 @@ def test_adocao_nao_agenda_sync_de_item_que_a_pluggy_ainda_esta_montando(
     conexão JÁ existe, então ele entra pelo caminho comum (`len(conexoes) == 1`),
     que é o assert final aqui.
     """
+    promote_to_pro(user_id)
     monkeypatch.setattr(of_routes, "get_pluggy_item",
                         lambda item_id, api_key=None: {"id": item_id, "status": "UPDATING",
                                                        "clientUserId": str(user_id),
@@ -234,6 +242,7 @@ def test_conta_apagada_no_meio_da_adocao_nao_ressuscita(monkeypatch, eventos, we
     """
     fantasma = 987654321988
     db.ensure_user(fantasma)
+    promote_to_pro(fantasma)
     _mock_item(monkeypatch, fantasma)
 
     real_register = of_routes.register_item

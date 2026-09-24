@@ -1048,7 +1048,8 @@ _GATE_EXEMPT_PREFIXES = ("/billing", "/auth", "/conta")
 
 
 def _is_pigbank_app(request: Request) -> bool:
-    """True se a requisição diz vir do WebView do app iOS (UA anexa "PigBankApp").
+    """True se a requisição diz vir do app: o WebView iOS anexa "PigBankApp/1.0"
+    ao UA, e o app nativo (iOS e Android) manda "PigBankApp/<versão> (...)".
 
     Só para TELEMETRIA (signup_source_from_request). NÃO usar para conceder nada:
     o User-Agent é escolhido pelo cliente, então isto é a alegação do chamador,
@@ -1061,8 +1062,9 @@ def _is_pigbank_app(request: Request) -> bool:
 
 def signup_source_from_request(request: Request, *, google: bool = False) -> str:
     """Origem do cadastro, gravada em auth_accounts.signup_source. Distingue web
-    de app iOS pro painel de admin, e SÓ isso: nenhum gate isenta o app nem lê
-    esta coluna (política em plan_service.needs_plan_selection).
+    de app (WebView iOS e app nativo iOS/Android) pro painel de admin, e SÓ
+    isso: nenhum gate isenta o app nem lê esta coluna (política em
+    plan_service.needs_plan_selection).
 
       web | app | google | google_app"""
     in_app = _is_pigbank_app(request)

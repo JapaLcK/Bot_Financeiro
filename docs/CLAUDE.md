@@ -242,7 +242,7 @@ na inferência.
 
 **Resend** (`RESEND_API_KEY`), em `core/services/email_service.py` — **não é mais
 SMTP/Gmail**. Além dos transacionais (verificação, boas-vindas, reset), há e-mails de
-ciclo de vida (reengajamento, nudge de upgrade, downsell de trial, relatório de
+ciclo de vida (reengajamento, downsell de trial, relatório de
 agente, mudança de plano), com link de descadastro (`make_unsub_url` + `unsub_headers`).
 
 Falha de e-mail é silenciosa por contrato: loga e não quebra o fluxo principal.

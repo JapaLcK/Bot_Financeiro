@@ -21,9 +21,9 @@
  *   a da ilha, nos dois ciclos) e PI8 a janela em que o `refreshPlanButtons`
  *   roda ANTES do mount — medida, não suposta.
  *
- * PO — O PÓDIO. Os três cards ficam na mesma linha acima de 900px, com o
- *   Plus no centro, mais alto e alinhado pela base aos planos laterais. Abaixo
- *   disso a escada empilha em uma coluna, sem criar uma fileira órfã de um card.
+ * PO — A COMPOSIÇÃO. Os três cards ficam alinhados acima de 900px, com o
+ *   Plus preto no centro, Essencial branco e Pro blush. Abaixo disso ficam em
+ *   uma coluna, sem criar uma fileira órfã ou overflow.
  *
  * Como se sabe se a ilha MONTOU, já que ela reemite o mesmo markup de propósito:
  * por um COMENTÁRIO HTML plantado dentro do `#plans-v2`. Comentário não é lido
@@ -690,13 +690,13 @@ test("PI10: o foco dentro do card sobrevive ao mount, e o de fora não é roubad
   }
 });
 
-// ── PO: o pódio ─────────────────────────────────────────────────────────────
+// ── PO: a composição ─────────────────────────────────────────────────────────────
 //
-// O pódio só existe quando o trio cabe na mesma linha. 900/901 cerca o breakpoint
+// O trio só ocupa três colunas quando cabe na mesma linha. 900/901 cerca o breakpoint
 // que separa o empilhamento mobile das três colunas.
 const LARGURAS = [320, 390, 600, 768, 820, 900, 901, 1024, 1440];
 
-test("PO1: pódio nas três colunas e cards contidos no empilhamento", async () => {
+test("PO1: três colunas alinhadas e cards contidos no empilhamento", async () => {
   const pagina = await browser.newPage();
   const fora = [];
   for (const largura of LARGURAS) {
@@ -708,22 +708,19 @@ test("PO1: pódio nas três colunas e cards contidos no empilhamento", async () 
       return { colunas: cs.gridTemplateColumns.split(" ").length, align: cs.alignItems,
         larguraCard: Math.round(g.querySelector("article.plan").getBoundingClientRect().width) };
     });
-    const esperado = r.colunas === 3 ? "end" : "normal";
+    assert.equal(r.colunas, largura > 900 ? 3 : 1, `colunas em ${largura}px`);
+    const esperado = "stretch";
     if (r.align !== esperado) fora.push(`${largura}px: ${r.colunas} coluna(s) com align-items: ${r.align}`);
-    if (r.colunas === 1 && r.larguraCard > 380) {
+    if (r.colunas === 1 && r.larguraCard > Math.min(550, largura - 40)) {
       fora.push(`${largura}px: card empilhado com ${r.larguraCard}px`);
     }
   }
   await pagina.close();
-  assert.deepEqual(fora, [], `o pódio e a contagem de colunas discordam em:\n${fora.join("\n")}`);
+  assert.deepEqual(fora, [], `o alinhamento e a contagem de colunas discordam em:\n${fora.join("\n")}`);
 });
 
-/**
- * PO2 — CONTROLE POSITIVO: o pódio EXISTE, e é pódio — são três cards, o Plus
- * ocupa o centro, é o mais alto, o Pro ocupa o degrau intermediário e as bases
- * estão alinhadas.
- */
-test("PO2: em 1024px os cards formam três degraus, com bases alinhadas", async () => {
+/** PO2: o layout aprovado tem três cards de mesma altura; contraste distingue o Plus. */
+test("PO2: em 1024px os cards têm alturas iguais, cores distintas e CTAs antes dos benefícios", async () => {
   const pagina = await browser.newPage();
   await pagina.setViewportSize({ width: 1024, height: 900 });
   await pagina.goto(ORIGIN + "/precos.html", { waitUntil: "load" });
@@ -733,6 +730,8 @@ test("PO2: em 1024px os cards formam três degraus, com bases alinhadas", async 
     return {
       nomes: cards.map((c) => c.querySelector("h3").textContent.trim()),
       alturas: cards.map((c) => Math.round(cx(c).height)),
+      topos: cards.map(c => Math.round(cx(c).top)),
+      cores: cards.map(c => getComputedStyle(c).backgroundColor),
       paddingsTopo: cards.map((c) => getComputedStyle(c).paddingTop),
       espacosTituloPreco: cards.map((c) => Math.round(
         c.querySelector(".price").getBoundingClientRect().top
@@ -755,24 +754,14 @@ test("PO2: em 1024px os cards formam três degraus, com bases alinhadas", async 
   await pagina.close();
   assert.deepEqual(r.nomes, ["Essencial", "Plus", "Pro"]);
   assert.equal(r.destaque, 1, "o Plus não está no centro do trio");
-  // ESTRITAMENTE mais alto, e não `=== Math.max(...)`: sem as regras do pódio o
-  // grid volta ao `stretch` e iguala os três cards, e aí o destaque EMPATA em
-  // primeiro — a asserção por `max` ficava verde num layout sem pódio nenhum
-  // (medido: apagando as duas regras do precos.css, este caso passava).
-  const outros = r.alturas.filter((_, i) => i !== r.destaque);
-  assert.ok(outros.every((h) => r.alturas[r.destaque] > h),
-    `o destaque (${r.alturas[r.destaque]}px) não é mais alto que todos: ${r.alturas.join("/")}`);
-  const degrauMinimo = 40;
-  assert.ok(r.alturas[2] - r.alturas[0] >= degrauMinimo,
-    `o degrau Essencial→Pro é menor que ${degrauMinimo}px: ${r.alturas.join("/")}`);
-  assert.ok(r.alturas[1] - r.alturas[2] >= degrauMinimo,
-    `o degrau Pro→Plus é menor que ${degrauMinimo}px: ${r.alturas.join("/")}`);
-  assert.ok(r.espacosTituloPreco.every((espaco) => espaco <= 36),
-    `há espaço demais entre título e preço: ${r.espacosTituloPreco.join("/")}px`);
+  assert.equal(new Set(r.alturas).size, 1, `alturas desalinhadas: ${r.alturas}`);
+  assert.equal(new Set(r.topos).size, 1, `topos desalinhados: ${r.topos}`);
+  assert.deepEqual(r.cores, ['rgb(255, 255, 255)', 'rgb(17, 17, 17)', 'rgb(249, 223, 233)']);
+  assert.ok(r.espacosTituloPreco.every(espaco => espaco > 0 && espaco <= 100),
+    `título/preço sem hierarquia compacta: ${r.espacosTituloPreco}`);
   assert.deepEqual(r.listas.map((l) => l.gap), ["16px", "16px", "16px"],
     `o espaçamento dos benefícios divergiu: ${JSON.stringify(r.listas)}`);
-  // Pro tem 8 desde o simulador de compra; o degrau do pódio exige que o item
-  // novo caiba em UMA linha em 1024px (medido: em duas, Plus−Pro cai a 39px).
+  // A composição muda; a seleção oficial de benefícios e a ordem do CTA permanecem.
   assert.deepEqual(r.listas.map((l) => l.itens), [6, 8, 8],
     `a seleção enxuta de benefícios divergiu: ${JSON.stringify(r.listas)}`);
   assert.ok(r.listas.every((l) => l.ctaAntes && l.vao >= 20 && l.vao <= 24),

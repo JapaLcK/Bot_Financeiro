@@ -20,11 +20,13 @@ from fastapi.testclient import TestClient
 os.environ.setdefault("MFA_ENCRYPTION_KEY", Fernet.generate_key().decode())
 
 import db
+from conftest import promote_to_pro
 import frontend.finance_bot_websocket_custom as dashboard
 
 
 def _auth(client: TestClient, user_id: int, email: str = "pkt@t.com") -> None:
     """Injeta cookies para passar por _authorize_dashboard_access."""
+    promote_to_pro(user_id)  # atravessa o gate de acesso do v2
     client.cookies.set(dashboard.AUTH_COOKIE_NAME, dashboard._make_jwt(user_id, email))
     client.cookies.set(dashboard.DASHBOARD_COOKIE_NAME, dashboard.make_dashboard_token(user_id, hours=1))
 

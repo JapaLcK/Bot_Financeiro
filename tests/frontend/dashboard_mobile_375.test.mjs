@@ -300,14 +300,14 @@ test("6) 320: cartão no #cards-grid cabe dentro da caixa da grade", async () =>
   await ctx.close();
 });
 
-test("7) formulários públicos: 16px no mobile, .92rem no desktop (controle positivo)", async () => {
+test("7) formulários públicos: 16px no mobile e desktop (controle positivo)", async () => {
   const campos = {
     "/login.html": ["#email", "#senha", "#mfa-code"],
     "/cadastro.html": ["#reg-name", "#reg-email", "#reg-phone", "#reg-password"],
-    "/suporte.html": ["#nome", "#email", "#assunto", "#msg"],
+    "/contato.html": ["#nome", "#email", "#assunto", "#msg"],
   };
   for (const [rota, ids] of Object.entries(campos)) {
-    for (const [w, esperado] of [[375, "16px"], [1280, "14.72px"]]) {
+    for (const [w, esperado] of [[375, "16px"], [1280, "16px"]]) {
       const ctx = await browser.newContext({ viewport: { width: w, height: 812 } });
       const page = await ctx.newPage();
       await page.goto(`${ORIGIN}${rota}`);

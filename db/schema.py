@@ -2100,7 +2100,7 @@ def init_db():
 
         # ─── Espaços financeiros (Fase 1) ───────────────────────────────────────
         # Segmentam a vida financeira em áreas (Pessoal, Casa, Fazenda). O
-        # espaço default por usuário é lazy (ver db/spaces.ensure_default_space);
+        # espaço default por usuário é lazy (nenhum código o cria hoje);
         # `space_id NULL` em launches/credit_transactions = espaço default. Apagar
         # um espaço NÃO apaga lançamentos (on delete set null → caem p/ default).
         #
