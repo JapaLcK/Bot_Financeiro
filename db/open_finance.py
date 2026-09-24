@@ -1,3 +1,4 @@
+import logging
 import re
 import unicodedata
 from decimal import Decimal
@@ -18,6 +19,11 @@ from .cards import (
 )
 from .connection import TIPO_CANON_SQL, get_conn
 from .users import ensure_user, ensure_user_tx
+
+# `logging` da stdlib, mesmo padrão (e mesmo motivo) de `db/open_finance_state.py`:
+# `_log_falha` exige uma exceção e um `user_id`, e `log_system_event_sync` custaria
+# outra aquisição de conexão do pool dentro de uma escrita com prazo (`budget_ms`).
+logger = logging.getLogger(__name__)
 
 
 def _rollback_imported_of(rows: list[dict]) -> None:
@@ -752,7 +758,23 @@ def save_pluggy_open_finance_item(user_id: int, item: dict, *,
         or item.get("name")
         or "Banco conectado"
     )
-    status = item.get("status") or item.get("executionStatus") or "UPDATING"
+    # FRONTEIRA (#539, A1): o `status` do payload é vocabulário do PROVEDOR e
+    # entrava CRU na coluna. `PAUSED` é sentinela LOCAL — "o item já foi deletado
+    # na Pluggy no fim do trial" — e é exatamente o valor que tira o item do
+    # DELETE remoto da exclusão de conta (`pluggy_items_a_deletar`) e da
+    # enumeração: `{"status": "PAUSED"}` vindo do provedor deixava o item vivo e
+    # pago na Pluggy depois de uma exclusão LGPD.
+    # Valor fora da lista vira o MESMO default de status AUSENTE (`UPDATING`), em
+    # vez de ser gravado cru: assim a coluna só recebe estado que os leitores dela
+    # sabem ler, e "desconhecido" tem um desfecho só. O valor original não se
+    # perde — ele fica no `raw` desta mesma linha (`Jsonb(item)`, abaixo), além do
+    # log.
+    from core.services.pluggy_health import STATUS_REMOTOS_ACEITOS
+    status = str(item.get("status") or item.get("executionStatus") or "UPDATING").upper()
+    if status not in STATUS_REMOTOS_ACEITOS:
+        logger.warning("of_status_remoto_recusado item=%s status=%r -> UPDATING",
+                       item_id, status)
+        status = "UPDATING"
     now = datetime.now(_tz())
 
     espera = None if budget_ms is None else max(0.001, budget_ms / 1000.0)
@@ -808,7 +830,7 @@ def save_pluggy_open_finance_item(user_id: int, item: dict, *,
                     user_id,
                     "pluggy",
                     item_id,
-                    str(status).upper(),
+                    status,
                     str(institution_id),
                     str(institution_name),
                     None,

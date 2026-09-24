@@ -588,3 +588,62 @@ def test_t16_enumeracao_sem_dono_e_recusada(user_id):
 
     assert db.list_pluggy_item_ids(user_id) == [_item_de(user_id)], \
         "a enumeração com dono é o caminho legítimo dos três chamadores"
+
+
+# ── T17 (fronteira do status remoto) ─────────────────────────────────────────
+
+def _status_da_conexao(item_id: str) -> str | None:
+    with get_conn() as conn:
+        with conn.cursor() as cur:
+            cur.execute(
+                "select status from open_finance_connections where provider_item_id = %s",
+                (item_id,),
+            )
+            linha = cur.fetchone()
+        conn.commit()
+    return linha["status"] if linha else None
+
+
+@pytest.mark.parametrize("status_remoto, na_coluna", [
+    ("PAUSED", "UPDATING"),      # sentinela local vinda do provedor
+    ("paused", "UPDATING"),      # a leitura faz `.upper()`, a caixa não protege
+    ("UPDATED", "UPDATED"),      # POSITIVO: o status legítimo dos outros testes
+    ("LOGIN_ERROR", "LOGIN_ERROR"),  # POSITIVO: status de erro real continua cru
+])
+def test_t17_status_do_payload_remoto_nunca_vira_a_sentinela_local(
+        user_id, monkeypatch, status_remoto, na_coluna):
+    """`save_pluggy_open_finance_item` é o ÚNICO ponto que grava status REMOTO, e
+    ele gravava o valor cru. `PAUSED` é sentinela LOCAL ("o item já foi deletado
+    na Pluggy no fim do trial") e é o valor que TIRA o item do DELETE remoto da
+    exclusão de conta — as duas guardas da exclusão leem o mesmo filtro
+    (`pluggy_items_a_deletar`), então as duas ficavam cegas juntas e o item seguia
+    vivo e pago na Pluggy depois de uma exclusão LGPD (#539 A1).
+
+    NEGATIVO: voltar a fronteira para `item.get("status") or
+    item.get("executionStatus") or "UPDATING"` (sem a lista de permissão) →
+    os dois primeiros casos vermelhos, nos DOIS asserts.
+    POSITIVO: os dois últimos casos são status que os outros testes já usam
+    (`tests/test_of_item_ownership.py`) e provam que a fronteira não achata o
+    vocabulário legítimo — sem eles o grupo passaria numa versão que gravasse
+    `UPDATING` para tudo, que é pior que o bug.
+
+    A sentinela LEGÍTIMA (o único escritor local, `pause_open_finance_connection`)
+    continua presa em `tests/test_of_trial_expiry.py`
+    (`test_free_expirado_pausa_e_preserva_dados` e
+    `test_lister_inclui_ativa_e_exclui_pausada`).
+    """
+    _semeia(user_id, item=None)   # conta agendada e vencida, zero conexões
+    item = f"{_item_de(user_id)}-t17"
+    db.save_pluggy_open_finance_item(
+        user_id,
+        {"id": item, "status": status_remoto, "connector": {"id": 613, "name": "Inter"}},
+        criar_usuario=False,   # o caminho da adoção por webhook
+    )
+    assert _status_da_conexao(item) == na_coluna, \
+        f"status remoto {status_remoto!r} chegou errado na coluna"
+
+    deletados = _mocka_pluggy(monkeypatch)
+    db.process_due_account_deletions(limit=10)
+    assert deletados == [item], \
+        (f"item VIVO na Pluggy depois da exclusão LGPD: status remoto "
+         f"{status_remoto!r} suprimiu o delete remoto")
