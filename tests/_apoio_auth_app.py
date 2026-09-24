@@ -97,7 +97,7 @@ def sessao():
     }
 
 
-def login_http(monkeypatch, *, como_app: bool):
+def login_http(monkeypatch, *, como_app: bool, ua: str | None = None):
     """Login de verdade pela rota, com a credencial mockada. Devolve o corpo."""
     db.ensure_user(UID)
     limpa_rate_limits("login", EMAIL)
@@ -118,6 +118,8 @@ def login_http(monkeypatch, *, como_app: bool):
         cabecalhos = {dashboard.APP_CLIENT_HEADER: "app"}
     else:
         cabecalhos = csrf(client)
+    if ua:
+        cabecalhos["User-Agent"] = ua
     r = client.post(
         "/auth/login",
         headers=cabecalhos,
