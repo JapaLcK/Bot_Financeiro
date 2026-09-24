@@ -78,6 +78,26 @@ export const INVESTMENTS = [
   { label: "Bitcoin", amount: 418.3 },
 ];
 
+// Entradas de abril a junho (antes dos lançamentos): bolsa + freela, quando teve.
+export const PAST_INCOMES = { "2026-04": 3650, "2026-05": 4600, "2026-06": 3400 };
+
+// Rendimento mensal, de out/2025 a set/2026 (as linhas do NET_WORTH): CDI e a carteira
+// (Tesouro Selic + Bitcoin, por isso ela oscila em volta do CDI).
+export const YIELDS = [
+  [1.12, 1.31], [1.05, 0.62], [1.14, 1.08], [1.16, 1.74], [0.99, 0.41], [1.13, 1.05],
+  [1.1, 1.28], [1.15, 0.87], [1.08, 1.09], [1.17, 1.46], [1.16, 0.93], [1.13, 1.02],
+].map(([cdi, carteira]) => ({ cdi: cdi / 100, carteira: carteira / 100 }));
+
+// Compras parceladas no cartão: valor da parcela, total de parcelas e quantas já foram
+// cobradas até a fatura de setembro. Ficam fora dos LAUNCHES para não mexer em saldo e
+// fatura dos meses já mostrados; o bloco olha só de outubro em diante.
+export const INSTALLMENTS = [
+  { label: "Celular novo", amount: 189.9, total: 10, paid: 4 },
+  { label: "Tênis", amount: 79.95, total: 5, paid: 1 },
+  { label: "Passagem pra BH", amount: 142.5, total: 6, paid: 3 },
+  { label: "Curso de inglês", amount: 99, total: 12, paid: 9 },
+];
+
 function prng(seed) {
   let a = seed >>> 0;
   return () => {

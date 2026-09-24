@@ -1,8 +1,6 @@
 // Perfis do Resumo. Um perfil é só o layout inicial do painel: a lista ordenada de
 // blocos. O ajuste fino fica salvo por perfil. `padrao` (o "Pular") é o painel de
 // sempre, com a lista em parts/Board.tsx.
-// Os presets já citam blocos que ainda não existem (renda, rendimento, parcelas):
-// a leitura descarta id desconhecido, então eles só aparecem quando existirem.
 import { TIERS } from "./data.js";
 
 export const PROFILES = [
@@ -10,16 +8,16 @@ export const PROFILES = [
     line: "Pra guardar mais todo mês. Mostra quanto sobrou, suas metas e onde dá pra cortar.",
     preset: ["resumo", "metas", "piggy", "categorias", "simulador", "compromissos"] },
   { id: "investir", label: "Investir", icon: "ph-trend-up",
-    line: "Pra fazer o dinheiro trabalhar. Mostra seu patrimônio, onde ele está e quanto falta pras metas.",
+    line: "Pra fazer o dinheiro trabalhar. Mostra seu patrimônio, quanto rendeu perto do CDI e onde ele está.",
     preset: ["patrimonio", "rendimento", "wealth", "simulador", "metas", "resumo", "piggy"] },
   { id: "controlar", label: "Controlar gastos", icon: "ph-chart-bar",
     line: "Pra saber pra onde vai cada real. Mostra os gastos por categoria, dia a dia, e as contas que vêm aí.",
     preset: ["categorias", "calendario", "resumo", "compromissos", "fatura", "piggy"] },
   { id: "dividas", label: "Sair das dívidas", icon: "ph-credit-card",
-    line: "Pra pagar o que deve e respirar. Mostra a fatura, os próximos vencimentos e o saldo previsto.",
+    line: "Pra pagar o que deve e respirar. Mostra a fatura, as parcelas que ainda vêm e os próximos vencimentos.",
     preset: ["fatura", "parcelas", "compromissos", "hero", "resumo", "categorias", "piggy"] },
   { id: "autonomo", label: "Autônomo", icon: "ph-briefcase",
-    line: "Pra quem tem renda que muda todo mês. Mostra o saldo previsto, as contas fixas e as metas.",
+    line: "Pra quem tem renda que muda todo mês. Mostra sua renda mês a mês, quanto a reserva segura e as contas fixas.",
     preset: ["renda", "hero", "resumo", "compromissos", "metas", "categorias", "piggy"] },
 ];
 const IDS = ["padrao", ...PROFILES.map((p) => p.id)];
