@@ -2187,26 +2187,26 @@ def _propose_manual_reconciliation(user_id: int, launch_id: int) -> dict:
                 conn.commit()
                 return {"ok": True, "of_tx_id": None}
 
+            # Candidatas só do MESMO recorte do aviso e do modal
+            # (`ACTIONABLE_PENDING_SQL`): transação de conexão PAUSED/DELETED ou de
+            # conta não-BRL viraria um par que ninguém vê — e tomaria o lugar de
+            # uma elegível. Os três primeiros %s: `merged_wallet_delta_params`.
             cur.execute(
-                """
-                select o.id as of_tx_id, o.description, l.id, l.valor,
-                       coalesce(l.posted_at, l.criado_em::date) as ref_date
-                  from open_finance_transactions o
-                  join open_finance_accounts a on a.id = o.account_id
-                  join open_finance_connections c on c.id = a.connection_id
-                  join launches l on l.id = o.imported_launch_id
-                 where c.user_id = %s and l.user_id = %s
-                   and upper(a.type) = 'BANK'
+                f"""
+                select t.id as of_tx_id, t.description, l.id, l.valor,
+                       coalesce(l.posted_at, l.criado_em::date) as ref_date{_RECORTE_TX_FROM_SQL}
+                  join launches l on l.id = t.imported_launch_id
+                 where l.user_id = %s
                    and l.source = 'open_finance' and l.is_internal_movement = false
                    and l.tipo = %s
-                   and o.match_launch_id is null
-                   and o.reconciliation_status in ('imported', 'pending')
+                   and t.match_launch_id is null
+                   and t.reconciliation_status in ('imported', 'pending')
                    and abs(l.valor - %s) <= %s
                    and coalesce(l.posted_at, l.criado_em::date) between %s and %s
-                 order by o.transaction_date, o.id
-                 for update of o
+                 order by t.transaction_date, t.id
+                 for update of t
                 """,
-                (user_id, user_id, m["tipo"], m["valor"], RECON_AMOUNT_TOL,
+                (*merged_wallet_delta_params(user_id), m["tipo"], m["valor"], RECON_AMOUNT_TOL,
                  m["ref_date"] - timedelta(days=RECON_DATE_WINDOW),
                  m["ref_date"] + timedelta(days=RECON_DATE_WINDOW)),
             )
@@ -2680,17 +2680,25 @@ BANK_ACCOUNTS_SQL = """
 # grava `delta_conta` -1 e `accounts.balance = balance + delta`
 # (db/accounts.py:94); devolver o débito é somar +1, como já faz o rollback do
 # delete (`balance - delta_conta`, db/accounts.py:1766).
+#
+# Transações `t` das contas no recorte, casadas pela identidade da conta (ver
+# acima). Usado aqui e na ordem inversa (`_propose_manual_reconciliation`), para
+# que o par criado lá seja o mesmo que o aviso e o modal enxergam. Dois %s: o de
+# `BANK_ACCOUNTS_SQL` e o de `tc.user_id`.
+_RECORTE_TX_FROM_SQL = f"""
+        from ({BANK_ACCOUNTS_SQL}) a
+        join open_finance_accounts ra on ra.id = a.id
+        join open_finance_accounts ta on ta.provider_account_id = ra.provider_account_id
+        join open_finance_connections tc on tc.id = ta.connection_id and tc.user_id = %s
+        join open_finance_transactions t on t.account_id = ta.id"""
+
+
 def _fused_join_sql(link_col: str, extra_where: str,
                     cols: str = "distinct l.id, (l.efeitos ->> 'delta_conta')::numeric as d") -> str:
     """O miolo acima: lançamentos manuais ligados por `t.<link_col>` a transações
     das contas no recorte. Params: `merged_wallet_delta_params`."""
     return f"""
-      select {cols}
-        from ({BANK_ACCOUNTS_SQL}) a
-        join open_finance_accounts ra on ra.id = a.id
-        join open_finance_accounts ta on ta.provider_account_id = ra.provider_account_id
-        join open_finance_connections tc on tc.id = ta.connection_id and tc.user_id = %s
-        join open_finance_transactions t on t.account_id = ta.id
+      select {cols}{_RECORTE_TX_FROM_SQL}
         join launches l on l.id = t.{link_col}
        where l.user_id = %s
          and coalesce(l.source, 'manual') <> 'open_finance'
