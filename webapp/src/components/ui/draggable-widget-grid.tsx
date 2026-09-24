@@ -364,7 +364,7 @@ function candidatesFor(
 	items: WidgetItem[],
 	id: string,
 	columns: number,
-	toSlot: (box: Box) => Slot,
+	toSlot: (box: Box, order: WidgetItem[]) => Slot,
 ): Candidate[] {
 	const places = layout(items, columns)
 	const me = places.find((p) => p.id === id)
@@ -387,10 +387,8 @@ function candidatesFor(
 						: p,
 			)
 			moved.sort((a, b) => a.row - b.row || a.col - b.col)
-			out.push({
-				order: moved.map((p) => byId.get(p.id) as WidgetItem),
-				slot: toSlot(area),
-			})
+			const order = moved.map((p) => byId.get(p.id) as WidgetItem)
+			out.push({ order, slot: toSlot(area, order) })
 		}
 	}
 
@@ -399,7 +397,7 @@ function candidatesFor(
 		if (i === from) continue
 		const order = moveTo(items, id, i)
 		const p = layout(order, columns).find((q) => q.id === id)
-		if (p) out.push({ order, slot: toSlot(p) })
+		if (p) out.push({ order, slot: toSlot(p, order) })
 	}
 	return out
 }
@@ -705,22 +703,34 @@ export function DraggableWidgetGrid({
 	}, [])
 
 	const toSlot = useCallback(
-		(box: Box): Slot => {
+		(box: Box, order: WidgetItem[]): Slot => {
 			const el = grid.current
-			const { unit } = latest.current.metrics
+			const { unit, columns } = latest.current.metrics
 			const rect = el?.getBoundingClientRect()
 			const colStep = unit + gap
 			const rowStep = Math.round(unit) + gap
 			const left = (rect?.left ?? 0) + box.col * colStep
-			const top = (rect?.top ?? 0) + box.row * rowStep
-			return {
-				left,
-				top,
-				right: left + box.w * colStep - gap,
-				bottom: top + box.h * rowStep - gap,
+			const right = left + box.w * colStep - gap
+			if (fitRows && el && rect) {
+				// Rows follow content: stack the rendered heights in `order`.
+				// ponytail: one column only (the phone board); several columns of
+				// auto rows would need the grid's resolved row tracks.
+				let y = rect.top
+				let top = y
+				let bottom = y
+				for (const p of layout(order, columns)) {
+					if (p.row === box.row) top = y
+					const node = el.querySelector(`[data-widget-id="${CSS.escape(p.id)}"]`)
+					y += (node as HTMLElement | null)?.offsetHeight ?? 0
+					if (p.row + p.h === box.row + box.h) bottom = y
+					y += gap
+				}
+				return { left, top, right, bottom }
 			}
+			const top = (rect?.top ?? 0) + box.row * rowStep
+			return { left, top, right, bottom: top + box.h * rowStep - gap }
 		},
-		[gap],
+		[gap, fitRows],
 	)
 
 	/* Drag state. React only re-renders on lift, reorder and drop. */
@@ -756,7 +766,7 @@ export function DraggableWidgetGrid({
 			if (!me) return
 			const r = el.getBoundingClientRect()
 			const order = choose(
-				toSlot(me),
+				toSlot(me, current),
 				candidatesFor(current, id, m.columns, toSlot),
 				r.left + r.width / 2,
 				r.top + r.height / 2,

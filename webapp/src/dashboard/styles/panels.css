@@ -44,7 +44,6 @@
 .cal { display: grid; grid-template-columns: repeat(7, minmax(0, 1fr)); gap: 4px; }
 .cal-wd { text-align: center; font-size: 11px; color: var(--ink-3); padding-bottom: 2px; }
 .cal-day {
-  aspect-ratio: 1;
   display: grid; place-items: center;
   padding: 0; border: 0; border-radius: 7px;
   background: var(--heat-0);
@@ -52,6 +51,9 @@
   font-size: 11px; font-variant-numeric: tabular-nums;
   transition: transform var(--t-fast) var(--ease-out), box-shadow var(--t-fast) ease;
 }
+/* Célula quadrada sem aspect-ratio (Safari < 15): o padding em % mede a largura. */
+.cal-day::before { content: ""; padding-top: 100%; }
+.cal-day::before, .cal-day > span { grid-area: 1 / 1; }
 .cal-day:active { transform: scale(0.92); }
 .cal-day[data-step="1"], .ramp i[data-step="1"] { background: var(--heat-1); }
 .cal-day[data-step="2"], .ramp i[data-step="2"] { background: var(--heat-2); }
@@ -110,6 +112,11 @@
 .sim-see:disabled { opacity: 0.4; cursor: default; }
 .sim-empty { grid-template-columns: minmax(0, 1fr); }
 .sim-prompt { font-size: 13px; line-height: 1.5; color: var(--ink-2); max-width: 36ch; align-self: center; }
+/* Safari < 16 ignora o @container: no celular a tela decide (bloco = tela − 68px). */
+@media (max-width: 538px) {
+  .sim-out { grid-template-columns: minmax(0, 1fr); }
+  .sim-see { width: 100%; }
+}
 @container (max-width: 470px) {
   .sim-out { grid-template-columns: minmax(0, 1fr); }
   .sim-see { width: 100%; }
@@ -132,7 +139,8 @@
   background: transparent; text-align: left;
   transition: background-color var(--t-fast) ease;
 }
-.bill[data-on], .bill:focus-visible { background: var(--plane-2); }
+.bill[data-on] { background: var(--plane-2); }
+.bill:focus-visible { background: var(--plane-2); }
 .bill[data-paid] { opacity: 0.55; }
 .bill-date { display: grid; justify-items: center; line-height: 1.1; }
 .bill-date b { font-size: 15px; font-weight: 600; font-variant-numeric: tabular-nums; }
@@ -169,6 +177,10 @@
 .goal-name { font-size: 13px; font-weight: 500; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; margin-bottom: 6px; }
 .goal-num { font-size: 12.5px; text-align: right; white-space: nowrap; }
 .goal-eta { font-size: 12px; text-align: right; }
+@media (max-width: 508px) {
+  .goal { grid-template-columns: 22px minmax(0, 1fr) 64px; grid-template-areas: "icon main eta" "icon num eta"; }
+  .goal-num { text-align: left; }
+}
 @container (max-width: 440px) {
   .goal { grid-template-columns: 22px minmax(0, 1fr) 64px; grid-template-areas: "icon main eta" "icon num eta"; }
   .goal-num { text-align: left; }
@@ -181,4 +193,5 @@
 .nw-parts dd { margin: 2px 0 0; font-size: 13px; font-weight: 600; }
 .nw-chart { position: relative; flex: 1; min-height: 70px; }
 .nw-area { fill: rgba(244, 244, 246, 0.06); }
+@media (max-width: 528px) { .nw-parts { display: none; } }
 @container (max-width: 460px) { .nw-parts { display: none; } }

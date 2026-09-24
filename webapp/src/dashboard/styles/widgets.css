@@ -54,7 +54,9 @@
 
 .chart { position: relative; flex: 1; min-height: 120px; }
 .chart svg, .nw-chart svg { position: absolute; inset: 0; outline: none; touch-action: pan-y; }
-.chart svg:focus-visible { border-radius: 8px; box-shadow: 0 0 0 2px var(--pink); }
+/* :focus, e não só :focus-visible: o Safari < 15.4 descarta este, e o svg não tem outline. */
+.chart svg:focus { border-radius: 8px; box-shadow: 0 0 0 2px var(--pink); }
+.chart svg:focus:not(:focus-visible) { box-shadow: none; }
 .grid { stroke: var(--rule); stroke-width: 1; shape-rendering: crispEdges; }
 .grid.zero { stroke: rgba(255, 122, 69, 0.55); }
 .axis { fill: var(--ink-3); font-size: 11px; font-variant-numeric: tabular-nums; }
@@ -88,6 +90,13 @@
 .cross circle.sim.gain { fill: var(--gain); }
 .cross circle.sim.warn { fill: var(--warn); }
 
+/* Safari < 16 ignora o @container: no celular a tela decide (bloco = tela − 68px). */
+@media (max-width: 508px) {
+  .w-hero .w-head { flex-wrap: wrap; }
+  .w-hero .w-aside, .w-hero .seg { width: 100%; }
+  .hero-value { font-size: 40px; }
+  .hero-facts { gap: 16px; }
+}
 @container (max-width: 440px) {
   .w-hero .w-head { flex-wrap: wrap; }
   .w-hero .w-aside, .w-hero .seg { width: 100%; }
@@ -109,6 +118,10 @@
 .stat:nth-child(-n + 2) { border-bottom: 1px solid var(--rule); }
 .stat-title { display: flex; align-items: center; gap: 7px; font-size: 12.5px; font-weight: 500; color: var(--ink-3); }
 .stat-key { width: 6px; height: 6px; border-radius: 50%; flex: none; }
+@media (max-width: 468px) {
+  .stat-value { font-size: 24px; }
+  .stat { padding: 12px 14px 14px; }
+}
 @container (max-width: 400px) {
   .stat-value { font-size: 24px; }
   .stat { padding: 12px 14px 14px; }
