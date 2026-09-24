@@ -38,6 +38,8 @@ async function abrir(hash = "#/") {
     const path = decodeURIComponent(url.pathname).replace(/\/$/, "/index.html");
     return r.fulfill({ path: join(ROOT, path) }).catch(() => r.fulfill({ status: 404, body: "" }));
   });
+  // já escolheu o perfil (Pular): sem isso o modal da 1ª visita cobre o Resumo
+  await ctx.addInitScript(() => localStorage.setItem("pigbank.dashboard.profile.v1", '"padrao"'));
   const page = await ctx.newPage();
   await page.goto(`${ORIGIN}/dashboard-v2/${hash}`);
   await page.locator("[data-widget-id], .months").first().waitFor();
@@ -165,6 +167,8 @@ test("Organizar: depois de Alt+↓ o foco fica no item, o Tab segue a ordem nova
   await page.waitForTimeout(100);
   const depois = await ordens(page);
   const focado = await page.evaluate(() => document.activeElement?.dataset.widgetId);
+  await page.keyboard.press("Tab"); // o ✕ do próprio item vem logo depois dele
+  const x = await page.evaluate(() => document.activeElement?.matches("[data-slot=widget-remove]") && document.activeElement.closest("[data-widget-id]").dataset.widgetId);
   await page.keyboard.press("Tab");
   const tab = await page.evaluate(() => document.activeElement?.dataset.widgetId);
   await page.getByRole("button", { name: "Pronto" }).click();
@@ -172,6 +176,7 @@ test("Organizar: depois de Alt+↓ o foco fica no item, o Tab segue a ordem nova
   await ctx.close();
   assert.notDeepEqual(depois.tela, inicio.tela); // a seta moveu de fato
   assert.equal(focado, id);
+  assert.equal(x, id);
   assert.equal(tab, depois.tela[depois.tela.indexOf(id) + 1]);
   assert.deepEqual(depois.dom, depois.tela);
   assert.deepEqual(fora.dom, fora.tela);

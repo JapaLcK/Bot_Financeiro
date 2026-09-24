@@ -5,6 +5,7 @@
 @import "./panels.css";
 @import "./ledger.css";
 @import "./pages.css";
+@import "./profile.css";
 @import "./flexgap.css";
 
 /* Só os utilitários: o grid arrastável é escrito em Tailwind. Sem base (preflight

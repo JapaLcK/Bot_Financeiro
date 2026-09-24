@@ -22,7 +22,6 @@
 
   /* 2. Linha com filho que cresce (flex: 1, margem auto): margem entre os filhos. */
   .w-head > * + * { margin-left: 10px; }
-  .board-head > * + * { margin-left: 12px; }
   .w-aside > * + * { margin-left: 8px; }
   .nw-parts > * + * { margin-left: 18px; } /* em grid venceria o display: none da consulta de contêiner */
   .lever-name > i { margin-right: 7px; }
@@ -39,8 +38,8 @@
   .detail-facts.col > :not(:last-child) { margin-bottom: 14px; }
 
   /* 3. Com quebra de linha: margem nos dois eixos, e o contêiner recua o mesmo tanto. */
-  .ledger-head, .inv-top { margin-top: -12px; margin-left: -12px; }
-  .ledger-head > *, .inv-top > * { margin-top: 12px; margin-left: 12px; }
+  .ledger-head, .inv-top, .board-head { margin-top: -12px; margin-left: -12px; }
+  .ledger-head > *, .inv-top > *, .board-head > * { margin-top: 12px; margin-left: 12px; }
   .ledger-tools { margin-top: -10px; margin-left: -10px; }
   .ledger-tools > * { margin-top: 10px; margin-left: 10px; }
   .detail-facts:not(.col) { margin-top: -12px; margin-left: -32px; }

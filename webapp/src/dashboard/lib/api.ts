@@ -32,3 +32,4 @@ export const caixinhasTotal = (): number => M.caixinhasTotal();
 export const netWorth = () => M.netWorth() as { date: Date; conta: number; caixinhas: number; investimentos: number; total: number }[];
 export const catById = (id: string | null) => CATEGORIES.find((c) => c.id === id);
 export const keyDate = (key: string) => new Date(Number(key.slice(0, 4)), Number(key.slice(5, 7)) - 1, 1);
+export const PLAN = D.PLAN as "essencial" | "plus" | "pro";
