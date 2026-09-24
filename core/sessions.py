@@ -18,6 +18,7 @@ Notas de design:
 """
 from __future__ import annotations
 
+import re
 import sys
 import uuid
 
@@ -25,6 +26,7 @@ from db.connection import get_conn
 
 
 TOUCH_DEBOUNCE_SEC = 60
+_UA_APP = re.compile(r"^PigBankApp/\S+ \(([A-Za-z0-9 .,_+-]{1,64});")
 
 
 def _new_jti() -> str:
@@ -188,6 +190,13 @@ def device_label(user_agent: str | None) -> str:
     ua = (user_agent or "").strip()
     if not ua:
         return "Dispositivo desconhecido"
+    # App nativo: `PigBankApp/<versão> (<modelo>; <SO>)`, montado em
+    # app/src/api/aparelho.ts. Ancorado no INÍCIO: o WebView do Capacitor só
+    # anexa `PigBankApp/1.0` ao UA do Safari e segue a heurística abaixo.
+    # Formato: tests/fixtures/user_agents_app.json.
+    app = _UA_APP.match(ua)
+    if app and app.group(1).strip():
+        return f"{app.group(1).strip()} • PigBank app"
     ua_low = ua.lower()
     # Browser
     browser = "Navegador"
