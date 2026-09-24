@@ -716,6 +716,18 @@ def handle_incoming(msg: IncomingMessage, *,
     # linha. Ver a docstring do `route()`.
     platform = msg.platform
 
+    # Pergunta que a IA deixou em aberto antes deste turno. Um "sim" a ela vai
+    # para a IA (5b); qualquer turno que a IA não atender a encerra (`finally`).
+    from core.services.ai_chat_commands import (
+        encerra_pergunta_da_ia, pergunta_aberta_da_ia,
+    )
+    pergunta_uid = pergunta_ia = None
+    try:
+        pergunta_uid = _normalize_user_id(msg)
+        pergunta_ia = pergunta_aberta_da_ia(pergunta_uid)
+    except Exception as exc:
+        logger.warning("pergunta_aberta_da_ia falhou: %s", exc)
+
     try:
         # ------------------------------------------------------------------
         # 0. Paywall — sem assinatura ativa, o bot não processa nada
@@ -894,10 +906,19 @@ def handle_incoming(msg: IncomingMessage, *,
         # pela IA — que não conhece o valor já informado e falha com "valor
         # precisa ser maior que zero". route() resolve a pendência primeiro.
         has_resumable_pending = False
+        # "sim"/"não" sem pendência nenhuma, logo depois de a IA perguntar algo
+        # ("Quer que eu mostre suas maiores despesas?"), responde à IA — sem
+        # isto o route() devolve "não entendi". Com pendência, o route() decide.
+        responde_a_ia = False
         try:
             _pend = db.get_pending_action(uid)
             if _pend and suprime_fallback_de_ia(_pend.get("action_type")):
                 has_resumable_pending = True
+            responde_a_ia = (
+                pergunta_ia is not None
+                and _pend is None
+                and intent_result.intent in ("confirm.yes", "confirm.no")
+            )
         except Exception:
             has_resumable_pending = False
 
@@ -906,6 +927,7 @@ def handle_incoming(msg: IncomingMessage, *,
             and (
                 intent_result.intent == "out_of_scope"
                 or intent_result.confidence < 0.55
+                or responde_a_ia
             )
         )
         if should_try_ai_fallback:
@@ -1012,3 +1034,7 @@ def handle_incoming(msg: IncomingMessage, *,
         return [OutgoingMessage(
             text="⚠️ Ocorreu um erro interno ao processar sua mensagem. Tente novamente em instantes."
         )]
+
+    finally:
+        if pergunta_ia is not None:
+            encerra_pergunta_da_ia(pergunta_uid, pergunta_ia)

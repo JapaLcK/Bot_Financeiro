@@ -21,7 +21,9 @@ from __future__ import annotations
 
 import logging
 import os
+import re
 import unicodedata
+from datetime import timedelta
 
 import db
 from core.services.plan_service import ai_chat_allowed, ai_monthly_limit_for
@@ -71,6 +73,48 @@ def _strip_ai_prefix(text: str) -> str | None:
                     continue
                 return raw[idx + len(sep):].strip()
     return None
+
+
+# Por quanto tempo um "sim"/"não" solto ainda responde à última pergunta da IA.
+# Mesmo horizonte da pendência da IA (db.ai_chat.PENDING_TTL_MINUTES).
+_JANELA_DA_PERGUNTA = timedelta(minutes=10)
+
+
+def pergunta_aberta_da_ia(user_id: int) -> int | None:
+    """Id da última mensagem do histórico, se ela é uma pergunta da IA feita há
+    pouco; senão None.
+
+    A IA oferece coisas sem guardar pendência ("Quer que eu mostre suas maiores
+    despesas?"), e o "sim" classifica como `confirm.yes` com confiança alta —
+    não cai no fallback de IA, e o `route()` sem pendência responde "não
+    entendi". Aqui o `handle_incoming` descobre que o "sim" é da IA.
+    """
+    last = db.ai_get_last_message(user_id)
+    if (last
+            and last["role"] == "assistant"
+            and last["age"] < _JANELA_DA_PERGUNTA
+            and re.search(r"\?\W*$", last["content"] or "")):
+        return last["id"]
+    return None
+
+
+# `system` porque o widget do app (/ai/messages) não mostra essa role, e a IA
+# ainda fica sabendo que a conversa foi interrompida.
+_PERGUNTA_ENCERRADA = (
+    "O usuário mandou outro comando, atendido fora desta conversa. "
+    "A pergunta anterior não está mais em aberto."
+)
+
+
+def encerra_pergunta_da_ia(user_id: int, pergunta_id: int) -> None:
+    """Fim de um turno do `handle_incoming`: se a pergunta que estava aberta
+    continua sendo a última mensagem, a IA não atendeu este turno (ex.: "saldo",
+    "plano", um OFX) — então ela deixa de estar em aberto. O `ai_messages` só vê
+    os turnos da IA, e sem isto um "sim" depois voltaria para a oferta antiga."""
+    try:
+        db.ai_append_message_if_last(user_id, pergunta_id, "system", _PERGUNTA_ENCERRADA)
+    except Exception as exc:
+        logger.warning("encerra_pergunta_da_ia falhou pra user %s: %s", user_id, exc)
 
 
 def handle_ai_chat_command(user_id: int, text: str, platform: str) -> str | None:
