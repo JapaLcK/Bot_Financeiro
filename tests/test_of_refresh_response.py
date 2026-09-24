@@ -26,6 +26,7 @@ import db
 import core.services.pluggy_sync as ps
 import frontend.finance_bot_websocket_custom as dashboard
 import frontend.routes.open_finance as of_routes
+from conftest import promote_to_pro
 from core.services.pluggy import PluggyApiError
 
 ITEM_OK = {
@@ -63,6 +64,7 @@ def _mundo_remoto(monkeypatch):
 
 
 def test_refresh_com_item_sumido_nao_diz_que_esta_tudo_em_dia(user_id, monkeypatch):
+    promote_to_pro(user_id)
     db.save_pluggy_open_finance_item(user_id, {"id": "item-vivo", "status": "UPDATED",
                                                "connector": {"id": 612, "name": "Nubank"}})
     db.save_pluggy_open_finance_item(user_id, {"id": "item-sumiu", "status": "UPDATED",
@@ -242,6 +244,7 @@ def test_um_item_com_429_nao_derruba_o_refresh_dos_demais(user_id, monkeypatch):
     `sync_pluggy_item` direto no lote (`sync_pluggy_user`) deixa este teste
     vermelho já no `status_code == 200`.
     """
+    promote_to_pro(user_id)
     db.save_pluggy_open_finance_item(user_id, {"id": "i-ok", "status": "UPDATED",
                                                "connector": {"id": 612, "name": "Nubank"}})
     # o item do 429 JÁ tinha sincronizado com sucesso — é essa conexão que dizia

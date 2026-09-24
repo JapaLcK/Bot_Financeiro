@@ -25,6 +25,7 @@ os.environ.setdefault("MFA_ENCRYPTION_KEY", Fernet.generate_key().decode())
 import core.observability as observability
 import frontend.finance_bot_websocket_custom as dashboard
 import frontend.routes.open_finance as of_routes
+from conftest import promote_to_pro
 from db.connection import get_conn
 
 
@@ -61,6 +62,7 @@ def _conexoes(user_id: int) -> int:
 
 
 def test_disconnect_deleta_item_remoto_e_local(user_id, monkeypatch):
+    promote_to_pro(user_id)
     item = f"disc-route-{user_id}"
     _semeia_conexao_pluggy(user_id, item)
 
@@ -91,6 +93,7 @@ def test_disconnect_com_lock_de_reconexao_ocupado_recusa_com_503(user_id, monkey
 
     CONTROLE NEGATIVO: no código sem o lock, este teste fica vermelho
     (200, conexão deletada e Pluggy tocada por baixo do lock)."""
+    promote_to_pro(user_id)
     from db.open_finance_state import pluggy_item_lock
 
     item = f"disc-route-lk-{user_id}"
@@ -122,6 +125,7 @@ def test_item_salvo_durante_a_janela_do_disconnect_e_deletado_na_pluggy(user_id,
     não viu. A injeção vai na 2ª chamada de list_pluggy_item_ids: a 1ª é a
     dos locks (antes de T1), a 2ª é a enumeração do helper (T1).
     CONTROLE NEGATIVO: sem o 2º passe (código anterior), fica vermelho."""
+    promote_to_pro(user_id)
     import db
 
     item_velho = f"disc-janela-{user_id}"
@@ -161,6 +165,7 @@ def test_item_salvo_durante_a_janela_do_disconnect_e_deletado_na_pluggy(user_id,
 
 
 def test_falha_remota_nao_impede_o_disconnect_local(user_id, monkeypatch):
+    promote_to_pro(user_id)
     _semeia_conexao_pluggy(user_id, f"disc-route2-{user_id}")
 
     def _pluggy_fora():

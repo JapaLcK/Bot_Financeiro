@@ -1,102 +1,152 @@
-<!DOCTYPE html>
+<!doctype html>
 <html lang="pt-BR">
 <head>
-<meta charset="UTF-8" />
-<meta name="viewport" content="width=device-width, initial-scale=1.0" />
+<meta charset="utf-8"/>
+<meta content="width=device-width, initial-scale=1.0" name="viewport"/>
 <title>Criar conta · PigBank</title>
-<meta name="description" content="Crie sua conta PigBank e comece a organizar sua vida financeira no WhatsApp." />
-<link rel="icon" type="image/png" href="/favicon.png?v=3" />
-<link rel="apple-touch-icon" href="/brand/apple-touch-icon.png?v=3" />
-<meta name="theme-color" content="#0c0c0d" />
-<link rel="stylesheet" href="/brand.css?v=4" />
-<link rel="stylesheet" href="/site.css?v=4" />
-<style>
-  .auth-error { display: none; background: rgba(255,45,45,.1); border: 1px solid rgba(255,45,45,.3); color: #ffb4b4; padding: 10px 13px; border-radius: 10px; font-size: .82rem; margin-bottom: 14px; line-height: 1.4; }
-  .auth-error.show { display: block; }
-  .auth-error.ok { background: rgba(0,240,120,.1); border-color: rgba(0,240,120,.3); color: #93f7c4; }
-  .field .hint { font-size: .74rem; color: var(--ink-3); margin-top: 6px; }
-</style>
-  <link rel="stylesheet" href="/app-mode.css?v=34" />
-  <script src="/app-mode.js?v=34"></script>
-  <script src="/purchase-intent.js?v=1" defer></script>
+<link rel="canonical" href="https://pigbankai.com/cadastro"/>
+<meta property="og:type" content="website"/>
+<meta property="og:title" content="Criar conta · PigBank"/>
+<meta property="og:description" content="Crie sua conta PigBank e comece a organizar sua vida financeira no WhatsApp."/>
+<meta property="og:url" content="https://pigbankai.com/cadastro"/>
+<meta property="og:image" content="https://pigbankai.com/brand/landing-piggy-cta.webp?v=1"/>
+
+<meta content="Crie sua conta PigBank e comece a organizar sua vida financeira no WhatsApp." name="description"/>
+<link href="/favicon.png?v=3" rel="icon" type="image/png"/>
+<link href="/brand/apple-touch-icon.png?v=3" rel="apple-touch-icon"/>
+<meta content="#111111" name="theme-color"/>
+<link href="/brand.css?v=4" rel="stylesheet"/>
+<link href="/site.css?v=4" rel="stylesheet"/>
+
+<link href="/app-mode.css?v=34" rel="stylesheet"/>
+<link href="/site-redesign.css?v=1" rel="stylesheet"/>
+<link href="/site-auth.css?v=1" rel="stylesheet"/>
+<script src="/app-mode.js?v=34">
+</script>
+<script defer="" src="/purchase-intent.js?v=1">
+</script>
+<link href="/phosphor.css?v=1" rel="stylesheet"/>
 </head>
-<body>
-<div class="glow"></div>
+<body class="lp lp-auth lp-auth-page">
+<a class="lp-skip-link" href="#conteudo">Pular para o conteúdo</a>
+<nav class="nav" aria-label="Navegação principal">
+<a class="nav-logo" href="/" aria-label="PigBank, início">
+<img class="logo-full" src="/brand/landing-logo.webp?v=1" alt="PigBank" width="142" height="42">
+</a>
+<div class="nav-right">
+<a class="link-entrar" href="/">Voltar ao site</a>
+<a class="btn btn-primary" href="/login">Entrar</a>
+</div>
+</nav>
+<main class="lp-auth-layout lp-shell" id="conteudo">
+<aside aria-label="PigBank" class="lp-auth-story">
+<div class="lp-auth-story-copy">
+<p class="lp-eyebrow">Clareza pra suas contas</p>
+<h2>Um começo mais leve<br/>para a sua grana.</h2>
+<p>WhatsApp e painel juntos para organizar seu dia a dia.</p>
+</div>
+<div class="lp-auth-piggy-wrap">
+<img alt="Piggy, o porquinho rosa de óculos escuros e moletom preto, com um celular" class="lp-auth-piggy" height="1200" src="/brand/landing-piggy-four-digits.webp?v=1" width="800"/>
+<div class="lp-auth-story-stamp">
+<i aria-hidden="true" class="ph ph-chat-circle">
+</i>
+<span>Organização que<br/>começa na conversa.</span>
+</div>
+</div>
+</aside>
+<div class="lp-auth-form-column">
+<div class="auth-card">
 
-  <nav class="nav">
-    <a class="nav-logo" href="/"><img class="logo-full" src="/brand/logo.webp?v=1" alt="PigBank" /></a>
-    <div class="nav-links">
-      <a href="/funcionalidades">Funcionalidades</a>
-      <a href="/como-funciona">Como funciona</a>
-      <a href="/precos">Planos</a>
-      
-    </div>
-    <div class="nav-right">
-      <a class="link-entrar" href="/login">Entrar</a>
-    </div>
-  </nav>
-
-  <div class="wrap auth-wrap">
-    <div class="auth-card">
-      <div class="auth-logo"><img src="/brand/icon.png?v=2" alt="" /><span>PigBank</span></div>
-
-      <!-- Passo 1: cadastro -->
-      <form id="form-register" onsubmit="doRegister(event)" novalidate>
-        <h1>Crie sua conta</h1>
-        <p class="auth-sub">Comece sua jornada financeira agora.</p>
-        <div id="reg-error" class="auth-error"></div>
-        <div class="field">
-          <label for="reg-name">Nome completo</label>
-          <input type="text" id="reg-name" placeholder="Seu nome completo" autocomplete="name" required />
-        </div>
-        <div class="field">
-          <label for="reg-email">E-mail</label>
-          <input type="email" id="reg-email" placeholder="seu@email.com" autocomplete="email" required />
-        </div>
-        <div class="field">
-          <label for="reg-phone">WhatsApp</label>
-          <input type="tel" id="reg-phone" placeholder="(11) 99999-9999" autocomplete="tel" required />
-          <div class="hint">Use o mesmo número com que você vai falar com a Piggy.</div>
-        </div>
-        <div class="field">
-          <label for="reg-password">Senha</label>
-          <input type="password" id="reg-password" placeholder="Mínimo 8 caracteres" autocomplete="new-password" required />
-        </div>
-        <div class="field">
-          <label for="reg-confirm">Confirmar senha</label>
-          <input type="password" id="reg-confirm" placeholder="Confirme sua senha" autocomplete="new-password" required />
-        </div>
-        <label class="checkbox-row">
-          <input type="checkbox" id="terms" required />
-          <span>Eu aceito os <a href="/termos" style="color:var(--pink)">Termos de Uso</a> e a <a href="/privacy" style="color:var(--pink)">Política de Privacidade</a>.</span>
-        </label>
-        <button type="submit" id="btn-register" class="btn btn-primary btn-block btn-lg">Criar conta</button>
-
-        <div class="auth-divider">ou cadastre-se com</div>
-        <div class="social-btns">
-          <a class="social-btn" href="/auth/google/start">
-            <svg width="18" height="18" viewBox="0 0 24 24"><path fill="#4285F4" d="M22.56 12.25c0-.78-.07-1.53-.2-2.25H12v4.26h5.92a5.06 5.06 0 0 1-2.2 3.32v2.77h3.57c2.08-1.92 3.28-4.74 3.28-8.1z"/><path fill="#34A853" d="M12 23c2.97 0 5.46-.98 7.28-2.66l-3.57-2.77c-.98.66-2.23 1.06-3.71 1.06-2.86 0-5.29-1.93-6.16-4.53H2.18v2.84A11 11 0 0 0 12 23z"/><path fill="#FBBC05" d="M5.84 14.1a6.6 6.6 0 0 1 0-4.2V7.06H2.18a11 11 0 0 0 0 9.88l3.66-2.84z"/><path fill="#EA4335" d="M12 5.38c1.62 0 3.06.56 4.21 1.64l3.15-3.15C17.45 2.09 14.97 1 12 1A11 11 0 0 0 2.18 7.06l3.66 2.84C6.71 7.3 9.14 5.38 12 5.38z"/></svg>
+<!-- Passo 1: cadastro -->
+<form id="form-register" novalidate="" onsubmit="doRegister(event)">
+<h1>Comece por você.</h1>
+<p class="auth-sub">Crie sua conta para organizar sua grana. Confirme seu e-mail para continuar.</p>
+<div class="auth-error" id="reg-error" role="alert">
+</div>
+<div class="field">
+<label for="reg-name">Nome completo</label>
+<input autocomplete="name" id="reg-name" maxlength="50" placeholder="Seu nome completo" required="" type="text"/>
+</div>
+<div class="field">
+<label for="reg-email">E-mail</label>
+<input autocomplete="email" id="reg-email" placeholder="seu@email.com" required="" type="email"/>
+</div>
+<div class="field">
+<label for="reg-phone">WhatsApp</label>
+<input autocomplete="tel" id="reg-phone" inputmode="tel" placeholder="(11) 99999-9999" required="" type="tel"/>
+<div class="hint">Use o mesmo número com que você vai falar com a Piggy.</div>
+</div>
+<div class="field">
+<label for="reg-password">Senha</label>
+<div class="lp-password-field">
+<input autocomplete="new-password" id="reg-password" placeholder="Mínimo 8 caracteres" required="" type="password"/>
+<button aria-label="Mostrar senha" aria-pressed="false" class="lp-password-toggle" data-password="reg-password" type="button">
+<i aria-hidden="true" class="ph ph-eye">
+</i>
+</button>
+</div>
+</div>
+<div class="field">
+<label for="reg-confirm">Confirmar senha</label>
+<div class="lp-password-field">
+<input autocomplete="new-password" id="reg-confirm" placeholder="Confirme sua senha" required="" type="password"/>
+<button aria-label="Mostrar senha" aria-pressed="false" class="lp-password-toggle" data-password="reg-confirm" type="button">
+<i aria-hidden="true" class="ph ph-eye">
+</i>
+</button>
+</div>
+</div>
+<label class="checkbox-row">
+<input id="terms" required="" type="checkbox"/>
+<span>Eu aceito os <a href="/termos" style="color:var(--pink)">Termos de Uso</a> e a <a href="/privacy" style="color:var(--pink)">Política de Privacidade</a>.</span>
+</label>
+<button class="btn btn-primary btn-block btn-lg" id="btn-register" type="submit">Criar conta</button>
+<div class="auth-divider">ou cadastre-se com</div>
+<div class="social-btns">
+<a class="social-btn" href="/auth/google/start">
+<svg height="18" viewbox="0 0 24 24" width="18">
+<path d="M22.56 12.25c0-.78-.07-1.53-.2-2.25H12v4.26h5.92a5.06 5.06 0 0 1-2.2 3.32v2.77h3.57c2.08-1.92 3.28-4.74 3.28-8.1z" fill="#4285F4">
+</path>
+<path d="M12 23c2.97 0 5.46-.98 7.28-2.66l-3.57-2.77c-.98.66-2.23 1.06-3.71 1.06-2.86 0-5.29-1.93-6.16-4.53H2.18v2.84A11 11 0 0 0 12 23z" fill="#34A853">
+</path>
+<path d="M5.84 14.1a6.6 6.6 0 0 1 0-4.2V7.06H2.18a11 11 0 0 0 0 9.88l3.66-2.84z" fill="#FBBC05">
+</path>
+<path d="M12 5.38c1.62 0 3.06.56 4.21 1.64l3.15-3.15C17.45 2.09 14.97 1 12 1A11 11 0 0 0 2.18 7.06l3.66 2.84C6.71 7.3 9.14 5.38 12 5.38z" fill="#EA4335">
+</path>
+</svg>
             Continuar com Google
           </a>
-        </div>
-        <p class="auth-alt">Já tem uma conta? <a href="/login">Entrar</a></p>
-      </form>
-
-      <!-- Passo 2: verificação -->
-      <form id="form-verify" onsubmit="doVerify(event)" style="display:none">
-        <h1>Confirme seu e-mail</h1>
-        <p class="auth-sub">Enviamos um código de 6 dígitos para <b id="verify-email-display"></b>.</p>
-        <div id="verify-error" class="auth-error"></div>
-        <div class="field">
-          <label for="verify-code">Código de verificação</label>
-          <input type="text" id="verify-code" inputmode="numeric" maxlength="6" placeholder="000000" style="letter-spacing:.4em;text-align:center;font-size:1.2rem" />
-        </div>
-        <button type="submit" id="btn-verify" class="btn btn-primary btn-block btn-lg">Confirmar</button>
-        <p class="auth-alt"><a href="#" onclick="resendCode(event)">Reenviar código</a> · <a href="#" onclick="backToRegister(event)">Voltar</a></p>
-      </form>
-    </div>
-  </div>
-
+</div>
+<p class="auth-alt">Já tem uma conta? <a href="/login">Entrar</a>
+</p>
+</form>
+<!-- Passo 2: verificação -->
+<form id="form-verify" onsubmit="doVerify(event)" style="display:none">
+<h1>Confirme seu e-mail</h1>
+<p class="auth-sub">Enviamos um código de 6 dígitos para <b id="verify-email-display">
+</b>.</p>
+<div class="auth-error" id="verify-error" role="alert">
+</div>
+<div class="field">
+<label for="verify-code">Código de verificação</label>
+<input autocomplete="one-time-code" id="verify-code" inputmode="numeric" maxlength="6" placeholder="000000" style="letter-spacing:.4em;text-align:center;font-size:1.2rem" type="text"/>
+</div>
+<button class="btn btn-primary btn-block btn-lg" id="btn-verify" type="submit">Confirmar</button>
+<p class="auth-alt">
+<a href="#" onclick="resendCode(event)">Reenviar código</a> · <a href="#" onclick="backToRegister(event)">Voltar</a>
+</p>
+</form>
+</div>
+</div>
+</main>
+<footer class="lp-auth-footer lp-shell">
+<p>© 2026 PigBank</p>
+<nav aria-label="Informações e ajuda">
+<a href="/suporte">Precisa de ajuda?</a>
+<a href="/privacy">Privacidade</a>
+<a href="/termos">Termos de uso</a>
+</nav>
+</footer>
 <script>
   function getCookie(n){return document.cookie.split('; ').find(r=>r.startsWith(n+'='))?.split('=')[1]||''}
   function csrfHeaders(e){e=e||{};var c=decodeURIComponent(getCookie('csrf_token')||'');if(c)e['X-CSRF-Token']=c;return e}
@@ -171,6 +221,8 @@
     try{await fetch('/auth/register',{method:'POST',credentials:'same-origin',headers:csrfHeaders({'Content-Type':'application/json'}),body:JSON.stringify({email:_email,password:pass,phone:_phone})})}catch(e){}
     err('verify-error','Novo código enviado!',true);
   }
+</script>
+<script src="/auth-presentation.js?v=1" defer>
 </script>
 </body>
 </html>

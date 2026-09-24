@@ -27,6 +27,7 @@ import db
 import core.services.pluggy_sync as ps
 import frontend.finance_bot_websocket_custom as dashboard
 import frontend.routes.open_finance as of_routes
+from conftest import promote_to_pro
 from db.connection import get_conn
 
 SEGREDO = "test-webhook-secret"
@@ -81,6 +82,7 @@ def _item_remoto(item_id: str, client_user_id) -> dict:
 # ── 25. clientUserId ≠ usuário da sessão ─────────────────────────────────────
 
 def test_item_de_outro_client_user_id_e_recusado(user_id, monkeypatch, eventos):
+    promote_to_pro(user_id)
     monkeypatch.setattr(of_routes, "get_pluggy_item",
                         lambda item_id, api_key=None: _item_remoto(item_id, 999_999_999))
     client = TestClient(dashboard.app)
@@ -95,6 +97,7 @@ def test_item_de_outro_client_user_id_e_recusado(user_id, monkeypatch, eventos):
 
 
 def test_o_que_e_gravado_e_o_item_REMOTO_nao_o_do_navegador(user_id, monkeypatch, eventos):
+    promote_to_pro(user_id)
     monkeypatch.setattr(of_routes, "get_pluggy_item",
                         lambda item_id, api_key=None: _item_remoto(item_id, user_id))
     monkeypatch.setattr(of_routes, "_schedule_pluggy_sync", lambda item_id: None)
@@ -117,6 +120,7 @@ def test_o_que_e_gravado_e_o_item_REMOTO_nao_o_do_navegador(user_id, monkeypatch
 # ── 26. item já vinculado a outra conta ──────────────────────────────────────
 
 def test_item_de_outra_conta_local_devolve_409(user_id, monkeypatch, eventos):
+    promote_to_pro(user_id)
     outro = user_id + 1
     db.ensure_user(outro)
     try:

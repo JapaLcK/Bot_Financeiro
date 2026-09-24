@@ -85,16 +85,6 @@ _ISENTOS_COM_RAZAO = {
         "grande demais para isso significar alguma coisa. É o espelho da "
         "cegueira 2c: lá o laço partido em duas funções escapa, aqui duas "
         "coisas na mesma função entram.",
-    "core/services/engagement_scheduler.py::_check_free_upgrade_nudge":
-        "WIN-BACK, mesma família do downsell: o funil é `plan = 'free'` ativo, "
-        "que DEPOIS DO CORTE é exatamente a população sem acesso — filtrar por "
-        "acesso o mataria inteiro. Dormente hoje "
-        "(`FREE_UPGRADE_NUDGE_ENABLED` default off), o que não dispensa a "
-        "decisão. RESSALVA REGISTRADA, e é de COPY e não de gate: "
-        "`send_free_upgrade_nudge_email` promete 'testar 15 dias grátis', e "
-        "para o ex-assinante cujo telefone já queimou o trial isso é a mesma "
-        "promessa falsa que este PR tirou da /precos e do downsell. Ligar o "
-        "flag sem reescrever a copy reabre aquele defeito.",
     "scripts/send_update_email.py::main":
         "Não é laço automático: é script de BROADCAST rodado à mão por um "
         "operador, com `--dry-run` e `--test`. Quem decide o público é a pessoa "

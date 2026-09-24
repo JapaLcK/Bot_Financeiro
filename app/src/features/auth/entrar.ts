@@ -147,16 +147,24 @@ export async function enviar(
  * resultado positivo (autenticação) segue o mesmo raciocínio de `enviar`.
  *
  * A tabela da falha (`frontend/finance_bot_websocket_custom.py`,
- * `auth_mfa_verify_login`: consome o desafio ANTES de conferir o código, só
- * depois responde 400/404/2xx — o limitador 429 roda antes do consumo):
+ * `auth_mfa_verify_login`, e `db/mfa.py`). O desafio aceita 5 tentativas:
+ * `reserve_login_challenge_attempt` gasta uma ANTES de conferir o código, e o
+ * código errado com tentativas sobrando deixa o desafio vivo.
  *
- * | falha                          | desafio no servidor | resultado |
- * |---------------------------------|----------------------|-----------|
- * | 400/404 (código errado/expirado)| consumido            | F         |
- * | 5xx (qualquer resposta HTTP)     | consumido (quase sempre) | F     |
- * | tempo limite (abort do comLimite, 15s) | provavelmente consumido | F |
- * | 429                              | vivo (nunca chegou a consumir) | M |
- * | erro de rede sem resposta (fetch rejeita antes de chegar) | ambíguo | M |
+ * | falha                                              | desafio   | resultado |
+ * |----------------------------------------------------|-----------|-----------|
+ * | 400 `mfa_code_invalid` (código errado, sobram tentativas) | vivo | M     |
+ * | 400 `mfa_challenge_expired` (expirado, 5ª tentativa, corrida) | morto | F |
+ * | 400 sem `code` ou com `code` desconhecido          | —         | F         |
+ * | 404 (usuário sumiu)                                | consumido | F         |
+ * | 5xx                                                | ambíguo   | F         |
+ * | tempo limite (abort do comLimite, 15s)             | ambíguo   | F         |
+ * | 429 por IP (antes da reserva)                      | vivo      | M         |
+ * | 429 por conta (depois da reserva: a tentativa conta) | vivo, salvo se era a 5ª | M |
+ * | erro de rede sem resposta (fetch rejeita antes de chegar) | ambíguo | M  |
+ *
+ * 5xx e tempo limite vão ao formulário porque o caso é ambíguo: voltar à
+ * senha custa redigitá-la e nunca deixa a pessoa presa num desafio morto.
  */
 export async function verificar(
   desafio: string,
@@ -180,16 +188,16 @@ export async function verificar(
     // repetiria o mesmo contrato quebrado. Volta ao formulário.
     if (e instanceof ContratoInvalido) return { fase: "formulario", aviso: GENERICO };
     if (e instanceof ErroDeApi) {
-      // 400/404: o desafio MORREU no servidor (challenge expirado, ou
-      // consumido por uma tentativa anterior — db/mfa.py:351 consome antes de
-      // conferir o código, então mesmo um código ERRADO já queima o desafio).
-      // Insistir em `M` reapresentaria um desafio morto; só o formulário, com
-      // um login novo, dá um desafio vivo.
-      //
-      // 5xx é a MESMA categoria: é resposta HTTP do servidor, então o
-      // `mfa_consume_login_challenge` já rodou (primeira linha do handler,
-      // antes de qualquer chance de falhar) — só o limitador (429) roda
-      // ANTES do consumo, e por isso fica de fora daqui.
+      // Código errado com tentativas sobrando: o desafio continua vivo, a
+      // pessoa tenta outro código sem redigitar a senha. O `code` vem no topo
+      // do corpo, ao lado do `detail`.
+      const codigoDoErro = (e.corpo as { code?: unknown } | null | undefined)?.code;
+      if (e.status === 400 && codigoDoErro === "mfa_code_invalid") {
+        return { fase: "mfa", desafio, email, modo, aviso: e.detalhe.trim() || GENERICO };
+      }
+      // Qualquer outro 400 (`mfa_challenge_expired`, ou sem `code`) e 404: o
+      // desafio morreu (ou o usuário sumiu); só um login novo dá um desafio
+      // vivo. 5xx: ambíguo — ver a tabela acima.
       if (e.status === 400 || e.status === 404 || e.status >= 500) {
         const base = e.detalhe.trim() || GENERICO;
         return { fase: "formulario", aviso: `${base} Entre de novo.` };
@@ -199,11 +207,9 @@ export async function verificar(
       return { fase: "mfa", desafio, email, modo, aviso: e.detalhe.trim() || GENERICO };
     }
     // Tempo limite do `comLimite` (15s): a requisição provavelmente CHEGOU ao
-    // servidor e o desafio já foi consumido — mesmo raciocínio do 5xx, mesmo
-    // sem resposta em mãos. `AbortError` é o único jeito de o `fetch`
-    // rejeitar SEM resposta que ainda assim quer dizer "provavelmente
-    // chegou"; qualquer outra rejeição sem resposta (rede fora antes de sair
-    // do aparelho) é ambígua e fica em M.
+    // servidor, e o que ela fez com o desafio é ambíguo — mesmo raciocínio do
+    // 5xx (ver a tabela acima). Qualquer outra rejeição sem resposta (rede
+    // fora antes de sair do aparelho) fica em M.
     if (typeof e === "object" && e !== null && "name" in e && e.name === "AbortError") {
       return { fase: "formulario", aviso: `${GENERICO} Entre de novo.` };
     }

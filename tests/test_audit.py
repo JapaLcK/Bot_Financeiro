@@ -20,6 +20,7 @@ from fastapi.testclient import TestClient
 os.environ.setdefault("MFA_ENCRYPTION_KEY", Fernet.generate_key().decode())
 
 import db
+from conftest import promote_to_pro
 import frontend.finance_bot_websocket_custom as dashboard
 from core.audit import (
     AuditEvent,
@@ -177,6 +178,7 @@ def test_activity_endpoint_returns_user_events(user_id):
     email = f"activity-{user_id}@t.com"
     user = db.register_auth_user(email, "senha-forte-123")
     real_user_id = int(user["user_id"])
+    promote_to_pro(real_user_id)
     record_audit_event(real_user_id, AuditEvent.MFA_ENABLED)
 
     client = TestClient(dashboard.app)

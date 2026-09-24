@@ -1,8 +1,8 @@
 /**
  * A máquina M/V de `entrar.ts`: verificar (código MFA), alternar modo, voltar
- * e as falhas — inclusive o desafio que sobrevive a um 429/5xx e o que morre
- * a um 400/404 (o desafio já foi consumido no servidor mesmo com código
- * errado — db/mfa.py:351, defeito conhecido e fora de escopo aqui).
+ * e as falhas — inclusive o desafio que sobrevive a um 429 e a um código
+ * errado (`mfa_code_invalid`: gasta uma das 5 tentativas do desafio, que
+ * continua vivo) e o que morre a um 400 `mfa_challenge_expired`/404.
  */
 import * as authService from "@/services/auth";
 import { FalhaNoCofre } from "@/storage/secure";
@@ -33,9 +33,21 @@ describe("verificar (M/V)", () => {
     expect(autenticar).toHaveBeenCalledTimes(1);
   });
 
+  it("400 mfa_code_invalid: código errado com tentativas sobrando — fica em M, mesmo desafio, com o detalhe do servidor", async () => {
+    rotear({ "/auth/mfa/verify-login": () => resposta(400, { detail: "Código inválido.", code: "mfa_code_invalid" }) });
+    const { aplicados, aplicar } = gravador<EstadoEntrar>();
+
+    await tocar(() => verificar(M.desafio, M.email, M.modo, "000000", jest.fn()), aplicar);
+
+    expect(aplicados).toEqual([{ ...M, aviso: "Código inválido." }]);
+  });
+
   it.each<[string, Rota, string]>([
-    ["400", () => resposta(400, { detail: "Código inválido." }), "Código inválido. Entre de novo."],
+    ["400 sem code (backend antes do #524)", () => resposta(400, { detail: "Código inválido." }), "Código inválido. Entre de novo."],
     ["404", () => resposta(404, { detail: "Usuário não encontrado." }), "Usuário não encontrado. Entre de novo."],
+    ["400 mfa_challenge_expired (expirado)", () => resposta(400, { detail: "Sessão MFA expirada. Faça login novamente.", code: "mfa_challenge_expired" }), "Sessão MFA expirada. Faça login novamente. Entre de novo."],
+    ["400 mfa_challenge_expired (5ª tentativa)", () => resposta(400, { detail: "Muitas tentativas. Faça login novamente.", code: "mfa_challenge_expired" }), "Muitas tentativas. Faça login novamente. Entre de novo."],
+    ["400 com code desconhecido", () => resposta(400, { detail: "Código inválido.", code: "xyz" }), "Código inválido. Entre de novo."],
   ])("%s: o desafio morreu no servidor — volta ao FORMULÁRIO, não fica em M", async (_nome, verify, aviso) => {
     rotear({ "/auth/mfa/verify-login": verify });
     const { aplicados, aplicar } = gravador<EstadoEntrar>();
@@ -63,7 +75,7 @@ describe("verificar (M/V)", () => {
     expect(aplicados).toEqual([{ ...M, aviso: "Algo deu errado. Tente de novo." }]);
   });
 
-  it("500 (apontamento Codex #3): resposta HTTP do servidor — o desafio já foi consumido, volta ao FORMULÁRIO", async () => {
+  it("500 (apontamento Codex #3): o que o servidor fez com o desafio é ambíguo — volta ao FORMULÁRIO", async () => {
     rotear({ "/auth/mfa/verify-login": () => resposta(500, { detail: "boom, traceback cru" }) });
     const { aplicados, aplicar } = gravador<EstadoEntrar>();
 
@@ -75,7 +87,7 @@ describe("verificar (M/V)", () => {
     ]);
   });
 
-  it("tempo limite (AbortError do comLimite, 15s): a requisição provavelmente chegou — volta ao FORMULÁRIO", async () => {
+  it("tempo limite (AbortError do comLimite, 15s): ambíguo — volta ao FORMULÁRIO", async () => {
     rotear({ "/auth/mfa/verify-login": () => Promise.reject(new DOMException("The operation was aborted.", "AbortError")) });
     const { aplicados, aplicar } = gravador<EstadoEntrar>();
 
@@ -185,12 +197,15 @@ describe("verificar (M/V)", () => {
   });
 
   describe("Voltar durante uma verificação em voo (B2 — geração + abandono invalidam o resultado tardio)", () => {
-    it("CONTROLE POSITIVO — 429 chega DEPOIS do Voltar: a fase mfa não ressuscita, fica formulário", async () => {
+    it.each<[string, () => Response]>([
+      ["429", () => resposta(429, { detail: "Muitas tentativas." })],
+      ["400 mfa_code_invalid", () => resposta(400, { detail: "Código inválido.", code: "mfa_code_invalid" })],
+    ])("CONTROLE POSITIVO — %s chega DEPOIS do Voltar: a fase mfa não ressuscita, fica formulário", async (_nome, falha) => {
       const portao = segurar();
       rotear({
         "/auth/mfa/verify-login": async () => {
           await portao.promessa;
-          return resposta(429, { detail: "Muitas tentativas." });
+          return falha();
         },
       });
       const { aplicados, aplicar } = gravador<EstadoEntrar>();
@@ -201,7 +216,7 @@ describe("verificar (M/V)", () => {
       portao.soltar();
       await emVoo;
 
-      // Só o `voltar()` chegou a `aplicados`; o 429 tardio nunca voltou a mostrar M.
+      // Só o `voltar()` chegou a `aplicados`; a falha tardia nunca voltou a mostrar M.
       expect(aplicados).toEqual([{ fase: "formulario" }]);
     });
 
@@ -215,18 +230,18 @@ describe("verificar (M/V)", () => {
     //
     // A verificação de que a guarda importa é MANUAL, e precisa desligar as
     // DUAS proteções ao mesmo tempo — hoje elas se sobrepõem para este
-    // cenário: `abandonarEntrada()` (chamada por `voltar()`) já faz o 429
-    // tardio virar `EntradaSuperada` nos services ANTES de `enfileirar`
+    // cenário: `abandonarEntrada()` (chamada por `voltar()`) já faz a falha
+    // tardia virar `EntradaSuperada` nos services ANTES de `enfileirar`
     // sequer olhar a geração, então desligar só uma das duas não basta para
     // ver vermelho. Comentar (a) `geracao === minhaGeracao` em `enfileirar`
     // E (b) a chamada a `abandonarEntrada()` dentro de `voltar()`, ao mesmo
-    // tempo, e rodar o teste ACIMA — aí sim ele fica vermelho (aplicados
-    // termina com `{...M, aviso: "Muitas tentativas."}` por cima do
+    // tempo, e rodar o teste ACIMA — aí sim os dois casos ficam vermelhos
+    // (aplicados termina com `{...M, aviso: <detalhe>}` por cima do
     // formulário). Restaurar os dois devolve o verde.
     //
-    // Verificado manualmente nesta tarefa: comentando as DUAS, o teste
-    // acima falha (`aplicados.at(-1)` volta a ser `{...M, aviso: "Muitas
-    // tentativas."}`); restaurando as duas, volta a passar.
+    // Verificado manualmente (também para o caso `mfa_code_invalid`):
+    // desligando só uma das duas, os dois casos seguem verdes; as DUAS, os
+    // dois ficam vermelhos; restaurando, voltam a passar.
   });
 });
 

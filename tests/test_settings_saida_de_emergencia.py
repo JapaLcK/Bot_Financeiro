@@ -15,14 +15,16 @@ só (§0.7), mesmo padrão de `tests/test_gate_saida_de_emergencia.py`. A divis�
 por assunto (§0.5) e porque este arquivo bateu no teto de 350 linhas
 (`tests/test_max_lines_python.py`).
 
-O gate é DORMENTE na suíte (`conftest.py` põe `PLANS_V2_ENABLED=0` por
-`setdefault`, e sem `PAYWALL_ENABLED` o `has_app_access` devolve True antes de
-consultar qualquer coisa). A fixture `_gate_ligado` é PRÉ-CONDIÇÃO, não
-decoração: sem ela o arquivo não fica verde nem tautológico — ele EXPLODE, porque
-o `assert has_app_access(user_id) is False` de `_cortar` cai primeiro. Medido
-neutralizando o corpo da fixture (2026-09-11, esta árvore): o ÚNICO caso que
-sobrevive nos dois arquivos é `test_pagante_continua_entrando_nas_cinco_rotas` —
-é o único que não passa por `_cortar` nem espera 402. Para remedir:
+O `conftest.py` roda este par no v2 com o gate ligado (nenhum dos dois está em
+`_AINDA_EM_V1`), então hoje a fixture `_gate_ligado` repete o conftest. Ela é
+PRÉ-CONDIÇÃO no v1: lá o gate é DORMENTE (sem `PAYWALL_ENABLED` o
+`has_app_access` devolve True antes de consultar qualquer coisa), e sem ela o
+arquivo não fica verde nem tautológico — ele EXPLODE, porque o
+`assert has_app_access(user_id) is False` de `_cortar` cai primeiro. Medido
+neutralizando o corpo da fixture (2026-09-11, quando a suíte inteira rodava no
+v1): o ÚNICO caso que sobrevive nos dois arquivos é
+`test_pagante_continua_entrando_nas_cinco_rotas` — é o único que não passa por
+`_cortar` nem espera 402. Para remedir (hoje, só com o par em `_AINDA_EM_V1`):
 
     # neutralize o corpo da fixture `_gate_ligado` e rode os dois arquivos
     .venv/bin/python -m pytest tests/test_settings_saida_de_emergencia.py \
@@ -82,9 +84,10 @@ SENHA_HASH = _hash_password(SENHA)
 
 @pytest.fixture(autouse=True)
 def _gate_ligado(monkeypatch):
-    """O corte é o default de produção; fixar as duas envs deixa o arquivo imune
-    ao `PLANS_V2_ENABLED=0` que o `conftest.py` põe por `setdefault`. Sem ela o
-    arquivo inteiro é tautológico."""
+    """O corte é o default de produção, e o `conftest.py` já roda este arquivo
+    assim (ele não está em `_AINDA_EM_V1`); fixar as duas envs o mantém no v2
+    mesmo se ele entrar na lista, onde sem ela o arquivo EXPLODE (docstring do
+    módulo)."""
     monkeypatch.setenv("PLANS_V2_ENABLED", "1")
     monkeypatch.setenv("ACCESS_GATE_ENABLED", "1")
 

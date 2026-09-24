@@ -16,8 +16,7 @@ O que cada teste prende:
   • ABORTO MÚTUO (P0 do Tester, 30/30 rodadas) — duas entregas simultâneas, sem
     gate nenhum. Cada uma grava o rastro antes de qualquer uma pegar o lock,
     cada uma enxerga o rastro da OUTRA e aborta: sobrava rastro COM dono e ZERO
-    conexão, estado TERMINAL — a 1ª guarda recusa toda retentativa e o
-    `scripts/adotar_items_of_orfaos.py` filtra fora rastro com dono, então o
+    conexão, estado TERMINAL — a 1ª guarda recusa toda retentativa, então o
     usuário ficava com 0 bancos e sem saída pelo produto. O conserto é o aborto
     desfazer a PRÓPRIA reivindicação ainda sob o lock: quem entra depois não vê
     reivindicação nenhuma e adota.
@@ -66,6 +65,7 @@ import pytest
 
 import db
 import frontend.routes.open_finance as of_routes
+from conftest import promote_to_pro
 from test_of_item_ownership import SEGREDO, _auth, _item_remoto, _webhook, eventos  # noqa: F401
 from test_of_webhook_adopt_guards import _limpa_item, _mock_item, _registry, webhook_pluggy  # noqa: F401
 
@@ -78,6 +78,7 @@ def test_entrega_atrasada_nao_ressuscita_o_banco_desconectado(
     num `asyncio.to_thread`, o loop segue livre) já com o rastro lido; a outra
     roda inteira e adota; o usuário desconecta; só então a presa escreve.
     """
+    promote_to_pro(user_id)
     _mock_item(monkeypatch, user_id)
     real, chamadas, chegou, liberar = (of_routes.user_exists, [],
                                        threading.Event(), threading.Event())
@@ -132,6 +133,7 @@ def test_aborto_mutuo_nao_deixa_o_item_reivindicado_e_sem_conexao(
     revalidação sozinha (sem o desfazimento) o resultado era `[None, None]` e
     zero conexão em 30/30 rodadas do Tester.
     """
+    promote_to_pro(user_id)
     _mock_item(monkeypatch, user_id)
 
     async def duas(item_id):
@@ -152,8 +154,7 @@ def test_aborto_mutuo_nao_deixa_o_item_reivindicado_e_sem_conexao(
             assert [d for d in donos if d is not None] == [user_id], donos
             # A perdedora apagou a própria reivindicação: rastro com dono só o
             # da que ganhou. Reivindicação abandonada é o que tornava o estado
-            # TERMINAL (a 1ª guarda recusa a retentativa e o script one-shot
-            # filtra fora rastro com dono).
+            # TERMINAL (a 1ª guarda recusa a retentativa).
             assert [r["origin"] for r in _registry(item)] == ["webhook_adopt"], _registry(item)
 
             # E o item continua respondendo como banco adotado, não como órfão:
@@ -182,9 +183,9 @@ def test_quem_aborta_sob_o_lock_some_do_rastro(user_id, monkeypatch, eventos, we
     aborto sob o lock sem concorrência de verdade. O que se mede é o que sobra —
     o rastro fica com UMA linha, a da rival, e nenhuma da entrega que abortou.
     Com a reivindicação abandonada de volta ao registry, este mesmo item é
-    inalcançável: a 1ª guarda recusa e `ITEMS_SEM_CONEXAO` + o filtro de rastro
-    com dono do `scripts/adotar_items_of_orfaos.py` não o listam.
+    inalcançável: a 1ª guarda recusa toda retentativa.
     """
+    promote_to_pro(user_id)
     _mock_item(monkeypatch, user_id)
     real, rival = of_routes.user_exists, []
 
@@ -258,6 +259,7 @@ def test_quem_perde_o_lock_tambem_some_do_rastro(user_id, monkeypatch, eventos, 
     seguinte e por que os dois asserts moram juntos: docstring do módulo);
     positivo — a retentativa exige UMA conexão, e derruba quem recusar tudo.
     """
+    promote_to_pro(user_id)
     _mock_item(monkeypatch, user_id)
     monkeypatch.setattr(of_routes, "_RECONNECT_DEADLINE_MS", 2000)
     real_lock, real_user = of_routes._salva_item_sob_lock, of_routes.user_exists

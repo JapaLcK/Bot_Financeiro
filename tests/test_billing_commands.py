@@ -260,12 +260,7 @@ def test_sem_plano_ativo_cancelar_recebe_mensagem_explicativa(patches):
     assert "a cancelar" in out
 
 
-# ─── Discord vs WhatsApp ────────────────────────────────────────────────────
-
-
-def test_discord_usa_double_asterisk_pra_negrito(patches):
-    out = mod.handle_billing_command(99, "assinar plano", platform="discord")
-    assert "**PigBank+**" in out
+# ─── Negrito no WhatsApp ────────────────────────────────────────────────────
 
 
 def test_whatsapp_usa_single_asterisk_pra_negrito(patches):

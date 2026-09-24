@@ -28,6 +28,7 @@ os.environ.setdefault("MFA_ENCRYPTION_KEY", Fernet.generate_key().decode())
 import db
 import frontend.finance_bot_websocket_custom as dashboard
 import frontend.routes.open_finance as of_routes
+from conftest import promote_to_pro
 from db.connection import get_conn
 from test_account_reset import SENHA, _item_de, _semeia
 from test_account_reset import _auth as _auth_reset
@@ -99,6 +100,7 @@ def _sem_pluggy_item(monkeypatch):
 def test_disconnect_grava_a_marca_com_dono_e_a_porta(
         user_id, monkeypatch, eventos, webhook_pluggy):
     """DELETE /open-finance/{uid} deixa `removed` com dono, porta e status."""
+    promote_to_pro(user_id)
     _mock_item(monkeypatch, user_id)
     item = "d-marca"
     try:
@@ -142,6 +144,7 @@ def test_item_created_reentregue_nao_ressuscita_banco_removido_sem_rastro_pluggy
     não existe, o usuário removeu o banco — e a Pluggy reentrega `item/created`.
     O status do POST NÃO é asserido de propósito (hoje 500, com a PR-A vira 200):
     a pré-condição verdadeira é a CONEXÃO ter sido criada."""
+    promote_to_pro(user_id)
     item = "d-ress"
     _mock_item(monkeypatch, user_id)
     real = _sem_pluggy_item(monkeypatch)
@@ -172,6 +175,7 @@ def test_item_created_reentregue_nao_ressuscita_banco_removido_sem_rastro_pluggy
 def test_conexao_legada_sem_rastro_nenhum_tambem_fica_removida(
         user_id, monkeypatch, eventos, webhook_pluggy):
     """A outra metade da classe: conexão ANTERIOR ao registry (nenhuma linha)."""
+    promote_to_pro(user_id)
     item = "d-legado"
     _mock_item(monkeypatch, user_id)
     try:
@@ -228,6 +232,7 @@ def test_reconexao_do_mesmo_dono_depois_da_marca_continua_funcionando(
     1 conexão do dono, sync, auditoria), verdes mesmo num código que nunca grava marca.
     Só a última, a ordem `['pluggy_item','removed','pluggy_item']`, depende da marca por
     desenho: é a evidência da regra R, a ORDEM que a recuperação por operador (PR-E) usa."""
+    promote_to_pro(user_id)
     from core.audit import AuditEvent, list_audit_events
 
     item = "d-reconecta"
@@ -261,9 +266,11 @@ def test_item_removido_por_um_dono_nao_e_adotado_por_outro(
         user_id, monkeypatch, eventos, webhook_pluggy):
     """#349: quem decide posse é o `clientUserId` remoto. A marca de A não
     autoriza nem impede B — B continua recusado, e nada de A vaza no log."""
+    promote_to_pro(user_id)
     item = "d-outro-dono"
     outro = user_id + 1
     db.ensure_user(outro)
+    promote_to_pro(outro)
     _mock_item(monkeypatch, user_id)
     try:
         client = TestClient(dashboard.app)
@@ -295,6 +302,7 @@ def test_linha_nova_nasce_marcada_e_a_legada_continua_sem_marca(
         user_id, monkeypatch, eventos, webhook_pluggy):
     """A coluna é a linha de corte no tempo: quem escreveu o rastro sabia marcar
     remoções? Rastro do fluxo real = sim; `insert` que não cita a coluna = não."""
+    promote_to_pro(user_id)
     item = "d-coluna"
     _mock_item(monkeypatch, user_id)
     try:
@@ -318,9 +326,11 @@ def test_linha_nova_nasce_marcada_e_a_legada_continua_sem_marca(
 def test_a_marca_e_do_dono_e_nao_toca_no_vizinho(
         user_id, monkeypatch, eventos, webhook_pluggy):
     """A desconecta; o rastro de B fica byte a byte igual."""
+    promote_to_pro(user_id)
     item_a, item_b = "d-iso-a", "d-iso-b"
     vizinho = user_id + 1
     db.ensure_user(vizinho)
+    promote_to_pro(vizinho)
     try:
         for uid, item in ((user_id, item_a), (vizinho, item_b)):
             _mock_item(monkeypatch, uid)

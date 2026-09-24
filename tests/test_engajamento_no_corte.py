@@ -11,8 +11,8 @@ que é a mesma ordem invertida que o corte do tutorial existe para não cometer.
 
 **Era o único laço da categoria que NÃO estava dormente.** Roda 1×/dia com
 `RUN_BACKGROUND_TASKS` (registrado em `finance_bot_websocket_custom.py`), sem
-flag própria — diferente do lembrete de pagamento (`PAYMENT_REMINDER_ENABLED`)
-e do nudge de upgrade (`FREE_UPGRADE_NUDGE_ENABLED`), os dois off por padrão.
+flag própria — diferente do lembrete de pagamento (`PAYMENT_REMINDER_ENABLED`),
+off por padrão.
 
 **Por que o portão não o pegou**, e isso está registrado em
 `tests/test_portao_lacos_proativos.py`: as chamadas são

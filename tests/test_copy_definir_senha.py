@@ -39,6 +39,7 @@ from fastapi.testclient import TestClient
 
 import frontend.finance_bot_websocket_custom as dashboard
 import frontend.routes.shared as shared
+from conftest import promote_to_pro
 from core.services.email_service import send_password_reset_email
 from db.connection import get_conn
 from tests._helpers_pii import insert_auth_account_pii
@@ -128,6 +129,7 @@ def test_email_com_senha_mantem_redefinir(spy_email):
 
 def test_password_reset_route_conta_google(user_id, spy_email, sem_rate_limit):
     email = _cria_conta(user_id, com_senha=False)
+    promote_to_pro(user_id)
     client, headers = _client_for(user_id, email)
 
     resp = client.post(f"/settings/{user_id}/password-reset", headers=headers)
@@ -141,6 +143,7 @@ def test_password_reset_route_conta_google(user_id, spy_email, sem_rate_limit):
 def test_password_reset_route_conta_com_senha(user_id, spy_email, sem_rate_limit):
     """POSITIVO: quem TEM senha continua lendo "redefinir" nos dois pontos."""
     email = _cria_conta(user_id, com_senha=True)
+    promote_to_pro(user_id)
     client, headers = _client_for(user_id, email)
 
     resp = client.post(f"/settings/{user_id}/password-reset", headers=headers)
@@ -253,15 +256,14 @@ def test_pagina_reset_nao_promete_redefinicao():
 
 
 def test_pagina_login_nao_promete_redefinicao():
-    """A primeira coisa que o usuário só-Google lê ao clicar "Esqueci minha senha"
-    é o toast de `login.html`, ANTES de qualquer resposta do servidor. Ele não pode
-    saber se a conta tem senha (seria enumeração), então tem de ser genérico.
-
-    Mira o corpo de `doForgot` — as mensagens desse fluxo — e não o arquivo inteiro."""
-    resp = TestClient(dashboard.app).get("/login")
+    """O link de login abre a recuperação real, que também atende contas só-Google."""
+    client = TestClient(dashboard.app)
+    login = client.get("/login")
+    assert 'href="/recuperar-senha"' in login.text
+    resp = client.get("/recuperar-senha")
     assert resp.status_code == 200
-
     corpo = re.search(r"async function doForgot\(.*?\n  \}", resp.text, re.S)
-    assert corpo, "doForgot não encontrado — o teste deixou de medir o toast"
-    assert "err('login-error'" in corpo.group(0)  # o toast está mesmo dentro do trecho
+    assert corpo, "doForgot não encontrado — o teste deixou de medir a solicitação"
+    assert "/auth/forgot-password" in corpo.group(0)
     assert "redefin" not in corpo.group(0).lower(), corpo.group(0)
+    assert "Se houver uma conta associada" in resp.text

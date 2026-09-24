@@ -1,153 +1,205 @@
-<!DOCTYPE html>
+<!doctype html>
 <html lang="pt-BR">
 <head>
-<meta charset="UTF-8" />
+<meta charset="utf-8" />
 <meta name="viewport" content="width=device-width, initial-scale=1.0" />
 <title>Política de Privacidade · PigBank</title>
 <meta name="description" content="Como o PigBank coleta, usa e protege seus dados pessoais." />
 <link rel="canonical" href="https://pigbankai.com/privacy" />
+<meta property="og:type" content="website" />
+<meta property="og:title" content="Política de Privacidade · PigBank" />
+<meta property="og:description" content="Como o PigBank coleta, usa e protege seus dados pessoais." />
+<meta property="og:url" content="https://pigbankai.com/privacy" />
+<meta property="og:image" content="https://pigbankai.com/brand/landing-piggy-cta.webp?v=1" />
+<meta name="theme-color" content="#111111" />
 <link rel="icon" type="image/png" href="/favicon.png?v=3" />
 <link rel="apple-touch-icon" href="/brand/apple-touch-icon.png?v=3" />
-<meta name="theme-color" content="#0c0c0d" />
+<link rel="preload" href="/fonts/Inter-Variable.woff2?v=5059ef2a9db0" as="font" type="font/woff2" crossorigin />
 <link rel="stylesheet" href="/brand.css?v=4" />
 <link rel="stylesheet" href="/phosphor.css?v=1" />
-<link rel="stylesheet" href="/site.css?v=4" />
-<script src="/safe-area.js?v=1"></script>
+<link rel="stylesheet" href="/site.css?v=5" />
+<link rel="stylesheet" href="/site-redesign.css?v=1" />
+<link rel="stylesheet" href="/site-help.css?v=1" />
+<script src="/safe-area.js?v=1">
+</script>
 </head>
-<body>
-<div class="glow"></div>
-
-  <nav class="nav">
-    <a class="nav-logo" href="/"><img class="logo-full" src="/brand/logo.webp?v=1" alt="PigBank" /></a>
-    <div class="nav-links">
-      <a href="/funcionalidades">Funcionalidades</a>
-      <a href="/como-funciona">Como funciona</a>
-      <a href="/precos">Planos</a>
-      <a href="/whatsapp">WhatsApp</a>
-      <a href="/agents">Agentes</a>
-      
-    </div>
-    <div class="nav-right">
-      <a class="link-entrar" href="/login">Entrar</a>
-      <a class="btn btn-primary" href="/cadastro">Criar conta</a>
-    </div>
-  </nav>
-
-  <div class="wrap">
-    <div class="legal">
-
-    <header class="page-header">
-      <div class="breadcrumb">Legal · Privacidade</div>
-      <h1>Política de Privacidade</h1>
-      <p class="updated">Última atualização: 9 de setembro de 2026</p>
-    </header>
-
-    <article class="privacy-panel">
-      <div class="intro">
-        <p>
+<body id="topo" class="lp lp-help lp-help-page lp-legal-page">
+<a class="lp-skip-link" href="#conteudo">Pular para o conteúdo</a>
+<nav aria-label="Navegação principal" class="nav">
+<a aria-label="PigBank, início" class="nav-logo" href="/">
+<img alt="PigBank" class="logo-full" height="42" src="/brand/landing-logo.webp?v=1" width="142"/>
+</a>
+<div class="nav-links">
+<a href="/como-funciona">Como funciona</a>
+<a href="/funcionalidades">Funcionalidades</a>
+<a href="/funcionalidades#open-finance">Open Finance</a>
+<a href="/whatsapp">WhatsApp</a>
+<a href="/agents">Agentes</a>
+<a href="/precos">Planos</a>
+</div>
+<div class="nav-right">
+<a class="link-entrar" href="/login">Entrar</a>
+<a class="btn btn-primary" href="/cadastro">Criar conta</a>
+</div>
+</nav>
+<main id="conteudo">
+<div class="lp-help-nav-wrap">
+<nav aria-label="Central de ajuda" class="lp-shell lp-help-nav">
+<a href="/suporte">Suporte</a>
+<a aria-current="page" href="/privacy">Privacidade</a>
+<a href="/termos">Termos de uso</a>
+</nav>
+</div>
+<section class="lp-help-heading lp-legal-heading">
+<div class="lp-shell">
+<p class="lp-eyebrow">Informações do PigBank</p>
+<h1>Política de Privacidade</h1>
+<p class="lp-legal-date">Última atualização: 9 de setembro de 2026</p>
+</div>
+</section>
+<div class="lp-shell lp-legal-layout">
+<nav aria-label="Índice do documento" class="lp-legal-toc">
+<p>Nesta página</p>
+<ol>
+<li>
+<a href="#privacy-1">Informações que coletamos</a>
+</li>
+<li>
+<a href="#privacy-2">Como usamos as informações</a>
+</li>
+<li>
+<a href="#privacy-3">Bases legais</a>
+</li>
+<li>
+<a href="#privacy-4">Compartilhamento e subprocessadores</a>
+</li>
+<li>
+<a href="#privacy-5">Armazenamento e segurança</a>
+</li>
+<li>
+<a href="#privacy-6">Retenção de dados</a>
+</li>
+<li>
+<a href="#privacy-7">Direitos do titular</a>
+</li>
+<li>
+<a href="#privacy-8">Encarregado de dados (DPO)</a>
+</li>
+<li>
+<a href="#privacy-9">Alterações nesta política</a>
+</li>
+</ol>
+<a class="lp-legal-contact" href="/suporte">Precisa de ajuda?</a>
+</nav>
+<article class="lp-privacy-panel">
+<div class="lp-intro">
+<p>
           Esta Política de Privacidade descreve como o <strong>PigBank</strong> ("nós", "nosso")
           coleta, usa, compartilha, armazena e protege dados pessoais no uso do aplicativo,
           dashboard, integrações financeiras, WhatsApp, Discord e demais canais do serviço.
           Tratamos dados pessoais de acordo com a Lei Geral de Proteção de Dados Pessoais
           (<strong>LGPD</strong> - Lei nº 13.709/2018).
         </p>
-      </div>
-
-      <section>
-        <h2>1. Informações que coletamos</h2>
-        <p>Podemos coletar e tratar os seguintes dados, conforme o uso do serviço:</p>
-        <ul>
-          <li>Nome informado no cadastro, usado para identificar você na conta, no produto e nas comunicações. Fica guardado por nós e pode ser alterado ou removido nas configurações da conta.</li>
-          <li>E-mail usado para cadastro, login, suporte, comunicações e recuperação de conta.</li>
-          <li>Telefone, incluindo número de WhatsApp utilizado para contato e autenticação operacional.</li>
-          <li>Dados financeiros, incluindo transações, receitas, despesas, investimentos, cartões, categorias, valores, datas, saldos, contas e instituições conectadas.</li>
-          <li>CPF ou CNPJ informado na contratação do plano anual por Pix, exigido pelo Banco Central para identificar o pagador. Ele apenas transita: vai para o Asaas para gerar a cobrança e não fica guardado por nós.</li>
-          <li>ID Discord e informações associadas necessárias para vincular e operar recursos via Discord.</li>
-          <li>Conteúdo de mensagens e interações enviadas ao bot pelo WhatsApp, quando necessário para interpretar comandos, registrar informações financeiras, responder solicitações, tratar anexos e manter a segurança do serviço.</li>
-          <li>Dados técnicos e de segurança, como logs de acesso, endereço IP, user agent, eventos de autenticação, erros e registros antifraude.</li>
-        </ul>
-      </section>
-
-      <section>
-        <h2>2. Como usamos as informações</h2>
-        <ul>
-          <li>Para criar e manter sua conta no PigBank.</li>
-          <li>Para processar, categorizar e registrar informações financeiras informadas ou conectadas pelo usuário.</li>
-          <li>Para gerar dashboards, relatórios, resumos, alertas, análises e recomendações financeiras.</li>
-          <li>Para operar integrações com Open Finance, pagamentos, WhatsApp, Discord e serviços de inteligência artificial.</li>
-          <li>Para enviar notificações, códigos, links de acesso, mensagens transacionais e comunicações solicitadas.</li>
-          <li>Para manter segurança, prevenir abuso, investigar falhas, auditar eventos e cumprir obrigações legais.</li>
-        </ul>
-      </section>
-
-      <section>
-        <h2>3. Bases legais</h2>
-        <p>
+</div>
+<section id="privacy-1">
+<h2>1. Informações que coletamos</h2>
+<p>Podemos coletar e tratar os seguintes dados, conforme o uso do serviço:</p>
+<ul>
+<li>Nome informado no cadastro, usado para identificar você na conta, no produto e nas comunicações. Fica guardado por nós e pode ser alterado ou removido nas configurações da conta.</li>
+<li>E-mail usado para cadastro, login, suporte, comunicações e recuperação de conta.</li>
+<li>Telefone, incluindo número de WhatsApp utilizado para contato e autenticação operacional.</li>
+<li>Dados financeiros, incluindo transações, receitas, despesas, investimentos, cartões, categorias, valores, datas, saldos, contas e instituições conectadas.</li>
+<li>CPF ou CNPJ informado na contratação do plano anual por Pix, exigido pelo Banco Central para identificar o pagador. Ele apenas transita: vai para o Asaas para gerar a cobrança e não fica guardado por nós.</li>
+<li>ID Discord e informações associadas necessárias para vincular e operar recursos via Discord.</li>
+<li>Conteúdo de mensagens e interações enviadas ao bot pelo WhatsApp, quando necessário para interpretar comandos, registrar informações financeiras, responder solicitações, tratar anexos e manter a segurança do serviço.</li>
+<li>Dados técnicos e de segurança, como logs de acesso, endereço IP, user agent, eventos de autenticação, erros e registros antifraude.</li>
+</ul>
+</section>
+<section id="privacy-2">
+<h2>2. Como usamos as informações</h2>
+<ul>
+<li>Para criar e manter sua conta no PigBank.</li>
+<li>Para processar, categorizar e registrar informações financeiras informadas ou conectadas pelo usuário.</li>
+<li>Para gerar dashboards, relatórios, resumos, alertas, análises e recomendações financeiras.</li>
+<li>Para operar integrações com Open Finance, pagamentos, WhatsApp, Discord e serviços de inteligência artificial.</li>
+<li>Para enviar notificações, códigos, links de acesso, mensagens transacionais e comunicações solicitadas.</li>
+<li>Para manter segurança, prevenir abuso, investigar falhas, auditar eventos e cumprir obrigações legais.</li>
+</ul>
+</section>
+<section id="privacy-3">
+<h2>3. Bases legais</h2>
+<p>
           Tratamos dados pessoais principalmente com base no <strong>consentimento</strong> do usuário,
           quando você autoriza o uso do serviço, integrações e comunicações, e na
           <strong>execução de contrato</strong>, quando o tratamento é necessário para fornecer as
           funcionalidades contratadas ou solicitadas, como login, dashboard, integração bancária,
           categorização, relatórios e atendimento.
         </p>
-        <p>
+<p>
           Também podemos tratar dados quando necessário para cumprir obrigações legais ou regulatórias,
           proteger direitos, prevenir fraude, manter a segurança do serviço e responder a solicitações
           legítimas de autoridades competentes.
         </p>
-      </section>
-
-      <section>
-        <h2>4. Compartilhamento e subprocessadores</h2>
-        <p>
+</section>
+<section id="privacy-4">
+<h2>4. Compartilhamento e subprocessadores</h2>
+<p>
           Não vendemos seus dados pessoais. Podemos compartilhar dados com fornecedores e
           subprocessadores estritamente necessários para operar, hospedar, proteger, integrar,
           processar pagamentos, entregar mensagens e gerar funcionalidades do PigBank.
           Entre eles:
         </p>
-        <ul>
-          <li><strong>Railway</strong>: hospedagem, infraestrutura e banco de dados.</li>
-          <li><strong>Cloudflare</strong>: DNS, segurança, cache, proteção e tráfego web.</li>
-          <li><strong>Pluggy</strong>: conexão Open Finance e acesso autorizado a dados financeiros.</li>
-          <li><strong>Stripe</strong>: pagamentos, assinaturas, cobrança e eventos financeiros relacionados.</li>
-          <li><strong>Asaas</strong>: emissão e liquidação de cobranças por Pix. Recebe seu nome e CPF/CNPJ, exigidos pelo Banco Central para identificar o pagador, e seu e-mail, usado no cadastro do cliente e nos recibos deles.</li>
-          <li><strong>Discord</strong>: integração com recursos e identificação de usuários no Discord.</li>
-          <li><strong>WhatsApp/Meta</strong>: envio, recebimento e processamento de mensagens pelo WhatsApp.</li>
-          <li><strong>OpenAI</strong>: processamento de linguagem natural, classificação, extração e geração de respostas assistidas por IA.</li>
-          <li><strong>Google Analytics</strong>: medição de uso das páginas públicas (visitas, origem do acesso e etapas do cadastro e da assinatura), para entender o que funciona no site.</li>
-        </ul>
-        <p>
+<ul>
+<li>
+<strong>Railway</strong>: hospedagem, infraestrutura e banco de dados.</li>
+<li>
+<strong>Cloudflare</strong>: DNS, segurança, cache, proteção e tráfego web.</li>
+<li>
+<strong>Pluggy</strong>: conexão Open Finance e acesso autorizado a dados financeiros.</li>
+<li>
+<strong>Stripe</strong>: pagamentos, assinaturas, cobrança e eventos financeiros relacionados.</li>
+<li>
+<strong>Asaas</strong>: emissão e liquidação de cobranças por Pix. Recebe seu nome e CPF/CNPJ, exigidos pelo Banco Central para identificar o pagador, e seu e-mail, usado no cadastro do cliente e nos recibos deles.</li>
+<li>
+<strong>Discord</strong>: integração com recursos e identificação de usuários no Discord.</li>
+<li>
+<strong>WhatsApp/Meta</strong>: envio, recebimento e processamento de mensagens pelo WhatsApp.</li>
+<li>
+<strong>OpenAI</strong>: processamento de linguagem natural, classificação, extração e geração de respostas assistidas por IA.</li>
+<li>
+<strong>Google Analytics</strong>: medição de uso das páginas públicas (visitas, origem do acesso e etapas do cadastro e da assinatura), para entender o que funciona no site.</li>
+</ul>
+<p>
           Também poderemos compartilhar informações quando exigido por lei, ordem judicial,
           solicitação regulatória ou para proteger direitos, segurança e integridade do serviço.
         </p>
-      </section>
-
-      <section>
-        <h2>5. Armazenamento e segurança</h2>
-        <p>
+</section>
+<section id="privacy-5">
+<h2>5. Armazenamento e segurança</h2>
+<p>
           Os dados são armazenados em banco de dados seguro com acesso restrito.
           Adotamos medidas técnicas e organizacionais para proteger suas informações contra
           acesso não autorizado, perda, alteração, divulgação indevida ou uso incompatível com
           esta política.
         </p>
-      </section>
-
-      <section>
-        <h2>6. Retenção de dados</h2>
-        <p>
+</section>
+<section id="privacy-6">
+<h2>6. Retenção de dados</h2>
+<p>
           Mantemos dados pessoais enquanto sua conta estiver ativa e pelo período necessário
           para fornecer o serviço, cumprir obrigações legais, resolver disputas, prevenir fraude
           e manter registros de segurança. Ao solicitar a exclusão da conta, iniciamos um período
           de carência de 7 dias para reduzir riscos de exclusão acidental, indevida ou causada por
           acesso não autorizado.
         </p>
-        <p>
+<p>
           Durante esse período de carência, a conta fica bloqueada para uso normal do PigBank.
           Após o prazo, excluímos os dados pessoais e financeiros vinculados à conta, incluindo
           lançamentos, saldos, caixinhas, investimentos, cartões, faturas, dados importados de Open
           Finance, categorias personalizadas, preferências, sessões, tokens e identidades vinculadas,
           salvo quando a conservação for necessária por uma hipótese legal aplicável.
         </p>
-        <p>
+<p>
           Podemos manter, pelo prazo necessário e de forma proporcional, registros mínimos para
           cumprimento de obrigação legal ou regulatória, segurança, prevenção de fraude, auditoria,
           cobrança, obrigações fiscais ou contábeis, chargeback, suporte, disputas ou exercício
@@ -155,7 +207,7 @@
           sob sigilo e segurança, quando exigido ou permitido pela legislação aplicável, incluindo
           o Marco Civil da Internet.
         </p>
-        <p>
+<p>
           Um caso concreto dessa conservação: para impedir que o mesmo número de telefone obtenha
           vários períodos de teste gratuitos, guardamos por prazo indeterminado um código derivado
           do seu telefone, junto com a data em que o teste começou. O número em si não é
@@ -164,89 +216,91 @@
           É um dado pseudonimizado: não fica vinculado à conta excluída e não é usado para
           nenhuma outra finalidade.
         </p>
-        <p>
+<p>
           Dados agregados ou anonimizados, que não permitam identificar razoavelmente o usuário,
           podem ser mantidos para métricas, estatísticas, melhoria do serviço e pesquisa interna.
           Quando não houver base legal para conservação, os dados pessoais serão eliminados ou
           anonimizados após o término do tratamento.
         </p>
-      </section>
-
-      <section>
-        <h2>7. Direitos do titular</h2>
-        <p>
+</section>
+<section id="privacy-7">
+<h2>7. Direitos do titular</h2>
+<p>
           Nos termos da LGPD, você pode solicitar:
         </p>
-        <ul>
-          <li><strong>Acesso</strong> aos dados pessoais que tratamos sobre você.</li>
-          <li><strong>Correção</strong> de dados incompletos, inexatos ou desatualizados.</li>
-          <li><strong>Exclusão</strong> de dados pessoais tratados com consentimento ou que não sejam mais necessários, quando aplicável e observadas as hipóteses legais de retenção.</li>
-          <li><strong>Portabilidade</strong> dos dados a outro fornecedor, quando tecnicamente possível, mediante validação da solicitação e conforme regulamentação aplicável.</li>
-          <li>Informações sobre compartilhamento de dados e subprocessadores.</li>
-          <li>Revogação do consentimento, quando o tratamento depender dessa base legal.</li>
-        </ul>
-      </section>
-
-      <section>
-        <h2>8. Encarregado de dados (DPO)</h2>
-        <p>
+<ul>
+<li>
+<strong>Acesso</strong> aos dados pessoais que tratamos sobre você.</li>
+<li>
+<strong>Correção</strong> de dados incompletos, inexatos ou desatualizados.</li>
+<li>
+<strong>Exclusão</strong> de dados pessoais tratados com consentimento ou que não sejam mais necessários, quando aplicável e observadas as hipóteses legais de retenção.</li>
+<li>
+<strong>Portabilidade</strong> dos dados a outro fornecedor, quando tecnicamente possível, mediante validação da solicitação e conforme regulamentação aplicável.</li>
+<li>Informações sobre compartilhamento de dados e subprocessadores.</li>
+<li>Revogação do consentimento, quando o tratamento depender dessa base legal.</li>
+</ul>
+</section>
+<section id="privacy-8">
+<h2>8. Encarregado de dados (DPO)</h2>
+<p>
           Para exercer seus direitos, tirar dúvidas sobre privacidade ou falar com o encarregado
           pelo tratamento de dados pessoais (DPO), entre em contato pelo e-mail:
           <a href="mailto:dpo@pigbankai.com">dpo@pigbankai.com</a>
-        </p>
-        <p>
+</p>
+<p>
           Para suporte operacional, problemas de acesso ou contestação urgente de uma solicitação
           de exclusão de conta, entre em contato pelo e-mail:
           <a href="mailto:contato@pigbankai.com">contato@pigbankai.com</a>
-        </p>
-        <p>
+</p>
+<p>
           Para proteger sua conta, poderemos solicitar informações adicionais para confirmar sua
           identidade antes de atender pedidos de acesso, correção, exclusão ou portabilidade.
         </p>
-      </section>
-
-      <section>
-        <h2>9. Alterações nesta política</h2>
-        <p>
+</section>
+<section id="privacy-9">
+<h2>9. Alterações nesta política</h2>
+<p>
           Podemos atualizar esta política periodicamente. Notificaremos os usuários sobre
           mudanças significativas através do próprio serviço ou pelos canais de contato disponíveis.
         </p>
-      </section>
-    </article>
-    </div>
-  </div>
+</section>
+</article>
+</div>
+</main>
+<footer class="lp-footer lp-section-dark">
+<div class="lp-shell">
+<div class="lp-footer-grid">
+<div class="lp-footer-brand">
+<a aria-label="PigBank, voltar ao início" class="lp-brand" href="#topo">
+<img alt="PigBank" height="42" loading="lazy" src="/brand/landing-logo.webp?v=1" width="142"/>
+</a>
+<p>Clareza pra suas contas.<br/>Espaço pra sua vida.</p>
+</div>
+<nav aria-label="Produto">
+<h3>Produto</h3>
+<a href="/whatsapp">WhatsApp</a>
+<a href="/funcionalidades">Funcionalidades</a>
+<a href="/agents">Agentes</a>
+<a href="/precos">Planos</a>
+</nav>
+<nav aria-label="Ajuda">
+<h3>Ajuda</h3>
+<a href="/suporte">Suporte</a>
+<a href="/privacy">Privacidade</a>
+<a href="/termos">Termos de uso</a>
+</nav>
+</div>
+<div class="lp-footer-bottom">
+<p>© 2026 PigBank</p>
+<a href="#topo">De volta ao topo</a>
+</div>
+</div>
+</footer>
 
-  <footer class="footer">
-    <div class="wrap footer-inner">
-      <div class="footer-brand">
-        <a class="nav-logo" href="/"><img class="logo-icon" src="/brand/icon.png?v=2" alt="" /> <span>PigBank</span></a>
-        <p>Seu dinheiro, suas regras, direto no WhatsApp, com a IA da Piggy.</p>
-      </div>
-      <div class="footer-cols">
-        <div class="footer-col"><span class="footer-title">Navegue</span>
-          <a href="/funcionalidades">Funcionalidades</a>
-          <a href="/como-funciona">Como funciona</a>
-          <a href="/precos">Planos</a>
-          <a href="/agents">Agentes</a>
-          <a href="/blog">Blog</a>
-          
-        </div>
-        <div class="footer-col"><span class="footer-title">Produto</span>
-          <a href="/whatsapp">WhatsApp</a>
-          <a href="/comandos">O que pedir</a>
-          <a href="/suporte">Suporte</a>
-        </div>
-        <div class="footer-col"><span class="footer-title">Institucional</span>
-          <a href="/termos">Termos de Uso</a>
-          <a href="/privacy">Privacidade</a>
-          <a href="mailto:contato@pigbankai.com">Contato</a>
-        </div>
-      </div>
-    </div>
-    <p class="footer-copy">© 2026 PigBank · Feito com <i class="ph ph-piggy-bank" aria-hidden="true"></i></p>
-  </footer>
-
-  <script src="/nav-auth.js?v=7" defer></script>
-  <script src="/nav-burger.js?v=1" defer></script>
+<script src="/nav-auth.js?v=7" defer>
+</script>
+<script src="/nav-burger.js?v=1" defer>
+</script>
 </body>
 </html>

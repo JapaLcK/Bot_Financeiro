@@ -112,6 +112,7 @@ async def serve_settings(request: Request):
     return html_file(FRONTEND_DIR / "settings.html", pixel=False)
 
 
+@router.get("/redefinir-senha")
 @router.get("/reset-password")
 async def serve_reset_password():
     return html_file(FRONTEND_DIR / "reset-password.html")
@@ -161,6 +162,17 @@ async def serve_login():
 @router.get("/cadastro")
 async def serve_cadastro():
     return html_file(FRONTEND_DIR / "cadastro.html")
+
+
+@router.get("/recuperar-senha")
+async def serve_recuperar_senha():
+    return html_file(FRONTEND_DIR / "recuperar-senha.html")
+
+
+@router.get("/suporte/contato")
+async def serve_contato():
+    # Formulário com dados pessoais: mesmo funil de suporte, sem Clarity.
+    return html_file(FRONTEND_DIR / "contato.html")
 
 
 @router.get("/static/auth-refresh.js")
@@ -680,6 +692,15 @@ async def serve_sidenav_scrollbar_js():
     )
 
 
+@router.get("/sidenav-groups.js")
+async def serve_sidenav_groups_js():
+    return FileResponse(
+        FRONTEND_DIR / "sidenav-groups.js",
+        media_type="application/javascript",
+        headers={"Cache-Control": "no-cache"},
+    )
+
+
 @router.get("/comecar.js")
 async def serve_comecar_js():
     """Comportamento do wizard de primeira configuração servido em /onboarding.
@@ -791,6 +812,69 @@ async def serve_site_css(request: Request):
     return FileResponse(
         FRONTEND_DIR / "site.css",
         media_type="text/css",
+        headers={"Cache-Control": _cache_asset_versionado(request)},
+    )
+
+
+@router.get("/site-marketing.css")
+async def serve_site_marketing_css(request: Request):
+    return FileResponse(
+        FRONTEND_DIR / "site-marketing.css",
+        media_type="text/css",
+        headers={"Cache-Control": _cache_asset_versionado(request)},
+    )
+
+
+@router.get("/site-help.css")
+async def serve_site_help_css(request: Request):
+    return FileResponse(
+        FRONTEND_DIR / "site-help.css",
+        media_type="text/css",
+        headers={"Cache-Control": _cache_asset_versionado(request)},
+    )
+
+
+@router.get("/site-auth.css")
+async def serve_site_auth_css(request: Request):
+    return FileResponse(
+        FRONTEND_DIR / "site-auth.css",
+        media_type="text/css",
+        headers={"Cache-Control": _cache_asset_versionado(request)},
+    )
+
+
+@router.get("/site-plans.css")
+async def serve_site_plans_css(request: Request):
+    return FileResponse(
+        FRONTEND_DIR / "site-plans.css",
+        media_type="text/css",
+        headers={"Cache-Control": _cache_asset_versionado(request)},
+    )
+
+
+@router.get("/contact.js")
+async def serve_contact_js(request: Request):
+    return FileResponse(
+        FRONTEND_DIR / "contact.js",
+        media_type="application/javascript",
+        headers={"Cache-Control": _cache_asset_versionado(request)},
+    )
+
+
+@router.get("/commands-copy.js")
+async def serve_commands_copy_js(request: Request):
+    return FileResponse(
+        FRONTEND_DIR / "commands-copy.js",
+        media_type="application/javascript",
+        headers={"Cache-Control": _cache_asset_versionado(request)},
+    )
+
+
+@router.get("/auth-presentation.js")
+async def serve_auth_presentation_js(request: Request):
+    return FileResponse(
+        FRONTEND_DIR / "auth-presentation.js",
+        media_type="application/javascript",
         headers={"Cache-Control": _cache_asset_versionado(request)},
     )
 

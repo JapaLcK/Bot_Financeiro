@@ -40,7 +40,7 @@ after(async () => { await browser?.close(); server?.kill(); });
 /** Páginas do servidor estático que têm `.field`. /suporte é servida pela rota
  *  do FastAPI (o `{{FAQ}}` é montado lá), então fica fora deste harness — a
  *  regra CSS é a mesma e os campos são o mesmo markup. */
-const PAGINAS = ["login.html", "cadastro.html", "reset-password.html"];
+const PAGINAS = ["login.html", "cadastro.html", "reset-password.html", "recuperar-senha.html", "completar-cadastro.html"];
 
 /** Foca por TECLADO. `el.focus()` nem sempre casa `:focus-visible` — o
  *  navegador decide pela modalidade da última interação. Tab a partir do body

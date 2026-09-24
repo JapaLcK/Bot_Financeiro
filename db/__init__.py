@@ -87,14 +87,6 @@ from .pockets import (
     delete_pocket,
 )
 
-# ── Espaços financeiros ───────────────────────────────────────────────────────
-from .spaces import (
-    ensure_default_space,
-    get_default_space_id,
-    list_spaces,
-    create_space,
-)
-
 # ── Investimentos e CDI ───────────────────────────────────────────────────────
 from .investments import (
     create_investment,
@@ -362,7 +354,6 @@ from .reports import (
     consume_password_reset_token,
     update_last_activity,
     get_users_for_engagement,
-    get_free_users_for_upgrade_nudge,
     mark_reengagement_sent,
     mark_tip_sent,
     mark_insight_sent,
@@ -478,8 +469,6 @@ __all__ = [
     # pockets
     "list_pockets", "pocket_withdraw_to_account", "create_pocket",
     "pocket_deposit_from_account", "delete_pocket",
-    # espaços financeiros
-    "ensure_default_space", "get_default_space_id", "list_spaces", "create_space",
     # investments
     "create_investment", "create_investment_db", "delete_investment", "list_investments",
     "list_users_with_investments", "accrue_all_investments", "accrue_investment_db",
@@ -571,7 +560,7 @@ __all__ = [
     "record_checkout_started", "record_checkout_completed",
     "create_email_verification", "AccountAlreadyExistsError", "confirm_email_verification", "attempt_whatsapp_phone_link",
     "create_password_reset_token", "consume_password_reset_token",
-    "update_last_activity", "get_users_for_engagement", "get_free_users_for_upgrade_nudge",
+    "update_last_activity", "get_users_for_engagement",
     "mark_reengagement_sent",
     "mark_tip_sent", "mark_insight_sent", "set_engagement_opt_out",
     "set_tip_email_opt_out", "set_insight_email_opt_out", "set_whatsapp_updates_opt_out",

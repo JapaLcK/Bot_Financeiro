@@ -81,7 +81,7 @@ def test_isencao_cobre_toda_variante_que_o_roteamento_atende(texto):
     só renderiza texto e a de billing só devolve link — nenhuma pode escrever."""
     uid = _cadastro_novo()
 
-    resposta = _diga(uid, texto, plataforma="discord")
+    resposta = _diga(uid, texto, plataforma="whatsapp")
 
     assert not _barrado(resposta), f"o gate barrou {texto!r}: {resposta!r}"
     assert db.list_launches(uid) == [], f"{texto!r} registrou lançamento"
@@ -94,12 +94,13 @@ def test_isencao_nao_alarga_para_o_que_nao_e_ajuda(texto):
 
     `menu` é o caso que mudou aqui — ele está em HELP_TRIGGERS (o desvio do
     WhatsApp usa isso ANTES do handle_incoming), mas o classificador manda `menu`
-    pra out_of_scope, então isentá-lo abria bypass sem levar ninguém à ajuda. No
-    WhatsApp ele nunca chega neste gate; no Discord ele já não respondia ajuda.
+    pra out_of_scope, então isentá-lo abria bypass sem levar ninguém à ajuda. Pelo
+    adaptador do WhatsApp ele nunca chega neste gate; aqui o teste chama o
+    `handle_incoming` direto, que é onde o bypass abriria.
     """
     uid = _cadastro_novo()
 
-    resposta = _diga(uid, texto, plataforma="discord")
+    resposta = _diga(uid, texto, plataforma="whatsapp")
 
     assert _barrado(resposta), f"{texto!r} escapou do gate: {resposta!r}"
     assert db.list_launches(uid) == []
@@ -107,7 +108,7 @@ def test_isencao_nao_alarga_para_o_que_nao_e_ajuda(texto):
 
 @pytest.mark.parametrize("comando,esperado", [
     ("assinar", "assinar"),      # link de checkout
-    ("/assinar", "assinar"),     # prefixo do Discord
+    ("/assinar", "assinar"),     # com barra
     ("plano", "plano"),
     ("cancelar", "cancelar"),    # o trigger da ressalva do `ponytail:` no gate
     # As TRÊS formas de ajuda de quem está BARRADO devolvem a mesma seção,
@@ -128,26 +129,25 @@ def test_isencao_nao_alarga_para_o_que_nao_e_ajuda(texto):
     ("ajuda ofx", "sem plano ativo"),
     ("help investimentos", "sem plano ativo"),
 ])
-def test_discord_barrado_alcanca_billing_e_ajuda(comando, esperado):
-    """No Discord o handle_incoming responde assinar/plano/ajuda ELE MESMO — o
-    adapter (adapters/discord/discord_bot.py) só cai nos cogs quando a lista
-    volta vazia. Sem as isenções, o gate sequestra esses comandos e o usuário
-    barrado fica sem como assinar."""
+def test_barrado_alcanca_billing_e_ajuda(comando, esperado):
+    """O handle_incoming responde assinar/plano/ajuda ELE MESMO. Sem as
+    isenções, o gate sequestra esses comandos e o usuário barrado fica sem como
+    assinar."""
     uid = _cadastro_novo()
 
-    resposta = _diga(uid, comando, plataforma="discord")
+    resposta = _diga(uid, comando, plataforma="whatsapp")
 
     assert not _barrado(resposta), f"o gate sequestrou {comando!r}: {resposta!r}"
     assert esperado in resposta.lower(), f"{comando!r} respondeu: {resposta!r}"
 
 
-def test_discord_mensagem_comum_continua_barrada():
-    """A isenção é dos comandos, não da plataforma."""
+def test_barrado_mensagem_comum_continua_barrada():
+    """A isenção é dos comandos, não de qualquer mensagem."""
     uid = _cadastro_novo()
 
-    resposta = _diga(uid, "gastei 50 no mercado", plataforma="discord")
+    resposta = _diga(uid, "gastei 50 no mercado", plataforma="whatsapp")
 
-    assert _barrado(resposta), f"o Discord passou por cima do gate: {resposta!r}"
+    assert _barrado(resposta), f"a mensagem passou por cima do gate: {resposta!r}"
     assert db.list_launches(uid) == []
 
 
