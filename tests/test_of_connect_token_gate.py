@@ -62,6 +62,19 @@ class TestConnectTokenGate:
             _run(of._ensure_of_access_allowed(1))
         assert ei.value.status_code == 402
 
+    @pytest.mark.parametrize("gate", ["_ensure_of_access_allowed", "_enforce_bank_limit"])
+    def test_limite_zero_nao_fala_de_gratis_nem_teste(self, monkeypatch, gate):
+        # O Grátis e os "15 dias de teste" saíram do produto; o texto não pode citá-los.
+        monkeypatch.setattr(plan_service, "plans_v2_enabled", lambda: True)
+        monkeypatch.setattr(plan_service, "get_user_limits", lambda uid: {"of_banks_max": 0})
+        with pytest.raises(HTTPException) as ei:
+            _run(getattr(of, gate)(1))
+        assert ei.value.status_code == 402
+        assert ei.value.detail["code"] == "OF_BANK_LIMIT" and ei.value.detail["limit"] == 0
+        msg = ei.value.detail["message"]
+        assert "Grátis" not in msg and "15 dias" not in msg
+        assert "planos pagos" in msg and "/precos" in msg
+
 
 # ─── Defaults de produtos / sandbox ──────────────────────────────────────────
 

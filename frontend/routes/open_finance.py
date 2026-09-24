@@ -1252,6 +1252,10 @@ def _bank_limit_enabled() -> bool:
     return (os.getenv("OF_BANK_LIMIT_ENABLED") or "").strip().lower() in ("1", "true", "yes", "on")
 
 
+# Plano sem Open Finance (of_banks_max <= 0). Um texto só para as duas barreiras.
+_MSG_OF_SO_NOS_PLANOS_PAGOS = "Conectar banco faz parte dos planos pagos. Assine pra conectar: /precos"
+
+
 async def _enforce_bank_limit(user_id: int, new_item_id: str | None = None) -> None:
     """Teto de conexões OF por plano.
 
@@ -1280,8 +1284,7 @@ async def _enforce_bank_limit(user_id: int, new_item_id: str | None = None) -> N
                 detail={
                     "code": "OF_BANK_LIMIT",
                     "limit": 0,
-                    "message": "Conectar banco faz parte dos planos pagos — no Grátis a conexão "
-                               "vale durante os 15 dias de teste. Assine pra reativar: /precos",
+                    "message": _MSG_OF_SO_NOS_PLANOS_PAGOS,
                 },
             )
         count = await asyncio.to_thread(count_open_finance_connections, user_id)
@@ -1337,8 +1340,7 @@ async def _ensure_of_access_allowed(user_id: int) -> None:
                 detail={
                     "code": "OF_BANK_LIMIT",
                     "limit": 0,
-                    "message": "Conectar banco faz parte dos planos pagos — no Grátis a conexão "
-                               "vale durante os 15 dias de teste. Assine pra reativar: /precos",
+                    "message": _MSG_OF_SO_NOS_PLANOS_PAGOS,
                 },
             )
         return
