@@ -37,6 +37,12 @@ interface Props {
    * (`RNSScreen.mm`, `applyFrameCorrectionForDescendantScrollView`) — aninhado
    * dentro do padding, ele ia para (0,0) e o conteúdo colava na borda e cobria
    * a alça. Na raiz, o padding fica no `contentContainerStyle` e sobrevive.
+   *
+   * Teclado (iOS): `automaticallyAdjustKeyboardInsets` põe o teclado como
+   * inset inferior e rola até o campo focado (`RCTScrollViewComponentView.mm`,
+   * `_keyboardWillChangeFrame`). Sem ela, na sheet inteira o teclado cobria o
+   * campo do código do MFA. No Android a prop não existe; lá é o
+   * `windowSoftInputMode` (padrão `resize` do Expo).
    */
   rolar?: boolean;
 }
@@ -76,6 +82,7 @@ export function SheetConteudo({ children, rolar = false }: Props) {
         style={{ flex: 1, backgroundColor: cores.bg }}
         contentContainerStyle={preenchimento}
         keyboardShouldPersistTaps="handled"
+        automaticallyAdjustKeyboardInsets
       >
         {alca}
         {children}

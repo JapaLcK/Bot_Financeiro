@@ -54,6 +54,8 @@ describe("SheetConteudo", () => {
     const raiz = c.UNSAFE_getByType(ScrollView);
     expect(raiz.props.testID).toBe("sheet-conteudo");
     expect(raiz.props.keyboardShouldPersistTaps).toBe("handled");
+    // Sem isto o teclado cobre o campo do código na sheet do MFA (iPhone real).
+    expect(raiz.props.automaticallyAdjustKeyboardInsets).toBe(true);
     expect(raiz.props.contentContainerStyle).toMatchObject({ paddingHorizontal: espaco.lg });
     expect(raiz.props.children[0].props.accessibilityElementsHidden).toBe(true);
   });
