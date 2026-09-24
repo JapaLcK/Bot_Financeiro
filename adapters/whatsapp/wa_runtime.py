@@ -1008,12 +1008,9 @@ def process_message(message: InboundMessage) -> None:
                 if paid is None:
                     _send_reply(reply_to, "Essa conta já estava paga (ou não achei mais). 👍")
                 else:
-                    val = paid.get("paid_amount") or paid.get("amount") or 0
-                    _send_reply(
-                        reply_to,
-                        f"✅ Conta paga: {wrap_wa_markup(paid.get('name'))} — {fmt_brl(val)} lançado e "
-                        f"categorizado. Tá tudo em dia! 🐷",
-                    )
+                    from core.handlers.bills import conta_paga
+                    _send_reply(reply_to, conta_paga(
+                        uid, paid, paid.get("paid_amount") or paid.get("amount") or 0))
                 return
 
             # Botão de desfazer áudio (legado: undo do último lançamento)
@@ -1174,7 +1171,7 @@ def process_message(message: InboundMessage) -> None:
                         pass
                     _send_reply(reply_to, f"Ok, deixei a conta de {wrap_wa_markup(name)} pendente. Quando pagar é só avisar. 🐷")
                     return
-                from utils_text import (fmt_brl, limpa_pontuacao_final,
+                from utils_text import (limpa_pontuacao_final,
                                         parse_money, valor_perigoso)
                 # Porta 4. A ACEITAÇÃO é o `parse_money` sobre o texto limpo —
                 # a mesma da `main`, que aqui nunca exigiu forma: "paguei 132",
@@ -1229,12 +1226,9 @@ def process_message(message: InboundMessage) -> None:
                     if paid is None:
                         _send_reply(reply_to, "Essa conta já estava paga (ou não achei mais). 👍")
                     else:
-                        val = paid.get("paid_amount") or paid.get("amount") or amount
-                        _send_reply(
-                            reply_to,
-                            f"✅ Conta paga: {wrap_wa_markup(paid.get('name'))} — {fmt_brl(val)} lançado e "
-                            f"categorizado. Tá tudo em dia! 🐷",
-                        )
+                        from core.handlers.bills import conta_paga
+                        _send_reply(reply_to, conta_paga(
+                            uid, paid, paid.get("paid_amount") or paid.get("amount") or amount))
                     return
 
         # ---------------------------------------------------------------

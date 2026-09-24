@@ -382,7 +382,7 @@ def test_oferta_final_condicional_nao_sobrescreve_fila_restaurada(user_id, monke
     monkeypatch.setattr(launches, "infer_category", lambda *_a, **_k: CategoriaFake())
     monkeypatch.setattr(launches, "learn_from_inference", lambda *_a, **_k: None)
     monkeypatch.setattr(launches, "_maybe_recurring_offer", lambda *_a, **_k: None)
-    monkeypatch.setattr(launches.db, "reconcile_manual_launch", lambda *_a, **_k: None)
+    monkeypatch.setattr(launches.db, "propose_manual_reconciliation", lambda *_a, **_k: None)
 
     def registra_enquanto_recupera(*_a, **_k):
         launches._devolve_head(user_id, devolvido, "whatsapp")
