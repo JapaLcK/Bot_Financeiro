@@ -894,10 +894,18 @@ def handle_incoming(msg: IncomingMessage, *,
         # pela IA — que não conhece o valor já informado e falha com "valor
         # precisa ser maior que zero". route() resolve a pendência primeiro.
         has_resumable_pending = False
+        # "sim"/"não" sem pendência nenhuma, logo depois de a IA perguntar algo
+        # ("Quer que eu mostre suas maiores despesas?"), responde à IA — sem
+        # isto o route() devolve "não entendi". Com pendência, o route() decide.
+        responde_a_ia = False
         try:
             _pend = db.get_pending_action(uid)
             if _pend and suprime_fallback_de_ia(_pend.get("action_type")):
                 has_resumable_pending = True
+            if (_pend is None
+                    and intent_result.intent in ("confirm.yes", "confirm.no")):
+                from core.services.ai_chat_commands import ia_acabou_de_perguntar
+                responde_a_ia = ia_acabou_de_perguntar(uid)
         except Exception:
             has_resumable_pending = False
 
@@ -906,6 +914,7 @@ def handle_incoming(msg: IncomingMessage, *,
             and (
                 intent_result.intent == "out_of_scope"
                 or intent_result.confidence < 0.55
+                or responde_a_ia
             )
         )
         if should_try_ai_fallback:

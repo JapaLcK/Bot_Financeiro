@@ -21,7 +21,9 @@ from __future__ import annotations
 
 import logging
 import os
+import re
 import unicodedata
+from datetime import timedelta
 
 import db
 from core.services.plan_service import ai_chat_allowed, ai_monthly_limit_for
@@ -71,6 +73,28 @@ def _strip_ai_prefix(text: str) -> str | None:
                     continue
                 return raw[idx + len(sep):].strip()
     return None
+
+
+# Por quanto tempo um "sim"/"não" solto ainda responde à última pergunta da IA.
+# Mesmo horizonte da pendência da IA (db.ai_chat.PENDING_TTL_MINUTES).
+_JANELA_DA_PERGUNTA = timedelta(minutes=10)
+
+
+def ia_acabou_de_perguntar(user_id: int) -> bool:
+    """A última mensagem do histórico é uma pergunta da IA, feita há pouco.
+
+    A IA oferece coisas sem guardar pendência ("Quer que eu mostre suas maiores
+    despesas?"), e o "sim" classifica como `confirm.yes` com confiança alta —
+    não cai no fallback de IA, e o `route()` sem pendência responde "não
+    entendi". Aqui o `handle_incoming` descobre que o "sim" é da IA.
+    """
+    last = db.ai_get_last_message(user_id)
+    return bool(
+        last
+        and last["role"] == "assistant"
+        and last["age"] < _JANELA_DA_PERGUNTA
+        and re.search(r"\?\W*$", last["content"] or "")
+    )
 
 
 def handle_ai_chat_command(user_id: int, text: str, platform: str) -> str | None:
