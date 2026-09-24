@@ -50,6 +50,10 @@ ITEM_SAUDAVEL = {
     "status": "UPDATED",
     "executionStatus": "SUCCESS",
     "clientUserId": "1",
+    # Marca de geração (`updatedAt`, `lastUpdatedAt`): sem `updatedAt` o gate da
+    # reconciliação não remove nada (`_sync_pluggy_item_confirmado`).
+    "updatedAt": "2026-08-20T11:00:00.000Z",
+    "lastUpdatedAt": "2026-08-20T11:00:00.000Z",
     "statusDetail": {
         "accounts": {"isUpdated": True, "lastUpdatedAt": "2026-08-20T11:00:00.000Z", "warnings": []},
         "creditCards": {"isUpdated": True, "lastUpdatedAt": "2026-08-20T11:00:00.000Z", "warnings": []},
@@ -1981,3 +1985,424 @@ def test_updating_seguido_de_foto_final_limpa_o_cartao_CONTROLE_POSITIVO(user_id
 
     ui = _ui("item-444-integra-4")
     assert ui["state"] == "updated", ui
+
+
+# ── 13. OF-01: a reconciliação do espelho de investimentos ──────────────────
+# A conversa inteira pelo `sync_pluggy_item`, não o `save_...` isolado: o que
+# decide se posição sai é o GATE (leitura completa E investimentos não-stale),
+# e ele mora aqui, dentro do lock e depois da relectura de autorização.
+#
+# CONTROLE NEGATIVO (medido, ver relato): tirar `leitura_completa=` da chamada
+# de `save_open_finance_investments` deixa o primeiro vermelho; tirar a condição
+# de stale do gate deixa o terceiro vermelho.
+
+def _mock_investimentos(monkeypatch, retorno):
+    """`_mock_pluggy` fixa `list_pluggy_investments` em `[]`; aqui ela devolve
+    carteira de verdade (ou levanta, se `retorno` for uma exceção)."""
+    def _lista(item_id, api_key=None, **kw):
+        if isinstance(retorno, Exception):
+            raise retorno
+        return list(retorno)
+    monkeypatch.setattr(ps, "list_pluggy_investments", _lista)
+
+
+_CX_A = {"id": "cx-a", "name": "Caixinha Viagem", "type": "FIXED_INCOME",
+         "subtype": "CDB", "balance": "800.00"}
+_CX_B = {"id": "cx-b", "name": "Caixinha Carro", "type": "FIXED_INCOME",
+         "subtype": "CDB", "balance": "500.00"}
+
+
+def _espelho_investimentos(connection_id: int) -> set[str]:
+    with get_conn() as c:
+        with c.cursor() as cur:
+            cur.execute("select provider_investment_id from open_finance_investments "
+                        "where connection_id=%s", (connection_id,))
+            return {r["provider_investment_id"] for r in (cur.fetchall() or [])}
+
+
+def _nomes_de_caixinha(user_id: int) -> set[str]:
+    return set(_pockets_por_nome(user_id))
+
+
+def _pockets_por_nome(user_id: int) -> dict:
+    from db.pockets import accrue_all_pockets
+    return {p["name"]: p for p in accrue_all_pockets(user_id)}
+
+
+def test_sync_reconcilia_posicao_que_sumiu_do_banco(user_id, monkeypatch, relogio_fixo):
+    """Sync 1 espelha duas caixinhas; no sync 2 o banco devolve só uma. A que
+    sumiu sai do espelho E a caixinha dela sai junto — sem virar fantasma com o
+    último saldo espelhado.
+
+    `contas=[]` de propósito: é o item de corretora, o caso que nunca
+    reconciliava enquanto a chamada ficava depois do early-return de
+    `no_accounts`."""
+    from conftest import promote_to_pro
+    promote_to_pro(user_id)
+    conexao = _conexao(user_id)
+    _mock_pluggy(monkeypatch, item=ITEM_SAUDAVEL, contas=[])
+    _mock_investimentos(monkeypatch, [_CX_A, _CX_B])
+    assert ps.sync_pluggy_item("item-g1")["ok"] is True
+    assert _espelho_investimentos(conexao["id"]) == {"cx-a", "cx-b"}
+    assert {"Caixinha Viagem", "Caixinha Carro"} <= _nomes_de_caixinha(user_id)
+
+    _mock_investimentos(monkeypatch, [_CX_A])
+    res = ps.sync_pluggy_item("item-g1")
+
+    assert res["ok"] is True
+    assert res["investments_removed"] == 1
+    assert _espelho_investimentos(conexao["id"]) == {"cx-a"}
+    nomes = _nomes_de_caixinha(user_id)
+    assert "Caixinha Carro" not in nomes, "espelho sem posição não fica"
+    assert "Caixinha Viagem" in nomes
+    linha = _linha()
+    assert linha["status"] == "ACTIVE"
+    assert linha["last_sync_at"] == AGORA
+
+
+def test_sync_com_leitura_de_investimentos_falha_nao_remove_nada(user_id, monkeypatch, relogio_fixo):
+    """429 em `/investments`: `investments_ok=False` e NADA sai — nem posição nem
+    caixinha. É o caminho que `list_pluggy_investments` toma em toda leitura
+    parcial (metadata incoerente, página que falhou, teto de páginas)."""
+    from conftest import promote_to_pro
+    promote_to_pro(user_id)
+    conexao = _conexao(user_id)
+    _mock_pluggy(monkeypatch, item=ITEM_SAUDAVEL, contas=[_conta_pluggy()], txs=[_tx_pluggy()])
+    _mock_investimentos(monkeypatch, [_CX_A, _CX_B])
+    assert ps.sync_pluggy_item("item-g1")["ok"] is True
+
+    _mock_investimentos(monkeypatch, PluggyApiError("rate limit", status_code=429))
+    res = ps.sync_pluggy_item("item-g1")
+
+    assert res["investments_ok"] is False
+    assert res["investments_removed"] == 0
+    assert _espelho_investimentos(conexao["id"]) == {"cx-a", "cx-b"}
+    assert {"Caixinha Viagem", "Caixinha Carro"} <= _nomes_de_caixinha(user_id)
+
+
+def test_sync_com_investimentos_stale_nao_remove_nada(user_id, monkeypatch, relogio_fixo):
+    """A segunda prova do gate: `statusDetail.investments.isUpdated=false` diz que
+    a coleta de investimentos NO BANCO falhou nesta execução — e mesmo assim
+    `/investments` responde 200 com o que tiver, possivelmente a metade. Resposta
+    VÁLIDA e curta, então, não autoriza remover."""
+    from conftest import promote_to_pro
+    promote_to_pro(user_id)
+    conexao = _conexao(user_id)
+    _mock_pluggy(monkeypatch, item=ITEM_SAUDAVEL, contas=[])
+    _mock_investimentos(monkeypatch, [_CX_A, _CX_B])
+    assert ps.sync_pluggy_item("item-g1")["ok"] is True
+
+    item_stale = {**ITEM_SAUDAVEL,
+                  "statusDetail": {**ITEM_SAUDAVEL["statusDetail"],
+                                   "investments": {"isUpdated": False, "warnings": []}}}
+    _mock_pluggy(monkeypatch, item=item_stale, contas=[])
+    _mock_investimentos(monkeypatch, [_CX_A])
+    res = ps.sync_pluggy_item("item-g1")
+
+    assert "INVESTMENTS" in res["stale_products"]
+    assert res["investments_ok"] is True, "a leitura em si foi válida — quem barra é o stale"
+    assert res["investments_removed"] == 0
+    assert _espelho_investimentos(conexao["id"]) == {"cx-a", "cx-b"}
+    assert {"Caixinha Viagem", "Caixinha Carro"} <= _nomes_de_caixinha(user_id)
+
+
+_PROVA_INV = {**ITEM_SAUDAVEL["statusDetail"],
+              "investments": {"isUpdated": True, "warnings": []}}
+_SEM_DETAIL = {k: v for k, v in ITEM_SAUDAVEL.items() if k != "statusDetail"}
+_SEM_INV = {**ITEM_SAUDAVEL, "executionStatus": "PARTIAL_SUCCESS"}  # formato de ITEM_PARCIAL
+
+
+@pytest.mark.parametrize("item_2, removidas", [
+    ({**ITEM_SAUDAVEL, "status": "UPDATING"}, 0),
+    ({**ITEM_SAUDAVEL, "status": "UPDATING", "statusDetail": _PROVA_INV}, 1),
+    (_SEM_INV, 0),
+    ({**_SEM_INV, "statusDetail": _PROVA_INV}, 1),
+    ({**ITEM_SAUDAVEL, "executionStatus": "ALGO_NOVO"}, 0),
+    ({**_SEM_DETAIL, "status": "OUTDATED", "executionStatus": "ERROR"}, 0),
+    ({**_SEM_DETAIL, "executionStatus": "MERGE_ERROR"}, 0),
+    (_SEM_DETAIL, 1),   # UPDATED + SUCCESS sem statusDetail: a decisão do dono
+], ids=["updating_sem_sinal", "updating_com_prova", "partial_sem_sinal", "partial_com_prova",
+        "exec_desconhecido_sem_sinal", "outdated_error_sem_sinal",
+        "updated_merge_error_sem_sinal", "updated_sem_statusdetail"])
+def test_sync_so_reconcilia_item_saudavel_ou_com_prova(user_id, monkeypatch, relogio_fixo,
+                                                       item_2, removidas):
+    """O gate é LISTA DE PERMISSÃO: sem `statusDetail.investments.isUpdated=true`,
+    só `UPDATED` + `SUCCESS` autoriza remover. Qualquer outro par (coleta em
+    andamento, parcial, erro, estado desconhecido) com `/investments` válido mas
+    curto NÃO apaga posição nem caixinha.
+
+    CONTROLES NEGATIVOS (medidos, por backup de arquivo):
+      1. gate do da263459 (só `ITEM_UPDATING` exige prova): `partial_sem_sinal`,
+         `exec_desconhecido_sem_sinal`, `outdated_error_sem_sinal` e
+         `updated_merge_error_sem_sinal` ficam vermelhos;
+      2. forma de exclusão (fora de `ITEM_UPDATING` e != `PARTIAL_SUCCESS`, ou
+         prova): SÓ `exec_desconhecido_sem_sinal`, `outdated_error_sem_sinal` e
+         `updated_merge_error_sem_sinal` ficam vermelhos — é o que prova que o
+         grupo mede a lista de permissão;
+      3. sem o termo `("UPDATED", "SUCCESS")` (prova sempre): `updated_sem_statusdetail`
+         fica vermelho — controle positivo da decisão do dono."""
+    from conftest import promote_to_pro
+    promote_to_pro(user_id)
+    conexao = _conexao(user_id)
+    _mock_pluggy(monkeypatch, item=ITEM_SAUDAVEL, contas=[])
+    _mock_investimentos(monkeypatch, [_CX_A, _CX_B])
+    assert ps.sync_pluggy_item("item-g1")["ok"] is True
+
+    _mock_pluggy(monkeypatch, item=item_2, contas=[])
+    _mock_investimentos(monkeypatch, [_CX_A])
+    res = ps.sync_pluggy_item("item-g1")
+
+    assert res["investments_ok"] is True
+    assert res["investments_removed"] == removidas
+    esperado = {"cx-a", "cx-b"} if removidas == 0 else {"cx-a"}
+    assert _espelho_investimentos(conexao["id"]) == esperado
+    assert ("Caixinha Carro" in _nomes_de_caixinha(user_id)) is (removidas == 0)
+
+
+# ── Duas fotos do item: a mesma geração antes e depois da leitura ─────────
+# A foto 1 (`GET /items` no começo de `sync_pluggy_item`) vem ANTES da leitura
+# remota, que leva minutos e roda fora do lock. Um refresh que começa depois dela
+# pode servir `/investments` pela metade. A foto 2, pedida depois da leitura, tem
+# de ser saudável E da mesma geração (`updatedAt`, `lastUpdatedAt`).
+#
+# CONTROLES NEGATIVOS (medidos por backup de arquivo, ver relato):
+#   (i)   gate só pela foto 1 (a foto 2 é pedida e ignorada): `foto2_updating`,
+#         `foto2_success_outra_geracao`, `foto2_outdated` e `sem_marca` ficam
+#         vermelhos;
+#   (ii)  foto 2 sem a igualdade da marca (só status + `updatedAt` presente): SÓ
+#         `foto2_success_outra_geracao` fica vermelho — é o que prova a marca;
+#   (iii) sem a exigência de `updatedAt` presente: SÓ `sem_marca` fica vermelho;
+#   (iv)  exceção no segundo GET sem negar a reconciliação: SÓ `foto2_429`.
+# CONTROLE POSITIVO: `foto2_identica` remove 1.
+
+_U2 = "2026-08-20T11:30:00.000Z"
+_SEM_MARCA = {k: v for k, v in ITEM_SAUDAVEL.items() if k != "updatedAt"}
+
+
+@pytest.mark.parametrize("foto1, foto2, removidas", [
+    (ITEM_SAUDAVEL, ITEM_SAUDAVEL, 1),
+    (ITEM_SAUDAVEL, {**ITEM_SAUDAVEL, "status": "UPDATING", "updatedAt": _U2}, 0),
+    (ITEM_SAUDAVEL, {**ITEM_SAUDAVEL, "updatedAt": _U2, "lastUpdatedAt": _U2}, 0),
+    (ITEM_SAUDAVEL, {**ITEM_SAUDAVEL, "status": "OUTDATED", "executionStatus": "ERROR"}, 0),
+    (ITEM_SAUDAVEL, PluggyApiError("rate limit", status_code=429), 0),
+    (_SEM_MARCA, _SEM_MARCA, 0),
+], ids=["foto2_identica", "foto2_updating", "foto2_success_outra_geracao",
+        "foto2_outdated", "foto2_429", "sem_marca"])
+def test_sync_so_reconcilia_com_a_mesma_geracao_nas_duas_fotos(
+        user_id, monkeypatch, relogio_fixo, foto1, foto2, removidas):
+    from conftest import promote_to_pro
+    promote_to_pro(user_id)
+    conexao = _conexao(user_id)
+    _mock_pluggy(monkeypatch, item=ITEM_SAUDAVEL, contas=[_conta_pluggy()], txs=[_tx_pluggy()])
+    _mock_investimentos(monkeypatch, [_CX_A, _CX_B])
+    assert ps.sync_pluggy_item("item-g1")["ok"] is True
+
+    fotos = [foto1, foto2]
+    chamadas = []
+
+    def _get_item(item_id, api_key=None):
+        chamadas.append(item_id)
+        foto = fotos[len(chamadas) - 1]
+        if isinstance(foto, Exception):
+            raise foto
+        return foto
+    monkeypatch.setattr(ps, "get_pluggy_item", _get_item)
+    _mock_investimentos(monkeypatch, [_CX_A])
+    res = ps.sync_pluggy_item("item-g1")
+
+    assert len(chamadas) == 2, "a foto 1 autoriza, então a foto 2 é pedida"
+    assert res["ok"] is True
+    assert res["investments_ok"] is True
+    assert res["investments_removed"] == removidas
+    esperado = {"cx-a", "cx-b"} if removidas == 0 else {"cx-a"}
+    assert _espelho_investimentos(conexao["id"]) == esperado
+    assert ("Caixinha Carro" in _nomes_de_caixinha(user_id)) is (removidas == 0)
+    assert _contas_espelhadas(conexao["id"]) == {"acc-g1"}, "as contas são gravadas"
+
+
+def test_investimentos_falhos_nao_pedem_a_segunda_foto(user_id, monkeypatch, relogio_fixo):
+    from conftest import promote_to_pro
+    promote_to_pro(user_id)
+    _conexao(user_id)
+    chamadas = []
+
+    def _get_item(item_id, api_key=None):
+        chamadas.append(item_id)
+        return ITEM_SAUDAVEL
+    _mock_pluggy(monkeypatch, item=ITEM_SAUDAVEL, contas=[_conta_pluggy()], txs=[_tx_pluggy()])
+    monkeypatch.setattr(ps, "get_pluggy_item", _get_item)
+    _mock_investimentos(monkeypatch, PluggyApiError("rate limit", status_code=429))
+
+    res = ps.sync_pluggy_item("item-g1")
+
+    assert res["investments_ok"] is False
+    assert len(chamadas) == 1
+
+
+def test_sync_religa_a_caixinha_quando_a_posicao_volta(user_id, monkeypatch, relogio_fixo):
+    """O bloqueante da passada 1 do Tester, pelo `sync_pluggy_item` inteiro.
+
+    Três syncs: a posição está, some, volta. Ela volta com id NOVO (a linha foi
+    apagada na reconciliação), e sem a lápide o auto-import criava uma caixinha
+    AUTOMÁTICA duplicada que o usuário não conseguia desfazer — a meta dele ficava
+    presa atrás de `OF_POCKET_READONLY`."""
+    from conftest import promote_to_pro
+    promote_to_pro(user_id)
+    conexao = _conexao(user_id)
+    _mock_pluggy(monkeypatch, item=ITEM_SAUDAVEL, contas=[])
+    _mock_investimentos(monkeypatch, [_CX_A])
+    assert ps.sync_pluggy_item("item-g1")["ok"] is True
+
+    # a meta MANUAL do usuário toma a posição (o espelho puro do auto-import sai)
+    _, meta, _ = db.create_pocket(user_id, "Viagem dos sonhos", interest_enabled=False)
+    posicao_1 = _pockets_por_nome(user_id)["Caixinha Viagem"]["of_investment_id"]
+    assert db.bind_pocket_to_caixinha(user_id, meta, posicao_1) is True
+
+    _mock_investimentos(monkeypatch, [])            # o banco omite a posição
+    assert ps.sync_pluggy_item("item-g1")["ok"] is False   # sem contas e sem investimento
+    assert _espelho_investimentos(conexao["id"]) == set()
+    assert _pockets_por_nome(user_id)["Viagem dos sonhos"]["of_investment_id"] is None
+
+    _mock_investimentos(monkeypatch, [_CX_A])       # e volta
+    res = ps.sync_pluggy_item("item-g1")
+
+    assert res["ok"] is True
+    assert res["caixinhas_religadas"] == 1
+    pk = _pockets_por_nome(user_id)
+    posicao_2 = pk["Viagem dos sonhos"]["of_investment_id"]
+    assert posicao_2 is not None and posicao_2 != posicao_1, "id novo, mesma meta"
+    assert float(pk["Viagem dos sonhos"]["balance"]) == 800.0, "espelho do banco"
+    assert "Caixinha Viagem" not in pk, "nenhuma caixinha automática duplicada"
+    assert _linha()["status"] == "ACTIVE"
+
+
+# ── 14. M1: a GRAVAÇÃO de investimentos também é fail-soft ──────────────────
+# Irmão de `test_429_em_investimentos_nao_descarta_as_contas_ja_lidas`, que cobre
+# só o lado da LEITURA. A chamada de `save_open_finance_investments` subiu para
+# antes de `save_open_finance_sync` (ela precisa rodar acima do early-return de
+# `no_accounts`, senão corretora nunca reconcilia), e sem `try` uma falha nela
+# passou a jogar fora as contas e transações já lidas — medido: espelho (0, 0)
+# onde antes do PR ficava (1, 1), e a linha sem carimbo nenhum.
+
+def test_falha_ao_gravar_investimentos_nao_descarta_as_contas(user_id, monkeypatch,
+                                                              relogio_fixo):
+    from conftest import promote_to_pro
+    promote_to_pro(user_id)
+    conexao = _conexao(user_id)
+    _mock_pluggy(monkeypatch, item=ITEM_SAUDAVEL,
+                 contas=[_conta_pluggy()], txs=[_tx_pluggy()])
+    _mock_investimentos(monkeypatch, [_CX_A, _CX_B])
+    assert ps.sync_pluggy_item("item-g1")["ok"] is True
+    assert _espelho_investimentos(conexao["id"]) == {"cx-a", "cx-b"}
+
+    # sync 2: a leitura vai bem, a GRAVAÇÃO estoura
+    _mock_investimentos(monkeypatch, [_CX_A])
+    monkeypatch.setattr(ps, "save_open_finance_investments",
+                        lambda *a, **kw: (_ for _ in ()).throw(RuntimeError("boom")))
+
+    res = ps.sync_pluggy_item("item-g1")
+
+    assert _espelho(conexao["id"]) == (1, 1), "contas e transações lidas TÊM que ficar"
+    assert res["ok"] is True, "o que deu certo, deu certo — contas e transações"
+    assert res["investments_ok"] is False, "leitura incompleta é o que sobra"
+    # `read_failed` é o motivo do ESPELHO VAZIO (`has_data=False`, ver
+    # `resolve_connection_state`): com contas gravadas a conexão segue ACTIVE sem
+    # motivo, exatamente como no irmão do 429. O caso de espelho vazio está no
+    # teste abaixo.
+    assert _linha()["status"] == "ACTIVE"
+    assert _espelho_investimentos(conexao["id"]) == {"cx-a", "cx-b"}, (
+        "o espelho de investimentos fica como estava — aqui a função nem chegou a "
+        "rodar (o mock levanta na entrada), então o que isto prova é que a falha "
+        "não descarta nada, não a atomicidade dela. Quem mede a transação por "
+        "dentro é `tests/test_of_investimento_reconciliacao.py`, injetando a falha "
+        "DEPOIS do upsert")
+    assert {"Caixinha Viagem", "Caixinha Carro"} <= _nomes_de_caixinha(user_id)
+
+
+def test_falha_ao_gravar_investimentos_de_corretora_vira_read_failed(user_id, monkeypatch,
+                                                                    relogio_fixo):
+    """O caminho do early-return: corretora (zero contas, carteira toda em
+    `/investments`). Aqui a gravação que falha deixa o espelho VAZIO, e é o caso
+    em que `resolve_connection_state` dá `read_failed` — "não consegui" e não "o
+    banco não tem nada". O que não pode, dos dois lados, é estourar."""
+    from conftest import promote_to_pro
+    promote_to_pro(user_id)
+    _conexao(user_id, "item-corretora")
+    _mock_pluggy(monkeypatch, item={**ITEM_SAUDAVEL, "id": "item-corretora"}, contas=[])
+    _mock_investimentos(monkeypatch, [_CX_A])
+    monkeypatch.setattr(ps, "save_open_finance_investments",
+                        lambda *a, **kw: (_ for _ in ()).throw(RuntimeError("boom")))
+
+    res = ps.sync_pluggy_item("item-corretora")
+
+    assert res["ok"] is False
+    assert res["reason"] == "read_failed", "não é `no_accounts`: não conseguimos gravar"
+    linha = _linha("item-corretora")
+    assert linha["status_reason"] == "read_failed"
+    assert linha["last_sync_at"] == ANTES, "gravação pela metade não é sucesso"
+
+
+def test_corretora_que_nao_gravou_nada_nao_carimba_sucesso(user_id, monkeypatch,
+                                                          relogio_fixo):
+    """O early-return decide pelo que foi PERSISTIDO, não pela lista LIDA.
+
+    A posição chega sem `id` usável: o `normalize` põe `provider_investment_id=""`
+    e o upsert a pula no `continue`. Com `bool(investments)`, a corretora (zero
+    contas) saía daqui `ok: True`, ACTIVE e `last_sync_at` carimbado sobre espelho
+    (0, 0) e ZERO investimentos — "Atualizado agora" sobre nada.
+
+    O monkeypatch em `ps.list_pluggy_investments` é necessário porque em PRODUÇÃO
+    este item é barrado antes, na paginação (`item_invalido`,
+    core/services/pluggy_investments.py). O que o teste guarda, então, é a
+    coerência do early-return — não um caminho comum. A segunda porta, também
+    rara, é o `if not owner` de `save_open_finance_investments`, que devolve zeros
+    sem levantar; as duas passam pelo mesmo `investments_synced`."""
+    from conftest import promote_to_pro
+    promote_to_pro(user_id)
+    conexao = _conexao(user_id, "item-sem-id")
+    _mock_pluggy(monkeypatch, item={**ITEM_SAUDAVEL, "id": "item-sem-id"}, contas=[])
+    _mock_investimentos(monkeypatch, [{**_CX_A, "id": ""}])
+
+    res = ps.sync_pluggy_item("item-sem-id")
+
+    assert res["ok"] is False, "nada foi gravado: não é sucesso"
+    assert res.get("investments_synced") == 0
+    linha = _linha("item-sem-id")
+    assert linha["last_sync_at"] == ANTES, "carimbo de sucesso não pode andar"
+    assert _espelho_investimentos(conexao["id"]) == set()
+
+
+def test_amount_profit_nao_numerico_nao_derruba_o_sync(user_id, monkeypatch, relogio_fixo):
+    """`amountProfit` é campo de TERCEIRO. Com `::numeric` cru, um "n/d" abortava
+    a transação e — pelo caminho do M1 — derrubava o item inteiro a CADA sync,
+    junto com as contas. Aqui ele chega na posição que VOLTA, que é onde o UPDATE
+    de religação o lê."""
+    from conftest import promote_to_pro
+    promote_to_pro(user_id)
+    conexao = _conexao(user_id)
+    sujo = {**_CX_A, "amountProfit": "n/d"}
+    _mock_pluggy(monkeypatch, item=ITEM_SAUDAVEL,
+                 contas=[_conta_pluggy()], txs=[_tx_pluggy()])
+    _mock_investimentos(monkeypatch, [sujo])
+    assert ps.sync_pluggy_item("item-g1")["ok"] is True
+
+    _, meta, _ = db.create_pocket(user_id, "Viagem dos sonhos", interest_enabled=False)
+    assert db.bind_pocket_to_caixinha(
+        user_id, meta, _pockets_por_nome(user_id)["Caixinha Viagem"]["of_investment_id"]) is True
+
+    _mock_investimentos(monkeypatch, [])            # some
+    ps.sync_pluggy_item("item-g1")
+    _mock_investimentos(monkeypatch, [sujo])        # e volta, com o campo sujo
+
+    res = ps.sync_pluggy_item("item-g1")
+
+    assert res["ok"] is True
+    assert res["caixinhas_religadas"] == 1
+    assert _espelho(conexao["id"]) == (1, 1), "as contas não podem cair junto"
+    pk = _pockets_por_nome(user_id)
+    assert pk["Viagem dos sonhos"]["of_investment_id"] is not None
+    with get_conn() as c:
+        with c.cursor() as cur:
+            cur.execute("select of_last_seen_profit as p from pockets where id=%s", (meta,))
+            assert cur.fetchone()["p"] is None, (
+                "valor não numérico vira NULL, que é o que o Banqueiro já sabe tratar")
