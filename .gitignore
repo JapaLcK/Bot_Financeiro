@@ -57,3 +57,15 @@ node_modules
 # morto e quebram lint. O padrão cobre também o nome SEM extensão.
 * [0-9].*
 * [0-9]
+
+# Bundle do protótipo dashboard-v2, gerado por `npm --prefix webapp run
+# build:dashboard`. Diferente do frontend/precos-app.*, não é servido pelo
+# backend e não tem gate no CI: versioná-lo poria centenas de KB de diff
+# minificado em cada mudança do protótipo.
+dashboard-v2/dashboard-app.*
+
+# Skill impeccable: capturas de tela e payloads das rodadas de design são
+# locais. O `.impeccable/design.json` e o `.impeccable/surfaces/` continuam
+# versionados.
+.impeccable/review/
+.impeccable/decision-*.json

@@ -1,0 +1,892 @@
+{
+  "schemaVersion": 2,
+  "generatedAt": "2026-09-23T16:00:00-03:00",
+  "title": "Design System: PigBank Dashboard (dark)",
+  "extensions": {
+    "colorMeta": {
+      "bg": {
+        "role": "neutral",
+        "displayName": "Graphite Black",
+        "tonalRamp": [
+          "#09090b",
+          "#101013",
+          "#16161a",
+          "#1d1d22",
+          "#24242a",
+          "#5d5d68",
+          "#8b8b96",
+          "#a8a8b3"
+        ]
+      },
+      "plane-1": {
+        "role": "neutral",
+        "displayName": "Plane 1",
+        "tonalRamp": [
+          "#09090b",
+          "#101013",
+          "#16161a",
+          "#1d1d22",
+          "#24242a",
+          "#5d5d68",
+          "#8b8b96",
+          "#a8a8b3"
+        ]
+      },
+      "plane-2": {
+        "role": "neutral",
+        "displayName": "Plane 2",
+        "tonalRamp": [
+          "#09090b",
+          "#101013",
+          "#16161a",
+          "#1d1d22",
+          "#24242a",
+          "#5d5d68",
+          "#8b8b96",
+          "#a8a8b3"
+        ]
+      },
+      "plane-3": {
+        "role": "neutral",
+        "displayName": "Plane 3",
+        "tonalRamp": [
+          "#09090b",
+          "#101013",
+          "#16161a",
+          "#1d1d22",
+          "#24242a",
+          "#5d5d68",
+          "#8b8b96",
+          "#a8a8b3"
+        ]
+      },
+      "card-border": {
+        "role": "neutral",
+        "displayName": "Card Border",
+        "tonalRamp": [
+          "#09090b",
+          "#101013",
+          "#16161a",
+          "#1d1d22",
+          "#24242a",
+          "#5d5d68",
+          "#8b8b96",
+          "#a8a8b3"
+        ]
+      },
+      "rule": {
+        "role": "neutral",
+        "displayName": "Rule"
+      },
+      "rule-strong": {
+        "role": "neutral",
+        "displayName": "Rule Strong"
+      },
+      "ink": {
+        "role": "neutral",
+        "displayName": "Ink",
+        "canonical": "oklch(96.8% 0.003 286)",
+        "tonalRamp": [
+          "#0b0b0c",
+          "#252526",
+          "#424243",
+          "#616162",
+          "#828283",
+          "#a5a5a6",
+          "#c9c9cb",
+          "#eeeef0"
+        ]
+      },
+      "ink-2": {
+        "role": "neutral",
+        "displayName": "Ink 2",
+        "canonical": "oklch(73.5% 0.016 286)",
+        "tonalRamp": [
+          "#0b0b0f",
+          "#24242a",
+          "#414148",
+          "#606069",
+          "#81818b",
+          "#a4a4af",
+          "#c8c8d3",
+          "#ededf8"
+        ]
+      },
+      "ink-3": {
+        "role": "neutral",
+        "displayName": "Ink 3",
+        "canonical": "oklch(64.0% 0.016 286)",
+        "tonalRamp": [
+          "#0b0a10",
+          "#24242b",
+          "#414149",
+          "#60606a",
+          "#81818c",
+          "#a4a4af",
+          "#c8c8d2",
+          "#ededf7"
+        ]
+      },
+      "ink-4": {
+        "role": "neutral",
+        "displayName": "Ink 4",
+        "canonical": "oklch(48.2% 0.017 286)",
+        "tonalRamp": [
+          "#0a0a11",
+          "#24242c",
+          "#41414b",
+          "#60606b",
+          "#81818c",
+          "#a4a4ae",
+          "#c8c8d2",
+          "#ededf7"
+        ]
+      },
+      "pink": {
+        "role": "primary",
+        "displayName": "PigBank Pink",
+        "tonalRamp": [
+          "#17161a",
+          "#2e1623",
+          "#4d1734",
+          "#761a4d",
+          "#a61c67",
+          "#d92280",
+          "#ff4f9f",
+          "#ff5aa6"
+        ]
+      },
+      "pink-ink": {
+        "role": "primary",
+        "displayName": "Pink Ink",
+        "tonalRamp": [
+          "#17161a",
+          "#2e1623",
+          "#4d1734",
+          "#761a4d",
+          "#a61c67",
+          "#d92280",
+          "#ff4f9f",
+          "#ff5aa6"
+        ]
+      },
+      "pink-wash": {
+        "role": "primary",
+        "displayName": "Pink Wash"
+      },
+      "pink-line": {
+        "role": "primary",
+        "displayName": "Pink Line"
+      },
+      "gain": {
+        "role": "secondary",
+        "displayName": "Ledger Green",
+        "canonical": "oklch(79.7% 0.164 160)",
+        "tonalRamp": [
+          "#001500",
+          "#00330f",
+          "#005429",
+          "#007745",
+          "#009c63",
+          "#23c282",
+          "#54e8a4",
+          "#8bffcb"
+        ]
+      },
+      "gain-wash": {
+        "role": "secondary",
+        "displayName": "Gain Wash"
+      },
+      "warn": {
+        "role": "tertiary",
+        "displayName": "Pace Amber",
+        "canonical": "oklch(81.3% 0.145 78)",
+        "tonalRamp": [
+          "#1d0200",
+          "#3e1b00",
+          "#603800",
+          "#855700",
+          "#ab7700",
+          "#d4992b",
+          "#fcbc4f",
+          "#ffe382"
+        ]
+      },
+      "warn-wash": {
+        "role": "tertiary",
+        "displayName": "Pace Wash"
+      },
+      "alert": {
+        "role": "tertiary",
+        "displayName": "Zero Orange",
+        "canonical": "oklch(72.7% 0.176 41)",
+        "tonalRamp": [
+          "#2b0000",
+          "#520000",
+          "#7a1a00",
+          "#a43a00",
+          "#d05926",
+          "#fd7944",
+          "#ffa171",
+          "#ffca9d"
+        ]
+      },
+      "heat-0": {
+        "role": "data",
+        "displayName": "Heat 0",
+        "tonalRamp": [
+          "#17161a",
+          "#2e1623",
+          "#4d1734",
+          "#761a4d",
+          "#a61c67",
+          "#d92280",
+          "#ff4f9f",
+          "#ff5aa6"
+        ]
+      },
+      "heat-1": {
+        "role": "data",
+        "displayName": "Heat 1",
+        "tonalRamp": [
+          "#17161a",
+          "#2e1623",
+          "#4d1734",
+          "#761a4d",
+          "#a61c67",
+          "#d92280",
+          "#ff4f9f",
+          "#ff5aa6"
+        ]
+      },
+      "heat-2": {
+        "role": "data",
+        "displayName": "Heat 2",
+        "tonalRamp": [
+          "#17161a",
+          "#2e1623",
+          "#4d1734",
+          "#761a4d",
+          "#a61c67",
+          "#d92280",
+          "#ff4f9f",
+          "#ff5aa6"
+        ]
+      },
+      "heat-3": {
+        "role": "data",
+        "displayName": "Heat 3",
+        "tonalRamp": [
+          "#17161a",
+          "#2e1623",
+          "#4d1734",
+          "#761a4d",
+          "#a61c67",
+          "#d92280",
+          "#ff4f9f",
+          "#ff5aa6"
+        ]
+      },
+      "heat-4": {
+        "role": "data",
+        "displayName": "Heat 4",
+        "tonalRamp": [
+          "#17161a",
+          "#2e1623",
+          "#4d1734",
+          "#761a4d",
+          "#a61c67",
+          "#d92280",
+          "#ff4f9f",
+          "#ff5aa6"
+        ]
+      },
+      "heat-5": {
+        "role": "data",
+        "displayName": "Heat 5",
+        "tonalRamp": [
+          "#17161a",
+          "#2e1623",
+          "#4d1734",
+          "#761a4d",
+          "#a61c67",
+          "#d92280",
+          "#ff4f9f",
+          "#ff5aa6"
+        ]
+      },
+      "heat-6": {
+        "role": "data",
+        "displayName": "Heat 6",
+        "tonalRamp": [
+          "#17161a",
+          "#2e1623",
+          "#4d1734",
+          "#761a4d",
+          "#a61c67",
+          "#d92280",
+          "#ff4f9f",
+          "#ff5aa6"
+        ]
+      },
+      "cat-mercado": {
+        "role": "data",
+        "displayName": "Mercado",
+        "canonical": "oklch(62.2% 0.161 255)",
+        "tonalRamp": [
+          "#00003a",
+          "#001f60",
+          "#003f88",
+          "#1560b3",
+          "#3582df",
+          "#5fa7ff",
+          "#88ccff",
+          "#b3f3ff"
+        ]
+      },
+      "cat-delivery": {
+        "role": "data",
+        "displayName": "Delivery",
+        "canonical": "oklch(62.2% 0.173 40)",
+        "tonalRamp": [
+          "#2e0000",
+          "#540000",
+          "#7d1300",
+          "#a73500",
+          "#d35522",
+          "#f87d50",
+          "#ffa57b",
+          "#ffcea6"
+        ]
+      },
+      "cat-transporte": {
+        "role": "data",
+        "displayName": "Transporte",
+        "canonical": "oklch(66.1% 0.114 227)",
+        "tonalRamp": [
+          "#000e24",
+          "#002b45",
+          "#004a68",
+          "#006c8e",
+          "#1d8fb5",
+          "#4cb3da",
+          "#7cd7fc",
+          "#a9fcff"
+        ]
+      },
+      "cat-lazer": {
+        "role": "data",
+        "displayName": "Lazer",
+        "canonical": "oklch(67.0% 0.143 73)",
+        "tonalRamp": [
+          "#210000",
+          "#421700",
+          "#663400",
+          "#8b5200",
+          "#b37300",
+          "#d9962e",
+          "#fcbc63",
+          "#ffe292"
+        ]
+      },
+      "cat-assinaturas": {
+        "role": "data",
+        "displayName": "Assinaturas",
+        "canonical": "oklch(67.0% 0.145 287)",
+        "tonalRamp": [
+          "#0d0032",
+          "#241656",
+          "#40347d",
+          "#5e52a6",
+          "#7e73d1",
+          "#a096f8",
+          "#c3bcff",
+          "#e8e2ff"
+        ]
+      },
+      "cat-compras": {
+        "role": "data",
+        "displayName": "Compras",
+        "canonical": "oklch(66.9% 0.159 22)",
+        "tonalRamp": [
+          "#2b0000",
+          "#510006",
+          "#79171f",
+          "#a2373a",
+          "#ce5657",
+          "#f67978",
+          "#ffa29e",
+          "#ffcbc6"
+        ]
+      },
+      "cat-moradia": {
+        "role": "data",
+        "displayName": "Moradia",
+        "canonical": "oklch(60.9% 0.023 264)",
+        "tonalRamp": [
+          "#080b12",
+          "#21252e",
+          "#3d424d",
+          "#5b616e",
+          "#7b8290",
+          "#9ea5b3",
+          "#c3c9d6",
+          "#e8effb"
+        ]
+      },
+      "cat-outros": {
+        "role": "data",
+        "displayName": "Outros",
+        "canonical": "oklch(48.5% 0.019 266)",
+        "tonalRamp": [
+          "#080b12",
+          "#21252d",
+          "#3e424c",
+          "#5c616c",
+          "#7d828d",
+          "#a0a5af",
+          "#c5c9d3",
+          "#eaeef8"
+        ]
+      }
+    },
+    "dataColor": [
+      {
+        "name": "on-pink",
+        "value": "#0f172a",
+        "purpose": "Text on the pink primary button (--on-pink); 5.12:1, where white gave 3.49:1."
+      },
+      {
+        "name": "goal-intercambio",
+        "value": "#3987e5",
+        "purpose": "Goal identity hue: icon, progress meter, timeline bar."
+      },
+      {
+        "name": "goal-reserva",
+        "value": "#d95926",
+        "purpose": "Goal identity hue."
+      },
+      {
+        "name": "goal-notebook",
+        "value": "#9085e9",
+        "purpose": "Goal identity hue."
+      },
+      {
+        "name": "goal-festival",
+        "value": "#c98500",
+        "purpose": "Goal identity hue. Order passes the palette validator on the dark surface, worst adjacent deltaE 26."
+      },
+      {
+        "name": "tint-tile",
+        "value": "identity hue at 13% alpha",
+        "purpose": "Ledger icon tile fill, via tint() in lib/format.js."
+      },
+      {
+        "name": "tint-timeline",
+        "value": "goal hue at 55% alpha",
+        "purpose": "Goal timeline bar (GoalsTimeline)."
+      },
+      {
+        "name": "wash-balance",
+        "value": "linear-gradient(#ff2d8e 16% to 0)",
+        "purpose": "Vertical wash under the realized balance line."
+      },
+      {
+        "name": "wash-networth",
+        "value": "linear-gradient(#9085e9 28% to 0)",
+        "purpose": "Vertical wash under the net-worth line."
+      },
+      {
+        "name": "forecast-band",
+        "value": "rgba(255, 45, 142, 0.08)",
+        "purpose": "Faixa provável band around the forecast."
+      },
+      {
+        "name": "stat-key-entrou",
+        "value": "var(--gain)",
+        "purpose": "6px dot before the Entrou label in Resumo do mês."
+      },
+      {
+        "name": "stat-key-saiu",
+        "value": "var(--alert)",
+        "purpose": "6px dot before Saiu."
+      },
+      {
+        "name": "stat-key-fatura",
+        "value": "var(--warn)",
+        "purpose": "6px dot before Fatura."
+      },
+      {
+        "name": "stat-key-guardado",
+        "value": "#9085e9",
+        "purpose": "6px dot before Guardado; same violet as Caixinhas in net worth."
+      },
+      {
+        "name": "ambient",
+        "value": "radial-gradient(60vw 40vh at 85% -10%, rgba(255, 45, 142, 0.07), transparent 70%), radial-gradient(40vw 30vh at 10% 110%, rgba(144, 133, 233, 0.04), transparent 70%)",
+        "purpose": "Fixed background behind all content (.shell::before); the only color not attached to data or state."
+      }
+    ],
+    "typographyMeta": {
+      "display": {
+        "displayName": "Display",
+        "purpose": "The single hero figure, the forecast balance; 40px when the widget is under 440px wide."
+      },
+      "headline": {
+        "displayName": "Headline",
+        "purpose": "Stat quadrant values; 28px variant for the simulator result and page titles (24px on mobile)."
+      },
+      "title": {
+        "displayName": "Title",
+        "purpose": "Section headings (h2)."
+      },
+      "title-sm": {
+        "displayName": "Title small",
+        "purpose": "Month title, hero facts, tooltip value, category detail title."
+      },
+      "body": {
+        "displayName": "Body",
+        "purpose": "Page default and page ledes (70ch max)."
+      },
+      "body-sm": {
+        "displayName": "Body small",
+        "purpose": "Working size: widget titles, list labels, inputs, nav."
+      },
+      "button": {
+        "displayName": "Button",
+        "purpose": "All buttons."
+      },
+      "label": {
+        "displayName": "Label",
+        "purpose": "Chips, legends, dt terms, day heads, stat titles."
+      },
+      "caption": {
+        "displayName": "Caption",
+        "purpose": "Chart axes, weekday initials, timeline ticks, tab bar labels."
+      },
+      "icon": {
+        "displayName": "Icon",
+        "purpose": "Phosphor regular icon font from the repo subset, 15-18px."
+      }
+    },
+    "shadows": [
+      {
+        "name": "lift",
+        "value": "inset 0 1px 0 rgba(255, 255, 255, 0.045)",
+        "purpose": "Top highlight on widgets, ghost buttons, segmented track."
+      },
+      {
+        "name": "card-ring",
+        "value": "inset 0 0 0 1px rgb(36 36 42)",
+        "purpose": "1px ring around widgets, page panels and the ledger."
+      },
+      {
+        "name": "seg-thumb",
+        "value": "0 1px 2px rgba(0, 0, 0, 0.4), inset 0 1px 0 rgba(255, 255, 255, 0.06)",
+        "purpose": "Sliding thumb of the segmented control."
+      },
+      {
+        "name": "tooltip",
+        "value": "0 0 0 1px rgba(255, 255, 255, 0.12), 0 12px 32px -8px rgba(0, 0, 0, 0.7)",
+        "purpose": "The single floating chart tooltip."
+      },
+      {
+        "name": "palette",
+        "value": "0 0 0 1px rgba(255, 255, 255, 0.12), 0 30px 80px -20px rgba(0, 0, 0, 0.85)",
+        "purpose": "Command palette dialog."
+      },
+      {
+        "name": "slider-thumb",
+        "value": "0 0 0 3px #101013, 0 2px 6px rgba(0, 0, 0, 0.5)",
+        "purpose": "Range slider thumb."
+      },
+      {
+        "name": "widget-rest",
+        "value": "0px 1px 2px 0px rgba(0,0,0,0.12), 0px 0px 0px 0px rgba(0,0,0,0)",
+        "purpose": "Draggable widget at rest (same layer count as lifted so it interpolates)."
+      },
+      {
+        "name": "widget-lifted",
+        "value": "0px 28px 60px -16px rgba(0,0,0,0.45), 0px 10px 24px -8px rgba(0,0,0,0.3)",
+        "purpose": "Widget while dragged, scaled 1.06."
+      }
+    ],
+    "motion": [
+      {
+        "name": "ease-out",
+        "value": "cubic-bezier(0.23, 1, 0.32, 1)",
+        "purpose": "Default easing for state changes, chart draw, meters, page transitions."
+      },
+      {
+        "name": "ease-in-out",
+        "value": "cubic-bezier(0.77, 0, 0.175, 1)",
+        "purpose": "Declared companion easing."
+      },
+      {
+        "name": "t-fast",
+        "value": "160ms",
+        "purpose": "Hover, press, color changes."
+      },
+      {
+        "name": "t-mid",
+        "value": "240ms",
+        "purpose": "Segmented thumb, top bar hairline, dimming."
+      },
+      {
+        "name": "page-out",
+        "value": "120ms opacity to 0",
+        "purpose": "View Transition, old page content; rail and top bar stay still."
+      },
+      {
+        "name": "page-in",
+        "value": "220ms opacity from 0, translateY 6px",
+        "purpose": "View Transition, new page content; skipped under reduced motion."
+      },
+      {
+        "name": "chart-draw",
+        "value": "900ms",
+        "purpose": "Trajectory chart reveals once per month change."
+      },
+      {
+        "name": "meter-fill",
+        "value": "600ms",
+        "purpose": "Goal meters and pace bars."
+      },
+      {
+        "name": "bar-fill",
+        "value": "500ms",
+        "purpose": "Category, month, place and timeline bars."
+      },
+      {
+        "name": "today-pulse",
+        "value": "2.4s infinite",
+        "purpose": "Today marker and live sync dot; the only loops."
+      },
+      {
+        "name": "spring-settle",
+        "value": "spring visualDuration 0.38s bounce 0.16",
+        "purpose": "Widget reflow on the board."
+      },
+      {
+        "name": "spring-lift",
+        "value": "spring visualDuration 0.26s bounce 0.32",
+        "purpose": "Widget pickup during drag."
+      },
+      {
+        "name": "spring-enter",
+        "value": "spring visualDuration 0.6s bounce 0.12, from y 18px scale 0.97",
+        "purpose": "Widget entrance, staggered."
+      }
+    ],
+    "breakpoints": [
+      {
+        "name": "rail-compact",
+        "value": "1180px"
+      },
+      {
+        "name": "page-grid-single",
+        "value": "1100px"
+      },
+      {
+        "name": "command-compact",
+        "value": "1060px"
+      },
+      {
+        "name": "mobile",
+        "value": "760px"
+      },
+      {
+        "name": "board-single-column",
+        "value": "640px"
+      }
+    ],
+    "pages": [
+      {
+        "path": "#/",
+        "title": "Resumo",
+        "purpose": "Draggable widget board plus ledger."
+      },
+      {
+        "path": "#/previsao",
+        "title": "Quanto vai sobrar",
+        "purpose": "Forecast; chart 380px tall."
+      },
+      {
+        "path": "#/gastos",
+        "title": "Para onde vai o dinheiro",
+        "purpose": "Categories and CategoryDetail."
+      },
+      {
+        "path": "#/simulador",
+        "title": "E se…",
+        "purpose": "Simulator."
+      },
+      {
+        "path": "#/metas",
+        "title": "Metas e caixinhas",
+        "purpose": "Goals and GoalsTimeline."
+      },
+      {
+        "path": "#/patrimonio",
+        "title": "Patrimônio",
+        "purpose": "Net worth, Wealth composition."
+      },
+      {
+        "path": "#/lancamentos",
+        "title": "Lançamentos",
+        "purpose": "Full ledger."
+      }
+    ]
+  },
+  "components": [
+    {
+      "name": "Primary Button",
+      "kind": "button",
+      "refersTo": "button-primary",
+      "description": "The one primary action per screen (Simular); near-black ink on pink.",
+      "html": "<button class=\"ds-btn ds-btn-primary\"><svg width=\"16\" height=\"16\" viewBox=\"0 0 256 256\" fill=\"none\" stroke=\"currentColor\" stroke-width=\"16\" stroke-linejoin=\"round\"><path d=\"M160 16 48 144h72l-24 96 112-128h-72z\"/></svg>Simular</button>",
+      "css": ".ds-btn { display: inline-flex; align-items: center; justify-content: center; gap: 8px; height: 36px; padding: 0 14px; border: 0; border-radius: 10px; font: 600 13px/1 Inter, -apple-system, sans-serif; letter-spacing: -0.005em; cursor: pointer; transition: background-color 160ms ease, color 160ms ease, transform 160ms cubic-bezier(0.23, 1, 0.32, 1); } .ds-btn:active { transform: scale(0.97); } .ds-btn:focus-visible { outline: 2px solid var(--pink, #ff2d8e); outline-offset: 2px; } .ds-btn-primary { background: var(--pink, #ff2d8e); color: var(--on-pink, #0f172a); } .ds-btn-primary:hover { background: #ff4a9e; }"
+    },
+    {
+      "name": "Ghost Button",
+      "kind": "button",
+      "refersTo": "button-ghost",
+      "description": "Secondary actions (Organizar, Ver no gráfico); pressed state goes pink-wash.",
+      "html": "<button class=\"ds-btn-ghost\">Organizar</button> <button class=\"ds-btn-ghost\" aria-pressed=\"true\">Pronto</button>",
+      "css": ".ds-btn-ghost { display: inline-flex; align-items: center; gap: 8px; height: 36px; padding: 0 14px; border: 0; border-radius: 10px; background: var(--plane-2, #16161a); color: var(--ink, #f4f4f6); box-shadow: inset 0 1px 0 rgba(255,255,255,0.045); font: 600 13px/1 Inter, -apple-system, sans-serif; cursor: pointer; transition: background-color 160ms ease, transform 160ms cubic-bezier(0.23, 1, 0.32, 1); } .ds-btn-ghost:hover { background: var(--plane-3, #1d1d22); } .ds-btn-ghost:active { transform: scale(0.97); } .ds-btn-ghost:focus-visible { outline: 2px solid var(--pink, #ff2d8e); outline-offset: 2px; } .ds-btn-ghost[aria-pressed=\"true\"] { background: rgba(255,45,142,0.1); color: var(--pink-ink, #ff5aa6); box-shadow: inset 0 0 0 1px rgba(255,45,142,0.45); }"
+    },
+    {
+      "name": "Chip",
+      "kind": "chip",
+      "refersTo": "chip",
+      "description": "Simulator presets and filters; selected goes pink-wash with pink ink.",
+      "html": "<button class=\"ds-chip\">Um rolê a menos por semana</button> <button class=\"ds-chip\" aria-pressed=\"true\">Delivery pela metade</button>",
+      "css": ".ds-chip { display: inline-flex; align-items: center; gap: 6px; height: 28px; padding: 0 10px; border: 0; border-radius: 8px; background: var(--plane-2, #16161a); color: var(--ink-2, #a8a8b3); font: 500 12px/1 Inter, -apple-system, sans-serif; cursor: pointer; transition: background-color 160ms ease, color 160ms ease, transform 160ms cubic-bezier(0.23, 1, 0.32, 1); } .ds-chip:hover { color: var(--ink, #f4f4f6); background: var(--plane-3, #1d1d22); } .ds-chip:active { transform: scale(0.97); } .ds-chip:focus-visible { outline: 2px solid var(--pink, #ff2d8e); outline-offset: 2px; } .ds-chip[aria-pressed=\"true\"] { background: rgba(255,45,142,0.1); color: var(--pink-ink, #ff5aa6); }"
+    },
+    {
+      "name": "Segmented Control",
+      "kind": "custom",
+      "refersTo": "segmented",
+      "description": "Forecast horizon and ledger filters; a plane-3 thumb slides under the checked option.",
+      "html": "<div class=\"ds-seg\" role=\"radiogroup\"><span class=\"ds-seg-thumb\"></span><button role=\"radio\" aria-checked=\"true\">Fim do mês</button><button role=\"radio\" aria-checked=\"false\">30 dias</button><button role=\"radio\" aria-checked=\"false\">90 dias</button></div>",
+      "css": ".ds-seg { position: relative; display: inline-grid; grid-auto-flow: column; grid-auto-columns: 1fr; padding: 3px; border-radius: 10px; background: var(--plane-2, #16161a); box-shadow: inset 0 1px 0 rgba(255,255,255,0.045); } .ds-seg button { position: relative; z-index: 1; height: 26px; padding: 0 10px; border: 0; background: transparent; color: var(--ink-3, #8b8b96); font: 550 12px/1 Inter, -apple-system, sans-serif; white-space: nowrap; cursor: pointer; transition: color 160ms ease; } .ds-seg button:hover { color: var(--ink-2, #a8a8b3); } .ds-seg button[aria-checked=\"true\"] { color: var(--ink, #f4f4f6); } .ds-seg button:focus-visible { outline: 2px solid var(--pink, #ff2d8e); outline-offset: 2px; border-radius: 6px; } .ds-seg-thumb { position: absolute; top: 3px; bottom: 3px; left: 3px; width: calc((100% - 6px) / 3); border-radius: 7px; background: var(--plane-3, #1d1d22); box-shadow: 0 1px 2px rgba(0,0,0,0.4), inset 0 1px 0 rgba(255,255,255,0.06); transition: transform 240ms cubic-bezier(0.23, 1, 0.32, 1); }"
+    },
+    {
+      "name": "Search Field",
+      "kind": "input",
+      "refersTo": "search-input",
+      "description": "Ledger search; the 1px inset ring turns pink on focus.",
+      "html": "<label class=\"ds-search\"><svg width=\"15\" height=\"15\" viewBox=\"0 0 256 256\" fill=\"none\" stroke=\"currentColor\" stroke-width=\"16\" stroke-linecap=\"round\"><circle cx=\"116\" cy=\"116\" r=\"84\"/><path d=\"m175.4 175.4 48.6 48.6\"/></svg><input placeholder=\"Buscar por nome ou mensagem\"></label>",
+      "css": ".ds-search { position: relative; display: block; width: 260px; color: var(--ink-3, #8b8b96); } .ds-search svg { position: absolute; left: 11px; top: 50%; transform: translateY(-50%); } .ds-search input { width: 100%; height: 34px; padding: 0 12px 0 34px; border: 0; border-radius: 10px; background: var(--plane-2, #16161a); box-shadow: inset 0 0 0 1px rgba(255,255,255,0.07); color: var(--ink, #f4f4f6); font: 400 13px/1 Inter, -apple-system, sans-serif; caret-color: var(--pink, #ff2d8e); transition: box-shadow 160ms ease; } .ds-search input::placeholder { color: var(--ink-3, #8b8b96); } .ds-search input:hover { box-shadow: inset 0 0 0 1px rgba(255,255,255,0.12); } .ds-search input:focus-visible { outline: none; box-shadow: inset 0 0 0 1px var(--pink, #ff2d8e); }"
+    },
+    {
+      "name": "Rail Navigation",
+      "kind": "nav",
+      "refersTo": "nav-item",
+      "description": "Left rail of the 7 hash-routed pages; active item on pink wash with a pink icon.",
+      "html": "<nav class=\"ds-rail\"><a href=\"#/\" aria-current=\"page\"><svg width=\"17\" height=\"17\" viewBox=\"0 0 256 256\" fill=\"none\" stroke=\"currentColor\" stroke-width=\"16\" stroke-linecap=\"round\" stroke-linejoin=\"round\"><path d=\"M40 216V116l88-76 88 76v100z\"/></svg>Resumo</a><a href=\"#/previsao\"><svg width=\"17\" height=\"17\" viewBox=\"0 0 256 256\" fill=\"none\" stroke=\"currentColor\" stroke-width=\"16\" stroke-linecap=\"round\" stroke-linejoin=\"round\"><path d=\"M224 208H32V48\"/><path d=\"m224 96-64 56-64-48-64 56\"/></svg>Previsão</a><a href=\"#/metas\"><svg width=\"17\" height=\"17\" viewBox=\"0 0 256 256\" fill=\"none\" stroke=\"currentColor\" stroke-width=\"16\"><circle cx=\"128\" cy=\"128\" r=\"96\"/><circle cx=\"128\" cy=\"128\" r=\"56\"/><circle cx=\"128\" cy=\"128\" r=\"16\"/></svg>Metas</a></nav>",
+      "css": ".ds-rail { display: grid; gap: 2px; width: 208px; } .ds-rail a { display: flex; align-items: center; gap: 11px; height: 36px; padding: 0 12px; border-radius: 9px; color: var(--ink-2, #a8a8b3); font: 500 14px/1 Inter, -apple-system, sans-serif; text-decoration: none; transition: color 160ms ease, background-color 160ms ease; } .ds-rail a:hover { color: var(--ink, #f4f4f6); background: var(--plane-1, #101013); } .ds-rail a:focus-visible { outline: 2px solid var(--pink, #ff2d8e); outline-offset: 2px; } .ds-rail a[aria-current=\"page\"] { color: var(--ink, #f4f4f6); background: rgba(255,45,142,0.1); } .ds-rail a[aria-current=\"page\"] svg { color: var(--pink, #ff2d8e); }"
+    },
+    {
+      "name": "Widget (hero)",
+      "kind": "card",
+      "refersTo": "widget",
+      "description": "Board tile: plane 1, 1px card ring, 16px radius; title in ink-2, the forecast figure in display type.",
+      "html": "<article class=\"ds-widget\"><header class=\"ds-w-head\">Saldo previsto</header><span class=\"ds-hero-value\">R$ 2.300</span><p class=\"ds-hero-sub\">em qua, 30 de setembro <span>· no ritmo dos últimos 60 dias</span></p><dl class=\"ds-facts\"><div><dt>Até lá</dt><dd>−R$ 535</dd></div><div><dt>Com a simulação</dt><dd class=\"ds-gain\">+R$ 180</dd></div></dl></article>",
+      "css": ".ds-widget { display: flex; flex-direction: column; gap: 12px; width: 420px; padding: 16px 18px 18px; border-radius: 16px; background: var(--plane-1, #101013); color: var(--ink, #f4f4f6); box-shadow: inset 0 0 0 1px #24242a, inset 0 1px 0 rgba(255,255,255,0.045); font-family: Inter, -apple-system, sans-serif; } .ds-w-head { min-height: 30px; display: flex; align-items: center; font-size: 13px; font-weight: 500; color: var(--ink-2, #a8a8b3); } .ds-hero-value { font-size: 52px; font-weight: 600; line-height: 1; letter-spacing: -0.035em; font-variant-numeric: tabular-nums; } .ds-hero-sub { margin: 0; font-size: 13px; color: var(--ink-2, #a8a8b3); } .ds-hero-sub span { color: var(--ink-3, #8b8b96); } .ds-facts { display: flex; gap: 22px; margin: 0; } .ds-facts dt { font-size: 12px; color: var(--ink-3, #8b8b96); } .ds-facts dd { margin: 2px 0 0; font-size: 15px; font-weight: 600; letter-spacing: -0.01em; font-variant-numeric: tabular-nums; } .ds-gain { color: var(--gain, #3ddc97); }"
+    },
+    {
+      "name": "Month Summary (stat quadrants)",
+      "kind": "card",
+      "refersTo": "widget",
+      "description": "Resumo do mês: one widget, four quadrants split by hairlines, each label led by a 6px stat key.",
+      "html": "<article class=\"ds-stats-w\"><header class=\"ds-w-head\">Resumo do mês</header><div class=\"ds-stats\"><section><h3><i style=\"background:#3ddc97\"></i>Entrou</h3><b>R$ 4.300</b><p class=\"ds-gain\">6% a mais que agosto</p></section><section><h3><i style=\"background:#ff7a45\"></i>Saiu</h3><b>R$ 2.636</b><p>R$ 225 a menos que agosto</p></section><section><h3><i style=\"background:#f5b544\"></i>Fatura aberta</h3><b>R$ 454</b><p>vence 10 de outubro</p></section><section><h3><i style=\"background:#9085e9\"></i>Guardado no mês</h3><b>R$ 730</b><p>automático nas 4 caixinhas</p></section></div></article>",
+      "css": ".ds-stats-w { display: flex; flex-direction: column; gap: 12px; width: 520px; padding: 16px 18px 18px; border-radius: 16px; background: var(--plane-1, #101013); color: var(--ink, #f4f4f6); box-shadow: inset 0 0 0 1px #24242a, inset 0 1px 0 rgba(255,255,255,0.045); font-family: Inter, -apple-system, sans-serif; } .ds-stats { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); margin: 0 -18px -18px; border-top: 1px solid rgba(255,255,255,0.07); } .ds-stats section { display: flex; flex-direction: column; gap: 8px; padding: 14px 18px 16px; transition: background-color 160ms ease; } .ds-stats section:hover { background: rgba(255,255,255,0.02); } .ds-stats section:nth-child(odd) { border-right: 1px solid rgba(255,255,255,0.07); } .ds-stats section:nth-child(-n+2) { border-bottom: 1px solid rgba(255,255,255,0.07); } .ds-stats h3 { display: flex; align-items: center; gap: 7px; margin: 0; font-size: 12.5px; font-weight: 500; color: var(--ink-3, #8b8b96); } .ds-stats h3 i { width: 6px; height: 6px; border-radius: 50%; flex: none; } .ds-stats b { font-size: 30px; font-weight: 600; line-height: 1.05; letter-spacing: -0.03em; font-variant-numeric: tabular-nums; } .ds-stats p { margin: -4px 0 0; font-size: 12.5px; color: var(--ink-2, #a8a8b3); } .ds-gain { color: var(--gain, #3ddc97); }"
+    },
+    {
+      "name": "Range Slider",
+      "kind": "input",
+      "refersTo": "field",
+      "description": "Simulator lever: 4px track filled pink to the value, white thumb ringed in plane 1.",
+      "html": "<input class=\"ds-range\" type=\"range\" min=\"0\" max=\"100\" value=\"30\" style=\"--p: 30%\">",
+      "css": ".ds-range { -webkit-appearance: none; appearance: none; width: 240px; height: 20px; background: transparent; cursor: pointer; } .ds-range::-webkit-slider-runnable-track { height: 4px; border-radius: 4px; background: linear-gradient(to right, var(--pink, #ff2d8e) var(--p), var(--plane-3, #1d1d22) var(--p)); } .ds-range::-moz-range-track { height: 4px; border-radius: 4px; background: var(--plane-3, #1d1d22); } .ds-range::-moz-range-progress { height: 4px; border-radius: 4px; background: var(--pink, #ff2d8e); } .ds-range::-webkit-slider-thumb { -webkit-appearance: none; width: 16px; height: 16px; margin-top: -6px; border-radius: 50%; background: #fff; box-shadow: 0 0 0 3px var(--plane-1, #101013), 0 2px 6px rgba(0,0,0,0.5); transition: transform 160ms cubic-bezier(0.23, 1, 0.32, 1); } .ds-range::-moz-range-thumb { width: 16px; height: 16px; border: 0; border-radius: 50%; background: #fff; box-shadow: 0 0 0 3px var(--plane-1, #101013), 0 2px 6px rgba(0,0,0,0.5); } .ds-range:hover::-webkit-slider-thumb { transform: scale(1.06); } .ds-range:active::-webkit-slider-thumb { transform: scale(1.12); } .ds-range:focus-visible { outline: none; } .ds-range:focus-visible::-webkit-slider-thumb { box-shadow: 0 0 0 3px var(--plane-1, #101013), 0 0 0 5px var(--pink, #ff2d8e); } .ds-range:focus-visible::-moz-range-thumb { box-shadow: 0 0 0 3px var(--plane-1, #101013), 0 0 0 5px var(--pink, #ff2d8e); }"
+    }
+  ],
+  "narrative": {
+    "northStar": "The Graphite Ledger",
+    "overview": "One month on near-black graphite, read like a well-kept ledger. The forecast is the spine: the hero figure (\"Saldo previsto\") and its trajectory chart sit at the top, and every other panel (categories, calendar, simulator, bills, goals) writes into that same number. The world is dark by decision, and its \"futuristic\" feel comes from craft rather than costume. Tight display tracking, tabular figures, 1px rules, 2px data lines and quiet tonal steps carry it. It uses no metaphor, no glow and no gradients on surfaces.\n\nThe density is high but calm. Panels are small tiles on a 4-column draggable grid. Inside them, divisions are hairlines, never nested boxes, and most text sits at 13px on four steps of ink. Color is scarce and semantic. Pink marks *now*, selection, focus and the one primary action. Green marks money gained. Amber marks spending above pace. A sequential pink ramp shows spending intensity. The eight category hues only identify categories. Every other surface is graphite.\n\nMotion is functional. Numbers roll (NumberFlow), the chart draws once on load, state changes run in 160–240ms, and widgets settle on springs when dragged. Only live indicators loop.",
+    "keyCharacteristics": [
+      "Graphite planes stepped in tone, separated by hairlines at 7% white",
+      "Inter with negative display tracking and tabular numbers everywhere",
+      "Pink for now, selection, focus and the primary action; green for money gained",
+      "A pink sequential heat ramp for spending intensity",
+      "Phosphor regular icons at 15–17px",
+      "2px data lines, 1px rules, a dashed line for the forecast",
+      "A 4-column tiled widget board that users can rearrange; one column on phones"
+    ],
+    "rules": [
+      {
+        "name": "The Pink-Is-Now Rule",
+        "body": "Pink means now, selected, focused or \"the one thing to press\". It never colors an amount, a loss or a decorative surface. Expenses are ink with a minus sign.",
+        "section": "colors"
+      },
+      {
+        "name": "The Green-Is-Money Rule",
+        "body": "Green appears only where the user ends up with more money. Positive values also carry a `+` sign or wording, so color never carries the meaning alone.",
+        "section": "colors"
+      },
+      {
+        "name": "The Data-Hue Rule",
+        "body": "The heat ramp and category hues belong to data marks. Chrome (buttons, nav, panels) stays graphite and pink.",
+        "section": "colors"
+      },
+      {
+        "name": "The Tabular Rule",
+        "body": "Every number that can change or be compared uses tabular figures (`.num`, or `font-variant-numeric: tabular-nums`).",
+        "section": "typography"
+      },
+      {
+        "name": "The Tighten-With-Size Rule",
+        "body": "Tracking goes from 0 at 13px to -0.012em at 15–17px, -0.03em at 28–30px and -0.035em at 52px. Small text is never tracked negative.",
+        "section": "typography"
+      },
+      {
+        "name": "The No-Uppercase Rule",
+        "body": "Labels are sentence case at 11–13px. No text is uppercase and none is letter-spaced wide.",
+        "section": "typography"
+      },
+      {
+        "name": "The Gap-Free Tiling Rule",
+        "body": "A new widget must fit the default order so the 4-column board still tiles without holes.",
+        "section": "layout"
+      },
+      {
+        "name": "The Container-First Rule",
+        "body": "Widget internals respond to their own box (container queries), never to the viewport.",
+        "section": "layout"
+      },
+      {
+        "name": "The Tonal-Stack Rule",
+        "body": "A surface at rest never gets a drop shadow. Shadows appear only on layers that float above the page, or while an element is held.",
+        "section": "elevation"
+      }
+    ],
+    "dos": [
+      "Do separate content inside a widget with 1px `rule` hairlines, not nested boxes.",
+      "Do set every amount in tabular figures, and give gains a `+` or wording as well as green.",
+      "Do keep pink to now, selection, focus and the single primary action.",
+      "Do use the `heat-*` ramp for any intensity-of-spending encoding and the fixed `cat-*` hue for each category.",
+      "Do gate hover styles behind `(hover: hover) and (pointer: fine)` and give every control a `:focus-visible` state (2px pink outline, 2px offset).",
+      "Do use 160ms (`--t-fast`) or 240ms (`--t-mid`) with `cubic-bezier(0.23, 1, 0.32, 1)` for state changes, and honor `prefers-reduced-motion` (all durations collapse to 1ms).",
+      "Do label synthetic data (\"Dados de demonstração\", \"Demonstração\") wherever demo numbers appear."
+    ],
+    "donts": [
+      "Don't put a drop shadow on a surface at rest. Depth is plane tone plus the 1px lift.",
+      "Don't color expenses or losses pink or red. An expense is ink with a minus sign, and above-pace spending is amber.",
+      "Don't use a category hue or heat step on chrome such as buttons, nav or panel backgrounds.",
+      "Don't loop an animation unless it signals a live state (the today pulse, the sync dot).",
+      "Don't uppercase or wide-track labels.",
+      "Don't add a metaphor layer (weather, cockpit, circuits). The owner rejected it; the finance dashboard stays literal."
+    ]
+  }
+}

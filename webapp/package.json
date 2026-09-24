@@ -5,7 +5,9 @@
   "description": "Ilhas React de preços e chats. Build separado da raiz, artefatos IIFE de nome fixo servidos pelo backend.",
   "scripts": {
     "build": "vite build && vite build --config vite.chat.config.ts && tsc --noEmit",
-    "typecheck": "tsc --noEmit"
+    "typecheck": "tsc --noEmit",
+    "build:dashboard": "vite build --config vite.dashboard.config.ts",
+    "watch:dashboard": "vite build --watch --config vite.dashboard.config.ts"
   },
   "dependencies": {
     "@number-flow/react": "^0.6.2",
@@ -15,6 +17,7 @@
     "clsx": "^2.1.1",
     "framer-motion": "^13.2.0",
     "lucide-react": "^1.45.0",
+    "motion": "13.2.0",
     "react": "19.3.0",
     "react-dom": "19.3.0",
     "tailwind-merge": "^2.6.1"
