@@ -64,7 +64,16 @@ const config: ExpoConfig = {
   // integração nativa e sobe os source maps. Sem ele, o empacotamento do Hermes
   // deixa a pilha de erro ilegível, e a camada de observabilidade relata sem
   // dizer ONDE — que é metade do valor dela.
-  plugins: ["expo-router", "expo-secure-store", "@sentry/react-native/expo"],
+  // `enableSceneSupport`: app compilado com o SDK do iOS 27 (Xcode 27) só abre
+  // com o ciclo de vida por scenes do UIKit; o SDK 57 o traz como opt-in
+  // (expo/fyi, "Staying on SDK 57 with Xcode 27"). No SDK 58 vira no-op: sai
+  // na atualização.
+  plugins: [
+    "expo-router",
+    "expo-secure-store",
+    "@sentry/react-native/expo",
+    ["expo-build-properties", { ios: { enableSceneSupport: true } }],
+  ],
   experiments: { typedRoutes: true },
   extra: {
     ambiente: AMBIENTE,
