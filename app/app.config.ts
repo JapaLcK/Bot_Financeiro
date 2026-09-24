@@ -56,6 +56,14 @@ const config: ExpoConfig = {
   ios: {
     bundleIdentifier: `${ID_BASE}${atual.sufixoId}`,
     supportsTablet: false,
+    appleTeamId: "S849YDA49P",
+    buildNumber: "2",
+    config: { usesNonExemptEncryption: false },
+    // Salvar senha e código no app Senhas: só produção, que é o único id em
+    // `/.well-known/apple-app-site-association` (frontend/routes/static_pages.py,
+    // `_APPLE_APP_IDS`). Dev e staging ficam fora para não misturar credenciais
+    // nem exigir a capability nos App IDs deles.
+    ...(AMBIENTE === "production" ? { associatedDomains: ["webcredentials:pigbankai.com"] } : {}),
   },
   android: {
     package: `${ID_BASE}${atual.sufixoId}`,
