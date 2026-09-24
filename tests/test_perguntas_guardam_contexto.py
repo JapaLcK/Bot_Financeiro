@@ -45,7 +45,9 @@ import uuid
 import pytest
 
 import db
+from conftest import promote_to_pro
 from core.handle_incoming import handle_incoming
+from core.services.plan_service import has_app_access
 from core.types import IncomingMessage
 
 _RAIZ = pathlib.Path(__file__).resolve().parents[1]
@@ -64,6 +66,8 @@ def _conversa(uid: int, *mensagens: str) -> list[str]:
 def uid() -> int:
     u = int(uuid.uuid4().int % 1_000_000_000) + 1   # < 2 bi: não sofre remap
     db.ensure_user(u)
+    promote_to_pro(u)
+    assert has_app_access(u)
     return u
 
 

@@ -13,8 +13,8 @@ por dois motivos, e o segundo é o que importa mais.
    grupo INTEIRO, e repetí-lo em três arquivos seria três versões divergindo em
    silêncio (§0.7). Cada arquivo de teste aponta para cá.
 
-NÃO usa `tests/_paywall_gate_helpers.py` de propósito: a fixture `v2_ligado`
-dele liga `PLANS_V2_ENABLED=1`, que não é o mundo destes testes.
+NÃO usa `tests/_paywall_gate_helpers.py`: o gate tem suíte própria, e aqui o
+usuário é pagante de verdade (`novo_uid`) para a mensagem chegar ao `route()`.
 
 
 Os vizinhos `investment_pick` e `funding_source_choice` já tinham; o bloco das
@@ -247,6 +247,8 @@ import pytest
 
 import db
 import core.handle_incoming as hi
+from conftest import promote_to_pro
+from core.services.plan_service import has_app_access
 from core.types import IncomingMessage
 
 
@@ -281,11 +283,13 @@ def escrituras(uid: int) -> dict:
 
 
 def novo_uid() -> int:
-    """Usuário PAGANTE — o gate de plano não pode ser o que segura a mensagem,
-    senão o teste mede o gate e não a escotilha."""
+    """Usuário PAGANTE de verdade: no v2 `plan_selected_at` sem plano ainda é
+    barrado pelo gate, e o teste mediria o gate e não a escotilha."""
     user = db.register_auth_user(f"abandono-{uuid.uuid4().hex[:12]}@t.com", "senha-forte-123")
     uid = int(user["user_id"])
     db.mark_plan_selected(uid)
+    promote_to_pro(uid)
+    assert has_app_access(uid)
     return uid
 
 
