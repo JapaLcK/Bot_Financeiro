@@ -96,6 +96,7 @@ from fastapi.testclient import TestClient
 import db
 import frontend.finance_bot_websocket_custom as dashboard
 import frontend.routes.open_finance as of_routes
+from conftest import promote_to_pro
 from db.connection import get_conn
 from test_of_item_ownership import _auth, _item_remoto, eventos, sem_indice_unico  # noqa: F401
 from test_of_webhook_adopt_guards import (_limpa_item, _mock_item,  # noqa: F401
@@ -144,8 +145,9 @@ def _dono_novo_no_lock(monkeypatch, item_id: str, *outros: int) -> None:
 
     `_enforce_bank_limit` roda DEPOIS do `outros`/`tinha_conexao_propria`
     pré-lock e imediatamente antes da escrita — tudo entre as duas é leitura.
-    Substituí-lo não perde cobertura: os tetos de plano estão dormentes na suíte
-    (`tests/conftest.py` põe `PLANS_V2_ENABLED=0`). Sem sleep e sem thread: o
+    Substituí-lo não perde cobertura: os tetos de plano estão dormentes neste
+    arquivo (ele está em `_AINDA_EM_V1`, que o `tests/conftest.py` roda no v1).
+    Sem sleep e sem thread: o
     ponto é determinístico.
     """
     async def _semeia_e_segue(uid, novo_item_id=None):
@@ -160,6 +162,7 @@ def _dono_novo_no_lock(monkeypatch, item_id: str, *outros: int) -> None:
 def test_dono_novo_entre_a_leitura_e_o_lock_devolve_409(user_id, monkeypatch, eventos):
     """Índice de pé. Hoje: `UniqueViolation` na escrita → 500 (por isso o
     `raise_server_exceptions=False`; sem ele o vermelho é a exceção crua)."""
+    promote_to_pro(user_id)
     item, outro = "oflock-t1", user_id + 1
     _mock_item(monkeypatch, user_id)
     logs = _logs(monkeypatch)
@@ -182,6 +185,7 @@ def test_dono_novo_no_lock_sem_indice_nao_cria_segundo_dono(
     """Sem o índice não há `UniqueViolation`: hoje isto devolve 200 e deixa o
     item com DOIS donos — o estado em que a leitura singular passa a levantar
     `AmbiguousItemError` para os dois usuários, para sempre."""
+    promote_to_pro(user_id)
     item, outro = "oflock-t2", user_id + 1
     _mock_item(monkeypatch, user_id)
     logs = _logs(monkeypatch)
@@ -210,6 +214,7 @@ def test_guarda_le_TODAS_as_conexoes_e_nao_a_singular(
     singular levanta `AmbiguousItemError`, que não é `OperationalError` e vira
     500 exatamente no estado que a guarda existe para conter.
     """
+    promote_to_pro(user_id)
     item, o1, o2 = "oflock-t3", user_id + 1, user_id + 2
     _mock_item(monkeypatch, user_id)
     _logs(monkeypatch)
@@ -233,6 +238,7 @@ def test_estado_proprio_que_sumiu_na_espera_do_lock_continua_409(
     """VERDE antes e depois: é guarda de regressão da revalidação de estado, que
     trocou a leitura própria pela releitura compartilhada e não tinha NENHUM
     teste antes deste arquivo."""
+    promote_to_pro(user_id)
     item = "oflock-t4"
     _mock_item(monkeypatch, user_id)
     logs = _logs(monkeypatch)
@@ -260,6 +266,7 @@ def test_estado_proprio_que_sumiu_na_espera_do_lock_continua_409(
 def test_reconexao_do_MESMO_dono_continua_200(user_id, monkeypatch, eventos):
     """Sem injeção nenhuma: o dono reconectando o PRÓPRIO item continua
     passando. Sem este caso o grupo passaria num código que recusa tudo."""
+    promote_to_pro(user_id)
     item = "oflock-t5"
     _mock_item(monkeypatch, user_id)
     monkeypatch.setattr(of_routes, "_schedule_pluggy_sync", lambda i: None)
@@ -283,12 +290,12 @@ def test_adocao_com_dono_novo_no_lock_desfaz_a_reivindicacao(
         user_id, monkeypatch, eventos, webhook_pluggy):
     """A adoção grava o rastro COM dono antes da conexão; se o 409 não apagar a
     própria linha, sobra rastro reivindicado e ZERO conexão nossa — o estado
-    terminal do P0, do qual nem a retentativa (1ª guarda) nem o script one-shot
-    (que filtra fora rastro com dono) tiram o usuário.
+    terminal do P0, do qual a retentativa (1ª guarda) não tira o usuário.
 
     `HTTPException` não é `psycopg.OperationalError`: ela atravessa o `except`
     de infra de `_grava_reconexao` e o desfazimento do 503 nunca roda.
     """
+    promote_to_pro(user_id)
     item, outro = "oflock-t6", user_id + 1
     _mock_item(monkeypatch, user_id)
     _logs(monkeypatch)
@@ -327,6 +334,7 @@ def test_a_rota_com_item_novo_le_conexoes_uma_vez(user_id, monkeypatch, eventos)
     `get_connections_by_item_id`, sendo estruturalmente cega ao segundo leitor —
     o nome antigo (`..._a_releitura_sob_o_lock_e_UMA`) prometia um requisito que
     esta asserção não pode falhar por."""
+    promote_to_pro(user_id)
     item = "oflock-t7"
     _mock_item(monkeypatch, user_id)
     monkeypatch.setattr(of_routes, "_schedule_pluggy_sync", lambda i: None)

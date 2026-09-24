@@ -6,7 +6,8 @@
  */
 import { z } from "zod";
 
-import { chamar } from "@/api/client";
+import { USER_AGENT } from "@/api/aparelho";
+import { _resetRenovacao, chamar } from "@/api/client";
 import {
   guardarCredenciais,
   lerCredenciais,
@@ -28,6 +29,7 @@ const fetchFalso = jest.fn();
 beforeEach(async () => {
   fetchFalso.mockReset();
   globalThis.fetch = fetchFalso as unknown as typeof fetch;
+  _resetRenovacao();
   await limparCredenciais();
 });
 
@@ -45,6 +47,26 @@ describe("credencial na requisição", () => {
     // guardar credencial ambiente sem querer — com ela, a escrita SEGUINTE
     // passaria a levar cookie e o servidor voltaria a exigir o par do CSRF.
     expect(opcoes.credentials).toBe("omit");
+  });
+
+  it("manda o User-Agent do app no login e na renovação", async () => {
+    // É dele que o servidor tira o rótulo da sessão (core/sessions.py).
+    fetchFalso.mockResolvedValue(resposta(200, { ok: true }));
+    await chamar("/auth/login", schema, { metodo: "POST", semAuth: true });
+    expect(fetchFalso.mock.calls[0][1].headers["User-Agent"]).toBe(USER_AGENT);
+
+    fetchFalso.mockReset();
+    await guardarCredenciais({ access: "velho", refresh: "rt_velho" });
+    fetchFalso
+      .mockResolvedValueOnce(resposta(401, {}))
+      .mockResolvedValueOnce(
+        resposta(200, { access_token: "n", refresh_token: "rt_n", dashboard_token: "d", expires_in: 900 }),
+      )
+      .mockResolvedValueOnce(resposta(200, { ok: true }));
+    await chamar("/x", schema);
+    const [url, opcoes] = fetchFalso.mock.calls[1];
+    expect(url).toContain("/auth/refresh");
+    expect(opcoes.headers["User-Agent"]).toBe(USER_AGENT);
   });
 
   it("não manda credencial em rota pública", async () => {

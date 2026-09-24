@@ -18,6 +18,7 @@ import pytest
 from psycopg.types.json import Jsonb
 
 import db
+from conftest import promote_to_pro
 from core.handlers import investments as h_investments
 from core.handlers import pockets as h_pockets
 from core.services import funding
@@ -579,6 +580,7 @@ def _assert_volta_para_a_origem(user_id: int, tipo_dep: str, tipo_saq: str, net:
 def _dashboard_client(user_id: int, email: str):
     """Cliente autenticado do dashboard — o preparo é compartilhado
     (`grep -c _dashboard_client tests/test_funding_source.py`)."""
+    promote_to_pro(user_id)  # atravessa o gate de acesso do v2
     from fastapi.testclient import TestClient
 
     import frontend.finance_bot_websocket_custom as dashboard

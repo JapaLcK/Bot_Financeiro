@@ -1,27 +1,34 @@
 <!DOCTYPE html>
+
 <html lang="pt-BR">
 <head>
-<meta charset="UTF-8" />
-<meta name="viewport" content="width=device-width, initial-scale=1.0" />
+<meta charset="utf-8"/>
+<meta content="width=device-width, initial-scale=1.0" name="viewport"/>
 <title>Planos · PigBank</title>
-<meta name="description" content="Planos PigBank: Essencial R$ 9,90, Plus R$ 19,90 e Pro R$ 49,90. 15 dias grátis pra testar o plano que você escolher." />
-<link rel="canonical" href="https://pigbankai.com/precos" />
-<link rel="icon" type="image/png" href="/favicon.png?v=3" />
-<link rel="apple-touch-icon" href="/brand/apple-touch-icon.png?v=3" />
-<meta name="theme-color" content="#0c0c0d" />
+<meta property="og:type" content="website"/>
+<meta property="og:title" content="Planos · PigBank"/>
+<meta property="og:description" content="Planos PigBank: Essencial R$ 9,90, Plus R$ 19,90 e Pro R$ 49,90. 15 dias grátis pra testar o plano que você escolher."/>
+<meta property="og:url" content="https://pigbankai.com/precos"/>
+<meta property="og:image" content="https://pigbankai.com/brand/landing-piggy-cta.webp?v=1"/>
+
+<meta content="Planos PigBank: Essencial R$ 9,90, Plus R$ 19,90 e Pro R$ 49,90. 15 dias grátis pra testar o plano que você escolher." name="description"/>
+<link href="https://pigbankai.com/precos" rel="canonical"/>
+<link href="/favicon.png?v=3" rel="icon" type="image/png"/>
+<link href="/brand/apple-touch-icon.png?v=3" rel="apple-touch-icon"/>
+<meta content="#111111" name="theme-color"/>
 <script>
   if (window.location.pathname === "/continuar-compra") {
     document.documentElement.classList.add("purchase-continuation");
     document.title = "Preparando pagamento · PigBank";
   }
 </script>
-<link rel="stylesheet" href="/brand.css?v=4" />
-<link rel="stylesheet" href="/phosphor.css?v=1" />
-<link rel="stylesheet" href="/site.css?v=4" />
+<link href="/brand.css?v=4" rel="stylesheet"/>
+<link href="/phosphor.css?v=1" rel="stylesheet"/>
+<link href="/site.css?v=4" rel="stylesheet"/>
 <!-- Camada do #plans-v2 (pódio + badge), emitida pelo build de webapp/.
      DEPOIS do site.css de propósito: ela refina `.plan`/`.plan-badge`, que
      nascem lá, e a mesma especificidade tem de ganhar pela ordem. -->
-<link rel="stylesheet" href="/precos-app.css?v=1" />
+<link href="/precos-app.css?v=1" rel="stylesheet"/>
 <style>
   #toast { position: fixed; bottom: 26px; left: 50%; transform: translateX(-50%) translateY(20px); background: rgba(23,23,26,.96); border: 1px solid rgba(255,45,142,.3); color: #fff; padding: 12px 20px; border-radius: 12px; font-size: .88rem; font-weight: 600; opacity: 0; pointer-events: none; transition: all .25s; z-index: 1000; backdrop-filter: blur(12px); }
   #toast.show { opacity: 1; transform: translateX(-50%) translateY(0); }
@@ -271,50 +278,34 @@
      conta logada e o clique em "Assinar" caía em "Faça login". -->
 <script src="/static/auth-refresh.js?v=1"></script>
 <script src="/purchase-intent.js?v=1"></script>
-</head>
-<body>
-<div class="glow"></div>
+<link href="/site-redesign.css?v=1" rel="stylesheet"/><link href="/site-plans.css?v=1" rel="stylesheet"/></head>
+<body id="topo" class="lp lp-plans"><a class="lp-skip-link" href="#conteudo">Pular para o conteúdo</a>
 
-<main id="purchase-continuation" aria-labelledby="purchase-continuation-title">
-  <section class="purchase-continuation-card" role="status" aria-live="polite">
-    <img class="purchase-continuation-logo" src="/brand/logo.webp?v=1" alt="PigBank" />
-    <div class="purchase-continuation-mark" aria-hidden="true"><i class="ph ph-clock"></i></div>
-    <h1 id="purchase-continuation-title">Preparando seu pagamento</h1>
-    <p id="purchase-continuation-copy">Sua conta está pronta. Estamos abrindo o checkout com o plano que você escolheu.</p>
-    <p class="purchase-continuation-summary" id="purchase-continuation-summary"></p>
-    <div class="purchase-continuation-actions" id="purchase-continuation-actions">
-      <button class="btn btn-primary" id="purchase-continuation-retry" type="button">Tentar novamente</button>
-      <a class="btn btn-outline" id="purchase-continuation-back" href="/precos">Voltar aos planos</a>
-    </div>
-  </section>
-</main>
-
-  <nav class="nav">
-    <a class="nav-logo" href="/"><img class="logo-full" src="/brand/logo.webp?v=1" alt="PigBank" /></a>
-    <div class="nav-links">
-      <a href="/funcionalidades">Funcionalidades</a>
-      <a href="/como-funciona">Como funciona</a>
-      <a href="/precos" class="active">Planos</a>
-      <a href="/whatsapp">WhatsApp</a>
-      <a href="/agents">Agentes</a>
-      
-    </div>
-    <div class="nav-right">
-      <a class="link-entrar" href="/login">Entrar</a>
-      <a class="btn btn-primary" href="/cadastro">Criar conta</a>
-    </div>
-  </nav>
-
-  <div class="wrap">
-
-    <section class="section">
-      <div class="section-head center">
-        <img src="/brand/mascot.webp" alt="" style="width:132px;height:auto;display:block;margin:0 auto 18px;filter:drop-shadow(0 10px 26px rgba(0,0,0,.5))" />
-        <h2 id="precos-title">Escolha seu <span class="grad">PigBank</span></h2>
-        <p id="precos-sub">15 dias grátis pra testar o plano que você escolher. Cancele antes do fim e não paga nada.</p>
-      </div>
-
-      <!-- Escada de planos (Essencial/Plus/Pro) — conteúdo ÚNICO
+<main aria-labelledby="purchase-continuation-title" id="purchase-continuation">
+<section aria-live="polite" class="purchase-continuation-card" role="status">
+<img alt="PigBank" class="purchase-continuation-logo" src="/brand/logo.webp?v=1"/>
+<div aria-hidden="true" class="purchase-continuation-mark"><i class="ph ph-clock"></i></div>
+<h1 id="purchase-continuation-title">Preparando seu pagamento</h1>
+<p id="purchase-continuation-copy">Sua conta está pronta. Estamos abrindo o checkout com o plano que você escolheu.</p>
+<p class="purchase-continuation-summary" id="purchase-continuation-summary"></p>
+<div class="purchase-continuation-actions" id="purchase-continuation-actions">
+<button class="btn btn-primary" id="purchase-continuation-retry" type="button">Tentar novamente</button>
+<a class="btn btn-outline" href="/precos" id="purchase-continuation-back">Voltar aos planos</a>
+</div>
+</section>
+<aside class="lp-purchase-side"><p class="lp-eyebrow">Seu próximo passo</p><h2>Uma escolha.<br/>Mais clareza.</h2><p>O PigBank confirma seu plano e abre a etapa de pagamento correspondente.</p><ul><li>Cartão: os dados são informados no checkout da Stripe.</li><li>Pix anual: confira o valor e a data de início antes de pagar.</li><li>A ativação depende da confirmação do pagamento.</li></ul><a href="/suporte/contato">Preciso de ajuda</a></aside></main>
+<nav aria-label="Navegação principal" class="nav">
+<a aria-label="PigBank, início" class="nav-logo" href="/"><img alt="PigBank" class="logo-full" height="42" src="/brand/landing-logo.webp?v=1" width="142"/></a>
+<div class="nav-links"><a href="/como-funciona">Como funciona</a><a href="/funcionalidades">Funcionalidades</a><a href="/funcionalidades#open-finance">Open Finance</a><a href="/whatsapp">WhatsApp</a><a href="/agents">Agentes</a><a href="/precos">Planos</a></div>
+<div class="nav-right"><a class="link-entrar" href="/login">Entrar</a><a class="btn btn-primary" href="/cadastro">Criar conta</a></div>
+</nav>
+<div class="wrap" id="conteudo">
+<section class="section">
+<section aria-labelledby="precos-title" class="lp-plans-intro lp-section-light"><div class="lp-shell lp-plans-intro-grid">
+<div class="lp-plans-intro-copy"><p class="lp-eyebrow">Planos PigBank</p><h1 id="precos-title">Um plano para cada <br/><span class="lp-underline">ritmo de vida.</span></h1><p class="lp-lead">Sua grana organizada no WhatsApp e no painel. Escolha como quer começar.</p><p class="lp-plans-status" id="precos-sub">15 dias grátis pra testar o plano que você escolher. Cancele antes do fim e não paga nada.</p></div>
+<div class="lp-plans-mascot"><div aria-hidden="true" class="lp-plans-mascot-bubble"></div><img alt="Piggy com óculos escuros, moletom preto e celular" fetchpriority="high" height="1200" src="/brand/landing-piggy-four-digits.webp?v=1" width="800"/></div>
+</div></section>
+<!-- Escada de planos (Essencial/Plus/Pro) — conteúdo ÚNICO
            e hardcoded da página (lançada 2026-08-06, sem flag: nada de flash
            de conteúdo antigo). Sem classes CSS novas de propósito: reusa
            .plan/.price/.plan-badge + estilos inline.
@@ -322,28 +313,25 @@
            entrar pela web, então ele não é mais uma escolha nem um degrau de
            comparação. O tier `free` continua existindo no backend como ESTADO
            (fallback após falha de cobrança). -->
-      <!-- O trio ocupa 1080px no desktop para manter o Plus no centro visual
+<!-- O trio ocupa 1080px no desktop para manter o Plus no centro visual
            e os cards laterais com a largura do mockup; em telas menores usa a
            largura disponível e deixa o grid reduzir as colunas. -->
-      <div id="plans-v2-wrap" style="width:min(1080px,calc(100vw - 48px));margin-left:50%;transform:translateX(-50%)">
-        <div class="cycle-wrap">
-          <div class="cycle-toggle">
-            <span class="cycle-label is-active" id="cycle-monthly-label">Mensal</span>
-            <button type="button" id="cycle-annual" class="cycle-switch" role="switch"
-                    aria-label="Cobrança anual" aria-checked="false"
-                    onclick="setCycle(currentCycle === 'monthly' ? 'annual' : 'monthly')">
-              <span class="cycle-switch-track" aria-hidden="true"><span class="cycle-switch-thumb"></span></span>
-            </button>
-            <span class="cycle-label" id="cycle-annual-label">Anual <span class="cycle-save">−17%</span></span>
-          </div>
-          <!-- O texto nasce oculto e só aparece quando o backend confirma que o
+<div id="plans-v2-wrap" style="width:min(1080px,calc(100vw - 48px));margin-left:50%;transform:translateX(-50%)">
+<div class="cycle-wrap">
+<div class="cycle-toggle">
+<span class="cycle-label is-active" id="cycle-monthly-label">Mensal</span>
+<button aria-checked="false" aria-label="Cobrança anual" class="cycle-switch" id="cycle-annual" onclick="setCycle(currentCycle === 'monthly' ? 'annual' : 'monthly')" role="switch" type="button">
+<span aria-hidden="true" class="cycle-switch-track"><span class="cycle-switch-thumb"></span></span>
+</button>
+<span class="cycle-label" id="cycle-annual-label">Anual <span class="cycle-save">−17%</span></span>
+</div>
+<!-- O texto nasce oculto e só aparece quando o backend confirma que o
                visitante pode comprar por Pix. A região externa permanece desde
                o parse para anunciar a revelação e o switch recebe este texto por
                aria-describedby. -->
-          <span id="pix-cycle-live" aria-live="polite"><span id="pix-cycle-note" hidden>Pix disponível no plano anual.</span></span>
-        </div>
-
-        <div class="plans" id="plans-v2">
+<span aria-live="polite" id="pix-cycle-live"><span hidden="" id="pix-cycle-note">Pix disponível no plano anual.</span></span>
+</div>
+<div class="plans" id="plans-v2">
           <article class="plan">
             <h3>Essencial</h3>
             <div class="plan-sub">Organize tudo, sem limites</div>
@@ -402,10 +390,7 @@
               <li><span class="tick"><i class="ph ph-check" aria-hidden="true"></i></span> <span><strong>5&nbsp;bancos conectados</strong></span></li>
               <li><span class="tick"><i class="ph ph-check" aria-hidden="true"></i></span> <span><strong>Todos os 7 agentes</strong>: energia pra rodar a equipe inteira</span></li>
               <li><span class="tick"><i class="ph ph-check" aria-hidden="true"></i></span> Previsão: 30/60/90 dias</li>
-              <!-- Este texto é MEDIDO: o PO2 (tests/frontend/precos_ilha_react.test.mjs) exige
-                   40px de degrau entre Plus e Pro, e um item que quebre em DUAS linhas derruba o
-                   pódio. Em 1024px cabem ~220px numa linha; "Simulador de compras" mede 153px
-                   (folga de 30%, ~8 caracteres). Encompridar a copy aqui quebra o teste: meça antes. -->
+              <!-- Benefícios oficiais, preservados no mount da ilha de preços. -->
               <li><span class="tick"><i class="ph ph-check" aria-hidden="true"></i></span> Simulador de compras</li>
               <li><span class="tick"><i class="ph ph-check" aria-hidden="true"></i></span> Histórico de 24 meses</li>
               <li><span class="tick"><i class="ph ph-check" aria-hidden="true"></i></span> Trajetória diária do caixa</li>
@@ -416,66 +401,33 @@
 
         </div>
 
-        <p class="plans-note"><i class="ph ph-piggy-bank" aria-hidden="true"></i> <strong>Preço de fundador:</strong> assinando agora, seu valor fica congelado pra sempre: enquanto a assinatura estiver ativa, ele nunca sobe.</p>
-      </div>
-      <p class="plans-note" id="plans-note-v2"><i class="ph ph-confetti" aria-hidden="true"></i> Todo plano vem com <strong>15 dias grátis pra testar</strong> (um teste por número). A primeira cobrança só acontece depois do trial. Cancele antes pelo dashboard e não paga nada. Pagamentos processados pela Stripe. A PigBank nunca vê os dados do seu cartão.</p>
-      <p class="plans-cta"><a href="#comparar">Ver a comparação completa, recurso por recurso <i class="ph ph-caret-right" aria-hidden="true"></i></a></p>
-    </section>
-
-    <!-- ══════════════════════════════════════════════════════════════════
+        <p class="plans-note"><i aria-hidden="true" class="ph ph-piggy-bank"></i> <strong>Preço de fundador:</strong> assinando agora, seu valor fica congelado pra sempre: enquanto a assinatura estiver ativa, ele nunca sobe.</p>
+</div>
+<p class="plans-note" id="plans-note-v2"><i aria-hidden="true" class="ph ph-confetti"></i> Todo plano vem com <strong>15 dias grátis pra testar</strong> (um teste por número). A primeira cobrança só acontece depois do trial. Cancele antes pelo dashboard e não paga nada. Pagamentos processados pela Stripe. A PigBank nunca vê os dados do seu cartão.</p>
+<p class="plans-cta"><a href="#comparar">Ver a comparação completa, recurso por recurso <i aria-hidden="true" class="ph ph-caret-right"></i></a></p>
+</section>
+<!-- ══════════════════════════════════════════════════════════════════
          Tabela comparativa — bloco shadcn comparison-3, montado pela ilha
          React `#cmp-v2` (webapp/src/precos/main.jsx). O conteúdo vive no
          componente (webapp/src/components/ui/comparison-3.tsx).
          ══════════════════════════════════════════════════════════════════ -->
-    <section class="section" id="comparar" style="padding-top:0">
-      <div class="cmp">
-        <!-- Ilha React: o precos-app.js monta aqui o bloco shadcn
+<section class="section" id="comparar" style="padding-top:0">
+<div class="cmp">
+<!-- Ilha React: o precos-app.js monta aqui o bloco shadcn
              comparison-3 (webapp/src/components/ui/comparison-3.tsx), que
              substituiu a tabela .cmp-table servida. Sem markup de fallback:
              o conteúdo é estático e o bundle é parser-blocking, a mesma
              janela de entrega dos cards do #plans-v2. -->
-        <div id="cmp-v2"></div>
-
-        <p class="cmp-note">
-          <i class="ph ph-lightning" aria-hidden="true"></i> <strong>Energia</strong> é o que limita quantos agentes ficam ligados ao mesmo tempo, não quais. Cada um custa o que dá trabalho para rodar:
+<div id="cmp-v2"></div>
+<p class="cmp-note">
+<i aria-hidden="true" class="ph ph-lightning"></i> <strong>Energia</strong> é o que limita quantos agentes ficam ligados ao mesmo tempo, não quais. Cada um custa o que dá trabalho para rodar:
           Repórter <span class="e">⚡1</span> · Carteiro <span class="e">⚡1</span> · Xerife <span class="e">⚡2</span> · Barão <span class="e">⚡2</span> · Faria Limer <span class="e">⚡2</span> · Detetive <span class="e">⚡3</span> · Banqueiro <span class="e">⚡3</span>.
           No Plus você distribui <span class="e">⚡4</span> entre os que quiser; no Pro, <span class="e">⚡14</span> ligam os sete de uma vez.
         </p>
-      </div>
-    </section>
-
-  </div>
-
-  <footer class="footer">
-    <div class="wrap footer-inner">
-      <div class="footer-brand">
-        <a class="nav-logo" href="/"><img class="logo-icon" src="/brand/icon.png?v=2" alt="" /> <span>PigBank</span></a>
-        <p>Seu dinheiro, suas regras, direto no WhatsApp, com a IA da Piggy.</p>
-      </div>
-      <div class="footer-cols">
-        <div class="footer-col"><span class="footer-title">Navegue</span>
-          <a href="/funcionalidades">Funcionalidades</a>
-          <a href="/como-funciona">Como funciona</a>
-          <a href="/precos">Planos</a>
-          <a href="/agents">Agentes</a>
-          <a href="/blog">Blog</a>
-          
-        </div>
-        <div class="footer-col"><span class="footer-title">Produto</span>
-          <a href="/whatsapp">WhatsApp</a>
-          <a href="/comandos">O que pedir</a>
-          <a href="/suporte">Suporte</a>
-        </div>
-        <div class="footer-col"><span class="footer-title">Institucional</span>
-          <a href="/termos">Termos de Uso</a>
-          <a href="/privacy">Privacidade</a>
-          <a href="mailto:contato@pigbankai.com">Contato</a>
-        </div>
-      </div>
-    </div>
-    <p class="footer-copy">© 2026 PigBank · Feito com <i class="ph ph-piggy-bank" aria-hidden="true"></i></p>
-  </footer>
-
+</div>
+</section>
+</div>
+<footer class="lp-footer lp-section-dark"><div class="lp-shell"><div class="lp-footer-grid"><div class="lp-footer-brand"><a aria-label="PigBank, voltar ao início" class="lp-brand" href="#topo"><img alt="PigBank" height="42" loading="lazy" src="/brand/landing-logo.webp?v=1" width="142"/></a><p>Clareza pra suas contas.<br/>Espaço pra sua vida.</p></div><nav aria-label="Produto"><h3>Produto</h3><a href="/whatsapp">WhatsApp</a><a href="/funcionalidades">Funcionalidades</a><a href="/agents">Agentes</a><a href="/precos">Planos</a></nav><nav aria-label="Ajuda"><h3>Ajuda</h3><a href="/suporte">Suporte</a><a href="/privacy">Privacidade</a><a href="/termos">Termos de uso</a></nav></div><div class="lp-footer-bottom"><p>© 2026 PigBank</p><a href="#topo">De volta ao topo</a></div></div></footer>
 <div id="toast" role="status"></div>
 <script>
 function showToast(msg, type) {
@@ -1209,30 +1161,30 @@ function enviarViewItemList() {
 }
 enviarViewItemList();
 </script>
-  <!-- Só pelo `pigTrapTab`: o modal do QR é um instrumento ao portador e o Tab
+<!-- Só pelo `pigTrapTab`: o modal do QR é um instrumento ao portador e o Tab
        tem de ficar preso dentro dele (é o mesmo helper do modal_keys.test.mjs).
        Nada é injetado no carregamento — o CSS dos modais dele só entra no
        primeiro alertModal/confirmModal, que esta página não usa. -->
-  <script src="/modals.js?v=1"></script>
-  <!-- Pix anual: CTA, modal do QR e poll. Scripts clássicos e SEM `defer` logo
+<script src="/modals.js?v=1"></script>
+<!-- Pix anual: CTA, modal do QR e poll. Scripts clássicos e SEM `defer` logo
        depois do bloco inline — eles publicam pbPixInit/pbPixRefresh no escopo
        global. A corrida com o loadPlansState acima não depende desta ordem: quem
        chegar por último lê o `window.pbPixState` que o outro deixou.
        O pix-ui.js vem PRIMEIRO (ele declara o `const pixBrl` que os dois leem) e
        o pix-poll.js antes do pix-checkout.js (ele declara o `pixPoll` que o outro
        lê): `const`/`let` de topo de script clássico tem TDZ até o script rodar. -->
-  <!-- Ilha React do #plans-v2 (build de webapp/, artefato commitado). ANTES dos
+<!-- Ilha React do #plans-v2 (build de webapp/, artefato commitado). ANTES dos
        scripts do Pix e SEM `type="module"`: módulo é deferido, e o defer faria o
        `document.querySelector('#plans-v2 [data-plan-btn=…]')` do pix-checkout.js
        rodar antes dos cards existirem. O mount é síncrono (flushSync), então
        quando esta linha termina o DOM dos cards já está pronto.
        Se este script falhar ou não carregar, fica o markup do servidor acima —
        que vende sozinho, com o mesmo visual. -->
-  <script src="/precos-app.js?v=2"></script>
-  <script src="/pix-ui.js?v=1"></script>
-  <script src="/pix-poll.js?v=1"></script>
-  <script src="/pix-checkout.js?v=1"></script>
-  <script src="/nav-auth.js?v=7" defer></script>
-  <script src="/nav-burger.js?v=1" defer></script>
+<script src="/precos-app.js?v=2"></script>
+<script src="/pix-ui.js?v=1"></script>
+<script src="/pix-poll.js?v=1"></script>
+<script src="/pix-checkout.js?v=1"></script>
+<script defer="" src="/nav-auth.js?v=7"></script>
+<script defer="" src="/nav-burger.js?v=1"></script>
 </body>
 </html>

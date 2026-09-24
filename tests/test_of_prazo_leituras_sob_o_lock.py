@@ -75,6 +75,7 @@ from psycopg_pool import PoolTimeout
 import db
 import db.open_finance_state as state
 import frontend.routes.open_finance as of_routes
+from conftest import promote_to_pro
 from test_of_item_ownership import SEGREDO, _item_remoto, eventos  # noqa: F401
 from test_of_webhook_adopt_guards import _limpa_item, _mock_item, _registry, webhook_pluggy  # noqa: F401
 
@@ -143,6 +144,7 @@ def test_leitura_sob_o_lock_estoura_com_pool_saturado_e_desfaz_a_reivindicacao(
     duas tentativas queimam, e o desfazimento tira a reivindicação porque
     nenhuma tentativa chegou à escrita.
     """
+    promote_to_pro(user_id)
     item = "z-prazo-leitura"
     _mock_item(monkeypatch, user_id)
     vistos = _intercepta(monkeypatch, "get_connections_by_item_id")
@@ -169,6 +171,7 @@ def test_a_2a_leitura_da_adocao_tambem_respeita_o_orcamento(
     impede o escopo "corrigi o que o Codex apontou" de passar disfarçado de
     classe resolvida.
     """
+    promote_to_pro(user_id)
     item = "z-prazo-registry"
     _mock_item(monkeypatch, user_id)
     vistos = _intercepta(monkeypatch, "item_registry_origins")
@@ -203,6 +206,7 @@ def test_orcamento_da_leitura_e_o_que_SOBROU_e_a_adocao_segue(
         prova que o orçamento é o da TENTATIVA e não o prazo inteiro nem os 30 s
         do pool —, não como prova de encolhimento.
     """
+    promote_to_pro(user_id)
     item = "z-prazo-positivo"
     _mock_item(monkeypatch, user_id)
     vistos = _intercepta(monkeypatch, None)

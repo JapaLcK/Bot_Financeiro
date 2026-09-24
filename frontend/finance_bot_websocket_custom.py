@@ -4004,6 +4004,12 @@ async def auth_mfa_verify_login(request: Request, response: Response, body: MFAV
     if verificado is None:
         return _recusa(_MFA_SESSAO_EXPIRADA, "mfa_challenge_expired")
     if not verificado:
+        # `restantes` é a foto da reserva, não do lock do consume. Duas
+        # requisições com código errado no MESMO desafio ao mesmo tempo podem
+        # responder `mfa_code_invalid` com o desafio já esgotado; o envio
+        # seguinte recebe `mfa_challenge_expired`. Aceito (#533): o app e o
+        # site não mandam dois códigos em paralelo, e só quem já tem a senha e
+        # o token do desafio chega aqui, perdendo só a própria tentativa.
         if reservado["restantes"] == 0:
             return _recusa("Muitas tentativas. Faça login novamente.", "mfa_challenge_expired")
         return _recusa("Código inválido.", "mfa_code_invalid")

@@ -1,195 +1,474 @@
-<!DOCTYPE html>
+<!doctype html>
 <html lang="pt-BR">
 <head>
-<meta charset="UTF-8" />
+<meta charset="utf-8" />
 <meta name="viewport" content="width=device-width, initial-scale=1.0" />
 <title>O que pedir · PigBank</title>
 <meta name="description" content="Exemplos do que você pode pedir pra Piggy no WhatsApp, em português corrido, sem comando decorado." />
 <link rel="canonical" href="https://pigbankai.com/comandos" />
+<meta property="og:type" content="website" />
+<meta property="og:title" content="O que pedir · PigBank" />
+<meta property="og:description" content="Exemplos do que você pode pedir pra Piggy no WhatsApp, em português corrido, sem comando decorado." />
+<meta property="og:url" content="https://pigbankai.com/comandos" />
+<meta property="og:image" content="https://pigbankai.com/brand/landing-piggy-cta.webp?v=1" />
+<meta name="theme-color" content="#111111" />
 <link rel="icon" type="image/png" href="/favicon.png?v=3" />
 <link rel="apple-touch-icon" href="/brand/apple-touch-icon.png?v=3" />
-<meta name="theme-color" content="#0c0c0d" />
+<link rel="preload" href="/fonts/Inter-Variable.woff2?v=5059ef2a9db0" as="font" type="font/woff2" crossorigin />
 <link rel="stylesheet" href="/brand.css?v=4" />
 <link rel="stylesheet" href="/phosphor.css?v=1" />
-<link rel="stylesheet" href="/site.css?v=4" />
-<script src="/safe-area.js?v=1"></script>
-</head>
-<body>
-<div class="glow"></div>
-
-  <nav class="nav">
-    <a class="nav-logo" href="/"><img class="logo-full" src="/brand/logo.webp?v=1" alt="PigBank" /></a>
-    <div class="nav-links">
-      <a href="/funcionalidades">Funcionalidades</a>
-      <a href="/como-funciona">Como funciona</a>
-      <a href="/precos">Planos</a>
-      <a href="/whatsapp">WhatsApp</a>
-      <a href="/agents">Agentes</a>
-      
-    </div>
-    <div class="nav-right">
-      <a class="link-entrar" href="/login">Entrar</a>
-      <a class="btn btn-primary" href="/cadastro">Criar conta</a>
-    </div>
-  </nav>
-
-  <div class="wrap cmds-page">
-
-    <section class="hero">
-      <h1>Pergunta do jeito que <span class="grad">sair na cabeça</span></h1>
-      <p>O Piggy não tem comando decorado: você fala português corrido e ele entende. Aqui em baixo tem algumas das coisas que dá pra pedir, pra você ter ideia. Clica em qualquer exemplo pra copiar.</p>
-    </section>
-
-    <section class="section-list">
-
-      <article class="cat">
-        <div class="cat-head"><div class="cat-icon"><i class="ph ph-credit-card" aria-hidden="true"></i></div><h2>Plano e assinatura</h2></div>
-        <p class="cat-desc">Vira Pro, gerencia, vê status do plano atual.</p>
-        <div class="cmds">
-          <div class="cmd">assinar plano<span class="copied">copiado</span></div>
-          <div class="cmd">cancelar plano<span class="copied">copiado</span></div>
-          <div class="cmd">plano<span class="cmd-note">vê seu status atual</span><span class="copied">copiado</span></div>
-          <div class="cmd">renovar plano<span class="copied">copiado</span></div>
-        </div>
-      </article>
-
-      <article class="cat">
-        <div class="cat-head"><div class="cat-icon"><i class="ph ph-coins" aria-hidden="true"></i></div><h2>Saldo e lançamentos</h2></div>
-        <p class="cat-desc">O básico: quanto tem, o que entrou, o que saiu.</p>
-        <div class="cmds">
-          <div class="cmd">saldo<span class="copied">copiado</span></div>
-          <div class="cmd">gastei 50 no mercado<span class="copied">copiado</span></div>
-          <div class="cmd">recebi 2000 de salário<span class="copied">copiado</span></div>
-          <div class="cmd">últimos lançamentos<span class="copied">copiado</span></div>
-          <div class="cmd">apaga o lançamento #N<span class="cmd-note">N é o número que aparece na listagem</span><span class="copied">copiado</span></div>
-          <div class="cmd">muda a categoria do #N pra alimentação<span class="copied">copiado</span></div>
-        </div>
-      </article>
-
-      <article class="cat">
-        <div class="cat-head"><div class="cat-icon"><i class="ph ph-credit-card" aria-hidden="true"></i></div><h2>Cartão de crédito</h2></div>
-        <p class="cat-desc">Compras, faturas, limite e pagamento: o cartão sem mistério.</p>
-        <div class="cmds">
-          <div class="cmd">gastei 200 no Nubank<span class="copied">copiado</span></div>
-          <div class="cmd">parcelei 1200 em 6x no Nubank<span class="copied">copiado</span></div>
-          <div class="cmd">minha fatura do Nubank<span class="copied">copiado</span></div>
-          <div class="cmd">próxima fatura<span class="cmd-note">projeção da fatura que vai fechar</span><span class="copied">copiado</span></div>
-          <div class="cmd">quanto eu devo<span class="cmd-note">soma de todas as faturas em aberto</span><span class="copied">copiado</span></div>
-          <div class="cmd">quanto tenho de limite no Nubank<span class="copied">copiado</span></div>
-          <div class="cmd">paguei a fatura do Nubank<span class="copied">copiado</span></div>
-        </div>
-      </article>
-
-      <article class="cat">
-        <div class="cat-head"><div class="cat-icon"><i class="ph ph-calendar-dots" aria-hidden="true"></i></div><h2>Parcelamentos</h2></div>
-        <p class="cat-desc">Acompanha o que tá parcelado e quando vence cada parcela.</p>
-        <div class="cmds">
-          <div class="cmd">meus parcelamentos<span class="cmd-note">mostra grupos ativos + datas das próximas cobranças</span><span class="copied">copiado</span></div>
-          <div class="cmd">apaga o parcelamento PCxxxxxx<span class="cmd-note">PCxxxxxx é o código que aparece quando você lista seus parcelamentos</span><span class="copied">copiado</span></div>
-        </div>
-      </article>
-
-      <article class="cat">
-        <div class="cat-head"><div class="cat-icon"><i class="ph ph-target" aria-hidden="true"></i></div><h2>Orçamentos</h2></div>
-        <p class="cat-desc">Define limite por categoria e o Piggy te avisa quando passar.</p>
-        <div class="cmds">
-          <div class="cmd">define orçamento de 500 em alimentação<span class="copied">copiado</span></div>
-          <div class="cmd">meus orçamentos<span class="cmd-note">mostra todos e o quanto já gastou</span><span class="copied">copiado</span></div>
-          <div class="cmd">como tá meu orçamento de lazer<span class="copied">copiado</span></div>
-          <div class="cmd">apaga orçamento de lazer<span class="copied">copiado</span></div>
-        </div>
-      </article>
-
-      <article class="cat">
-        <div class="cat-head"><div class="cat-icon"><i class="ph ph-bank" aria-hidden="true"></i></div><h2>Caixinhas</h2></div>
-        <p class="cat-desc">Reservas separadas: viagem, emergência, reforma. Dinheiro que não tá no saldo principal.</p>
-        <div class="cmds">
-          <div class="cmd">cria caixinha viagem<span class="copied">copiado</span></div>
-          <div class="cmd">deposita 200 na caixinha viagem<span class="copied">copiado</span></div>
-          <div class="cmd">saca 50 da caixinha viagem<span class="copied">copiado</span></div>
-          <div class="cmd">minhas caixinhas<span class="copied">copiado</span></div>
-          <div class="cmd">apaga caixinha viagem<span class="cmd-note">precisa ter saldo zero</span><span class="copied">copiado</span></div>
-        </div>
-      </article>
-
-      <article class="cat">
-        <div class="cat-head"><div class="cat-icon"><i class="ph ph-trend-up" aria-hidden="true"></i></div><h2>Investimentos</h2></div>
-        <p class="cat-desc">CDB, Tesouro, LCI: cadastro, aporta, resgata. Calcula IR/IOF no resgate sozinho.</p>
-        <div class="cmds">
-          <div class="cmd">cria investimento Tesouro Selic 13.75 anual<span class="cmd-note">nome, taxa (% anual), periodicidade</span><span class="copied">copiado</span></div>
-          <div class="cmd">aporta 500 no Tesouro Selic<span class="copied">copiado</span></div>
-          <div class="cmd">resgata 200 do Tesouro Selic<span class="copied">copiado</span></div>
-          <div class="cmd">meus investimentos<span class="copied">copiado</span></div>
-          <div class="cmd">quanto tenho investido<span class="cmd-note">total da carteira</span><span class="copied">copiado</span></div>
-          <div class="cmd">quanto aportei esse mês<span class="copied">copiado</span></div>
-        </div>
-      </article>
-
-      <article class="cat">
-        <div class="cat-head"><div class="cat-icon"><i class="ph ph-chart-bar" aria-hidden="true"></i></div><h2>Análise e relatórios</h2></div>
-        <p class="cat-desc">Onde tá indo a grana, comparações, projeções. Tudo pronto, sem precisar abrir o dashboard.</p>
-        <div class="cmds">
-          <div class="cmd">onde gastei mais esse mês<span class="cmd-note">top categorias</span><span class="copied">copiado</span></div>
-          <div class="cmd">meus 5 maiores gastos do mês<span class="copied">copiado</span></div>
-          <div class="cmd">tendência últimos 6 meses<span class="copied">copiado</span></div>
-          <div class="cmd">compara abril com maio<span class="copied">copiado</span></div>
-          <div class="cmd">projeção do mês<span class="cmd-note">"vou fechar no negativo?"</span><span class="copied">copiado</span></div>
-        </div>
-      </article>
-
-      <article class="cat">
-        <div class="cat-head"><div class="cat-icon"><i class="ph ph-sun-horizon" aria-hidden="true"></i></div><h2>Relatório diário</h2></div>
-        <p class="cat-desc">Resumo financeiro automático todo dia, no horário que você escolher.</p>
-        <div class="cmds">
-          <div class="cmd">liga relatório diário<span class="copied">copiado</span></div>
-          <div class="cmd">desliga relatório diário<span class="copied">copiado</span></div>
-          <div class="cmd">muda hora do relatório pra 8h<span class="copied">copiado</span></div>
-        </div>
-      </article>
-
-    </section>
-
-    <div class="callout">
-      <h3><i class="ph ph-piggy-bank" aria-hidden="true"></i> Não viu aqui?</h3>
-      <p>Pergunta mesmo assim. O Piggy entende português corrido e sempre pede confirmação antes de mexer em qualquer coisa importante.</p>
-    </div>
-  </div>
-
-  <footer class="footer">
-    <div class="wrap footer-inner">
-      <div class="footer-brand">
-        <a class="nav-logo" href="/"><img class="logo-icon" src="/brand/icon.png?v=2" alt="" /> <span>PigBank</span></a>
-        <p>Seu dinheiro, suas regras, direto no WhatsApp, com a IA da Piggy.</p>
-      </div>
-      <div class="footer-cols">
-        <div class="footer-col"><span class="footer-title">Navegue</span>
-          <a href="/funcionalidades">Funcionalidades</a><a href="/como-funciona">Como funciona</a><a href="/precos">Planos</a><a href="/agents">Agentes</a><a href="/blog">Blog</a>
-        </div>
-        <div class="footer-col"><span class="footer-title">Produto</span>
-          <a href="/whatsapp">WhatsApp</a><a href="/comandos">O que pedir</a><a href="/suporte">Suporte</a>
-        </div>
-        <div class="footer-col"><span class="footer-title">Institucional</span>
-          <a href="/termos">Termos de Uso</a><a href="/privacy">Privacidade</a><a href="mailto:contato@pigbankai.com">Contato</a>
-        </div>
-      </div>
-    </div>
-    <p class="footer-copy">© 2026 PigBank · Feito com <i class="ph ph-piggy-bank" aria-hidden="true"></i></p>
-  </footer>
-
-<script>
-document.querySelectorAll(".cmd").forEach(function(el){
-  el.addEventListener("click", function(){
-    var clone = el.cloneNode(true);
-    clone.querySelectorAll(".cmd-note,.copied").forEach(function(n){ n.remove(); });
-    var txt = clone.textContent.trim();
-    if(!txt) return;
-    if(navigator.clipboard) navigator.clipboard.writeText(txt).catch(function(){});
-    el.classList.add("just-copied");
-    setTimeout(function(){ el.classList.remove("just-copied"); }, 1200);
-  });
-});
+<link rel="stylesheet" href="/site.css?v=5" />
+<link rel="stylesheet" href="/site-redesign.css?v=1" />
+<link rel="stylesheet" href="/site-help.css?v=1" />
+<script src="/safe-area.js?v=1">
 </script>
-  <script src="/nav-auth.js?v=7" defer></script>
-  <script src="/nav-burger.js?v=1" defer></script>
+</head>
+<body id="topo" class="lp lp-help lp-journey-page lp-commands-page">
+<a class="lp-skip-link" href="#conteudo">Pular para o conteúdo</a>
+<nav aria-label="Navegação principal" class="nav">
+<a aria-label="PigBank, início" class="nav-logo" href="/">
+<img alt="PigBank" class="logo-full" height="42" src="/brand/landing-logo.webp?v=1" width="142"/>
+</a>
+<div class="nav-links">
+<a href="/como-funciona">Como funciona</a>
+<a href="/funcionalidades">Funcionalidades</a>
+<a href="/funcionalidades#open-finance">Open Finance</a>
+<a href="/whatsapp">WhatsApp</a>
+<a href="/agents">Agentes</a>
+<a href="/precos">Planos</a>
+</div>
+<div class="nav-right">
+<a class="link-entrar" href="/login">Entrar</a>
+<a class="btn btn-primary" href="/cadastro">Criar conta</a>
+</div>
+</nav>
+<main id="conteudo">
+<section class="lp-commands-intro lp-shell">
+<div>
+<nav aria-label="Você está aqui" class="lp-journey-breadcrumb">
+<a href="/whatsapp">WhatsApp</a>
+<span aria-hidden="true">/</span>
+<span>Exemplos de conversa</span>
+</nav>
+<p class="lp-eyebrow">Um guia para o seu dia a dia</p>
+<h1>O que pedir<br/> ao Piggy<span class="lp-pink-dot">.</span>
+</h1>
+<p class="lp-journey-lead">Escolha um exemplo, copie e adapte à sua rotina. Depois, cole na conversa do WhatsApp.</p>
+</div>
+<aside class="lp-commands-tip">
+<img alt="" height="55" src="/brand/landing-icon.webp?v=1" width="52"/>
+<h2>Fale do seu jeito.</h2>
+<p>Você também pode enviar áudio ou foto de um cupom ou comprovante.</p>
+<div class="lp-commands-tip-example">
+<i aria-hidden="true" class="ph ph-chat-circle">
+</i>
+<span>gastei 50 no mercado</span>
+</div>
+<a class="lp-btn lp-btn-dark" href="/wa">Abrir conversa</a>
+<small>Copiar um exemplo não envia a mensagem.</small>
+</aside>
+</section>
+<div class="lp-commands-body lp-shell">
+<nav aria-label="Assuntos do guia" class="lp-command-categories">
+<a href="#cmds_plano">Plano e assinatura</a>
+<a href="#cmds_saldo">Saldo e lançamentos</a>
+<a href="#cmds_cartao">Cartão de crédito</a>
+<a href="#cmds_parcel">Parcelamentos</a>
+<a href="#cmds_orca">Orçamentos</a>
+<a href="#cmds_caixa">Caixinhas</a>
+<a href="#cmds_invest">Investimentos</a>
+<a href="#cmds_analise">Análise e relatórios</a>
+<a href="#cmds_diario">Resumos automáticos</a>
+</nav>
+<p class="lp-commands-instruction">Adapte valores, nomes e períodos antes de enviar.</p>
+<section aria-labelledby="cmds_plano-title" class="lp-command-section" id="cmds_plano">
+<div class="lp-command-section-heading">
+<div>
+<h2 id="cmds_plano-title">Plano e assinatura</h2>
+<p>Vira Pro, gerencia, vê status do plano</p>
+</div>
+</div>
+<div class="lp-commands-grid">
+<article class="lp-command-card">
+<p class="lp-command-example" id="cmds_plano-0">assinar plano</p>
+<p class="lp-command-hint">Adapte os dados à sua rotina antes de enviar.</p>
+<button aria-label="Copiar exemplo: assinar plano" class="lp-copy-command" data-copy="cmds_plano-0" type="button">Copiar exemplo</button>
+</article>
+<article class="lp-command-card">
+<p class="lp-command-example" id="cmds_plano-1">cancelar plano</p>
+<p class="lp-command-hint">Adapte os dados à sua rotina antes de enviar.</p>
+<button aria-label="Copiar exemplo: cancelar plano" class="lp-copy-command" data-copy="cmds_plano-1" type="button">Copiar exemplo</button>
+</article>
+<article class="lp-command-card">
+<p class="lp-command-example" id="cmds_plano-2">plano</p>
+<p class="lp-command-hint">vê seu status atual</p>
+<button aria-label="Copiar exemplo: plano" class="lp-copy-command" data-copy="cmds_plano-2" type="button">Copiar exemplo</button>
+</article>
+<article class="lp-command-card">
+<p class="lp-command-example" id="cmds_plano-3">renovar plano</p>
+<p class="lp-command-hint">Adapte os dados à sua rotina antes de enviar.</p>
+<button aria-label="Copiar exemplo: renovar plano" class="lp-copy-command" data-copy="cmds_plano-3" type="button">Copiar exemplo</button>
+</article>
+</div>
+</section>
+<section aria-labelledby="cmds_saldo-title" class="lp-command-section" id="cmds_saldo">
+<div class="lp-command-section-heading">
+<div>
+<h2 id="cmds_saldo-title">Saldo e lançamentos</h2>
+<p>Quanto tem, o que entrou, o que saiu</p>
+</div>
+</div>
+<div class="lp-commands-grid">
+<article class="lp-command-card">
+<p class="lp-command-example" id="cmds_saldo-0">saldo</p>
+<p class="lp-command-hint">Adapte os dados à sua rotina antes de enviar.</p>
+<button aria-label="Copiar exemplo: saldo" class="lp-copy-command" data-copy="cmds_saldo-0" type="button">Copiar exemplo</button>
+</article>
+<article class="lp-command-card">
+<p class="lp-command-example" id="cmds_saldo-1">gastei 50 no mercado</p>
+<p class="lp-command-hint">Adapte os dados à sua rotina antes de enviar.</p>
+<button aria-label="Copiar exemplo: gastei 50 no mercado" class="lp-copy-command" data-copy="cmds_saldo-1" type="button">Copiar exemplo</button>
+</article>
+<article class="lp-command-card">
+<p class="lp-command-example" id="cmds_saldo-2">recebi 2000 de salário</p>
+<p class="lp-command-hint">Adapte os dados à sua rotina antes de enviar.</p>
+<button aria-label="Copiar exemplo: recebi 2000 de salário" class="lp-copy-command" data-copy="cmds_saldo-2" type="button">Copiar exemplo</button>
+</article>
+<article class="lp-command-card">
+<p class="lp-command-example" id="cmds_saldo-3">últimos lançamentos</p>
+<p class="lp-command-hint">Adapte os dados à sua rotina antes de enviar.</p>
+<button aria-label="Copiar exemplo: últimos lançamentos" class="lp-copy-command" data-copy="cmds_saldo-3" type="button">Copiar exemplo</button>
+</article>
+<article class="lp-command-card">
+<p class="lp-command-example" id="cmds_saldo-4">apaga o lançamento #N</p>
+<p class="lp-command-hint">N é o número que aparece na listagem</p>
+<button aria-label="Copiar exemplo: apaga o lançamento #N" class="lp-copy-command" data-copy="cmds_saldo-4" type="button">Copiar exemplo</button>
+</article>
+<article class="lp-command-card">
+<p class="lp-command-example" id="cmds_saldo-5">muda a categoria do #N pra alimentação</p>
+<p class="lp-command-hint">Adapte os dados à sua rotina antes de enviar.</p>
+<button aria-label="Copiar exemplo: muda a categoria do #N pra alimentação" class="lp-copy-command" data-copy="cmds_saldo-5" type="button">Copiar exemplo</button>
+</article>
+</div>
+</section>
+<section aria-labelledby="cmds_cartao-title" class="lp-command-section" id="cmds_cartao">
+<div class="lp-command-section-heading">
+<div>
+<h2 id="cmds_cartao-title">Cartão de crédito</h2>
+<p>Compras, faturas, limite, pagamento</p>
+</div>
+</div>
+<div class="lp-commands-grid">
+<article class="lp-command-card">
+<p class="lp-command-example" id="cmds_cartao-0">gastei 200 no Nubank</p>
+<p class="lp-command-hint">Adapte os dados à sua rotina antes de enviar.</p>
+<button aria-label="Copiar exemplo: gastei 200 no Nubank" class="lp-copy-command" data-copy="cmds_cartao-0" type="button">Copiar exemplo</button>
+</article>
+<article class="lp-command-card">
+<p class="lp-command-example" id="cmds_cartao-1">parcelei 1200 em 6x no Nubank</p>
+<p class="lp-command-hint">Adapte os dados à sua rotina antes de enviar.</p>
+<button aria-label="Copiar exemplo: parcelei 1200 em 6x no Nubank" class="lp-copy-command" data-copy="cmds_cartao-1" type="button">Copiar exemplo</button>
+</article>
+<article class="lp-command-card">
+<p class="lp-command-example" id="cmds_cartao-2">minha fatura do Nubank</p>
+<p class="lp-command-hint">Adapte os dados à sua rotina antes de enviar.</p>
+<button aria-label="Copiar exemplo: minha fatura do Nubank" class="lp-copy-command" data-copy="cmds_cartao-2" type="button">Copiar exemplo</button>
+</article>
+<article class="lp-command-card">
+<p class="lp-command-example" id="cmds_cartao-3">próxima fatura</p>
+<p class="lp-command-hint">projeção da fatura que vai fechar</p>
+<button aria-label="Copiar exemplo: próxima fatura" class="lp-copy-command" data-copy="cmds_cartao-3" type="button">Copiar exemplo</button>
+</article>
+<article class="lp-command-card">
+<p class="lp-command-example" id="cmds_cartao-4">quanto eu devo</p>
+<p class="lp-command-hint">soma de todas as faturas em aberto</p>
+<button aria-label="Copiar exemplo: quanto eu devo" class="lp-copy-command" data-copy="cmds_cartao-4" type="button">Copiar exemplo</button>
+</article>
+<article class="lp-command-card">
+<p class="lp-command-example" id="cmds_cartao-5">quanto tenho de limite no Nubank</p>
+<p class="lp-command-hint">Adapte os dados à sua rotina antes de enviar.</p>
+<button aria-label="Copiar exemplo: quanto tenho de limite no Nubank" class="lp-copy-command" data-copy="cmds_cartao-5" type="button">Copiar exemplo</button>
+</article>
+<article class="lp-command-card">
+<p class="lp-command-example" id="cmds_cartao-6">paguei a fatura do Nubank</p>
+<p class="lp-command-hint">Adapte os dados à sua rotina antes de enviar.</p>
+<button aria-label="Copiar exemplo: paguei a fatura do Nubank" class="lp-copy-command" data-copy="cmds_cartao-6" type="button">Copiar exemplo</button>
+</article>
+</div>
+</section>
+<section aria-labelledby="cmds_parcel-title" class="lp-command-section" id="cmds_parcel">
+<div class="lp-command-section-heading">
+<div>
+<h2 id="cmds_parcel-title">Parcelamentos</h2>
+<p>Grupos ativos e próximas cobranças</p>
+</div>
+</div>
+<div class="lp-commands-grid">
+<article class="lp-command-card">
+<p class="lp-command-example" id="cmds_parcel-0">meus parcelamentos</p>
+<p class="lp-command-hint">mostra grupos ativos + datas das próximas cobranças</p>
+<button aria-label="Copiar exemplo: meus parcelamentos" class="lp-copy-command" data-copy="cmds_parcel-0" type="button">Copiar exemplo</button>
+</article>
+<article class="lp-command-card">
+<p class="lp-command-example" id="cmds_parcel-1">apaga o parcelamento PCxxxxxx</p>
+<p class="lp-command-hint">PCxxxxxx é o código que aparece nos parcelamentos</p>
+<button aria-label="Copiar exemplo: apaga o parcelamento PCxxxxxx" class="lp-copy-command" data-copy="cmds_parcel-1" type="button">Copiar exemplo</button>
+</article>
+</div>
+</section>
+<section aria-labelledby="cmds_orca-title" class="lp-command-section" id="cmds_orca">
+<div class="lp-command-section-heading">
+<div>
+<h2 id="cmds_orca-title">Orçamentos</h2>
+<p>Limites por categoria, avisos de estouro</p>
+</div>
+</div>
+<div class="lp-commands-grid">
+<article class="lp-command-card">
+<p class="lp-command-example" id="cmds_orca-0">define orçamento de 500 em alimentação</p>
+<p class="lp-command-hint">Adapte os dados à sua rotina antes de enviar.</p>
+<button aria-label="Copiar exemplo: define orçamento de 500 em alimentação" class="lp-copy-command" data-copy="cmds_orca-0" type="button">Copiar exemplo</button>
+</article>
+<article class="lp-command-card">
+<p class="lp-command-example" id="cmds_orca-1">meus orçamentos</p>
+<p class="lp-command-hint">mostra todos e quanto já gastou</p>
+<button aria-label="Copiar exemplo: meus orçamentos" class="lp-copy-command" data-copy="cmds_orca-1" type="button">Copiar exemplo</button>
+</article>
+<article class="lp-command-card">
+<p class="lp-command-example" id="cmds_orca-2">como tá meu orçamento de lazer</p>
+<p class="lp-command-hint">Adapte os dados à sua rotina antes de enviar.</p>
+<button aria-label="Copiar exemplo: como tá meu orçamento de lazer" class="lp-copy-command" data-copy="cmds_orca-2" type="button">Copiar exemplo</button>
+</article>
+<article class="lp-command-card">
+<p class="lp-command-example" id="cmds_orca-3">apaga orçamento de lazer</p>
+<p class="lp-command-hint">Adapte os dados à sua rotina antes de enviar.</p>
+<button aria-label="Copiar exemplo: apaga orçamento de lazer" class="lp-copy-command" data-copy="cmds_orca-3" type="button">Copiar exemplo</button>
+</article>
+</div>
+</section>
+<section aria-labelledby="cmds_caixa-title" class="lp-command-section" id="cmds_caixa">
+<div class="lp-command-section-heading">
+<div>
+<h2 id="cmds_caixa-title">Caixinhas</h2>
+<p>Reservas separadas por objetivo</p>
+</div>
+</div>
+<div class="lp-commands-grid">
+<article class="lp-command-card">
+<p class="lp-command-example" id="cmds_caixa-0">cria caixinha viagem</p>
+<p class="lp-command-hint">Adapte os dados à sua rotina antes de enviar.</p>
+<button aria-label="Copiar exemplo: cria caixinha viagem" class="lp-copy-command" data-copy="cmds_caixa-0" type="button">Copiar exemplo</button>
+</article>
+<article class="lp-command-card">
+<p class="lp-command-example" id="cmds_caixa-1">deposita 200 na caixinha viagem</p>
+<p class="lp-command-hint">Adapte os dados à sua rotina antes de enviar.</p>
+<button aria-label="Copiar exemplo: deposita 200 na caixinha viagem" class="lp-copy-command" data-copy="cmds_caixa-1" type="button">Copiar exemplo</button>
+</article>
+<article class="lp-command-card">
+<p class="lp-command-example" id="cmds_caixa-2">saca 50 da caixinha viagem</p>
+<p class="lp-command-hint">Adapte os dados à sua rotina antes de enviar.</p>
+<button aria-label="Copiar exemplo: saca 50 da caixinha viagem" class="lp-copy-command" data-copy="cmds_caixa-2" type="button">Copiar exemplo</button>
+</article>
+<article class="lp-command-card">
+<p class="lp-command-example" id="cmds_caixa-3">minhas caixinhas</p>
+<p class="lp-command-hint">Adapte os dados à sua rotina antes de enviar.</p>
+<button aria-label="Copiar exemplo: minhas caixinhas" class="lp-copy-command" data-copy="cmds_caixa-3" type="button">Copiar exemplo</button>
+</article>
+<article class="lp-command-card">
+<p class="lp-command-example" id="cmds_caixa-4">apaga caixinha viagem</p>
+<p class="lp-command-hint">precisa ter saldo zero</p>
+<button aria-label="Copiar exemplo: apaga caixinha viagem" class="lp-copy-command" data-copy="cmds_caixa-4" type="button">Copiar exemplo</button>
+</article>
+</div>
+</section>
+<section aria-labelledby="cmds_invest-title" class="lp-command-section" id="cmds_invest">
+<div class="lp-command-section-heading">
+<div>
+<h2 id="cmds_invest-title">Investimentos</h2>
+<p>CDB, Tesouro, LCI — aporta e resgata</p>
+</div>
+</div>
+<div class="lp-commands-grid">
+<article class="lp-command-card">
+<p class="lp-command-example" id="cmds_invest-0">cria investimento Tesouro Selic 13.75 anual</p>
+<p class="lp-command-hint">nome, taxa (% anual), periodicidade</p>
+<button aria-label="Copiar exemplo: cria investimento Tesouro Selic 13.75 anual" class="lp-copy-command" data-copy="cmds_invest-0" type="button">Copiar exemplo</button>
+</article>
+<article class="lp-command-card">
+<p class="lp-command-example" id="cmds_invest-1">aporta 500 no Tesouro Selic</p>
+<p class="lp-command-hint">Adapte os dados à sua rotina antes de enviar.</p>
+<button aria-label="Copiar exemplo: aporta 500 no Tesouro Selic" class="lp-copy-command" data-copy="cmds_invest-1" type="button">Copiar exemplo</button>
+</article>
+<article class="lp-command-card">
+<p class="lp-command-example" id="cmds_invest-2">resgata 200 do Tesouro Selic</p>
+<p class="lp-command-hint">Adapte os dados à sua rotina antes de enviar.</p>
+<button aria-label="Copiar exemplo: resgata 200 do Tesouro Selic" class="lp-copy-command" data-copy="cmds_invest-2" type="button">Copiar exemplo</button>
+</article>
+<article class="lp-command-card">
+<p class="lp-command-example" id="cmds_invest-3">meus investimentos</p>
+<p class="lp-command-hint">Adapte os dados à sua rotina antes de enviar.</p>
+<button aria-label="Copiar exemplo: meus investimentos" class="lp-copy-command" data-copy="cmds_invest-3" type="button">Copiar exemplo</button>
+</article>
+<article class="lp-command-card">
+<p class="lp-command-example" id="cmds_invest-4">quanto tenho investido</p>
+<p class="lp-command-hint">total da carteira</p>
+<button aria-label="Copiar exemplo: quanto tenho investido" class="lp-copy-command" data-copy="cmds_invest-4" type="button">Copiar exemplo</button>
+</article>
+<article class="lp-command-card">
+<p class="lp-command-example" id="cmds_invest-5">quanto aportei esse mês</p>
+<p class="lp-command-hint">Adapte os dados à sua rotina antes de enviar.</p>
+<button aria-label="Copiar exemplo: quanto aportei esse mês" class="lp-copy-command" data-copy="cmds_invest-5" type="button">Copiar exemplo</button>
+</article>
+</div>
+</section>
+<section aria-labelledby="cmds_analise-title" class="lp-command-section" id="cmds_analise">
+<div class="lp-command-section-heading">
+<div>
+<h2 id="cmds_analise-title">Análise e relatórios</h2>
+<p>Onde vai a grana, comparações, projeções</p>
+</div>
+</div>
+<div class="lp-commands-grid">
+<article class="lp-command-card">
+<p class="lp-command-example" id="cmds_analise-0">resumo</p>
+<p class="lp-command-hint">resumo do dia</p>
+<button aria-label="Copiar exemplo: resumo" class="lp-copy-command" data-copy="cmds_analise-0" type="button">Copiar exemplo</button>
+</article>
+<article class="lp-command-card">
+<p class="lp-command-example" id="cmds_analise-1">resumo semanal</p>
+<p class="lp-command-hint">gastos da semana</p>
+<button aria-label="Copiar exemplo: resumo semanal" class="lp-copy-command" data-copy="cmds_analise-1" type="button">Copiar exemplo</button>
+</article>
+<article class="lp-command-card">
+<p class="lp-command-example" id="cmds_analise-2">resumo mensal</p>
+<p class="lp-command-hint">gastos do mês</p>
+<button aria-label="Copiar exemplo: resumo mensal" class="lp-copy-command" data-copy="cmds_analise-2" type="button">Copiar exemplo</button>
+</article>
+<article class="lp-command-card">
+<p class="lp-command-example" id="cmds_analise-3">onde gastei mais esse mês</p>
+<p class="lp-command-hint">top categorias</p>
+<button aria-label="Copiar exemplo: onde gastei mais esse mês" class="lp-copy-command" data-copy="cmds_analise-3" type="button">Copiar exemplo</button>
+</article>
+<article class="lp-command-card">
+<p class="lp-command-example" id="cmds_analise-4">meus 5 maiores gastos do mês</p>
+<p class="lp-command-hint">Adapte os dados à sua rotina antes de enviar.</p>
+<button aria-label="Copiar exemplo: meus 5 maiores gastos do mês" class="lp-copy-command" data-copy="cmds_analise-4" type="button">Copiar exemplo</button>
+</article>
+<article class="lp-command-card">
+<p class="lp-command-example" id="cmds_analise-5">tendência últimos 6 meses</p>
+<p class="lp-command-hint">Adapte os dados à sua rotina antes de enviar.</p>
+<button aria-label="Copiar exemplo: tendência últimos 6 meses" class="lp-copy-command" data-copy="cmds_analise-5" type="button">Copiar exemplo</button>
+</article>
+<article class="lp-command-card">
+<p class="lp-command-example" id="cmds_analise-6">compara abril com maio</p>
+<p class="lp-command-hint">Adapte os dados à sua rotina antes de enviar.</p>
+<button aria-label="Copiar exemplo: compara abril com maio" class="lp-copy-command" data-copy="cmds_analise-6" type="button">Copiar exemplo</button>
+</article>
+<article class="lp-command-card">
+<p class="lp-command-example" id="cmds_analise-7">projeção do mês</p>
+<p class="lp-command-hint">"vou fechar no negativo?"</p>
+<button aria-label="Copiar exemplo: projeção do mês" class="lp-copy-command" data-copy="cmds_analise-7" type="button">Copiar exemplo</button>
+</article>
+</div>
+</section>
+<section aria-labelledby="cmds_diario-title" class="lp-command-section" id="cmds_diario">
+<div class="lp-command-section-heading">
+<div>
+<h2 id="cmds_diario-title">Resumos automáticos</h2>
+<p>Resumo diário, semanal e mensal no horário que quiser</p>
+</div>
+</div>
+<div class="lp-commands-grid">
+<article class="lp-command-card">
+<p class="lp-command-example" id="cmds_diario-0">liga relatório diário</p>
+<p class="lp-command-hint">Adapte os dados à sua rotina antes de enviar.</p>
+<button aria-label="Copiar exemplo: liga relatório diário" class="lp-copy-command" data-copy="cmds_diario-0" type="button">Copiar exemplo</button>
+</article>
+<article class="lp-command-card">
+<p class="lp-command-example" id="cmds_diario-1">desliga relatório diário</p>
+<p class="lp-command-hint">Adapte os dados à sua rotina antes de enviar.</p>
+<button aria-label="Copiar exemplo: desliga relatório diário" class="lp-copy-command" data-copy="cmds_diario-1" type="button">Copiar exemplo</button>
+</article>
+<article class="lp-command-card">
+<p class="lp-command-example" id="cmds_diario-2">muda hora do relatório pra 8h</p>
+<p class="lp-command-hint">Adapte os dados à sua rotina antes de enviar.</p>
+<button aria-label="Copiar exemplo: muda hora do relatório pra 8h" class="lp-copy-command" data-copy="cmds_diario-2" type="button">Copiar exemplo</button>
+</article>
+<article class="lp-command-card">
+<p class="lp-command-example" id="cmds_diario-3">liga resumo semanal</p>
+<p class="lp-command-hint">toda segunda-feira</p>
+<button aria-label="Copiar exemplo: liga resumo semanal" class="lp-copy-command" data-copy="cmds_diario-3" type="button">Copiar exemplo</button>
+</article>
+<article class="lp-command-card">
+<p class="lp-command-example" id="cmds_diario-4">desliga resumo semanal</p>
+<p class="lp-command-hint">Adapte os dados à sua rotina antes de enviar.</p>
+<button aria-label="Copiar exemplo: desliga resumo semanal" class="lp-copy-command" data-copy="cmds_diario-4" type="button">Copiar exemplo</button>
+</article>
+<article class="lp-command-card">
+<p class="lp-command-example" id="cmds_diario-5">liga resumo mensal</p>
+<p class="lp-command-hint">todo dia 1º</p>
+<button aria-label="Copiar exemplo: liga resumo mensal" class="lp-copy-command" data-copy="cmds_diario-5" type="button">Copiar exemplo</button>
+</article>
+<article class="lp-command-card">
+<p class="lp-command-example" id="cmds_diario-6">desliga resumo mensal</p>
+<p class="lp-command-hint">Adapte os dados à sua rotina antes de enviar.</p>
+<button aria-label="Copiar exemplo: desliga resumo mensal" class="lp-copy-command" data-copy="cmds_diario-6" type="button">Copiar exemplo</button>
+</article>
+</div>
+</section>
+<section class="lp-commands-bottom">
+<div>
+<p class="lp-eyebrow">Na própria conversa</p>
+<h2>Esqueceu o que pode pedir?</h2>
+<p>Envie <strong>comandos</strong>, <strong>exemplos</strong> ou <strong>o que pedir</strong> para descobrir as opções com o Piggy.</p>
+<p class="lp-commands-limits">O uso dos recursos e os limites de mensagens e histórico dependem do seu plano.</p>
+</div>
+<div class="lp-commands-bottom-actions">
+<a class="lp-btn lp-btn-dark" href="/wa">Conversar com o Piggy</a>
+<a class="lp-journey-text-link" href="/suporte/contato">Preciso de ajuda</a>
+</div>
+</section>
+</div>
+<div aria-live="polite" class="lp-copy-notice" hidden="" id="copy-notice" role="status">
+</div>
+<noscript>
+<p class="lp-shell lp-commands-instruction">Selecione e copie os textos manualmente. Ative o JavaScript para usar os botões de copiar.</p>
+</noscript>
+</main>
+<footer class="lp-footer lp-section-dark">
+<div class="lp-shell">
+<div class="lp-footer-grid">
+<div class="lp-footer-brand">
+<a aria-label="PigBank, voltar ao início" class="lp-brand" href="#topo">
+<img alt="PigBank" height="42" loading="lazy" src="/brand/landing-logo.webp?v=1" width="142"/>
+</a>
+<p>Clareza pra suas contas.<br/>Espaço pra sua vida.</p>
+</div>
+<nav aria-label="Produto">
+<h3>Produto</h3>
+<a href="/whatsapp">WhatsApp</a>
+<a href="/funcionalidades">Funcionalidades</a>
+<a href="/agents">Agentes</a>
+<a href="/precos">Planos</a>
+</nav>
+<nav aria-label="Ajuda">
+<h3>Ajuda</h3>
+<a href="/suporte">Suporte</a>
+<a href="/privacy">Privacidade</a>
+<a href="/termos">Termos de uso</a>
+</nav>
+</div>
+<div class="lp-footer-bottom">
+<p>© 2026 PigBank</p>
+<a href="#topo">De volta ao topo</a>
+</div>
+</div>
+</footer>
+<script src="/commands-copy.js?v=1" defer>
+</script>
+<script src="/nav-auth.js?v=7" defer>
+</script>
+<script src="/nav-burger.js?v=1" defer>
+</script>
 </body>
 </html>

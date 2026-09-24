@@ -456,9 +456,7 @@ def list_connections_for_health_check(*, older_than_sec: int, limit: int) -> lis
 
 
 # Item visto no registry (o único rastro: o `GET /items` da Pluggy devolve 401)
-# que não tem NENHUMA conexão local. Uma fonte só, porque dois leitores precisam
-# enxergar exatamente o mesmo universo: o contador do painel de saúde abaixo e o
-# `scripts/adotar_items_of_orfaos.py`, que adota justamente esses items.
+# que não tem NENHUMA conexão local. Quem lê é o contador do painel de saúde abaixo.
 ITEMS_SEM_CONEXAO = """
   from open_finance_item_registry r
  where r.provider_item_id is not null
@@ -502,8 +500,7 @@ def item_registry_origins(provider_item_id: str, *, provider: str = "pluggy",
         (`exceto_registro_id`, abaixo);
       • `POST /pluggy-item` — `'pluggy_item' in ...` = o NAVEGADOR já registrou
         este item, logo a conexão que existe não é a que o webhook acabou de
-        adotar (auditoria de reconexão);
-      • `scripts/adotar_items_of_orfaos.py` — o alvo do one-shot.
+        adotar (auditoria de reconexão).
 
     `exceto_registro_id` IGNORA uma linha do rastro pelo `id` — a que o próprio
     chamador acabou de gravar. É o que permite ao `_salva_item_sob_lock` refazer
@@ -559,9 +556,8 @@ def unregister_item(registro_id: int, user_id: int) -> int:
     continua sendo — o único caso que apaga é a linha que ESTA adoção gravou
     segundos atrás e não vai honrar, porque outra entrega ficou com o item. Sem
     isso o aborto era TERMINAL: rastro com dono e zero conexão recusa toda
-    retentativa (1ª guarda de `_adota_item_orfao`) e some do
-    `scripts/adotar_items_of_orfaos.py` (o filtro dele exclui rastro com dono),
-    e o usuário fica com 0 bancos sem saída pelo produto.
+    retentativa (1ª guarda de `_adota_item_orfao`), e o usuário fica com 0
+    bancos sem saída pelo produto.
 
     `user_id` no `where` não é decoração: é o isolamento por usuário do
     CLAUDE.md §0 aplicado a um DELETE que recebe um `id` cru.

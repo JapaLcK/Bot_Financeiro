@@ -19,6 +19,7 @@ from fastapi.testclient import TestClient
 os.environ.setdefault("MFA_ENCRYPTION_KEY", Fernet.generate_key().decode())
 
 import db
+from conftest import promote_to_pro
 import frontend.finance_bot_websocket_custom as dashboard
 from core.sessions import (
     create_session,
@@ -141,6 +142,7 @@ def test_sessions_endpoint_lists_with_current_flag(user_id):
     email = f"sess-{user_id}@t.com"
     user = db.register_auth_user(email, "senha-forte-123")
     real_uid = int(user["user_id"])
+    promote_to_pro(real_uid)
 
     j_other = create_session(real_uid, ip="1.1.1.1", user_agent="other-ua")
     j_current = create_session(real_uid, ip="2.2.2.2", user_agent="current-ua")
@@ -162,6 +164,7 @@ def test_revoke_single_session_blocks_current_jti(user_id):
     email = f"block-{user_id}@t.com"
     user = db.register_auth_user(email, "senha-forte-123")
     real_uid = int(user["user_id"])
+    promote_to_pro(real_uid)
 
     j_current = create_session(real_uid, ip="1.1.1.1")
     client = TestClient(dashboard.app)
@@ -179,6 +182,7 @@ def test_revoke_single_session_works_for_other(user_id):
     email = f"single-{user_id}@t.com"
     user = db.register_auth_user(email, "senha-forte-123")
     real_uid = int(user["user_id"])
+    promote_to_pro(real_uid)
 
     j_current = create_session(real_uid, ip="1.1.1.1")
     j_other = create_session(real_uid, ip="2.2.2.2")
@@ -198,6 +202,7 @@ def test_revoke_others_endpoint(user_id):
     email = f"others-{user_id}@t.com"
     user = db.register_auth_user(email, "senha-forte-123")
     real_uid = int(user["user_id"])
+    promote_to_pro(real_uid)
 
     j_current = create_session(real_uid, ip="1.1.1.1")
     j_a = create_session(real_uid, ip="2.2.2.2")
@@ -268,6 +273,7 @@ def test_dashboard_token_with_revoked_jti_is_rejected(user_id):
     email = f"dash-rev-{user_id}@t.com"
     user = db.register_auth_user(email, "senha-forte-123")
     real_uid = int(user["user_id"])
+    promote_to_pro(real_uid)
 
     jti = create_session(real_uid, ip="1.1.1.1")
     client = TestClient(dashboard.app)
@@ -294,6 +300,7 @@ def test_dashboard_token_legacy_no_jti_is_grandfathered(user_id):
     email = f"dash-legacy-{user_id}@t.com"
     user = db.register_auth_user(email, "senha-forte-123")
     real_uid = int(user["user_id"])
+    promote_to_pro(real_uid)
 
     client = TestClient(dashboard.app)
     # Token sem jti (legacy)

@@ -39,6 +39,7 @@ import db
 import core.services.pluggy_sync as ps
 import frontend.finance_bot_websocket_custom as dashboard
 import frontend.routes.open_finance as of_routes
+from conftest import promote_to_pro
 from db.connection import get_conn
 
 ITEM = {
@@ -1269,6 +1270,7 @@ def test_erro_de_bug_na_escrita_nao_vira_503(user_id, monkeypatch, erro, esperad
     `_grava_reconexao` por `except psycopg.Error` → os dois casos de psycopg
     viram 503 aqui (o de `ValueError` continua 400, e é por isso que ele sozinho
     não discrimina)."""
+    promote_to_pro(user_id)
     def _estoura(uid, remote, **kw):
         raise erro()
 

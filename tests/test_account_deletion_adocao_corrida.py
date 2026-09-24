@@ -224,7 +224,14 @@ def test_t18_webhook_nao_adota_item_de_conta_com_exclusao_agendada(user_id, monk
     COLUNA `user_id` (a conta existe, e a cascata de `system_event_logs` a levará
     no dia da exclusão), nunca em `details`, que a cascata não alcança.
     """
+    from conftest import promote_to_pro
+
     _semeia(user_id, item=None)  # conta agendada, ZERO conexões
+    # Pro, e é ESSENCIAL: a suíte roda com `PLANS_V2_ENABLED=1` por default e no
+    # Grátis o `_enforce_bank_limit` já recusaria com 402 (`of_banks_max=0`) —
+    # o caso ficaria VERDE sem a guarda nenhuma, medindo o teto do plano.
+    # Com plano que TEM vaga, quem recusa só pode ser a exclusão agendada.
+    promote_to_pro(user_id)
     item_novo = f"{_item_de(user_id)}-t18"
     try:
         r = _webhook_de_item_criado(monkeypatch, user_id, item_novo)
@@ -250,7 +257,14 @@ def test_t18b_conta_sem_exclusao_agendada_continua_sendo_adotada(user_id, monkey
     só sem exclusão agendada, continuam adotando. Sem ele o grupo passaria num
     código que recusa tudo — que é pior que o bug.
     """
+    from conftest import promote_to_pro
+
     _semeia(user_id, agendada=False, item=None)
+    # A suíte roda com `PLANS_V2_ENABLED=1` por default: no Grátis o
+    # `_enforce_bank_limit` recusa com 402 (`of_banks_max=0`) e o caso mediria a
+    # ausência de plano, não a guarda. Mesma promoção do positivo canônico
+    # (`tests/test_of_webhook_adopt_guards.py`).
+    promote_to_pro(user_id)
     item_novo = f"{_item_de(user_id)}-t18b"
     try:
         r = _webhook_de_item_criado(monkeypatch, user_id, item_novo)

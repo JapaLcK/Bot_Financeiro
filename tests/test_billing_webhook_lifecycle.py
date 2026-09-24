@@ -267,7 +267,8 @@ def test_checkout_completed_fecha_o_gate_de_escolha(user_id, monkeypatch):
     ramo `invoice.paid` não discrimina nada: este teste não emite invoice.
     """
     uid, client, fake = _setup(monkeypatch, f"gate-{user_id}")
-    # O gate de escolha só existe sob a escada v2 (o conftest fixa 0 pra suíte).
+    # O gate de escolha só existe sob a escada v2 (o conftest já roda este
+    # arquivo no v2; o setenv o segura se ele entrar em `_AINDA_EM_V1`).
     monkeypatch.setenv("PLANS_V2_ENABLED", "1")
     from core.services.plan_service import needs_plan_selection
     try:

@@ -211,7 +211,6 @@
   "login.html": {
     "funcoes": [
       "cancelMfa",
-      "doForgot",
       "doLogin",
       "doMfa"
     ],
@@ -263,6 +262,12 @@
       "showSettingsSection",
       "toggleSecurityEdit",
       "updateNotificationSettings"
+    ],
+    "variaveis": []
+  },
+  "recuperar-senha.html": {
+    "funcoes": [
+      "doForgot"
     ],
     "variaveis": []
   }

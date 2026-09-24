@@ -6,6 +6,7 @@
  */
 import { act, fireEvent } from "@testing-library/react-native";
 import { useState } from "react";
+import { TextInput } from "react-native";
 
 import { CodigoMfa } from "@/features/auth/CodigoMfa";
 import type { EstadoEntrar, EstadoMfa } from "@/features/auth/entrar";
@@ -189,14 +190,18 @@ describe("CodigoMfa — depois de um código errado (D1-A)", () => {
     for (let i = 0; i < 20; i++) await Promise.resolve();
   };
   const verifies = () => chamadas().filter((c) => c.caminho === "/auth/mfa/verify-login");
+  // O mock do RN põe `focus` no protótipo: um `jest.fn` só para todos os campos.
+  const foco = jest.mocked(TextInput.prototype.focus);
 
   beforeEach(() => {
     rotear({ "/auth/mfa/verify-login": () => resposta(400, { detail: "Código inválido.", code: "mfa_code_invalid" }) });
+    foco.mockClear();
   });
 
   it("TOTP: o campo esvazia a cada erro (também no 2º igual seguido), e o próximo dígito não reenvia o código velho", async () => {
     const { getByLabelText, getByText } = renderInterativo(<Harness inicial={M} autenticar={jest.fn()} />);
     const campo = () => getByLabelText(/^Código de 6 dígitos/);
+    expect(foco).not.toHaveBeenCalled();
 
     for (const errado of ["000000", "111111"]) {
       await act(async () => {
@@ -214,6 +219,8 @@ describe("CodigoMfa — depois de um código errado (D1-A)", () => {
     });
     expect(campo().props.value).toBe("1");
     expect(verifies()).toHaveLength(2);
+    // O `editable={false}` da verificação tira o foco no iOS: cada erro o devolve.
+    expect(foco).toHaveBeenCalledTimes(2);
   });
 
   it("backup: o texto digitado continua no campo depois do erro", async () => {
@@ -229,5 +236,6 @@ describe("CodigoMfa — depois de um código errado (D1-A)", () => {
 
     expect(getByText("Código inválido.")).toBeTruthy();
     expect(getByLabelText(/^Código de backup/).props.value).toBe("ABCDE-FGHIJ");
+    expect(foco).toHaveBeenCalledTimes(1);
   });
 });

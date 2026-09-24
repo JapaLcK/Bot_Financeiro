@@ -146,3 +146,75 @@ def test_resumo_consolidado(user_id):
     assert len(ev["payload"]["moves"]) == 2
     assert "Resumo" in ev["payload"]["mensagem"]
     assert abs(float(ev["valor_impacto"]) - 600.0) < 0.01   # 300 + 300
+
+
+# ── G: o baseline de RENDIMENTO tem de acompanhar a posição ──────────────────
+# Passada 2 do Tester, sem forjar nada: `bind_pocket_to_caixinha` inicializava só
+# `of_last_seen_balance`, e `_unbind_pocket` limpava só ele. O rendimento da
+# posição ANTERIOR ficava valendo de régua para a posição NOVA, e o Banqueiro
+# anunciava um saque que nunca existiu.
+#
+# CONTROLE NEGATIVO (medido, ver relato): tirar o `of_last_seen_profit` do UPDATE
+# do bind faz aparecer o evento "você tirou R$995,00". CONTROLE POSITIVO:
+# `test_saida_detectada` e `test_aporte_separado_do_rendimento` acima continuam
+# verdes — o conserto zera a régua ao trocar de posição, não desliga o detector.
+
+def test_trocar_de_posicao_nao_inventa_saque(user_id):
+    """A meta MANUAL troca de posição direto (bind A → bind B). `_unbind_pocket`
+    não roda no pocket ALVO nesse caminho, então o baseline que ficar para trás é
+    o da posição VELHA — e vira régua da NOVA.
+
+    Balanços iguais (800 → 800) de propósito: o único delta possível vem do
+    rendimento, então o evento que aparecer é 100% invenção do baseline errado."""
+    cid = _conn(user_id)
+    db.save_open_finance_investments(cid, [
+        normalize_pluggy_investment(_cx("velha", "CDB Velho", 800, 5)),
+        normalize_pluggy_investment(_cx("nova", "CDB Novo", 800, 1000)),
+    ])
+    _, pocket_id, _ = db.create_pocket(user_id, "Viagem", interest_enabled=False)
+
+    def _of(provider):
+        with get_conn() as conn:
+            with conn.cursor() as cur:
+                cur.execute("select id from open_finance_investments where "
+                            "connection_id=%s and provider_investment_id=%s", (cid, provider))
+                return cur.fetchone()["id"]
+
+    assert db.bind_pocket_to_caixinha(user_id, pocket_id, _of("velha")) is True
+    assert _run(user_id) == 0, "pré-condição: vínculo novo não anuncia nada"
+
+    assert db.bind_pocket_to_caixinha(user_id, pocket_id, _of("nova")) is True
+
+    assert _run(user_id) == 0, "o usuário não mexeu em nada: não há evento"
+    ev = _last_event(user_id)
+    assert ev is None, f"evento inventado: {ev and ev['payload'].get('mensagem')}"
+
+
+def test_posicao_que_some_e_volta_nao_inventa_saque(user_id):
+    """O mesmo estrago pelo caminho da AUSÊNCIA: o `_unbind_pocket` limpa o
+    `of_last_seen_balance` e deixava o `of_last_seen_profit` — os dois são
+    baseline da MESMA posição e têm de sair juntos."""
+    cid = _conn(user_id)
+    db.save_open_finance_investments(cid, [
+        normalize_pluggy_investment(_cx("velha", "CDB Velho", 800, 5))])
+    _, pocket_id, _ = db.create_pocket(user_id, "Viagem", interest_enabled=False)
+    with get_conn() as conn:
+        with conn.cursor() as cur:
+            cur.execute("select id from open_finance_investments where "
+                        "connection_id=%s and provider_investment_id='velha'", (cid,))
+            assert db.bind_pocket_to_caixinha(user_id, pocket_id, cur.fetchone()["id"]) is True
+        conn.commit()
+    assert _run(user_id) == 0
+
+    # some (a meta volta ao saldo próprio) e volta com rendimento MUITO maior
+    db.save_open_finance_investments(cid, [], leitura_completa=True)
+    with get_conn() as conn:
+        with conn.cursor() as cur:
+            cur.execute("select of_last_seen_profit as p from pockets where id=%s", (pocket_id,))
+            assert cur.fetchone()["p"] is None, "o baseline de rendimento sai com o vínculo"
+    db.save_open_finance_investments(cid, [
+        normalize_pluggy_investment(_cx("velha", "CDB Velho", 800, 1000))], leitura_completa=True)
+
+    assert _run(user_id) == 0, "religou: o baseline nasce na posição atual"
+    ev = _last_event(user_id)
+    assert ev is None, f"evento inventado: {ev and ev['payload'].get('mensagem')}"
