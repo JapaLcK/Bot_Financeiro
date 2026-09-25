@@ -36,7 +36,7 @@ export function apagaSenhaNaFase(fase: EstadoEntrar["fase"]): boolean {
 export type EstadoMfa = Extract<EstadoEntrar, { fase: "mfa" }>;
 export type EstadoVerificando = Extract<EstadoEntrar, { fase: "verificando" }>;
 
-const GENERICO = "Algo deu errado. Tente de novo.";
+export const GENERICO = "Algo deu errado. Tente de novo.";
 
 /** Mensagem da fase X (cofre do aparelho recusou ler ou gravar). */
 export const MENSAGEM_ERRO_COFRE = "Não conseguimos abrir sua sessão neste aparelho. Tente de novo.";
