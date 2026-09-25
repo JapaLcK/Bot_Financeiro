@@ -121,8 +121,10 @@ tecnologia, podendo refazer o que for preciso, com calma (Q5).
   a sessão vencida ou revogada. Por isso o servidor **fecha o stream quando vence o token
   que o abriu** (no máximo 15 minutos, e o cliente reconecta pelo caminho acima) e **na
   hora** em que a sessão é encerrada ou revogada (logout, "sair de todos os aparelhos",
-  troca de senha). Teste: revogar uma sessão com o stream aberto — ele fecha e não recebe
-  mais nada. O teste de ponta a ponta
+  troca de senha). A revogação usa o mesmo canal do aviso: com mais de um processo, ela
+  vai pelo `NOTIFY` (com o id da sessão) e cada processo fecha os streams dela. Teste:
+  revogar uma sessão com o stream aberto — ele fecha e não recebe mais nada; no caso de
+  vários processos, com a revogação e o stream em processos diferentes. O teste de ponta a ponta
   do aviso (Q32) inclui derrubar a conexão, lançar e reconectar, e reconectar com a sessão
   vencida. O aviso sai de uma função única, e **todo processo que grava dado financeiro tem
   de alcançá-la**. Hoje produção roda dois: o `launch.py` sobe o uvicorn e também o
@@ -194,8 +196,15 @@ tecnologia, podendo refazer o que for preciso, com calma (Q5).
     `core/services/investment_scheduler.py`); foto de saldo parado joga o rendimento para o
     intervalo — e às vezes o mês — errado. Por isso toda foto, diária ou de movimento, é
     tirada **logo depois de calcular os juros daquele usuário até hoje**, na mesma
-    operação, e nunca lê o saldo sem isso. Teste: virada de mês com o laço de juros atrasado
-    — o rendimento cai no mês certo. O job grava uma foto por dia e mais uma antes
+    operação, e nunca lê o saldo sem isso. E "até hoje" não é garantido: o cálculo
+    (`_growth_for_period`, em `db/investments.py`) só anda até a última data com taxa
+    publicada (CDI, SELIC, IPCA saem com atraso). Por isso a foto grava a **data efetiva**
+    (o `last_date` até onde os juros foram calculados), e o rendimento é atribuído por ela,
+    não pelo dia da foto. Quando o cálculo atravessa uma virada de mês, ele roda em dois
+    passos, com uma foto na data efetiva do último dia útil do mês; até essa foto existir, o
+    mês aparece como "em apuração". Testes: virada de mês com o laço de juros atrasado, e
+    taxa do fim do mês publicada só depois da virada — nos dois, o rendimento cai no mês
+    certo. O job grava uma foto por dia e mais uma antes
     e outra depois de cada movimento, no mesmo commit dele, marcadas como o par do
     movimento. O rendimento de cada intervalo entre fotos é a variação do valor sobre o
     valor do início, **exceto o par antes→depois de um movimento**, que é o próprio dinheiro
@@ -226,11 +235,13 @@ tecnologia, podendo refazer o que for preciso, com calma (Q5).
   mensal converte cada frequência de `db/recurring.py` (`VALID_FREQUENCIES`): diária × 365/12,
   semanal × 52/12, mensal × 1, anual ÷ 12; pagamento único (`once`) não entra. Conta de valor
   variável sem estimativa (guardada com valor 0) fica fora da soma, e o bloco diz quantas
-  ficaram. A condição do vazio é o **total**, não a existência de conta: com total zero a
-  API devolve `meses: null` com o motivo — `sem_contas_fixas` (nenhuma ativa) ou
-  `sem_valor` (há contas, mas nenhuma com valor) —, nunca infinito nem erro, e o bloco pede
-  o que falta. Testes de contrato e de tela: cada frequência, a conta variável sem
-  estimativa, e os dois motivos do vazio. Hoje nada marca qual caixinha
+  ficaram. A condição do vazio é o **total**, e ela se avalia **depois** de tirar o que não
+  entra na soma: com total zero a API devolve `meses: null` com o motivo —
+  `sem_contas_fixas` (nenhuma conta recorrente ativa; pagamento único não conta) ou
+  `sem_valor` (há contas recorrentes, mas nenhuma com valor) —, nunca infinito nem erro, e
+  o bloco pede o que falta. Testes de contrato e de tela: cada frequência, a conta variável
+  sem estimativa, só pagamento único ativo (`sem_contas_fixas`), e os dois motivos do
+  vazio. Hoje nada marca qual caixinha
   é a reserva: só há o palpite pelo nome em `core/services/piggy_agents.py` (`_is_reserva`).
   Por isso a caixinha de reserva passa a ser **designada pelo usuário** (um campo na
   caixinha, no máximo uma por usuário). Sem designação, o bloco pede para escolher, e o
