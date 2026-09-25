@@ -120,12 +120,16 @@ tecnologia, podendo refazer o que for preciso, com calma (Q5).
   para separar rendimento de aporte e resgate. Por isso **o job da etapa 0 grava também, por
   posição, o valor e o rendimento acumulado** — nos do Open Finance, o `amountProfit` que o
   banco manda; nos manuais, calculado dos lotes, contando também o que já saiu em resgate.
-  O rendimento de cada dia é a variação do acumulado sobre o valor do início do dia, e o do
-  mês é o encadeamento dos dias (rentabilidade ponderada pelo tempo, a mesma régua do CDI).
-  Como a foto é diária, aporte e resgate mudam o valor da base no dia seguinte, e dinheiro
-  novo não infla nem dilui o percentual. A fórmula exata do acumulado dos manuais se fecha no
-  PR do job, com teste de aporte grande e de resgate no meio do mês: o percentual tem de sair
-  igual ao do caso sem movimento. Posição sem rendimento informado (renda variável, cripto sem
+  O rendimento de cada dia é a variação do acumulado dividida pela base do dia, e o do mês é
+  o encadeamento dos dias (rentabilidade ponderada pelo tempo, a mesma régua do CDI). A base
+  do dia é o valor do início **mais o fluxo líquido do próprio dia** (aporte menos resgate,
+  que sai das fotos: variação do valor menos variação do acumulado). Assim, o dinheiro que
+  entra de manhã e rende no mesmo dia conta na base desse dia, e dinheiro novo não infla nem
+  dilui o percentual. O erro que sobra é tratar o fluxo como se entrasse no começo do dia,
+  ou seja, no máximo um dia de rendimento sobre o valor movido. A fórmula exata do acumulado
+  dos manuais se fecha no PR do job, com teste de aporte grande e de resgate no meio do mês,
+  inclusive o valor movido rendendo no próprio dia: o percentual tem de sair igual ao do
+  caso sem movimento. Posição sem rendimento informado (renda variável, cripto sem
   `amountProfit`) fica fora da conta, e o bloco diz quais ficaram. Como o patrimônio, nada
   de reconstruir o passado: enquanto o histórico enche, o bloco diz que se completa com o
   tempo.
