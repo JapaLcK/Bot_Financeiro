@@ -21,7 +21,11 @@ plano marca aqui o que concluiu**, na seção "Andamento".
   `bank_list_ui_enabled`), com a lista numa variável de ambiente e o valor chegando ao
   navegador pelo `/auth/me` (Q11).
 - **O app atual (Capacitor) nunca mostra o v2.** Ele carrega o site ao vivo, então os links
-  de troca ficam escondidos quando o user agent é `PigBankApp/1.0` (Q10). O app novo (Expo)
+  de troca ficam escondidos quando o user agent **contém** `PigBankApp` — a mesma checagem por
+  trecho de `_is_pigbank_app` (`frontend/routes/shared.py`) e do `app-mode.js`: o WebView
+  anexa o marcador ao user agent do Safari e a versão muda, então comparação exata falha.
+  Isso só esconde interface; nunca concede nem nega acesso (o user agent é alegação do
+  cliente) (Q10). O app novo (Expo)
   terá telas próprias e consome a mesma API nova (Q17, Q31).
 - **Quando abrir para mais gente:** decisão do dono, sem critério automático (Q16).
 - **Tema:** só escuro no primeiro corte; o tema claro vem numa fase seguinte (Q9).
@@ -59,7 +63,11 @@ tecnologia, podendo refazer o que for preciso, com calma (Q5).
   não recebe dado do A".
 - **Contrato (Q22):** request e response declarados em Pydantic (`response_model` em toda
   rota) → especificação OpenAPI → tipos TypeScript gerados para o v2 e para o app (e o zod
-  do app, gerado da mesma especificação). A especificação fica disponível só em
+  do app, gerado da mesma especificação). **Exceção: a rota de eventos (SSE)**, que devolve
+  um stream e não tem `response_model` útil. O formato de cada evento (`{"mudou": [...]}`) é
+  um modelo Pydantic próprio, registrado nos componentes da especificação para os tipos
+  saírem gerados como os outros. O teste que varre as rotas (Q23) aceita essa exceção pelo
+  nome, e só ela. A especificação fica disponível só em
   desenvolvimento; em produção continua desligada, como hoje.
 - **Erro (Q25):** envelope único `{"erro": {"codigo": "...", "mensagem": "...",
   "campo": null}}`, com os códigos listados no contrato.
@@ -80,7 +88,12 @@ tecnologia, podendo refazer o que for preciso, com calma (Q5).
   passado (mostraria número errado com cara de certo).
 - **Rendimento × CDI:** calculado dos investimentos e da série do CDI que já existe
   (`db/investments.py`).
-- **Reserva em meses:** derivada da caixinha de reserva e das contas fixas.
+- **Reserva em meses:** reserva dividida pelas contas fixas. Hoje nada marca qual caixinha
+  é a reserva: só há o palpite pelo nome em `core/services/piggy_agents.py` (`_is_reserva`).
+  Por isso a caixinha de reserva passa a ser **designada pelo usuário** (um campo na
+  caixinha, no máximo uma por usuário). Sem designação, o bloco pede para escolher, e o
+  palpite pelo nome só sugere. Pela regra de uma fonte só (Q18), o agente que usa o palpite
+  passa a ler o campo no mesmo PR (etapa 4, Metas).
 - **Perfil e layout do Resumo:** perfil no servidor (coluna com `CHECK` nos ids
   `economizar|investir|controlar|dividas|autonomo|padrao`); layout segue no navegador.
 
