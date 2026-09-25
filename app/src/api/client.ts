@@ -53,7 +53,7 @@ export class ContratoInvalido extends ErroDeApi {
   }
 }
 
-function baseUrl(): string {
+export function baseUrl(): string {
   const url = Constants.expoConfig?.extra?.apiUrl;
   if (typeof url !== "string" || !url) {
     throw new Error("apiUrl ausente em app.config.ts — confira o .env");
