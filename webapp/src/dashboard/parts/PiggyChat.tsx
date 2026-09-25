@@ -9,9 +9,14 @@ import { FrameScope } from "./Frame";
 type Prompt = { key: string; ask: string | null; topic?: TopicId; cat?: string };
 const AVATAR = "../frontend/brand/icon.png";
 
-// Bloco estático da resposta. `inert` tira clique, hover e Tab; onde ele não existe
-// (Safari < 15.5), o CSS corta o ponteiro (.msg-block > * { pointer-events: none }) e os
-// controles saem do Tab. O PR dos blocos que expandem troca isto por blocos vivos.
+// Bloco estático da resposta. `inert` tira tudo; onde ele não existe (Safari < 15.5), cada
+// caminho que aciona um controle tem a sua trava:
+//   ponteiro (clique, toque, hover)       → CSS .msg-block > * { pointer-events: none }
+//   Tab                                   → tabindex=-1 nos controles
+//   clique do leitor de tela (VoiceOver)  → onClickCapture
+//   foco programático (dispara onFocus)   → onFocusCapture
+//   tecla com o foco dentro               → onKeyDownCapture
+// O PR dos blocos que expandem troca isto por blocos vivos.
 const FOCUSABLE = "a[href], button, input, select, textarea, [tabindex]";
 function Snapshot({ children }: { children: ReactNode }) {
   const box = useRef<HTMLDivElement>(null);
@@ -19,7 +24,11 @@ function Snapshot({ children }: { children: ReactNode }) {
     if ("inert" in HTMLElement.prototype) return;
     box.current?.querySelectorAll<HTMLElement>(FOCUSABLE).forEach((el) => el.setAttribute("tabindex", "-1"));
   });
-  return <div className="panel msg-block" inert ref={box}>{children}</div>;
+  const stop = (e: { stopPropagation: () => void; preventDefault?: () => void }) => { e.preventDefault?.(); e.stopPropagation(); };
+  return (
+    <div className="panel msg-block" inert ref={box} onClickCapture={stop} onKeyDownCapture={stop}
+      onFocusCapture={(e) => e.stopPropagation()}>{children}</div>
+  );
 }
 
 // Resposta do Piggy: texto, os blocos (uma foto do estado na hora da pergunta; ficam

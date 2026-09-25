@@ -133,6 +133,8 @@ for (const semInert of [false, true]) test(`os blocos da resposta são uma foto:
     return [f.filter((e) => e.tabIndex >= 0 && !b.inert).length, f.includes(document.elementFromPoint(r.x + r.width / 2, r.y + r.height / 2))];
   });
   await bloco.locator("button").first().click({ force: true }); // o usuário tenta filtrar uma categoria
+  // Leitor de tela (VoiceOver): foco programático e clique sem ponteiro, direto no botão.
+  await bloco.evaluate((b) => { const f = b.querySelector("button"); f.focus(); f.click(); });
   await page.evaluate(() => { location.hash = "#/gastos"; });
   await page.locator("#page-title", { hasText: "Para onde vai" }).waitFor();
   const filtrado = await page.locator(".cats [aria-pressed='true'], .chip[aria-pressed='true']").count();
