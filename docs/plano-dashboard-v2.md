@@ -108,8 +108,15 @@ Decidido pelo dono na mesma data (Q37–Q41):
 - **Q41 — o saque entra na carteira sozinho**, com um aviso que o usuário pode desfazer
   (se o dinheiro não foi para o bolso). O depósito em espécie é o inverso. Como é o Open
   Finance que cria esse lançamento, ele segue a transação de origem pela vida toda:
-  - **ligação durável:** o lançamento da carteira guarda o id da transação do banco que o
-    criou;
+  - **ligação durável:** o lançamento da carteira guarda a identidade da transação do banco
+    que o criou — não a linha local (desconectar o banco apaga conexão, contas e transações
+    em cascata) e não só o `provider_transaction_id` (ele é único só dentro da conta:
+    `(account_id, provider_transaction_id)` em `db/schema.py`). A identidade é a chave
+    natural da conta no provedor mais o id da transação; o PR mede na API real se ela
+    sobrevive a desconectar e reconectar. Desconectar **não** apaga nem desfaz o lançamento
+    da carteira (o dinheiro vivo continua no bolso). E, independente de a chave sobreviver:
+    depois de uma reconexão, saque com data anterior à conexão nova **não** gera lançamento
+    automático — ele já foi tratado, ou recusado, na conexão antiga;
   - **o banco corrige, a carteira acompanha:** valor ou data corrigidos numa sincronização
     (`save_open_finance_sync`) atualizam o lançamento; transação apagada pelo banco (o
     caminho `transactions/deleted`, em `frontend/routes/open_finance.py`) desfaz o
@@ -118,7 +125,8 @@ Decidido pelo dono na mesma data (Q37–Q41):
     da transação do banco, e a próxima sincronização não recria o lançamento.
 
   Testes: saque corrigido em valor e em data; saque apagado pelo banco; desfazer e
-  sincronizar de novo (o dinheiro não volta).
+  sincronizar de novo (o dinheiro não volta); desconectar, reconectar e o banco trazer o
+  mesmo saque de novo (nenhum crédito a mais, e o dinheiro da carteira fica).
 
 ### O que a primeira versão precisa ter (Q3)
 
@@ -358,10 +366,15 @@ tecnologia, podendo refazer o que for preciso, com calma (Q5).
   feito dela (a reserva em meses, o saldo, o patrimônio de hoje) seguiria com cara de
   certo. Por isso toda resposta da `/api/v2` que usa dado do Open Finance leva, por
   conexão e produto, a hora do último sucesso local (a mesma que a foto usa) e um estado
-  `em_dia | desatualizado`. Desatualizado: o número vem acompanhado do aviso, e onde ele
+  `em_dia | desatualizado`. Desatualizado não depende de pausa ou erro explícito: é
+  **último sucesso mais velho que o dobro do intervalo de atualização daquele produto**
+  (a sincronização automática do provedor é diária, então 48 horas; o PR confere o
+  intervalo real de cada produto e guarda o limite numa constante só, que a foto também
+  usa). Desatualizado: o número vem acompanhado do aviso, e onde ele
   seria uma conclusão (meses de reserva, % do CDI) a API devolve `null` com o motivo
-  `banco_desatualizado`. Teste por bloco: conexão pausada e falha só em `/investments`,
-  incluindo a reserva numa caixinha espelhada.
+  `banco_desatualizado`. Teste por bloco: conexão pausada, falha só em `/investments`, e
+  conexão ativa cujo último sucesso passou do limite sem erro nenhum, incluindo a reserva
+  numa caixinha espelhada.
 - **Tabela nova por usuário entra no ciclo de privacidade.** As fotos do patrimônio e das
   posições são histórico financeiro do usuário, e `db/privacy.py` enumera as tabelas à mão.
   Toda tabela nova com dado de usuário entra, no mesmo PR que a cria, na exportação
