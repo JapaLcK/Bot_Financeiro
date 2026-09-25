@@ -105,12 +105,15 @@ tecnologia, podendo refazer o que for preciso, com calma (Q5).
   `launch.py`. Se sair e sobrar um processo só, o aviso fica dentro dele; se ficar, ou com
   uma segunda instância, a função usa `LISTEN/NOTIFY` do Postgres desde a etapa 0.
   Duas regras valem nos dois casos:
-  - **só depois do commit.** O aviso dentro do processo não tem a ordem de commit que o
-    `NOTIFY` tem (ele só é entregue quando a transação confirma): chamado com a transação
-    ainda aberta, a tela pediria de novo e leria o estado velho, sem outro aviso depois.
-    Então a função é chamada depois do commit com sucesso, nunca dentro da transação, e
-    nada é avisado se ela desfaz. Teste: uma escrita com o commit atrasado de propósito — a
-    tela só pede de novo depois dele e vê o dado novo.
+  - **o aviso só chega depois do commit, e chega sempre.** Aviso antes do commit faz a
+    tela pedir de novo e ler o estado velho, sem outro aviso depois; aviso depois do commit
+    feito à parte pode não sair se o processo cair entre os dois. Por isso cada caso usa o
+    seu mecanismo: com `NOTIFY`, ele é emitido **dentro** da transação da escrita (o
+    Postgres só entrega quando ela confirma, e nada se ela desfaz); com o aviso dentro do
+    processo, a função roda **depois** do commit com sucesso — ali, se o processo cai, cai
+    junto o stream, e a reconexão refaz tudo. Teste: uma escrita com o commit atrasado de
+    propósito — a tela só pede de novo depois dele e vê o dado novo; e uma escrita que
+    desfaz não gera aviso.
   - **só para o dono.** O aviso interno leva o `user_id` de quem teve o dado mudado (o que
     vai para o navegador continua só `{"mudou": [...]}`), e cada stream assina só o usuário
     do `usuario_atual`. Um aviso global deixaria B saber quando A mexe no dinheiro e faria
