@@ -146,8 +146,12 @@ tecnologia, podendo refazer o que for preciso, com calma (Q5).
     conexão de `LISTEN` do servidor cai e volta enquanto o navegador segue conectado, e o
     Postgres não reenvia o que foi avisado nesse intervalo. Por isso, quando o `LISTEN`
     cai, o servidor **fecha todos os streams** que dependem dele; cada navegador reconecta e
-    refaz tudo pelo caminho normal. Teste separado: derrubar só a conexão de `LISTEN`,
-    lançar, e ver a tela atualizar. Teste: uma escrita com o commit atrasado de
+    refaz tudo pelo caminho normal. Enquanto o `LISTEN` não voltar, **nenhum stream novo
+    abre**: a rota responde 503 com um tempo de nova tentativa, e o cliente tenta de novo
+    com espera crescente — senão um stream aberto durante a queda pediria tudo uma vez e
+    perderia as escritas seguintes. Teste separado: derrubar só a conexão de `LISTEN`,
+    fazer duas escritas durante a queda, e ver a tela atualizar com as duas quando ela
+    voltar. Teste: uma escrita com o commit atrasado de
     propósito — a tela só pede de novo depois dele e vê o dado novo; e uma escrita que
     desfaz não gera aviso.
   - **só para o dono.** O aviso interno leva o `user_id` de quem teve o dado mudado (o que
@@ -202,7 +206,12 @@ tecnologia, podendo refazer o que for preciso, com calma (Q5).
     `investment_withdraw_to_account` e todo outro caminho que mexa no principal — o
     inventário por `grep` é o primeiro passo do PR do job). Toda foto é tirada **logo
     depois de calcular os juros daquele usuário** (`accrue_all_investments` roda hoje num
-    laço próprio em `core/services/investment_scheduler.py`), na mesma operação. Aporte com
+    laço próprio em `core/services/investment_scheduler.py`), na mesma operação. O cálculo
+    (`_growth_for_period`) compõe de uma vez todas as taxas que faltavam e devolve só a
+    última data, então um atraso que atravessa uma ou mais viradas de mês jogaria tudo no
+    último mês. Por isso o job **para em cada virada**: chama o cálculo até o último dia de
+    cada mês coberto (`accrue_investment_db` já aceita `today=`), tira a foto ali, e só
+    então segue para o próximo. Aporte com
     data no passado (`purchase_date`) só conta a partir da primeira foto, já com os juros em
     dia: rendimento de antes dela nunca entra.
 
@@ -247,7 +256,8 @@ tecnologia, podendo refazer o que for preciso, com calma (Q5).
   para na data efetiva); resgate total; resgate total e novo
   aporte semanas depois (a sombra não rende no buraco); lote aberto e encerrado no meio do
   mês; investimento com um lote de CDI e outro de IPCA; IPCA publicado depois da virada
-  (cai no mês que cobre); virada de mês com o laço de juros atrasado; aporte com data no
+  (cai no mês que cobre); laço de juros parado por mais de uma virada de mês (cada mês
+  recebe o seu); aporte com data no
   passado; investimento resgatado e depois apagado (continua no histórico). Open Finance:
   investimento sem taxa; mês de abertura e de encerramento (sem comparação); posição
   liquidada entre duas rodadas do job (a taxa da última sincronização fica no histórico).
