@@ -64,11 +64,15 @@ tecnologia, podendo refazer o que for preciso, com calma (Q5).
 - **Plano por recurso (Q20):** estar logado com plano ativo não basta. Rota de recurso pago
   declara também `Depends(recurso("forecast"))` (ou `insights`, `simulator`, `ai_chat`…),
   que chama o `plan_gate_ok` de `core/services/plan_service.py` — a matriz
-  `FEATURE_MIN_TIER_V2` continua a fonte única, sem cópia na `/api/v2`. Recusa sai no envelope
-  de erro (`plano_insuficiente`). O teste que varre as rotas exige, em cada uma, ou a
+  `FEATURE_MIN_TIER_V2` continua a fonte única, sem cópia na `/api/v2`. Como o `plan_gate_ok`
+  trata nome desconhecido como plano de entrada, o `recurso()` recusa, **ao montar a rota**
+  (o servidor nem sobe), nome que não esteja na matriz nem nos casos especiais que ele
+  conhece (hoje só `ai_chat`, que é cota mensal e não plano) — um erro de digitação não vira
+  acesso liberado em silêncio. Recusa sai no envelope de erro (`plano_insuficiente`, ou
+  `cota_esgotada` no `ai_chat`). O teste que varre as rotas exige, em cada uma, ou a
   dependência de recurso ou a presença numa lista explícita de rotas do plano de entrada. Cada
   rota paga tem teste na fronteira: o plano abaixo recebe a recusa, o plano mínimo recebe o
-  dado. O gate pelo `/auth/me` na tela (seção 3) só decide o que mostrar; quem protege é o
+  dado; as do `ai_chat` têm também o teste da cota esgotada. O gate pelo `/auth/me` na tela (seção 3) só decide o que mostrar; quem protege é o
   servidor.
 - **Contrato (Q22):** request e response declarados em Pydantic (`response_model` em toda
   rota) → especificação OpenAPI → tipos TypeScript gerados para o v2 e para o app (e o zod
@@ -85,8 +89,13 @@ tecnologia, podendo refazer o que for preciso, com calma (Q5).
   Um lançamento feito pelo WhatsApp atualiza o painel aberto. O aviso não se guarda: se a
   conexão cair, o que mudou nesse meio-tempo se perde. Por isso, **a cada (re)conexão** o
   cliente invalida todas as consultas e a tela pede tudo de novo — cobre a queda, a volta do
-  sono do computador e a janela entre a primeira carga e a conexão abrir. O teste de ponta a
-  ponta do aviso (Q32) inclui derrubar a conexão, lançar e reconectar. Hoje roda um processo só:
+  sono do computador e a janela entre a primeira carga e a conexão abrir. A sessão expira em
+  15 minutos e só o `fetch` sabe renová-la (`frontend/static/auth-refresh.js`); o
+  `EventSource` que recebe 401 fecha de vez. Então, quando a conexão fecha, o cliente faz uma
+  chamada leve pela API (o `fetch` renova a sessão se precisar) e recria o stream; se a
+  sessão acabou de fato, segue o caminho normal de sessão encerrada. O teste de ponta a ponta
+  do aviso (Q32) inclui derrubar a conexão, lançar e reconectar, e reconectar com a sessão
+  vencida. Hoje roda um processo só:
   o aviso fica dentro do processo, atrás de uma função única; com uma segunda instância,
   troca-se essa função por `LISTEN/NOTIFY` do Postgres. O `/ws` antigo sai junto com o
   dashboard antigo.
