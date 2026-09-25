@@ -116,7 +116,13 @@ tecnologia, podendo refazer o que for preciso, com calma (Q5).
   15 minutos e só o `fetch` sabe renová-la (`frontend/static/auth-refresh.js`); o
   `EventSource` que recebe 401 fecha de vez. Então, quando a conexão fecha, o cliente faz uma
   chamada leve pela API (o `fetch` renova a sessão se precisar) e recria o stream; se a
-  sessão acabou de fato, segue o caminho normal de sessão encerrada. O teste de ponta a ponta
+  sessão acabou de fato, segue o caminho normal de sessão encerrada. O inverso também vale: a
+  dependência de usuário só roda na abertura, então um stream aberto não perceberia sozinho
+  a sessão vencida ou revogada. Por isso o servidor **fecha o stream quando vence o token
+  que o abriu** (no máximo 15 minutos, e o cliente reconecta pelo caminho acima) e **na
+  hora** em que a sessão é encerrada ou revogada (logout, "sair de todos os aparelhos",
+  troca de senha). Teste: revogar uma sessão com o stream aberto — ele fecha e não recebe
+  mais nada. O teste de ponta a ponta
   do aviso (Q32) inclui derrubar a conexão, lançar e reconectar, e reconectar com a sessão
   vencida. O aviso sai de uma função única, e **todo processo que grava dado financeiro tem
   de alcançá-la**. Hoje produção roda dois: o `launch.py` sobe o uvicorn e também o
