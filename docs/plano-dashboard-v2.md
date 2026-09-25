@@ -289,7 +289,10 @@ tecnologia, podendo refazer o que for preciso, com calma (Q5).
     seguinte não sobra conexão para conferir. Por isso cada foto guarda **quais conexões
     entraram nela**, e o gráfico quebra a linha (com a legenda "banco conectado" ou
     "desconectado") quando esse conjunto muda de um ponto para o outro, em vez de ligar os
-    dois pontos como se fosse variação;
+    dois pontos como se fosse variação. O mesmo vale para **todo número derivado da série**
+    (a variação no título do bloco, o texto acessível do período — hoje
+    `widgets/NetWorth.tsx` faz `último − primeiro` sem olhar nada): ele só é calculado
+    dentro do trecho sem quebra, e o bloco diz que o banco X entrou ou saiu no período;
   - **"a conferir" não vira número certo:** com movimento de banco pendente
     (`bank_movements.pending_count` > 0), o painel antigo já troca o patrimônio por "A
     conferir" (`frontend/dashboard.js`), porque o dinheiro pode estar nos dois lados. A foto
@@ -306,7 +309,18 @@ tecnologia, podendo refazer o que for preciso, com calma (Q5).
   que fica pausada ou parcial entre duas rodadas (o ponto sai marcado como incompleto, sem
   queda falsa); falha só em `/investments` com as contas em dia (incompleto); conta de
   banco em dólar sem nenhum investimento em dólar (fica fora e aparece o aviso); desconectar e
-  conectar um banco entre duas rodadas (a linha quebra, sem salto).
+  conectar um banco entre duas rodadas (a linha quebra, sem salto, e a variação do título
+  não atravessa a quebra).
+- **Dado do Open Finance desatualizado nunca aparece como exato**, em bloco nenhum — não só
+  na foto. Pausar a conexão (`pause_open_finance_connection`) mantém o espelho, e a caixinha
+  espelhada para de ser atualizada (`sync_open_finance_caixinhas`), então qualquer número
+  feito dela (a reserva em meses, o saldo, o patrimônio de hoje) seguiria com cara de
+  certo. Por isso toda resposta da `/api/v2` que usa dado do Open Finance leva, por
+  conexão e produto, a hora do último sucesso local (a mesma que a foto usa) e um estado
+  `em_dia | desatualizado`. Desatualizado: o número vem acompanhado do aviso, e onde ele
+  seria uma conclusão (meses de reserva, % do CDI) a API devolve `null` com o motivo
+  `banco_desatualizado`. Teste por bloco: conexão pausada e falha só em `/investments`,
+  incluindo a reserva numa caixinha espelhada.
 - **Tabela nova por usuário entra no ciclo de privacidade.** As fotos do patrimônio e das
   posições são histórico financeiro do usuário, e `db/privacy.py` enumera as tabelas à mão.
   Toda tabela nova com dado de usuário entra, no mesmo PR que a cria, na exportação
