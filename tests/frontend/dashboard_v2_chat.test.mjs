@@ -101,7 +101,7 @@ test("os 8 assuntos respondem com blocos, sem erro e sem id repetido", async () 
   await page.locator(".chat > .msg-piggy").first().waitFor();
   const blocos = {};
   for (const [assunto, nome] of [
-    ["categorias", "Pra onde vai meu dinheiro?"], ["lancamentos", "Quais foram meus maiores gastos?"],
+    ["categorias", "Pra onde vai meu dinheiro?"], ["lancamentos", "Quais foram meus maiores gastos do mês?"],
     ["categoria", /^Me mostra o detalhe/], ["saldo", "Vai sobrar até o fim do mês?"], ["fatura", "E a minha fatura?"],
     ["saldo2", "Vai sobrar até o fim do mês?"], ["metas", "Quanto falta pras minhas metas?"],
     ["investimentos", "Como estão meus investimentos?"], ["renda", "Como anda a minha renda?"],
@@ -267,9 +267,21 @@ test("a resposta nova é anunciada para leitor de tela", async () => {
   await page.locator(".chat > .msg-piggy").first().waitFor();
   await perguntar(page, "oi");
   await page.waitForFunction(() => document.querySelectorAll(".chat > .msg-piggy").length === 2);
+  await page.waitForFunction(() => document.querySelector("[role=status]").textContent === [...document.querySelectorAll(".chat > .msg-piggy .msg-text")].pop().textContent, null, { timeout: 2000 }).catch(() => {});
   const r = await page.evaluate(() => [document.querySelector("[role=status]").textContent, [...document.querySelectorAll(".chat > .msg-piggy .msg-text")].pop().textContent]);
+  // Duas respostas iguais seguidas (texto livre): a região esvazia e enche de novo, então muda.
+  const mudancas = await page.evaluate(async () => {
+    const st = document.querySelector("[role=status]");
+    let n = 0; new MutationObserver(() => n++).observe(st, { childList: true, subtree: true, characterData: true });
+    const inp = document.querySelector("#askbar-input"); const set = Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, "value").set;
+    set.call(inp, "oi de novo"); inp.dispatchEvent(new Event("input", { bubbles: true }));
+    await new Promise((r) => setTimeout(r, 50)); inp.form.requestSubmit();
+    await new Promise((r) => setTimeout(r, 400));
+    return [n, st.textContent.startsWith("Aqui no protótipo")];
+  });
   await ctx.close();
   assert.equal(r[0], r[1]);
+  assert.ok(mudancas[0] >= 2 && mudancas[1], JSON.stringify(mudancas)); // esvaziou e encheu com a mesma resposta
 });
 
 // As que respondiam só de lado (Codex #584, 2ª rodada, e a varredura das 23 perguntas).
@@ -332,4 +344,23 @@ test("insights e as perguntas restantes respondem o que pediram (e com o mesmo n
   assert.match(normal, /média dos meses anteriores no mesmo ponto é R\$ 2\.519, então este mês está 5% acima do normal/);
   assert.match(await pela("investir", "rendendo bem"), /^Em 12 meses ela rendeu 96% do CDI .*um pouco abaixo do CDI/);
   assert.match(await pela("autonomo", "no azul"), /^Sim\. Até o dia 23 entraram R\$ 4\.300, saíram R\$ 2\.636 .*sobram R\$ 934/);
+});
+
+test("as próximas perguntas também respondem o que pedem (investir, maiores gastos, onde cortar)", async () => {
+  const { ctx, page } = await abrir();
+  await perguntar(page, "oi");
+  await page.locator(".chat > .msg-piggy").first().waitFor();
+  const texto = async () => page.locator(".chat > .msg-piggy").last().locator(".msg-text").textContent();
+  await seguir(page, "Como estão meus investimentos?");
+  await seguir(page, "Quanto sobra pra investir?");
+  const investir = await texto();
+  await seguir(page, "Quanto falta pras minhas metas?");
+  await seguir(page, "Onde dá pra cortar pra chegar antes?");
+  const cortar = await texto();
+  await seguir(page, "Quais foram meus maiores gastos do mês?");
+  const maiores = await texto();
+  await ctx.close();
+  assert.match(investir, /dá pra investir uns R\$ 990/); // não o saldo inteiro (~R$ 2.300)
+  assert.match(cortar, /^O que mais subiu foi Delivery/); // não Mercado, que caiu
+  assert.match(maiores, /^Seu maior gasto de setembro foi Aluguel/); // o mês, não a semana
 });

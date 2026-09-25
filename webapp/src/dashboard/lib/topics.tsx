@@ -21,7 +21,8 @@ import { Yield } from "../widgets/Yield";
 // calculado dos dados, os blocos do dashboard e sugestões de próxima pergunta. Em
 // produção, quem escolhe o assunto é a IA (as tools de /ai/chat), não esta tabela.
 export type TopicId = "categorias" | "categoria" | "lancamentos" | "fatura" | "investimentos" | "metas" | "saldo" | "renda";
-export interface Follow { label: string; topic: TopicId; cat?: string }
+// `key` escolhe a resposta própria da pergunta (LEADS), quando o assunto sozinho não a responde.
+export interface Follow { label: string; topic: TopicId; cat?: string; key?: string }
 export interface Answer { text: ReactNode; blocks: ReactNode[]; follow: Follow[] }
 
 const NOW = MONTHS[MONTHS.length - 1];
@@ -44,7 +45,7 @@ function byTopic(topic: TopicId, cat: string | null): Answer {
       return {
         text: <>Em {MONTH}, até o dia {DAY}, saíram <b>{money0(m.expense)}</b>, {m.expense <= then ? `${money0(then - m.expense)} a menos` : `${money0(m.expense - then)} a mais`} que em {monthName(keyDate(prev))} no mesmo ponto. O que mais pesa é <b>{top.label}</b> ({money0(m.byCategory[top.id])}).</>,
         blocks: [<Categories s={snap()} />],
-        follow: [{ label: `Me mostra o detalhe de ${top.label.toLowerCase()}`, topic: "categoria", cat: top.id }, { label: "Quais foram meus maiores gastos?", topic: "lancamentos" }, { label: "Vai sobrar até o fim do mês?", topic: "saldo" }],
+        follow: [{ label: `Me mostra o detalhe de ${top.label.toLowerCase()}`, topic: "categoria", cat: top.id }, { label: "Quais foram meus maiores gastos do mês?", topic: "lancamentos", key: "maior-gasto" }, { label: "Vai sobrar até o fim do mês?", topic: "saldo" }],
       };
     }
     case "categoria": {
@@ -72,7 +73,7 @@ function byTopic(topic: TopicId, cat: string | null): Answer {
       return {
         text: <>A fatura aberta está em <b>{money0(m.invoice)}</b> e vence dia {CARD.dueDay} de {monthName(new Date(TODAY.getFullYear(), TODAY.getMonth() + 1, 1))}. Da próxima, <b>{money0(p.months[0].value)}</b> já são parcelas; a última termina em {monthName(p.last)} de {p.last.getFullYear()}.</>,
         blocks: [<Invoice s={snap()} />, <Installments />],
-        follow: [{ label: "Vai sobrar até o fim do mês?", topic: "saldo" }, { label: "Quais foram meus maiores gastos?", topic: "lancamentos" }, { label: "Pra onde vai meu dinheiro?", topic: "categorias" }],
+        follow: [{ label: "Vai sobrar até o fim do mês?", topic: "saldo" }, { label: "Quais foram meus maiores gastos do mês?", topic: "lancamentos", key: "maior-gasto" }, { label: "Pra onde vai meu dinheiro?", topic: "categorias" }],
       };
     }
     case "investimentos": {
@@ -80,7 +81,7 @@ function byTopic(topic: TopicId, cat: string | null): Answer {
       return {
         text: <>Sua carteira rendeu <b>{signed0(y.month.value)}</b> em {MONTH} ({pct(y.month.ofCdi)} do CDI) e <b>{signed0(y.year.value)}</b> em 12 meses ({pct(y.year.ofCdi)} do CDI).</>,
         blocks: [<Yield />, <Wealth />],
-        follow: [{ label: "Quanto falta pras minhas metas?", topic: "metas" }, { label: "Quanto sobra pra investir?", topic: "saldo" }, { label: "Como anda a minha renda?", topic: "renda" }],
+        follow: [{ label: "Quanto falta pras minhas metas?", topic: "metas" }, { label: "Quanto sobra pra investir?", topic: "saldo", key: "quanto-investir" }, { label: "Como anda a minha renda?", topic: "renda" }],
       };
     }
     case "metas": {
@@ -88,7 +89,7 @@ function byTopic(topic: TopicId, cat: string | null): Answer {
       return {
         text: <>A meta mais perto é <b>{next.g.label}</b>: faltam {money0(next.g.target - next.g.saved)}, e no ritmo de hoje ela chega em {monthYear(next.eta.date)}. Sua reserva cobre {reserveMonths().toLocaleString("pt-BR", { maximumFractionDigits: 1 })} meses de contas fixas.</>,
         blocks: [<Goals s={snap()} />],
-        follow: [{ label: "Onde dá pra cortar pra chegar antes?", topic: "categorias" }, { label: "Como estão meus investimentos?", topic: "investimentos" }, { label: "Vai sobrar até o fim do mês?", topic: "saldo" }],
+        follow: [{ label: "Onde dá pra cortar pra chegar antes?", topic: "categorias", key: "economizar-mes" }, { label: "Como estão meus investimentos?", topic: "investimentos" }, { label: "Vai sobrar até o fim do mês?", topic: "saldo" }],
       };
     }
     case "saldo": {

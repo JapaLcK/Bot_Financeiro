@@ -1,4 +1,4 @@
-import { useEffect, useRef, type ReactNode } from "react";
+import { useEffect, useRef, useState, type ReactNode } from "react";
 import { PLAN } from "../lib/api";
 import { ask, useConversation, type Msg } from "../lib/conversation";
 import { locked, readProfile } from "../lib/profiles.js";
@@ -41,7 +41,7 @@ function PiggySays({ m, live = true }: { m: Msg; live?: boolean }) {
       {m.blocks?.map((b, i) => <Snapshot key={i}>{b}</Snapshot>)}
       {live && !!m.follow?.length && (
         <ul className="chat-follow" aria-label="Próximas perguntas">
-          {m.follow.map((f) => <li key={f.label}><button type="button" className="chip" onClick={() => ask({ text: f.label, topic: f.topic, cat: f.cat })}>{f.label}</button></li>)}
+          {m.follow.map((f) => <li key={f.label}><button type="button" className="chip" onClick={() => ask({ text: f.label, topic: f.topic, cat: f.cat, key: f.key })}>{f.label}</button></li>)}
         </ul>
       )}
     </FrameScope.Provider>
@@ -53,6 +53,15 @@ export function PiggyChat() {
   const end = useRef<HTMLLIElement>(null);
   // A pergunta nova aparece no topo da tela (a resposta dela vem logo abaixo).
   useEffect(() => { end.current?.scrollIntoView({ block: "start" }); }, [msgs.length]);
+  const last = [...msgs].reverse().find((m) => m.role === "piggy");
+  // Esvazia e preenche de novo a cada resposta: duas respostas iguais seguidas (o texto
+  // livre no protótipo) também são anunciadas.
+  const [said, setSaid] = useState<ReactNode>(null);
+  useEffect(() => {
+    setSaid(null);
+    const t = setTimeout(() => setSaid(last?.text ?? null), 60);
+    return () => clearTimeout(t);
+  }, [msgs.length]);
 
   const head = (
     <header className="page-head">
@@ -96,12 +105,11 @@ export function PiggyChat() {
     );
   }
 
-  const last = [...msgs].reverse().find((m) => m.role === "piggy");
   return (
     <>
       {head}
       {/* A resposta nova entra acima da barra, onde o foco fica: o leitor de tela a lê daqui. */}
-      <p className="sr-only" role="status">{last?.text}</p>
+      <p className="sr-only" role="status">{said}</p>
       <ol className="chat" aria-label="Conversa">
         {msgs.map((m, i) => (
           <li key={m.id} ref={i === msgs.length - 2 ? end : undefined} className={m.role === "user" ? "msg-user" : "msg-piggy"}>
