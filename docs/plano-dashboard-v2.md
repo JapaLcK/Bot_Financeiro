@@ -52,8 +52,8 @@ O que isso muda neste plano:
 - **Os defeitos de dinheiro achados na revisão deste plano ficam no código atual**, não no
   v2: o resgate que pula juro de índice atrasado, o desfazer que não devolve o cursor, o
   desfazer de resgate anterior que cria dinheiro e o desfazer sem a trava por usuário. Eles
-  seguem valendo para quem usa o painel antigo e o WhatsApp **até** o investimento manual
-  ser desligado lá — ver a pergunta Q39 abaixo.
+  seguem valendo para quem usa o painel antigo e o WhatsApp, e são consertados num PR
+  próprio (Q39, abaixo).
 - **Recorrente só prevê.** Hoje o carregador de recorrentes (`run_recurring_charger_loop`,
   em `core/services/recurring_charger.py`) lança sozinho na carteira: o salário entra como
   crédito e a conta fixa como débito, sem olhar o Open Finance — que já traz a mesma
@@ -72,32 +72,33 @@ O que isso muda neste plano:
   gasto que não houve. Depositar dinheiro vivo é o inverso. Por isso existe uma
   **transferência entre banco e carteira**: o saque (ou depósito em espécie) que o Open
   Finance trouxer é casado com uma entrada (ou saída) da carteira Piggy, e o par fica fora
-  dos relatórios de gasto e receita e não mexe no patrimônio. Como o casamento acontece é
-  a Q41. Testes: saque e depósito, olhando patrimônio (não muda) e relatórios (não entra).
+  dos relatórios de gasto e receita e não mexe no patrimônio. O casamento é automático,
+  com um aviso que o usuário pode desfazer (Q41). Testes: saque e depósito, olhando patrimônio (não muda) e relatórios (não entra).
 
-A decidir com o dono (próxima rodada, antes da etapa 0):
-- **Q37 — o que já existe de manual.** Investimentos, aportes, caixinhas e lançamentos
-  manuais que os usuários já têm hoje: ficam só para leitura como "registro manual antigo"
-  (sugestão), são arquivados, ou o usuário é convidado a conectar o banco e zerar?
-- **Q38 — caixinhas e metas.** Caixinha com "depositar e retirar" à mão é movimento manual.
-  No v2 a meta vira um alvo sobre o saldo de uma caixinha do banco (espelhada pelo Open
-  Finance) ou sobre a carteira (sugestão), e a caixinha manual deixa de existir?
-- **Q39 — o código atual até o corte.** Consertar os defeitos de dinheiro do investimento
-  manual no painel antigo e no WhatsApp (o chip já aberto), ou **congelar** o investimento
-  manual lá agora — sem aporte, resgate e desfazer novos (sugestão: congelar, que é menor e
-  tira o risco de uma vez; os dois que criam dinheiro não podem esperar o corte)?
-- **Q40 — o WhatsApp.** "Gastei 50 no mercado" vira lançamento da carteira (espécie) ou
-  anotação/categoria para casar com a transação que o Open Finance trouxer? Sem essa regra,
-  um gasto no cartão lançado pelo WhatsApp conta duas vezes.
-- **Q41 — saque e depósito em espécie.** Quando o Open Finance traz um saque, a carteira
-  recebe a entrada: sozinha, com um aviso que o usuário pode desfazer (sugestão), ou só
-  depois de ele confirmar? E o valor sacado que ele gastar depois é lançado na carteira
-  normalmente.
+Decidido pelo dono na mesma data (Q37–Q41):
+- **Q37 — o que já existe de manual fica só para leitura**, como "registro manual antigo",
+  com convite para conectar o banco. Não se aporta, resgata nem desfaz mais nada nele pelo
+  v2; aparece com o saldo, sem comparação com o CDI.
+- **Q38 — a caixinha manual continua**, como exceção à Q36: ela é dinheiro separado pelo
+  próprio usuário, e depositar e retirar nela segue existindo no v2. A caixinha espelhada
+  do banco continua vindo do Open Finance.
+- **Q39 — os defeitos de dinheiro do código atual são consertados**, não congelados, num PR
+  próprio (faixa Completo, com o time): o resgate que pula juro de índice atrasado, o
+  desfazer que não devolve o cursor, o desfazer de resgate anterior que cria dinheiro, e o
+  desfazer e o apagar investimento sem a trava por usuário. A regra combinada: só se desfaz
+  o último movimento do investimento, e apagar o investimento conta como movimento.
+- **Q40 — WhatsApp, três caminhos:** gasto **em dinheiro** vira lançamento na carteira
+  Piggy; gasto **no Pix ou no cartão** vira anotação (descrição e categoria) que se casa com
+  a transação quando o Open Finance a trouxer, sem lançar nada; quando **não dá para saber**
+  como foi pago, o Piggy pergunta antes de registrar. Teste: "gastei 50 no mercado no
+  cartão" seguido da transação do banco — conta uma vez, com a categoria da mensagem.
+- **Q41 — o saque entra na carteira sozinho**, com um aviso que o usuário pode desfazer
+  (se o dinheiro não foi para o bolso). O depósito em espécie é o inverso.
 
 ### O que a primeira versão precisa ter (Q3)
 
 Resumo, Lançamentos (ver tudo; lançar, editar e apagar só na carteira — Q36), Previsão,
-Metas e caixinhas (o "depositar e retirar" depende da Q38), Para onde vai, Patrimônio e o chat do Piggy com IA real e blocos (Q6).
+Metas e caixinhas (depositar e retirar na caixinha manual — Q38), Para onde vai, Patrimônio e o chat do Piggy com IA real e blocos (Q6).
 Pix, conexão do Open Finance, MFA e notificações já moram em `settings.html` /
 `precos.html` e continuam lá; o v2 só aponta para elas. O resto (orçamentos, orçamento
 doméstico, cartões, categorias, agentes, afiliados, exportar, importar OFX, ajuste de
@@ -373,8 +374,7 @@ tecnologia, podendo refazer o que for preciso, com calma (Q5).
     da desconexão, e o histórico fica. Teste: desconectar e consultar o histórico. A cascata do histórico fica só para o
     usuário, pela regra de privacidade abaixo.
   - **Manuais:** não entram (Q36): no v2 não existe investimento manual. O que já existe
-    de manual segue a resposta da Q37; sem ela decidida, aparece só com o saldo, sem
-    comparação com o CDI.
+    de manual fica só para leitura (Q37): aparece com o saldo, sem comparação com o CDI.
 
   **O bloco compara cada investimento com o CDI, e não mostra número da carteira inteira**
   (decisão do dono, 2026-09-25). No Open Finance o banco não diz quando o dinheiro entrou ou
@@ -454,7 +454,7 @@ fica; só as respostas prontas saem quando a IA real entrar.
 | 1 | Resumo (perfil no servidor entra aqui) | API Completo, tela Leve |
 | 2 | Lançamentos: ver tudo; lançar, editar e apagar na carteira Piggy (Q36) | idem |
 | 3 | Previsão | idem |
-| 4 | Metas e caixinhas (forma depende da Q38) | idem |
+| 4 | Metas e caixinhas: a manual com depositar e retirar, a espelhada pelo Open Finance (Q38) | idem |
 | 5 | Para onde vai | idem |
 | 6 | Patrimônio (com o histórico que o job da etapa 0 já vem gravando) | idem |
 | 7 | Chat com IA real e blocos: o `/ai/chat` passa a devolver "texto + blocos" a partir das tools que usou | Completo |
