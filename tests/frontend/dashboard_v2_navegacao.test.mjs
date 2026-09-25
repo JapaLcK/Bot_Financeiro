@@ -85,3 +85,16 @@ test("barra de cima: o botão Ferramentas fica dentro da margem de 320 a 1440", 
     assert.deepEqual(r, [true, true, true, 0], String(width));
   }
 });
+
+test("a aba do Piggy mostra quando é a página atual, como as outras", async () => {
+  const { ctx, page } = await abrir(390);
+  const estilo = () => page.locator('.tabbar a[data-tab="piggy"] img').evaluate((i) => `${getComputedStyle(i).filter}|${getComputedStyle(i).opacity}`);
+  const fora = await estilo();
+  await page.locator('.tabbar a[data-tab="piggy"]').click();
+  await page.locator('.tabbar a[data-tab="piggy"][aria-current="page"]').waitFor();
+  await page.waitForFunction(() => getComputedStyle(document.querySelector('.tabbar a[data-tab="piggy"] img')).opacity === "1", null, { timeout: 3000 }).catch(() => {}); // há transição
+  const dentro = await estilo();
+  await ctx.close();
+  assert.notEqual(fora, dentro);
+  assert.equal(dentro, "none|1");
+});
