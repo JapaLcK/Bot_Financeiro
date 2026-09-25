@@ -119,12 +119,15 @@ tecnologia, podendo refazer o que for preciso, com calma (Q5).
   sessão acabou de fato, segue o caminho normal de sessão encerrada. O inverso também vale: a
   dependência de usuário só roda na abertura, então um stream aberto não perceberia sozinho
   a sessão vencida ou revogada. Por isso o servidor **fecha o stream quando vence o token
-  que o abriu** (no máximo 15 minutos, e o cliente reconecta pelo caminho acima) e **na
-  hora** em que a sessão é encerrada ou revogada (logout, "sair de todos os aparelhos",
-  troca de senha). A revogação usa o mesmo canal do aviso: com mais de um processo, ela
-  vai pelo `NOTIFY` (com o id da sessão) e cada processo fecha os streams dela. Teste:
-  revogar uma sessão com o stream aberto — ele fecha e não recebe mais nada; no caso de
-  vários processos, com a revogação e o stream em processos diferentes. O teste de ponta a ponta
+  que o abriu** (no máximo 15 minutos, e o cliente reconecta pelo caminho acima) e quando
+  a sessão é revogada. A revogação não é avisada por quem revoga: há vários caminhos que
+  gravam `auth_sessions.revoked_at` (logout e "sair de todos" em `core/sessions.py`, replay
+  de refresh e ociosidade em `core/refresh_tokens.py`, o painel de admin), e avisar em cada
+  um seria remendo por instância. Em vez disso, **o próprio stream confere a sua sessão no
+  banco a cada 30 segundos** (junto do keepalive) e fecha se ela foi revogada — cobre todo
+  caminho, os de hoje e os futuros, em qualquer processo, sem canal extra. Teste: revogar
+  por um caminho que não é endpoint (replay de refresh) com o stream aberto em outro
+  processo — ele fecha em até 30 segundos e não recebe mais nada. O teste de ponta a ponta
   do aviso (Q32) inclui derrubar a conexão, lançar e reconectar, e reconectar com a sessão
   vencida. O aviso sai de uma função única, e **todo processo que grava dado financeiro tem
   de alcançá-la**. Hoje produção roda dois: o `launch.py` sobe o uvicorn e também o
