@@ -60,6 +60,7 @@ from fastapi.testclient import TestClient
 import db
 import frontend.finance_bot_websocket_custom as dashboard
 import frontend.routes.open_finance as of_routes
+from conftest import promote_to_pro
 from core.audit import AuditEvent
 from test_of_item_ownership import _auth
 from test_of_webhook_adopt_guards import (  # noqa: F401 — `webhook_pluggy` é fixture
@@ -68,6 +69,19 @@ from test_of_webhook_adopt_guards import (  # noqa: F401 — `webhook_pluggy` é
     _registry,
     webhook_pluggy,
 )
+
+
+@pytest.fixture(autouse=True)
+def _plano_com_vaga(user_id):
+    """Sem isto, `_enforce_bank_limit` recusa com 402 ANTES de a rota chegar ao
+    `register_item`, e o arquivo inteiro mede o teto de plano em vez do rastro.
+
+    A suíte roda com a escada v2 ligada (o conftest só isenta os arquivos de
+    `_AINDA_EM_V1`, e este não está lá), e no Grátis `of_banks_max` é 0. Mesmo
+    padrão de `tests/test_open_finance_disconnect_route.py`. Medido: isolado o
+    arquivo passava, na suíte inteira dava `402 subscription_required` nos 6.
+    """
+    promote_to_pro(user_id)
 
 
 @pytest.fixture()
