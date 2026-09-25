@@ -3,7 +3,7 @@ import { useState } from "react";
 import { KeyboardAvoidingView, Platform, View } from "react-native";
 
 import { CodigoMfa } from "@/features/auth/CodigoMfa";
-import { MENSAGEM_ERRO_COFRE, enviar, tentarDeNovo, tocar, type EstadoEntrar } from "@/features/auth/entrar";
+import { MENSAGEM_ERRO_COFRE, apagaSenhaNaFase, enviar, tentarDeNovo, tocar, type EstadoEntrar } from "@/features/auth/entrar";
 import { useSessao } from "@/features/auth/sessao";
 import { Banner } from "@/ui/componentes/Banner";
 import { Button } from "@/ui/componentes/Button";
@@ -29,6 +29,16 @@ export default function Entrar() {
 
   const enviando = estado.fase === "enviando";
   const avisoFormulario = estado.fase === "formulario" ? estado.aviso : undefined;
+  // Voltar a digitar é uma tentativa nova: o aviso da anterior sai da tela.
+  const digitar = (definir: (v: string) => void) => (v: string) => {
+    definir(v);
+    if (avisoFormulario) setEstado({ fase: "formulario" });
+  };
+  // Por que a senha fica ou sai em cada fase: `apagaSenhaNaFase` (entrar.ts).
+  const aplicar = (e: EstadoEntrar) => {
+    if (apagaSenhaNaFase(e.fase)) setSenha("");
+    setEstado(e);
+  };
 
   return (
     <KeyboardAvoidingView behavior={Platform.OS === "ios" ? "padding" : undefined} style={{ flex: 1 }}>
@@ -40,10 +50,10 @@ export default function Entrar() {
             <Banner
               tom="danger"
               mensagem={MENSAGEM_ERRO_COFRE}
-              acao={{ rotulo: "Tentar de novo", onPress: () => setEstado(tentarDeNovo()) }}
+              acao={{ rotulo: "Tentar de novo", onPress: () => aplicar(tentarDeNovo()) }}
             />
           ) : estado.fase === "mfa" || estado.fase === "verificando" ? (
-            <CodigoMfa estado={estado} autenticar={sessao.autenticar} aplicar={setEstado} />
+            <CodigoMfa estado={estado} autenticar={sessao.autenticar} aplicar={aplicar} />
           ) : (
             <>
               <Card>
@@ -52,7 +62,7 @@ export default function Entrar() {
                     rotulo="E-mail"
                     icone="Envelope"
                     value={email}
-                    onChangeText={setEmail}
+                    onChangeText={digitar(setEmail)}
                     autoCapitalize="none"
                     autoCorrect={false}
                     keyboardType="email-address"
@@ -64,7 +74,7 @@ export default function Entrar() {
                     rotulo="Senha"
                     icone="Lock"
                     value={senha}
-                    onChangeText={setSenha}
+                    onChangeText={digitar(setSenha)}
                     secureTextEntry
                     autoComplete="current-password"
                     textContentType="password"
@@ -85,17 +95,13 @@ export default function Entrar() {
                     carregando={enviando}
                     desativado={!email.trim() || !senha}
                     onPress={() => {
-                      // A senha sai da tela ANTES da requisição: voltar ao
-                      // formulário nunca a mostra preenchida.
-                      const s = senha;
-                      setSenha("");
                       // Fase "enviando" aplicada AQUI, antes de `tocar()`: sem
                       // isto o busy só aparecia quando a resposta já tivesse
                       // chegado — tarde demais para desativar campo/botões
                       // durante a espera de verdade (B1). A guarda de UMA
                       // requisição continua sendo o `pendentes` de `tocar()`.
-                      setEstado({ fase: "enviando" });
-                      void tocar(() => enviar(email, s, sessao.autenticar), setEstado);
+                      aplicar({ fase: "enviando" });
+                      void tocar(() => enviar(email, senha, sessao.autenticar), aplicar);
                     }}
                   />
                 </View>

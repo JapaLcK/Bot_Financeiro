@@ -83,6 +83,7 @@ from adapters.whatsapp import wa_runtime
 from core.handlers import bills as h_bills
 from core.handlers import pending as h_pending
 from core.response_formatter import format_for_platform
+from conftest import usuario_pagante
 
 # A lista de nomes legítimos do #145 (tests/test_export_pdf_escape.py:105).
 NOMES_LEGITIMOS = [("McDonald's", "mcdonald's"),
@@ -138,7 +139,7 @@ def test_categoria_legitima_mantem_o_negrito(pro_user_id, nome, canon):
 def test_conta_paga_com_asterisco_no_nome(monkeypatch):
     """Botão "✅ Já paguei" numa conta de valor fixo chamada `luz *casa*`."""
     replies: list[tuple[str, str]] = []
-    _mock_wa_boot(monkeypatch, replies, uid=4242)
+    _mock_wa_boot(monkeypatch, replies, uid=usuario_pagante())
     monkeypatch.setattr(
         "db.bills.get_bill",
         lambda uid, bid: {"id": bid, "name": "luz *casa*", "status": "pending",
@@ -160,7 +161,7 @@ def test_conta_paga_com_asterisco_no_nome(monkeypatch):
 def test_conta_paga_legitima_mantem_o_negrito(monkeypatch):
     """CONTROLE POSITIVO no caminho do dinheiro."""
     replies: list[tuple[str, str]] = []
-    _mock_wa_boot(monkeypatch, replies, uid=4242)
+    _mock_wa_boot(monkeypatch, replies, uid=usuario_pagante())
     monkeypatch.setattr(
         "db.bills.get_bill",
         lambda uid, bid: {"id": bid, "name": "Cartão Nubank", "status": "pending",
@@ -182,7 +183,7 @@ def test_conta_paga_legitima_mantem_o_negrito(monkeypatch):
 def _pergunta_de_valor(monkeypatch, nome: str) -> str:
     """Roda o `process_message` real até a pergunta de valor (wa_runtime.py:805)."""
     replies: list[tuple[str, str]] = []
-    _mock_wa_boot(monkeypatch, replies, uid=4242)
+    _mock_wa_boot(monkeypatch, replies, uid=usuario_pagante())
     monkeypatch.setattr(
         "db.bills.get_bill",
         lambda uid, bid: {"id": bid, "name": nome, "status": "pending",

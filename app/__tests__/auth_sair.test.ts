@@ -1,4 +1,4 @@
-import { SessaoExpirada } from "@/api/client";
+import { SessaoExpirada, TEMPO_LIMITE_AUTH_MS } from "@/api/client";
 import { perfil, sair } from "@/services/auth";
 import { guardarCredenciais, lerCredenciais } from "@/storage/secure";
 
@@ -71,4 +71,80 @@ it("renovação real que termina DEPOIS da limpeza não regrava a sessão", asyn
 
   await expect(chamadaDePerfil).rejects.toBeInstanceOf(SessaoExpirada);
   await expect(lerCredenciais()).resolves.toBeNull();
+});
+
+/**
+ * #458: a revogação no servidor é ESPERADA, com o tempo limite de auth. O cofre
+ * continua vazio antes de qualquer rede (motivo do #433) — o que muda é só
+ * quando `sair()` resolve.
+ */
+describe("sair() espera a revogação no servidor (#458)", () => {
+  afterEach(() => jest.useRealTimers());
+
+  const drenar = async () => {
+    for (let i = 0; i < 20; i++) await Promise.resolve();
+  };
+
+  it("só resolve depois da resposta do /auth/logout", async () => {
+    await guardarCredenciais({ access: ACCESS_A, refresh: "rt_A" });
+    let soltarChegou: () => void = () => {};
+    const chegou = new Promise<void>((r) => (soltarChegou = r));
+    let soltarPortao: () => void = () => {};
+    const portao = new Promise<void>((r) => (soltarPortao = r));
+    fetchFalso.mockImplementation(async () => {
+      soltarChegou();
+      await portao;
+      return resposta(200, {});
+    });
+
+    let feito = false;
+    const s = sair().then(() => (feito = true));
+    await chegou;
+    await drenar();
+    expect(feito).toBe(false);
+    await expect(lerCredenciais()).resolves.toBeNull();
+
+    soltarPortao();
+    await s;
+    expect(feito).toBe(true);
+  });
+
+  it("logout pendurado: sair() resolve no tempo limite sem rejeitar, com o cofre já vazio", async () => {
+    jest.useFakeTimers();
+    await guardarCredenciais({ access: ACCESS_A, refresh: "rt_A" });
+    let soltarChegou: () => void = () => {};
+    const chegou = new Promise<void>((r) => (soltarChegou = r));
+    // O dublê padrão ignora `signal`; este só rejeita quando o sinal aborta,
+    // como o `fetch` de verdade.
+    fetchFalso.mockImplementation(
+      (_u: string, o: RequestInit) =>
+        new Promise<Response>((_resolve, reject) => {
+          soltarChegou();
+          o.signal?.addEventListener("abort", () => reject(new DOMException("Abortado", "AbortError")));
+        }),
+    );
+
+    let feito = false;
+    const s = sair().then(() => (feito = true));
+    await chegou;
+    await expect(lerCredenciais()).resolves.toBeNull();
+
+    await jest.advanceTimersByTimeAsync(TEMPO_LIMITE_AUTH_MS - 1);
+    expect(feito).toBe(false);
+    await jest.advanceTimersByTimeAsync(1);
+    expect(feito).toBe(true);
+    await s;
+  });
+
+  it.each([
+    ["401", () => Promise.resolve(resposta(401, { detail: "expirado" }))],
+    ["500", () => Promise.resolve(resposta(500, {}))],
+    ["rede fora", () => Promise.reject(new TypeError("Network request failed"))],
+  ])("revogação que falha (%s) não faz sair() rejeitar, e o cofre fica vazio", async (_nome, falha) => {
+    await guardarCredenciais({ access: ACCESS_A, refresh: "rt_A" });
+    fetchFalso.mockImplementation(falha);
+
+    await expect(sair()).resolves.toBeUndefined();
+    await expect(lerCredenciais()).resolves.toBeNull();
+  });
 });

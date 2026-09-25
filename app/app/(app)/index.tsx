@@ -1,3 +1,4 @@
+import { router } from "expo-router";
 import { useCallback, useEffect, useState } from "react";
 import { ActivityIndicator, View } from "react-native";
 
@@ -30,11 +31,19 @@ export default function Inicio() {
   // perderia "Olá, nome" à toa) — só soma um aviso com "Tentar de novo" por
   // cima do que já está na tela.
   const [erroSaida, setErroSaida] = useState<string | null>(null);
+  // A saída espera a revogação no servidor (até o tempo limite de auth): o
+  // botão fica em carregando nesse meio. No sucesso a tela desmonta e o
+  // `setSaindo(false)` nem roda.
+  const [saindo, setSaindo] = useState(false);
 
   const sair = useCallback(async () => {
     setErroSaida(null);
+    setSaindo(true);
     const ok = await sessao.sair();
-    if (!ok) setErroSaida(MENSAGEM_ERRO_SAIR);
+    if (!ok) {
+      setSaindo(false);
+      setErroSaida(MENSAGEM_ERRO_SAIR);
+    }
   }, [sessao]);
 
   const carregar = useCallback(async () => {
@@ -75,23 +84,24 @@ export default function Inicio() {
             <ActivityIndicator color={cores.brand} accessibilityLabel="Carregando" />
             {/* Sem isto, um `/auth/refresh` pendurado (I-E — token vencido +
                 servidor que nunca responde nem falha) prendia a tela aqui
-                para sempre, sem NENHUMA saída: `sair()` já limpa o cofre
-                ANTES de falar com a rede, então não depende deste
-                `perfil()` terminar. */}
+                para sempre, sem NENHUMA saída: `sair()` limpa o cofre ANTES
+                de falar com a rede e espera a revogação só até o tempo
+                limite, então não depende deste `perfil()` terminar. */}
             {erroSaida ? (
               <Banner tom="danger" mensagem={erroSaida} acao={{ rotulo: "Tentar de novo", onPress: () => void sair() }} />
             ) : null}
-            <Button rotulo="Sair" variante="secondary" onPress={() => void sair()} />
+            <Button rotulo="Sair" variante="secondary" carregando={saindo} onPress={() => void sair()} />
           </>
         )}
 
         {estado.fase === "pronto" && (
           <>
             <Texto variante="titulo">Olá, {estado.nome}</Texto>
+            <Button rotulo="Segurança" variante="secondary" icone="Lock" onPress={() => router.push("/seguranca")} />
             {erroSaida ? (
               <Banner tom="danger" mensagem={erroSaida} acao={{ rotulo: "Tentar de novo", onPress: () => void sair() }} />
             ) : null}
-            <Button rotulo="Sair" variante="secondary" onPress={() => void sair()} />
+            <Button rotulo="Sair" variante="secondary" carregando={saindo} onPress={() => void sair()} />
           </>
         )}
 
@@ -102,7 +112,7 @@ export default function Inicio() {
             </Texto>
             <Button rotulo="Tentar de novo" onPress={() => void carregar()} />
             {erroSaida ? <Banner tom="danger" mensagem={erroSaida} /> : null}
-            <Button rotulo="Sair" variante="secondary" onPress={() => void sair()} />
+            <Button rotulo="Sair" variante="secondary" carregando={saindo} onPress={() => void sair()} />
           </>
         )}
       </View>

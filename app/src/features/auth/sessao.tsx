@@ -19,16 +19,19 @@ interface Sessao {
   estado: EstadoSessao;
   /** Chamado assim que uma credencial é gravada (login ou MFA). */
   autenticar: () => void;
-  /** `/auth/me` (ou qualquer chamada autenticada) tomou `SessaoExpirada`. */
+  /** `/auth/me` (ou qualquer chamada autenticada) tomou `SessaoExpirada`; só age em `autenticado`. */
   expirou: (aviso: string) => void;
   /**
-   * Toque duplo é ignorado (guarda por `ref`, único provider da árvore).
+   * Toque duplo é ignorado (guarda por `ref`, único provider da árvore), e
+   * `expirou()` também, enquanto a saída estiver em voo.
    *
-   * Resolve `true` quando a saída terminou (ou o toque foi ignorado porque já
-   * havia uma saída em andamento) e `false` quando a chamada ao servidor OU a
-   * limpeza local falharam — sem isto, a falha era engolida em silêncio: o
-   * provider continuava `autenticado` (correto, o invariante de pé) mas quem
-   * tocou "Sair" não via nada, nem um erro nem uma segunda chance óbvia.
+   * Resolve `true` quando a saída terminou — depois da resposta da revogação
+   * no servidor ou do tempo limite dela — ou quando o toque foi ignorado
+   * porque já havia uma saída em andamento; e `false` quando o cofre falhou
+   * (a falha da revogação não conta: `services/auth.ts` a engole). Sem o
+   * `false`, a falha do cofre passava em silêncio: o provider continuava
+   * `autenticado` (correto, o invariante de pé) mas quem tocou "Sair" não via
+   * nada, nem um erro nem uma segunda chance óbvia.
    */
   sair: () => Promise<boolean>;
   /** Só vale em `erro`: refaz a checagem de sessão do início. */
@@ -77,7 +80,15 @@ export function SessaoProvider({ children }: { children: ReactNode }) {
     () => ({
       estado,
       autenticar: () => setEstado({ fase: "autenticado" }),
-      expirou: (aviso) => setEstado({ fase: "anonimo", aviso }),
+      expirou: (aviso) => {
+        // Com a saída em voo, um `SessaoExpirada` é efeito dela (o cofre já foi
+        // limpo): virar anônimo aqui abriria Entrar antes de `sair()` terminar,
+        // e o `.then` abaixo apagaria o estado de quem entrasse nesse meio.
+        // E só age a partir de `autenticado`: um `SessaoExpirada` que chega
+        // depois da saída terminar poria "sessão expirou" num logout limpo.
+        if (saindoEmVoo.current) return;
+        setEstado((s) => (s.fase === "autenticado" ? { fase: "anonimo", aviso } : s));
+      },
       sair: () => {
         if (saindoEmVoo.current) return Promise.resolve(true);
         saindoEmVoo.current = true;

@@ -61,6 +61,7 @@ import asyncio
 import db
 import frontend.finance_bot_websocket_custom as dashboard
 import frontend.routes.open_finance as of_routes
+from conftest import promote_to_pro
 from db.connection import get_conn
 from fastapi.testclient import TestClient
 from test_of_item_ownership import SEGREDO, _auth, _item_remoto, _webhook, eventos  # noqa: F401
@@ -70,6 +71,7 @@ from test_of_webhook_adopt_guards import _limpa_item, _mock_item, _registry, web
 def test_duplicata_de_item_created_nao_ressuscita_banco_removido(
         user_id, monkeypatch, eventos, webhook_pluggy):
     """O repro do Tester: adota → o usuário remove → a MESMA entrega chega de novo."""
+    promote_to_pro(user_id)
     _mock_item(monkeypatch, user_id)
     client = TestClient(dashboard.app)
     try:
@@ -99,6 +101,7 @@ def test_rastro_sem_dono_nao_bloqueia_a_adocao_legitima(
         user_id, monkeypatch, eventos, webhook_pluggy):
     """CONTROLE POSITIVO: o item do bug antigo tem rastro (`origin='webhook'`,
     `user_id IS NULL`) e continua adotável — a guarda pergunta por DONO."""
+    promote_to_pro(user_id)
     _mock_item(monkeypatch, user_id)
     db.register_item(None, provider_item_id="z-null", origin="webhook", last_event="item/updated")
     try:
@@ -122,6 +125,7 @@ def test_reconexao_do_mesmo_banco_audita_toda_vez(
     antes" (1 evento), então este teste sozinho não passa num código que parou
     de auditar a rota.
     """
+    promote_to_pro(user_id)
     from core.audit import AuditEvent
 
     auditados: list[int] = []
@@ -159,6 +163,7 @@ def test_segunda_entrega_inteira_dentro_do_get_da_primeira_audita_uma_vez(
     A conexão é uma só nas duas ordens (upsert em `uq_of_conn_provider_item`); o
     que discrimina é a AUDITORIA, que fica fora do `pluggy_item_lock`.
     """
+    promote_to_pro(user_id)
     import threading
 
     from core.audit import AuditEvent
@@ -213,6 +218,7 @@ def test_auditoria_engolida_no_webhook_nao_apaga_a_da_rota(
     auditoria da rota por causa dele. Desfecho: conexão viva e NENHUM
     `OPEN_FINANCE_CONNECTED` em "Atividade da conta" (Codex #313, P2).
     """
+    promote_to_pro(user_id)
     from core.audit import AuditEvent, list_audit_events
 
     real_audit = of_routes.record_audit_event
@@ -253,6 +259,7 @@ def test_reconexao_de_conexao_anterior_ao_registry_audita(
     rodada anterior declarou: ali o teto era só o item ADOTADO cujo navegador
     nunca postou.
     """
+    promote_to_pro(user_id)
     from core.audit import AuditEvent, list_audit_events
 
     _mock_item(monkeypatch, user_id)
@@ -283,6 +290,7 @@ def test_details_escalar_no_rastro_nao_derruba_o_post(
     PERMANENTE no `POST /pluggy-item` daquele usuário, para sempre, por causa de
     um dado. Nenhum escritor de hoje grava assim; é fronteira de leitura do banco.
     """
+    promote_to_pro(user_id)
     from core.audit import AuditEvent
 
     _mock_item(monkeypatch, user_id)
@@ -318,6 +326,7 @@ def test_reconexao_muito_depois_da_adocao_audita(
     trás contra uma janela de 1h — sem borda, sem flake. O evento velho continua
     DENTRO dos 50 últimos: o que discrimina é a janela, não o limite da consulta.
     """
+    promote_to_pro(user_id)
     from core.audit import AuditEvent, list_audit_events
 
     _mock_item(monkeypatch, user_id)

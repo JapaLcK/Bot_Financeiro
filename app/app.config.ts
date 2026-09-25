@@ -56,6 +56,14 @@ const config: ExpoConfig = {
   ios: {
     bundleIdentifier: `${ID_BASE}${atual.sufixoId}`,
     supportsTablet: false,
+    appleTeamId: "S849YDA49P",
+    buildNumber: "3",
+    config: { usesNonExemptEncryption: false },
+    // Salvar senha e código no app Senhas: só produção, que é o único id em
+    // `/.well-known/apple-app-site-association` (frontend/routes/static_pages.py,
+    // `_APPLE_APP_IDS`). Dev e staging ficam fora para não misturar credenciais
+    // nem exigir a capability nos App IDs deles.
+    ...(AMBIENTE === "production" ? { associatedDomains: ["webcredentials:pigbankai.com"] } : {}),
   },
   android: {
     package: `${ID_BASE}${atual.sufixoId}`,
@@ -64,7 +72,16 @@ const config: ExpoConfig = {
   // integração nativa e sobe os source maps. Sem ele, o empacotamento do Hermes
   // deixa a pilha de erro ilegível, e a camada de observabilidade relata sem
   // dizer ONDE — que é metade do valor dela.
-  plugins: ["expo-router", "expo-secure-store", "@sentry/react-native/expo"],
+  // `enableSceneSupport`: app compilado com o SDK do iOS 27 (Xcode 27) só abre
+  // com o ciclo de vida por scenes do UIKit; o SDK 57 o traz como opt-in
+  // (expo/fyi, "Staying on SDK 57 with Xcode 27"). No SDK 58 vira no-op: sai
+  // na atualização.
+  plugins: [
+    "expo-router",
+    "expo-secure-store",
+    "@sentry/react-native/expo",
+    ["expo-build-properties", { ios: { enableSceneSupport: true } }],
+  ],
   experiments: { typedRoutes: true },
   extra: {
     ambiente: AMBIENTE,

@@ -14,11 +14,9 @@ os.environ.setdefault("PII_ENCRYPTION_KEY", _Fernet.generate_key().decode())
 os.environ.setdefault("PII_HASH_PEPPER", "test-pepper-for-pytest-only-must-be-32-chars-long")
 # Não polui pii_access_log durante testes (cada decrypt registra uma row).
 os.environ.setdefault("PII_AUDIT_DISABLED", "1")
-# Escada de planos v2 lançada com default LIGADO (2026-08-06). A suíte foi
-# escrita no mundo v1 (gates binários Free×Pro, mocks de is_pro), então os
-# testes rodam com o freio puxado por padrão — os testes da escada
-# (test_plan_tiers, test_of_trial_expiry, etc.) ligam com setenv("...", "1").
-os.environ.setdefault("PLANS_V2_ENABLED", "0")
+# Escada de planos v2: a suíte roda o mundo de PRODUÇÃO (v2 e gate de acesso
+# ligados, que é o padrão do código sem env). Os arquivos ainda escritos para o
+# v1 ficam em `_AINDA_EM_V1`, na fixture `_mundo_do_plano` mais abaixo.
 
 # Bcrypt no custo mínimo — só nos testes. O custo padrão é calibrado para ser
 # lento de propósito, e a suíte hasheia senha/código de backup o tempo todo:
@@ -35,6 +33,8 @@ if not hasattr(_bcrypt, "gensalt_padrao"):
     _bcrypt.gensalt = lambda rounds=12, prefix=b"2b": _bcrypt.gensalt_padrao(4, prefix)
 
 from db import init_db, ensure_user, get_conn
+import db_support  # noqa: E402
+from core.services.plan_service import has_app_access  # noqa: E402
 
 
 # ── Coleta: arquivos que dependem de `ofxparse` ──────────────────────────────
@@ -447,6 +447,43 @@ def _auto_cleanup_orphan_users():
             pass
 
 
+# Arquivos (basename) que ainda falham no v2 e rodam com o freio puxado até a
+# migração deles. Medido em 2026-09-23 na main 9cf5c8f: union das falhas de
+# duas rodadas completas com PLANS_V2_ENABLED=1 (`-n 4`), menos os arquivos já
+# migrados. Cada PR da migração tira os seus; a lista só encolhe.
+_AINDA_EM_V1 = {
+    "test_agent_chat_eval_fixtures.py",
+    "test_ai_chat_commands.py",
+    "test_ai_chat_tier2.py",
+    "test_billing_checkout.py",
+    "test_cashflow_forecast_rotas.py",
+    "test_cashflow_receita_frequencia.py",
+    "test_category_normalization.py",
+    "test_handle_incoming_routing.py",
+    "test_household_budget.py",
+    "test_piggy_agents.py",
+    "test_virada_de_mes.py",
+    "test_ws_subscription_gate.py",
+}
+
+
+def _aplica_mundo_do_plano(nome_arquivo: str, monkeypatch) -> None:
+    """Sem env é o padrão de produção (v2 e gate ligados); `_AINDA_EM_V1` puxa o
+    freio do v2. Os dois `delenv` impedem que uma env do shell de quem roda
+    decida o mundo. `setenv` no corpo do teste ou numa fixture do arquivo roda
+    depois desta e continua ganhando."""
+    monkeypatch.delenv("ACCESS_GATE_ENABLED", raising=False)
+    if nome_arquivo in _AINDA_EM_V1:
+        monkeypatch.setenv("PLANS_V2_ENABLED", "0")
+    else:
+        monkeypatch.delenv("PLANS_V2_ENABLED", raising=False)
+
+
+@pytest.fixture(autouse=True)
+def _mundo_do_plano(request, monkeypatch):
+    _aplica_mundo_do_plano(request.path.name, monkeypatch)
+
+
 @pytest.fixture()
 def user_id():
     uid = int(uuid.uuid4().int % 10_000_000_000)  # bigint ok
@@ -455,9 +492,18 @@ def user_id():
     _cleanup_user(uid)
 
 
-def promote_to_pro(user_id: int) -> int:
+def promote_to_pro(user_id: int, plan: str = "pro") -> int:
     """Mesma promoção da fixture `pro_user_id`, chamável no meio de um teste
-    (quando o user vem de outra fixture, ex.: id pequeno pro WhatsApp)."""
+    (quando o user vem de outra fixture, ex.: id pequeno pro WhatsApp).
+
+    `plan` é o valor gravado em `auth_accounts.plan`: o padrão `'pro'` é o Plus
+    no v2; quem precisa do tier mais alto pede `plan="pro_max"`.
+
+    O assert do fim existe porque, sem plano, o gate barra a mensagem antes do
+    `route()`, e um teste de ausência ("não pagou", "não gravou") fica verde sem
+    o código rodar. A invalidação vem antes dele porque a escrita é SQL cru e o
+    `get_auth_user` tem cache. `plan="free"` é isento: o `_cota_esgotada` de
+    `test_ai_chat_commands` rebaixa de propósito (a rever no PR 5)."""
     import uuid as _uuid
     from db.connection import get_conn
     fake_email = f"pro-{_uuid.uuid4().hex[:8]}@test.local"
@@ -467,15 +513,18 @@ def promote_to_pro(user_id: int) -> int:
             row = cur.fetchone()
             if row:
                 cur.execute(
-                    "update auth_accounts set plan='pro', plan_expires_at=null where user_id = %s",
-                    (user_id,),
+                    "update auth_accounts set plan=%s, plan_expires_at=null where user_id = %s",
+                    (plan, user_id),
                 )
             else:
                 cur.execute(
-                    "insert into auth_accounts(user_id, email, password_hash, plan) values (%s, %s, 'x', 'pro')",
-                    (user_id, fake_email),
+                    "insert into auth_accounts(user_id, email, password_hash, plan) values (%s, %s, 'x', %s)",
+                    (user_id, fake_email, plan),
                 )
         conn.commit()
+    db_support.invalidate_auth_user_cache(user_id)
+    if plan != "free":
+        assert has_app_access(user_id), f"promote_to_pro({user_id}, {plan!r}) não deu acesso"
     return user_id
 
 
@@ -484,3 +533,67 @@ def pro_user_id(user_id: int):
     """user_id já promovido para plano Pro — use em testes que precisam criar
     múltiplas caixinhas/cartões ou exercem features Pro."""
     return promote_to_pro(user_id)
+
+
+@pytest.fixture()
+def pluggy_responde(monkeypatch):
+    """Faz o `httpx.Client.get` devolver o que o teste mandar — o caminho real
+    passa por `_pluggy_get`, que é onde o saneamento e a conferência de
+    paginação moram.
+
+    Chamada com um DICT, ele vale para todas as chamadas (o comportamento
+    original, usado por `test_pluggy_resposta_venenosa.py`). Chamada com uma
+    LISTA, cada entrada responde a um GET, na ordem — é o que permite testar
+    paginação. Entrada em forma de tupla `(status_code, payload)` simula HTTP de
+    erro, passando pelo `_raise_for_pluggy_response` REAL em vez de mockar a
+    exceção.
+
+    O objeto devolvido expõe `.chamadas` com os `params` recebidos por GET.
+    """
+    import core.services.pluggy as pluggy
+
+    estado: dict = {"respostas": None}
+    chamadas: list = []
+
+    class _Resp:
+        def __init__(self, entrada):
+            if isinstance(entrada, tuple):
+                self.status_code, self._payload = entrada
+            else:
+                self.status_code, self._payload = 200, entrada
+            self.is_success = 200 <= self.status_code < 300
+
+        def json(self):
+            return self._payload
+
+    def _fake_get(self, url, headers=None, params=None):
+        chamadas.append(params)
+        respostas = estado["respostas"]
+        if isinstance(respostas, list):
+            i = len(chamadas) - 1
+            assert i < len(respostas), f"GET nº {i + 1} sem resposta programada"
+            return _Resp(respostas[i])
+        return _Resp(respostas)
+
+    monkeypatch.setattr(pluggy.httpx.Client, "get", _fake_get)
+
+    def programa(respostas):
+        estado["respostas"] = respostas
+        chamadas.clear()
+
+    programa.chamadas = chamadas
+    return programa
+
+
+def usuario_pagante(plan: str = "pro") -> int:
+    """Usuário novo, com id PEQUENO, já com plano. Acima de ~2e9 o handler do
+    bot troca o id por hash (`_normalize_user_id`) e o lançamento cai noutro
+    usuário. A limpeza é a do `_auto_cleanup_orphan_users`."""
+    uid = int(uuid.uuid4().int % 900_000_000) + 1
+    ensure_user(uid)
+    return promote_to_pro(uid, plan)
+
+
+@pytest.fixture()
+def pro_small_uid() -> int:
+    return usuario_pagante()

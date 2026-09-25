@@ -17,6 +17,7 @@ import pytest
 
 from core.types import IncomingMessage
 import core.handle_incoming as hi
+from conftest import usuario_pagante
 
 
 # ---------------------------------------------------------------------------
@@ -40,21 +41,7 @@ def spy_ai(monkeypatch):
 @pytest.fixture
 def pro_uid():
     """User Pro com uid pequeno (nunca normalizado por handle_incoming)."""
-    import uuid as _uuid
-    import db as _db
-    from db.connection import get_conn
-
-    uid = int(_uuid.uuid4().int % 1_000_000_000)
-    _db.ensure_user(uid)
-    with get_conn() as conn:
-        with conn.cursor() as cur:
-            cur.execute(
-                "insert into auth_accounts(user_id, email, password_hash, plan) "
-                "values (%s, %s, 'x', 'pro')",
-                (uid, f"pro-{uid}@test.local"),
-            )
-        conn.commit()
-    return uid
+    return usuario_pagante()
 
 
 def _msg(uid: int, text: str, platform: str = "whatsapp") -> IncomingMessage:
@@ -628,24 +615,13 @@ def test_ia_com_valor_valor_legitimo_continua_passando(pro_uid, ia_de_esclarecim
 # Porta 3 (numeração em `core/intent_router.py`): a fila do `multi_launch_values`
 # (`core/handlers/launches.py::resolve_multi_launch_value`).
 #
-# Usuário GRÁTIS de propósito: quando estes casos foram escritos, para o Pro a
-# IA sequestrava o turno antes e a porta ficava escondida — é esse mascaramento
-# que fez a rodada 1 concluir, errado, que ela não reproduzia. O #142 fechou o
-# buraco (`multi_launch_values` ganhou `suprime_ia=True` no `_REGISTRO` de
-# `db/pending.py`, e `tests/test_pending_registry.py` prende isso pelo Pro),
-# então hoje o Grátis é só o caminho mais curto, não o único que enxerga.
+# Usuário PAGANTE (`pro_small_uid`, do conftest). No v2 não existe Grátis:
+# `free` é "sem plano", e esse o gate barra antes do `route()` — o gate tem
+# suíte própria (`test_paywall_gate_*`). Desde o #142 o pagante enxerga a porta
+# (`multi_launch_values` tem `suprime_ia=True` no `_REGISTRO` de
+# `db/pending.py`, preso em `tests/test_pending_registry.py`), então ele é o
+# caminho real.
 # ---------------------------------------------------------------------------
-
-@pytest.fixture
-def free_uid():
-    """User do Grátis — sem linha em `auth_accounts`."""
-    import uuid as _uuid
-    import db as _db
-
-    uid = int(_uuid.uuid4().int % 1_000_000_000)
-    _db.ensure_user(uid)
-    return uid
-
 
 def _fila_de_dois(uid: int) -> str:
     resp = _send(uid, "paguei o aluguel e paguei a luz")
@@ -661,8 +637,8 @@ def _fila_de_dois(uid: int) -> str:
     ("0", "apagava a pendência e a luz sumia da fila"),
     ("1" * 400, "parse_money devolve inf → '⚠️ Ocorreu um erro interno'"),
 ])
-def test_multi_launch_recusa_valor_perigoso_e_mantem_a_fila(free_uid, spy_ai, resposta, motivo):
-    uid = free_uid
+def test_multi_launch_recusa_valor_perigoso_e_mantem_a_fila(pro_small_uid, spy_ai, resposta, motivo):
+    uid = pro_small_uid
     import db
     _fila_de_dois(uid)
 
@@ -677,9 +653,9 @@ def test_multi_launch_recusa_valor_perigoso_e_mantem_a_fila(free_uid, spy_ai, re
     assert fila == ["aluguel", "luz"], f"a fila foi mexida: {fila}"
 
 
-def test_multi_launch_pontuacao_final_nao_infla(free_uid, spy_ai):
+def test_multi_launch_pontuacao_final_nao_infla(pro_small_uid, spy_ai):
     """`132,50.` gravava R$ 13.250,00 (parse_money lê a vírgula como milhar)."""
-    uid = free_uid
+    uid = pro_small_uid
     import db
     _fila_de_dois(uid)
 
@@ -695,9 +671,9 @@ def test_multi_launch_pontuacao_final_nao_infla(free_uid, spy_ai):
     ("cinquenta", 50.0),            # por extenso, sem dígito
     ("paguei 132 no mercado", 132.0),  # frase: segue com o `_extract_valor`
 ])
-def test_multi_launch_positivo_o_aperto_nao_recusa_tudo(free_uid, spy_ai, resposta, esperado):
+def test_multi_launch_positivo_o_aperto_nao_recusa_tudo(pro_small_uid, spy_ai, resposta, esperado):
     """Controle positivo da porta 3."""
-    uid = free_uid
+    uid = pro_small_uid
     import db
     _fila_de_dois(uid)
 
@@ -708,9 +684,9 @@ def test_multi_launch_positivo_o_aperto_nao_recusa_tudo(free_uid, spy_ai, respos
     assert abs(float(lancs[0]["valor"])) == esperado, lancs[0]
 
 
-def test_multi_launch_texto_sem_valor_ainda_abandona(free_uid, spy_ai):
+def test_multi_launch_texto_sem_valor_ainda_abandona(pro_small_uid, spy_ai):
     """Controle negativo do aperto: mudar de assunto continua largando a fila."""
-    uid = free_uid
+    uid = pro_small_uid
     _fila_de_dois(uid)
 
     resp = _send(uid, "saldo")
@@ -834,9 +810,9 @@ def test_clarification_dano_nao_some_com_palavra_na_frente(pro_uid, spy_ai, resp
 
 
 @pytest.mark.parametrize("resposta,recusa", _PERIGOSOS_COM_PREFIXO)
-def test_multi_launch_dano_nao_some_com_palavra_na_frente(free_uid, spy_ai, resposta, recusa):
+def test_multi_launch_dano_nao_some_com_palavra_na_frente(pro_small_uid, spy_ai, resposta, recusa):
     """B2, porta do multi-lançamento: mesma tabela, mesma fonte de verdade."""
-    uid = free_uid
+    uid = pro_small_uid
     import db
     _fila_de_dois(uid)
 
@@ -905,9 +881,9 @@ def test_clarification_abandona_comando_mesmo_com_numero(pro_uid, spy_ai, comand
 
 
 @pytest.mark.parametrize("comando", COMANDOS_COM_NUMERO + COMANDOS_SEM_NUMERO)
-def test_multi_launch_abandona_comando_mesmo_com_numero(free_uid, spy_ai, comando):
+def test_multi_launch_abandona_comando_mesmo_com_numero(pro_small_uid, spy_ai, comando):
     """Porta 3 — mesma tabela, mesma fonte de verdade."""
-    uid = free_uid
+    uid = pro_small_uid
     import db
     _fila_de_dois(uid)
 
@@ -923,14 +899,14 @@ def test_multi_launch_abandona_comando_mesmo_com_numero(free_uid, spy_ai, comand
 @pytest.mark.parametrize("resposta,esperado", [
     ("132 reais", 132.0), ("50 pila", 50.0), ("10 mil", 10000.0),
 ])
-def test_multi_launch_continua_registrando_o_valor(free_uid, spy_ai, resposta, esperado):
+def test_multi_launch_continua_registrando_o_valor(pro_small_uid, spy_ai, resposta, esperado):
     """Coluna 1 da porta 3: o passo 1 não pode sequestrar a resposta certa.
 
     As três classificam `launches.add` 0.95, que NÃO está no `ABANDONA` — o
     conjunto é mundo fechado. Se algum intent de valor entrar lá, a fila é
     largada e o dinheiro some.
     """
-    uid = free_uid
+    uid = pro_small_uid
     import db
     _fila_de_dois(uid)
 
@@ -999,9 +975,9 @@ def test_controle_negativo_sem_o_separador_a_descricao_infla_o_valor(pro_uid, sp
 
 @pytest.mark.parametrize("resposta,esperado", RESPOSTAS_QUE_PARECEM_COMANDO)
 def test_multi_launch_nao_perde_a_fila_com_resposta_que_parece_comando(
-        free_uid, spy_ai, resposta, esperado):
+        pro_small_uid, spy_ai, resposta, esperado):
     """Com a blacklist, isto apagava a fila INTEIRA e não registrava nada."""
-    uid = free_uid
+    uid = pro_small_uid
     import db
     _fila_de_dois(uid)
 
@@ -1055,7 +1031,7 @@ def test_clarification_nao_perde_a_pergunta_com_resposta_que_parece_comando(
     assert (_pendencia(uid) or {}).get("action_type") != "clarification", _pendencia(uid)
 
 
-def test_controle_negativo_credit_handle_no_conjunto_apaga_a_fila(free_uid, spy_ai, monkeypatch):
+def test_controle_negativo_credit_handle_no_conjunto_apaga_a_fila(pro_small_uid, spy_ai, monkeypatch):
     """Pôr `credit.handle` no `ABANDONA` tem que reproduzir o bloqueante.
 
     Injetado no caso verde
@@ -1066,7 +1042,7 @@ def test_controle_negativo_credit_handle_no_conjunto_apaga_a_fila(free_uid, spy_
 
     monkeypatch.setattr(IR, "ABANDONA", IR.ABANDONA | {"credit.handle"})
 
-    uid = free_uid
+    uid = pro_small_uid
     _fila_de_dois(uid)
 
     _send(uid, "132 no cartao")
@@ -1077,7 +1053,7 @@ def test_controle_negativo_credit_handle_no_conjunto_apaga_a_fila(free_uid, spy_
         f"a fila TINHA que ter sido apagada: {pend}"
 
 
-def test_passo_1_da_porta_3_nao_apaga_pergunta_de_outra_tarefa(free_uid, spy_ai, monkeypatch):
+def test_passo_1_da_porta_3_nao_apaga_pergunta_de_outra_tarefa(pro_small_uid, spy_ai, monkeypatch):
     """O abandono da porta 3 é CAS, não `clear_pending_action`.
 
     `pending_actions` é UMA linha por usuário: entre o `route()` ler a fila e o
@@ -1089,7 +1065,7 @@ def test_passo_1_da_porta_3_nao_apaga_pergunta_de_outra_tarefa(free_uid, spy_ai,
     import core.intent_router as IR
     import db
 
-    uid = free_uid
+    uid = pro_small_uid
     _fila_de_dois(uid)
 
     nova = {"bill_id": 99, "name": "Internet"}
@@ -1123,8 +1099,8 @@ def test_passo_1_da_porta_3_nao_apaga_pergunta_de_outra_tarefa(free_uid, spy_ai,
     ("132.", 132.0), ("1.500.", 1500.0),
     ("foi 132.", 132.0), ("paguei 132.  ", 132.0),
 ])
-def test_multi_launch_ponto_final_sem_virgula_registra(free_uid, spy_ai, resposta, esperado):
-    uid = free_uid
+def test_multi_launch_ponto_final_sem_virgula_registra(pro_small_uid, spy_ai, resposta, esperado):
+    uid = pro_small_uid
     import db
     _fila_de_dois(uid)
 
@@ -1136,7 +1112,7 @@ def test_multi_launch_ponto_final_sem_virgula_registra(free_uid, spy_ai, respost
 
 @pytest.mark.parametrize("resposta", ["132.", "1.500.", "foi 132.", "paguei 132.  "])
 def test_controle_negativo_porta_3_sem_limpar_a_pontuacao_recusa(
-        free_uid, spy_ai, monkeypatch, resposta):
+        pro_small_uid, spy_ai, monkeypatch, resposta):
     """Controle: desliga a limpeza e os quatro casos verdes ficam vermelhos.
 
     O `import` da porta 3 é local, então o alvo é o `utils_text`.
@@ -1144,7 +1120,7 @@ def test_controle_negativo_porta_3_sem_limpar_a_pontuacao_recusa(
     import db
     import utils_text
 
-    uid = free_uid
+    uid = pro_small_uid
     _fila_de_dois(uid)
     monkeypatch.setattr(utils_text, "limpa_pontuacao_final", lambda s: s or "")
 
@@ -1192,14 +1168,6 @@ _SUFIXOS = ["", " da luz", " - da luz", " — luz", ". foi isso", " no mercado",
             ", foi isso", " reais", ".", " total"]
 
 
-def _novo_free_uid() -> int:
-    import uuid as _uuid
-    import db as _db
-    uid = int(_uuid.uuid4().int % 1_000_000_000)
-    _db.ensure_user(uid)
-    return uid
-
-
 def test_corpus_de_prosa_registra_o_valor_certo(spy_ai):
     """150 células de prosa na porta 3: nenhuma recusa, nenhum valor torto."""
     import db
@@ -1209,7 +1177,7 @@ def test_corpus_de_prosa_registra_o_valor_certo(spy_ai):
         for numero, esperado in _NUMEROS:
             for sufixo in _SUFIXOS:
                 texto = f"{prefixo}{numero}{sufixo}"
-                uid = _novo_free_uid()
+                uid = usuario_pagante()
                 _fila_de_dois(uid)
                 resp = _send(uid, texto)
                 lancs = db.list_launches(uid, limit=1)
@@ -1252,10 +1220,9 @@ def test_clarification_prosa_registra_o_valor_certo(pro_uid, spy_ai, resposta, e
 @pytest.mark.parametrize("resposta,esperado", _PROSA)
 def test_botao_ja_paguei_prosa_paga_o_valor_certo(monkeypatch, resposta, esperado):
     """Porta 4, pelo `process_message` real — a que roda antes do handler."""
-    import uuid
     import db.bills as B
 
-    uid = int(uuid.uuid4().int % 1_000_000_000)
+    uid = usuario_pagante()
     from tests.test_bill_amount_pending import (_monta_conta_variavel,
                                                 _manda_texto_no_wa,
                                                 _toca_ja_paguei)
@@ -1274,7 +1241,7 @@ def test_botao_ja_paguei_prosa_paga_o_valor_certo(monkeypatch, resposta, esperad
 @pytest.mark.parametrize("resposta", ["paguei 132 - da luz", "132 — luz",
                                       "gastei 50 - mercado", "luz - 132"])
 def test_controle_negativo_traco_de_prosa_como_sinal_recusa(
-        free_uid, spy_ai, monkeypatch, resposta):
+        pro_small_uid, spy_ai, monkeypatch, resposta):
     """Volta a regra antiga do sinal: os quatro casos verdes ficam vermelhos.
 
     A regra antiga era "traço de qualquer lado do bloco = negativo", e ela
@@ -1297,7 +1264,7 @@ def test_controle_negativo_traco_de_prosa_como_sinal_recusa(
                 return "nao_positivo"
         return real(texto, valor)
 
-    uid = free_uid
+    uid = pro_small_uid
     _fila_de_dois(uid)
     monkeypatch.setattr(utils_text, "valor_perigoso", regra_antiga)
 
@@ -1312,7 +1279,7 @@ def test_controle_negativo_traco_de_prosa_como_sinal_recusa(
     ("paguei 132,50. foi isso", 13250.0), ("1.234,56, foi isso", None),
 ])
 def test_controle_negativo_pontuacao_so_no_fim_da_mensagem(
-        free_uid, spy_ai, monkeypatch, resposta, inflado):
+        pro_small_uid, spy_ai, monkeypatch, resposta, inflado):
     """Volta o `rstrip(" .!")` sozinho — que não alcança a prosa DEPOIS.
 
     Dois estragos diferentes, e o controle prende os dois: sem vírgula o
@@ -1323,7 +1290,7 @@ def test_controle_negativo_pontuacao_so_no_fim_da_mensagem(
     import db
     import utils_text
 
-    uid = free_uid
+    uid = pro_small_uid
     _fila_de_dois(uid)
     monkeypatch.setattr(utils_text, "limpa_pontuacao_final",
                         lambda raw: (raw or "").rstrip(" .!"))
@@ -1350,8 +1317,8 @@ _PROSA_PERIGOSA = [
 
 
 @pytest.mark.parametrize("resposta,recusa", _PROSA_PERIGOSA)
-def test_prosa_perigosa_recusada_com_a_fila_viva(free_uid, spy_ai, resposta, recusa):
-    uid = free_uid
+def test_prosa_perigosa_recusada_com_a_fila_viva(pro_small_uid, spy_ai, resposta, recusa):
+    uid = pro_small_uid
     import db
     _fila_de_dois(uid)
 

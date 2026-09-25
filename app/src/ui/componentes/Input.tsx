@@ -1,4 +1,4 @@
-import { useEffect } from "react";
+import { useEffect, type Ref } from "react";
 import { AccessibilityInfo, TextInput, View, type TextInputProps } from "react-native";
 
 import { useAvisoAoErrar } from "@/ui/haptics";
@@ -15,6 +15,8 @@ interface Props
   desativado?: boolean;
   /** Ícone à esquerda, dentro do contorno do campo (E-mail/Senha do login). Sem ele, o campo é IDÊNTICO ao de antes — snapshot preservado. */
   icone?: NomeIcone;
+  /** Vai direto ao `TextInput` (React 19: `ref` é prop comum), para quem precisa devolver o foco. */
+  ref?: Ref<TextInput>;
 }
 
 /**

@@ -1,0 +1,33 @@
+<!doctype html>
+<html lang="pt-BR">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+  <meta name="color-scheme" content="dark">
+  <meta name="theme-color" content="#09090b">
+  <title>PigBank · Visão geral</title>
+  <link rel="icon" href="../frontend/brand/favicon.png">
+  <link rel="preload" href="../frontend/fonts/Inter-Variable.woff2" as="font" type="font/woff2" crossorigin>
+  <link rel="stylesheet" href="../frontend/phosphor.css">
+  <style>
+    /* As fontes são as do site; URLs relativas a esta página. A do Phosphor é
+       redeclarada porque a do phosphor.css é absoluta (/fonts/), rota do backend. */
+    @font-face { font-family: "Inter"; font-style: normal; font-weight: 100 900; font-display: swap; src: url("../frontend/fonts/Inter-Variable.woff2") format("woff2-variations"); }
+    @font-face { font-family: "Phosphor"; font-display: block; src: url("../frontend/fonts/Phosphor.woff2") format("woff2"); }
+    html { background: #09090b; }
+  </style>
+  <!-- dashboard-app.* é gerado por `npm --prefix webapp run build:dashboard`. Sirva da
+       raiz do repositório (ex.: `python3 -m http.server 8897`): a página carrega
+       ../frontend/fonts e os assets de marca. -->
+  <link rel="stylesheet" href="dashboard-app.css">
+  <!-- O painel de chat é o de produção (ilha webapp/src/chat); a faixa do Piggy o abre. -->
+  <link rel="stylesheet" href="../frontend/chat-app.css">
+  <script defer src="dashboard-app.js"></script>
+  <script defer src="../frontend/chat-app.js"></script>
+</head>
+<body>
+  <div id="pigbank-dashboard"></div>
+  <div id="pigbank-chat-root"></div>
+  <noscript>Este painel precisa de JavaScript.</noscript>
+</body>
+</html>

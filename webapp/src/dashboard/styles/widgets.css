@@ -1,0 +1,161 @@
+/* Moldura dos widgets, o bloco principal, os números e os gráficos em SVG. */
+.board-actions { display: flex; gap: 8px; }
+.board-hint kbd { margin: 0 2px; }
+
+.w {
+  container-type: size;
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  height: 100%;
+  padding: 16px 18px 18px;
+  box-shadow: var(--lift);
+}
+.w-head { display: flex; align-items: center; gap: 10px; min-height: 30px; }
+.w-title {
+  flex: 1; min-width: 0;
+  font-size: 13px; font-weight: 500; letter-spacing: 0;
+  color: var(--ink-2);
+  white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+}
+.w-aside { display: flex; align-items: center; gap: 8px; }
+.w-aside-num { font-size: 12.5px; }
+.w-grip { display: none; fill: var(--ink-3); flex: none; }
+.w-body { flex: 1; min-height: 0; display: flex; flex-direction: column; gap: 12px; }
+.w-lede { font-size: 12.5px; color: var(--ink-2); }
+
+.board[data-editing] .w-body,
+.board[data-editing] .w-aside { pointer-events: none; }
+.board[data-editing] .w-grip { display: block; }
+.board[data-editing] [data-slot="widget"]:hover .w-grip { fill: var(--ink); }
+
+/* Bloco principal: saldo previsto */
+.hero-top { display: flex; flex-wrap: wrap; align-items: flex-end; justify-content: space-between; gap: 12px 24px; }
+.hero-value {
+  display: block;
+  font-size: 52px; font-weight: 600; line-height: 1;
+  letter-spacing: -0.035em;
+  font-variant-numeric: tabular-nums;
+  --number-flow-mask-height: 0.2em;
+}
+.hero-sub { margin-top: 10px; font-size: 13px; color: var(--ink-2); }
+.hero-facts { display: flex; gap: 22px; margin: 0; }
+.hero-facts dt { font-size: 12px; color: var(--ink-3); }
+.hero-facts dd { margin: 2px 0 0; font-size: 15px; font-weight: 600; letter-spacing: -0.01em; font-variant-numeric: tabular-nums; }
+
+.legend { display: flex; flex-wrap: wrap; gap: 6px 16px; font-size: 12px; color: var(--ink-2); }
+.legend li { display: inline-flex; align-items: center; gap: 7px; }
+.key { display: inline-block; width: 16px; height: 2px; border-radius: 2px; background: var(--ink); }
+.key.forecast { height: 0; background: none; border-top: 2px dashed rgba(244, 244, 246, 0.6); border-radius: 0; }
+.key.band { height: 8px; background: rgba(255, 45, 142, 0.22); }
+.key.sim { background: var(--ink-2); }
+.key.sim.gain { background: var(--gain); }
+.key.sim.warn { background: var(--warn); }
+
+.chart { position: relative; flex: 1; min-height: 120px; }
+.chart svg, .nw-chart svg { position: absolute; inset: 0; outline: none; touch-action: pan-y; }
+/* :focus, e não só :focus-visible: o Safari < 15.4 descarta este, e o svg não tem outline. */
+.chart svg:focus { border-radius: 8px; box-shadow: 0 0 0 2px var(--pink); }
+.chart svg:focus:not(:focus-visible) { box-shadow: none; }
+.grid { stroke: var(--rule); stroke-width: 1; shape-rendering: crispEdges; }
+.grid.zero { stroke: rgba(255, 122, 69, 0.55); }
+.axis { fill: var(--ink-3); font-size: 11px; font-variant-numeric: tabular-nums; }
+.line { fill: none; stroke-width: 2; stroke-linejoin: round; stroke-linecap: round; }
+.line.real { stroke: var(--ink); }
+.line.forecast { stroke: rgba(244, 244, 246, 0.55); stroke-dasharray: 4 5; }
+.line.sim { stroke: var(--ink-2); }
+.line.sim.gain { stroke: var(--gain); }
+.line.sim.warn { stroke: var(--warn); }
+.band { fill: rgba(255, 45, 142, 0.08); }
+.gain-area { fill: var(--gain-wash); }
+.gain-area.warn { fill: var(--warn-wash); }
+.mark { fill: var(--ink-2); stroke: rgb(var(--tw-card)); stroke-width: 2; }
+.mark.in { fill: var(--gain); }
+.mark.inv { fill: var(--warn); }
+.clip-rect { transform-box: fill-box; transform-origin: left center; }
+.today-line { stroke: var(--pink-line); stroke-width: 1; }
+.today-dot { fill: var(--pink); stroke: rgb(var(--tw-card)); stroke-width: 2; }
+.today-pulse {
+  fill: none; stroke: var(--pink); stroke-width: 1.5;
+  transform-box: fill-box; transform-origin: center;
+  animation: pulse 2.4s var(--ease-out) infinite;
+}
+@keyframes pulse {
+  0% { transform: scale(1); opacity: 0.8; }
+  100% { transform: scale(3.2); opacity: 0; }
+}
+.cross line, .cross-line { stroke: rgba(255, 255, 255, 0.32); stroke-width: 1; }
+.cross circle, .cross-dot { fill: var(--ink); stroke: rgb(var(--tw-card)); stroke-width: 2; }
+.cross circle.sim { fill: var(--ink-2); }
+.cross circle.sim.gain { fill: var(--gain); }
+.cross circle.sim.warn { fill: var(--warn); }
+
+/* Safari < 16 ignora o @container: no celular a tela decide (bloco = tela − 68px). */
+@media (max-width: 508px) {
+  .w-hero .w-head { flex-wrap: wrap; }
+  .w-hero .w-aside, .w-hero .seg { width: 100%; }
+  .hero-value { font-size: 40px; }
+  .hero-facts { gap: 16px; }
+}
+@container (max-width: 440px) {
+  .w-hero .w-head { flex-wrap: wrap; }
+  .w-hero .w-aside, .w-hero .seg { width: 100%; }
+  .hero-value { font-size: 40px; }
+  .hero-facts { gap: 16px; }
+}
+
+/* Resumo do mês: quatro quadrantes separados por filetes */
+.stats {
+  flex: 1;
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  grid-template-rows: repeat(2, minmax(0, 1fr));
+  margin: 0 -18px -18px;
+  border-top: 1px solid var(--rule);
+}
+.stat { display: flex; flex-direction: column; gap: 8px; min-width: 0; padding: 14px 18px 16px; }
+.stat:nth-child(odd) { border-right: 1px solid var(--rule); }
+.stat:nth-child(-n + 2) { border-bottom: 1px solid var(--rule); }
+.stat-title { display: flex; align-items: center; gap: 7px; font-size: 12.5px; font-weight: 500; color: var(--ink-3); }
+.stat-key { width: 6px; height: 6px; border-radius: 50%; flex: none; }
+@media (max-width: 468px) {
+  .stat-value { font-size: 24px; }
+  .stat { padding: 12px 14px 14px; }
+}
+@container (max-width: 400px) {
+  .stat-value { font-size: 24px; }
+  .stat { padding: 12px 14px 14px; }
+}
+
+/* Uma coluna (celular): cada bloco cresce até o conteúdo, sem célula quadrada */
+.board[data-fit] .w { container-type: inline-size; height: auto; }
+.board[data-fit] .chart { flex: none; height: 240px; }
+.board[data-fit] .nw-chart { flex: none; height: 140px; }
+.board[data-fit] .bills { max-height: 420px; }
+.board[data-fit] .stats { grid-template-rows: auto auto; }
+
+/* Números soltos */
+.stat-value {
+  display: block;
+  font-size: 30px; font-weight: 600; line-height: 1.05;
+  letter-spacing: -0.03em;
+  font-variant-numeric: tabular-nums;
+}
+.stat-delta { font-size: 12.5px; color: var(--ink-2); margin-top: -4px; }
+.stat-foot { margin-top: auto; display: grid; gap: 8px; }
+.stat-note { font-size: 12.5px; }
+.stat-note b { font-weight: 600; }
+.mini-rows { display: grid; gap: 6px; margin: 0; }
+.mini-rows div { display: flex; flex-wrap: wrap; justify-content: space-between; gap: 0 8px; font-size: 12.5px; }
+.mini-rows dt { color: var(--ink-3); }
+.mini-rows dd { margin: 0; }
+
+.pace { display: grid; gap: 5px; }
+.pace-bar { display: block; height: 6px; border-radius: 3px; background: var(--plane-3); overflow: hidden; }
+.pace-bar i { display: block; height: 100%; border-radius: 3px; background: var(--alert); transform-origin: left; transition: transform 600ms var(--ease-out); }
+.pace-bar.prev i { background: rgba(255, 255, 255, 0.3); }
+.pace-legend { display: flex; justify-content: space-between; font-size: 11px; }
+
+@container (max-height: 230px) {
+  .stat-foot { display: none; }
+}

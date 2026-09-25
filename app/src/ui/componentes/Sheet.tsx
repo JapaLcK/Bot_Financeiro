@@ -1,6 +1,7 @@
 import type { NativeStackNavigationOptions } from "expo-router";
-import type { ReactNode } from "react";
-import { View } from "react-native";
+import { useEffect, useRef, type ReactNode, type RefObject } from "react";
+// eslint-disable-next-line no-restricted-imports -- só o `TextInput.State` (quem tem o foco); nada de texto é renderizado aqui.
+import { Keyboard, Platform, ScrollView, TextInput, View } from "react-native";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 
 import { useTema } from "@/ui/tema";
@@ -30,6 +31,31 @@ export const OPCOES_SHEET: NativeStackNavigationOptions = {
 
 interface Props {
   children: ReactNode;
+  /**
+   * Conteúdo que pode passar da altura da sheet. O `ScrollView` tem de ser a
+   * RAIZ da casca: no `formSheet` do iOS o `react-native-screens` acha o
+   * primeiro `ScrollView` descendente e impõe a ele o frame da tela inteira
+   * (`RNSScreen.mm`, `applyFrameCorrectionForDescendantScrollView`) — aninhado
+   * dentro do padding, ele ia para (0,0) e o conteúdo colava na borda e cobria
+   * a alça. Na raiz, o padding fica no `contentContainerStyle` e sobrevive.
+   *
+   * Teclado (iOS): `automaticallyAdjustKeyboardInsets` põe o teclado como
+   * inset inferior e rola até o campo focado (`RCTScrollViewComponentView.mm`,
+   * `_keyboardWillChangeFrame`). Sem ela, na sheet inteira o teclado cobria o
+   * campo do código do MFA. No Android a prop não existe; lá é o
+   * `windowSoftInputMode` (padrão `resize` do Expo).
+   *
+   * Ela rola só até o CURSOR (`RCTTextInputComponentView.mm`,
+   * `reactUpdateResponderOffsetForScrollView`), e o botão que vem depois do
+   * campo ficava atrás do teclado. Por isso, no `keyboardDidShow` (o inset do
+   * teclado já aplicado), a casca pede rolagem até o rótulo do campo focado: o
+   * `scrollTo` nativo corta no fim do conteúdo (`RCTScrollViewComponentView.mm`,
+   * `scrollTo:y:animated:`), então o resultado é "até o fim, mas nunca
+   * passando do campo" — botão visível quando cabe, campo visível sempre.
+   * Só no iOS: no Android o `resize` já encolhe a tela para o teclado, e esse
+   * caminho nunca foi verificado num aparelho Android.
+   */
+  rolar?: boolean;
 }
 
 /**
@@ -37,33 +63,64 @@ interface Props {
  * nunca contorno de controle, escondida do leitor de tela), área segura
  * inferior e respiro lateral. Usada DENTRO da rota aberta com `OPCOES_SHEET`.
  */
-export function SheetConteudo({ children }: Props) {
+export function SheetConteudo({ children, rolar = false }: Props) {
   const { cores } = useTema();
   const insets = useSafeAreaInsets();
+  const rolagem = useRef<ScrollView>(null);
+  const conteudo = useRef<View>(null);
+
+  useEffect(() => {
+    if (!rolar || Platform.OS !== "ios") return;
+    const sub = Keyboard.addListener("keyboardDidShow", () => {
+      const campo = TextInput.State.currentlyFocusedInput();
+      if (!conteudo.current || !campo) return;
+      // `xxxl` acima do TextInput: o rótulo do `Input` fica ali.
+      campo.measureLayout(conteudo.current, (_x, y) => rolagem.current?.scrollTo({ y: y - espaco.xxxl }), () => undefined);
+    });
+    return () => sub.remove();
+  }, [rolar]);
+
+  const preenchimento = {
+    paddingHorizontal: espaco.lg,
+    paddingBottom: insets.bottom + espaco.lg,
+  };
+  const alca = (
+    <View
+      importantForAccessibility="no-hide-descendants"
+      accessibilityElementsHidden
+      style={{
+        alignSelf: "center",
+        width: 36,
+        height: 4,
+        borderRadius: raio.sm,
+        backgroundColor: cores.border,
+        marginTop: espaco.sm,
+        marginBottom: espaco.lg,
+      }}
+    />
+  );
+
+  if (rolar) {
+    return (
+      <ScrollView
+        ref={rolagem}
+        // O .d.ts do RN tipa sem o `| null` que o `useRef` do React 19 devolve.
+        innerViewRef={conteudo as RefObject<View>}
+        testID="sheet-conteudo"
+        style={{ flex: 1, backgroundColor: cores.bg }}
+        contentContainerStyle={preenchimento}
+        keyboardShouldPersistTaps="handled"
+        automaticallyAdjustKeyboardInsets
+      >
+        {alca}
+        {children}
+      </ScrollView>
+    );
+  }
 
   return (
-    <View
-      testID="sheet-conteudo"
-      style={{
-        flex: 1,
-        backgroundColor: cores.bg,
-        paddingHorizontal: espaco.lg,
-        paddingBottom: insets.bottom + espaco.lg,
-      }}
-    >
-      <View
-        importantForAccessibility="no-hide-descendants"
-        accessibilityElementsHidden
-        style={{
-          alignSelf: "center",
-          width: 36,
-          height: 4,
-          borderRadius: raio.sm,
-          backgroundColor: cores.border,
-          marginTop: espaco.sm,
-          marginBottom: espaco.lg,
-        }}
-      />
+    <View testID="sheet-conteudo" style={{ flex: 1, backgroundColor: cores.bg, ...preenchimento }}>
+      {alca}
       {children}
     </View>
   );

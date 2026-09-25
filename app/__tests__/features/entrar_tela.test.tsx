@@ -83,6 +83,43 @@ describe("(auth)/entrar — tela real", () => {
     fireEvent.press(screen.getByRole("button", { name: "Tentar de novo" }));
     expect(screen.getByLabelText("E-mail")).toBeTruthy();
     expect(screen.getByLabelText("E-mail").props.value).toBe("a@x.com");
+    expect(screen.getByLabelText("Senha").props.value).toBe("");
+  });
+
+  it("a senha fica no campo enquanto o login não responde (o iOS só oferece salvar assim) e sai quando volta o 401", async () => {
+    const portao = segurar();
+    rotear({ "/auth/login": async () => { await portao.promessa; return resposta(401, { detail: "E-mail ou senha incorretos." }); } });
+    renderRouter("./app", { initialUrl: "/entrar" });
+    await waitFor(() => expect(screen).toHavePathname("/entrar"));
+
+    fireEvent.changeText(screen.getByLabelText("E-mail"), "ana@x.com");
+    fireEvent.changeText(screen.getByLabelText("Senha"), "s3nha");
+    fireEvent.press(screen.getByRole("button", { name: "Entrar" }));
+    expect(screen.getByLabelText("Senha").props.value).toBe("s3nha");
+
+    await act(async () => {
+      portao.soltar();
+      await respirar();
+    });
+    expect(screen.getByText("E-mail ou senha incorretos.")).toBeTruthy();
+    expect(screen.getByLabelText(/^Senha/).props.value).toBe("");
+  });
+
+  it("Voltar do MFA: o formulário reaparece com a senha vazia", async () => {
+    rotear({ "/auth/login": () => resposta(200, MFA_ANA) });
+    renderRouter("./app", { initialUrl: "/entrar" });
+    await waitFor(() => expect(screen).toHavePathname("/entrar"));
+
+    fireEvent.changeText(screen.getByLabelText("E-mail"), "ana@x.com");
+    fireEvent.changeText(screen.getByLabelText("Senha"), "s3nha");
+    await act(async () => {
+      fireEvent.press(screen.getByRole("button", { name: "Entrar" }));
+      await respirar();
+    });
+    await waitFor(() => screen.getByLabelText("Código de 6 dígitos"));
+
+    fireEvent.press(screen.getByRole("button", { name: "Voltar" }));
+    expect(screen.getByLabelText("Senha").props.value).toBe("");
   });
 
   it("M3 — botões sociais desativados carregam accessibilityHint 'Em breve'", async () => {
@@ -98,6 +135,24 @@ describe("(auth)/entrar — tela real", () => {
     await waitFor(() => expect(screen).toHavePathname("/esqueci-senha"));
 
     expect(router.canGoBack()).toBe(true);
+  });
+
+  it("senha errada: o aviso aparece e some quando a pessoa volta a digitar", async () => {
+    rotear({ "/auth/login": () => resposta(401, { detail: "E-mail ou senha incorretos." }) });
+    renderRouter("./app", { initialUrl: "/entrar" });
+    await waitFor(() => expect(screen).toHavePathname("/entrar"));
+
+    fireEvent.changeText(screen.getByLabelText("E-mail"), "ana@x.com");
+    fireEvent.changeText(screen.getByLabelText("Senha"), "errada");
+    await act(async () => {
+      fireEvent.press(screen.getByRole("button", { name: "Entrar" }));
+      await respirar();
+    });
+    expect(screen.getByText("E-mail ou senha incorretos.")).toBeTruthy();
+
+    fireEvent.changeText(screen.getByLabelText(/^Senha/), "errad");
+    expect(screen.queryByText("E-mail ou senha incorretos.")).toBeNull();
+    expect(screen.getByLabelText("Senha")).toBeTruthy();
   });
 
   it("código errado e depois o certo autentica sem pedir a senha de novo (400 mfa_code_invalid mantém o desafio)", async () => {

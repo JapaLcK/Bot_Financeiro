@@ -18,7 +18,8 @@ Estrutura dos cenários:
   - IA falha (exception) → mensagem de erro padrão
 
 Mocka `is_pro`, `db.ai_get_pending_action`/`ai_consume_pending_action` e o
-`ai_chat.chat` real pra isolar o gate. Não toca em DB nem em LLM.
+`ai_chat.chat` real pra isolar o gate. Não toca em LLM; só os testes de cota
+esgotada, no fim do arquivo, usam banco real.
 """
 from __future__ import annotations
 
@@ -282,3 +283,50 @@ def test_pending_frase_ambigua_nao_dispara_guard_vai_pra_ia(patches):
     out = mod.handle_ai_chat_command(42, "na verdade deixa quieto", platform="whatsapp")
     assert patches["clear_pending_called"] is False
     assert patches["ai_called_with"] is not None
+
+
+# ─── Cota esgotada no v2, por tier (banco real) ──────────────────────────────
+# Este arquivo roda em v1 (_AINDA_EM_V1 do conftest); a mensagem de cota só
+# existe no v2, então cada teste liga a flag.
+
+def _cota_esgotada(monkeypatch, uid, plan):
+    from datetime import date
+
+    import db
+    from conftest import promote_to_pro
+
+    monkeypatch.setenv("PLANS_V2_ENABLED", "1")
+    promote_to_pro(uid, plan=plan)
+    with db.get_conn() as conn, conn.cursor() as cur:
+        cur.execute(
+            "update auth_accounts set ai_messages_this_month = 1000000, ai_month_reset_at = %s "
+            "where user_id = %s",
+            (date.today().replace(day=1), uid),
+        )
+        conn.commit()
+    return mod.handle_ai_chat_command(uid, "piggy oi", platform="whatsapp")
+
+
+def test_cota_esgotada_essencial_renova_dia_1_e_sugere_plus(user_id, monkeypatch):
+    out = _cota_esgotada(monkeypatch, user_id, "essencial")
+    assert "acabaram" in out
+    assert "dia 1º" in out
+    assert "Plus" in out and "https://pigbankai.com/precos" in out
+    assert "planos pagos" not in out
+
+
+@pytest.mark.parametrize("plan", ["pro", "pro_max"])  # 'pro' = Plus, 'pro_max' = Pro
+def test_cota_esgotada_plus_e_pro_so_renova_sem_upgrade(user_id, monkeypatch, plan):
+    out = _cota_esgotada(monkeypatch, user_id, plan)
+    assert "acabaram" in out
+    assert "dia 1º" in out
+    assert "precos" not in out
+    assert "Plus" not in out and "planos pagos" not in out
+
+
+def test_cota_esgotada_gratis_mantem_texto_dos_planos_pagos(user_id, monkeypatch):
+    out = _cota_esgotada(monkeypatch, user_id, "free")
+    assert out == (
+        "🐷 Suas mensagens com a Piggy deste mês acabaram!\n"
+        "Nos planos pagos a conversa continua: https://pigbankai.com/precos"
+    )

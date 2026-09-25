@@ -3,12 +3,17 @@ from datetime import date
 from unittest.mock import patch
 
 from adapters.whatsapp.wa_app import _daily_report_tick, _dedupe_whatsapp_targets
+from conftest import usuario_pagante
+
+# Os testes do tick usam usuário pagante: o tick filtra por acesso ANTES de
+# olhar o template, e um id sem plano sairia da lista sem medir nada.
 
 
 def test_daily_report_tick_nao_envia_quando_claim_falha():
+    uid = usuario_pagante()
     with patch.dict(os.environ, {"WA_PROACTIVE_TEMPLATE_NAME": "daily_opener"}, clear=False), \
          patch("adapters.whatsapp.wa_app.now_tz") as now_mock, \
-         patch("adapters.whatsapp.wa_app.list_users_with_daily_report_enabled", return_value=[123]), \
+         patch("adapters.whatsapp.wa_app.list_users_with_daily_report_enabled", return_value=[uid]), \
          patch("adapters.whatsapp.wa_app.get_daily_report_prefs", return_value={"enabled": True, "hour": 9, "minute": 0}), \
          patch("adapters.whatsapp.wa_app.claim_daily_report_send", return_value=False) as claim_mock, \
          patch("adapters.whatsapp.wa_app.build_daily_report_text") as build_mock, \
@@ -18,15 +23,16 @@ def test_daily_report_tick_nao_envia_quando_claim_falha():
         now_mock.return_value = type("FakeNow", (), {"hour": 9, "minute": 0, "date": lambda self: date(2026, 4, 23)})()
         _daily_report_tick()
 
-    claim_mock.assert_called_once_with(123, date(2026, 4, 23))
+    claim_mock.assert_called_once_with(uid, date(2026, 4, 23))
     build_mock.assert_not_called()
     template_mock.assert_not_called()
 
 
 def test_daily_report_tick_nao_envia_whatsapp_sem_template_configurado():
+    uid = usuario_pagante()
     with patch.dict(os.environ, {"WA_PROACTIVE_TEMPLATE_NAME": ""}, clear=False), \
          patch("adapters.whatsapp.wa_app.now_tz") as now_mock, \
-         patch("adapters.whatsapp.wa_app.list_users_with_daily_report_enabled", return_value=[123]), \
+         patch("adapters.whatsapp.wa_app.list_users_with_daily_report_enabled", return_value=[uid]), \
          patch("adapters.whatsapp.wa_app.get_daily_report_prefs", return_value={"enabled": True, "hour": 9, "minute": 0}), \
          patch("adapters.whatsapp.wa_app.claim_daily_report_send") as claim_mock, \
          patch("adapters.whatsapp.wa_app.build_daily_report_text", return_value="resumo"), \
@@ -41,6 +47,7 @@ def test_daily_report_tick_nao_envia_whatsapp_sem_template_configurado():
 
 
 def test_daily_report_tick_envia_apenas_template_quando_configurado():
+    uid = usuario_pagante()
     with patch.dict(os.environ, {
         "WA_PROACTIVE_TEMPLATE_NAME": "daily_opener",
         "WA_PROACTIVE_TEMPLATE_LANGUAGE": "pt_BR",
@@ -48,7 +55,7 @@ def test_daily_report_tick_envia_apenas_template_quando_configurado():
         "WA_PROACTIVE_TEMPLATE_STOP_BUTTON": "0",
     }, clear=False), \
          patch("adapters.whatsapp.wa_app.now_tz") as now_mock, \
-         patch("adapters.whatsapp.wa_app.list_users_with_daily_report_enabled", return_value=[123]), \
+         patch("adapters.whatsapp.wa_app.list_users_with_daily_report_enabled", return_value=[uid]), \
          patch("adapters.whatsapp.wa_app.get_daily_report_prefs", return_value={"enabled": True, "hour": 9, "minute": 0}), \
          patch("adapters.whatsapp.wa_app.claim_daily_report_send", return_value=True), \
          patch("adapters.whatsapp.wa_app.build_daily_report_text", return_value="resumo"), \
@@ -68,6 +75,7 @@ def test_daily_report_tick_envia_apenas_template_quando_configurado():
 
 
 def test_daily_report_tick_envia_resumo_como_parametro_do_template_quando_habilitado():
+    uid = usuario_pagante()
     with patch.dict(os.environ, {
         "WA_PROACTIVE_TEMPLATE_NAME": "daily_report",
         "WA_PROACTIVE_TEMPLATE_LANGUAGE": "pt_BR",
@@ -75,7 +83,7 @@ def test_daily_report_tick_envia_resumo_como_parametro_do_template_quando_habili
         "WA_PROACTIVE_TEMPLATE_STOP_BUTTON": "1",
     }, clear=False), \
          patch("adapters.whatsapp.wa_app.now_tz") as now_mock, \
-         patch("adapters.whatsapp.wa_app.list_users_with_daily_report_enabled", return_value=[123]), \
+         patch("adapters.whatsapp.wa_app.list_users_with_daily_report_enabled", return_value=[uid]), \
          patch("adapters.whatsapp.wa_app.get_daily_report_prefs", return_value={"enabled": True, "hour": 9, "minute": 0}), \
          patch("adapters.whatsapp.wa_app.claim_daily_report_send", return_value=True), \
          patch("adapters.whatsapp.wa_app.build_daily_report_text", return_value="resumo"), \

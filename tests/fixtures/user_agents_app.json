@@ -1,0 +1,74 @@
+[
+  {
+    "ua": "PigBankApp/0.1.0 (iPhone 17 Pro; iOS 26.1)",
+    "label": "iPhone 17 Pro • PigBank app",
+    "entrada": {
+      "versao": "0.1.0",
+      "modelo": "iPhone 17 Pro",
+      "so": "ios",
+      "versaoSo": "26.1"
+    }
+  },
+  {
+    "ua": "PigBankApp/0.1.0 (Moto g60; Android 14)",
+    "label": "Moto g60 • PigBank app",
+    "entrada": {
+      "versao": "0.1.0",
+      "modelo": "Moto g(60)",
+      "so": "android",
+      "versaoSo": "14"
+    }
+  },
+  {
+    "ua": "PigBankApp/0.1.0 (iPhone; iOS 26.1)",
+    "label": "iPhone • PigBank app",
+    "entrada": {
+      "versao": "0.1.0",
+      "modelo": null,
+      "so": "ios",
+      "versaoSo": "26.1"
+    }
+  },
+  {
+    "ua": "PigBankApp/0.1.0 (Android; Android 14)",
+    "label": "Android • PigBank app",
+    "entrada": {
+      "versao": "0.1.0",
+      "modelo": null,
+      "so": "android",
+      "versaoSo": "14"
+    }
+  },
+  {
+    "ua": "PigBankApp/0.1.0 (MMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMM; Android 14)",
+    "label": "MMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMM • PigBank app",
+    "entrada": {
+      "versao": "0.1.0",
+      "modelo": "MMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMM",
+      "so": "android",
+      "versaoSo": "14"
+    }
+  },
+  {
+    "ua": "PigBankApp/0.1.0 (bxb; Android 14)",
+    "label": "bxb • PigBank app",
+    "entrada": {
+      "versao": "0.1.0",
+      "modelo": "<b>x\"'</b>",
+      "so": "android",
+      "versaoSo": "14"
+    }
+  },
+  {
+    "ua": "Mozilla/5.0 (iPhone; CPU iPhone OS 17_0 like Mac OS X) AppleWebKit/605.1.15 (KHTML, like Gecko) Mobile/15E148 PigBankApp/1.0",
+    "label": "Navegador • iOS"
+  },
+  {
+    "ua": "PigBankApp/1 (<img src=x onerror=alert>; x)",
+    "label": "Navegador • Outro"
+  },
+  {
+    "ua": "PigBankApp/1 (iPhone\u202e17 orP; iOS 26.1)",
+    "label": "Navegador • iOS"
+  }
+]

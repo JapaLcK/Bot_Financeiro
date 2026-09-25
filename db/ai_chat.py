@@ -28,6 +28,11 @@ from .ai_quota import (
 PENDING_TTL_MINUTES = 10
 DEFAULT_CONTEXT_WINDOW = 20
 
+# Toda gravação no histórico de um user passa por esta trava (até o commit),
+# para o `append_message_if_last` enxergar a última linha de verdade: sem ela,
+# uma resposta da IA ainda não commitada escapa do snapshot da conferência.
+_TRAVA_DO_HISTORICO = "select pg_advisory_xact_lock(hashtext('ai_messages:' || %s))"
+
 
 # ─── Mensagens do chat ──────────────────────────────────────────────────────
 
@@ -42,6 +47,7 @@ def append_message(
 ) -> int:
     """Grava uma mensagem no histórico. Retorna o id da linha criada."""
     with get_conn() as conn, conn.cursor() as cur:
+        cur.execute(_TRAVA_DO_HISTORICO, (str(int(user_id)),))
         cur.execute(
             """
             insert into ai_messages
@@ -105,6 +111,45 @@ def get_recent_messages(user_id: int, limit: int = DEFAULT_CONTEXT_WINDOW) -> li
             msg["name"] = tool_name
         out.append(msg)
     return out
+
+
+def get_last_message(user_id: int) -> Optional[dict[str, Any]]:
+    """Última mensagem do histórico do user: `id`, `role`, `content` e `age` (timedelta
+    medido pelo relógio do banco, o mesmo que gravou `created_at`)."""
+    with get_conn() as conn, conn.cursor() as cur:
+        cur.execute(
+            """
+            select id, role, content, now() - created_at as age
+            from ai_messages
+            where user_id = %s
+            order by created_at desc, id desc
+            limit 1
+            """,
+            (int(user_id),),
+        )
+        return cur.fetchone()
+
+
+def append_message_if_last(user_id: int, last_id: int, role: str, content: str) -> bool:
+    """Grava a mensagem SÓ SE `last_id` ainda é a última do user. A trava do
+    histórico serializa com o `append_message`: a conferência roda depois de
+    qualquer gravação concorrente commitar, então uma resposta nova da IA não
+    vira a penúltima. True se gravou."""
+    with get_conn() as conn, conn.cursor() as cur:
+        cur.execute(_TRAVA_DO_HISTORICO, (str(int(user_id)),))
+        cur.execute(
+            """
+            insert into ai_messages (user_id, role, content)
+            select %s, %s, %s
+            where (select id from ai_messages where user_id = %s
+                   order by created_at desc, id desc limit 1) = %s
+            returning id
+            """,
+            (int(user_id), role, content, int(user_id), int(last_id)),
+        )
+        gravou = cur.fetchone() is not None
+        conn.commit()
+        return gravou
 
 
 # ─── Pending action (write aguardando confirmação) ──────────────────────────

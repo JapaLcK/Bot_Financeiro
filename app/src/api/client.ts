@@ -1,12 +1,15 @@
 import Constants from "expo-constants";
 import { z } from "zod";
 
+import { USER_AGENT } from "./aparelho";
 import { credenciaisSchema } from "./schemas/auth";
 import { lerCredenciais, limparSe, trocarSe } from "../storage/secure";
 
 /** Header que faz o servidor entregar token no corpo e NENHUM cookie. */
 const HEADER_CLIENTE = "X-PigBank-Client";
 const CLIENTE = "app";
+/** Vão em TODA requisição — a comum (`enviar`) e a renovação (`renovar`). */
+const CABECALHOS_DO_APP = { [HEADER_CLIENTE]: CLIENTE, "User-Agent": USER_AGENT };
 
 export class ErroDeApi extends Error {
   constructor(
@@ -183,7 +186,7 @@ async function renovar(refreshDeOrigem: string): Promise<Renovacao> {
         method: "POST",
         headers: {
           Authorization: `Bearer ${refreshDeOrigem}`,
-          [HEADER_CLIENTE]: CLIENTE,
+          ...CABECALHOS_DO_APP,
           "Content-Type": "application/json",
         },
         credentials: "omit",
@@ -307,24 +310,28 @@ type Opcoes = {
    */
   credencial?: { access: string; refresh: string };
   /**
-   * Não renova em 401, e não trata o 401 como fim de sessão.
+   * A rota usa 401 também para uma credencial SECUNDÁRIA — a senha que o
+   * MFA pede de novo numa sessão já aberta. Ali o 401 pode querer dizer "essa
+   * senha está errada", e renovar não resolve nada: renovaria, repetiria, e o
+   * segundo 401 apagaria o cofre — logout por senha errada.
    *
-   * Existe para as rotas que usam 401 para uma credencial SECUNDÁRIA — a senha
-   * numa configuração de dois fatores, por exemplo. Ali o 401 quer dizer "esse
-   * dado está errado", não "sua sessão acabou", e renovar não resolve nada:
-   * mandaria o usuário para a tela de entrada por ter digitado a senha errada
-   * num formulário que já estava autenticado.
+   * O servidor separa os dois: só o 401 de SESSÃO leva `WWW-Authenticate`
+   * (`WWW_AUTHENTICATE_401`, frontend/routes/shared.py; é o mesmo critério do
+   * `auth-refresh.js` do site). Com esta opção: 401 com a marca renova como
+   * qualquer chamada; 401 sem a marca — antes ou depois de renovar — é um
+   * `ErroDeApi` comum, com a sessão intacta.
    *
-   * Nenhuma rota da Fase 1 é assim; o sinalizador existe para que a primeira
-   * que for tenha um caminho certo em vez de descobrir o problema em produção.
+   * Não é "nunca renova": o access token vive 15 minutos, e quem ficou esse
+   * tempo no campo de senha tomaria um 401 de sessão mostrado como "senha
+   * incorreta".
    */
-  semRenovar?: boolean;
+  credencialSecundaria?: boolean;
   sinal?: AbortSignal;
 };
 
 async function enviar(rota: string, opcoes: Opcoes, access: string | null) {
   const metodo = opcoes.metodo ?? "GET";
-  const cabecalhos: Record<string, string> = { [HEADER_CLIENTE]: CLIENTE };
+  const cabecalhos: Record<string, string> = { ...CABECALHOS_DO_APP };
   if (access) cabecalhos["Authorization"] = `Bearer ${access}`;
   // Toda ESCRITA declara JSON, inclusive a que não tem corpo (logout). É a 2ª
   // condição da isenção de CSRF do servidor: um `<form>` cross-site só emite
@@ -355,13 +362,12 @@ async function executar<T>(
   guardadas: { access: string; refresh: string } | null,
 ): Promise<T> {
   let resposta = await enviar(rota, opcoes, guardadas?.access ?? null);
+  // 401 que diz "sessão": todo 401, salvo nas rotas de credencial secundária,
+  // onde só o que traz a marca do servidor.
+  const deSessao = (r: Response) =>
+    r.status === 401 && (!opcoes.credencialSecundaria || !!r.headers?.get("WWW-Authenticate"));
 
-  if (
-    resposta.status === 401 &&
-    !opcoes.semAuth &&
-    !opcoes.credencial &&
-    !opcoes.semRenovar
-  ) {
+  if (deSessao(resposta) && !opcoes.semAuth && !opcoes.credencial) {
     // Sem credencial de origem não há o que renovar — e renovar com a de outro
     // dono é justamente o que a amarração impede.
     if (!guardadas) throw new SessaoExpirada();
@@ -376,7 +382,7 @@ async function executar<T>(
       throw new SessaoExpirada();
     }
     resposta = await enviar(rota, opcoes, renovada.access);
-    if (resposta.status === 401) {
+    if (deSessao(resposta)) {
       // Renovou e AINDA assim tomou 401: a sessão morreu entre as duas
       // requisições (revogada noutro aparelho, logout, troca de senha). É
       // terminal, e a credencial recém-guardada tem de sair do keychain junto —

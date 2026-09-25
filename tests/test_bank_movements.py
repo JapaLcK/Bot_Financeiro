@@ -8,6 +8,7 @@ from db.bank_movements import (
     bank_movement_summary, confirm_bank_movement, list_bank_movements,
     migrate_legacy_bank_movements,
 )
+from conftest import promote_to_pro
 from core.services import funding
 from utils_date import _tz
 from datetime import datetime
@@ -199,7 +200,6 @@ def test_duas_declaracoes_nao_consumem_mesma_prova(user_id):
 
 
 def test_prova_de_outro_usuario_nao_e_selecionavel(user_id):
-    from tests.conftest import promote_to_pro
     other = user_id + 983471
     db.ensure_user(other)
     promote_to_pro(other)
@@ -257,6 +257,7 @@ def test_vinculo_manual_antigo_nao_e_roubado(user_id):
 def test_api_confere_com_csrf_e_isolamento(user_id):
     import frontend.finance_bot_websocket_custom as dashboard
     from fastapi.testclient import TestClient
+    promote_to_pro(user_id)
     cid, source = _bank(user_id)
     lid = _deposit(user_id, source)
     _sync(cid, 500, _tx(category="Same person transfer"))

@@ -27,9 +27,10 @@ TENTAR. Medido 2026-09-11: `classify("tutorial")` → `help.tutorial`,
 from __future__ import annotations
 
 # `_gate_ligado` é autouse e vem JUNTO de propósito: fixture autouse só vale no
-# módulo que a define, e sem ela o `conftest` roda com `PLANS_V2_ENABLED=0` — o
-# gate se auto-desliga, nada é barrado e os dois negativos daqui ficariam verdes
-# medindo NADA. Custou dois vermelhos antes de eu notar.
+# módulo que a define. Hoje o `conftest` já roda este arquivo no v2 (ele não está
+# em `_AINDA_EM_V1`); a fixture segura isso se ele entrar na lista, onde o v2 fica
+# desligado — o gate se auto-desliga, nada é barrado e os dois negativos daqui
+# ficariam verdes medindo NADA. Custou dois vermelhos antes de eu notar.
 from test_wa_botao_velho_no_corte import (  # noqa: F401  (fixtures por import)
     _clique, _conta, _gate_ligado, _texto, bancada,
 )
