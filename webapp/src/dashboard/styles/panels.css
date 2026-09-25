@@ -151,7 +151,6 @@
 
 /* Piggy notou */
 .piggy-title { display: inline-flex; align-items: center; gap: 8px; }
-.piggy-title img { border-radius: 50%; }
 .insights { display: grid; gap: 18px; }
 .insights li { display: grid; grid-template-columns: 18px minmax(0, 1fr); column-gap: 10px; }
 .insight-icon { font-size: 16px; margin-top: 2px; }

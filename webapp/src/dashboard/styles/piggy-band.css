@@ -10,7 +10,6 @@
   transition: box-shadow var(--t-fast) ease, background-color var(--t-fast) ease;
 }
 .piggy-band-by { display: grid; grid-auto-flow: column; align-items: center; column-gap: 8px; font-size: 12.5px; color: var(--ink-3); }
-.piggy-band-by img { border-radius: 50%; }
 .piggy-band-head { font-size: 22px; font-weight: 600; letter-spacing: -0.02em; line-height: 1.25; }
 .piggy-band-text { max-width: 72ch; font-size: 14px; line-height: 1.5; color: var(--ink-2); }
 .piggy-band-text b { color: var(--ink); font-weight: 600; }
