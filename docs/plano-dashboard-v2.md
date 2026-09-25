@@ -124,6 +124,6 @@ dashboard antigo e o `/ws`.
 
 - [x] Protótipo: perfis do Resumo (#573, #575), faixa do Piggy (#579), navegação com o
   Piggy no meio e Ferramentas (#582).
-- [ ] Protótipo: página do chat (#584).
-- [ ] Protótipo: blocos que expandem na conversa.
+- [x] Protótipo: página do chat (#584).
+- [ ] Protótipo: blocos que expandem na conversa (em outro chat).
 - [ ] Etapa 0 · [ ] 1 · [ ] 2 · [ ] 3 · [ ] 4 · [ ] 5 · [ ] 6 · [ ] 7
