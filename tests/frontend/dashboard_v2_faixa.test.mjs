@@ -120,3 +120,13 @@ test("320 e 390: a faixa cabe na tela", async () => {
     assert.deepEqual(r, [0, true], String(width));
   }
 });
+
+test("trocar de perfil sorteia de novo (a faixa não fica presa ao perfil de antes)", async () => {
+  const { ctx, page } = await abrir({ perfil: "investir", sorte: 0 });
+  const antes = await faixa(page);
+  await page.selectOption("#board-profile", "dividas");
+  await page.locator(`.piggy-band:not([data-band="${antes}"])`).waitFor({ timeout: 3000 }).catch(() => {});
+  const depois = await faixa(page);
+  await ctx.close();
+  assert.notEqual(depois, antes); // com a mesma sorte, só muda se a faixa sortear de novo
+});

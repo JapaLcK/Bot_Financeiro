@@ -124,7 +124,7 @@ export function Board({ s }: { s: DashState }) {
           </button>
         </div>
       </div>
-      <PiggyBand s={s} profile={shown} />
+      <PiggyBand key={shown} s={s} profile={shown} />
       {s.editing && <Catalog missing={ALL.filter((w) => !ids.includes(w.id))} onAdd={add} />}
       <p className="sr-only" aria-live="polite">{said}</p>
       {!ids.length && !s.editing && <p className="board-empty faint">Toque em Organizar para adicionar blocos</p>}
