@@ -196,7 +196,11 @@ tecnologia, podendo refazer o que for preciso, com calma (Q5).
     quando alguém pedir. A caixinha espelhada não guarda moeda (`sync_open_finance_caixinhas`
     e `bind_pocket_to_caixinha` não levam a moeda para ela), então a moeda da caixinha
     ligada vem do investimento de origem: caixinha espelhando posição em dólar fica fora
-    como a posição;
+    como a posição. E "BRL" gravado não prova BRL: a ingestão grava `BRL` quando o conector
+    não manda moeda (`inv.get("currency") or "BRL"` e o mesmo para contas, em
+    `db/open_finance.py`), e `BANK_ACCOUNTS_SQL` trata nulo como BRL. O primeiro passo do PR
+    é conferir no `raw` guardado se algum conector omite a moeda; se omitir, a ingestão passa
+    a guardar a moeda como desconhecida e a foto a trata como fora, com o mesmo aviso;
   - **uma leitura só:** a foto lê tudo numa única transação `REPEATABLE READ` (uma visão só
     do banco), para um aporte que confirma no meio não ser contado duas vezes nem nenhuma.
     "Tudo" inclui a marca de pendência abaixo, lida **no mesmo cursor** (hoje
@@ -209,7 +213,11 @@ tecnologia, podendo refazer o que for preciso, com calma (Q5).
   - **reset no meio:** a visão consistente não impede o "Recomeçar do zero" de apagar o
     histórico entre a leitura e a gravação da foto, e aí a foto velha voltaria. O job pega
     uma trava consultiva do usuário em modo compartilhado; o reset a pega em modo
-    exclusivo. Movimentos comuns não passam por ela, então o job não os segura;
+    exclusivo. Movimentos comuns não passam por ela, então o job não os segura. A ordem
+    importa: numa transação `REPEATABLE READ` a visão do banco é fixada no primeiro
+    comando, que seria o próprio pedido da trava — se ele esperasse o reset, a foto leria o
+    estado de antes. Por isso a trava é **de sessão, pega antes de abrir a transação**, e
+    solta depois do commit;
   - **"a conferir" não vira número certo:** com movimento de banco pendente
     (`bank_movements.pending_count` > 0), o painel antigo já troca o patrimônio por "A
     conferir" (`frontend/dashboard.js`), porque o dinheiro pode estar nos dois lados. A foto
@@ -220,8 +228,9 @@ tecnologia, podendo refazer o que for preciso, com calma (Q5).
   solta e ligada a uma caixinha (fica fora e aparece o aviso); foto no meio de um aporte
   (conta uma vez); foto com transferência de banco pendente (marcada como incerta), e a
   sincronização resolvendo a pendência no meio da foto (continua incerta); lançamento
-  fundido entre carteira e banco (não debita duas vezes); reset no meio da foto (a foto
-  velha não volta).
+  fundido entre carteira e banco (não debita duas vezes); reset começando antes da foto e
+  a foto esperando por ele (a foto velha não volta); conta ou posição sem moeda informada
+  (fica fora e aparece o aviso).
 - **Tabela nova por usuário entra no ciclo de privacidade.** As fotos do patrimônio e das
   posições são histórico financeiro do usuário, e `db/privacy.py` enumera as tabelas à mão.
   Toda tabela nova com dado de usuário entra, no mesmo PR que a cria, na exportação
@@ -405,7 +414,11 @@ tecnologia, podendo refazer o que for preciso, com calma (Q5).
   Por isso a caixinha de reserva passa a ser **designada pelo usuário** (um campo na
   caixinha, no máximo uma por usuário). Sem designação, o bloco pede para escolher, e o
   palpite pelo nome só sugere. Pela regra de uma fonte só (Q18), o agente que usa o palpite
-  passa a ler o campo no mesmo PR (etapa 4, Metas).
+  passa a ler o campo no mesmo PR (etapa 4, Metas). Só caixinha em reais pode ser a
+  reserva: a espelhada de uma posição em outra moeda, ou de moeda desconhecida (regra do
+  patrimônio acima), não pode ser escolhida, e se já estiver escolhida a API devolve
+  `meses: null` com o motivo `moeda_estrangeira` — dólar não vira real na conta da reserva.
+  Teste: reserva numa caixinha ligada a posição em dólar.
 - **Perfil e layout do Resumo:** perfil no servidor (coluna com `CHECK` nos ids
   `economizar|investir|controlar|dividas|autonomo|padrao`); layout segue no navegador.
 
