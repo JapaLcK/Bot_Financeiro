@@ -4,6 +4,7 @@ import { monthTitle } from "./lib/format.js";
 import { set } from "./lib/store.js";
 import type { DashState } from "./lib/types";
 import { useDash } from "./useDash";
+import { AskBar } from "./parts/AskBar";
 import { Command } from "./parts/Command";
 import { Tip } from "./parts/Tip";
 import { PAGES } from "./pages";
@@ -93,6 +94,7 @@ export function App() {
           );
         })}
       </nav>
+      <AskBar path={path} />
       <Tip />
       <Command />
     </>
