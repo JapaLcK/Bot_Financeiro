@@ -278,12 +278,16 @@ tecnologia, podendo refazer o que for preciso, com calma (Q5).
     aplicada. O movimento tem de manter o cursor real, e o desfazer tem de devolver o de
     antes do resgate. E o desfazer do resgate grava o saldo **absoluto** de antes dele,
     sem olhar o que veio depois: com dois resgates no mesmo lote, desfazer o primeiro
-    apaga o segundo e cria dinheiro. A regra mais simples que fecha isso: **só se desfaz o
-    último movimento de cada lote**; desfazer um anterior é recusado com o motivo (desfaça
-    os seguintes antes). Com ela, a regra do histórico abaixo (as fotos saem a partir do
+    apaga o segundo e cria dinheiro. E o lote não basta como unidade: o resgate consome os
+    lotes em ordem (FIFO), então um resgate posterior que só tocou o lote B dependeu de o
+    primeiro ter fechado o A. A regra mais simples que fecha isso: **só se desfaz o último
+    movimento do investimento** (de qualquer lote); desfazer um anterior é recusado com o
+    motivo (desfaça os seguintes antes). Com ela, a regra do histórico abaixo (as fotos saem a partir do
     movimento desfeito) nunca apaga um movimento que continua valendo. Testes: índice
     atrasado mais resgate parcial; índice atrasado, resgate total, desfazer e a taxa sair;
-    dois resgates no mesmo lote e desfazer o primeiro (recusado, nada muda).
+    dois resgates no mesmo lote e desfazer o primeiro (recusado, nada muda); dois lotes,
+    o primeiro resgate fechando o lote A exatamente e o segundo só no B, e desfazer o
+    primeiro (recusado).
 
   **O bloco compara cada investimento com o CDI, e não mostra número da carteira inteira**
   (decisão do dono, 2026-09-25). No Open Finance o banco não diz quando o dinheiro entrou ou
