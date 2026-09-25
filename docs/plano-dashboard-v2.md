@@ -54,6 +54,16 @@ O que isso muda neste plano:
   desfazer de resgate anterior que cria dinheiro e o desfazer sem a trava por usuário. Eles
   seguem valendo para quem usa o painel antigo e o WhatsApp **até** o investimento manual
   ser desligado lá — ver a pergunta Q39 abaixo.
+- **Recorrente só prevê.** Hoje o carregador de recorrentes (`run_recurring_charger_loop`,
+  em `core/services/recurring_charger.py`) lança sozinho na carteira: o salário entra como
+  crédito e a conta fixa como débito, sem olhar o Open Finance — que já traz a mesma
+  transação do banco. Com a Q36 isso conta duas vezes, então no v2 a recorrente só alimenta
+  a Previsão e o aviso de vencimento; o dinheiro real vem do Open Finance. Antes do job da
+  foto (etapa 0), o PR confere se a leitura com a correção de fusão
+  (`MERGED_WALLET_DELTA_SQL`) já desconta esses lançamentos automáticos; se não descontar,
+  desligar o lançamento automático para quem tem banco conectado entra antes do job.
+  Teste: salário recorrente com o crédito do banco já no Open Finance — a foto conta uma
+  vez.
 - **Lançar, no v2, é lançar na carteira.** "Lançamentos (ver, lançar, editar, apagar)" da
   primeira versão vira: ver tudo; lançar, editar e apagar só o que é da carteira Piggy.
   Transação do Open Finance não se cria nem se apaga à mão.
@@ -299,7 +309,12 @@ tecnologia, podendo refazer o que for preciso, com calma (Q5).
     desse dia é gravada marcada como incerta, e o gráfico a mostra assim — nunca como ponto
     exato.
 
-  Testes: caixinha ligada a um CDB do Open Finance (conta uma vez só); posição em dólar,
+  **Uma foto por usuário por dia:** restrição única em `(user_id, dia)` e gravação que
+  substitui a do mesmo dia, para duas instâncias ou uma nova tentativa não deixarem pontos
+  repetidos ou em conflito.
+
+  Testes: duas rodadas do job ao mesmo tempo (um ponto só); caixinha ligada a um CDB do
+  Open Finance (conta uma vez só); posição em dólar,
   solta e ligada a uma caixinha (fica fora e aparece o aviso); foto no meio de um aporte
   (conta uma vez); foto com transferência de banco pendente (marcada como incerta), e a
   sincronização resolvendo a pendência no meio da foto (continua incerta); lançamento
