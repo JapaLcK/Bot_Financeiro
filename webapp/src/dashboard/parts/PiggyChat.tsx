@@ -1,4 +1,4 @@
-import { useEffect, useRef } from "react";
+import { useEffect, useRef, type ReactNode } from "react";
 import { PLAN } from "../lib/api";
 import { ask, useConversation, type Msg } from "../lib/conversation";
 import { locked, readProfile } from "../lib/profiles.js";
@@ -9,6 +9,19 @@ import { FrameScope } from "./Frame";
 type Prompt = { key: string; ask: string | null; topic?: TopicId; cat?: string };
 const AVATAR = "../frontend/brand/icon.png";
 
+// Bloco estático da resposta. `inert` tira clique, hover e Tab; onde ele não existe
+// (Safari < 15.5), o CSS corta o ponteiro (.msg-block > * { pointer-events: none }) e os
+// controles saem do Tab. O PR dos blocos que expandem troca isto por blocos vivos.
+const FOCUSABLE = "a[href], button, input, select, textarea, [tabindex]";
+function Snapshot({ children }: { children: ReactNode }) {
+  const box = useRef<HTMLDivElement>(null);
+  useEffect(() => {
+    if ("inert" in HTMLElement.prototype) return;
+    box.current?.querySelectorAll<HTMLElement>(FOCUSABLE).forEach((el) => el.setAttribute("tabindex", "-1"));
+  });
+  return <div className="panel msg-block" inert ref={box}>{children}</div>;
+}
+
 // Resposta do Piggy: texto, os blocos (uma foto do estado na hora da pergunta; ficam
 // estáticos até o PR dos blocos que expandem) e as sugestões de próxima pergunta.
 function PiggySays({ m, live = true }: { m: Msg; live?: boolean }) {
@@ -16,10 +29,7 @@ function PiggySays({ m, live = true }: { m: Msg; live?: boolean }) {
     <FrameScope.Provider value={`m${m.id}-`}>
       <p className="msg-by"><img src={AVATAR} alt="" width={24} height={24} />Piggy</p>
       <p className="msg-text">{m.text}</p>
-      {m.blocks?.map((b, i) => (
-        // Safari < 15.5 ignora `inert`: o clique (e o Enter/Espaço, que viram clique) para aqui.
-        <div className="panel msg-block" inert key={i} onClickCapture={(e) => { e.preventDefault(); e.stopPropagation(); }}>{b}</div>
-      ))}
+      {m.blocks?.map((b, i) => <Snapshot key={i}>{b}</Snapshot>)}
       {live && !!m.follow?.length && (
         <ul className="chat-follow" aria-label="Próximas perguntas">
           {m.follow.map((f) => <li key={f.label}><button type="button" className="chip" onClick={() => ask({ text: f.label, topic: f.topic, cat: f.cat })}>{f.label}</button></li>)}
@@ -77,9 +87,12 @@ export function PiggyChat() {
     );
   }
 
+  const last = [...msgs].reverse().find((m) => m.role === "piggy");
   return (
     <>
       {head}
+      {/* A resposta nova entra acima da barra, onde o foco fica: o leitor de tela a lê daqui. */}
+      <p className="sr-only" role="status">{last?.text}</p>
       <ol className="chat" aria-label="Conversa">
         {msgs.map((m, i) => (
           <li key={m.id} ref={i === msgs.length - 2 ? end : undefined} className={m.role === "user" ? "msg-user" : "msg-piggy"}>

@@ -126,12 +126,19 @@ for (const semInert of [false, true]) test(`os blocos da resposta são uma foto:
   await seguir(page, "Pra onde vai meu dinheiro?");
   const bloco = page.locator(".chat > .msg-piggy").last().locator(".msg-block");
   const inerte = await bloco.evaluate((b) => b.inert);
+  // Sem inert: nenhum controle do bloco no Tab, e o ponteiro não chega neles.
+  const [soltos, alcancado] = await bloco.evaluate((b) => {
+    const f = [...b.querySelectorAll("a[href], button, input, select, textarea, [tabindex]")];
+    const r = f[0].getBoundingClientRect();
+    return [f.filter((e) => e.tabIndex >= 0 && !b.inert).length, f.includes(document.elementFromPoint(r.x + r.width / 2, r.y + r.height / 2))];
+  });
   await bloco.locator("button").first().click({ force: true }); // o usuário tenta filtrar uma categoria
   await page.evaluate(() => { location.hash = "#/gastos"; });
   await page.locator("#page-title", { hasText: "Para onde vai" }).waitFor();
   const filtrado = await page.locator(".cats [aria-pressed='true'], .chip[aria-pressed='true']").count();
   await ctx.close();
   assert.equal(!!inerte, !semInert); // sem suporte, a propriedade nem existe
+  assert.deepEqual([soltos, alcancado], [0, false]);
   assert.equal(filtrado, 0);
 });
 
@@ -250,4 +257,43 @@ test("toda pergunta pronta responde com texto, sem erro (as sugestões de cada p
   assert.equal(chave, "fim-de-semana");
   assert.match(fds, /por fim de semana|segurar o fim de semana/);
   assert.deepEqual(erros, []);
+});
+
+test("a resposta nova é anunciada para leitor de tela", async () => {
+  const { ctx, page } = await abrir({ hash: "#/piggy" });
+  await page.locator(".chat-empty .chat-follow button").first().click();
+  await page.locator(".chat > .msg-piggy").first().waitFor();
+  await perguntar(page, "oi");
+  await page.waitForFunction(() => document.querySelectorAll(".chat > .msg-piggy").length === 2);
+  const r = await page.evaluate(() => [document.querySelector("[role=status]").textContent, [...document.querySelectorAll(".chat > .msg-piggy .msg-text")].pop().textContent]);
+  await ctx.close();
+  assert.equal(r[0], r[1]);
+});
+
+// As que respondiam só de lado (Codex #584, 2ª rodada, e a varredura das 23 perguntas).
+test("as perguntas de dívida, assinatura, resumo, reserva e economia respondem o que pediram", async () => {
+  const pela = async (perfil, texto) => {
+    const { ctx, page } = await abrir({ hash: "#/piggy", perfil });
+    await page.locator(".chat-follow button", { hasText: texto }).click();
+    await page.locator(".chat > .msg-piggy .msg-text").first().waitFor();
+    const t = await page.locator(".chat > .msg-piggy .msg-text").textContent();
+    await ctx.close();
+    return t;
+  };
+  const faixa = async (sorte, chave) => {
+    const { ctx, page } = await abrir({ sorte });
+    assert.equal(await page.locator(".piggy-band").getAttribute("data-band"), chave);
+    await page.locator(".piggy-band").click();
+    await page.locator(".chat > .msg-piggy .msg-text").first().waitFor();
+    const t = await page.locator(".chat > .msg-piggy .msg-text").textContent();
+    await ctx.close();
+    return t;
+  };
+  assert.match(await pela("dividas", "comprometido"), /^No mês que vem, R\$ 1\.821 já estão comprometidos: R\$ 1\.310 de contas fixas e R\$ 511 de parcelas/);
+  assert.match(await pela("dividas", "volta a caber"), /acaba em março de 2027/);
+  assert.match(await pela("investir", "reserva de emergência"), /^Sua reserva cobre 3,3 meses .* já passou do mínimo/);
+  assert.match(await pela("dividas", "economizar este mês"), /^O que mais subiu foi Delivery/);
+  // comuns fora das sugestões: pela faixa (3 insights × 2 + 10 comuns × 1 = 16)
+  assert.match(await faixa(11.5 / 16, "assinaturas"), /^Você paga 3 assinaturas: Spotify .*Netflix .* e Academia .*R\$ 166,70 por mês/);
+  assert.match(await faixa(14.5 / 16, "resumo"), /^1\. Entraram .*2\. O que mais pesa .*3\. No ritmo atual/);
 });

@@ -1,6 +1,7 @@
 import type { ReactNode } from "react";
 import { CARD, CATEGORIES, GOALS, MONTHS, TODAY, catById, fixedMonthly, goalEta, incomeHistory, installmentsAhead, keyDate, previousKey, reserveMonths, spentUntil, summary, trajectory, yieldVsCdi } from "./api";
-import { money0, monthName, monthYear, signed0 } from "./format.js";
+import { RECURRING } from "./data.js";
+import { money, money0, monthName, monthYear, signed0 } from "./format.js";
 import { get } from "./store.js";
 import type { DashState, Launch } from "./types";
 import { Bills } from "../widgets/Bills";
@@ -177,6 +178,46 @@ const LEADS: Record<string, () => Partial<Answer>> = {
     return {
       text: <>Seu pior mês ({monthName(worst.date)}, {money0(worst.value)}) ficou {money0(avg - worst.value)} abaixo da média. Guardar uns <b>{money0(avg - worst.value)}</b> nos meses bons cobre um mês fraco como aquele.</>,
     };
+  },
+  "comprometido": () => {
+    const fixed = fixedMonthly(), parc = installmentsAhead(6).months[0].value;
+    const avg = incomeHistory().reduce((a, r) => a + r.value, 0) / 6;
+    return {
+      text: <>No mês que vem, <b>{money0(fixed + parc)}</b> já estão comprometidos: {money0(fixed)} de contas fixas e {money0(parc)} de parcelas na fatura. É {pct((fixed + parc) / avg)} da sua renda média ({money0(avg)}).</>,
+    };
+  },
+  "fatura-cabe": () => {
+    const p = installmentsAhead(6);
+    const drop = p.months.find((m) => m.value < p.months[0].value);
+    return {
+      text: <>A parte da fatura presa em parcelas fica em {money0(p.months[0].value)} até {monthName(p.months[2].date)}{drop && <>, cai para {money0(drop.value)} em {monthName(drop.date)}</>} e acaba em <b>{monthName(p.last)} de {p.last.getFullYear()}</b>. A partir daí a fatura volta a ter só os gastos do mês (a de {MONTH} está em {money0(summary(NOW).invoice)}).</>,
+    };
+  },
+  "assinaturas": () => {
+    const subs = RECURRING.filter((r) => r.category === "assinaturas");
+    const total = subs.reduce((a, r) => a + r.amount, 0);
+    return {
+      text: <>Você paga {subs.length} assinaturas: {subs.map((r, i) => <span key={r.label}>{i ? (i === subs.length - 1 ? " e " : ", ") : ""}<b>{r.label}</b> ({money(r.amount)})</span>)}. São <b>{money(total)} por mês</b>, {money0(total * 12)} por ano.</>,
+    };
+  },
+  "resumo": () => {
+    const m = summary(NOW), top = topVariable(m.byCategory);
+    return {
+      text: <>1. Entraram {money0(m.income)} e saíram {money0(m.expense)} até o dia {DAY}; {money0(m.saved)} foram para as caixinhas.<br />2. O que mais pesa no dia a dia é <b>{top.label}</b> ({money0(m.byCategory[top.id])}).<br />3. No ritmo atual você fecha {MONTH} com cerca de <b>{money0(monthEnd())}</b>.</>,
+    };
+  },
+  "reserva": () => {
+    const months = reserveMonths();
+    return {
+      text: <>Sua reserva cobre <b>{months.toLocaleString("pt-BR", { maximumFractionDigits: 1 })} meses</b> de contas fixas. O comum é ter de 3 a 6 meses, então ela {months < 3 ? "ainda está abaixo do mínimo" : months < 6 ? "já passou do mínimo, mas pode crescer" : "já está num tamanho confortável"}.</>,
+    };
+  },
+  "economizar-mes": () => {
+    const g = grower();
+    return g ? {
+      text: <>O que mais subiu foi <b>{g.c.label}</b>: {money0(g.now)} contra {money0(g.then)} em {monthName(keyDate(previousKey(NOW)!))} no mesmo ponto. Cortar pela metade daria uns <b>{money0((g.now / DAY) * 30.4 / 2)} por mês</b>.</>,
+      blocks: [<CategoryDetail s={snap(g.c.id)} />],
+    } : {};
   },
   "meta-economia": () => ({
     text: <>Suas caixinhas já recebem <b>{money0(GOALS.reduce((a, g) => a + g.monthly, 0))} por mês</b>. Pra uma meta nova, me diz o valor e a data: no app de verdade eu monto ela com você aqui.</>,
