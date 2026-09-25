@@ -212,7 +212,13 @@ tecnologia, podendo refazer o que for preciso, com calma (Q5).
     inteiro, então a data efetiva é o último dia do mês). O histórico tem identidade
     própria (id e nome guardados nele, sem chave estrangeira em cascata para `investments`
     ou `investment_lots`): lote resgatado ou investimento apagado (`delete_investment` apaga
-    a linha) continua nos meses em que existiu, marcado como encerrado.
+    a linha) continua nos meses em que existiu, marcado como encerrado. A exceção é
+    **desfazer** o lançamento do aporte (`delete_launch_and_rollback`, em `db/accounts.py`):
+    ele apaga o lote e devolve só o valor aportado, jogando fora o juro que já tinha rendido.
+    Desfazer é "o aporte nunca existiu", então as fotos daquele lote saem junto, na mesma
+    transação — nem o ganho descartado fica no histórico, nem o principal devolvido vira
+    perda. Teste: aporte, juros, desfazer o lançamento — o histórico fica como se o aporte
+    não tivesse existido.
 
     **Quando se tira a foto.** Uma por dia e mais uma antes e outra depois de cada aporte e
     resgate, no mesmo commit do movimento. Cada foto guarda uma **sequência crescente** (a
