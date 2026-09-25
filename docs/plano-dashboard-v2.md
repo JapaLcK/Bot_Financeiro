@@ -270,9 +270,11 @@ tecnologia, podendo refazer o que for preciso, com calma (Q5).
   **O bloco compara cada investimento com o CDI, e não mostra número da carteira inteira**
   (decisão do dono, 2026-09-25). No Open Finance o banco não diz quando o dinheiro entrou ou
   saiu, então não existe rentabilidade exata da carteira somada; um número aproximado com
-  cara de exato é o que este plano proíbe. No Open Finance a taxa do banco é do mês e o
-  período dela não é informado, então o mês de abertura e o de encerramento aparecem sem
-  comparação, com o motivo. Investimento sem rentabilidade informada (o banco não mandou a
+  cara de exato é o que este plano proíbe. No Open Finance, mesmo com o mês de referência
+  informado, a taxa é do mês inteiro e o banco não diz em que dia a posição abriu ou
+  fechou, então o mês de abertura e o de encerramento aparecem sem comparação, com o
+  motivo; e sem mês de referência informado não há comparação com CDI em mês nenhum (regra
+  acima). Investimento sem rentabilidade informada (o banco não mandou a
   taxa, renda variável, cripto) aparece sem a comparação, com o motivo. Como o patrimônio,
   nada de reconstruir o passado: enquanto o histórico enche, o bloco diz que se completa com
   o tempo. O widget do protótipo (`widgets/Yield.tsx`) mostra a carteira somada; ele passa a
@@ -287,7 +289,8 @@ tecnologia, podendo refazer o que for preciso, com calma (Q5).
   (cai no mês que cobre); laço de juros parado por mais de uma virada de mês (cada mês
   recebe o seu); aporte com data no
   passado; investimento resgatado e depois apagado (continua no histórico). Open Finance:
-  investimento sem taxa; mês de abertura e de encerramento (sem comparação); posição
+  investimento sem taxa; mês de abertura e de encerramento (sem comparação); conector sem mês de referência
+  (nenhum mês comparado com CDI); posição
   liquidada entre duas rodadas do job (a taxa da última sincronização fica no histórico).
 - **Reserva em meses:** reserva dividida pelo custo mensal das contas fixas ativas. O custo
   mensal converte cada frequência de `db/recurring.py` (`VALID_FREQUENCIES`): diária × 365/12,
