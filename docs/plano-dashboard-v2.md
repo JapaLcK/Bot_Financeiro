@@ -87,11 +87,21 @@ Decidido pelo dono na mesma data (Q37–Q41):
   desfazer que não devolve o cursor, o desfazer de resgate anterior que cria dinheiro, e o
   desfazer e o apagar investimento sem a trava por usuário. A regra combinada: só se desfaz
   o último movimento do investimento, e apagar o investimento conta como movimento.
-- **Q40 — WhatsApp, três caminhos:** gasto **em dinheiro** vira lançamento na carteira
-  Piggy; gasto **no Pix ou no cartão** vira anotação (descrição e categoria) que se casa com
-  a transação quando o Open Finance a trouxer, sem lançar nada; quando **não dá para saber**
-  como foi pago, o Piggy pergunta antes de registrar. Teste: "gastei 50 no mercado no
-  cartão" seguido da transação do banco — conta uma vez, com a categoria da mensagem.
+- **Q40 — WhatsApp, três caminhos**, na forma que o dono mostrou numa conversa real:
+  1. **Não dá para saber como foi pago** ("gastei 500"): o Piggy pergunta antes de
+     registrar qualquer coisa — "Esse R$ 500 foi em dinheiro vivo ou passou pelo banco
+     (PIX, cartão, débito)?".
+  2. **Em dinheiro:** vira lançamento na carteira Piggy.
+  3. **Pix, cartão ou débito:** **não registra nada**. O Piggy explica que o Open Finance já
+     traz essa transação e oferece procurá-la no extrato do banco conectado para confirmar
+     que ela já apareceu ("Quer que eu busque essa transação no seu extrato do Nubank?").
+
+  Hoje isso não é regra escrita no código: é o modelo respondendo por conta própria, então
+  pode mudar de uma mensagem para outra. Vira regra (no roteamento do lançamento ou nas
+  instruções da IA, o que o PR medir como mais firme) com teste de conversa pelo
+  `handle_incoming` e rodada no harness da IA (o pytest não fala com o modelo): "gastei 500"
+  → pergunta; "pix" → nada lançado e a oferta de buscar; "dinheiro" → um lançamento na
+  carteira; "gastei 50 no mercado no cartão" → nada lançado, sem perguntar.
 - **Q41 — o saque entra na carteira sozinho**, com um aviso que o usuário pode desfazer
   (se o dinheiro não foi para o bolso). O depósito em espécie é o inverso.
 
