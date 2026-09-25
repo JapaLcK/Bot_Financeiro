@@ -321,14 +321,11 @@ tecnologia, podendo refazer o que for preciso, com calma (Q5).
   exatamente qual é** e em que **a posição esteve o tempo todo**. Saber o período: o banco
   informa o mês de referência (para `lastMonthRate`) ou o início e o fim exatos (para
   `lastTwelveMonthsRate`, cujo fim pode ser o dia da sincronização, o fim do mês anterior…).
-  Estar o tempo todo: a posição foi vista numa sincronização **antes do início** do período
-  e **depois do fim** dele, **sem nenhum encerramento entre essas duas sincronizações** —
-  não só dentro do período: a reconciliação apaga a posição ausente e ela pode voltar com o
-  mesmo id, e a sincronização de antes tem de ser da mesma vida da posição que a de depois
-  (encerrada em agosto e reaberta em 15 de setembro, a posição não cobre setembro) — ou o banco informa as datas da posição. Isso tira de uma vez o
-  mês de abertura e o de encerramento, o mês anterior à primeira sincronização (vista em
-  outubro, a taxa de setembro não compara) e os 12 meses de posição mais nova. Fora disso,
-  a taxa aparece sem comparação, com o motivo. Investimento sem rentabilidade informada (o banco não mandou a
+  Estar o tempo todo: **só o banco prova** — pelas datas da própria posição (aplicação,
+  emissão, vencimento, resgate, o que o conector mandar). Sincronizações nas pontas do
+  período não provam nada: a posição pode sumir e voltar com o mesmo id entre duas delas sem
+  deixar rastro. O primeiro passo do PR é medir, na API real, quais datas o conector manda.
+  Sem as datas do período e da posição, a taxa aparece sem comparação, com o motivo. Investimento sem rentabilidade informada (o banco não mandou a
   taxa, renda variável, cripto) aparece sem a comparação, com o motivo. Como o patrimônio,
   nada de reconstruir o passado: enquanto o histórico enche, o bloco diz que se completa com
   o tempo. O widget do protótipo (`widgets/Yield.tsx`) mostra a carteira somada; ele passa a
@@ -343,13 +340,12 @@ tecnologia, podendo refazer o que for preciso, com calma (Q5).
   (cai no mês que cobre); laço de juros parado por mais de uma virada de mês (cada mês
   recebe o seu); aporte com data no
   passado; investimento resgatado e depois apagado (continua no histórico). Open Finance:
-  investimento sem taxa; mês de abertura e de encerramento (sem comparação); primeira sincronização logo depois
-  da virada (o mês anterior não compara); posição que some e volta com o mesmo id (o
-  período com o encerramento no meio não compara; encerrada antes do período e reaberta no
-  meio dele também não); conector sem mês de referência (nenhum mês
-  comparado com CDI); 12 meses sem as datas do período, ou com a posição mais nova que o
-  início (sem comparação de 12 meses); posição
-  liquidada entre duas rodadas do job (a taxa da última sincronização fica no histórico).
+  investimento sem taxa; conector sem mês de referência ou sem as datas dos 12 meses (sem
+  comparação); posição sem datas próprias do banco (sem comparação, mesmo vista em várias
+  sincronizações); posição com datas que não cobrem o período inteiro — aberta ou resgatada
+  no meio (sem comparação); sincronização logo depois da virada (a taxa vai para o mês de
+  referência, não para o da sincronização); posição
+liquidada entre duas rodadas do job (a taxa da última sincronização fica no histórico).
 - **Reserva em meses:** reserva dividida pelo custo mensal das contas fixas ativas. O custo
   mensal converte cada frequência de `db/recurring.py` (`VALID_FREQUENCIES`): diária × 365/12,
   semanal × 52/12, mensal × 1, anual ÷ 12; pagamento único (`once`) não entra. Conta de valor
