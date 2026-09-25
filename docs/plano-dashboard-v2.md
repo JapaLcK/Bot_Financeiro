@@ -208,7 +208,10 @@ tecnologia, podendo refazer o que for preciso, com calma (Q5).
     a linha) continua nos meses em que existiu, marcado como encerrado.
 
     **Quando se tira a foto.** Uma por dia e mais uma antes e outra depois de cada aporte e
-    resgate, no mesmo commit do movimento (`investment_deposit_from_account`,
+    resgate, no mesmo commit do movimento. Cada foto guarda uma **sequência crescente** (a
+    ordem entre fotos da mesma data efetiva) e, nas de movimento, o **id do movimento** e se
+    é a de antes ou a de depois — é isso que permite tirar o par da conta mesmo com vários
+    movimentos e a foto diária no mesmo dia (`investment_deposit_from_account`,
     `investment_withdraw_to_account` e todo outro caminho que mexa no principal — o
     inventário por `grep` é o primeiro passo do PR do job). Toda foto é tirada **logo
     depois de calcular os juros daquele usuário** (`accrue_all_investments` roda hoje num
