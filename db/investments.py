@@ -964,6 +964,11 @@ def create_investment(user_id: int, name: str, rate: float, period: str, nota: s
 
     with get_conn() as conn:
         with conn.cursor() as cur:
+            # Mesmo lock dos outros escritores: a guarda do desfazer
+            # (db/investment_undo.py) lê "id maior = mais novo", e isso só vale
+            # se todo launch de investimento entra com o usuário travado.
+            from .bank_movements import _lock_user
+            _lock_user(cur, user_id)
             try:
                 cur.execute(
                     "insert into investments(user_id, name, balance, rate, period, last_date) "
@@ -1187,6 +1192,10 @@ def delete_investment(user_id: int, investment_name: str, nota: str | None = Non
 
     with get_conn() as conn:
         with conn.cursor() as cur:
+            # Mesmo lock do desfazer: sem ele, apagar e desfazer um movimento deste
+            # investimento correm um contra o outro (ver db/investment_undo.py).
+            from .bank_movements import _lock_user
+            _lock_user(cur, user_id)
             cur.execute(
                 """
                 select id, name, balance, rate, period, last_date,
@@ -1205,7 +1214,7 @@ def delete_investment(user_id: int, investment_name: str, nota: str | None = Non
             if Decimal(str(inv["balance"])) != Decimal("0"):
                 raise ValueError("INV_NOT_ZERO")
 
-            cur.execute("delete from investments where id=%s", (inv_id,))
+            cur.execute("delete from investments where id=%s and user_id=%s", (inv_id, user_id))
 
             efeitos = {
                 "delta_conta": 0.0, "delta_pocket": None, "delta_invest": None,
@@ -1682,12 +1691,14 @@ def investment_withdraw_to_account(
                         "principal_remaining": float(lot_principal),
                         "status": lot["status"],
                         "closed_at": None,
+                        "last_date": lot["last_date"].isoformat() if lot["last_date"] else None,
                     },
                     "after": {
                         "balance": float(after_balance),
                         "principal_remaining": float(after_principal),
                         "status": after_status,
                         "closed_at": today.isoformat() if closes else None,
+                        "last_date": lot["last_date"].isoformat() if lot["last_date"] else None,
                     },
                 })
                 breakdown.append({
@@ -1704,10 +1715,12 @@ def investment_withdraw_to_account(
                     "iof_rate": float(_iof_rate_for_days(age_days, tax_profile)),
                 })
 
+                # Sem `last_date`: o cursor fica onde o accrual o deixou (último índice
+                # publicado). Pular para hoje perdia o juro do saldo que fica no lote.
                 cur.execute(
                     """
                     update investment_lots
-                    set balance=%s, principal_remaining=%s, status=%s, closed_at=%s, last_date=%s
+                    set balance=%s, principal_remaining=%s, status=%s, closed_at=%s
                     where id=%s and user_id=%s
                     """,
                     (
@@ -1715,7 +1728,6 @@ def investment_withdraw_to_account(
                         after_principal,
                         after_status,
                         today if closes else None,
-                        today,
                         lot["id"],
                         user_id,
                     ),

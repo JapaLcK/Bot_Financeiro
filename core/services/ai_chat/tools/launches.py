@@ -455,6 +455,11 @@ def _delete_launch_execute(user_id: int, args: dict[str, Any]) -> str:
                     f"🐷 O lançamento #{lid} é antigo e não guarda o que precisaria "
                     f"ser revertido, então mantive ele intacto pra não bagunçar seu saldo."
                 )
+            except db.InvestmentMovementNotLast as e:
+                # Antes do `LaunchUnsafeRollback` (subclasse); mesma frase do WhatsApp.
+                _log_falha("delete_launch_movimento_posterior", user_id, e,
+                           nivel=logging.WARNING, launch_id=internal_id, user_seq=lid)
+                return f"🐷 Não apaguei o lançamento #{lid}. {e}"
             except db.LaunchUnsafeRollback as e:
                 # `efeitos` existe mas não dá pra revertê-lo por inteiro —
                 # mesma condição PERMANENTE do WhatsApp (`core/handlers/
