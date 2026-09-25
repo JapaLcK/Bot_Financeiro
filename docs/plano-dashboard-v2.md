@@ -218,13 +218,20 @@ tecnologia, podendo refazer o que for preciso, com calma (Q5).
     reconstruir o passado.
 
   **O bloco compara cada investimento com o CDI, e não mostra número da carteira inteira**
-  (decisão do dono, 2026-09-25). No Open Finance o banco não diz quando o dinheiro entrou ou
+  (decisão do dono, 2026-09-25). **O CDI é medido no mesmo período do investimento**, não no
+  mês inteiro: investimento aberto ou encerrado no meio do mês seria comparado com dias em
+  que não existia (aberto na metade de um mês de CDI 1%, rendendo 0,5%, apareceria como 50%
+  do CDI em vez de ~100%). Nos manuais o histórico guarda a primeira e a última data
+  efetiva, e o CDI é composto exatamente nesse intervalo. No Open Finance a taxa do banco é
+  do mês e o período dela não é informado, então o mês de abertura e o de encerramento
+  aparecem sem comparação, com o motivo. No Open Finance o banco não diz quando o dinheiro entrou ou
   saiu, então não existe rentabilidade exata da carteira somada; um número aproximado com
   cara de exato é o que este plano proíbe. Investimento sem rentabilidade informada (o banco
   não mandou a taxa, renda variável, cripto) aparece sem a comparação, com o motivo. Como o
   patrimônio, nada de reconstruir o passado: enquanto o histórico enche, o bloco diz que se
   completa com o tempo. Testes do PR do job: aporte e resgate nos manuais, rendendo antes e
-  depois do movimento (exato); movimento sem rendimento nenhum (dá 0%); virada de mês com os juros atrasados; investimento resgatado e depois apagado (continua no
+  depois do movimento (exato); movimento sem rendimento nenhum (dá 0%); virada de mês com os juros atrasados; investimento aberto e encerrado no meio do mês (CDI
+  do mesmo intervalo; no Open Finance, sem comparação); investimento resgatado e depois apagado (continua no
   histórico); investimento e aporte com data no passado (o juro antigo
   não entra); dois movimentos no mesmo dia; resgate total; investimento do
   Open Finance sem taxa (aparece sem comparação); posição do Open Finance liquidada entre
