@@ -3,12 +3,14 @@ import { BALANCE_TODAY, CATEGORIES, MONTHS, TODAY, addDays, isCurrentMonth, keyD
 import { LAUNCHES } from "../lib/data.js";
 import { monthName, money0, relativeDays, signed0 } from "../lib/format.js";
 import { set, setCut } from "../lib/store.js";
+import type { TopicId } from "../lib/topics";
 import type { DashState, Launch } from "../lib/types";
 import { Frame } from "../parts/Frame";
 import { go } from "../router";
 
-// `head` e `ask` são o que a faixa do topo do Resumo usa: a manchete e a pergunta que vai para o chat.
-interface Insight { key: string; icon: string; tone: string; text: ReactNode; head?: string; ask?: string; action?: { label: string; run: () => void } }
+// `head`, `ask` e `topic` são o que a faixa do topo do Resumo usa: a manchete, a pergunta
+// que vai para a conversa e o assunto da resposta (lib/topics.tsx).
+interface Insight { key: string; icon: string; tone: string; text: ReactNode; head?: string; ask?: string; topic?: TopicId; cat?: string; action?: { label: string; run: () => void } }
 
 const spentIn = (key: string, cat: string, day: number) =>
   (LAUNCHES[key] as Launch[]).filter((l) => l.kind === "expense" && l.category === cat && l.date.getDate() <= day).reduce((a, l) => a + (l.amount ?? 0), 0);
@@ -30,6 +32,7 @@ export function insights(s: DashState): Insight[] {
         key: "rise", icon: "ph-trend-up", tone: "var(--warn)",
         head: `${rise.c.label} subiu ${Math.round(rise.d * 100)}%`,
         ask: `Por que meu gasto com ${rise.c.label.toLowerCase()} subiu ${Math.round(rise.d * 100)}% em ${monthName(keyDate(s.month))}?`,
+        topic: "categoria", cat: rise.c.id,
         text: <><b>{rise.c.label}</b> subiu {Math.round(rise.d * 100)}%: {money0(rise.now)} contra {money0(rise.then)} em {monthName(keyDate(prev))}{current ? ` até o dia ${day}` : ""}.</>,
         action: { label: `Simular ${rise.c.label.toLowerCase()} −30%`, run: () => { setCut(rise.c.id, 0.3); go("/simulador"); } },
       });
@@ -42,7 +45,7 @@ export function insights(s: DashState): Insight[] {
       out.push({
         key: "trend", icon: "ph-chart-line-down", tone: "var(--pink-ink)",
         head: "Sem freelas, seu saldo desce",
-        ask: "Como evito que meu saldo caia nos próximos 3 meses?",
+        ask: "Como evito que meu saldo caia nos próximos 3 meses?", topic: "saldo",
         text: <>Sem freelas, seu saldo cai cerca de <b>{money0(-perMonth)} por mês</b>. Em 90 dias fica perto de {money0(end.value)}.</>,
         action: { label: "Ver 90 dias", run: () => { set({ horizon: "90" }); go("/previsao"); } },
       });
@@ -53,7 +56,7 @@ export function insights(s: DashState): Insight[] {
       out.push({
         key: "next", icon: "ph-receipt", tone: "#2fa0c8",
         head: `${next.label} vence ${relativeDays(days)}`,
-        ask: `Consigo pagar ${next.label} (${money0(next.amount ?? 0)}) sem apertar o resto do mês?`,
+        ask: `Consigo pagar ${next.label} (${money0(next.amount ?? 0)}) sem apertar o resto do mês?`, topic: "saldo",
         text: <><b>{next.label}</b> vence {relativeDays(days)} ({money0(next.amount ?? 0)}). O saldo de hoje, {money0(BALANCE_TODAY)}, {BALANCE_TODAY >= (next.amount ?? 0) ? "cobre" : "não cobre"}.</>,
         action: { label: "Ver compromissos", run: () => go("/previsao") },
       });

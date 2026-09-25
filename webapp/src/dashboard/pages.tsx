@@ -6,6 +6,7 @@ import type { DashState } from "./lib/types";
 import { Frame } from "./parts/Frame";
 import { Board } from "./parts/Board";
 import { Ledger } from "./parts/Ledger";
+import { PiggyChat } from "./parts/PiggyChat";
 import { go, href, route, type Path } from "./router";
 import { Bills } from "./widgets/Bills";
 import { Calendar } from "./widgets/Calendar";
@@ -171,15 +172,6 @@ function Tools() {
           );
         })}
       </ul>
-    </Page>
-  );
-}
-
-// ponytail: lugar da conversa com o Piggy até a página de chat entrar (PR seguinte).
-function PiggyChat() {
-  return (
-    <Page path="/piggy" lede="Pergunte o que quiser sobre o seu dinheiro.">
-      <p className="span-12 faint">A conversa com o Piggy chega na próxima versão do protótipo.</p>
     </Page>
   );
 }

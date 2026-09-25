@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState, type KeyboardEvent, type PointerEvent } from "react";
+import { useEffect, useId, useRef, useState, type KeyboardEvent, type PointerEvent } from "react";
 import type { Point, Trajectory } from "../lib/types";
 import { axisMoney, dayMonth, longDate, money, moneyBig, tone } from "../lib/format.js";
 import { dayKey } from "../lib/store.js";
@@ -49,7 +49,8 @@ export function TrajectoryChart({ traj, simOn, highlight, drawKey }: {
   const [box, { width, height }] = useSize<HTMLDivElement>();
   const clip = useRef<SVGRectElement>(null);
   const [hover, setHover] = useState<number | null>(null);
-  const clipId = `clip-${drawKey}`;
+  // Único por instância: a conversa do Piggy pode mostrar o mesmo gráfico duas vezes.
+  const clipId = `clip-${drawKey}-${useId().replace(/[^a-z0-9]/gi, "")}`;
   const pts = traj.points;
   const n = pts.length;
   const ih = Math.max(1, height - M.t - M.b);

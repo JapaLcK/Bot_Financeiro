@@ -1,7 +1,7 @@
 // Protótipo dashboard-v2: a faixa do Piggy no topo do Resumo (parts/PiggyBand.tsx).
 //   · o sorteio (lib/prompts.js): peso, e nunca a mesma opção duas visitas seguidas;
 //   · fixa em todos os painéis e fora do grid (sem ✕, fora do catálogo);
-//   · o clique abre o chat de produção com a pergunta já enviada;
+//   · o clique abre a conversa do Piggy (#/piggy) com a pergunta já enviada e respondida;
 //   · no Essencial vira convite para o Plus, sem abrir o chat;
 //   · 320 e 390 sem rolagem para o lado.
 import { test, before, after } from "node:test";
@@ -81,18 +81,16 @@ test("a cada visita outra opção: com a mesma sorte, duas visitas seguidas dife
   for (let i = 1; i < vistas.length; i++) assert.notEqual(vistas[i], vistas[i - 1], JSON.stringify(vistas));
 });
 
-test("insight do dia: o clique abre o chat com a pergunta dele já enviada", async () => {
+test("insight do dia: o clique abre a conversa com a pergunta dele respondida", async () => {
   const { ctx, page, erros } = await abrir({ perfil: "economizar", sorte: 0 }); // 1ª opção = 1º insight
   const chave = await faixa(page);
   const cta = await page.locator(".piggy-band-cta").innerText();
   await page.locator(".piggy-band").click();
-  await page.locator("#pigbank-chat-root").getByText("Aqui é a demonstração").waitFor();
-  const r = await page.evaluate(() => [window.PigBankChatUI.isOpen("piggy"), document.getElementById("pigbank-chat-root").innerText]);
+  await page.locator(".chat .msg-piggy .msg-block").first().waitFor();
+  const r = await page.evaluate(() => [location.hash, document.querySelector(".chat .msg-user").textContent, document.querySelector(".chat .msg-piggy [id$='w-cat-detalhe']") !== null]);
   await ctx.close();
-  assert.match(chave, /^insight-/);
-  const pergunta = cta.match(/“(.+)”/)[1];
-  assert.equal(r[0], true);
-  assert.ok(r[1].includes(pergunta), `${pergunta} ⊄ ${r[1]}`);
+  assert.equal(chave, "insight-rise"); // delivery subiu: a resposta é o detalhe da categoria
+  assert.deepEqual(r, ["#/piggy", cta.match(/“(.+)”/)[1], true]);
   assert.deepEqual(erros, []);
 });
 

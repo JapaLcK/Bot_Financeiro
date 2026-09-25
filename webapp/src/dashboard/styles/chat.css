@@ -1,0 +1,58 @@
+/* Conversa com o Piggy (#/piggy) e a barra de conversa. Onde dá, grid (o Safari 14 não
+   tem flex gap); as sugestões quebram linha em flex e têm o recuo em flexgap.css. */
+.chat { display: grid; gap: 22px; max-width: 920px; }
+.msg-user {
+  justify-self: end; max-width: min(560px, 85%); padding: 10px 14px;
+  border-radius: 16px 16px 4px 16px; background: var(--plane-3);
+  font-size: 15px; line-height: 1.45; scroll-margin-top: 80px;
+}
+.msg-piggy { display: grid; gap: 12px; }
+.msg-by { display: grid; grid-auto-flow: column; justify-content: start; align-items: center; column-gap: 8px; font-size: 12.5px; font-weight: 500; color: var(--ink-3); }
+
+.msg-text { max-width: 68ch; font-size: 15px; line-height: 1.55; color: var(--ink-2); }
+.msg-text b { color: var(--ink); font-weight: 600; }
+.chat-follow { display: flex; flex-wrap: wrap; gap: 8px; }
+.chat-follow .chip { text-align: left; }
+.chat-empty { display: grid; justify-items: start; gap: 14px; max-width: 720px; }
+.chat-hello { font-size: 16px; line-height: 1.5; }
+.chat-plus { display: grid; gap: 14px; max-width: 920px; }
+.chat-plus-cta {
+  display: grid; justify-items: start; gap: 12px; padding: 18px 20px; border-radius: var(--r-panel);
+  background: var(--pink-wash); box-shadow: inset 0 0 0 1px var(--pink-line); font-size: 14px; color: var(--ink-2);
+}
+.chat-plus-cta b { color: var(--ink); }
+
+/* A barra: flutua no centro da coluna de conteúdo; na conversa ela alarga. */
+.askbar {
+  position: fixed; z-index: 40; bottom: 20px;
+  left: calc(var(--rail-w) + (100vw - var(--rail-w)) / 2); transform: translateX(-50%);
+  width: min(560px, calc(100vw - var(--rail-w) - 2 * var(--gutter)));
+  display: grid; grid-template-columns: 28px minmax(0, 1fr) 36px; align-items: center; column-gap: 10px;
+  padding: 6px 6px 6px 12px; border-radius: 999px;
+  background: rgba(22, 22, 26, 0.72);
+  backdrop-filter: saturate(140%) blur(16px); -webkit-backdrop-filter: saturate(140%) blur(16px);
+  box-shadow: 0 10px 30px rgba(0, 0, 0, 0.45), inset 0 0 0 1px var(--rule-strong);
+  color: var(--ink); text-decoration: none;
+  view-transition-name: askbar;
+}
+.askbar[data-here] { width: min(760px, calc(100vw - var(--rail-w) - 2 * var(--gutter))); }
+.askbar input { min-width: 0; height: 36px; border: 0; background: transparent; color: var(--ink); font: inherit; font-size: 15px; outline: none; }
+.askbar input::placeholder, .askbar-hint { color: var(--ink-3); }
+.askbar:focus-within { box-shadow: 0 10px 30px rgba(0, 0, 0, 0.45), inset 0 0 0 2px var(--pink); }
+.askbar-send { width: 36px; height: 36px; border: 0; border-radius: 50%; background: var(--pink); color: var(--on-pink); font-size: 17px; cursor: pointer; }
+.askbar-send:disabled { background: var(--plane-3); color: var(--ink-4); cursor: default; }
+.askbar em { font-style: normal; font-size: 12px; color: var(--pink-ink); padding-right: 8px; }
+a.askbar { grid-template-columns: 28px minmax(0, 1fr) auto; }
+::view-transition-group(askbar) { animation-duration: 320ms; animation-timing-function: var(--ease-out); }
+
+/* O conteúdo termina acima da barra. */
+@media (min-width: 761px) { .page { padding-bottom: 120px; } }
+@media (max-width: 760px) {
+  /* No celular a barra só existe na conversa, acima da barra de baixo. */
+  .askbar { display: none; }
+  .askbar[data-here] {
+    display: grid; left: var(--gutter); right: var(--gutter); width: auto; transform: none;
+    bottom: calc(76px + env(safe-area-inset-bottom));
+  }
+  .page[data-page="/piggy"] { padding-bottom: calc(160px + env(safe-area-inset-bottom)); }
+}
