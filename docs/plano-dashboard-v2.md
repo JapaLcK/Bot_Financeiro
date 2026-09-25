@@ -282,12 +282,20 @@ tecnologia, podendo refazer o que for preciso, com calma (Q5).
     lotes em ordem (FIFO), então um resgate posterior que só tocou o lote B dependeu de o
     primeiro ter fechado o A. A regra mais simples que fecha isso: **só se desfaz o último
     movimento do investimento** (de qualquer lote); desfazer um anterior é recusado com o
-    motivo (desfaça os seguintes antes). Com ela, a regra do histórico abaixo (as fotos saem a partir do
+    motivo (desfaça os seguintes antes). Apagar o investimento (`delete_investment`, que
+    leva os lotes em cascata) conta como movimento posterior: depois dele, nenhum resgate
+    daquele investimento se desfaz, porque não há lote para reabrir. E a checagem "é o
+    último" só vale se ninguém puder mexer no meio: o desfazer tem de pegar **a mesma trava
+    por usuário** que o aporte e o resgate usam (`_lock_user`) e segurá-la da checagem até o
+    fim — hoje ele só pega a trava quando o movimento é de banco
+    (`uses_bank_movement_lock`), e o de carteira passa sem ela. Com ela, a regra do histórico abaixo (as fotos saem a partir do
     movimento desfeito) nunca apaga um movimento que continua valendo. Testes: índice
     atrasado mais resgate parcial; índice atrasado, resgate total, desfazer e a taxa sair;
     dois resgates no mesmo lote e desfazer o primeiro (recusado, nada muda); dois lotes,
     o primeiro resgate fechando o lote A exatamente e o segundo só no B, e desfazer o
-    primeiro (recusado).
+    primeiro (recusado); resgate total, apagar o investimento e desfazer o resgate
+    (recusado); desfazer e resgatar ao mesmo tempo (um espera o outro, nenhum dinheiro
+    criado).
 
   **O bloco compara cada investimento com o CDI, e não mostra número da carteira inteira**
   (decisão do dono, 2026-09-25). No Open Finance o banco não diz quando o dinheiro entrou ou
