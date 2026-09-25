@@ -148,7 +148,10 @@ tecnologia, podendo refazer o que for preciso, com calma (Q5).
     seu mecanismo: com `NOTIFY`, ele é emitido **dentro** da transação da escrita (o
     Postgres só entrega quando ela confirma, e nada se ela desfaz); com o aviso dentro do
     processo, a função roda **depois** do commit com sucesso — ali, se o processo cai, cai
-    junto o stream, e a reconexão refaz tudo. Com `NOTIFY` há mais uma queda possível: a
+    junto o stream, e a reconexão refaz tudo. Mas o aviso pode falhar sem o processo cair
+    (erro na função, tarefa cancelada): então qualquer falha ao avisar **fecha os streams
+    daquele usuário**, e a reconexão refaz tudo. Teste: a função do aviso falha depois de
+    um commit com sucesso, e a tela se atualiza pela reconexão. Com `NOTIFY` há mais uma queda possível: a
     conexão de `LISTEN` do servidor cai e volta enquanto o navegador segue conectado, e o
     Postgres não reenvia o que foi avisado nesse intervalo. Por isso, quando o `LISTEN`
     cai, o servidor **fecha todos os streams** que dependem dele; cada navegador reconecta e
@@ -288,13 +291,16 @@ tecnologia, podendo refazer o que for preciso, com calma (Q5).
     último" só vale se ninguém puder mexer no meio: o desfazer tem de pegar **a mesma trava
     por usuário** que o aporte e o resgate usam (`_lock_user`) e segurá-la da checagem até o
     fim — hoje ele só pega a trava quando o movimento é de banco
-    (`uses_bank_movement_lock`), e o de carteira passa sem ela. Com ela, a regra do histórico abaixo (as fotos saem a partir do
+    (`uses_bank_movement_lock`), e o de carteira passa sem ela. Pela mesma razão, apagar o
+    investimento, que aqui conta como movimento, pega a mesma trava (hoje
+    `delete_investment` só trava a linha do investimento). Com ela, a regra do histórico abaixo (as fotos saem a partir do
     movimento desfeito) nunca apaga um movimento que continua valendo. Testes: índice
     atrasado mais resgate parcial; índice atrasado, resgate total, desfazer e a taxa sair;
     dois resgates no mesmo lote e desfazer o primeiro (recusado, nada muda); dois lotes,
     o primeiro resgate fechando o lote A exatamente e o segundo só no B, e desfazer o
     primeiro (recusado); resgate total, apagar o investimento e desfazer o resgate
-    (recusado); desfazer e resgatar ao mesmo tempo (um espera o outro, nenhum dinheiro
+    (recusado); desfazer e resgatar ao mesmo tempo, e desfazer e apagar o investimento ao
+    mesmo tempo (um espera o outro, um deles é recusado de forma limpa, nenhum dinheiro
     criado).
 
   **O bloco compara cada investimento com o CDI, e não mostra número da carteira inteira**
