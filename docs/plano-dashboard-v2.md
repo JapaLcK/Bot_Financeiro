@@ -200,7 +200,9 @@ tecnologia, podendo refazer o que for preciso, com calma (Q5).
     não manda moeda (`inv.get("currency") or "BRL"` e o mesmo para contas, em
     `db/open_finance.py`), e `BANK_ACCOUNTS_SQL` trata nulo como BRL. O primeiro passo do PR
     é conferir no `raw` guardado se algum conector omite a moeda; se omitir, a ingestão passa
-    a guardar a moeda como desconhecida e a foto a trata como fora, com o mesmo aviso;
+    a guardar a moeda como desconhecida **e as linhas já gravadas são reclassificadas pelo
+    `raw`** (senão as antigas seguem como reais até a próxima sincronização, ou para sempre
+    numa conexão parada), e a foto trata a moeda desconhecida como fora, com o mesmo aviso;
   - **uma leitura só:** a foto lê tudo numa única transação `REPEATABLE READ` (uma visão só
     do banco), para um aporte que confirma no meio não ser contado duas vezes nem nenhuma.
     "Tudo" inclui a marca de pendência abaixo, lida **no mesmo cursor** (hoje
@@ -229,8 +231,9 @@ tecnologia, podendo refazer o que for preciso, com calma (Q5).
   (conta uma vez); foto com transferência de banco pendente (marcada como incerta), e a
   sincronização resolvendo a pendência no meio da foto (continua incerta); lançamento
   fundido entre carteira e banco (não debita duas vezes); reset começando antes da foto e
-  a foto esperando por ele (a foto velha não volta); conta ou posição sem moeda informada
-  (fica fora e aparece o aviso).
+  a foto esperando por ele (a foto velha não volta); conta ou posição sem moeda informada,
+  gravada antes e depois do conserto da ingestão (fica fora e aparece o aviso); aporte,
+  juros e desfazer (o patrimônio volta ao de antes do aporte, e o histórico bate com ele).
 - **Tabela nova por usuário entra no ciclo de privacidade.** As fotos do patrimônio e das
   posições são histórico financeiro do usuário, e `db/privacy.py` enumera as tabelas à mão.
   Toda tabela nova com dado de usuário entra, no mesmo PR que a cria, na exportação
@@ -280,9 +283,11 @@ tecnologia, podendo refazer o que for preciso, com calma (Q5).
     regra vale para qualquer movimento, aporte ou resgate: desfazer é "o movimento nunca
     existiu". Na mesma transação saem as fotos daquele lote **a partir do movimento
     desfeito** (o par dele e as que vieram depois); a próxima foto, com os juros em dia,
-    recomeça do estado restaurado. Assim o aporte desfeito não deixa o ganho descartado
-    (o desfazer devolve só o valor aportado), e o resgate desfeito não deixa o intervalo
-    zerado nem o juro de recuperação preso num par. Testes, olhando o rendimento e a
+    recomeça do estado restaurado. Desfazer o aporte devolve só o valor aportado e o juro
+    que ele rendeu some junto — de propósito: se o aporte nunca existiu, o juro dele também
+    não (é o comportamento atual do produto, e este plano não o muda). O histórico segue a
+    mesma regra, então não fica um ganho que o saldo já não tem, e o resgate desfeito não
+    deixa o intervalo zerado nem o juro de recuperação preso num par. Testes, olhando o rendimento e a
     comparação com o CDI, não só o saldo: aporte, juros, desfazer; resgate total, tempo e
     taxa passando, desfazer — nos dois, o histórico fica como se o movimento não tivesse
     existido.
