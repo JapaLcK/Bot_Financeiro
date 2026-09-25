@@ -6,7 +6,7 @@ import type { DashState } from "./lib/types";
 import { Frame } from "./parts/Frame";
 import { Board } from "./parts/Board";
 import { Ledger } from "./parts/Ledger";
-import { go, route, type Path } from "./router";
+import { go, href, route, type Path } from "./router";
 import { Bills } from "./widgets/Bills";
 import { Calendar } from "./widgets/Calendar";
 import { Categories } from "./widgets/Categories";
@@ -146,7 +146,46 @@ function Launches({ s }: { s: DashState }) {
   );
 }
 
+// Ferramentas: só o Simulador já existe no protótipo; as outras vêm do dashboard atual
+// (ou são novas) e entram uma de cada vez.
+const TOOLS: { label: string; line: string; icon: string; to?: Path }[] = [
+  { label: "Simulador", line: "E se você cortasse o delivery pela metade? Veja o saldo e as metas mudarem na hora.", icon: "ph-lightning", to: "/simulador" },
+  { label: "Orçamento doméstico", line: "Divida as contas da casa com quem mora com você.", icon: "ph-house" },
+  { label: "Orçamentos por categoria", line: "Um teto por categoria e um aviso antes de estourar.", icon: "ph-chart-pie" },
+  { label: "Vale a pena comprar?", line: "Veja o que uma compra grande faz com o seu mês e as suas metas.", icon: "ph-shopping-cart" },
+  { label: "Progresso ao milhão", line: "Quanto falta e em quanto tempo você chega ao primeiro milhão.", icon: "ph-trophy" },
+  { label: "Agentes", line: "Piggys que cuidam de uma parte do seu dinheiro por você.", icon: "ph-robot" },
+];
+
+function Tools() {
+  return (
+    <Page path="/ferramentas" lede="Tudo o que ajuda a decidir, num lugar só.">
+      <ul className="span-12 tools">
+        {TOOLS.map((t) => {
+          const body = <><i className={`ph ${t.icon}`} aria-hidden="true" /><b>{t.label}</b><span>{t.line}</span></>;
+          return (
+            <li key={t.label}>
+              {t.to ? <a className="tool" href={href(t.to)}>{body}</a>
+                : <div className="tool" aria-disabled="true">{body}<em>Em breve</em></div>}
+            </li>
+          );
+        })}
+      </ul>
+    </Page>
+  );
+}
+
+// ponytail: lugar da conversa com o Piggy até a página de chat entrar (PR seguinte).
+function PiggyChat() {
+  return (
+    <Page path="/piggy" lede="Pergunte o que quiser sobre o seu dinheiro.">
+      <p className="span-12 faint">A conversa com o Piggy chega na próxima versão do protótipo.</p>
+    </Page>
+  );
+}
+
 export const PAGES: Record<Path, (p: { s: DashState }) => ReactNode> = {
   "/": Home, "/previsao": Forecast, "/gastos": Spending, "/simulador": Simulate,
   "/metas": GoalsPage, "/patrimonio": Wealthy, "/lancamentos": Launches,
+  "/ferramentas": Tools, "/piggy": PiggyChat,
 };

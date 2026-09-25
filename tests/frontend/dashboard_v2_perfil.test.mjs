@@ -183,13 +183,13 @@ test("?plano=plus: Investir sem o simulador; no catálogo ele tem cadeado e não
   const antes = await painel(page);
   await organizar(page);
   await catalogo(page);
-  const item = page.locator("#board-catalog button", { hasText: "E se…" });
+  const item = page.locator("#board-catalog button", { hasText: "Simulador" });
   const r = [await item.getAttribute("aria-disabled"), await item.textContent(), await item.locator("i.ph-lock").count()];
   await item.click({ force: true }); // o Playwright não clica em aria-disabled; o usuário clica
   const depois = await painel(page);
   await ctx.close();
   assert.deepEqual(ordenado(antes), ordenado(INVESTIR.filter((id) => id !== "simulador")));
-  assert.deepEqual(r, ["true", "E se…No Pro", 1]);
+  assert.deepEqual(r, ["true", "SimuladorNo Pro", 1]);
   assert.deepEqual(depois, antes);
 });
 
@@ -221,7 +221,7 @@ test("esvaziar no essencial salva [] e o upgrade não põe o travado de volta: e
   assert.equal(restaurar, 0);
   assert.equal(vazio, "[]");
   assert.deepEqual(depois, []);
-  assert.ok(livres.includes("E se…") && livres.includes("Piggy notou"), JSON.stringify(livres));
+  assert.ok(livres.includes("Simulador") && livres.includes("Piggy notou"), JSON.stringify(livres));
 });
 
 test("positivo: ?plano=pro mostra previsão, Piggy e simulador", async () => {

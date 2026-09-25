@@ -30,7 +30,7 @@ const DEFAULT: WidgetItem[] = [
   { id: "resumo", size: "lg", label: "Resumo do mês" },
   { id: "categorias", size: "tall", label: "Para onde vai" },
   { id: "calendario", size: "tall", label: "Dia a dia" },
-  { id: "simulador", size: "lg", label: "E se…" },
+  { id: "simulador", size: "lg", label: "Simulador" },
   { id: "compromissos", size: "tall", label: "Próximos 30 dias" },
   { id: "piggy", size: "tall", label: "Piggy notou" },
   { id: "metas", size: "wide", label: "Metas e caixinhas" },

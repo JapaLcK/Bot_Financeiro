@@ -7,7 +7,7 @@ import { useDash } from "./useDash";
 import { Command } from "./parts/Command";
 import { Tip } from "./parts/Tip";
 import { PAGES } from "./pages";
-import { NO_MONTH, ROUTES, TABBAR, href, route, useRoute, type Path } from "./router";
+import { NO_MONTH, RAIL, TABBAR, href, route, useRoute, type Path } from "./router";
 
 function Topbar({ s, path }: { s: DashState; path: Path }) {
   const [stuck, setStuck] = useState(false);
@@ -31,7 +31,7 @@ function Topbar({ s, path }: { s: DashState; path: Path }) {
         <span>Buscar ou ir para…</span>
         <kbd>⌘K</kbd>
       </button>
-      <a className="btn btn-primary" href={href("/simulador")}><i className="ph ph-lightning" aria-hidden="true" />Simular</a>
+      <a className="btn btn-primary" href={href("/ferramentas")} aria-current={path === "/ferramentas" ? "page" : undefined}><i className="ph ph-wrench" aria-hidden="true" />Ferramentas</a>
     </header>
   );
 }
@@ -59,7 +59,7 @@ export function App() {
             <span>PigBank</span>
           </a>
           <ul className="rail-list">
-            {ROUTES.map((r) => (
+            {RAIL.map(route).map((r) => (
               <li key={r.path}>
                 <a href={href(r.path)} aria-current={path === r.path ? "page" : undefined} title={r.label}>
                   <i className={`ph ${r.icon}`} aria-hidden="true" /><span className="rail-label">{r.label}</span>
@@ -84,8 +84,11 @@ export function App() {
         {TABBAR.map((p) => {
           const r = route(p);
           return (
-            <a key={p} href={href(p)} aria-current={path === p ? "page" : undefined}>
-              <i className={`ph ${r.icon}`} aria-hidden="true" /><span>{r.short}</span>
+            <a key={p} href={href(p)} aria-current={path === p ? "page" : undefined} data-tab={p === "/piggy" ? "piggy" : undefined}>
+              {p === "/piggy"
+                ? <img src="../frontend/brand/avatar.webp" alt="" width={30} height={30} />
+                : <i className={`ph ${r.icon}`} aria-hidden="true" />}
+              <span>{r.short}</span>
             </a>
           );
         })}

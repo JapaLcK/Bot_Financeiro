@@ -74,7 +74,7 @@
 .ramp span:last-child { margin-left: 4px; }
 .cal-note { font-size: 12.5px; }
 
-/* E se… */
+/* Simulador */
 .presets { display: flex; flex-wrap: wrap; gap: 6px; }
 .levers { display: grid; gap: 4px; }
 .lever {
