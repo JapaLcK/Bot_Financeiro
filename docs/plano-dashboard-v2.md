@@ -97,13 +97,28 @@ Decidido pelo dono na mesma data (Q37–Q41):
      que ela já apareceu ("Quer que eu busque essa transação no seu extrato do Nubank?").
 
   Hoje isso não é regra escrita no código: é o modelo respondendo por conta própria, então
-  pode mudar de uma mensagem para outra. Vira regra (no roteamento do lançamento ou nas
-  instruções da IA, o que o PR medir como mais firme) com teste de conversa pelo
+  pode mudar de uma mensagem para outra. Vira regra **no código, não nas instruções da IA**:
+  a forma de pagamento é um estado estruturado do lançamento pendente (`dinheiro | banco |
+  desconhecida`), e a ferramenta que grava na carteira **recusa** gravar enquanto ele não
+  for `dinheiro` — a IA pode reformular a pergunta, mas não decide sozinha se o dinheiro
+  sai da carteira. Teste de conversa pelo
   `handle_incoming` e rodada no harness da IA (o pytest não fala com o modelo): "gastei 500"
   → pergunta; "pix" → nada lançado e a oferta de buscar; "dinheiro" → um lançamento na
   carteira; "gastei 50 no mercado no cartão" → nada lançado, sem perguntar.
 - **Q41 — o saque entra na carteira sozinho**, com um aviso que o usuário pode desfazer
-  (se o dinheiro não foi para o bolso). O depósito em espécie é o inverso.
+  (se o dinheiro não foi para o bolso). O depósito em espécie é o inverso. Como é o Open
+  Finance que cria esse lançamento, ele segue a transação de origem pela vida toda:
+  - **ligação durável:** o lançamento da carteira guarda o id da transação do banco que o
+    criou;
+  - **o banco corrige, a carteira acompanha:** valor ou data corrigidos numa sincronização
+    (`save_open_finance_sync`) atualizam o lançamento; transação apagada pelo banco (o
+    caminho `transactions/deleted`, em `frontend/routes/open_finance.py`) desfaz o
+    lançamento — senão um saque de R$ 100 apagado deixa R$ 100 de dinheiro que não existe;
+  - **desfazer é para sempre:** quando o usuário desfaz, fica gravada a recusa ligada ao id
+    da transação do banco, e a próxima sincronização não recria o lançamento.
+
+  Testes: saque corrigido em valor e em data; saque apagado pelo banco; desfazer e
+  sincronizar de novo (o dinheiro não volta).
 
 ### O que a primeira versão precisa ter (Q3)
 
