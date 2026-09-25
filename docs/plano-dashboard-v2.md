@@ -65,6 +65,12 @@ O que isso muda neste plano:
   porque a foto é de todos. Quem quiser registrar que pagou em dinheiro lança na carteira.
   Testes: salário recorrente com o crédito do banco já no Open Finance (conta uma vez);
   usuário sem banco conectado com salário e conta recorrentes (nada lançado, só previsto).
+  O mesmo vale para **marcar uma conta como paga** à mão: hoje `mark_bill_paid`
+  (`db/bills.py`) sempre lança na carteira, pela rota `/recurring-bills/.../pay` e pela
+  ferramenta `pay_bill` da IA. Ela passa a usar o mesmo estado da forma de pagamento da
+  Q40: paga pelo banco, marcar como paga só muda o estado da conta (o débito vem do Open
+  Finance); paga em dinheiro, lança na carteira; sem saber, pergunta. Testes: marcar paga
+  pelo banco (nada lançado) e em dinheiro (um lançamento), pela rota e pela IA.
 - **Lançar, no v2, é lançar na carteira.** "Lançamentos (ver, lançar, editar, apagar)" da
   primeira versão vira: ver tudo; lançar, editar e apagar só o que é da carteira Piggy.
   Transação do Open Finance não se cria nem se apaga à mão.
@@ -79,7 +85,23 @@ O que isso muda neste plano:
 Decidido pelo dono na mesma data (Q37–Q41):
 - **Q37 — o que já existe de manual fica só para leitura**, como "registro manual antigo",
   com convite para conectar o banco. Não se aporta, resgata nem desfaz mais nada nele pelo
-  v2; aparece com o saldo, sem comparação com o CDI.
+  v2; aparece com o saldo, sem comparação com o CDI. Duas heranças que a foto do patrimônio
+  não pode somar às cegas:
+  - **investimento manual que o banco também traz:** não há ligação entre `investments` e
+    `open_finance_investments`, então o CDB lançado à mão e o mesmo CDB vindo do banco
+    contariam duas vezes. Quando o usuário tem investimento manual e investimento do Open
+    Finance, o v2 pergunta, para cada manual, se ele é um dos do banco (aí o manual sai da
+    soma) ou outro; enquanto houver algum sem resposta, a foto sai marcada como incerta;
+  - **carteira que não é só dinheiro vivo:** hoje a carteira é dinheiro mais contas de banco
+    não conectadas (o painel antigo pede para "Ajustar Carteira" depois de conectar), então
+    somá-la ao saldo do banco conta o mesmo dinheiro duas vezes — a correção de fusão só
+    cobre lançamentos casados, não o saldo acumulado. Na primeira vez no v2, quem tem banco
+    conectado confirma quanto da carteira é dinheiro vivo; até confirmar, a foto sai
+    marcada como incerta. Quem não tem banco conectado não precisa: ali não há o que somar
+    duas vezes.
+
+  Testes: CDB manual e o mesmo CDB do banco (incerta até responder; depois, uma vez só);
+  carteira com saldo de banco antigo e banco conectado (incerta até confirmar).
 - **Q38 — a caixinha manual continua**, como exceção à Q36: ela é dinheiro separado pelo
   próprio usuário, e depositar e retirar nela segue existindo no v2. A caixinha espelhada
   do banco continua vindo do Open Finance.
