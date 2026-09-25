@@ -22,7 +22,11 @@ plano marca aqui o que concluiu**, na seção "Andamento".
   navegador pelo `/auth/me` (Q11). A chave vale **no servidor**, não só nos links: a rota
   `/painel` confere a chave e manda para o `/app` quem estiver fora da lista, então abrir
   ou compartilhar o endereço direto não fura a liberação. Teste: usuário fora da lista
-  abrindo `/painel` direto cai no `/app`; usuário da lista abre o v2.
+  abrindo `/painel` direto cai no `/app`; usuário da lista abre o v2. A rota também manda
+  para o `/app` quem chega com o marcador `PigBankApp` no user agent, mesmo liberado: o
+  WebView do app atual navega em `pigbankai.com`, e um link compartilhado abriria o v2 lá
+  dentro. Aqui o user agent escolhe qual tela, não concede acesso. Teste: `PigBankApp`
+  liberado abrindo `/painel` direto cai no `/app`.
 - **O app atual (Capacitor) nunca mostra o v2.** Ele carrega o site ao vivo, então os links
   de troca ficam escondidos quando o user agent **contém** `PigBankApp` — a mesma checagem por
   trecho de `_is_pigbank_app` (`frontend/routes/shared.py`) e do `app-mode.js`: o WebView
@@ -99,7 +103,13 @@ tecnologia, podendo refazer o que for preciso, com calma (Q5).
   "campo": null}}`, com os códigos listados no contrato.
 - **Tempo real (Q19, Q27–Q29):** SSE, só servidor → cliente. O aviso carrega só *o que*
   mudou (`{"mudou": ["lancamentos", "saldo"]}`), nunca o dado; a tela pede de novo à API.
-  Um lançamento feito pelo WhatsApp atualiza o painel aberto. O aviso não se guarda: se a
+  Um lançamento feito pelo WhatsApp atualiza o painel aberto. **Toda escrita de dado
+  financeiro avisa**, não só criar lançamento: editar e apagar lançamento, depositar e
+  retirar de caixinha, aporte e resgate, fatura, contas fixas, metas, sincronização do Open
+  Finance. Como as regras moram num lugar só (Q18), o aviso sai de dentro da regra, que
+  declara os tipos que mudou; cada PR que migra uma regra traz o teste de que ela avisa os
+  tipos certos, e um teste varre a lista de tipos do contrato e falha se algum não tiver
+  escrita testada. O aviso não se guarda: se a
   conexão cair, o que mudou nesse meio-tempo se perde. Por isso, **a cada (re)conexão** o
   cliente invalida todas as consultas e a tela pede tudo de novo — cobre a queda, a volta do
   sono do computador e a janela entre a primeira carga e a conexão abrir. A sessão expira em
@@ -164,11 +174,22 @@ tecnologia, podendo refazer o que for preciso, com calma (Q5).
     (`db/open_finance.py`) e antes de sobrescrever ou apagar a linha do espelho — não pelo
     job diário, que chegaria tarde para a posição liquidada entre duas rodadas. O histórico
     fica numa tabela própria, que a reconciliação não apaga: a posição que o banco deixou de
-    mandar continua na série dos meses em que existiu, marcada como encerrada.
+    mandar continua na série dos meses em que existiu, marcada como encerrada. Vale o mesmo
+    para os manuais: `delete_investment` (`db/investments.py`) apaga a linha de verdade, então
+    o histórico tem identidade própria (id e nome guardados nele, sem chave estrangeira em
+    cascata para `investments`) e o investimento apagado continua nos meses em que existiu,
+    marcado como encerrado. A cascata fica só para o usuário, pela regra de privacidade
+    abaixo.
   - **Manuais:** o aporte e o resgate passam pelo nosso código
     (`investment_deposit_from_account` e `investment_withdraw_to_account`, em
     `db/investments.py`, e todo outro caminho que mexa no principal — o inventário por
-    `grep` é o primeiro passo do PR do job). O job grava uma foto por dia e mais uma antes
+    `grep` é o primeiro passo do PR do job). O saldo só anda quando os juros são
+    calculados (`accrue_all_investments`, que hoje roda num laço próprio de horas em
+    `core/services/investment_scheduler.py`); foto de saldo parado joga o rendimento para o
+    intervalo — e às vezes o mês — errado. Por isso toda foto, diária ou de movimento, é
+    tirada **logo depois de calcular os juros daquele usuário até hoje**, na mesma
+    operação, e nunca lê o saldo sem isso. Teste: virada de mês com o laço de juros atrasado
+    — o rendimento cai no mês certo. O job grava uma foto por dia e mais uma antes
     e outra depois de cada movimento, no mesmo commit dele, marcadas como o par do
     movimento. O rendimento de cada intervalo entre fotos é a variação do valor sobre o
     valor do início, **exceto o par antes→depois de um movimento**, que é o próprio dinheiro
@@ -188,7 +209,8 @@ tecnologia, podendo refazer o que for preciso, com calma (Q5).
   não mandou a taxa, renda variável, cripto) aparece sem a comparação, com o motivo. Como o
   patrimônio, nada de reconstruir o passado: enquanto o histórico enche, o bloco diz que se
   completa com o tempo. Testes do PR do job: aporte e resgate nos manuais, rendendo antes e
-  depois do movimento (exato); movimento sem rendimento nenhum (dá 0%); investimento e aporte com data no passado (o juro antigo
+  depois do movimento (exato); movimento sem rendimento nenhum (dá 0%); virada de mês com os juros atrasados; investimento resgatado e depois apagado (continua no
+  histórico); investimento e aporte com data no passado (o juro antigo
   não entra); dois movimentos no mesmo dia; resgate total; investimento do
   Open Finance sem taxa (aparece sem comparação); posição do Open Finance liquidada entre
   duas rodadas do job (a taxa da última sincronização fica no histórico).
