@@ -103,8 +103,21 @@ tecnologia, podendo refazer o que for preciso, com calma (Q5).
   `bot.py` (o bot do Discord, morto como produto mas vivo no deploy, e que grava pelo
   `core_handle_incoming`). A etapa 0 começa confirmando com o dono se o `bot.py` sai do
   `launch.py`. Se sair e sobrar um processo só, o aviso fica dentro dele; se ficar, ou com
-  uma segunda instância, a função usa `LISTEN/NOTIFY` do Postgres desde a etapa 0. O `/ws` antigo sai junto com o
-  dashboard antigo.
+  uma segunda instância, a função usa `LISTEN/NOTIFY` do Postgres desde a etapa 0.
+  Duas regras valem nos dois casos:
+  - **só depois do commit.** O aviso dentro do processo não tem a ordem de commit que o
+    `NOTIFY` tem (ele só é entregue quando a transação confirma): chamado com a transação
+    ainda aberta, a tela pediria de novo e leria o estado velho, sem outro aviso depois.
+    Então a função é chamada depois do commit com sucesso, nunca dentro da transação, e
+    nada é avisado se ela desfaz. Teste: uma escrita com o commit atrasado de propósito — a
+    tela só pede de novo depois dele e vê o dado novo.
+  - **só para o dono.** O aviso interno leva o `user_id` de quem teve o dado mudado (o que
+    vai para o navegador continua só `{"mudou": [...]}`), e cada stream assina só o usuário
+    do `usuario_atual`. Um aviso global deixaria B saber quando A mexe no dinheiro e faria
+    todo painel aberto pedir de novo a cada escrita de qualquer um. Teste: B conectado não
+    recebe nada quando A lança.
+
+  O `/ws` antigo sai junto com o dashboard antigo.
 - **Processo (Q21):** todo PR que cria ou muda endpoint da `/api/v2` é **faixa Completo**,
   com o time inteiro, os testes de isolamento e o Codex.
 
