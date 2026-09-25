@@ -159,8 +159,12 @@ tecnologia, podendo refazer o que for preciso, com calma (Q5).
   - **Open Finance:** a rentabilidade que o próprio banco calcula por posição
     (`lastMonthRate` e `lastTwelveMonthsRate`, que o código já lê em `db/rv.py`). Das fotos
     não dá para tirar isso: dois movimentos que se anulam entre duas sincronizações somem
-    no fluxo líquido. O job da etapa 0 grava, por posição e por mês, a taxa que o banco
-    informou, para montar a série mensal.
+    no fluxo líquido. A taxa é gravada **a cada sincronização com sucesso**, por posição e
+    por mês (a última do mês vale), dentro de `save_open_finance_investments`
+    (`db/open_finance.py`) e antes de sobrescrever ou apagar a linha do espelho — não pelo
+    job diário, que chegaria tarde para a posição liquidada entre duas rodadas. O histórico
+    fica numa tabela própria, que a reconciliação não apaga: a posição que o banco deixou de
+    mandar continua na série dos meses em que existiu, marcada como encerrada.
   - **Manuais:** o aporte e o resgate passam pelo nosso código
     (`investment_deposit_from_account` e `investment_withdraw_to_account`, em
     `db/investments.py`, e todo outro caminho que mexa no principal — o inventário por
@@ -178,7 +182,8 @@ tecnologia, podendo refazer o que for preciso, com calma (Q5).
   patrimônio, nada de reconstruir o passado: enquanto o histórico enche, o bloco diz que se
   completa com o tempo. Testes do PR do job: aporte e resgate nos manuais, rendendo antes e
   depois do movimento (exato); dois movimentos no mesmo dia; resgate total; investimento do
-  Open Finance sem taxa (aparece sem comparação).
+  Open Finance sem taxa (aparece sem comparação); posição do Open Finance liquidada entre
+  duas rodadas do job (a taxa da última sincronização fica no histórico).
   O widget do protótipo (`widgets/Yield.tsx`) mostra a carteira somada; ele passa a ser por
   investimento quando for ligado à API, na etapa do Resumo.
 - **Reserva em meses:** reserva dividida pelas contas fixas. Hoje nada marca qual caixinha
