@@ -19,7 +19,10 @@ plano marca aqui o que concluiu**, na seção "Andamento".
 - **Chave por usuário:** `dashboard_v2_enabled(user_id, email)`, no mesmo padrão das listas
   de liberados que já existem em `core/services/plan_service.py` (`agents_beta_tester`,
   `bank_list_ui_enabled`), com a lista numa variável de ambiente e o valor chegando ao
-  navegador pelo `/auth/me` (Q11).
+  navegador pelo `/auth/me` (Q11). A chave vale **no servidor**, não só nos links: a rota
+  `/painel` confere a chave e manda para o `/app` quem estiver fora da lista, então abrir
+  ou compartilhar o endereço direto não fura a liberação. Teste: usuário fora da lista
+  abrindo `/painel` direto cai no `/app`; usuário da lista abre o v2.
 - **O app atual (Capacitor) nunca mostra o v2.** Ele carrega o site ao vivo, então os links
   de troca ficam escondidos quando o user agent **contém** `PigBankApp` — a mesma checagem por
   trecho de `_is_pigbank_app` (`frontend/routes/shared.py`) e do `app-mode.js`: o WebView
@@ -130,6 +133,13 @@ tecnologia, podendo refazer o que for preciso, com calma (Q5).
   Ele entra **na etapa 0**, antes de qualquer tela, para o histórico começar a encher o quanto
   antes; enquanto enche, o gráfico diz que se completa com o tempo. Nada de reconstruir o
   passado (mostraria número errado com cara de certo).
+- **Tabela nova por usuário entra no ciclo de privacidade.** As fotos do patrimônio e das
+  posições são histórico financeiro do usuário, e `db/privacy.py` enumera as tabelas à mão.
+  Toda tabela nova com dado de usuário entra, no mesmo PR que a cria, na exportação
+  (`build_user_export_zip`), no "Recomeçar do zero" (`_RESET_TABLES` — senão o painel
+  reconstruído mostra pontos velhos) e na exclusão de conta (`delete_user_data`, com a
+  chave estrangeira em cascata). Testes do ciclo: o dado aparece na exportação e some no
+  reset e na exclusão.
 - **Rendimento × CDI:** a série do CDI já existe (`db/investments.py`), mas o lado da
   carteira não tem histórico: `investments`, `investment_lots` e `open_finance_investments`
   guardam só o saldo atual, sobrescrito a cada juro ou sincronização, e sem histórico não dá
