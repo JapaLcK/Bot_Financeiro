@@ -271,9 +271,20 @@ tecnologia, podendo refazer o que for preciso, com calma (Q5).
     sincronização parcial ou desatualizada, a conta daquele banco some da soma
     (`BANK_ACCOUNTS_SQL` já tira conexões pausadas e apagadas) enquanto os investimentos em
     cache continuam — o gráfico mostraria uma queda que não houve. A foto confere o estado
-    de cada conexão e de cada produto (o mesmo `PARTIAL_SUCCESS` e o `isUpdated` que a
-    reconciliação já usa) e, se algum não estiver em dia, grava o ponto marcado como
-    incompleto, dizendo qual banco;
+    de cada conexão e de cada produto e, se algum não estiver em dia, grava o ponto marcado
+    como incompleto, dizendo qual banco. "Em dia" não pode vir só do provedor
+    (`PARTIAL_SUCCESS`, `isUpdated`): quando a busca ou a gravação dos investimentos falha
+    num item cujas contas sincronizaram, `_sync_pluggy_item_confirmado`
+    (`core/services/pluggy_sync.py`) marca `investments_ok=False` mas grava a conexão como
+    `ACTIVE`, sem motivo. Então a sincronização passa a gravar, **por conexão e por
+    produto** (contas, investimentos), a hora do último sucesso local, e a foto usa isso;
+  - **o conjunto de bancos muda, a linha quebra:** conectar, desconectar ou pausar um banco
+    muda o que entra na soma, e o gráfico mostraria um salto que não é ganho nem perda.
+    Desconectar apaga a conexão (`disconnect_open_finance_connection`), então no dia
+    seguinte não sobra conexão para conferir. Por isso cada foto guarda **quais conexões
+    entraram nela**, e o gráfico quebra a linha (com a legenda "banco conectado" ou
+    "desconectado") quando esse conjunto muda de um ponto para o outro, em vez de ligar os
+    dois pontos como se fosse variação;
   - **"a conferir" não vira número certo:** com movimento de banco pendente
     (`bank_movements.pending_count` > 0), o painel antigo já troca o patrimônio por "A
     conferir" (`frontend/dashboard.js`), porque o dinheiro pode estar nos dois lados. A foto
@@ -288,7 +299,8 @@ tecnologia, podendo refazer o que for preciso, com calma (Q5).
   a foto esperando por ele (a foto velha não volta); conta ou posição sem moeda informada,
   gravada antes e depois do conserto da ingestão (fica fora e aparece o aviso); conexão
   que fica pausada ou parcial entre duas rodadas (o ponto sai marcado como incompleto, sem
-  queda falsa).
+  queda falsa); falha só em `/investments` com as contas em dia (incompleto); desconectar e
+  conectar um banco entre duas rodadas (a linha quebra, sem salto).
 - **Tabela nova por usuário entra no ciclo de privacidade.** As fotos do patrimônio e das
   posições são histórico financeiro do usuário, e `db/privacy.py` enumera as tabelas à mão.
   Toda tabela nova com dado de usuário entra, no mesmo PR que a cria, na exportação
