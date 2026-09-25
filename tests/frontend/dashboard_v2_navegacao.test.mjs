@@ -73,7 +73,7 @@ test("o nome antigo \"E se…\" não aparece mais", async () => {
 });
 
 test("barra de cima: o botão Ferramentas fica dentro da margem de 320 a 1440", async () => {
-  for (const width of [320, 360, 390, 760, 1440]) {
+  for (const width of [320, 340, 360, 361, 375, 383, 390, 414, 760, 1440]) { // 361–383: a busca volta e ainda tem de caber
     const { ctx, page } = await abrir(width);
     const r = await page.evaluate(() => {
       const b = document.querySelector(".topbar .btn-primary").getBoundingClientRect();
