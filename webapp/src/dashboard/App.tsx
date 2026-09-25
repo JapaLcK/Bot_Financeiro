@@ -21,7 +21,7 @@ function Topbar({ s, path }: { s: DashState; path: Path }) {
     <header className="topbar" data-stuck={stuck}>
       {!NO_MONTH.includes(path) && <div className="month-switch" role="group" aria-label="Mês exibido">
         <button className="icon-btn" type="button" aria-label="Mês anterior" disabled={i === 0} onClick={() => set({ month: MONTHS[i - 1] })}><i className="ph ph-arrow-left" aria-hidden="true" /></button>
-        <p className="month-title" aria-live="polite">{monthTitle(s.month)}</p>
+        <p className="month-title" aria-live="polite">{monthTitle(s.month).replace(/ (\d{4})$/, "")}<span className="month-year"> {s.month.slice(0, 4)}</span></p>
         <button className="icon-btn" type="button" aria-label="Próximo mês" disabled={i === MONTHS.length - 1} onClick={() => set({ month: MONTHS[i + 1] })}><i className="ph ph-arrow-right" aria-hidden="true" /></button>
       </div>}
       <span className="tag-demo">Demonstração</span>
@@ -86,7 +86,7 @@ export function App() {
           return (
             <a key={p} href={href(p)} aria-current={path === p ? "page" : undefined} data-tab={p === "/piggy" ? "piggy" : undefined}>
               {p === "/piggy"
-                ? <img src="../frontend/brand/avatar.webp" alt="" width={30} height={30} />
+                ? <img src="../frontend/brand/icon.png" alt="" width={26} height={26} />
                 : <i className={`ph ${r.icon}`} aria-hidden="true" />}
               <span>{r.short}</span>
             </a>

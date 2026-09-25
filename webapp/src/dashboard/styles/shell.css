@@ -153,10 +153,10 @@
   .tabbar i { font-size: 21px; }
   .tabbar a[aria-current="page"] { color: var(--ink); }
   .tabbar a[aria-current="page"] i { color: var(--pink); }
-  /* O Piggy no meio: o avatar no lugar do ícone, com o anel rosa quando é a página atual */
-  .tabbar img { border-radius: 50%; margin-top: -3px; box-shadow: 0 0 0 2px var(--rule-strong); }
-  .tabbar a[aria-current="page"] img { box-shadow: 0 0 0 2px var(--pink); }
+  /* O Piggy no meio: a logo do PigBank no lugar do ícone */
+  .tabbar img { margin-top: -3px; }
 }
 @media (max-width: 400px) { .topbar .btn-primary i { display: none; } }
-/* Até 360px não cabem mês, busca e Ferramentas lado a lado: nessas telas a busca sai. */
-@media (max-width: 360px) { .topbar .cmd-trigger { display: none; } }
+/* Até 360px não cabem mês, busca e Ferramentas lado a lado: nessas telas a busca e o
+   ano saem (o CI no Linux mede o texto mais largo que o macOS; sem o ano sobra folga). */
+@media (max-width: 360px) { .topbar .cmd-trigger, .month-year { display: none; } }

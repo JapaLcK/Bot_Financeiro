@@ -34,7 +34,7 @@ export function PiggyBand({ s, profile }: { s: DashState; profile: string }) {
   if (locked("piggy", PLAN)) {
     return (
       <a className="piggy-band" href="../frontend/precos.html" data-band="plus">
-        <span className="piggy-band-by"><img src="../frontend/brand/avatar.webp" alt="" width={28} height={28} />Piggy</span>
+        <span className="piggy-band-by"><img src="../frontend/brand/icon.png" alt="" width={28} height={28} />Piggy</span>
         <span className="piggy-band-head">O Piggy lê seus gastos e te conta o que mudou.</span>
         <span className="piggy-band-text">Os insights e a conversa com o Piggy vêm no plano Plus.</span>
         <span className="piggy-band-cta">Conhecer o Plus<i className="ph ph-arrow-right" aria-hidden="true" /></span>
@@ -43,7 +43,7 @@ export function PiggyBand({ s, profile }: { s: DashState; profile: string }) {
   }
   return (
     <button type="button" className="piggy-band" data-band={o.key} onClick={() => askPiggy(o.ask)}>
-      <span className="piggy-band-by"><img src="../frontend/brand/avatar.webp" alt="" width={28} height={28} />Piggy · hoje</span>
+      <span className="piggy-band-by"><img src="../frontend/brand/icon.png" alt="" width={28} height={28} />Piggy · hoje</span>
       <span className="piggy-band-head">{o.head}</span>
       {o.text && <span className="piggy-band-text">{o.text}</span>}
       <span className="piggy-band-cta">
