@@ -777,6 +777,16 @@ def save_pluggy_open_finance_item(user_id: int, item: dict, *,
     # sabem ler, e "desconhecido" tem um desfecho só. O valor original não se
     # perde — ele fica no `raw` desta mesma linha (`Jsonb(item)`, abaixo), além do
     # log.
+    # `t0` ANTES do aviso, e não depois dele: o `_DashboardHandler` do root logger
+    # espelha todo WARNING em `system_event_logs` com `psycopg.connect()` + INSERT
+    # SÍNCRONOS (`core/observability.py`), com teto próprio de segundos. Com o
+    # relógio começando depois, esse tempo saía de graça e a reconexão com cliente
+    # HTTP esperando podia estourar o `budget_ms` que esta função promete respeitar
+    # (Codex, PR #539). Agora o aviso gasta do MESMO orçamento que o resto: o
+    # `_CursorComTeto` desconta o que ele levou, e o pior caso vira escrita que
+    # falha por prazo — não uma que ignora o prazo.
+    t0 = monotonic()
+
     from core.services.pluggy_health import STATUS_REMOTOS_ACEITOS
     status = str(item.get("status") or item.get("executionStatus") or "UPDATING").upper()
     if status not in STATUS_REMOTOS_ACEITOS:
@@ -785,8 +795,11 @@ def save_pluggy_open_finance_item(user_id: int, item: dict, *,
         status = "UPDATING"
     now = datetime.now(_tz())
 
-    espera = None if budget_ms is None else max(0.001, budget_ms / 1000.0)
-    t0 = monotonic()
+    # O que SOBRA do orçamento depois do aviso, não o orçamento inteiro: sem o
+    # desconto, o `t0` acima só faria o `_CursorComTeto` cobrar a diferença, e a
+    # espera pela conexão continuaria pagando o aviso por fora.
+    espera = (None if budget_ms is None
+              else max(0.001, (budget_ms - (monotonic() - t0) * 1000) / 1000.0))
     with get_conn(timeout=espera) as conn:
         with conn.cursor() as cur:
             if budget_ms is not None:

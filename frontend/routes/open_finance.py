@@ -1155,8 +1155,22 @@ async def _adota_item_orfao(item_id: str, last_event: str | None = None) -> int 
             # db/privacy.py:1255). No dia em que existir "cancelar exclusão", estas
             # duas linhas viram PERDA DE DADO: o usuário cancela e o banco dele já
             # foi apagado na Pluggy.
-            await asyncio.to_thread(delete_pluggy_items_best_effort, dono, [item_id],
-                                    log_user_id=False)
+            # REVALIDA na mesma thread do DELETE, coladinho nele: entre o
+            # `user_exists` acima e este ponto há um `await` e um salto de thread, e
+            # o `user_id` é DETERMINÍSTICO a partir do e-mail — quem foi excluído e
+            # se recadastra recebe o mesmo id e, pelo `avoidDuplicates`, a Pluggy
+            # devolve o MESMO item. Sem a releitura, esta linha apagaria uma conexão
+            # VÁLIDA e recém-criada, de forma irreversível (Codex, PR #539). A
+            # janela não fecha — o provedor é externo e não há transação que o
+            # inclua —, mas encolhe do salto de thread para uma ida ao banco, e o
+            # sinal lido é o mais forte que existe deste lado: se o item TEM conexão
+            # local agora, ele está em uso e não é órfão de ninguém.
+            def _apaga_se_ainda_orfao() -> None:
+                if user_exists(dono) or get_connections_by_item_id(item_id):
+                    return
+                delete_pluggy_items_best_effort(dono, [item_id], log_user_id=False)
+
+            await asyncio.to_thread(_apaga_se_ainda_orfao)
             return None
         # A conta pode EXISTIR e já estar a caminho do fim: `user_exists` responde
         # True durante a exclusão agendada de propósito (db/users.py:34, "LIMITE

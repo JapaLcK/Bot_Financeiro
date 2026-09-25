@@ -725,3 +725,88 @@ def test_t21_item_da_janela_sai_mesmo_com_falha_pos_commit(user_id, monkeypatch)
         monkeypatch.undo()
         _limpa_item(item_novo)
         _limpa_item(item_velho)
+
+
+# ── T22 (a corrida do recadastro, entre a checagem e o DELETE remoto) ────────
+
+def test_t22_recadastro_na_janela_impede_o_delete_remoto(user_id, monkeypatch):
+    """O `user_exists` diz "não existe" e, antes de o DELETE remoto sair, a pessoa
+    se recadastra e reconecta o MESMO item — e aí apagar é destruir dado válido.
+
+    Não é hipótese: o `user_id` é determinístico a partir do e-mail
+    (`db/users.get_or_create_canonical_user`), então recadastro devolve o MESMO
+    id, e o `avoidDuplicates` da Pluggy devolve o MESMO item. Entre a checagem e
+    o delete há um `await` e um salto de thread (Codex, PR #539).
+
+    A janela não fecha — o provedor é externo —, mas a releitura colada no delete
+    a encolhe para uma ida ao banco. Aqui a corrida é simulada de forma
+    determinística: a conexão aparece DURANTE a chamada, no lugar exato onde a
+    revalidação lê.
+    """
+    _semeia(user_id, agendada=False)
+    item_novo = f"{_item_de(user_id)}-t22"
+    deletados = _mocka_pluggy(monkeypatch)
+
+    real_user_exists = of_routes.user_exists
+
+    def _some_e_volta(uid: int) -> bool:
+        # 1ª leitura (a guarda): a conta "não existe" → entra no ramo do delete.
+        # 2ª leitura (a revalidação): já existe de novo — é o recadastro.
+        _some_e_volta.n += 1
+        return _some_e_volta.n > 1 and real_user_exists(uid)
+
+    _some_e_volta.n = 0
+    monkeypatch.setattr(of_routes, "user_exists", _some_e_volta)
+    try:
+        r = _webhook_de_item_criado(monkeypatch, user_id, item_novo)
+
+        assert r.status_code == 200, r.text
+        assert _some_e_volta.n >= 2, (
+            "a revalidação não aconteceu: o delete saiu com a leitura ANTIGA, "
+            f"que é exatamente o defeito (leituras={_some_e_volta.n})")
+        assert deletados == [], (
+            "DELETE IRREVERSÍVEL EM CONTA VÁLIDA: a pessoa se recadastrou na janela "
+            f"e o item dela foi apagado na Pluggy — {deletados}")
+    finally:
+        _limpa_item(item_novo)
+
+
+def test_t22b_item_com_conexao_local_viva_nunca_e_apagado(monkeypatch, user_id):
+    """O outro sinal da revalidação, e o mais forte deste lado: se o item TEM
+    conexão local no instante do delete, ele está em uso — não é órfão de ninguém.
+
+    Controle de que a revalidação não olha só o usuário: aqui `user_exists` diz
+    "não existe" o tempo todo, e quem barra é a conexão que APARECE na janela.
+
+    A conexão não pode existir desde o começo: aí o item nem seria órfão, a adoção
+    sairia antes e o caso passaria sem tocar no delete — medido, a primeira versão
+    deste teste continuava VERDE com a revalidação removida. Ela nasce na 2ª
+    leitura, que é onde a revalidação olha.
+    """
+    fantasma = 987654321987
+    item_novo = f"{_item_de(fantasma)}-t22b"
+    deletados = _mocka_pluggy(monkeypatch)
+    monkeypatch.setattr(of_routes, "user_exists", lambda uid: False)
+
+    leituras = {"n": 0}
+
+    def _conexao_que_aparece(item, **kw):
+        leituras["n"] += 1
+        if leituras["n"] == 1:      # a guarda: ainda órfão
+            return []
+        return [{"user_id": user_id, "provider_item_id": item}]
+
+    monkeypatch.setattr(of_routes, "get_connections_by_item_id", _conexao_que_aparece)
+    try:
+        r = _webhook_de_item_criado(monkeypatch, fantasma, item_novo)
+
+        assert leituras["n"] >= 2, (
+            "a revalidação não leu as conexões do item: o delete saiu sem olhar se "
+            f"ele está em uso (leituras={leituras['n']})")
+
+        assert r.status_code == 200, r.text
+        assert deletados == [], (
+            "item com conexão local viva foi apagado na Pluggy: a revalidação tem "
+            f"de olhar o ITEM, não só o usuário — {deletados}")
+    finally:
+        _limpa_item(item_novo)
