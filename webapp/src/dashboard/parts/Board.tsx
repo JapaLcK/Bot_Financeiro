@@ -22,6 +22,7 @@ import { Yield } from "../widgets/Yield";
 import { Installments } from "../widgets/Installments";
 import { Catalog, ProfileSelect } from "./BoardControls";
 import { ProfilePicker } from "./ProfilePicker";
+import { PiggyBand } from "./PiggyBand";
 
 // Ordem padrão (o perfil `padrao`): em 4 colunas ela ladrilha sem buraco (24 células, 6 linhas).
 const DEFAULT: WidgetItem[] = [
@@ -123,6 +124,7 @@ export function Board({ s }: { s: DashState }) {
           </button>
         </div>
       </div>
+      <PiggyBand key={shown} s={s} profile={shown} />
       {s.editing && <Catalog missing={ALL.filter((w) => !ids.includes(w.id))} onAdd={add} />}
       <p className="sr-only" aria-live="polite">{said}</p>
       {!ids.length && !s.editing && <p className="board-empty faint">Toque em Organizar para adicionar blocos</p>}

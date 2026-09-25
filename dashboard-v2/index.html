@@ -20,10 +20,14 @@
        raiz do repositório (ex.: `python3 -m http.server 8897`): a página carrega
        ../frontend/fonts e os assets de marca. -->
   <link rel="stylesheet" href="dashboard-app.css">
+  <!-- O painel de chat é o de produção (ilha webapp/src/chat); a faixa do Piggy o abre. -->
+  <link rel="stylesheet" href="../frontend/chat-app.css">
   <script defer src="dashboard-app.js"></script>
+  <script defer src="../frontend/chat-app.js"></script>
 </head>
 <body>
   <div id="pigbank-dashboard"></div>
+  <div id="pigbank-chat-root"></div>
   <noscript>Este painel precisa de JavaScript.</noscript>
 </body>
 </html>
