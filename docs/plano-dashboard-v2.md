@@ -197,9 +197,19 @@ tecnologia, podendo refazer o que for preciso, com calma (Q5).
     e `bind_pocket_to_caixinha` não levam a moeda para ela), então a moeda da caixinha
     ligada vem do investimento de origem: caixinha espelhando posição em dólar fica fora
     como a posição;
-  - **uma leitura só:** a foto lê carteira, caixinhas e investimentos numa única transação
-    `REPEATABLE READ` (uma visão só do banco), para um aporte que confirma no meio não ser
-    contado duas vezes nem nenhuma;
+  - **uma leitura só:** a foto lê tudo numa única transação `REPEATABLE READ` (uma visão só
+    do banco), para um aporte que confirma no meio não ser contado duas vezes nem nenhuma.
+    "Tudo" inclui a marca de pendência abaixo, lida **no mesmo cursor** (hoje
+    `bank_movement_summary` abre conexão própria e veria outro momento);
+  - **o caixa é o do painel de hoje:** carteira manual mais as contas do banco em BRL
+    (`BANK_ACCOUNTS_SQL`), com a correção de lançamento fundido
+    (`MERGED_WALLET_DELTA_SQL`, no monólito) para a transação já refletida no banco não ser
+    debitada duas vezes. A função reusa essas consultas numa versão que recebe o cursor,
+    dentro da mesma transação, sem reescrever a regra;
+  - **reset no meio:** a visão consistente não impede o "Recomeçar do zero" de apagar o
+    histórico entre a leitura e a gravação da foto, e aí a foto velha voltaria. O job pega
+    uma trava consultiva do usuário em modo compartilhado; o reset a pega em modo
+    exclusivo. Movimentos comuns não passam por ela, então o job não os segura;
   - **"a conferir" não vira número certo:** com movimento de banco pendente
     (`bank_movements.pending_count` > 0), o painel antigo já troca o patrimônio por "A
     conferir" (`frontend/dashboard.js`), porque o dinheiro pode estar nos dois lados. A foto
@@ -208,7 +218,10 @@ tecnologia, podendo refazer o que for preciso, com calma (Q5).
 
   Testes: caixinha ligada a um CDB do Open Finance (conta uma vez só); posição em dólar,
   solta e ligada a uma caixinha (fica fora e aparece o aviso); foto no meio de um aporte
-  (conta uma vez); foto com transferência de banco pendente (marcada como incerta).
+  (conta uma vez); foto com transferência de banco pendente (marcada como incerta), e a
+  sincronização resolvendo a pendência no meio da foto (continua incerta); lançamento
+  fundido entre carteira e banco (não debita duas vezes); reset no meio da foto (a foto
+  velha não volta).
 - **Tabela nova por usuário entra no ciclo de privacidade.** As fotos do patrimônio e das
   posições são histórico financeiro do usuário, e `db/privacy.py` enumera as tabelas à mão.
   Toda tabela nova com dado de usuário entra, no mesmo PR que a cria, na exportação
