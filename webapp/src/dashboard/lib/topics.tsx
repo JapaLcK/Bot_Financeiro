@@ -1,5 +1,5 @@
 import type { ReactNode } from "react";
-import { CARD, CATEGORIES, GOALS, MONTHS, TODAY, catById, fixedMonthly, goalEta, incomeHistory, installmentsAhead, keyDate, previousKey, reserveMonths, spentUntil, summary, trajectory, yieldVsCdi } from "./api";
+import { BALANCE_TODAY, CARD, CATEGORIES, GOALS, MONTHS, TODAY, addDays, catById, fixedMonthly, goalEta, incomeHistory, installmentsAhead, keyDate, previousKey, reserveMonths, scheduled, spentUntil, summary, trajectory, yieldVsCdi } from "./api";
 import { RECURRING } from "./data.js";
 import { money, money0, monthName, monthYear, signed0 } from "./format.js";
 import { get } from "./store.js";
@@ -124,7 +124,7 @@ const WEEKDAYS = ["domingo", "segunda", "terça", "quarta", "quinta", "sexta", "
 
 // Perguntas da faixa que pedem um recorte próprio do assunto: o texto (e às vezes o bloco)
 // muda para responder exatamente o que foi perguntado, com o número dessa pergunta.
-const LEADS: Record<string, () => Partial<Answer>> = {
+const LEADS: Record<string, (cat: string | null) => Partial<Answer>> = {
   "maior-gasto": () => {
     const all = (summary(NOW).launches as Launch[]).filter((l) => l.kind === "expense").sort((a, b) => (b.amount ?? 0) - (a.amount ?? 0));
     const top = all[0], variable = all.find((l) => CATEGORIES.find((c) => c.id === l.category)?.variable);
@@ -219,6 +219,52 @@ const LEADS: Record<string, () => Partial<Answer>> = {
       blocks: [<CategoryDetail s={snap(g.c.id)} />],
     } : {};
   },
+  "normal": () => {
+    const past = MONTHS.slice(0, -1).map((k) => spentUntil(k, DAY));
+    const base = past.reduce((a, b) => a + b, 0) / past.length, now = summary(NOW).expense;
+    return {
+      text: <>Até o dia {DAY}, você gastou <b>{money0(now)}</b>. A média dos meses anteriores no mesmo ponto é {money0(base)}, então este mês está <b>{now > base ? `${pct(now / base - 1)} acima` : `${pct(1 - now / base)} abaixo`} do normal</b>.</>,
+    };
+  },
+  "carteira-cdi": () => {
+    const y = yieldVsCdi();
+    const verdict = y.year.ofCdi >= 1 ? "acima do CDI" : y.year.ofCdi >= 0.9 ? "um pouco abaixo do CDI" : "bem abaixo do CDI";
+    return {
+      text: <>Em 12 meses ela rendeu <b>{pct(y.year.ofCdi)} do CDI</b> ({signed0(y.year.value)}): <b>{verdict}</b>. Em {MONTH} foi {pct(y.month.ofCdi)} do CDI.</>,
+    };
+  },
+  "no-azul": () => {
+    const m = summary(NOW), left = m.income - m.expense - m.saved;
+    return {
+      text: <><b>{left >= 0 ? "Sim" : "Ainda não"}.</b> Até o dia {DAY} entraram {money0(m.income)}, saíram {money0(m.expense)} e {money0(m.saved)} foram para as caixinhas: {left >= 0 ? "sobram" : "faltam"} <b>{money0(Math.abs(left))}</b>.</>,
+    };
+  },
+  "insight-rise": (cat) => {
+    const c = catById(cat), prev = previousKey(NOW)!;
+    if (!c) return {};
+    const buys = (k: string) => (summary(k).launches as Launch[]).filter((l) => l.kind === "expense" && l.category === c.id && l.date.getDate() <= DAY);
+    const a = buys(prev), b = buys(NOW);
+    const ticket = (xs: Launch[]) => xs.reduce((s, l) => s + (l.amount ?? 0), 0) / Math.max(1, xs.length);
+    const more = b.length > a.length;
+    return {
+      text: <>Subiu porque {more ? <>você pediu <b>mais vezes</b>: {b.length} contra {a.length} em {monthName(keyDate(prev))} no mesmo ponto</> : <>cada pedido saiu <b>mais caro</b></>}; o valor médio foi de {money(ticket(a))} para {money(ticket(b))}. Os lugares que mais pesaram estão no detalhe abaixo.</>,
+    };
+  },
+  "insight-trend": () => {
+    const t = trajectory(NOW, "90", null);
+    const fall = BALANCE_TODAY - t.end.value;
+    return {
+      text: <>Sem freelas, o saldo sai de {money0(BALANCE_TODAY)} hoje para cerca de <b>{money0(t.end.value)} em 90 dias</b>: {money0((fall / 90) * 30.4)} por mês a menos. Pra segurar, dá pra cortar no dia a dia o que mais subiu ou manter um freela por mês; o simulador mostra o efeito de cada corte.</>,
+      blocks: [<Hero s={{ ...snap(), horizon: "90" }} />],
+    };
+  },
+  "insight-next": () => {
+    const next = (scheduled(addDays(TODAY, 1), addDays(TODAY, 30)) as Launch[]).find((b) => b.kind === "expense" && !b.transfer && b.source !== "cartao" && b.amount != null);
+    if (!next) return {};
+    return {
+      text: <><b>{BALANCE_TODAY >= (next.amount ?? 0) ? "Sim" : "Hoje não"}.</b> {next.label} ({money0(next.amount ?? 0)}) vence dia {next.date.getDate()}, e hoje você tem {money0(BALANCE_TODAY)} na conta. Contando todos os compromissos até o fim do mês, você fecha {MONTH} com cerca de {money0(monthEnd())}.</>,
+    };
+  },
   "meta-economia": () => ({
     text: <>Suas caixinhas já recebem <b>{money0(GOALS.reduce((a, g) => a + g.monthly, 0))} por mês</b>. Pra uma meta nova, me diz o valor e a data: no app de verdade eu monto ela com você aqui.</>,
   }),
@@ -227,7 +273,7 @@ const LEADS: Record<string, () => Partial<Answer>> = {
 /** A resposta pronta do assunto; `key` (a pergunta da faixa) ajusta o texto quando ela pede um recorte. */
 export function answer(topic: TopicId, cat: string | null = null, key?: string): Answer {
   const base = byTopic(topic, key === "categoria-cresceu" ? grower()?.c.id ?? cat : cat);
-  return { ...base, ...(key ? LEADS[key]?.() : undefined) };
+  return { ...base, ...(key ? LEADS[key]?.(cat) : undefined) };
 }
 
 // Texto livre no protótipo: sem IA, o Piggy oferece os assuntos que ele sabe mostrar.
