@@ -57,13 +57,14 @@ O que isso muda neste plano:
 - **Recorrente só prevê.** Hoje o carregador de recorrentes (`run_recurring_charger_loop`,
   em `core/services/recurring_charger.py`) lança sozinho na carteira: o salário entra como
   crédito e a conta fixa como débito, sem olhar o Open Finance — que já traz a mesma
-  transação do banco. Com a Q36 isso conta duas vezes, então no v2 a recorrente só alimenta
-  a Previsão e o aviso de vencimento; o dinheiro real vem do Open Finance. Antes do job da
-  foto (etapa 0), o PR confere se a leitura com a correção de fusão
-  (`MERGED_WALLET_DELTA_SQL`) já desconta esses lançamentos automáticos; se não descontar,
-  desligar o lançamento automático para quem tem banco conectado entra antes do job.
-  Teste: salário recorrente com o crédito do banco já no Open Finance — a foto conta uma
-  vez.
+  transação do banco. Com a Q36 isso conta duas vezes — e, para quem não tem banco
+  conectado, transforma uma previsão (salário que ainda não caiu, conta ainda não paga) em
+  dinheiro na carteira. Então a recorrente **só prevê, para todo mundo**: alimenta a
+  Previsão e o aviso de vencimento, e o lançamento automático do carregador é desligado
+  **antes** do job da foto (etapa 0), para todos os usuários — também no painel antigo,
+  porque a foto é de todos. Quem quiser registrar que pagou em dinheiro lança na carteira.
+  Testes: salário recorrente com o crédito do banco já no Open Finance (conta uma vez);
+  usuário sem banco conectado com salário e conta recorrentes (nada lançado, só previsto).
 - **Lançar, no v2, é lançar na carteira.** "Lançamentos (ver, lançar, editar, apagar)" da
   primeira versão vira: ver tudo; lançar, editar e apagar só o que é da carteira Piggy.
   Transação do Open Finance não se cria nem se apaga à mão.
@@ -114,9 +115,13 @@ Decidido pelo dono na mesma data (Q37–Q41):
     `(account_id, provider_transaction_id)` em `db/schema.py`). A identidade é a chave
     natural da conta no provedor mais o id da transação; o PR mede na API real se ela
     sobrevive a desconectar e reconectar. Desconectar **não** apaga nem desfaz o lançamento
-    da carteira (o dinheiro vivo continua no bolso). E, independente de a chave sobreviver:
-    depois de uma reconexão, saque com data anterior à conexão nova **não** gera lançamento
-    automático — ele já foi tratado, ou recusado, na conexão antiga;
+    da carteira (o dinheiro vivo continua no bolso). Na reconexão, o banco reimporta o
+    histórico: saque cuja identidade já tem lançamento ou recusa gravados é pulado; saque
+    nunca visto — inclusive o feito enquanto o banco estava desconectado — segue o caminho
+    normal (lançamento automático com aviso). Se o PR medir que a identidade **não**
+    sobrevive à reconexão, o saque anterior à conexão nova que não se consegue provar
+    inédito vai para **confirmação** do usuário em vez de lançar sozinho — nunca é
+    descartado pela data, que apagaria um saque real feito no intervalo;
   - **o banco corrige, a carteira acompanha:** valor ou data corrigidos numa sincronização
     (`save_open_finance_sync`) atualizam o lançamento; transação apagada pelo banco (o
     caminho `transactions/deleted`, em `frontend/routes/open_finance.py`) desfaz o
@@ -126,7 +131,8 @@ Decidido pelo dono na mesma data (Q37–Q41):
 
   Testes: saque corrigido em valor e em data; saque apagado pelo banco; desfazer e
   sincronizar de novo (o dinheiro não volta); desconectar, reconectar e o banco trazer o
-  mesmo saque de novo (nenhum crédito a mais, e o dinheiro da carteira fica).
+  mesmo saque de novo (nenhum crédito a mais, e o dinheiro da carteira fica); saque feito
+  enquanto o banco estava desconectado (entra na carteira depois da reconexão).
 
 ### O que a primeira versão precisa ter (Q3)
 
@@ -370,7 +376,11 @@ tecnologia, podendo refazer o que for preciso, com calma (Q5).
   **último sucesso mais velho que o dobro do intervalo de atualização daquele produto**
   (a sincronização automática do provedor é diária, então 48 horas; o PR confere o
   intervalo real de cada produto e guarda o limite numa constante só, que a foto também
-  usa). Desatualizado: o número vem acompanhado do aviso, e onde ele
+  usa). Como o estado muda com o relógio, sem escrita nenhuma, a resposta traz também
+  **até quando ela vale** (`em_dia_ate`), e o cliente agenda uma nova busca para esse
+  instante — senão uma tela aberta antes do limite continuaria dizendo "em dia" depois
+  dele, já que o aviso em tempo real só dispara com escrita. Teste: a tela fica aberta
+  enquanto o limite passa e muda para desatualizado sozinha. Desatualizado: o número vem acompanhado do aviso, e onde ele
   seria uma conclusão (meses de reserva, % do CDI) a API devolve `null` com o motivo
   `banco_desatualizado`. Teste por bloco: conexão pausada, falha só em `/investments`, e
   conexão ativa cujo último sucesso passou do limite sem erro nenhum, incluindo a reserva
