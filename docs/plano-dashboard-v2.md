@@ -61,6 +61,15 @@ tecnologia, podendo refazer o que for preciso, com calma (Q5).
   o Bearer (app), barra plano inativo e entrega o usuário. Um teste varre todas as rotas da
   `/api/v2` e falha se alguma não tiver a dependência. Cada rota tem teste de "o usuário B
   não recebe dado do A".
+- **Plano por recurso (Q20):** estar logado com plano ativo não basta. Rota de recurso pago
+  declara também `Depends(recurso("forecast"))` (ou `insights`, `simulator`, `ai_chat`…),
+  que chama o `plan_gate_ok` de `core/services/plan_service.py` — a matriz
+  `FEATURE_MIN_TIER_V2` continua a fonte única, sem cópia na `/api/v2`. Recusa sai no envelope
+  de erro (`plano_insuficiente`). O teste que varre as rotas exige, em cada uma, ou a
+  dependência de recurso ou a presença numa lista explícita de rotas do plano de entrada. Cada
+  rota paga tem teste na fronteira: o plano abaixo recebe a recusa, o plano mínimo recebe o
+  dado. O gate pelo `/auth/me` na tela (seção 3) só decide o que mostrar; quem protege é o
+  servidor.
 - **Contrato (Q22):** request e response declarados em Pydantic (`response_model` em toda
   rota) → especificação OpenAPI → tipos TypeScript gerados para o v2 e para o app (e o zod
   do app, gerado da mesma especificação). **Exceção: a rota de eventos (SSE)**, que devolve
@@ -73,7 +82,11 @@ tecnologia, podendo refazer o que for preciso, com calma (Q5).
   "campo": null}}`, com os códigos listados no contrato.
 - **Tempo real (Q19, Q27–Q29):** SSE, só servidor → cliente. O aviso carrega só *o que*
   mudou (`{"mudou": ["lancamentos", "saldo"]}`), nunca o dado; a tela pede de novo à API.
-  Um lançamento feito pelo WhatsApp atualiza o painel aberto. Hoje roda um processo só:
+  Um lançamento feito pelo WhatsApp atualiza o painel aberto. O aviso não se guarda: se a
+  conexão cair, o que mudou nesse meio-tempo se perde. Por isso, **a cada (re)conexão** o
+  cliente invalida todas as consultas e a tela pede tudo de novo — cobre a queda, a volta do
+  sono do computador e a janela entre a primeira carga e a conexão abrir. O teste de ponta a
+  ponta do aviso (Q32) inclui derrubar a conexão, lançar e reconectar. Hoje roda um processo só:
   o aviso fica dentro do processo, atrás de uma função única; com uma segunda instância,
   troca-se essa função por `LISTEN/NOTIFY` do Postgres. O `/ws` antigo sai junto com o
   dashboard antigo.
@@ -86,8 +99,18 @@ tecnologia, podendo refazer o que for preciso, com calma (Q5).
   Ele entra **na etapa 0**, antes de qualquer tela, para o histórico começar a encher o quanto
   antes; enquanto enche, o gráfico diz que se completa com o tempo. Nada de reconstruir o
   passado (mostraria número errado com cara de certo).
-- **Rendimento × CDI:** calculado dos investimentos e da série do CDI que já existe
-  (`db/investments.py`).
+- **Rendimento × CDI:** a série do CDI já existe (`db/investments.py`), mas o lado da
+  carteira não tem histórico: `investments`, `investment_lots` e `open_finance_investments`
+  guardam só o saldo atual, sobrescrito a cada juro ou sincronização, e sem histórico não dá
+  para separar rendimento de aporte e resgate. Por isso **o job da etapa 0 grava também, por
+  posição, o valor e o rendimento acumulado** — nos do Open Finance, o `amountProfit` que o
+  banco manda; nos manuais, calculado dos lotes, contando também o que já saiu em resgate.
+  O rendimento do mês é a variação desse acumulado sobre o valor do início. A fórmula exata
+  dos manuais se fecha no PR do job, com teste de que aporte e resgate no meio do mês não
+  mexem no rendimento. Posição sem rendimento informado (renda variável, cripto sem
+  `amountProfit`) fica fora da conta, e o bloco diz quais ficaram. Como o patrimônio, nada
+  de reconstruir o passado: enquanto o histórico enche, o bloco diz que se completa com o
+  tempo.
 - **Reserva em meses:** reserva dividida pelas contas fixas. Hoje nada marca qual caixinha
   é a reserva: só há o palpite pelo nome em `core/services/piggy_agents.py` (`_is_reserva`).
   Por isso a caixinha de reserva passa a ser **designada pelo usuário** (um campo na
@@ -120,7 +143,7 @@ fica; só as respostas prontas saem quando a IA real entrar.
 
 | Etapa | O que entra | Faixa |
 |---|---|---|
-| 0 | Esqueleto da `/api/v2` (dependência de usuário, envelope de erro, contrato + tipos gerados, SSE), `/painel` servido com a chave e os links, plano real pelo `/auth/me`, cliente TanStack Query, job da foto diária do patrimônio | Completo |
+| 0 | Esqueleto da `/api/v2` (dependência de usuário, envelope de erro, contrato + tipos gerados, SSE), `/painel` servido com a chave e os links, plano real pelo `/auth/me`, cliente TanStack Query, job da foto diária do patrimônio e das posições de investimento | Completo |
 | 1 | Resumo (perfil no servidor entra aqui) | API Completo, tela Leve |
 | 2 | Lançamentos: ver, lançar, editar, apagar | idem |
 | 3 | Previsão | idem |
