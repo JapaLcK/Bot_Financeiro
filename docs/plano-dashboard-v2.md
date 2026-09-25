@@ -57,6 +57,13 @@ O que isso muda neste plano:
 - **Lançar, no v2, é lançar na carteira.** "Lançamentos (ver, lançar, editar, apagar)" da
   primeira versão vira: ver tudo; lançar, editar e apagar só o que é da carteira Piggy.
   Transação do Open Finance não se cria nem se apaga à mão.
+- **Dinheiro que muda de lugar não é gasto nem receita.** Sacar no caixa eletrônico: o Open
+  Finance vê só o débito no banco; sem nada mais, o patrimônio cai e o relatório mostra um
+  gasto que não houve. Depositar dinheiro vivo é o inverso. Por isso existe uma
+  **transferência entre banco e carteira**: o saque (ou depósito em espécie) que o Open
+  Finance trouxer é casado com uma entrada (ou saída) da carteira Piggy, e o par fica fora
+  dos relatórios de gasto e receita e não mexe no patrimônio. Como o casamento acontece é
+  a Q41. Testes: saque e depósito, olhando patrimônio (não muda) e relatórios (não entra).
 
 A decidir com o dono (próxima rodada, antes da etapa 0):
 - **Q37 — o que já existe de manual.** Investimentos, aportes, caixinhas e lançamentos
@@ -72,6 +79,10 @@ A decidir com o dono (próxima rodada, antes da etapa 0):
 - **Q40 — o WhatsApp.** "Gastei 50 no mercado" vira lançamento da carteira (espécie) ou
   anotação/categoria para casar com a transação que o Open Finance trouxer? Sem essa regra,
   um gasto no cartão lançado pelo WhatsApp conta duas vezes.
+- **Q41 — saque e depósito em espécie.** Quando o Open Finance traz um saque, a carteira
+  recebe a entrada: sozinha, com um aviso que o usuário pode desfazer (sugestão), ou só
+  depois de ele confirmar? E o valor sacado que ele gastar depois é lançado na carteira
+  normalmente.
 
 ### O que a primeira versão precisa ter (Q3)
 
@@ -256,6 +267,13 @@ tecnologia, podendo refazer o que for preciso, com calma (Q5).
     comando, que seria o próprio pedido da trava — se ele esperasse o reset, a foto leria o
     estado de antes. Por isso a trava é **de sessão, pega antes de abrir a transação**, e
     solta depois do commit;
+  - **conexão parada não vira queda:** com uma conexão pausada, apagada, com
+    sincronização parcial ou desatualizada, a conta daquele banco some da soma
+    (`BANK_ACCOUNTS_SQL` já tira conexões pausadas e apagadas) enquanto os investimentos em
+    cache continuam — o gráfico mostraria uma queda que não houve. A foto confere o estado
+    de cada conexão e de cada produto (o mesmo `PARTIAL_SUCCESS` e o `isUpdated` que a
+    reconciliação já usa) e, se algum não estiver em dia, grava o ponto marcado como
+    incompleto, dizendo qual banco;
   - **"a conferir" não vira número certo:** com movimento de banco pendente
     (`bank_movements.pending_count` > 0), o painel antigo já troca o patrimônio por "A
     conferir" (`frontend/dashboard.js`), porque o dinheiro pode estar nos dois lados. A foto
@@ -268,7 +286,9 @@ tecnologia, podendo refazer o que for preciso, com calma (Q5).
   sincronização resolvendo a pendência no meio da foto (continua incerta); lançamento
   fundido entre carteira e banco (não debita duas vezes); reset começando antes da foto e
   a foto esperando por ele (a foto velha não volta); conta ou posição sem moeda informada,
-  gravada antes e depois do conserto da ingestão (fica fora e aparece o aviso).
+  gravada antes e depois do conserto da ingestão (fica fora e aparece o aviso); conexão
+  que fica pausada ou parcial entre duas rodadas (o ponto sai marcado como incompleto, sem
+  queda falsa).
 - **Tabela nova por usuário entra no ciclo de privacidade.** As fotos do patrimônio e das
   posições são histórico financeiro do usuário, e `db/privacy.py` enumera as tabelas à mão.
   Toda tabela nova com dado de usuário entra, no mesmo PR que a cria, na exportação
