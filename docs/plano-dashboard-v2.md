@@ -91,8 +91,12 @@ Decidido pelo dono na mesma data (Q37–Q41):
   - **investimento manual que o banco também traz:** não há ligação entre `investments` e
     `open_finance_investments`, então o CDB lançado à mão e o mesmo CDB vindo do banco
     contariam duas vezes. Quando o usuário tem investimento manual e investimento do Open
-    Finance, o v2 pergunta, para cada manual, se ele é um dos do banco (aí o manual sai da
-    soma) ou outro; enquanto houver algum sem resposta, a foto sai marcada como incerta;
+    Finance, o v2 pergunta, para cada manual, **qual** posição do banco ele é (aí o manual
+    sai da soma) ou se é outro; a resposta guarda a identidade dessa posição (a mesma chave
+    estável na reconexão usada no saque). Ela é refeita quando essa posição some (banco
+    desconectado: o manual volta para a soma e a pergunta reabre) ou quando o conjunto de
+    bancos muda ("outro" pode ter virado duplicado). Enquanto houver algum sem resposta, a
+    foto sai marcada como incerta;
   - **carteira que não é só dinheiro vivo:** hoje a carteira é dinheiro mais contas de banco
     não conectadas (o painel antigo pede para "Ajustar Carteira" depois de conectar), então
     somá-la ao saldo do banco conta o mesmo dinheiro duas vezes — a correção de fusão só
@@ -101,9 +105,15 @@ Decidido pelo dono na mesma data (Q37–Q41):
     (`recurring_income_credits`, `recurring_charges`) — desligar o carregador só para os
     lançamentos futuros. Por isso, **sem exceção**, na primeira vez no v2 todo usuário
     confirma quanto da carteira é dinheiro vivo, tenha banco conectado ou não; até
-    confirmar, a foto dele sai marcada como incerta.
+    confirmar, a foto dele sai marcada como incerta. A confirmação vale enquanto a
+    carteira só receber dinheiro vivo: se o usuário voltar ao painel antigo e usar um
+    caminho que não pergunta a forma de pagamento (lançar em `/launches/...` ou o ajuste de
+    saldo `adjust_balance_route`), a confirmação cai e a foto volta a ser incerta até ele
+    confirmar de novo;
 
-  Testes: CDB manual e o mesmo CDB do banco (incerta até responder; depois, uma vez só);
+  Testes: CDB manual e o mesmo CDB do banco (incerta até responder; depois, uma vez só;
+  desconectar o banco devolve o manual à soma e reabre a pergunta); lançar pelo painel
+  antigo depois de confirmar a carteira (volta a incerta);
   carteira com saldo de banco antigo e banco conectado, e carteira com salário recorrente
   lançado antes do desligamento sem banco conectado (incerta até confirmar, nos dois).
 - **Q38 — a caixinha manual continua**, como exceção à Q36: ela é dinheiro separado pelo
@@ -376,7 +386,9 @@ tecnologia, podendo refazer o que for preciso, com calma (Q5).
     exato.
 
   **Uma foto por usuário por dia:** restrição única em `(user_id, dia)`, e a foto guarda
-  **a hora da leitura** (o início da transação que a leu). A gravação só substitui a do
+  **a hora da leitura** — tirada no **primeiro comando** da transação (`select
+  clock_timestamp()`), que é o que fixa a visão `REPEATABLE READ`; a hora do `BEGIN` não
+  serve, porque a visão só nasce no primeiro comando. A gravação só substitui a do
   mesmo dia se a leitura dela for mais nova — senão uma instância que leu antes e terminou
   depois gravaria o saldo velho por cima do novo.
 
