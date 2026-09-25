@@ -182,70 +182,64 @@ tecnologia, podendo refazer o que for preciso, com calma (Q5).
     (`db/open_finance.py`) e antes de sobrescrever ou apagar a linha do espelho — não pelo
     job diário, que chegaria tarde para a posição liquidada entre duas rodadas. O histórico
     fica numa tabela própria, que a reconciliação não apaga: a posição que o banco deixou de
-    mandar continua na série dos meses em que existiu, marcada como encerrada. Vale o mesmo
-    para os manuais: `delete_investment` (`db/investments.py`) apaga a linha de verdade, então
-    o histórico tem identidade própria (id e nome guardados nele, sem chave estrangeira em
-    cascata para `investments`) e o investimento apagado continua nos meses em que existiu,
-    marcado como encerrado. A cascata fica só para o usuário, pela regra de privacidade
-    abaixo.
-  - **Manuais:** o aporte e o resgate passam pelo nosso código
-    (`investment_deposit_from_account` e `investment_withdraw_to_account`, em
-    `db/investments.py`, e todo outro caminho que mexa no principal — o inventário por
-    `grep` é o primeiro passo do PR do job). O saldo só anda quando os juros são
-    calculados (`accrue_all_investments`, que hoje roda num laço próprio de horas em
-    `core/services/investment_scheduler.py`); foto de saldo parado joga o rendimento para o
-    intervalo — e às vezes o mês — errado. Por isso toda foto, diária ou de movimento, é
-    tirada **logo depois de calcular os juros daquele usuário até hoje**, na mesma
-    operação, e nunca lê o saldo sem isso. E "até hoje" não é garantido: o cálculo
-    (`_growth_for_period`, em `db/investments.py`) só anda até a última data com taxa
-    publicada (CDI, SELIC, IPCA saem com atraso). Por isso a foto grava a **data efetiva**
-    (até onde os juros foram calculados), e o rendimento é atribuído por ela, não pelo dia
-    da foto. A data efetiva é o **fim do período que a taxa cobre**, que nem sempre é o
-    cursor do banco: no IPCA mensal a chave da observação é o dia 1 do mês e o fator vale
-    o mês inteiro, então a data efetiva é o último dia daquele mês (guardada à parte do
-    `last_date`). Dois pré-requisitos no código de hoje, que entram antes do job (faixa
-    Completo, dinheiro): o resgate parcial (`investment_withdraw_to_account`) grava
-    `last_date = hoje` nos lotes que continuam abertos mesmo quando o juro parou antes por
-    falta de taxa, e os dias entre um e outro nunca rendem — o movimento tem de manter o
-    cursor real; e o teste disso é índice atrasado mais resgate parcial. Quando o cálculo atravessa uma virada de mês, ele roda em dois
-    passos, com uma foto na data efetiva do último dia útil do mês; até essa foto existir, o
-    mês aparece como "em apuração". Testes: virada de mês com o laço de juros atrasado, e
-    taxa do fim do mês publicada só depois da virada — nos dois, o rendimento cai no mês
-    certo. O job grava uma foto por dia e mais uma antes
-    e outra depois de cada movimento, no mesmo commit dele, marcadas como o par do
-    movimento. O rendimento de cada intervalo entre fotos é a variação do valor sobre o
-    valor do início, **exceto o par antes→depois de um movimento**, que é o próprio dinheiro
-    entrando ou saindo e fica fora; o intervalo seguinte começa da foto de depois. O do mês
-    é o encadeamento dos intervalos (rentabilidade ponderada pelo tempo, a mesma régua do
-    CDI). Como todo movimento cai entre duas fotos, a conta é exata. Criar investimento e aportar aceitam
-    data no passado (`purchase_date` em `create_investment_db`, e o lote nasce com ela), e o
-    juro desse passado só entra quando os juros forem atualizados. Por isso a foto de depois
-    é tirada **com o investimento já em dia** (juros calculados até hoje) — ela é a base, e
-    rendimento de antes da primeira foto nunca entra na conta, como manda a regra de não
-    reconstruir o passado.
+    mandar continua na série dos meses em que existiu, marcada como encerrada. A cascata do histórico fica só para o
+    usuário, pela regra de privacidade abaixo.
+  - **Manuais:** a unidade é o **lote** (`investment_lots`), não o investimento: cada lote
+    tem indexador, taxa e cursor de juros próprios (um investimento pode ter um lote de CDI
+    e outro de IPCA, cada um em dia até uma data diferente). O job grava, por lote, o valor,
+    o principal e a **data efetiva** — o fim do período que a taxa já aplicada cobre, que
+    nem sempre é o cursor do banco (no IPCA mensal a chave é o dia 1 e o fator vale o mês
+    inteiro, então a data efetiva é o último dia do mês). O histórico tem identidade
+    própria (id e nome guardados nele, sem chave estrangeira em cascata para `investments`
+    ou `investment_lots`): lote resgatado ou investimento apagado (`delete_investment` apaga
+    a linha) continua nos meses em que existiu, marcado como encerrado.
+
+    **Quando se tira a foto.** Uma por dia e mais uma antes e outra depois de cada aporte e
+    resgate, no mesmo commit do movimento (`investment_deposit_from_account`,
+    `investment_withdraw_to_account` e todo outro caminho que mexa no principal — o
+    inventário por `grep` é o primeiro passo do PR do job). Toda foto é tirada **logo
+    depois de calcular os juros daquele usuário** (`accrue_all_investments` roda hoje num
+    laço próprio em `core/services/investment_scheduler.py`), na mesma operação. Aporte com
+    data no passado (`purchase_date`) só conta a partir da primeira foto, já com os juros em
+    dia: rendimento de antes dela nunca entra.
+
+    **A conta: CDI no mesmo dinheiro, nos mesmos dias.** Para cada lote, o rendimento é a
+    variação do valor entre fotos, tirando o par antes→depois de um movimento (que é o
+    próprio dinheiro entrando ou saindo). A comparação é uma **carteira-sombra**: o mesmo
+    capital de cada lote, em cada intervalo em que esteve aplicado, até a mesma data
+    efetiva, rendendo CDI. O bloco mostra, por investimento, quanto rendeu e quanto teria
+    rendido no CDI (em reais) e a razão entre os dois ("% do CDI"). Isso fecha de uma vez os
+    casos que uma média de percentuais erra: aporte e resgate no meio do período, lote aberto
+    ou encerrado no meio do mês, investimento que fica zerado e depois recebe aporte (sem
+    capital a sombra não rende), lotes com indexadores diferentes (cada um até a sua data
+    efetiva) e taxa publicada com atraso (o rendimento cai no período que a taxa cobre; o
+    mês cuja taxa ainda não saiu aparece como "em apuração").
+
+    **Pré-requisito no código de hoje** (faixa Completo, dinheiro, antes do job): o resgate
+    parcial (`investment_withdraw_to_account`) grava `last_date = hoje` nos lotes que
+    continuam abertos mesmo quando o juro parou antes por falta de taxa, e os dias entre um
+    e outro nunca rendem. O movimento tem de manter o cursor real; teste: índice atrasado
+    mais resgate parcial.
 
   **O bloco compara cada investimento com o CDI, e não mostra número da carteira inteira**
-  (decisão do dono, 2026-09-25). **O CDI é medido no mesmo período do investimento**, não no
-  mês inteiro: investimento aberto ou encerrado no meio do mês seria comparado com dias em
-  que não existia (aberto na metade de um mês de CDI 1%, rendendo 0,5%, apareceria como 50%
-  do CDI em vez de ~100%). Nos manuais o histórico guarda a primeira e a última data
-  efetiva, e o CDI é composto exatamente nesse intervalo. No Open Finance a taxa do banco é
-  do mês e o período dela não é informado, então o mês de abertura e o de encerramento
-  aparecem sem comparação, com o motivo. No Open Finance o banco não diz quando o dinheiro entrou ou
+  (decisão do dono, 2026-09-25). No Open Finance o banco não diz quando o dinheiro entrou ou
   saiu, então não existe rentabilidade exata da carteira somada; um número aproximado com
-  cara de exato é o que este plano proíbe. Investimento sem rentabilidade informada (o banco
-  não mandou a taxa, renda variável, cripto) aparece sem a comparação, com o motivo. Como o
-  patrimônio, nada de reconstruir o passado: enquanto o histórico enche, o bloco diz que se
-  completa com o tempo. Testes do PR do job: aporte e resgate nos manuais, rendendo antes e
-  depois do movimento (exato); movimento sem rendimento nenhum (dá 0%); virada de mês com os juros atrasados; investimento aberto e encerrado no meio do mês (CDI
-  do mesmo intervalo; no Open Finance, sem comparação); IPCA publicado depois da virada comparado com o
-  CDI do mês que ele cobre; investimento resgatado e depois apagado (continua no
-  histórico); investimento e aporte com data no passado (o juro antigo
-  não entra); dois movimentos no mesmo dia; resgate total; investimento do
-  Open Finance sem taxa (aparece sem comparação); posição do Open Finance liquidada entre
-  duas rodadas do job (a taxa da última sincronização fica no histórico).
-  O widget do protótipo (`widgets/Yield.tsx`) mostra a carteira somada; ele passa a ser por
-  investimento quando for ligado à API, na etapa do Resumo.
+  cara de exato é o que este plano proíbe. No Open Finance a taxa do banco é do mês e o
+  período dela não é informado, então o mês de abertura e o de encerramento aparecem sem
+  comparação, com o motivo. Investimento sem rentabilidade informada (o banco não mandou a
+  taxa, renda variável, cripto) aparece sem a comparação, com o motivo. Como o patrimônio,
+  nada de reconstruir o passado: enquanto o histórico enche, o bloco diz que se completa com
+  o tempo. O widget do protótipo (`widgets/Yield.tsx`) mostra a carteira somada; ele passa a
+  ser por investimento quando for ligado à API, na etapa do Resumo.
+
+  **Testes do PR do job** — manuais: aporte e resgate rendendo antes e depois; movimento sem
+  rendimento (dá 0); dois movimentos no mesmo dia; resgate total; resgate total e novo
+  aporte semanas depois (a sombra não rende no buraco); lote aberto e encerrado no meio do
+  mês; investimento com um lote de CDI e outro de IPCA; IPCA publicado depois da virada
+  (cai no mês que cobre); virada de mês com o laço de juros atrasado; aporte com data no
+  passado; investimento resgatado e depois apagado (continua no histórico). Open Finance:
+  investimento sem taxa; mês de abertura e de encerramento (sem comparação); posição
+  liquidada entre duas rodadas do job (a taxa da última sincronização fica no histórico).
 - **Reserva em meses:** reserva dividida pelo custo mensal das contas fixas ativas. O custo
   mensal converte cada frequência de `db/recurring.py` (`VALID_FREQUENCIES`): diária × 365/12,
   semanal × 52/12, mensal × 1, anual ÷ 12; pagamento único (`once`) não entra. Conta de valor
