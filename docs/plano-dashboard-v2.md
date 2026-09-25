@@ -184,7 +184,19 @@ tecnologia, podendo refazer o que for preciso, com calma (Q5).
 - **Patrimônio em 12 meses:** um job diário grava uma "foto" do patrimônio de cada usuário.
   Ele entra **na etapa 0**, antes de qualquer tela, para o histórico começar a encher o quanto
   antes; enquanto enche, o gráfico diz que se completa com o tempo. Nada de reconstruir o
-  passado (mostraria número errado com cara de certo).
+  passado (mostraria número errado com cara de certo). O que entra na foto sai de **uma
+  função só** de patrimônio, criada na etapa 0 e usada também pela tela de Patrimônio (Q18)
+  — hoje não existe uma. Duas regras que ela herda do código atual:
+  - **sem contar duas vezes:** caixinha ligada a um investimento do Open Finance espelha o
+    saldo dele (`pockets.of_investment_id`), e `list_of_fixed_income` (`db/rv.py`) já tira
+    essas posições da lista; a função reusa essa exclusão, não a reescreve;
+  - **só reais:** `open_finance_investments` guarda a moeda, e o código de análise já
+    filtra BRL. A foto soma só BRL e guarda quantas posições em outra moeda ficaram fora; o
+    gráfico diz isso, em vez de somar dólar como real. Conversão com câmbio datado fica para
+    quando alguém pedir.
+
+  Testes: caixinha ligada a um CDB do Open Finance (conta uma vez só); posição em dólar
+  (fica fora e aparece o aviso).
 - **Tabela nova por usuário entra no ciclo de privacidade.** As fotos do patrimônio e das
   posições são histórico financeiro do usuário, e `db/privacy.py` enumera as tabelas à mão.
   Toda tabela nova com dado de usuário entra, no mesmo PR que a cria, na exportação
@@ -210,7 +222,11 @@ tecnologia, podendo refazer o que for preciso, com calma (Q5).
     é dentro de `save_open_finance_investments`
     (`db/open_finance.py`) e antes de sobrescrever ou apagar a linha do espelho — não pelo
     job diário, que chegaria tarde para a posição liquidada entre duas rodadas. O histórico
-    fica numa tabela própria, que a reconciliação não apaga: a posição que o banco deixou de
+    fica numa tabela própria, que a reconciliação não apaga, e **cada observação guarda
+    junto as datas que o banco mandou naquele momento** — o período da taxa e as datas da
+    posição do usuário. A linha viva do espelho é apagada quando a posição some ou o banco é
+    desconectado, e a comparação precisa dessas datas depois; tirá-las da linha viva
+    misturaria vidas diferentes do mesmo id. No histórico, a posição que o banco deixou de
     mandar continua na série dos meses em que existiu, marcada como encerrada. Desconectar
     o banco (`disconnect_open_finance_connection`, em `db/open_finance.py`) não passa pela
     sincronização — ele apaga a conexão e a cascata leva as posições —, então a mesma
