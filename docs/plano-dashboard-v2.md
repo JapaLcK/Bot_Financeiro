@@ -186,10 +186,15 @@ tecnologia, podendo refazer o que for preciso, com calma (Q5).
   duas rodadas do job (a taxa da última sincronização fica no histórico).
   O widget do protótipo (`widgets/Yield.tsx`) mostra a carteira somada; ele passa a ser por
   investimento quando for ligado à API, na etapa do Resumo.
-- **Reserva em meses:** reserva dividida pelas contas fixas. Sem conta fixa ativa a divisão
-  não existe: a API devolve `meses: null` com o motivo (`sem_contas_fixas`), nunca infinito
-  nem erro, e o bloco diz "cadastre suas contas fixas". Teste de contrato e de tela para
-  esse caso. Hoje nada marca qual caixinha
+- **Reserva em meses:** reserva dividida pelo custo mensal das contas fixas ativas. O custo
+  mensal converte cada frequência de `db/recurring.py` (`VALID_FREQUENCIES`): diária × 365/12,
+  semanal × 52/12, mensal × 1, anual ÷ 12; pagamento único (`once`) não entra. Conta de valor
+  variável sem estimativa (guardada com valor 0) fica fora da soma, e o bloco diz quantas
+  ficaram. A condição do vazio é o **total**, não a existência de conta: com total zero a
+  API devolve `meses: null` com o motivo — `sem_contas_fixas` (nenhuma ativa) ou
+  `sem_valor` (há contas, mas nenhuma com valor) —, nunca infinito nem erro, e o bloco pede
+  o que falta. Testes de contrato e de tela: cada frequência, a conta variável sem
+  estimativa, e os dois motivos do vazio. Hoje nada marca qual caixinha
   é a reserva: só há o palpite pelo nome em `core/services/piggy_agents.py` (`_is_reserva`).
   Por isso a caixinha de reserva passa a ser **designada pelo usuário** (um campo na
   caixinha, no máximo uma por usuário). Sem designação, o bloco pede para escolher, e o
