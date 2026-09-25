@@ -99,6 +99,7 @@ def synthetic_read(uid, kind, name, arguments):
             stack.enter_context(patch.object(db, attribute, return_value=value))
         stack.enter_context(patch.object(db.bills, 'list_bills', return_value=[]))
         stack.enter_context(patch.object(plan_service, 'consolidated_balance_enabled', return_value=False))
+        stack.enter_context(patch.object(plan_service, 'get_plan_tier', return_value='pro'))
         stack.enter_context(patch.object(piggy_agents, 'find_duplicate_charges', return_value=[]))
         stack.enter_context(patch.object(piggy_agents, 'find_recurring_charges', return_value=[]))
         if snapshot:

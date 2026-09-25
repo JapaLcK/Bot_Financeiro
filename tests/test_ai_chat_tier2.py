@@ -183,20 +183,20 @@ def test_largest_expenses_vazio_sem_gastos(user_id):
 
 # ─── compare_periods ────────────────────────────────────────────────────────
 
-def test_compare_periods_diff_correto(user_id):
+def test_compare_periods_diff_correto(pro_user_id):
     """Período A com R$ 100 despesa, B com R$ 250 → diff_despesa = +150."""
     db.add_launch_and_update_balance(
-        user_id, "despesa", 100, "a", "a",
+        pro_user_id, "despesa", 100, "a", "a",
         categoria="outros",
         criado_em=datetime(2026, 4, 10),
     )
     db.add_launch_and_update_balance(
-        user_id, "despesa", 250, "b", "b",
+        pro_user_id, "despesa", 250, "b", "b",
         categoria="outros",
         criado_em=datetime(2026, 5, 5),
     )
 
-    result = _compare_periods(user_id, {
+    result = _compare_periods(pro_user_id, {
         "period_a_start": "2026-04-01", "period_a_end": "2026-04-30",
         "period_b_start": "2026-05-01", "period_b_end": "2026-05-31",
         "period_a_label": "Abril", "period_b_label": "Maio",
@@ -207,13 +207,13 @@ def test_compare_periods_diff_correto(user_id):
     assert result["period_a"]["label"] == "Abril"
 
 
-def test_compare_periods_falta_arg(user_id):
-    result = _compare_periods(user_id, {"period_a_start": "2026-04-01"})
+def test_compare_periods_falta_arg(pro_user_id):
+    result = _compare_periods(pro_user_id, {"period_a_start": "2026-04-01"})
     assert "error" in result
 
 
-def test_compare_periods_end_anterior_a_start(user_id):
-    result = _compare_periods(user_id, {
+def test_compare_periods_end_anterior_a_start(pro_user_id):
+    result = _compare_periods(pro_user_id, {
         "period_a_start": "2026-05-01", "period_a_end": "2026-04-01",
         "period_b_start": "2026-05-01", "period_b_end": "2026-05-31",
     })
@@ -222,13 +222,13 @@ def test_compare_periods_end_anterior_a_start(user_id):
 
 # ─── get_spending_trend ─────────────────────────────────────────────────────
 
-def test_spending_trend_retorna_dados_dos_meses(user_id):
+def test_spending_trend_retorna_dados_dos_meses(pro_user_id):
     """Cria gasto em meses diferentes, confere que aparecem na lista."""
     today = date.today()
     # Gasto no mês corrente
-    db.add_launch_and_update_balance(user_id, "despesa", 50, "x", "x", categoria="outros")
+    db.add_launch_and_update_balance(pro_user_id, "despesa", 50, "x", "x", categoria="outros")
 
-    result = _get_spending_trend(user_id, {"months": 3})
+    result = _get_spending_trend(pro_user_id, {"months": 3})
     assert result["months"] == 3
     assert isinstance(result["data"], list)
     # Pelo menos o mês corrente deve aparecer (com o gasto que criamos)
@@ -238,18 +238,18 @@ def test_spending_trend_retorna_dados_dos_meses(user_id):
     assert current_month[0]["despesa"] >= 50.0
 
 
-def test_spending_trend_clamp_limite(user_id):
-    result = _get_spending_trend(user_id, {"months": 100})
+def test_spending_trend_clamp_limite(pro_user_id):
+    result = _get_spending_trend(pro_user_id, {"months": 100})
     assert result["months"] == 24  # clamp em 24
 
 
-def test_spending_trend_inclui_credito(user_id):
+def test_spending_trend_inclui_credito(pro_user_id):
     """Compra no cartão deve entrar como despesa do mês."""
-    card_id = db.create_card(user_id, "Nubank", closing_day=10, due_day=17)
-    db.set_default_card(user_id, card_id)
-    db.add_credit_purchase(user_id, card_id, 200, "outros", "x", date.today())
+    card_id = db.create_card(pro_user_id, "Nubank", closing_day=10, due_day=17)
+    db.set_default_card(pro_user_id, card_id)
+    db.add_credit_purchase(pro_user_id, card_id, 200, "outros", "x", date.today())
 
-    result = _get_spending_trend(user_id, {"months": 1})
+    result = _get_spending_trend(pro_user_id, {"months": 1})
     today = date.today()
     cur = next((r for r in result["data"]
                 if r["year"] == today.year and r["month"] == today.month), None)
@@ -259,20 +259,20 @@ def test_spending_trend_inclui_credito(user_id):
 
 # ─── forecast_month_end ─────────────────────────────────────────────────────
 
-def test_forecast_month_end_sem_gastos_projeta_zero(user_id):
-    result = _forecast_month_end(user_id, {})
+def test_forecast_month_end_sem_gastos_projeta_zero(pro_user_id):
+    result = _forecast_month_end(pro_user_id, {})
     assert result["despesa_real_atual"] == 0.0
     assert result["aportes_atual"] == 0.0
     assert result["saidas_atual"] == 0.0
     assert result["saidas_projetadas_fim_do_mes"] == 0.0
 
 
-def test_forecast_month_end_projeta_baseado_em_ritmo(user_id):
+def test_forecast_month_end_projeta_baseado_em_ritmo(pro_user_id):
     """Despesa atual = R$ 100, gastei só hoje → projeção considera ritmo
     diário e extrapola pro mês."""
-    db.add_launch_and_update_balance(user_id, "despesa", 100, "x", "x", categoria="outros")
+    db.add_launch_and_update_balance(pro_user_id, "despesa", 100, "x", "x", categoria="outros")
 
-    result = _forecast_month_end(user_id, {})
+    result = _forecast_month_end(pro_user_id, {})
     assert result["despesa_real_atual"] == 100.0
     assert result["saidas_atual"] == 100.0  # sem aportes
     # Despesa projetada deve ser >= valor atual (ritmo escala)
@@ -281,25 +281,25 @@ def test_forecast_month_end_projeta_baseado_em_ritmo(user_id):
         assert key in result
 
 
-def test_forecast_month_end_vai_fechar_negativo(user_id):
+def test_forecast_month_end_vai_fechar_negativo(pro_user_id):
     """Despesa real > receita → vai_fechar_negativo."""
-    db.add_launch_and_update_balance(user_id, "receita", 50, None, "seed")
-    db.add_launch_and_update_balance(user_id, "despesa", 200, "x", "x", categoria="outros")
+    db.add_launch_and_update_balance(pro_user_id, "receita", 50, None, "seed")
+    db.add_launch_and_update_balance(pro_user_id, "despesa", 200, "x", "x", categoria="outros")
 
-    result = _forecast_month_end(user_id, {})
+    result = _forecast_month_end(pro_user_id, {})
     assert result["vai_fechar_negativo"] is True
 
 
-def test_forecast_month_end_conta_aportes_no_fluxo_do_mes(user_id):
+def test_forecast_month_end_conta_aportes_no_fluxo_do_mes(pro_user_id):
     """Aporte de investimento entra no fluxo_do_mes (sai do caixa)."""
-    db.add_launch_and_update_balance(user_id, "receita", 1000, None, "salario")
+    db.add_launch_and_update_balance(pro_user_id, "receita", 1000, None, "salario")
     db.add_launch_and_update_balance(
-        user_id, "despesa", 500, "carteira", "aporte",
+        pro_user_id, "despesa", 500, "carteira", "aporte",
         categoria="investimento_aporte",
         is_internal_movement=True,
     )
 
-    result = _forecast_month_end(user_id, {})
+    result = _forecast_month_end(pro_user_id, {})
     assert result["despesa_real_atual"] == 0.0
     assert result["aportes_atual"] == 500.0
     assert result["saidas_atual"] == 500.0
@@ -308,21 +308,21 @@ def test_forecast_month_end_conta_aportes_no_fluxo_do_mes(user_id):
     assert result["fluxo_do_mes"] == 500.0
 
 
-def test_forecast_month_end_aportes_constantes_na_projecao(user_id):
+def test_forecast_month_end_aportes_constantes_na_projecao(pro_user_id):
     """REGRESSION do bug do Lucas: aporte de R$ 300 nos primeiros dias do
     mês NÃO deve escalar pelo ritmo (não projeta R$ 900 num mês de 30 dias).
     Deve aparecer como constante R$ 300 nos aportes projetados."""
-    db.add_launch_and_update_balance(user_id, "receita", 5000, None, "salario")
+    db.add_launch_and_update_balance(pro_user_id, "receita", 5000, None, "salario")
     # Aporte único de R$ 300
     db.add_launch_and_update_balance(
-        user_id, "despesa", 300, "carteira", "aporte",
+        pro_user_id, "despesa", 300, "carteira", "aporte",
         categoria="investimento_aporte",
         is_internal_movement=True,
     )
     # Despesa real "comum" de R$ 50 — essa SIM escala
-    db.add_launch_and_update_balance(user_id, "despesa", 50, "x", "x", categoria="outros")
+    db.add_launch_and_update_balance(pro_user_id, "despesa", 50, "x", "x", categoria="outros")
 
-    result = _forecast_month_end(user_id, {})
+    result = _forecast_month_end(pro_user_id, {})
     # Aportes projetados = aportes atuais (constante, NÃO escala)
     assert result["aportes_projetados_fim_do_mes"] == 300.0
     assert result["aportes_atual"] == 300.0
@@ -336,12 +336,12 @@ def test_forecast_month_end_aportes_constantes_na_projecao(user_id):
 
 # ─── get_spending_trend summary (média, tendência) ──────────────────────────
 
-def test_spending_trend_calcula_medias(user_id):
+def test_spending_trend_calcula_medias(pro_user_id):
     """Cria gasto só no mês corrente → média = valor / N meses pedidos."""
-    db.add_launch_and_update_balance(user_id, "despesa", 300, "x", "x", categoria="outros")
-    db.add_launch_and_update_balance(user_id, "receita", 600, None, "seed")
+    db.add_launch_and_update_balance(pro_user_id, "despesa", 300, "x", "x", categoria="outros")
+    db.add_launch_and_update_balance(pro_user_id, "receita", 600, None, "seed")
 
-    result = _get_spending_trend(user_id, {"months": 3})
+    result = _get_spending_trend(pro_user_id, {"months": 3})
     summary = result["summary"]
     # 300 / 1 mes com dado retornado
     # Mas só temos 1 row de dado (mês corrente) — média conta sobre os rows
@@ -350,7 +350,7 @@ def test_spending_trend_calcula_medias(user_id):
     assert summary["media_receita"] == round(600.0 / n_rows, 2)
 
 
-def test_spending_trend_tendencia_subindo(user_id):
+def test_spending_trend_tendencia_subindo(pro_user_id):
     """Mês anterior com R$ 100, mês atual com R$ 300 → tendência 'subindo'."""
     today = date.today()
     # Mês anterior (calcular data)
@@ -361,23 +361,23 @@ def test_spending_trend_tendencia_subindo(user_id):
     prev_dt = datetime(prev_y, prev_m, 15)
 
     db.add_launch_and_update_balance(
-        user_id, "despesa", 100, "x", "x", categoria="outros", criado_em=prev_dt,
+        pro_user_id, "despesa", 100, "x", "x", categoria="outros", criado_em=prev_dt,
     )
     db.add_launch_and_update_balance(
-        user_id, "despesa", 300, "y", "y", categoria="outros",
+        pro_user_id, "despesa", 300, "y", "y", categoria="outros",
     )
 
-    result = _get_spending_trend(user_id, {"months": 2})
+    result = _get_spending_trend(pro_user_id, {"months": 2})
     assert result["summary"]["tendencia_despesa"] == "subindo"
     # 300 vs 100 = +200% de variação
     assert result["summary"]["variacao_pct"] > 10
 
 
-def test_spending_trend_tendencia_estavel_com_1_mes(user_id):
+def test_spending_trend_tendencia_estavel_com_1_mes(pro_user_id):
     """1 mês só → não dá pra ter tendência."""
-    db.add_launch_and_update_balance(user_id, "despesa", 100, "x", "x", categoria="outros")
+    db.add_launch_and_update_balance(pro_user_id, "despesa", 100, "x", "x", categoria="outros")
 
-    result = _get_spending_trend(user_id, {"months": 1})
+    result = _get_spending_trend(pro_user_id, {"months": 1})
     assert result["summary"]["tendencia_despesa"] == "estavel"
     assert result["summary"]["variacao_pct"] == 0.0
 

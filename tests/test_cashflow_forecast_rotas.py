@@ -2,31 +2,33 @@
 from datetime import date, timedelta
 
 from _cashflow_helpers import _mock_sources, fontes_que_mudam
+from conftest import usuario_pagante
 from core.services.cashflow_forecast import forecast_horizons, forecast_with_trajectory
 
 
 # Rotas /forecast e /recurring-bills/.../projection pelo HTTP de verdade
-# (TestClient), com auth/plano mockados como em tests/test_export_email.py.
+# (TestClient), com a auth mockada como em tests/test_export_email.py e o plano
+# real (`usuario_pagante("pro_max")`).
 
 def _cliente(monkeypatch, **fontes):
     from fastapi.testclient import TestClient
     import frontend.finance_bot_websocket_custom as app_mod
 
     monkeypatch.setattr(app_mod, "_authorize_dashboard_access", lambda req, user_id: None)
-    monkeypatch.setattr(app_mod, "_require_pro", lambda user_id, feature: None)
     monkeypatch.setattr(app_mod, "_require_boletos_access", lambda user_id: None)
     cf = _mock_sources(monkeypatch, **fontes)
     # sem raise: um 500 tem de aparecer como 500, não como exceção do teste
-    return TestClient(app_mod.app, raise_server_exceptions=False), cf
+    # 60/90 dias são do Pro (`pro_max`); o id vai na URL.
+    return TestClient(app_mod.app, raise_server_exceptions=False), cf, usuario_pagante("pro_max")
 
 
 def test_rota_forecast_devolve_trajetoria_causas_vencidos_e_horizons_intactos(monkeypatch):
     today = date.today()
-    client, cf = _cliente(monkeypatch, saldo=1000.0, bills=[
+    client, cf, uid = _cliente(monkeypatch, saldo=1000.0, bills=[
         {"status": "pending", "due_date": today - timedelta(days=2), "amount": 100.0, "name": "Multa"},
         {"status": "pending", "due_date": today + timedelta(days=10), "amount": 700.0, "name": "Aluguel"},
     ])
-    r = client.get("/forecast/1?threshold=250")
+    r = client.get(f"/forecast/{uid}?threshold=250")
     assert r.status_code == 200, r.text
     fc = r.json()["forecast"]
 
@@ -34,7 +36,7 @@ def test_rota_forecast_devolve_trajetoria_causas_vencidos_e_horizons_intactos(mo
     assert fc["threshold"] == 250.0
     assert fc["period"] == {"start": (today + timedelta(days=1)).isoformat(),
                             "end": (today + timedelta(days=90)).isoformat()}
-    assert fc["premises"] == forecast_with_trajectory(1)["premises"]
+    assert fc["premises"] == forecast_with_trajectory(uid)["premises"]
     assert fc["vencidos"] == [{"date": (today - timedelta(days=2)).isoformat(),
                                "tipo": "boleto", "nome": "Multa", "valor": 100.0}]
     wd = fc["worst_day"]
@@ -44,7 +46,7 @@ def test_rota_forecast_devolve_trajetoria_causas_vencidos_e_horizons_intactos(mo
     assert wd["causas"] == [{"date": (today + timedelta(days=10)).isoformat(),
                              "tipo": "boleto", "nome": "Aluguel", "valor": 700.0}]
     # os horizontes da rota batem com os de `forecast_horizons` (a da tool de IA) nas mesmas fontes
-    esperado = forecast_horizons(1)
+    esperado = forecast_horizons(uid)
     assert fc["horizons"] == esperado["horizons"]
     for campo in ("today", "balance_source", "of_bank_count", "banks_excluded"):
         assert fc[campo] == esperado[campo]
@@ -52,28 +54,28 @@ def test_rota_forecast_devolve_trajetoria_causas_vencidos_e_horizons_intactos(mo
 
 
 def test_rota_forecast_recusa_threshold_nao_finito(monkeypatch):
-    client, _ = _cliente(monkeypatch, saldo=1000.0)
-    assert client.get("/forecast/1?threshold=100").status_code == 200  # finito passa
+    client, _, uid = _cliente(monkeypatch, saldo=1000.0)
+    assert client.get(f"/forecast/{uid}?threshold=100").status_code == 200  # finito passa
     for valor in ("nan", "inf", "-inf"):
-        r = client.get(f"/forecast/1?threshold={valor}")
+        r = client.get(f"/forecast/{uid}?threshold={valor}")
         assert r.status_code == 400, (valor, r.status_code, r.text)
 
 
 def test_rota_projection_recusa_amount_nao_finito(monkeypatch):
-    client, _ = _cliente(monkeypatch, saldo=1000.0)
+    client, _, uid = _cliente(monkeypatch, saldo=1000.0)
     alvo = (date.today() + timedelta(days=30)).isoformat()
-    assert client.get(f"/recurring-bills/1/projection?date={alvo}&amount=100").status_code == 200
+    assert client.get(f"/recurring-bills/{uid}/projection?date={alvo}&amount=100").status_code == 200
     for valor in ("nan", "inf"):
-        r = client.get(f"/recurring-bills/1/projection?date={alvo}&amount={valor}")
+        r = client.get(f"/recurring-bills/{uid}/projection?date={alvo}&amount={valor}")
         assert r.status_code == 400, (valor, r.status_code, r.text)
 
 
 def test_rota_forecast_horizontes_e_trajetoria_da_mesma_leitura(monkeypatch):
     """Horizontes e trajetória da MESMA resposta saem de uma leitura só: se as
     fontes mudam entre leituras, o dia 30 da trajetória ainda é o horizonte de 30."""
-    client, _ = _cliente(monkeypatch)
+    client, _, uid = _cliente(monkeypatch)
     leituras = fontes_que_mudam(monkeypatch)
-    r = client.get("/forecast/1")
+    r = client.get(f"/forecast/{uid}")
     assert r.status_code == 200, r.text
     fc = r.json()["forecast"]
 

@@ -15,8 +15,10 @@ os.environ.setdefault("PII_HASH_PEPPER", "test-pepper-for-pytest-only-must-be-32
 # Não polui pii_access_log durante testes (cada decrypt registra uma row).
 os.environ.setdefault("PII_AUDIT_DISABLED", "1")
 # Escada de planos v2: a suíte roda o mundo de PRODUÇÃO (v2 e gate de acesso
-# ligados, que é o padrão do código sem env). Os arquivos ainda escritos para o
-# v1 ficam em `_AINDA_EM_V1`, na fixture `_mundo_do_plano` mais abaixo.
+# ligados, que é o padrão do código sem env). Uma env do shell de quem roda não
+# decide o mundo; o teste que precisa do v1 (o freio) faz `monkeypatch.setenv`.
+os.environ.pop("PLANS_V2_ENABLED", None)
+os.environ.pop("ACCESS_GATE_ENABLED", None)
 
 # Bcrypt no custo mínimo — só nos testes. O custo padrão é calibrado para ser
 # lento de propósito, e a suíte hasheia senha/código de backup o tempo todo:
@@ -447,43 +449,6 @@ def _auto_cleanup_orphan_users():
             pass
 
 
-# Arquivos (basename) que ainda falham no v2 e rodam com o freio puxado até a
-# migração deles. Medido em 2026-09-23 na main 9cf5c8f: union das falhas de
-# duas rodadas completas com PLANS_V2_ENABLED=1 (`-n 4`), menos os arquivos já
-# migrados. Cada PR da migração tira os seus; a lista só encolhe.
-_AINDA_EM_V1 = {
-    "test_agent_chat_eval_fixtures.py",
-    "test_ai_chat_commands.py",
-    "test_ai_chat_tier2.py",
-    "test_billing_checkout.py",
-    "test_cashflow_forecast_rotas.py",
-    "test_cashflow_receita_frequencia.py",
-    "test_category_normalization.py",
-    "test_handle_incoming_routing.py",
-    "test_household_budget.py",
-    "test_piggy_agents.py",
-    "test_virada_de_mes.py",
-    "test_ws_subscription_gate.py",
-}
-
-
-def _aplica_mundo_do_plano(nome_arquivo: str, monkeypatch) -> None:
-    """Sem env é o padrão de produção (v2 e gate ligados); `_AINDA_EM_V1` puxa o
-    freio do v2. Os dois `delenv` impedem que uma env do shell de quem roda
-    decida o mundo. `setenv` no corpo do teste ou numa fixture do arquivo roda
-    depois desta e continua ganhando."""
-    monkeypatch.delenv("ACCESS_GATE_ENABLED", raising=False)
-    if nome_arquivo in _AINDA_EM_V1:
-        monkeypatch.setenv("PLANS_V2_ENABLED", "0")
-    else:
-        monkeypatch.delenv("PLANS_V2_ENABLED", raising=False)
-
-
-@pytest.fixture(autouse=True)
-def _mundo_do_plano(request, monkeypatch):
-    _aplica_mundo_do_plano(request.path.name, monkeypatch)
-
-
 @pytest.fixture()
 def user_id():
     uid = int(uuid.uuid4().int % 10_000_000_000)  # bigint ok
@@ -502,8 +467,7 @@ def promote_to_pro(user_id: int, plan: str = "pro") -> int:
     O assert do fim existe porque, sem plano, o gate barra a mensagem antes do
     `route()`, e um teste de ausência ("não pagou", "não gravou") fica verde sem
     o código rodar. A invalidação vem antes dele porque a escrita é SQL cru e o
-    `get_auth_user` tem cache. `plan="free"` é isento: o `_cota_esgotada` de
-    `test_ai_chat_commands` rebaixa de propósito (a rever no PR 5)."""
+    `get_auth_user` tem cache."""
     import uuid as _uuid
     from db.connection import get_conn
     fake_email = f"pro-{_uuid.uuid4().hex[:8]}@test.local"
@@ -523,8 +487,32 @@ def promote_to_pro(user_id: int, plan: str = "pro") -> int:
                 )
         conn.commit()
     db_support.invalidate_auth_user_cache(user_id)
-    if plan != "free":
-        assert has_app_access(user_id), f"promote_to_pro({user_id}, {plan!r}) não deu acesso"
+    assert has_app_access(user_id), f"promote_to_pro({user_id}, {plan!r}) não deu acesso"
+    return user_id
+
+
+def em_carencia(user_id: int) -> int:
+    """Conta na carência de cobrança: plano pago VENCIDO com o relógio de
+    inadimplência aberto. É o único estado do v2 em que o tier `free` entra no
+    app (`tem_direito_hoje`, lado direito do OR) — o "Grátis" que sobrou."""
+    from datetime import datetime, timedelta, timezone
+    import db
+    from core.services.plan_service import get_plan_tier
+    promote_to_pro(user_id)
+    # Deltas absolutos, nunca `DUNNING_GRACE_DAYS ± n`.
+    agora = datetime.now(timezone.utc)
+    with get_conn() as conn:
+        with conn.cursor() as cur:
+            cur.execute(
+                "update auth_accounts set plan_expires_at=%s, past_due_since=%s,"
+                "       last_payment_status='past_due' where user_id=%s",
+                (agora - timedelta(days=1), agora - timedelta(days=2), user_id),
+            )
+        conn.commit()
+    # Sem `plan_selected_at` o `needs_plan_selection` barra antes do acesso (402).
+    db.mark_plan_selected(user_id)
+    db_support.invalidate_auth_user_cache(user_id)
+    assert get_plan_tier(user_id) == "free" and has_app_access(user_id), "carência não montou"
     return user_id
 
 

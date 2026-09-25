@@ -31,35 +31,13 @@ def spy_ai(monkeypatch):
 
 
 @pytest.fixture
-def pro_small_uid():
-    """User Pro com id < 2bi. handle_incoming só re-normaliza ids > 2bi (via
-    _internal_user_id), então um id pequeno é estável — espelha os ids
-    canônicos internos reais (ex: user prod 88648360). Necessário pra is_pro
-    enxergar o plano dentro de handle_incoming."""
-    import uuid as _uuid
-    import db as _db
-    from db.connection import get_conn
-
-    uid = int(_uuid.uuid4().int % 1_000_000_000)  # < 1bi, nunca normalizado
-    _db.ensure_user(uid)
-    with get_conn() as conn:
-        with conn.cursor() as cur:
-            cur.execute(
-                "insert into auth_accounts(user_id, email, password_hash, plan) "
-                "values (%s, %s, 'x', 'pro')",
-                (uid, f"pro-{uid}@test.local"),
-            )
-        conn.commit()
-    return uid  # _auto_cleanup_orphan_users (conftest) limpa depois
-
-
-@pytest.fixture
 def free_small_uid():
     import uuid as _uuid
     import db as _db
+    from conftest import em_carencia
     uid = int(_uuid.uuid4().int % 1_000_000_000)
     _db.ensure_user(uid)
-    return uid
+    return em_carencia(uid)
 
 
 def _msg(uid: int, text: str) -> IncomingMessage:

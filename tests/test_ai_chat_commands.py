@@ -9,7 +9,7 @@ em handle_incoming.
 
 Estrutura dos cenários:
   - Free sem prefix → None (segue fluxo tradicional)
-  - Free com prefix → gate "PigBank+"
+  - Free com prefix → gate (a copy "PigBank+" é do v1; no v2 só o roteamento)
   - Free com pending → gate + limpa pending
   - Pro sem prefix → None (comando determinístico tem precedência)
   - Pro com prefix → IA é chamada com o prefix removido
@@ -17,9 +17,10 @@ Estrutura dos cenários:
   - Texto vazio → None
   - IA falha (exception) → mensagem de erro padrão
 
-Mocka `is_pro`, `db.ai_get_pending_action`/`ai_consume_pending_action` e o
-`ai_chat.chat` real pra isolar o gate. Não toca em LLM; só os testes de cota
-esgotada, no fim do arquivo, usam banco real.
+Mocka `ai_chat_allowed` (a chave `is_pro` do state),
+`db.ai_get_pending_action`/`ai_consume_pending_action` e o `ai_chat.chat` real
+pra isolar o gate. Não toca em LLM; só os testes de cota esgotada, no fim do
+arquivo, usam banco real.
 """
 from __future__ import annotations
 
@@ -100,7 +101,9 @@ def test_free_msg_vazia_retorna_none(patches):
 # ─── Free com prefix → gate Pro ─────────────────────────────────────────────
 
 
-def test_free_com_prefix_piggy_recebe_gate_pro(patches):
+def test_free_com_prefix_piggy_recebe_gate_pro(patches, monkeypatch):
+    # Copy "PigBank+" é do v1 (freio PLANS_V2_ENABLED=0). Apagar na Fase 2.
+    monkeypatch.setenv("PLANS_V2_ENABLED", "0")
     patches["is_pro"] = False
     out = mod.handle_ai_chat_command(1, "piggy quanto gastei?", platform="whatsapp")
     assert out is not None
@@ -112,20 +115,20 @@ def test_free_com_prefix_piggy_recebe_gate_pro(patches):
 def test_free_com_prefix_pergunta_recebe_gate_pro(patches):
     patches["is_pro"] = False
     out = mod.handle_ai_chat_command(1, "pergunta meu saldo", platform="whatsapp")
-    assert out is not None and "PigBank+" in out
+    assert out is not None and patches["ai_called_with"] is None
 
 
 def test_free_com_prefix_so_piggy_puro_tambem_recebe_gate(patches):
     patches["is_pro"] = False
     out = mod.handle_ai_chat_command(1, "piggy", platform="whatsapp")
-    assert out is not None and "PigBank+" in out
+    assert out is not None and patches["ai_called_with"] is None
 
 
 def test_free_com_pending_recebe_gate_e_limpa_pending(patches):
     patches["is_pro"] = False
     patches["pending"] = {"some": "pending"}
     out = mod.handle_ai_chat_command(1, "sim", platform="whatsapp")
-    assert "PigBank+" in out
+    assert out is not None
     assert patches["clear_pending_called"] is True
     assert patches["ai_called_with"] is None
 
@@ -286,17 +289,15 @@ def test_pending_frase_ambigua_nao_dispara_guard_vai_pra_ia(patches):
 
 
 # ─── Cota esgotada no v2, por tier (banco real) ──────────────────────────────
-# Este arquivo roda em v1 (_AINDA_EM_V1 do conftest); a mensagem de cota só
-# existe no v2, então cada teste liga a flag.
 
 def _cota_esgotada(monkeypatch, uid, plan):
     from datetime import date
 
     import db
-    from conftest import promote_to_pro
+    from conftest import em_carencia, promote_to_pro
 
-    monkeypatch.setenv("PLANS_V2_ENABLED", "1")
-    promote_to_pro(uid, plan=plan)
+    # "free" no v2 com acesso à Piggy = carência de cobrança (tier free).
+    em_carencia(uid) if plan == "free" else promote_to_pro(uid, plan=plan)
     with db.get_conn() as conn, conn.cursor() as cur:
         cur.execute(
             "update auth_accounts set ai_messages_this_month = 1000000, ai_month_reset_at = %s "
@@ -324,6 +325,7 @@ def test_cota_esgotada_plus_e_pro_so_renova_sem_upgrade(user_id, monkeypatch, pl
     assert "Plus" not in out and "planos pagos" not in out
 
 
+# A copy afirmada é a da B3 (manda assinar quem está em carência); muda com ela.
 def test_cota_esgotada_gratis_mantem_texto_dos_planos_pagos(user_id, monkeypatch):
     out = _cota_esgotada(monkeypatch, user_id, "free")
     assert out == (

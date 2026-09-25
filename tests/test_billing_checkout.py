@@ -166,9 +166,6 @@ def test_checkout_omitted_interval_uses_monthly_price(user_id, monkeypatch):
     monkeypatch.setattr(dashboard, "STRIPE_PRICE_ID_PRO_MENSAL", "price_mensal_abc")
     monkeypatch.setattr(dashboard, "STRIPE_PRICE_ID_PRO_ANUAL", "price_anual_xyz")
     monkeypatch.setattr(dashboard, "STRIPE_PRICE_ID_PRO", "")
-    # Trial lido de PRO_TRIAL_DAYS em runtime (default do código = 15). Fixa pra
-    # o teste ficar deterministico independente do ambiente.
-    monkeypatch.setenv("PRO_TRIAL_DAYS", "7")
     fake = _patch_stripe(monkeypatch)
 
     resp = client.post("/billing/create-checkout", json={"plan": "plus"}, headers=_CSRF_HEADERS)
@@ -183,10 +180,23 @@ def test_checkout_omitted_interval_uses_monthly_price(user_id, monkeypatch):
     ]
     assert fake.last_session_kwargs["mode"] == "subscription"
     assert fake.last_session_kwargs["metadata"]["interval"] == "monthly"
-    # Trial 7 dias garantido pelo backend (price ja nao traz mais trial no Stripe novo)
-    assert fake.last_session_kwargs["subscription_data"]["trial_period_days"] == 7
     # Locale pt-BR forca interface em portugues e moeda BRL no Checkout
     assert fake.last_session_kwargs["locale"] == "pt-BR"
+
+
+def test_checkout_v1_trial_vem_de_pro_trial_days(user_id, monkeypatch):
+    """v1 (freio PLANS_V2_ENABLED=0): o trial é PRO_TRIAL_DAYS, garantido pelo
+    backend (o price não traz trial no Stripe novo). Apagar na Fase 2."""
+    _, _, client = _auth_user_setup(f"v1trial-{user_id}")
+    monkeypatch.setenv("PLANS_V2_ENABLED", "0")
+    monkeypatch.setenv("PRO_TRIAL_DAYS", "7")
+    monkeypatch.setattr(dashboard, "STRIPE_SECRET_KEY", "sk_test_xxx")
+    monkeypatch.setattr(dashboard, "STRIPE_PRICE_ID_PRO_MENSAL", "price_mensal_abc")
+    fake = _patch_stripe(monkeypatch)
+
+    resp = client.post("/billing/create-checkout", json={"plan": "plus"}, headers=_CSRF_HEADERS)
+    assert resp.status_code == 200, resp.text
+    assert fake.last_session_kwargs["subscription_data"]["trial_period_days"] == 7
 
 
 def test_checkout_annual_uses_annual_price(user_id, monkeypatch):
