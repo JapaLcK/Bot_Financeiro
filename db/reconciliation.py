@@ -3,7 +3,8 @@
 Estados de `open_finance_transactions` que importam aqui:
   pending     imported = sombra, match = X  (o usuário ainda não decidiu)
   confirmed   imported = match = X          (o usuário confirmou)
-  auto_merged imported = X, match = X       (o import ou a fusão reversa juntaram;
+  auto_merged imported = X, match = X       (o import juntou, ou a antiga fusão
+                                             reversa, em dado anterior ao #498;
                                              dado antigo pode ter match null)
   imported    imported = sombra, match null (sem par, ou par rejeitado/desfeito)
 

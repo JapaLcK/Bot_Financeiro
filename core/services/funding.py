@@ -173,7 +173,7 @@ def carteira_txt(exibida, disponivel) -> str:
     return txt
 
 
-def aviso_conferir(exibido, rec: dict | None) -> str:
+def aviso_conferir(exibido, rec: dict | None, so_contagem: bool = False) -> str:
     """Aviso de pendência de reconciliação (Open Finance × lançamento manual) —
     fonte única do texto que aparece em /saldo, na resposta de lançamento, na
     IA e nos relatórios. `reconciliations.js` espelha isto em JS (CLAUDE.md
@@ -183,6 +183,10 @@ def aviso_conferir(exibido, rec: dict | None) -> str:
     certo (db/open_finance.py): confirmar uma despesa pendente sobe o exibido
     (o dinheiro que "saiu" no banco ainda não saiu da Carteira), confirmar
     uma receita desce.
+
+    `so_contagem`: só o número + " no PigBank.", sem o "pode ser" — para
+    "paguei a conta", que não mostra saldo e onde o valor soaria como o saldo
+    (core/handlers/bills.py).
     """
     n = int((rec or {}).get("pending_count") or 0)
     if n <= 0:
@@ -190,6 +194,8 @@ def aviso_conferir(exibido, rec: dict | None) -> str:
     from utils_text import fmt_brl
 
     txt = f"⚠ {n} lançamento(s) a conferir"
+    if so_contagem:
+        return txt + " no PigBank."
     delta = _dec(rec.get("delta_se_confirmar"))
     if delta != 0:
         txt += f" · pode ser {fmt_brl(float(_dec(exibido) + delta))}"

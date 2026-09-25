@@ -1152,11 +1152,10 @@ def add_from_entities(
             "learn_from_inference falhou depois do commit (user %s, lancamento %s)",
             user_id, launch_id)
 
-    # Lançamento manual é dinheiro em espécie (Carteira Piggy): a FUSÃO
-    # SILENCIOSA com transações do Open Finance foi removida (decisão
-    # "lançamentos manuais exclusivos para dinheiro"). A reconciliação que
-    # permanece é só a confirmável pelo usuário, criada no importador
-    # ('ask' → pending → confirm/reject) — nada roda aqui.
+    # Banco importou antes e o usuário lançou depois: vira a mesma pendência
+    # confirmável da ordem direta, nunca fusão. ANTES do saldo relido abaixo,
+    # para o aviso "a conferir" sair nesta resposta. Não sobe exceção.
+    db.propose_manual_reconciliation(user_id, launch_id)
 
     # Detecção "essa despesa se repete → sugere gasto fixo". Só para despesa
     # real (não movimentação interna). A oferta divide a linha de pending_actions
@@ -1218,9 +1217,9 @@ def add_from_entities(
             )
 
     emoji = "💸" if tipo == "despesa" else "💰"
-    # `new_balance` é a Carteira e foi lido ANTES da reconciliação acima — que
-    # funde o lançamento com o espelho do banco. Com banco conectado, a linha é o
-    # mesmo recorte do /saldo (core/handlers/balance.py:20), relido agora.
+    # `new_balance` é a Carteira lida na gravação. A linha reusa o recorte do
+    # /saldo (core/handlers/balance.py:20), relido agora — depois da pendência
+    # criada acima, que não muda a Carteira mas entra no aviso "a conferir".
     # Pós-commit: qualquer falha aqui cai na linha de hoje em vez de subir exceção
     # (a fila de multi-lançamento devolveria o item e lançaria o gasto de novo).
     linha_saldo = f"🏦 Saldo: {fmt_brl(float(new_balance))}"

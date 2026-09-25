@@ -1,3 +1,4 @@
+import logging
 import re
 import unicodedata
 from decimal import Decimal
@@ -18,6 +19,8 @@ from .cards import (
 )
 from .connection import TIPO_CANON_SQL, get_conn
 from .users import ensure_user, ensure_user_tx
+
+logger = logging.getLogger(__name__)
 
 
 def _rollback_imported_of(rows: list[dict]) -> None:
@@ -2126,85 +2129,115 @@ def import_open_finance_launches(user_id: int, connection_id: int | None = None)
     }
 
 
-def reconcile_manual_launch(user_id: int, launch_id: int) -> dict:
-    """Reconciliação REVERSA (P0 #3): usuário criou um lançamento manual; se já existe um OF
-    launch gêmeo (importado antes), funde — apaga o OF launch e revincula a OF tx no manual.
+def propose_manual_reconciliation(user_id: int, launch_id: int) -> dict:
+    """Ordem inversa da reconciliação: o banco importou antes e o usuário lançou
+    o mesmo gasto (ou receita) à mão depois. Cria a MESMA pendência que o
+    importador cria na ordem direta — `pending`, `match` = o manual,
+    `imported` = a sombra — e para aí. Nunca funde, nunca apaga a sombra, nunca
+    mexe em saldo: quem decide é o usuário (confirm/reject).
 
-    Chamar logo após criar um lançamento manual (bot/web). Best-effort e idempotente.
+    Chamada só na CRIAÇÃO do manual (texto do bot, entrada rápida, POST
+    /launches, `mark_bill_paid`). Nunca na edição nem em varredura: é isso que
+    garante que um par rejeitado não volta (o reject grava `imported`, sem memória).
+
+    Pós-commit do lançamento: qualquer falha vira log e `{"ok": False}`, nunca
+    exceção — o chamador não distingue "não gravou" de "gravou e falhou no
+    acessório", e a fila de multi-lançamento relançaria o gasto.
     """
-    ensure_user(user_id)
+    try:
+        return _propose_manual_reconciliation(user_id, launch_id)
+    except Exception:
+        logger.exception("propose_manual_reconciliation falhou (user %s, lancamento %s)",
+                         user_id, launch_id)
+        return {"ok": False}
+
+
+def _propose_manual_reconciliation(user_id: int, launch_id: int) -> dict:
+    from .bank_movements import _lock_user
     with get_conn() as conn:
         with conn.cursor() as cur:
+            # Mesma primeira trava do importador, do sync e de `_locked_tx`.
+            _lock_user(cur, user_id)
+            # O tipo do manual é canonizado NA LEITURA: é o parâmetro do bind
+            # abaixo, e é ele que pode vir legado ('saida'/'entrada'). A coluna
+            # `l.tipo` da sombra é moderna por construção (`_insert_of_shadow`).
             cur.execute(
-                """
-                select id, tipo, valor, coalesce(posted_at, criado_em::date) as ref_date,
-                       alvo, nota, coalesce(source,'manual') as source, is_internal_movement
-                from launches where id=%s and user_id=%s
+                f"""
+                select valor, {TIPO_CANON_SQL} as tipo,
+                       coalesce(posted_at, criado_em::date) as ref_date, alvo, nota
+                  from launches m
+                 where id=%s and user_id=%s
+                   and coalesce(source, 'manual') = 'manual'
+                   and is_internal_movement = false
+                   and not (coalesce(efeitos, '{{}}'::jsonb) ? 'of_recurring')
+                   and not exists (
+                       -- Só as transações do PRÓPRIO usuário (§0 e custo):
+                       -- `match_launch_id` não tem índice, e sem o join isto
+                       -- varreria a tabela de todos os usuários a cada lançamento.
+                       select 1 from open_finance_transactions o
+                         join open_finance_accounts a on a.id = o.account_id
+                         join open_finance_connections c on c.id = a.connection_id
+                        where c.user_id = %s
+                          and (o.imported_launch_id = m.id or o.match_launch_id = m.id))
                 """,
-                (launch_id, user_id),
+                (launch_id, user_id, user_id),
             )
             m = cur.fetchone()
-            if not m or m["source"] == "open_finance" or m["is_internal_movement"]:
-                return {"ok": False, "reason": "not_manual"}
+            if not m or m["tipo"] not in ("despesa", "receita"):
+                conn.commit()
+                return {"ok": True, "of_tx_id": None}
 
-            # `l.tipo=%s` cru: canonizar a COLUNA aqui seria no-op, e essa é a
-            # armadilha do trecho. `l.tipo` é a coluna do lançamento OF, moderna por
-            # construção (prova em `detect_open_finance_salary`, :1948-1958); quem pode
-            # vir legado é o PARÂMETRO, `m["tipo"]`, do lançamento MANUAL, que não
-            # passa por filtro de `source` nenhum. Um manual 'saida' procuraria um OF
-            # 'saida', que não existe: o dedupe reverso falha calado e o gasto conta
-            # DUAS vezes. O conserto, se um dia precisar, é canonizar o PARÂMETRO em
-            # Python antes do bind — `{TIPO_CANON_SQL} = %s` na coluna é no-op aqui,
-            # porque a coluna já é moderna. Hoje é inalcançável só porque nenhum
-            # escritor atual grava a forma legada (o chamador reconcilia lançamento
-            # recém-criado), NÃO pelo filtro de `source`. Mesma inversão que
-            # `_find_manual_candidates` (:1363-1372) documenta, com os lados trocados:
-            # lá a coluna é suja e o parâmetro limpo. Registrado na issue 294.
+            # Candidatas só do MESMO recorte do aviso e do modal
+            # (`ACTIONABLE_PENDING_SQL`): transação de conexão PAUSED/DELETED ou de
+            # conta não-BRL viraria um par que ninguém vê — e tomaria o lugar de
+            # uma elegível. Os três primeiros %s: `merged_wallet_delta_params`.
             cur.execute(
-                """
-                select l.id, l.valor, coalesce(l.posted_at, l.criado_em::date) as ref_date,
-                       o.id as of_tx_id, o.description as of_desc
-                from launches l
-                join open_finance_transactions o on o.imported_launch_id = l.id
-                where l.user_id=%s and coalesce(l.source,'') = 'open_finance'
-                  and l.tipo=%s and l.is_internal_movement = false
-                  and abs(l.valor - %s) <= %s
-                  and coalesce(l.posted_at, l.criado_em::date) between %s and %s
-                  and o.reconciliation_status in ('imported','pending')
+                f"""
+                select t.id as of_tx_id, t.description, l.id, l.valor,
+                       coalesce(l.posted_at, l.criado_em::date) as ref_date{_RECORTE_TX_FROM_SQL}
+                  join launches l on l.id = t.imported_launch_id
+                 where l.user_id = %s
+                   and l.source = 'open_finance' and l.is_internal_movement = false
+                   and l.tipo = %s
+                   and t.match_launch_id is null
+                   and t.reconciliation_status in ('imported', 'pending')
+                   and abs(l.valor - %s) <= %s
+                   and coalesce(l.posted_at, l.criado_em::date) between %s and %s
+                 order by t.transaction_date, t.id
+                 for update of t
                 """,
-                (user_id, m["tipo"], m["valor"], RECON_AMOUNT_TOL,
+                (*merged_wallet_delta_params(user_id), m["tipo"], m["valor"], RECON_AMOUNT_TOL,
                  m["ref_date"] - timedelta(days=RECON_DATE_WINDOW),
                  m["ref_date"] + timedelta(days=RECON_DATE_WINDOW)),
             )
-            of_rows = cur.fetchall()
-
-    if not of_rows:
-        return {"ok": True, "matched": False}
-
-    manual_desc = f"{m['alvo'] or ''} {m['nota'] or ''}"
-    candidates = [
-        {"id": r["id"], "valor": r["valor"], "ref_date": r["ref_date"], "alvo": r["of_desc"], "nota": None}
-        for r in of_rows
-    ]
-    pick = pick_reconciliation_match(m["valor"], m["ref_date"], manual_desc, candidates)
-    if pick["verdict"] != "auto":
-        return {"ok": True, "matched": False, "verdict": pick["verdict"]}
-
-    of_launch_id = pick["launch_id"]
-    of_tx_id = next(r["of_tx_id"] for r in of_rows if r["id"] == of_launch_id)
-    try:
-        delete_launch_and_rollback(user_id, of_launch_id)
-    except Exception:
-        pass
-    with get_conn() as conn:
-        with conn.cursor() as cur:
-            cur.execute(
-                "update open_finance_transactions "
-                "set imported_launch_id=%s, match_launch_id=%s, reconciliation_status='auto_merged' where id=%s",
-                (launch_id, launch_id, of_tx_id),
+            rows = cur.fetchall()
+            pick = pick_reconciliation_match(
+                m["valor"], m["ref_date"], f"{m['alvo'] or ''} {m['nota'] or ''}",
+                [{"id": r["id"], "valor": r["valor"], "ref_date": r["ref_date"],
+                  "alvo": r["description"], "nota": None} for r in rows],
             )
+            # 'auto' e 'ask' viram pendência igual: lançamento manual nunca
+            # funde sozinho (decisão "lançamentos manuais exclusivos para dinheiro").
+            # Limitação aceita: o primeiro manual do mesmo valor leva o par ("mercado 50
+            # e padaria 50" × banco "PADARIA -50" → par com o mercado); rejeitado, a
+            # padaria não é reoferecida (só roda na criação). docs/validacao-planos-pl01.md.
+            of_tx_id = next((r["of_tx_id"] for r in rows if r["id"] == pick["launch_id"]), None)
+            if of_tx_id is not None:
+                cur.execute(
+                    """update open_finance_transactions
+                          set match_launch_id=%s, reconciliation_status='pending'
+                        where id=%s and match_launch_id is null
+                          and reconciliation_status in ('imported', 'pending')
+                          and account_id in (
+                              select a.id from open_finance_accounts a
+                                join open_finance_connections c on c.id = a.connection_id
+                               where c.user_id = %s)""",
+                    (launch_id, of_tx_id, user_id),
+                )
+                if cur.rowcount != 1:
+                    of_tx_id = None
         conn.commit()
-    return {"ok": True, "matched": True, "merged_of_launch": of_launch_id}
+    return {"ok": True, "of_tx_id": of_tx_id}
 
 
 def import_open_finance_credit(user_id: int, connection_id: int | None = None) -> dict:
@@ -2647,17 +2680,25 @@ BANK_ACCOUNTS_SQL = """
 # grava `delta_conta` -1 e `accounts.balance = balance + delta`
 # (db/accounts.py:94); devolver o débito é somar +1, como já faz o rollback do
 # delete (`balance - delta_conta`, db/accounts.py:1766).
+#
+# Transações `t` das contas no recorte, casadas pela identidade da conta (ver
+# acima). Usado aqui e na ordem inversa (`_propose_manual_reconciliation`), para
+# que o par criado lá seja o mesmo que o aviso e o modal enxergam. Dois %s: o de
+# `BANK_ACCOUNTS_SQL` e o de `tc.user_id`.
+_RECORTE_TX_FROM_SQL = f"""
+        from ({BANK_ACCOUNTS_SQL}) a
+        join open_finance_accounts ra on ra.id = a.id
+        join open_finance_accounts ta on ta.provider_account_id = ra.provider_account_id
+        join open_finance_connections tc on tc.id = ta.connection_id and tc.user_id = %s
+        join open_finance_transactions t on t.account_id = ta.id"""
+
+
 def _fused_join_sql(link_col: str, extra_where: str,
                     cols: str = "distinct l.id, (l.efeitos ->> 'delta_conta')::numeric as d") -> str:
     """O miolo acima: lançamentos manuais ligados por `t.<link_col>` a transações
     das contas no recorte. Params: `merged_wallet_delta_params`."""
     return f"""
-      select {cols}
-        from ({BANK_ACCOUNTS_SQL}) a
-        join open_finance_accounts ra on ra.id = a.id
-        join open_finance_accounts ta on ta.provider_account_id = ra.provider_account_id
-        join open_finance_connections tc on tc.id = ta.connection_id and tc.user_id = %s
-        join open_finance_transactions t on t.account_id = ta.id
+      select {cols}{_RECORTE_TX_FROM_SQL}
         join launches l on l.id = t.{link_col}
        where l.user_id = %s
          and coalesce(l.source, 'manual') <> 'open_finance'

@@ -7066,7 +7066,7 @@ async def create_launch_route(request: Request, user_id: int, payload: LaunchCre
         }
 
     # ── Receita / Despesa → fluxo padrão de launches ──────────────────────
-    from db import add_launch_and_update_balance
+    from db import add_launch_and_update_balance, propose_manual_reconciliation
     from db.accounts import carteira_exibida
 
     nota = nota_in or alvo or ("receita registrada pelo dashboard" if tipo == "receita" else "despesa registrada pelo dashboard")
@@ -7098,6 +7098,10 @@ async def create_launch_route(request: Request, user_id: int, payload: LaunchCre
         raise HTTPException(status_code=400, detail=detalhe_seguro(exc)) from exc
     except Exception as exc:
         raise HTTPException(status_code=500, detail=f"Erro ao registrar lançamento: {exc}") from exc
+
+    # Fora do `try`: o lançamento já está gravado; a pendência com a transação
+    # do banco (se houver) é acessória e não sobe exceção.
+    await asyncio.to_thread(propose_manual_reconciliation, int(user_id), int(launch_id))
 
     return {
         "ok": True,

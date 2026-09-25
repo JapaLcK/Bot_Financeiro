@@ -51,9 +51,10 @@ def test_com_banco_a_resposta_traz_o_mesmo_numero_do_saldo(uid_pro, ia_fora):
 
 def test_o_numero_vale_DEPOIS_do_lancamento_na_mesma_mensagem(uid_pro, ia_fora):
     """A releitura é o ponto: `new_balance` sai obsoleto na linha em que é
-    impresso. NO CONTRATO NOVO não há mais fusão reversa — o lançamento manual
-    fica na Carteira (👛) e o total consolidado (💰) é o do /saldo; a tx OF
-    pré-importada permanece como lançamento separado."""
+    impresso. O lançamento manual fica na Carteira (👛) e o total consolidado
+    (💰) é o do /saldo. A tx OF pré-importada vira PENDÊNCIA com o manual
+    (`propose_manual_reconciliation`), sem fundir: a Carteira não muda até o
+    usuário confirmar."""
     hoje = today_tz()
     conexao = conecta_banco(uid_pro, "113.88",
                             [tx(uid_pro, "-1.00", hoje, "PIX ENVIADO BARBARA")])
@@ -97,10 +98,10 @@ def test_com_banco_mas_gate_desligado_a_carteira_piggy_e_nomeada(
 
 
 def test_gate_desligado_sem_fusao_a_carteira_e_a_lancada(uid_pro, ia_fora, monkeypatch):
-    """O gate congela o FORMATO, não autoriza número defasado. NO CONTRATO NOVO
-    não há fusão reversa: com a tx pré-importada, o lançamento manual fica na
-    Carteira e ela é relida na resposta — `new_balance` obsoleto era o sintoma
-    do relato original."""
+    """O gate congela o FORMATO, não autoriza número defasado. Com a tx
+    pré-importada, o lançamento manual vira pendência com ela (sem fundir), fica
+    na Carteira e ela é relida na resposta — `new_balance` obsoleto era o
+    sintoma do relato original."""
     monkeypatch.setenv("OF_CONSOLIDATED_BALANCE_ENABLED", "0")
     monkeypatch.setenv("OF_CONSOLIDATED_BETA_EMAILS", "ninguem@test.local")
     monkeypatch.setenv("OF_CONSOLIDATED_BETA_USER_IDS", "")
