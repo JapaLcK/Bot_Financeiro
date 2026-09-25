@@ -169,10 +169,12 @@ tecnologia, podendo refazer o que for preciso, com calma (Q5).
     (`investment_deposit_from_account` e `investment_withdraw_to_account`, em
     `db/investments.py`, e todo outro caminho que mexa no principal — o inventário por
     `grep` é o primeiro passo do PR do job). O job grava uma foto por dia e mais uma antes
-    e outra depois de cada movimento, no mesmo commit dele; o rendimento de cada intervalo
-    entre fotos é a variação do valor sobre o valor do início, e o do mês é o encadeamento
-    dos intervalos (rentabilidade ponderada pelo tempo, a mesma régua do CDI). Como todo
-    movimento cai entre duas fotos, a conta é exata. Criar investimento e aportar aceitam
+    e outra depois de cada movimento, no mesmo commit dele, marcadas como o par do
+    movimento. O rendimento de cada intervalo entre fotos é a variação do valor sobre o
+    valor do início, **exceto o par antes→depois de um movimento**, que é o próprio dinheiro
+    entrando ou saindo e fica fora; o intervalo seguinte começa da foto de depois. O do mês
+    é o encadeamento dos intervalos (rentabilidade ponderada pelo tempo, a mesma régua do
+    CDI). Como todo movimento cai entre duas fotos, a conta é exata. Criar investimento e aportar aceitam
     data no passado (`purchase_date` em `create_investment_db`, e o lote nasce com ela), e o
     juro desse passado só entra quando os juros forem atualizados. Por isso a foto de depois
     é tirada **com o investimento já em dia** (juros calculados até hoje) — ela é a base, e
@@ -186,7 +188,7 @@ tecnologia, podendo refazer o que for preciso, com calma (Q5).
   não mandou a taxa, renda variável, cripto) aparece sem a comparação, com o motivo. Como o
   patrimônio, nada de reconstruir o passado: enquanto o histórico enche, o bloco diz que se
   completa com o tempo. Testes do PR do job: aporte e resgate nos manuais, rendendo antes e
-  depois do movimento (exato); investimento e aporte com data no passado (o juro antigo
+  depois do movimento (exato); movimento sem rendimento nenhum (dá 0%); investimento e aporte com data no passado (o juro antigo
   não entra); dois movimentos no mesmo dia; resgate total; investimento do
   Open Finance sem taxa (aparece sem comparação); posição do Open Finance liquidada entre
   duas rodadas do job (a taxa da última sincronização fica no histórico).
@@ -242,8 +244,16 @@ fica; só as respostas prontas saem quando a IA real entrar.
 | 7 | Chat com IA real e blocos: o `/ai/chat` passa a devolver "texto + blocos" a partir das tools que usou | Completo |
 
 **Depois:** migrar as demais telas uma a uma (as "em breve" de Ferramentas e as que abrem
-no antigo), tema claro, abrir para mais gente, corte final (`/app` abre o v2) e apagar o
-dashboard antigo e o `/ws`.
+no antigo), tema claro, abrir para mais gente, e o corte final em dois passos, porque o app
+atual (Capacitor) carrega o `/app` ao vivo e nunca pode mostrar o v2:
+
+1. `/app` passa a abrir o v2 no navegador; com o marcador `PigBankApp` no user agent ele
+   continua servindo o painel antigo. Aqui o user agent escolhe *qual tela* (os dois são
+   dados do próprio usuário), não concede acesso — segue valendo a regra de acima.
+2. Apagar o `dashboard.html`, o `dashboard.js` e o `/ws` **só depois de o app atual sair
+   de circulação**: o app novo publicado e uma versão mínima obrigatória que tire o
+   Capacitor de uso. Até lá, o painel antigo e os assets dele ficam. Teste: user agent com
+   `PigBankApp` abrindo `/app` recebe o painel antigo; sem ele, o v2.
 
 ## 5. Andamento
 
