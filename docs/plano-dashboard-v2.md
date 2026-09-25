@@ -130,10 +130,12 @@ tecnologia, podendo refazer o que for preciso, com calma (Q5).
   gravam `auth_sessions.revoked_at` (logout e "sair de todos" em `core/sessions.py`, replay
   de refresh e ociosidade em `core/refresh_tokens.py`, o painel de admin), e avisar em cada
   um seria remendo por instância. Em vez disso, **o próprio stream confere a sua sessão no
-  banco a cada 30 segundos** (junto do keepalive) e fecha se ela foi revogada — cobre todo
-  caminho, os de hoje e os futuros, em qualquer processo, sem canal extra. Teste: revogar
-  por um caminho que não é endpoint (replay de refresh) com o stream aberto em outro
-  processo — ele fecha em até 30 segundos e não recebe mais nada. O teste de ponta a ponta
+  banco a cada 30 segundos** (junto do keepalive) e **antes de mandar cada aviso**, e fecha
+  se ela foi revogada — cobre todo caminho, os de hoje e os futuros, em qualquer processo,
+  sem canal extra, e nenhum aviso sai para uma sessão já revogada (avisos são raros; uma
+  consulta por aviso é barata). Teste: revogar por um caminho que não é endpoint (replay de
+  refresh) com o stream aberto em outro processo e lançar logo em seguida — nenhum aviso
+  chega, e o stream fecha. O teste de ponta a ponta
   do aviso (Q32) inclui derrubar a conexão, lançar e reconectar, e reconectar com a sessão
   vencida. O aviso sai de uma função única, e **todo processo que grava dado financeiro tem
   de alcançá-la**. Hoje produção roda dois: o `launch.py` sobe o uvicorn e também o
@@ -310,15 +312,16 @@ tecnologia, podendo refazer o que for preciso, com calma (Q5).
   **O bloco compara cada investimento com o CDI, e não mostra número da carteira inteira**
   (decisão do dono, 2026-09-25). No Open Finance o banco não diz quando o dinheiro entrou ou
   saiu, então não existe rentabilidade exata da carteira somada; um número aproximado com
-  cara de exato é o que este plano proíbe. No Open Finance, mesmo com o mês de referência
-  informado, a taxa é do mês inteiro e o banco não diz em que dia a posição abriu ou
-  fechou, então o mês de abertura e o de encerramento aparecem sem comparação, com o
-  motivo; e sem mês de referência informado não há comparação com CDI em mês nenhum (regra
-  acima). A comparação de **12 meses** (`lastTwelveMonthsRate`) segue a mesma régua: só
-  aparece quando o banco informa o início e o fim exatos do período, e aí o CDI é desse
-  intervalo — e só se a posição existia no nosso histórico desde esse início. Sem as datas,
-  não se sabe onde o período termina (no dia da sincronização, no fim do mês anterior…),
-  e a taxa aparece sem comparação, com o motivo. Investimento sem rentabilidade informada (o banco não mandou a
+  cara de exato é o que este plano proíbe. No Open Finance vale **uma regra só**, para o mês
+  e para os 12 meses: a taxa do banco só é comparada com o CDI de um período que **se sabe
+  exatamente qual é** e em que **a posição esteve o tempo todo**. Saber o período: o banco
+  informa o mês de referência (para `lastMonthRate`) ou o início e o fim exatos (para
+  `lastTwelveMonthsRate`, cujo fim pode ser o dia da sincronização, o fim do mês anterior…).
+  Estar o tempo todo: a posição foi vista numa sincronização **antes do início** do período
+  e **depois do fim** dele (ou o banco informa as datas da posição). Isso tira de uma vez o
+  mês de abertura e o de encerramento, o mês anterior à primeira sincronização (vista em
+  outubro, a taxa de setembro não compara) e os 12 meses de posição mais nova. Fora disso,
+  a taxa aparece sem comparação, com o motivo. Investimento sem rentabilidade informada (o banco não mandou a
   taxa, renda variável, cripto) aparece sem a comparação, com o motivo. Como o patrimônio,
   nada de reconstruir o passado: enquanto o histórico enche, o bloco diz que se completa com
   o tempo. O widget do protótipo (`widgets/Yield.tsx`) mostra a carteira somada; ele passa a
@@ -333,9 +336,10 @@ tecnologia, podendo refazer o que for preciso, com calma (Q5).
   (cai no mês que cobre); laço de juros parado por mais de uma virada de mês (cada mês
   recebe o seu); aporte com data no
   passado; investimento resgatado e depois apagado (continua no histórico). Open Finance:
-  investimento sem taxa; mês de abertura e de encerramento (sem comparação); conector sem mês de referência
-  (nenhum mês comparado com CDI); 12 meses sem as datas do período, ou com a posição mais
-  nova que o início (sem comparação de 12 meses); posição
+  investimento sem taxa; mês de abertura e de encerramento (sem comparação); primeira sincronização logo depois
+  da virada (o mês anterior não compara); conector sem mês de referência (nenhum mês
+  comparado com CDI); 12 meses sem as datas do período, ou com a posição mais nova que o
+  início (sem comparação de 12 meses); posição
   liquidada entre duas rodadas do job (a taxa da última sincronização fica no histórico).
 - **Reserva em meses:** reserva dividida pelo custo mensal das contas fixas ativas. O custo
   mensal converte cada frequência de `db/recurring.py` (`VALID_FREQUENCIES`): diária × 365/12,
