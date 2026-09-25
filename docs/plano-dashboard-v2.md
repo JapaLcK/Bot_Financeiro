@@ -202,7 +202,11 @@ tecnologia, podendo refazer o que for preciso, com calma (Q5).
     (`db/open_finance.py`) e antes de sobrescrever ou apagar a linha do espelho — não pelo
     job diário, que chegaria tarde para a posição liquidada entre duas rodadas. O histórico
     fica numa tabela própria, que a reconciliação não apaga: a posição que o banco deixou de
-    mandar continua na série dos meses em que existiu, marcada como encerrada. A cascata do histórico fica só para o
+    mandar continua na série dos meses em que existiu, marcada como encerrada. Desconectar
+    o banco (`disconnect_open_finance_connection`, em `db/open_finance.py`) não passa pela
+    sincronização — ele apaga a conexão e a cascata leva as posições —, então a mesma
+    transação marca o histórico de cada posição daquela conexão como encerrado, com a data
+    da desconexão, e o histórico fica. Teste: desconectar e consultar o histórico. A cascata do histórico fica só para o
     usuário, pela regra de privacidade abaixo.
   - **Manuais:** a unidade é o **lote** (`investment_lots`), não o investimento: cada lote
     tem indexador, taxa e cursor de juros próprios (um investimento pode ter um lote de CDI
@@ -213,12 +217,16 @@ tecnologia, podendo refazer o que for preciso, com calma (Q5).
     própria (id e nome guardados nele, sem chave estrangeira em cascata para `investments`
     ou `investment_lots`): lote resgatado ou investimento apagado (`delete_investment` apaga
     a linha) continua nos meses em que existiu, marcado como encerrado. A exceção é
-    **desfazer** o lançamento do aporte (`delete_launch_and_rollback`, em `db/accounts.py`):
-    ele apaga o lote e devolve só o valor aportado, jogando fora o juro que já tinha rendido.
-    Desfazer é "o aporte nunca existiu", então as fotos daquele lote saem junto, na mesma
-    transação — nem o ganho descartado fica no histórico, nem o principal devolvido vira
-    perda. Teste: aporte, juros, desfazer o lançamento — o histórico fica como se o aporte
-    não tivesse existido.
+    **desfazer** um movimento (`delete_launch_and_rollback`, em `db/accounts.py`), e a
+    regra vale para qualquer movimento, aporte ou resgate: desfazer é "o movimento nunca
+    existiu". Na mesma transação saem as fotos daquele lote **a partir do movimento
+    desfeito** (o par dele e as que vieram depois); a próxima foto, com os juros em dia,
+    recomeça do estado restaurado. Assim o aporte desfeito não deixa o ganho descartado
+    (o desfazer devolve só o valor aportado), e o resgate desfeito não deixa o intervalo
+    zerado nem o juro de recuperação preso num par. Testes, olhando o rendimento e a
+    comparação com o CDI, não só o saldo: aporte, juros, desfazer; resgate total, tempo e
+    taxa passando, desfazer — nos dois, o histórico fica como se o movimento não tivesse
+    existido.
 
     **Quando se tira a foto.** Uma por dia e mais uma antes e outra depois de cada aporte e
     resgate, no mesmo commit do movimento. Cada foto guarda uma **sequência crescente** (a
