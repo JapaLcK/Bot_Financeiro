@@ -60,7 +60,10 @@ tecnologia, podendo refazer o que for preciso, com calma (Q5).
   dependência única (`Depends(usuario_atual)`) aceita o cookie de sessão (web, com CSRF) e
   o Bearer (app), barra plano inativo e entrega o usuário. Um teste varre todas as rotas da
   `/api/v2` e falha se alguma não tiver a dependência. Cada rota tem teste de "o usuário B
-  não recebe dado do A".
+  não recebe dado do A". Sem `user_id` no caminho, o id do recurso (lançamento, caixinha…)
+  ainda vem de fora: toda query de escrita filtra também por `user_id` do `usuario_atual`, e
+  cada rota que altera ou apaga tem teste de B mandando o id de A — B recebe recusa (404,
+  para não revelar que o id existe) e o registro de A continua igual.
 - **Plano por recurso (Q20):** estar logado com plano ativo não basta. Rota de recurso pago
   declara também `Depends(recurso("forecast"))` (ou `insights`, `simulator`, `ai_chat`…),
   que chama o `plan_gate_ok` de `core/services/plan_service.py` — a matriz
@@ -95,9 +98,12 @@ tecnologia, podendo refazer o que for preciso, com calma (Q5).
   chamada leve pela API (o `fetch` renova a sessão se precisar) e recria o stream; se a
   sessão acabou de fato, segue o caminho normal de sessão encerrada. O teste de ponta a ponta
   do aviso (Q32) inclui derrubar a conexão, lançar e reconectar, e reconectar com a sessão
-  vencida. Hoje roda um processo só:
-  o aviso fica dentro do processo, atrás de uma função única; com uma segunda instância,
-  troca-se essa função por `LISTEN/NOTIFY` do Postgres. O `/ws` antigo sai junto com o
+  vencida. O aviso sai de uma função única, e **todo processo que grava dado financeiro tem
+  de alcançá-la**. Hoje produção roda dois: o `launch.py` sobe o uvicorn e também o
+  `bot.py` (o bot do Discord, morto como produto mas vivo no deploy, e que grava pelo
+  `core_handle_incoming`). A etapa 0 começa confirmando com o dono se o `bot.py` sai do
+  `launch.py`. Se sair e sobrar um processo só, o aviso fica dentro dele; se ficar, ou com
+  uma segunda instância, a função usa `LISTEN/NOTIFY` do Postgres desde a etapa 0. O `/ws` antigo sai junto com o
   dashboard antigo.
 - **Processo (Q21):** todo PR que cria ou muda endpoint da `/api/v2` é **faixa Completo**,
   com o time inteiro, os testes de isolamento e o Codex.
@@ -114,9 +120,12 @@ tecnologia, podendo refazer o que for preciso, com calma (Q5).
   para separar rendimento de aporte e resgate. Por isso **o job da etapa 0 grava também, por
   posição, o valor e o rendimento acumulado** — nos do Open Finance, o `amountProfit` que o
   banco manda; nos manuais, calculado dos lotes, contando também o que já saiu em resgate.
-  O rendimento do mês é a variação desse acumulado sobre o valor do início. A fórmula exata
-  dos manuais se fecha no PR do job, com teste de que aporte e resgate no meio do mês não
-  mexem no rendimento. Posição sem rendimento informado (renda variável, cripto sem
+  O rendimento de cada dia é a variação do acumulado sobre o valor do início do dia, e o do
+  mês é o encadeamento dos dias (rentabilidade ponderada pelo tempo, a mesma régua do CDI).
+  Como a foto é diária, aporte e resgate mudam o valor da base no dia seguinte, e dinheiro
+  novo não infla nem dilui o percentual. A fórmula exata do acumulado dos manuais se fecha no
+  PR do job, com teste de aporte grande e de resgate no meio do mês: o percentual tem de sair
+  igual ao do caso sem movimento. Posição sem rendimento informado (renda variável, cripto sem
   `amountProfit`) fica fora da conta, e o bloco diz quais ficaram. Como o patrimônio, nada
   de reconstruir o passado: enquanto o histórico enche, o bloco diz que se completa com o
   tempo.
