@@ -78,8 +78,15 @@ tecnologia, podendo refazer o que for preciso, com calma (Q5).
   `cota_esgotada` no `ai_chat`). O teste que varre as rotas exige, em cada uma, ou a
   dependência de recurso ou a presença numa lista explícita de rotas do plano de entrada. Cada
   rota paga tem teste na fronteira: o plano abaixo recebe a recusa, o plano mínimo recebe o
-  dado; as do `ai_chat` têm também o teste da cota esgotada. O gate pelo `/auth/me` na tela (seção 3) só decide o que mostrar; quem protege é o
-  servidor.
+  dado; as do `ai_chat` têm também o teste da cota esgotada. O gate pelo `/auth/me` na tela
+  (seção 3) só decide o que mostrar; quem protege é o servidor.
+- **Limites por valor, além do sim/não (Q20):** o plano também limita *quanto* se vê, não só
+  *se* se vê — a janela de histórico (`history_days`, `history_current_month_only` em
+  `core/services/plan_limits.py`) e os tetos (`launches_month_max`, `pockets_max`…). Toda
+  rota de leitura com histórico corta a consulta no servidor pelo `history_earliest_date`
+  (`core/services/plan_service.py`), como as rotas atuais já fazem, e toda rota de escrita
+  com teto confere o teto. Teste por rota: o plano de entrada não recebe nada antes do
+  corte, o plano sem corte recebe; e a escrita acima do teto é recusada.
 - **Contrato (Q22):** request e response declarados em Pydantic (`response_model` em toda
   rota) → especificação OpenAPI → tipos TypeScript gerados para o v2 e para o app (e o zod
   do app, gerado da mesma especificação). **Exceção: a rota de eventos (SSE)**, que devolve
@@ -114,7 +121,12 @@ tecnologia, podendo refazer o que for preciso, com calma (Q5).
     seu mecanismo: com `NOTIFY`, ele é emitido **dentro** da transação da escrita (o
     Postgres só entrega quando ela confirma, e nada se ela desfaz); com o aviso dentro do
     processo, a função roda **depois** do commit com sucesso — ali, se o processo cai, cai
-    junto o stream, e a reconexão refaz tudo. Teste: uma escrita com o commit atrasado de
+    junto o stream, e a reconexão refaz tudo. Com `NOTIFY` há mais uma queda possível: a
+    conexão de `LISTEN` do servidor cai e volta enquanto o navegador segue conectado, e o
+    Postgres não reenvia o que foi avisado nesse intervalo. Por isso, quando o `LISTEN`
+    cai, o servidor **fecha todos os streams** que dependem dele; cada navegador reconecta e
+    refaz tudo pelo caminho normal. Teste separado: derrubar só a conexão de `LISTEN`,
+    lançar, e ver a tela atualizar. Teste: uma escrita com o commit atrasado de
     propósito — a tela só pede de novo depois dele e vê o dado novo; e uma escrita que
     desfaz não gera aviso.
   - **só para o dono.** O aviso interno leva o `user_id` de quem teve o dado mudado (o que
@@ -142,46 +154,30 @@ tecnologia, podendo refazer o que for preciso, com calma (Q5).
   reset e na exclusão.
 - **Rendimento × CDI:** a série do CDI já existe (`db/investments.py`), mas o lado da
   carteira não tem histórico: `investments`, `investment_lots` e `open_finance_investments`
-  guardam só o saldo atual, sobrescrito a cada juro ou sincronização, e sem histórico não dá
-  para separar rendimento de aporte e resgate. Por isso **o job da etapa 0 grava também, por
-  posição, o valor e o rendimento acumulado** — nos do Open Finance, o `amountProfit` que o
-  banco manda; nos manuais, calculado dos lotes, contando também o que já saiu em resgate.
-
-  **Quando se tira a foto.** Uma por dia pelo job, e mais uma em cada ponto onde o dinheiro
-  mexe ou o dado some:
-  - nos manuais, **antes e depois de cada aporte e resgate** — eles passam pelo nosso código
+  guardam só o saldo atual, sobrescrito a cada juro ou sincronização. A regra: **nenhum
+  número inferido**. Cada origem usa a fonte que sabe separar rendimento de aporte e resgate:
+  - **Open Finance:** a rentabilidade que o próprio banco calcula por posição
+    (`lastMonthRate` e `lastTwelveMonthsRate`, que o código já lê em `db/rv.py`). Das fotos
+    não dá para tirar isso: dois movimentos que se anulam entre duas sincronizações somem
+    no fluxo líquido. O job da etapa 0 grava, por posição e por mês, a taxa que o banco
+    informou, para montar a série mensal.
+  - **Manuais:** o aporte e o resgate passam pelo nosso código
     (`investment_deposit_from_account` e `investment_withdraw_to_account`, em
-    `db/investments.py`), no mesmo commit do movimento, e em todo outro caminho que mexa
-    no principal (o inventário por `grep` é o primeiro passo do PR do job);
-  - no Open Finance, **a cada sincronização, antes de sobrescrever** a posição. Quando a
-    reconciliação remove uma posição que o banco deixou de mandar
-    (`save_open_finance_investments`, em `db/open_finance.py`), grava-se um **registro de
-    saída com valor zero**. A linha local ainda tem o saldo e o `amountProfit` da
-    sincronização anterior, então o rendimento entre ela e a liquidação é desconhecido: esse
-    último intervalo fica fora da conta (não se chuta), e o valor de saída conta só como
-    resgate.
+    `db/investments.py`, e todo outro caminho que mexa no principal — o inventário por
+    `grep` é o primeiro passo do PR do job). O job grava uma foto por dia e mais uma antes
+    e outra depois de cada movimento, no mesmo commit dele; o rendimento de cada intervalo
+    entre fotos é a variação do valor sobre o valor do início, e o do mês é o encadeamento
+    dos intervalos (rentabilidade ponderada pelo tempo, a mesma régua do CDI). Como todo
+    movimento cai entre duas fotos, a conta é exata.
 
-  **A conta.** O rendimento de cada intervalo entre duas fotos é a variação do acumulado
-  dividida pela base do intervalo, e o do mês é o encadeamento dos intervalos
-  (rentabilidade ponderada pelo tempo, a mesma régua do CDI); intervalo sem capital aplicado
-  fica fora, assim como intervalo de rendimento desconhecido. Nos manuais o movimento cai
-  entre a foto de antes e a de depois, então o intervalo seguinte começa do valor depois do
-  movimento e a conta é exata. No Open Finance o banco não diz quando o dinheiro
-  mexeu: o fluxo sai das fotos (variação do valor menos variação do acumulado) e a hora dele
-  dentro do intervalo é desconhecida. Ali a base é **o maior entre o valor do início e o
-  valor do início mais o fluxo** (o maior capital aplicado no intervalo), que acerta aporte
-  cedo e resgate tarde e, nos outros casos, **puxa o percentual para perto de zero** — tanto
-  ganho quanto perda: um dia de −10% com aporte tarde aparece como −1%. Não é limite
-  inferior, e o bloco não promete isso. O erro vem só de intervalo com movimento, e as
-  posições que entram na conta são as que informam rendimento (renda fixa, em quase todo
-  dia com variação pequena e positiva). A fórmula exata do acumulado dos manuais se fecha no
-  PR do job, com testes de: aporte e resgate nos manuais, rendendo depois (exato); os quatro casos do Open
-  Finance (aporte e resgate, cedo e tarde) com dia de ganho **e** dia de perda; resgate total;
-  e a posição liquidada entre duas sincronizações (registro de saída, intervalo fora da
-  conta). Posição sem rendimento informado (renda variável, cripto sem
-  `amountProfit`) fica fora da conta, e o bloco diz quais ficaram. Como o patrimônio, nada
-  de reconstruir o passado: enquanto o histórico enche, o bloco diz que se completa com o
-  tempo.
+  A carteira é a média das posições ponderada pelo valor de cada uma no início do mês.
+  Posição sem rentabilidade informada (o banco não mandou a taxa, renda variável, cripto)
+  fica fora, e o bloco diz quais ficaram; posição que sumiu no mês sai da conta desse mês, e posição aberta no meio do mês entra a
+  partir do seguinte.
+  Como o patrimônio, nada de reconstruir o passado: enquanto o histórico enche, o bloco diz
+  que se completa com o tempo. Testes do PR do job: aporte e resgate nos manuais, rendendo
+  antes e depois do movimento (exato); dois movimentos no mesmo dia; resgate total; posição
+  do Open Finance sem taxa (fica fora e aparece na lista).
 - **Reserva em meses:** reserva dividida pelas contas fixas. Hoje nada marca qual caixinha
   é a reserva: só há o palpite pelo nome em `core/services/piggy_agents.py` (`_is_reserva`).
   Por isso a caixinha de reserva passa a ser **designada pelo usuário** (um campo na
