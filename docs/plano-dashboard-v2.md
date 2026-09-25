@@ -96,13 +96,16 @@ Decidido pelo dono na mesma data (Q37–Q41):
   - **carteira que não é só dinheiro vivo:** hoje a carteira é dinheiro mais contas de banco
     não conectadas (o painel antigo pede para "Ajustar Carteira" depois de conectar), então
     somá-la ao saldo do banco conta o mesmo dinheiro duas vezes — a correção de fusão só
-    cobre lançamentos casados, não o saldo acumulado. Na primeira vez no v2, quem tem banco
-    conectado confirma quanto da carteira é dinheiro vivo; até confirmar, a foto sai
-    marcada como incerta. Quem não tem banco conectado não precisa: ali não há o que somar
-    duas vezes.
+    cobre lançamentos casados, não o saldo acumulado. E ela também pode ter dentro salário
+    ou conta que o carregador de recorrentes lançou sozinho sem terem acontecido
+    (`recurring_income_credits`, `recurring_charges`) — desligar o carregador só para os
+    lançamentos futuros. Por isso, **sem exceção**, na primeira vez no v2 todo usuário
+    confirma quanto da carteira é dinheiro vivo, tenha banco conectado ou não; até
+    confirmar, a foto dele sai marcada como incerta.
 
   Testes: CDB manual e o mesmo CDB do banco (incerta até responder; depois, uma vez só);
-  carteira com saldo de banco antigo e banco conectado (incerta até confirmar).
+  carteira com saldo de banco antigo e banco conectado, e carteira com salário recorrente
+  lançado antes do desligamento sem banco conectado (incerta até confirmar, nos dois).
 - **Q38 — a caixinha manual continua**, como exceção à Q36: ela é dinheiro separado pelo
   próprio usuário, e depositar e retirar nela segue existindo no v2. A caixinha espelhada
   do banco continua vindo do Open Finance.
@@ -372,11 +375,13 @@ tecnologia, podendo refazer o que for preciso, com calma (Q5).
     desse dia é gravada marcada como incerta, e o gráfico a mostra assim — nunca como ponto
     exato.
 
-  **Uma foto por usuário por dia:** restrição única em `(user_id, dia)` e gravação que
-  substitui a do mesmo dia, para duas instâncias ou uma nova tentativa não deixarem pontos
-  repetidos ou em conflito.
+  **Uma foto por usuário por dia:** restrição única em `(user_id, dia)`, e a foto guarda
+  **a hora da leitura** (o início da transação que a leu). A gravação só substitui a do
+  mesmo dia se a leitura dela for mais nova — senão uma instância que leu antes e terminou
+  depois gravaria o saldo velho por cima do novo.
 
-  Testes: duas rodadas do job ao mesmo tempo (um ponto só); caixinha ligada a um CDB do
+  Testes: duas rodadas do job ao mesmo tempo, a que leu antes terminando depois (fica um
+  ponto só, com o valor da leitura mais nova); caixinha ligada a um CDB do
   Open Finance (conta uma vez só); posição em dólar,
   solta e ligada a uma caixinha (fica fora e aparece o aviso); foto no meio de um aporte
   (conta uma vez); foto com transferência de banco pendente (marcada como incerta), e a
