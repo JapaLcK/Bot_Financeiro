@@ -322,9 +322,10 @@ tecnologia, podendo refazer o que for preciso, com calma (Q5).
   informa o mês de referência (para `lastMonthRate`) ou o início e o fim exatos (para
   `lastTwelveMonthsRate`, cujo fim pode ser o dia da sincronização, o fim do mês anterior…).
   Estar o tempo todo: a posição foi vista numa sincronização **antes do início** do período
-  e **depois do fim** dele, **sem nenhum encerramento no meio** (a reconciliação apaga a
-  posição ausente e ela pode voltar com o mesmo id; o registro de encerramento dela fica no
-  histórico e quebra a cobertura) — ou o banco informa as datas da posição. Isso tira de uma vez o
+  e **depois do fim** dele, **sem nenhum encerramento entre essas duas sincronizações** —
+  não só dentro do período: a reconciliação apaga a posição ausente e ela pode voltar com o
+  mesmo id, e a sincronização de antes tem de ser da mesma vida da posição que a de depois
+  (encerrada em agosto e reaberta em 15 de setembro, a posição não cobre setembro) — ou o banco informa as datas da posição. Isso tira de uma vez o
   mês de abertura e o de encerramento, o mês anterior à primeira sincronização (vista em
   outubro, a taxa de setembro não compara) e os 12 meses de posição mais nova. Fora disso,
   a taxa aparece sem comparação, com o motivo. Investimento sem rentabilidade informada (o banco não mandou a
@@ -344,7 +345,8 @@ tecnologia, podendo refazer o que for preciso, com calma (Q5).
   passado; investimento resgatado e depois apagado (continua no histórico). Open Finance:
   investimento sem taxa; mês de abertura e de encerramento (sem comparação); primeira sincronização logo depois
   da virada (o mês anterior não compara); posição que some e volta com o mesmo id (o
-  período com o encerramento no meio não compara); conector sem mês de referência (nenhum mês
+  período com o encerramento no meio não compara; encerrada antes do período e reaberta no
+  meio dele também não); conector sem mês de referência (nenhum mês
   comparado com CDI); 12 meses sem as datas do período, ou com a posição mais nova que o
   início (sem comparação de 12 meses); posição
   liquidada entre duas rodadas do job (a taxa da última sincronização fica no histórico).
