@@ -11,7 +11,9 @@ import * as SecureStore from "expo-secure-store";
 const PAR = "pb.credenciais";
 
 /**
- * O cofre falhou de um jeito que deixa o estado da sessão DESCONHECIDO.
+ * O cofre falhou de um jeito que deixa o estado da sessão DESCONHECIDO — ou
+ * recusou guardar uma credencial que o servidor já entregou, e que não volta
+ * (`guardarCredenciaisSe`: na gravação ou no desfazer).
  *
  * Tem nome próprio porque quem chama precisa distinguir isto de "outra
  * tentativa assumiu": a segunda é uma corrida normal e silenciosa, esta é um
@@ -232,8 +234,18 @@ export function guardarCredenciaisSe(
     // O que estava lá ANTES, para o desfazer poder RESTAURAR em vez de apagar.
     // Apagar destruiria a sessão de um terceiro: se a conta C já estava no
     // cofre e a entrada da A é superada, quem não pediu nada ficaria deslogado.
-    const anterior = await SecureStore.getItemAsync(PAR);
-    await SecureStore.setItemAsync(PAR, JSON.stringify(c));
+    //
+    // Falhar AQUI também é `FalhaNoCofre`, e não o erro cru: quem chama já
+    // gastou do lado do servidor o que trouxe esta credencial (o código do
+    // cadastro, o desafio do MFA), e o erro cru caía no ramo genérico — a
+    // pessoa ficava na tela do código, onde repetir só diz "já utilizado".
+    let anterior: string | null;
+    try {
+      anterior = await SecureStore.getItemAsync(PAR);
+      await SecureStore.setItemAsync(PAR, JSON.stringify(c));
+    } catch (causa) {
+      throw new FalhaNoCofre(causa);
+    }
     // E CONFERE DE NOVO. A gravação em si é assíncrona, então uma tentativa
     // mais nova pode ter começado enquanto ela acontecia — e ela pode nem
     // gravar nada (uma entrada que para numa etapa de código, por exemplo), o

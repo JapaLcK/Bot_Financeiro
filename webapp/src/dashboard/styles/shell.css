@@ -125,8 +125,7 @@
   .rail { display: none; }
   .topbar { height: 56px; gap: 6px; }
   .topbar .tag-demo, .cmd-trigger span, .cmd-trigger kbd { display: none; }
-  .topbar .btn-primary { width: 40px; padding: 0; font-size: 0; gap: 0; }
-  .topbar .btn-primary i { font-size: 18px; }
+  .topbar .btn-primary { padding: 0 12px; } /* com o nome escrito: só o ícone não dizia o que era */
   .cmd-trigger { width: 40px; padding: 0; justify-content: center; }
   .month-switch, .topbar-spacer { flex: 1; }
   .month-switch ~ .topbar-spacer { display: none; } /* sem o seletor (NO_MONTH), o espaçador empurra os botões à direita */
@@ -154,4 +153,14 @@
   .tabbar i { font-size: 21px; }
   .tabbar a[aria-current="page"] { color: var(--ink); }
   .tabbar a[aria-current="page"] i { color: var(--pink); }
+  /* O Piggy no meio: a logo do PigBank no lugar do ícone. Como a logo já é rosa, fora da
+     página ela fica cinza como os outros ícones, e só ganha a cor quando é a atual. */
+  .tabbar img { margin-top: -3px; filter: grayscale(1) brightness(1.35); opacity: 0.7; }
+  .tabbar a[aria-current="page"] img { filter: none; opacity: 1; }
 }
+@media (max-width: 400px) { .topbar .btn-primary i { display: none; } }
+/* Mês, busca e Ferramentas lado a lado não deixam folga: o CI no Linux mede o texto mais
+   largo que o macOS e estourava em 320 e em 361px. Até 420px o ano sai do título; até
+   360px a busca sai também. */
+@media (max-width: 420px) { .month-year { display: none; } }
+@media (max-width: 360px) { .topbar .cmd-trigger { display: none; } }

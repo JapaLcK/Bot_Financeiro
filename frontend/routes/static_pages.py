@@ -408,6 +408,16 @@ async def serve_domain_verification():
     )
 
 
+# Espelho de appleTeamId + ID_BASE do app/app.config.ts; tests/test_apple_app_site_association.py compara os dois.
+_APPLE_APP_IDS = ("S849YDA49P.com.pigbankai.mobile",)
+
+
+@router.get("/.well-known/apple-app-site-association")
+async def serve_apple_app_site_association():
+    """Associa o app iOS ao domínio para salvar senha e código no app Senhas."""
+    return JSONResponse({"webcredentials": {"apps": list(_APPLE_APP_IDS)}})
+
+
 @router.get("/robots.txt")
 async def serve_robots_txt():
     content = "\n".join([

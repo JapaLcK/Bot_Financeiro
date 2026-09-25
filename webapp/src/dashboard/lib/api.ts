@@ -32,3 +32,12 @@ export const caixinhasTotal = (): number => M.caixinhasTotal();
 export const netWorth = () => M.netWorth() as { date: Date; conta: number; caixinhas: number; investimentos: number; total: number }[];
 export const catById = (id: string | null) => CATEGORIES.find((c) => c.id === id);
 export const keyDate = (key: string) => new Date(Number(key.slice(0, 4)), Number(key.slice(5, 7)) - 1, 1);
+export const PLAN = D.PLAN as "essencial" | "plus" | "pro";
+
+type MonthValue = { key: string; date: Date; value: number };
+type YieldPeriod = { value: number; rate: number; cdi: number; ofCdi: number };
+export const incomeHistory = () => M.incomeHistory() as MonthValue[];
+export const fixedMonthly = (): number => M.fixedMonthly();
+export const reserveMonths = (): number => M.reserveMonths();
+export const yieldVsCdi = () => M.yieldVsCdi() as { month: YieldPeriod; year: YieldPeriod };
+export const installmentsAhead = (n = 6) => M.installmentsAhead(n) as { months: MonthValue[]; last: Date };

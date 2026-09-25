@@ -35,6 +35,15 @@ usuário confirma, como pede o `CLAUDE.md` §1. Na **Direto** este fluxo não se
    próprio Arquiteto.
 3. **Coder**: chame com o plano completo do Arquiteto. Saída esperada: diff
    implementado + o que foi pulado deliberadamente (ponytail).
+
+   **3b. Codex antes do Tester.** Com o diff do Coder ainda não commitado, o
+   orquestrador roda no worktree, **fora do sandbox** (precisa de rede):
+   `codex review --uncommitted > <scratchpad>/codex-antes.txt`, e guarda a lista de
+   achados. `codex_antes` é o número de apontamentos distintos marcados `[P0]`–`[P3]`
+   nessa saída; ela repete o bloco final, então conte cada apontamento uma vez. É o
+   código sem o time revisado como seria sem o time. **Não passe esse
+   parecer ao Tester nem ao Manager** — a independência deles é o que se mede. Se o
+   Codex CLI falhar ou não existir, registre `codex_antes=nd` e siga.
 4. **Tester**: chame com o diff/arquivos que o Coder tocou. Saída esperada:
    lista de achados, cada um com severidade e se foi provado rodando ou é
    hipótese.
@@ -69,6 +78,12 @@ usuário confirma, como pede o `CLAUDE.md` §1. Na **Direto** este fluxo não se
    corrigidos). Ele audita consistência entre os três, não repete achados do Tester.
    Se reprovar, siga a tabela do passo 5.
 
+   Depois da última passada do Manager, o orquestrador compara os bugs **provados** de
+   cada agente com a lista do passo 3b e conta os exclusivos (os que o Codex local não
+   apontou). Só conta bug provado — por reprodução ou por mutação que o faz aparecer;
+   hipótese não conta. Teste que não mede nada (passa com o código quebrado) conta como
+   bug provado.
+
 ## Gates deste repositório
 
 - **Verde local não é verde no CI: o venv local não é o `requirements.txt`.** Em
@@ -93,10 +108,12 @@ usuário confirma, como pede o `CLAUDE.md` §1. Na **Direto** este fluxo não se
 ## Regras do orquestrador
 
 - **Ao abrir o PR, grave no corpo o marcador**
-  `<!-- time-dev: grupo=com faixa=<Leve|Completo> internos=N bloqueantes=M -->`,
-  onde `internos` = defeitos achados pelo Tester e pelo Manager durante a tarefa
-  (inclusive os já corrigidos) e `bloqueantes` = os que impediam o push. É o dado
-  que `scripts/medir_time_dev.py` lê para medir se o time vale o custo em tokens.
+  `<!-- time-dev: faixa=<Leve|Completo> tester=N tester_so=A manager=M manager_so=B codex_antes=K -->`,
+  onde `tester`/`manager` = bugs provados que cada um achou durante a tarefa
+  (inclusive os já corrigidos), `tester_so`/`manager_so` = desses, os que o Codex
+  local do passo 3b não apontou, e `codex_antes` = achados do Codex local sobre o
+  diff do Coder (inteiro, ou `nd`). Agente que não rodou fica com 0. É o dado que
+  `scripts/medir_time_dev.py` lê na medição semanal (`CLAUDE.md` §0).
 - Dentro da faixa escolhida, nunca pule uma etapa para economizar tempo — o
   valor do time é justamente ter um papel adversarial (Tester) e um auditor
   (Manager) que não confiam no agente anterior. Economizar é escolher a faixa

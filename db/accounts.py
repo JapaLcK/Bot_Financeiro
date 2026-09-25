@@ -1542,13 +1542,9 @@ def delete_launch_and_rollback(user_id: int, launch_id: int, *,
     investimento é apagado), e a partir daí o lançamento cai em `kept_unsafe`
     em TODA tentativa, sem caminho de saída pro usuário. É a troca deliberada:
     recusar para sempre não perde dinheiro; seguir perde (R$300 em 5 toques de
-    produto, medido). Nas portas do Open Finance que chamam isto dentro de
-    `except Exception: pass` a recusa é SILÊNCIO — `reconcile_manual_launch`
-    segue e marca `auto_merged` mesmo com o delete recusado. (Os escritores do
-    lançamento manual — rota do dashboard, handler do bot, entrada rápida — não
-    chamam mais essa função desde a decisão "lançamentos manuais exclusivos
-    para dinheiro" de 2026-09; o caminho silencioso ficou inalcançável de
-    fato.) Consertar isso é o PR dos `except`, não este.
+    produto, medido). Em `_rollback_imported_of` (db/open_finance.py), que
+    chama isto dentro de `except Exception: pass`, a recusa é SILÊNCIO.
+    Consertar isso é o PR dos `except`, não este.
 
     `escopo_conta_corrente=True` — usado SÓ pelo "apagar tudo" — recusa também
     o que mexe em caixinha/investimento (`_EFEITOS_FORA_DO_APAGAR_TUDO`).
@@ -1559,12 +1555,12 @@ def delete_launch_and_rollback(user_id: int, launch_id: int, *,
       - `core/services/ai_chat/tools/launches.py:433` (/ai/chat);
       - `frontend/finance_bot_websocket_custom.py:5749` (DELETE /launches);
       - `delete_all_launches_and_rollback` (abaixo), que classifica em baldes;
-      - `db/open_finance.py`: `_rollback_imported_of` e `reconcile_manual_launch`,
-        dentro de `except Exception: pass` (o confirmar da reconciliação saiu
-        para `db/reconciliation.py`, que apaga a sombra direto e não passa por
-        aqui). Ali uma recusa não vira mensagem nem log: o
-        lançamento duplicado do Open Finance sobrevive à reconciliação e o saldo
-        conta duas vezes, calado. HOJE inalcançável (as chaves que o importador
+      - `db/open_finance.py`: `_rollback_imported_of`, dentro de
+        `except Exception: pass` (o confirmar da reconciliação saiu para
+        `db/reconciliation.py`, que apaga a sombra direto e não passa por aqui;
+        a ordem inversa, `propose_manual_reconciliation`, só cria pendência e
+        não apaga nada). Ali uma recusa não vira mensagem nem log: a sombra do
+        Open Finance sobrevive à limpeza, calada. HOJE inalcançável (as chaves que o importador
         do OF grava estão todas em `_EFEITOS_REVERSIVEIS`, e ele não grava delta
         de lote), mas qualquer chave nova de OF vira perda silenciosa antes de
         virar recusa visível. Os `except` de lá são o próximo conserto, não este.

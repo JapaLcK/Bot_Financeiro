@@ -299,9 +299,9 @@ def test_pay_bill_amount_devolve_a_carteira_exibida(uid_pro, ia_fora):
 # ── 9. rota POST /launches: o TERCEIRO chamador da mesma defasagem ────────
 
 def test_rota_de_lancamento_devolve_a_carteira_sem_fusao(uid_pro, ia_fora, sem_autorizacao):
-    """NO CONTRATO NOVO não há fusão reversa: `new_balance` da rota é a Carteira
-    real do lançamento manual (a tx OF pré-importada segue como lançamento
-    separado) e bate com o exibido pelo dashboard — mesmo recorte, mesmo número."""
+    """Sem fusão: `new_balance` da rota é a Carteira real do lançamento manual
+    (a tx OF pré-importada vira pendência com ele, não funde) e bate com o
+    exibido pelo dashboard — mesmo recorte, mesmo número."""
     import frontend.finance_bot_websocket_custom as mono
 
     conecta_banco(uid_pro, "113.88",

@@ -1,11 +1,10 @@
 """Desfazer uma fusão devolve o gasto à Carteira e a sombra do banco à timeline.
 
 Sentido A: o manual veio antes, o import propôs o casamento e o usuário
-confirmou (`confirm_reconciliation` apagou a sombra). CONTRATO NOVO: o sentido B
-(fusão reversa silenciosa, `reconcile_manual_launch`) foi removido — um
-lançamento manual criado depois da importação OF permanece SEPARADO, coberto
-pelo teste de separação explícita abaixo. No sentido A o cenário é "gastei 50
-no mercado" × MERCADO -50 com o banco em 1000 → 950.
+confirmou (`confirm_reconciliation` apagou a sombra). Sentido B (manual depois
+da importação OF) não funde sozinho: vira pendência e fica SEPARADO, coberto
+pelo teste abaixo. No sentido A o cenário é "gastei 50 no mercado" × MERCADO
+-50 com o banco em 1000 → 950.
 """
 from __future__ import annotations
 
@@ -74,36 +73,38 @@ def test_desfazer_fusao_do_import(uid_pro, ia_fora):
     _desfaz_e_confere(uid_pro, funde_a(uid_pro))
 
 
-def test_manual_criado_depois_do_import_permance_separado_e_o_delete_nao_toca_a_tx_of(uid_pro, ia_fora):
-    """CONTRATO NOVO (decisão "Lançamentos Manuais Exclusivos para Dinheiro"):
-    substitui o antigo `test_desfazer_fusao_reversa`. A fusão reversa silenciosa
-    (`reconcile_manual_launch`) saiu dos escritores — um lançamento manual
-    criado depois da importação OF NUNCA funde sozinho.
+def test_manual_criado_depois_do_import_vira_pendencia_e_o_delete_nao_apaga_a_sombra(uid_pro, ia_fora):
+    """Decisão "Lançamentos Manuais Exclusivos para Dinheiro": um lançamento
+    manual criado depois da importação OF NUNCA funde sozinho — vira pendência
+    (`propose_manual_reconciliation`).
 
-    O que vale agora é a separação explícita: a tx OF permanece 'imported' na
-    PRÓPRIA sombra (não é revinculada no manual), o manual fica lançamento
-    separado debitando a Carteira, e desfazer (apagar) o manual devolve a
-    Carteira sem tocar na tx OF nem na sombra."""
+    A tx OF continua na PRÓPRIA sombra, com `match` = o manual; o manual fica
+    lançamento separado debitando a Carteira. Apagar o manual devolve a
+    Carteira sem apagar a sombra: a FK `on delete set null` zera o `match` e a
+    pendência vira órfã (fora do aviso, que exige o join com o manual)."""
     conexao = conecta_banco(uid_pro, "950.00", [tx(uid_pro, "-50.00", today_tz(), "MERCADO")])
     assert db.import_open_finance_launches(uid_pro, conexao)["inserted"] == 1
     assert _sombras(uid_pro) == 1
     assert consolidado(uid_pro) == (950.0, 0.0)
 
-    # o dono lança o MESMO gasto à mão depois: nada funde em silêncio
+    # o dono lança o MESMO gasto à mão depois: pendência, nada funde em silêncio
     manda(uid_pro, "gastei 50 no mercado")
     manual_id = ultimo_launch(uid_pro)
 
-    # a sombra OF continua viva e a tx OF NÃO foi revinculada no manual
+    sombra = _estado(_of_tx(uid_pro))["imported_launch_id"]
     assert _sombras(uid_pro) == 1
-    assert _estado(_of_tx(uid_pro))["reconciliation_status"] == "imported"
+    assert _estado(_of_tx(uid_pro)) == {"imported_launch_id": sombra, "match_launch_id": manual_id,
+                                        "reconciliation_status": "pending"}
     # sombra (delta 0) + manual (-50): o consolidado some os dois
     assert consolidado(uid_pro) == (900.0, -50.0)
 
-    # desfazer o manual: a Carteira volta, a tx OF e a sombra intactas
+    # apagar o manual: a Carteira volta, a sombra fica, a pendência vira órfã
     db.delete_launch_and_rollback(uid_pro, manual_id)
     assert consolidado(uid_pro) == (950.0, 0.0)
     assert _sombras(uid_pro) == 1
-    assert _estado(_of_tx(uid_pro))["reconciliation_status"] == "imported"
+    assert _estado(_of_tx(uid_pro)) == {"imported_launch_id": sombra, "match_launch_id": None,
+                                        "reconciliation_status": "pending"}
+    assert db.reconciliation_summary(uid_pro)["pending_count"] == 0
 
 
 def test_desfazer_confirmada(uid_pro, ia_fora):

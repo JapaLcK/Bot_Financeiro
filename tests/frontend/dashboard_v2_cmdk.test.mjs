@@ -36,6 +36,8 @@ async function abrir(width, semDialog) {
     const path = decodeURIComponent(url.pathname).replace(/\/$/, "/index.html");
     return r.fulfill({ path: join(ROOT, path) }).catch(() => r.fulfill({ status: 404, body: "" }));
   });
+  // já escolheu o perfil (Pular): sem isso o modal da 1ª visita cobre o Resumo
+  await ctx.addInitScript(() => localStorage.setItem("pigbank.dashboard.profile.v1", '"padrao"'));
   const page = await ctx.newPage();
   if (semDialog) await page.addInitScript(() => { delete HTMLDialogElement.prototype.showModal; delete HTMLDialogElement.prototype.close; });
   await page.goto(`${ORIGIN}/dashboard-v2/#/`);

@@ -176,7 +176,7 @@ export function AtivarMfa({ aoEnviar, aoFalhar, aoConcluir, aoGerarNovos }: Prop
         </Texto>
       </View>
       <Button
-        rotulo="Abrir no app autenticador"
+        rotulo="Adicionar ao app Senhas"
         variante="secondary"
         onPress={() => {
           setAvisoLink(null);

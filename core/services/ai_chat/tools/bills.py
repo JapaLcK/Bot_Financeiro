@@ -144,7 +144,6 @@ def _resolve_bill(user_id: int, args: dict[str, Any]):
 
 def _pay_bill_execute(user_id: int, args: dict[str, Any]) -> str:
     from db.bills import mark_bill_paid
-    from utils_text import fmt_brl
 
     bill, err = _resolve_bill(user_id, args)
     if err:
@@ -191,9 +190,8 @@ def _pay_bill_execute(user_id: int, args: dict[str, Any]) -> str:
         return f"🐷 Não consegui registrar o pagamento: {e}"
     if paid is None:
         return "🐷 Essa conta já estava paga (ou não achei mais)."
-    val = paid.get("paid_amount") or paid.get("amount") or 0
-    return (f"✅ Conta paga: *{paid.get('name')}* — {fmt_brl(val)} lançado e "
-            f"categorizado. Tá tudo em dia! 🐷")
+    from core.handlers.bills import conta_paga
+    return conta_paga(user_id, paid, paid.get("paid_amount") or paid.get("amount") or 0)
 
 
 # ─── Add boleto (avulso) + projeção de caixa ─────────────────────────────────

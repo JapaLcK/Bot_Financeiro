@@ -13,6 +13,7 @@ core/handlers/recurring.py (payment_mode='manual'). Ver [[db/bills.py]].
 """
 from __future__ import annotations
 
+import logging
 import re
 
 from core.response_formatter import wrap_wa_markup
@@ -25,6 +26,7 @@ _STOP_TOKENS = {
     "conta", "boleto", "boletos", "fatura", "reais", "real", "rs", "r",
     "ja", "hoje", "ontem", "esse", "essa", "esta", "este",
 }
+logger = logging.getLogger(__name__)
 
 
 
@@ -66,6 +68,30 @@ def pergunta_de_valor_sem_contexto(user_id: int, nome: str) -> str:
         f"minha {espera}\n"
         f"Me responde ela primeiro; a {rotulo} fica pendente aqui e a gente "
         f"resolve o valor em seguida."
+    )
+
+
+def conta_paga(user_id: int, paid: dict, val) -> str:
+    """Resposta de "paguei a conta", única para as portas do bot (texto,
+    botão do WhatsApp, ferramenta da IA). Se o banco já tinha importado o
+    débito, `mark_bill_paid` deixou a pendência: sai o MESMO aviso do
+    lançamento avulso (`aviso_conferir`, core/handlers/launches.py) no lugar
+    do "Tá tudo em dia!", que aí seria falso. Só a contagem: sem linha de saldo
+    aqui, o "pode ser R$ X" pareceria o saldo. Pós-commit: falha na leitura do
+    aviso vira log, nunca exceção (a conta já está paga) — e sem "em dia", que
+    não dá para afirmar sem ler."""
+    try:
+        import db
+        from core.services.funding import aviso_conferir
+        cb = db.get_consolidated_balance(user_id)
+        aviso = aviso_conferir(None, cb.get("reconciliation"), so_contagem=True)
+        fim = f"\n{aviso}" if aviso else " Tá tudo em dia! 🐷"
+    except Exception:
+        logger.exception("aviso a conferir falhou depois de pagar conta (user %s)", user_id)
+        fim = ""
+    return (
+        f"✅ Conta paga: {wrap_wa_markup(paid.get('name'))} — {fmt_brl(val)} lançado e "
+        "categorizado." + fim
     )
 
 
@@ -171,11 +197,7 @@ def try_pay_from_text(user_id: int, text: str) -> str | None:
         )
     if paid is None:
         return None
-    val = paid.get("paid_amount") or paid.get("amount") or 0
-    return (
-        f"✅ Conta paga: {wrap_wa_markup(paid.get('name'))} — {fmt_brl(val)} lançado e "
-        f"categorizado. Tá tudo em dia! 🐷"
-    )
+    return conta_paga(user_id, paid, paid.get("paid_amount") or paid.get("amount") or 0)
 
 
 
@@ -292,11 +314,7 @@ def resolve_bill_amount(user_id: int, text: str, pending: dict) -> str | None:
         paid = mark_bill_paid(user_id, int(payload["bill_id"]), amount)
     if paid is None:
         return "Essa conta não está mais pendente."
-    val = paid.get("paid_amount") or paid.get("amount") or 0
-    return (
-        f"✅ Conta paga: {wrap_wa_markup(paid.get('name'))} — {fmt_brl(val)} lançado e "
-        f"categorizado. Tá tudo em dia! 🐷"
-    )
+    return conta_paga(user_id, paid, paid.get("paid_amount") or paid.get("amount") or 0)
 
 
 __all__ = ["resolve_bill_amount", "try_pay_from_text"]

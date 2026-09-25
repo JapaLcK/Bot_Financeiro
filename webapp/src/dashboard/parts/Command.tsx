@@ -4,34 +4,10 @@ import { dayMonth, money, monthTitle } from "../lib/format.js";
 import { dayKey, get, set, setFilter, setSim } from "../lib/store.js";
 import { PRESETS } from "../widgets/Simulator";
 import { NO_MONTH, ROUTES, go, useRoute, type Path } from "../router";
+import { NATIVE, hide, isOpen, show, untrap } from "./dialog";
 
 interface Cmd { id: string; group: string; label: string; hint?: string; icon: string; run: () => void }
 
-
-// Safari < 15.4 não tem <dialog>: sem showModal/close/.open. Lá abre e fecha pelo
-// atributo, com um fundo próprio (não há ::backdrop), o Esc tratado aqui, o foco
-// preso no campo enquanto aberta (Tab e foco fora voltam a ele; sem `inert` antes do
-// 15.5) e devolvido a quem abriu, como o showModal()/close() nativos fazem.
-const NATIVE = typeof HTMLDialogElement === "function" && typeof HTMLDialogElement.prototype.showModal === "function";
-let back: HTMLElement | null = null;
-let untrap = () => {};
-const isOpen = (d: HTMLDialogElement | null) => !!d?.hasAttribute("open");
-const show = (d: HTMLDialogElement | null) => {
-  if (!d || isOpen(d)) return; // reaberta (dash:command com ela aberta) recapturaria o campo como `back`
-  if (NATIVE) { d.showModal(); return; }
-  untrap();
-  back = document.activeElement as HTMLElement | null;
-  d.setAttribute("open", "");
-  const keep = (e: Event) => {
-    if (e.type === "keydown" ? (e as globalThis.KeyboardEvent).key !== "Tab" : d.contains(e.target as Node)) return;
-    e.preventDefault();
-    d.querySelector("input")?.focus();
-  };
-  document.addEventListener("keydown", keep, true);
-  document.addEventListener("focusin", keep);
-  untrap = () => { document.removeEventListener("keydown", keep, true); document.removeEventListener("focusin", keep); untrap = () => {}; };
-};
-const hide = (d: HTMLDialogElement | null) => { if (!d) return; if (NATIVE) d.close(); else { untrap(); d.removeAttribute("open"); (document.activeElement as HTMLElement | null)?.blur(); back?.focus(); } };
 
 const norm = (t: string) => t.normalize("NFD").replace(/[\u0300-\u036f]/g, "").toLowerCase();
 
@@ -69,7 +45,7 @@ export function Command() {
   const items = useMemo(() => commands(q, here), [q, opened, here]);
 
   useEffect(() => {
-    const open = () => { setQ(""); setActive(0); setOpened((n) => n + 1); show(dlg.current); input.current?.focus(); };
+    const open = () => { setQ(""); setActive(0); setOpened((n) => n + 1); show(dlg.current, "input"); input.current?.focus(); };
     const onKey = (e: globalThis.KeyboardEvent) => {
       if ((e.metaKey || e.ctrlKey) && e.key.toLowerCase() === "k") { e.preventDefault(); if (isOpen(dlg.current)) hide(dlg.current); else open(); }
       else if (e.key === "/" && !(e.target as HTMLElement).closest("input, textarea, select") && !isOpen(dlg.current)) { e.preventDefault(); open(); }

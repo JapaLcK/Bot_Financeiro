@@ -46,6 +46,8 @@ async function abrir({ semInert = false, organizar = false } = {}) {
     const path = decodeURIComponent(url.pathname).replace(/\/$/, "/index.html");
     return r.fulfill({ path: join(ROOT, path) }).catch(() => r.fulfill({ status: 404, body: "" }));
   });
+  // já escolheu o perfil (Pular): sem isso o modal da 1ª visita cobre o Resumo
+  await ctx.addInitScript(() => localStorage.setItem("pigbank.dashboard.profile.v1", '"padrao"'));
   const page = await ctx.newPage();
   if (semInert) await page.addInitScript(() => {
     const sa = Element.prototype.setAttribute, ta = Element.prototype.toggleAttribute;
@@ -66,17 +68,19 @@ async function abrir({ semInert = false, organizar = false } = {}) {
 async function focar(page, sel) {
   assert.ok(await page.evaluate((s) => { const el = document.querySelector(s); el?.focus(); return document.activeElement === el; }, sel), `não focou ${sel}`);
 }
-// Onde o foco para em 12 Tabs a partir do botão de Organizar/Pronto. ROLAGEM é uma lista rolável
+// Onde o foco para em 24 Tabs a partir do botão de Organizar/Pronto. ROLAGEM é uma lista rolável
 // sem controle focável dentro: o Chromium a põe na ordem de Tab, o Safari não (e com `inert` ela não entra).
+// O ✕ de esconder (remover:<id>) fica fora do conteúdo inerte: no Organizar ele vem depois de cada item.
 async function tabs(page, nome) {
   await page.getByRole("button", { name: nome }).focus();
   const seq = [];
-  for (let i = 0; i < 12; i++) {
+  for (let i = 0; i < 24; i++) {
     await page.keyboard.press("Tab");
     seq.push(await page.evaluate(() => {
       const a = document.activeElement, item = a.closest("[data-widget-id]");
       if (!item) return "fora";
       if (a === item) return `item:${item.dataset.widgetId}`;
+      if (a.matches("[data-slot=widget-remove]")) return `remover:${item.dataset.widgetId}`;
       return `${a.matches("a[href], button, input, select, textarea, [tabindex]") ? "INTERNO" : "ROLAGEM"}:${item.dataset.widgetId}`;
     }));
   }
@@ -92,6 +96,7 @@ test("Organizar: o Tab percorre os itens e nunca entra num controle de widget", 
   await ctx.close();
   assert.deepEqual(seq.filter((s) => /^(INTERNO|ROLAGEM)/.test(s)), [], seq.join(" "));
   assert.ok(seq.filter((s) => s.startsWith("item:")).length >= 9, seq.join(" ")); // os itens seguem alcançáveis
+  assert.ok(seq.filter((s) => s.startsWith("remover:")).length >= 9, seq.join(" ")); // e o ✕ de cada um
 });
 
 test("Organizar sem inert (Safari < 15.5): teclas e digitação em controle interno não mudam nada", async () => {
@@ -131,6 +136,7 @@ test("Organizar sem inert: o Tab não entra em controle interno, e no Pronto ele
   await ctx.close();
   assert.deepEqual(internos(organizando), [], organizando.join(" "));
   assert.ok(organizando.filter((s) => s.startsWith("item:")).length >= 9, organizando.join(" "));
+  assert.ok(organizando.filter((s) => s.startsWith("remover:")).length >= 9, organizando.join(" ")); // sem inert o ✕ segue na ordem de Tab
   assert.ok(internos(depois).length >= 3, depois.join(" ")); // positivo: os tabindex foram devolvidos
 });
 

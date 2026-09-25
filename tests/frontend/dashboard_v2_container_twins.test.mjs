@@ -39,5 +39,5 @@ test("cada @container por largura tem o @media gêmeo logo antes", () => {
       pares++;
     });
   }
-  assert.equal(pares, 8); // remeça com grep -c '@container (max-width' se mudar
+  assert.equal(pares, 9); // remeça com grep -c '@container (max-width' se mudar
 });

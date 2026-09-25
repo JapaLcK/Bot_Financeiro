@@ -308,7 +308,7 @@ credencial de ambiente próprio).
 | F3 | Com o dashboard aberto numa segunda aba, esperar o sync disparado pelo **webhook** da Pluggy | dashboard repinta sozinho, cerca de 1,5 s depois do evento `open_finance_synced`, sem recarregar a página (B10). O botão "↻ Atualizar" **não** emite esse evento; sem webhook da sandbox não há repintura, e isso fica **bloqueado**, não reprovado |
 | F4 | Comparar o saldo **por conta** em Ajustes → Open Finance → "Contas sincronizadas" com o do conector sandbox | mesmo valor por conta. Não comparar com o saldo total do dashboard: ele soma a Carteira, que já tem os lançamentos de C1 e D3 |
 | F5 | Depois de F2, anotar **duas** saídas do sandbox (valor, data, descrição). Desconectar o banco (a desconexão desfaz o que foi importado). Pelo WhatsApp, lançar dois gastos com o mesmo valor (±R$ 0,05), data (±3 dias) e nome de cada saída. Reconectar e sincronizar | cada par aparece como **pendente** no modal **"Conferência com o extrato"**, aberto pelo link no card de saldo da Visão geral (o link só aparece com pendência; `frontend/reconciliations.js`): o importador rebaixa o casamento automático para "perguntar" quando o lançamento é manual (`import_open_finance_launches`). Mesclagem automática não acontece com lançamento manual |
-| F5b | Com o banco já sincronizado, lançar pelo WhatsApp um gasto igual a outra saída sandbox **já importada** | **nenhum par é criado**: o casamento só roda quando o importador recebe transação nova, e `reconcile_manual_launch` não tem chamador em produção. Conferir os totais do mês: se o gasto contar duas vezes (manual + banco), registrar como **candidato a defeito** |
+| F5b | Com o banco já sincronizado, lançar pelo WhatsApp um gasto igual a outra saída sandbox **já importada**, fora das duas usadas no F5: mesmo valor (±R$ 0,05) e saída dos últimos 3 dias, ou a data dela dita na mensagem ("ontem"), dentro de ±3 dias. Fora dessa janela não forma par, e isso não é defeito | a contagem do aviso **"⚠ N lançamento(s) a conferir"** na resposta do bot **sobe em 1** (os dois pares do F5 continuam abertos, então N = 3) e o par novo aparece como **pendente** no modal "Conferência com o extrato", igual ao F5: o lançamento manual cria a pendência na hora (`db/open_finance.py::propose_manual_reconciliation`). Nada funde sozinho; até confirmar, o gasto conta duas vezes nos totais do mês, como no F5. F6 e F8 usam os **dois pares do F5**, não o do F5b. **Limitação conhecida (aceita):** o primeiro lançamento manual de mesmo valor dentro da janela leva o par, na mesma mensagem ou em mensagens separadas ("gastei 50 no mercado" hoje e "gastei 50 na padaria" amanhã, contra uma saída "PADARIA": o par fica com o mercado); se o usuário marcar "São diferentes", a padaria não é oferecida de novo |
 | F6 | Confirmar o primeiro par no modal | gasto conta uma vez só nos totais do mês |
 | F7 | Desfazer o par confirmado em F6 | o par **sai** da lista "Unidos nos últimos 60 dias" do modal (estado `imported`); a transação do banco volta a ser lançamento próprio e o gasto manual volta à Carteira, então os dois contam separados, como em F8 (`db/reconciliation.py::undo_reconciliation`) |
 | F8 | No segundo par, marcar **"São diferentes"** | os dois lançamentos ficam separados e contam como dois |
@@ -389,6 +389,7 @@ reembolso, e o I4 cancela dentro dele. Registrar qual dos dois aconteceu.
 Roda por último, depois do ciclo da Stripe: I1 precisa da mesma conta de teste.
 
 - [ ] `PLUGGY_INCLUDE_SANDBOX` confirmado desligado no Railway (desligado ao fim de F, P5)
+- [ ] par pendente do F5b rejeitado ("São diferentes") ou confirmado, para não ficar aberto
 - [ ] conexão sandbox removida da conta de teste
 - [ ] conta de teste de volta a Essencial pelo admin (depois de I4 ela fica em `free`), ou excluída se não for mais usada
 - [ ] contas a pagar e gastos fixos de teste removidos
@@ -400,7 +401,7 @@ Roda por último, depois do ciclo da Stripe: I1 precisa da mesma conta de teste.
 | caso | sintoma | causa | PR |
 |---|---|---|---|
 | C6c | *candidato, visto só no código:* "gastei mais esse mês que no passado?" vira pedido de valor de lançamento | classificador determinístico casa "gastei" com `launches.add` antes da IA | — confirmar em produção |
-| F5b | *candidato, visto só no código:* gasto manual lançado depois da transação do banco não vira par | `reconcile_manual_launch` sem chamador em produção; resta medir se o total conta duas vezes | — confirmar em produção |
+| F5b | *visto só no código:* gasto manual lançado depois da transação do banco não virava par e contava duas vezes, calado | a fusão reversa não tinha chamador em produção; o lançamento manual agora cria a pendência (`propose_manual_reconciliation`) | corrigido no PR JapaLcK/Bot_Financeiro#563 |
 
 ## O que este roteiro não cobre
 

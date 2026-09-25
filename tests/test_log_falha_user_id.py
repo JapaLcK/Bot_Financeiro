@@ -88,6 +88,7 @@ import db
 import core.observability as observability
 
 # Reuso, não recriação (§0.1): as helpers da varredura moram no teste irmão.
+from conftest import usuario_pagante
 from test_log_falha_traceback import _apelidos, _e_log_falha, _nome, _varre_repo
 
 # A isca: `999999` é um id que NÃO é o do usuário e `5511987654321` é um dado de
@@ -103,10 +104,9 @@ def _uid() -> int:
     """Abaixo de 2 bilhões DE PROPÓSITO — `core.handle_incoming._normalize_user_id`
     comprime id maior que isso e o `handle_incoming` roteia para OUTRO usuário
     (mesma escolha de `tests/test_pending_rollback.py`). O
-    `_auto_cleanup_orphan_users` do conftest apaga o user no fim do teste."""
-    uid = int(uuid.uuid4().int % 1_000_000_000)
-    db.ensure_user(uid)
-    return uid
+    `_auto_cleanup_orphan_users` do conftest apaga o user no fim do teste. É
+    pagante porque, em v2 sem plano, o gate barra antes do trabalho medido."""
+    return usuario_pagante()
 
 
 def _explode(*a, **k):

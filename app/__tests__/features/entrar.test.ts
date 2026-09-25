@@ -8,7 +8,7 @@
 import { TEMPO_LIMITE_AUTH_MS } from "@/api/client";
 import * as authService from "@/services/auth";
 import { FalhaNoCofre, lerCredenciais } from "@/storage/secure";
-import { enviar, tocar, verificar, voltar, type EstadoEntrar } from "@/features/auth/entrar";
+import { apagaSenhaNaFase, enviar, tocar, verificar, voltar, type EstadoEntrar } from "@/features/auth/entrar";
 
 import {
   GENERICO,
@@ -329,5 +329,21 @@ describe("abandonarEntrada() (services/auth.ts)", () => {
     // não abortasse de verdade, esta promise ficaria pendurada e o teste
     // estouraria o tempo limite do Jest, não devolveria "EntradaSuperada".
     expect(await p).toBe("EntradaSuperada");
+  });
+});
+
+describe("apagaSenhaNaFase", () => {
+  // Tabela escrita à mão, não copiada do módulo: `Record` obriga a decidir
+  // aqui também quando uma fase nova aparecer.
+  const esperado: Record<EstadoEntrar["fase"], boolean> = {
+    formulario: true,
+    "erro-cofre": true,
+    enviando: false,
+    mfa: false, // o objetivo do PR: o campo sai da tela preenchido
+    verificando: false,
+  };
+
+  it.each(Object.entries(esperado) as [EstadoEntrar["fase"], boolean][])("%s → %s", (fase, apaga) => {
+    expect(apagaSenhaNaFase(fase)).toBe(apaga);
   });
 });

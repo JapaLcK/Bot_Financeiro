@@ -15,6 +15,10 @@ export const cofre = (globalThis as unknown as { __cofreDeTeste: Map<string, str
 export const falharApagar = (
   globalThis as unknown as { __falharApagarNoCofre: (v: boolean) => void }
 ).__falharApagarNoCofre;
+/** Faz a GRAVAÇÃO no cofre falhar, como um keychain recusando. */
+export const falharEscrita = (
+  globalThis as unknown as { __falharEscritaNoCofre: (v: boolean) => void }
+).__falharEscritaNoCofre;
 /** Prende a próxima gravação no cofre até a promessa resolver. */
 export const atrasarEscrita = (
   globalThis as unknown as { __atrasarEscritaNoCofre: (p: Promise<void>) => void }
@@ -41,6 +45,7 @@ export function prepararCaso() {
   falharLeitura(false);
   cofre.clear();
   falharApagar(false);
+  falharEscrita(false);
   fetchFalso.mockReset();
   globalThis.fetch = fetchFalso as unknown as typeof fetch;
 }

@@ -73,7 +73,7 @@ const simulate = (page, withFallback) => page.evaluate((withFallback) => {
   return sup.map((s) => s.conditionText.replace(/\s/g, ""));
 }, withFallback);
 
-async function measure(width, hash, withFallback, setup) {
+async function measure(width, hash, withFallback, setup, semente = true) {
   const ctx = await browser.newContext({ viewport: { width, height: 900 }, reducedMotion: "reduce" });
   await ctx.route("**/*", (r) => {
     const url = new URL(r.request().url());
@@ -81,6 +81,8 @@ async function measure(width, hash, withFallback, setup) {
     const path = decodeURIComponent(url.pathname).replace(/\/$/, "/index.html");
     return r.fulfill({ path: join(ROOT, path) }).catch(() => r.fulfill({ status: 404, body: "" }));
   });
+  // já escolheu o perfil (Pular): sem isso o modal da 1ª visita cobre o Resumo
+  if (semente) await ctx.addInitScript(() => localStorage.setItem("pigbank.dashboard.profile.v1", '"padrao"'));
   const page = await ctx.newPage();
   await page.goto(`${ORIGIN}/dashboard-v2/#${hash}`);
   await page.locator("#page-title").waitFor({ state: "attached" });
@@ -111,6 +113,9 @@ const filtros = async (page) => {
   await page.evaluate(() => { location.hash = "#/lancamentos"; });
   await page.locator(".ledger-chips").waitFor();
 };
+// 1ª visita (sem a semente do perfil): o modal de perfis aberto por cima do Resumo
+const modal = (page) => page.locator(".picker[open]").waitFor();
+const catalogo = async (page) => { await organizar(page); await page.getByRole("button", { name: "Adicionar bloco" }).click(); await page.locator("#board-catalog").waitFor(); };
 const simular = async (page) => { await page.locator(".presets .chip").first().click(); await page.locator(".sim-facts").waitFor(); };
 // mensagem que precisa de reticência em qualquer largura
 const textoLongo = (page) => page.locator(".row-msg").evaluateAll((qs) => qs.forEach((q) => { q.textContent = "pagamento da viagem de formatura dividido com a galera toda do terceirão"; }));
@@ -119,14 +124,15 @@ const CASES = [
   ...[1440, 1100, 1024, 390, 320].flatMap((w) => PAGES.map((p) => [w, p])),
   ...[1440, 390, 320].flatMap((w) => [paleta, organizar, filtros].map((f) => [w, "/", f])),
   ...[1440, 390, 320].map((w) => [w, "/simulador", simular]),
+  ...[1440, 390, 320].flatMap((w) => [[w, "/", modal, false], [w, "/", catalogo]]),
   [390, "/lancamentos", textoLongo],
   [1440, "/", dica],
 ];
 
 test("com o fallback, o Safari 14.0 simulado tem a geometria do Chromium normal", async () => {
   const falhas = [];
-  for (const [w, p, setup] of CASES) {
-    const { diffs, conditions, overflow } = await measure(w, p, true, setup);
+  for (const [w, p, setup, semente] of CASES) {
+    const { diffs, conditions, overflow } = await measure(w, p, true, setup, semente);
     // no Chromium normal, sem simulação: nada pode passar da largura da tela
     if (overflow > 0) falhas.push(`${w} ${p}${setup ? ` (${setup.name})` : ""}: rolagem horizontal de ${overflow} px`);
     assert.deepEqual(conditions, ["not(inset:0)"], "o minificador não pode reescrever a condição do @supports");

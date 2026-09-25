@@ -1,0 +1,92 @@
+/* Perfil do Resumo: seletor, catálogo do Organizar, botão de esconder e o modal da
+   primeira visita. Sem gap em flex aqui (o Safari 14.0 o ignora): as linhas são grid. */
+
+/* Cabeçalho do painel: seletor, dica e ações. No celular a dica vai para cima, sozinha. */
+.board-head { flex-wrap: wrap; }
+.board-hint { flex: 1 1 0; min-width: 0; }
+@media (max-width: 640px) { .board-hint { flex-basis: 100%; order: -1; } }
+.board-profile {
+  display: inline-grid; grid-auto-flow: column; align-items: center; gap: 8px;
+  font-size: 13px; color: var(--ink-2);
+}
+
+/* Espaço para o ✕ do Organizar (44 × 44 no canto do bloco, fora do conteúdo inerte). */
+.board[data-editing] .w-head { padding-right: 32px; }
+
+/* "Onde está o dinheiro" no Resumo tem uma coluna: sai o % da linha (a legenda dá o do grupo). */
+.board .wealth-rows li { grid-template-columns: 8px minmax(0, 1fr) auto; }
+.board .wealth-rows li > .faint { display: none; }
+
+/* Fatura no Resumo: o nome do cartão tomava o título inteiro ("Fatu…") no bloco de uma coluna. */
+.board #w-fatura .w-aside { display: none; }
+
+.board-empty {
+  margin-top: 14px; padding: 48px 16px;
+  border: 1px dashed var(--rule-strong); border-radius: var(--r-panel);
+  text-align: center;
+}
+
+.catalog { margin: 12px 0 14px; }
+.catalog-list {
+  display: grid; grid-template-columns: repeat(auto-fill, minmax(200px, 1fr)); gap: 8px;
+  margin-top: 10px;
+}
+.catalog-item {
+  display: grid; grid-template-columns: auto minmax(0, 1fr) auto; align-items: center; column-gap: 10px;
+  width: 100%; height: 44px; padding: 0 12px;
+  border: 0; border-radius: var(--r-ctrl);
+  background: var(--plane-2); box-shadow: inset 0 0 0 1px var(--rule);
+  color: var(--ink); font-size: 13px; text-align: left;
+}
+.catalog-item > span:first-of-type { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.catalog-item i { font-size: 16px; color: var(--ink-2); }
+.catalog-item[aria-disabled] { color: var(--ink-3); cursor: not-allowed; }
+.catalog-tier { font-size: 11.5px; font-weight: 600; color: var(--pink-ink); }
+@media (hover: hover) and (pointer: fine) {
+  .catalog-item:not([aria-disabled]):hover { background: var(--plane-3); }
+}
+
+/* Modal da primeira visita. Sem <dialog> (Safari < 15.4) abre pelo atributo, com fundo próprio,
+   abaixo da paleta ⌘K (90/91). */
+.picker {
+  width: min(560px, calc(100vw - 32px));
+  max-height: calc(100vh - 32px);
+  margin: auto;
+  padding: 24px;
+  border: 0; border-radius: 16px;
+  background: #141418;
+  color: var(--ink);
+  box-shadow: 0 0 0 1px var(--rule-strong), 0 30px 80px -20px rgba(0, 0, 0, 0.85);
+  overflow-y: auto;
+}
+.picker:not([open]) { display: none; }
+.picker[open] { display: block; }
+.picker::backdrop { background: rgba(0, 0, 0, 0.6); }
+.picker-fb { position: fixed; top: 16px; left: 0; right: 0; z-index: 81; }
+.picker-scrim { display: none; }
+.picker[open] + .picker-scrim { display: block; position: fixed; top: 0; right: 0; bottom: 0; left: 0; z-index: 80; background: rgba(0, 0, 0, 0.6); }
+.picker h2 { font-size: 20px; letter-spacing: -0.02em; }
+.picker-lede { margin-top: 6px; font-size: 13.5px; color: var(--ink-2); }
+.picker-list { display: grid; gap: 8px; margin-top: 18px; }
+.picker-card {
+  display: grid; grid-template-columns: 22px minmax(0, 1fr); column-gap: 12px; row-gap: 2px;
+  width: 100%; padding: 12px 14px;
+  border: 0; border-radius: 12px;
+  background: var(--plane-2); box-shadow: inset 0 0 0 1px var(--rule);
+  text-align: left;
+  transition: background-color var(--t-fast) ease, box-shadow var(--t-fast) ease;
+}
+.picker-card i { grid-row: span 2; font-size: 20px; line-height: 22px; color: var(--ink-2); }
+.picker-name { font-size: 14px; font-weight: 600; }
+.picker-line { font-size: 12.5px; line-height: 1.45; color: var(--ink-2); }
+.picker-card:focus-visible { outline: none; box-shadow: inset 0 0 0 1px var(--pink); }
+.picker-card:focus-visible i { color: var(--pink); }
+@media (hover: hover) and (pointer: fine) {
+  .picker-card:hover { background: var(--plane-3); }
+  .picker-card:hover i { color: var(--pink); }
+}
+.picker-skip { width: 100%; margin-top: 14px; }
+@media (max-width: 480px) {
+  .picker { padding: 20px 16px; }
+  .picker-card { padding: 10px 12px; }
+}

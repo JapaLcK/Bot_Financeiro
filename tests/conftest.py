@@ -33,6 +33,8 @@ if not hasattr(_bcrypt, "gensalt_padrao"):
     _bcrypt.gensalt = lambda rounds=12, prefix=b"2b": _bcrypt.gensalt_padrao(4, prefix)
 
 from db import init_db, ensure_user, get_conn
+import db_support  # noqa: E402
+from core.services.plan_service import has_app_access  # noqa: E402
 
 
 # ── Coleta: arquivos que dependem de `ofxparse` ──────────────────────────────
@@ -453,22 +455,14 @@ _AINDA_EM_V1 = {
     "test_agent_chat_eval_fixtures.py",
     "test_ai_chat_commands.py",
     "test_ai_chat_tier2.py",
-    "test_bill_amount_pending.py",
     "test_billing_checkout.py",
-    "test_card_name_limite.py",
     "test_cashflow_forecast_rotas.py",
     "test_cashflow_receita_frequencia.py",
     "test_category_normalization.py",
-    "test_credit_help_escala_pra_ia.py",
     "test_handle_incoming_routing.py",
     "test_household_budget.py",
-    "test_log_falha_user_id.py",
-    "test_pending_registry.py",
-    "test_pending_rollback.py",
     "test_piggy_agents.py",
     "test_virada_de_mes.py",
-    "test_whatsapp_daily_report.py",
-    "test_whatsapp_markup_escape.py",
     "test_ws_subscription_gate.py",
 }
 
@@ -503,7 +497,13 @@ def promote_to_pro(user_id: int, plan: str = "pro") -> int:
     (quando o user vem de outra fixture, ex.: id pequeno pro WhatsApp).
 
     `plan` é o valor gravado em `auth_accounts.plan`: o padrão `'pro'` é o Plus
-    no v2; quem precisa do tier mais alto pede `plan="pro_max"`."""
+    no v2; quem precisa do tier mais alto pede `plan="pro_max"`.
+
+    O assert do fim existe porque, sem plano, o gate barra a mensagem antes do
+    `route()`, e um teste de ausência ("não pagou", "não gravou") fica verde sem
+    o código rodar. A invalidação vem antes dele porque a escrita é SQL cru e o
+    `get_auth_user` tem cache. `plan="free"` é isento: o `_cota_esgotada` de
+    `test_ai_chat_commands` rebaixa de propósito (a rever no PR 5)."""
     import uuid as _uuid
     from db.connection import get_conn
     fake_email = f"pro-{_uuid.uuid4().hex[:8]}@test.local"
@@ -522,6 +522,9 @@ def promote_to_pro(user_id: int, plan: str = "pro") -> int:
                     (user_id, fake_email, plan),
                 )
         conn.commit()
+    db_support.invalidate_auth_user_cache(user_id)
+    if plan != "free":
+        assert has_app_access(user_id), f"promote_to_pro({user_id}, {plan!r}) não deu acesso"
     return user_id
 
 

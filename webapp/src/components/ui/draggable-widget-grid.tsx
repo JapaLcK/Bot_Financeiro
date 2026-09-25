@@ -64,6 +64,8 @@ export interface DraggableWidgetGridProps {
 	radius?: number
 	/** Rows take the height of their content instead of square cells (one-column phones). */
 	fitRows?: boolean
+	/** While editable, each widget gets a hide button; the new list goes out through `onChange`. */
+	onRemove?: boolean
 	className?: string
 }
 
@@ -426,6 +428,9 @@ const SHADOW_LIFTED =
 const NO_INERT =
 	typeof HTMLElement !== 'undefined' && !('inert' in HTMLElement.prototype)
 const FOCUSABLE = 'a[href], button, input, select, textarea, [tabindex]'
+/** The hide button sits outside the inert content and stays usable while organizing. */
+const REMOVE = '[data-slot="widget-remove"]'
+const isRemove = (t: EventTarget) => !!(t as HTMLElement).closest?.(REMOVE)
 
 /* ------------------------------------------------------------------ *
  * Widget
@@ -445,6 +450,7 @@ interface WidgetHandlers {
 	drag: () => void
 	end: (id: string) => void
 	key: (e: ReactKeyboardEvent, id: string) => void
+	remove: (id: string) => void
 	/** True while the click that follows a drop should be ignored. */
 	swallow: () => boolean
 	/** Ignore the next click (called when a pointer is released after a drag). */
@@ -460,6 +466,7 @@ const Widget = memo(function Widget({
 	columns,
 	rows,
 	editable,
+	removable,
 	held,
 	raised,
 	landed,
@@ -477,6 +484,7 @@ const Widget = memo(function Widget({
 	columns: number
 	rows: number
 	editable: boolean
+	removable: boolean
 	held: boolean
 	raised: boolean
 	landed: boolean
@@ -567,7 +575,7 @@ const Widget = memo(function Widget({
 		const untab = () =>
 			el.querySelectorAll(FOCUSABLE).forEach((c) => {
 				const t = c.getAttribute('tabindex')
-				if (t === '-1') return
+				if (t === '-1' || c.matches(REMOVE)) return
 				saved.set(c, t)
 				c.setAttribute('tabindex', '-1')
 			})
@@ -637,6 +645,7 @@ const Widget = memo(function Widget({
 				if (
 					editable &&
 					e.target !== e.currentTarget &&
+					!isRemove(e.target) &&
 					e.key !== 'Tab' &&
 					!((e.metaKey || e.ctrlKey) && e.key.length === 1)
 				) {
@@ -646,7 +655,7 @@ const Widget = memo(function Widget({
 			}}
 			onClickCapture={(e) => {
 				// Organizing: the content is inert; this also covers browsers without `inert` (Safari < 15.5).
-				if (handlers.swallow() || (editable && e.target !== e.currentTarget)) {
+				if (handlers.swallow() || (editable && e.target !== e.currentTarget && !isRemove(e.target))) {
 					e.preventDefault()
 					e.stopPropagation()
 				}
@@ -686,6 +695,19 @@ const Widget = memo(function Widget({
 				}`}>
 				{renderItem?.(item as never, sizeOf(w, h))}
 			</motion.div>
+			{removable && (
+				<button
+					type="button"
+					data-slot="widget-remove"
+					aria-label={`Esconder ${item.label ?? item.id}`}
+					onPointerDown={(e) => e.stopPropagation()}
+					onClick={() => handlers.remove(item.id)}
+					className="absolute right-0 top-0 z-10 grid h-11 w-11 cursor-pointer place-items-center rounded-full border-0 bg-transparent p-0 text-foreground [&:hover>span]:bg-foreground/20">
+					<span className="grid h-7 w-7 place-items-center rounded-full bg-foreground/10 ring-1 ring-border transition-colors">
+						<i className="ph ph-x text-[14px]" aria-hidden="true" />
+					</span>
+				</button>
+			)}
 		</motion.div>
 	)
 })
@@ -704,6 +726,7 @@ export function DraggableWidgetGrid({
 	gap = 12,
 	radius = 24,
 	fitRows = false,
+	onRemove = false,
 	className = '',
 }: DraggableWidgetGridProps) {
 	const [items, setItems] = useState(() => initialItems ?? DEFAULT_ITEMS)
@@ -913,6 +936,19 @@ export function DraggableWidgetGrid({
 					return
 				}
 			},
+			remove: (id) => {
+				const { items: current, metrics: m } = latest.current
+				const cols = m.columns || maxColumns
+				// Focus moves to the next widget in reading order, or the previous one at the end.
+				const read = layout(current, cols)
+					.sort((a, b) => a.row - b.row || a.col - b.col)
+					.map((p) => p.id)
+				const at = read.indexOf(id)
+				refocus.current = read[at + 1] ?? read[at - 1] ?? null
+				const next = canonical(current.filter((item) => item.id !== id), cols)
+				commit(next)
+				latest.current.onChange?.(next)
+			},
 			swallow: () => performance.now() < swallowUntil.current,
 			suppressClick: () => {
 				swallowUntil.current = performance.now() + 300
@@ -982,6 +1018,7 @@ export function DraggableWidgetGrid({
 								columns={columns}
 								rows={rows}
 								editable={editable}
+								removable={editable && onRemove}
 								held={held === p.id}
 								raised={raised === p.id}
 								landed={landed === p.id}

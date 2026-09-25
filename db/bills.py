@@ -179,6 +179,7 @@ def mark_bill_paid(user_id: int, bill_id: int, amount: float | None = None) -> d
     variável). Retorna a conta atualizada, ou None se não achar / já paga.
     """
     from db.accounts import add_launch_and_update_balance
+    from db.open_finance import propose_manual_reconciliation
 
     bill = get_bill(user_id, bill_id)
     if not bill or bill["status"] == "paid":
@@ -261,11 +262,10 @@ def mark_bill_paid(user_id: int, bill_id: int, amount: float | None = None) -> d
         raise
     with get_conn() as conn:
         with conn.cursor() as cur:
-            cur.execute(
-                "update bill_instances set launch_id=%s where id=%s and user_id=%s",
-                (launch_id, int(bill_id), int(user_id)),
-            )
+            cur.execute("update bill_instances set launch_id=%s where id=%s and user_id=%s",
+                        (launch_id, int(bill_id), int(user_id)))
         conn.commit()
+    propose_manual_reconciliation(user_id, launch_id)  # débito já importado vira pendência; não sobe
     return get_bill(user_id, bill_id)
 
 

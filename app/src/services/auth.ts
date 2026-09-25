@@ -1,3 +1,5 @@
+import { z } from "zod";
+
 import { ErroDeApi, TEMPO_LIMITE_AUTH_MS, _esquecerRotacoes, chamar, comLimite } from "../api/client";
 import {
   loginSchema,
@@ -102,6 +104,16 @@ async function tentativa<T>(
  *
  * Sem tentativa em voo, é inofensivo: só avança o contador (o que o próximo
  * login/verify já faria sozinho) e não há controlador para abortar.
+ *
+ * ponytail: limite conhecido, documentado e SEM cobertura. `ultimaTentativa` é
+ * um contador único para login, MFA e cadastro (`confirmarCadastro`), então um
+ * abandono aqui supera a entrada em voo de QUALQUER um dos três. Caso real: um
+ * verify de cadastro em voo em `/criar-conta`, `/entrar` empilhada por cima
+ * (hoje só por link `pigbank://` digitado de fora), login de outra conta que
+ * para no MFA e Voltar — o 200 atrasado do cadastro vira `EntradaSuperada`, a
+ * conta já existe no servidor e a sessão dela é descartada sem aviso
+ * (recuperação: Entrar com e-mail e senha). Enumere a máquina (fluxos × eventos
+ * que avançam o contador) antes de mexer aqui.
  */
 export function abandonarEntrada(): void {
   ultimaTentativa += 1;
@@ -119,20 +131,24 @@ export async function entrar(email: string, senha: string): Promise<Entrada> {
     if ("mfa_required" in r) {
       return { fase: "mfa", desafio: r.mfa_challenge, email: r.email };
     }
-    // A conferência acontece DENTRO da gravação, não antes: entre um passo e o
-    // outro caberia uma entrada mais nova, e o aparelho ficaria logado nesta
-    // enquanto a tela mostra a outra.
-    const gravou = await guardarCredenciaisSe(
-      () => minhaVez === ultimaTentativa,
-      { access: r.access_token, refresh: r.refresh_token },
-    );
-    if (!gravou) throw new EntradaSuperada();
-    _esquecerRotacoes();
-    return {
-      fase: "pronta",
-      perfil: { user_id: r.user_id, email: r.email, plan: r.plan },
-    };
+    return { fase: "pronta", perfil: await gravarSessao(minhaVez, r) };
   });
+}
+
+/**
+ * O final comum de quem recebe credencial (`entrar`, `verificarMfa`,
+ * `confirmarCadastro`), sempre DENTRO de `tentativa()`. A conferência acontece
+ * DENTRO da gravação, não antes: entre um passo e o outro caberia uma entrada
+ * mais nova, e o aparelho ficaria logado nesta enquanto a tela mostra a outra.
+ */
+async function gravarSessao(minhaVez: number, r: z.infer<typeof loginSchema>): Promise<Perfil> {
+  const gravou = await guardarCredenciaisSe(
+    () => minhaVez === ultimaTentativa,
+    { access: r.access_token, refresh: r.refresh_token },
+  );
+  if (!gravou) throw new EntradaSuperada();
+  _esquecerRotacoes();
+  return { user_id: r.user_id, email: r.email, plan: r.plan };
 }
 
 /** Completa a entrada de quem tem dois fatores. `backup` usa código de reserva. */
@@ -148,13 +164,38 @@ export async function verificarMfa(
       semAuth: true,
       sinal,
     });
-    const gravou = await guardarCredenciaisSe(
-      () => minhaVez === ultimaTentativa,
-      { access: r.access_token, refresh: r.refresh_token },
-    );
-    if (!gravou) throw new EntradaSuperada();
-    _esquecerRotacoes();
-    return { user_id: r.user_id, email: r.email, plan: r.plan };
+    return gravarSessao(minhaVez, r);
+  });
+}
+
+/**
+ * Pede o código de confirmação do cadastro. Não grava credencial, então fica
+ * FORA de `tentativa()` — mesmo desenho do Esqueci a senha. Objeto e não
+ * posicional: são quatro strings, e trocar duas delas passaria no TS.
+ */
+export async function cadastrar(dados: { email: string; senha: string; nome: string; telefone: string }): Promise<void> {
+  await chamar("/auth/register", z.unknown(), {
+    metodo: "POST",
+    corpo: { email: dados.email, password: dados.senha, name: dados.nome, phone: dados.telefone },
+    semAuth: true,
+    sinal: comLimite(),
+  });
+}
+
+/**
+ * Confirma o código e recebe a sessão da conta nova. Passa por `tentativa()`
+ * como o login e o MFA: um `entrar()` de outra conta começado depois vence,
+ * e este resultado vira `EntradaSuperada` sem tocar no cofre.
+ */
+export async function confirmarCadastro(email: string, codigo: string): Promise<Perfil> {
+  return tentativa(async (minhaVez, sinal) => {
+    const r = await chamar("/auth/verify-email", loginSchema, {
+      metodo: "POST",
+      corpo: { email, code: codigo },
+      semAuth: true,
+      sinal,
+    });
+    return gravarSessao(minhaVez, r);
   });
 }
 

@@ -1,7 +1,7 @@
 // Cálculos derivados dos dados: resumo do mês, saldo dia a dia, previsão e simulação.
 // Regra de caixa: compra no cartão não sai do saldo no dia; entra na fatura, paga no
 // dia 10 do mês seguinte. Pix, débito e Open Finance saem no dia.
-import { BANK_CDB_TOTAL, CATEGORIES, CARD, GOALS, INCOMES, LAUNCHES, MONTHS, NET_WORTH, OPENING_BALANCE, RECURRING, TODAY, TRANSFER_DAY, daysIn } from "./data.js";
+import { BANK_CDB_TOTAL, CATEGORIES, CARD, GOALS, INCOMES, INSTALLMENTS, INVESTMENTS, LAUNCHES, MONTHS, NET_WORTH, OPENING_BALANCE, PAST_INCOMES, RECURRING, TODAY, TRANSFER_DAY, YIELDS, daysIn } from "./data.js";
 
 const DAY = 86400000;
 const JUNE_INVOICE = 612.4; // fatura de junho, paga em 10/07 (antes do período dos dados)
@@ -154,6 +154,44 @@ export function netWorth() {
   last.conta = BALANCE_TODAY;
   last.caixinhas = caixinhasTotal();
   return rows.map((r) => ({ ...r, total: round2(r.conta + r.caixinhas + r.investimentos) }));
+}
+
+const monthsFrom = (offset, n) => Array.from({ length: n }, (_, i) => new Date(TODAY.getFullYear(), TODAY.getMonth() + offset + i, 1));
+
+// Entradas dos últimos 6 meses (o atual incluso, até hoje). Não segue o mês escolhido.
+export function incomeHistory() {
+  return monthsFrom(-5, 6).map((date) => {
+    const key = monthKey(date);
+    const value = LAUNCHES[key]
+      ? LAUNCHES[key].filter((l) => l.kind === "income").reduce((s, l) => s + l.amount, 0)
+      : PAST_INCOMES[key] ?? 0;
+    return { key, date, value: round2(value) };
+  });
+}
+export const fixedMonthly = () => round2(RECURRING.reduce((s, r) => s + r.amount, 0));
+export const reserveMonths = () => GOALS.find((g) => g.id === "reserva").saved / fixedMonthly();
+
+// Rendimento dos investimentos contra o CDI: no último mês e em 12 meses. O ganho é o
+// que o saldo de hoje rendeu no período (sem aportes), para bater com o total da carteira.
+export function yieldVsCdi() {
+  const base = INVESTMENTS.reduce((s, x) => s + x.amount, 0);
+  const period = (ys) => {
+    const acc = (k) => ys.reduce((p, y) => p * (1 + y[k]), 1) - 1;
+    const rate = acc("carteira"), cdi = acc("cdi");
+    return { value: round2(base - base / (1 + rate)), rate, cdi, ofCdi: rate / cdi };
+  };
+  return { month: period(YIELDS.slice(-1)), year: period(YIELDS) };
+}
+
+// Quanto das próximas faturas já está preso em parcelas, e quando a última acaba.
+export function installmentsAhead(n = 6) {
+  const left = (x) => x.total - x.paid;
+  const months = monthsFrom(1, n).map((date, j) => ({
+    key: monthKey(date), date,
+    value: round2(INSTALLMENTS.filter((x) => left(x) > j).reduce((s, x) => s + x.amount, 0)),
+  }));
+  const end = Math.max(0, ...INSTALLMENTS.map(left));
+  return { months, last: new Date(TODAY.getFullYear(), TODAY.getMonth() + end, 1) };
 }
 
 export const goalsTotal = () => GOALS.reduce((s, g) => s + g.saved, 0);

@@ -19,13 +19,13 @@ pé ainda recusa outra pergunta) passam nas duas versões.
 """
 import ast
 import pathlib
-import uuid
 
 import pytest
 
 import db
 from db.pending import _REGISTRO
 from core.types import IncomingMessage
+from conftest import usuario_pagante
 
 
 # função → (índice posicional, nome) do argumento que INTRODUZ um tipo.
@@ -141,9 +141,10 @@ def _uid_de_whatsapp() -> int:
     para outro id interno — gravar a pendência no id da fixture `user_id` (que
     sorteia até 10 bilhões) e mandar a mensagem por ele mediria dois usuários
     diferentes, e o teste ficaria verde ou vermelho por motivo nenhum. Mesmo
-    formato do `tests/test_bill_amount_pending.py`.
+    formato do `tests/test_bill_amount_pending.py`. Também é pagante: em v2 sem
+    plano, o gate barra a mensagem antes do `route()`.
     """
-    return int(uuid.uuid4().int % 1_000_000_000)
+    return usuario_pagante()
 
 
 def _diga(uid, texto):

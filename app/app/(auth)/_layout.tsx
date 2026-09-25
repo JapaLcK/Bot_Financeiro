@@ -26,6 +26,7 @@ export default function LayoutAuth() {
   return (
     <Stack screenOptions={{ headerShown: false }}>
       <Stack.Screen name="entrar" />
+      <Stack.Screen name="criar-conta" />
       <Stack.Screen name="esqueci-senha" options={OPCOES_SHEET} />
     </Stack>
   );

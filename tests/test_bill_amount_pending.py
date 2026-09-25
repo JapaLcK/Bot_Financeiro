@@ -3,6 +3,7 @@ import sys
 import pytest
 from unittest.mock import Mock
 
+from conftest import usuario_pagante
 from core.handlers import bills
 
 
@@ -417,11 +418,10 @@ def test_gate_da_ia_nao_deixa_o_numero_chegar_na_ia(ia_espia):
     se `bill_amount_expected` perder o `suprime_ia` no registro — e falharia
     também se o gate voltasse a filtrar a mensagem antes de suprimir.
     """
-    import uuid
     import db
     import db.bills as B
 
-    uid = int(uuid.uuid4().int % 1_000_000_000)
+    uid = usuario_pagante()
     _monta_conta_variavel(uid)
 
     assert "valor variável" in _diga(uid, "paguei a luz")
@@ -444,11 +444,10 @@ def test_pergunta_de_valor_desaloja_oferta_de_conveniencia(ia_espia):
     guardar de qual conta falava e o "132" ia pra IA — a issue #132 inteira de
     volta. Oferta de conveniência cede para pergunta (ordem em db/pending.py).
     """
-    import uuid
     import db
     import db.bills as B
 
-    uid = int(uuid.uuid4().int % 1_000_000_000)
+    uid = usuario_pagante()
     _monta_conta_variavel(uid)
 
     _diga(uid, "gastei 50 no mercado")
@@ -553,10 +552,9 @@ def test_formas_faladas_de_responder_o_valor_pagam_a_conta(ia_espia, resposta):
     filtrava por "parece um número" e mandava tudo isso pra IA com a conta em
     aberto — número solto na mão da IA, que é exatamente a issue #132.
     """
-    import uuid
     import db.bills as B
 
-    uid = int(uuid.uuid4().int % 1_000_000_000)
+    uid = usuario_pagante()
     _monta_conta_variavel(uid)
     _diga(uid, "paguei a luz")
     ia_espia.clear()
@@ -669,11 +667,10 @@ def test_dois_assuntos_diferentes_em_sequencia_pelo_handle_incoming(ia_espia):
     `pending_actions` e o gate da IA. Os dois piores achados do Tester só
     apareceram aqui.
     """
-    import uuid
     import db
     import db.bills as B
 
-    uid = int(uuid.uuid4().int % 1_000_000_000)
+    uid = usuario_pagante()
     _monta_conta_variavel(uid)
 
     primeiro = _diga(uid, "gastei 50 no mercado")
@@ -701,11 +698,10 @@ def test_tool_da_ia_tambem_guarda_de_qual_conta_falava():
     o número da resposta voltava pra IA sem contexto, reabrindo a issue #132
     pelo lado do Pro. Agora ela arma a mesma pendência do handler.
     """
-    import uuid
     import db
     from core.services.ai_chat.tools.bills import _pay_bill_execute
 
-    uid = int(uuid.uuid4().int % 1_000_000_000)
+    uid = usuario_pagante()
     conta = _monta_conta_variavel(uid)
 
     resposta = _pay_bill_execute(uid, {"name": "luz"})
@@ -852,11 +848,10 @@ def test_numero_gigante_pela_conversa_nao_fecha_a_conta(ia_espia):
     ANTES de reivindicar a pendência: conta pendente, saldo intacto, pergunta
     de pé e nenhum "erro interno" com stack trace no log.
     """
-    import uuid
     import db
     import db.bills as B
 
-    uid = int(uuid.uuid4().int % 1_000_000_000)
+    uid = usuario_pagante()
     _monta_conta_variavel(uid)
     _diga(uid, "paguei a luz")
 
@@ -885,12 +880,11 @@ def test_sim_da_oferta_de_gasto_fixo_sobrevive_a_pergunta_de_conta(ia_espia):
     O texto degradado pede para terminar a oferta primeiro — e o final do teste
     mostra por quê: é DEPOIS do "sim" (linha livre) que a forma completa paga.
     """
-    import uuid
     import db
     import db.bills as B
     import db.recurring as R
 
-    uid = int(uuid.uuid4().int % 1_000_000_000)
+    uid = usuario_pagante()
     _monta_conta_variavel(uid)
     db.set_pending_action(uid, "confirm_recurring_offer", {
         "name": "Spotify", "amount": 21.9, "category": "assinaturas",
@@ -1012,10 +1006,9 @@ def test_controle_a_espia_da_ia_dispara_de_verdade(ia_espia):
     é justamente a que TEM que cair na IA: usuário sem pendência nenhuma,
     pergunta fora do escopo financeiro.
     """
-    import uuid
     import db
 
-    uid = int(uuid.uuid4().int % 1_000_000_000)
+    uid = usuario_pagante()
     db.ensure_user(uid)
 
     resposta = _diga(uid, "qual a capital da mongolia")
@@ -1115,10 +1108,9 @@ def test_centavo_invisivel_direto_no_mark_bill_paid_nao_reserva():
 def test_valor_gigante_finito_pela_conversa_paga_como_na_main(ia_espia):
     """C3: o teto de R$ 1 bi transformava isto em "erro interno" e a conta
     ficava pendente. Na `main` paga; tem que continuar pagando."""
-    import uuid
     import db.bills as B
 
-    uid = int(uuid.uuid4().int % 1_000_000_000)
+    uid = usuario_pagante()
     _monta_conta_variavel(uid)
 
     r = _diga(uid, "paguei luz 2000000000")
@@ -1181,10 +1173,9 @@ def test_botao_ja_paguei_nao_destroi_pergunta_viva(monkeypatch):
     seja terminada primeiro — a forma completa não funciona nesse estado
     (achado do Codex; ver `pergunta_de_valor_sem_contexto`).
     """
-    import uuid
     import db
 
-    uid = int(uuid.uuid4().int % 1_000_000_000)
+    uid = usuario_pagante()
     conta = _monta_conta_variavel(uid)
     db.set_pending_action(uid, "clarification", {"valor": 77.9})
 
@@ -1200,10 +1191,9 @@ def test_botao_ja_paguei_nao_destroi_pergunta_viva(monkeypatch):
 
 def test_controle_botao_ja_paguei_em_linha_livre_guarda_a_pergunta(monkeypatch):
     """Controle negativo: sem pergunta viva, o botão continua guardando."""
-    import uuid
     import db
 
-    uid = int(uuid.uuid4().int % 1_000_000_000)
+    uid = usuario_pagante()
     conta = _monta_conta_variavel(uid)
 
     respostas = _toca_ja_paguei(monkeypatch, uid, int(conta["id"]))
@@ -1217,10 +1207,9 @@ def test_controle_botao_ja_paguei_em_linha_livre_guarda_a_pergunta(monkeypatch):
 def test_botao_ja_paguei_desaloja_oferta_de_conveniencia(monkeypatch):
     """A sequência comum: lançou algo (deixa a oferta de recategorizar) e toca
     o botão do lembrete. Oferta cede para pergunta."""
-    import uuid
     import db
 
-    uid = int(uuid.uuid4().int % 1_000_000_000)
+    uid = usuario_pagante()
     conta = _monta_conta_variavel(uid)
     db.set_pending_action(uid, "recategorize_launch_offer", {"launch_id": 9})
 
@@ -1236,10 +1225,9 @@ def test_segundo_botao_ja_paguei_substitui_a_propria_pergunta(monkeypatch):
     esta regra, o `claim` recusaria e a Água só seria pagável por texto até a
     pendência da Luz expirar (30 min).
     """
-    import uuid
     import db
 
-    uid = int(uuid.uuid4().int % 1_000_000_000)
+    uid = usuario_pagante()
     luz = _monta_conta_variavel(uid, "Luz")
     _monta_conta_variavel(uid, "Agua")
     agua = [b for b in db.bills.list_bills(uid, include_paid=False) if b["name"] == "Agua"][0]
@@ -1254,11 +1242,10 @@ def test_segundo_botao_ja_paguei_substitui_a_propria_pergunta(monkeypatch):
 
 def test_centavo_invisivel_pelo_botao_do_whatsapp_nao_paga(monkeypatch):
     """Quarto caminho do C1: o valor digitado depois do botão."""
-    import uuid
     import db
     import db.bills as B
 
-    uid = int(uuid.uuid4().int % 1_000_000_000)
+    uid = usuario_pagante()
     conta = _monta_conta_variavel(uid)
     _toca_ja_paguei(monkeypatch, uid, int(conta["id"]))
 
@@ -1276,10 +1263,9 @@ def test_centavo_invisivel_pelo_botao_do_whatsapp_nao_paga(monkeypatch):
 
 
 def test_controle_valor_normal_pelo_botao_do_whatsapp_paga(monkeypatch):
-    import uuid
     import db.bills as B
 
-    uid = int(uuid.uuid4().int % 1_000_000_000)
+    uid = usuario_pagante()
     conta = _monta_conta_variavel(uid)
     _toca_ja_paguei(monkeypatch, uid, int(conta["id"]))
 
@@ -1303,10 +1289,9 @@ def test_botao_de_uma_conta_substitui_a_pergunta_de_texto_de_outra(monkeypatch):
     pergunta da Luz continuava armada e comia o número: pagava a LUZ, a conta
     errada, com a Água ainda pendente.
     """
-    import uuid
     import db.bills as B
 
-    uid = int(uuid.uuid4().int % 1_000_000_000)
+    uid = usuario_pagante()
     _monta_conta_variavel(uid, "Luz")
     _monta_conta_variavel(uid, "Agua")
     agua = [b for b in B.list_bills(uid, include_paid=False) if b["name"] == "Agua"][0]
@@ -1325,10 +1310,9 @@ def test_botao_de_uma_conta_substitui_a_pergunta_de_texto_de_outra(monkeypatch):
 def test_pergunta_de_texto_depois_do_botao_nao_muda_a_conta(monkeypatch):
     """A ordem inversa: o consumidor do botão intercepta o "paguei a luz"
     (não é número → re-pergunta) e a Água continua sendo a conta em jogo."""
-    import uuid
     import db.bills as B
 
-    uid = int(uuid.uuid4().int % 1_000_000_000)
+    uid = usuario_pagante()
     _monta_conta_variavel(uid, "Luz")
     _monta_conta_variavel(uid, "Agua")
     agua = [b for b in B.list_bills(uid, include_paid=False) if b["name"] == "Agua"][0]
@@ -1356,10 +1340,9 @@ def test_ponto_final_na_resposta_de_texto_nao_paga_cem_vezes(monkeypatch, respos
     """"132,50." tem vírgula E ponto: o `parse_money` lia a vírgula como milhar
     e devolvia 13250.0. Quem limpa é o `limpa_pontuacao_final`, no
     `limpa_pontuacao_final` — quem escreve "132,50." está respondendo."""
-    import uuid
     import db.bills as B
 
-    uid = int(uuid.uuid4().int % 1_000_000_000)
+    uid = usuario_pagante()
     _monta_conta_variavel(uid)
     _manda_texto_no_wa(monkeypatch, uid, "paguei a luz")
 
@@ -1375,10 +1358,9 @@ def test_ponto_final_na_resposta_de_texto_nao_paga_cem_vezes(monkeypatch, respos
 ])
 def test_ponto_final_na_resposta_do_botao_nao_paga_cem_vezes(monkeypatch, resposta, esperado):
     """Mesma pergunta, outra porta: o consumidor do botão tinha o mesmo furo."""
-    import uuid
     import db.bills as B
 
-    uid = int(uuid.uuid4().int % 1_000_000_000)
+    uid = usuario_pagante()
     conta = _monta_conta_variavel(uid)
     _toca_ja_paguei(monkeypatch, uid, int(conta["id"]))
 
@@ -1402,11 +1384,10 @@ _LEGITIMOS = [("1.200", 1200.0), ("132.50", 132.5), ("132,50", 132.5),
 
 @pytest.mark.parametrize("resposta", _MALFORMADOS)
 def test_milhar_malformado_pelo_texto_nao_paga(monkeypatch, resposta):
-    import uuid
     import db
     import db.bills as B
 
-    uid = int(uuid.uuid4().int % 1_000_000_000)
+    uid = usuario_pagante()
     _monta_conta_variavel(uid)
     _manda_texto_no_wa(monkeypatch, uid, "paguei a luz")
 
@@ -1421,10 +1402,9 @@ def test_milhar_malformado_pelo_texto_nao_paga(monkeypatch, resposta):
 
 @pytest.mark.parametrize("resposta,esperado", _LEGITIMOS)
 def test_controle_milhar_legitimo_pelo_texto_paga(monkeypatch, resposta, esperado):
-    import uuid
     import db.bills as B
 
-    uid = int(uuid.uuid4().int % 1_000_000_000)
+    uid = usuario_pagante()
     _monta_conta_variavel(uid)
     _manda_texto_no_wa(monkeypatch, uid, "paguei a luz")
 
@@ -1437,11 +1417,10 @@ def test_controle_milhar_legitimo_pelo_texto_paga(monkeypatch, resposta, esperad
 @pytest.mark.parametrize("resposta", _MALFORMADOS)
 def test_milhar_malformado_pelo_botao_nao_paga(monkeypatch, resposta):
     """Mesma pergunta, outra porta: o consumidor do botão tinha o mesmo furo."""
-    import uuid
     import db
     import db.bills as B
 
-    uid = int(uuid.uuid4().int % 1_000_000_000)
+    uid = usuario_pagante()
     conta = _monta_conta_variavel(uid)
     _toca_ja_paguei(monkeypatch, uid, int(conta["id"]))
 
@@ -1456,10 +1435,9 @@ def test_milhar_malformado_pelo_botao_nao_paga(monkeypatch, resposta):
 
 @pytest.mark.parametrize("resposta,esperado", _LEGITIMOS)
 def test_controle_milhar_legitimo_pelo_botao_paga(monkeypatch, resposta, esperado):
-    import uuid
     import db.bills as B
 
-    uid = int(uuid.uuid4().int % 1_000_000_000)
+    uid = usuario_pagante()
     conta = _monta_conta_variavel(uid)
     _toca_ja_paguei(monkeypatch, uid, int(conta["id"]))
 
@@ -1517,12 +1495,11 @@ def test_claim_perdido_nao_anuncia_comando_que_paga_o_lancamento_errado(ia_espia
     primeira metade prende segue sendo necessário — e é por isso que ele NÃO
     voltou a sugerir a forma completa.
     """
-    import uuid
     import db
     import db.bills as B
     from core.handlers.bills import pergunta_de_valor_sem_contexto
 
-    uid = int(uuid.uuid4().int % 1_000_000_000)
+    uid = usuario_pagante()
     _monta_conta_variavel(uid)
     db.set_pending_action(uid, "clarification", {
         "intent": "launches.add",
@@ -1558,11 +1535,10 @@ def test_valor_invalido_continua_sugerindo_a_forma_completa(ia_espia):
     chegar nele já prova que nenhuma pendência engoliu a mensagem. Medido
     abaixo: a mesma frase sugerida paga a conta no turno seguinte.
     """
-    import uuid
     import db
     import db.bills as B
 
-    uid = int(uuid.uuid4().int % 1_000_000_000)
+    uid = usuario_pagante()
     _monta_conta_variavel(uid)
     assert db.get_pending_action(uid) is None
 
@@ -1583,10 +1559,9 @@ def test_botao_ja_paguei_com_pergunta_viva_tambem_nao_anuncia_o_comando(monkeypa
     Aqui o claim perde SEM corrida: o botão não passa por `route()`, então a
     `clarification` continua de pé quando o clique chega.
     """
-    import uuid
     import db
 
-    uid = int(uuid.uuid4().int % 1_000_000_000)
+    uid = usuario_pagante()
     conta = _monta_conta_variavel(uid)
     db.set_pending_action(uid, "clarification", {
         "intent": "launches.add",
@@ -1615,11 +1590,10 @@ def test_botao_ja_paguei_com_pergunta_viva_tambem_nao_anuncia_o_comando(monkeypa
 
 def test_botao_devolve_pergunta_quando_o_pagamento_estoura(monkeypatch):
     """Negativo: sem o `with` em wa_runtime.py, a pendência some e isto fica vermelho."""
-    import uuid
     import db
     import db.bills as B
 
-    uid = int(uuid.uuid4().int % 1_000_000_000)
+    uid = usuario_pagante()
     conta = _monta_conta_variavel(uid)
     _toca_ja_paguei(monkeypatch, uid, int(conta["id"]))
     payload = (db.get_pending_action(uid) or {}).get("payload")
@@ -1641,11 +1615,10 @@ def test_botao_devolve_pergunta_quando_o_pagamento_estoura(monkeypatch):
 
 def test_botao_devolucao_nao_atropela_pergunta_mais_nova(monkeypatch):
     """Corrida: a devolução é condicional, não upsert."""
-    import uuid
     import db
     import db.bills as B
 
-    uid = int(uuid.uuid4().int % 1_000_000_000)
+    uid = usuario_pagante()
     conta = _monta_conta_variavel(uid)
     _toca_ja_paguei(monkeypatch, uid, int(conta["id"]))
 
@@ -1745,10 +1718,9 @@ def test_commit_ambiguo_do_pagamento_nao_rearma_a_pergunta(monkeypatch):
 
 def test_porta_das_contas_continua_pagando_depois_da_extracao(ia_espia):
     """T7 — controle positivo da porta 1: a extração não mudou nada aqui."""
-    import uuid
     import db.bills as B
 
-    uid = int(uuid.uuid4().int % 1_000_000_000)
+    uid = usuario_pagante()
     _monta_conta_variavel(uid)
 
     pergunta = _diga(uid, "paguei a luz")
@@ -1763,11 +1735,10 @@ def test_porta_das_contas_continua_pagando_depois_da_extracao(ia_espia):
 
 def test_negativo_pelo_botao_nao_paga(monkeypatch):
     """T8 — porta 4: `parse_money("-10") == 10.0` pagava R$ 10,00."""
-    import uuid
     import db
     import db.bills as B
 
-    uid = int(uuid.uuid4().int % 1_000_000_000)
+    uid = usuario_pagante()
     conta = _monta_conta_variavel(uid)
     _toca_ja_paguei(monkeypatch, uid, int(conta["id"]))
 
@@ -1902,10 +1873,9 @@ def test_vinte_e_tres_formas_medidas_da_main_nao_sao_recusadas(entrada, esperado
 ])
 def test_botao_ja_paguei_aceita_o_valor_dentro_da_frase(monkeypatch, resposta, esperado):
     """Controle POSITIVO da porta 4: recusar entrada válida é pior que o bug."""
-    import uuid
     import db.bills as B
 
-    uid = int(uuid.uuid4().int % 1_000_000_000)
+    uid = usuario_pagante()
     conta = _monta_conta_variavel(uid)
     _toca_ja_paguei(monkeypatch, uid, int(conta["id"]))
 
@@ -1933,11 +1903,10 @@ def test_botao_ja_paguei_aceita_o_valor_dentro_da_frase(monkeypatch, resposta, e
 ])
 def test_botao_ja_paguei_recusa_o_perigoso_com_pergunta_viva(monkeypatch, resposta, fragmento):
     """Controle NEGATIVO: afrouxar a FORMA não pode afrouxar o DANO."""
-    import uuid
     import db
     import db.bills as B
 
-    uid = int(uuid.uuid4().int % 1_000_000_000)
+    uid = usuario_pagante()
     conta = _monta_conta_variavel(uid)
     _toca_ja_paguei(monkeypatch, uid, int(conta["id"]))
 
@@ -1958,11 +1927,10 @@ def test_escotilha_da_clarification_nao_apaga_pergunta_de_outra_tarefa(monkeypat
     no lugar uma pergunta nova — que já apareceu na tela. A corrida é injetada
     no próprio predicado.
     """
-    import uuid
     import db
     import core.intent_router as IR
 
-    uid = int(uuid.uuid4().int % 1_000_000_000)
+    uid = usuario_pagante()
     db.ensure_user(uid)
 
     assert "Quanto foi" in _diga(uid, "paguei a luz")
@@ -2129,10 +2097,9 @@ def test_porta_da_conta_continua_pagando_pelo_handle_incoming(resposta, esperado
       abaixo prende isso. Nas portas 2/3/4, onde a `main` ACEITA os três, o
       filtro de dano deixa passar (é o conserto C2).
     """
-    import uuid
     import db.bills as B
 
-    uid = int(uuid.uuid4().int % 1_000_000_000)
+    uid = usuario_pagante()
     _monta_conta_variavel(uid)
     assert "só o valor" in _diga(uid, "paguei a luz")
 
@@ -2151,11 +2118,10 @@ def test_porta_da_conta_repergunta_no_milhar_com_espaco_como_na_main(resposta):
     Nas portas 2/3/4 os mesmos três passam — ver
     `test_botao_ja_paguei_aceita_o_valor_dentro_da_frase`.
     """
-    import uuid
     import db
     import db.bills as B
 
-    uid = int(uuid.uuid4().int % 1_000_000_000)
+    uid = usuario_pagante()
     _monta_conta_variavel(uid)
     assert "só o valor" in _diga(uid, "paguei a luz")
 
@@ -2181,11 +2147,10 @@ def test_porta_1_portao_de_forma_da_main_abandona_comando(comando):
     (`tests/test_full_handler_smoke.py`), onde ele é a única coisa que separa
     "apagar 42" de um lançamento.
     """
-    import uuid
     import db
     import db.bills as B
 
-    uid = int(uuid.uuid4().int % 1_000_000_000)
+    uid = usuario_pagante()
     _monta_conta_variavel(uid)
     assert "só o valor" in _diga(uid, "paguei a luz")
 
@@ -2206,11 +2171,10 @@ def test_botao_ja_paguei_abandona_comando(monkeypatch, comando):
     Aqui a `main` NUNCA abandonava: qualquer texto sem valor re-perguntava para
     sempre, e "apagar 42" pagava a conta com R$ 42,00.
     """
-    import uuid
     import db
     import db.bills as B
 
-    uid = int(uuid.uuid4().int % 1_000_000_000)
+    uid = usuario_pagante()
     conta = _monta_conta_variavel(uid)
     _toca_ja_paguei(monkeypatch, uid, int(conta["id"]))
 
@@ -2253,13 +2217,12 @@ def test_controle_negativo_conjunto_vazio_deixa_o_comando_pagar(monkeypatch):
 
     Injetado no caso verde `test_botao_ja_paguei_abandona_comando[apagar 42]`.
     """
-    import uuid
     import core.intent_router as IR
     import db.bills as B
 
     monkeypatch.setattr(IR, "ABANDONA", set())
 
-    uid = int(uuid.uuid4().int % 1_000_000_000)
+    uid = usuario_pagante()
     conta = _monta_conta_variavel(uid)
     _toca_ja_paguei(monkeypatch, uid, int(conta["id"]))
 
@@ -2276,12 +2239,11 @@ def test_controle_negativo_credit_handle_no_conjunto_sequestra_o_cartao(monkeypa
     Injetado no caso verde `test_botao_ja_paguei_aceita_o_valor_dentro_da_frase`
     — só que com "132 no cartao", que é `credit.handle` 0.95.
     """
-    import uuid
     import core.intent_router as IR
     import db
     import db.bills as B
 
-    uid = int(uuid.uuid4().int % 1_000_000_000)
+    uid = usuario_pagante()
     conta = _monta_conta_variavel(uid)
     _toca_ja_paguei(monkeypatch, uid, int(conta["id"]))
     # Verde primeiro: com o conjunto de verdade, a resposta paga.
@@ -2290,7 +2252,7 @@ def test_controle_negativo_credit_handle_no_conjunto_sequestra_o_cartao(monkeypa
 
     monkeypatch.setattr(IR, "ABANDONA", IR.ABANDONA | {"credit.handle"})
 
-    uid2 = int(uuid.uuid4().int % 1_000_000_000)
+    uid2 = usuario_pagante()
     conta2 = _monta_conta_variavel(uid2)
     _toca_ja_paguei(monkeypatch, uid2, int(conta2["id"]))
     _manda_texto_no_wa(monkeypatch, uid2, "132 no cartao")
@@ -2306,13 +2268,12 @@ def test_controle_negativo_sem_normalizar_o_traco_o_menos_unicode_paga(monkeypat
     Injetado no caso verde
     `test_botao_ja_paguei_recusa_o_perigoso_com_pergunta_viva[−10]`.
     """
-    import uuid
     import utils_text as U
     import db.bills as B
 
     monkeypatch.setattr(U, "_TRACOS", {})   # str.translate aceita dict vazio
 
-    uid = int(uuid.uuid4().int % 1_000_000_000)
+    uid = usuario_pagante()
     conta = _monta_conta_variavel(uid)
     _toca_ja_paguei(monkeypatch, uid, int(conta["id"]))
 
@@ -2328,13 +2289,12 @@ def test_controle_negativo_espaco_ambiguo_sem_a_regra_dos_3_digitos(monkeypatch)
 
     Injetado em `test_botao_ja_paguei_aceita_o_valor_dentro_da_frase[1 500]`.
     """
-    import uuid
     import utils_text as U
     import db.bills as B
 
     monkeypatch.setattr(U, "_espaco_ambiguo", lambda bloco: " " in bloco.strip())
 
-    uid = int(uuid.uuid4().int % 1_000_000_000)
+    uid = usuario_pagante()
     conta = _monta_conta_variavel(uid)
     _toca_ja_paguei(monkeypatch, uid, int(conta["id"]))
 
@@ -2350,12 +2310,11 @@ def test_passo_1_da_porta_4_nao_apaga_pergunta_de_outra_tarefa(monkeypatch):
     Aqui o `pending_recat` foi lido linhas acima, no `process_message`; entre
     aquela leitura e o abandono cabe a pergunta de outra tarefa.
     """
-    import uuid
     import adapters.whatsapp.wa_runtime as wr
     import db
     import db.bills as B
 
-    uid = int(uuid.uuid4().int % 1_000_000_000)
+    uid = usuario_pagante()
     conta = _monta_conta_variavel(uid)
     _toca_ja_paguei(monkeypatch, uid, int(conta["id"]))
 
@@ -2400,10 +2359,9 @@ PONTO_FINAL_SEM_VIRGULA = [("132.", 132.0), ("1.500.", 1500.0),
 @pytest.mark.parametrize("resposta,esperado", PONTO_FINAL_SEM_VIRGULA)
 def test_porta_1_ponto_final_sem_virgula_paga_como_na_main(resposta, esperado):
     """Porta 1. Medido na `main`: os quatro pagam. No branch, recusavam."""
-    import uuid
     import db.bills as B
 
-    uid = int(uuid.uuid4().int % 1_000_000_000)
+    uid = usuario_pagante()
     _monta_conta_variavel(uid)
     assert "só o valor" in _diga(uid, "paguei a luz")
 
@@ -2416,10 +2374,9 @@ def test_porta_1_ponto_final_sem_virgula_paga_como_na_main(resposta, esperado):
 @pytest.mark.parametrize("resposta,esperado", PONTO_FINAL_SEM_VIRGULA)
 def test_porta_4_ponto_final_sem_virgula_paga_como_na_main(monkeypatch, resposta, esperado):
     """Porta 4, o botão — mesmo furo, mesma cura."""
-    import uuid
     import db.bills as B
 
-    uid = int(uuid.uuid4().int % 1_000_000_000)
+    uid = usuario_pagante()
     conta = _monta_conta_variavel(uid)
     _toca_ja_paguei(monkeypatch, uid, int(conta["id"]))
 
@@ -2433,10 +2390,9 @@ def test_porta_4_ponto_final_sem_virgula_paga_como_na_main(monkeypatch, resposta
 def test_porta_2_ponto_final_sem_virgula_registra(resposta, esperado):
     """Porta 2, a única que já limpava antes — aqui só para as quatro
     concordarem no MESMO texto, que é o ponto do PR."""
-    import uuid
     import db
 
-    uid = int(uuid.uuid4().int % 1_000_000_000)
+    uid = usuario_pagante()
     db.ensure_user(uid)
     assert "Quanto foi" in _diga(uid, "paguei a luz")
 
@@ -2463,7 +2419,6 @@ def test_controle_negativo_sem_limpar_a_pontuacao_a_porta_1_recusa(
     `valor_perigoso` faz por dentro, no `utils_text` (a FORMA — sem ela "132."
     vira milhar malformado). Desligar só um deixa o outro cobrindo o furo.
     """
-    import uuid
     import db
     import db.bills as B
     import utils_text
@@ -2472,7 +2427,7 @@ def test_controle_negativo_sem_limpar_a_pontuacao_a_porta_1_recusa(
     monkeypatch.setattr(BH, "limpa_pontuacao_final", lambda s: s or "")
     monkeypatch.setattr(utils_text, "limpa_pontuacao_final", lambda s: s or "")
 
-    uid = int(uuid.uuid4().int % 1_000_000_000)
+    uid = usuario_pagante()
     _monta_conta_variavel(uid)
     assert "só o valor" in _diga(uid, "paguei a luz")
 
@@ -2487,13 +2442,12 @@ def test_controle_negativo_sem_limpar_a_pontuacao_a_porta_4_recusa(monkeypatch):
     """Mesmo controle na porta 4 — o `import` dela é local, então o alvo do
     monkeypatch é o `utils_text` (que a porta 1 NÃO enxerga: ela importa no
     topo do módulo)."""
-    import uuid
     import utils_text
     import db.bills as B
 
     monkeypatch.setattr(utils_text, "limpa_pontuacao_final", lambda s: s or "")
 
-    uid = int(uuid.uuid4().int % 1_000_000_000)
+    uid = usuario_pagante()
     conta = _monta_conta_variavel(uid)
     _toca_ja_paguei(monkeypatch, uid, int(conta["id"]))
 
@@ -2542,11 +2496,10 @@ def test_porta_1_portao_de_forma_vem_antes_do_dano(comando):
     este PR conserta é a ORDEM, e é o controle negativo logo abaixo que a mede
     — não este teste sozinho.
     """
-    import uuid
     import db
     import db.bills as B
 
-    uid = int(uuid.uuid4().int % 1_000_000_000)
+    uid = usuario_pagante()
     _monta_conta_variavel(uid)
     assert "só o valor" in _diga(uid, "paguei a luz")
 
@@ -2566,7 +2519,6 @@ def test_controle_negativo_dano_antes_do_abandono_prende_o_comando(monkeypatch, 
     acima precisa distinguir. Se este teste passar a ver abandono, a asserção
     de cima virou decoração.
     """
-    import uuid
     import db
     import core.handlers.bills as BH
 
@@ -2584,7 +2536,7 @@ def test_controle_negativo_dano_antes_do_abandono_prende_o_comando(monkeypatch, 
     import core.intent_router as IR
     monkeypatch.setattr(IR.h_bills, "resolve_bill_amount", ordem_antiga)
 
-    uid = int(uuid.uuid4().int % 1_000_000_000)
+    uid = usuario_pagante()
     _monta_conta_variavel(uid)
     assert "só o valor" in _diga(uid, "paguei a luz")
 
@@ -2609,11 +2561,10 @@ def test_porta_1_com_o_abandono_na_frente_o_perigoso_ainda_recusa(resposta, frag
     """A outra metade da inversão: `−10` (U+2212) classifica FORA do `ABANDONA`
     e não casa o `_VALOR_RE`, então sem a normalização de traço na FORMA ele
     voltaria a abandonar a pergunta em silêncio."""
-    import uuid
     import db
     import db.bills as B
 
-    uid = int(uuid.uuid4().int % 1_000_000_000)
+    uid = usuario_pagante()
     _monta_conta_variavel(uid)
     assert "só o valor" in _diga(uid, "paguei a luz")
 
@@ -2635,11 +2586,10 @@ def test_recusa_da_porta_2_nao_apaga_pergunta_de_outra_tarefa(monkeypatch, respo
     `clear_pending_action` do topo do `_resolve_clarification` e ANTES do
     re-armamento — exatamente a janela onde a pergunta de outra tarefa cabe.
     """
-    import uuid
     import db
     import core.intent_router as IR
 
-    uid = int(uuid.uuid4().int % 1_000_000_000)
+    uid = usuario_pagante()
     db.ensure_user(uid)
     assert "Quanto foi" in _diga(uid, "paguei a luz")
 
@@ -2677,10 +2627,9 @@ def test_recusa_da_porta_2_sem_corrida_mantem_a_pergunta_viva(resposta):
     topo já apagou a linha, então um `advance_pending_action` (CAS sobre
     `old_payload`) não acharia nada para atualizar e a pergunta morreria aqui.
     """
-    import uuid
     import db
 
-    uid = int(uuid.uuid4().int % 1_000_000_000)
+    uid = usuario_pagante()
     db.ensure_user(uid)
     assert "Quanto foi" in _diga(uid, "paguei a luz")
 
@@ -2693,7 +2642,6 @@ def test_recusa_da_porta_2_sem_corrida_mantem_a_pergunta_viva(resposta):
 
 def test_controle_negativo_upsert_incondicional_atropela_a_pergunta_nova(monkeypatch):
     """Controle: com o `set_pending_action` de volta, a pergunta nova some."""
-    import uuid
     import db
     import core.intent_router as IR
 
@@ -2702,7 +2650,7 @@ def test_controle_negativo_upsert_incondicional_atropela_a_pergunta_nova(monkeyp
         lambda uid_, tipo, payload, minutes=10: db.set_pending_action(
             uid_, tipo, payload, minutes) or True)
 
-    uid = int(uuid.uuid4().int % 1_000_000_000)
+    uid = usuario_pagante()
     db.ensure_user(uid)
     assert "Quanto foi" in _diga(uid, "paguei a luz")
 
@@ -2855,11 +2803,10 @@ def _pergunta_e_responde(porta: int, monkeypatch, texto: str):
     Devolve `(valores registrados, resposta)` — nas portas 1 e 4 o valor pago
     da conta (lista vazia = não pagou), nas portas 2 e 3 os lançamentos.
     """
-    import uuid
     import db
     import db.bills as B
 
-    uid = int(uuid.uuid4().int % 1_000_000_000)
+    uid = usuario_pagante()
     db.ensure_user(uid)
     if porta == 1:
         _monta_conta_variavel(uid)
@@ -3035,10 +2982,9 @@ def test_cas_perdido_na_porta_2_nao_toca_a_pergunta_nova(monkeypatch):
     Sem o conserto, o `get_pending_action` seguinte recarregava a substituta e a
     porta 3 apagava a fila que outra tarefa acabou de mostrar ao usuário.
     """
-    import uuid
     import db
 
-    uid = int(uuid.uuid4().int % 1_000_000_000)
+    uid = usuario_pagante()
     db.ensure_user(uid)
     assert "Quanto foi" in _diga(uid, "paguei a luz")
 
@@ -3051,10 +2997,9 @@ def test_cas_perdido_na_porta_2_nao_toca_a_pergunta_nova(monkeypatch):
 
 def test_controle_negativo_porta_2_ignorando_o_cas_a_fila_some(monkeypatch):
     """Controle negativo da porta 2, injetado no caso VERDE acima."""
-    import uuid
     import db
 
-    uid = int(uuid.uuid4().int % 1_000_000_000)
+    uid = usuario_pagante()
     db.ensure_user(uid)
     assert "Quanto foi" in _diga(uid, "paguei a luz")
 
@@ -3072,10 +3017,9 @@ def test_cas_perdido_na_porta_4_nao_toca_a_pergunta_nova(monkeypatch):
     apagava — a porta 4 roda ANTES do `handle_incoming`, então o `pending_recat`
     local não protege nada.
     """
-    import uuid
     import db.bills as B
 
-    uid = int(uuid.uuid4().int % 1_000_000_000)
+    uid = usuario_pagante()
     conta = _monta_conta_variavel(uid)
     _toca_ja_paguei(monkeypatch, uid, int(conta["id"]))
 
@@ -3089,10 +3033,9 @@ def test_cas_perdido_na_porta_4_nao_toca_a_pergunta_nova(monkeypatch):
 
 def test_controle_negativo_porta_4_ignorando_o_cas_a_fila_some(monkeypatch):
     """Controle negativo da porta 4, injetado no caso VERDE acima."""
-    import uuid
     import db
 
-    uid = int(uuid.uuid4().int % 1_000_000_000)
+    uid = usuario_pagante()
     conta = _monta_conta_variavel(uid)
     _toca_ja_paguei(monkeypatch, uid, int(conta["id"]))
 
@@ -3112,10 +3055,9 @@ def test_cas_perdido_na_porta_1_ja_nao_tocava_a_pergunta_nova(monkeypatch):
     de fora. O controle negativo desta porta é o CAS em si: trocá-lo por um
     `clear_pending_action` apaga a fila (é o `test_abandono_...` acima).
     """
-    import uuid
     import db
 
-    uid = int(uuid.uuid4().int % 1_000_000_000)
+    uid = usuario_pagante()
     _monta_conta_variavel(uid)
     assert "só o valor" in _diga(uid, "paguei a luz")
 
@@ -3138,10 +3080,9 @@ def test_cas_perdido_na_porta_3_ja_nao_tocava_a_pergunta_nova(monkeypatch):
     sozinho — escrita incondicional herdada (~48 no repositório, ver
     `db/pending.py`), fora das quatro portas e fora deste PR.
     """
-    import uuid
     import db
 
-    uid = int(uuid.uuid4().int % 1_000_000_000)
+    uid = usuario_pagante()
     db.ensure_user(uid)
     assert "Faltou o valor de *aluguel*" in _diga(
         uid, "gastei 30 no mercado e paguei o aluguel")
@@ -3172,10 +3113,9 @@ def test_281_guarda_de_entrega_prende_o_valor_que_o_reroteamento_mudaria():
     O furo é do `parse_money` sobre a pontuação de prosa e tem issue própria
     (ver `_cola_separador_decimal`); enquanto ele existir, a via EXPLÍCITO não
     pode entregar a mensagem ao roteamento normal."""
-    import uuid
     import db
 
-    uid = int(uuid.uuid4().int % 1_000_000_000)
+    uid = usuario_pagante()
     db.ensure_user(uid)
     assert "Quanto foi" in _diga(uid, "paguei a luz")
 
@@ -3227,9 +3167,8 @@ def test_281_veto_de_catalogo_alcanca_a_via_de_escrita(nome):
 
     Os quatro testes do #185 não viam porque `saldo` está no `ABANDONA`, que
     sempre passou pelo veto."""
-    import uuid
 
-    uid = int(uuid.uuid4().int % 1_000_000_000) + 1
+    uid = usuario_pagante()
     _pergunta_de_valor_do_saque(uid, pocket=nome, saldo=300, conta=700)
 
     assert "caixinha" in _diga(uid, "saquei 200").lower()
@@ -3262,11 +3201,10 @@ def test_281_valor_perigoso_vem_antes_do_abandono(resposta):
 
     O consertado é a CLASSE, não as strings: o filtro roda antes da decisão,
     então qualquer forma nova de resíduo cai nele igual."""
-    import uuid
 
     import db
 
-    uid = int(uuid.uuid4().int % 1_000_000_000) + 1
+    uid = usuario_pagante()
     _pergunta_de_valor_do_saque(uid)
     _diga(uid, "tirar da caixinha viagem")
     assert "Qual o valor" in _diga(uid, "viagem")
