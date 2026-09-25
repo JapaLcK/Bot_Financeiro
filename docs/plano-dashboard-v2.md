@@ -193,10 +193,22 @@ tecnologia, podendo refazer o que for preciso, com calma (Q5).
   - **só reais:** `open_finance_investments` guarda a moeda, e o código de análise já
     filtra BRL. A foto soma só BRL e guarda quantas posições em outra moeda ficaram fora; o
     gráfico diz isso, em vez de somar dólar como real. Conversão com câmbio datado fica para
-    quando alguém pedir.
+    quando alguém pedir. A caixinha espelhada não guarda moeda (`sync_open_finance_caixinhas`
+    e `bind_pocket_to_caixinha` não levam a moeda para ela), então a moeda da caixinha
+    ligada vem do investimento de origem: caixinha espelhando posição em dólar fica fora
+    como a posição;
+  - **uma leitura só:** a foto lê carteira, caixinhas e investimentos numa única transação
+    `REPEATABLE READ` (uma visão só do banco), para um aporte que confirma no meio não ser
+    contado duas vezes nem nenhuma;
+  - **"a conferir" não vira número certo:** com movimento de banco pendente
+    (`bank_movements.pending_count` > 0), o painel antigo já troca o patrimônio por "A
+    conferir" (`frontend/dashboard.js`), porque o dinheiro pode estar nos dois lados. A foto
+    desse dia é gravada marcada como incerta, e o gráfico a mostra assim — nunca como ponto
+    exato.
 
-  Testes: caixinha ligada a um CDB do Open Finance (conta uma vez só); posição em dólar
-  (fica fora e aparece o aviso).
+  Testes: caixinha ligada a um CDB do Open Finance (conta uma vez só); posição em dólar,
+  solta e ligada a uma caixinha (fica fora e aparece o aviso); foto no meio de um aporte
+  (conta uma vez); foto com transferência de banco pendente (marcada como incerta).
 - **Tabela nova por usuário entra no ciclo de privacidade.** As fotos do patrimônio e das
   posições são histórico financeiro do usuário, e `db/privacy.py` enumera as tabelas à mão.
   Toda tabela nova com dado de usuário entra, no mesmo PR que a cria, na exportação
