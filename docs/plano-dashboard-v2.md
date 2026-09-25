@@ -59,7 +59,8 @@ O que isso muda neste plano:
   crédito e a conta fixa como débito, sem olhar o Open Finance — que já traz a mesma
   transação do banco. Com a Q36 isso conta duas vezes — e, para quem não tem banco
   conectado, transforma uma previsão (salário que ainda não caiu, conta ainda não paga) em
-  dinheiro na carteira. Então a recorrente **só prevê, para todo mundo**: alimenta a
+  dinheiro na carteira. Então a recorrente **só prevê, para todo mundo** (decisão do dono,
+  Q42, 2026-09-25 — contra a alternativa de manter o lançamento para quem não tem banco): alimenta a
   Previsão e o aviso de vencimento, e o lançamento automático do carregador é desligado
   **antes** do job da foto (etapa 0), para todos os usuários — também no painel antigo,
   porque a foto é de todos. Quem quiser registrar que pagou em dinheiro lança na carteira.
