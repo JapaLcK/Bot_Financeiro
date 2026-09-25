@@ -108,8 +108,14 @@ tecnologia, podendo refazer o que for preciso, com calma (Q5).
   retirar de caixinha, aporte e resgate, fatura, contas fixas, metas, sincronização do Open
   Finance. Como as regras moram num lugar só (Q18), o aviso sai de dentro da regra, que
   declara os tipos que mudou; cada PR que migra uma regra traz o teste de que ela avisa os
-  tipos certos, e um teste varre a lista de tipos do contrato e falha se algum não tiver
-  escrita testada. O aviso não se guarda: se a
+  tipos certos. Mas durante a convivência o código antigo também escreve (o ajuste de saldo
+  em `adjust_balance_route`, no monólito, só invalida o cache do painel antigo), e testar
+  "cada tipo tem alguma escrita que avisa" passa com o caminho novo enquanto o antigo fica
+  mudo. Então na etapa 0 o aviso entra **nas funções que escrevem nas tabelas financeiras**
+  (a camada `db/`, por onde passam o painel antigo, o WhatsApp, o v2 e a sincronização), e
+  as escritas que hoje estão direto numa rota passam para essa camada. O teste enumera
+  **os caminhos de escrita, não os tipos**: varre o código atrás de `insert`, `update` e
+  `delete` nas tabelas financeiras e falha se algum estiver fora de uma função que avisa. O aviso não se guarda: se a
   conexão cair, o que mudou nesse meio-tempo se perde. Por isso, **a cada (re)conexão** o
   cliente invalida todas as consultas e a tela pede tudo de novo — cobre a queda, a volta do
   sono do computador e a janela entre a primeira carga e a conexão abrir. A sessão expira em
@@ -211,7 +217,13 @@ tecnologia, podendo refazer o que for preciso, com calma (Q5).
     última data, então um atraso que atravessa uma ou mais viradas de mês jogaria tudo no
     último mês. Por isso o job **para em cada virada**: chama o cálculo até o último dia de
     cada mês coberto (`accrue_investment_db` já aceita `today=`), tira a foto ali, e só
-    então segue para o próximo. Aporte com
+    então segue para o próximo. Isso vale para **todo** caminho que calcula juros e tira
+    foto, não só o job: o aporte e o resgate também chamam o cálculo direto
+    (`db/investments.py`, dentro de `investment_deposit_from_account` e
+    `investment_withdraw_to_account`). Por isso existe uma função só, "juros em dia com
+    foto", que faz o corte por virada, e o job e os movimentos a chamam; ninguém chama o
+    cálculo cru antes de uma foto. Teste: laço de juros parado por uma virada e o usuário
+    resgata antes de ele voltar — cada mês recebe o seu. Aporte com
     data no passado (`purchase_date`) só conta a partir da primeira foto, já com os juros em
     dia: rendimento de antes dela nunca entra.
 
