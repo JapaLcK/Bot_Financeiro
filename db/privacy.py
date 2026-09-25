@@ -810,6 +810,7 @@ def reset_user_data(
 def delete_user_data(
     user_id: int,
     remote_cleanup: "Callable[[], None] | None" = None,
+    swept_sink: "list[str] | None" = None,
 ) -> dict:
     """Exclusão definitiva: apaga a conta e tudo que pertence a ela.
 
@@ -1169,6 +1170,17 @@ def delete_user_data(
 
             conn.commit()
 
+        # O 2º passe remoto roda no CHAMADOR, depois do retorno — e tudo abaixo
+        # pode levantar: o `RuntimeError` de sobras levanta sozinho, sem injeção
+        # nenhuma, e uma queda de conexão em Postgres gerenciado faz o mesmo.
+        # Sem esta linha o conjunto ia embora junto com a exceção, e aí a conta e
+        # a conexão local JÁ foram apagadas, `_restore_account_deletion_schedule`
+        # não tem `auth_accounts` para restaurar, e o item da janela ficava órfão
+        # e pago na Pluggy para sempre (Codex, PR #539). O commit acima é o que
+        # torna a lista definitiva; daqui para baixo ela não muda mais.
+        if swept_sink is not None:
+            swept_sink.extend(pluggy_items_swept)
+
         # Verificação pós-commit: garante que outra conexão também enxerga a conta
         # como removida antes de o job considerar a exclusão concluída.
         with get_conn() as conn:
@@ -1295,19 +1307,28 @@ def process_due_account_deletions(limit: int = 50, stale_after_minutes: int = 12
             # de uma conta apagada (o disconnect e o reset seguem com a coluna).
             enumerados.extend(delete_pluggy_items_best_effort(user_id, log_user_id=False))
 
+        # `varridos` é preenchido DENTRO de `delete_user_data`, logo depois do
+        # commit local — antes da verificação pós-commit, que pode levantar. O
+        # retorno não serve sozinho: quando ela levanta, não há retorno nenhum e o
+        # 2º passe ficava sem alvo, deixando o item da janela órfão e pago
+        # (Codex, PR #539). Com o recipiente, o desfecho da exclusão local e o do
+        # passe remoto param de depender um do outro.
+        varridos: list[str] = []
+        falha_local: Exception | None = None
+        resultado: dict = {}
         try:
-            resultado = delete_user_data(user_id, remote_cleanup=_limpeza_remota)
+            resultado = delete_user_data(user_id, remote_cleanup=_limpeza_remota,
+                                         swept_sink=varridos)
         except Exception as exc:
-            _restore_account_deletion_schedule(user_id)
-            results.append({"user_id": user_id, "deleted": False, "error": str(exc)})
-            continue
+            falha_local = exc
 
         # 2º passe remoto: item salvo ENTRE a enumeração acima e o DELETE local
         # foi varrido do banco sem ser deletado na Pluggy — órfão pago, com os
         # dados bancários do titular, DEPOIS de uma exclusão LGPD. `tardios` é
         # normalmente vazio. Best-effort como o 1º passe: o helper já loga por
         # item; este `try` cobre a falha do helper inteiro.
-        tardios = sorted(set(resultado.pop("pluggy_items_swept", None) or []) - set(enumerados))
+        resultado.pop("pluggy_items_swept", None)
+        tardios = sorted(set(varridos) - set(enumerados))
         if tardios:
             try:
                 from frontend.routes.open_finance import delete_pluggy_items_best_effort
@@ -1324,6 +1345,14 @@ def process_due_account_deletions(limit: int = 50, stale_after_minutes: int = 12
                     source="db.privacy", user_id=None,
                     details={"items": tardios, "error": str(exc)[:200]},
                 )
+
+        # O desfecho local é reportado DEPOIS do 2º passe, e não no lugar dele:
+        # a exclusão que levanta reagenda e volta `deleted: False`, como antes.
+        if falha_local is not None:
+            _restore_account_deletion_schedule(user_id)
+            results.append({"user_id": user_id, "deleted": False,
+                            "error": str(falha_local)})
+            continue
 
         results.append(resultado)
     return results

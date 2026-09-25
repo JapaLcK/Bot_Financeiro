@@ -630,3 +630,98 @@ def test_t18f_sem_credencial_pluggy_o_rastro_do_item_sobrevive_sem_uid(monkeypat
             "uid de conta APAGADA em `details`: nenhuma purga alcança o JSON"
     finally:
         _limpa_item(item_novo)
+
+
+# ── T21 (a janela + falha pós-commit) ───────────────────────────────────────
+
+def test_t21_item_da_janela_sai_mesmo_com_falha_pos_commit(user_id, monkeypatch):
+    """T17 mais o desfecho do T14: o 2º passe TEM de acontecer mesmo quando a
+    verificação pós-commit levanta.
+
+    Apontamento do Codex (PR #539), reproduzido antes do conserto por dois
+    gatilhos — `OperationalError` na 2ª `get_conn()` (queda de conexão em
+    Postgres gerenciado, o mesmo do T14) e o `RuntimeError` de sobras do próprio
+    código, que levanta SEM injeção nenhuma. Nos dois, a lista capturada pelo
+    cinto ia embora junto com a exceção: a conta e a conexão local já estavam
+    apagadas, não havia `auth_accounts` para `_restore_account_deletion_schedule`
+    restaurar, e o item da janela ficava órfão e pago na Pluggy para sempre.
+
+    Este caso usa o gatilho curto (a 2ª `get_conn()`). O que se mede é o item
+    NOVO em `deletados` — o velho já sai no 1º passe e passaria de qualquer jeito.
+    """
+    import psycopg
+
+    _semeia(user_id)
+    item_velho = _item_de(user_id)
+    item_novo = f"{item_velho}-t21"
+    deletados = _mocka_pluggy(monkeypatch)
+
+    porta = threading.Event()
+    concluiu = threading.Event()
+    sessao2: dict = {}
+
+    def _sessao2():
+        if not porta.wait(30):
+            sessao2["erro"] = "porta nunca abriu"
+            concluiu.set()
+            return
+        try:
+            db.save_pluggy_open_finance_item(
+                user_id,
+                {"id": item_novo, "status": "UPDATED",
+                 "connector": {"id": 613, "name": "Inter"}},
+                criar_usuario=False,
+            )
+        except Exception as exc:  # noqa: BLE001 — é isso que o caso mede
+            sessao2["erro"] = f"{type(exc).__name__}: {exc}"
+        finally:
+            concluiu.set()
+
+    t = threading.Thread(target=_sessao2, name="sessao2-t21", daemon=True)
+    t.start()
+
+    real_table_exists = privacy._table_exists
+    acionada = {"ok": False}
+
+    def _hook(cur, table):
+        r = real_table_exists(cur, table)
+        if table == "credit_transactions" and not acionada["ok"]:
+            acionada["ok"] = True
+            porta.set()
+            sessao2["commitou_antes_do_delete_users"] = concluiu.wait(30)
+        return r
+
+    real_get_conn = privacy.get_conn
+    chamadas = {"n": 0}
+
+    def _get_conn_instavel(*a, **kw):
+        import sys as _sys
+        if _sys._getframe(1).f_code.co_name == "delete_user_data":
+            chamadas["n"] += 1
+            if chamadas["n"] == 2:  # a conexão da VERIFICAÇÃO PÓS-COMMIT
+                raise psycopg.OperationalError("server closed the connection unexpectedly")
+        return real_get_conn(*a, **kw)
+
+    monkeypatch.setattr(privacy, "_table_exists", _hook)
+    monkeypatch.setattr(privacy, "get_conn", _get_conn_instavel)
+    try:
+        resultados = db.process_due_account_deletions(limit=10)
+        t.join(10)
+
+        assert acionada["ok"], "a barreira não foi acionada — o caso não mediu nada"
+        assert chamadas["n"] == 2, \
+            f"o gatilho não alcançou a conexão pós-commit (chamadas={chamadas})"
+        assert sessao2.get("erro") is None, \
+            f"a sessão 2 tinha que ter commitado na janela: {sessao2}"
+        assert not _existe_usuario(user_id), \
+            "PREMISSA: o commit local passou e a conta está apagada"
+        assert resultados and resultados[0]["deleted"] is False, \
+            f"a falha pós-commit continua sendo reportada como erro: {resultados}"
+        assert item_novo in deletados, (
+            "ITEM ÓRFÃO NA PLUGGY: o item da janela entrou no `pluggy_items_swept`, "
+            "mas a falha pós-commit descartou o conjunto e o 2º passe não rodou"
+        )
+    finally:
+        monkeypatch.undo()
+        _limpa_item(item_novo)
+        _limpa_item(item_velho)
