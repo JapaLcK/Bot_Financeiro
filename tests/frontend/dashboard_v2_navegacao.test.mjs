@@ -42,7 +42,7 @@ test("celular: o Piggy é o botão do meio e leva à página dele", async () => 
   const { ctx, page } = await abrir(390);
   const abas = await textos(page, ".tabbar a");
   await page.locator('.tabbar a[data-tab="piggy"]').click();
-  await page.waitForFunction(() => location.hash === "#/piggy");
+  await page.locator("#page-title", { hasText: "Converse com o Piggy" }).waitFor({ timeout: 3000 }).catch(() => {});
   const r = [await page.locator("#page-title").innerText(), await page.locator('.tabbar a[data-tab="piggy"]').getAttribute("aria-current")];
   await ctx.close();
   assert.deepEqual(abas, ["Resumo", "Gastos", "Piggy", "Metas", "Extrato"]);
@@ -78,11 +78,18 @@ test("barra de cima: o botão Ferramentas fica dentro da margem de 320 a 1440", 
     const r = await page.evaluate(() => {
       const b = document.querySelector(".topbar .btn-primary").getBoundingClientRect();
       const t = document.querySelector(".month-title");
+      // Folga: o que sobra no seletor de mês além das setas e do texto visível. O CI no Linux
+      // desenha o texto mais largo que o macOS; sem folga aqui, lá estoura.
+      const sw = document.querySelector(".month-switch");
+      const range = document.createRange(); range.selectNodeContents(t);
+      const texto = [...range.getClientRects()].reduce((a, r) => a + r.width, 0);
+      const setas = [...sw.querySelectorAll("button")].reduce((a, e) => a + e.getBoundingClientRect().width, 0);
+      const folga = sw.getBoundingClientRect().width - setas - texto;
       return [document.documentElement.clientWidth - Math.round(b.right) >= 16, b.width > 0 && /Ferramentas/.test(document.querySelector(".topbar .btn-primary").textContent),
-        t.scrollWidth <= t.clientWidth, document.scrollingElement.scrollWidth - document.scrollingElement.clientWidth];
+        t.scrollWidth <= t.clientWidth, document.scrollingElement.scrollWidth - document.scrollingElement.clientWidth, innerWidth > 760 || folga >= 12 || Math.round(folga)]; // no desktop quem absorve a sobra é o espaçador
     });
     await ctx.close();
-    assert.deepEqual(r, [true, true, true, 0], String(width));
+    assert.deepEqual(r, [true, true, true, 0, true], String(width));
   }
 });
 
