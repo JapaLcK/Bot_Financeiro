@@ -104,6 +104,16 @@ async function tentativa<T>(
  *
  * Sem tentativa em voo, é inofensivo: só avança o contador (o que o próximo
  * login/verify já faria sozinho) e não há controlador para abortar.
+ *
+ * ponytail: limite conhecido, documentado e SEM cobertura. `ultimaTentativa` é
+ * um contador único para login, MFA e cadastro (`confirmarCadastro`), então um
+ * abandono aqui supera a entrada em voo de QUALQUER um dos três. Caso real: um
+ * verify de cadastro em voo em `/criar-conta`, `/entrar` empilhada por cima
+ * (hoje só por link `pigbank://` digitado de fora), login de outra conta que
+ * para no MFA e Voltar — o 200 atrasado do cadastro vira `EntradaSuperada`, a
+ * conta já existe no servidor e a sessão dela é descartada sem aviso
+ * (recuperação: Entrar com e-mail e senha). Enumere a máquina (fluxos × eventos
+ * que avançam o contador) antes de mexer aqui.
  */
 export function abandonarEntrada(): void {
   ultimaTentativa += 1;

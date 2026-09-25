@@ -163,7 +163,8 @@ describe("confirmar (V)", () => {
     await entrar("bia@x.com", "s3nha");
     portao.soltar();
 
-    await expect(cadastro).resolves.toBeNull();
+    // Superada volta ao código sem aviso (não é `null`: a tela ficaria presa em "verificando").
+    await expect(cadastro).resolves.toEqual({ fase: "codigo", email: "ana@x.com" });
     expect(autenticar).not.toHaveBeenCalled();
     await expect(lerCredenciais()).resolves.toEqual({ access: "access-bia", refresh: "rt_bia" });
   });

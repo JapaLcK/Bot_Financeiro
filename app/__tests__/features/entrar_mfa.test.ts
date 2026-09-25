@@ -16,7 +16,7 @@ import {
   type EstadoMfa,
 } from "@/features/auth/entrar";
 
-import { chamadas, gravador, prepararCaso, resposta, rotear, segurar, type Rota } from "./auth_apoio";
+import { chamadas, falharEscrita, gravador, prepararCaso, resposta, rotear, segurar, type Rota } from "./auth_apoio";
 
 const M: EstadoMfa = { fase: "mfa", desafio: "d-1", email: "m@x.com", modo: "totp" };
 
@@ -112,6 +112,21 @@ describe("verificar (M/V)", () => {
     await tocar(() => verificar(M.desafio, M.email, M.modo, "000000", jest.fn()), aplicar);
 
     expect(aplicados).toEqual([{ fase: "erro-cofre" }]);
+  });
+
+  // Com o cofre REAL: o desafio já foi consumido no servidor, e o erro cru da
+  // gravação caía no ramo genérico. Controle negativo (medido): sem o `try` da
+  // gravação inicial em `guardarCredenciaisSe`, fica vermelho.
+  it("cofre recusa gravar a credencial do 200: vira erro-cofre, sem autenticar", async () => {
+    rotear({ "/auth/mfa/verify-login": () => resposta(200, { user_id: 1, email: M.email, access_token: "a", refresh_token: "r", dashboard_token: "d", expires_in: 900 }) });
+    falharEscrita(true);
+    const { aplicados, aplicar } = gravador<EstadoEntrar>();
+    const autenticar = jest.fn();
+
+    await tocar(() => verificar(M.desafio, M.email, M.modo, "123456", autenticar), aplicar);
+
+    expect(aplicados).toEqual([{ fase: "erro-cofre" }]);
+    expect(autenticar).not.toHaveBeenCalled();
   });
 
   it("código colado com espaço no meio ('123 456') chega sem espaço ao servidor", async () => {

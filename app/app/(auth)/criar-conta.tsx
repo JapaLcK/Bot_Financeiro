@@ -1,4 +1,5 @@
-import { router } from "expo-router";
+import { router, Stack } from "expo-router";
+import { usePreventRemove } from "expo-router/react-navigation";
 import { useRef, useState } from "react";
 import { KeyboardAvoidingView, Linking, Platform, View } from "react-native";
 
@@ -53,6 +54,12 @@ export default function CriarConta() {
   const dados: DadosCadastro = { nome, email, telefone, senha };
   const ocupado = estado.fase === "enviando";
   const aviso = estado.fase === "formulario" ? estado.aviso : undefined;
+  // Com o verify em voo, sair da rota deixaria a confirmação terminar em
+  // segundo plano, sem ninguém para mostrar o resultado. `usePreventRemove`
+  // segura o Voltar do Android e qualquer `goBack`; o `gestureEnabled` impede
+  // o gesto de voltar do iOS de começar. Mesmo par de `prenderSheet.ts`.
+  const verificando = estado.fase === "verificando";
+  usePreventRemove(verificando, () => undefined);
 
   // Por que a senha fica ou sai em cada fase: `apagaSenhaNaFase` (criarConta.ts).
   const aplicar = (e: EstadoCriarConta) => {
@@ -104,6 +111,7 @@ export default function CriarConta() {
   return (
     <KeyboardAvoidingView behavior={Platform.OS === "ios" ? "padding" : undefined} style={{ flex: 1 }}>
       <Screen>
+        <Stack.Screen options={{ gestureEnabled: !verificando }} />
         <View style={{ gap: espaco.xl, paddingTop: espaco.xxl }}>
           <Texto variante="titulo">Criar conta</Texto>
 

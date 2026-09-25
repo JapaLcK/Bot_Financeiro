@@ -119,11 +119,17 @@ export async function reenviar(d: DadosCadastro): Promise<EstadoCriarConta> {
 }
 
 /**
- * V → resultado. `null` no sucesso (o `Stack.Protected` troca a rota assim
- * que `autenticar()` roda) e na `EntradaSuperada` (outra entrada mais nova
- * decidiu). 5xx, rede, tempo limite e contrato quebrado são ambíguos: se o
- * servidor criou a conta, a próxima tentativa diz "já utilizado" e a pessoa
- * entra pelo Entrar.
+ * V → resultado. `null` só no sucesso (o `Stack.Protected` troca a rota assim
+ * que `autenticar()` roda). Na `EntradaSuperada` volta ao código sem aviso:
+ * `null` ali deixava a tela presa em "verificando", e com a saída da rota
+ * bloqueada nessa fase, sem saída. Limite conhecido: a superação pode vir do
+ * Voltar do MFA de OUTRA conta (`abandonarEntrada()`, contador compartilhado —
+ * ver `services/auth.ts`); aí a conta já existe no servidor, a sessão é
+ * descartada sem aviso e retentar o código diz "já utilizado". Recuperação:
+ * Entrar com e-mail e senha.
+ * 5xx, rede, tempo limite e contrato quebrado são ambíguos: se o servidor
+ * criou a conta, a próxima tentativa diz "já utilizado" e a pessoa entra pelo
+ * Entrar.
  */
 export async function confirmar(
   email: string,
@@ -135,7 +141,7 @@ export async function confirmar(
     autenticar();
     return null;
   } catch (e) {
-    if (e instanceof EntradaSuperada) return null;
+    if (e instanceof EntradaSuperada) return { fase: "codigo", email };
     if (e instanceof FalhaNoCofre) return { fase: "erro-cofre" };
     const doServidor = e instanceof ErroDeApi && !(e instanceof ContratoInvalido) && e.status < 500;
     return { fase: "codigo", email, aviso: doServidor ? textoDaFalha(e) : GENERICO };

@@ -14,53 +14,8 @@ import { GENERICO } from "@/features/auth/entrar";
 import * as authService from "@/services/auth";
 import { FalhaNoCofre, guardarCredenciais, lerCredenciais } from "@/storage/secure";
 
-import { S, chamadas, credencialDe, fetchFalso, prepararCaso, resposta, rotear, segurar, type Rota } from "./auth_apoio";
-
-/** Drena microtarefas sem `setTimeout(0)`, que trava dentro de `act()` com `renderRouter`. */
-const respirar = async () => {
-  for (let i = 0; i < 20; i++) await Promise.resolve();
-};
-
-const ENVIADO = { status: "verification_sent", email: "ana@x.com" };
-const CORPO = { email: "ana@x.com", password: "s3nha-boa", name: "Ana", phone: "11999998888" };
-const registers = () => chamadas().filter((c) => c.caminho === "/auth/register");
-const verifies = () => chamadas().filter((c) => c.caminho === "/auth/verify-email");
-const botao = (nome: string) => screen.getByRole("button", { name: nome });
-// Regex: com erro o rótulo vira "<rótulo>, erro: <aviso>" (Input.tsx).
-const campo = (rotulo: string) => screen.getByLabelText(new RegExp(`^${rotulo}`));
-
-function rotas(extra: Record<string, Rota> = {}) {
-  rotear({
-    "/auth/register": () => resposta(200, ENVIADO),
-    "/auth/verify-email": (o) =>
-      (JSON.parse(String(o.body)) as { code: string }).code === "123456"
-        ? resposta(200, credencialDe("ana@x.com"))
-        : resposta(400, { detail: "Código inválido ou expirado." }),
-    ...extra,
-  });
-}
-
-async function abrir() {
-  renderRouter("./app", { initialUrl: "/criar-conta" });
-  await waitFor(() => expect(screen).toHavePathname("/criar-conta"));
-}
-
-function preencher(telefone = "(11) 99999-8888") {
-  fireEvent.changeText(campo("Nome"), " Ana ");
-  fireEvent.changeText(campo("E-mail"), "ana@x.com");
-  fireEvent.changeText(campo("WhatsApp"), telefone);
-  fireEvent.changeText(campo("Senha"), "s3nha-boa");
-}
-
-async function irAoCodigo() {
-  await abrir();
-  preencher();
-  await act(async () => {
-    fireEvent.press(botao("Criar conta"));
-    await respirar();
-  });
-  await waitFor(() => campo("Código de 6 dígitos"));
-}
+import { S, falharEscrita, fetchFalso, prepararCaso, resposta, rotear, segurar } from "./auth_apoio";
+import { CORPO, abrir, botao, campo, irAoCodigo, preencher, registers, respirar, rotas, verifies } from "./criar_conta_tela_apoio";
 
 beforeEach(() => {
   prepararCaso();
@@ -275,6 +230,25 @@ describe("(auth)/criar-conta — tela real", () => {
       await respirar();
     });
     await waitFor(() => expect(screen).toHavePathname("/entrar"));
+  });
+
+  // Sem dublê do serviço: o verify responde 200 (conta criada, código gasto) e
+  // o cofre REAL recusa gravar. Controle negativo (medido): sem o `try` da
+  // gravação inicial em `guardarCredenciaisSe`, a tela fica no código com o
+  // aviso genérico e este teste fica vermelho. O positivo é o T4.
+  it("T13b — cofre recusa gravar depois do verify 200: erro-cofre com 'Ir para Entrar'", async () => {
+    await irAoCodigo();
+    falharEscrita(true);
+
+    await act(async () => {
+      fireEvent.changeText(campo("Código de 6 dígitos"), "123456");
+      await respirar();
+    });
+    expect(verifies()).toHaveLength(1);
+    expect(screen.getByText(/Sua conta foi criada, mas não conseguimos abrir a sessão/)).toBeTruthy();
+    expect(screen.queryByLabelText(/^Código de 6 dígitos/)).toBeNull();
+    expect(botao("Ir para Entrar")).toBeTruthy();
+    await expect(lerCredenciais()).resolves.toBeNull();
   });
 
   // Controle negativo (medido): sem o `.catch` de `agir()` a tela fica presa
