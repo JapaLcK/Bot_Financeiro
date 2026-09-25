@@ -170,14 +170,17 @@ tecnologia, podendo refazer o que for preciso, com calma (Q5).
     dos intervalos (rentabilidade ponderada pelo tempo, a mesma régua do CDI). Como todo
     movimento cai entre duas fotos, a conta é exata.
 
-  A carteira é a média das posições ponderada pelo valor de cada uma no início do mês.
-  Posição sem rentabilidade informada (o banco não mandou a taxa, renda variável, cripto)
-  fica fora, e o bloco diz quais ficaram; posição que sumiu no mês sai da conta desse mês, e posição aberta no meio do mês entra a
-  partir do seguinte.
-  Como o patrimônio, nada de reconstruir o passado: enquanto o histórico enche, o bloco diz
-  que se completa com o tempo. Testes do PR do job: aporte e resgate nos manuais, rendendo
-  antes e depois do movimento (exato); dois movimentos no mesmo dia; resgate total; posição
-  do Open Finance sem taxa (fica fora e aparece na lista).
+  **O bloco compara cada investimento com o CDI, e não mostra número da carteira inteira**
+  (decisão do dono, 2026-09-25). No Open Finance o banco não diz quando o dinheiro entrou ou
+  saiu, então não existe rentabilidade exata da carteira somada; um número aproximado com
+  cara de exato é o que este plano proíbe. Investimento sem rentabilidade informada (o banco
+  não mandou a taxa, renda variável, cripto) aparece sem a comparação, com o motivo. Como o
+  patrimônio, nada de reconstruir o passado: enquanto o histórico enche, o bloco diz que se
+  completa com o tempo. Testes do PR do job: aporte e resgate nos manuais, rendendo antes e
+  depois do movimento (exato); dois movimentos no mesmo dia; resgate total; investimento do
+  Open Finance sem taxa (aparece sem comparação).
+  O widget do protótipo (`widgets/Yield.tsx`) mostra a carteira somada; ele passa a ser por
+  investimento quando for ligado à API, na etapa do Resumo.
 - **Reserva em meses:** reserva dividida pelas contas fixas. Hoje nada marca qual caixinha
   é a reserva: só há o palpite pelo nome em `core/services/piggy_agents.py` (`_is_reserva`).
   Por isso a caixinha de reserva passa a ser **designada pelo usuário** (um campo na
