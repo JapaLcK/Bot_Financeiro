@@ -206,9 +206,15 @@ tecnologia, podendo refazer o que for preciso, com calma (Q5).
     **A conta: CDI no mesmo dinheiro, nos mesmos dias.** Para cada lote, o rendimento é a
     variação do valor entre fotos, tirando o par antes→depois de um movimento (que é o
     próprio dinheiro entrando ou saindo). A comparação é uma **carteira-sombra**: o mesmo
-    capital de cada lote, em cada intervalo em que esteve aplicado, até a mesma data
-    efetiva, rendendo CDI. O bloco mostra, por investimento, quanto rendeu e quanto teria
-    rendido no CDI (em reais) e a razão entre os dois ("% do CDI"). Isso fecha de uma vez os
+    capital de cada lote, nos mesmos dias cujo rendimento o lote de fato recebeu (até a
+    data efetiva dele, não até a data do resgate), rendendo CDI. Resgate de lote de índice
+    com taxa atrasada é pago pelo que já foi calculado, e a taxa que sai depois nunca é
+    aplicada ao capital que saiu — é a regra atual do produto, e mudá-la é outra decisão;
+    a sombra não conta esses dias, então lote e CDI comparam os mesmos dias. O bloco mostra, por investimento, quanto rendeu e quanto teria
+    rendido no CDI (em reais) e a razão entre os dois ("% do CDI"). Quando a sombra rende
+    zero (lote aberto e resgatado no mesmo dia, ou período sem dia útil de CDI), a razão não
+    existe: a API devolve `pct_cdi: null` com o motivo `sem_periodo_cdi`, nunca erro,
+    infinito ou NaN, e o bloco mostra só os valores em reais. Isso fecha de uma vez os
     casos que uma média de percentuais erra: aporte e resgate no meio do período, lote aberto
     ou encerrado no meio do mês, investimento que fica zerado e depois recebe aporte (sem
     capital a sombra não rende), lotes com indexadores diferentes (cada um até a sua data
@@ -233,7 +239,9 @@ tecnologia, podendo refazer o que for preciso, com calma (Q5).
   ser por investimento quando for ligado à API, na etapa do Resumo.
 
   **Testes do PR do job** — manuais: aporte e resgate rendendo antes e depois; movimento sem
-  rendimento (dá 0); dois movimentos no mesmo dia; resgate total; resgate total e novo
+  rendimento (dá 0); dois movimentos no mesmo dia; lote aberto e resgatado no mesmo dia
+  (`pct_cdi: null`); resgate parcial e total de lote de IPCA antes de a taxa sair (a sombra
+  para na data efetiva); resgate total; resgate total e novo
   aporte semanas depois (a sombra não rende no buraco); lote aberto e encerrado no meio do
   mês; investimento com um lote de CDI e outro de IPCA; IPCA publicado depois da virada
   (cai no mês que cobre); virada de mês com o laço de juros atrasado; aporte com data no
