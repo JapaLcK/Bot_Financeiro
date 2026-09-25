@@ -281,11 +281,11 @@ AccountAlreadyExistsError = _db_support.AccountAlreadyExistsError
 def create_email_verification(
     email: str,
     password: str,
-    phone: str,
+    phone: str | None,
     minutes_valid: int = 15,
     display_name: str | None = None,
 ) -> str:
-    phone_e164 = normalize_phone_e164(phone)
+    phone_e164 = normalize_phone_e164(phone) if phone else None
     return _db_support.create_email_verification_impl(
         get_conn, _hash_password, email, password, phone_e164, minutes_valid,
         display_name=display_name,
