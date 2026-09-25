@@ -315,10 +315,10 @@ tecnologia, podendo refazer o que for preciso, com calma (Q5).
   fechou, então o mês de abertura e o de encerramento aparecem sem comparação, com o
   motivo; e sem mês de referência informado não há comparação com CDI em mês nenhum (regra
   acima). A comparação de **12 meses** (`lastTwelveMonthsRate`) segue a mesma régua: só
-  aparece quando a posição tem 12 meses completos observados no nosso histórico (ou quando
-  o banco informa o início e o fim do período, e aí o CDI é desse intervalo). Antes disso,
-  a taxa de 12 meses pode cobrir meses em que o usuário nem tinha a posição, e o bloco a
-  mostra sem comparação, com o motivo. Investimento sem rentabilidade informada (o banco não mandou a
+  aparece quando o banco informa o início e o fim exatos do período, e aí o CDI é desse
+  intervalo — e só se a posição existia no nosso histórico desde esse início. Sem as datas,
+  não se sabe onde o período termina (no dia da sincronização, no fim do mês anterior…),
+  e a taxa aparece sem comparação, com o motivo. Investimento sem rentabilidade informada (o banco não mandou a
   taxa, renda variável, cripto) aparece sem a comparação, com o motivo. Como o patrimônio,
   nada de reconstruir o passado: enquanto o histórico enche, o bloco diz que se completa com
   o tempo. O widget do protótipo (`widgets/Yield.tsx`) mostra a carteira somada; ele passa a
@@ -334,8 +334,8 @@ tecnologia, podendo refazer o que for preciso, com calma (Q5).
   recebe o seu); aporte com data no
   passado; investimento resgatado e depois apagado (continua no histórico). Open Finance:
   investimento sem taxa; mês de abertura e de encerramento (sem comparação); conector sem mês de referência
-  (nenhum mês comparado com CDI); posição com menos de 12 meses observados (sem comparação
-  de 12 meses); posição
+  (nenhum mês comparado com CDI); 12 meses sem as datas do período, ou com a posição mais
+  nova que o início (sem comparação de 12 meses); posição
   liquidada entre duas rodadas do job (a taxa da última sincronização fica no histórico).
 - **Reserva em meses:** reserva dividida pelo custo mensal das contas fixas ativas. O custo
   mensal converte cada frequência de `db/recurring.py` (`VALID_FREQUENCIES`): diária × 365/12,
