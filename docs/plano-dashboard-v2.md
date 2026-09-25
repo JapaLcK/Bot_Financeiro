@@ -37,10 +37,46 @@ plano marca aqui o que concluiu**, na seção "Andamento".
 - **Quando abrir para mais gente:** decisão do dono, sem critério automático (Q16).
 - **Tema:** só escuro no primeiro corte; o tema claro vem numa fase seguinte (Q9).
 
+### Fonte da verdade: Open Finance, e a carteira Piggy só para dinheiro físico (Q36)
+
+Decisão do dono em 2026-09-25, depois das 35 primeiras: no app novo e no v2, **o único
+lançamento manual é na carteira Piggy, e ela é só dinheiro físico** (espécie). Pix, contas,
+cartões, investimentos, aportes, resgates, saques e todo o resto vêm **só do Open
+Finance**, que passa a ser a fonte única da verdade para eles.
+
+O que isso muda neste plano:
+- **Investimento manual sai do v2.** Não se cria, não se aporta, não se resgata e não se
+  desfaz investimento à mão no v2. Com isso sai do plano toda a maquinaria de rendimento
+  dos investimentos manuais (lotes, fotos antes e depois do movimento, carteira-sombra,
+  regras do desfazer): o Rendimento × CDI passa a ser só do Open Finance (seção 2).
+- **Os defeitos de dinheiro achados na revisão deste plano ficam no código atual**, não no
+  v2: o resgate que pula juro de índice atrasado, o desfazer que não devolve o cursor, o
+  desfazer de resgate anterior que cria dinheiro e o desfazer sem a trava por usuário. Eles
+  seguem valendo para quem usa o painel antigo e o WhatsApp **até** o investimento manual
+  ser desligado lá — ver a pergunta Q39 abaixo.
+- **Lançar, no v2, é lançar na carteira.** "Lançamentos (ver, lançar, editar, apagar)" da
+  primeira versão vira: ver tudo; lançar, editar e apagar só o que é da carteira Piggy.
+  Transação do Open Finance não se cria nem se apaga à mão.
+
+A decidir com o dono (próxima rodada, antes da etapa 0):
+- **Q37 — o que já existe de manual.** Investimentos, aportes, caixinhas e lançamentos
+  manuais que os usuários já têm hoje: ficam só para leitura como "registro manual antigo"
+  (sugestão), são arquivados, ou o usuário é convidado a conectar o banco e zerar?
+- **Q38 — caixinhas e metas.** Caixinha com "depositar e retirar" à mão é movimento manual.
+  No v2 a meta vira um alvo sobre o saldo de uma caixinha do banco (espelhada pelo Open
+  Finance) ou sobre a carteira (sugestão), e a caixinha manual deixa de existir?
+- **Q39 — o código atual até o corte.** Consertar os defeitos de dinheiro do investimento
+  manual no painel antigo e no WhatsApp (o chip já aberto), ou **congelar** o investimento
+  manual lá agora — sem aporte, resgate e desfazer novos (sugestão: congelar, que é menor e
+  tira o risco de uma vez; os dois que criam dinheiro não podem esperar o corte)?
+- **Q40 — o WhatsApp.** "Gastei 50 no mercado" vira lançamento da carteira (espécie) ou
+  anotação/categoria para casar com a transação que o Open Finance trouxer? Sem essa regra,
+  um gasto no cartão lançado pelo WhatsApp conta duas vezes.
+
 ### O que a primeira versão precisa ter (Q3)
 
-Resumo, Lançamentos (ver, lançar, editar, apagar), Previsão, Metas e caixinhas (com
-depositar e retirar), Para onde vai, Patrimônio e o chat do Piggy com IA real e blocos (Q6).
+Resumo, Lançamentos (ver tudo; lançar, editar e apagar só na carteira — Q36), Previsão,
+Metas e caixinhas (o "depositar e retirar" depende da Q38), Para onde vai, Patrimônio e o chat do Piggy com IA real e blocos (Q6).
 Pix, conexão do Open Finance, MFA e notificações já moram em `settings.html` /
 `precos.html` e continuam lá; o v2 só aponta para elas. O resto (orçamentos, orçamento
 doméstico, cartões, categorias, agentes, afiliados, exportar, importar OFX, ajuste de
@@ -207,7 +243,7 @@ tecnologia, podendo refazer o que for preciso, com calma (Q5).
     do banco), para um aporte que confirma no meio não ser contado duas vezes nem nenhuma.
     "Tudo" inclui a marca de pendência abaixo, lida **no mesmo cursor** (hoje
     `bank_movement_summary` abre conexão própria e veria outro momento);
-  - **o caixa é o do painel de hoje:** carteira manual mais as contas do banco em BRL
+  - **o caixa é o do painel de hoje:** carteira Piggy (a manual) mais as contas do banco em BRL
     (`BANK_ACCOUNTS_SQL`), com a correção de lançamento fundido
     (`MERGED_WALLET_DELTA_SQL`) — as duas em `db/open_finance.py` — para a transação já refletida no banco não ser
     debitada duas vezes. A função reusa essas consultas numa versão que recebe o cursor,
@@ -232,8 +268,7 @@ tecnologia, podendo refazer o que for preciso, com calma (Q5).
   sincronização resolvendo a pendência no meio da foto (continua incerta); lançamento
   fundido entre carteira e banco (não debita duas vezes); reset começando antes da foto e
   a foto esperando por ele (a foto velha não volta); conta ou posição sem moeda informada,
-  gravada antes e depois do conserto da ingestão (fica fora e aparece o aviso); aporte,
-  juros e desfazer (o patrimônio volta ao de antes do aporte, e o histórico bate com ele).
+  gravada antes e depois do conserto da ingestão (fica fora e aparece o aviso).
 - **Tabela nova por usuário entra no ciclo de privacidade.** As fotos do patrimônio e das
   posições são histórico financeiro do usuário, e `db/privacy.py` enumera as tabelas à mão.
   Toda tabela nova com dado de usuário entra, no mesmo PR que a cria, na exportação
@@ -244,7 +279,7 @@ tecnologia, podendo refazer o que for preciso, com calma (Q5).
 - **Rendimento × CDI:** a série do CDI já existe (`db/investments.py`), mas o lado da
   carteira não tem histórico: `investments`, `investment_lots` e `open_finance_investments`
   guardam só o saldo atual, sobrescrito a cada juro ou sincronização. A regra: **nenhum
-  número inferido**. Cada origem usa a fonte que sabe separar rendimento de aporte e resgate:
+  número inferido**, e a fonte é só o Open Finance (Q36):
   - **Open Finance:** a rentabilidade que o próprio banco calcula por posição
     (`lastMonthRate` e `lastTwelveMonthsRate`, que o código já lê em `db/rv.py`). Das fotos
     não dá para tirar isso: dois movimentos que se anulam entre duas sincronizações somem
@@ -270,103 +305,9 @@ tecnologia, podendo refazer o que for preciso, com calma (Q5).
     transação marca o histórico de cada posição daquela conexão como encerrado, com a data
     da desconexão, e o histórico fica. Teste: desconectar e consultar o histórico. A cascata do histórico fica só para o
     usuário, pela regra de privacidade abaixo.
-  - **Manuais:** a unidade é o **lote** (`investment_lots`), não o investimento: cada lote
-    tem indexador, taxa e cursor de juros próprios (um investimento pode ter um lote de CDI
-    e outro de IPCA, cada um em dia até uma data diferente). O job grava, por lote, o valor,
-    o principal e a **data efetiva** — o fim do período que a taxa já aplicada cobre, que
-    nem sempre é o cursor do banco (no IPCA mensal a chave é o dia 1 e o fator vale o mês
-    inteiro, então a data efetiva é o último dia do mês). O histórico tem identidade
-    própria (id e nome guardados nele, sem chave estrangeira em cascata para `investments`
-    ou `investment_lots`): lote resgatado ou investimento apagado (`delete_investment` apaga
-    a linha) continua nos meses em que existiu, marcado como encerrado. A exceção é
-    **desfazer** um movimento (`delete_launch_and_rollback`, em `db/accounts.py`), e a
-    regra vale para qualquer movimento, aporte ou resgate: desfazer é "o movimento nunca
-    existiu". Na mesma transação saem as fotos daquele lote **a partir do movimento
-    desfeito** (o par dele e as que vieram depois); a próxima foto, com os juros em dia,
-    recomeça do estado restaurado. Desfazer o aporte devolve só o valor aportado e o juro
-    que ele rendeu some junto — de propósito: se o aporte nunca existiu, o juro dele também
-    não (é o comportamento atual do produto, e este plano não o muda). O histórico segue a
-    mesma regra, então não fica um ganho que o saldo já não tem, e o resgate desfeito não
-    deixa o intervalo zerado nem o juro de recuperação preso num par. Testes, olhando o rendimento e a
-    comparação com o CDI, não só o saldo: aporte, juros, desfazer; resgate total, tempo e
-    taxa passando, desfazer — nos dois, o histórico fica como se o movimento não tivesse
-    existido.
-
-    **Quando se tira a foto.** Uma por dia e mais uma antes e outra depois de cada aporte e
-    resgate, no mesmo commit do movimento. Cada foto guarda uma **sequência crescente** (a
-    ordem entre fotos da mesma data efetiva) e, nas de movimento, o **id do movimento** e se
-    é a de antes ou a de depois — é isso que permite tirar o par da conta mesmo com vários
-    movimentos e a foto diária no mesmo dia (`investment_deposit_from_account`,
-    `investment_withdraw_to_account` e todo outro caminho que mexa no principal — o
-    inventário por `grep` é o primeiro passo do PR do job). Toda foto é tirada **logo
-    depois de calcular os juros daquele usuário** (`accrue_all_investments` roda hoje num
-    laço próprio em `core/services/investment_scheduler.py`), na mesma operação. O cálculo
-    (`_growth_for_period`) compõe de uma vez todas as taxas que faltavam e devolve só a
-    última data, então um atraso que atravessa uma ou mais viradas de mês jogaria tudo no
-    último mês. Por isso o job **para em cada virada**: chama o cálculo até o último dia de
-    cada mês coberto (`accrue_investment_db` já aceita `today=`), tira a foto ali, e só
-    então segue para o próximo. Isso vale para **todo** caminho que calcula juros e tira
-    foto, não só o job: o aporte e o resgate também chamam o cálculo direto
-    (`db/investments.py`, dentro de `investment_deposit_from_account` e
-    `investment_withdraw_to_account`). Por isso existe uma função só, "juros em dia com
-    foto", que faz o corte por virada, e o job e os movimentos a chamam; ninguém chama o
-    cálculo cru antes de uma foto. Teste: laço de juros parado por uma virada e o usuário
-    resgata antes de ele voltar — cada mês recebe o seu. Aporte com
-    data no passado (`purchase_date`) só conta a partir da primeira foto, já com os juros em
-    dia: rendimento de antes dela nunca entra.
-
-    **A conta: CDI no mesmo dinheiro, nos mesmos dias.** Para cada lote, o rendimento é a
-    variação do valor entre fotos, tirando o par antes→depois de um movimento (que é o
-    próprio dinheiro entrando ou saindo). A comparação é uma **carteira-sombra**: o mesmo
-    capital de cada lote, nos mesmos dias cujo rendimento o lote de fato recebeu (até a
-    data efetiva dele, não até a data do resgate), rendendo CDI. Resgate de lote de índice
-    com taxa atrasada é pago pelo que já foi calculado, e a taxa que sai depois nunca é
-    aplicada ao capital que saiu — é a regra atual do produto, e mudá-la é outra decisão;
-    a sombra não conta esses dias, então lote e CDI comparam os mesmos dias. O bloco mostra, por investimento, quanto rendeu e quanto teria
-    rendido no CDI (em reais) e a razão entre os dois ("% do CDI"). Quando a sombra rende
-    zero (lote aberto e resgatado no mesmo dia, ou período sem dia útil de CDI), a razão não
-    existe: a API devolve `pct_cdi: null` com o motivo `sem_periodo_cdi`, nunca erro,
-    infinito ou NaN, e o bloco mostra só os valores em reais. Isso fecha de uma vez os
-    casos que uma média de percentuais erra: aporte e resgate no meio do período, lote aberto
-    ou encerrado no meio do mês, investimento que fica zerado e depois recebe aporte (sem
-    capital a sombra não rende), lotes com indexadores diferentes (cada um até a sua data
-    efetiva) e taxa publicada com atraso (o rendimento cai no período que a taxa cobre; o
-    mês cuja taxa ainda não saiu aparece como "em apuração").
-
-    **Pré-requisito no código de hoje** (faixa Completo, dinheiro, antes do job): o resgate
-    parcial (`investment_withdraw_to_account`) grava `last_date = hoje` nos lotes que
-    continuam abertos mesmo quando o juro parou antes por falta de taxa, e os dias entre um
-    e outro nunca rendem. O mesmo vale para o resgate total desfeito: o resgate grava
-    `last_date = hoje` no lote que fecha, e o desfazer (`delete_launch_and_rollback`, em
-    `db/accounts.py`) reabre o lote sem devolver o cursor, então a taxa atrasada nunca é
-    aplicada. O movimento tem de manter o cursor real, e o desfazer tem de devolver o de
-    antes do resgate. E o desfazer do resgate grava o saldo **absoluto** de antes dele,
-    sem olhar o que veio depois: com dois resgates no mesmo lote, desfazer o primeiro
-    apaga o segundo e cria dinheiro. E o lote não basta como unidade: o resgate consome os
-    lotes em ordem (FIFO), então um resgate posterior que só tocou o lote B dependeu de o
-    primeiro ter fechado o A. A regra mais simples que fecha isso: **só se desfaz o último
-    movimento do investimento** (de qualquer lote); desfazer um anterior é recusado com o
-    motivo (desfaça os seguintes antes). Apagar o investimento (`delete_investment`, que
-    leva os lotes em cascata) conta como movimento posterior: depois dele, nenhum resgate
-    daquele investimento se desfaz, porque não há lote para reabrir — **mesmo que o
-    apagar seja desfeito depois**: o desfazer do apagar recria só a linha do investimento,
-    não os lotes. Esse bloqueio permanente já existe no código de hoje: a recusa por
-    `rowcount` do `delete_launch_and_rollback` (`db/accounts.py`) não reverte resgate cujo
-    lote sumiu, e foi escrita para esta mesma sequência. E a checagem "é o
-    último" só vale se ninguém puder mexer no meio: o desfazer tem de pegar **a mesma trava
-    por usuário** que o aporte e o resgate usam (`_lock_user`) e segurá-la da checagem até o
-    fim — hoje ele só pega a trava quando o movimento é de banco
-    (`uses_bank_movement_lock`), e o de carteira passa sem ela. Pela mesma razão, apagar o
-    investimento, que aqui conta como movimento, pega a mesma trava (hoje
-    `delete_investment` só trava a linha do investimento). Com ela, a regra do histórico abaixo (as fotos saem a partir do
-    movimento desfeito) nunca apaga um movimento que continua valendo. Testes: índice
-    atrasado mais resgate parcial; índice atrasado, resgate total, desfazer e a taxa sair;
-    dois resgates no mesmo lote e desfazer o primeiro (recusado, nada muda); dois lotes,
-    o primeiro resgate fechando o lote A exatamente e o segundo só no B, e desfazer o
-    primeiro (recusado); resgate total, apagar o investimento e desfazer o resgate
-    (recusado); resgate, apagar, desfazer o apagar e desfazer o resgate (recusado); desfazer e resgatar ao mesmo tempo, e desfazer e apagar o investimento ao
-    mesmo tempo (um espera o outro, um deles é recusado de forma limpa, nenhum dinheiro
-    criado).
+  - **Manuais:** não entram (Q36): no v2 não existe investimento manual. O que já existe
+    de manual segue a resposta da Q37; sem ela decidida, aparece só com o saldo, sem
+    comparação com o CDI.
 
   **O bloco compara cada investimento com o CDI, e não mostra número da carteira inteira**
   (decisão do dono, 2026-09-25). No Open Finance o banco não diz quando o dinheiro entrou ou
@@ -388,15 +329,7 @@ tecnologia, podendo refazer o que for preciso, com calma (Q5).
   o tempo. O widget do protótipo (`widgets/Yield.tsx`) mostra a carteira somada; ele passa a
   ser por investimento quando for ligado à API, na etapa do Resumo.
 
-  **Testes do PR do job** — manuais: aporte e resgate rendendo antes e depois; movimento sem
-  rendimento (dá 0); dois movimentos no mesmo dia; lote aberto e resgatado no mesmo dia
-  (`pct_cdi: null`); resgate parcial e total de lote de IPCA antes de a taxa sair (a sombra
-  para na data efetiva); resgate total; resgate total e novo
-  aporte semanas depois (a sombra não rende no buraco); lote aberto e encerrado no meio do
-  mês; investimento com um lote de CDI e outro de IPCA; IPCA publicado depois da virada
-  (cai no mês que cobre); laço de juros parado por mais de uma virada de mês (cada mês
-  recebe o seu); aporte com data no
-  passado; investimento resgatado e depois apagado (continua no histórico). Open Finance:
+  **Testes do PR do job** — Open Finance:
   investimento sem taxa; conector sem mês de referência ou sem as datas dos 12 meses (sem
   comparação); posição sem datas próprias do banco (sem comparação, mesmo vista em várias
   sincronizações); posição com datas que não cobrem o período inteiro — aberta ou resgatada
@@ -450,11 +383,11 @@ fica; só as respostas prontas saem quando a IA real entrar.
 
 | Etapa | O que entra | Faixa |
 |---|---|---|
-| 0 | Esqueleto da `/api/v2` (dependência de usuário, envelope de erro, contrato + tipos gerados, SSE), `/painel` servido com a chave e os links, plano real pelo `/auth/me`, cliente TanStack Query, job da foto diária do patrimônio e das posições de investimento | Completo |
+| 0 | Esqueleto da `/api/v2` (dependência de usuário, envelope de erro, contrato + tipos gerados, SSE), `/painel` servido com a chave e os links, plano real pelo `/auth/me`, cliente TanStack Query, job da foto diária do patrimônio e o histórico da taxa do Open Finance por sincronização | Completo |
 | 1 | Resumo (perfil no servidor entra aqui) | API Completo, tela Leve |
-| 2 | Lançamentos: ver, lançar, editar, apagar | idem |
+| 2 | Lançamentos: ver tudo; lançar, editar e apagar na carteira Piggy (Q36) | idem |
 | 3 | Previsão | idem |
-| 4 | Metas e caixinhas, com depositar e retirar | idem |
+| 4 | Metas e caixinhas (forma depende da Q38) | idem |
 | 5 | Para onde vai | idem |
 | 6 | Patrimônio (com o histórico que o job da etapa 0 já vem gravando) | idem |
 | 7 | Chat com IA real e blocos: o `/ai/chat` passa a devolver "texto + blocos" a partir das tools que usou | Completo |
