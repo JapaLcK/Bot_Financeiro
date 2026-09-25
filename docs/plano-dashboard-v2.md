@@ -123,20 +123,24 @@ tecnologia, podendo refazer o que for preciso, com calma (Q5).
 
   **Quando se tira a foto.** Uma por dia pelo job, e mais uma em cada ponto onde o dinheiro
   mexe ou o dado some:
-  - nos manuais, **antes de cada aporte e resgate** — eles passam pelo nosso código
+  - nos manuais, **antes e depois de cada aporte e resgate** — eles passam pelo nosso código
     (`investment_deposit_from_account` e `investment_withdraw_to_account`, em
     `db/investments.py`), no mesmo commit do movimento, e em todo outro caminho que mexa
     no principal (o inventário por `grep` é o primeiro passo do PR do job);
-  - no Open Finance, **a cada sincronização, antes de sobrescrever ou apagar** a posição —
-    inclusive a foto final da posição liquidada que a reconciliação remove
-    (`save_open_finance_investments`, em `db/open_finance.py`). Sem ela, o último dia da
-    posição some ou vira resgate puro.
+  - no Open Finance, **a cada sincronização, antes de sobrescrever** a posição. Quando a
+    reconciliação remove uma posição que o banco deixou de mandar
+    (`save_open_finance_investments`, em `db/open_finance.py`), grava-se um **registro de
+    saída com valor zero**. A linha local ainda tem o saldo e o `amountProfit` da
+    sincronização anterior, então o rendimento entre ela e a liquidação é desconhecido: esse
+    último intervalo fica fora da conta (não se chuta), e o valor de saída conta só como
+    resgate.
 
   **A conta.** O rendimento de cada intervalo entre duas fotos é a variação do acumulado
   dividida pela base do intervalo, e o do mês é o encadeamento dos intervalos
   (rentabilidade ponderada pelo tempo, a mesma régua do CDI); intervalo sem capital aplicado
-  fica fora. Nos manuais o movimento cai sempre na fronteira de um intervalo, então a base é
-  o valor do início e a conta é exata. No Open Finance o banco não diz quando o dinheiro
+  fica fora, assim como intervalo de rendimento desconhecido. Nos manuais o movimento cai
+  entre a foto de antes e a de depois, então o intervalo seguinte começa do valor depois do
+  movimento e a conta é exata. No Open Finance o banco não diz quando o dinheiro
   mexeu: o fluxo sai das fotos (variação do valor menos variação do acumulado) e a hora dele
   dentro do intervalo é desconhecida. Ali a base é **o maior entre o valor do início e o
   valor do início mais o fluxo** (o maior capital aplicado no intervalo), que acerta aporte
@@ -145,9 +149,10 @@ tecnologia, podendo refazer o que for preciso, com calma (Q5).
   inferior, e o bloco não promete isso. O erro vem só de intervalo com movimento, e as
   posições que entram na conta são as que informam rendimento (renda fixa, em quase todo
   dia com variação pequena e positiva). A fórmula exata do acumulado dos manuais se fecha no
-  PR do job, com testes de: aporte e resgate nos manuais (exato); os quatro casos do Open
+  PR do job, com testes de: aporte e resgate nos manuais, rendendo depois (exato); os quatro casos do Open
   Finance (aporte e resgate, cedo e tarde) com dia de ganho **e** dia de perda; resgate total;
-  e a posição liquidada entre dois jobs. Posição sem rendimento informado (renda variável, cripto sem
+  e a posição liquidada entre duas sincronizações (registro de saída, intervalo fora da
+  conta). Posição sem rendimento informado (renda variável, cripto sem
   `amountProfit`) fica fora da conta, e o bloco diz quais ficaram. Como o patrimônio, nada
   de reconstruir o passado: enquanto o histórico enche, o bloco diz que se completa com o
   tempo.
