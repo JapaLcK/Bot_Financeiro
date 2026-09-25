@@ -3036,7 +3036,7 @@ class _CorpoSemVeneno(BaseModel):
 class RegisterBody(_CorpoSemVeneno):
     email: str
     password: str
-    phone: str | None = None  # o app nativo não pede; o site exige no formulário
+    phone: str
     name: str | None = None
 
 class LoginBody(_CorpoSemVeneno):
@@ -3211,16 +3211,14 @@ async def auth_register(request: Request, body: RegisterBody):
         if len(name) > 50:
             raise HTTPException(status_code=400, detail="O nome deve ter no máximo 50 caracteres.")
 
-    phone = (body.phone or "").strip() or None
-    if phone is not None:
-        try:
-            normalize_phone_e164(phone)
-        except ValueError as e:
-            raise HTTPException(status_code=400, detail=detalhe_seguro(e))
+    try:
+        normalize_phone_e164(body.phone)
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=detalhe_seguro(e))
 
     try:
         code = create_email_verification(
-            body.email, body.password, phone, display_name=name,
+            body.email, body.password, body.phone, display_name=name,
         )
     except AccountAlreadyExistsError as exc:
         # Anti-enumeração: e-mail/telefone já existe. NÃO revela isso — responde

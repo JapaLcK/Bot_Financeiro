@@ -124,9 +124,8 @@ paralelas e repete a request original. Se o refresh falhar, o 401 passa para o
 chamador decidir. **Esse interceptor é global nas páginas autenticadas** — considere-o
 antes de tratar 401 na mão em qualquer tela.
 
-Caminhos de entrada, todos em `/auth/*`: `register` (telefone opcional; o app não
-pede, o site exige no formulário) → `verify-email` (código de 6 dígitos) → `login`;
-`forgot-password`/`reset-password`; **Google OAuth**
+Caminhos de entrada, todos em `/auth/*`: `register` → `verify-email` (código de 6
+dígitos) → `login`; `forgot-password`/`reset-password`; **Google OAuth**
 (`google/start`, `google/callback`, `google/complete-signup`, `google/pending/{token}`);
 `dashboard-link`/`dashboard-token` (link mágico); `link-code` (vincula WhatsApp e
 Discord à conta); `logout`; `refresh`; `account` (exclusão) e `account/export`.

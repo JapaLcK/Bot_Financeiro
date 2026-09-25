@@ -782,13 +782,13 @@ def create_email_verification_impl(
     hash_password,
     email: str,
     password: str,
-    phone_e164: str | None,
+    phone_e164: str,
     minutes_valid: int = 15,
     display_name: str | None = None,
 ) -> str:
     email = email.strip().lower()
-    # Telefone opcional: o app nativo cadastra sem ele (a conta nasce sem WhatsApp).
-    normalized_phone = normalize_phone_e164(phone_e164) if phone_e164 else None
+    normalized_phone = normalize_phone_e164(phone_e164)
+    phone_candidates = phone_lookup_candidates(normalized_phone)
     display_name = (display_name or "").strip() or None
 
     with get_conn() as conn:
@@ -804,14 +804,9 @@ def create_email_verification_impl(
                 # avisando o dono por e-mail.
                 reason = "email_google" if existing["password_hash"] is None else "email"
                 raise AccountAlreadyExistsError(reason, existing_user_id=existing["user_id"])
-            phone_row = None
-            if normalized_phone:
-                _phone_hashes = [
-                    hash_pii_optional(c, kind="phone")
-                    for c in phone_lookup_candidates(normalized_phone) if c
-                ]
-                cur.execute("select user_id from auth_accounts where phone_hash = any(%s)", (_phone_hashes,))
-                phone_row = cur.fetchone()
+            _phone_hashes = [hash_pii_optional(c, kind="phone") for c in phone_candidates if c]
+            cur.execute("select user_id from auth_accounts where phone_hash = any(%s)", (_phone_hashes,))
+            phone_row = cur.fetchone()
             if phone_row:
                 # Telefone já em uso por outra conta. NÃO revela isso ao
                 # cadastrante: se a gente parasse aqui (ou não mandasse o código),

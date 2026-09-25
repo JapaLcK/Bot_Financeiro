@@ -5,12 +5,14 @@ direto (`_issue_session_token`) e nunca passavam pelo `verify-email`; aqui a
 sessão é a que o cadastro entrega. O e-mail é o único mock: a função de envio
 captura o código, o resto (banco, rate limit, emissão de sessão) é o de verdade.
 
-Controles negativos do grupo: forçar `_entrega_sessao` a ir sempre pelo ramo do
-navegador deixa B1, B3, B4 e B5 vermelhos; voltar `RegisterBody.phone` a `str`
-obrigatório deixa B6 vermelho (422); pular a busca por `phone_hash` mesmo com
-telefone deixa B9 vermelho (medido em 2026-09-25). Controles positivos: B2 (o navegador segue
-recebendo cookie e nenhum token no corpo) e B7 (telefone inválido segue 400,
-válido segue gravado).
+Todo cadastro manda um telefone válido e distinto: um número repetido seria
+descartado em silêncio (anti-enumeração) e mudaria o que o teste prova — só o
+B9 repete de propósito, porque é esse descarte que ele prova.
+
+Controle negativo do grupo: forçar `_entrega_sessao` a ir sempre pelo ramo do
+navegador deixa B1, B3, B4 e B5 vermelhos; pular a busca por `phone_hash` deixa
+B9 vermelho (medido em 2026-09-25). Controle positivo: B2 (o navegador segue
+recebendo cookie e nenhum token no corpo).
 """
 import uuid
 
@@ -22,6 +24,7 @@ import db_support
 import frontend.finance_bot_websocket_custom as dashboard
 from core.crypto import hash_pii_optional
 from core.services import email_service
+from utils_phone import normalize_phone_e164
 from _apoio_auth_app import csrf, limpa_rate_limits
 
 SENHA = "senha-forte-123"
@@ -55,19 +58,27 @@ def _email() -> str:
     return email
 
 
+def _telefone() -> str:
+    return f"55119{uuid.uuid4().int % 100_000_000:08d}"
+
+
 def _cabecalhos_app() -> dict[str, str]:
     return {dashboard.APP_CLIENT_HEADER: "app", "User-Agent": UA_APP}
 
 
-def _cadastro_do_app(correio, email: str, **extra):
+def _cadastro_do_app(correio, email: str, phone: str | None = None):
     """Register + verify como o app: header do app, cookie jar vazio."""
     client = TestClient(dashboard.app)
     r = client.post(
         "/auth/register",
         headers=_cabecalhos_app(),
-        json={"email": email, "password": SENHA, "name": "Fulana", **extra},
+        json={
+            "email": email, "password": SENHA,
+            "phone": phone or _telefone(), "name": "Fulana",
+        },
     )
     assert r.status_code == 200, r.text
+    assert r.json() == {"status": "verification_sent", "email": email}
     client.cookies.clear()  # o app não guarda cookie; o verify tem de ver jar vazio
     return client.post(
         "/auth/verify-email",
@@ -90,7 +101,7 @@ def _refresh_do_app(token: str):
 def _conta(email: str) -> dict:
     with db.get_conn() as conn, conn.cursor() as cur:
         cur.execute(
-            "select user_id, phone_e164, phone_hash, signup_source from auth_accounts"
+            "select user_id, phone_e164, signup_source from auth_accounts"
             " where email_hash = %s",
             (hash_pii_optional(email, kind="email"),),
         )
@@ -124,7 +135,7 @@ def test_b2_verify_do_navegador_continua_so_com_cookies(correio):
     r = client.post(
         "/auth/register",
         headers=cabecalhos,
-        json={"email": email, "password": SENHA, "phone": "11987654321"},
+        json={"email": email, "password": SENHA, "phone": _telefone()},
     )
     assert r.status_code == 200, r.text
     r = client.post(
@@ -174,41 +185,13 @@ def test_b5_access_do_cadastro_abre_auth_me_e_origem_e_app(correio):
     assert _conta(email)["signup_source"] == "app"
 
 
-# ── B6–B8: telefone opcional ─────────────────────────────────────────────────
-
-@pytest.mark.parametrize("extra", [{}, {"phone": None}, {"phone": "   "}])
-def test_b6_cadastro_sem_telefone_cria_conta_sem_telefone(correio, extra):
-    email = _email()
-    r = _cadastro_do_app(correio, email, **extra)
-    assert r.status_code == 200, r.text
-    conta = _conta(email)
-    assert conta["user_id"] == r.json()["user_id"]
-    assert conta["phone_e164"] is None
-    assert conta["phone_hash"] is None
-
-
-def test_b7_telefone_invalido_segue_400_e_valido_segue_gravado(correio):
-    """Controle positivo da restrição: telefone opcional não é telefone ignorado."""
-    email = _email()
-    r = TestClient(dashboard.app).post(
-        "/auth/register",
-        headers=_cabecalhos_app(),
-        json={"email": email, "password": SENHA, "phone": "123"},
-    )
-    assert r.status_code == 400, r.text
-    assert r.json()["detail"] == "Informe um número de WhatsApp válido com DDD."
-    assert email not in correio["codigos"]
-
-    r = _cadastro_do_app(correio, email, phone="(11) 98765-4321")
-    assert r.status_code == 200, r.text
-    assert _conta(email)["phone_e164"] == "5511987654321"
-
+# ── B8: e-mail já cadastrado ─────────────────────────────────────────────────
 
 @pytest.mark.parametrize("so_google", [False, True])
-def test_b8_email_existente_sem_telefone_nao_enumera(correio, so_google):
+def test_b8_email_existente_nao_enumera(correio, so_google):
     email = _email()
     db.confirm_email_verification(
-        email, db.create_email_verification(email, SENHA, None)
+        email, db.create_email_verification(email, SENHA, _telefone())
     )
     if so_google:
         with db.get_conn() as conn, conn.cursor() as cur:
@@ -223,7 +206,7 @@ def test_b8_email_existente_sem_telefone_nao_enumera(correio, so_google):
     r = TestClient(dashboard.app).post(
         "/auth/register",
         headers=_cabecalhos_app(),
-        json={"email": email, "password": SENHA},
+        json={"email": email, "password": SENHA, "phone": _telefone()},
     )
     assert r.status_code == 200, r.text
     assert r.json() == {"status": "verification_sent", "email": email}
@@ -238,17 +221,18 @@ def test_b8_email_existente_sem_telefone_nao_enumera(correio, so_google):
         assert cur.fetchone()["n"] == 0
 
 
-def test_b9_telefone_de_outra_conta_segue_descartado_sem_enumerar(correio):
-    """A busca por `phone_hash` passou a rodar só quando há telefone; quando há,
-    o número já em uso continua sendo descartado em silêncio (código enviado,
-    conta nasce sem telefone), sem revelar que ele existe."""
-    dono = _email()
-    db.confirm_email_verification(
-        dono, db.create_email_verification(dono, SENHA, "11987650000")
-    )
-    email = _email()
-    r = _cadastro_do_app(correio, email, phone="(11) 98765-0000")
+# ── B9: telefone de outra conta ──────────────────────────────────────────────
+
+def test_b9_telefone_de_outra_conta_e_descartado_sem_enumerar(correio):
+    """Par do B8 pelo telefone: o número já em uso é descartado em silêncio
+    (`db_support.py`, busca por `phone_hash`) — mesma resposta, código enviado,
+    nenhum aviso, e a conta nasce sem telefone."""
+    telefone = _telefone()
+    dono, email = _email(), _email()
+    assert _cadastro_do_app(correio, dono, phone=telefone).status_code == 200
+
+    r = _cadastro_do_app(correio, email, phone=telefone)  # confere o corpo do register
     assert r.status_code == 200, r.text
     assert correio["avisos"] == []
     assert _conta(email)["phone_e164"] is None
-    assert _conta(dono)["phone_e164"] == "5511987650000"
+    assert _conta(dono)["phone_e164"] == normalize_phone_e164(telefone)
