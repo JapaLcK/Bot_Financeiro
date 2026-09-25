@@ -172,7 +172,12 @@ tecnologia, podendo refazer o que for preciso, com calma (Q5).
     e outra depois de cada movimento, no mesmo commit dele; o rendimento de cada intervalo
     entre fotos é a variação do valor sobre o valor do início, e o do mês é o encadeamento
     dos intervalos (rentabilidade ponderada pelo tempo, a mesma régua do CDI). Como todo
-    movimento cai entre duas fotos, a conta é exata.
+    movimento cai entre duas fotos, a conta é exata. Criar investimento e aportar aceitam
+    data no passado (`purchase_date` em `create_investment_db`, e o lote nasce com ela), e o
+    juro desse passado só entra quando os juros forem atualizados. Por isso a foto de depois
+    é tirada **com o investimento já em dia** (juros calculados até hoje) — ela é a base, e
+    rendimento de antes da primeira foto nunca entra na conta, como manda a regra de não
+    reconstruir o passado.
 
   **O bloco compara cada investimento com o CDI, e não mostra número da carteira inteira**
   (decisão do dono, 2026-09-25). No Open Finance o banco não diz quando o dinheiro entrou ou
@@ -181,7 +186,8 @@ tecnologia, podendo refazer o que for preciso, com calma (Q5).
   não mandou a taxa, renda variável, cripto) aparece sem a comparação, com o motivo. Como o
   patrimônio, nada de reconstruir o passado: enquanto o histórico enche, o bloco diz que se
   completa com o tempo. Testes do PR do job: aporte e resgate nos manuais, rendendo antes e
-  depois do movimento (exato); dois movimentos no mesmo dia; resgate total; investimento do
+  depois do movimento (exato); investimento e aporte com data no passado (o juro antigo
+  não entra); dois movimentos no mesmo dia; resgate total; investimento do
   Open Finance sem taxa (aparece sem comparação); posição do Open Finance liquidada entre
   duas rodadas do job (a taxa da última sincronização fica no histórico).
   O widget do protótipo (`widgets/Yield.tsx`) mostra a carteira somada; ele passa a ser por
