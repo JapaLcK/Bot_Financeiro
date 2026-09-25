@@ -3,6 +3,8 @@ import { href, route, type Path } from "../router";
 
 // No Resumo cada bloco aponta para a sua página; nas páginas o contexto fica vazio.
 export const FrameLink = createContext<Path | null>(null);
+// Prefixo dos ids: a conversa do Piggy pode mostrar o mesmo bloco em várias respostas.
+export const FrameScope = createContext("");
 
 // Moldura comum dos widgets: título, ação à direita e corpo.
 export function Frame({ id, title, aside, children, className = "" }: {
@@ -13,10 +15,11 @@ export function Frame({ id, title, aside, children, className = "" }: {
   className?: string;
 }) {
   const to = useContext(FrameLink);
+  const key = `${useContext(FrameScope)}w-${id}`;
   return (
-    <article className={`w ${className}`} id={`w-${id}`} aria-labelledby={`w-${id}-h`}>
+    <article className={`w ${className}`} id={key} aria-labelledby={`${key}-h`}>
       <header className="w-head">
-        <h2 id={`w-${id}-h`} className="w-title">{title}</h2>
+        <h2 id={`${key}-h`} className="w-title">{title}</h2>
         {aside && <div className="w-aside">{aside}</div>}
         {to && (
           <a className="w-open" href={href(to)} aria-label={`Abrir ${route(to).label}`}>
