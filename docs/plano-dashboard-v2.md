@@ -199,8 +199,15 @@ tecnologia, podendo refazer o que for preciso, com calma (Q5).
     operação, e nunca lê o saldo sem isso. E "até hoje" não é garantido: o cálculo
     (`_growth_for_period`, em `db/investments.py`) só anda até a última data com taxa
     publicada (CDI, SELIC, IPCA saem com atraso). Por isso a foto grava a **data efetiva**
-    (o `last_date` até onde os juros foram calculados), e o rendimento é atribuído por ela,
-    não pelo dia da foto. Quando o cálculo atravessa uma virada de mês, ele roda em dois
+    (até onde os juros foram calculados), e o rendimento é atribuído por ela, não pelo dia
+    da foto. A data efetiva é o **fim do período que a taxa cobre**, que nem sempre é o
+    cursor do banco: no IPCA mensal a chave da observação é o dia 1 do mês e o fator vale
+    o mês inteiro, então a data efetiva é o último dia daquele mês (guardada à parte do
+    `last_date`). Dois pré-requisitos no código de hoje, que entram antes do job (faixa
+    Completo, dinheiro): o resgate parcial (`investment_withdraw_to_account`) grava
+    `last_date = hoje` nos lotes que continuam abertos mesmo quando o juro parou antes por
+    falta de taxa, e os dias entre um e outro nunca rendem — o movimento tem de manter o
+    cursor real; e o teste disso é índice atrasado mais resgate parcial. Quando o cálculo atravessa uma virada de mês, ele roda em dois
     passos, com uma foto na data efetiva do último dia útil do mês; até essa foto existir, o
     mês aparece como "em apuração". Testes: virada de mês com o laço de juros atrasado, e
     taxa do fim do mês publicada só depois da virada — nos dois, o rendimento cai no mês
@@ -231,7 +238,8 @@ tecnologia, podendo refazer o que for preciso, com calma (Q5).
   patrimônio, nada de reconstruir o passado: enquanto o histórico enche, o bloco diz que se
   completa com o tempo. Testes do PR do job: aporte e resgate nos manuais, rendendo antes e
   depois do movimento (exato); movimento sem rendimento nenhum (dá 0%); virada de mês com os juros atrasados; investimento aberto e encerrado no meio do mês (CDI
-  do mesmo intervalo; no Open Finance, sem comparação); investimento resgatado e depois apagado (continua no
+  do mesmo intervalo; no Open Finance, sem comparação); IPCA publicado depois da virada comparado com o
+  CDI do mês que ele cobre; investimento resgatado e depois apagado (continua no
   histórico); investimento e aporte com data no passado (o juro antigo
   não entra); dois movimentos no mesmo dia; resgate total; investimento do
   Open Finance sem taxa (aparece sem comparação); posição do Open Finance liquidada entre
