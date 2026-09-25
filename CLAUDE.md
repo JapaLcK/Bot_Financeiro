@@ -47,14 +47,18 @@ linha é **Leve**.
 | **Leve** | feature e tela comuns, correção de bug **que muda lógica**, refatoração, dependência, CI/ferramenta e configuração — tudo fora das áreas acima | `time-dev` com **uma** passada do Tester e Manager curto; o Arquiteto só é pulado quando a mudança já tem plano aprovado ou cabe num arquivo com um único comportamento possível |
 | **Direto** | texto, CSS pequeno, docs, código provisório, correção **sem mudança de lógica** (typo, nome, constante óbvia) | sem o time: teste do que mudou e `git diff` lido de ponta a ponta |
 
-**Experimento temporário (desde 2026-09-16).** Na faixa **Leve**, os PRs alternam
-com e sem o time, na ordem que `python scripts/medir_time_dev.py <PRs>` indicar em
-"próximo PR Leve" — passe **todos** os PRs marcados desde o início do experimento, não
-só os recentes: a alternância é contada só sobre a lista recebida. Sem o time: o próprio agente implementa,
-roda a suíte (skill `baseline-testes`) e lê o `git diff` inteiro, e grava
-`<!-- time-dev: grupo=sem faixa=Leve internos=0 bloqueantes=0 -->` no PR.
-**Completo continua sempre com o time.** O experimento termina com 10 PRs Leve em
-cada grupo; aí roda-se o script, o dono decide, e este bloco sai.
+**Medição do time.** Todo PR feito com o time, na Completo e na Leve, grava no corpo o
+marcador com os bugs provados de cada agente e quantos deles o Codex local não tinha
+apontado — formato e procedimento em `.claude/commands/time-dev.md`. Todo PR ou issue
+que conserta bug causado por um PR conhecido leva `Origem: #NNN` no corpo: é assim que
+o script conta o que escapou do time. Toda semana roda-se
+`python scripts/medir_time_dev.py --desde AAAA-MM-01`, com o 1º dia do mês corrente: é
+o acumulado do mês, que cresce a cada semana e atualiza os escapados das semanas
+anteriores. O relatório vai como comentário na issue "Medição do time-dev". A decisão
+do mês M roda no dia 15 de M+1, com `--desde` no 1º dia de M e `--ate` no último: aí a
+janela de escapados de todo PR de M já fechou, inclusive a dos mergeados no fim do mês.
+Se um agente fechar o mês sem nenhum bug exclusivo numa faixa, o dono decide se ele sai
+dessa faixa.
 
 O time existe para o §4 ("ataque antes de empurrar"): onde há dinheiro ou sessão ele
 pagou a conta várias vezes (PR #133, #384/#386, o logout no-op do #433). Onde o risco

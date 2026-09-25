@@ -1,65 +1,48 @@
 #!/usr/bin/env python3
-"""Mede se o `/time-dev` vale o custo em tokens, PR por PR.
+"""Medição contínua do `/time-dev`: relatório semanal em markdown.
 
 Uso:
-    python scripts/medir_time_dev.py 455 456 457
+    python scripts/medir_time_dev.py [--desde AAAA-MM-DD] [--ate AAAA-MM-DD]
 
-Junta três fontes por PR:
-  a) achados/rodadas/aprovação do Codex, via `gh api` (repo fixo abaixo);
-  b) o marcador `<!-- time-dev: grupo=... faixa=... internos=N bloqueantes=M -->`
-     no corpo do PR (CLAUDE.md §0, `.claude/commands/time-dev.md`);
-  c) tokens dos transcripts do Claude Code em `~/.claude/projects/`, filtrados
+Padrão: os últimos 7 dias até hoje. Pega os PRs MERGEADOS na janela que têm o
+marcador (CLAUDE.md §0, `.claude/commands/time-dev.md`)
+`<!-- time-dev: faixa=Leve tester=N tester_so=A manager=M manager_so=B codex_antes=K -->`
+e junta, por PR:
+  a) os bugs provados do Tester e do Manager, e quantos o Codex local não viu;
+  b) os achados do Codex do GitHub depois, via `gh api` (repo fixo abaixo);
+  c) os escapados: issues e PRs com `Origem: #N` criados até 14 dias depois do merge;
+  d) tokens dos transcripts do Claude Code em `~/.claude/projects/`, filtrados
      pelo `head.ref` do PR.
+A saída vai como comentário na issue "Medição do time-dev":
+    python scripts/medir_time_dev.py --desde ... | gh issue comment N --body-file -
 
 `gh` precisa de rede: sem `dangerouslyDisableSandbox`, a interceptação de TLS
 do sandbox derruba a verificação de certificado do `gh` (medido nesta sessão).
 
-As funções de parse/agregação são puras (sem rede, sem disco) para o teste em
+As regras (marcador, escapados, resumo) moram em `_time_dev_metricas.py`; elas e
+as de tokens daqui são puras (sem rede, sem disco) para o teste em
 `tests/test_medir_time_dev.py`; `_gh`, `medir_codex` e `medir_tokens` fazem I/O.
 """
 from __future__ import annotations
 
+import argparse
 import glob
 import json
 import os
 import re
 import subprocess
 import sys
+from datetime import date, datetime, timedelta, timezone
 from pathlib import Path
+
+from _time_dev_metricas import (JANELA_ESCAPADOS, conferir, contar_escapados,
+                                parse_marcador, resumir)
 
 REPO = "JapaLcK/Bot_Financeiro"
 _RAIZ = Path(subprocess.run(["git", "rev-parse", "--path-format=absolute", "--git-common-dir"],
     capture_output=True, text=True, cwd=Path(__file__).parent).stdout.strip()).parent
 _COD = re.sub(r"[^A-Za-z0-9]", "-", str(_RAIZ))  # como o Claude Code nomeia a pasta
 PROJETOS_GLOBS = [os.path.expanduser(f"~/.claude/projects/{_COD}{s}") for s in ("", "--*")]
-GRUPOS_VALIDOS = {"com", "sem"}
-FAIXAS_VALIDAS = {"Leve", "Completo"}
-MARCADOR_RE = re.compile(
-    r"<!--\s*time-dev:\s*grupo=(\w+)\s+faixa=(\w+)\s+internos=(\d+)\s+"
-    r"bloqueantes=(\d+)\s*-->"
-)
-
-# Puro: marcador
-
-
-def parse_marcador(corpo: str) -> dict | None:
-    """`<!-- time-dev: grupo=com faixa=Leve internos=3 bloqueantes=1 -->` -> dict.
-    Ausente ou fora do formato/valores esperados -> None."""
-    if not corpo:
-        return None
-    m = MARCADOR_RE.search(corpo)
-    if not m:
-        return None
-    grupo, faixa, internos, bloqueantes = m.groups()
-    if grupo not in GRUPOS_VALIDOS or faixa not in FAIXAS_VALIDAS:
-        return None
-    return {
-        "grupo": grupo,
-        "faixa": faixa,
-        "internos": int(internos),
-        "bloqueantes": int(bloqueantes),
-    }
-
 
 # Puro: tokens de um transcript já parseado (lista de dicts = linhas do jsonl)
 
@@ -234,113 +217,73 @@ def medir_tokens(branch: str) -> tuple[dict[str, dict[str, int]], bool]:
                     agregar_papel(tokens, papel, somar_tokens(sub_linhas, sub_branch))
     return tokens, achou_transcript
 
-
-# Saída
-
-PAPEIS_TIME = ("arquiteto", "coder", "tester", "manager")
+# Saída (markdown)
 
 
 def _fmt_num(n: float | None) -> str:
     return "n/d" if n is None else f"{n:,.0f}".replace(",", ".")
 
 
-def _fmt_1c(n: float | None) -> str:
-    return "n/d" if n is None else f"{n:.1f}"
+def _data(iso: str) -> datetime:
+    return datetime.fromisoformat(iso.replace("Z", "+00:00"))
 
 
 def main(argv: list[str]) -> int:
-    if not argv:
-        print("uso: python scripts/medir_time_dev.py <PR> [PR ...]", file=sys.stderr)
-        return 2
+    ap = argparse.ArgumentParser(description="Medição semanal do /time-dev.")
+    ap.add_argument("--desde", type=date.fromisoformat, default=date.today() - timedelta(days=7))
+    ap.add_argument("--ate", type=date.fromisoformat, default=date.today())
+    args = ap.parse_args(argv)
 
-    linhas_tabela = []
-    grupos: dict[str, list[dict]] = {"com": [], "sem": []}
-    leve_por_grupo = {"com": 0, "sem": 0}
+    paginas = _gh(f"search/issues?q=repo:{REPO}+is:pr+is:merged"
+                  f"+merged:{args.desde}..{args.ate}&per_page=100")
+    prs = [(i["number"], _data(i["pull_request"]["merged_at"]), m)
+           for p in paginas for i in p["items"] if (m := parse_marcador(i.get("body")))]
+    print(f"## Medição do time-dev — {args.desde} a {args.ate}\n")
+    if not prs:
+        print("Nenhum PR mergeado na janela com o marcador do time-dev.")
+        return 0
 
-    for arg in argv:
-        pr = int(arg)
-        codex = medir_codex(pr)
-        marcador = parse_marcador(codex["body"])
+    merges = {n: merged for n, merged, _ in prs}
+    itens = [(x["number"], x.get("body"), _data(x["created_at"]))
+             for x in _gh(f"repos/{REPO}/issues?state=all&since={args.desde}T00:00:00Z&per_page=100")]
+    escapados = contar_escapados(itens, merges)
+    agora = datetime.now(timezone.utc)
+
+    linhas = []
+    print("| PR | faixa | tester (só) | manager (só) | Codex antes | Codex GitHub | escapados "
+          "| tokens entrada | tokens saída | obs |")
+    print("|---|---|---|---|---|---|---|---|---|---|")
+    for n, merged, m in sorted(prs, key=lambda x: x[0]):
+        codex = medir_codex(n)
         tokens, achou = medir_tokens(codex["head_ref"])
-        total_entrada = sum(v["entrada"] for v in tokens.values())
-        total_saida = sum(v["saida"] for v in tokens.values())
-        time_entrada = sum(tokens.get(p, {}).get("entrada", 0) for p in PAPEIS_TIME)
-        time_saida = sum(tokens.get(p, {}).get("saida", 0) for p in PAPEIS_TIME)
+        tok = (sum(v["entrada"] for v in tokens.values()),
+               sum(v["saida"] for v in tokens.values())) if achou else None
+        aberta = agora - merged < JANELA_ESCAPADOS
+        linhas.append({**m, "codex_github": codex["achados_total"],
+                       "escapados": escapados[n], "aberta": aberta, "tokens": tok})
+        obs = [o for o in (conferir(m, tokens, achou),
+                           "sem revisão do Codex" if codex["sem_revisao"] else "") if o]
+        so = {a: "n/d" if m["codex_antes"] is None else m[f"{a}_so"] for a in ("tester", "manager")}
+        print(f"| #{n} | {m['faixa']} | {m['tester']} ({so['tester']}) "
+              f"| {m['manager']} ({so['manager']}) "
+              f"| {'n/d' if m['codex_antes'] is None else m['codex_antes']} "
+              f"| {codex['achados_total']} | {escapados[n]}{' (janela aberta)' if aberta else ''} "
+              f"| {_fmt_num(tok and tok[0])} | {_fmt_num(tok and tok[1])} | {'; '.join(obs)} |")
 
-        linha = {
-            "pr": pr,
-            "grupo": marcador["grupo"] if marcador else "-",
-            "faixa": marcador["faixa"] if marcador else "-",
-            "internos": marcador["internos"] if marcador else "-",
-            "bloqueantes": marcador["bloqueantes"] if marcador else "-",
-            "codex_1a": codex["achados_1a_rodada"],
-            "codex_total": codex["achados_total"],
-            "p1": codex["p1"],
-            "rodadas": codex["rodadas"],
-            "sem_revisao": codex["sem_revisao"],
-            "tokens_entrada": total_entrada,
-            "tokens_saida": total_saida,
-            "tokens_time_entrada": time_entrada,
-            "tokens_time_saida": time_saida,
-            "transcript": achou,
-        }
-        linhas_tabela.append(linha)
-
-        # Só Leve se compara: Completo é sempre "com", misturá-lo enviesa o grupo.
-        if marcador and marcador["faixa"] == "Leve":
-            leve_por_grupo[marcador["grupo"]] += 1
-            # Sem transcript fica fora: custo e achados vêm da mesma coorte.
-            if not codex["sem_revisao"] and achou:
-                grupos[marcador["grupo"]].append({**linha, **marcador})
-
-    print(f"{'PR':>5} {'grupo':6} {'faixa':9} {'int':>3} {'bloq':>4} {'cx1a':>4} "
-          f"{'cxtot':>5} {'P1':>3} {'rod':>3} {'tok_in':>10} {'tok_out':>9} "
-          f"{'time_in':>10} {'time_out':>9}")
-    for l in linhas_tabela:
-        obs = (" (sem transcript)" if not l["transcript"] else "") + \
-              (" (sem revisão do Codex)" if l["sem_revisao"] else "")
-        print(f"{l['pr']:>5} {str(l['grupo']):6} {str(l['faixa']):9} "
-              f"{str(l['internos']):>3} {str(l['bloqueantes']):>4} "
-              f"{l['codex_1a']:>4} {l['codex_total']:>5} {l['p1']:>3} {l['rodadas']:>3} "
-              f"{_fmt_num(l['tokens_entrada']):>10} {_fmt_num(l['tokens_saida']):>9} "
-              f"{_fmt_num(l['tokens_time_entrada']):>10} {_fmt_num(l['tokens_time_saida']):>9}"
-              f"{obs}")
-
-    def media(lst, chave):
-        return sum(x[chave] for x in lst) / len(lst) if lst else None
-
-    campos_media = ("codex_1a", "codex_total", "p1", "rodadas", "tokens_entrada", "tokens_saida")
-    print()
-    print(f"{'grupo':6} {'n':>3} {'cx1a':>7} {'cxtot':>7} {'P1':>6} {'rod':>6} {'tok_in':>10} {'tok_out':>9}")
-    medias = {g: {c: media(grupos[g], c) for c in campos_media} for g in ("com", "sem")}
-    for g in ("com", "sem"):
-        m = medias[g]
-        print(f"{g:6} {len(grupos[g]):>3} {_fmt_1c(m['codex_1a']):>7} "
-              f"{_fmt_1c(m['codex_total']):>7} {_fmt_1c(m['p1']):>6} {_fmt_1c(m['rodadas']):>6} "
-              f"{_fmt_num(m['tokens_entrada']):>10} {_fmt_num(m['tokens_saida']):>9}")
-
-    m_com, m_sem = medias["com"], medias["sem"]
-    print()
-    if m_com["tokens_entrada"] is None or m_sem["tokens_entrada"] is None:
-        print("tokens a mais por achado do Codex evitado: n/d (falta PR num dos grupos)")
-    else:
-        denom = m_sem["codex_total"] - m_com["codex_total"]
-        if denom <= 0:
-            print("tokens a mais por achado do Codex evitado: n/d (o grupo 'com' não achou menos)")
-        else:
-            for c in ("tokens_entrada", "tokens_saida"):
-                custo = (m_com[c] - m_sem[c]) / denom
-                print(f"{c} a mais por achado do Codex evitado: {_fmt_num(custo)}")
-
-    print()
-    n_com_leve, n_sem_leve = leve_por_grupo["com"], leve_por_grupo["sem"]
-    proximo = "com" if n_com_leve <= n_sem_leve else "sem"
-    print(f"PRs Leve marcados: com={n_com_leve} sem={n_sem_leve}")
-    if n_com_leve >= 10 and n_sem_leve >= 10:
-        print("experimento encerrado — nenhum PR Leve novo entra; o dono decide")
-    else:
-        print(f"próximo PR Leve: {proximo}")
-
+    print("\n### Resumo por faixa\n")
+    print("| faixa | PRs | tester (só) | manager (só) | exclusivos | Codex GitHub | escapados "
+          "| eficácia | tokens por exclusivo (entrada / saída) |")
+    print("|---|---|---|---|---|---|---|---|---|")
+    for faixa, r in resumir(linhas).items():
+        tpe = r["tokens_por_exclusivo"]
+        abertas = f" ({r['abertas']} PR com janela aberta)" if r["abertas"] else ""
+        print(f"| {faixa} | {r['prs']} | {r['tester']} ({r['tester_so']}) "
+              f"| {r['manager']} ({r['manager_so']}) | {r['exclusivos']} | {r['codex_github']} "
+              f"| {r['escapados']}{abertas} "
+              f"| {'n/d' if r['eficacia'] is None else format(r['eficacia'], '.0%')} "
+              f"| {'n/d' if tpe is None else f'{_fmt_num(tpe[0])} / {_fmt_num(tpe[1])}'} |")
+    print("\neficácia = (tester + manager) / (tester + manager + Codex GitHub + escapados). "
+          "Escapados com janela aberta ainda podem subir.")
     return 0
 
 
