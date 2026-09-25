@@ -121,15 +121,24 @@ tecnologia, podendo refazer o que for preciso, com calma (Q5).
   posição, o valor e o rendimento acumulado** — nos do Open Finance, o `amountProfit` que o
   banco manda; nos manuais, calculado dos lotes, contando também o que já saiu em resgate.
   O rendimento de cada dia é a variação do acumulado dividida pela base do dia, e o do mês é
-  o encadeamento dos dias (rentabilidade ponderada pelo tempo, a mesma régua do CDI). A base
-  do dia é o valor do início **mais o fluxo líquido do próprio dia** (aporte menos resgate,
-  que sai das fotos: variação do valor menos variação do acumulado). Assim, o dinheiro que
-  entra de manhã e rende no mesmo dia conta na base desse dia, e dinheiro novo não infla nem
-  dilui o percentual. O erro que sobra é tratar o fluxo como se entrasse no começo do dia,
-  ou seja, no máximo um dia de rendimento sobre o valor movido. A fórmula exata do acumulado
-  dos manuais se fecha no PR do job, com teste de aporte grande e de resgate no meio do mês,
-  inclusive o valor movido rendendo no próprio dia: o percentual tem de sair igual ao do
-  caso sem movimento. Posição sem rendimento informado (renda variável, cripto sem
+  o encadeamento dos dias (rentabilidade ponderada pelo tempo, a mesma régua do CDI). O fluxo
+  líquido do dia sai das fotos (variação do valor menos variação do acumulado), mas a foto
+  diária não sabe **a que horas** o dinheiro mexeu, e nenhuma base única acerta os quatro
+  casos. A regra é a base = **o maior entre o valor do início e o valor do início mais o
+  fluxo**, ou seja, o maior capital que esteve aplicado no dia:
+
+  | caso | resultado |
+  |---|---|
+  | aporte cedo (rende no dia) | exato |
+  | aporte tarde | subestima |
+  | resgate cedo | subestima |
+  | resgate tarde (depois de render) | exato |
+
+  Ela nunca superestima e nunca fica negativa (resgate total incluído); dia sem capital
+  aplicado (base zero) fica fora do encadeamento. O erro
+  fica limitado a um dia de rendimento sobre o valor movido, sempre para baixo. A fórmula
+  exata do acumulado dos manuais se fecha no PR do job, com um teste para cada linha da
+  tabela e um para o resgate total. Posição sem rendimento informado (renda variável, cripto sem
   `amountProfit`) fica fora da conta, e o bloco diz quais ficaram. Como o patrimônio, nada
   de reconstruir o passado: enquanto o histórico enche, o bloco diz que se completa com o
   tempo.
