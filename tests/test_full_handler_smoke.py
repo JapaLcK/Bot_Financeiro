@@ -41,21 +41,7 @@ def spy_ai(monkeypatch):
 @pytest.fixture
 def pro_uid():
     """User Pro com uid pequeno (nunca normalizado por handle_incoming)."""
-    import uuid as _uuid
-    import db as _db
-    from db.connection import get_conn
-
-    uid = int(_uuid.uuid4().int % 1_000_000_000)
-    _db.ensure_user(uid)
-    with get_conn() as conn:
-        with conn.cursor() as cur:
-            cur.execute(
-                "insert into auth_accounts(user_id, email, password_hash, plan) "
-                "values (%s, %s, 'x', 'pro')",
-                (uid, f"pro-{uid}@test.local"),
-            )
-        conn.commit()
-    return uid
+    return usuario_pagante()
 
 
 def _msg(uid: int, text: str, platform: str = "whatsapp") -> IncomingMessage:
