@@ -191,7 +191,14 @@ tecnologia, podendo refazer o que for preciso, com calma (Q5).
     (`lastMonthRate` e `lastTwelveMonthsRate`, que o código já lê em `db/rv.py`). Das fotos
     não dá para tirar isso: dois movimentos que se anulam entre duas sincronizações somem
     no fluxo líquido. A taxa é gravada **a cada sincronização com sucesso**, por posição e
-    por mês (a última do mês vale), dentro de `save_open_finance_investments`
+    **pelo mês a que ela se refere** — não pelo mês da sincronização: uma sincronização de
+    outubro traz o `lastMonthRate` de setembro. Hoje o código não lê nenhuma data de
+    referência do Pluggy; o primeiro passo do PR é medir, na API real, se o conector
+    informa o período. Se informar, a chave é esse mês. Se não informar, a série mensal
+    dessa posição não existe: o bloco mostra a taxa como "último mês informado pelo banco",
+    sem comparar com um mês de CDI, em vez de adivinhar o mês. Teste: sincronização logo
+    depois da virada não sobrescreve o mês anterior nem joga a taxa no mês novo. A gravação
+    é dentro de `save_open_finance_investments`
     (`db/open_finance.py`) e antes de sobrescrever ou apagar a linha do espelho — não pelo
     job diário, que chegaria tarde para a posição liquidada entre duas rodadas. O histórico
     fica numa tabela própria, que a reconciliação não apaga: a posição que o banco deixou de
