@@ -132,10 +132,14 @@ tecnologia, podendo refazer o que for preciso, com calma (Q5).
   um seria remendo por instância. Em vez disso, **o próprio stream confere a sua sessão no
   banco a cada 30 segundos** (junto do keepalive) e **antes de mandar cada aviso**, e fecha
   se ela foi revogada — cobre todo caminho, os de hoje e os futuros, em qualquer processo,
-  sem canal extra, e nenhum aviso sai para uma sessão já revogada (avisos são raros; uma
-  consulta por aviso é barata). Teste: revogar por um caminho que não é endpoint (replay de
-  refresh) com o stream aberto em outro processo e lançar logo em seguida — nenhum aviso
-  chega, e o stream fecha. O teste de ponta a ponta
+  sem canal extra (avisos são raros; uma consulta por aviso é barata). A garantia exata:
+  nenhum aviso sai depois que a conferência viu a revogação. Sobra uma janela de
+  milissegundos entre conferir e mandar em que um aviso pode passar — e ele não carrega
+  dado nenhum (`{"mudou": [...]}`); o dado só vem pedindo à API, que recusa a sessão
+  revogada. Serializar essa janela entre processos custaria mais do que protege, então não
+  se faz. Teste: revogar por um caminho que não é endpoint (replay de refresh) com o stream
+  aberto em outro processo e lançar depois — nenhum aviso chega, o stream fecha, e o pedido
+  de dado com a sessão revogada é recusado. O teste de ponta a ponta
   do aviso (Q32) inclui derrubar a conexão, lançar e reconectar, e reconectar com a sessão
   vencida. O aviso sai de uma função única, e **todo processo que grava dado financeiro tem
   de alcançá-la**. Hoje produção roda dois: o `launch.py` sobe o uvicorn e também o
@@ -318,7 +322,9 @@ tecnologia, podendo refazer o que for preciso, com calma (Q5).
   informa o mês de referência (para `lastMonthRate`) ou o início e o fim exatos (para
   `lastTwelveMonthsRate`, cujo fim pode ser o dia da sincronização, o fim do mês anterior…).
   Estar o tempo todo: a posição foi vista numa sincronização **antes do início** do período
-  e **depois do fim** dele (ou o banco informa as datas da posição). Isso tira de uma vez o
+  e **depois do fim** dele, **sem nenhum encerramento no meio** (a reconciliação apaga a
+  posição ausente e ela pode voltar com o mesmo id; o registro de encerramento dela fica no
+  histórico e quebra a cobertura) — ou o banco informa as datas da posição. Isso tira de uma vez o
   mês de abertura e o de encerramento, o mês anterior à primeira sincronização (vista em
   outubro, a taxa de setembro não compara) e os 12 meses de posição mais nova. Fora disso,
   a taxa aparece sem comparação, com o motivo. Investimento sem rentabilidade informada (o banco não mandou a
@@ -337,7 +343,8 @@ tecnologia, podendo refazer o que for preciso, com calma (Q5).
   recebe o seu); aporte com data no
   passado; investimento resgatado e depois apagado (continua no histórico). Open Finance:
   investimento sem taxa; mês de abertura e de encerramento (sem comparação); primeira sincronização logo depois
-  da virada (o mês anterior não compara); conector sem mês de referência (nenhum mês
+  da virada (o mês anterior não compara); posição que some e volta com o mesmo id (o
+  período com o encerramento no meio não compara); conector sem mês de referência (nenhum mês
   comparado com CDI); 12 meses sem as datas do período, ou com a posição mais nova que o
   início (sem comparação de 12 meses); posição
   liquidada entre duas rodadas do job (a taxa da última sincronização fica no histórico).
