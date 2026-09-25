@@ -203,7 +203,7 @@ tecnologia, podendo refazer o que for preciso, com calma (Q5).
     `bank_movement_summary` abre conexão própria e veria outro momento);
   - **o caixa é o do painel de hoje:** carteira manual mais as contas do banco em BRL
     (`BANK_ACCOUNTS_SQL`), com a correção de lançamento fundido
-    (`MERGED_WALLET_DELTA_SQL`, no monólito) para a transação já refletida no banco não ser
+    (`MERGED_WALLET_DELTA_SQL`) — as duas em `db/open_finance.py` — para a transação já refletida no banco não ser
     debitada duas vezes. A função reusa essas consultas numa versão que recebe o cursor,
     dentro da mesma transação, sem reescrever a regra;
   - **reset no meio:** a visão consistente não impede o "Recomeçar do zero" de apagar o
