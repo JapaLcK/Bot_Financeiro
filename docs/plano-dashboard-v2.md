@@ -238,8 +238,9 @@ tecnologia, podendo refazer o que for preciso, com calma (Q5).
     saldo dele (`pockets.of_investment_id`), e `list_of_fixed_income` (`db/rv.py`) já tira
     essas posições da lista; a função reusa essa exclusão, não a reescreve;
   - **só reais:** `open_finance_investments` guarda a moeda, e o código de análise já
-    filtra BRL. A foto soma só BRL e guarda quantas posições em outra moeda ficaram fora; o
-    gráfico diz isso, em vez de somar dólar como real. Conversão com câmbio datado fica para
+    filtra BRL. A foto soma só BRL e guarda quantas posições **e contas** em outra moeda
+    ficaram fora (`BANK_ACCOUNTS_SQL` só pega contas em BRL, então conta em dólar também
+    some em silêncio); o gráfico diz isso, em vez de somar dólar como real. Conversão com câmbio datado fica para
     quando alguém pedir. A caixinha espelhada não guarda moeda (`sync_open_finance_caixinhas`
     e `bind_pocket_to_caixinha` não levam a moeda para ela), então a moeda da caixinha
     ligada vem do investimento de origem: caixinha espelhando posição em dólar fica fora
@@ -266,7 +267,11 @@ tecnologia, podendo refazer o que for preciso, com calma (Q5).
     importa: numa transação `REPEATABLE READ` a visão do banco é fixada no primeiro
     comando, que seria o próprio pedido da trava — se ele esperasse o reset, a foto leria o
     estado de antes. Por isso a trava é **de sessão, pega antes de abrir a transação**, e
-    solta depois do commit;
+    solta **em qualquer saída** (num `finally`, com sucesso ou erro): trava de sessão
+    sobrevive ao rollback, e a conexão volta ao pool (`db/connection.py`) — esquecida ali,
+    ela seguraria o "Recomeçar do zero" daquele usuário para sempre. Se soltar falhar, a
+    conexão é descartada em vez de voltar ao pool. Teste: a foto falha no meio e o reset
+    seguinte do mesmo usuário roda;
   - **conexão parada não vira queda:** com uma conexão pausada, apagada, com
     sincronização parcial ou desatualizada, a conta daquele banco some da soma
     (`BANK_ACCOUNTS_SQL` já tira conexões pausadas e apagadas) enquanto os investimentos em
@@ -299,7 +304,8 @@ tecnologia, podendo refazer o que for preciso, com calma (Q5).
   a foto esperando por ele (a foto velha não volta); conta ou posição sem moeda informada,
   gravada antes e depois do conserto da ingestão (fica fora e aparece o aviso); conexão
   que fica pausada ou parcial entre duas rodadas (o ponto sai marcado como incompleto, sem
-  queda falsa); falha só em `/investments` com as contas em dia (incompleto); desconectar e
+  queda falsa); falha só em `/investments` com as contas em dia (incompleto); conta de
+  banco em dólar sem nenhum investimento em dólar (fica fora e aparece o aviso); desconectar e
   conectar um banco entre duas rodadas (a linha quebra, sem salto).
 - **Tabela nova por usuário entra no ciclo de privacidade.** As fotos do patrimônio e das
   posições são histórico financeiro do usuário, e `db/privacy.py` enumera as tabelas à mão.
