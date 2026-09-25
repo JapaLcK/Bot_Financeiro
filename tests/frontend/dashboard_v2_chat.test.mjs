@@ -24,7 +24,7 @@ before(async () => {
 });
 after(() => browser?.close());
 
-async function abrir({ width = 1440, hash = "#/", perfil = "padrao", qs = "" } = {}) {
+async function abrir({ width = 1440, hash = "#/", perfil = "padrao", qs = "", semInert = false, sorte = null } = {}) {
   const ctx = await browser.newContext({ viewport: { width, height: 900 }, reducedMotion: "reduce" });
   await ctx.route("**/*", (r) => {
     const url = new URL(r.request().url());
@@ -33,6 +33,13 @@ async function abrir({ width = 1440, hash = "#/", perfil = "padrao", qs = "" } =
     return r.fulfill({ path: join(ROOT, path) }).catch(() => r.fulfill({ status: 404, body: "" }));
   });
   await ctx.addInitScript((p) => localStorage.setItem("pigbank.dashboard.profile.v1", JSON.stringify(p)), perfil);
+  if (sorte !== null) await ctx.addInitScript((v) => { Math.random = () => v; }, sorte);
+  if (semInert) await ctx.addInitScript(() => { // Safari < 15.5: o mesmo de dashboard_v2_organizar
+    const sa = Element.prototype.setAttribute, ta = Element.prototype.toggleAttribute;
+    Element.prototype.setAttribute = function (n, v) { if (n !== "inert") return sa.call(this, n, v); };
+    Element.prototype.toggleAttribute = function (n, f) { return n === "inert" ? false : ta.call(this, n, f); };
+    delete HTMLElement.prototype.inert;
+  });
   const page = await ctx.newPage();
   const erros = [];
   page.on("pageerror", (e) => erros.push(e.message));
@@ -112,8 +119,8 @@ test("os 8 assuntos respondem com blocos, sem erro e sem id repetido", async () 
   assert.deepEqual(erros, []);
 });
 
-test("os blocos da resposta são uma foto: clicar neles não mexe no painel", async () => {
-  const { ctx, page } = await abrir();
+for (const semInert of [false, true]) test(`os blocos da resposta são uma foto: clicar neles não mexe no painel${semInert ? " (sem inert, Safari < 15.5)" : ""}`, async () => {
+  const { ctx, page } = await abrir({ semInert });
   await perguntar(page, "oi");
   await page.locator(".chat > .msg-piggy").first().waitFor();
   await seguir(page, "Pra onde vai meu dinheiro?");
@@ -124,8 +131,45 @@ test("os blocos da resposta são uma foto: clicar neles não mexe no painel", as
   await page.locator("#page-title", { hasText: "Para onde vai" }).waitFor();
   const filtrado = await page.locator(".cats [aria-pressed='true'], .chip[aria-pressed='true']").count();
   await ctx.close();
-  assert.equal(inerte, true);
+  assert.equal(!!inerte, !semInert); // sem suporte, a propriedade nem existe
   assert.equal(filtrado, 0);
+});
+
+// Perguntas da faixa que pedem um recorte do assunto: a resposta tem de responder a elas.
+test("\"qual categoria mais cresceu\" e \"que dia da semana\" respondem o que foi perguntado", async () => {
+  const { ctx, page } = await abrir({ hash: "#/piggy", perfil: "controlar" });
+  const clicar = async (texto) => {
+    const antes = await respostas(page);
+    await page.locator(".chat-follow button", { hasText: texto }).first().click();
+    await page.waitForFunction((n) => document.querySelectorAll(".chat > .msg-piggy").length > n, antes);
+    return page.locator(".chat > .msg-piggy").last().evaluate((m) => [m.querySelector(".msg-text").textContent, [...m.querySelectorAll(".msg-block article")].map((a) => a.id.replace(/^m\d+-/, ""))]);
+  };
+  const cresceu = await clicar("Qual categoria de gasto mais cresceu este mês?");
+  await ctx.close();
+  // Delivery +20%. Antes a resposta era Mercado (o maior, que caiu 9%). Outros sobe 32% em
+  // cima de ~R$ 29: fica fora pela mesma regra do "Piggy notou" (> R$ 50 no mês anterior).
+  assert.match(cresceu[0], /^A que mais cresceu foi Delivery: .*\(20% a mais\)/);
+  assert.deepEqual(cresceu[1], ["w-cat-detalhe"]);
+  const { ctx: c2, page: p2 } = await abrir({ hash: "#/piggy", perfil: "controlar" });
+  await p2.locator(".chat-follow button", { hasText: "Em que dia da semana eu mais gasto?" }).click();
+  await p2.locator(".chat > .msg-piggy .msg-block").first().waitFor();
+  const dia = await p2.locator(".chat > .msg-piggy").last().evaluate((m) => [m.querySelector(".msg-text").textContent, [...m.querySelectorAll(".msg-block article")].map((a) => a.id.replace(/^m\d+-/, ""))]);
+  await c2.close();
+  assert.match(dia[0], /^Você gasta mais (aos|às) \S+: R\$/);
+  assert.deepEqual(dia[1], ["w-calendario"]);
+});
+
+test("\"qual foi meu maior gasto este mês\" olha o mês inteiro, não a semana", async () => {
+  // Padrão sem perfil: 3 insights (peso 2) + 10 comuns (peso 1) = 16; "maior-gasto" é a
+  // 8ª comum, na faixa [13, 14). A 1ª checagem confirma que a sorte caiu nela.
+  const { ctx, page } = await abrir({ sorte: 13.5 / 16 });
+  const chave = await page.locator(".piggy-band").getAttribute("data-band");
+  await page.locator(".piggy-band").click();
+  await page.locator(".chat > .msg-piggy .msg-block").first().waitFor();
+  const texto = await page.locator(".chat > .msg-piggy .msg-text").textContent();
+  await ctx.close();
+  assert.equal(chave, "maior-gasto");
+  assert.match(texto, /^Seu maior gasto de setembro foi Aluguel \(sua parte\) \(R\$ 950\)/);
 });
 
 test("a conversa sobrevive à troca de página e some ao recarregar", async () => {
@@ -182,4 +226,28 @@ test("320 e 390: a conversa não rola para o lado e a barra fica acima da de bai
     await ctx.close();
     assert.deepEqual(r, [0, true, true], String(width));
   }
+});
+
+test("toda pergunta pronta responde com texto, sem erro (as sugestões de cada perfil e o fim de semana)", async () => {
+  const vistos = {};
+  for (const perfil of ["economizar", "investir", "controlar", "dividas", "autonomo"]) for (let i = 0; i < 5; i++) {
+    const { ctx, page, erros } = await abrir({ hash: "#/piggy", perfil });
+    const botao = page.locator(".chat-empty .chat-follow button").nth(i);
+    const pergunta = await botao.textContent();
+    await botao.click();
+    await page.locator(".chat > .msg-piggy .msg-text").first().waitFor();
+    vistos[pergunta] = [await page.locator(".chat > .msg-piggy .msg-text").textContent(), erros.length];
+    await ctx.close();
+  }
+  // "fim-de-semana" não está entre as sugestões: pela faixa, com a sorte na faixa [12, 13) de 16.
+  const { ctx, page, erros } = await abrir({ sorte: 12.5 / 16 });
+  const chave = await page.locator(".piggy-band").getAttribute("data-band");
+  await page.locator(".piggy-band").click();
+  await page.locator(".chat > .msg-piggy .msg-text").first().waitFor();
+  const fds = await page.locator(".chat > .msg-piggy .msg-text").textContent();
+  await ctx.close();
+  for (const [q, [texto, n]] of Object.entries(vistos)) assert.ok(texto.length > 40 && n === 0, `${q}: ${texto} (${n} erros)`);
+  assert.equal(chave, "fim-de-semana");
+  assert.match(fds, /por fim de semana|segurar o fim de semana/);
+  assert.deepEqual(erros, []);
 });

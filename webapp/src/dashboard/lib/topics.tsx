@@ -1,9 +1,10 @@
 import type { ReactNode } from "react";
-import { CARD, CATEGORIES, GOALS, MONTHS, TODAY, catById, goalEta, incomeHistory, installmentsAhead, keyDate, previousKey, reserveMonths, spentUntil, summary, trajectory, yieldVsCdi } from "./api";
+import { CARD, CATEGORIES, GOALS, MONTHS, TODAY, catById, fixedMonthly, goalEta, incomeHistory, installmentsAhead, keyDate, previousKey, reserveMonths, spentUntil, summary, trajectory, yieldVsCdi } from "./api";
 import { money0, monthName, monthYear, signed0 } from "./format.js";
 import { get } from "./store.js";
 import type { DashState, Launch } from "./types";
 import { Bills } from "../widgets/Bills";
+import { Calendar } from "../widgets/Calendar";
 import { Categories } from "../widgets/Categories";
 import { CategoryDetail } from "../widgets/CategoryDetail";
 import { Goals } from "../widgets/Goals";
@@ -32,7 +33,7 @@ const spentIn = (key: string, cat: string) => (summary(key).launches as Launch[]
 // "Foto" do estado para os blocos da resposta: o mês atual e, se houver, a categoria.
 const snap = (cat: string | null = null): DashState => ({ ...get(), month: NOW, filter: { category: cat, day: null, query: "", source: "todos" }, highlight: null, editing: false });
 
-export function answer(topic: TopicId, cat: string | null = null): Answer {
+function byTopic(topic: TopicId, cat: string | null): Answer {
   const m = summary(NOW);
   const prev = previousKey(NOW)!;
   const top = topVariable(m.byCategory);
@@ -107,6 +108,85 @@ export function answer(topic: TopicId, cat: string | null = null): Answer {
       };
     }
   }
+}
+
+// A categoria variável que mais cresceu contra o mês anterior, no mesmo ponto do mês.
+function grower() {
+  const prev = previousKey(NOW)!;
+  return CATEGORIES.filter((c) => c.variable)
+    .map((c) => ({ c, now: spentIn(NOW, c.id), then: spentIn(prev, c.id) }))
+    .filter((r) => r.then > 50)
+    .sort((a, b) => (b.now - b.then) / b.then - (a.now - a.then) / a.then)[0];
+}
+const monthEnd = () => trajectory(NOW, "mes", null).end.value;
+const WEEKDAYS = ["domingo", "segunda", "terça", "quarta", "quinta", "sexta", "sábado"];
+
+// Perguntas da faixa que pedem um recorte próprio do assunto: o texto (e às vezes o bloco)
+// muda para responder exatamente o que foi perguntado, com o número dessa pergunta.
+const LEADS: Record<string, () => Partial<Answer>> = {
+  "maior-gasto": () => {
+    const all = (summary(NOW).launches as Launch[]).filter((l) => l.kind === "expense").sort((a, b) => (b.amount ?? 0) - (a.amount ?? 0));
+    const top = all[0], variable = all.find((l) => CATEGORIES.find((c) => c.id === l.category)?.variable);
+    return {
+      text: <>Seu maior gasto de {MONTH} foi <b>{top.label}</b> ({money0(top.amount ?? 0)}), no dia {top.date.getDate()}.{variable && <> Fora as contas fixas, foi <b>{variable.label}</b> ({money0(variable.amount ?? 0)}).</>}</>,
+      blocks: [<LaunchList title={`Maiores gastos de ${MONTH}`} launches={all.slice(0, 8)} />],
+    };
+  },
+  "dia-semana": () => {
+    const byDay = new Array(7).fill(0);
+    for (const l of summary(NOW).launches as Launch[]) if (l.kind === "expense" && CATEGORIES.find((c) => c.id === l.category)?.variable) byDay[l.date.getDay()] += l.amount ?? 0;
+    const total = byDay.reduce((a, b) => a + b, 0);
+    const d = byDay.indexOf(Math.max(...byDay));
+    return {
+      text: <>Você gasta mais <b>{d === 0 || d === 6 ? `aos ${WEEKDAYS[d]}s` : `às ${WEEKDAYS[d]}s`}</b>: {money0(byDay[d])} em {MONTH}, {pct(byDay[d] / total)} dos seus gastos do dia a dia. O calendário mostra dia por dia.</>,
+      blocks: [<Calendar s={snap()} />],
+    };
+  },
+  "categoria-cresceu": () => {
+    const g = grower();
+    return g ? { text: <>A que mais cresceu foi <b>{g.c.label}</b>: {money0(g.now)} em {MONTH} até o dia {DAY}, contra {money0(g.then)} em {monthName(keyDate(previousKey(NOW)!))} no mesmo ponto ({pct((g.now - g.then) / g.then)} a mais).</> } : {};
+  },
+  "fim-de-semana": () => {
+    const last = new Date(TODAY.getFullYear(), TODAY.getMonth() + 1, 0).getDate();
+    let weekends = 0;
+    for (let d = DAY + 1; d <= last; d++) if (new Date(TODAY.getFullYear(), TODAY.getMonth(), d).getDay() === 6) weekends++;
+    const spare = monthEnd() - fixedMonthly();
+    return {
+      text: spare > 0
+        ? <>Você fecha {MONTH} com cerca de {money0(monthEnd())}. Guardando {money0(fixedMonthly())} pras contas fixas do mês que vem, sobram uns {money0(spare)}: <b>{money0(spare / Math.max(1, weekends))} por fim de semana</b> até o fim do mês sem apertar.</>
+        : <>No ritmo de hoje, o saldo de {MONTH} não cobre as contas fixas do mês que vem ({money0(fixedMonthly())}). Melhor segurar o fim de semana.</>,
+    };
+  },
+  "quanto-investir": () => {
+    const spare = monthEnd() - fixedMonthly();
+    return {
+      text: <>Você fecha {MONTH} com cerca de {money0(monthEnd())}. Deixando um mês de contas fixas ({money0(fixedMonthly())}) de folga, dá pra investir uns <b>{money0(Math.max(0, spare))}</b> sem apertar.</>,
+    };
+  },
+  "antecipar": () => {
+    const p = installmentsAhead(6);
+    const total = p.months.reduce((a, m) => a + m.value, 0);
+    return {
+      text: <>Parcela no cartão sem juros não fica mais barata se você antecipar: só tira dinheiro do caixa agora. As suas somam <b>{money0(total)}</b> até {monthName(p.last)} de {p.last.getFullYear()}; vale antecipar se alguma cobrar juros.</>,
+    };
+  },
+  "mes-fraco": () => {
+    const rows = incomeHistory();
+    const avg = rows.reduce((a, r) => a + r.value, 0) / rows.length;
+    const worst = rows.reduce((a, r) => (r.value < a.value ? r : a));
+    return {
+      text: <>Seu pior mês ({monthName(worst.date)}, {money0(worst.value)}) ficou {money0(avg - worst.value)} abaixo da média. Guardar uns <b>{money0(avg - worst.value)}</b> nos meses bons cobre um mês fraco como aquele.</>,
+    };
+  },
+  "meta-economia": () => ({
+    text: <>Suas caixinhas já recebem <b>{money0(GOALS.reduce((a, g) => a + g.monthly, 0))} por mês</b>. Pra uma meta nova, me diz o valor e a data: no app de verdade eu monto ela com você aqui.</>,
+  }),
+};
+
+/** A resposta pronta do assunto; `key` (a pergunta da faixa) ajusta o texto quando ela pede um recorte. */
+export function answer(topic: TopicId, cat: string | null = null, key?: string): Answer {
+  const base = byTopic(topic, key === "categoria-cresceu" ? grower()?.c.id ?? cat : cat);
+  return { ...base, ...(key ? LEADS[key]?.() : undefined) };
 }
 
 // Texto livre no protótipo: sem IA, o Piggy oferece os assuntos que ele sabe mostrar.

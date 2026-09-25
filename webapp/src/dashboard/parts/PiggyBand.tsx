@@ -45,7 +45,7 @@ export function PiggyBand({ s, profile }: { s: DashState; profile: string }) {
     );
   }
   return (
-    <button type="button" className="piggy-band" data-band={o.key} onClick={() => (o.ask ? ask({ text: o.ask, topic: o.topic, cat: o.cat }) : go("/piggy"))}>
+    <button type="button" className="piggy-band" data-band={o.key} onClick={() => (o.ask ? ask({ text: o.ask, topic: o.topic, cat: o.cat, key: o.key }) : go("/piggy"))}>
       <span className="piggy-band-by"><img src="../frontend/brand/icon.png" alt="" width={28} height={28} />Piggy · hoje</span>
       <span className="piggy-band-head">{o.head}</span>
       {o.text && <span className="piggy-band-text">{o.text}</span>}

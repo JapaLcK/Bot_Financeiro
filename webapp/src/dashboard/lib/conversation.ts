@@ -13,8 +13,8 @@ const subs = new Set<() => void>();
 export const useConversation = () => useSyncExternalStore((f) => { subs.add(f); return () => subs.delete(f); }, () => msgs);
 
 /** Envia a pergunta e abre a conversa. Sem `topic`, o Piggy responde com os atalhos. */
-export function ask(q: { text: string; topic?: TopicId | null; cat?: string | null }) {
-  const a = q.topic ? answer(q.topic, q.cat ?? null) : DEMO;
+export function ask(q: { text: string; topic?: TopicId | null; cat?: string | null; key?: string }) {
+  const a = q.topic ? answer(q.topic, q.cat ?? null, q.key) : DEMO;
   msgs = [...msgs, { id: ++seq, role: "user", text: q.text }, { id: ++seq, role: "piggy", ...a }];
   subs.forEach((f) => f());
   go("/piggy");

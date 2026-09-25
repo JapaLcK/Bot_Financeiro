@@ -16,7 +16,10 @@ function PiggySays({ m, live = true }: { m: Msg; live?: boolean }) {
     <FrameScope.Provider value={`m${m.id}-`}>
       <p className="msg-by"><img src={AVATAR} alt="" width={24} height={24} />Piggy</p>
       <p className="msg-text">{m.text}</p>
-      {m.blocks?.map((b, i) => <div className="panel msg-block" inert key={i}>{b}</div>)}
+      {m.blocks?.map((b, i) => (
+        // Safari < 15.5 ignora `inert`: o clique (e o Enter/Espaço, que viram clique) para aqui.
+        <div className="panel msg-block" inert key={i} onClickCapture={(e) => { e.preventDefault(); e.stopPropagation(); }}>{b}</div>
+      ))}
       {live && !!m.follow?.length && (
         <ul className="chat-follow" aria-label="Próximas perguntas">
           {m.follow.map((f) => <li key={f.label}><button type="button" className="chip" onClick={() => ask({ text: f.label, topic: f.topic, cat: f.cat })}>{f.label}</button></li>)}
@@ -67,7 +70,7 @@ export function PiggyChat() {
           <img src={AVATAR} alt="" width={56} height={56} />
           <p className="chat-hello">Oi, eu sou o Piggy. Pergunta o que quiser sobre o seu dinheiro, ou começa por uma destas:</p>
           <ul className="chat-follow">
-            {ideas.map((p) => <li key={p.key}><button type="button" className="chip" onClick={() => ask({ text: p.ask!, topic: p.topic, cat: p.cat })}>{p.ask}</button></li>)}
+            {ideas.map((p) => <li key={p.key}><button type="button" className="chip" onClick={() => ask({ text: p.ask!, topic: p.topic, cat: p.cat, key: p.key })}>{p.ask}</button></li>)}
           </ul>
         </section>
       </>
