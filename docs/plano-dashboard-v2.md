@@ -321,8 +321,10 @@ tecnologia, podendo refazer o que for preciso, com calma (Q5).
   exatamente qual é** e em que **a posição esteve o tempo todo**. Saber o período: o banco
   informa o mês de referência (para `lastMonthRate`) ou o início e o fim exatos (para
   `lastTwelveMonthsRate`, cujo fim pode ser o dia da sincronização, o fim do mês anterior…).
-  Estar o tempo todo: **só o banco prova** — pelas datas da própria posição (aplicação,
-  emissão, vencimento, resgate, o que o conector mandar). Sincronizações nas pontas do
+  Estar o tempo todo: **só o banco prova** — pelas datas **da posição deste usuário**
+  (quando ele aplicou e, se for o caso, quando resgatou). Datas do título (emissão,
+  vencimento) não servem: um título emitido em janeiro e comprado em março não prova nada
+  sobre fevereiro. Sincronizações nas pontas do
   período não provam nada: a posição pode sumir e voltar com o mesmo id entre duas delas sem
   deixar rastro. O primeiro passo do PR é medir, na API real, quais datas o conector manda.
   Sem as datas do período e da posição, a taxa aparece sem comparação, com o motivo. Investimento sem rentabilidade informada (o banco não mandou a
@@ -344,8 +346,9 @@ tecnologia, podendo refazer o que for preciso, com calma (Q5).
   comparação); posição sem datas próprias do banco (sem comparação, mesmo vista em várias
   sincronizações); posição com datas que não cobrem o período inteiro — aberta ou resgatada
   no meio (sem comparação); sincronização logo depois da virada (a taxa vai para o mês de
-  referência, não para o da sincronização); posição
-liquidada entre duas rodadas do job (a taxa da última sincronização fica no histórico).
+  referência, não para o da sincronização); posição com só emissão e vencimento do título
+  (sem comparação); posição
+  liquidada entre duas rodadas do job (a taxa da última sincronização fica no histórico).
 - **Reserva em meses:** reserva dividida pelo custo mensal das contas fixas ativas. O custo
   mensal converte cada frequência de `db/recurring.py` (`VALID_FREQUENCIES`): diária × 365/12,
   semanal × 52/12, mensal × 1, anual ÷ 12; pagamento único (`once`) não entra. Conta de valor
