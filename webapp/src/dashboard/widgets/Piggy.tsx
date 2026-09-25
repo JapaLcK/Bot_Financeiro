@@ -70,7 +70,7 @@ export function insights(s: DashState): Insight[] {
 
 export function Piggy({ s }: { s: DashState }) {
   return (
-    <Frame id="piggy" title={<span className="piggy-title"><img src="../frontend/brand/avatar.webp" alt="" width={22} height={22} />Piggy notou</span>}>
+    <Frame id="piggy" title={<span className="piggy-title"><img src="../frontend/brand/icon.png" alt="" width={22} height={22} />Piggy notou</span>}>
       <ul className="insights">
         {insights(s).map((i) => (
           <li key={i.key}>

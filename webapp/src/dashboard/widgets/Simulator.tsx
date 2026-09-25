@@ -42,7 +42,7 @@ export function Simulator({ s, full = false }: { s: DashState; full?: boolean })
   const bad = draft?.msg ?? null;
 
   return (
-    <Frame id="simulador" title={full ? "Seus hábitos" : "E se…"} className="w-sim"
+    <Frame id="simulador" title={full ? "Seus hábitos" : "Simulador"} className="w-sim"
       aside={on && <button type="button" className="btn btn-quiet" onClick={() => { setDraft(null); resetSim(); }}>Zerar</button>}>
       <div className="presets" role="group" aria-label="Simulações prontas">
         {PRESETS.map((p) => {
