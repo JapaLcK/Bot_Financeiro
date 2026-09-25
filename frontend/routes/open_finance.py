@@ -1695,6 +1695,19 @@ async def open_finance_pluggy_item_route(request: Request, user_id: int, payload
         # entrega pode virar 200 pendurado pelos dois furos fora do alcance do
         # `statement_timeout` (COMMIT e servidor que aceita o socket e não responde,
         # `core/system_event_log.py`). Mesmo teto dos irmãos do `_grava_reconexao`.
+        #
+        # ANTES do `_log_com_teto`, e não em vez dele — mesmo padrão dos dois irmãos
+        # da reconexão, pela mesma razão: quando o teto ESTOURA, o `wait_for` engole
+        # o `TimeoutError`, e quando o banco do log está fora o `log_system_event`
+        # engole o erro imprimindo mensagem GENÉRICA, sem `event_type` e sem
+        # `item_id` (`core/admin_dashboard.py`). Medido nas duas metades: o
+        # `new_item_id` não sobrava em canal nenhum. Como este caminho deixa de
+        # propósito uma conexão commitada SEM rastro `pluggy_item`, o id é a única
+        # chave operacional que resta — perdê-lo é perder o item (Codex, PR #542).
+        logging.getLogger(__name__).warning(
+            "of_item_registry_failed item_id=%s user_id=%s motivo=%s sqlstate=%s",
+            new_item_id, session_uid, type(exc).__name__,
+            getattr(exc, "sqlstate", None))
         await _log_com_teto(
             _LOG_DIAG_TIMEOUT_S,
             "warning", "of_item_registry_failed", "Falha ao registrar item conectado",
@@ -1739,6 +1752,16 @@ async def open_finance_pluggy_item_route(request: Request, user_id: int, payload
     #      evidência ainda não → audita, e o webhook audita em seguida: 2
     #      `OPEN_FINANCE_CONNECTED` para 1 conexão. Escolha deliberada, mesma
     #      régua do bloco acima — duplicata é ruído, buraco é perda.
+    # Sync inicial ANTES da auditoria, e não depois: `record_audit_event` abre
+    # `get_conn()` com o default de 30s do pool e faz INSERT/commit SEM prazo por
+    # query (`core/audit.py`), então uma tabela de auditoria travada segura a
+    # requisição — medido: 6,02s de espera por um lock de 6s. Se o cliente
+    # desiste ou o servidor corta nesse vão, a conexão JÁ commitada ficava sem
+    # sync inicial, que é exatamente o desfecho que este bloco existe para
+    # eliminar (Codex, PR #542). `_schedule_pluggy_sync` só empilha a tarefa e
+    # não toca no banco, então antecipá-lo não rouba prazo de ninguém.
+    _schedule_pluggy_sync(str((connection or {}).get("provider_item_id") or ""))
+
     if not conexao_recem_adotada:
         await asyncio.to_thread(
             record_audit_event,
@@ -1747,9 +1770,6 @@ async def open_finance_pluggy_item_route(request: Request, user_id: int, payload
             request=request,
             details={"provider": "pluggy", "item_id": (connection or {}).get("provider_item_id")},
         )
-
-    # Sync inicial: puxa contas + transações do banco recém-conectado.
-    _schedule_pluggy_sync(str((connection or {}).get("provider_item_id") or ""))
 
     snapshot = await asyncio.to_thread(get_open_finance_snapshot, user_id)
     return json.loads(shared.jdump({"ok": True, "connection": connection, **snapshot}))

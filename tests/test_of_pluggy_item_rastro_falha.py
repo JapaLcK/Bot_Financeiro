@@ -237,3 +237,88 @@ def test_falha_no_rastro_do_connect_token_tambem_nasce_com_dono(
     assert falhas[0]["user_id"] == user_id, falhas
     assert "tok-de-teste" not in str(falhas[0]["details"]), (
         f"o token bruto NUNCA pode ir para o log: {falhas}")
+
+
+# ── 5. o `item_id` sobrevive quando o próprio diagnóstico não grava ──────────
+
+def test_item_id_sobrevive_ao_diagnostico_que_nao_grava(
+        user_id, monkeypatch, caplog, webhook_pluggy, auditados):
+    """Apontamento do Codex (PR #542), medido nas duas metades antes do conserto.
+
+    Quando o teto do `_log_com_teto` estoura, o `wait_for` engole o `TimeoutError`;
+    quando o banco do log está fora, o `log_system_event` engole o erro e imprime
+    mensagem GENÉRICA, sem `event_type` e sem `item_id`. Nas duas, o id não sobrava
+    em canal nenhum — e ele é a única chave operacional de uma conexão que este
+    caminho deixa de propósito SEM rastro `pluggy_item`.
+
+    Aqui o `log_system_event` PENDURA: é a metade (a), a que o `_log_com_teto`
+    existe para tolerar, e a que não depende de `system_event_logs` existir no
+    banco de teste. O teto é encurtado para o teste não pagar os segundos reais.
+    Logger que LEVANTA não é o caso de produção — lá ele engole os próprios erros
+    de banco (`core/admin_dashboard.py`) e imprime a mensagem genérica, que é
+    exatamente o que faz o id se perder.
+    """
+    import asyncio as _asyncio
+    import logging as _logging
+
+    _mock_item(monkeypatch, user_id)
+    monkeypatch.setattr(of_routes, "register_item", lambda *a, **k: (_ for _ in ()).throw(
+        psycopg.OperationalError("registry fora do ar")))
+    monkeypatch.setattr(of_routes, "_LOG_DIAG_TIMEOUT_S", 0.05)
+
+    async def _log_que_pendura(*a, **kw):
+        await _asyncio.sleep(30)
+
+    monkeypatch.setattr(of_routes, "log_system_event", _log_que_pendura)
+    client = TestClient(dashboard.app)
+    try:
+        with caplog.at_level(_logging.WARNING, logger="frontend.routes.open_finance"):
+            r = _post(client, user_id, "pia-sem-log")
+
+        assert r.status_code == 200, f"{r.status_code}: {r.text}"
+        assert len(db.get_connections_by_item_id("pia-sem-log")) == 1
+        assert webhook_pluggy == ["pia-sem-log"], webhook_pluggy
+
+        texto = "\n".join(rec.getMessage() for rec in caplog.records)
+        assert "pia-sem-log" in texto, (
+            "o `item_id` não sobrou em canal nenhum: sem o aviso local, o único "
+            f"rastro é a mensagem genérica do logger — {texto!r}")
+        assert "of_item_registry_failed" in texto, texto
+    finally:
+        db.disconnect_open_finance_connection(user_id)
+        _limpa_item("pia-sem-log")
+
+
+# ── 6. o sync é agendado antes da auditoria, que não tem prazo ───────────────
+
+def test_sync_agendado_antes_da_auditoria_sem_prazo(
+        user_id, monkeypatch, eventos, webhook_pluggy):
+    """Apontamento do Codex (PR #542): `record_audit_event` usa `get_conn()` com o
+    default do pool e faz INSERT/commit sem prazo por query (`core/audit.py`) —
+    medido: 6,02s de espera por um lock de 6s. Com ela na frente do agendamento,
+    uma auditoria travada deixava a conexão JÁ commitada sem sync inicial, que é o
+    desfecho que este bloco existe para eliminar.
+
+    A auditoria aqui LEVANTA em vez de travar: é o mesmo ponto do código, sem
+    prender a suíte por segundos. O que se mede é a ORDEM — o sync já foi agendado
+    quando a auditoria falha.
+    """
+    _mock_item(monkeypatch, user_id)
+    monkeypatch.setattr(of_routes, "register_item", lambda *a, **k: (_ for _ in ()).throw(
+        psycopg.OperationalError("registry fora do ar")))
+    monkeypatch.setattr(of_routes, "record_audit_event",
+                        lambda *a, **k: (_ for _ in ()).throw(
+                            psycopg.OperationalError("audit_events travada")))
+    client = TestClient(dashboard.app)
+    try:
+        r = _post(client, user_id, "pia-ordem")
+
+        assert len(db.get_connections_by_item_id("pia-ordem")) == 1, "conexão não commitou"
+        assert webhook_pluggy == ["pia-ordem"], (
+            "conexão commitada e sync inicial NÃO agendado: com a auditoria na "
+            f"frente, é isto que uma `audit_events` travada produzia — {webhook_pluggy}")
+        assert r.status_code == 500, (
+            f"a auditoria que falha continua subindo, como antes: {r.status_code}")
+    finally:
+        db.disconnect_open_finance_connection(user_id)
+        _limpa_item("pia-ordem")
