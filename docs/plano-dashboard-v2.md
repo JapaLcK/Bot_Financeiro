@@ -276,8 +276,14 @@ tecnologia, podendo refazer o que for preciso, com calma (Q5).
     `last_date = hoje` no lote que fecha, e o desfazer (`delete_launch_and_rollback`, em
     `db/accounts.py`) reabre o lote sem devolver o cursor, então a taxa atrasada nunca é
     aplicada. O movimento tem de manter o cursor real, e o desfazer tem de devolver o de
-    antes do resgate. Testes: índice atrasado mais resgate parcial; índice atrasado,
-    resgate total, desfazer e a taxa sair.
+    antes do resgate. E o desfazer do resgate grava o saldo **absoluto** de antes dele,
+    sem olhar o que veio depois: com dois resgates no mesmo lote, desfazer o primeiro
+    apaga o segundo e cria dinheiro. A regra mais simples que fecha isso: **só se desfaz o
+    último movimento de cada lote**; desfazer um anterior é recusado com o motivo (desfaça
+    os seguintes antes). Com ela, a regra do histórico abaixo (as fotos saem a partir do
+    movimento desfeito) nunca apaga um movimento que continua valendo. Testes: índice
+    atrasado mais resgate parcial; índice atrasado, resgate total, desfazer e a taxa sair;
+    dois resgates no mesmo lote e desfazer o primeiro (recusado, nada muda).
 
   **O bloco compara cada investimento com o CDI, e não mostra número da carteira inteira**
   (decisão do dono, 2026-09-25). No Open Finance o banco não diz quando o dinheiro entrou ou
