@@ -264,8 +264,12 @@ tecnologia, podendo refazer o que for preciso, com calma (Q5).
     **Pré-requisito no código de hoje** (faixa Completo, dinheiro, antes do job): o resgate
     parcial (`investment_withdraw_to_account`) grava `last_date = hoje` nos lotes que
     continuam abertos mesmo quando o juro parou antes por falta de taxa, e os dias entre um
-    e outro nunca rendem. O movimento tem de manter o cursor real; teste: índice atrasado
-    mais resgate parcial.
+    e outro nunca rendem. O mesmo vale para o resgate total desfeito: o resgate grava
+    `last_date = hoje` no lote que fecha, e o desfazer (`delete_launch_and_rollback`, em
+    `db/accounts.py`) reabre o lote sem devolver o cursor, então a taxa atrasada nunca é
+    aplicada. O movimento tem de manter o cursor real, e o desfazer tem de devolver o de
+    antes do resgate. Testes: índice atrasado mais resgate parcial; índice atrasado,
+    resgate total, desfazer e a taxa sair.
 
   **O bloco compara cada investimento com o CDI, e não mostra número da carteira inteira**
   (decisão do dono, 2026-09-25). No Open Finance o banco não diz quando o dinheiro entrou ou
