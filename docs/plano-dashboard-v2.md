@@ -287,7 +287,11 @@ tecnologia, podendo refazer o que for preciso, com calma (Q5).
     movimento do investimento** (de qualquer lote); desfazer um anterior é recusado com o
     motivo (desfaça os seguintes antes). Apagar o investimento (`delete_investment`, que
     leva os lotes em cascata) conta como movimento posterior: depois dele, nenhum resgate
-    daquele investimento se desfaz, porque não há lote para reabrir. E a checagem "é o
+    daquele investimento se desfaz, porque não há lote para reabrir — **mesmo que o
+    apagar seja desfeito depois**: o desfazer do apagar recria só a linha do investimento,
+    não os lotes. Esse bloqueio permanente já existe no código de hoje: a recusa por
+    `rowcount` do `delete_launch_and_rollback` (`db/accounts.py`) não reverte resgate cujo
+    lote sumiu, e foi escrita para esta mesma sequência. E a checagem "é o
     último" só vale se ninguém puder mexer no meio: o desfazer tem de pegar **a mesma trava
     por usuário** que o aporte e o resgate usam (`_lock_user`) e segurá-la da checagem até o
     fim — hoje ele só pega a trava quando o movimento é de banco
@@ -299,7 +303,7 @@ tecnologia, podendo refazer o que for preciso, com calma (Q5).
     dois resgates no mesmo lote e desfazer o primeiro (recusado, nada muda); dois lotes,
     o primeiro resgate fechando o lote A exatamente e o segundo só no B, e desfazer o
     primeiro (recusado); resgate total, apagar o investimento e desfazer o resgate
-    (recusado); desfazer e resgatar ao mesmo tempo, e desfazer e apagar o investimento ao
+    (recusado); resgate, apagar, desfazer o apagar e desfazer o resgate (recusado); desfazer e resgatar ao mesmo tempo, e desfazer e apagar o investimento ao
     mesmo tempo (um espera o outro, um deles é recusado de forma limpa, nenhum dinheiro
     criado).
 
