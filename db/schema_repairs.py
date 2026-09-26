@@ -189,8 +189,10 @@ def ensure_lower_name_unique(cur) -> list[str]:
 
     A própria construção do índice é a checagem de duplicata: sem janela de corrida,
     e o CREATE INDEX que falha não deixa índice inválido. Tabela com duplicata é
-    pulada (o boot não pode cair) e devolvida para o chamador avisar no log.
-    Idempotente.
+    pulada (o boot não pode cair), avisada em WARNING e devolvida. WARNING e não
+    `print` porque o `_DashboardHandler` do root (core/observability.py) grava em
+    `system_event_logs`, que é onde alguém vê. Só o nome da tabela: nada de nome
+    nem `user_id`. Idempotente.
     """
     pulou: list[str] = []
     for t in ("investments", "pockets"):
@@ -200,6 +202,8 @@ def ensure_lower_name_unique(cur) -> list[str]:
                 f"on {t} (user_id, lower(name))"
             )
         except psycopg.errors.UniqueViolation:
+            logger.warning("[schema_repairs] AVISO #596: %s tem nome duplicado por "
+                           "maiúscula; índice uq_%s_user_lower_name NÃO criado", t, t)
             pulou.append(t)
     return pulou
 

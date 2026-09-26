@@ -99,6 +99,38 @@ def test_migracao_com_duplicata_pula_so_a_tabela_e_nao_mexe_em_dado(cur_sombra):
     assert _indices_sombra(cur) == ["uq_pockets_user_lower_name"]
 
 
+def test_migracao_com_duplicata_avisa_em_system_event_logs(cur_sombra, caplog):
+    """O aviso é WARNING (não `print`): o `_DashboardHandler` do root o grava em
+    `system_event_logs`. Só o nome da tabela — nada de nome nem `user_id`."""
+    import asyncio
+    import logging
+
+    import core.observability as observability
+    from core.admin_dashboard import ensure_admin_tables
+
+    asyncio.run(ensure_admin_tables())
+    cur_sombra.execute("insert into investments values (7,'cdb',10), (7,'CDB',5)")
+    msg = ("[schema_repairs] AVISO #596: investments tem nome duplicado por maiúscula; "
+           "índice uq_investments_user_lower_name NÃO criado")
+    handler = observability._DashboardHandler()
+    logging.getLogger().addHandler(handler)
+    try:
+        with caplog.at_level(logging.WARNING):
+            assert ensure_lower_name_unique(cur_sombra) == ["investments"]
+    finally:
+        logging.getLogger().removeHandler(handler)
+
+    assert [(r.levelname, r.getMessage()) for r in caplog.records
+            if "#596" in r.getMessage()] == [("WARNING", msg)]
+    with db.get_conn() as conn, conn.cursor() as cur:
+        cur.execute("delete from system_event_logs where message=%s "
+                    "returning level, source, user_id", (msg,))
+        linhas = cur.fetchall()
+        conn.commit()
+    assert linhas and all(tuple(r.values()) == ("warning", "db.schema_repairs", None)
+                          for r in linhas), linhas
+
+
 def test_migracao_sem_duplicata_cria_os_dois_e_e_idempotente(cur_sombra):
     cur = cur_sombra
     cur.execute("insert into investments values (1,'cdb',10), (2,'CDB',5)")
@@ -225,16 +257,66 @@ def _post(uid, path, body):
     return client.post(path, json=body, headers=_csrf_headers(client))
 
 
-def test_painel_criar_caixinha_com_outra_caixa_devolve_a_existente(user_id):
-    """Já existe = 200 com `created: false` e o nome canônico (o dashboard mostra
-    'Caixinha "<canon>" já existe')."""
-    r1 = _post(user_id, f"/pockets/{user_id}", {"name": "Viagem"})
+def _pockets(uid):
+    with db.get_conn() as conn, conn.cursor() as cur:
+        cur.execute("select * from pockets where user_id=%s order by id", (uid,))
+        return cur.fetchall()
+
+
+_JA_EXISTE_CAIXINHA = (400, "Já existe uma caixinha com esse nome.")
+
+
+@pytest.mark.parametrize("repetido", ["viagem", "Viagem"])
+def test_painel_criar_caixinha_que_ja_existe_recusa_sem_mexer_em_nada(user_id, repetido):
+    """Já existe (exato ou com outra caixa) = 400 e nada muda. O 200 `created:false`
+    levava a tela de Metas a reescrever a caixinha que já existia."""
+    promote_to_pro(user_id)
+    db.add_launch_and_update_balance(user_id, "receita", 500, None, "seed")
+    r1 = _post(user_id, f"/pockets/{user_id}",
+               {"name": "viagem", "description": "praia", "interest_rate": 1.1})
     assert r1.status_code == 200 and r1.json()["created"] is True, r1.text
-    r2 = _post(user_id, f"/pockets/{user_id}", {"name": "VIAGEM"})
-    assert r2.status_code == 200, r2.text
-    assert (r2.json()["created"], r2.json()["pocket"]["id"], r2.json()["pocket"]["name"]) == (
-        False, r1.json()["pocket"]["id"], "Viagem")
-    assert [p["name"] for p in db.list_pockets(user_id, accrue=False)] == ["Viagem"]
+    db.pocket_deposit_from_account(user_id, "viagem", 50, None)
+    antes, n = _pockets(user_id), _n_launches(user_id)
+
+    r2 = _post(user_id, f"/pockets/{user_id}", {"name": repetido, "description": "outra",
+                                                 "interest_enabled": False})
+    assert (r2.status_code, r2.json().get("detail")) == _JA_EXISTE_CAIXINHA, r2.text
+    assert _pockets(user_id) == antes and _n_launches(user_id) == n
+
+
+def test_tela_de_metas_com_nome_que_ja_existe_nao_reescreve_a_caixinha(user_id):
+    """O fluxo do `dashboard.js` (saveGoal): POST cria, e só se `ok` faz o PATCH da
+    meta no `pocket.id` devolvido. Com o 200 `created:false`, o PATCH caía na
+    caixinha que já existia."""
+    promote_to_pro(user_id)
+
+    def criar_meta(nome, meta, taxa):
+        r = _post(user_id, f"/pockets/{user_id}", {"name": nome, "interest_rate": taxa})
+        if r.status_code == 200:
+            from tests.test_pockets_endpoints import _auth, _csrf_headers
+            import frontend.finance_bot_websocket_custom as dashboard
+            client = TestClient(dashboard.app)
+            _auth(client, user_id)
+            client.patch(f"/pockets/{user_id}/{r.json()['pocket']['id']}/meta",
+                         json={"target_amount": meta, "interest_rate": taxa},
+                         headers=_csrf_headers(client))
+        return r
+
+    assert criar_meta("viagem", 1000, 1.1).status_code == 200
+    antes = _pockets(user_id)
+    assert antes[0]["target_amount"] == Decimal("1000")
+
+    r = criar_meta("Viagem", 5000, 1.3)
+    assert (r.status_code, r.json().get("detail")) == _JA_EXISTE_CAIXINHA, r.text
+    assert _pockets(user_id) == antes
+
+
+def test_painel_criar_caixinha_com_nome_novo_da_200(user_id):
+    promote_to_pro(user_id)
+    assert _post(user_id, f"/pockets/{user_id}", {"name": "viagem"}).status_code == 200
+    r = _post(user_id, f"/pockets/{user_id}", {"name": "carro"})
+    assert r.status_code == 200 and r.json()["created"] is True, r.text
+    assert [p["name"] for p in _pockets(user_id)] == ["viagem", "carro"]
 
 
 @pytest.mark.parametrize("repetido", ["CDB", "cdb"])

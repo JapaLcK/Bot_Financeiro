@@ -2643,9 +2643,7 @@ def _run_ddl(conn, ddl_statements) -> None:
                 changes = repair_user_fk_cascades(cur)
                 if changes:
                     print(f"[init_db] schema_repairs ajustou {len(changes)} FK(s): {changes}")
-                for t in ensure_lower_name_unique(cur):
-                    print(f"[init_db] AVISO #596: {t} tem nome duplicado por maiúscula; "
-                          f"índice uq_{t}_user_lower_name NÃO criado")
+                ensure_lower_name_unique(cur)
             except Exception as e:
                 print(f"[init_db] schema_repairs falhou: {e}")
                 raise
