@@ -62,6 +62,13 @@ jest.mock("expo-haptics", () => ({
   NotificationFeedbackType: { Success: "success", Warning: "warning", Error: "error" },
 }));
 
+// expo-system-ui é nativo, e todo `TemaProvider` o chama (ver `ui/tema.tsx`):
+// o dublê fica aqui, e não num teste só, para que quem monta o `_layout.tsx`
+// real também não rode o módulo de verdade. `tema.test.tsx` espia esta espiã.
+jest.mock("expo-system-ui", () => ({
+  setBackgroundColorAsync: jest.fn(() => Promise.resolve()),
+}));
+
 // expo-font: controlável por teste. `layout.test.tsx` precisa dos três
 // estados do `_layout.tsx` (carregando, carregado, erro) sem depender de TTF
 // de verdade — o padrão default é "carregado", o caso comum.
