@@ -113,20 +113,25 @@ def get_recent_messages(user_id: int, limit: int = DEFAULT_CONTEXT_WINDOW) -> li
     return out
 
 
-def get_last_messages(user_id: int, n: int) -> list[dict[str, Any]]:
-    """As `n` últimas mensagens do histórico do user, da mais nova para a mais
-    velha: `id`, `role`, `content` e `age` (timedelta medido pelo relógio do
+def get_last_messages(
+    user_id: int, n: int, within: Optional[timedelta] = None,
+) -> list[dict[str, Any]]:
+    """As `n` últimas mensagens do histórico do user (só as criadas há menos de
+    `within`, se dado), da mais nova para a mais velha: `id`, `role`,
+    `content`, `has_tool_calls` e `age` (timedelta medido pelo relógio do
     banco, o mesmo que gravou `created_at`)."""
     with get_conn() as conn, conn.cursor() as cur:
         cur.execute(
             """
-            select id, role, content, now() - created_at as age
+            select id, role, content, tool_calls is not null as has_tool_calls,
+                   now() - created_at as age
             from ai_messages
             where user_id = %s
+              and (%s::interval is null or created_at > now() - %s::interval)
             order by created_at desc, id desc
             limit %s
             """,
-            (int(user_id), int(n)),
+            (int(user_id), within, within, int(n)),
         )
         return cur.fetchall()
 

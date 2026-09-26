@@ -94,17 +94,20 @@ def pergunta_aberta_da_ia(user_id: int) -> int | None:
     Turno da IA que falhou não fecha a pergunta: o runner grava `user` +
     `assistant(ERROR_MSG)`, ou só o `user` se a exceção escapou dele. Sem pular
     esses turnos, a nova tentativa da resposta ("300 reais transporte") cairia
-    no `route()` e viraria despesa. A janela conta da pergunta, não da falha.
+    no `route()` e viraria despesa. Idem para as linhas intermediárias de um
+    turno que chamou tool e depois falhou (`assistant` com `tool_calls` e
+    `tool`): o turno que dá certo sempre termina no `assistant` final. Lê só a
+    janela, sem teto fixo de turnos falhos: a janela conta da pergunta, não da
+    falha, e um `system` (encerramento) fecha.
     """
-    # ponytail: olha só as 6 últimas (3 turnos falhos seguidos); mais que isso
-    # a pergunta fica fechada e o texto segue o route().
-    rows = db.ai_get_last_messages(user_id, 6)
+    # 100: só um teto para não varrer sem limite (50 turnos falhos em 10 min).
+    rows = db.ai_get_last_messages(user_id, 100, within=_JANELA_DA_PERGUNTA)
     for m in rows:
-        if m["role"] == "user" or (m["role"] == "assistant" and m["content"] == ERROR_MSG):
+        if (m["role"] in ("user", "tool")
+                or (m["role"] == "assistant"
+                    and (m["has_tool_calls"] or m["content"] == ERROR_MSG))):
             continue
-        if (m["role"] == "assistant"
-                and m["age"] < _JANELA_DA_PERGUNTA
-                and re.search(r"\?\W*$", m["content"] or "")):
+        if m["role"] == "assistant" and re.search(r"\?\W*$", m["content"] or ""):
             return rows[0]["id"]
         return None
     return None

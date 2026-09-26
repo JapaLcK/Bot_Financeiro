@@ -719,3 +719,64 @@ def test_audio_nao_lido_nao_vaza_para_o_turno_seguinte(monkeypatch):
     diga(uid, "300 reais transporte")
     assert chamadas == []
     assert _lancamentos(uid) == 1
+
+
+# ---------------------------------------------------------------------------
+# Achados do Codex no #598: falha depois de uma tool, e falhas em série.
+# ---------------------------------------------------------------------------
+
+_TOOL_CALL = {"id": "call_1", "type": "function",
+              "function": {"name": "get_balance", "arguments": "{}"}}
+
+
+def _turno_com_tool(uid, texto, final):
+    """O que o runner grava num turno que chamou tool: `user`, `assistant` com
+    `tool_calls`, `tool` e o `assistant` final (ERROR_MSG se falhou depois)."""
+    db.ai_append_message(uid, "user", texto)
+    db.ai_append_message(uid, "assistant", None, tool_calls=[_TOOL_CALL])
+    db.ai_append_message(uid, "tool", '{"saldo": 0}', tool_call_id="call_1",
+                         tool_name="get_balance")
+    db.ai_append_message(uid, "assistant", final)
+
+
+def test_falha_depois_de_tool_nao_encerra_a_pergunta(monkeypatch):
+    from core.services.ai_chat.runner import ERROR_MSG
+    uid, chamadas = _com_ia(monkeypatch)
+
+    def _chat(u, t, **k):
+        chamadas.append(t)
+        if len(chamadas) > 1:
+            return "resposta do agente"
+        _turno_com_tool(u, t, ERROR_MSG)
+        return ERROR_MSG
+    monkeypatch.setattr("core.services.ai_chat.chat", _chat)
+    _ia_disse(uid, ORCAMENTO)
+
+    assert diga(uid, "300 reais transporte") == ERROR_MSG
+    assert diga(uid, "300 reais transporte") == "resposta do agente"
+    assert chamadas == ["300 reais transporte"] * 2
+    assert _lancamentos(uid) == 0
+
+
+def test_cinco_falhas_seguidas_nao_encerram_a_pergunta(monkeypatch):
+    from core.services.ai_chat.runner import ERROR_MSG
+    uid, chamadas = _com_ia(monkeypatch)
+    _ia_disse(uid, ORCAMENTO)
+    for _ in range(5):
+        db.ai_append_message(uid, "user", "300 reais transporte")
+        db.ai_append_message(uid, "assistant", ERROR_MSG)
+
+    assert diga(uid, "300 reais transporte") == "resposta do agente"
+    assert chamadas == ["300 reais transporte"]
+    assert _lancamentos(uid) == 0
+
+
+def test_turno_com_tool_que_responde_sem_pergunta_encerra(monkeypatch):
+    """Positivo: o pulo das linhas de tool não reabre a pergunta respondida."""
+    uid, chamadas = _com_ia(monkeypatch)
+    _ia_disse(uid, ORCAMENTO)
+    _turno_com_tool(uid, "300 reais transporte", "Anotado: R$ 300 em transporte.")
+
+    diga(uid, "gastei 50 no mercado")
+    assert chamadas == []
+    assert _lancamentos(uid) == 1
