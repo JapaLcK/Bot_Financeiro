@@ -3,6 +3,7 @@
 //     outras respostas, e o detalhe/extrato abre dentro da própria resposta;
 //   · "Abrir no painel" leva o estado da resposta para a página, mesmo com outro mês no painel;
 //   · visão compacta: bloco alto corta com "Ver tudo", e o foco num controle cortado abre;
+//   · abrir o detalhe ou o extrato rola até ele; voltar à conversa e fechar não rolam;
 //   · no painel (sem conversa) os blocos seguem escrevendo no estado global.
 import { test, before, after } from "node:test";
 import assert from "node:assert/strict";
@@ -165,12 +166,164 @@ test("\"Abrir no painel\" do dia da semana leva o dia escolhido, mesmo com outro
   const n = Number(await dia.textContent());
   await dia.click();
   const extrato = await r.locator(".ledger-chips").textContent(); // o extrato do dia, dentro da resposta
+  const fechar = await r.locator(".msg-close").count(); // este fecha desmarcando o dia
   await r.locator(".msg-open").click();
   await page.locator("#page-title", { hasText: "Lançamentos" }).waitFor();
   const chips = await page.locator(".ledger-chips").textContent().catch(() => "");
   await ctx.close();
   assert.match(extrato, new RegExp(`dia ${n}(?!\\d)`));
+  assert.equal(fechar, 0);
   assert.match(chips, new RegExp(`dia ${n}(?!\\d)`));
+});
+
+test("\"Fechar extrato\" fecha o extrato aberto por \"Ver N lançamentos\", o foco fica na resposta, e fechado sobrevive à troca de página", async () => {
+  const { ctx, page, erros } = await abrir();
+  const r = await atalho(page, "Pra onde vai meu dinheiro?");
+  await r.locator(".cat", { hasText: "Delivery" }).click();
+  const antes = await r.locator(".msg-close").count();
+  await r.locator("button.link", { hasText: /^Ver \d+ lançamentos/ }).click();
+  await r.locator(".ledger").waitFor();
+  const fechar = r.locator(".msg-close");
+  await r.locator(".msg-foot:has(.msg-close) .msg-more").waitFor(); // a medição da altura chega depois da 1ª pintura
+  // Na linha do "Ver tudo" do extrato, com o mesmo estilo neutro e 32px de toque.
+  const linha = await fechar.evaluate((b) => {
+    const more = b.parentElement.querySelector(".msg-more"), r0 = b.getBoundingClientRect(), r1 = more.getBoundingClientRect();
+    return [b.textContent, b.parentElement.previousElementSibling.querySelector(".ledger") !== null, Math.round(r0.top) === Math.round(r1.top), r0.height >= 32, getComputedStyle(b).color === getComputedStyle(more).color];
+  });
+  await fechar.focus();
+  await page.keyboard.press("Enter");
+  await r.locator(".ledger").waitFor({ state: "detached", timeout: 2000 }).catch(() => {});
+  const estado = (m) => [
+    m.querySelectorAll(".ledger").length, m.querySelectorAll(".msg-close").length,
+    [...m.querySelectorAll(".msg-block article")].map((a) => a.id.replace(/^m\d+-/, "")),
+  ];
+  const depois = await r.evaluate(estado);
+  const foco = await page.evaluate(() => [document.activeElement === document.body, document.activeElement.textContent]);
+  await irPara(page, "#/gastos", "Para onde vai");
+  await irPara(page, "#/piggy", "Converse com o Piggy");
+  await r.locator(".msg-block").first().waitFor();
+  const volta = await r.evaluate(estado);
+  await ctx.close();
+  assert.equal(antes, 0);
+  assert.deepEqual(linha, ["Fechar extrato", true, true, true, true]);
+  assert.deepEqual(depois, [0, 0, ["w-categorias", "w-cat-detalhe"]]); // o detalhe fica
+  assert.deepEqual(foco, [false, "Abrir no painel"]);
+  assert.deepEqual(volta, depois);
+  assert.deepEqual(erros, []);
+});
+
+test("a resposta lê a simulação atual: zerar no Simulador tira \"Com a simulação\" da resposta", async () => {
+  const { ctx, page, erros } = await abrir({ hash: "#/simulador" });
+  await page.locator(".presets .chip").first().click();
+  await page.locator(".sim-facts").waitFor();
+  const c = await atalho(page, "Pra onde vai meu dinheiro?");
+  const n = await respostas(page).count();
+  await c.locator(".chat-follow button", { hasText: "Vai sobrar até o fim do mês?" }).click();
+  await page.waitForFunction((k) => document.querySelectorAll(".chat > .msg-piggy").length > k, n);
+  const r = respostas(page).nth(n);
+  await r.locator(".w-hero").waitFor();
+  const com = await r.locator(".hero-sim dt").allTextContents();
+  await irPara(page, "#/simulador", "Simulador");
+  await page.getByRole("button", { name: "Zerar" }).click();
+  await irPara(page, "#/piggy", "Converse com o Piggy");
+  await r.locator(".w-hero").waitFor();
+  const sem = await r.locator(".hero-sim").count();
+  await ctx.close();
+  assert.deepEqual(com, ["Com a simulação"]);
+  assert.equal(sem, 0);
+  assert.deepEqual(erros, []);
+});
+
+// Rolagem até o bloco que abre na resposta. Os contextos têm movimento reduzido: a rolagem
+// é instantânea. Uma resposta embaixo (a fatura) dá à página para onde rolar.
+async function duasRespostas(page) {
+  const r = await atalho(page, "Pra onde vai meu dinheiro?");
+  await atalho(page, "E a minha fatura?");
+  return r;
+}
+// Registra os blocos da resposta que o app rolou até a tela.
+const espiar = (page) => page.evaluate(() => {
+  window.__rolou = [];
+  const orig = Element.prototype.scrollIntoView;
+  Element.prototype.scrollIntoView = function (o) {
+    if (this.matches(".msg-block")) window.__rolou.push(this.id.replace(/^m\d+-/, ""));
+    return orig.call(this, o);
+  };
+});
+const rolou = (page) => page.evaluate(() => window.__rolou);
+// Clica e espera a página rolar (até 2s; se não rolar, segue e a asserção diz).
+async function clicarERolar(page, alvo) {
+  await alvo.scrollIntoViewIfNeeded();
+  const antes = await page.evaluate(() => scrollY);
+  await alvo.click();
+  await page.waitForFunction((y) => scrollY !== y, antes, { timeout: 2000 }).catch(() => {});
+  return [antes, await page.evaluate(() => scrollY)];
+}
+// Topo do bloco na tela × o fundo da barra de cima.
+const topoEBarra = (bloco) => bloco.evaluate((b) => [Math.round(b.getBoundingClientRect().top), Math.round(document.querySelector(".topbar").getBoundingClientRect().bottom)]);
+
+test("marcar a categoria rola até o detalhe, com o topo logo abaixo da barra de cima", async () => {
+  const { ctx, page, erros } = await abrir();
+  const r = await duasRespostas(page);
+  const [antes, depois] = await clicarERolar(page, r.locator(".cat", { hasText: "Delivery" }));
+  const [topo, barra] = await topoEBarra(r.locator(".msg-block").nth(1));
+  await ctx.close();
+  assert.ok(depois > antes, `scrollY ${antes} → ${depois}`);
+  assert.ok(topo >= barra && topo <= barra + 32, `topo ${topo}, barra ${barra}`);
+  assert.deepEqual(erros, []);
+});
+
+test("\"Ver N lançamentos\" rola até o extrato, com o topo logo abaixo da barra de cima", async () => {
+  const { ctx, page, erros } = await abrir();
+  const r = await duasRespostas(page);
+  await r.locator(".cat", { hasText: "Delivery" }).click();
+  const [antes, depois] = await clicarERolar(page, r.locator("button.link", { hasText: /^Ver \d+ lançamentos/ }));
+  const [topo, barra] = await topoEBarra(r.locator(".msg-block:has(.ledger)"));
+  await ctx.close();
+  assert.ok(depois > antes, `scrollY ${antes} → ${depois}`);
+  assert.ok(topo >= barra && topo <= barra + 32, `topo ${topo}, barra ${barra}`);
+  assert.deepEqual(erros, []);
+});
+
+test("voltar à conversa com o detalhe aberto não rola até ele; abrir de novo, rola", async () => {
+  const { ctx, page, erros } = await abrir();
+  const r = await duasRespostas(page);
+  await r.locator(".cat", { hasText: "Delivery" }).click();
+  await irPara(page, "#/gastos", "Para onde vai");
+  await espiar(page);
+  await irPara(page, "#/piggy", "Converse com o Piggy");
+  await r.locator(".msg-block").nth(1).waitFor();
+  const volta = await rolou(page);
+  await r.locator(".cat", { hasText: "Delivery" }).click(); // desmarca
+  await r.locator(".cat", { hasText: "Mercado" }).click();
+  await page.waitForFunction(() => window.__rolou.length > 0, null, { timeout: 2000 }).catch(() => {});
+  const deNovo = await rolou(page);
+  await ctx.close();
+  assert.deepEqual(volta, []);
+  assert.deepEqual(deNovo, ["b1"]); // a espiã vê a rolagem quando ela acontece
+  assert.deepEqual(erros, []);
+});
+
+test("fechar não rola: \"Fechar extrato\" e desmarcar a categoria", async () => {
+  const { ctx, page, erros } = await abrir();
+  const r = await duasRespostas(page);
+  await espiar(page);
+  await r.locator(".cat", { hasText: "Delivery" }).click();
+  await r.locator("button.link", { hasText: /^Ver \d+ lançamentos/ }).click();
+  await r.locator(".ledger").waitFor();
+  const abriu = await rolou(page);
+  await r.locator(".msg-close").click();
+  await r.locator(".ledger").waitFor({ state: "detached" });
+  const cat = r.locator(".cat", { hasText: "Delivery" });
+  await cat.scrollIntoViewIfNeeded();
+  const y = await page.evaluate(() => scrollY);
+  await cat.click();
+  await r.locator(".msg-block").nth(1).waitFor({ state: "detached" });
+  const depois = [await page.evaluate(() => scrollY), await rolou(page)];
+  await ctx.close();
+  assert.deepEqual(depois, [y, abriu]); // nada rolou depois de abrir
+  assert.deepEqual(abriu, ["b1", "b2"]); // a espiã vê a rolagem quando ela acontece
+  assert.deepEqual(erros, []);
 });
 
 test("visão compacta: \"Ver tudo\" só em bloco alto, abre no lugar, e o foco num controle cortado abre", async () => {
@@ -178,7 +331,7 @@ test("visão compacta: \"Ver tudo\" só em bloco alto, abre no lugar, e o foco n
   const f = await atalho(page, "E a minha fatura?"); // fatura (alto) e parcelas (baixo)
   await f.locator(".msg-block[data-cut]").waitFor(); // a medição da altura chega depois da 1ª pintura
   const blocos = await f.evaluate((m) => [...m.querySelectorAll(".msg-block")].map((b) => {
-    const btn = b.nextElementSibling?.matches(".msg-more") ? b.nextElementSibling : null;
+    const btn = b.nextElementSibling?.matches(".msg-foot") ? b.nextElementSibling.querySelector(".msg-more") : null;
     return [Math.round(b.getBoundingClientRect().height), btn && [btn.textContent, btn.getAttribute("aria-expanded"), btn.getAttribute("aria-controls") === b.id]];
   }));
   await f.locator(".msg-more").click();
@@ -197,7 +350,7 @@ test("visão compacta: \"Ver tudo\" só em bloco alto, abre no lugar, e o foco n
   await bloco.locator("button").nth(visivel).focus();
   const naoAbriu = await bloco.getAttribute("data-cut");
   await page.keyboard.press("Tab");
-  const depois = await bloco.evaluate((b, i) => [b.hasAttribute("data-cut"), document.activeElement === b.querySelectorAll("button")[i], b.getBoundingClientRect().height > 340, b.nextElementSibling.getAttribute("aria-expanded")], cortado);
+  const depois = await bloco.evaluate((b, i) => [b.hasAttribute("data-cut"), document.activeElement === b.querySelectorAll("button")[i], b.getBoundingClientRect().height > 340, b.nextElementSibling.querySelector(".msg-more").getAttribute("aria-expanded")], cortado);
   await ctx.close();
   assert.equal(blocos[0][0], 340);
   assert.deepEqual(blocos[0][1], ["Ver tudo", "false", true]);

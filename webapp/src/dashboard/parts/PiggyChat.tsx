@@ -1,9 +1,8 @@
 import { useEffect, useRef, useState, type ReactNode } from "react";
-import { PLAN } from "../lib/api";
 import { ask, useConversation, type Msg } from "../lib/conversation";
-import { locked, readProfile } from "../lib/profiles.js";
+import { readProfile } from "../lib/profiles.js";
 import { BY_PROFILE, COMMON } from "../lib/prompts.js";
-import { answer, type TopicId } from "../lib/topics";
+import type { TopicId } from "../lib/topics";
 import { FrameScope } from "./Frame";
 import { LiveAnswer } from "./LiveAnswer";
 
@@ -48,23 +47,6 @@ export function PiggyChat() {
       <p className="page-lede">Pergunte sobre gastos, fatura, metas e investimentos. A resposta vem com os seus números.</p>
     </header>
   );
-
-  if (locked("piggy", PLAN)) {
-    const sample: Msg = { id: 0, role: "piggy", ...answer("categoria", "delivery") };
-    return (
-      <>
-        {head}
-        <section className="chat-plus" aria-label="Exemplo de conversa">
-          <p className="msg-user">Quanto eu gastei com delivery?</p>
-          <div className="msg-piggy"><PiggySays m={sample} live={false} /></div>
-          <div className="chat-plus-cta">
-            <p><b>Disponível no Plus.</b> O Piggy responde com os seus números e mostra os gráficos na conversa.</p>
-            <a className="btn btn-primary" href="../frontend/precos.html">Conhecer o Plus</a>
-          </div>
-        </section>
-      </>
-    );
-  }
 
   if (!msgs.length) {
     const profile = readProfile() ?? "padrao";

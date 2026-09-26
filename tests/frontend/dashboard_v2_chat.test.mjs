@@ -6,7 +6,9 @@
 //   · os 8 assuntos respondem sem erro, sem id repetido na página;
 //   · os blocos da resposta são vivos: dashboard_v2_chat_blocos.test.mjs;
 //   · a conversa sobrevive à troca de página e some ao recarregar;
-//   · estado vazio com as sugestões do perfil primeiro; Essencial vê o convite do Plus.
+//   · estado vazio com as sugestões do perfil primeiro;
+//   · o Essencial conversa como os outros planos (em produção ele tem IA, com cota:
+//     core/services/plan_limits.py, `ai_conversational_enabled`).
 import { test, before, after } from "node:test";
 import assert from "node:assert/strict";
 import { execSync } from "node:child_process";
@@ -178,17 +180,20 @@ test("estado vazio: as sugestões do perfil vêm primeiro e respondem", async ()
   assert.equal(blocos, 2); // Rendimento × CDI + Onde está o dinheiro
 });
 
-test("Essencial: a conversa vira convite e a barra leva até ele", async () => {
-  const { ctx, page } = await abrir({ hash: "#/gastos", qs: "?plano=essencial" });
-  const barra = await page.locator(".askbar").evaluate((a) => [a.tagName, a.getAttribute("href"), a.textContent]);
-  await page.locator(".askbar").click();
-  await page.locator(".chat-plus").waitFor();
-  const r = await page.evaluate(() => [!!document.querySelector("#askbar-input"), document.querySelector(".chat-plus-cta a").getAttribute("href")]);
+test("Essencial: conversa normal, a barra pergunta e o Piggy responde", async () => {
+  const { ctx, page, erros } = await abrir({ hash: "#/gastos", qs: "?plano=essencial" });
+  const barra = await page.locator(".askbar").evaluate((a) => a.tagName);
+  await perguntar(page, "oi");
+  await page.locator(".chat > .msg-piggy").first().waitFor();
+  const r = await page.evaluate(() => [
+    document.querySelector(".chat .msg-user").textContent,
+    document.querySelectorAll(".chat .msg-piggy .chat-follow button").length > 0,
+    document.querySelectorAll(".chat-plus").length,
+  ]);
   await ctx.close();
-  assert.equal(barra[0], "A");
-  assert.equal(barra[1], "#/piggy");
-  assert.match(barra[2], /no Plus/);
-  assert.deepEqual(r, [false, "../frontend/precos.html"]);
+  assert.equal(barra, "FORM");
+  assert.deepEqual(r, ["oi", true, 0]);
+  assert.deepEqual(erros, []);
 });
 
 test("320 e 390: a conversa não rola para o lado e a barra fica acima da de baixo", async () => {
