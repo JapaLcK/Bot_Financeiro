@@ -221,13 +221,11 @@ _MOVIDAS = ("recurring_expenses", "recurring_charges", "recurring_incomes", "rec
 
 
 def test_positivo_itens_sem_lancamento_vao_para_a_conta_do_site(user_id):
-    from datetime import date
-
     from db.bills import list_bills
     from db.budgets import list_budgets
     from db.categories import list_custom_category_names
     from db.household_budget import get_config, get_monthly_income
-    from db.recurring import find_recurring_candidate, list_due_recurring_expenses, list_recurring_expenses
+    from db.recurring import find_recurring_candidate, list_active_autopay_recurrings, list_recurring_expenses
     from db.recurring_income import list_recurring_incomes
 
     wa_phone, wa_uid = _wa_dono_do_numero()
@@ -247,9 +245,9 @@ def test_positivo_itens_sem_lancamento_vao_para_a_conta_do_site(user_id):
     prefs = db.get_daily_report_prefs(user_id)
     assert (prefs["hour"], prefs["minute"]) == (7, 30)
     assert find_recurring_candidate(user_id, "netflix", 39.9, current_year=2026, current_month=9) == 0
-    devidos = [x for x in list_due_recurring_expenses(today=date(2026, 3, 10)) if x["name"] == "Aluguel"
-               and x["user_id"] in (user_id, wa_uid)]
-    assert [x["user_id"] for x in devidos] == [user_id], "o cron cobraria na conta que sumiu"
+    avisos = [x for x in list_active_autopay_recurrings() if x["name"] == "Aluguel"
+              and x["user_id"] in (user_id, wa_uid)]
+    assert [x["user_id"] for x in avisos] == [user_id], "o aviso de vencimento iria para a conta que sumiu"
     for t in _MOVIDAS:
         n = _sql(f"select count(*) as n from {t} where user_id=%s", (wa_uid,))[0]["n"]
         assert n == 0, f"{t}: {n} linha(s) presa(s) na origem"

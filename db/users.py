@@ -68,7 +68,8 @@ class MergeRefused(Exception):
 # Onde mora "dado financeiro" para a recusa do `merge_users`. Com linha nestas
 # tabelas dos DOIS lados a junção colide (user_seq, nome de caixinha/investimento,
 # arquivo OFX...) — e o dono decidiu recusar em vez de escolher o que sobra.
-# Recorrentes e contas a pagar entram para não cobrar em dobro (dono, 2026-09-26);
+# Recorrentes e contas a pagar entram para não duplicar previsão e lembrete — desde
+# a Q42 o recorrente não lança mais (dono, 2026-09-26);
 # `recurring_charges`/`recurring_income_credits` só existem com o pai.
 _TABELAS_FINANCEIRAS = ("launches", "pockets", "investments", "credit_cards", "ofx_imports",
                         "recurring_expenses", "recurring_incomes", "bill_instances")
