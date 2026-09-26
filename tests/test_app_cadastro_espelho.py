@@ -88,3 +88,29 @@ def test_fronteiras_do_nome_batem_com_nome_min_e_nome_max(monkeypatch):
     longo = _register(monkeypatch, name="x" * (nome_max + 1))
     assert longo.status_code == 400, longo.text
     assert _register(monkeypatch, name="x" * nome_max).status_code == 200
+
+
+def test_fronteiras_do_nome_no_complete_signup_do_google(monkeypatch):
+    """O `complete-signup` do Google tem os próprios literais 2..50
+    (`db/google_auth.py`), e o app valida o nome do cadastro Google com os
+    mesmos `NOME_MIN`/`NOME_MAX`. O pré-cadastro sobrevive às recusas: o nome é
+    conferido antes de qualquer escrita, então o mesmo token serve às três."""
+    import db
+
+    email = f"espelho-google-{uuid.uuid4().hex[:10]}@example.com"
+    token = db.create_pending_google_signup(f"sub-{email}", email, None)
+    telefone = f"55119{uuid.uuid4().int % 100_000_000:08d}"
+
+    def _completa(nome: str):
+        return TestClient(dashboard.app).post(
+            "/auth/google/complete-signup",
+            headers={dashboard.APP_CLIENT_HEADER: "app"},
+            json={"token": token, "name": nome, "phone": telefone, "accepted_terms": True},
+        )
+
+    nome_max = _constante("NOME_MAX")
+    curto = _completa("x" * (_constante("NOME_MIN") - 1))
+    assert curto.status_code == 400, curto.text
+    longo = _completa("x" * (nome_max + 1))
+    assert longo.status_code == 400, longo.text
+    assert _completa("x" * nome_max).status_code == 200

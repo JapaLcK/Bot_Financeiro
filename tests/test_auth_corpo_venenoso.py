@@ -99,6 +99,7 @@ CORPOS = {
                                "use_backup": False},
     "/auth/google/complete-signup": {"token": "tok-inexistente", "name": "Fulano",
                                      "phone": "+5511999990000", "accepted_terms": True},
+    "/auth/google/exchange": {"code": "codigo-inexistente"},
 }
 
 # Todo campo `str` de todas elas, derivado do corpo e não escrito à mão: rota
@@ -118,6 +119,7 @@ ACENTO_ESPERADO = {
     "/auth/reset-password": 400,    # "Link inválido ou expirado"
     "/auth/mfa/verify-login": 400,  # "Sessão MFA expirada"
     "/auth/google/complete-signup": 400,  # token pendente inexistente
+    "/auth/google/exchange": 400,         # google_code_invalid
 }
 # Campo de TEXTO LIVRE onde o acento/emoji entra (`token` e `challenge` são
 # nossos, nunca têm acento).
