@@ -2,7 +2,7 @@
 
 `db/accounts.py:import_ofx_launches_bulk` alimenta `ofx_service.py:57`
 ("💰 Saldo final"), `statement_service.py:74` ("💰 Saldo atual") e
-`handle_incoming.py:774` ("🏦 Saldo atual") — por isso o conserto é na FONTE e
+`handle_incoming.py:787` ("🏦 Saldo atual") — por isso o conserto é na FONTE e
 nenhum dos três formatadores tem uma linha de diff.
 
 Dois ramos sobrescreviam o conserto depois dele, um em cada arquivo de
@@ -48,7 +48,7 @@ def test_relatorio_ofx_traz_a_carteira_exibida(uid_pro, ia_fora):
     """`db/accounts.py:import_ofx_launches_bulk` alimenta TRÊS telas com o mesmo
     `new_balance`: `core/services/ofx_service.py:57` ("💰 Saldo final"),
     `core/services/statement_service.py:74` ("💰 Saldo atual") e
-    `core/handle_incoming.py:774`. Um produtor, três superfícies — por isso o
+    `core/handle_incoming.py:787`. Um produtor, três superfícies — por isso o
     conserto é na fonte e nenhum dos três formatadores mudou.
 
     Chega no produtor sem passar por `ofxparse`: a montagem das linhas é do
