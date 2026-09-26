@@ -762,16 +762,21 @@ def _is_natural_credit_purchase(text: str) -> bool:
     return any(token in norm for token in ("cartao", "credito"))
 
 
-def cartao_manual_da_compra(user_id: int, text: str) -> int | None:
-    """O cartão que a compra no crédito usaria, se ele existe e NÃO é
-    sincronizado pelo Open Finance; senão None. É a mesma resolução do
-    `add_credit_from_entities`: o nome citado, ou o cartão padrão. Com banco
-    conectado, só cartão manual continua registrando na fatura (Q2b)."""
+def compra_fica_com_o_of(user_id: int, text: str) -> bool:
+    """Com banco conectado, a compra no crédito fica com o Open Finance (não
+    registra) quando o cartão que ela usaria é sincronizado, ou quando o usuário
+    não tem nenhum cartão manual. Cartão não resolvido (nome desconhecido, sem
+    padrão) com cartão manual existente cai na validação de sempre (Q2b). A
+    resolução é a do `add_credit_from_entities`: o nome citado, ou o padrão."""
     _dt, sem_data = extract_date_from_text(text)
     nome, _ = _extract_card_reference_for_purchase(user_id, (sem_data or text).strip())
     card_id = get_card_id_by_name(user_id, nome) if nome else get_default_card_id(user_id)
     card = get_card_by_id(user_id, card_id) if card_id else None
-    return card_id if card and not card.get("of_sync_active") else None
+    if card:
+        return bool(card.get("of_sync_active"))
+    # ponytail: uma consulta por cartão; o usuário tem poucos.
+    return all((get_card_by_id(user_id, c["id"]) or {}).get("of_sync_active")
+               for c in list_cards(user_id))
 
 
 def _extract_card_reference_for_purchase(user_id: int, text: str) -> tuple[str | None, str | None]:
@@ -940,7 +945,7 @@ def try_handle_natural_credit_purchase(user_id: int, text: str) -> str | None:
     # fatura; o resto chega pelo Open Finance. Aqui, e não em cada chamador:
     # `add()`, a entrada rápida e o `credit.handle` passam todos por esta porta.
     from core.handlers import forma_pagamento as fp
-    if fp.regra_ativa(user_id) and not cartao_manual_da_compra(user_id, text):
+    if fp.regra_ativa(user_id) and compra_fica_com_o_of(user_id, text):
         return fp.msg_banco(user_id, "despesa", parse_money(text))
 
     dt_evento, text_without_date = extract_date_from_text(text)

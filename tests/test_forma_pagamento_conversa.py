@@ -16,7 +16,8 @@ import pytest
 
 import db
 from tests._fusao_of_helpers import ia_fora, manda, uid_pro  # noqa: F401 (fixtures)
-from tests.test_manual_launches_carteira_piggy import _connect_fake_bank, _importa_of_tx
+from tests.test_manual_launches_carteira_piggy import (
+    _cobertura_open_finance, _connect_fake_bank, _importa_of_tx)
 from conftest import promote_to_pro
 from utils_date import today_tz
 
@@ -115,6 +116,39 @@ def test_a4_cartao_manual_padrao_vai_para_a_fatura(com_of, ia_fora):
     assert compras_credito(com_of) == 1
     assert manuais(com_of) == 0
     assert carteira(com_of) == pytest.approx(antes)
+
+
+# Cartão NÃO resolvido com cartão manual existente: a validação de sempre, não
+# "o Open Finance traz" (Q2b; review Codex P2 no #633).
+
+def test_a4_dois_manuais_sem_padrao_pergunta_o_padrao(com_of, ia_fora):
+    db.create_card(com_of, "Inter", closing_day=10, due_day=17)
+    db.create_card(com_of, "C6", closing_day=10, due_day=17)
+    r = manda(com_of, "gastei 50 no cartão")
+    assert "cartão padrão" in r and "Não registrei" not in r, r
+    assert manuais(com_of) == 0 and compras_credito(com_of) == 0
+
+
+def test_a4_manual_e_nome_desconhecido_diz_que_nao_achou(com_of, ia_fora):
+    db.create_card(com_of, "Inter", closing_day=10, due_day=17)
+    r = manda(com_of, "gastei 50 no cartão Foo")
+    assert "Não achei o cartão 'Foo'" in r, r
+    assert manuais(com_of) == 0 and compras_credito(com_of) == 0
+
+
+def test_a4_sem_manual_e_nome_desconhecido_o_open_finance_traz(com_of, ia_fora):
+    r = manda(com_of, "gastei 50 no cartão Foo")
+    assert "Não registrei" in r and "Open Finance" in r, r
+    assert manuais(com_of) == 0 and compras_credito(com_of) == 0
+
+
+def test_a4_cartao_sincronizado_nomeado_o_open_finance_traz(com_of, ia_fora):
+    padrao = db.create_card(com_of, "Inter", closing_day=10, due_day=17)
+    db.set_default_card(com_of, padrao)
+    _cobertura_open_finance(com_of, db.create_card(com_of, "Nubank", closing_day=10, due_day=17))
+    r = manda(com_of, "gastei 50 no cartão Nubank")
+    assert "Não registrei" in r and "Open Finance" in r, r
+    assert manuais(com_of) == 0 and compras_credito(com_of) == 0
 
 
 def test_a5_cartao_de_debito_com_of_nao_vira_credito(com_of, ia_fora):

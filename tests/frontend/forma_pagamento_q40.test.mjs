@@ -67,7 +67,7 @@ async function abreEscolha(page, exige) {
   await page.evaluate((e) => {
     _billsExigeForma = e;
     window.__prompts = [];
-    window.prompt = (msg, pre) => { window.__prompts.push(msg); return "132,50"; };
+    window.prompt = (msg) => { window.__prompts.push(msg); return "132,50"; };
     window.__fim = payBill(7, 120, "Luz", true);
   }, exige);
 }
