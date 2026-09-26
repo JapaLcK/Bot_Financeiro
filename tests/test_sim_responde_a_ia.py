@@ -251,7 +251,7 @@ def test_sem_ia_no_plano_grava_pelo_route(monkeypatch):
 
 # Cota da IA esgotada (v2: todo tier tem IA, só a cota a tira) com a pergunta
 # aberta: aviso de cota, sem gravar; a pergunta fecha (achado do Codex).
-COTA = "Suas mensagens com a Piggy deste mês acabaram"
+COTA = "Suas mensagens com o Piggy deste mês acabaram"
 
 
 def _sem_cota(monkeypatch):

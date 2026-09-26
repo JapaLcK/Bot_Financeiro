@@ -4881,7 +4881,7 @@ async def _billing_checkout_for_user(stripe_mod, user_id: int, plan: str, interv
             locale="pt-BR",
             allow_promotion_codes=True,
             # `td` = dias de trial concedidos NESTA sessão. `pl` = plano escolhido.
-            # `ia` = cota mensal de mensagens da Piggy nesse plano. A tela de
+            # `ia` = cota mensal de mensagens do Piggy nesse plano. A tela de
             # confirmação usa os três na cópia. Sem `td` o front chutava 30, que
             # quebra se trial_days_total()/PRO_TRIAL_DAYS mudar; sem `pl` ele
             # parabenizava TODO mundo pelo Plus, inclusive quem comprou Essencial

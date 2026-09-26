@@ -1,4 +1,5 @@
-import { createContext, useContext, useMemo, type ReactNode } from "react";
+import * as SystemUI from "expo-system-ui";
+import { createContext, useContext, useEffect, useMemo, type ReactNode } from "react";
 import { useColorScheme } from "react-native";
 
 import { claro, escuro, type Paleta } from "@/ui/tokens";
@@ -12,6 +13,12 @@ interface ContextoTema {
 
 const Contexto = createContext<ContextoTema | null>(null);
 
+// Cor cosmética: se o nativo recusar, a janela fica branca como antes — a
+// rejeição não pode estourar e derrubar nada.
+function pintarJanela(cor: string) {
+  SystemUI.setBackgroundColorAsync(cor).catch(() => {});
+}
+
 /**
  * `esquema` forçado é para telas que precisam de um tema fixo (catálogo do
  * `/_ds`, por exemplo); sem ele, segue `useColorScheme()` — o app não repete o
@@ -24,6 +31,22 @@ export function TemaProvider(props: { esquema?: Esquema; children: ReactNode }) 
     () => ({ esquema, cores: esquema === "dark" ? escuro : claro }),
     [esquema],
   );
+
+  // A janela nativa por baixo das telas é branca por padrão e aparece onde
+  // nenhuma View cobre: nos cantos arredondados do teclado do iOS, por
+  // exemplo. Pinta ela com o `bg` do tema em vigor. Um provider aninhado (o
+  // tema forçado do `/_ds`) devolve a cor do de fora ao desmontar.
+  // ponytail: sistema trocando de tema COM um provider aninhado montado deixa
+  // a janela no tema do de fora (o efeito do pai roda depois do do filho) até
+  // o aninhado trocar ou desmontar — só o catálogo de dev aninha hoje.
+  const bgPai = useContext(Contexto)?.cores.bg;
+  useEffect(() => {
+    pintarJanela(valor.cores.bg);
+    return () => {
+      if (bgPai) pintarJanela(bgPai);
+    };
+  }, [valor.cores.bg, bgPai]);
+
   return <Contexto.Provider value={valor}>{props.children}</Contexto.Provider>;
 }
 

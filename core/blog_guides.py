@@ -19,16 +19,16 @@ from __future__ import annotations
 GUIDES: list[dict] = [
     {
         "slug": "registrar-gastos-whatsapp",
-        "title": "Como registrar gastos falando com a Piggy no WhatsApp",
+        "title": "Como registrar gastos falando com o Piggy no WhatsApp",
         "category": "Guia",
         "emoji": "💬",
         "sticker": "hello",
         "read_time": "4 min",
-        "description": "Registrar um gasto no PigBank é só mandar mensagem pra Piggy no WhatsApp, do jeito que sair na cabeça. Veja como.",
+        "description": "Registrar um gasto no PigBank é só mandar mensagem pro Piggy no WhatsApp, do jeito que sair na cabeça. Veja como.",
         "body": """
 <p>No PigBank você não preenche formulário nem abre planilha pra anotar um gasto.
-Você <strong>conversa com a Piggy no WhatsApp</strong>, do jeito que a frase sair na
-cabeça — ela entende, categoriza e guarda pra você.</p>
+Você <strong>conversa com o Piggy no WhatsApp</strong>, do jeito que a frase sair na
+cabeça — ele entende, categoriza e guarda pra você.</p>
 
 <h2>Mande a mensagem do seu jeito</h2>
 <p>Não existe fórmula certa. Todas essas funcionam:</p>
@@ -38,20 +38,20 @@ cabeça — ela entende, categoriza e guarda pra você.</p>
   <li>"paguei 120 de farmácia"</li>
   <li>"recebi 2000 de salário"</li>
 </ul>
-<p>A Piggy identifica o valor, se é receita ou despesa, e chuta a categoria
-(alimentação, transporte, saúde…). Se ela errar a categoria, é só corrigir — e
-ela <strong>aprende</strong> a sua preferência pra da próxima vez já acertar.</p>
+<p>O Piggy identifica o valor, se é receita ou despesa, e chuta a categoria
+(alimentação, transporte, saúde…). Se ele errar a categoria, é só corrigir — e
+ele <strong>aprende</strong> a sua preferência pra da próxima vez já acertar.</p>
 
-<h2>Ela confirma antes de salvar</h2>
-<p>Pra você nunca registrar algo errado sem querer, a Piggy mostra o que entendeu
-e espera seu ok antes de gravar. Anotou errado? Responde ali mesmo que ela ajusta.</p>
+<h2>Ele confirma antes de salvar</h2>
+<p>Pra você nunca registrar algo errado sem querer, o Piggy mostra o que entendeu
+e espera seu ok antes de gravar. Anotou errado? Responde ali mesmo que ele ajusta.</p>
 
 <h2>Tirou foto do cupom? Manda também</h2>
 <p>Recebeu um comprovante de Pix, uma nota fiscal ou a foto de um cupom? Manda a
-imagem que a Piggy lê os dados e monta o lançamento pra você conferir. (Leitura de
+imagem que o Piggy lê os dados e monta o lançamento pra você conferir. (Leitura de
 imagem faz parte do PigBank+.)</p>
 
-<aside class="g-callout"><div class="g-callout-ico">🐷</div><div><span class="g-callout-k">Dica da Piggy</span><p>Anote na hora que gasta — ainda no caixa ou dentro do Uber. Deixar pra depois é a receita pra esquecer, e o que não é anotado não aparece nos seus relatórios.</p></div></aside>
+<aside class="g-callout"><div class="g-callout-ico">🐷</div><div><span class="g-callout-k">Dica do Piggy</span><p>Anote na hora que gasta — ainda no caixa ou dentro do Uber. Deixar pra depois é a receita pra esquecer, e o que não é anotado não aparece nos seus relatórios.</p></div></aside>
 
 <h2>Comandos rápidos que vale conhecer</h2>
 <ul>
@@ -60,14 +60,14 @@ imagem faz parte do PigBank+.)</p>
   <li><strong>apagar</strong> — remove o último lançamento (ou um específico)</li>
 </ul>
 <p>E se quiser só conversar — "onde eu mais gastei esse mês?" — pode perguntar
-normal. A Piggy responde com base nos seus próprios números.</p>
+normal. O Piggy responde com base nos seus próprios números.</p>
 
 <p>A ideia é essa: quanto menos fricção pra anotar, mais você anota. E quanto mais
 você anota, mais o PigBank te mostra pra onde seu dinheiro está indo.</p>
 
 <div class="g-takeaways"><h4>🐷 Resumindo</h4>
-<div class="g-tk"><span class="c">1</span><span>Registrar é só mandar mensagem pra Piggy, do jeito que a frase sair na cabeça.</span></div>
-<div class="g-tk"><span class="c">2</span><span>Ela confirma antes de salvar — anotou errado, corrige ali mesmo.</span></div>
+<div class="g-tk"><span class="c">1</span><span>Registrar é só mandar mensagem pro Piggy, do jeito que a frase sair na cabeça.</span></div>
+<div class="g-tk"><span class="c">2</span><span>Ele confirma antes de salvar — anotou errado, corrige ali mesmo.</span></div>
 <div class="g-tk"><span class="c">3</span><span>Foto de cupom ou comprovante também vira lançamento (recurso do PigBank+).</span></div>
 </div>
 """,
@@ -102,7 +102,7 @@ esse valor e mostra o quanto você já caminhou até a meta.</p>
 <ul>
   <li>No dashboard, clique em <strong>+ Nova</strong> na área de caixinhas.</li>
   <li>Dê um nome e (se quiser) uma meta em reais.</li>
-  <li>Pra guardar, faça um aporte — pelo dashboard ou pedindo pra Piggy:
+  <li>Pra guardar, faça um aporte — pelo dashboard ou pedindo pro Piggy:
       "guarda 200 na viagem".</li>
 </ul>
 <p>Suas caixinhas se organizam sozinhas por saldo, então a que tem mais dinheiro
@@ -133,7 +133,7 @@ guardado aparece primeiro.</p>
 <p>Ou seja: aportar numa caixinha não some com o seu dinheiro — ele continua seu,
 só que reservado pra um objetivo.</p>
 
-<aside class="g-callout"><div class="g-callout-ico">🐷</div><div><span class="g-callout-k">Dica da Piggy</span><p>Guarde <strong>assim que o dinheiro entra</strong>, não com o que sobra no fim do mês. O que sobra pra guardar é sempre menor do que a gente imagina.</p></div></aside>
+<aside class="g-callout"><div class="g-callout-ico">🐷</div><div><span class="g-callout-k">Dica do Piggy</span><p>Guarde <strong>assim que o dinheiro entra</strong>, não com o que sobra no fim do mês. O que sobra pra guardar é sempre menor do que a gente imagina.</p></div></aside>
 
 <h2>Uma regra importante</h2>
 <p>Uma caixinha <strong>não pode ser apagada enquanto tiver saldo</strong>. É de
@@ -178,7 +178,7 @@ da fatura que ainda vai fechar. Nada de esperar o e-mail do banco pra descobrir.
 faturas dos próximos meses, com a identificação de qual parcela é qual (1/12,
 2/12…), pra você saber exatamente quanto do cartão já está comprometido lá na frente.</p>
 
-<aside class="g-callout"><div class="g-callout-ico">🐷</div><div><span class="g-callout-k">Dica da Piggy</span><p>Pagou só o mínimo? O resto vira <strong>crédito rotativo</strong> — os juros mais caros que existem. Acompanhar a fatura durante o mês é o que te ajuda a pagar tudo e fugir dessa bola de neve.</p></div></aside>
+<aside class="g-callout"><div class="g-callout-ico">🐷</div><div><span class="g-callout-k">Dica do Piggy</span><p>Pagou só o mínimo? O resto vira <strong>crédito rotativo</strong> — os juros mais caros que existem. Acompanhar a fatura durante o mês é o que te ajuda a pagar tudo e fugir dessa bola de neve.</p></div></aside>
 
 <h2>Lembretes pra não perder o vencimento</h2>
 <p>Dá pra ligar lembretes por cartão, avisando alguns dias antes do vencimento.
@@ -251,7 +251,7 @@ mão pesa, o que ajuda a criar pequenas regras ("sexta é dia de segurar").</p>
 <p>Um resumo direto: quanto entrou, quanto saiu, quanto <strong>sobrou</strong> e o
 que você guardou. É o "como foi o mês" em uma olhada.</p>
 
-<aside class="g-callout"><div class="g-callout-ico">🐷</div><div><span class="g-callout-k">Dica da Piggy</span><p>Olhou o relatório e uma categoria te surpreendeu? Esse é o ouro. <strong>Ataque a surpresa</strong> — quase sempre é onde tem gordura pra cortar sem dor.</p></div></aside>
+<aside class="g-callout"><div class="g-callout-ico">🐷</div><div><span class="g-callout-k">Dica do Piggy</span><p>Olhou o relatório e uma categoria te surpreendeu? Esse é o ouro. <strong>Ataque a surpresa</strong> — quase sempre é onde tem gordura pra cortar sem dor.</p></div></aside>
 
 <h2>Como usar de verdade</h2>
 <p>Não precisa virar analista. Escolha <strong>uma</strong> visão por mês pra
@@ -300,7 +300,7 @@ se precisa de mais prazo.</p>
 <h2>3. Transforme a meta numa caixinha</h2>
 <p>Crie uma caixinha com o nome do objetivo e a meta em reais. Cada aporte te
 mostra a barrinha andando — e ver o progresso é o que mantém você no jogo. Se
-quiser, peça pra Piggy guardar assim que o salário cair.</p>
+quiser, peça pro Piggy guardar assim que o salário cair.</p>
 
 <div class="g-goal">
   <div class="g-goal-top"><span class="g-goal-name">✈️ Viagem pro Chile</span><span class="g-goal-pct">45%</span></div>
@@ -312,7 +312,7 @@ quiser, peça pra Piggy guardar assim que o salário cair.</p>
 <p>Bateu 25%, metade, 75%? Reconheça. Meta longa sem marco pelo caminho cansa;
 com marcos, cada etapa vira uma pequena vitória.</p>
 
-<aside class="g-callout"><div class="g-callout-ico">🐷</div><div><span class="g-callout-k">Dica da Piggy</span><p>Meta que só funciona "num mês perfeito" quebra no primeiro imprevisto. Melhor uma <strong>meta menor que você cumpre</strong> do que uma enorme que você abandona.</p></div></aside>
+<aside class="g-callout"><div class="g-callout-ico">🐷</div><div><span class="g-callout-k">Dica do Piggy</span><p>Meta que só funciona "num mês perfeito" quebra no primeiro imprevisto. Melhor uma <strong>meta menor que você cumpre</strong> do que uma enorme que você abandona.</p></div></aside>
 
 <h2>5. Reavalie sem culpa</h2>
 <p>Mudou de vida, apertou o mês? Ajuste o valor ou o prazo. Uma meta é uma
@@ -343,7 +343,7 @@ a sério no PigBank, em várias camadas — não como enfeite, mas por padrão.<
 no banco de dados. Mesmo internamente, esses dados não trafegam em texto puro —
 seguem a lógica de minimizar quem consegue enxergar o quê, em linha com a LGPD.</p>
 
-<aside class="g-callout"><div class="g-callout-ico">🐷</div><div><span class="g-callout-k">Dica da Piggy</span><p>Ative a <strong>verificação em duas etapas</strong> hoje — leva 2 minutos e é a barreira que segura sua conta mesmo se sua senha vazar em algum outro site.</p></div></aside>
+<aside class="g-callout"><div class="g-callout-ico">🐷</div><div><span class="g-callout-k">Dica do Piggy</span><p>Ative a <strong>verificação em duas etapas</strong> hoje — leva 2 minutos e é a barreira que segura sua conta mesmo se sua senha vazar em algum outro site.</p></div></aside>
 
 <h2>Verificação em duas etapas (2FA)</h2>
 <p>Você pode ativar a autenticação em dois fatores na sua conta. Com ela ligada,

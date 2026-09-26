@@ -1,7 +1,7 @@
 """db/bills.py — Contas a pagar (boletos).
 
 Instâncias por ciclo dos recorrentes com `payment_mode='manual'`. Diferente do
-gasto fixo (autopay), a conta a pagar NÃO debita sozinha: a Piggy lembra e o
+gasto fixo (autopay), a conta a pagar NÃO debita sozinha: o Piggy lembra e o
 lançamento só é criado quando o usuário confirma o pagamento (`mark_bill_paid`).
 
 Status: 'pending' | 'paid'. "Vencida" é derivado (pending + due_date < hoje).

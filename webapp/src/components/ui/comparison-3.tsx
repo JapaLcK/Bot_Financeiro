@@ -90,7 +90,7 @@ const groups: FeatureGroup[] = [
       { label: "Bancos conectados (Open Finance)", values: ["1", "2", "5"] },
       // Plus/Pro: `ai_monthly_messages: None` cai no teto GLOBAL
       // AI_CHAT_MONTHLY_LIMIT, não em "ilimitado" (ver o card do Plus).
-      { label: "Mensagens com a Piggy", values: ["200/mês", "1.000/mês", "Igual ao Plus"] },
+      { label: "Mensagens com o Piggy", values: ["200/mês", "1.000/mês", "Igual ao Plus"] },
       { label: "Histórico que você enxerga", values: ["90 dias", "12 meses", "24 meses"] },
     ],
   },

@@ -26,7 +26,7 @@ describe("app.config — iOS", () => {
   it.each(["production", "development"])("%s: time, build e criptografia isenta", (ambiente) => {
     expect(configEm(ambiente).ios).toMatchObject({
       appleTeamId: "S849YDA49P",
-      buildNumber: "4",
+      buildNumber: "5",
       config: { usesNonExemptEncryption: false },
     });
   });

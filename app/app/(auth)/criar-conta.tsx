@@ -30,7 +30,7 @@ import { espaco } from "@/ui/tokens";
 const MENSAGEM_ERRO_COFRE =
   "Sua conta foi criada, mas não conseguimos abrir a sessão neste aparelho. Entre com seu e-mail e senha.";
 const LEGENDA_SENHA = `Pelo menos ${SENHA_MIN} caracteres.`;
-const LEGENDA_WHATSAPP = "Use o mesmo número com que você vai falar com a Piggy.";
+const LEGENDA_WHATSAPP = "Use o mesmo número com que você vai falar com o Piggy.";
 const AVISO_LINK = "Não conseguimos abrir a página. Tente de novo em instantes.";
 
 /**

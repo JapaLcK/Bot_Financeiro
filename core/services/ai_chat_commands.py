@@ -154,7 +154,7 @@ def aviso_de_cota(user_id: int) -> str | None:
     if not (plans_v2_enabled() and get_user_limits(user_id)["ai_conversational_enabled"]):
         return None
     tier = get_plan_tier(user_id)
-    acabou = "🐷 Suas mensagens com a Piggy deste mês acabaram!\n"
+    acabou = "🐷 Suas mensagens com o Piggy deste mês acabaram!\n"
     # A cota vira no dia 1º (db/ai_quota._current_month_start).
     # Plus e Pro têm o mesmo teto: subir de um pro outro não dá mais mensagens.
     if tier_at_least(tier, "plus"):
