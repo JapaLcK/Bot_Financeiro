@@ -105,7 +105,13 @@ Decidido pelo dono na mesma data (Q37–Q41):
     (`recurring_income_credits`, `recurring_charges`) — desligar o carregador só para os
     lançamentos futuros. Por isso, **sem exceção**, na primeira vez no v2 todo usuário
     confirma quanto da carteira é dinheiro vivo, tenha banco conectado ou não; até
-    confirmar, a foto dele sai marcada como incerta. A confirmação vale enquanto a
+    confirmar, a foto dele sai marcada como incerta. A confirmação não corrige só o
+    saldo: os lançamentos automáticos antigos da recorrente continuam como linhas comuns
+    (ligadas em `recurring_income_credits` e `recurring_charges`) e apareceriam em
+    Lançamentos e em Para onde vai como receita e gasto reais. Por isso, no mesmo passo, o
+    usuário vê esses lançamentos e marca quais aconteceram; os que não aconteceram saem dos
+    relatórios (sem apagar a linha). Até ele revisar, eles aparecem com a marca "lançado
+    automaticamente, a conferir" e ficam fora dos totais. A confirmação vale enquanto a
     carteira só receber dinheiro vivo: se o usuário voltar ao painel antigo e usar um
     caminho que não pergunta a forma de pagamento (lançar em `/launches/...` ou o ajuste de
     saldo `adjust_balance_route`), a confirmação cai e a foto volta a ser incerta até ele
@@ -115,7 +121,9 @@ Decidido pelo dono na mesma data (Q37–Q41):
   desconectar o banco devolve o manual à soma e reabre a pergunta); lançar pelo painel
   antigo depois de confirmar a carteira (volta a incerta);
   carteira com saldo de banco antigo e banco conectado, e carteira com salário recorrente
-  lançado antes do desligamento sem banco conectado (incerta até confirmar, nos dois).
+  lançado antes do desligamento sem banco conectado (incerta até confirmar, nos dois);
+  salário automático antigo que não caiu (fora de Lançamentos e de Para onde vai depois
+  de marcado como não aconteceu, e fora dos totais enquanto não revisado).
 - **Q38 — a caixinha manual continua**, como exceção à Q36: ela é dinheiro separado pelo
   próprio usuário, e depositar e retirar nela segue existindo no v2. A caixinha espelhada
   do banco continua vindo do Open Finance.
