@@ -17,7 +17,6 @@ from decimal import Decimal
 from psycopg.types.json import Jsonb
 
 from utils_date import _tz
-from .connection import get_conn
 
 PERGUNTAS = ("perguntar_manual", "perguntar_novo", "perguntar_fraco")
 # Nestes estados o lado do banco fica fora dos relatórios (sombra interna) e
@@ -25,6 +24,12 @@ PERGUNTAS = ("perguntar_manual", "perguntar_novo", "perguntar_fraco")
 INTERNOS = ("ativo", "desfeito") + PERGUNTAS
 RESPOSTAS = {"perguntar_manual": {"same", "different"}, "perguntar_novo": {"already", "credit"},
              "perguntar_fraco": {"cash", "not_cash"}, "ativo": {"seen"}}
+# Fonte única para db/accounts.py: o par ativo segue interno com qualquer categoria;
+# lançamento com vínculo trava `accounts` antes de apagar (a ordem do reconciliador).
+PAR_ATIVO_SQL = ("exists (select 1 from of_cash_links k where k.launch_id = launches.id "
+                 "and k.user_id = launches.user_id and k.status = 'ativo')")
+VINCULADO_SQL = ("exists (select 1 from of_cash_links k where k.user_id = launches.user_id "
+                 "and launches.id in (k.launch_id, k.manual_launch_id))")
 
 
 def enabled() -> bool:
@@ -53,11 +58,12 @@ def _sha(*parts) -> str:
 
 
 def account_key(account_type, account_raw, institution_name) -> str:
-    """Número da conta; sem ele, o nome da instituição. Nunca id de conexão."""
+    """Instituição (nome normalizado) + número da conta. Nunca id de conexão nem de
+    connector: o mesmo banco vem por connectors diferentes com o mesmo nome."""
     from .open_finance import _normalize_merchant
-    tipo = (account_type or "").upper()
+    tipo, nome = (account_type or "").upper(), _normalize_merchant(institution_name)
     numero = re.sub(r"\D", "", str((account_raw or {}).get("number") or ""))
-    return _sha(tipo, "n", numero) if numero else _sha(tipo, "i", _normalize_merchant(institution_name))
+    return _sha(tipo, nome, "n", numero) if numero else _sha(tipo, "i", nome)
 
 
 def tx_key(acc_key, raw, provider_transaction_id) -> tuple[str, bool]:
@@ -125,21 +131,23 @@ def _muda_status(cur, user_id, link, status) -> None:
 
 
 def _corrige(cur, user_id, link, t) -> int:
-    """O banco corrigiu valor/data de um saque já creditado: segue o banco."""
+    """O banco corrigiu valor/data: o vínculo segue o banco (a pergunta pendente
+    credita o valor corrente) e o automático já creditado também."""
     v = abs(Decimal(str(t["amount"])))
     if v == Decimal(str(link["amount"])) and t["transaction_date"] == link["tx_date"]:
         return 0
-    novo = -v if link["kind"] == "deposito" else v
-    criado_em, known = _quando(t["transaction_date"], t["transacted_at"])
-    # O delta velho vem do PRÓPRIO lançamento (o `returning` lê a linha antes do update).
-    cur.execute("""update launches l set valor=%s, criado_em=%s, efeitos = l.efeitos || %s
-                     from launches o where o.id = l.id and l.id=%s and l.user_id=%s
-                   returning (o.efeitos->>'delta_conta')::numeric as velho""",
-                (v, criado_em, Jsonb({"delta_conta": float(novo), "time_known": known}),
-                 link["launch_id"], user_id))
-    if not (row := cur.fetchone()):
-        return 0
-    cur.execute("update accounts set balance = balance + %s where user_id=%s", (novo - row["velho"], user_id))
+    if link["status"] == "ativo" and link["launch_id"] and link["origem"] == "auto":
+        novo = -v if link["kind"] == "deposito" else v
+        criado_em, known = _quando(t["transaction_date"], t["transacted_at"])
+        # O delta velho vem do PRÓPRIO lançamento (o `returning` lê a linha antes do update).
+        cur.execute("""update launches l set valor=%s, criado_em=%s, efeitos = l.efeitos || %s
+                         from launches o where o.id = l.id and l.id=%s and l.user_id=%s
+                       returning (o.efeitos->>'delta_conta')::numeric as velho""",
+                    (v, criado_em, Jsonb({"delta_conta": float(novo), "time_known": known}),
+                     link["launch_id"], user_id))
+        if not (row := cur.fetchone()):
+            return 0
+        cur.execute("update accounts set balance = balance + %s where user_id=%s", (novo - row["velho"], user_id))
     cur.execute("update of_cash_links set amount=%s, tx_date=%s, updated_at=now() where id=%s and user_id=%s",
                 (v, t["transaction_date"], link["id"], user_id))
     return 1
@@ -158,9 +166,7 @@ def _revisa(cur, user_id, link, t, kind) -> int:
     if kind != link["kind"]:
         _muda_status(cur, user_id, link, "estornado")
         return 1
-    if link["status"] == "ativo" and link["launch_id"] and link["origem"] == "auto":
-        return _corrige(cur, user_id, link, t)
-    return 0
+    return _corrige(cur, user_id, link, t)
 
 
 def _candidato_manual(cur, user_id, links, kind, t) -> int | None:
@@ -279,70 +285,3 @@ def record_coverage(cur, user_id, connection_id=None) -> None:
                     "covered_until) values (%s,%s,%s,%s,%s)",
                     (user_id, account_key(r["type"], r["raw"], r["institution_name"]),
                      r["created_at"], r["lo"], r["hi"]))
-
-
-def _link_travado(cur, user_id, link_id) -> dict:
-    from .bank_movements import _lock_user
-    _lock_user(cur, user_id)
-    cur.execute("select * from of_cash_links where id=%s and user_id=%s for update", (link_id, user_id))
-    if not (link := cur.fetchone()):
-        raise LookupError("CASH_LINK_NOT_FOUND")
-    return dict(link)
-
-
-def undo_link(user_id, link_id) -> dict:
-    """Desfazer: só a Carteira volta; a saída do banco segue fora dos relatórios."""
-    with get_conn() as conn, conn.cursor() as cur:
-        link = _link_travado(cur, user_id, link_id)
-        changed = link["status"] == "ativo" and bool(link["launch_id"])
-        if changed:
-            _muda_status(cur, user_id, link, "desfeito")
-        conn.commit()
-    return {"ok": True, "changed": changed}
-
-
-def answer_link(user_id, link_id, resposta) -> dict:
-    """Resposta a uma pergunta (ou 'seen' num aviso). Fora do estado atual é
-    no-op idempotente (botão tocado duas vezes)."""
-    if not any(resposta in r for r in RESPOSTAS.values()):
-        raise ValueError("CASH_ANSWER_INVALID")
-    with get_conn() as conn, conn.cursor() as cur:
-        link = _link_travado(cur, user_id, link_id)
-        result = {"ok": True, "changed": resposta in RESPOSTAS.get(link["status"], ())}
-        if result["changed"] and resposta == "seen":
-            cur.execute("update of_cash_links set seen_at=now() where id=%s and user_id=%s", (link_id, user_id))
-        elif result["changed"] and resposta == "same":
-            cur.execute("update launches set is_internal_movement=true where id=%s and user_id=%s "
-                        "and not is_internal_movement", (link["manual_launch_id"], user_id))
-            if cur.rowcount != 1:
-                result = {"ok": False, "changed": False, "reason": "MANUAL_NOT_AVAILABLE"}
-            else:
-                cur.execute("update of_cash_links set status='ativo', origem='manual', launch_id=%s, "
-                            "updated_at=now() where id=%s and user_id=%s",
-                            (link["manual_launch_id"], link_id, user_id))
-        elif result["changed"] and resposta in ("already", "not_cash"):
-            _muda_status(cur, user_id, link, "desfeito" if resposta == "already" else "nao_dinheiro")
-        elif result["changed"]:  # different, credit, cash
-            _credita(cur, user_id, link)
-        conn.commit()
-    return result
-
-
-def list_pending(user_id) -> list[dict]:
-    with get_conn() as conn, conn.cursor() as cur:
-        cur.execute("""select k.id, k.kind, k.status, k.amount, k.tx_date, k.manual_launch_id,
-                              m.alvo as manual_alvo, m.valor as manual_valor
-                         from of_cash_links k
-                         left join launches m on m.id = k.manual_launch_id and m.user_id = k.user_id
-                        where k.user_id=%s and k.status = any(%s)
-                        order by k.tx_date desc, k.id desc""", (user_id, list(PERGUNTAS)))
-        return [dict(r) for r in cur.fetchall()]
-
-
-def cash_transfer_summary(user_id) -> dict:
-    with get_conn() as conn, conn.cursor() as cur:
-        cur.execute("""select count(*) filter (where status = any(%s)) as pending_count, count(*) filter
-                         (where status='ativo' and launch_id is not null and seen_at is null) as unseen_count
-                         from of_cash_links where user_id=%s""", (list(PERGUNTAS), user_id))
-        row = cur.fetchone()
-    return {"pending_count": int(row["pending_count"]), "unseen_count": int(row["unseen_count"])}

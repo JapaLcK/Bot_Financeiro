@@ -4,7 +4,7 @@ from decimal import Decimal
 
 import db
 from conftest import usuario_pagante
-from db.open_finance_cash import answer_link
+from db.open_finance_cash_answers import answer_link, cash_transfer_summary
 from tests._of_cash_helpers import (  # noqa: F401  (fixture)
     caixa, carteira, conecta, dia, launches_visiveis, links, q, sync, tx,
 )
@@ -86,13 +86,40 @@ def test_anterior_ao_corte_e_historico(caixa):
 
 
 def test_switch_desligado_nao_muda_nada(monkeypatch):
+    """Nem crédito nem pergunta: saque, depósito e Pix Saque passam como antes."""
     monkeypatch.delenv("OF_CASH_ENABLED", raising=False)
     uid = usuario_pagante()
     c = conecta(uid, f"item-{uid}")
-    sync(c, uid, [tx("t1", -200, dia(10))])
+    sync(c, uid, [tx("t1", -200, dia(10)), tx("d1", 300, dia(11), op="DEPOSITO", desc="Transfers"),
+                  tx("p1", -100, dia(12), op="PIX", desc="Pix Saque Loja X", category="Transfer - PIX")])
     assert carteira(uid) == 0
     assert links(uid) == []
-    assert q("select count(*) as n from launches where user_id=%s", (uid,), True)[0]["n"] == 1
+    assert cash_transfer_summary(uid) == {"pending_count": 0, "unseen_count": 0}
+    assert q("select count(*) as n from launches where user_id=%s", (uid,), True)[0]["n"] == 3
+
+
+def test_trocar_categoria_pelo_whatsapp_e_em_lote_nao_vira_receita(caixa, monkeypatch):
+    """As outras portas que gravam categoria: o botão "Trocar categoria" da
+    conversa (process_message → update_launch_category) e o lote."""
+    from adapters.whatsapp import wa_runtime
+    from tests.test_category_normalization import _botao, _wa
+    uid = usuario_pagante()
+    sync(conecta(uid, f"item-{uid}"), uid, [tx("t1", -200, dia(10)), tx("t2", -50, dia(11))])
+    par, par2 = (k["launch_id"] for k in links(uid))
+    outro, _, _ = db.add_launch_and_update_balance(uid, "receita", 10, "pai", None,
+                                                    categoria="transferencia_interna",
+                                                    is_internal_movement=True)
+    respostas = _wa(monkeypatch, uid)
+
+    wa_runtime.process_message(_botao(f"{wa_runtime.WA_RECAT_PICK_PREFIX}{par}:outros", uid))
+    assert "atualizada" in respostas[-1], respostas
+    db.update_launch_categories_bulk(uid, [(par2, "outros"), (outro, "outros")])
+
+    rows = q("select id, categoria, is_internal_movement as i from launches where id = any(%s)",
+             ([par, par2, outro],), True)
+    assert {r["id"]: (r["categoria"], r["i"]) for r in rows} == {
+        par: ("outros", True), par2: ("outros", True), outro: ("outros", False)}
+    assert [r["id"] for r in launches_visiveis(uid)] == [outro], "o par virou receita"
 
 
 def test_editar_categoria_do_par_nao_vira_receita(caixa):
