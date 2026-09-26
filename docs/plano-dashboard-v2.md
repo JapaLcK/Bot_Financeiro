@@ -106,7 +106,10 @@ que não se sabe aparece como "sem comparação", "a conferir", "desatualizado" 
   o passado. Uma função só calcula o patrimônio (a foto e a tela usam a mesma). A foto
   guarda o que entrou nela, e o gráfico quebra a linha quando isso muda (banco entrou ou
   saiu, conta em outra moeda, correção de base), em vez de mostrar um salto como ganho ou
-  perda.
+  perda. **A foto só é exata quando a base do usuário é confiável**: carteira confirmada
+  (Q37) e a transferência em espécie (Q41) funcionando com o ciclo de vida inteiro. Antes
+  disso — inclusive para quem ainda não abriu o v2 — a foto é gravada, mas marcada como
+  incerta; o histórico enche desde a etapa 0 sem afirmar nada que depois não se sustente.
 - **Rendimento × CDI** (Q35): por investimento, sem número da carteira somada. A fonte é a
   rentabilidade que o banco informa pelo Open Finance, gravada a cada sincronização para
   formar histórico. Só compara com o CDI quando se sabe o período exato e que a posição
@@ -140,8 +143,9 @@ e esse histórico não se refaz:
 - a Q42 (recorrente só prevê) e a Q43 (manual para de render);
 - a regra da forma de pagamento da Q40 em todos os caminhos que gravam hoje (marcar conta
   como paga, WhatsApp, IA, painel antigo) — só a interface nova do chat espera a etapa 7;
-- a transferência entre banco e carteira da Q41 (saque e depósito em espécie), ou, até
-  ela existir, a foto marcada como incerta quando houver saque ou depósito no período.
+- a transferência entre banco e carteira da Q41 (saque e depósito em espécie), **com o
+  ciclo de vida inteiro** (o banco corrigir ou apagar, reconectar, o usuário desfazer), ou,
+  até ela existir, a foto marcada como incerta (seção 4).
 
 | Etapa | O que entra | Faixa |
 |---|---|---|
@@ -183,13 +187,13 @@ PR de cada etapa, não soluções prontas. Cada PR confere se ainda valem, decid
 
 **Etapas de tela (1 a 6)**
 - Etapa 2: identidade das transações importadas por conta (conta e cartão); editar a data
-  de um lançamento fundido; o ciclo de vida da transferência entre banco e carteira (Q41):
-  correção, exclusão, reconexão.
+  de um lançamento fundido.
 - Etapa 4: reserva designada, custo mensal por frequência, reserva só em reais; caixinha
   manual versus a do banco.
 - Etapa 6: variação do período só dentro de um trecho sem quebra.
-- A confirmação da carteira e a revisão dos lançamentos antigos (Q37): em que etapa entram
-  e o que as derruba.
+- A tela da confirmação da carteira e da revisão dos lançamentos antigos (Q37): em que
+  etapa entra e o que derruba a confirmação. O estado "não confirmado" existe desde a
+  etapa 0 (seção 4).
 
 **Convivência com o painel antigo (desde a etapa 0)**
 - Quem usa o v2 ainda alcança o painel antigo (links nos dois sentidos, e o app atual fica
