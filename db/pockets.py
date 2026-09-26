@@ -4,6 +4,7 @@ db/pockets.py — Caixinhas (pockets): criar, depositar, sacar e excluir.
 from datetime import date, datetime
 from decimal import Decimal
 
+import psycopg
 from psycopg.types.json import Jsonb
 
 from utils_date import _tz
@@ -317,12 +318,16 @@ def update_pocket_meta(
                     params.insert(-2, today)
                 else:
                     accrue_pocket_db(cur, user_id, int(pocket_id))
-            cur.execute(
-                f"update pockets set {', '.join(sets)} "
-                "where user_id=%s and id=%s "
-                f"returning {POCKET_COLUMNS}",
-                params,
-            )
+            try:
+                cur.execute(
+                    f"update pockets set {', '.join(sets)} "
+                    "where user_id=%s and id=%s "
+                    f"returning {POCKET_COLUMNS}",
+                    params,
+                )
+            except psycopg.errors.UniqueViolation:
+                # Sai do `with get_conn()` por exceção: o pool faz o rollback.
+                raise ValueError("Já existe uma caixinha com esse nome.") from None
             row = cur.fetchone()
         conn.commit()
     return row
@@ -592,7 +597,7 @@ def create_pocket(
                 )
                 values (%s, %s, 0, %s, %s, %s, 'cdi', 'regressive_ir_iof', %s)
                 """
-                "on conflict (user_id, name) do nothing returning id, name",
+                "on conflict do nothing returning id, name",
                 (user_id, name, desc, bool(interest_enabled), rate, today),
             )
             row = cur.fetchone()
