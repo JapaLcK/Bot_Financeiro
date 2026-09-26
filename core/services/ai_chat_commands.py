@@ -23,6 +23,7 @@ import logging
 import os
 import re
 import unicodedata
+from contextvars import ContextVar
 from datetime import timedelta
 
 import db
@@ -117,12 +118,21 @@ _PERGUNTA_ENCERRADA = (
 )
 
 
+# O turno do `handle_incoming` foi entregue à IA — resposta, ERROR_MSG ou
+# exceção. Marcado onde o agente é chamado; sem a marca, o `finally` encerra a
+# pergunta. O histórico não serve de prova: o runner devolve ERROR_MSG sem
+# gravar nada (sem chave, cliente que não sobe) e aí a nova tentativa da
+# resposta ("300 reais transporte") cairia no route() como despesa.
+turno_foi_para_a_ia: ContextVar[bool] = ContextVar("turno_foi_para_a_ia", default=False)
+
+
 def encerra_pergunta_da_ia(user_id: int, ultima_id: int) -> None:
-    """Fim de um turno do `handle_incoming`: se a última mensagem lida por
-    `pergunta_aberta_da_ia` (a pergunta, ou o turno falho depois dela) continua
-    sendo a última, a IA não atendeu este turno (ex.: "saldo",
-    "plano", um OFX) — então ela deixa de estar em aberto. O `ai_messages` só vê
-    os turnos da IA, e sem isto um "sim" depois voltaria para a oferta antiga."""
+    """Fim de um turno do `handle_incoming` que NÃO foi para a IA (ex.:
+    "saldo", "plano", um OFX): a pergunta deixa de estar em aberto. O
+    `ai_messages` só vê os turnos da IA, e sem isto um "sim" depois voltaria
+    para a oferta antiga. Só grava se `ultima_id` (a âncora lida por
+    `pergunta_aberta_da_ia`) ainda for a última linha: a IA do app pode ter
+    respondido no meio, e aí a pergunta aberta é a dela."""
     try:
         db.ai_append_message_if_last(user_id, ultima_id, "system", _PERGUNTA_ENCERRADA)
     except Exception as exc:
@@ -250,6 +260,7 @@ def handle_ai_chat_command(user_id: int, text: str, platform: str) -> str | None
         )
 
     # 4. Tem acesso: roteia pra IA (cota do tier).
+    turno_foi_para_a_ia.set(True)
     from core.services.ai_chat import chat as ai_chat_run
     try:
         return ai_chat_run(

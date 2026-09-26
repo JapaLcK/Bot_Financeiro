@@ -32,6 +32,7 @@ from core.services.media_service import (
 )
 from core.observability import log_system_event_sync
 from core.services.plan_limits import PlanLimitExceeded
+from core.services.ai_chat_commands import turno_foi_para_a_ia
 from utils_text import fmt_brl
 from ai_router import _internal_user_id
 
@@ -160,10 +161,12 @@ def _resposta_da_ia(uid: int, text: str, platform: str, rotulo: str,
             ai_reply = ai_chat_run(
                 uid, text, monthly_limit=ai_monthly_limit_for(uid), platform=platform,
             )
+            turno_foi_para_a_ia.set(True)
             return format_for_platform(ai_reply, platform)
     except Exception as exc:
         logger.warning("%s falhou pra user %s: %s", rotulo, uid, exc)
         if erro_se_falhar:
+            turno_foi_para_a_ia.set(True)
             from core.services.ai_chat.runner import ERROR_MSG
             return format_for_platform(ERROR_MSG, platform)
     return None
@@ -753,10 +756,11 @@ def handle_incoming(msg: IncomingMessage, *,
     # Pergunta que a IA deixou em aberto antes deste turno. Sem pendência, a
     # resposta a ela (texto ou áudio) vai para a IA (5b e `_handle_audio`) —
     # "300 reais transporte" é o orçamento que ela pediu, não uma despesa.
-    # Qualquer turno que a IA não atender a encerra (`finally`).
+    # Qualquer turno que não for para a IA a encerra (`finally`).
     from core.services.ai_chat_commands import (
         encerra_pergunta_da_ia, pergunta_aberta_da_ia,
     )
+    marca_da_ia = turno_foi_para_a_ia.set(False)
     pergunta_uid = pergunta_ia = None
     try:
         pergunta_uid = _normalize_user_id(msg)
@@ -1050,5 +1054,6 @@ def handle_incoming(msg: IncomingMessage, *,
         )]
 
     finally:
-        if pergunta_ia is not None:
+        if pergunta_ia is not None and not turno_foi_para_a_ia.get():
             encerra_pergunta_da_ia(pergunta_uid, pergunta_ia)
+        turno_foi_para_a_ia.reset(marca_da_ia)

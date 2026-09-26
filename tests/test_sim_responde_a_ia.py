@@ -246,6 +246,46 @@ def test_sem_ia_no_plano_grava_pelo_route(monkeypatch):
     assert _lancamentos(uid) == 1
 
 
+@pytest.mark.parametrize("primeira", ["error_msg", "levanta"])
+def test_ia_que_falha_sem_gravar_nao_encerra_a_pergunta(monkeypatch, primeira):
+    """O runner devolve ERROR_MSG sem gravar nada (sem OPENAI_API_KEY, cliente
+    que não sobe), ou levanta antes do `user`: o histórico fica igual, mas o
+    turno foi da IA — a nova tentativa ainda responde a ela, não vira despesa."""
+    from core.services.ai_chat.runner import ERROR_MSG
+    uid, chamadas = _com_ia(monkeypatch)
+
+    def chat(_uid, texto, **_k):
+        chamadas.append(texto)
+        if len(chamadas) > 1:
+            return "resposta do agente"
+        if primeira == "levanta":
+            raise RuntimeError("cliente OpenAI")
+        return ERROR_MSG
+
+    monkeypatch.setattr("core.services.ai_chat.chat", chat)
+    _ia_disse(uid, ORCAMENTO)
+
+    assert diga(uid, "300 reais transporte") == ERROR_MSG
+    assert diga(uid, "300 reais transporte") == "resposta do agente"
+    assert chamadas == ["300 reais transporte"] * 2
+    assert _lancamentos(uid) == 0
+
+
+def test_prefixo_piggy_que_falha_sem_gravar_nao_encerra_a_pergunta(monkeypatch):
+    """Mesma regra pela outra porta da IA (`handle_ai_chat_command`)."""
+    from core.services.ai_chat.runner import ERROR_MSG
+    uid, chamadas = _com_ia(monkeypatch)
+    monkeypatch.setattr("core.services.ai_chat_commands.ai_chat_allowed", lambda _uid: True)
+    monkeypatch.setattr("core.services.ai_chat.chat",
+                        lambda _u, t, **_k: chamadas.append(t) or ERROR_MSG)
+    _ia_disse(uid, ORCAMENTO)
+
+    assert diga(uid, "piggy 300 reais transporte") == ERROR_MSG
+    assert diga(uid, "300 reais transporte") == ERROR_MSG
+    assert chamadas == ["300 reais transporte"] * 2
+    assert _lancamentos(uid) == 0
+
+
 def test_recusa_de_investimento_vem_antes_da_pergunta(monkeypatch):
     uid, chamadas = _com_ia(monkeypatch)
     _ia_disse(uid, ORCAMENTO)
