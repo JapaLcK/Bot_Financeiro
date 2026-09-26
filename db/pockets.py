@@ -17,6 +17,7 @@ from .investments import (
     _growth_for_period,
     _iof_rate_for_days,
     _ir_rate_for_days,
+    _sgs_falhas,
     _taxes_for_gain,
     fifo_takes,
 )
@@ -123,10 +124,12 @@ def accrue_pocket_db(cur, user_id: int, pocket_id: int, today: date | None = Non
     """Acumulação FINAL da caixinha manual (Q43): roda uma vez e congela.
 
     Caixinha com `interest_frozen_at` preenchido não rende mais — devolve o saldo.
-    Com o marcador NULL (caixinha anterior à Q43), carimba o marcador e desliga
-    `interest_enabled` sob o mesmo `for update` e, se o juro estava ligado, aplica
-    o CDI publicado até `today` uma última vez. Dias sem índice publicado ficam de
-    fora (decisão do dono).
+    Com o marcador NULL (caixinha anterior à Q43), sob o mesmo `for update`: se o
+    juro estava ligado, aplica o CDI publicado até `today` uma última vez; depois
+    carimba o marcador e desliga `interest_enabled` num único update — só se nenhuma
+    busca de índice falhou (`_sgs_falhas`). Na falha, o cursor para no último dia
+    conhecido e a próxima rodada completa e carimba. Dias sem índice publicado ficam
+    de fora (decisão do dono).
     """
     if today is None:
         today = _today()
@@ -154,47 +157,52 @@ def accrue_pocket_db(cur, user_id: int, pocket_id: int, today: date | None = Non
     _ensure_pocket_lots(cur, user_id, pocket)
     if pocket["interest_frozen_at"] is not None:
         return Decimal(str(pocket["balance"] or 0))
-    cur.execute(
-        "update pockets set interest_frozen_at=now(), interest_enabled=false where id=%s and user_id=%s",
-        (pocket_id, user_id),
-    )
-    if not pocket.get("interest_enabled"):
-        return Decimal(str(pocket["balance"] or 0))
+    falhas = _sgs_falhas.get()
+    resultado = Decimal(str(pocket["balance"] or 0))
 
-    period = pocket.get("interest_period") or "cdi"
-    rate = Decimal(str(pocket.get("interest_rate") or 1))
+    if pocket.get("interest_enabled"):
+        period = pocket.get("interest_period") or "cdi"
+        rate = Decimal(str(pocket.get("interest_rate") or 1))
 
-    cur.execute(
-        """
-        select id, balance, last_date
-        from pocket_lots
-        where user_id=%s and pocket_id=%s and status='open'
-        order by opened_at, id
-        for update
-        """,
-        (user_id, pocket_id),
-    )
-    lots = cur.fetchall()
-    if not lots:
-        cur.execute("update pockets set balance=0 where id=%s and user_id=%s", (pocket_id, user_id))
-        return ZERO
-
-    for lot in lots:
-        new_balance, applied_until = _growth_for_period(
-            cur,
-            Decimal(str(lot["balance"] or 0)),
-            period,
-            rate,
-            lot["last_date"],
-            today,
+        cur.execute(
+            """
+            select id, balance, last_date
+            from pocket_lots
+            where user_id=%s and pocket_id=%s and status='open'
+            order by opened_at, id
+            for update
+            """,
+            (user_id, pocket_id),
         )
-        if new_balance != lot["balance"] or applied_until != lot["last_date"]:
-            cur.execute(
-                "update pocket_lots set balance=%s, last_date=%s where id=%s and user_id=%s",
-                (new_balance, applied_until or lot["last_date"], lot["id"], user_id),
-            )
+        lots = cur.fetchall()
+        if not lots:
+            cur.execute("update pockets set balance=0 where id=%s and user_id=%s", (pocket_id, user_id))
+            resultado = ZERO
+        else:
+            for lot in lots:
+                new_balance, applied_until = _growth_for_period(
+                    cur,
+                    Decimal(str(lot["balance"] or 0)),
+                    period,
+                    rate,
+                    lot["last_date"],
+                    today,
+                )
+                if new_balance != lot["balance"] or applied_until != lot["last_date"]:
+                    cur.execute(
+                        "update pocket_lots set balance=%s, last_date=%s where id=%s and user_id=%s",
+                        (new_balance, applied_until or lot["last_date"], lot["id"], user_id),
+                    )
+            resultado = _sync_pocket_from_lots(cur, user_id, pocket_id)
 
-    return _sync_pocket_from_lots(cur, user_id, pocket_id)
+    # Carimbo e `interest_enabled=false` no MESMO update: desligar o juro sem o
+    # carimbo faria a próxima rodada carimbar sem render, e o ganho sumiria.
+    if _sgs_falhas.get() == falhas:
+        cur.execute(
+            "update pockets set interest_frozen_at=now(), interest_enabled=false where id=%s and user_id=%s",
+            (pocket_id, user_id),
+        )
+    return resultado
 
 
 def accrue_all_pockets(user_id: int, today: date | None = None):

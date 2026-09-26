@@ -4,6 +4,7 @@ db/investments.py — Investimentos: criar, aportar, resgatar, juros e CDI.
 import logging
 import sys
 import requests
+from contextvars import ContextVar
 from datetime import datetime, date, timedelta, timezone
 from decimal import Decimal, ROUND_HALF_UP
 
@@ -51,7 +52,8 @@ SGS_TIMEOUT_SECONDS = 3
 #    a dados que COMPLETAM a cauda → upsert; memo vale até a meia-noite UTC
 #    b dados PARCIAIS ou vazia (pré-publicação) → upsert o que veio; memo vale
 #      SGS_CONFIRM_SHORT — pega o ponto publicado à noite ainda no mesmo dia
-#    c falha/timeout (None) ou 200+lixo (None) → NÃO grava memo; re-tenta já
+#    c falha/timeout (None) ou 200+lixo (None) → NÃO grava memo; re-tenta já;
+#      conta em `_sgs_falhas`: a acumulação final não carimba
 #  5 cache VAZIO na janela → 0 fetch só se o memo cobre [start, end]; senão
 #    fetch da janela e grava como a célula 4. Mesma RESSALVA da célula 3.
 #    Instância real: manhã de segunda com lote acruado na sexta (janela
@@ -75,6 +77,8 @@ SGS_TIMEOUT_SECONDS = 3
 SGS_CONFIRM_SHORT = timedelta(hours=2)
 # code → (validade, start, end) do último intervalo que a rede respondeu.
 _sgs_answered: dict[str, tuple[datetime, date, date]] = {}
+# Buscas que falharam (célula 4c) nesta thread; mesmo idioma de db/connection.py::_commits_ambiguos.
+_sgs_falhas: ContextVar[int] = ContextVar("sgs_falhas", default=0)
 
 
 def _sgs_remember(code: str, start: date, end: date, *, complete: bool) -> None:
@@ -288,6 +292,8 @@ def _get_cdi_daily_map(cur, start: date, end: date) -> dict[date, float]:
     if not isinstance(data, list) or not data:
         if isinstance(data, list):  # []: "sem valores" pré-publicação → curto
             _sgs_remember("CDI", fetch_start, end, complete=False)
+        else:
+            _sgs_falhas.set(_sgs_falhas.get() + 1)
         return cached
 
     to_upsert = []
@@ -355,6 +361,8 @@ def _get_sgs_daily_map(cur, code: str, series_code: int, start: date, end: date)
     if not isinstance(data, list) or not data:
         if isinstance(data, list):  # []: "sem valores" pré-publicação → curto
             _sgs_remember(code, fetch_start, end, complete=False)
+        else:
+            _sgs_falhas.set(_sgs_falhas.get() + 1)
         return cached
 
     to_upsert = []
@@ -847,8 +855,9 @@ def accrue_investment_db(cur, user_id: int, inv_id: int, today: date | None = No
 
     Com `interest_frozen_at` preenchido, não aplica juro: só sincroniza o saldo dos
     lotes (o valor que o resgate consome). Com o marcador NULL (investimento anterior
-    à Q43), carimba o marcador sob o mesmo `for update` e aplica os índices
-    publicados até `today` uma última vez; dias sem índice ficam de fora.
+    à Q43), aplica os índices publicados até `today` sob o mesmo `for update` e só
+    então carimba — e só se nenhuma busca de índice falhou (`_sgs_falhas`): na falha,
+    o cursor para no último dia conhecido e a próxima rodada completa e carimba.
 
     Atualiza (balance, last_date) aplicando juros por dias úteis.
     daily → rate por dia útil
@@ -875,11 +884,7 @@ def accrue_investment_db(cur, user_id: int, inv_id: int, today: date | None = No
 
     _ensure_investment_lots(cur, user_id, inv)
     congelado = inv["interest_frozen_at"] is not None
-    if not congelado:
-        cur.execute(
-            "update investments set interest_frozen_at=now() where id=%s and user_id=%s",
-            (inv_id, user_id),
-        )
+    falhas = _sgs_falhas.get()
 
     cur.execute(
         """
@@ -892,12 +897,6 @@ def accrue_investment_db(cur, user_id: int, inv_id: int, today: date | None = No
         (user_id, inv_id),
     )
     lots = cur.fetchall()
-    if not lots:
-        cur.execute(
-            "update investments set balance=0 where id=%s and user_id=%s",
-            (inv_id, user_id),
-        )
-        return ZERO
 
     for lot in ([] if congelado else lots):
         # Cada lote pode ter taxa/período próprios (Tesouro IPCA+, Prefixado,
@@ -920,6 +919,19 @@ def accrue_investment_db(cur, user_id: int, inv_id: int, today: date | None = No
                 "update investment_lots set balance=%s, last_date=%s where id=%s and user_id=%s",
                 (new_balance, applied_until or lot["last_date"], lot["id"], user_id),
             )
+
+    if not congelado and _sgs_falhas.get() == falhas:
+        cur.execute(
+            "update investments set interest_frozen_at=now() where id=%s and user_id=%s",
+            (inv_id, user_id),
+        )
+
+    if not lots:
+        cur.execute(
+            "update investments set balance=0 where id=%s and user_id=%s",
+            (inv_id, user_id),
+        )
+        return ZERO
 
     return _sync_investment_from_lots(cur, user_id, inv_id)
 

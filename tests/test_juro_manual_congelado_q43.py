@@ -7,8 +7,9 @@ Dias sem índice publicado na final são descartados (decisão do dono).
 Regra de todo teste de "não rende": lote retroativo E CDI publicado depois do
 cursor, de modo que o código anterior renderia.
 """
+import threading
 from concurrent.futures import ThreadPoolExecutor
-from datetime import timedelta
+from datetime import date, timedelta
 from decimal import Decimal
 from threading import Event
 
@@ -24,15 +25,15 @@ CDI7 = {D0 + timedelta(days=i): 0.05 for i in range(1, 8)}   # D0+1 .. T
 GANHO7 = Decimal(str(1000 * 1.0005 ** 7))
 
 
-def _caixinha_com_lote(uid, nome, *, legado, juro=True, balance=1000):
-    """Caixinha com lote de 60 dias e cursor em D0. `legado`: marcador NULL."""
+def _caixinha_com_lote(uid, nome, *, legado, juro=True, balance=1000, cursor=D0):
+    """Caixinha com lote de 60 dias e cursor em `cursor`. `legado`: marcador NULL."""
     _, pid, _ = db.create_pocket(uid, nome)
     with db.get_conn() as conn, conn.cursor() as cur:
         cur.execute(
             """insert into pocket_lots(user_id, pocket_id, principal_initial, principal_remaining,
                    balance, opened_at, last_date, status)
                values (%s,%s,%s,%s,%s,%s,%s,'open')""",
-            (uid, pid, balance, balance, balance, T - timedelta(days=60), D0))
+            (uid, pid, balance, balance, balance, T - timedelta(days=60), cursor))
         cur.execute(
             "update pockets set balance=%s, interest_enabled=%s, "
             "interest_frozen_at = case when %s then null else interest_frozen_at end "
@@ -474,3 +475,157 @@ def test_migracao_add_e_default_no_mesmo_statement():
             assert [tuple(r.values()) for r in cur.fetchall()] == antes
             cur.execute("drop table q43_mig")
         conn.rollback()
+
+
+# ── G. Falha de busca do índice não congela (P1 do Codex no #623) ─────────────
+# CDI de verdade em `market_rates` e o BCB stubado em `_fetch_sgs_series_json`.
+# Janela fixa passada: cursor em G_D0 (seg), cache até G_K (3 dias úteis), cauda
+# útil 06, 09 e 10/06 até G_HOJE. Sem feriado nacional na janela.
+
+G_D0, G_K, G_HOJE = date(2025, 6, 2), date(2025, 6, 5), date(2025, 6, 10)
+G_CAUDA = [date(2025, 6, 6), date(2025, 6, 9), date(2025, 6, 10)]
+G_ATE_K, G_TUDO = Decimal(str(1000 * 1.0005 ** 3)), Decimal(str(1000 * 1.0005 ** 6))
+
+
+@pytest.fixture
+def bcb(monkeypatch):
+    """`bcb["resposta"]`: None = falha; lista de datas = o BCB publica essas
+    (as do intervalo pedido, a 0,05%). Apaga de `market_rates` só o que entrou."""
+    from tests.test_funding_source import _apaga_cdi, _semeia_cdi
+
+    criados, estado = [], {"resposta": None, "chamadas": 0}
+
+    def fetch(_serie, ini, fim):
+        estado["chamadas"] += 1
+        resp = estado["resposta"](threading.current_thread().name) \
+            if callable(estado["resposta"]) else estado["resposta"]
+        if resp is None:
+            return None
+        dias = [d for d in resp if ini <= d <= fim]
+        if dias:  # só o que não existia: a tabela é global, sem `user_id`
+            with db.get_conn() as conn, conn.cursor() as cur:
+                cur.execute("select ref_date from market_rates "
+                            "where code='CDI' and ref_date = any(%s)", (dias,))
+                existentes = {r["ref_date"] for r in cur.fetchall()}
+            criados.extend(d for d in dias if d not in existentes)
+        return [{"data": d.strftime("%d/%m/%Y"), "valor": "0.05"} for d in dias]
+
+    monkeypatch.setattr(investments_db, "_fetch_sgs_series_json", fetch)
+    estado["semeia"] = lambda ini, fim: criados.extend(_semeia_cdi(ini, fim))
+    yield estado
+    _apaga_cdi(criados)
+
+
+def test_G1_investimento_falha_nao_carimba_e_completa_depois(user_id, bcb):
+    bcb["semeia"](G_D0, G_K)
+    inv = _investimento_com_lote(user_id, "cdb", "cdi", 1.0, G_D0)
+    db.accrue_all_investments(user_id, today=G_HOJE)
+    assert bcb["chamadas"] > 0
+    saldo, _, _, cursor = _lotes(user_id, inv)[0]
+    assert _approx(saldo, G_ATE_K) and cursor == G_K
+    assert _linha("investments", user_id, inv)["interest_frozen_at"] is None
+
+    bcb["resposta"] = G_CAUDA  # a rede voltou: completa do cursor, sem dobrar
+    db.accrue_all_investments(user_id, today=G_HOJE)
+    saldo, _, _, cursor = _lotes(user_id, inv)[0]
+    assert _approx(saldo, G_TUDO) and cursor == G_HOJE
+    assert _linha("investments", user_id, inv)["interest_frozen_at"] is not None
+
+    bcb["resposta"] = G_CAUDA + [G_HOJE + timedelta(days=i) for i in (1, 2, 3)]
+    db.accrue_all_investments(user_id, today=G_HOJE + timedelta(days=3))
+    assert _lotes(user_id, inv)[0][0] == saldo and _lotes(user_id, inv)[0][3] == G_HOJE
+
+
+def test_G2_bcb_sem_valores_carimba_com_o_que_tem(user_id, bcb):
+    """Positivo: `[]` é resposta, não falha."""
+    bcb["semeia"](G_D0, G_K)
+    bcb["resposta"] = []
+    inv = _investimento_com_lote(user_id, "cdb", "cdi", 1.0, G_D0)
+    db.accrue_all_investments(user_id, today=G_HOJE)
+    assert bcb["chamadas"] > 0
+    saldo, _, _, cursor = _lotes(user_id, inv)[0]
+    assert _approx(saldo, G_ATE_K) and cursor == G_K
+    assert _linha("investments", user_id, inv)["interest_frozen_at"] is not None
+
+
+def test_G3_cache_com_buraco_e_falha_nao_carimba(user_id, bcb):
+    bcb["semeia"](date(2025, 6, 3), date(2025, 6, 3))
+    bcb["semeia"](G_K, G_K)  # falta 04/06
+    inv = _investimento_com_lote(user_id, "cdb", "cdi", 1.0, G_D0)
+    db.accrue_all_investments(user_id, today=G_HOJE)
+    assert bcb["chamadas"] > 0
+    assert _linha("investments", user_id, inv)["interest_frozen_at"] is None
+
+
+def test_G4_caixinha_falha_nao_carimba_nem_desliga_e_completa_depois(user_id, bcb):
+    bcb["semeia"](G_D0, G_K)
+    pid = _caixinha_com_lote(user_id, "viagem", legado=True, cursor=G_D0)
+    db.accrue_all_pockets(user_id, today=G_HOJE)
+    assert bcb["chamadas"] > 0
+    row = _linha("pockets", user_id, pid)
+    assert _approx(row["balance"], G_ATE_K)
+    assert row["interest_frozen_at"] is None and row["interest_enabled"] is True
+
+    bcb["resposta"] = G_CAUDA
+    db.accrue_all_pockets(user_id, today=G_HOJE)
+    row = _linha("pockets", user_id, pid)
+    assert _approx(row["balance"], G_TUDO)
+    assert row["interest_frozen_at"] is not None and row["interest_enabled"] is False
+
+
+def test_G5_varredura_com_falha_nao_conta_erro_e_volta_na_proxima(user_id, bcb, monkeypatch):
+    """O scheduler acrua com o `today` real: a janela aqui é a do relógio. O cache
+    vai até o dia útil anterior ao último dia útil <= hoje, então a cauda sempre
+    tem dia útil a buscar, em qualquer dia do ano."""
+    from core.services import investment_scheduler
+    from utils_date import is_br_business_day
+
+    uteis = [T - timedelta(days=i) for i in range(30, -1, -1)
+             if is_br_business_day(T - timedelta(days=i))]
+    bcb["semeia"](T - timedelta(days=30), uteis[-2])
+    inv = _investimento_com_lote(user_id, "cdb", "cdi", 1.0, T - timedelta(days=31))
+    real = db.list_users_with_unfrozen_interest
+    monkeypatch.setattr(db, "list_users_with_unfrozen_interest",
+                        lambda: [u for u in real() if u == user_id])
+
+    assert investment_scheduler.accrue_all_users_investments()["failed"] == 0
+    assert bcb["chamadas"] > 0
+    assert user_id in real()
+
+    bcb["resposta"] = uteis
+    assert investment_scheduler.accrue_all_users_investments()["failed"] == 0
+    assert user_id not in real()
+    assert _lotes(user_id, inv)[0][3] == uteis[-1]
+
+
+def test_G6_falha_de_uma_thread_nao_segura_o_carimbo_da_outra(monkeypatch, bcb):
+    """B para dentro do `_growth_for_period` (já leu o contador); A roda inteiro
+    com a rede caída; B segue com a rede respondendo. Contador global faria B
+    enxergar a falha de A."""
+    from conftest import usuario_pagante
+
+    bcb["semeia"](G_D0, G_K)
+    bcb["resposta"] = lambda thread: G_CAUDA if thread.startswith("q43B") else None
+    a, b = usuario_pagante(), usuario_pagante()
+    inv_a = _investimento_com_lote(a, "cdb", "cdi", 1.0, G_D0)
+    inv_b = _investimento_com_lote(b, "cdb", "cdi", 1.0, G_D0)
+    dentro, libera, original = Event(), Event(), investments_db._growth_for_period
+
+    def pausa(*args, **kw):
+        if threading.current_thread().name.startswith("q43B") and not dentro.is_set():
+            dentro.set()
+            assert libera.wait(10)
+        return original(*args, **kw)
+
+    monkeypatch.setattr(investments_db, "_growth_for_period", pausa)
+    with ThreadPoolExecutor(max_workers=1, thread_name_prefix="q43B") as pool:
+        fb = pool.submit(db.accrue_all_investments, b, today=G_HOJE)
+        assert dentro.wait(10)
+        db.accrue_all_investments(a, today=G_HOJE)
+        libera.set()
+        fb.result(timeout=20)
+
+    assert _linha("investments", a, inv_a)["interest_frozen_at"] is None
+    assert _approx(_lotes(a, inv_a)[0][0], G_ATE_K)
+    assert _linha("investments", b, inv_b)["interest_frozen_at"] is not None
+    assert _approx(_lotes(b, inv_b)[0][0], G_TUDO)
