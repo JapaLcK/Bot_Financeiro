@@ -2,7 +2,8 @@ import NumberFlow from "@number-flow/react";
 import { useMemo } from "react";
 import { BALANCE_TODAY, HORIZONS, isCurrentMonth, trajectory } from "../lib/api";
 import { longDate, money0, signed0, signedBig, tone } from "../lib/format.js";
-import { set, simActive } from "../lib/store.js";
+import { useActions } from "../lib/actions";
+import { simActive } from "../lib/store.js";
 import type { DashState } from "../lib/types";
 import { Frame } from "../parts/Frame";
 import { Seg } from "../parts/Seg";
@@ -11,6 +12,7 @@ import { TrajectoryChart } from "./TrajectoryChart";
 export const BRL = { style: "currency", currency: "BRL", maximumFractionDigits: 0 } as const;
 
 export function Hero({ s }: { s: DashState }) {
+  const { set } = useActions();
   const current = isCurrentMonth(s.month);
   const simOn = current && simActive(s);
   const traj = useMemo(() => trajectory(s.month, s.horizon, simOn ? s.sim : null), [s.month, s.horizon, s.sim, simOn]);

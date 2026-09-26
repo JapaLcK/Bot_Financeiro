@@ -1,13 +1,13 @@
 import { CATEGORIES, MONTHS, TODAY, catById, isCurrentMonth, keyDate, summary } from "../lib/api";
 import { LAUNCHES } from "../lib/data.js";
 import { money, money0, monthShort } from "../lib/format.js";
-import { setFilter } from "../lib/store.js";
+import { useActions } from "../lib/actions";
 import type { DashState, Launch } from "../lib/types";
 import { Frame } from "../parts/Frame";
-import { go } from "../router";
 
 // Detalhe da categoria escolhida em "Para onde vai" (ou da maior variável do mês).
 export function CategoryDetail({ s }: { s: DashState }) {
+  const { setFilter, go } = useActions();
   const m = summary(s.month);
   const top = CATEGORIES.filter((c) => c.variable).sort((a, b) => m.byCategory[b.id] - m.byCategory[a.id])[0];
   const picked = catById(s.filter.category);

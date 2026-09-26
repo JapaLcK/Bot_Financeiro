@@ -1,8 +1,10 @@
-import { useDeferredValue, useEffect, useMemo, useState } from "react";
+import { useContext, useDeferredValue, useEffect, useMemo, useState } from "react";
 import { catById, summary } from "../lib/api";
 import { longDate, money, tint } from "../lib/format.js";
-import { dayKey, setFilter } from "../lib/store.js";
+import { useActions } from "../lib/actions";
+import { dayKey } from "../lib/store.js";
 import type { DashState, Launch } from "../lib/types";
+import { FrameScope } from "./Frame";
 import { Seg } from "./Seg";
 
 const SOURCES = {
@@ -16,6 +18,8 @@ const PAGE = 30;
 const norm = (t: string) => t.normalize("NFD").replace(/[\u0300-\u036f]/g, "").toLowerCase();
 
 export function Ledger({ s }: { s: DashState }) {
+  const { setFilter } = useActions();
+  const scope = useContext(FrameScope);
   const source = s.filter.source;
   const [limit, setLimit] = useState(PAGE);
   // A origem vale só enquanto o extrato está aberto: sair da tela a devolve a "Todos",
@@ -53,9 +57,9 @@ export function Ledger({ s }: { s: DashState }) {
   const clear = () => setFilter({ category: null, day: null, query: "", source: "todos" });
 
   return (
-    <section id="lancamentos" className="ledger" aria-labelledby="ledger-h">
+    <section id={`${scope}lancamentos`} className="ledger" aria-labelledby={`${scope}ledger-h`}>
       <header className="ledger-head">
-        <h2 id="ledger-h">No mês <span className="faint num">{rows.length}</span></h2>
+        <h2 id={`${scope}ledger-h`}>No mês <span className="faint num">{rows.length}</span></h2>
         <div className="ledger-tools">
           <label className="search">
             <i className="ph ph-magnifying-glass" aria-hidden="true" />
