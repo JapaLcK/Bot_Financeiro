@@ -1,6 +1,7 @@
 """Saque e depósito em espécie vindos do Open Finance movem a Carteira (Q41).
 
-- Kill switch `OF_CASH_ENABLED`, desligado por padrão e lido a cada chamada.
+- Kill switch `OF_CASH_ENABLED`, desligado por padrão e lido a cada chamada. Ele
+  só impede vínculo NOVO: o que já existe segue o banco e segue interno.
 - Escrita sob `_lock_user`, na transação de quem chama, com SQL inline: nunca
   `add_launch_and_update_balance`/`delete_launch_and_rollback` (conexão própria
   esperando a linha de `accounts` que o sync já travou = autodeadlock).
@@ -51,6 +52,13 @@ def cash_kind(account_type, amount, raw, description) -> str | None:
     if saque and (tipo == "BANK" and v < 0 and op == "PIX" or tipo == "CREDIT" and v != 0):
         return "fraco"
     return None
+
+
+def kind_atual(t) -> str | None:
+    """O tipo que o banco diz AGORA. Declaração bancária confirmada nunca é dinheiro."""
+    if t["reconciliation_status"] == "bank_movement_confirmed":
+        return None
+    return cash_kind(t["account_type"], t["amount"], t["raw"], t["description"])
 
 
 def _sha(*parts) -> str:
@@ -130,74 +138,9 @@ def _muda_status(cur, user_id, link, status) -> None:
     link.update(status=status, launch_id=None)
 
 
-def _corrige(cur, user_id, link, t) -> int:
-    """O banco corrigiu valor/data: o vínculo segue o banco (a pergunta pendente
-    credita o valor corrente) e o automático já creditado também."""
-    v = abs(Decimal(str(t["amount"])))
-    if v == Decimal(str(link["amount"])) and t["transaction_date"] == link["tx_date"]:
-        return 0
-    if link["status"] == "ativo" and link["launch_id"] and link["origem"] == "auto":
-        novo = -v if link["kind"] == "deposito" else v
-        criado_em, known = _quando(t["transaction_date"], t["transacted_at"])
-        # O delta velho vem do PRÓPRIO lançamento (o `returning` lê a linha antes do update).
-        cur.execute("""update launches l set valor=%s, criado_em=%s, efeitos = l.efeitos || %s
-                         from launches o where o.id = l.id and l.id=%s and l.user_id=%s
-                       returning (o.efeitos->>'delta_conta')::numeric as velho""",
-                    (v, criado_em, Jsonb({"delta_conta": float(novo), "time_known": known}),
-                     link["launch_id"], user_id))
-        if not (row := cur.fetchone()):
-            return 0
-        cur.execute("update accounts set balance = balance + %s where user_id=%s", (novo - row["velho"], user_id))
-    cur.execute("update of_cash_links set amount=%s, tx_date=%s, updated_at=now() where id=%s and user_id=%s",
-                (v, t["transaction_date"], link["id"], user_id))
-    link.update(amount=v, tx_date=t["transaction_date"])
-    return 1
-
-
-def casa_manual(cur, user_id, manual_id, valor, dia) -> bool:
-    """O manual ainda casa com o banco? Mesma tolerância do casamento
-    (`pick_reconciliation_match`: valor e ±dias). Manual apagado não casa."""
-    from .open_finance import pick_reconciliation_match
-    cur.execute("select id, valor, coalesce(posted_at, criado_em::date) as ref_date from launches "
-                "where id=%s and user_id=%s", (manual_id, user_id))
-    row = cur.fetchone()
-    return bool(row) and pick_reconciliation_match(valor, dia, "", [dict(row)])["launch_id"] is not None
-
-
-def _descasa(cur, user_id, link, corrigiu) -> bool:
-    """Casamento com o manual que deixou de casar (o banco corrigiu, ou o manual
-    mudou/sumiu): desfaz — senão o "é o mesmo" some com a diferença. A pergunta
-    é revalidada toda rodada; o 'ativo' manual já respondido, só quando o banco
-    corrige (editar o manual depois do "é o mesmo" é escolha do usuário)."""
-    if link["status"] == "perguntar_manual":
-        manual = link["manual_launch_id"]
-    elif corrigiu and link["status"] == "ativo" and link["origem"] == "manual" and link["launch_id"]:
-        manual = link["launch_id"]
-    else:
-        return False
-    if casa_manual(cur, user_id, manual, link["amount"], link["tx_date"]):
-        return False
-    if link["status"] == "ativo":
-        _muda_status(cur, user_id, link, "desfeito")  # devolve o manual a lançamento comum
-    return True
-
-
-def _revisa(cur, user_id, link, t, kind) -> tuple[int, bool]:
-    """Transação que já tem vínculo: religa, corrige ou estorna. Devolve
-    (mudou, reavaliar) — reavaliar = o casamento com o manual se desfez."""
-    if link["of_transaction_id"] is None:  # reconexão: mesma transação, espelho novo
-        link["of_transaction_id"] = t["id"]
-        cur.execute("update of_cash_links set of_transaction_id=%s, updated_at=now() where id=%s "
-                    "and user_id=%s", (t["id"], link["id"], user_id))
-    elif link["of_transaction_id"] != t["id"]:
-        return 0, False  # a mesma transação vista por outra conexão viva
-    if link["status"] not in INTERNOS:
-        return 0, False
-    if kind != link["kind"]:
-        _muda_status(cur, user_id, link, "estornado")
-        return 1, False
-    corrigiu = _corrige(cur, user_id, link, t)
-    return corrigiu, _descasa(cur, user_id, link, corrigiu)
+def _do_usuario(link) -> bool:
+    """Desfazer, "apagar #N", "já anotei" e "não era dinheiro": o banco não reabre."""
+    return link["status"] in ("desfeito", "nao_dinheiro") or (link["status"] == "ativo" and not link["launch_id"])
 
 
 def _candidato_manual(cur, user_id, links, kind, t) -> int | None:
@@ -214,9 +157,13 @@ def _candidato_manual(cur, user_id, links, kind, t) -> int | None:
 
 def reconcile_cash_transfers(cur, user_id) -> int:
     """Roda dentro da transação do sync. Devolve quantos vínculos mudaram."""
-    if not enabled():
-        return 0
+    ligado = enabled()
+    if not ligado:
+        cur.execute("select 1 from of_cash_links where user_id=%s limit 1", (user_id,))
+        if not cur.fetchone():
+            return 0
     from .bank_movements import _lock_user
+    from .open_finance_cash_revisao import _revisa
     _lock_user(cur, user_id)
     ativacao = _activation(cur)
     # ponytail: varre as transações do usuário todo sync (≤1837/conexão); filtrar no SQL se pesar.
@@ -261,8 +208,7 @@ def reconcile_cash_transfers(cur, user_id) -> int:
 
     mudou = 0
     for t in txs:
-        kind = (None if t["reconciliation_status"] == "bank_movement_confirmed"
-                else cash_kind(t["account_type"], t["amount"], t["raw"], t["description"]))
+        kind = kind_atual(t)
         chave, duravel = tx_key(t["akey"], t["raw"], t["provider_transaction_id"])
         # Pela transação local primeiro: nome da instituição e número da conta mudam
         # na conexão viva (upsert do item) e, pela chave só, virariam crédito em dobro.
@@ -275,16 +221,18 @@ def reconcile_cash_transfers(cur, user_id) -> int:
                 link.update(tx_key=chave, account_key=t["akey"], key_durable=duravel)
             n, reavaliar = _revisa(cur, user_id, link, t, kind)
             mudou += n
-            if reavaliar:  # o manual não casa mais: a transação passa pela decisão de novo
+            if reavaliar:
                 status, manual = decide(t, kind, link["key_durable"])
-                cur.execute("update of_cash_links set status=%s, origem='auto', manual_launch_id=%s, "
-                            "updated_at=now() where id=%s and user_id=%s", (status, manual, link["id"], user_id))
-                link.update(status=status, origem="auto", manual_launch_id=manual)
+                link.update(status=status, origem="auto", manual_launch_id=manual,
+                            amount=abs(Decimal(str(t["amount"]))), tx_date=t["transaction_date"])
+                cur.execute("update of_cash_links set status=%s, origem='auto', manual_launch_id=%s, kind=%s, "
+                            "amount=%s, tx_date=%s, updated_at=now() where id=%s and user_id=%s",
+                            (status, manual, kind, link["amount"], link["tx_date"], link["id"], user_id))
                 if status == "ativo":
                     link["launch_id"] = _credita(cur, user_id, link, t["transacted_at"])
                 mudou += 1
             continue
-        if kind is None:
+        if kind is None or not ligado:
             continue
         status, manual = decide(t, kind, duravel)
         dia = t["transaction_date"]
@@ -305,12 +253,18 @@ def reconcile_cash_transfers(cur, user_id) -> int:
 
 def cash_internal_tx_ids(cur, user_id) -> set:
     """Transações OF cujo lado do banco fica fora dos relatórios. Os três sites
-    que classificam a sombra (import, correção, desfazer fusão) consultam isto."""
-    if not enabled():
-        return set()
-    cur.execute("select of_transaction_id from of_cash_links where user_id=%s "
-                "and of_transaction_id is not null and status = any(%s)", (user_id, list(INTERNOS)))
-    return {r["of_transaction_id"] for r in cur.fetchall()}
+    que classificam a sombra (import, correção, desfazer fusão) consultam isto.
+    Sem o switch de propósito: desligar não reinterpreta o que já foi gravado.
+    Decisão do usuário (desfeito) só esconde o lado do banco enquanto o banco
+    disser que é dinheiro: virou compra, conta como compra — sem recreditar."""
+    cur.execute("""select k.of_transaction_id, k.status, k.launch_id, t.amount, t.raw, t.description,
+                          t.reconciliation_status, a.type as account_type
+                     from of_cash_links k
+                     join open_finance_transactions t on t.id = k.of_transaction_id
+                     join open_finance_accounts a on a.id = t.account_id
+                     join open_finance_connections c on c.id = a.connection_id and c.user_id = k.user_id
+                    where k.user_id=%s and k.status = any(%s)""", (user_id, list(INTERNOS)))
+    return {r["of_transaction_id"] for r in cur.fetchall() if not _do_usuario(r) or kind_atual(r)}
 
 
 def estorna_links(cur, user_id, of_tx_ids) -> int:
@@ -318,7 +272,7 @@ def estorna_links(cur, user_id, of_tx_ids) -> int:
     switch de propósito — crédito já feito tem de voltar mesmo com ele desligado."""
     cur.execute("select * from of_cash_links where user_id=%s and of_transaction_id = any(%s) "
                 "and status = any(%s) for update", (user_id, list(of_tx_ids), list(INTERNOS)))
-    rows = [dict(r) for r in cur.fetchall()]
+    rows = [dict(r) for r in cur.fetchall() if not _do_usuario(r)]
     for link in rows:
         _muda_status(cur, user_id, link, "estornado")
     return len(rows)

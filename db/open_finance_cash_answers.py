@@ -2,7 +2,8 @@
 desfazer, responder pergunta, listar pendências. Cada uma trava `accounts` antes
 (`_lock_user`), na mesma ordem do reconciliador."""
 from .connection import get_conn
-from .open_finance_cash import PERGUNTAS, RESPOSTAS, _credita, _muda_status, casa_manual
+from .open_finance_cash import PERGUNTAS, RESPOSTAS, _credita, _muda_status
+from .open_finance_cash_revisao import casa_manual
 
 
 def _link_travado(cur, user_id, link_id) -> dict:
