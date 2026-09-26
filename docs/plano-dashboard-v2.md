@@ -249,6 +249,7 @@ PR de cada etapa, não soluções prontas. Cada PR confere se ainda valem, decid
 - [ ] Pré-requisitos: ~~#594~~ ✓ · Q42 (#620, mergeado; conferir o deploy) · Q43 (#623 e
   #634, mergeados; deploy não conferido) · Q40 (#633, mergeado; deploy não conferido) ·
   Q41 (#627, aberto)
+  - Q41: núcleo no #627, atrás de `OF_CASH_ENABLED` (desligado); falta o PR B (painel, WhatsApp e o switch ligado).
 - Etapa 0 em andamento:
   - PR 1 (#632, mergeado): esqueleto da `/api/v2` (`usuario_atual`, envelope de erro,
     `GET /api/v2/me`, varredura de rotas).
