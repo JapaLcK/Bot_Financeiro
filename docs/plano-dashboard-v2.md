@@ -475,7 +475,15 @@ tecnologia, podendo refazer o que for preciso, com calma (Q5).
     num item cujas contas sincronizaram, `_sync_pluggy_item_confirmado`
     (`core/services/pluggy_sync.py`) marca `investments_ok=False` mas grava a conexão como
     `ACTIVE`, sem motivo. Então a sincronização passa a gravar, **por conexão e por
-    produto** (contas, investimentos), a hora do último sucesso local, e a foto usa isso;
+    produto** (contas, investimentos), a hora do último sucesso local, e a foto usa isso.
+    E uma sincronização não é atômica: em `_sync_pluggy_item_confirmado` os investimentos
+    confirmam numa transação e as contas em outra, então uma foto no meio leria o
+    investimento novo com o saldo velho (um ganho falso, com os dois produtos "em dia").
+    Por isso a sincronização marca a conexão como **em andamento** do começo ao fim da
+    fase de escrita, e a foto de um usuário com conexão em andamento não é gravada como
+    exata: ela espera e tenta de novo mais tarde na mesma rodada; se a marca não sair (a
+    sincronização morreu no meio), o ponto sai como incompleto. Teste: pausar entre os dois
+    commits da sincronização e rodar a foto (nenhum ponto exato com a mistura);
   - **o conjunto de bancos muda, a linha quebra:** conectar, desconectar ou pausar um banco
     muda o que entra na soma, e o gráfico mostraria um salto que não é ganho nem perda.
     Desconectar apaga a conexão (`disconnect_open_finance_connection`), então no dia
