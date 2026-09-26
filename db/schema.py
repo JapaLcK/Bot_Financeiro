@@ -933,6 +933,8 @@ def init_db():
           id bigserial primary key,
           user_id bigint not null references users(id) on delete cascade,
           account_key text not null,
+          -- banco; = account_key quando a conta não tem número (ver account_key)
+          institution_key text not null,
           connected_at timestamptz not null,
           covered_from date,
           covered_until date

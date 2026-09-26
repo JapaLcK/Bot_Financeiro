@@ -90,3 +90,37 @@ def test_mesmo_banco_por_dois_connectors_segue_a_mesma_conta(caixa):
 
     assert [r["status"] for r in links(uid)] == ["ativo", "perguntar_novo"]
     assert carteira(uid) == Decimal("200")
+
+
+def test_desconectar_com_o_switch_desligado_guarda_a_janela(caixa, monkeypatch):
+    """Switch desligado no meio: desconectar ainda grava a janela. Religado e
+    reconectado, o saque feito durante a desconexão entra (não vira histórico)
+    e o antigo com providerId trocado pergunta (não credita de novo)."""
+    uid = usuario_pagante()
+    c1 = conecta(uid, f"item-a-{uid}")
+    sync(c1, uid, [tx("a-1", -200, dia(10), pid="P1")])
+    monkeypatch.setenv("OF_CASH_ENABLED", "0")
+    assert db.disconnect_open_finance_connection(uid, c1) == 1
+    monkeypatch.setenv("OF_CASH_ENABLED", "1")
+    c2 = conecta(uid, f"item-b-{uid}", desde=datetime(2026, 4, 1, 12))
+    sync(c2, uid, [tx("b-1", -200, dia(10), pid="P9"), tx("b-3", -70, dia(20), pid="P3")])
+
+    assert [r["status"] for r in links(uid)] == ["ativo", "perguntar_novo", "ativo"]
+    assert carteira(uid) == Decimal("270")
+
+
+def test_switch_nunca_ligado_a_janela_nao_muda_nada(monkeypatch):
+    """Positivo: sem o switch, gravar a janela no desconectar não cria vínculo
+    nem lançamento na Carteira, antes e depois de reconectar."""
+    monkeypatch.delenv("OF_CASH_ENABLED", raising=False)
+    uid = usuario_pagante()
+    c1 = conecta(uid, f"item-a-{uid}")
+    sync(c1, uid, [tx("a-1", -200, dia(10), pid="P1")])
+    assert db.disconnect_open_finance_connection(uid, c1) == 1
+    c2 = conecta(uid, f"item-b-{uid}", desde=datetime(2026, 4, 1, 12))
+    sync(c2, uid, [tx("b-1", -200, dia(10), pid="P1"), tx("b-3", -70, dia(20), pid="P3")])
+
+    assert links(uid) == [] and carteira(uid) == 0
+    assert q("select count(*) as n from launches where user_id=%s and source is distinct from "
+             "'open_finance'", (uid,), True)[0]["n"] == 0
+    assert len(q("select 1 from of_cash_coverage where user_id=%s", (uid,), True)) == 1

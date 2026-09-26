@@ -65,13 +65,20 @@ def _sha(*parts) -> str:
     return hashlib.sha256("|".join(str(p) for p in parts).encode()).hexdigest()
 
 
-def account_key(account_type, account_raw, institution_name) -> str:
-    """Instituição (nome normalizado) + número da conta. Nunca id de conexão nem de
-    connector: o mesmo banco vem por connectors diferentes com o mesmo nome."""
+def account_key(account_type, account_raw, institution_name, provider_account_id) -> tuple[str, str, bool]:
+    """(conta, instituição, sem_número). Instituição (nome normalizado) + número
+    da conta; nunca id de conexão nem de connector: o mesmo banco vem por
+    connectors diferentes com o mesmo nome. Sem número, duas contas do mesmo
+    banco não se distinguem: a chave leva o id da conta na Pluggy (separa as
+    contas, não sobrevive a reconectar) e corte e janela das outras conexões
+    são checados pela instituição (`decide`) — ambíguo pergunta."""
     from .open_finance import _normalize_merchant
     tipo, nome = (account_type or "").upper(), _normalize_merchant(institution_name)
     numero = re.sub(r"\D", "", str((account_raw or {}).get("number") or ""))
-    return _sha(tipo, nome, "n", numero) if numero else _sha(tipo, "i", nome)
+    inst = _sha(tipo, "i", nome)
+    if numero:
+        return _sha(tipo, nome, "n", numero), inst, False
+    return _sha(inst, "a", provider_account_id), inst, True
 
 
 def tx_key(acc_key, raw, provider_transaction_id) -> tuple[str, bool]:
@@ -116,8 +123,12 @@ def _solta(cur, user_id, link) -> None:
     lid = link["launch_id"]
     if not lid:
         return
-    if link["origem"] == "manual":
-        cur.execute("update launches set is_internal_movement=false where id=%s and user_id=%s", (lid, user_id))
+    if link["origem"] == "manual":  # volta ao que a categoria dele diz (a regra de update_launch_fields)
+        from utils_text import is_internal_category
+        cur.execute("select categoria from launches where id=%s and user_id=%s", (lid, user_id))
+        if row := cur.fetchone():
+            cur.execute("update launches set is_internal_movement=%s where id=%s and user_id=%s",
+                        (is_internal_category(row["categoria"]), lid, user_id))
         return
     from .accounts import _validar_efeitos
     cur.execute("select efeitos from launches where id=%s and user_id=%s for update", (lid, user_id))
@@ -148,7 +159,10 @@ def _candidato_manual(cur, user_id, links, kind, t) -> int | None:
     from .open_finance import _find_manual_candidates, pick_reconciliation_match
     tipo = "despesa" if kind == "deposito" else "receita"
     valor = abs(Decimal(str(t["amount"])))
-    usados = {i for k in links.values() for i in (k["launch_id"], k["manual_launch_id"]) if i}
+    # Reserva o manual só quem o representa: o casado ("é o mesmo" → launch_id) e
+    # a pergunta aberta. Recusado, descasado ou estornado, ele volta a ser candidato.
+    usados = {k["launch_id"] if k["status"] != "perguntar_manual" else k["manual_launch_id"]
+              for k in links.values()}
     cands = [c for c in _find_manual_candidates(cur, user_id, tipo, valor, t["transaction_date"])
              if c["source"] == "manual" and c["id"] not in usados and c["delta_conta"] is not None
              and (c["delta_conta"] < 0 if tipo == "despesa" else c["delta_conta"] > 0)]
@@ -168,7 +182,7 @@ def reconcile_cash_transfers(cur, user_id) -> int:
     ativacao = _activation(cur)
     # ponytail: varre as transações do usuário todo sync (≤1837/conexão); filtrar no SQL se pesar.
     cur.execute("""select t.*, a.type as account_type, a.raw as account_raw, c.id as connection_id,
-                          c.institution_name, c.created_at as connected_at
+                          a.provider_account_id, c.institution_name, c.created_at as connected_at
                      from open_finance_transactions t
                      join open_finance_accounts a on a.id = t.account_id
                      join open_finance_connections c on c.id = a.connection_id
@@ -178,27 +192,45 @@ def reconcile_cash_transfers(cur, user_id) -> int:
     links = {r["tx_key"]: dict(r) for r in cur.fetchall()}
     por_tx = {k["of_transaction_id"]: k for k in links.values() if k["of_transaction_id"]}
     cur.execute("select * from of_cash_coverage where user_id=%s", (user_id,))
-    primeira, janelas = {}, []
-    for c in cur.fetchall():
-        primeira[c["account_key"]] = min(primeira.get(c["account_key"], c["connected_at"]), c["connected_at"])
-        janelas.append((c["account_key"], None, c["covered_from"], c["covered_until"]))
+    primeira, janelas = {}, []  # primeira conexão por conta e por instituição
+
+    def _primeira(k, quando):
+        primeira[k] = min(primeira.get(k, quando), quando)
+    for c in cur.fetchall():  # conta sem número gravada pela instituição (record_coverage)
+        _primeira(c["account_key"], c["connected_at"])
+        _primeira(c["institution_key"], c["connected_at"])
+        janelas.append((c["account_key"], c["institution_key"], c["account_key"] == c["institution_key"],
+                        None, c["covered_from"], c["covered_until"]))
     vivas = {}
     for t in txs:
-        k = t["akey"] = account_key(t["account_type"], t["account_raw"], t["institution_name"])
-        primeira[k] = min(primeira.get(k, t["connected_at"]), t["connected_at"])
-        lo, hi = vivas.get((k, t["connection_id"]), (t["transaction_date"],) * 2)
-        vivas[(k, t["connection_id"])] = (min(lo, t["transaction_date"]), max(hi, t["transaction_date"]))
-    janelas += [(k, cid, lo, hi) for (k, cid), (lo, hi) in vivas.items()]
+        t["akey"], t["inst"], t["anon"] = account_key(
+            t["account_type"], t["account_raw"], t["institution_name"], t["provider_account_id"])
+        k, inst, anon = t["akey"], t["inst"], t["anon"]
+        _primeira(k, t["connected_at"])
+        _primeira(inst, t["connected_at"])
+        chave, dia = (k, inst, anon, t["connection_id"]), t["transaction_date"]
+        lo, hi = vivas.get(chave, (dia, dia))
+        vivas[chave] = (min(lo, dia), max(hi, dia))
+    janelas += [chave + janela for chave, janela in vivas.items()]
+
+    def outra_viu(t, dia):
+        """Outra conexão (viva ou removida) cobriu a data nesta conta — ou, com
+        conta sem número de algum dos lados, neste banco."""
+        return any(cid != t["connection_id"] and lo and hi and lo <= dia <= hi
+                   and (k == t["akey"] or inst == t["inst"] and (anon or t["anon"]))
+                   for k, inst, anon, cid, lo, hi in janelas)
 
     def decide(t, kind, duravel):
         dia, manual = t["transaction_date"], None
         corte = max(ativacao, primeira[t["akey"]]).astimezone(_tz()).date()
-        if dia < corte:
+        # Sem número, a conta pode ser a mesma de uma conexão mais antiga do banco:
+        # antes do corte dela e depois do do banco é ambíguo (pergunta).
+        banco = max(ativacao, primeira[t["inst"]]).astimezone(_tz()).date() if t["anon"] else corte
+        if dia < banco:
             status = "historico"
         elif (manual := _candidato_manual(cur, user_id, links, kind, t)) is not None:
             status = "perguntar_manual"
-        elif not duravel or any(k == t["akey"] and cid != t["connection_id"] and lo and hi and lo <= dia <= hi
-                                for k, cid, lo, hi in janelas):
+        elif not duravel or dia < corte or outra_viu(t, dia):
             status = "perguntar_novo"
         elif kind != "saque":
             status = "perguntar_fraco"
@@ -279,10 +311,9 @@ def estorna_links(cur, user_id, of_tx_ids) -> int:
 
 
 def record_coverage(cur, user_id, connection_id=None) -> None:
-    """Antes do delete da conexão: a janela que cada conta dela já cobriu."""
-    if not enabled():
-        return
-    cur.execute("""select a.type, a.raw, c.institution_name, c.created_at,
+    """Antes do delete da conexão: a janela que cada conta dela já cobriu. Sem o
+    switch de propósito: é só memória de período visto, que ninguém lê sem vínculo."""
+    cur.execute("""select a.type, a.raw, a.provider_account_id, c.institution_name, c.created_at,
                           min(t.transaction_date) as lo, max(t.transaction_date) as hi
                      from open_finance_accounts a
                      join open_finance_connections c on c.id = a.connection_id
@@ -290,7 +321,8 @@ def record_coverage(cur, user_id, connection_id=None) -> None:
                     where c.user_id=%s and (%s::bigint is null or c.id=%s) group by a.id, c.id""",
                 (user_id, connection_id, connection_id))
     for r in cur.fetchall():
-        cur.execute("insert into of_cash_coverage(user_id, account_key, connected_at, covered_from, "
-                    "covered_until) values (%s,%s,%s,%s,%s)",
-                    (user_id, account_key(r["type"], r["raw"], r["institution_name"]),
-                     r["created_at"], r["lo"], r["hi"]))
+        # Conta sem número: a chave por conta morre com a conexão; fica a do banco.
+        akey, inst, anon = account_key(r["type"], r["raw"], r["institution_name"], r["provider_account_id"])
+        cur.execute("insert into of_cash_coverage(user_id, account_key, institution_key, connected_at, "
+                    "covered_from, covered_until) values (%s,%s,%s,%s,%s,%s)",
+                    (user_id, inst if anon else akey, inst, r["created_at"], r["lo"], r["hi"]))

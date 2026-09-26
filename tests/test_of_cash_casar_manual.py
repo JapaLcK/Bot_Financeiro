@@ -117,3 +117,45 @@ def test_e_o_mesmo_recusa_manual_que_nao_casa_mais(caixa):
     assert (r["changed"], r.get("reason")) == (False, "MANUAL_NOT_AVAILABLE")
     assert not _interno(uid, _recebi_id(uid))
     assert links(uid)[0]["status"] == "perguntar_manual"
+
+
+@pytest.mark.parametrize("porta", ["banco_estorna", "desfazer"])
+def test_soltar_o_manual_respeita_a_categoria_dele(caixa, porta):
+    """Casado com "é o mesmo" e depois recategorizado como transferência interna:
+    soltar o casamento (o banco deixa de dizer saque, ou o usuário desfaz)
+    devolve o manual ao que a CATEGORIA dele diz — interno — e não a receita."""
+    from db.open_finance_cash_answers import undo_link
+    uid = usuario_pagante()
+    c = _conversa_e_banco(uid, 200)
+    assert answer_link(uid, links(uid)[0]["id"], "same")["changed"]
+    assert db.update_launch_category(uid, _recebi_id(uid), "transferencia_interna")
+    if porta == "banco_estorna":
+        sync(c, uid, [tx("t1", -200, date.today(), op="CARTAO", desc="Compra")])
+    else:
+        assert undo_link(uid, links(uid)[0]["id"])["changed"]
+
+    assert links(uid)[0]["status"] in ("estornado", "desfeito")
+    assert _interno(uid, _recebi_id(uid))
+
+
+def test_sao_diferentes_solta_o_manual_para_o_proximo_saque(caixa):
+    """"São diferentes" no 1º saque de 200: o "recebi 200" fica livre, e o 2º
+    saque de 200 (esse sim, talvez o anotado) pergunta em vez de creditar."""
+    uid = usuario_pagante()
+    c = _conversa_e_banco(uid, 200)
+    assert answer_link(uid, links(uid)[0]["id"], "different")["changed"]
+    sync(c, uid, [tx("t1", -200, date.today()), tx("t2", -200, date.today())])
+
+    assert [(r["status"], r["manual_launch_id"]) for r in links(uid)][1] == ("perguntar_manual", _recebi_id(uid))
+    assert carteira(uid) == Decimal("350")
+
+
+def test_pergunta_aberta_segue_reservando_o_manual(caixa):
+    """Positivo: com a pergunta do 1º saque aberta, o "recebi 200" não é
+    oferecido também ao 2º saque de 200 — que credita direto."""
+    uid = usuario_pagante()
+    c = _conversa_e_banco(uid, 200)
+    sync(c, uid, [tx("t1", -200, date.today()), tx("t2", -200, date.today())])
+
+    assert [r["status"] for r in links(uid)] == ["perguntar_manual", "ativo"]
+    assert carteira(uid) == Decimal("350")
