@@ -1526,7 +1526,11 @@ async def open_finance_connect_token_route(request: Request, user_id: int):
     except Exception as exc:  # noqa: BLE001 — rastro nunca derruba a emissão do token
         await log_system_event(
             "warning", "of_item_registry_failed", "Falha ao registrar connect token",
-            source="open_finance", details={"error": str(exc)[:200]},
+            source="open_finance", user_id=user_id,  # mesma razão do irmão no /pluggy-item
+            # Tipo + `sqlstate` e não `str(exc)[:200]`, também pela razão do irmão:
+            # com o dono na coluna, estes `details` passam a sair na exportação LGPD.
+            details={"motivo": type(exc).__name__,
+                     "sqlstate": getattr(exc, "sqlstate", None)},
         )
 
     return {
@@ -1666,11 +1670,68 @@ async def open_finance_pluggy_item_route(request: Request, user_id: int, payload
     except ValueError as exc:
         raise HTTPException(status_code=400, detail=detalhe_seguro(exc)) from exc
 
-    await asyncio.to_thread(
-        register_item, session_uid,
-        provider_item_id=new_item_id, origin="pluggy_item",
-        status=str(remote.get("status") or "") or None,
-    )
+    try:
+        await asyncio.to_thread(
+            register_item, session_uid,
+            provider_item_id=new_item_id, origin="pluggy_item",
+            status=str(remote.get("status") or "") or None,
+        )
+    except Exception as exc:  # noqa: BLE001 — rastro nunca derruba conexão já commitada
+        # Mesmo contrato dos outros dois `of_item_registry_failed` (connect token e
+        # webhook), e aqui era o pior dos três desfechos: 500 com a conexão JÁ
+        # commitada, sem `OPEN_FINANCE_CONNECTED` e sem sync inicial. Preço de
+        # seguir: o item fica sem rastro `pluggy_item` — igual ao que o 500 já
+        # deixava. O que ISSO custava (reentrega de `item/created` depois da
+        # remoção não ser reconhecida pela 1ª guarda de `_adota_item_orfao`) está
+        # fechado por DOIS mecanismos, não por um:
+        #   * banco REMOVIDO — disconnect e reset gravam `origin='removed'` na mesma
+        #     transação do delete (`db.mark_items_removed`) e a guarda recusa
+        #     qualquer origem COM DONO (regra em `db.item_registry_origins`,
+        #     CLAUDE.md §0.7). Quem prova é o `tests/test_of_marca_removido.py::
+        #     test_item_created_reentregue_nao_ressuscita_banco_removido_sem_rastro_pluggy_item`;
+        #   * conta EXCLUÍDA — lá não há marca nenhuma (o registry vai no cascade da
+        #     FK junto com o usuário); quem fecha é a guarda de `user_exists` de
+        #     `_adota_item_orfao`, que recusa por IDENTIDADE.
+        # ESCOPO: isto salva a falha ISOLADA do registry. Numa queda geral do
+        # Postgres o `get_open_finance_snapshot` abaixo (leitura sem `try`) derruba
+        # a resposta do mesmo jeito — e aí a conexão commitada já não é o caso raro.
+        # `_log_com_teto` e não `log_system_event` cru: este `except` dispara quando
+        # o Postgres ACABOU de falhar, e sem o `wait_for` o 200 que este bloco
+        # entrega pode virar 200 pendurado pelos dois furos fora do alcance do
+        # `statement_timeout` (COMMIT e servidor que aceita o socket e não responde,
+        # `core/system_event_log.py`). Mesmo teto dos irmãos do `_grava_reconexao`.
+        #
+        # ANTES do `_log_com_teto`, e não em vez dele — mesmo padrão dos dois irmãos
+        # da reconexão, pela mesma razão: quando o teto ESTOURA, o `wait_for` engole
+        # o `TimeoutError`, e quando o banco do log está fora o `log_system_event`
+        # engole o erro imprimindo mensagem GENÉRICA, sem `event_type` e sem
+        # `item_id` (`core/admin_dashboard.py`). Medido nas duas metades: o
+        # `new_item_id` não sobrava em canal nenhum. Como este caminho deixa de
+        # propósito uma conexão commitada SEM rastro `pluggy_item`, o id é a única
+        # chave operacional que resta — perdê-lo é perder o item (Codex, PR #542).
+        logging.getLogger(__name__).warning(
+            "of_item_registry_failed item_id=%s user_id=%s motivo=%s sqlstate=%s",
+            new_item_id, session_uid, type(exc).__name__,
+            getattr(exc, "sqlstate", None))
+        await _log_com_teto(
+            _LOG_DIAG_TIMEOUT_S,
+            "warning", "of_item_registry_failed", "Falha ao registrar item conectado",
+            source="open_finance",
+            # `user_id` na COLUNA (padrão do repo, `tests/test_log_falha_user_id.py`):
+            # é por ela que o `delete_user_data` (`db/privacy.py`) apaga o evento e
+            # que a FK `system_event_logs.user_id` o leva no cascade; linha com a
+            # coluna NULL nenhuma das duas varreduras alcança.
+            user_id=session_uid,
+            # Tipo + `sqlstate`, e NÃO o `str(exc)[:200]` que os irmãos de coluna
+            # NULL gravam: com o dono na coluna estes `details` passam a sair
+            # INTEIROS na exportação LGPD do próprio titular (`build_user_export_zip`,
+            # `db/privacy.py`), e o texto cru do psycopg numa falha de conexão traz
+            # host e porta. Mesma lista branca que a PR #539 adotou para exceção; o
+            # que o diagnóstico perde, o `logging` do servidor ainda tem.
+            details={"item_id": new_item_id, "origin": "pluggy_item_route",
+                     "motivo": type(exc).__name__,
+                     "sqlstate": getattr(exc, "sqlstate", None)},
+        )
 
     # Pula SÓ a duplicata do webhook. `item/created` chega antes do `onSuccess`
     # do widget (que só dispara em status final), então em produção a ordem comum
@@ -1696,6 +1757,16 @@ async def open_finance_pluggy_item_route(request: Request, user_id: int, payload
     #      evidência ainda não → audita, e o webhook audita em seguida: 2
     #      `OPEN_FINANCE_CONNECTED` para 1 conexão. Escolha deliberada, mesma
     #      régua do bloco acima — duplicata é ruído, buraco é perda.
+    # Sync inicial ANTES da auditoria, e não depois: `record_audit_event` abre
+    # `get_conn()` com o default de 30s do pool e faz INSERT/commit SEM prazo por
+    # query (`core/audit.py`), então uma tabela de auditoria travada segura a
+    # requisição — medido: 6,02s de espera por um lock de 6s. Se o cliente
+    # desiste ou o servidor corta nesse vão, a conexão JÁ commitada ficava sem
+    # sync inicial, que é exatamente o desfecho que este bloco existe para
+    # eliminar (Codex, PR #542). `_schedule_pluggy_sync` só empilha a tarefa e
+    # não toca no banco, então antecipá-lo não rouba prazo de ninguém.
+    _schedule_pluggy_sync(str((connection or {}).get("provider_item_id") or ""))
+
     if not conexao_recem_adotada:
         await asyncio.to_thread(
             record_audit_event,
@@ -1704,9 +1775,6 @@ async def open_finance_pluggy_item_route(request: Request, user_id: int, payload
             request=request,
             details={"provider": "pluggy", "item_id": (connection or {}).get("provider_item_id")},
         )
-
-    # Sync inicial: puxa contas + transações do banco recém-conectado.
-    _schedule_pluggy_sync(str((connection or {}).get("provider_item_id") or ""))
 
     snapshot = await asyncio.to_thread(get_open_finance_snapshot, user_id)
     return json.loads(shared.jdump({"ok": True, "connection": connection, **snapshot}))
