@@ -809,7 +809,7 @@ def send_password_reset_email(to: str, reset_url: str, has_password: bool = True
         subject = "🔑 Redefinir senha — PigBank"
     else:
         intro = (
-            "Sua conta no <strong>PigBank</strong> foi criada com o Google e ainda não tem senha. "
+            "Sua conta no <strong>PigBank</strong> ainda não tem senha. "
             "Use o link abaixo para definir uma."
         )
         button = "🔑 Definir minha senha"

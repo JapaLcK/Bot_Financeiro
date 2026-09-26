@@ -2160,7 +2160,7 @@ function applySecuritySettings(data) {
     HAS_PASSWORD ? "Enviar e-mail de reset" : "Enviar e-mail";
   if (!HAS_PASSWORD && hasEmail) {
     document.getElementById("security-reset-copy").textContent =
-      `Sua conta foi criada com o Google e ainda não tem senha. O link vai para ${data.email} e expira em 30 minutos.`;
+      `Sua conta ainda não tem senha. O link vai para ${data.email} e expira em 30 minutos.`;
   }
 }
 
@@ -2684,7 +2684,7 @@ async function refreshHasPassword() {
 function requireSenhaDefinida() {
   if (HAS_PASSWORD) return true;
   confirmModal(
-    "Sua conta foi criada com o Google e ainda não tem senha, então nenhuma senha funciona aqui. "
+    "Sua conta ainda não tem senha, então nenhuma senha funciona aqui. "
     + "Defina uma senha por e-mail e volte para concluir.\n\n"
     // No app o gesto é puxar a tela (não há recarregar); na web é recarregar.
     // O PBRefresh rebusca o has_password nas duas abas que têm ponto barrado.

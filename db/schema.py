@@ -1010,6 +1010,10 @@ def init_db():
         """
         alter table email_verification_codes add column if not exists display_name text
         """,
+        # Cadastro pelo quiz (frontend/routes/quiz_signup.py) nasce sem senha.
+        """
+        alter table email_verification_codes alter column password_hash drop not null
+        """,
         """
         create table if not exists password_reset_tokens (
           token text primary key,
