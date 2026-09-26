@@ -296,7 +296,7 @@ def update_pocket_meta(
         sets.append("status = %s")
         params.append(status)
     # Q43: caixinha manual não rende mais. Ligar o juro é ignorado (a rota e o JS
-    # em cache ainda mandam true); só o desligar é gravado.
+    # em cache ainda mandam true); só o desligar é gravado, e só se a final carimbou.
     if interest_enabled is False:
         sets.append("interest_enabled = false")
     if interest_rate is not None:
@@ -319,6 +319,17 @@ def update_pocket_meta(
                     return None
                 # Finaliza (e congela) a caixinha ainda não congelada.
                 accrue_pocket_db(cur, user_id, int(pocket_id))
+                # Busca de índice falhou: marcador NULL e juro ligado para a próxima
+                # rodada completar. Desligar aqui faria ela carimbar sem render.
+                if interest_enabled is False:
+                    cur.execute(
+                        "select interest_frozen_at, of_investment_id, source "
+                        "from pockets where user_id=%s and id=%s",
+                        (user_id, int(pocket_id)),
+                    )
+                    p = cur.fetchone()
+                    if p["interest_frozen_at"] is None and not _is_of_mirror(p):
+                        sets.remove("interest_enabled = false")
             if sets:
                 try:
                     cur.execute(
@@ -330,7 +341,7 @@ def update_pocket_meta(
                 except psycopg.errors.UniqueViolation:
                     # Sai do `with get_conn()` por exceção: o pool faz o rollback.
                     raise ValueError("Já existe uma caixinha com esse nome.") from None
-            else:  # só `interest_enabled: true`, que é ignorado: devolve a caixinha
+            else:  # só `interest_enabled`, ignorado ou adiado: devolve a caixinha
                 cur.execute(
                     f"select {POCKET_COLUMNS} from pockets where user_id=%s and id=%s",
                     params,

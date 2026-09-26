@@ -431,6 +431,57 @@ def test_F5_patch_so_ligando_o_juro_e_200_sem_vazar(user_id):
     assert r.status_code == 404, r.text
 
 
+@pytest.mark.parametrize("payload", [{"name": "novo nome", "interest_enabled": False},
+                                     {"interest_enabled": False}])
+def test_F6_patch_desligando_com_o_bcb_fora_nao_perde_o_juro(user_id, bcb, monkeypatch, payload):
+    """O `saveGoal` manda `interest_enabled: false` até num renomear. Com a busca
+    falhando, o PATCH não desliga: a próxima rodada completa o juro e aí desliga."""
+    import db.pockets as pockets_db
+    from tests.test_delete_endpoints_nao_vazam import _client, _headers
+
+    monkeypatch.setattr(pockets_db, "_today", lambda: G_HOJE)
+    bcb["semeia"](G_D0, G_K)
+    pid = _caixinha_com_lote(user_id, "viagem", legado=True, cursor=G_D0)
+    r = _client(user_id).patch(f"/pockets/{user_id}/{pid}/meta", headers=_headers(), json=payload)
+    assert r.status_code == 200, r.text
+    assert bcb["chamadas"] > 0
+    row = _linha("pockets", user_id, pid)
+    assert r.json()["pocket"]["name"] == row["name"] == payload.get("name", "viagem")
+    assert _approx(row["balance"], G_ATE_K)
+    assert row["interest_frozen_at"] is None and row["interest_enabled"] is True
+
+    bcb["resposta"] = G_CAUDA
+    db.accrue_all_pockets(user_id, today=G_HOJE)
+    row = _linha("pockets", user_id, pid)
+    assert _approx(row["balance"], G_TUDO)
+    assert row["interest_frozen_at"] is not None and row["interest_enabled"] is False
+
+
+def test_F7_patch_desligando_sem_falha_grava_false(user_id, bcb, monkeypatch):
+    """Positivo: a legada que carimba e o espelho do banco (que nunca carimba) desligam."""
+    import db.pockets as pockets_db
+    from tests.test_delete_endpoints_nao_vazam import _client, _headers
+
+    monkeypatch.setattr(pockets_db, "_today", lambda: G_HOJE)
+    bcb["semeia"](G_D0, G_K)
+    bcb["resposta"] = []
+    manual = _caixinha_com_lote(user_id, "viagem", legado=True, cursor=G_D0)
+    espelho = _espelho_desvinculado(user_id, "q43-f7")
+    with db.get_conn() as conn, conn.cursor() as cur:
+        cur.execute("update pockets set interest_enabled=true where id=%s and user_id=%s",
+                    (espelho, user_id))
+        conn.commit()
+
+    for pid in (manual, espelho):
+        r = _client(user_id).patch(f"/pockets/{user_id}/{pid}/meta", headers=_headers(),
+                                   json={"interest_enabled": False})
+        assert r.status_code == 200, r.text
+        assert r.json()["pocket"]["interest_enabled"] is False
+        assert _linha("pockets", user_id, pid)["interest_enabled"] is False
+    assert _linha("pockets", user_id, manual)["interest_frozen_at"] is not None
+    _espelho_intacto(user_id, espelho)
+
+
 # ── Migração ──────────────────────────────────────────────────────────────────
 
 def test_migracao_default_now_nas_duas_tabelas(user_id):
