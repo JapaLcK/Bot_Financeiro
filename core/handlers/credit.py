@@ -4,6 +4,7 @@ import logging
 import re
 from collections import defaultdict
 
+from core.handlers.forma_pagamento import NEGACAO_RE
 # Helper único das portas destrutivas (a docstring dele lista quais e explica o
 # critério de nível). Ele nunca põe `str(e)` no log.
 from core.intent_classifier import classify, NEGATIVAS_EXATAS
@@ -745,10 +746,13 @@ def _infer_category(user_id: int, desc: str) -> str:
 
 
 def e_compra_no_debito(text: str) -> bool:
-    """"gastei 50 no cartão de débito": sai da conta, não da fatura (Q2b)."""
+    """"gastei 50 no cartão de débito": sai da conta, não da fatura (Q2b). Com
+    negação ("no cartão, não foi no débito") o débito não vale: fica o crédito
+    pelo "cartão", como era antes da Q2b."""
     norm = normalize_text(text)
     return bool(re.match(r"^(gastei|paguei|comprei|debitei|gasto)\b", norm)
-                and re.search(r"\bdebito\b", norm) and not re.search(r"\bcredito\b", norm))
+                and re.search(r"\bdebito\b", norm) and not re.search(r"\bcredito\b", norm)
+                and not NEGACAO_RE.search(norm))
 
 
 def _is_natural_credit_purchase(text: str) -> bool:
@@ -938,8 +942,18 @@ def add_credit_from_entities(
         return f"❌ Erro registrando compra no crédito: {e}"
 
 
+def negada_com_o_of(user_id: int, text: str) -> bool:
+    """"gastei 50, nem pix nem cartão, foi dinheiro vivo" com banco conectado:
+    a compra que ficaria com o OF ("não registrei") segue como despesa, e o
+    `add()` pergunta a forma (Q40: negação não decide). Cartão manual ou sem
+    banco: o "cartão" decide o crédito, como antes da Q40."""
+    from core.handlers import forma_pagamento as fp
+    return bool(_is_natural_credit_purchase(text) and NEGACAO_RE.search(normalize_text(text))
+                and fp.regra_ativa(user_id) and compra_fica_com_o_of(user_id, text))
+
+
 def try_handle_natural_credit_purchase(user_id: int, text: str) -> str | None:
-    if not _is_natural_credit_purchase(text):
+    if not _is_natural_credit_purchase(text) or negada_com_o_of(user_id, text):
         return None
     # Q2b/Q40: com banco conectado, só cartão MANUAL (fora do OF) registra na
     # fatura; o resto chega pelo Open Finance. Aqui, e não em cada chamador:

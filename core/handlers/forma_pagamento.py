@@ -50,6 +50,13 @@ _EXPRESSAO_DINHEIRO_RE = re.compile(
     r"\s*\b(?:(?:em|no|de|com)\s+(?:dinheiro(?:\s+vivo)?|esp[eé]cie|cash)|dinheiro\s+vivo)\b"
     r"|(?:(?<=\d)|(?<=\breal)|(?<=\breais))\s+dinheiro\b",
     re.IGNORECASE)
+# Negação em qualquer lugar ("não foi em dinheiro", "pix não", "nem pix", "sem
+# ser no pix"): o texto não decide a forma. Com banco o Piggy pergunta (ou
+# repete a pergunta); sem banco `decidir` é Carteira de qualquer jeito. "não"
+# sozinho cancela: `resolver` confere `_CANCELA` antes de `e_resposta`.
+# ponytail: "sem desconto no pix" também pergunta; separar a negação que fala
+# da forma da que não fala é o parser que já errou três vezes.
+NEGACAO_RE = re.compile(r"\b(nao|nem|nunca|sem)\b")
 _CANCELA = {"cancelar", "cancela", "nao"}
 logger = logging.getLogger(__name__)
 
@@ -76,6 +83,8 @@ def decidir(user_id: int, declarada: str) -> str:
 
 
 def _formas(norm: str, resposta: bool) -> tuple[bool, bool]:
+    if NEGACAO_RE.search(norm):
+        return False, False
     banco = bool(_BANCO_RE.search(norm) or (resposta and _BANCO_RESPOSTA_RE.search(norm)))
     dinheiro = bool((_DINHEIRO_RESPOSTA_RE if resposta else _EXPRESSAO_DINHEIRO_RE).search(norm))
     return banco, dinheiro

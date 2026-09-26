@@ -1317,9 +1317,10 @@ def _execute(intent: str, user_id: int, text: str, entities: dict, platform: str
 
     # --- cartões / crédito ---
     if intent == "credit.handle":
-        if h_credit.e_compra_no_debito(text):
+        if h_credit.e_compra_no_debito(text) or h_credit.negada_com_o_of(user_id, text):
             # O classificador lê "cartão" e manda para o cartão; débito é gasto
-            # da conta (Q2b), então segue o caminho de qualquer despesa.
+            # da conta (Q2b), e a negação com banco pergunta a forma (Q40):
+            # segue o caminho de qualquer despesa.
             return _execute("launches.add", user_id, text, entities, platform, external_id,
                             forma_pagamento)
         resp = h_credit.handle(user_id, text)
