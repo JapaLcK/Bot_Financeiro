@@ -518,12 +518,12 @@ _TIPS: list[tuple[str, str, str]] = [
         <p>Economize tempo e mantenha seus relatórios sempre organizados. ✨</p>""",
     ),
     (
-        "Acompanhe investimentos com rendimento automático",
-        "Cadastre seus investimentos e veja o saldo crescer com o CDI em tempo real.",
-        """<p>O PigBank calcula o rendimento dos seus investimentos automaticamente:</p>
-        <code class="cmd">investimento: Tesouro Selic, R$ 2000, 100% CDI</code>
-        <p>O saldo aparece atualizado no seu dashboard a cada acesso, com os juros já aplicados. 📈</p>
-        <p>Use o comando <strong>investimentos</strong> para ver um resumo rápido pelo bot.</p>""",
+        "Seus investimentos num lugar só",
+        "Registre aportes e resgates pelo WhatsApp e veja o total no dashboard.",
+        """<p>Cadastre suas aplicações na aba <strong>Investimentos</strong> do dashboard e registre as movimentações pelo bot:</p>
+        <code class="cmd">apliquei 200 no investimento CDB Nubank</code>
+        <code class="cmd">retirei 100 do investimento CDB Nubank</code>
+        <p>Mande <strong>investimentos</strong> pra ver o resumo da carteira. 📈</p>""",
     ),
     (
         "Relatório diário no horário que você escolher",

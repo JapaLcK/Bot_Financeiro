@@ -3679,14 +3679,9 @@ const GOAL_COLOR_OPTIONS = [
   "#BE8200","#7E5FE6","#E85F2A","#22C3D6","#94A3B8",
 ];
 
-function _cdiPercentFromRate(rate) {
-  const pct = Number(rate == null ? 1 : rate) * 100;
-  return Number.isFinite(pct) && pct > 0 ? pct : 100;
-}
-
-function _formatCdiRate(rate) {
-  const pct = _cdiPercentFromRate(rate);
-  return `Rende ${pct.toLocaleString("pt-BR", { maximumFractionDigits: 2 })}% do CDI · simulado`;
+function _pocketYieldLabel(p) {
+  if (_isOfStale(p)) return "Reative seu banco (plano pago) pra o saldo voltar a atualizar";
+  return _isOfPocket(p) ? "Saldo atualizado pelo banco" : "Sem rendimento";
 }
 
 let _goalsCache = null;
@@ -3837,9 +3832,7 @@ function _renderPocketOnlyCard(p, idx = 0) {
   const line1 = ofStale ? "<i class='ph ph-lock' aria-hidden='true'></i> Banco desconectado. Reative pra atualizar"
               : ofPocket ? "Sincronizada com seu banco"
               : "Caixinha sem meta: depósitos livres";
-  const line2 = ofStale ? "Reative seu banco (plano pago) pra o saldo voltar a atualizar"
-              : ofPocket ? "Saldo atualizado pela corretora/banco"
-              : (p.interest_enabled === false ? "Sem rendimento" : _formatCdiRate(p.interest_rate));
+  const line2 = _pocketYieldLabel(p);
   return `
     <div class="goal-card${ofStale ? " of-stale" : ""}" style="animation-delay:${idx * 80}ms;cursor:pointer" onclick="openPocketHistory('${escapeJsString(p.name)}')">
       <div class="goal-ring">
@@ -3911,7 +3904,7 @@ function _renderGoalCard(g, idx = 0) {
         <div class="goal-amt">${_fmtBRL(g.balance || 0)} / ${_fmtBRL(g.target_amount || 0)}</div>
         <div class="bar-track" style="margin-top:6px"><div class="bar-fill" style="width:${pct}%;background:${color}"></div></div>
         <div class="goal-deadline" style="color:${deadlineColor}">${deadlineText}${g.days_left !== null ? " · " + (g.days_left >= 0 ? "em " + g.days_left + " dias" : "vencido há " + (-g.days_left) + " dias") : ""}</div>
-        <div class="goal-deadline" style="color:var(--text-3)">${g.interest_enabled === false ? "Sem rendimento" : _formatCdiRate(g.interest_rate)}</div>
+        <div class="goal-deadline" style="color:var(--text-3)">${_pocketYieldLabel(g)}</div>
         ${alertText}
       </div>
     </div>
@@ -3970,21 +3963,6 @@ function _ensureGoalModal() {
               <label for="goal-description">Descrição (opcional)</label>
               <input type="text" id="goal-description" maxlength="200" placeholder="Anotações..." />
             </div>
-            <div class="field">
-              <label for="goal-interest-enabled">Rendimento?</label>
-              <label style="display:flex;align-items:center;gap:10px;color:var(--text-2);font-size:.86rem">
-                <input type="checkbox" id="goal-interest-enabled" checked onchange="syncGoalInterestConfig()" />
-                <span>Rendimento atrelado ao CDI</span>
-              </label>
-              <div id="goal-interest-config" style="margin-top:10px">
-                <label for="goal-interest-rate">Percentual do CDI</label>
-                <div style="display:flex;align-items:center;gap:8px">
-                  <input type="number" id="goal-interest-rate" min="1" max="300" step="0.01" value="100" inputmode="decimal" style="width:112px;flex:0 0 112px" />
-                  <span style="color:var(--text-2);font-size:.86rem;white-space:nowrap">% do CDI</span>
-                </div>
-                <div style="color:var(--text-3);font-size:.78rem;margin-top:8px;line-height:1.35"><i class="ph ph-lightbulb" aria-hidden="true"></i> Valor simulado: o PigBank não custodia seu dinheiro. Use a taxa do banco onde o saldo realmente está aplicado.</div>
-              </div>
-            </div>
           </div>
           <div class="modal-acts" style="margin-top:18px;display:flex;gap:8px;align-items:center">
             <button type="button" class="inst-delete-btn" id="goal-delete-btn" style="display:none" onclick="deleteGoalFromModal()"><i class="ph ph-trash" aria-hidden="true"></i> Excluir</button>
@@ -4027,12 +4005,6 @@ function _setGoalColor(c) {
   _rerenderPicker("goal-color-picker", _renderGoalPickers);
 }
 
-function syncGoalInterestConfig() {
-  const enabled = document.getElementById("goal-interest-enabled")?.checked ?? true;
-  const config = document.getElementById("goal-interest-config");
-  if (config) config.style.display = enabled ? "" : "none";
-}
-
 function openGoalEditModal(goal) {
   _ensureGoalModal();
   const isEdit = !!(goal && goal.id);
@@ -4048,9 +4020,6 @@ function openGoalEditModal(goal) {
   document.getElementById("goal-target-date").value = isEdit && goal.target_date ? goal.target_date : "";
   document.getElementById("goal-status").value = isEdit ? (goal.status || "active") : "active";
   document.getElementById("goal-description").value = isEdit ? (goal.description || "") : "";
-  document.getElementById("goal-interest-enabled").checked = isEdit ? goal.interest_enabled !== false : true;
-  document.getElementById("goal-interest-rate").value = _cdiPercentFromRate(isEdit ? goal.interest_rate : 1).toFixed(2).replace(/\.00$/, "");
-  syncGoalInterestConfig();
   document.getElementById("goal-delete-btn").style.display = isEdit ? "" : "none";
   _renderGoalPickers();
   document.getElementById("goal-edit-overlay").classList.add("open");
@@ -4066,8 +4035,6 @@ async function saveGoal() {
   const targetRaw = document.getElementById("goal-target").value.trim();
   const hasTarget = targetRaw !== "";
   const targetVal = hasTarget ? parseFloat(targetRaw) : null;
-  const interestEnabled = document.getElementById("goal-interest-enabled").checked;
-  const cdiPct = parseFloat((document.getElementById("goal-interest-rate").value || "100").replace(",", "."));
   const payload = {
     name: document.getElementById("goal-name").value.trim(),
     description: document.getElementById("goal-description").value.trim() || null,
@@ -4076,17 +4043,11 @@ async function saveGoal() {
     emoji: _goalEditState.emoji,
     color: _goalEditState.color,
     status: document.getElementById("goal-status").value,
-    interest_enabled: interestEnabled,
-    interest_rate: interestEnabled ? cdiPct / 100 : 1.0,
     clear_target: !hasTarget,
   };
   if (!payload.name) { await alertModal("Digite um nome.", { title: "Nome obrigatório" }); return; }
   if (hasTarget && (!targetVal || targetVal <= 0)) {
     await alertModal("Valor alvo deve ser maior que zero ou deixe vazio pra criar só uma caixinha.", { title: "Valor inválido" });
-    return;
-  }
-  if (interestEnabled && (!Number.isFinite(cdiPct) || cdiPct <= 0)) {
-    await alertModal("Informe um percentual do CDI maior que zero.", { title: "Rendimento inválido" });
     return;
   }
   _goalSaving = true;
@@ -4103,8 +4064,6 @@ async function saveGoal() {
         body: JSON.stringify({
           name: payload.name,
           description: payload.description || null,
-          interest_enabled: payload.interest_enabled,
-          interest_rate: payload.interest_rate,
         }),
       });
       if (!r.ok) {
@@ -9790,18 +9749,9 @@ document.getElementById("invest-overlay")?.addEventListener("click", e => {
 // ─── Caixinha (criar) ────────────────────────────────────────────────────────
 let pocketSubmitting = false;
 
-function syncPocketInterestConfig() {
-  const enabled = document.getElementById("pocket-interest-enabled")?.checked ?? true;
-  const config = document.getElementById("pocket-interest-config");
-  if (config) config.style.display = enabled ? "" : "none";
-}
-
 function openPocketModal() {
   document.getElementById("pocket-name").value = "";
   document.getElementById("pocket-description").value = "";
-  document.getElementById("pocket-interest-enabled").checked = true;
-  document.getElementById("pocket-interest-rate").value = "100";
-  syncPocketInterestConfig();
   hidePocketError();
   document.getElementById("pocket-overlay").classList.add("open");
   setTimeout(() => document.getElementById("pocket-name").focus(), 50);
@@ -9829,14 +9779,8 @@ async function submitPocket() {
 
   const name = document.getElementById("pocket-name").value.trim();
   const description = document.getElementById("pocket-description").value.trim();
-  const interestEnabled = document.getElementById("pocket-interest-enabled").checked;
-  const cdiPct = parseFloat((document.getElementById("pocket-interest-rate").value || "100").replace(",", "."));
   if (!name) {
     showPocketError("Informe o nome da caixinha.");
-    return;
-  }
-  if (interestEnabled && (!Number.isFinite(cdiPct) || cdiPct <= 0)) {
-    showPocketError("Informe um percentual do CDI maior que zero.");
     return;
   }
 
@@ -9854,8 +9798,6 @@ async function submitPocket() {
       body: JSON.stringify({
         name,
         description: description || null,
-        interest_enabled: interestEnabled,
-        interest_rate: interestEnabled ? cdiPct / 100 : 1.0,
       }),
     });
     const data = await readResponsePayload(res);
@@ -10027,7 +9969,7 @@ async function openPocketHistory(pocketName) {
     const t = data.totals || {};
     _currentPocketForEdit = p;
     titleEl.textContent = `Histórico: ${p.name || pocketName}`;
-    const interestTxt = p.interest_enabled === false ? "Sem rendimento" : _formatCdiRate(p.interest_rate);
+    const interestTxt = _pocketYieldLabel(p);
     subEl.textContent = p.description ? `${p.description} · ${interestTxt}` : interestTxt;
 
     document.getElementById("pkt-hist-balance").textContent      = fmt(p.balance || 0);
@@ -10077,9 +10019,6 @@ function editCurrentPocketFromHistory() {
     name: p.name,
     balance: p.balance,
     description: p.description,
-    interest_enabled: p.interest_enabled,
-    interest_rate: p.interest_rate,
-    interest_period: p.interest_period,
     target_amount: p.target_amount,
     target_date: p.target_date,
     emoji: p.emoji,

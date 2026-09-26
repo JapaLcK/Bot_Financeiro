@@ -325,3 +325,18 @@ def test_history_endpoint_marks_caixinha_do_banco(user_id):
     manual = client.get(f"/pockets/{user_id}/manual/history").json()["pocket"]
     assert manual["source"] != "open_finance"
     assert manual["of_investment_id"] is None
+
+
+def test_history_endpoint_says_if_bank_is_frozen(user_id, monkeypatch):
+    """O subtítulo do histórico decide "Saldo atualizado pelo banco" × "Reative seu
+    banco" por `of_plan_active` (`_isOfStale`, frontend/dashboard.js). Sem o campo,
+    a caixinha congelada no Grátis se dizia atualizada."""
+    from core.services import plan_service
+
+    db.create_pocket(user_id, "viagem")
+    client = TestClient(dashboard.app)
+    _auth(client, user_id)  # promove a Pro
+
+    assert client.get(f"/pockets/{user_id}/viagem/history").json()["pocket"]["of_plan_active"] is True
+    monkeypatch.setattr(plan_service, "require_min_tier", lambda uid, minimum: False)
+    assert client.get(f"/pockets/{user_id}/viagem/history").json()["pocket"]["of_plan_active"] is False

@@ -172,7 +172,7 @@ def _step_3(wa_id: str) -> None:
             "• *excluir caixinha viagem*\n\n"
             "🎯 Perfeito para reserva de emergência, férias e metas!"
         ),
-        footer="Próximo: investimentos com rendimento automático",
+        footer="Próximo: investimentos",
         buttons=[
             {"id": "tut_4",       "title": "➡️ Próximo"},
             {"id": "tut_back_cc", "title": "⬅️ Anterior"},
@@ -186,7 +186,7 @@ def _step_4(wa_id: str) -> None:
         to=wa_id,
         header="Passo 5 de 7 — Investimentos 📈",
         body=(
-            "Acompanhe suas aplicações com rendimento automático pelo dashboard:\n\n"
+            "Registre aportes e resgates das suas aplicações:\n\n"
             "• *investimentos* → lista carteira e envia um link mágico\n"
             "• para criar investimentos, acesse a aba *Investimentos* no dashboard\n"
             "• o formulário completo evita cadastro incompleto por mensagem\n"
@@ -194,7 +194,7 @@ def _step_4(wa_id: str) -> None:
             "• *retirei 100 do investimento CDB*\n"
             "• *listar investimentos*\n"
             "• *ver cdi* → consulta a taxa CDI atual\n\n"
-            "💡 O rendimento é calculado automaticamente!"
+            "💡 Rendimento real? Conecte seu banco no dashboard."
         ),
         footer="Próximo: importar extrato bancário (.OFX)",
         buttons=[

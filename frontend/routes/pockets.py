@@ -432,6 +432,11 @@ async def get_pocket_history_route(request: Request, user_id: int, pocket_name: 
             )
             rows = await cur.fetchall()
 
+    from core.services.plan_service import require_min_tier
+    # a mesma régua do /goals/status: no Grátis a caixinha do banco congela e o
+    # subtítulo do histórico pede pra reativar em vez de dizer "atualizado".
+    of_plan_active = await asyncio.to_thread(require_min_tier, user_id, "essencial")
+
     history = []
     deposits_total = 0.0
     withdrawals_total = 0.0
@@ -473,6 +478,7 @@ async def get_pocket_history_route(request: Request, user_id: int, pocket_name: 
             "source": pocket_row.get("source"),
             "of_investment_id": (int(pocket_row["of_investment_id"])
                                  if pocket_row.get("of_investment_id") is not None else None),
+            "of_plan_active": of_plan_active,
         },
         "totals": {
             "deposits": deposits_total,
