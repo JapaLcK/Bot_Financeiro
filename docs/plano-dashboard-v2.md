@@ -182,7 +182,8 @@ Decidido pelo dono na mesma data (Q37–Q41):
   confirmada seguida de um saque sincronizado e de depositar e retirar numa caixinha manual
   (a confirmação continua); caixinha manual e a mesma caixinha vinda do banco (incerta até
   responder, depois uma vez só); caixinha manual com rendimento simulado (a foto conta só o
-  principal); retirar de caixinha manual com rendimento simulado e tirar a foto (a
+  principal); investimento manual antigo com o laço de juros rodando antes da foto (a foto
+  conta só o principal); retirar de caixinha manual com rendimento simulado e tirar a foto (a
   confirmação cai); recorrente antiga casada cuja transação o banco apaga com a conexão
   ativa (a linha antiga volta); conta corrigida de BRL para moeda desconhecida e de volta
   (a linha quebra nas duas, sem perda nem ganho falsos); carteira derrubada e reconfirmada
@@ -205,10 +206,16 @@ Decidido pelo dono na mesma data (Q37–Q41):
     Com a Q36 (rendimento só do Open Finance), isso é a **Q43**, abaixo. Até ela ser
     decidida, a foto conta a caixinha manual **pelo principal**, e o rendimento simulado
     aparece à parte, como estimativa, fora do patrimônio.
-- **Q43 — a decidir: a caixinha manual continua rendendo?** Sugestão: não — ela vira só
-  dinheiro separado, sem rendimento simulado, e o ganho já acumulado vira parte do saldo
-  dela uma última vez, com aviso. A alternativa é manter o rendimento como estimativa
-  visível, mas nunca somado ao patrimônio.
+- **Q43 — a decidir: o manual continua rendendo?** Vale para a caixinha manual e para o
+  investimento manual antigo (Q37): os dois rendem juro simulado sozinhos — a caixinha por
+  `accrue_all_pockets`, o investimento por `accrue_all_users_investments`
+  (`core/services/investment_scheduler.py`), que grava o ganho no saldo. Sugestão: não —
+  vira só dinheiro separado (ou registro antigo), sem rendimento simulado, e o ganho já
+  acumulado entra no saldo uma última vez, com aviso. A alternativa é manter o rendimento
+  como estimativa visível, mas nunca somado ao patrimônio. Até a decisão, a foto conta os
+  dois **pelo principal** (na caixinha, o valor guardado; no investimento, o
+  `principal_remaining` dos lotes abertos), e o ganho simulado fica à parte, como
+  estimativa.
 - **Q39 — os defeitos de dinheiro do código atual são consertados**, não congelados, num PR
   próprio (faixa Completo, com o time): o resgate que pula juro de índice atrasado, o
   desfazer que não devolve o cursor, o desfazer de resgate anterior que cria dinheiro, e o
