@@ -1684,6 +1684,9 @@ def delete_open_finance_transactions(
             )
             for row in cur.fetchall():
                 delete_if_shadow(cur, row["user_id"], row["imported_launch_id"])
+            from .open_finance_cash import estorna_links
+            for owner in owners:
+                estorna_links(cur, owner, [r["id"] for r in rows if r["user_id"] == owner])
             cur.execute(
                 "delete from open_finance_transactions where id = any(%s)",
                 ([r["id"] for r in rows],),
@@ -1783,6 +1786,8 @@ def save_open_finance_sync(connection_id: int, accounts: list[dict]) -> dict:
             # ressuscitava conexão morta — DELETED/ERROR viravam ACTIVE com
             # "sincronizado agora". Quem afirma sucesso é `mark_sync_result`, no
             # sync, DEPOIS de o `GET /items/{id}` confirmar que o item existe.
+            from .open_finance_cash import reconcile_cash_transfers
+            reconcile_cash_transfers(cur, owner["user_id"])
             reconcile_bank_movements(cur, owner["user_id"])
         conn.commit()
 
@@ -1950,7 +1955,9 @@ def _find_manual_candidates(cur, user_id: int, tipo: str, valor, tx_date) -> lis
         f"""
         select id, valor, coalesce(posted_at, criado_em::date) as ref_date, alvo, nota,
                coalesce(source, 'manual') as source,
-               (efeitos ? 'of_recurring') as of_recurring
+               (efeitos ? 'of_recurring') as of_recurring,
+               case when jsonb_typeof(efeitos -> 'delta_conta') = 'number'
+                    then (efeitos ->> 'delta_conta')::numeric end as delta_conta
         from launches
         where user_id = %s
           and {TIPO_CANON_SQL} = %s
@@ -2052,6 +2059,8 @@ def import_open_finance_launches(user_id: int, connection_id: int | None = None)
                 (user_id, connection_id, connection_id),
             )
             rows = cur.fetchall()
+            from .open_finance_cash import cash_internal_tx_ids
+            caixa = cash_internal_tx_ids(cur, user_id)
 
             for r in rows:
                 if (r["account_type"] or "").upper() != "BANK":
@@ -2059,6 +2068,8 @@ def import_open_finance_launches(user_id: int, connection_id: int | None = None)
                     continue
 
                 cls = classify_open_finance_launch(r["amount"], r["category"], r["description"])
+                if r["of_tx_id"] in caixa:  # saque/depósito em espécie: par da Carteira
+                    cls["is_internal_movement"] = True
 
                 # Reconciliação (Fase 2): gasto/receita não-interno tenta casar com manual.
                 verdict, match_id = "none", None
@@ -2449,7 +2460,7 @@ def sync_imported_open_finance_updates(user_id: int, connection_id: int | None =
             # 1) Launches próprios do OF (conta BANK)
             cur.execute(
                 """
-                select o.amount, o.transaction_date, o.category, o.description,
+                select o.id as of_tx_id, o.amount, o.transaction_date, o.category, o.description,
                        l.id as launch_id, l.valor as cur_valor, l.categoria as cur_cat,
                        l.tipo as cur_tipo, l.is_internal_movement as cur_internal,
                        coalesce(l.posted_at, l.criado_em::date) as cur_date
@@ -2462,8 +2473,12 @@ def sync_imported_open_finance_updates(user_id: int, connection_id: int | None =
                 """,
                 (user_id, connection_id, connection_id),
             )
-            for r in cur.fetchall():
+            from .open_finance_cash import cash_internal_tx_ids
+            rows, caixa = cur.fetchall(), cash_internal_tx_ids(cur, user_id)
+            for r in rows:
                 cls = classify_open_finance_launch(r["amount"], r["category"], r["description"])
+                if r["of_tx_id"] in caixa:  # saque/depósito em espécie: par da Carteira
+                    cls["is_internal_movement"] = True
                 new_cat = r["category"] or "outros"
                 changed = (
                     Decimal(str(r["cur_valor"])) != cls["valor"]
@@ -3144,6 +3159,8 @@ def disconnect_open_finance_connection(
             )
             for row in cur.fetchall():
                 delete_if_shadow(cur, row["user_id"], row["imported_launch_id"])
+            from .open_finance_cash import record_coverage
+            record_coverage(cur, user_id, connection_id)
             if connection_id is None:
                 cur.execute(
                     "delete from open_finance_connections where user_id=%s "

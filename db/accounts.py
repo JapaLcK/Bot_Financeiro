@@ -370,7 +370,11 @@ def update_launch_fields(
         cat_clean = categoria.strip() or None
         sets.append("categoria=%s")
         params.append(cat_clean)
-        sets.append("is_internal_movement=%s")
+        # Par da Carteira de um saque/depósito do banco (db/open_finance_cash.py)
+        # continua interno com qualquer categoria: senão vira receita/gasto novo.
+        sets.append("is_internal_movement = %s or exists (select 1 from of_cash_links k "
+                    "where k.launch_id = launches.id and k.user_id = launches.user_id "
+                    "and k.status = 'ativo')")
         params.append(is_internal_category(cat_clean))
     if alvo is not None:
         sets.append("alvo=%s")
