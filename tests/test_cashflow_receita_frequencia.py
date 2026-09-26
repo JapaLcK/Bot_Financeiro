@@ -103,6 +103,13 @@ def _creditos_e_lancamentos(uid: int, inc_id: int) -> tuple[list[float], int]:
             return creditos, int(cur.fetchone()["n"])
 
 
+@pytest.fixture()
+def pro_max_uid():
+    """60/90 dias da previsão são do Pro (`pro_max`); o Plus só vê 30."""
+    from conftest import usuario_pagante
+    return usuario_pagante("pro_max")
+
+
 def _previsao(uid: int, chave: str) -> tuple[float, float, float]:
     out = asyncio.run(dashboard.forecast_route(request=None, user_id=uid))
     # Se a rota passar a ler a data em outro módulo, falha aqui sempre, não só em certas datas.
@@ -116,44 +123,44 @@ def _previsao(uid: int, chave: str) -> tuple[float, float, float]:
     ("weekly", 300, 17, "2026-09-17"),  # no bug: 300 / 600 / 900
     ("daily", 50, 17, "2026-09-17"),    # no bug: 50 / 100 / 150
 ])
-def test_receita_legada_fora_de_mensal_anual_nao_entra_na_previsao(pro_user_id, freq, amount, pay_day, start):
-    _receita_legada(pro_user_id, freq, amount, pay_day, start)
+def test_receita_legada_fora_de_mensal_anual_nao_entra_na_previsao(pro_max_uid, freq, amount, pay_day, start):
+    _receita_legada(pro_max_uid, freq, amount, pay_day, start)
 
-    assert _previsao(pro_user_id, "receitas_previstas") == (0, 0, 0)
-    assert _previsao(pro_user_id, "projetado") == (0, 0, 0)
+    assert _previsao(pro_max_uid, "receitas_previstas") == (0, 0, 0)
+    assert _previsao(pro_max_uid, "projetado") == (0, 0, 0)
 
 
 @pytest.mark.parametrize("kw, esperado", [
     (dict(amount=2000, pay_day=5), (2000, 4000, 6000)),
     (dict(amount=1200, pay_day=20, frequency="annual", pay_month=10), (0, 1200, 1200)),
 ])
-def test_receita_mensal_e_anual_continuam_na_previsao(pro_user_id, kw, esperado):
+def test_receita_mensal_e_anual_continuam_na_previsao(pro_max_uid, kw, esperado):
     """POSITIVO: o conserto não pode zerar o caminho legítimo."""
-    _cria_receita(pro_user_id, **kw)
+    _cria_receita(pro_max_uid, **kw)
 
-    assert _previsao(pro_user_id, "receitas_previstas") == esperado
-    assert _previsao(pro_user_id, "projetado") == esperado
+    assert _previsao(pro_max_uid, "receitas_previstas") == esperado
+    assert _previsao(pro_max_uid, "projetado") == esperado
 
 
-def test_gasto_fixo_mensal_continua_e_semanal_segue_aceito_e_fora(pro_user_id):
+def test_gasto_fixo_mensal_continua_e_semanal_segue_aceito_e_fora(pro_max_uid):
     """POSITIVO: a regra mora num helper que os gastos fixos também usam. Gasto
     fixo semanal continua aceito no cadastro (o cobrador o debita; fica fora
     deste conserto) e continua fora da previsão, como já era."""
-    create_recurring_expense(pro_user_id, "Aluguel", 500, "outros", 20, "account", start_date=HOJE)
-    semanal = create_recurring_expense(pro_user_id, "Feira", 80, "outros", 20, "account",
+    create_recurring_expense(pro_max_uid, "Aluguel", 500, "outros", 20, "account", start_date=HOJE)
+    semanal = create_recurring_expense(pro_max_uid, "Feira", 80, "outros", 20, "account",
                                        start_date=HOJE, frequency="weekly")
 
     assert semanal["frequency"] == "weekly"
-    assert _previsao(pro_user_id, "gastos_fixos_previstos") == (500, 1000, 1500)
-    assert _previsao(pro_user_id, "projetado") == (-500, -1000, -1500)
+    assert _previsao(pro_max_uid, "gastos_fixos_previstos") == (500, 1000, 1500)
+    assert _previsao(pro_max_uid, "projetado") == (-500, -1000, -1500)
 
 
-def test_cenario_combinado_so_a_mensal_soma(pro_user_id):
-    _cria_receita(pro_user_id, 2000, 5)
-    _receita_legada(pro_user_id, "once", 5000, 10, "2026-10-10")
-    _receita_legada(pro_user_id, "weekly", 300, 17, "2026-09-17")
+def test_cenario_combinado_so_a_mensal_soma(pro_max_uid):
+    _cria_receita(pro_max_uid, 2000, 5)
+    _receita_legada(pro_max_uid, "once", 5000, 10, "2026-10-10")
+    _receita_legada(pro_max_uid, "weekly", 300, 17, "2026-09-17")
 
-    assert _previsao(pro_user_id, "receitas_previstas") == (2000, 4000, 6000)
+    assert _previsao(pro_max_uid, "receitas_previstas") == (2000, 4000, 6000)
 
 
 @pytest.mark.parametrize("freq", RECUSADAS)

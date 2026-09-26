@@ -1189,8 +1189,11 @@ def test_positivo_before_valido_continua_apagando(user_id: int, caso: str, befor
     — fechar o falsy seria recusar o que hoje funciona."""
     lid = _aporte_forjado(user_id, '{"delta_conta": 0.0}')
     lot_id, _inv = _ids_do_aporte(user_id)
+    # `delta_invest.nome` como todo escritor real grava: sem ele a guarda "só o
+    # último movimento" (db/investment_undo.py) recusa em falha fechada.
     _set_efeitos(user_id, lid,
-                 '{"delta_conta": 0.0, "investment_lot_withdrawals": '
+                 '{"delta_conta": 0.0, "delta_invest": {"nome": "cdb", "delta": 0.0}, '
+                 '"investment_lot_withdrawals": '
                  '[{"lot_id": %d, "before": %s}]}' % (lot_id, before))
 
     db.delete_launch_and_rollback(user_id, lid)
@@ -1399,9 +1402,11 @@ def test_produto_lote_sumiu_por_cascade_recusa_em_vez_de_destruir(user_id: int):
     assert _lotes(user_id, "investment_lots") == (0, 0.0), \
         "o CASCADE leva os lotes junto — é o gatilho, não um `efeitos` forjado"
 
-    with pytest.raises(db.LaunchUnsafeRollback) as exc:
+    # Desde a guarda "só o último movimento" (db/investment_undo.py), o apagar do
+    # investimento é movimento POSTERIOR e recusa antes do `rowcount` do lote.
+    with pytest.raises(db.InvestmentMovementNotLast) as exc:
         db.delete_launch_and_rollback(user_id, resgate)
-    assert exc.value.motivo == "efeito_incompleto"
+    assert exc.value.motivo == "movimento_posterior"
     assert _bal(user_id) == 1000.0, "a recusa é ANTES de qualquer update"
     assert any(int(r["id"]) == resgate for r in db.list_launches(user_id, limit=20))
 
@@ -1536,7 +1541,8 @@ def test_positivo_before_closed_at_iso_completo_restaura_o_lote(user_id: int):
     lid = _aporte_forjado(user_id, '{"delta_conta": 0.0}')
     lot_id, _inv = _ids_do_aporte(user_id)
     _set_efeitos(user_id, lid,
-                 '{"delta_conta": 0.0, "investment_lot_withdrawals": [{"lot_id": %d, '
+                 '{"delta_conta": 0.0, "delta_invest": {"nome": "cdb", "delta": 0.0}, '
+                 '"investment_lot_withdrawals": [{"lot_id": %d, '
                  '"before": {"balance": 300.0, "principal_remaining": 300.0, '
                  '"status": "closed", "closed_at": "%s"}}]}' % (lot_id, _ISO_COM_HORA))
 

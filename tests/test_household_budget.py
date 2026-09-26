@@ -265,7 +265,8 @@ def _cliente(user_id: int, email: str = "hb@t.com"):
     return client, headers
 
 
-def test_rota_status_403_para_free(user_id):
+def test_rota_status_403_abaixo_do_plus(user_id):
+    promote_to_pro(user_id, "essencial")  # abaixo do Plus
     client, _ = _cliente(user_id)
     r = client.get(f"/household-budget/{user_id}/status")
     assert r.status_code == 403, r.text

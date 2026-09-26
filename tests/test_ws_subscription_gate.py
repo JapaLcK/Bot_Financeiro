@@ -23,8 +23,6 @@ def _connect(client: TestClient, uid: int):
 
 
 def test_sem_plano_ws_fecha_sem_snapshot(user_id, monkeypatch):
-    monkeypatch.setenv("PLANS_V2_ENABLED", "0")   # v2 off: has_app_access decide
-    monkeypatch.setenv("PAYWALL_ENABLED", "1")    # paywall ligado, user não é pro
     client = TestClient(dashboard.app)
     with pytest.raises(WebSocketDisconnect):
         with _connect(client, user_id) as ws:
@@ -32,8 +30,6 @@ def test_sem_plano_ws_fecha_sem_snapshot(user_id, monkeypatch):
 
 
 def test_com_plano_ws_manda_snapshot_normal(user_id, monkeypatch):
-    monkeypatch.setenv("PLANS_V2_ENABLED", "0")
-    monkeypatch.setenv("PAYWALL_ENABLED", "1")
     promote_to_pro(user_id)
     client = TestClient(dashboard.app)
     with _connect(client, user_id) as ws:
@@ -43,7 +39,9 @@ def test_com_plano_ws_manda_snapshot_normal(user_id, monkeypatch):
 
 
 def test_paywall_desligado_segue_liberado(user_id, monkeypatch):
-    """Config padrão de hoje (v2 on) — nada muda pra quem tem acesso."""
+    """v1 (freio PLANS_V2_ENABLED=0) com o paywall desligado: has_app_access
+    libera todo mundo. Apagar na Fase 2."""
+    monkeypatch.setenv("PLANS_V2_ENABLED", "0")
     monkeypatch.delenv("PAYWALL_ENABLED", raising=False)
     client = TestClient(dashboard.app)
     with _connect(client, user_id) as ws:
@@ -60,7 +58,6 @@ def test_ua_de_app_nao_abre_o_ws_sem_plano(user_id, monkeypatch):
     receber o snapshot com os dados. Controle negativo: repor o `not in_app and`
     no lambda do gate faz a segunda perna deste teste voltar a receber snapshot.
     """
-    monkeypatch.setenv("PLANS_V2_ENABLED", "1")  # gate de escolha ativo (v2)
     from db.connection import get_conn
     with get_conn() as conn:
         with conn.cursor() as cur:

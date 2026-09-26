@@ -145,10 +145,9 @@ def _dono_novo_no_lock(monkeypatch, item_id: str, *outros: int) -> None:
 
     `_enforce_bank_limit` roda DEPOIS do `outros`/`tinha_conexao_propria`
     pré-lock e imediatamente antes da escrita — tudo entre as duas é leitura.
-    Substituí-lo não perde cobertura: os tetos de plano estão dormentes neste
-    arquivo (ele está em `_AINDA_EM_V1`, que o `tests/conftest.py` roda no v1).
-    Sem sleep e sem thread: o
-    ponto é determinístico.
+    Substituí-lo não perde cobertura: o teto de bancos tem teste próprio em
+    `tests/test_of_connect_token_gate.py`. Sem sleep e sem thread: o ponto é
+    determinístico.
     """
     async def _semeia_e_segue(uid, novo_item_id=None):
         for outro in outros:
