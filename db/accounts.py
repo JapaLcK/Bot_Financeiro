@@ -1760,7 +1760,7 @@ def delete_launch_and_rollback(user_id: int, launch_id: int, *,
                             interest_payment_frequency, tax_profile
                         )
                         values (%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s)
-                        on conflict (user_id, name) do nothing
+                        on conflict do nothing
                         """,
                         (
                             user_id, nome, bal0, rate, period, ld,
@@ -1776,7 +1776,7 @@ def delete_launch_and_rollback(user_id: int, launch_id: int, *,
                 if nome:
                     cur.execute(
                         "insert into pockets(user_id, name, balance) values (%s,%s,%s) "
-                        "on conflict (user_id, name) do nothing",
+                        "on conflict do nothing",
                         (user_id, nome, bal0),
                     )
 

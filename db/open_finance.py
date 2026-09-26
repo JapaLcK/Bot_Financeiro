@@ -1544,7 +1544,7 @@ def sync_open_finance_caixinhas(connection_id: int, user_id: int) -> dict:
                         where not exists (
                             select 1 from pockets where user_id=%s and lower(name)=lower(%s)
                         )
-                        on conflict (user_id, name) do nothing
+                        on conflict do nothing
                         """,
                         (user_id, new_name, bal, of_id, bal, profit, user_id, new_name),
                     )

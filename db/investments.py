@@ -1074,7 +1074,7 @@ def create_investment_db(
                     interest_payment_frequency, tax_profile
                 )
                 values (%s,%s,0,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s)
-                on conflict (user_id, name) do nothing
+                on conflict do nothing
                 returning id, name
                 """,
                 (
