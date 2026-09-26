@@ -99,3 +99,112 @@ test("em https o cookie sai Secure", async () => {
   assert.equal(cookie.value, "v1.dividas.acdbd");
   assert.equal(cookie.secure, true);
 });
+
+// ── e/c: a /q confirma o e-mail e cria a conta pelo /auth/verify-email ──────────
+
+const CSRF = "csrf-q";
+
+/** Abre a /q com e/c, grava os POST de /auth e responde verify/resend com `respostas`. */
+async function confirmar(resto, respostas = {}, viewport = undefined) {
+  const ctx = await browser.newContext(viewport ? { viewport } : {});
+  await ctx.addCookies([{ name: "csrf_token", value: CSRF, url: ORIGIN }]);
+  const posts = [];
+  await ctx.route(`${ORIGIN}/auth/**`, (route) => {
+    const req = route.request();
+    const { pathname } = new URL(req.url());
+    posts.push({ url: req.url(), pathname, body: req.postDataJSON(), csrf: req.headers()["x-csrf-token"] });
+    const [status, body] = respostas[pathname] || [200, { ok: true }];
+    return route.fulfill({ status, contentType: "application/json", body: JSON.stringify(body) });
+  });
+  const page = await ctx.newPage();
+  await page.goto(q(resto));
+  await page.locator("#confirma").waitFor();
+  return { ctx, page, posts };
+}
+
+const DESTINO = [200, { dashboard_url: "http://127.0.0.1:1/precos?escolha=1" }];
+
+test("e/c: mostra o e-mail, nada sai antes do clique, e/c só no corpo do POST", async () => {
+  const { ctx, page, posts } = await confirmar(
+    "?utm_source=ig#p=dividas&r=acdbd&e=joao+x@gmail.com&c=123456&fbclid=f1",
+    { "/auth/verify-email": DESTINO });
+  assert.equal(await page.locator("h1 strong").textContent(), "joao+x@gmail.com?");
+  const semFrag = new URL(page.url());
+  assert.equal(semFrag.hash, "");
+  assert.equal(semFrag.search, "?utm_source=ig&fbclid=f1");
+  await page.waitForTimeout(300);
+  assert.deepEqual(posts, [], "POST saiu antes do clique em Continuar");
+  const cookie = (await ctx.cookies()).find((c) => c.name === "quiz_result");
+  assert.equal(cookie.value, "v1.dividas.acdbd");
+
+  const navegou = page.waitForRequest((req) => req.url().includes("/precos"));
+  await page.click("#continuar");
+  const final = new URL((await navegou).url());
+  assert.equal(posts.length, 1);
+  assert.equal(posts[0].pathname, "/auth/verify-email");
+  assert.deepEqual(posts[0].body, { email: "joao+x@gmail.com", code: "123456" });
+  assert.equal(posts[0].csrf, CSRF);
+  assert.equal(new URL(posts[0].url).search, "");
+  assert.equal(final.pathname, "/precos");
+  assert.equal(final.search, "?escolha=1&utm_source=ig&fbclid=f1");
+  await ctx.close();
+});
+
+test("e-mail vai por textContent, nunca como HTML", async () => {
+  const { ctx, page } = await confirmar("#p=dividas&e=%3Cimg%20src%3Dx%3E@a.com&c=123456");
+  assert.equal(await page.locator("h1 img").count(), 0);
+  assert.equal(await page.locator("h1 strong").textContent(), "<img+src=x>@a.com?");
+  await ctx.close();
+});
+
+test("400: pede o código de novo, não mostra o detail, e o reenviar chama /auth/quiz/resend", async () => {
+  const { ctx, page, posts } = await confirmar("#p=dividas&e=a@b.com&c=111111",
+    { "/auth/verify-email": [400, { detail: "segredo-do-servidor" }] });
+  assert.equal(await page.locator("#campo-codigo").isVisible(), false);
+  await page.click("#continuar");
+  await page.locator("#campo-codigo").waitFor();
+  assert.ok(!(await page.content()).includes("segredo-do-servidor"));
+  assert.equal(await page.locator("a[href='/login']").isVisible(), true);
+
+  await page.click("#reenviar");
+  await page.waitForFunction(() => document.getElementById("msg").textContent !== "");
+  assert.deepEqual(posts.map((p) => [p.pathname, p.body]), [
+    ["/auth/verify-email", { email: "a@b.com", code: "111111" }],
+    ["/auth/quiz/resend", { email: "a@b.com" }],
+  ]);
+  await page.fill("#codigo", "654321");
+  await page.click("#continuar");
+  await page.waitForFunction(() => !document.getElementById("continuar").disabled);
+  assert.deepEqual(posts[2].body, { email: "a@b.com", code: "654321" });
+  await ctx.close();
+});
+
+test("429: pede para aguardar", async () => {
+  const { ctx, page } = await confirmar("#p=dividas&e=a@b.com&c=111111",
+    { "/auth/verify-email": [429, { detail: "x" }] });
+  await page.click("#continuar");
+  await page.waitForFunction(() => /Aguarde/.test(document.getElementById("msg").textContent));
+  await ctx.close();
+});
+
+test("e sem c segue pro /cadastro sem levar o e-mail", async () => {
+  const { destino, cookie } = await abrir(q("?utm_source=ig#p=dividas&e=a@b.com"));
+  assert.equal(cookie.value, "v1.dividas");
+  assert.equal(destino.search, "?utm_source=ig");
+});
+
+for (const [nome, viewport] of [["desktop", { width: 1280, height: 800 }], ["mobile", { width: 375, height: 667 }]]) {
+  test(`confirmação sem estouro horizontal no ${nome}, com e-mail longo e o formulário aberto`, async () => {
+    const longo = `${"nome.sobrenome.bem.comprido".repeat(3)}@exemplo-de-dominio.com.br`;
+    const { ctx, page } = await confirmar(`#p=dividas&e=${longo}&c=111111`,
+      { "/auth/verify-email": [400, {}] }, viewport);
+    await page.click("#continuar");
+    await page.locator("#campo-codigo").waitFor();
+    const { sw, cw } = await page.evaluate(() => ({ sw: document.documentElement.scrollWidth,
+                                                    cw: document.documentElement.clientWidth }));
+    assert.ok(sw <= cw, `scrollWidth ${sw} > clientWidth ${cw}`);
+    // Para olhar a tela: PB_SHOT_DIR=<pasta> node --test tests/frontend/quiz_resultado.test.mjs
+    if (process.env.PB_SHOT_DIR) await page.screenshot({ path: `${process.env.PB_SHOT_DIR}/q-${nome}.png` });
+    await ctx.close();
+  });
+}

@@ -127,6 +127,7 @@ from frontend.routes.open_finance import router as open_finance_router
 from frontend.routes.pockets import router as pockets_router
 from frontend.routes.prospects import router as prospects_router
 from frontend.routes.push import router as push_router
+from frontend.routes.quiz_signup import router as quiz_signup_router
 from frontend.routes.onboarding import router as onboarding_router
 from frontend.routes.settings import router as settings_router
 from frontend.routes.simulator import router as simulator_router
@@ -2198,6 +2199,10 @@ CSRF_EXEMPT_PATHS = {
     # token de CSRF, e isenção que não é necessária é privilégio esquecido.
     # `tests/test_pix_rota_registrada.py` prende essa unicidade.
     "/billing/asaas/webhook",
+    # Webhook do XQuiz: server-to-server, sem cookie — autenticado pelo token
+    # XQUIZ_WEBHOOK_TOKEN (frontend/routes/quiz_signup.py). O `/auth/quiz/resend`
+    # é do navegador e NÃO entra.
+    "/xquiz/webhook",
 }
 
 _SECURITY_HEADERS = {
@@ -7539,6 +7544,10 @@ app.include_router(affiliates_router)
 
 # ─── Funil de prospecção → frontend/routes/prospects.py ──────────────────────
 app.include_router(prospects_router)
+
+
+# ─── Cadastro pelo quiz (XQuiz) → frontend/routes/quiz_signup.py ─────────────
+app.include_router(quiz_signup_router)
 
 
 # ─── Agentes do Piggy → frontend/routes/agents.py ────────────────────────────

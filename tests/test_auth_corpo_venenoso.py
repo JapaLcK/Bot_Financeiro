@@ -100,6 +100,11 @@ CORPOS = {
     "/auth/google/complete-signup": {"token": "tok-inexistente", "name": "Fulano",
                                      "phone": "+5511999990000", "accepted_terms": True},
     "/auth/google/exchange": {"code": "codigo-inexistente"},
+    # Cadastro pelo quiz (frontend/routes/quiz_signup.py). O token do webhook vai
+    # no corpo, que é um dos lugares aceitos; o env é o do fixture abaixo.
+    "/xquiz/webhook": {"email": f"xq@{DOMINIO}", "nome": "Fulano",
+                       "whatsapp": "+5511999990000", "token": "tok-369"},
+    "/auth/quiz/resend": {"email": f"qr@{DOMINIO}"},
 }
 
 # Todo campo `str` de todas elas, derivado do corpo e não escrito à mão: rota
@@ -120,11 +125,13 @@ ACENTO_ESPERADO = {
     "/auth/mfa/verify-login": 400,  # "Sessão MFA expirada"
     "/auth/google/complete-signup": 400,  # token pendente inexistente
     "/auth/google/exchange": 400,         # google_code_invalid
+    "/xquiz/webhook": 200,                # {"ok": true} de sempre
+    "/auth/quiz/resend": 200,             # resposta genérica de sempre
 }
 # Campo de TEXTO LIVRE onde o acento/emoji entra (`token` e `challenge` são
 # nossos, nunca têm acento).
 ACENTO_CAMPO = {"/auth/register": "name", "/auth/google/complete-signup": "name",
-                "/auth/reset-password": "new_password"}
+                "/auth/reset-password": "new_password", "/xquiz/webhook": "nome"}
 
 
 def _post(url: str, corpo: dict):
@@ -167,7 +174,7 @@ def _tentativas(bucket: str, identifier: str) -> int:
 
 
 @pytest.fixture(autouse=True)
-def _limites_limpos():
+def _limites_limpos(monkeypatch):
     """Os tetos por IP (`@limiter.limit` em memória) e por e-mail (tabela) são
     compartilhados entre testes: sem reset, o 429 passaria por "não é 500" —
     por isso todo assert daqui é por status EXATO. Mesmo precedente de
@@ -176,6 +183,7 @@ def _limites_limpos():
         dashboard.limiter._storage.reset()
     except Exception:
         pass
+    monkeypatch.setenv("XQUIZ_WEBHOOK_TOKEN", CORPOS["/xquiz/webhook"]["token"])
     _zera = [f"email:{c['email']}" for c in CORPOS.values() if "email" in c]
     with db.get_conn() as conn:
         with conn.cursor() as cur:

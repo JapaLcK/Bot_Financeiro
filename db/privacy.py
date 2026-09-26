@@ -28,7 +28,7 @@ from .users import _check_password, ensure_user_tx
 # enumeração de e-mails por chamador ANÔNIMO. Nos endpoints que re-autenticam,
 # o usuário já está logado como ele mesmo: não há e-mail alheio a enumerar.
 PASSWORD_NOT_SET_MSG = (
-    "Sua conta foi criada com o Google e ainda não tem senha. "
+    "Sua conta ainda não tem senha. "
     "Defina uma senha para continuar."
 )
 

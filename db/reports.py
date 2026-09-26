@@ -271,16 +271,34 @@ AccountAlreadyExistsError = _db_support.AccountAlreadyExistsError
 
 def create_email_verification(
     email: str,
-    password: str,
-    phone: str,
+    password: str | None,
+    phone: str | None,
     minutes_valid: int = 15,
     display_name: str | None = None,
 ) -> str:
-    phone_e164 = normalize_phone_e164(phone)
+    phone_e164 = normalize_phone_e164(phone) if phone else None
     return _db_support.create_email_verification_impl(
         get_conn, _hash_password, email, password, phone_e164, minutes_valid,
         display_name=display_name,
     )
+
+
+def quiz_signup_pendente(email: str) -> tuple[str | None, str | None] | None:
+    """(telefone, nome) do último cadastro do quiz (sem senha) deste e-mail nas
+    últimas 24h, para o reenvio do código. None quando não há."""
+    with get_conn() as conn:
+        with conn.cursor() as cur:
+            cur.execute(
+                """
+                select phone_e164, display_name from email_verification_codes
+                where email_hash = %s and password_hash is null
+                  and created_at > now() - interval '24 hours'
+                order by created_at desc limit 1
+                """,
+                (hash_pii_optional(email.strip().lower(), kind="email"),),
+            )
+            row = cur.fetchone()
+    return (row["phone_e164"], row["display_name"]) if row else None
 
 
 def confirm_email_verification(email: str, code: str, source: str = "web") -> dict:

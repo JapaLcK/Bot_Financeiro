@@ -809,14 +809,16 @@ def create_email_verification_impl(
     get_conn,
     hash_password,
     email: str,
-    password: str,
-    phone_e164: str,
+    password: str | None,
+    phone_e164: str | None,
     minutes_valid: int = 15,
     display_name: str | None = None,
 ) -> str:
+    """`password=None` é o cadastro pelo quiz (frontend/routes/quiz_signup.py):
+    a conta nasce sem senha e o reenvio do webhook devolve o código ainda vivo
+    em vez de invalidá-lo. Com senha (/auth/register), nada disso vale."""
     email = email.strip().lower()
-    normalized_phone = normalize_phone_e164(phone_e164)
-    phone_candidates = phone_lookup_candidates(normalized_phone)
+    normalized_phone = normalize_phone_e164(phone_e164) if phone_e164 else None
     display_name = (display_name or "").strip() or None
 
     with get_conn() as conn:
@@ -832,9 +834,11 @@ def create_email_verification_impl(
                 # avisando o dono por e-mail.
                 reason = "email_google" if existing["password_hash"] is None else "email"
                 raise AccountAlreadyExistsError(reason, existing_user_id=existing["user_id"])
-            _phone_hashes = [hash_pii_optional(c, kind="phone") for c in phone_candidates if c]
-            cur.execute("select user_id from auth_accounts where phone_hash = any(%s)", (_phone_hashes,))
-            phone_row = cur.fetchone()
+            phone_row = None
+            if normalized_phone:
+                _phone_hashes = [hash_pii_optional(c, kind="phone") for c in phone_lookup_candidates(normalized_phone) if c]
+                cur.execute("select user_id from auth_accounts where phone_hash = any(%s)", (_phone_hashes,))
+                phone_row = cur.fetchone()
             if phone_row:
                 # Telefone já em uso por outra conta. NÃO revela isso ao
                 # cadastrante: se a gente parasse aqui (ou não mandasse o código),
@@ -845,8 +849,36 @@ def create_email_verification_impl(
                 # vinculado (dá pra vincular outro número depois). A colisão de
                 # telefone fica indistinguível até o e-mail ser verificado.
                 normalized_phone = None
+            if password is None:
+                cur.execute(
+                    """
+                    select id, code from email_verification_codes
+                    where email_hash = %s and used_at is null and expires_at > now()
+                      and password_hash is null
+                    order by created_at desc limit 1
+                    """,
+                    (hash_pii_optional(email, kind="email"),),
+                )
+                vivo = cur.fetchone()
+                if vivo:
+                    # Mesmo código e validade; o telefone/nome corrigido no
+                    # reenvio vale. None (inválido ou disputado) não apaga o anterior.
+                    cur.execute(
+                        """
+                        update email_verification_codes set
+                          phone_e164 = coalesce(%s, phone_e164), phone_hash = coalesce(%s, phone_hash),
+                          phone_enc = coalesce(%s, phone_enc), display_name = coalesce(%s, display_name),
+                          display_name_enc = coalesce(%s, display_name_enc)
+                        where id = %s
+                        """,
+                        (normalized_phone, hash_pii_optional(normalized_phone, kind="phone"),
+                         encrypt_pii_optional(normalized_phone), display_name,
+                         encrypt_pii_optional(display_name), vivo["id"]),
+                    )
+                    conn.commit()
+                    return vivo["code"]
 
-    password_hash = hash_password(password)
+    password_hash = hash_password(password) if password is not None else None
     # Código de verificação precisa ser imprevisível (brute-force de 6 dígitos):
     # secrets (CSPRNG) em vez de random (Mersenne Twister, previsível).
     code = f"{secrets.randbelow(1_000_000):06d}"
