@@ -3,7 +3,9 @@ import { useState } from "react";
 import { KeyboardAvoidingView, Platform, View } from "react-native";
 
 import { CodigoMfa } from "@/features/auth/CodigoMfa";
+import { CompletarCadastroGoogle } from "@/features/auth/CompletarCadastroGoogle";
 import { MENSAGEM_ERRO_COFRE, apagaSenhaNaFase, enviar, tentarDeNovo, tocar, type EstadoEntrar } from "@/features/auth/entrar";
+import { continuarComGoogle } from "@/features/auth/google";
 import { useSessao } from "@/features/auth/sessao";
 import { Banner } from "@/ui/componentes/Banner";
 import { Button } from "@/ui/componentes/Button";
@@ -17,7 +19,8 @@ import { espaco } from "@/ui/tokens";
 /**
  * Formulário e fase de código do MFA na MESMA rota (`CodigoMfa`, montado
  * quando `estado.fase` é "mfa"/"verificando"). O desafio nunca vira parâmetro
- * de rota — é uma credencial de 5 minutos, e fica só no `useState` local.
+ * de rota — é uma credencial de 5 minutos, e fica só no `useState` local. O
+ * cadastro de quem entra pelo Google sem conta também (`CompletarCadastroGoogle`).
  */
 export default function Entrar() {
   const { cores } = useTema();
@@ -28,6 +31,9 @@ export default function Entrar() {
   const [senha, setSenha] = useState("");
 
   const enviando = estado.fase === "enviando";
+  const google = estado.fase === "google";
+  // Uma ação por vez: com o login ou o Google em voo, nada mais do formulário responde.
+  const ocupado = enviando || google;
   const avisoFormulario = estado.fase === "formulario" ? estado.aviso : undefined;
   // Voltar a digitar é uma tentativa nova: o aviso da anterior sai da tela.
   const digitar = (definir: (v: string) => void) => (v: string) => {
@@ -44,16 +50,20 @@ export default function Entrar() {
     <KeyboardAvoidingView behavior={Platform.OS === "ios" ? "padding" : undefined} style={{ flex: 1 }}>
       <Screen>
         <View style={{ gap: espaco.xl, paddingTop: espaco.xxl }}>
-          <Texto variante="titulo">Entrar</Texto>
+          <Texto variante="titulo">
+            {estado.fase === "google-cadastro" || estado.fase === "google-criando" ? "Criar conta" : "Entrar"}
+          </Texto>
 
           {estado.fase === "erro-cofre" ? (
             <Banner
               tom="danger"
-              mensagem={MENSAGEM_ERRO_COFRE}
+              mensagem={estado.mensagem ?? MENSAGEM_ERRO_COFRE}
               acao={{ rotulo: "Tentar de novo", onPress: () => aplicar(tentarDeNovo()) }}
             />
           ) : estado.fase === "mfa" || estado.fase === "verificando" ? (
             <CodigoMfa estado={estado} autenticar={sessao.autenticar} aplicar={aplicar} />
+          ) : estado.fase === "google-cadastro" || estado.fase === "google-criando" ? (
+            <CompletarCadastroGoogle estado={estado} autenticar={sessao.autenticar} aplicar={aplicar} />
           ) : (
             <>
               <Card>
@@ -68,7 +78,7 @@ export default function Entrar() {
                     keyboardType="email-address"
                     autoComplete="email"
                     textContentType="username"
-                    desativado={enviando}
+                    desativado={ocupado}
                   />
                   <Input
                     rotulo="Senha"
@@ -78,14 +88,14 @@ export default function Entrar() {
                     secureTextEntry
                     autoComplete="current-password"
                     textContentType="password"
-                    desativado={enviando}
+                    desativado={ocupado}
                     erro={avisoFormulario}
                   />
                   <View style={{ alignSelf: "flex-end" }}>
                     <Button
                       rotulo="Esqueci a senha"
                       variante="ghost"
-                      desativado={enviando}
+                      desativado={ocupado}
                       onPress={() => router.push("/esqueci-senha")}
                     />
                   </View>
@@ -93,7 +103,7 @@ export default function Entrar() {
                     rotulo="Entrar"
                     tamanho="L"
                     carregando={enviando}
-                    desativado={!email.trim() || !senha}
+                    desativado={google || !email.trim() || !senha}
                     onPress={() => {
                       // Fase "enviando" aplicada AQUI, antes de `tocar()`: sem
                       // isto o busy só aparecia quando a resposta já tivesse
@@ -120,9 +130,13 @@ export default function Entrar() {
                   rotulo="Continuar com Google"
                   variante="secondary"
                   icone="GoogleLogo"
-                  desativado
-                  accessibilityHint="Em breve"
-                  onPress={() => {}}
+                  carregando={google}
+                  desativado={enviando}
+                  onPress={() => {
+                    // G antes de `tocar()`, pelo mesmo motivo do Entrar (B1).
+                    aplicar({ fase: "google" });
+                    void tocar(() => continuarComGoogle(sessao.autenticar), aplicar);
+                  }}
                 />
                 <Button
                   rotulo="Continuar com Apple"
@@ -133,7 +147,7 @@ export default function Entrar() {
                   onPress={() => {}}
                 />
                 <Texto variante="legenda" tom="inkMuted" style={{ textAlign: "center" }}>
-                  Em breve
+                  Entrar com Apple chega em breve.
                 </Texto>
               </View>
 
@@ -144,7 +158,7 @@ export default function Entrar() {
                 <Button
                   rotulo="Criar conta"
                   variante="ghost"
-                  desativado={enviando}
+                  desativado={ocupado}
                   onPress={() => router.push("/criar-conta")}
                 />
               </View>

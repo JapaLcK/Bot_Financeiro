@@ -2860,6 +2860,7 @@ async function requestAccountDeletion() {
 // open-finance-connect.js, que rebusca o estado a cada abertura do modal.
 let OF_BANKS_MAX = null;
 let OF_HAS_CONNECTION = false; // há alguma conexão (mesmo pausada)? refina a copy do CTA
+let OF_COBRANCA_EM_ATRASO = false; // carência (vem do /auth/me): o CTA vai pro cartão, não pra /precos
 
 /* ── Modal de conectar banco → frontend/open-finance-connect.js ──────────
    O picker, o trap de foco e o widget da Pluggy saíram daqui pra serem
@@ -2908,11 +2909,17 @@ PBOpenFinance.init({
 
 // Reconfigura o botão "Conectar Open Finance" conforme o plano. No Free (limite 0),
 // não faz sentido abrir a Pluggy (o /pluggy-item recusaria com 402): troca por um
-// CTA de upgrade que leva pra /precos.
+// CTA de upgrade que leva pra /precos. Na carência de cobrança a pessoa já é
+// assinante (a /precos a recusaria com 409): o CTA é o cartão, no /conta.
 function applyOfConnectButton() {
   const btn = document.getElementById("connect-btn");
   if (!btn) return;
-  if (OF_BANKS_MAX === 0) {
+  if (OF_BANKS_MAX === 0 && OF_COBRANCA_EM_ATRASO) {
+    btn.textContent = "Atualizar cartão";
+    btn.onclick = () => { window.location.href = "/conta"; };
+    btn.disabled = false;
+    btn.classList.add("btn-connect--upgrade");
+  } else if (OF_BANKS_MAX === 0) {
     btn.textContent = OF_HAS_CONNECTION ? "Reative seu banco" : "Assine para conectar um banco";
     btn.onclick = () => { window.location.href = "/precos"; };
     btn.disabled = false;
@@ -3773,6 +3780,7 @@ async function initSettings() {
 
   // Open Finance: teto de bancos do plano. 0 = Free/sem OF → botão vira CTA de upgrade.
   OF_BANKS_MAX = (me && me.of_banks_max !== undefined) ? me.of_banks_max : null;
+  OF_COBRANCA_EM_ATRASO = !!(me && me.cobranca_em_atraso);
   applyOfConnectButton();
 
   document.getElementById("dashboard-link").href = "/app";

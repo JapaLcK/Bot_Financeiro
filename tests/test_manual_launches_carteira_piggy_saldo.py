@@ -1,11 +1,11 @@
 """Preservação de `accounts.balance` (Carteira Piggy) para fluxos que o banco cobra.
 
 Par da suíte `test_manual_launches_carteira_piggy.py` (separada pelo portão de
-350 linhas): pagamento de fatura e cobrança de gasto fixo em conta NÃO drenam
-a Carteira para usuários com Open Finance ativo (`delta_conta: 0`, origem
-`bank` — o extrato OF já reflete o movimento); sem OF, os dois continuam
-debitando a Carteira como sempre. Inclui o P1 da revisão Codex: a cobrança
-recorrente bancária funde direto com a tx do banco, sem pendência.
+350 linhas): pagamento de fatura NÃO drena a Carteira para usuários com Open
+Finance ativo (`delta_conta: 0`, origem `bank` — o extrato OF já reflete o
+movimento); sem OF, continua debitando a Carteira como sempre. Inclui o P1 da
+revisão Codex: a cobrança recorrente bancária (gravada pelo cobrador antes da
+Q42) funde direto com a tx do banco, sem pendência.
 """
 from __future__ import annotations
 
@@ -87,61 +87,23 @@ def test_pay_bill_route_sem_open_finance_segue_exigindo_saldo(user_id):
     assert "Saldo insuficiente" in r.text
 
 
-def test_recurring_charge_account_with_open_finance_does_not_drain_carteira(pro_user_id):
-    """Gasto fixo com `payment_type='account'` para quem tem OF: o débito
-    ocorre na conta bancária (o OF importa), então a cobrança registra
-    `delta_conta: 0` em vez de esvaziar a Carteira Piggy."""
-    from core.services.recurring_charger import charge_due_recurring_expenses_once
-    from db.recurring import create_recurring_expense
-
-    _connect_fake_bank(pro_user_id)
-    db.add_launch_and_update_balance(pro_user_id, "receita", 300, None, "seed")
-    hoje = today_tz()
-    create_recurring_expense(
-        pro_user_id, "Aluguel", 200, "moradia", hoje.day, "account", start_date=hoje)
-
-    cobrancas = charge_due_recurring_expenses_once(hoje)
-    assert cobrancas, "a cobrança não rodou"
-
-    assert float(db.get_balance(pro_user_id)) == 300.0, "a Carteira Piggy foi drenada"
-    with db.get_conn() as conn, conn.cursor() as cur:
-        cur.execute("select efeitos from launches where user_id=%s and "
-                    "alvo like 'recorrente:%%'", (pro_user_id,))
-        efeitos = cur.fetchone()["efeitos"]
-    assert efeitos["delta_conta"] == 0
-
-
-def test_recurring_charge_account_sem_open_finance_continua_debitando(pro_user_id):
-    """Sem OF a cobrança do gasto fixo em conta debita a Carteira como sempre."""
-    from core.services.recurring_charger import charge_due_recurring_expenses_once
-    from db.recurring import create_recurring_expense
-
-    db.add_launch_and_update_balance(pro_user_id, "receita", 300, None, "seed")
-    hoje = today_tz()
-    create_recurring_expense(
-        pro_user_id, "Aluguel", 200, "moradia", hoje.day, "account", start_date=hoje)
-
-    cobrancas = charge_due_recurring_expenses_once(hoje)
-    assert cobrancas, "a cobrança não rodou"
-
-    assert float(db.get_balance(pro_user_id)) == 100.0
-
-
 def test_recurring_of_charge_funde_direto_sem_pendencia(pro_user_id):
     """P1 (review Codex): cobrança recorrente em conta para usuário com OF é o
     DÉBITO BANCÁRIO PREVISTO — não dinheiro em espécie. Quando a tx do banco
     chega, o importador FUNDE direto (marcador `of_recurring`): sem 'ask', sem
-    pendência, e o mês não conta em dobro."""
-    from core.services.recurring_charger import charge_due_recurring_expenses_once
-    from db.recurring import create_recurring_expense
+    pendência, e o mês não conta em dobro.
 
+    O cobrador foi removido (Q42), mas as linhas que ele gravou antes do corte
+    continuam no banco e a tx do banco ainda pode chegar depois: o lançamento é
+    semeado exatamente como ele gravava."""
     _connect_fake_bank(pro_user_id)
     hoje = today_tz()
-    create_recurring_expense(
-        pro_user_id, "Netflix", 21.90, "streaming", hoje.day, "account",
-        start_date=hoje)
-    cobrancas = charge_due_recurring_expenses_once(hoje)
-    assert cobrancas, "a cobrança não rodou"
+    db.add_launch_and_update_balance(
+        pro_user_id, "despesa", 21.90, alvo="recorrente:Netflix",
+        nota="Cobrança automática · Netflix", categoria="streaming",
+        is_internal_movement=False, apply_delta=False,
+        extra_efeitos={"of_recurring": True},
+    )
     assert float(db.get_balance(pro_user_id)) == 0.0, "a Carteira foi drenada"
 
     rep = _importa_of_tx(pro_user_id, hoje, "21.90", "NETFLIX COBRANCA",

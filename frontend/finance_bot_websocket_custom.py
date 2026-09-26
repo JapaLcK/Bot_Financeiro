@@ -114,6 +114,7 @@ from db.investment_undo import MENSAGEM_NAO_E_O_ULTIMO
 from core.observability import _log_falha, get_logger
 from core.pg_text import detalhe_seguro, limpa_para_pg, recusa_veneno, tem_veneno
 from core.secure_compare import constant_time_eq
+from api.v2 import app as api_v2_app
 from frontend.routes.affiliates import router as affiliates_router
 from frontend.routes.billing_pix import router as billing_pix_router
 from frontend.routes.agents import router as agents_router
@@ -883,14 +884,17 @@ async def get_financial_data(
 
         cat_list.append(cat)
 
-    # Alertas de cobranças automáticas (recurring_charges) ainda não vistas.
+    # Alertas de gasto fixo (recurring_charges) ainda não vistos. `launched`:
+    # linha do cobrador antigo, que lançou ("Piggy lançou"); sem lançamento é o
+    # aviso de vencimento do autopay (Q42 — "dia de débito no banco").
     try:
         async with await db_connect() as _alert_conn:
             async with _alert_conn.cursor() as _alert_cur:
                 await _alert_cur.execute(
                     """
                     select rc.id, rc.amount, rc.charged_at, rc.ym,
-                           r.name, r.payment_type, r.id as recurring_id
+                           r.name, r.payment_type, r.id as recurring_id,
+                           (rc.launch_id is not null or rc.credit_tx_id is not null) as launched
                     from recurring_charges rc
                     join recurring_expenses r on r.id = rc.recurring_id
                     where rc.user_id = %s and rc.acknowledged = false
@@ -910,6 +914,7 @@ async def get_financial_data(
                         "payment_type": r["payment_type"],
                         "ym":           r["ym"],
                         "charged_at":   r["charged_at"].isoformat() if r["charged_at"] else None,
+                        "launched":     bool(r["launched"]),
                     })
     except Exception:
         # Tabela pode não existir ainda no init_db da primeira subida — silencia.
@@ -3189,6 +3194,32 @@ async def _apply_prospect_attribution(request: Request, response: Response, user
         response.delete_cookie("prospect_code")
 
 
+async def _apply_quiz_attribution(request: Request, response: Response, user_id: int) -> None:
+    """Se o cadastro veio do quiz de venda (cookie quiz_result da /q), revalida,
+    grava perfil e respostas na conta e consome o cookie. Nunca quebra o signup.
+    Perfil e respostas são dado financeiro: fora de log e de print."""
+    from db.signup_quiz import QUIZ_COOKIE, parse_quiz_cookie, record_signup_quiz
+    valor = request.cookies.get(QUIZ_COOKIE)
+    if not valor:
+        return
+    try:
+        resultado = parse_quiz_cookie(valor)
+        if resultado and await asyncio.to_thread(record_signup_quiz, int(user_id), *resultado):
+            await log_system_event(
+                "info",
+                "quiz_result_recorded",
+                f"Cadastro com resultado do quiz ({'completo' if resultado[1] else 'parcial'}).",
+                source="quiz",
+                user_id=int(user_id),
+            )
+    except Exception as exc:
+        # Só o tipo: o CheckViolation traz "Failing row contains (...)" com e-mail,
+        # telefone e perfil — `{exc}` aqui vaza PII para o log.
+        print(f"[quiz] gravacao falhou user={user_id}: {type(exc).__name__}")
+    finally:
+        response.delete_cookie(QUIZ_COOKIE, secure=COOKIE_SECURE, samesite="lax")
+
+
 @app.post("/auth/register")
 @limiter.limit("3/hour")
 async def auth_register(request: Request, body: RegisterBody):
@@ -3278,6 +3309,7 @@ async def auth_verify_email(request: Request, response: Response, body: VerifyEm
 
     await _apply_referral_attribution(request, response, int(user_id))
     await _apply_prospect_attribution(request, response, int(user_id))
+    await _apply_quiz_attribution(request, response, int(user_id))
 
     # Meta Conversions API — CompleteRegistration (conta criada). Agendado como
     # background task (roda DEPOIS da resposta) pra um Meta lento/fora nunca
@@ -3731,6 +3763,7 @@ async def auth_me(user_id: int = Depends(_get_current_user)):
         get_plan_tier, get_trial_status, history_earliest_date, get_user_limits,
         needs_plan_selection,
     )
+    from core.services import billing_copy
     of_ui_enabled = _open_finance_ui_enabled(user_id, user_dict.get("email"))
     from core.services.plan_service import agents_ui_enabled as _agents_ui_enabled
     agents_ui = _agents_ui_enabled(user_id, user_dict.get("email"))
@@ -3772,6 +3805,13 @@ async def auth_me(user_id: int = Depends(_get_current_user)):
         "plans_v2_enabled": plans_v2_enabled(),
         "plan_tier": plan_tier,
         "of_banks_max": of_banks_max,
+        # Carência de cobrança: assinante com tier `free`. O front troca o
+        # "assine → /precos" (que o recusaria com 409) por "Atualizar cartão →
+        # /conta". `user=user_dict`: sem SELECT novo, como as duas acima.
+        "cobranca_em_atraso": (
+            plans_v2_enabled() and plan_tier == "free"
+            and billing_copy.estado_sem_plano_pago(user_id, user_dict) == "carencia"
+        ),
         "trial": {"active": trial["active"], "days_left": trial["days_left"]},
         "history_earliest_date": earliest_history.isoformat() if earliest_history else None,
         "of_ui_enabled": of_ui_enabled,
@@ -4659,6 +4699,7 @@ async def auth_google_complete_signup(
 
     await _apply_referral_attribution(request, response, user_id)
     await _apply_prospect_attribution(request, response, user_id)
+    await _apply_quiz_attribution(request, response, user_id)
 
     # Meta Conversions API — CompleteRegistration (conta criada via Google).
     # Background task (roda após a resposta); event_id signup_<uid> casa com o
@@ -8710,6 +8751,11 @@ async def create_investment_route(request: Request, user_id: int, payload: Inves
                                              acao="aporte inicial", plain=True)
                    if str(exc) == "INSUFFICIENT_ACCOUNT" else str(exc))
         raise HTTPException(status_code=400, detail=message) from exc
+    if launch_id is None:
+        # Já existe (#596: também com outra maiúscula). O 200 `created:false`
+        # descartava o aporte inicial em silêncio e a tela dizia "criado".
+        raise HTTPException(status_code=400, detail=(
+            "Já existe um investimento com esse nome. Para colocar dinheiro nele, use Aportar."))
 
     _invalidate_dashboard_current_cache(user_id)
     return {
@@ -8841,6 +8887,9 @@ app.include_router(onboarding_router)
 # O nome da env não aparece neste arquivo de propósito: `test_pix_destino_inerte`
 # é TEXTUAL e pega até comentário. É ele que mantém a flag com quem a obedece.
 app.include_router(billing_pix_router)
+
+# ─── /api/v2 (dashboard v2) → api/v2/: sub-app com o envelope de erro próprio ──
+app.mount("/api/v2", api_v2_app)
 
 
 # ─── WebSocket ────────────────────────────────────────────────────────────────

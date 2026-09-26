@@ -678,6 +678,8 @@ def test_401_de_autenticacao_declara_familia():
     alvos += sorted(
         p.relative_to(raiz) for p in (raiz / "frontend" / "routes").glob("*.py")
     )
+    # A /api/v2 (`api/v2/`) também é chamada pelo navegador com o interceptor.
+    alvos += sorted(p.relative_to(raiz) for p in (raiz / "api").rglob("*.py"))
 
     achados = []
     for rel in alvos:

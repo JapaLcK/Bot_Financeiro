@@ -141,7 +141,7 @@ def resolve_delete(user_id: int, confirmed: bool) -> str | None:
                 pass
             return "Ok, não marco como gasto fixo. 👍"
 
-        from db.recurring import create_recurring_expense, mark_recurring_charged
+        from db.recurring import create_recurring_expense
         try:
             rec = create_recurring_expense(
                 user_id,
@@ -152,19 +152,12 @@ def resolve_delete(user_id: int, confirmed: bool) -> str | None:
                 "account",
                 payment_mode="autopay",
             )
-            # A despesa deste mês que disparou a oferta JÁ foi lançada. O recorrente
-            # nasce com due_day=hoje e start_date=hoje, então o charger autopay o
-            # consideraria "vence hoje" e debitaria de novo no mesmo dia, dobrando o
-            # lançamento. Marca o mês corrente como já cobrado — 1ª cobrança
-            # automática cai só no mês que vem.
-            from utils_date import today_tz
-            mark_recurring_charged(user_id, rec["id"], today_tz().strftime("%Y-%m"))
         except (ValueError, TypeError) as e:
             return f"Não consegui criar o gasto fixo agora ({e}). Você pode cadastrar na aba *Recorrentes* do dashboard."
         return (
             f"✅ Pronto! *{rec['name']}* agora é *gasto fixo*: "
             f"{fmt_brl(rec['amount'])} todo dia {rec['due_day']}. "
-            f"O Piggy lança sozinho. 🐷"
+            f"O Piggy vai considerar na sua previsão. 🐷"
         )
 
     # só trata deletes abaixo
