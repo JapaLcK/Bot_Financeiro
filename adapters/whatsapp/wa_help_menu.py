@@ -96,7 +96,7 @@ def send_help_menu(wa_id: str) -> None:
                     {
                         "id": "help_invest",
                         "title": "Investimentos",
-                        "description": "Aplicações com rendimento automático",
+                        "description": "Aportes e resgates das suas aplicações",
                     },
                 ],
             },
