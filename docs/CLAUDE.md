@@ -49,6 +49,11 @@ core/
   reports/                — relatório diário (reports_daily.py)
   crypto.py, audit.py     — PII cifrada e trilha de auditoria
 
+api/v2/                   — a /api/v2 do dashboard v2: sub-app FastAPI montado pelo
+                            monólito em /api/v2, com envelope de erro próprio
+                            (erros.py), a dependência única do usuário (sessao.py)
+                            e um router por assunto (me.py)
+
 db/                       — PACOTE com ~30 módulos, um por domínio
   schema.py               — DDL de TODAS as tabelas (init_db) — fonte de verdade
   connection.py           — pool psycopg3
@@ -100,8 +105,9 @@ decimais; frações de centavo são recusadas na validação comum da API e da t
 Taxas percentuais mantêm precisão livre, inclusive valores muito pequenos.
 Sem persistência e sem tela ainda; lógica em `core/services/decision_simulator.py`.
 
-**Rota nova vai para um router de `frontend/routes/`**, não para o monólito. Ao
-procurar uma rota existente, procure nos dois lugares:
+**Rota nova vai para um router de `frontend/routes/`**, não para o monólito — exceto
+rota da `/api/v2`, que vai para `api/v2/` (ver "API v2" abaixo). Ao procurar uma rota
+existente, procure nos dois lugares:
 
 ```bash
 grep -rn '@\(app\|router\)\.\(get\|post\|put\|patch\|delete\)("/caminho' --include="*.py" frontend/ adapters/
@@ -111,6 +117,34 @@ São ~198 rotas. Os grupos maiores: `/auth` (27), `/open-finance` (11), `/settin
 (10), `/billing` (8), `/agents` (7), `/cards`, `/categories`, `/pockets`,
 `/recurring-bills` (6 cada), `/analytics` (6), `/investments`, `/installments`,
 `/recurring-incomes`, `/recurring-expenses` (5 cada), `/budgets` (4).
+
+### API v2 (`api/v2/`)
+
+Sub-app FastAPI (`api/v2/app.py`) montado pelo monólito com `app.mount("/api/v2", ...)`.
+É o backend do dashboard v2 (`docs/plano-dashboard-v2.md`, §3). Regras, presas por
+`tests/test_api_v2_rotas.py`:
+
+- **Nenhuma rota recebe `user_id`** — nem path, query, header, cookie ou corpo. O
+  usuário vem da dependência `usuario_atual` (`api/v2/sessao.py`): sessão (Bearer ou
+  cookie `dashboard_token`) → conta agendada para exclusão (403) → gate de plano
+  (`_enforce_subscription_gate`, 402) → chave `dashboard_v2_enabled` (404
+  `dashboard_v2_disabled`). O user agent não entra.
+- Toda rota tem `response_model`.
+- **Erro** sai no envelope `{"error": {"code", "message", "details"?}}`
+  (`api/v2/erros.py`), com os headers da exceção preservados (`WWW-Authenticate` do
+  401, `Allow` do 405). A exceção não tratada sai 500 `internal_error` ou, se for
+  timeout/queda de conexão de banco, 503 `service_unavailable` — a regra é a
+  `status_do_erro` (`core/admin_dashboard.py`), a mesma do pai — e registra
+  `log_system_event` ali mesmo: o `admin_error_logging_middleware` do pai não enxerga
+  exceção que o sub-app já respondeu. `ClientDisconnect` é levantada de novo para o
+  pai, que responde 499 sem evento. Limite: depois de responder, o starlette re-levanta
+  a exceção e ela sai do app inteiro (traceback de novo no log do servidor; teste de
+  500/503 usa `raise_server_exceptions=False`) — revisitar no PR do SSE. Ficam **fora**
+  do envelope o 403 do CSRF e o 422 do `query_venenosa_middleware`, que nascem nos
+  middlewares do pai e saem `{"detail": ...}`.
+- `GET /api/v2/me` devolve `{"plan_tier": "free"|"essencial"|"plus"|"pro"}`, sem PII.
+- Chave: `DASHBOARD_V2_BETA_EMAILS` (sem a env = os e-mails de teste do beta de
+  Agentes; definida e vazia = ninguém) e `DASHBOARD_V2_BETA_USER_IDS`.
 
 ### Autenticação
 
@@ -145,8 +179,11 @@ por cima deles perde os códigos do usuário — já quase aconteceu (registro n
 
 ### WebSocket
 
-`ConnectionManager` + endpoint `@app.websocket("/ws/{user_id}")` no monólito. É o que
-mantém o dashboard ao vivo quando o bot registra algo pelo WhatsApp. Mudou o formato
+`ConnectionManager` + endpoint `@app.websocket("/ws/{user_id}")` no monólito. O
+dashboard pede dados por ele (pergunta e resposta); empurrar algo sem o cliente pedir
+só acontece em `open_finance_synced`, do fim do sync do Open Finance e do "Recomeçar do
+zero" — confira com `grep -rn "broadcast_to_user(" --include="*.py" frontend/ core/`.
+**Lançamento feito pelo WhatsApp não avisa o dashboard.** Mudou o formato
 de mensagem? Os dois lados mudam junto — o consumidor está no `dashboard.js`.
 
 ### Pagamentos
