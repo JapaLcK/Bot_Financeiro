@@ -219,4 +219,5 @@ PR de cada etapa, não soluções prontas. Cada PR confere se ainda valem, decid
   Piggy no meio e Ferramentas (#582), página do chat (#584).
 - [x] Protótipo: blocos que expandem na conversa, com estado por resposta e "Abrir no painel" (PR 3 do chat).
 - [ ] Pré-requisitos: #594 · Q42 · Q43 · Q40 (regra) · Q41
+  - Q41: núcleo no #627, atrás de `OF_CASH_ENABLED` (desligado); falta o PR B (painel, WhatsApp e o switch ligado).
 - [ ] Etapa 0 · [ ] 1 · [ ] 2 · [ ] 3 · [ ] 4 · [ ] 5 · [ ] 6 · [ ] 7
