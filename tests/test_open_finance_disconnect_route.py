@@ -11,6 +11,10 @@ CONTROLE NEGATIVO do grupo (§3 do CLAUDE.md): remover a chamada
 e_local` vermelho (deletados == []). POSITIVO: `test_falha_remota_nao_impede_o_
 disconnect_local` prova que o caminho legítimo (limpeza local) sobrevive à
 Pluggy fora do ar — o contrato best-effort de antes do refactor.
+
+SEGUNDO controle negativo, do caso do DONO no log: passar `log_user_id=False`
+também nesta rota (como a exclusão de conta faz) → `test_disconnect_com_falha_
+de_auth_loga_o_dono_na_coluna` vermelho.
 """
 
 from __future__ import annotations
@@ -188,3 +192,60 @@ def test_falha_remota_nao_impede_o_disconnect_local(user_id, monkeypatch):
     assert _conexoes(user_id) == 0, "falha remota (best-effort) não podia impedir o disconnect local"
     assert "pluggy_disconnect_auth_failed" in eventos, \
         f"o evento de log do best-effort sumiu no refactor: {eventos}"
+
+
+def test_disconnect_com_falha_de_auth_loga_o_dono_na_coluna(user_id, monkeypatch):
+    """Disconnect NÃO apaga a conta: o dono da falha vai na COLUNA `user_id` —
+    o padrão do repositório (`tests/test_log_falha_user_id.py`), que é o que a
+    exportação LGPD lê e o que a cascata leva no dia em que a conta for excluída.
+
+    A PR da Onda 4 (exclusão de conta) tirou o dono deste log para que a linha
+    pudesse SOBREVIVER à cascata sem identificador de conta apagada
+    (`test_account_deletion_pluggy.py::…_t12_…`) — mas o helper é compartilhado
+    por três chamadores, e disconnect e reset perderam o dono de carona. Hoje só
+    a exclusão passa `log_user_id=False`.
+
+    O log é o REAL (`log_system_event_sync` do módulo, sem mock): o que se mede é
+    a linha no banco, não a chamada.
+    """
+    import asyncio
+
+    from core.admin_dashboard import ensure_admin_tables
+
+    asyncio.run(ensure_admin_tables())  # `system_event_logs` não vem de db/schema.py
+    # Como os outros quatro casos do arquivo: com `PLANS_V2_ENABLED=1` (default da
+    # suíte desde 5870eebe) o Grátis tem `of_banks_max=0` e a rota devolve 402
+    # antes de chegar ao log. Faltava só aqui — o caso nasceu com os planos v2
+    # desligados.
+    promote_to_pro(user_id)
+    _semeia_conexao_pluggy(user_id, f"disc-dono-{user_id}")
+
+    def _pluggy_fora():
+        raise RuntimeError("PLUGGY_CLIENT_ID/SECRET ausentes")
+
+    monkeypatch.setattr(of_routes, "create_pluggy_api_key", _pluggy_fora)
+
+    with get_conn() as conn, conn.cursor() as cur:
+        cur.execute("select coalesce(max(id), 0) as m from system_event_logs")
+        marca = int(cur.fetchone()["m"])
+        conn.commit()
+
+    client = TestClient(dashboard.app)
+    headers = _auth(client, user_id)
+    resp = client.delete(f"/open-finance/{user_id}", headers=headers)
+
+    assert resp.status_code == 200, resp.text
+    with get_conn() as conn, conn.cursor() as cur:
+        cur.execute(
+            "select user_id, message, details::text as det from system_event_logs "
+            "where id > %s and event_type = 'pluggy_disconnect_auth_failed' order by id",
+            (marca,),
+        )
+        linhas = cur.fetchall()
+        conn.commit()
+
+    assert len(linhas) == 1, f"esperava 1 rastro do ramo de auth falhada, veio {linhas}"
+    assert linhas[0]["user_id"] == user_id, \
+        f"disconnect de conta VIVA virou log sem dono: {dict(linhas[0])}"
+    # A linha é limpa pela cascata no teardown da fixture `user_id` — que é
+    # exatamente o mecanismo que preencher a coluna compra.

@@ -20,6 +20,17 @@ from .cards import (
 from .connection import TIPO_CANON_SQL, get_conn
 from .users import ensure_user, ensure_user_tx
 
+# `logging` da stdlib, mesmo padrão (e mesmo motivo) de `db/open_finance_state.py`:
+# `_log_falha` exige uma `Exception` no 3º posicional (`core/observability.py:102`)
+# e aqui não há exceção — o que se loga é um VALOR recusado na fronteira.
+#
+# NÃO é por custo, e a justificativa anterior dizia isso errado: um `warning()` da
+# stdlib NÃO é barato aqui. O `_DashboardHandler` mora no ROOT logger
+# (`core/observability.py:29-46`) e espelha todo WARNING em `system_event_logs`
+# chamando o MESMO `log_system_event_sync`, que abre `psycopg.connect()` próprio
+# (sem pool nenhum) e faz o INSERT bloqueante. A conta é a mesma dos dois lados —
+# inclusive dentro de uma escrita com prazo (`budget_ms`) — e o que a limita são o
+# `connect_timeout=2` e o `statement_timeout` de `core/system_event_log.py`.
 logger = logging.getLogger(__name__)
 
 
@@ -395,22 +406,31 @@ def list_open_finance_user_ids() -> list[int]:
             return [r["user_id"] for r in cur.fetchall()]
 
 
-def list_pluggy_item_ids(user_id: int | None = None) -> list[str]:
-    """Item ids Pluggy ativos (todos, ou de um usuário). Usado no refresh periódico.
+def list_pluggy_item_ids(user_id: int) -> list[str]:
+    """Item ids Pluggy ativos de UM usuário. Usado no refresh periódico.
 
     Conexões PAUSED ficam de fora: o item já foi deletado na Pluggy (trial venceu),
     então não há o que refrescar/deletar de novo.
+
+    `user_id` é OBRIGATÓRIO, e o `None` que antes significava "de todos" foi
+    recusado: o filtro `user_id` é a garantia de isolamento (CLAUDE.md §0) desta
+    enumeração, e o chamador de maior consequência é a limpeza remota da exclusão
+    de conta (`delete_pluggy_items_best_effort`), que DELETA na Pluggy tudo o que
+    esta função devolver — num laço em lote (`process_due_account_deletions`).
+    Um `None` ali apagaria o item de TODOS os clientes. Ninguém usava o modo
+    "todos" (0 chamadas sem argumento em 23/09/2026,
+    `grep -rn "list_pluggy_item_ids()" --include="*.py"`).
     """
-    sql = (
-        "select provider_item_id from open_finance_connections "
-        "where provider='pluggy' and upper(coalesce(status,'')) <> 'PAUSED'"
-    )
+    if user_id is None:
+        raise ValueError("list_pluggy_item_ids exige user_id: sem ele o DELETE na Pluggy alcançaria todos os clientes")
     with get_conn() as conn:
         with conn.cursor() as cur:
-            if user_id is None:
-                cur.execute(sql)
-            else:
-                cur.execute(sql + " and user_id=%s", (user_id,))
+            cur.execute(
+                "select provider_item_id from open_finance_connections "
+                "where provider='pluggy' and upper(coalesce(status,'')) <> 'PAUSED' "
+                "and user_id=%s",
+                (user_id,),
+            )
             return [r["provider_item_id"] for r in cur.fetchall() if r["provider_item_id"]]
 
 
@@ -746,11 +766,40 @@ def save_pluggy_open_finance_item(user_id: int, item: dict, *,
         or item.get("name")
         or "Banco conectado"
     )
-    status = item.get("status") or item.get("executionStatus") or "UPDATING"
+    # FRONTEIRA (#539, A1): o `status` do payload é vocabulário do PROVEDOR e
+    # entrava CRU na coluna. `PAUSED` é sentinela LOCAL — "o item já foi deletado
+    # na Pluggy no fim do trial" — e é exatamente o valor que tira o item do
+    # DELETE remoto da exclusão de conta (`pluggy_items_a_deletar`) e da
+    # enumeração: `{"status": "PAUSED"}` vindo do provedor deixava o item vivo e
+    # pago na Pluggy depois de uma exclusão LGPD.
+    # Valor fora da lista vira o MESMO default de status AUSENTE (`UPDATING`), em
+    # vez de ser gravado cru: assim a coluna só recebe estado que os leitores dela
+    # sabem ler, e "desconhecido" tem um desfecho só. O valor original não se
+    # perde — ele fica no `raw` desta mesma linha (`Jsonb(item)`, abaixo), além do
+    # log.
+    # `t0` ANTES do aviso, e não depois dele: o `_DashboardHandler` do root logger
+    # espelha todo WARNING em `system_event_logs` com `psycopg.connect()` + INSERT
+    # SÍNCRONOS (`core/observability.py`), com teto próprio de segundos. Com o
+    # relógio começando depois, esse tempo saía de graça e a reconexão com cliente
+    # HTTP esperando podia estourar o `budget_ms` que esta função promete respeitar
+    # (Codex, PR #539). Agora o aviso gasta do MESMO orçamento que o resto: o
+    # `_CursorComTeto` desconta o que ele levou, e o pior caso vira escrita que
+    # falha por prazo — não uma que ignora o prazo.
+    t0 = monotonic()
+
+    from core.services.pluggy_health import STATUS_REMOTOS_ACEITOS
+    status = str(item.get("status") or item.get("executionStatus") or "UPDATING").upper()
+    if status not in STATUS_REMOTOS_ACEITOS:
+        logger.warning("of_status_remoto_recusado item=%s status=%r -> UPDATING",
+                       item_id, status)
+        status = "UPDATING"
     now = datetime.now(_tz())
 
-    espera = None if budget_ms is None else max(0.001, budget_ms / 1000.0)
-    t0 = monotonic()
+    # O que SOBRA do orçamento depois do aviso, não o orçamento inteiro: sem o
+    # desconto, o `t0` acima só faria o `_CursorComTeto` cobrar a diferença, e a
+    # espera pela conexão continuaria pagando o aviso por fora.
+    espera = (None if budget_ms is None
+              else max(0.001, (budget_ms - (monotonic() - t0) * 1000) / 1000.0))
     with get_conn(timeout=espera) as conn:
         with conn.cursor() as cur:
             if budget_ms is not None:
@@ -802,7 +851,7 @@ def save_pluggy_open_finance_item(user_id: int, item: dict, *,
                     user_id,
                     "pluggy",
                     item_id,
-                    str(status).upper(),
+                    status,
                     str(institution_id),
                     str(institution_name),
                     None,
@@ -3089,7 +3138,7 @@ def disconnect_open_finance_connection(
             from .bank_movements import _lock_user, delete_if_shadow, reconcile_bank_movements
             # Import LOCAL: `open_finance_state` importa este módulo no topo, e a
             # mão única do import está documentada lá (`:38-42`).
-            from .open_finance_state import mark_items_removed
+            from .open_finance_state import mark_items_removed, pluggy_items_a_deletar
             _lock_user(cur, user_id)
             # Caixinha vinculada é ESPELHO: o dinheiro está no banco. Indo embora a
             # conexão, o FK só zera o `of_investment_id` (`on delete set null`,
@@ -3168,11 +3217,7 @@ def disconnect_open_finance_connection(
         conn.commit()
 
     if swept_out is not None:
-        swept_out.extend(sorted({
-            r["provider_item_id"] for r in varridas
-            if r["provider"] == "pluggy" and r["provider_item_id"]
-            and str(r["status"] or "").upper() != "PAUSED"
-        }))
+        swept_out.extend(pluggy_items_a_deletar(varridas))
 
     return deleted
 

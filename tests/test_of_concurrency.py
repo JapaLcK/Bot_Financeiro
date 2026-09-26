@@ -988,7 +988,12 @@ def test_gravar_reconexao_usa_UMA_conexao_do_pool(user_id, monkeypatch):
         budget_ms=5000)
 
     assert len(aberturas) == 1, f"a escrita pegou {len(aberturas)} conexões do pool"
-    assert aberturas == [5.0], f"o prazo tem de chegar ao pool: {aberturas}"
+    # Faixa, e não `== [5.0]`: desde o conserto do prazo no PR #539 o que chega ao
+    # pool é o que SOBRA do orçamento — o relógio começa antes do aviso de status
+    # recusado, cujo espelho no `_DashboardHandler` faz conexão e INSERT SÍNCRONOS.
+    # O que se mede aqui continua sendo "o prazo chega ao pool"; o piso é folga de
+    # sobra para o desconto real, que neste caminho é de microssegundos.
+    assert 4.5 <= aberturas[0] <= 5.0, f"o prazo tem de chegar ao pool: {aberturas}"
 
 
 # ── Codex #166, 3 apontamentos de uma vez: etapa sequencial não pode ganhar o

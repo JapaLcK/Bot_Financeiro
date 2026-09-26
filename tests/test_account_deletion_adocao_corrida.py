@@ -1,0 +1,812 @@
+"""P2 do Codex (Onda 4, PR-C): a exclusão de conta × a adoção de item pelo webhook.
+
+ASSUNTO PRÓPRIO, e é por isso que o arquivo é novo: os dois irmãos
+(`tests/test_account_deletion_pluggy.py`, "a exclusão deleta o item na Pluggy", e
+`tests/test_account_deletion_pii_logs.py`, "o resíduo de PII nos logs") medem UM
+processo cada; aqui os dois correm ao MESMO tempo, com barreira de thread, e o
+defeito só existe no cruzamento. Os dois já passam do teto de 350 linhas
+(`tests/test_max_lines_python.py`) e nenhum usa concorrência.
+
+O DEFEITO (reproduzido pelo Tester antes do conserto): dentro da transação de
+exclusão, DEPOIS do `delete from open_finance_connections ... returning` e ANTES
+do `delete from users`, outra sessão ainda consegue commitar uma conexão nova — a
+linha de `users` existe até ali, e `user_exists` (db/users.py) responde True
+durante a exclusão AGENDADA de propósito. O `delete from users` levava essa
+conexão pela CASCATA, e o `provider_item_id` dela nunca esteve no `RETURNING` que
+alimenta o delete remoto: item vivo, e PAGO, na Pluggy depois de uma exclusão
+LGPD. Porta única em produção: o webhook `item/created` → `_adota_item_orfao`
+(o `POST /pluggy-item` já morria em 403).
+
+O conserto tem duas metades, e cada teste aqui mede UMA:
+  • T18 = a PORTA: a adoção por webhook recusa conta com exclusão agendada — e
+    APAGA o item na Pluggy ao recusar, porque item recusado nunca vira conexão e
+    some de toda enumeração nossa (decisão do dono, 24/09). T18e é o ramo IRMÃO,
+    a conta JÁ apagada, com o mesmo desfecho e o mesmo remédio;
+  • T17 = o CINTO: a exclusão reconsulta `open_finance_connections` antes do
+    `delete from users` e soma ao `pluggy_items_swept`, então o 2º passe deleta o
+    item mesmo que a conexão tenha entrado por outro caminho.
+
+E T20 prende o que sobra dessas duas: a ORDEM `accounts → users` de
+`delete_user_data`, que é o que fecha a janela entre a reconsulta e o `delete from
+users` para a escrita REAL (ver abaixo).
+
+CONTROLES DO GRUPO (CLAUDE.md §3), cada mutação injetada em caso VERDE:
+  • negativo — apagar o bloco da reconsulta (o `if _table_exists(cur,
+    "open_finance_connections")` imediatamente ANTES do `delete from users`, em
+    `db/privacy.delete_user_data`): T17 vermelho;
+  • negativo — apagar o `if await asyncio.to_thread(is_account_scheduled_for_deletion,
+    dono)` de `_adota_item_orfao` (`frontend/routes/open_finance.py`): T18 vermelho;
+  • SEPARAÇÃO, medida nas duas mutações acima: com só a PORTA desligada T17 fica
+    VERDE (é a prova de que o cinto mede sozinho — T17 escreve pelo
+    `save_pluggy_open_finance_item`, a MESMA escrita da adoção, sem passar pelo
+    webhook), e com só o CINTO desligado T18 fica VERDE. Com as DUAS desligadas:
+    T17 e T18 vermelhos, T18b verde;
+  • negativo — apagar o `await asyncio.to_thread(delete_pluggy_items_best_effort,
+    dono, [item_id])` dessa MESMA guarda: T18 vermelho (a recusa volta a deixar o
+    item vivo e pago na Pluggy), T18b e T18c verdes;
+  • negativo — apagar o delete do ramo IRMÃO (`user_exists`, o `item/created` que
+    chega depois de a conta já ter sido apagada, decisão do dono de 24/09): T18e
+    vermelho, T18 verde. Os dois deletes se medem separados de propósito: eles
+    saem de guardas diferentes e T18e é o único que passa por `log_user_id=False`;
+  • negativo — trocar esse `log_user_id=False` pelo default `True`: T18f vermelho
+    (a coluna leva uid de conta apagada, a FK `system_event_logs_user_id_fkey`
+    derruba o INSERT inteiro e o ÚNICO rastro do item se PERDE — o teto está
+    escrito no `except` de `core/system_event_log.log_system_event_sync`). T18e
+    fica VERDE nessa mutação: lá a apiKey funciona e o helper não loga nada;
+  • GATILHO — `test_t18c_recusa_por_outro_motivo_nao_apaga_o_item_na_pluggy` é o
+    controle da ação IRREVERSÍVEL: alargar o gatilho (apagar em qualquer recusa,
+    p.ex. mover o delete para o `except` genérico) deixa T18 verde e T18c
+    VERMELHO. Sem ele, o grupo aprovaria um delete que vaza para o teto de plano;
+  • positivo — `test_t18b_conta_sem_exclusao_agendada_continua_sendo_adotada`: sem
+    ele o grupo passaria num código que recusa TODA adoção. O positivo canônico da
+    adoção mora em
+    `tests/test_of_webhook_adopt_guards.py::test_item_created_continua_adotando_o_dono_legitimo`;
+    o daqui é o par IMEDIATO da guarda nova (mesma conta, mesmo webhook, só o
+    `deletion_status` muda) e é o que separa "recusa por exclusão agendada" de
+    "recusa por qualquer motivo".
+
+A janela que SOBRA entre a reconsulta e o `delete from users` é medida por T20, e
+o mecanismo tem DUAS metades (o comentário de `db/privacy.py`, imediatamente antes
+da reconsulta, traz a versão longa): o laço de `user_owned_tables` já apagou a
+linha de `accounts`, então o `_lock_user` do escritor (`select ... from accounts
+... for update`, `db/bank_movements.py:58`) BLOQUEIA no lock da tupla apagada até
+o commit — ele não levanta nada, e depois do commit só devolve zero linhas — e
+quem MATA a escrita é o INSERT da conexão, na FK `open_finance_connections.user_id
+references users(id)` (`db/schema.py:414`). Segura `accounts`, mata `users`.
+
+CONTROLES de T20 (mesma regra, cada mutação injetada em caso VERDE):
+  • negativo — tirar o `_lock_user` de `save_pluggy_open_finance_item`
+    (`db/open_finance.py`): T20 vermelho, e a MEDIÇÃO mostra a inversão de ordem
+    em pessoa — `DeadlockDetected ... while locking tuple in relation "accounts"`
+    na sessão 2. Sem o `_lock_user` a escrita chega ao INSERT primeiro (que pega
+    `FOR KEY SHARE` na linha de `users`, pela FK) e só DEPOIS pede `accounts`, no
+    `reconcile_bank_movements` da mesma transação: `users` antes de `accounts`,
+    ciclo fechado com a exclusão. A escrita não vaza nesse mundo, mas quem a
+    recusa deixa de ser a FK e passa a ser o deadlock — e o segundo assert do
+    caso é exatamente esse;
+  • negativo — mover o bloco da reconsulta para ANTES do laço de
+    `user_owned_tables` (`accounts` ainda viva quando a barreira abre): T20
+    vermelho em `parada_em == 'commitou'` — a escrita ATRAVESSA a janela, commita
+    e sai pela cascata sem entrar no `pluggy_items_swept`. T17 fica VERDE nas
+    duas mutações, que é a prova de que T20 mede o que ele não mede;
+  • positivo — T18b continua provando que a adoção legítima grava (e que ela NÃO
+    apaga nada na Pluggy); e T20 exige o item ENUMERADO deletado na Pluggy, então
+    uma exclusão que recusasse tudo não passa.
+
+CLASSE CEGA declarada: não há Pluggy de verdade em nenhum caso (o
+`delete_pluggy_item` é dublê).
+"""
+from __future__ import annotations
+
+import asyncio
+import json
+import os
+import threading
+from time import monotonic, sleep
+
+import pytest
+from cryptography.fernet import Fernet
+from fastapi.testclient import TestClient
+
+os.environ.setdefault("MFA_ENCRYPTION_KEY", Fernet.generate_key().decode())
+
+import db
+import db.open_finance_state as open_finance_state
+import db.privacy as privacy
+import frontend.finance_bot_websocket_custom as dashboard
+import frontend.routes.open_finance as of_routes
+from db.connection import get_conn
+from test_account_deletion_pluggy import _existe_usuario, _item_de, _mocka_pluggy, _semeia
+
+SEGREDO = "test-webhook-secret-p2"
+
+
+@pytest.fixture(autouse=True)
+def tabelas_admin():
+    """`system_event_logs` nasce preguiçosamente em `core/admin_dashboard.py`; sem
+    ela o INSERT do log falha em silêncio e T18 não mediria o rastro."""
+    from core.admin_dashboard import ensure_admin_tables
+
+    asyncio.run(ensure_admin_tables())
+
+
+def _limpa_item(item_id: str):
+    """Teardown por ITEM: a conta de T18 sobrevive ao teste (não foi excluída) e a
+    de T17 já foi apagada, mas os logs vão com `user_id` NULL em parte dos casos e
+    nenhuma cascata os leva."""
+    with get_conn() as conn:
+        conn.execute("delete from open_finance_item_registry where provider_item_id=%s", (item_id,))
+        conn.execute("delete from open_finance_connections where provider_item_id=%s", (item_id,))
+        conn.execute("delete from system_event_logs where details::text like %s", (f"%{item_id}%",))
+        conn.commit()
+
+
+def _conexoes_do_item(item_id: str) -> list[dict]:
+    """SEM filtro de user_id de propósito: a pergunta é se a linha sobreviveu em
+    QUALQUER dono (o item id é único por caso)."""
+    with get_conn() as conn:
+        with conn.cursor() as cur:
+            cur.execute(
+                "select user_id from open_finance_connections where provider_item_id=%s",
+                (item_id,),
+            )
+            linhas = [dict(r) for r in cur.fetchall()]
+        conn.commit()
+    return linhas
+
+
+def _skips(item_id: str, event_type: str = "of_webhook_adopt_skipped") -> list[dict]:
+    """`event_type` existe pelo 2º chamador (T18d lê `pluggy_item_delete_failed`,
+    que o `delete_pluggy_items_best_effort` escreve) — estender serve os dois
+    chamadores, copiar a query seria a mesma regra em dois lugares (§0.1)."""
+    with get_conn() as conn:
+        with conn.cursor() as cur:
+            cur.execute(
+                """
+                select user_id, details from system_event_logs
+                where event_type = %s
+                  and details::text like %s
+                order by id
+                """,
+                (event_type, f"%{item_id}%"),
+            )
+            linhas = [dict(r) for r in cur.fetchall()]
+        conn.commit()
+    return linhas
+
+
+# ── T17 (o CINTO) ───────────────────────────────────────────────────────────
+
+def test_t17_conexao_commitada_entre_o_returning_e_o_delete_users(user_id, monkeypatch):
+    """A conexão que entra na janela sai pela cascata, e o item TEM de ser
+    deletado na Pluggy mesmo assim.
+
+    Barreira REAL, zero sleep: a 1ª pergunta de `_table_exists` por
+    "credit_transactions" é o statement imediatamente seguinte ao `delete from
+    open_finance_connections ... returning`. Nela a sessão 2 é soltada e a
+    transação de exclusão ESPERA o commit dela — determinístico, não temporizado.
+    """
+    _semeia(user_id)
+    item_velho = _item_de(user_id)
+    item_novo = f"{item_velho}-t17"
+    deletados = _mocka_pluggy(monkeypatch)
+
+    porta = threading.Event()
+    concluiu = threading.Event()
+    sessao2: dict = {}
+
+    def _sessao2():
+        if not porta.wait(30):
+            sessao2["erro"] = "porta nunca abriu"
+            concluiu.set()
+            return
+        try:
+            # A MESMA escrita de `_adota_item_orfao` (`criar_usuario=False`).
+            db.save_pluggy_open_finance_item(
+                user_id,
+                {"id": item_novo, "status": "UPDATED",
+                 "connector": {"id": 613, "name": "Inter"}},
+                criar_usuario=False,
+            )
+        except Exception as exc:  # noqa: BLE001 — é isso que o caso mede
+            sessao2["erro"] = f"{type(exc).__name__}: {exc}"
+        finally:
+            concluiu.set()
+
+    t = threading.Thread(target=_sessao2, name="sessao2-t17", daemon=True)
+    t.start()
+
+    real = privacy._table_exists
+    acionada = {"ok": False}
+
+    def _hook(cur, table):
+        r = real(cur, table)
+        if table == "credit_transactions" and not acionada["ok"]:
+            acionada["ok"] = True
+            porta.set()
+            sessao2["commitou_antes_do_delete_users"] = concluiu.wait(30)
+        return r
+
+    monkeypatch.setattr(privacy, "_table_exists", _hook)
+    try:
+        db.process_due_account_deletions(limit=10)
+        t.join(10)
+
+        assert acionada["ok"], "a barreira não foi acionada — o caso não mediu nada"
+        assert sessao2.get("erro") is None, \
+            f"a sessão 2 tinha que ter commitado na janela: {sessao2}"
+        assert sessao2.get("commitou_antes_do_delete_users") is True
+        assert not _existe_usuario(user_id), "a conta tinha que ter sido excluída"
+        assert _conexoes_do_item(item_novo) == [], \
+            "a conexão da janela tinha que sair pela cascata do `delete from users`"
+        assert item_velho in deletados, "o item enumerado tinha que sair no 1º passe"
+        assert item_novo in deletados, (
+            "ITEM ÓRFÃO NA PLUGGY: a conexão commitada na janela saiu pela cascata "
+            "sem entrar no `pluggy_items_swept` — o 2º passe nunca deletou o item"
+        )
+    finally:
+        _limpa_item(item_novo)
+        _limpa_item(item_velho)
+
+
+# ── T20 (a ORDEM `accounts → users`) ────────────────────────────────────────
+
+def _travado_no_lock_de_accounts() -> bool:
+    """Alguma sessão DESTE banco está bloqueada AGORA no `select ... from accounts
+    ... for update` do `_lock_user`?
+
+    Espera por ESTADO, não por tempo: `pg_stat_activity.wait_event_type` diz o que
+    a sessão está fazendo neste instante. `datname = current_database()` porque a
+    view é do cluster inteiro e a suíte roda num banco próprio.
+    """
+    with get_conn() as conn:
+        with conn.cursor() as cur:
+            cur.execute(
+                """
+                select count(*) as n from pg_stat_activity
+                 where datname = current_database()
+                   and wait_event_type = 'Lock'
+                   and query ilike '%from accounts where user_id%for update%'
+                """
+            )
+            n = int(cur.fetchone()["n"])
+        conn.commit()
+    return n > 0
+
+
+def test_t20_escrita_real_na_janela_residual_morre_na_fk(user_id, monkeypatch):
+    """A ORDEM `accounts → users` é o que fecha a janela que SOBRA depois do cinto.
+
+    Sem este caso, tirar o `_lock_user` de `save_pluggy_open_finance_item` — ou
+    mover a reconsulta para antes do laço de `user_owned_tables` — reabre o
+    vazamento sem uma linha vermelha: T17 continua verde porque ele mede a escrita
+    ANTES da reconsulta, e a que passa DEPOIS dela não entra no `pluggy_items_swept`.
+
+    As DUAS metades do mecanismo, e cada assert mede uma:
+      • `accounts` SEGURA — a linha já foi apagada por esta transação (aberta), e o
+        `FOR UPDATE` do escritor bloqueia no lock da tupla até o commit. Ele não
+        levanta nada: depois do commit devolve zero linhas e segue;
+      • `users` MATA — quem recusa a escrita é o INSERT da conexão, na FK
+        `open_finance_connections.user_id references users(id)` (`db/schema.py:414`),
+        já com a linha de `users` apagada. É NA conexão, não antes dela.
+
+    Barreira REAL, sem sono fixo: a 2ª chamada de `pluggy_items_a_deletar` é a
+    reconsulta (a 1ª é o `RETURNING`), ou seja, o começo exato da janela residual.
+    Ancorar nela faz a barreira ANDAR JUNTO com o código: quem mover a reconsulta
+    para antes do laço abre a barreira com `accounts` ainda viva, a escrita passa e
+    o caso fica vermelho. O `delete_user_data` dublado só limita a barreira à
+    exclusão DESTE usuário (o job roda em lote).
+    """
+    _semeia(user_id)
+    item_velho = _item_de(user_id)
+    item_novo = f"{item_velho}-t20"
+    deletados = _mocka_pluggy(monkeypatch)
+
+    porta = threading.Event()
+    concluiu = threading.Event()
+    sessao2: dict = {}
+
+    def _sessao2():
+        if not porta.wait(30):
+            sessao2["erro"] = "porta nunca abriu"
+            concluiu.set()
+            return
+        try:
+            # A MESMA escrita de `_adota_item_orfao` (`criar_usuario=False`).
+            db.save_pluggy_open_finance_item(
+                user_id,
+                {"id": item_novo, "status": "UPDATED",
+                 "connector": {"id": 613, "name": "Inter"}},
+                criar_usuario=False,
+            )
+        except Exception as exc:  # noqa: BLE001 — é isso que o caso mede
+            sessao2["erro"] = f"{type(exc).__name__}: {exc}"
+        finally:
+            concluiu.set()
+
+    t = threading.Thread(target=_sessao2, name="sessao2-t20", daemon=True)
+    t.start()
+
+    real_filtro = open_finance_state.pluggy_items_a_deletar
+    real_delete = privacy.delete_user_data
+    alvo = {"nosso": False}
+    chamadas = {"n": 0}
+
+    def _delete_user_data(uid, *args, **kwargs):
+        alvo["nosso"] = uid == user_id
+        try:
+            return real_delete(uid, *args, **kwargs)
+        finally:
+            alvo["nosso"] = False
+
+    def _filtro(linhas):
+        if alvo["nosso"]:
+            chamadas["n"] += 1
+            if chamadas["n"] == 2:
+                porta.set()
+                limite = monotonic() + 30
+                while monotonic() < limite:
+                    if concluiu.is_set():
+                        sessao2["parada_em"] = "commitou"
+                        break
+                    if _travado_no_lock_de_accounts():
+                        sessao2["parada_em"] = "lock"
+                        break
+                    sleep(0.02)
+        return real_filtro(linhas)
+
+    monkeypatch.setattr(privacy, "delete_user_data", _delete_user_data)
+    monkeypatch.setattr(open_finance_state, "pluggy_items_a_deletar", _filtro)
+    try:
+        db.process_due_account_deletions(limit=10)
+        t.join(30)
+
+        assert chamadas["n"] >= 2, "a barreira não foi acionada — o caso não mediu nada"
+        assert sessao2.get("parada_em") == "lock", (
+            "a escrita concorrente ATRAVESSOU a janela residual em vez de ficar presa "
+            f"no lock da tupla de `accounts` já apagada: {sessao2}"
+        )
+        assert "ForeignKeyViolation" in (sessao2.get("erro") or ""), (
+            "quem mata a escrita é o INSERT da conexão na FK para `users`; veio outra "
+            f"coisa: {sessao2}"
+        )
+        assert not _existe_usuario(user_id), "a conta tinha que ter sido excluída"
+        assert _conexoes_do_item(item_novo) == [], \
+            "a escrita da janela residual chegou a existir no banco"
+        assert deletados == [item_velho], (
+            "o item ENUMERADO tinha que sair na Pluggy (positivo) e o da janela nunca "
+            f"chegou a existir: {deletados}"
+        )
+    finally:
+        porta.set()
+        _limpa_item(item_novo)
+        _limpa_item(item_velho)
+
+
+# ── T18 (a PORTA) ───────────────────────────────────────────────────────────
+
+def _webhook_de_item_criado(monkeypatch, dono: int, item_id: str):
+    """`item/created` de um item que a Pluggy diz ser do `dono`. Só a resposta
+    remota é dublada e o sync fica inerte: as guardas da adoção rodam de verdade.
+    """
+    monkeypatch.setenv("PLUGGY_WEBHOOK_SECRET", SEGREDO)
+    monkeypatch.setattr(of_routes, "_schedule_pluggy_sync", lambda i: None)
+    monkeypatch.setattr(
+        of_routes, "get_pluggy_item",
+        lambda item, api_key=None: {
+            "id": item, "clientUserId": str(dono), "status": "UPDATED",
+            "connector": {"id": 613, "name": "Inter"},
+        },
+    )
+    client = TestClient(dashboard.app)
+    return client.post(
+        f"/open-finance/pluggy/webhook?token={SEGREDO}",
+        content=json.dumps({"event": "item/created", "itemId": item_id}).encode(),
+        headers={"Content-Type": "application/json"},
+    )
+
+
+@pytest.mark.parametrize("estado", ["scheduled", "processing"])
+def test_t18_webhook_nao_adota_item_de_conta_com_exclusao_agendada(user_id, monkeypatch, estado):
+    """A porta que o P2 usava. `user_exists` responde True nessa janela, então é
+    `is_account_scheduled_for_deletion` que recusa — e o rastro leva o dono na
+    COLUNA `user_id` (a conta existe, e a cascata de `system_event_logs` a levará
+    no dia da exclusão), nunca em `details`, que a cascata não alcança.
+
+    OS DOIS ESTADOS, e `processing` é o que importa: a corrida do P2 acontece
+    DENTRO da exclusão, e ali o `deletion_status` já é `processing` — é o que
+    `_claim_due_account_deletions` grava (`db/privacy.py:1219`) antes de chamar
+    `delete_user_data`. `scheduled` é a janela de carência, ANTES do job. O
+    predicado aceita os dois (`deletion_status in ('scheduled','processing')`,
+    db/privacy.py:250) e o caso só com `scheduled` deixava metade da guarda —
+    justamente a metade em que a corrida existe — sem nenhum teste.
+    """
+    from conftest import promote_to_pro
+
+    _semeia(user_id, item=None)  # conta agendada, ZERO conexões
+    if estado != "scheduled":
+        with get_conn() as conn:
+            conn.execute(
+                "update auth_accounts set deletion_status = %s where user_id = %s",
+                (estado, user_id),
+            )
+            conn.commit()
+    # Pro, e é ESSENCIAL: a suíte roda com `PLANS_V2_ENABLED=1` por default e no
+    # Grátis o `_enforce_bank_limit` já recusaria com 402 (`of_banks_max=0`) —
+    # o caso ficaria VERDE sem a guarda nenhuma, medindo o teto do plano.
+    # Com plano que TEM vaga, quem recusa só pode ser a exclusão agendada.
+    promote_to_pro(user_id)
+    deletados = _mocka_pluggy(monkeypatch)
+    item_novo = f"{_item_de(user_id)}-t18-{estado}"
+    try:
+        r = _webhook_de_item_criado(monkeypatch, user_id, item_novo)
+
+        assert r.status_code == 200, r.text  # nunca 5xx: a Pluggy retentaria
+        assert _conexoes_do_item(item_novo) == [], (
+            "o webhook adotou um item para conta em exclusão agendada — a conexão "
+            "sai pela cascata do `delete from users` e o item fica vivo na Pluggy"
+        )
+        skips = _skips(item_novo)
+        assert len(skips) == 1, f"esperava 1 rastro de skip, veio {skips}"
+        assert skips[0]["details"]["motivo"] == "exclusao_agendada", skips[0]
+        assert skips[0]["user_id"] == user_id, \
+            "o dono tinha que ir na COLUNA (a conta existe e a cascata a leva)"
+        assert "user_id" not in skips[0]["details"], \
+            "uid em `details` sobrevive à exclusão: a cascata não alcança o JSON"
+        assert deletados == [item_novo], (
+            "recusar sem apagar deixa o item VIVO e pago na Pluggy: ele nunca vira "
+            "linha em `open_finance_connections`, então nem `list_pluggy_item_ids` "
+            "nem o `RETURNING` da exclusão o alcançam, e não existe listagem de "
+            f"items na Pluggy para enumerar por fora. Deletados: {deletados}"
+        )
+        # A conta tem ZERO conexões (`_semeia(item=None)`), então a ENUMERAÇÃO
+        # (`item_ids=None`) apagaria NADA: o id acima só aparece porque a chamada
+        # passa o item EXPLÍCITO. Este assert é o que prende esse argumento.
+    finally:
+        _limpa_item(item_novo)
+
+
+def test_t18b_conta_sem_exclusao_agendada_continua_sendo_adotada(user_id, monkeypatch):
+    """CONTROLE POSITIVO, par imediato do T18: a MESMA conta e o MESMO webhook,
+    só sem exclusão agendada, continuam adotando. Sem ele o grupo passaria num
+    código que recusa tudo — que é pior que o bug.
+    """
+    from conftest import promote_to_pro
+
+    _semeia(user_id, agendada=False, item=None)
+    # A suíte roda com `PLANS_V2_ENABLED=1` por default: no Grátis o
+    # `_enforce_bank_limit` recusa com 402 (`of_banks_max=0`) e o caso mediria a
+    # ausência de plano, não a guarda. Mesma promoção do positivo canônico
+    # (`tests/test_of_webhook_adopt_guards.py`).
+    promote_to_pro(user_id)
+    deletados = _mocka_pluggy(monkeypatch)
+    item_novo = f"{_item_de(user_id)}-t18b"
+    try:
+        r = _webhook_de_item_criado(monkeypatch, user_id, item_novo)
+
+        assert r.status_code == 200, r.text
+        assert _conexoes_do_item(item_novo) == [{"user_id": user_id}], \
+            "a adoção legítima parou de funcionar"
+        assert _skips(item_novo) == [], \
+            f"a adoção legítima gravou skip: {_skips(item_novo)}"
+        assert deletados == [], (
+            "a adoção legítima apagou o item na Pluggy — o delete é IRREVERSÍVEL e "
+            f"só pode sair do ramo da exclusão agendada: {deletados}"
+        )
+    finally:
+        _limpa_item(item_novo)
+
+
+def test_t18c_recusa_por_outro_motivo_nao_apaga_o_item_na_pluggy(user_id, monkeypatch):
+    """CONTROLE DE GATILHO: recusa que NÃO é exclusão agendada não apaga nada.
+
+    Conta viva, plano Grátis (`of_banks_max=0` com `PLANS_V2_ENABLED=1`, o default
+    da suíte): quem recusa aqui é o `_enforce_bank_limit`, com 402. O desfecho
+    correto é o de sempre — 200, sem conexão, rastro de skip — e ZERO delete: o
+    usuário continua existindo, o item é dele e a vaga volta quando ele assinar.
+
+    Sem este caso, alargar o gatilho (apagar em QUALQUER recusa) ficaria verde, e
+    é o vazamento mais caro possível de uma ação irreversível.
+    """
+    _semeia(user_id, agendada=False, item=None)  # conta VIVA, sem exclusão nenhuma
+    deletados = _mocka_pluggy(monkeypatch)
+    item_novo = f"{_item_de(user_id)}-t18c"
+    try:
+        r = _webhook_de_item_criado(monkeypatch, user_id, item_novo)
+
+        assert r.status_code == 200, r.text
+        assert _conexoes_do_item(item_novo) == [], "o Grátis adotou com `of_banks_max=0`"
+        skips = _skips(item_novo)
+        assert [x["details"].get("motivo") for x in skips] == ["HTTPException"], (
+            "a recusa tinha que vir do teto do plano (402), não da exclusão "
+            f"agendada — o caso não estaria medindo o gatilho: {skips}"
+        )
+        assert deletados == [], (
+            "recusa por TETO DE PLANO apagou o item do usuário na Pluggy: o delete "
+            f"vazou para fora do ramo da exclusão agendada: {deletados}"
+        )
+    finally:
+        _limpa_item(item_novo)
+
+
+@pytest.mark.parametrize("erro", [RuntimeError("Pluggy 503"), ValueError("item sumiu")])
+def test_t18d_falha_do_provedor_no_delete_nao_derruba_o_webhook(user_id, monkeypatch, erro):
+    """Best-effort: a Pluggy fora do ar no instante da recusa NÃO vira 5xx (a
+    Pluggy retentaria em laço) e deixa rastro. O item fica órfão lá — o MESMO
+    estado de antes deste conserto, nunca pior.
+    """
+    from conftest import promote_to_pro
+
+    _semeia(user_id, item=None)
+    promote_to_pro(user_id)  # como em T18: sem plano, quem recusaria era o 402
+    deletados = _mocka_pluggy(monkeypatch, erro=erro)
+    item_novo = f"{_item_de(user_id)}-t18d"
+    try:
+        r = _webhook_de_item_criado(monkeypatch, user_id, item_novo)
+
+        assert r.status_code == 200, r.text
+        assert _conexoes_do_item(item_novo) == [], "recusou e mesmo assim adotou"
+        assert deletados == [item_novo], f"nem tentou apagar: {deletados}"
+        falhas = _skips(item_novo, "pluggy_item_delete_failed")
+        assert len(falhas) == 1, f"a falha do provedor ficou sem rastro nenhum: {falhas}"
+        assert str(erro) in falhas[0]["details"].get("error", ""), falhas[0]
+    finally:
+        _limpa_item(item_novo)
+
+
+def test_t18e_item_created_de_conta_ja_apagada_apaga_o_item_na_pluggy(monkeypatch):
+    """O ramo IRMÃO do T18: o `item/created` que chega DEPOIS da exclusão.
+
+    Aqui não há corrida nenhuma — a conta já não existe e quem recusa é o
+    `user_exists`. O desfecho da recusa era o MESMO do T18 (item vivo e pago na
+    Pluggy, com os dados bancários do titular, depois de uma exclusão LGPD) e
+    agora tem o mesmo remédio (decisão do dono, 24/09). Este ramo é ainda mais
+    terminal que o do T18: lá a exclusão ainda vai rodar, aqui ela JÁ rodou, então
+    nem o `RETURNING` volta a passar por perto — e não existe listagem de items no
+    provedor (`core/services/pluggy.py`) para enumerar por fora.
+
+    Sem conta, o uid não pode ir na COLUNA (`system_event_logs.user_id` é FK) nem
+    em `details` (nenhuma purga alcança o JSON) — os dois últimos asserts são isso,
+    e é a mesma regra do `log_user_id=False` da exclusão de conta.
+    """
+    fantasma = 987654321987
+    deletados = _mocka_pluggy(monkeypatch)
+    item_novo = f"{_item_de(fantasma)}-t18e"
+    try:
+        assert not _existe_usuario(fantasma), "pré-condição: a conta não existe"
+
+        r = _webhook_de_item_criado(monkeypatch, fantasma, item_novo)
+
+        assert r.status_code == 200, r.text  # nunca 5xx: a Pluggy retentaria
+        assert not _existe_usuario(fantasma), \
+            "o webhook RECRIOU a conta apagada (a ressurreição do Codex #313)"
+        assert _conexoes_do_item(item_novo) == [], "adotou item para conta inexistente"
+        skips = _skips(item_novo)
+        assert len(skips) == 1, f"esperava 1 rastro de skip, veio {skips}"
+        assert skips[0]["details"]["motivo"] == "usuario_inexistente", skips[0]
+        assert deletados == [item_novo], (
+            "recusar sem apagar deixa o item VIVO e pago na Pluggy depois de a conta "
+            "ter sido apagada: sem conexão local ele não aparece em "
+            "`list_pluggy_item_ids`, a exclusão dele já passou e não há listagem de "
+            f"items no provedor — nada mais o alcança. Deletados: {deletados}"
+        )
+        assert skips[0]["user_id"] is None, \
+            "a coluna é FK: uid de conta apagada não entra (e a linha tem de sobreviver)"
+        assert "user_id" not in skips[0]["details"], \
+            "uid de conta APAGADA em `details`: nenhuma purga alcança o JSON"
+    finally:
+        _limpa_item(item_novo)
+
+
+def test_t18f_sem_credencial_pluggy_o_rastro_do_item_sobrevive_sem_uid(monkeypatch):
+    """O par do T18e no ramo de FALHA: sem `PLUGGY_CLIENT_ID/SECRET` o item fica
+    órfão na Pluggy e o log é a única coisa que sobra — e ele tem de SOBREVIVER.
+
+    É o que `log_user_id=False` compra aqui: a conta não existe, então uid na
+    COLUNA derruba o INSERT inteiro pela `system_event_logs_user_id_fkey` e o
+    evento se perde em silêncio (o teto está no `except` de
+    `core/system_event_log.log_system_event_sync`). Mesma regra do
+    `db/privacy.process_due_account_deletions`, medida por
+    `tests/test_account_deletion_pluggy.py::test_t12_...` no outro chamador.
+    """
+    fantasma = 987654321987
+    monkeypatch.setattr(
+        of_routes, "create_pluggy_api_key",
+        lambda: (_ for _ in ()).throw(RuntimeError("PLUGGY_CLIENT_ID ausente")),
+    )
+    item_novo = f"{_item_de(fantasma)}-t18f"
+    try:
+        r = _webhook_de_item_criado(monkeypatch, fantasma, item_novo)
+
+        assert r.status_code == 200, r.text
+        falhas = _skips(item_novo, "pluggy_disconnect_auth_failed")
+        assert len(falhas) == 1, (
+            "o rastro da falha SUMIU: com uid de conta apagada na coluna, a FK "
+            f"derruba o INSERT e não resta nada que nomeie o item órfão: {falhas}"
+        )
+        assert falhas[0]["user_id"] is None, falhas[0]
+        assert falhas[0]["details"]["items"] == [item_novo], falhas[0]
+        assert "user_id" not in falhas[0]["details"], \
+            "uid de conta APAGADA em `details`: nenhuma purga alcança o JSON"
+    finally:
+        _limpa_item(item_novo)
+
+
+# ── T21 (a janela + falha pós-commit) ───────────────────────────────────────
+
+def test_t21_item_da_janela_sai_mesmo_com_falha_pos_commit(user_id, monkeypatch):
+    """T17 mais o desfecho do T14: o 2º passe TEM de acontecer mesmo quando a
+    verificação pós-commit levanta.
+
+    Apontamento do Codex (PR #539), reproduzido antes do conserto por dois
+    gatilhos — `OperationalError` na 2ª `get_conn()` (queda de conexão em
+    Postgres gerenciado, o mesmo do T14) e o `RuntimeError` de sobras do próprio
+    código, que levanta SEM injeção nenhuma. Nos dois, a lista capturada pelo
+    cinto ia embora junto com a exceção: a conta e a conexão local já estavam
+    apagadas, não havia `auth_accounts` para `_restore_account_deletion_schedule`
+    restaurar, e o item da janela ficava órfão e pago na Pluggy para sempre.
+
+    Este caso usa o gatilho curto (a 2ª `get_conn()`). O que se mede é o item
+    NOVO em `deletados` — o velho já sai no 1º passe e passaria de qualquer jeito.
+    """
+    import psycopg
+
+    _semeia(user_id)
+    item_velho = _item_de(user_id)
+    item_novo = f"{item_velho}-t21"
+    deletados = _mocka_pluggy(monkeypatch)
+
+    porta = threading.Event()
+    concluiu = threading.Event()
+    sessao2: dict = {}
+
+    def _sessao2():
+        if not porta.wait(30):
+            sessao2["erro"] = "porta nunca abriu"
+            concluiu.set()
+            return
+        try:
+            db.save_pluggy_open_finance_item(
+                user_id,
+                {"id": item_novo, "status": "UPDATED",
+                 "connector": {"id": 613, "name": "Inter"}},
+                criar_usuario=False,
+            )
+        except Exception as exc:  # noqa: BLE001 — é isso que o caso mede
+            sessao2["erro"] = f"{type(exc).__name__}: {exc}"
+        finally:
+            concluiu.set()
+
+    t = threading.Thread(target=_sessao2, name="sessao2-t21", daemon=True)
+    t.start()
+
+    real_table_exists = privacy._table_exists
+    acionada = {"ok": False}
+
+    def _hook(cur, table):
+        r = real_table_exists(cur, table)
+        if table == "credit_transactions" and not acionada["ok"]:
+            acionada["ok"] = True
+            porta.set()
+            sessao2["commitou_antes_do_delete_users"] = concluiu.wait(30)
+        return r
+
+    real_get_conn = privacy.get_conn
+    chamadas = {"n": 0}
+
+    def _get_conn_instavel(*a, **kw):
+        import sys as _sys
+        if _sys._getframe(1).f_code.co_name == "delete_user_data":
+            chamadas["n"] += 1
+            if chamadas["n"] == 2:  # a conexão da VERIFICAÇÃO PÓS-COMMIT
+                raise psycopg.OperationalError("server closed the connection unexpectedly")
+        return real_get_conn(*a, **kw)
+
+    monkeypatch.setattr(privacy, "_table_exists", _hook)
+    monkeypatch.setattr(privacy, "get_conn", _get_conn_instavel)
+    try:
+        resultados = db.process_due_account_deletions(limit=10)
+        t.join(10)
+
+        assert acionada["ok"], "a barreira não foi acionada — o caso não mediu nada"
+        assert chamadas["n"] == 2, \
+            f"o gatilho não alcançou a conexão pós-commit (chamadas={chamadas})"
+        assert sessao2.get("erro") is None, \
+            f"a sessão 2 tinha que ter commitado na janela: {sessao2}"
+        assert not _existe_usuario(user_id), \
+            "PREMISSA: o commit local passou e a conta está apagada"
+        assert resultados and resultados[0]["deleted"] is False, \
+            f"a falha pós-commit continua sendo reportada como erro: {resultados}"
+        assert item_novo in deletados, (
+            "ITEM ÓRFÃO NA PLUGGY: o item da janela entrou no `pluggy_items_swept`, "
+            "mas a falha pós-commit descartou o conjunto e o 2º passe não rodou"
+        )
+    finally:
+        monkeypatch.undo()
+        _limpa_item(item_novo)
+        _limpa_item(item_velho)
+
+
+# ── T22 (a corrida do recadastro, entre a checagem e o DELETE remoto) ────────
+
+def test_t22_recadastro_na_janela_impede_o_delete_remoto(user_id, monkeypatch):
+    """O `user_exists` diz "não existe" e, antes de o DELETE remoto sair, a pessoa
+    se recadastra e reconecta o MESMO item — e aí apagar é destruir dado válido.
+
+    Não é hipótese: o `user_id` é determinístico a partir do e-mail
+    (`db/users.get_or_create_canonical_user`), então recadastro devolve o MESMO
+    id, e o `avoidDuplicates` da Pluggy devolve o MESMO item. Entre a checagem e
+    o delete há um `await` e um salto de thread (Codex, PR #539).
+
+    A janela não fecha — o provedor é externo —, mas a releitura colada no delete
+    a encolhe para uma ida ao banco. Aqui a corrida é simulada de forma
+    determinística: a conexão aparece DURANTE a chamada, no lugar exato onde a
+    revalidação lê.
+    """
+    _semeia(user_id, agendada=False)
+    item_novo = f"{_item_de(user_id)}-t22"
+    deletados = _mocka_pluggy(monkeypatch)
+
+    real_user_exists = of_routes.user_exists
+
+    def _some_e_volta(uid: int) -> bool:
+        # 1ª leitura (a guarda): a conta "não existe" → entra no ramo do delete.
+        # 2ª leitura (a revalidação): já existe de novo — é o recadastro.
+        _some_e_volta.n += 1
+        return _some_e_volta.n > 1 and real_user_exists(uid)
+
+    _some_e_volta.n = 0
+    monkeypatch.setattr(of_routes, "user_exists", _some_e_volta)
+    try:
+        r = _webhook_de_item_criado(monkeypatch, user_id, item_novo)
+
+        assert r.status_code == 200, r.text
+        assert _some_e_volta.n >= 2, (
+            "a revalidação não aconteceu: o delete saiu com a leitura ANTIGA, "
+            f"que é exatamente o defeito (leituras={_some_e_volta.n})")
+        assert deletados == [], (
+            "DELETE IRREVERSÍVEL EM CONTA VÁLIDA: a pessoa se recadastrou na janela "
+            f"e o item dela foi apagado na Pluggy — {deletados}")
+    finally:
+        _limpa_item(item_novo)
+
+
+def test_t22b_item_com_conexao_local_viva_nunca_e_apagado(monkeypatch, user_id):
+    """O outro sinal da revalidação, e o mais forte deste lado: se o item TEM
+    conexão local no instante do delete, ele está em uso — não é órfão de ninguém.
+
+    Controle de que a revalidação não olha só o usuário: aqui `user_exists` diz
+    "não existe" o tempo todo, e quem barra é a conexão que APARECE na janela.
+
+    A conexão não pode existir desde o começo: aí o item nem seria órfão, a adoção
+    sairia antes e o caso passaria sem tocar no delete — medido, a primeira versão
+    deste teste continuava VERDE com a revalidação removida. Ela nasce na 2ª
+    leitura, que é onde a revalidação olha.
+    """
+    fantasma = 987654321987
+    item_novo = f"{_item_de(fantasma)}-t22b"
+    deletados = _mocka_pluggy(monkeypatch)
+    monkeypatch.setattr(of_routes, "user_exists", lambda uid: False)
+
+    leituras = {"n": 0}
+
+    def _conexao_que_aparece(item, **kw):
+        leituras["n"] += 1
+        if leituras["n"] == 1:      # a guarda: ainda órfão
+            return []
+        return [{"user_id": user_id, "provider_item_id": item}]
+
+    monkeypatch.setattr(of_routes, "get_connections_by_item_id", _conexao_que_aparece)
+    try:
+        r = _webhook_de_item_criado(monkeypatch, fantasma, item_novo)
+
+        assert leituras["n"] >= 2, (
+            "a revalidação não leu as conexões do item: o delete saiu sem olhar se "
+            f"ele está em uso (leituras={leituras['n']})")
+
+        assert r.status_code == 200, r.text
+        assert deletados == [], (
+            "item com conexão local viva foi apagado na Pluggy: a revalidação tem "
+            f"de olhar o ITEM, não só o usuário — {deletados}")
+    finally:
+        _limpa_item(item_novo)

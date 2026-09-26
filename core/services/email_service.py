@@ -60,15 +60,30 @@ def send_email(
     from_addr: Optional[str] = None,
     headers: Optional[dict] = None,
     attachments: Optional[list] = None,
+    log_recipient: bool = True,
 ) -> bool:
     """Envia e-mail via Resend API. Retorna True em sucesso, nunca lança exceção.
 
     attachments: lista no formato Resend, ex:
     [{"filename": "x.pdf", "content": <base64 str>, "content_type": "application/pdf"}].
+
+    `log_recipient=False` tira o ENDEREÇO de todo log desta função — o
+    `system_event_logs` (que não tem coluna `user_id`, logo não é levado por
+    cascata nenhuma) e o log de aplicação, que o `_DashboardHandler`
+    (`core/observability.py`) espelha na MESMA tabela a partir de WARNING.
+    Continuam indo o `event_type`, o assunto e o sucesso/falha — e, na falha, o
+    tipo da exceção + o `code` (status HTTP) e o `error_type` do provedor, o
+    bastante para o operador saber que o e-mail saiu e por que não saiu. Existe
+    por um único chamador:
+    `send_account_deletion_completed_email`, o e-mail que sai DEPOIS de a conta
+    ser apagada, cujo destinatário é PII de conta excluída. Default `True`:
+    nenhum outro chamador muda de comportamento nem precisa lembrar do
+    parâmetro.
     """
+    to_log = to if log_recipient else "<destinatário omitido>"
     api_key = os.getenv("RESEND_API_KEY", "")
     if not api_key:
-        logger.warning("Resend não configurado (RESEND_API_KEY ausente). E-mail para <%s> não enviado.", to)
+        logger.warning("Resend não configurado (RESEND_API_KEY ausente). E-mail para <%s> não enviado.", to_log)
         return False
     try:
         resend = _get_resend()
@@ -91,12 +106,30 @@ def send_email(
         if attachments:
             params["attachments"] = attachments
         resend.Emails.send(params)
-        logger.info("E-mail enviado para <%s>: %s", to, subject)
-        _log_email_event("info", "email_sent", f"E-mail enviado para {to}", to=to, subject=subject)
+        logger.info("E-mail enviado para <%s>: %s", to_log, subject)
+        _log_email_event("info", "email_sent", f"E-mail enviado para {to_log}", to=to_log, subject=subject)
         return True
     except Exception as exc:
-        logger.error("Falha ao enviar e-mail para <%s>: %s", to, exc)
-        _log_email_event("error", "email_failed", f"Falha ao enviar para {to}: {exc}", to=to, subject=subject, error=str(exc))
+        # LISTA BRANCA sob `log_recipient=False`: o texto do provedor NÃO é
+        # persistido. Ele ecoa o destinatário ("invalid `to` field: …") em formas
+        # que substituição literal não alcança — medido em 6 formas, 4 vazavam
+        # com `str(exc).replace(to, to_log)`: maiúsculas, domínio em maiúsculas,
+        # URL-encoded (`%40`) e JSON escapado (`\u0040`). Redigir por regex de
+        # e-mail seria a mesma lista negra (as duas últimas não têm `@` no
+        # texto). Fica o que NÃO vem de texto livre e já separa as causas: o tipo
+        # da exceção e os dois campos enum do `ResendError` — `code`, que é o
+        # status HTTP ("400", "422", "429"…), e `error_type`, o nome do erro na
+        # API ("validation_error", "missing_api_key", "rate_limit_exceeded"…;
+        # `resend/exceptions.py`, dicionário `ERRORS`). O status sozinho não
+        # separa `validation_error` de `missing_required_field` no mesmo 422.
+        if log_recipient:
+            erro = str(exc)
+        else:
+            enums = [f"{k}={v}" for k, v in (("code", getattr(exc, "code", None)),
+                                             ("type", getattr(exc, "error_type", None))) if v]
+            erro = " ".join([type(exc).__name__, *enums])
+        logger.error("Falha ao enviar e-mail para <%s>: %s", to_log, erro)
+        _log_email_event("error", "email_failed", f"Falha ao enviar para {to_log}: {erro}", to=to_log, subject=subject, error=erro)
         return False
 
 
@@ -981,6 +1014,9 @@ def send_account_deletion_completed_email(to: str) -> bool:
         subject="Conta excluída — PigBank",
         html_body=html,
         text_body=text,
+        # Este e-mail sai DEPOIS do commit da exclusão: o endereço já não tem
+        # dono no banco e o log dele não é levado por cascata nenhuma.
+        log_recipient=False,
     )
 
 
