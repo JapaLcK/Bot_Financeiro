@@ -150,23 +150,54 @@ def _corrige(cur, user_id, link, t) -> int:
         cur.execute("update accounts set balance = balance + %s where user_id=%s", (novo - row["velho"], user_id))
     cur.execute("update of_cash_links set amount=%s, tx_date=%s, updated_at=now() where id=%s and user_id=%s",
                 (v, t["transaction_date"], link["id"], user_id))
+    link.update(amount=v, tx_date=t["transaction_date"])
     return 1
 
 
-def _revisa(cur, user_id, link, t, kind) -> int:
-    """Transação que já tem vínculo pela chave: religa, corrige ou estorna."""
+def casa_manual(cur, user_id, manual_id, valor, dia) -> bool:
+    """O manual ainda casa com o banco? Mesma tolerância do casamento
+    (`pick_reconciliation_match`: valor e ±dias). Manual apagado não casa."""
+    from .open_finance import pick_reconciliation_match
+    cur.execute("select id, valor, coalesce(posted_at, criado_em::date) as ref_date from launches "
+                "where id=%s and user_id=%s", (manual_id, user_id))
+    row = cur.fetchone()
+    return bool(row) and pick_reconciliation_match(valor, dia, "", [dict(row)])["launch_id"] is not None
+
+
+def _descasa(cur, user_id, link, corrigiu) -> bool:
+    """Casamento com o manual que deixou de casar (o banco corrigiu, ou o manual
+    mudou/sumiu): desfaz — senão o "é o mesmo" some com a diferença. A pergunta
+    é revalidada toda rodada; o 'ativo' manual já respondido, só quando o banco
+    corrige (editar o manual depois do "é o mesmo" é escolha do usuário)."""
+    if link["status"] == "perguntar_manual":
+        manual = link["manual_launch_id"]
+    elif corrigiu and link["status"] == "ativo" and link["origem"] == "manual" and link["launch_id"]:
+        manual = link["launch_id"]
+    else:
+        return False
+    if casa_manual(cur, user_id, manual, link["amount"], link["tx_date"]):
+        return False
+    if link["status"] == "ativo":
+        _muda_status(cur, user_id, link, "desfeito")  # devolve o manual a lançamento comum
+    return True
+
+
+def _revisa(cur, user_id, link, t, kind) -> tuple[int, bool]:
+    """Transação que já tem vínculo: religa, corrige ou estorna. Devolve
+    (mudou, reavaliar) — reavaliar = o casamento com o manual se desfez."""
     if link["of_transaction_id"] is None:  # reconexão: mesma transação, espelho novo
         link["of_transaction_id"] = t["id"]
         cur.execute("update of_cash_links set of_transaction_id=%s, updated_at=now() where id=%s "
                     "and user_id=%s", (t["id"], link["id"], user_id))
     elif link["of_transaction_id"] != t["id"]:
-        return 0  # a mesma transação vista por outra conexão viva
+        return 0, False  # a mesma transação vista por outra conexão viva
     if link["status"] not in INTERNOS:
-        return 0
+        return 0, False
     if kind != link["kind"]:
         _muda_status(cur, user_id, link, "estornado")
-        return 1
-    return _corrige(cur, user_id, link, t)
+        return 1, False
+    corrigiu = _corrige(cur, user_id, link, t)
+    return corrigiu, _descasa(cur, user_id, link, corrigiu)
 
 
 def _candidato_manual(cur, user_id, links, kind, t) -> int | None:
@@ -198,6 +229,7 @@ def reconcile_cash_transfers(cur, user_id) -> int:
     txs = [dict(r) for r in cur.fetchall()]
     cur.execute("select * from of_cash_links where user_id=%s for update", (user_id,))
     links = {r["tx_key"]: dict(r) for r in cur.fetchall()}
+    por_tx = {k["of_transaction_id"]: k for k in links.values() if k["of_transaction_id"]}
     cur.execute("select * from of_cash_coverage where user_id=%s", (user_id,))
     primeira, janelas = {}, []
     for c in cur.fetchall():
@@ -210,16 +242,8 @@ def reconcile_cash_transfers(cur, user_id) -> int:
         lo, hi = vivas.get((k, t["connection_id"]), (t["transaction_date"],) * 2)
         vivas[(k, t["connection_id"])] = (min(lo, t["transaction_date"]), max(hi, t["transaction_date"]))
     janelas += [(k, cid, lo, hi) for (k, cid), (lo, hi) in vivas.items()]
-    mudou = 0
-    for t in txs:
-        kind = (None if t["reconciliation_status"] == "bank_movement_confirmed"
-                else cash_kind(t["account_type"], t["amount"], t["raw"], t["description"]))
-        chave, duravel = tx_key(t["akey"], t["raw"], t["provider_transaction_id"])
-        if chave in links:
-            mudou += _revisa(cur, user_id, links[chave], t, kind)
-            continue
-        if kind is None:
-            continue
+
+    def decide(t, kind, duravel):
         dia, manual = t["transaction_date"], None
         corte = max(ativacao, primeira[t["akey"]]).astimezone(_tz()).date()
         if dia < corte:
@@ -233,6 +257,37 @@ def reconcile_cash_transfers(cur, user_id) -> int:
             status = "perguntar_fraco"
         else:
             status = "ativo"
+        return status, manual
+
+    mudou = 0
+    for t in txs:
+        kind = (None if t["reconciliation_status"] == "bank_movement_confirmed"
+                else cash_kind(t["account_type"], t["amount"], t["raw"], t["description"]))
+        chave, duravel = tx_key(t["akey"], t["raw"], t["provider_transaction_id"])
+        # Pela transação local primeiro: nome da instituição e número da conta mudam
+        # na conexão viva (upsert do item) e, pela chave só, virariam crédito em dobro.
+        if link := por_tx.get(t["id"]) or links.get(chave):
+            if link["tx_key"] != chave and chave not in links:  # a chave segue o banco (religa ao reconectar)
+                cur.execute("update of_cash_links set tx_key=%s, account_key=%s, key_durable=%s, "
+                            "updated_at=now() where id=%s and user_id=%s",
+                            (chave, t["akey"], duravel, link["id"], user_id))
+                links[chave] = links.pop(link["tx_key"])
+                link.update(tx_key=chave, account_key=t["akey"], key_durable=duravel)
+            n, reavaliar = _revisa(cur, user_id, link, t, kind)
+            mudou += n
+            if reavaliar:  # o manual não casa mais: a transação passa pela decisão de novo
+                status, manual = decide(t, kind, link["key_durable"])
+                cur.execute("update of_cash_links set status=%s, origem='auto', manual_launch_id=%s, "
+                            "updated_at=now() where id=%s and user_id=%s", (status, manual, link["id"], user_id))
+                link.update(status=status, origem="auto", manual_launch_id=manual)
+                if status == "ativo":
+                    link["launch_id"] = _credita(cur, user_id, link, t["transacted_at"])
+                mudou += 1
+            continue
+        if kind is None:
+            continue
+        status, manual = decide(t, kind, duravel)
+        dia = t["transaction_date"]
         cur.execute("""insert into of_cash_links(user_id, tx_key, key_durable, account_key, kind,
                          status, manual_launch_id, of_transaction_id, amount, tx_date)
                        values (%s,%s,%s,%s,%s,%s,%s,%s,%s,%s)

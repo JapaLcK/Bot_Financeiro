@@ -2,7 +2,7 @@
 desfazer, responder pergunta, listar pendências. Cada uma trava `accounts` antes
 (`_lock_user`), na mesma ordem do reconciliador."""
 from .connection import get_conn
-from .open_finance_cash import PERGUNTAS, RESPOSTAS, _credita, _muda_status
+from .open_finance_cash import PERGUNTAS, RESPOSTAS, _credita, _muda_status, casa_manual
 
 
 def _link_travado(cur, user_id, link_id) -> dict:
@@ -36,9 +36,13 @@ def answer_link(user_id, link_id, resposta) -> dict:
         if result["changed"] and resposta == "seen":
             cur.execute("update of_cash_links set seen_at=now() where id=%s and user_id=%s", (link_id, user_id))
         elif result["changed"] and resposta == "same":
-            cur.execute("update launches set is_internal_movement=true where id=%s and user_id=%s "
-                        "and not is_internal_movement", (link["manual_launch_id"], user_id))
-            if cur.rowcount != 1:
+            # Revalida na hora: o manual editado depois da pergunta não casa mais, e
+            # "é o mesmo" sumiria com a diferença. Fica pendente; o sync reavalia.
+            casa = casa_manual(cur, user_id, link["manual_launch_id"], link["amount"], link["tx_date"])
+            if casa:
+                cur.execute("update launches set is_internal_movement=true where id=%s and user_id=%s "
+                            "and not is_internal_movement", (link["manual_launch_id"], user_id))
+            if not casa or cur.rowcount != 1:
                 result = {"ok": False, "changed": False, "reason": "MANUAL_NOT_AVAILABLE"}
             else:
                 cur.execute("update of_cash_links set status='ativo', origem='manual', launch_id=%s, "
