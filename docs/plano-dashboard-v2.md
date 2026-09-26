@@ -129,9 +129,11 @@ Decidido pelo dono na mesma data (Q37–Q41):
     importação incompleta, nada parecido), a linha continua contando. O casamento guarda a
     identidade da transação do banco estável na reconexão (a mesma do saque), e segue a
     vida dela: se a transação some porque o banco foi desconectado (o desconectar desfaz o
-    lançamento importado e apaga a transação), a linha antiga **volta** aos relatórios,
-    para o fato não sumir; se o banco a traz de novo com a mesma identidade, a linha antiga
-    sai de novo, sem contar duas vezes. Sair dos
+    lançamento importado e apaga a transação) **ou porque o banco a apagou** com a conexão
+    ativa (o caminho `transactions/deleted`, que também desfaz o lançamento importado), a
+    linha antiga **volta** aos relatórios, para o fato não sumir; se o banco a traz de novo
+    com a mesma identidade, ou manda uma substituta que o usuário casa, a linha antiga sai
+    de novo, sem contar duas vezes. Sair dos
     relatórios não apaga a linha. Até ele revisar, eles aparecem com a marca "lançado
     automaticamente, a conferir" e ficam fora dos totais. A confirmação vale enquanto a
     carteira só receber dinheiro vivo, e isso se garante pela classe, não por lista de
@@ -139,7 +141,11 @@ Decidido pelo dono na mesma data (Q37–Q41):
     escrita de dinheiro vivo confiável derruba a confirmação**. Confiáveis são só duas: o
     lançamento em dinheiro do v2, a transferência automática entre banco e carteira da
     Q41 (com as correções que o banco fizer nela) e o depositar e retirar entre carteira e
-    caixinha manual do v2 (Q38) — todas dinheiro vivo mudando de lugar ou entrando. As
+    caixinha manual do v2 (Q38) — todas dinheiro vivo mudando de lugar ou entrando. Mas
+    retirar da caixinha manual hoje credita também o rendimento simulado
+    (`pocket_withdraw_to_account` soma o ganho no que volta para a carteira): enquanto a
+    Q43 não for decidida, só o principal conta como escrita confiável, e a retirada que
+    trouxer ganho simulado derruba a confirmação. As
     outras derrubam: lançar ou apagar no painel antigo,
     ajuste de saldo, importar extrato OFX (`import_ofx_launches_bulk`), desfazer
     (`delete_launch_and_rollback`) e qualquer caminho futuro. A regra mora na camada `db/`,
@@ -165,7 +171,10 @@ Decidido pelo dono na mesma data (Q37–Q41):
   confirmada seguida de um saque sincronizado e de depositar e retirar numa caixinha manual
   (a confirmação continua); caixinha manual e a mesma caixinha vinda do banco (incerta até
   responder, depois uma vez só); caixinha manual com rendimento simulado (a foto conta só o
-  principal).
+  principal); retirar de caixinha manual com rendimento simulado e tirar a foto (a
+  confirmação cai); recorrente antiga casada cuja transação o banco apaga com a conexão
+  ativa (a linha antiga volta); conta corrigida de BRL para moeda desconhecida e de volta
+  (a linha quebra nas duas, sem perda nem ganho falsos).
 - **Q38 — a caixinha manual continua**, como exceção à Q36: ela é dinheiro separado pelo
   próprio usuário, e depositar e retirar nela segue existindo no v2. A caixinha espelhada
   do banco continua vindo do Open Finance. Consequências:
@@ -444,10 +453,12 @@ tecnologia, podendo refazer o que for preciso, com calma (Q5).
   - **o conjunto de bancos muda, a linha quebra:** conectar, desconectar ou pausar um banco
     muda o que entra na soma, e o gráfico mostraria um salto que não é ganho nem perda.
     Desconectar apaga a conexão (`disconnect_open_finance_connection`), então no dia
-    seguinte não sobra conexão para conferir. Por isso cada foto guarda **quais conexões
-    entraram nela**, e o gráfico quebra a linha (com a legenda "banco conectado" ou
-    "desconectado") quando esse conjunto muda de um ponto para o outro, em vez de ligar os
-    dois pontos como se fosse variação. O mesmo vale para **todo número derivado da série**
+    seguinte não sobra conexão para conferir. Por isso cada foto guarda **a sua
+    cobertura**: quais conexões e quais contas entraram nela, e quais itens ficaram fora por
+    moeda. O gráfico quebra a linha (com a legenda do que mudou: "banco conectado",
+    "desconectado", "conta em outra moeda") quando a cobertura muda de um ponto para o
+    outro, em vez de ligar os dois pontos como se fosse variação — corrigir a moeda de uma
+    conta de BRL para desconhecida tiraria o saldo dela, e isso não é perda. O mesmo vale para **todo número derivado da série**
     (a variação no título do bloco, o texto acessível do período — hoje
     `widgets/NetWorth.tsx` faz `último − primeiro` sem olhar nada): ele só é calculado
     dentro do trecho sem quebra, e o bloco diz que o banco X entrou ou saiu no período.
