@@ -118,12 +118,17 @@ _PERGUNTA_ENCERRADA = (
 )
 
 
-# O turno do `handle_incoming` foi entregue à IA — resposta, ERROR_MSG ou
-# exceção. Marcado onde o agente é chamado; sem a marca, o `finally` encerra a
-# pergunta. O histórico não serve de prova: o runner devolve ERROR_MSG sem
-# gravar nada (sem chave, cliente que não sobe) e aí a nova tentativa da
-# resposta ("300 reais transporte") cairia no route() como despesa.
-turno_foi_para_a_ia: ContextVar[bool] = ContextVar("turno_foi_para_a_ia", default=False)
+# O que o turno do `handle_incoming` faz com a pergunta aberta da IA:
+#   None    — leu a mensagem e a atendeu fora da IA: o `finally` encerra.
+#   MANTEM  — foi para a IA (resposta ou ERROR_MSG), não leu a mensagem (áudio
+#             antes de virar texto, texto vazio) ou falhou: a pergunta segue.
+#             O histórico não prova a ida à IA: o runner devolve ERROR_MSG sem
+#             gravar nada, e a nova tentativa ("300 reais transporte") cairia
+#             no route() como despesa.
+#   ENCERRA — largou a `ai_pending` com um comando claro: sem captura (o
+#             comando vai ao route()), e o `finally` encerra.
+MANTEM, ENCERRA = "mantem", "encerra"
+pergunta_no_turno: ContextVar[str | None] = ContextVar("pergunta_no_turno", default=None)
 
 
 def encerra_pergunta_da_ia(user_id: int, ultima_id: int) -> None:
@@ -193,6 +198,7 @@ def handle_ai_chat_command(user_id: int, text: str, platform: str) -> str | None
                     and _res.confidence >= 0.55):
                 # Abandono: se perdeu o CAS, não havia nada nosso pra abandonar.
                 db.ai_consume_pending_action(user_id, pending)
+                pergunta_no_turno.set(ENCERRA)
                 return None
         except Exception as exc:
             logger.warning("guard anti-sequestro do ai_pending falhou: %s", exc)
@@ -260,7 +266,7 @@ def handle_ai_chat_command(user_id: int, text: str, platform: str) -> str | None
         )
 
     # 4. Tem acesso: roteia pra IA (cota do tier).
-    turno_foi_para_a_ia.set(True)
+    pergunta_no_turno.set(MANTEM)
     from core.services.ai_chat import chat as ai_chat_run
     try:
         return ai_chat_run(

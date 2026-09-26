@@ -16,6 +16,7 @@ from db.connection import get_conn
 from core.intent_router import INVESTMENT_ACTION_REFUSAL_MSG, NOT_UNDERSTOOD_MSG
 from core.types import IncomingMessage
 from _pendencia_credito_helpers import arma_installment, diga, novo_uid
+from core.services.ai_chat_commands import pergunta_aberta_da_ia
 
 OFERTA = ("🐷 Eu entendo, às vezes os gastos podem surpreender. Quer que eu "
           "mostre suas maiores despesas ou top categorias do mês?")
@@ -373,15 +374,22 @@ def _pendencias_quebram_uma_vez(monkeypatch):
     return falhou
 
 
+ERRO_INTERNO = "Ocorreu um erro interno"
+
+
 def test_consulta_de_pendencia_falha_com_pergunta_aberta_nao_grava(monkeypatch):
-    from core.services.ai_chat.runner import ERROR_MSG
     uid, chamadas = _com_ia(monkeypatch)
     _ia_disse(uid, ORCAMENTO)
     falhou = _pendencias_quebram_uma_vez(monkeypatch)
 
-    assert diga(uid, "300 reais transporte") == ERROR_MSG
+    assert ERRO_INTERNO in diga(uid, "300 reais transporte")
     assert falhou == [uid]
     assert chamadas == []
+    assert _lancamentos(uid) == 0
+
+    # A pergunta continuou aberta: a repetição vai à IA.
+    assert diga(uid, "300 reais transporte") == "resposta do agente"
+    assert chamadas == ["300 reais transporte"]
     assert _lancamentos(uid) == 0
 
 
@@ -422,16 +430,15 @@ def test_audio_sem_pergunta_ou_com_pendencia_segue_o_route(monkeypatch):
     arma_installment(uid2)
     assert "parcelamento registrado" in _audio(monkeypatch, uid2, "comprei uma tv").lower()
     assert chamadas == []
+    assert pergunta_aberta_da_ia(uid2) is None  # áudio roteado encerra
 
 
 def test_audio_consulta_de_pendencia_falha_com_pergunta_aberta_nao_grava(monkeypatch):
-    from core.services.ai_chat.runner import ERROR_MSG
     uid, chamadas = _com_ia(monkeypatch)
     _ia_disse(uid, ORCAMENTO)
     falhou = _pendencias_quebram_uma_vez(monkeypatch)
 
-    r = _audio(monkeypatch, uid, "300 reais transporte")
-    assert 'Entendi: "300 reais transporte"' in r and ERROR_MSG in r
+    assert ERRO_INTERNO in _audio(monkeypatch, uid, "300 reais transporte")
     assert falhou == [uid]
     assert chamadas == []
     assert _lancamentos(uid) == 0
@@ -560,6 +567,107 @@ def test_janela_conta_da_pergunta_e_nao_da_falha(monkeypatch):
     db.ai_append_message(uid, "user", "300 reais transporte")
     db.ai_append_message(uid, "assistant", ERROR_MSG)
 
+    diga(uid, "300 reais transporte")
+    assert chamadas == []
+    assert _lancamentos(uid) == 1
+
+
+# ---------------------------------------------------------------------------
+# A pergunta só fecha quando o turno LEU a mensagem e a atendeu fora da IA.
+# ---------------------------------------------------------------------------
+
+def _transcricao_que_levanta(data, fn):
+    raise RuntimeError("whisper caiu")
+
+
+@pytest.mark.parametrize("caso", ["sem_dados", "transcricao_vazia", "transcricao_levanta"])
+def test_audio_nao_lido_nao_encerra_a_pergunta(monkeypatch, caso):
+    uid, chamadas = _com_ia(monkeypatch)
+    _ia_disse(uid, ORCAMENTO)
+
+    if caso == "sem_dados":
+        _envia(uid, _Anexo("audio.ogg", "audio/ogg"))
+    elif caso == "transcricao_vazia":
+        _audio(monkeypatch, uid, None)
+    else:
+        monkeypatch.setattr(hi, "transcribe_audio", _transcricao_que_levanta)
+        assert ERRO_INTERNO in _envia(uid, _Anexo("audio.ogg", "audio/ogg", b"x"))
+
+    assert diga(uid, "300 reais transporte") == "resposta do agente"
+    assert chamadas == ["300 reais transporte"]
+    assert _lancamentos(uid) == 0
+
+
+def test_excecao_no_turno_nao_encerra_a_pergunta(monkeypatch):
+    uid, chamadas = _com_ia(monkeypatch)
+    _ia_disse(uid, ORCAMENTO)
+    real, falhou = hi.classify, []
+
+    def _classify(*a, **k):
+        if not falhou:
+            falhou.append(1)
+            raise RuntimeError("classifier caiu")
+        return real(*a, **k)
+    monkeypatch.setattr(hi, "classify", _classify)
+
+    assert ERRO_INTERNO in diga(uid, "300 reais transporte")
+    assert diga(uid, "300 reais transporte") == "resposta do agente"
+    assert chamadas == ["300 reais transporte"]
+    assert _lancamentos(uid) == 0
+
+
+def test_anexo_sem_texto_nao_encerra_a_pergunta(monkeypatch):
+    uid, chamadas = _com_ia(monkeypatch)
+    _ia_disse(uid, ORCAMENTO)
+
+    assert _envia(uid, _Anexo("contato.vcf", "text/vcard", b"x")) == ""
+    assert diga(uid, "300 reais transporte") == "resposta do agente"
+    assert _lancamentos(uid) == 0
+
+
+def _arma_ai_pending(monkeypatch):
+    uid, chamadas = _com_ia(monkeypatch)
+    monkeypatch.setattr("core.services.ai_chat_commands.ai_chat_allowed", lambda _uid: True)
+    db.ai_set_pending_action(uid, "delete_launch", {"launch_id": 5}, "apagar #5")
+    _ia_disse(uid, "Posso apagar o lançamento #5?")
+    return uid, chamadas
+
+
+@pytest.mark.parametrize("comando", ["saldo", "Apagar id 5"])
+def test_comando_que_larga_a_ai_pending_vai_ao_route(monkeypatch, comando):
+    uid, chamadas = _arma_ai_pending(monkeypatch)
+
+    diga(uid, comando)
+    assert chamadas == []
+    assert db.ai_get_pending_action(uid) is None
+    assert pergunta_aberta_da_ia(uid) is None
+
+    diga(uid, "300 reais transporte")
+    assert _lancamentos(uid) == 1
+
+
+def test_larga_a_ai_pending_com_consulta_de_pendencia_falhando(monkeypatch):
+    uid, chamadas = _arma_ai_pending(monkeypatch)
+    falhou = _pendencias_quebram_uma_vez(monkeypatch)
+
+    assert ERRO_INTERNO not in diga(uid, "saldo")
+    assert falhou == [uid]
+    assert chamadas == []
+
+
+def test_sim_com_ai_pending_e_pergunta_vai_para_a_ia(monkeypatch):
+    uid, chamadas = _arma_ai_pending(monkeypatch)
+
+    assert diga(uid, "sim") == "resposta do agente"
+    assert chamadas == ["sim"]
+
+
+def test_audio_nao_lido_nao_vaza_para_o_turno_seguinte(monkeypatch):
+    uid, chamadas = _com_ia(monkeypatch)
+    _ia_disse(uid, ORCAMENTO)
+
+    _envia(uid, _Anexo("audio.ogg", "audio/ogg"))
+    assert "Open Finance" in diga(uid, "conectar banco")
     diga(uid, "300 reais transporte")
     assert chamadas == []
     assert _lancamentos(uid) == 1

@@ -32,7 +32,7 @@ from core.services.media_service import (
 )
 from core.observability import log_system_event_sync
 from core.services.plan_limits import PlanLimitExceeded
-from core.services.ai_chat_commands import turno_foi_para_a_ia
+from core.services.ai_chat_commands import MANTEM, ENCERRA, pergunta_no_turno
 from utils_text import fmt_brl
 from ai_router import _internal_user_id
 
@@ -161,12 +161,12 @@ def _resposta_da_ia(uid: int, text: str, platform: str, rotulo: str,
             ai_reply = ai_chat_run(
                 uid, text, monthly_limit=ai_monthly_limit_for(uid), platform=platform,
             )
-            turno_foi_para_a_ia.set(True)
+            pergunta_no_turno.set(MANTEM)
             return format_for_platform(ai_reply, platform)
     except Exception as exc:
         logger.warning("%s falhou pra user %s: %s", rotulo, uid, exc)
         if erro_se_falhar:
-            turno_foi_para_a_ia.set(True)
+            pergunta_no_turno.set(MANTEM)
             from core.services.ai_chat.runner import ERROR_MSG
             return format_for_platform(ERROR_MSG, platform)
     return None
@@ -199,6 +199,8 @@ def _handle_audio(msg: IncomingMessage, platform: str,
     ]
     if not audio_atts:
         return None
+    # Até a transcrição virar texto, a mensagem não foi lida.
+    pergunta_no_turno.set(MANTEM)
 
     a = audio_atts[0]
     data = getattr(a, "data", None)
@@ -244,21 +246,15 @@ def _handle_audio(msg: IncomingMessage, platform: str,
 
     # Mesma regra do texto (5b do `handle_incoming`): pergunta da IA em aberto
     # e nenhuma pendência → a transcrição inteira responde à IA. Se a consulta
-    # da pendência falha, falha fechado como no texto: sem route().
-    if pergunta_ia is not None:
-        try:
-            sem_pendencia = db.get_pending_action(uid) is None
-        except Exception as exc:
-            logger.warning("pendência do áudio falhou pra user %s: %s", uid, exc)
-            turno_foi_para_a_ia.set(True)
-            from core.services.ai_chat.runner import ERROR_MSG
-            return [OutgoingMessage(text=preview + format_for_platform(ERROR_MSG, platform))]
-    if pergunta_ia is not None and sem_pendencia:
+    # da pendência falha, a exceção sobe ao except do `handle_incoming`, que
+    # mantém a pergunta: sem route().
+    if pergunta_ia is not None and db.get_pending_action(uid) is None:
         ai_reply = _resposta_da_ia(uid, transcription, platform, "áudio→IA",
                                    erro_se_falhar=True)
         if ai_reply is not None:
             return [OutgoingMessage(text=preview + ai_reply)]
 
+    pergunta_no_turno.set(None)  # roteado: atendido fora da IA
     # Detecta múltiplos lançamentos no mesmo áudio
     parts = _split_audio_transactions(transcription)
     is_multi = len(parts) > 1
@@ -765,11 +761,12 @@ def handle_incoming(msg: IncomingMessage, *,
     # Pergunta que a IA deixou em aberto antes deste turno. Sem pendência, a
     # resposta a ela (texto ou áudio) vai para a IA (5b e `_handle_audio`) —
     # "300 reais transporte" é o orçamento que ela pediu, não uma despesa.
-    # Qualquer turno que não for para a IA a encerra (`finally`).
+    # O `finally` a encerra quando o turno leu e atendeu a mensagem fora da IA
+    # (`pergunta_no_turno`).
     from core.services.ai_chat_commands import (
         encerra_pergunta_da_ia, pergunta_aberta_da_ia,
     )
-    marca_da_ia = turno_foi_para_a_ia.set(False)
+    marca = pergunta_no_turno.set(None)
     pergunta_uid = pergunta_ia = None
     try:
         pergunta_uid = _normalize_user_id(msg)
@@ -909,6 +906,7 @@ def handle_incoming(msg: IncomingMessage, *,
         # ------------------------------------------------------------------
         text = (msg.text or "").strip()
         if not text:
+            pergunta_no_turno.set(MANTEM)
             return []
 
         if platform == "whatsapp":
@@ -960,19 +958,19 @@ def handle_incoming(msg: IncomingMessage, *,
         # orçamento pedido (que o route() gravaria como despesa). Com pendência,
         # o route() decide; botão interativo não é capturado aqui.
         responde_a_ia = False
+        capturavel = (pergunta_ia is not None and not de_botao
+                      and pergunta_no_turno.get() != ENCERRA)
         try:
             _pend = db.get_pending_action(uid)
             if _pend and suprime_fallback_de_ia(_pend.get("action_type")):
                 has_resumable_pending = True
-            responde_a_ia = pergunta_ia is not None and _pend is None and not de_botao
+            responde_a_ia = capturavel and _pend is None
         except Exception:
-            has_resumable_pending = False
             # Com a pergunta aberta, não dá para saber se o texto responde à IA:
-            # falha fechado, sem route() (que poderia gravar).
-            if pergunta_ia is not None and not de_botao:
-                turno_foi_para_a_ia.set(True)
-                from core.services.ai_chat.runner import ERROR_MSG
-                return [OutgoingMessage(text=format_for_platform(ERROR_MSG, platform))]
+            # sobe ao except geral, que mantém a pergunta, sem route().
+            if capturavel:
+                raise
+            has_resumable_pending = False
 
         should_try_ai_fallback = (
             not has_resumable_pending
@@ -1033,6 +1031,7 @@ def handle_incoming(msg: IncomingMessage, *,
         return [OutgoingMessage(text=format_for_platform(exc.message, msg.platform))]
 
     except Exception as exc:
+        pergunta_no_turno.set(MANTEM)
         tb = traceback.format_exc()
         logger.error(
             "handle_incoming FAILED platform=%s user_id=%s text=%r error=%s",
@@ -1069,6 +1068,6 @@ def handle_incoming(msg: IncomingMessage, *,
         )]
 
     finally:
-        if pergunta_ia is not None and not turno_foi_para_a_ia.get():
+        if pergunta_ia is not None and pergunta_no_turno.get() != MANTEM:
             encerra_pergunta_da_ia(pergunta_uid, pergunta_ia)
-        turno_foi_para_a_ia.reset(marca_da_ia)
+        pergunta_no_turno.reset(marca)
