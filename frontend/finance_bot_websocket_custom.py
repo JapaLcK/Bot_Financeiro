@@ -8710,6 +8710,11 @@ async def create_investment_route(request: Request, user_id: int, payload: Inves
                                              acao="aporte inicial", plain=True)
                    if str(exc) == "INSUFFICIENT_ACCOUNT" else str(exc))
         raise HTTPException(status_code=400, detail=message) from exc
+    if launch_id is None:
+        # Já existe (#596: também com outra maiúscula). O 200 `created:false`
+        # descartava o aporte inicial em silêncio e a tela dizia "criado".
+        raise HTTPException(status_code=400, detail=(
+            "Já existe um investimento com esse nome. Para colocar dinheiro nele, use Aportar."))
 
     _invalidate_dashboard_current_cache(user_id)
     return {

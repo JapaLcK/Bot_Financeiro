@@ -237,13 +237,18 @@ def test_painel_criar_caixinha_com_outra_caixa_devolve_a_existente(user_id):
     assert [p["name"] for p in db.list_pockets(user_id, accrue=False)] == ["Viagem"]
 
 
-def test_painel_criar_investimento_com_outra_caixa_devolve_o_existente(user_id):
-    """Já existe = 200 com `created: false` e o nome canônico."""
-    body = {"name": "CDB", "rate": 0.10, "period": "yearly"}
+@pytest.mark.parametrize("repetido", ["CDB", "cdb"])
+def test_painel_criar_investimento_que_ja_existe_recusa_sem_mexer_em_nada(user_id, repetido):
+    """Já existe (exato ou com outra caixa) = 400 e nada muda. O 200 `created:false`
+    descartava o aporte inicial em silêncio e a tela dizia "✓ Investimento criado"."""
+    db.add_launch_and_update_balance(user_id, "receita", 1000, None, "seed")
+    body = {"name": "CDB", "rate": 0.10, "period": "yearly", "initial_amount": 100}
     r1 = _post(user_id, f"/investments/{user_id}", body)
     assert r1.status_code == 200 and r1.json()["created"] is True, r1.text
-    r2 = _post(user_id, f"/investments/{user_id}", body | {"name": "cdb"})
-    assert r2.status_code == 200, r2.text
-    assert (r2.json()["created"], r2.json()["investment"]["id"], r2.json()["investment"]["name"]) == (
-        False, r1.json()["investment"]["id"], "CDB")
-    assert [i[1] for i in _invs(user_id)] == ["CDB"]
+    antes = _estado(user_id)
+    assert antes[0] == Decimal("900") and antes[2] == [("CDB", Decimal("100"))], antes
+
+    r2 = _post(user_id, f"/investments/{user_id}", body | {"name": repetido, "initial_amount": 200})
+    assert (r2.status_code, r2.json().get("detail")) == (
+        400, "Já existe um investimento com esse nome. Para colocar dinheiro nele, use Aportar."), r2.text
+    assert _estado(user_id) == antes
