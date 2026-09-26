@@ -183,7 +183,9 @@ PR de cada etapa, não soluções prontas. Cada PR confere se ainda valem, decid
 - Quando o dado do Open Finance conta como desatualizado (limite por produto) e como a
   tela aberta percebe isso sem escrita.
 - Rentabilidade do Open Finance: medir na API real o que o Pluggy manda (mês de
-  referência, datas da posição) antes de decidir o que comparar.
+  referência, datas da posição, e se a taxa do banco já desconta aporte e resgate no
+  período) antes de decidir o que comparar. A comparação usa a taxa que o banco calcula,
+  nunca a diferença entre fotos do rendimento acumulado.
 
 **Etapas de tela (1 a 6)**
 - Etapa 2: identidade das transações importadas por conta (conta e cartão); editar a data
