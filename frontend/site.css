@@ -232,7 +232,7 @@ img { max-width: 100%; display: block; }
 .tick { width: 24px; height: 24px; border-radius: 7px; background: rgba(198,241,26,.12); border: 1px solid rgba(198,241,26,.3); color: var(--neon); display: flex; align-items: center; justify-content: center; font-size: .78rem; font-weight: 800; flex-shrink: 0; }
 .tech-visual { display: flex; justify-content: center; }
 
-/* Vocabulário real da Piggy — substitui o cubo "AI". Mono porque é o texto que
+/* Vocabulário real do Piggy — substitui o cubo "AI". Mono porque é o texto que
    a pessoa DIGITA, não prosa de marketing; é o mesmo tratamento que /comandos
    já dá aos exemplos, e ali funciona. */
 .phrasebook { display: flex; flex-wrap: wrap; gap: 10px; align-content: center; max-width: 460px; }
@@ -445,7 +445,7 @@ a.article:hover .article-source-cta { text-decoration: underline; }
 .guide-back { display: inline-block; color: var(--ink-3); font-size: .84rem; font-weight: 600; margin-bottom: 8px; }
 .guide-back:hover { color: var(--ink); }
 
-/* Hero: sticker da Piggy num disco gradiente + título centralizado */
+/* Hero: sticker do Piggy num disco gradiente + título centralizado */
 .guide-hero { text-align: center; padding: 12px 0 34px; margin-bottom: 30px; border-bottom: 1px solid var(--line); }
 .guide-sticker-wrap { width: 168px; height: 168px; margin: 6px auto 20px; border-radius: 50%;
   display: flex; align-items: center; justify-content: center;
@@ -471,13 +471,13 @@ a.article:hover .article-source-cta { text-decoration: underline; }
 .guide-prose em { font-style: italic; }
 .more-guides { border-top: 1px solid var(--line); margin-top: 52px; padding-top: 12px; }
 
-/* Thumb dos cards de guia = sticker da Piggy sobre o gradiente do card */
+/* Thumb dos cards de guia = sticker do Piggy sobre o gradiente do card */
 .article-thumb-sticker { display: flex; align-items: center; justify-content: center; }
 .card-sticker { width: 104px; height: 104px; object-fit: contain; filter: drop-shadow(0 8px 18px rgba(0,0,0,.45)); transition: transform .2s ease; }
 a.article:hover .card-sticker { transform: scale(1.07) rotate(-3deg); }
 
 /* ── Blocos ricos embutidos no corpo dos guias (.guide-prose) ─────────────── */
-/* 1 — Callout "Dica da Piggy" */
+/* 1 — Callout "Dica do Piggy" */
 .guide-prose .g-callout { display: flex; gap: 15px; background: var(--pink-soft); border: 1px solid rgba(255,45,142,.28); border-left: 3px solid var(--pink); border-radius: 14px; padding: 17px 19px; margin: 26px 0; }
 .g-callout-ico { font-size: 1.6rem; line-height: 1; flex: none; margin-top: 2px; }
 .g-callout-k { display: block; color: var(--pink); font-weight: 800; font-size: .7rem; letter-spacing: .08em; text-transform: uppercase; margin-bottom: 5px; }

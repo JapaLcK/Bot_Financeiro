@@ -224,7 +224,7 @@ def send_trial_downsell_email(to: str, dashboard_url: str = "") -> bool:
         <li><strong>Essencial — R$ 9,90/mês</strong>: banco reconectado, lançamentos
         ilimitados com áudio e foto, boletos com lembrete.</li>
         <li><strong>Plus — R$ 19,90/mês</strong>: tudo que você usou no teste —
-        2 bancos, os 3 agentes e a Piggy sem limites.</li>
+        2 bancos, os 3 agentes e o Piggy sem limites.</li>
       </ul>
       <p style="text-align:center;margin-top:24px">
         <a class="btn" href="{base}/precos">Escolher meu plano</a>
@@ -233,7 +233,7 @@ def send_trial_downsell_email(to: str, dashboard_url: str = "") -> bool:
     """
     return send_email(
         to,
-        "Seu teste acabou — continue com a Piggy por R$ 9,90 🐷",
+        "Seu teste acabou — continue com o Piggy por R$ 9,90 🐷",
         _base_html("Seu teste do PigBank acabou", content),
     )
 
