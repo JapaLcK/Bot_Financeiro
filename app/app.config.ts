@@ -57,7 +57,7 @@ const config: ExpoConfig = {
     bundleIdentifier: `${ID_BASE}${atual.sufixoId}`,
     supportsTablet: false,
     appleTeamId: "S849YDA49P",
-    buildNumber: "4",
+    buildNumber: "5",
     config: { usesNonExemptEncryption: false },
     // Salvar senha e código no app Senhas: só produção, que é o único id em
     // `/.well-known/apple-app-site-association` (frontend/routes/static_pages.py,
