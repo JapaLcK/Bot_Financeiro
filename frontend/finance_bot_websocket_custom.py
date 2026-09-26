@@ -109,7 +109,9 @@ from db import (
     InvestmentLotHasWithdrawal,
     LaunchUnsafeRollback,
     InvestmentMovementNotLast,
+    PocketHasMovement,
 )
+from db.accounts import MENSAGEM_CAIXINHA_COM_MOVIMENTO
 from db.investment_undo import MENSAGEM_NAO_E_O_ULTIMO
 from core.observability import _log_falha, get_logger
 from core.pg_text import detalhe_seguro, limpa_para_pg, recusa_veneno, tem_veneno
@@ -7298,6 +7300,7 @@ _MSG_DELETE_LAUNCH = {
     ),
     # Antes da mãe: o `next(isinstance)` abaixo percorre na ordem do dict.
     InvestmentMovementNotLast: MENSAGEM_NAO_E_O_ULTIMO,
+    PocketHasMovement: MENSAGEM_CAIXINHA_COM_MOVIMENTO,
     LaunchUnsafeRollback: (
         "Não consigo reverter esse lançamento com segurança, então mantive ele "
         "intacto pra não bagunçar seu saldo."

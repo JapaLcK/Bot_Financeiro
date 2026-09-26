@@ -329,6 +329,8 @@ class LaunchUnsafeRollback(ValueError):
       - `mudou_durante`       — o lançamento mudou entre a leitura e o lock
       - `movimento_posterior` — movimento de investimento que não é o último
                                 (`InvestmentMovementNotLast`)
+      - `caixinha_com_movimento` — desfazer a criação de caixinha com saldo ou
+                                com depósito/saque depois dela (`PocketHasMovement`)
 
     Obrigatório no construtor de propósito: `raise` novo tem de escolher um
     código, em vez de herdar um genérico em silêncio."""
@@ -344,6 +346,20 @@ class InvestmentMovementNotLast(LaunchUnsafeRollback):
 
     def __init__(self, mensagem: str):
         super().__init__(mensagem, "movimento_posterior")
+
+
+MENSAGEM_CAIXINHA_COM_MOVIMENTO = (
+    "Essa caixinha já teve depósito ou saque. Pra removê-la, tira o saldo e "
+    "apaga a caixinha."
+)
+
+
+class PocketHasMovement(LaunchUnsafeRollback):
+    """Desfazer a criação de caixinha que tem saldo ou já teve movimento: o
+    `delete from pockets` levaria saldo e lotes junto (#609)."""
+
+    def __init__(self, mensagem: str = MENSAGEM_CAIXINHA_COM_MOVIMENTO):
+        super().__init__(mensagem, "caixinha_com_movimento")
 
 
 def update_launch_fields(
@@ -2006,6 +2022,24 @@ def delete_launch_and_rollback(user_id: int, launch_id: int, *,
             if create_pocket:
                 nome = create_pocket.get("nome")
                 if nome:
+                    from .pockets import TIPOS_HISTORICO_CAIXINHA
+                    # `for update` antes: depósito/saque travam a caixinha antes
+                    # de gravar lote e launch, então o desfazer serializa com eles.
+                    cur.execute(
+                        "select balance from pockets where user_id=%s and lower(name)=lower(%s) for update",
+                        (user_id, nome),
+                    )
+                    if any(Decimal(str(p["balance"])) != 0 for p in cur.fetchall()):
+                        raise PocketHasMovement()
+                    # Zerada que já teve movimento também recusa (decisão do dono).
+                    # `id > launch_id`: histórico de outra caixinha que teve o nome antes não conta.
+                    cur.execute(
+                        "select 1 from launches where user_id=%s and id>%s "
+                        "and lower(alvo)=lower(%s) and tipo = any(%s) limit 1",
+                        (user_id, launch_id, nome, list(TIPOS_HISTORICO_CAIXINHA)),
+                    )
+                    if cur.fetchone():
+                        raise PocketHasMovement()
                     cur.execute(
                         "delete from pockets where user_id=%s and lower(name)=lower(%s)",
                         (user_id, nome),
