@@ -31,6 +31,7 @@ from .users import (
     ensure_user,
     user_exists,
     merge_users,
+    MergeRefused,
     choose_primary_user,
     user_score,
     get_or_create_canonical_user,
@@ -334,7 +335,6 @@ from .reports import (
     login_auth_user,
     get_auth_user,
     get_password_changed_at,
-    auto_link_auth_user,
     create_dashboard_session,
     consume_dashboard_session,
     update_user_plan,
@@ -456,7 +456,7 @@ __all__ = [
     # schema
     "init_db",
     # users
-    "ensure_user_tx", "ensure_user", "user_exists", "merge_users", "choose_primary_user", "user_score",
+    "ensure_user_tx", "ensure_user", "user_exists", "merge_users", "MergeRefused", "choose_primary_user", "user_score",
     "get_or_create_canonical_user", "create_link_code", "create_platform_onboarding_token",
     "consume_platform_onboarding_token", "consume_link_code", "bind_identity",
     "link_platform_identity",
@@ -556,7 +556,7 @@ __all__ = [
     "mark_daily_report_sent", "claim_daily_report_send", "was_daily_report_sent_today",
     "claim_weekly_report_send", "claim_monthly_report_send",
     "get_last_ofx_import_end_date",
-    "register_auth_user", "login_auth_user", "get_auth_user", "get_password_changed_at", "auto_link_auth_user",
+    "register_auth_user", "login_auth_user", "get_auth_user", "get_password_changed_at",
     "create_dashboard_session", "consume_dashboard_session",
     "update_user_plan", "mark_plan_selected", "get_plan_gate_state",
     "get_user_by_stripe_customer", "set_stripe_customer", "set_payment_status",

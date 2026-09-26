@@ -2,14 +2,18 @@
 db/users.py — Gerenciamento de usuários, identidades e link de contas.
 """
 import hashlib
+import logging
 import secrets
 from datetime import datetime, timedelta, timezone
 
 import bcrypt
+import psycopg
 
 from core.crypto import encrypt_pii_optional, hash_pii_optional
 
 from .connection import get_conn
+
+logger = logging.getLogger(__name__)
 
 
 # ──────────────────────────────────────────────────────────────────────────────
@@ -56,13 +60,89 @@ def user_exists(user_id: int) -> bool:
 # Merge de usuários (vinculação Discord ↔ WhatsApp)
 # ──────────────────────────────────────────────────────────────────────────────
 
+class MergeRefused(Exception):
+    """`merge_users` não junta (#607): dado financeiro dos dois lados, origem
+    presa (Open Finance vivo ou plano pago) ou colisão de unique na junção."""
+
+
+# Onde mora "dado financeiro" para a recusa do `merge_users`. Com linha nestas
+# tabelas dos DOIS lados a junção colide (user_seq, nome de caixinha/investimento,
+# arquivo OFX...) — e o dono decidiu recusar em vez de escolher o que sobra.
+# Recorrentes e contas a pagar entram para não duplicar previsão e lembrete — desde
+# a Q42 o recorrente não lança mais (dono, 2026-09-26);
+# `recurring_charges`/`recurring_income_credits` só existem com o pai.
+_TABELAS_FINANCEIRAS = ("launches", "pockets", "investments", "credit_cards", "ofx_imports",
+                        "recurring_expenses", "recurring_incomes", "bill_instances")
+
+# Na colisão, o destino vence: a linha da origem que repete a chave única de uma
+# linha do destino é apagada antes do update. As colunas repetem a unique/PK real
+# SEM o `user_id`; vazio = a PK é o próprio `user_id` (uma linha por usuário).
+_DESTINO_VENCE = (
+    ("user_category_rules", ("keyword",)),
+    ("pending_actions", ()),
+    ("user_categories", ("name",)),
+    ("category_budgets", ("categoria",)),
+    ("household_budget_config", ("bucket",)),
+    ("household_budget_income", ("month",)),
+    ("daily_report_prefs", ()),
+    ("recurring_suggestion_dismissed", ("merchant_key", "amount")),
+)
+
+
+def _tem_dados_financeiros(cur, user_id: int) -> bool:
+    # `balance <> 0`, não "tem linha": o `ensure_user_tx` cria accounts zerada.
+    cur.execute(
+        "select "
+        + " or ".join(f"exists(select 1 from {t} where user_id = %(u)s)" for t in _TABELAS_FINANCEIRAS)
+        + " or exists(select 1 from accounts where user_id = %(u)s and balance <> 0) as tem",
+        {"u": user_id},
+    )
+    return bool(cur.fetchone()["tem"])
+
+
+def _origem_presa(cur, user_id: int) -> bool:
+    """A conta que some tem Open Finance vivo ou plano pago vigente (dono, P1)?
+
+    "Vivo" é o que o código de OF considera vivo (`_TERMINAL`): PAUSED é trial
+    vencido (o item nem existe mais na Pluggy) e DELETED é removido. Plano pago
+    é a regra de `plan_service` — o trial do Stripe conta (é assinatura
+    `trialing` com `plan` gravado); o trial por telefone (`trial_started_at`) não."""
+    from core.services.plan_service import _tem_plano_pago_vigente  # tardio: importa `db`
+    from .open_finance_state import _TERMINAL
+
+    cur.execute(
+        "select exists(select 1 from open_finance_connections where user_id = %s"
+        f" and upper(coalesce(status, '')) not in {_TERMINAL}) as tem",
+        (user_id,),
+    )
+    if cur.fetchone()["tem"]:
+        return True
+    cur.execute("select plan, plan_expires_at from auth_accounts where user_id = %s", (user_id,))
+    return any(_tem_plano_pago_vigente(r) for r in cur.fetchall())
+
+
 def merge_users(from_user_id: int, to_user_id: int) -> None:
     """
     Move TODOS os dados de from_user_id → to_user_id.
 
-    Antes de mover launches, remove duplicatas que colidem na unique
-    uq_launches_user_source_external (user_id, source, external_id).
+    Recusa (`MergeRefused`, nada escrito) quando os dois lados têm dados
+    financeiros, quando a origem está presa (`_origem_presa`) ou quando a junção
+    bate numa unique. Antes de mover launches, remove duplicatas que colidem na
+    unique uq_launches_user_source_external (user_id, source, external_id).
     """
+    try:
+        _merge_users(from_user_id, to_user_id)
+    except psycopg.errors.UniqueViolation as exc:
+        # Sem str(exc): o texto do psycopg traz o valor da linha que violou.
+        logger.warning(
+            "merge_users: unique na junção, recusado from=%s to=%s constraint=%s",
+            from_user_id, to_user_id, exc.diag.constraint_name,
+            extra={"user_id": to_user_id},
+        )
+        raise MergeRefused(f"{from_user_id} -> {to_user_id}") from exc
+
+
+def _merge_users(from_user_id: int, to_user_id: int) -> None:
     if from_user_id == to_user_id:
         return
 
@@ -70,6 +150,14 @@ def merge_users(from_user_id: int, to_user_id: int) -> None:
         with conn.cursor() as cur:
             ensure_user_tx(cur, to_user_id)
             ensure_user_tx(cur, from_user_id)
+            # ponytail: checagem sem lock — dado gravado por outra transação
+            # entre ela e os updates escapa dela: sem unique no caminho, junta;
+            # batendo numa unique (user_seq, nome de caixinha...), volta tudo e
+            # vira `MergeRefused` no `merge_users`. Lock por user_id se precisar.
+            if _origem_presa(cur, from_user_id) or (
+                _tem_dados_financeiros(cur, from_user_id) and _tem_dados_financeiros(cur, to_user_id)
+            ):
+                raise MergeRefused(f"{from_user_id} -> {to_user_id}")
 
             # 1) dedupe de launches
             cur.execute(
@@ -118,9 +206,18 @@ def merge_users(from_user_id: int, to_user_id: int) -> None:
                 (to_user_id, from_user_id),
             )
 
-            # 5) outras tabelas com user_id
-            for table in ("user_category_rules", "pending_actions", "pockets", "investments",
-                          "credit_transactions", "ofx_imports"):
+            # 5) outras tabelas com user_id — na colisão, o destino vence
+            for table, cols in _DESTINO_VENCE:
+                cur.execute(
+                    f"delete from {table} o where o.user_id = %s and exists("
+                    f"select 1 from {table} d where d.user_id = %s"
+                    + "".join(f" and d.{c} = o.{c}" for c in cols) + ")",
+                    (from_user_id, to_user_id),
+                )
+            for table in (*(t for t, _ in _DESTINO_VENCE), "pockets", "pocket_lots",
+                          "investments", "investment_lots", "credit_transactions", "ofx_imports",
+                          "recurring_expenses", "recurring_charges", "recurring_incomes",
+                          "recurring_income_credits", "bill_instances", "bank_movement_declarations"):
                 cur.execute(
                     f"update {table} set user_id=%s where user_id=%s",
                     (to_user_id, from_user_id),

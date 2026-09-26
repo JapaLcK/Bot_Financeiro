@@ -1631,6 +1631,8 @@ def test_apagar_tudo_nao_reabre_o_lote_do_resgate_com_tipo_reescrito(user_id: in
 #   `delete_card`  (cascade de credit_bills)   900 -> 1000, nenhuma fatura de pé
 #   `merge_users`  (dedup de credit_bills)     900 -> 1000, fatura do destino
 #                                              intacta e com `paid_amount` 0
+#                  (desde o #607 o `merge_users` recusa quando os DOIS lados
+#                  têm cartão, então essa rota não chega mais ao dedup)
 #   fatura de OUTRO usuário (forjado)          900 -> 1000, fatura alheia AINDA
 #                                              `paid`  <- R$100 criados
 #
@@ -1673,13 +1675,15 @@ def test_positivo_pagamento_de_cartao_apagado_devolve_o_dinheiro(user_id: int):
     assert not any(int(r["id"]) == pgto for r in db.list_launches(user_id, limit=10))
 
 
-def test_positivo_merge_users_deixa_bill_id_morto_e_o_pagamento_continua_apagavel(user_id: int):
+def test_merge_users_recusa_e_o_pagamento_continua_apagavel_na_origem(user_id: int):
     """A segunda rota de produto, ponta a ponta pelo `merge_users` real.
 
-    O dedup de `credit_bills` (`db/users.py`) apaga a fatura JÁ PAGA da origem
-    quando o destino tem uma do mesmo cartão e período, e o lançamento migra com
-    o `bill_id` morto no `efeitos`. Medido: a fatura que SOBRA é a do destino,
-    com `paid_amount` 0 — nada é criado ao devolver os R$100."""
+    Era: o dedup de `credit_bills` (`db/users.py`) apagava a fatura JÁ PAGA da
+    origem quando o destino tinha uma do mesmo cartão e período, e o lançamento
+    migrava com o `bill_id` morto no `efeitos`. Desde o #607, com dados
+    financeiros dos dois lados (aqui: cartão) a junção é RECUSADA sem escrever
+    nada — o que sobra provar é que a recusa não deixa o pagamento órfão: a
+    fatura da origem continua de pé e apagar o pagamento devolve os R$100."""
     origem = user_id
     _card_o, bill_origem, pgto = _pagamento_de_fatura(origem)
     destino = int(uuid.uuid4().int % 10_000_000_000)
@@ -1697,18 +1701,16 @@ def test_positivo_merge_users_deixa_bill_id_morto_e_o_pagamento_continua_apagave
             bill_destino = cur.fetchone()["id"]
         conn.commit()
 
-    db.merge_users(origem, destino)
+    with pytest.raises(db.MergeRefused):
+        db.merge_users(origem, destino)
 
-    with db.get_conn() as conn:
-        with conn.cursor() as cur:
-            cur.execute("select count(*) as n from credit_bills where id=%s", (bill_origem,))
-            assert int(cur.fetchone()["n"]) == 0, "o dedup tem de apagar a fatura da origem"
-    assert _bal(destino) == 900.0
-
-    db.delete_launch_and_rollback(destino, pgto)
-
-    assert _bal(destino) == 1000.0
+    assert _bill_status(bill_origem) == "paid", "a recusa não pode tocar na fatura da origem"
     assert _bill_status(bill_destino) == "closed", "a fatura do destino não é tocada"
+    assert _bal(origem) == 900.0 and _bal(destino) == 0.0
+
+    db.delete_launch_and_rollback(origem, pgto)
+
+    assert _bal(origem) == 1000.0
 
 
 def test_bill_id_de_outro_usuario_recusa_em_vez_de_creditar(user_id: int):
