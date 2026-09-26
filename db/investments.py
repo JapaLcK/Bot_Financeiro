@@ -2,6 +2,7 @@
 db/investments.py — Investimentos: criar, aportar, resgatar, juros e CDI.
 """
 import logging
+import math
 import sys
 import requests
 from contextvars import ContextVar
@@ -52,8 +53,8 @@ SGS_TIMEOUT_SECONDS = 3
 #    a dados que COMPLETAM a cauda → upsert; memo vale até a meia-noite UTC
 #    b dados PARCIAIS ou vazia (pré-publicação) → upsert o que veio; memo vale
 #      SGS_CONFIRM_SHORT — pega o ponto publicado à noite ainda no mesmo dia
-#    c falha/timeout (None) ou 200+lixo (None) → NÃO grava memo; re-tenta já;
-#      conta em `_sgs_falhas`: a acumulação final não carimba
+#    c falha/timeout (None), 200+lixo (None) ou 200 com item que não parseia →
+#      NÃO grava memo; re-tenta já; conta em `_sgs_falhas`: a final não carimba
 #  5 cache VAZIO na janela → 0 fetch só se o memo cobre [start, end]; senão
 #    fetch da janela e grava como a célula 4. Mesma RESSALVA da célula 3.
 #    Instância real: manhã de segunda com lote acruado na sexta (janela
@@ -296,21 +297,26 @@ def _get_cdi_daily_map(cur, start: date, end: date) -> dict[date, float]:
             _sgs_falhas.set(_sgs_falhas.get() + 1)
         return cached
 
-    to_upsert = []
+    to_upsert, invalido = [], False
     for item in data:
         if not isinstance(item, dict):
+            invalido = True
             continue
         try:
             raw_date = item.get("data")
             raw_val = item.get("valor")
             if not raw_date or raw_val is None:
+                invalido = True
                 continue
             d = datetime.strptime(raw_date, "%d/%m/%Y").date()
             v = float(str(raw_val).replace(",", "."))
+            if not math.isfinite(v):  # "nan"/"inf" parseiam sem exceção
+                raise ValueError(f"valor não finito: {v}")
             if d not in cached:
                 to_upsert.append((d, v))
             cached[d] = v
         except Exception as e:
+            invalido = True
             _warn_bcb_once(
                 ("invalid_bcb_item", str(item), type(e).__name__, str(e)),
                 "Item inválido do BCB ignorado: %s | erro=%s",
@@ -325,6 +331,9 @@ def _get_cdi_daily_map(cur, start: date, end: date) -> dict[date, float]:
             to_upsert,
         )
 
+    if invalido:  # célula 4c: resposta que não virou índice inteira é falha
+        _sgs_falhas.set(_sgs_falhas.get() + 1)
+        return cached
     # Célula 4a×4b: resposta completou a cauda ⇒ dia cheio; parcial ⇒ curto.
     _sgs_remember("CDI", fetch_start, end,
                   complete=bool(cached) and _sgs_tail_is_fresh(max(cached), end))
@@ -365,15 +374,18 @@ def _get_sgs_daily_map(cur, code: str, series_code: int, start: date, end: date)
             _sgs_falhas.set(_sgs_falhas.get() + 1)
         return cached
 
-    to_upsert = []
+    to_upsert, invalido = [], False
     for item in data:
         try:
             d = datetime.strptime(item["data"], "%d/%m/%Y").date()
             v = float(str(item["valor"]).replace(",", "."))
+            if not math.isfinite(v):  # "nan"/"inf" parseiam sem exceção
+                raise ValueError(f"valor não finito: {v}")
             if d not in cached:
                 to_upsert.append((code, d, v))
             cached[d] = v
         except Exception as e:
+            invalido = True
             _warn_bcb_once(
                 ("invalid_sgs_daily_item", code, str(item), type(e).__name__, str(e)),
                 "Item inválido do SGS %s ignorado: %s | erro=%s",
@@ -389,6 +401,9 @@ def _get_sgs_daily_map(cur, code: str, series_code: int, start: date, end: date)
             to_upsert,
         )
 
+    if invalido:  # célula 4c: resposta que não virou índice inteira é falha
+        _sgs_falhas.set(_sgs_falhas.get() + 1)
+        return cached
     # Célula 4a×4b: resposta completou a cauda ⇒ dia cheio; parcial ⇒ curto.
     _sgs_remember(code, fetch_start, end,
                   complete=bool(cached) and _sgs_tail_is_fresh(max(cached), end))

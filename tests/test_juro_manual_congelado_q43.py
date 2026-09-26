@@ -490,7 +490,8 @@ G_ATE_K, G_TUDO = Decimal(str(1000 * 1.0005 ** 3)), Decimal(str(1000 * 1.0005 **
 @pytest.fixture
 def bcb(monkeypatch):
     """`bcb["resposta"]`: None = falha; lista de datas = o BCB publica essas
-    (as do intervalo pedido, a 0,05%). Apaga de `market_rates` só o que entrou."""
+    (as do intervalo pedido, a 0,05%); dict na lista vai cru, como o BCB mandou.
+    Apaga de `market_rates` só o que entrou."""
     from tests.test_funding_source import _apaga_cdi, _semeia_cdi
 
     criados, estado = [], {"resposta": None, "chamadas": 0}
@@ -501,17 +502,19 @@ def bcb(monkeypatch):
             if callable(estado["resposta"]) else estado["resposta"]
         if resp is None:
             return None
-        dias = [d for d in resp if ini <= d <= fim]
+        crus = [d for d in resp if isinstance(d, dict)]
+        dias = [d for d in resp if not isinstance(d, dict) and ini <= d <= fim]
         if dias:  # só o que não existia: a tabela é global, sem `user_id`
             with db.get_conn() as conn, conn.cursor() as cur:
                 cur.execute("select ref_date from market_rates "
                             "where code='CDI' and ref_date = any(%s)", (dias,))
                 existentes = {r["ref_date"] for r in cur.fetchall()}
             criados.extend(d for d in dias if d not in existentes)
-        return [{"data": d.strftime("%d/%m/%Y"), "valor": "0.05"} for d in dias]
+        return [{"data": d.strftime("%d/%m/%Y"), "valor": "0.05"} for d in dias] + crus
 
     monkeypatch.setattr(investments_db, "_fetch_sgs_series_json", fetch)
     estado["semeia"] = lambda ini, fim: criados.extend(_semeia_cdi(ini, fim))
+    estado["criados"] = criados
     yield estado
     _apaga_cdi(criados)
 
@@ -629,3 +632,66 @@ def test_G6_falha_de_uma_thread_nao_segura_o_carimbo_da_outra(monkeypatch, bcb):
     assert _approx(_lotes(a, inv_a)[0][0], G_ATE_K)
     assert _linha("investments", b, inv_b)["interest_frozen_at"] is not None
     assert _approx(_lotes(b, inv_b)[0][0], G_TUDO)
+
+
+def test_G7_item_que_nao_parseia_nao_carimba_e_completa_depois(user_id, bcb):
+    """Resposta com os dias da cauda E um item lixo: não virou índice inteira, é falha."""
+    bcb["semeia"](G_D0, G_K)
+    bcb["resposta"] = G_CAUDA + [{"erro": "x"}]
+    inv = _investimento_com_lote(user_id, "cdb", "cdi", 1.0, G_D0)
+    db.accrue_all_investments(user_id, today=G_HOJE)
+    assert bcb["chamadas"] > 0
+    assert _linha("investments", user_id, inv)["interest_frozen_at"] is None
+
+    bcb["resposta"] = G_CAUDA  # a rede voltou limpa
+    db.accrue_all_investments(user_id, today=G_HOJE)
+    saldo, _, _, cursor = _lotes(user_id, inv)[0]
+    assert _approx(saldo, G_TUDO) and cursor == G_HOJE
+    assert _linha("investments", user_id, inv)["interest_frozen_at"] is not None
+
+
+def test_G8_item_que_nao_parseia_nao_grava_memo(user_id, bcb):
+    """Sem memo, a chamada seguinte no mesmo processo busca de novo em vez de
+    carimbar sem os dias que faltam."""
+    bcb["semeia"](G_D0, G_K)
+    bcb["resposta"] = [G_CAUDA[0], {"erro": "x"}]
+    inv = _investimento_com_lote(user_id, "cdb", "cdi", 1.0, G_D0)
+    db.accrue_all_investments(user_id, today=G_HOJE)
+    antes = bcb["chamadas"]
+    assert antes > 0
+    db.accrue_all_investments(user_id, today=G_HOJE)
+    assert bcb["chamadas"] > antes
+    assert _linha("investments", user_id, inv)["interest_frozen_at"] is None
+
+
+def test_G9_valor_nao_finito_nao_entra_no_indice(user_id, bcb):
+    """`float("nan")` não levanta: sem o `isfinite`, o NaN ia para o cache, o
+    `market_rates` e o saldo, e o ativo congelava."""
+    dia = G_CAUDA[-1]
+    with db.get_conn() as conn, conn.cursor() as cur:
+        cur.execute("select 1 from market_rates where code='CDI' and ref_date=%s", (dia,))
+        if cur.fetchone() is None:
+            bcb["criados"].append(dia)  # sem o conserto, o NaN entraria aqui
+    bcb["semeia"](G_D0, G_K)
+    bcb["resposta"] = G_CAUDA[:-1] + [{"data": dia.strftime("%d/%m/%Y"), "valor": "nan"}]
+    inv = _investimento_com_lote(user_id, "cdb", "cdi", 1.0, G_D0)
+    db.accrue_all_investments(user_id, today=G_HOJE)
+    assert bcb["chamadas"] > 0
+    assert _linha("investments", user_id, inv)["interest_frozen_at"] is None
+    with db.get_conn() as conn, conn.cursor() as cur:
+        cur.execute("select count(*) as n from market_rates where value = 'NaN'")
+        assert cur.fetchone()["n"] == 0
+    assert _lotes(user_id, inv)[0][0].is_finite()
+
+
+def test_G10_item_malformado_da_selic_nao_carimba(user_id, bcb):
+    """O mesmo guarda em `_get_sgs_daily_map` (SELIC/IPCA), que G1–G9 não passam."""
+    bcb["resposta"] = [{"erro": "x"}]
+    inv = _investimento_com_lote(user_id, "tesouro selic", "selic_spread", 0.001, G_D0)
+    db.accrue_all_investments(user_id, today=G_HOJE)
+    assert bcb["chamadas"] > 0
+    assert _linha("investments", user_id, inv)["interest_frozen_at"] is None
+
+    bcb["resposta"] = []  # a rede respondeu "sem valores": não é falha, carimba
+    db.accrue_all_investments(user_id, today=G_HOJE)
+    assert _linha("investments", user_id, inv)["interest_frozen_at"] is not None
