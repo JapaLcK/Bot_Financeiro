@@ -1523,15 +1523,15 @@ def sync_open_finance_caixinhas(connection_id: int, user_id: int) -> dict:
                 for tentativa in range(1, 51):
                     new_name = name if tentativa == 1 else f"{name} {tentativa}"
                     # Duas guardas, porque elas cobrem coisas diferentes:
-                    # `not exists` com lower() é a de NOME, porque o unique da
-                    # tabela é `unique(user_id, name)` — CASE-SENSITIVE
-                    # (db/schema.py:115) — enquanto o resto do código de caixinha
-                    # compara `lower(name)`. Sem ela, o usuário com "caixinha
-                    # nubank" ganhava uma "Caixinha Nubank" do banco: duas
-                    # caixinhas de mesmo nome na tela, e o `on conflict` nunca via
-                    # a colisão. `on conflict do nothing` é a de CORRIDA: fecha a
-                    # janela TOCTOU entre o `not exists` e o insert sem abortar a
-                    # transação (era a UniqueViolation que levava o import inteiro).
+                    # `not exists` com lower() é a de NOME: o índice
+                    # uq_pockets_user_lower_name (#596) já recusa "Caixinha
+                    # Nubank" ao lado de "caixinha nubank", mas o `init_db` o
+                    # PULA se houver duplicata antiga, e aí só esta guarda impede
+                    # a caixinha de mesmo nome na tela. `on conflict do nothing`
+                    # (sem alvo, para valer com e sem o índice) é a de CORRIDA:
+                    # fecha a janela TOCTOU entre o `not exists` e o insert sem
+                    # abortar a transação (era a UniqueViolation que levava o
+                    # import inteiro).
                     cur.execute(
                         """
                         insert into pockets(

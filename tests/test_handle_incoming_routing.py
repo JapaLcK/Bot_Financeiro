@@ -69,3 +69,31 @@ def test_free_saldo_vai_pro_tradicional(spy_ai, free_small_uid):
     out = hi.handle_incoming(_msg(free_small_uid, "saldo"))
     assert spy_ai == []
     assert "Conta Corrente" in out[0].text
+
+
+def test_carencia_com_cota_esgotada_manda_ao_cartao_e_saldo_segue(spy_ai, free_small_uid):
+    """Pela conversa: a carência estoura a cota e ouve "atualize o cartão" (não
+    "assine", que a /precos recusaria com 409); o assunto seguinte não fica preso."""
+    from datetime import date
+
+    import db
+    with db.get_conn() as conn, conn.cursor() as cur:
+        cur.execute(
+            "update auth_accounts set ai_messages_this_month = 1000000, ai_month_reset_at = %s "
+            "where user_id = %s",
+            (date.today().replace(day=1), free_small_uid),
+        )
+        conn.commit()
+
+    out = hi.handle_incoming(_msg(free_small_uid, "piggy quanto gastei com mercado?"))
+    assert spy_ai == []
+    from core.services import billing_copy
+    # 1.000.000 estoura também a cota do Plus pago: pagar não a devolve este mês.
+    assert out[0].text == (
+        "🐷 Suas mensagens com o Piggy deste mês acabaram!\n"
+        + billing_copy.IA_COTA_EM_CARENCIA_SEM_COTA
+    )
+
+    out = hi.handle_incoming(_msg(free_small_uid, "saldo"))
+    assert spy_ai == []
+    assert "Conta Corrente" in out[0].text

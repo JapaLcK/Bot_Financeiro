@@ -258,16 +258,17 @@ def test_desfazer_apagar_investimento_sem_nada_depois_recria(user_id):
     assert _estado(user_id)[2] == [("cdb", Decimal("0"))]
 
 
-def test_investimento_de_mesmo_nome_com_outra_caixa_nao_bloqueia(user_id):
-    """`unique(user_id, name)` deixa "cdb" e "CDB" coexistirem: são dois
-    investimentos. O movimento posterior é o CRIAR de "CDB" porque ele grava o nome
-    da linha inserida; um aporte digitado "CDB" não serve de teste, o
-    `lower(name)=lower(%s)` do aporte escolhe entre as duas linhas ao acaso. A
-    recusa legítima (mesmo investimento) é a do `test_desfazer_aporte_anterior_e_recusado`."""
-    (a,) = _carteira_com_cdb(user_id, "cdb", aportes=(100,))
-    db.create_investment_db(user_id, "CDB", rate=0.10, period="yearly")
-    db.delete_launch_and_rollback(user_id, a)
-    assert sorted(_estado(user_id)[2]) == [("CDB", Decimal("0")), ("cdb", Decimal("0"))]
+def test_aporte_digitado_com_outra_caixa_cai_na_mesma_linha(user_id):
+    """#596: "cdb" e "CDB" são o MESMO investimento (índice `(user_id, lower(name))`).
+    Criar "CDB" resolve para o "cdb" existente, o aporte "CDB" cai nele, e a guarda
+    do desfazer vê o segundo aporte como posterior ao primeiro."""
+    (a1,) = _carteira_com_cdb(user_id, "cdb", aportes=(100,))
+    assert db.create_investment_db(user_id, "CDB", rate=0.10, period="yearly")[0] is None
+    a2 = db.investment_deposit_from_account(user_id, "CDB", 200, "aporte")[0]
+    assert _estado(user_id)[2] == [("cdb", Decimal("300"))]
+    _recusa(user_id, a1)
+    db.delete_launch_and_rollback(user_id, a2)
+    assert _estado(user_id)[2] == [("cdb", Decimal("100"))]
 
 
 # ── Caixinha: o saque também deixa o cursor onde o CDI parou ─────────────────

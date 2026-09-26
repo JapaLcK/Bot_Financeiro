@@ -2,7 +2,9 @@
 db/schema.py — DDL e inicialização do banco de dados.
 """
 from .connection import get_conn
-from .schema_repairs import ensure_plan_trials_user_fk, repair_user_fk_cascades
+from .schema_repairs import (
+    ensure_lower_name_unique, ensure_plan_trials_user_fk, repair_user_fk_cascades,
+)
 
 # Chave do advisory lock que serializa o init_db INTEIRO entre instâncias.
 # Valor arbitrário e estável; só precisa não colidir com outro lock do processo.
@@ -64,6 +66,8 @@ on conflict (source, external_ref) do nothing
 
 
 def init_db():
+    from .signup_quiz import PERFIS
+
     ddl_statements = [
         # ─── Extensions ──────────────────────────────────────────────────────────
         # unaccent: normaliza acentos pra busca textual ("credito" casa "crédito").
@@ -112,7 +116,7 @@ def init_db():
           name text not null,
           balance numeric not null default 0,
           created_at timestamptz default now(),
-          unique(user_id, name)
+          unique(user_id, name)  -- sem caixa: uq_pockets_user_lower_name (schema_repairs, #596)
         )
         """,
 
@@ -142,7 +146,7 @@ def init_db():
           interest_payment_frequency text not null default 'maturity',
           tax_profile text not null default 'regressive_ir_iof',
           created_at timestamptz default now(),
-          unique(user_id, name)
+          unique(user_id, name)  -- sem caixa: uq_investments_user_lower_name (schema_repairs, #596)
         )
         """,
         """
@@ -1942,6 +1946,18 @@ def init_db():
         # NULL = conta anterior a esta coluna (origem desconhecida);
         # sem backfill por data chutado — o painel mostra "—" pra elas.
         """alter table auth_accounts add column if not exists signup_source text""",
+        # Resultado do quiz de venda (db/signup_quiz.py), gravado na criação da
+        # conta. NÃO confundir com `/auth/dashboard-profile` (monólito), que é
+        # outra coisa (gates de feature). NULL = painel padrão / não veio do quiz.
+        # `signup_quiz` = {"versao": 1, "respostas": {...} | null}; é DADO
+        # FINANCEIRO PESSOAL — sai no export, no "Recomeçar do zero" e na exclusão.
+        # O CHECK fica fora do `add column` pelo mesmo motivo do de `pix_charges`
+        # (abaixo): inline não chega à tabela que já existe; `not valid` não trava a subida.
+        """alter table auth_accounts add column if not exists dashboard_profile text""",
+        """alter table auth_accounts add column if not exists signup_quiz jsonb""",
+        """alter table auth_accounts drop constraint if exists auth_accounts_dashboard_profile_valido""",
+        f"""alter table auth_accounts add constraint auth_accounts_dashboard_profile_valido
+             check (dashboard_profile in ({", ".join(f"'{p}'" for p in PERFIS)})) not valid""",
         """
         create table if not exists plan_trials (
           phone_hash text primary key,
@@ -2655,6 +2671,7 @@ def _run_ddl(conn, ddl_statements) -> None:
                 changes = repair_user_fk_cascades(cur)
                 if changes:
                     print(f"[init_db] schema_repairs ajustou {len(changes)} FK(s): {changes}")
+                ensure_lower_name_unique(cur)
             except Exception as e:
                 print(f"[init_db] schema_repairs falhou: {e}")
                 raise

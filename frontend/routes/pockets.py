@@ -78,6 +78,10 @@ async def create_pocket_route(request: Request, user_id: int, payload: PocketCre
         )
     except ValueError as exc:
         raise HTTPException(status_code=400, detail=detalhe_seguro(exc)) from exc
+    if launch_id is None:
+        # Já existe (#596: também com outra maiúscula). O 200 `created:false` fazia
+        # a tela de Metas pegar o id e reescrever meta e rendimento da existente.
+        raise HTTPException(status_code=400, detail="Já existe uma caixinha com esse nome.")
 
     # Q43: a nova nasce com false, mas no conflito de nome a caixinha é a existente.
     def _juro_gravado():
