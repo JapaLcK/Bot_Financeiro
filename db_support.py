@@ -1058,7 +1058,13 @@ def attempt_whatsapp_phone_link_impl(
 
     final_user_id = target_user_id
     if int(current_user_id) != target_user_id:
-        merge_users(int(current_user_id), target_user_id)
+        from db.users import MergeRefused  # tardio: db/ importa este módulo
+
+        try:
+            merge_users(int(current_user_id), target_user_id)
+        except MergeRefused:
+            # As duas contas têm dados (#607): o número segue na conta do WhatsApp.
+            return {"status": "merge_conflict", "wa_phone": wa_phone}
 
     with get_conn() as conn:
         with conn.cursor() as cur:
