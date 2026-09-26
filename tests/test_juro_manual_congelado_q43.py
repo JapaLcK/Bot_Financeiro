@@ -550,13 +550,24 @@ def test_G2_bcb_sem_valores_carimba_com_o_que_tem(user_id, bcb):
     assert _linha("investments", user_id, inv)["interest_frozen_at"] is not None
 
 
-def test_G3_cache_com_buraco_e_falha_nao_carimba(user_id, bcb):
+def test_G3_cache_com_buraco_e_falha_nao_carimba_nem_pula_o_buraco(user_id, bcb):
+    """Com `return cached` na falha, o cursor ia a 05/06 por cima do 04/06, e a
+    próxima busca começava em 06/06: o 04 nunca rendia."""
+    buraco = date(2025, 6, 4)
     bcb["semeia"](date(2025, 6, 3), date(2025, 6, 3))
     bcb["semeia"](G_K, G_K)  # falta 04/06
     inv = _investimento_com_lote(user_id, "cdb", "cdi", 1.0, G_D0)
     db.accrue_all_investments(user_id, today=G_HOJE)
     assert bcb["chamadas"] > 0
+    saldo, _, _, cursor = _lotes(user_id, inv)[0]
+    assert _approx(saldo, Decimal(str(1000 * 1.0005))) and cursor == date(2025, 6, 3)
     assert _linha("investments", user_id, inv)["interest_frozen_at"] is None
+
+    bcb["resposta"] = [buraco] + G_CAUDA  # a rede voltou: o buraco rende uma vez
+    db.accrue_all_investments(user_id, today=G_HOJE)
+    saldo, _, _, cursor = _lotes(user_id, inv)[0]
+    assert _approx(saldo, G_TUDO) and cursor == G_HOJE
+    assert _linha("investments", user_id, inv)["interest_frozen_at"] is not None
 
 
 def test_G4_caixinha_falha_nao_carimba_nem_desliga_e_completa_depois(user_id, bcb):
@@ -694,3 +705,55 @@ def test_G10_item_malformado_da_selic_nao_carimba(user_id, bcb):
     bcb["resposta"] = []  # a rede respondeu "sem valores": não é falha, carimba
     db.accrue_all_investments(user_id, today=G_HOJE)
     assert _linha("investments", user_id, inv)["interest_frozen_at"] is not None
+
+
+def test_G11_item_malformado_no_meio_da_cauda_nao_pula_o_dia(user_id, bcb):
+    """[06 válido, 09 malformado, 10 válido]: com `return cached` o cursor ia a
+    10/06 e a próxima busca começava em 11/06 — o 09 nunca rendia e a chamada
+    seguinte congelava com juro a menos."""
+    malformado = {"data": "09/06/2025", "valor": "x"}
+    bcb["semeia"](G_D0, G_K)
+    bcb["resposta"] = [G_CAUDA[0], malformado, G_CAUDA[2]]
+    inv = _investimento_com_lote(user_id, "cdb", "cdi", 1.0, G_D0)
+    db.accrue_all_investments(user_id, today=G_HOJE)
+    assert bcb["chamadas"] > 0
+    saldo, _, _, cursor = _lotes(user_id, inv)[0]
+    assert _approx(saldo, Decimal(str(1000 * 1.0005 ** 4))) and cursor == G_CAUDA[0]
+    assert _linha("investments", user_id, inv)["interest_frozen_at"] is None
+
+    bcb["resposta"] = G_CAUDA  # a rede voltou completa: 09 e 10 rendem uma vez cada
+    db.accrue_all_investments(user_id, today=G_HOJE)
+    saldo, _, _, cursor = _lotes(user_id, inv)[0]
+    assert _approx(saldo, G_TUDO) and cursor == G_HOJE
+    assert _linha("investments", user_id, inv)["interest_frozen_at"] is not None
+
+
+def _br(d):
+    return {"data": d.strftime("%d/%m/%Y"), "valor": "0.04"}
+
+
+@pytest.mark.parametrize("semeados, resposta, esperado", [
+    # falha (None) com buraco no 04/06: só o 03 antes do buraco
+    ([date(2025, 6, 3), G_K], None, [date(2025, 6, 3)]),
+    # [06 válido, 09 malformado, 10 válido]: nada depois do 09
+    ([date(2025, 6, 3), date(2025, 6, 4), G_K],
+     [_br(G_CAUDA[0]), {"data": "09/06/2025", "valor": "x"}, _br(G_CAUDA[2])],
+     [date(2025, 6, 3), date(2025, 6, 4), G_K, G_CAUDA[0]]),
+], ids=["falha", "invalido"])
+def test_G12_selic_na_falha_devolve_so_o_prefixo_sem_buraco(monkeypatch, semeados, resposta, esperado):
+    """O mesmo conserto de G3/G11 em `_get_sgs_daily_map`, que eles não passam.
+    Transação com rollback: `market_rates` é global."""
+    chamadas = []
+    monkeypatch.setattr(investments_db, "_sgs_answered", {})
+    monkeypatch.setattr(investments_db, "_fetch_sgs_series_json",
+                        lambda *a: chamadas.append(a) or resposta)
+    with db.get_conn() as conn, conn.cursor() as cur:
+        cur.execute("delete from market_rates where code='SELIC_DAILY' "
+                    "and ref_date between %s and %s", (G_D0, G_HOJE))
+        for d in semeados:
+            cur.execute("insert into market_rates(code, ref_date, value) "
+                        "values ('SELIC_DAILY', %s, 0.04)", (d,))
+        out = investments_db._get_sgs_daily_map(cur, "SELIC_DAILY", 11, date(2025, 6, 3), G_HOJE)
+        conn.rollback()
+    assert chamadas
+    assert sorted(out) == esperado

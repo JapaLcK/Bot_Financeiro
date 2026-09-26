@@ -54,7 +54,8 @@ SGS_TIMEOUT_SECONDS = 3
 #    b dados PARCIAIS ou vazia (pré-publicação) → upsert o que veio; memo vale
 #      SGS_CONFIRM_SHORT — pega o ponto publicado à noite ainda no mesmo dia
 #    c falha/timeout (None), 200+lixo (None) ou 200 com item que não parseia →
-#      NÃO grava memo; re-tenta já; conta em `_sgs_falhas`: a final não carimba
+#      NÃO grava memo; re-tenta já; conta em `_sgs_falhas`: a final não carimba;
+#      na falha, devolve só o prefixo sem buraco: o cursor não pula dia
 #  5 cache VAZIO na janela → 0 fetch só se o memo cobre [start, end]; senão
 #    fetch da janela e grava como a célula 4. Mesma RESSALVA da célula 3.
 #    Instância real: manhã de segunda com lote acruado na sexta (janela
@@ -253,12 +254,25 @@ def _sgs_cache_covers(cached: dict[date, float], start: date, newest: date) -> b
     (comportamento antigo), que cura o buraco. Falso-negativo possível: dia
     que o nosso calendário chama de útil mas o BCB não publica vira fetch da
     janela toda — correto, só não otimizado."""
+    return _sgs_first_gap(cached, start, newest) is None
+
+
+def _sgs_first_gap(cached: dict[date, float], start: date, newest: date) -> date | None:
+    """Primeiro dia útil BR de [start, newest] fora do cache; None = sem buraco."""
     d = start
     while d <= newest:
         if is_br_business_day(d) and d not in cached:
-            return False
+            return d
         d += timedelta(days=1)
-    return True
+    return None
+
+
+def _sgs_prefix_on_failure(cached: dict[date, float], start: date) -> dict[date, float]:
+    """Célula 4c: só as datas antes do primeiro buraco. O accrual avança o cursor
+    até a maior data devolvida; com buraco no meio ele pularia o dia faltante e
+    a próxima busca começaria depois dele. Série mensal: no máximo o mês de `start`."""
+    gap = _sgs_first_gap(cached, start, max(cached)) if cached else None
+    return cached if gap is None else {d: v for d, v in cached.items() if d < gap}
 
 
 def _get_cdi_daily_map(cur, start: date, end: date) -> dict[date, float]:
@@ -295,6 +309,7 @@ def _get_cdi_daily_map(cur, start: date, end: date) -> dict[date, float]:
             _sgs_remember("CDI", fetch_start, end, complete=False)
         else:
             _sgs_falhas.set(_sgs_falhas.get() + 1)
+            return _sgs_prefix_on_failure(cached, start)
         return cached
 
     to_upsert, invalido = [], False
@@ -333,7 +348,7 @@ def _get_cdi_daily_map(cur, start: date, end: date) -> dict[date, float]:
 
     if invalido:  # célula 4c: resposta que não virou índice inteira é falha
         _sgs_falhas.set(_sgs_falhas.get() + 1)
-        return cached
+        return _sgs_prefix_on_failure(cached, start)
     # Célula 4a×4b: resposta completou a cauda ⇒ dia cheio; parcial ⇒ curto.
     _sgs_remember("CDI", fetch_start, end,
                   complete=bool(cached) and _sgs_tail_is_fresh(max(cached), end))
@@ -372,6 +387,7 @@ def _get_sgs_daily_map(cur, code: str, series_code: int, start: date, end: date)
             _sgs_remember(code, fetch_start, end, complete=False)
         else:
             _sgs_falhas.set(_sgs_falhas.get() + 1)
+            return _sgs_prefix_on_failure(cached, start)
         return cached
 
     to_upsert, invalido = [], False
@@ -403,7 +419,7 @@ def _get_sgs_daily_map(cur, code: str, series_code: int, start: date, end: date)
 
     if invalido:  # célula 4c: resposta que não virou índice inteira é falha
         _sgs_falhas.set(_sgs_falhas.get() + 1)
-        return cached
+        return _sgs_prefix_on_failure(cached, start)
     # Célula 4a×4b: resposta completou a cauda ⇒ dia cheio; parcial ⇒ curto.
     _sgs_remember(code, fetch_start, end,
                   complete=bool(cached) and _sgs_tail_is_fresh(max(cached), end))
