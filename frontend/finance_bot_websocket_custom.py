@@ -3189,6 +3189,32 @@ async def _apply_prospect_attribution(request: Request, response: Response, user
         response.delete_cookie("prospect_code")
 
 
+async def _apply_quiz_attribution(request: Request, response: Response, user_id: int) -> None:
+    """Se o cadastro veio do quiz de venda (cookie quiz_result da /q), revalida,
+    grava perfil e respostas na conta e consome o cookie. Nunca quebra o signup.
+    Perfil e respostas são dado financeiro: fora de log e de print."""
+    from db.signup_quiz import QUIZ_COOKIE, parse_quiz_cookie, record_signup_quiz
+    valor = request.cookies.get(QUIZ_COOKIE)
+    if not valor:
+        return
+    try:
+        resultado = parse_quiz_cookie(valor)
+        if resultado and await asyncio.to_thread(record_signup_quiz, int(user_id), *resultado):
+            await log_system_event(
+                "info",
+                "quiz_result_recorded",
+                f"Cadastro com resultado do quiz ({'completo' if resultado[1] else 'parcial'}).",
+                source="quiz",
+                user_id=int(user_id),
+            )
+    except Exception as exc:
+        # Só o tipo: o CheckViolation traz "Failing row contains (...)" com e-mail,
+        # telefone e perfil — `{exc}` aqui vaza PII para o log.
+        print(f"[quiz] gravacao falhou user={user_id}: {type(exc).__name__}")
+    finally:
+        response.delete_cookie(QUIZ_COOKIE, secure=COOKIE_SECURE, samesite="lax")
+
+
 @app.post("/auth/register")
 @limiter.limit("3/hour")
 async def auth_register(request: Request, body: RegisterBody):
@@ -3278,6 +3304,7 @@ async def auth_verify_email(request: Request, response: Response, body: VerifyEm
 
     await _apply_referral_attribution(request, response, int(user_id))
     await _apply_prospect_attribution(request, response, int(user_id))
+    await _apply_quiz_attribution(request, response, int(user_id))
 
     # Meta Conversions API — CompleteRegistration (conta criada). Agendado como
     # background task (roda DEPOIS da resposta) pra um Meta lento/fora nunca
@@ -4659,6 +4686,7 @@ async def auth_google_complete_signup(
 
     await _apply_referral_attribution(request, response, user_id)
     await _apply_prospect_attribution(request, response, user_id)
+    await _apply_quiz_attribution(request, response, user_id)
 
     # Meta Conversions API — CompleteRegistration (conta criada via Google).
     # Background task (roda após a resposta); event_id signup_<uid> casa com o
