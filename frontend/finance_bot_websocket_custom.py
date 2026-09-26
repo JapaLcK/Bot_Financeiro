@@ -108,7 +108,9 @@ from db import (
     LaunchNoEffects,
     InvestmentLotHasWithdrawal,
     LaunchUnsafeRollback,
+    InvestmentMovementNotLast,
 )
+from db.investment_undo import MENSAGEM_NAO_E_O_ULTIMO
 from core.observability import _log_falha, get_logger
 from core.pg_text import detalhe_seguro, limpa_para_pg, recusa_veneno, tem_veneno
 from core.secure_compare import constant_time_eq
@@ -7222,6 +7224,8 @@ _MSG_DELETE_LAUNCH = {
         "Não dá pra desfazer esse aporte: o lote já teve resgate. Apague o "
         "resgate primeiro."
     ),
+    # Antes da mãe: o `next(isinstance)` abaixo percorre na ordem do dict.
+    InvestmentMovementNotLast: MENSAGEM_NAO_E_O_ULTIMO,
     LaunchUnsafeRollback: (
         "Não consigo reverter esse lançamento com segurança, então mantive ele "
         "intacto pra não bagunçar seu saldo."

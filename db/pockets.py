@@ -463,11 +463,13 @@ def pocket_withdraw_to_account(
                     "iof_rate": float(_iof_rate_for_days(age_days, tax_profile)),
                 })
 
+                # Sem `last_date`: o cursor fica onde o accrual o deixou (último CDI
+                # publicado). Pular para hoje perdia o juro do saldo que fica no lote.
                 cur.execute(
                     """
                     update pocket_lots
                        set balance=%s, principal_remaining=%s, status=%s,
-                           closed_at=%s, last_date=%s
+                           closed_at=%s
                      where id=%s and user_id=%s
                     """,
                     (
@@ -475,7 +477,6 @@ def pocket_withdraw_to_account(
                         after_principal,
                         after_status,
                         criado_em.date() if closes else None,
-                        criado_em.date(),
                         lot["id"],
                         user_id,
                     ),

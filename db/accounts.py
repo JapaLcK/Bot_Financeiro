@@ -314,7 +314,7 @@ class LaunchUnsafeRollback(ValueError):
     `causa=LaunchUnsafeRollback` só, e a comum (`lote_ausente`, lote gravado
     antes de `79bd52f`, que dispara em todo depósito de caixinha antigo) ficava
     indistinguível da rara e grave (`chave_desconhecida`, escritor novo
-    gravando efeito que ninguém sabe reverter). Os cinco valores:
+    gravando efeito que ninguém sabe reverter). Os valores:
 
       - `sem_delta_conta`     — `efeitos` sem a chave (degenerado, ex.: `{}`)
       - `chave_desconhecida`  — chave fora de `_EFEITOS_REVERSIVEIS`
@@ -326,6 +326,9 @@ class LaunchUnsafeRollback(ValueError):
                                 usuário; o irmão do `lote_ausente`, que é a
                                 chave ausente
       - `fora_do_escopo`      — caixinha/investimento no "apagar tudo"
+      - `mudou_durante`       — o lançamento mudou entre a leitura e o lock
+      - `movimento_posterior` — movimento de investimento que não é o último
+                                (`InvestmentMovementNotLast`)
 
     Obrigatório no construtor de propósito: `raise` novo tem de escolher um
     código, em vez de herdar um genérico em silêncio."""
@@ -333,6 +336,14 @@ class LaunchUnsafeRollback(ValueError):
     def __init__(self, mensagem: str, motivo: str):
         super().__init__(mensagem)
         self.motivo = motivo
+
+
+class InvestmentMovementNotLast(LaunchUnsafeRollback):
+    """Movimento (aporte, resgate, criar, apagar) que não é o mais recente do
+    investimento (ou o investimento foi apagado depois). Ver `db/investment_undo.py`."""
+
+    def __init__(self, mensagem: str):
+        super().__init__(mensagem, "movimento_posterior")
 
 
 def update_launch_fields(
@@ -1326,6 +1337,7 @@ _BEFORE_FORMA = {
     "principal_remaining": (_dinheiro, True),
     "status": (_texto, False),
     "closed_at": (_data, False),
+    "last_date": (_data, False),  # ausente em snapshot anterior a este campo
 }
 
 # chave -> (container, campos)
@@ -1571,9 +1583,17 @@ def delete_launch_and_rollback(user_id: int, launch_id: int, *,
     with get_conn() as conn:
         with conn.cursor() as cur:
             from .bank_movements import _lock_user, uses_bank_movement_lock
+            from .investment_undo import guard_last_investment_movement, touches_investment
+
+            def _precisa_lock(r):
+                # Investimento também: a guarda "é o último" tem de rodar sob o
+                # MESMO lock de aporte/resgate/apagar investimento, até o commit.
+                return bool(r and (uses_bank_movement_lock(r["source"], r["efeitos"])
+                                   or touches_investment(r["efeitos"])))
+
             cur.execute("select source,efeitos from launches where id=%s and user_id=%s", (launch_id, user_id))
             preview = cur.fetchone()
-            bank_lock = bool(preview and uses_bank_movement_lock(preview["source"], preview["efeitos"]))
+            bank_lock = _precisa_lock(preview)
             if bank_lock:
                 # Matcher: conta → transação OF → sombra. Cartões manuais
                 # mantêm sua ordem anterior de fatura → conta.
@@ -1597,8 +1617,9 @@ def delete_launch_and_rollback(user_id: int, launch_id: int, *,
             if not row:
                 raise LookupError("NOT_FOUND")
 
-            if uses_bank_movement_lock(row["source"], row["efeitos"]) != bank_lock:
-                raise LaunchUnsafeRollback("Lançamento mudou durante a exclusão; tente novamente.")
+            if _precisa_lock(row) != bank_lock:
+                raise LaunchUnsafeRollback("Lançamento mudou durante a exclusão; tente novamente.",
+                                           "mudou_durante")
 
             efeitos = row.get("efeitos")
             if isinstance(efeitos, str):
@@ -1621,6 +1642,8 @@ def delete_launch_and_rollback(user_id: int, launch_id: int, *,
             # visível é o mesmo — `commit()` só no fim da função.
             delta_conta = _validar_efeitos(
                 efeitos, escopo_conta_corrente=escopo_conta_corrente)
+            if touches_investment(efeitos):
+                guard_last_investment_movement(cur, user_id, launch_id, efeitos)
 
             delta_pocket = efeitos.get("delta_pocket")
             delta_invest = efeitos.get("delta_invest")
@@ -1833,7 +1856,7 @@ def delete_launch_and_rollback(user_id: int, launch_id: int, *,
                         # Invariante do banco quebrada, não caso de uso — sai
                         # CRU (balde `errors`, com log de ERROR), nunca como
                         # `LaunchUnsafeRollback`, que é recusa PREVISTA, vira
-                        # frase de produto e teria de mentir um dos cinco
+                        # frase de produto e teria de mentir um dos
                         # `motivo`. A transação reverte nos dois casos: o
                         # `conn.commit()` só vem no fim da função.
                         raise RuntimeError(
@@ -1897,7 +1920,8 @@ def delete_launch_and_rollback(user_id: int, launch_id: int, *,
                     cur.execute(
                         """
                         update investment_lots
-                        set balance=%s, principal_remaining=%s, status=%s, closed_at=%s
+                        set balance=%s, principal_remaining=%s, status=%s, closed_at=%s,
+                            last_date=coalesce(%s::date, last_date)
                         where id=%s and user_id=%s
                         returning investment_id
                         """,
@@ -1906,6 +1930,7 @@ def delete_launch_and_rollback(user_id: int, launch_id: int, *,
                             Decimal(str(before.get("principal_remaining", 0))),
                             before.get("status") or "open",
                             before.get("closed_at"),
+                            before.get("last_date"),
                             lot_id,
                             user_id,
                         ),
@@ -2133,10 +2158,10 @@ def delete_all_launches_and_rollback(user_id: int) -> dict:
             # mensagens destas exceções são texto nosso, mas nada prende essa
             # invariante — um `raise LaunchUnsafeRollback(f"... {row[...]}")`
             # amanhã persistiria dado do cliente em `system_event_logs`, e a
-            # guarda por `ast` só olha `com_traceback`. Qual das 5 recusas
+            # guarda por `ast` só olha `com_traceback`. Qual recusa
             # disparou vem no `motivo=`: CÓDIGO CURTO ENUMERADO que nasce no
             # `raise` (atributo da exceção), nunca inferido da mensagem. Sem
-            # ele as cinco colapsavam num `causa=LaunchUnsafeRollback` só e a
+            # ele elas colapsavam num `causa=LaunchUnsafeRollback` só e a
             # comum (`lote_ausente`) ficava igual à rara e grave
             # (`chave_desconhecida`). Os valores estão na docstring de
             # `LaunchUnsafeRollback`; `InvestmentLotHasWithdrawal` traz o dela

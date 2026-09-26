@@ -188,6 +188,12 @@ def resolve_delete(user_id: int, confirmed: bool) -> str | None:
                 f"precisaria ser revertido, então mantive ele intacto pra não "
                 f"bagunçar seu saldo."
             )
+        except db.InvestmentMovementNotLast as e:
+            # Antes do `LaunchUnsafeRollback` (é subclasse). Tem contorno: desfazer
+            # os movimentos mais novos do investimento primeiro.
+            _log_falha("delete_launch_movimento_posterior", user_id, e,
+                       nivel=logging.WARNING, launch_id=launch_id, user_seq=display_id)
+            return f"🐷 Não apaguei o lançamento **#{display_id}**. {e}"
         except db.LaunchUnsafeRollback as e:
             # `efeitos` existe, mas não dá pra revertê-lo POR INTEIRO (chave de
             # escritor novo, `{}` degenerado, lote de caixinha que o

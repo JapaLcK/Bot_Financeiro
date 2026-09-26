@@ -15,6 +15,7 @@ from fastapi.testclient import TestClient
 import core.admin_dashboard as admin_dashboard
 import frontend.finance_bot_websocket_custom as dashboard
 from db import ensure_user, get_conn
+from tests._espera_lock import _esperar_backend_travado
 
 NOW = datetime.now(timezone.utc)
 
@@ -1407,28 +1408,6 @@ def test_gate_do_reset_recusa_pago_vencido_ainda_que_o_painel_diga_cancelado(
         assert _trial_lock_exists(h)
     finally:
         _drop_locks(h)
-
-
-def _esperar_backend_travado(timeout: float = 15.0) -> bool:
-    """Espera algum backend DESTE database ficar parado esperando um lock.
-
-    É o que torna o teste abaixo determinístico em vez de dependente de sleep:
-    sem isto, uma thread lenta a começar faria o commit da troca acontecer
-    ANTES do SELECT do reset, e o caso passaria verde sem medir nada.
-    """
-    import time
-    fim = time.monotonic() + timeout
-    while time.monotonic() < fim:
-        with get_conn() as c:
-            with c.cursor() as cur:
-                cur.execute(
-                    "select count(*) as n from pg_stat_activity "
-                    "where datname = current_database() and wait_event_type = 'Lock'"
-                )
-                if cur.fetchone()["n"] > 0:
-                    return True
-        time.sleep(0.05)
-    return False
 
 
 def test_reset_apaga_a_trava_do_telefone_NOVO_numa_troca_concorrente(panel_accounts):
