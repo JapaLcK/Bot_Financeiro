@@ -152,11 +152,9 @@ Decidido pelo dono na mesma data (Q37–Q41):
     escrita de dinheiro vivo confiável derruba a confirmação**. Confiáveis são só duas: o
     lançamento em dinheiro do v2, a transferência automática entre banco e carteira da
     Q41 (com as correções que o banco fizer nela) e o depositar e retirar entre carteira e
-    caixinha manual do v2 (Q38) — todas dinheiro vivo mudando de lugar ou entrando. Mas
-    retirar da caixinha manual hoje credita também o rendimento simulado
-    (`pocket_withdraw_to_account` soma o ganho no que volta para a carteira): enquanto a
-    Q43 não for decidida, só o principal conta como escrita confiável, e a retirada que
-    trouxer ganho simulado derruba a confirmação. As
+    caixinha manual do v2 (Q38) — todas dinheiro vivo mudando de lugar ou entrando. Com o
+    rendimento simulado desligado (Q43), a retirada da caixinha só devolve o que foi
+    guardado. As
     outras derrubam: lançar ou apagar no painel antigo,
     ajuste de saldo, importar extrato OFX (`import_ofx_launches_bulk`), desfazer
     (`delete_launch_and_rollback`) e qualquer caminho futuro. A regra mora na camada `db/`,
@@ -181,10 +179,8 @@ Decidido pelo dono na mesma data (Q37–Q41):
   reconectado (o fato aparece uma vez em cada momento, nunca zero nem duas); carteira
   confirmada seguida de um saque sincronizado e de depositar e retirar numa caixinha manual
   (a confirmação continua); caixinha manual e a mesma caixinha vinda do banco (incerta até
-  responder, depois uma vez só); caixinha manual com rendimento simulado (a foto conta só o
-  principal); investimento manual antigo com o laço de juros rodando antes da foto (a foto
-  conta só o principal); retirar de caixinha manual com rendimento simulado e tirar a foto (a
-  confirmação cai); recorrente antiga casada cuja transação o banco apaga com a conexão
+  responder, depois uma vez só); caixinha manual e investimento manual antigo com o laço de
+  juros rodando antes da foto (o saldo não muda, Q43); recorrente antiga casada cuja transação o banco apaga com a conexão
   ativa (a linha antiga volta); conta corrigida de BRL para moeda desconhecida e de volta
   (a linha quebra nas duas, sem perda nem ganho falsos); carteira derrubada e reconfirmada
   com outro valor entre duas fotos (a linha quebra).
@@ -203,19 +199,17 @@ Decidido pelo dono na mesma data (Q37–Q41):
     não derrubam a confirmação da carteira;
   - **rendimento simulado:** a caixinha manual hoje rende CDI simulado (`interest_enabled`
     ligado por padrão, `accrue_all_pockets`), e esse ganho vai para a carteira no resgate.
-    Com a Q36 (rendimento só do Open Finance), isso é a **Q43**, abaixo. Até ela ser
-    decidida, a foto conta a caixinha manual **pelo principal**, e o rendimento simulado
-    aparece à parte, como estimativa, fora do patrimônio.
-- **Q43 — a decidir: o manual continua rendendo?** Vale para a caixinha manual e para o
-  investimento manual antigo (Q37): os dois rendem juro simulado sozinhos — a caixinha por
-  `accrue_all_pockets`, o investimento por `accrue_all_users_investments`
-  (`core/services/investment_scheduler.py`), que grava o ganho no saldo. Sugestão: não —
-  vira só dinheiro separado (ou registro antigo), sem rendimento simulado, e o ganho já
-  acumulado entra no saldo uma última vez, com aviso. A alternativa é manter o rendimento
-  como estimativa visível, mas nunca somado ao patrimônio. Até a decisão, a foto conta os
-  dois **pelo principal** (na caixinha, o valor guardado; no investimento, o
-  `principal_remaining` dos lotes abertos), e o ganho simulado fica à parte, como
-  estimativa.
+    Com a Q36 isso acaba: ver a **Q43**, abaixo.
+- **Q43 — o manual para de render** (decisão do dono, 2026-09-25). Vale para a caixinha
+  manual e para o investimento manual antigo (Q37), que hoje rendem juro simulado sozinhos
+  — a caixinha por `accrue_all_pockets`, o investimento por `accrue_all_users_investments`
+  (`core/services/investment_scheduler.py`), que grava o ganho no saldo. Os dois laços
+  param para o que é manual **antes do job da foto** (etapa 0), para todos os usuários e
+  também no painel antigo, como a recorrente (Q42). O ganho já acumulado entra no saldo
+  uma última vez, com um aviso ao usuário, e daí em diante a caixinha é só dinheiro
+  separado e o investimento é registro antigo com saldo parado. Com isso a foto conta o
+  saldo deles como está, sem parte simulada. Testes: laço de juros rodando depois do
+  desligamento (não mexe em manual); o aviso do último ganho aparece uma vez só.
 - **Q39 — os defeitos de dinheiro do código atual são consertados**, não congelados, num PR
   próprio (faixa Completo, com o time): o resgate que pula juro de índice atrasado, o
   desfazer que não devolve o cursor, o desfazer de resgate anterior que cria dinheiro, e o
