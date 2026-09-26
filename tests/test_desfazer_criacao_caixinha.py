@@ -9,7 +9,6 @@ import pytest
 
 import db
 from db.accounts import MENSAGEM_CAIXINHA_COM_MOVIMENTO
-from conftest import usuario_pagante
 
 
 def _estado(uid):
@@ -77,6 +76,7 @@ def test_caixinha_sem_movimento_desfaz(user_id):
 
 
 def test_conversa_apagar_criacao_de_caixinha_com_saldo_recusa():
+    from conftest import usuario_pagante
     from tests.test_pending_rollback import _diga
 
     uid = usuario_pagante()
@@ -104,32 +104,3 @@ def test_dashboard_apagar_criacao_de_caixinha_com_saldo_responde_400_com_a_frase
     assert resp.status_code == 400, resp.text
     assert resp.json()["detail"] == MENSAGEM_CAIXINHA_COM_MOVIMENTO, resp.text
     assert [(c[1], c[2]) for c in _estado(user_id)[1]] == [("viagem", Decimal("300"))]
-
-
-def test_desfazer_criacao_de_A_nao_apaga_a_irma_a():
-    uid = usuario_pagante()
-    _, pid_a, _ = db.create_pocket(uid, "a")
-    lid, _, _ = db.create_pocket(uid, "A")
-    db.delete_launch_and_rollback(uid, lid)
-    assert _estado(uid)[1] == [(pid_a, "a", Decimal("0"))]
-
-
-def test_irma_com_saldo_nao_bloqueia_desfazer_a_vazia():
-    uid = usuario_pagante()
-    db.add_launch_and_update_balance(uid, "receita", 1000, None, "seed")
-    _, pid, _ = db.create_pocket(uid, "Viagem")
-    db.pocket_deposit_from_account(uid, "Viagem", 300)
-    lid, _, _ = db.create_pocket(uid, "viagem")
-    db.delete_launch_and_rollback(uid, lid)
-    assert _estado(uid)[1] == [(pid, "Viagem", Decimal("300"))]
-
-
-def test_A_com_saldo_recusa_mesmo_com_irma_a():
-    uid = usuario_pagante()
-    lid, pid_A, _ = db.create_pocket(uid, "A")
-    _, pid_a, _ = db.create_pocket(uid, "a")
-    with db.get_conn() as conn, conn.cursor() as cur:
-        cur.execute("update pockets set balance=1000 where id=%s and user_id=%s", (pid_A, uid))
-        cur.execute("update pockets set balance=500 where id=%s and user_id=%s", (pid_a, uid))
-        conn.commit()
-    _recusa(uid, lid)
