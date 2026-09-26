@@ -14,8 +14,9 @@ logger = logging.getLogger(__name__)
 
 # Recusas de domínio do `delete_launch_and_rollback`: (classe, evento de log,
 # frase). Fonte única do apagar singular e do lote. Ordem importa: o
-# `InvestmentMovementNotLast` é subclasse do `LaunchUnsafeRollback` e vem antes.
-# Só a frase dele recebe `{e}` (o `str` é a constante `MENSAGEM_NAO_E_O_ULTIMO`);
+# `InvestmentMovementNotLast` e o `PocketHasMovement` são subclasses do
+# `LaunchUnsafeRollback` e vêm antes. Só as frases deles recebem `{e}` (o `str`
+# é a constante `MENSAGEM_NAO_E_O_ULTIMO`/`MENSAGEM_CAIXINHA_COM_MOVIMENTO`);
 # texto de erro de banco nas outras chegaria cru ao usuário.
 _RECUSAS_APAGAR = (
     # PERMANENTE: sem `efeitos` não dá pra reverter o saldo. Mesma distinção do
@@ -25,6 +26,8 @@ _RECUSAS_APAGAR = (
      "revertido, então mantive ele intacto pra não bagunçar seu saldo."),
     # Tem contorno: desfazer os movimentos mais novos do investimento primeiro.
     (db.InvestmentMovementNotLast, "delete_launch_movimento_posterior",
+     "🐷 Não apaguei o lançamento **#{n}**. {e}"),
+    (db.PocketHasMovement, "delete_launch_caixinha_com_movimento",
      "🐷 Não apaguei o lançamento **#{n}**. {e}"),
     # PERMANENTE: `efeitos` existe mas não se reverte POR INTEIRO (chave de
     # escritor novo, `{}` degenerado, lote de caixinha que o

@@ -38,13 +38,16 @@ export type RetornoGoogle =
  * Lê a URL de volta. Scheme e host EXATOS, e exatamente UM parâmetro conhecido
  * com valor não vazio; qualquer outra coisa é `invalido`. À mão, sem `URL`: o
  * polyfill do Hermes não tem prova aqui de que separa host e caminho como o
- * navegador (`pigbank://auth.x`, `pigbank://auth/x`).
+ * navegador (`pigbank://auth.x`, `pigbank://auth/x`). O fragmento é descartado
+ * porque o 302 do callback herda o `#` da URL de entrada (RFC 7231 §7.1.2) e o
+ * `ASWebAuthenticationSession` o devolve junto (Origem: #613).
  */
 export function lerRetorno(url: string): RetornoGoogle {
-  if (!url.startsWith(`${RETORNO}?`)) return { tipo: "invalido" };
-  const par = url.slice(RETORNO.length + 1);
+  const semFragmento = url.split("#", 1)[0] ?? "";
+  if (!semFragmento.startsWith(`${RETORNO}?`)) return { tipo: "invalido" };
+  const par = semFragmento.slice(RETORNO.length + 1);
   const igual = par.indexOf("=");
-  if (igual < 1 || par.includes("&") || par.includes("#")) return { tipo: "invalido" };
+  if (igual < 1 || par.includes("&")) return { tipo: "invalido" };
   const chave = par.slice(0, igual);
   let valor: string;
   try {

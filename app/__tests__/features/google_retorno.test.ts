@@ -14,6 +14,14 @@ describe("lerRetorno", () => {
     ["pigbank://auth?erro=falha", { tipo: "erro", valor: "falha" }],
     ["pigbank://auth?erro=email_nao_verificado", { tipo: "erro", valor: "email_nao_verificado" }],
     ["pigbank://auth?erro=conta_em_exclusao", { tipo: "erro", valor: "conta_em_exclusao" }],
+    // O fragmento herdado pelo 302 do callback é descartado (Origem: #613).
+    ["pigbank://auth?code=a#b", { tipo: "code", valor: "a" }],
+    ["pigbank://auth?code=a#", { tipo: "code", valor: "a" }],
+    ["pigbank://auth?onboarding=x#_=_", { tipo: "onboarding", valor: "x" }],
+    ["pigbank://auth?erro=falha#y", { tipo: "erro", valor: "falha" }],
+    ["pigbank://auth?code=a#b&code=c", { tipo: "code", valor: "a" }], // o `&` do fragmento não conta
+    ["pigbank://auth?code=a#b#c", { tipo: "code", valor: "a" }], // corta no PRIMEIRO `#`
+    ["pigbank://auth?code=a%23b", { tipo: "code", valor: "a#b" }], // `#` codificado não é fragmento
   ])("%s → reconhecido", (url, esperado) => {
     expect(lerRetorno(url)).toEqual(esperado);
   });
@@ -35,7 +43,12 @@ describe("lerRetorno", () => {
     "pigbank://auth?=abc",
     "pigbank://auth?code",
     "pigbank://auth?code=a&onboarding=b",
-    "pigbank://auth?code=a#b",
+    "pigbank://auth?code=#x",
+    "pigbank://auth#?code=x",
+    "pigbank://auth?#code=x",
+    "pigbank://evil?code=x#y",
+    "pigbank://auth.evil.com?code=x#y",
+    "pigbank://auth?code=a&onboarding=b#y",
     "pigbank://auth?token=abc",
     "pigbank://auth?erro=expirou", // não existe mais: cai no genérico
     "pigbank://auth?erro=toString",
