@@ -571,6 +571,12 @@ def _build_autolink_warning_message(status: str, auto_link_result: dict[str, Any
             "⚠️ Sua conta já tem outro WhatsApp vinculado. "
             f"Este número ({mask_phone(auto_link_result['wa_phone'])}) não foi conectado automaticamente."
         )
+    if status == "merge_conflict":
+        return (
+            "⚠️ Sua conta do site e este WhatsApp já têm dados cada um, então não dá pra juntar "
+            "os dois automaticamente. Por enquanto, o que você mandar aqui fica na conta do WhatsApp.\n"
+            "Pra ter tudo num lugar só, use este número numa conta só."
+        )
     return None
 
 
@@ -725,6 +731,7 @@ def process_message(message: InboundMessage) -> None:
             "multiple_accounts",
             "wa_linked_other_account",
             "account_has_other_whatsapp",
+            "merge_conflict",
         }:
             if _maybe_send_autolink_greeting_warning(
                 reply_to,
