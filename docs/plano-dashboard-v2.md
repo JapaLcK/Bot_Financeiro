@@ -446,7 +446,13 @@ tecnologia, podendo refazer o que for preciso, com calma (Q5).
     (`BANK_ACCOUNTS_SQL`), com a correção de lançamento fundido
     (`MERGED_WALLET_DELTA_SQL`) — as duas em `db/open_finance.py` — para a transação já refletida no banco não ser
     debitada duas vezes. A função reusa essas consultas numa versão que recebe o cursor,
-    dentro da mesma transação, sem reescrever a regra;
+    dentro da mesma transação, sem reescrever a regra. Depois que o usuário confirma a
+    carteira (Q37), o valor confirmado **é a nova base**: as fusões de antes dela já não
+    estão dentro desse valor, então a correção só vale para fusões feitas depois da
+    confirmação, e desfazer depois uma fusão antiga não mexe na carteira confirmada. Sem
+    isso, confirmar R$ 0 com um gasto de R$ 100 fundido antes daria R$ 100 a mais. Teste:
+    confirmar a carteira com fusão antiga, e desfazer essa fusão depois (o patrimônio não
+    muda nos dois);
   - **reset no meio:** a visão consistente não impede o "Recomeçar do zero" de apagar o
     histórico entre a leitura e a gravação da foto, e aí a foto velha voltaria. O job pega
     uma trava consultiva do usuário em modo compartilhado; o reset a pega em modo
