@@ -388,12 +388,16 @@ tecnologia, podendo refazer o que for preciso, com calma (Q5).
   **Uma foto por usuário por dia:** restrição única em `(user_id, dia)`, e a foto guarda
   **a hora da leitura** — tirada no **primeiro comando** da transação (`select
   clock_timestamp()`), que é o que fixa a visão `REPEATABLE READ`; a hora do `BEGIN` não
-  serve, porque a visão só nasce no primeiro comando. A gravação só substitui a do
+  serve, porque a visão só nasce no primeiro comando. Em `REPEATABLE READ`, a gravação que
+  esbarra numa linha que outra instância acabou de confirmar aborta com erro de
+  serialização (`40001`): nesse caso a foto **refaz a leitura inteira** numa transação nova
+  e tenta de novo, poucas vezes, antes de desistir daquele usuário até a rodada seguinte. A gravação só substitui a do
   mesmo dia se a leitura dela for mais nova — senão uma instância que leu antes e terminou
   depois gravaria o saldo velho por cima do novo.
 
-  Testes: duas rodadas do job ao mesmo tempo, a que leu antes terminando depois (fica um
-  ponto só, com o valor da leitura mais nova); caixinha ligada a um CDB do
+  Testes: duas rodadas do job ao mesmo tempo, a que leu antes terminando depois, e a
+  que leu antes confirmando primeiro com a mais nova esbarrando nela (nos dois fica um ponto
+  só, com o valor da leitura mais nova); caixinha ligada a um CDB do
   Open Finance (conta uma vez só); posição em dólar,
   solta e ligada a uma caixinha (fica fora e aparece o aviso); foto no meio de um aporte
   (conta uma vez); foto com transferência de banco pendente (marcada como incerta), e a
