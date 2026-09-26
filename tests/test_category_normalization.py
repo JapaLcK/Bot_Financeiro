@@ -53,7 +53,7 @@ from fastapi.testclient import TestClient
 import db
 from adapters.whatsapp import wa_runtime
 from adapters.whatsapp.wa_parse import InboundMessage
-from conftest import promote_to_pro
+from conftest import em_carencia, promote_to_pro
 from core.services.category_service import infer_category
 from db.categories import (
     CATEGORY_NAME_MAX_LEN,
@@ -511,6 +511,7 @@ def test_free_nao_cria_categoria_custom(user_id):
     Comportamento pra quem não tem o plano: grava o texto no lançamento SEM
     ACENTO, exatamente como a `main`, e NÃO cria linha no catálogo.
     """
+    em_carencia(user_id)
     launch_id = _novo_launch(user_id)
     client = TestClient(dashboard.app)
     headers = _auth(client, user_id)
@@ -544,6 +545,7 @@ def test_free_duas_grafias_colapsam_numa_so(user_id):
     (sem o `_custom_categories_allowed`) devolve 'padaria do zé' != 'padaria
     do ze' e o assert de igualdade cai.
     """
+    em_carencia(user_id)
     a_id = _novo_launch(user_id)
     b_id = _novo_launch(user_id)
     client = TestClient(dashboard.app)
@@ -627,11 +629,9 @@ def test_invisivel_nao_fica_gravado(pro_user_id):
 
 
 @pytest.mark.parametrize("pago", [False, True])
-def test_gate_de_categoria_custom_com_planos_v2(user_id, monkeypatch, pago):
-    """O `conftest` roda este arquivo no v1 (ele está em `_AINDA_EM_V1`), mas o
-    DEFAULT de produção é
-    LIGADO — e o gate saiu do monólito pro `plan_service.plan_gate_ok` neste
-    PR. Este é o único teste do PR que roda o ramo v2.
+def test_gate_de_categoria_custom_com_planos_v2(user_id, pago):
+    """O gate de categoria custom saiu do monólito pro `plan_service.plan_gate_ok`
+    neste PR; este teste o exercita pelo HTTP, no v2 (o mundo da suíte).
 
     Grátis não cria categoria custom; pago (tier >= essencial) cria — os dois
     gravam o texto no lançamento de qualquer jeito.
@@ -642,41 +642,11 @@ def test_gate_de_categoria_custom_com_planos_v2(user_id, monkeypatch, pago):
     `subscription_required`) e nunca chega neste gate de categoria. Sobrou UM
     estado em que tier `free` e acesso coexistem — a CARÊNCIA de inadimplência:
     plano pago vencido com o relógio aberto, que `tem_direito_hoje` deixa entrar
-    pelo lado direito do OR. É esse estado que o caso passou a montar, e ele é
+    pelo lado direito do OR. É esse estado que `em_carencia` monta, e ele é
     a única porta de entrada real para o gate de categoria do Grátis hoje.
     De quebra, é o único teste que exercita a carência ponta a ponta por HTTP.
     """
-    monkeypatch.setenv("PLANS_V2_ENABLED", "1")
-    monkeypatch.setenv("ACCESS_GATE_ENABLED", "1")
-    if pago:
-        promote_to_pro(user_id)
-    else:
-        # Carência aberta: `plan_expires_at` no passado (tier vira free) + o par
-        # (relógio, status) da INVARIANTE. Deltas absolutos, nunca
-        # `DUNNING_GRACE_DAYS ± n`.
-        promote_to_pro(user_id)
-        from datetime import datetime as _dt, timedelta as _td, timezone as _tz
-        from db.connection import get_conn as _gc
-        agora = _dt.now(_tz.utc)
-        with _gc() as _c:
-            with _c.cursor() as _cur:
-                _cur.execute(
-                    "update auth_accounts set plan_expires_at=%s, past_due_since=%s,"
-                    "       last_payment_status='past_due' where user_id=%s",
-                    (agora - _td(days=1), agora - _td(days=2), user_id),
-                )
-            _c.commit()
-        from db_support import invalidate_auth_user_cache as _inval
-        _inval(user_id)
-        # A OUTRA perna do gate de página/dados: sem `plan_selected_at` o
-        # `needs_plan_selection` barra antes do `has_app_access` (402
-        # `plan_selection_required`). Quem está na carência já escolheu plano
-        # um dia — é assim que a conta chegou a ter assinatura para falhar.
-        db.mark_plan_selected(user_id)
-        _inval(user_id)
-        from core.services.plan_service import get_plan_tier, has_app_access
-        assert get_plan_tier(user_id) == "free", "pré-condição: o tier tem de ser free"
-        assert has_app_access(user_id) is True, "pré-condição: a carência concede acesso"
+    em_carencia(user_id) if not pago else promote_to_pro(user_id)
     launch_id = _novo_launch(user_id)
     client = TestClient(dashboard.app)
     headers = _auth(client, user_id)
@@ -1010,7 +980,6 @@ def _mock_gpt(monkeypatch, categoria: str) -> None:
     import ai_router
     monkeypatch.setenv("OPENAI_API_KEY", "test-key")
     monkeypatch.setattr(ai_router, "classify_category_with_gpt", lambda *a, **k: categoria)
-    monkeypatch.setattr("core.services.plan_service.is_pro", lambda uid: True)
 
 
 def test_round_trip_duas_grafias_uma_categoria(wa_user_id, monkeypatch):

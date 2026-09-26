@@ -15,8 +15,8 @@ só (§0.7), mesmo padrão de `tests/test_gate_saida_de_emergencia.py`. A divis�
 por assunto (§0.5) e porque este arquivo bateu no teto de 350 linhas
 (`tests/test_max_lines_python.py`).
 
-O `conftest.py` roda este par no v2 com o gate ligado (nenhum dos dois está em
-`_AINDA_EM_V1`), então hoje a fixture `_gate_ligado` repete o conftest. Ela é
+O `conftest.py` roda a suíte no v2 com o gate ligado, então hoje a fixture
+`_gate_ligado` repete o conftest. Ela é
 PRÉ-CONDIÇÃO no v1: lá o gate é DORMENTE (sem `PAYWALL_ENABLED` o
 `has_app_access` devolve True antes de consultar qualquer coisa), e sem ela o
 arquivo não fica verde nem tautológico — ele EXPLODE, porque o
@@ -24,9 +24,9 @@ arquivo não fica verde nem tautológico — ele EXPLODE, porque o
 neutralizando o corpo da fixture (2026-09-11, quando a suíte inteira rodava no
 v1): o ÚNICO caso que sobrevive nos dois arquivos é
 `test_pagante_continua_entrando_nas_cinco_rotas` — é o único que não passa por
-`_cortar` nem espera 402. Para remedir (hoje, só com o par em `_AINDA_EM_V1`):
+`_cortar` nem espera 402. Para remedir (hoje, só puxando o freio do v2):
 
-    # neutralize o corpo da fixture `_gate_ligado` e rode os dois arquivos
+    # troque o corpo da `_gate_ligado` por monkeypatch.setenv("PLANS_V2_ENABLED", "0")
     .venv/bin/python -m pytest tests/test_settings_saida_de_emergencia.py \
                               tests/test_settings_saida_guardas.py -q
 
@@ -84,10 +84,9 @@ SENHA_HASH = _hash_password(SENHA)
 
 @pytest.fixture(autouse=True)
 def _gate_ligado(monkeypatch):
-    """O corte é o default de produção, e o `conftest.py` já roda este arquivo
-    assim (ele não está em `_AINDA_EM_V1`); fixar as duas envs o mantém no v2
-    mesmo se ele entrar na lista, onde sem ela o arquivo EXPLODE (docstring do
-    módulo)."""
+    """O corte é o default de produção, e o `conftest.py` já roda a suíte
+    assim; fixar as duas envs o mantém no v2 mesmo se o padrão da suíte mudar,
+    e no v1 sem ela o arquivo EXPLODE (docstring do módulo)."""
     monkeypatch.setenv("PLANS_V2_ENABLED", "1")
     monkeypatch.setenv("ACCESS_GATE_ENABLED", "1")
 
