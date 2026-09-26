@@ -154,6 +154,7 @@ def aviso_de_cota(user_id: int) -> str | None:
     com IA só a perde pela cota mensal."""
     from core.services.plan_service import (
         plans_v2_enabled, get_user_limits, get_plan_tier, tier_at_least,
+        tier_publico, ai_monthly_limit_for_tier,
     )
     if not (plans_v2_enabled() and get_user_limits(user_id)["ai_conversational_enabled"]):
         return None
@@ -177,7 +178,20 @@ def aviso_de_cota(user_id: int) -> str | None:
     except Exception:
         estado = "carencia"
     if estado == "carencia":
-        return acabou + billing_copy.IA_COTA_EM_CARENCIA
+        # Pagar não zera o contador (só o dia 1º): "volta na hora" só para quem
+        # ainda cabe na cota do plano pago, que a coluna `plan` guarda na carência.
+        # Exceção: o `reduz`/`unpaid` do `recompute_entitlement` grava `plan='free'`
+        # sem fechar `past_due_since` — aí sai o texto sem a promessa, o lado seguro.
+        # Na dúvida, sem a promessa.
+        try:
+            plan = (db.get_auth_user(user_id) or {}).get("plan") or ""
+            pago = tier_publico(plan.lower())
+            volta = db.ai_get_usage_this_month(user_id) < ai_monthly_limit_for_tier(pago)
+        except Exception:
+            volta = False
+        if volta:
+            return acabou + billing_copy.IA_COTA_EM_CARENCIA
+        return acabou + billing_copy.IA_COTA_EM_CARENCIA_SEM_COTA
     return acabou + "Nos planos pagos a conversa continua: https://pigbankai.com/precos"
 
 

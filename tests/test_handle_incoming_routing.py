@@ -87,9 +87,12 @@ def test_carencia_com_cota_esgotada_manda_ao_cartao_e_saldo_segue(spy_ai, free_s
 
     out = hi.handle_incoming(_msg(free_small_uid, "piggy quanto gastei com mercado?"))
     assert spy_ai == []
-    texto = out[0].text
-    assert "A cobrança da sua assinatura não passou" in texto and "/conta" in texto
-    assert "/precos" not in texto and "planos pagos" not in texto
+    from core.services import billing_copy
+    # 1.000.000 estoura também a cota do Plus pago: pagar não a devolve este mês.
+    assert out[0].text == (
+        "🐷 Suas mensagens com o Piggy deste mês acabaram!\n"
+        + billing_copy.IA_COTA_EM_CARENCIA_SEM_COTA
+    )
 
     out = hi.handle_incoming(_msg(free_small_uid, "saldo"))
     assert spy_ai == []

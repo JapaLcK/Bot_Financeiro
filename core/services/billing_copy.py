@@ -93,6 +93,11 @@ IA_COTA_EM_CARENCIA = (
     "A cobrança da sua assinatura não passou — assim que ela entrar, a conversa "
     "volta na hora. Pra atualizar o cartão: pigbankai.com/conta"
 )
+# B3 de quem já gastou a cota do plano pago: pagar não zera o contador do mês.
+IA_COTA_EM_CARENCIA_SEM_COTA = (
+    "A cobrança da sua assinatura não passou. Pra atualizar o cartão: "
+    "pigbankai.com/conta — as mensagens renovam no dia 1º."
+)
 OPEN_FINANCE_EM_CARENCIA = (
     "A cobrança da sua assinatura não passou — o Open Finance volta quando ela "
     "entrar. Pra atualizar o cartão: /conta"
