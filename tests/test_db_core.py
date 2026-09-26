@@ -168,6 +168,7 @@ def test_attempt_whatsapp_phone_link_religa_quando_stale_uid_tem_auth_diferente(
                 insert_auth_account_pii(cur, stale_wa_uid, stale_email, phone="5511000000000")
                 # simula identidade WA stale apontando para stale_wa_uid
                 bind_identity_pii(cur, "whatsapp", wa_phone, stale_wa_uid)
+                bind_identity_pii(cur, "email", stale_email, stale_wa_uid)
             conn.commit()
 
         result = attempt_whatsapp_phone_link(wa_phone, current_user_id=stale_wa_uid)
@@ -193,6 +194,20 @@ def test_attempt_whatsapp_phone_link_religa_quando_stale_uid_tem_auth_diferente(
         assert row["user_id"] == user_id, (
             f"identidade WA deve apontar para {user_id}, aponta para {row['user_id']}"
         )
+
+        # #635 (D3): com login nos dois lados, o login da origem é apagado, e o
+        # e-mail dele não vira porta para o destino — cadastro novo = conta nova.
+        with get_conn() as conn:
+            with conn.cursor() as cur:
+                cur.execute("select count(*) as n from auth_accounts where user_id = %s", (stale_wa_uid,))
+                assert cur.fetchone()["n"] == 0, "o login antigo da origem sobrou"
+        novo = confirm_email_verification(stale_email, create_email_verification(
+            stale_email, "senha-forte-123", f"55119{uuid.uuid4().int % 100_000_000:08d}"))
+        assert novo["user_id"] not in (user_id, stale_wa_uid)
+        with get_conn() as conn:
+            with conn.cursor() as cur:
+                cur.execute("select count(*) as n from auth_accounts where user_id = %s", (user_id,))
+                assert cur.fetchone()["n"] == 1, "o e-mail antigo virou 2ª conta de login no destino"
     finally:
         # stale pode ter sido absorvido (merge) — tenta deletar mesmo assim
         with get_conn() as conn:
@@ -200,6 +215,9 @@ def test_attempt_whatsapp_phone_link_religa_quando_stale_uid_tem_auth_diferente(
                 cur.execute("delete from user_identities where provider='whatsapp' and external_id=%s", (wa_phone,))
                 cur.execute("delete from auth_accounts where user_id = %s", (stale_wa_uid,))
                 cur.execute("delete from users where id = %s", (stale_wa_uid,))
+                cur.execute("delete from user_identities where provider = 'email' and external_id = %s",
+                            (stale_email,))
+                cur.execute("delete from auth_accounts where email = %s", (stale_email,))
             conn.commit()
 
 

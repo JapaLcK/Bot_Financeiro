@@ -62,7 +62,7 @@ def user_exists(user_id: int) -> bool:
 
 class MergeRefused(Exception):
     """`merge_users` não junta (#607): dado financeiro dos dois lados, origem
-    presa (Open Finance vivo ou plano pago) ou colisão de unique na junção."""
+    presa (Open Finance vivo ou plano pago) ou colisão de unique/FK na junção."""
 
 
 # Onde mora "dado financeiro" para a recusa do `merge_users`. Com linha nestas
@@ -86,7 +86,21 @@ _DESTINO_VENCE = (
     ("household_budget_income", ("month",)),
     ("daily_report_prefs", ()),
     ("recurring_suggestion_dismissed", ("merchant_key", "amount")),
+    ("ai_pending_actions", ()),
+    ("budget_alert_sent", ("categoria", "ym", "threshold")),
 )
+
+# Movidas sem regra de colisão (#635): conversa com a IA, logs, dinheiro, Open
+# Finance terminal e afiliado. Unique que colidir (Pix aberto, `affiliates.user_id`)
+# vira `MergeRefused` no `merge_users`.
+_MOVIDAS = ("ai_messages", "ai_fallback_log", "audit_events", "auth_login_events", "plan_grants",
+            "pix_charges", "open_finance_connections", "open_finance_item_registry", "affiliates")
+
+# FKs em users(id) cuja coluna não se chama `user_id`.
+_OUTRAS_COLUNAS = (("pii_access_log", "subject_user_id"),
+                   ("affiliate_referrals", "referred_user_id"),
+                   ("affiliate_commissions", "referred_user_id"),
+                   ("prospect_referrals", "referred_user_id"))
 
 
 def _tem_dados_financeiros(cur, user_id: int) -> bool:
@@ -123,19 +137,22 @@ def _origem_presa(cur, user_id: int) -> bool:
 
 def merge_users(from_user_id: int, to_user_id: int) -> None:
     """
-    Move TODOS os dados de from_user_id → to_user_id.
+    Move os dados de from_user_id → to_user_id e APAGA a linha `users` da origem
+    no mesmo commit (#635): o que não foi movido some pelas FKs (sessões, tokens,
+    push, cache, agentes; com login nos dois lados, o login da origem).
 
     Recusa (`MergeRefused`, nada escrito) quando os dois lados têm dados
     financeiros, quando a origem está presa (`_origem_presa`) ou quando a junção
-    bate numa unique. Antes de mover launches, remove duplicatas que colidem na
+    bate numa unique ou numa FK composta (ex.: `fk_launches_space`, lançamento da
+    origem num `financial_spaces` dela). Antes de mover launches, remove duplicatas que colidem na
     unique uq_launches_user_source_external (user_id, source, external_id).
     """
     try:
         _merge_users(from_user_id, to_user_id)
-    except psycopg.errors.UniqueViolation as exc:
+    except (psycopg.errors.UniqueViolation, psycopg.errors.ForeignKeyViolation) as exc:
         # Sem str(exc): o texto do psycopg traz o valor da linha que violou.
         logger.warning(
-            "merge_users: unique na junção, recusado from=%s to=%s constraint=%s",
+            "merge_users: unique/FK na junção, recusado from=%s to=%s constraint=%s",
             from_user_id, to_user_id, exc.diag.constraint_name,
             extra={"user_id": to_user_id},
         )
@@ -196,10 +213,16 @@ def _merge_users(from_user_id: int, to_user_id: int) -> None:
             )
             cur.execute("delete from accounts where user_id=%s", (from_user_id,))
 
-            # 4) identidades / link_codes
+            cur.execute("select id from auth_accounts where user_id=%s limit 1", (to_user_id,))
+            to_has_auth = cur.fetchone() is not None
+
+            # 4) identidades / link_codes. Com login nos dois lados, o e-mail da
+            # origem fica e some com ela: movido, um cadastro novo com ele
+            # resolveria para o destino e daria uma 2ª auth_accounts lá (#635, D3).
             cur.execute(
-                "update user_identities set user_id=%s where user_id=%s",
-                (to_user_id, from_user_id),
+                "update user_identities set user_id=%s where user_id=%s"
+                " and (provider <> 'email' or not %s)",
+                (to_user_id, from_user_id, to_has_auth),
             )
             cur.execute(
                 "update link_codes set user_id=%s where user_id=%s",
@@ -220,6 +243,14 @@ def _merge_users(from_user_id: int, to_user_id: int) -> None:
                           "recurring_income_credits", "bill_instances", "bank_movement_declarations"):
                 cur.execute(
                     f"update {table} set user_id=%s where user_id=%s",
+                    (to_user_id, from_user_id),
+                )
+            # system_event_logs nasce no startup (core/admin_dashboard.py), não no init_db.
+            cur.execute("select to_regclass('system_event_logs') is not null as existe")
+            logs = ("system_event_logs",) if cur.fetchone()["existe"] else ()
+            for table, col in (*((t, "user_id") for t in (*_MOVIDAS, *logs)), *_OUTRAS_COLUNAS):
+                cur.execute(
+                    f"update {table} set {col}=%s where {col}=%s",
                     (to_user_id, from_user_id),
                 )
 
@@ -269,15 +300,16 @@ def _merge_users(from_user_id: int, to_user_id: int) -> None:
                 (to_user_id, from_user_id),
             )
 
-            # 8) auth_accounts: migra se to_user não tem
-            cur.execute("select id from auth_accounts where user_id=%s limit 1", (to_user_id,))
-            to_has_auth = cur.fetchone() is not None
-
+            # 8) login (conta, Google, MFA): migra se to_user não tem
             if not to_has_auth:
-                cur.execute(
-                    "update auth_accounts set user_id=%s where user_id=%s",
-                    (to_user_id, from_user_id),
-                )
+                for table in ("auth_accounts", "auth_identities", "user_mfa", "user_mfa_backup_codes"):
+                    cur.execute(
+                        f"update {table} set user_id=%s where user_id=%s",
+                        (to_user_id, from_user_id),
+                    )
+
+            # O resto segue a política das FKs de db/schema_repairs.py, a mesma do delete_user_data.
+            cur.execute("delete from users where id = %s", (from_user_id,))
 
         conn.commit()
 
