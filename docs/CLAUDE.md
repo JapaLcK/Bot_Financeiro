@@ -278,7 +278,7 @@ por isso recusa com 409 quando `last_payment_status` é `trialing|active|past_du
 ### Tarefas de fundo
 
 Sobem no startup do app quando `RUN_BACKGROUND_TASKS != "0"`: rendimento de
-investimento, Open Finance (abaixo), cobrança de recorrentes, agendadores de
+investimento, Open Finance (abaixo), contas a pagar dos recorrentes, agendadores de
 engajamento e de IA proativa, retenção de eventos de login, poda das tabelas de
 refresh token / challenge de MFA / cadastro Google pendente
 (`core/services/table_cleanup.py`). Ficam desligadas só onde
