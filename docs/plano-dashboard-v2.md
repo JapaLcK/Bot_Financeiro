@@ -81,6 +81,17 @@ O que isso muda neste plano:
 - **Lançar, no v2, é lançar na carteira.** "Lançamentos (ver, lançar, editar, apagar)" da
   primeira versão vira: ver tudo; lançar, editar e apagar só o que é da carteira Piggy.
   Transação do Open Finance não se cria nem se apaga à mão.
+- **Transação importada: identidade e moeda.** O import do Open Finance
+  (`_insert_of_shadow`, em `db/open_finance.py`) grava o lançamento com `external_id` =
+  só o id da transação no provedor, e a unicidade é `(user_id, source, external_id)` —
+  enquanto no espelho ela é por conta. Os ids do Pluggy são UUID, então colisão real é
+  improvável, mas a identidade passa a ser a mesma chave por conta e estável na reconexão
+  usada no saque (etapa 2, Lançamentos, com migração das linhas existentes e teste de dois
+  ids iguais em contas diferentes). E o import grava todo lançamento como `BRL`, mesmo de
+  conta em outra moeda: a regra de moeda do patrimônio vale também para as transações —
+  o lançamento guarda a moeda real (ou desconhecida), e Lançamentos e Para onde vai somam
+  só BRL, mostrando os de outra moeda à parte. Teste: conta em dólar com transações, nas
+  duas telas.
 - **Dinheiro que muda de lugar não é gasto nem receita.** Sacar no caixa eletrônico: o Open
   Finance vê só o débito no banco; sem nada mais, o patrimônio cai e o relatório mostra um
   gasto que não houve. Depositar dinheiro vivo é o inverso. Por isso existe uma
@@ -174,7 +185,8 @@ Decidido pelo dono na mesma data (Q37–Q41):
   principal); retirar de caixinha manual com rendimento simulado e tirar a foto (a
   confirmação cai); recorrente antiga casada cuja transação o banco apaga com a conexão
   ativa (a linha antiga volta); conta corrigida de BRL para moeda desconhecida e de volta
-  (a linha quebra nas duas, sem perda nem ganho falsos).
+  (a linha quebra nas duas, sem perda nem ganho falsos); carteira derrubada e reconfirmada
+  com outro valor entre duas fotos (a linha quebra).
 - **Q38 — a caixinha manual continua**, como exceção à Q36: ela é dinheiro separado pelo
   próprio usuário, e depositar e retirar nela segue existindo no v2. A caixinha espelhada
   do banco continua vindo do Open Finance. Consequências:
@@ -454,8 +466,12 @@ tecnologia, podendo refazer o que for preciso, com calma (Q5).
     muda o que entra na soma, e o gráfico mostraria um salto que não é ganho nem perda.
     Desconectar apaga a conexão (`disconnect_open_finance_connection`), então no dia
     seguinte não sobra conexão para conferir. Por isso cada foto guarda **a sua
-    cobertura**: quais conexões e quais contas entraram nela, e quais itens ficaram fora por
-    moeda. O gráfico quebra a linha (com a legenda do que mudou: "banco conectado",
+    cobertura**: quais conexões e quais contas entraram nela, quais itens ficaram fora por
+    moeda, e a **época de conferência** — um número que sobe toda vez que a confirmação da
+    carteira ou alguma reconciliação (investimento manual, caixinha, recorrente antiga)
+    cai ou é refeita. Assim uma correção de base que começa e termina entre duas fotos
+    (a carteira confirmada em R$ 50, derrubada e reconfirmada em R$ 0 no mesmo dia) quebra
+    a linha em vez de aparecer como perda de R$ 50. O gráfico quebra a linha (com a legenda do que mudou: "banco conectado",
     "desconectado", "conta em outra moeda") quando a cobertura muda de um ponto para o
     outro, em vez de ligar os dois pontos como se fosse variação — corrigir a moeda de uma
     conta de BRL para desconhecida tiraria o saldo dela, e isso não é perda. O mesmo vale para **todo número derivado da série**
