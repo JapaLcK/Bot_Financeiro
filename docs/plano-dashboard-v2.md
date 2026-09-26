@@ -193,6 +193,9 @@ PR de cada etapa, não soluções prontas. Cada PR confere se ainda valem, decid
 **Etapas de tela (1 a 6)**
 - Etapa 2: identidade das transações importadas por conta (conta e cartão); editar a data
   de um lançamento fundido.
+- Etapa 3: desde a Q42 o gasto fixo diário, semanal e único entra na Previsão, uma
+  ocorrência por data — um diário gera até 90 itens em `compromissos`/`causas`. A tela
+  `/previsao` tem de agrupar por nome; o código de hoje não agrega nem limita.
 - Etapa 4: reserva designada, custo mensal por frequência, reserva só em reais; caixinha
   manual versus a do banco.
 - Etapa 6: variação do período só dentro de um trecho sem quebra.

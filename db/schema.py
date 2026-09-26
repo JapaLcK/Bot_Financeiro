@@ -1351,11 +1351,10 @@ def init_db():
         """,
 
         # ─── Gastos Fixos / Recorrentes (Sprint 4) ──────────────────────────────
-        # Pro-only. Cobrança automática via cron no dia `due_day` de cada mês.
-        # `last_charged_ym` = idempotência (não cobra 2x no mesmo mês).
+        # Pro-only. Só PREVÊ (Q42): autopay entra na Previsão, 'manual' vira conta a pagar.
+        # `last_charged_ym` = idempotência do cobrador removido; nada mais escreve.
         # `last_amount` + `last_amount_changed_at` = detector de reajuste quando user edita.
-        # `payment_type='credit_card'` → cria credit_transaction na bill open atual.
-        # `payment_type='account'`     → cria launch despesa.
+        # `payment_type`/`card_id` = por onde o usuário paga; não geram lançamento.
         """
         create table if not exists recurring_expenses (
           id          bigserial primary key,
@@ -1404,10 +1403,10 @@ def init_db():
 
         # ─── Receitas Recorrentes ──────────────────────────────────────────────
         # Espelho de `recurring_expenses` do lado da entrada. Pro-only, mesma flag
-        # (recurring_expenses_enabled). Lança receita na conta no dia `pay_day`.
+        # (recurring_expenses_enabled). Só PREVÊ (Q42): entra na Previsão no dia `pay_day`.
         # Não tem payment_type/card_id: receita sempre cai na conta.
         # `is_primary` = renda principal (salário) vs extra (freela, aluguel).
-        # `last_credited_ym` = idempotência (não credita 2x no mesmo mês).
+        # `last_credited_ym` = idempotência do cobrador removido; nada mais escreve.
         """
         create table if not exists recurring_incomes (
           id          bigserial primary key,
@@ -1468,7 +1467,7 @@ def init_db():
         """alter table recurring_incomes add column if not exists pay_month int""",
 
         # migration: modo de pagamento do recorrente.
-        #   'autopay' (default, comportamento antigo) → o charger LANÇA sozinho no dia.
+        #   'autopay' (default) → gasto fixo: só entra na Previsão (Q42), não lança.
         #   'manual'  (conta a pagar / boleto)        → NÃO lança; o Piggy lembra e
         #     só lança quando o user confirma o pagamento. Aparece na sub-aba
         #     "Contas a pagar". Cada ciclo vira uma linha em bill_instances.

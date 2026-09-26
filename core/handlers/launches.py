@@ -794,7 +794,8 @@ def _total_despesa(
     investimento); `classify_open_finance_launch` decide por palavra da
     DESCRIÇÃO; e há `True`/`False` cravado em `pay_bill_amount`,
     `rebuild_bill_totals`, `set_initial_balance_route`, `adjust_balance_route`,
-    `_charge_one`, `_credit_one` e `mark_bill_paid`. Medido: o
+    o cobrador de recorrentes (removido na Q42; as linhas dele ficam) e
+    `mark_bill_paid`. Medido: o
     `adjust_balance_route` grava categoria='ajuste' com a flag True, e
     `is_internal_category("ajuste")` é False — o total negava e a lista mostrava
     R$ 700,00.
@@ -1275,8 +1276,8 @@ def add_from_entities(
     if recurring_offer:
         resposta += (
             f"\n\n💡 Você já lançou *{recurring_offer['name']}* de {fmt_brl(valor)} "
-            f"em outro mês. Quer marcar como *gasto fixo* (o Piggy lança sozinho "
-            f"todo mês)? Responda *sim* ou *não*."
+            f"em outro mês. Quer marcar como *gasto fixo* (o Piggy usa pra prever "
+            f"seu saldo todo mês)? Responda *sim* ou *não*."
         )
 
     # Nudge de onboarding: no primeiríssimo lançamento do usuário no WhatsApp,

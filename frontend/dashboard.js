@@ -4179,8 +4179,8 @@ const RECURRING_CATEGORY_EMOJI = {
 };
 
 // 1ª ocorrência do dia `dayNum` (1-31) em/depois de hoje E de `startISO`
-// (YYYY-MM-DD, opcional). Espelha o guard do charger: recorrência com início
-// futuro só "vence" a partir do start_date.
+// (YYYY-MM-DD, opcional): recorrência com início futuro só "vence" a partir do
+// start_date.
 function _nextRecurringOccurrence(dayNum, startISO, frequency, monthNum) {
   const floor = new Date();
   floor.setHours(0, 0, 0, 0);
@@ -4312,7 +4312,7 @@ function _renderFixedProGate() {
       <div class="empty" style="padding:30px;text-align:center;color:var(--text-3)">
         <div style="font-size:2.5rem;margin-bottom:10px"><i class="ph ph-lock" aria-hidden="true"></i></div>
         <div style="font-size:1.05rem;font-weight:700;color:var(--text);margin-bottom:6px">Gastos Fixos é Pro</div>
-        <div style="margin-bottom:14px">Cadastre suas assinaturas e contas recorrentes pra o Piggy lançar automaticamente todo mês.</div>
+        <div style="margin-bottom:14px">Cadastre suas assinaturas e contas fixas pro Piggy incluir na previsão do seu saldo.</div>
         <button class="mock-cta" onclick="showUpgradeModal('recurring_expenses')"><i class="ph ph-star" aria-hidden="true"></i> Ver Pro</button>
       </div>`;
   }
@@ -4656,7 +4656,7 @@ function _toggleRecurringFreqFields() {
 // Ajusta ajuda + título + campos do modal conforme o modo (gasto fixo vs conta
 // a pagar). Numa CONTA A PAGAR o valor é SEMPRE uma estimativa (o valor real é
 // informado ao pagar), então o campo de valor vira opcional; num GASTO FIXO o
-// valor é obrigatório (o charger debita esse valor sozinho).
+// valor é obrigatório (é ele que entra na previsão).
 function _toggleRecurringModeHint() {
   const mode = (document.getElementById("recurring-mode") || {}).value || "autopay";
   const hint = document.getElementById("recurring-mode-hint");
@@ -4680,7 +4680,7 @@ function _toggleRecurringModeHint() {
     if (amount) { amount.required = false; amount.placeholder = "estimativa, ex: 80,00"; }
     if (name) name.placeholder = "Ex: Água, Luz, Internet...";
   } else {
-    if (hint) hint.innerHTML = "<i class='ph ph-warning' aria-hidden='true'></i> <strong>Gasto fixo:</strong> é <strong>lançado automaticamente</strong> no dia escolhido (débito na conta). Pra contas que você paga na mão (boleto), use \"Conta a pagar\".";
+    if (hint) hint.innerHTML = "<i class='ph ph-warning' aria-hidden='true'></i> <strong>Gasto fixo:</strong> entra na <strong>previsão</strong> do seu saldo — o Piggy não lança sozinho. O pagamento de verdade vem do seu banco conectado, ou você registra se pagar em dinheiro. Pra ser lembrado antes do vencimento, use \"Conta a pagar\".";
     if (title && !isEdit) title.textContent = "Novo gasto fixo";
     if (paytypeRow) paytypeRow.style.display = "";
     if (label) label.textContent = "Valor (R$) *";
@@ -4814,7 +4814,7 @@ async function saveRecurring() {
 async function deleteRecurringFromModal() {
   if (!_recurringEditState.id) return;
   const ok = await confirmModal(
-    "Excluir este gasto fixo? Lançamentos passados ficam preservados. Só não vai mais cobrar automaticamente.",
+    "Excluir este gasto fixo? Os lançamentos que já existem ficam. Ele só sai da previsão.",
     { title: "Excluir gasto fixo", okText: "Excluir", danger: true },
   );
   if (!ok) return;
@@ -5643,7 +5643,7 @@ function _renderRecurringIncomeProGate() {
       <div class="empty" style="padding:30px;text-align:center;color:var(--text-3)">
         <div style="font-size:2.5rem;margin-bottom:10px"><i class="ph ph-lock" aria-hidden="true"></i></div>
         <div style="font-size:1.05rem;font-weight:700;color:var(--text);margin-bottom:6px">Receitas fixas é Pro</div>
-        <div style="margin-bottom:14px">Cadastre salário, aluguel e freelas recorrentes pra o Piggy lançar automaticamente todo mês.</div>
+        <div style="margin-bottom:14px">Cadastre salário, aluguel e freelas recorrentes pro Piggy incluir na previsão do seu saldo.</div>
         <button class="mock-cta" onclick="showUpgradeModal('recurring_expenses')"><i class="ph ph-star" aria-hidden="true"></i> Ver Pro</button>
       </div>`;
   }
@@ -5796,7 +5796,7 @@ function _ensureRecurringIncomeModal() {
       <div class="modal wide">
         <h3 id="recurring-income-edit-title">Nova receita fixa</h3>
         <p class="msub" style="background:rgba(34,197,94,.1);border:1px solid rgba(34,197,94,.3);border-radius:8px;padding:10px 12px;margin-bottom:14px;font-size:.78rem">
-          <i class="ph ph-coins" aria-hidden="true"></i> <strong>Importante:</strong> essa receita será <strong>lançada automaticamente</strong> todo mês no dia escolhido. Se o valor variar, é só editar aqui: o Piggy registra o reajuste.
+          <i class="ph ph-coins" aria-hidden="true"></i> <strong>Importante:</strong> essa receita entra na <strong>previsão</strong> do seu saldo, mas não é lançada sozinha. Se o valor variar, é só editar aqui: o Piggy registra o reajuste.
         </p>
         <form id="recurring-income-edit-form" onsubmit="event.preventDefault(); saveRecurringIncome();">
           <div class="invest-form">
@@ -5963,7 +5963,7 @@ async function saveRecurringIncome() {
 async function deleteRecurringIncomeFromModal() {
   if (!_recurringIncomeEditState.id) return;
   const ok = await confirmModal(
-    "Excluir esta receita fixa? Lançamentos passados ficam preservados. Só não vai mais lançar automaticamente.",
+    "Excluir esta receita fixa? Os lançamentos que já existem ficam. Ela só sai da previsão.",
     { title: "Excluir receita fixa", okText: "Excluir", danger: true },
   );
   if (!ok) return;

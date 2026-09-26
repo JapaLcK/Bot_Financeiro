@@ -5,7 +5,7 @@ linguagem natural no bot — ex: "gasto fixo de 100 todo dia 10 a partir de 10/0
 "salário de 3000 todo dia 5".
 
 Essencial+ (mesma feature `recurring_expenses` do dashboard). Não tira/credita nada
-na hora — só cadastra; o charger (core/services/recurring_charger.py) lança no dia.
+— só cadastra; o recorrente entra na Previsão e nunca é lançado sozinho (Q42).
 Ver [[project_recurring_start_date]] pra semântica de start_date.
 """
 from __future__ import annotations
@@ -19,7 +19,7 @@ _INCOME_WORDS = ("receita", "recebimento", "entrada", "renda", "salario", "salá
 
 # Marcadores de "conta a pagar / boleto" (payment_mode='manual'): o Piggy só
 # LEMBRA e o débito só entra quando o usuário confirma o pagamento — diferente
-# do gasto fixo (autopay), que debita sozinho no dia. Ver [[db/bills.py]].
+# do gasto fixo (autopay), que só entra na Previsão. Ver [[db/bills.py]].
 _MANUAL_MARKERS = (
     "boleto", "boletos", "conta a pagar", "contas a pagar", "conta pra pagar",
     "conta para pagar", "me lembra", "me lembre", "me lembrar", "lembrete",
@@ -67,7 +67,7 @@ def add(user_id: int, text: str, entities: dict) -> str:
         from core.services.plan_service import plan_gate_ok
         if not plan_gate_ok(user_id, "recurring_expenses"):
             return ("📅 Gastos e receitas fixas estão disponíveis a partir do *Essencial*. Assine pro Piggy "
-                    "lançar tudo sozinho todo mês, no dia certo. 🐷")
+                    "prever seu saldo com tudo que se repete todo mês. 🐷")
     except Exception:
         return "Não consegui conferir seu plano agora. Tente novamente em instantes."
 
@@ -76,7 +76,7 @@ def add(user_id: int, text: str, entities: dict) -> str:
 
     # Conta a pagar (boleto/lembrete): o valor é SEMPRE uma estimativa (o valor
     # real é informado ao pagar), então pode nascer sem valor. Gasto fixo/receita
-    # exigem o valor (o charger debita/credita esse valor sozinho).
+    # exigem o valor (é ele que entra na Previsão).
     is_manual = (not is_income) and (
         _is_manual_bill(text, entities) or _is_variable_amount(text, entities)
     )
@@ -159,7 +159,7 @@ def add(user_id: int, text: str, entities: dict) -> str:
             f"✅ *Receita fixa criada:* {rec['name']}\n"
             f"💰 {fmt_brl(valor)} · {_fmt_quando(frequency, dia, mes)}\n"
             f"📅 {_fmt_start(rec.get('start_date'))}\n"
-            f"É só o cadastro — o Piggy credita sozinho no dia. Edite na aba *Recorrentes* do dashboard."
+            f"É só o cadastro — o Piggy usa isso pra prever seu saldo, não lança sozinho. Edite na aba *Recorrentes* do dashboard."
         )
 
     from db.recurring import create_recurring_expense
@@ -200,7 +200,7 @@ def add(user_id: int, text: str, entities: dict) -> str:
         f"✅ *Gasto fixo criado:* {rec['name']}\n"
         f"💸 {fmt_brl(valor)} · débito na conta {_fmt_quando(frequency, dia, mes)}\n"
         f"📅 {_fmt_start(rec.get('start_date'))}\n"
-        f"Não tira nada agora — só no dia. Edite na aba *Recorrentes* do dashboard."
+        f"Entra na sua previsão — o Piggy não lança sozinho. Edite na aba *Recorrentes* do dashboard."
     )
 
 

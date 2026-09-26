@@ -88,8 +88,9 @@ def test_daily_trajectory_bate_com_project_nos_tres_marcos(monkeypatch):
          "due_day": 7, "amount": 111.0, "name": "Gasto inativo"},
         {"is_active": True, "payment_mode": "manual", "frequency": "monthly",
          "due_day": 8, "amount": 222.0, "name": "Gasto manual"},
+        # sem start_date o semanal não tem âncora: fica fora (em produção o início é obrigatório)
         {"is_active": True, "payment_mode": "autopay", "frequency": "weekly",
-         "due_day": 9, "amount": 333.0, "name": "Gasto semanal"},
+         "due_day": 9, "amount": 333.0, "name": "Gasto semanal sem início"},
     ]
     bills = [
         {"status": "pending", "due_date": today + timedelta(days=45), "amount": 150.0, "name": "Água"},
@@ -117,7 +118,7 @@ def test_daily_trajectory_bate_com_project_nos_tres_marcos(monkeypatch):
     vistos = {c["nome"] for item in traj["trajectory"] for c in item["compromissos"]}
     vistos |= {v["nome"] for v in traj["vencidos"]}
     assert {"Salário", "13º", "Aluguel", "Água", "Multa", "Nubank", "Inter"} <= vistos
-    assert not vistos & {"Receita inativa", "Gasto inativo", "Gasto manual", "Gasto semanal",
+    assert not vistos & {"Receita inativa", "Gasto inativo", "Gasto manual", "Gasto semanal sem início",
                          "Boleto pago", "Fora do horizonte"}
 
 
