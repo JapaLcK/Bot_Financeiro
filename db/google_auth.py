@@ -188,7 +188,9 @@ def consume_pending_google_signup(
     email = pending["email"]
     sub = pending["provider_sub"]
 
-    # Verifica colisão de telefone com outras contas
+    # Telefone de outra conta: descarta em silêncio e segue, sem dizer "em uso"
+    # (enumeraria números de WhatsApp) — igual ao `create_email_verification_impl`.
+    # A conta nasce sem WhatsApp e vincula depois pelo `whatsapp_link` (#585).
     with get_conn() as conn, conn.cursor() as cur:
         phone_hashes = [hash_pii_optional(c, kind="phone") for c in phone_candidates if c]
         cur.execute(
@@ -196,12 +198,14 @@ def consume_pending_google_signup(
             (phone_hashes,),
         )
         if cur.fetchone():
-            raise ValueError("Este número de WhatsApp já está em uso por outra conta.")
+            normalized_phone = None
 
     # user_id determinístico baseado no email — bate com create_email_verification
     user_id = get_or_create_canonical_user("email", email)
 
-    with get_conn() as conn:
+    # Corrida (outra conta grava o número depois da busca): o helper desfaz e
+    # grava sem telefone. `conn` é o do `with` logo abaixo.
+    def _gravar(normalized_phone):
         with conn.cursor() as cur:
             cur.execute(
                 """
@@ -242,8 +246,11 @@ def consume_pending_google_signup(
                  encrypt_pii_optional(email)),
             )
             cur.execute("delete from pending_google_signups where token = %s", (token,))
+
+    from db_support import gravar_descartando_telefone_disputado, invalidate_auth_user_cache
+    with get_conn() as conn:
+        gravar_descartando_telefone_disputado(conn, _gravar, normalized_phone)
         conn.commit()
-    from db_support import invalidate_auth_user_cache
     invalidate_auth_user_cache(user_id)
 
     link_code = create_link_code(user_id, minutes_valid=15)

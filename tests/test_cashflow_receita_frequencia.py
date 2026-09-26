@@ -1,9 +1,9 @@
-"""Receita recorrente única/semanal/diária: previsão, cadastro e edição (feature Pro).
+"""Frequência dos recorrentes na previsão, e cadastro e edição da receita (feature Pro).
 
-O cobrador (`core/services/recurring_charger.py`) só credita receita mensal e
-anual, mas a previsão contava as outras três como mensais: uma receita única de
-R$5.000 somava R$15.000 em 90 dias. Medido aqui pelas rotas de produção, com
-Postgres real:
+Receita só aceita mensal e anual, mas a previsão contava as outras três como
+mensais: uma receita única de R$5.000 somava R$15.000 em 90 dias. Gasto fixo aceita
+as cinco frequências e, desde a Q42 (recorrente só prevê), todas entram na previsão
+na data de cada ocorrência. Medido aqui pelas rotas de produção, com Postgres real:
 
 * a previsão ignora receita que não seja mensal/anual (registros legados);
 * o cadastro (POST/PATCH `/recurring-incomes`) recusa essas frequências;
@@ -16,9 +16,14 @@ Postgres real:
 Controle NEGATIVO (medido): volte `if frequency is not None and
 str(frequency).strip():` para `if frequency is not None:` em
 `db/recurring_income.py`. Ficam vermelhos o `test_patch_do_modal_mantem_*`, o
-`test_cobrador_nao_credita_*` (credita 5.000 em 10/10 e em 10/11), o
 `test_edicao_aceita_anual_*` e os dois casos de `test_frequencia_vazia_*` (a anual
-vira mensal); o `test_cobrador_credita_*` (positivo) segue verde.
+vira mensal).
+
+Controle NEGATIVO da Q42 (medido): reponha em `_cashflow_events` o filtro
+`if (e.get("frequency") or "monthly") not in ("monthly", "annual"): continue` dos
+gastos fixos. Ficam vermelhos os três casos de `test_gasto_fixo_*_entra_na_previsao`,
+o `test_gasto_fixo_semanal_com_inicio_futuro_*` e o `test_gasto_fixo_mensal_e_semanal_*`;
+as bordas (`test_gasto_fixo_unico_fora_da_janela_*`) seguem verdes.
 
 Registro legado = nasce mensal pela rota e tem a frequência forçada por SQL, o
 único jeito de existir depois que o cadastro passou a recusar.
@@ -35,7 +40,6 @@ import core.services.cashflow as cf
 import core.services.cashflow_forecast as cff
 import db
 import frontend.finance_bot_websocket_custom as dashboard
-from core.services.recurring_charger import credit_due_recurring_incomes_once
 from db.recurring import create_recurring_expense
 from db.recurring_income import count_active_recurring_incomes, get_recurring_income
 
@@ -91,18 +95,6 @@ def _patch_do_modal(uid: int, inc_id: int, frequency: str) -> None:
                    is_primary=False, notes=None)
 
 
-def _creditos_e_lancamentos(uid: int, inc_id: int) -> tuple[list[float], int]:
-    with db.get_conn() as conn:
-        with conn.cursor() as cur:
-            cur.execute(
-                "select amount from recurring_income_credits where user_id=%s and income_id=%s order by ym",
-                (uid, inc_id),
-            )
-            creditos = [float(r["amount"]) for r in cur.fetchall()]
-            cur.execute("select count(*) as n from launches where user_id=%s", (uid,))
-            return creditos, int(cur.fetchone()["n"])
-
-
 @pytest.fixture()
 def pro_max_uid():
     """60/90 dias da previsão são do Pro (`pro_max`); o Plus só vê 30."""
@@ -142,17 +134,59 @@ def test_receita_mensal_e_anual_continuam_na_previsao(pro_max_uid, kw, esperado)
     assert _previsao(pro_max_uid, "projetado") == esperado
 
 
-def test_gasto_fixo_mensal_continua_e_semanal_segue_aceito_e_fora(pro_max_uid):
-    """POSITIVO: a regra mora num helper que os gastos fixos também usam. Gasto
-    fixo semanal continua aceito no cadastro (o cobrador o debita; fica fora
-    deste conserto) e continua fora da previsão, como já era."""
+def _gasto_fixo(uid: int, freq: str, amount: float, start: date, nome: str = "Gasto") -> None:
+    create_recurring_expense(uid, nome, amount, "outros", start.day, "account",
+                             start_date=start, frequency=freq)
+
+
+# Janelas: 30 → 16/10, 60 → 15/11, 90 → 15/12 (ocorrências em (16/09, alvo]).
+@pytest.mark.parametrize("freq, amount, start, esperado", [
+    ("weekly", 80, HOJE, (320, 640, 960)),                # 23/09…14/10 · …11/11 · …09/12
+    ("daily", 10, HOJE, (300, 600, 900)),                 # 17/09 em diante, um por dia
+    ("once", 5000, date(2026, 10, 10), (5000, 5000, 5000)),
+])
+def test_gasto_fixo_fora_de_mensal_anual_entra_na_previsao(pro_max_uid, freq, amount, start, esperado):
+    """Q42 (P2): gasto fixo semanal/diário/único entra na previsão. Sem isto
+    (filtro de volta), os três casos leem (0, 0, 0)."""
+    _gasto_fixo(pro_max_uid, freq, amount, start)
+
+    assert _previsao(pro_max_uid, "gastos_fixos_previstos") == esperado
+    assert _previsao(pro_max_uid, "projetado") == tuple(-v for v in esperado)
+
+
+def test_gasto_fixo_mensal_e_semanal_somam_juntos(pro_max_uid):
+    """POSITIVO: o mensal segue como era (500/1000/1500) e o semanal entra junto."""
     create_recurring_expense(pro_max_uid, "Aluguel", 500, "outros", 20, "account", start_date=HOJE)
     semanal = create_recurring_expense(pro_max_uid, "Feira", 80, "outros", 20, "account",
                                        start_date=HOJE, frequency="weekly")
 
     assert semanal["frequency"] == "weekly"
-    assert _previsao(pro_max_uid, "gastos_fixos_previstos") == (500, 1000, 1500)
-    assert _previsao(pro_max_uid, "projetado") == (-500, -1000, -1500)
+    assert _previsao(pro_max_uid, "gastos_fixos_previstos") == (820, 1640, 2460)
+    assert _previsao(pro_max_uid, "projetado") == (-820, -1640, -2460)
+
+
+def test_gasto_fixo_semanal_com_inicio_futuro_so_conta_a_partir_do_inicio(pro_max_uid):
+    """01/10 em diante: 01, 08, 15/10 · + 22, 29/10, 05, 12/11 · + 19, 26/11, 03, 10/12."""
+    _gasto_fixo(pro_max_uid, "weekly", 80, date(2026, 10, 1))
+
+    assert _previsao(pro_max_uid, "gastos_fixos_previstos") == (240, 560, 880)
+
+
+@pytest.mark.parametrize("start", [
+    date(2026, 9, 10),   # passado: não vira "vencido" nem pesa no saldo de partida
+    HOJE,                # hoje: a previsão conta de amanhã em diante
+    date(2027, 1, 10),   # além da janela de 90 dias
+])
+def test_gasto_fixo_unico_fora_da_janela_nao_entra(pro_max_uid, start):
+    _gasto_fixo(pro_max_uid, "once", 5000, start, nome="Único")
+
+    assert _previsao(pro_max_uid, "gastos_fixos_previstos") == (0, 0, 0)
+    out = cff.forecast_with_trajectory(pro_max_uid, days=90)
+    nomes = {c["nome"] for c in out["vencidos"] + out["vencem_hoje"]}
+    nomes |= {c["nome"] for item in out["trajectory"] for c in item["compromissos"]}
+    assert "Único" not in nomes
+    assert out["trajectory"][0]["saldo_projetado"] == 0  # saldo de partida intacto
+    assert _previsao(pro_max_uid, "projetado") == (0, 0, 0)
 
 
 def test_cenario_combinado_so_a_mensal_soma(pro_max_uid):
@@ -209,30 +243,6 @@ def test_patch_do_modal_mantem_frequencia_do_legado(pro_user_id, freq, vazio):
     rec = get_recurring_income(pro_user_id, inc_id)
     assert (rec["frequency"], rec["pay_month"]) == (freq, None)
     assert (rec["name"], rec["amount"]) == ("Bônus ajustado", 5000.0)
-
-
-def test_cobrador_nao_credita_receita_unica_editada_pelo_modal(pro_user_id):
-    """O dano do bug: a única de R$5.000 virava mensal e o cobrador real creditava
-    em 10/10, 10/11... O cobrador varre o banco inteiro; toda checagem filtra o user."""
-    inc_id = _receita_legada(pro_user_id, "once", 5000, 10, "2026-10-10")
-    _patch_do_modal(pro_user_id, inc_id, "")
-
-    credit_due_recurring_incomes_once(date(2026, 10, 10))
-    credit_due_recurring_incomes_once(date(2026, 11, 10))
-
-    assert _creditos_e_lancamentos(pro_user_id, inc_id) == ([], 0)
-
-
-def test_cobrador_credita_receita_unica_que_o_usuario_muda_para_mensal(pro_user_id):
-    """POSITIVO: a mesma receita, mudada de propósito para mensal, é creditada. Sem
-    isto, o teste acima passaria com um cobrador que não credita nada."""
-    inc_id = _receita_legada(pro_user_id, "once", 5000, 10, "2026-10-10")
-    _patch_do_modal(pro_user_id, inc_id, "monthly")
-
-    credit_due_recurring_incomes_once(date(2026, 10, 10))
-
-    assert get_recurring_income(pro_user_id, inc_id)["frequency"] == "monthly"
-    assert _creditos_e_lancamentos(pro_user_id, inc_id) == ([5000.0], 1)
 
 
 @pytest.mark.parametrize("pay_month, esperado", [(None, ("annual", 3)), (5, ("annual", 5))])

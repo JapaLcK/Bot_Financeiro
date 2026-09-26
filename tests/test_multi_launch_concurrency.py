@@ -515,7 +515,7 @@ def test_oferta_de_gasto_fixo_sai_quando_a_fila_e_restaurada(user_id, monkeypatc
     def registra_com_oferta_e_devolve(*a, **k):
         r = real(*a, **k)
         r += ("\n\n💡 Você já lançou *aluguel* de R$ 800,00 em outro mês. "
-              "Quer marcar como *gasto fixo* (o Piggy lança sozinho todo mês)? "
+              "Quer marcar como *gasto fixo* (o Piggy usa pra prever seu saldo todo mês)? "
               "Responda *sim* ou *não*.")
         launches._devolve_head(user_id, {"desc": "gas", "tipo": "despesa"}, "whatsapp")
         return r
@@ -535,7 +535,7 @@ def test_controle_oferta_de_gasto_fixo_sobrevive_sem_fila(user_id):
     """
     texto = ("💸 Despesa registrada: R$ 800,00\n\n💡 Você já lançou *aluguel* de "
              "R$ 800,00 em outro mês. Quer marcar como *gasto fixo* (o Piggy "
-             "lança sozinho todo mês)? Responda *sim* ou *não*.")
+             "usa pra prever seu saldo todo mês)? Responda *sim* ou *não*.")
     assert "sim* ou *não" in texto
     assert "sim* ou *não" not in launches._sem_oferta_de_gasto_fixo(texto)
     assert "Despesa registrada" in launches._sem_oferta_de_gasto_fixo(texto)

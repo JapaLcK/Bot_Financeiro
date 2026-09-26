@@ -383,6 +383,33 @@ def consolidated_balance_enabled(user_id: int, email: str | None = None) -> bool
     return str(user_id) in beta_ids
 
 
+def _na_lista_beta(user_id: int, email: str | None, env_emails: str,
+                   env_ids: str, padrao: set[str]) -> bool:
+    """E-mail em `env_emails` (sem a env = `padrao`; definida e vazia = ninguém)
+    OU id em `env_ids`. Mesma regra dos três irmãos acima, que ainda têm cópia
+    própria — migrá-los para cá é PR separado (§0.3)."""
+    raw = os.getenv(env_emails)
+    emails = padrao if raw is None else {e.strip().lower() for e in raw.split(",") if e.strip()}
+    if email and str(email).strip().lower() in emails:
+        return True
+    ids = {i.strip() for i in (os.getenv(env_ids) or "").split(",") if i.strip()}
+    return str(user_id) in ids
+
+
+def dashboard_v2_enabled(user_id: int, email: str | None = None) -> bool:
+    """Chave do dashboard v2 (`/painel` e `/api/v2`), por usuário.
+
+    Liberados: e-mail em DASHBOARD_V2_BETA_EMAILS (sem a env = os mesmos e-mails
+    de teste do beta de Agentes; definida e vazia = ninguém) OU id em
+    DASHBOARD_V2_BETA_USER_IDS. Sem e-mail, busca o da conta pelo
+    `get_auth_user` (cache de 10 s), não pelo `get_user_email`, que decifra PII a
+    cada chamada."""
+    if email is None:
+        email = (get_auth_user(int(user_id)) or {}).get("email")
+    return _na_lista_beta(user_id, email, "DASHBOARD_V2_BETA_EMAILS",
+                          "DASHBOARD_V2_BETA_USER_IDS", _AGENTS_BETA_EMAILS_DEFAULT)
+
+
 # Sentinela do parâmetro `user` de `has_app_access`. Existe porque `None` já
 # TEM significado ali — "não há linha em `auth_accounts`", a população
 # só-WhatsApp, que o corte barra —, e `None` como "não busquei" faria o MESMO

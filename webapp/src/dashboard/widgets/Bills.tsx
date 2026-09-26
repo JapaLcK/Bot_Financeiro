@@ -1,7 +1,8 @@
 import { useMemo, useRef, useState } from "react";
 import { MONTHS, TODAY, addDays, scheduled } from "../lib/api";
 import { money, money0, relativeDays, weekday } from "../lib/format.js";
-import { dayKey, get, set } from "../lib/store.js";
+import { useActions } from "../lib/actions";
+import { dayKey } from "../lib/store.js";
 import type { DashState, Launch } from "../lib/types";
 import { Frame } from "../parts/Frame";
 
@@ -9,6 +10,7 @@ const DAY = 86400000;
 
 // Compromissos dos últimos 5 dias (já pagos) e dos próximos `span` dias.
 export function Bills({ s, days: span = 30 }: { s: DashState; days?: number }) {
+  const { get, set } = useActions();
   const items = useMemo(() => scheduled(addDays(TODAY, -5), addDays(TODAY, span)), [span]);
   // Assinatura no cartão é paga pela fatura, que já tem linha própria.
   const due = items.filter((b) => b.date > TODAY && b.kind === "expense" && !b.transfer && b.source !== "cartao");

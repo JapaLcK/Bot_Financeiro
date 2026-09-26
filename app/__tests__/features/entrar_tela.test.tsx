@@ -122,11 +122,11 @@ describe("(auth)/entrar — tela real", () => {
     expect(screen.getByLabelText("Senha").props.value).toBe("");
   });
 
-  it("M3 — botões sociais desativados carregam accessibilityHint 'Em breve'", async () => {
+  it("M3 — só a Apple segue desativada com accessibilityHint 'Em breve'; o Google não", async () => {
     renderRouter("./app", { initialUrl: "/entrar" });
     await waitFor(() => expect(screen).toHavePathname("/entrar"));
 
-    expect(screen.getByRole("button", { name: "Continuar com Google" }).props.accessibilityHint).toBe("Em breve");
+    expect(screen.getByRole("button", { name: "Continuar com Google" }).props.accessibilityHint).toBeUndefined();
     expect(screen.getByRole("button", { name: "Continuar com Apple" }).props.accessibilityHint).toBe("Em breve");
   });
 

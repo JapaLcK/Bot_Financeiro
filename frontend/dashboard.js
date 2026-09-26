@@ -4187,8 +4187,8 @@ const RECURRING_CATEGORY_EMOJI = {
 };
 
 // 1ª ocorrência do dia `dayNum` (1-31) em/depois de hoje E de `startISO`
-// (YYYY-MM-DD, opcional). Espelha o guard do charger: recorrência com início
-// futuro só "vence" a partir do start_date.
+// (YYYY-MM-DD, opcional): recorrência com início futuro só "vence" a partir do
+// start_date.
 function _nextRecurringOccurrence(dayNum, startISO, frequency, monthNum) {
   const floor = new Date();
   floor.setHours(0, 0, 0, 0);
@@ -4320,7 +4320,7 @@ function _renderFixedProGate() {
       <div class="empty" style="padding:30px;text-align:center;color:var(--text-3)">
         <div style="font-size:2.5rem;margin-bottom:10px"><i class="ph ph-lock" aria-hidden="true"></i></div>
         <div style="font-size:1.05rem;font-weight:700;color:var(--text);margin-bottom:6px">Gastos Fixos é Pro</div>
-        <div style="margin-bottom:14px">Cadastre suas assinaturas e contas recorrentes pra o Piggy lançar automaticamente todo mês.</div>
+        <div style="margin-bottom:14px">Cadastre suas assinaturas e contas fixas pro Piggy incluir na previsão do seu saldo.</div>
         <button class="mock-cta" onclick="showUpgradeModal('recurring_expenses')"><i class="ph ph-star" aria-hidden="true"></i> Ver Pro</button>
       </div>`;
   }
@@ -4397,7 +4397,7 @@ function _renderFixedView(items) {
           <div class="tx-icon" style="color:${(x.date - today) / (1000 * 60 * 60 * 24) <= 2 ? 'var(--red)' : '#fbbf24'}">${phIcon(_recurringEmoji(x.rec))}</div>
           <div class="tx-main">
             <div class="tx-desc">${escapeHtmlSafe(x.rec.name)} · ${x.date.toLocaleDateString("pt-BR", { day: "2-digit", month: "short" })}</div>
-            <div class="tx-meta">${_formatDueIn(x.date)} · ${x.rec.payment_type === "credit_card" ? "Cartão " + escapeHtmlSafe(x.rec.card_name || "?") : "Débito automático"}</div>
+            <div class="tx-meta">${_formatDueIn(x.date)} · ${x.rec.payment_type === "credit_card" ? "Cartão " + escapeHtmlSafe(x.rec.card_name || "?") : "Débito no banco"}</div>
           </div>
           <div class="tx-amt ${_toneClass(-x.rec.amount, "green", "red")}">-${_fmtBRL(x.rec.amount)}</div>
         </div>
@@ -4518,7 +4518,7 @@ function _ensureRecurringModal() {
               <div class="field">
                 <label for="recurring-mode">Tipo *</label>
                 <select id="recurring-mode" onchange="_toggleRecurringModeHint()">
-                  <option value="autopay">Gasto fixo (débito automático)</option>
+                  <option value="autopay">Gasto fixo (débito no banco)</option>
                   <option value="manual">Conta a pagar (boleto/lembrete)</option>
                 </select>
               </div>
@@ -4563,7 +4563,7 @@ function _ensureRecurringModal() {
               <div class="field">
                 <label for="recurring-payment-type">Forma de pagamento *</label>
                 <select id="recurring-payment-type" onchange="_toggleRecurringCardField()">
-                  <option value="account">Débito automático na conta</option>
+                  <option value="account">Débito automático no banco</option>
                   <option value="credit_card">Cartão de crédito</option>
                 </select>
               </div>
@@ -4576,7 +4576,7 @@ function _ensureRecurringModal() {
               <div class="field">
                 <label for="recurring-start-date" id="recurring-start-label">Começa a partir de</label>
                 <input type="date" id="recurring-start-date" />
-                <span id="recurring-start-hint" style="font-size:.68rem;color:var(--text-3);margin-top:4px;display:block">A 1ª cobrança é no dia do vencimento em/após esta data. Deixe hoje pra começar já.</span>
+                <span id="recurring-start-hint" style="font-size:.68rem;color:var(--text-3);margin-top:4px;display:block">Entra na previsão a partir do 1º vencimento em/após esta data. Deixe hoje pra começar já.</span>
               </div>
             </div>
             <div class="field">
@@ -4656,7 +4656,7 @@ function _toggleRecurringFreqFields() {
     if (startInput) startInput.required = true;
   } else {
     if (startLabel) startLabel.textContent = "Começa a partir de";
-    if (startHint) startHint.textContent = "A 1ª cobrança é no dia do vencimento em/após esta data. Deixe hoje pra começar já.";
+    if (startHint) startHint.textContent = "Entra na previsão a partir do 1º vencimento em/após esta data. Deixe hoje pra começar já.";
     if (startInput) startInput.required = false;
   }
 }
@@ -4664,7 +4664,7 @@ function _toggleRecurringFreqFields() {
 // Ajusta ajuda + título + campos do modal conforme o modo (gasto fixo vs conta
 // a pagar). Numa CONTA A PAGAR o valor é SEMPRE uma estimativa (o valor real é
 // informado ao pagar), então o campo de valor vira opcional; num GASTO FIXO o
-// valor é obrigatório (o charger debita esse valor sozinho).
+// valor é obrigatório (é ele que entra na previsão).
 function _toggleRecurringModeHint() {
   const mode = (document.getElementById("recurring-mode") || {}).value || "autopay";
   const hint = document.getElementById("recurring-mode-hint");
@@ -4688,7 +4688,7 @@ function _toggleRecurringModeHint() {
     if (amount) { amount.required = false; amount.placeholder = "estimativa, ex: 80,00"; }
     if (name) name.placeholder = "Ex: Água, Luz, Internet...";
   } else {
-    if (hint) hint.innerHTML = "<i class='ph ph-warning' aria-hidden='true'></i> <strong>Gasto fixo:</strong> é <strong>lançado automaticamente</strong> no dia escolhido (débito na conta). Pra contas que você paga na mão (boleto), use \"Conta a pagar\".";
+    if (hint) hint.innerHTML = "<i class='ph ph-warning' aria-hidden='true'></i> <strong>Gasto fixo:</strong> entra na <strong>previsão</strong> do seu saldo — o Piggy não lança sozinho. O pagamento de verdade vem do seu banco conectado, ou você registra se pagar em dinheiro. Pra ser lembrado antes do vencimento, use \"Conta a pagar\".";
     if (title && !isEdit) title.textContent = "Novo gasto fixo";
     if (paytypeRow) paytypeRow.style.display = "";
     if (label) label.textContent = "Valor (R$) *";
@@ -4822,7 +4822,7 @@ async function saveRecurring() {
 async function deleteRecurringFromModal() {
   if (!_recurringEditState.id) return;
   const ok = await confirmModal(
-    "Excluir este gasto fixo? Lançamentos passados ficam preservados. Só não vai mais cobrar automaticamente.",
+    "Excluir este gasto fixo? Os lançamentos que já existem ficam. Ele só sai da previsão.",
     { title: "Excluir gasto fixo", okText: "Excluir", danger: true },
   );
   if (!ok) return;
@@ -5673,7 +5673,7 @@ function _renderRecurringIncomeProGate() {
       <div class="empty" style="padding:30px;text-align:center;color:var(--text-3)">
         <div style="font-size:2.5rem;margin-bottom:10px"><i class="ph ph-lock" aria-hidden="true"></i></div>
         <div style="font-size:1.05rem;font-weight:700;color:var(--text);margin-bottom:6px">Receitas fixas é Pro</div>
-        <div style="margin-bottom:14px">Cadastre salário, aluguel e freelas recorrentes pra o Piggy lançar automaticamente todo mês.</div>
+        <div style="margin-bottom:14px">Cadastre salário, aluguel e freelas recorrentes pro Piggy incluir na previsão do seu saldo.</div>
         <button class="mock-cta" onclick="showUpgradeModal('recurring_expenses')"><i class="ph ph-star" aria-hidden="true"></i> Ver Pro</button>
       </div>`;
   }
@@ -5826,7 +5826,7 @@ function _ensureRecurringIncomeModal() {
       <div class="modal wide">
         <h3 id="recurring-income-edit-title">Nova receita fixa</h3>
         <p class="msub" style="background:rgba(34,197,94,.1);border:1px solid rgba(34,197,94,.3);border-radius:8px;padding:10px 12px;margin-bottom:14px;font-size:.78rem">
-          <i class="ph ph-coins" aria-hidden="true"></i> <strong>Importante:</strong> essa receita será <strong>lançada automaticamente</strong> todo mês no dia escolhido. Se o valor variar, é só editar aqui: o Piggy registra o reajuste.
+          <i class="ph ph-coins" aria-hidden="true"></i> <strong>Importante:</strong> essa receita entra na <strong>previsão</strong> do seu saldo, mas não é lançada sozinha. Se o valor variar, é só editar aqui: o Piggy registra o reajuste.
         </p>
         <form id="recurring-income-edit-form" onsubmit="event.preventDefault(); saveRecurringIncome();">
           <div class="invest-form">
@@ -5878,7 +5878,7 @@ function _ensureRecurringIncomeModal() {
               <div class="field">
                 <label for="recurring-income-start-date">Começa a partir de</label>
                 <input type="date" id="recurring-income-start-date" />
-                <span style="font-size:.68rem;color:var(--text-3);margin-top:4px;display:block">O 1º crédito é no dia do recebimento em/após esta data. Deixe hoje pra começar já.</span>
+                <span style="font-size:.68rem;color:var(--text-3);margin-top:4px;display:block">Entra na previsão a partir do 1º recebimento em/após esta data. Deixe hoje pra começar já.</span>
               </div>
             </div>
             <div class="field">
@@ -5993,7 +5993,7 @@ async function saveRecurringIncome() {
 async function deleteRecurringIncomeFromModal() {
   if (!_recurringIncomeEditState.id) return;
   const ok = await confirmModal(
-    "Excluir esta receita fixa? Lançamentos passados ficam preservados. Só não vai mais lançar automaticamente.",
+    "Excluir esta receita fixa? Os lançamentos que já existem ficam. Ela só sai da previsão.",
     { title: "Excluir receita fixa", okText: "Excluir", danger: true },
   );
   if (!ok) return;
@@ -8587,8 +8587,14 @@ function renderAlerts(alerts) {
   let html = "";
   alerts.forEach(a => {
     if (a.type === "recurring_charged") {
-      const where = a.payment_type === "credit_card" ? "no cartão" : "da conta";
-      html += `<div class="alert-row"><i class="ph ph-piggy-bank" aria-hidden="true"></i> Piggy lançou <b>${escapeHtmlSafe(a.name)}</b> ${fmt(a.amount)} ${where} ${_alertWhenLabel(a.charged_at)}. <button onclick="ackRecurringCharge(${a.charge_id})" aria-label="Marcar como visto" title="Marcar como visto" style="background:none;border:none;color:var(--text-3);cursor:pointer;font-size:.85rem;line-height:1;padding:2px 6px;margin-left:6px;border-radius:6px;opacity:.7;transition:opacity .15s,background .15s" onmouseover="this.style.opacity=1;this.style.background='rgba(255,255,255,.08)'" onmouseout="this.style.opacity=.7;this.style.background='none'"><i class="ph ph-x" aria-hidden="true"></i></button></div>`;
+      // launched: linha antiga do cobrador que lançava; sem ele é o aviso de
+      // vencimento do autopay (Q42), que não lançou nada.
+      const cartao = a.payment_type === "credit_card";
+      const when = _alertWhenLabel(a.charged_at);
+      const msg = a.launched
+        ? `Piggy lançou <b>${escapeHtmlSafe(a.name)}</b> ${fmt(a.amount)} ${cartao ? "no cartão" : "da conta"} ${when}.`
+        : `<b>${escapeHtmlSafe(a.name)}</b> ${fmt(a.amount)}: dia de ${cartao ? "cobrança no cartão" : "débito no banco"} ${when}.`;
+      html += `<div class="alert-row"><i class="ph ph-piggy-bank" aria-hidden="true"></i> ${msg} <button onclick="ackRecurringCharge(${a.charge_id})" aria-label="Marcar como visto" title="Marcar como visto" style="background:none;border:none;color:var(--text-3);cursor:pointer;font-size:.85rem;line-height:1;padding:2px 6px;margin-left:6px;border-radius:6px;opacity:.7;transition:opacity .15s,background .15s" onmouseover="this.style.opacity=1;this.style.background='rgba(255,255,255,.08)'" onmouseout="this.style.opacity=.7;this.style.background='none'"><i class="ph ph-x" aria-hidden="true"></i></button></div>`;
     } else if (a.type === "recurring_credited") {
       html += `<div class="alert-row"><i class="ph ph-piggy-bank" aria-hidden="true"></i> Piggy recebeu <b>${escapeHtmlSafe(a.name)}</b> ${fmt(a.amount)} na conta ${_alertWhenLabel(a.credited_at)}. <button onclick="ackRecurringIncomeCredit(${a.credit_id})" aria-label="Marcar como visto" title="Marcar como visto" style="background:none;border:none;color:var(--text-3);cursor:pointer;font-size:.85rem;line-height:1;padding:2px 6px;margin-left:6px;border-radius:6px;opacity:.7;transition:opacity .15s,background .15s" onmouseover="this.style.opacity=1;this.style.background='rgba(255,255,255,.08)'" onmouseout="this.style.opacity=.7;this.style.background='none'"><i class="ph ph-x" aria-hidden="true"></i></button></div>`;
     } else {

@@ -1,11 +1,11 @@
 import { router, Stack } from "expo-router";
 import { usePreventRemove } from "expo-router/react-navigation";
 import { useRef, useState } from "react";
-import { KeyboardAvoidingView, Linking, Platform, View } from "react-native";
+import { KeyboardAvoidingView, Platform, View } from "react-native";
 
-import { baseUrl } from "@/api/client";
 import { CodigoEmail } from "@/features/auth/CodigoEmail";
 import {
+  LEGENDA_WHATSAPP,
   NOME_MAX,
   SENHA_MIN,
   apagaSenhaNaFase,
@@ -19,6 +19,7 @@ import {
 } from "@/features/auth/criarConta";
 import { GENERICO } from "@/features/auth/entrar";
 import { useSessao } from "@/features/auth/sessao";
+import { Termos } from "@/features/auth/Termos";
 import { Banner } from "@/ui/componentes/Banner";
 import { Button } from "@/ui/componentes/Button";
 import { Card } from "@/ui/componentes/Card";
@@ -30,8 +31,6 @@ import { espaco } from "@/ui/tokens";
 const MENSAGEM_ERRO_COFRE =
   "Sua conta foi criada, mas não conseguimos abrir a sessão neste aparelho. Entre com seu e-mail e senha.";
 const LEGENDA_SENHA = `Pelo menos ${SENHA_MIN} caracteres.`;
-const LEGENDA_WHATSAPP = "Use o mesmo número com que você vai falar com o Piggy.";
-const AVISO_LINK = "Não conseguimos abrir a página. Tente de novo em instantes.";
 
 /**
  * Formulário e código na MESMA rota: a senha fica no `useState` para o
@@ -82,16 +81,6 @@ export default function CriarConta() {
         emVoo.current = false;
         if (proximo) aplicar(proximo);
       });
-  };
-
-  /** Termos e Privacidade moram no site, que é o mesmo servidor da API. */
-  const abrirNoSite = async (rota: string) => {
-    setAvisoLink(false);
-    try {
-      await Linking.openURL(`${baseUrl()}${rota}`);
-    } catch {
-      setAvisoLink(true);
-    }
   };
 
   const digitar = (campo: keyof DadosCadastro, definir: (v: string) => void) => (v: string) => {
@@ -196,18 +185,7 @@ export default function CriarConta() {
                   </View>
                   {aviso ? <Banner tom="danger" mensagem={aviso} /> : null}
                   <Button rotulo="Criar conta" tamanho="L" carregando={ocupado} onPress={criar} />
-                  <Texto variante="legenda" tom="inkMuted" style={{ textAlign: "center" }}>
-                    Ao criar a conta, você aceita os{" "}
-                    <Texto variante="legenda" tom="brandInk" accessibilityRole="link" onPress={() => void abrirNoSite("/termos")}>
-                      Termos de Uso
-                    </Texto>{" "}
-                    e a{" "}
-                    <Texto variante="legenda" tom="brandInk" accessibilityRole="link" onPress={() => void abrirNoSite("/privacy")}>
-                      Política de Privacidade
-                    </Texto>
-                    .
-                  </Texto>
-                  {avisoLink ? <Banner tom="warning" mensagem={AVISO_LINK} /> : null}
+                  <Termos aviso={avisoLink} definirAviso={setAvisoLink} />
                 </View>
               </Card>
 

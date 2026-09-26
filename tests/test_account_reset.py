@@ -499,6 +499,26 @@ def test_reset_reabre_o_onboarding(user_id):
     assert db.get_onboarding_state(user_id) == {"step": 0, "completed": False}
 
 
+def test_reset_zera_o_quiz_e_o_vizinho_mantem(user_id):
+    from db.signup_quiz import record_signup_quiz
+
+    vizinho = user_id + 1
+    db.ensure_user(vizinho)
+    _semeia(user_id)
+    _semeia(vizinho)
+    assert record_signup_quiz(user_id, "dividas", None) and record_signup_quiz(vizinho, "investir", None)
+
+    reset_user_data(user_id, SENHA)
+
+    with get_conn() as conn, conn.cursor() as cur:
+        cur.execute("select user_id, dashboard_profile, signup_quiz from auth_accounts "
+                    "where user_id in (%s, %s) order by user_id", (user_id, vizinho))
+        linhas = {r["user_id"]: (r["dashboard_profile"], r["signup_quiz"]) for r in cur.fetchall()}
+        conn.commit()
+    assert linhas[user_id] == (None, None)
+    assert linhas[vizinho] == ("investir", {"versao": 1, "respostas": None})
+
+
 # ── 4. tudo-ou-nada ──────────────────────────────────────────────────────────
 
 def test_falha_no_meio_da_transacao_nao_muda_nada(user_id, monkeypatch):

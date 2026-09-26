@@ -218,8 +218,8 @@ PREMISSAS = (
     "um mês depois, no mesmo dia (ajustado ao fim do mês). Parcelado com juros usa a tabela "
     "Price; o arredondamento em centavos vai para a última parcela. total_pago é pago_na_compra "
     "mais todas as parcelas, inclusive as que caem depois do dia 90, e NÃO inclui a despesa "
-    "mensal nova, que não tem fim contratado. Receitas e gastos fixos só entram quando "
-    "mensais ou anuais; recorrências semanais, diárias e únicas não são projetadas. "
+    "mensal nova, que não tem fim contratado. Receitas fixas só entram quando mensais ou "
+    "anuais; gastos fixos entram em todas as frequências. "
     "Não inclui gastos avulsos futuros nem IOF, "
     "seguro ou tarifas não informados. Valores monetários aceitam no máximo duas casas decimais."
 )

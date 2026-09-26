@@ -114,6 +114,7 @@ from db.investment_undo import MENSAGEM_NAO_E_O_ULTIMO
 from core.observability import _log_falha, get_logger
 from core.pg_text import detalhe_seguro, limpa_para_pg, recusa_veneno, tem_veneno
 from core.secure_compare import constant_time_eq
+from api.v2 import app as api_v2_app
 from frontend.routes.affiliates import router as affiliates_router
 from frontend.routes.billing_pix import router as billing_pix_router
 from frontend.routes.agents import router as agents_router
@@ -885,14 +886,17 @@ async def get_financial_data(
 
         cat_list.append(cat)
 
-    # Alertas de cobranças automáticas (recurring_charges) ainda não vistas.
+    # Alertas de gasto fixo (recurring_charges) ainda não vistos. `launched`:
+    # linha do cobrador antigo, que lançou ("Piggy lançou"); sem lançamento é o
+    # aviso de vencimento do autopay (Q42 — "dia de débito no banco").
     try:
         async with await db_connect() as _alert_conn:
             async with _alert_conn.cursor() as _alert_cur:
                 await _alert_cur.execute(
                     """
                     select rc.id, rc.amount, rc.charged_at, rc.ym,
-                           r.name, r.payment_type, r.id as recurring_id
+                           r.name, r.payment_type, r.id as recurring_id,
+                           (rc.launch_id is not null or rc.credit_tx_id is not null) as launched
                     from recurring_charges rc
                     join recurring_expenses r on r.id = rc.recurring_id
                     where rc.user_id = %s and rc.acknowledged = false
@@ -912,6 +916,7 @@ async def get_financial_data(
                         "payment_type": r["payment_type"],
                         "ym":           r["ym"],
                         "charged_at":   r["charged_at"].isoformat() if r["charged_at"] else None,
+                        "launched":     bool(r["launched"]),
                     })
     except Exception:
         # Tabela pode não existir ainda no init_db da primeira subida — silencia.
@@ -3195,6 +3200,32 @@ async def _apply_prospect_attribution(request: Request, response: Response, user
         response.delete_cookie("prospect_code")
 
 
+async def _apply_quiz_attribution(request: Request, response: Response, user_id: int) -> None:
+    """Se o cadastro veio do quiz de venda (cookie quiz_result da /q), revalida,
+    grava perfil e respostas na conta e consome o cookie. Nunca quebra o signup.
+    Perfil e respostas são dado financeiro: fora de log e de print."""
+    from db.signup_quiz import QUIZ_COOKIE, parse_quiz_cookie, record_signup_quiz
+    valor = request.cookies.get(QUIZ_COOKIE)
+    if not valor:
+        return
+    try:
+        resultado = parse_quiz_cookie(valor)
+        if resultado and await asyncio.to_thread(record_signup_quiz, int(user_id), *resultado):
+            await log_system_event(
+                "info",
+                "quiz_result_recorded",
+                f"Cadastro com resultado do quiz ({'completo' if resultado[1] else 'parcial'}).",
+                source="quiz",
+                user_id=int(user_id),
+            )
+    except Exception as exc:
+        # Só o tipo: o CheckViolation traz "Failing row contains (...)" com e-mail,
+        # telefone e perfil — `{exc}` aqui vaza PII para o log.
+        print(f"[quiz] gravacao falhou user={user_id}: {type(exc).__name__}")
+    finally:
+        response.delete_cookie(QUIZ_COOKIE, secure=COOKIE_SECURE, samesite="lax")
+
+
 @app.post("/auth/register")
 @limiter.limit("3/hour")
 async def auth_register(request: Request, body: RegisterBody):
@@ -3284,6 +3315,7 @@ async def auth_verify_email(request: Request, response: Response, body: VerifyEm
 
     await _apply_referral_attribution(request, response, int(user_id))
     await _apply_prospect_attribution(request, response, int(user_id))
+    await _apply_quiz_attribution(request, response, int(user_id))
 
     # Meta Conversions API — CompleteRegistration (conta criada). Agendado como
     # background task (roda DEPOIS da resposta) pra um Meta lento/fora nunca
@@ -3329,7 +3361,7 @@ async def auth_login(request: Request, response: Response, body: LoginBody):
     """Login via email+senha. Retorna JWT + link_code novo para vincular o bot."""
     import sys
     sys.path.insert(0, str(pathlib.Path(__file__).parent.parent))
-    from db import login_auth_user, create_link_code, find_user_id_by_email, email_has_password
+    from db import login_auth_user, find_user_id_by_email, email_has_password
 
     await _check_auth_rate_limits("login", request, body.email)
 
@@ -3359,7 +3391,18 @@ async def auth_login(request: Request, response: Response, body: LoginBody):
         )
         raise HTTPException(status_code=401, detail="E-mail ou senha incorretos.")
 
-    user_id    = result["user_id"]
+    return await _concluir_login(
+        request, response, user_id=result["user_id"], email=result["email"], plan=result["plan"]
+    )
+
+
+async def _concluir_login(
+    request: Request, response: Response, *, user_id: int, email: str, plan: str
+) -> dict:
+    """Final comum de `/auth/login` e `/auth/google/exchange`, depois de a
+    identidade estar provada: exclusão agendada → desafio de MFA → sessão."""
+    from db import create_link_code
+
     _raise_if_account_scheduled_for_deletion(user_id)
 
     # Se o usuario tem MFA ativado, emite challenge token e retorna 200 com
@@ -3370,7 +3413,7 @@ async def auth_login(request: Request, response: Response, body: LoginBody):
     if mfa_status.get("enabled"):
         challenge = await asyncio.to_thread(mfa_create_login_challenge, user_id)
         await log_auth_login_event(
-            result["email"],
+            email,
             True,
             user_id=user_id,
             ip_address=get_remote_address(request),
@@ -3380,11 +3423,11 @@ async def auth_login(request: Request, response: Response, body: LoginBody):
         return {
             "mfa_required": True,
             "mfa_challenge": challenge,
-            "email": result["email"],
+            "email": email,
         }
 
     link_code  = create_link_code(user_id, minutes_valid=15)
-    token, jti, refresh = _issue_session_token(user_id, result["email"], request)
+    token, jti, refresh = _issue_session_token(user_id, email, request)
     credenciais = _entrega_sessao(
         request, response, user_id=user_id, access=token, jti=jti, refresh=refresh
     )
@@ -3393,7 +3436,7 @@ async def auth_login(request: Request, response: Response, body: LoginBody):
     await asyncio.to_thread(maybe_record_login_from_new_ip, user_id, request=request)
 
     await log_auth_login_event(
-        result["email"],
+        email,
         True,
         user_id=user_id,
         ip_address=get_remote_address(request),
@@ -3404,8 +3447,8 @@ async def auth_login(request: Request, response: Response, body: LoginBody):
 
     return {
         "user_id": user_id,
-        "email": result["email"],
-        "plan": result["plan"],
+        "email": email,
+        "plan": plan,
         "link_code": link_code,
         "whatsapp_link": wa_link,
         "dashboard_url": _post_login_url(user_id),
@@ -3726,6 +3769,7 @@ async def auth_me(user_id: int = Depends(_get_current_user)):
         get_plan_tier, get_trial_status, history_earliest_date, get_user_limits,
         needs_plan_selection,
     )
+    from core.services import billing_copy
     of_ui_enabled = _open_finance_ui_enabled(user_id, user_dict.get("email"))
     from core.services.plan_service import agents_ui_enabled as _agents_ui_enabled
     agents_ui = _agents_ui_enabled(user_id, user_dict.get("email"))
@@ -3767,6 +3811,13 @@ async def auth_me(user_id: int = Depends(_get_current_user)):
         "plans_v2_enabled": plans_v2_enabled(),
         "plan_tier": plan_tier,
         "of_banks_max": of_banks_max,
+        # Carência de cobrança: assinante com tier `free`. O front troca o
+        # "assine → /precos" (que o recusaria com 409) por "Atualizar cartão →
+        # /conta". `user=user_dict`: sem SELECT novo, como as duas acima.
+        "cobranca_em_atraso": (
+            plans_v2_enabled() and plan_tier == "free"
+            and billing_copy.estado_sem_plano_pago(user_id, user_dict) == "carencia"
+        ),
         "trial": {"active": trial["active"], "days_left": trial["days_left"]},
         "history_earliest_date": earliest_history.isoformat() if earliest_history else None,
         "of_ui_enabled": of_ui_enabled,
@@ -4325,6 +4376,10 @@ class GoogleSignupCompleteBody(_CorpoSemVeneno):
     accepted_terms: bool = False
 
 
+class GoogleExchangeBody(_CorpoSemVeneno):
+    code: str
+
+
 def _google_oauth_next_url(value: str | None) -> str | None:
     """Aceita somente destinos internos conhecidos após o OAuth."""
     return value if value == GOOGLE_OAUTH_PURCHASE_CONTINUE_URL else None
@@ -4343,6 +4398,12 @@ def _google_redirect_to_landing(message: str) -> RedirectResponse:
     return response
 
 
+def _google_app_scheme(state: str | None) -> str | None:
+    """Scheme do app que abriu o login, pelo prefixo do `state` (ver
+    `/auth/google/start`): "app-" é o app antigo, "nat-" o nativo novo. None: web."""
+    return {"app-": "pigbankai", "nat-": "pigbank"}.get((state or "")[:4])
+
+
 @app.get("/auth/google/start")
 @limiter.limit("10/minute")
 async def auth_google_start(
@@ -4352,11 +4413,13 @@ async def auth_google_start(
 ):
     """Gera state, salva em cookie short-lived e redireciona pro Google.
 
-    `app=1`: fluxo iniciado pelo app iOS (via ASWebAuthenticationSession). O
-    marcador viaja no próprio `state` (prefixo "app-"), que o Google devolve
-    intacto no callback — sem precisar de cookie extra. Assim o callback sabe
-    devolver um código de uso único pelo scheme `pigbankai://` em vez de setar
-    cookies num navegador que não é o WebView do app."""
+    `app=1`: fluxo iniciado pelo app iOS antigo (Capacitor, via
+    ASWebAuthenticationSession). `app=2`: fluxo do app nativo novo (Expo). O
+    marcador viaja no próprio `state` (prefixo "app-" ou "nat-"), que o Google
+    devolve intacto no callback — sem precisar de cookie extra. Assim o callback
+    sabe devolver um código de uso único pelo scheme do app (`pigbankai://` ou
+    `pigbank://`, ver `_google_app_scheme`) em vez de setar cookies num
+    navegador que não é o do app."""
     from core.services.google_oauth import (
         GoogleOAuthError,
         build_authorization_url,
@@ -4369,7 +4432,7 @@ async def auth_google_start(
             detail="Login com Google ainda não está configurado neste ambiente.",
         )
 
-    state = ("app-" if app == 1 else "") + secrets.token_urlsafe(32)
+    state = {1: "app-", 2: "nat-"}.get(app, "") + secrets.token_urlsafe(32)
     try:
         url = build_authorization_url(state)
     except GoogleOAuthError as exc:
@@ -4387,7 +4450,7 @@ async def auth_google_start(
         path="/auth/google",
     )
     continue_url = _google_oauth_next_url(next_url)
-    if continue_url and app != 1:
+    if continue_url and app == 0:
         response.set_cookie(
             GOOGLE_OAUTH_NEXT_COOKIE,
             continue_url,
@@ -4434,21 +4497,35 @@ async def auth_google_callback(
 
     cookie_state = request.cookies.get(GOOGLE_OAUTH_STATE_COOKIE) or ""
     next_url = _google_oauth_next_url(request.cookies.get(GOOGLE_OAUTH_NEXT_COOKIE))
-    # Fluxo do app iOS: o state carrega o prefixo "app-" (ver /auth/google/start)
-    is_app_flow = bool(state) and state.startswith("app-")
+    # Fluxo dos apps: o state carrega o prefixo do app (ver /auth/google/start).
+    # Só vale com o state conferido contra o cookie: sem isso, um state `nat-`
+    # forjado faria um erro qualquer voltar ao app como se fosse legítimo.
+    state_ok = bool(state and cookie_state and constant_time_eq(state, cookie_state))
+    scheme = _google_app_scheme(state) if state_ok else None
+
+    def _erro(codigo: str, message: str) -> RedirectResponse:
+        # App nativo: o erro volta ao app com um código FIXO, nenhum texto
+        # refletido. App antigo e web seguem na landing, como sempre.
+        if scheme != "pigbank":
+            return _google_redirect_to_landing(message)
+        erro_response = RedirectResponse(url=f"pigbank://auth?erro={codigo}", status_code=302)
+        _clear_google_oauth_cookies(erro_response)
+        return erro_response
 
     if error:
-        return _google_redirect_to_landing(f"Login com Google cancelado: {error}")
+        return _erro("cancelado" if error == "access_denied" else "falha",
+                     f"Login com Google cancelado: {error}")
 
-    if not code or not state or not cookie_state or not constant_time_eq(state, cookie_state):
-        return _google_redirect_to_landing("Sessão de login expirou. Tente novamente.")
+    if not code or not state_ok:
+        # No app nativo só chega aqui com o state conferido e sem `code`.
+        return _erro("falha", "Sessão de login expirou. Tente novamente.")
 
     try:
         try:
             tokens = await exchange_code_for_tokens(code)
             claims = verify_id_token(tokens["id_token"])
         except GoogleOAuthError as exc:
-            return _google_redirect_to_landing(str(exc))
+            return _erro("falha", str(exc))
 
         sub = claims["sub"]
         email = (claims.get("email") or "").strip().lower()
@@ -4456,8 +4533,9 @@ async def auth_google_callback(
         name_hint = claims.get("name") or claims.get("given_name") or None
 
         if not email or not email_verified:
-            return _google_redirect_to_landing(
-                "Sua conta Google não tem e-mail verificado. Verifique no Google e tente novamente."
+            return _erro(
+                "email_nao_verificado",
+                "Sua conta Google não tem e-mail verificado. Verifique no Google e tente novamente.",
             )
 
         # 1) Já existe vínculo? → login direto
@@ -4479,7 +4557,7 @@ async def auth_google_callback(
             # pra /completar-cadastro (frontend/routes/static_pages.py), que é o
             # que mantém o cadastro por Google funcionando nos apps já
             # instalados. Web: vai direto pro destino final.
-            onb_url = (f"pigbankai://auth?onboarding={token}" if is_app_flow
+            onb_url = (f"{scheme}://auth?onboarding={token}" if scheme
                        else f"/completar-cadastro?token={token}")
             signup_response = RedirectResponse(url=onb_url, status_code=302)
             _clear_google_oauth_cookies(signup_response)
@@ -4489,22 +4567,26 @@ async def auth_google_callback(
         try:
             _raise_if_account_scheduled_for_deletion(user_id)
         except HTTPException as exc:
-            return _google_redirect_to_landing(exc.detail)
+            return _erro("conta_em_exclusao", exc.detail)
 
-        # App iOS: NÃO seta cookies aqui (esta resposta vive no navegador nativo
-        # do ASWebAuthenticationSession, não no WebView). Em vez disso, gera um
-        # código de uso único e devolve pelo scheme; o app carrega /d/{code} no
-        # WebView, que aí sim seta os cookies e loga de verdade.
-        if is_app_flow:
+        # Apps: NÃO seta cookies aqui (esta resposta vive no navegador nativo
+        # do ASWebAuthenticationSession, não no app). Em vez disso, gera um
+        # código de uso único e devolve pelo scheme. O app antigo carrega
+        # /d/{code} no WebView, que aí sim seta os cookies; o nativo troca o
+        # código por Bearer em POST /auth/google/exchange.
+        if scheme:
             from db import create_dashboard_session
             code = await asyncio.to_thread(create_dashboard_session, int(user_id), 5 / 60)
-            await asyncio.to_thread(maybe_record_login_from_new_ip, user_id, request=request)
-            await log_auth_login_event(
-                email, True, user_id=user_id,
-                ip_address=get_remote_address(request),
-                user_agent=request.headers.get("user-agent"),
-            )
-            app_response = RedirectResponse(url=f"pigbankai://auth?code={code}", status_code=302)
+            # No nativo o login só se completa na troca, que pede o MFA e
+            # registra o evento lá; registrar aqui contaria login que não houve.
+            if scheme == "pigbankai":
+                await asyncio.to_thread(maybe_record_login_from_new_ip, user_id, request=request)
+                await log_auth_login_event(
+                    email, True, user_id=user_id,
+                    ip_address=get_remote_address(request),
+                    user_agent=request.headers.get("user-agent"),
+                )
+            app_response = RedirectResponse(url=f"{scheme}://auth?code={code}", status_code=302)
             _clear_google_oauth_cookies(app_response)
             return app_response
 
@@ -4534,9 +4616,39 @@ async def auth_google_callback(
     except Exception as exc:
         _log.error("Falha inesperada no /auth/google/callback: %s\n%s",
                    exc, _traceback.format_exc())
-        return _google_redirect_to_landing(
-            f"Falha inesperada no login Google ({type(exc).__name__}). Veja o terminal do servidor."
+        return _erro(
+            "falha",
+            f"Falha inesperada no login Google ({type(exc).__name__}). Veja o terminal do servidor.",
         )
+
+
+@app.post("/auth/google/exchange")
+@limiter.limit("10/minute")
+async def auth_google_exchange(request: Request, response: Response, body: GoogleExchangeBody):
+    """App nativo: troca o código do callback `nat-` pela sessão.
+
+    O código vai no CORPO, nunca no path: com path param o `@limiter.limit`
+    abre um balde por URL e o teto não vale (ver `/d/{code}`). O `user_id` sai
+    SÓ da linha do código consumido. A tabela é a `dashboard_sessions`, a mesma
+    do magic link do bot: quem tem um código do bot também o troca aqui, com o
+    mesmo poder que já tem pelo `/d/{code}`.
+    """
+    from db import consume_dashboard_session, get_auth_user
+
+    user_id = await asyncio.to_thread(consume_dashboard_session, body.code.strip())
+    user = await asyncio.to_thread(get_auth_user, user_id) if user_id else None
+    if not user:
+        # 400, nunca 401: 401 é "renove a sessão" no interceptor do app.
+        return JSONResponse(
+            status_code=400,
+            content={
+                "detail": "Não deu para concluir a entrada com o Google. Tente de novo.",
+                "code": "google_code_invalid",
+            },
+        )
+    return await _concluir_login(
+        request, response, user_id=int(user_id), email=user["email"], plan=user.get("plan", "free")
+    )
 
 
 @app.get("/auth/google/pending/{token}")
@@ -4593,6 +4705,7 @@ async def auth_google_complete_signup(
 
     await _apply_referral_attribution(request, response, user_id)
     await _apply_prospect_attribution(request, response, user_id)
+    await _apply_quiz_attribution(request, response, user_id)
 
     # Meta Conversions API — CompleteRegistration (conta criada via Google).
     # Background task (roda após a resposta); event_id signup_<uid> casa com o
@@ -8668,6 +8781,11 @@ async def create_investment_route(request: Request, user_id: int, payload: Inves
                                              acao="aporte inicial", plain=True)
                    if str(exc) == "INSUFFICIENT_ACCOUNT" else str(exc))
         raise HTTPException(status_code=400, detail=message) from exc
+    if launch_id is None:
+        # Já existe (#596: também com outra maiúscula). O 200 `created:false`
+        # descartava o aporte inicial em silêncio e a tela dizia "criado".
+        raise HTTPException(status_code=400, detail=(
+            "Já existe um investimento com esse nome. Para colocar dinheiro nele, use Aportar."))
 
     _invalidate_dashboard_current_cache(user_id)
     return {
@@ -8799,6 +8917,9 @@ app.include_router(onboarding_router)
 # O nome da env não aparece neste arquivo de propósito: `test_pix_destino_inerte`
 # é TEXTUAL e pega até comentário. É ele que mantém a flag com quem a obedece.
 app.include_router(billing_pix_router)
+
+# ─── /api/v2 (dashboard v2) → api/v2/: sub-app com o envelope de erro próprio ──
+app.mount("/api/v2", api_v2_app)
 
 
 # ─── WebSocket ────────────────────────────────────────────────────────────────

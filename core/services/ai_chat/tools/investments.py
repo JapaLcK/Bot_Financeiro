@@ -151,8 +151,10 @@ def _create_investment_execute(user_id: int, args: dict[str, Any]) -> str:
     # sempre gravar decimal.
     rate_decimal = rate_pct / 100
     try:
-        db.create_investment(user_id, name, rate_decimal, period)
-        return f'✅ Investimento "{name}" criado.'
+        launch_id, canon = db.create_investment(user_id, name, rate_decimal, period)
+        if launch_id is None:
+            return f'ℹ️ O investimento "{canon}" já existe.'
+        return f'✅ Investimento "{canon}" criado.'
     except ValueError as e:
         return f"🐷 Não consegui criar: {e}"
     except Exception as e:

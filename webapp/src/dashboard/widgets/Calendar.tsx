@@ -1,7 +1,8 @@
 import type { PointerEvent } from "react";
 import { TODAY, catById, isCurrentMonth, keyDate, summary } from "../lib/api";
 import { longDate, money, money0 } from "../lib/format.js";
-import { dayKey, setFilter } from "../lib/store.js";
+import { useActions } from "../lib/actions";
+import { dayKey } from "../lib/store.js";
 import type { DashState, Launch } from "../lib/types";
 import { Frame } from "../parts/Frame";
 import { hideTip, showTip } from "../parts/Tip";
@@ -10,6 +11,7 @@ const WEEK = ["D", "S", "T", "Q", "Q", "S", "S"];
 const STEPS = 6;
 
 export function Calendar({ s }: { s: DashState }) {
+  const { setFilter } = useActions();
   const m = summary(s.month);
   const first = keyDate(s.month);
   const days = m.daily.length;

@@ -344,7 +344,7 @@ def build_user_export_zip(user_id: int) -> bytes:
                        insight_email_opt_out, whatsapp_updates_opt_out,
                        last_reengagement_sent_at, deletion_requested_at,
                        deletion_scheduled_for, deletion_status,
-                       deletion_processing_started_at
+                       deletion_processing_started_at, dashboard_profile, signup_quiz
                 from auth_accounts
                 where user_id = %s
                 """,
@@ -566,6 +566,8 @@ def reset_user_data(
     (vínculo WhatsApp/Discord — decisão do dono), MFA e sessões, tokens,
     plan_trials, push_tokens, open_finance_item_registry, audit_events,
     pii_access_log, system_event_logs, affiliate*, checkout_funnel_events.
+    De auth_accounts saem só o onboarding e o resultado do quiz
+    (`dashboard_profile`, `signup_quiz`): o painel volta ao padrão.
 
     O `open_finance_item_registry` é preservado E GANHA uma linha por conexão
     apagada (`origin='removed'`, `last_event='reset'`, na mesma transação do
@@ -793,7 +795,9 @@ def reset_user_data(
                     """
                     update auth_accounts
                     set onboarding_step = 0,
-                        onboarding_completed_at = null
+                        onboarding_completed_at = null,
+                        dashboard_profile = null,
+                        signup_quiz = null
                     where user_id = %s
                     """,
                     (user_id,),
