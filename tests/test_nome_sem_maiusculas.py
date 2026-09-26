@@ -167,7 +167,15 @@ def test_renomear_caixinha_para_nome_livre_ou_so_trocando_a_caixa_da_200(user_id
 
 def test_conversa_aporte_em_CDB_cai_no_cdb_depois_de_criar_com_outra_caixa():
     """O "CDB" criado pelo painel depois do "cdb" não vira segunda linha, então o
-    aporte digitado "CDB" no WhatsApp não tem linha para errar."""
+    aporte digitado "CDB" no WhatsApp não tem linha para errar.
+
+    Quem discrimina aqui é o seed `create_investment_db(uid, "CDB")`: sem o índice
+    ele cria a segunda linha e o `_invs` fica vermelho. A conversa não prova nada
+    sobre a caixa — o WhatsApp baixa o texto para minúsculas antes de extrair o
+    nome (`parse_investment_deposit_natural` faz `text.lower()`; criar caixinha e
+    investimento extraem de `_normalize`). Ela prova que o aporte cai na linha
+    única e a Carteira bate depois de outro assunto no meio. A porta que preserva
+    a caixa é o painel: bloco F."""
     from conftest import usuario_pagante
     from tests.test_pending_rollback import _diga
 
@@ -180,3 +188,62 @@ def test_conversa_aporte_em_CDB_cai_no_cdb_depois_de_criar_com_outra_caixa():
 
     assert [i[1:] for i in _invs(uid)] == [("cdb", Decimal("100"))], resp
     assert db.get_balance(uid) == Decimal("850"), resp
+
+
+# ── E: a ferramenta da IA diz "já existe", com o nome canônico ────────────────
+
+def test_ia_criar_investimento_com_outra_caixa_diz_que_ja_existe(user_id):
+    from core.services.ai_chat.tools.investments import _create_investment_execute
+
+    args = {"rate": 10, "period": "yearly"}
+    assert _create_investment_execute(user_id, {"name": "cdb", **args}) == '✅ Investimento "cdb" criado.'
+    n = _n_launches(user_id)
+    assert _create_investment_execute(user_id, {"name": "CDB", **args}) == 'ℹ️ O investimento "cdb" já existe.'
+    assert [i[1] for i in _invs(user_id)] == ["cdb"]
+    assert _n_launches(user_id) == n
+
+
+def test_ia_criar_caixinha_com_outra_caixa_diz_que_ja_existe(user_id):
+    from core.services.ai_chat.tools.pockets import _create_pocket_execute
+
+    promote_to_pro(user_id)
+    assert _create_pocket_execute(user_id, {"name": "Viagem"}) == '✅ Caixinha "Viagem" criada.'
+    n = _n_launches(user_id)
+    assert _create_pocket_execute(user_id, {"name": "viagem"}) == 'ℹ️ A caixinha "Viagem" já existe.'
+    assert [p["name"] for p in db.list_pockets(user_id, accrue=False)] == ["Viagem"]
+    assert _n_launches(user_id) == n
+
+
+# ── F: o painel manda o nome como digitado — é a porta que discrimina a caixa ──
+
+def _post(uid, path, body):
+    from tests.test_pockets_endpoints import _auth, _csrf_headers
+    import frontend.finance_bot_websocket_custom as dashboard
+
+    client = TestClient(dashboard.app)
+    _auth(client, uid)
+    return client.post(path, json=body, headers=_csrf_headers(client))
+
+
+def test_painel_criar_caixinha_com_outra_caixa_devolve_a_existente(user_id):
+    """Já existe = 200 com `created: false` e o nome canônico (o dashboard mostra
+    'Caixinha "<canon>" já existe')."""
+    r1 = _post(user_id, f"/pockets/{user_id}", {"name": "Viagem"})
+    assert r1.status_code == 200 and r1.json()["created"] is True, r1.text
+    r2 = _post(user_id, f"/pockets/{user_id}", {"name": "VIAGEM"})
+    assert r2.status_code == 200, r2.text
+    assert (r2.json()["created"], r2.json()["pocket"]["id"], r2.json()["pocket"]["name"]) == (
+        False, r1.json()["pocket"]["id"], "Viagem")
+    assert [p["name"] for p in db.list_pockets(user_id, accrue=False)] == ["Viagem"]
+
+
+def test_painel_criar_investimento_com_outra_caixa_devolve_o_existente(user_id):
+    """Já existe = 200 com `created: false` e o nome canônico."""
+    body = {"name": "CDB", "rate": 0.10, "period": "yearly"}
+    r1 = _post(user_id, f"/investments/{user_id}", body)
+    assert r1.status_code == 200 and r1.json()["created"] is True, r1.text
+    r2 = _post(user_id, f"/investments/{user_id}", body | {"name": "cdb"})
+    assert r2.status_code == 200, r2.text
+    assert (r2.json()["created"], r2.json()["investment"]["id"], r2.json()["investment"]["name"]) == (
+        False, r1.json()["investment"]["id"], "CDB")
+    assert [i[1] for i in _invs(user_id)] == ["CDB"]
