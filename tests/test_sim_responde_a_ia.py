@@ -377,6 +377,14 @@ def test_wa_runtime_marca_o_clique_como_botao(monkeypatch, botao, texto):
 
 def _clica(monkeypatch, uid, botao, texto):
     """Um clique pelo `process_message` real."""
+    _wa(monkeypatch, uid, texto, {
+        "type": "interactive",
+        "interactive": {"type": "button_reply",
+                        "button_reply": {"id": botao, "title": texto or "x"}}})
+
+
+def _wa(monkeypatch, uid, texto, raw=None, duplicada=False):
+    """Uma mensagem pelo `process_message` real (texto, se `raw` é None)."""
     from adapters.whatsapp.wa_parse import InboundMessage
     from adapters.whatsapp.wa_runtime import process_message
     wr = "adapters.whatsapp.wa_runtime."
@@ -385,15 +393,15 @@ def _clica(monkeypatch, uid, botao, texto):
                         lambda wa_id, current_user_id=None: {"status": "noop", "user_id": uid})
     monkeypatch.setattr(wr + "log_system_event_sync", lambda *a, **k: None)
     monkeypatch.setattr(wr + "send_typing_indicator", lambda *a, **k: None)
-    monkeypatch.setattr(wr + "_seen_recent", lambda message_id: False)
+    monkeypatch.setattr(wr + "_seen_recent", lambda message_id: duplicada)
+    for envio in ("send_help_menu", "send_commands_menu", "send_welcome"):
+        monkeypatch.setattr(wr + envio, lambda *a, **k: None)
     monkeypatch.setattr(wr + "_send_reply", lambda *a, **k: None)
     monkeypatch.setattr(wr + "_send_reply_with_optional_buttons", lambda *a, **k: None)
 
     process_message(InboundMessage(
         wa_id="5511999990000", text=texto, timestamp="1", attachments=[],
-        raw={"id": f"wamid.{uuid.uuid4().hex[:10]}", "type": "interactive",
-             "interactive": {"type": "button_reply",
-                             "button_reply": {"id": botao, "title": texto or "x"}}},
+        raw={"id": f"wamid.{uuid.uuid4().hex[:10]}", **(raw or {"type": "text"})},
     ))
 
 
@@ -407,6 +415,39 @@ def test_botao_que_retorna_cedo_tambem_encerra_a_pergunta(monkeypatch):
     diga(uid, "gastei 50 no mercado")
     assert chamadas == []
     assert _lancamentos(uid) == 1
+
+
+@pytest.mark.parametrize("texto", ["ajuda", "comandos", "tutorial"])
+def test_texto_atendido_antes_do_nucleo_encerra_a_pergunta(monkeypatch, texto):
+    """Achado do Codex no #598: `ajuda`, o catálogo e `tutorial` respondem no
+    `process_message` sem chegar ao `handle_incoming`."""
+    uid, chamadas = _com_ia(monkeypatch)
+    _ia_disse(uid, ORCAMENTO)
+
+    _wa(monkeypatch, uid, texto)
+    diga(uid, "gastei 50 no mercado")
+    assert chamadas == []
+    assert _lancamentos(uid) == 1
+
+
+def test_texto_que_chega_ao_nucleo_continua_indo_a_ia(monkeypatch):
+    """Positivo: o encerramento fora do núcleo não pega o turno que chegou nele."""
+    uid, chamadas = _com_ia(monkeypatch)
+    _ia_disse(uid, ORCAMENTO)
+
+    _wa(monkeypatch, uid, "300 reais transporte")
+    assert chamadas == ["300 reais transporte"]
+    assert _lancamentos(uid) == 0
+    assert pergunta_aberta_da_ia(uid) is not None  # o `chat` falso não grava
+
+
+def test_mensagem_duplicada_nao_encerra_a_pergunta(monkeypatch):
+    uid, chamadas = _com_ia(monkeypatch)
+    _ia_disse(uid, ORCAMENTO)
+
+    _wa(monkeypatch, uid, "300 reais transporte", duplicada=True)
+    assert chamadas == []
+    assert pergunta_aberta_da_ia(uid) is not None
 
 
 def _pendencias_quebram_uma_vez(monkeypatch):

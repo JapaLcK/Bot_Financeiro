@@ -626,6 +626,12 @@ def _maybe_send_autolink_greeting_warning(
 
 def process_message(message: InboundMessage) -> None:
     core_started = False
+    # Turno atendido aqui, sem chegar ao `handle_incoming` (botão, `ajuda`,
+    # catálogo, `tutorial`, pendência de recategorizar/valor de conta): o
+    # `finally` encerra a pergunta aberta da IA, como o `finally` do núcleo faz.
+    # Mensagem descartada sem resposta e exceção a mantêm.
+    uid = None
+    mantem_pergunta = False
     try:
         reply_to = message.wa_id
         logger.info(
@@ -720,23 +726,6 @@ def process_message(message: InboundMessage) -> None:
         interactive_id = get_interactive_id(raw_msg)
 
         if interactive_id:
-            # Botão nunca responde à pergunta aberta da IA, e quase todos os
-            # ramos abaixo dão `return` sem passar pelo `finally` do
-            # `handle_incoming` que a encerraria: encerra aqui, para todos. Mesmo
-            # uid que o `handle_incoming` lê. A `ai_pending` (botão que confirma
-            # ação da IA) é outra tabela e segue intacta.
-            try:
-                from core.handle_incoming import _normalize_user_id
-                from core.services.ai_chat_commands import (
-                    encerra_pergunta_da_ia, pergunta_aberta_da_ia,
-                )
-                pid = _normalize_user_id(IncomingMessage(platform="whatsapp", user_id=uid, text=""))
-                ancora = pergunta_aberta_da_ia(pid)
-                if ancora is not None:
-                    encerra_pergunta_da_ia(pid, ancora)
-            except Exception as exc:
-                logger.warning("WA encerrar pergunta da IA no botão falhou: %s", exc)
-
             # Botões do tutorial
             tut_bid = get_tutorial_button_id(raw_msg)
             if tut_bid:
@@ -1225,6 +1214,7 @@ def process_message(message: InboundMessage) -> None:
                     logger.warning("WA clear bill_pay_amount pending failed: %s", exc)
                     reivindicou = False
                 if not reivindicou:
+                    mantem_pergunta = True  # o turno vencedor responde
                     return
                 if bill_id:
                     from db.bills import mark_bill_paid
@@ -1314,6 +1304,7 @@ def process_message(message: InboundMessage) -> None:
 
         if _seen_recent(msg_id):
             logger.info("WA duplicate ignored message_id=%s", msg_id)
+            mantem_pergunta = True
             return
 
         try:
@@ -1362,6 +1353,7 @@ def process_message(message: InboundMessage) -> None:
             logger.warning("WA outgoing messages had no deliverable text from=%s", message.wa_id)
             _send_reply(reply_to, _DELIVERY_FAILURE_MESSAGE)
     except Exception as exc:
+        mantem_pergunta = True
         logger.error("WA message processing failed wa_id=%s error=%s", message.wa_id, exc)
         try:
             log_system_event_sync(
@@ -1391,6 +1383,19 @@ def process_message(message: InboundMessage) -> None:
                 message.wa_id,
                 send_exc,
             )
+    finally:
+        if uid is not None and not core_started and not mantem_pergunta:
+            try:
+                from core.handle_incoming import _normalize_user_id
+                from core.services.ai_chat_commands import (
+                    encerra_pergunta_da_ia, pergunta_aberta_da_ia,
+                )
+                pid = _normalize_user_id(IncomingMessage(platform="whatsapp", user_id=uid, text=""))
+                ancora = pergunta_aberta_da_ia(pid)
+                if ancora is not None:
+                    encerra_pergunta_da_ia(pid, ancora)
+            except Exception as exc:
+                logger.warning("WA encerrar pergunta da IA fora do núcleo falhou: %s", exc)
 
 
 def process_payload(payload: dict[str, Any]) -> int:
