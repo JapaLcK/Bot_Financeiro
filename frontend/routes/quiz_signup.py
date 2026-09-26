@@ -3,6 +3,7 @@
 Serviço:   POST /xquiz/webhook     o XQuiz manda e-mail/nome/WhatsApp do formulário;
            aqui se grava a verificação sem senha e se envia o código de 6 dígitos.
            Token = env XQUIZ_WEBHOOK_TOKEN (constant_time_eq): sem env 503, errado 401.
+           Falha de banco ou de envio: 503, para o XQuiz reenviar (o código vivo é reaproveitado).
 Navegador: POST /auth/quiz/resend  a /q reenvia o código (com CSRF).
 
 A conta é criada pelo /auth/verify-email de sempre, que a /q chama com e-mail e
@@ -13,6 +14,7 @@ import asyncio
 import os
 
 from fastapi import APIRouter, BackgroundTasks, HTTPException, Request
+from fastapi.responses import JSONResponse
 from pydantic import BaseModel, model_validator
 
 from core.admin_dashboard import log_system_event
@@ -125,9 +127,10 @@ async def xquiz_webhook(request: Request, body: QuizLeadBody):
         return OK
     except Exception as exc:
         await _registra_falha("webhook", exc)
-        return OK
+        return JSONResponse({"ok": False}, status_code=503)
     if not await asyncio.to_thread(send_verification_email, email, code):
         await _registra_falha("webhook")
+        return JSONResponse({"ok": False}, status_code=503)
     return OK
 
 

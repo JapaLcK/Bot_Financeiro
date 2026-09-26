@@ -3,7 +3,8 @@
 Rotas e banco reais. O e-mail é capturado por monkeypatch (o código vem de lá).
 Controles negativos medidos no PR: desligar o `password=None` (hash de senha
 gravado) ou a migração (NOT NULL) deixa `test_conversa_*` vermelho; desligar o
-reuso do código vivo deixa `test_reenvio_do_webhook_*` vermelho.
+reuso do código vivo deixa `test_reenvio_do_webhook_*` vermelho; responder 200
+na falha de envio ou de banco deixa `test_falha_de_envio_ou_banco_*` vermelho.
 """
 import uuid
 from types import SimpleNamespace
@@ -264,20 +265,34 @@ def test_teto_global_independe_de_ip_e_de_email(env):
         conn.commit()
 
 
-def test_log_das_falhas_sem_pii(env, monkeypatch, capsys, caplog):
+def test_falha_de_envio_ou_banco_503_sem_pii_e_o_retry_reaproveita_o_codigo(env, monkeypatch, capsys, caplog):
+    """200 na falha = o XQuiz não reenvia e o cadastro some."""
     email, tel = _email(), _telefone()
-    monkeypatch.setattr(quiz_signup, "send_verification_email", lambda to, code: env.enviados.append(code) or False)
-    _webhook({"email": email, "nome": NOME, "whatsapp": tel})
+    corpo, smtp_no_ar = {"email": email, "nome": NOME, "whatsapp": tel}, []
+    criar = quiz_signup.create_email_verification
+    monkeypatch.setattr(quiz_signup, "send_verification_email",
+                        lambda to, code: env.enviados.append((to, code)) or bool(smtp_no_ar))
+    respostas = [_webhook(corpo)]  # o envio falha: a linha fica
+    assert _codigos(email) == 1
 
     def explode(*_a, **_kw):
         raise Exception(f"Failing row contains ({email}, {tel}, {NOME})")
 
     monkeypatch.setattr(quiz_signup, "create_email_verification", explode)
-    _webhook({"email": email, "nome": NOME, "whatsapp": tel})
+    respostas.append(_webhook(corpo))  # o banco cai
+    assert [(r.status_code, r.json()) for r in respostas] == [(503, {"ok": False})] * 2
     assert len(env.eventos) == 2
-    texto = repr(env.eventos) + capsys.readouterr().out + caplog.text
-    segredos = [email, tel, NOME, *env.enviados]
-    assert [s for s in segredos if s in texto] == [], texto
+    texto = repr(env.eventos) + "".join(r.text for r in respostas) + capsys.readouterr().out + caplog.text
+    assert [s for s in (email, tel, NOME, env.enviados[0][1]) if s in texto] == [], texto
+
+    monkeypatch.setattr(quiz_signup, "create_email_verification", criar)
+    smtp_no_ar.append(1)
+    r = _webhook(corpo)  # o retry do XQuiz
+    assert (r.status_code, r.json()) == (200, {"ok": True})
+    primeiro, segundo = (c for _, c in env.enviados)
+    assert primeiro == segundo and _codigos(email) == 1
+    _, r = _verifica(email, segundo)
+    assert r.status_code == 200, r.text
 
 
 # ── Reenvio pela /q ──────────────────────────────────────────────────────────
