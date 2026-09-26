@@ -70,8 +70,14 @@ O que isso muda neste plano:
   (`db/bills.py`) sempre lança na carteira, pela rota `/recurring-bills/.../pay` e pela
   ferramenta `pay_bill` da IA. Ela passa a usar o mesmo estado da forma de pagamento da
   Q40: paga pelo banco, marcar como paga só muda o estado da conta (o débito vem do Open
-  Finance); paga em dinheiro, lança na carteira; sem saber, pergunta. Testes: marcar paga
-  pelo banco (nada lançado) e em dinheiro (um lançamento), pela rota e pela IA.
+  Finance); paga em dinheiro, lança na carteira; sem saber, pergunta. `mark_bill_paid`
+  passa a exigir a forma (sem valor padrão, que erraria para um dos lados), e **todo**
+  chamador coleta e repassa a escolha — o inventário por `grep` é o primeiro passo: a rota
+  HTTP, a ferramenta `pay_bill` da IA (`core/services/ai_chat/tools/bills.py`), o `payBill`
+  do painel antigo (`frontend/dashboard.js`, que hoje manda só o valor), o WhatsApp
+  (`adapters/whatsapp/wa_runtime.py`, dois pontos) e `core/handlers/bills.py` (dois
+  pontos). Testes: marcar paga pelo banco (nada lançado) e em dinheiro (um lançamento), em
+  cada um desses chamadores.
 - **Lançar, no v2, é lançar na carteira.** "Lançamentos (ver, lançar, editar, apagar)" da
   primeira versão vira: ver tudo; lançar, editar e apagar só o que é da carteira Piggy.
   Transação do Open Finance não se cria nem se apaga à mão.
@@ -120,12 +126,20 @@ Decidido pelo dono na mesma data (Q37–Q41):
     uma transação específica do Open Finance** (o v2 sugere a candidata, o usuário
     confirma) — manter as duas contaria o mesmo salário duas vezes, mas tirar sem a outra
     sumiria com um salário que existiu. Sem transação para casar (banco não conectado,
-    importação incompleta, nada parecido), a linha continua contando. Sair dos
+    importação incompleta, nada parecido), a linha continua contando. O casamento guarda a
+    identidade da transação do banco estável na reconexão (a mesma do saque), e segue a
+    vida dela: se a transação some porque o banco foi desconectado (o desconectar desfaz o
+    lançamento importado e apaga a transação), a linha antiga **volta** aos relatórios,
+    para o fato não sumir; se o banco a traz de novo com a mesma identidade, a linha antiga
+    sai de novo, sem contar duas vezes. Sair dos
     relatórios não apaga a linha. Até ele revisar, eles aparecem com a marca "lançado
     automaticamente, a conferir" e ficam fora dos totais. A confirmação vale enquanto a
     carteira só receber dinheiro vivo, e isso se garante pela classe, não por lista de
-    rotas: **toda escrita no saldo da carteira (`accounts.balance`) que não venha da escrita
-    de dinheiro vivo do v2 derruba a confirmação** — lançar ou apagar no painel antigo,
+    rotas: **toda escrita no saldo da carteira (`accounts.balance`) que não venha de uma
+    escrita de dinheiro vivo confiável derruba a confirmação**. Confiáveis são só duas: o
+    lançamento em dinheiro do v2 e a transferência automática entre banco e carteira da
+    Q41 (com as correções que o banco fizer nela), que é dinheiro vivo por definição. As
+    outras derrubam: lançar ou apagar no painel antigo,
     ajuste de saldo, importar extrato OFX (`import_ofx_launches_bulk`), desfazer
     (`delete_launch_and_rollback`) e qualquer caminho futuro. A regra mora na camada `db/`,
     junto do aviso em tempo real, e o mesmo teste que varre as escritas nas tabelas
@@ -145,7 +159,9 @@ Decidido pelo dono na mesma data (Q37–Q41):
   casado, conta uma vez só); "pelo banco" sem transação para casar (a linha continua
   contando); posição nova num banco já conectado com um manual respondido "outro" (a
   pergunta reabre); posição casada que o banco liquida com a conexão ativa (o manual segue
-  fora da soma, "a conferir").
+  fora da soma, "a conferir"); recorrente antiga casada, banco desconectado e depois
+  reconectado (o fato aparece uma vez em cada momento, nunca zero nem duas); carteira
+  confirmada seguida de um saque sincronizado (a confirmação continua).
 - **Q38 — a caixinha manual continua**, como exceção à Q36: ela é dinheiro separado pelo
   próprio usuário, e depositar e retirar nela segue existindo no v2. A caixinha espelhada
   do banco continua vindo do Open Finance.
