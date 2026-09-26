@@ -115,14 +115,20 @@ Decidido pelo dono na mesma data (Q37–Q41):
     duas contaria o mesmo salário duas vezes) ou **não aconteceu** (sai também). Sair dos
     relatórios não apaga a linha. Até ele revisar, eles aparecem com a marca "lançado
     automaticamente, a conferir" e ficam fora dos totais. A confirmação vale enquanto a
-    carteira só receber dinheiro vivo: se o usuário voltar ao painel antigo e usar um
-    caminho que não pergunta a forma de pagamento (lançar em `/launches/...` ou o ajuste de
-    saldo `adjust_balance_route`), a confirmação cai e a foto volta a ser incerta até ele
-    confirmar de novo;
+    carteira só receber dinheiro vivo, e isso se garante pela classe, não por lista de
+    rotas: **toda escrita no saldo da carteira (`accounts.balance`) que não venha da escrita
+    de dinheiro vivo do v2 derruba a confirmação** — lançar ou apagar no painel antigo,
+    ajuste de saldo, importar extrato OFX (`import_ofx_launches_bulk`), desfazer
+    (`delete_launch_and_rollback`) e qualquer caminho futuro. A regra mora na camada `db/`,
+    junto do aviso em tempo real, e o mesmo teste que varre as escritas nas tabelas
+    financeiras falha se alguma escrita no saldo da carteira não passar por ela. Caída a
+    confirmação, a foto volta a ser incerta até o usuário confirmar de novo;
 
   Testes: CDB manual e o mesmo CDB do banco (incerta até responder; depois, uma vez só;
   desconectar o banco devolve o manual à soma e reabre a pergunta); lançar pelo painel
-  antigo depois de confirmar a carteira (volta a incerta);
+  antigo depois de confirmar a carteira, importar OFX e apagar lançamento antigo (volta a
+  incerta nos três); último ponto incompleto e último ponto incerto (a variação do título
+  não é calculada);
   carteira com saldo de banco antigo e banco conectado, e carteira com salário recorrente
   lançado antes do desligamento sem banco conectado (incerta até confirmar, nos dois);
   salário automático antigo que não caiu (fora de Lançamentos e de Para onde vai depois
@@ -391,7 +397,9 @@ tecnologia, podendo refazer o que for preciso, com calma (Q5).
     dois pontos como se fosse variação. O mesmo vale para **todo número derivado da série**
     (a variação no título do bloco, o texto acessível do período — hoje
     `widgets/NetWorth.tsx` faz `último − primeiro` sem olhar nada): ele só é calculado
-    dentro do trecho sem quebra, e o bloco diz que o banco X entrou ou saiu no período;
+    dentro do trecho sem quebra, e o bloco diz que o banco X entrou ou saiu no período.
+    Ponto marcado como incompleto ou incerto também quebra o trecho: variação que começaria
+    ou terminaria nele não é calculada, e o bloco diz por quê;
   - **"a conferir" não vira número certo:** com movimento de banco pendente
     (`bank_movements.pending_count` > 0), o painel antigo já troca o patrimônio por "A
     conferir" (`frontend/dashboard.js`), porque o dinheiro pode estar nos dois lados. A foto
