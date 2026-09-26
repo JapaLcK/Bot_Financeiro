@@ -14,8 +14,8 @@ def test_accrue_investment_db_cdi_sem_novas_datas_publicadas_nao_avanca_last_dat
         with conn.cursor() as cur:
             cur.execute(
                 """
-                insert into investments(user_id, name, balance, rate, period, last_date)
-                values (%s, %s, %s, %s, %s, %s)
+                insert into investments(user_id, name, balance, rate, period, last_date, interest_frozen_at)
+                values (%s, %s, %s, %s, %s, %s, null)
                 returning id
                 """,
                 (user_id, "CDB CDI Teste", original_balance, Decimal("1.16"), "cdi", original_last_date),
@@ -58,8 +58,8 @@ def test_accrue_investment_db_cdi_avanca_ate_ultima_data_publicada(user_id):
         with conn.cursor() as cur:
             cur.execute(
                 """
-                insert into investments(user_id, name, balance, rate, period, last_date)
-                values (%s, %s, %s, %s, %s, %s)
+                insert into investments(user_id, name, balance, rate, period, last_date, interest_frozen_at)
+                values (%s, %s, %s, %s, %s, %s, null)
                 returning id
                 """,
                 (user_id, "CDB CDI Datas Publicadas", original_balance, Decimal("1.16"), "cdi", original_last_date),
@@ -107,8 +107,8 @@ def test_accrue_investment_db_cdi_spread_composto(user_id):
         with conn.cursor() as cur:
             cur.execute(
                 """
-                insert into investments(user_id, name, balance, rate, period, last_date)
-                values (%s, %s, %s, %s, %s, %s)
+                insert into investments(user_id, name, balance, rate, period, last_date, interest_frozen_at)
+                values (%s, %s, %s, %s, %s, %s, null)
                 returning id
                 """,
                 (user_id, "CDB CDI Spread", original_balance, Decimal("0.025"), "cdi_spread", original_last_date),
@@ -149,8 +149,8 @@ def test_accrue_investment_db_selic_spread_composto(user_id):
         with conn.cursor() as cur:
             cur.execute(
                 """
-                insert into investments(user_id, name, balance, rate, period, last_date)
-                values (%s, %s, %s, %s, %s, %s)
+                insert into investments(user_id, name, balance, rate, period, last_date, interest_frozen_at)
+                values (%s, %s, %s, %s, %s, %s, null)
                 returning id
                 """,
                 (user_id, "Tesouro Selic Spread", original_balance, Decimal("0.0007"), "selic_spread", original_last_date),
@@ -191,8 +191,8 @@ def test_accrue_investment_db_ipca_spread_composto(user_id):
         with conn.cursor() as cur:
             cur.execute(
                 """
-                insert into investments(user_id, name, balance, rate, period, last_date)
-                values (%s, %s, %s, %s, %s, %s)
+                insert into investments(user_id, name, balance, rate, period, last_date, interest_frozen_at)
+                values (%s, %s, %s, %s, %s, %s, null)
                 returning id
                 """,
                 (user_id, "Tesouro IPCA Spread", original_balance, Decimal("0.0743"), "ipca_spread", original_last_date),
@@ -224,12 +224,13 @@ def test_accrue_investment_db_ipca_spread_composto(user_id):
             conn.commit()
 
 
-def test_accrue_all_projeta_lots_individualmente_sem_subestimar_lots_antigos(user_id):
+def test_accrue_all_nao_projeta_rendimento_q43(user_id):
     """
-    Regressão: lot novo do mesmo dia não pode subestimar a projection de lots
-    mais antigos. Antes do fix, inv.last_date = MAX(lots.last_date) e a projection
-    rodava sobre o balance agregado, dando 1 dia útil em vez dos N que o lot
-    antigo merecia. Reproduzido em prod na Reserva de Emergência (2026-05-11).
+    Q43: investimento manual não rende, e a projeção de exibição saiu junto.
+    Era o teste da projeção por lote (Reserva de Emergência, 2026-05-11): o mesmo
+    cenário — dois lotes atrasados e CDI publicado em `market_rates` — projetava
+    1000×1.0005^4 + 500×1.0005^2. Agora a linha sai sem `projected_*` e com o saldo
+    realizado.
     """
     inv_id = None
     today_ = date(2026, 4, 20)  # segunda
@@ -303,21 +304,8 @@ def test_accrue_all_projeta_lots_individualmente_sem_subestimar_lots_antigos(use
             db._get_cdi_daily_map = original_fetch
 
         inv_row = next(r for r in out if r["id"] == inv_id)
-
-        # Projection esperada (por lote, somando):
-        #   Lot antigo: 1000 × (1 + 0.0005)^4 = 1002.0015...
-        #   Lot novo:    500 × (1 + 0.0005)^2 =  500.5001...
-        rate = Decimal("0.05") / Decimal("100")
-        expected = float(
-            Decimal("1000") * (Decimal("1") + rate) ** 4
-            + Decimal("500") * (Decimal("1") + rate) ** 2
-        )
-        assert abs(inv_row["projected_balance"] - expected) < 0.01
-
-        # Bug original projetaria 1500 × (1.0005)^2 = 1501.50 — claramente menor.
-        assert inv_row["projected_balance"] > 1502.0
-        # Máximo de dias úteis projetados entre todos os lotes = 4 (lot antigo).
-        assert inv_row["projected_days"] == 4
+        assert not {"projected_balance", "projected_days", "projected_until"} & inv_row.keys()
+        assert inv_row["balance"] == Decimal("1500")
 
     finally:
         with db.get_conn() as conn:

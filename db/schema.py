@@ -223,6 +223,19 @@ def init_db():
         """
         alter table pockets add column if not exists last_interest_date date not null default current_date
         """,
+        # Q43 (docs/plano-dashboard-v2.md): caixinha e investimento manuais param de
+        # render. `interest_frozen_at` NULL = ainda não recebeu a acumulação final;
+        # não-nulo = congelado. Idioma do `plan_selected_at` invertido: o ADD sem
+        # default deixa as linhas que já existem NULL (a final roda uma vez em cada),
+        # e o SET DEFAULT faz toda linha nova nascer congelada. Os dois no MESMO
+        # statement: o init_db roda em autocommit, e separados um INSERT entre eles
+        # nasceria NULL. `add column ... default now()` não serve: preencheria as
+        # linhas antigas com o instante do ALTER e elas congelariam sem a final.
+        """alter table pockets add column if not exists interest_frozen_at timestamptz,
+             alter column interest_frozen_at set default now()""",
+        """alter table investments add column if not exists interest_frozen_at timestamptz,
+             alter column interest_frozen_at set default now()""",
+        """alter table pockets alter column interest_enabled set default false""",
         """
         create table if not exists pocket_lots (
           id bigserial primary key,

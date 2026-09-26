@@ -1,5 +1,10 @@
 """Resgate não pula juro; desfazer devolve o cursor e só desfaz o ÚLTIMO movimento.
 
+Q43: investimento e caixinha manuais não rendem mais. O primeiro toque depois do
+deploy é a acumulação FINAL, e dias sem índice publicado nela são descartados
+(decisão do dono). Os testes dos defeitos 1 e 2 que esperavam o juro "depois"
+agora provam que ele não vem: o resgate é o primeiro toque, congela o ativo.
+
 Três defeitos, cada um com o grupo de testes e o controle negativo que o discrimina:
 
 1. Resgate setava `last_date=hoje` nos lotes depois de um accrual que só avança até o
@@ -25,7 +30,8 @@ def _cdi(monkeypatch, mapa):
     monkeypatch.setattr(db, "_get_cdi_daily_map", lambda _c, _s, _e: dict(mapa))
 
 
-def _investimento_com_lote(uid, nome, period, rate, last_date, balance=1000):
+def _investimento_com_lote(uid, nome, period, rate, last_date, balance=1000, legado=True):
+    """`legado=True`: investimento anterior à Q43 (marcador NULL, falta a final)."""
     _, inv_id, _ = db.create_investment_db(uid, nome, rate=rate, period=period,
                                            tax_profile="exempt_ir_iof")
     with db.get_conn() as conn, conn.cursor() as cur:
@@ -34,8 +40,10 @@ def _investimento_com_lote(uid, nome, period, rate, last_date, balance=1000):
                    principal_remaining, balance, opened_at, last_date, status)
                values (%s,%s,%s,%s,%s,%s,%s,'open')""",
             (uid, inv_id, balance, balance, balance, T - timedelta(days=60), last_date))
-        cur.execute("update investments set balance=%s, last_date=%s where id=%s and user_id=%s",
-                    (balance, last_date, inv_id, uid))
+        cur.execute("update investments set balance=%s, last_date=%s, "
+                    "interest_frozen_at = case when %s then null else interest_frozen_at end "
+                    "where id=%s and user_id=%s",
+                    (balance, last_date, legado, inv_id, uid))
         conn.commit()
     return inv_id
 
@@ -77,7 +85,7 @@ def _cursor_legado(uid, launch_id):
 
 # ── Defeito 1: resgate deixa o cursor onde o accrual parou ────────────────────
 
-def test_resgate_parcial_com_ipca_atrasado_deixa_o_juro_para_o_saldo_restante(user_id, monkeypatch):
+def test_resgate_parcial_com_ipca_atrasado_descarta_o_juro_sem_indice_q43(user_id, monkeypatch):
     # IPCA é mensal: `_growth_for_period` aplica cada mês `M` (1º dia) com
     # last_date < M <= hoje, fator (1+ipca) * (1+spread)^(1/12).
     d0 = (T.replace(day=1) - timedelta(days=1)).replace(day=1)
@@ -89,11 +97,10 @@ def test_resgate_parcial_com_ipca_atrasado_deixa_o_juro_para_o_saldo_restante(us
 
     ipca[T.replace(day=1)] = 0.50
     db.accrue_all_investments(user_id, today=T)
-    esperado = 600 * 1.005 * 1.06 ** (1 / 12)
-    assert abs(float(_lotes(user_id, inv)[0][0]) - esperado) < 1e-6
+    assert _lotes(user_id, inv) == [(Decimal("600"), Decimal("600"), "open", d0)]
 
 
-def test_resgate_parcial_com_cdi_atrasado_deixa_o_juro_para_o_saldo_restante(user_id, monkeypatch):
+def test_resgate_parcial_com_cdi_atrasado_descarta_o_juro_sem_indice_q43(user_id, monkeypatch):
     # CDI: um fator por DIA do mapa (o mapa é o que o BCB publicou, só dias úteis
     # na vida real); rate=1.0 = 100% do CDI.
     d0 = T - timedelta(days=7)
@@ -105,9 +112,7 @@ def test_resgate_parcial_com_cdi_atrasado_deixa_o_juro_para_o_saldo_restante(use
 
     cdi.update({d0 + timedelta(days=i): 0.05 for i in range(1, 8)})
     db.accrue_all_investments(user_id, today=T)
-    saldo, _, _, cursor = _lotes(user_id, inv)[0]
-    assert abs(float(saldo) - 600 * 1.0005 ** 7) < 1e-6
-    assert cursor == T
+    assert _lotes(user_id, inv) == [(Decimal("600"), Decimal("600"), "open", d0)]
 
 
 def test_resgate_de_lote_com_juro_ate_hoje_nao_mexe_no_cursor(user_id, monkeypatch):
@@ -120,7 +125,7 @@ def test_resgate_de_lote_com_juro_ate_hoje_nao_mexe_no_cursor(user_id, monkeypat
 
 # ── Defeito 2: desfazer devolve o cursor ──────────────────────────────────────
 
-def test_desfazer_resgate_total_com_indice_atrasado_recebe_o_juro_depois(user_id, monkeypatch):
+def test_desfazer_resgate_total_com_indice_atrasado_nao_recebe_juro_depois_q43(user_id, monkeypatch):
     d0 = T - timedelta(days=7)
     cdi = {}
     _cdi(monkeypatch, cdi)
@@ -131,7 +136,7 @@ def test_desfazer_resgate_total_com_indice_atrasado_recebe_o_juro_depois(user_id
 
     cdi.update({d0 + timedelta(days=i): 0.05 for i in range(1, 8)})
     db.accrue_all_investments(user_id, today=T)
-    assert abs(float(_lotes(user_id, inv)[0][0]) - 1000 * 1.0005 ** 7) < 1e-6
+    assert _lotes(user_id, inv) == [(Decimal("1000"), Decimal("1000"), "open", d0)]
 
 
 def test_desfazer_resgate_parcial_depois_de_accrual_devolve_o_cursor(user_id, monkeypatch):
@@ -142,13 +147,12 @@ def test_desfazer_resgate_parcial_depois_de_accrual_devolve_o_cursor(user_id, mo
     r = _resgate(user_id, "cdb", 400)
     cdi.update({d0 + timedelta(days=i): 0.05 for i in range(1, 4)})
     db.accrue_all_investments(user_id, today=T)
-    saldo, _, _, cursor = _lotes(user_id, inv)[0]
-    assert abs(float(saldo) - 600 * 1.0005 ** 3) < 1e-6 and cursor == d0 + timedelta(days=3)
+    assert _lotes(user_id, inv) == [(Decimal("600"), Decimal("600"), "open", d0)]
 
     db.delete_launch_and_rollback(user_id, r)
     assert _lotes(user_id, inv) == [(Decimal("1000"), Decimal("1000"), "open", d0)]
     db.accrue_all_investments(user_id, today=T)
-    assert abs(float(_lotes(user_id, inv)[0][0]) - 1000 * 1.0005 ** 3) < 1e-6
+    assert _lotes(user_id, inv) == [(Decimal("1000"), Decimal("1000"), "open", d0)]
 
 
 def test_desfazer_resgate_legado_sem_last_date_no_snapshot_continua_funcionando(user_id, monkeypatch):
@@ -268,7 +272,7 @@ def test_investimento_de_mesmo_nome_com_outra_caixa_nao_bloqueia(user_id):
 
 # ── Caixinha: o saque também deixa o cursor onde o CDI parou ─────────────────
 
-def test_saque_parcial_de_caixinha_com_cdi_atrasado_deixa_o_juro_para_o_restante(user_id, monkeypatch):
+def test_saque_parcial_de_caixinha_com_cdi_atrasado_descarta_o_juro_sem_indice_q43(user_id, monkeypatch):
     d0 = T - timedelta(days=7)
     cdi = {}
     _cdi(monkeypatch, cdi)
@@ -279,7 +283,8 @@ def test_saque_parcial_de_caixinha_com_cdi_atrasado_deixa_o_juro_para_o_restante
                    balance, opened_at, last_date, status)
                values (%s,%s,1000,1000,1000,%s,%s,'open')""",
             (user_id, pid, T - timedelta(days=60), d0))
-        cur.execute("update pockets set balance=1000 where id=%s and user_id=%s", (pid, user_id))
+        cur.execute("update pockets set balance=1000, interest_frozen_at=null, interest_enabled=true "
+                    "where id=%s and user_id=%s", (pid, user_id))
         conn.commit()
     db.pocket_withdraw_to_account(user_id, "viagem", 400)
 
@@ -287,7 +292,7 @@ def test_saque_parcial_de_caixinha_com_cdi_atrasado_deixa_o_juro_para_o_restante
     with db.get_conn() as conn, conn.cursor() as cur:
         saldo = pockets_db.accrue_pocket_db(cur, user_id, pid, today=T)
         conn.commit()
-    assert abs(float(saldo) - 600 * 1.0005 ** 7) < 1e-6
+    assert saldo == Decimal("600")
 
 
 # ── Conversa: pelo `handle_incoming`, com estado real de outro fluxo ──────────

@@ -843,6 +843,13 @@ def _fetch_lots_for_investments(cur, user_id: int, inv_ids: list[int]) -> dict[i
 
 def accrue_investment_db(cur, user_id: int, inv_id: int, today: date | None = None):
     """
+    Acumulação FINAL do investimento manual (Q43): roda uma vez e congela.
+
+    Com `interest_frozen_at` preenchido, não aplica juro: só sincroniza o saldo dos
+    lotes (o valor que o resgate consome). Com o marcador NULL (investimento anterior
+    à Q43), carimba o marcador sob o mesmo `for update` e aplica os índices
+    publicados até `today` uma última vez; dias sem índice ficam de fora.
+
     Atualiza (balance, last_date) aplicando juros por dias úteis.
     daily → rate por dia útil
     monthly → rate distribuído em 21 dias úteis
@@ -856,7 +863,7 @@ def accrue_investment_db(cur, user_id: int, inv_id: int, today: date | None = No
 
     cur.execute(
         """
-        select id, balance, rate, period, last_date, purchase_date
+        select id, balance, rate, period, last_date, purchase_date, interest_frozen_at
         from investments
         where id=%s and user_id=%s for update
         """,
@@ -867,6 +874,12 @@ def accrue_investment_db(cur, user_id: int, inv_id: int, today: date | None = No
         raise LookupError("INV_NOT_FOUND")
 
     _ensure_investment_lots(cur, user_id, inv)
+    congelado = inv["interest_frozen_at"] is not None
+    if not congelado:
+        cur.execute(
+            "update investments set interest_frozen_at=now() where id=%s and user_id=%s",
+            (inv_id, user_id),
+        )
 
     cur.execute(
         """
@@ -886,7 +899,7 @@ def accrue_investment_db(cur, user_id: int, inv_id: int, today: date | None = No
         )
         return ZERO
 
-    for lot in lots:
+    for lot in ([] if congelado else lots):
         # Cada lote pode ter taxa/período próprios (Tesouro IPCA+, Prefixado,
         # Debêntures etc.). Lotes legados sem rate/period caem no fallback do
         # investimento — comportamento idêntico ao antigo.
@@ -1271,86 +1284,24 @@ def list_investments(user_id: int, *, include_lots: bool = True):
             return rows
 
 
-def list_users_with_investments() -> list[int]:
-    """Retorna usuários que possuem ao menos um investimento cadastrado."""
+def list_users_with_unfrozen_interest() -> list[int]:
+    """Usuários com investimento ou caixinha manual ainda sem a acumulação final (Q43)."""
     with get_conn() as conn:
         with conn.cursor() as cur:
-            cur.execute("select distinct user_id from investments order by user_id")
+            cur.execute(
+                """
+                select user_id from investments where interest_frozen_at is null
+                union
+                select user_id from pockets
+                 where interest_frozen_at is null and of_investment_id is null
+                order by user_id
+                """
+            )
             return [int(row["user_id"]) for row in cur.fetchall()]
 
 
-def _project_to_today(
-    cur,
-    balance: Decimal,
-    period: str,
-    rate_value: Decimal,
-    last_date: date | None,
-    today: date,
-) -> tuple[Decimal, date | None, int]:
-    """
-    Estima o saldo de last_date até today usando a última taxa conhecida como
-    proxy para dias úteis ainda não publicados pelo BCB.
-
-    NÃO persiste nada — somente para exibição. O saldo realizado em
-    investment_lots continua sendo atualizado apenas com taxas oficialmente
-    publicadas, então a projeção converge para o valor correto assim que o
-    BCB publica os dados.
-
-    Retorna (balance_projetado, data_alvo, dias_uteis_projetados).
-    """
-    if last_date is None or today <= last_date:
-        return balance, last_date, 0
-
-    n = _business_days_between(last_date, today)
-    if n <= 0:
-        return balance, last_date, 0
-
-    rate = float(rate_value)
-
-    if period in ("cdi", "cdi_spread"):
-        cur.execute(
-            "select value from market_rates where code='CDI' order by ref_date desc limit 1"
-        )
-        row = cur.fetchone()
-        if not row:
-            return balance, last_date, 0
-        latest_cdi = float(row["value"])
-
-        if period == "cdi":
-            factor = (1.0 + (latest_cdi / 100.0) * rate) ** n
-        else:
-            spread_daily = (1.0 + rate) ** (1.0 / 252.0) - 1.0
-            factor = ((1.0 + latest_cdi / 100.0) * (1.0 + spread_daily)) ** n
-        return Decimal(str(float(balance) * factor)), today, n
-
-    if period == "selic_spread":
-        cur.execute(
-            "select value from market_rates where code='SELIC_DAILY' order by ref_date desc limit 1"
-        )
-        row = cur.fetchone()
-        if not row:
-            return balance, last_date, 0
-        latest_selic = float(row["value"])
-        spread_daily = (1.0 + rate) ** (1.0 / 252.0) - 1.0
-        factor = ((1.0 + latest_selic / 100.0) * (1.0 + spread_daily)) ** n
-        return Decimal(str(float(balance) * factor)), today, n
-
-    if period == "daily":
-        daily_rate = rate
-    elif period == "monthly":
-        daily_rate = (1.0 + rate) ** (1.0 / 21.0) - 1.0
-    elif period == "yearly":
-        daily_rate = (1.0 + rate) ** (1.0 / 252.0) - 1.0
-    else:
-        return balance, last_date, 0
-
-    if daily_rate > 0:
-        return Decimal(str(float(balance) * (1.0 + daily_rate) ** n)), today, n
-    return balance, last_date, 0
-
-
 def accrue_all_investments(user_id: int, today: date | None = None):
-    """Aplica juros em todos os investimentos do usuário e retorna a lista atualizada."""
+    """Acumulação final (Q43) de cada investimento do usuário; retorna a lista."""
     ensure_user(user_id)
     if today is None:
         today = datetime.now(_tz()).date()
@@ -1376,47 +1327,6 @@ def accrue_all_investments(user_id: int, today: date | None = None):
             lots_by_inv = _fetch_lots_for_investments(cur, user_id, [int(r["id"]) for r in out])
             for row in out:
                 row["lots"] = lots_by_inv.get(int(row["id"]), [])
-
-                # Projeção por lote: cada lote acumula independente, então um lote
-                # criado hoje não pode "esconder" o gap de projection de lotes mais
-                # antigos via inv.last_date = MAX(...). Soma as projeções de cada
-                # lote aberto; fallback no agregado se não houver lotes (cenário
-                # legado pré-migração de lots).
-                open_lots = [lot for lot in row["lots"] if lot.get("status") == "open"]
-                if open_lots:
-                    proj_total = Decimal("0")
-                    proj_days = 0
-                    proj_until = None
-                    for lot in open_lots:
-                        lot_rate = lot.get("rate") if lot.get("rate") is not None else row["rate"]
-                        lot_period = lot.get("period") or row["period"]
-                        lot_pb, lot_until, lot_days = _project_to_today(
-                            cur,
-                            Decimal(str(lot["balance"] or 0)),
-                            lot_period,
-                            Decimal(str(lot_rate or 0)),
-                            lot["last_date"],
-                            today,
-                        )
-                        proj_total += lot_pb
-                        proj_days = max(proj_days, lot_days)
-                        if lot_until and (proj_until is None or lot_until > proj_until):
-                            proj_until = lot_until
-                    row["projected_balance"] = float(proj_total)
-                    row["projected_until"] = proj_until or row["last_date"]
-                    row["projected_days"] = proj_days
-                else:
-                    projected_balance, projected_until, projected_days = _project_to_today(
-                        cur,
-                        Decimal(str(row["balance"] or 0)),
-                        row["period"],
-                        Decimal(str(row["rate"] or 0)),
-                        row["last_date"],
-                        today,
-                    )
-                    row["projected_balance"] = float(projected_balance)
-                    row["projected_until"] = projected_until
-                    row["projected_days"] = projected_days
 
         conn.commit()
 

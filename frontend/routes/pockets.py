@@ -79,6 +79,15 @@ async def create_pocket_route(request: Request, user_id: int, payload: PocketCre
     except ValueError as exc:
         raise HTTPException(status_code=400, detail=detalhe_seguro(exc)) from exc
 
+    # Q43: a nova nasce com false, mas no conflito de nome a caixinha é a existente.
+    def _juro_gravado():
+        from db.connection import get_conn
+        with get_conn() as conn, conn.cursor() as cur:
+            cur.execute("select interest_enabled from pockets where user_id = %s and id = %s",
+                        (user_id, pocket_id))
+            return bool(cur.fetchone()["interest_enabled"])
+
+    interest_enabled = await asyncio.to_thread(_juro_gravado)
     shared.invalidate_dashboard_current_cache(user_id)
     return {
         "ok": True,
@@ -87,7 +96,7 @@ async def create_pocket_route(request: Request, user_id: int, payload: PocketCre
             "id": int(pocket_id),
             "name": canon,
             "description": description,
-            "interest_enabled": bool(payload.interest_enabled),
+            "interest_enabled": interest_enabled,
             "interest_rate": interest_rate,
             "interest_period": "cdi",
         },

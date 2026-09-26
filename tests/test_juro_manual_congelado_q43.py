@@ -1,0 +1,422 @@
+"""Q43: caixinha e investimento manuais param de render.
+
+Todo ativo manual recebe UMA acumulação final (marcador `interest_frozen_at` NULL →
+carimbado sob o mesmo `for update`) e depois congela. Ativo novo nasce congelado.
+Dias sem índice publicado na final são descartados (decisão do dono).
+
+Regra de todo teste de "não rende": lote retroativo E CDI publicado depois do
+cursor, de modo que o código anterior renderia.
+"""
+from concurrent.futures import ThreadPoolExecutor
+from datetime import timedelta
+from decimal import Decimal
+from threading import Event
+
+import pytest
+
+import db
+import db.investments as investments_db
+from tests._espera_lock import _esperar_backend_travado
+from tests.test_investimento_juro_e_desfazer import T, _cdi, _investimento_com_lote, _lotes
+
+D0 = T - timedelta(days=7)
+CDI7 = {D0 + timedelta(days=i): 0.05 for i in range(1, 8)}   # D0+1 .. T
+GANHO7 = Decimal(str(1000 * 1.0005 ** 7))
+
+
+def _caixinha_com_lote(uid, nome, *, legado, juro=True, balance=1000):
+    """Caixinha com lote de 60 dias e cursor em D0. `legado`: marcador NULL."""
+    _, pid, _ = db.create_pocket(uid, nome)
+    with db.get_conn() as conn, conn.cursor() as cur:
+        cur.execute(
+            """insert into pocket_lots(user_id, pocket_id, principal_initial, principal_remaining,
+                   balance, opened_at, last_date, status)
+               values (%s,%s,%s,%s,%s,%s,%s,'open')""",
+            (uid, pid, balance, balance, balance, T - timedelta(days=60), D0))
+        cur.execute(
+            "update pockets set balance=%s, interest_enabled=%s, "
+            "interest_frozen_at = case when %s then null else interest_frozen_at end "
+            "where id=%s and user_id=%s", (balance, juro, legado, pid, uid))
+        conn.commit()
+    return pid
+
+
+def _linha(tabela, uid, id_):
+    assert tabela in ("pockets", "investments")
+    with db.get_conn() as conn, conn.cursor() as cur:
+        cur.execute(f"select * from {tabela} where id=%s and user_id=%s", (id_, uid))
+        return cur.fetchone()
+
+
+def _saldo_lotes_caixinha(uid, pid):
+    with db.get_conn() as conn, conn.cursor() as cur:
+        cur.execute("select balance, last_date from pocket_lots where user_id=%s and pocket_id=%s "
+                    "and status='open' order by id", (uid, pid))
+        return [tuple(r.values()) for r in cur.fetchall()]
+
+
+def _approx(valor, esperado):
+    return abs(Decimal(str(valor)) - Decimal(str(esperado))) < Decimal("0.000001")
+
+
+# ── A. Congelamento na função ─────────────────────────────────────────────────
+
+def test_A1_investimento_novo_nasce_congelado_e_nao_rende(user_id, monkeypatch):
+    _cdi(monkeypatch, CDI7)
+    inv = _investimento_com_lote(user_id, "cdb", "cdi", 1.0, D0, legado=False)
+    db.accrue_all_investments(user_id, today=T)
+    assert _lotes(user_id, inv) == [(Decimal("1000"), Decimal("1000"), "open", D0)]
+    row = _linha("investments", user_id, inv)
+    assert (row["balance"], row["last_date"]) == (Decimal("1000"), D0)
+
+
+def test_A2_caixinha_nova_nasce_congelada_e_nao_rende(user_id, monkeypatch):
+    _cdi(monkeypatch, CDI7)
+    pid = _caixinha_com_lote(user_id, "viagem", legado=False)
+    row = _linha("pockets", user_id, pid)
+    assert row["interest_frozen_at"] is not None
+    # juro=True isola o marcador: sem ele, `interest_enabled` sozinho deixaria render.
+    assert row["interest_enabled"] is True
+    db.accrue_all_pockets(user_id, today=T)
+    assert _saldo_lotes_caixinha(user_id, pid) == [(Decimal("1000"), D0)]
+    assert _linha("pockets", user_id, pid)["balance"] == Decimal("1000")
+
+
+def test_A3_aporte_retroativo_em_investimento_congelado_nao_rende(user_id, monkeypatch):
+    _cdi(monkeypatch, {T - timedelta(days=i): 0.05 for i in range(0, 30)})
+    db.add_launch_and_update_balance(user_id, "receita", 1000, None, "seed")
+    _, inv, _ = db.create_investment_db(user_id, "cdb", rate=1.0, period="cdi",
+                                        tax_profile="exempt_ir_iof")
+    db.investment_deposit_from_account(user_id, "cdb", 500, "aporte",
+                                       purchase_date=T - timedelta(days=30))
+    db.accrue_all_investments(user_id, today=T)
+    assert [x[0] for x in _lotes(user_id, inv)] == [Decimal("500")]
+    assert _linha("investments", user_id, inv)["balance"] == Decimal("500")
+
+
+# A4 (sem projeção) mora em tests/test_db_investments.py::test_accrue_all_nao_projeta_rendimento_q43.
+
+
+# ── B. Acumulação final exatamente uma vez ────────────────────────────────────
+
+def test_B1_final_rende_uma_vez_e_carimba(user_id, monkeypatch):
+    cdi = dict(CDI7)
+    _cdi(monkeypatch, cdi)
+    inv = _investimento_com_lote(user_id, "cdb", "cdi", 1.0, D0)
+    assert _linha("investments", user_id, inv)["interest_frozen_at"] is None
+    db.accrue_all_investments(user_id, today=T)
+    saldo, _, _, cursor = _lotes(user_id, inv)[0]
+    assert _approx(saldo, GANHO7) and cursor == T
+    assert _linha("investments", user_id, inv)["interest_frozen_at"] is not None
+
+    cdi.update({T + timedelta(days=i): 0.05 for i in range(1, 4)})
+    db.accrue_all_investments(user_id, today=T + timedelta(days=3))
+    assert _lotes(user_id, inv)[0][0] == saldo and _lotes(user_id, inv)[0][3] == T
+
+
+def test_B2_concorrencia_rende_uma_vez_so(user_id, monkeypatch):
+    """Thread 1 para dentro do `_growth_for_period` segurando a linha (today=T-3,
+    4 dias). Thread 2 chama com today=T: se não enxergar o carimbo, renderia os 3
+    dias seguintes."""
+    _cdi(monkeypatch, CDI7)
+    inv = _investimento_com_lote(user_id, "cdb", "cdi", 1.0, D0)
+    segurando, original = Event(), investments_db._growth_for_period
+
+    def pausa(*a, **k):
+        if not segurando.is_set():
+            segurando.set()
+            _esperar_backend_travado(5)
+        return original(*a, **k)
+
+    monkeypatch.setattr(investments_db, "_growth_for_period", pausa)
+
+    def segunda():
+        assert segurando.wait(5)
+        return db.accrue_all_investments(user_id, today=T)
+
+    with ThreadPoolExecutor(max_workers=2) as pool:
+        f1 = pool.submit(db.accrue_all_investments, user_id, today=T - timedelta(days=3))
+        f2 = pool.submit(segunda)
+        f1.result(timeout=20), f2.result(timeout=20)
+    assert _approx(_lotes(user_id, inv)[0][0], Decimal(str(1000 * 1.0005 ** 4)))
+
+
+def test_B3_caixinha_legada_sem_juro_so_carimba(user_id, monkeypatch):
+    _cdi(monkeypatch, CDI7)
+    pid = _caixinha_com_lote(user_id, "viagem", legado=True, juro=False)
+    db.accrue_all_pockets(user_id, today=T)
+    assert _saldo_lotes_caixinha(user_id, pid) == [(Decimal("1000"), D0)]
+    assert _linha("pockets", user_id, pid)["interest_frozen_at"] is not None
+
+
+def test_B4_caixinha_legada_com_juro_rende_uma_vez_e_desliga(user_id, monkeypatch):
+    from tests.test_delete_endpoints_nao_vazam import _client
+
+    cdi = dict(CDI7)
+    _cdi(monkeypatch, cdi)
+    pid = _caixinha_com_lote(user_id, "viagem", legado=True)
+    db.accrue_all_pockets(user_id, today=T)
+    row = _linha("pockets", user_id, pid)
+    assert _approx(row["balance"], GANHO7)
+    assert row["interest_enabled"] is False and row["interest_frozen_at"] is not None
+
+    cdi.update({T + timedelta(days=i): 0.05 for i in range(1, 4)})
+    db.accrue_all_pockets(user_id, today=T + timedelta(days=3))
+    assert _linha("pockets", user_id, pid)["balance"] == row["balance"]
+
+    goals = _client(user_id).get(f"/goals/{user_id}/status").json()["goals"]
+    assert [g["interest_enabled"] for g in goals if g["id"] == pid] == [False]
+
+
+def test_B5_resgate_total_de_legado_inclui_o_ganho_final(user_id, monkeypatch):
+    _cdi(monkeypatch, CDI7)
+    _investimento_com_lote(user_id, "cdb", "cdi", 1.0, D0)
+    antes = db.get_balance(user_id)
+    _, _, bal_inv, _, taxes, _ = db.investment_withdraw_to_account(user_id, "cdb", withdraw_all=True)
+    assert _approx(taxes["gross"], GANHO7) and bal_inv == 0
+    assert _approx(db.get_balance(user_id) - antes, GANHO7)
+
+
+# ── C. Caminhos reais não rendem ──────────────────────────────────────────────
+
+def _atrasa_lotes(uid, tabela):
+    with db.get_conn() as conn, conn.cursor() as cur:
+        cur.execute(f"update {tabela} set opened_at=%s, last_date=%s where user_id=%s",
+                    (T - timedelta(days=60), D0, uid))
+        conn.commit()
+
+
+def test_C1_dashboard_http_nao_rende(user_id, monkeypatch):
+    from tests.test_delete_endpoints_nao_vazam import _client, _headers
+
+    _cdi(monkeypatch, CDI7)
+    db.add_launch_and_update_balance(user_id, "receita", 3000, None, "seed")
+    c, h = _client(user_id), _headers()
+    # O JS em cache ainda manda interest_enabled=true.
+    assert c.post(f"/pockets/{user_id}", json={"name": "viagem", "interest_enabled": True,
+                                               "interest_rate": 1.0}, headers=h).status_code == 200
+    assert c.post(f"/pockets/{user_id}/viagem/deposit", json={"amount": 1000}, headers=h).status_code == 200
+    r = c.post(f"/investments/{user_id}", headers=h, json={
+        "name": "cdb", "rate": 1.0, "period": "cdi", "initial_amount": 1000,
+        "purchase_date": D0.isoformat(), "tax_profile": "exempt_ir_iof"})
+    assert r.status_code == 200, r.text
+    _atrasa_lotes(user_id, "pocket_lots")
+
+    r = c.post(f"/pockets/{user_id}/viagem/withdraw", json={"amount": 400}, headers=h)
+    assert r.status_code == 200 and float(r.json()["pocket_balance"]) == 600
+    r = c.post(f"/pockets/{user_id}/viagem/deposit", json={"amount": 100}, headers=h)
+    assert float(r.json()["pocket_balance"]) == 700
+    r = c.post(f"/investments/{user_id}/deposit", json={"name": "cdb", "amount": 200}, headers=h)
+    assert r.status_code == 200 and float(r.json()["investment_balance"]) == 1200
+    r = c.post(f"/investments/{user_id}/withdraw", json={"name": "cdb", "amount": 300}, headers=h)
+    assert r.status_code == 200 and float(r.json()["investment_balance"]) == 900
+    assert r.json()["tax_summary"]["gross"] == 300.0
+    assert db.get_balance(user_id) == Decimal("3000") - 1000 - 1000 + 400 - 100 - 200 + 300
+
+
+def test_C2_conversa_whatsapp_nao_rende(monkeypatch):
+    from conftest import usuario_pagante
+    from tests.test_pending_rollback import _diga
+
+    _cdi(monkeypatch, CDI7)
+    uid = usuario_pagante()
+    db.add_launch_and_update_balance(uid, "receita", 3000, None, "seed")
+    db.create_investment_db(uid, "CDB", rate=1.0, period="cdi", tax_profile="exempt_ir_iof",
+                            initial_amount=1000, purchase_date=D0)
+    # "coloquei R$ 50,00 ..." cai na IA (sem chave aqui) — por isso "guardei". Acento
+    # em nome de caixinha tem defeito próprio (cria "poupanca", depósito procura
+    # "poupança"), fora da Q43; o acento fica no gasto.
+    for frase in ("criar caixinha viagem", "coloquei 300 na caixinha viagem"):
+        assert "✅" in _diga(uid, frase), frase
+    _atrasa_lotes(uid, "pocket_lots")
+    assert "mercado" in _diga(uid, "gastei 50 no mercado").lower()
+    for frase in ("apliquei 200 no investimento CDB", "retirei 100 da caixinha viagem",
+                  "gastei R$ 50,00 no açougue", "retirei 100 do investimento CDB",
+                  "guardei R$ 50,00 na caixinha viagem"):
+        assert "R$" in _diga(uid, frase), frase
+
+    pockets = {p["name"]: p["balance"] for p in db.list_pockets(uid)}
+    invs = {i["name"]: i["balance"] for i in db.list_investments(uid)}
+    assert (pockets, invs) == ({"viagem": Decimal("250")}, {"CDB": Decimal("1100")})
+    assert db.get_balance(uid) == Decimal("3000") - 1000 - 300 - 50 - 200 + 100 - 50 + 100 - 50
+
+
+# ── D. Caixinha do banco não é afetada (controle positivo) ────────────────────
+
+def test_D_caixinha_do_banco_segue_o_banco_e_nao_carimba(user_id):
+    from tests.test_of_caixinha_autoimport import _save, _seed_connection
+
+    conn_id = _seed_connection(user_id)
+    raw = {"id": "cxq43", "name": "Caixinha Reserva", "type": "FIXED_INCOME", "subtype": "CDB"}
+    _save(conn_id, [{**raw, "balance": 1000.0}])
+    db.sync_open_finance_caixinhas(conn_id, user_id)
+    with db.get_conn() as conn, conn.cursor() as cur:
+        cur.execute("update pockets set interest_frozen_at=null where user_id=%s returning id", (user_id,))
+        pid = cur.fetchone()["id"]
+        conn.commit()
+
+    assert [p["balance"] for p in db.accrue_all_pockets(user_id)] == [Decimal("1000")]
+    assert _linha("pockets", user_id, pid)["interest_frozen_at"] is None
+    _save(conn_id, [{**raw, "balance": 1250.0}])
+    db.sync_open_finance_caixinhas(conn_id, user_id)
+    assert [p["balance"] for p in db.accrue_all_pockets(user_id)] == [Decimal("1250")]
+
+
+# ── E. Varredura e isolamento ─────────────────────────────────────────────────
+
+def test_E_varredura_so_quem_falta_e_sem_vazar(monkeypatch):
+    from conftest import usuario_pagante
+    from core.services import investment_scheduler
+    from tests.test_of_caixinha_autoimport import _save, _seed_connection
+
+    _cdi(monkeypatch, CDI7)
+    a, b, banco, frio = (usuario_pagante() for _ in range(4))
+    inv_a = _investimento_com_lote(a, "cdb", "cdi", 1.0, D0)
+    pid_b = _caixinha_com_lote(b, "viagem", legado=True)
+    conn_id = _seed_connection(banco, item="q43-item")
+    _save(conn_id, [{"id": "cxe", "name": "Caixinha E", "type": "FIXED_INCOME",
+                     "subtype": "CDB", "balance": 10.0}])
+    db.sync_open_finance_caixinhas(conn_id, banco)
+    with db.get_conn() as conn, conn.cursor() as cur:
+        cur.execute("update pockets set interest_frozen_at=null where user_id=%s", (banco,))
+        conn.commit()
+    _investimento_com_lote(frio, "cdb", "cdi", 1.0, D0, legado=False)
+    _caixinha_com_lote(frio, "viagem", legado=False)
+
+    nossos = {a, b, banco, frio}
+    lista = set(db.list_users_with_unfrozen_interest()) & nossos
+    assert lista == {a, b}
+
+    db.accrue_all_investments(a)
+    db.accrue_all_pockets(a)
+    assert _linha("investments", a, inv_a)["interest_frozen_at"] is not None
+    assert _linha("pockets", b, pid_b)["interest_frozen_at"] is None
+
+    real = db.list_users_with_unfrozen_interest
+    monkeypatch.setattr(db, "list_users_with_unfrozen_interest",
+                        lambda: [u for u in real() if u in nossos])
+    assert investment_scheduler.accrue_all_users_investments()["failed"] == 0
+    assert not set(real()) & nossos
+    assert _approx(_linha("pockets", b, pid_b)["balance"], GANHO7)
+
+
+# ── F. Quem grava interest_enabled ────────────────────────────────────────────
+
+def test_F1_create_pocket_ignora_ligar_o_juro(user_id):
+    _, pid, _ = db.create_pocket(user_id, "viagem", interest_enabled=True)
+    assert _linha("pockets", user_id, pid)["interest_enabled"] is False
+
+
+def test_F2_patch_meta_ignora_ligar_o_juro_e_nao_mexe_no_cursor(user_id):
+    from tests.test_delete_endpoints_nao_vazam import _client, _headers
+
+    pid = _caixinha_com_lote(user_id, "viagem", legado=False, juro=False)
+    r = _client(user_id).patch(f"/pockets/{user_id}/{pid}/meta", headers=_headers(),
+                               json={"interest_enabled": True, "interest_rate": 1.1})
+    assert r.status_code == 200, r.text
+    assert _linha("pockets", user_id, pid)["interest_enabled"] is False
+    assert _saldo_lotes_caixinha(user_id, pid) == [(Decimal("1000"), D0)]
+
+
+def test_F3_patch_so_de_nome_continua_funcionando(user_id):
+    """Positivo."""
+    from tests.test_delete_endpoints_nao_vazam import _client, _headers
+
+    _, pid, _ = db.create_pocket(user_id, "viagem")
+    r = _client(user_id).patch(f"/pockets/{user_id}/{pid}/meta", headers=_headers(),
+                               json={"name": "ferias"})
+    assert r.status_code == 200 and r.json()["pocket"]["name"] == "ferias"
+
+
+def test_F4_post_responde_o_juro_gravado(user_id):
+    from tests.test_delete_endpoints_nao_vazam import _client, _headers
+
+    r = _client(user_id).post(f"/pockets/{user_id}", headers=_headers(),
+                              json={"name": "viagem", "interest_enabled": True})
+    assert r.status_code == 200, r.text
+    assert r.json()["pocket"]["interest_enabled"] is False
+    assert _linha("pockets", user_id, r.json()["pocket"]["id"])["interest_enabled"] is False
+
+
+def test_F4b_post_com_nome_existente_responde_o_juro_da_legada(user_id):
+    """Conflito de nome devolve a caixinha existente: a legada ainda rende."""
+    from tests.test_delete_endpoints_nao_vazam import _client, _headers
+
+    _, pid, _ = db.create_pocket(user_id, "viagem")
+    with db.get_conn() as conn, conn.cursor() as cur:
+        cur.execute("update pockets set interest_enabled=true, interest_frozen_at=null "
+                    "where id=%s and user_id=%s", (pid, user_id))
+        conn.commit()
+
+    r = _client(user_id).post(f"/pockets/{user_id}", headers=_headers(),
+                              json={"name": "viagem", "interest_enabled": False})
+    assert r.status_code == 200, r.text
+    assert r.json()["created"] is False and r.json()["pocket"]["id"] == pid
+    assert r.json()["pocket"]["interest_enabled"] is True
+    assert _linha("pockets", user_id, pid)["interest_enabled"] is True
+
+
+def test_F5_patch_so_ligando_o_juro_e_200_sem_vazar(user_id):
+    from conftest import usuario_pagante
+    from tests.test_delete_endpoints_nao_vazam import _client, _headers
+
+    _, pid, _ = db.create_pocket(user_id, "viagem")
+    antes = _linha("pockets", user_id, pid)
+    r = _client(user_id).patch(f"/pockets/{user_id}/{pid}/meta", headers=_headers(),
+                               json={"interest_enabled": True})
+    assert r.status_code == 200, r.text
+    assert r.json()["pocket"]["id"] == pid and r.json()["pocket"]["interest_enabled"] is False
+    assert _linha("pockets", user_id, pid) == antes
+
+    outro = usuario_pagante()
+    r = _client(outro).patch(f"/pockets/{outro}/{pid}/meta", headers=_headers(),
+                             json={"interest_enabled": True})
+    assert r.status_code == 404, r.text
+    r = _client(user_id).patch(f"/pockets/{user_id}/999999999/meta", headers=_headers(),
+                               json={"interest_enabled": True})
+    assert r.status_code == 404, r.text
+
+
+# ── Migração ──────────────────────────────────────────────────────────────────
+
+def test_migracao_default_now_nas_duas_tabelas(user_id):
+    with db.get_conn() as conn, conn.cursor() as cur:
+        cur.execute("select table_name, column_default from information_schema.columns "
+                    "where table_schema = current_schema() and column_name='interest_frozen_at' "
+                    "order by table_name")
+        assert [(r["table_name"], r["column_default"]) for r in cur.fetchall()] == [
+            ("investments", "now()"), ("pockets", "now()")]
+        cur.execute("insert into pockets(user_id, name) values (%s,'q43') "
+                    "returning interest_frozen_at, interest_enabled", (user_id,))
+        row = cur.fetchone()
+        conn.rollback()
+    assert row["interest_frozen_at"] is not None and row["interest_enabled"] is False
+
+
+def test_migracao_add_e_default_no_mesmo_statement():
+    """O statement do init_db, aplicado a uma tabela com linhas: as antigas ficam
+    NULL (recebem a final), a nova nasce carimbada, e a 2ª subida não mexe em nada.
+    Um statement só: o init_db é autocommit, e separados um INSERT no meio nasce NULL."""
+    import inspect
+    import re
+
+    from db import schema
+
+    stmts = [s for s in re.findall(r'"""(.*?)"""', inspect.getsource(schema.init_db), re.S)
+             if "add column if not exists interest_frozen_at" in s]
+    assert len(stmts) == 2
+    with db.get_conn() as conn, conn.cursor() as cur:
+        for stmt in stmts:
+            cur.execute("create temp table q43_mig (id int)")
+            cur.execute("insert into q43_mig values (1), (2)")
+            sql = re.sub(r"alter table (pockets|investments)", "alter table q43_mig", stmt)
+            cur.execute(sql)
+            cur.execute("insert into q43_mig(id) values (3)")
+            cur.execute("select id, interest_frozen_at from q43_mig order by id")
+            antes = [tuple(r.values()) for r in cur.fetchall()]
+            assert [f is None for _, f in antes] == [True, True, False], stmt
+            cur.execute(sql)
+            cur.execute("select id, interest_frozen_at from q43_mig order by id")
+            assert [tuple(r.values()) for r in cur.fetchall()] == antes
+            cur.execute("drop table q43_mig")
+        conn.rollback()
