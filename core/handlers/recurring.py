@@ -198,7 +198,7 @@ def add(user_id: int, text: str, entities: dict) -> str:
         )
     return (
         f"✅ *Gasto fixo criado:* {rec['name']}\n"
-        f"💸 {fmt_brl(valor)} · débito na conta {_fmt_quando(frequency, dia, mes)}\n"
+        f"💸 {fmt_brl(valor)} · debitado pelo banco {_fmt_quando(frequency, dia, mes)}\n"
         f"📅 {_fmt_start(rec.get('start_date'))}\n"
         f"Entra na sua previsão — o Piggy não lança sozinho. Edite na aba *Recorrentes* do dashboard."
     )

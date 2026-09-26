@@ -484,6 +484,42 @@ def dismiss_recurring_suggestion(user_id: int, key: str, amount: float) -> None:
         conn.commit()
 
 
+def list_active_autopay_recurrings() -> list[dict[str, Any]]:
+    """Gastos fixos autopay ativos de TODOS os usuários, pro aviso de vencimento
+    do loop global (`sync_autopay_notices_once`). Cada linha leva o próprio user_id."""
+    with get_conn() as conn:
+        with conn.cursor() as cur:
+            cur.execute(
+                """
+                select id, user_id, name, amount, due_day, due_month, frequency,
+                       payment_type, coalesce(start_date, created_at::date) as start_date
+                from recurring_expenses
+                where is_active = true and payment_mode = 'autopay' and amount > 0
+                """
+            )
+            return [dict(r) for r in (cur.fetchall() or [])]
+
+
+def ensure_autopay_notice(recurring_id: int, user_id: int, amount: float, period_key: str) -> bool:
+    """Grava o aviso de vencimento (linha em recurring_charges SEM lançamento:
+    launch_id e credit_tx_id nulos). Idempotente pelo UNIQUE (recurring_id, ym).
+    True se criou agora."""
+    with get_conn() as conn:
+        with conn.cursor() as cur:
+            cur.execute(
+                """
+                insert into recurring_charges (recurring_id, user_id, amount, ym)
+                values (%s, %s, %s, %s)
+                on conflict (recurring_id, ym) do nothing
+                returning id
+                """,
+                (int(recurring_id), int(user_id), Decimal(str(amount)), period_key),
+            )
+            criou = cur.fetchone() is not None
+        conn.commit()
+    return criou
+
+
 __all__ = [
     "list_recurring_expenses",
     "get_recurring_expense",
@@ -493,4 +529,6 @@ __all__ = [
     "delete_recurring_expense",
     "find_recurring_candidate",
     "dismiss_recurring_suggestion",
+    "list_active_autopay_recurrings",
+    "ensure_autopay_notice",
 ]

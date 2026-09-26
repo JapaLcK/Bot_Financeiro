@@ -1379,9 +1379,11 @@ def init_db():
           on recurring_expenses (user_id, is_active)
         """,
 
-        # Histórico de cobranças automáticas. Garante idempotência via unique
-        # (recurring_id, ym) + serve pra alertas no banner do dashboard até user
-        # marcar como visto (acknowledged=true).
+        # Histórico de cobranças automáticas (cobrador antigo, com launch_id ou
+        # credit_tx_id) e avisos de vencimento do autopay (Q42, os dois nulos:
+        # nada foi lançado). Idempotência via unique (recurring_id, ym) + serve
+        # pra alertas no banner do dashboard até user marcar como visto
+        # (acknowledged=true).
         """
         create table if not exists recurring_charges (
           id           bigserial primary key,

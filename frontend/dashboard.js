@@ -4389,7 +4389,7 @@ function _renderFixedView(items) {
           <div class="tx-icon" style="color:${(x.date - today) / (1000 * 60 * 60 * 24) <= 2 ? 'var(--red)' : '#fbbf24'}">${phIcon(_recurringEmoji(x.rec))}</div>
           <div class="tx-main">
             <div class="tx-desc">${escapeHtmlSafe(x.rec.name)} · ${x.date.toLocaleDateString("pt-BR", { day: "2-digit", month: "short" })}</div>
-            <div class="tx-meta">${_formatDueIn(x.date)} · ${x.rec.payment_type === "credit_card" ? "Cartão " + escapeHtmlSafe(x.rec.card_name || "?") : "Débito automático"}</div>
+            <div class="tx-meta">${_formatDueIn(x.date)} · ${x.rec.payment_type === "credit_card" ? "Cartão " + escapeHtmlSafe(x.rec.card_name || "?") : "Débito no banco"}</div>
           </div>
           <div class="tx-amt ${_toneClass(-x.rec.amount, "green", "red")}">-${_fmtBRL(x.rec.amount)}</div>
         </div>
@@ -4510,7 +4510,7 @@ function _ensureRecurringModal() {
               <div class="field">
                 <label for="recurring-mode">Tipo *</label>
                 <select id="recurring-mode" onchange="_toggleRecurringModeHint()">
-                  <option value="autopay">Gasto fixo (débito automático)</option>
+                  <option value="autopay">Gasto fixo (débito no banco)</option>
                   <option value="manual">Conta a pagar (boleto/lembrete)</option>
                 </select>
               </div>
@@ -4555,7 +4555,7 @@ function _ensureRecurringModal() {
               <div class="field">
                 <label for="recurring-payment-type">Forma de pagamento *</label>
                 <select id="recurring-payment-type" onchange="_toggleRecurringCardField()">
-                  <option value="account">Débito automático na conta</option>
+                  <option value="account">Débito automático no banco</option>
                   <option value="credit_card">Cartão de crédito</option>
                 </select>
               </div>
@@ -4568,7 +4568,7 @@ function _ensureRecurringModal() {
               <div class="field">
                 <label for="recurring-start-date" id="recurring-start-label">Começa a partir de</label>
                 <input type="date" id="recurring-start-date" />
-                <span id="recurring-start-hint" style="font-size:.68rem;color:var(--text-3);margin-top:4px;display:block">A 1ª cobrança é no dia do vencimento em/após esta data. Deixe hoje pra começar já.</span>
+                <span id="recurring-start-hint" style="font-size:.68rem;color:var(--text-3);margin-top:4px;display:block">Entra na previsão a partir do 1º vencimento em/após esta data. Deixe hoje pra começar já.</span>
               </div>
             </div>
             <div class="field">
@@ -4648,7 +4648,7 @@ function _toggleRecurringFreqFields() {
     if (startInput) startInput.required = true;
   } else {
     if (startLabel) startLabel.textContent = "Começa a partir de";
-    if (startHint) startHint.textContent = "A 1ª cobrança é no dia do vencimento em/após esta data. Deixe hoje pra começar já.";
+    if (startHint) startHint.textContent = "Entra na previsão a partir do 1º vencimento em/após esta data. Deixe hoje pra começar já.";
     if (startInput) startInput.required = false;
   }
 }
@@ -5848,7 +5848,7 @@ function _ensureRecurringIncomeModal() {
               <div class="field">
                 <label for="recurring-income-start-date">Começa a partir de</label>
                 <input type="date" id="recurring-income-start-date" />
-                <span style="font-size:.68rem;color:var(--text-3);margin-top:4px;display:block">O 1º crédito é no dia do recebimento em/após esta data. Deixe hoje pra começar já.</span>
+                <span style="font-size:.68rem;color:var(--text-3);margin-top:4px;display:block">Entra na previsão a partir do 1º recebimento em/após esta data. Deixe hoje pra começar já.</span>
               </div>
             </div>
             <div class="field">
@@ -8557,8 +8557,14 @@ function renderAlerts(alerts) {
   let html = "";
   alerts.forEach(a => {
     if (a.type === "recurring_charged") {
-      const where = a.payment_type === "credit_card" ? "no cartão" : "da conta";
-      html += `<div class="alert-row"><i class="ph ph-piggy-bank" aria-hidden="true"></i> Piggy lançou <b>${escapeHtmlSafe(a.name)}</b> ${fmt(a.amount)} ${where} ${_alertWhenLabel(a.charged_at)}. <button onclick="ackRecurringCharge(${a.charge_id})" aria-label="Marcar como visto" title="Marcar como visto" style="background:none;border:none;color:var(--text-3);cursor:pointer;font-size:.85rem;line-height:1;padding:2px 6px;margin-left:6px;border-radius:6px;opacity:.7;transition:opacity .15s,background .15s" onmouseover="this.style.opacity=1;this.style.background='rgba(255,255,255,.08)'" onmouseout="this.style.opacity=.7;this.style.background='none'"><i class="ph ph-x" aria-hidden="true"></i></button></div>`;
+      // launched: linha antiga do cobrador que lançava; sem ele é o aviso de
+      // vencimento do autopay (Q42), que não lançou nada.
+      const cartao = a.payment_type === "credit_card";
+      const when = _alertWhenLabel(a.charged_at);
+      const msg = a.launched
+        ? `Piggy lançou <b>${escapeHtmlSafe(a.name)}</b> ${fmt(a.amount)} ${cartao ? "no cartão" : "da conta"} ${when}.`
+        : `<b>${escapeHtmlSafe(a.name)}</b> ${fmt(a.amount)}: dia de ${cartao ? "cobrança no cartão" : "débito no banco"} ${when}.`;
+      html += `<div class="alert-row"><i class="ph ph-piggy-bank" aria-hidden="true"></i> ${msg} <button onclick="ackRecurringCharge(${a.charge_id})" aria-label="Marcar como visto" title="Marcar como visto" style="background:none;border:none;color:var(--text-3);cursor:pointer;font-size:.85rem;line-height:1;padding:2px 6px;margin-left:6px;border-radius:6px;opacity:.7;transition:opacity .15s,background .15s" onmouseover="this.style.opacity=1;this.style.background='rgba(255,255,255,.08)'" onmouseout="this.style.opacity=.7;this.style.background='none'"><i class="ph ph-x" aria-hidden="true"></i></button></div>`;
     } else if (a.type === "recurring_credited") {
       html += `<div class="alert-row"><i class="ph ph-piggy-bank" aria-hidden="true"></i> Piggy recebeu <b>${escapeHtmlSafe(a.name)}</b> ${fmt(a.amount)} na conta ${_alertWhenLabel(a.credited_at)}. <button onclick="ackRecurringIncomeCredit(${a.credit_id})" aria-label="Marcar como visto" title="Marcar como visto" style="background:none;border:none;color:var(--text-3);cursor:pointer;font-size:.85rem;line-height:1;padding:2px 6px;margin-left:6px;border-radius:6px;opacity:.7;transition:opacity .15s,background .15s" onmouseover="this.style.opacity=1;this.style.background='rgba(255,255,255,.08)'" onmouseout="this.style.opacity=.7;this.style.background='none'"><i class="ph ph-x" aria-hidden="true"></i></button></div>`;
     } else {
