@@ -121,6 +121,9 @@ def undo_reconciliation(user_id: int, of_tx_id: int) -> dict:
                 or o["match_launch_id"] not in (None, x)):
             return {"ok": True, "changed": False}
         cls = classify_open_finance_launch(o["amount"], o["category"], o["description"])
+        from .open_finance_cash import cash_internal_tx_ids
+        if o["id"] in cash_internal_tx_ids(cur, user_id):  # par da Carteira (saque/depósito)
+            cls["is_internal_movement"] = True
         shadow_id, _ = _insert_of_shadow(cur, user_id, o, cls)
         if shadow_id is None:
             raise ReconciliationConflict("SHADOW_NOT_CREATED")
