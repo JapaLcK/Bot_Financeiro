@@ -35,6 +35,15 @@ describe("continuarComGoogle (G)", () => {
     await expect(lerCredenciais()).resolves.toEqual({ access: "access-ana", refresh: "rt_ana" });
   });
 
+  it("6 — o fragmento que o 302 do callback herda é descartado e o código vai à troca (Origem: #613)", async () => {
+    voltaDoGoogle("pigbank://auth?code=code-ana#fragmento-do-google");
+
+    expect(await google()).toEqual([{ fase: "google" }]);
+
+    expect(chamadas()).toEqual([{ caminho: "/auth/google/exchange", auth: undefined, corpo: { code: "code-ana" } }]);
+    await expect(lerCredenciais()).resolves.toEqual({ access: "access-ana", refresh: "rt_ana" });
+  });
+
   it("6a — conta com MFA: vai ao código TOTP, sem gravar nada", async () => {
     voltaDoGoogle("pigbank://auth?code=code-ana");
     rotasGoogle({
