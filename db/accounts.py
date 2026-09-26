@@ -2025,14 +2025,18 @@ def delete_launch_and_rollback(user_id: int, launch_id: int, *,
                     from .pockets import TIPOS_HISTORICO_CAIXINHA
                     # `for update` antes: depósito/saque travam a caixinha antes
                     # de gravar lote e launch, então o desfazer serializa com eles.
+                    # Nome EXATO aqui e no delete: o unique é (user_id, name), então
+                    # "a" e "A" coexistem (até o índice lower(name) da #596) e só a
+                    # que este launch criou pode ser lida ou apagada.
                     cur.execute(
-                        "select balance from pockets where user_id=%s and lower(name)=lower(%s) for update",
+                        "select balance from pockets where user_id=%s and name=%s for update",
                         (user_id, nome),
                     )
                     if any(Decimal(str(p["balance"])) != 0 for p in cur.fetchall()):
                         raise PocketHasMovement()
                     # Zerada que já teve movimento também recusa (decisão do dono).
                     # `id > launch_id`: histórico de outra caixinha que teve o nome antes não conta.
+                    # `lower` aqui de propósito: recusar a mais cobre `alvo` legado com outra caixa.
                     cur.execute(
                         "select 1 from launches where user_id=%s and id>%s "
                         "and lower(alvo)=lower(%s) and tipo = any(%s) limit 1",
@@ -2041,7 +2045,7 @@ def delete_launch_and_rollback(user_id: int, launch_id: int, *,
                     if cur.fetchone():
                         raise PocketHasMovement()
                     cur.execute(
-                        "delete from pockets where user_id=%s and lower(name)=lower(%s)",
+                        "delete from pockets where user_id=%s and name=%s",
                         (user_id, nome),
                     )
 
