@@ -16,9 +16,16 @@ from .connection import (
     get_conn, cat_key_sql, LAUNCH_HAS_TIME_SQL,
     TIPO_CANON_SQL, TIPO_DESPESA_SQL, TIPO_RECEITA_SQL,
 )
+from .open_finance_cash import PAR_ATIVO_SQL, VINCULADO_SQL
 from .users import ensure_user
 
 logger = logging.getLogger(__name__)
+
+# Categoria decide o `is_internal_movement` — menos no par da Carteira de um
+# saque/depósito do banco (db/open_finance_cash.py), que segue interno com
+# qualquer categoria: senão vira receita/gasto novo. Todo escritor de categoria
+# de lançamento passa por aqui.
+_SET_CATEGORIA = f"categoria=%s, is_internal_movement = %s or {PAR_ATIVO_SQL}"
 
 
 # ──────────────────────────────────────────────────────────────────────────────
@@ -257,20 +264,7 @@ def display_id_for(user_id: int, launch_id: int) -> int:
 
 
 def update_launch_category(user_id: int, launch_id: int, categoria: str | None) -> bool:
-    from utils_text import is_internal_category
-
-    ensure_user(user_id)
-    cat = (categoria or "").strip() or None
-    is_internal = is_internal_category(cat)
-    with get_conn() as conn:
-        with conn.cursor() as cur:
-            cur.execute(
-                "update launches set categoria=%s, is_internal_movement=%s where user_id=%s and id=%s",
-                (cat, is_internal, user_id, launch_id),
-            )
-            changed = (cur.rowcount or 0) == 1
-        conn.commit()
-    return changed
+    return update_launch_fields(user_id, launch_id, categoria=categoria or "")
 
 
 class LaunchDateLockedError(ValueError):
@@ -368,10 +362,8 @@ def update_launch_fields(
     params: list = []
     if categoria is not None:
         cat_clean = categoria.strip() or None
-        sets.append("categoria=%s")
-        params.append(cat_clean)
-        sets.append("is_internal_movement=%s")
-        params.append(is_internal_category(cat_clean))
+        sets.append(_SET_CATEGORIA)
+        params.extend([cat_clean, is_internal_category(cat_clean)])
     if alvo is not None:
         sets.append("alvo=%s")
         params.append((alvo.strip() or None))
@@ -440,7 +432,7 @@ def update_launch_categories_bulk(user_id: int, items: list[tuple[int, str]]) ->
     with get_conn() as conn:
         with conn.cursor() as cur:
             cur.executemany(
-                "update launches set categoria=%s, is_internal_movement=%s where user_id=%s and id=%s",
+                f"update launches set {_SET_CATEGORIA} where user_id=%s and id=%s",
                 [(cat, is_internal_category(cat), user_id, lid) for (lid, cat) in items],
             )
             n = cur.rowcount or 0
@@ -1589,10 +1581,13 @@ def delete_launch_and_rollback(user_id: int, launch_id: int, *,
             def _precisa_lock(r):
                 # Investimento também: a guarda "é o último" tem de rodar sob o
                 # MESMO lock de aporte/resgate/apagar investimento, até o commit.
+                # Saque/depósito em espécie também: o reconciliador trava conta →
+                # lançamento; apagar sem o lock seria lançamento → conta (deadlock).
                 return bool(r and (uses_bank_movement_lock(r["source"], r["efeitos"])
-                                   or touches_investment(r["efeitos"])))
+                                   or touches_investment(r["efeitos"]) or r["caixa"]))
 
-            cur.execute("select source,efeitos from launches where id=%s and user_id=%s", (launch_id, user_id))
+            cur.execute(f"select source,efeitos,{VINCULADO_SQL} as caixa from launches "
+                        "where id=%s and user_id=%s", (launch_id, user_id))
             preview = cur.fetchone()
             bank_lock = _precisa_lock(preview)
             if bank_lock:
@@ -1610,8 +1605,8 @@ def delete_launch_and_rollback(user_id: int, launch_id: int, *,
             # lê "erro técnico, continua aí" sobre algo que já não existe. É o
             # comportamento da `main` também; o balde que falta é outro PR.
             cur.execute(
-                "select id, tipo, valor, alvo, efeitos, source from launches "
-                "where id=%s and user_id=%s for update",
+                f"select id, tipo, valor, alvo, efeitos, source, {VINCULADO_SQL} as caixa "
+                "from launches where id=%s and user_id=%s for update",
                 (launch_id, user_id),
             )
             row = cur.fetchone()

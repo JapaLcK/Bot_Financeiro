@@ -862,6 +862,62 @@ def init_db():
           on bank_movement_declarations(user_id, matched_transaction_id)
         """,
 
+        # Saque/depósito em espécie do Open Finance → Carteira (db/open_finance_cash.py).
+        # `ativo` com `launch_id` nulo = desfeito: apagar o lançamento por qualquer
+        # porta zera o vínculo pelo `set null` e ele nunca é recriado.
+        """
+        create table if not exists of_cash_links (
+          id bigserial primary key,
+          user_id bigint not null references users(id) on delete cascade,
+          tx_key text not null,
+          key_durable boolean not null,
+          account_key text not null,
+          kind text not null check (kind in ('saque','deposito','fraco')),
+          origem text not null default 'auto' check (origem in ('auto','manual')),
+          -- `= any(array[...])` de propósito: tests/test_pix_transicao_efeitos.py lê
+          -- o primeiro check de status com lista `in` deste arquivo como o do pix_charges.
+          status text not null check (status = any (array['ativo','desfeito','estornado',
+            'historico','nao_dinheiro','perguntar_manual','perguntar_novo','perguntar_fraco'])),
+          launch_id bigint references launches(id) on delete set null,
+          manual_launch_id bigint references launches(id) on delete set null,
+          of_transaction_id bigint references open_finance_transactions(id) on delete set null,
+          amount numeric not null,
+          tx_date date not null,
+          notified_at timestamptz,
+          seen_at timestamptz,
+          created_at timestamptz not null default now(),
+          updated_at timestamptz not null default now(),
+          unique(user_id, tx_key)
+        )
+        """,
+        """create unique index if not exists uq_of_cash_links_launch
+             on of_cash_links(launch_id) where launch_id is not null""",
+        """create index if not exists idx_of_cash_links_manual
+             on of_cash_links(manual_launch_id) where manual_launch_id is not null""",
+        """create index if not exists idx_of_cash_links_tx
+             on of_cash_links(of_transaction_id) where of_transaction_id is not null""",
+        # Janela que uma conexão removida já cobriu, por conta (gravada no disconnect).
+        """
+        create table if not exists of_cash_coverage (
+          id bigserial primary key,
+          user_id bigint not null references users(id) on delete cascade,
+          account_key text not null,
+          connected_at timestamptz not null,
+          covered_from date,
+          covered_until date
+        )
+        """,
+        """create index if not exists idx_of_cash_coverage_user
+             on of_cash_coverage(user_id, account_key)""",
+        # Uma linha só: quando o reconciliador rodou pela 1ª vez com OF_CASH_ENABLED.
+        # Saque/depósito anteriores viram 'historico' (não mexem na Carteira).
+        """
+        create table if not exists of_cash_activation (
+          id boolean primary key default true check (id),
+          activated_at timestamptz not null default now()
+        )
+        """,
+
         # -----------------------------
         # Open Finance — instante real da transação (com hora), quando o banco
         # envia. NULL = só data (cai no fallback de meia-dia local no import).

@@ -60,6 +60,7 @@ def _lock_user(cur, user_id):
 
 def _transactions(cur, user_id, *, lock=False):
     from .open_finance import BANK_ACCOUNTS_SQL, is_credit_card_payment, investment_transfer_kind
+    from .open_finance_cash import INTERNOS
     cur.execute(
         f"""select t.*, a.id as bank_account_id, a.name as account_name,
                    a.institution_name, l.source as imported_source, l.user_id as imported_user,
@@ -68,7 +69,11 @@ def _transactions(cur, user_id, *, lock=False):
               join ({BANK_ACCOUNTS_SQL}) a on a.id=t.account_id
               left join launches l on l.id=t.imported_launch_id
              where (t.imported_launch_id is null or l.user_id=%s)
-             order by t.transaction_date, t.id""" + (" for update of t" if lock else ""), (user_id, user_id))
+               -- saque/depósito em espécie já é da Carteira (db/open_finance_cash.py)
+               and not exists (select 1 from of_cash_links k where k.of_transaction_id=t.id
+                                  and k.user_id=%s and k.status = any(%s))
+             order by t.transaction_date, t.id""" + (" for update of t" if lock else ""),
+        (user_id, user_id, user_id, list(INTERNOS)))
     rows = []
     for row in cur.fetchall():
         row = dict(row)
