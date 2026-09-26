@@ -17,6 +17,7 @@ from .investments import (
     _growth_for_period,
     _iof_rate_for_days,
     _ir_rate_for_days,
+    _sgs_falhas,
     _taxes_for_gain,
     fifo_takes,
 )
@@ -120,7 +121,16 @@ def _sync_pocket_from_lots(cur, user_id: int, pocket_id: int) -> Decimal:
 
 
 def accrue_pocket_db(cur, user_id: int, pocket_id: int, today: date | None = None) -> Decimal:
-    """Aplica rendimento da caixinha por lote, reaproveitando a regra de CDI dos investimentos."""
+    """Acumulação FINAL da caixinha manual (Q43): roda uma vez e congela.
+
+    Caixinha com `interest_frozen_at` preenchido não rende mais — devolve o saldo.
+    Com o marcador NULL (caixinha anterior à Q43), sob o mesmo `for update`: se o
+    juro estava ligado, aplica o CDI publicado até `today` uma última vez; depois
+    carimba o marcador e desliga `interest_enabled` num único update — só se nenhuma
+    busca de índice falhou (`_sgs_falhas`). Na falha, o cursor para no último dia
+    conhecido e a próxima rodada completa e carimba. Dias sem índice publicado ficam
+    de fora (decisão do dono).
+    """
     if today is None:
         today = _today()
 
@@ -128,7 +138,7 @@ def accrue_pocket_db(cur, user_id: int, pocket_id: int, today: date | None = Non
         """
         select id, balance, interest_enabled, interest_rate,
                interest_period, interest_tax_profile, last_interest_date,
-               of_investment_id
+               of_investment_id, source, interest_frozen_at
         from pockets
         where user_id=%s and id=%s for update
         """,
@@ -138,50 +148,61 @@ def accrue_pocket_db(cur, user_id: int, pocket_id: int, today: date | None = Non
     if not pocket:
         raise LookupError("POCKET_NOT_FOUND")
 
-    # Caixinha vinda do Open Finance: saldo é espelho do banco (escrito no sync),
-    # sem juros interno nem lotes. Retorna o saldo como está — não deixa a máquina
-    # de accrual/lotes tocar no valor espelhado.
-    if pocket.get("of_investment_id"):
+    # Caixinha do banco (`_is_of_mirror`, vinculada OU espelho legado desvinculado):
+    # saldo é espelho do banco, sem juro, lote nem carimbo. Devolve o saldo como está —
+    # a máquina de lotes não toca no valor espelhado.
+    if _is_of_mirror(pocket):
         return Decimal(str(pocket["balance"] or 0))
 
     _ensure_pocket_lots(cur, user_id, pocket)
-    if not pocket.get("interest_enabled"):
+    if pocket["interest_frozen_at"] is not None:
         return Decimal(str(pocket["balance"] or 0))
+    falhas = _sgs_falhas.get()
+    resultado = Decimal(str(pocket["balance"] or 0))
 
-    period = pocket.get("interest_period") or "cdi"
-    rate = Decimal(str(pocket.get("interest_rate") or 1))
+    if pocket.get("interest_enabled"):
+        period = pocket.get("interest_period") or "cdi"
+        rate = Decimal(str(pocket.get("interest_rate") or 1))
 
-    cur.execute(
-        """
-        select id, balance, last_date
-        from pocket_lots
-        where user_id=%s and pocket_id=%s and status='open'
-        order by opened_at, id
-        for update
-        """,
-        (user_id, pocket_id),
-    )
-    lots = cur.fetchall()
-    if not lots:
-        cur.execute("update pockets set balance=0 where id=%s and user_id=%s", (pocket_id, user_id))
-        return ZERO
-
-    for lot in lots:
-        new_balance, applied_until = _growth_for_period(
-            cur,
-            Decimal(str(lot["balance"] or 0)),
-            period,
-            rate,
-            lot["last_date"],
-            today,
+        cur.execute(
+            """
+            select id, balance, last_date
+            from pocket_lots
+            where user_id=%s and pocket_id=%s and status='open'
+            order by opened_at, id
+            for update
+            """,
+            (user_id, pocket_id),
         )
-        if new_balance != lot["balance"] or applied_until != lot["last_date"]:
-            cur.execute(
-                "update pocket_lots set balance=%s, last_date=%s where id=%s and user_id=%s",
-                (new_balance, applied_until or lot["last_date"], lot["id"], user_id),
-            )
+        lots = cur.fetchall()
+        if not lots:
+            cur.execute("update pockets set balance=0 where id=%s and user_id=%s", (pocket_id, user_id))
+            resultado = ZERO
+        else:
+            for lot in lots:
+                new_balance, applied_until = _growth_for_period(
+                    cur,
+                    Decimal(str(lot["balance"] or 0)),
+                    period,
+                    rate,
+                    lot["last_date"],
+                    today,
+                )
+                if new_balance != lot["balance"] or applied_until != lot["last_date"]:
+                    cur.execute(
+                        "update pocket_lots set balance=%s, last_date=%s where id=%s and user_id=%s",
+                        (new_balance, applied_until or lot["last_date"], lot["id"], user_id),
+                    )
+            resultado = _sync_pocket_from_lots(cur, user_id, pocket_id)
 
-    return _sync_pocket_from_lots(cur, user_id, pocket_id)
+    # Carimbo e `interest_enabled=false` no MESMO update: desligar o juro sem o
+    # carimbo faria a próxima rodada carimbar sem render, e o ganho sumiria.
+    if _sgs_falhas.get() == falhas:
+        cur.execute(
+            "update pockets set interest_frozen_at=now(), interest_enabled=false where id=%s and user_id=%s",
+            (pocket_id, user_id),
+        )
+    return resultado
 
 
 def accrue_all_pockets(user_id: int, today: date | None = None):
@@ -226,6 +247,27 @@ def list_pockets(user_id: int, *, accrue: bool = True):
                 (user_id,),
             )
             return cur.fetchall()
+
+
+TIPOS_HISTORICO_CAIXINHA = ('deposito_caixinha', 'saque_caixinha', 'criar_caixinha', 'delete_pocket')
+
+
+def _renomear_no_historico(cur, user_id: int, antigo: str, novo: str) -> None:
+    """#608: o histórico acompanha o renome, senão quem lê por nome (histórico,
+    delete_pocket, o desfazer da criação) perde a caixinha ou acha outra. Comparação
+    exata: os escritores gravam o nome canônico, e lower() roubaria o histórico de
+    uma caixinha que só difere em maiúsculas. `alvo` só nos tipos de caixinha — uma
+    despesa com alvo "Viagem" não é da caixinha."""
+    cur.execute(
+        "update launches set alvo = %s where user_id = %s and alvo = %s and tipo = any(%s)",
+        (novo, user_id, antigo, list(TIPOS_HISTORICO_CAIXINHA)),
+    )
+    for chave in ("delta_pocket", "create_pocket", "delete_pocket"):
+        cur.execute(
+            "update launches set efeitos = jsonb_set(efeitos, array[%s, 'nome'], to_jsonb(%s::text)) "
+            "where user_id = %s and efeitos -> %s ->> 'nome' = %s",
+            (chave, novo, user_id, chave, antigo),
+        )
 
 
 def update_pocket_meta(
@@ -274,61 +316,62 @@ def update_pocket_meta(
             raise ValueError("STATUS_INVALIDO")
         sets.append("status = %s")
         params.append(status)
-    if interest_enabled is not None:
-        sets.append("interest_enabled = %s")
-        params.append(bool(interest_enabled))
+    # Q43: caixinha manual não rende mais. Ligar o juro é ignorado (a rota e o JS
+    # em cache ainda mandam true); só o desligar é gravado, e só se a final carimbou.
+    if interest_enabled is False:
+        sets.append("interest_enabled = false")
     if interest_rate is not None:
         rate = Decimal(str(interest_rate))
         if rate <= 0:
             raise ValueError("INTEREST_RATE_INVALID")
         sets.append("interest_rate = %s")
         params.append(rate)
-    if not sets:
+    if not sets and interest_enabled is None:
         return None
     params.extend([user_id, int(pocket_id)])
     with get_conn() as conn:
         with conn.cursor() as cur:
-            if interest_enabled is not None:
+            if interest_enabled is not None or name is not None:
                 cur.execute(
-                    """
-                    select id, balance, interest_enabled, interest_rate,
-                           interest_period, interest_tax_profile, last_interest_date,
-                           of_investment_id
-                      from pockets
-                     where user_id=%s and id=%s
-                     for update
-                    """,
+                    "select id, name from pockets where user_id=%s and id=%s for update",
                     (user_id, int(pocket_id)),
                 )
                 pocket = cur.fetchone()
                 if not pocket:
                     return None
-                _ensure_pocket_lots(cur, user_id, pocket)
-                if bool(interest_enabled):
-                    today = _today()
+            if interest_enabled is not None:
+                # Finaliza (e congela) a caixinha ainda não congelada.
+                accrue_pocket_db(cur, user_id, int(pocket_id))
+                # Busca de índice falhou: marcador NULL e juro ligado para a próxima
+                # rodada completar. Desligar aqui faria ela carimbar sem render.
+                if interest_enabled is False:
                     cur.execute(
-                        """
-                        update pocket_lots
-                           set last_date=%s
-                         where user_id=%s and pocket_id=%s and status='open'
-                        """,
-                        (today, user_id, int(pocket_id)),
+                        "select interest_frozen_at, of_investment_id, source "
+                        "from pockets where user_id=%s and id=%s",
+                        (user_id, int(pocket_id)),
                     )
-                    sets.append("last_interest_date = %s")
-                    params.insert(-2, today)
-                else:
-                    accrue_pocket_db(cur, user_id, int(pocket_id))
-            try:
+                    p = cur.fetchone()
+                    if p["interest_frozen_at"] is None and not _is_of_mirror(p):
+                        sets.remove("interest_enabled = false")
+            if sets:
+                try:
+                    cur.execute(
+                        f"update pockets set {', '.join(sets)} "
+                        "where user_id=%s and id=%s "
+                        f"returning {POCKET_COLUMNS}",
+                        params,
+                    )
+                except psycopg.errors.UniqueViolation:
+                    # Sai do `with get_conn()` por exceção: o pool faz o rollback.
+                    raise ValueError("Já existe uma caixinha com esse nome.") from None
+            else:  # só `interest_enabled`, ignorado ou adiado: devolve a caixinha
                 cur.execute(
-                    f"update pockets set {', '.join(sets)} "
-                    "where user_id=%s and id=%s "
-                    f"returning {POCKET_COLUMNS}",
+                    f"select {POCKET_COLUMNS} from pockets where user_id=%s and id=%s",
                     params,
                 )
-            except psycopg.errors.UniqueViolation:
-                # Sai do `with get_conn()` por exceção: o pool faz o rollback.
-                raise ValueError("Já existe uma caixinha com esse nome.") from None
             row = cur.fetchone()
+            if name is not None and row and row["name"] != pocket["name"]:
+                _renomear_no_historico(cur, user_id, pocket["name"], row["name"])
         conn.commit()
     return row
 
@@ -567,6 +610,8 @@ def create_pocket(
 
     `nota` vira o texto do lançamento (audit log).
     `description` é a descrição visível da caixinha (mostrada no dashboard).
+    `interest_enabled` é ignorado: caixinha manual não rende (Q43) e nasce com
+    `false`. Fica na assinatura porque a rota e o JS em cache ainda mandam true.
     """
     ensure_user(user_id)
     name = (name or "").strip()
@@ -595,10 +640,10 @@ def create_pocket(
                     interest_enabled, interest_rate, interest_period,
                     interest_tax_profile, last_interest_date
                 )
-                values (%s, %s, 0, %s, %s, %s, 'cdi', 'regressive_ir_iof', %s)
+                values (%s, %s, 0, %s, false, %s, 'cdi', 'regressive_ir_iof', %s)
                 """
                 "on conflict do nothing returning id, name",
-                (user_id, name, desc, bool(interest_enabled), rate, today),
+                (user_id, name, desc, rate, today),
             )
             row = cur.fetchone()
 
@@ -621,7 +666,7 @@ def create_pocket(
                 "delta_conta": 0.0, "delta_pocket": None, "delta_invest": None,
                 "create_pocket": {
                     "nome": pocket_name,
-                    "interest_enabled": bool(interest_enabled),
+                    "interest_enabled": False,
                     "interest_rate": float(rate),
                     "interest_period": "cdi",
                 },
