@@ -91,8 +91,8 @@ _IGNORADOS = {".venv", ".claude", ".git", "tests", "harness_tests", "node_module
 
 # Referência (chamada ou passada ao `asyncio.to_thread`) por arquivo de
 # PRODUÇÃO. É um ratchet: referência nova em qualquer arquivo reprova. Os
-# chamadores de `add_launch_and_update_balance` fora da Q40 (fatura, gasto
-# fixo, saldo inicial e ajuste, o seed do harness) ficam de fora por decisão
+# chamadores de `add_launch_and_update_balance` fora da Q40 (fatura,
+# saldo inicial e ajuste, o seed do harness) ficam de fora por decisão
 # do dono (plano, seção 1).
 _PERMITIDOS = {
     "mark_bill_paid": {"core/handlers/forma_pagamento.py": 1},
@@ -102,7 +102,6 @@ _PERMITIDOS = {
         "frontend/finance_bot_websocket_custom.py": 3,  # POST /launches + saldo inicial/ajuste
         "db/bills.py": 1,                        # mark_bill_paid(metodo="carteira")
         "db/cards.py": 3,                        # fatura, antecipação, estorno
-        "core/services/recurring_charger.py": 2,  # gasto fixo (Q42, outro PR)
         "scripts/whatsapp_qa_vault_harness.py": 1,
     },
 }
