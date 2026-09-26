@@ -34,10 +34,10 @@ def q(sql, params=(), fetch=False):
     return rows
 
 
-def conecta(uid, item, desde=CONECTADO, instituicao=612):
+def conecta(uid, item, desde=CONECTADO, instituicao=612, nome="Nubank"):
     """Conexão nova com `created_at` no passado (a data da 1ª conexão é o corte)."""
     conn_id = db.save_pluggy_open_finance_item(uid, {
-        "id": item, "connector": {"id": instituicao, "name": "Nubank"}, "status": "UPDATED",
+        "id": item, "connector": {"id": instituicao, "name": nome}, "status": "UPDATED",
     })["id"]
     q("update open_finance_connections set created_at=%s where id=%s and user_id=%s", (desde, conn_id, uid))
     return conn_id

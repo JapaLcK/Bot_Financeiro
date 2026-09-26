@@ -2,6 +2,7 @@
 from decimal import Decimal
 
 from conftest import usuario_pagante
+from db.open_finance_cash_answers import answer_link
 from tests._of_cash_helpers import caixa, carteira, conecta, dia, links, q, sync, tx  # noqa: F401
 
 
@@ -37,3 +38,20 @@ def test_sync_repetido_nao_mexe(caixa):
     assert carteira(uid) == Decimal("250")
     assert len(links(uid)) == 2
     assert q("select count(*) as n from launches where user_id=%s and source='manual'", (uid,), True)[0]["n"] == 2
+
+
+def test_correcao_numa_pergunta_pendente_vale_na_resposta(caixa):
+    """Depósito ainda perguntando que o banco corrige (300→350, 10→12/03): a
+    resposta "foi dinheiro" debita o valor e a data correntes, não os da 1ª leitura."""
+    uid = usuario_pagante()
+    c = conecta(uid, f"item-{uid}")
+    sync(c, uid, [tx("d1", 300, dia(10), op="DEPOSITO", desc="Transfers")])
+    sync(c, uid, [tx("d1", 350, dia(12), op="DEPOSITO", desc="Transfers")])
+    (link,) = links(uid)
+    assert link["status"] == "perguntar_fraco"
+
+    assert answer_link(uid, link["id"], "cash")["changed"]
+    assert carteira(uid) == Decimal("-350"), "debitou o valor da 1ª leitura"
+    assert _launch(uid)["criado_em"].date() == dia(12)
+    (link,) = links(uid)
+    assert (Decimal(str(link["amount"])), link["tx_date"]) == (Decimal("350"), dia(12))

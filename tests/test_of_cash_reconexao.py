@@ -56,3 +56,37 @@ def test_sem_providerid_pergunta(caixa):
     sync(c, uid, [tx("x-1", -200, dia(10), pid=False)])
     assert carteira(uid) == 0
     assert [(r["status"], r["key_durable"]) for r in links(uid)] == [("perguntar_novo", False)]
+
+
+def _nubank_ate_abril(uid, instituicao=212):
+    """Nubank vivo com saque em 10/03 e extrato até 20/04 (a janela que ele cobre)."""
+    c = conecta(uid, f"item-nu-{uid}-{instituicao}", instituicao=instituicao)
+    sync(c, uid, [tx("n-1", -200, dia(10), pid="P1"), tx("n-2", -5, dia(20, 4), op="PIX", desc="Pix enviado")])
+    return c
+
+
+def test_mesmo_numero_em_bancos_diferentes_nao_se_misturam(caixa):
+    """Inter conectado em 01/04 com o MESMO número de conta do Nubank: o saque do
+    Inter anterior à conexão dele é histórico, e o posterior credita — nenhum dos
+    dois herda o corte nem a janela da conta do Nubank."""
+    uid = usuario_pagante()
+    _nubank_ate_abril(uid)
+    inter = conecta(uid, f"item-inter-{uid}", desde=datetime(2026, 4, 1, 12), instituicao=77, nome="Inter")
+    sync(inter, uid, [tx("i-1", -70, dia(15), pid="I1"), tx("i-2", -30, dia(15, 4), pid="I2")])
+
+    assert [(r["tx_date"], r["status"]) for r in links(uid)] == [
+        (dia(10), "ativo"), (dia(15), "historico"), (dia(15, 4), "ativo")]
+    assert carteira(uid) == Decimal("230")
+
+
+def test_mesmo_banco_por_dois_connectors_segue_a_mesma_conta(caixa):
+    """Positivo: Nubank direto (212) e Nubank Open Finance (612) vivos, mesmo nome
+    e número — é a mesma conta, e o saque que o 612 vê com outro providerId na
+    janela do 212 pergunta em vez de creditar em dobro."""
+    uid = usuario_pagante()
+    _nubank_ate_abril(uid)
+    of = conecta(uid, f"item-of-{uid}", instituicao=612)
+    sync(of, uid, [tx("o-1", -200, dia(10), pid="Q1")])
+
+    assert [r["status"] for r in links(uid)] == ["ativo", "perguntar_novo"]
+    assert carteira(uid) == Decimal("200")

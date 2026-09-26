@@ -5,7 +5,7 @@ from decimal import Decimal
 import pytest
 
 from conftest import usuario_pagante
-from db.open_finance_cash import answer_link, list_pending, undo_link
+from db.open_finance_cash_answers import answer_link, list_pending, undo_link
 from tests._of_cash_helpers import caixa, carteira, conecta, dia, links, sync, tx  # noqa: F401
 
 

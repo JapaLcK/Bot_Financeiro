@@ -5,7 +5,7 @@ from datetime import date, datetime, timedelta
 from decimal import Decimal
 
 from conftest import usuario_pagante
-from db.open_finance_cash import answer_link
+from db.open_finance_cash_answers import answer_link
 from tests._of_cash_helpers import caixa, carteira, conecta, links, q, sync, tx  # noqa: F401
 from tests.test_pending_rollback import _diga
 

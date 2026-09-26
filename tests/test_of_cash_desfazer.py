@@ -4,7 +4,7 @@ from decimal import Decimal
 
 import db
 from conftest import usuario_pagante
-from db.open_finance_cash import undo_link
+from db.open_finance_cash_answers import undo_link
 from tests._of_cash_helpers import (  # noqa: F401  (fixture)
     caixa, carteira, conecta, dia, launches_visiveis, links, sync, tx,
 )
