@@ -11,9 +11,9 @@ inverte a premissa: lançamento manual é DINHEIRO EM ESPÉCIE e não pode ser
 ABSORVIDO em silêncio. O mecanismo exato:
 - casamento AUTO com candidato manual é REBAIXADO a 'ask' no importador — vira
   PENDÊNCIA e o usuário decide (`confirm_reconciliation`/`reject_reconciliation`);
-- a fusão REVERSA (`reconcile_manual_launch`) saiu dos três escritores (rota do
-  dashboard, handler do bot, entrada rápida): lançamento manual criado DEPOIS
-  da importação permanece separado.
+- na ordem inversa (lançamento manual criado DEPOIS da importação) os
+  escritores do manual só criam a mesma pendência
+  (`propose_manual_reconciliation`): permanece separado até o usuário decidir.
 
 O que os cenários antigos provam AGORA: nenhum AUTO-merge acontece — nem tipo
 legado, nem moderno, nem `alvo` nulo, nem nome divergente. Os casos ambíguos

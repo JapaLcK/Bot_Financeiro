@@ -1,4 +1,5 @@
 import {
+  FalhaNoCofre,
   guardarCredenciais,
   lerCredenciais,
   limparCredenciais,
@@ -223,6 +224,31 @@ describe("guardarCredenciaisSe", () => {
       guardarCredenciaisSe(() => ++vezes === 1, { access: "a1", refresh: "rt_A" }),
     ).resolves.toBe(false);
     await expect(lerCredenciais()).resolves.toBeNull();
+  });
+
+  // Controle negativo (medido): sem o `try` em volta da leitura e da gravação
+  // iniciais, os dois ficam vermelhos (o erro cru não é `FalhaNoCofre`). O
+  // positivo é "grava quando permitido", acima.
+  it("falha na GRAVAÇÃO inicial vira FalhaNoCofre, e o cofre fica como estava", async () => {
+    await guardarCredenciais({ access: "c1", refresh: "rt_C" });
+    falharEscrita(true);
+    await expect(
+      guardarCredenciaisSe(() => true, { access: "a", refresh: "rt_a" }),
+    ).rejects.toBeInstanceOf(FalhaNoCofre);
+    falharEscrita(false);
+    await expect(lerCredenciais()).resolves.toEqual({ access: "c1", refresh: "rt_C" });
+  });
+
+  it("falha na LEITURA inicial vira FalhaNoCofre, sem gravar", async () => {
+    // O dublê lê por `has` (jest.setup.js).
+    const leitura = jest.spyOn(cofre, "has").mockImplementation(() => {
+      throw new Error("keychain recusou ler");
+    });
+    await expect(
+      guardarCredenciaisSe(() => true, { access: "a", refresh: "rt_a" }),
+    ).rejects.toBeInstanceOf(FalhaNoCofre);
+    leitura.mockRestore();
+    expect([...cofre.keys()]).toHaveLength(0);
   });
 
   it("falha ao DESFAZER propaga, em vez de mentir que não persistiu", async () => {

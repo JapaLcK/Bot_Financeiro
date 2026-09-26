@@ -136,6 +136,18 @@ export default function Entrar() {
                   Em breve
                 </Texto>
               </View>
+
+              <View style={{ alignItems: "center" }}>
+                <Texto variante="legenda" tom="inkMuted">
+                  Não tem conta?
+                </Texto>
+                <Button
+                  rotulo="Criar conta"
+                  variante="ghost"
+                  desativado={enviando}
+                  onPress={() => router.push("/criar-conta")}
+                />
+              </View>
             </>
           )}
         </View>

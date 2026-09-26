@@ -5,10 +5,10 @@ dinheiro em espécie da Carteira Piggy. Compras em cartão de crédito manuais
 só valem para cartão FORA do Open Finance (`credit_cards.open_finance_account_id
 is null`); cartão coberto tem as compras importadas automaticamente e o
 lançamento manual é recusado (400 na API, aviso no bot). A FUSÃO SILENCIOSA
-com transações do Open Finance foi removida nos dois sentidos: a reversa
-(`reconcile_manual_launch`) saiu dos três escritores (rota do dashboard,
-handler do bot, entrada rápida) e a direta rebaixa 'auto' → 'ask' no importador
-quando o candidato é manual — o dinheiro em espécie NUNCA some em silêncio.
+com transações do Open Finance não existe em nenhum sentido: a direta rebaixa
+'auto' → 'ask' no importador quando o candidato é manual, e a inversa
+(`propose_manual_reconciliation`, chamada pelos escritores do manual) só cria a
+mesma pendência — o dinheiro em espécie NUNCA some em silêncio.
 A reconciliação CONFIRMAVEL permanece: o casamento ambíguo vira pendência e o
 usuário decide (confirm/reject); outras fontes elegíveis (`ofx`) seguem
 auto-fundindo. E `accounts.balance` (a Carteira) não é drenado por fluxos que
@@ -105,7 +105,7 @@ def _status_tx_of(tx_id: str) -> str:
         return cur.fetchone()["reconciliation_status"]
 
 
-# ── reconciliação desativada nas duas ordens ─────────────────────────────────
+# ── nas duas ordens: pendência, nunca fusão ──────────────────────────────────
 
 def test_reconciliation_order_manual_then_of_import(user_id):
     """Manual primeiro, importação OF depois: a tx bancária NÃO funde com o
@@ -123,10 +123,10 @@ def test_reconciliation_order_manual_then_of_import(user_id):
         assert cur.fetchone()["n"] == 2  # manual + OF launch separado
 
 
-def test_reconciliation_order_of_import_then_manual(user_id):
-    """OF primeiro, manual depois (caminho do handler do bot): a reconciliação
-    reversa foi removida — a tx OF continua 'imported' no PRÓPRIO OF launch, o
-    OF launch não é apagado e o manual vira linha própria."""
+def test_reconciliation_order_of_import_then_manual_vira_pendencia(user_id):
+    """OF primeiro, manual depois (caminho do handler do bot): a tx OF vira
+    pendência apontando o manual, mas o OF launch NÃO é apagado e o manual vira
+    linha própria — separados até o usuário confirmar."""
     from core.handlers import launches as h_launches
 
     hoje = today_tz()
@@ -139,11 +139,14 @@ def test_reconciliation_order_of_import_then_manual(user_id):
         nota="Mercado Pague Menos", categoria="mercado",
     )
 
-    assert _status_tx_of(tx_id) == "imported"
+    assert _status_tx_of(tx_id) == "pending"
     with db.get_conn() as conn, conn.cursor() as cur:
-        cur.execute("select imported_launch_id from open_finance_transactions "
+        cur.execute("select imported_launch_id, match_launch_id from open_finance_transactions "
                     "where provider_transaction_id=%s", (tx_id,))
-        of_launch_id = cur.fetchone()["imported_launch_id"]
+        row = cur.fetchone()
+        of_launch_id = row["imported_launch_id"]
+        cur.execute("select id from launches where user_id=%s and source='manual'", (user_id,))
+        assert row["match_launch_id"] == cur.fetchone()["id"], "a pendência não aponta o manual"
         cur.execute("select count(*) as n from launches where user_id=%s and id=%s",
                     (user_id, of_launch_id))
         assert cur.fetchone()["n"] == 1, "o OF launch foi apagado pela reversa"
@@ -152,9 +155,9 @@ def test_reconciliation_order_of_import_then_manual(user_id):
         assert cur.fetchone()["n"] == 1, "o lançamento manual não foi criado"
 
 
-def test_quick_entry_does_not_trigger_reverse_reconciliation(user_id):
-    """Entrada rápida (primeira linha do pipeline do bot) também não reconcilia:
-    tx OF de mesmo valor/data fica 'imported' no próprio launch."""
+def test_quick_entry_manual_depois_do_import_vira_pendencia(user_id):
+    """Entrada rápida (primeira linha do pipeline do bot): tx OF de mesmo
+    valor/data vira pendência, sem fundir."""
     from core.services.quick_entry import handle_quick_entry
 
     hoje = today_tz()
@@ -165,7 +168,7 @@ def test_quick_entry_does_not_trigger_reverse_reconciliation(user_id):
     out = handle_quick_entry(user_id, "gastei 50 no mercado")
     assert out is not None
 
-    assert _status_tx_of(tx_id) == "imported"
+    assert _status_tx_of(tx_id) == "pending"
 
 
 # ── cartão coberto vs não coberto ────────────────────────────────────────────

@@ -18,9 +18,9 @@ Controle negativo (CLAUDE.md §3): `MERGED_WALLET_DELTA_SQL` devolvendo 0 tem de
 deixar vermelhos os casos dos caminhos de fusão (1: import + confirmação;
 2: "ask" + confirmação). Controle positivo: o lançamento que NÃO funde continua
 debitando a Carteira e devolvendo o dinheiro no delete — sem ele, um conserto
-que zerasse TUDO passaria. O caminho 3 fixa o contrato novo: lançamento manual
-criado DEPOIS da importação OF permanece SEPARADO (a fusão reversa saiu dos
-escritores).
+que zerasse TUDO passaria. O caminho 3 fixa o contrato: lançamento manual
+criado DEPOIS da importação OF vira pendência e permanece SEPARADO até o
+usuário confirmar (nunca funde sozinho).
 """
 from __future__ import annotations
 
@@ -107,17 +107,16 @@ def test_caminho_2_confirmacao_devolve_o_debito(uid_pro, ia_fora):
         "a correção é de LEITURA: o banco não pode ter mudado"
 
 
-# ── caminho 3: manual criado DEPOIS do import NUNCA funde sozinho ───────────
+# ── caminho 3: manual criado DEPOIS do import vira pendência, nunca fusão ───
 
-def test_caminho_3_manual_depois_do_import_permance_separado(uid_pro, ia_fora):
-    """CONTRATO NOVO (decisão "Lançamentos Manuais Exclusivos para Dinheiro"):
-    a fusão reversa (`reconcile_manual_launch`) saiu dos escritores — um
-    lançamento manual criado depois da importação OF NUNCA funde em silêncio.
+def test_caminho_3_manual_depois_do_import_vira_pendencia_separada(uid_pro, ia_fora):
+    """Decisão "Lançamentos Manuais Exclusivos para Dinheiro": um lançamento
+    manual criado depois da importação OF NUNCA funde em silêncio — vira a
+    mesma pendência da ordem direta (`propose_manual_reconciliation`).
 
-    A tx OF permanece 'imported' na PRÓPRIA sombra (delta 0) e o manual fica
-    separado, debitando a Carteira: os dois números se somam. Antes do conserto
-    da leitura este cenário era o "caminho 3" da fusão; hoje é o teste da
-    separação explícita — quem quiser fundir, confirma a pendência (caminho 2).
+    A tx OF continua na PRÓPRIA sombra (delta 0), com `match` = o manual e
+    status 'pending'; o manual fica separado, debitando a Carteira: os dois
+    números se somam até o usuário confirmar (caminho 2).
     """
     hoje = today_tz()
     conexao = conecta_banco(uid_pro, "113.88",
@@ -126,7 +125,7 @@ def test_caminho_3_manual_depois_do_import_permance_separado(uid_pro, ia_fora):
     assert rep["inserted"] == 1, rep
     assert consolidado(uid_pro) == (113.88, 0.0)
 
-    # o dono lança o MESMO gasto à mão depois: fica SEPARADO, sem fusão reversa
+    # o dono lança o MESMO gasto à mão depois: pendência, SEPARADO até confirmar
     manda(uid_pro, "Gastei 1 real com a barbara")
     manual_id = ultimo_launch(uid_pro)
 
@@ -135,11 +134,12 @@ def test_caminho_3_manual_depois_do_import_permance_separado(uid_pro, ia_fora):
     assert delta_conta(uid_pro, manual_id) == Decimal("-1")
     with db.connection.get_conn() as conn, conn.cursor() as cur:
         cur.execute(
-            "select reconciliation_status from open_finance_transactions "
+            "select match_launch_id, reconciliation_status from open_finance_transactions "
             "where provider_transaction_id=%s",
             (f"of-tx-{uid_pro}-1",),
         )
-        assert cur.fetchone()["reconciliation_status"] == "imported"
+        assert dict(cur.fetchone()) == {"match_launch_id": manual_id,
+                                        "reconciliation_status": "pending"}
 
 
 # ── receita: o delta positivo volta pelo mesmo caminho, sem sinal cravado ───

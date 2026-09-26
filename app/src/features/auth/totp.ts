@@ -1,6 +1,6 @@
 /**
- * A regra do campo de código TOTP, uma só para o login (`CodigoMfa.tsx`) e a
- * configuração do MFA (`features/seguranca/`).
+ * A regra do campo de código de 6 dígitos, uma só para o login (`CodigoMfa.tsx`),
+ * o cadastro (`CodigoEmail.tsx`) e a configuração do MFA (`features/seguranca/`).
  */
 export const TAMANHO_TOTP = 6;
 

@@ -1,6 +1,9 @@
 from core.types import OutgoingMessage
 from parsers import parse_receita_despesa_natural
-from db import ensure_user, add_launch_and_update_balance, has_open_finance_connections
+from db import (
+    ensure_user, add_launch_and_update_balance, has_open_finance_connections,
+    propose_manual_reconciliation,
+)
 from utils_text import fmt_brl
 from core.services.category_service import learn_from_inference
 
@@ -38,6 +41,12 @@ def handle_quick_entry(user_id: int, text: str) -> OutgoingMessage | None:
         is_internal_movement=is_internal,
     )
 
+    # Lançamento manual é dinheiro em espécie: se o banco já importou o mesmo
+    # gasto, vira pendência confirmável (nunca fusão). Não sobe exceção. Antes
+    # do `learn_from_inference`, que não tem `try`: se ele estourar, a
+    # pendência já nasceu.
+    propose_manual_reconciliation(user_id, launch_id)
+
     learn_from_inference(
         user_id,
         nota or text,
@@ -46,9 +55,6 @@ def handle_quick_entry(user_id: int, text: str) -> OutgoingMessage | None:
         reason=category_reason,
     )
 
-    # Lançamento manual é dinheiro em espécie: a fusão SILENCIOSA com tx do
-    # Open Finance foi removida (a tx do banco, se existir, é tratada só como
-    # pendência confirmável no importador — nunca some com o lançamento aqui).
     # Com banco conectado, o rótulo do saldo deixa claro que a Conta é a
     # Carteira Piggy.
     saldo_label = "👛 Saldo (Carteira Piggy)" if has_open_finance_connections(user_id) else "🏦 Conta"
