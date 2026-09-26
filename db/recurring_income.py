@@ -2,13 +2,13 @@
 db/recurring_income.py — Receitas Recorrentes.
 
 Espelho de `db/recurring.py` do lado da entrada. Pro-only (mesma flag
-`recurring_expenses_enabled`). Crédito automático no dia `pay_day` de cada
-mês via o mesmo loop de `core/services/recurring_charger.py`.
+`recurring_expenses_enabled`). Receita recorrente só PREVÊ
+(docs/plano-dashboard-v2.md, Q42): entra na Previsão no dia `pay_day`
+(`core/services/cashflow.py`) e nunca é creditada sozinha.
 
-Sempre cria launch `receita` na conta — receita não tem cartão de crédito,
-então não existe `payment_type`/`card_id` aqui.
+Receita não tem cartão de crédito, então não existe `payment_type`/`card_id` aqui.
 
-Idempotência: `last_credited_ym` impede creditar 2x no mesmo mês.
+`last_credited_ym` é resto do cobrador removido: nada mais o escreve.
 Reajuste: ao editar `amount`, guarda `last_amount` + timestamp pra UI mostrar
 a variação (aumento de salário aparece igual reajuste de assinatura).
 """
@@ -23,8 +23,8 @@ from .connection import get_conn
 from .recurring import _parse_start_date, validate_frequency
 from .users import ensure_user
 
-# O cobrador (`core/services/recurring_charger.py`) só credita receita mensal e
-# anual; única/semanal/diária seria gravada e nunca creditada.
+# A Previsão (`core/services/cashflow.py::_cashflow_events`) só conta receita
+# mensal e anual; única/semanal/diária seria gravada e nunca prevista.
 INCOME_FREQUENCIES = ("monthly", "annual")
 
 
@@ -268,50 +268,6 @@ def delete_recurring_income(user_id: int, inc_id: int) -> None:
         conn.commit()
 
 
-def list_due_recurring_incomes(today: date | None = None) -> list[dict[str, Any]]:
-    """Lista global — todos os user — receitas que caem hoje (ou já passaram no mês)
-    e ainda não foram creditadas neste mês (`last_credited_ym != current_ym`).
-
-    Usado pelo cron diário pra processar os créditos automáticos.
-    """
-    today = today or date.today()
-    ym = today.strftime("%Y-%m")
-    with get_conn() as conn:
-        with conn.cursor() as cur:
-            cur.execute(
-                """
-                select r.id, r.user_id, r.name, r.amount, r.category, r.pay_day
-                from recurring_incomes r
-                where r.is_active = true
-                  and r.pay_day <= %s
-                  and (r.last_credited_ym is null or r.last_credited_ym != %s)
-                  -- Não retroagir: começa em start_date (ver charger).
-                  and (
-                      to_char(coalesce(r.start_date, r.created_at::date), 'YYYY-MM') < %s
-                      or (
-                          to_char(coalesce(r.start_date, r.created_at::date), 'YYYY-MM') = %s
-                          and r.pay_day >= extract(day from coalesce(r.start_date, r.created_at::date))
-                      )
-                  )
-                """,
-                (today.day, ym, ym, ym),
-            )
-            rows = cur.fetchall() or []
-    return [dict(r) for r in rows]
-
-
-def mark_recurring_income_credited(user_id: int, inc_id: int, ym: str) -> None:
-    """Marca como creditada neste mês (idempotência)."""
-    with get_conn() as conn:
-        with conn.cursor() as cur:
-            cur.execute(
-                "update recurring_incomes set last_credited_ym=%s "
-                "where user_id=%s and id=%s",
-                (ym, user_id, int(inc_id)),
-            )
-        conn.commit()
-
-
 __all__ = [
     "list_recurring_incomes",
     "get_recurring_income",
@@ -319,6 +275,4 @@ __all__ = [
     "create_recurring_income",
     "update_recurring_income",
     "delete_recurring_income",
-    "list_due_recurring_incomes",
-    "mark_recurring_income_credited",
 ]

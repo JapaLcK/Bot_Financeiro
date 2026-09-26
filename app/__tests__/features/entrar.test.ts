@@ -340,7 +340,7 @@ describe("apagaSenhaNaFase", () => {
     "erro-cofre": true,
     enviando: false,
     mfa: false, // o objetivo do PR: o campo sai da tela preenchido
-    verificando: false,
+    verificando: false, google: true, "google-cadastro": true, "google-criando": true, // Google: a senha sai vazia
   };
 
   it.each(Object.entries(esperado) as [EstadoEntrar["fase"], boolean][])("%s → %s", (fase, apaga) => {

@@ -39,6 +39,7 @@ from core.services.pluggy import (
     get_pluggy_item,
     list_pluggy_connectors,
 )
+from core.services import billing_copy
 from core.services.plan_service import is_pro
 from core.services.pluggy_sync import (
     ITEM_UPDATING,
@@ -1256,6 +1257,20 @@ def _bank_limit_enabled() -> bool:
 _MSG_OF_SO_NOS_PLANOS_PAGOS = "Conectar banco faz parte dos planos pagos. Assine pra conectar: /precos"
 
 
+def _msg_sem_open_finance(user_id: int) -> str:
+    """Na carência a pessoa é assinante: mandá-la assinar é beco (a /precos a
+    recusa com 409). Síncrona, lê o banco — chame via `asyncio.to_thread`."""
+    try:
+        estado = billing_copy.estado_sem_plano_pago(user_id)
+    except Exception:
+        # Sem isto o 402 vira 500. "Não sei" vira carência: a /conta leva à /precos sem Stripe; a /precos daria 409 ao assinante.
+        logging.getLogger(__name__).warning("of_msg_sem_open_finance_falhou user_id=%s", user_id, exc_info=True)
+        estado = "carencia"
+    if estado == "carencia":
+        return billing_copy.OPEN_FINANCE_EM_CARENCIA
+    return _MSG_OF_SO_NOS_PLANOS_PAGOS
+
+
 async def _enforce_bank_limit(user_id: int, new_item_id: str | None = None) -> None:
     """Teto de conexões OF por plano.
 
@@ -1284,7 +1299,7 @@ async def _enforce_bank_limit(user_id: int, new_item_id: str | None = None) -> N
                 detail={
                     "code": "OF_BANK_LIMIT",
                     "limit": 0,
-                    "message": _MSG_OF_SO_NOS_PLANOS_PAGOS,
+                    "message": await asyncio.to_thread(_msg_sem_open_finance, user_id),
                 },
             )
         count = await asyncio.to_thread(count_open_finance_connections, user_id)
@@ -1340,7 +1355,7 @@ async def _ensure_of_access_allowed(user_id: int) -> None:
                 detail={
                     "code": "OF_BANK_LIMIT",
                     "limit": 0,
-                    "message": _MSG_OF_SO_NOS_PLANOS_PAGOS,
+                    "message": await asyncio.to_thread(_msg_sem_open_finance, user_id),
                 },
             )
         return

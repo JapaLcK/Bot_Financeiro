@@ -66,7 +66,6 @@ LEGADOS: frozenset[str] = frozenset(
         "core/services/plan_service.py",
         "core/services/pluggy_health.py",
         "core/services/pluggy_sync.py",
-        "core/services/recurring_charger.py",
         "db/__init__.py",
         "db/accounts.py",
         "db/affiliates.py",

@@ -106,3 +106,8 @@ jest.mock("react-native/Libraries/Components/AccessibilityInfo/AccessibilityInfo
     announceForAccessibility: jest.fn(),
   },
 }));
+
+// expo-web-browser é nativo (`ASWebAuthenticationSession`). O "Continuar com
+// Google" (`features/auth/google.ts`) só lê o que `openAuthSessionAsync`
+// devolve: cada teste diz o retorno com `jest.mocked(...).mockResolvedValue`.
+jest.mock("expo-web-browser", () => ({ openAuthSessionAsync: jest.fn() }));
