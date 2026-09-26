@@ -325,9 +325,43 @@ def test_cota_esgotada_plus_e_pro_so_renova_sem_upgrade(user_id, monkeypatch, pl
     assert "Plus" not in out and "planos pagos" not in out
 
 
-# A copy afirmada é a da B3 (manda assinar quem está em carência); muda com ela.
-def test_cota_esgotada_gratis_mantem_texto_dos_planos_pagos(user_id, monkeypatch):
+def test_cota_esgotada_em_carencia_manda_atualizar_o_cartao(user_id, monkeypatch):
+    """Carência = assinante com a cobrança em retentativa. "Assine" é beco: o
+    checkout da /precos o recusa com 409 "Você já tem um plano ativo"."""
     out = _cota_esgotada(monkeypatch, user_id, "free")
+    assert out == (
+        "🐷 Suas mensagens com o Piggy deste mês acabaram!\n"
+        "A cobrança da sua assinatura não passou — assim que ela entrar, a conversa "
+        "volta na hora. Pra atualizar o cartão: pigbankai.com/conta"
+    )
+    assert "planos pagos" not in out and "/precos" not in out
+    assert "/conta" in out
+
+
+def test_cota_esgotada_cortado_mantem_texto_dos_planos_pagos(user_id, monkeypatch):
+    """POSITIVO: o tier `free` que NÃO é carência (cortado, com o freio do corte
+    puxado para ele alcançar o Piggy) continua ouvindo a copy antiga."""
+    from datetime import datetime, timedelta, timezone
+
+    import db
+    import db_support
+    from core.services import billing_copy
+
+    monkeypatch.setenv("ACCESS_GATE_ENABLED", "0")
+    out_pro = _cota_esgotada(monkeypatch, user_id, "pro")  # monta a conta e estoura a cota
+    assert "renovam no dia 1º" in out_pro
+    db.mark_plan_selected(user_id)
+    with db.get_conn() as conn, conn.cursor() as cur:
+        cur.execute(  # cortado: plano vencido, `canceled`, sem relógio de carência
+            "update auth_accounts set plan_expires_at=%s, past_due_since=null,"
+            "       last_payment_status='canceled' where user_id=%s",
+            (datetime.now(timezone.utc) - timedelta(days=1), user_id),
+        )
+        conn.commit()
+    db_support.invalidate_auth_user_cache(user_id)
+    assert billing_copy.estado_sem_plano_pago(user_id) == "sem_acesso"
+
+    out = mod.handle_ai_chat_command(user_id, "piggy oi", platform="whatsapp")
     assert out == (
         "🐷 Suas mensagens com o Piggy deste mês acabaram!\n"
         "Nos planos pagos a conversa continua: https://pigbankai.com/precos"

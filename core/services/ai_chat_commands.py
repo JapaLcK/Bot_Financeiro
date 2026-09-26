@@ -28,6 +28,7 @@ from datetime import timedelta
 
 import db
 from core.services.ai_chat.runner import ERROR_MSG
+from core.services import billing_copy
 from core.services.plan_service import ai_chat_allowed, ai_monthly_limit_for
 
 logger = logging.getLogger(__name__)
@@ -167,6 +168,16 @@ def aviso_de_cota(user_id: int) -> str | None:
             acabou + "Elas renovam no dia 1º. No Plus você tem mais mensagens: "
             "https://pigbankai.com/precos"
         )
+    # Tier `free` com IA no v2 = carência de cobrança: é assinante, e a /precos o
+    # recusa com 409. Levantar aqui cairia no upsell do chamador (`except: pass`);
+    # "não sei" vira carência, como no `except` de `estado_sem_plano_pago` — o
+    # /conta sem cliente Stripe devolve para a /precos.
+    try:
+        estado = billing_copy.estado_sem_plano_pago(user_id)
+    except Exception:
+        estado = "carencia"
+    if estado == "carencia":
+        return acabou + billing_copy.IA_COTA_EM_CARENCIA
     return acabou + "Nos planos pagos a conversa continua: https://pigbankai.com/precos"
 
 

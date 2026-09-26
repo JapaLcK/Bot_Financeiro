@@ -3720,6 +3720,7 @@ async def auth_me(user_id: int = Depends(_get_current_user)):
         get_plan_tier, get_trial_status, history_earliest_date, get_user_limits,
         needs_plan_selection,
     )
+    from core.services import billing_copy
     of_ui_enabled = _open_finance_ui_enabled(user_id, user_dict.get("email"))
     from core.services.plan_service import agents_ui_enabled as _agents_ui_enabled
     agents_ui = _agents_ui_enabled(user_id, user_dict.get("email"))
@@ -3761,6 +3762,13 @@ async def auth_me(user_id: int = Depends(_get_current_user)):
         "plans_v2_enabled": plans_v2_enabled(),
         "plan_tier": plan_tier,
         "of_banks_max": of_banks_max,
+        # Carência de cobrança: assinante com tier `free`. O front troca o
+        # "assine → /precos" (que o recusaria com 409) por "Atualizar cartão →
+        # /conta". `user=user_dict`: sem SELECT novo, como as duas acima.
+        "cobranca_em_atraso": (
+            plans_v2_enabled() and plan_tier == "free"
+            and billing_copy.estado_sem_plano_pago(user_id, user_dict) == "carencia"
+        ),
         "trial": {"active": trial["active"], "days_left": trial["days_left"]},
         "history_earliest_date": earliest_history.isoformat() if earliest_history else None,
         "of_ui_enabled": of_ui_enabled,

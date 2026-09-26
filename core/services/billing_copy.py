@@ -1,5 +1,5 @@
 """
-core/services/billing_copy.py — o que o bot DIZ sobre o estado da assinatura.
+core/services/billing_copy.py — o que o bot e a web DIZEM sobre o estado da assinatura.
 
 UM assunto: as mensagens que `plano` e `cancelar` entregam a quem **não** tem um
 plano pago vigente. São três estados, e confundi-los é caro — o bot é o canal
@@ -82,6 +82,20 @@ COBRANCA_EM_ATRASO = (
     "reduzidos: 30 lançamentos no mês, histórico só do mês atual, e sem Open "
     "Finance nem agentes até a cobrança entrar.\n\n"
     "Pra atualizar o cartão ou encerrar a assinatura: manda {cancelar}"
+)
+
+# A carência que estoura a cota da IA (B3) ou bate no Open Finance (B4). A
+# pessoa é ASSINANTE: mandá-la para os planos pagos é beco sem saída, porque o
+# checkout da /precos a recusa com 409 "Você já tem um plano ativo". O caminho é
+# o cartão, pelo `/conta` (portal da Stripe). B3 vem depois da 1ª linha do
+# `aviso_de_cota`, e sem "renovam no dia 1º" (decisão do dono).
+IA_COTA_EM_CARENCIA = (
+    "A cobrança da sua assinatura não passou — assim que ela entrar, a conversa "
+    "volta na hora. Pra atualizar o cartão: pigbankai.com/conta"
+)
+OPEN_FINANCE_EM_CARENCIA = (
+    "A cobrança da sua assinatura não passou — o Open Finance volta quando ela "
+    "entrar. Pra atualizar o cartão: /conta"
 )
 
 
