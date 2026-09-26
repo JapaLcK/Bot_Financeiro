@@ -238,11 +238,59 @@ def test_csv_sem_dados_encerra_a_pergunta(monkeypatch):
 
 
 def test_sem_ia_no_plano_grava_pelo_route(monkeypatch):
+    """Sem a IA por outro motivo que não a cota (v1 sem Pro): route(), como antes."""
     uid, chamadas = _com_ia(monkeypatch)
     monkeypatch.setattr("core.services.plan_service.ai_chat_allowed", lambda _uid: False)
+    monkeypatch.setenv("PLANS_V2_ENABLED", "0")
     _ia_disse(uid, ORCAMENTO)
 
     diga(uid, "300 reais transporte")
+    assert chamadas == []
+    assert _lancamentos(uid) == 1
+
+
+# Cota da IA esgotada (v2: todo tier tem IA, só a cota a tira) com a pergunta
+# aberta: aviso de cota, sem gravar; a pergunta fecha (achado do Codex).
+COTA = "Suas mensagens com a Piggy deste mês acabaram"
+
+
+def _sem_cota(monkeypatch):
+    uid, chamadas = _com_ia(monkeypatch)
+    monkeypatch.setattr("core.services.plan_service.ai_chat_allowed", lambda _uid: False)
+    monkeypatch.delenv("PLANS_V2_ENABLED", raising=False)
+    return uid, chamadas
+
+
+def test_cota_esgotada_com_pergunta_aberta_avisa_e_nao_grava(monkeypatch):
+    uid, chamadas = _sem_cota(monkeypatch)
+    _ia_disse(uid, ORCAMENTO)
+
+    assert COTA in diga(uid, "300 reais transporte")
+    assert chamadas == []
+    assert _lancamentos(uid) == 0
+    assert pergunta_aberta_da_ia(uid) is None
+
+    diga(uid, "300 reais transporte")  # a pergunta fechou: volta ao route()
+    assert _lancamentos(uid) == 1
+
+
+def test_audio_cota_esgotada_com_pergunta_aberta_avisa_e_nao_grava(monkeypatch):
+    uid, chamadas = _sem_cota(monkeypatch)
+    _ia_disse(uid, ORCAMENTO)
+
+    r = _audio(monkeypatch, uid, "300 reais transporte")
+    assert 'Entendi: "300 reais transporte"' in r and COTA in r
+    assert chamadas == []
+    assert _lancamentos(uid) == 0
+
+    _audio(monkeypatch, uid, "300 reais transporte")
+    assert _lancamentos(uid) == 1
+
+
+def test_cota_esgotada_sem_pergunta_aberta_grava_pelo_route(monkeypatch):
+    uid, chamadas = _sem_cota(monkeypatch)
+
+    assert COTA not in diga(uid, "300 reais transporte")
     assert chamadas == []
     assert _lancamentos(uid) == 1
 

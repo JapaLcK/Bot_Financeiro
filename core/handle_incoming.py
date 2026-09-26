@@ -32,7 +32,7 @@ from core.services.media_service import (
 )
 from core.observability import log_system_event_sync
 from core.services.plan_limits import PlanLimitExceeded
-from core.services.ai_chat_commands import MANTEM, ENCERRA, pergunta_no_turno
+from core.services.ai_chat_commands import MANTEM, ENCERRA, aviso_de_cota, pergunta_no_turno
 from utils_text import fmt_brl
 from ai_router import _internal_user_id
 
@@ -151,7 +151,8 @@ def _process_audio_transaction(uid: int, transcription: str, msg: IncomingMessag
 
 def _resposta_da_ia(uid: int, text: str, platform: str, rotulo: str,
                     erro_se_falhar: bool = False) -> str | None:
-    """Resposta da IA formatada; None se o usuário não tem a IA. Se a IA
+    """Resposta da IA formatada; None se o usuário não tem a IA (com
+    `erro_se_falhar` e a cota esgotada, o aviso de cota). Se a IA
     falhar: None (o chamador segue o fluxo) ou, com `erro_se_falhar`, a
     mensagem de erro — a resposta à pergunta da IA não pode cair no route()."""
     try:
@@ -163,6 +164,12 @@ def _resposta_da_ia(uid: int, text: str, platform: str, rotulo: str,
             )
             pergunta_no_turno.set(MANTEM)
             return format_for_platform(ai_reply, platform)
+        # Cota esgotada com a pergunta aberta: avisa e não grava; a pergunta
+        # fecha (a próxima mensagem volta ao fluxo normal).
+        aviso = aviso_de_cota(uid) if erro_se_falhar else None
+        if aviso:
+            pergunta_no_turno.set(None)
+            return format_for_platform(aviso, platform)
     except Exception as exc:
         logger.warning("%s falhou pra user %s: %s", rotulo, uid, exc)
         if erro_se_falhar:

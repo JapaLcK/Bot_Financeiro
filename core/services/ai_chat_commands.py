@@ -144,6 +144,29 @@ def encerra_pergunta_da_ia(user_id: int, ultima_id: int) -> None:
         logger.warning("encerra_pergunta_da_ia falhou pra user %s: %s", user_id, exc)
 
 
+def aviso_de_cota(user_id: int) -> str | None:
+    """Para quem já está sem a IA (`ai_chat_allowed` False): o aviso de cota
+    esgotada, ou None se o motivo não é a cota (v1 sem Pro). No v2 todo tier
+    com IA só a perde pela cota mensal."""
+    from core.services.plan_service import (
+        plans_v2_enabled, get_user_limits, get_plan_tier, tier_at_least,
+    )
+    if not (plans_v2_enabled() and get_user_limits(user_id)["ai_conversational_enabled"]):
+        return None
+    tier = get_plan_tier(user_id)
+    acabou = "🐷 Suas mensagens com a Piggy deste mês acabaram!\n"
+    # A cota vira no dia 1º (db/ai_quota._current_month_start).
+    # Plus e Pro têm o mesmo teto: subir de um pro outro não dá mais mensagens.
+    if tier_at_least(tier, "plus"):
+        return acabou + "Elas renovam no dia 1º."
+    if tier == "essencial":
+        return (
+            acabou + "Elas renovam no dia 1º. No Plus você tem mais mensagens: "
+            "https://pigbankai.com/precos"
+        )
+    return acabou + "Nos planos pagos a conversa continua: https://pigbankai.com/precos"
+
+
 def handle_ai_chat_command(user_id: int, text: str, platform: str) -> str | None:
     """
     Detecta se a msg do user é uma interação com o chat IA e devolve a resposta.
@@ -242,22 +265,9 @@ def handle_ai_chat_command(user_id: int, text: str, platform: str) -> str | None
             except Exception:
                 pass
         try:
-            from core.services.plan_service import (
-                plans_v2_enabled, get_user_limits, get_plan_tier, tier_at_least,
-            )
-            if plans_v2_enabled() and get_user_limits(user_id)["ai_conversational_enabled"]:
-                tier = get_plan_tier(user_id)
-                acabou = "🐷 Suas mensagens com a Piggy deste mês acabaram!\n"
-                # A cota vira no dia 1º (db/ai_quota._current_month_start).
-                # Plus e Pro têm o mesmo teto: subir de um pro outro não dá mais mensagens.
-                if tier_at_least(tier, "plus"):
-                    return acabou + "Elas renovam no dia 1º."
-                if tier == "essencial":
-                    return (
-                        acabou + "Elas renovam no dia 1º. No Plus você tem mais mensagens: "
-                        "https://pigbankai.com/precos"
-                    )
-                return acabou + "Nos planos pagos a conversa continua: https://pigbankai.com/precos"
+            aviso = aviso_de_cota(user_id)
+            if aviso:
+                return aviso
         except Exception:
             pass
         return (
