@@ -12,6 +12,40 @@ from utils_text import fmt_brl
 
 logger = logging.getLogger(__name__)
 
+# Recusas de domínio do `delete_launch_and_rollback`: (classe, evento de log,
+# frase). Fonte única do apagar singular e do lote. Ordem importa: o
+# `InvestmentMovementNotLast` é subclasse do `LaunchUnsafeRollback` e vem antes.
+# Só a frase dele recebe `{e}` (o `str` é a constante `MENSAGEM_NAO_E_O_ULTIMO`);
+# texto de erro de banco nas outras chegaria cru ao usuário.
+_RECUSAS_APAGAR = (
+    # PERMANENTE: sem `efeitos` não dá pra reverter o saldo. Mesma distinção do
+    # "apagar tudo" (`kept_no_effects` × `errors`, `db/accounts.py`).
+    (db.LaunchNoEffects, "delete_launch_sem_efeitos",
+     "⚠️ O lançamento **#{n}** é antigo e não guarda o que precisaria ser "
+     "revertido, então mantive ele intacto pra não bagunçar seu saldo."),
+    # Tem contorno: desfazer os movimentos mais novos do investimento primeiro.
+    (db.InvestmentMovementNotLast, "delete_launch_movimento_posterior",
+     "🐷 Não apaguei o lançamento **#{n}**. {e}"),
+    # PERMANENTE: `efeitos` existe mas não se reverte POR INTEIRO (chave de
+    # escritor novo, `{}` degenerado, lote de caixinha que o
+    # `_sync_pocket_from_lots` ressuscita). "É antigo" seria falso; retry não destrava.
+    (db.LaunchUnsafeRollback, "delete_launch_inseguro",
+     "⚠️ Não consigo reverter o lançamento **#{n}** com segurança, então "
+     "mantive ele intacto pra não bagunçar seu saldo."),
+    # TEMPORÁRIA: apagar o resgate reabre o lote. A frase diz O QUE destrava —
+    # "tenta de novo em alguns minutos" seria falso, e "é antigo" também.
+    (db.InvestmentLotHasWithdrawal, "delete_launch_lote_com_resgate",
+     "🐷 Não dá pra desfazer o aporte **#{n}**: esse lote já teve resgate. "
+     "Apaga o resgate primeiro e depois volta aqui pra apagar o aporte."),
+)
+_RECUSA_TIPOS = tuple(c for c, _, _ in _RECUSAS_APAGAR)
+
+
+def _recusa_apagar(e: Exception, n) -> tuple[str, str]:
+    """(evento de log, frase ao usuário) da primeira classe em que `e` casa."""
+    return next((ev, frase.format(n=n, e=e))
+                for c, ev, frase in _RECUSAS_APAGAR if isinstance(e, c))
+
 
 def resolve_delete(user_id: int, confirmed: bool) -> str | None:
     """
@@ -176,47 +210,11 @@ def resolve_delete(user_id: int, confirmed: bool) -> str | None:
             # janela de 10 min da pendência. Condição PERMANENTE: mandar tentar
             # de novo é conselho que nunca vai funcionar.
             return f"🐷 O lançamento **#{display_id}** já não está no seu histórico."
-        except db.LaunchNoEffects as e:
-            # Sem `efeitos` não dá pra reverter o saldo com segurança — também
-            # permanente. É a MESMA distinção do "apagar tudo", que separa
-            # `kept_no_effects` de `errors` (`db/accounts.py`); aqui a porta é
-            # um lançamento só, mas a causa e a frase são as mesmas.
-            _log_falha("delete_launch_sem_efeitos", user_id, e,
+        except _RECUSA_TIPOS as e:
+            evento, frase = _recusa_apagar(e, display_id)
+            _log_falha(evento, user_id, e,
                        nivel=logging.WARNING, launch_id=launch_id, user_seq=display_id)
-            return (
-                f"⚠️ O lançamento **#{display_id}** é antigo e não guarda o que "
-                f"precisaria ser revertido, então mantive ele intacto pra não "
-                f"bagunçar seu saldo."
-            )
-        except db.InvestmentMovementNotLast as e:
-            # Antes do `LaunchUnsafeRollback` (é subclasse). Tem contorno: desfazer
-            # os movimentos mais novos do investimento primeiro.
-            _log_falha("delete_launch_movimento_posterior", user_id, e,
-                       nivel=logging.WARNING, launch_id=launch_id, user_seq=display_id)
-            return f"🐷 Não apaguei o lançamento **#{display_id}**. {e}"
-        except db.LaunchUnsafeRollback as e:
-            # `efeitos` existe, mas não dá pra revertê-lo POR INTEIRO (chave de
-            # escritor novo, `{}` degenerado, lote de caixinha que o
-            # `_sync_pocket_from_lots` ressuscita). PERMANENTE também: "é
-            # antigo" seria falso (o dado está inteiro) e retry não destrava.
-            _log_falha("delete_launch_inseguro", user_id, e,
-                       nivel=logging.WARNING, launch_id=launch_id, user_seq=display_id)
-            return (
-                f"⚠️ Não consigo reverter o lançamento **#{display_id}** com "
-                f"segurança, então mantive ele intacto pra não bagunçar seu saldo."
-            )
-        except db.InvestmentLotHasWithdrawal as e:
-            # TEMPORÁRIA, e é a única aqui que tem contorno: apagar o resgate
-            # reabre o lote. "Tenta de novo em alguns minutos" seria falso (o
-            # tempo não destrava nada), e "é antigo" também — o dado está
-            # inteiro. A frase tem de dizer O QUE destrava.
-            _log_falha("delete_launch_lote_com_resgate", user_id, e,
-                       nivel=logging.WARNING, launch_id=launch_id, user_seq=display_id)
-            return (
-                f"🐷 Não dá pra desfazer o aporte **#{display_id}**: esse lote já "
-                f"teve resgate. Apaga o resgate primeiro e depois volta aqui pra "
-                f"apagar o aporte."
-            )
+            return frase
         except Exception as e:
             _log_falha("delete_launch", user_id, e, launch_id=launch_id, user_seq=display_id)
             return erro_tecnico
@@ -231,19 +229,19 @@ def resolve_delete(user_id: int, confirmed: bool) -> str | None:
         def _disp(lid):
             return display_ids_map.get(str(lid), display_ids_map.get(lid, lid))
 
-        failed = []
-        for lid in ids:
+        # Do id interno mais NOVO para o mais velho, sem repetidos: o
+        # `guard_last_investment_movement` só deixa desfazer o último movimento
+        # do investimento (por `id`, não `criado_em`), então "apagar #R1 e #R2"
+        # na ordem digitada recusava o R1 que o R2 logo depois liberaria. As
+        # recusas de domínio levam a MESMA frase do singular (`_RECUSAS_APAGAR`),
+        # não contam como incidente (WARNING) e não viram "⚠️ Falha" — que fica
+        # para o erro técnico, o único em que tentar de novo pode resolver.
+        recusas, failed = {}, []
+        for lid in sorted(set(ids), reverse=True):
             try:
                 db.delete_launch_and_rollback(user_id, lid)
-            except (db.LaunchNoEffects, db.InvestmentLotHasWithdrawal,
-                    db.LaunchUnsafeRollback) as e:
-                # MESMA função e MESMAS condições de domínio dos três `except`
-                # do delete_launch singular acima — sem este ramo, "apaga #2, #5
-                # e #7" com um lançamento antigo no meio contava como incidente
-                # em `backend_errors_24h` e "apaga #2" sozinho não contava.
-                # A mensagem ao usuário não muda: no bulk é "⚠️ Falha: #N" pras
-                # três, e ela não promete retry.
-                failed.append(lid)
+            except _RECUSA_TIPOS as e:
+                recusas[lid] = _recusa_apagar(e, _disp(lid))[1]
                 _log_falha("delete_launch_bulk", user_id, e, nivel=logging.WARNING,
                            launch_id=lid, user_seq=_disp(lid))
             except Exception as e:
@@ -251,12 +249,14 @@ def resolve_delete(user_id: int, confirmed: bool) -> str | None:
                 # os DOIS ids: a queixa cita "#2", o log cita o id interno.
                 _log_falha("delete_launch_bulk", user_id, e,
                            launch_id=lid, user_seq=_disp(lid))
-        ok_ids = [i for i in ids if i not in failed]
+        ordem = list(dict.fromkeys(ids))  # a resposta segue a ordem do pedido
+        ok_ids = [i for i in ordem if i not in recusas and i not in failed]
         parts = []
         if ok_ids:
             parts.append("✅ Apagados: " + ", ".join(f"**#{_disp(i)}**" for i in ok_ids))
+        parts += [recusas[i] for i in ordem if i in recusas]
         if failed:
-            parts.append("⚠️ Falha: " + ", ".join(f"#{_disp(i)}" for i in failed))
+            parts.append("⚠️ Falha: " + ", ".join(f"#{_disp(i)}" for i in ordem if i in failed))
         return "\n".join(parts) or "Nada foi apagado."
 
     if action_type == "delete_pocket":
