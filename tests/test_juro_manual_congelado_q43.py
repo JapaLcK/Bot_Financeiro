@@ -393,8 +393,8 @@ def test_F4_post_responde_o_juro_gravado(user_id):
     assert _linha("pockets", user_id, r.json()["pocket"]["id"])["interest_enabled"] is False
 
 
-def test_F4b_post_com_nome_existente_responde_o_juro_da_legada(user_id):
-    """Conflito de nome devolve a caixinha existente: a legada ainda rende."""
+def test_F4b_post_com_nome_da_legada_recusa_sem_tocar_nela(user_id):
+    """Nome já existente dá 400 (#626) e a caixinha legada fica como estava."""
     from tests.test_delete_endpoints_nao_vazam import _client, _headers
 
     _, pid, _ = db.create_pocket(user_id, "viagem")
@@ -405,10 +405,9 @@ def test_F4b_post_com_nome_existente_responde_o_juro_da_legada(user_id):
 
     r = _client(user_id).post(f"/pockets/{user_id}", headers=_headers(),
                               json={"name": "viagem", "interest_enabled": False})
-    assert r.status_code == 200, r.text
-    assert r.json()["created"] is False and r.json()["pocket"]["id"] == pid
-    assert r.json()["pocket"]["interest_enabled"] is True
-    assert _linha("pockets", user_id, pid)["interest_enabled"] is True
+    assert r.status_code == 400, r.text
+    linha = _linha("pockets", user_id, pid)
+    assert linha["interest_enabled"] is True and linha["interest_frozen_at"] is None
 
 
 def test_F5_patch_so_ligando_o_juro_e_200_sem_vazar(user_id):
