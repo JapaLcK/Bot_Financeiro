@@ -104,3 +104,19 @@ def test_dashboard_apagar_criacao_de_caixinha_com_saldo_responde_400_com_a_frase
     assert resp.status_code == 400, resp.text
     assert resp.json()["detail"] == MENSAGEM_CAIXINHA_COM_MOVIMENTO, resp.text
     assert [(c[1], c[2]) for c in _estado(user_id)[1]] == [("viagem", Decimal("300"))]
+
+
+def test_caixinha_renomeada_com_saldo_recusa(user_id):
+    """#608 + #609: o renome reescreve o nome no lançamento de criação, e a guarda
+    tem de achar a caixinha pelo nome novo — senão apaga "Praia" com o dinheiro."""
+    from tests.test_renomear_caixinha_historico import _renomeia
+
+    db.add_launch_and_update_balance(user_id, "receita", 1000, None, "seed")
+    lid, pid, _ = db.create_pocket(user_id, "Viagem")
+    db.pocket_deposit_from_account(user_id, "Viagem", 300)
+    _renomeia(user_id, "Viagem", "Praia")
+
+    _recusa(user_id, lid)
+    conta, caixinhas, _, _ = _estado(user_id)
+    assert conta == Decimal("700")
+    assert caixinhas == [(pid, "Praia", Decimal("300"))]

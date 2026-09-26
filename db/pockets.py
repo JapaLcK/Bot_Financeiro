@@ -232,9 +232,6 @@ def list_pockets(user_id: int, *, accrue: bool = True):
             return cur.fetchall()
 
 
-TIPOS_HISTORICO_CAIXINHA = ('deposito_caixinha', 'saque_caixinha', 'criar_caixinha', 'delete_pocket')
-
-
 def _renomear_no_historico(cur, user_id: int, antigo: str, novo: str) -> None:
     """#608: o histórico acompanha o renome, senão quem lê por nome (histórico,
     delete_pocket, o desfazer da criação) perde a caixinha ou acha outra. Comparação
