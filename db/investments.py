@@ -2,8 +2,10 @@
 db/investments.py — Investimentos: criar, aportar, resgatar, juros e CDI.
 """
 import logging
+import math
 import sys
 import requests
+from contextvars import ContextVar
 from datetime import datetime, date, timedelta, timezone
 from decimal import Decimal, ROUND_HALF_UP
 
@@ -51,7 +53,9 @@ SGS_TIMEOUT_SECONDS = 3
 #    a dados que COMPLETAM a cauda → upsert; memo vale até a meia-noite UTC
 #    b dados PARCIAIS ou vazia (pré-publicação) → upsert o que veio; memo vale
 #      SGS_CONFIRM_SHORT — pega o ponto publicado à noite ainda no mesmo dia
-#    c falha/timeout (None) ou 200+lixo (None) → NÃO grava memo; re-tenta já
+#    c falha/timeout (None), 200+lixo (None) ou 200 com item que não parseia →
+#      NÃO grava memo; re-tenta já; conta em `_sgs_falhas`: a final não carimba;
+#      na falha, devolve só o prefixo sem buraco: o cursor não pula dia
 #  5 cache VAZIO na janela → 0 fetch só se o memo cobre [start, end]; senão
 #    fetch da janela e grava como a célula 4. Mesma RESSALVA da célula 3.
 #    Instância real: manhã de segunda com lote acruado na sexta (janela
@@ -75,6 +79,8 @@ SGS_TIMEOUT_SECONDS = 3
 SGS_CONFIRM_SHORT = timedelta(hours=2)
 # code → (validade, start, end) do último intervalo que a rede respondeu.
 _sgs_answered: dict[str, tuple[datetime, date, date]] = {}
+# Buscas que falharam (célula 4c) nesta thread; mesmo idioma de db/connection.py::_commits_ambiguos.
+_sgs_falhas: ContextVar[int] = ContextVar("sgs_falhas", default=0)
 
 
 def _sgs_remember(code: str, start: date, end: date, *, complete: bool) -> None:
@@ -248,12 +254,25 @@ def _sgs_cache_covers(cached: dict[date, float], start: date, newest: date) -> b
     (comportamento antigo), que cura o buraco. Falso-negativo possível: dia
     que o nosso calendário chama de útil mas o BCB não publica vira fetch da
     janela toda — correto, só não otimizado."""
+    return _sgs_first_gap(cached, start, newest) is None
+
+
+def _sgs_first_gap(cached: dict[date, float], start: date, newest: date) -> date | None:
+    """Primeiro dia útil BR de [start, newest] fora do cache; None = sem buraco."""
     d = start
     while d <= newest:
         if is_br_business_day(d) and d not in cached:
-            return False
+            return d
         d += timedelta(days=1)
-    return True
+    return None
+
+
+def _sgs_prefix_on_failure(cached: dict[date, float], start: date) -> dict[date, float]:
+    """Célula 4c: só as datas antes do primeiro buraco. O accrual avança o cursor
+    até a maior data devolvida; com buraco no meio ele pularia o dia faltante e
+    a próxima busca começaria depois dele. Série mensal: no máximo o mês de `start`."""
+    gap = _sgs_first_gap(cached, start, max(cached)) if cached else None
+    return cached if gap is None else {d: v for d, v in cached.items() if d < gap}
 
 
 def _get_cdi_daily_map(cur, start: date, end: date) -> dict[date, float]:
@@ -288,23 +307,31 @@ def _get_cdi_daily_map(cur, start: date, end: date) -> dict[date, float]:
     if not isinstance(data, list) or not data:
         if isinstance(data, list):  # []: "sem valores" pré-publicação → curto
             _sgs_remember("CDI", fetch_start, end, complete=False)
+        else:
+            _sgs_falhas.set(_sgs_falhas.get() + 1)
+            return _sgs_prefix_on_failure(cached, start)
         return cached
 
-    to_upsert = []
+    to_upsert, invalido = [], False
     for item in data:
         if not isinstance(item, dict):
+            invalido = True
             continue
         try:
             raw_date = item.get("data")
             raw_val = item.get("valor")
             if not raw_date or raw_val is None:
+                invalido = True
                 continue
             d = datetime.strptime(raw_date, "%d/%m/%Y").date()
             v = float(str(raw_val).replace(",", "."))
+            if not math.isfinite(v):  # "nan"/"inf" parseiam sem exceção
+                raise ValueError(f"valor não finito: {v}")
             if d not in cached:
                 to_upsert.append((d, v))
             cached[d] = v
         except Exception as e:
+            invalido = True
             _warn_bcb_once(
                 ("invalid_bcb_item", str(item), type(e).__name__, str(e)),
                 "Item inválido do BCB ignorado: %s | erro=%s",
@@ -319,6 +346,9 @@ def _get_cdi_daily_map(cur, start: date, end: date) -> dict[date, float]:
             to_upsert,
         )
 
+    if invalido:  # célula 4c: resposta que não virou índice inteira é falha
+        _sgs_falhas.set(_sgs_falhas.get() + 1)
+        return _sgs_prefix_on_failure(cached, start)
     # Célula 4a×4b: resposta completou a cauda ⇒ dia cheio; parcial ⇒ curto.
     _sgs_remember("CDI", fetch_start, end,
                   complete=bool(cached) and _sgs_tail_is_fresh(max(cached), end))
@@ -355,17 +385,23 @@ def _get_sgs_daily_map(cur, code: str, series_code: int, start: date, end: date)
     if not isinstance(data, list) or not data:
         if isinstance(data, list):  # []: "sem valores" pré-publicação → curto
             _sgs_remember(code, fetch_start, end, complete=False)
+        else:
+            _sgs_falhas.set(_sgs_falhas.get() + 1)
+            return _sgs_prefix_on_failure(cached, start)
         return cached
 
-    to_upsert = []
+    to_upsert, invalido = [], False
     for item in data:
         try:
             d = datetime.strptime(item["data"], "%d/%m/%Y").date()
             v = float(str(item["valor"]).replace(",", "."))
+            if not math.isfinite(v):  # "nan"/"inf" parseiam sem exceção
+                raise ValueError(f"valor não finito: {v}")
             if d not in cached:
                 to_upsert.append((code, d, v))
             cached[d] = v
         except Exception as e:
+            invalido = True
             _warn_bcb_once(
                 ("invalid_sgs_daily_item", code, str(item), type(e).__name__, str(e)),
                 "Item inválido do SGS %s ignorado: %s | erro=%s",
@@ -381,6 +417,9 @@ def _get_sgs_daily_map(cur, code: str, series_code: int, start: date, end: date)
             to_upsert,
         )
 
+    if invalido:  # célula 4c: resposta que não virou índice inteira é falha
+        _sgs_falhas.set(_sgs_falhas.get() + 1)
+        return _sgs_prefix_on_failure(cached, start)
     # Célula 4a×4b: resposta completou a cauda ⇒ dia cheio; parcial ⇒ curto.
     _sgs_remember(code, fetch_start, end,
                   complete=bool(cached) and _sgs_tail_is_fresh(max(cached), end))
@@ -843,6 +882,14 @@ def _fetch_lots_for_investments(cur, user_id: int, inv_ids: list[int]) -> dict[i
 
 def accrue_investment_db(cur, user_id: int, inv_id: int, today: date | None = None):
     """
+    Acumulação FINAL do investimento manual (Q43): roda uma vez e congela.
+
+    Com `interest_frozen_at` preenchido, não aplica juro: só sincroniza o saldo dos
+    lotes (o valor que o resgate consome). Com o marcador NULL (investimento anterior
+    à Q43), aplica os índices publicados até `today` sob o mesmo `for update` e só
+    então carimba — e só se nenhuma busca de índice falhou (`_sgs_falhas`): na falha,
+    o cursor para no último dia conhecido e a próxima rodada completa e carimba.
+
     Atualiza (balance, last_date) aplicando juros por dias úteis.
     daily → rate por dia útil
     monthly → rate distribuído em 21 dias úteis
@@ -856,7 +903,7 @@ def accrue_investment_db(cur, user_id: int, inv_id: int, today: date | None = No
 
     cur.execute(
         """
-        select id, balance, rate, period, last_date, purchase_date
+        select id, balance, rate, period, last_date, purchase_date, interest_frozen_at
         from investments
         where id=%s and user_id=%s for update
         """,
@@ -867,6 +914,8 @@ def accrue_investment_db(cur, user_id: int, inv_id: int, today: date | None = No
         raise LookupError("INV_NOT_FOUND")
 
     _ensure_investment_lots(cur, user_id, inv)
+    congelado = inv["interest_frozen_at"] is not None
+    falhas = _sgs_falhas.get()
 
     cur.execute(
         """
@@ -879,14 +928,8 @@ def accrue_investment_db(cur, user_id: int, inv_id: int, today: date | None = No
         (user_id, inv_id),
     )
     lots = cur.fetchall()
-    if not lots:
-        cur.execute(
-            "update investments set balance=0 where id=%s and user_id=%s",
-            (inv_id, user_id),
-        )
-        return ZERO
 
-    for lot in lots:
+    for lot in ([] if congelado else lots):
         # Cada lote pode ter taxa/período próprios (Tesouro IPCA+, Prefixado,
         # Debêntures etc.). Lotes legados sem rate/period caem no fallback do
         # investimento — comportamento idêntico ao antigo.
@@ -907,6 +950,19 @@ def accrue_investment_db(cur, user_id: int, inv_id: int, today: date | None = No
                 "update investment_lots set balance=%s, last_date=%s where id=%s and user_id=%s",
                 (new_balance, applied_until or lot["last_date"], lot["id"], user_id),
             )
+
+    if not congelado and _sgs_falhas.get() == falhas:
+        cur.execute(
+            "update investments set interest_frozen_at=now() where id=%s and user_id=%s",
+            (inv_id, user_id),
+        )
+
+    if not lots:
+        cur.execute(
+            "update investments set balance=0 where id=%s and user_id=%s",
+            (inv_id, user_id),
+        )
+        return ZERO
 
     return _sync_investment_from_lots(cur, user_id, inv_id)
 
@@ -1074,7 +1130,7 @@ def create_investment_db(
                     interest_payment_frequency, tax_profile
                 )
                 values (%s,%s,0,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s)
-                on conflict (user_id, name) do nothing
+                on conflict do nothing
                 returning id, name
                 """,
                 (
@@ -1271,86 +1327,28 @@ def list_investments(user_id: int, *, include_lots: bool = True):
             return rows
 
 
-def list_users_with_investments() -> list[int]:
-    """Retorna usuários que possuem ao menos um investimento cadastrado."""
+def list_users_with_unfrozen_interest() -> list[int]:
+    """Usuários com investimento ou caixinha manual ainda sem a acumulação final (Q43).
+
+    Caixinha manual = não é do banco: a mesma régua de `db/pockets.py::_is_of_mirror`.
+    """
     with get_conn() as conn:
         with conn.cursor() as cur:
-            cur.execute("select distinct user_id from investments order by user_id")
+            cur.execute(
+                """
+                select user_id from investments where interest_frozen_at is null
+                union
+                select user_id from pockets
+                 where interest_frozen_at is null and of_investment_id is null
+                   and source <> 'open_finance'
+                order by user_id
+                """
+            )
             return [int(row["user_id"]) for row in cur.fetchall()]
 
 
-def _project_to_today(
-    cur,
-    balance: Decimal,
-    period: str,
-    rate_value: Decimal,
-    last_date: date | None,
-    today: date,
-) -> tuple[Decimal, date | None, int]:
-    """
-    Estima o saldo de last_date até today usando a última taxa conhecida como
-    proxy para dias úteis ainda não publicados pelo BCB.
-
-    NÃO persiste nada — somente para exibição. O saldo realizado em
-    investment_lots continua sendo atualizado apenas com taxas oficialmente
-    publicadas, então a projeção converge para o valor correto assim que o
-    BCB publica os dados.
-
-    Retorna (balance_projetado, data_alvo, dias_uteis_projetados).
-    """
-    if last_date is None or today <= last_date:
-        return balance, last_date, 0
-
-    n = _business_days_between(last_date, today)
-    if n <= 0:
-        return balance, last_date, 0
-
-    rate = float(rate_value)
-
-    if period in ("cdi", "cdi_spread"):
-        cur.execute(
-            "select value from market_rates where code='CDI' order by ref_date desc limit 1"
-        )
-        row = cur.fetchone()
-        if not row:
-            return balance, last_date, 0
-        latest_cdi = float(row["value"])
-
-        if period == "cdi":
-            factor = (1.0 + (latest_cdi / 100.0) * rate) ** n
-        else:
-            spread_daily = (1.0 + rate) ** (1.0 / 252.0) - 1.0
-            factor = ((1.0 + latest_cdi / 100.0) * (1.0 + spread_daily)) ** n
-        return Decimal(str(float(balance) * factor)), today, n
-
-    if period == "selic_spread":
-        cur.execute(
-            "select value from market_rates where code='SELIC_DAILY' order by ref_date desc limit 1"
-        )
-        row = cur.fetchone()
-        if not row:
-            return balance, last_date, 0
-        latest_selic = float(row["value"])
-        spread_daily = (1.0 + rate) ** (1.0 / 252.0) - 1.0
-        factor = ((1.0 + latest_selic / 100.0) * (1.0 + spread_daily)) ** n
-        return Decimal(str(float(balance) * factor)), today, n
-
-    if period == "daily":
-        daily_rate = rate
-    elif period == "monthly":
-        daily_rate = (1.0 + rate) ** (1.0 / 21.0) - 1.0
-    elif period == "yearly":
-        daily_rate = (1.0 + rate) ** (1.0 / 252.0) - 1.0
-    else:
-        return balance, last_date, 0
-
-    if daily_rate > 0:
-        return Decimal(str(float(balance) * (1.0 + daily_rate) ** n)), today, n
-    return balance, last_date, 0
-
-
 def accrue_all_investments(user_id: int, today: date | None = None):
-    """Aplica juros em todos os investimentos do usuário e retorna a lista atualizada."""
+    """Acumulação final (Q43) de cada investimento do usuário; retorna a lista."""
     ensure_user(user_id)
     if today is None:
         today = datetime.now(_tz()).date()
@@ -1376,47 +1374,6 @@ def accrue_all_investments(user_id: int, today: date | None = None):
             lots_by_inv = _fetch_lots_for_investments(cur, user_id, [int(r["id"]) for r in out])
             for row in out:
                 row["lots"] = lots_by_inv.get(int(row["id"]), [])
-
-                # Projeção por lote: cada lote acumula independente, então um lote
-                # criado hoje não pode "esconder" o gap de projection de lotes mais
-                # antigos via inv.last_date = MAX(...). Soma as projeções de cada
-                # lote aberto; fallback no agregado se não houver lotes (cenário
-                # legado pré-migração de lots).
-                open_lots = [lot for lot in row["lots"] if lot.get("status") == "open"]
-                if open_lots:
-                    proj_total = Decimal("0")
-                    proj_days = 0
-                    proj_until = None
-                    for lot in open_lots:
-                        lot_rate = lot.get("rate") if lot.get("rate") is not None else row["rate"]
-                        lot_period = lot.get("period") or row["period"]
-                        lot_pb, lot_until, lot_days = _project_to_today(
-                            cur,
-                            Decimal(str(lot["balance"] or 0)),
-                            lot_period,
-                            Decimal(str(lot_rate or 0)),
-                            lot["last_date"],
-                            today,
-                        )
-                        proj_total += lot_pb
-                        proj_days = max(proj_days, lot_days)
-                        if lot_until and (proj_until is None or lot_until > proj_until):
-                            proj_until = lot_until
-                    row["projected_balance"] = float(proj_total)
-                    row["projected_until"] = proj_until or row["last_date"]
-                    row["projected_days"] = proj_days
-                else:
-                    projected_balance, projected_until, projected_days = _project_to_today(
-                        cur,
-                        Decimal(str(row["balance"] or 0)),
-                        row["period"],
-                        Decimal(str(row["rate"] or 0)),
-                        row["last_date"],
-                        today,
-                    )
-                    row["projected_balance"] = float(projected_balance)
-                    row["projected_until"] = projected_until
-                    row["projected_days"] = projected_days
 
         conn.commit()
 

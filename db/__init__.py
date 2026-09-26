@@ -94,7 +94,7 @@ from .investments import (
     create_investment_db,
     delete_investment,
     list_investments,
-    list_users_with_investments,
+    list_users_with_unfrozen_interest,
     accrue_all_investments,
     accrue_investment_db,
     investment_deposit_from_account,
@@ -475,7 +475,7 @@ __all__ = [
     "pocket_deposit_from_account", "delete_pocket",
     # investments
     "create_investment", "create_investment_db", "delete_investment", "list_investments",
-    "list_users_with_investments", "accrue_all_investments", "accrue_investment_db",
+    "list_users_with_unfrozen_interest", "accrue_all_investments", "accrue_investment_db",
     "investment_deposit_from_account", "investment_withdraw_to_account", "get_latest_cdi", "get_latest_cdi_aa",
     "get_latest_cdi_daily_pct", "get_latest_selic_aa", "get_latest_ipca_12m",
     "get_dashboard_market_rates", "_get_cdi_daily_map", "_business_days_between",

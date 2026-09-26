@@ -491,14 +491,14 @@ def promote_to_pro(user_id: int, plan: str = "pro") -> int:
     return user_id
 
 
-def em_carencia(user_id: int) -> int:
+def em_carencia(user_id: int, plan: str = "pro") -> int:
     """Conta na carência de cobrança: plano pago VENCIDO com o relógio de
     inadimplência aberto. É o único estado do v2 em que o tier `free` entra no
     app (`tem_direito_hoje`, lado direito do OR) — o "Grátis" que sobrou."""
     from datetime import datetime, timedelta, timezone
     import db
     from core.services.plan_service import get_plan_tier
-    promote_to_pro(user_id)
+    promote_to_pro(user_id, plan=plan)
     # Deltas absolutos, nunca `DUNNING_GRACE_DAYS ± n`.
     agora = datetime.now(timezone.utc)
     with get_conn() as conn:

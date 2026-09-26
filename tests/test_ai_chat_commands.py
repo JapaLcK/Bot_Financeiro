@@ -290,19 +290,19 @@ def test_pending_frase_ambigua_nao_dispara_guard_vai_pra_ia(patches):
 
 # ─── Cota esgotada no v2, por tier (banco real) ──────────────────────────────
 
-def _cota_esgotada(monkeypatch, uid, plan):
+def _cota_esgotada(monkeypatch, uid, plan, uso=1000000, pago="pro"):
     from datetime import date
 
     import db
     from conftest import em_carencia, promote_to_pro
 
     # "free" no v2 com acesso ao Piggy = carência de cobrança (tier free).
-    em_carencia(uid) if plan == "free" else promote_to_pro(uid, plan=plan)
+    em_carencia(uid, plan=pago) if plan == "free" else promote_to_pro(uid, plan=plan)
     with db.get_conn() as conn, conn.cursor() as cur:
         cur.execute(
-            "update auth_accounts set ai_messages_this_month = 1000000, ai_month_reset_at = %s "
+            "update auth_accounts set ai_messages_this_month = %s, ai_month_reset_at = %s "
             "where user_id = %s",
-            (date.today().replace(day=1), uid),
+            (uso, date.today().replace(day=1), uid),
         )
         conn.commit()
     return mod.handle_ai_chat_command(uid, "piggy oi", platform="whatsapp")
@@ -325,9 +325,81 @@ def test_cota_esgotada_plus_e_pro_so_renova_sem_upgrade(user_id, monkeypatch, pl
     assert "Plus" not in out and "planos pagos" not in out
 
 
-# A copy afirmada é a da B3 (manda assinar quem está em carência); muda com ela.
-def test_cota_esgotada_gratis_mantem_texto_dos_planos_pagos(user_id, monkeypatch):
-    out = _cota_esgotada(monkeypatch, user_id, "free")
+def test_cota_esgotada_em_carencia_manda_atualizar_o_cartao(user_id, monkeypatch):
+    """Carência = assinante com a cobrança em retentativa. "Assine" é beco: o
+    checkout da /precos o recusa com 409 "Você já tem um plano ativo".
+    O uso estoura a cota da carência (tier free) e cabe na do Plus pago."""
+    from core.services.plan_service import ai_monthly_limit_for_tier
+
+    uso = ai_monthly_limit_for_tier("free")
+    assert uso < ai_monthly_limit_for_tier("plus")
+    out = _cota_esgotada(monkeypatch, user_id, "free", uso=uso)
+    assert out == (
+        "🐷 Suas mensagens com o Piggy deste mês acabaram!\n"
+        "A cobrança da sua assinatura não passou — assim que ela entrar, a conversa "
+        "volta na hora. Pra atualizar o cartão: pigbankai.com/conta"
+    )
+    assert "planos pagos" not in out and "/precos" not in out
+    assert "/conta" in out
+
+
+def test_cota_esgotada_em_carencia_sem_cota_do_plano_pago_nao_promete_a_volta(user_id, monkeypatch):
+    """Pagar não zera o contador do mês: quem já gastou a cota do Essencial antes
+    da cobrança falhar não recebe a IA de volta quando ela entrar."""
+    from core.services.plan_service import ai_monthly_limit_for_tier
+
+    uso = ai_monthly_limit_for_tier("essencial")  # a borda: igual ao limite
+    out = _cota_esgotada(monkeypatch, user_id, "free", uso=uso, pago="essencial")
+    assert out == (
+        "🐷 Suas mensagens com o Piggy deste mês acabaram!\n"
+        "A cobrança da sua assinatura não passou. Pra atualizar o cartão: "
+        "pigbankai.com/conta — as mensagens renovam no dia 1º."
+    )
+    assert "volta na hora" not in out
+
+
+def test_cota_esgotada_em_carencia_sem_ler_o_plano_nao_promete_a_volta(user_id, monkeypatch):
+    """O mesmo arranjo que dá a promessa, mas a leitura do plano falha: sem ela."""
+    import db
+    from core.services import billing_copy
+    from core.services.plan_service import ai_monthly_limit_for_tier
+
+    acabou = "🐷 Suas mensagens com o Piggy deste mês acabaram!\n"
+    out = _cota_esgotada(monkeypatch, user_id, "free", uso=ai_monthly_limit_for_tier("free"))
+    assert out == acabou + billing_copy.IA_COTA_EM_CARENCIA  # o arranjo promete
+
+    def _falha(*a, **k):
+        raise RuntimeError("banco fora")
+
+    monkeypatch.setattr(db, "get_auth_user", _falha)
+    out = mod.handle_ai_chat_command(user_id, "piggy oi", platform="whatsapp")
+    assert out == acabou + billing_copy.IA_COTA_EM_CARENCIA_SEM_COTA
+
+
+def test_cota_esgotada_cortado_mantem_texto_dos_planos_pagos(user_id, monkeypatch):
+    """POSITIVO: o tier `free` que NÃO é carência (cortado, com o freio do corte
+    puxado para ele alcançar o Piggy) continua ouvindo a copy antiga."""
+    from datetime import datetime, timedelta, timezone
+
+    import db
+    import db_support
+    from core.services import billing_copy
+
+    monkeypatch.setenv("ACCESS_GATE_ENABLED", "0")
+    out_pro = _cota_esgotada(monkeypatch, user_id, "pro")  # monta a conta e estoura a cota
+    assert "renovam no dia 1º" in out_pro
+    db.mark_plan_selected(user_id)
+    with db.get_conn() as conn, conn.cursor() as cur:
+        cur.execute(  # cortado: plano vencido, `canceled`, sem relógio de carência
+            "update auth_accounts set plan_expires_at=%s, past_due_since=null,"
+            "       last_payment_status='canceled' where user_id=%s",
+            (datetime.now(timezone.utc) - timedelta(days=1), user_id),
+        )
+        conn.commit()
+    db_support.invalidate_auth_user_cache(user_id)
+    assert billing_copy.estado_sem_plano_pago(user_id) == "sem_acesso"
+
+    out = mod.handle_ai_chat_command(user_id, "piggy oi", platform="whatsapp")
     assert out == (
         "🐷 Suas mensagens com o Piggy deste mês acabaram!\n"
         "Nos planos pagos a conversa continua: https://pigbankai.com/precos"

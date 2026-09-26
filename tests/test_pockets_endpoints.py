@@ -170,11 +170,12 @@ def test_pocket_meta_endpoint_updates_cdi_percent(user_id):
 
     assert resp.status_code == 200, resp.text
     body = resp.json()
-    assert body["pocket"]["interest_enabled"] is True
+    # Q43: ligar o juro é ignorado; a taxa continua gravada.
+    assert body["pocket"]["interest_enabled"] is False
     assert body["pocket"]["interest_rate"] == 1.15
 
     row = db.list_pockets(user_id, accrue=False)[0]
-    assert row["interest_enabled"] is True
+    assert row["interest_enabled"] is False
     assert Decimal(str(row["interest_rate"])) == Decimal("1.15")
 
 
@@ -194,8 +195,11 @@ def test_pocket_accrues_at_default_100_percent_cdi(user_id):
                 """,
                 (start, start, user_id, pocket["id"]),
             )
+            # Q43: caixinha anterior ao congelamento (marcador NULL, juro ligado)
+            # recebe a acumulação final; a nova nasce congelada.
             cur.execute(
-                "update pockets set last_interest_date=%s where user_id=%s and id=%s",
+                "update pockets set last_interest_date=%s, interest_frozen_at=null, "
+                "interest_enabled=true where user_id=%s and id=%s",
                 (start, user_id, pocket["id"]),
             )
         conn.commit()
@@ -238,8 +242,11 @@ def test_pocket_accrues_using_configured_cdi_percent(user_id):
                 """,
                 (start, start, user_id, pocket["id"]),
             )
+            # Q43: caixinha anterior ao congelamento (marcador NULL, juro ligado)
+            # recebe a acumulação final; a nova nasce congelada.
             cur.execute(
-                "update pockets set last_interest_date=%s where user_id=%s and id=%s",
+                "update pockets set last_interest_date=%s, interest_frozen_at=null, "
+                "interest_enabled=true where user_id=%s and id=%s",
                 (start, user_id, pocket["id"]),
             )
         conn.commit()
