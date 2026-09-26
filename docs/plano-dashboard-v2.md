@@ -89,7 +89,11 @@ calma (Q5).
   `plan_service.py`. Um teste varre as rotas e falha se alguma escapar dessas regras. Toda
   rota tem teste de "B não vê nem mexe no que é de A".
 - **Contrato** (Q22): Pydantic em toda rota → OpenAPI → tipos TypeScript gerados para o v2
-  e o app. **Erro** (Q25): um envelope único com código.
+  e o app. **Erro** (Q25): um envelope único com código,
+  `{"error": {"code": str, "message": str, "details"?: [...]}}` (decisão do dono,
+  2026-09-26). `details` só no 422, com `loc`/`msg`/`type` e nunca o `input`. O 403 do
+  CSRF e o 422 de query venenosa nascem nos middlewares do monólito e saem
+  `{"detail": ...}`; o cliente cai no status quando não houver `error.code`.
 - **Tempo real** (Q19, Q27–Q29): SSE, só servidor → cliente, avisando só *o que* mudou;
   a tela pede o dado de novo. Princípios: o aviso vai só para o dono do dado, só depois de
   gravado, e a tela nunca fica desatualizada em silêncio (reconectar refaz tudo; sessão
@@ -130,7 +134,9 @@ que não se sabe aparece como "sem comparação", "a conferir", "desatualizado" 
 
 - **Busca de dados:** TanStack Query (Q24).
 - **Bundle** commitado em `frontend/` com trava de rebuild no CI (Q7).
-- **Plano real** pelo `/auth/me` (hoje o protótipo lê `?plano=`).
+- **Plano real** pelo `GET /api/v2/me` tipado (decisão do dono, 2026-09-26; hoje o
+  protótipo lê `?plano=`). O `/auth/me` só leva `dashboard_v2_enabled`, para o link do
+  `/app`.
 - **Um PR por tela** (Q8); tela que só consome a API é faixa Leve, com o time na versão
   leve.
 - **Testes** (Q32): pytest com Postgres real para isolamento e contrato; Playwright com
@@ -152,7 +158,7 @@ e esse histórico não se refaz:
 
 | Etapa | O que entra | Faixa |
 |---|---|---|
-| 0 | Esqueleto da `/api/v2` (usuário, erro, contrato, SSE), `/painel` com a chave, plano pelo `/auth/me`, TanStack Query, job da foto diária e histórico da rentabilidade do Open Finance | Completo |
+| 0 | Esqueleto da `/api/v2` (usuário, erro, contrato, SSE), `/painel` com a chave, plano pelo `GET /api/v2/me`, TanStack Query, job da foto diária e histórico da rentabilidade do Open Finance | Completo |
 | 1 | Resumo (perfil no servidor) | API Completo, tela Leve |
 | 2 | Lançamentos: ver tudo; lançar, editar e apagar na carteira (Q36) | idem |
 | 3 | Previsão | idem |
@@ -173,6 +179,8 @@ PR de cada etapa, não soluções prontas. Cada PR confere se ainda valem, decid
 - Tempo real: aviso depois do commit, só para o dono, reconexão (inclusive com a sessão
   vencida), sessão revogada fechando o stream, e o `LISTEN` caindo com mais de um
   processo.
+- O 500 da v2 escapa do app depois da resposta (o starlette re-levanta): decidir o
+  conserto junto com o desenho do stream.
 - Todas as escritas financeiras avisarem, inclusive as do código antigo (a camada `db/`
   como lugar do aviso).
 - Foto diária: leitura consistente, uma por dia, concorrência entre instâncias, "Recomeçar
@@ -218,5 +226,7 @@ PR de cada etapa, não soluções prontas. Cada PR confere se ainda valem, decid
 - [x] Protótipo: perfis do Resumo (#573, #575), faixa do Piggy (#579), navegação com o
   Piggy no meio e Ferramentas (#582), página do chat (#584).
 - [x] Protótipo: blocos que expandem na conversa, com estado por resposta e "Abrir no painel" (PR 3 do chat).
-- [ ] Pré-requisitos: #594 · Q42 · Q43 · Q40 (regra) · Q41
+- [ ] Pré-requisitos: ~~#594~~ ✓ · Q42 (#620, mergeado; conferir o deploy) · Q43 · Q40 (regra) · Q41
+- Etapa 0 em andamento: PR 1 (esqueleto da `/api/v2`: `usuario_atual`, envelope de
+  erro, `GET /api/v2/me`, varredura de rotas).
 - [ ] Etapa 0 · [ ] 1 · [ ] 2 · [ ] 3 · [ ] 4 · [ ] 5 · [ ] 6 · [ ] 7

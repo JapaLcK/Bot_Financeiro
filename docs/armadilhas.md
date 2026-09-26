@@ -357,7 +357,10 @@ fixo de toda mudança de layout.
   para `frontend/routes/` (`static_pages`, `settings`, `pockets`, `cards`,
   `analytics`, `open_finance`, `push`, `agents`, `affiliates`, `shared`), registradas
   por `include_router`. **Rota nova vai para um router de `frontend/routes/`** — não
-  para o monólito. O plano completo está em `docs/refactor_plan.md`. Exceção:
+  para o monólito. Rota da `/api/v2` vai para `api/v2/` (sub-app montado, com envelope
+  de erro próprio): no monólito ela escaparia do envelope e da varredura de
+  `tests/test_api_v2_rotas.py`, que reprova rota sob `/api/v2` fora do mount. O plano
+  completo está em `docs/refactor_plan.md`. Exceção:
   `POST /auth/google/exchange` fica no monólito, ao lado das `/auth/google/*`,
   porque depende de `_entrega_sessao`, `_issue_session_token` e `_concluir_login`,
   que moram lá — importá-los de um router cria import circular.
