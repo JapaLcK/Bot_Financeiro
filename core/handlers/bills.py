@@ -165,7 +165,11 @@ def try_pay_from_text(user_id: int, text: str, forma_pagamento: str | None = Non
 
     declarada = forma_pagamento or fp.detectar(text)
     decisao = fp.decidir(user_id, declarada)
-    if decisao in (fp.PERGUNTA, fp.MISTO):
+    if decisao == fp.MISTO:
+        # Nem paga nem pergunta: a resposta seguinte reescreveria o misto e a
+        # conta inteira sairia de um lado só. Igual ao lançamento misto.
+        return fp.msg_misto()
+    if decisao == fp.PERGUNTA:
         return fp.perguntar_conta(user_id, best, amount)
 
     # Conta de valor variável (água/luz) sem valor informado: guarda qual conta
@@ -326,6 +330,9 @@ def resolve_bill_amount(user_id: int, text: str, pending: dict) -> str | None:
         status, paid = fp.quitar(user_id, int(payload["bill_id"]), amount,
                                  payload.get("forma_pagamento", fp.DESCONHECIDA))
     if status == fp.PERGUNTA:
+        if payload.get("forma_pagamento") == fp.MISTO:
+            # Misto armado sem banco, e o banco conectou antes do valor.
+            return fp.msg_misto()
         # Pendência de antes da Q40, de quem tem banco conectado: pergunta a
         # forma com o valor que acabou de chegar.
         from db.bills import get_bill

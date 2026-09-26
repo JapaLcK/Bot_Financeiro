@@ -58,6 +58,12 @@ _EXPRESSAO_DINHEIRO_RE = re.compile(
 # da forma da que não fala é o parser que já errou três vezes.
 NEGACAO_RE = re.compile(r"\b(nao|nem|nunca|sem)\b")
 _CANCELA = {"cancelar", "cancela", "nao"}
+# O que pode cercar o marcador numa RESPOSTA ("foi no pix", "paguei no pix
+# mesmo", "cartão de crédito", "app do banco" — a pergunta da conta cita o app).
+# Lista fechada: qualquer outra palavra faz a frase ser assunto novo.
+_LIGACAO = frozenset(
+    "foi no na em pelo pela de do da com o a mesmo via sim e eu tudo app "
+    "paguei pagou pago recebi recebeu caiu".split())
 logger = logging.getLogger(__name__)
 
 
@@ -102,10 +108,14 @@ def limpar(texto: str) -> str:
 
 
 def e_resposta(texto: str) -> str | None:
-    """A forma, se `texto` é uma RESPOSTA à pergunta; senão None. Texto com
-    dígito nunca é resposta: "gastei 30 no uber no pix" é gasto novo."""
+    """A forma, se `texto` é uma RESPOSTA à pergunta; senão None. Resposta é
+    frase que, sem os marcadores de forma, só tem palavra de `_LIGACAO`: "me
+    fala meu saldo em dinheiro" e "gastei 30 no uber no pix" são assunto novo."""
     norm = normalize_text(texto or "")
-    if not norm or re.search(r"\d", norm) or len(norm.split()) > 6:
+    resto = norm
+    for rx in (_BANCO_RE, _BANCO_RESPOSTA_RE, _DINHEIRO_RESPOSTA_RE):
+        resto = rx.sub(" ", resto)
+    if not norm or not set(resto.split()) <= _LIGACAO:
         return None
     banco, dinheiro = _formas(norm, resposta=True)
     if banco == dinheiro:
