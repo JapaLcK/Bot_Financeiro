@@ -19,6 +19,7 @@ from .cards import (
 )
 from .connection import TIPO_CANON_SQL, get_conn
 from .of_snapshots import grava_fotos_posicoes
+from .open_finance_cash import RESERVADO_SQL
 from .users import ensure_user, ensure_user_tx
 
 # `logging` da stdlib, mesmo padrão (e mesmo motivo) de `db/open_finance_state.py`:
@@ -2042,6 +2043,12 @@ def pick_reconciliation_match(valor, tx_date, description, candidates) -> dict:
     return {"launch_id": best["id"], "verdict": "ask"}
 
 
+# Débito recorrente em conta: o lançamento É o débito do banco, não dinheiro em
+# espécie. Fonte única de quem o reconhece (importador, ordem inversa e o saque
+# em espécie, db/open_finance_cash*.py). Sem alias: a coluna é de `launches`.
+OF_RECURRING_SQL = "coalesce(efeitos ? 'of_recurring', false)"
+
+
 def _find_manual_candidates(cur, user_id: int, tipo: str, valor, tx_date) -> list[dict]:
     """Lançamentos não-OF elegíveis a casar com uma tx OF, ainda não vinculados.
 
@@ -2066,7 +2073,7 @@ def _find_manual_candidates(cur, user_id: int, tipo: str, valor, tx_date) -> lis
         f"""
         select id, valor, coalesce(posted_at, criado_em::date) as ref_date, alvo, nota,
                coalesce(source, 'manual') as source,
-               (efeitos ? 'of_recurring') as of_recurring,
+               {OF_RECURRING_SQL} as of_recurring,
                case when jsonb_typeof(efeitos -> 'delta_conta') = 'number'
                     then (efeitos ->> 'delta_conta')::numeric end as delta_conta
         from launches
@@ -2079,6 +2086,7 @@ def _find_manual_candidates(cur, user_id: int, tipo: str, valor, tx_date) -> lis
           and not exists (
               select 1 from open_finance_transactions o where o.imported_launch_id = launches.id
           )
+          and not {RESERVADO_SQL.format(t="launches")}
         """,
         (user_id, tipo, Decimal(str(valor)), RECON_AMOUNT_TOL,
          tx_date - timedelta(days=RECON_DATE_WINDOW), tx_date + timedelta(days=RECON_DATE_WINDOW)),
@@ -2294,7 +2302,7 @@ def _propose_manual_reconciliation(user_id: int, launch_id: int) -> dict:
                  where id=%s and user_id=%s
                    and coalesce(source, 'manual') = 'manual'
                    and is_internal_movement = false
-                   and not (coalesce(efeitos, '{{}}'::jsonb) ? 'of_recurring')
+                   and not {OF_RECURRING_SQL}
                    and not exists (
                        -- Só as transações do PRÓPRIO usuário (§0 e custo):
                        -- `match_launch_id` não tem índice, e sem o join isto
@@ -2304,6 +2312,7 @@ def _propose_manual_reconciliation(user_id: int, launch_id: int) -> dict:
                          join open_finance_connections c on c.id = a.connection_id
                         where c.user_id = %s
                           and (o.imported_launch_id = m.id or o.match_launch_id = m.id))
+                   and not {RESERVADO_SQL.format(t="m")}
                 """,
                 (launch_id, user_id, user_id),
             )
@@ -2841,11 +2850,13 @@ MERGED_WALLET_DELTA_SQL = f"""
 
 # Pendência ACIONÁVEL (`pending`: imported = sombra, match = X), uma linha por
 # transação: conta no recorte, X existente e X não ocupado por outra transação
+# nem pelo saque em espécie (`RESERVADO_SQL`)
 # (confirmar daria ALREADY_LINKED). Regra única da lista e do resumo (§0.7).
 ACTIONABLE_PENDING_SQL = _fused_join_sql("match_launch_id", """
          and t.reconciliation_status = 'pending'
          and not exists (select 1 from open_finance_transactions o
-                          where o.imported_launch_id = l.id)""",
+                          where o.imported_launch_id = l.id)
+         and not """ + RESERVADO_SQL.format(t="l"),
                                          cols="t.id as of_tx_id, l.id, (l.efeitos ->> 'delta_conta')::numeric as d")
 
 # O que mudaria na Carteira exibida se o usuário confirmasse: mesmo sinal da

@@ -23,6 +23,7 @@ from utils_date import today_tz
 
 from .bank_movements import _lock_user, delete_if_shadow
 from .connection import TIPO_CANON_SQL, get_conn
+from .open_finance_cash import RESERVADO_SQL
 from .open_finance import (
     ACTIONABLE_PENDING_SQL, MERGED_WALLET_DELTA_SQL, PENDING_RECONCILIATION_SQL, _insert_of_shadow,
     classify_open_finance_launch, merged_wallet_delta_params,
@@ -80,7 +81,10 @@ def confirm_reconciliation(user_id: int, of_tx_id: int) -> dict:
             raise ValueError("MATCH_NOT_FOUND")
         cur.execute("select 1 from open_finance_transactions where imported_launch_id=%s and id<>%s",
                     (x, o["id"]))
-        if cur.fetchone():
+        taken = cur.fetchone()
+        cur.execute(f"select 1 from launches where id=%s and user_id=%s and {RESERVADO_SQL.format(t='launches')}",
+                    (x, user_id))
+        if taken or cur.fetchone():  # ou é do saque em espécie (db/open_finance_cash.py)
             raise ValueError("ALREADY_LINKED")
         cur.execute(
             """update open_finance_transactions

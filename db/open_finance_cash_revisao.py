@@ -35,10 +35,13 @@ def _corrige(cur, user_id, link, t) -> int:
 
 def casa_manual(cur, user_id, manual_id, valor, dia) -> bool:
     """O manual ainda casa com o banco? Mesma tolerância do casamento
-    (`pick_reconciliation_match`: valor e ±dias). Manual apagado não casa."""
-    from .open_finance import pick_reconciliation_match
+    (`pick_reconciliation_match`: valor e ±dias). Manual apagado, já fundido
+    numa transação pelo conciliador comum, ou débito recorrente em conta, não casa."""
+    from .open_finance import OF_RECURRING_SQL, pick_reconciliation_match
     cur.execute("select id, valor, coalesce(posted_at, criado_em::date) as ref_date from launches "
-                "where id=%s and user_id=%s", (manual_id, user_id))
+                f"where id=%s and user_id=%s and not {OF_RECURRING_SQL} and not exists (select 1 "
+                "from open_finance_transactions o where o.imported_launch_id = launches.id)",
+                (manual_id, user_id))
     row = cur.fetchone()
     return bool(row) and pick_reconciliation_match(valor, dia, "", [dict(row)])["launch_id"] is not None
 

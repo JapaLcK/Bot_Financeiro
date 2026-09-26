@@ -31,6 +31,12 @@ PAR_ATIVO_SQL = ("exists (select 1 from of_cash_links k where k.launch_id = laun
                  "and k.user_id = launches.user_id and k.status = 'ativo')")
 VINCULADO_SQL = ("exists (select 1 from of_cash_links k where k.user_id = launches.user_id "
                  "and launches.id in (k.launch_id, k.manual_launch_id))")
+# Fonte única do manual que o dinheiro segura (o casado e a pergunta aberta): o
+# conciliador comum não o oferece, não o lista nem o confirma (db/open_finance.py,
+# db/reconciliation.py). `{t}` = o nome/alias de `launches` na query de quem usa.
+RESERVADO_SQL = ("exists (select 1 from of_cash_links k where k.user_id = {t}.user_id and "
+                 "(k.status = 'ativo' and k.launch_id = {t}.id "
+                 "or k.status = 'perguntar_manual' and k.manual_launch_id = {t}.id))")
 
 
 def enabled() -> bool:
@@ -99,11 +105,18 @@ def _quando(tx_date, transacted_at=None):
             else (datetime.combine(tx_date, time(12, 0), tzinfo=_tz()), False))
 
 
-def _credita(cur, user_id, link, transacted_at=None) -> int:
+def _credita(cur, user_id, link) -> int:
+    """A hora vem da transação, aqui e não de quem chama: o sync e a resposta a
+    uma pergunta gravam o mesmo instante (sem transação, meio-dia do tx_date)."""
     v = Decimal(str(link["amount"]))
     deposito = link["kind"] == "deposito"
     delta = -v if deposito else v
-    criado_em, known = _quando(link["tx_date"], transacted_at)
+    cur.execute("""select t.transacted_at from open_finance_transactions t
+                     join open_finance_accounts a on a.id = t.account_id
+                     join open_finance_connections c on c.id = a.connection_id
+                    where t.id = %s and c.user_id = %s""", (link["of_transaction_id"], user_id))
+    row = cur.fetchone()
+    criado_em, known = _quando(link["tx_date"], row and row["transacted_at"])
     cur.execute("update accounts set balance = balance + %s where user_id=%s", (delta, user_id))
     cur.execute("""insert into launches(user_id, tipo, valor, alvo, categoria, criado_em, efeitos,
                    is_internal_movement) values (%s,%s,%s,%s,'transferencia_interna',%s,%s,true)
@@ -154,17 +167,21 @@ def _do_usuario(link) -> bool:
     return link["status"] in ("desfeito", "nao_dinheiro") or (link["status"] == "ativo" and not link["launch_id"])
 
 
-def _candidato_manual(cur, user_id, links, kind, t) -> int | None:
+def _candidato_manual(cur, user_id, kind, t) -> int | None:
     """Receita (saque) / despesa (depósito) manual da Carteira, mesmo valor, ±3 dias."""
     from .open_finance import _find_manual_candidates, pick_reconciliation_match
     tipo = "despesa" if kind == "deposito" else "receita"
     valor = abs(Decimal(str(t["amount"])))
-    # Reserva o manual só quem o representa: o casado ("é o mesmo" → launch_id) e
-    # a pergunta aberta. Recusado, descasado ou estornado, ele volta a ser candidato.
-    usados = {k["launch_id"] if k["status"] != "perguntar_manual" else k["manual_launch_id"]
-              for k in links.values()}
+    # O que o próprio dinheiro reserva sai em `_find_manual_candidates` (RESERVADO_SQL);
+    # aqui sai o que está pendente no conciliador comum (fundido já saiu lá).
+    cur.execute("""select o.match_launch_id from open_finance_transactions o
+                     join open_finance_accounts a on a.id = o.account_id
+                     join open_finance_connections c on c.id = a.connection_id
+                    where c.user_id = %s and o.reconciliation_status = 'pending'""", (user_id,))
+    usados = {r["match_launch_id"] for r in cur.fetchall()}
     cands = [c for c in _find_manual_candidates(cur, user_id, tipo, valor, t["transaction_date"])
-             if c["source"] == "manual" and c["id"] not in usados and c["delta_conta"] is not None
+             if c["source"] == "manual" and not c["of_recurring"] and c["id"] not in usados
+             and c["delta_conta"] is not None
              and (c["delta_conta"] < 0 if tipo == "despesa" else c["delta_conta"] > 0)]
     return pick_reconciliation_match(valor, t["transaction_date"], t["description"], cands)["launch_id"]
 
@@ -228,7 +245,7 @@ def reconcile_cash_transfers(cur, user_id) -> int:
         banco = max(ativacao, primeira[t["inst"]]).astimezone(_tz()).date() if t["anon"] else corte
         if dia < banco:
             status = "historico"
-        elif (manual := _candidato_manual(cur, user_id, links, kind, t)) is not None:
+        elif (manual := _candidato_manual(cur, user_id, kind, t)) is not None:
             status = "perguntar_manual"
         elif not duravel or dia < corte or outra_viu(t, dia):
             status = "perguntar_novo"
@@ -261,7 +278,7 @@ def reconcile_cash_transfers(cur, user_id) -> int:
                             "amount=%s, tx_date=%s, updated_at=now() where id=%s and user_id=%s",
                             (status, manual, kind, link["amount"], link["tx_date"], link["id"], user_id))
                 if status == "ativo":
-                    link["launch_id"] = _credita(cur, user_id, link, t["transacted_at"])
+                    link["launch_id"] = _credita(cur, user_id, link)
                 mudou += 1
             continue
         if kind is None or not ligado:
@@ -278,7 +295,7 @@ def reconcile_cash_transfers(cur, user_id) -> int:
             continue
         links[chave] = dict(novo)
         if status == "ativo":  # só quem inseriu credita
-            links[chave]["launch_id"] = _credita(cur, user_id, novo, t["transacted_at"])
+            links[chave]["launch_id"] = _credita(cur, user_id, novo)
         mudou += 1
     return mudou
 

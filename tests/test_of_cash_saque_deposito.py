@@ -1,10 +1,14 @@
 """Q41 grupo 1: saque do banco move a Carteira; depósito pergunta; o par fica
 fora de gasto/receita e o consolidado não muda. Sinais falsos seguem gasto."""
+from datetime import datetime, timezone
 from decimal import Decimal
+
+import pytest
 
 import db
 from conftest import usuario_pagante
 from db.open_finance_cash_answers import answer_link, cash_transfer_summary
+from utils_date import _tz
 from tests._of_cash_helpers import (  # noqa: F401  (fixture)
     caixa, carteira, conecta, dia, launches_visiveis, links, q, sync, tx,
 )
@@ -137,3 +141,36 @@ def test_editar_categoria_do_par_nao_vira_receita(caixa):
         "select id, is_internal_movement as i from launches where id = any(%s)", ([lid, outro],), True)}
     assert interno[lid] is True, "recategorizar o saque o transformou em receita"
     assert interno[outro] is False, "positivo: lançamento comum segue a categoria"
+
+
+_HORA = datetime(2026, 3, 10, 18, 42, tzinfo=timezone.utc)
+
+
+@pytest.mark.parametrize("resposta", ["auto", "cash", "credit", "different"])
+def test_responder_grava_a_hora_do_banco_como_o_automatico(caixa, resposta):
+    """Responder a pergunta cria o lançamento no instante que o banco mandou,
+    igual ao caminho automático — não ao meio-dia com hora "desconhecida"."""
+    uid = usuario_pagante()
+    c = conecta(uid, f"item-{uid}")
+    t = {"cash": tx("d1", 300, dia(10), op="DEPOSITO", desc="Transfers"),
+         "credit": tx("t1", -200, dia(10), pid=False)}.get(resposta, tx("t1", -200, dia(10)))
+    if resposta == "different":
+        db.add_launch_and_update_balance(uid, "receita", 200, "meu pai", None, criado_em=_HORA)
+    sync(c, uid, [{**t, "transacted_at": _HORA}])
+    (link,) = links(uid)
+    if resposta != "auto":
+        assert link["status"] != "ativo"
+        assert answer_link(uid, link["id"], resposta)["changed"]
+        (link,) = links(uid)
+    r = q("select criado_em, efeitos->>'time_known' as k from launches where id=%s", (link["launch_id"],), True)[0]
+    assert (r["criado_em"], r["k"]) == (_HORA, "true")
+
+
+def test_sem_hora_do_banco_fica_meio_dia(caixa):
+    """Positivo: sem `transacted_at`, meio-dia local e hora desconhecida."""
+    uid = usuario_pagante()
+    c = conecta(uid, f"item-{uid}")
+    sync(c, uid, [tx("d1", 300, dia(10), op="DEPOSITO", desc="Transfers")])
+    assert answer_link(uid, links(uid)[0]["id"], "cash")["changed"]
+    r = q("select criado_em, efeitos->>'time_known' as k from launches where id=%s", (links(uid)[0]["launch_id"],), True)[0]
+    assert (r["criado_em"].astimezone(_tz()).hour, r["k"]) == (12, "false")
