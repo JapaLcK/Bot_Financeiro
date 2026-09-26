@@ -162,7 +162,7 @@ def _pay_bill_execute(user_id: int, args: dict[str, Any]) -> str:
     decisao = fp.decidir(user_id, forma)
     if decisao not in (fp.CARTEIRA, fp.BANCO):
         return ("🐷 Nada foi pago. Pergunte ao usuário se pagou pelo banco (Pix, "
-                "boleto, débito) ou em dinheiro vivo e chame de novo com `forma_pagamento`.")
+                "débito, app do banco) ou em dinheiro vivo e chame de novo com `forma_pagamento`.")
 
     if decisao == fp.CARTEIRA and bill.get("variable_amount") and amount is None:
         # Mesma pendência do handler determinístico (core/handlers/bills.py):
@@ -383,9 +383,9 @@ TOOLS: list[Tool] = [
                             "type": "string",
                             "enum": ["dinheiro", "banco"],
                             "description": (
-                                "Como pagou, SÓ se o usuário disse: 'banco' (Pix, boleto, "
-                                "débito) ou 'dinheiro' (dinheiro vivo). Nunca invente: omita "
-                                "se ele não disse."
+                                "Como pagou, SÓ se o usuário disse: 'banco' (Pix, débito, "
+                                "app do banco) ou 'dinheiro' (dinheiro vivo). 'Boleto' diz o "
+                                "que foi pago, não como. Nunca invente: omita se ele não disse."
                             ),
                         },
                     },

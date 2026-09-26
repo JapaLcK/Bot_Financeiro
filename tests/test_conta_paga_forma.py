@@ -162,6 +162,41 @@ def test_texto_paguei_a_luz_no_pix_paga_direto(com_of, ia_fora):
     assert manuais(com_of) == 0 and pendencia(com_of) is None
 
 
+# "boleto" diz O QUE foi pago, não COMO: paga-se boleto em dinheiro na
+# lotérica (review Codex P1 no #633).
+
+def test_boleto_sem_forma_pergunta_como_pagou(com_of, ia_fora):
+    conta = conta_fixa(com_of, "Internet", 100.0)
+    r = manda(com_of, "paguei o boleto da internet")
+    assert "dinheiro vivo" in r and "boleto" not in r, r
+    assert B.get_bill(com_of, conta["id"])["status"] == "pending"
+    assert pendencia(com_of) == "payment_method_choice"
+
+
+def test_boleto_em_dinheiro_paga_na_carteira(com_of, ia_fora):
+    conta = conta_fixa(com_of, "Internet", 100.0)
+    antes = carteira(com_of)
+    r = manda(com_of, "paguei o boleto da internet em dinheiro")
+    assert B.get_bill(com_of, conta["id"])["status"] == "paid", r
+    assert manuais(com_of) == 1 and carteira(com_of) == pytest.approx(antes - 100)
+
+
+def test_boleto_no_pix_continua_pelo_banco(com_of, ia_fora):
+    conta = conta_fixa(com_of, "Internet", 100.0)
+    manda(com_of, "paguei o boleto da internet no pix")
+    assert B.get_bill(com_of, conta["id"])["status"] == "paid"
+    assert manuais(com_of) == 0 and pendencia(com_of) is None
+
+
+def test_resposta_boleto_nao_decide_e_repete_a_pergunta(com_of, ia_fora):
+    conta = conta_fixa(com_of, "Internet", 100.0)
+    manda(com_of, "paguei a internet")
+    r = manda(com_of, "boleto")
+    assert "dinheiro vivo" in r, r
+    assert B.get_bill(com_of, conta["id"])["status"] == "pending"
+    assert pendencia(com_of) == "payment_method_choice" and not ia_fora
+
+
 def test_botao_ja_paguei_pergunta_a_forma(monkeypatch, com_of, ia_fora):
     conta = conta_fixa(com_of)
     r = _toca_ja_paguei(monkeypatch, com_of, conta["id"])

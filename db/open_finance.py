@@ -392,22 +392,36 @@ def buscar_no_extrato(user_id: int, tipo: str, valor, dias: int = 7,
     """Transações do Open Finance deste usuário com o mesmo tipo e valor
     (tolerância de `RECON_AMOUNT_TOL`) nos últimos `dias`. É o "já está no
     extrato" da resposta a um lançamento que passou pelo banco (Q40,
-    `core/handlers/forma_pagamento.py`). Só leitura."""
+    `core/handlers/forma_pagamento.py`). A compra de cartão importada mora em
+    `credit_transactions`; só entra a ligada a uma transação OF. Só leitura."""
+    valor = Decimal(str(valor))
     with get_conn() as conn:
         with conn.cursor() as cur:
             cur.execute(
                 f"""
-                select coalesce(posted_at, criado_em::date) as dia,
-                       coalesce(alvo, nota) as alvo, valor
-                  from launches
-                 where user_id = %s and source = 'open_finance'
-                   and {TIPO_CANON_SQL} = %s
-                   and abs(valor - %s) <= %s
-                   and coalesce(posted_at, criado_em::date) >= current_date - %s::int
-                 order by criado_em desc
+                select dia, alvo, valor from (
+                  select coalesce(posted_at, criado_em::date) as dia,
+                         coalesce(alvo, nota) as alvo, valor, criado_em as ordem
+                    from launches
+                   where user_id = %s and source = 'open_finance'
+                     and {TIPO_CANON_SQL} = %s
+                     and abs(valor - %s) <= %s
+                     and coalesce(posted_at, criado_em::date) >= current_date - %s::int
+                  union all
+                  select ct.purchased_at, o.description, ct.valor, ct.created_at
+                    from credit_transactions ct
+                    join open_finance_transactions o on o.imported_credit_tx_id = ct.id
+                    join open_finance_accounts a on a.id = o.account_id
+                    join open_finance_connections c on c.id = a.connection_id
+                   where ct.user_id = %s and c.user_id = %s and %s = 'despesa'
+                     and abs(ct.valor - %s) <= %s
+                     and ct.purchased_at >= current_date - %s::int
+                ) x
+                 order by ordem desc
                  limit %s
                 """,
-                (user_id, tipo, Decimal(str(valor)), RECON_AMOUNT_TOL, int(dias), int(limite)),
+                (user_id, tipo, valor, RECON_AMOUNT_TOL, int(dias),
+                 user_id, user_id, tipo, valor, RECON_AMOUNT_TOL, int(dias), int(limite)),
             )
             return cur.fetchall()
 

@@ -353,6 +353,81 @@ def test_extrato_de_outro_usuario_nao_aparece(com_of, uid_pro, ia_fora, sem_of):
     assert len(buscar_no_extrato(outro, "despesa", 500)) == 1
 
 
+# ── marcador que diz O QUE, não COMO (review Codex P1 no #633) ──────────────
+# "o dinheiro do freela" é a coisa recebida, não a forma; "doc do carro" é o
+# documento (o DOC bancário acabou em 2024); "uma espécie de" é "um tipo de".
+
+@pytest.mark.parametrize("frase", [
+    "recebi o dinheiro do freela 500", "paguei 80 no doc do carro"])
+def test_marcador_que_e_objeto_pergunta_a_forma(com_of, ia_fora, frase):
+    r = manda(com_of, frase)
+    assert "dinheiro vivo" in r and "Não registrei" not in r, r
+    assert manuais(com_of) == 0 and pendencia(com_of) == "payment_method_choice"
+
+
+@pytest.mark.parametrize("frase", [
+    "recebi 500 no pix, o dinheiro do freela", "gastei 20 numa espécie de taxa no pix"])
+def test_objeto_com_pix_e_banco_nao_misto(com_of, ia_fora, frase):
+    r = manda(com_of, frase)
+    assert "Não registrei" in r and "separado" not in r, r
+    assert manuais(com_of) == 0
+
+
+@pytest.mark.parametrize("frase", [
+    "gastei 50 no mercado com dinheiro", "gastei 50 no mercado no dinheiro",
+    "gastei 50 de dinheiro no mercado", "gastei 50 no mercado, dinheiro vivo",
+    "gastei 50 no mercado em espécie", "gastei 50 no mercado em cash"])
+def test_forma_dinheiro_declarada_continua_gravando(com_of, ia_fora, frase):
+    manda(com_of, frase)
+    assert manuais(com_of) == 1
+
+
+@pytest.mark.parametrize("frase", [
+    "gastei 50 dinheiro no mercado", "gastei 50 reais dinheiro no mercado"])
+def test_dinheiro_colado_no_valor_grava_com_o_mesmo_alvo(com_of, ia_fora, sem_of, frase):
+    manda(com_of, frase)
+    manda(sem_of, "gastei 50 no mercado")
+    com = _q("select alvo, categoria from launches where user_id=%s", (com_of,))
+    ref = _q("select alvo, categoria from launches where user_id=%s", (sem_of,))
+    assert manuais(com_of) == 1 and pendencia(com_of) != "payment_method_choice"
+    assert com["alvo"] == "mercado" and com["categoria"] == ref["categoria"], (com, ref)
+
+
+# ── compra de cartão já importada pelo OF (review Codex P2 no #633) ─────────
+
+def _importa_compra_cartao(uid, valor: str, descricao: str, tx_id: str) -> None:
+    """Uma compra no crédito pelo caminho de produção (espelho Pluggy → importador)."""
+    from decimal import Decimal
+    conexao = db.save_pluggy_open_finance_item(uid, {
+        "id": f"item-{tx_id}", "connector": {"id": 612, "name": "Nubank"}, "status": "UPDATED"})
+    db.save_open_finance_sync(conexao["id"], [{
+        "provider_account_id": f"acc-{tx_id}", "name": "Nubank", "type": "CREDIT",
+        "currency": "BRL", "balance": Decimal("-" + valor), "raw": {},
+        "transactions": [{"provider_transaction_id": tx_id, "description": descricao,
+                          "amount": Decimal("-" + valor), "transaction_date": today_tz(),
+                          "transacted_at": None, "category": "Shopping", "raw": {}}]}])
+    db.import_open_finance_credit(uid, conexao["id"])
+
+
+def test_cartao_sincronizado_lista_a_compra_ja_importada(com_of, ia_fora):
+    _importa_compra_cartao(com_of, "50.00", "MERCADO LIVRE", f"cc-q40-{com_of}")
+    antes = compras_credito(com_of)
+    r = manda(com_of, "gastei 50 no cartão Nubank")
+    assert "Não registrei" in r and "Ainda não apareceu" not in r, r
+    assert f"{today_tz():%d/%m} · MERCADO LIVRE · R$ 50,00" in r, r
+    assert compras_credito(com_of) == antes and manuais(com_of) == 0
+
+
+def test_extrato_de_cartao_so_importada_so_despesa_so_do_usuario(com_of, ia_fora, sem_of):
+    from db.open_finance import buscar_no_extrato
+    manual = db.create_card(com_of, "Inter", closing_day=10, due_day=17)
+    db.add_credit_purchase(com_of, manual, 50.0, "mercado", "mercado", today_tz())
+    _importa_compra_cartao(sem_of, "50.00", "COMPRA DO OUTRO", f"cc-q40-b-{sem_of}")
+    assert buscar_no_extrato(com_of, "despesa", 50) == []
+    assert [r["alvo"] for r in buscar_no_extrato(sem_of, "despesa", 50)] == ["COMPRA DO OUTRO"]
+    assert buscar_no_extrato(sem_of, "receita", 50) == []
+
+
 # ── outros caminhos que gravam: foto de recibo, fila de valores, Discord ─────
 
 def _recibo(uid):

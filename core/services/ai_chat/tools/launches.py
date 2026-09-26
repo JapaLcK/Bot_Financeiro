@@ -937,8 +937,8 @@ TOOLS: list[Tool] = [
                             "description": (
                                 "Como o dinheiro saiu/entrou, SÓ se o usuário disse: "
                                 "'dinheiro' (dinheiro vivo, espécie) ou 'banco' (Pix, "
-                                "cartão, débito, transferência, boleto). Nunca invente: "
-                                "omita se ele não disse."
+                                "cartão, débito, transferência). 'Boleto' diz o que foi "
+                                "pago, não como. Nunca invente: omita se ele não disse."
                             ),
                         },
                     },

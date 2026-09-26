@@ -31,19 +31,24 @@ FORMAS = frozenset({DINHEIRO, BANCO, MISTO, DESCONHECIDA})
 # DECISÃO (o que o sistema faz). BANCO e MISTO também são decisões.
 CARTEIRA, PERGUNTA = "carteira", "pergunta"
 
-# Sobre o texto NORMALIZADO (minúsculo, sem acento, sem pontuação).
+# Sobre o texto NORMALIZADO (minúsculo, sem acento, sem pontuação). Só marcador
+# de COMO pagou: "boleto" e "doc" dizem O QUE foi pago (boleto se paga em
+# dinheiro na lotérica; "doc do carro"; o DOC bancário acabou em 2024).
 _BANCO_RE = re.compile(
-    r"\b(pix|pixei|cartao|credito|debito|debitei|transferencias?|transferi|ted|doc"
-    r"|boleto|no banco|pelo banco)\b")
-_DINHEIRO_RE = re.compile(r"\b(dinheiro|especie|cash)\b")
-# "banco" e "vivo" sozinhos só valem como RESPOSTA à pergunta: numa frase de
-# gasto eles são ambíguos ("banco da praça", "show ao vivo").
+    r"\b(pix|pixei|cartao|credito|debito|debitei|transferencias?|transferi|ted"
+    r"|no banco|pelo banco)\b")
+# Sozinhos, "banco", "dinheiro", "espécie" e "vivo" só valem como RESPOSTA à
+# pergunta: numa frase eles são ambíguos ("banco da praça", "o dinheiro do
+# freela", "uma espécie de taxa", "show ao vivo"). Na frase, o dinheiro é a
+# expressão abaixo.
 _BANCO_RESPOSTA_RE = re.compile(r"\bbanco\b")
-_DINHEIRO_RESPOSTA_RE = re.compile(r"\bvivo\b")
-# Sobre o texto ORIGINAL: a expressão de dinheiro sai antes do parse, senão o
-# alvo vira "mercado em dinheiro" e a categoria muda.
+_DINHEIRO_RESPOSTA_RE = re.compile(r"\b(dinheiro|especie|cash|vivo)\b")
+# A expressão de dinheiro: o que a frase declara e o que sai antes do parse,
+# senão o alvo vira "mercado em dinheiro" e a categoria muda. "dinheiro" colado
+# no valor ("50 dinheiro", "50 reais dinheiro") também é forma.
 _EXPRESSAO_DINHEIRO_RE = re.compile(
-    r"\s*\b(?:(?:em|no|de|com)\s+(?:dinheiro(?:\s+vivo)?|esp[eé]cie|cash)|dinheiro\s+vivo)\b",
+    r"\s*\b(?:(?:em|no|de|com)\s+(?:dinheiro(?:\s+vivo)?|esp[eé]cie|cash)|dinheiro\s+vivo)\b"
+    r"|(?:(?<=\d)|(?<=\breal)|(?<=\breais))\s+dinheiro\b",
     re.IGNORECASE)
 _CANCELA = {"cancelar", "cancela", "nao"}
 logger = logging.getLogger(__name__)
@@ -72,8 +77,7 @@ def decidir(user_id: int, declarada: str) -> str:
 
 def _formas(norm: str, resposta: bool) -> tuple[bool, bool]:
     banco = bool(_BANCO_RE.search(norm) or (resposta and _BANCO_RESPOSTA_RE.search(norm)))
-    dinheiro = bool(_DINHEIRO_RE.search(norm)
-                    or (resposta and _DINHEIRO_RESPOSTA_RE.search(norm)))
+    dinheiro = bool((_DINHEIRO_RESPOSTA_RE if resposta else _EXPRESSAO_DINHEIRO_RE).search(norm))
     return banco, dinheiro
 
 
@@ -111,7 +115,7 @@ def pergunta_lancamento(tipo: str | None, valor: float | None) -> str:
 
 
 def pergunta_conta(nome: str) -> str:
-    return f"🐷 Pagou a {wrap_wa_markup(nome)} pelo banco (Pix, boleto, débito) ou em dinheiro vivo?"
+    return f"🐷 Pagou a {wrap_wa_markup(nome)} pelo banco (Pix, débito, app do banco) ou em dinheiro vivo?"
 
 
 def msg_banco(user_id: int, tipo: str | None, valor: float | None) -> str:
