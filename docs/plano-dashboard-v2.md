@@ -137,8 +137,9 @@ Decidido pelo dono na mesma data (Q37–Q41):
     carteira só receber dinheiro vivo, e isso se garante pela classe, não por lista de
     rotas: **toda escrita no saldo da carteira (`accounts.balance`) que não venha de uma
     escrita de dinheiro vivo confiável derruba a confirmação**. Confiáveis são só duas: o
-    lançamento em dinheiro do v2 e a transferência automática entre banco e carteira da
-    Q41 (com as correções que o banco fizer nela), que é dinheiro vivo por definição. As
+    lançamento em dinheiro do v2, a transferência automática entre banco e carteira da
+    Q41 (com as correções que o banco fizer nela) e o depositar e retirar entre carteira e
+    caixinha manual do v2 (Q38) — todas dinheiro vivo mudando de lugar ou entrando. As
     outras derrubam: lançar ou apagar no painel antigo,
     ajuste de saldo, importar extrato OFX (`import_ofx_launches_bulk`), desfazer
     (`delete_launch_and_rollback`) e qualquer caminho futuro. A regra mora na camada `db/`,
@@ -161,10 +162,32 @@ Decidido pelo dono na mesma data (Q37–Q41):
   pergunta reabre); posição casada que o banco liquida com a conexão ativa (o manual segue
   fora da soma, "a conferir"); recorrente antiga casada, banco desconectado e depois
   reconectado (o fato aparece uma vez em cada momento, nunca zero nem duas); carteira
-  confirmada seguida de um saque sincronizado (a confirmação continua).
+  confirmada seguida de um saque sincronizado e de depositar e retirar numa caixinha manual
+  (a confirmação continua); caixinha manual e a mesma caixinha vinda do banco (incerta até
+  responder, depois uma vez só); caixinha manual com rendimento simulado (a foto conta só o
+  principal).
 - **Q38 — a caixinha manual continua**, como exceção à Q36: ela é dinheiro separado pelo
   próprio usuário, e depositar e retirar nela segue existindo no v2. A caixinha espelhada
-  do banco continua vindo do Open Finance.
+  do banco continua vindo do Open Finance. Consequências:
+  - **caixinha manual que o banco também traz:** a sincronização
+    (`sync_open_finance_caixinhas`) não adota a manual sozinha — cria outra espelhada ou
+    deixa a posição do banco sem ligação quando o nome colide —, então a mesma caixinha
+    contaria duas vezes. Ela entra no mesmo fluxo de reconciliação do investimento manual
+    (Q37, abaixo): a pergunta "é esta do banco?", a resposta ligada à posição, e a foto
+    incerta enquanto houver pergunta aberta;
+  - **mover entre carteira e caixinha manual é escrita confiável:** depositar e retirar
+    (`pocket_deposit_from_account`, `pocket_withdraw_to_account`) mexem no saldo da
+    carteira, mas é dinheiro vivo mudando de lugar, então entram na lista das escritas que
+    não derrubam a confirmação da carteira;
+  - **rendimento simulado:** a caixinha manual hoje rende CDI simulado (`interest_enabled`
+    ligado por padrão, `accrue_all_pockets`), e esse ganho vai para a carteira no resgate.
+    Com a Q36 (rendimento só do Open Finance), isso é a **Q43**, abaixo. Até ela ser
+    decidida, a foto conta a caixinha manual **pelo principal**, e o rendimento simulado
+    aparece à parte, como estimativa, fora do patrimônio.
+- **Q43 — a decidir: a caixinha manual continua rendendo?** Sugestão: não — ela vira só
+  dinheiro separado, sem rendimento simulado, e o ganho já acumulado vira parte do saldo
+  dela uma última vez, com aviso. A alternativa é manter o rendimento como estimativa
+  visível, mas nunca somado ao patrimônio.
 - **Q39 — os defeitos de dinheiro do código atual são consertados**, não congelados, num PR
   próprio (faixa Completo, com o time): o resgate que pula juro de índice atrasado, o
   desfazer que não devolve o cursor, o desfazer de resgate anterior que cria dinheiro, e o
@@ -205,14 +228,17 @@ Decidido pelo dono na mesma data (Q37–Q41):
     inédito vai para **confirmação** do usuário em vez de lançar sozinho — nunca é
     descartado pela data, que apagaria um saque real feito no intervalo;
   - **o banco corrige, a carteira acompanha:** valor ou data corrigidos numa sincronização
-    (`save_open_finance_sync`) atualizam o lançamento; transação apagada pelo banco (o
+    (`save_open_finance_sync`) atualizam o lançamento; e a cada correção a transação é
+    **reavaliada**: se deixou de ser saque ou depósito em espécie (o banco reclassificou
+    como compra ou transferência), o lançamento da carteira é desfeito; transação apagada pelo banco (o
     caminho `transactions/deleted`, em `frontend/routes/open_finance.py`) desfaz o
     lançamento — senão um saque de R$ 100 apagado deixa R$ 100 de dinheiro que não existe;
   - **desfazer é para sempre:** quando o usuário desfaz, fica gravada a recusa ligada ao id
     da transação do banco, e a próxima sincronização não recria o lançamento.
 
   Testes: saque corrigido em valor e em data; saque apagado pelo banco; desfazer e
-  sincronizar de novo (o dinheiro não volta); desconectar, reconectar e o banco trazer o
+  sincronizar de novo (o dinheiro não volta); saque reclassificado pelo banco como compra
+  (o lançamento da carteira sai); desconectar, reconectar e o banco trazer o
   mesmo saque de novo (nenhum crédito a mais, e o dinheiro da carteira fica); saque feito
   enquanto o banco estava desconectado (entra na carteira depois da reconexão).
 
