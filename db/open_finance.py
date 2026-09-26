@@ -392,7 +392,9 @@ def buscar_no_extrato(user_id: int, tipo: str, valor, dias: int = 7,
     """Transações do Open Finance deste usuário com o mesmo tipo e valor
     (tolerância de `RECON_AMOUNT_TOL`) nos últimos `dias`. É o "já está no
     extrato" da resposta a um lançamento que passou pelo banco (Q40,
-    `core/handlers/forma_pagamento.py`). A compra de cartão importada mora em
+    `core/handlers/forma_pagamento.py`). Parte da transação OF, não da sombra:
+    a conciliada aponta para o lançamento manual e a sombra foi apagada
+    (`confirm_reconciliation`). A compra de cartão importada mora em
     `credit_transactions`; só entra a ligada a uma transação OF. Só leitura."""
     valor = Decimal(str(valor))
     with get_conn() as conn:
@@ -400,15 +402,23 @@ def buscar_no_extrato(user_id: int, tipo: str, valor, dias: int = 7,
             cur.execute(
                 f"""
                 select dia, alvo, valor from (
-                  select coalesce(posted_at, criado_em::date) as dia,
-                         coalesce(alvo, nota) as alvo, valor, criado_em as ordem
-                    from launches
-                   where user_id = %s and source = 'open_finance'
+                  -- `imported_launch_id` não é único (`_bind` de db/bank_movements.py)
+                  -- nem `imported_credit_tx_id` (reconexão: o importador deduplica pelo
+                  -- id do provedor): uma linha por lançamento e por compra.
+                  (select distinct on (l.id) o.transaction_date as dia,
+                         o.description as alvo, abs(o.amount) as valor, l.criado_em as ordem
+                    from open_finance_transactions o
+                    join open_finance_accounts a on a.id = o.account_id
+                    join open_finance_connections c on c.id = a.connection_id
+                    join launches l on l.id = o.imported_launch_id and l.user_id = c.user_id
+                   where c.user_id = %s
                      and {TIPO_CANON_SQL} = %s
-                     and abs(valor - %s) <= %s
-                     and coalesce(posted_at, criado_em::date) >= current_date - %s::int
+                     and abs(abs(o.amount) - %s) <= %s
+                     and o.transaction_date >= current_date - %s::int
+                   order by l.id, o.id)
                   union all
-                  select ct.purchased_at, o.description, ct.valor, ct.created_at
+                  (select distinct on (ct.id) ct.purchased_at, o.description, ct.valor,
+                         ct.created_at
                     from credit_transactions ct
                     join open_finance_transactions o on o.imported_credit_tx_id = ct.id
                     join open_finance_accounts a on a.id = o.account_id
@@ -416,6 +426,7 @@ def buscar_no_extrato(user_id: int, tipo: str, valor, dias: int = 7,
                    where ct.user_id = %s and c.user_id = %s and %s = 'despesa'
                      and abs(ct.valor - %s) <= %s
                      and ct.purchased_at >= current_date - %s::int
+                   order by ct.id, o.id)
                 ) x
                  order by ordem desc
                  limit %s
