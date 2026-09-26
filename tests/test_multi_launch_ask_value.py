@@ -58,7 +58,8 @@ def test_pergunta_valor_do_trecho_sem_numero(user_id):
     # armou o pending certo
     p = _pending(user_id)
     assert p["action_type"] == "multi_launch_values"
-    assert p["payload"]["queue"] == [{"tipo": "despesa", "desc": "aluguel"}]
+    assert p["payload"]["queue"] == [{"tipo": "despesa", "desc": "aluguel",
+                                       "forma_pagamento": "desconhecida"}]
 
 
 def test_resposta_com_valor_registra_o_que_faltava(user_id):

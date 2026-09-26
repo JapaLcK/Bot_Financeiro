@@ -173,30 +173,31 @@ def ensure_bill_instance(recurring_id: int, user_id: int, due_date: date, amount
         conn.commit()
 
 
-def mark_bill_paid(user_id: int, bill_id: int, amount: float | None = None) -> dict[str, Any] | None:
-    """Confirma o pagamento: cria o lançamento de despesa (debita + categoriza)
-    e marca a conta como paga. `amount` opcional sobrescreve o valor (boleto
-    variável). Retorna a conta atualizada, ou None se não achar / já paga.
-    """
+def mark_bill_paid(user_id: int, bill_id: int, amount: float | None = None, *,
+                   metodo: str) -> dict[str, Any] | None:
+    """Confirma o pagamento. `metodo` não tem default: quem decide é
+    `core/handlers/forma_pagamento.quitar`, o único chamador. 'carteira' cria o
+    lançamento de despesa (debita + categoriza); 'banco' só marca como paga — o
+    débito chega pelo Open Finance, e `paid_amount` é o valor informado ou NULL
+    (a estimativa não é o valor pago). `amount` sobrescreve o valor (boleto
+    variável). Retorna a conta atualizada, ou None se não achar / já paga."""
     from db.accounts import add_launch_and_update_balance
     from db.open_finance import propose_manual_reconciliation
-
+    if metodo not in ("carteira", "banco"):
+        raise ValueError("METODO_INVALIDO")
     bill = get_bill(user_id, bill_id)
     if not bill or bill["status"] == "paid":
         return None
 
-    # Valida ANTES da reserva. `parse_money("1"*400)` devolve `inf` sem mock
-    # nenhum: sem esta guarda a reserva grava `paid_amount = Infinity` (o
-    # Postgres `numeric` aceita), o `add_launch` estoura depois no JSON, e a
-    # conta fica fechada com valor infinito no dashboard.
+    # Valida ANTES da reserva. `parse_money("1"*400)` devolve `inf`: sem esta
+    # guarda a reserva grava `paid_amount = Infinity` e a conta fica fechada
+    # com valor infinito no dashboard. Arredonda para centavos AQUI, e não em
+    # cada porta: "paguei luz 0,001" gravava 0.001 e dizia "R$ 0,00 lançado".
     if amount is not None and not isfinite(float(amount)):
         raise ValueError("VALOR_INVALIDO")
-    # Arredonda para centavos AQUI, e não em cada chamador: os quatro caminhos
-    # de pagamento (texto, tool da IA, botão do WhatsApp, rota web) passam por
-    # esta função. Sem isso, "paguei luz 0,001" gravava paid_amount=0.001 e a
-    # resposta dizia "R$ 0,00 lançado" — mensagem e dado divergentes.
-    valor = round(float(amount), 2) if (amount is not None and float(amount) > 0) else float(bill["amount"] or 0)
-    if valor <= 0:
+    informado = round(float(amount), 2) if (amount is not None and float(amount) > 0) else None
+    valor = informado if (informado is not None or metodo == "banco") else float(bill["amount"] or 0)
+    if valor is not None and valor <= 0:
         raise ValueError("VALOR_INVALIDO")
 
     name = bill["name"] or "Conta"
@@ -208,9 +209,8 @@ def mark_bill_paid(user_id: int, bill_id: int, amount: float | None = None) -> d
     # falha entre os dois commits deixa o débito feito com a conta ainda
     # pendente, então a próxima tentativa debita de novo.
     #
-    # Com a reserva primeiro, o `where status='pending'` serializa: só uma
-    # requisição transita a conta, e as outras recebem None.
-    #
+    # Com a reserva primeiro, o `where status='pending'` serializa (inclusive
+    # 'banco' × 'carteira'): só uma requisição transita, as outras recebem None.
     # A janela entre os dois passos NÃO é erro conservador — foi o que se
     # pensou, e está errado. Medido: conta 'paid' sem lançamento, saldo não
     # debitado, gasto fora do extrato, e a retentativa devolve None ("essa
@@ -225,12 +225,12 @@ def mark_bill_paid(user_id: int, bill_id: int, amount: float | None = None) -> d
                    set status='paid', paid_at=now(), paid_amount=%s
                  where id=%s and user_id=%s and status='pending'
                 """,
-                (Decimal(str(valor)), int(bill_id), int(user_id)),
+                (None if valor is None else Decimal(str(valor)), int(bill_id), int(user_id)),
             )
             reservou = cur.rowcount == 1
         conn.commit()
-    if not reservou:
-        return None
+    if not reservou or metodo == "banco":
+        return get_bill(user_id, bill_id) if reservou else None
 
     try:
         launch_id, _seq, _bal = add_launch_and_update_balance(

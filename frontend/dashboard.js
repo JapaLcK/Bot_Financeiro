@@ -3564,6 +3564,7 @@ function _ensureGenericConfirmModal() {
         <p class="msub" id="generic-confirm-body" style="white-space:pre-wrap"></p>
         <div class="modal-acts" style="margin-top:18px">
           <button type="button" class="btn-cancel" id="generic-confirm-cancel">Cancelar</button>
+          <button type="button" class="btn-save" id="generic-confirm-alt" style="display:none"></button>
           <button type="button" class="btn-save" id="generic-confirm-ok">OK</button>
         </div>
       </div>
@@ -3575,6 +3576,7 @@ function _ensureGenericConfirmModal() {
   });
   document.getElementById("generic-confirm-cancel").addEventListener("click", () => _genericModalClose(false));
   document.getElementById("generic-confirm-ok").addEventListener("click", () => _genericModalClose(true));
+  document.getElementById("generic-confirm-alt").addEventListener("click", () => _genericModalClose("alt"));
 
   /* Este arquivo REDECLARA confirmModal/alertModal, e a dashboard.html carrega
      dashboard.js depois de modals.js — então no dashboard quem roda é este
@@ -3633,6 +3635,11 @@ function confirmModal(message, opts = {}) {
   const okBtn = document.getElementById("generic-confirm-ok");
   cancelBtn.textContent = cancelText;
   cancelBtn.style.display = "";
+  // `opts.altText`: segunda opção que resolve "alt" (ex.: banco × dinheiro).
+  // Esc, overlay e Cancelar continuam resolvendo false.
+  const altBtn = document.getElementById("generic-confirm-alt");
+  altBtn.textContent = opts.altText || "";
+  altBtn.style.display = opts.altText ? "" : "none";
   okBtn.textContent = okText;
   okBtn.className = danger ? "inst-delete-btn" : "btn-save";
   _genericModalLastFocus = document.activeElement;
@@ -3650,6 +3657,7 @@ function alertModal(message, opts = {}) {
   const cancelBtn = document.getElementById("generic-confirm-cancel");
   const okBtn = document.getElementById("generic-confirm-ok");
   cancelBtn.style.display = "none";
+  document.getElementById("generic-confirm-alt").style.display = "none";
   okBtn.textContent = okText;
   okBtn.className = "btn-save";
   _genericModalLastFocus = document.activeElement;
@@ -5098,6 +5106,8 @@ function openRecurringNewFromTab() {
 
 // ── Agenda de boletos (a pagar) ───────────────────────────────────────
 const _billsChannel = makeFetchChannel(); // dedup + abort + geração
+// Q40: com banco conectado o servidor exige a forma ao pagar (`metodo`).
+let _billsExigeForma = false;
 
 async function _fetchBills({ force = false } = {}) {
   return _billsChannel.run(async (signal) => {
@@ -5108,6 +5118,7 @@ async function _fetchBills({ force = false } = {}) {
     if (resp.status === 403) return { pro_required: true };
     if (!resp.ok) throw _erroHttp(resp.status, await resp.text());
     const data = await resp.json();
+    _billsExigeForma = !!data.exige_forma_pagamento;
     return data.bills || [];
   }, { force });
 }
@@ -5232,7 +5243,9 @@ function _renderBillRow(b) {
 }
 
 function _renderBillPaidRow(b) {
-  const paidVal = b.paid_amount != null ? b.paid_amount : b.amount;
+  // Q40: paga pelo banco sem valor informado → paid_amount null; o valor real
+  // está no extrato, e a estimativa (amount) não é o que foi pago.
+  const paidTxt = b.paid_amount != null ? `-${_fmtBRL(b.paid_amount)}` : "valor no extrato";
   const when = b.paid_at ? new Date(b.paid_at).toLocaleDateString("pt-BR", { day: "2-digit", month: "short" }) : "";
   return `
     <div class="tx-row">
@@ -5241,7 +5254,7 @@ function _renderBillPaidRow(b) {
         <div class="tx-desc">${escapeHtmlSafe(b.name || "Conta")}</div>
         <div class="tx-meta">paga ${when}</div>
       </div>
-      <div class="tx-amt" style="color:var(--text-2)">-${_fmtBRL(paidVal)}</div>
+      <div class="tx-amt" style="color:var(--text-2)">${paidTxt}</div>
     </div>`;
 }
 
@@ -5260,6 +5273,19 @@ async function _errDetail(resp) {
 }
 
 async function payBill(billId, estimate, name, variavel) {
+  // Q40: com banco conectado, a forma vem ANTES do valor. Pelo banco não pede
+  // valor (o débito chega pelo Open Finance). Esc/overlay/Cancelar = nada.
+  let metodo = null;
+  if (_billsExigeForma) {
+    const escolha = await confirmModal(
+      `Como você pagou "${name}"?\n\nPelo banco, o débito chega sozinho pelo Open Finance. ` +
+      "Em dinheiro vivo, sai da sua Carteira Piggy.",
+      { title: "Forma de pagamento", okText: "Pelo banco", altText: "Dinheiro vivo" });
+    if (escolha === true) metodo = "banco";
+    else if (escolha === "alt") metodo = "dinheiro";
+    else return;
+  }
+  if (metodo === "banco") return _postPayBill(billId, { metodo }, "✓ Marcada como paga (pelo banco)");
   // Valor da conta a pagar é sempre confirmado na hora (pode variar). Se tem
   // estimativa, pré-preenche pra ser só ajustar/confirmar; senão abre vazio.
   const pergunta = variavel
@@ -5273,18 +5299,22 @@ async function payBill(billId, estimate, name, variavel) {
     await alertModal("Digite um valor válido (maior que zero).", { title: "Valor inválido" });
     return;
   }
+  return _postPayBill(billId, metodo ? { metodo, amount } : { amount }, `✓ Boleto pago: ${_fmtBRL(amount)}`);
+}
+
+async function _postPayBill(billId, corpo, toast) {
   try {
     const resp = await fetch(`${API}/recurring-bills/${USER_ID}/${billId}/pay`, {
       method: "POST",
       credentials: "same-origin",
       headers: csrfHeaders({ "Content-Type": "application/json" }),
-      body: JSON.stringify({ amount }),
+      body: JSON.stringify(corpo),
     });
     if (resp.status === 403) return;   // pro_required: interceptor abre upgrade
     if (!resp.ok) {
       throw new Error(await _errDetail(resp));
     }
-    showToast(`✓ Boleto pago: ${_fmtBRL(amount)}`);
+    showToast(toast);
     loadBillsView();
     sendRefresh();
   } catch (err) {
@@ -9277,8 +9307,16 @@ function populateLaunchCategories() {
   }
 }
 
+// Q40: com banco conectado o manual é só dinheiro vivo. Só a copy muda; quem
+// decide é o servidor.
+const _LAUNCH_MSUB = "Registre uma receita ou despesa. Vai aparecer aqui e no histórico do bot.";
+const _LAUNCH_MSUB_OF = "Registre o que foi em dinheiro vivo. Pix, cartão e débito entram sozinhos pelo Open Finance.";
+
 function openLaunchModal(opts) {
   opts = opts || {};
+  const soDinheiro = !!(lastData && lastData.exige_forma_pagamento);
+  document.getElementById("launch-msub").textContent = soDinheiro ? _LAUNCH_MSUB_OF : _LAUNCH_MSUB;
+  document.querySelectorAll("#launch-overlay .tipo-sub").forEach(el => { el.hidden = !soDinheiro; });
   setValorMode("parcela");           // reseta o toggle pro default a cada abertura
   setLaunchTipo(opts.tipo || "despesa");
   document.getElementById("launch-valor").value = opts.valor || "";
@@ -9714,6 +9752,9 @@ async function submitLaunch() {
         categoria: categoria || null,
         card_id: cardId ? Number(cardId) : null,
         parcelas: parcelas,
+        // Lançamento manual de receita/despesa é dinheiro vivo (Carteira
+        // Piggy); com banco conectado o servidor exige a declaração (Q40).
+        funding_source: launchTipo === "credito" ? null : "carteira",
       }),
     });
     const data = await readResponsePayload(res);

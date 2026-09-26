@@ -35,7 +35,7 @@ def _sombras(uid):
 
 def funde_a(uid):
     conexao = conecta_banco(uid, "1000.00")
-    manda(uid, "gastei 50 no mercado")
+    manda(uid, "gastei 50 no mercado em dinheiro")
     sincroniza(conexao, uid, "950.00", [tx(uid, "-50.00", today_tz(), "MERCADO")])
     rep = db.import_open_finance_launches(uid, conexao)
     assert rep["pending"] == 1 and rep["auto_merged"] == 0, rep
@@ -88,7 +88,7 @@ def test_manual_criado_depois_do_import_vira_pendencia_e_o_delete_nao_apaga_a_so
     assert consolidado(uid_pro) == (950.0, 0.0)
 
     # o dono lança o MESMO gasto à mão depois: pendência, nada funde em silêncio
-    manda(uid_pro, "gastei 50 no mercado")
+    manda(uid_pro, "gastei 50 no mercado em dinheiro")
     manual_id = ultimo_launch(uid_pro)
 
     sombra = _estado(_of_tx(uid_pro))["imported_launch_id"]
@@ -149,7 +149,7 @@ def test_fusao_historica_credito_em_conta_fica_intacta(uid_pro, ia_fora):
 
     sincroniza(conexao, uid_pro, "980.00", [tx(uid_pro, "-20.00", hoje, "CINEMA")])
     db.import_open_finance_launches(uid_pro, conexao)
-    manda(uid_pro, "recebi 73,38 do fulano")
+    manda(uid_pro, "recebi 73,38 do fulano em dinheiro")
 
     assert _estado(of_tx) == antes
 

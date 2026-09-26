@@ -97,8 +97,7 @@ def resolve_delete(user_id: int, confirmed: bool) -> str | None:
                     criado_em = None
 
             alvo = payload.get("alvo") or ""
-            resp = add_from_entities(
-                user_id,
+            ents = dict(
                 tipo=payload.get("tipo") or "despesa",
                 valor=float(payload["valor"]),
                 alvo=alvo,
@@ -107,9 +106,18 @@ def resolve_delete(user_id: int, confirmed: bool) -> str | None:
                 # != "ai": respeita a categoria que o usuário confirmou; não
                 # dispara o cross-check com regras locais.
                 category_reason="image_confirmed",
-                criado_em=criado_em,
-                platform=payload.get("platform") or "whatsapp",
             )
+            platform = payload.get("platform") or "whatsapp"
+            # Q40: com banco conectado, o recibo pode ter sido pago no Pix ou
+            # no cartão — pergunta a forma antes de gravar. Sem banco, grava.
+            from core.handlers import forma_pagamento as fp
+            if fp.decidir(user_id, fp.DESCONHECIDA) == fp.PERGUNTA:
+                ents["criado_em"] = criado_em.isoformat() if criado_em else None
+                return fp.perguntar(
+                    user_id, {"fluxo": "entities", "entities": ents, "platform": platform},
+                    fp.pergunta_lancamento(ents["tipo"], ents["valor"]))
+            resp = add_from_entities(user_id, **ents, criado_em=criado_em, platform=platform,
+                                     forma_pagamento=fp.DESCONHECIDA)
             return f"✅ Lançamento registrado!\n{resp}"
 
         # Fallback legado: pendências antigas que só guardaram o texto.
@@ -119,6 +127,8 @@ def resolve_delete(user_id: int, confirmed: bool) -> str | None:
 
         from core.services.quick_entry import handle_quick_entry
         msg_out = handle_quick_entry(user_id, text)
+        if msg_out and msg_out.text.startswith("🐷"):
+            return msg_out.text  # recusa da Q40 (banco conectado): nada gravado
         if msg_out:
             return f"✅ Lançamento registrado!\n{msg_out.text}"
         return f"⚠️ Não consegui registrar automaticamente. Tente: {wrap_wa_markup(text, '`')}"

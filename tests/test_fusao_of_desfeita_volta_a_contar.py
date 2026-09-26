@@ -38,7 +38,7 @@ def _funde_um_real(uid: int) -> tuple[int, int]:
     usuário confirma o casamento (lançamento manual nunca funde em silêncio)."""
     hoje = today_tz()
     conexao = conecta_banco(uid, "114.88")
-    manda(uid, "Gastei 1 real com a barbara")
+    manda(uid, "Gastei 1 real com a barbara em dinheiro")
     manual_id = ultimo_launch(uid)
     sincroniza(conexao, uid, "113.88",
                [tx(uid, "-1.00", hoje, "PIX ENVIADO BARBARA")])
@@ -106,7 +106,7 @@ def test_fusao_falsa_positiva_devolve_o_gasto_ao_desfazer(uid_pro, ia_fora):
     a pendência (lançamento manual só funde com confirmação) e a desfaz."""
     hoje = today_tz()
     conexao = conecta_banco(uid_pro, "1000.00")
-    manda(uid_pro, "gastei 50 no mercado")
+    manda(uid_pro, "gastei 50 no mercado em dinheiro")
     manual_id = ultimo_launch(uid_pro)
 
     sincroniza(conexao, uid_pro, "950.00",
@@ -165,7 +165,7 @@ def test_apagar_enquanto_o_sync_funde_nao_deadlocka(uid_pro, ia_fora, monkeypatc
 
     hoje = today_tz()
     conexao = conecta_banco(uid_pro, "114.88")
-    manda(uid_pro, "Gastei 1 real com a barbara")
+    manda(uid_pro, "Gastei 1 real com a barbara em dinheiro")
     manual_id = ultimo_launch(uid_pro)
     sincroniza(conexao, uid_pro, "113.88",
                [tx(uid_pro, "-1.00", hoje, "PIX ENVIADO BARBARA")])
@@ -256,7 +256,7 @@ def test_desconectar_durante_o_sync_nao_engole_o_gasto(uid_pro, ia_fora):
 
     hoje = today_tz()
     conexao = conecta_banco(uid_pro, "114.88")
-    manda(uid_pro, "Gastei 1 real com a barbara")
+    manda(uid_pro, "Gastei 1 real com a barbara em dinheiro")
     manual_id = ultimo_launch(uid_pro)
 
     # transação longa: o Pix que funde + 40 transações de ruído que não casam

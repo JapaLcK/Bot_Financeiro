@@ -32,7 +32,7 @@ def test_variable_bill_stores_pending_and_accepts_bare_amount(monkeypatch):
     assert pending == {
         "user_id": 7,
         "action_type": "bill_amount_expected",
-        "payload": {"bill_id": 41, "bill_name": "Luz"},
+        "payload": {"bill_id": 41, "bill_name": "Luz", "forma_pagamento": "desconhecida"},
     }
 
     paid = {"name": "Luz", "paid_amount": 132.5}
@@ -45,7 +45,7 @@ def test_variable_bill_stores_pending_and_accepts_bare_amount(monkeypatch):
 
     response = bills.resolve_bill_amount(7, "132,50", pending)
 
-    mark.assert_called_once_with(7, 41, 132.5)
+    mark.assert_called_once_with(7, 41, 132.5, metodo="carteira")
     # A pendência é apagada pela própria reivindicação (grava None se o payload
     # ainda for o lido), não mais por um clear incondicional.
     reivindica.assert_called_once_with(7, pending)
@@ -106,7 +106,7 @@ def test_conversa_inteira_numero_solto_paga_a_conta(monkeypatch):
     monkeypatch.setattr(db.bills, "list_bills", lambda *a, **k: [bill])
     pago = {"name": "Luz", "paid_amount": None}
 
-    def _mark(uid, bid, amt):
+    def _mark(uid, bid, amt, **_k):
         pago["paid_amount"] = amt
         return {"name": "Luz", "paid_amount": amt}
 
@@ -153,7 +153,7 @@ def test_duas_respostas_simultaneas_pagam_a_conta_uma_vez_so(monkeypatch):
 
     pagamentos = []
 
-    def _mark(u, bid, amt):
+    def _mark(u, bid, amt, **_k):
         pagamentos.append((bid, amt))
         return {"name": "Luz", "paid_amount": amt}
 
@@ -187,7 +187,7 @@ def test_valor_negativo_mantem_a_pergunta_e_nao_paga(monkeypatch):
 
     pagou = []
     monkeypatch.setattr(db.bills, "mark_bill_paid",
-                        lambda u, b, a: pagou.append(a) or {"name": "Luz", "paid_amount": a})
+                        lambda u, b, a, **_k: pagou.append(a) or {"name": "Luz", "paid_amount": a})
 
     for entrada in ("-10", "R$ -5", "- 10"):
         db.set_pending_action(uid, "bill_amount_expected", payload)
@@ -219,7 +219,7 @@ def test_devolucao_repoe_a_pergunta_quando_o_pagamento_estoura(monkeypatch):
     db.set_pending_action(uid, "bill_amount_expected", payload)
     pending = db.get_pending_action(uid)
 
-    def _estoura(u, b, a):
+    def _estoura(u, b, a, **_k):
         raise RuntimeError("banco caiu")
 
     monkeypatch.setattr(db.bills, "mark_bill_paid", _estoura)
@@ -251,7 +251,7 @@ def test_devolucao_nao_atropela_pendencia_mais_nova(monkeypatch):
     db.set_pending_action(uid, "bill_amount_expected", payload)
     pending = db.get_pending_action(uid)
 
-    def _estoura(u, b, a):
+    def _estoura(u, b, a, **_k):
         # a outra tarefa armou a dela enquanto esta trabalhava
         db.set_pending_action(uid, "confirm_recurring_offer", {"name": "Luz"})
         raise RuntimeError("banco caiu")
@@ -395,7 +395,7 @@ def test_reserva_serializa_duas_respostas_e_debita_uma_vez(monkeypatch):
 
     def paga():
         try:
-            resultados.append(B.mark_bill_paid(uid, int(conta["id"]), 100.0))
+            resultados.append(B.mark_bill_paid(uid, int(conta["id"]), 100.0, metodo="carteira"))
         except Exception as exc:                      # pragma: no cover
             resultados.append(exc)
 
@@ -709,7 +709,8 @@ def test_tool_da_ia_tambem_guarda_de_qual_conta_falava():
     assert "valor variável" in resposta, resposta
     atual = db.get_pending_action(uid) or {}
     assert atual.get("action_type") == "bill_amount_expected", atual
-    assert atual.get("payload") == {"bill_id": int(conta["id"]), "bill_name": "Luz"}
+    assert atual.get("payload") == {"bill_id": int(conta["id"]), "bill_name": "Luz",
+                                   "forma_pagamento": "desconhecida"}
 
     # e o número seguinte, pelo caminho real, paga a conta
     import db.bills as B
@@ -752,7 +753,7 @@ def test_falha_no_debito_devolve_a_conta_e_a_retentativa_paga(monkeypatch):
 
     monkeypatch.setattr(ACC, "add_launch_and_update_balance", _estoura)
     with pytest.raises(RuntimeError):
-        B.mark_bill_paid(uid, int(conta["id"]), 100.0)
+        B.mark_bill_paid(uid, int(conta["id"]), 100.0, metodo="carteira")
 
     depois = B.list_bills(uid, include_paid=True)[0]
     assert depois["status"] == "pending", "a conta ficou fechada sem lançamento"
@@ -760,7 +761,7 @@ def test_falha_no_debito_devolve_a_conta_e_a_retentativa_paga(monkeypatch):
     assert db.list_launches(uid, limit=5) == []
 
     monkeypatch.undo()
-    pago = B.mark_bill_paid(uid, int(conta["id"]), 100.0)
+    pago = B.mark_bill_paid(uid, int(conta["id"]), 100.0, metodo="carteira")
     assert pago is not None, "a retentativa não conseguiu pagar"
     assert pago["status"] == "paid" and float(pago["paid_amount"]) == 100.0
     assert len(db.list_launches(uid, limit=5)) == 1
@@ -792,7 +793,7 @@ def test_devolucao_nao_reabre_conta_que_ja_tem_lancamento(monkeypatch):
 
     monkeypatch.setattr(ACC, "add_launch_and_update_balance", _lanca_e_estoura)
     with pytest.raises(RuntimeError):
-        B.mark_bill_paid(uid, int(conta["id"]), 100.0)
+        B.mark_bill_paid(uid, int(conta["id"]), 100.0, metodo="carteira")
 
     depois = B.list_bills(uid, include_paid=True)[0]
     assert depois["status"] == "paid", "reabriu uma conta que já tinha lançamento"
@@ -814,7 +815,7 @@ def test_valor_absurdo_e_recusado_antes_da_reserva(valor):
     conta = _monta_conta_variavel(uid)
 
     with pytest.raises(ValueError):
-        B.mark_bill_paid(uid, int(conta["id"]), valor)
+        B.mark_bill_paid(uid, int(conta["id"]), valor, metodo="carteira")
 
     depois = B.list_bills(uid, include_paid=True)[0]
     assert depois["status"] == "pending", f"{valor} reservou a conta"
@@ -835,7 +836,7 @@ def test_valor_gigante_finito_ainda_paga():
     uid = int(uuid.uuid4().int % 1_000_000_000)
     conta = _monta_conta_variavel(uid)
 
-    pago = B.mark_bill_paid(uid, int(conta["id"]), 2_000_000_000.0)
+    pago = B.mark_bill_paid(uid, int(conta["id"]), 2_000_000_000.0, metodo="carteira")
     assert pago is not None and pago["status"] == "paid"
     assert float(pago["paid_amount"]) == 2_000_000_000.0
 
@@ -990,7 +991,7 @@ def test_nan_nao_paga_silenciosamente_o_valor_estimado_da_conta():
     conta = [b for b in B.list_bills(uid) if b["status"] == "pending"][0]
 
     with pytest.raises(ValueError):
-        B.mark_bill_paid(uid, int(conta["id"]), float("nan"))
+        B.mark_bill_paid(uid, int(conta["id"]), float("nan"), metodo="carteira")
 
     depois = B.list_bills(uid, include_paid=True)[0]
     assert depois["status"] == "pending", "nan pagou o valor estimado da conta"
@@ -1098,7 +1099,7 @@ def test_centavo_invisivel_direto_no_mark_bill_paid_nao_reserva():
     conta = _monta_conta_variavel(uid)
 
     with pytest.raises(ValueError):
-        B.mark_bill_paid(uid, int(conta["id"]), 0.001)
+        B.mark_bill_paid(uid, int(conta["id"]), 0.001, metodo="carteira")
 
     depois = B.list_bills(uid, include_paid=True)[0]
     assert depois["status"] == "pending" and depois["paid_amount"] is None
