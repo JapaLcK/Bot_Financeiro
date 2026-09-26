@@ -204,7 +204,9 @@ Decidido pelo dono na mesma data (Q37–Q41):
   manual e para o investimento manual antigo (Q37), que hoje rendem juro simulado sozinhos
   — a caixinha por `accrue_all_pockets`, o investimento por `accrue_all_users_investments`
   (`core/services/investment_scheduler.py`), que grava o ganho no saldo. Os dois laços
-  param para o que é manual **antes do job da foto** (etapa 0), para todos os usuários e
+  param para o que é manual **antes do job da foto** (etapa 0) — e também toda chamada
+  direta do cálculo fora deles (o aporte e o resgate chamam `accrue_investment_db` antes de
+  mexer no lote; o inventário por `grep` é o primeiro passo) —, para todos os usuários e
   também no painel antigo, como a recorrente (Q42). O ganho já acumulado entra no saldo
   uma última vez, com um aviso ao usuário, e daí em diante a caixinha é só dinheiro
   separado e o investimento é registro antigo com saldo parado. Com isso a foto conta o
