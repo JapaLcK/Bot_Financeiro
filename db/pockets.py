@@ -227,6 +227,27 @@ def list_pockets(user_id: int, *, accrue: bool = True):
             return cur.fetchall()
 
 
+TIPOS_HISTORICO_CAIXINHA = ('deposito_caixinha', 'saque_caixinha', 'criar_caixinha', 'delete_pocket')
+
+
+def _renomear_no_historico(cur, user_id: int, antigo: str, novo: str) -> None:
+    """#608: o histórico acompanha o renome, senão quem lê por nome (histórico,
+    delete_pocket, o desfazer da criação) perde a caixinha ou acha outra. Comparação
+    exata: os escritores gravam o nome canônico, e lower() roubaria o histórico de
+    uma caixinha que só difere em maiúsculas. `alvo` só nos tipos de caixinha — uma
+    despesa com alvo "Viagem" não é da caixinha."""
+    cur.execute(
+        "update launches set alvo = %s where user_id = %s and alvo = %s and tipo = any(%s)",
+        (novo, user_id, antigo, list(TIPOS_HISTORICO_CAIXINHA)),
+    )
+    for chave in ("delta_pocket", "create_pocket", "delete_pocket"):
+        cur.execute(
+            "update launches set efeitos = jsonb_set(efeitos, array[%s, 'nome'], to_jsonb(%s::text)) "
+            "where user_id = %s and efeitos -> %s ->> 'nome' = %s",
+            (chave, novo, user_id, chave, antigo),
+        )
+
+
 def update_pocket_meta(
     user_id: int,
     pocket_id: int,
@@ -287,10 +308,10 @@ def update_pocket_meta(
     params.extend([user_id, int(pocket_id)])
     with get_conn() as conn:
         with conn.cursor() as cur:
-            if interest_enabled is not None:
+            if interest_enabled is not None or name is not None:
                 cur.execute(
                     """
-                    select id, balance, interest_enabled, interest_rate,
+                    select id, name, balance, interest_enabled, interest_rate,
                            interest_period, interest_tax_profile, last_interest_date,
                            of_investment_id
                       from pockets
@@ -302,6 +323,7 @@ def update_pocket_meta(
                 pocket = cur.fetchone()
                 if not pocket:
                     return None
+            if interest_enabled is not None:
                 _ensure_pocket_lots(cur, user_id, pocket)
                 if bool(interest_enabled):
                     today = _today()
@@ -324,6 +346,8 @@ def update_pocket_meta(
                 params,
             )
             row = cur.fetchone()
+            if name is not None and row and row["name"] != pocket["name"]:
+                _renomear_no_historico(cur, user_id, pocket["name"], row["name"])
         conn.commit()
     return row
 
