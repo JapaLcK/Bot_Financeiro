@@ -9,7 +9,14 @@
 .msg-piggy { display: grid; gap: 12px; }
 .msg-by { display: grid; grid-auto-flow: column; justify-content: start; align-items: center; column-gap: 8px; font-size: 12.5px; font-weight: 500; color: var(--ink-3); }
 
-.msg-block > * { pointer-events: none; } /* estático até o PR dos blocos que expandem */
+/* Blocos vivos (parts/LiveAnswer.tsx): na visão compacta cortam na altura e esmaecem embaixo. */
+.msg-block[data-cut] {
+  overflow: hidden;
+  -webkit-mask-image: linear-gradient(#000 70%, transparent); mask-image: linear-gradient(#000 70%, transparent);
+}
+.msg-block > .ledger { background: none; box-shadow: none; } /* o bloco já é o cartão */
+.msg-more, .msg-open { justify-self: start; min-height: 32px; }
+.msg-more { margin-top: -8px; color: var(--ink-2); }
 .msg-text { max-width: 68ch; font-size: 15px; line-height: 1.55; color: var(--ink-2); }
 .msg-text b { color: var(--ink); font-weight: 600; }
 .chat-follow { display: flex; flex-wrap: wrap; gap: 8px; }
