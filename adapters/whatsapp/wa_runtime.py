@@ -720,6 +720,23 @@ def process_message(message: InboundMessage) -> None:
         interactive_id = get_interactive_id(raw_msg)
 
         if interactive_id:
+            # Botão nunca responde à pergunta aberta da IA, e quase todos os
+            # ramos abaixo dão `return` sem passar pelo `finally` do
+            # `handle_incoming` que a encerraria: encerra aqui, para todos. Mesmo
+            # uid que o `handle_incoming` lê. A `ai_pending` (botão que confirma
+            # ação da IA) é outra tabela e segue intacta.
+            try:
+                from core.handle_incoming import _normalize_user_id
+                from core.services.ai_chat_commands import (
+                    encerra_pergunta_da_ia, pergunta_aberta_da_ia,
+                )
+                pid = _normalize_user_id(IncomingMessage(platform="whatsapp", user_id=uid, text=""))
+                ancora = pergunta_aberta_da_ia(pid)
+                if ancora is not None:
+                    encerra_pergunta_da_ia(pid, ancora)
+            except Exception as exc:
+                logger.warning("WA encerrar pergunta da IA no botão falhou: %s", exc)
+
             # Botões do tutorial
             tut_bid = get_tutorial_button_id(raw_msg)
             if tut_bid:

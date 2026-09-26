@@ -320,10 +320,16 @@ def test_botao_nunca_responde_a_pergunta_da_ia(monkeypatch):
 @pytest.mark.parametrize("botao,texto", [("undo_launch", ""), ("confirm_yes", "Sim")])
 def test_wa_runtime_marca_o_clique_como_botao(monkeypatch, botao, texto):
     """A fiação: o clique chega ao `handle_incoming` real com `de_botao`."""
-    from adapters.whatsapp.wa_parse import InboundMessage
-    from adapters.whatsapp.wa_runtime import process_message
     uid, chamadas = _com_ia(monkeypatch)
     _ia_disse(uid, ORCAMENTO)
+    _clica(monkeypatch, uid, botao, texto)
+    assert chamadas == []
+
+
+def _clica(monkeypatch, uid, botao, texto):
+    """Um clique pelo `process_message` real."""
+    from adapters.whatsapp.wa_parse import InboundMessage
+    from adapters.whatsapp.wa_runtime import process_message
     wr = "adapters.whatsapp.wa_runtime."
     monkeypatch.setattr(wr + "get_or_create_canonical_user", lambda provider, external_id: uid)
     monkeypatch.setattr(wr + "attempt_whatsapp_phone_link",
@@ -340,7 +346,54 @@ def test_wa_runtime_marca_o_clique_como_botao(monkeypatch, botao, texto):
              "interactive": {"type": "button_reply",
                              "button_reply": {"id": botao, "title": texto or "x"}}},
     ))
+
+
+def test_botao_que_retorna_cedo_tambem_encerra_a_pergunta(monkeypatch):
+    """Achado do Codex no #598: a lista de categorias responde e dá `return`
+    no `process_message`, sem passar pelo `finally` do `handle_incoming`."""
+    uid, chamadas = _com_ia(monkeypatch)
+    _ia_disse(uid, ORCAMENTO)
+
+    _clica(monkeypatch, uid, "recatpick:1:Alimentação", "Alimentação")
+    diga(uid, "gastei 50 no mercado")
     assert chamadas == []
+    assert _lancamentos(uid) == 1
+
+
+def _pendencias_quebram_uma_vez(monkeypatch):
+    real = db.get_pending_action
+    falhou = []
+
+    def _get(uid):
+        if not falhou:
+            falhou.append(uid)
+            raise RuntimeError("banco caiu")
+        return real(uid)
+    monkeypatch.setattr(db, "get_pending_action", _get)
+    return falhou
+
+
+def test_consulta_de_pendencia_falha_com_pergunta_aberta_nao_grava(monkeypatch):
+    from core.services.ai_chat.runner import ERROR_MSG
+    uid, chamadas = _com_ia(monkeypatch)
+    _ia_disse(uid, ORCAMENTO)
+    falhou = _pendencias_quebram_uma_vez(monkeypatch)
+
+    assert diga(uid, "300 reais transporte") == ERROR_MSG
+    assert falhou == [uid]
+    assert chamadas == []
+    assert _lancamentos(uid) == 0
+
+
+def test_consulta_de_pendencia_falha_sem_pergunta_segue_o_route(monkeypatch):
+    """Positivo: sem pergunta aberta, a mesma falha segue o fluxo de hoje."""
+    from core.services.ai_chat.runner import ERROR_MSG
+    uid, chamadas = _com_ia(monkeypatch)
+    falhou = _pendencias_quebram_uma_vez(monkeypatch)
+
+    assert diga(uid, "300 reais transporte") != ERROR_MSG
+    assert falhou == [uid]
+    assert _lancamentos(uid) == 1
 
 
 def _audio(monkeypatch, uid, transcricao):
@@ -369,6 +422,24 @@ def test_audio_sem_pergunta_ou_com_pendencia_segue_o_route(monkeypatch):
     arma_installment(uid2)
     assert "parcelamento registrado" in _audio(monkeypatch, uid2, "comprei uma tv").lower()
     assert chamadas == []
+
+
+def test_audio_consulta_de_pendencia_falha_com_pergunta_aberta_nao_grava(monkeypatch):
+    from core.services.ai_chat.runner import ERROR_MSG
+    uid, chamadas = _com_ia(monkeypatch)
+    _ia_disse(uid, ORCAMENTO)
+    falhou = _pendencias_quebram_uma_vez(monkeypatch)
+
+    r = _audio(monkeypatch, uid, "300 reais transporte")
+    assert 'Entendi: "300 reais transporte"' in r and ERROR_MSG in r
+    assert falhou == [uid]
+    assert chamadas == []
+    assert _lancamentos(uid) == 0
+
+    # A pergunta continuou aberta: a repetição vai à IA.
+    _audio(monkeypatch, uid, "300 reais transporte")
+    assert chamadas == ["300 reais transporte"]
+    assert _lancamentos(uid) == 0
 
 
 # ---------------------------------------------------------------------------

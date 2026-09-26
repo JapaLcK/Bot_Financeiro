@@ -243,8 +243,17 @@ def _handle_audio(msg: IncomingMessage, platform: str,
     preview = f'🎙️ {prefix}Entendi: "{transcription}"{prefix}\n\n'
 
     # Mesma regra do texto (5b do `handle_incoming`): pergunta da IA em aberto
-    # e nenhuma pendência → a transcrição inteira responde à IA.
-    if pergunta_ia is not None and db.get_pending_action(uid) is None:
+    # e nenhuma pendência → a transcrição inteira responde à IA. Se a consulta
+    # da pendência falha, falha fechado como no texto: sem route().
+    if pergunta_ia is not None:
+        try:
+            sem_pendencia = db.get_pending_action(uid) is None
+        except Exception as exc:
+            logger.warning("pendência do áudio falhou pra user %s: %s", uid, exc)
+            turno_foi_para_a_ia.set(True)
+            from core.services.ai_chat.runner import ERROR_MSG
+            return [OutgoingMessage(text=preview + format_for_platform(ERROR_MSG, platform))]
+    if pergunta_ia is not None and sem_pendencia:
         ai_reply = _resposta_da_ia(uid, transcription, platform, "áudio→IA",
                                    erro_se_falhar=True)
         if ai_reply is not None:
@@ -958,6 +967,12 @@ def handle_incoming(msg: IncomingMessage, *,
             responde_a_ia = pergunta_ia is not None and _pend is None and not de_botao
         except Exception:
             has_resumable_pending = False
+            # Com a pergunta aberta, não dá para saber se o texto responde à IA:
+            # falha fechado, sem route() (que poderia gravar).
+            if pergunta_ia is not None and not de_botao:
+                turno_foi_para_a_ia.set(True)
+                from core.services.ai_chat.runner import ERROR_MSG
+                return [OutgoingMessage(text=format_for_platform(ERROR_MSG, platform))]
 
         should_try_ai_fallback = (
             not has_resumable_pending
