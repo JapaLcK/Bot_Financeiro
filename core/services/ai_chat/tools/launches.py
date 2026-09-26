@@ -460,6 +460,11 @@ def _delete_launch_execute(user_id: int, args: dict[str, Any]) -> str:
                 _log_falha("delete_launch_movimento_posterior", user_id, e,
                            nivel=logging.WARNING, launch_id=internal_id, user_seq=lid)
                 return f"🐷 Não apaguei o lançamento #{lid}. {e}"
+            except db.PocketHasMovement as e:
+                # Idem: subclasse, antes da mãe; mesma frase do WhatsApp.
+                _log_falha("delete_launch_caixinha_com_movimento", user_id, e,
+                           nivel=logging.WARNING, launch_id=internal_id, user_seq=lid)
+                return f"🐷 Não apaguei o lançamento #{lid}. {e}"
             except db.LaunchUnsafeRollback as e:
                 # `efeitos` existe mas não dá pra revertê-lo por inteiro —
                 # mesma condição PERMANENTE do WhatsApp (`core/handlers/

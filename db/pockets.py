@@ -31,6 +31,10 @@ POCKET_COLUMNS = """
     of_investment_id, source
 """
 
+# Tipos de launch que são o histórico de uma caixinha (`alvo` = nome dela). O
+# `delete_pocket` apaga estes; desfazer a criação recusa se houver algum depois.
+TIPOS_HISTORICO_CAIXINHA = ('deposito_caixinha', 'saque_caixinha', 'criar_caixinha', 'delete_pocket')
+
 
 def _is_of_mirror(p: dict) -> bool:
     """Caixinha do banco é read-only: o dinheiro está no banco, não no Pig.
@@ -226,9 +230,6 @@ def list_pockets(user_id: int, *, accrue: bool = True):
                 (user_id,),
             )
             return cur.fetchall()
-
-
-TIPOS_HISTORICO_CAIXINHA = ('deposito_caixinha', 'saque_caixinha', 'criar_caixinha', 'delete_pocket')
 
 
 def _renomear_no_historico(cur, user_id: int, antigo: str, novo: str) -> None:
@@ -793,10 +794,9 @@ def delete_pocket(user_id: int, pocket_name: str):
                 delete from launches
                  where user_id = %s
                    and lower(alvo) = lower(%s)
-                   and tipo in ('deposito_caixinha', 'saque_caixinha',
-                                'criar_caixinha', 'delete_pocket')
+                   and tipo = any(%s)
                 """,
-                (user_id, canon),
+                (user_id, canon, list(TIPOS_HISTORICO_CAIXINHA)),
             )
             cur.execute("delete from pockets where id=%s", (pocket_id,))
 
