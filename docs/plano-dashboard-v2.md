@@ -217,6 +217,6 @@ PR de cada etapa, não soluções prontas. Cada PR confere se ainda valem, decid
 
 - [x] Protótipo: perfis do Resumo (#573, #575), faixa do Piggy (#579), navegação com o
   Piggy no meio e Ferramentas (#582), página do chat (#584).
-- [ ] Protótipo: blocos que expandem na conversa (em outro chat).
+- [x] Protótipo: blocos que expandem na conversa, com estado por resposta e "Abrir no painel" (PR 3 do chat).
 - [ ] Pré-requisitos: #594 · Q42 · Q43 · Q40 (regra) · Q41
 - [ ] Etapa 0 · [ ] 1 · [ ] 2 · [ ] 3 · [ ] 4 · [ ] 5 · [ ] 6 · [ ] 7

@@ -23,9 +23,11 @@ import logging
 import os
 import re
 import unicodedata
+from contextvars import ContextVar
 from datetime import timedelta
 
 import db
+from core.services.ai_chat.runner import ERROR_MSG
 from core.services.plan_service import ai_chat_allowed, ai_monthly_limit_for
 
 logger = logging.getLogger(__name__)
@@ -81,20 +83,33 @@ _JANELA_DA_PERGUNTA = timedelta(minutes=10)
 
 
 def pergunta_aberta_da_ia(user_id: int) -> int | None:
-    """Id da última mensagem do histórico, se ela é uma pergunta da IA feita há
-    pouco; senão None.
+    """Se a IA deixou uma pergunta feita há pouco, o id da ÚLTIMA mensagem do
+    histórico (a âncora do `encerra_pergunta_da_ia`); senão None.
 
     A IA oferece coisas sem guardar pendência ("Quer que eu mostre suas maiores
     despesas?"), e o "sim" classifica como `confirm.yes` com confiança alta —
     não cai no fallback de IA, e o `route()` sem pendência responde "não
     entendi". Aqui o `handle_incoming` descobre que o "sim" é da IA.
+
+    Turno da IA que falhou não fecha a pergunta: o runner grava `user` +
+    `assistant(ERROR_MSG)`, ou só o `user` se a exceção escapou dele. Sem pular
+    esses turnos, a nova tentativa da resposta ("300 reais transporte") cairia
+    no `route()` e viraria despesa. Idem para as linhas intermediárias de um
+    turno que chamou tool e depois falhou (`assistant` com `tool_calls` e
+    `tool`): o turno que dá certo sempre termina no `assistant` final. Lê só a
+    janela, sem teto fixo de turnos falhos: a janela conta da pergunta, não da
+    falha, e um `system` (encerramento) fecha.
     """
-    last = db.ai_get_last_message(user_id)
-    if (last
-            and last["role"] == "assistant"
-            and last["age"] < _JANELA_DA_PERGUNTA
-            and re.search(r"\?\W*$", last["content"] or "")):
-        return last["id"]
+    # 100: só um teto para não varrer sem limite (50 turnos falhos em 10 min).
+    rows = db.ai_get_last_messages(user_id, 100, within=_JANELA_DA_PERGUNTA)
+    for m in rows:
+        if (m["role"] in ("user", "tool")
+                or (m["role"] == "assistant"
+                    and (m["has_tool_calls"] or m["content"] == ERROR_MSG))):
+            continue
+        if m["role"] == "assistant" and re.search(r"\?\W*$", m["content"] or ""):
+            return rows[0]["id"]
+        return None
     return None
 
 
@@ -106,15 +121,53 @@ _PERGUNTA_ENCERRADA = (
 )
 
 
-def encerra_pergunta_da_ia(user_id: int, pergunta_id: int) -> None:
-    """Fim de um turno do `handle_incoming`: se a pergunta que estava aberta
-    continua sendo a última mensagem, a IA não atendeu este turno (ex.: "saldo",
-    "plano", um OFX) — então ela deixa de estar em aberto. O `ai_messages` só vê
-    os turnos da IA, e sem isto um "sim" depois voltaria para a oferta antiga."""
+# O que o turno do `handle_incoming` faz com a pergunta aberta da IA:
+#   None    — leu a mensagem e a atendeu fora da IA: o `finally` encerra.
+#   MANTEM  — foi para a IA (resposta ou ERROR_MSG), não leu a mensagem (áudio
+#             antes de virar texto, texto vazio) ou falhou: a pergunta segue.
+#             O histórico não prova a ida à IA: o runner devolve ERROR_MSG sem
+#             gravar nada, e a nova tentativa ("300 reais transporte") cairia
+#             no route() como despesa.
+#   ENCERRA — largou a `ai_pending` com um comando claro: sem captura (o
+#             comando vai ao route()), e o `finally` encerra.
+MANTEM, ENCERRA = "mantem", "encerra"
+pergunta_no_turno: ContextVar[str | None] = ContextVar("pergunta_no_turno", default=None)
+
+
+def encerra_pergunta_da_ia(user_id: int, ultima_id: int) -> None:
+    """Fim de um turno do `handle_incoming` que NÃO foi para a IA (ex.:
+    "saldo", "plano", um OFX): a pergunta deixa de estar em aberto. O
+    `ai_messages` só vê os turnos da IA, e sem isto um "sim" depois voltaria
+    para a oferta antiga. Só grava se `ultima_id` (a âncora lida por
+    `pergunta_aberta_da_ia`) ainda for a última linha: a IA do app pode ter
+    respondido no meio, e aí a pergunta aberta é a dela."""
     try:
-        db.ai_append_message_if_last(user_id, pergunta_id, "system", _PERGUNTA_ENCERRADA)
+        db.ai_append_message_if_last(user_id, ultima_id, "system", _PERGUNTA_ENCERRADA)
     except Exception as exc:
         logger.warning("encerra_pergunta_da_ia falhou pra user %s: %s", user_id, exc)
+
+
+def aviso_de_cota(user_id: int) -> str | None:
+    """Para quem já está sem a IA (`ai_chat_allowed` False): o aviso de cota
+    esgotada, ou None se o motivo não é a cota (v1 sem Pro). No v2 todo tier
+    com IA só a perde pela cota mensal."""
+    from core.services.plan_service import (
+        plans_v2_enabled, get_user_limits, get_plan_tier, tier_at_least,
+    )
+    if not (plans_v2_enabled() and get_user_limits(user_id)["ai_conversational_enabled"]):
+        return None
+    tier = get_plan_tier(user_id)
+    acabou = "🐷 Suas mensagens com o Piggy deste mês acabaram!\n"
+    # A cota vira no dia 1º (db/ai_quota._current_month_start).
+    # Plus e Pro têm o mesmo teto: subir de um pro outro não dá mais mensagens.
+    if tier_at_least(tier, "plus"):
+        return acabou + "Elas renovam no dia 1º."
+    if tier == "essencial":
+        return (
+            acabou + "Elas renovam no dia 1º. No Plus você tem mais mensagens: "
+            "https://pigbankai.com/precos"
+        )
+    return acabou + "Nos planos pagos a conversa continua: https://pigbankai.com/precos"
 
 
 def handle_ai_chat_command(user_id: int, text: str, platform: str) -> str | None:
@@ -171,6 +224,7 @@ def handle_ai_chat_command(user_id: int, text: str, platform: str) -> str | None
                     and _res.confidence >= 0.55):
                 # Abandono: se perdeu o CAS, não havia nada nosso pra abandonar.
                 db.ai_consume_pending_action(user_id, pending)
+                pergunta_no_turno.set(ENCERRA)
                 return None
         except Exception as exc:
             logger.warning("guard anti-sequestro do ai_pending falhou: %s", exc)
@@ -214,22 +268,9 @@ def handle_ai_chat_command(user_id: int, text: str, platform: str) -> str | None
             except Exception:
                 pass
         try:
-            from core.services.plan_service import (
-                plans_v2_enabled, get_user_limits, get_plan_tier, tier_at_least,
-            )
-            if plans_v2_enabled() and get_user_limits(user_id)["ai_conversational_enabled"]:
-                tier = get_plan_tier(user_id)
-                acabou = "🐷 Suas mensagens com o Piggy deste mês acabaram!\n"
-                # A cota vira no dia 1º (db/ai_quota._current_month_start).
-                # Plus e Pro têm o mesmo teto: subir de um pro outro não dá mais mensagens.
-                if tier_at_least(tier, "plus"):
-                    return acabou + "Elas renovam no dia 1º."
-                if tier == "essencial":
-                    return (
-                        acabou + "Elas renovam no dia 1º. No Plus você tem mais mensagens: "
-                        "https://pigbankai.com/precos"
-                    )
-                return acabou + "Nos planos pagos a conversa continua: https://pigbankai.com/precos"
+            aviso = aviso_de_cota(user_id)
+            if aviso:
+                return aviso
         except Exception:
             pass
         return (
@@ -238,6 +279,7 @@ def handle_ai_chat_command(user_id: int, text: str, platform: str) -> str | None
         )
 
     # 4. Tem acesso: roteia pra IA (cota do tier).
+    pergunta_no_turno.set(MANTEM)
     from core.services.ai_chat import chat as ai_chat_run
     try:
         return ai_chat_run(

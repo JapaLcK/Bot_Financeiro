@@ -126,7 +126,9 @@ antes de tratar 401 na mão em qualquer tela.
 
 Caminhos de entrada, todos em `/auth/*`: `register` → `verify-email` (código de 6
 dígitos) → `login`; `forgot-password`/`reset-password`; **Google OAuth**
-(`google/start`, `google/callback`, `google/complete-signup`, `google/pending/{token}`);
+(`google/start`, `google/callback`, `google/complete-signup`, `google/pending/{token}`,
+e `google/exchange`, que troca por Bearer o código que o callback devolve ao app nativo
+quando o login começa em `google/start?app=2`);
 `dashboard-link`/`dashboard-token` (link mágico); `link-code` (vincula WhatsApp e
 Discord à conta); `logout`; `refresh`; `account` (exclusão) e `account/export`.
 

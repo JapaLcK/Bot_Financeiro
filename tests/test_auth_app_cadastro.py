@@ -11,8 +11,10 @@ B9 repete de propósito, porque é esse descarte que ele prova.
 
 Controle negativo do grupo: forçar `_entrega_sessao` a ir sempre pelo ramo do
 navegador deixa B1, B3, B4 e B5 vermelhos; pular a busca por `phone_hash` deixa
-B9 vermelho (medido em 2026-09-25). Controle positivo: B2 (o navegador segue
-recebendo cookie e nenhum token no corpo).
+B9 vermelho (medido em 2026-09-25); tirar o `except` de
+`gravar_descartando_telefone_disputado` deixa B11 vermelho (medido em
+2026-09-26). Controle positivo: B2 (o navegador segue recebendo cookie e
+nenhum token no corpo) e B9 para o B11.
 """
 import uuid
 
@@ -234,5 +236,37 @@ def test_b9_telefone_de_outra_conta_e_descartado_sem_enumerar(correio):
     r = _cadastro_do_app(correio, email, phone=telefone)  # confere o corpo do register
     assert r.status_code == 200, r.text
     assert correio["avisos"] == []
+    assert _conta(email)["phone_e164"] is None
+    assert _conta(dono)["phone_e164"] == normalize_phone_e164(telefone)
+
+
+# ── B11: telefone gravado por outra conta ENTRE o register e o verify ────────
+
+def test_b11_telefone_tomado_antes_do_verify_e_descartado_sem_500(correio):
+    """O register confere o telefone e o verify o grava até 15 min depois; se
+    outra conta gravou o número nesse meio-tempo, o INSERT batia no índice
+    único e o verify dava 500 (irmão da #585). O B9 é o positivo."""
+    telefone = _telefone()
+    email = _email()
+    client = TestClient(dashboard.app)
+    r = client.post(
+        "/auth/register",
+        headers=_cabecalhos_app(),
+        json={"email": email, "password": SENHA, "phone": telefone, "name": "Fulana"},
+    )
+    assert r.status_code == 200, r.text
+    codigo = correio["codigos"][email]
+
+    dono = _email()
+    db.confirm_email_verification(dono, db.create_email_verification(dono, SENHA, telefone))
+
+    client.cookies.clear()
+    r = client.post(
+        "/auth/verify-email",
+        headers=_cabecalhos_app(),
+        json={"email": email, "code": codigo},
+    )
+    assert r.status_code == 200, r.text
+    assert r.json()["access_token"]
     assert _conta(email)["phone_e164"] is None
     assert _conta(dono)["phone_e164"] == normalize_phone_e164(telefone)

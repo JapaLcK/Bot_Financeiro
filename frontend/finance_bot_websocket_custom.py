@@ -3323,7 +3323,7 @@ async def auth_login(request: Request, response: Response, body: LoginBody):
     """Login via email+senha. Retorna JWT + link_code novo para vincular o bot."""
     import sys
     sys.path.insert(0, str(pathlib.Path(__file__).parent.parent))
-    from db import login_auth_user, create_link_code, find_user_id_by_email, email_has_password
+    from db import login_auth_user, find_user_id_by_email, email_has_password
 
     await _check_auth_rate_limits("login", request, body.email)
 
@@ -3353,7 +3353,18 @@ async def auth_login(request: Request, response: Response, body: LoginBody):
         )
         raise HTTPException(status_code=401, detail="E-mail ou senha incorretos.")
 
-    user_id    = result["user_id"]
+    return await _concluir_login(
+        request, response, user_id=result["user_id"], email=result["email"], plan=result["plan"]
+    )
+
+
+async def _concluir_login(
+    request: Request, response: Response, *, user_id: int, email: str, plan: str
+) -> dict:
+    """Final comum de `/auth/login` e `/auth/google/exchange`, depois de a
+    identidade estar provada: exclusão agendada → desafio de MFA → sessão."""
+    from db import create_link_code
+
     _raise_if_account_scheduled_for_deletion(user_id)
 
     # Se o usuario tem MFA ativado, emite challenge token e retorna 200 com
@@ -3364,7 +3375,7 @@ async def auth_login(request: Request, response: Response, body: LoginBody):
     if mfa_status.get("enabled"):
         challenge = await asyncio.to_thread(mfa_create_login_challenge, user_id)
         await log_auth_login_event(
-            result["email"],
+            email,
             True,
             user_id=user_id,
             ip_address=get_remote_address(request),
@@ -3374,11 +3385,11 @@ async def auth_login(request: Request, response: Response, body: LoginBody):
         return {
             "mfa_required": True,
             "mfa_challenge": challenge,
-            "email": result["email"],
+            "email": email,
         }
 
     link_code  = create_link_code(user_id, minutes_valid=15)
-    token, jti, refresh = _issue_session_token(user_id, result["email"], request)
+    token, jti, refresh = _issue_session_token(user_id, email, request)
     credenciais = _entrega_sessao(
         request, response, user_id=user_id, access=token, jti=jti, refresh=refresh
     )
@@ -3387,7 +3398,7 @@ async def auth_login(request: Request, response: Response, body: LoginBody):
     await asyncio.to_thread(maybe_record_login_from_new_ip, user_id, request=request)
 
     await log_auth_login_event(
-        result["email"],
+        email,
         True,
         user_id=user_id,
         ip_address=get_remote_address(request),
@@ -3398,8 +3409,8 @@ async def auth_login(request: Request, response: Response, body: LoginBody):
 
     return {
         "user_id": user_id,
-        "email": result["email"],
-        "plan": result["plan"],
+        "email": email,
+        "plan": plan,
         "link_code": link_code,
         "whatsapp_link": wa_link,
         "dashboard_url": _post_login_url(user_id),
@@ -4319,6 +4330,10 @@ class GoogleSignupCompleteBody(_CorpoSemVeneno):
     accepted_terms: bool = False
 
 
+class GoogleExchangeBody(_CorpoSemVeneno):
+    code: str
+
+
 def _google_oauth_next_url(value: str | None) -> str | None:
     """Aceita somente destinos internos conhecidos após o OAuth."""
     return value if value == GOOGLE_OAUTH_PURCHASE_CONTINUE_URL else None
@@ -4337,6 +4352,12 @@ def _google_redirect_to_landing(message: str) -> RedirectResponse:
     return response
 
 
+def _google_app_scheme(state: str | None) -> str | None:
+    """Scheme do app que abriu o login, pelo prefixo do `state` (ver
+    `/auth/google/start`): "app-" é o app antigo, "nat-" o nativo novo. None: web."""
+    return {"app-": "pigbankai", "nat-": "pigbank"}.get((state or "")[:4])
+
+
 @app.get("/auth/google/start")
 @limiter.limit("10/minute")
 async def auth_google_start(
@@ -4346,11 +4367,13 @@ async def auth_google_start(
 ):
     """Gera state, salva em cookie short-lived e redireciona pro Google.
 
-    `app=1`: fluxo iniciado pelo app iOS (via ASWebAuthenticationSession). O
-    marcador viaja no próprio `state` (prefixo "app-"), que o Google devolve
-    intacto no callback — sem precisar de cookie extra. Assim o callback sabe
-    devolver um código de uso único pelo scheme `pigbankai://` em vez de setar
-    cookies num navegador que não é o WebView do app."""
+    `app=1`: fluxo iniciado pelo app iOS antigo (Capacitor, via
+    ASWebAuthenticationSession). `app=2`: fluxo do app nativo novo (Expo). O
+    marcador viaja no próprio `state` (prefixo "app-" ou "nat-"), que o Google
+    devolve intacto no callback — sem precisar de cookie extra. Assim o callback
+    sabe devolver um código de uso único pelo scheme do app (`pigbankai://` ou
+    `pigbank://`, ver `_google_app_scheme`) em vez de setar cookies num
+    navegador que não é o do app."""
     from core.services.google_oauth import (
         GoogleOAuthError,
         build_authorization_url,
@@ -4363,7 +4386,7 @@ async def auth_google_start(
             detail="Login com Google ainda não está configurado neste ambiente.",
         )
 
-    state = ("app-" if app == 1 else "") + secrets.token_urlsafe(32)
+    state = {1: "app-", 2: "nat-"}.get(app, "") + secrets.token_urlsafe(32)
     try:
         url = build_authorization_url(state)
     except GoogleOAuthError as exc:
@@ -4381,7 +4404,7 @@ async def auth_google_start(
         path="/auth/google",
     )
     continue_url = _google_oauth_next_url(next_url)
-    if continue_url and app != 1:
+    if continue_url and app == 0:
         response.set_cookie(
             GOOGLE_OAUTH_NEXT_COOKIE,
             continue_url,
@@ -4428,21 +4451,35 @@ async def auth_google_callback(
 
     cookie_state = request.cookies.get(GOOGLE_OAUTH_STATE_COOKIE) or ""
     next_url = _google_oauth_next_url(request.cookies.get(GOOGLE_OAUTH_NEXT_COOKIE))
-    # Fluxo do app iOS: o state carrega o prefixo "app-" (ver /auth/google/start)
-    is_app_flow = bool(state) and state.startswith("app-")
+    # Fluxo dos apps: o state carrega o prefixo do app (ver /auth/google/start).
+    # Só vale com o state conferido contra o cookie: sem isso, um state `nat-`
+    # forjado faria um erro qualquer voltar ao app como se fosse legítimo.
+    state_ok = bool(state and cookie_state and constant_time_eq(state, cookie_state))
+    scheme = _google_app_scheme(state) if state_ok else None
+
+    def _erro(codigo: str, message: str) -> RedirectResponse:
+        # App nativo: o erro volta ao app com um código FIXO, nenhum texto
+        # refletido. App antigo e web seguem na landing, como sempre.
+        if scheme != "pigbank":
+            return _google_redirect_to_landing(message)
+        erro_response = RedirectResponse(url=f"pigbank://auth?erro={codigo}", status_code=302)
+        _clear_google_oauth_cookies(erro_response)
+        return erro_response
 
     if error:
-        return _google_redirect_to_landing(f"Login com Google cancelado: {error}")
+        return _erro("cancelado" if error == "access_denied" else "falha",
+                     f"Login com Google cancelado: {error}")
 
-    if not code or not state or not cookie_state or not constant_time_eq(state, cookie_state):
-        return _google_redirect_to_landing("Sessão de login expirou. Tente novamente.")
+    if not code or not state_ok:
+        # No app nativo só chega aqui com o state conferido e sem `code`.
+        return _erro("falha", "Sessão de login expirou. Tente novamente.")
 
     try:
         try:
             tokens = await exchange_code_for_tokens(code)
             claims = verify_id_token(tokens["id_token"])
         except GoogleOAuthError as exc:
-            return _google_redirect_to_landing(str(exc))
+            return _erro("falha", str(exc))
 
         sub = claims["sub"]
         email = (claims.get("email") or "").strip().lower()
@@ -4450,8 +4487,9 @@ async def auth_google_callback(
         name_hint = claims.get("name") or claims.get("given_name") or None
 
         if not email or not email_verified:
-            return _google_redirect_to_landing(
-                "Sua conta Google não tem e-mail verificado. Verifique no Google e tente novamente."
+            return _erro(
+                "email_nao_verificado",
+                "Sua conta Google não tem e-mail verificado. Verifique no Google e tente novamente.",
             )
 
         # 1) Já existe vínculo? → login direto
@@ -4473,7 +4511,7 @@ async def auth_google_callback(
             # pra /completar-cadastro (frontend/routes/static_pages.py), que é o
             # que mantém o cadastro por Google funcionando nos apps já
             # instalados. Web: vai direto pro destino final.
-            onb_url = (f"pigbankai://auth?onboarding={token}" if is_app_flow
+            onb_url = (f"{scheme}://auth?onboarding={token}" if scheme
                        else f"/completar-cadastro?token={token}")
             signup_response = RedirectResponse(url=onb_url, status_code=302)
             _clear_google_oauth_cookies(signup_response)
@@ -4483,22 +4521,26 @@ async def auth_google_callback(
         try:
             _raise_if_account_scheduled_for_deletion(user_id)
         except HTTPException as exc:
-            return _google_redirect_to_landing(exc.detail)
+            return _erro("conta_em_exclusao", exc.detail)
 
-        # App iOS: NÃO seta cookies aqui (esta resposta vive no navegador nativo
-        # do ASWebAuthenticationSession, não no WebView). Em vez disso, gera um
-        # código de uso único e devolve pelo scheme; o app carrega /d/{code} no
-        # WebView, que aí sim seta os cookies e loga de verdade.
-        if is_app_flow:
+        # Apps: NÃO seta cookies aqui (esta resposta vive no navegador nativo
+        # do ASWebAuthenticationSession, não no app). Em vez disso, gera um
+        # código de uso único e devolve pelo scheme. O app antigo carrega
+        # /d/{code} no WebView, que aí sim seta os cookies; o nativo troca o
+        # código por Bearer em POST /auth/google/exchange.
+        if scheme:
             from db import create_dashboard_session
             code = await asyncio.to_thread(create_dashboard_session, int(user_id), 5 / 60)
-            await asyncio.to_thread(maybe_record_login_from_new_ip, user_id, request=request)
-            await log_auth_login_event(
-                email, True, user_id=user_id,
-                ip_address=get_remote_address(request),
-                user_agent=request.headers.get("user-agent"),
-            )
-            app_response = RedirectResponse(url=f"pigbankai://auth?code={code}", status_code=302)
+            # No nativo o login só se completa na troca, que pede o MFA e
+            # registra o evento lá; registrar aqui contaria login que não houve.
+            if scheme == "pigbankai":
+                await asyncio.to_thread(maybe_record_login_from_new_ip, user_id, request=request)
+                await log_auth_login_event(
+                    email, True, user_id=user_id,
+                    ip_address=get_remote_address(request),
+                    user_agent=request.headers.get("user-agent"),
+                )
+            app_response = RedirectResponse(url=f"{scheme}://auth?code={code}", status_code=302)
             _clear_google_oauth_cookies(app_response)
             return app_response
 
@@ -4528,9 +4570,39 @@ async def auth_google_callback(
     except Exception as exc:
         _log.error("Falha inesperada no /auth/google/callback: %s\n%s",
                    exc, _traceback.format_exc())
-        return _google_redirect_to_landing(
-            f"Falha inesperada no login Google ({type(exc).__name__}). Veja o terminal do servidor."
+        return _erro(
+            "falha",
+            f"Falha inesperada no login Google ({type(exc).__name__}). Veja o terminal do servidor.",
         )
+
+
+@app.post("/auth/google/exchange")
+@limiter.limit("10/minute")
+async def auth_google_exchange(request: Request, response: Response, body: GoogleExchangeBody):
+    """App nativo: troca o código do callback `nat-` pela sessão.
+
+    O código vai no CORPO, nunca no path: com path param o `@limiter.limit`
+    abre um balde por URL e o teto não vale (ver `/d/{code}`). O `user_id` sai
+    SÓ da linha do código consumido. A tabela é a `dashboard_sessions`, a mesma
+    do magic link do bot: quem tem um código do bot também o troca aqui, com o
+    mesmo poder que já tem pelo `/d/{code}`.
+    """
+    from db import consume_dashboard_session, get_auth_user
+
+    user_id = await asyncio.to_thread(consume_dashboard_session, body.code.strip())
+    user = await asyncio.to_thread(get_auth_user, user_id) if user_id else None
+    if not user:
+        # 400, nunca 401: 401 é "renove a sessão" no interceptor do app.
+        return JSONResponse(
+            status_code=400,
+            content={
+                "detail": "Não deu para concluir a entrada com o Google. Tente de novo.",
+                "code": "google_code_invalid",
+            },
+        )
+    return await _concluir_login(
+        request, response, user_id=int(user_id), email=user["email"], plan=user.get("plan", "free")
+    )
 
 
 @app.get("/auth/google/pending/{token}")

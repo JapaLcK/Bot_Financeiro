@@ -624,8 +624,27 @@ def _maybe_send_autolink_greeting_warning(
     return True
 
 
+def _pergunta_da_ia(uid: int):
+    """(pid, âncora) da pergunta aberta da IA no INÍCIO do turno, como o núcleo lê."""
+    try:
+        from core.handle_incoming import _normalize_user_id
+        from core.services.ai_chat_commands import pergunta_aberta_da_ia
+        pid = _normalize_user_id(IncomingMessage(platform="whatsapp", user_id=uid, text=""))
+        return pid, pergunta_aberta_da_ia(pid)
+    except Exception as exc:
+        logger.warning("WA pergunta_aberta_da_ia falhou: %s", exc)
+        return None, None
+
+
 def process_message(message: InboundMessage) -> None:
     core_started = False
+    # Turno atendido aqui, sem chegar ao `handle_incoming` (botão, `ajuda`,
+    # catálogo, `tutorial`, pendência de recategorizar/valor de conta): o
+    # `finally` encerra a pergunta aberta da IA, como o `finally` do núcleo faz.
+    # Mensagem descartada sem resposta e exceção a mantêm.
+    uid = None
+    pid = ancora = None
+    mantem_pergunta = False
     try:
         reply_to = message.wa_id
         logger.info(
@@ -637,6 +656,9 @@ def process_message(message: InboundMessage) -> None:
         )
         uid = get_or_create_canonical_user("whatsapp", message.wa_id)
         logger.info("WA canonical user resolved uid=%s from=%s", uid, message.wa_id)
+        # Âncora lida antes de qualquer tratamento pré-núcleo: pergunta que o app
+        # criar durante este turno não é deste turno e fica aberta.
+        pid, ancora = _pergunta_da_ia(uid)
 
         auto_link_result = attempt_whatsapp_phone_link(message.wa_id, current_user_id=uid)
         if auto_link_result["status"] in {"linked", "already_linked"}:
@@ -649,6 +671,7 @@ def process_message(message: InboundMessage) -> None:
                     message.wa_id,
                 )
                 uid = resolved_uid
+                pid, ancora = _pergunta_da_ia(uid)
             if auto_link_result["status"] == "linked":
                 logger.info(
                     "WA phone auto-link success wa_id=%s final_user_id=%s",
@@ -1208,6 +1231,7 @@ def process_message(message: InboundMessage) -> None:
                     logger.warning("WA clear bill_pay_amount pending failed: %s", exc)
                     reivindicou = False
                 if not reivindicou:
+                    mantem_pergunta = True  # o turno vencedor responde
                     return
                 if bill_id:
                     from db.bills import mark_bill_paid
@@ -1297,6 +1321,7 @@ def process_message(message: InboundMessage) -> None:
 
         if _seen_recent(msg_id):
             logger.info("WA duplicate ignored message_id=%s", msg_id)
+            mantem_pergunta = True
             return
 
         try:
@@ -1324,7 +1349,11 @@ def process_message(message: InboundMessage) -> None:
         )
 
         core_started = True
-        outs = handle_incoming(incoming, ignora_pendencias=ignora_pendencias) or []
+        # Todo botão/lista que não deu `return` acima chega aqui (o
+        # `undo_launch` como "desfazer", o `confirm_yes` como "Sim"): não
+        # é capturado pela pergunta aberta da IA.
+        outs = handle_incoming(incoming, ignora_pendencias=ignora_pendencias,
+                               de_botao=bool(interactive_id)) or []
         if not outs:
             logger.info("WA no outgoing messages for from=%s", message.wa_id)
             _send_reply(reply_to, "Nao entendi. Digite ajuda para ver os comandos.")
@@ -1341,6 +1370,7 @@ def process_message(message: InboundMessage) -> None:
             logger.warning("WA outgoing messages had no deliverable text from=%s", message.wa_id)
             _send_reply(reply_to, _DELIVERY_FAILURE_MESSAGE)
     except Exception as exc:
+        mantem_pergunta = True
         logger.error("WA message processing failed wa_id=%s error=%s", message.wa_id, exc)
         try:
             log_system_event_sync(
@@ -1370,6 +1400,13 @@ def process_message(message: InboundMessage) -> None:
                 message.wa_id,
                 send_exc,
             )
+    finally:
+        if ancora is not None and not core_started and not mantem_pergunta:
+            try:
+                from core.services.ai_chat_commands import encerra_pergunta_da_ia
+                encerra_pergunta_da_ia(pid, ancora)
+            except Exception as exc:
+                logger.warning("WA encerrar pergunta da IA fora do núcleo falhou: %s", exc)
 
 
 def process_payload(payload: dict[str, Any]) -> int:
