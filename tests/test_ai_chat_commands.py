@@ -296,7 +296,7 @@ def _cota_esgotada(monkeypatch, uid, plan):
     import db
     from conftest import em_carencia, promote_to_pro
 
-    # "free" no v2 com acesso à Piggy = carência de cobrança (tier free).
+    # "free" no v2 com acesso ao Piggy = carência de cobrança (tier free).
     em_carencia(uid) if plan == "free" else promote_to_pro(uid, plan=plan)
     with db.get_conn() as conn, conn.cursor() as cur:
         cur.execute(
@@ -329,6 +329,6 @@ def test_cota_esgotada_plus_e_pro_so_renova_sem_upgrade(user_id, monkeypatch, pl
 def test_cota_esgotada_gratis_mantem_texto_dos_planos_pagos(user_id, monkeypatch):
     out = _cota_esgotada(monkeypatch, user_id, "free")
     assert out == (
-        "🐷 Suas mensagens com a Piggy deste mês acabaram!\n"
+        "🐷 Suas mensagens com o Piggy deste mês acabaram!\n"
         "Nos planos pagos a conversa continua: https://pigbankai.com/precos"
     )

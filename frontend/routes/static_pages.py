@@ -985,7 +985,7 @@ async def serve_brand_asset(path: str):
 
 @router.get("/wa")
 async def open_whatsapp_bot():
-    """Abre o chat DIRETO com a Piggy no WhatsApp (deep link), com saudação
+    """Abre o chat DIRETO com o Piggy no WhatsApp (deep link), com saudação
     pré-preenchida. Botões do site apontam pra cá — o número real fica no
     servidor (WHATSAPP_NUMBER), nada hardcoded no HTML. Serve pra reencontrar
     o bot rápido. Sem número configurado, cai no seletor genérico do WhatsApp."""

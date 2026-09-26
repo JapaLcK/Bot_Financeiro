@@ -661,7 +661,7 @@ def ai_monthly_limit_for_tier(tier: str) -> int:
 
 
 def ai_chat_allowed(user_id: int) -> bool:
-    """Pode falar com a Piggy agora? v1: só Pro. v2: todo tier tem IA — a cota
+    """Pode falar com o Piggy agora? v1: só Pro. v2: todo tier tem IA — a cota
     mensal é quem limita (checada dentro do chat via monthly_limit)."""
     if not plans_v2_enabled():
         return is_pro(user_id)
