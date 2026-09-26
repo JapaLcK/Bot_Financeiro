@@ -777,6 +777,34 @@ class AccountAlreadyExistsError(Exception):
         self.existing_user_id = existing_user_id
 
 
+# Os DOIS índices únicos do telefone em `auth_accounts` (`db/schema.py`): o do
+# `phone_e164` e o do `phone_hash`. O INSERT grava os dois e o Postgres acusa o
+# que conferir primeiro. `tests/test_auth_google_app_cadastro.py` confere que
+# os nomes existem no banco.
+INDICES_TELEFONE_UNICO = ("idx_auth_accounts_phone_unique", "idx_auth_accounts_phone_hash_unique")
+
+
+def gravar_descartando_telefone_disputado(conn, gravar, telefone: str | None) -> None:
+    """Roda `gravar(telefone)`; se outra conta gravou o mesmo número entre a
+    busca por `phone_hash` e o INSERT, desfaz e grava de novo SEM telefone.
+
+    É o mesmo descarte silencioso da busca (`create_email_verification_impl`),
+    agora também na corrida: a conta nasce sem WhatsApp, nunca num 500.
+    Só a violação dos índices do telefone é engolida; qualquer outra sobe.
+
+    ponytail: variantes diferentes do mesmo número (com e sem o nono dígito)
+    gravadas ao mesmo tempo têm hashes diferentes e as duas entram — mesmo
+    limite do register.
+    """
+    try:
+        gravar(telefone)
+    except psycopg.errors.UniqueViolation as exc:
+        if telefone is None or exc.diag.constraint_name not in INDICES_TELEFONE_UNICO:
+            raise
+        conn.rollback()
+        gravar(None)
+
+
 def create_email_verification_impl(
     get_conn,
     hash_password,
@@ -889,7 +917,9 @@ def confirm_email_verification_impl(
     verification_id = row["id"]
     user_id = get_or_create_canonical_user("email", email)
 
-    with get_conn() as conn:
+    # O telefone foi conferido no register, até 15 min antes: outra conta pode
+    # tê-lo gravado nesse meio-tempo. `conn` é o do `with` logo abaixo.
+    def _gravar(phone_e164):
         with conn.cursor() as cur:
             cur.execute(
                 """
@@ -926,6 +956,9 @@ def confirm_email_verification_impl(
                 "update email_verification_codes set used_at = now() where id = %s",
                 (verification_id,),
             )
+
+    with get_conn() as conn:
+        gravar_descartando_telefone_disputado(conn, _gravar, phone_e164)
         conn.commit()
     invalidate_auth_user_cache(user_id)
 

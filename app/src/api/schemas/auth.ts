@@ -45,6 +45,12 @@ export const desafioMfaSchema = z.object({
 /** O que `/auth/login` pode devolver com 200: credencial OU desafio. */
 export const respostaLoginSchema = z.union([desafioMfaSchema, loginSchema]);
 
+/** `GET /auth/google/pending/{token}`: o pré-cadastro de quem entrou pelo Google sem conta. */
+export const pendenteGoogleSchema = z.object({
+  email: z.string(),
+  name_hint: z.string(),
+});
+
 export type Credenciais = z.infer<typeof credenciaisSchema>;
 export type Perfil = z.infer<typeof perfilSchema>;
 

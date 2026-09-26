@@ -128,3 +128,41 @@ def login_http(monkeypatch, *, como_app: bool, ua: str | None = None):
     assert r.status_code == 200, r.text
     return r.json(), r
 
+
+
+# ── Login social: o Google é o ÚNICO dublê ───────────────────────────────────
+# Usado pelos `tests/test_auth_google_app_*.py`. Banco, rotas, state, cookie e
+# sessão são os de verdade; só o que sairia para a rede do Google é trocado.
+
+def google_de_mentira(monkeypatch, email: str, *, verificado: bool = True) -> None:
+    """`build_authorization_url` devolve o state na URL, e a troca do `code`
+    devolve este e-mail. O `sub` deriva do e-mail: cada teste tem o seu."""
+    import core.services.google_oauth as google_oauth
+
+    async def _troca(_code):
+        return {"id_token": "id-token-de-teste"}
+
+    monkeypatch.setattr(google_oauth, "is_configured", lambda: True)
+    monkeypatch.setattr(
+        google_oauth, "build_authorization_url",
+        lambda state: f"https://accounts.google.test/auth?state={state}",
+    )
+    monkeypatch.setattr(google_oauth, "exchange_code_for_tokens", _troca)
+    monkeypatch.setattr(google_oauth, "verify_id_token", lambda _t: {
+        "sub": f"sub-{email}", "email": email,
+        "email_verified": verificado, "name": "Fulana Google",
+    })
+
+
+def login_google(app: int, **query):
+    """`/auth/google/start?app=N` → `/auth/google/callback` com o state que o
+    start gravou no cookie. Devolve (cliente, 302 do callback). `query`
+    sobrescreve a URL do callback (`state=` errado, `error=`)."""
+    from urllib.parse import parse_qs, urlparse
+
+    client = TestClient(dashboard.app)
+    inicio = client.get(f"/auth/google/start?app={app}", follow_redirects=False)
+    assert inicio.status_code == 302, inicio.text
+    state = parse_qs(urlparse(inicio.headers["location"]).query)["state"][0]
+    params = {"code": "code-do-google", "state": state, **query}
+    return client, client.get("/auth/google/callback", params=params, follow_redirects=False)

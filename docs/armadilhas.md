@@ -357,7 +357,10 @@ fixo de toda mudança de layout.
   para `frontend/routes/` (`static_pages`, `settings`, `pockets`, `cards`,
   `analytics`, `open_finance`, `push`, `agents`, `affiliates`, `shared`), registradas
   por `include_router`. **Rota nova vai para um router de `frontend/routes/`** — não
-  para o monólito. O plano completo está em `docs/refactor_plan.md`.
+  para o monólito. O plano completo está em `docs/refactor_plan.md`. Exceção:
+  `POST /auth/google/exchange` fica no monólito, ao lado das `/auth/google/*`,
+  porque depende de `_entrega_sessao`, `_issue_session_token` e `_concluir_login`,
+  que moram lá — importá-los de um router cria import circular.
 - **Isolamento por usuário é regra dura.** A formulação da regra mora no §0 do
   `CLAUDE.md`, que é auto-carregado — instrução de segurança não pode depender de
   alguém abrir este arquivo. Aqui fica só o lembrete de que ela vale em todo `db/`.
