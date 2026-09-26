@@ -68,7 +68,8 @@ Piggy com IA real e blocos. Pix, conexão do Open Finance, MFA e notificações 
   etapa 0.
 - **Q43 — o manual para de render**: caixinha manual e investimento manual antigo deixam
   de ganhar juro simulado, antes da etapa 0 e também no painel antigo. O ganho já acumulado
-  entra no saldo uma última vez, com aviso.
+  entra no saldo uma última vez. Sem aviso ao usuário: o dono decidiu em 2026-09-26 (#623)
+  que ele não será enviado por canal nenhum.
 
 ## 3. A API nova: `/api/v2`
 

@@ -1480,7 +1480,9 @@ def test_C1_o_accrual_muda_quais_lotes_o_saque_consome(user_id):
         with db.get_conn() as conn, conn.cursor() as cur:   # 60 dias sem accrual
             cur.execute("update pocket_lots set opened_at=%s, last_date=%s where user_id=%s",
                         (inicio, inicio, user_id))
-            cur.execute("update pockets set last_interest_date=%s where user_id=%s",
+            # Q43: caixinha anterior ao congelamento; o saque é a acumulação final.
+            cur.execute("update pockets set last_interest_date=%s, interest_frozen_at=null, "
+                        "interest_enabled=true where user_id=%s",
                         (inicio, user_id))
             conn.commit()
 

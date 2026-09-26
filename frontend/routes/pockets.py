@@ -91,7 +91,7 @@ async def create_pocket_route(request: Request, user_id: int, payload: PocketCre
             "id": int(pocket_id),
             "name": canon,
             "description": description,
-            "interest_enabled": bool(payload.interest_enabled),
+            "interest_enabled": False,  # Q43: caixinha nova nasce sem rendimento
             "interest_rate": interest_rate,
             "interest_period": "cdi",
         },
