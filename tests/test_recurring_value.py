@@ -28,7 +28,8 @@ def _seed(uid, tipo, valor, desc, n=1):
     """Cria n lançamentos históricos de `desc` com `valor`."""
     for _ in range(n):
         launches.add_from_entities(uid, tipo=tipo, valor=float(valor),
-                                   alvo=desc, nota=desc, platform="whatsapp")
+                                   alvo=desc, nota=desc, platform="whatsapp",
+                                   forma_pagamento="desconhecida")
 
 
 class _Att:

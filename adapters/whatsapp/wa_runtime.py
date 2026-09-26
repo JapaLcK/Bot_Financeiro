@@ -956,7 +956,8 @@ def process_message(message: InboundMessage) -> None:
                     return
                 # (o corte já foi aplicado no gate único lá em cima, junto com
                 # os outros cinco botões que escrevem)
-                from db.bills import get_bill, mark_bill_paid
+                from core.handlers import forma_pagamento as fp
+                from db.bills import get_bill
                 from utils_text import fmt_brl
                 try:
                     bill = get_bill(uid, bill_id)
@@ -966,6 +967,17 @@ def process_message(message: InboundMessage) -> None:
                     return
                 if bill is None or bill.get("status") == "paid":
                     _send_reply(reply_to, "Essa conta já estava paga (ou não achei mais). 👍")
+                    return
+                # Q40/Q7: com banco conectado, a FORMA vem antes do valor. A
+                # resposta ("pix", "dinheiro") chega pelo `handle_incoming` e é
+                # resolvida no `route()`. Sem banco, o fluxo de sempre abaixo.
+                try:
+                    if fp.decidir(uid, fp.DESCONHECIDA) == fp.PERGUNTA:
+                        _send_reply(reply_to, fp.perguntar_conta(uid, bill, None))
+                        return
+                except Exception as exc:
+                    logger.exception("WA bill_paid pergunta de forma falhou bill=%s: %s", bill_id, exc)
+                    _send_reply(reply_to, "Não consegui registrar o pagamento agora. Tente em instantes.")
                     return
                 # Valor variável (água/luz): o estimado não serve — pergunta quanto
                 # veio e a próxima mensagem (número) fecha o pagamento.
@@ -1023,7 +1035,7 @@ def process_message(message: InboundMessage) -> None:
                     return
                 # Valor fixo: quita direto no valor cadastrado.
                 try:
-                    paid = mark_bill_paid(uid, bill_id)
+                    _, paid = fp.quitar(uid, bill_id, None, fp.DESCONHECIDA)
                 except Exception as exc:
                     logger.exception("WA bill_paid failed bill=%s: %s", bill_id, exc)
                     _send_reply(reply_to, "Não consegui registrar o pagamento agora. Tente em instantes.")
@@ -1234,7 +1246,7 @@ def process_message(message: InboundMessage) -> None:
                     mantem_pergunta = True  # o turno vencedor responde
                     return
                 if bill_id:
-                    from db.bills import mark_bill_paid
+                    from core.handlers import forma_pagamento as fp
                     try:
                         # Devolve a pergunta se o pagamento estourar: sem isso o
                         # "Tente em instantes" é mentira — a pendência já foi e o
@@ -1242,7 +1254,17 @@ def process_message(message: InboundMessage) -> None:
                         # que ela foi armada (:773). Mesmo desenho da outra porta
                         # desta pergunta (core/handlers/bills.py::resolve_bill_amount).
                         with restore_pending_on_error(uid, pending_recat, 30):
-                            paid = mark_bill_paid(uid, int(bill_id), amount)
+                            status, paid = fp.quitar(
+                                uid, int(bill_id), amount,
+                                payload_bp.get("forma_pagamento", fp.DESCONHECIDA))
+                        if status == fp.PERGUNTA:
+                            # Banco conectado entre as duas mensagens, ou
+                            # pendência de antes da Q40: a forma, com o valor.
+                            from db.bills import get_bill
+                            bill = get_bill(uid, int(bill_id))
+                            if bill and bill.get("status") != "paid":
+                                _send_reply(reply_to, fp.perguntar_conta(uid, bill, amount))
+                                return
                     except Exception as exc:
                         logger.exception("WA bill_pay_amount mark failed bill=%s: %s", bill_id, exc)
                         _send_reply(reply_to, "Não consegui registrar o pagamento agora. Tente em instantes.")

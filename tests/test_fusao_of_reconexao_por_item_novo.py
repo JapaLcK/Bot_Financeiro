@@ -57,7 +57,7 @@ def _funde_um_real_no_item_a(uid: int) -> int:
     hoje = today_tz()
     conta = f"acc-real-{uid}"
     a = _item(uid, f"item-A-{uid}", conta, "114.88")
-    manda(uid, "Gastei 1 real com a barbara")
+    manda(uid, "Gastei 1 real com a barbara em dinheiro")
     _item(uid, f"item-A-{uid}", conta, "113.88",
           [tx(uid, "-1.00", hoje, "PIX ENVIADO BARBARA")])
     # o casamento é rebaixado a pendência (candidato manual) e a confirmação tem
@@ -138,7 +138,7 @@ def test_mesmo_provider_account_id_em_dois_usuarios_nao_vaza(uid_pro, ia_fora):
 
     # o dono funde 1 real numa conta com o id colidente (com confirmação)
     a = _item(uid_pro, f"item-colide-A-{uid_pro}", conta_compartilhada, "114.88")
-    manda(uid_pro, "Gastei 1 real com a barbara")
+    manda(uid_pro, "Gastei 1 real com a barbara em dinheiro")
     _item(uid_pro, f"item-colide-A-{uid_pro}", conta_compartilhada, "113.88",
           [tx(uid_pro, "-1.00", hoje, "PIX ENVIADO BARBARA")])
     rep = db.import_open_finance_launches(uid_pro, a)

@@ -46,7 +46,7 @@ def test_preco_fusao_falsa_positiva_superconta_450(uid_pro, ia_fora):
     """
     hoje = today_tz()
     conexao = conecta_banco(uid_pro, "500.00")
-    manda(uid_pro, "gastei 50 no almoço")                  # em espécie
+    manda(uid_pro, "gastei 50 no almoço em dinheiro")                  # em espécie
     sincroniza(conexao, uid_pro, "450.00",
                [tx(uid_pro, "-50.00", hoje, "UBER *TRIP SAO PAULO")])  # outro gasto
     rep = db.import_open_finance_launches(uid_pro, conexao)
@@ -77,7 +77,7 @@ def test_preco_espelho_atrasado_superconta_ate_o_proximo_sync(uid_pro, ia_fora):
     """
     hoje = today_tz()
     conexao = conecta_banco(uid_pro, "114.88")
-    manda(uid_pro, "Gastei 1 real com a barbara")
+    manda(uid_pro, "Gastei 1 real com a barbara em dinheiro")
 
     # espelho AINDA cheio (114,88), transação já entregue: a janela do relato.
     # o casamento é rebaixado a pendência (candidato manual) e o dono confirma:
@@ -118,7 +118,7 @@ def test_preco_extrato_reconciliado_fica_50_acima_do_ledgerbal(uid_pro, ia_fora,
     hoje = today_tz()
     conexao = conecta_banco(uid_pro, "1000.00")
     db.add_launch_and_update_balance(uid_pro, "receita", 100, None, "seed")
-    manda(uid_pro, "gastei 50 no mercado")
+    manda(uid_pro, "gastei 50 no mercado em dinheiro")
     sincroniza(conexao, uid_pro, "950.00", [tx(uid_pro, "-50.00", hoje, "MERCADO")])
     rep = db.import_open_finance_launches(uid_pro, conexao)
     assert rep["pending"] == 1 and rep["auto_merged"] == 0, rep

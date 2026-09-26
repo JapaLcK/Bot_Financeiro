@@ -41,7 +41,7 @@ def _saldo_total_do_comando(uid: int) -> str:
 def test_com_banco_a_resposta_traz_o_mesmo_numero_do_saldo(uid_pro, ia_fora):
     conecta_banco(uid_pro, "114.88")
 
-    resp = manda(uid_pro, "Gastei 1 real com a barbara")
+    resp = manda(uid_pro, "Gastei 1 real com a barbara em dinheiro")
 
     m = _LINHA_NOVA.search(resp)
     assert m, resp
@@ -60,7 +60,7 @@ def test_o_numero_vale_DEPOIS_do_lancamento_na_mesma_mensagem(uid_pro, ia_fora):
                             [tx(uid_pro, "-1.00", hoje, "PIX ENVIADO BARBARA")])
     db.import_open_finance_launches(uid_pro, conexao)
 
-    resp = manda(uid_pro, "Gastei 1 real com a barbara")
+    resp = manda(uid_pro, "Gastei 1 real com a barbara em dinheiro")
 
     m = _LINHA_NOVA.search(resp)
     assert m, resp
@@ -72,7 +72,7 @@ def test_o_numero_vale_DEPOIS_do_lancamento_na_mesma_mensagem(uid_pro, ia_fora):
 # ── POSITIVOS: sem banco, ou com o gate desligado, nada muda ───────────────
 
 def test_sem_banco_conectado_a_linha_continua_a_de_hoje(uid_pro, ia_fora):
-    resp = manda(uid_pro, "gastei 50 no mercado")
+    resp = manda(uid_pro, "gastei 50 no mercado em dinheiro")
 
     assert _LINHA_DE_HOJE.search(resp), resp
     assert _LINHA_NOVA.search(resp) is None, resp
@@ -90,7 +90,7 @@ def test_com_banco_mas_gate_desligado_a_carteira_piggy_e_nomeada(
     monkeypatch.setenv("OF_CONSOLIDATED_BETA_USER_IDS", "")
     conecta_banco(uid_pro, "114.88")
 
-    resp = manda(uid_pro, "gastei 50 no mercado")
+    resp = manda(uid_pro, "gastei 50 no mercado em dinheiro")
 
     assert "👛 Saldo (Carteira Piggy): R$ -50,00" in resp, resp
     assert _LINHA_NOVA.search(resp) is None
@@ -110,7 +110,7 @@ def test_gate_desligado_sem_fusao_a_carteira_e_a_lancada(uid_pro, ia_fora, monke
                             [tx(uid_pro, "-1.00", hoje, "PIX ENVIADO BARBARA")])
     db.import_open_finance_launches(uid_pro, conexao)
 
-    resp = manda(uid_pro, "Gastei 1 real com a barbara")
+    resp = manda(uid_pro, "Gastei 1 real com a barbara em dinheiro")
 
     # linha da Carteira nomeada, número relido (sem fusão: -1,00)
     assert "👛 Saldo (Carteira Piggy): R$ -1,00" in resp, resp

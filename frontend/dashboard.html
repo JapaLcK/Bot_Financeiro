@@ -998,16 +998,18 @@
 <div class="overlay" id="launch-overlay">
   <div class="modal">
     <h3>Novo lançamento</h3>
-    <p class="msub">Registre uma receita ou despesa. Vai aparecer aqui e no histórico do bot.</p>
+    <p class="msub" id="launch-msub">Registre uma receita ou despesa. Vai aparecer aqui e no histórico do bot.</p>
 
     <div class="tipo-toggle" role="radiogroup" aria-label="Tipo de lançamento">
       <button type="button" class="tipo-opt despesa active" data-tipo="despesa" onclick="setLaunchTipo('despesa')" role="radio" aria-checked="true">
         <span class="tipo-icon"><i class="ph ph-trend-down" aria-hidden="true"></i></span>
         <span>Despesa</span>
+        <span class="tipo-sub" hidden style="font-size:.66rem;font-weight:500;opacity:.8">em dinheiro vivo</span>
       </button>
       <button type="button" class="tipo-opt receita" data-tipo="receita" onclick="setLaunchTipo('receita')" role="radio" aria-checked="false">
         <span class="tipo-icon"><i class="ph ph-trend-up" aria-hidden="true"></i></span>
         <span>Receita</span>
+        <span class="tipo-sub" hidden style="font-size:.66rem;font-weight:500;opacity:.8">em dinheiro vivo</span>
       </button>
       <button type="button" class="tipo-opt credito" data-tipo="credito" onclick="setLaunchTipo('credito')" role="radio" aria-checked="false">
         <span class="tipo-icon"><i class="ph ph-credit-card" aria-hidden="true"></i></span>

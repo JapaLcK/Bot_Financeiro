@@ -62,7 +62,7 @@ def _funde_cinquenta(uid: int) -> int:
     hoje = today_tz()
     conexao = conecta_banco(uid, "1000.00")
     db.add_launch_and_update_balance(uid, "receita", 100, None, "seed")
-    manda(uid, "gastei 50 no mercado")
+    manda(uid, "gastei 50 no mercado em dinheiro")
     sincroniza(conexao, uid, "950.00", [tx(uid, "-50.00", hoje, "MERCADO")])
     rep = db.import_open_finance_launches(uid, conexao)
     assert rep["pending"] == 1 and rep["auto_merged"] == 0, rep
@@ -310,7 +310,8 @@ def test_rota_de_lancamento_devolve_a_carteira_sem_fusao(uid_pro, ia_fora, sem_a
 
     r = asyncio.run(mono.create_launch_route(
         _Req(), uid_pro, mono.LaunchCreatePayload(
-            tipo="despesa", valor=1.0, nota="Gastei 1 real com a barbara")))
+            tipo="despesa", valor=1.0, nota="Gastei 1 real com a barbara",
+            funding_source="carteira")))
 
     exibido = asyncio.run(mono.get_financial_data(uid_pro))["balance"]
     assert r["new_balance"] == pytest.approx(exibido), "rota e dashboard divergem"

@@ -45,7 +45,7 @@ def test_caminho_1_import_devolve_o_debito(uid_pro, ia_fora):
     conexao = conecta_banco(uid_pro, "114.88")
     assert consolidado(uid_pro) == (114.88, 0.0)
 
-    resp = manda(uid_pro, "Gastei 1 real com a barbara")
+    resp = manda(uid_pro, "Gastei 1 real com a barbara em dinheiro")
     assert "registrada" in resp.lower(), resp
     assert consolidado(uid_pro) == (113.88, -1.0), "o gasto ainda não chegou no banco"
 
@@ -66,10 +66,10 @@ def test_caminho_1_depois_de_outro_assunto_na_mesma_conversa(uid_pro, ia_fora):
     hoje = today_tz()
     conexao = conecta_banco(uid_pro, "114.88")
 
-    manda(uid_pro, "gastei 50 no mercado")
+    manda(uid_pro, "gastei 50 no mercado em dinheiro")
     assert consolidado(uid_pro) == (64.88, -50.0)
 
-    manda(uid_pro, "Gastei 1 real com a barbara")
+    manda(uid_pro, "Gastei 1 real com a barbara em dinheiro")
     sincroniza(conexao, uid_pro, "113.88",
                [tx(uid_pro, "-1.00", hoje, "PIX ENVIADO BARBARA")])
     rep = db.import_open_finance_launches(uid_pro, conexao)
@@ -85,7 +85,7 @@ def test_caminho_1_depois_de_outro_assunto_na_mesma_conversa(uid_pro, ia_fora):
 def test_caminho_2_confirmacao_devolve_o_debito(uid_pro, ia_fora):
     hoje = today_tz()
     conexao = conecta_banco(uid_pro, "114.88")
-    manda(uid_pro, "Gastei 1 real com a barbara")
+    manda(uid_pro, "Gastei 1 real com a barbara em dinheiro")
     manual_id = ultimo_launch(uid_pro)
 
     # descrição que NÃO parece a do manual → verdict "ask", não "auto"
@@ -126,7 +126,7 @@ def test_caminho_3_manual_depois_do_import_vira_pendencia_separada(uid_pro, ia_f
     assert consolidado(uid_pro) == (113.88, 0.0)
 
     # o dono lança o MESMO gasto à mão depois: pendência, SEPARADO até confirmar
-    manda(uid_pro, "Gastei 1 real com a barbara")
+    manda(uid_pro, "Gastei 1 real com a barbara em dinheiro")
     manual_id = ultimo_launch(uid_pro)
 
     # sombra OF (delta 0) + manual (-1): a Carteira conta o gasto, o espelho não
@@ -148,7 +148,7 @@ def test_receita_fundida_nao_derruba_o_consolidado(uid_pro, ia_fora):
     hoje = today_tz()
     conexao = conecta_banco(uid_pro, "114.88")
 
-    manda(uid_pro, "recebi 100 do fulano")
+    manda(uid_pro, "recebi 100 do fulano em dinheiro")
     assert consolidado(uid_pro) == (214.88, 100.0)
 
     sincroniza(conexao, uid_pro, "214.88",
@@ -170,7 +170,7 @@ def test_apagar_o_lancamento_fundido_nao_cria_dinheiro(uid_pro, ia_fora):
     o espelho do banco continua contando o real uma vez."""
     hoje = today_tz()
     conexao = conecta_banco(uid_pro, "114.88")
-    manda(uid_pro, "Gastei 1 real com a barbara")
+    manda(uid_pro, "Gastei 1 real com a barbara em dinheiro")
     manual_id = ultimo_launch(uid_pro)
     sincroniza(conexao, uid_pro, "113.88",
                [tx(uid_pro, "-1.00", hoje, "PIX ENVIADO BARBARA")])
@@ -191,7 +191,7 @@ def test_apagar_o_lancamento_fundido_nao_cria_dinheiro(uid_pro, ia_fora):
 def test_lancamento_que_nao_funde_continua_debitando_a_carteira(uid_pro, ia_fora):
     """Sem banco conectado. Sem este caso, um conserto que zerasse TODO
     `delta_conta` passaria no grupo — e seria pior que o bug."""
-    manda(uid_pro, "gastei 50 no mercado")
+    manda(uid_pro, "gastei 50 no mercado em dinheiro")
     launch_id = ultimo_launch(uid_pro)
 
     assert delta_conta(uid_pro, launch_id) == Decimal("-50")
@@ -206,7 +206,7 @@ def test_com_banco_mas_fora_da_tolerancia_continua_debitando(uid_pro, ia_fora):
     não funde, o débito fica de pé e o consolidado soma os dois."""
     hoje = today_tz()
     conexao = conecta_banco(uid_pro, "114.88")
-    manda(uid_pro, "Gastei 1 real com a barbara")
+    manda(uid_pro, "Gastei 1 real com a barbara em dinheiro")
     launch_id = ultimo_launch(uid_pro)
 
     sincroniza(conexao, uid_pro, "37.88",

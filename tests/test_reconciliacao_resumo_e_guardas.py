@@ -24,7 +24,7 @@ from tests.test_fusao_of_superficies_da_carteira import (  # noqa: F401 (fixture
 )
 from tests.test_reconciliacao_resolver import _q, pendencia
 
-RECEITA = dict(valor="73.38", frase="recebi 73,38 do fulano", saldo="188.26",
+RECEITA = dict(valor="73.38", frase="recebi 73,38 do fulano em dinheiro", saldo="188.26",
                descricao="CREDITO XPTO 9981")
 
 
@@ -56,7 +56,7 @@ def test_sql_da_fusao_nao_mudou():
 
 def test_despesa_pendente_exibe_igual_e_pode_ser_mais(uid_pro, ia_fora):
     import frontend.finance_bot_websocket_custom as dashboard
-    pendencia(uid_pro, "-50.00", "gastei 50 no mercado", "64.88")
+    pendencia(uid_pro, "-50.00", "gastei 50 no mercado em dinheiro", "64.88")
 
     assert consolidado(uid_pro) == (14.88, -50.0), "a exibição mudou"
     snap = asyncio.run(dashboard.get_financial_data(uid_pro))
@@ -75,8 +75,8 @@ def test_receita_pendente_pode_ser_menos(uid_pro, ia_fora):
 def test_mistas_somam_com_sinal(uid_pro, ia_fora):
     hoje = today_tz()
     conexao = conecta_banco(uid_pro, "114.88")
-    manda(uid_pro, "gastei 50 no mercado")
-    manda(uid_pro, "recebi 73,38 do fulano")
+    manda(uid_pro, "gastei 50 no mercado em dinheiro")
+    manda(uid_pro, "recebi 73,38 do fulano em dinheiro")
     sincroniza(conexao, uid_pro, "138.26", [
         tx(uid_pro, "-50.00", hoje, "COMPRA CARTAO 4412 XPTO", ident="1"),
         tx(uid_pro, "73.38", hoje, "CREDITO XPTO 9981", ident="2"),
@@ -105,7 +105,7 @@ def _carteira_fonte(uid):
 def test_receita_pendente_nao_autoriza(uid_pro, ia_fora, sem_autorizacao):
     from fastapi import HTTPException
     from frontend.routes.cards import PayBillPayload, pay_bill_route
-    pendencia(uid_pro, "100.00", "recebi 100 do fulano", "214.88", "CREDITO XPTO 9981")
+    pendencia(uid_pro, "100.00", "recebi 100 do fulano em dinheiro", "214.88", "CREDITO XPTO 9981")
     assert saldo_bruto(uid_pro) == Decimal("100")
 
     with pytest.raises(ValueError, match="INSUFFICIENT_ACCOUNT"):
@@ -122,7 +122,7 @@ def test_receita_pendente_nao_autoriza(uid_pro, ia_fora, sem_autorizacao):
 
 
 def test_rejeitar_receita_libera_o_aporte(uid_pro, ia_fora):
-    _, of_tx, _, _ = pendencia(uid_pro, "100.00", "recebi 100 do fulano", "214.88",
+    _, of_tx, _, _ = pendencia(uid_pro, "100.00", "recebi 100 do fulano em dinheiro", "214.88",
                                "CREDITO XPTO 9981")
     db.reject_reconciliation(uid_pro, of_tx)
     _aporte(uid_pro, 50)
@@ -131,7 +131,7 @@ def test_rejeitar_receita_libera_o_aporte(uid_pro, ia_fora):
 
 def test_despesa_pendente_continua_contando_em_dobro(uid_pro, ia_fora):
     db.add_launch_and_update_balance(uid_pro, "receita", 100, None, "seed")
-    _, of_tx, _, _ = pendencia(uid_pro, "-50.00", "gastei 50 no mercado", "64.88")
+    _, of_tx, _, _ = pendencia(uid_pro, "-50.00", "gastei 50 no mercado em dinheiro", "64.88")
     with pytest.raises(ValueError, match="INSUFFICIENT_ACCOUNT"):
         _aporte(uid_pro, 60)
     db.confirm_reconciliation(uid_pro, of_tx)
@@ -147,7 +147,7 @@ def test_sem_pendencia_autoriza_como_hoje(uid_pro, ia_fora):
 
 
 def _receita_100(uid, *gastos):
-    pendencia(uid, "100.00", "recebi 100 do fulano", "0.00", "CREDITO XPTO 9981")
+    pendencia(uid, "100.00", "recebi 100 do fulano em dinheiro", "0.00", "CREDITO XPTO 9981")
     for g in gastos:
         manda(uid, g)
 
@@ -155,8 +155,8 @@ def _receita_100(uid, *gastos):
 def _receita_e_despesa_pendentes(uid):
     hoje = today_tz()
     conexao = conecta_banco(uid, "0.00")
-    manda(uid, "Gastei 1 real com a barbara")
-    manda(uid, "recebi 73,38 do fulano")
+    manda(uid, "Gastei 1 real com a barbara em dinheiro")
+    manda(uid, "recebi 73,38 do fulano em dinheiro")
     sincroniza(conexao, uid, "0.00", [
         tx(uid, "-1.00", hoje, "COMPRA CARTAO 4412 XPTO", ident="1"),
         tx(uid, "73.38", hoje, "CREDITO XPTO 9981", ident="2"),
@@ -166,8 +166,8 @@ def _receita_e_despesa_pendentes(uid):
 
 @pytest.mark.parametrize("prepara, tela, disponivel, a_conferir", [
     (lambda u: _receita_100(u), "R$ 100,00", "R$ 0,00", "R$ 100,00"),
-    (lambda u: _receita_100(u, "gastei 70 no mercado"), "R$ 30,00", "R$ -70,00", "R$ 100,00"),
-    (lambda u: _receita_100(u, "gastei 150 no mercado"), "R$ -50,00", "R$ -150,00", "R$ 100,00"),
+    (lambda u: _receita_100(u, "gastei 70 no mercado em dinheiro"), "R$ 30,00", "R$ -70,00", "R$ 100,00"),
+    (lambda u: _receita_100(u, "gastei 150 no mercado em dinheiro"), "R$ -50,00", "R$ -150,00", "R$ 100,00"),
     (_receita_e_despesa_pendentes, "R$ 72,38", "R$ -1,00", "R$ 73,38"),
 ], ids=["nada_gasto", "entrada_maior_que_a_tela", "tela_negativa", "receita_e_despesa"])
 def test_caixinha_recusa_citando_a_tela_e_fatura_com_of_nao_drena(
@@ -219,7 +219,7 @@ def test_recusa_sem_pendencia_nao_muda(uid_pro, ia_fora, sem_autorizacao):
 # ── investimento: as duas guardas de Carteira com receita pendente ─────────
 
 def test_investimento_com_receita_pendente_nao_autoriza(uid_pro, ia_fora):
-    _, of_tx, _, _ = pendencia(uid_pro, "100.00", "recebi 100 do fulano", "214.88",
+    _, of_tx, _, _ = pendencia(uid_pro, "100.00", "recebi 100 do fulano em dinheiro", "214.88",
                                "CREDITO XPTO 9981")
     with pytest.raises(ValueError, match="INSUFFICIENT_ACCOUNT"):
         db.create_investment_db(uid_pro, "CDB Inicial", 0.01, "monthly", initial_amount=50)
@@ -237,7 +237,7 @@ def test_investimento_com_receita_pendente_nao_autoriza(uid_pro, ia_fora):
 def test_pergunta_de_origem_cita_a_carteira_da_tela(uid_pro, ia_fora):
     """Carteira na tela 300, 100 dela é receita a conferir, banco também cobre."""
     db.add_launch_and_update_balance(uid_pro, "receita", 200, None, "seed")
-    pendencia(uid_pro, "100.00", "recebi 100 do fulano", "500.00", "CREDITO XPTO 9981")
+    pendencia(uid_pro, "100.00", "recebi 100 do fulano em dinheiro", "500.00", "CREDITO XPTO 9981")
     db.create_pocket(uid_pro, "viagem")
 
     assert "Carteira: R$ 300,00" in manda(uid_pro, "/saldo")

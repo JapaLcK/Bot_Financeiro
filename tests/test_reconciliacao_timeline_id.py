@@ -81,7 +81,7 @@ def test_of_tx_de_a_com_launch_id_de_b_nao_vaza_para_b(uid_pro, ia_fora):
     outro = int(uuid.uuid4().int % 1_000_000_000)
     db.ensure_user(outro)
     promote_to_pro(outro)
-    manda(outro, "Gastei 1 real com a barbara")
+    manda(outro, "Gastei 1 real com a barbara em dinheiro")
     manual_b = _q("select id from launches where user_id=%s order by id desc limit 1",
                   (outro,))[0]["id"]
 
