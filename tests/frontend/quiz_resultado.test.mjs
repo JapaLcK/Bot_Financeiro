@@ -68,6 +68,20 @@ for (const perfil of ["padrao", "admin"]) {
   });
 }
 
+const velho = (ctx) => ctx.addCookies([{ name: "quiz_result", value: "v1.dividas.acdbd", url: ORIGIN }]);
+
+for (const resto of ["#p=admin", ""]) {
+  test(`resultado rejeitado (${resto || "sem fragmento"}) apaga o cookie de uma visita anterior`, async () => {
+    const { cookie } = await abrir(q(resto), velho);
+    assert.equal(cookie, undefined);
+  });
+}
+
+test("resultado válido sobrescreve o cookie de uma visita anterior", async () => {
+  const { cookie } = await abrir(q("#p=investir&r=bdcae"), velho);
+  assert.equal(cookie.value, "v1.investir.bdcae");
+});
+
 test("respostas inválidas gravam só o perfil", async () => {
   const { cookie } = await abrir(q("#p=dividas&r=zzzzz"));
   assert.equal(cookie.value, "v1.dividas");

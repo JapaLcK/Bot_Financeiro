@@ -15,10 +15,11 @@
   frag.delete("p");
   frag.delete("r");
   frag.forEach(function (v, k) { if (!query.has(k)) query.append(k, v); });
-  if (PERFIS.indexOf(p) !== -1) {
-    document.cookie = "quiz_result=v1." + p + (RESPOSTAS.test(r || "") ? "." + r : "") +
-      "; Max-Age=86400; Path=/; SameSite=Lax" + (location.protocol === "https:" ? "; Secure" : "");
-  }
+  // Resultado inválido apaga o de uma visita anterior: senão o cadastro grava o perfil velho.
+  const attrs = "; Path=/; SameSite=Lax" + (location.protocol === "https:" ? "; Secure" : "");
+  document.cookie = PERFIS.indexOf(p) !== -1
+    ? "quiz_result=v1." + p + (RESPOSTAS.test(r || "") ? "." + r : "") + "; Max-Age=86400" + attrs
+    : "quiz_result=; Max-Age=0" + attrs;
   const qs = query.toString();
   location.replace("/cadastro" + (qs ? "?" + qs : ""));
 })();
