@@ -93,9 +93,14 @@ Decidido pelo dono na mesma data (Q37–Q41):
     contariam duas vezes. Quando o usuário tem investimento manual e investimento do Open
     Finance, o v2 pergunta, para cada manual, **qual** posição do banco ele é (aí o manual
     sai da soma) ou se é outro; a resposta guarda a identidade dessa posição (a mesma chave
-    estável na reconexão usada no saque). Ela é refeita quando essa posição some (banco
-    desconectado: o manual volta para a soma e a pergunta reabre) ou quando o conjunto de
-    bancos muda ("outro" pode ter virado duplicado). Enquanto houver algum sem resposta, a
+    estável na reconexão usada no saque). Ela é refeita quando:
+    - **a posição some porque o banco foi desconectado:** o manual volta para a soma (o
+      investimento existe, só não é mais visto) e a pergunta reabre;
+    - **a posição some com o banco conectado e sincronizando bem** (o banco a liquidou): o
+      manual **continua fora** da soma, marcado "a conferir" — o dinheiro do resgate já
+      pode estar no saldo do banco — até o usuário responder de novo;
+    - **aparece posição nova** em qualquer banco, mesmo sem mudar o conjunto de bancos: as
+      respostas "outro" reabrem, porque a nova pode ser a mesma. Enquanto houver algum sem resposta, a
     foto sai marcada como incerta;
   - **carteira que não é só dinheiro vivo:** hoje a carteira é dinheiro mais contas de banco
     não conectadas (o painel antigo pede para "Ajustar Carteira" depois de conectar), então
@@ -110,9 +115,12 @@ Decidido pelo dono na mesma data (Q37–Q41):
     (ligadas em `recurring_income_credits` e `recurring_charges`) e apareceriam em
     Lançamentos e em Para onde vai como receita e gasto reais. Por isso, no mesmo passo, o
     usuário vê esses lançamentos e responde, para cada um, como ele aconteceu — a mesma
-    lógica da Q40: **em dinheiro** (a linha fica, é da carteira), **pelo banco** (a linha
-    sai dos relatórios: quem conta é a transação que o Open Finance trouxe, e manter as
-    duas contaria o mesmo salário duas vezes) ou **não aconteceu** (sai também). Sair dos
+    lógica da Q40: **em dinheiro** (a linha fica, é da carteira), **pelo banco** ou **não
+    aconteceu** (sai). "Pelo banco" só tira a linha dos relatórios **depois de casada com
+    uma transação específica do Open Finance** (o v2 sugere a candidata, o usuário
+    confirma) — manter as duas contaria o mesmo salário duas vezes, mas tirar sem a outra
+    sumiria com um salário que existiu. Sem transação para casar (banco não conectado,
+    importação incompleta, nada parecido), a linha continua contando. Sair dos
     relatórios não apaga a linha. Até ele revisar, eles aparecem com a marca "lançado
     automaticamente, a conferir" e ficam fora dos totais. A confirmação vale enquanto a
     carteira só receber dinheiro vivo, e isso se garante pela classe, não por lista de
@@ -133,8 +141,11 @@ Decidido pelo dono na mesma data (Q37–Q41):
   lançado antes do desligamento sem banco conectado (incerta até confirmar, nos dois);
   salário automático antigo que não caiu (fora de Lançamentos e de Para onde vai depois
   de marcado como não aconteceu, e fora dos totais enquanto não revisado); salário
-  automático antigo que caiu no banco e já veio pelo Open Finance (marcado "pelo banco",
-  conta uma vez só).
+  automático antigo que caiu no banco e já veio pelo Open Finance (marcado "pelo banco" e
+  casado, conta uma vez só); "pelo banco" sem transação para casar (a linha continua
+  contando); posição nova num banco já conectado com um manual respondido "outro" (a
+  pergunta reabre); posição casada que o banco liquida com a conexão ativa (o manual segue
+  fora da soma, "a conferir").
 - **Q38 — a caixinha manual continua**, como exceção à Q36: ela é dinheiro separado pelo
   próprio usuário, e depositar e retirar nela segue existindo no v2. A caixinha espelhada
   do banco continua vindo do Open Finance.
