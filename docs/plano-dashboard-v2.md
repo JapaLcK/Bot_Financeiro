@@ -90,8 +90,12 @@ O que isso muda neste plano:
   ids iguais em contas diferentes). E o import grava todo lançamento como `BRL`, mesmo de
   conta em outra moeda: a regra de moeda do patrimônio vale também para as transações —
   o lançamento guarda a moeda real (ou desconhecida), e Lançamentos e Para onde vai somam
-  só BRL, mostrando os de outra moeda à parte. Teste: conta em dólar com transações, nas
-  duas telas.
+  só BRL, mostrando os de outra moeda à parte. As duas regras (identidade por conta e
+  moeda real) valem também para o **cartão**, que tem caminho próprio:
+  `import_open_finance_credit` não passa por `_insert_of_shadow`, grava em
+  `credit_transactions` (sem coluna de moeda) e `add_imported_credit_purchase` deduplica
+  por `(user_id, source, external_id)`. Testes: conta e cartão em dólar com transações, nas
+  duas telas; dois ids iguais em contas diferentes e em cartões diferentes.
 - **Dinheiro que muda de lugar não é gasto nem receita.** Sacar no caixa eletrônico: o Open
   Finance vê só o débito no banco; sem nada mais, o patrimônio cai e o relatório mostra um
   gasto que não houve. Depositar dinheiro vivo é o inverso. Por isso existe uma
@@ -252,7 +256,11 @@ Decidido pelo dono na mesma data (Q37–Q41):
     da carteira (o dinheiro vivo continua no bolso). Na reconexão, o banco reimporta o
     histórico: saque cuja identidade já tem lançamento ou recusa gravados é pulado; saque
     nunca visto — inclusive o feito enquanto o banco estava desconectado — segue o caminho
-    normal (lançamento automático com aviso). Se o PR medir que a identidade **não**
+    normal (lançamento automático com aviso) — **exceto** o saque ou depósito datado de
+    antes da confirmação da carteira (Q37): o valor confirmado já inclui o dinheiro que
+    estava no bolso naquele dia, então esse movimento vai para confirmação do usuário em
+    vez de lançar sozinho, e o mesmo vale para correções do banco nele. Se o PR medir que a
+    identidade **não**
     sobrevive à reconexão, o saque anterior à conexão nova que não se consegue provar
     inédito vai para **confirmação** do usuário em vez de lançar sozinho — nunca é
     descartado pela data, que apagaria um saque real feito no intervalo;
@@ -269,7 +277,9 @@ Decidido pelo dono na mesma data (Q37–Q41):
   sincronizar de novo (o dinheiro não volta); saque reclassificado pelo banco como compra
   (o lançamento da carteira sai); desconectar, reconectar e o banco trazer o
   mesmo saque de novo (nenhum crédito a mais, e o dinheiro da carteira fica); saque feito
-  enquanto o banco estava desconectado (entra na carteira depois da reconexão).
+  enquanto o banco estava desconectado (entra na carteira depois da reconexão); conectar o
+  banco depois de confirmar a carteira, com saque antigo (vai para confirmação, não lança
+  sozinho).
 
 ### O que a primeira versão precisa ter (Q3)
 
@@ -447,12 +457,14 @@ tecnologia, podendo refazer o que for preciso, com calma (Q5).
     (`MERGED_WALLET_DELTA_SQL`) — as duas em `db/open_finance.py` — para a transação já refletida no banco não ser
     debitada duas vezes. A função reusa essas consultas numa versão que recebe o cursor,
     dentro da mesma transação, sem reescrever a regra. Depois que o usuário confirma a
-    carteira (Q37), o valor confirmado **é a nova base**: as fusões de antes dela já não
-    estão dentro desse valor, então a correção só vale para fusões feitas depois da
-    confirmação, e desfazer depois uma fusão antiga não mexe na carteira confirmada. Sem
+    carteira (Q37), o valor confirmado **é a nova base**, e a correção só vale para
+    lançamentos **criados** depois da confirmação — o que conta é a data do lançamento, não
+    a da fusão: um lançamento antigo que só casa com o banco depois (sincronização
+    atrasada) já está fora da base, e corrigi-lo somaria o valor de volta. Desfazer depois
+    uma fusão antiga também não mexe na carteira confirmada. Sem
     isso, confirmar R$ 0 com um gasto de R$ 100 fundido antes daria R$ 100 a mais. Teste:
-    confirmar a carteira com fusão antiga, e desfazer essa fusão depois (o patrimônio não
-    muda nos dois);
+    confirmar a carteira com fusão antiga, desfazer essa fusão depois, e casar depois da
+    confirmação um lançamento de antes dela (o patrimônio não muda nos três);
   - **reset no meio:** a visão consistente não impede o "Recomeçar do zero" de apagar o
     histórico entre a leitura e a gravação da foto, e aí a foto velha voltaria. O job pega
     uma trava consultiva do usuário em modo compartilhado; o reset a pega em modo
@@ -482,8 +494,12 @@ tecnologia, podendo refazer o que for preciso, com calma (Q5).
     Por isso a sincronização marca a conexão como **em andamento** do começo ao fim da
     fase de escrita, e a foto de um usuário com conexão em andamento não é gravada como
     exata: ela espera e tenta de novo mais tarde na mesma rodada; se a marca não sair (a
-    sincronização morreu no meio), o ponto sai como incompleto. Teste: pausar entre os dois
-    commits da sincronização e rodar a foto (nenhum ponto exato com a mistura);
+    sincronização morreu no meio), o ponto sai como incompleto. A marca vale também para a
+    tela aberta: o aviso em tempo real da sincronização sai **uma vez, no fim** da fase de
+    escrita (não a cada commit), e toda leitura da `/api/v2` que junta produtos de uma
+    conexão em andamento devolve o estado `sincronizando` em vez de um total exato. Testes:
+    pausar entre os dois commits e rodar a foto (nenhum ponto exato com a mistura) e buscar
+    a tela (vem `sincronizando`);
   - **o conjunto de bancos muda, a linha quebra:** conectar, desconectar ou pausar um banco
     muda o que entra na soma, e o gráfico mostraria um salto que não é ganho nem perda.
     Desconectar apaga a conexão (`disconnect_open_finance_connection`), então no dia
