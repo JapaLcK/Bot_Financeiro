@@ -26,6 +26,7 @@ import unicodedata
 from datetime import timedelta
 
 import db
+from core.services.ai_chat.runner import ERROR_MSG
 from core.services.plan_service import ai_chat_allowed, ai_monthly_limit_for
 
 logger = logging.getLogger(__name__)
@@ -81,20 +82,30 @@ _JANELA_DA_PERGUNTA = timedelta(minutes=10)
 
 
 def pergunta_aberta_da_ia(user_id: int) -> int | None:
-    """Id da última mensagem do histórico, se ela é uma pergunta da IA feita há
-    pouco; senão None.
+    """Se a IA deixou uma pergunta feita há pouco, o id da ÚLTIMA mensagem do
+    histórico (a âncora do `encerra_pergunta_da_ia`); senão None.
 
     A IA oferece coisas sem guardar pendência ("Quer que eu mostre suas maiores
     despesas?"), e o "sim" classifica como `confirm.yes` com confiança alta —
     não cai no fallback de IA, e o `route()` sem pendência responde "não
     entendi". Aqui o `handle_incoming` descobre que o "sim" é da IA.
+
+    Turno da IA que falhou não fecha a pergunta: o runner grava `user` +
+    `assistant(ERROR_MSG)`, ou só o `user` se a exceção escapou dele. Sem pular
+    esses turnos, a nova tentativa da resposta ("300 reais transporte") cairia
+    no `route()` e viraria despesa. A janela conta da pergunta, não da falha.
     """
-    last = db.ai_get_last_message(user_id)
-    if (last
-            and last["role"] == "assistant"
-            and last["age"] < _JANELA_DA_PERGUNTA
-            and re.search(r"\?\W*$", last["content"] or "")):
-        return last["id"]
+    # ponytail: olha só as 6 últimas (3 turnos falhos seguidos); mais que isso
+    # a pergunta fica fechada e o texto segue o route().
+    rows = db.ai_get_last_messages(user_id, 6)
+    for m in rows:
+        if m["role"] == "user" or (m["role"] == "assistant" and m["content"] == ERROR_MSG):
+            continue
+        if (m["role"] == "assistant"
+                and m["age"] < _JANELA_DA_PERGUNTA
+                and re.search(r"\?\W*$", m["content"] or "")):
+            return rows[0]["id"]
+        return None
     return None
 
 
@@ -106,13 +117,14 @@ _PERGUNTA_ENCERRADA = (
 )
 
 
-def encerra_pergunta_da_ia(user_id: int, pergunta_id: int) -> None:
-    """Fim de um turno do `handle_incoming`: se a pergunta que estava aberta
-    continua sendo a última mensagem, a IA não atendeu este turno (ex.: "saldo",
+def encerra_pergunta_da_ia(user_id: int, ultima_id: int) -> None:
+    """Fim de um turno do `handle_incoming`: se a última mensagem lida por
+    `pergunta_aberta_da_ia` (a pergunta, ou o turno falho depois dela) continua
+    sendo a última, a IA não atendeu este turno (ex.: "saldo",
     "plano", um OFX) — então ela deixa de estar em aberto. O `ai_messages` só vê
     os turnos da IA, e sem isto um "sim" depois voltaria para a oferta antiga."""
     try:
-        db.ai_append_message_if_last(user_id, pergunta_id, "system", _PERGUNTA_ENCERRADA)
+        db.ai_append_message_if_last(user_id, ultima_id, "system", _PERGUNTA_ENCERRADA)
     except Exception as exc:
         logger.warning("encerra_pergunta_da_ia falhou pra user %s: %s", user_id, exc)
 

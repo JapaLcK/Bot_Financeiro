@@ -1324,7 +1324,11 @@ def process_message(message: InboundMessage) -> None:
         )
 
         core_started = True
-        outs = handle_incoming(incoming, ignora_pendencias=ignora_pendencias) or []
+        # Todo botão/lista que não deu `return` acima chega aqui (o
+        # `undo_launch` como "desfazer", o `confirm_yes` como "Sim"): não
+        # é capturado pela pergunta aberta da IA.
+        outs = handle_incoming(incoming, ignora_pendencias=ignora_pendencias,
+                               de_botao=bool(interactive_id)) or []
         if not outs:
             logger.info("WA no outgoing messages for from=%s", message.wa_id)
             _send_reply(reply_to, "Nao entendi. Digite ajuda para ver os comandos.")

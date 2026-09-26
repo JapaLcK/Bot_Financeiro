@@ -148,7 +148,29 @@ def _process_audio_transaction(uid: int, transcription: str, msg: IncomingMessag
     return format_for_platform(raw_response, platform)
 
 
-def _handle_audio(msg: IncomingMessage, platform: str) -> list[OutgoingMessage] | None:
+def _resposta_da_ia(uid: int, text: str, platform: str, rotulo: str,
+                    erro_se_falhar: bool = False) -> str | None:
+    """Resposta da IA formatada; None se o usuário não tem a IA. Se a IA
+    falhar: None (o chamador segue o fluxo) ou, com `erro_se_falhar`, a
+    mensagem de erro — a resposta à pergunta da IA não pode cair no route()."""
+    try:
+        from core.services.plan_service import ai_chat_allowed, ai_monthly_limit_for
+        if ai_chat_allowed(uid):
+            from core.services.ai_chat import chat as ai_chat_run
+            ai_reply = ai_chat_run(
+                uid, text, monthly_limit=ai_monthly_limit_for(uid), platform=platform,
+            )
+            return format_for_platform(ai_reply, platform)
+    except Exception as exc:
+        logger.warning("%s falhou pra user %s: %s", rotulo, uid, exc)
+        if erro_se_falhar:
+            from core.services.ai_chat.runner import ERROR_MSG
+            return format_for_platform(ERROR_MSG, platform)
+    return None
+
+
+def _handle_audio(msg: IncomingMessage, platform: str,
+                  pergunta_ia: int | None = None) -> list[OutgoingMessage] | None:
     """
     Detecta anexo de áudio, transcreve via Whisper e processa diretamente.
 
@@ -216,6 +238,14 @@ def _handle_audio(msg: IncomingMessage, platform: str) -> list[OutgoingMessage] 
 
     prefix = "_" if platform == "discord" else ""
     preview = f'🎙️ {prefix}Entendi: "{transcription}"{prefix}\n\n'
+
+    # Mesma regra do texto (5b do `handle_incoming`): pergunta da IA em aberto
+    # e nenhuma pendência → a transcrição inteira responde à IA.
+    if pergunta_ia is not None and db.get_pending_action(uid) is None:
+        ai_reply = _resposta_da_ia(uid, transcription, platform, "áudio→IA",
+                                   erro_se_falhar=True)
+        if ai_reply is not None:
+            return [OutgoingMessage(text=preview + ai_reply)]
 
     # Detecta múltiplos lançamentos no mesmo áudio
     parts = _split_audio_transactions(transcription)
@@ -709,15 +739,21 @@ def _paywall_gate(msg: IncomingMessage, platform: str) -> list[OutgoingMessage] 
 
 
 def handle_incoming(msg: IncomingMessage, *,
-                    ignora_pendencias: bool = False) -> list[OutgoingMessage]:
+                    ignora_pendencias: bool = False,
+                    de_botao: bool = False) -> list[OutgoingMessage]:
     # `ignora_pendencias`: repassado cru ao `route()`. Um chamador só — a
     # porta 4 (`adapters/whatsapp/wa_runtime.py`), quando o CAS de abandono
     # dela perde para uma pergunta NOVA que outra tarefa acabou de pôr na
     # linha. Ver a docstring do `route()`.
+    # `de_botao`: a mensagem veio de botão/lista interativa do WhatsApp — não
+    # é capturada pela pergunta aberta da IA (decisão do dono). Com `ai_pending`
+    # o botão ainda chega à IA pelo `handle_ai_chat_command` (confirma a ação).
     platform = msg.platform
 
-    # Pergunta que a IA deixou em aberto antes deste turno. Um "sim" a ela vai
-    # para a IA (5b); qualquer turno que a IA não atender a encerra (`finally`).
+    # Pergunta que a IA deixou em aberto antes deste turno. Sem pendência, a
+    # resposta a ela (texto ou áudio) vai para a IA (5b e `_handle_audio`) —
+    # "300 reais transporte" é o orçamento que ela pediu, não uma despesa.
+    # Qualquer turno que a IA não atender a encerra (`finally`).
     from core.services.ai_chat_commands import (
         encerra_pergunta_da_ia, pergunta_aberta_da_ia,
     )
@@ -826,7 +862,7 @@ def handle_incoming(msg: IncomingMessage, *,
         # ------------------------------------------------------------------
         # 2. Anexo ÁUDIO — transcreve via Whisper e processa como texto
         # ------------------------------------------------------------------
-        audio_result = _handle_audio(msg, platform)
+        audio_result = _handle_audio(msg, platform, pergunta_ia)
         if audio_result is not None:
             return audio_result
 
@@ -906,19 +942,16 @@ def handle_incoming(msg: IncomingMessage, *,
         # pela IA — que não conhece o valor já informado e falha com "valor
         # precisa ser maior que zero". route() resolve a pendência primeiro.
         has_resumable_pending = False
-        # "sim"/"não" sem pendência nenhuma, logo depois de a IA perguntar algo
-        # ("Quer que eu mostre suas maiores despesas?"), responde à IA — sem
-        # isto o route() devolve "não entendi". Com pendência, o route() decide.
+        # Qualquer texto sem pendência nenhuma, logo depois de a IA perguntar
+        # algo, responde à IA: o "sim" à oferta, o "300 reais transporte" ao
+        # orçamento pedido (que o route() gravaria como despesa). Com pendência,
+        # o route() decide; botão interativo não é capturado aqui.
         responde_a_ia = False
         try:
             _pend = db.get_pending_action(uid)
             if _pend and suprime_fallback_de_ia(_pend.get("action_type")):
                 has_resumable_pending = True
-            responde_a_ia = (
-                pergunta_ia is not None
-                and _pend is None
-                and intent_result.intent in ("confirm.yes", "confirm.no")
-            )
+            responde_a_ia = pergunta_ia is not None and _pend is None and not de_botao
         except Exception:
             has_resumable_pending = False
 
@@ -931,20 +964,11 @@ def handle_incoming(msg: IncomingMessage, *,
             )
         )
         if should_try_ai_fallback:
-            try:
-                from core.services.plan_service import ai_chat_allowed, ai_monthly_limit_for
-                if ai_chat_allowed(uid):
-                    from core.services.ai_chat import chat as ai_chat_run
-                    ai_reply = ai_chat_run(
-                        uid, text, monthly_limit=ai_monthly_limit_for(uid), platform=platform,
-                    )
-                    return [OutgoingMessage(text=format_for_platform(ai_reply, platform))]
-            except Exception as exc:
-                logger.warning(
-                    "ai fallback falhou pra user %s: %s — caindo no fluxo normal",
-                    uid, exc,
-                )
-                # segue pro route() abaixo (resposta padrão "não entendi")
+            ai_reply = _resposta_da_ia(uid, text, platform, "ai fallback",
+                                       erro_se_falhar=responde_a_ia)
+            if ai_reply is not None:
+                return [OutgoingMessage(text=ai_reply)]
+            # sem IA, ou falhou sem pergunta aberta: segue pro route() abaixo
 
         # ------------------------------------------------------------------
         # 6. Roteia → executa → obtém resposta bruta
@@ -972,19 +996,9 @@ def handle_incoming(msg: IncomingMessage, *,
             and infer_help_from_text(text, platform) is None
         )
         if not resposta_de_saudacao and _looks_like_help_fallback(raw_response):
-            try:
-                from core.services.plan_service import ai_chat_allowed, ai_monthly_limit_for
-                if ai_chat_allowed(uid):
-                    from core.services.ai_chat import chat as ai_chat_run
-                    ai_reply = ai_chat_run(
-                        uid, text, monthly_limit=ai_monthly_limit_for(uid), platform=platform,
-                    )
-                    return [OutgoingMessage(text=format_for_platform(ai_reply, platform))]
-            except Exception as exc:
-                logger.warning(
-                    "help→AI fallback falhou pra user %s: %s — devolve help original",
-                    uid, exc,
-                )
+            ai_reply = _resposta_da_ia(uid, text, platform, "help→AI fallback")
+            if ai_reply is not None:
+                return [OutgoingMessage(text=ai_reply)]
 
         # ------------------------------------------------------------------
         # 7. Formata para o canal

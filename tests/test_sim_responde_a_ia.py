@@ -6,10 +6,16 @@ pendência. O "Sim" classifica como `confirm.yes` com confiança 1.0, então nã
 caía no fallback de IA do `handle_incoming`, e o `route()` sem pendência
 devolvia `NOT_UNDERSTOOD_MSG`.
 """
+import uuid
+
+import pytest
+
 import db
+import core.handle_incoming as hi
 from db.connection import get_conn
-from core.intent_router import NOT_UNDERSTOOD_MSG
-from _pendencia_credito_helpers import diga, novo_uid
+from core.intent_router import INVESTMENT_ACTION_REFUSAL_MSG, NOT_UNDERSTOOD_MSG
+from core.types import IncomingMessage
+from _pendencia_credito_helpers import arma_installment, diga, novo_uid
 
 OFERTA = ("🐷 Eu entendo, às vezes os gastos podem surpreender. Quer que eu "
           "mostre suas maiores despesas ou top categorias do mês?")
@@ -79,12 +85,13 @@ def test_historico_de_outro_usuario_nao_conta(monkeypatch):
 
 
 def test_comando_no_meio_encerra_a_pergunta_da_ia(monkeypatch):
-    """Achado do Codex no #574: o `ai_messages` não vê o "saldo", então sem a
-    invalidação o "sim" voltava para a oferta abandonada."""
+    """Achado do Codex no #574: o `ai_messages` não vê o comando do meio, então
+    sem a invalidação o "sim" voltava para a oferta abandonada. "conectar banco"
+    responde antes do 5b (Open Finance só devolve o link, sem rede)."""
     uid, chamadas = _com_ia(monkeypatch)
     _ia_disse(uid, OFERTA)
 
-    assert diga(uid, "saldo") != "resposta do agente"
+    assert "Open Finance" in diga(uid, "conectar banco")
     assert diga(uid, "sim") == NOT_UNDERSTOOD_MSG
     assert chamadas == []
 
@@ -155,3 +162,293 @@ def test_encerrar_espera_a_resposta_da_ia_que_ainda_nao_commitou():
 
     assert resultado == {"gravou": False}
     assert db.ai_get_last_message(uid)["content"] == "Quer ver as categorias?"
+
+
+# ---------------------------------------------------------------------------
+# Qualquer texto responde à pergunta da IA, não só "sim"/"não" (relato do dono,
+# 2026-09-25): a IA pediu o orçamento e "300 reais transporte" virou despesa.
+# ---------------------------------------------------------------------------
+
+ORCAMENTO = ("Qual categoria você gostaria de focar primeiro? Alimentação, "
+             "transporte, lazer... E quanto você gostaria de gastar por mês "
+             "nessa categoria?")
+
+
+def _lancamentos(uid):
+    with get_conn() as conn, conn.cursor() as cur:
+        return cur.execute("select count(*) as n from launches where user_id = %s",
+                           (uid,)).fetchone()["n"]
+
+
+@pytest.mark.parametrize("resposta", ["300 reais transporte", "gastei 50 no mercado", "saldo"])
+def test_resposta_a_pergunta_da_ia_vai_para_a_ia(monkeypatch, resposta):
+    uid, chamadas = _com_ia(monkeypatch)
+    _ia_disse(uid, ORCAMENTO)
+
+    assert diga(uid, resposta) == "resposta do agente"
+    assert chamadas == [resposta]
+    assert _lancamentos(uid) == 0
+
+
+def test_sim_ao_desfazer_apaga_mesmo_com_pergunta_da_ia(monkeypatch):
+    """Positivo: a pendência (delete_launch) armada depois da pergunta ganha."""
+    from core.handlers.launches import propose_delete
+    uid, chamadas = _com_ia(monkeypatch)
+    launch_id, _, _ = db.add_launch_and_update_balance(uid, "despesa", 50, None, "mercado")
+    _ia_disse(uid, ORCAMENTO)
+    propose_delete(uid, launch_id)
+
+    diga(uid, "Sim")
+    assert chamadas == []
+    assert _lancamentos(uid) == 0
+
+
+def test_pendencia_deterministica_resolve_pelo_route(monkeypatch):
+    uid, chamadas = _com_ia(monkeypatch)
+    _ia_disse(uid, ORCAMENTO)
+    arma_installment(uid)
+
+    assert "parcelamento registrado" in diga(uid, "comprei uma tv").lower()
+    assert chamadas == []
+
+
+class _Anexo:
+    def __init__(self, filename, content_type, data=None):
+        self.filename, self.content_type, self.data = filename, content_type, data
+
+
+def _envia(uid, anexo, texto=""):
+    out = hi.handle_incoming(IncomingMessage(
+        platform="whatsapp", user_id=uid, text=texto, message_id=uuid.uuid4().hex,
+        attachments=[anexo], external_id="", raw={},
+    ))
+    return "\n".join(m.text for m in out)
+
+
+def test_csv_sem_dados_encerra_a_pergunta(monkeypatch):
+    uid, chamadas = _com_ia(monkeypatch)
+    _ia_disse(uid, ORCAMENTO)
+
+    assert "Recebi o CSV, mas não consegui baixar" in _envia(
+        uid, _Anexo("extrato.csv", "text/csv"))
+    diga(uid, "300 reais transporte")
+    assert chamadas == []
+    assert _lancamentos(uid) == 1
+
+
+def test_sem_ia_no_plano_grava_pelo_route(monkeypatch):
+    uid, chamadas = _com_ia(monkeypatch)
+    monkeypatch.setattr("core.services.plan_service.ai_chat_allowed", lambda _uid: False)
+    _ia_disse(uid, ORCAMENTO)
+
+    diga(uid, "300 reais transporte")
+    assert chamadas == []
+    assert _lancamentos(uid) == 1
+
+
+def test_recusa_de_investimento_vem_antes_da_pergunta(monkeypatch):
+    uid, chamadas = _com_ia(monkeypatch)
+    _ia_disse(uid, ORCAMENTO)
+
+    assert INVESTMENT_ACTION_REFUSAL_MSG.splitlines()[0] in diga(uid, "devo comprar bitcoin?")
+    assert chamadas == []
+
+
+def test_pergunta_velha_ou_de_outro_usuario_nao_captura(monkeypatch):
+    uid, chamadas = _com_ia(monkeypatch)
+    outro = novo_uid()
+    _ia_disse(uid, ORCAMENTO, minutos_atras=11)
+    _ia_disse(outro, ORCAMENTO)
+
+    diga(uid, "300 reais transporte")
+    assert chamadas == []
+    assert _lancamentos(uid) == 1
+    assert _lancamentos(outro) == 0
+
+
+def test_botao_nunca_responde_a_pergunta_da_ia(monkeypatch):
+    uid, chamadas = _com_ia(monkeypatch)
+    _ia_disse(uid, ORCAMENTO)
+
+    hi.handle_incoming(IncomingMessage(
+        platform="whatsapp", user_id=uid, text="desfazer", message_id=uuid.uuid4().hex,
+        attachments=[], external_id="", raw={},
+    ), de_botao=True)
+    assert chamadas == []
+
+
+@pytest.mark.parametrize("botao,texto", [("undo_launch", ""), ("confirm_yes", "Sim")])
+def test_wa_runtime_marca_o_clique_como_botao(monkeypatch, botao, texto):
+    """A fiação: o clique chega ao `handle_incoming` real com `de_botao`."""
+    from adapters.whatsapp.wa_parse import InboundMessage
+    from adapters.whatsapp.wa_runtime import process_message
+    uid, chamadas = _com_ia(monkeypatch)
+    _ia_disse(uid, ORCAMENTO)
+    wr = "adapters.whatsapp.wa_runtime."
+    monkeypatch.setattr(wr + "get_or_create_canonical_user", lambda provider, external_id: uid)
+    monkeypatch.setattr(wr + "attempt_whatsapp_phone_link",
+                        lambda wa_id, current_user_id=None: {"status": "noop", "user_id": uid})
+    monkeypatch.setattr(wr + "log_system_event_sync", lambda *a, **k: None)
+    monkeypatch.setattr(wr + "send_typing_indicator", lambda *a, **k: None)
+    monkeypatch.setattr(wr + "_seen_recent", lambda message_id: False)
+    monkeypatch.setattr(wr + "_send_reply", lambda *a, **k: None)
+    monkeypatch.setattr(wr + "_send_reply_with_optional_buttons", lambda *a, **k: None)
+
+    process_message(InboundMessage(
+        wa_id="5511999990000", text=texto, timestamp="1", attachments=[],
+        raw={"id": f"wamid.{uuid.uuid4().hex[:10]}", "type": "interactive",
+             "interactive": {"type": "button_reply",
+                             "button_reply": {"id": botao, "title": texto or "x"}}},
+    ))
+    assert chamadas == []
+
+
+def _audio(monkeypatch, uid, transcricao):
+    monkeypatch.setattr(hi, "transcribe_audio", lambda data, fn: transcricao)
+    return _envia(uid, _Anexo("audio.ogg", "audio/ogg", b"x"))
+
+
+def test_audio_com_pergunta_da_ia_vai_para_a_ia(monkeypatch):
+    uid, chamadas = _com_ia(monkeypatch)
+    _ia_disse(uid, ORCAMENTO)
+
+    r = _audio(monkeypatch, uid, "300 reais transporte e 200 lazer")
+    assert 'Entendi: "300 reais transporte e 200 lazer"' in r
+    assert "resposta do agente" in r
+    assert chamadas == ["300 reais transporte e 200 lazer"]
+    assert _lancamentos(uid) == 0
+
+
+def test_audio_sem_pergunta_ou_com_pendencia_segue_o_route(monkeypatch):
+    uid, chamadas = _com_ia(monkeypatch)
+    _audio(monkeypatch, uid, "gastei 50 no mercado")
+    assert _lancamentos(uid) == 1
+
+    uid2 = novo_uid()
+    _ia_disse(uid2, ORCAMENTO)
+    arma_installment(uid2)
+    assert "parcelamento registrado" in _audio(monkeypatch, uid2, "comprei uma tv").lower()
+    assert chamadas == []
+
+
+# ---------------------------------------------------------------------------
+# A IA falha (timeout, rate limit) com a pergunta aberta: a resposta a ela não
+# pode cair no route() e virar despesa (achado do Tester).
+# ---------------------------------------------------------------------------
+
+def _ia_quebrada(monkeypatch):
+    uid, chamadas = _com_ia(monkeypatch)
+
+    def _falha(*a, **k):
+        chamadas.append(a[1])
+        raise RuntimeError("timeout")
+    monkeypatch.setattr("core.services.ai_chat.chat", _falha)
+    return uid, chamadas
+
+
+def test_ia_falha_com_pergunta_aberta_nao_grava(monkeypatch):
+    from core.services.ai_chat.runner import ERROR_MSG
+    uid, chamadas = _ia_quebrada(monkeypatch)
+    _ia_disse(uid, ORCAMENTO)
+
+    assert diga(uid, "300 reais transporte") == ERROR_MSG
+    assert chamadas == ["300 reais transporte"]
+    assert _lancamentos(uid) == 0
+
+
+def test_audio_ia_falha_com_pergunta_aberta_nao_grava(monkeypatch):
+    from core.services.ai_chat.runner import ERROR_MSG
+    uid, chamadas = _ia_quebrada(monkeypatch)
+    _ia_disse(uid, ORCAMENTO)
+
+    r = _audio(monkeypatch, uid, "300 reais transporte")
+    assert ERROR_MSG in r
+    assert chamadas == ["300 reais transporte"]
+    assert _lancamentos(uid) == 0
+
+
+def test_ia_falha_sem_pergunta_aberta_segue_o_fluxo_antigo(monkeypatch):
+    """Positivo: out_of_scope sem pergunta aberta, IA falhando, continua no
+    route() como antes — sem a mensagem de erro."""
+    from core.services.ai_chat.runner import ERROR_MSG
+    uid, chamadas = _ia_quebrada(monkeypatch)
+
+    r = diga(uid, "qual a capital da frança")
+    assert chamadas, "o texto nem chegou ao fallback de IA"
+    assert ERROR_MSG not in r
+    assert _lancamentos(uid) == 0
+
+
+def test_audio_para_a_ia_nao_encerra_a_pergunta(monkeypatch):
+    """Com a IA de verdade (grava user+assistant), o `finally` não grava o
+    `system`: a última mensagem é a resposta da IA."""
+    uid, chamadas = _com_ia(monkeypatch)
+    _ia_disse(uid, ORCAMENTO)
+    monkeypatch.setattr(
+        "core.services.ai_chat.chat",
+        lambda u, t, **k: (chamadas.append(t), db.ai_append_message(u, "user", t),
+                           db.ai_append_message(u, "assistant", "Anotado: R$ 300"))
+        and "resposta do agente",
+    )
+
+    assert "resposta do agente" in _audio(monkeypatch, uid, "300 reais transporte")
+    assert db.ai_get_last_message(uid)["content"] == "Anotado: R$ 300"
+
+
+# ---------------------------------------------------------------------------
+# A nova tentativa depois de uma falha da IA (achado do Tester): o runner real
+# grava o turno falho no histórico, e ele não pode fechar a pergunta.
+# ---------------------------------------------------------------------------
+
+def _ia_falha_uma_vez(monkeypatch, *, levanta):
+    """Imita o runner: 1º turno falha — `user` + `assistant(ERROR_MSG)` (caminho
+    comum) ou só o `user` e exceção (erro que escapa do runner); depois responde."""
+    from core.services.ai_chat.runner import ERROR_MSG
+    uid, chamadas = _com_ia(monkeypatch)
+
+    def _chat(u, t, **k):
+        chamadas.append(t)
+        if len(chamadas) > 1:
+            return "resposta do agente"
+        db.ai_append_message(u, "user", t)
+        if levanta:
+            raise RuntimeError("banco caiu no meio do turno")
+        db.ai_append_message(u, "assistant", ERROR_MSG)
+        return ERROR_MSG
+    monkeypatch.setattr("core.services.ai_chat.chat", _chat)
+    return uid, chamadas
+
+
+@pytest.mark.parametrize("levanta", [False, True])
+def test_nova_tentativa_depois_de_falha_da_ia_vai_para_a_ia(monkeypatch, levanta):
+    from core.services.ai_chat.runner import ERROR_MSG
+    uid, chamadas = _ia_falha_uma_vez(monkeypatch, levanta=levanta)
+    _ia_disse(uid, ORCAMENTO)
+
+    assert ERROR_MSG in diga(uid, "300 reais transporte")
+    assert diga(uid, "300 reais transporte") == "resposta do agente"
+    assert chamadas == ["300 reais transporte"] * 2
+    assert _lancamentos(uid) == 0
+
+
+def test_comando_depois_de_falha_da_ia_encerra_a_pergunta(monkeypatch):
+    uid, chamadas = _ia_falha_uma_vez(monkeypatch, levanta=False)
+    _ia_disse(uid, ORCAMENTO)
+
+    diga(uid, "300 reais transporte")
+    assert "Open Finance" in diga(uid, "conectar banco")
+    diga(uid, "300 reais transporte")
+    assert len(chamadas) == 1
+    assert _lancamentos(uid) == 1
+
+
+def test_janela_conta_da_pergunta_e_nao_da_falha(monkeypatch):
+    from core.services.ai_chat.runner import ERROR_MSG
+    uid, chamadas = _com_ia(monkeypatch)
+    _ia_disse(uid, ORCAMENTO, minutos_atras=11)
+    db.ai_append_message(uid, "user", "300 reais transporte")
+    db.ai_append_message(uid, "assistant", ERROR_MSG)
+
+    diga(uid, "300 reais transporte")
+    assert chamadas == []
+    assert _lancamentos(uid) == 1
