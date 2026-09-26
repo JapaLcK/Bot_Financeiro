@@ -14,7 +14,11 @@ export type EstadoEntrar =
   | { fase: "enviando" }
   | { fase: "mfa"; desafio: string; email: string; modo: "totp" | "backup"; aviso?: string }
   | { fase: "verificando"; desafio: string; email: string; modo: "totp" | "backup" }
-  | { fase: "erro-cofre" };
+  | { fase: "erro-cofre"; mensagem?: string }
+  // Google (`google.ts`): navegador aberto ou troca em voo; e o cadastro de quem não tem conta.
+  | { fase: "google" }
+  | { fase: "google-cadastro"; token: string; email: string; nome: string; aviso?: string }
+  | { fase: "google-criando"; token: string; email: string };
 
 /**
  * Quais fases apagam o campo Senha ao entrar nelas. O iOS só oferece "Salvar
@@ -27,6 +31,9 @@ const APAGA_SENHA: Record<EstadoEntrar["fase"], boolean> = {
   enviando: false, // o campo continua na tela (desativado) durante o envio, e no sucesso ele sai daqui preenchido
   mfa: false, // o campo sai da tela nesta troca: é ELA que o iOS lê para oferecer salvar
   verificando: false, // o campo já não está na tela; o sucesso segue para o app, a falha volta por "formulario"
+  google: true, // quem toca no Google não usa a senha: o campo sai vazio, e o iOS não oferece salvar
+  "google-cadastro": true,
+  "google-criando": true,
 };
 
 export function apagaSenhaNaFase(fase: EstadoEntrar["fase"]): boolean {
