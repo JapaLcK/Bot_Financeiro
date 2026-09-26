@@ -133,8 +133,15 @@ que não se sabe aparece como "sem comparação", "a conferir", "desatualizado" 
 ## 6. Ordem
 
 **Antes de tudo:** terminar o protótipo do chat (PR 3, blocos que expandem na conversa)
-(Q34), e ter no ar os pré-requisitos da seção 2 que mexem no produto atual: o PR #594, a
-Q42 (recorrente só prevê) e a Q43 (manual para de render).
+(Q34), e ter no ar, **antes do job da foto da etapa 0**, tudo da seção 2 que mexe no
+dinheiro do produto atual — senão as primeiras fotos gravam ganho ou perda que não houve,
+e esse histórico não se refaz:
+- o PR #594;
+- a Q42 (recorrente só prevê) e a Q43 (manual para de render);
+- a regra da forma de pagamento da Q40 em todos os caminhos que gravam hoje (marcar conta
+  como paga, WhatsApp, IA, painel antigo) — só a interface nova do chat espera a etapa 7;
+- a transferência entre banco e carteira da Q41 (saque e depósito em espécie), ou, até
+  ela existir, a foto marcada como incerta quando houver saque ou depósito no período.
 
 | Etapa | O que entra | Faixa |
 |---|---|---|
@@ -176,22 +183,28 @@ PR de cada etapa, não soluções prontas. Cada PR confere se ainda valem, decid
 
 **Etapas de tela (1 a 6)**
 - Etapa 2: identidade das transações importadas por conta (conta e cartão); editar a data
-  de um lançamento fundido; transferência entre banco e carteira (Q41) e o ciclo de vida
-  dela (correção, exclusão, reconexão).
+  de um lançamento fundido; o ciclo de vida da transferência entre banco e carteira (Q41):
+  correção, exclusão, reconexão.
 - Etapa 4: reserva designada, custo mensal por frequência, reserva só em reais; caixinha
   manual versus a do banco.
 - Etapa 6: variação do período só dentro de um trecho sem quebra.
 - A confirmação da carteira e a revisão dos lançamentos antigos (Q37): em que etapa entram
   e o que as derruba.
 
+**Convivência com o painel antigo (desde a etapa 0)**
+- Quem usa o v2 ainda alcança o painel antigo (links nos dois sentidos, e o app atual fica
+  nele), onde dá para criar lançamento de banco e investimento manual — o que a Q36 tira do
+  v2. Decidir se esses caminhos antigos são bloqueados ou adaptados durante a convivência,
+  com teste cruzando as duas telas.
+
 **Etapa 7 (chat)**
-- A forma de pagamento da Q40 como regra no código, em todos os caminhos que gravam (IA,
-  WhatsApp, marcar conta como paga, painel antigo).
+- A interface nova do chat sobre a regra da forma de pagamento (a regra em si vem antes,
+  seção 6).
 
 ## 8. Andamento
 
 - [x] Protótipo: perfis do Resumo (#573, #575), faixa do Piggy (#579), navegação com o
   Piggy no meio e Ferramentas (#582), página do chat (#584).
 - [ ] Protótipo: blocos que expandem na conversa (em outro chat).
-- [ ] Pré-requisitos: #594 · Q42 · Q43
+- [ ] Pré-requisitos: #594 · Q42 · Q43 · Q40 (regra) · Q41
 - [ ] Etapa 0 · [ ] 1 · [ ] 2 · [ ] 3 · [ ] 4 · [ ] 5 · [ ] 6 · [ ] 7
