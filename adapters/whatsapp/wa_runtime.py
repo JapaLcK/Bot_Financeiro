@@ -624,6 +624,18 @@ def _maybe_send_autolink_greeting_warning(
     return True
 
 
+def _pergunta_da_ia(uid: int):
+    """(pid, âncora) da pergunta aberta da IA no INÍCIO do turno, como o núcleo lê."""
+    try:
+        from core.handle_incoming import _normalize_user_id
+        from core.services.ai_chat_commands import pergunta_aberta_da_ia
+        pid = _normalize_user_id(IncomingMessage(platform="whatsapp", user_id=uid, text=""))
+        return pid, pergunta_aberta_da_ia(pid)
+    except Exception as exc:
+        logger.warning("WA pergunta_aberta_da_ia falhou: %s", exc)
+        return None, None
+
+
 def process_message(message: InboundMessage) -> None:
     core_started = False
     # Turno atendido aqui, sem chegar ao `handle_incoming` (botão, `ajuda`,
@@ -631,6 +643,7 @@ def process_message(message: InboundMessage) -> None:
     # `finally` encerra a pergunta aberta da IA, como o `finally` do núcleo faz.
     # Mensagem descartada sem resposta e exceção a mantêm.
     uid = None
+    pid = ancora = None
     mantem_pergunta = False
     try:
         reply_to = message.wa_id
@@ -643,6 +656,9 @@ def process_message(message: InboundMessage) -> None:
         )
         uid = get_or_create_canonical_user("whatsapp", message.wa_id)
         logger.info("WA canonical user resolved uid=%s from=%s", uid, message.wa_id)
+        # Âncora lida antes de qualquer tratamento pré-núcleo: pergunta que o app
+        # criar durante este turno não é deste turno e fica aberta.
+        pid, ancora = _pergunta_da_ia(uid)
 
         auto_link_result = attempt_whatsapp_phone_link(message.wa_id, current_user_id=uid)
         if auto_link_result["status"] in {"linked", "already_linked"}:
@@ -655,6 +671,7 @@ def process_message(message: InboundMessage) -> None:
                     message.wa_id,
                 )
                 uid = resolved_uid
+                pid, ancora = _pergunta_da_ia(uid)
             if auto_link_result["status"] == "linked":
                 logger.info(
                     "WA phone auto-link success wa_id=%s final_user_id=%s",
@@ -1384,16 +1401,10 @@ def process_message(message: InboundMessage) -> None:
                 send_exc,
             )
     finally:
-        if uid is not None and not core_started and not mantem_pergunta:
+        if ancora is not None and not core_started and not mantem_pergunta:
             try:
-                from core.handle_incoming import _normalize_user_id
-                from core.services.ai_chat_commands import (
-                    encerra_pergunta_da_ia, pergunta_aberta_da_ia,
-                )
-                pid = _normalize_user_id(IncomingMessage(platform="whatsapp", user_id=uid, text=""))
-                ancora = pergunta_aberta_da_ia(pid)
-                if ancora is not None:
-                    encerra_pergunta_da_ia(pid, ancora)
+                from core.services.ai_chat_commands import encerra_pergunta_da_ia
+                encerra_pergunta_da_ia(pid, ancora)
             except Exception as exc:
                 logger.warning("WA encerrar pergunta da IA fora do núcleo falhou: %s", exc)
 

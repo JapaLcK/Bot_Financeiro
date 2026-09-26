@@ -430,6 +430,23 @@ def test_texto_atendido_antes_do_nucleo_encerra_a_pergunta(monkeypatch, texto):
     assert _lancamentos(uid) == 1
 
 
+def test_pergunta_criada_durante_o_turno_fora_do_nucleo_fica_aberta(monkeypatch):
+    """Achado do Codex no #598: o `finally` do `process_message` encerra a
+    âncora lida no INÍCIO do turno, não a que o app criou durante o `ajuda`."""
+    uid, chamadas = _com_ia(monkeypatch)
+    _ia_disse(uid, ORCAMENTO)
+
+    def app_pergunta_no_meio(*_a):
+        _ia_disse(uid, "Quer ver as categorias?")
+        return False
+    monkeypatch.setattr("adapters.whatsapp.wa_runtime._ajuda_do_cortado", app_pergunta_no_meio)
+
+    _wa(monkeypatch, uid, "ajuda")
+    assert pergunta_aberta_da_ia(uid) is not None
+    diga(uid, "300 reais transporte")
+    assert chamadas == ["300 reais transporte"]
+
+
 def test_texto_que_chega_ao_nucleo_continua_indo_a_ia(monkeypatch):
     """Positivo: o encerramento fora do núcleo não pega o turno que chegou nele."""
     uid, chamadas = _com_ia(monkeypatch)
