@@ -55,7 +55,8 @@ after(async () => { await browser?.close(); server?.kill(); });
  * Abre o Settings já na aba de Open Finance, com o backend simulado.
  * `banksMax` é o teto do plano; `conexoes` são as conexões existentes.
  */
-async function abrirSettings({ banksMax = 2, conexoes = [], conectores = BANCOS } = {}) {
+async function abrirSettings({ banksMax = 2, conexoes = [], conectores = BANCOS,
+                               cobrancaEmAtraso = false } = {}) {
   const ctx = await browser.newContext();
   const page = await ctx.newPage();
 
@@ -71,7 +72,8 @@ async function abrirSettings({ banksMax = 2, conexoes = [], conectores = BANCOS 
                     body: readFileSync(join(FRONTEND, "static", "auth-refresh.js"), "utf8") }));
   await page.route("**/auth/validate", (route) => route.fulfill(json({ user_id: 1 })));
   await page.route("**/auth/me", (route) =>
-    route.fulfill(json({ app_access: true, of_ui_enabled: true, of_banks_max: banksMax })));
+    route.fulfill(json({ app_access: true, of_ui_enabled: true, of_banks_max: banksMax,
+                         cobranca_em_atraso: cobrancaEmAtraso })));
   await page.route("**/open-finance/1/connectors", (route) =>
     route.fulfill(json({ connectors: conectores })));
   await page.route("**/open-finance/1", (route) =>
@@ -80,6 +82,8 @@ async function abrirSettings({ banksMax = 2, conexoes = [], conectores = BANCOS 
   // pra a navegação acontecer sem sair do servidor de teste.
   await page.route("**/precos**", (route) =>
     route.fulfill({ status: 200, contentType: "text/html", body: "<title>precos</title>" }));
+  await page.route("**/conta", (route) =>
+    route.fulfill({ status: 200, contentType: "text/html", body: "<title>conta</title>" }));
 
   await page.goto(`${ORIGIN}/settings.html?view=open-finance`);
 
@@ -199,6 +203,18 @@ test("plano sem Open Finance não abre o picker: vira CTA de upgrade", async () 
   assert.match(await page.$eval("#connect-btn", (b) => b.className), /btn-connect--upgrade/);
   await page.click("#connect-btn");
   await page.waitForURL(/\/precos/);
+  assert.equal(await pickerAberto(page).catch(() => false), false);
+  await page.__ctx.close();
+});
+
+test("carência de cobrança sem Open Finance: o CTA atualiza o cartão no /conta", async () => {
+  // Já é assinante: mandar pra /precos seria beco (o checkout recusa com 409).
+  // O caso acima, sem o campo, é o controle positivo: continua indo pra /precos.
+  const page = await abrirSettings({ banksMax: 0, cobrancaEmAtraso: true });
+
+  assert.equal((await page.textContent("#connect-btn")).trim(), "Atualizar cartão");
+  await page.click("#connect-btn");
+  await page.waitForURL(/\/conta$/);
   assert.equal(await pickerAberto(page).catch(() => false), false);
   await page.__ctx.close();
 });
