@@ -883,14 +883,17 @@ async def get_financial_data(
 
         cat_list.append(cat)
 
-    # Alertas de cobranças automáticas (recurring_charges) ainda não vistas.
+    # Alertas de gasto fixo (recurring_charges) ainda não vistos. `launched`:
+    # linha do cobrador antigo, que lançou ("Piggy lançou"); sem lançamento é o
+    # aviso de vencimento do autopay (Q42 — "dia de débito no banco").
     try:
         async with await db_connect() as _alert_conn:
             async with _alert_conn.cursor() as _alert_cur:
                 await _alert_cur.execute(
                     """
                     select rc.id, rc.amount, rc.charged_at, rc.ym,
-                           r.name, r.payment_type, r.id as recurring_id
+                           r.name, r.payment_type, r.id as recurring_id,
+                           (rc.launch_id is not null or rc.credit_tx_id is not null) as launched
                     from recurring_charges rc
                     join recurring_expenses r on r.id = rc.recurring_id
                     where rc.user_id = %s and rc.acknowledged = false
@@ -910,6 +913,7 @@ async def get_financial_data(
                         "payment_type": r["payment_type"],
                         "ym":           r["ym"],
                         "charged_at":   r["charged_at"].isoformat() if r["charged_at"] else None,
+                        "launched":     bool(r["launched"]),
                     })
     except Exception:
         # Tabela pode não existir ainda no init_db da primeira subida — silencia.

@@ -821,7 +821,8 @@ def list_launches_by_category(
     - `nota` e `alvo` vêm CRUS, cada um na sua chave. `descricao` continua sendo
       o rótulo pronto (`coalesce(alvo, nota, '—')`) que o WhatsApp imprime, mas
       ele NÃO serve pra pré-preencher um formulário de edição: numa linha com os
-      dois preenchidos (recurring_charger.py, db/bills.py, db/cards.py) ele é o
+      dois preenchidos (linhas antigas do cobrador de recorrentes, db/bills.py,
+      db/cards.py) ele é o
       ALVO, e salvar o formulário gravava o alvo por cima da nota real.
     `after` (default None, aditivo) é o "carregar mais" do dashboard: a tupla
     `(dt, fonte, ord_id)` da ÚLTIMA linha da página anterior, e a próxima página
