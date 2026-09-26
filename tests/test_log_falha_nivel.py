@@ -135,7 +135,7 @@ def test_bulk_condicao_de_dominio_loga_warning_e_apaga_o_resto(user_id, caplog):
 
     assert _niveis(caplog, "delete_launch_bulk:") == ["WARNING"], \
         [(r.levelname, r.getMessage()) for r in caplog.records]
-    assert "⚠️ Falha: #2" in resp, resp
+    assert "#2" in resp and "é antigo" in resp and "Falha" not in resp, resp
     assert "**#5**" in resp, resp
     restantes = [int(r["id"]) for r in db.list_launches(user_id, limit=10)]
     assert restantes == [antigo], f"o bulk parou no lançamento de domínio: {restantes}"
