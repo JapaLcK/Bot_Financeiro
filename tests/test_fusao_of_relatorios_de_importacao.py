@@ -35,7 +35,7 @@ def _funde_cinquenta(uid: int) -> int:
     hoje = today_tz()
     conexao = conecta_banco(uid, "1000.00")
     db.add_launch_and_update_balance(uid, "receita", 100, None, "seed")
-    manda(uid, "gastei 50 no mercado")
+    manda(uid, "gastei 50 no mercado em dinheiro")
     sincroniza(conexao, uid, "950.00", [tx(uid, "-50.00", hoje, "MERCADO")])
     rep = db.import_open_finance_launches(uid, conexao)
     assert rep["pending"] == 1 and rep["auto_merged"] == 0, rep

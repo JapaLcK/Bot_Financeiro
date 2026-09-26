@@ -130,12 +130,14 @@ def _split_audio_transactions(text: str) -> list[str]:
     return split_financial_transactions(text)
 
 
-def _process_audio_transaction(uid: int, transcription: str, msg: IncomingMessage, platform: str) -> str:
+def _process_audio_transaction(uid: int, transcription: str, msg: IncomingMessage, platform: str,
+                               forma: str | None = None, intent_result=None) -> str:
     """
     Processa um único lançamento de áudio diretamente (sem confirmação).
-    Retorna a resposta formatada.
+    Retorna a resposta formatada. `forma`: a forma de pagamento declarada para
+    o áudio inteiro (Q40); `intent_result`: a classificação já feita.
     """
-    intent_result = classify(transcription, user_id=uid)
+    intent_result = intent_result or classify(transcription, user_id=uid)
     msg_from_audio = IncomingMessage(
         platform=msg.platform,
         user_id=uid,
@@ -145,8 +147,101 @@ def _process_audio_transaction(uid: int, transcription: str, msg: IncomingMessag
         external_id=msg.external_id,
         raw=msg.raw,
     )
-    raw_response = route(intent_result, msg_from_audio)
+    raw_response = route(intent_result, msg_from_audio, forma_pagamento=forma)
     return format_for_platform(raw_response, platform)
+
+
+def rotear_partes(uid: int, parts: list[str], msg: IncomingMessage, platform: str,
+                  forma: str | None = None, resultados: list | None = None) -> tuple[str, bool]:
+    """Roteia os pedaços de um áudio, cada um no seu fluxo; devolve (corpo,
+    pediu_valor). `forma`: a forma declarada para o áudio inteiro (Q40, banco
+    conectado — também a resposta à pergunta de forma do áudio, em
+    `core/handlers/forma_pagamento.py`); None = cada pedaço pela própria frase.
+    `resultados`: as classificações já feitas, alinhadas com `parts`."""
+    from core.handlers import forma_pagamento as fp
+    is_multi = len(parts) > 1
+    responses = []
+    fallbacks = []
+    # Pedaços de um áudio múltiplo que vêm com verbo mas SEM valor
+    # ("gastei 500 no ifood e paguei o aluguel"). No texto digitado esse ramo
+    # já pergunta o valor (core.handlers.launches.add); aqui o áudio pré-divide
+    # a transcrição ANTES do add(), então cada pedaço vira um route() separado e
+    # o pedaço sem valor cairia no "não consegui identificar o valor". Detectamos
+    # antes de rotear e enfileiramos pra perguntar o valor — paridade com o texto.
+    missing: list[dict] = []
+    if is_multi:
+        from parsers import describe_valueless_launch
+        from core.handlers.launches import register_if_recurring
+    for i, part in enumerate(parts):
+        if is_multi:
+            info = describe_valueless_launch(fp.limpar(part) if forma == fp.DINHEIRO else part)
+            if info:
+                tipo, desc = info
+                if forma and fp.decidir(uid, forma) == fp.BANCO:
+                    responses.append(format_for_platform(fp.msg_banco(uid, tipo, None), platform))
+                    continue
+                f = forma or fp.detectar(part)
+                # Valor recorrente conhecido ("aluguel" que sempre é o mesmo) →
+                # lança sozinho (com aviso). Senão, enfileira pra perguntar.
+                auto = register_if_recurring(uid, tipo, desc, platform, forma_pagamento=f)
+                if auto is not None:
+                    # add_from_entities devolve markdown estilo Discord (**bold**);
+                    # os demais pedaços do áudio já saem formatados por
+                    # _process_audio_transaction, então formatamos este também.
+                    responses.append(format_for_platform(auto, platform))
+                else:
+                    missing.append({"tipo": tipo, "desc": desc, "forma_pagamento": f})
+                continue
+        result_text = _process_audio_transaction(uid, part, msg, platform, forma,
+                                                 resultados[i] if resultados else None)
+        # A quebra em múltiplos lançamentos (_split_audio_transactions) pode
+        # separar um pedaço real ("comprei 550 de pão doce") de um pedaço que
+        # é só ruído da fala ("fala pig, sei que lá, sei que lá,"). O pedaço
+        # de ruído roteia pro help genérico ("Não entendi..."). Colar esse
+        # fallback num "Despesa registrada" gera resposta contraditória —
+        # então separamos e só mostramos o fallback se NADA foi registrado.
+        if _looks_like_help_fallback(result_text):
+            fallbacks.append(result_text)
+        else:
+            responses.append(result_text)
+
+    # Enfileira a pergunta de valor faltante e monta a pergunta do primeiro item.
+    # Setar o pending por ÚLTIMO garante que ele sobrevive: o route() de cada
+    # pedaço acima pode ter armado um pending próprio (ex: "categoria errada?"),
+    # mas o multi_launch_values é o que a próxima resposta do usuário resolve.
+    # Com a forma do áudio (Q40), por claim: um pedaço pode ter armado uma
+    # PERGUNTA de verdade (ex.: o valor da conta), e a fila não a apaga.
+    ask_value_question = ""
+    if missing:
+        from core.handlers.launches import _ask_value_question
+        fila = {"queue": missing, "platform": platform}
+        if forma is None:
+            db.set_pending_action(uid, "multi_launch_values", fila)
+            ask_value_question = _ask_value_question(missing[0])
+        elif db.claim_pending_action(uid, "multi_launch_values", fila):
+            ask_value_question = _ask_value_question(missing[0])
+        else:
+            nomes = ", ".join(f"*{m['desc']}*" for m in missing)
+            ask_value_question = (f"🐷 Não registrei {nomes}: antes tem outra pergunta minha "
+                                  "esperando. Responde ela e me manda de novo.")
+
+    if responses:
+        body = "\n\n".join(responses)
+    elif missing:
+        # Nada com valor foi registrado, mas há pedaço(s) esperando valor — a
+        # pergunta abaixo cobre a resposta; não mostra o fallback "não entendi".
+        body = ""
+    else:
+        # Nenhum pedaço virou lançamento válido — mostra UM fallback só
+        # (não repetido por pedaço).
+        body = fallbacks[0] if fallbacks else (
+            "🎙️ Recebi seu áudio, mas não entendi o que registrar.\n"
+            'Tente algo como: "gastei 50 no mercado".'
+        )
+
+    if ask_value_question:
+        body = f"{body}\n\n{ask_value_question}" if body else ask_value_question
+    return body, bool(missing)
 
 
 def _resposta_da_ia(uid: int, text: str, platform: str, rotulo: str,
@@ -264,7 +359,37 @@ def _handle_audio(msg: IncomingMessage, platform: str,
     pergunta_no_turno.set(None)  # roteado: atendido fora da IA
     # Detecta múltiplos lançamentos no mesmo áudio
     parts = _split_audio_transactions(transcription)
-    is_multi = len(parts) > 1
+    forma, resultados, aviso_misto = None, None, ""
+    if len(parts) > 1:
+        # Q40: com banco conectado, a forma vale para o áudio inteiro, como no
+        # texto digitado — mas cada pedaço segue no SEU fluxo (caixinha, conta,
+        # gasto), igual ao áudio sem banco.
+        from core.handlers import forma_pagamento as fp
+        from parsers import describe_valueless_launch
+        if fp.regra_ativa(uid):
+            forma = fp.detectar(transcription)
+        if forma in (fp.DESCONHECIDA, fp.MISTO):
+            # Quem precisa da forma: gasto/receita (com ou sem valor) e conta.
+            resultados = [None if describe_valueless_launch(p) else classify(p, user_id=uid)
+                          for p in parts]
+            precisa = [r is None or r.intent == "launches.add" for r in resultados]
+            if any(precisa) and forma == fp.DESCONHECIDA:
+                # UMA pergunta e o áudio inteiro espera por ela: rodar os outros
+                # pedaços agora poderia armar outra pergunta por cima desta.
+                i = precisa.index(True)
+                info = describe_valueless_launch(parts[i])
+                tipo = info[0] if info else (resultados[i].entities or {}).get("tipo")
+                texto = fp.perguntar(uid, {"fluxo": "audio", "partes": parts, "platform": platform},
+                                     fp.pergunta_lancamento(tipo, None))
+                return [OutgoingMessage(text=preview + format_for_platform(texto, platform))]
+            if any(precisa):
+                # Misto: o que precisa da forma não grava; o resto segue.
+                aviso_misto = fp.msg_misto()
+                resultados = [r for r, x in zip(resultados, precisa) if not x]
+                parts = [p for p, x in zip(parts, precisa) if not x]
+                if not parts:
+                    return [OutgoingMessage(text=preview + aviso_misto)]
+            forma = None
 
     # Maior id de lançamento ANTES de processar este áudio. Serve pra saber se
     # este turno REALMENTE inseriu um lançamento — uma resposta por áudio que só
@@ -276,82 +401,14 @@ def _handle_audio(msg: IncomingMessage, platform: str,
     # sim, é sempre o maior.
     pre_launch_id = db.latest_launch_id(uid)
 
-    responses = []
-    fallbacks = []
-    # Pedaços de um áudio múltiplo que vêm com verbo mas SEM valor
-    # ("gastei 500 no ifood e paguei o aluguel"). No texto digitado esse ramo
-    # já pergunta o valor (core.handlers.launches.add); aqui o áudio pré-divide
-    # a transcrição ANTES do add(), então cada pedaço vira um route() separado e
-    # o pedaço sem valor cairia no "não consegui identificar o valor". Detectamos
-    # antes de rotear e enfileiramos pra perguntar o valor — paridade com o texto.
-    missing: list[dict] = []
-    if is_multi:
-        from parsers import describe_valueless_launch
-        from core.handlers.launches import register_if_recurring
-    for part in parts:
-        if is_multi:
-            info = describe_valueless_launch(part)
-            if info:
-                tipo, desc = info
-                # Valor recorrente conhecido ("aluguel" que sempre é o mesmo) →
-                # lança sozinho (com aviso). Senão, enfileira pra perguntar.
-                auto = register_if_recurring(uid, tipo, desc, platform)
-                if auto is not None:
-                    # add_from_entities devolve markdown estilo Discord (**bold**);
-                    # os demais pedaços do áudio já saem formatados por
-                    # _process_audio_transaction, então formatamos este também.
-                    responses.append(format_for_platform(auto, platform))
-                else:
-                    missing.append({"tipo": tipo, "desc": desc})
-                continue
-        result_text = _process_audio_transaction(uid, part, msg, platform)
-        # A quebra em múltiplos lançamentos (_split_audio_transactions) pode
-        # separar um pedaço real ("comprei 550 de pão doce") de um pedaço que
-        # é só ruído da fala ("fala pig, sei que lá, sei que lá,"). O pedaço
-        # de ruído roteia pro help genérico ("Não entendi..."). Colar esse
-        # fallback num "Despesa registrada" gera resposta contraditória —
-        # então separamos e só mostramos o fallback se NADA foi registrado.
-        if _looks_like_help_fallback(result_text):
-            fallbacks.append(result_text)
-        else:
-            responses.append(result_text)
-
-    registered_something = bool(responses)
+    body, missing = rotear_partes(uid, parts, msg, platform, forma, resultados)
+    if aviso_misto:
+        body = f"{body}\n\n{aviso_misto}"
 
     # Este turno REALMENTE inseriu um lançamento? (vs só resolver uma pendência,
     # que devolve texto normal mas não cria lançamento). É o que decide o undo.
     post_launch_id = db.latest_launch_id(uid)
     inserted_launch = post_launch_id is not None and post_launch_id != pre_launch_id
-
-    # Enfileira a pergunta de valor faltante e monta a pergunta do primeiro item.
-    # Setar o pending por ÚLTIMO garante que ele sobrevive: o route() de cada
-    # pedaço acima pode ter armado um pending próprio (ex: "categoria errada?"),
-    # mas o multi_launch_values é o que a próxima resposta do usuário resolve.
-    ask_value_question = ""
-    if missing:
-        from core.handlers.launches import _ask_value_question
-        db.set_pending_action(
-            uid, "multi_launch_values",
-            {"queue": missing, "platform": platform},
-        )
-        ask_value_question = _ask_value_question(missing[0])
-
-    if registered_something:
-        body = "\n\n".join(responses)
-    elif missing:
-        # Nada com valor foi registrado, mas há pedaço(s) esperando valor — a
-        # pergunta abaixo cobre a resposta; não mostra o fallback "não entendi".
-        body = ""
-    else:
-        # Nenhum pedaço virou lançamento válido — mostra UM fallback só
-        # (não repetido por pedaço).
-        body = fallbacks[0] if fallbacks else (
-            "🎙️ Recebi seu áudio, mas não entendi o que registrar.\n"
-            'Tente algo como: "gastei 50 no mercado".'
-        )
-
-    if ask_value_question:
-        body = f"{body}\n\n{ask_value_question}" if body else ask_value_question
 
     # Dica de desfazer — só faz sentido se um lançamento foi de fato inserido
     # NESTE turno. Uma resposta por áudio que só resolve pendência ("cancelar",

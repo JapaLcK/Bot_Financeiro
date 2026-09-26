@@ -387,6 +387,31 @@ def has_open_finance_connections(user_id: int) -> bool:
             return cur.fetchone() is not None
 
 
+def buscar_no_extrato(user_id: int, tipo: str, valor, dias: int = 7,
+                      limite: int = 3) -> list[dict]:
+    """Transações do Open Finance deste usuário com o mesmo tipo e valor
+    (tolerância de `RECON_AMOUNT_TOL`) nos últimos `dias`. É o "já está no
+    extrato" da resposta a um lançamento que passou pelo banco (Q40,
+    `core/handlers/forma_pagamento.py`). Só leitura."""
+    with get_conn() as conn:
+        with conn.cursor() as cur:
+            cur.execute(
+                f"""
+                select coalesce(posted_at, criado_em::date) as dia,
+                       coalesce(alvo, nota) as alvo, valor
+                  from launches
+                 where user_id = %s and source = 'open_finance'
+                   and {TIPO_CANON_SQL} = %s
+                   and abs(valor - %s) <= %s
+                   and coalesce(posted_at, criado_em::date) >= current_date - %s::int
+                 order by criado_em desc
+                 limit %s
+                """,
+                (user_id, tipo, Decimal(str(valor)), RECON_AMOUNT_TOL, int(dias), int(limite)),
+            )
+            return cur.fetchall()
+
+
 def list_open_finance_user_ids() -> list[int]:
     """user_ids distintos com pelo menos 1 banco Pluggy conectado (pros ticks proativos)."""
     with get_conn() as conn:

@@ -1072,7 +1072,7 @@ def test_conversa_com_outro_assunto_no_meio(user_id):
     assert "De onde sai" in _manda(user_id, "guardei 100 na caixinha viagem")
     _manda(user_id, "1")
     assert _saldo_pocket(user_id, "viagem") == 100.0
-    _manda(user_id, "gastei 50 no mercado")
+    _manda(user_id, "gastei 50 no mercado em dinheiro")
 
     s = _manda(user_id, "esvaziar caixinha viagem")
     assert _saldo_pocket(user_id, "viagem") == 0.0, s

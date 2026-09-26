@@ -810,6 +810,8 @@ async def get_financial_data(
     )
     of_bank_balance = float(of_bank_rows[0]["b"]) if of_bank_rows else 0.0
     of_bank_count = int(of_bank_rows[0]["n"]) if of_bank_rows else 0
+    from core.handlers.forma_pagamento import regra_ativa
+    exige_forma_pagamento = await asyncio.to_thread(regra_ativa, user_id)
 
     # O dashboard NÃO passa por `get_consolidated_balance` — monta o snapshot com
     # query própria. A mesma correção de leitura tem de valer aqui, senão a tela
@@ -982,6 +984,10 @@ async def get_financial_data(
         "balance":            (float(account["balance"]) if account else 0.0) + delta_fundido,
         "of_bank_balance":    of_bank_balance,  # saldo das contas bancárias conectadas (OF)
         "of_bank_count":      of_bank_count,    # nº de contas BANK conectadas (0 = sem banco)
+        # Q40: com QUALQUER conexão OF (inclusive só cartão) o manual é só
+        # dinheiro vivo — outro recorte que o `of_bank_count`. Só muda a copy;
+        # quem decide é o servidor (`forma_pagamento.decidir`).
+        "exige_forma_pagamento": exige_forma_pagamento,
         "pockets":            [{**dict(r), "of_plan_active": _of_plan_active} for r in pockets],
         "investments":        [dict(r) for r in investments],
         "rv_positions":       rv_positions,  # ações/FIIs via Open Finance (já são dicts)
@@ -6936,6 +6942,18 @@ async def create_launch_route(request: Request, user_id: int, payload: LaunchCre
             status_code=400,
             detail="Lançamentos manuais só podem ser feitos na Carteira Piggy (dinheiro em espécie).",
         )
+    # Q40 (C1): com banco conectado, o lançamento manual é só dinheiro vivo, e
+    # o painel declara isso mandando `funding_source`. Sem ele, só passa quem
+    # não tem banco — `decidir` é a fonte única da regra.
+    if tipo in ("receita", "despesa"):
+        from core.handlers import forma_pagamento as fp
+        declarada = fp.DINHEIRO if funding_source else fp.DESCONHECIDA
+        if await asyncio.to_thread(fp.decidir, int(user_id), declarada) != fp.CARTEIRA:
+            raise HTTPException(
+                status_code=400,
+                detail="Com banco conectado, lançamento manual é só dinheiro vivo. "
+                       "Pix, cartão e débito entram pelo Open Finance.",
+            )
 
     # Resolve categoria — explícita do form ou inferência (mesmo fluxo do bot).
     explicit = (payload.categoria or "").strip() or None
@@ -8141,12 +8159,17 @@ def _recurring_value_error(code: str) -> HTTPException:
         "FREQUENCIA_INVALIDA": "Frequência inválida (use 'monthly' ou 'annual').",
         "MES_INVALIDO": "Mês inválido — para recorrência anual, informe o mês (1 a 12).",
         "MODO_PAGAMENTO_INVALIDO": "Modo de pagamento inválido (use 'autopay' ou 'manual').",
+        "METODO_INVALIDO": "Forma de pagamento inválida (use 'dinheiro' ou 'banco').",
     }
     return HTTPException(status_code=400, detail=msg.get(code, code))
 
 
 class BillPayPayload(BaseModel):
     amount: float | None = None  # opcional: valor real do boleto (variável)
+    # Q40: com banco conectado a forma é obrigatória ("banco" não cria
+    # lançamento; o débito chega pelo Open Finance). Sem banco, ignorada.
+    # `str`, não Literal: forma fora do enum é 400 com a mensagem da rota.
+    metodo: str | None = None
 
 
 class BoletoPayload(BaseModel):
@@ -8178,7 +8201,9 @@ async def recurring_bills_route(request: Request, user_id: int, include_paid: bo
     except Exception:
         pass
     items = await asyncio.to_thread(list_bills, user_id, include_paid)
-    return {"ok": True, "bills": items}
+    from core.handlers.forma_pagamento import regra_ativa
+    exige = await asyncio.to_thread(regra_ativa, user_id)
+    return {"ok": True, "bills": items, "exige_forma_pagamento": exige}
 
 
 @app.post("/recurring-bills/{user_id}/{bill_id}/pay")
@@ -8187,11 +8212,16 @@ async def recurring_bill_pay_route(request: Request, user_id: int, bill_id: int,
     marca a conta como paga."""
     _authorize_dashboard_access(request, user_id)
     _require_boletos_access(user_id)
-    from db.bills import mark_bill_paid
+    from core.handlers import forma_pagamento as fp
+    if payload.metodo not in (None, fp.DINHEIRO, fp.BANCO):
+        raise HTTPException(status_code=400, detail="Diga como pagou: dinheiro ou banco.")
     try:
-        bill = await asyncio.to_thread(mark_bill_paid, user_id, bill_id, payload.amount)
+        status, bill = await asyncio.to_thread(
+            fp.quitar, user_id, bill_id, payload.amount, payload.metodo or fp.DESCONHECIDA)
     except ValueError as exc:
         raise _recurring_value_error(str(exc))
+    if status == fp.PERGUNTA:
+        raise HTTPException(status_code=400, detail="Diga como pagou: dinheiro ou banco.")
     if bill is None:
         raise HTTPException(status_code=404, detail="Conta a pagar não encontrada ou já paga.")
     _invalidate_dashboard_current_cache(user_id)

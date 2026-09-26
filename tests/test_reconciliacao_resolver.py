@@ -32,7 +32,7 @@ def _gasto_do_mes(uid):
     return asyncio.run(dashboard.get_financial_data(uid, year=h.year, month=h.month))["monthly_expense"]
 
 
-def pendencia(uid, valor="-1.00", frase="Gastei 1 real com a barbara",
+def pendencia(uid, valor="-1.00", frase="Gastei 1 real com a barbara em dinheiro",
               saldo="113.88", descricao="COMPRA CARTAO 4412 XPTO"):
     """Deixa uma pendência e devolve (conexão, of_tx_id, manual_id, sombra_id)."""
     conexao = conecta_banco(uid, "114.88")
@@ -141,7 +141,7 @@ def _lista_e_contagem(uid):
 def _duas_no_mesmo_x(uid):
     hoje = today_tz()
     conexao = conecta_banco(uid, "114.88")
-    manda(uid, "Gastei 1 real com a barbara")
+    manda(uid, "Gastei 1 real com a barbara em dinheiro")
     manual = ultimo_launch(uid)
     sincroniza(conexao, uid, "112.88", [
         tx(uid, "-1.00", hoje, "COMPRA CARTAO 4412 XPTO", ident="1"),
@@ -201,7 +201,7 @@ def _segundo_banco_com_pendencia(uid):
     """Outra conta (outra identidade) com "gastei 50 no mercado" pendente."""
     item = db.save_pluggy_open_finance_item(uid, {
         "id": f"item-2-{uid}", "connector": {"id": 77, "name": "Inter"}, "status": "UPDATED"})
-    manda(uid, "gastei 50 no mercado")
+    manda(uid, "gastei 50 no mercado em dinheiro")
     db.save_open_finance_sync(item["id"], [{
         "provider_account_id": f"acc-2-{uid}", "name": "Inter Conta", "type": "BANK",
         "currency": "BRL", "balance": 500, "raw": {},
@@ -229,7 +229,7 @@ def test_tipo_legado_entrada_sai_como_receita(uid_pro, ia_fora):
     Sem TIPO_CANON_SQL o front faz `fmtBRL(tipo === "receita" ? valor : -valor)`
     e desenha negativo um valor que o banco mostra positivo."""
     conexao = conecta_banco(uid_pro, "114.88")
-    manda(uid_pro, "Recebi 1 real da barbara")
+    manda(uid_pro, "Recebi 1 real da barbara em dinheiro")
     manual = ultimo_launch(uid_pro)
     _q("update launches set tipo='entrada' where id=%s returning id", (manual,))
     sincroniza(conexao, uid_pro, "115.88",

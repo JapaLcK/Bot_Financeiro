@@ -352,7 +352,18 @@ def _add_launch_execute(user_id: int, args: dict[str, Any]) -> str:
     if valor <= 0:
         return "🐷 O valor precisa ser maior que zero."
 
+    from core.handlers import forma_pagamento as fp
     from core.handlers.launches import add_from_entities
+
+    # Q40: a tool só DECLARA a forma; quem decide se grava é o servidor. Fora
+    # do enum vira "desconhecida" — o modelo não inventa uma terceira forma.
+    forma = args.get("forma_pagamento")
+    forma = forma if forma in (fp.DINHEIRO, fp.BANCO) else fp.DESCONHECIDA
+    decisao = fp.decidir(user_id, forma)
+    if decisao == fp.BANCO:
+        return fp.msg_banco(user_id, tipo, valor)
+    if decisao != fp.CARTEIRA:
+        return _PERGUNTE_A_FORMA
 
     return add_from_entities(
         user_id,
@@ -364,7 +375,16 @@ def _add_launch_execute(user_id: int, args: dict[str, Any]) -> str:
         category_reason="ai",
         criado_em=_parse_iso_datetime_for_launch(args.get("data")),
         platform=CURRENT_PLATFORM.get(),
+        forma_pagamento=forma,
     )
+
+
+# Instrução ao MODELO (volta como resultado da tool). Não arma pendência: a
+# pergunta aberta da IA (#598) leva a resposta do usuário de volta para ela.
+_PERGUNTE_A_FORMA = (
+    "🐷 Nada foi gravado. Pergunte ao usuário se foi em dinheiro vivo ou pelo "
+    "banco (Pix, cartão, débito) e chame de novo com `forma_pagamento`."
+)
 
 
 # ─── Write: delete_launch (PEDE confirmação — destrutivo) ───────────────────
@@ -910,6 +930,16 @@ TOOLS: list[Tool] = [
                         "data": {
                             "type": "string",
                             "description": "Data do lançamento em ISO 8601 (YYYY-MM-DD). Omita pra usar hoje.",
+                        },
+                        "forma_pagamento": {
+                            "type": "string",
+                            "enum": ["dinheiro", "banco"],
+                            "description": (
+                                "Como o dinheiro saiu/entrou, SÓ se o usuário disse: "
+                                "'dinheiro' (dinheiro vivo, espécie) ou 'banco' (Pix, "
+                                "cartão, débito, transferência, boleto). Nunca invente: "
+                                "omita se ele não disse."
+                            ),
                         },
                     },
                     "required": ["tipo", "valor"],

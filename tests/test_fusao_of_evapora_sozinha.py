@@ -45,7 +45,7 @@ def _funde_um_real(uid: int) -> int:
     """
     hoje = today_tz()
     conexao = conecta_banco(uid, "114.88")
-    manda(uid, "Gastei 1 real com a barbara")
+    manda(uid, "Gastei 1 real com a barbara em dinheiro")
     sincroniza(conexao, uid, "113.88",
                [tx(uid, "-1.00", hoje, "PIX ENVIADO BARBARA")])
     rep = db.import_open_finance_launches(uid, conexao)
@@ -208,7 +208,7 @@ def test_7_transacao_de_cartao_nao_aciona_a_correcao(uid_pro, ia_fora):
         "transactions": [tx(uid_pro, "-1.00", hoje, "PIX ENVIADO BARBARA")],
     }])
 
-    manda(uid_pro, "Gastei 1 real com a barbara")
+    manda(uid_pro, "Gastei 1 real com a barbara em dinheiro")
     db.import_open_finance_launches(uid_pro, item["id"])
 
     cb = db.get_consolidated_balance(uid_pro)

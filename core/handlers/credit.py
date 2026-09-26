@@ -744,13 +744,34 @@ def _infer_category(user_id: int, desc: str) -> str:
     return _infer_category_result(user_id, desc).category
 
 
+def e_compra_no_debito(text: str) -> bool:
+    """"gastei 50 no cartão de débito": sai da conta, não da fatura (Q2b)."""
+    norm = normalize_text(text)
+    return bool(re.match(r"^(gastei|paguei|comprei|debitei|gasto)\b", norm)
+                and re.search(r"\bdebito\b", norm) and not re.search(r"\bcredito\b", norm))
+
+
 def _is_natural_credit_purchase(text: str) -> bool:
     norm = normalize_text(text)
     if norm.startswith("paguei fatura"):
         return False
     if not re.match(r"^(gastei|paguei|comprei|debitei|gasto)\b", norm):
         return False
+    if e_compra_no_debito(text):
+        return False
     return any(token in norm for token in ("cartao", "credito"))
+
+
+def cartao_manual_da_compra(user_id: int, text: str) -> int | None:
+    """O cartão que a compra no crédito usaria, se ele existe e NÃO é
+    sincronizado pelo Open Finance; senão None. É a mesma resolução do
+    `add_credit_from_entities`: o nome citado, ou o cartão padrão. Com banco
+    conectado, só cartão manual continua registrando na fatura (Q2b)."""
+    _dt, sem_data = extract_date_from_text(text)
+    nome, _ = _extract_card_reference_for_purchase(user_id, (sem_data or text).strip())
+    card_id = get_card_id_by_name(user_id, nome) if nome else get_default_card_id(user_id)
+    card = get_card_by_id(user_id, card_id) if card_id else None
+    return card_id if card and not card.get("of_sync_active") else None
 
 
 def _extract_card_reference_for_purchase(user_id: int, text: str) -> tuple[str | None, str | None]:
@@ -915,6 +936,12 @@ def add_credit_from_entities(
 def try_handle_natural_credit_purchase(user_id: int, text: str) -> str | None:
     if not _is_natural_credit_purchase(text):
         return None
+    # Q2b/Q40: com banco conectado, só cartão MANUAL (fora do OF) registra na
+    # fatura; o resto chega pelo Open Finance. Aqui, e não em cada chamador:
+    # `add()`, a entrada rápida e o `credit.handle` passam todos por esta porta.
+    from core.handlers import forma_pagamento as fp
+    if fp.regra_ativa(user_id) and not cartao_manual_da_compra(user_id, text):
+        return fp.msg_banco(user_id, "despesa", parse_money(text))
 
     dt_evento, text_without_date = extract_date_from_text(text)
     if dt_evento is None:

@@ -72,7 +72,8 @@ def test_audio_pergunta_valor_do_trecho_sem_numero(small_uid, audio):
     # armou o pending certo (sobrevive ao undo_audio)
     p = db.get_pending_action(small_uid)
     assert p and p["action_type"] == "multi_launch_values"
-    assert p["payload"]["queue"] == [{"tipo": "despesa", "desc": "aluguel"}]
+    assert p["payload"]["queue"] == [{"tipo": "despesa", "desc": "aluguel",
+                                       "forma_pagamento": "desconhecida"}]
 
 
 def test_audio_resposta_por_audio_completa_o_lancamento(small_uid, audio):

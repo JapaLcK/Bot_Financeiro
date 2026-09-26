@@ -112,14 +112,14 @@ def test_saldo_sem_pendencia_nao_cita_a_conferir(uid_pro, ia_fora):
 
 def test_resposta_de_lancamento_com_pendencia_mostra_aviso(uid_pro, ia_fora):
     pendencia(uid_pro)
-    resp = manda(uid_pro, "gastei 50 no almoço")
+    resp = manda(uid_pro, "gastei 50 no almoço em dinheiro")
     assert "⚠ 1 lançamento(s) a conferir · pode ser R$" in resp
     assert "ID: #" in resp
     assert resp.index("a conferir") < resp.index("ID: #"), "aviso tem de vir antes do ID"
 
 
 def test_resposta_de_lancamento_sem_pendencia_nao_cita_a_conferir(uid_pro, ia_fora):
-    resp = manda(uid_pro, "gastei 20 no busão")
+    resp = manda(uid_pro, "gastei 20 no busão em dinheiro")
     assert "a conferir" not in resp
 
 

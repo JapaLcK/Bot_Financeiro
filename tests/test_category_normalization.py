@@ -951,7 +951,7 @@ def test_categoria_digitada_pela_ia_usa_grafia_do_catalogo(pro_user_id, reason):
     add_from_entities(
         pro_user_id, tipo="despesa", valor=39.9,
         alvo="zzq comercio", nota="zzq comercio",
-        categoria="McDonald's", category_reason=reason,
+        categoria="McDonald's", category_reason=reason, forma_pagamento="desconhecida",
     )
 
     assert _ultimo_launch(pro_user_id)["categoria"] == "mcdonald's"
@@ -966,7 +966,7 @@ def test_cross_check_da_ia_continua_de_pe(pro_user_id):
     add_from_entities(
         pro_user_id, tipo="despesa", valor=39.9,
         alvo="zzq comercio", nota="zzq comercio",
-        categoria="Alimentação", category_reason="ai",
+        categoria="Alimentação", category_reason="ai", forma_pagamento="desconhecida",
     )
 
     assert _ultimo_launch(pro_user_id)["categoria"] == "moradia"

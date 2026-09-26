@@ -79,7 +79,12 @@ def conta_paga(user_id: int, paid: dict, val) -> str:
     do "Tá tudo em dia!", que aí seria falso. Só a contagem: sem linha de saldo
     aqui, o "pode ser R$ X" pareceria o saldo. Pós-commit: falha na leitura do
     aviso vira log, nunca exceção (a conta já está paga) — e sem "em dia", que
-    não dá para afirmar sem ler."""
+    não dá para afirmar sem ler. Paga pelo BANCO (sem lançamento): o débito
+    chega pelo Open Finance, e não há o que conferir."""
+    if paid.get("status") == "paid" and not paid.get("launch_id"):
+        valor = f" — {fmt_brl(paid['paid_amount'])}" if paid.get("paid_amount") else ""
+        return (f"✅ Conta paga: {wrap_wa_markup(paid.get('name'))}{valor}, marcada como "
+                "paga pelo banco; o débito chega pelo Open Finance.")
     try:
         import db
         from core.services.funding import aviso_conferir
@@ -95,14 +100,16 @@ def conta_paga(user_id: int, paid: dict, val) -> str:
     )
 
 
-def try_pay_from_text(user_id: int, text: str) -> str | None:
+def try_pay_from_text(user_id: int, text: str, forma_pagamento: str | None = None) -> str | None:
     """Se o texto for 'paguei/quitei <conta>' E houver uma conta a pagar
-    pendente que casa, marca como paga e retorna a confirmação. Senão None."""
+    pendente que casa, marca como paga e retorna a confirmação. Senão None.
+    Com Open Finance, a forma vem ANTES do valor (Q7, `forma_pagamento`)."""
     norm = normalize_text(text or "")
     if not _PAY_RE.match(norm):
         return None
 
-    from db.bills import list_bills, mark_bill_paid
+    from core.handlers import forma_pagamento as fp
+    from db.bills import list_bills
 
     pend = [b for b in list_bills(user_id, include_paid=False) if b.get("status") == "pending"]
     if not pend:
@@ -156,10 +163,15 @@ def try_pay_from_text(user_id: int, text: str) -> str | None:
             nomes = ", ".join(b.get("name") or "?" for b in ties[:5])
             return f"Você tem contas a pagar pendentes: {nomes}. Qual delas você pagou?"
 
+    declarada = forma_pagamento or fp.detectar(text)
+    decisao = fp.decidir(user_id, declarada)
+    if decisao in (fp.PERGUNTA, fp.MISTO):
+        return fp.perguntar_conta(user_id, best, amount)
+
     # Conta de valor variável (água/luz) sem valor informado: guarda qual conta
     # originou a pergunta. Assim a resposta natural (só "132,50") não cai no
-    # classificador/na IA sem contexto.
-    if best.get("variable_amount") and amount is None:
+    # classificador/na IA sem contexto. Pelo banco não pede valor (Q7).
+    if decisao == fp.CARTEIRA and best.get("variable_amount") and amount is None:
         from db import claim_pending_action
 
         nome = (best.get("name") or "conta")
@@ -172,7 +184,7 @@ def try_pay_from_text(user_id: int, text: str) -> str | None:
         guardou = claim_pending_action(
             user_id,
             "bill_amount_expected",
-            {"bill_id": int(best["id"]), "bill_name": nome},
+            {"bill_id": int(best["id"]), "bill_name": nome, "forma_pagamento": declarada},
         )
         if not guardou:
             return pergunta_de_valor_sem_contexto(user_id, nome)
@@ -182,7 +194,7 @@ def try_pay_from_text(user_id: int, text: str) -> str | None:
         )
 
     try:
-        paid = mark_bill_paid(user_id, int(best["id"]), amount)
+        _, paid = fp.quitar(user_id, int(best["id"]), amount, declarada)
     except ValueError as exc:
         if str(exc) != "VALOR_INVALIDO":
             raise
@@ -292,8 +304,8 @@ def resolve_bill_amount(user_id: int, text: str, pending: dict) -> str | None:
     # Centavos: o `valor_perigoso` já recusou o que arredonda para zero.
     amount = round(amount, 2)
 
+    from core.handlers import forma_pagamento as fp
     from db import consume_pending_action, restore_pending_on_error
-    from db.bills import mark_bill_paid
 
     payload = pending.get("payload") or {}
 
@@ -311,7 +323,16 @@ def resolve_bill_amount(user_id: int, text: str, pending: dict) -> str | None:
     # pendência e o valor que digitou, e a conta continua em aberto sem ninguém
     # avisar. Prazo 10 min, o mesmo do `claim` que a armou (:144).
     with restore_pending_on_error(user_id, pending):
-        paid = mark_bill_paid(user_id, int(payload["bill_id"]), amount)
+        status, paid = fp.quitar(user_id, int(payload["bill_id"]), amount,
+                                 payload.get("forma_pagamento", fp.DESCONHECIDA))
+    if status == fp.PERGUNTA:
+        # Pendência de antes da Q40, de quem tem banco conectado: pergunta a
+        # forma com o valor que acabou de chegar.
+        from db.bills import get_bill
+        bill = get_bill(user_id, int(payload["bill_id"]))
+        if not bill or bill.get("status") == "paid":
+            return "Essa conta não está mais pendente."
+        return fp.perguntar_conta(user_id, bill, amount)
     if paid is None:
         return "Essa conta não está mais pendente."
     return conta_paga(user_id, paid, paid.get("paid_amount") or paid.get("amount") or 0)

@@ -283,6 +283,11 @@ _REGISTRO: dict[str, _Pendencia] = {
     # desempate sobrevive, o turno não insere lançamento e o check nem roda.
     # Fica `True` por coerência com a `clarification` que ele embrulha.
     "value_or_command_choice":   _Pendencia(   False,   True,      True),
+    # "Foi em dinheiro vivo ou pelo banco?" (Q40, core/handlers/forma_pagamento.py).
+    # Pergunta, não oferta. Suprime a IA: "pix" chega pelo `handle_incoming` e
+    # a IA do Pro o sequestraria. Sobrevive a áudio: perdê-la perde o gasto já
+    # digitado.
+    "payment_method_choice":     _Pendencia(   False,   True,      True),
 
     # ── perguntas respondidas com "sim"/"não" (classificador reconhece) ───
     "confirm_recurring_offer":   _Pendencia(   False,   False,     True),

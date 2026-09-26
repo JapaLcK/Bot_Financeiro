@@ -143,7 +143,7 @@ def _resolve_bill(user_id: int, args: dict[str, Any]):
 
 
 def _pay_bill_execute(user_id: int, args: dict[str, Any]) -> str:
-    from db.bills import mark_bill_paid
+    from core.handlers import forma_pagamento as fp
 
     bill, err = _resolve_bill(user_id, args)
     if err:
@@ -155,7 +155,16 @@ def _pay_bill_execute(user_id: int, args: dict[str, Any]) -> str:
     except (TypeError, ValueError):
         amount = None
 
-    if bill.get("variable_amount") and amount is None:
+    # Q40/Q7: com banco conectado, a forma vem antes do valor. Sem banco,
+    # `decidir` dá sempre CARTEIRA e o fluxo é o de sempre.
+    forma = args.get("forma_pagamento")
+    forma = forma if forma in (fp.DINHEIRO, fp.BANCO) else fp.DESCONHECIDA
+    decisao = fp.decidir(user_id, forma)
+    if decisao not in (fp.CARTEIRA, fp.BANCO):
+        return ("🐷 Nada foi pago. Pergunte ao usuário se pagou pelo banco (Pix, "
+                "boleto, débito) ou em dinheiro vivo e chame de novo com `forma_pagamento`.")
+
+    if decisao == fp.CARTEIRA and bill.get("variable_amount") and amount is None:
         # Mesma pendência do handler determinístico (core/handlers/bills.py):
         # sem ela a pergunta saía sem estado nenhum e o número da resposta
         # voltava pra IA sem contexto — a issue #132 reaberta pelo lado do Pro,
@@ -165,7 +174,7 @@ def _pay_bill_execute(user_id: int, args: dict[str, Any]) -> str:
         nome = bill.get("name") or "conta"
         guardou = claim_pending_action(
             user_id, "bill_amount_expected",
-            {"bill_id": int(bill["id"]), "bill_name": nome},
+            {"bill_id": int(bill["id"]), "bill_name": nome, "forma_pagamento": forma},
         )
         if not guardou:
             # Quarta cópia da mesma frase pela mesma razão: a forma completa
@@ -177,7 +186,7 @@ def _pay_bill_execute(user_id: int, args: dict[str, Any]) -> str:
                 f"Pode mandar só o valor, por exemplo: *132,50*")
 
     try:
-        paid = mark_bill_paid(user_id, int(bill["id"]), amount)
+        _, paid = fp.quitar(user_id, int(bill["id"]), amount, forma)
     except ValueError as e:
         if str(e) != "VALOR_INVALIDO":
             return f"🐷 Não consegui registrar o pagamento: {e}"
@@ -370,6 +379,15 @@ TOOLS: list[Tool] = [
                         "name": {"type": "string", "description": "Nome da conta a pagar (ex: 'luz', 'água', 'internet')."},
                         "bill_id": {"type": "integer", "description": "ID da conta a pagar, se conhecido."},
                         "amount": {"type": "number", "description": "Valor real pago (obrigatório se a conta é de valor variável)."},
+                        "forma_pagamento": {
+                            "type": "string",
+                            "enum": ["dinheiro", "banco"],
+                            "description": (
+                                "Como pagou, SÓ se o usuário disse: 'banco' (Pix, boleto, "
+                                "débito) ou 'dinheiro' (dinheiro vivo). Nunca invente: omita "
+                                "se ele não disse."
+                            ),
+                        },
                     },
                 },
             },

@@ -62,7 +62,7 @@ def test_manual_depois_do_import_vira_a_mesma_pendencia_da_ordem_direta(uid_pro,
     of_tx = _of(uid_pro)
     sombra = _estado(of_tx)["imported_launch_id"]
 
-    resp = manda(uid_pro, "gastei 50 no mercado")
+    resp = manda(uid_pro, "gastei 50 no mercado em dinheiro")
     manual = ultimo_launch(uid_pro)
 
     assert "1 lançamento(s) a conferir" in resp, resp
@@ -82,11 +82,11 @@ def test_manual_depois_do_import_vira_a_mesma_pendencia_da_ordem_direta(uid_pro,
 
 def test_so_o_gasto_igual_forma_par(uid_pro, ia_fora):
     _banco(uid_pro, tx(uid_pro, "-50.00", today_tz(), "MERCADO"))
-    resp_uber = manda(uid_pro, "gastei 30 no uber")
+    resp_uber = manda(uid_pro, "gastei 30 no uber em dinheiro")
     uber = ultimo_launch(uid_pro)
     assert "a conferir" not in resp_uber, resp_uber
 
-    manda(uid_pro, "gastei 50 no mercado")
+    manda(uid_pro, "gastei 50 no mercado em dinheiro")
 
     assert _estado(_of(uid_pro))["match_launch_id"] == ultimo_launch(uid_pro)
     assert not _q("select 1 from open_finance_transactions where match_launch_id=%s", (uber,))
@@ -100,14 +100,14 @@ def test_entrada_real_com_data_de_ontem(uid_pro, ia_fora):
     Se o "ontem" se perdesse, o manual cairia hoje, a 4 dias, e ficaria sem par
     (o controle positivo `test_data_fora_da_janela_nao_forma_par`)."""
     _banco(uid_pro, tx(uid_pro, "-50.00", today_tz() - timedelta(days=4), "MERCADO"))
-    resp = manda(uid_pro, "Gastei R$ 50,00 ontem no MERCADO")
+    resp = manda(uid_pro, "Gastei R$ 50,00 ontem no MERCADO em dinheiro")
     assert "registrada" in resp, resp
     assert _estado(_of(uid_pro))["match_launch_id"] == ultimo_launch(uid_pro)
 
 
 def test_nome_diferente_tambem_vira_pendencia(uid_pro, ia_fora):
     _banco(uid_pro, tx(uid_pro, "-1.00", today_tz(), "COMPRA CARTAO 4412 XPTO"), saldo="113.88")
-    manda(uid_pro, "Gastei 1 real com a barbara")
+    manda(uid_pro, "Gastei 1 real com a barbara em dinheiro")
     assert _estado(_of(uid_pro))["reconciliation_status"] == "pending"
 
 
@@ -117,7 +117,7 @@ def test_nome_diferente_tambem_vira_pendencia(uid_pro, ia_fora):
 def test_tolerancia_de_valor_na_fronteira(uid_pro, ia_fora, valor, forma_par):
     """RECON_AMOUNT_TOL = 0,05: a borda casa, um centavo além não."""
     _banco(uid_pro, tx(uid_pro, "-50.00", today_tz(), "MERCADO"))
-    resp = manda(uid_pro, f"gastei {valor} no mercado")
+    resp = manda(uid_pro, f"gastei {valor} no mercado em dinheiro")
     assert "registrada" in resp and ("a conferir" in resp) is forma_par, resp
     assert _pendentes(uid_pro) == int(forma_par)
     if not forma_par:
@@ -127,7 +127,7 @@ def test_tolerancia_de_valor_na_fronteira(uid_pro, ia_fora, valor, forma_par):
 def test_data_fora_da_janela_nao_forma_par(uid_pro, ia_fora):
     """4 dias = um além de RECON_DATE_WINDOW (3)."""
     _banco(uid_pro, tx(uid_pro, "-50.00", today_tz() - timedelta(days=4), "MERCADO"))
-    manda(uid_pro, "gastei 50 no mercado")
+    manda(uid_pro, "gastei 50 no mercado em dinheiro")
     _sem_par(_of(uid_pro))
     assert _pendentes(uid_pro) == 0
 
@@ -136,11 +136,11 @@ def test_data_fora_da_janela_nao_forma_par(uid_pro, ia_fora):
 
 def test_rejeitada_nao_volta_com_outra_mensagem_nem_novo_import(uid_pro, ia_fora):
     conexao = _banco(uid_pro, tx(uid_pro, "-50.00", today_tz(), "MERCADO"))
-    manda(uid_pro, "gastei 50 no mercado")
+    manda(uid_pro, "gastei 50 no mercado em dinheiro")
     of_tx = _of(uid_pro)
     assert db.reject_reconciliation(uid_pro, of_tx)["changed"] is True
 
-    manda(uid_pro, "gastei 30 no uber")
+    manda(uid_pro, "gastei 30 no uber em dinheiro")
     sincroniza(conexao, uid_pro, "950.00", [tx(uid_pro, "-50.00", today_tz(), "MERCADO")])
     db.import_open_finance_launches(uid_pro, conexao)
 
@@ -156,7 +156,7 @@ def test_transacao_de_outro_usuario_nunca_forma_par(uid_pro, ia_fora):
     _banco(outro, tx(outro, "-50.00", today_tz(), "MERCADO"))  # B primeiro: id menor
     conecta_banco(uid_pro, "1000.00")
 
-    manda(uid_pro, "gastei 50 no mercado")
+    manda(uid_pro, "gastei 50 no mercado em dinheiro")
     manual_a = ultimo_launch(uid_pro)
 
     _sem_par(_of(outro))
@@ -174,16 +174,16 @@ def test_um_manual_por_transacao(uid_pro, ia_fora):
            tx(uid_pro, "-50.00", hoje, "MERCADO", "2"), saldo="900.00")
     ontem, de_hoje = _of(uid_pro, "1"), _of(uid_pro, "2")
 
-    manda(uid_pro, "gastei 50 no mercado")
+    manda(uid_pro, "gastei 50 no mercado em dinheiro")
     primeiro = ultimo_launch(uid_pro)
     assert _estado(de_hoje)["match_launch_id"] == primeiro, "a data mais próxima vence"
     _sem_par(ontem)
 
-    manda(uid_pro, "gastei 50 no mercado")
+    manda(uid_pro, "gastei 50 no mercado em dinheiro")
     assert _estado(ontem)["match_launch_id"] == ultimo_launch(uid_pro)
     assert _estado(de_hoje)["match_launch_id"] == primeiro, "o segundo roubou o par"
 
-    manda(uid_pro, "gastei 50 no mercado")
+    manda(uid_pro, "gastei 50 no mercado em dinheiro")
     assert not _q("select 1 from open_finance_transactions where match_launch_id=%s",
                   (ultimo_launch(uid_pro),))
 
@@ -192,7 +192,7 @@ def test_chamar_duas_vezes_nao_cria_segunda_pendencia(uid_pro, ia_fora):
     hoje = today_tz()
     _banco(uid_pro, tx(uid_pro, "-50.00", hoje - timedelta(days=1), "MERCADO", "1"),
            tx(uid_pro, "-50.00", hoje, "MERCADO", "2"), saldo="900.00")
-    manda(uid_pro, "gastei 50 no mercado")
+    manda(uid_pro, "gastei 50 no mercado em dinheiro")
     manual = ultimo_launch(uid_pro)
 
     assert db.propose_manual_reconciliation(uid_pro, manual) == {"ok": True, "of_tx_id": None}
@@ -208,7 +208,7 @@ def test_rota_post_launches_cria_a_pendencia(uid_pro, ia_fora, sem_autorizacao):
     _banco(uid_pro, tx(uid_pro, "-50.00", today_tz(), "MERCADO"))
 
     r = asyncio.run(mono.create_launch_route(_Req(), uid_pro, mono.LaunchCreatePayload(
-        tipo="despesa", valor=50.0, nota="mercado")))
+        tipo="despesa", valor=50.0, nota="mercado", funding_source="carteira")))
 
     assert _estado(_of(uid_pro))["match_launch_id"] == r["launch_id"]
     assert _pendentes(uid_pro) == 1
@@ -221,7 +221,7 @@ def test_paguei_a_luz_depois_do_debito_importado(uid_pro, ia_fora):
     _banco(uid_pro, tx(uid_pro, "-120.00", today_tz(), "PAGAMENTO ENEL LUZ"), saldo="880.00")
     create_boleto(uid_pro, "Luz", 120.0, today_tz(), category="moradia")
 
-    resp = manda(uid_pro, "paguei a luz")
+    resp = manda(uid_pro, "paguei a luz em dinheiro")
 
     assert "Conta paga" in resp, resp
     assert "⚠ 1 lançamento(s) a conferir no PigBank." in resp, resp
@@ -236,7 +236,7 @@ def test_paguei_a_luz_sem_debito_igual_segue_em_dia(uid_pro, ia_fora):
     _banco(uid_pro, tx(uid_pro, "-50.00", today_tz(), "MERCADO"))
     create_boleto(uid_pro, "Luz", 120.0, today_tz(), category="moradia")
 
-    resp = manda(uid_pro, "paguei a luz")
+    resp = manda(uid_pro, "paguei a luz em dinheiro")
 
     assert "Conta paga" in resp and "Tá tudo em dia! 🐷" in resp, resp
     assert "a conferir" not in resp, resp
@@ -275,7 +275,7 @@ def test_falha_vira_log_e_o_lancamento_fica(uid_pro, ia_fora, monkeypatch, caplo
     monkeypatch.setattr(of_mod, "pick_reconciliation_match", _estoura)
     caplog.set_level(logging.ERROR, logger="db.open_finance")
 
-    resp = manda(uid_pro, "gastei 50 no mercado")
+    resp = manda(uid_pro, "gastei 50 no mercado em dinheiro")
 
     assert "registrada" in resp, resp
     assert consolidado(uid_pro) == (900.0, -50.0), "o lançamento não ficou"
@@ -287,7 +287,7 @@ def test_falha_vira_log_e_o_lancamento_fica(uid_pro, ia_fora, monkeypatch, caplo
 
 def test_receita_depois_do_import_vira_pendencia(uid_pro, ia_fora):
     _banco(uid_pro, tx(uid_pro, "100.00", today_tz(), "CREDITO XPTO 9981"), saldo="1100.00")
-    manda(uid_pro, "recebi 100 do fulano")
+    manda(uid_pro, "recebi 100 do fulano em dinheiro")
 
     assert _estado(_of(uid_pro))["match_launch_id"] == ultimo_launch(uid_pro)
     assert db.reconciliation_summary(uid_pro)["receita_back"] == -100
@@ -299,12 +299,12 @@ def test_pendencia_orfa_forma_par_com_o_manual_novo(uid_pro, ia_fora):
     _banco(uid_pro, tx(uid_pro, "-50.00", today_tz(), "MERCADO"))
     of_tx = _of(uid_pro)
     sombra = _estado(of_tx)["imported_launch_id"]
-    manda(uid_pro, "gastei 50 no mercado")
+    manda(uid_pro, "gastei 50 no mercado em dinheiro")
     db.delete_launch_and_rollback(uid_pro, ultimo_launch(uid_pro))
     assert _estado(of_tx)["match_launch_id"] is None
     assert _pendentes(uid_pro) == 0
 
-    manda(uid_pro, "gastei 50 no mercado")
+    manda(uid_pro, "gastei 50 no mercado em dinheiro")
 
     assert _estado(of_tx) == {"imported_launch_id": sombra,
                               "match_launch_id": ultimo_launch(uid_pro),

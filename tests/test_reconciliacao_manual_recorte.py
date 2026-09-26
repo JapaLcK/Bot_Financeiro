@@ -38,7 +38,7 @@ def test_conexao_pausada_nao_forma_par(uid_pro, ia_fora):
                    tx(uid_pro, "-50.00", today_tz(), "MERCADO"))
     db.pause_open_finance_connection(a)
 
-    manda(uid_pro, "gastei 50 no mercado")
+    manda(uid_pro, "gastei 50 no mercado em dinheiro")
 
     _sem_par(_of(uid_pro))
     assert _pendentes(uid_pro) == 0
@@ -50,7 +50,7 @@ def test_conta_em_dolar_nao_forma_par(uid_pro, ia_fora):
     assert _q("update open_finance_accounts set currency='USD' "
               "where provider_account_id=%s returning id", (f"acc-A-{uid_pro}",))
 
-    manda(uid_pro, "gastei 50 no mercado")
+    manda(uid_pro, "gastei 50 no mercado em dinheiro")
 
     _sem_par(_of(uid_pro))
     assert _pendentes(uid_pro) == 0
@@ -65,7 +65,7 @@ def test_pausada_e_ativa_o_par_vai_para_a_ativa(uid_pro, ia_fora):
                tx(uid_pro, "-50.00", hoje, "PADARIA", ident="2"))
     db.pause_open_finance_connection(a)
 
-    manda(uid_pro, "gastei 50 no mercado")
+    manda(uid_pro, "gastei 50 no mercado em dinheiro")
 
     _sem_par(_of(uid_pro, "1"))
     assert _estado(_of(uid_pro, "2"))["match_launch_id"] == ultimo_launch(uid_pro)
@@ -81,7 +81,7 @@ def test_reconexao_por_item_novo_ainda_forma_par(uid_pro, ia_fora):
     db.pause_open_finance_connection(a)
     _item(uid_pro, f"item-B-{uid_pro}", conta, "950.00")
 
-    manda(uid_pro, "gastei 50 no mercado")
+    manda(uid_pro, "gastei 50 no mercado em dinheiro")
 
     assert _estado(_of(uid_pro))["match_launch_id"] == ultimo_launch(uid_pro)
     assert _pendentes(uid_pro) == 1

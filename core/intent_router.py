@@ -42,6 +42,7 @@ from core.handlers import (
     greeting   as h_greeting,
     recurring  as h_recurring,
     bills      as h_bills,
+    forma_pagamento as h_forma,
 )
 
 logger = logging.getLogger(__name__)
@@ -811,7 +812,7 @@ _AVISO_PERGUNTA_CANCELADA = "🔕 Cancelei a pergunta anterior.\n\n"
 
 
 def route(result: IntentResult, msg: IncomingMessage, *,
-          ignora_pendencias: bool = False) -> str:
+          ignora_pendencias: bool = False, forma_pagamento: str | None = None) -> str:
     """
     Ponto de entrada único do roteador.
     Retorna o texto de resposta (ainda não formatado por plataforma).
@@ -827,6 +828,8 @@ def route(result: IntentResult, msg: IncomingMessage, *,
     O segundo é este próprio `route()`, no `abandona_avisa` da clarification e
     no abandono das pendências de cartão: a linha ACABOU de ser consumida, e a
     reentrada existe só para pôr o aviso na frente da resposta do comando.
+    `forma_pagamento`: a forma já declarada para um pedaço de áudio (Q40,
+    `core/handle_incoming.py::rotear_partes`); nunca vem de `entities`.
     Recursão de um nível nos dois casos — o segundo passe faz `pending = None`
     logo abaixo e não pode reabrir ramo nenhum, porque nada mais é lido do DB.
     """
@@ -857,6 +860,25 @@ def route(result: IntentResult, msg: IncomingMessage, *,
             resp = _resolve_desempate(desempate, msg, user_id)
             if resp is not None:
                 return resp
+        # "Foi em dinheiro vivo ou pelo banco?" (Q40). Também antes do
+        # `infer_help_from_text`: "pix", "dinheiro" e "cartão" não podem virar
+        # pedido de ajuda. Texto com número ou comando claro é assunto novo:
+        # abandona a pergunta COM aviso, como a clarification (porta 2).
+        elif desempate and desempate.get("action_type") == "payment_method_choice":
+            resp = h_forma.resolver(user_id, text, desempate)
+            if resp is not None:
+                return resp
+            if re.search(r"\d", text) or (
+                    confidence >= 0.55
+                    and intent not in ("out_of_scope", "confirm.yes", "confirm.no")):
+                if db.consume_pending_action(user_id, desempate):
+                    return _AVISO_PERGUNTA_CANCELADA + route(
+                        result, msg, ignora_pendencias=True)
+                ignora_pendencias = True
+            else:
+                pergunta = (desempate.get("payload") or {}).get("question") or \
+                    "Foi em dinheiro vivo ou pelo banco?"
+                return f"{pergunta}\n\nResponde *dinheiro* ou *banco* (ou *cancela*)."
 
     # Pedidos de operação ou recomendação de ativos precisam de uma recusa
     # explícita. O bot acompanha a carteira, mas não atua como corretora nem
@@ -1136,12 +1158,14 @@ def route(result: IntentResult, msg: IncomingMessage, *,
     # 5-7. Destrutivo → confirma; write com confiança moderada → confirma;
     #      senão executa direto. (Mesma lógica reusada pelo esclarecimento.)
     # -----------------------------------------------------------------------
-    return _dispatch_actionable(intent, user_id, text, entities, confidence, platform, external_id)
+    return _dispatch_actionable(intent, user_id, text, entities, confidence, platform, external_id,
+                                forma_pagamento)
 
 
 def _dispatch_actionable(
     intent: str, user_id: int, text: str, entities: dict,
     confidence: float, platform: str, external_id: str,
+    forma_pagamento: str | None = None,
 ) -> str:
     """Etapa final do roteamento pra uma intent já classificada e acionável:
     destrutivo → confirma; write com confiança <0.85 → confirma; senão executa."""
@@ -1152,7 +1176,7 @@ def _dispatch_actionable(
         label = _intent_label(intent)
         return f"Entendi como *{label}*. Confirma? Responda **sim** ou **não**."
 
-    return _execute(intent, user_id, text, entities, platform, external_id)
+    return _execute(intent, user_id, text, entities, platform, external_id, forma_pagamento)
 
 
 # ---------------------------------------------------------------------------
@@ -1245,7 +1269,8 @@ def _ask_add_destination(user_id: int, text: str) -> str:
     return pergunta
 
 
-def _execute(intent: str, user_id: int, text: str, entities: dict, platform: str, external_id: str) -> str:
+def _execute(intent: str, user_id: int, text: str, entities: dict, platform: str, external_id: str,
+             forma_pagamento: str | None = None) -> str:
 
     # --- adicionar dinheiro sem destino → pergunta onde ---
     if intent == "funds.add_ask":
@@ -1275,10 +1300,13 @@ def _execute(intent: str, user_id: int, text: str, entities: dict, platform: str
         # "paguei a luz" pode quitar uma CONTA A PAGAR pendente (boleto) em vez
         # de criar um lançamento avulso. Só intercepta se casar uma conta
         # pendente; senão segue o fluxo normal de despesa.
-        paid = h_bills.try_pay_from_text(user_id, text)
+        # `forma_pagamento`: a forma já declarada que uma pergunta anterior
+        # guardou no payload (Q40); None = sai do texto.
+        paid = h_bills.try_pay_from_text(user_id, text, forma_pagamento)
         if paid is not None:
             return paid
-        return h_launches.add(user_id, text, entities, platform=platform)
+        return h_launches.add(user_id, text, entities, platform=platform,
+                              forma_pagamento=forma_pagamento)
 
     if intent == "launches.undo":
         return h_launches.undo(user_id)
@@ -1289,6 +1317,11 @@ def _execute(intent: str, user_id: int, text: str, entities: dict, platform: str
 
     # --- cartões / crédito ---
     if intent == "credit.handle":
+        if h_credit.e_compra_no_debito(text):
+            # O classificador lê "cartão" e manda para o cartão; débito é gasto
+            # da conta (Q2b), então segue o caminho de qualquer despesa.
+            return _execute("launches.add", user_id, text, entities, platform, external_id,
+                            forma_pagamento)
         resp = h_credit.handle(user_id, text)
         return resp if resp is not None else _contextual_help_message(text, platform)
 
@@ -2110,7 +2143,8 @@ def _resolve_clarification(clarif: dict, user_response: str, user_id: int, platf
                 "", orig_text, flags=re.IGNORECASE,
             ).strip()
             combined = f"{verbo} {_cola_separador_decimal(resposta)} {desc}".strip()
-        return _execute("launches.add", user_id, combined, original_entities, platform, external_id)
+        return _execute("launches.add", user_id, combined, original_entities, platform, external_id,
+                        forma_pagamento=payload.get("forma_pagamento"))
 
     # demais intents (ex: launches.list "dia 4 de qual mês?") → extrai data
     dt, _ = extract_date_from_text(user_response)

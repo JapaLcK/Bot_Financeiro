@@ -136,7 +136,7 @@ def test_reconciliation_order_of_import_then_manual_vira_pendencia(user_id):
 
     h_launches.add_from_entities(
         user_id, tipo="despesa", valor=50, alvo="Mercado Pague Menos",
-        nota="Mercado Pague Menos", categoria="mercado",
+        nota="Mercado Pague Menos", categoria="mercado", forma_pagamento="dinheiro",
     )
 
     assert _status_tx_of(tx_id) == "pending"
@@ -165,7 +165,7 @@ def test_quick_entry_manual_depois_do_import_vira_pendencia(user_id):
     rep = _importa_of_tx(user_id, hoje, "50.00", "MERCADO PAGUE MENOS", tx_id)
     assert rep["inserted"] == 1
 
-    out = handle_quick_entry(user_id, "gastei 50 no mercado")
+    out = handle_quick_entry(user_id, "gastei 50 no mercado em dinheiro")
     assert out is not None
 
     assert _status_tx_of(tx_id) == "pending"
@@ -287,13 +287,15 @@ def test_bot_shows_carteira_piggy_when_of_connected(user_id):
     from core.handlers import launches as h_launches
 
     msg_sem = h_launches.add_from_entities(
-        user_id, tipo="receita", valor=100, alvo="salario", categoria="salario")
+        user_id, tipo="receita", valor=100, alvo="salario", categoria="salario",
+        forma_pagamento="desconhecida")
     assert "🏦 Saldo:" in msg_sem
     assert "Carteira Piggy" not in msg_sem
 
     _connect_fake_bank(user_id)
     msg_com = h_launches.add_from_entities(
-        user_id, tipo="despesa", valor=20, alvo="padaria", categoria="alimentacao")
+        user_id, tipo="despesa", valor=20, alvo="padaria", categoria="alimentacao",
+        forma_pagamento="dinheiro")
     assert "👛 Saldo (Carteira Piggy):" in msg_com
 
 
@@ -301,5 +303,5 @@ def test_quick_entry_label_carteira_piggy_when_of_connected(user_id):
     from core.services.quick_entry import handle_quick_entry
 
     _connect_fake_bank(user_id)
-    out = handle_quick_entry(user_id, "recebi 200 freelas")
+    out = handle_quick_entry(user_id, "recebi 200 freelas em dinheiro")
     assert "👛 Saldo (Carteira Piggy):" in out.text
