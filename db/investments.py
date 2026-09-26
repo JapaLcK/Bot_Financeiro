@@ -1285,7 +1285,10 @@ def list_investments(user_id: int, *, include_lots: bool = True):
 
 
 def list_users_with_unfrozen_interest() -> list[int]:
-    """Usuários com investimento ou caixinha manual ainda sem a acumulação final (Q43)."""
+    """Usuários com investimento ou caixinha manual ainda sem a acumulação final (Q43).
+
+    Caixinha manual = não é do banco: a mesma régua de `db/pockets.py::_is_of_mirror`.
+    """
     with get_conn() as conn:
         with conn.cursor() as cur:
             cur.execute(
@@ -1294,6 +1297,7 @@ def list_users_with_unfrozen_interest() -> list[int]:
                 union
                 select user_id from pockets
                  where interest_frozen_at is null and of_investment_id is null
+                   and source <> 'open_finance'
                 order by user_id
                 """
             )

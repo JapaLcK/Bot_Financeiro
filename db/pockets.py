@@ -134,7 +134,7 @@ def accrue_pocket_db(cur, user_id: int, pocket_id: int, today: date | None = Non
         """
         select id, balance, interest_enabled, interest_rate,
                interest_period, interest_tax_profile, last_interest_date,
-               of_investment_id, interest_frozen_at
+               of_investment_id, source, interest_frozen_at
         from pockets
         where user_id=%s and id=%s for update
         """,
@@ -144,10 +144,10 @@ def accrue_pocket_db(cur, user_id: int, pocket_id: int, today: date | None = Non
     if not pocket:
         raise LookupError("POCKET_NOT_FOUND")
 
-    # Caixinha vinda do Open Finance: saldo é espelho do banco (escrito no sync),
-    # sem juros interno nem lotes. Retorna o saldo como está — não deixa a máquina
-    # de accrual/lotes tocar no valor espelhado.
-    if pocket.get("of_investment_id"):
+    # Caixinha do banco (`_is_of_mirror`, vinculada OU espelho legado desvinculado):
+    # saldo é espelho do banco, sem juro, lote nem carimbo. Devolve o saldo como está —
+    # a máquina de lotes não toca no valor espelhado.
+    if _is_of_mirror(pocket):
         return Decimal(str(pocket["balance"] or 0))
 
     _ensure_pocket_lots(cur, user_id, pocket)

@@ -262,6 +262,60 @@ def test_D_caixinha_do_banco_segue_o_banco_e_nao_carimba(user_id):
     assert [p["balance"] for p in db.accrue_all_pockets(user_id)] == [Decimal("1250")]
 
 
+def _espelho_desvinculado(uid, item):
+    """Espelho LEGADO do banco (ver tests/test_of_caixinha_dinheiro.py::
+    test_espelho_legado_sem_vinculo_continua_read_only): `source='open_finance'`,
+    vínculo NULO, 800 espelhados e marcador NULL (anterior à Q43)."""
+    from tests.test_of_caixinha_autoimport import _save, _seed_connection
+
+    conn_id = _seed_connection(uid, item=item)
+    _save(conn_id, [{"id": f"cx-{item}", "name": "Caixinha Nubank", "type": "FIXED_INCOME",
+                     "subtype": "CDB", "balance": 800.0}])
+    db.sync_open_finance_caixinhas(conn_id, uid)
+    with db.get_conn() as conn, conn.cursor() as cur:
+        cur.execute("update pockets set of_investment_id=null, interest_frozen_at=null "
+                    "where user_id=%s and source='open_finance' returning id", (uid,))
+        pid = cur.fetchone()["id"]
+        conn.commit()
+    return pid
+
+
+def _espelho_intacto(uid, pid):
+    row = _linha("pockets", uid, pid)
+    assert _saldo_lotes_caixinha(uid, pid) == []          # o espelho não virou lote
+    assert row["balance"] == Decimal("800") and row["interest_frozen_at"] is None
+
+
+def test_D2_espelho_desvinculado_nao_vira_lote_nem_carimba(user_id, monkeypatch):
+    """Controle positivo: a caixinha manual legada do mesmo usuário é finalizada."""
+    _cdi(monkeypatch, CDI7)
+    pid = _espelho_desvinculado(user_id, "q43-d2")
+    manual = _caixinha_com_lote(user_id, "viagem", legado=True, juro=False)
+    db.accrue_all_pockets(user_id, today=T)
+    _espelho_intacto(user_id, pid)
+    assert _linha("pockets", user_id, manual)["interest_frozen_at"] is not None
+
+
+def test_D3_varredura_ignora_espelho_desvinculado(user_id):
+    _espelho_desvinculado(user_id, "q43-d3")
+    assert user_id not in db.list_users_with_unfrozen_interest()
+
+
+def test_D4_scheduler_com_investimento_legado_nao_toca_no_espelho(user_id, monkeypatch):
+    """O usuário entra na varredura pelo investimento; o `accrue_all_pockets` da
+    mesma rodada passa pelo espelho."""
+    from core.services import investment_scheduler
+
+    _cdi(monkeypatch, CDI7)
+    pid = _espelho_desvinculado(user_id, "q43-d4")
+    inv = _investimento_com_lote(user_id, "cdb", "cdi", 1.0, D0)
+    assert user_id in db.list_users_with_unfrozen_interest()
+    monkeypatch.setattr(db, "list_users_with_unfrozen_interest", lambda: [user_id])
+    assert investment_scheduler.accrue_all_users_investments()["failed"] == 0
+    _espelho_intacto(user_id, pid)
+    assert _linha("investments", user_id, inv)["interest_frozen_at"] is not None
+
+
 # ── E. Varredura e isolamento ─────────────────────────────────────────────────
 
 def test_E_varredura_so_quem_falta_e_sem_vazar(monkeypatch):
