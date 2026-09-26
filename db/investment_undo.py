@@ -35,9 +35,10 @@ def guard_last_investment_movement(cur, user_id: int, launch_id: int, efeitos: d
     O accrual diário não é launch e não conta — ele é função de saldo, taxa,
     `last_date` e índices, e a restauração devolve o par saldo/`last_date`.
 
-    Igualdade EXATA, não `lower()`: todo escritor grava o `investments.name` da linha
-    que tocou, e `unique(user_id, name)` deixa "cdb" e "CDB" coexistirem — com
-    `lower()` o aporte num bloqueava o desfazer do outro.
+    Por `lower()`, não igualdade exata: o índice uq_investments_user_lower_name (#596)
+    faz do nome sem caixa a identidade do investimento. Com igualdade exata, apagar
+    "CDB" → criar "cdb" → desfazer o apagar passava pela guarda e virava no-op (o
+    `on conflict do nothing` pula a recriação e o launch some).
 
     ponytail: liga pelo NOME gravado no `efeitos`. Não existe renomear investimento;
     no dia em que existir, gravar `investment_id` no `delta_invest` e ligar por ele.
@@ -56,16 +57,16 @@ def guard_last_investment_movement(cur, user_id: int, launch_id: int, efeitos: d
     # `accrue_all_investments` (investimento → lotes): sem ela, os dois se
     # esperavam em ordem trocada.
     cur.execute(
-        "select id from investments where user_id=%s and name=%s for update",
+        "select id from investments where user_id=%s and lower(name)=lower(%s) for update",
         (user_id, nome),
     )
     cur.execute(
         """
         select 1 from launches
          where user_id=%s and id>%s
-           and %s in (efeitos->'delta_invest'->>'nome',
-                      efeitos->'delete_investment'->>'nome',
-                      efeitos->'create_investment'->>'nome')
+           and lower(%s) in (lower(efeitos->'delta_invest'->>'nome'),
+                             lower(efeitos->'delete_investment'->>'nome'),
+                             lower(efeitos->'create_investment'->>'nome'))
          limit 1
         """,
         (user_id, launch_id, nome),

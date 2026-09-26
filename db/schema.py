@@ -2,7 +2,9 @@
 db/schema.py — DDL e inicialização do banco de dados.
 """
 from .connection import get_conn
-from .schema_repairs import ensure_plan_trials_user_fk, repair_user_fk_cascades
+from .schema_repairs import (
+    ensure_lower_name_unique, ensure_plan_trials_user_fk, repair_user_fk_cascades,
+)
 
 # Chave do advisory lock que serializa o init_db INTEIRO entre instâncias.
 # Valor arbitrário e estável; só precisa não colidir com outro lock do processo.
@@ -112,7 +114,7 @@ def init_db():
           name text not null,
           balance numeric not null default 0,
           created_at timestamptz default now(),
-          unique(user_id, name)
+          unique(user_id, name)  -- sem caixa: uq_pockets_user_lower_name (schema_repairs, #596)
         )
         """,
 
@@ -142,7 +144,7 @@ def init_db():
           interest_payment_frequency text not null default 'maturity',
           tax_profile text not null default 'regressive_ir_iof',
           created_at timestamptz default now(),
-          unique(user_id, name)
+          unique(user_id, name)  -- sem caixa: uq_investments_user_lower_name (schema_repairs, #596)
         )
         """,
         """
@@ -2641,6 +2643,9 @@ def _run_ddl(conn, ddl_statements) -> None:
                 changes = repair_user_fk_cascades(cur)
                 if changes:
                     print(f"[init_db] schema_repairs ajustou {len(changes)} FK(s): {changes}")
+                for t in ensure_lower_name_unique(cur):
+                    print(f"[init_db] AVISO #596: {t} tem nome duplicado por maiúscula; "
+                          f"índice uq_{t}_user_lower_name NÃO criado")
             except Exception as e:
                 print(f"[init_db] schema_repairs falhou: {e}")
                 raise

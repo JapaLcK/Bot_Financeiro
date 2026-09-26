@@ -15,6 +15,8 @@ from __future__ import annotations
 
 import logging
 
+import psycopg
+
 logger = logging.getLogger(__name__)
 
 
@@ -175,6 +177,31 @@ def ensure_plan_trials_user_fk(cur) -> bool:
     logger.info("[schema_repairs] validando FK plan_trials_user_id_fkey")
     cur.execute("alter table plan_trials validate constraint plan_trials_user_id_fkey")
     return criou
+
+
+def ensure_lower_name_unique(cur) -> list[str]:
+    """Nome de investimento e caixinha é único sem diferenciar maiúscula (#596).
+
+    O `unique(user_id, name)` da tabela deixava "cdb" e "CDB" coexistirem, e todo o
+    resto do código resolve por `lower(name)=lower(%s) ... fetchone()` — linha
+    arbitrária. O unique antigo fica: o container velho do deploy ainda usa
+    `on conflict (user_id, name)`.
+
+    A própria construção do índice é a checagem de duplicata: sem janela de corrida,
+    e o CREATE INDEX que falha não deixa índice inválido. Tabela com duplicata é
+    pulada (o boot não pode cair) e devolvida para o chamador avisar no log.
+    Idempotente.
+    """
+    pulou: list[str] = []
+    for t in ("investments", "pockets"):
+        try:
+            cur.execute(
+                f"create unique index if not exists uq_{t}_user_lower_name "
+                f"on {t} (user_id, lower(name))"
+            )
+        except psycopg.errors.UniqueViolation:
+            pulou.append(t)
+    return pulou
 
 
 def _decode_action(code: str) -> str:
