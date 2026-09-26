@@ -2,6 +2,13 @@
 from __future__ import annotations
 import db
 
+# #607: o código já foi consumido — não mandar gerar outro.
+_JUNCAO_RECUSADA = (
+    "⚠️ Não deu pra vincular: sua conta do site e esta conta já têm dados cada uma, "
+    "então não dá pra juntar as duas automaticamente.\n"
+    "Pra ter tudo num lugar só, use este número numa conta só."
+)
+
 
 def link(platform: str, external_id: str, code: str | None) -> str:
     if not external_id:
@@ -21,7 +28,10 @@ def link(platform: str, external_id: str, code: str | None) -> str:
     if not target_user_id:
         return "❌ Código inválido ou expirado. Envie *link* para gerar um novo."
 
-    db.link_platform_identity(platform, external_id, target_user_id)
+    try:
+        db.link_platform_identity(platform, external_id, target_user_id)
+    except db.MergeRefused:
+        return _JUNCAO_RECUSADA
     return "✅ Contas vinculadas! Discord e WhatsApp agora usam os mesmos dados."
 
 
@@ -33,6 +43,9 @@ def vincular(platform: str, external_id: str, code: str) -> str:
     if not target_user_id:
         return "❌ Código inválido ou expirado. Gere um novo no site e tente novamente."
 
-    db.link_platform_identity(platform, external_id, target_user_id)
+    try:
+        db.link_platform_identity(platform, external_id, target_user_id)
+    except db.MergeRefused:
+        return _JUNCAO_RECUSADA
     platform_label = "WhatsApp" if platform == "whatsapp" else "Discord"
     return f"✅ {platform_label} vinculado à sua conta! Digite *ajuda* para ver os comandos."
