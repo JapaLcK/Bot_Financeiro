@@ -204,14 +204,19 @@ Decidido pelo dono na mesma data (Q37–Q41):
   manual e para o investimento manual antigo (Q37), que hoje rendem juro simulado sozinhos
   — a caixinha por `accrue_all_pockets`, o investimento por `accrue_all_users_investments`
   (`core/services/investment_scheduler.py`), que grava o ganho no saldo. Os dois laços
-  param para o que é manual **antes do job da foto** (etapa 0) — e também toda chamada
-  direta do cálculo fora deles (o aporte e o resgate chamam `accrue_investment_db` antes de
-  mexer no lote; o inventário por `grep` é o primeiro passo) —, para todos os usuários e
+  param para o que é manual **antes do job da foto** (etapa 0). Parar só os laços não
+  basta: depositar e retirar chamam o cálculo direto (`accrue_pocket_db` em
+  `pocket_deposit_from_account`/`pocket_withdraw_to_account`, `accrue_investment_db` no
+  aporte e no resgate), pelo painel antigo e pelo WhatsApp. Por isso o congelamento mora
+  **nas próprias funções de cálculo** (`accrue_pocket_db`, `accrue_investment_db`), que não
+  rendem mais nada para o que é manual — todo caminho, de hoje e futuro, passa por elas —, para todos os usuários e
   também no painel antigo, como a recorrente (Q42). O ganho já acumulado entra no saldo
   uma última vez, com um aviso ao usuário, e daí em diante a caixinha é só dinheiro
   separado e o investimento é registro antigo com saldo parado. Com isso a foto conta o
   saldo deles como está, sem parte simulada. Testes: laço de juros rodando depois do
-  desligamento (não mexe em manual); o aviso do último ganho aparece uma vez só.
+  desligamento (não mexe em manual); depositar e retirar numa caixinha manual e aportar e
+  resgatar num investimento manual, pelo painel antigo e pelo WhatsApp (o saldo não ganha
+  juro); o aviso do último ganho aparece uma vez só.
 - **Q39 — os defeitos de dinheiro do código atual são consertados**, não congelados, num PR
   próprio (faixa Completo, com o time): o resgate que pula juro de índice atrasado, o
   desfazer que não devolve o cursor, o desfazer de resgate anterior que cria dinheiro, e o
