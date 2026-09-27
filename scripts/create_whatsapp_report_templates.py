@@ -102,7 +102,7 @@ MONTHLY_BODY = (
 AUTOPAY_BODY = (
     "Hoje vence o seu gasto fixo {{gasto}}, de {{valor}}, com {{meio}}.\n"
     "\n"
-    "É só um lembrete do Piggy: não lancei nada no app."
+    "🐷 É só um lembrete do Piggy: não lancei nada no app."
 )
 
 # exemplos exigidos pela Meta (um por variável nomeada)
