@@ -48,6 +48,12 @@ Controles NEGATIVOS declarados (docs/controles_declarados.md) — em
      e `[daily]`; tirar `and r.amount > 0` da listagem → vermelho `[valor_zero]`;
   o. voltar a ler `rc.amount` (retrato da gravação) em vez de `r.amount` →
      vermelho `test_valor_editado_depois_da_gravacao_vai_o_novo`.
+  p. no upsert de `ensure_autopay_notice`, voltar a `do nothing` → vermelho
+     `test_vencimento_mudou_no_mes_avisa_na_data_nova`; tirar
+     `wa_notified_at is null` do WHERE → vermelho
+     `test_vencimento_mudou_depois_do_envio_nao_reagenda` (pela linha, não
+     pelo envio); tirar `launch_id is null` → vermelho
+     `test_linha_do_cobrador_no_mesmo_mes_nao_e_tocada`.
 Positivo: `test_loop_real_manda_um_aviso_por_gasto_conta_e_cartao` e o segundo
 passo de `test_antes_da_hora_nao_reserva_e_depois_envia` seguem verdes nas injeções.
 """
@@ -526,3 +532,92 @@ def test_valor_editado_depois_da_gravacao_vai_o_novo(user_id, monkeypatch):
     rc.notify_autopay_notices_whatsapp_once(now=_as(10))
 
     assert [_params(p)["valor"] for p in _para(posts, _FONE_A)] == ["R$ 61,50"]
+
+
+# ── Vencimento mudou no meio do mês (achado do Codex no #647) ─────────────────
+# Datas fixas: a sync do dia 5 grava o aviso do mês; o usuário muda o
+# vencimento para o dia 20; a sync do dia 20 cai na MESMA chave `YYYY-MM`.
+_D5, _D20 = date(2026, 10, 5), date(2026, 10, 20)
+
+
+def _em(dia: date, hora: int = 10):
+    return now_tz().replace(year=dia.year, month=dia.month, day=dia.day,
+                            hour=hora, minute=0, second=0, microsecond=0)
+
+
+def _mensal_dia_5(uid: int, nome: str) -> dict:
+    return create_recurring_expense(uid, nome, 55.9, "assinaturas", 5, "account",
+                                    start_date=date(2026, 9, 1))
+
+
+def _linha(uid: int) -> dict:
+    with db.get_conn() as conn, conn.cursor() as cur:
+        cur.execute("select due_on, charged_at, launch_id, wa_notified_at, acknowledged "
+                    "from recurring_charges where user_id=%s", (uid,))
+        rows = cur.fetchall()
+    assert len(rows) == 1
+    return dict(rows[0])
+
+
+def test_vencimento_mudou_no_mes_avisa_na_data_nova(user_id, monkeypatch):
+    """Controle negativo: voltar o `on conflict ... do update` para `do nothing`
+    → a linha fica com due_on=dia 5 e o dia 20 manda 0: vermelho."""
+    posts = _armar(monkeypatch)
+    _dono(user_id, _FONE_A)
+    rec = _mensal_dia_5(user_id, "Muda Dia Q616")
+    rc.sync_autopay_notices_once(today=_D5)
+    update_recurring_expense(user_id, rec["id"], due_day=20)
+    assert rc.notify_autopay_notices_whatsapp_once(now=_em(_D5)) == 0  # dia 5 já não vence
+
+    rc.sync_autopay_notices_once(today=_D20)
+    rc.notify_autopay_notices_whatsapp_once(now=_em(_D20))
+
+    assert len(_para(posts, _FONE_A)) == 1
+    linha = _linha(user_id)
+    assert linha["due_on"] == _D20 and linha["acknowledged"] is False
+
+
+def test_vencimento_mudou_depois_do_envio_nao_reagenda(user_id, monkeypatch):
+    """O aviso do dia 5 já saiu no WhatsApp; o vencimento muda para o dia 20 no
+    mesmo mês: nada é reenviado e a linha fica como estava (due_on=dia 5).
+
+    Controle negativo: tirar `wa_notified_at is null` do WHERE do upsert → a
+    linha passa para due_on=dia 20: vermelho na asserção da linha. O ENVIO
+    segue 0 com a injeção (a listagem também exige `wa_notified_at is null`),
+    então quem discrimina é a linha, não a contagem de posts."""
+    posts = _armar(monkeypatch)
+    _dono(user_id, _FONE_A)
+    rec = _mensal_dia_5(user_id, "Ja Avisado Q616")
+    rc.sync_autopay_notices_once(today=_D5)
+    rc.notify_autopay_notices_whatsapp_once(now=_em(_D5))
+    assert len(_para(posts, _FONE_A)) == 1
+    antes = _linha(user_id)
+
+    update_recurring_expense(user_id, rec["id"], due_day=20)
+    rc.sync_autopay_notices_once(today=_D20)
+    rc.notify_autopay_notices_whatsapp_once(now=_em(_D20))
+
+    assert len(_para(posts, _FONE_A)) == 1
+    assert _linha(user_id) == antes
+
+
+def test_linha_do_cobrador_no_mesmo_mes_nao_e_tocada(user_id, monkeypatch):
+    """Linha do cobrador antigo (com lançamento, sem due_on) no mesmo `ym`: a
+    sync do dia do vencimento não a altera nem avisa.
+
+    Controle negativo: tirar `launch_id is null` do WHERE do upsert → due_on e
+    charged_at mudam: vermelho."""
+    posts = _armar(monkeypatch)
+    _dono(user_id, _FONE_A)
+    rec = _mensal_dia_5(user_id, "Cobrador Q616")
+    launch_id, _, _ = db.add_launch_and_update_balance(user_id, "despesa", 55.9, None, "antigo")
+    _sql("insert into recurring_charges (recurring_id, user_id, launch_id, amount, ym, charged_at) "
+         "values (%s, %s, %s, 55.9, '2026-10', '2026-10-05 00:05-03')",
+         (rec["id"], user_id, launch_id))
+    antes = _linha(user_id)
+
+    assert rc.sync_autopay_notices_once(today=_D5) == 0
+    rc.notify_autopay_notices_whatsapp_once(now=_em(_D5))
+
+    assert _linha(user_id) == antes
+    assert _para(posts, _FONE_A) == []

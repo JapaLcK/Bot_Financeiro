@@ -504,14 +504,25 @@ def ensure_autopay_notice(recurring_id: int, user_id: int, amount: float, period
                           due_on: date) -> bool:
     """Grava o aviso de vencimento (linha em recurring_charges SEM lançamento:
     launch_id e credit_tx_id nulos) com o dia lógico `due_on`. Idempotente pelo
-    UNIQUE (recurring_id, ym). True se criou agora."""
+    UNIQUE (recurring_id, ym). Se o período já tem aviso com OUTRO `due_on` (o
+    vencimento mudou no meio do mês), reagenda: passa pra data nova e volta ao
+    banner — só enquanto não tem lançamento (linha do cobrador antigo fica
+    intocada) nem foi reservado pro WhatsApp (não reenvia no mesmo período).
+    Linha de antes da coluna (`due_on` nulo) também é reagendada. True se criou
+    ou reagendou agora."""
     with get_conn() as conn:
         with conn.cursor() as cur:
             cur.execute(
                 """
                 insert into recurring_charges (recurring_id, user_id, amount, ym, due_on)
                 values (%s, %s, %s, %s, %s)
-                on conflict (recurring_id, ym) do nothing
+                on conflict (recurring_id, ym) do update
+                   set due_on = excluded.due_on, amount = excluded.amount,
+                       charged_at = now(), acknowledged = false
+                 where recurring_charges.launch_id is null
+                   and recurring_charges.credit_tx_id is null
+                   and recurring_charges.wa_notified_at is null
+                   and recurring_charges.due_on is distinct from excluded.due_on
                 returning id
                 """,
                 (int(recurring_id), int(user_id), Decimal(str(amount)), period_key, due_on),

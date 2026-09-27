@@ -169,7 +169,8 @@ def sync_autopay_notices_once(today: date | None = None) -> int:
     """Grava o aviso de vencimento de cada gasto fixo autopay que vence HOJE
     (conta ou cartão), por `_vence_hoje`. Não lança nada. A chave é a do
     cobrador antigo (mensal/anual `YYYY-MM`, semanal `w:`, único `o:`), então o
-    período que ele já lançou não ganha aviso duplicado. Retorna quantos criou."""
+    período que ele já lançou não ganha aviso duplicado. Retorna quantos criou
+    ou reagendou (`ensure_autopay_notice`)."""
     from db.recurring import ensure_autopay_notice, list_active_autopay_recurrings
 
     today = today or date.today()
