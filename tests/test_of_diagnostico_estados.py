@@ -16,6 +16,8 @@ Controles do grupo (medidos, ver o relato da PR):
   • negativo do DESCONHECIDO — devolver NUNCA_ATRIBUIDO sem olhar a existência:
     `test_id_que_ninguem_viu_e_desconhecido` fica vermelho; o positivo é
     `test_formato_exclusao_de_conta_so_pelo_log` (só log → NUNCA_ATRIBUIDO);
+  • negativo da auditoria sem registry — DESCONHECIDO antes de olhar a auditoria:
+    `test_so_auditoria_sem_registry_e_legado_e_aceita_apagar` fica vermelho;
   • negativo do `RESOLVIDO_PELO_OPERADOR` — tirá-lo de `ITEMS_SEM_CONEXAO`: os
     dois testes de card ficam vermelhos; o positivo é a reabertura por rastro novo.
 """
@@ -308,3 +310,21 @@ def test_nova_falha_depois_do_operator_delete_reabre_a_marca(user_id, item, monk
     assert item not in diag.itens_com_remocao_remota_falha()
     of_routes.delete_pluggy_items_best_effort(user_id, [item])
     assert item in diag.itens_com_remocao_remota_falha()
+
+
+# ── rodada 3: auditoria sem registry ────────────────────────────────────────
+
+def test_so_auditoria_sem_registry_e_legado_e_aceita_apagar(user_id, item, monkeypatch):
+    """Quem conectou e desconectou antes do registry (04/08 → 05/08) deixou item
+    vivo sem linha nenhuma e sem log: a auditoria prova que o id existiu."""
+    from scripts import of_itens_operador as op
+
+    record_audit_event(user_id, AuditEvent.OPEN_FINANCE_CONNECTED,
+                       details={"provider": "pluggy", "item_id": item})
+    assert diag.classifica_item(item) == diag.LEGADO_AMBIGUO
+    apagados: list[str] = []
+    monkeypatch.setattr(op, "delete_pluggy_item", lambda i, api_key=None: apagados.append(i))
+    assert op.main(["--item", item, "--apagar", "--estado", "LEGADO_AMBIGUO",
+                    "--apply"]) == 0
+    assert apagados == [item]
+

@@ -23,8 +23,8 @@ Estados e procedimento:
                    resolvido; vivo → apagar.
   CONECTADO_SEM_RASTRO  conexão viva sem linha com dono no registry. Só
                    informativo; nenhuma escrita.
-  DESCONHECIDO     nem o registry nem os logs conhecem o id (digitação, outra
-                   caixa). Recusado; item real sem rastro é no painel da Pluggy.
+  DESCONHECIDO     nem registry, nem auditoria, nem logs conhecem o id (digitação,
+                   outra caixa). Recusado; item real sem rastro é no painel da Pluggy.
 Apagado pelo operador: sai da lista e do card do painel até aparecer rastro novo.
 O rastro de log é APAGÁVEL (`DELETE /admin/api/events`, `admin.py purge`) e o log
 com `user_id` na coluna some na exclusão da conta: aí a marca desaparece e o item
@@ -117,7 +117,7 @@ def listar() -> None:
               + ", ".join(sem_rastro))
     if apagados := apagados_pelo_operador():
         print(f"{apagados} apagado(s) pelo operador (fora da lista até novo rastro).")
-    if not (sem_conexao or falhas or sem_rastro):
+    if not (sem_conexao or falhas or sem_rastro or apagados):
         print("Nada no registry nem nos logs. Isso NÃO prova que não há órfão na Pluggy.")
     print("Detalhe de um item: --item ID. Procedimento por estado: --help.")
 
@@ -130,7 +130,7 @@ def detalhe(item: str) -> int:
         print("  conexão local viva: nada a fazer aqui (a remoção é pelo app).")
         return 0
     if estado == DESCONHECIDO:
-        print("  nem o registry nem os logs conhecem este id (confira a caixa e o id)."
+        print("  nem registry, nem auditoria, nem logs conhecem este id (confira a caixa e o id)."
               " Esta ferramenta não age nele; item real sem rastro é no painel da Pluggy.")
         return 0
     comando = f"--item {item} --apagar --estado {estado} --apply"
@@ -139,15 +139,22 @@ def detalhe(item: str) -> int:
     except PluggyApiError as exc:
         if exc.status_code == 404:
             print("  Pluggy: 404, o item não existe lá. Nada a apagar.")
-            if marca:
-                # Sem isto a marca ficava eterna. O DELETE é idempotente (404 =
-                # sucesso) e grava o `operator_delete` que a fecha.
-                print(f"  Para fechar a marca de falha: {comando}")
+            # Item que ainda aparece (marca de falha, ou na lista/card) ficaria lá
+            # para sempre: o DELETE é idempotente (404 = sucesso) e grava o
+            # `operator_delete` que o fecha.
+            # ponytail: `listar_sem_conexao` classifica todos; punhado de items.
+            if marca or item in listar_sem_conexao():
+                print(f"  Para tirar da lista (e fechar a marca, se houver): {comando}")
             return 0
         print(f"  Pluggy: erro ({exc}). Tente de novo.")
         return 1
     except _FALHA_PLUGGY as exc:
         print(f"  Pluggy inalcançável ({type(exc).__name__}: {exc}). Tente de novo.")
+        return 1
+    except ValueError:   # 200 com corpo que não é JSON (JSONDecodeError)
+        remoto = None
+    if not isinstance(remoto, dict):
+        print("  Pluggy: resposta inesperada da Pluggy (não é um item). Tente de novo.")
         return 1
     dono = str(remoto.get("clientUserId") or "")
     conector = (remoto.get("connector") or {}).get("name")
@@ -181,7 +188,7 @@ def apagar(item: str, estado_esperado: str) -> int:
                   "(DELETE /open-finance/{uid}).")
             return 1
         if atual == DESCONHECIDO:
-            print(f"{item}: id desconhecido (nem registry nem logs). Recusado.")
+            print(f"{item}: id desconhecido (nem registry, auditoria ou logs). Recusado.")
             return 1
         if atual != estado_esperado:
             print(f"{item}: o estado mudou ({estado_esperado} → {atual}). "
@@ -189,6 +196,14 @@ def apagar(item: str, estado_esperado: str) -> int:
             return 1
         try:
             delete_pluggy_item(item)   # 404 conta como sucesso (idempotente)
+        except httpx.TimeoutException as exc:
+            print(f"{item}: o DELETE na Pluggy estourou o prazo ({type(exc).__name__})."
+                  " Resultado INCERTO: ele pode ter sido aplicado. Nada gravado; rode"
+                  " de novo o MESMO comando (404 conta como sucesso).")
+            return 1
+        except ValueError:   # 200 com corpo que não é JSON (JSONDecodeError, no /auth)
+            print(f"{item}: resposta inesperada da Pluggy. Nada gravado; tente de novo.")
+            return 1
         except _FALHA_PLUGGY as exc:
             print(f"{item}: o DELETE na Pluggy falhou ({type(exc).__name__}: {exc})."
                   " Nada gravado.")

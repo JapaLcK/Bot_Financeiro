@@ -20,6 +20,7 @@ from core.services.pluggy import PluggyApiError
 from db import open_finance_diagnostico as diag
 from db.connection import get_conn
 from scripts import of_itens_operador as op
+from test_of_diagnostico_estados import _linha
 from test_of_item_ownership import _auth, _webhook, eventos  # noqa: F401
 from test_of_webhook_adopt_guards import (  # noqa: F401 — `webhook_pluggy` é fixture
     _existe_user,
@@ -168,3 +169,36 @@ def test_listar_agrupa_conta_apagados_e_nao_prescreve_id_recusado(
     finally:
         for i in (removido, apagado, ruim):
             _limpa(i)
+
+
+def test_card_so_perde_o_item_cuja_ultima_linha_e_operator_delete(user_id):
+    """`ITEMS_SEM_CONEXAO` de antes da PR contra o de agora, no mesmo banco: a
+    única diferença são os items resolvidos pelo operador."""
+    from db.open_finance_state import ITEMS_SEM_CONEXAO
+
+    item = "conv-card"
+
+    antigo = ITEMS_SEM_CONEXAO.rsplit("   and not ", 1)[0]   # sem o RESOLVIDO
+    sementes = {
+        "a": [(user_id, "pluggy_item")],
+        "b": [(user_id, "pluggy_item"), (user_id, "removed")],
+        "c": [(None, "webhook"), (None, "webhook")],
+        "d": [(None, "operator_delete"), (user_id, "pluggy_item")],   # reaberto
+        "f": [(user_id, "pluggy_item"), (None, "operator_delete")],   # resolvido
+    }
+    try:
+        for sufixo, linhas in sementes.items():
+            for uid, origem in linhas:
+                _linha(uid, f"{item}-{sufixo}", origem)
+
+        def _itens(sql):
+            with get_conn() as c:
+                return {r["i"] for r in c.execute(
+                    f"select distinct r.provider_item_id as i {sql}").fetchall()}
+
+        assert _itens(antigo) - _itens(ITEMS_SEM_CONEXAO) >= {f"{item}-f"}
+        novos = {i for i in _itens(ITEMS_SEM_CONEXAO) if i.startswith(item)}
+        assert novos == {f"{item}-{x}" for x in "abcd"}
+    finally:
+        for sufixo in sementes:
+            _limpa(f"{item}-{sufixo}")

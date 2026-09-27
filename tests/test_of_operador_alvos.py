@@ -235,7 +235,9 @@ def _falhas_pluggy():
 
 @pytest.mark.parametrize("exc", _falhas_pluggy(), ids=lambda e: type(e).__name__)
 def test_falha_de_rede_ou_credencial_no_delete_e_rc_1_sem_rastro(
-        user_id, item, monkeypatch, exc):
+        user_id, item, monkeypatch, capsys, exc):
+    import httpx
+
     def _boom(i, api_key=None):
         raise exc
 
@@ -243,6 +245,12 @@ def test_falha_de_rede_ou_credencial_no_delete_e_rc_1_sem_rastro(
     _interrompido(user_id, item)
     assert op.main(["--item", item, "--apagar", "--estado", "INTERROMPIDO", "--apply"]) == 1
     assert [o for o, _ in _origens(item)] == ["pluggy_item"]
+    saida = capsys.readouterr().out
+    # Timeout: o DELETE pode ter sido aplicado — "falhou" seria mentira.
+    if isinstance(exc, httpx.TimeoutException):
+        assert "INCERTO" in saida and "MESMO comando" in saida, saida
+    else:
+        assert "falhou" in saida and "INCERTO" not in saida, saida
 
 
 @pytest.mark.parametrize("exc", _falhas_pluggy(), ids=lambda e: type(e).__name__)
@@ -267,3 +275,76 @@ def test_delete_ok_e_rastro_falho_avisa_que_apagou(user_id, item, deletados,
     assert op.main(["--item", item, "--apagar", "--estado", "INTERROMPIDO", "--apply"]) == 1
     assert deletados == [item]
     assert "APAGADO na Pluggy" in capsys.readouterr().out
+
+
+# ── rodada 3: resposta 200 malformada, 404 de item reaberto, lista vazia ────
+
+@pytest.mark.parametrize("resposta", ["html", "lista"])
+def test_get_200_malformado_no_detalhe_e_rc_1(user_id, item, monkeypatch, capsys, resposta):
+    import json
+
+    def _get(i):
+        if resposta == "html":
+            raise json.JSONDecodeError("Expecting value", "<html>", 0)
+        return []
+
+    monkeypatch.setattr(op, "get_pluggy_item", _get)
+    _interrompido(user_id, item)
+    assert op.main(["--item", item]) == 1
+    assert "resposta inesperada da Pluggy" in capsys.readouterr().out
+
+
+def test_200_malformado_no_apagar_e_rc_1_sem_rastro(user_id, item, monkeypatch, capsys):
+    import json
+
+    def _html(i, api_key=None):
+        raise json.JSONDecodeError("Expecting value", "<html>", 0)
+
+    monkeypatch.setattr(op, "delete_pluggy_item", _html)
+    _interrompido(user_id, item)
+    assert op.main(["--item", item, "--apagar", "--estado", "INTERROMPIDO", "--apply"]) == 1
+    assert "resposta inesperada da Pluggy" in capsys.readouterr().out
+    assert [o for o, _ in _origens(item)] == ["pluggy_item"]
+
+
+def test_404_de_item_reaberto_sem_marca_prescreve_o_apagar(user_id, item, monkeypatch, capsys):
+    """pluggy_item → operator_delete → webhook: o item voltou à lista (e ao card)
+    e não tem marca de falha. Sem o comando ele ficava lá para sempre."""
+    from core.services.pluggy import PluggyApiError
+
+    _interrompido(user_id, item)
+    db.register_item(None, provider_item_id=item, origin="operator_delete")
+    db.register_item(None, provider_item_id=item, origin="webhook")
+
+    def _404(i):
+        raise PluggyApiError("x", status_code=404)
+
+    monkeypatch.setattr(op, "get_pluggy_item", _404)
+    assert op.main(["--item", item]) == 0
+    assert f"--item {item} --apagar --estado INTERROMPIDO --apply" in capsys.readouterr().out
+
+
+def test_404_de_item_ja_resolvido_nao_prescreve_nada(user_id, item, monkeypatch, capsys):
+    """Controle positivo do anterior: fora da lista e sem marca, 404 é só 404."""
+    from core.services.pluggy import PluggyApiError
+
+    _interrompido(user_id, item)
+    db.register_item(None, provider_item_id=item, origin="operator_delete")
+
+    def _404(i):
+        raise PluggyApiError("x", status_code=404)
+
+    monkeypatch.setattr(op, "get_pluggy_item", _404)
+    assert op.main(["--item", item]) == 0
+    assert "--apagar" not in capsys.readouterr().out
+
+
+def test_lista_so_com_apagados_nao_diz_que_nao_ha_nada(monkeypatch, capsys):
+    monkeypatch.setattr(op, "listar_sem_conexao", lambda: {})
+    monkeypatch.setattr(op, "itens_com_remocao_remota_falha", lambda: [])
+    monkeypatch.setattr(op, "conexoes_sem_rastro", lambda: [])
+    monkeypatch.setattr(op, "apagados_pelo_operador", lambda: 3)
+    assert op.main([]) == 0
+    saida = capsys.readouterr().out
+    assert "3 apagado(s) pelo operador" in saida
+    assert "Nada no registry" not in saida

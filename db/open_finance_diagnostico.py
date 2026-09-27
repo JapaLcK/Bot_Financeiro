@@ -70,13 +70,14 @@ def classifica_item(item_id: str, *, provider: str = "pluggy") -> str:
         informação);
       • outra origem SEM `removal_tracked`       → LEGADO_AMBIGUO (rastro anterior
         à marca: não dá para saber);
-      • nenhuma linha com dono                   → NUNCA_ATRIBUIDO — a menos que
-        exista auditoria `OPEN_FINANCE_CONNECTED` com o mesmo `item_id`: aí o
-        item TEVE dono e o rastro se perdeu, e ele cai em LEGADO_AMBIGUO (D3);
-      • nenhuma linha NENHUMA e nenhuma citação em log de DELETE falho
-                                                 → DESCONHECIDO (recusado). Só
-        log, sem registry, é o caso legítimo da conta excluída (a cascata levou
-        o registry) e segue as regras acima.
+      • nenhuma linha com dono, e auditoria `OPEN_FINANCE_CONNECTED` com o mesmo
+        `item_id`                                → LEGADO_AMBIGUO (D3): o item TEVE
+        dono e o rastro se perdeu — com ou sem linha sem dono no registry (quem
+        conectou antes do registry não deixou linha nenhuma);
+      • nenhuma linha com dono, sem auditoria, e pelo menos uma linha sem dono OU
+        citação em log de DELETE falho           → NUNCA_ATRIBUIDO (só log é a
+        conta excluída: a cascata levou registry e auditoria);
+      • nada disso                               → DESCONHECIDO (recusado).
 
     Por `id` e não por `created_at`: `now()` é o tempo de INÍCIO da transação,
     empata entre duas escritas da mesma transação e pode inverter entre sessões
@@ -90,6 +91,10 @@ def classifica_item(item_id: str, *, provider: str = "pluggy") -> str:
     que caia entre o commit da conexão e esse insert deixa a última linha como
     `pluggy_item` com o banco REMOVIDO — sai INTERROMPIDO. Janela de ms e exige o
     clique do usuário; o operador age item a item, e apagar ali não causa dano.
+
+    LIMITE CONHECIDO: existência é por match EXATO, e só a conexão viva compara
+    com `lower()`. Linha do registry em outra caixa (o webhook grava o que vier)
+    classifica aquele id à parte; teórico, porque a Pluggy emite minúsculo.
     """
     item = str(item_id or "")
     with get_conn() as conn, conn.cursor() as cur:
@@ -127,12 +132,14 @@ def classifica_item(item_id: str, *, provider: str = "pluggy") -> str:
         if ultima["origin"] == "removed":
             return REMOVIDO
         return INTERROMPIDO if ultima["removal_tracked"] else LEGADO_AMBIGUO
-    # Nenhuma linha no registry E nenhuma citação em log de DELETE falho: o id
-    # não é de nada que vimos (digitação, outra caixa, item de outro ambiente).
-    # ponytail: varre os logs para UM id; só roda quando o registry não tem nada.
+    if teve_auditoria:
+        return LEGADO_AMBIGUO
+    # Nem registry, nem auditoria, nem log de DELETE falho: o id não é de nada
+    # que vimos (digitação, outra caixa, item de outro ambiente).
+    # ponytail: varre os logs para UM id; só roda quando nada mais o conhece.
     if linha is None and item not in itens_com_remocao_remota_falha():
         return DESCONHECIDO
-    return LEGADO_AMBIGUO if teve_auditoria else NUNCA_ATRIBUIDO
+    return NUNCA_ATRIBUIDO
 
 
 def apagados_pelo_operador(*, provider: str = "pluggy") -> int:
