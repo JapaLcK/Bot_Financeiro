@@ -1946,7 +1946,7 @@ def init_db():
         # iOS. Só TELEMETRIA — não concede nada: o gate de plano não isenta o
         # app (política em plan_service.needs_plan_selection).
         # Valores (os únicos que signup_source_from_request produz):
-        # 'web' | 'app' | 'google' | 'google_app'.
+        # 'web' | 'app' | 'google' | 'google_app' | 'apple' | 'apple_app'.
         # NULL = conta anterior a esta coluna (origem desconhecida);
         # sem backfill por data chutado — o painel mostra "—" pra elas.
         """alter table auth_accounts add column if not exists signup_source text""",
