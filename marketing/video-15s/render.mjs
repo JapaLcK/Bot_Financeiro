@@ -7,7 +7,7 @@ import { chromium } from "playwright";
 import { spawn } from "node:child_process";
 import { createServer } from "node:http";
 import { readFile, mkdir, access } from "node:fs/promises";
-import { extname, join, dirname, resolve } from "node:path";
+import { extname, join, dirname, resolve, sep } from "node:path";
 import { fileURLToPath } from "node:url";
 
 const HERE = dirname(fileURLToPath(import.meta.url));
@@ -20,10 +20,11 @@ const stills = arg("--stills");
 const TYPES = { ".html": "text/html", ".css": "text/css", ".js": "text/javascript", ".png": "image/png", ".webp": "image/webp", ".woff2": "font/woff2" };
 const server = createServer(async (req, res) => {
   const p = join(ROOT, decodeURIComponent(new URL(req.url, "http://x").pathname));
-  if (!p.startsWith(ROOT)) { res.writeHead(403).end(); return; }
+  if (!p.startsWith(ROOT + sep)) { res.writeHead(403).end(); return; } // com sep: "Bot_Financeiro2" não passa
   try { const body = await readFile(p); res.writeHead(200, { "content-type": TYPES[extname(p)] || "application/octet-stream" }).end(body); }
   catch { res.writeHead(404).end(); }
-}).listen(0);
+}).listen(0, "127.0.0.1"); // só loopback: o handler serve qualquer arquivo do repo, inclusive .env
+await new Promise(r => server.once("listening", r)); // com host, o bind é assíncrono
 const url = `http://127.0.0.1:${server.address().port}/marketing/video-15s/index.html?render=1`;
 
 await mkdir(OUT, { recursive: true });
