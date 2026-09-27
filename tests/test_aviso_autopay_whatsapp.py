@@ -1,0 +1,738 @@
+"""#616 — aviso de vencimento do gasto fixo autopay no WhatsApp, em TEXTO LIVRE,
+só para quem falou com o Piggy nas últimas 23h (`_JANELA_WA`).
+
+Banco real, `send_text` REAL; só o `requests.post` é trocado (a borda HTTP).
+O relógio entra por `now=` (ou por `rc.now_tz` no loop inteiro). A janela abre
+pelo escritor real (`db.update_last_activity`), ou por SQL quando o relógio do
+teste não é o de hoje.
+
+Controles NEGATIVOS declarados (docs/controles_declarados.md) — em
+`db/recurring.py` / `core/services/recurring_charger.py`:
+
+  janela. apagar `and exists (select 1 from auth_accounts a ...)` da listagem →
+     vermelhos `test_fora_da_janela_nao_envia_nem_reserva[25h]` e `[nula]`;
+     trocar `_JANELA_WA = timedelta(hours=23)` por `hours=24` → vermelho
+     `test_borda_da_janela[23h01]`; tirar `a.user_id = rc.user_id and` do
+     `exists` → vermelho `test_isolamento_so_quem_esta_na_janela_recebe`;
+     `update_last_activity` sem efeito (`UPDATE auth_accounts SET
+     last_activity_at = now()` virando no-op) → vermelho
+     `test_sem_janela_nao_reserva_e_a_mensagem_do_usuario_abre`; checar a
+     janela DEPOIS do claim (tirar o `exists` e pular o envio de quem está fora
+     depois de reservar) → vermelhos no mesmo teste e em
+     `test_fora_da_janela_nao_envia_nem_reserva[25h]` e `[nula]`.
+  interruptor. tirar o `return 0` do `WA_AUTOPAY_NOTICE_ENABLED` → vermelhos
+     `test_interruptor_desligado_nao_le_nem_reserva[ausente]` e `[zero]`.
+  agrupamento. uma mensagem por aviso (voltar a enviar dentro do laço dos
+     avisos) → vermelho `test_dois_gastos_do_mesmo_dia_viram_uma_mensagem`;
+     reservar um por um com `claim_autopay_notices_whatsapp(uid, [id])` →
+     vermelho `test_ticks_concorrentes_nao_dividem_a_mensagem`.
+  marcação. tirar o `wrap_wa_markup` do nome → vermelho
+     `test_loop_real_manda_o_texto_do_aviso`; embrulhar sempre em `*` →
+     vermelho `test_nome_com_marcacao_sai_sem_negrito_e_inteiro`.
+  a. apagar `and rc.due_on = %s` da listagem → vermelho
+     `test_aviso_de_ontem_nao_sai`; voltar ao corte `rc.charged_at >=
+     <meia-noite de hoje>` → vermelhos `test_aviso_de_ontem_nao_sai`,
+     `test_vencimento_mudou_no_mes_avisa_na_data_nova` e
+     `test_vencimento_mudou_depois_do_envio_nao_reagenda` (o
+     `test_volta_da_meia_noite_com_leitura_falha_nao_sai_atrasado` segue verde
+     nessa injeção: a reconferência `_vence_hoje` também o segura);
+  b. apagar `rc.launch_id is null and` da listagem →
+     vermelho `test_linha_do_cobrador_com_lancamento_nao_sai`;
+  c. apagar `and wa_notified_at is null` do UPDATE do claim E da listagem →
+     vermelhos `test_dois_ticks_seguidos_mandam_uma_vez` e
+     `test_dois_ticks_concorrentes_mandam_uma_vez`;
+  d. trocar o claim por "enviar e depois marcar" → vermelhos
+     `test_dois_ticks_concorrentes_mandam_uma_vez` e
+     `test_sem_telefone_nao_envia_e_consome_o_aviso`;
+  f. trocar `not get_whatsapp_updates_opt_out(uid)` por `True` →
+     vermelho `test_opt_out_nao_recebe`;
+  g. trocar `bool(filtrar_por_acesso([uid]))` por `True` →
+     vermelho `test_sem_acesso_nao_recebe` (e o portão
+     `tests/test_portao_lacos_proativos.py`);
+  h. calcular `targets` com `list_identities_by_user(<primeiro user_id da
+     listagem>)` → vermelho `test_cada_telefone_recebe_so_o_proprio_aviso`;
+  j. tirar o `[:60]` do nome → vermelho `test_nome_longo_corta_em_60_code_points`;
+     cortar antes de juntar os espaços → vermelho
+     `test_corte_em_60_vem_depois_de_juntar_os_espacos`;
+  k. tirar o `try/except ValueError` do `WA_BILL_REMINDER_HOUR` →
+     vermelho `test_hora_invalida_vale_o_padrao[nove]`; tirar a checagem de
+     faixa 0..23 → vermelho `[-1]` e `[25]`;
+  l. mover o claim para antes do `try` da leitura de acesso/opt-out →
+     vermelho `test_leitura_que_falha_nao_reserva_e_a_proxima_hora_envia` (os dois);
+  m. no loop, voltar a ler o relógio em cada passo → vermelho
+     `test_volta_que_cruza_a_meia_noite_envia_o_aviso_do_dia`;
+  n. no notify, apagar a reconferência `_vence_hoje` → vermelhos
+     `test_editado_depois_da_gravacao_nao_avisa[due_day]` e `[daily]`; tirar
+     `and r.amount > 0` da listagem → vermelho `[valor_zero]`;
+  o. voltar a ler `rc.amount` em vez de `r.amount` → vermelho
+     `test_valor_editado_depois_da_gravacao_vai_o_novo`;
+  p. no upsert de `ensure_autopay_notice`, voltar a `do nothing` → vermelho
+     `test_vencimento_mudou_no_mes_avisa_na_data_nova`; tirar
+     `wa_notified_at is null` do WHERE → vermelho
+     `test_vencimento_mudou_depois_do_envio_nao_reagenda`; tirar
+     `launch_id is null` → vermelho `test_linha_do_cobrador_no_mesmo_mes_nao_e_tocada`.
+Positivos (o caminho legítimo): `test_loop_real_manda_o_texto_do_aviso`, o
+segundo passo de `test_sem_janela_nao_reserva_e_a_mensagem_do_usuario_abre`,
+`test_borda_da_janela[22h59]` e `test_dois_telefones_do_mesmo_usuario_recebem`.
+"""
+from __future__ import annotations
+
+import time
+from concurrent.futures import ThreadPoolExecutor
+from datetime import date, timedelta
+
+import pytest
+
+import core.services.recurring_charger as rc
+import db
+import db.recurring as dbr
+from _billing_grants_helpers import garantir_system_event_logs
+from conftest import promote_to_pro, usuario_pagante
+from core.observability import recent_event_exists
+from db.recurring import create_recurring_expense, update_recurring_expense
+from db_support import invalidate_auth_user_cache
+from test_bill_amount_pending import _manda_texto_no_wa
+from test_recorrente_so_preve import _um_tick
+from utils_date import now_tz
+
+_FONE_A = "5511999961601"
+_FONE_B = "5511999961602"
+_EVENTO = "whatsapp_autopay_notice_sent"
+_RODAPE = "\n\n💡É só um lembrete: não lancei nada no app."
+
+
+@pytest.fixture(autouse=True)
+def _event_logs():
+    garantir_system_event_logs()
+
+
+def _armar(monkeypatch, status: int = 200, atraso: float = 0.0) -> list[dict]:
+    posts: list[dict] = []
+
+    class _Resp:
+        status_code = status
+        text = ""
+
+        @staticmethod
+        def json():
+            return {"messages": [{"id": "wamid.x"}]}
+
+    def _post(url, **kw):
+        time.sleep(atraso)
+        posts.append(kw["json"])
+        return _Resp()
+
+    monkeypatch.setenv("WA_TOKEN", "tok")
+    monkeypatch.setenv("WA_PHONE_NUMBER_ID", "123")
+    monkeypatch.setenv("WA_AUTOPAY_NOTICE_ENABLED", "1")
+    monkeypatch.delenv("WA_BILL_REMINDER_HOUR", raising=False)
+    monkeypatch.setattr("requests.post", _post)
+    return posts
+
+
+def _as(hora: int):
+    return now_tz().replace(hour=hora, minute=0, second=0, microsecond=0)
+
+
+def _dono(uid: int, fone: str | None, janela: bool = True) -> int:
+    promote_to_pro(uid)
+    if fone:
+        db.bind_identity("whatsapp", fone, uid)
+    if janela:
+        db.update_last_activity(uid)  # "falou com o Piggy agora"
+    return uid
+
+
+def _janela(uid: int, quando) -> None:
+    """Última atividade num instante do relógio do teste (quando não é hoje)."""
+    _sql("update auth_accounts set last_activity_at=%s where user_id=%s", (quando, uid))
+
+
+def _gasto(uid: int, nome: str, valor: float = 55.9, tipo: str = "account") -> dict:
+    card_id = db.create_card(uid, "Nubank", closing_day=10, due_day=17) if tipo == "credit_card" else None
+    hoje = date.today()
+    return create_recurring_expense(uid, nome, valor, "assinaturas", hoje.day, tipo,
+                                    card_id=card_id, start_date=hoje)
+
+
+def _rodar(hora: int = 10) -> int:
+    rc.sync_autopay_notices_once()
+    return rc.notify_autopay_notices_whatsapp_once(now=_as(hora))
+
+
+def _para(posts: list[dict], fone: str) -> list[dict]:
+    return [p for p in posts if p["to"] == fone]
+
+
+def _corpos(posts: list[dict], fone: str) -> list[str]:
+    return [p["text"]["body"] for p in _para(posts, fone)]
+
+
+def _sql(sql: str, args: tuple) -> None:
+    with db.get_conn() as conn, conn.cursor() as cur:
+        cur.execute(sql, args)
+        conn.commit()
+
+
+def _reservados(uid: int) -> int:
+    with db.get_conn() as conn, conn.cursor() as cur:
+        cur.execute("select count(*) as n from recurring_charges "
+                    "where user_id=%s and wa_notified_at is not null", (uid,))
+        return int(cur.fetchone()["n"])
+
+
+def test_loop_real_manda_o_texto_do_aviso(user_id, monkeypatch):
+    posts = _armar(monkeypatch)
+    _dono(user_id, _FONE_A)
+    _gasto(user_id, "Netflix Q616", 55.9, "account")
+    monkeypatch.setattr(rc, "now_tz", lambda: _as(10))
+
+    _um_tick(monkeypatch)
+
+    [post] = _para(posts, _FONE_A)
+    assert post["type"] == "text" and "template" not in post
+    assert post["text"]["body"] == (
+        "🐷 Hoje vence o seu gasto fixo *Netflix Q616*, de R$ 55,90, com débito na conta." + _RODAPE)
+    assert _reservados(user_id) == 1
+    assert recent_event_exists(_EVENTO, user_id, 1) is True
+
+
+def test_dois_gastos_do_mesmo_dia_viram_uma_mensagem(user_id, monkeypatch):
+    posts = _armar(monkeypatch)
+    _dono(user_id, _FONE_A)
+    _gasto(user_id, "Netflix Q616", 55.9, "account")
+    _gasto(user_id, "Spotify Q616", 21.9, "credit_card")
+
+    _rodar()
+
+    [corpo] = _corpos(posts, _FONE_A)
+    cab = "🐷 Hoje vencem 2 gastos fixos seus:"
+    net = "• *Netflix Q616*, R$ 55,90, débito na conta"
+    spo = "• *Spotify Q616*, R$ 21,90, cobrança no cartão"
+    # A ordem é a de `rc.id`, que depende da ordem em que a sync gravou.
+    assert corpo in {f"{cab}\n{a}\n{b}{_RODAPE}" for a, b in [(net, spo), (spo, net)]}, corpo
+    assert _reservados(user_id) == 2
+
+
+def test_ticks_concorrentes_nao_dividem_a_mensagem(user_id, monkeypatch):
+    """Quem reserva algo segura a vez por 0,3s antes da próxima reserva: com o
+    claim em lote isso não abre brecha; com o claim um por um, o segundo
+    processo pega o 2º aviso no meio e a mensagem sai partida em duas."""
+    posts = _armar(monkeypatch)
+    _dono(user_id, _FONE_A)
+    _gasto(user_id, "Luz Q616", 90.0)
+    _gasto(user_id, "Agua Q616", 40.0)
+    rc.sync_autopay_notices_once()
+
+    real = dbr.claim_autopay_notices_whatsapp
+
+    def _lento(uid, ids):
+        reservados = real(uid, ids)
+        if reservados:
+            time.sleep(0.3)
+        return reservados
+
+    monkeypatch.setattr(dbr, "claim_autopay_notices_whatsapp", _lento)
+    with ThreadPoolExecutor(2) as pool:
+        for f in [pool.submit(rc.notify_autopay_notices_whatsapp_once, now=_as(10)) for _ in range(2)]:
+            f.result()
+
+    [corpo] = _corpos(posts, _FONE_A)
+    assert "Luz Q616" in corpo and "Agua Q616" in corpo
+    assert _reservados(user_id) == 2
+
+
+def test_sem_janela_nao_reserva_e_a_mensagem_do_usuario_abre(monkeypatch):
+    """Sem conversa, nada sai nem é reservado; uma mensagem de texto real pelo
+    `process_message` abre a janela e a volta seguinte manda."""
+    posts = _armar(monkeypatch)
+    import core.services.ai_chat as AC
+    monkeypatch.setattr(AC, "chat", lambda uid, text, **kw: "[IA]")  # nada de LLM
+    uid = usuario_pagante()
+    db.bind_identity("whatsapp", _FONE_A, uid)
+    _gasto(uid, "Janela Q616")
+
+    _rodar(10)
+    assert _para(posts, _FONE_A) == [] and _reservados(uid) == 0
+
+    _manda_texto_no_wa(monkeypatch, uid, "oi piggy")
+    _rodar(11)
+    assert len(_para(posts, _FONE_A)) == 1 and _reservados(uid) == 1
+
+
+@pytest.mark.parametrize("atividade", [timedelta(hours=25), None], ids=["25h", "nula"])
+def test_fora_da_janela_nao_envia_nem_reserva(user_id, monkeypatch, atividade):
+    posts = _armar(monkeypatch)
+    _dono(user_id, _FONE_A, janela=False)
+    _janela(user_id, _as(10) - atividade if atividade else None)
+    _gasto(user_id, "Fora Q616")
+
+    _rodar(10)
+
+    assert _para(posts, _FONE_A) == [] and _reservados(user_id) == 0
+
+
+@pytest.mark.parametrize("atras, envios", [(timedelta(hours=22, minutes=59), 1),
+                                           (timedelta(hours=23, minutes=1), 0)],
+                         ids=["22h59", "23h01"])
+def test_borda_da_janela(user_id, monkeypatch, atras, envios):
+    posts = _armar(monkeypatch)
+    _dono(user_id, _FONE_A, janela=False)
+    _janela(user_id, _as(10) - atras)
+    _gasto(user_id, "Borda Q616")
+
+    _rodar(10)
+
+    assert len(_para(posts, _FONE_A)) == envios and _reservados(user_id) == envios
+
+
+def test_isolamento_so_quem_esta_na_janela_recebe(user_id, monkeypatch):
+    from conftest import _cleanup_user
+    posts = _armar(monkeypatch)
+    outro = user_id + 1
+    try:
+        db.ensure_user(outro)
+        _dono(user_id, _FONE_A)
+        _dono(outro, _FONE_B, janela=False)
+        _gasto(user_id, "Do A Q616")
+        _gasto(outro, "Do B Q616")
+
+        _rodar()
+
+        [corpo] = _corpos(posts, _FONE_A)
+        assert "Do A Q616" in corpo and "Do B" not in corpo
+        assert _para(posts, _FONE_B) == [] and _reservados(outro) == 0
+    finally:
+        _cleanup_user(outro)
+
+
+def test_dois_telefones_do_mesmo_usuario_recebem(user_id, monkeypatch):
+    """Teto aceito (a janela é do usuário, não do telefone): os dois recebem."""
+    posts = _armar(monkeypatch)
+    _dono(user_id, _FONE_A)
+    db.bind_identity("whatsapp", _FONE_B, user_id)
+    _gasto(user_id, "Dois Fones Q616")
+
+    assert _rodar() == 2
+
+    assert len(_para(posts, _FONE_A)) == 1 and len(_para(posts, _FONE_B)) == 1
+
+
+@pytest.mark.parametrize("status", [400, 401])
+def test_envio_recusado_nao_levanta_e_nao_reenvia(user_id, monkeypatch, status):
+    """400 levanta dentro do `send_text`, 401 devolve None: os dois só logam."""
+    posts = _armar(monkeypatch, status=status)
+    _dono(user_id, _FONE_A)
+    _gasto(user_id, "Recusa Q616")
+
+    assert _rodar() == 0
+    assert len(_para(posts, _FONE_A)) == 1  # tentou uma vez
+    assert recent_event_exists(_EVENTO, user_id, 1) is False
+    assert _reservados(user_id) == 1
+
+    _rodar(11)
+    assert len(_para(posts, _FONE_A)) == 1
+
+
+@pytest.mark.parametrize("valor", [None, "0"], ids=["ausente", "zero"])
+def test_interruptor_desligado_nao_le_nem_reserva(user_id, monkeypatch, valor):
+    posts = _armar(monkeypatch)
+    if valor is None:
+        monkeypatch.delenv("WA_AUTOPAY_NOTICE_ENABLED")
+    else:
+        monkeypatch.setenv("WA_AUTOPAY_NOTICE_ENABLED", valor)
+    _dono(user_id, _FONE_A)
+    _gasto(user_id, "Desligado Q616")
+    rc.sync_autopay_notices_once()
+
+    def _leu(*a, **k):
+        raise AssertionError("leu o banco com o interruptor desligado")
+
+    monkeypatch.setattr(dbr, "list_autopay_notices_for_whatsapp", _leu)
+    assert rc.notify_autopay_notices_whatsapp_once(now=_as(10)) == 0
+
+    assert posts == []
+    assert _reservados(user_id) == 0
+
+
+def test_volta_que_cruza_a_meia_noite_envia_o_aviso_do_dia(user_id, monkeypatch):
+    """A volta começa em D 23:59:59 e a meia-noite passa enquanto a sync grava.
+
+    Controle negativo: o loop lendo o relógio em cada passo (sync e notify sem
+    argumento) → o notify vê D+1 00:00:05, antes da hora, e manda 0: vermelho."""
+    posts = _armar(monkeypatch)
+    _dono(user_id, _FONE_A)
+    _gasto(user_id, "Meia-noite Q616")
+
+    virou = []
+    gravar = dbr.ensure_autopay_notice
+    monkeypatch.setattr(dbr, "ensure_autopay_notice", lambda *a: virou.append(1) or gravar(*a))
+    d = _as(23).replace(minute=59, second=59)
+    _janela(user_id, d)
+    monkeypatch.setattr(rc, "now_tz", lambda: d + timedelta(seconds=6) if virou else d)
+
+    _um_tick(monkeypatch)
+
+    assert virou and len(_para(posts, _FONE_A)) == 1
+    assert _reservados(user_id) == 1
+
+
+def test_volta_da_meia_noite_com_leitura_falha_nao_sai_atrasado(user_id, monkeypatch):
+    """A volta de D cruza a meia-noite (a linha nasce com `charged_at` de D+1) e a
+    leitura de opt-out falha nela (fail-closed, sem reserva). Às 9h de D+1 o
+    aviso de D NÃO sai dizendo "Hoje vence" um dia depois (a janela segue aberta).
+    Seguram isso o `rc.due_on = %s` e a reconferência `_vence_hoje`, cada um
+    sozinho."""
+    posts = _armar(monkeypatch)
+    _dono(user_id, _FONE_A)
+    _gasto(user_id, "Atrasado Q616")
+
+    d = _as(23).replace(minute=59, second=59)
+    depois = d + timedelta(seconds=6)
+    _janela(user_id, d)
+    virou = []
+    gravar = dbr.ensure_autopay_notice
+
+    def _grava_depois_da_meia_noite(*a):
+        virou.append(1)
+        criou = gravar(*a)
+        # O banco não segue o relógio falso: o `now()` da inserção já é D+1.
+        _sql("update recurring_charges set charged_at=%s where user_id=%s", (depois, user_id))
+        return criou
+
+    def _quebra(*a, **k):
+        raise RuntimeError("banco caiu")
+
+    monkeypatch.setattr(dbr, "ensure_autopay_notice", _grava_depois_da_meia_noite)
+    with monkeypatch.context() as m:
+        m.setattr("db.get_whatsapp_updates_opt_out", _quebra)
+        m.setattr(rc, "now_tz", lambda: depois if virou else d)
+        _um_tick(monkeypatch)
+    assert virou and _para(posts, _FONE_A) == [] and _reservados(user_id) == 0
+
+    monkeypatch.setattr(rc, "now_tz", lambda: (d + timedelta(days=1)).replace(hour=9, second=0))
+    _um_tick(monkeypatch)
+
+    assert _para(posts, _FONE_A) == []
+    assert _reservados(user_id) == 0
+
+
+def test_aviso_de_ontem_nao_sai(user_id, monkeypatch):
+    posts = _armar(monkeypatch)
+    _dono(user_id, _FONE_A)
+    _gasto(user_id, "Ontem Q616")
+    rc.sync_autopay_notices_once()
+    _sql("update recurring_charges set due_on = due_on - 1 where user_id=%s", (user_id,))
+
+    rc.notify_autopay_notices_whatsapp_once(now=_as(10))
+
+    assert _para(posts, _FONE_A) == []
+    assert _reservados(user_id) == 0
+
+
+def test_linha_do_cobrador_com_lancamento_nao_sai(user_id, monkeypatch):
+    posts = _armar(monkeypatch)
+    _dono(user_id, _FONE_A)
+    _gasto(user_id, "Lancado Q616")
+    rc.sync_autopay_notices_once()
+    launch_id, _, _ = db.add_launch_and_update_balance(user_id, "despesa", 55.9, None, "antigo")
+    _sql("update recurring_charges set launch_id=%s where user_id=%s", (launch_id, user_id))
+
+    rc.notify_autopay_notices_whatsapp_once(now=_as(10))
+
+    assert _para(posts, _FONE_A) == []
+
+
+def test_dois_ticks_seguidos_mandam_uma_vez(user_id, monkeypatch):
+    posts = _armar(monkeypatch)
+    _dono(user_id, _FONE_A)
+    _gasto(user_id, "Seguido Q616")
+
+    _rodar()
+    _rodar()
+
+    assert len(_para(posts, _FONE_A)) == 1
+
+
+def test_dois_ticks_concorrentes_mandam_uma_vez(user_id, monkeypatch):
+    posts = _armar(monkeypatch, atraso=0.2)
+    _dono(user_id, _FONE_A)
+    _gasto(user_id, "Concorrente Q616")
+    rc.sync_autopay_notices_once()
+
+    with ThreadPoolExecutor(2) as pool:
+        for f in [pool.submit(rc.notify_autopay_notices_whatsapp_once, now=_as(10)) for _ in range(2)]:
+            f.result()
+
+    assert len(_para(posts, _FONE_A)) == 1
+
+
+def test_sem_telefone_nao_envia_e_consome_o_aviso(user_id, monkeypatch):
+    posts = _armar(monkeypatch)
+    _dono(user_id, None)
+    _gasto(user_id, "SemFone Q616")
+
+    _rodar()
+
+    assert [p for p in posts if "SemFone Q616" in p["text"]["body"]] == []
+    assert _reservados(user_id) == 1
+
+
+def test_opt_out_nao_recebe(user_id, monkeypatch):
+    posts = _armar(monkeypatch)
+    _dono(user_id, _FONE_A)
+    db.set_whatsapp_updates_opt_out(user_id, True)
+    _gasto(user_id, "OptOut Q616")
+
+    _rodar()
+
+    assert _para(posts, _FONE_A) == []
+
+
+def test_sem_acesso_nao_recebe(user_id, monkeypatch):
+    posts = _armar(monkeypatch)
+    _dono(user_id, _FONE_A)
+    _sql("update auth_accounts set plan='free', plan_expires_at=null where user_id=%s", (user_id,))
+    invalidate_auth_user_cache(user_id)
+    _gasto(user_id, "Cortado Q616")
+
+    _rodar()
+
+    assert _para(posts, _FONE_A) == []
+
+
+def test_cada_telefone_recebe_so_o_proprio_aviso(user_id, monkeypatch):
+    from conftest import _cleanup_user
+    posts = _armar(monkeypatch)
+    outro = user_id + 1
+    try:
+        db.ensure_user(outro)
+        _dono(user_id, _FONE_A)
+        _dono(outro, _FONE_B)
+        _gasto(user_id, "Do A Q616")
+        _gasto(outro, "Do B Q616")
+
+        _rodar()
+
+        [a] = _corpos(posts, _FONE_A)
+        [b] = _corpos(posts, _FONE_B)
+        assert "Do A Q616" in a and "Do B" not in a
+        assert "Do B Q616" in b and "Do A" not in b
+    finally:
+        _cleanup_user(outro)
+
+
+def test_antes_da_hora_nao_reserva_e_depois_envia(user_id, monkeypatch):
+    posts = _armar(monkeypatch)
+    _dono(user_id, _FONE_A)
+    _gasto(user_id, "Hora Q616")
+
+    _rodar(8)
+    assert _para(posts, _FONE_A) == [] and _reservados(user_id) == 0
+
+    _rodar(9)
+    assert len(_para(posts, _FONE_A)) == 1
+
+
+def test_nome_com_quebra_e_tab_vira_uma_linha(user_id, monkeypatch):
+    posts = _armar(monkeypatch)
+    _dono(user_id, _FONE_A)
+    rec = _gasto(user_id, "Aluguel Q616")
+    _sql("update recurring_expenses set name=%s where id=%s", ("Aluguel\n\t  apto", rec["id"]))
+
+    _rodar()
+
+    [corpo] = _corpos(posts, _FONE_A)
+    assert "gasto fixo *Aluguel apto*, de" in corpo
+
+
+def test_nome_com_marcacao_sai_sem_negrito_e_inteiro(user_id, monkeypatch):
+    """#276: o WhatsApp não tem escape; nome que já tem marcação vai sem o
+    negrito do bot, inteiro (espaços juntados)."""
+    posts = _armar(monkeypatch)
+    _dono(user_id, _FONE_A)
+    _gasto(user_id, "Cartão *Premium*  _x_ ~y~")
+
+    _rodar()
+
+    [corpo] = _corpos(posts, _FONE_A)
+    assert "gasto fixo Cartão *Premium* _x_ ~y~, de R$ 55,90" in corpo
+
+
+def test_nome_longo_corta_em_60_code_points(user_id, monkeypatch):
+    posts = _armar(monkeypatch)
+    _dono(user_id, _FONE_A)
+    nome = "🐷💳 Plano família " + "é" * 60
+    _gasto(user_id, nome)
+
+    _rodar()
+
+    [corpo] = _corpos(posts, _FONE_A)
+    assert f"gasto fixo *{nome[:60]}*, de" in corpo
+
+
+def test_corte_em_60_vem_depois_de_juntar_os_espacos(user_id, monkeypatch):
+    posts = _armar(monkeypatch)
+    _dono(user_id, _FONE_A)
+    rec = _gasto(user_id, "Espacos Q616")
+    _sql("update recurring_expenses set name=%s where id=%s", ("A" * 55 + "     " + "B" * 10, rec["id"]))
+
+    _rodar()
+
+    [corpo] = _corpos(posts, _FONE_A)
+    assert f"gasto fixo *{'A' * 55} {'B' * 4}*, de" in corpo
+
+
+@pytest.mark.parametrize("hora", ["nove", "-1", "25"])
+def test_hora_invalida_vale_o_padrao(user_id, monkeypatch, hora):
+    posts = _armar(monkeypatch)
+    monkeypatch.setenv("WA_BILL_REMINDER_HOUR", hora)
+    _dono(user_id, _FONE_A)
+    _gasto(user_id, "HoraInvalida Q616")
+
+    _rodar(8)
+    assert _para(posts, _FONE_A) == [] and _reservados(user_id) == 0
+
+    _rodar(9)
+    assert len(_para(posts, _FONE_A)) == 1
+
+
+@pytest.mark.parametrize("alvo", ["db.get_whatsapp_updates_opt_out",
+                                  "core.reports.reports_daily.filtrar_por_acesso"])
+def test_leitura_que_falha_nao_reserva_e_a_proxima_hora_envia(user_id, monkeypatch, alvo):
+    """Fail-closed: leitura de acesso/opt-out que levanta não envia NEM reserva.
+    Positivo: a volta seguinte, sem a falha, envia 1 vez."""
+    posts = _armar(monkeypatch)
+    _dono(user_id, _FONE_A)
+    _gasto(user_id, "Falha Q616")
+
+    def _quebra(*a, **k):
+        raise RuntimeError("banco caiu")
+
+    with monkeypatch.context() as m:
+        m.setattr(alvo, _quebra)
+        _rodar()
+    assert _para(posts, _FONE_A) == [] and _reservados(user_id) == 0
+
+    _rodar()
+    assert len(_para(posts, _FONE_A)) == 1
+
+
+def _outro_dia() -> int:
+    return date.today().day % 28 + 1  # nunca hoje, nem clampado a hoje
+
+
+@pytest.mark.parametrize("edicao", ["due_day", "daily", "valor_zero"])
+def test_editado_depois_da_gravacao_nao_avisa(user_id, monkeypatch, edicao):
+    """A sync gravou o aviso de hoje; antes da hora de envio o usuário muda o
+    vencimento (ou a frequência pra diário). O notify reconfere no recorrente
+    ATUAL: 0 envios e nada reservado. Valor 0 (só por SQL; a edição recusa)
+    também não é aviso, como na sync."""
+    posts = _armar(monkeypatch)
+    _dono(user_id, _FONE_A)
+    rec = _gasto(user_id, "Editado Q616")
+    rc.sync_autopay_notices_once()
+    if edicao == "due_day":
+        update_recurring_expense(user_id, rec["id"], due_day=_outro_dia())
+    elif edicao == "daily":
+        update_recurring_expense(user_id, rec["id"], frequency="daily")
+    else:
+        _sql("update recurring_expenses set amount=0 where id=%s", (rec["id"],))
+
+    rc.notify_autopay_notices_whatsapp_once(now=_as(10))
+
+    assert _para(posts, _FONE_A) == []
+    assert _reservados(user_id) == 0
+
+
+def test_valor_editado_depois_da_gravacao_vai_o_novo(user_id, monkeypatch):
+    posts = _armar(monkeypatch)
+    _dono(user_id, _FONE_A)
+    rec = _gasto(user_id, "Reajuste Q616", 55.9)
+    rc.sync_autopay_notices_once()
+    update_recurring_expense(user_id, rec["id"], amount=61.5)
+
+    rc.notify_autopay_notices_whatsapp_once(now=_as(10))
+
+    [corpo] = _corpos(posts, _FONE_A)
+    assert ", de R$ 61,50, com" in corpo
+
+
+# ── Vencimento mudou no meio do mês (achado do Codex no #647) ─────────────────
+# Datas fixas: a sync do dia 5 grava o aviso do mês; o usuário muda o
+# vencimento para o dia 20; a sync do dia 20 cai na MESMA chave `YYYY-MM`.
+_D5, _D20 = date(2026, 10, 5), date(2026, 10, 20)
+
+
+def _em(dia: date, hora: int = 10):
+    return now_tz().replace(year=dia.year, month=dia.month, day=dia.day,
+                            hour=hora, minute=0, second=0, microsecond=0)
+
+
+def _mensal_dia_5(uid: int, nome: str) -> dict:
+    # Atividade no dia 20: a janela fica aberta nas voltas do dia 5 e do dia 20.
+    _janela(uid, _em(_D20))
+    return create_recurring_expense(uid, nome, 55.9, "assinaturas", 5, "account",
+                                    start_date=date(2026, 9, 1))
+
+
+def _linha(uid: int) -> dict:
+    with db.get_conn() as conn, conn.cursor() as cur:
+        cur.execute("select due_on, charged_at, launch_id, wa_notified_at, acknowledged "
+                    "from recurring_charges where user_id=%s", (uid,))
+        rows = cur.fetchall()
+    assert len(rows) == 1
+    return dict(rows[0])
+
+
+def test_vencimento_mudou_no_mes_avisa_na_data_nova(user_id, monkeypatch):
+    posts = _armar(monkeypatch)
+    _dono(user_id, _FONE_A)
+    rec = _mensal_dia_5(user_id, "Muda Dia Q616")
+    rc.sync_autopay_notices_once(today=_D5)
+    update_recurring_expense(user_id, rec["id"], due_day=20)
+    assert rc.notify_autopay_notices_whatsapp_once(now=_em(_D5)) == 0  # dia 5 já não vence
+
+    rc.sync_autopay_notices_once(today=_D20)
+    rc.notify_autopay_notices_whatsapp_once(now=_em(_D20))
+
+    assert len(_para(posts, _FONE_A)) == 1
+    linha = _linha(user_id)
+    assert linha["due_on"] == _D20 and linha["acknowledged"] is False
+
+
+def test_vencimento_mudou_depois_do_envio_nao_reagenda(user_id, monkeypatch):
+    """O aviso do dia 5 já saiu no WhatsApp; o vencimento muda para o dia 20 no
+    mesmo mês: nada é reenviado e a linha fica como estava (due_on=dia 5). Quem
+    discrimina o controle é a linha, não a contagem de posts."""
+    posts = _armar(monkeypatch)
+    _dono(user_id, _FONE_A)
+    rec = _mensal_dia_5(user_id, "Ja Avisado Q616")
+    rc.sync_autopay_notices_once(today=_D5)
+    rc.notify_autopay_notices_whatsapp_once(now=_em(_D5))
+    assert len(_para(posts, _FONE_A)) == 1
+    antes = _linha(user_id)
+
+    update_recurring_expense(user_id, rec["id"], due_day=20)
+    rc.sync_autopay_notices_once(today=_D20)
+    rc.notify_autopay_notices_whatsapp_once(now=_em(_D20))
+
+    assert len(_para(posts, _FONE_A)) == 1
+    assert _linha(user_id) == antes
+
+
+def test_linha_do_cobrador_no_mesmo_mes_nao_e_tocada(user_id, monkeypatch):
+    posts = _armar(monkeypatch)
+    _dono(user_id, _FONE_A)
+    rec = _mensal_dia_5(user_id, "Cobrador Q616")
+    launch_id, _, _ = db.add_launch_and_update_balance(user_id, "despesa", 55.9, None, "antigo")
+    _sql("insert into recurring_charges (recurring_id, user_id, launch_id, amount, ym, charged_at) "
+         "values (%s, %s, %s, 55.9, '2026-10', '2026-10-05 00:05-03')",
+         (rec["id"], user_id, launch_id))
+    antes = _linha(user_id)
+
+    assert rc.sync_autopay_notices_once(today=_D5) == 0
+    rc.notify_autopay_notices_whatsapp_once(now=_em(_D5))
+
+    assert _linha(user_id) == antes
+    assert _para(posts, _FONE_A) == []

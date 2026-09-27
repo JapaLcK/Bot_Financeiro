@@ -229,7 +229,7 @@ def test_payload_do_alerta_separa_aviso_de_lancado_e_isola_usuario(user_id):
 
     aviso = create_recurring_expense(user_id, "Aviso Q42", 10.0, "outros", 1, "account")
     antigo = create_recurring_expense(user_id, "Antigo Q42", 20.0, "outros", 1, "account")
-    ensure_autopay_notice(aviso["id"], user_id, 10.0, "2026-09")
+    ensure_autopay_notice(aviso["id"], user_id, 10.0, "2026-09", date(2026, 9, 1))
     with db.get_conn() as conn, conn.cursor() as cur:
         cur.execute("insert into launches (user_id, tipo, valor, categoria, nota) "
                     "values (%s, 'despesa', 20, 'outros', 'x') returning id", (user_id,))
@@ -240,7 +240,7 @@ def test_payload_do_alerta_separa_aviso_de_lancado_e_isola_usuario(user_id):
     outro = user_id + 1
     ensure_user(outro)
     alheio = create_recurring_expense(outro, "Alheio Q42", 30.0, "outros", 1, "account")
-    ensure_autopay_notice(alheio["id"], outro, 30.0, "2026-09")
+    ensure_autopay_notice(alheio["id"], outro, 30.0, "2026-09", date(2026, 9, 1))
 
     assert sorted((a["name"], a["launched"]) for a in _alertas(user_id)) == [
         ("Antigo Q42", True), ("Aviso Q42", False)]
