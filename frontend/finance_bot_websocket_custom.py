@@ -3238,6 +3238,59 @@ async def _apply_quiz_attribution(request: Request, response: Response, user_id:
         response.delete_cookie(QUIZ_COOKIE, secure=COOKIE_SECURE, samesite="lax")
 
 
+async def _sessao_de_conta_nova(
+    request: Request,
+    response: Response,
+    background_tasks: BackgroundTasks,
+    *,
+    user_id: int,
+    email: str,
+    origem_url: str,
+) -> dict[str, str | int]:
+    """Conta acabou de nascer: sessão, as três atribuições e o CAPI
+    CompleteRegistration. Chamadores: `/auth/verify-email`,
+    `_completar_cadastro_social` (Google/Apple) e `/auth/quiz/conta`
+    (`frontend/routes/quiz_signup.py`). `response` tem de ser o da rota: as
+    atribuições apagam os cookies de origem nele. Devolve o que vai no CORPO
+    (ver `_entrega_sessao`)."""
+    token, jti, refresh = _issue_session_token(user_id, email, request)
+    credenciais = _entrega_sessao(
+        request, response, user_id=user_id, access=token, jti=jti, refresh=refresh
+    )
+
+    await _apply_referral_attribution(request, response, user_id)
+    await _apply_prospect_attribution(request, response, user_id)
+    await _apply_quiz_attribution(request, response, user_id)
+
+    # Meta Conversions API — CompleteRegistration (conta criada). Agendado como
+    # background task (roda DEPOIS da resposta) pra um Meta lento/fora nunca
+    # atrasar o cadastro. event_id signup_<uid> casa com o pixel da página de
+    # origem (`origem_url`) pro Meta deduplicar.
+    try:
+        from core.services.meta_capi import (
+            capi_configured,
+            registration_event_id,
+            sanitize_fb_cookie,
+            send_event,
+        )
+        if capi_configured():
+            background_tasks.add_task(
+                send_event,
+                event_name="CompleteRegistration",
+                event_id=registration_event_id(user_id),
+                event_time=int(datetime.now(timezone.utc).timestamp()),
+                email=email,
+                # Mesma classe do Purchase: sem os cookies do pixel, o cadastro
+                # chega ao Meta sem o clique que o originou.
+                fbp=sanitize_fb_cookie(request.cookies.get("_fbp")),
+                fbc=sanitize_fb_cookie(request.cookies.get("_fbc")),
+                event_source_url=origem_url,
+            )
+    except Exception as exc:
+        print(f"[auth] meta capi registration falhou user={user_id}: {type(exc).__name__}")
+    return credenciais
+
+
 @app.post("/auth/register")
 @limiter.limit("3/hour")
 async def auth_register(request: Request, body: RegisterBody):
@@ -3320,40 +3373,10 @@ async def auth_verify_email(request: Request, response: Response, body: VerifyEm
 
     user_id    = result["user_id"]
     link_code  = result["link_code"]
-    token, jti, refresh = _issue_session_token(user_id, body.email.strip().lower(), request)
-    credenciais = _entrega_sessao(
-        request, response, user_id=user_id, access=token, jti=jti, refresh=refresh
+    credenciais = await _sessao_de_conta_nova(
+        request, response, background_tasks, user_id=int(user_id),
+        email=body.email.strip().lower(), origem_url=f"{DASHBOARD_URL}/cadastro",
     )
-
-    await _apply_referral_attribution(request, response, int(user_id))
-    await _apply_prospect_attribution(request, response, int(user_id))
-    await _apply_quiz_attribution(request, response, int(user_id))
-
-    # Meta Conversions API — CompleteRegistration (conta criada). Agendado como
-    # background task (roda DEPOIS da resposta) pra um Meta lento/fora nunca
-    # atrasar o cadastro. event_id signup_<uid> casa com o pixel do /cadastro.
-    try:
-        from core.services.meta_capi import (
-            capi_configured,
-            registration_event_id,
-            sanitize_fb_cookie,
-            send_event,
-        )
-        if capi_configured():
-            background_tasks.add_task(
-                send_event,
-                event_name="CompleteRegistration",
-                event_id=registration_event_id(user_id),
-                event_time=int(datetime.now(timezone.utc).timestamp()),
-                email=body.email.strip().lower(),
-                # Mesma classe do Purchase: sem os cookies do pixel, o cadastro
-                # chega ao Meta sem o clique que o originou.
-                fbp=sanitize_fb_cookie(request.cookies.get("_fbp")),
-                fbc=sanitize_fb_cookie(request.cookies.get("_fbc")),
-                event_source_url=f"{DASHBOARD_URL}/cadastro",
-            )
-    except Exception as exc:
-        print(f"[auth] meta capi registration falhou user={user_id}: {exc}")
 
     wa_link = _build_whatsapp_onboarding_link(user_id)
 
@@ -4738,38 +4761,10 @@ async def _completar_cadastro_social(
     user_id = int(result["user_id"])
     email = result["email"]
 
-    jwt_token, jti, refresh = _issue_session_token(user_id, email, request)
-    credenciais = _entrega_sessao(
-        request, response, user_id=user_id, access=jwt_token, jti=jti, refresh=refresh
+    credenciais = await _sessao_de_conta_nova(
+        request, response, background_tasks, user_id=user_id,
+        email=email, origem_url=f"{DASHBOARD_URL}/completar-cadastro",
     )
-
-    await _apply_referral_attribution(request, response, user_id)
-    await _apply_prospect_attribution(request, response, user_id)
-    await _apply_quiz_attribution(request, response, user_id)
-
-    # Meta Conversions API — CompleteRegistration (conta criada via Google/Apple).
-    # Background task (roda após a resposta); event_id signup_<uid> casa com o
-    # pixel do /completar-cadastro pro Meta deduplicar.
-    try:
-        from core.services.meta_capi import (
-            capi_configured,
-            registration_event_id,
-            sanitize_fb_cookie,
-            send_event,
-        )
-        if capi_configured():
-            background_tasks.add_task(
-                send_event,
-                event_name="CompleteRegistration",
-                event_id=registration_event_id(user_id),
-                event_time=int(datetime.now(timezone.utc).timestamp()),
-                email=email,
-                fbp=sanitize_fb_cookie(request.cookies.get("_fbp")),
-                fbc=sanitize_fb_cookie(request.cookies.get("_fbc")),
-                event_source_url=f"{DASHBOARD_URL}/completar-cadastro",
-            )
-    except Exception as exc:
-        print(f"[auth] meta capi registration ({provider}) falhou user={user_id}: {exc}")
 
     await log_auth_login_event(
         email,

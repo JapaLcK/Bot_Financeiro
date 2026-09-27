@@ -200,8 +200,8 @@ def consume_pending_google_signup(
     # O e-mail ganhou conta depois do pendente (outra aba, outro provedor): o
     # `on conflict (email)` abaixo fundiria o cadastro nela e a rota abriria
     # sessão sem MFA. Recomeçar leva ao vínculo por e-mail, que passa pelo
-    # `_concluir_login`. Limite: a corrida de milissegundos entre esta busca e
-    # o insert ainda funde.
+    # `_concluir_login`. A corrida entre esta busca e o insert é recusada lá
+    # embaixo, pelo `inserir_conta_nova`.
     if find_user_id_by_email(pending["email"]):
         with get_conn() as conn, conn.cursor() as cur:
             cur.execute("delete from pending_google_signups where token = %s", (token,))
@@ -240,31 +240,9 @@ def consume_pending_google_signup(
     # grava sem telefone. `conn` é o do `with` logo abaixo.
     def _gravar(normalized_phone):
         with conn.cursor() as cur:
-            cur.execute(
-                """
-                insert into auth_accounts
-                  (user_id, email, password_hash, phone_e164, display_name, phone_status,
-                   email_hash, email_enc, phone_hash, phone_enc, display_name_enc, signup_source)
-                values (%s, %s, NULL, %s, %s, 'pending', %s, %s, %s, %s, %s, %s)
-                on conflict (email) do update
-                set phone_e164 = coalesce(auth_accounts.phone_e164, excluded.phone_e164),
-                    display_name = coalesce(auth_accounts.display_name, excluded.display_name),
-                    email_hash = coalesce(auth_accounts.email_hash, excluded.email_hash),
-                    email_enc = coalesce(auth_accounts.email_enc, excluded.email_enc),
-                    phone_hash = coalesce(auth_accounts.phone_hash, excluded.phone_hash),
-                    phone_enc = coalesce(auth_accounts.phone_enc, excluded.phone_enc),
-                    display_name_enc = coalesce(auth_accounts.display_name_enc, excluded.display_name_enc),
-                    -- Preserva a origem da 1ª criação em re-registro do mesmo e-mail
-                    signup_source = coalesce(auth_accounts.signup_source, excluded.signup_source)
-                """,
-                (user_id, email, normalized_phone, name,
-                 hash_pii_optional(email, kind="email"),
-                 encrypt_pii_optional(email),
-                 hash_pii_optional(normalized_phone, kind="phone"),
-                 encrypt_pii_optional(normalized_phone),
-                 encrypt_pii_optional(name),
-                 source),
-            )
+            if not inserir_conta_nova(cur, user_id=user_id, email=email, password_hash=None,
+                                      phone_e164=normalized_phone, display_name=name, source=source):
+                raise ValueError(_CADASTRO_EXPIRADO[provider])
             cur.execute(
                 """
                 insert into auth_identities (user_id, provider, provider_sub,
@@ -280,7 +258,9 @@ def consume_pending_google_signup(
             )
             cur.execute("delete from pending_google_signups where token = %s", (token,))
 
-    from db_support import gravar_descartando_telefone_disputado, invalidate_auth_user_cache
+    from db_support import (
+        gravar_descartando_telefone_disputado, inserir_conta_nova, invalidate_auth_user_cache,
+    )
     with get_conn() as conn:
         gravar_descartando_telefone_disputado(conn, _gravar, normalized_phone)
         conn.commit()
