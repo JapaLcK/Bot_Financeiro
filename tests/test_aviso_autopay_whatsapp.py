@@ -1,24 +1,49 @@
-"""#616 — aviso de vencimento do gasto fixo autopay no WhatsApp.
+"""#616 — aviso de vencimento do gasto fixo autopay no WhatsApp, em TEXTO LIVRE,
+só para quem falou com o Piggy nas últimas 23h (`_JANELA_WA`).
 
-Banco real, `send_template` REAL; só o `requests.post` é trocado (a borda HTTP).
-O relógio entra por `now=` (ou por `rc.now_tz` no loop inteiro).
+Banco real, `send_text` REAL; só o `requests.post` é trocado (a borda HTTP).
+O relógio entra por `now=` (ou por `rc.now_tz` no loop inteiro). A janela abre
+pelo escritor real (`db.update_last_activity`), ou por SQL quando o relógio do
+teste não é o de hoje.
 
 Controles NEGATIVOS declarados (docs/controles_declarados.md) — em
 `db/recurring.py` / `core/services/recurring_charger.py`:
 
-  a. apagar `and rc.due_on = %s` (e o parâmetro `today`) da listagem →
-     vermelho `test_aviso_de_ontem_nao_sai`; voltar ao corte antigo
-     `rc.charged_at >= <meia-noite de hoje>` → vermelho
-     `test_volta_da_meia_noite_com_leitura_falha_nao_sai_atrasado`;
+  janela. apagar `and exists (select 1 from auth_accounts a ...)` da listagem →
+     vermelhos `test_fora_da_janela_nao_envia_nem_reserva[25h]` e `[nula]`;
+     trocar `_JANELA_WA = timedelta(hours=23)` por `hours=24` → vermelho
+     `test_borda_da_janela[23h01]`; tirar `a.user_id = rc.user_id and` do
+     `exists` → vermelho `test_isolamento_so_quem_esta_na_janela_recebe`;
+     `update_last_activity` sem efeito (`UPDATE auth_accounts SET
+     last_activity_at = now()` virando no-op) → vermelho
+     `test_sem_janela_nao_reserva_e_a_mensagem_do_usuario_abre`; checar a
+     janela DEPOIS do claim (tirar o `exists` e pular o envio de quem está fora
+     depois de reservar) → vermelhos no mesmo teste e em
+     `test_fora_da_janela_nao_envia_nem_reserva[25h]` e `[nula]`.
+  interruptor. tirar o `return 0` do `WA_AUTOPAY_NOTICE_ENABLED` → vermelhos
+     `test_interruptor_desligado_nao_le_nem_reserva[ausente]` e `[zero]`.
+  agrupamento. uma mensagem por aviso (voltar a enviar dentro do laço dos
+     avisos) → vermelho `test_dois_gastos_do_mesmo_dia_viram_uma_mensagem`;
+     reservar um por um com `claim_autopay_notices_whatsapp(uid, [id])` →
+     vermelho `test_ticks_concorrentes_nao_dividem_a_mensagem`.
+  marcação. tirar o `wrap_wa_markup` do nome → vermelho
+     `test_loop_real_manda_o_texto_do_aviso`; embrulhar sempre em `*` →
+     vermelho `test_nome_com_marcacao_sai_sem_negrito_e_inteiro`.
+  a. apagar `and rc.due_on = %s` da listagem → vermelho
+     `test_aviso_de_ontem_nao_sai`; voltar ao corte `rc.charged_at >=
+     <meia-noite de hoje>` → vermelhos `test_aviso_de_ontem_nao_sai`,
+     `test_vencimento_mudou_no_mes_avisa_na_data_nova` e
+     `test_vencimento_mudou_depois_do_envio_nao_reagenda` (o
+     `test_volta_da_meia_noite_com_leitura_falha_nao_sai_atrasado` segue verde
+     nessa injeção: a reconferência `_vence_hoje` também o segura);
   b. apagar `rc.launch_id is null and` da listagem →
      vermelho `test_linha_do_cobrador_com_lancamento_nao_sai`;
   c. apagar `and wa_notified_at is null` do UPDATE do claim E da listagem →
      vermelhos `test_dois_ticks_seguidos_mandam_uma_vez` e
      `test_dois_ticks_concorrentes_mandam_uma_vez`;
-  d. trocar o claim por "enviar e depois marcar" (claim depois do laço de
-     `send_template`) → vermelhos `test_dois_ticks_concorrentes_mandam_uma_vez`
-     e `test_sem_telefone_nao_envia_e_consome_o_aviso` (o seguido fica verde:
-     em série, marcar depois basta);
+  d. trocar o claim por "enviar e depois marcar" → vermelhos
+     `test_dois_ticks_concorrentes_mandam_uma_vez` e
+     `test_sem_telefone_nao_envia_e_consome_o_aviso`;
   f. trocar `not get_whatsapp_updates_opt_out(uid)` por `True` →
      vermelho `test_opt_out_nao_recebe`;
   g. trocar `bool(filtrar_por_acesso([uid]))` por `True` →
@@ -26,45 +51,35 @@ Controles NEGATIVOS declarados (docs/controles_declarados.md) — em
      `tests/test_portao_lacos_proativos.py`);
   h. calcular `targets` com `list_identities_by_user(<primeiro user_id da
      listagem>)` → vermelho `test_cada_telefone_recebe_so_o_proprio_aviso`;
-  fonte única: renomear um `{{x}}` de `AUTOPAY_BODY` (ou uma chave de `params`)
-     → vermelho `test_parametros_batem_com_o_template_do_script`;
-  i. recolocar o negrito `*{{gasto}}*` em `AUTOPAY_BODY` →
-     vermelho `test_nome_com_marcacao_vai_cru_e_o_corpo_nao_tem_marcacao`;
-  j. tirar o `[:60]` do `gasto` → vermelho `test_nome_longo_corta_em_60_code_points`;
+  j. tirar o `[:60]` do nome → vermelho `test_nome_longo_corta_em_60_code_points`;
      cortar antes de juntar os espaços → vermelho
      `test_corte_em_60_vem_depois_de_juntar_os_espacos`;
   k. tirar o `try/except ValueError` do `WA_BILL_REMINDER_HOUR` →
      vermelho `test_hora_invalida_vale_o_padrao[nove]`; tirar a checagem de
      faixa 0..23 → vermelho `[-1]` e `[25]`;
-  crase em volta de `{{gasto}}` no `AUTOPAY_BODY` → vermelho
-     `test_nome_com_marcacao_vai_cru_e_o_corpo_nao_tem_marcacao`.
-  l. mover o claim para antes do `try` da leitura de acesso/opt-out (ou seguir
-     com `ok=True` no except) → vermelho
-     `test_leitura_que_falha_nao_reserva_e_a_proxima_hora_envia` (os dois).
-  m. no loop, voltar a ler o relógio em cada passo (sync e notify sem argumento)
-     → vermelho `test_volta_que_cruza_a_meia_noite_envia_o_aviso_do_dia`.
-  n. no notify, apagar a reconferência `if not _vence_hoje(row, now.date()):
-     continue` → vermelhos `test_editado_depois_da_gravacao_nao_avisa[due_day]`
-     e `[daily]`; tirar `and r.amount > 0` da listagem → vermelho `[valor_zero]`;
-  o. voltar a ler `rc.amount` (retrato da gravação) em vez de `r.amount` →
-     vermelho `test_valor_editado_depois_da_gravacao_vai_o_novo`.
+  l. mover o claim para antes do `try` da leitura de acesso/opt-out →
+     vermelho `test_leitura_que_falha_nao_reserva_e_a_proxima_hora_envia` (os dois);
+  m. no loop, voltar a ler o relógio em cada passo → vermelho
+     `test_volta_que_cruza_a_meia_noite_envia_o_aviso_do_dia`;
+  n. no notify, apagar a reconferência `_vence_hoje` → vermelhos
+     `test_editado_depois_da_gravacao_nao_avisa[due_day]` e `[daily]`; tirar
+     `and r.amount > 0` da listagem → vermelho `[valor_zero]`;
+  o. voltar a ler `rc.amount` em vez de `r.amount` → vermelho
+     `test_valor_editado_depois_da_gravacao_vai_o_novo`;
   p. no upsert de `ensure_autopay_notice`, voltar a `do nothing` → vermelho
      `test_vencimento_mudou_no_mes_avisa_na_data_nova`; tirar
      `wa_notified_at is null` do WHERE → vermelho
-     `test_vencimento_mudou_depois_do_envio_nao_reagenda` (pela linha, não
-     pelo envio); tirar `launch_id is null` → vermelho
-     `test_linha_do_cobrador_no_mesmo_mes_nao_e_tocada`.
-Positivo: `test_loop_real_manda_um_aviso_por_gasto_conta_e_cartao` e o segundo
-passo de `test_antes_da_hora_nao_reserva_e_depois_envia` seguem verdes nas injeções.
+     `test_vencimento_mudou_depois_do_envio_nao_reagenda`; tirar
+     `launch_id is null` → vermelho `test_linha_do_cobrador_no_mesmo_mes_nao_e_tocada`.
+Positivos (o caminho legítimo): `test_loop_real_manda_o_texto_do_aviso`, o
+segundo passo de `test_sem_janela_nao_reserva_e_a_mensagem_do_usuario_abre`,
+`test_borda_da_janela[22h59]` e `test_dois_telefones_do_mesmo_usuario_recebem`.
 """
 from __future__ import annotations
 
-import importlib.util
-import re
 import time
 from concurrent.futures import ThreadPoolExecutor
 from datetime import date, timedelta
-from pathlib import Path
 
 import pytest
 
@@ -72,16 +87,18 @@ import core.services.recurring_charger as rc
 import db
 import db.recurring as dbr
 from _billing_grants_helpers import garantir_system_event_logs
-from conftest import promote_to_pro
+from conftest import promote_to_pro, usuario_pagante
 from core.observability import recent_event_exists
 from db.recurring import create_recurring_expense, update_recurring_expense
 from db_support import invalidate_auth_user_cache
+from test_bill_amount_pending import _manda_texto_no_wa
 from test_recorrente_so_preve import _um_tick
 from utils_date import now_tz
 
 _FONE_A = "5511999961601"
 _FONE_B = "5511999961602"
 _EVENTO = "whatsapp_autopay_notice_sent"
+_RODAPE = "\n\n💡É só um lembrete: não lancei nada no app."
 
 
 @pytest.fixture(autouse=True)
@@ -107,8 +124,7 @@ def _armar(monkeypatch, status: int = 200, atraso: float = 0.0) -> list[dict]:
 
     monkeypatch.setenv("WA_TOKEN", "tok")
     monkeypatch.setenv("WA_PHONE_NUMBER_ID", "123")
-    monkeypatch.setenv("WA_AUTOPAY_NOTICE_TEMPLATE_NAME", "aviso_gasto_fixo")
-    monkeypatch.delenv("WA_PROACTIVE_TEMPLATE_LANGUAGE", raising=False)
+    monkeypatch.setenv("WA_AUTOPAY_NOTICE_ENABLED", "1")
     monkeypatch.delenv("WA_BILL_REMINDER_HOUR", raising=False)
     monkeypatch.setattr("requests.post", _post)
     return posts
@@ -118,11 +134,18 @@ def _as(hora: int):
     return now_tz().replace(hour=hora, minute=0, second=0, microsecond=0)
 
 
-def _dono(uid: int, fone: str | None) -> int:
+def _dono(uid: int, fone: str | None, janela: bool = True) -> int:
     promote_to_pro(uid)
     if fone:
         db.bind_identity("whatsapp", fone, uid)
+    if janela:
+        db.update_last_activity(uid)  # "falou com o Piggy agora"
     return uid
+
+
+def _janela(uid: int, quando) -> None:
+    """Última atividade num instante do relógio do teste (quando não é hoje)."""
+    _sql("update auth_accounts set last_activity_at=%s where user_id=%s", (quando, uid))
 
 
 def _gasto(uid: int, nome: str, valor: float = 55.9, tipo: str = "account") -> dict:
@@ -141,8 +164,8 @@ def _para(posts: list[dict], fone: str) -> list[dict]:
     return [p for p in posts if p["to"] == fone]
 
 
-def _params(post: dict) -> dict[str, str]:
-    return {p["parameter_name"]: p["text"] for p in post["template"]["components"][0]["parameters"]}
+def _corpos(posts: list[dict], fone: str) -> list[str]:
+    return [p["text"]["body"] for p in _para(posts, fone)]
 
 
 def _sql(sql: str, args: tuple) -> None:
@@ -158,26 +181,178 @@ def _reservados(uid: int) -> int:
         return int(cur.fetchone()["n"])
 
 
-def test_loop_real_manda_um_aviso_por_gasto_conta_e_cartao(user_id, monkeypatch):
+def test_loop_real_manda_o_texto_do_aviso(user_id, monkeypatch):
     posts = _armar(monkeypatch)
     _dono(user_id, _FONE_A)
     _gasto(user_id, "Netflix Q616", 55.9, "account")
-    _gasto(user_id, "Spotify Q616", 21.9, "credit_card")
     monkeypatch.setattr(rc, "now_tz", lambda: _as(10))
 
     _um_tick(monkeypatch)
 
-    meus = _para(posts, _FONE_A)
-    assert sorted((_params(p)["gasto"], _params(p)["valor"], _params(p)["meio"]) for p in meus) == [
-        ("Netflix Q616", "R$ 55,90", "débito na conta"),
-        ("Spotify Q616", "R$ 21,90", "cobrança no cartão"),
-    ]
-    for p in meus:
-        assert p["template"]["name"] == "aviso_gasto_fixo"
-        assert p["template"]["language"]["code"] == "pt_BR"
-        assert [c["type"] for c in p["template"]["components"]] == ["body"]  # sem botão
-    assert _reservados(user_id) == 2
+    [post] = _para(posts, _FONE_A)
+    assert post["type"] == "text" and "template" not in post
+    assert post["text"]["body"] == (
+        "🐷 Hoje vence o seu gasto fixo *Netflix Q616*, de R$ 55,90, com débito na conta." + _RODAPE)
+    assert _reservados(user_id) == 1
     assert recent_event_exists(_EVENTO, user_id, 1) is True
+
+
+def test_dois_gastos_do_mesmo_dia_viram_uma_mensagem(user_id, monkeypatch):
+    posts = _armar(monkeypatch)
+    _dono(user_id, _FONE_A)
+    _gasto(user_id, "Netflix Q616", 55.9, "account")
+    _gasto(user_id, "Spotify Q616", 21.9, "credit_card")
+
+    _rodar()
+
+    [corpo] = _corpos(posts, _FONE_A)
+    cab = "🐷 Hoje vencem 2 gastos fixos seus:"
+    net = "• *Netflix Q616*, R$ 55,90, débito na conta"
+    spo = "• *Spotify Q616*, R$ 21,90, cobrança no cartão"
+    # A ordem é a de `rc.id`, que depende da ordem em que a sync gravou.
+    assert corpo in {f"{cab}\n{a}\n{b}{_RODAPE}" for a, b in [(net, spo), (spo, net)]}, corpo
+    assert _reservados(user_id) == 2
+
+
+def test_ticks_concorrentes_nao_dividem_a_mensagem(user_id, monkeypatch):
+    """Quem reserva algo segura a vez por 0,3s antes da próxima reserva: com o
+    claim em lote isso não abre brecha; com o claim um por um, o segundo
+    processo pega o 2º aviso no meio e a mensagem sai partida em duas."""
+    posts = _armar(monkeypatch)
+    _dono(user_id, _FONE_A)
+    _gasto(user_id, "Luz Q616", 90.0)
+    _gasto(user_id, "Agua Q616", 40.0)
+    rc.sync_autopay_notices_once()
+
+    real = dbr.claim_autopay_notices_whatsapp
+
+    def _lento(uid, ids):
+        reservados = real(uid, ids)
+        if reservados:
+            time.sleep(0.3)
+        return reservados
+
+    monkeypatch.setattr(dbr, "claim_autopay_notices_whatsapp", _lento)
+    with ThreadPoolExecutor(2) as pool:
+        for f in [pool.submit(rc.notify_autopay_notices_whatsapp_once, now=_as(10)) for _ in range(2)]:
+            f.result()
+
+    [corpo] = _corpos(posts, _FONE_A)
+    assert "Luz Q616" in corpo and "Agua Q616" in corpo
+    assert _reservados(user_id) == 2
+
+
+def test_sem_janela_nao_reserva_e_a_mensagem_do_usuario_abre(monkeypatch):
+    """Sem conversa, nada sai nem é reservado; uma mensagem de texto real pelo
+    `process_message` abre a janela e a volta seguinte manda."""
+    posts = _armar(monkeypatch)
+    import core.services.ai_chat as AC
+    monkeypatch.setattr(AC, "chat", lambda uid, text, **kw: "[IA]")  # nada de LLM
+    uid = usuario_pagante()
+    db.bind_identity("whatsapp", _FONE_A, uid)
+    _gasto(uid, "Janela Q616")
+
+    _rodar(10)
+    assert _para(posts, _FONE_A) == [] and _reservados(uid) == 0
+
+    _manda_texto_no_wa(monkeypatch, uid, "oi piggy")
+    _rodar(11)
+    assert len(_para(posts, _FONE_A)) == 1 and _reservados(uid) == 1
+
+
+@pytest.mark.parametrize("atividade", [timedelta(hours=25), None], ids=["25h", "nula"])
+def test_fora_da_janela_nao_envia_nem_reserva(user_id, monkeypatch, atividade):
+    posts = _armar(monkeypatch)
+    _dono(user_id, _FONE_A, janela=False)
+    _janela(user_id, _as(10) - atividade if atividade else None)
+    _gasto(user_id, "Fora Q616")
+
+    _rodar(10)
+
+    assert _para(posts, _FONE_A) == [] and _reservados(user_id) == 0
+
+
+@pytest.mark.parametrize("atras, envios", [(timedelta(hours=22, minutes=59), 1),
+                                           (timedelta(hours=23, minutes=1), 0)],
+                         ids=["22h59", "23h01"])
+def test_borda_da_janela(user_id, monkeypatch, atras, envios):
+    posts = _armar(monkeypatch)
+    _dono(user_id, _FONE_A, janela=False)
+    _janela(user_id, _as(10) - atras)
+    _gasto(user_id, "Borda Q616")
+
+    _rodar(10)
+
+    assert len(_para(posts, _FONE_A)) == envios and _reservados(user_id) == envios
+
+
+def test_isolamento_so_quem_esta_na_janela_recebe(user_id, monkeypatch):
+    from conftest import _cleanup_user
+    posts = _armar(monkeypatch)
+    outro = user_id + 1
+    try:
+        db.ensure_user(outro)
+        _dono(user_id, _FONE_A)
+        _dono(outro, _FONE_B, janela=False)
+        _gasto(user_id, "Do A Q616")
+        _gasto(outro, "Do B Q616")
+
+        _rodar()
+
+        [corpo] = _corpos(posts, _FONE_A)
+        assert "Do A Q616" in corpo and "Do B" not in corpo
+        assert _para(posts, _FONE_B) == [] and _reservados(outro) == 0
+    finally:
+        _cleanup_user(outro)
+
+
+def test_dois_telefones_do_mesmo_usuario_recebem(user_id, monkeypatch):
+    """Teto aceito (a janela é do usuário, não do telefone): os dois recebem."""
+    posts = _armar(monkeypatch)
+    _dono(user_id, _FONE_A)
+    db.bind_identity("whatsapp", _FONE_B, user_id)
+    _gasto(user_id, "Dois Fones Q616")
+
+    assert _rodar() == 2
+
+    assert len(_para(posts, _FONE_A)) == 1 and len(_para(posts, _FONE_B)) == 1
+
+
+@pytest.mark.parametrize("status", [400, 401])
+def test_envio_recusado_nao_levanta_e_nao_reenvia(user_id, monkeypatch, status):
+    """400 levanta dentro do `send_text`, 401 devolve None: os dois só logam."""
+    posts = _armar(monkeypatch, status=status)
+    _dono(user_id, _FONE_A)
+    _gasto(user_id, "Recusa Q616")
+
+    assert _rodar() == 0
+    assert len(_para(posts, _FONE_A)) == 1  # tentou uma vez
+    assert recent_event_exists(_EVENTO, user_id, 1) is False
+    assert _reservados(user_id) == 1
+
+    _rodar(11)
+    assert len(_para(posts, _FONE_A)) == 1
+
+
+@pytest.mark.parametrize("valor", [None, "0"], ids=["ausente", "zero"])
+def test_interruptor_desligado_nao_le_nem_reserva(user_id, monkeypatch, valor):
+    posts = _armar(monkeypatch)
+    if valor is None:
+        monkeypatch.delenv("WA_AUTOPAY_NOTICE_ENABLED")
+    else:
+        monkeypatch.setenv("WA_AUTOPAY_NOTICE_ENABLED", valor)
+    _dono(user_id, _FONE_A)
+    _gasto(user_id, "Desligado Q616")
+    rc.sync_autopay_notices_once()
+
+    def _leu(*a, **k):
+        raise AssertionError("leu o banco com o interruptor desligado")
+
+    monkeypatch.setattr(dbr, "list_autopay_notices_for_whatsapp", _leu)
+    assert rc.notify_autopay_notices_whatsapp_once(now=_as(10)) == 0
+
+    assert posts == []
+    assert _reservados(user_id) == 0
 
 
 def test_volta_que_cruza_a_meia_noite_envia_o_aviso_do_dia(user_id, monkeypatch):
@@ -193,6 +368,7 @@ def test_volta_que_cruza_a_meia_noite_envia_o_aviso_do_dia(user_id, monkeypatch)
     gravar = dbr.ensure_autopay_notice
     monkeypatch.setattr(dbr, "ensure_autopay_notice", lambda *a: virou.append(1) or gravar(*a))
     d = _as(23).replace(minute=59, second=59)
+    _janela(user_id, d)
     monkeypatch.setattr(rc, "now_tz", lambda: d + timedelta(seconds=6) if virou else d)
 
     _um_tick(monkeypatch)
@@ -204,16 +380,16 @@ def test_volta_que_cruza_a_meia_noite_envia_o_aviso_do_dia(user_id, monkeypatch)
 def test_volta_da_meia_noite_com_leitura_falha_nao_sai_atrasado(user_id, monkeypatch):
     """A volta de D cruza a meia-noite (a linha nasce com `charged_at` de D+1) e a
     leitura de opt-out falha nela (fail-closed, sem reserva). Às 9h de D+1 o
-    aviso de D NÃO sai dizendo "Hoje vence" um dia depois.
-
-    Controle negativo: filtrar por `rc.charged_at >= <meia-noite de hoje>` em vez
-    de `rc.due_on = %s` → 1 envio na volta das 9h: vermelho."""
+    aviso de D NÃO sai dizendo "Hoje vence" um dia depois (a janela segue aberta).
+    Seguram isso o `rc.due_on = %s` e a reconferência `_vence_hoje`, cada um
+    sozinho."""
     posts = _armar(monkeypatch)
     _dono(user_id, _FONE_A)
     _gasto(user_id, "Atrasado Q616")
 
     d = _as(23).replace(minute=59, second=59)
     depois = d + timedelta(seconds=6)
+    _janela(user_id, d)
     virou = []
     gravar = dbr.ensure_autopay_notice
 
@@ -298,7 +474,7 @@ def test_sem_telefone_nao_envia_e_consome_o_aviso(user_id, monkeypatch):
 
     _rodar()
 
-    assert [p for p in posts if _params(p)["gasto"] == "SemFone Q616"] == []
+    assert [p for p in posts if "SemFone Q616" in p["text"]["body"]] == []
     assert _reservados(user_id) == 1
 
 
@@ -338,22 +514,12 @@ def test_cada_telefone_recebe_so_o_proprio_aviso(user_id, monkeypatch):
 
         _rodar()
 
-        assert [_params(p)["gasto"] for p in _para(posts, _FONE_A)] == ["Do A Q616"]
-        assert [_params(p)["gasto"] for p in _para(posts, _FONE_B)] == ["Do B Q616"]
+        [a] = _corpos(posts, _FONE_A)
+        [b] = _corpos(posts, _FONE_B)
+        assert "Do A Q616" in a and "Do B" not in a
+        assert "Do B Q616" in b and "Do A" not in b
     finally:
         _cleanup_user(outro)
-
-
-def test_sem_env_nao_le_nem_reserva(user_id, monkeypatch):
-    posts = _armar(monkeypatch)
-    monkeypatch.delenv("WA_AUTOPAY_NOTICE_TEMPLATE_NAME")
-    _dono(user_id, _FONE_A)
-    _gasto(user_id, "SemEnv Q616")
-
-    assert _rodar() == 0
-
-    assert posts == []
-    assert _reservados(user_id) == 0
 
 
 def test_antes_da_hora_nao_reserva_e_depois_envia(user_id, monkeypatch):
@@ -376,58 +542,21 @@ def test_nome_com_quebra_e_tab_vira_uma_linha(user_id, monkeypatch):
 
     _rodar()
 
-    assert [_params(p)["gasto"] for p in _para(posts, _FONE_A)] == ["Aluguel apto"]
+    [corpo] = _corpos(posts, _FONE_A)
+    assert "gasto fixo *Aluguel apto*, de" in corpo
 
 
-def test_401_nao_levanta_nem_registra_envio(user_id, monkeypatch):
-    posts = _armar(monkeypatch, status=401)
-    _dono(user_id, _FONE_A)
-    _gasto(user_id, "Token Q616")
-
-    assert _rodar() == 0
-
-    assert len(_para(posts, _FONE_A)) == 1  # tentou uma vez
-    assert recent_event_exists(_EVENTO, user_id, 1) is False
-
-
-def _script(monkeypatch):
-    caminho = Path(__file__).resolve().parent.parent / "scripts" / "create_whatsapp_report_templates.py"
-    spec = importlib.util.spec_from_file_location("_templates_616", caminho)
-    script = importlib.util.module_from_spec(spec)
-    # O script faz `load_dotenv(.env)` no import: num checkout com `.env` real isso
-    # poria o WA_TOKEN de verdade no `os.environ` do resto da suíte.
-    monkeypatch.setattr("dotenv.load_dotenv", lambda *a, **k: None)
-    spec.loader.exec_module(script)
-    return script
-
-
-def test_parametros_batem_com_o_template_do_script(user_id, monkeypatch):
-    """§0.7: o nome dos parâmetros vive no script (Meta) e no envio; os dois têm de bater."""
-    script = _script(monkeypatch)
-    posts = _armar(monkeypatch)
-    _dono(user_id, _FONE_A)
-    _gasto(user_id, "Fonte Q616")
-
-    _rodar()
-
-    [post] = _para(posts, _FONE_A)
-    no_corpo = set(re.findall(r"\{\{(\w+)\}\}", script.AUTOPAY_BODY))
-    assert no_corpo == set(script.AUTOPAY_EXAMPLES) == set(_params(post))
-
-
-def test_nome_com_marcacao_vai_cru_e_o_corpo_nao_tem_marcacao(user_id, monkeypatch):
-    """#276: o template não decide embrulho por argumento, então o corpo não tem
-    marcação nenhuma e o nome vai como o usuário escreveu (decisão do dono)."""
-    script = _script(monkeypatch)
+def test_nome_com_marcacao_sai_sem_negrito_e_inteiro(user_id, monkeypatch):
+    """#276: o WhatsApp não tem escape; nome que já tem marcação vai sem o
+    negrito do bot, inteiro (espaços juntados)."""
     posts = _armar(monkeypatch)
     _dono(user_id, _FONE_A)
     _gasto(user_id, "Cartão *Premium*  _x_ ~y~")
 
     _rodar()
 
-    assert [_params(p)["gasto"] for p in _para(posts, _FONE_A)] == ["Cartão *Premium* _x_ ~y~"]
-    fora_das_variaveis = re.sub(r"\{\{\w+\}\}", "", script.AUTOPAY_BODY)
-    assert not set("*_~`") & set(fora_das_variaveis), fora_das_variaveis
+    [corpo] = _corpos(posts, _FONE_A)
+    assert "gasto fixo Cartão *Premium* _x_ ~y~, de R$ 55,90" in corpo
 
 
 def test_nome_longo_corta_em_60_code_points(user_id, monkeypatch):
@@ -438,8 +567,8 @@ def test_nome_longo_corta_em_60_code_points(user_id, monkeypatch):
 
     _rodar()
 
-    [gasto] = [_params(p)["gasto"] for p in _para(posts, _FONE_A)]
-    assert len(gasto) == 60 and gasto == nome[:60]
+    [corpo] = _corpos(posts, _FONE_A)
+    assert f"gasto fixo *{nome[:60]}*, de" in corpo
 
 
 def test_corte_em_60_vem_depois_de_juntar_os_espacos(user_id, monkeypatch):
@@ -450,7 +579,8 @@ def test_corte_em_60_vem_depois_de_juntar_os_espacos(user_id, monkeypatch):
 
     _rodar()
 
-    assert [_params(p)["gasto"] for p in _para(posts, _FONE_A)] == ["A" * 55 + " " + "B" * 4]
+    [corpo] = _corpos(posts, _FONE_A)
+    assert f"gasto fixo *{'A' * 55} {'B' * 4}*, de" in corpo
 
 
 @pytest.mark.parametrize("hora", ["nove", "-1", "25"])
@@ -471,9 +601,6 @@ def test_hora_invalida_vale_o_padrao(user_id, monkeypatch, hora):
                                   "core.reports.reports_daily.filtrar_por_acesso"])
 def test_leitura_que_falha_nao_reserva_e_a_proxima_hora_envia(user_id, monkeypatch, alvo):
     """Fail-closed: leitura de acesso/opt-out que levanta não envia NEM reserva.
-
-    Controle negativo: mover o claim para antes do `try` da leitura (ou trocar o
-    `continue` do except por seguir com `ok=True`) → vermelho nos dois parâmetros.
     Positivo: a volta seguinte, sem a falha, envia 1 vez."""
     posts = _armar(monkeypatch)
     _dono(user_id, _FONE_A)
@@ -500,10 +627,7 @@ def test_editado_depois_da_gravacao_nao_avisa(user_id, monkeypatch, edicao):
     """A sync gravou o aviso de hoje; antes da hora de envio o usuário muda o
     vencimento (ou a frequência pra diário). O notify reconfere no recorrente
     ATUAL: 0 envios e nada reservado. Valor 0 (só por SQL; a edição recusa)
-    também não é aviso, como na sync.
-
-    Controle negativo: tirar a reconferência `_vence_hoje` do notify → 1 envio
-    em `due_day` e `daily`; tirar `r.amount > 0` da listagem → 1 em `valor_zero`."""
+    também não é aviso, como na sync."""
     posts = _armar(monkeypatch)
     _dono(user_id, _FONE_A)
     rec = _gasto(user_id, "Editado Q616")
@@ -522,7 +646,6 @@ def test_editado_depois_da_gravacao_nao_avisa(user_id, monkeypatch, edicao):
 
 
 def test_valor_editado_depois_da_gravacao_vai_o_novo(user_id, monkeypatch):
-    """Controle negativo: ler `rc.amount` (o retrato da gravação) → "R$ 55,90": vermelho."""
     posts = _armar(monkeypatch)
     _dono(user_id, _FONE_A)
     rec = _gasto(user_id, "Reajuste Q616", 55.9)
@@ -531,7 +654,8 @@ def test_valor_editado_depois_da_gravacao_vai_o_novo(user_id, monkeypatch):
 
     rc.notify_autopay_notices_whatsapp_once(now=_as(10))
 
-    assert [_params(p)["valor"] for p in _para(posts, _FONE_A)] == ["R$ 61,50"]
+    [corpo] = _corpos(posts, _FONE_A)
+    assert ", de R$ 61,50, com" in corpo
 
 
 # ── Vencimento mudou no meio do mês (achado do Codex no #647) ─────────────────
@@ -546,6 +670,8 @@ def _em(dia: date, hora: int = 10):
 
 
 def _mensal_dia_5(uid: int, nome: str) -> dict:
+    # Atividade no dia 20: a janela fica aberta nas voltas do dia 5 e do dia 20.
+    _janela(uid, _em(_D20))
     return create_recurring_expense(uid, nome, 55.9, "assinaturas", 5, "account",
                                     start_date=date(2026, 9, 1))
 
@@ -560,8 +686,6 @@ def _linha(uid: int) -> dict:
 
 
 def test_vencimento_mudou_no_mes_avisa_na_data_nova(user_id, monkeypatch):
-    """Controle negativo: voltar o `on conflict ... do update` para `do nothing`
-    → a linha fica com due_on=dia 5 e o dia 20 manda 0: vermelho."""
     posts = _armar(monkeypatch)
     _dono(user_id, _FONE_A)
     rec = _mensal_dia_5(user_id, "Muda Dia Q616")
@@ -579,12 +703,8 @@ def test_vencimento_mudou_no_mes_avisa_na_data_nova(user_id, monkeypatch):
 
 def test_vencimento_mudou_depois_do_envio_nao_reagenda(user_id, monkeypatch):
     """O aviso do dia 5 já saiu no WhatsApp; o vencimento muda para o dia 20 no
-    mesmo mês: nada é reenviado e a linha fica como estava (due_on=dia 5).
-
-    Controle negativo: tirar `wa_notified_at is null` do WHERE do upsert → a
-    linha passa para due_on=dia 20: vermelho na asserção da linha. O ENVIO
-    segue 0 com a injeção (a listagem também exige `wa_notified_at is null`),
-    então quem discrimina é a linha, não a contagem de posts."""
+    mesmo mês: nada é reenviado e a linha fica como estava (due_on=dia 5). Quem
+    discrimina o controle é a linha, não a contagem de posts."""
     posts = _armar(monkeypatch)
     _dono(user_id, _FONE_A)
     rec = _mensal_dia_5(user_id, "Ja Avisado Q616")
@@ -602,11 +722,6 @@ def test_vencimento_mudou_depois_do_envio_nao_reagenda(user_id, monkeypatch):
 
 
 def test_linha_do_cobrador_no_mesmo_mes_nao_e_tocada(user_id, monkeypatch):
-    """Linha do cobrador antigo (com lançamento, sem due_on) no mesmo `ym`: a
-    sync do dia do vencimento não a altera nem avisa.
-
-    Controle negativo: tirar `launch_id is null` do WHERE do upsert → due_on e
-    charged_at mudam: vermelho."""
     posts = _armar(monkeypatch)
     _dono(user_id, _FONE_A)
     rec = _mensal_dia_5(user_id, "Cobrador Q616")

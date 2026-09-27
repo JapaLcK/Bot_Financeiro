@@ -7,11 +7,6 @@ Monta e registra na Meta (WhatsApp Cloud API) os templates dos resumos
 
     {{periodo}} {{saldo}} {{gastos}} {{receita}} {{lancamentos}}
 
-e o do **aviso de gasto fixo autopay** (`--only autopay`), que o bot envia em
-`core/services/recurring_charger.py` (`notify_autopay_notices_whatsapp_once`):
-
-    {{gasto}} {{valor}} {{meio}}
-
 Como o código envia **parâmetros nomeados**, o template PRECISA ser criado com
 `example.body_text_named_params` (parâmetros nomeados), e não posicionais
 (`{{1}}`, `{{2}}`, ...). Este script já monta assim.
@@ -28,7 +23,6 @@ Uso:
   # Só um deles:
   python scripts/create_whatsapp_report_templates.py --only weekly
   python scripts/create_whatsapp_report_templates.py --only monthly
-  python scripts/create_whatsapp_report_templates.py --only autopay
 
   # Com o botão de resposta rápida "Desligar resumo" (quick reply):
   python scripts/create_whatsapp_report_templates.py --stop-button
@@ -39,7 +33,6 @@ Env vars usadas:
   WA_GRAPH_VERSION               — ex.: v25.0 (default v21.0)
   WA_WEEKLY_TEMPLATE_NAME        — nome do template semanal (default resumo_semanal)
   WA_MONTHLY_TEMPLATE_NAME       — nome do template mensal  (default resumo_mensal)
-  WA_AUTOPAY_NOTICE_TEMPLATE_NAME — nome do aviso de gasto fixo (default aviso_gasto_fixo)
   WA_PROACTIVE_TEMPLATE_LANGUAGE — idioma (default pt_BR)
 
 Depois de APROVADO pela Meta, basta setar WA_WEEKLY_TEMPLATE_NAME /
@@ -67,7 +60,6 @@ import requests
 
 DEFAULT_WEEKLY_NAME = "resumo_semanal"
 DEFAULT_MONTHLY_NAME = "resumo_mensal"
-DEFAULT_AUTOPAY_NAME = "aviso_gasto_fixo"
 DEFAULT_LANGUAGE = "pt_BR"
 
 # payload que o bot usa no botão quick reply para desligar cada resumo
@@ -95,23 +87,7 @@ MONTHLY_BODY = (
     "📊 Lançamentos do mês: {{lancamentos}}"
 )
 
-# aviso de gasto fixo autopay — os nomes têm de bater com os `params` de
-# notify_autopay_notices_whatsapp_once (tests/test_aviso_autopay_whatsapp.py compara).
-# Sem `*`/`_`/`~` no corpo: o `{{gasto}}` é o nome que o usuário digitou, e
-# marcação dele casaria com a do template (mesma classe da #276).
-AUTOPAY_BODY = (
-    "Hoje vence o seu gasto fixo {{gasto}}, de {{valor}}, com {{meio}}.\n"
-    "\n"
-    "🐷 É só um lembrete do Piggy: não lancei nada no app."
-)
-
 # exemplos exigidos pela Meta (um por variável nomeada)
-AUTOPAY_EXAMPLES = {
-    "gasto": "Netflix",
-    "valor": "R$ 55,90",
-    "meio": "cobrança no cartão",
-}
-
 WEEKLY_EXAMPLES = {
     "periodo": "27/07/2026 a 02/08/2026",
     "saldo": "R$ 1.000,00",
@@ -203,7 +179,7 @@ def create_template(waba_id: str, token: str, base: str, payload: dict) -> tuple
 def main() -> None:
     parser = argparse.ArgumentParser(description="Cria os templates de resumo (semanal/mensal) na Meta.")
     parser.add_argument("--dry-run", action="store_true", help="Só imprime os payloads, não chama a Meta")
-    parser.add_argument("--only", choices=["weekly", "monthly", "autopay"], help="Cria apenas um dos templates")
+    parser.add_argument("--only", choices=["weekly", "monthly"], help="Cria apenas um dos templates")
     parser.add_argument(
         "--stop-button",
         action="store_true",
@@ -212,7 +188,6 @@ def main() -> None:
     )
     parser.add_argument("--weekly-name", default=_env("WA_WEEKLY_TEMPLATE_NAME", default=DEFAULT_WEEKLY_NAME))
     parser.add_argument("--monthly-name", default=_env("WA_MONTHLY_TEMPLATE_NAME", default=DEFAULT_MONTHLY_NAME))
-    parser.add_argument("--autopay-name", default=_env("WA_AUTOPAY_NOTICE_TEMPLATE_NAME", default=DEFAULT_AUTOPAY_NAME))
     parser.add_argument("--language", default=_env("WA_PROACTIVE_TEMPLATE_LANGUAGE", default=DEFAULT_LANGUAGE))
     args = parser.parse_args()
 
@@ -244,22 +219,6 @@ def main() -> None:
                     examples=MONTHLY_EXAMPLES,
                     language=language,
                     stop_button_payload=WA_MONTHLY_REPORT_DISABLE_ID if args.stop_button else None,
-                ),
-            )
-        )
-
-    if args.only in (None, "autopay"):
-        specs.append(
-            (
-                "autopay",
-                build_template_payload(
-                    name=args.autopay_name,
-                    header_text="Gasto fixo de hoje",
-                    body_text=AUTOPAY_BODY,
-                    examples=AUTOPAY_EXAMPLES,
-                    language=language,
-                    stop_button_payload=None,
-                    footer_text="PigBank",
                 ),
             )
         )
@@ -298,7 +257,6 @@ def main() -> None:
     print("Aguarde a aprovação da Meta e então configure as env vars no bot:")
     print(f"  WA_WEEKLY_TEMPLATE_NAME={args.weekly_name}")
     print(f"  WA_MONTHLY_TEMPLATE_NAME={args.monthly_name}")
-    print(f"  WA_AUTOPAY_NOTICE_TEMPLATE_NAME={args.autopay_name}")
 
 
 if __name__ == "__main__":

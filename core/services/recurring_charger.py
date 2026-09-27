@@ -6,9 +6,10 @@ cria as `bill_instances` do próximo ciclo dos recorrentes `payment_mode='manual
 (é delas que sai o lembrete de vencimento), e `sync_autopay_notices_once` grava
 em `recurring_charges`, SEM lançamento, o aviso do autopay que vence hoje (o
 banner do dashboard mostra "dia de débito no banco"). Não debita nada.
-Logo depois, `notify_autopay_notices_whatsapp_once` manda cada aviso NOVO uma
-vez só pro WhatsApp do dono (template `WA_AUTOPAY_NOTICE_TEMPLATE_NAME`; sem a
-env, não faz nada).
+Logo depois, `notify_autopay_notices_whatsapp_once` manda os avisos NOVOS do dia
+uma vez só pro WhatsApp do dono, numa mensagem de texto livre por usuário, só
+para quem falou com o Piggy nas últimas 23h (`WA_AUTOPAY_NOTICE_ENABLED`; sem
+a env, não faz nada).
 
 Recorrente só PREVÊ (docs/plano-dashboard-v2.md, Q42): gasto fixo e receita
 recorrente entram na Previsão (`core/services/cashflow.py`) e nunca são lançados
@@ -188,16 +189,40 @@ def sync_autopay_notices_once(today: date | None = None) -> int:
     return n
 
 
-def notify_autopay_notices_whatsapp_once(now: datetime | None = None) -> int:
-    """Manda pro WhatsApp do DONO cada aviso de autopay de hoje ainda não
-    reservado, a partir de WA_BILL_REMINDER_HOUR. Reserva ANTES de enviar (no
-    máximo uma tentativa; falha não desfaz): sem acesso, opt-out ou sem telefone
-    também consomem o aviso. Retorna quantos destinos aceitaram."""
-    from core.services.open_finance_proactive import _template_cfg
+# Janela de 24h da Meta para texto livre, com 1h de folga.
+# ponytail: por usuário (last_activity_at), não por telefone; upgrade = coluna em user_identities.
+# Só o `handle_incoming` escreve essa coluna (texto e áudio): quem só aperta
+# botão, lista ou manda imagem fica fora da janela — erra para o lado seguro.
+_JANELA_WA = timedelta(hours=23)
 
-    cfg = _template_cfg("WA_AUTOPAY_NOTICE_TEMPLATE_NAME")
-    if not cfg:
-        return 0  # dormente: template Meta ainda não configurado
+
+def _mensagem_autopay(avisos: list[dict]) -> str:
+    """Texto aprovado pelo dono: singular com 1 aviso, lista com 2+."""
+    from core.response_formatter import wrap_wa_markup
+    from utils_text import fmt_brl
+
+    def partes(a: dict) -> tuple[str, str, str]:
+        nome = " ".join(str(a["name"] or "").split())[:60] or "seu gasto fixo"
+        meio = "cobrança no cartão" if a["payment_type"] == "credit_card" else "débito na conta"
+        return wrap_wa_markup(nome), fmt_brl(float(a["amount"])), meio
+
+    rodape = "\n\n💡É só um lembrete: não lancei nada no app."
+    if len(avisos) == 1:
+        nome, valor, meio = partes(avisos[0])
+        return f"🐷 Hoje vence o seu gasto fixo {nome}, de {valor}, com {meio}.{rodape}"
+    linhas = "\n".join("• {}, {}, {}".format(*partes(a)) for a in avisos)
+    return f"🐷 Hoje vencem {len(avisos)} gastos fixos seus:\n{linhas}{rodape}"
+
+
+def notify_autopay_notices_whatsapp_once(now: datetime | None = None) -> int:
+    """Manda pro WhatsApp do DONO os avisos de autopay de hoje ainda não
+    reservados, a partir de WA_BILL_REMINDER_HOUR, numa mensagem de texto livre
+    por usuário — só para quem está na janela (`_JANELA_WA`). Reserva em lote
+    ANTES de enviar (no máximo uma tentativa; falha não desfaz): sem acesso,
+    opt-out ou sem telefone também consomem o aviso. Retorna quantos destinos
+    aceitaram."""
+    if (os.getenv("WA_AUTOPAY_NOTICE_ENABLED") or "").strip().lower() not in ("1", "true", "yes", "on"):
+        return 0  # desligado: nem lê o banco
     now = now or now_tz()
     try:
         hora = int(os.getenv("WA_BILL_REMINDER_HOUR", "9") or 9)
@@ -209,15 +234,14 @@ def notify_autopay_notices_whatsapp_once(now: datetime | None = None) -> int:
         return 0
 
     from adapters.whatsapp.wa_app import _dedupe_whatsapp_targets
-    from adapters.whatsapp.wa_client import send_template
+    from adapters.whatsapp.wa_client import send_text
     from core.observability import log_system_event_sync
     from core.reports.reports_daily import filtrar_por_acesso
     from db import get_whatsapp_updates_opt_out, list_identities_by_user
-    from db.recurring import claim_autopay_notice_whatsapp, list_autopay_notices_for_whatsapp
-    from utils_text import fmt_brl
+    from db.recurring import claim_autopay_notices_whatsapp, list_autopay_notices_for_whatsapp
 
     por_usuario: dict[int, list[dict]] = {}
-    for row in list_autopay_notices_for_whatsapp(now.date()):
+    for row in list_autopay_notices_for_whatsapp(now.date(), now - _JANELA_WA):
         if not _vence_hoje(row, now.date()):
             continue  # editado depois da gravação: não reserva, e amanhã o due_on já não bate
         por_usuario.setdefault(int(row["user_id"]), []).append(row)
@@ -231,37 +255,30 @@ def notify_autopay_notices_whatsapp_once(now: datetime | None = None) -> int:
             # Fail-closed sem reservar: a leitura falhou, tenta de novo na próxima hora.
             print(f"[autopay_wa] leitura falhou user_id={uid} erro={type(exc).__name__}", file=sys.stderr)
             continue
-        for aviso in avisos:
-            if not claim_autopay_notice_whatsapp(aviso["id"], uid):
-                continue
-            if not targets:
-                continue
-            params = {
-                # A Meta recusa parâmetro com \n, \t ou 4+ espaços (erro 132018).
-                "gasto": " ".join(str(aviso["name"] or "").split())[:60] or "seu gasto fixo",
-                "valor": fmt_brl(float(aviso["amount"])),
-                "meio": "cobrança no cartão" if aviso["payment_type"] == "credit_card" else "débito na conta",
-            }
-            enviou = False
-            for to in targets:
-                try:
-                    if send_template(to, cfg["name"], language_code=cfg["language_code"],
-                                     named_body_params=params) is None:
-                        # `None` é o 401 da Meta, que `send_template` não levanta.
-                        print(f"[autopay_wa] recusado user_id={uid} erro=token_invalido", file=sys.stderr)
-                        continue
-                    sent += 1
-                    enviou = True
-                except Exception as exc:
-                    # Só o TIPO: `str(exc)` pode ecoar o número (PII).
-                    print(f"[autopay_wa] envio falhou user_id={uid} erro={type(exc).__name__}", file=sys.stderr)
-            if enviou:
-                log_system_event_sync(
-                    "info", "whatsapp_autopay_notice_sent",
-                    "Aviso de gasto fixo autopay enviado via template WhatsApp.",
-                    source="recurring_charger", user_id=uid,
-                    details={"charge_id": aviso["id"], "template_name": cfg["name"]},
-                )
+        reservados = set(claim_autopay_notices_whatsapp(uid, [a["id"] for a in avisos]))
+        avisos = [a for a in avisos if a["id"] in reservados]
+        if not avisos or not targets:
+            continue
+        corpo = _mensagem_autopay(avisos)
+        enviou = False
+        for to in targets:
+            try:
+                if send_text(to, corpo) is None:
+                    # `None` é o 401 da Meta, que `send_text` não levanta.
+                    print(f"[autopay_wa] recusado user_id={uid} erro=token_invalido", file=sys.stderr)
+                    continue
+                sent += 1
+                enviou = True
+            except Exception as exc:
+                # Só o TIPO: `str(exc)` pode ecoar o número (PII).
+                print(f"[autopay_wa] envio falhou user_id={uid} erro={type(exc).__name__}", file=sys.stderr)
+        if enviou:
+            log_system_event_sync(
+                "info", "whatsapp_autopay_notice_sent",
+                "Aviso de gasto fixo autopay enviado via texto livre.",
+                source="recurring_charger", user_id=uid,
+                details={"charge_ids": [a["id"] for a in avisos]},
+            )
     return sent
 
 
