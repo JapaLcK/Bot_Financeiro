@@ -215,7 +215,7 @@ def rotear_partes(uid: int, parts: list[str], msg: IncomingMessage, platform: st
     # mas o multi_launch_values é o que a próxima resposta do usuário resolve.
     # Com a forma do áudio (Q40), por claim: um pedaço pode ter armado uma
     # PERGUNTA de verdade (ex.: o valor da conta), e a fila não a apaga.
-    ask_value_question = ""
+    ask_value_question, na_fila = "", missing
     if missing:
         from core.handlers.launches import _ask_value_question
         fila = {"queue": missing, "platform": platform}
@@ -225,6 +225,7 @@ def rotear_partes(uid: int, parts: list[str], msg: IncomingMessage, platform: st
         elif db.claim_pending_action(uid, "multi_launch_values", fila):
             ask_value_question = _ask_value_question(missing[0])
         else:
+            na_fila = []  # a linha é de outra pendência: o aviso não cita estes itens
             nomes = ", ".join(f"*{m['desc']}*" for m in missing)
             ask_value_question = (f"🐷 Não registrei {nomes}: antes tem outra pergunta minha "
                                   "esperando. Responde ela e me manda de novo.")
@@ -245,7 +246,7 @@ def rotear_partes(uid: int, parts: list[str], msg: IncomingMessage, platform: st
 
     # Aviso depois da pergunta: o texto com pergunta diz "a pergunta acima".
     # Fila que já existia não chega aqui: com ela o áudio não é dividido (_handle_audio).
-    avisos = [_aviso_pergunta_pulada(p, missing) for p in puladas]
+    avisos = [_aviso_pergunta_pulada(p, na_fila) for p in puladas]
     body = "\n\n".join(b for b in [body, ask_value_question, *avisos] if b)
     return body, bool(missing)
 

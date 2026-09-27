@@ -183,6 +183,33 @@ def test_audio_q40_resposta_da_forma_pula_o_comparativo(monkeypatch):
     assert pedacos == ["gastei 30 no uber"]
     assert corpo == "✅\n\n" + _aviso("gastei mais em 2025 ou 2026")
 
+
+def test_texto_q40_resposta_cartao_pula_o_comparativo(monkeypatch):
+    # "cartão" refaz cada pedaço com "… no cartão", fora do laço do multi: o
+    # pedaço comparativo gravava CREDITO R$ 2.025.
+    from core.handlers import forma_pagamento as fp
+    recebidos = []
+    monkeypatch.setattr(fp, "db", types.SimpleNamespace(consume_pending_action=lambda u, p: True))
+    monkeypatch.setattr(L, "add", lambda uid, t, *a, **k: recebidos.append(t) or "✅")
+    corpo = fp.resolver(5, "cartão", {"action_type": "payment_method_choice", "payload": {
+        "fluxo": "texto", "text": "gastei 50 no mercado e gastei mais em 2025 ou 2026?",
+        "platform": "whatsapp"}})
+    assert recebidos == ["gastei 50 no mercado no cartão"]
+    assert corpo == "✅\n\n" + _aviso("gastei mais em 2025 ou 2026?")
+
+
+def test_audio_q40_fila_recusada_aviso_nao_cita_a_fila(monkeypatch):
+    # Outra pendência ocupa a linha (o claim da fila falha): "depois de me
+    # passar o valor de *aluguel* e *luz*" mandaria o "1200" para ela.
+    from core.handlers import forma_pagamento as fp
+    monkeypatch.setattr(L, "register_if_recurring", lambda *a, **k: None)
+    monkeypatch.setattr(hi, "db", types.SimpleNamespace(claim_pending_action=lambda *a: False))
+    corpo, _ = hi.rotear_partes(5, ["paguei o aluguel", "paguei a luz", "gastei mais em 2025 ou 2026"],
+                                IncomingMessage(platform="whatsapp", user_id=5, text=""),
+                                "whatsapp", fp.DINHEIRO)
+    assert corpo == ("🐷 Não registrei *aluguel*, *luz*: antes tem outra pergunta minha esperando. "
+                     "Responde ela e me manda de novo.\n\n" + _aviso("gastei mais em 2025 ou 2026"))
+
 @pytest.mark.parametrize("fila,depois", [
     ([], ""),
     ([{"desc": "aluguel"}], "depois de responder a pergunta acima, "),
