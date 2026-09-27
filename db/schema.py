@@ -575,9 +575,9 @@ def init_db():
         # (`OPEN_FINANCE_DISCONNECTED` não guarda `item_id`). A distinção que ela
         # habilita: última linha com dono sem `removed` e COM `removal_tracked` =
         # adoção INTERROMPIDA; sem `removal_tracked` = legado AMBÍGUO. A regra
-        # inteira (ordem por `id`, os quatro desfechos e o limite dela) está no
-        # docstring de `db.open_finance_state.mark_items_removed`; quem a consome
-        # é a recuperação por operador, fora desta PR.
+        # inteira (ordem por `id`, os desfechos e o limite dela) está no
+        # docstring de `db.open_finance_diagnostico.classifica_item`, que é quem
+        # a consome (ferramenta de operador, `scripts/of_itens_operador.py`).
         """
         alter table open_finance_item_registry
           add column if not exists removal_tracked boolean not null default false

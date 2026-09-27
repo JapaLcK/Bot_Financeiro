@@ -455,9 +455,19 @@ def list_connections_for_health_check(*, older_than_sec: int, limit: int) -> lis
             return [dict(r) for r in (cur.fetchall() or [])]
 
 
+# Item cuja linha de MAIOR `id` no registry (com ou sem dono) é `operator_delete`:
+# o operador já o apagou na Pluggy (`scripts/of_itens_operador.py`). Linha nova
+# depois (webhook, POST) tem `id` maior e o reabre. Predicado sobre o alias `r`.
+RESOLVIDO_PELO_OPERADOR = """
+   (select u.origin from open_finance_item_registry u
+     where u.provider = r.provider and u.provider_item_id = r.provider_item_id
+     order by u.id desc limit 1) = 'operator_delete'
+"""
+
 # Item visto no registry (o único rastro: o `GET /items` da Pluggy devolve 401)
-# que não tem NENHUMA conexão local. Quem lê é o contador do painel de saúde abaixo.
-ITEMS_SEM_CONEXAO = """
+# que não tem NENHUMA conexão local nem foi resolvido pelo operador. Quem lê é o
+# contador do painel de saúde abaixo e o diagnóstico do operador.
+ITEMS_SEM_CONEXAO = f"""
   from open_finance_item_registry r
  where r.provider_item_id is not null
    and not exists (
@@ -465,6 +475,7 @@ ITEMS_SEM_CONEXAO = """
         where c.provider = r.provider
           and c.provider_item_id = r.provider_item_id
    )
+   and not {RESOLVIDO_PELO_OPERADOR}
 """
 
 
@@ -490,9 +501,9 @@ def item_registry_origins(provider_item_id: str, *, provider: str = "pluggy",
         que era o buraco por onde a reentrega de `item/created` ressuscitava
         banco removido.
 
-    Quem precisa SEPARAR as três (nenhum leitor automático precisa; é a
-    recuperação por operador, fora desta PR) usa a regra de precedência escrita
-    no docstring de `mark_items_removed`. Os leitores daqui:
+    Quem precisa SEPARAR as três (nenhum leitor automático precisa; é o
+    operador) usa `db.open_finance_diagnostico.classifica_item`, onde a regra de
+    precedência está escrita. Os leitores daqui:
 
       • `_adota_item_orfao` — só adota item sem NENHUM dono no rastro (duplicata
         de `item/created`, entrega at-least-once, ressuscitava o removido), e a
@@ -669,37 +680,9 @@ def mark_items_removed(cur, user_id: int, linhas, *, last_event: str) -> int:
     na Pluggy — e o delete remoto do trial expiry é best-effort, então item pausado
     pode estar vivo lá e mandando evento.
 
-    PRECEDÊNCIA (a regra, escrita aqui porque é aqui que a linha nasce; nenhum
-    leitor de HOJE a usa — `item_registry_origins` trata as três origens com dono
-    igual, e é isso que recusa a adoção). O registry é log de APPEND: depois de
-    "conectou → removeu → reconectou" o item tem, em ordem de `id`,
-    `pluggy_item`, `removed`, `pluggy_item`. Para decidir o ESTADO de um item sem
-    conexão local, ordene as linhas com `user_id is not null` por `id` crescente
-    e olhe a ÚLTIMA:
-
-      • `origin='removed'`                                  → REMOVIDO pelo usuário;
-      • `pluggy_item`/`webhook_adopt` COM `removal_tracked`  → INTERROMPIDO (adoção
-        ou POST que não completou: a era já marca remoção, então a ausência de
-        `removed` é informação);
-      • `pluggy_item`/`webhook_adopt` SEM `removal_tracked`  → LEGADO AMBÍGUO (rastro
-        anterior à marca: não dá para saber);
-      • nenhuma linha com dono                              → NUNCA ATRIBUÍDO (adotável).
-
-    Por `id` e não por `created_at`: `now()` é o tempo de INÍCIO da transação,
-    empata entre duas escritas da mesma transação e pode inverter entre sessões
-    concorrentes; `id` é `bigserial`, alocado no INSERT.
-
-    LIMITE CONHECIDO da regra (declarado, não consertado): ordem de ALOCAÇÃO não
-    é ordem de COMMIT. O caso que importaria — disconnect × reconexão do mesmo
-    item — é serializado pelo `pluggy_items_lock`, porque o item está em
-    `list_pluggy_item_ids(user_id)` enquanto a conexão existe. SOBRA uma janela:
-    o `register_item` do `POST /pluggy-item` roda FORA do lock (em
-    `frontend/routes/open_finance.py`, logo DEPOIS de `_grava_reconexao`
-    devolver), então um `DELETE /open-finance/{uid}` que caia entre o commit da
-    conexão e esse insert deixa a última linha como `pluggy_item` com o banco
-    REMOVIDO — o item sai classificado "interrompido". Janela de ms e exige o
-    clique do usuário dentro dela; quem consumir a regra põe um humano item a
-    item, então o desfecho é revisável.
+    PRECEDÊNCIA: o registry é log de append, e o estado de um item sem conexão
+    sai da ÚLTIMA linha com dono em ordem de `id` — a regra inteira, e o limite
+    dela, estão no docstring de `db.open_finance_diagnostico.classifica_item`.
 
     Devolve quantas marcas gravou.
     """
