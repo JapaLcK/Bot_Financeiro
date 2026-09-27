@@ -123,14 +123,15 @@ def _origem_presa(cur, user_id: int) -> bool:
     é a regra de `plan_service` — o trial do Stripe conta (é assinatura
     `trialing` com `plan` gravado); o trial por telefone (`trial_started_at`) não.
 
-    Também presa: `stripe_customer_id` com assinatura viva na Stripe
-    (`LIVE_PAYMENT_STATUSES`), mesmo com o plano já vencido — `past_due` cobrado
-    depois acharia pelo webhook uma conta apagada. Inclui `unpaid` com
-    `plan='free'`: o par não prova que a Stripe encerrou (ver o /trial-reset em
-    `core/admin_dashboard.py`), e aqui não há humano no laço. Sem
-    `stripe_customer_id` o status não conta: o grant Pix grava `active` e ele
-    fica velho depois que o grant vence."""
-    from core.services.billing_dunning import LIVE_PAYMENT_STATUSES
+    Também presa: `stripe_customer_id` com status em `LIVE_PAYMENT_STATUSES`,
+    mesmo com o plano vencido — `past_due` cobrado depois acharia pelo webhook
+    uma conta apagada. `PAST_DUE_PAYMENT_STATUSES` recusa sem consulta (o
+    `_find_active_subscription` não vê `unpaid`/`incomplete`). `active`/`trialing`
+    sem plano vigente é o caso duvidoso — o grant Pix grava `active` e ele fica
+    velho quando o grant vence —, então só aí se pergunta à Stripe; falha na
+    consulta recusa (indisponibilidade não é ausência). Sem
+    `stripe_customer_id` o status não conta."""
+    from core.services.billing_dunning import LIVE_PAYMENT_STATUSES, PAST_DUE_PAYMENT_STATUSES
     from core.services.plan_service import _tem_plano_pago_vigente  # tardio: importa `db`
     from .open_finance_state import _TERMINAL
 
@@ -143,12 +144,25 @@ def _origem_presa(cur, user_id: int) -> bool:
         return True
     cur.execute("select plan, plan_expires_at, stripe_customer_id, last_payment_status"
                 " from auth_accounts where user_id = %s", (user_id,))
-    return any(
-        _tem_plano_pago_vigente(r)
-        or (r["stripe_customer_id"]
-            and (r["last_payment_status"] or "").strip().lower() in LIVE_PAYMENT_STATUSES)
-        for r in cur.fetchall()
-    )
+    contas = cur.fetchall()
+    if any(_tem_plano_pago_vigente(r) for r in contas):
+        return True
+    for r in contas:
+        customer = (r["stripe_customer_id"] or "").strip()
+        status = (r["last_payment_status"] or "").strip().lower()
+        if not customer or status not in LIVE_PAYMENT_STATUSES:
+            continue
+        if status in PAST_DUE_PAYMENT_STATUSES:
+            return True
+        # ponytail: chamada de rede com a transação aberta; só neste caso raro.
+        import stripe as _stripe
+        from frontend.finance_bot_websocket_custom import _find_active_subscription  # tardio: monólito
+        try:
+            if _find_active_subscription(_stripe, customer) is not None:
+                return True
+        except Exception:  # noqa: BLE001 — indisponibilidade não é ausência
+            return True
+    return False
 
 
 def merge_users(from_user_id: int, to_user_id: int) -> None:
