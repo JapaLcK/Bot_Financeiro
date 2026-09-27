@@ -250,7 +250,7 @@ async def _log_com_teto(segundos: float, *args, **kwargs) -> None:
     dentro do event loop, e com `system_event_logs` travada isso DOBRA o prazo e
     para o processo (issue #541; quem prende é
     `tests/test_of_log_teto_e_status.py::test_teto_vale_com_o_espelho_do_logging_lento`).
-    Os três avisos que já existem
+    Os avisos que já existem
     (`of_reconnect_lock_retry`, `of_reconnect_lock_timeout` no
     `_grava_reconexao` e `of_item_registry_failed` no `/pluggy-item`) pagam esse
     custo hoje — registrado, fora do escopo da #541.

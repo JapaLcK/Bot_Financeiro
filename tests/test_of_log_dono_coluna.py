@@ -123,6 +123,7 @@ def test_item_de_outro_client_user_id_loga_o_uid_da_sessao(user_id, monkeypatch,
     assert r.status_code == 403, r.text
     conflito = _de(eventos, "of_item_owner_conflict")
     assert [e["user_id"] for e in conflito] == [user_id], conflito
+    assert set(conflito[0]["details"]) == {"item_id", "origin"}, conflito  # sai na exportação
 
 
 def test_item_de_outra_conta_local_loga_o_uid_da_sessao_sem_o_outro(
@@ -140,6 +141,7 @@ def test_item_de_outra_conta_local_loga_o_uid_da_sessao_sem_o_outro(
         assert r.status_code == 409, r.text
         conflito = _de(eventos, "of_item_owner_conflict")
         assert [e["user_id"] for e in conflito] == [user_id], conflito
+        assert set(conflito[0]["details"]) == {"item_id", "connections", "origin"}, conflito
     finally:
         db.disconnect_open_finance_connection(outro)
         _limpa_item("i541-disputa")
