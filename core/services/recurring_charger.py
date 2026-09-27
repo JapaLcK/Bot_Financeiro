@@ -24,7 +24,7 @@ import calendar
 import os
 import sys
 import traceback
-from datetime import date, datetime, time, timedelta
+from datetime import date, datetime, timedelta
 
 from utils_date import now_tz
 
@@ -173,7 +173,7 @@ def sync_autopay_notices_once(today: date | None = None) -> int:
         key = {"weekly": f"w:{today.isoformat()}",
                "once": f"o:{today.isoformat()}"}.get(freq, today.strftime("%Y-%m"))
         try:
-            n += ensure_autopay_notice(int(rec["id"]), int(rec["user_id"]), float(rec["amount"]), key)
+            n += ensure_autopay_notice(int(rec["id"]), int(rec["user_id"]), float(rec["amount"]), key, today)
         except Exception as exc:
             print(f"[autopay_notice] falhou rec={rec.get('id')}: {exc}", file=sys.stderr)
     return n
@@ -208,8 +208,7 @@ def notify_autopay_notices_whatsapp_once(now: datetime | None = None) -> int:
     from utils_text import fmt_brl
 
     por_usuario: dict[int, list[dict]] = {}
-    since = datetime.combine(now.date(), time.min, tzinfo=now.tzinfo)
-    for row in list_autopay_notices_for_whatsapp(since):
+    for row in list_autopay_notices_for_whatsapp(now.date()):
         por_usuario.setdefault(int(row["user_id"]), []).append(row)
 
     sent = 0

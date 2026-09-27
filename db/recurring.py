@@ -500,31 +500,33 @@ def list_active_autopay_recurrings() -> list[dict[str, Any]]:
             return [dict(r) for r in (cur.fetchall() or [])]
 
 
-def ensure_autopay_notice(recurring_id: int, user_id: int, amount: float, period_key: str) -> bool:
+def ensure_autopay_notice(recurring_id: int, user_id: int, amount: float, period_key: str,
+                          due_on: date) -> bool:
     """Grava o aviso de vencimento (linha em recurring_charges SEM lançamento:
-    launch_id e credit_tx_id nulos). Idempotente pelo UNIQUE (recurring_id, ym).
-    True se criou agora."""
+    launch_id e credit_tx_id nulos) com o dia lógico `due_on`. Idempotente pelo
+    UNIQUE (recurring_id, ym). True se criou agora."""
     with get_conn() as conn:
         with conn.cursor() as cur:
             cur.execute(
                 """
-                insert into recurring_charges (recurring_id, user_id, amount, ym)
-                values (%s, %s, %s, %s)
+                insert into recurring_charges (recurring_id, user_id, amount, ym, due_on)
+                values (%s, %s, %s, %s, %s)
                 on conflict (recurring_id, ym) do nothing
                 returning id
                 """,
-                (int(recurring_id), int(user_id), Decimal(str(amount)), period_key),
+                (int(recurring_id), int(user_id), Decimal(str(amount)), period_key, due_on),
             )
             criou = cur.fetchone() is not None
         conn.commit()
     return criou
 
 
-def list_autopay_notices_for_whatsapp(since) -> list[dict[str, Any]]:
+def list_autopay_notices_for_whatsapp(today: date) -> list[dict[str, Any]]:
     """Avisos de autopay ainda não reservados pro WhatsApp, de TODOS os usuários,
-    gravados a partir de `since` (meia-noite de hoje, com fuso). Cada linha leva
-    o próprio user_id. O corte por `charged_at` segura aviso de dia anterior (o
-    do deploy) e linha antiga do cobrador com lançamento apagado."""
+    que vencem em `today` (`due_on`, o dia lógico da volta que gravou — não o
+    horário de inserção, que passa da meia-noite). Cada linha leva o próprio
+    user_id. Aviso de dia anterior não sai atrasado; linha antiga (do cobrador
+    ou de antes da coluna) tem `due_on` nulo e fica de fora."""
     with get_conn() as conn:
         with conn.cursor() as cur:
             cur.execute(
@@ -534,11 +536,11 @@ def list_autopay_notices_for_whatsapp(since) -> list[dict[str, Any]]:
                 join recurring_expenses r on r.id = rc.recurring_id and r.user_id = rc.user_id
                 where rc.launch_id is null and rc.credit_tx_id is null
                   and rc.wa_notified_at is null
-                  and rc.charged_at >= %s
+                  and rc.due_on = %s
                   and r.is_active and r.payment_mode = 'autopay'
                 order by rc.user_id, rc.id
                 """,
-                (since,),
+                (today,),
             )
             return [dict(r) for r in (cur.fetchall() or [])]
 

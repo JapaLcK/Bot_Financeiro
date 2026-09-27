@@ -6,8 +6,10 @@ O relógio entra por `now=` (ou por `rc.now_tz` no loop inteiro).
 Controles NEGATIVOS declarados (docs/controles_declarados.md) — em
 `db/recurring.py` / `core/services/recurring_charger.py`:
 
-  a. apagar `and rc.charged_at >= %s` (e o parâmetro `since`) da listagem →
-     vermelho `test_aviso_de_ontem_nao_sai`;
+  a. apagar `and rc.due_on = %s` (e o parâmetro `today`) da listagem →
+     vermelho `test_aviso_de_ontem_nao_sai`; voltar ao corte antigo
+     `rc.charged_at >= <meia-noite de hoje>` → vermelho
+     `test_volta_da_meia_noite_com_leitura_falha_nao_sai_atrasado`;
   b. apagar `rc.launch_id is null and` da listagem →
      vermelho `test_linha_do_cobrador_com_lancamento_nao_sai`;
   c. apagar `and wa_notified_at is null` do UPDATE do claim E da listagem →
@@ -188,12 +190,52 @@ def test_volta_que_cruza_a_meia_noite_envia_o_aviso_do_dia(user_id, monkeypatch)
     assert _reservados(user_id) == 1
 
 
+def test_volta_da_meia_noite_com_leitura_falha_nao_sai_atrasado(user_id, monkeypatch):
+    """A volta de D cruza a meia-noite (a linha nasce com `charged_at` de D+1) e a
+    leitura de opt-out falha nela (fail-closed, sem reserva). Às 9h de D+1 o
+    aviso de D NÃO sai dizendo "Hoje vence" um dia depois.
+
+    Controle negativo: filtrar por `rc.charged_at >= <meia-noite de hoje>` em vez
+    de `rc.due_on = %s` → 1 envio na volta das 9h: vermelho."""
+    posts = _armar(monkeypatch)
+    _dono(user_id, _FONE_A)
+    _gasto(user_id, "Atrasado Q616")
+
+    d = _as(23).replace(minute=59, second=59)
+    depois = d + timedelta(seconds=6)
+    virou = []
+    gravar = dbr.ensure_autopay_notice
+
+    def _grava_depois_da_meia_noite(*a):
+        virou.append(1)
+        criou = gravar(*a)
+        # O banco não segue o relógio falso: o `now()` da inserção já é D+1.
+        _sql("update recurring_charges set charged_at=%s where user_id=%s", (depois, user_id))
+        return criou
+
+    def _quebra(*a, **k):
+        raise RuntimeError("banco caiu")
+
+    monkeypatch.setattr(dbr, "ensure_autopay_notice", _grava_depois_da_meia_noite)
+    with monkeypatch.context() as m:
+        m.setattr("db.get_whatsapp_updates_opt_out", _quebra)
+        m.setattr(rc, "now_tz", lambda: depois if virou else d)
+        _um_tick(monkeypatch)
+    assert virou and _para(posts, _FONE_A) == [] and _reservados(user_id) == 0
+
+    monkeypatch.setattr(rc, "now_tz", lambda: (d + timedelta(days=1)).replace(hour=9, second=0))
+    _um_tick(monkeypatch)
+
+    assert _para(posts, _FONE_A) == []
+    assert _reservados(user_id) == 0
+
+
 def test_aviso_de_ontem_nao_sai(user_id, monkeypatch):
     posts = _armar(monkeypatch)
     _dono(user_id, _FONE_A)
     _gasto(user_id, "Ontem Q616")
     rc.sync_autopay_notices_once()
-    _sql("update recurring_charges set charged_at = now() - interval '1 day' where user_id=%s", (user_id,))
+    _sql("update recurring_charges set due_on = due_on - 1 where user_id=%s", (user_id,))
 
     rc.notify_autopay_notices_whatsapp_once(now=_as(10))
 
