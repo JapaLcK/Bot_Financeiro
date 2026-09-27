@@ -13,7 +13,6 @@ com uid no texto — só uma varredura (AST) pegaria.
 from __future__ import annotations
 
 import asyncio
-import logging
 import time
 
 import psycopg
@@ -181,7 +180,7 @@ def test_sync_que_cai_em_fk_real_nao_grava_uid_com_coluna_nula(monkeypatch):
     falha = _de(vistos, "pluggy_sync_failed")
     assert len(falha) == 1 and falha[0].get("user_id") is None, vistos
     assert falha[0]["details"] == {"item_id": "i541-syncfail", "motivo": "ForeignKeyViolation",
-                                   "sqlstate": "23503"}, falha
+                                   "sqlstate": "23503", "status_code": None}, falha
     assert str(alheio) not in falha[0]["message"], falha
 
 
@@ -226,7 +225,7 @@ def test_aviso_local_do_rastro_espelha_com_dono(user_id, monkeypatch, coletor, e
 
 # ── connect-token (1671): o log com teto não pendura a emissão ──────────────
 
-def test_rastro_do_connect_token_nao_pendura_a_resposta(user_id, monkeypatch, caplog):
+def test_rastro_do_connect_token_nao_pendura_a_resposta(user_id, monkeypatch, capsys):
     promote_to_pro(user_id)
     monkeypatch.setattr(of_routes, "create_pluggy_connect_token",
                         lambda uid, webhook_url=None: {"accessToken": "tok"})
@@ -239,17 +238,16 @@ def test_rastro_do_connect_token_nao_pendura_a_resposta(user_id, monkeypatch, ca
 
     client = TestClient(dashboard.app)
     t0 = time.monotonic()
-    with caplog.at_level(logging.WARNING, logger=of_routes.__name__):
-        r = client.post(f"/open-finance/{user_id}/connect-token", headers=_auth(client, user_id))
+    r = client.post(f"/open-finance/{user_id}/connect-token", headers=_auth(client, user_id))
     assert r.status_code == 200, r.text
     assert time.monotonic() - t0 < 2, "o log de diagnóstico pendurou a emissão do token"
-    # Teto estourado: o aviso local é o único canal que sobra.
-    locais = [x for x in caplog.records if "of_item_registry_failed" in x.getMessage()]
-    assert [x.user_id for x in locais] == [user_id], caplog.text
-    assert str(user_id) not in locais[0].getMessage(), locais[0].getMessage()
+    # Teto estourado: o rastro em stderr (sem banco) é o único canal que sobra.
+    err = capsys.readouterr().err
+    assert "teto estourado: of_item_registry_failed motivo=OperationalError" in err, err
+    assert str(user_id) not in err, err
 
 
-def test_conflito_da_reconexao_deixa_aviso_local_quando_o_teto_estoura(user_id, monkeypatch, caplog):
+def test_conflito_da_reconexao_deixa_rastro_local_quando_o_teto_estoura(user_id, monkeypatch, capsys):
     promote_to_pro(user_id)
     _mock_item(monkeypatch, user_id)
 
@@ -265,12 +263,12 @@ def test_conflito_da_reconexao_deixa_aviso_local_quando_o_teto_estoura(user_id, 
     monkeypatch.setattr(of_routes, "log_system_event", _pendura)
     client = TestClient(dashboard.app)
     try:
-        with caplog.at_level(logging.WARNING, logger=of_routes.__name__):
-            r = client.post(f"/open-finance/{user_id}/pluggy-item",
-                            json={"item": {"id": "i541-conf"}}, headers=_auth(client, user_id))
+        r = client.post(f"/open-finance/{user_id}/pluggy-item",
+                        json={"item": {"id": "i541-conf"}}, headers=_auth(client, user_id))
         assert r.status_code == 409, r.text
-        locais = [x for x in caplog.records if "of_reconnect_aborted_state_gone" in x.getMessage()]
-        assert [x.user_id for x in locais] == [user_id], caplog.text
+        err = capsys.readouterr().err
+        assert "teto estourado: of_reconnect_aborted_state_gone" in err, err
+        assert str(user_id) not in err, err
     finally:
         _limpa_item("i541-conf")
 

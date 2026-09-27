@@ -16,6 +16,7 @@ import logging
 import math
 import os
 import random
+import sys
 import time
 from datetime import datetime, timedelta, timezone
 from typing import Literal
@@ -239,12 +240,19 @@ async def _log_com_teto(segundos: float, *args, **kwargs) -> None:
     ilimitado por esses dois caminhos.
 
     Engolir o `TimeoutError` é deliberado: o log é DIAGNÓSTICO, e perder o
-    diagnóstico não pode virar um segundo modo de falha em cima do 503. A causa
-    NÃO se perde — TODO chamador emite o `logging.getLogger(...).warning` local
-    ANTES desta chamada (as três do `_grava_reconexao`, o connect-token e o
-    `/pluggy-item`), e esse canal não depende do banco (é o mesmo motivo pelo
-    qual ele existe: ver o `except` do `_grava_reconexao`). Chamador novo sem
-    esse aviso perde a falha em silêncio quando o teto estoura.
+    diagnóstico não pode virar um segundo modo de falha em cima do 503. O que
+    sobra quando o teto estoura é o `print` em stderr do `except` abaixo —
+    `event_type` + `motivo`, sem uid, SEM banco (mesmo espírito do "[admin]
+    failed to record" de `log_system_event`). Vale para todo chamador, num lugar só.
+
+    NÃO use `logging.warning` como canal "local" antes desta chamada: o
+    `_DashboardHandler` (`core/observability.py`) o espelha com INSERT SÍNCRONO
+    dentro do event loop, e com `system_event_logs` travada isso DOBRA o prazo e
+    para o processo (medido na issue #541: connect-token 2,05 s → 4,05 s, loop
+    parado 2,01 s; três concorrentes 8,10 s). Os três avisos que já existem
+    (`of_reconnect_lock_retry`, `of_reconnect_lock_timeout` no
+    `_grava_reconexao` e `of_item_registry_failed` no `/pluggy-item`) pagam esse
+    custo hoje — registrado, fora do escopo da #541.
 
     Só `asyncio.TimeoutError` é engolido. `CancelledError` de fora (cliente
     desistiu, shutdown) continua subindo — o `wait_for` só converte em
@@ -262,7 +270,11 @@ async def _log_com_teto(segundos: float, *args, **kwargs) -> None:
         await asyncio.wait_for(log_system_event(*args, **kwargs),
                                max(0.001, segundos))
     except asyncio.TimeoutError:
-        pass
+        evento = args[1] if len(args) > 1 else kwargs.get("event_type")
+        detalhes = kwargs.get("details")
+        motivo = detalhes.get("motivo") if isinstance(detalhes, dict) else None
+        print(f"[open_finance] log com teto estourado: {evento} motivo={motivo}",
+              file=sys.stderr)
 
 
 # HTTP da Pluggy que some sozinho: cota estourada e erro do lado dela. 404 fica
@@ -637,8 +649,6 @@ async def _grava_reconexao(
             # O context manager já liberou o lock. O diagnóstico tem o mesmo
             # teto dos demais logs da reconexão e não prolonga sua seção crítica.
             args, context = exc.diagnostico
-            logging.getLogger(__name__).warning("%s %s", args[1], args[2],
-                                                extra={"user_id": context.get("user_id")})
             await _log_com_teto(_LOG_DIAG_TIMEOUT_S, *args, **context)
             raise
         except psycopg.OperationalError as exc:
@@ -903,7 +913,8 @@ async def _run_pluggy_sync_bg(item_id: str) -> None:
             f"Sync Pluggy falhou: {item_id}",
             source="open_finance",
             details={"item_id": item_id, "motivo": type(exc).__name__,
-                     "sqlstate": getattr(exc, "sqlstate", None)},
+                     "sqlstate": getattr(exc, "sqlstate", None),
+                     "status_code": getattr(exc, "status_code", None)},
         )
 
 
@@ -1096,8 +1107,12 @@ async def _adota_item_orfao(item_id: str, last_event: str | None = None) -> int 
             "warning", "of_webhook_adopt_skipped",
             "Item órfão sem dono resolvível",
             source="open_finance",
+            # Coluna NULL: `str(exc)` do `ValueError` acima traz o `clientUserId`
+            # bruto, que sobreviveria à exclusão (issue #541). `status_code`
+            # separa o 404 dos outros erros da Pluggy.
             details={"item_id": item_id, "motivo": type(exc).__name__,
-                     "error": str(exc)[:200]},
+                     "sqlstate": getattr(exc, "sqlstate", None),
+                     "status_code": getattr(exc, "status_code", None)},
         )
         return None
 
@@ -1691,10 +1706,6 @@ async def open_finance_connect_token_route(request: Request, user_id: int):
             token_hash=token_hash(token_data["accessToken"]), origin="connect_token",
         )
     except Exception as exc:  # noqa: BLE001 — rastro nunca derruba a emissão do token
-        # Canal local ANTES, como no `/pluggy-item`: se o teto estoura, é o que sobra.
-        logging.getLogger(__name__).warning(
-            "of_item_registry_failed origin=connect_token motivo=%s sqlstate=%s",
-            type(exc).__name__, getattr(exc, "sqlstate", None), extra={"user_id": user_id})
         await _log_com_teto(
             _LOG_DIAG_TIMEOUT_S,
             "warning", "of_item_registry_failed", "Falha ao registrar connect token",
