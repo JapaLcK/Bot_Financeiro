@@ -18,6 +18,7 @@ def porta4(monkeypatch):
     from adapters.whatsapp.wa_parse import InboundMessage
 
     respostas, pagos = [], []
+    monkeypatch.setattr("core.handlers.forma_pagamento.regra_ativa", lambda u: False)  # sem banco conectado (Q40)
     pend = {"action_type": "bill_pay_amount", "payload": {"bill_id": 7, "name": "luz"}}
     for nome, f in {
         "get_or_create_canonical_user": lambda p, e: 5,
@@ -34,7 +35,7 @@ def porta4(monkeypatch):
     }.items():
         monkeypatch.setattr(wr, nome, f)
     monkeypatch.setattr(B, "mark_bill_paid",
-                        lambda u, b, a: pagos.append(a) or {"name": "luz", "paid_amount": a})
+                        lambda u, b, a, **k: pagos.append(a) or {"name": "luz", "paid_amount": a})
 
     def manda(texto):
         wr.process_message(InboundMessage(wa_id="5511999998888", text=texto, timestamp="2",

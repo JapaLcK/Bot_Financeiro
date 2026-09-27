@@ -1,11 +1,11 @@
 """
 db/recurring.py — Gastos Fixos / Recorrentes (Sprint 4).
 
-Pro-only. Cobrança automática no dia `due_day` de cada mês via cron.
-- `payment_type='account'`     → cria launch despesa (não interno).
-- `payment_type='credit_card'` → cria credit_transaction na bill open atual.
+Pro-only. Gasto fixo só PREVÊ (docs/plano-dashboard-v2.md, Q42): o autopay entra
+na Previsão (`core/services/cashflow.py`) e o 'manual' vira conta a pagar com
+lembrete (`db/bills.py`). Nada é lançado sozinho — nem em conta, nem no cartão.
 
-Idempotência: `last_charged_ym` impede cobrar 2x no mesmo mês.
+`last_charged_ym` é resto do cobrador removido: nada mais o escreve.
 Reajuste: ao editar `amount`, guarda `last_amount` + timestamp pra UI mostrar a variação.
 """
 from __future__ import annotations
@@ -174,7 +174,7 @@ def create_recurring_expense(
     """Cria gasto fixo. Levanta ValueError se input inválido.
 
     `start_date` = a partir de quando a recorrência vale (default: hoje). A
-    primeira cobrança é a primeira ocorrência de `due_day` em/depois dessa data.
+    primeira ocorrência é a primeira de `due_day` em/depois dessa data.
     `frequency` = 'monthly' (todo mês no due_day) ou 'annual' (1x/ano no
     `due_month`/due_day).
     """
@@ -212,9 +212,8 @@ def create_recurring_expense(
     if payment_type == "account":
         card_id = None  # ignora card_id quando não é cartão
 
-    # #147: o usuário DIGITA esta categoria e o cobrador a copia pra
-    # `launches.categoria` todo mês. Sem resolver, "McDonald's" nascia cru aqui e
-    # abria fatia gêmea no donut. A REGRA das 4 portas (o que pode ser gravado, e
+    # #147: o usuário DIGITA esta categoria. Sem resolver, "McDonald's" nascia cru
+    # aqui, fora da grafia do catálogo. A REGRA das 4 portas (o que pode ser gravado, e
     # por que o `create` segue o plano em vez de ser fixo em True) está escrita num
     # lugar só: `db/categories.resolve_category_for_write`.
     cat = (category or "").strip() or "outros"
@@ -385,51 +384,6 @@ def delete_recurring_expense(user_id: int, rec_id: int) -> None:
         conn.commit()
 
 
-def list_due_recurring_expenses(today: date | None = None) -> list[dict[str, Any]]:
-    """Lista globais — todos os user — gastos fixos que VENCEM hoje e ainda
-    não foram cobrados neste mês (`last_charged_ym != current_ym`).
-
-    Usado pelo cron diário pra processar cobranças automáticas.
-    """
-    today = today or date.today()
-    ym = today.strftime("%Y-%m")
-    with get_conn() as conn:
-        with conn.cursor() as cur:
-            cur.execute(
-                """
-                select r.id, r.user_id, r.name, r.amount, r.category,
-                       r.due_day, r.payment_type, r.card_id
-                from recurring_expenses r
-                where r.is_active = true
-                  and r.due_day <= %s
-                  and (r.last_charged_ym is null or r.last_charged_ym != %s)
-                  -- Não retroagir: recorrência começa em start_date (ver charger).
-                  and (
-                      to_char(coalesce(r.start_date, r.created_at::date), 'YYYY-MM') < %s
-                      or (
-                          to_char(coalesce(r.start_date, r.created_at::date), 'YYYY-MM') = %s
-                          and r.due_day >= extract(day from coalesce(r.start_date, r.created_at::date))
-                      )
-                  )
-                """,
-                (today.day, ym, ym, ym),
-            )
-            rows = cur.fetchall() or []
-    return [dict(r) for r in rows]
-
-
-def mark_recurring_charged(user_id: int, rec_id: int, ym: str) -> None:
-    """Marca como cobrado neste mês (idempotência)."""
-    with get_conn() as conn:
-        with conn.cursor() as cur:
-            cur.execute(
-                "update recurring_expenses set last_charged_ym=%s "
-                "where user_id=%s and id=%s",
-                (ym, user_id, int(rec_id)),
-            )
-        conn.commit()
-
-
 # ---------------------------------------------------------------------------
 # Detecção "essa despesa se repete → sugere virar gasto fixo"
 # ---------------------------------------------------------------------------
@@ -530,6 +484,42 @@ def dismiss_recurring_suggestion(user_id: int, key: str, amount: float) -> None:
         conn.commit()
 
 
+def list_active_autopay_recurrings() -> list[dict[str, Any]]:
+    """Gastos fixos autopay ativos de TODOS os usuários, pro aviso de vencimento
+    do loop global (`sync_autopay_notices_once`). Cada linha leva o próprio user_id."""
+    with get_conn() as conn:
+        with conn.cursor() as cur:
+            cur.execute(
+                """
+                select id, user_id, name, amount, due_day, due_month, frequency,
+                       payment_type, coalesce(start_date, created_at::date) as start_date
+                from recurring_expenses
+                where is_active = true and payment_mode = 'autopay' and amount > 0
+                """
+            )
+            return [dict(r) for r in (cur.fetchall() or [])]
+
+
+def ensure_autopay_notice(recurring_id: int, user_id: int, amount: float, period_key: str) -> bool:
+    """Grava o aviso de vencimento (linha em recurring_charges SEM lançamento:
+    launch_id e credit_tx_id nulos). Idempotente pelo UNIQUE (recurring_id, ym).
+    True se criou agora."""
+    with get_conn() as conn:
+        with conn.cursor() as cur:
+            cur.execute(
+                """
+                insert into recurring_charges (recurring_id, user_id, amount, ym)
+                values (%s, %s, %s, %s)
+                on conflict (recurring_id, ym) do nothing
+                returning id
+                """,
+                (int(recurring_id), int(user_id), Decimal(str(amount)), period_key),
+            )
+            criou = cur.fetchone() is not None
+        conn.commit()
+    return criou
+
+
 __all__ = [
     "list_recurring_expenses",
     "get_recurring_expense",
@@ -537,8 +527,8 @@ __all__ = [
     "create_recurring_expense",
     "update_recurring_expense",
     "delete_recurring_expense",
-    "list_due_recurring_expenses",
-    "mark_recurring_charged",
     "find_recurring_candidate",
     "dismiss_recurring_suggestion",
+    "list_active_autopay_recurrings",
+    "ensure_autopay_notice",
 ]

@@ -191,6 +191,7 @@
     const counted = ((of && of.connections) || []).filter(countsTowardLimit);
     return {
       banksMax: (me && me.of_banks_max !== undefined) ? me.of_banks_max : null,
+      cobrancaEmAtraso: !!(me && me.cobranca_em_atraso),
       count: counted.length,
       names: counted.map(function (c) { return stripAccent(c.institution_name || ""); }),
     };
@@ -509,7 +510,8 @@
         conf("notify")("Não deu pra confirmar seu plano agora. Tente de novo em instantes.", "error");
         return;
       }
-      if (plano.banksMax === 0) { window.location.href = "/precos"; return; }
+      // Carência de cobrança: já é assinante, a /precos o recusaria — vai pro cartão.
+      if (plano.banksMax === 0) { window.location.href = plano.cobrancaEmAtraso ? "/conta" : "/precos"; return; }
 
       // Teto atingido: só segue se for RECONEXÃO de um banco já conectado (mesmo
       // nome). Banco novo abriria o widget da Pluggy só pra tomar 402 no

@@ -639,12 +639,11 @@ def update_user_category(
                     "where user_id=%s and lower(category)=lower(%s)",
                     (next_name, user_id, old_name),
                 )
-                # #147: os recorrentes guardam o TEXTO da categoria e o cobrador
-                # o copia pra `launches.categoria` todo mês. Ficar de fora do
-                # cascade reabria a fatia gêmea que o #147 fechou: o histórico
-                # renomeado acima e o recorrente ainda no nome velho, que o
-                # cobrador (`create=False` + `or raw`) grava de novo no mês
-                # seguinte. Medido em `test_rename_cascateia_para_o_recorrente`.
+                # #147: os recorrentes guardam o TEXTO da categoria. Ficar de
+                # fora do cascade deixava o recorrente no nome velho com o
+                # histórico já renomeado acima — a categoria que sumiu do
+                # catálogo continuava viva nele. Medido em
+                # `test_rename_cascateia_para_o_recorrente`.
                 cur.execute(
                     "update recurring_expenses set category=%s "
                     "where user_id=%s and lower(category)=lower(%s)",
@@ -909,15 +908,11 @@ def resolve_category_for_write(user_id: int, raw: str) -> str:
     pode ter categoria custom: "Padaria do Zé" seria gravado "padaria do ze" com o
     histórico em "Padaria do Zé", e o donut — que agrupa pela string crua, sensível a
     caixa e acento (`db/accounts.py`) — abriria a fatia GÊMEA que o #147 existe pra
-    matar. É a mesma razão pela qual o cobrador usa `create=False`
-    (`recurring_charger._canonical_category`); a porta de escrita não pode fazer o que
-    o cobrador foi proibido de fazer.
+    matar.
 
     Quem não pode ter custom hoje é o PLANO INATIVO (assinatura vencida, cancelada ou
     com pagamento falhando): `get_plan_tier` colapsa em "free" quando `_paid_plan_active`
     é falso (`core/services/plan_service.py:117-122`) — não é mais um produto grátis.
-    E `list_due_recurring_expenses` não filtra por plano, então essa pessoa continua
-    gerando lançamento todo mês.
 
     Para quem PODE ter custom nada muda: `create=True`, grafia preservada, catálogo
     semeado depois pelo `ensure_user_category`, e a falha de leitura do catálogo

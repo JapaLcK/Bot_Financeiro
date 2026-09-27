@@ -14,14 +14,23 @@ const listeners = new Set();
 
 export const get = () => state;
 
-/** @param {Partial<import("./types").DashState>} patch */
-export function set(patch) {
-  const next = { ...state, ...patch };
+/** O próximo estado depois de `patch`. Função pura: a store global e cada resposta da
+ *  conversa do Piggy (estado próprio, parts/LiveAnswer.tsx) aplicam a mesma regra.
+ *  @param {import("./types").DashState} prev
+ *  @param {Partial<import("./types").DashState>} patch
+ *  @returns {import("./types").DashState} */
+export function apply(prev, patch) {
+  const next = { ...prev, ...patch };
   // O dia filtrado é uma data do mês anterior: no mês novo ele esvaziaria a lista.
   // A origem fica: vale em qualquer mês enquanto o extrato está aberto (o Ledger a
   // zera ao desmontar).
-  if (next.month !== state.month) next.filter = { ...next.filter, day: null };
-  state = next;
+  if (next.month !== prev.month) next.filter = { ...next.filter, day: null };
+  return next;
+}
+
+/** @param {Partial<import("./types").DashState>} patch */
+export function set(patch) {
+  state = apply(state, patch);
   for (const fn of listeners) fn();
 }
 

@@ -122,7 +122,7 @@ def test_delete_preserva_manual_e_sombra_alheia(uid_pro, ia_fora):
     de T1 com o manual vira pendência e o usuário confirma — o estado fundido
     é o mesmo do antigo auto-merge."""
     conexao = conecta_banco(uid_pro, "1000.00")
-    manda(uid_pro, "gastei 50 no mercado")
+    manda(uid_pro, "gastei 50 no mercado em dinheiro")
     sincroniza(conexao, uid_pro, "850.00", [
         tx(uid_pro, "-50.00", today_tz(), "MERCADO", ident="1"),
         tx(uid_pro, "-100.00", today_tz(), "OUTRO", ident="2"),

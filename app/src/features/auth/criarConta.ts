@@ -59,14 +59,23 @@ export function normalizarTelefone(cru: string): string | null {
 /** Conta como o `len()` do Python (pontos de código), não como `.length` (UTF-16). */
 const tamanho = (s: string) => [...s].length;
 
-/** Erros por campo; objeto vazio = pode enviar. Nenhuma requisição sai com erro aqui. */
-export function validar(d: DadosCadastro): ErrosCadastro {
+/** Legenda do WhatsApp nos dois cadastros (Criar conta e Google). */
+export const LEGENDA_WHATSAPP = "Use o mesmo número com que você vai falar com o Piggy.";
+
+/** Nome e WhatsApp: o que o cadastro pelo Google também pede (`complete-signup`). */
+export function validarPerfil(d: Pick<DadosCadastro, "nome" | "telefone">): ErrosCadastro {
   const erros: ErrosCadastro = {};
   const nome = tamanho(d.nome.trim());
   if (nome < NOME_MIN) erros.nome = `Informe seu nome (pelo menos ${NOME_MIN} letras).`;
   else if (nome > NOME_MAX) erros.nome = `O nome deve ter no máximo ${NOME_MAX} caracteres.`;
-  if (!EMAIL.test(d.email.trim())) erros.email = "Digite um e-mail válido.";
   if (normalizarTelefone(d.telefone) === null) erros.telefone = ERRO_TELEFONE;
+  return erros;
+}
+
+/** Erros por campo; objeto vazio = pode enviar. Nenhuma requisição sai com erro aqui. */
+export function validar(d: DadosCadastro): ErrosCadastro {
+  const erros = validarPerfil(d);
+  if (!EMAIL.test(d.email.trim())) erros.email = "Digite um e-mail válido.";
   if (tamanho(d.senha) < SENHA_MIN) erros.senha = `A senha precisa ter pelo menos ${SENHA_MIN} caracteres.`;
   return erros;
 }

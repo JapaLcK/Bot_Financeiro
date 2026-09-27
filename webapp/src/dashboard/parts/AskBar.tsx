@@ -1,8 +1,6 @@
 import { useState } from "react";
-import { PLAN } from "../lib/api";
 import { ask } from "../lib/conversation";
-import { locked } from "../lib/profiles.js";
-import { href, type Path } from "../router";
+import type { Path } from "../router";
 
 // A barra de conversa com o Piggy. No desktop flutua em todas as páginas; no celular só
 // aparece na página da conversa (lá o acesso é o botão do meio). Na #/piggy ela é a
@@ -12,13 +10,6 @@ export function AskBar({ path }: { path: Path }) {
   const here = path === "/piggy";
   const avatar = <img src="../frontend/brand/icon.png" alt="" width={28} height={28} />;
 
-  if (locked("piggy", PLAN)) {
-    return here ? null : (
-      <a className="askbar" href={href("/piggy")}>
-        {avatar}<span className="askbar-hint">Converse com o Piggy</span><em>no Plus</em>
-      </a>
-    );
-  }
   return (
     <form className="askbar" data-here={here || undefined} role="search" aria-label="Conversa com o Piggy"
       onSubmit={(e) => {

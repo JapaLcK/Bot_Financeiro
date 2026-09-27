@@ -86,7 +86,7 @@ def test_cadastro_pelo_google_entrega_credencial_ao_app(monkeypatch):
     monkeypatch.setattr(
         dashboard,
         "consume_pending_google_signup",
-        lambda token, nome, telefone, origem: {
+        lambda token, nome, telefone, origem, provider: {
             "user_id": UID,
             "email": "google@example.com",
             "link_code": "ABC123",
@@ -97,7 +97,7 @@ def test_cadastro_pelo_google_entrega_credencial_ao_app(monkeypatch):
     monkeypatch.setattr(
         _db,
         "consume_pending_google_signup",
-        lambda token, nome, telefone, origem: {
+        lambda token, nome, telefone, origem, provider: {
             "user_id": UID,
             "email": "google@example.com",
             "link_code": "ABC123",

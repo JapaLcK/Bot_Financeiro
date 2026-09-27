@@ -327,7 +327,7 @@ test("controle positivo: a ilha montou com as seções e os dados nas colunas ce
       secoes,
       escada: linha("No seu plano entra"),
       bancos: linha("Bancos conectados (Open Finance)"),
-      mensagens: linha("Mensagens com a Piggy"),
+      mensagens: linha("Mensagens com o Piggy"),
       previsao: linha("Previsão de saldo"),
       semanal: linha("Resumo semanal automático"),
       insights: linha("Insights e comparações"),

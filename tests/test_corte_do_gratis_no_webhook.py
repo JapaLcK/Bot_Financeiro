@@ -60,9 +60,8 @@ def _event_logs():
 
 @pytest.fixture(autouse=True)
 def _gate_ligado(monkeypatch):
-    """O corte é o default de produção, e o `conftest.py` já roda este arquivo
-    assim (ele não está em `_AINDA_EM_V1`); fixar as duas envs o mantém no v2
-    mesmo se ele entrar na lista."""
+    """O corte é o default de produção, e o `conftest.py` já roda a suíte
+    assim; fixar as duas envs o mantém no v2 mesmo se o padrão da suíte mudar."""
     monkeypatch.setenv("PLANS_V2_ENABLED", "1")
     monkeypatch.setenv("ACCESS_GATE_ENABLED", "1")
 

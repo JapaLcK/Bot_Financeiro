@@ -387,6 +387,56 @@ def has_open_finance_connections(user_id: int) -> bool:
             return cur.fetchone() is not None
 
 
+def buscar_no_extrato(user_id: int, tipo: str, valor, dias: int = 7,
+                      limite: int = 3) -> list[dict]:
+    """Transações do Open Finance deste usuário com o mesmo tipo e valor
+    (tolerância de `RECON_AMOUNT_TOL`) nos últimos `dias`. É o "já está no
+    extrato" da resposta a um lançamento que passou pelo banco (Q40,
+    `core/handlers/forma_pagamento.py`). Parte da transação OF, não da sombra:
+    a conciliada aponta para o lançamento manual e a sombra foi apagada
+    (`confirm_reconciliation`). A compra de cartão importada mora em
+    `credit_transactions`; só entra a ligada a uma transação OF. Só leitura."""
+    valor = Decimal(str(valor))
+    with get_conn() as conn:
+        with conn.cursor() as cur:
+            cur.execute(
+                f"""
+                select dia, alvo, valor from (
+                  -- `imported_launch_id` não é único (`_bind` de db/bank_movements.py)
+                  -- nem `imported_credit_tx_id` (reconexão: o importador deduplica pelo
+                  -- id do provedor): uma linha por lançamento e por compra.
+                  (select distinct on (l.id) o.transaction_date as dia,
+                         o.description as alvo, abs(o.amount) as valor, l.criado_em as ordem
+                    from open_finance_transactions o
+                    join open_finance_accounts a on a.id = o.account_id
+                    join open_finance_connections c on c.id = a.connection_id
+                    join launches l on l.id = o.imported_launch_id and l.user_id = c.user_id
+                   where c.user_id = %s
+                     and {TIPO_CANON_SQL} = %s
+                     and abs(abs(o.amount) - %s) <= %s
+                     and o.transaction_date >= current_date - %s::int
+                   order by l.id, o.id)
+                  union all
+                  (select distinct on (ct.id) ct.purchased_at, o.description, ct.valor,
+                         ct.created_at
+                    from credit_transactions ct
+                    join open_finance_transactions o on o.imported_credit_tx_id = ct.id
+                    join open_finance_accounts a on a.id = o.account_id
+                    join open_finance_connections c on c.id = a.connection_id
+                   where ct.user_id = %s and c.user_id = %s and %s = 'despesa'
+                     and abs(ct.valor - %s) <= %s
+                     and ct.purchased_at >= current_date - %s::int
+                   order by ct.id, o.id)
+                ) x
+                 order by ordem desc
+                 limit %s
+                """,
+                (user_id, tipo, valor, RECON_AMOUNT_TOL, int(dias),
+                 user_id, user_id, tipo, valor, RECON_AMOUNT_TOL, int(dias), int(limite)),
+            )
+            return cur.fetchall()
+
+
 def list_open_finance_user_ids() -> list[int]:
     """user_ids distintos com pelo menos 1 banco Pluggy conectado (pros ticks proativos)."""
     with get_conn() as conn:
@@ -1523,15 +1573,15 @@ def sync_open_finance_caixinhas(connection_id: int, user_id: int) -> dict:
                 for tentativa in range(1, 51):
                     new_name = name if tentativa == 1 else f"{name} {tentativa}"
                     # Duas guardas, porque elas cobrem coisas diferentes:
-                    # `not exists` com lower() é a de NOME, porque o unique da
-                    # tabela é `unique(user_id, name)` — CASE-SENSITIVE
-                    # (db/schema.py:115) — enquanto o resto do código de caixinha
-                    # compara `lower(name)`. Sem ela, o usuário com "caixinha
-                    # nubank" ganhava uma "Caixinha Nubank" do banco: duas
-                    # caixinhas de mesmo nome na tela, e o `on conflict` nunca via
-                    # a colisão. `on conflict do nothing` é a de CORRIDA: fecha a
-                    # janela TOCTOU entre o `not exists` e o insert sem abortar a
-                    # transação (era a UniqueViolation que levava o import inteiro).
+                    # `not exists` com lower() é a de NOME: o índice
+                    # uq_pockets_user_lower_name (#596) já recusa "Caixinha
+                    # Nubank" ao lado de "caixinha nubank", mas o `init_db` o
+                    # PULA se houver duplicata antiga, e aí só esta guarda impede
+                    # a caixinha de mesmo nome na tela. `on conflict do nothing`
+                    # (sem alvo, para valer com e sem o índice) é a de CORRIDA:
+                    # fecha a janela TOCTOU entre o `not exists` e o insert sem
+                    # abortar a transação (era a UniqueViolation que levava o
+                    # import inteiro).
                     cur.execute(
                         """
                         insert into pockets(
@@ -1544,7 +1594,7 @@ def sync_open_finance_caixinhas(connection_id: int, user_id: int) -> dict:
                         where not exists (
                             select 1 from pockets where user_id=%s and lower(name)=lower(%s)
                         )
-                        on conflict (user_id, name) do nothing
+                        on conflict do nothing
                         """,
                         (user_id, new_name, bal, of_id, bal, profit, user_id, new_name),
                     )

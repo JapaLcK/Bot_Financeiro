@@ -32,6 +32,7 @@ from core.services.media_service import (
 )
 from core.observability import log_system_event_sync
 from core.services.plan_limits import PlanLimitExceeded
+from core.services.ai_chat_commands import MANTEM, ENCERRA, aviso_de_cota, pergunta_no_turno
 from utils_text import fmt_brl
 from ai_router import _internal_user_id
 
@@ -129,12 +130,14 @@ def _split_audio_transactions(text: str) -> list[str]:
     return split_financial_transactions(text)
 
 
-def _process_audio_transaction(uid: int, transcription: str, msg: IncomingMessage, platform: str) -> str:
+def _process_audio_transaction(uid: int, transcription: str, msg: IncomingMessage, platform: str,
+                               forma: str | None = None, intent_result=None) -> str:
     """
     Processa um único lançamento de áudio diretamente (sem confirmação).
-    Retorna a resposta formatada.
+    Retorna a resposta formatada. `forma`: a forma de pagamento declarada para
+    o áudio inteiro (Q40); `intent_result`: a classificação já feita.
     """
-    intent_result = classify(transcription, user_id=uid)
+    intent_result = intent_result or classify(transcription, user_id=uid)
     msg_from_audio = IncomingMessage(
         platform=msg.platform,
         user_id=uid,
@@ -144,11 +147,141 @@ def _process_audio_transaction(uid: int, transcription: str, msg: IncomingMessag
         external_id=msg.external_id,
         raw=msg.raw,
     )
-    raw_response = route(intent_result, msg_from_audio)
+    raw_response = route(intent_result, msg_from_audio, forma_pagamento=forma)
     return format_for_platform(raw_response, platform)
 
 
-def _handle_audio(msg: IncomingMessage, platform: str) -> list[OutgoingMessage] | None:
+def rotear_partes(uid: int, parts: list[str], msg: IncomingMessage, platform: str,
+                  forma: str | None = None, resultados: list | None = None) -> tuple[str, bool]:
+    """Roteia os pedaços de um áudio, cada um no seu fluxo; devolve (corpo,
+    pediu_valor). `forma`: a forma declarada para o áudio inteiro (Q40, banco
+    conectado — também a resposta à pergunta de forma do áudio, em
+    `core/handlers/forma_pagamento.py`); None = cada pedaço pela própria frase.
+    `resultados`: as classificações já feitas, alinhadas com `parts`."""
+    from core.handlers import forma_pagamento as fp
+    is_multi = len(parts) > 1
+    responses = []
+    fallbacks = []
+    # Pedaços de um áudio múltiplo que vêm com verbo mas SEM valor
+    # ("gastei 500 no ifood e paguei o aluguel"). No texto digitado esse ramo
+    # já pergunta o valor (core.handlers.launches.add); aqui o áudio pré-divide
+    # a transcrição ANTES do add(), então cada pedaço vira um route() separado e
+    # o pedaço sem valor cairia no "não consegui identificar o valor". Detectamos
+    # antes de rotear e enfileiramos pra perguntar o valor — paridade com o texto.
+    missing: list[dict] = []
+    puladas: list[str] = []
+    if is_multi:
+        from parsers import describe_valueless_launch
+        from core.handlers.launches import _aviso_pergunta_pulada, register_if_recurring
+    for i, part in enumerate(parts):
+        if is_multi and is_comparative_question(part):
+            puladas.append(part)  # igual ao texto
+            continue
+        if is_multi:
+            info = describe_valueless_launch(fp.limpar(part) if forma == fp.DINHEIRO else part)
+            if info:
+                tipo, desc = info
+                if forma and fp.decidir(uid, forma) == fp.BANCO:
+                    responses.append(format_for_platform(fp.msg_banco(uid, tipo, None), platform))
+                    continue
+                f = forma or fp.detectar(part)
+                # Valor recorrente conhecido ("aluguel" que sempre é o mesmo) →
+                # lança sozinho (com aviso). Senão, enfileira pra perguntar.
+                auto = register_if_recurring(uid, tipo, desc, platform, forma_pagamento=f)
+                if auto is not None:
+                    # add_from_entities devolve markdown estilo Discord (**bold**);
+                    # os demais pedaços do áudio já saem formatados por
+                    # _process_audio_transaction, então formatamos este também.
+                    responses.append(format_for_platform(auto, platform))
+                else:
+                    missing.append({"tipo": tipo, "desc": desc, "forma_pagamento": f})
+                continue
+        result_text = _process_audio_transaction(uid, part, msg, platform, forma,
+                                                 resultados[i] if resultados else None)
+        # A quebra em múltiplos lançamentos (_split_audio_transactions) pode
+        # separar um pedaço real ("comprei 550 de pão doce") de um pedaço que
+        # é só ruído da fala ("fala pig, sei que lá, sei que lá,"). O pedaço
+        # de ruído roteia pro help genérico ("Não entendi..."). Colar esse
+        # fallback num "Despesa registrada" gera resposta contraditória —
+        # então separamos e só mostramos o fallback se NADA foi registrado.
+        if _looks_like_help_fallback(result_text):
+            fallbacks.append(result_text)
+        else:
+            responses.append(result_text)
+
+    # Enfileira a pergunta de valor faltante e monta a pergunta do primeiro item.
+    # Setar o pending por ÚLTIMO garante que ele sobrevive: o route() de cada
+    # pedaço acima pode ter armado um pending próprio (ex: "categoria errada?"),
+    # mas o multi_launch_values é o que a próxima resposta do usuário resolve.
+    # Com a forma do áudio (Q40), por claim: um pedaço pode ter armado uma
+    # PERGUNTA de verdade (ex.: o valor da conta), e a fila não a apaga.
+    ask_value_question = ""
+    if missing:
+        from core.handlers.launches import _ask_value_question
+        fila = {"queue": missing, "platform": platform}
+        if forma is None:
+            db.set_pending_action(uid, "multi_launch_values", fila)
+            ask_value_question = _ask_value_question(missing[0])
+        elif db.claim_pending_action(uid, "multi_launch_values", fila):
+            ask_value_question = _ask_value_question(missing[0])
+        else:
+            nomes = ", ".join(f"*{m['desc']}*" for m in missing)
+            ask_value_question = (f"🐷 Não registrei {nomes}: antes tem outra pergunta minha "
+                                  "esperando. Responde ela e me manda de novo.")
+
+    if responses:
+        body = "\n\n".join(responses)
+    elif missing or puladas:
+        # Nada com valor foi registrado, mas há pedaço(s) esperando valor ou
+        # pulado(s) — a pergunta/aviso abaixo cobre; sem o fallback "não entendi".
+        body = ""
+    else:
+        # Nenhum pedaço virou lançamento válido — mostra UM fallback só
+        # (não repetido por pedaço).
+        body = fallbacks[0] if fallbacks else (
+            "🎙️ Recebi seu áudio, mas não entendi o que registrar.\n"
+            'Tente algo como: "gastei 50 no mercado".'
+        )
+
+    # Aviso depois da pergunta: o texto com pergunta diz "a pergunta acima".
+    # Fila que já existia não chega aqui: com ela o áudio não é dividido (_handle_audio).
+    avisos = [_aviso_pergunta_pulada(p, missing) for p in puladas]
+    body = "\n\n".join(b for b in [body, ask_value_question, *avisos] if b)
+    return body, bool(missing)
+
+
+def _resposta_da_ia(uid: int, text: str, platform: str, rotulo: str,
+                    erro_se_falhar: bool = False) -> str | None:
+    """Resposta da IA formatada; None se o usuário não tem a IA (com
+    `erro_se_falhar` e a cota esgotada, o aviso de cota). Se a IA
+    falhar: None (o chamador segue o fluxo) ou, com `erro_se_falhar`, a
+    mensagem de erro — a resposta à pergunta da IA não pode cair no route()."""
+    try:
+        from core.services.plan_service import ai_chat_allowed, ai_monthly_limit_for
+        if ai_chat_allowed(uid):
+            from core.services.ai_chat import chat as ai_chat_run
+            ai_reply = ai_chat_run(
+                uid, text, monthly_limit=ai_monthly_limit_for(uid), platform=platform,
+            )
+            pergunta_no_turno.set(MANTEM)
+            return format_for_platform(ai_reply, platform)
+        # Cota esgotada com a pergunta aberta: avisa e não grava; a pergunta
+        # fecha (a próxima mensagem volta ao fluxo normal).
+        aviso = aviso_de_cota(uid) if erro_se_falhar else None
+        if aviso:
+            pergunta_no_turno.set(None)
+            return format_for_platform(aviso, platform)
+    except Exception as exc:
+        logger.warning("%s falhou pra user %s: %s", rotulo, uid, exc)
+        if erro_se_falhar:
+            pergunta_no_turno.set(MANTEM)
+            from core.services.ai_chat.runner import ERROR_MSG
+            return format_for_platform(ERROR_MSG, platform)
+    return None
+
+
+def _handle_audio(msg: IncomingMessage, platform: str,
+                  pergunta_ia: int | None = None) -> list[OutgoingMessage] | None:
     """
     Detecta anexo de áudio, transcreve via Whisper e processa diretamente.
 
@@ -174,6 +307,8 @@ def _handle_audio(msg: IncomingMessage, platform: str) -> list[OutgoingMessage] 
     ]
     if not audio_atts:
         return None
+    # Até a transcrição virar texto, a mensagem não foi lida.
+    pergunta_no_turno.set(MANTEM)
 
     a = audio_atts[0]
     data = getattr(a, "data", None)
@@ -217,16 +352,58 @@ def _handle_audio(msg: IncomingMessage, platform: str) -> list[OutgoingMessage] 
     prefix = "_" if platform == "discord" else ""
     preview = f'🎙️ {prefix}Entendi: "{transcription}"{prefix}\n\n'
 
+    # Mesma regra do texto (5b do `handle_incoming`): pergunta da IA em aberto
+    # e nenhuma pendência → a transcrição inteira responde à IA. Se a consulta
+    # da pendência falha, a exceção sobe ao except do `handle_incoming`, que
+    # mantém a pergunta: sem route().
+    if pergunta_ia is not None and db.get_pending_action(uid) is None:
+        ai_reply = _resposta_da_ia(uid, transcription, platform, "áudio→IA",
+                                   erro_se_falhar=True)
+        if ai_reply is not None:
+            return [OutgoingMessage(text=preview + ai_reply)]
+
+    pergunta_no_turno.set(None)  # roteado: atendido fora da IA
     # Detecta múltiplos lançamentos no mesmo áudio. Com a fila do multi de pé e
     # uma pergunta comparativa na fala, NÃO divide: dividido, o pedaço "gastei
     # 30 no uber" respondia a fila (R$ 30 no aluguel). Inteiro, cai na recusa
     # da fila, igual ao texto digitado. Banco só lido quando o predicado bate.
+    # Pedaço comparativo não pede a forma (Q40): `classify` dá out_of_scope.
     parts = _split_audio_transactions(transcription)
     if len(parts) > 1 and contains_comparative_question(transcription):
         viva = db.get_pending_action(uid)
         if viva and viva.get("action_type") == "multi_launch_values":
             parts = [transcription]
-    is_multi = len(parts) > 1
+    forma, resultados, aviso_misto = None, None, ""
+    if len(parts) > 1:
+        # Q40: com banco conectado, a forma vale para o áudio inteiro, como no
+        # texto digitado — mas cada pedaço segue no SEU fluxo (caixinha, conta,
+        # gasto), igual ao áudio sem banco.
+        from core.handlers import forma_pagamento as fp
+        from parsers import describe_valueless_launch
+        if fp.regra_ativa(uid):
+            forma = fp.detectar(transcription)
+        if forma in (fp.DESCONHECIDA, fp.MISTO):
+            # Quem precisa da forma: gasto/receita (com ou sem valor) e conta.
+            resultados = [None if describe_valueless_launch(p) else classify(p, user_id=uid)
+                          for p in parts]
+            precisa = [r is None or r.intent == "launches.add" for r in resultados]
+            if any(precisa) and forma == fp.DESCONHECIDA:
+                # UMA pergunta e o áudio inteiro espera por ela: rodar os outros
+                # pedaços agora poderia armar outra pergunta por cima desta.
+                i = precisa.index(True)
+                info = describe_valueless_launch(parts[i])
+                tipo = info[0] if info else (resultados[i].entities or {}).get("tipo")
+                texto = fp.perguntar(uid, {"fluxo": "audio", "partes": parts, "platform": platform},
+                                     fp.pergunta_lancamento(tipo, None))
+                return [OutgoingMessage(text=preview + format_for_platform(texto, platform))]
+            if any(precisa):
+                # Misto: o que precisa da forma não grava; o resto segue.
+                aviso_misto = fp.msg_misto()
+                resultados = [r for r, x in zip(resultados, precisa) if not x]
+                parts = [p for p, x in zip(parts, precisa) if not x]
+                if not parts:
+                    return [OutgoingMessage(text=preview + aviso_misto)]
+            forma = None
 
     # Maior id de lançamento ANTES de processar este áudio. Serve pra saber se
     # este turno REALMENTE inseriu um lançamento — uma resposta por áudio que só
@@ -238,88 +415,14 @@ def _handle_audio(msg: IncomingMessage, platform: str) -> list[OutgoingMessage] 
     # sim, é sempre o maior.
     pre_launch_id = db.latest_launch_id(uid)
 
-    responses = []
-    fallbacks = []
-    # Pedaços de um áudio múltiplo que vêm com verbo mas SEM valor
-    # ("gastei 500 no ifood e paguei o aluguel"). No texto digitado esse ramo
-    # já pergunta o valor (core.handlers.launches.add); aqui o áudio pré-divide
-    # a transcrição ANTES do add(), então cada pedaço vira um route() separado e
-    # o pedaço sem valor cairia no "não consegui identificar o valor". Detectamos
-    # antes de rotear e enfileiramos pra perguntar o valor — paridade com o texto.
-    missing: list[dict] = []
-    puladas: list[str] = []
-    if is_multi:
-        from parsers import describe_valueless_launch
-        from core.handlers.launches import _aviso_pergunta_pulada, register_if_recurring
-    for part in parts:
-        if is_multi and is_comparative_question(part):
-            puladas.append(part)  # igual ao texto
-            continue
-        if is_multi:
-            info = describe_valueless_launch(part)
-            if info:
-                tipo, desc = info
-                # Valor recorrente conhecido ("aluguel" que sempre é o mesmo) →
-                # lança sozinho (com aviso). Senão, enfileira pra perguntar.
-                auto = register_if_recurring(uid, tipo, desc, platform)
-                if auto is not None:
-                    # add_from_entities devolve markdown estilo Discord (**bold**);
-                    # os demais pedaços do áudio já saem formatados por
-                    # _process_audio_transaction, então formatamos este também.
-                    responses.append(format_for_platform(auto, platform))
-                else:
-                    missing.append({"tipo": tipo, "desc": desc})
-                continue
-        result_text = _process_audio_transaction(uid, part, msg, platform)
-        # A quebra em múltiplos lançamentos (_split_audio_transactions) pode
-        # separar um pedaço real ("comprei 550 de pão doce") de um pedaço que
-        # é só ruído da fala ("fala pig, sei que lá, sei que lá,"). O pedaço
-        # de ruído roteia pro help genérico ("Não entendi..."). Colar esse
-        # fallback num "Despesa registrada" gera resposta contraditória —
-        # então separamos e só mostramos o fallback se NADA foi registrado.
-        if _looks_like_help_fallback(result_text):
-            fallbacks.append(result_text)
-        else:
-            responses.append(result_text)
-
-    registered_something = bool(responses)
+    body, missing = rotear_partes(uid, parts, msg, platform, forma, resultados)
+    if aviso_misto:
+        body = f"{body}\n\n{aviso_misto}"
 
     # Este turno REALMENTE inseriu um lançamento? (vs só resolver uma pendência,
     # que devolve texto normal mas não cria lançamento). É o que decide o undo.
     post_launch_id = db.latest_launch_id(uid)
     inserted_launch = post_launch_id is not None and post_launch_id != pre_launch_id
-
-    # Enfileira a pergunta de valor faltante e monta a pergunta do primeiro item.
-    # Setar o pending por ÚLTIMO garante que ele sobrevive: o route() de cada
-    # pedaço acima pode ter armado um pending próprio (ex: "categoria errada?"),
-    # mas o multi_launch_values é o que a próxima resposta do usuário resolve.
-    ask_value_question = ""
-    if missing:
-        from core.handlers.launches import _ask_value_question
-        db.set_pending_action(
-            uid, "multi_launch_values",
-            {"queue": missing, "platform": platform},
-        )
-        ask_value_question = _ask_value_question(missing[0])
-
-    if registered_something:
-        body = "\n\n".join(responses)
-    elif missing or puladas:
-        # Nada com valor foi registrado, mas há pedaço(s) esperando valor ou
-        # pulado(s) — a pergunta/aviso abaixo cobre; sem o fallback "não entendi".
-        body = ""
-    else:
-        # Nenhum pedaço virou lançamento válido — mostra UM fallback só
-        # (não repetido por pedaço).
-        body = fallbacks[0] if fallbacks else (
-            "🎙️ Recebi seu áudio, mas não entendi o que registrar.\n"
-            'Tente algo como: "gastei 50 no mercado".'
-        )
-
-    # Aviso depois da pergunta: o texto com pergunta diz "a pergunta acima".
-    # Fila que já existia não chega aqui: com ela o áudio não é dividido (acima).
-    avisos = [_aviso_pergunta_pulada(p, missing) for p in puladas]
-    body = "\n\n".join(b for b in [body, ask_value_question, *avisos] if b)
 
     # Dica de desfazer — só faz sentido se um lançamento foi de fato inserido
     # NESTE turno. Uma resposta por áudio que só resolve pendência ("cancelar",
@@ -722,18 +825,26 @@ def _paywall_gate(msg: IncomingMessage, platform: str) -> list[OutgoingMessage] 
 
 
 def handle_incoming(msg: IncomingMessage, *,
-                    ignora_pendencias: bool = False) -> list[OutgoingMessage]:
+                    ignora_pendencias: bool = False,
+                    de_botao: bool = False) -> list[OutgoingMessage]:
     # `ignora_pendencias`: repassado cru ao `route()`. Um chamador só — a
     # porta 4 (`adapters/whatsapp/wa_runtime.py`), quando o CAS de abandono
     # dela perde para uma pergunta NOVA que outra tarefa acabou de pôr na
     # linha. Ver a docstring do `route()`.
+    # `de_botao`: a mensagem veio de botão/lista interativa do WhatsApp — não
+    # é capturada pela pergunta aberta da IA (decisão do dono). Com `ai_pending`
+    # o botão ainda chega à IA pelo `handle_ai_chat_command` (confirma a ação).
     platform = msg.platform
 
-    # Pergunta que a IA deixou em aberto antes deste turno. Um "sim" a ela vai
-    # para a IA (5b); qualquer turno que a IA não atender a encerra (`finally`).
+    # Pergunta que a IA deixou em aberto antes deste turno. Sem pendência, a
+    # resposta a ela (texto ou áudio) vai para a IA (5b e `_handle_audio`) —
+    # "300 reais transporte" é o orçamento que ela pediu, não uma despesa.
+    # O `finally` a encerra quando o turno leu e atendeu a mensagem fora da IA
+    # (`pergunta_no_turno`).
     from core.services.ai_chat_commands import (
         encerra_pergunta_da_ia, pergunta_aberta_da_ia,
     )
+    marca = pergunta_no_turno.set(None)
     pergunta_uid = pergunta_ia = None
     try:
         pergunta_uid = _normalize_user_id(msg)
@@ -839,7 +950,7 @@ def handle_incoming(msg: IncomingMessage, *,
         # ------------------------------------------------------------------
         # 2. Anexo ÁUDIO — transcreve via Whisper e processa como texto
         # ------------------------------------------------------------------
-        audio_result = _handle_audio(msg, platform)
+        audio_result = _handle_audio(msg, platform, pergunta_ia)
         if audio_result is not None:
             return audio_result
 
@@ -873,6 +984,7 @@ def handle_incoming(msg: IncomingMessage, *,
         # ------------------------------------------------------------------
         text = (msg.text or "").strip()
         if not text:
+            pergunta_no_turno.set(MANTEM)
             return []
 
         if platform == "whatsapp":
@@ -919,20 +1031,23 @@ def handle_incoming(msg: IncomingMessage, *,
         # pela IA — que não conhece o valor já informado e falha com "valor
         # precisa ser maior que zero". route() resolve a pendência primeiro.
         has_resumable_pending = False
-        # "sim"/"não" sem pendência nenhuma, logo depois de a IA perguntar algo
-        # ("Quer que eu mostre suas maiores despesas?"), responde à IA — sem
-        # isto o route() devolve "não entendi". Com pendência, o route() decide.
+        # Qualquer texto sem pendência nenhuma, logo depois de a IA perguntar
+        # algo, responde à IA: o "sim" à oferta, o "300 reais transporte" ao
+        # orçamento pedido (que o route() gravaria como despesa). Com pendência,
+        # o route() decide; botão interativo não é capturado aqui.
         responde_a_ia = False
+        capturavel = (pergunta_ia is not None and not de_botao
+                      and pergunta_no_turno.get() != ENCERRA)
         try:
             _pend = db.get_pending_action(uid)
             if _pend and suprime_fallback_de_ia(_pend.get("action_type")):
                 has_resumable_pending = True
-            responde_a_ia = (
-                pergunta_ia is not None
-                and _pend is None
-                and intent_result.intent in ("confirm.yes", "confirm.no")
-            )
+            responde_a_ia = capturavel and _pend is None
         except Exception:
+            # Com a pergunta aberta, não dá para saber se o texto responde à IA:
+            # sobe ao except geral, que mantém a pergunta, sem route().
+            if capturavel:
+                raise
             has_resumable_pending = False
 
         should_try_ai_fallback = (
@@ -944,20 +1059,11 @@ def handle_incoming(msg: IncomingMessage, *,
             )
         )
         if should_try_ai_fallback:
-            try:
-                from core.services.plan_service import ai_chat_allowed, ai_monthly_limit_for
-                if ai_chat_allowed(uid):
-                    from core.services.ai_chat import chat as ai_chat_run
-                    ai_reply = ai_chat_run(
-                        uid, text, monthly_limit=ai_monthly_limit_for(uid), platform=platform,
-                    )
-                    return [OutgoingMessage(text=format_for_platform(ai_reply, platform))]
-            except Exception as exc:
-                logger.warning(
-                    "ai fallback falhou pra user %s: %s — caindo no fluxo normal",
-                    uid, exc,
-                )
-                # segue pro route() abaixo (resposta padrão "não entendi")
+            ai_reply = _resposta_da_ia(uid, text, platform, "ai fallback",
+                                       erro_se_falhar=responde_a_ia)
+            if ai_reply is not None:
+                return [OutgoingMessage(text=ai_reply)]
+            # sem IA, ou falhou sem pergunta aberta: segue pro route() abaixo
 
         # ------------------------------------------------------------------
         # 6. Roteia → executa → obtém resposta bruta
@@ -985,19 +1091,9 @@ def handle_incoming(msg: IncomingMessage, *,
             and infer_help_from_text(text, platform) is None
         )
         if not resposta_de_saudacao and _looks_like_help_fallback(raw_response):
-            try:
-                from core.services.plan_service import ai_chat_allowed, ai_monthly_limit_for
-                if ai_chat_allowed(uid):
-                    from core.services.ai_chat import chat as ai_chat_run
-                    ai_reply = ai_chat_run(
-                        uid, text, monthly_limit=ai_monthly_limit_for(uid), platform=platform,
-                    )
-                    return [OutgoingMessage(text=format_for_platform(ai_reply, platform))]
-            except Exception as exc:
-                logger.warning(
-                    "help→AI fallback falhou pra user %s: %s — devolve help original",
-                    uid, exc,
-                )
+            ai_reply = _resposta_da_ia(uid, text, platform, "help→AI fallback")
+            if ai_reply is not None:
+                return [OutgoingMessage(text=ai_reply)]
 
         # ------------------------------------------------------------------
         # 7. Formata para o canal
@@ -1013,6 +1109,7 @@ def handle_incoming(msg: IncomingMessage, *,
         return [OutgoingMessage(text=format_for_platform(exc.message, msg.platform))]
 
     except Exception as exc:
+        pergunta_no_turno.set(MANTEM)
         tb = traceback.format_exc()
         logger.error(
             "handle_incoming FAILED platform=%s user_id=%s text=%r error=%s",
@@ -1049,5 +1146,6 @@ def handle_incoming(msg: IncomingMessage, *,
         )]
 
     finally:
-        if pergunta_ia is not None:
+        if pergunta_ia is not None and pergunta_no_turno.get() != MANTEM:
             encerra_pergunta_da_ia(pergunta_uid, pergunta_ia)
+        pergunta_no_turno.reset(marca)

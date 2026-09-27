@@ -240,6 +240,7 @@ def test_delete_launch_aporte_com_resgate_diz_o_que_destrava_no_ai_chat(user_id)
 
     assert "antigo" not in msg.lower(), f"condição temporária vendida como permanente: {msg!r}"
     assert "de novo" not in msg.lower(), f"retry que nunca funciona: {msg!r}"
-    assert "resgate" in msg.lower(), f"não diz o que destrava: {msg!r}"
+    # Guarda "só o último movimento": o resgate posterior recusa antes do lote.
+    assert "mais novos primeiro" in msg.lower(), f"não diz o que destrava: {msg!r}"
     assert f"#{seq}" in msg, msg
     assert db.resolve_user_seq_to_id(user_id, seq) == int(aporte_id), "o aporte não podia sumir"

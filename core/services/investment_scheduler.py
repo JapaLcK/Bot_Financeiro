@@ -1,9 +1,10 @@
 """
-Atualização automática dos investimentos.
+Acumulação final dos investimentos e caixinhas manuais (Q43).
 
-O cálculo de juros é idempotente por investimento/lote porque usa last_date.
-Assim, o loop pode rodar algumas vezes ao dia: ele só aplica datas novas quando
-taxas oficiais novas estiverem disponíveis.
+Caixinha e investimento manuais não rendem mais: cada um recebe UMA acumulação
+final, que carimba `interest_frozen_at` (db/investments.py::accrue_investment_db,
+db/pockets.py::accrue_pocket_db). Este laço varre só quem ainda tem ativo sem
+carimbo; usuário que falhou continua na lista e tenta de novo na próxima rodada.
 """
 from __future__ import annotations
 
@@ -39,24 +40,31 @@ def _startup_delay_seconds() -> int:
 def accrue_all_users_investments() -> dict[str, int]:
     import db
 
-    user_ids = db.list_users_with_investments()
+    user_ids = db.list_users_with_unfrozen_interest()
     updated = 0
     failed = 0
 
     for user_id in user_ids:
-        try:
-            db.accrue_all_investments(user_id)
+        ok = True
+        # Um try por tipo: falha nos investimentos não pula as caixinhas.
+        for tipo, accrue in (("investimentos", db.accrue_all_investments),
+                             ("caixinhas", db.accrue_all_pockets)):
+            try:
+                accrue(user_id)
+            except Exception as exc:
+                ok = False
+                logger.warning("Falha ao atualizar %s user_id=%s: %s", tipo, user_id, exc, exc_info=True)
+                log_system_event_sync(
+                    "warning",
+                    "investment_accrual_user_failed",
+                    f"Falha ao atualizar {tipo} automaticamente: {exc}",
+                    source="investment_scheduler",
+                    user_id=user_id,
+                )
+        if ok:
             updated += 1
-        except Exception as exc:
+        else:
             failed += 1
-            logger.warning("Falha ao atualizar investimentos user_id=%s: %s", user_id, exc, exc_info=True)
-            log_system_event_sync(
-                "warning",
-                "investment_accrual_user_failed",
-                f"Falha ao atualizar investimentos automaticamente: {exc}",
-                source="investment_scheduler",
-                user_id=user_id,
-            )
 
     return {"users": len(user_ids), "updated": updated, "failed": failed}
 

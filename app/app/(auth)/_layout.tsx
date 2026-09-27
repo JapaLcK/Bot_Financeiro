@@ -1,6 +1,7 @@
 import { Stack } from "expo-router";
 
 import { OPCOES_SHEET } from "@/ui/componentes/Sheet";
+import { useTema } from "@/ui/tema";
 
 /**
  * Existe por causa da sheet: "Esqueci a senha" precisa de
@@ -23,8 +24,12 @@ import { OPCOES_SHEET } from "@/ui/componentes/Sheet";
 export const unstable_settings = { initialRouteName: "entrar" };
 
 export default function LayoutAuth() {
+  // Sem `contentStyle`, a tela fica com o fundo padrão do react-navigation
+  // (cinza claro) — e ele aparece no espaço que o `KeyboardAvoidingView` abre
+  // para o teclado, até no tema escuro.
+  const { cores } = useTema();
   return (
-    <Stack screenOptions={{ headerShown: false }}>
+    <Stack screenOptions={{ headerShown: false, contentStyle: { backgroundColor: cores.bg } }}>
       <Stack.Screen name="entrar" />
       <Stack.Screen name="criar-conta" />
       <Stack.Screen name="esqueci-senha" options={OPCOES_SHEET} />

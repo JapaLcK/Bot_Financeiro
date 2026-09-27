@@ -149,6 +149,7 @@ def test_execute_consistente_com_handler_tradicional(user_id):
             valor=25,
             alvo="uber",
             platform="ia",
+            forma_pagamento="desconhecida",
         )
 
         # Mesma quebra de linhas; só o ID interno pode diferir

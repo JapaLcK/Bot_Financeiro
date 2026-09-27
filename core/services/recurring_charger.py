@@ -1,20 +1,18 @@
 """
-core/services/recurring_charger.py — Cobra gastos fixos e credita receitas
-recorrentes automaticamente.
+core/services/recurring_charger.py — Contas a pagar e avisos de vencimento dos recorrentes.
 
-Roda como background task no startup. Verifica a cada hora:
+Roda como background task no startup. A cada hora, `sync_manual_bills_once`
+cria as `bill_instances` do próximo ciclo dos recorrentes `payment_mode='manual'`
+(é delas que sai o lembrete de vencimento), e `sync_autopay_notices_once` grava
+em `recurring_charges`, SEM lançamento, o aviso do autopay que vence hoje (o
+banner do dashboard mostra "dia de débito no banco"). Não debita nada.
 
-1. `recurring_expenses` com `due_day <= today` não cobrados neste mês.
-   Cria launch (account) ou credit_transaction (cartão) + registra em
-   `recurring_charges` (idempotência via UNIQUE(recurring_id, ym)).
-2. `recurring_incomes` com `pay_day <= today` não creditadas neste mês.
-   Cria launch receita + registra em `recurring_income_credits`
-   (idempotência via UNIQUE(income_id, ym)).
-
-Cobrança em cartão de crédito:
-- Acha a `credit_bills` open atual do cartão (status='open', period contendo today).
-- Se não existir, dispara `ensure_open_bill_for_today` (deixa o fluxo padrão criar).
-- Adiciona tx + atualiza bill.total.
+Recorrente só PREVÊ (docs/plano-dashboard-v2.md, Q42): gasto fixo e receita
+recorrente entram na Previsão (`core/services/cashflow.py`) e nunca são lançados
+sozinhos — o dinheiro de verdade vem do Open Finance ou do lançamento do usuário.
+O cobrador que lançava gasto fixo (conta e cartão) e creditava receita foi
+removido; as linhas que ele deixou em `recurring_charges` /
+`recurring_income_credits` ficam como histórico (Q37).
 """
 from __future__ import annotations
 
@@ -23,32 +21,13 @@ import calendar
 import sys
 import traceback
 from datetime import date, timedelta
-from decimal import Decimal
-
-from db.connection import get_conn
 
 
 async def run_recurring_charger_loop():
-    """Loop infinito: verifica e cobra/credita a cada hora."""
+    """Loop infinito: a cada hora, contas a pagar e avisos de vencimento do autopay."""
     while True:
         try:
             await asyncio.sleep(5)  # delay inicial pra não pegar startup
-            await asyncio.to_thread(charge_due_recurring_expenses_once)
-        except asyncio.CancelledError:
-            raise
-        except Exception as exc:
-            print(f"[recurring_charger] erro: {exc}", file=sys.stderr)
-            traceback.print_exc(file=sys.stderr)
-        try:
-            # Receitas rodam em try separado: falha na despesa não pode
-            # impedir o crédito da receita (e vice-versa).
-            await asyncio.to_thread(credit_due_recurring_incomes_once)
-        except asyncio.CancelledError:
-            raise
-        except Exception as exc:
-            print(f"[recurring_income] erro: {exc}", file=sys.stderr)
-            traceback.print_exc(file=sys.stderr)
-        try:
             # Contas a pagar (manual): gera as instâncias do ciclo. NÃO debita —
             # só cria a pendência; o lembrete sai pelo report diário e o
             # pagamento é confirmado pelo user.
@@ -57,6 +36,13 @@ async def run_recurring_charger_loop():
             raise
         except Exception as exc:
             print(f"[bills] erro: {exc}", file=sys.stderr)
+            traceback.print_exc(file=sys.stderr)
+        try:
+            await asyncio.to_thread(sync_autopay_notices_once)
+        except asyncio.CancelledError:
+            raise
+        except Exception as exc:
+            print(f"[autopay_notice] erro: {exc}", file=sys.stderr)
             traceback.print_exc(file=sys.stderr)
         await asyncio.sleep(60 * 60)  # 1 hora entre verificações
 
@@ -151,404 +137,35 @@ def sync_manual_bills_once(today: date | None = None, user_id: int | None = None
     return n
 
 
-def charge_due_recurring_expenses_once(today: date | None = None) -> list[dict]:
-    """Roda uma passada. Retorna lista de cobranças efetuadas (pra logging).
-    Pulável e idempotente — pode rodar várias vezes no mesmo dia sem duplicar.
-    """
+def sync_autopay_notices_once(today: date | None = None) -> int:
+    """Grava o aviso de vencimento de cada gasto fixo autopay que vence HOJE
+    (conta ou cartão). Não lança nada. Diário não avisa (seria todo dia). A data
+    sai de `_recurring_occurrence_dates`, a mesma da Previsão. A chave é a do
+    cobrador antigo (mensal/anual `YYYY-MM`, semanal `w:`, único `o:`), então o
+    período que ele já lançou não ganha aviso duplicado. Retorna quantos criou."""
+    from core.services.cashflow import _recurring_occurrence_dates
+    from db.recurring import ensure_autopay_notice, list_active_autopay_recurrings
+
     today = today or date.today()
-    ym = today.strftime("%Y-%m")
-
-    with get_conn() as conn:
-        with conn.cursor() as cur:
-            cur.execute(
-                """
-                select r.id, r.user_id, r.name, r.amount, r.category,
-                       r.due_day, r.payment_type, r.card_id
-                from recurring_expenses r
-                where r.is_active = true
-                  -- só autopay lança sozinho; 'manual' (conta a pagar) é tratado
-                  -- por sync_manual_bills_once (lembra + espera confirmação).
-                  and coalesce(r.payment_mode, 'autopay') = 'autopay'
-                  and r.due_day <= %s
-                  and (
-                      -- MENSAL (default): cobra todo mês; idempotência por ym.
-                      (coalesce(r.frequency, 'monthly') = 'monthly'
-                           and (r.last_charged_ym is null or r.last_charged_ym <> %s))
-                      -- ANUAL: só no mês due_month; idempotência por ANO (prefixo
-                      -- YYYY do last_charged_ym, que guardamos como o ym da cobrança).
-                      or (r.frequency = 'annual'
-                           and r.due_month = %s
-                           and (r.last_charged_ym is null or left(r.last_charged_ym, 4) <> %s))
-                  )
-                  -- Não retroagir: a recorrência começa em start_date (escolhido
-                  -- pelo user; fallback created_at). Se o vencimento deste mês é
-                  -- anterior ao início, só cobra a partir do mês do start_date.
-                  -- start_date em mês futuro → nenhum ramo dispara → não cobra.
-                  and (
-                      to_char(coalesce(r.start_date, r.created_at::date), 'YYYY-MM') < %s
-                      or (
-                          to_char(coalesce(r.start_date, r.created_at::date), 'YYYY-MM') = %s
-                          and r.due_day >= extract(day from coalesce(r.start_date, r.created_at::date))
-                      )
-                  )
-                """,
-                (today.day, ym, today.month, str(today.year), ym, ym),
-            )
-            due = cur.fetchall() or []
-
-    cache: dict[int, dict[str, str]] = {}
-    results: list[dict] = []
-    for r in due:
-        try:
-            result = _charge_one(dict(r), today, ym, cache)
-            results.append(result)
-        except Exception as exc:
-            print(
-                f"[recurring_charger] falhou cobrar rec={r['id']} user={r['user_id']}: {exc}",
-                file=sys.stderr,
-            )
-            traceback.print_exc(file=sys.stderr)
-
-    # Pass separado (Python) pras frequências ancoradas no start_date —
-    # once/weekly/daily. Fica fora do SQL mensal/anual (que é provado) pra não
-    # arriscar o motor existente; idempotência própria por period_key.
-    try:
-        results.extend(_charge_anchored_autopay_once(today, cache))
-    except Exception as exc:
-        print(f"[recurring_charger] falhou pass ancorado: {exc}", file=sys.stderr)
-        traceback.print_exc(file=sys.stderr)
-
-    if results:
-        print(f"[recurring_charger] {len(results)} cobranças efetuadas em {today}.", flush=True)
-    return results
-
-
-def _anchored_charge_plan(rec: dict, today: date) -> tuple[date, str] | None:
-    """(data_esperada, period_key) da cobrança de um autopay ancorado no
-    start_date, ou None se ainda não é pra cobrar. daily=todo dia; weekly=a cada
-    7 dias; once=uma vez na data. period_key vai pro recurring_charges.ym e
-    last_charged_ym (idempotência)."""
-    freq = rec.get("frequency")
-    start = rec.get("start_date")
-    if start is None or today < start:
-        return None
-    if freq == "daily":
-        return today, f"d:{today.isoformat()}"
-    if freq == "weekly":
-        weeks = (today - start).days // 7
-        charge_date = start + timedelta(days=7 * weeks)
-        return charge_date, f"w:{charge_date.isoformat()}"
-    if freq == "once":
-        return start, f"o:{start.isoformat()}"
-    return None
-
-
-def _charge_anchored_autopay_once(
-    today: date, cache: dict[int, dict[str, str]] | None = None
-) -> list[dict]:
-    """Cobra gastos fixos autopay de frequência ancorada no start_date
-    (daily/weekly/once). Idempotência por period_key: o pré-check em
-    last_charged_ym evita re-debitar (loop é sequencial), e o UNIQUE
-    (recurring_id, ym) em recurring_charges é a rede de segurança."""
-    with get_conn() as conn:
-        with conn.cursor() as cur:
-            cur.execute(
-                """
-                select r.id, r.user_id, r.name, r.amount, r.category, r.due_day,
-                       r.payment_type, r.card_id, r.frequency,
-                       coalesce(r.start_date, r.created_at::date) as start_date,
-                       r.last_charged_ym
-                from recurring_expenses r
-                where r.is_active = true
-                  and coalesce(r.payment_mode, 'autopay') = 'autopay'
-                  and r.frequency in ('daily', 'weekly', 'once')
-                """
-            )
-            rows = cur.fetchall() or []
-
-    results: list[dict] = []
-    for row in rows:
-        rec = dict(row)
-        plan = _anchored_charge_plan(rec, today)
-        if plan is None:
+    n = 0
+    for rec in list_active_autopay_recurrings():
+        freq = rec.get("frequency") or "monthly"
+        if freq == "daily":
             continue
-        _charge_date, period_key = plan
-        if rec.get("last_charged_ym") == period_key:
-            continue  # já cobrado neste período
+        if not _recurring_occurrence_dates(rec.get("due_day"), freq, rec.get("due_month"),
+                                           rec.get("start_date"), today - timedelta(days=1), today):
+            continue
+        key = {"weekly": f"w:{today.isoformat()}",
+               "once": f"o:{today.isoformat()}"}.get(freq, today.strftime("%Y-%m"))
         try:
-            results.append(_charge_one(rec, today, period_key, cache))
+            n += ensure_autopay_notice(int(rec["id"]), int(rec["user_id"]), float(rec["amount"]), key)
         except Exception as exc:
-            print(
-                f"[recurring_charger] falhou cobrar (ancorado) rec={rec['id']} user={rec['user_id']}: {exc}",
-                file=sys.stderr,
-            )
-            traceback.print_exc(file=sys.stderr)
-    return results
-
-
-def _canonical_category(
-    user_id: int, raw: str, cache: dict[int, dict[str, str]] | None = None
-) -> str:
-    """Grafia do catálogo do usuário para a categoria copiada do recorrente (#147).
-
-    `create=False` de propósito. Com `create=True` este job em lote ficaria pior
-    de três formas medidas: `user_category_display_map(strict=True)` faria erro de
-    banco SUBIR e abortar a cobrança em vez de degradar; `_custom_categories_allowed`
-    passaria a consultar o plano por linha cobrada; e, pra quem NÃO tem plano com
-    categoria custom, o retorno é `normalize_text(raw)` — "Padaria do Zé" viraria
-    "padaria do ze" a partir do próximo mês, com o histórico em "Padaria do Zé",
-    criando a fatia gêmea que este conserto existe pra matar.
-
-    O `or raw` fecha o contrato: nunca inventa nome, nunca grava no catálogo,
-    mantém o texto quando não acha correspondência.
-
-    `cache` é por `user_id` porque as listas de vencimento são GLOBAIS (todos os
-    usuários numa query só) — sem ele seria uma query de catálogo por linha cobrada.
-    """
-    # ponytail: o cache é lido uma vez por usuário e vale o lote inteiro. Se o
-    # dono criar/renomear categoria DURANTE o cron, a 2ª linha dele usa o mapa
-    # velho — teto conhecido, custa um lançamento com a grafia anterior e o
-    # rename seguinte o corrige (o cascade de `update_user_category` alcança
-    # `launches`). Invalidar por escrita só se isso virar sintoma real.
-    from db.categories import resolve_category_input, user_category_display_map
-
-    if cache is None:
-        cache = {}
-    if user_id not in cache:
-        cache[user_id] = user_category_display_map(user_id)
-    return resolve_category_input(
-        user_id, raw, create=False, display_map=cache[user_id]
-    ) or raw
-
-
-def _charge_one(
-    rec: dict, today: date, ym: str, cache: dict[int, dict[str, str]] | None = None
-) -> dict:
-    """Cobra UM gasto fixo. Retorna dict com info da cobrança."""
-    user_id = int(rec["user_id"])
-    rec_id = int(rec["id"])
-    amount = float(rec["amount"])
-    name = rec["name"]
-    category = _canonical_category(user_id, rec["category"] or "outros", cache)
-    payment_type = rec["payment_type"]
-
-    nota = f"Cobrança automática · {name}"
-
-    launch_id = None
-    credit_tx_id = None
-
-    if payment_type == "account":
-        from db.accounts import add_launch_and_update_balance
-        from db import has_open_finance_connections
-
-        # Com Open Finance ativo o débito do gasto fixo ocorre na conta
-        # bancária (o extrato OF já o reflete): registrar com `delta_conta: 0`
-        # impede que a cobrança drene a Carteira Piggy e conte o gasto duas
-        # vezes. Sem OF, o débito da Carteira continua como sempre.
-        #
-        # O marcador `of_recurring` tira a cobrança do caminho do dinheiro em
-        # espécie: quando a tx do banco chega, o importador FUNDE direto
-        # (sem 'ask'/pendência e sem duplicar no mês/orçamentos) — o lançamento
-        # É o débito bancário previsto, não um lançamento manual do usuário.
-        of_ativo = has_open_finance_connections(user_id)
-        launch_id, _seq, _bal = add_launch_and_update_balance(
-            user_id, "despesa", amount, alvo=f"recorrente:{name}", nota=nota,
-            categoria=category, is_internal_movement=False,
-            apply_delta=not of_ativo,
-            extra_efeitos={"of_recurring": True} if of_ativo else None,
-        )
-    else:  # credit_card
-        card_id = rec.get("card_id")
-        if not card_id:
-            raise ValueError(f"recorrente {rec_id}: payment_type=credit_card sem card_id")
-        credit_tx_id = _charge_on_credit_card(user_id, int(card_id), amount, category, nota, today)
-
-    # Insere recurring_charges + marca last_charged_ym (UNIQUE(recurring_id, ym))
-    with get_conn() as conn:
-        with conn.cursor() as cur:
-            cur.execute(
-                """
-                insert into recurring_charges (recurring_id, user_id, launch_id, credit_tx_id, amount, ym)
-                values (%s, %s, %s, %s, %s, %s)
-                on conflict (recurring_id, ym) do nothing
-                returning id
-                """,
-                (rec_id, user_id, launch_id, credit_tx_id, Decimal(str(amount)), ym),
-            )
-            row = cur.fetchone()
-            charge_id = row["id"] if row else None
-            cur.execute(
-                "update recurring_expenses set last_charged_ym=%s where id=%s and user_id=%s",
-                (ym, rec_id, user_id),
-            )
-        conn.commit()
-
-    return {
-        "recurring_id": rec_id, "user_id": user_id, "name": name,
-        "amount": amount, "payment_type": payment_type,
-        "launch_id": launch_id, "credit_tx_id": credit_tx_id,
-        "charge_id": charge_id, "ym": ym,
-    }
-
-
-def _charge_on_credit_card(
-    user_id: int, card_id: int, amount: float, category: str, nota: str, today: date
-) -> int:
-    """Cria credit_transaction na bill open atual do cartão.
-    Se não existir bill open, cria uma. Atualiza bill.total."""
-    with get_conn() as conn:
-        with conn.cursor() as cur:
-            # Tenta achar bill open que cobre `today`
-            cur.execute(
-                """
-                select id, total from credit_bills
-                where user_id=%s and card_id=%s and status='open'
-                  and period_start <= %s and period_end >= %s
-                limit 1
-                """,
-                (user_id, card_id, today, today),
-            )
-            bill = cur.fetchone()
-            if not bill:
-                # Procura qualquer bill open desse cartão (mais permissivo)
-                cur.execute(
-                    """
-                    select id, total from credit_bills
-                    where user_id=%s and card_id=%s and status='open'
-                    order by period_end asc limit 1
-                    """,
-                    (user_id, card_id),
-                )
-                bill = cur.fetchone()
-            if not bill:
-                raise ValueError(
-                    f"Sem bill open pro cartão {card_id} — cron não consegue cobrar."
-                )
-
-            bill_id = bill["id"]
-            cur.execute(
-                """
-                insert into credit_transactions (
-                    bill_id, user_id, card_id, tipo, valor, categoria, nota,
-                    purchased_at, is_refund, source
-                ) values (%s, %s, %s, 'credito', %s, %s, %s, %s, false, 'recurring')
-                returning id
-                """,
-                (bill_id, user_id, card_id, Decimal(str(amount)), category, nota, today),
-            )
-            tx_id = cur.fetchone()["id"]
-            cur.execute(
-                "update credit_bills set total = total + %s where id = %s",
-                (Decimal(str(amount)), bill_id),
-            )
-        conn.commit()
-    return tx_id
-
-
-def credit_due_recurring_incomes_once(today: date | None = None) -> list[dict]:
-    """Roda uma passada nas receitas recorrentes. Retorna lista de créditos
-    efetuados (pra logging). Idempotente — pode rodar várias vezes no mesmo dia
-    sem duplicar (UNIQUE(income_id, ym) + last_credited_ym).
-    """
-    today = today or date.today()
-    ym = today.strftime("%Y-%m")
-
-    with get_conn() as conn:
-        with conn.cursor() as cur:
-            cur.execute(
-                """
-                select r.id, r.user_id, r.name, r.amount, r.category, r.pay_day
-                from recurring_incomes r
-                where r.is_active = true
-                  and r.pay_day <= %s
-                  and (
-                      -- MENSAL (default): credita todo mês; idempotência por ym.
-                      (coalesce(r.frequency, 'monthly') = 'monthly'
-                           and (r.last_credited_ym is null or r.last_credited_ym <> %s))
-                      -- ANUAL: só no mês pay_month; idempotência por ANO.
-                      or (r.frequency = 'annual'
-                           and r.pay_month = %s
-                           and (r.last_credited_ym is null or left(r.last_credited_ym, 4) <> %s))
-                  )
-                  -- Mesmo guard das despesas: começa a valer em start_date
-                  -- (fallback created_at). start_date futuro → não credita ainda.
-                  and (
-                      to_char(coalesce(r.start_date, r.created_at::date), 'YYYY-MM') < %s
-                      or (
-                          to_char(coalesce(r.start_date, r.created_at::date), 'YYYY-MM') = %s
-                          and r.pay_day >= extract(day from coalesce(r.start_date, r.created_at::date))
-                      )
-                  )
-                """,
-                (today.day, ym, today.month, str(today.year), ym, ym),
-            )
-            due = cur.fetchall() or []
-
-    cache: dict[int, dict[str, str]] = {}
-    results: list[dict] = []
-    for r in due:
-        try:
-            results.append(_credit_one(dict(r), today, ym, cache))
-        except Exception as exc:
-            print(
-                f"[recurring_income] falhou creditar inc={r['id']} user={r['user_id']}: {exc}",
-                file=sys.stderr,
-            )
-            traceback.print_exc(file=sys.stderr)
-
-    if results:
-        print(f"[recurring_income] {len(results)} receitas creditadas em {today}.", flush=True)
-    return results
-
-
-def _credit_one(
-    inc: dict, today: date, ym: str, cache: dict[int, dict[str, str]] | None = None
-) -> dict:
-    """Credita UMA receita recorrente. Retorna dict com info do crédito."""
-    from db.accounts import add_launch_and_update_balance
-
-    user_id = int(inc["user_id"])
-    inc_id = int(inc["id"])
-    amount = float(inc["amount"])
-    name = inc["name"]
-    category = _canonical_category(user_id, inc["category"] or "salário", cache)
-
-    nota = f"Receita recorrente · {name}"
-
-    launch_id, _seq, _bal = add_launch_and_update_balance(
-        user_id, "receita", amount, alvo=f"recorrente:{name}", nota=nota,
-        categoria=category, is_internal_movement=False,
-    )
-
-    with get_conn() as conn:
-        with conn.cursor() as cur:
-            cur.execute(
-                """
-                insert into recurring_income_credits (income_id, user_id, launch_id, amount, ym)
-                values (%s, %s, %s, %s, %s)
-                on conflict (income_id, ym) do nothing
-                returning id
-                """,
-                (inc_id, user_id, launch_id, Decimal(str(amount)), ym),
-            )
-            row = cur.fetchone()
-            credit_id = row["id"] if row else None
-            cur.execute(
-                "update recurring_incomes set last_credited_ym=%s where id=%s and user_id=%s",
-                (ym, inc_id, user_id),
-            )
-        conn.commit()
-
-    return {
-        "income_id": inc_id, "user_id": user_id, "name": name,
-        "amount": amount, "launch_id": launch_id,
-        "credit_id": credit_id, "ym": ym,
-    }
+            print(f"[autopay_notice] falhou rec={rec.get('id')}: {exc}", file=sys.stderr)
+    return n
 
 
 __all__ = [
     "run_recurring_charger_loop",
-    "charge_due_recurring_expenses_once",
-    "credit_due_recurring_incomes_once",
     "sync_manual_bills_once",
+    "sync_autopay_notices_once",
 ]

@@ -1625,6 +1625,16 @@ async def log_admin_startup_warnings() -> None:
         print(f"[admin] failed to record startup warnings: {exc}", file=sys.stderr)
 
 
+def status_do_erro(exc: Exception) -> tuple[int, str]:
+    """Status e mensagem ao usuário de uma exceção não tratada: timeout ou queda
+    de conexão de banco → 503; o resto → 500. Fonte única deste middleware e do
+    envelope da /api/v2 (`api/v2/erros.py`), que ele não enxerga."""
+    err_str = str(exc) or exc.__class__.__name__
+    if any(kw in err_str.lower() for kw in ("timeout", "connection", "could not connect")):
+        return 503, "Serviço temporariamente indisponível. Tente novamente em instantes."
+    return 500, "Erro interno do servidor."
+
+
 async def admin_error_logging_middleware(request: Request, call_next):
     try:
         return await call_next(request)
@@ -1651,14 +1661,7 @@ async def admin_error_logging_middleware(request: Request, call_next):
             flush=True,
         )
 
-        # detecta timeout de banco → 503 Service Unavailable
-        is_timeout = any(kw in err_str.lower() for kw in ("timeout", "connection", "could not connect"))
-        status_code = 503 if is_timeout else 500
-        user_msg = (
-            "Serviço temporariamente indisponível. Tente novamente em instantes."
-            if is_timeout
-            else "Erro interno do servidor."
-        )
+        status_code, user_msg = status_do_erro(exc)
 
         await log_system_event(
             "error",

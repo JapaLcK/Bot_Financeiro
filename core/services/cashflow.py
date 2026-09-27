@@ -6,19 +6,19 @@ Responde a pergunta do dono da farmácia: "se eu aceitar pagar até o dia X
 
 projetado(D) = saldo_atual
              + receitas fixas previstas em (hoje, D]
-             − gastos fixos automáticos (mensal/anual) em (hoje, D]
+             − gastos fixos automáticos (todas as frequências) em (hoje, D]
              − boletos pendentes com vencimento até D
              − (opcional) um boleto novo que ele está considerando
 
 `tranquilo` = projetado, em centavos (o valor exibido), >= 0. É uma estimativa:
-não conta gastos avulsos futuros nem receitas e gastos fixos
-semanais/diários/únicos; a ideia é dar visão de fôlego, não fechamento contábil.
+não conta gastos avulsos futuros nem receitas semanais/diárias/únicas (legado);
+a ideia é dar visão de fôlego, não fechamento contábil.
 """
 from __future__ import annotations
 
 import calendar
 import math
-from datetime import date
+from datetime import date, timedelta
 from typing import Any
 
 
@@ -35,9 +35,24 @@ def _as_date(v: Any) -> date | None:
 
 def _recurring_occurrence_dates(day: Any, freq: str, month: Any, start: date | None,
                                 after: date, until: date) -> list[date]:
-    """Datas de ocorrência de um recorrente MENSAL/ANUAL em (after, until]."""
+    """Datas de ocorrência de um recorrente em (after, until]. Mensal/anual caem
+    em `day` (clampado ao fim do mês); único/diário/semanal ancoram em `start`
+    (único = start; diário = todo dia desde start; semanal = start + 7k)."""
     if until <= after:
         return []
+    if freq in ("once", "daily", "weekly"):
+        if start is None:
+            return []
+        if freq == "once":
+            return [start] if after < start <= until else []
+        passo = 1 if freq == "daily" else 7
+        first = max(start, after + timedelta(days=1))
+        d = start + timedelta(days=passo * math.ceil((first - start).days / passo))
+        dates = []
+        while d <= until:
+            dates.append(d)
+            d += timedelta(days=passo)
+        return dates
     try:
         day = int(day or 1)
     except (TypeError, ValueError):
@@ -106,7 +121,7 @@ def _cashflow_events(user_id: int, today: date, until: date) -> list[tuple[date,
     Todo filtro mora aqui — filtro fora deste gerador é uma segunda versão da regra.
 
     - receita fixa ativa, mensal/anual, valor > 0: ocorrências em (today, until], +valor;
-    - gasto fixo ativo, autopay, mensal/anual, valor > 0: idem, −valor;
+    - gasto fixo ativo, autopay, qualquer frequência, valor > 0: idem, −valor;
     - boleto pendente com vencimento até `until` (vencidos inclusive), −valor
       com QUALQUER valor, até 0 ou negativo — regra herdada de `project`;
     - fatura de cartão com saldo e vencimento até `until` (vencidas inclusive), −saldo.
@@ -120,8 +135,8 @@ def _cashflow_events(user_id: int, today: date, until: date) -> list[tuple[date,
         if not inc.get("is_active"):
             continue
         if (inc.get("frequency") or "monthly") not in ("monthly", "annual"):
-            # O cobrador de receitas só lança mensal e anual: contar once/weekly/daily
-            # (registros legados) como mensal inflava a previsão.
+            # Receita só aceita mensal e anual (INCOME_FREQUENCIES); once/weekly/daily
+            # são registros legados e ficam fora da previsão.
             continue
         amount = float(inc.get("amount") or 0)
         if amount <= 0:
@@ -138,8 +153,6 @@ def _cashflow_events(user_id: int, today: date, until: date) -> list[tuple[date,
             continue
         if (e.get("payment_mode") or "autopay") != "autopay":
             continue  # 'manual' = boleto; já entra nos boletos pendentes
-        if (e.get("frequency") or "monthly") not in ("monthly", "annual"):
-            continue  # weekly/daily/once ficam de fora do v1 da projeção
         amount = float(e.get("amount") or 0)
         if amount <= 0:
             continue

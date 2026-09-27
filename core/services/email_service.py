@@ -224,7 +224,7 @@ def send_trial_downsell_email(to: str, dashboard_url: str = "") -> bool:
         <li><strong>Essencial — R$ 9,90/mês</strong>: banco reconectado, lançamentos
         ilimitados com áudio e foto, boletos com lembrete.</li>
         <li><strong>Plus — R$ 19,90/mês</strong>: tudo que você usou no teste —
-        2 bancos, os 3 agentes e a Piggy sem limites.</li>
+        2 bancos, os 3 agentes e o Piggy sem limites.</li>
       </ul>
       <p style="text-align:center;margin-top:24px">
         <a class="btn" href="{base}/precos">Escolher meu plano</a>
@@ -233,7 +233,7 @@ def send_trial_downsell_email(to: str, dashboard_url: str = "") -> bool:
     """
     return send_email(
         to,
-        "Seu teste acabou — continue com a Piggy por R$ 9,90 🐷",
+        "Seu teste acabou — continue com o Piggy por R$ 9,90 🐷",
         _base_html("Seu teste do PigBank acabou", content),
     )
 
@@ -518,12 +518,12 @@ _TIPS: list[tuple[str, str, str]] = [
         <p>Economize tempo e mantenha seus relatórios sempre organizados. ✨</p>""",
     ),
     (
-        "Acompanhe investimentos com rendimento automático",
-        "Cadastre seus investimentos e veja o saldo crescer com o CDI em tempo real.",
-        """<p>O PigBank calcula o rendimento dos seus investimentos automaticamente:</p>
-        <code class="cmd">investimento: Tesouro Selic, R$ 2000, 100% CDI</code>
-        <p>O saldo aparece atualizado no seu dashboard a cada acesso, com os juros já aplicados. 📈</p>
-        <p>Use o comando <strong>investimentos</strong> para ver um resumo rápido pelo bot.</p>""",
+        "Seus investimentos num lugar só",
+        "Registre aportes e resgates pelo WhatsApp e veja o total no dashboard.",
+        """<p>Cadastre suas aplicações na aba <strong>Investimentos</strong> do dashboard e registre as movimentações pelo bot:</p>
+        <code class="cmd">apliquei 200 no investimento CDB Nubank</code>
+        <code class="cmd">retirei 100 do investimento CDB Nubank</code>
+        <p>Mande <strong>investimentos</strong> pra ver o resumo da carteira. 📈</p>""",
     ),
     (
         "Relatório diário no horário que você escolher",
@@ -809,7 +809,7 @@ def send_password_reset_email(to: str, reset_url: str, has_password: bool = True
         subject = "🔑 Redefinir senha — PigBank"
     else:
         intro = (
-            "Sua conta no <strong>PigBank</strong> foi criada com o Google e ainda não tem senha. "
+            "Sua conta no <strong>PigBank</strong> ainda não tem senha. "
             "Use o link abaixo para definir uma."
         )
         button = "🔑 Definir minha senha"

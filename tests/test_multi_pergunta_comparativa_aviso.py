@@ -59,9 +59,10 @@ def add_sem_banco(monkeypatch):
                         lambda **k: types.SimpleNamespace(category="outros", reason="stub"))
     monkeypatch.setattr("core.handlers.credit.try_handle_natural_credit_purchase",
                         lambda uid, text: None)
-    monkeypatch.setattr(L, "register_if_recurring", lambda *a: None)
+    monkeypatch.setattr(L, "register_if_recurring", lambda *a, **k: None)
+    monkeypatch.setattr("core.handlers.forma_pagamento.regra_ativa", lambda u: False)  # sem banco conectado (Q40)
     monkeypatch.setattr(L, "_register_parsed",
-                        lambda uid, p, part, pl: gravados.append(float(p["valor"])) or "ok")
+                        lambda uid, p, part, pl, **k: gravados.append(float(p["valor"])) or "ok")
     monkeypatch.setattr(L.db, "set_pending_action", lambda *a, **k: None)
     return lambda text: (L.add(1, text, {}), gravados)
 
@@ -85,14 +86,15 @@ def test_multi_com_pergunta_de_valor_avisa_depois_dela(add_sem_banco):
 def audio_sem_banco(monkeypatch):
     """`_handle_audio` com banco e rota de cada pedaço trocados por dublês."""
     monkeypatch.setattr("core.services.plan_service.feature_enabled", lambda *a: True)
-    monkeypatch.setattr(L, "register_if_recurring", lambda *a: None)
+    monkeypatch.setattr(L, "register_if_recurring", lambda *a, **k: None)
+    monkeypatch.setattr("core.handlers.forma_pagamento.regra_ativa", lambda u: False)  # sem banco conectado (Q40)
     monkeypatch.setattr(hi, "db", types.SimpleNamespace(
         ensure_user=lambda u: None, update_last_activity=lambda u: None,
         latest_launch_id=lambda u: 1, set_pending_action=lambda *a: None,
         get_pending_action=lambda u: None))
     # Pedaço que não vira lançamento ("paguei") devolve o help genérico.
     monkeypatch.setattr(hi, "_process_audio_transaction",
-                        lambda uid, part, msg, pl: "🤔 Não entendi exatamente. Posso te ajudar com…")
+                        lambda uid, part, msg, pl, *a: "🤔 Não entendi exatamente. Posso te ajudar com…")
 
     def ouvir(fala):
         monkeypatch.setattr(hi, "transcribe_audio", lambda data, fn: fala)
@@ -154,6 +156,32 @@ def test_audio_com_pergunta_de_valor_avisa_depois_dela(audio_sem_banco):
     assert _PERGUNTA_ALUGUEL in texto and aviso in texto, texto
     assert texto.index(_PERGUNTA_ALUGUEL) < texto.index(aviso)
 
+
+
+# ── Q40 (banco conectado): o pedaço comparativo não pede a forma de pagamento ──
+
+def test_audio_q40_so_comparativas_nao_pede_a_forma(audio_sem_banco, monkeypatch):
+    from core.handlers import forma_pagamento as fp
+    monkeypatch.setattr(fp, "regra_ativa", lambda u: True)
+    monkeypatch.setattr(fp, "perguntar", lambda *a: pytest.fail("pediu a forma"))
+    texto = audio_sem_banco("gastei mais em 2025 ou 2026 e gastei mais que devia 50 no bar")
+    assert _aviso("gastei mais em 2025 ou 2026") in texto
+    assert _aviso("gastei mais que devia 50 no bar") in texto
+
+
+def test_audio_q40_resposta_da_forma_pula_o_comparativo(monkeypatch):
+    # A pergunta de forma guarda as partes do áudio inteiras; a resposta as
+    # roteia por `rotear_partes`, que pula o pedaço comparativo e avisa.
+    from core.handlers import forma_pagamento as fp
+    pedacos = []
+    monkeypatch.setattr(fp, "db", types.SimpleNamespace(consume_pending_action=lambda u, p: True))
+    monkeypatch.setattr(hi, "_process_audio_transaction",
+                        lambda uid, part, *a: pedacos.append(part) or "✅")
+    partes = ["gastei 30 no uber", "gastei mais em 2025 ou 2026"]
+    corpo = fp.resolver(5, "dinheiro", {"action_type": "payment_method_choice", "payload": {
+        "fluxo": "audio", "partes": partes, "platform": "whatsapp"}})
+    assert pedacos == ["gastei 30 no uber"]
+    assert corpo == "✅\n\n" + _aviso("gastei mais em 2025 ou 2026")
 
 @pytest.mark.parametrize("fila,depois", [
     ([], ""),

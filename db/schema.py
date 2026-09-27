@@ -2,7 +2,9 @@
 db/schema.py — DDL e inicialização do banco de dados.
 """
 from .connection import get_conn
-from .schema_repairs import ensure_plan_trials_user_fk, repair_user_fk_cascades
+from .schema_repairs import (
+    ensure_lower_name_unique, ensure_plan_trials_user_fk, repair_user_fk_cascades,
+)
 
 # Chave do advisory lock que serializa o init_db INTEIRO entre instâncias.
 # Valor arbitrário e estável; só precisa não colidir com outro lock do processo.
@@ -64,6 +66,8 @@ on conflict (source, external_ref) do nothing
 
 
 def init_db():
+    from .signup_quiz import PERFIS
+
     ddl_statements = [
         # ─── Extensions ──────────────────────────────────────────────────────────
         # unaccent: normaliza acentos pra busca textual ("credito" casa "crédito").
@@ -112,7 +116,7 @@ def init_db():
           name text not null,
           balance numeric not null default 0,
           created_at timestamptz default now(),
-          unique(user_id, name)
+          unique(user_id, name)  -- sem caixa: uq_pockets_user_lower_name (schema_repairs, #596)
         )
         """,
 
@@ -142,7 +146,7 @@ def init_db():
           interest_payment_frequency text not null default 'maturity',
           tax_profile text not null default 'regressive_ir_iof',
           created_at timestamptz default now(),
-          unique(user_id, name)
+          unique(user_id, name)  -- sem caixa: uq_investments_user_lower_name (schema_repairs, #596)
         )
         """,
         """
@@ -223,6 +227,19 @@ def init_db():
         """
         alter table pockets add column if not exists last_interest_date date not null default current_date
         """,
+        # Q43 (docs/plano-dashboard-v2.md): caixinha e investimento manuais param de
+        # render. `interest_frozen_at` NULL = ainda não recebeu a acumulação final;
+        # não-nulo = congelado. Idioma do `plan_selected_at` invertido: o ADD sem
+        # default deixa as linhas que já existem NULL (a final roda uma vez em cada),
+        # e o SET DEFAULT faz toda linha nova nascer congelada. Os dois no MESMO
+        # statement: o init_db roda em autocommit, e separados um INSERT entre eles
+        # nasceria NULL. `add column ... default now()` não serve: preencheria as
+        # linhas antigas com o instante do ALTER e elas congelariam sem a final.
+        """alter table pockets add column if not exists interest_frozen_at timestamptz,
+             alter column interest_frozen_at set default now()""",
+        """alter table investments add column if not exists interest_frozen_at timestamptz,
+             alter column interest_frozen_at set default now()""",
+        """alter table pockets alter column interest_enabled set default false""",
         """
         create table if not exists pocket_lots (
           id bigserial primary key,
@@ -360,7 +377,7 @@ def init_db():
         )
         """,
         # Sugestões de "gasto fixo" que o usuário recusou. Quando uma despesa se
-        # repete (mesma descrição + valor em meses distintos) a Piggy oferece
+        # repete (mesma descrição + valor em meses distintos) o Piggy oferece
         # marcar como recorrente; se o user diz "não", grava aqui pra não
         # re-perguntar a mesma combinação (merchant + valor). Ver
         # find_recurring_candidate em db/recurring.py.
@@ -993,6 +1010,10 @@ def init_db():
         """
         alter table email_verification_codes add column if not exists display_name text
         """,
+        # Cadastro pelo quiz (frontend/routes/quiz_signup.py) nasce sem senha.
+        """
+        alter table email_verification_codes alter column password_hash drop not null
+        """,
         """
         create table if not exists password_reset_tokens (
           token text primary key,
@@ -1351,11 +1372,10 @@ def init_db():
         """,
 
         # ─── Gastos Fixos / Recorrentes (Sprint 4) ──────────────────────────────
-        # Pro-only. Cobrança automática via cron no dia `due_day` de cada mês.
-        # `last_charged_ym` = idempotência (não cobra 2x no mesmo mês).
+        # Pro-only. Só PREVÊ (Q42): autopay entra na Previsão, 'manual' vira conta a pagar.
+        # `last_charged_ym` = idempotência do cobrador removido; nada mais escreve.
         # `last_amount` + `last_amount_changed_at` = detector de reajuste quando user edita.
-        # `payment_type='credit_card'` → cria credit_transaction na bill open atual.
-        # `payment_type='account'`     → cria launch despesa.
+        # `payment_type`/`card_id` = por onde o usuário paga; não geram lançamento.
         """
         create table if not exists recurring_expenses (
           id          bigserial primary key,
@@ -1380,9 +1400,11 @@ def init_db():
           on recurring_expenses (user_id, is_active)
         """,
 
-        # Histórico de cobranças automáticas. Garante idempotência via unique
-        # (recurring_id, ym) + serve pra alertas no banner do dashboard até user
-        # marcar como visto (acknowledged=true).
+        # Histórico de cobranças automáticas (cobrador antigo, com launch_id ou
+        # credit_tx_id) e avisos de vencimento do autopay (Q42, os dois nulos:
+        # nada foi lançado). Idempotência via unique (recurring_id, ym) + serve
+        # pra alertas no banner do dashboard até user marcar como visto
+        # (acknowledged=true).
         """
         create table if not exists recurring_charges (
           id           bigserial primary key,
@@ -1404,10 +1426,10 @@ def init_db():
 
         # ─── Receitas Recorrentes ──────────────────────────────────────────────
         # Espelho de `recurring_expenses` do lado da entrada. Pro-only, mesma flag
-        # (recurring_expenses_enabled). Lança receita na conta no dia `pay_day`.
+        # (recurring_expenses_enabled). Só PREVÊ (Q42): entra na Previsão no dia `pay_day`.
         # Não tem payment_type/card_id: receita sempre cai na conta.
         # `is_primary` = renda principal (salário) vs extra (freela, aluguel).
-        # `last_credited_ym` = idempotência (não credita 2x no mesmo mês).
+        # `last_credited_ym` = idempotência do cobrador removido; nada mais escreve.
         """
         create table if not exists recurring_incomes (
           id          bigserial primary key,
@@ -1468,8 +1490,8 @@ def init_db():
         """alter table recurring_incomes add column if not exists pay_month int""",
 
         # migration: modo de pagamento do recorrente.
-        #   'autopay' (default, comportamento antigo) → o charger LANÇA sozinho no dia.
-        #   'manual'  (conta a pagar / boleto)        → NÃO lança; a Piggy lembra e
+        #   'autopay' (default) → gasto fixo: só entra na Previsão (Q42), não lança.
+        #   'manual'  (conta a pagar / boleto)        → NÃO lança; o Piggy lembra e
         #     só lança quando o user confirma o pagamento. Aparece na sub-aba
         #     "Contas a pagar". Cada ciclo vira uma linha em bill_instances.
         """alter table recurring_expenses add column if not exists payment_mode text not null default 'autopay'""",
@@ -1924,10 +1946,22 @@ def init_db():
         # iOS. Só TELEMETRIA — não concede nada: o gate de plano não isenta o
         # app (política em plan_service.needs_plan_selection).
         # Valores (os únicos que signup_source_from_request produz):
-        # 'web' | 'app' | 'google' | 'google_app'.
+        # 'web' | 'app' | 'google' | 'google_app' | 'apple' | 'apple_app'.
         # NULL = conta anterior a esta coluna (origem desconhecida);
         # sem backfill por data chutado — o painel mostra "—" pra elas.
         """alter table auth_accounts add column if not exists signup_source text""",
+        # Resultado do quiz de venda (db/signup_quiz.py), gravado na criação da
+        # conta. NÃO confundir com `/auth/dashboard-profile` (monólito), que é
+        # outra coisa (gates de feature). NULL = painel padrão / não veio do quiz.
+        # `signup_quiz` = {"versao": 1, "respostas": {...} | null}; é DADO
+        # FINANCEIRO PESSOAL — sai no export, no "Recomeçar do zero" e na exclusão.
+        # O CHECK fica fora do `add column` pelo mesmo motivo do de `pix_charges`
+        # (abaixo): inline não chega à tabela que já existe; `not valid` não trava a subida.
+        """alter table auth_accounts add column if not exists dashboard_profile text""",
+        """alter table auth_accounts add column if not exists signup_quiz jsonb""",
+        """alter table auth_accounts drop constraint if exists auth_accounts_dashboard_profile_valido""",
+        f"""alter table auth_accounts add constraint auth_accounts_dashboard_profile_valido
+             check (dashboard_profile in ({", ".join(f"'{p}'" for p in PERFIS)})) not valid""",
         """
         create table if not exists plan_trials (
           phone_hash text primary key,
@@ -2641,6 +2675,7 @@ def _run_ddl(conn, ddl_statements) -> None:
                 changes = repair_user_fk_cascades(cur)
                 if changes:
                     print(f"[init_db] schema_repairs ajustou {len(changes)} FK(s): {changes}")
+                ensure_lower_name_unique(cur)
             except Exception as e:
                 print(f"[init_db] schema_repairs falhou: {e}")
                 raise

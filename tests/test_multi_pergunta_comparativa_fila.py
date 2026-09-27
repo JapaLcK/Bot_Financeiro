@@ -60,6 +60,7 @@ class _Explode:
 
 @pytest.fixture
 def sem_banco(monkeypatch):
+    monkeypatch.setattr("core.handlers.forma_pagamento.regra_ativa", lambda u: False)  # sem banco conectado (Q40)
     monkeypatch.setattr(L, "db", _Explode())
     monkeypatch.setattr(L, "add_from_entities",
                         lambda *a, **k: pytest.fail("gravou lançamento"))
@@ -81,6 +82,7 @@ def test_fila_recusa_receita_usa_a_pergunta_de_receita(sem_banco):
 def banco_que_grava(monkeypatch):
     """Positivo: o CAS vence, a fila acaba, o registro é capturado."""
     gravados, consumidos = [], []
+    monkeypatch.setattr("core.handlers.forma_pagamento.regra_ativa", lambda u: False)  # sem banco conectado (Q40)
     monkeypatch.setattr(L, "db", types.SimpleNamespace(
         advance_pending_action=lambda *a, **k: True,
         get_pending_action=lambda u: None,
@@ -123,7 +125,7 @@ def porta2(monkeypatch):
         create_pending_action_if_absent=lambda u, t, p: recriadas.append((t, p)) or True))
     monkeypatch.setattr("core.intent_classifier.classify_with_context", lambda *a, **k: None)
     monkeypatch.setattr(IR, "_alvos_existentes", lambda u, i: [])  # sem banco, sem log de ERROR
-    monkeypatch.setattr(IR, "_execute", lambda intent, uid, text, *a: executados.append(text) or "✅")
+    monkeypatch.setattr(IR, "_execute", lambda intent, uid, text, *a, **k: executados.append(text) or "✅")
     def responde(resp, **payload):
         clarif["payload"] = {**_CLARIF["payload"], **payload}
         return IR._resolve_clarification(clarif, resp, 1, "whatsapp", ""), recriadas, executados
@@ -235,7 +237,7 @@ def audio_fila(monkeypatch, sem_banco):
         latest_launch_id=lambda u: 1,
         get_pending_action=lambda u: lidas.append(u) or _pendencia(fila)))
     monkeypatch.setattr(hi, "_process_audio_transaction",
-                        lambda uid, part, msg, pl: pedacos.append(part) or _resolve(part, fila))
+                        lambda uid, part, msg, pl, *a: pedacos.append(part) or _resolve(part, fila))
 
     def ouvir(fala):
         monkeypatch.setattr(hi, "transcribe_audio", lambda data, fn: fala)
@@ -260,7 +262,7 @@ def test_audio_com_fila_recusa_inteiro(audio_fila, fala):
 def test_audio_sem_pergunta_segue_dividido_sem_ler_a_fila(audio_fila, monkeypatch):
     pedacos = []
     monkeypatch.setattr(hi, "_process_audio_transaction",
-                        lambda uid, part, msg, pl: pedacos.append(part) or "✅")
+                        lambda uid, part, msg, pl, *a: pedacos.append(part) or "✅")
     _, _, lidas = audio_fila("gastei 30 no uber e gastei 40 no bar")
     assert pedacos == ["gastei 30 no uber", "gastei 40 no bar"]
     assert lidas == []  # predicado falso: o banco nem é lido

@@ -328,9 +328,11 @@ def test_aporte_com_lote_resgatado_diz_o_que_destrava(user_id, caplog):
 
     assert "antigo" not in resp.lower(), f"condição temporária vendida como permanente: {resp!r}"
     assert "de novo" not in resp.lower(), f"retry que nunca funciona: {resp!r}"
-    assert "resgate" in resp.lower(), f"não diz o que destrava: {resp!r}"
+    # Desde a guarda "só o último movimento", o resgate posterior recusa ANTES do
+    # teste do lote: a frase manda desfazer os mais novos (o resgate) primeiro.
+    assert "mais novos primeiro" in resp.lower(), f"não diz o que destrava: {resp!r}"
     assert "#9" in resp, resp
-    assert any(r.startswith("delete_launch_lote_com_resgate:") for r in registros), registros
+    assert any(r.startswith("delete_launch_movimento_posterior:") for r in registros), registros
     assert any(int(l["id"]) == aporte_id for l in db.list_launches(user_id, limit=20)), \
         "o aporte não podia ser apagado"
 

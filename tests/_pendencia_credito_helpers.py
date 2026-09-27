@@ -248,7 +248,6 @@ import pytest
 import db
 import core.handle_incoming as hi
 from conftest import promote_to_pro
-from core.services.plan_service import has_app_access
 from core.types import IncomingMessage
 
 
@@ -289,7 +288,6 @@ def novo_uid() -> int:
     uid = int(user["user_id"])
     db.mark_plan_selected(uid)
     promote_to_pro(uid)
-    assert has_app_access(uid)
     return uid
 
 

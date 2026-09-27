@@ -2,13 +2,17 @@
 import logging
 import sys
 import uuid
+from datetime import datetime, timedelta, timezone
 from types import SimpleNamespace
 
+import jwt as pyjwt
 import pytest
 from fastapi.testclient import TestClient
 
 import db
 import frontend.finance_bot_websocket_custom as dashboard
+from core.sessions import create_session, revoke_session
+from db.connection import get_conn
 
 
 MESSAGE = (
@@ -168,3 +172,67 @@ def test_api_portal_preserva_csrf(portal):
     response = portal.client.post("/billing/portal")
     assert response.status_code == 403
     assert portal.calls == []
+
+
+# ─── /conta aceita as mesmas sessões que o /auth/validate ────────────────────
+# Se aceitasse menos, o /login (validate 200 → next=/conta) e a /conta (302 →
+# /login?next=/conta) devolviam o usuário um ao outro em loop com o access
+# expirado e o dashboard_token válido — o estado normal 15 min depois do login.
+
+LOGIN_CONTA = dashboard._dashboard_url("/login?next=/conta")
+ESTADOS = ("sem_cookie", "so_access", "so_dashboard", "access_expirado", "revogado", "legado_senha_trocada")
+
+
+def _sessao(portal, estado):
+    """Deixa no client só os cookies do `estado` (mais o CSRF)."""
+    uid = portal.uid
+    jti = create_session(uid)
+    cookies = portal.client.cookies
+    cookies.clear()
+    cookies.set(dashboard.CSRF_COOKIE_NAME, "csrf-portal-test")
+    if estado in ("so_access", "revogado"):
+        cookies.set(dashboard.AUTH_COOKIE_NAME, dashboard._make_jwt(uid, "x@example.com", jti=jti))
+    if estado in ("so_dashboard", "access_expirado", "revogado"):
+        cookies.set(dashboard.DASHBOARD_COOKIE_NAME, dashboard.make_dashboard_token(uid, hours=1, jti=jti))
+    if estado == "access_expirado":
+        expirado = pyjwt.encode(
+            {"sub": str(uid), "email": "x@example.com", "type": "auth", "jti": jti,
+             "exp": datetime.now(timezone.utc) - timedelta(minutes=1)},
+            dashboard.JWT_SECRET, algorithm="HS256",
+        )
+        cookies.set(dashboard.AUTH_COOKIE_NAME, expirado)
+    if estado == "revogado":
+        revoke_session(uid, jti)
+    if estado == "legado_senha_trocada":
+        cookies.set(dashboard.DASHBOARD_COOKIE_NAME, dashboard.make_dashboard_token(uid, hours=1))
+        with get_conn() as conn:
+            with conn.cursor() as cur:
+                cur.execute("update auth_accounts set password_changed_at = now() where user_id = %s", (uid,))
+            conn.commit()
+
+
+@pytest.mark.parametrize("estado", ["so_dashboard", "access_expirado"])
+def test_conta_aceita_dashboard_token_sem_access_valido(portal, estado):
+    _sessao(portal, estado)
+    assert portal.client.get("/auth/validate").status_code == 200
+    response = request_portal(portal.client, "/conta")
+    assert response.status_code == 302
+    assert response.headers["location"] == "https://billing.stripe.com/p/session/test-portal"
+    assert len(portal.calls) == 1
+
+
+def test_conta_com_sessao_revogada_vai_para_o_login(portal):
+    _sessao(portal, "revogado")
+    response = request_portal(portal.client, "/conta")
+    assert response.status_code == 302
+    assert response.headers["location"] == LOGIN_CONTA
+    assert portal.client.get("/auth/validate").status_code == 401
+    assert portal.calls == []
+
+
+@pytest.mark.parametrize("estado", ESTADOS)
+def test_conta_e_validate_nunca_formam_loop(portal, estado):
+    _sessao(portal, estado)
+    validate = portal.client.get("/auth/validate").status_code
+    location = request_portal(portal.client, "/conta").headers.get("location", "")
+    assert not (validate == 200 and location.startswith(LOGIN_CONTA)), (validate, location)

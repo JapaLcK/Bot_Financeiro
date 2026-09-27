@@ -3,6 +3,7 @@ import { z } from "zod";
 import { ErroDeApi, TEMPO_LIMITE_AUTH_MS, _esquecerRotacoes, chamar, comLimite } from "../api/client";
 import {
   loginSchema,
+  pendenteGoogleSchema,
   perfilSchema,
   respostaLoginSchema,
   type Perfil,
@@ -105,29 +106,27 @@ async function tentativa<T>(
  * Sem tentativa em voo, é inofensivo: só avança o contador (o que o próximo
  * login/verify já faria sozinho) e não há controlador para abortar.
  *
- * ponytail: limite conhecido, documentado e SEM cobertura. `ultimaTentativa` é
- * um contador único para login, MFA e cadastro (`confirmarCadastro`), então um
- * abandono aqui supera a entrada em voo de QUALQUER um dos três. Caso real: um
- * verify de cadastro em voo em `/criar-conta`, `/entrar` empilhada por cima
- * (hoje só por link `pigbank://` digitado de fora), login de outra conta que
- * para no MFA e Voltar — o 200 atrasado do cadastro vira `EntradaSuperada`, a
- * conta já existe no servidor e a sessão dela é descartada sem aviso
- * (recuperação: Entrar com e-mail e senha). Enumere a máquina (fluxos × eventos
- * que avançam o contador) antes de mexer aqui.
+ * ponytail: limite conhecido, documentado e SEM cobertura (#592). `ultimaTentativa`
+ * é um contador único para login, MFA, cadastro (`confirmarCadastro`) e Google
+ * (`entrarComGoogle`, `completarCadastroGoogle`), então um abandono aqui supera
+ * a entrada em voo de QUALQUER um deles. Caso real: um verify de cadastro em voo
+ * em `/criar-conta`, `/entrar` empilhada por cima (hoje só por link `pigbank://`
+ * digitado de fora: a volta do Google NÃO passa pelo expo-router, ela chega pelo
+ * retorno do `openAuthSessionAsync`), login de outra conta que para no MFA e
+ * Voltar — o 200 atrasado do cadastro vira `EntradaSuperada`, a conta já existe
+ * no servidor e a sessão dela é descartada sem aviso (recuperação: Entrar com
+ * e-mail e senha). O Voltar do cadastro do Google não chama isto, de propósito.
+ * Enumere a máquina (fluxos × eventos que avançam o contador) antes de mexer aqui.
  */
 export function abandonarEntrada(): void {
   ultimaTentativa += 1;
   controladorEmVoo?.abort();
 }
 
-export async function entrar(email: string, senha: string): Promise<Entrada> {
+/** O primeiro passo de `/auth/login` e da troca do Google: o servidor responde igual (`_concluir_login`). */
+async function entrarPor(caminho: string, corpo: unknown): Promise<Entrada> {
   return tentativa(async (minhaVez, sinal): Promise<Entrada> => {
-    const r = await chamar("/auth/login", respostaLoginSchema, {
-      metodo: "POST",
-      corpo: { email, password: senha },
-      semAuth: true,
-      sinal,
-    });
+    const r = await chamar(caminho, respostaLoginSchema, { metodo: "POST", corpo, semAuth: true, sinal });
     if ("mfa_required" in r) {
       return { fase: "mfa", desafio: r.mfa_challenge, email: r.email };
     }
@@ -135,11 +134,49 @@ export async function entrar(email: string, senha: string): Promise<Entrada> {
   });
 }
 
+export async function entrar(email: string, senha: string): Promise<Entrada> {
+  return entrarPor("/auth/login", { email, password: senha });
+}
+
 /**
- * O final comum de quem recebe credencial (`entrar`, `verificarMfa`,
- * `confirmarCadastro`), sempre DENTRO de `tentativa()`. A conferência acontece
- * DENTRO da gravação, não antes: entre um passo e o outro caberia uma entrada
- * mais nova, e o aparelho ficaria logado nesta enquanto a tela mostra a outra.
+ * Troca o código de uso único do Google (`pigbank://auth?code=`) pela sessão.
+ * O código vai no corpo; conta com dois fatores volta com o desafio, como o login.
+ */
+export async function entrarComGoogle(codigo: string): Promise<Entrada> {
+  return entrarPor("/auth/google/exchange", { code: codigo });
+}
+
+/** O pré-cadastro do Google. Não grava credencial: fica FORA de `tentativa()`, como `cadastrar`. */
+export async function pendenteGoogle(token: string): Promise<{ email: string; name_hint: string }> {
+  return chamar(`/auth/google/pending/${encodeURIComponent(token)}`, pendenteGoogleSchema, {
+    semAuth: true,
+    sinal: comLimite(),
+  });
+}
+
+/**
+ * Cria a conta do Google e recebe a sessão dela. Dentro de `tentativa()`, como
+ * `confirmarCadastro`. Chamar isto é o aceite dos Termos: a tela mostra o texto
+ * com os links logo acima do botão, sem caixa de seleção (decisão do dono).
+ */
+export async function completarCadastroGoogle(token: string, nome: string, telefone: string): Promise<Perfil> {
+  return tentativa(async (minhaVez, sinal) => {
+    const r = await chamar("/auth/google/complete-signup", loginSchema, {
+      metodo: "POST",
+      corpo: { token, name: nome, phone: telefone, accepted_terms: true },
+      semAuth: true,
+      sinal,
+    });
+    return gravarSessao(minhaVez, r);
+  });
+}
+
+/**
+ * O final comum de quem recebe credencial (`entrarPor`, `verificarMfa`,
+ * `confirmarCadastro`, `completarCadastroGoogle`), sempre DENTRO de
+ * `tentativa()`. A conferência acontece DENTRO da gravação, não antes: entre
+ * um passo e o outro caberia uma entrada mais nova, e o aparelho ficaria
+ * logado nesta enquanto a tela mostra a outra.
  */
 async function gravarSessao(minhaVez: number, r: z.infer<typeof loginSchema>): Promise<Perfil> {
   const gravou = await guardarCredenciaisSe(
