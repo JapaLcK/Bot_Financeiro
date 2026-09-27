@@ -18,7 +18,8 @@ PIX = dict(op="PIX", desc="Pix recebido Joao", category="Pix recebido")
 
 
 def _recebi(uid):
-    assert "Receita registrada" in _diga(uid, "recebi 200 do meu pai")
+    # "em dinheiro": com banco conectado o manual só grava em dinheiro vivo (Q40).
+    assert "Receita registrada" in _diga(uid, "recebi 200 do meu pai em dinheiro")
     return q("select id from launches where user_id=%s and tipo='receita' "
              "and coalesce(source, 'manual')='manual' order by id limit 1",
              (uid,), True)[0]["id"]

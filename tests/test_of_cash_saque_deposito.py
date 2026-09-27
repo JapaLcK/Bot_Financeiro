@@ -69,6 +69,25 @@ def test_sinais_falsos_seguem_gasto(caixa):
     assert len(launches_visiveis(uid)) == 3
 
 
+def test_saque_no_cartao_segue_compra_e_nao_pergunta(caixa):
+    """Saque no cartão (CREDIT) fica fora: a linha vira compra na fatura
+    (credit_transactions, contada como gasto), e creditar a Carteira contaria o
+    mesmo dinheiro duas vezes. Positivo: o Pix Saque na conta segue perguntando."""
+    uid = usuario_pagante()
+    c = conecta(uid, f"item-{uid}")
+    sync(c, uid, [tx("p1", -100, dia(10), op="PIX", desc="Pix Saque Loja X", category="Transfer - PIX")])
+    db.save_open_finance_sync(c, [{
+        "provider_account_id": f"cc-{c}", "name": "Cartao", "type": "CREDIT", "subtype": "CREDIT_CARD",
+        "currency": "BRL", "balance": Decimal("0"), "raw": {"number": "9999"},
+        "transactions": [tx("s1", 200, dia(11), op="", desc="Saque cartao credito", category="Withdrawal")],
+    }])
+    db.import_open_finance_credit(uid, c)
+
+    assert [(r["status"], r["kind"]) for r in links(uid)] == [("perguntar_fraco", "fraco")]
+    assert carteira(uid) == 0
+    assert q("select count(*) as n from credit_transactions where user_id=%s", (uid,), True)[0]["n"] == 1
+
+
 def test_pix_saque_so_pergunta(caixa):
     uid = usuario_pagante()
     c = conecta(uid, f"item-{uid}")

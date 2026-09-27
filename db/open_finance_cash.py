@@ -57,7 +57,10 @@ def cash_kind(account_type, amount, raw, description) -> str | None:
         return "saque"
     if tipo == "BANK" and v > 0 and op == "DEPOSITO":
         return "deposito"
-    if saque and (tipo == "BANK" and v < 0 and op == "PIX" or tipo == "CREDIT" and v != 0):
+    # Saque no cartão (CREDIT) fica de fora: a linha vira compra em
+    # credit_transactions e os relatórios a contam como gasto — creditar a
+    # Carteira contaria o mesmo dinheiro duas vezes.
+    if saque and tipo == "BANK" and v < 0 and op == "PIX":
         return "fraco"
     return None
 

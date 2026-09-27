@@ -207,7 +207,8 @@ def test_desfazer_fusao_de_desfeito_que_virou_compra(caixa, monkeypatch):
     sync(c, uid, [tx("t1", -200, hoje)])
     undo_link(uid, links(uid)[0]["id"])
     _webhook_apaga(monkeypatch, f"item-{uid}", ["t1"])
-    _diga(uid, "gastei 200 no mercado")
+    # Com banco conectado, o manual só grava em dinheiro vivo (Q40, forma_pagamento.py).
+    assert "mercado" in _diga(uid, "gastei 200 no mercado em dinheiro").lower()
     sync(c, uid, [tx("t1", -200, hoje, op="CARTAO", desc="Mercado", category="Groceries")])
     (o,) = q("select id, reconciliation_status as s from open_finance_transactions where provider_transaction_id='t1' "
              "and account_id in (select id from open_finance_accounts where connection_id=%s)", (c,), True)

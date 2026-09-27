@@ -198,3 +198,21 @@ def test_banco_corrige_dentro_da_tolerancia_depois_do_e_o_mesmo_segue_casado(cai
     (link,) = links(uid)
     assert (link["status"], link["origem"], link["launch_id"]) == ("ativo", "manual", _recebi_id(uid))
     assert carteira(uid) == Decimal("150")
+
+
+@pytest.mark.parametrize("resposta, esperado", [("dinheiro vivo", ("perguntar_manual", 0)),
+                                                 ("pelo banco", ("ativo", 200))])
+def test_ordem_real_depois_da_q40_banco_ja_conectado(caixa, resposta, esperado):
+    """A ordem de verdade: banco já conectado, o "recebi 200" pergunta a forma
+    (Q40, core/handlers/forma_pagamento.py). "Dinheiro vivo" grava na Carteira e
+    o saque pergunta "é o mesmo?"; "pelo banco" não grava e o saque credita."""
+    uid = usuario_pagante()
+    c = conecta(uid, f"item-{uid}", desde=datetime.now() - timedelta(days=10))
+    sync(c, uid, [])
+    assert "dinheiro vivo ou pelo banco" in _diga(uid, "recebi 200 do meu pai")
+    _diga(uid, resposta)
+    sync(c, uid, [tx("t1", -200, date.today())])
+
+    status, saque = esperado
+    assert [r["status"] for r in links(uid)] == [status]
+    assert carteira(uid) == (Decimal("200") if resposta == "dinheiro vivo" else 0) + saque
