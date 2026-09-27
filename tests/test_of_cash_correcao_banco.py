@@ -97,3 +97,35 @@ def test_nome_novo_e_reconexao_religam(caixa):
     assert carteira(uid) == Decimal("200")
     (link,) = links(uid)
     assert link["status"] == "ativo" and link["of_transaction_id"]
+
+
+def test_banco_manda_so_a_hora_depois_e_o_lancamento_segue(caixa):
+    """Mesmo valor e data, o banco preenche e depois corrige `transacted_at`: o
+    lançamento automático sai do meio-dia e passa a mostrar a hora do banco."""
+    from utils_date import _tz
+    uid = usuario_pagante()
+    c = conecta(uid, f"item-{uid}")
+    sync(c, uid, [tx("t1", -200, dia(10))])
+    assert _launch(uid)["efeitos"]["time_known"] is False
+
+    for hora in (datetime(2026, 3, 10, 15, 30, tzinfo=_tz()), datetime(2026, 3, 10, 16, 45, tzinfo=_tz())):
+        sync(c, uid, [{**tx("t1", -200, dia(10)), "transacted_at": hora}])
+        lan = _launch(uid)
+        assert (lan["criado_em"], lan["efeitos"]["time_known"]) == (hora, True), "a hora do banco não chegou"
+    assert carteira(uid) == Decimal("200") and Decimal(str(lan["valor"])) == Decimal("200")
+    antes = links(uid)[0]["updated_at"]
+    sync(c, uid, [{**tx("t1", -200, dia(10)), "transacted_at": hora}])
+    assert links(uid)[0]["updated_at"] == antes, "positivo: a mesma hora de novo não reescreve"
+
+
+def test_data_editada_pelo_usuario_fica_ate_o_banco_mudar(caixa):
+    """Positivo: só a mudança do BANCO reescreve o lançamento; a data que o
+    usuário editou não volta num sync sem mudança."""
+    uid = usuario_pagante()
+    c = conecta(uid, f"item-{uid}")
+    sync(c, uid, [tx("t1", -200, dia(10))])
+    (lid,) = [r["launch_id"] for r in links(uid)]
+    editada = datetime(2026, 3, 9, 8, 0, tzinfo=_launch(uid)["criado_em"].tzinfo)
+    assert db.update_launch_fields(uid, lid, criado_em=editada)
+    sync(c, uid, [tx("t1", -200, dia(10))])
+    assert _launch(uid)["criado_em"] == editada, "o sync sem mudança do banco desfez a edição"

@@ -914,6 +914,7 @@ def init_db():
           of_transaction_id bigint references open_finance_transactions(id) on delete set null,
           amount numeric not null,
           tx_date date not null,
+          tx_at timestamptz,  -- hora do banco (null = só data); com amount/tx_date, o último estado visto
           notified_at timestamptz,
           seen_at timestamptz,
           created_at timestamptz not null default now(),

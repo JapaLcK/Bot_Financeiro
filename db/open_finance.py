@@ -19,7 +19,7 @@ from .cards import (
 )
 from .connection import TIPO_CANON_SQL, get_conn
 from .of_snapshots import grava_fotos_posicoes
-from .open_finance_cash import RESERVADO_SQL
+from .open_finance_cash import RESERVA_SQL, RESERVADO_SQL
 from .users import ensure_user, ensure_user_tx
 
 # `logging` da stdlib, mesmo padrão (e mesmo motivo) de `db/open_finance_state.py`:
@@ -2049,7 +2049,8 @@ def pick_reconciliation_match(valor, tx_date, description, candidates) -> dict:
 OF_RECURRING_SQL = "coalesce(efeitos ? 'of_recurring', false)"
 
 
-def _find_manual_candidates(cur, user_id: int, tipo: str, valor, tx_date) -> list[dict]:
+def _find_manual_candidates(cur, user_id: int, tipo: str, valor, tx_date, proprio=None,
+                            internos=False) -> list[dict]:
     """Lançamentos não-OF elegíveis a casar com uma tx OF, ainda não vinculados.
 
     Inclui `source = 'manual'` DE PROPÓSITO, mas só como candidato a 'ask':
@@ -2068,28 +2069,39 @@ def _find_manual_candidates(cur, user_id: int, tipo: str, valor, tx_date) -> lis
     `list_launches_by_tipo`: 'saida'/'entrada' passadas como ARGUMENTO passam a
     não casar nada (antes casavam as linhas legadas). Inalcançável daqui — o
     único produtor do argumento é `classify_open_finance_launch` — mas quem
-    ligar outro chamador precisa saber."""
+    ligar outro chamador precisa saber.
+
+    `proprio`: id do vínculo de saque em espécie que revalida o PRÓPRIO manual
+    (db/open_finance_cash_revisao.py) — a reserva dele e o interno que o "é o
+    mesmo" pôs não contam; o resto do predicado é o da escolha. `internos=True`
+    devolve também os internos (`interno`), que o saque em espécie usa como
+    bloqueio do crédito automático — nunca como par."""
     cur.execute(
         f"""
+        select * from (
         select id, valor, coalesce(posted_at, criado_em::date) as ref_date, alvo, nota,
                coalesce(source, 'manual') as source,
                {OF_RECURRING_SQL} as of_recurring,
                case when jsonb_typeof(efeitos -> 'delta_conta') = 'number'
-                    then (efeitos ->> 'delta_conta')::numeric end as delta_conta
+                    then (efeitos ->> 'delta_conta')::numeric end as delta_conta,
+               is_internal_movement and not exists (
+                   select 1 from of_cash_links p where p.id = %s and p.user_id = launches.user_id
+                      and p.status = 'ativo' and p.launch_id = launches.id) as interno
         from launches
         where user_id = %s
           and {TIPO_CANON_SQL} = %s
           and coalesce(source, 'manual') <> 'open_finance'
-          and is_internal_movement = false
           and abs(valor - %s) <= %s
           and coalesce(posted_at, criado_em::date) between %s and %s
           and not exists (
               select 1 from open_finance_transactions o where o.imported_launch_id = launches.id
           )
-          and not {RESERVADO_SQL.format(t="launches")}
+          and not {RESERVA_SQL.format(t="launches", proprio="%s")}
+        ) c where %s or not c.interno
         """,
-        (user_id, tipo, Decimal(str(valor)), RECON_AMOUNT_TOL,
-         tx_date - timedelta(days=RECON_DATE_WINDOW), tx_date + timedelta(days=RECON_DATE_WINDOW)),
+        (proprio, user_id, tipo, Decimal(str(valor)), RECON_AMOUNT_TOL,
+         tx_date - timedelta(days=RECON_DATE_WINDOW), tx_date + timedelta(days=RECON_DATE_WINDOW),
+         proprio, internos),
     )
     return cur.fetchall()
 

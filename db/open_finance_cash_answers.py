@@ -39,7 +39,7 @@ def answer_link(user_id, link_id, resposta) -> dict:
         elif result["changed"] and resposta == "same":
             # Revalida na hora: o manual editado depois da pergunta não casa mais, e
             # "é o mesmo" sumiria com a diferença. Fica pendente; o sync reavalia.
-            casa = casa_manual(cur, user_id, link["manual_launch_id"], link["amount"], link["tx_date"])
+            casa = casa_manual(cur, user_id, link, link["manual_launch_id"])
             if casa:
                 cur.execute("update launches set is_internal_movement=true where id=%s and user_id=%s "
                             "and not is_internal_movement", (link["manual_launch_id"], user_id))

@@ -6,14 +6,17 @@ from decimal import Decimal
 
 from psycopg.types.json import Jsonb
 
-from .open_finance_cash import INTERNOS, _do_usuario, _muda_status, _quando
+from .open_finance_cash import INTERNOS, RESERVADO_SQL, _do_usuario, _muda_status, _quando
 
 
 def _corrige(cur, user_id, link, t) -> int:
-    """O banco corrigiu valor/data: o vínculo segue o banco (a pergunta pendente
-    credita o valor corrente) e o automático já creditado também."""
+    """O banco corrigiu valor/data/hora: o vínculo segue o banco (a pergunta
+    pendente credita o valor corrente) e o automático já creditado também. O
+    vínculo guarda o último estado do banco: só a mudança DELE reescreve o
+    lançamento (a data que o usuário editou fica até o banco mudar)."""
     v = abs(Decimal(str(t["amount"])))
-    if v == Decimal(str(link["amount"])) and t["transaction_date"] == link["tx_date"]:
+    banco = (v, t["transaction_date"], t["transacted_at"])
+    if banco == (Decimal(str(link["amount"])), link["tx_date"], link["tx_at"]):
         return 0
     if link["status"] == "ativo" and link["launch_id"] and link["origem"] == "auto":
         novo = -v if link["kind"] == "deposito" else v
@@ -27,23 +30,51 @@ def _corrige(cur, user_id, link, t) -> int:
         if not (row := cur.fetchone()):
             return 0
         cur.execute("update accounts set balance = balance + %s where user_id=%s", (novo - row["velho"], user_id))
-    cur.execute("update of_cash_links set amount=%s, tx_date=%s, updated_at=now() where id=%s and user_id=%s",
-                (v, t["transaction_date"], link["id"], user_id))
-    link.update(amount=v, tx_date=t["transaction_date"])
+    cur.execute("update of_cash_links set amount=%s, tx_date=%s, tx_at=%s, updated_at=now() "
+                "where id=%s and user_id=%s", (*banco, link["id"], user_id))
+    link.update(amount=v, tx_date=t["transaction_date"], tx_at=t["transacted_at"])
     return 1
 
 
-def casa_manual(cur, user_id, manual_id, valor, dia) -> bool:
-    """O manual ainda casa com o banco? Mesma tolerância do casamento
-    (`pick_reconciliation_match`: valor e ±dias). Manual apagado, já fundido
-    numa transação pelo conciliador comum, ou débito recorrente em conta, não casa."""
-    from .open_finance import OF_RECURRING_SQL, pick_reconciliation_match
-    cur.execute("select id, valor, coalesce(posted_at, criado_em::date) as ref_date from launches "
-                f"where id=%s and user_id=%s and not {OF_RECURRING_SQL} and not exists (select 1 "
-                "from open_finance_transactions o where o.imported_launch_id = launches.id)",
-                (manual_id, user_id))
-    row = cur.fetchone()
-    return bool(row) and pick_reconciliation_match(valor, dia, "", [dict(row)])["launch_id"] is not None
+def _candidatos(cur, user_id, kind, valor, dia, proprio=None) -> list[dict]:
+    """Fonte única do manual que casa com o saque/depósito — a escolha
+    (`_candidato_manual`) e a revalidação (`casa_manual`) leem daqui: receita
+    (saque) / despesa (depósito) manual, não interna, fora do débito recorrente
+    e de fusão, mexendo na Carteira no sentido do dinheiro, mesmo valor ±3 dias,
+    sem reserva de outro vínculo nem pendência no conciliador comum (a que o
+    próprio dinheiro reserva não é acionável lá: `ACTIONABLE_PENDING_SQL`).
+    Com `interno`: o manual interno com o mesmo resto não vira par, mas impede
+    o crédito automático — o saque não se prova novo e vira pergunta."""
+    from .open_finance import _find_manual_candidates
+    tipo = "despesa" if kind == "deposito" else "receita"
+    cur.execute(f"""select o.match_launch_id from open_finance_transactions o
+                      join open_finance_accounts a on a.id = o.account_id
+                      join open_finance_connections c on c.id = a.connection_id
+                      join launches l on l.id = o.match_launch_id
+                     where c.user_id = %s and o.reconciliation_status = 'pending'
+                       and not {RESERVADO_SQL.format(t="l")}""", (user_id,))
+    usados = {r["match_launch_id"] for r in cur.fetchall()}
+    return [c for c in _find_manual_candidates(cur, user_id, tipo, abs(Decimal(str(valor))), dia, proprio, True)
+            if c["source"] == "manual" and not c["of_recurring"] and c["id"] not in usados
+            and c["delta_conta"] is not None
+            and (c["delta_conta"] < 0 if tipo == "despesa" else c["delta_conta"] > 0)]
+
+
+def _candidato_manual(cur, user_id, kind, t, proprio=None) -> tuple[int | None, bool]:
+    """(manual para perguntar "é o mesmo?", há manual interno que bloqueia o automático)."""
+    from .open_finance import pick_reconciliation_match
+    cands = _candidatos(cur, user_id, kind, t["amount"], t["transaction_date"], proprio)
+    pares = [c for c in cands if not c["interno"]]
+    return (pick_reconciliation_match(abs(Decimal(str(t["amount"]))), t["transaction_date"],
+                                      t["description"], pares)["launch_id"], len(pares) < len(cands))
+
+
+def casa_manual(cur, user_id, link, manual_id) -> bool:
+    """O manual ainda sairia da escolha para esta transação? Manual apagado,
+    fundido, recategorizado como interno, com valor/data fora etc. não casa."""
+    return manual_id is not None and any(
+        c["id"] == manual_id and not c["interno"]
+        for c in _candidatos(cur, user_id, link["kind"], link["amount"], link["tx_date"], link["id"]))
 
 
 def _descasa(cur, user_id, link, corrigiu) -> bool:
@@ -57,7 +88,7 @@ def _descasa(cur, user_id, link, corrigiu) -> bool:
         manual = link["launch_id"]
     else:
         return False
-    if casa_manual(cur, user_id, manual, link["amount"], link["tx_date"]):
+    if casa_manual(cur, user_id, link, manual):
         return False
     if link["status"] == "ativo":
         _muda_status(cur, user_id, link, "desfeito")  # devolve o manual a lançamento comum

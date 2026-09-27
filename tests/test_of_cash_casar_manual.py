@@ -159,3 +159,42 @@ def test_pergunta_aberta_segue_reservando_o_manual(caixa):
 
     assert [r["status"] for r in links(uid)] == ["perguntar_manual", "ativo"]
     assert carteira(uid) == Decimal("350")
+
+
+@pytest.mark.parametrize("categoria, esperado", [("transferencia_interna", "perguntar_novo"),
+                                                  ("presente", "perguntar_manual"), (None, "ativo")])
+def test_manual_recategorizado_com_a_pergunta_aberta(caixa, categoria, esperado):
+    """Com "é o mesmo?" aberto, o "recebi 200" vira transferência interna (ou é
+    apagado): a escolha não o ofereceria mais, então o sync refaz a decisão em
+    vez de manter uma pergunta que o botão recusa para sempre. Interno de mesmo
+    valor não prova o saque novo: pergunta "já anotei?", nunca crédito. Apagado,
+    credita. Positivo: outra categoria comum segue casando e "é o mesmo" vale."""
+    uid = usuario_pagante()
+    c = _conversa_e_banco(uid, 200)
+    recebi = _recebi_id(uid)
+    if categoria:
+        assert db.update_launch_category(uid, recebi, categoria)
+    else:
+        _diga(uid, f"apagar #{db.get_launch_user_seq(uid, recebi)}")
+        _diga(uid, "sim")
+        assert not q("select 1 from launches where id=%s", (recebi,), True)
+    sync(c, uid, [tx("t1", -200, date.today())])
+
+    (link,) = links(uid)
+    assert link["status"] == esperado, "pergunta presa ou crédito sem prova de que o saque é novo"
+    assert answer_link(uid, link["id"], "same")["changed"] is (esperado == "perguntar_manual")
+    assert carteira(uid) == Decimal("150"), "a Carteira contou o saque em dobro (ou não contou)"
+
+
+def test_banco_corrige_dentro_da_tolerancia_depois_do_e_o_mesmo_segue_casado(caixa):
+    """Positivo do predicado único: o "é o mesmo" deixou o manual interno (é o
+    par). O banco corrige a data em 1 dia: o manual segue casando — o interno
+    que o próprio vínculo pôs não o desqualifica, senão viria crédito em dobro."""
+    uid = usuario_pagante()
+    c = _conversa_e_banco(uid, 200)
+    assert answer_link(uid, links(uid)[0]["id"], "same")["changed"]
+    sync(c, uid, [tx("t1", -200, date.today() - timedelta(days=1))])
+
+    (link,) = links(uid)
+    assert (link["status"], link["origem"], link["launch_id"]) == ("ativo", "manual", _recebi_id(uid))
+    assert carteira(uid) == Decimal("150")
