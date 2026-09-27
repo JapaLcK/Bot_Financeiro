@@ -526,18 +526,22 @@ def list_autopay_notices_for_whatsapp(today: date) -> list[dict[str, Any]]:
     que vencem em `today` (`due_on`, o dia lógico da volta que gravou — não o
     horário de inserção, que passa da meia-noite). Cada linha leva o próprio
     user_id. Aviso de dia anterior não sai atrasado; linha antiga (do cobrador
-    ou de antes da coluna) tem `due_on` nulo e fica de fora."""
+    ou de antes da coluna) tem `due_on` nulo e fica de fora. Tudo que a mensagem
+    afirma (nome, valor, meio, data) vem do recorrente ATUAL, não do retrato da
+    gravação: o notify reconfere a data com `_vence_hoje`."""
     with get_conn() as conn:
         with conn.cursor() as cur:
             cur.execute(
                 """
-                select rc.id, rc.user_id, rc.amount, r.name, r.payment_type
+                select rc.id, rc.user_id, r.amount, r.name, r.payment_type,
+                       r.due_day, r.due_month, r.frequency,
+                       coalesce(r.start_date, r.created_at::date) as start_date
                 from recurring_charges rc
                 join recurring_expenses r on r.id = rc.recurring_id and r.user_id = rc.user_id
                 where rc.launch_id is null and rc.credit_tx_id is null
                   and rc.wa_notified_at is null
                   and rc.due_on = %s
-                  and r.is_active and r.payment_mode = 'autopay'
+                  and r.is_active and r.payment_mode = 'autopay' and r.amount > 0
                 order by rc.user_id, rc.id
                 """,
                 (today,),

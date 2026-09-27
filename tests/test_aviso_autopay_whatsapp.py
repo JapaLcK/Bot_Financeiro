@@ -43,6 +43,11 @@ Controles NEGATIVOS declarados (docs/controles_declarados.md) — em
      `test_leitura_que_falha_nao_reserva_e_a_proxima_hora_envia` (os dois).
   m. no loop, voltar a ler o relógio em cada passo (sync e notify sem argumento)
      → vermelho `test_volta_que_cruza_a_meia_noite_envia_o_aviso_do_dia`.
+  n. no notify, apagar a reconferência `if not _vence_hoje(row, now.date()):
+     continue` → vermelhos `test_editado_depois_da_gravacao_nao_avisa[due_day]`
+     e `[daily]`; tirar `and r.amount > 0` da listagem → vermelho `[valor_zero]`;
+  o. voltar a ler `rc.amount` (retrato da gravação) em vez de `r.amount` →
+     vermelho `test_valor_editado_depois_da_gravacao_vai_o_novo`.
 Positivo: `test_loop_real_manda_um_aviso_por_gasto_conta_e_cartao` e o segundo
 passo de `test_antes_da_hora_nao_reserva_e_depois_envia` seguem verdes nas injeções.
 """
@@ -63,7 +68,7 @@ import db.recurring as dbr
 from _billing_grants_helpers import garantir_system_event_logs
 from conftest import promote_to_pro
 from core.observability import recent_event_exists
-from db.recurring import create_recurring_expense
+from db.recurring import create_recurring_expense, update_recurring_expense
 from db_support import invalidate_auth_user_cache
 from test_recorrente_so_preve import _um_tick
 from utils_date import now_tz
@@ -478,3 +483,46 @@ def test_leitura_que_falha_nao_reserva_e_a_proxima_hora_envia(user_id, monkeypat
 
     _rodar()
     assert len(_para(posts, _FONE_A)) == 1
+
+
+def _outro_dia() -> int:
+    return date.today().day % 28 + 1  # nunca hoje, nem clampado a hoje
+
+
+@pytest.mark.parametrize("edicao", ["due_day", "daily", "valor_zero"])
+def test_editado_depois_da_gravacao_nao_avisa(user_id, monkeypatch, edicao):
+    """A sync gravou o aviso de hoje; antes da hora de envio o usuário muda o
+    vencimento (ou a frequência pra diário). O notify reconfere no recorrente
+    ATUAL: 0 envios e nada reservado. Valor 0 (só por SQL; a edição recusa)
+    também não é aviso, como na sync.
+
+    Controle negativo: tirar a reconferência `_vence_hoje` do notify → 1 envio
+    em `due_day` e `daily`; tirar `r.amount > 0` da listagem → 1 em `valor_zero`."""
+    posts = _armar(monkeypatch)
+    _dono(user_id, _FONE_A)
+    rec = _gasto(user_id, "Editado Q616")
+    rc.sync_autopay_notices_once()
+    if edicao == "due_day":
+        update_recurring_expense(user_id, rec["id"], due_day=_outro_dia())
+    elif edicao == "daily":
+        update_recurring_expense(user_id, rec["id"], frequency="daily")
+    else:
+        _sql("update recurring_expenses set amount=0 where id=%s", (rec["id"],))
+
+    rc.notify_autopay_notices_whatsapp_once(now=_as(10))
+
+    assert _para(posts, _FONE_A) == []
+    assert _reservados(user_id) == 0
+
+
+def test_valor_editado_depois_da_gravacao_vai_o_novo(user_id, monkeypatch):
+    """Controle negativo: ler `rc.amount` (o retrato da gravação) → "R$ 55,90": vermelho."""
+    posts = _armar(monkeypatch)
+    _dono(user_id, _FONE_A)
+    rec = _gasto(user_id, "Reajuste Q616", 55.9)
+    rc.sync_autopay_notices_once()
+    update_recurring_expense(user_id, rec["id"], amount=61.5)
+
+    rc.notify_autopay_notices_whatsapp_once(now=_as(10))
+
+    assert [_params(p)["valor"] for p in _para(posts, _FONE_A)] == ["R$ 61,50"]

@@ -152,24 +152,32 @@ def sync_manual_bills_once(today: date | None = None, user_id: int | None = None
     return n
 
 
+def _vence_hoje(rec: dict, today: date) -> bool:
+    """Regra única do "vence hoje" do aviso de autopay: a sync grava por ela e o
+    notify reconfere no recorrente ATUAL (edição entre os dois não manda aviso
+    falso). Diário não avisa (seria todo dia). A data sai de
+    `_recurring_occurrence_dates`, a mesma da Previsão."""
+    from core.services.cashflow import _recurring_occurrence_dates
+
+    freq = rec.get("frequency") or "monthly"
+    return freq != "daily" and bool(_recurring_occurrence_dates(
+        rec.get("due_day"), freq, rec.get("due_month"), rec.get("start_date"),
+        today - timedelta(days=1), today))
+
+
 def sync_autopay_notices_once(today: date | None = None) -> int:
     """Grava o aviso de vencimento de cada gasto fixo autopay que vence HOJE
-    (conta ou cartão). Não lança nada. Diário não avisa (seria todo dia). A data
-    sai de `_recurring_occurrence_dates`, a mesma da Previsão. A chave é a do
+    (conta ou cartão), por `_vence_hoje`. Não lança nada. A chave é a do
     cobrador antigo (mensal/anual `YYYY-MM`, semanal `w:`, único `o:`), então o
     período que ele já lançou não ganha aviso duplicado. Retorna quantos criou."""
-    from core.services.cashflow import _recurring_occurrence_dates
     from db.recurring import ensure_autopay_notice, list_active_autopay_recurrings
 
     today = today or date.today()
     n = 0
     for rec in list_active_autopay_recurrings():
+        if not _vence_hoje(rec, today):
+            continue
         freq = rec.get("frequency") or "monthly"
-        if freq == "daily":
-            continue
-        if not _recurring_occurrence_dates(rec.get("due_day"), freq, rec.get("due_month"),
-                                           rec.get("start_date"), today - timedelta(days=1), today):
-            continue
         key = {"weekly": f"w:{today.isoformat()}",
                "once": f"o:{today.isoformat()}"}.get(freq, today.strftime("%Y-%m"))
         try:
@@ -209,6 +217,8 @@ def notify_autopay_notices_whatsapp_once(now: datetime | None = None) -> int:
 
     por_usuario: dict[int, list[dict]] = {}
     for row in list_autopay_notices_for_whatsapp(now.date()):
+        if not _vence_hoje(row, now.date()):
+            continue  # editado depois da gravação: não reserva, e amanhã o due_on já não bate
         por_usuario.setdefault(int(row["user_id"]), []).append(row)
 
     sent = 0
