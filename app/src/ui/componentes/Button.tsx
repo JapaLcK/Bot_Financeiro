@@ -23,7 +23,8 @@ interface Props {
   accessibilityHint?: string;
 }
 
-const ALTURA: Record<Tamanho, number> = { M: 44, L: 52 };
+/** Exportada para o botão do sistema da Apple (Entrar) ter a MESMA altura do botão do Google. */
+export const ALTURA: Record<Tamanho, number> = { M: 44, L: 52 };
 
 /**
  * Rosa só onde há decisão (identidade pigbank-frontend): só `primary` usa

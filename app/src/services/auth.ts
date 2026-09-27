@@ -5,6 +5,7 @@ import {
   loginSchema,
   pendenteGoogleSchema,
   perfilSchema,
+  respostaAppleSchema,
   respostaLoginSchema,
   type Perfil,
 } from "../api/schemas/auth";
@@ -44,7 +45,11 @@ export class EntradaSuperada extends ErroDeApi {
 
 export type Entrada =
   | { fase: "pronta"; perfil: Perfil }
-  | { fase: "mfa"; desafio: string; email: string };
+  | { fase: "mfa"; desafio: string; email: string }
+  // Só a Apple: conta nova, sem sessão (`respostaAppleSchema`).
+  | { fase: "cadastro"; token: string; email: string; nome: string };
+
+export type ProvedorSocial = "google" | "apple";
 
 /**
  * O `AbortController` da tentativa de entrada EM VOO agora, se houver.
@@ -107,15 +112,17 @@ async function tentativa<T>(
  * login/verify já faria sozinho) e não há controlador para abortar.
  *
  * ponytail: limite conhecido, documentado e SEM cobertura (#592). `ultimaTentativa`
- * é um contador único para login, MFA, cadastro (`confirmarCadastro`) e Google
- * (`entrarComGoogle`, `completarCadastroGoogle`), então um abandono aqui supera
- * a entrada em voo de QUALQUER um deles. Caso real: um verify de cadastro em voo
+ * é um contador único para login, MFA, cadastro (`confirmarCadastro`), Google
+ * (`entrarComGoogle`) e Apple (`entrarComApple`), e o cadastro dos dois
+ * (`completarCadastroSocial`), então um abandono aqui supera a entrada em voo
+ * de QUALQUER um deles. Caso real: um verify de cadastro em voo
  * em `/criar-conta`, `/entrar` empilhada por cima (hoje só por link `pigbank://`
- * digitado de fora: a volta do Google NÃO passa pelo expo-router, ela chega pelo
- * retorno do `openAuthSessionAsync`), login de outra conta que para no MFA e
+ * digitado de fora: nem a volta do Google nem a da Apple passam pelo
+ * expo-router — chegam pelo retorno do `openAuthSessionAsync` e do
+ * `signInAsync`), login de outra conta que para no MFA e
  * Voltar — o 200 atrasado do cadastro vira `EntradaSuperada`, a conta já existe
  * no servidor e a sessão dela é descartada sem aviso (recuperação: Entrar com
- * e-mail e senha). O Voltar do cadastro do Google não chama isto, de propósito.
+ * e-mail e senha). O Voltar do cadastro social não chama isto, de propósito.
  * Enumere a máquina (fluxos × eventos que avançam o contador) antes de mexer aqui.
  */
 export function abandonarEntrada(): void {
@@ -123,12 +130,23 @@ export function abandonarEntrada(): void {
   controladorEmVoo?.abort();
 }
 
-/** O primeiro passo de `/auth/login` e da troca do Google: o servidor responde igual (`_concluir_login`). */
-async function entrarPor(caminho: string, corpo: unknown): Promise<Entrada> {
+/**
+ * O primeiro passo de `/auth/login` e das trocas do Google e da Apple: o
+ * servidor responde igual (`_concluir_login`). Só a Apple pode devolver a
+ * conta nova, e só o esquema dela a aceita.
+ */
+async function entrarPor(
+  caminho: string,
+  corpo: unknown,
+  esquema: z.ZodType<z.infer<typeof respostaAppleSchema>> = respostaLoginSchema,
+): Promise<Entrada> {
   return tentativa(async (minhaVez, sinal): Promise<Entrada> => {
-    const r = await chamar(caminho, respostaLoginSchema, { metodo: "POST", corpo, semAuth: true, sinal });
+    const r = await chamar(caminho, esquema, { metodo: "POST", corpo, semAuth: true, sinal });
     if ("mfa_required" in r) {
       return { fase: "mfa", desafio: r.mfa_challenge, email: r.email };
+    }
+    if ("signup_required" in r) {
+      return { fase: "cadastro", token: r.signup_token, email: r.email, nome: r.name_hint };
     }
     return { fase: "pronta", perfil: await gravarSessao(minhaVez, r) };
   });
@@ -146,6 +164,19 @@ export async function entrarComGoogle(codigo: string): Promise<Entrada> {
   return entrarPor("/auth/google/exchange", { code: codigo });
 }
 
+/**
+ * Troca o identity token da Apple pela sessão, pelo desafio ou pela conta nova.
+ * `nonceCru` é o que gerou o hash mandado à Apple: o servidor confere um contra
+ * o outro (`core/services/apple_signin.py`).
+ */
+export async function entrarComApple(identityToken: string, nonceCru: string, nome: string | null): Promise<Entrada> {
+  return entrarPor(
+    "/auth/apple/exchange",
+    { identity_token: identityToken, nonce: nonceCru, name: nome },
+    respostaAppleSchema,
+  );
+}
+
 /** O pré-cadastro do Google. Não grava credencial: fica FORA de `tentativa()`, como `cadastrar`. */
 export async function pendenteGoogle(token: string): Promise<{ email: string; name_hint: string }> {
   return chamar(`/auth/google/pending/${encodeURIComponent(token)}`, pendenteGoogleSchema, {
@@ -155,13 +186,19 @@ export async function pendenteGoogle(token: string): Promise<{ email: string; na
 }
 
 /**
- * Cria a conta do Google e recebe a sessão dela. Dentro de `tentativa()`, como
- * `confirmarCadastro`. Chamar isto é o aceite dos Termos: a tela mostra o texto
- * com os links logo acima do botão, sem caixa de seleção (decisão do dono).
+ * Cria a conta de quem entrou pelo Google ou pela Apple e recebe a sessão dela.
+ * Dentro de `tentativa()`, como `confirmarCadastro`. Chamar isto é o aceite dos
+ * Termos: a tela mostra o texto com os links logo acima do botão, sem caixa de
+ * seleção (decisão do dono).
  */
-export async function completarCadastroGoogle(token: string, nome: string, telefone: string): Promise<Perfil> {
+export async function completarCadastroSocial(
+  provedor: ProvedorSocial,
+  token: string,
+  nome: string,
+  telefone: string,
+): Promise<Perfil> {
   return tentativa(async (minhaVez, sinal) => {
-    const r = await chamar("/auth/google/complete-signup", loginSchema, {
+    const r = await chamar(`/auth/${provedor}/complete-signup`, loginSchema, {
       metodo: "POST",
       corpo: { token, name: nome, phone: telefone, accepted_terms: true },
       semAuth: true,
@@ -173,7 +210,7 @@ export async function completarCadastroGoogle(token: string, nome: string, telef
 
 /**
  * O final comum de quem recebe credencial (`entrarPor`, `verificarMfa`,
- * `confirmarCadastro`, `completarCadastroGoogle`), sempre DENTRO de
+ * `confirmarCadastro`, `completarCadastroSocial`), sempre DENTRO de
  * `tentativa()`. A conferência acontece DENTRO da gravação, não antes: entre
  * um passo e o outro caberia uma entrada mais nova, e o aparelho ficaria
  * logado nesta enquanto a tela mostra a outra.
