@@ -122,12 +122,12 @@ describe("(auth)/entrar — tela real", () => {
     expect(screen.getByLabelText("Senha").props.value).toBe("");
   });
 
-  it("M3 — só a Apple segue desativada com accessibilityHint 'Em breve'; o Google não", async () => {
+  it("M3 — nenhum botão social com accessibilityHint 'Em breve' (a Apple está em entrar_apple_tela)", async () => {
     renderRouter("./app", { initialUrl: "/entrar" });
     await waitFor(() => expect(screen).toHavePathname("/entrar"));
 
     expect(screen.getByRole("button", { name: "Continuar com Google" }).props.accessibilityHint).toBeUndefined();
-    expect(screen.getByRole("button", { name: "Continuar com Apple" }).props.accessibilityHint).toBe("Em breve");
+    expect(screen.getByRole("button", { name: "Continuar com a Apple" }).props.accessibilityHint).toBeUndefined();
   });
 
   it("M1 — deep link frio para /esqueci-senha tem /entrar embaixo na pilha (canGoBack)", async () => {

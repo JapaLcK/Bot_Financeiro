@@ -41,11 +41,10 @@ async function tocarGoogle() {
 }
 
 describe("(auth)/entrar — Continuar com Google", () => {
-  it("o botão do Google está ativo; o 'em breve' é só da Apple", async () => {
+  it("o botão do Google está ativo; o 'em breve' da Apple saiu", async () => {
     await abrirEntrar();
     expect(desativado("Continuar com Google")).toBe(false);
-    expect(desativado("Continuar com Apple")).toBe(true);
-    expect(screen.getByText("Entrar com Apple chega em breve.")).toBeTruthy();
+    expect(screen.queryByText("Entrar com Apple chega em breve.")).toBeNull();
     expect(screen.queryByText("Em breve")).toBeNull();
   });
 

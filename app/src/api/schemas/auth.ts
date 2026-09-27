@@ -45,6 +45,17 @@ export const desafioMfaSchema = z.object({
 /** O que `/auth/login` pode devolver com 200: credencial OU desafio. */
 export const respostaLoginSchema = z.union([desafioMfaSchema, loginSchema]);
 
+/** A conta nova da `/auth/apple/exchange`: o pré-cadastro vem na própria resposta, sem sessão. */
+export const cadastroPendenteSchema = z.object({
+  signup_required: z.literal(true),
+  signup_token: z.string().min(1),
+  email: z.string(),
+  name_hint: z.string(),
+});
+
+/** O que `/auth/apple/exchange` pode devolver com 200 (`auth_apple_exchange`). */
+export const respostaAppleSchema = z.union([desafioMfaSchema, cadastroPendenteSchema, loginSchema]);
+
 /** `GET /auth/google/pending/{token}`: o pré-cadastro de quem entrou pelo Google sem conta. */
 export const pendenteGoogleSchema = z.object({
   email: z.string(),

@@ -23,6 +23,18 @@ describe("app.config — iOS", () => {
     expect(configEm(ambiente).ios?.associatedDomains).toBeUndefined();
   });
 
+  it("produção liga Entrar com a Apple (capability e plugin)", () => {
+    const config = configEm("production");
+    expect(config.ios?.usesAppleSignIn).toBe(true);
+    expect(config.plugins).toContain("expo-apple-authentication");
+  });
+
+  it.each(["development", "staging"])("%s não liga Entrar com a Apple", (ambiente) => {
+    const config = configEm(ambiente);
+    expect(config.ios?.usesAppleSignIn).toBeUndefined();
+    expect(config.plugins).not.toContain("expo-apple-authentication");
+  });
+
   it.each(["production", "development"])("%s: time, build e criptografia isenta", (ambiente) => {
     expect(configEm(ambiente).ios).toMatchObject({
       appleTeamId: "S849YDA49P",
