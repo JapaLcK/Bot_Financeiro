@@ -464,6 +464,8 @@ _401_RENOVAVEL = {
     # é o provedor, não um navegador — não há sessão para renovar, e o
     # `auth-refresh.js` nem roda do outro lado.
     ("frontend/routes/billing_pix.py", "asaas_webhook", "Não autorizado."): False,
+    # Webhook do XQuiz (cadastro pelo quiz): mesma família, quem toma é o XQuiz.
+    ("frontend/routes/quiz_signup.py", "xquiz_webhook", "Token inválido."): False,
     # ── família C: 401 que o INTERCEPTOR nem alcança ──────────────────────────
     # Os dois do `POST /auth/refresh` (montados como `JSONResponse` porque o
     # `raise` descarta o Set-Cookie da limpeza, #175). O interceptor sai antes

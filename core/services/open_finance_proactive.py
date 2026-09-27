@@ -83,14 +83,15 @@ def run_salary_notifications() -> dict:
                 if send_template(to, cfg["name"], language_code=cfg["language_code"], named_body_params=params) is None:
                     # `None` é o 401 da Meta (token inválido/expirado), que `send_template` NÃO levanta
                     # (`adapters/whatsapp/wa_client.py`, ramo `whatsapp_token_invalid`); todo outro erro chega no `except`.
-                    logger.warning("[of_proactive] salario: send_template recusado user_id=%s erro=token_invalido", uid)
+                    logger.warning("[of_proactive] salario: send_template recusado user_id=%s erro=token_invalido", uid,
+                                   extra={"user_id": uid})
                     continue
                 sent += 1
                 enviou = True
             except Exception as exc:
                 # Só o TIPO: `str(exc)` pode ecoar o número (PII).
                 logger.warning("[of_proactive] salario: send_template falhou user_id=%s erro=%s",
-                               uid, type(exc).__name__)
+                               uid, type(exc).__name__, extra={"user_id": uid})
         if enviou:
             log_system_event_sync(
                 "info", OF_SALARY_EVENT, "Confirmacao de salario enviada via template WhatsApp.",
@@ -126,13 +127,14 @@ def run_reconnect_notifications() -> dict:
             try:
                 if send_template(to, cfg["name"], language_code=cfg["language_code"], named_body_params={OF_RECONNECT_PARAM: banks}) is None:
                     # Mesmo `None` do salário: 401 (`whatsapp_token_invalid`) não levanta.
-                    logger.warning("[of_proactive] reconnect: send_template recusado user_id=%s erro=token_invalido", uid)
+                    logger.warning("[of_proactive] reconnect: send_template recusado user_id=%s erro=token_invalido", uid,
+                                   extra={"user_id": uid})
                     continue
                 sent += 1
                 enviou = True
             except Exception as exc:
                 logger.warning("[of_proactive] reconnect: send_template falhou user_id=%s erro=%s",
-                               uid, type(exc).__name__)
+                               uid, type(exc).__name__, extra={"user_id": uid})
         if enviou:
             log_system_event_sync(
                 "info", OF_RECONNECT_EVENT, "Aviso de reconexao enviado via template WhatsApp.",

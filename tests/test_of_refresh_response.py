@@ -93,15 +93,16 @@ def test_refresh_com_item_sumido_nao_diz_que_esta_tudo_em_dia(user_id, monkeypat
     assert por_item["item-vivo"]["products"] == {"BANK": "updated"}
     assert isinstance(sync["duration_ms"], int)
 
-    # o clique fica registrado com o usuário ANONIMIZADO e sem segredo nenhum
+    # o clique fica registrado com o dono na COLUNA (issue #541, D1) e sem segredo nenhum
     clique = [e for e in eventos if e["event"] == "of_manual_refresh"]
     assert len(clique) == 1, eventos
     detalhes = clique[0]["details"]
     assert clique[0]["level"] == "warning"
     assert detalhes["ok"] is False
     assert isinstance(detalhes["duration_ms"], int)
-    assert str(user_id) not in str(detalhes), "o id do usuário não pode aparecer em claro"
-    assert len(detalhes["user_hash"]) == 16
+    assert clique[0]["user_id"] == user_id
+    assert str(user_id) not in str(detalhes), "o dono vai na coluna, não em details"
+    assert "user_hash" not in detalhes
     assert {i["item_id"] for i in detalhes["items"]} == {"item-vivo", "item-sumiu"}
     texto = str(detalhes).lower()
     for proibido in ("token", "apikey", "secret", "balance", "valor"):

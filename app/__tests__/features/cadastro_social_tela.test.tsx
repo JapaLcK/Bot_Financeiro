@@ -9,11 +9,13 @@ import { act, fireEvent, renderRouter, screen, waitFor } from "expo-router/testi
 import { Linking } from "react-native";
 
 import { LEGENDA_WHATSAPP } from "@/features/auth/criarConta";
-import { ERRO_COFRE_GOOGLE } from "@/features/auth/google";
+import { ERRO_COFRE_SOCIAL } from "@/features/auth/cadastroSocial";
+import { LEGENDA_RELAY } from "@/features/auth/CompletarCadastroSocial";
 import { confirmarCadastro } from "@/services/auth";
 import { lerCredenciais } from "@/storage/secure";
 
 import { chamadas, credencialDe, falharEscrita, prepararCaso, resposta, segurar } from "./auth_apoio";
+import { PENDENTE_APPLE, rotasApple, voltaDaApple } from "./apple_apoio";
 import { PENDENTE, rotasGoogle, voltaDoGoogle } from "./google_apoio";
 
 const respirar = async () => {
@@ -65,6 +67,8 @@ describe("(auth)/entrar — cadastro pelo Google (C/K)", () => {
     expect(screen.getByText("Termos de Uso")).toBeTruthy();
     expect(screen.getByText("Política de Privacidade")).toBeTruthy();
     expect(screen.queryByLabelText(/^Senha/)).toBeNull();
+    expect(screen.getByText(/^Sua conta Google ainda não tem PigBank/)).toBeTruthy();
+    expect(screen.queryByText(LEGENDA_RELAY)).toBeNull(); // e-mail do Google nunca é relay
   });
 
   it("10b — WhatsApp inválido: erro no campo e NENHUMA requisição", async () => {
@@ -125,7 +129,7 @@ describe("(auth)/entrar — cadastro pelo Google (C/K)", () => {
     falharEscrita(true);
     await irAoCadastro();
     await criarConta();
-    expect(screen.getByText(ERRO_COFRE_GOOGLE)).toBeTruthy();
+    expect(screen.getByText(ERRO_COFRE_SOCIAL.google)).toBeTruthy();
   });
 
   it("Termos abre o site", async () => {
@@ -163,5 +167,45 @@ describe("(auth)/entrar — cadastro pelo Google (C/K)", () => {
     });
     await expect(emVoo).resolves.toMatchObject({ email: "ana@x.com" });
     await expect(lerCredenciais()).resolves.toEqual({ access: "access-ana", refresh: "rt_ana" });
+  });
+});
+
+describe("(auth)/entrar — cadastro pela Apple (C/K)", () => {
+  async function irAoCadastroApple() {
+    rotasApple();
+    voltaDaApple({ identityToken: "id-token-leo" });
+    renderRouter("./app", { initialUrl: "/entrar" });
+    await waitFor(() => expect(screen).toHavePathname("/entrar"));
+    await waitFor(() => botao("Continuar com a Apple"));
+    await act(async () => {
+      fireEvent.press(botao("Continuar com a Apple"));
+      await respirar();
+    });
+    await waitFor(() => campo("WhatsApp"));
+  }
+
+  it("C — copy da Apple, e-mail relay só leitura com a legenda, nome sugerido", async () => {
+    await irAoCadastroApple();
+    expect(screen.getByText(/^Sua conta Apple ainda não tem PigBank/)).toBeTruthy();
+    expect(campo("E-mail").props.value).toBe(PENDENTE_APPLE.email);
+    expect(campo("E-mail").props.editable).toBe(false);
+    expect(screen.getByText(LEGENDA_RELAY)).toBeTruthy();
+    expect(campo("Nome").props.value).toBe(PENDENTE_APPLE.name_hint);
+  });
+
+  it("11 — Criar conta vai ao complete-signup da Apple e abre o app", async () => {
+    await irAoCadastroApple();
+    await criarConta();
+    await waitFor(() => expect(screen.getByText(/Olá, Leo/)).toBeTruthy());
+    expect(chamadas().filter((c) => c.caminho === "/auth/apple/complete-signup").map((c) => c.corpo)).toEqual([
+      { token: "gso_leo", name: "Leo Lima", phone: "11999998888", accepted_terms: true },
+    ]);
+  });
+
+  it("11e — o cofre recusa: X manda entrar com a Apple de novo", async () => {
+    await irAoCadastroApple();
+    falharEscrita(true);
+    await criarConta();
+    expect(screen.getByText(ERRO_COFRE_SOCIAL.apple)).toBeTruthy();
   });
 });

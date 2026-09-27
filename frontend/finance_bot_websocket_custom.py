@@ -41,7 +41,7 @@ from fastapi.exception_handlers import http_exception_handler, request_validatio
 from fastapi.utils import is_body_allowed_for_status_code
 from starlette.exceptions import HTTPException as StarletteHTTPException
 import uvicorn
-from pydantic import BaseModel, model_validator
+from pydantic import BaseModel, Field, model_validator
 from slowapi.util import get_remote_address
 from slowapi.errors import RateLimitExceeded
 from config.env import load_app_env
@@ -127,6 +127,7 @@ from frontend.routes.open_finance import router as open_finance_router
 from frontend.routes.pockets import router as pockets_router
 from frontend.routes.prospects import router as prospects_router
 from frontend.routes.push import router as push_router
+from frontend.routes.quiz_signup import router as quiz_signup_router
 from frontend.routes.onboarding import router as onboarding_router
 from frontend.routes.settings import router as settings_router
 from frontend.routes.simulator import router as simulator_router
@@ -152,6 +153,7 @@ from frontend.routes.shared import (
     months_pt as _months_pt,
     parse_date_param as _parse_date_param,
     raise_if_account_scheduled_for_deletion as _raise_if_account_scheduled_for_deletion,
+    _resolve_page_user_id,
     resolve_analytics_window as _resolve_analytics_window,
     resolve_dashboard_user_id as _resolve_dashboard_user_id,
     stamp_asset_versions as _stamp_asset_versions,
@@ -1758,7 +1760,11 @@ async def _open_finance_refresh():
                         "info", "of_refresh_claimed",
                         f"Refresh periódico reivindicou {len(res['claimed'])} item(ns)",
                         source="open_finance",
-                        details={"origin": res.get("origin"), "items": res["claimed"],
+                        # Só os `item_id`: `claimed` traz o `user_id` de cada dono, e
+                        # a coluna fica NULL (vários donos) — uid em `details`
+                        # sobreviveria à exclusão da conta (issue #541).
+                        details={"origin": res.get("origin"),
+                                 "items": [c.get("item_id") for c in res["claimed"]],
                                  "triggered": res.get("triggered")},
                     )
                 for falha in res.get("failures") or []:
@@ -2198,6 +2204,10 @@ CSRF_EXEMPT_PATHS = {
     # token de CSRF, e isenção que não é necessária é privilégio esquecido.
     # `tests/test_pix_rota_registrada.py` prende essa unicidade.
     "/billing/asaas/webhook",
+    # Webhook do XQuiz: server-to-server, sem cookie — autenticado pelo token
+    # XQUIZ_WEBHOOK_TOKEN (frontend/routes/quiz_signup.py). O `/auth/quiz/resend`
+    # é do navegador e NÃO entra.
+    "/xquiz/webhook",
 }
 
 _SECURITY_HEADERS = {
@@ -3401,7 +3411,7 @@ async def auth_login(request: Request, response: Response, body: LoginBody):
 async def _concluir_login(
     request: Request, response: Response, *, user_id: int, email: str, plan: str
 ) -> dict:
-    """Final comum de `/auth/login` e `/auth/google/exchange`, depois de a
+    """Final comum de `/auth/login`, `/auth/google/exchange` e `/auth/apple/exchange`, depois de a
     identidade estar provada: exclusão agendada → desafio de MFA → sessão."""
     from db import create_link_code
 
@@ -4382,6 +4392,14 @@ class GoogleExchangeBody(_CorpoSemVeneno):
     code: str
 
 
+class AppleExchangeBody(_CorpoSemVeneno):
+    identity_token: str = Field(min_length=1, max_length=4096)
+    nonce: str = Field(min_length=16, max_length=128)
+    # `formatFullName` do app, sem assinatura: só pré-preenche um campo que a
+    # pessoa edita no Criar conta.
+    name: str | None = Field(default=None, max_length=100)
+
+
 def _google_oauth_next_url(value: str | None) -> str | None:
     """Aceita somente destinos internos conhecidos após o OAuth."""
     return value if value == GOOGLE_OAUTH_PURCHASE_CONTINUE_URL else None
@@ -4679,6 +4697,21 @@ async def auth_google_complete_signup(
     background_tasks: BackgroundTasks,
 ):
     """Finaliza o cadastro Google: cria conta com nome + telefone."""
+    return await _completar_cadastro_social(
+        request, response, body, background_tasks, provider="google"
+    )
+
+
+async def _completar_cadastro_social(
+    request: Request,
+    response: Response,
+    body: GoogleSignupCompleteBody,
+    background_tasks: BackgroundTasks,
+    *,
+    provider: str,
+) -> dict:
+    """Corpo comum de `/auth/{google,apple}/complete-signup`. O token pendente
+    de um provedor não serve no outro (`get_pending_google_signup` filtra)."""
     from db import consume_pending_google_signup
 
     if not body.accepted_terms:
@@ -4692,7 +4725,8 @@ async def auth_google_complete_signup(
         result = await asyncio.to_thread(
             consume_pending_google_signup,
             body.token, body.name, body.phone,
-            signup_source_from_request(request, google=True),
+            signup_source_from_request(request, provedor=provider),
+            provider,
         )
     except ValueError as exc:
         raise HTTPException(status_code=400, detail=detalhe_seguro(exc))
@@ -4709,7 +4743,7 @@ async def auth_google_complete_signup(
     await _apply_prospect_attribution(request, response, user_id)
     await _apply_quiz_attribution(request, response, user_id)
 
-    # Meta Conversions API — CompleteRegistration (conta criada via Google).
+    # Meta Conversions API — CompleteRegistration (conta criada via Google/Apple).
     # Background task (roda após a resposta); event_id signup_<uid> casa com o
     # pixel do /completar-cadastro pro Meta deduplicar.
     try:
@@ -4731,7 +4765,7 @@ async def auth_google_complete_signup(
                 event_source_url=f"{DASHBOARD_URL}/completar-cadastro",
             )
     except Exception as exc:
-        print(f"[auth] meta capi registration (google) falhou user={user_id}: {exc}")
+        print(f"[auth] meta capi registration ({provider}) falhou user={user_id}: {exc}")
 
     await log_auth_login_event(
         email,
@@ -4751,6 +4785,109 @@ async def auth_google_complete_signup(
         "dashboard_url": _post_login_url(user_id),
         **credenciais,
     }
+
+
+# ─── Login social (Apple, só no app nativo) ──────────────────────────────────
+
+def _apple_erro(status: int, code: str, detail: str) -> JSONResponse:
+    # 400, nunca 401: 401 é "renove a sessão" no interceptor do app.
+    return JSONResponse(status_code=status, content={"detail": detail, "code": code})
+
+
+_APPLE_TOKEN_INVALIDO = (400, "apple_token_invalid", "Não deu para entrar com a Apple. Tente de novo.")
+
+
+@app.post("/auth/apple/exchange")
+@limiter.limit("10/minute")
+async def auth_apple_exchange(request: Request, response: Response, body: AppleExchangeBody):
+    """App nativo: troca o identity token da Apple pela sessão, pelo desafio de
+    MFA ou por um cadastro pendente.
+
+    Nada no banco depende do token antes de a verificação inteira passar
+    (assinatura, `iss`, `aud`, `exp`/`iat`, nonce, `sub`), e o erro de antes
+    dela é sempre o mesmo 400 (ou o 503). O `user_id` sai só do vínculo
+    `auth_identities(apple, sub)` ou do e-mail verificado pela Apple, e toda sessão
+    passa pelo `_concluir_login` (exclusão → MFA → sessão).
+    """
+    import logging as _logging
+
+    from core.services.apple_signin import (
+        AppleIndisponivel,
+        AppleTokenInvalido,
+        verificar_identity_token,
+    )
+    from db import (
+        PROVIDER_APPLE,
+        create_pending_google_signup,
+        find_user_by_google_sub,
+        find_user_id_by_email,
+        get_auth_user,
+        get_pending_google_signup,
+        link_google_identity,
+    )
+
+    try:
+        claims = await asyncio.to_thread(
+            verificar_identity_token, body.identity_token, body.nonce
+        )
+    except AppleIndisponivel:
+        return _apple_erro(
+            503, "apple_indisponivel",
+            "Não deu para falar com a Apple agora. Tente de novo em instantes.",
+        )
+    except AppleTokenInvalido:
+        return _apple_erro(*_APPLE_TOKEN_INVALIDO)
+
+    sub, email = claims["sub"], claims["email"]
+    user_id = await asyncio.to_thread(find_user_by_google_sub, sub, PROVIDER_APPLE)
+
+    if not user_id:
+        if not email or not claims["email_verified"]:
+            return _apple_erro(
+                400, "apple_sem_email",
+                "A Apple não enviou um e-mail verificado. Tente de novo ou entre com e-mail e senha.",
+            )
+        # E-mail verificado pela Apple de conta existente: vincula (igual ao
+        # Google), real ou relay — o relay é exclusivo de um ID Apple [P4 ampliada].
+        existente = await asyncio.to_thread(find_user_id_by_email, email)
+        if not existente:
+            token = await asyncio.to_thread(
+                create_pending_google_signup, sub, email, body.name, PROVIDER_APPLE
+            )
+            # O nome pode ter vindo do pendente anterior (a Apple só o manda
+            # na 1ª autorização).
+            pendente = await asyncio.to_thread(get_pending_google_signup, token, PROVIDER_APPLE)
+            _no_store(response)
+            return {
+                "signup_required": True,
+                "signup_token": token,
+                "email": email,
+                "name_hint": (pendente or {}).get("name_hint") or "",
+            }
+        await asyncio.to_thread(link_google_identity, existente, sub, email, PROVIDER_APPLE)
+        user_id = existente
+
+    user = await asyncio.to_thread(get_auth_user, user_id)
+    if not user:
+        _logging.getLogger("auth.apple").warning("Apple: identidade sem conta")
+        return _apple_erro(*_APPLE_TOKEN_INVALIDO)
+    return await _concluir_login(
+        request, response, user_id=int(user_id), email=user["email"], plan=user.get("plan", "free")
+    )
+
+
+@app.post("/auth/apple/complete-signup")
+@limiter.limit("10/minute")
+async def auth_apple_complete_signup(
+    request: Request,
+    response: Response,
+    body: GoogleSignupCompleteBody,
+    background_tasks: BackgroundTasks,
+):
+    """Finaliza o cadastro Apple: o mesmo contrato do Google."""
+    return await _completar_cadastro_social(
+        request, response, body, background_tasks, provider="apple"
+    )
 
 
 # ─── Billing (Stripe) ────────────────────────────────────────────────────────
@@ -6674,25 +6811,17 @@ async def conta_redirect(request: Request):
     Atalho público (GET) usado em invoices, recibos e emails do Stripe:
     `pigbankai.com/conta` → leva o usuário direto para o ponto certo.
 
-    - Não autenticado → landing com flag `login_required=conta`.
+    - Não autenticado → `/login?next=/conta`.
     - Autenticado sem assinatura ativa → página de planos.
     - Autenticado com `stripe_customer_id` → Stripe Customer Portal.
     """
-    # Sem auth válida → /login?next=/conta. O login renova sessão expirada em
-    # silêncio (validate→refresh) e volta pra cá; antes caía na landing com
-    # ?login_required mesmo pra usuário logado cujo access tinha expirado
-    # (navegação top-level não passa pelo interceptor de refresh).
-    token = _get_auth_token_from_request(request, None)
-    payload = _decode_jwt(token) if token else None
-    if not payload or payload.get("type") != "auth":
+    # Sem sessão válida → /login?next=/conta. Aceita as MESMAS sessões que o
+    # /auth/validate (auth_token OU dashboard_token): se aceitasse menos, o
+    # validate daria 200 com o access expirado e o login devolveria o usuário
+    # para cá, em loop.
+    user_id = await asyncio.to_thread(_resolve_page_user_id, request)
+    if user_id is None:
         return RedirectResponse(url=_dashboard_url("/login?next=/conta"), status_code=302)
-
-    user_id = int(payload["sub"])
-    jti = payload.get("jti")
-    if jti:
-        session = await asyncio.to_thread(get_active_session, jti)
-        if not session or int(session.get("user_id") or 0) != user_id:
-            return RedirectResponse(url=_dashboard_url("/login?next=/conta"), status_code=302)
 
     if not STRIPE_SECRET_KEY:
         return RedirectResponse(url=_dashboard_url("/precos"), status_code=302)
@@ -6801,9 +6930,7 @@ Os links expiram em __MAGIC_LINK_MINUTES__ minutos e funcionam uma única vez.</
     jti = await asyncio.to_thread(create_session, int(user_id), ip=ip, user_agent=ua)
     _set_dashboard_cookie(response, int(user_id), jti=jti)
     # Tambem seta auth_token (cookie principal) com o mesmo jti — permite acessar
-    # rotas que exigem auth completa (/conta, /api/me, etc) sem precisar logar
-    # de novo. Sem isso, ?next=/conta caia em /?login_required=conta porque
-    # /conta so olha pro auth_token, nao pro dashboard_token.
+    # rotas que exigem auth completa (/api/me, etc) sem precisar logar de novo.
     # Magic link também emite refresh_token (sessão de 14d com idle 7d).
     try:
         from db import get_auth_user
@@ -7539,6 +7666,10 @@ app.include_router(affiliates_router)
 
 # ─── Funil de prospecção → frontend/routes/prospects.py ──────────────────────
 app.include_router(prospects_router)
+
+
+# ─── Cadastro pelo quiz (XQuiz) → frontend/routes/quiz_signup.py ─────────────
+app.include_router(quiz_signup_router)
 
 
 # ─── Agentes do Piggy → frontend/routes/agents.py ────────────────────────────

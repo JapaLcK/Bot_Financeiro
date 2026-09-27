@@ -111,3 +111,42 @@ jest.mock("react-native/Libraries/Components/AccessibilityInfo/AccessibilityInfo
 // Google" (`features/auth/google.ts`) só lê o que `openAuthSessionAsync`
 // devolve: cada teste diz o retorno com `jest.mocked(...).mockResolvedValue`.
 jest.mock("expo-web-browser", () => ({ openAuthSessionAsync: jest.fn() }));
+
+// expo-apple-authentication é nativo (`ASAuthorizationController`). O
+// "Continuar com a Apple" (`features/auth/apple.ts`) só lê o que `signInAsync`
+// devolve: cada teste diz o retorno com `jest.mocked(...)`. O botão do sistema
+// vira um `Pressable` com o rótulo que o VoiceOver lê no nativo, e repassa as
+// props (estilo, tipo, raio) para o teste conferir. Fora da fábrica: o babel
+// do Nativewind reescreve o `createElement`, e a fábrica não pode citar o import dele.
+function mockBotaoApple(props) {
+  const { Pressable } = require("react-native");
+  return require("react").createElement(Pressable, {
+    ...props,
+    accessibilityRole: "button",
+    accessibilityLabel: "Continuar com a Apple",
+  });
+}
+jest.mock("expo-apple-authentication", () => {
+  return {
+    signInAsync: jest.fn(),
+    formatFullName: (n) => [n.givenName, n.familyName].filter(Boolean).join(" "),
+    AppleAuthenticationScope: { FULL_NAME: 0, EMAIL: 1 },
+    AppleAuthenticationButtonType: { SIGN_IN: 0, CONTINUE: 1, SIGN_UP: 2 },
+    AppleAuthenticationButtonStyle: { WHITE: 0, WHITE_OUTLINE: 1, BLACK: 2 },
+    AppleAuthenticationButton: mockBotaoApple,
+  };
+});
+
+// expo-crypto é nativo. O digest usa o `crypto` do Node DE VERDADE, pelo nome
+// do algoritmo pedido: o teste do nonce mede a relação hash × cru, e um
+// algoritmo trocado daria outro hex.
+jest.mock("expo-crypto", () => {
+  const nodeCrypto = require("crypto");
+  return {
+    CryptoDigestAlgorithm: { SHA1: "SHA-1", SHA256: "SHA-256", SHA384: "SHA-384", SHA512: "SHA-512" },
+    randomUUID: jest.fn(() => nodeCrypto.randomUUID()),
+    digestStringAsync: jest.fn(async (algoritmo, dado) =>
+      nodeCrypto.createHash(algoritmo.replace("-", "").toLowerCase()).update(dado).digest("hex"),
+    ),
+  };
+});

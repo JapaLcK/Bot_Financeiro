@@ -575,9 +575,9 @@ def init_db():
         # (`OPEN_FINANCE_DISCONNECTED` não guarda `item_id`). A distinção que ela
         # habilita: última linha com dono sem `removed` e COM `removal_tracked` =
         # adoção INTERROMPIDA; sem `removal_tracked` = legado AMBÍGUO. A regra
-        # inteira (ordem por `id`, os quatro desfechos e o limite dela) está no
-        # docstring de `db.open_finance_state.mark_items_removed`; quem a consome
-        # é a recuperação por operador, fora desta PR.
+        # inteira (ordem por `id`, os desfechos e o limite dela) está no
+        # docstring de `db.open_finance_diagnostico.classifica_item`, que é quem
+        # a consome (ferramenta de operador, `scripts/of_itens_operador.py`).
         """
         alter table open_finance_item_registry
           add column if not exists removal_tracked boolean not null default false
@@ -1010,6 +1010,10 @@ def init_db():
         """
         alter table email_verification_codes add column if not exists display_name text
         """,
+        # Cadastro pelo quiz (frontend/routes/quiz_signup.py) nasce sem senha.
+        """
+        alter table email_verification_codes alter column password_hash drop not null
+        """,
         """
         create table if not exists password_reset_tokens (
           token text primary key,
@@ -1419,6 +1423,13 @@ def init_db():
         create index if not exists idx_recurring_charges_user_ack
           on recurring_charges (user_id, acknowledged)
         """,
+        # Reserva do aviso de autopay no WhatsApp (#616): gravada ANTES do envio
+        # (`claim_autopay_notices_whatsapp`). Independente de `acknowledged`, que é do banner.
+        "alter table recurring_charges add column if not exists wa_notified_at timestamptz",
+        # Dia lógico do vencimento (#616): o WhatsApp filtra por ele, não por `charged_at`
+        # (a volta que cruza a meia-noite grava o aviso de D com horário de D+1).
+        # Sem backfill: linha antiga fica nula e fora do WhatsApp.
+        "alter table recurring_charges add column if not exists due_on date",
 
         # ─── Receitas Recorrentes ──────────────────────────────────────────────
         # Espelho de `recurring_expenses` do lado da entrada. Pro-only, mesma flag
@@ -1942,7 +1953,7 @@ def init_db():
         # iOS. Só TELEMETRIA — não concede nada: o gate de plano não isenta o
         # app (política em plan_service.needs_plan_selection).
         # Valores (os únicos que signup_source_from_request produz):
-        # 'web' | 'app' | 'google' | 'google_app'.
+        # 'web' | 'app' | 'google' | 'google_app' | 'apple' | 'apple_app'.
         # NULL = conta anterior a esta coluna (origem desconhecida);
         # sem backfill por data chutado — o painel mostra "—" pra elas.
         """alter table auth_accounts add column if not exists signup_source text""",

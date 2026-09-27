@@ -1548,7 +1548,7 @@ function renderOpenFinanceGrid(of) {
       hint: "GET /items devolveu 404" },
     { label: "Sem contas",          val: fInt(of.sem_contas),   color: of.sem_contas > 0 ? 'yellow' : 'green', cls: of.sem_contas > 0 ? 'warning' : '' },
     { label: "Items sem conexão",   val: fInt(of.items_sem_conexao), color: of.items_sem_conexao > 0 ? 'yellow' : 'green', cls: of.items_sem_conexao > 0 ? 'warning' : '',
-      hint: "Vistos no registry, sem conexão local" },
+      hint: "No registry sem conexão; exclui apagados pelo operador" },
     { label: "Maior atraso",        val: atrasoH ? `${atrasoH}h` : '—', color: atrasoH > 48 ? 'red' : (atrasoH > 24 ? 'yellow' : 'green'), cls: atrasoH > 48 ? 'danger' : '' },
     { label: "Conta atrasada",      val: fInt(stale.BANK || 0),        color: (stale.BANK||0) > 0 ? 'yellow' : 'green' },
     { label: "Cartão atrasado",     val: fInt(stale.CREDIT || 0),      color: (stale.CREDIT||0) > 0 ? 'yellow' : 'green' },
@@ -1953,7 +1953,7 @@ function planLabel(p) {
 // mesmo tier que 'pro', mas não é o que o webhook da Stripe grava.
 const PLAN_WRITE_VALUES = ['free', 'essencial', 'pro', 'pro_max'];
 // Origem do cadastro (auth_accounts.signup_source). null = conta anterior à coluna.
-const SOURCE_LABELS = { web: 'Web', app: 'App iOS', google: 'Google', google_app: 'Google (app)' };
+const SOURCE_LABELS = { web: 'Web', app: 'App iOS', google: 'Google', google_app: 'Google (app)', apple: 'Apple', apple_app: 'Apple (app)' };
 function sourceLabel(s) {
   if (!s) return '—';
   return SOURCE_LABELS[String(s).toLowerCase()] || s;

@@ -3,11 +3,11 @@
 `_log_falha` escrevia o identificador do titular apenas dentro da `message`
 (`"… falha user_id=42 …"`). O `_DashboardHandler` chamava
 `log_system_event_sync()` sem `user_id=`, então `system_event_logs.user_id`
-ficava NULL — e `db/privacy.py` faz o select da exportação (`:366`) e o delete
-da exclusão de conta (`:485`) EXCLUSIVAMENTE por `WHERE user_id = %s`. Efeito:
+ficava NULL — e `db/privacy.py` faz o select da exportação (`build_user_export_zip`) e o delete
+da exclusão de conta (`delete_user_data`) EXCLUSIVAMENTE por `WHERE user_id = %s`. Efeito:
 esses eventos ficavam de fora da exportação e SOBREVIVIAM à exclusão da conta,
 carregando o identificador do titular no texto. Com a coluna preenchida o
-`:485` apaga a linha inteira, e o texto vai junto.
+`delete_user_data` apaga a linha inteira, e o texto vai junto.
 
 Três camadas, porque texto de arquivo não mede comportamento (§3):
 
@@ -295,7 +295,7 @@ PORTAS = [
 @pytest.mark.parametrize("nome,driver", PORTAS, ids=[p[0] for p in PORTAS])
 def test_porta_grava_o_user_id_na_coluna(nome, driver, monkeypatch, coletor):
     """O evento chega a `system_event_logs` com a COLUNA `user_id` preenchida —
-    é o que a exportação (`db/privacy.py:366`) e a exclusão de conta (`:485`)
+    é o que a exportação (`db/privacy.py::build_user_export_zip`) e a exclusão de conta (`delete_user_data`)
     enxergam. E nada da isca vaza pro texto: o id vem do atributo do
     `LogRecord`, não de `str(e)`."""
     uid, op = driver(monkeypatch)
@@ -421,8 +421,8 @@ def test_todo_log_falha_passa_o_user_id_da_funcao():
     assert not fora, (
         "`_log_falha` com 2º posicional que não é o `user_id` da função: o "
         "`system_event_logs.user_id` passa a guardar um id que `db/privacy.py` "
-        "não enxerga (select da exportação em `:366`, delete da exclusão de "
-        f"conta em `:485`). Fora da lista: {fora}"
+        "não enxerga (select da exportação em `build_user_export_zip`, delete da exclusão de "
+        f"conta em `delete_user_data`). Fora da lista: {fora}"
     )
     orfas = sorted(_ALLOWLIST_USER_ID - set(achados))
     assert not orfas, f"allowlist com entrada que nenhum código produz: {orfas}"
@@ -539,7 +539,7 @@ def test_porta_nova_com_id_errado_nao_passa_em_silencio():
 # `delete_all_launches_and_rollback` não usa `_log_falha` — loga por `logger.*`
 # direto, então não herdava o `extra={"user_id": …}` e caía no MESMO bug por
 # outra porta: id do titular na `message`, coluna NULL, linha fora da
-# exportação (`db/privacy.py:366`) e SOBREVIVENDO à exclusão de conta (`:485`).
+# exportação (`db/privacy.py::build_user_export_zip`) e SOBREVIVENDO à exclusão de conta (`delete_user_data`).
 # Foi regressão DESTE PR, achada na revisão.
 #
 # RECORTE: só `db/accounts.py`. Medido, não estimado: o arquivo tem 1729 linhas
@@ -634,7 +634,7 @@ def test_logger_direto_com_id_no_texto_leva_o_id_na_coluna():
     """A CLASSE, não os 3 sites: um `logger.warning`/`error` NOVO em
     `db/accounts.py` que interpole o identificador no texto sem `extra=` grava
     linha com `user_id` NULL — que `db/privacy.py` não enxerga nem para exportar
-    (`:366`) nem para apagar na exclusão de conta (`:485`)."""
+    (`build_user_export_zip`) nem para apagar na exclusão de conta (`delete_user_data`)."""
     achados = _varre_repo(_loggers_do_recorte)
     fora = sorted({(r, fn) for r, fn, _ln, tem in achados if not tem}
                   - _ALLOWLIST_LOGGER)

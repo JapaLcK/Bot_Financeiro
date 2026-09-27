@@ -371,6 +371,7 @@ from .reports import (
 # ── Login social (Google) ────────────────────────────────────────────────────
 from .google_auth import (
     PROVIDER_GOOGLE,
+    PROVIDER_APPLE,
     find_user_by_google_sub,
     find_user_id_by_email,
     auth_account_has_password,
@@ -582,7 +583,7 @@ __all__ = [
     "create_data_export_token", "consume_data_export_token",
     "has_recent_export_request",
     # google login
-    "PROVIDER_GOOGLE", "find_user_by_google_sub", "find_user_id_by_email",
+    "PROVIDER_GOOGLE", "PROVIDER_APPLE", "find_user_by_google_sub", "find_user_id_by_email",
     "auth_account_has_password", "email_has_password", "link_google_identity",
     "create_pending_google_signup", "get_pending_google_signup",
     "consume_pending_google_signup", "cleanup_expired_pending_signups",
