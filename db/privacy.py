@@ -1168,18 +1168,30 @@ def delete_user_data(
                 if cur.fetchone():
                     raise RuntimeError(f"Falha ao remover usuário {user_id}: registro ainda existe após a limpeza final.")
 
+                # ANTES do commit, e de dentro da transação: o commit pode levantar
+                # com a transação JÁ APLICADA — é o "commit ambíguo" que
+                # `db/connection.py::_Conn.commit` existe para contar. Preenchido
+                # depois, o recipiente ficava do lado de lá da exceção: conta e
+                # conexão local apagadas, 2º passe sem alvo, item órfão e pago na
+                # Pluggy (Codex, PR #539). Aqui a lista já é definitiva — o que
+                # falta é só o commit —, e encher o recipiente cedo demais não
+                # custa nada: se a transação NÃO aplicar, a conexão local continua
+                # de pé e um delete a mais na Pluggy é 404, que o helper trata como
+                # sucesso. O erro simétrico (não apagar item que sobrou) é o caro.
+                if swept_sink is not None:
+                    swept_sink.extend(pluggy_items_swept)
+
             conn.commit()
 
-        # O 2º passe remoto roda no CHAMADOR, depois do retorno — e tudo abaixo
-        # pode levantar: o `RuntimeError` de sobras levanta sozinho, sem injeção
-        # nenhuma, e uma queda de conexão em Postgres gerenciado faz o mesmo.
-        # Sem esta linha o conjunto ia embora junto com a exceção, e aí a conta e
-        # a conexão local JÁ foram apagadas, `_restore_account_deletion_schedule`
-        # não tem `auth_accounts` para restaurar, e o item da janela ficava órfão
-        # e pago na Pluggy para sempre (Codex, PR #539). O commit acima é o que
-        # torna a lista definitiva; daqui para baixo ela não muda mais.
-        if swept_sink is not None:
-            swept_sink.extend(pluggy_items_swept)
+        # O recipiente já foi preenchido lá em cima, DENTRO da transação: o 2º
+        # passe remoto roda no CHAMADOR, depois do retorno, e tudo entre um ponto
+        # e outro pode levantar — o `RuntimeError` de sobras levanta sozinho, sem
+        # injeção nenhuma; uma queda de conexão em Postgres gerenciado faz o mesmo;
+        # e o próprio `conn.commit()` pode levantar com a transação já aplicada.
+        # Em qualquer um deles a conta e a conexão local já foram apagadas,
+        # `_restore_account_deletion_schedule` não tem `auth_accounts` para
+        # restaurar, e sem a lista o item da janela ficaria órfão e pago na Pluggy
+        # para sempre (Codex, PR #539, duas rodadas).
 
         # Verificação pós-commit: garante que outra conexão também enxerga a conta
         # como removida antes de o job considerar a exclusão concluída.

@@ -1229,7 +1229,23 @@ async def _adota_item_orfao(item_id: str, last_event: str | None = None) -> int 
             #   de `system_event_logs` o leva no dia da exclusão.
             # Depois da decisão e SEM gravar conexão nem rastro de adoção: o item
             # não é nosso para adotar, é nosso para remover.
-            await asyncio.to_thread(delete_pluggy_items_best_effort, dono, [item_id])
+            # REVALIDA colado no delete, igual ao ramo de conta inexistente — e
+            # pelo mesmo motivo, que aqui eu tinha deixado pela metade (§2 do
+            # CLAUDE.md: "achei um caso" ≠ "resolvi a categoria"; o Codex pegou o
+            # irmão). Entre a leitura de cima e este ponto há um `await` do log e
+            # um salto de thread; se a exclusão for cancelada ou a conta se
+            # recadastrar e reconectar o MESMO item nesse vão, apagar destrói
+            # conexão válida, de forma irreversível. Os dois sinais são os do
+            # irmão: a exclusão deixou de estar agendada, ou o item já tem conexão
+            # local — item em uso não é órfão de ninguém.
+            def _apaga_se_ainda_agendada() -> None:
+                if not is_account_scheduled_for_deletion(dono):
+                    return
+                if get_connections_by_item_id(item_id):
+                    return
+                delete_pluggy_items_best_effort(dono, [item_id])
+
+            await asyncio.to_thread(_apaga_se_ainda_agendada)
             return None
         await _enforce_bank_limit(dono, item_id)
         # O rastro DUPLICA de propósito quando o navegador volta depois (o POST

@@ -810,3 +810,155 @@ def test_t22b_item_com_conexao_local_viva_nunca_e_apagado(monkeypatch, user_id):
             f"de olhar o ITEM, não só o usuário — {deletados}")
     finally:
         _limpa_item(item_novo)
+
+
+# ── T23 (a janela + COMMIT AMBÍGUO) ─────────────────────────────────────────
+
+def test_t23_item_da_janela_sai_mesmo_com_commit_ambiguo(user_id, monkeypatch):
+    """O `swept_sink` tem de ser preenchido ANTES do `conn.commit()`, não depois.
+
+    Apontamento do Codex (PR #539): o commit pode levantar com a transação JÁ
+    aplicada — o "commit ambíguo" que `db/connection.py::_Conn.commit` existe
+    para contar. Nesse desfecho a conta e a conexão local já sumiram, mas a linha
+    que preenche o recipiente fica do lado de lá da exceção: o 2º passe recebe
+    lista vazia e o item da janela fica órfão e pago na Pluggy.
+
+    T21 cobre a falha DEPOIS do commit; este cobre a falha NO commit. São
+    posições diferentes em relação à única linha que importa.
+    """
+    import psycopg
+
+    _semeia(user_id)
+    item_velho = _item_de(user_id)
+    item_novo = f"{item_velho}-t23"
+    deletados = _mocka_pluggy(monkeypatch)
+
+    porta = threading.Event()
+    concluiu = threading.Event()
+    sessao2: dict = {}
+
+    def _sessao2():
+        if not porta.wait(30):
+            sessao2["erro"] = "porta nunca abriu"
+            concluiu.set()
+            return
+        try:
+            db.save_pluggy_open_finance_item(
+                user_id,
+                {"id": item_novo, "status": "UPDATED",
+                 "connector": {"id": 613, "name": "Inter"}},
+                criar_usuario=False,
+            )
+        except Exception as exc:  # noqa: BLE001
+            sessao2["erro"] = f"{type(exc).__name__}: {exc}"
+        finally:
+            concluiu.set()
+
+    t = threading.Thread(target=_sessao2, name="sessao2-t23", daemon=True)
+    t.start()
+
+    real_table_exists = privacy._table_exists
+    acionada = {"ok": False}
+
+    def _hook(cur, table):
+        r = real_table_exists(cur, table)
+        if table == "credit_transactions" and not acionada["ok"]:
+            acionada["ok"] = True
+            porta.set()
+            sessao2["commitou_antes_do_delete_users"] = concluiu.wait(30)
+        return r
+
+    real_get_conn = privacy.get_conn
+    estado = {"commits": 0}
+
+    class _ConnQueCaiNoCommit:
+        """Aplica o commit DE VERDADE e só então levanta — o desfecho ambíguo."""
+
+        def __init__(self, inner):
+            self._inner = inner
+
+        def __getattr__(self, nome):
+            return getattr(self._inner, nome)
+
+        def commit(self):
+            estado["commits"] += 1
+            if estado["commits"] == 1:
+                self._inner.commit()
+                raise psycopg.OperationalError("server closed the connection unexpectedly")
+            return self._inner.commit()
+
+    class _Ctx:
+        def __init__(self, cm):
+            self._cm = cm
+
+        def __enter__(self):
+            return _ConnQueCaiNoCommit(self._cm.__enter__())
+
+        def __exit__(self, *a):
+            return self._cm.__exit__(*a)
+
+    def _get_conn(*a, **kw):
+        import sys as _sys
+        if _sys._getframe(1).f_code.co_name == "delete_user_data" and estado["commits"] == 0:
+            return _Ctx(real_get_conn(*a, **kw))
+        return real_get_conn(*a, **kw)
+
+    monkeypatch.setattr(privacy, "_table_exists", _hook)
+    monkeypatch.setattr(privacy, "get_conn", _get_conn)
+    try:
+        db.process_due_account_deletions(limit=10)
+        t.join(10)
+
+        assert acionada["ok"], "a barreira não foi acionada — o caso não mediu nada"
+        assert estado["commits"] >= 1, "o commit dublado não chegou a rodar"
+        assert sessao2.get("erro") is None, \
+            f"a sessão 2 tinha que ter commitado na janela: {sessao2}"
+        assert not _existe_usuario(user_id), \
+            "PREMISSA: o commit foi APLICADO antes de levantar — a conta sumiu"
+        assert item_novo in deletados, (
+            "ITEM ÓRFÃO NA PLUGGY: o commit ambíguo pulou o preenchimento do "
+            f"recipiente e o 2º passe ficou sem alvo — {deletados}"
+        )
+    finally:
+        monkeypatch.undo()
+        _limpa_item(item_novo)
+        _limpa_item(item_velho)
+
+
+# ── T24 (o irmão do T22: revalidação no ramo de exclusão AGENDADA) ──────────
+
+def test_t24_ramo_agendado_revalida_antes_do_delete(user_id, monkeypatch):
+    """A mesma corrida do T22, no ramo que eu tinha deixado sem revalidação.
+
+    O conserto do T22 cobriu só o ramo de conta inexistente; este, de exclusão
+    AGENDADA, continuava apagando com a leitura antiga (Codex, PR #539, 2ª
+    rodada). Se a exclusão for cancelada — ou a conta se recadastrar e reconectar
+    o mesmo item — entre a leitura e o delete, apagar destrói conexão válida.
+    """
+    _semeia(user_id)  # agendada
+    item_novo = f"{_item_de(user_id)}-t24"
+    deletados = _mocka_pluggy(monkeypatch)
+
+    real = of_routes.is_account_scheduled_for_deletion
+    leituras = {"n": 0}
+
+    def _agendada_que_some(uid):
+        leituras["n"] += 1
+        # 1ª leitura (a guarda): agendada → entra no ramo do delete.
+        # 2ª (a revalidação): já não está — o cancelamento/recadastro na janela.
+        return leituras["n"] == 1 and real(uid)
+
+    monkeypatch.setattr(of_routes, "is_account_scheduled_for_deletion", _agendada_que_some)
+    try:
+        r = _webhook_de_item_criado(monkeypatch, user_id, item_novo)
+
+        assert r.status_code == 200, r.text
+        assert _conexoes_do_item(item_novo) == [], "não podia adotar item de conta em exclusão"
+        assert leituras["n"] >= 2, (
+            "o ramo agendado não revalidou antes do delete irreversível "
+            f"(leituras={leituras['n']})")
+        assert deletados == [], (
+            "DELETE IRREVERSÍVEL depois de a conta deixar de estar agendada: "
+            f"{deletados}")
+    finally:
+        _limpa_item(item_novo)
