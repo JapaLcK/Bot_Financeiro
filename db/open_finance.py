@@ -2245,9 +2245,12 @@ def propose_manual_reconciliation(user_id: int, launch_id: int) -> dict:
     """
     try:
         return _propose_manual_reconciliation(user_id, launch_id)
-    except Exception:
-        logger.exception("propose_manual_reconciliation falhou (user %s, lancamento %s)",
-                         user_id, launch_id)
+    except Exception as exc:
+        # Sem traceback (issue #541): com o dono na coluna, o `_DashboardHandler`
+        # levaria o texto cru à exportação LGPD. Tipo + sqlstate, padrão do repo.
+        logger.error("propose_manual_reconciliation falhou (user %s, lancamento %s) causa=%s sqlstate=%s",
+                     user_id, launch_id, type(exc).__name__, getattr(exc, "sqlstate", None),
+                     extra={"user_id": user_id})
         return {"ok": False}
 
 

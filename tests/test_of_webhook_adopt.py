@@ -134,6 +134,7 @@ def test_teto_de_bancos_estourado_nao_adota_e_o_webhook_responde_200(
         # de operador diferentes — 402 (teto do plano), 409 (o estado sumiu) e
         # 503 (lock ocupado). Sem o status/detail, o log não separa nenhum deles.
         assert pulado[0]["details"]["error"].startswith("402"), pulado[0]["details"]
+        assert pulado[0]["user_id"] == user_id, "issue #541: dono na coluna"
         assert "OF_BANK_LIMIT" in pulado[0]["details"]["error"], pulado[0]["details"]
         assert [r["origin"] for r in _registry("item-no-teto")] == ["webhook"]
     finally:
@@ -226,7 +227,7 @@ def test_adocao_nao_agenda_sync_de_item_que_a_pluggy_ainda_esta_montando(
         _limpa_item("item-updating")
 
 
-def test_conta_apagada_no_meio_da_adocao_nao_ressuscita(monkeypatch, eventos, webhook_pluggy):
+def test_conta_apagada_no_meio_da_adocao_nao_ressuscita(monkeypatch, webhook_pluggy):
     """A JANELA entre o `user_exists` e a escrita da conexão (Codex #313, P1).
 
     `user_exists` lê em transação própria, e `register_item`/`save_pluggy_open_
@@ -239,7 +240,18 @@ def test_conta_apagada_no_meio_da_adocao_nao_ressuscita(monkeypatch, eventos, we
     `users` que a LGPD acabou de apagar e pendurava a conexão nela — a guarda de
     identidade não alcança, porque no instante em que ela leu a conta existia.
     Quem alcança é a FK, e só com `criar_usuario=False`.
+
+    O log é o REAL (issue #541): a linha de skip é o ÚNICO rastro do `item_id`, e
+    com o dono na coluna a FK de `system_event_logs` a recusaria em silêncio.
+    CONTROLE POSITIVO da coluna: tirar o `isinstance(..., ForeignKeyViolation)`
+    do `except` genérico de `_adota_item_orfao` deixa este caso vermelho.
     """
+    import asyncio
+
+    from core.admin_dashboard import ensure_admin_tables
+    from test_account_deletion_adocao_corrida import _skips
+
+    asyncio.run(ensure_admin_tables())  # `system_event_logs` não vem de db/schema.py
     fantasma = 987654321988
     db.ensure_user(fantasma)
     promote_to_pro(fantasma)
@@ -263,12 +275,15 @@ def test_conta_apagada_no_meio_da_adocao_nao_ressuscita(monkeypatch, eventos, we
             "a escrita da conexão RECRIOU a conta que a exclusão apagou no meio")
         assert db.get_connections_by_item_id("item-lgpd-corrida") == [], \
             "conexão pendurada numa conta que não existe mais"
-        motivos = [e["details"].get("motivo") for e in eventos
-                   if e["event"] == "of_webhook_adopt_skipped"]
-        assert motivos == ["ForeignKeyViolation"], (
-            f"a FK tinha de ser quem recusa nesta janela: {motivos}")
+        skips = _skips("item-lgpd-corrida")
+        assert [x["details"].get("motivo") for x in skips] == ["ForeignKeyViolation"], (
+            f"a FK tinha de ser quem recusa nesta janela — ou a linha se perdeu: {skips}")
+        assert skips[0]["user_id"] is None, skips
+        assert str(fantasma) not in str(skips[0]["details"]), skips
     finally:
         _limpa_item("item-lgpd-corrida")
         with get_conn() as c:
+            c.execute("delete from system_event_logs where details::text like %s",
+                      ("%item-lgpd-corrida%",))
             c.execute("delete from users where id=%s", (fantasma,))
             c.commit()

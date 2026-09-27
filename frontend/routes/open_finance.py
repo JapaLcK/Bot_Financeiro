@@ -16,6 +16,7 @@ import logging
 import math
 import os
 import random
+import sys
 import time
 from datetime import datetime, timedelta, timezone
 from typing import Literal
@@ -239,10 +240,20 @@ async def _log_com_teto(segundos: float, *args, **kwargs) -> None:
     ilimitado por esses dois caminhos.
 
     Engolir o `TimeoutError` é deliberado: o log é DIAGNÓSTICO, e perder o
-    diagnóstico não pode virar um segundo modo de falha em cima do 503. A causa
-    NÃO se perde — os dois chamadores emitem o `logging.getLogger(...).warning`
-    local ANTES desta chamada, e esse canal não depende do banco (é o mesmo
-    motivo pelo qual ele existe: ver o `except` do `_grava_reconexao`).
+    diagnóstico não pode virar um segundo modo de falha em cima do 503. O que
+    sobra quando o teto estoura é o `print` em stderr do `except` abaixo —
+    `event_type` + `motivo`, sem uid, SEM banco (mesmo espírito do "[admin]
+    failed to record" de `log_system_event`). Vale para todo chamador, num lugar só.
+
+    NÃO use `logging.warning` como canal "local" antes desta chamada: o
+    `_DashboardHandler` (`core/observability.py`) o espelha com INSERT SÍNCRONO
+    dentro do event loop, e com `system_event_logs` travada isso DOBRA o prazo e
+    para o processo (issue #541; quem prende é
+    `tests/test_of_log_teto_e_status.py::test_teto_vale_com_o_espelho_do_logging_lento`).
+    Os avisos que já existem
+    (`of_reconnect_lock_retry`, `of_reconnect_lock_timeout` no
+    `_grava_reconexao` e `of_item_registry_failed` no `/pluggy-item`) pagam esse
+    custo hoje — registrado, fora do escopo da #541.
 
     Só `asyncio.TimeoutError` é engolido. `CancelledError` de fora (cliente
     desistiu, shutdown) continua subindo — o `wait_for` só converte em
@@ -260,7 +271,11 @@ async def _log_com_teto(segundos: float, *args, **kwargs) -> None:
         await asyncio.wait_for(log_system_event(*args, **kwargs),
                                max(0.001, segundos))
     except asyncio.TimeoutError:
-        pass
+        evento = args[1] if len(args) > 1 else kwargs.get("event_type")
+        detalhes = kwargs.get("details")
+        motivo = detalhes.get("motivo") if isinstance(detalhes, dict) else None
+        print(f"[open_finance] log com teto estourado: {evento} motivo={motivo}",
+              file=sys.stderr)
 
 
 # HTTP da Pluggy que some sozinho: cota estourada e erro do lado dela. 404 fica
@@ -703,6 +718,7 @@ async def _grava_reconexao(
             # é decidir não retentar quando `causa` é da família de conexão; o
             # gancho já existe (é a própria `causa`), a decisão é de outro PR.
             connection, sob_lock = None, False
+            # Texto cru com coluna NULL (#541): só `OperationalError` (infra) chega aqui, sem dado de linha.
             causa = f"{type(exc).__name__}: {exc}"
         if sob_lock:
             return connection
@@ -871,7 +887,7 @@ async def _run_pluggy_sync_bg(item_id: str) -> None:
             await log_system_event(
                 "warning", "of_product_stale",
                 f"Sync concluído com produto atrasado: {item_id}",
-                source="open_finance",
+                source="open_finance", user_id=int(uid) if uid else None,
                 details={"item_id": item_id, "stale_products": result["stale_products"]},
             )
         if ok:
@@ -885,16 +901,22 @@ async def _run_pluggy_sync_bg(item_id: str) -> None:
             evento,
             f"Sync Pluggy {'concluído' if ok else 'sem sucesso'}: {item_id}"
             + (f" ({reason})" if reason else ""),
-            source="open_finance",
-            details={**result, "reason": reason or None},
+            source="open_finance", user_id=int(uid) if uid else None,
+            details={**{k: v for k, v in result.items() if k != "user_id"},
+                     "reason": reason or None},
         )
     except Exception as exc:  # noqa: BLE001 — background, não pode derrubar nada
+        # Coluna NULL (aqui só se sabe o item), logo nada de `str(exc)`: o texto de
+        # FK/CHECK do Postgres traz `Key (user_id)=(…)` e `Failing row contains (…)`,
+        # que sobreviveriam à exclusão da conta (issue #541).
         await log_system_event(
             "error",
             "pluggy_sync_failed",
-            f"Sync Pluggy falhou: {item_id}: {exc}",
+            f"Sync Pluggy falhou: {item_id}",
             source="open_finance",
-            details={"item_id": item_id, "error": str(exc)[:200]},
+            details={"item_id": item_id, "motivo": type(exc).__name__,
+                     "sqlstate": getattr(exc, "sqlstate", None),
+                     "status_code": getattr(exc, "status_code", None)},
         )
 
 
@@ -1085,8 +1107,12 @@ async def _adota_item_orfao(item_id: str, last_event: str | None = None) -> int 
             "warning", "of_webhook_adopt_skipped",
             "Item órfão sem dono resolvível",
             source="open_finance",
+            # Coluna NULL: `str(exc)` do `ValueError` acima traz o `clientUserId`
+            # bruto, que sobreviveria à exclusão (issue #541). `status_code`
+            # separa o 404 dos outros erros da Pluggy.
             details={"item_id": item_id, "motivo": type(exc).__name__,
-                     "error": str(exc)[:200]},
+                     "sqlstate": getattr(exc, "sqlstate", None),
+                     "status_code": getattr(exc, "status_code", None)},
         )
         return None
 
@@ -1103,6 +1129,7 @@ async def _adota_item_orfao(item_id: str, last_event: str | None = None) -> int 
     try:
         origens = await asyncio.to_thread(item_registry_origins, item_id)
     except Exception as exc:  # noqa: BLE001 — nada escapa daqui (o webhook responde 200)
+        # `str(exc)` fica com coluna NULL (#541): é SELECT por item_id, e `Key (user_id)=`/`Failing row` só nascem em escrita.
         await log_system_event(
             "warning", "of_webhook_adopt_skipped",
             "Rastro do item ilegível: adoção não verificável",
@@ -1188,8 +1215,8 @@ async def _adota_item_orfao(item_id: str, last_event: str | None = None) -> int 
         # nenhum — ver o ramo acima). Aqui a conta existe, então o dono
         # vai na COLUNA `user_id` — a cascata de `system_event_logs` a leva no dia
         # da exclusão, e `details` (que a cascata não alcança) não guarda uid.
-        # Se o PREDICADO levantar, o `except` genérico lá embaixo ainda grava uid
-        # em `details` — classe pré-existente de TODAS as guardas daqui, issue #541.
+        # Se o PREDICADO levantar, o `except` genérico lá embaixo grava o dono na
+        # coluna, não em `details` (issue #541).
         if await asyncio.to_thread(is_account_scheduled_for_deletion, dono):
             await log_system_event(
                 "warning", "of_webhook_adopt_skipped",
@@ -1287,12 +1314,24 @@ async def _adota_item_orfao(item_id: str, last_event: str | None = None) -> int 
         # três 409 se separam pelo texto do `detail`. O
         # `str()` do `HTTPException` já é `"{status_code}: {detail}"`
         # (starlette), então não precisa de formatação nossa.
+        # Issue #541: dono na COLUNA (sai na exportação LGPD e na cascata), logo
+        # `str(exc)` só do `HTTPException`, cujo `detail` é texto nosso — o de
+        # psycopg traz host e porta. `ForeignKeyViolation` = conta apagada no
+        # meio: com o dono na coluna a FK recusaria a linha, e ela é o único
+        # rastro do `item_id`; fica NULL e sem uid, como os ramos de conta inexistente.
+        # Teto aceito (A3 da revisão): conta apagada SEM agendamento e exceção que
+        # não seja FK → a FK do log recusa a linha e o motivo se perde; o
+        # `item_id` sobrevive nos logs de coluna NULL do webhook.
+        details = {"item_id": item_id, "motivo": type(exc).__name__,
+                   "sqlstate": getattr(exc, "sqlstate", None)}
+        if isinstance(exc, HTTPException):
+            details["error"] = str(exc)[:200]
         await log_system_event(
             "warning", "of_webhook_adopt_skipped",
             "Item órfão não adotado",
             source="open_finance",
-            details={"item_id": item_id, "user_id": dono, "motivo": type(exc).__name__,
-                     "error": str(exc)[:200]},
+            user_id=None if isinstance(exc, psycopg.errors.ForeignKeyViolation) else dono,
+            details=details,
         )
         return None
 
@@ -1367,9 +1406,9 @@ async def _adota_item_orfao(item_id: str, last_event: str | None = None) -> int 
         await log_system_event(
             "warning", "of_webhook_adopt_incompleto",
             "Item adotado, mas auditoria/sync falharam",
-            source="open_finance",
-            details={"item_id": item_id, "user_id": dono, "motivo": type(exc).__name__,
-                     "error": str(exc)[:200]},
+            source="open_finance", user_id=dono,
+            details={"item_id": item_id, "motivo": type(exc).__name__,
+                     "sqlstate": getattr(exc, "sqlstate", None)},
         )
     return dono
 
@@ -1388,9 +1427,11 @@ def _msg_sem_open_finance(user_id: int) -> str:
     recusa com 409). Síncrona, lê o banco — chame via `asyncio.to_thread`."""
     try:
         estado = billing_copy.estado_sem_plano_pago(user_id)
-    except Exception:
+    except Exception as exc:
         # Sem isto o 402 vira 500. "Não sei" vira carência: a /conta leva à /precos sem Stripe; a /precos daria 409 ao assinante.
-        logging.getLogger(__name__).warning("of_msg_sem_open_finance_falhou user_id=%s", user_id, exc_info=True)
+        logging.getLogger(__name__).warning(
+            "of_msg_sem_open_finance_falhou user_id=%s causa=%s sqlstate=%s", user_id,
+            type(exc).__name__, getattr(exc, "sqlstate", None), extra={"user_id": user_id})
         estado = "carencia"
     if estado == "carencia":
         return billing_copy.OPEN_FINANCE_EM_CARENCIA
@@ -1665,7 +1706,8 @@ async def open_finance_connect_token_route(request: Request, user_id: int):
             token_hash=token_hash(token_data["accessToken"]), origin="connect_token",
         )
     except Exception as exc:  # noqa: BLE001 — rastro nunca derruba a emissão do token
-        await log_system_event(
+        await _log_com_teto(
+            _LOG_DIAG_TIMEOUT_S,
             "warning", "of_item_registry_failed", "Falha ao registrar connect token",
             source="open_finance", user_id=user_id,  # mesma razão do irmão no /pluggy-item
             # Tipo + `sqlstate` e não `str(exc)[:200]`, também pela razão do irmão:
@@ -1728,7 +1770,7 @@ async def open_finance_pluggy_item_route(request: Request, user_id: int, payload
         await log_system_event(
             "error", "of_item_owner_conflict",
             "Item Pluggy não pertence ao usuário da sessão",
-            source="open_finance",
+            source="open_finance", user_id=session_uid,
             details={"item_id": new_item_id, "origin": "pluggy_item_route"},
         )
         raise HTTPException(status_code=403, detail="Este item não pertence a esta conta.")
@@ -1743,7 +1785,7 @@ async def open_finance_pluggy_item_route(request: Request, user_id: int, payload
         await log_system_event(
             "error", "of_item_owner_conflict",
             "Item Pluggy já vinculado a outra conta",
-            source="open_finance",
+            source="open_finance", user_id=session_uid,
             # `origin` nos TRÊS emissores de `of_item_owner_conflict`, não em
             # dois: os dois 409 têm `detail` IDÊNTICO de propósito (o pré-lock
             # daqui e o de `_salva_item_sob_lock`), então sem este campo eles
@@ -1853,7 +1895,7 @@ async def open_finance_pluggy_item_route(request: Request, user_id: int, payload
         logging.getLogger(__name__).warning(
             "of_item_registry_failed item_id=%s user_id=%s motivo=%s sqlstate=%s",
             new_item_id, session_uid, type(exc).__name__,
-            getattr(exc, "sqlstate", None))
+            getattr(exc, "sqlstate", None), extra={"user_id": session_uid})
         await _log_com_teto(
             _LOG_DIAG_TIMEOUT_S,
             "warning", "of_item_registry_failed", "Falha ao registrar item conectado",
@@ -1955,16 +1997,15 @@ async def open_finance_refresh_route(request: Request, user_id: int, wait: int |
     except PluggyApiError as exc:
         raise HTTPException(status_code=502, detail=str(exc)) from exc
 
-    # Clique registrado com o usuário ANONIMIZADO (hash), sem token, credencial
+    # Clique registrado com o dono na COLUNA (issue #541), sem token, credencial
     # ou valor — só quem, quando, quanto demorou e como terminou.
     itens = result.get("items") or []
     await log_system_event(
         "info" if result.get("ok") else "warning",
         "of_manual_refresh",
         f"Refresh manual de Open Finance ({'ok' if result.get('ok') else 'com pendências'})",
-        source="open_finance",
+        source="open_finance", user_id=user_id,
         details={
-            "user_hash": hashlib.sha256(str(user_id).encode()).hexdigest()[:16],
             "ok": bool(result.get("ok")),
             "duration_ms": int((time.monotonic() - t0) * 1000),
             "items": [{"item_id": i.get("item_id"), "state": i.get("state"),
@@ -2288,10 +2329,12 @@ def delete_pluggy_items_best_effort(user_id: int, item_ids: list[str] | None = N
         # falhou"). Ramo alcançado sempre que faltar PLUGGY_CLIENT_ID/SECRET.
         log_system_event_sync(
             "warning", "pluggy_disconnect_auth_failed",
-            f"Sem apiKey pra deletar {len(pluggy_item_ids)} item(s) na Pluggy: {exc}",
+            f"Sem apiKey pra deletar {len(pluggy_item_ids)} item(s) na Pluggy",
             source="open_finance",
             user_id=user_id if log_user_id else None,
-            details={"items": pluggy_item_ids, "error": str(exc)[:200]},
+            details={"items": pluggy_item_ids, "motivo": type(exc).__name__,
+                     "sqlstate": getattr(exc, "sqlstate", None),
+                     "status_code": getattr(exc, "status_code", None)},
         )
     if api_key:
         for item_id in pluggy_item_ids:
@@ -2345,9 +2388,12 @@ def _disconnect_sob_lock(user_id: int) -> int:
 
                 log_system_event_sync(
                     "warning", "pluggy_item_delete_failed",
-                    f"2º passe do disconnect do user {user_id} falhou: {exc}",
+                    "2º passe do disconnect falhou",
                     source="open_finance",
-                    details={"items": tardios, "error": str(exc)[:200]},
+                    # Coluna NULL de propósito, como o 1º passe: o rastro do item
+                    # órfão sobrevive à exclusão; por isso sem uid e sem texto cru.
+                    details={"items": tardios, "motivo": type(exc).__name__,
+                             "sqlstate": getattr(exc, "sqlstate", None)},
                 )
         return deleted
 

@@ -1760,7 +1760,11 @@ async def _open_finance_refresh():
                         "info", "of_refresh_claimed",
                         f"Refresh periódico reivindicou {len(res['claimed'])} item(ns)",
                         source="open_finance",
-                        details={"origin": res.get("origin"), "items": res["claimed"],
+                        # Só os `item_id`: `claimed` traz o `user_id` de cada dono, e
+                        # a coluna fica NULL (vários donos) — uid em `details`
+                        # sobreviveria à exclusão da conta (issue #541).
+                        details={"origin": res.get("origin"),
+                                 "items": [c.get("item_id") for c in res["claimed"]],
                                  "triggered": res.get("triggered")},
                     )
                 for falha in res.get("failures") or []:
