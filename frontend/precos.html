@@ -610,6 +610,9 @@ function resumePurchaseAfterAuth() {
       || (!purchaseContinuationPage && window.pbPlanAuthState !== "authenticated")) return;
   const intent = window.PBPurchaseIntent.pending();
   if (!intent) {
+    // Fora da /continuar-compra, sem intenção não há o que retomar: o erro
+    // virava toast para todo logado que abria a /precos.
+    if (!purchaseContinuationPage) return;
     purchaseContinuationError(
       "Sua escolha não está mais disponível. Volte aos planos para começar novamente.",
       false,
