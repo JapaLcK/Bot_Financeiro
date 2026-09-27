@@ -12,6 +12,7 @@ import psycopg
 import pytest
 from fastapi.testclient import TestClient
 
+import db
 import frontend.finance_bot_websocket_custom as dashboard
 import frontend.routes.open_finance as of_routes
 from conftest import promote_to_pro
@@ -108,3 +109,62 @@ def test_item_de_conta_inexistente_com_delete_falho_e_apagado_pelo_operador(
         assert item not in diag.itens_com_remocao_remota_falha()
     finally:
         _limpa(item)
+
+
+def _falha_de_delete(uid: int, item: str, monkeypatch) -> None:
+    """O log de DELETE falho pelo caminho de produção (`delete_pluggy_items_best_effort`)."""
+    monkeypatch.setattr(of_routes, "create_pluggy_api_key", lambda: "k")
+
+    def _503(i, api_key=None):
+        raise RuntimeError("pluggy 503")
+
+    monkeypatch.setattr(of_routes, "delete_pluggy_item", _503)
+    of_routes.delete_pluggy_items_best_effort(uid, [item])
+
+
+def test_404_com_marca_prescreve_o_apagar_que_fecha_a_marca(user_id, monkeypatch, capsys):
+    """Sem o comando, `--item` dizia "Nada a apagar" e a marca ficava eterna."""
+    item = "conv-404-marca"
+    try:
+        _falha_de_delete(user_id, item, monkeypatch)
+
+        def _404(i):
+            raise PluggyApiError("x", status_code=404)
+
+        monkeypatch.setattr(op, "get_pluggy_item", _404)
+        assert op.main(["--item", item]) == 0
+        comando = f"--item {item} --apagar --estado {diag.NUNCA_ATRIBUIDO} --apply"
+        assert comando in capsys.readouterr().out
+        monkeypatch.setattr(op, "delete_pluggy_item", lambda i, api_key=None: True)
+        assert op.main(comando.split()) == 0
+        assert item not in diag.itens_com_remocao_remota_falha()
+    finally:
+        _limpa(item)
+
+
+def test_listar_agrupa_conta_apagados_e_nao_prescreve_id_recusado(
+        user_id, monkeypatch, capsys):
+    removido, apagado, ruim = "conv-lista-rem", "conv-lista-apag", "1234567"
+    try:
+        db.register_item(user_id, provider_item_id=removido, origin="removed")
+        _falha_de_delete(user_id, removido, monkeypatch)
+        db.register_item(user_id, provider_item_id=apagado, origin="pluggy_item")
+        db.register_item(None, provider_item_id=apagado, origin="operator_delete")
+        db.register_item(None, provider_item_id=ruim, origin="webhook")
+
+        assert op.main([]) == 0
+        linhas = capsys.readouterr().out.splitlines()
+        assert str(user_id) not in "\n".join(linhas), "vazou user_id na lista"
+        grupo = next(l for l in linhas if l.startswith("REMOVIDO ("))
+        assert removido in grupo
+        falha = next(l for l in linhas if l.startswith("remoção remota falhou ("))
+        assert f"{removido} [REMOVIDO]" in falha
+        assert any("apagado(s) pelo operador" in l for l in linhas)
+        assert not any(apagado in l for l in linhas), "apagado pelo operador segue listado"
+        recusa = next(l for l in linhas if "FORA da lista" in l)
+        assert repr(ruim) in recusa
+        assert not any(ruim in l for l in linhas if l.startswith("NUNCA_ATRIBUIDO")), \
+            "id recusado pela régua foi contado e prescrito"
+    finally:
+        for i in (removido, apagado, ruim):
+            _limpa(i)

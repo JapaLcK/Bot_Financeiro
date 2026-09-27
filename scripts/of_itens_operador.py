@@ -23,6 +23,12 @@ Estados e procedimento:
                    resolvido; vivo → apagar.
   CONECTADO_SEM_RASTRO  conexão viva sem linha com dono no registry. Só
                    informativo; nenhuma escrita.
+  DESCONHECIDO     nem o registry nem os logs conhecem o id (digitação, outra
+                   caixa). Recusado; item real sem rastro é no painel da Pluggy.
+Apagado pelo operador: sai da lista e do card do painel até aparecer rastro novo.
+O rastro de log é APAGÁVEL (`DELETE /admin/api/events`, `admin.py purge`) e o log
+com `user_id` na coluna some na exclusão da conta: aí a marca desaparece e o item
+pode sair da ferramenta.
 Contato com o dono: `admin.py inspect <uid> --reason`, com o uid do `--item`.
 
 Registry vazio NÃO prova que não há órfão na Pluggy: o `GET /items` dela devolve
@@ -38,12 +44,21 @@ from __future__ import annotations
 import argparse
 import sys
 
+import httpx
+
 import db
-from core.services.pluggy import PluggyApiError, delete_pluggy_item, get_pluggy_item
+from core.services.pluggy import (
+    PluggyApiError,
+    PluggyConfigError,
+    delete_pluggy_item,
+    get_pluggy_item,
+)
 from db.open_finance_diagnostico import (
     CONECTADO,
     CONECTADO_SEM_RASTRO,
+    DESCONHECIDO,
     ESTADOS_SEM_CONEXAO,
+    apagados_pelo_operador,
     classifica_item,
     conexoes_sem_rastro,
     itens_com_remocao_remota_falha,
@@ -51,6 +66,10 @@ from db.open_finance_diagnostico import (
 )
 from db.open_finance_state import pluggy_item_lock, register_item
 from scripts.of_itens_alvos import _dica_de_recusa, recusa_id
+
+# O que a Pluggy pode levantar e não é bug nosso: HTTP de erro, rede/timeout,
+# credencial ausente. Vira mensagem e rc=1, nunca traceback.
+_FALHA_PLUGGY = (PluggyApiError, PluggyConfigError, httpx.HTTPError)
 
 
 def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
@@ -96,26 +115,40 @@ def listar() -> None:
     if sem_rastro := conexoes_sem_rastro():
         print(f"{CONECTADO_SEM_RASTRO} ({len(sem_rastro)}), só informativo: "
               + ", ".join(sem_rastro))
+    if apagados := apagados_pelo_operador():
+        print(f"{apagados} apagado(s) pelo operador (fora da lista até novo rastro).")
     if not (sem_conexao or falhas or sem_rastro):
         print("Nada no registry nem nos logs. Isso NÃO prova que não há órfão na Pluggy.")
     print("Detalhe de um item: --item ID. Procedimento por estado: --help.")
 
 
-def detalhe(item: str) -> None:
+def detalhe(item: str) -> int:
     estado = classifica_item(item)
     marca = item in itens_com_remocao_remota_falha()
     print(f"{item}: {estado}" + (" + remoção remota falhou" if marca else ""))
     if estado in (CONECTADO, CONECTADO_SEM_RASTRO):
         print("  conexão local viva: nada a fazer aqui (a remoção é pelo app).")
-        return
+        return 0
+    if estado == DESCONHECIDO:
+        print("  nem o registry nem os logs conhecem este id (confira a caixa e o id)."
+              " Esta ferramenta não age nele; item real sem rastro é no painel da Pluggy.")
+        return 0
+    comando = f"--item {item} --apagar --estado {estado} --apply"
     try:
         remoto = get_pluggy_item(item)
     except PluggyApiError as exc:
         if exc.status_code == 404:
             print("  Pluggy: 404, o item não existe lá. Nada a apagar.")
-        else:
-            print(f"  Pluggy: erro ({exc}). Tente de novo.")
-        return
+            if marca:
+                # Sem isto a marca ficava eterna. O DELETE é idempotente (404 =
+                # sucesso) e grava o `operator_delete` que a fecha.
+                print(f"  Para fechar a marca de falha: {comando}")
+            return 0
+        print(f"  Pluggy: erro ({exc}). Tente de novo.")
+        return 1
+    except _FALHA_PLUGGY as exc:
+        print(f"  Pluggy inalcançável ({type(exc).__name__}: {exc}). Tente de novo.")
+        return 1
     dono = str(remoto.get("clientUserId") or "")
     conector = (remoto.get("connector") or {}).get("name")
     print(f"  Pluggy: VIVO, status={remoto.get('status')} banco={conector} dono={dono or '?'}")
@@ -127,7 +160,8 @@ def detalhe(item: str) -> None:
         print("  conta do dono: exclusão AGENDADA.")
     else:
         print("  conta do dono: existe.")
-    print(f"  Apagar: --item {item} --apagar --estado {estado} --apply")
+    print(f"  Apagar: {comando}")
+    return 0
 
 
 def apagar(item: str, estado_esperado: str) -> int:
@@ -146,14 +180,18 @@ def apagar(item: str, estado_esperado: str) -> int:
             print(f"{item}: tem conexão LOCAL viva. Recusado — a remoção é pelo app "
                   "(DELETE /open-finance/{uid}).")
             return 1
+        if atual == DESCONHECIDO:
+            print(f"{item}: id desconhecido (nem registry nem logs). Recusado.")
+            return 1
         if atual != estado_esperado:
             print(f"{item}: o estado mudou ({estado_esperado} → {atual}). "
                   "Recusado; rode o --item de novo.")
             return 1
         try:
             delete_pluggy_item(item)   # 404 conta como sucesso (idempotente)
-        except PluggyApiError as exc:
-            print(f"{item}: a Pluggy recusou o DELETE ({exc}). Nada gravado.")
+        except _FALHA_PLUGGY as exc:
+            print(f"{item}: o DELETE na Pluggy falhou ({type(exc).__name__}: {exc})."
+                  " Nada gravado.")
             return 1
     try:
         register_item(None, provider_item_id=item, origin="operator_delete",
@@ -171,9 +209,8 @@ def main(argv: list[str] | None = None) -> int:
     if args.apagar:
         return apagar(args.item, args.estado)
     if args.item is not None:
-        detalhe(args.item)
-    else:
-        listar()
+        return detalhe(args.item)
+    listar()
     return 0
 
 

@@ -1027,10 +1027,9 @@ async def _adota_item_orfao(item_id: str, last_event: str | None = None) -> int 
     cenário — NÃO verificado. A saída é o operador: `scripts/of_itens_operador.py`
     mostra o item como INTERROMPIDO, apaga na Pluggy (`--apagar`) e ele pede a
     reconexão. Adotar por script NÃO existe: o one-shot antigo não tinha guarda
-    contra item duplicado da mesma conta (dobraria saldo e lançamentos).
-    Fechar isso sozinho exigiria o disconnect deixar rastro próprio
-    (`origin='disconnect'`) para separar "removido" de "adoção que falhou" —
-    escrita em outro fluxo, outro PR.
+    contra item duplicado da mesma conta (dobraria saldo e lançamentos). O
+    rastro que separa "removido" de "adoção que falhou" já existe: disconnect e
+    reset gravam `origin='removed'` (`db.mark_items_removed`).
 
     Nada escapa daqui: o chamador (webhook) tem de responder 200 mesmo em falha,
     senão a Pluggy retenta em laço. Sem dono resolvível, sem usuário, com o teto

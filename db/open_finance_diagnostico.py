@@ -8,12 +8,18 @@ de terminal, de quem já tem o banco inteiro na mão. Mesmo assim nada aqui devo
 existe em alguns eventos por engano (issue #541) e não é fonte de nada.
 
 Sem escrita: quem escreve é o script, com as guardas dele.
+
+O RASTRO DE LOG É APAGÁVEL: `DELETE /admin/api/events` e `admin.py purge` limpam
+`system_event_logs`, e log com `user_id` na COLUNA some na cascata da exclusão de
+conta. Nesses casos a marca "remoção remota falhou" desaparece e, se o registry
+também não tiver o item, ele sai da ferramenta (DESCONHECIDO) — sobra o painel
+da Pluggy.
 """
 from __future__ import annotations
 
 from core.audit import AuditEvent
 from db.connection import get_conn
-from db.open_finance_state import ITEMS_SEM_CONEXAO
+from db.open_finance_state import ITEMS_SEM_CONEXAO, RESOLVIDO_PELO_OPERADOR
 
 REMOVIDO = "REMOVIDO"
 INTERROMPIDO = "INTERROMPIDO"
@@ -21,7 +27,9 @@ LEGADO_AMBIGUO = "LEGADO_AMBIGUO"
 NUNCA_ATRIBUIDO = "NUNCA_ATRIBUIDO"
 CONECTADO = "CONECTADO"
 CONECTADO_SEM_RASTRO = "CONECTADO_SEM_RASTRO"
-# Só estes aceitam `--apagar`: os dois CONECTADO têm conexão local e são recusados.
+DESCONHECIDO = "DESCONHECIDO"
+# Só estes aceitam `--apagar`: CONECTADO* tem conexão local e DESCONHECIDO não é
+# item que vimos — os três são recusados.
 ESTADOS_SEM_CONEXAO = (REMOVIDO, INTERROMPIDO, LEGADO_AMBIGUO, NUNCA_ATRIBUIDO)
 
 # Os eventos em que o DELETE remoto de um item falhou. Formato de LOG virou
@@ -64,7 +72,11 @@ def classifica_item(item_id: str, *, provider: str = "pluggy") -> str:
         à marca: não dá para saber);
       • nenhuma linha com dono                   → NUNCA_ATRIBUIDO — a menos que
         exista auditoria `OPEN_FINANCE_CONNECTED` com o mesmo `item_id`: aí o
-        item TEVE dono e o rastro se perdeu, e ele cai em LEGADO_AMBIGUO (D3).
+        item TEVE dono e o rastro se perdeu, e ele cai em LEGADO_AMBIGUO (D3);
+      • nenhuma linha NENHUMA e nenhuma citação em log de DELETE falho
+                                                 → DESCONHECIDO (recusado). Só
+        log, sem registry, é o caso legítimo da conta excluída (a cascata levou
+        o registry) e segue as regras acima.
 
     Por `id` e não por `created_at`: `now()` é o tempo de INÍCIO da transação,
     empata entre duas escritas da mesma transação e pode inverter entre sessões
@@ -81,20 +93,27 @@ def classifica_item(item_id: str, *, provider: str = "pluggy") -> str:
     """
     item = str(item_id or "")
     with get_conn() as conn, conn.cursor() as cur:
-        cur.execute(
-            "select origin, removal_tracked from open_finance_item_registry"
-            " where provider = %s and provider_item_id = %s and user_id is not null"
-            " order by id desc limit 1",
-            (provider, item),
-        )
-        ultima = cur.fetchone()
+        # `lower()` só AQUI, e é o lado seguro: a guarda de conexão viva não pode
+        # depender da caixa que o operador digitou (UUID maiúsculo passava).
         cur.execute(
             "select 1 from open_finance_connections"
-            " where provider = %s and provider_item_id = %s limit 1",
+            " where provider = %s and lower(provider_item_id) = lower(%s) limit 1",
             (provider, item),
         )
-        if cur.fetchone():
+        conectado = cur.fetchone() is not None
+        # Existência e estado por match EXATO: é essa string que vai no DELETE.
+        cur.execute(
+            "select user_id is not null as com_dono, origin, removal_tracked"
+            " from open_finance_item_registry"
+            " where provider = %s and provider_item_id = %s"
+            " order by (user_id is not null) desc, id desc limit 1",
+            (provider, item),
+        )
+        linha = cur.fetchone()
+        ultima = linha if linha and linha["com_dono"] else None
+        if conectado:
             return CONECTADO if ultima else CONECTADO_SEM_RASTRO
+        teve_auditoria = False
         if ultima is None:
             # ponytail: varre `audit_events` sem índice em `details->>'item_id'`.
             # Ferramenta de operador, um item por vez; índice se ficar lento.
@@ -103,10 +122,28 @@ def classifica_item(item_id: str, *, provider: str = "pluggy") -> str:
                 "and details->>'item_id' = %s limit 1",
                 (AuditEvent.OPEN_FINANCE_CONNECTED, item),
             )
-            return LEGADO_AMBIGUO if cur.fetchone() else NUNCA_ATRIBUIDO
-    if ultima["origin"] == "removed":
-        return REMOVIDO
-    return INTERROMPIDO if ultima["removal_tracked"] else LEGADO_AMBIGUO
+            teve_auditoria = cur.fetchone() is not None
+    if ultima is not None:
+        if ultima["origin"] == "removed":
+            return REMOVIDO
+        return INTERROMPIDO if ultima["removal_tracked"] else LEGADO_AMBIGUO
+    # Nenhuma linha no registry E nenhuma citação em log de DELETE falho: o id
+    # não é de nada que vimos (digitação, outra caixa, item de outro ambiente).
+    # ponytail: varre os logs para UM id; só roda quando o registry não tem nada.
+    if linha is None and item not in itens_com_remocao_remota_falha():
+        return DESCONHECIDO
+    return LEGADO_AMBIGUO if teve_auditoria else NUNCA_ATRIBUIDO
+
+
+def apagados_pelo_operador(*, provider: str = "pluggy") -> int:
+    """Quantos items estão resolvidos pelo operador (`RESOLVIDO_PELO_OPERADOR`):
+    saem da lista e do card, e o dry-run só os conta."""
+    with get_conn() as conn, conn.cursor() as cur:
+        cur.execute(
+            "select count(distinct r.provider_item_id) as n"
+            f" from open_finance_item_registry r where r.provider = %s"
+            f" and {RESOLVIDO_PELO_OPERADOR}", (provider,))
+        return int(cur.fetchone()["n"])
 
 
 def listar_sem_conexao(*, provider: str = "pluggy") -> dict[str, str]:

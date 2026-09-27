@@ -455,9 +455,19 @@ def list_connections_for_health_check(*, older_than_sec: int, limit: int) -> lis
             return [dict(r) for r in (cur.fetchall() or [])]
 
 
+# Item cuja linha de MAIOR `id` no registry (com ou sem dono) é `operator_delete`:
+# o operador já o apagou na Pluggy (`scripts/of_itens_operador.py`). Linha nova
+# depois (webhook, POST) tem `id` maior e o reabre. Predicado sobre o alias `r`.
+RESOLVIDO_PELO_OPERADOR = """
+   (select u.origin from open_finance_item_registry u
+     where u.provider = r.provider and u.provider_item_id = r.provider_item_id
+     order by u.id desc limit 1) = 'operator_delete'
+"""
+
 # Item visto no registry (o único rastro: o `GET /items` da Pluggy devolve 401)
-# que não tem NENHUMA conexão local. Quem lê é o contador do painel de saúde abaixo.
-ITEMS_SEM_CONEXAO = """
+# que não tem NENHUMA conexão local nem foi resolvido pelo operador. Quem lê é o
+# contador do painel de saúde abaixo e o diagnóstico do operador.
+ITEMS_SEM_CONEXAO = f"""
   from open_finance_item_registry r
  where r.provider_item_id is not null
    and not exists (
@@ -465,6 +475,7 @@ ITEMS_SEM_CONEXAO = """
         where c.provider = r.provider
           and c.provider_item_id = r.provider_item_id
    )
+   and not {RESOLVIDO_PELO_OPERADOR}
 """
 
 

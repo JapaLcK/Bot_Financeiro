@@ -12,7 +12,12 @@ Controles do grupo (medidos, ver o relato da PR):
   • negativo da marca — tirar a leitura de `system_event_logs`: os 5 casos de
     formato e o de conta excluída ficam vermelhos;
   • positivo da marca — `test_operator_delete_posterior_resolve_a_marca`
-    (a marca some, mas só com `operator_delete` DEPOIS da falha).
+    (a marca some, mas só com `operator_delete` DEPOIS da falha);
+  • negativo do DESCONHECIDO — devolver NUNCA_ATRIBUIDO sem olhar a existência:
+    `test_id_que_ninguem_viu_e_desconhecido` fica vermelho; o positivo é
+    `test_formato_exclusao_de_conta_so_pelo_log` (só log → NUNCA_ATRIBUIDO);
+  • negativo do `RESOLVIDO_PELO_OPERADOR` — tirá-lo de `ITEMS_SEM_CONEXAO`: os
+    dois testes de card ficam vermelhos; o positivo é a reabertura por rastro novo.
 """
 from __future__ import annotations
 
@@ -243,3 +248,63 @@ def test_item_com_conexao_viva_nao_tem_marca(user_id, item, monkeypatch):
     of_routes.delete_pluggy_items_best_effort(user_id, [item])
     _conecta(user_id, item)
     assert item not in diag.itens_com_remocao_remota_falha()
+
+
+# ── rodada 2: id desconhecido, resolvido pelo operador, linhas sem dono ─────
+
+def test_id_que_ninguem_viu_e_desconhecido(item):
+    assert diag.classifica_item(item) == diag.DESCONHECIDO
+
+
+def test_linhas_sem_dono_depois_do_removed_nao_mudam_o_estado(user_id, item):
+    _linha(user_id, item, "pluggy_item")
+    _linha(user_id, item, "removed")
+    _linha(None, item, "webhook")
+    _linha(None, item, "operator_delete")
+    assert diag.classifica_item(item) == diag.REMOVIDO
+
+
+def test_auditoria_de_disconnect_nao_conta_para_d3(user_id, item):
+    _linha(None, item, "webhook")
+    record_audit_event(user_id, AuditEvent.OPEN_FINANCE_DISCONNECTED,
+                       details={"item_id": item})
+    assert diag.classifica_item(item) == diag.NUNCA_ATRIBUIDO
+
+
+def test_operator_delete_tira_da_lista_e_do_card_e_rastro_novo_reabre(user_id, item):
+    """Predicado único `RESOLVIDO_PELO_OPERADOR`: linha de MAIOR id é
+    `operator_delete` → fora de `ITEMS_SEM_CONEXAO` (card) e da lista."""
+    from db.open_finance_state import of_health_counters
+
+    _linha(user_id, item, "pluggy_item")
+    antes = of_health_counters()["items_sem_conexao"]
+    assert item in diag.listar_sem_conexao()
+    _linha(None, item, "operator_delete")
+    assert item not in diag.listar_sem_conexao()
+    assert of_health_counters()["items_sem_conexao"] == antes - 1
+    assert diag.apagados_pelo_operador() >= 1
+    _linha(None, item, "webhook")          # a Pluggy voltou a falar do item
+    assert diag.listar_sem_conexao()[item] == diag.INTERROMPIDO
+    assert of_health_counters()["items_sem_conexao"] == antes
+
+
+def test_operator_delete_de_item_so_do_log_nao_sobe_o_card(user_id, item, monkeypatch):
+    """O item da conta excluída só existe no log; apagá-lo grava a 1ª linha dele
+    no registry — e ela NÃO pode virar "item sem conexão" no painel."""
+    from db.open_finance_state import of_health_counters
+
+    _pluggy_quebrada(monkeypatch)
+    of_routes.delete_pluggy_items_best_effort(user_id, [item])
+    antes = of_health_counters()["items_sem_conexao"]
+    db.register_item(None, provider_item_id=item, origin="operator_delete")
+    assert of_health_counters()["items_sem_conexao"] == antes
+    assert item not in diag.listar_sem_conexao()
+
+
+def test_nova_falha_depois_do_operator_delete_reabre_a_marca(user_id, item, monkeypatch):
+    _pluggy_quebrada(monkeypatch)
+    of_routes.delete_pluggy_items_best_effort(user_id, [item])
+    db.register_item(None, provider_item_id=item, origin="operator_delete")
+    assert item not in diag.itens_com_remocao_remota_falha()
+    of_routes.delete_pluggy_items_best_effort(user_id, [item])
+    assert item in diag.itens_com_remocao_remota_falha()
