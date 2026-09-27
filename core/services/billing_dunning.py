@@ -79,6 +79,12 @@ webhook importam daqui. Quem trouxer uma função para cá importa
 # compondo dela. NÃO crie uma quarta lista.
 PAST_DUE_PAYMENT_STATUSES = ("past_due", "unpaid", "incomplete")
 
+# Assinatura VIVA na Stripe: a lista acima mais `trialing` e `active`. Nasceu
+# como `_LIVE_PAYMENT_STATUSES` em `core/admin_dashboard.py` (que a importa
+# daqui com o mesmo nome) e mudou de casa pelo mesmo motivo: o `merge_users`
+# (`db/users.py`) também decide com ela e não pode importar o admin.
+LIVE_PAYMENT_STATUSES = frozenset({"trialing", "active", *PAST_DUE_PAYMENT_STATUSES})
+
 # `cancellation_details.reason` do `customer.subscription.deleted` que significa
 # "a Stripe encerrou DE VEZ por inadimplência" — o único desfecho TERMINAL de
 # uma cobrança, e o gatilho do ramo que grava `unpaid` em vez de `canceled`.

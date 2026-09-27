@@ -62,7 +62,8 @@ def user_exists(user_id: int) -> bool:
 
 class MergeRefused(Exception):
     """`merge_users` não junta (#607): dado financeiro dos dois lados, origem
-    presa (Open Finance vivo ou plano pago) ou colisão de unique/FK na junção."""
+    presa (Open Finance vivo, plano pago ou assinatura Stripe viva) ou colisão de
+    unique/FK na junção."""
 
 
 # Onde mora "dado financeiro" para a recusa do `merge_users`. Com linha nestas
@@ -120,7 +121,16 @@ def _origem_presa(cur, user_id: int) -> bool:
     "Vivo" é o que o código de OF considera vivo (`_TERMINAL`): PAUSED é trial
     vencido (o item nem existe mais na Pluggy) e DELETED é removido. Plano pago
     é a regra de `plan_service` — o trial do Stripe conta (é assinatura
-    `trialing` com `plan` gravado); o trial por telefone (`trial_started_at`) não."""
+    `trialing` com `plan` gravado); o trial por telefone (`trial_started_at`) não.
+
+    Também presa: `stripe_customer_id` com assinatura viva na Stripe
+    (`LIVE_PAYMENT_STATUSES`), mesmo com o plano já vencido — `past_due` cobrado
+    depois acharia pelo webhook uma conta apagada. Inclui `unpaid` com
+    `plan='free'`: o par não prova que a Stripe encerrou (ver o /trial-reset em
+    `core/admin_dashboard.py`), e aqui não há humano no laço. Sem
+    `stripe_customer_id` o status não conta: o grant Pix grava `active` e ele
+    fica velho depois que o grant vence."""
+    from core.services.billing_dunning import LIVE_PAYMENT_STATUSES
     from core.services.plan_service import _tem_plano_pago_vigente  # tardio: importa `db`
     from .open_finance_state import _TERMINAL
 
@@ -131,8 +141,14 @@ def _origem_presa(cur, user_id: int) -> bool:
     )
     if cur.fetchone()["tem"]:
         return True
-    cur.execute("select plan, plan_expires_at from auth_accounts where user_id = %s", (user_id,))
-    return any(_tem_plano_pago_vigente(r) for r in cur.fetchall())
+    cur.execute("select plan, plan_expires_at, stripe_customer_id, last_payment_status"
+                " from auth_accounts where user_id = %s", (user_id,))
+    return any(
+        _tem_plano_pago_vigente(r)
+        or (r["stripe_customer_id"]
+            and (r["last_payment_status"] or "").strip().lower() in LIVE_PAYMENT_STATUSES)
+        for r in cur.fetchall()
+    )
 
 
 def merge_users(from_user_id: int, to_user_id: int) -> None:

@@ -401,3 +401,31 @@ def test_origem_com_open_finance_ou_plano_pago_nao_some(user_id, prender, espera
         assert _dono_do_numero(wa_phone) == wa_uid
     else:
         assert _dono_do_numero(wa_phone) == user_id
+
+
+@pytest.mark.parametrize("status,esperado", [
+    ("past_due", "merge_conflict"),  # retentativa paga depois acharia uma conta apagada
+    ("canceled", "linked"),
+])
+def test_origem_com_assinatura_stripe_viva_e_plano_vencido_nao_some(user_id, status, esperado):
+    wa_phone, wa_uid = _wa_dono_do_numero()
+    _conta_site(user_id, wa_phone)
+    cus = f"cus_{uuid.uuid4().hex[:14]}"
+    with get_conn() as conn:
+        with conn.cursor() as cur:
+            insert_auth_account_pii(cur, wa_uid, f"o-{uuid.uuid4().hex[:8]}@e.com", phone="5511000000000")
+            cur.execute("update auth_accounts set plan='pro', plan_expires_at=now() - interval '2 days',"
+                        " stripe_customer_id=%s, last_payment_status=%s where user_id=%s",
+                        (cus, status, wa_uid))
+        conn.commit()
+
+    r = attempt_whatsapp_phone_link(wa_phone, current_user_id=wa_uid)
+
+    assert r["status"] == esperado, r
+    origem = _sql("select a.stripe_customer_id from users u"
+                  " left join auth_accounts a on a.user_id = u.id where u.id=%s", (wa_uid,))
+    if esperado == "merge_conflict":
+        assert origem == [{"stripe_customer_id": cus}], "users e auth_accounts da origem intactos"
+        assert _dono_do_numero(wa_phone) == wa_uid
+    else:
+        assert origem == [] and _dono_do_numero(wa_phone) == user_id
