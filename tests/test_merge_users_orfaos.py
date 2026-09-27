@@ -9,6 +9,8 @@ OF terminal; o resto some pelas FKs quando a linha `users` da origem é apagada.
 """
 import uuid
 
+import pytest
+
 import db
 from adapters.whatsapp import wa_runtime as wr
 from adapters.whatsapp.wa_parse import InboundMessage
@@ -246,6 +248,24 @@ def test_comissao_de_afiliado_da_origem_passa_ao_destino(user_id):
         assert _n("affiliate_referrals where affiliate_id = %s and referred_user_id = %s", (af, user_id)) == 1
     finally:
         _sql("delete from users where id = %s", (dono,))
+
+
+@pytest.mark.parametrize("dono_e_origem", [True, False], ids=["origem_dona", "destino_dono"])
+def test_afiliado_de_um_lado_indicou_o_outro_recusa_e_nada_muda(user_id, dono_e_origem):
+    """Juntos, dono e indicado viram o mesmo usuário: a 1ª fatura paga seria
+    comissão para si mesmo (`record_commission_for_invoice` não rechecaria)."""
+    fone, origem = _origem_do_whatsapp(user_id)
+    dono, indicado = (origem, user_id) if dono_e_origem else (user_id, origem)
+    af = _sql("insert into affiliates(user_id, code) values (%s, %s) returning id",
+              (dono, uuid.uuid4().hex[:10]))[0]["id"]
+    _sql("insert into affiliate_referrals(affiliate_id, referred_user_id) values (%s, %s)", (af, indicado))
+
+    r = attempt_whatsapp_phone_link(fone, current_user_id=origem)
+
+    assert r == {"status": "merge_conflict", "wa_phone": fone}
+    assert _n("users where id = %s", (origem,)) == 1
+    assert _n("affiliates where id = %s and user_id = %s", (af, dono)) == 1
+    assert _n("affiliate_referrals where affiliate_id = %s and referred_user_id = %s", (af, indicado)) == 1
 
 
 def test_login_da_origem_vai_inteiro_quando_o_destino_nao_tem(user_id):

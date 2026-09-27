@@ -68,8 +68,8 @@ def user_exists(user_id: int) -> bool:
 
 class MergeRefused(Exception):
     """`merge_users` não junta (#607): dado financeiro dos dois lados, origem
-    presa (Open Finance vivo, plano pago ou cliente Stripe) ou colisão de
-    unique/FK na junção."""
+    presa (Open Finance vivo, plano pago ou cliente Stripe), autoindicação de
+    afiliado ou colisão de unique/FK na junção."""
 
 
 # Onde mora "dado financeiro" para a recusa do `merge_users`. Com linha nestas
@@ -149,6 +149,18 @@ def _origem_presa(cur, user_id: int) -> bool:
                for r in cur.fetchall())
 
 
+def _viraria_autoindicacao(cur, from_user_id: int, to_user_id: int) -> bool:
+    """Um lado é dono do afiliado que indicou o outro? Juntos, viram autoindicação
+    (`record_referral` recusa; `record_commission_for_invoice` não rechecaria)."""
+    cur.execute(
+        "select exists(select 1 from affiliate_referrals r join affiliates a on a.id = r.affiliate_id"
+        " where (a.user_id = %(f)s and r.referred_user_id = %(t)s)"
+        " or (a.user_id = %(t)s and r.referred_user_id = %(f)s)) as tem",
+        {"f": from_user_id, "t": to_user_id},
+    )
+    return cur.fetchone()["tem"]
+
+
 def merge_users(from_user_id: int, to_user_id: int) -> None:
     """
     Move os dados de from_user_id → to_user_id e APAGA a linha `users` da origem
@@ -156,7 +168,8 @@ def merge_users(from_user_id: int, to_user_id: int) -> None:
     push, cache, agentes; com login nos dois lados, o login da origem).
 
     Recusa (`MergeRefused`, nada escrito) quando os dois lados têm dados
-    financeiros, quando a origem está presa (`_origem_presa`) ou quando a junção
+    financeiros, quando a origem está presa (`_origem_presa`), quando viraria
+    autoindicação de afiliado (`_viraria_autoindicacao`) ou quando a junção
     bate numa unique ou numa FK composta (ex.: `fk_launches_space`, lançamento da
     origem num `financial_spaces` dela). Antes de mover launches, remove duplicatas que colidem na
     unique uq_launches_user_source_external (user_id, source, external_id).
@@ -185,7 +198,7 @@ def _merge_users(from_user_id: int, to_user_id: int) -> None:
             # entre ela e os updates escapa dela: sem unique no caminho, junta;
             # batendo numa unique (user_seq, nome de caixinha...), volta tudo e
             # vira `MergeRefused` no `merge_users`. Lock por user_id se precisar.
-            if _origem_presa(cur, from_user_id) or (
+            if _origem_presa(cur, from_user_id) or _viraria_autoindicacao(cur, from_user_id, to_user_id) or (
                 _tem_dados_financeiros(cur, from_user_id) and _tem_dados_financeiros(cur, to_user_id)
             ):
                 raise MergeRefused(f"{from_user_id} -> {to_user_id}")
