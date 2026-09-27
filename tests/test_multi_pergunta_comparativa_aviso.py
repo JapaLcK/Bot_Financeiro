@@ -220,3 +220,16 @@ def test_aviso_cita_a_fila(fila, depois):
     assert L._aviso_pergunta_pulada(" x? ", fila) == (
         'ℹ️ Não registrei "x?" porque parece uma pergunta. '
         f"Se era gasto, {depois}me manda só o valor e o lugar, tipo *gastei 50 no bar*.")
+
+
+def test_aviso_corta_trecho_longo_e_mantem_o_curto():
+    # Citado inteiro, um trecho de 3000 levava a resposta acima dos 4096 do
+    # WhatsApp e a Meta recusava tudo, confirmações dos gravados inclusive.
+    longo = "gastei mais que no mês passado " * 100
+    aviso = L._aviso_pergunta_pulada(longo)
+    assert aviso.startswith('ℹ️ Não registrei "gastei mais que no mês passado gastei')
+    assert '…" porque parece uma pergunta.' in aviso and len(aviso) < 200
+    sem_espaco = L._aviso_pergunta_pulada("x" * 3000)
+    assert f'"{"x" * 79}…"' in sem_espaco
+    curto = "a" * 80  # no limite: sai igual, sem "…"
+    assert L._aviso_pergunta_pulada(curto) == _aviso(curto)

@@ -1341,7 +1341,12 @@ def _aviso_pergunta_pulada(part: str, fila: list[dict] = ()) -> str:
     Limite conhecido: um `*` solto dentro do pedaço do usuário pode formar par
     com o `*` de `*gastei 50 no bar*` (total ímpar de `*` = #276).
     `fila`: itens da pergunta de valor de pé. O aviso vem DEPOIS da pergunta, e
-    mandar o gasto antes de responder TODOS gravaria no item da fila."""
+    mandar o gasto antes de responder TODOS gravaria no item da fila.
+    O pedaço é cortado em 80: citado inteiro, um trecho longo levava a resposta
+    (confirmações + aviso) acima dos 4096 do WhatsApp e a Meta recusava tudo."""
+    trecho = part.strip()
+    if len(trecho) > 80:
+        trecho = trecho[:79].rsplit(" ", 1)[0] + "…"
     descs = [f"*{_desc_do_item(i)}*" for i in fila]
     if len(descs) > 1:
         depois = f"depois de me passar o valor de {', '.join(descs[:-1])} e {descs[-1]}, "
@@ -1349,7 +1354,7 @@ def _aviso_pergunta_pulada(part: str, fila: list[dict] = ()) -> str:
         depois = "depois de responder a pergunta acima, "
     else:
         depois = ""
-    return (f'ℹ️ Não registrei "{part.strip()}" porque parece uma pergunta. '
+    return (f'ℹ️ Não registrei "{trecho}" porque parece uma pergunta. '
             f"Se era gasto, {depois}me manda só o valor e o lugar, tipo *gastei 50 no bar*.")
 
 
