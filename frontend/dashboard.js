@@ -11897,6 +11897,11 @@ function _showAccessError(title, msg) {
         if (me && me.agents_ui_enabled === false) {
           document.querySelectorAll('[data-nav="agentes"]').forEach(el => { el.style.display = "none"; });
         }
+        // Painel novo (beta): só quem a chave libera, e nunca no app — o /painel
+        // manda o app de volta para cá.
+        if (me && me.dashboard_v2_enabled === true && !window.PB_IN_APP) {
+          document.querySelectorAll("[data-painel-v2]").forEach(el => { el.hidden = false; });
+        }
         // Gate de escolha de plano: cadastro novo passa pela /precos e assina um
         // plano pago antes de acessar o app (o Grátis não é mais uma escolha
         // oferecida na /precos). Vale também no app iOS — a política (e por que

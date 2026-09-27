@@ -5,16 +5,16 @@ import { BY_PROFILE, COMMON } from "../lib/prompts.js";
 import type { TopicId } from "../lib/topics";
 import { FrameScope } from "./Frame";
 import { LiveAnswer } from "./LiveAnswer";
+import { ICON } from "../lib/brand";
 
 type Prompt = { key: string; ask: string | null; topic?: TopicId; cat?: string };
-const AVATAR = "../frontend/brand/icon.png";
 
 // Resposta do Piggy: texto, os blocos (vivos, com o estado próprio da resposta) e as
 // sugestões de próxima pergunta.
 function PiggySays({ m, live = true }: { m: Msg; live?: boolean }) {
   return (
     <FrameScope.Provider value={`m${m.id}-`}>
-      <p className="msg-by"><img src={AVATAR} alt="" width={24} height={24} />Piggy</p>
+      <p className="msg-by"><img src={ICON} alt="" width={24} height={24} />Piggy</p>
       <p className="msg-text">{m.text}</p>
       {m.blocks?.length && m.s0 && m.page ? <LiveAnswer blocks={m.blocks} s0={m.s0} page={m.page} /> : null}
       {live && !!m.follow?.length && (
@@ -56,7 +56,7 @@ export function PiggyChat() {
       <>
         {head}
         <section className="chat-empty">
-          <img src={AVATAR} alt="" width={56} height={56} />
+          <img src={ICON} alt="" width={56} height={56} />
           <p className="chat-hello">Oi, eu sou o Piggy. Pergunta o que quiser sobre o seu dinheiro, ou começa por uma destas:</p>
           <ul className="chat-follow">
             {ideas.map((p) => <li key={p.key}><button type="button" className="chip" onClick={() => ask({ text: p.ask!, topic: p.topic, cat: p.cat, key: p.key })}>{p.ask}</button></li>)}

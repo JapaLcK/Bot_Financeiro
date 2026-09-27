@@ -15,7 +15,7 @@ from fastapi.testclient import TestClient
 import db
 import db_support
 import frontend.finance_bot_websocket_custom as dashboard
-from _apoio_auth_app import req
+from _apoio_auth_app import libera, sessao_de as sessao, sql
 from conftest import em_carencia, promote_to_pro
 from core.sessions import revoke_session
 from frontend.routes.shared import WWW_AUTHENTICATE_401
@@ -32,17 +32,6 @@ def _ninguem_liberado(monkeypatch):
     monkeypatch.setenv("DASHBOARD_V2_BETA_USER_IDS", "")
 
 
-def libera(monkeypatch, uid):
-    monkeypatch.setenv("DASHBOARD_V2_BETA_USER_IDS", str(uid))
-
-
-def sessao(uid):
-    email = db.get_auth_user(uid)["email"]
-    access, jti, refresh = dashboard._issue_session_token(uid, email, req("/auth/login"))
-    dash = dashboard.make_dashboard_token(uid, hours=dashboard.DASHBOARD_SESSION_HOURS, jti=jti)
-    return {"access": access, "jti": jti, "refresh": refresh, "dashboard": dash}
-
-
 def get_com_cookie(token, **headers):
     client = TestClient(dashboard.app)
     client.cookies.set(dashboard.DASHBOARD_COOKIE_NAME, token)
@@ -51,13 +40,6 @@ def get_com_cookie(token, **headers):
 
 def get_com_bearer(token, **headers):
     return TestClient(dashboard.app).get(ME, headers={"Authorization": f"Bearer {token}", **headers})
-
-
-def sql(query, *args):
-    with db.get_conn() as conn:
-        conn.execute(query, args)
-        conn.commit()
-    db_support.invalidate_auth_user_cache()
 
 
 def assert_erro(r, status, code):

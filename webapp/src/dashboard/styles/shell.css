@@ -107,7 +107,7 @@
 .board-hint { font-size: 13px; color: var(--ink-2); }
 .foot { font-size: 12px; text-align: center; color: var(--ink-3); padding-top: 24px; }
 
-.tabbar { display: none; }
+.tabbar, .demo-strip { display: none; }
 
 @media (max-width: 1180px) {
   :root { --rail-w: 72px; --gutter: 28px; }
@@ -125,6 +125,7 @@
   .rail { display: none; }
   .topbar { height: 56px; gap: 6px; }
   .topbar .tag-demo, .cmd-trigger span, .cmd-trigger kbd { display: none; }
+  .demo-strip { display: block; padding: 6px var(--gutter) 0; font-size: 11px; font-weight: 500; color: var(--ink-3); text-align: center; }
   .topbar .btn-primary { padding: 0 12px; } /* com o nome escrito: só o ícone não dizia o que era */
   .cmd-trigger { width: 40px; padding: 0; justify-content: center; }
   .month-switch, .topbar-spacer { flex: 1; }

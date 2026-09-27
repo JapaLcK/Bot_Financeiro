@@ -1,6 +1,7 @@
 import { useState } from "react";
 import { ask } from "../lib/conversation";
 import type { Path } from "../router";
+import { ICON } from "../lib/brand";
 
 // A barra de conversa com o Piggy. No desktop flutua em todas as páginas; no celular só
 // aparece na página da conversa (lá o acesso é o botão do meio). Na #/piggy ela é a
@@ -8,7 +9,7 @@ import type { Path } from "../router";
 export function AskBar({ path }: { path: Path }) {
   const [text, setText] = useState("");
   const here = path === "/piggy";
-  const avatar = <img src="../frontend/brand/icon.png" alt="" width={28} height={28} />;
+  const avatar = <img src={ICON} alt="" width={28} height={28} />;
 
   return (
     <form className="askbar" data-here={here || undefined} role="search" aria-label="Conversa com o Piggy"

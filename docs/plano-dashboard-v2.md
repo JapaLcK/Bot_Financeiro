@@ -227,7 +227,15 @@ PR de cada etapa, não soluções prontas. Cada PR confere se ainda valem, decid
 - [x] Protótipo: perfis do Resumo (#573, #575), faixa do Piggy (#579), navegação com o
   Piggy no meio e Ferramentas (#582), página do chat (#584).
 - [x] Protótipo: blocos que expandem na conversa, com estado por resposta e "Abrir no painel" (PR 3 do chat).
-- [ ] Pré-requisitos: ~~#594~~ ✓ · Q42 (#620, mergeado; conferir o deploy) · Q43 · Q40 (regra) · Q41
-- Etapa 0 em andamento: PR 1 (esqueleto da `/api/v2`: `usuario_atual`, envelope de
-  erro, `GET /api/v2/me`, varredura de rotas).
+- [ ] Pré-requisitos: ~~#594~~ ✓ · Q42 (#620, mergeado; conferir o deploy) · Q43 (#623 e
+  #634, mergeados; deploy não conferido) · Q40 (#633, mergeado; deploy não conferido) ·
+  Q41 (#627, aberto)
+- Etapa 0 em andamento:
+  - PR 1 (#632, mergeado): esqueleto da `/api/v2` (`usuario_atual`, envelope de erro,
+    `GET /api/v2/me`, varredura de rotas).
+  - PR 2a: a página `/painel` (gate de sessão, chave, UA do app e os gates do `/app`),
+    `dashboard_v2_enabled` no `/auth/me`, links "Painel novo (beta)" no `/app` e "Painel
+    antigo" no v2, e o bundle servido de `frontend/dashboard-app.*` com gate no CI. O v2
+    ainda não chama a API e o `?plano=` continua.
+  - PR 2b: contrato OpenAPI → TS, TanStack Query, fim do `?plano=`, erros, Safari 14.
 - [ ] Etapa 0 · [ ] 1 · [ ] 2 · [ ] 3 · [ ] 4 · [ ] 5 · [ ] 6 · [ ] 7

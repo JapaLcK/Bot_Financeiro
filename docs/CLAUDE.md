@@ -145,6 +145,12 @@ Sub-app FastAPI (`api/v2/app.py`) montado pelo monólito com `app.mount("/api/v2
 - `GET /api/v2/me` devolve `{"plan_tier": "free"|"essencial"|"plus"|"pro"}`, sem PII.
 - Chave: `DASHBOARD_V2_BETA_EMAILS` (sem a env = os e-mails de teste do beta de
   Agentes; definida e vazia = ninguém) e `DASHBOARD_V2_BETA_USER_IDS`.
+- A página é `/painel` (`frontend/painel.html` + o artefato `frontend/dashboard-app.*`,
+  de `webapp/src/dashboard`): sessão por `auth_token` ou `dashboard_token`
+  (`_resolve_page_user_id`), senão `/login?next=/painel`; UA do app ou fora da chave
+  (ou a chave falhando) vai para `/app`; depois os gates de plano e onboarding do `/app`.
+  O `/auth/me` devolve `dashboard_v2_enabled`, que revela o link no menu do `/app`
+  (fora do app).
 
 ### Autenticação
 

@@ -15,37 +15,26 @@
  * Só 1440: é no desktop que o teclado é a entrada principal; o grid e os handlers
  * são os mesmos no celular.
  *
- * Rodar:  npm run test:frontend   (o `before` gera o bundle, gitignored, em dashboard-v2/)
+ * Rodar:  npm run test:frontend   (abre o artefato commitado frontend/dashboard-app.*: mudou webapp/src, rode `npm --prefix webapp run build`)
  */
 import { test, before, after } from "node:test";
 import assert from "node:assert/strict";
-import { execSync } from "node:child_process";
-import { fileURLToPath } from "node:url";
-import { dirname, join } from "node:path";
 import { chromium } from "playwright";
+import { PAINEL, exigeArtefatoEmDia, servir } from "./_painel.mjs";
 
-const ROOT = join(dirname(fileURLToPath(import.meta.url)), "..", "..");
-// Porta fictícia: toda requisição é atendida da raiz do repositório pela rota (como _dock.mjs);
-// a página carrega ../frontend/fonts, então servir só dashboard-v2/ não basta.
-const ORIGIN = "http://127.0.0.1:1";
 const HERO = '[data-widget-id="hero"] [role=radio]';
 const NUM = '[data-widget-id="simulador"] input[type=number]';
 
 let browser;
 before(async () => {
-  execSync("npm --prefix webapp run build:dashboard", { cwd: ROOT, stdio: "pipe" });
+  exigeArtefatoEmDia();
   browser = await chromium.launch();
 });
 after(() => browser?.close());
 
 async function abrir({ semInert = false, organizar = false } = {}) {
   const ctx = await browser.newContext({ viewport: { width: 1440, height: 1000 }, reducedMotion: "reduce" });
-  await ctx.route("**/*", (r) => {
-    const url = new URL(r.request().url());
-    if (url.origin !== ORIGIN) return r.abort();
-    const path = decodeURIComponent(url.pathname).replace(/\/$/, "/index.html");
-    return r.fulfill({ path: join(ROOT, path) }).catch(() => r.fulfill({ status: 404, body: "" }));
-  });
+  await servir(ctx);
   // já escolheu o perfil (Pular): sem isso o modal da 1ª visita cobre o Resumo
   await ctx.addInitScript(() => localStorage.setItem("pigbank.dashboard.profile.v1", '"padrao"'));
   const page = await ctx.newPage();
@@ -55,7 +44,7 @@ async function abrir({ semInert = false, organizar = false } = {}) {
     Element.prototype.toggleAttribute = function (n, f) { return n === "inert" ? false : ta.call(this, n, f); };
     delete HTMLElement.prototype.inert;
   });
-  await page.goto(`${ORIGIN}/dashboard-v2/#/`);
+  await page.goto(`${PAINEL}#/`);
   await page.locator(HERO).first().waitFor();
   if (organizar) {
     await page.getByRole("button", { name: "Organizar" }).click();

@@ -9,6 +9,7 @@ import pytest
 from fastapi.testclient import TestClient
 
 import db
+import db_support
 import frontend.finance_bot_websocket_custom as dashboard
 
 # Rota de escrita usada como alvo: POST, não é isenta de CSRF, e resolve
@@ -70,6 +71,28 @@ def req(path: str, *, host: str = "10.0.0.1", cookies: dict | None = None):
             "server": ("testserver", 80),
         }
     )
+
+
+def libera(monkeypatch, uid):
+    """Põe `uid` na chave do dashboard v2 (`/painel` e `/api/v2`)."""
+    monkeypatch.setenv("DASHBOARD_V2_BETA_USER_IDS", str(uid))
+
+
+def sql(query, *args):
+    """SQL cru com commit, e o cache do `get_auth_user` invalidado."""
+    with db.get_conn() as conn:
+        conn.execute(query, args)
+        conn.commit()
+    db_support.invalidate_auth_user_cache()
+
+
+def sessao_de(uid):
+    """Sessão real de uma conta que já existe em `auth_accounts`: o access
+    (`auth_token`), o `jti`, o refresh e o `dashboard_token` do mesmo `jti`."""
+    email = db.get_auth_user(uid)["email"]
+    access, jti, refresh = dashboard._issue_session_token(uid, email, req("/auth/login"))
+    dash = dashboard.make_dashboard_token(uid, hours=dashboard.DASHBOARD_SESSION_HOURS, jti=jti)
+    return {"access": access, "jti": jti, "refresh": refresh, "dashboard": dash}
 
 
 @pytest.fixture

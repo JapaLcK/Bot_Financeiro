@@ -114,7 +114,7 @@ export function Board({ s }: { s: DashState }) {
         <p className="board-hint" aria-live="polite">
           {s.editing
             ? <>Arraste os blocos para organizar. No celular, segure antes de arrastar. No teclado: <kbd>Alt</kbd> + setas.</>
-            : <span className="faint">Dados de demonstração · hoje é 23 de setembro de 2026</span>}
+            : <span className="faint">hoje é 23 de setembro de 2026</span>}
         </p>
         <div className="board-actions">
           {s.editing && custom && <button type="button" className="btn btn-quiet" onClick={restore}>Restaurar padrão</button>}

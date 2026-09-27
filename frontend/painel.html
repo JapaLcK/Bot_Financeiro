@@ -1,0 +1,26 @@
+<!doctype html>
+<html lang="pt-BR">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+  <meta name="color-scheme" content="dark">
+  <meta name="theme-color" content="#09090b">
+  <meta name="robots" content="noindex">
+  <title>PigBank · Painel</title>
+  <link rel="icon" href="/brand/favicon.png">
+  <link rel="preload" href="/fonts/Inter-Variable.woff2" as="font" type="font/woff2" crossorigin>
+  <style>
+    /* A Inter do site; o bundle não declara @font-face (webapp/src/dashboard/styles/base.css). */
+    @font-face { font-family: "Inter"; font-style: normal; font-weight: 100 900; font-display: swap; src: url("/fonts/Inter-Variable.woff2") format("woff2-variations"); }
+    html { background: #09090b; }
+  </style>
+  <link rel="stylesheet" href="/phosphor.css?v=1">
+  <!-- dashboard-app.* sai de `npm --prefix webapp run build` (webapp/src/dashboard). -->
+  <link rel="stylesheet" href="/dashboard-app.css?v=1">
+  <script defer src="/dashboard-app.js?v=1"></script>
+</head>
+<body>
+  <div id="pigbank-dashboard"></div>
+  <noscript>Este painel precisa de JavaScript.</noscript>
+</body>
+</html>

@@ -7,6 +7,7 @@ import { BY_PROFILE, COMMON, pick } from "../lib/prompts.js";
 import type { DashState } from "../lib/types";
 import { go } from "../router";
 import { insights } from "../widgets/Piggy";
+import { ICON } from "../lib/brand";
 
 // Faixa fixa no topo do Resumo: um convite para conversar com o Piggy, sorteado a cada
 // visita entre os insights do dia e perguntas (as do perfil pesam mais). O clique abre a
@@ -36,7 +37,7 @@ export function PiggyBand({ s, profile }: { s: DashState; profile: string }) {
 
   return (
     <button type="button" className="piggy-band" data-band={o.key} onClick={() => (o.ask ? ask({ text: o.ask, topic: o.topic, cat: o.cat, key: o.key }) : go("/piggy"))}>
-      <span className="piggy-band-by"><img src="../frontend/brand/icon.png" alt="" width={28} height={28} />Piggy · hoje</span>
+      <span className="piggy-band-by"><img src={ICON} alt="" width={28} height={28} />Piggy · hoje</span>
       <span className="piggy-band-head">{o.head}</span>
       {o.text && <span className="piggy-band-text">{o.text}</span>}
       <span className="piggy-band-cta">
