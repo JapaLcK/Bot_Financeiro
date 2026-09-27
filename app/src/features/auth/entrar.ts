@@ -1,5 +1,11 @@
 import { ContratoInvalido, ErroDeApi } from "@/api/client";
-import { abandonarEntrada, entrar as entrarNoServidor, verificarMfa, EntradaSuperada } from "@/services/auth";
+import {
+  abandonarEntrada,
+  entrar as entrarNoServidor,
+  verificarMfa,
+  EntradaSuperada,
+  type ProvedorSocial,
+} from "@/services/auth";
 import { FalhaNoCofre } from "@/storage/secure";
 
 /**
@@ -15,10 +21,12 @@ export type EstadoEntrar =
   | { fase: "mfa"; desafio: string; email: string; modo: "totp" | "backup"; aviso?: string }
   | { fase: "verificando"; desafio: string; email: string; modo: "totp" | "backup" }
   | { fase: "erro-cofre"; mensagem?: string }
-  // Google (`google.ts`): navegador aberto ou troca em voo; e o cadastro de quem não tem conta.
+  // Google (`google.ts`) e Apple (`apple.ts`): folha aberta ou troca em voo.
   | { fase: "google" }
-  | { fase: "google-cadastro"; token: string; email: string; nome: string; aviso?: string }
-  | { fase: "google-criando"; token: string; email: string };
+  | { fase: "apple" }
+  // O cadastro de quem entrou por um dos dois sem conta (`cadastroSocial.ts`).
+  | { fase: "cadastro-social"; provedor: ProvedorSocial; token: string; email: string; nome: string; aviso?: string }
+  | { fase: "criando-social"; provedor: ProvedorSocial; token: string; email: string };
 
 /**
  * Quais fases apagam o campo Senha ao entrar nelas. O iOS só oferece "Salvar
@@ -32,8 +40,9 @@ const APAGA_SENHA: Record<EstadoEntrar["fase"], boolean> = {
   mfa: false, // o campo sai da tela nesta troca: é ELA que o iOS lê para oferecer salvar
   verificando: false, // o campo já não está na tela; o sucesso segue para o app, a falha volta por "formulario"
   google: true, // quem toca no Google não usa a senha: o campo sai vazio, e o iOS não oferece salvar
-  "google-cadastro": true,
-  "google-criando": true,
+  apple: true, // idem para a Apple
+  "cadastro-social": true,
+  "criando-social": true,
 };
 
 export function apagaSenhaNaFase(fase: EstadoEntrar["fase"]): boolean {
@@ -54,6 +63,11 @@ export function textoDaFalha(e: unknown): string {
   if (e instanceof ContratoInvalido) return GENERICO;
   if (e instanceof ErroDeApi) return e.detalhe.trim() || GENERICO;
   return GENERICO;
+}
+
+/** Google e Apple: 5xx, rede, tempo limite e contrato quebrado dão o genérico; o resto, o `detail` do servidor. */
+export function textoSocial(e: unknown): string {
+  return e instanceof ErroDeApi && e.status >= 500 ? GENERICO : textoDaFalha(e);
 }
 
 /**

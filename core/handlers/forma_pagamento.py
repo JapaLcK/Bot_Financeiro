@@ -228,9 +228,15 @@ def resolver(user_id: int, text: str, pending: dict) -> str | None:
         from core.handlers import launches as h_launches
         texto, plat = payload.get("text") or "", payload.get("platform") or "whatsapp"
         if no_cartao:
+            # Pedaço a pedaço, fora do laço do multi: o pulo da pergunta
+            # comparativa é repetido aqui ("… no cartão" gravava R$ 2.025).
+            from core.intent_classifier import is_comparative_question
+            partes = h_launches.split_financial_transactions(texto) or [texto]
             return "\n\n".join(
-                h_launches.add(user_id, f"{p} no cartão", {}, plat, forma_pagamento=BANCO)
-                for p in h_launches.split_financial_transactions(texto) or [texto])
+                [h_launches.add(user_id, f"{p} no cartão", {}, plat, forma_pagamento=BANCO)
+                 for p in partes if not is_comparative_question(p)]
+                + [h_launches._aviso_pergunta_pulada(p)
+                   for p in partes if is_comparative_question(p)])
         return h_launches.add(user_id, texto, payload.get("entities") or {}, plat,
                               forma_pagamento=forma)
     if fluxo == "audio":

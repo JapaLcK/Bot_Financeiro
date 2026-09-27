@@ -7,7 +7,7 @@ from collections import defaultdict
 from core.handlers.forma_pagamento import NEGACAO_RE
 # Helper único das portas destrutivas (a docstring dele lista quais e explica o
 # critério de nível). Ele nunca põe `str(e)` no log.
-from core.intent_classifier import classify, NEGATIVAS_EXATAS
+from core.intent_classifier import classify, is_comparative_question, NEGATIVAS_EXATAS
 from core.observability import _log_falha
 from core.services.category_service import infer_category, learn_from_inference
 from core.services.plan_limits import PlanLimitExceeded
@@ -639,6 +639,8 @@ def _so_numero(text: str) -> bool:
     if all(e_numero(t) or t in _UNIDADE_DE_RESPOSTA or t in _FILLER
            for t in tokens):
         return True
+    if is_comparative_question(text):
+        return False  # "gastei mais nos ultimos 3 meses?" não é "dia 3"
     return classify(text, allow_ai=False).intent == "out_of_scope"
 
 
