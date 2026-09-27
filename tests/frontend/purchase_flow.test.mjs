@@ -967,3 +967,45 @@ test("onboarding confirma a compra sem criar uma etapa paralela", async () => {
   }
   await page.close();
 });
+
+async function rotasLogadoSemIntencao(page) {
+  await page.route("**/billing/plans-config", (route) => route.fulfill({
+    contentType: "application/json",
+    body: JSON.stringify({ essencial_available: true, plus_available: true, pro_available: true }),
+  }));
+  await page.route("**/billing/subscription", (route) => route.fulfill({
+    contentType: "application/json", body: JSON.stringify({ active: false }),
+  }));
+  await page.route("**/continuar-compra", (route) => route.fulfill({
+    contentType: "text/html",
+    body: fs.readFileSync("frontend/precos.html", "utf8"),
+  }));
+}
+
+// Controle negativo: sem a guarda em resumePurchaseAfterAuth, os dois viewports
+// ficam vermelhos com o toast "Sua escolha não está mais disponível".
+for (const viewport of [{ width: 1280, height: 900 }, { width: 390, height: 844 }]) {
+  test(`logado sem intenção de compra abre a /precos sem toast de erro (${viewport.width}px)`, async () => {
+    const page = await browser.newPage({ viewport });
+    await rotasLogadoSemIntencao(page);
+    await page.goto(`${ORIGIN}/precos.html`);
+    // `purchaseResumeScheduled` só vira true depois da sessão confirmada, e com o
+    // documento carregado a retomada roda na mesma chamada.
+    await page.waitForFunction(() => document.readyState === "complete"
+      && window.pbPlanAuthState === "authenticated" && purchaseResumeScheduled);
+    const toast = await page.$eval("#toast", (el) => ({ text: el.textContent, err: el.classList.contains("err") }));
+    assert.equal(toast.err, false, `toast de erro para logado sem intenção: "${toast.text}"`);
+    assert.doesNotMatch(toast.text, /não está mais disponível/);
+    await page.close();
+  });
+}
+
+// Controle positivo: na rota técnica, sem intenção, o erro continua aparecendo.
+test("/continuar-compra sem intenção de compra continua mostrando o erro", async () => {
+  const page = await browser.newPage({ viewport: { width: 390, height: 844 } });
+  await rotasLogadoSemIntencao(page);
+  await page.goto(`${ORIGIN}/continuar-compra`);
+  await page.waitForSelector("#purchase-continuation-actions.show");
+  assert.match(await page.textContent("#purchase-continuation"), /Sua escolha não está mais disponível/);
+  await page.close();
+});
