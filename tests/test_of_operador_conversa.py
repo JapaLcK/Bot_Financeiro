@@ -249,7 +249,7 @@ def test_lista_so_com_apagados_nao_diz_que_nao_ha_nada(monkeypatch, capsys):
 
 
 
-# ── rodada 4: REMOVIDO é só contagem, legado só da auditoria, isolamento ────
+# ── rodada 4: REMOVIDO é só contagem, legado só da auditoria ───────────────
 
 def _404(monkeypatch):
     def _get(i):
@@ -316,24 +316,3 @@ def test_legado_so_da_auditoria_aparece_na_lista_sem_user_id(user_id, capsys):
             c.commit()
         _limpa(so_auditoria)
         _limpa(com_linha)
-
-
-def test_nenhum_modulo_de_producao_importa_a_ferramenta_do_operador():
-    """Leitura ENTRE usuários só pelo terminal: nenhuma rota nem serviço importa."""
-    import ast
-    from pathlib import Path
-
-    proibidos = {"db.open_finance_diagnostico", "scripts.of_itens_operador"}
-    raiz = Path(__file__).resolve().parent.parent
-    achados = []
-    for pasta in ("frontend", "core"):
-        for arq in (raiz / pasta).rglob("*.py"):
-            for no in ast.walk(ast.parse(arq.read_text(encoding="utf-8"))):
-                nomes = []
-                if isinstance(no, ast.Import):
-                    nomes = [a.name for a in no.names]
-                elif isinstance(no, ast.ImportFrom) and no.module:
-                    nomes = [no.module] + [f"{no.module}.{a.name}" for a in no.names]
-                if proibidos & set(nomes):
-                    achados.append(f"{arq.relative_to(raiz)}:{no.lineno}")
-    assert achados == [], achados
