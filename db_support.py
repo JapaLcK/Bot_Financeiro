@@ -62,7 +62,7 @@ def get_summary_by_period_impl(
 
     # Import local, não no topo: `db/__init__` importa `db.reports`, que lê
     # atributos de `db_support` na carga — topo aqui fecha o ciclo (mesmo motivo
-    # do `from db_support import ...` local em db/users.py:167).
+    # do `from db_support import ...` local no `_merge_users` de db/users.py).
     from db.connection import TIPO_CANON_SQL
 
     # `TIPO_CANON_SQL` colapsa a forma legada na moderna AQUI, no SQL: com

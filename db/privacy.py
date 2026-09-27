@@ -277,7 +277,7 @@ def schedule_account_deletion(user_id: int, password: str, grace_days: int = 7) 
                 raise LookupError("Conta de login não encontrada.")
             # Este caminho NÃO passa por verify_user_password (select próprio):
             # sem esta guarda, _check_password(password, None) estoura
-            # AttributeError, é engolido em db/users.py:350-354 e vira
+            # AttributeError, é engolido no `except` do `_check_password` e vira
             # "Senha incorreta." — mesma raiz, segundo caminho de código.
             if not account["password_hash"]:
                 raise PasswordNotSetError(PASSWORD_NOT_SET_MSG)
@@ -645,9 +645,10 @@ def reset_user_data(
                 # escreve depois, sobre saldo 0. Saldo NEGATIVO após o reset é o
                 # certo — o lançamento sobreviveu (decisão do dono) com o
                 # dinheiro dele. `ensure_user_tx` ANTES porque sem a linha o
-                # update casa 0 e não trava nada, e o estado é alcançável
-                # (`merge_users` apaga accounts da origem, db/users.py:88); o
-                # `on conflict do nothing` (:19) é inócuo no caso normal.
+                # update casa 0 e não trava nada, e o estado existe em conta
+                # antiga (o `merge_users` anterior ao #635 deixava a origem com
+                # login e sem accounts); o `on conflict do nothing` é inócuo no
+                # caso normal.
                 #
                 # ponytail: o lock inverte a ordem accounts×pockets/investments
                 # de 4 fluxos (db/pockets.py:336→466, db/investments.py:1041→1096

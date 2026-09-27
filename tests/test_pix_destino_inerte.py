@@ -124,6 +124,9 @@ MARCAS_PERMITIDAS: dict[str, tuple[str, ...]] = {
     # `pix_payment_effects` NÃO são alcançáveis por `user_id` e não têm o que
     # fazer aqui, então deixá-las de fora mantém o portão medindo.
     "db/privacy.py": ("pix_charges",),
+    # A junção de contas (#635) passa a cobrança da origem ao destino num
+    # `update ... set user_id`; a origem é apagada logo depois.
+    "db/users.py": ("pix_charges",),
 }
 
 

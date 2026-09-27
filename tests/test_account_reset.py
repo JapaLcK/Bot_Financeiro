@@ -674,10 +674,9 @@ def test_reset_sem_corrida_zera_a_conta_e_o_caminho_normal_continua(user_id):
 def test_reset_de_conta_sem_linha_de_accounts_nao_deixa_divida_fantasma(user_id, monkeypatch):
     """NEGATIVO do `ensure_user_tx`: sem ele o `update` casa 0 e não trava NADA.
 
-    Estado real e alcançável: `merge_users` apaga accounts do usuário de origem
-    (db/users.py:88) e migra auth_accounts sem recriar a linha (:155-162) — a
-    conta fica com login válido e ZERO linhas em accounts. Todo reset rodado na
-    versão anterior deixava a conta assim também.
+    Estado real em conta antiga: o `merge_users` anterior ao #635 apagava accounts
+    da origem e a deixava com login válido e ZERO linhas em accounts. Todo reset
+    rodado na versão anterior deixava a conta assim também.
 
     O gatilho aqui é a PRIMEIRA tabela do laço, não a última: é a posição
     discriminante deste caso. Sem `ensure_user_tx` o lançamento entra livre (não

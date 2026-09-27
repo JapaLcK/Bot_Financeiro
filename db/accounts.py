@@ -1713,10 +1713,12 @@ def delete_launch_and_rollback(user_id: int, launch_id: int, *,
                 #         `core/handlers/credit.py`): o cascade de
                 #         `credit_bills.card_id` leva as faturas -> 900/1000,
                 #         nenhuma fatura de pé.
-                #       `merge_users` (`db/users.py:122`): o dedup apaga a
-                #         fatura JÁ PAGA da origem e move o lançamento com o
-                #         `bill_id` morto -> 900/1000, e a fatura que sobra é a
-                #         do destino, com `paid_amount` 0. Nada é criado.
+                #       `merge_users` anterior ao #607 (passo 6, dedup de
+                #         `credit_bills`): apagava a fatura JÁ PAGA da origem e
+                #         movia o lançamento com o `bill_id` morto -> 900/1000, e
+                #         a fatura que sobra é a do destino, com `paid_amount` 0.
+                #         Nada é criado. Desde o #607 cartão nos dois lados é
+                #         recusa, mas o lançamento migrado antes segue no banco.
                 #     Recusar aqui seria falso positivo, e `kept_unsafe` é
                 #     PERMANENTE.
                 #
@@ -1800,7 +1802,7 @@ def delete_launch_and_rollback(user_id: int, launch_id: int, *,
             # reverte conta. NÃO checar `cur.rowcount` aqui (proposta original
             # da issue #246) — mas não porque seja impossível casar 0: o
             # `ensure_user` do topo (:1521) commita em transação PRÓPRIA e solta
-            # a linha, então `merge_users` (db/users.py:88) apagando accounts
+            # a linha, então `merge_users` (passo 3) apagando accounts
             # entre ele e este update deixa rowcount 0, e o lançamento é apagado
             # sem reverter o saldo — o sintoma do #246 por outra porta. A
             # decisão de não guardar é de custo, não de impossibilidade: a
