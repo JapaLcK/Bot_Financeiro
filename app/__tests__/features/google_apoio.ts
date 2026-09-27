@@ -2,7 +2,7 @@ import * as WebBrowser from "expo-web-browser";
 
 import { credencialDe, resposta, rotear, type Rota } from "./auth_apoio";
 
-/** Apoio dos testes do "Continuar com Google" (`entrar_google*`, `completar_cadastro_google*`, `google_deep_link`). */
+/** Apoio dos testes do "Continuar com Google" (`entrar_google*`, `cadastro_social*`, `google_deep_link`). */
 
 export const abrirFolha = jest.mocked(WebBrowser.openAuthSessionAsync);
 

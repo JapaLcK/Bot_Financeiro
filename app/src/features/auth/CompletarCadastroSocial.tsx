@@ -10,34 +10,40 @@ import { espaco } from "@/ui/tokens";
 
 import { LEGENDA_WHATSAPP, NOME_MAX, validarPerfil, type ErrosCadastro } from "./criarConta";
 import { tocar, type EstadoEntrar } from "./entrar";
-import { criarContaComGoogle } from "./google";
+import { criarContaSocial } from "./cadastroSocial";
 import { Termos } from "./Termos";
 
 interface Props {
-  estado: Extract<EstadoEntrar, { fase: "google-cadastro" | "google-criando" }>;
+  estado: Extract<EstadoEntrar, { fase: "cadastro-social" | "criando-social" }>;
   autenticar: () => void;
   aplicar: (e: EstadoEntrar) => void;
 }
 
+/** O e-mail que a Apple cria para quem escolhe "Ocultar meu e-mail". */
+const RELAY_DA_APPLE = "@privaterelay.appleid.com";
+export const LEGENDA_RELAY = "É o e-mail que a Apple criou para você. As mensagens chegam no seu e-mail de sempre.";
+
 /**
- * Fases C e K: quem entrou pelo Google sem conta completa o cadastro na MESMA
- * rota Entrar (o token do pré-cadastro nunca vira parâmetro de rota). E-mail
- * só leitura, nome sugerido pelo Google, WhatsApp obrigatório. Montado nas
- * duas fases no mesmo lugar da árvore: o que foi digitado sobrevive a K → C.
+ * Fases C e K: quem entrou pelo Google ou pela Apple sem conta completa o
+ * cadastro na MESMA rota Entrar (o token do pré-cadastro nunca vira parâmetro
+ * de rota). E-mail só leitura (o relay da Apple também: é a escolha da pessoa),
+ * nome sugerido pelo provedor, WhatsApp obrigatório. Montado nas duas fases no
+ * mesmo lugar da árvore: o que foi digitado sobrevive a K → C.
  */
-export function CompletarCadastroGoogle({ estado, autenticar, aplicar }: Props) {
+export function CompletarCadastroSocial({ estado, autenticar, aplicar }: Props) {
   const [nome, setNome] = useState("nome" in estado ? estado.nome : "");
   const [telefone, setTelefone] = useState("");
   const [erros, setErros] = useState<ErrosCadastro>({});
   const [avisoLink, setAvisoLink] = useState(false);
-  const criando = estado.fase === "google-criando";
-  const aviso = estado.fase === "google-cadastro" ? estado.aviso : undefined;
+  const criando = estado.fase === "criando-social";
+  const aviso = estado.fase === "cadastro-social" ? estado.aviso : undefined;
+  const relay = estado.email.endsWith(RELAY_DA_APPLE);
 
   const digitar = (campo: "nome" | "telefone", definir: (v: string) => void) => (v: string) => {
     definir(v);
     setAvisoLink(false);
     if (erros[campo]) setErros({ ...erros, [campo]: undefined });
-    if (estado.fase === "google-cadastro" && aviso) aplicar({ ...estado, aviso: undefined });
+    if (estado.fase === "cadastro-social" && aviso) aplicar({ ...estado, aviso: undefined });
   };
 
   const criar = () => {
@@ -45,19 +51,33 @@ export function CompletarCadastroGoogle({ estado, autenticar, aplicar }: Props) 
     setErros(encontrados);
     setAvisoLink(false);
     if (Object.keys(encontrados).length > 0) return;
-    const { token, email } = estado;
-    aplicar({ fase: "google-criando", token, email });
-    void tocar(() => criarContaComGoogle({ token, email, nome }, telefone, autenticar), aplicar);
+    const { provedor, token, email } = estado;
+    aplicar({ fase: "criando-social", provedor, token, email });
+    void tocar(() => criarContaSocial({ provedor, token, email, nome }, telefone, autenticar), aplicar);
   };
 
   return (
     <View style={{ gap: espaco.lg }}>
       <Texto variante="corpo" tom="inkMuted">
-        Sua conta Google ainda não tem PigBank. Confira seu nome e informe seu WhatsApp para criar a conta.
+        {`Sua conta ${estado.provedor === "google" ? "Google" : "Apple"} ainda não tem PigBank. ` +
+          "Confira seu nome e informe seu WhatsApp para criar a conta."}
       </Texto>
       <Card>
         <View style={{ gap: espaco.lg }}>
-          <Input rotulo="E-mail" icone="Envelope" value={estado.email} desativado />
+          <View>
+            <Input
+              rotulo="E-mail"
+              icone="Envelope"
+              value={estado.email}
+              desativado
+              accessibilityHint={relay ? LEGENDA_RELAY : undefined}
+            />
+            {relay ? (
+              <Texto variante="legenda" tom="inkMuted">
+                {LEGENDA_RELAY}
+              </Texto>
+            ) : null}
+          </View>
           <Input
             rotulo="Nome"
             value={nome}

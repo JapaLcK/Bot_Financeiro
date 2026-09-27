@@ -262,9 +262,16 @@ def describe_valueless_launch(text: str) -> tuple[str, str] | None:
     perguntar o valor ao usuário em vez de dropar o lançamento.
 
     Retorna None se o trecho já tem valor, não tem verbo financeiro
-    reconhecível, ou sobra sem descrição (ex: só "paguei").
+    reconhecível, sobra sem descrição (ex: só "paguei"), ou é pergunta
+    comparativa ("gastei mais que no mês passado?"). O veto age no caminho de
+    mensagem única (`launches.add`, depois do laço do multi): sem ele a
+    pergunta viraria "Quanto foi no *...*?". Os laços do multi (texto e áudio)
+    já pulam o pedaço comparativo antes de chegar aqui.
     """
     if _extract_valor(text) is not None:
+        return None
+    from core.intent_classifier import is_comparative_question  # local: não arrasta o classificador no import
+    if is_comparative_question(text):
         return None
     m = _LEAD_VERB_RE.match(text)
     if not m:
