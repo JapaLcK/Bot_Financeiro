@@ -191,6 +191,8 @@ def notify_autopay_notices_whatsapp_once(now: datetime | None = None) -> int:
         hora = int(os.getenv("WA_BILL_REMINDER_HOUR", "9") or 9)
     except ValueError:
         hora = 9  # env inválida vale o padrão, em vez de derrubar o tick
+    if not 0 <= hora <= 23:
+        hora = 9  # -1 mandaria de madrugada e 25 nunca mandaria, em silêncio
     if now.hour < hora:
         return 0
 

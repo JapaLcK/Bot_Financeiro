@@ -29,8 +29,13 @@ Controles NEGATIVOS declarados (docs/controles_declarados.md) — em
   i. recolocar o negrito `*{{gasto}}*` em `AUTOPAY_BODY` →
      vermelho `test_nome_com_marcacao_vai_cru_e_o_corpo_nao_tem_marcacao`;
   j. tirar o `[:60]` do `gasto` → vermelho `test_nome_longo_corta_em_60_code_points`;
+     cortar antes de juntar os espaços → vermelho
+     `test_corte_em_60_vem_depois_de_juntar_os_espacos`;
   k. tirar o `try/except ValueError` do `WA_BILL_REMINDER_HOUR` →
-     vermelho `test_hora_invalida_vale_o_padrao`.
+     vermelho `test_hora_invalida_vale_o_padrao[nove]`; tirar a checagem de
+     faixa 0..23 → vermelho `[-1]` e `[25]`;
+  crase em volta de `{{gasto}}` no `AUTOPAY_BODY` → vermelho
+     `test_nome_com_marcacao_vai_cru_e_o_corpo_nao_tem_marcacao`.
 Positivo: `test_loop_real_manda_um_aviso_por_gasto_conta_e_cartao` e o segundo
 passo de `test_antes_da_hora_nao_reserva_e_depois_envia` seguem verdes nas injeções.
 """
@@ -342,7 +347,7 @@ def test_nome_com_marcacao_vai_cru_e_o_corpo_nao_tem_marcacao(user_id, monkeypat
 
     assert [_params(p)["gasto"] for p in _para(posts, _FONE_A)] == ["Cartão *Premium* _x_ ~y~"]
     fora_das_variaveis = re.sub(r"\{\{\w+\}\}", "", script.AUTOPAY_BODY)
-    assert not set("*_~") & set(fora_das_variaveis), fora_das_variaveis
+    assert not set("*_~`") & set(fora_das_variaveis), fora_das_variaveis
 
 
 def test_nome_longo_corta_em_60_code_points(user_id, monkeypatch):
@@ -357,9 +362,21 @@ def test_nome_longo_corta_em_60_code_points(user_id, monkeypatch):
     assert len(gasto) == 60 and gasto == nome[:60]
 
 
-def test_hora_invalida_vale_o_padrao(user_id, monkeypatch):
+def test_corte_em_60_vem_depois_de_juntar_os_espacos(user_id, monkeypatch):
     posts = _armar(monkeypatch)
-    monkeypatch.setenv("WA_BILL_REMINDER_HOUR", "nove")
+    _dono(user_id, _FONE_A)
+    rec = _gasto(user_id, "Espacos Q616")
+    _sql("update recurring_expenses set name=%s where id=%s", ("A" * 55 + "     " + "B" * 10, rec["id"]))
+
+    _rodar()
+
+    assert [_params(p)["gasto"] for p in _para(posts, _FONE_A)] == ["A" * 55 + " " + "B" * 4]
+
+
+@pytest.mark.parametrize("hora", ["nove", "-1", "25"])
+def test_hora_invalida_vale_o_padrao(user_id, monkeypatch, hora):
+    posts = _armar(monkeypatch)
+    monkeypatch.setenv("WA_BILL_REMINDER_HOUR", hora)
     _dono(user_id, _FONE_A)
     _gasto(user_id, "HoraInvalida Q616")
 
