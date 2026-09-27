@@ -611,6 +611,41 @@ def register_item(
     return new_id
 
 
+def pluggy_items_a_deletar(linhas) -> list[str]:
+    """Das linhas de `provider, provider_item_id, status`: quais items ainda
+    precisam de DELETE na Pluggy.
+
+    FONTE ÚNICA (CLAUDE.md §0.7) de um filtro que estava copiado palavra por
+    palavra em três lugares e ia para o quarto: o disconnect
+    (`db/open_finance.py`, `swept_out`), o reset e a exclusão de conta
+    (`db/privacy.py` — lá são DOIS: o `RETURNING` do delete e a reconsulta que
+    fecha a janela da cascata). Todos leem o MESMO formato de linha e alimentam o
+    MESMO `delete_pluggy_items_best_effort`.
+
+    `PAUSED` fica FORA: o item já foi deletado na Pluggy no vencimento do trial, e
+    é a mesma regra do `list_pluggy_item_ids`. É exatamente aqui que esta função
+    difere de `mark_items_removed`, que lê a mesma tupla e INCLUI `PAUSED` de
+    propósito — a marca é sobre a intenção do usuário, não sobre o item existir
+    lá (docstring dela, logo abaixo). Duas leituras da mesma tupla, uma regra
+    cada, cada uma num lugar só.
+
+    Ordenado e sem repetição: o chamador compara conjuntos (1º passe × 2º passe).
+
+    ASSIMETRIA DELIBERADA: `status` normaliza a caixa (`.upper()`) porque vem do
+    payload da Pluggy; `provider` compara IGUAL porque é literal nosso (os dois
+    únicos inserts, `db/open_finance.py:125` e `:770`, escrevem `'pluggy'`) e a
+    irmã SQL que alimenta o MESMO delete remoto compara do mesmo jeito
+    (`list_pluggy_item_ids`, `where provider='pluggy'`, :416). Normalizar só aqui
+    faria as duas leituras divergirem (§0.7). As regras estão presas caso a caso
+    em `tests/test_of_pluggy_items_a_deletar.py`.
+    """
+    return sorted({
+        r["provider_item_id"] for r in (linhas or [])
+        if r["provider"] == "pluggy" and r["provider_item_id"]
+        and str(r["status"] or "").upper() != "PAUSED"
+    })
+
+
 def mark_items_removed(cur, user_id: int, linhas, *, last_event: str) -> int:
     """Grava a marca da remoção DELIBERADA, no cursor de quem apagou a conexão.
 

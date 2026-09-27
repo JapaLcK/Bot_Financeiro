@@ -181,6 +181,72 @@ _MESCLA_PERMITE_ANTERIOR = _UPDATING | {"UPDATED"}
 _NEEDS_USER = {"LOGIN_ERROR", "WAITING_USER_INPUT", "INVALID_CREDENTIALS",
                "OUTDATED", ITEM_STATUS_AUTORIZA_DISPOSITIVO}
 
+# LISTA DE PERMISSÃO DA FRONTEIRA (#539, A1): o que um payload da Pluggy pode
+# virar na coluna `status` de `open_finance_connections`. Quem aplica é
+# `save_pluggy_open_finance_item` (`db/open_finance.py`), o ÚNICO ponto da árvore
+# que grava status REMOTO — os outros escritores da coluna gravam valor NOSSO:
+# `pause_open_finance_connection` (PAUSED), o mapa literal do webhook
+# (`update_pluggy_open_finance_item_status`: UPDATING/ERROR/DELETED), o
+# `resolve_connection_state` via `mark_sync_result` (ACTIVE/ERROR) e o mock
+# (ACTIVE, provider `mock_pluggy`).
+#
+# Existe porque `PAUSED` e `DELETED` são sentinelas LOCAIS e TERMINAIS
+# (`db/open_finance_state._TERMINAL`), e `PAUSED` quer dizer "o item já foi
+# deletado na Pluggy no vencimento do trial": é ele que TIRA o item do DELETE
+# remoto da exclusão de conta (`db/open_finance_state.pluggy_items_a_deletar`) e
+# da enumeração (`list_pluggy_item_ids`). Sem a lista, um `{"status": "PAUSED"}`
+# do provedor deixava o item VIVO e pago na Pluggy depois de uma exclusão LGPD —
+# e as duas guardas dessa exclusão são cegas juntas, porque leem o mesmo filtro.
+#
+# É lista de PERMISSÃO e não de bloqueio das duas sentinelas: `ACTIVE` e elas são
+# vocabulário NOSSO, e nenhum payload pode reivindicar nenhum dos três. O
+# conteúdo é a união dos conjuntos acima — os status que este módulo já trata por
+# nome —, mais `ERROR` (o que o webhook grava e o que `of_health_counters` conta)
+# e o `executionStatus` de dispositivo, que a fronteira também aceita pelo
+# `item['status'] or item['executionStatus']`. Não acrescente status "por
+# precaução": vale aqui o mesmo veto do bloco de `_NEEDS_USER`.
+#
+# POR QUE ESTA LEITURA DIVERGE DA DE `derive_item_health`, e a divergência é
+# DELIBERADA (#539, ressalva 6 do Manager). O upsert lê `item["status"] or
+# item["executionStatus"]`; `derive_item_health` lê `item["status"]` e SÓ ele, e
+# isso está preso em
+# `tests/test_of_health.py::test_execution_status_de_erro_nao_e_status_de_item`.
+# Não é a mesma pergunta respondida de dois jeitos:
+#   • `derive_item_health` tem DOIS campos de saída (`item_status` e
+#     `execution_status`) e consumidores que os leem separados — misturar LÁ
+#     corromperia um campo que tem casa própria;
+#   • a coluna `status` tem UM slot só. Sem o `or`, o `executionStatus` de um
+#     payload SEM `status` não vai a lugar nenhum.
+# E o `or` NÃO amplia o vocabulário da coluna: depois desta lista, dos
+# `executionStatus` documentados só entram os que ela já aceita — os que este
+# módulo sabe pintar (`CREATED` → "Atualizando…", `INVALID_CREDENTIALS` → "Ação
+# necessária", `USER_AUTHORIZATION_PENDING` → "Autorize o acesso no app do
+# banco"). `PARTIAL_SUCCESS`, `MERGE_ERROR`, `SITE_NOT_AVAILABLE`,
+# `INVALID_CREDENTIALS_MFA` e `USER_AUTHORIZATION_NOT_GRANTED` viram `UPDATING` —
+# exatamente o que virariam SEM o `or`, porque quem os deixa sem estado é o
+# `status` AUSENTE, não o fallback. O preço (a tela dizendo "Atualizando…" para um
+# item cuja última execução falhou) é o MESMO nas duas opções e só existe em
+# payload sem `status`; tirar o `or` só perderia os três de cima.
+#
+# `DELETED` fica de FORA de propósito, e a consequência é conhecida: um
+# `status: "DELETED"` REMOTO vira `UPDATING` e o agendador deixa de ver terminal
+# (`db/open_finance_state._TERMINAL`), continuando a pedir sync. Aceita-se porque:
+#   • item apagado na Pluggy não chega aqui como `"DELETED"` — o `GET /items/{id}`
+#     responde 404, que esta árvore já trata (linha A da tabela de estados:
+#     `item_missing` → ERROR). Quem grava DELETED de verdade é LOCAL e não passa
+#     por esta fronteira: o mapa do webhook `item/deleted`
+#     (`frontend/routes/open_finance.py:1959` →
+#     `update_pluggy_open_finance_item_status`);
+#   • o oposto custa mais: TERMINAL é irreversível para quem escreve depois
+#     (`mark_sync_result` tem `where ... not in _TERMINAL`), então um payload que
+#     pudesse gravar `DELETED` congelaria uma conexão VIVA;
+#   • o custo do nosso lado é um ciclo de sync a mais, que termina em 404 →
+#     `item_missing`. Nenhum item fica vivo e pago na Pluggy por isso: quem decide
+#     o DELETE remoto (`pluggy_items_a_deletar`) exclui `PAUSED`, não `DELETED`.
+STATUS_REMOTOS_ACEITOS = frozenset(
+    _MESCLA_PERMITE_ANTERIOR | _NEEDS_USER | {"ERROR", EXEC_STATUS_AUTORIZA_DISPOSITIVO}
+)
+
 _LABELS = {
     "updated": "Atualizado",
     "partial": "Parcial",
