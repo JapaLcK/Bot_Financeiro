@@ -25,7 +25,12 @@ Controles NEGATIVOS declarados (docs/controles_declarados.md) — em
   h. calcular `targets` com `list_identities_by_user(<primeiro user_id da
      listagem>)` → vermelho `test_cada_telefone_recebe_so_o_proprio_aviso`;
   fonte única: renomear um `{{x}}` de `AUTOPAY_BODY` (ou uma chave de `params`)
-     → vermelho `test_parametros_batem_com_o_template_do_script`.
+     → vermelho `test_parametros_batem_com_o_template_do_script`;
+  i. recolocar o negrito `*{{gasto}}*` em `AUTOPAY_BODY` →
+     vermelho `test_nome_com_marcacao_vai_cru_e_o_corpo_nao_tem_marcacao`;
+  j. tirar o `[:60]` do `gasto` → vermelho `test_nome_longo_corta_em_60_code_points`;
+  k. tirar o `try/except ValueError` do `WA_BILL_REMINDER_HOUR` →
+     vermelho `test_hora_invalida_vale_o_padrao`.
 Positivo: `test_loop_real_manda_um_aviso_por_gasto_conta_e_cartao` e o segundo
 passo de `test_antes_da_hora_nao_reserva_e_depois_envia` seguem verdes nas injeções.
 """
@@ -300,8 +305,7 @@ def test_401_nao_levanta_nem_registra_envio(user_id, monkeypatch):
     assert recent_event_exists(_EVENTO, user_id, 1) is False
 
 
-def test_parametros_batem_com_o_template_do_script(user_id, monkeypatch):
-    """§0.7: o nome dos parâmetros vive no script (Meta) e no envio; os dois têm de bater."""
+def _script(monkeypatch):
     caminho = Path(__file__).resolve().parent.parent / "scripts" / "create_whatsapp_report_templates.py"
     spec = importlib.util.spec_from_file_location("_templates_616", caminho)
     script = importlib.util.module_from_spec(spec)
@@ -309,6 +313,12 @@ def test_parametros_batem_com_o_template_do_script(user_id, monkeypatch):
     # poria o WA_TOKEN de verdade no `os.environ` do resto da suíte.
     monkeypatch.setattr("dotenv.load_dotenv", lambda *a, **k: None)
     spec.loader.exec_module(script)
+    return script
+
+
+def test_parametros_batem_com_o_template_do_script(user_id, monkeypatch):
+    """§0.7: o nome dos parâmetros vive no script (Meta) e no envio; os dois têm de bater."""
+    script = _script(monkeypatch)
     posts = _armar(monkeypatch)
     _dono(user_id, _FONE_A)
     _gasto(user_id, "Fonte Q616")
@@ -318,3 +328,43 @@ def test_parametros_batem_com_o_template_do_script(user_id, monkeypatch):
     [post] = _para(posts, _FONE_A)
     no_corpo = set(re.findall(r"\{\{(\w+)\}\}", script.AUTOPAY_BODY))
     assert no_corpo == set(script.AUTOPAY_EXAMPLES) == set(_params(post))
+
+
+def test_nome_com_marcacao_vai_cru_e_o_corpo_nao_tem_marcacao(user_id, monkeypatch):
+    """#276: o template não decide embrulho por argumento, então o corpo não tem
+    marcação nenhuma e o nome vai como o usuário escreveu (decisão do dono)."""
+    script = _script(monkeypatch)
+    posts = _armar(monkeypatch)
+    _dono(user_id, _FONE_A)
+    _gasto(user_id, "Cartão *Premium*  _x_ ~y~")
+
+    _rodar()
+
+    assert [_params(p)["gasto"] for p in _para(posts, _FONE_A)] == ["Cartão *Premium* _x_ ~y~"]
+    fora_das_variaveis = re.sub(r"\{\{\w+\}\}", "", script.AUTOPAY_BODY)
+    assert not set("*_~") & set(fora_das_variaveis), fora_das_variaveis
+
+
+def test_nome_longo_corta_em_60_code_points(user_id, monkeypatch):
+    posts = _armar(monkeypatch)
+    _dono(user_id, _FONE_A)
+    nome = "🐷💳 Plano família " + "é" * 60
+    _gasto(user_id, nome)
+
+    _rodar()
+
+    [gasto] = [_params(p)["gasto"] for p in _para(posts, _FONE_A)]
+    assert len(gasto) == 60 and gasto == nome[:60]
+
+
+def test_hora_invalida_vale_o_padrao(user_id, monkeypatch):
+    posts = _armar(monkeypatch)
+    monkeypatch.setenv("WA_BILL_REMINDER_HOUR", "nove")
+    _dono(user_id, _FONE_A)
+    _gasto(user_id, "HoraInvalida Q616")
+
+    _rodar(8)
+    assert _para(posts, _FONE_A) == [] and _reservados(user_id) == 0
+
+    _rodar(9)
+    assert len(_para(posts, _FONE_A)) == 1

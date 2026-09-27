@@ -97,8 +97,10 @@ MONTHLY_BODY = (
 
 # aviso de gasto fixo autopay — os nomes têm de bater com os `params` de
 # notify_autopay_notices_whatsapp_once (tests/test_aviso_autopay_whatsapp.py compara).
+# Sem `*`/`_`/`~` no corpo: o `{{gasto}}` é o nome que o usuário digitou, e
+# marcação dele casaria com a do template (mesma classe da #276).
 AUTOPAY_BODY = (
-    "Hoje vence o seu gasto fixo *{{gasto}}*, de {{valor}}, com {{meio}}.\n"
+    "Hoje vence o seu gasto fixo {{gasto}}, de {{valor}}, com {{meio}}.\n"
     "\n"
     "É só um lembrete do Piggy: não lancei nada no app."
 )

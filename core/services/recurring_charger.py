@@ -187,7 +187,11 @@ def notify_autopay_notices_whatsapp_once(now: datetime | None = None) -> int:
     if not cfg:
         return 0  # dormente: template Meta ainda não configurado
     now = now or now_tz()
-    if now.hour < int(os.getenv("WA_BILL_REMINDER_HOUR", "9") or 9):
+    try:
+        hora = int(os.getenv("WA_BILL_REMINDER_HOUR", "9") or 9)
+    except ValueError:
+        hora = 9  # env inválida vale o padrão, em vez de derrubar o tick
+    if now.hour < hora:
         return 0
 
     from adapters.whatsapp.wa_app import _dedupe_whatsapp_targets
