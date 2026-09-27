@@ -1,0 +1,664 @@
+<!doctype html>
+<html lang="pt-BR">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=1080">
+<title>PigBank · 15s</title>
+<!-- Vídeo de 15s (1080×1920). Aberto no navegador, toca em loop; render.mjs
+     chama window.__seek(t) quadro a quadro. Tudo é função do tempo: as animações
+     CSS ficam pausadas e são posicionadas por currentTime, e o canvas é desenhado
+     a partir de t. Valores ilustrativos, sem dado real de usuário. -->
+<link rel="stylesheet" href="../../frontend/phosphor.css">
+<style>
+@font-face { font-family: "Inter"; font-weight: 100 900; src: url("../../frontend/fonts/Inter-Variable.woff2") format("woff2-variations"); }
+@font-face { font-family: "Phosphor"; src: url("../../frontend/fonts/Phosphor.woff2") format("woff2"); }
+
+:root {
+  --pink: #FF2D8E; --pink-700: #C7186B; --neon: #C6F11A;
+  --black: #0D0D0E; --elev: #18181B; --elev-2: #222226; --line: #2C2C31;
+  --text: #F6F4F1; --muted: #A5A5A3; --subtle: #6E6E6C;
+  --out: cubic-bezier(.16, 1, .3, 1); --back: cubic-bezier(.34, 1.56, .64, 1);
+  --in: cubic-bezier(.7, 0, .84, 0); --io: cubic-bezier(.65, 0, .35, 1);
+}
+* { box-sizing: border-box; margin: 0; padding: 0; }
+html, body { background: #000; }
+body { font-family: "Inter", sans-serif; color: var(--text); -webkit-font-smoothing: antialiased; font-feature-settings: "tnum" 1, "cv11" 1; }
+#stage { position: relative; width: 1080px; height: 1920px; overflow: hidden; background: var(--black); }
+canvas { position: absolute; inset: 0; pointer-events: none; }
+.abs { position: absolute; }
+.ph { line-height: 1; }
+
+/* Toda animação usa o atraso como tempo absoluto do vídeo: --d. */
+[style*="--d"] { animation-delay: var(--d) !important; }
+
+@keyframes up      { from { opacity: 0; translate: 0 70px; } to { opacity: 1; translate: 0 0; } }
+@keyframes down    { from { opacity: 0; translate: 0 -60px; } to { opacity: 1; translate: 0 0; } }
+@keyframes rise    { from { translate: 0 115%; } to { translate: 0 0; } }
+@keyframes pop     { 0% { opacity: 0; scale: .3; } 55% { opacity: 1; scale: 1.1; } 100% { opacity: 1; scale: 1; } }
+@keyframes bubble  { from { opacity: 0; scale: .55; } to { opacity: 1; scale: 1; } }
+@keyframes fadeIn  { from { opacity: 0; } to { opacity: 1; } }
+@keyframes fadeOut { from { opacity: 1; } to { opacity: 0; } }
+@keyframes on      { from { opacity: 0; } to { opacity: 1; } }
+@keyframes blurIn  { from { opacity: 0; filter: blur(24px); scale: 1.25; } to { opacity: 1; filter: blur(0); scale: 1; } }
+@keyframes tile    { from { opacity: 0; translate: 0 120px; scale: .9; filter: blur(14px); } to { opacity: 1; translate: 0 0; scale: 1; filter: blur(0); } }
+@keyframes slideR  { from { opacity: 0; translate: 220px 0; filter: blur(10px); } to { opacity: 1; translate: 0 0; filter: blur(0); } }
+@keyframes slideL  { from { opacity: 0; translate: -160px 0; } to { opacity: 1; translate: 0 0; } }
+@keyframes growX   { from { scale: 0 1; } to { scale: 1 1; } }
+@keyframes drop    { 0% { opacity: 0; translate: 0 -380px; filter: blur(8px); } 45% { opacity: 1; filter: blur(0); } 70% { opacity: 1; translate: 0 18px; } 85% { translate: 0 -8px; } 100% { opacity: 1; translate: 0 0; } }
+
+/* Cena: aparece em --s, sai em --e (0.3s). Dois efeitos na mesma propriedade:
+   o de saída usa fill forwards para não pintar antes de começar. */
+.scene { position: absolute; inset: 0; opacity: 0;
+  animation: on .01s linear var(--s) both, sceneOut .3s var(--in) calc(var(--e) - .3s) forwards; }
+@keyframes sceneOut { from { opacity: 1; } to { opacity: 0; } }
+
+/* ------------------------------------------------ título em palavras mascaradas */
+.head { position: absolute; left: 72px; right: 72px; font-weight: 850; letter-spacing: -.055em; line-height: .98; }
+.head .w { display: inline-block; overflow: clip; padding: 0 .04em .14em 0; margin-bottom: -.14em; vertical-align: top; }
+.head .w > span { display: inline-block; animation: rise .55s var(--out) both; }
+.pinkdot { color: var(--pink); }
+.sub { position: absolute; left: 72px; right: 72px; font-size: 42px; font-weight: 500; color: var(--muted); letter-spacing: -.01em; animation: up .6s var(--out) both; }
+
+/* ------------------------------------------------------------ navegação do topo */
+#nav { position: absolute; top: 78px; left: 0; right: 0; display: flex; justify-content: center; gap: 44px; font-size: 33px; font-weight: 650; letter-spacing: -.02em;
+  opacity: 0; animation: down .5s var(--out) 1.5s both, fadeOut .25s linear 12.85s forwards; }
+#nav .it { position: relative; color: rgba(246,244,241,.32); }
+#nav .it b { position: absolute; inset: 0; color: var(--text); font-weight: inherit; opacity: 0;
+  animation: on .2s linear var(--s) both, fadeOut .2s linear var(--e) forwards; }
+#nav .it i { position: absolute; left: 0; right: 0; bottom: -14px; height: 5px; border-radius: 3px; background: var(--pink); transform-origin: left; scale: 0 1;
+  animation: growX .35s var(--out) var(--s) both, fadeOut .2s linear var(--e) forwards; }
+
+/* ------------------------------------------------------------------ transições */
+.wipe { position: absolute; left: -20%; width: 140%; height: 150%; top: -25%; rotate: -9deg; translate: 0 120%; z-index: 50;
+  animation: wipe .5s var(--io) both; }
+.wipe::before { content: ""; position: absolute; left: 0; right: 0; top: -14px; height: 14px; background: var(--neon); }
+@keyframes wipe { from { translate: 0 120%; } to { translate: 0 -120%; } }
+#flash { position: absolute; inset: 0; background: #fff; z-index: 60; opacity: 0; animation: flash .35s ease-out 7.5s forwards; }
+@keyframes flash { 0% { opacity: .95; } 100% { opacity: 0; } }
+
+/* ------------------------------------------------------------------ ícone (SVG) */
+.pig-icon .ring { fill: none; stroke: var(--pink); stroke-width: 38; stroke-dasharray: 742; transform: rotate(60deg); transform-origin: 256px 262px; }
+.pig-icon .part { fill: var(--pink); transform-box: fill-box; transform-origin: center; }
+.pig-icon .nostril { fill: var(--black); }
+
+/* ============================================================== CENA A · abertura */
+#A { --s: 0s; --e: 1.6s; }
+#A .iconwrap { position: absolute; left: 330px; top: 560px; width: 420px; height: 420px;
+  animation: iconUp .55s var(--out) .72s both; }
+@keyframes iconUp { from { translate: 0 0; scale: 1; } to { translate: 0 -250px; scale: .56; } }
+#A .glow { position: absolute; inset: -40%; border-radius: 50%; background: radial-gradient(circle, rgba(255,45,142,.55), transparent 62%); opacity: 0; animation: glowP 1s ease-out .62s both; }
+@keyframes glowP { 0% { opacity: 0; scale: .6; } 25% { opacity: 1; scale: 1.05; } 100% { opacity: .45; scale: 1; } }
+#A .ring { animation: drawRing .62s var(--io) .02s both; }
+@keyframes drawRing { from { stroke-dashoffset: 742; } to { stroke-dashoffset: 0; } }
+@keyframes draw { to { stroke-dashoffset: 0; } }
+#A .ear { animation: pop .4s var(--back) both; }
+#A .head { top: 830px; text-align: center; font-size: 172px; white-space: nowrap; left: 0; right: 0; }
+#A .sub { top: 1085px; text-align: center; }
+#A .sub .ph { color: var(--neon); vertical-align: -5px; margin-right: 10px; }
+#A .content { animation: aOut .35s var(--in) 1.3s forwards; }
+@keyframes aOut { to { scale: 1.12; filter: blur(16px); opacity: 0; } }
+
+/* ============================================================ CENA B · registrar */
+#B { --s: 1.5s; --e: 5.05s; }
+#B .head { top: 168px; font-size: 118px; }
+#B .kinds { position: absolute; top: 305px; left: 72px; font-size: 44px; font-weight: 650; letter-spacing: -.02em; display: flex; gap: 22px; color: rgba(246,244,241,.28); animation: up .5s var(--out) 1.75s both; }
+#B .kinds span { position: relative; }
+#B .kinds span b { position: absolute; inset: 0; color: var(--text); font-weight: inherit; opacity: 0; animation: on .15s linear both; }
+#B .kinds span b .ph { color: var(--pink); }
+#B .kinds .dot { color: var(--subtle); }
+
+.phone { position: absolute; left: 190px; top: 410px; width: 700px; height: 1420px; border-radius: 86px; background: #050506;
+  border: 14px solid #1E1E22; box-shadow: 0 0 0 2px #34343A, 0 80px 160px rgba(0,0,0,.7), 0 0 180px rgba(255,45,142,.12); overflow: hidden;
+  animation: phoneIn .75s var(--out) 1.6s both, phoneOut .35s var(--in) 4.75s forwards; }
+#B { perspective: 1800px; perspective-origin: 540px 1100px; }
+#t2 { perspective: 900px; }
+@keyframes phoneIn { from { translate: 0 900px; rotate: x 28deg; opacity: 0; } to { translate: 0 0; rotate: x 0deg; opacity: 1; } }
+@keyframes phoneOut { to { translate: 0 -160px; scale: .82; filter: blur(18px); opacity: 0; } }
+.phone .island { position: absolute; top: 20px; left: 50%; width: 170px; height: 46px; margin-left: -85px; border-radius: 30px; background: #000; z-index: 3; }
+.chat-top { position: absolute; top: 0; left: 0; right: 0; height: 176px; padding: 86px 32px 0; display: flex; align-items: center; gap: 20px; background: #121214; border-bottom: 1px solid var(--line); z-index: 2; }
+.chat-top img { width: 70px; height: 70px; border-radius: 50%; box-shadow: 0 0 0 3px var(--pink); }
+.chat-top .nm { font-size: 32px; font-weight: 700; letter-spacing: -.02em; }
+.chat-top .st { font-size: 23px; color: var(--neon); font-weight: 500; margin-top: 2px; }
+.chat-top .wa { margin-left: auto; font-size: 44px; color: var(--muted); }
+.chat-win { position: absolute; top: 176px; bottom: 122px; left: 0; right: 0; overflow: hidden;
+  background: radial-gradient(600px 400px at 80% 10%, rgba(255,45,142,.07), transparent), #0A0A0B; }
+.chat-feed { position: absolute; left: 0; right: 0; top: 0; padding: 30px 28px; display: flex; flex-direction: column; gap: 20px; }
+.chat-in { position: absolute; bottom: 0; left: 0; right: 0; height: 122px; padding: 22px 26px 30px; display: flex; gap: 16px; background: #121214; border-top: 1px solid var(--line); }
+.chat-in .fld { flex: 1; height: 68px; border-radius: 34px; background: #1E1E22; color: var(--subtle); font-size: 26px; padding: 0 28px; display: flex; align-items: center; }
+.chat-in .mic { width: 68px; height: 68px; border-radius: 50%; background: var(--pink); display: grid; place-items: center; font-size: 34px; color: #fff; }
+
+.msg { max-width: 500px; animation: bubble .38s var(--back) both; }
+.msg.me { align-self: flex-end; transform-origin: bottom right; }
+.msg.pig { align-self: flex-start; transform-origin: bottom left; }
+.me .bb { background: var(--pink); color: #fff; border-radius: 34px 34px 10px 34px; padding: 22px 28px 16px; font-size: 32px; font-weight: 550; letter-spacing: -.01em; }
+.bb .meta { display: block; text-align: right; font-size: 20px; opacity: .8; margin-top: 4px; font-weight: 500; }
+.pig .bb { background: var(--elev); border: 1px solid var(--line); border-radius: 34px 34px 34px 10px; padding: 22px 26px; font-size: 29px; }
+.ok { display: inline-grid; place-items: center; width: 40px; height: 40px; border-radius: 50%; background: var(--neon); color: #111; font-size: 24px; vertical-align: -9px; margin-right: 12px; }
+.card-reg .t { font-size: 32px; font-weight: 750; letter-spacing: -.02em; margin-bottom: 14px; }
+.card-reg .row { display: flex; justify-content: space-between; gap: 40px; padding: 11px 0; border-top: 1px solid var(--line); font-size: 27px; animation: slideL .35s var(--out) both; }
+.card-reg .row span:first-child { color: var(--muted); }
+.card-reg .row span:last-child { font-weight: 650; }
+.line-reg { display: flex; align-items: center; gap: 4px; font-weight: 600; white-space: nowrap; }
+.line-reg em { font-style: normal; color: var(--muted); font-weight: 500; margin: 0 10px; }
+.typing { position: absolute; left: 0; top: 0; background: var(--elev); border: 1px solid var(--line); border-radius: 30px 30px 30px 10px; padding: 24px 28px; display: flex; gap: 10px;
+  animation: bubble .25s var(--back) 2.22s both, fadeOut .1s linear 2.5s forwards; }
+.typing i { width: 14px; height: 14px; border-radius: 50%; background: var(--muted); }
+.audio .bb { padding: 20px 26px 16px; }
+.audio .arow { display: flex; align-items: center; gap: 18px; }
+.audio .play { width: 58px; height: 58px; border-radius: 50%; background: #fff; color: var(--pink); display: grid; place-items: center; font-size: 30px; flex: none; }
+.audio .wave { display: flex; align-items: center; gap: 5px; height: 60px; }
+.audio .wave i { width: 6px; border-radius: 3px; background: rgba(255,255,255,.55); }
+.audio .tm { font-size: 22px; opacity: .85; font-weight: 600; }
+.transc { font-size: 23px; opacity: .9; font-style: italic; margin-top: 10px; }
+.photo .bb { padding: 12px; }
+.receipt { position: relative; width: 330px; height: 330px; overflow: hidden; border-radius: 24px 24px 6px 24px; background: #2a0f1d; }
+.paper { position: absolute; left: 50px; top: 22px; width: 230px; background: #F6F4F1; color: #222; padding: 20px 20px 34px; font-size: 16px; line-height: 1.55; rotate: -4deg;
+  clip-path: polygon(0 0, 100% 0, 100% 94%, 90% 100%, 80% 94%, 70% 100%, 60% 94%, 50% 100%, 40% 94%, 30% 100%, 20% 94%, 10% 100%, 0 94%); box-shadow: 0 20px 40px rgba(0,0,0,.4); }
+.paper .h { font-weight: 800; letter-spacing: .1em; text-align: center; font-size: 17px; margin-bottom: 8px; }
+.paper .r { display: flex; justify-content: space-between; }
+.paper .tot { font-weight: 800; border-top: 2px dashed #999; margin-top: 8px; padding-top: 6px; font-size: 19px; position: relative; }
+.paper .tot::after { content: ""; position: absolute; inset: 2px -8px -4px; border: 3px solid var(--pink); border-radius: 8px; opacity: 0; animation: pop .3s var(--back) 3.95s both; }
+.scan { position: absolute; left: 0; right: 0; height: 6px; background: var(--pink); box-shadow: 0 0 24px 8px rgba(255,45,142,.7); opacity: 0;
+  animation: scan .45s var(--io) 3.58s both; }
+@keyframes scan { 0% { top: 0; opacity: 0; } 12% { opacity: 1; } 88% { opacity: 1; } 100% { top: 324px; opacity: 0; } }
+#B .sticker { position: absolute; left: 770px; top: 1440px; width: 280px; rotate: 10deg; animation: pop .45s var(--back) 4.25s both; filter: drop-shadow(0 20px 30px rgba(0,0,0,.5)); }
+
+/* ============================================================ CENA C · organizar */
+#C { --s: 5.0s; --e: 7.5s; }
+#C .head { top: 168px; font-size: 118px; }
+#C .sub { top: 305px; }
+#C .bento { position: absolute; inset: 0; animation: drift 2.5s linear 5s both, bentoOut .3s var(--in) 7.2s forwards; }
+@keyframes drift { from { scale: 1; } to { scale: 1.035; } }
+@keyframes bentoOut { to { translate: 0 -120px; opacity: 0; filter: blur(20px); } }
+.tile { position: absolute; background: var(--elev); border: 1px solid var(--line); border-radius: 44px; padding: 38px 40px; overflow: hidden; animation: tile .6s var(--out) both; }
+.tile .lb { font-size: 26px; color: var(--muted); font-weight: 600; letter-spacing: -.005em; display: flex; align-items: center; gap: 10px; }
+.tile .lb .ph { font-size: 30px; color: var(--pink); }
+.tile .big { font-size: 64px; font-weight: 800; letter-spacing: -.045em; margin-top: 6px; }
+#t1 { left: 72px; top: 400px; width: 936px; height: 500px; }
+#t1 svg { position: absolute; left: 36px; top: 90px; }
+#t1 .seg { fill: none; stroke-width: 58; animation: seg .7s var(--out) both; }
+@keyframes seg { from { stroke-dasharray: 0 1100; } }
+#t1 .ctr { position: absolute; left: 36px; top: 90px; width: 380px; height: 380px; display: grid; place-items: center; text-align: center; }
+#t1 .ctr small { display: block; font-size: 22px; color: var(--muted); font-weight: 600; }
+#t1 .ctr b { font-size: 42px; font-weight: 800; letter-spacing: -.04em; }
+#t1 .legend { position: absolute; left: 470px; top: 92px; right: 40px; display: flex; flex-direction: column; gap: 14px; }
+#t1 .lg { display: flex; align-items: center; gap: 16px; font-size: 28px; font-weight: 600; animation: slideR .45s var(--out) both; padding: 12px 18px; border-radius: 22px; background: var(--elev-2); }
+#t1 .lg i.sw { width: 18px; height: 18px; border-radius: 6px; flex: none; }
+#t1 .lg .ph { font-size: 30px; color: var(--muted); }
+#t1 .lg span:last-child { margin-left: auto; color: var(--muted); font-weight: 600; }
+#t1 .auto { position: absolute; left: 40px; top: 34px; }
+#t1 .ai { position: absolute; right: 40px; top: 30px; font-size: 22px; font-weight: 700; color: #111; background: var(--neon); padding: 8px 16px; border-radius: 16px; animation: pop .4s var(--back) 5.9s both; }
+
+#t2 { left: 72px; top: 924px; width: 456px; height: 560px; }
+.ccard { position: relative; margin-top: 26px; height: 230px; border-radius: 26px; padding: 24px 26px; overflow: hidden;
+  background: linear-gradient(135deg, #2b2b30 0%, #121214 60%), #000; border: 1px solid #3a3a40; animation: flip .7s var(--out) 5.35s both; }
+@keyframes flip { from { rotate: y 95deg; opacity: 0; } to { rotate: y 0deg; opacity: 1; } }
+.ccard::after { content: ""; position: absolute; right: -60px; top: -80px; width: 260px; height: 260px; border-radius: 50%; background: radial-gradient(circle, rgba(255,45,142,.55), transparent 65%); }
+.ccard .chip { width: 58px; height: 44px; border-radius: 9px; background: linear-gradient(135deg, #d8d2c6, #8f8a80); }
+.ccard .num { position: absolute; left: 26px; bottom: 58px; font-size: 26px; letter-spacing: .14em; color: #d9d9d6; font-weight: 600; }
+.ccard .nm { position: absolute; left: 26px; bottom: 22px; font-size: 20px; color: var(--muted); font-weight: 600; letter-spacing: .08em; }
+.ccard .logo { position: absolute; right: 24px; bottom: 16px; width: 58px; height: 58px; }
+#t2 .kv { display: flex; justify-content: space-between; font-size: 25px; margin-top: 16px; color: var(--muted); font-weight: 600; }
+#t2 .kv b { color: var(--text); }
+.bar { height: 16px; border-radius: 8px; background: #2c2c31; margin-top: 12px; overflow: hidden; }
+.bar i { display: block; height: 100%; border-radius: 8px; transform-origin: left; animation: growX .9s var(--out) both; }
+
+#t3 { left: 552px; top: 924px; width: 456px; height: 268px; }
+#t2 .big { font-size: 54px; }
+#t3 .big { font-size: 52px; }
+#t3 .big small { font-size: 28px; color: var(--muted); font-weight: 600; letter-spacing: -.01em; }
+#t4 { left: 552px; top: 1216px; width: 456px; height: 268px; }
+#t4 svg { position: absolute; left: 30px; bottom: 26px; }
+#t4 .ln { fill: none; stroke: var(--pink); stroke-width: 6; stroke-linecap: round; stroke-dasharray: 520; stroke-dashoffset: 520; animation: draw 1s var(--io) 5.7s both; }
+#t4 .area { fill: url(#fg); opacity: 0; animation: fadeIn .5s linear 6.3s both; }
+#t4 .dots text { font: 600 20px Inter; fill: var(--muted); }
+#t5 { left: 72px; top: 1508px; width: 936px; height: 196px; }
+#t5 .row { display: flex; align-items: baseline; justify-content: space-between; margin-top: 8px; }
+#t5 .row b { font-size: 44px; font-weight: 800; letter-spacing: -.035em; }
+#t5 .row span { font-size: 26px; color: var(--muted); font-weight: 600; }
+
+/* ======================================================= CENA D · Open Finance */
+#D { --s: 7.5s; --e: 11.02s; }
+#D .content { position: absolute; inset: 0; transform-origin: 540px 880px; animation: suck .32s var(--in) 10.72s forwards; }
+@keyframes suck { to { scale: .05; opacity: 0; filter: blur(10px); } }
+#D .title { position: absolute; top: 150px; left: 0; right: 0; text-align: center; font-size: 136px; font-weight: 900; letter-spacing: -.06em; line-height: 1; }
+#D .title span { display: inline-block; animation: blurIn .5s var(--out) both; }
+#D .title .o { color: transparent; -webkit-text-stroke: 4px var(--pink); }
+#D .sub { top: 310px; text-align: center; }
+#D .trust { position: absolute; top: 396px; left: 0; right: 0; display: flex; justify-content: center; gap: 14px; }
+#D .trust span { font-size: 25px; font-weight: 650; padding: 12px 20px; border-radius: 40px; border: 1.5px solid #3a3a40; background: #141416; display: flex; align-items: center; gap: 10px; animation: pop .4s var(--back) both; }
+#D .trust .ph { color: var(--neon); font-size: 28px; }
+#D .core { position: absolute; left: 430px; top: 770px; width: 220px; height: 220px; border-radius: 50%; background: #111113; box-shadow: 0 0 0 2px #3a3a40, 0 0 120px rgba(255,45,142,.45);
+  display: grid; place-items: center; animation: pop .5s var(--back) 7.55s both; }
+#D .core svg { width: 170px; height: 170px; }
+#D .sync { position: absolute; left: 340px; width: 400px; top: 1010px; text-align: center; font-size: 25px; font-weight: 650; }
+#D .sync span { position: absolute; left: 0; right: 0; }
+#D .sync .a { color: var(--muted); animation: fadeIn .2s linear 8.2s both, fadeOut .15s linear 9.0s forwards; }
+#D .sync .b { color: var(--neon); animation: pop .35s var(--back) 9.05s both; }
+.node { position: absolute; left: 0; top: 0; width: 150px; height: 150px; }
+.node .bx { width: 150px; height: 150px; border-radius: 40px; background: var(--elev); border: 1.5px solid #3a3a40; display: grid; place-items: center; font-size: 66px; color: var(--text);
+  box-shadow: 0 20px 50px rgba(0,0,0,.5); }
+.node .nl { position: absolute; top: 160px; left: -80px; right: -80px; text-align: center; font-size: 24px; font-weight: 650; color: var(--muted); white-space: nowrap; }
+.node .ck { position: absolute; right: -10px; top: -10px; width: 46px; height: 46px; border-radius: 50%; background: var(--neon); color: #111; display: grid; place-items: center; font-size: 26px; border: 4px solid var(--black); animation: pop .35s var(--back) both; }
+#D .panel { position: absolute; left: 72px; right: 72px; top: 1290px; border-radius: 44px; background: var(--elev); border: 1px solid var(--line); padding: 34px 40px; animation: tile .6s var(--out) 8.25s both; }
+#D .panel .lb { font-size: 26px; color: var(--muted); font-weight: 600; display: flex; justify-content: space-between; }
+#D .panel .lb em { font-style: normal; color: var(--pink); display: flex; gap: 8px; align-items: center; }
+#D .bal { font-size: 100px; font-weight: 850; letter-spacing: -.05em; line-height: 1.1; margin-top: 4px; }
+.tx { display: flex; align-items: center; gap: 20px; padding: 13px 0; border-top: 1px solid var(--line); animation: slideR .45s var(--out) both; }
+.tx .ic { width: 62px; height: 62px; border-radius: 20px; background: var(--elev-2); display: grid; place-items: center; font-size: 32px; color: var(--muted); flex: none; }
+.tx .d { font-size: 29px; font-weight: 650; letter-spacing: -.015em; }
+.tx .d small { display: block; font-size: 21px; color: var(--subtle); font-weight: 600; margin-top: 2px; }
+.tx .v { margin-left: auto; font-size: 32px; font-weight: 750; letter-spacing: -.03em; }
+.tx .v.pos { color: var(--neon); }
+
+/* ============================================================ CENA E · agentes */
+#E { --s: 11.0s; --e: 13.05s; }
+#E .head { top: 168px; font-size: 106px; }
+#E .sub { top: 400px; font-size: 38px; }
+.agent { position: absolute; animation: drop .6s var(--out) both; }
+.agent img { display: block; height: 100%; width: auto; filter: drop-shadow(0 26px 30px rgba(0,0,0,.55)); }
+.agent .tag { position: absolute; left: 50%; translate: -50% 0; bottom: -44px; font-size: 25px; font-weight: 750; letter-spacing: -.01em; white-space: nowrap; background: var(--black); padding: 6px 16px; border-radius: 20px; border: 1.5px solid #3a3a40; }
+.agent.back .tag { bottom: auto; top: -26px; font-size: 21px; }
+#E .floor { position: absolute; left: 0; right: 0; top: 1130px; height: 400px; background: radial-gradient(50% 40% at 50% 30%, rgba(255,45,142,.28), transparent 70%); animation: fadeIn .6s linear 11.1s both; }
+.toast { position: absolute; left: 72px; right: 72px; height: 112px; border-radius: 32px; background: rgba(28,28,32,.92); border: 1px solid #3a3a40; display: flex; align-items: center; gap: 22px; padding: 0 26px;
+  box-shadow: 0 20px 60px rgba(0,0,0,.6); animation: slideR .5s var(--out) both; }
+.toast .av { width: 74px; height: 74px; border-radius: 50%; overflow: hidden; background: var(--elev-2); flex: none; box-shadow: 0 0 0 3px var(--pink); }
+.toast .av img { width: 100%; height: 170%; object-fit: cover; object-position: top; }
+.toast .tx2 { font-size: 27px; font-weight: 550; line-height: 1.25; letter-spacing: -.01em; }
+.toast .tx2 b { display: block; font-size: 24px; color: var(--muted); font-weight: 700; }
+.toast .ph { margin-left: auto; font-size: 38px; color: var(--pink); }
+
+/* ============================================================ CENA F · final */
+#F { --s: 13.0s; --e: 99s; }
+.split { position: absolute; left: 0; right: 0; height: 50.5%; background: var(--pink); z-index: 40; }
+.split.t { top: 0; animation: splitT .22s var(--in) 12.78s reverse both, splitT2 .5s var(--io) 13.15s forwards; }
+.split.b { bottom: 0; animation: splitB .22s var(--in) 12.78s reverse both, splitB2 .5s var(--io) 13.15s forwards; }
+@keyframes splitT { to { translate: 0 -101%; } }
+@keyframes splitB { to { translate: 0 101%; } }
+@keyframes splitT2 { from { translate: 0 0; } to { translate: 0 -101%; } }
+@keyframes splitB2 { from { translate: 0 0; } to { translate: 0 101%; } }
+#F .bgglow { position: absolute; left: -200px; right: -200px; bottom: -300px; height: 1300px; background: radial-gradient(closest-side, rgba(255,45,142,.55), rgba(255,45,142,.12) 55%, transparent); animation: fadeIn .8s linear 13.2s both; }
+#F .brand { position: absolute; top: 150px; left: 0; right: 0; display: flex; justify-content: center; align-items: center; gap: 22px; animation: pop .5s var(--back) 13.3s both; }
+#F .brand svg { width: 104px; height: 104px; }
+#F .brand span { font-size: 76px; font-weight: 800; letter-spacing: -.05em; }
+#F .head { top: 330px; text-align: center; font-size: 122px; }
+#F .ul { position: relative; }
+#F .ul::after { content: ""; position: absolute; left: 0; right: .1em; bottom: .02em; height: .12em; border-radius: .06em; background: var(--pink); transform-origin: left; animation: growX .45s var(--out) 14.05s both; z-index: -1; }
+#F .cta { position: absolute; top: 760px; left: 50%; translate: -50% 0; white-space: nowrap; }
+#F .cta a { display: flex; align-items: center; gap: 18px; background: var(--pink); color: #fff; font-size: 42px; font-weight: 750; letter-spacing: -.02em; padding: 32px 50px; border-radius: 70px; text-decoration: none;
+  box-shadow: 0 20px 70px rgba(255,45,142,.55); animation: pop .5s var(--back) 14.15s both; }
+#F .cta .ph { font-size: 52px; }
+#F .url { position: absolute; top: 916px; left: 0; right: 0; text-align: center; font-size: 34px; font-weight: 650; color: var(--muted); letter-spacing: -.01em; animation: up .5s var(--out) 14.3s both; }
+#F .piggy { position: absolute; left: 238px; top: 1000px; width: 604px; animation: piggy .8s var(--back) 13.35s both; }
+@keyframes piggy { from { translate: 0 1000px; rotate: -8deg; } to { translate: 0 0; rotate: 0deg; } }
+#F .piggy img { width: 100%; display: block; filter: drop-shadow(0 -10px 60px rgba(255,45,142,.35)); }
+#F .foot { position: absolute; left: 0; right: 0; bottom: 0; height: 190px; background: linear-gradient(transparent, rgba(0,0,0,.9) 55%); }
+
+#fine { position: absolute; left: 0; right: 0; bottom: 34px; text-align: center; font-size: 22px; font-weight: 600; color: rgba(246,244,241,.5); z-index: 30;
+  animation: fadeIn .3s linear 1.6s both; }
+#fine span { position: absolute; left: 0; right: 0; }
+#fine .a { animation: fadeOut .2s linear 13.0s forwards; }
+#fine .b { opacity: 0; animation: fadeIn .3s linear 14.4s both; }
+</style>
+</head>
+<body>
+<div id="stage">
+  <canvas id="bg" width="1080" height="1920"></canvas>
+
+
+  <!-- ===================== A ===================== -->
+  <section class="scene" id="A">
+    <div class="content">
+      <div class="iconwrap"><div class="glow"></div>
+        <svg class="pig-icon" viewBox="0 0 512 512" width="420" height="420"></svg></div>
+      <h1 class="head"><span class="w"><span style="--d:.82s">Sua</span></span> <span class="w"><span style="--d:.94s">grana<span class="pinkdot">.</span></span></span></h1>
+      <p class="sub" style="--d:1.05s"><i class="ph ph-whatsapp-logo"></i>Seu assistente financeiro no WhatsApp</p>
+    </div>
+  </section>
+
+  <!-- ===================== B · Registrar ===================== -->
+  <section class="scene" id="B">
+    <h2 class="head"><span class="w"><span style="--d:1.62s">Uma</span></span> <span class="w"><span style="--d:1.72s">conversa<span class="pinkdot">.</span></span></span></h2>
+    <div class="kinds">
+      <span>Texto<b style="--d:1.95s">Texto</b></span><span class="dot">·</span>
+      <span>Áudio<b style="--d:2.85s">Áudio</b></span><span class="dot">·</span>
+      <span>Foto<b style="--d:3.5s">Foto</b></span>
+    </div>
+    <div class="phone">
+      <div class="island"></div>
+      <div class="chat-top"><img src="../../frontend/brand/avatar.webp" alt=""><div><div class="nm">Piggy</div><div class="st">online</div></div><i class="ph ph-whatsapp-logo wa"></i></div>
+      <div class="chat-win"><div class="chat-feed" id="feed">
+        <div class="msg me" style="--d:1.95s" data-t="1.95"><div class="bb">gastei 32 no almoço<span class="meta">12:04 ✓✓</span></div></div>
+        <div style="position:relative">
+          <div class="typing"><i></i><i></i><i></i></div>
+          <div class="msg pig card-reg" style="--d:2.47s" data-t="2.47"><div class="bb">
+            <div class="t"><span class="ok"><i class="ph ph-check"></i></span>Registrado!</div>
+            <div class="row" style="--d:2.6s"><span>Descrição</span><span>Almoço</span></div>
+            <div class="row" style="--d:2.67s"><span>Categoria</span><span><i class="ph ph-fork-knife"></i> Alimentação</span></div>
+            <div class="row" style="--d:2.74s"><span>Valor</span><span>R$ 32,00</span></div>
+          </div></div>
+        </div>
+        <div class="msg me audio" style="--d:2.85s" data-t="2.85"><div class="bb"><div class="arow"><span class="play"><i class="ph ph-microphone"></i></span><span class="wave" id="wave"></span><span class="tm">0:03</span></div><div class="transc">“uber de 18 pra casa”</div></div></div>
+        <div class="msg pig" style="--d:3.2s" data-t="3.2"><div class="bb line-reg"><span class="ok"><i class="ph ph-check"></i></span><i class="ph ph-car"></i>&nbsp;Transporte<em>·</em>R$ 18,00</div></div>
+        <div class="msg me photo" style="--d:3.5s" data-t="3.5"><div class="bb"><div class="receipt">
+          <div class="paper"><div class="h">MERCADO</div>
+            <div class="r"><span>Arroz 5kg</span><span>27,90</span></div><div class="r"><span>Café</span><span>18,50</span></div>
+            <div class="r"><span>Frutas</span><span>22,10</span></div><div class="r"><span>Leite</span><span>17,90</span></div>
+            <div class="r tot"><span>TOTAL</span><span>86,40</span></div></div>
+          <div class="scan"></div></div><span class="meta">12:31 ✓✓</span></div></div>
+        <div class="msg pig" style="--d:4.05s" data-t="4.05"><div class="bb line-reg"><span class="ok"><i class="ph ph-check"></i></span><i class="ph ph-shopping-cart"></i>&nbsp;Mercado<em>·</em>R$ 86,40</div></div>
+      </div></div>
+      <div class="chat-in"><div class="fld">Mensagem</div><div class="mic"><i class="ph ph-microphone"></i></div></div>
+    </div>
+    <img class="sticker" src="../../frontend/brand/stickers/success.webp" alt="">
+  </section>
+
+  <!-- ===================== C · Organizar ===================== -->
+  <section class="scene" id="C">
+    <h2 class="head"><span class="w"><span style="--d:5.05s">Tudo</span></span> <span class="w"><span style="--d:5.13s">no</span></span> <span class="w"><span style="--d:5.21s">lugar<span class="pinkdot">.</span></span></span></h2>
+    <p class="sub" style="--d:5.2s">Categorias, cartões, metas e previsão.</p>
+    <div class="bento">
+      <div class="tile" id="t1" style="--d:5.08s">
+        <div class="lb auto"><i class="ph ph-chart-pie"></i>Gastos do mês por categoria</div>
+        <div class="ai">categorizado pela IA</div>
+        <svg width="380" height="380" viewBox="0 0 380 380"><g transform="rotate(-90 190 190)">
+          <circle cx="190" cy="190" r="160" fill="none" stroke="#232327" stroke-width="58"/>
+          <circle class="seg" style="--d:5.3s"  cx="190" cy="190" r="160" stroke="#FF2D8E" stroke-dasharray="378 1005" stroke-dashoffset="0"/>
+          <circle class="seg" style="--d:5.42s" cx="190" cy="190" r="160" stroke="#F6F4F1" stroke-dasharray="256 1005" stroke-dashoffset="-384"/>
+          <circle class="seg" style="--d:5.54s" cx="190" cy="190" r="160" stroke="#8E8E8C" stroke-dasharray="176 1005" stroke-dashoffset="-646"/>
+          <circle class="seg" style="--d:5.66s" cx="190" cy="190" r="160" stroke="#4A4A4F" stroke-dasharray="171 1005" stroke-dashoffset="-828"/>
+        </g></svg>
+        <div class="ctr"><div><small>Saídas</small><b data-count="0,1847.3,5.3,6.2">R$ 0</b></div></div>
+        <div class="legend">
+          <div class="lg" style="--d:5.4s"><i class="sw" style="background:#FF2D8E"></i><i class="ph ph-fork-knife"></i>Alimentação<span>38%</span></div>
+          <div class="lg" style="--d:5.5s"><i class="sw" style="background:#F6F4F1"></i><i class="ph ph-shopping-cart"></i>Mercado<span>26%</span></div>
+          <div class="lg" style="--d:5.6s"><i class="sw" style="background:#8E8E8C"></i><i class="ph ph-car"></i>Transporte<span>18%</span></div>
+          <div class="lg" style="--d:5.7s"><i class="sw" style="background:#4A4A4F"></i><i class="ph ph-game-controller"></i>Lazer<span>18%</span></div>
+        </div>
+      </div>
+      <div class="tile" id="t2" style="--d:5.18s">
+        <div class="lb"><i class="ph ph-credit-card"></i>Cartões e faturas</div>
+        <div class="ccard"><div class="chip"></div><div class="num">•••• 4821</div><div class="nm">FATURA ABERTA</div>
+          <svg class="logo pig-icon" viewBox="0 0 512 512"></svg></div>
+        <div class="big" data-count="0,1240.9,5.5,6.4">R$ 0</div>
+        <div class="kv"><span>Limite usado</span><b>62%</b></div>
+        <div class="bar"><i style="--d:5.8s;width:62%;background:var(--pink)"></i></div>
+        <div class="kv"><span>Parcela do notebook</span><b>3 de 10</b></div>
+      </div>
+      <div class="tile" id="t3" style="--d:5.28s">
+        <div class="lb"><i class="ph ph-airplane-tilt"></i>Caixinha · Viagem</div>
+        <div class="big" style="margin-top:14px"><span data-count="0,600,5.6,6.6">R$ 0</span> <small>de R$ 2.000</small></div>
+        <div class="bar" style="margin-top:22px;height:20px"><i style="--d:5.7s;width:30%;background:var(--neon)"></i></div>
+      </div>
+      <div class="tile" id="t4" style="--d:5.38s">
+        <div class="lb"><i class="ph ph-chart-line-up"></i>Previsão de saldo</div>
+        <svg width="396" height="150" viewBox="0 0 396 150">
+          <defs><linearGradient id="fg" x1="0" x2="0" y1="0" y2="1"><stop offset="0" stop-color="#FF2D8E" stop-opacity=".35"/><stop offset="1" stop-color="#FF2D8E" stop-opacity="0"/></linearGradient></defs>
+          <path class="area" d="M8 100 C60 92 90 110 132 84 S220 70 264 58 S350 30 388 22 L388 120 L8 120Z"/>
+          <path class="ln" d="M8 100 C60 92 90 110 132 84 S220 70 264 58 S350 30 388 22"/>
+          <g class="dots"><text x="120" y="146">30d</text><text x="252" y="146">60d</text><text x="352" y="146">90d</text></g>
+        </svg>
+      </div>
+      <div class="tile" id="t5" style="--d:5.48s">
+        <div class="lb"><i class="ph ph-target"></i>Orçamento · Lazer</div>
+        <div class="row"><b data-count="0,320,5.8,6.6">R$ 0</b><span>de R$ 500 no mês</span></div>
+        <div class="bar"><i style="--d:5.85s;width:64%;background:var(--text)"></i></div>
+      </div>
+    </div>
+  </section>
+
+  <!-- ===================== D · Open Finance ===================== -->
+  <section class="scene" id="D">
+    <div class="content">
+      <canvas id="of" width="1080" height="1920"></canvas>
+      <div class="title"><span class="o" style="--d:7.5s">Open</span> <span style="--d:7.62s">Finance</span></div>
+      <p class="sub" style="--d:7.8s">Seus bancos. Uma visão só.</p>
+      <div class="trust">
+        <span style="--d:9.7s"><i class="ph ph-eye"></i>Somente leitura</span>
+        <span style="--d:9.82s"><i class="ph ph-shield-check"></i>Você autoriza</span>
+        <span style="--d:9.94s"><i class="ph ph-key"></i>Você revoga</span>
+      </div>
+      <div class="node" data-i="0"><div class="in"><div class="bx"><i class="ph ph-bank"></i></div><div class="nl">Conta corrente</div><div class="ck" style="--d:9.05s"><i class="ph ph-check"></i></div></div></div>
+      <div class="node" data-i="1"><div class="in"><div class="bx"><i class="ph ph-credit-card"></i></div><div class="nl">Cartão de crédito</div><div class="ck" style="--d:9.12s"><i class="ph ph-check"></i></div></div></div>
+      <div class="node" data-i="2"><div class="in"><div class="bx"><i class="ph ph-chart-line-up"></i></div><div class="nl">Investimentos</div><div class="ck" style="--d:9.19s"><i class="ph ph-check"></i></div></div></div>
+      <div class="node" data-i="3"><div class="in"><div class="bx"><i class="ph ph-piggy-bank"></i></div><div class="nl">Poupança</div><div class="ck" style="--d:9.26s"><i class="ph ph-check"></i></div></div></div>
+      <div class="node" data-i="4"><div class="in"><div class="bx"><i class="ph ph-device-mobile"></i></div><div class="nl">Conta digital</div><div class="ck" style="--d:9.33s"><i class="ph ph-check"></i></div></div></div>
+      <div class="core"><svg class="pig-icon" viewBox="0 0 512 512"></svg></div>
+      <div class="sync"><span class="a">sincronizando…</span><span class="b">✓ sincronizado</span></div>
+      <div class="panel">
+        <div class="lb"><span>Saldo consolidado</span><em><i class="ph ph-arrows-clockwise"></i>Open Finance</em></div>
+        <div class="bal" data-count="0,4782.15,8.4,9.5">R$ 0</div>
+        <div class="tx" style="--d:9.1s"><div class="ic"><i class="ph ph-briefcase"></i></div><div class="d">Salário<small>Conta corrente · hoje</small></div><div class="v pos">+R$ 2.400,00</div></div>
+        <div class="tx" style="--d:9.22s"><div class="ic"><i class="ph ph-shopping-cart"></i></div><div class="d">Mercado<small>Cartão de crédito · ontem</small></div><div class="v">−R$ 212,35</div></div>
+        <div class="tx" style="--d:9.34s"><div class="ic"><i class="ph ph-television"></i></div><div class="d">Streaming<small>Cartão de crédito · ontem</small></div><div class="v">−R$ 39,90</div></div>
+        <div class="tx" style="--d:9.46s"><div class="ic"><i class="ph ph-hand-coins"></i></div><div class="d">Pix recebido<small>Conta digital · 24/09</small></div><div class="v pos">+R$ 150,00</div></div>
+      </div>
+    </div>
+  </section>
+
+  <!-- ===================== E · Agentes ===================== -->
+  <section class="scene" id="E">
+    <h2 class="head"><span class="w"><span style="--d:11.03s">Um</span></span> <span class="w"><span style="--d:11.09s">time</span></span> <span class="w"><span style="--d:11.15s">de</span></span> <span class="w"><span style="--d:11.21s">olho</span></span><br><span class="w"><span style="--d:11.27s">em</span></span> <span class="w"><span style="--d:11.33s">tudo<span class="pinkdot">.</span></span></span></h2>
+    <p class="sub" style="--d:11.3s">Os agentes do Piggy acompanham a sua grana.</p>
+    <div class="floor"></div>
+    <div class="agent back" style="--d:11.10s;left:40px;top:560px;height:330px"><img src="../../frontend/brand/agents/barao.png" alt=""><span class="tag">Barão</span></div>
+    <div class="agent back" style="--d:11.18s;left:292px;top:540px;height:330px"><img src="../../frontend/brand/agents/reporter.png" alt=""><span class="tag">Repórter</span></div>
+    <div class="agent back" style="--d:11.26s;left:568px;top:550px;height:330px"><img src="../../frontend/brand/agents/faria_limer.png" alt=""><span class="tag">Faria Limer</span></div>
+    <div class="agent back" style="--d:11.34s;left:800px;top:540px;height:330px"><img src="../../frontend/brand/agents/cofre.png" alt=""><span class="tag">Banqueiro</span></div>
+    <div class="agent" style="--d:11.42s;left:24px;top:830px;height:440px"><img src="../../frontend/brand/agents/xerife.png" alt=""><span class="tag">Xerife</span></div>
+    <div class="agent" style="--d:11.50s;left:388px;top:850px;height:420px"><img src="../../frontend/brand/agents/carteiro.png" alt=""><span class="tag">Carteiro</span></div>
+    <div class="agent" style="--d:11.58s;left:730px;top:836px;height:434px"><img src="../../frontend/brand/agents/detetive.png" alt=""><span class="tag">Detetive</span></div>
+    <div class="toast" style="--d:11.85s;top:1400px"><div class="av"><img src="../../frontend/brand/agents/carteiro.png" alt=""></div><div class="tx2"><b>Carteiro</b>Sua conta de internet vence amanhã.</div><i class="ph ph-bell"></i></div>
+    <div class="toast" style="--d:12.1s;top:1528px"><div class="av"><img src="../../frontend/brand/agents/xerife.png" alt=""></div><div class="tx2"><b>Xerife</b>Delivery acima do seu padrão este mês.</div><i class="ph ph-warning"></i></div>
+    <div class="toast" style="--d:12.35s;top:1656px"><div class="av"><img src="../../frontend/brand/agents/reporter.png" alt=""></div><div class="tx2"><b>Repórter</b>Seu resumo do mês está pronto.</div><i class="ph ph-newspaper"></i></div>
+  </section>
+
+  <!-- ===================== F · final ===================== -->
+  <section class="scene" id="F">
+    <div class="bgglow"></div>
+    <div class="brand"><svg class="pig-icon" viewBox="0 0 512 512"></svg><span>PigBank</span></div>
+    <h2 class="head">
+      <span class="w"><span style="--d:13.45s">Sua</span></span> <span class="w"><span style="--d:13.52s">grana.</span></span><br>
+      <span class="w"><span style="--d:13.65s">Uma</span></span> <span class="w"><span style="--d:13.72s">conversa.</span></span><br>
+      <span class="w"><span style="--d:13.85s"><span class="ul">Tudo mais claro.</span></span></span>
+    </h2>
+    <canvas id="conf" width="1080" height="1920"></canvas>
+    <div class="piggy"><img src="../../frontend/brand/landing-piggy-four-digits.webp" alt=""></div>
+    <div class="cta"><a><i class="ph ph-whatsapp-logo"></i>Chama o Piggy no WhatsApp</a></div>
+    <div class="url">pigbankai.com</div>
+    <div class="foot"></div>
+  </section>
+
+  <div class="split t"></div><div class="split b"></div>
+  <div class="wipe" style="--d:1.25s;background:var(--pink)"></div>
+  <div class="wipe" style="--d:4.75s;background:#F6F4F1"></div>
+  <div class="wipe" style="--d:10.8s;background:var(--pink)"></div>
+  <div id="flash"></div>
+
+  <nav id="nav">
+    <span class="it" style="--s:1.55s;--e:5.0s">Registrar<b>Registrar</b><i></i></span>
+    <span class="it" style="--s:5.0s;--e:7.5s">Organizar<b>Organizar</b><i></i></span>
+    <span class="it" style="--s:7.5s;--e:11.0s">Conectar<b>Conectar</b><i></i></span>
+    <span class="it" style="--s:11.0s;--e:13.0s">Acompanhar<b>Acompanhar</b><i></i></span>
+  </nav>
+  <div id="fine"><span class="a">Valores ilustrativos</span><span class="b">O PigBank não é banco e não movimenta seu dinheiro. Valores ilustrativos.</span></div>
+  <canvas id="grain" width="540" height="960" style="width:1080px;height:1920px;mix-blend-mode:overlay;opacity:.22;z-index:90"></canvas>
+</div>
+
+<script>
+const DUR = 15;
+// Ícone PigBank redesenhado em SVG (anel, orelhas, focinho, rabicho de balão) para poder desenhar o anel.
+const PIG = `<circle class="ring" cx="256" cy="262" r="118"/>
+  <path class="part ear" style="--d:.34s" d="M121 102 Q176 108 208 131 L141 199 Q117 150 121 102Z"/>
+  <path class="part ear" style="--d:.40s" d="M391 102 Q336 108 304 131 L371 199 Q395 150 391 102Z"/>
+  <rect class="part ear" style="--d:.48s" x="183" y="206" width="146" height="96" rx="48"/>
+  <circle class="nostril" cx="231" cy="254" r="11"/><circle class="nostril" cx="281" cy="254" r="11"/>
+  <path class="part ear" style="--d:.56s" d="M262 376 L270 410 Q306 398 334 364Z"/>`;
+document.querySelectorAll("svg.pig-icon").forEach(s => s.innerHTML = PIG);
+const clamp = (x, a = 0, b = 1) => Math.min(b, Math.max(a, x));
+const prog = (t, a, b) => clamp((t - a) / (b - a));
+const eOut = x => 1 - Math.pow(1 - x, 4);
+const eIn = x => x * x * x;
+const eBack = x => { const c = 1.9; return 1 + (c + 1) * Math.pow(x - 1, 3) + c * Math.pow(x - 1, 2); };
+function rng(seed) { return () => { seed |= 0; seed = seed + 0x6D2B79F5 | 0; let t = Math.imul(seed ^ seed >>> 15, 1 | seed); t = t + Math.imul(t ^ t >>> 7, 61 | t) ^ t; return ((t ^ t >>> 14) >>> 0) / 4294967296; }; }
+const brl = new Intl.NumberFormat("pt-BR", { style: "currency", currency: "BRL" });
+const brl0 = new Intl.NumberFormat("pt-BR", { style: "currency", currency: "BRL", maximumFractionDigits: 0 });
+
+/* ---------- contadores: data-count="de,até,t0,t1" */
+const counters = [...document.querySelectorAll("[data-count]")].map(el => {
+  const [a, b, t0, t1] = el.dataset.count.split(",").map(Number);
+  return { el, a, b, t0, t1, cents: b % 1 !== 0 };
+});
+
+/* ---------- onda do áudio */
+const wave = document.getElementById("wave");
+const R = rng(7), waveH = [];
+for (let i = 0; i < 26; i++) { waveH.push(.25 + R() * .75); wave.appendChild(document.createElement("i")); }
+const bars = [...wave.children];
+
+/* ---------- rolagem do chat: cada mensagem nova empurra o feed até caber */
+const feed = document.getElementById("feed"), win = feed.parentElement;
+const msgs = [...feed.querySelectorAll("[data-t]")];
+function feedScroll(t) {
+  let y = 0;
+  for (const m of msgs) {
+    const box = m.closest(".chat-feed > *");
+    const need = Math.max(0, box.offsetTop + box.offsetHeight + 30 - win.clientHeight);
+    y += (need - y) * eOut(prog(t, +m.dataset.t - .05, +m.dataset.t + .35));
+  }
+  return y;
+}
+
+/* ---------- fundo: brilhos que mudam de lugar por cena, e grade de pontos */
+const bg = document.getElementById("bg").getContext("2d");
+const glows = [ // [t, x, y, raio, alfa]
+  [0, 540, 860, 700, .0], [.6, 540, 860, 700, .35], [1.5, 900, 300, 900, .22], [5, 150, 1500, 900, .2],
+  [7.4, 540, 900, 500, .05], [7.6, 540, 880, 900, .38], [11, 540, 1100, 1000, .25], [13, 540, 1700, 1100, .3], [15, 540, 1650, 1150, .32]];
+function glowAt(t) {
+  for (let i = 0; i < glows.length - 1; i++) {
+    const a = glows[i], b = glows[i + 1];
+    if (t <= b[0]) { const k = eOut(prog(t, a[0], b[0])); return a.map((v, j) => v + (b[j] - v) * k); }
+  }
+  return glows.at(-1);
+}
+function drawBg(t) {
+  bg.fillStyle = "#0D0D0E"; bg.fillRect(0, 0, 1080, 1920);
+  const [, x, y, r, al] = glowAt(t);
+  let g = bg.createRadialGradient(x, y, 0, x, y, r);
+  g.addColorStop(0, `rgba(255,45,142,${al})`); g.addColorStop(1, "rgba(255,45,142,0)");
+  bg.fillStyle = g; bg.fillRect(0, 0, 1080, 1920);
+  const x2 = 1080 - x + Math.sin(t * .9) * 120, y2 = 1920 - y;
+  g = bg.createRadialGradient(x2, y2, 0, x2, y2, r * .7);
+  g.addColorStop(0, `rgba(198,241,26,${al * .12})`); g.addColorStop(1, "rgba(198,241,26,0)");
+  bg.fillStyle = g; bg.fillRect(0, 0, 1080, 1920);
+  // grade de pontos em deriva lenta
+  bg.fillStyle = "rgba(255,255,255,.055)";
+  const off = (t * 18) % 54;
+  for (let yy = -54 + off; yy < 1920; yy += 54) for (let xx = 27; xx < 1080; xx += 54) bg.fillRect(xx, yy, 3, 3);
+}
+
+/* ---------- Open Finance: nós em órbita, linhas e partículas até o núcleo */
+const of = document.getElementById("of").getContext("2d");
+const CX = 540, CY = 880, RX = 372, RY = 262;
+const nodes = [...document.querySelectorAll(".node")];
+const base = [-2.25, -.9, .35, 1.6, 2.75];
+function nodePos(i, t) {
+  const th = base[i] + (t - 7.5) * .11;
+  const k = eBack(prog(t, 7.72 + i * .07, 8.25 + i * .07));
+  return { x: CX + (Math.cos(th) * RX) * k, y: CY + (Math.sin(th) * RY) * k, k, raw: prog(t, 7.72 + i * .07, 8.25 + i * .07) };
+}
+const parts = []; { const P = rng(42);
+  for (let i = 0; i < 5; i++) for (let s = 8.05 + i * .045; s < 10.55; s += .07 + P() * .07) parts.push({ i, s, d: .55 + P() * .25, bend: (P() - .5) * 160, c: P() < .55 ? "255,45,142" : P() < .6 ? "198,241,26" : "246,244,241", r: 4 + P() * 4.5 }); }
+function drawOF(t) {
+  of.clearRect(0, 0, 1080, 1920);
+  if (t < 7.45 || t > 11.1) return;
+  const P = nodes.map((n, i) => nodePos(i, t));
+  // pulsos do núcleo em cada tempo
+  for (let b = 8.0; b < 10.8; b += .5) {
+    const k = prog(t, b, b + 1.1); if (k <= 0 || k >= 1) continue;
+    of.strokeStyle = `rgba(255,45,142,${.5 * (1 - k)})`; of.lineWidth = 3;
+    of.beginPath(); of.ellipse(CX, CY, 120 + k * 420, 120 + k * 330, 0, 0, Math.PI * 2); of.stroke();
+  }
+  // linhas
+  P.forEach((p, i) => {
+    const k = eOut(prog(t, 7.95 + i * .06, 8.3 + i * .06)); if (!k) return;
+    const g = of.createLinearGradient(p.x, p.y, CX, CY);
+    g.addColorStop(0, "rgba(246,244,241,.28)"); g.addColorStop(1, "rgba(255,45,142,.55)");
+    of.strokeStyle = g; of.lineWidth = 2.5; of.setLineDash([10, 12]); of.lineDashOffset = -t * 60;
+    of.beginPath(); of.moveTo(p.x, p.y); of.lineTo(p.x + (CX - p.x) * k, p.y + (CY - p.y) * k); of.stroke();
+  });
+  of.setLineDash([]);
+  // partículas com rastro, somadas (lighter) para brilhar onde se cruzam
+  of.globalCompositeOperation = "lighter";
+  for (const q of parts) {
+    const k0 = (t - q.s) / q.d; if (k0 < 0 || k0 > 1.05) continue;
+    const p = P[q.i];
+    for (let j = 0; j < 7; j++) {
+      const k = clamp(k0 - j * .035); const e = eIn(k) * .6 + k * .4;
+      const mx = (p.x + CX) / 2 - (CY - p.y) * q.bend / 900, my = (p.y + CY) / 2 + (CX - p.x) * q.bend / 900;
+      const x = (1 - e) * (1 - e) * p.x + 2 * (1 - e) * e * mx + e * e * CX, y = (1 - e) * (1 - e) * p.y + 2 * (1 - e) * e * my + e * e * CY;
+      of.fillStyle = `rgba(${q.c},${(1 - j / 7) * (k0 > 1 ? 0 : 1) * .95})`;
+      of.beginPath(); of.arc(x, y, q.r * (1 - j / 9), 0, Math.PI * 2); of.fill();
+    }
+  }
+  of.globalCompositeOperation = "source-over";
+  nodes.forEach((n, i) => {
+    const p = P[i];
+    n.style.transform = `translate(${p.x - 75}px, ${p.y - 75}px)`;
+    n.firstElementChild.style.transform = `scale(${Math.max(0, p.k)})`;
+    n.style.opacity = clamp(p.raw * 3);
+  });
+  // o núcleo "engole" as partículas: pulsa quando elas chegam
+  const core = document.querySelector("#D .core svg");
+  core.style.transform = `scale(${1 + .06 * Math.max(0, Math.sin(t * 22)) * prog(t, 8.3, 8.6) * (1 - prog(t, 10.4, 10.6))})`;
+}
+
+/* ---------- confete do final */
+const conf = document.getElementById("conf").getContext("2d");
+const bits = []; { const C = rng(99);
+  for (let i = 0; i < 140; i++) { const a = -Math.PI / 2 + (C() - .5) * 2.4, v = 900 + C() * 1500;
+    bits.push({ vx: Math.cos(a) * v, vy: Math.sin(a) * v, w: 10 + C() * 16, h: 6 + C() * 10, rot: C() * 6, vr: (C() - .5) * 18, c: ["#FF2D8E", "#C6F11A", "#F6F4F1", "#FF2D8E"][i % 4], s: 13.45 + C() * .12 }); } }
+function drawConf(t) {
+  conf.clearRect(0, 0, 1080, 1920);
+  for (const b of bits) {
+    const d = t - b.s; if (d < 0) continue;
+    const x = 540 + b.vx * d * Math.exp(-d * 1.4), y = 1350 + b.vy * d * Math.exp(-d * 1.4) + 700 * d * d;
+    if (y > 2000) continue;
+    conf.save(); conf.translate(x, y); conf.rotate(b.rot + b.vr * d); conf.globalAlpha = clamp(1.6 - d * .8);
+    conf.fillStyle = b.c; conf.fillRect(-b.w / 2, -b.h / 2, b.w, b.h); conf.restore();
+  }
+}
+
+/* ---------- grão de filme: 6 quadros pré-gerados */
+const gr = document.getElementById("grain").getContext("2d");
+const grains = []; { const G = rng(3);
+  for (let f = 0; f < 6; f++) { const im = gr.createImageData(540, 960);
+    for (let i = 0; i < im.data.length; i += 4) { const v = G() * 255; im.data[i] = im.data[i + 1] = im.data[i + 2] = v; im.data[i + 3] = 255; }
+    grains.push(im); } }
+
+function draw(t) {
+  drawBg(t); drawOF(t); drawConf(t);
+  gr.putImageData(grains[Math.floor(t * 30) % 6], 0, 0);
+  for (const c of counters) { const v = c.a + (c.b - c.a) * eOut(prog(t, c.t0, c.t1)); c.el.textContent = (c.cents ? brl : brl0).format(c.cents ? v : Math.round(v)); }
+  const play = prog(t, 2.95, 3.35);
+  bars.forEach((b, i) => { const on = i / bars.length < play; b.style.height = (14 + waveH[i] * 44 * (on ? 1 : .75) * (1 + .25 * Math.sin(t * 30 + i))) + "px"; b.style.background = on ? "#fff" : "rgba(255,255,255,.5)"; });
+  feed.style.transform = `translateY(${-feedScroll(t)}px)`;
+}
+
+window.__seek = t => {
+  for (const a of document.getAnimations()) { a.pause(); a.currentTime = t * 1000; }
+  draw(t);
+};
+window.__ready = (async () => {
+  await document.fonts.ready;
+  await Promise.all([...document.images].map(i => i.decode().catch(() => {})));
+  window.__seek(0);
+})();
+if (!/render/.test(location.search)) window.__ready.then(() => {
+  const t0 = performance.now();
+  const loop = () => { window.__seek(((performance.now() - t0) / 1000) % DUR); requestAnimationFrame(loop); };
+  loop();
+});
+</script>
+</body>
+</html>

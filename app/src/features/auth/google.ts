@@ -1,12 +1,13 @@
 import * as WebBrowser from "expo-web-browser";
 
 import { ErroDeApi, baseUrl } from "@/api/client";
-import { GENERICO, textoDaFalha, type EstadoEntrar } from "@/features/auth/entrar";
-import { EntradaSuperada, completarCadastroGoogle, entrarComGoogle, pendenteGoogle } from "@/services/auth";
+import { GENERICO, textoSocial, type EstadoEntrar } from "@/features/auth/entrar";
+import { EntradaSuperada, entrarComGoogle, pendenteGoogle } from "@/services/auth";
 import { FalhaNoCofre } from "@/storage/secure";
 
 /**
- * "Continuar com Google" na rota Entrar — as fases G, C e K de `EstadoEntrar`.
+ * "Continuar com Google" na rota Entrar — a fase G de `EstadoEntrar`, e a
+ * entrada em C. C e K são comuns com a Apple (`cadastroSocial.ts`).
  * Sem JSX, como `entrar.ts`: o Jest exercita as transições com os serviços reais.
  *
  * O retorno do Google chega SÓ pelo `openAuthSessionAsync` (a
@@ -25,8 +26,6 @@ const TEXTO_DO_ERRO = {
 } as const;
 
 export const CADASTRO_GOOGLE_EXPIRADO = "Seu cadastro pelo Google expirou. Tente de novo.";
-export const ERRO_COFRE_GOOGLE =
-  "Sua conta foi criada, mas não conseguimos abrir a sessão neste aparelho. Entre com o Google de novo.";
 
 export type RetornoGoogle =
   | { tipo: "code"; valor: string }
@@ -62,9 +61,6 @@ export function lerRetorno(url: string): RetornoGoogle {
   return { tipo: "invalido" };
 }
 
-/** 5xx, rede, tempo limite e contrato quebrado: texto genérico. O resto, o `detail` do servidor. */
-const textoGoogle = (e: unknown) => (e instanceof ErroDeApi && e.status >= 500 ? GENERICO : textoDaFalha(e));
-
 /**
  * F → G → resultado. NUNCA devolve `null`: G tem todos os botões desativados,
  * e `null` (o "nada" de `enfileirar`) prenderia a tela nela.
@@ -92,7 +88,7 @@ export async function continuarComGoogle(autenticar: () => void): Promise<Estado
   } catch (e) {
     if (e instanceof EntradaSuperada) return { fase: "formulario" };
     if (e instanceof FalhaNoCofre) return { fase: "erro-cofre" };
-    return { fase: "formulario", aviso: textoGoogle(e) };
+    return { fase: "formulario", aviso: textoSocial(e) };
   }
 }
 
@@ -100,38 +96,9 @@ export async function continuarComGoogle(autenticar: () => void): Promise<Estado
 async function abrirCadastro(token: string): Promise<EstadoEntrar> {
   try {
     const p = await pendenteGoogle(token);
-    return { fase: "google-cadastro", token, email: p.email, nome: p.name_hint };
+    return { fase: "cadastro-social", provedor: "google", token, email: p.email, nome: p.name_hint };
   } catch (e) {
     const expirou = e instanceof ErroDeApi && e.status === 404;
     return { fase: "formulario", aviso: expirou ? CADASTRO_GOOGLE_EXPIRADO : GENERICO };
-  }
-}
-
-/**
- * K → resultado. O 400 do `complete-signup` só distingue o cadastro vencido
- * pelo texto (`consume_pending_google_signup`, `db/google_auth.py`): esse volta
- * ao formulário, porque o token morreu; os de nome/telefone ficam em C.
- *
- * ponytail: casa pelo começo do `detail`, sem `code` no corpo. Se o texto do
- * servidor mudar, o vencido cai em C com o aviso certo e a pessoa volta pelo
- * Voltar. Ganha um `code` no backend quando isso incomodar.
- */
-export async function criarContaComGoogle(
-  c: { token: string; email: string; nome: string },
-  telefone: string,
-  autenticar: () => void,
-): Promise<EstadoEntrar> {
-  const voltaAoC = (aviso?: string): EstadoEntrar => ({ fase: "google-cadastro", ...c, aviso });
-  try {
-    await completarCadastroGoogle(c.token, c.nome.trim(), telefone.replace(/\D+/g, ""));
-    autenticar();
-    return { fase: "google-criando", token: c.token, email: c.email };
-  } catch (e) {
-    if (e instanceof EntradaSuperada) return voltaAoC();
-    if (e instanceof FalhaNoCofre) return { fase: "erro-cofre", mensagem: ERRO_COFRE_GOOGLE };
-    if (e instanceof ErroDeApi && e.status === 400 && e.detalhe.startsWith("Cadastro expirado")) {
-      return { fase: "formulario", aviso: e.detalhe };
-    }
-    return voltaAoC(textoGoogle(e));
   }
 }

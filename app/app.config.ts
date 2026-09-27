@@ -64,6 +64,11 @@ const config: ExpoConfig = {
     // `_APPLE_APP_IDS`). Dev e staging ficam fora para não misturar credenciais
     // nem exigir a capability nos App IDs deles.
     ...(AMBIENTE === "production" ? { associatedDomains: ["webcredentials:pigbankai.com"] } : {}),
+    // Entrar com a Apple: só o App ID de produção tem a capability, e o
+    // backend só aceita o `aud` dele (core/services/apple_signin.py). No dev
+    // client a Apple falha e cai no aviso genérico; o Expo Go (57.0.9) nem traz
+    // o módulo, e o botão não renderiza. O caminho real só no build de produção.
+    ...(AMBIENTE === "production" ? { usesAppleSignIn: true } : {}),
   },
   android: {
     package: `${ID_BASE}${atual.sufixoId}`,
@@ -81,6 +86,9 @@ const config: ExpoConfig = {
     "expo-secure-store",
     "@sentry/react-native/expo",
     ["expo-build-properties", { ios: { enableSceneSupport: true } }],
+    // Grava o entitlement da Apple e deixa o botão do sistema em português
+    // (`CFBundleAllowMixedLocalizations`). Só produção, como o `usesAppleSignIn`.
+    ...(AMBIENTE === "production" ? ["expo-apple-authentication"] : []),
   ],
   experiments: { typedRoutes: true },
   extra: {
