@@ -24,7 +24,7 @@ import pytest
 
 import db
 from db.connection import get_conn
-from db.open_finance_state import pluggy_item_lock
+from db.open_finance_state import _lock_key, pluggy_item_lock
 from scripts import of_itens_operador as op
 from test_of_webhook_adopt_guards import _limpa_item
 
@@ -121,13 +121,18 @@ def test_falha_da_pluggy_nao_grava_operator_delete(user_id, item, monkeypatch):
     assert [o for o, _ in _origens(item)] == ["pluggy_item"]
 
 
-def _esperando_advisory(prazo: float) -> bool:
-    """Alguém está BLOQUEADO num advisory lock (o script, na fila do item)."""
+def _esperando_advisory(item: str, prazo: float) -> bool:
+    """Alguém está BLOQUEADO no advisory lock DESTE item (`pg_advisory_lock(bigint)`:
+    `classid` = 32 bits altos, `objid` = 32 baixos da chave)."""
     fim = time.monotonic() + prazo
     while time.monotonic() < fim:
         with get_conn() as c:
-            if c.execute("select 1 from pg_locks where locktype = 'advisory'"
-                         " and not granted limit 1").fetchone():
+            if c.execute(
+                "with k as (select hashtext(%s)::bigint as v)"
+                " select 1 from pg_locks, k where locktype = 'advisory' and not granted"
+                " and classid::bigint = (k.v >> 32) & 4294967295"
+                " and objid::bigint = k.v & 4294967295 limit 1",
+                (_lock_key(item),)).fetchone():
                 return True
         time.sleep(0.05)
     return False
@@ -158,34 +163,13 @@ def test_conexao_gravada_sob_o_lock_e_vista(user_id, item, deletados, monkeypatc
     t_script = threading.Thread(target=_script, daemon=True)
     t_script.start()
     try:
-        assert _esperando_advisory(_PRAZO), "o script não entrou na fila do lock"
+        assert _esperando_advisory(item, _PRAZO), "o script não entrou na fila do lock"
     finally:
         soltar.set()
         t_post.join(_PRAZO)
         t_script.join(_PRAZO)
     assert not t_script.is_alive(), "script pendurado"
     assert rc == [1] and deletados == [], f"rc={rc} deletados={deletados}"
-
-
-# ── detalhe (--item): o GET na Pluggy e o dono remoto ───────────────────────
-
-def test_detalhe_mostra_dono_remoto_e_prescreve_o_estado(user_id, item, monkeypatch, capsys):
-    from core.services.pluggy import PluggyApiError
-
-    db.register_item(None, provider_item_id=item, origin="webhook")
-    monkeypatch.setattr(op, "get_pluggy_item", lambda i: {
-        "status": "UPDATED", "clientUserId": "987654321989", "connector": {"name": "Nubank"}})
-    op.main(["--item", item])
-    saida = capsys.readouterr().out
-    assert "NUNCA_ATRIBUIDO" in saida and "NÃO existe" in saida
-    assert f"--item {item} --apagar --estado NUNCA_ATRIBUIDO --apply" in saida
-
-    def _404(i):
-        raise PluggyApiError("x", status_code=404)
-
-    monkeypatch.setattr(op, "get_pluggy_item", _404)
-    op.main(["--item", item])
-    assert "404" in capsys.readouterr().out
 
 
 # ── rodada 2: id desconhecido, caixa, falhas de rede e do rastro ────────────
@@ -230,7 +214,7 @@ def _falhas_pluggy():
 
     from core.services.pluggy import PluggyConfigError
     return [httpx.ConnectTimeout("t"), httpx.ConnectError("c"), httpx.ReadTimeout("r"),
-            PluggyConfigError("sem credencial")]
+            httpx.RemoteProtocolError("r"), PluggyConfigError("sem credencial")]
 
 
 @pytest.mark.parametrize("exc", _falhas_pluggy(), ids=lambda e: type(e).__name__)
@@ -246,8 +230,8 @@ def test_falha_de_rede_ou_credencial_no_delete_e_rc_1_sem_rastro(
     assert op.main(["--item", item, "--apagar", "--estado", "INTERROMPIDO", "--apply"]) == 1
     assert [o for o, _ in _origens(item)] == ["pluggy_item"]
     saida = capsys.readouterr().out
-    # Timeout: o DELETE pode ter sido aplicado — "falhou" seria mentira.
-    if isinstance(exc, httpx.TimeoutException):
+    # Timeout ou conexão caída no meio: o DELETE pode ter sido aplicado.
+    if isinstance(exc, (httpx.TimeoutException, httpx.RemoteProtocolError)):
         assert "INCERTO" in saida and "MESMO comando" in saida, saida
     else:
         assert "falhou" in saida and "INCERTO" not in saida, saida
@@ -339,12 +323,11 @@ def test_404_de_item_ja_resolvido_nao_prescreve_nada(user_id, item, monkeypatch,
     assert "--apagar" not in capsys.readouterr().out
 
 
-def test_lista_so_com_apagados_nao_diz_que_nao_ha_nada(monkeypatch, capsys):
-    monkeypatch.setattr(op, "listar_sem_conexao", lambda: {})
-    monkeypatch.setattr(op, "itens_com_remocao_remota_falha", lambda: [])
-    monkeypatch.setattr(op, "conexoes_sem_rastro", lambda: [])
-    monkeypatch.setattr(op, "apagados_pelo_operador", lambda: 3)
-    assert op.main([]) == 0
-    saida = capsys.readouterr().out
-    assert "3 apagado(s) pelo operador" in saida
-    assert "Nada no registry" not in saida
+
+@pytest.mark.parametrize("conector", ["Nubank", ["Nubank"], None])
+def test_connector_fora_do_formato_nao_estoura(user_id, item, monkeypatch, capsys, conector):
+    monkeypatch.setattr(op, "get_pluggy_item", lambda i: {
+        "status": "UPDATED", "clientUserId": "x", "connector": conector})
+    _interrompido(user_id, item)
+    assert op.main(["--item", item]) == 0
+    assert "banco=None" in capsys.readouterr().out

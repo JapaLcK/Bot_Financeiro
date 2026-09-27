@@ -1061,7 +1061,8 @@ async def _adota_item_orfao(item_id: str, last_event: str | None = None) -> int 
     `test_so_item_created_adota` prende), então item cujo `item/created` se perdeu
     ou nunca foi entregue não é adotado por evento NENHUM depois — nem pelo
     `item/updated` —; se reconectar pelo widget o recupera NÃO foi verificado
-    (o one-shot saiu; ver "Na adoção que morreu no meio", acima). Nenhum dos
+    (esse item fica no registry como NUNCA_ATRIBUIDO, e a saída é o operador:
+    `scripts/of_itens_operador.py`, que o apaga para o usuário reconectar). Nenhum dos
     dois é regressão
     contra a `main`.
 

@@ -7,20 +7,25 @@ a adoção por script dobrava saldo com duplicata do mesmo banco (saiu em
 `db.open_finance_diagnostico.classifica_item`.
 
 Estados e procedimento:
-  REMOVIDO         o usuário tirou o banco. GET 404: nada a fazer. Item VIVO na
-                   Pluggy: a remoção remota falhou — apagar.
+  REMOVIDO         o usuário tirou o banco. Na lista é só CONTAGEM, a menos que
+                   tenha a marca de falha abaixo. GET 404 sem marca: nada a
+                   fazer. Item VIVO na Pluggy: a remoção remota falhou — apagar.
   INTERROMPIDO     adoção ou POST /pluggy-item que não completou. Avisar o
                    usuário, apagar, pedir reconexão. (Um disconnect numa janela
                    de ms também cai aqui; apagar não causa dano.)
   LEGADO_AMBIGUO   rastro anterior à marca de remoção, ou sem rastro com dono mas
-                   com auditoria de conexão. Nunca recuperar sozinho: perguntar
-                   ao usuário; apagar, e pedir reconexão se ele quiser o banco.
+                   com auditoria de conexão (inclusive item que só a auditoria
+                   conhece: conectou antes do registry). Nunca recuperar
+                   sozinho: perguntar ao usuário; apagar, e pedir reconexão se
+                   ele quiser o banco.
   NUNCA_ATRIBUIDO  o webhook viu, ninguém ficou com ele. O `--item` mostra o dono
                    remoto: conta inexistente ou com exclusão agendada → apagar
                    (LGPD); conta existe → apagar e pedir reconexão.
   remoção remota falhou (marca, soma-se ao estado): o log registra DELETE falho
                    na Pluggy e nenhum `operator_delete` depois. GET 404 =
                    resolvido; vivo → apagar.
+  CONECTADO        conexão viva, com rastro. Nada a fazer aqui: a remoção é
+                   pelo app (DELETE /open-finance/{uid}); `--apagar` recusa.
   CONECTADO_SEM_RASTRO  conexão viva sem linha com dono no registry. Só
                    informativo; nenhuma escrita.
   DESCONHECIDO     nem registry, nem auditoria, nem logs conhecem o id (digitação,
@@ -58,11 +63,13 @@ from db.open_finance_diagnostico import (
     CONECTADO_SEM_RASTRO,
     DESCONHECIDO,
     ESTADOS_SEM_CONEXAO,
+    REMOVIDO,
     apagados_pelo_operador,
     classifica_item,
     conexoes_sem_rastro,
     itens_com_remocao_remota_falha,
     listar_sem_conexao,
+    resolvido_pelo_operador,
 )
 from db.open_finance_state import pluggy_item_lock, register_item
 from scripts.of_itens_alvos import _dica_de_recusa, recusa_id
@@ -70,6 +77,9 @@ from scripts.of_itens_alvos import _dica_de_recusa, recusa_id
 # O que a Pluggy pode levantar e não é bug nosso: HTTP de erro, rede/timeout,
 # credencial ausente. Vira mensagem e rc=1, nunca traceback.
 _FALHA_PLUGGY = (PluggyApiError, PluggyConfigError, httpx.HTTPError)
+# Falha que pode ter chegado DEPOIS de a Pluggy receber o DELETE: o resultado é
+# incerto (não "falhou"). `ConnectTimeout` entra junto, pelo lado conservador.
+_INCERTO = (httpx.TimeoutException, httpx.RemoteProtocolError)
 
 
 def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
@@ -104,11 +114,16 @@ def listar() -> None:
     if recusados:
         print(f"{len(recusados)} id(s) FORA da lista — nenhum comando os aceita: "
               + ", ".join(map(repr, recusados)) + _dica_de_recusa())
+    falhas = [i for i in falhas if i not in recusados]
     for estado in ESTADOS_SEM_CONEXAO:
         itens = [i for i, e in sem_conexao.items() if e == estado and i not in recusados]
+        if estado == REMOVIDO:
+            # Desconexão normal não é pendência: só a com DELETE falho aparece.
+            if sem_falha := [i for i in itens if i not in falhas]:
+                print(f"{len(sem_falha)} removido(s) sem falha registrada (nada a fazer).")
+            itens = [i for i in itens if i in falhas]
         if itens:
             print(f"{estado} ({len(itens)}): {', '.join(itens)}")
-    falhas = [i for i in falhas if i not in recusados]
     if falhas:
         print(f"remoção remota falhou ({len(falhas)}): "
               + ", ".join(f"{i} [{classifica_item(i)}]" for i in falhas))
@@ -139,11 +154,11 @@ def detalhe(item: str) -> int:
     except PluggyApiError as exc:
         if exc.status_code == 404:
             print("  Pluggy: 404, o item não existe lá. Nada a apagar.")
-            # Item que ainda aparece (marca de falha, ou na lista/card) ficaria lá
-            # para sempre: o DELETE é idempotente (404 = sucesso) e grava o
-            # `operator_delete` que o fecha.
-            # ponytail: `listar_sem_conexao` classifica todos; punhado de items.
-            if marca or item in listar_sem_conexao():
+            # Marca de falha, ou item pendente na lista (estado ≠ REMOVIDO e não
+            # resolvido pelo operador), ficaria lá para sempre: o DELETE é
+            # idempotente (404 = sucesso) e grava o `operator_delete` que o fecha.
+            # REMOVIDO sem marca é desconexão normal: nada a fazer.
+            if marca or (estado != REMOVIDO and not resolvido_pelo_operador(item)):
                 print(f"  Para tirar da lista (e fechar a marca, se houver): {comando}")
             return 0
         print(f"  Pluggy: erro ({exc}). Tente de novo.")
@@ -157,7 +172,8 @@ def detalhe(item: str) -> int:
         print("  Pluggy: resposta inesperada da Pluggy (não é um item). Tente de novo.")
         return 1
     dono = str(remoto.get("clientUserId") or "")
-    conector = (remoto.get("connector") or {}).get("name")
+    conector = remoto.get("connector")
+    conector = conector.get("name") if isinstance(conector, dict) else None
     print(f"  Pluggy: VIVO, status={remoto.get('status')} banco={conector} dono={dono or '?'}")
     if not dono.isdigit():
         print("  dono remoto não é um user_id nosso.")
@@ -196,8 +212,8 @@ def apagar(item: str, estado_esperado: str) -> int:
             return 1
         try:
             delete_pluggy_item(item)   # 404 conta como sucesso (idempotente)
-        except httpx.TimeoutException as exc:
-            print(f"{item}: o DELETE na Pluggy estourou o prazo ({type(exc).__name__})."
+        except _INCERTO as exc:
+            print(f"{item}: o DELETE na Pluggy caiu no meio ({type(exc).__name__})."
                   " Resultado INCERTO: ele pode ter sido aplicado. Nada gravado; rode"
                   " de novo o MESMO comando (404 conta como sucesso).")
             return 1

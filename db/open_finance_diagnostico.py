@@ -153,9 +153,24 @@ def apagados_pelo_operador(*, provider: str = "pluggy") -> int:
         return int(cur.fetchone()["n"])
 
 
+def resolvido_pelo_operador(item_id: str, *, provider: str = "pluggy") -> bool:
+    """Este item está resolvido pelo operador (`RESOLVIDO_PELO_OPERADOR`)?"""
+    with get_conn() as conn, conn.cursor() as cur:
+        cur.execute(
+            f"select 1 from open_finance_item_registry r where r.provider = %s"
+            f" and r.provider_item_id = %s and {RESOLVIDO_PELO_OPERADOR} limit 1",
+            (provider, str(item_id or "")))
+        return cur.fetchone() is not None
+
+
 def listar_sem_conexao(*, provider: str = "pluggy") -> dict[str, str]:
-    """Todo item do registry sem conexão local → estado. O predicado é o do painel
-    (`ITEMS_SEM_CONEXAO`, uma fonte só), restrito a um provider.
+    """Todo item sem conexão local → estado. Duas fontes:
+
+      • o registry, pelo predicado do painel (`ITEMS_SEM_CONEXAO`, uma fonte só);
+      • a auditoria `OPEN_FINANCE_CONNECTED` com `details.item_id` de item SEM
+        nenhuma linha no registry (conectou antes do registry existir): sai
+        LEGADO_AMBIGUO. O card do painel NÃO conta estes — ele lê só o registry.
+        Da auditoria sai só o `item_id`, nunca o `user_id`.
 
     ponytail: uma `classifica_item` por item. Punhado de items; se virar milhares,
     é uma query com `distinct on`."""
@@ -164,6 +179,22 @@ def listar_sem_conexao(*, provider: str = "pluggy") -> dict[str, str]:
             f"select distinct r.provider_item_id as item {ITEMS_SEM_CONEXAO}"
             " and r.provider = %s order by 1", (provider,))
         itens = [r["item"] for r in (cur.fetchall() or [])]
+        # Conexão com `lower()`, como em `classifica_item`; registry por match exato.
+        cur.execute(
+            """
+            select distinct a.details->>'item_id' as item from audit_events a
+             where a.event = %s and coalesce(a.details->>'item_id', '') <> ''
+               and not exists (select 1 from open_finance_connections c
+                                where c.provider = %s
+                                  and lower(c.provider_item_id) = lower(a.details->>'item_id'))
+               and not exists (select 1 from open_finance_item_registry r
+                                where r.provider = %s
+                                  and r.provider_item_id = a.details->>'item_id')
+             order by 1
+            """,
+            (AuditEvent.OPEN_FINANCE_CONNECTED, provider, provider),
+        )
+        itens += [r["item"] for r in (cur.fetchall() or [])]
     return {i: classifica_item(i, provider=provider) for i in itens}
 
 
