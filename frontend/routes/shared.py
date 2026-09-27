@@ -1211,16 +1211,9 @@ def gate_pro_page(request: Request):
     path = request.url.path or "/"
     login_redirect = RedirectResponse(url=f"/login?next={quote(path)}", status_code=302)
 
-    token = get_auth_token_from_request(request, None)
-    payload = decode_jwt(token) if token else None
-    if not payload or payload.get("type") != "auth":
+    user_id = _resolve_page_user_id(request)
+    if user_id is None:
         return login_redirect
-    user_id = int(payload["sub"])
-    jti = payload.get("jti")
-    if jti:
-        session = get_active_session(jti)
-        if not session or int(session.get("user_id") or 0) != user_id:
-            return login_redirect
     if not is_pro(user_id):
         return RedirectResponse(url="/precos", status_code=302)
     return None
