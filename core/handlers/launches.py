@@ -1354,8 +1354,11 @@ def _aviso_pergunta_pulada(part: str, fila: list[dict] = ()) -> str:
         depois = "depois de responder a pergunta acima, "
     else:
         depois = ""
-    return (f'ℹ️ Não registrei "{trecho}" porque parece uma pergunta. '
-            f"Se era gasto, {depois}me manda só o valor e o lugar, tipo *gastei 50 no bar*.")
+    if normalize_text(trecho).startswith(RECEITA_START_VERBS):
+        dica = f"Se era receita, {depois}me manda só o valor e de onde veio, tipo *recebi 500 do freela*."
+    else:
+        dica = f"Se era gasto, {depois}me manda só o valor e o lugar, tipo *gastei 50 no bar*."
+    return f'ℹ️ Não registrei "{trecho}" porque parece uma pergunta. {dica}'
 
 
 # Quantas vezes o MESMO valor precisa ter aparecido antes (pro mesmo tipo/descrição)

@@ -233,3 +233,31 @@ def test_aviso_corta_trecho_longo_e_mantem_o_curto():
     assert f'"{"x" * 79}…"' in sem_espaco
     curto = "a" * 80  # no limite: sai igual, sem "…"
     assert L._aviso_pergunta_pulada(curto) == _aviso(curto)
+
+
+# ── Pedaço pulado de RECEITA: a dica não manda regravar como gasto (Codex #570) ──
+# Tipo pelo verbo, com a mesma regra do resto (`RECEITA_START_VERBS`).
+
+def _aviso_receita(pedaco: str, depois: str = "") -> str:
+    return (f'ℹ️ Não registrei "{pedaco}" porque parece uma pergunta. '
+            f"Se era receita, {depois}me manda só o valor e de onde veio, tipo *recebi 500 do freela*.")
+
+
+@pytest.mark.parametrize("pedaco", [
+    "recebi mais que o normal 500 do freela", "Ganhei mais que o combinado 300?",
+    "caiu mais que no mês passado 200", "entrou menos que devia 100 do aluguel",
+])
+@pytest.mark.parametrize("fila,depois", [
+    ([], ""),
+    ([{"desc": "aluguel"}], "depois de responder a pergunta acima, "),
+    ([{"desc": "a"}, {"desc": "b"}], "depois de me passar o valor de *a* e *b*, "),
+])
+def test_aviso_de_receita_pede_receita(pedaco, fila, depois):
+    assert L._aviso_pergunta_pulada(pedaco, fila) == _aviso_receita(pedaco, depois)
+
+
+def test_multi_receita_pulada_avisa_como_receita(add_sem_banco):
+    resposta, gravados = add_sem_banco("gastei 30 no uber e recebi mais que o normal 500 do freela")
+    assert gravados == [30]
+    assert _aviso_receita("recebi mais que o normal 500 do freela") in resposta, resposta
+    assert "Se era gasto" not in resposta
