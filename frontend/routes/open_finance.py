@@ -248,8 +248,9 @@ async def _log_com_teto(segundos: float, *args, **kwargs) -> None:
     NÃO use `logging.warning` como canal "local" antes desta chamada: o
     `_DashboardHandler` (`core/observability.py`) o espelha com INSERT SÍNCRONO
     dentro do event loop, e com `system_event_logs` travada isso DOBRA o prazo e
-    para o processo (medido na issue #541: connect-token 2,05 s → 4,05 s, loop
-    parado 2,01 s; três concorrentes 8,10 s). Os três avisos que já existem
+    para o processo (issue #541; quem prende é
+    `tests/test_of_log_teto_e_status.py::test_teto_vale_com_o_espelho_do_logging_lento`).
+    Os três avisos que já existem
     (`of_reconnect_lock_retry`, `of_reconnect_lock_timeout` no
     `_grava_reconexao` e `of_item_registry_failed` no `/pluggy-item`) pagam esse
     custo hoje — registrado, fora do escopo da #541.
@@ -717,6 +718,7 @@ async def _grava_reconexao(
             # é decidir não retentar quando `causa` é da família de conexão; o
             # gancho já existe (é a própria `causa`), a decisão é de outro PR.
             connection, sob_lock = None, False
+            # Texto cru com coluna NULL (#541): só `OperationalError` (infra) chega aqui, sem dado de linha.
             causa = f"{type(exc).__name__}: {exc}"
         if sob_lock:
             return connection
@@ -1129,6 +1131,7 @@ async def _adota_item_orfao(item_id: str, last_event: str | None = None) -> int 
     try:
         origens = await asyncio.to_thread(item_registry_origins, item_id)
     except Exception as exc:  # noqa: BLE001 — nada escapa daqui (o webhook responde 200)
+        # `str(exc)` fica com coluna NULL (#541): é SELECT por item_id, e `Key (user_id)=`/`Failing row` só nascem em escrita.
         await log_system_event(
             "warning", "of_webhook_adopt_skipped",
             "Rastro do item ilegível: adoção não verificável",

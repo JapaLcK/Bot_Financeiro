@@ -3,8 +3,8 @@ logging lento, e o `status_code` da Pluggy sobrevive à lista branca.
 
 O `_DashboardHandler` (`core/observability.py`) espelha todo WARNING com INSERT
 SÍNCRONO dentro do event loop. Um `logging.warning` "local" antes do
-`_log_com_teto` dobrava o prazo com `system_event_logs` travada (medido: 2 s → 4 s,
-loop parado 2 s). O rastro de teto estourado é um `print` em stderr, sem banco.
+`_log_com_teto` dobrava o prazo com `system_event_logs` travada e parava o event
+loop. O rastro de teto estourado é um `print` em stderr, sem banco.
 
 CONTROLES (CLAUDE.md §3), cada um num caso verde:
   • recolocar um `logging.warning` antes do `_log_com_teto` do connect-token →
