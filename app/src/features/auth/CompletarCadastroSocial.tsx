@@ -69,7 +69,7 @@ export function CompletarCadastroSocial({ estado, autenticar, aplicar }: Props) 
               rotulo="E-mail"
               icone="Envelope"
               value={estado.email}
-              desativado
+              somenteLeitura
               accessibilityHint={relay ? LEGENDA_RELAY : undefined}
             />
             {relay ? (
