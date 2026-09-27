@@ -36,6 +36,9 @@ Controles NEGATIVOS declarados (docs/controles_declarados.md) — em
      faixa 0..23 → vermelho `[-1]` e `[25]`;
   crase em volta de `{{gasto}}` no `AUTOPAY_BODY` → vermelho
      `test_nome_com_marcacao_vai_cru_e_o_corpo_nao_tem_marcacao`.
+  l. mover o claim para antes do `try` da leitura de acesso/opt-out (ou seguir
+     com `ok=True` no except) → vermelho
+     `test_leitura_que_falha_nao_reserva_e_a_proxima_hora_envia` (os dois).
 Positivo: `test_loop_real_manda_um_aviso_por_gasto_conta_e_cartao` e o segundo
 passo de `test_antes_da_hora_nao_reserva_e_depois_envia` seguem verdes nas injeções.
 """
@@ -384,4 +387,28 @@ def test_hora_invalida_vale_o_padrao(user_id, monkeypatch, hora):
     assert _para(posts, _FONE_A) == [] and _reservados(user_id) == 0
 
     _rodar(9)
+    assert len(_para(posts, _FONE_A)) == 1
+
+
+@pytest.mark.parametrize("alvo", ["db.get_whatsapp_updates_opt_out",
+                                  "core.reports.reports_daily.filtrar_por_acesso"])
+def test_leitura_que_falha_nao_reserva_e_a_proxima_hora_envia(user_id, monkeypatch, alvo):
+    """Fail-closed: leitura de acesso/opt-out que levanta não envia NEM reserva.
+
+    Controle negativo: mover o claim para antes do `try` da leitura (ou trocar o
+    `continue` do except por seguir com `ok=True`) → vermelho nos dois parâmetros.
+    Positivo: a volta seguinte, sem a falha, envia 1 vez."""
+    posts = _armar(monkeypatch)
+    _dono(user_id, _FONE_A)
+    _gasto(user_id, "Falha Q616")
+
+    def _quebra(*a, **k):
+        raise RuntimeError("banco caiu")
+
+    with monkeypatch.context() as m:
+        m.setattr(alvo, _quebra)
+        _rodar()
+    assert _para(posts, _FONE_A) == [] and _reservados(user_id) == 0
+
+    _rodar()
     assert len(_para(posts, _FONE_A)) == 1
