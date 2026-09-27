@@ -43,15 +43,18 @@ async def run_recurring_charger_loop():
         except Exception as exc:
             print(f"[bills] erro: {exc}", file=sys.stderr)
             traceback.print_exc(file=sys.stderr)
+        # Uma leitura do relógio pros dois passos: a volta que cruza a meia-noite
+        # grava e envia no mesmo dia lógico (senão o aviso de D some ou sai em D+1).
+        agora = now_tz()
         try:
-            await asyncio.to_thread(sync_autopay_notices_once)
+            await asyncio.to_thread(sync_autopay_notices_once, agora.date())
         except asyncio.CancelledError:
             raise
         except Exception as exc:
             print(f"[autopay_notice] erro: {exc}", file=sys.stderr)
             traceback.print_exc(file=sys.stderr)
         try:
-            await asyncio.to_thread(notify_autopay_notices_whatsapp_once)
+            await asyncio.to_thread(notify_autopay_notices_whatsapp_once, agora)
         except asyncio.CancelledError:
             raise
         except Exception as exc:

@@ -39,6 +39,8 @@ Controles NEGATIVOS declarados (docs/controles_declarados.md) — em
   l. mover o claim para antes do `try` da leitura de acesso/opt-out (ou seguir
      com `ok=True` no except) → vermelho
      `test_leitura_que_falha_nao_reserva_e_a_proxima_hora_envia` (os dois).
+  m. no loop, voltar a ler o relógio em cada passo (sync e notify sem argumento)
+     → vermelho `test_volta_que_cruza_a_meia_noite_envia_o_aviso_do_dia`.
 Positivo: `test_loop_real_manda_um_aviso_por_gasto_conta_e_cartao` e o segundo
 passo de `test_antes_da_hora_nao_reserva_e_depois_envia` seguem verdes nas injeções.
 """
@@ -48,13 +50,14 @@ import importlib.util
 import re
 import time
 from concurrent.futures import ThreadPoolExecutor
-from datetime import date
+from datetime import date, timedelta
 from pathlib import Path
 
 import pytest
 
 import core.services.recurring_charger as rc
 import db
+import db.recurring as dbr
 from _billing_grants_helpers import garantir_system_event_logs
 from conftest import promote_to_pro
 from core.observability import recent_event_exists
@@ -162,6 +165,27 @@ def test_loop_real_manda_um_aviso_por_gasto_conta_e_cartao(user_id, monkeypatch)
         assert [c["type"] for c in p["template"]["components"]] == ["body"]  # sem botão
     assert _reservados(user_id) == 2
     assert recent_event_exists(_EVENTO, user_id, 1) is True
+
+
+def test_volta_que_cruza_a_meia_noite_envia_o_aviso_do_dia(user_id, monkeypatch):
+    """A volta começa em D 23:59:59 e a meia-noite passa enquanto a sync grava.
+
+    Controle negativo: o loop lendo o relógio em cada passo (sync e notify sem
+    argumento) → o notify vê D+1 00:00:05, antes da hora, e manda 0: vermelho."""
+    posts = _armar(monkeypatch)
+    _dono(user_id, _FONE_A)
+    _gasto(user_id, "Meia-noite Q616")
+
+    virou = []
+    gravar = dbr.ensure_autopay_notice
+    monkeypatch.setattr(dbr, "ensure_autopay_notice", lambda *a: virou.append(1) or gravar(*a))
+    d = _as(23).replace(minute=59, second=59)
+    monkeypatch.setattr(rc, "now_tz", lambda: d + timedelta(seconds=6) if virou else d)
+
+    _um_tick(monkeypatch)
+
+    assert virou and len(_para(posts, _FONE_A)) == 1
+    assert _reservados(user_id) == 1
 
 
 def test_aviso_de_ontem_nao_sai(user_id, monkeypatch):
