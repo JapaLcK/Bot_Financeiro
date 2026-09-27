@@ -520,6 +520,44 @@ def ensure_autopay_notice(recurring_id: int, user_id: int, amount: float, period
     return criou
 
 
+def list_autopay_notices_for_whatsapp(since) -> list[dict[str, Any]]:
+    """Avisos de autopay ainda não reservados pro WhatsApp, de TODOS os usuários,
+    gravados a partir de `since` (meia-noite de hoje, com fuso). Cada linha leva
+    o próprio user_id. O corte por `charged_at` segura aviso de dia anterior (o
+    do deploy) e linha antiga do cobrador com lançamento apagado."""
+    with get_conn() as conn:
+        with conn.cursor() as cur:
+            cur.execute(
+                """
+                select rc.id, rc.user_id, rc.amount, r.name, r.payment_type
+                from recurring_charges rc
+                join recurring_expenses r on r.id = rc.recurring_id and r.user_id = rc.user_id
+                where rc.launch_id is null and rc.credit_tx_id is null
+                  and rc.wa_notified_at is null
+                  and rc.charged_at >= %s
+                  and r.is_active and r.payment_mode = 'autopay'
+                order by rc.user_id, rc.id
+                """,
+                (since,),
+            )
+            return [dict(r) for r in (cur.fetchall() or [])]
+
+
+def claim_autopay_notice_whatsapp(charge_id: int, user_id: int) -> bool:
+    """Reserva o aviso pro WhatsApp ANTES do envio. True só pra quem reservou —
+    dois processos (deploy sobreposto) não mandam duas vezes."""
+    with get_conn() as conn:
+        with conn.cursor() as cur:
+            cur.execute(
+                "update recurring_charges set wa_notified_at = now() "
+                "where id = %s and user_id = %s and wa_notified_at is null returning id",
+                (int(charge_id), int(user_id)),
+            )
+            reservou = cur.fetchone() is not None
+        conn.commit()
+    return reservou
+
+
 __all__ = [
     "list_recurring_expenses",
     "get_recurring_expense",
@@ -531,4 +569,6 @@ __all__ = [
     "dismiss_recurring_suggestion",
     "list_active_autopay_recurrings",
     "ensure_autopay_notice",
+    "list_autopay_notices_for_whatsapp",
+    "claim_autopay_notice_whatsapp",
 ]

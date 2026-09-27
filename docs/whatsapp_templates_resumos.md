@@ -156,3 +156,28 @@ semanal"* / *"desligar resumo mensal"* por texto, ou pelo painel de Configuraç�
 > Dica: use **parâmetros nomeados** ao criar (não posicionais `{{1}}`/`{{2}}`).
 > O código envia por nome (`periodo`, `saldo`, ...). Se a Meta/sua conta ainda
 > usar só posicionais, me avise que eu troco o código para enviar posicional.
+
+---
+
+## Template 3 — Aviso de gasto fixo autopay (#616)
+
+Sai no dia do vencimento de cada gasto fixo **autopay** (conta ou cartão), uma
+vez só, a partir de `WA_BILL_REMINDER_HOUR` (padrão 9h), para quem tem acesso e
+não desligou as atualizações do Piggy. Código:
+`core/services/recurring_charger.py` → `notify_autopay_notices_whatsapp_once`.
+
+- **Nome:** `aviso_gasto_fixo` · **Categoria:** `Utility` · **Idioma:** `pt_BR`
+- **Cabeçalho:** `Gasto fixo de hoje` · **Rodapé:** `PigBank` · **Sem botões**
+- **Variáveis:** `gasto` (`Netflix`), `valor` (`R$ 55,90`), `meio`
+  (`débito na conta` ou `cobrança no cartão`)
+
+O corpo e os exemplos moram no script (`AUTOPAY_BODY`, `AUTOPAY_EXAMPLES`); não
+copie aqui. Para conferir e criar:
+
+```bash
+python scripts/create_whatsapp_report_templates.py --dry-run --only autopay
+python scripts/create_whatsapp_report_templates.py --only autopay
+```
+
+Depois da aprovação, setar `WA_AUTOPAY_NOTICE_TEMPLATE_NAME=aviso_gasto_fixo`.
+Sem a env, nada é enviado.
