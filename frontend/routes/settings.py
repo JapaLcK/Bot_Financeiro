@@ -169,8 +169,10 @@ async def account_reset_route(request: Request, payload: AccountResetPayload):
         except Exception as exc:  # noqa: BLE001
             log_system_event_sync(
                 "warning", "account_reset_pluggy_cleanup_failed",
-                f"Reset do user {user_id}: limpeza remota na Pluggy falhou: {exc}",
-                source="settings", user_id=user_id, details={"error": str(exc)[:200]},
+                "Reset: limpeza remota na Pluggy falhou",
+                source="settings", user_id=user_id,
+                details={"motivo": type(exc).__name__,
+                         "sqlstate": getattr(exc, "sqlstate", None)},
             )
 
     try:
@@ -234,9 +236,10 @@ async def account_reset_route(request: Request, payload: AccountResetPayload):
             await asyncio.to_thread(
                 log_system_event_sync,
                 "warning", "account_reset_pluggy_cleanup_failed",
-                f"Reset do user {user_id}: 2º passe remoto falhou: {exc}",
+                "Reset: 2º passe remoto falhou",
                 source="settings", user_id=user_id,
-                details={"items": tardios, "error": str(exc)[:200]},
+                details={"items": tardios, "motivo": type(exc).__name__,
+                         "sqlstate": getattr(exc, "sqlstate", None)},
             )
 
     # Mesmo padrão de toda rota de mutação (cards/pockets/launches): sem isto,
