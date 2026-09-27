@@ -240,9 +240,11 @@ async def _log_com_teto(segundos: float, *args, **kwargs) -> None:
 
     Engolir o `TimeoutError` é deliberado: o log é DIAGNÓSTICO, e perder o
     diagnóstico não pode virar um segundo modo de falha em cima do 503. A causa
-    NÃO se perde — os dois chamadores emitem o `logging.getLogger(...).warning`
-    local ANTES desta chamada, e esse canal não depende do banco (é o mesmo
-    motivo pelo qual ele existe: ver o `except` do `_grava_reconexao`).
+    NÃO se perde — TODO chamador emite o `logging.getLogger(...).warning` local
+    ANTES desta chamada (as três do `_grava_reconexao`, o connect-token e o
+    `/pluggy-item`), e esse canal não depende do banco (é o mesmo motivo pelo
+    qual ele existe: ver o `except` do `_grava_reconexao`). Chamador novo sem
+    esse aviso perde a falha em silêncio quando o teto estoura.
 
     Só `asyncio.TimeoutError` é engolido. `CancelledError` de fora (cliente
     desistiu, shutdown) continua subindo — o `wait_for` só converte em
@@ -635,6 +637,8 @@ async def _grava_reconexao(
             # O context manager já liberou o lock. O diagnóstico tem o mesmo
             # teto dos demais logs da reconexão e não prolonga sua seção crítica.
             args, context = exc.diagnostico
+            logging.getLogger(__name__).warning("%s %s", args[1], args[2],
+                                                extra={"user_id": context.get("user_id")})
             await _log_com_teto(_LOG_DIAG_TIMEOUT_S, *args, **context)
             raise
         except psycopg.OperationalError as exc:
@@ -890,12 +894,16 @@ async def _run_pluggy_sync_bg(item_id: str) -> None:
                      "reason": reason or None},
         )
     except Exception as exc:  # noqa: BLE001 — background, não pode derrubar nada
+        # Coluna NULL (aqui só se sabe o item), logo nada de `str(exc)`: o texto de
+        # FK/CHECK do Postgres traz `Key (user_id)=(…)` e `Failing row contains (…)`,
+        # que sobreviveriam à exclusão da conta (issue #541).
         await log_system_event(
             "error",
             "pluggy_sync_failed",
-            f"Sync Pluggy falhou: {item_id}: {exc}",
+            f"Sync Pluggy falhou: {item_id}",
             source="open_finance",
-            details={"item_id": item_id, "error": str(exc)[:200]},
+            details={"item_id": item_id, "motivo": type(exc).__name__,
+                     "sqlstate": getattr(exc, "sqlstate", None)},
         )
 
 
@@ -1296,6 +1304,9 @@ async def _adota_item_orfao(item_id: str, last_event: str | None = None) -> int 
         # psycopg traz host e porta. `ForeignKeyViolation` = conta apagada no
         # meio: com o dono na coluna a FK recusaria a linha, e ela é o único
         # rastro do `item_id`; fica NULL e sem uid, como os ramos de conta inexistente.
+        # Teto aceito (A3 da revisão): conta apagada SEM agendamento e exceção que
+        # não seja FK → a FK do log recusa a linha e o motivo se perde; o
+        # `item_id` sobrevive nos logs de coluna NULL do webhook.
         details = {"item_id": item_id, "motivo": type(exc).__name__,
                    "sqlstate": getattr(exc, "sqlstate", None)}
         if isinstance(exc, HTTPException):
@@ -1680,6 +1691,10 @@ async def open_finance_connect_token_route(request: Request, user_id: int):
             token_hash=token_hash(token_data["accessToken"]), origin="connect_token",
         )
     except Exception as exc:  # noqa: BLE001 — rastro nunca derruba a emissão do token
+        # Canal local ANTES, como no `/pluggy-item`: se o teto estoura, é o que sobra.
+        logging.getLogger(__name__).warning(
+            "of_item_registry_failed origin=connect_token motivo=%s sqlstate=%s",
+            type(exc).__name__, getattr(exc, "sqlstate", None), extra={"user_id": user_id})
         await _log_com_teto(
             _LOG_DIAG_TIMEOUT_S,
             "warning", "of_item_registry_failed", "Falha ao registrar connect token",
@@ -2309,7 +2324,8 @@ def delete_pluggy_items_best_effort(user_id: int, item_ids: list[str] | None = N
             source="open_finance",
             user_id=user_id if log_user_id else None,
             details={"items": pluggy_item_ids, "motivo": type(exc).__name__,
-                     "sqlstate": getattr(exc, "sqlstate", None)},
+                     "sqlstate": getattr(exc, "sqlstate", None),
+                     "status_code": getattr(exc, "status_code", None)},
         )
     if api_key:
         for item_id in pluggy_item_ids:

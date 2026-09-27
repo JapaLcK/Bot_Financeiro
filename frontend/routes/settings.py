@@ -172,7 +172,8 @@ async def account_reset_route(request: Request, payload: AccountResetPayload):
                 "Reset: limpeza remota na Pluggy falhou",
                 source="settings", user_id=user_id,
                 details={"motivo": type(exc).__name__,
-                         "sqlstate": getattr(exc, "sqlstate", None)},
+                         "sqlstate": getattr(exc, "sqlstate", None),
+                         "status_code": getattr(exc, "status_code", None)},
             )
 
     try:
@@ -239,7 +240,8 @@ async def account_reset_route(request: Request, payload: AccountResetPayload):
                 "Reset: 2º passe remoto falhou",
                 source="settings", user_id=user_id,
                 details={"items": tardios, "motivo": type(exc).__name__,
-                         "sqlstate": getattr(exc, "sqlstate", None)},
+                         "sqlstate": getattr(exc, "sqlstate", None),
+                         "status_code": getattr(exc, "status_code", None)},
             )
 
     # Mesmo padrão de toda rota de mutação (cards/pockets/launches): sem isto,

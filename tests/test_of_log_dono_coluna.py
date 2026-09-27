@@ -1,23 +1,19 @@
 """Issue #541 — log de Open Finance que sabe o dono grava o dono na COLUNA.
 
-`system_event_logs.user_id` é o que a exportação (`db/privacy.py`,
-`build_user_export_zip`) e a exclusão de conta (`delete_user_data` + cascata)
-enxergam. Dono só em `details`/`message` com coluna NULL fica fora das duas; e,
-com a coluna preenchida, texto cru de exceção (host/porta do psycopg) sai na
-exportação do titular — por isso aqui se mede as duas coisas juntas.
+`system_event_logs.user_id` é o que a exportação (`build_user_export_zip`) e a
+exclusão de conta (`delete_user_data` + cascata) enxergam. Com a coluna
+preenchida, texto cru de exceção (host/porta do psycopg) sai na exportação; com
+ela NULL, uid no texto sobrevive à exclusão. Um caso por ponto, pela porta real;
+a contraprova com o log REAL mora em `tests/test_of_log_dono_exportacao.py`.
 
-Um caso por ponto do plano, cada um pela porta real (rota/webhook/laço). A
-contraprova com o `log_system_event` REAL, exportação e exclusão, mora em
-`tests/test_of_log_dono_exportacao.py`.
-
-CONTROLES (CLAUDE.md §3): tirar o `user_id=`/`extra=` de cada ponto deixa o
-respectivo caso vermelho; voltar `str(exc)` com a coluna preenchida deixa
-vermelho o caso de host do ponto. CLASSE CEGA: log NOVO com uid no texto —
-nenhum caso daqui o vê; só uma varredura (AST) pegaria.
+CONTROLES (CLAUDE.md §3): tirar o `user_id=`/`extra=`/aviso local de cada ponto,
+ou voltar `str(exc)`, deixa o respectivo caso vermelho. CLASSE CEGA: log NOVO
+com uid no texto — só uma varredura (AST) pegaria.
 """
 from __future__ import annotations
 
 import asyncio
+import logging
 import time
 
 import psycopg
@@ -34,6 +30,7 @@ import db
 import db.open_finance as of_mod
 import frontend.finance_bot_websocket_custom as dashboard
 import frontend.routes.open_finance as of_routes
+from db.connection import get_conn
 from conftest import promote_to_pro
 from core.services import plan_service
 from tests._fusao_of_helpers import ia_fora, manda, tx, uid_pro  # noqa: F401 — fixtures
@@ -45,7 +42,7 @@ from test_log_falha_user_id import coletor  # noqa: F401 — fixture
 from test_of_item_ownership import _auth, _webhook, eventos  # noqa: F401
 from test_of_webhook_adopt_guards import _limpa_item, _mock_item, webhook_pluggy  # noqa: F401
 from test_open_finance_disconnect_route import _semeia_conexao_pluggy
-from test_open_finance_proactive_dedupe import _CASOS, _armar, _espiao
+from test_open_finance_proactive_dedupe import _CASOS, _armar, _espiao, _event_logs  # noqa: F401
 
 HOST = 'connection to server at "db.interno" (10.9.8.7), port 5432 failed'
 _PEDACOS_DO_HOST = ("db.interno", "10.9.8.7", "5432")
@@ -164,6 +161,30 @@ def test_sync_em_background_grava_o_dono_na_coluna(user_id, monkeypatch, eventos
     assert por_evento["pluggy_sync_done"]["details"]["stale_products"] == ["INVESTMENTS"]
 
 
+def test_sync_que_cai_em_fk_real_nao_grava_uid_com_coluna_nula(monkeypatch):
+    # A FK real põe `Key (user_id)=(…)` no texto; coluna NULL sobrevive à exclusão.
+    alheio, vistos = 987654321955, []
+    with get_conn() as c:
+        try:
+            c.execute("insert into pockets (user_id, name) values (%s, 'x')", (alheio,))
+        except psycopg.errors.ForeignKeyViolation as e:
+            c.rollback()
+            fk = e
+    assert str(alheio) in str(fk), "pré-condição: o texto cru traz o uid"
+    monkeypatch.setattr(of_routes, "sync_pluggy_item", _levanta(fk))
+
+    async def _log(level, event_type, message, **kw):
+        vistos.append({"event": event_type, "message": message, **kw})
+    monkeypatch.setattr(of_routes, "log_system_event", _log)
+    asyncio.run(of_routes._run_pluggy_sync_bg("i541-syncfail"))
+
+    falha = _de(vistos, "pluggy_sync_failed")
+    assert len(falha) == 1 and falha[0].get("user_id") is None, vistos
+    assert falha[0]["details"] == {"item_id": "i541-syncfail", "motivo": "ForeignKeyViolation",
+                                   "sqlstate": "23503"}, falha
+    assert str(alheio) not in falha[0]["message"], falha
+
+
 # ── logging espelhado pelo `_DashboardHandler` (1396 e 1856) ────────────────
 
 def test_falha_na_copia_do_402_espelha_com_dono_e_sem_traceback(user_id, monkeypatch, coletor):
@@ -205,7 +226,7 @@ def test_aviso_local_do_rastro_espelha_com_dono(user_id, monkeypatch, coletor, e
 
 # ── connect-token (1671): o log com teto não pendura a emissão ──────────────
 
-def test_rastro_do_connect_token_nao_pendura_a_resposta(user_id, monkeypatch):
+def test_rastro_do_connect_token_nao_pendura_a_resposta(user_id, monkeypatch, caplog):
     promote_to_pro(user_id)
     monkeypatch.setattr(of_routes, "create_pluggy_connect_token",
                         lambda uid, webhook_url=None: {"accessToken": "tok"})
@@ -218,9 +239,40 @@ def test_rastro_do_connect_token_nao_pendura_a_resposta(user_id, monkeypatch):
 
     client = TestClient(dashboard.app)
     t0 = time.monotonic()
-    r = client.post(f"/open-finance/{user_id}/connect-token", headers=_auth(client, user_id))
+    with caplog.at_level(logging.WARNING, logger=of_routes.__name__):
+        r = client.post(f"/open-finance/{user_id}/connect-token", headers=_auth(client, user_id))
     assert r.status_code == 200, r.text
     assert time.monotonic() - t0 < 2, "o log de diagnóstico pendurou a emissão do token"
+    # Teto estourado: o aviso local é o único canal que sobra.
+    locais = [x for x in caplog.records if "of_item_registry_failed" in x.getMessage()]
+    assert [x.user_id for x in locais] == [user_id], caplog.text
+    assert str(user_id) not in locais[0].getMessage(), locais[0].getMessage()
+
+
+def test_conflito_da_reconexao_deixa_aviso_local_quando_o_teto_estoura(user_id, monkeypatch, caplog):
+    promote_to_pro(user_id)
+    _mock_item(monkeypatch, user_id)
+
+    def _conflito(*a, **k):
+        raise of_routes._ConflitoReconexao(
+            "x", "warning", "of_reconnect_aborted_state_gone", "Reconexão abortada: i541-conf",
+            source="open_finance", user_id=user_id, details={"item_id": "i541-conf"})
+    monkeypatch.setattr(of_routes, "_salva_item_sob_lock", _conflito)
+    monkeypatch.setattr(of_routes, "_LOG_DIAG_TIMEOUT_S", 0.05)
+
+    async def _pendura(*a, **k):
+        await asyncio.sleep(3)
+    monkeypatch.setattr(of_routes, "log_system_event", _pendura)
+    client = TestClient(dashboard.app)
+    try:
+        with caplog.at_level(logging.WARNING, logger=of_routes.__name__):
+            r = client.post(f"/open-finance/{user_id}/pluggy-item",
+                            json={"item": {"id": "i541-conf"}}, headers=_auth(client, user_id))
+        assert r.status_code == 409, r.text
+        locais = [x for x in caplog.records if "of_reconnect_aborted_state_gone" in x.getMessage()]
+        assert [x.user_id for x in locais] == [user_id], caplog.text
+    finally:
+        _limpa_item("i541-conf")
 
 
 # ── disconnect (2351) e reset (2294, settings 170/236) ──────────────────────
@@ -276,7 +328,7 @@ def test_reset_com_limpeza_remota_quebrada_grava_dono_sem_host(user_id, monkeypa
 
 @pytest.mark.parametrize("recusar", [False, True], ids=["falhou", "recusado"])
 @pytest.mark.parametrize("caso", list(_CASOS))
-def test_aviso_proativo_espelha_com_dono(user_id, monkeypatch, coletor, caso, recusar):
+def test_aviso_proativo_espelha_com_dono(user_id, monkeypatch, _event_logs, coletor, caso, recusar):
     erro = None if recusar else RuntimeError("meta fora")
     _armar(monkeypatch, caso, [user_id], _espiao([], erro, recusar=recusar))
     assert _CASOS[caso][0]()["sent"] == 0
@@ -295,4 +347,3 @@ def test_conciliacao_manual_quebrada_espelha_com_dono_sem_traceback(
     assert linhas[0]["user_id"] == uid_pro, linhas
     assert "traceback" not in linhas[0]["details"], linhas
     _host_fora(linhas[0]["message"], linhas[0]["details"])
-
