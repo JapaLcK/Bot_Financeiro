@@ -153,6 +153,7 @@ from frontend.routes.shared import (
     months_pt as _months_pt,
     parse_date_param as _parse_date_param,
     raise_if_account_scheduled_for_deletion as _raise_if_account_scheduled_for_deletion,
+    _resolve_page_user_id,
     resolve_analytics_window as _resolve_analytics_window,
     resolve_dashboard_user_id as _resolve_dashboard_user_id,
     stamp_asset_versions as _stamp_asset_versions,
@@ -6806,25 +6807,17 @@ async def conta_redirect(request: Request):
     Atalho público (GET) usado em invoices, recibos e emails do Stripe:
     `pigbankai.com/conta` → leva o usuário direto para o ponto certo.
 
-    - Não autenticado → landing com flag `login_required=conta`.
+    - Não autenticado → `/login?next=/conta`.
     - Autenticado sem assinatura ativa → página de planos.
     - Autenticado com `stripe_customer_id` → Stripe Customer Portal.
     """
-    # Sem auth válida → /login?next=/conta. O login renova sessão expirada em
-    # silêncio (validate→refresh) e volta pra cá; antes caía na landing com
-    # ?login_required mesmo pra usuário logado cujo access tinha expirado
-    # (navegação top-level não passa pelo interceptor de refresh).
-    token = _get_auth_token_from_request(request, None)
-    payload = _decode_jwt(token) if token else None
-    if not payload or payload.get("type") != "auth":
+    # Sem sessão válida → /login?next=/conta. Aceita as MESMAS sessões que o
+    # /auth/validate (auth_token OU dashboard_token): se aceitasse menos, o
+    # validate daria 200 com o access expirado e o login devolveria o usuário
+    # para cá, em loop.
+    user_id = await asyncio.to_thread(_resolve_page_user_id, request)
+    if user_id is None:
         return RedirectResponse(url=_dashboard_url("/login?next=/conta"), status_code=302)
-
-    user_id = int(payload["sub"])
-    jti = payload.get("jti")
-    if jti:
-        session = await asyncio.to_thread(get_active_session, jti)
-        if not session or int(session.get("user_id") or 0) != user_id:
-            return RedirectResponse(url=_dashboard_url("/login?next=/conta"), status_code=302)
 
     if not STRIPE_SECRET_KEY:
         return RedirectResponse(url=_dashboard_url("/precos"), status_code=302)
@@ -6933,9 +6926,7 @@ Os links expiram em __MAGIC_LINK_MINUTES__ minutos e funcionam uma única vez.</
     jti = await asyncio.to_thread(create_session, int(user_id), ip=ip, user_agent=ua)
     _set_dashboard_cookie(response, int(user_id), jti=jti)
     # Tambem seta auth_token (cookie principal) com o mesmo jti — permite acessar
-    # rotas que exigem auth completa (/conta, /api/me, etc) sem precisar logar
-    # de novo. Sem isso, ?next=/conta caia em /?login_required=conta porque
-    # /conta so olha pro auth_token, nao pro dashboard_token.
+    # rotas que exigem auth completa (/api/me, etc) sem precisar logar de novo.
     # Magic link também emite refresh_token (sessão de 14d com idle 7d).
     try:
         from db import get_auth_user
