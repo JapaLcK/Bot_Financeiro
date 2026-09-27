@@ -59,8 +59,8 @@ from db.connection import get_conn
 
 @pytest.fixture(autouse=True)
 def _gate_ligado(monkeypatch):
-    """O corte é o default de produção, e o `conftest` já roda este arquivo no
-    v2; as envs o seguram se ele entrar em `_AINDA_EM_V1`."""
+    """O corte é o default de produção, e o `conftest` já roda a suíte no v2;
+    as envs o seguram se o padrão da suíte mudar."""
     monkeypatch.setenv("PLANS_V2_ENABLED", "1")
     monkeypatch.setenv("ACCESS_GATE_ENABLED", "1")
     monkeypatch.setenv("PAYWALL_ENABLED", "0")

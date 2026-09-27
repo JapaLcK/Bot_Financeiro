@@ -16,7 +16,7 @@ import pytest
 from fastapi import HTTPException
 
 import frontend.routes.open_finance as of
-from core.services import plan_service
+from core.services import billing_copy, plan_service
 
 
 def _run(coro):
@@ -28,6 +28,7 @@ def _run(coro):
 class TestConnectTokenGate:
     def test_blocks_when_plan_has_no_of(self, monkeypatch):
         monkeypatch.setattr(plan_service, "plans_v2_enabled", lambda: True)
+        monkeypatch.setattr(billing_copy, "estado_sem_plano_pago", lambda uid: "sem_acesso")
         monkeypatch.setattr(plan_service, "get_user_limits", lambda uid: {"of_banks_max": 0})
         with pytest.raises(HTTPException) as ei:
             _run(of._ensure_of_access_allowed(1))
@@ -62,18 +63,51 @@ class TestConnectTokenGate:
             _run(of._ensure_of_access_allowed(1))
         assert ei.value.status_code == 402
 
-    @pytest.mark.parametrize("gate", ["_ensure_of_access_allowed", "_enforce_bank_limit"])
-    def test_limite_zero_nao_fala_de_gratis_nem_teste(self, monkeypatch, gate):
-        # O Grátis e os "15 dias de teste" saíram do produto; o texto não pode citá-los.
+    @staticmethod
+    def _msg_limite_zero(monkeypatch, gate, estado):
         monkeypatch.setattr(plan_service, "plans_v2_enabled", lambda: True)
         monkeypatch.setattr(plan_service, "get_user_limits", lambda uid: {"of_banks_max": 0})
+        monkeypatch.setattr(billing_copy, "estado_sem_plano_pago", lambda uid: estado)
         with pytest.raises(HTTPException) as ei:
             _run(getattr(of, gate)(1))
         assert ei.value.status_code == 402
         assert ei.value.detail["code"] == "OF_BANK_LIMIT" and ei.value.detail["limit"] == 0
         msg = ei.value.detail["message"]
+        # O Grátis e os "15 dias de teste" saíram do produto; o texto não pode citá-los.
         assert "Grátis" not in msg and "15 dias" not in msg
-        assert "planos pagos" in msg and "/precos" in msg
+        return msg
+
+    @pytest.mark.parametrize("gate", ["_ensure_of_access_allowed", "_enforce_bank_limit"])
+    def test_limite_zero_em_carencia_manda_atualizar_o_cartao(self, monkeypatch, gate):
+        # Carência é assinante: "assine" é beco (a /precos o recusa com 409).
+        msg = self._msg_limite_zero(monkeypatch, gate, "carencia")
+        assert msg == (
+            "A cobrança da sua assinatura não passou — o Open Finance volta quando ela "
+            "entrar. Pra atualizar o cartão: /conta"
+        )
+        assert "planos pagos" not in msg and "/precos" not in msg
+
+    @pytest.mark.parametrize("gate", ["_ensure_of_access_allowed", "_enforce_bank_limit"])
+    def test_limite_zero_fora_da_carencia_mantem_os_planos_pagos(self, monkeypatch, gate):
+        # POSITIVO: quem não é carência continua sendo mandado para os planos.
+        msg = self._msg_limite_zero(monkeypatch, gate, "sem_acesso")
+        assert "planos pagos" in msg and "/precos" in msg and "/conta" not in msg
+
+    @pytest.mark.parametrize("gate", ["_ensure_of_access_allowed", "_enforce_bank_limit"])
+    def test_limite_zero_com_leitura_do_usuario_quebrada_da_402_de_carencia(self, monkeypatch, gate):
+        # `needs_plan_selection` lê `get_auth_user` fora do try de
+        # `estado_sem_plano_pago`: o soluço de banco não pode virar 500.
+        def _boom(uid):
+            raise RuntimeError("banco fora")
+
+        monkeypatch.setattr(plan_service, "plans_v2_enabled", lambda: True)
+        monkeypatch.setattr(plan_service, "get_user_limits", lambda uid: {"of_banks_max": 0})
+        monkeypatch.setattr(plan_service, "get_auth_user", _boom)
+        with pytest.raises(HTTPException) as ei:
+            _run(getattr(of, gate)(1))
+        assert ei.value.status_code == 402
+        assert ei.value.detail["code"] == "OF_BANK_LIMIT"
+        assert ei.value.detail["message"] == billing_copy.OPEN_FINANCE_EM_CARENCIA
 
 
 # ─── Defaults de produtos / sandbox ──────────────────────────────────────────

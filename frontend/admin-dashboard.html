@@ -1953,7 +1953,7 @@ function planLabel(p) {
 // mesmo tier que 'pro', mas não é o que o webhook da Stripe grava.
 const PLAN_WRITE_VALUES = ['free', 'essencial', 'pro', 'pro_max'];
 // Origem do cadastro (auth_accounts.signup_source). null = conta anterior à coluna.
-const SOURCE_LABELS = { web: 'Web', app: 'App iOS', google: 'Google', google_app: 'Google (app)' };
+const SOURCE_LABELS = { web: 'Web', app: 'App iOS', google: 'Google', google_app: 'Google (app)', apple: 'Apple', apple_app: 'Apple (app)' };
 function sourceLabel(s) {
   if (!s) return '—';
   return SOURCE_LABELS[String(s).toLowerCase()] || s;

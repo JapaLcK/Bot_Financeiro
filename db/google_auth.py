@@ -1,5 +1,6 @@
 """
-db/google_auth.py — Login social (Google OAuth).
+db/google_auth.py — Login social (Google e Apple). O nome e as tabelas vêm do
+Google; a Apple usa as mesmas funções com `provider=PROVIDER_APPLE`.
 
 Estrutura:
   auth_identities          → vínculo permanente (user_id ↔ provider, provider_sub)
@@ -18,19 +19,27 @@ from .users import create_link_code, get_or_create_canonical_user
 
 
 PROVIDER_GOOGLE = "google"
+PROVIDER_APPLE = "apple"
 PENDING_SIGNUP_TTL_MINUTES = 30
+
+# Os dois começam com "Cadastro expirado": é o que o app usa para voltar ao
+# formulário de entrada.
+_CADASTRO_EXPIRADO = {
+    PROVIDER_GOOGLE: "Cadastro expirado. Inicie novamente o login com Google.",
+    PROVIDER_APPLE: "Cadastro expirado. Entre com a Apple de novo.",
+}
 
 
 # ──────────────────────────────────────────────────────────────────────────────
 # Lookups
 # ──────────────────────────────────────────────────────────────────────────────
 
-def find_user_by_google_sub(sub: str) -> int | None:
-    """Retorna user_id se já existe um vínculo (provider=google, sub=...)."""
+def find_user_by_google_sub(sub: str, provider: str = PROVIDER_GOOGLE) -> int | None:
+    """Retorna user_id se já existe um vínculo (provider, sub)."""
     with get_conn() as conn, conn.cursor() as cur:
         cur.execute(
             "select user_id from auth_identities where provider=%s and provider_sub=%s",
-            (PROVIDER_GOOGLE, sub),
+            (provider, sub),
         )
         row = cur.fetchone()
     return int(row["user_id"]) if row else None
@@ -77,7 +86,9 @@ def email_has_password(email: str) -> bool:
 # Vinculação de identidade Google a uma conta existente
 # ──────────────────────────────────────────────────────────────────────────────
 
-def link_google_identity(user_id: int, sub: str, email: str) -> None:
+def link_google_identity(
+    user_id: int, sub: str, email: str, provider: str = PROVIDER_GOOGLE
+) -> None:
     email = (email or "").strip().lower() or None
     with get_conn() as conn:
         with conn.cursor() as cur:
@@ -91,7 +102,7 @@ def link_google_identity(user_id: int, sub: str, email: str) -> None:
                     email = coalesce(excluded.email, auth_identities.email),
                     email_enc = coalesce(excluded.email_enc, auth_identities.email_enc)
                 """,
-                (int(user_id), PROVIDER_GOOGLE, sub, email,
+                (int(user_id), provider, sub, email,
                  encrypt_pii_optional(email)),
             )
         conn.commit()
@@ -101,7 +112,9 @@ def link_google_identity(user_id: int, sub: str, email: str) -> None:
 # Pre-cadastro: usuário novo, aguarda nome+telefone
 # ──────────────────────────────────────────────────────────────────────────────
 
-def create_pending_google_signup(sub: str, email: str, name_hint: str | None) -> str:
+def create_pending_google_signup(
+    sub: str, email: str, name_hint: str | None, provider: str = PROVIDER_GOOGLE
+) -> str:
     """Cria registro pendente e devolve token de uso único (URL-safe)."""
     email = (email or "").strip().lower()
     name_hint = (name_hint or "").strip() or None
@@ -110,10 +123,18 @@ def create_pending_google_signup(sub: str, email: str, name_hint: str | None) ->
 
     with get_conn() as conn:
         with conn.cursor() as cur:
-            # invalida pendentes anteriores do mesmo sub pra evitar acúmulo
+            # invalida pendentes anteriores do mesmo sub pra evitar acúmulo, e
+            # herda o nome deles: a Apple manda o nome só na 1ª autorização, e
+            # "Voltar" seguido de tocar na Apple de novo não pode apagá-lo.
+            # ponytail: só herda se a limpeza ainda não podou o pendente anterior;
+            # depois disso a pessoa digita o nome.
             cur.execute(
-                "delete from pending_google_signups where provider=%s and provider_sub=%s",
-                (PROVIDER_GOOGLE, sub),
+                "delete from pending_google_signups where provider=%s and provider_sub=%s"
+                " returning name_hint",
+                (provider, sub),
+            )
+            name_hint = name_hint or next(
+                (r["name_hint"] for r in cur.fetchall() if r["name_hint"]), None
             )
             cur.execute(
                 """
@@ -122,7 +143,7 @@ def create_pending_google_signup(sub: str, email: str, name_hint: str | None) ->
                    email_hash, email_enc, name_hint_enc)
                 values (%s, %s, %s, %s, %s, %s, %s, %s, %s)
                 """,
-                (token, PROVIDER_GOOGLE, sub, email, name_hint, expires_at,
+                (token, provider, sub, email, name_hint, expires_at,
                  hash_pii_optional(email, kind="email"),
                  encrypt_pii_optional(email),
                  encrypt_pii_optional(name_hint)),
@@ -132,7 +153,7 @@ def create_pending_google_signup(sub: str, email: str, name_hint: str | None) ->
     return token
 
 
-def get_pending_google_signup(token: str) -> dict | None:
+def get_pending_google_signup(token: str, provider: str = PROVIDER_GOOGLE) -> dict | None:
     # Idem `consume_data_export_token`: o token vem do path da rota ANÔNIMA
     # `/auth/google/pending/{token}` e envenenado dava 500 em vez do 404 de
     # "cadastro expirado ou inválido" (#321). Guarda aqui, não na rota, porque
@@ -145,9 +166,9 @@ def get_pending_google_signup(token: str) -> dict | None:
             """
             select provider_sub, email, name_hint, expires_at
             from pending_google_signups
-            where token = %s
+            where token = %s and provider = %s
             """,
-            (token,),
+            (token, provider),
         )
         row = cur.fetchone()
     if not row or row["expires_at"] < now:
@@ -164,6 +185,7 @@ def consume_pending_google_signup(
     name: str,
     phone_raw: str,
     source: str = "google",
+    provider: str = PROVIDER_GOOGLE,
 ) -> dict:
     """
     Finaliza o cadastro: cria auth_account (sem senha), grava auth_identities
@@ -171,9 +193,20 @@ def consume_pending_google_signup(
 
     Lança ValueError com mensagem amigável se algo falhar.
     """
-    pending = get_pending_google_signup(token)
+    pending = get_pending_google_signup(token, provider)
     if not pending:
-        raise ValueError("Cadastro expirado. Inicie novamente o login com Google.")
+        raise ValueError(_CADASTRO_EXPIRADO[provider])
+
+    # O e-mail ganhou conta depois do pendente (outra aba, outro provedor): o
+    # `on conflict (email)` abaixo fundiria o cadastro nela e a rota abriria
+    # sessão sem MFA. Recomeçar leva ao vínculo por e-mail, que passa pelo
+    # `_concluir_login`. Limite: a corrida de milissegundos entre esta busca e
+    # o insert ainda funde.
+    if find_user_id_by_email(pending["email"]):
+        with get_conn() as conn, conn.cursor() as cur:
+            cur.execute("delete from pending_google_signups where token = %s", (token,))
+            conn.commit()
+        raise ValueError(_CADASTRO_EXPIRADO[provider])
 
     name = (name or "").strip()
     if len(name) < 2 or len(name) > 50:
@@ -188,7 +221,9 @@ def consume_pending_google_signup(
     email = pending["email"]
     sub = pending["provider_sub"]
 
-    # Verifica colisão de telefone com outras contas
+    # Telefone de outra conta: descarta em silêncio e segue, sem dizer "em uso"
+    # (enumeraria números de WhatsApp) — igual ao `create_email_verification_impl`.
+    # A conta nasce sem WhatsApp e vincula depois pelo `whatsapp_link` (#585).
     with get_conn() as conn, conn.cursor() as cur:
         phone_hashes = [hash_pii_optional(c, kind="phone") for c in phone_candidates if c]
         cur.execute(
@@ -196,12 +231,14 @@ def consume_pending_google_signup(
             (phone_hashes,),
         )
         if cur.fetchone():
-            raise ValueError("Este número de WhatsApp já está em uso por outra conta.")
+            normalized_phone = None
 
     # user_id determinístico baseado no email — bate com create_email_verification
     user_id = get_or_create_canonical_user("email", email)
 
-    with get_conn() as conn:
+    # Corrida (outra conta grava o número depois da busca): o helper desfaz e
+    # grava sem telefone. `conn` é o do `with` logo abaixo.
+    def _gravar(normalized_phone):
         with conn.cursor() as cur:
             cur.execute(
                 """
@@ -238,12 +275,15 @@ def consume_pending_google_signup(
                     email = excluded.email,
                     email_enc = excluded.email_enc
                 """,
-                (user_id, PROVIDER_GOOGLE, sub, email,
+                (user_id, provider, sub, email,
                  encrypt_pii_optional(email)),
             )
             cur.execute("delete from pending_google_signups where token = %s", (token,))
+
+    from db_support import gravar_descartando_telefone_disputado, invalidate_auth_user_cache
+    with get_conn() as conn:
+        gravar_descartando_telefone_disputado(conn, _gravar, normalized_phone)
         conn.commit()
-    from db_support import invalidate_auth_user_cache
     invalidate_auth_user_cache(user_id)
 
     link_code = create_link_code(user_id, minutes_valid=15)

@@ -777,18 +777,48 @@ class AccountAlreadyExistsError(Exception):
         self.existing_user_id = existing_user_id
 
 
+# Os DOIS índices únicos do telefone em `auth_accounts` (`db/schema.py`): o do
+# `phone_e164` e o do `phone_hash`. O INSERT grava os dois e o Postgres acusa o
+# que conferir primeiro. `tests/test_auth_google_app_cadastro.py` confere que
+# os nomes existem no banco.
+INDICES_TELEFONE_UNICO = ("idx_auth_accounts_phone_unique", "idx_auth_accounts_phone_hash_unique")
+
+
+def gravar_descartando_telefone_disputado(conn, gravar, telefone: str | None) -> None:
+    """Roda `gravar(telefone)`; se outra conta gravou o mesmo número entre a
+    busca por `phone_hash` e o INSERT, desfaz e grava de novo SEM telefone.
+
+    É o mesmo descarte silencioso da busca (`create_email_verification_impl`),
+    agora também na corrida: a conta nasce sem WhatsApp, nunca num 500.
+    Só a violação dos índices do telefone é engolida; qualquer outra sobe.
+
+    ponytail: variantes diferentes do mesmo número (com e sem o nono dígito)
+    gravadas ao mesmo tempo têm hashes diferentes e as duas entram — mesmo
+    limite do register.
+    """
+    try:
+        gravar(telefone)
+    except psycopg.errors.UniqueViolation as exc:
+        if telefone is None or exc.diag.constraint_name not in INDICES_TELEFONE_UNICO:
+            raise
+        conn.rollback()
+        gravar(None)
+
+
 def create_email_verification_impl(
     get_conn,
     hash_password,
     email: str,
-    password: str,
-    phone_e164: str,
+    password: str | None,
+    phone_e164: str | None,
     minutes_valid: int = 15,
     display_name: str | None = None,
 ) -> str:
+    """`password=None` é o cadastro pelo quiz (frontend/routes/quiz_signup.py):
+    a conta nasce sem senha e o reenvio do webhook devolve o código ainda vivo
+    em vez de invalidá-lo. Com senha (/auth/register), nada disso vale."""
     email = email.strip().lower()
-    normalized_phone = normalize_phone_e164(phone_e164)
-    phone_candidates = phone_lookup_candidates(normalized_phone)
+    normalized_phone = normalize_phone_e164(phone_e164) if phone_e164 else None
     display_name = (display_name or "").strip() or None
 
     with get_conn() as conn:
@@ -804,9 +834,11 @@ def create_email_verification_impl(
                 # avisando o dono por e-mail.
                 reason = "email_google" if existing["password_hash"] is None else "email"
                 raise AccountAlreadyExistsError(reason, existing_user_id=existing["user_id"])
-            _phone_hashes = [hash_pii_optional(c, kind="phone") for c in phone_candidates if c]
-            cur.execute("select user_id from auth_accounts where phone_hash = any(%s)", (_phone_hashes,))
-            phone_row = cur.fetchone()
+            phone_row = None
+            if normalized_phone:
+                _phone_hashes = [hash_pii_optional(c, kind="phone") for c in phone_lookup_candidates(normalized_phone) if c]
+                cur.execute("select user_id from auth_accounts where phone_hash = any(%s)", (_phone_hashes,))
+                phone_row = cur.fetchone()
             if phone_row:
                 # Telefone já em uso por outra conta. NÃO revela isso ao
                 # cadastrante: se a gente parasse aqui (ou não mandasse o código),
@@ -817,8 +849,36 @@ def create_email_verification_impl(
                 # vinculado (dá pra vincular outro número depois). A colisão de
                 # telefone fica indistinguível até o e-mail ser verificado.
                 normalized_phone = None
+            if password is None:
+                cur.execute(
+                    """
+                    select id, code from email_verification_codes
+                    where email_hash = %s and used_at is null and expires_at > now()
+                      and password_hash is null
+                    order by created_at desc limit 1
+                    """,
+                    (hash_pii_optional(email, kind="email"),),
+                )
+                vivo = cur.fetchone()
+                if vivo:
+                    # Mesmo código e validade; o telefone/nome corrigido no
+                    # reenvio vale. None (inválido ou disputado) não apaga o anterior.
+                    cur.execute(
+                        """
+                        update email_verification_codes set
+                          phone_e164 = coalesce(%s, phone_e164), phone_hash = coalesce(%s, phone_hash),
+                          phone_enc = coalesce(%s, phone_enc), display_name = coalesce(%s, display_name),
+                          display_name_enc = coalesce(%s, display_name_enc)
+                        where id = %s
+                        """,
+                        (normalized_phone, hash_pii_optional(normalized_phone, kind="phone"),
+                         encrypt_pii_optional(normalized_phone), display_name,
+                         encrypt_pii_optional(display_name), vivo["id"]),
+                    )
+                    conn.commit()
+                    return vivo["code"]
 
-    password_hash = hash_password(password)
+    password_hash = hash_password(password) if password is not None else None
     # Código de verificação precisa ser imprevisível (brute-force de 6 dígitos):
     # secrets (CSPRNG) em vez de random (Mersenne Twister, previsível).
     code = f"{secrets.randbelow(1_000_000):06d}"
@@ -889,7 +949,9 @@ def confirm_email_verification_impl(
     verification_id = row["id"]
     user_id = get_or_create_canonical_user("email", email)
 
-    with get_conn() as conn:
+    # O telefone foi conferido no register, até 15 min antes: outra conta pode
+    # tê-lo gravado nesse meio-tempo. `conn` é o do `with` logo abaixo.
+    def _gravar(phone_e164):
         with conn.cursor() as cur:
             cur.execute(
                 """
@@ -926,6 +988,9 @@ def confirm_email_verification_impl(
                 "update email_verification_codes set used_at = now() where id = %s",
                 (verification_id,),
             )
+
+    with get_conn() as conn:
+        gravar_descartando_telefone_disputado(conn, _gravar, phone_e164)
         conn.commit()
     invalidate_auth_user_cache(user_id)
 
@@ -1025,7 +1090,13 @@ def attempt_whatsapp_phone_link_impl(
 
     final_user_id = target_user_id
     if int(current_user_id) != target_user_id:
-        merge_users(int(current_user_id), target_user_id)
+        from db.users import MergeRefused  # tardio: db/ importa este módulo
+
+        try:
+            merge_users(int(current_user_id), target_user_id)
+        except MergeRefused:
+            # As duas contas têm dados (#607): o número segue na conta do WhatsApp.
+            return {"status": "merge_conflict", "wa_phone": wa_phone}
 
     with get_conn() as conn:
         with conn.cursor() as cur:

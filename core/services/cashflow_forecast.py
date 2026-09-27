@@ -145,13 +145,11 @@ def forecast_with_trajectory(user_id: int, days: int = 90, threshold: float = 0.
         **_horizons(today, sb, events, HORIZONS),
         **_trajectory(today, sb, events, days, threshold),
         "premises": (
-            "Estimativa dia a dia: saldo + receitas fixas − gastos fixos automáticos "
-            "(mensais e anuais) − boletos pendentes − faturas de cartão em aberto, na data "
-            "de vencimento de cada compromisso. Boletos e faturas já vencidos ou que vencem "
-            "hoje entram no saldo de partida e são listados à parte, em vencidos e em vencem "
-            "hoje. Receitas fixas entram uma vez por mês no dia do pagamento (as anuais, só "
-            "no mês delas), qualquer que seja a frequência cadastrada. Não inclui gastos "
-            "avulsos futuros nem gastos fixos semanais, diários ou únicos."
+            "Estimativa dia a dia: saldo + receitas fixas (mensais e anuais) − gastos fixos "
+            "automáticos (mensais, anuais, semanais, diários e únicos, na data de cada "
+            "ocorrência) − boletos pendentes − faturas de cartão em aberto. Boletos e faturas "
+            "já vencidos ou que vencem hoje entram no saldo de partida e são listados à parte. "
+            "Não inclui gastos avulsos futuros."
         ),
     }
 

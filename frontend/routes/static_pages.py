@@ -164,6 +164,18 @@ async def serve_cadastro():
     return html_file(FRONTEND_DIR / "cadastro.html")
 
 
+@router.get("/q")
+async def serve_quiz_resultado():
+    # Perfil e respostas do quiz são dado financeiro: nada de Pixel/GA4/Clarity aqui.
+    return html_file(FRONTEND_DIR / "quiz-resultado.html", pixel=False)
+
+
+@router.get("/quiz-resultado.js")
+async def serve_quiz_resultado_js():
+    return FileResponse(FRONTEND_DIR / "quiz-resultado.js", media_type="application/javascript",
+                        headers={"Cache-Control": "no-cache"})
+
+
 @router.get("/recuperar-senha")
 async def serve_recuperar_senha():
     return html_file(FRONTEND_DIR / "recuperar-senha.html")
@@ -985,7 +997,7 @@ async def serve_brand_asset(path: str):
 
 @router.get("/wa")
 async def open_whatsapp_bot():
-    """Abre o chat DIRETO com a Piggy no WhatsApp (deep link), com saudação
+    """Abre o chat DIRETO com o Piggy no WhatsApp (deep link), com saudação
     pré-preenchida. Botões do site apontam pra cá — o número real fica no
     servidor (WHATSAPP_NUMBER), nada hardcoded no HTML. Serve pra reencontrar
     o bot rápido. Sem número configurado, cai no seletor genérico do WhatsApp."""

@@ -1107,28 +1107,10 @@ def test_handle_incoming_clarification_tem_precedencia_sobre_fallback_ia():
     porque é justamente quando o fallback de IA *seria* acionado — provando a
     precedência do caminho determinístico.
     """
-    import uuid as _uuid
-    import db
-    from db.connection import get_conn
+    from conftest import usuario_pagante
     from core.handle_incoming import handle_incoming
 
-    uid = int(_uuid.uuid4().int % 1_000_000_000) + 1  # < 2 bilhões
-    db.ensure_user(uid)
-    with get_conn() as conn:
-        with conn.cursor() as cur:
-            cur.execute("select id from auth_accounts where user_id = %s limit 1", (uid,))
-            if cur.fetchone():
-                cur.execute(
-                    "update auth_accounts set plan='pro', plan_expires_at=null where user_id = %s",
-                    (uid,),
-                )
-            else:
-                cur.execute(
-                    "insert into auth_accounts(user_id, email, password_hash, plan) "
-                    "values (%s, %s, 'x', 'pro')",
-                    (uid, f"pro-clarif-{uid}@test.local"),
-                )
-        conn.commit()
+    uid = usuario_pagante()
 
     set_pending_action(
         uid,

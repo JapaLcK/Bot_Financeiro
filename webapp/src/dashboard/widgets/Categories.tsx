@@ -1,7 +1,7 @@
 import { CATEGORIES, TODAY, isCurrentMonth, previousKey, summary } from "../lib/api";
 import { LAUNCHES } from "../lib/data.js";
 import { money0 } from "../lib/format.js";
-import { setFilter } from "../lib/store.js";
+import { useActions } from "../lib/actions";
 import type { DashState, Launch } from "../lib/types";
 import { Frame } from "../parts/Frame";
 
@@ -22,6 +22,7 @@ export function Categories({ s }: { s: DashState }) {
     .sort((a, b) => b.value - a.value);
   const max = Math.max(...rows.map((r) => Math.max(r.value, r.before ?? 0)), 1);
   const active = s.filter.category;
+  const { setFilter } = useActions();
 
   return (
     <Frame id="categorias" title="Para onde vai"

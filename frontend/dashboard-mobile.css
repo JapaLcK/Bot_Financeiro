@@ -80,7 +80,7 @@ html, body { overflow-x: hidden; }
   /* ── Cards respiram menos pra sobrar tela pro conteúdo ───────────────── */
   .card { padding: 16px 14px; }
 
-  /* ── Toast: acima do FAB da Piggy e sem colar na borda ───────────────── */
+  /* ── Toast: acima do FAB do Piggy e sem colar na borda ───────────────── */
   #toast { left: 12px; right: 12px; bottom: 84px; text-align: center; }
 
   /* ── iOS Safari dá zoom automático ao focar campo com fonte <16px, o que

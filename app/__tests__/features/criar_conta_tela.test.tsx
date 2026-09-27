@@ -200,7 +200,7 @@ describe("(auth)/criar-conta — tela real", () => {
       textContentType: "telephoneNumber",
       autoComplete: "tel",
       placeholder: "(11) 99999-9999",
-      accessibilityHint: "Use o mesmo número com que você vai falar com a Piggy.",
+      accessibilityHint: "Use o mesmo número com que você vai falar com o Piggy.",
     });
     expect(campo("Senha").props).toMatchObject({
       secureTextEntry: true,

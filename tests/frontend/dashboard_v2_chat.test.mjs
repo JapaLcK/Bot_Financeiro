@@ -4,9 +4,11 @@
 //   · digitar + Enter abre a conversa com a pergunta; sem IA no protótipo, texto livre
 //     recebe os atalhos, e cada atalho responde com texto, blocos e próximas perguntas;
 //   · os 8 assuntos respondem sem erro, sem id repetido na página;
-//   · os blocos da resposta são uma foto: clicar neles não mexe no painel (PR 3 os anima);
+//   · os blocos da resposta são vivos: dashboard_v2_chat_blocos.test.mjs;
 //   · a conversa sobrevive à troca de página e some ao recarregar;
-//   · estado vazio com as sugestões do perfil primeiro; Essencial vê o convite do Plus.
+//   · estado vazio com as sugestões do perfil primeiro;
+//   · o Essencial conversa como os outros planos (em produção ele tem IA, com cota:
+//     core/services/plan_limits.py, `ai_conversational_enabled`).
 import { test, before, after } from "node:test";
 import assert from "node:assert/strict";
 import { execSync } from "node:child_process";
@@ -24,7 +26,7 @@ before(async () => {
 });
 after(() => browser?.close());
 
-async function abrir({ width = 1440, hash = "#/", perfil = "padrao", qs = "", semInert = false, sorte = null } = {}) {
+async function abrir({ width = 1440, hash = "#/", perfil = "padrao", qs = "", sorte = null } = {}) {
   const ctx = await browser.newContext({ viewport: { width, height: 900 }, reducedMotion: "reduce" });
   await ctx.route("**/*", (r) => {
     const url = new URL(r.request().url());
@@ -34,12 +36,6 @@ async function abrir({ width = 1440, hash = "#/", perfil = "padrao", qs = "", se
   });
   await ctx.addInitScript((p) => localStorage.setItem("pigbank.dashboard.profile.v1", JSON.stringify(p)), perfil);
   if (sorte !== null) await ctx.addInitScript((v) => { Math.random = () => v; }, sorte);
-  if (semInert) await ctx.addInitScript(() => { // Safari < 15.5: o mesmo de dashboard_v2_organizar
-    const sa = Element.prototype.setAttribute, ta = Element.prototype.toggleAttribute;
-    Element.prototype.setAttribute = function (n, v) { if (n !== "inert") return sa.call(this, n, v); };
-    Element.prototype.toggleAttribute = function (n, f) { return n === "inert" ? false : ta.call(this, n, f); };
-    delete HTMLElement.prototype.inert;
-  });
   const page = await ctx.newPage();
   const erros = [];
   page.on("pageerror", (e) => erros.push(e.message));
@@ -119,31 +115,6 @@ test("os 8 assuntos respondem com blocos, sem erro e sem id repetido", async () 
   assert.deepEqual(erros, []);
 });
 
-for (const semInert of [false, true]) test(`os blocos da resposta são uma foto: clicar neles não mexe no painel${semInert ? " (sem inert, Safari < 15.5)" : ""}`, async () => {
-  const { ctx, page } = await abrir({ semInert });
-  await perguntar(page, "oi");
-  await page.locator(".chat > .msg-piggy").first().waitFor();
-  await seguir(page, "Pra onde vai meu dinheiro?");
-  const bloco = page.locator(".chat > .msg-piggy").last().locator(".msg-block");
-  const inerte = await bloco.evaluate((b) => b.inert);
-  // Sem inert: nenhum controle do bloco no Tab, e o ponteiro não chega neles.
-  const [soltos, alcancado] = await bloco.evaluate((b) => {
-    const f = [...b.querySelectorAll("a[href], button, input, select, textarea, [tabindex]")];
-    const r = f[0].getBoundingClientRect();
-    return [f.filter((e) => e.tabIndex >= 0 && !b.inert).length, f.includes(document.elementFromPoint(r.x + r.width / 2, r.y + r.height / 2))];
-  });
-  await bloco.locator("button").first().click({ force: true }); // o usuário tenta filtrar uma categoria
-  // Leitor de tela (VoiceOver): foco programático e clique sem ponteiro, direto no botão.
-  await bloco.evaluate((b) => { const f = b.querySelector("button"); f.focus(); f.click(); });
-  await page.evaluate(() => { location.hash = "#/gastos"; });
-  await page.locator("#page-title", { hasText: "Para onde vai" }).waitFor();
-  const filtrado = await page.locator(".cats [aria-pressed='true'], .chip[aria-pressed='true']").count();
-  await ctx.close();
-  assert.equal(!!inerte, !semInert); // sem suporte, a propriedade nem existe
-  assert.deepEqual([soltos, alcancado], [0, false]);
-  assert.equal(filtrado, 0);
-});
-
 // Perguntas da faixa que pedem um recorte do assunto: a resposta tem de responder a elas.
 test("\"qual categoria mais cresceu\" e \"que dia da semana\" respondem o que foi perguntado", async () => {
   const { ctx, page } = await abrir({ hash: "#/piggy", perfil: "controlar" });
@@ -209,17 +180,20 @@ test("estado vazio: as sugestões do perfil vêm primeiro e respondem", async ()
   assert.equal(blocos, 2); // Rendimento × CDI + Onde está o dinheiro
 });
 
-test("Essencial: a conversa vira convite e a barra leva até ele", async () => {
-  const { ctx, page } = await abrir({ hash: "#/gastos", qs: "?plano=essencial" });
-  const barra = await page.locator(".askbar").evaluate((a) => [a.tagName, a.getAttribute("href"), a.textContent]);
-  await page.locator(".askbar").click();
-  await page.locator(".chat-plus").waitFor();
-  const r = await page.evaluate(() => [!!document.querySelector("#askbar-input"), document.querySelector(".chat-plus-cta a").getAttribute("href")]);
+test("Essencial: conversa normal, a barra pergunta e o Piggy responde", async () => {
+  const { ctx, page, erros } = await abrir({ hash: "#/gastos", qs: "?plano=essencial" });
+  const barra = await page.locator(".askbar").evaluate((a) => a.tagName);
+  await perguntar(page, "oi");
+  await page.locator(".chat > .msg-piggy").first().waitFor();
+  const r = await page.evaluate(() => [
+    document.querySelector(".chat .msg-user").textContent,
+    document.querySelectorAll(".chat .msg-piggy .chat-follow button").length > 0,
+    document.querySelectorAll(".chat-plus").length,
+  ]);
   await ctx.close();
-  assert.equal(barra[0], "A");
-  assert.equal(barra[1], "#/piggy");
-  assert.match(barra[2], /no Plus/);
-  assert.deepEqual(r, [false, "../frontend/precos.html"]);
+  assert.equal(barra, "FORM");
+  assert.deepEqual(r, ["oi", true, 0]);
+  assert.deepEqual(erros, []);
 });
 
 test("320 e 390: a conversa não rola para o lado e a barra fica acima da de baixo", async () => {

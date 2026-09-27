@@ -128,3 +128,107 @@ def login_http(monkeypatch, *, como_app: bool, ua: str | None = None):
     assert r.status_code == 200, r.text
     return r.json(), r
 
+
+
+# ── Login social: o Google é o ÚNICO dublê ───────────────────────────────────
+# Usado pelos `tests/test_auth_google_app_*.py`. Banco, rotas, state, cookie e
+# sessão são os de verdade; só o que sairia para a rede do Google é trocado.
+
+def google_de_mentira(monkeypatch, email: str, *, verificado: bool = True) -> None:
+    """`build_authorization_url` devolve o state na URL, e a troca do `code`
+    devolve este e-mail. O `sub` deriva do e-mail: cada teste tem o seu."""
+    import core.services.google_oauth as google_oauth
+
+    async def _troca(_code):
+        return {"id_token": "id-token-de-teste"}
+
+    monkeypatch.setattr(google_oauth, "is_configured", lambda: True)
+    monkeypatch.setattr(
+        google_oauth, "build_authorization_url",
+        lambda state: f"https://accounts.google.test/auth?state={state}",
+    )
+    monkeypatch.setattr(google_oauth, "exchange_code_for_tokens", _troca)
+    monkeypatch.setattr(google_oauth, "verify_id_token", lambda _t: {
+        "sub": f"sub-{email}", "email": email,
+        "email_verified": verificado, "name": "Fulana Google",
+    })
+
+
+def login_google(app: int, **query):
+    """`/auth/google/start?app=N` → `/auth/google/callback` com o state que o
+    start gravou no cookie. Devolve (cliente, 302 do callback). `query`
+    sobrescreve a URL do callback (`state=` errado, `error=`)."""
+    from urllib.parse import parse_qs, urlparse
+
+    client = TestClient(dashboard.app)
+    inicio = client.get(f"/auth/google/start?app={app}", follow_redirects=False)
+    assert inicio.status_code == 302, inicio.text
+    state = parse_qs(urlparse(inicio.headers["location"]).query)["state"][0]
+    params = {"code": "code-do-google", "state": state, **query}
+    return client, client.get("/auth/google/callback", params=params, follow_redirects=False)
+
+
+# ── Login social: a rede da Apple é o ÚNICO dublê ────────────────────────────
+# Usado pelos `tests/test_auth_apple_*.py`. A verificação de verdade roda
+# sempre (`verificar_identity_token` nunca é dublado): o que troca é só o
+# `urlopen` que o `PyJWKClient` usa para buscar o JWKS, então a conversão de
+# `URLError` em `PyJWKClientConnectionError` e o cache do conjunto são os reais.
+
+NONCE_CRU = "nonce-cru-de-teste-7f3a9c1e-0b2d"
+KID = "kid-de-teste"
+APAGA = object()  # valor de claim que a tira do token
+
+
+def apple_de_mentira(monkeypatch):
+    """Chave RSA gerada aqui, JWKS servido só com a pública dela, e um
+    `PyJWKClient` NOVO por teste: o cache do conjunto sobreviveria entre
+    testes e faria o caso "mesmo `kid`, outra chave" passar pelo motivo errado.
+
+    Devolve um objeto com `emitir(**claims)`, `buscas` (quantas vezes o JWKS
+    foi pedido à "rede") e `fora` (True derruba a rede)."""
+    import hashlib
+    import io
+    import json
+    import time
+    import types
+    import urllib.error
+
+    import jwt
+    from cryptography.hazmat.primitives.asymmetric import rsa
+
+    import core.services.apple_signin as apple_signin
+
+    chave = rsa.generate_private_key(public_exponent=65537, key_size=2048)
+    jwk = json.loads(jwt.algorithms.RSAAlgorithm.to_jwk(chave.public_key()))
+    jwk.update(kid=KID, alg="RS256", use="sig")
+    apple = types.SimpleNamespace(chave=chave, buscas=0, fora=False)
+
+    def _urlopen(pedido, timeout=None, context=None):
+        assert pedido.full_url == "https://appleid.apple.com/auth/keys"
+        apple.buscas += 1
+        if apple.fora:
+            raise urllib.error.URLError("a Apple está fora")
+        return io.BytesIO(json.dumps({"keys": [jwk]}).encode())
+
+    def emitir(*, chave_de=None, kid=KID, **claims):
+        agora = int(time.time())
+        corpo = {
+            "iss": apple_signin.APPLE_ISSUER,
+            "aud": apple_signin.APPLE_BUNDLE_ID,
+            "iat": agora,
+            "exp": agora + 600,
+            "sub": "000123.apple-de-teste.0456",
+            "nonce": hashlib.sha256(NONCE_CRU.encode()).hexdigest(),
+            "email": "apple@example.com",
+            "email_verified": True,
+        }
+        corpo.update(claims)
+        corpo = {k: v for k, v in corpo.items() if v is not APAGA}
+        return jwt.encode(corpo, chave_de or chave, algorithm="RS256", headers={"kid": kid})
+
+    apple.emitir = emitir
+    monkeypatch.setattr(jwt.jwks_client.urllib.request, "urlopen", _urlopen)
+    monkeypatch.setattr(
+        apple_signin, "_jwks", jwt.PyJWKClient(apple_signin._jwks.uri, timeout=5)
+    )
+    return apple

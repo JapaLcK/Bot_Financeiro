@@ -2377,7 +2377,7 @@ function wpInicioValido(s) {
   const ev = params.get("ev");    // "trial" | "purchase" (definido pelo success_url)
   const td = params.get("td");    // dias de trial concedidos (0 quando ev=purchase)
   const pl = params.get("pl");    // plano escolhido: essencial | plus | pro
-  const ia = params.get("ia");    // cota mensal de mensagens da Piggy nesse plano
+  const ia = params.get("ia");    // cota mensal de mensagens do Piggy nesse plano
   const gw = params.get("gw");    // "pix" quando veio do Pix anual (pix-poll.js)
   if (!status) return;
 

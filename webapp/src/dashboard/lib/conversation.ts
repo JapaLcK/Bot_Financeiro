@@ -1,10 +1,10 @@
 import { useSyncExternalStore, type ReactNode } from "react";
 import { go } from "../router";
-import { DEMO, answer, type Follow, type TopicId } from "./topics";
+import { DEMO, answer, type Answer, type TopicId } from "./topics";
 
 // A conversa com o Piggy: vive enquanto a aba está aberta (troca de página não apaga;
 // recarregar começa de novo). Guardar histórico é fase posterior, com backend.
-export interface Msg { id: number; role: "user" | "piggy"; text: ReactNode; blocks?: ReactNode[]; follow?: Follow[] }
+export interface Msg extends Partial<Omit<Answer, "text">> { id: number; role: "user" | "piggy"; text: ReactNode }
 
 let msgs: Msg[] = [];
 let seq = 0;

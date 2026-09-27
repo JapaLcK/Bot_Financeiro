@@ -10,14 +10,29 @@ from core.services.category_service import learn_from_inference
 
 def handle_quick_entry(user_id: int, text: str) -> OutgoingMessage | None:
     from core.handlers import credit as h_credit
+    from core.handlers import forma_pagamento as fp
 
     credit_response = h_credit.try_handle_natural_credit_purchase(user_id, text)
     if credit_response is not None:
         return OutgoingMessage(text=credit_response)
 
+    # Mesma regra do `core/handlers/launches.py::add` (Q40), mas sem pergunta
+    # com estado: o Discord está morto, não vale criar pendência aqui.
+    declarada = fp.detectar(text)
+    if declarada == fp.DINHEIRO:
+        text = fp.limpar(text)
     parsed = parse_receita_despesa_natural(user_id, text)
     if not parsed:
         return None
+    decisao = fp.decidir(user_id, declarada)
+    if decisao == fp.MISTO:
+        return OutgoingMessage(text=fp.msg_misto())
+    if decisao == fp.BANCO:
+        return OutgoingMessage(text=fp.msg_banco(user_id, parsed["tipo"], parsed["valor"]))
+    if decisao == fp.PERGUNTA:
+        return OutgoingMessage(text=(
+            "🐷 Não registrei. Com banco conectado, o que passou pelo banco chega "
+            "pelo Open Finance. Se foi em espécie: *gastei 50 em dinheiro no mercado*"))
 
     ensure_user(user_id)
 

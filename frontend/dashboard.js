@@ -3564,6 +3564,7 @@ function _ensureGenericConfirmModal() {
         <p class="msub" id="generic-confirm-body" style="white-space:pre-wrap"></p>
         <div class="modal-acts" style="margin-top:18px">
           <button type="button" class="btn-cancel" id="generic-confirm-cancel">Cancelar</button>
+          <button type="button" class="btn-save" id="generic-confirm-alt" style="display:none"></button>
           <button type="button" class="btn-save" id="generic-confirm-ok">OK</button>
         </div>
       </div>
@@ -3575,6 +3576,7 @@ function _ensureGenericConfirmModal() {
   });
   document.getElementById("generic-confirm-cancel").addEventListener("click", () => _genericModalClose(false));
   document.getElementById("generic-confirm-ok").addEventListener("click", () => _genericModalClose(true));
+  document.getElementById("generic-confirm-alt").addEventListener("click", () => _genericModalClose("alt"));
 
   /* Este arquivo REDECLARA confirmModal/alertModal, e a dashboard.html carrega
      dashboard.js depois de modals.js — então no dashboard quem roda é este
@@ -3633,6 +3635,11 @@ function confirmModal(message, opts = {}) {
   const okBtn = document.getElementById("generic-confirm-ok");
   cancelBtn.textContent = cancelText;
   cancelBtn.style.display = "";
+  // `opts.altText`: segunda opção que resolve "alt" (ex.: banco × dinheiro).
+  // Esc, overlay e Cancelar continuam resolvendo false.
+  const altBtn = document.getElementById("generic-confirm-alt");
+  altBtn.textContent = opts.altText || "";
+  altBtn.style.display = opts.altText ? "" : "none";
   okBtn.textContent = okText;
   okBtn.className = danger ? "inst-delete-btn" : "btn-save";
   _genericModalLastFocus = document.activeElement;
@@ -3650,6 +3657,7 @@ function alertModal(message, opts = {}) {
   const cancelBtn = document.getElementById("generic-confirm-cancel");
   const okBtn = document.getElementById("generic-confirm-ok");
   cancelBtn.style.display = "none";
+  document.getElementById("generic-confirm-alt").style.display = "none";
   okBtn.textContent = okText;
   okBtn.className = "btn-save";
   _genericModalLastFocus = document.activeElement;
@@ -3671,14 +3679,9 @@ const GOAL_COLOR_OPTIONS = [
   "#BE8200","#7E5FE6","#E85F2A","#22C3D6","#94A3B8",
 ];
 
-function _cdiPercentFromRate(rate) {
-  const pct = Number(rate == null ? 1 : rate) * 100;
-  return Number.isFinite(pct) && pct > 0 ? pct : 100;
-}
-
-function _formatCdiRate(rate) {
-  const pct = _cdiPercentFromRate(rate);
-  return `Rende ${pct.toLocaleString("pt-BR", { maximumFractionDigits: 2 })}% do CDI · simulado`;
+function _pocketYieldLabel(p) {
+  if (_isOfStale(p)) return "Reative seu banco (plano pago) pra o saldo voltar a atualizar";
+  return _isOfPocket(p) ? "Saldo atualizado pelo banco" : "Sem rendimento";
 }
 
 let _goalsCache = null;
@@ -3829,9 +3832,7 @@ function _renderPocketOnlyCard(p, idx = 0) {
   const line1 = ofStale ? "<i class='ph ph-lock' aria-hidden='true'></i> Banco desconectado. Reative pra atualizar"
               : ofPocket ? "Sincronizada com seu banco"
               : "Caixinha sem meta: depósitos livres";
-  const line2 = ofStale ? "Reative seu banco (plano pago) pra o saldo voltar a atualizar"
-              : ofPocket ? "Saldo atualizado pela corretora/banco"
-              : (p.interest_enabled === false ? "Sem rendimento" : _formatCdiRate(p.interest_rate));
+  const line2 = _pocketYieldLabel(p);
   return `
     <div class="goal-card${ofStale ? " of-stale" : ""}" style="animation-delay:${idx * 80}ms;cursor:pointer" onclick="openPocketHistory('${escapeJsString(p.name)}')">
       <div class="goal-ring">
@@ -3903,7 +3904,7 @@ function _renderGoalCard(g, idx = 0) {
         <div class="goal-amt">${_fmtBRL(g.balance || 0)} / ${_fmtBRL(g.target_amount || 0)}</div>
         <div class="bar-track" style="margin-top:6px"><div class="bar-fill" style="width:${pct}%;background:${color}"></div></div>
         <div class="goal-deadline" style="color:${deadlineColor}">${deadlineText}${g.days_left !== null ? " · " + (g.days_left >= 0 ? "em " + g.days_left + " dias" : "vencido há " + (-g.days_left) + " dias") : ""}</div>
-        <div class="goal-deadline" style="color:var(--text-3)">${g.interest_enabled === false ? "Sem rendimento" : _formatCdiRate(g.interest_rate)}</div>
+        <div class="goal-deadline" style="color:var(--text-3)">${_pocketYieldLabel(g)}</div>
         ${alertText}
       </div>
     </div>
@@ -3962,21 +3963,6 @@ function _ensureGoalModal() {
               <label for="goal-description">Descrição (opcional)</label>
               <input type="text" id="goal-description" maxlength="200" placeholder="Anotações..." />
             </div>
-            <div class="field">
-              <label for="goal-interest-enabled">Rendimento?</label>
-              <label style="display:flex;align-items:center;gap:10px;color:var(--text-2);font-size:.86rem">
-                <input type="checkbox" id="goal-interest-enabled" checked onchange="syncGoalInterestConfig()" />
-                <span>Rendimento atrelado ao CDI</span>
-              </label>
-              <div id="goal-interest-config" style="margin-top:10px">
-                <label for="goal-interest-rate">Percentual do CDI</label>
-                <div style="display:flex;align-items:center;gap:8px">
-                  <input type="number" id="goal-interest-rate" min="1" max="300" step="0.01" value="100" inputmode="decimal" style="width:112px;flex:0 0 112px" />
-                  <span style="color:var(--text-2);font-size:.86rem;white-space:nowrap">% do CDI</span>
-                </div>
-                <div style="color:var(--text-3);font-size:.78rem;margin-top:8px;line-height:1.35"><i class="ph ph-lightbulb" aria-hidden="true"></i> Valor simulado: o PigBank não custodia seu dinheiro. Use a taxa do banco onde o saldo realmente está aplicado.</div>
-              </div>
-            </div>
           </div>
           <div class="modal-acts" style="margin-top:18px;display:flex;gap:8px;align-items:center">
             <button type="button" class="inst-delete-btn" id="goal-delete-btn" style="display:none" onclick="deleteGoalFromModal()"><i class="ph ph-trash" aria-hidden="true"></i> Excluir</button>
@@ -4019,12 +4005,6 @@ function _setGoalColor(c) {
   _rerenderPicker("goal-color-picker", _renderGoalPickers);
 }
 
-function syncGoalInterestConfig() {
-  const enabled = document.getElementById("goal-interest-enabled")?.checked ?? true;
-  const config = document.getElementById("goal-interest-config");
-  if (config) config.style.display = enabled ? "" : "none";
-}
-
 function openGoalEditModal(goal) {
   _ensureGoalModal();
   const isEdit = !!(goal && goal.id);
@@ -4040,9 +4020,6 @@ function openGoalEditModal(goal) {
   document.getElementById("goal-target-date").value = isEdit && goal.target_date ? goal.target_date : "";
   document.getElementById("goal-status").value = isEdit ? (goal.status || "active") : "active";
   document.getElementById("goal-description").value = isEdit ? (goal.description || "") : "";
-  document.getElementById("goal-interest-enabled").checked = isEdit ? goal.interest_enabled !== false : true;
-  document.getElementById("goal-interest-rate").value = _cdiPercentFromRate(isEdit ? goal.interest_rate : 1).toFixed(2).replace(/\.00$/, "");
-  syncGoalInterestConfig();
   document.getElementById("goal-delete-btn").style.display = isEdit ? "" : "none";
   _renderGoalPickers();
   document.getElementById("goal-edit-overlay").classList.add("open");
@@ -4058,8 +4035,6 @@ async function saveGoal() {
   const targetRaw = document.getElementById("goal-target").value.trim();
   const hasTarget = targetRaw !== "";
   const targetVal = hasTarget ? parseFloat(targetRaw) : null;
-  const interestEnabled = document.getElementById("goal-interest-enabled").checked;
-  const cdiPct = parseFloat((document.getElementById("goal-interest-rate").value || "100").replace(",", "."));
   const payload = {
     name: document.getElementById("goal-name").value.trim(),
     description: document.getElementById("goal-description").value.trim() || null,
@@ -4068,17 +4043,11 @@ async function saveGoal() {
     emoji: _goalEditState.emoji,
     color: _goalEditState.color,
     status: document.getElementById("goal-status").value,
-    interest_enabled: interestEnabled,
-    interest_rate: interestEnabled ? cdiPct / 100 : 1.0,
     clear_target: !hasTarget,
   };
   if (!payload.name) { await alertModal("Digite um nome.", { title: "Nome obrigatório" }); return; }
   if (hasTarget && (!targetVal || targetVal <= 0)) {
     await alertModal("Valor alvo deve ser maior que zero ou deixe vazio pra criar só uma caixinha.", { title: "Valor inválido" });
-    return;
-  }
-  if (interestEnabled && (!Number.isFinite(cdiPct) || cdiPct <= 0)) {
-    await alertModal("Informe um percentual do CDI maior que zero.", { title: "Rendimento inválido" });
     return;
   }
   _goalSaving = true;
@@ -4095,8 +4064,6 @@ async function saveGoal() {
         body: JSON.stringify({
           name: payload.name,
           description: payload.description || null,
-          interest_enabled: payload.interest_enabled,
-          interest_rate: payload.interest_rate,
         }),
       });
       if (!r.ok) {
@@ -4179,8 +4146,8 @@ const RECURRING_CATEGORY_EMOJI = {
 };
 
 // 1ª ocorrência do dia `dayNum` (1-31) em/depois de hoje E de `startISO`
-// (YYYY-MM-DD, opcional). Espelha o guard do charger: recorrência com início
-// futuro só "vence" a partir do start_date.
+// (YYYY-MM-DD, opcional): recorrência com início futuro só "vence" a partir do
+// start_date.
 function _nextRecurringOccurrence(dayNum, startISO, frequency, monthNum) {
   const floor = new Date();
   floor.setHours(0, 0, 0, 0);
@@ -4312,7 +4279,7 @@ function _renderFixedProGate() {
       <div class="empty" style="padding:30px;text-align:center;color:var(--text-3)">
         <div style="font-size:2.5rem;margin-bottom:10px"><i class="ph ph-lock" aria-hidden="true"></i></div>
         <div style="font-size:1.05rem;font-weight:700;color:var(--text);margin-bottom:6px">Gastos Fixos é Pro</div>
-        <div style="margin-bottom:14px">Cadastre suas assinaturas e contas recorrentes pra o Piggy lançar automaticamente todo mês.</div>
+        <div style="margin-bottom:14px">Cadastre suas assinaturas e contas fixas pro Piggy incluir na previsão do seu saldo.</div>
         <button class="mock-cta" onclick="showUpgradeModal('recurring_expenses')"><i class="ph ph-star" aria-hidden="true"></i> Ver Pro</button>
       </div>`;
   }
@@ -4389,7 +4356,7 @@ function _renderFixedView(items) {
           <div class="tx-icon" style="color:${(x.date - today) / (1000 * 60 * 60 * 24) <= 2 ? 'var(--red)' : '#fbbf24'}">${phIcon(_recurringEmoji(x.rec))}</div>
           <div class="tx-main">
             <div class="tx-desc">${escapeHtmlSafe(x.rec.name)} · ${x.date.toLocaleDateString("pt-BR", { day: "2-digit", month: "short" })}</div>
-            <div class="tx-meta">${_formatDueIn(x.date)} · ${x.rec.payment_type === "credit_card" ? "Cartão " + escapeHtmlSafe(x.rec.card_name || "?") : "Débito automático"}</div>
+            <div class="tx-meta">${_formatDueIn(x.date)} · ${x.rec.payment_type === "credit_card" ? "Cartão " + escapeHtmlSafe(x.rec.card_name || "?") : "Débito no banco"}</div>
           </div>
           <div class="tx-amt ${_toneClass(-x.rec.amount, "green", "red")}">-${_fmtBRL(x.rec.amount)}</div>
         </div>
@@ -4510,7 +4477,7 @@ function _ensureRecurringModal() {
               <div class="field">
                 <label for="recurring-mode">Tipo *</label>
                 <select id="recurring-mode" onchange="_toggleRecurringModeHint()">
-                  <option value="autopay">Gasto fixo (débito automático)</option>
+                  <option value="autopay">Gasto fixo (débito no banco)</option>
                   <option value="manual">Conta a pagar (boleto/lembrete)</option>
                 </select>
               </div>
@@ -4555,7 +4522,7 @@ function _ensureRecurringModal() {
               <div class="field">
                 <label for="recurring-payment-type">Forma de pagamento *</label>
                 <select id="recurring-payment-type" onchange="_toggleRecurringCardField()">
-                  <option value="account">Débito automático na conta</option>
+                  <option value="account">Débito automático no banco</option>
                   <option value="credit_card">Cartão de crédito</option>
                 </select>
               </div>
@@ -4568,7 +4535,7 @@ function _ensureRecurringModal() {
               <div class="field">
                 <label for="recurring-start-date" id="recurring-start-label">Começa a partir de</label>
                 <input type="date" id="recurring-start-date" />
-                <span id="recurring-start-hint" style="font-size:.68rem;color:var(--text-3);margin-top:4px;display:block">A 1ª cobrança é no dia do vencimento em/após esta data. Deixe hoje pra começar já.</span>
+                <span id="recurring-start-hint" style="font-size:.68rem;color:var(--text-3);margin-top:4px;display:block">Entra na previsão a partir do 1º vencimento em/após esta data. Deixe hoje pra começar já.</span>
               </div>
             </div>
             <div class="field">
@@ -4648,7 +4615,7 @@ function _toggleRecurringFreqFields() {
     if (startInput) startInput.required = true;
   } else {
     if (startLabel) startLabel.textContent = "Começa a partir de";
-    if (startHint) startHint.textContent = "A 1ª cobrança é no dia do vencimento em/após esta data. Deixe hoje pra começar já.";
+    if (startHint) startHint.textContent = "Entra na previsão a partir do 1º vencimento em/após esta data. Deixe hoje pra começar já.";
     if (startInput) startInput.required = false;
   }
 }
@@ -4656,7 +4623,7 @@ function _toggleRecurringFreqFields() {
 // Ajusta ajuda + título + campos do modal conforme o modo (gasto fixo vs conta
 // a pagar). Numa CONTA A PAGAR o valor é SEMPRE uma estimativa (o valor real é
 // informado ao pagar), então o campo de valor vira opcional; num GASTO FIXO o
-// valor é obrigatório (o charger debita esse valor sozinho).
+// valor é obrigatório (é ele que entra na previsão).
 function _toggleRecurringModeHint() {
   const mode = (document.getElementById("recurring-mode") || {}).value || "autopay";
   const hint = document.getElementById("recurring-mode-hint");
@@ -4667,7 +4634,7 @@ function _toggleRecurringModeHint() {
   const amount = document.getElementById("recurring-amount");
   const name = document.getElementById("recurring-name");
   if (mode === "manual") {
-    if (hint) hint.innerHTML = "<i class='ph ph-receipt' aria-hidden='true'></i> <strong>Conta a pagar:</strong> a Piggy te <strong>lembra</strong> do vencimento e <strong>nada sai da conta</strong> até você confirmar. O valor é sempre uma <strong>estimativa</strong>. Você informa o valor real ao marcar como paga.";
+    if (hint) hint.innerHTML = "<i class='ph ph-receipt' aria-hidden='true'></i> <strong>Conta a pagar:</strong> o Piggy te <strong>lembra</strong> do vencimento e <strong>nada sai da conta</strong> até você confirmar. O valor é sempre uma <strong>estimativa</strong>. Você informa o valor real ao marcar como paga.";
     if (title && !isEdit) title.textContent = "Nova conta a pagar";
     // Conta a pagar nunca é débito automático — o user sempre confirma na mão.
     // A "forma de pagamento" (autopay/cartão) não se aplica: esconde e fixa account.
@@ -4680,7 +4647,7 @@ function _toggleRecurringModeHint() {
     if (amount) { amount.required = false; amount.placeholder = "estimativa, ex: 80,00"; }
     if (name) name.placeholder = "Ex: Água, Luz, Internet...";
   } else {
-    if (hint) hint.innerHTML = "<i class='ph ph-warning' aria-hidden='true'></i> <strong>Gasto fixo:</strong> é <strong>lançado automaticamente</strong> no dia escolhido (débito na conta). Pra contas que você paga na mão (boleto), use \"Conta a pagar\".";
+    if (hint) hint.innerHTML = "<i class='ph ph-warning' aria-hidden='true'></i> <strong>Gasto fixo:</strong> entra na <strong>previsão</strong> do seu saldo — o Piggy não lança sozinho. O pagamento de verdade vem do seu banco conectado, ou você registra se pagar em dinheiro. Pra ser lembrado antes do vencimento, use \"Conta a pagar\".";
     if (title && !isEdit) title.textContent = "Novo gasto fixo";
     if (paytypeRow) paytypeRow.style.display = "";
     if (label) label.textContent = "Valor (R$) *";
@@ -4814,7 +4781,7 @@ async function saveRecurring() {
 async function deleteRecurringFromModal() {
   if (!_recurringEditState.id) return;
   const ok = await confirmModal(
-    "Excluir este gasto fixo? Lançamentos passados ficam preservados. Só não vai mais cobrar automaticamente.",
+    "Excluir este gasto fixo? Os lançamentos que já existem ficam. Ele só sai da previsão.",
     { title: "Excluir gasto fixo", okText: "Excluir", danger: true },
   );
   if (!ok) return;
@@ -5098,6 +5065,8 @@ function openRecurringNewFromTab() {
 
 // ── Agenda de boletos (a pagar) ───────────────────────────────────────
 const _billsChannel = makeFetchChannel(); // dedup + abort + geração
+// Q40: com banco conectado o servidor exige a forma ao pagar (`metodo`).
+let _billsExigeForma = false;
 
 async function _fetchBills({ force = false } = {}) {
   return _billsChannel.run(async (signal) => {
@@ -5108,6 +5077,7 @@ async function _fetchBills({ force = false } = {}) {
     if (resp.status === 403) return { pro_required: true };
     if (!resp.ok) throw _erroHttp(resp.status, await resp.text());
     const data = await resp.json();
+    _billsExigeForma = !!data.exige_forma_pagamento;
     return data.bills || [];
   }, { force });
 }
@@ -5232,7 +5202,9 @@ function _renderBillRow(b) {
 }
 
 function _renderBillPaidRow(b) {
-  const paidVal = b.paid_amount != null ? b.paid_amount : b.amount;
+  // Q40: paga pelo banco sem valor informado → paid_amount null; o valor real
+  // está no extrato, e a estimativa (amount) não é o que foi pago.
+  const paidTxt = b.paid_amount != null ? `-${_fmtBRL(b.paid_amount)}` : "valor no extrato";
   const when = b.paid_at ? new Date(b.paid_at).toLocaleDateString("pt-BR", { day: "2-digit", month: "short" }) : "";
   return `
     <div class="tx-row">
@@ -5241,7 +5213,7 @@ function _renderBillPaidRow(b) {
         <div class="tx-desc">${escapeHtmlSafe(b.name || "Conta")}</div>
         <div class="tx-meta">paga ${when}</div>
       </div>
-      <div class="tx-amt" style="color:var(--text-2)">-${_fmtBRL(paidVal)}</div>
+      <div class="tx-amt" style="color:var(--text-2)">${paidTxt}</div>
     </div>`;
 }
 
@@ -5260,6 +5232,19 @@ async function _errDetail(resp) {
 }
 
 async function payBill(billId, estimate, name, variavel) {
+  // Q40: com banco conectado, a forma vem ANTES do valor. Pelo banco não pede
+  // valor (o débito chega pelo Open Finance). Esc/overlay/Cancelar = nada.
+  let metodo = null;
+  if (_billsExigeForma) {
+    const escolha = await confirmModal(
+      `Como você pagou "${name}"?\n\nPelo banco, o débito chega sozinho pelo Open Finance. ` +
+      "Em dinheiro vivo, sai da sua Carteira Piggy.",
+      { title: "Forma de pagamento", okText: "Pelo banco", altText: "Dinheiro vivo" });
+    if (escolha === true) metodo = "banco";
+    else if (escolha === "alt") metodo = "dinheiro";
+    else return;
+  }
+  if (metodo === "banco") return _postPayBill(billId, { metodo }, "✓ Marcada como paga (pelo banco)");
   // Valor da conta a pagar é sempre confirmado na hora (pode variar). Se tem
   // estimativa, pré-preenche pra ser só ajustar/confirmar; senão abre vazio.
   const pergunta = variavel
@@ -5273,18 +5258,22 @@ async function payBill(billId, estimate, name, variavel) {
     await alertModal("Digite um valor válido (maior que zero).", { title: "Valor inválido" });
     return;
   }
+  return _postPayBill(billId, metodo ? { metodo, amount } : { amount }, `✓ Boleto pago: ${_fmtBRL(amount)}`);
+}
+
+async function _postPayBill(billId, corpo, toast) {
   try {
     const resp = await fetch(`${API}/recurring-bills/${USER_ID}/${billId}/pay`, {
       method: "POST",
       credentials: "same-origin",
       headers: csrfHeaders({ "Content-Type": "application/json" }),
-      body: JSON.stringify({ amount }),
+      body: JSON.stringify(corpo),
     });
     if (resp.status === 403) return;   // pro_required: interceptor abre upgrade
     if (!resp.ok) {
       throw new Error(await _errDetail(resp));
     }
-    showToast(`✓ Boleto pago: ${_fmtBRL(amount)}`);
+    showToast(toast);
     loadBillsView();
     sendRefresh();
   } catch (err) {
@@ -5643,7 +5632,7 @@ function _renderRecurringIncomeProGate() {
       <div class="empty" style="padding:30px;text-align:center;color:var(--text-3)">
         <div style="font-size:2.5rem;margin-bottom:10px"><i class="ph ph-lock" aria-hidden="true"></i></div>
         <div style="font-size:1.05rem;font-weight:700;color:var(--text);margin-bottom:6px">Receitas fixas é Pro</div>
-        <div style="margin-bottom:14px">Cadastre salário, aluguel e freelas recorrentes pra o Piggy lançar automaticamente todo mês.</div>
+        <div style="margin-bottom:14px">Cadastre salário, aluguel e freelas recorrentes pro Piggy incluir na previsão do seu saldo.</div>
         <button class="mock-cta" onclick="showUpgradeModal('recurring_expenses')"><i class="ph ph-star" aria-hidden="true"></i> Ver Pro</button>
       </div>`;
   }
@@ -5796,7 +5785,7 @@ function _ensureRecurringIncomeModal() {
       <div class="modal wide">
         <h3 id="recurring-income-edit-title">Nova receita fixa</h3>
         <p class="msub" style="background:rgba(34,197,94,.1);border:1px solid rgba(34,197,94,.3);border-radius:8px;padding:10px 12px;margin-bottom:14px;font-size:.78rem">
-          <i class="ph ph-coins" aria-hidden="true"></i> <strong>Importante:</strong> essa receita será <strong>lançada automaticamente</strong> todo mês no dia escolhido. Se o valor variar, é só editar aqui: o Piggy registra o reajuste.
+          <i class="ph ph-coins" aria-hidden="true"></i> <strong>Importante:</strong> essa receita entra na <strong>previsão</strong> do seu saldo, mas não é lançada sozinha. Se o valor variar, é só editar aqui: o Piggy registra o reajuste.
         </p>
         <form id="recurring-income-edit-form" onsubmit="event.preventDefault(); saveRecurringIncome();">
           <div class="invest-form">
@@ -5848,7 +5837,7 @@ function _ensureRecurringIncomeModal() {
               <div class="field">
                 <label for="recurring-income-start-date">Começa a partir de</label>
                 <input type="date" id="recurring-income-start-date" />
-                <span style="font-size:.68rem;color:var(--text-3);margin-top:4px;display:block">O 1º crédito é no dia do recebimento em/após esta data. Deixe hoje pra começar já.</span>
+                <span style="font-size:.68rem;color:var(--text-3);margin-top:4px;display:block">Entra na previsão a partir do 1º recebimento em/após esta data. Deixe hoje pra começar já.</span>
               </div>
             </div>
             <div class="field">
@@ -5963,7 +5952,7 @@ async function saveRecurringIncome() {
 async function deleteRecurringIncomeFromModal() {
   if (!_recurringIncomeEditState.id) return;
   const ok = await confirmModal(
-    "Excluir esta receita fixa? Lançamentos passados ficam preservados. Só não vai mais lançar automaticamente.",
+    "Excluir esta receita fixa? Os lançamentos que já existem ficam. Ela só sai da previsão.",
     { title: "Excluir receita fixa", okText: "Excluir", danger: true },
   );
   if (!ok) return;
@@ -7297,7 +7286,7 @@ const UPGRADE_MESSAGES = {
   cards_unlimited: "No Grátis você cadastra 1 cartão. Com um plano pago fica ilimitado: controle todos os seus cartões em um lugar.",
   ofx_import: "Importar extrato bancário e fatura de cartão por OFX faz parte dos planos pagos.",
   history_unlimited: "Histórico além de 30 dias faz parte dos planos pagos.",
-  changelog: "As notícias e resumos do mercado feitos pela Piggy fazem parte dos planos Plus e Pro. Assine pra desbloquear.",
+  changelog: "As notícias e resumos do mercado feitos pelo Piggy fazem parte dos planos Plus e Pro. Assine pra desbloquear.",
   recurring_expenses: "A agenda de boletos e os gastos fixos fazem parte dos planos pagos. Cadastre suas contas a pagar e nunca mais perca um vencimento.",
   agents: "Seu plano atual não ativa mais agentes. Fazendo upgrade, a equipe de porquinhos trabalha pra você: Xerife, Repórter, Carteiro e os próximos que chegarem.",
   forecast: "O Plus prevê seu saldo em 30 dias. O Pro inclui 60 e 90 dias e a análise da trajetória do caixa.",
@@ -8557,8 +8546,14 @@ function renderAlerts(alerts) {
   let html = "";
   alerts.forEach(a => {
     if (a.type === "recurring_charged") {
-      const where = a.payment_type === "credit_card" ? "no cartão" : "da conta";
-      html += `<div class="alert-row"><i class="ph ph-piggy-bank" aria-hidden="true"></i> Piggy lançou <b>${escapeHtmlSafe(a.name)}</b> ${fmt(a.amount)} ${where} ${_alertWhenLabel(a.charged_at)}. <button onclick="ackRecurringCharge(${a.charge_id})" aria-label="Marcar como visto" title="Marcar como visto" style="background:none;border:none;color:var(--text-3);cursor:pointer;font-size:.85rem;line-height:1;padding:2px 6px;margin-left:6px;border-radius:6px;opacity:.7;transition:opacity .15s,background .15s" onmouseover="this.style.opacity=1;this.style.background='rgba(255,255,255,.08)'" onmouseout="this.style.opacity=.7;this.style.background='none'"><i class="ph ph-x" aria-hidden="true"></i></button></div>`;
+      // launched: linha antiga do cobrador que lançava; sem ele é o aviso de
+      // vencimento do autopay (Q42), que não lançou nada.
+      const cartao = a.payment_type === "credit_card";
+      const when = _alertWhenLabel(a.charged_at);
+      const msg = a.launched
+        ? `Piggy lançou <b>${escapeHtmlSafe(a.name)}</b> ${fmt(a.amount)} ${cartao ? "no cartão" : "da conta"} ${when}.`
+        : `<b>${escapeHtmlSafe(a.name)}</b> ${fmt(a.amount)}: dia de ${cartao ? "cobrança no cartão" : "débito no banco"} ${when}.`;
+      html += `<div class="alert-row"><i class="ph ph-piggy-bank" aria-hidden="true"></i> ${msg} <button onclick="ackRecurringCharge(${a.charge_id})" aria-label="Marcar como visto" title="Marcar como visto" style="background:none;border:none;color:var(--text-3);cursor:pointer;font-size:.85rem;line-height:1;padding:2px 6px;margin-left:6px;border-radius:6px;opacity:.7;transition:opacity .15s,background .15s" onmouseover="this.style.opacity=1;this.style.background='rgba(255,255,255,.08)'" onmouseout="this.style.opacity=.7;this.style.background='none'"><i class="ph ph-x" aria-hidden="true"></i></button></div>`;
     } else if (a.type === "recurring_credited") {
       html += `<div class="alert-row"><i class="ph ph-piggy-bank" aria-hidden="true"></i> Piggy recebeu <b>${escapeHtmlSafe(a.name)}</b> ${fmt(a.amount)} na conta ${_alertWhenLabel(a.credited_at)}. <button onclick="ackRecurringIncomeCredit(${a.credit_id})" aria-label="Marcar como visto" title="Marcar como visto" style="background:none;border:none;color:var(--text-3);cursor:pointer;font-size:.85rem;line-height:1;padding:2px 6px;margin-left:6px;border-radius:6px;opacity:.7;transition:opacity .15s,background .15s" onmouseover="this.style.opacity=1;this.style.background='rgba(255,255,255,.08)'" onmouseout="this.style.opacity=.7;this.style.background='none'"><i class="ph ph-x" aria-hidden="true"></i></button></div>`;
     } else {
@@ -9271,8 +9266,16 @@ function populateLaunchCategories() {
   }
 }
 
+// Q40: com banco conectado o manual é só dinheiro vivo. Só a copy muda; quem
+// decide é o servidor.
+const _LAUNCH_MSUB = "Registre uma receita ou despesa. Vai aparecer aqui e no histórico do bot.";
+const _LAUNCH_MSUB_OF = "Registre o que foi em dinheiro vivo. Pix, cartão e débito entram sozinhos pelo Open Finance.";
+
 function openLaunchModal(opts) {
   opts = opts || {};
+  const soDinheiro = !!(lastData && lastData.exige_forma_pagamento);
+  document.getElementById("launch-msub").textContent = soDinheiro ? _LAUNCH_MSUB_OF : _LAUNCH_MSUB;
+  document.querySelectorAll("#launch-overlay .tipo-sub").forEach(el => { el.hidden = !soDinheiro; });
   setValorMode("parcela");           // reseta o toggle pro default a cada abertura
   setLaunchTipo(opts.tipo || "despesa");
   document.getElementById("launch-valor").value = opts.valor || "";
@@ -9708,6 +9711,9 @@ async function submitLaunch() {
         categoria: categoria || null,
         card_id: cardId ? Number(cardId) : null,
         parcelas: parcelas,
+        // Lançamento manual de receita/despesa é dinheiro vivo (Carteira
+        // Piggy); com banco conectado o servidor exige a declaração (Q40).
+        funding_source: launchTipo === "credito" ? null : "carteira",
       }),
     });
     const data = await readResponsePayload(res);
@@ -9743,18 +9749,9 @@ document.getElementById("invest-overlay")?.addEventListener("click", e => {
 // ─── Caixinha (criar) ────────────────────────────────────────────────────────
 let pocketSubmitting = false;
 
-function syncPocketInterestConfig() {
-  const enabled = document.getElementById("pocket-interest-enabled")?.checked ?? true;
-  const config = document.getElementById("pocket-interest-config");
-  if (config) config.style.display = enabled ? "" : "none";
-}
-
 function openPocketModal() {
   document.getElementById("pocket-name").value = "";
   document.getElementById("pocket-description").value = "";
-  document.getElementById("pocket-interest-enabled").checked = true;
-  document.getElementById("pocket-interest-rate").value = "100";
-  syncPocketInterestConfig();
   hidePocketError();
   document.getElementById("pocket-overlay").classList.add("open");
   setTimeout(() => document.getElementById("pocket-name").focus(), 50);
@@ -9782,14 +9779,8 @@ async function submitPocket() {
 
   const name = document.getElementById("pocket-name").value.trim();
   const description = document.getElementById("pocket-description").value.trim();
-  const interestEnabled = document.getElementById("pocket-interest-enabled").checked;
-  const cdiPct = parseFloat((document.getElementById("pocket-interest-rate").value || "100").replace(",", "."));
   if (!name) {
     showPocketError("Informe o nome da caixinha.");
-    return;
-  }
-  if (interestEnabled && (!Number.isFinite(cdiPct) || cdiPct <= 0)) {
-    showPocketError("Informe um percentual do CDI maior que zero.");
     return;
   }
 
@@ -9807,8 +9798,6 @@ async function submitPocket() {
       body: JSON.stringify({
         name,
         description: description || null,
-        interest_enabled: interestEnabled,
-        interest_rate: interestEnabled ? cdiPct / 100 : 1.0,
       }),
     });
     const data = await readResponsePayload(res);
@@ -9980,7 +9969,7 @@ async function openPocketHistory(pocketName) {
     const t = data.totals || {};
     _currentPocketForEdit = p;
     titleEl.textContent = `Histórico: ${p.name || pocketName}`;
-    const interestTxt = p.interest_enabled === false ? "Sem rendimento" : _formatCdiRate(p.interest_rate);
+    const interestTxt = _pocketYieldLabel(p);
     subEl.textContent = p.description ? `${p.description} · ${interestTxt}` : interestTxt;
 
     document.getElementById("pkt-hist-balance").textContent      = fmt(p.balance || 0);
@@ -10030,9 +10019,6 @@ function editCurrentPocketFromHistory() {
     name: p.name,
     balance: p.balance,
     description: p.description,
-    interest_enabled: p.interest_enabled,
-    interest_rate: p.interest_rate,
-    interest_period: p.interest_period,
     target_amount: p.target_amount,
     target_date: p.target_date,
     emoji: p.emoji,

@@ -1036,6 +1036,76 @@ def cena_23_pendencia_abandonada():
 
 
 # ═══════════════════════════════════════════════════════════════════════
+# DOMÍNIO: FORMA DE PAGAMENTO COM BANCO CONECTADO (Q40)
+#
+# Com Open Finance, lançamento manual é só dinheiro vivo. O pytest prova a
+# regra no código; só aqui se vê o que o MODELO faz — em especial se ele
+# declara "dinheiro" sem o usuário ter dito (o único furo que o código não
+# fecha). Usuário Pro (a IA responde) com uma conexão OF inserida no banco.
+# ═══════════════════════════════════════════════════════════════════════
+
+def new_of_uid() -> int:
+    from decimal import Decimal
+    uid = new_pro_uid()
+    item = db.save_pluggy_open_finance_item(uid, {
+        "id": f"item-qa-{uid}", "connector": {"id": 612, "name": "Nubank"}, "status": "UPDATED"})
+    db.save_open_finance_sync(item["id"], [{
+        "provider_account_id": f"acc-qa-{uid}", "name": "Conta", "type": "BANK",
+        "subtype": "CHECKING_ACCOUNT", "currency": "BRL", "balance": Decimal("1000.00"),
+        "raw": {}, "transactions": []}])
+    return uid
+
+
+def _manuais(uid) -> int:
+    from db.connection import get_conn
+    with get_conn() as conn, conn.cursor() as cur:
+        cur.execute("select count(*) n from launches where user_id=%s "
+                    "and coalesce(source,'manual') <> 'open_finance'", (uid,))
+        return cur.fetchone()["n"]
+
+
+def cena_24_of_gasto_e_pix():
+    sc = Scenario("24. Banco conectado: gasto sem forma → pix", "Forma de pagamento", "pro + OF — Q40")
+    SCENARIOS.append(sc)
+    uid = new_of_uid()
+    r1 = sc.turn(uid, "gastei 500")
+    sc.check("dinheiro vivo" in r1 and _manuais(uid) == 0,
+             "\"gastei 500\" → pergunta a forma, nada gravado")
+    r2 = sc.turn(uid, "pix")
+    sc.check("Open Finance" in r2 and _manuais(uid) == 0,
+             "\"pix\" → não grava e diz que chega pelo Open Finance")
+    sc.set_veredict("✅" if all(x[0] for x in sc.checklist) else "❌")
+
+
+def cena_25_of_frase_so_da_ia():
+    sc = Scenario("25. Banco conectado: frase que só a IA entende", "Forma de pagamento", "pro + OF — Q40")
+    SCENARIOS.append(sc)
+    uid = new_of_uid()
+    r1 = sc.turn(uid, "torrei 80 conto no bar")
+    sc.check(_manuais(uid) == 0 and ("dinheiro" in r1.lower() or "banco" in r1.lower()),
+             "\"torrei 80 conto no bar\" → nada gravado e a forma é perguntada (sem inventar)")
+    sc.turn(uid, "foi em dinheiro")
+    sc.check(_manuais(uid) == 1, "\"foi em dinheiro\" → 1 lançamento na Carteira")
+    sc.set_veredict("✅" if all(x[0] for x in sc.checklist) else "❌")
+
+
+def cena_26_of_paguei_a_luz():
+    sc = Scenario("26. Banco conectado: paguei a luz", "Forma de pagamento", "pro + OF — Q40/Q7")
+    SCENARIOS.append(sc)
+    uid = new_of_uid()
+    from db.bills import create_boleto, get_bill
+    from utils_date import today_tz
+    conta = create_boleto(uid, "Luz", 120.0, today_tz(), category="moradia")
+    r1 = sc.turn(uid, "paguei a luz")
+    sc.check("pelo banco" in r1 and get_bill(uid, conta["id"])["status"] == "pending",
+             "\"paguei a luz\" → pergunta a forma, conta segue pendente")
+    sc.turn(uid, "pix")
+    sc.check(get_bill(uid, conta["id"])["status"] == "paid" and _manuais(uid) == 0,
+             "\"pix\" → conta paga, sem lançamento")
+    sc.set_veredict("✅" if all(x[0] for x in sc.checklist) else "❌")
+
+
+# ═══════════════════════════════════════════════════════════════════════
 # Execução sequencial e determinística
 # ═══════════════════════════════════════════════════════════════════════
 
@@ -1228,6 +1298,9 @@ def main():
         cena_21_apagar_compra_parcelamento,
         cena_22_sim_nao,
         cena_23_pendencia_abandonada,
+        cena_24_of_gasto_e_pix,
+        cena_25_of_frase_so_da_ia,
+        cena_26_of_paguei_a_luz,
     ]
 
     so_pares = "--pares" in sys.argv

@@ -1382,8 +1382,8 @@ def test_total_parcial_diz_quanto_ficou_de_fora(pro_user_id):
     # e a lista somava R$ 600,00 — R$ 500,00 engolidos calados, no mesmo dia e na
     # mesma categoria. Pior que a negação do B2: número errado com cara de certo.
     #
-    # Não é cenário de laboratório: `_charge_one` (recurring_charger) crava
-    # is_internal_movement=False pra qualquer categoria escolhida pelo usuário,
+    # Não é cenário de laboratório: o cobrador de recorrentes (removido na Q42; as
+    # linhas dele ficam) cravava is_internal_movement=False pra qualquer categoria,
     # enquanto os importadores marcam True — os dois lados na mesma categoria.
     base = _hoje_as(9)
     db.add_launch_and_update_balance(
