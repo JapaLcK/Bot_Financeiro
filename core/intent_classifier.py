@@ -18,7 +18,7 @@ import unicodedata
 from difflib import get_close_matches
 from dataclasses import dataclass, field
 from typing import Any
-from utils_text import parse_money
+from utils_text import PT_NUM_ALT_NO_ARTICLE, parse_money
 
 logger = logging.getLogger(__name__)
 
@@ -696,6 +696,44 @@ def _is_boleto_ai_query(norm: str) -> bool:
             or any(mk in norm for mk in _PRAZO_MARKERS))
 
 
+# Pergunta COMPARATIVA que começa com verbo de lançamento ("gastei mais esse mês
+# que no passado?", "gastei mais em 2025 ou 2026?") vai pra IA (compare_periods),
+# não pro launches.add — que perguntava o valor ou gravava o ano como R$ 2.025.
+# Só vale com mais/menos/muito/demais SEM quantidade logo depois ("gastei mais 30"
+# e "gastei mais ou menos 50" seguem lançamento) E com "?" ou marcador.
+# ponytail: heurística de prefixo; "gastei bem mais esse mês?" escapa.
+_VERBOS_LANC_RE = "|".join(sorted(VERBOS_DE_LANCAMENTO, key=len, reverse=True))
+_QTD = rf"(?:(?:uns|umas)\s+)?(?:\d|r\s|(?:{PT_NUM_ALT_NO_ARTICLE})\b)"   # "r\s" = "R$" depois do _normalize
+_COMPARATIVO_RE = re.compile(
+    rf"^(?:{_VERBOS_LANC_RE})\s+(?:mais|menos|muito|demais)\b"
+    rf"(?!\s+{_QTD})"                  # "gastei mais (uns) 30", "paguei menos 10", "mais trinta"
+    rf"(?!\s+ou\s+menos\s+{_QTD})"     # "gastei mais ou menos (uns) 50 no mercado"
+)
+# "que" só COLADO ao comparativo ("mais que", "menos do que"): o "que" relativo
+# ("mais um pix de 50 que o joao mandou") é lançamento. O "ou" de "mais ou
+# menos" é aproximação, não alternativa.
+_MARCADOR_COMPARACAO_RE = re.compile(
+    r"\b(?:(?:mais|menos) (?:do )?que|(?<!\bmais )ou|passado|passada|anterior|normal|comum|antes)\b"
+)
+
+
+def is_comparative_question(text: str) -> bool:
+    """True se a mensagem é pergunta comparativa com verbo de lançamento."""
+    norm = _normalize(text)
+    if not _COMPARATIVO_RE.match(norm):
+        return False
+    return "?" in (text or "") or bool(_MARCADOR_COMPARACAO_RE.search(norm))
+
+
+def contains_comparative_question(text: str) -> bool:
+    """`is_comparative_question` no texto inteiro OU em algum pedaço dele. As
+    portas da pergunta de valor usam esta: em "paguei a luz e gastei mais em
+    2025 ou 2026?" o texto inteiro não é comparativo e o valor extraído é 2025."""
+    from parsers import split_financial_transactions  # local: parsers importa daqui
+    return is_comparative_question(text) or any(
+        is_comparative_question(p) for p in split_financial_transactions(text))
+
+
 # ---------------------------------------------------------------------------
 # Tier 1 — busca exata
 # ---------------------------------------------------------------------------
@@ -1024,8 +1062,9 @@ def classify(text: str, user_id: int | None = None, *, allow_ai: bool = True) ->
 
         Com o default `True` os DOIS `if not allow_ai` abaixo são inalcançáveis,
         então nenhum chamador existente muda de comportamento. (O
-        `_is_boleto_ai_query` continua vindo antes dos dois: "132 no boleto"
-        sai `out_of_scope 0.4` mesmo com `allow_ai=False`.)
+        `_is_boleto_ai_query` e o `is_comparative_question` continuam vindo
+        antes dos dois: "132 no boleto" e "gastei mais em 2025 ou 2026?" saem
+        `out_of_scope 0.4` mesmo com `allow_ai=False`.)
     """
     norm = _normalize(text)
 
@@ -1033,6 +1072,11 @@ def classify(text: str, user_id: int | None = None, *, allow_ai: bool = True) ->
     # tools). Retorna out_of_scope pra cair no fallback de IA (handle_incoming),
     # em vez de o determinístico tratar como launches.list por causa da data.
     if _is_boleto_ai_query(norm):
+        return IntentResult(intent="out_of_scope", confidence=0.4)
+
+    # Pergunta comparativa ("gastei mais esse mês que no passado?") → IA. Antes
+    # da recorrência: "recebi mais que 5 mil todo mes?" não é recurring.add.
+    if is_comparative_question(text):
         return IntentResult(intent="out_of_scope", confidence=0.4)
 
     # Recorrência (valor + "todo mes"/"mensal"/"recorrente"/"gasto fixo"/"anual"…)
