@@ -989,8 +989,8 @@ async def _adota_item_orfao(item_id: str, last_event: str | None = None) -> int 
     efeito de banco removido pelo usuário. Já não é o mesmo ESTADO: a remoção
     deliberada grava `origin='removed'` (`db.mark_items_removed`) e esta sobra
     fica com `pluggy_item`/`webhook_adopt`, então a diferença está gravada — só
-    que nenhuma porta automática a lê (quem lê é a recuperação por operador, e a
-    regra de precedência está no docstring daquela função). Aqui NÃO há
+    que nenhuma porta automática a lê (quem lê é o operador, pela
+    `db.open_finance_diagnostico.classifica_item`, onde está a regra). Aqui NÃO há
     recuperação automática: a retentativa do
     `item/created` não readota (a 1ª guarda acima). É por isso que os TRÊS
     desfechos em que a escrita provadamente não aconteceu apagam o rastro que a
@@ -1024,12 +1024,10 @@ async def _adota_item_orfao(item_id: str, last_event: str | None = None) -> int 
     no meio, o `DELETE /open-finance/{uid}` não alcança o item na Pluggy: ele só
     apaga lá os items que têm conexão aqui (`list_pluggy_item_ids`). Se reconectar
     pelo widget recupera a conexão depende do `avoidDuplicates` da Pluggy neste
-    cenário — NÃO verificado. O one-shot
-    que apagava o item por id saiu do repositório porque o `--apply` dele não
-    tinha guarda contra item duplicado da mesma conta (dobraria saldo e
-    lançamentos); se precisar, ele volta do histórico — os DOIS arquivos, porque
-    ele importa o módulo da lista — com
-    `git checkout bda3ee7 -- scripts/adotar_items_of_orfaos.py scripts/adotar_items_lista.py`.
+    cenário — NÃO verificado. A saída é o operador: `scripts/of_itens_operador.py`
+    mostra o item como INTERROMPIDO, apaga na Pluggy (`--apagar`) e ele pede a
+    reconexão. Adotar por script NÃO existe: o one-shot antigo não tinha guarda
+    contra item duplicado da mesma conta (dobraria saldo e lançamentos).
     Fechar isso sozinho exigiria o disconnect deixar rastro próprio
     (`origin='disconnect'`) para separar "removido" de "adoção que falhou" —
     escrita em outro fluxo, outro PR.
@@ -1221,10 +1219,9 @@ async def _adota_item_orfao(item_id: str, last_event: str | None = None) -> int 
             #   (`pluggy_item_delete_failed`/`pluggy_disconnect_auth_failed`) e o
             #   webhook segue 200; a Pluggy fora do ar nesse instante devolve o
             #   estado ANTERIOR a este commit (item órfão e pago lá), não um 5xx.
-            #   NÃO há retentativa e não há ferramenta: o log guarda o `item_id`, e
-            #   a única ação possível é apagar o item À MÃO no painel da Pluggy —
-            #   não existe listagem de items no provedor aqui e o one-shot que a
-            #   decisão D-C2 prometia ao operador foi apagado em `924aee3f`;
+            #   NÃO há retentativa: o log guarda o `item_id`, e o operador o vê
+            #   como "remoção remota falhou" em `scripts/of_itens_operador.py`,
+            #   que o apaga (`--apagar`) — não existe listagem de items no provedor;
             # • `log_user_id` fica no default `True`: aqui a conta AINDA existe,
             #   então o dono vai na COLUNA (o mesmo que o skip acima), e a cascata
             #   de `system_event_logs` o leva no dia da exclusão.
@@ -2286,11 +2283,9 @@ def delete_pluggy_items_best_effort(user_id: int, item_ids: list[str] | None = N
         # padrão do repositório, e é o que a cascata de `system_event_logs` leva.
         # Sob `log_user_id=False` (só a exclusão de conta) a coluna fica NULL, a
         # linha sobrevive à cascata e a chave operacional que resta é o item: é
-        # com ele que o operador acha a conexão na Pluggy, sem o dono. Não há
-        # ferramenta no repositório que consuma esses ids — o one-shot saiu em
-        # `924aee3f` e volta do histórico pelo `git checkout bda3ee7 -- ...` do
-        # docstring de `_adota_item_orfao`. Ramo alcançado sempre que faltar
-        # PLUGGY_CLIENT_ID/SECRET.
+        # com ele que o operador acha a conexão na Pluggy, sem o dono. Quem
+        # consome esses ids é `scripts/of_itens_operador.py` ("remoção remota
+        # falhou"). Ramo alcançado sempre que faltar PLUGGY_CLIENT_ID/SECRET.
         log_system_event_sync(
             "warning", "pluggy_disconnect_auth_failed",
             f"Sem apiKey pra deletar {len(pluggy_item_ids)} item(s) na Pluggy: {exc}",

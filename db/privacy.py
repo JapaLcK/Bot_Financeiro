@@ -834,11 +834,8 @@ def delete_user_data(
     `on delete cascade` — log com dono é log que se apaga sozinho (ou cujo
     INSERT viola a FK, se escrito depois do commit). A lista `items` em `details`
     é a chave operacional: com ela o operador acha o item na Pluggy e no log,
-    sem precisar do dono. Não há ferramenta no repositório que consuma esses ids
-    — o one-shot que fazia isso saiu em `924aee3f` e volta do histórico com
-    `git checkout bda3ee7 -- scripts/adotar_items_of_orfaos.py scripts/adotar_items_lista.py`
-    (os DOIS arquivos, ver `frontend/routes/open_finance.py`,
-    `_adota_item_orfao`, para por que ele saiu). O `user_id` não vai nem para
+    sem precisar do dono. Quem consome esses ids é `scripts/of_itens_operador.py`
+    ("remoção remota falhou"), que apaga o item na Pluggy. O `user_id` não vai nem para
     `details`, porque a exclusão existe justamente para remover identificadores
     da conta (mesma regra de `plan_trials`).
 
