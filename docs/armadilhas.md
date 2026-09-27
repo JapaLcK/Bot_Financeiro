@@ -361,8 +361,8 @@ fixo de toda mudança de layout.
   de erro próprio): no monólito ela escaparia do envelope e da varredura de
   `tests/test_api_v2_rotas.py`, que reprova rota sob `/api/v2` fora do mount. O plano
   completo está em `docs/refactor_plan.md`. Exceção:
-  `POST /auth/google/exchange` fica no monólito, ao lado das `/auth/google/*`,
-  porque depende de `_entrega_sessao`, `_issue_session_token` e `_concluir_login`,
+  `POST /auth/google/exchange` e as `/auth/apple/*` ficam no monólito, ao lado das
+  `/auth/google/*`, porque dependem de `_entrega_sessao`, `_issue_session_token` e `_concluir_login`,
   que moram lá — importá-los de um router cria import circular.
 - **Isolamento por usuário é regra dura.** A formulação da regra mora no §0 do
   `CLAUDE.md`, que é auto-carregado — instrução de segurança não pode depender de

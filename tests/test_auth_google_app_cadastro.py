@@ -11,6 +11,7 @@ Controle negativo (medido; comando e resultado no corpo do PR): voltar o
 `raise ValueError` no SELECT → G2 vermelho; tirar o `except` do helper → G3
 vermelho (e o B11 de `test_auth_app_cadastro.py`); `except UniqueViolation`
 genérico → G4 vermelho; `_entrega_sessao` pelo ramo do navegador → B10 vermelho.
+Tirar a guarda de e-mail do `consume_pending_google_signup` → G5 vermelho.
 Controle positivo: G1 (telefone livre segue gravado).
 """
 import uuid
@@ -162,3 +163,22 @@ def test_g4_unique_violation_de_outra_constraint_sobe():
             db_support.gravar_descartando_telefone_disputado(conn, gravar, "+5511999990000")
         conn.rollback()
     assert chamadas == ["+5511999990000"]
+
+
+def test_g5_email_que_ganhou_conta_no_meio_nao_funde():
+    """P7, o mesmo do C2 da Apple (`tests/test_auth_apple_cadastro.py`): antes,
+    o `on conflict (email)` abria sessão na conta que surgiu, sem MFA."""
+    email = _email()
+    token = db.create_pending_google_signup(f"sub-{email}", email, "Fulana")
+    uid = int(db.register_auth_user(email, "senha-forte-123")["user_id"])
+    r = TestClient(dashboard.app).post(
+        "/auth/google/complete-signup",
+        headers={dashboard.APP_CLIENT_HEADER: "app", "User-Agent": UA_APP},
+        json={"token": token, "name": "Fulana", "phone": _telefone(), "accepted_terms": True},
+    )
+    assert r.status_code == 400, r.text
+    assert r.json()["detail"] == "Cadastro expirado. Inicie novamente o login com Google."
+    assert "access_token" not in r.json()
+    with db.get_conn() as conn, conn.cursor() as cur:
+        cur.execute("select provider from auth_identities where user_id = %s", (uid,))
+        assert cur.fetchall() == []

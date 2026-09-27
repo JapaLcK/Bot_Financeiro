@@ -1060,16 +1060,16 @@ def _is_pigbank_app(request: Request) -> bool:
     return "PigBankApp" in (request.headers.get("user-agent") or "")
 
 
-def signup_source_from_request(request: Request, *, google: bool = False) -> str:
+def signup_source_from_request(request: Request, *, provedor: str | None = None) -> str:
     """Origem do cadastro, gravada em auth_accounts.signup_source. Distingue web
     de app (WebView iOS e app nativo iOS/Android) pro painel de admin, e SÓ
     isso: nenhum gate isenta o app nem lê esta coluna (política em
-    plan_service.needs_plan_selection).
+    plan_service.needs_plan_selection). `provedor` é o do login social.
 
-      web | app | google | google_app"""
+      web | app | google | google_app | apple | apple_app"""
     in_app = _is_pigbank_app(request)
-    if google:
-        return "google_app" if in_app else "google"
+    if provedor:
+        return f"{provedor}_app" if in_app else provedor
     return "app" if in_app else "web"
 
 

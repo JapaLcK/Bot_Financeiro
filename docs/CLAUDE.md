@@ -165,7 +165,10 @@ e a `/q` chama o mesmo `verify-email` depois de o usuário confirmar o e-mail na
 (`quiz/resend` reenvia; `frontend/routes/quiz_signup.py`); `forgot-password`/`reset-password`; **Google OAuth**
 (`google/start`, `google/callback`, `google/complete-signup`, `google/pending/{token}`,
 e `google/exchange`, que troca por Bearer o código que o callback devolve ao app nativo
-quando o login começa em `google/start?app=2`);
+quando o login começa em `google/start?app=2`); **Apple**, só no app nativo iOS
+(`apple/exchange`, que verifica o identity token pelo JWKS da Apple e devolve sessão,
+desafio de MFA ou cadastro pendente, e `apple/complete-signup`; o pendente mora na
+mesma `pending_google_signups`, com `provider='apple'`);
 `dashboard-link`/`dashboard-token` (link mágico); `link-code` (vincula WhatsApp e
 Discord à conta); `logout`; `refresh`; `account` (exclusão) e `account/export`.
 
