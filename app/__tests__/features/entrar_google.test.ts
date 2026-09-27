@@ -138,7 +138,7 @@ describe("continuarComGoogle (G)", () => {
   it("7 — conta nova: busca o pré-cadastro e vai a C com o nome sugerido, sem gravar sessão", async () => {
     voltaDoGoogle("pigbank://auth?onboarding=gso_bia");
     expect(await google()).toEqual([
-      { fase: "google-cadastro", token: "gso_bia", email: PENDENTE.email, nome: PENDENTE.name_hint },
+      { fase: "cadastro-social", provedor: "google", token: "gso_bia", email: PENDENTE.email, nome: PENDENTE.name_hint },
     ]);
     expect(chamadas().map((c) => c.caminho)).toEqual(["/auth/google/pending/gso_bia"]);
     await expect(lerCredenciais()).resolves.toBeNull();
@@ -147,7 +147,7 @@ describe("continuarComGoogle (G)", () => {
   it("7 — o token vai codificado no caminho", async () => {
     voltaDoGoogle("pigbank://auth?onboarding=a%2F..%2Fb");
     rotasGoogle({ "/auth/google/pending/a%2F..%2Fb": () => resposta(200, PENDENTE) });
-    expect((await google())[0]).toMatchObject({ fase: "google-cadastro", token: "a/../b" });
+    expect((await google())[0]).toMatchObject({ fase: "cadastro-social", provedor: "google", token: "a/../b" });
   });
 
   it.each<[string, Rota, string]>([

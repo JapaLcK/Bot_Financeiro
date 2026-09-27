@@ -23,8 +23,7 @@ export type NomeIcone =
   | "Envelope"
   | "Lock"
   | "ArrowLeft"
-  | "GoogleLogo"
-  | "AppleLogo";
+  | "GoogleLogo";
 
 /** Forma mínima que todo ícone do Phosphor e o stub de teste têm em comum. */
 type ComponenteIcone = ComponentType<{ size?: number; color?: string; weight?: string }>;
@@ -68,7 +67,6 @@ const ICONES: Record<NomeIcone, ComponenteIcone> = {
   Lock: resolver(require("phosphor-react-native/src/icons/Lock"), "LockIcon"),
   ArrowLeft: resolver(require("phosphor-react-native/src/icons/ArrowLeft"), "ArrowLeftIcon"),
   GoogleLogo: resolver(require("phosphor-react-native/src/icons/GoogleLogo"), "GoogleLogoIcon"),
-  AppleLogo: resolver(require("phosphor-react-native/src/icons/AppleLogo"), "AppleLogoIcon"),
 };
 
 interface Props {
