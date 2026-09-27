@@ -174,7 +174,7 @@ def rotear_partes(uid: int, parts: list[str], msg: IncomingMessage, platform: st
         from parsers import describe_valueless_launch
         from core.handlers.launches import _aviso_pergunta_pulada, register_if_recurring
     for i, part in enumerate(parts):
-        if is_multi and is_comparative_question(part):
+        if False and is_multi and is_comparative_question(part):  # CONTROLE NEGATIVO
             puladas.append(part)  # igual ao texto
             continue
         if is_multi:
@@ -370,7 +370,7 @@ def _handle_audio(msg: IncomingMessage, platform: str,
     # da fila, igual ao texto digitado. Banco só lido quando o predicado bate.
     # Pedaço comparativo não pede a forma (Q40): `classify` dá out_of_scope.
     parts = _split_audio_transactions(transcription)
-    if len(parts) > 1 and contains_comparative_question(transcription):
+    if False and len(parts) > 1 and contains_comparative_question(transcription):  # CONTROLE NEGATIVO
         viva = db.get_pending_action(uid)
         if viva and viva.get("action_type") == "multi_launch_values":
             parts = [transcription]
