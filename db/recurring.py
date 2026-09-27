@@ -10,7 +10,7 @@ Reajuste: ao editar `amount`, guarda `last_amount` + timestamp pra UI mostrar a 
 """
 from __future__ import annotations
 
-from datetime import date
+from datetime import date, datetime
 from decimal import Decimal
 from typing import Any
 
@@ -500,24 +500,87 @@ def list_active_autopay_recurrings() -> list[dict[str, Any]]:
             return [dict(r) for r in (cur.fetchall() or [])]
 
 
-def ensure_autopay_notice(recurring_id: int, user_id: int, amount: float, period_key: str) -> bool:
+def ensure_autopay_notice(recurring_id: int, user_id: int, amount: float, period_key: str,
+                          due_on: date) -> bool:
     """Grava o aviso de vencimento (linha em recurring_charges SEM lançamento:
-    launch_id e credit_tx_id nulos). Idempotente pelo UNIQUE (recurring_id, ym).
-    True se criou agora."""
+    launch_id e credit_tx_id nulos) com o dia lógico `due_on`. Idempotente pelo
+    UNIQUE (recurring_id, ym). Se o período já tem aviso com OUTRO `due_on` (o
+    vencimento mudou no meio do mês), reagenda: passa pra data nova e volta ao
+    banner — só enquanto não tem lançamento (linha do cobrador antigo fica
+    intocada) nem foi reservado pro WhatsApp (não reenvia no mesmo período).
+    Linha de antes da coluna (`due_on` nulo) também é reagendada. True se criou
+    ou reagendou agora."""
     with get_conn() as conn:
         with conn.cursor() as cur:
             cur.execute(
                 """
-                insert into recurring_charges (recurring_id, user_id, amount, ym)
-                values (%s, %s, %s, %s)
-                on conflict (recurring_id, ym) do nothing
+                insert into recurring_charges (recurring_id, user_id, amount, ym, due_on)
+                values (%s, %s, %s, %s, %s)
+                on conflict (recurring_id, ym) do update
+                   set due_on = excluded.due_on, amount = excluded.amount,
+                       charged_at = now(), acknowledged = false
+                 where recurring_charges.launch_id is null
+                   and recurring_charges.credit_tx_id is null
+                   and recurring_charges.wa_notified_at is null
+                   and recurring_charges.due_on is distinct from excluded.due_on
                 returning id
                 """,
-                (int(recurring_id), int(user_id), Decimal(str(amount)), period_key),
+                (int(recurring_id), int(user_id), Decimal(str(amount)), period_key, due_on),
             )
             criou = cur.fetchone() is not None
         conn.commit()
     return criou
+
+
+def list_autopay_notices_for_whatsapp(today: date, janela_desde: datetime) -> list[dict[str, Any]]:
+    """Avisos de autopay ainda não reservados pro WhatsApp, de TODOS os usuários,
+    que vencem em `today` (`due_on`, o dia lógico da volta que gravou — não o
+    horário de inserção, que passa da meia-noite). Cada linha leva o próprio
+    user_id. Aviso de dia anterior não sai atrasado; linha antiga (do cobrador
+    ou de antes da coluna) tem `due_on` nulo e fica de fora. Tudo que a mensagem
+    afirma (nome, valor, meio, data) vem do recorrente ATUAL, não do retrato da
+    gravação: o notify reconfere a data com `_vence_hoje`.
+
+    Só entra quem falou com o Piggy desde `janela_desde` (`last_activity_at`,
+    escrito pelo `handle_incoming`): o aviso vai como texto livre, que a Meta só
+    aceita dentro da janela de 24h. `EXISTS` e não JOIN: `auth_accounts.user_id`
+    não é único."""
+    with get_conn() as conn:
+        with conn.cursor() as cur:
+            cur.execute(
+                """
+                select rc.id, rc.user_id, r.amount, r.name, r.payment_type,
+                       r.due_day, r.due_month, r.frequency,
+                       coalesce(r.start_date, r.created_at::date) as start_date
+                from recurring_charges rc
+                join recurring_expenses r on r.id = rc.recurring_id and r.user_id = rc.user_id
+                where rc.launch_id is null and rc.credit_tx_id is null
+                  and rc.wa_notified_at is null
+                  and rc.due_on = %s
+                  and r.is_active and r.payment_mode = 'autopay' and r.amount > 0
+                  and exists (select 1 from auth_accounts a
+                              where a.user_id = rc.user_id and a.last_activity_at >= %s)
+                order by rc.user_id, rc.id
+                """,
+                (today, janela_desde),
+            )
+            return [dict(r) for r in (cur.fetchall() or [])]
+
+
+def claim_autopay_notices_whatsapp(user_id: int, charge_ids: list[int]) -> list[int]:
+    """Reserva os avisos do usuário pro WhatsApp ANTES do envio, num UPDATE só:
+    devolve só os ids que ESTE processo reservou. Em lote para que dois processos
+    (deploy sobreposto) não dividam a mensagem agrupada nem mandem duas vezes."""
+    with get_conn() as conn:
+        with conn.cursor() as cur:
+            cur.execute(
+                "update recurring_charges set wa_notified_at = now() "
+                "where user_id = %s and id = any(%s) and wa_notified_at is null returning id",
+                (int(user_id), [int(i) for i in charge_ids]),
+            )
+            reservados = [int(r["id"]) for r in (cur.fetchall() or [])]
+        conn.commit()
+    return reservados
 
 
 __all__ = [
@@ -531,4 +594,6 @@ __all__ = [
     "dismiss_recurring_suggestion",
     "list_active_autopay_recurrings",
     "ensure_autopay_notice",
+    "list_autopay_notices_for_whatsapp",
+    "claim_autopay_notices_whatsapp",
 ]

@@ -1423,6 +1423,13 @@ def init_db():
         create index if not exists idx_recurring_charges_user_ack
           on recurring_charges (user_id, acknowledged)
         """,
+        # Reserva do aviso de autopay no WhatsApp (#616): gravada ANTES do envio
+        # (`claim_autopay_notices_whatsapp`). Independente de `acknowledged`, que é do banner.
+        "alter table recurring_charges add column if not exists wa_notified_at timestamptz",
+        # Dia lógico do vencimento (#616): o WhatsApp filtra por ele, não por `charged_at`
+        # (a volta que cruza a meia-noite grava o aviso de D com horário de D+1).
+        # Sem backfill: linha antiga fica nula e fora do WhatsApp.
+        "alter table recurring_charges add column if not exists due_on date",
 
         # ─── Receitas Recorrentes ──────────────────────────────────────────────
         # Espelho de `recurring_expenses` do lado da entrada. Pro-only, mesma flag
