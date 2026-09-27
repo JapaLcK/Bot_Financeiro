@@ -403,30 +403,17 @@ def test_origem_com_open_finance_ou_plano_pago_nao_some(user_id, prender, espera
         assert _dono_do_numero(wa_phone) == user_id
 
 
-@pytest.mark.parametrize("status,plano,com_cus,stripe,esperado", [
-    # retentativa paga depois acharia uma conta apagada; a Stripe nem é consultada
-    ("past_due", "pro", True, None, "merge_conflict"),
-    ("canceled", "pro", True, None, "linked"),
-    # Codex P2: cartão cancelado, grant Pix vencido deixou `active` para trás
-    ("active", "free", True, "sem_assinatura", "linked"),
-    ("active", "free", True, "assinatura", "merge_conflict"),
-    ("active", "free", True, "levanta", "merge_conflict"),
-    ("active", "free", False, None, "linked"),  # junção comum: sem rede
-], ids=["past_due", "canceled", "pix_vencido_sem_assinatura", "pix_vencido_com_assinatura",
-        "stripe_indisponivel", "sem_customer"])
-def test_origem_com_assinatura_stripe_viva_e_plano_vencido_nao_some(
-        user_id, monkeypatch, status, plano, com_cus, stripe, esperado):
-    import frontend.finance_bot_websocket_custom as dashboard
-
-    chamadas = []
-
-    def _falsa(_mod, customer):
-        chamadas.append(customer)
-        if stripe == "levanta":
-            raise RuntimeError("stripe fora do ar")
-        return {"id": "sub_x"} if stripe == "assinatura" else None
-
-    monkeypatch.setattr(dashboard, "_find_active_subscription", _falsa)
+@pytest.mark.parametrize("status,plano,com_cus,esperado", [
+    # Codex P1: checkout aberto — o `checkout.session.completed` chegaria depois
+    ("inactive", "free", True, "merge_conflict"),
+    ("canceled", "pro", True, "merge_conflict"),  # estorno/disputa de cobrança antiga
+    ("active", "free", True, "merge_conflict"),
+    ("past_due", "pro", True, "merge_conflict"),
+    ("active", "free", False, "linked"),  # grant Pix vencido deixou `active`: sem cliente, junta
+], ids=["checkout_aberto", "canceled", "active_plano_vencido", "past_due", "sem_customer"])
+def test_origem_com_cliente_stripe_nao_some(user_id, status, plano, com_cus, esperado):
+    """Dono (2026-09-27): qualquer `stripe_customer_id` na origem recusa. O plano
+    está vencido em todos os casos — é só o cliente Stripe que prende."""
     wa_phone, wa_uid = _wa_dono_do_numero()
     _conta_site(user_id, wa_phone)
     cus = f"cus_{uuid.uuid4().hex[:14]}" if com_cus else None
@@ -441,7 +428,6 @@ def test_origem_com_assinatura_stripe_viva_e_plano_vencido_nao_some(
     r = attempt_whatsapp_phone_link(wa_phone, current_user_id=wa_uid)
 
     assert r["status"] == esperado, r
-    assert chamadas == ([cus] if stripe else [])
     origem = _sql("select a.stripe_customer_id from users u"
                   " left join auth_accounts a on a.user_id = u.id where u.id=%s", (wa_uid,))
     if esperado == "merge_conflict":

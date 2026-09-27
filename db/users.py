@@ -62,7 +62,7 @@ def user_exists(user_id: int) -> bool:
 
 class MergeRefused(Exception):
     """`merge_users` não junta (#607): dado financeiro dos dois lados, origem
-    presa (Open Finance vivo, plano pago ou assinatura Stripe viva) ou colisão de
+    presa (Open Finance vivo, plano pago ou cliente Stripe) ou colisão de
     unique/FK na junção."""
 
 
@@ -116,22 +116,17 @@ def _tem_dados_financeiros(cur, user_id: int) -> bool:
 
 
 def _origem_presa(cur, user_id: int) -> bool:
-    """A conta que some tem Open Finance vivo ou plano pago vigente (dono, P1)?
+    """A conta que some tem Open Finance vivo, plano pago vigente ou cliente Stripe?
 
     "Vivo" é o que o código de OF considera vivo (`_TERMINAL`): PAUSED é trial
     vencido (o item nem existe mais na Pluggy) e DELETED é removido. Plano pago
-    é a regra de `plan_service` — o trial do Stripe conta (é assinatura
-    `trialing` com `plan` gravado); o trial por telefone (`trial_started_at`) não.
+    é a regra de `plan_service` — cobre também quem paga sem cliente Stripe
+    (Pix vigente, grandfathered); o trial por telefone (`trial_started_at`) não.
 
-    Também presa: `stripe_customer_id` com status em `LIVE_PAYMENT_STATUSES`,
-    mesmo com o plano vencido — `past_due` cobrado depois acharia pelo webhook
-    uma conta apagada. `PAST_DUE_PAYMENT_STATUSES` recusa sem consulta (o
-    `_find_active_subscription` não vê `unpaid`/`incomplete`). `active`/`trialing`
-    sem plano vigente é o caso duvidoso — o grant Pix grava `active` e ele fica
-    velho quando o grant vence —, então só aí se pergunta à Stripe; falha na
-    consulta recusa (indisponibilidade não é ausência). Sem
-    `stripe_customer_id` o status não conta."""
-    from core.services.billing_dunning import LIVE_PAYMENT_STATUSES, PAST_DUE_PAYMENT_STATUSES
+    Qualquer `stripe_customer_id`, com qualquer status, prende (dono,
+    2026-09-27): todo cliente Stripe pode gerar evento futuro — assinatura,
+    checkout aberto, estorno, disputa — que o webhook resolveria para a conta
+    apagada."""
     from core.services.plan_service import _tem_plano_pago_vigente  # tardio: importa `db`
     from .open_finance_state import _TERMINAL
 
@@ -142,27 +137,10 @@ def _origem_presa(cur, user_id: int) -> bool:
     )
     if cur.fetchone()["tem"]:
         return True
-    cur.execute("select plan, plan_expires_at, stripe_customer_id, last_payment_status"
+    cur.execute("select plan, plan_expires_at, stripe_customer_id"
                 " from auth_accounts where user_id = %s", (user_id,))
-    contas = cur.fetchall()
-    if any(_tem_plano_pago_vigente(r) for r in contas):
-        return True
-    for r in contas:
-        customer = (r["stripe_customer_id"] or "").strip()
-        status = (r["last_payment_status"] or "").strip().lower()
-        if not customer or status not in LIVE_PAYMENT_STATUSES:
-            continue
-        if status in PAST_DUE_PAYMENT_STATUSES:
-            return True
-        # ponytail: chamada de rede com a transação aberta; só neste caso raro.
-        import stripe as _stripe
-        from frontend.finance_bot_websocket_custom import _find_active_subscription  # tardio: monólito
-        try:
-            if _find_active_subscription(_stripe, customer) is not None:
-                return True
-        except Exception:  # noqa: BLE001 — indisponibilidade não é ausência
-            return True
-    return False
+    return any(_tem_plano_pago_vigente(r) or (r["stripe_customer_id"] or "").strip()
+               for r in cur.fetchall())
 
 
 def merge_users(from_user_id: int, to_user_id: int) -> None:

@@ -870,9 +870,9 @@ _USER_STATUSES = ("paying", "trial", "past_due", "canceled", "granted", "free")
 # O espelho SQL em _ACCOUNT_STATUS_SQL abaixo continua com a lista literal, como
 # sempre — o teste de paridade de tests/test_admin_users_panel.py compara os dois.
 from core.services.billing_dunning import (  # noqa: E402
-    LIVE_PAYMENT_STATUSES as _LIVE_PAYMENT_STATUSES,
     PAST_DUE_PAYMENT_STATUSES as _PAST_DUE_PAYMENT_STATUSES,
 )
+_LIVE_PAYMENT_STATUSES = frozenset({"trialing", "active", *_PAST_DUE_PAYMENT_STATUSES})
 
 
 def _derive_account_status(row: dict, now: datetime) -> str:
