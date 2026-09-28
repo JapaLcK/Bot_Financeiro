@@ -2,9 +2,9 @@
   "name": "pigbank-webapp",
   "private": true,
   "type": "module",
-  "description": "Ilhas React de preços e chats. Build separado da raiz, artefatos IIFE de nome fixo servidos pelo backend.",
+  "description": "Ilhas React de preços, chats e dashboard v2 (/painel). Build separado da raiz, artefatos IIFE de nome fixo servidos pelo backend.",
   "scripts": {
-    "build": "vite build && vite build --config vite.chat.config.ts && tsc --noEmit",
+    "build": "vite build && vite build --config vite.chat.config.ts && vite build --config vite.dashboard.config.ts && tsc --noEmit",
     "typecheck": "tsc --noEmit",
     "build:dashboard": "vite build --config vite.dashboard.config.ts",
     "watch:dashboard": "vite build --watch --config vite.dashboard.config.ts"

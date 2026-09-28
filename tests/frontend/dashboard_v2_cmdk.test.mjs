@@ -9,38 +9,28 @@
  *
  * 1440 e 390: o gatilho muda de forma no celular, a paleta é a mesma.
  *
- * Rodar:  npm run test:frontend   (o `before` gera o bundle, gitignored, em dashboard-v2/)
+ * Rodar:  npm run test:frontend   (abre o artefato commitado frontend/dashboard-app.*: mudou webapp/src, rode `npm --prefix webapp run build`)
  */
 import { test, before, after } from "node:test";
 import assert from "node:assert/strict";
-import { execSync } from "node:child_process";
-import { fileURLToPath } from "node:url";
-import { dirname, join } from "node:path";
 import { chromium } from "playwright";
-
-const ROOT = join(dirname(fileURLToPath(import.meta.url)), "..", "..");
-const ORIGIN = "http://127.0.0.1:1"; // atendida da raiz do repositório pela rota, como no organizar
+import { PAINEL, exigeArtefatoEmDia, servir } from "./_painel.mjs";
 
 let browser;
 before(async () => {
-  execSync("npm --prefix webapp run build:dashboard", { cwd: ROOT, stdio: "pipe" });
+  exigeArtefatoEmDia();
   browser = await chromium.launch();
 });
 after(() => browser?.close());
 
 async function abrir(width, semDialog) {
   const ctx = await browser.newContext({ viewport: { width, height: width > 500 ? 1000 : 844 }, reducedMotion: "reduce" });
-  await ctx.route("**/*", (r) => {
-    const url = new URL(r.request().url());
-    if (url.origin !== ORIGIN) return r.abort();
-    const path = decodeURIComponent(url.pathname).replace(/\/$/, "/index.html");
-    return r.fulfill({ path: join(ROOT, path) }).catch(() => r.fulfill({ status: 404, body: "" }));
-  });
+  await servir(ctx);
   // já escolheu o perfil (Pular): sem isso o modal da 1ª visita cobre o Resumo
   await ctx.addInitScript(() => localStorage.setItem("pigbank.dashboard.profile.v1", '"padrao"'));
   const page = await ctx.newPage();
   if (semDialog) await page.addInitScript(() => { delete HTMLDialogElement.prototype.showModal; delete HTMLDialogElement.prototype.close; });
-  await page.goto(`${ORIGIN}/dashboard-v2/#/`);
+  await page.goto(`${PAINEL}#/`);
   await page.locator(".cmd-trigger").waitFor();
   return { ctx, page };
 }

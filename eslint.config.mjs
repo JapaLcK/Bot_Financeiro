@@ -274,5 +274,7 @@ export default defineConfig([
     "frontend/precos-app.css",
     "frontend/chat-app.js",
     "frontend/chat-app.css",
+    "frontend/dashboard-app.js",
+    "frontend/dashboard-app.css",
   ]),
 ]);

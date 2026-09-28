@@ -13,17 +13,13 @@
  * Com 4 colunas o ladrilhador reordena o preset para fechar buracos: a ORDEM do preset se
  * confere a 390 (uma coluna, sem reordenação); a 1440 confere-se o conjunto.
  *
- * Rodar:  npm run test:frontend   (o `before` gera o bundle, gitignored, em dashboard-v2/)
+ * Rodar:  npm run test:frontend   (abre o artefato commitado frontend/dashboard-app.*: mudou webapp/src, rode `npm --prefix webapp run build`)
  */
 import { test, before, after } from "node:test";
 import assert from "node:assert/strict";
-import { execSync } from "node:child_process";
-import { fileURLToPath } from "node:url";
-import { dirname, join } from "node:path";
 import { chromium } from "playwright";
+import { PAINEL, exigeArtefatoEmDia, servir } from "./_painel.mjs";
 
-const ROOT = join(dirname(fileURLToPath(import.meta.url)), "..", "..");
-const ORIGIN = "http://127.0.0.1:1"; // fictícia: a rota atende da raiz do repositório (como em dashboard_v2_organizar)
 const PERFIL = "pigbank.dashboard.profile.v1";
 const PADRAO = ["hero", "resumo", "categorias", "calendario", "simulador", "compromissos", "piggy", "metas", "patrimonio"];
 const INVESTIR = ["patrimonio", "rendimento", "wealth", "simulador", "metas", "resumo", "piggy"];
@@ -31,19 +27,14 @@ const ECONOMIZAR = ["resumo", "metas", "piggy", "categorias", "simulador", "comp
 
 let browser;
 before(async () => {
-  execSync("npm --prefix webapp run build:dashboard", { cwd: ROOT, stdio: "pipe" });
+  exigeArtefatoEmDia();
   browser = await chromium.launch();
 });
 after(() => browser?.close());
 
 async function abrir({ width = 1440, qs = "", perfil = null, semInert = false, semStorage = false } = {}) {
   const ctx = await browser.newContext({ viewport: { width, height: width > 500 ? 1000 : 844 }, reducedMotion: "reduce" });
-  await ctx.route("**/*", (r) => {
-    const url = new URL(r.request().url());
-    if (url.origin !== ORIGIN) return r.abort();
-    const path = decodeURIComponent(url.pathname).replace(/\/$/, "/index.html");
-    return r.fulfill({ path: join(ROOT, path) }).catch(() => r.fulfill({ status: 404, body: "" }));
-  });
+  await servir(ctx);
   // só na primeira carga: o reload tem de ler o que a página salvou
   if (perfil) await ctx.addInitScript(([k, v]) => { if (!localStorage.getItem(k)) localStorage.setItem(k, v); }, [PERFIL, JSON.stringify(perfil)]);
   if (semStorage) await ctx.addInitScript(() => {
@@ -58,7 +49,7 @@ async function abrir({ width = 1440, qs = "", perfil = null, semInert = false, s
   const page = await ctx.newPage();
   const erros = [];
   page.on("pageerror", (e) => erros.push(e.message));
-  await page.goto(`${ORIGIN}/dashboard-v2/${qs}#/`);
+  await page.goto(`${PAINEL}${qs}#/`);
   await page.locator("#board-profile").waitFor();
   return { ctx, page, erros };
 }
@@ -211,7 +202,7 @@ test("esvaziar no essencial salva [] e o upgrade não põe o travado de volta: e
   const x = page.locator("[data-slot=widget-remove]");
   while (await x.count()) await x.first().click();
   const vazio = await salvo(page, "pigbank.dashboard.layout.v1.investir");
-  await page.goto(`${ORIGIN}/dashboard-v2/?plano=pro#/`);
+  await page.goto(`${PAINEL}?plano=pro#/`);
   await page.locator("#board-profile").waitFor();
   const depois = await painel(page);
   await page.getByRole("button", { name: "Organizar" }).click();

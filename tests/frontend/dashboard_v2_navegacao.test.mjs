@@ -3,36 +3,26 @@
 //   · menu lateral sem o Piggy (no desktop o acesso é a barra de conversa) e com Ferramentas;
 //   · "E se…" virou "Simulador" em todo lugar; o botão rosa virou "Ferramentas", com o
 //     nome escrito também no celular;
-//   · Ferramentas: só o Simulador leva a algum lugar, o resto está "Em breve";
+//   · Ferramentas: o Simulador e o Painel antigo (/app) levam a algum lugar, o resto está "Em breve";
 //   · 320 a 1440 sem nada saindo da barra de cima.
 import { test, before, after } from "node:test";
 import assert from "node:assert/strict";
-import { execSync } from "node:child_process";
-import { fileURLToPath } from "node:url";
-import { dirname, join } from "node:path";
 import { chromium } from "playwright";
-
-const ROOT = join(dirname(fileURLToPath(import.meta.url)), "..", "..");
-const ORIGIN = "http://127.0.0.1:1"; // fictícia: a rota atende da raiz do repositório
+import { PAINEL, exigeArtefatoEmDia, servir } from "./_painel.mjs";
 
 let browser;
 before(async () => {
-  execSync("npm --prefix webapp run build:dashboard", { cwd: ROOT, stdio: "pipe" });
+  exigeArtefatoEmDia();
   browser = await chromium.launch();
 });
 after(() => browser?.close());
 
 async function abrir(width, hash = "#/") {
   const ctx = await browser.newContext({ viewport: { width, height: 800 }, reducedMotion: "reduce" });
-  await ctx.route("**/*", (r) => {
-    const url = new URL(r.request().url());
-    if (url.origin !== ORIGIN) return r.abort();
-    const path = decodeURIComponent(url.pathname).replace(/\/$/, "/index.html");
-    return r.fulfill({ path: join(ROOT, path) }).catch(() => r.fulfill({ status: 404, body: "" }));
-  });
+  await servir(ctx);
   await ctx.addInitScript(() => localStorage.setItem("pigbank.dashboard.profile.v1", '"padrao"'));
   const page = await ctx.newPage();
-  await page.goto(`${ORIGIN}/dashboard-v2/${hash}`);
+  await page.goto(`${PAINEL}${hash}`);
   await page.locator("#page-title").waitFor();
   return { ctx, page };
 }
@@ -61,8 +51,9 @@ test("desktop: menu com Simulador e Ferramentas, sem Piggy; o botão rosa abre F
   assert.deepEqual(menu, ["Resumo", "Previsão", "Para onde vai", "Simulador", "Metas", "Patrimônio", "Lançamentos", "Ferramentas"]);
   assert.equal(botao.trim(), "Ferramentas");
   assert.deepEqual(cards[0], ["Simulador", "#/simulador"]);
-  assert.equal(cards.length, 6);
-  assert.ok(cards.slice(1).every(([, v]) => v === true), JSON.stringify(cards)); // o resto: "Em breve", sem link
+  assert.deepEqual(cards[1], ["Painel antigo", "/app"]); // sai do v2 para o dashboard de sempre
+  assert.equal(cards.length, 7);
+  assert.ok(cards.slice(2).every(([, v]) => v === true), JSON.stringify(cards)); // o resto: "Em breve", sem link
 });
 
 test("o nome antigo \"E se…\" não aparece mais", async () => {

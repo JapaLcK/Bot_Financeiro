@@ -16,11 +16,12 @@
     @font-face { font-family: "Phosphor"; font-display: block; src: url("../frontend/fonts/Phosphor.woff2") format("woff2"); }
     html { background: #09090b; }
   </style>
-  <!-- dashboard-app.* é gerado por `npm --prefix webapp run build:dashboard`. Sirva da
-       raiz do repositório (ex.: `python3 -m http.server 8897`): a página carrega
-       ../frontend/fonts e os assets de marca. -->
-  <link rel="stylesheet" href="dashboard-app.css">
-  <script defer src="dashboard-app.js"></script>
+  <!-- Protótipo, mantido para comparar com o /painel: carrega o MESMO artefato
+       (frontend/dashboard-app.*, de `npm --prefix webapp run build`). Sirva da raiz
+       do repositório (ex.: `python3 -m http.server 8897`) e abra
+       /dashboard-v2/index.html. -->
+  <link rel="stylesheet" href="../frontend/dashboard-app.css">
+  <script defer src="../frontend/dashboard-app.js"></script>
 </head>
 <body>
   <div id="pigbank-dashboard"></div>

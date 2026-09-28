@@ -13,8 +13,8 @@ Uso (precisa do CSS completo do pacote upstream):
 
 O conjunto usado sai de três fontes, nesta ordem:
   1. qualquer token `ph-<nome>` literal em frontend/**.{html,js,css} e em
-     webapp/src/**.{js,jsx,css} — a FONTE da ilha React, e não o bundle
-     minificado que ela produz (ver ARTEFATOS abaixo);
+     webapp/src/**.{js,jsx,ts,tsx,css} — a FONTE das ilhas React, e não os
+     bundles minificados que elas produzem (ver ARTEFATOS abaixo);
   2. os valores dos mapas fechados EMOJI_TO_PH (dashboard.js), ACTIVITY_ICONS e
      CAT_ICONS (settings.html), que alimentam as interpolações `ph-${...}`;
   3. os fallbacks literais desses três helpers: tag, circle, trend-down.
@@ -39,9 +39,11 @@ DESTINO_FONTE = FRONTEND / "fonts" / "Phosphor.woff2"
 # um `ph-algo` que o minificador emita por acidente viraria ícone FANTASMA (e
 # vermelho no test_phosphor_subset.py por um nome que ninguém escreveu), e um
 # ícone de verdade que o componente use está na fonte (`webapp/src`), que a
-# varredura lê. Hoje o bundle tem ZERO ocorrências de `ph-`; é do dia em que
-# tiver que esta linha trata.
-ARTEFATOS = {FRONTEND / "precos-app.js", FRONTEND / "precos-app.css"}
+# varredura lê. O do /painel (`dashboard-app.js`) já tem `ph-` no bundle.
+ARTEFATOS = {FRONTEND / nome for nome in (
+    "precos-app.js", "precos-app.css", "chat-app.js", "chat-app.css",
+    "dashboard-app.js", "dashboard-app.css",
+)}
 # A ilha React: fonte de frontend que NÃO mora em frontend/.
 WEBAPP_SRC = RAIZ / "webapp" / "src"
 
@@ -70,7 +72,8 @@ FONTE_CSS = """@font-face {
 def icones_usados() -> set[str]:
     usados = set()
     for f in (*FRONTEND.rglob("*"), *WEBAPP_SRC.rglob("*")):
-        if f.suffix not in (".html", ".js", ".jsx", ".css") or f == DESTINO:
+        # .ts/.tsx: o dashboard v2 e o chat são TypeScript.
+        if f.suffix not in (".html", ".js", ".jsx", ".ts", ".tsx", ".css") or f == DESTINO:
             continue
         if f in ARTEFATOS:
             continue

@@ -1051,7 +1051,8 @@ def _is_pigbank_app(request: Request) -> bool:
     """True se a requisição diz vir do app: o WebView iOS anexa "PigBankApp/1.0"
     ao UA, e o app nativo (iOS e Android) manda "PigBankApp/<versão> (...)".
 
-    Só para TELEMETRIA (signup_source_from_request). NÃO usar para conceder nada:
+    Só para TELEMETRIA (signup_source_from_request) e para ESCOLHER a tela (o
+    /painel manda o app para o /app, que ele conhece). NÃO usar para conceder nada:
     o User-Agent é escolhido pelo cliente, então isto é a alegação do chamador,
     não um fato verificado. Os gates isentavam o app com base nisto e qualquer
     conta web entrava sem plano mandando a substring — a isenção saiu por isso.

@@ -6,6 +6,7 @@ finance_bot_websocket_custom.py sem mudança de comportamento.
 
 import asyncio
 import html as _html
+import logging
 import os
 import re
 from urllib.parse import quote
@@ -17,6 +18,8 @@ from pydantic import BaseModel
 from core.secure_compare import constant_time_eq
 from frontend.routes.shared import (
     FRONTEND_DIR,
+    _is_pigbank_app,
+    _resolve_page_user_id,
     gate_onboarding,
     gate_plan_selection,
     gate_pro_page,
@@ -69,6 +72,44 @@ async def serve_dashboard(request: Request):
     if gate is not None:
         return gate
     return html_file(FRONTEND_DIR / "dashboard.html", pixel=False)
+
+
+@router.get("/painel")
+def serve_painel(request: Request):
+    """Dashboard v2, só para quem a chave libera. Fora dela, o painel é o /app.
+
+    `def` e não `async def`: sessão, chave e gates são banco síncrono, e o
+    FastAPI roda rota síncrona no threadpool em vez de travar o event loop
+    (mesma escolha de `api/v2/sessao.usuario_atual`).
+
+    `_resolve_page_user_id` aceita o `auth_token` (15 min) OU o
+    `dashboard_token` (12 h). O `/auth/validate` da /login aceita o segundo:
+    exigir só o primeiro faria a /login mandar para cá e daqui de volta ao
+    login (o loop da /conta no #644).
+
+    O user agent do app só ESCOLHE a tela (o app segue no /app): ele não
+    concede nada, quem libera é a chave, no servidor. Chave que falha = fechado.
+    """
+    from core.services.plan_service import dashboard_v2_enabled
+
+    uid = _resolve_page_user_id(request)
+    if uid is None:
+        return RedirectResponse(url="/login?next=/painel", status_code=302)
+    try:
+        liberado = not _is_pigbank_app(request) and dashboard_v2_enabled(uid)
+    except Exception:
+        logging.getLogger(__name__).warning("dashboard_v2_enabled falhou", exc_info=True)
+        liberado = False
+    if not liberado:
+        return RedirectResponse(url="/app", status_code=302)
+    # Mesma sequência do /app: plano primeiro, onboarding depois.
+    gate = gate_plan_selection(request)
+    if gate is not None:
+        return gate
+    gate = gate_onboarding(request)
+    if gate is not None:
+        return gate
+    return html_file(FRONTEND_DIR / "painel.html", pixel=False)
 
 
 @router.get("/home")
@@ -436,6 +477,7 @@ async def serve_robots_txt():
         "User-agent: *",
         "Allow: /",
         "Disallow: /app",
+        "Disallow: /painel",
         "Disallow: /home",
         "Disallow: /settings",
         "Disallow: /onboarding",
@@ -680,6 +722,25 @@ async def serve_chat_app_js():
 async def serve_chat_app_css():
     return FileResponse(
         FRONTEND_DIR / "chat-app.css",
+        media_type="text/css",
+        headers={"Cache-Control": "no-cache"},
+    )
+
+
+@router.get("/dashboard-app.js")
+async def serve_dashboard_app_js():
+    """Ilha React do dashboard v2 (/painel); revalidação acompanha o HTML."""
+    return FileResponse(
+        FRONTEND_DIR / "dashboard-app.js",
+        media_type="application/javascript",
+        headers={"Cache-Control": "no-cache"},
+    )
+
+
+@router.get("/dashboard-app.css")
+async def serve_dashboard_app_css():
+    return FileResponse(
+        FRONTEND_DIR / "dashboard-app.css",
         media_type="text/css",
         headers={"Cache-Control": "no-cache"},
     )

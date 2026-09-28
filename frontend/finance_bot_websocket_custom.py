@@ -3784,6 +3784,7 @@ async def auth_me(user_id: int = Depends(_get_current_user)):
     from core.services import billing_copy
     of_ui_enabled = _open_finance_ui_enabled(user_id, user_dict.get("email"))
     from core.services.plan_service import agents_ui_enabled as _agents_ui_enabled
+    from core.services.plan_service import dashboard_v2_enabled
     agents_ui = _agents_ui_enabled(user_id, user_dict.get("email"))
     # Planos v2: tier efetivo da escada + estado do trial (30d via Stripe).
     plan_tier = await asyncio.to_thread(get_plan_tier, user_id)
@@ -3834,6 +3835,9 @@ async def auth_me(user_id: int = Depends(_get_current_user)):
         "history_earliest_date": earliest_history.isoformat() if earliest_history else None,
         "of_ui_enabled": of_ui_enabled,
         "agents_ui_enabled": agents_ui,
+        # A chave pura: o /app esconde o link no app (window.PB_IN_APP), e o
+        # /painel manda o app para o /app no servidor.
+        "dashboard_v2_enabled": dashboard_v2_enabled(user_id, user_dict.get("email")),
     }
 
 
