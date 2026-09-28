@@ -143,6 +143,13 @@ Sub-app FastAPI (`api/v2/app.py`) montado pelo monólito com `app.mount("/api/v2
   do envelope o 403 do CSRF e o 422 do `query_venenosa_middleware`, que nascem nos
   middlewares do pai e saem `{"detail": ...}`.
 - `GET /api/v2/me` devolve `{"plan_tier": "free"|"essencial"|"plus"|"pro"}`, sem PII.
+- **Contrato:** o envelope entra no OpenAPI como resposta `default` (`ErroV2`, em
+  `api/v2/erros.py`; a resposta real continua saindo de `_envelope`). Os tipos TS saem de
+  `python scripts/gerar_tipos_api_v2.py` para `webapp/src/dashboard/lib/api-v2.gen.ts`
+  (gerado e commitado; construção fora da lista aceita levanta `ValueError`), e
+  `tests/test_api_v2_contrato.py` compara o arquivo com o `openapi()` de hoje e valida as
+  fixtures dos testes de navegador (`tests/frontend/api_v2_respostas.json`). Mudou modelo:
+  rode o gerador e depois o build do `webapp/`.
 - Chave: `DASHBOARD_V2_BETA_EMAILS` (sem a env = os e-mails de teste do beta de
   Agentes; definida e vazia = ninguém) e `DASHBOARD_V2_BETA_USER_IDS`.
 - A página é `/painel` (`frontend/painel.html` + o artefato `frontend/dashboard-app.*`,
@@ -150,7 +157,18 @@ Sub-app FastAPI (`api/v2/app.py`) montado pelo monólito com `app.mount("/api/v2
   (`_resolve_page_user_id`), senão `/login?next=/painel`; UA do app ou fora da chave
   (ou a chave falhando) vai para `/app`; depois os gates de plano e onboarding do `/app`.
   O `/auth/me` devolve `dashboard_v2_enabled`, que revela o link no menu do `/app`
-  (fora do app).
+  (fora do app). O `/painel` carrega o `/static/auth-refresh.js` antes do bundle: o 401
+  de autenticação da `/api/v2` (só aceita `dashboard_token`/Bearer) é renovado e repetido
+  por ele.
+- **Erro no cliente** (`webapp/src/dashboard/parts/Entrada.tsx`): nada do painel monta
+  antes do `/me`; qualquer erro é uma tela só, com texto fixo em português (a `message`
+  do envelope não vai para a tela: em 402/404 ela sai em inglês), Recarregar e "Painel
+  antigo", **sem redirecionamento no cliente** — o Recarregar passa pelo `serve_painel`, que já manda cada
+  caso ao lugar certo. Rede e 5xx tentam 3 vezes (com `networkMode: "always"`, para o evento `offline`
+  não pausar o `/me` em "Carregando…"); 4xx (inclusive 429) nunca repete. Limite
+  conhecido: conta agendada para exclusão leva 403 da `/api/v2` e o Recarregar serve a
+  mesma tela, porque o `serve_painel` não barra exclusão (herdado do #659; o `/app`
+  também não) — a única saída visível é o "Painel antigo".
 
 ### Autenticação
 
@@ -489,6 +507,12 @@ de job que apaga linha; `TABLE_CLEANUP_INTERVAL_HOURS=0` desliga a poda).
   [ADR 0002](adr/0002-piloto-como-funciona-como-ilha-react.md).
   Ao alterar o build, preserve o alvo Safari 14 nos artefatos JS e CSS e
   `emptyOutDir: false`: o destino é o diretório do site.
+  A ilha do v2 (`/painel`) busca dados com **TanStack Query v5**. O alvo safari14 só
+  rebaixa sintaxe (os `this.#x` viram WeakMap), não faz polyfill de API: por isso
+  `tests/frontend/dashboard_v2_safari14.test.mjs` varre o `dashboard-app.js` commitado
+  atrás das APIs que o Safari 14 não tem (`.at(`, `structuredClone`, `Object.hasOwn(`,
+  `WeakRef`, `static{`, `this.#` e outras) e monta o `/painel` no Chromium com elas
+  apagadas.
   O gate do CI recompila `webapp/` e exige artefatos idênticos aos commitados.
   Dependências novas exigem rebuild e inclusão dos artefatos afetados no commit.
   **O que isto NÃO autoriza:** transformar a área logada em SPA, adicionar

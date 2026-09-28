@@ -21,6 +21,12 @@
        do repositório (ex.: `python3 -m http.server 8897`) e abra
        /dashboard-v2/index.html. -->
   <link rel="stylesheet" href="../frontend/dashboard-app.css">
+  <!-- Sem backend: o plano da demonstração vem de ?plano=essencial|plus|pro (o resto é
+       o Pro) e o bundle não chama a API. O bundle é o mesmo do /painel; ligar o
+       protótipo à API é apagar este script. -->
+  <script>
+    window.PIGBANK_DEMO_PLAN = (function (p) { return ["essencial", "plus", "pro"].indexOf(p) >= 0 ? p : "pro"; })(new URLSearchParams(location.search).get("plano"));
+  </script>
   <script defer src="../frontend/dashboard-app.js"></script>
 </head>
 <body>

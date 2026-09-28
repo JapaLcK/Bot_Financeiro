@@ -12,8 +12,10 @@ from api.v2 import erros, me
 
 # Documentação desligada como no app principal. `servers` deixa o `openapi()`
 # (que o contrato do PR seguinte gera) com o prefixo do mount, e não relativo.
+# `responses.default` põe o envelope de erro no contrato (os tipos TS saem daí).
 app = FastAPI(openapi_url=None, docs_url=None, redoc_url=None,
-              servers=[{"url": "/api/v2"}])
+              servers=[{"url": "/api/v2"}],
+              responses={"default": {"model": erros.ErroV2, "description": "Erro no envelope"}})
 
 # StarletteHTTPException e não a do FastAPI: o 404/405 do router é a do Starlette.
 app.add_exception_handler(StarletteHTTPException, erros.http_erro)

@@ -36,15 +36,15 @@ before(async () => {
 after(() => browser?.close());
 
 // `sorte` fixa o Math.random (0 = sempre a primeira opção do sorteio).
-async function abrir({ width = 1440, perfil = "padrao", qs = "", sorte = null } = {}) {
+async function abrir({ width = 1440, perfil = "padrao", plano = "pro", sorte = null } = {}) {
   const ctx = await browser.newContext({ viewport: { width, height: 900 }, reducedMotion: "reduce" });
-  await servir(ctx);
+  await servir(ctx, undefined, { plano });
   await ctx.addInitScript((p) => localStorage.setItem("pigbank.dashboard.profile.v1", JSON.stringify(p)), perfil);
   if (sorte !== null) await ctx.addInitScript((v) => { Math.random = () => v; }, sorte);
   const page = await ctx.newPage();
   const erros = [];
   page.on("pageerror", (e) => erros.push(e.message));
-  await page.goto(`${PAINEL}${qs}#/`);
+  await page.goto(`${PAINEL}#/`);
   await page.locator(".piggy-band").waitFor();
   return { ctx, page, erros };
 }
@@ -90,7 +90,7 @@ test("Essencial: a faixa abre a conversa e nunca sorteia um insight", async () =
   const sorteio = async (plano) => {
     const vistas = [];
     for (const sorte of SORTES) {
-      const { ctx, page } = await abrir({ perfil: "investir", qs: `?plano=${plano}`, sorte });
+      const { ctx, page } = await abrir({ perfil: "investir", plano, sorte });
       vistas.push([await faixa(page), await page.locator(".piggy-band").evaluate((b) => b.tagName)]);
       await ctx.close();
     }
@@ -98,7 +98,7 @@ test("Essencial: a faixa abre a conversa e nunca sorteia um insight", async () =
   };
   const essencial = await sorteio("essencial");
   const plus = await sorteio("plus");
-  const { ctx, page, erros } = await abrir({ perfil: "investir", qs: "?plano=essencial", sorte: 0 });
+  const { ctx, page, erros } = await abrir({ perfil: "investir", plano: "essencial", sorte: 0 });
   await page.locator(".piggy-band").click();
   await page.locator(".chat > .msg-piggy .msg-text").first().waitFor();
   const hash = await page.evaluate(() => location.hash);

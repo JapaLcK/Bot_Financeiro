@@ -6,7 +6,7 @@
  *   · o ajuste é por perfil e "Restaurar padrão" volta ao preset do perfil atual;
  *   · o ✕ esconde por clique e por Enter, com e sem `inert` (Safari < 15.5): sem inert ele
  *     segue alcançável pelo Tab; depois o foco fica num bloco, e o catálogo o devolve;
- *   · o plano (?plano=) tira os blocos pagos do painel e os mostra com cadeado no catálogo;
+ *   · o plano (do /api/v2/me) tira os blocos pagos do painel e os mostra com cadeado no catálogo;
  *   · storage que lança não impede de montar nem de escolher;
  *   · 390: modal, seletor e catálogo sem rolagem horizontal, ✕ com 44 × 44.
  *
@@ -32,9 +32,9 @@ before(async () => {
 });
 after(() => browser?.close());
 
-async function abrir({ width = 1440, qs = "", perfil = null, semInert = false, semStorage = false } = {}) {
+async function abrir({ width = 1440, plano = "pro", perfil = null, semInert = false, semStorage = false } = {}) {
   const ctx = await browser.newContext({ viewport: { width, height: width > 500 ? 1000 : 844 }, reducedMotion: "reduce" });
-  await servir(ctx);
+  await servir(ctx, undefined, { plano });
   // só na primeira carga: o reload tem de ler o que a página salvou
   if (perfil) await ctx.addInitScript(([k, v]) => { if (!localStorage.getItem(k)) localStorage.setItem(k, v); }, [PERFIL, JSON.stringify(perfil)]);
   if (semStorage) await ctx.addInitScript(() => {
@@ -49,7 +49,7 @@ async function abrir({ width = 1440, qs = "", perfil = null, semInert = false, s
   const page = await ctx.newPage();
   const erros = [];
   page.on("pageerror", (e) => erros.push(e.message));
-  await page.goto(`${PAINEL}${qs}#/`);
+  await page.goto(`${PAINEL}#/`);
   await page.locator("#board-profile").waitFor();
   return { ctx, page, erros };
 }
@@ -169,8 +169,8 @@ for (const semInert of [false, true]) for (const modo of ["clique", "Enter"]) {
   });
 }
 
-test("?plano=plus: Investir sem o simulador; no catálogo ele tem cadeado e não entra", async () => {
-  const { ctx, page } = await abrir({ qs: "?plano=plus", perfil: "investir" });
+test("plano plus: Investir sem o simulador; no catálogo ele tem cadeado e não entra", async () => {
+  const { ctx, page } = await abrir({ plano: "plus", perfil: "investir" });
   const antes = await painel(page);
   await organizar(page);
   await catalogo(page);
@@ -184,8 +184,8 @@ test("?plano=plus: Investir sem o simulador; no catálogo ele tem cadeado e não
   assert.deepEqual(depois, antes);
 });
 
-test("?plano=essencial: previsão, Piggy e simulador fora do painel em todos os perfis", async () => {
-  const { ctx, page } = await abrir({ qs: "?plano=essencial", perfil: "padrao" });
+test("plano essencial: previsão, Piggy e simulador fora do painel em todos os perfis", async () => {
+  const { ctx, page } = await abrir({ plano: "essencial", perfil: "padrao" });
   const vistos = {};
   for (const p of ["padrao", "economizar", "investir", "controlar", "dividas", "autonomo"]) {
     await page.selectOption("#board-profile", p);
@@ -196,13 +196,14 @@ test("?plano=essencial: previsão, Piggy e simulador fora do painel em todos os 
 });
 
 test("esvaziar no essencial salva [] e o upgrade não põe o travado de volta: ele fica no catálogo", async () => {
-  const { ctx, page } = await abrir({ qs: "?plano=essencial", perfil: "investir" });
+  const { ctx, page } = await abrir({ plano: "essencial", perfil: "investir" });
   await organizar(page);
   const restaurar = await page.getByRole("button", { name: "Restaurar padrão" }).count(); // sem ajuste: 0
   const x = page.locator("[data-slot=widget-remove]");
   while (await x.count()) await x.first().click();
   const vazio = await salvo(page, "pigbank.dashboard.layout.v1.investir");
-  await page.goto(`${PAINEL}?plano=pro#/`);
+  await servir(ctx, undefined, { plano: "pro" }); // o upgrade: o /me passa a dizer Pro
+  await page.reload(); // goto na mesma URL com # só troca o hash, sem recarregar
   await page.locator("#board-profile").waitFor();
   const depois = await painel(page);
   await page.getByRole("button", { name: "Organizar" }).click();
@@ -215,8 +216,8 @@ test("esvaziar no essencial salva [] e o upgrade não põe o travado de volta: e
   assert.ok(livres.includes("Simulador") && livres.includes("Piggy notou"), JSON.stringify(livres));
 });
 
-test("positivo: ?plano=pro mostra previsão, Piggy e simulador", async () => {
-  const { ctx, page } = await abrir({ qs: "?plano=pro", perfil: "padrao" });
+test("positivo: plano pro mostra previsão, Piggy e simulador", async () => {
+  const { ctx, page } = await abrir({ plano: "pro", perfil: "padrao" });
   const r = (await painel(page)).filter((id) => ["hero", "piggy", "simulador"].includes(id));
   await ctx.close();
   assert.deepEqual(ordenado(r), ["hero", "piggy", "simulador"]);

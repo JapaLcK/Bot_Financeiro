@@ -17,6 +17,9 @@
   <link rel="stylesheet" href="/phosphor.css?v=1">
   <!-- dashboard-app.* sai de `npm --prefix webapp run build` (webapp/src/dashboard). -->
   <link rel="stylesheet" href="/dashboard-app.css?v=1">
+  <!-- defer preserva a ordem: o auth-refresh (renova no 401 e repete) envolve o fetch
+       antes de o bundle pedir o /api/v2/me. -->
+  <script defer src="/static/auth-refresh.js?v=1"></script>
   <script defer src="/dashboard-app.js?v=1"></script>
 </head>
 <body>
