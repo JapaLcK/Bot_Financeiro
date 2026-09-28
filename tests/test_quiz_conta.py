@@ -289,6 +289,26 @@ def test_desfazer_apaga_so_a_conta_e_as_sessoes_do_proprio_user_id(env):
     assert (_linha(vizinha), _sessoes_e_refresh(uid_vizinha)) == antes_vizinha
 
 
+def test_desfazer_nao_derruba_sessao_de_outra_linha_do_mesmo_user_id(env):
+    """`auth_accounts` não tem unique em `user_id`: o login que a outra linha fez na
+    janela é legítimo e fica."""
+    email, outro = _email(), _email()
+    uid, conta_id = _conta_sem_senha(email)
+    with db.get_conn() as conn, conn.cursor() as cur:
+        assert db_support.inserir_conta_nova(cur, user_id=uid, email=outro, password_hash="x",
+                                             phone_e164=None, display_name=None, source="web")
+        conn.commit()
+    import core.refresh_tokens as refresh_tokens
+    import core.sessions as sessions
+    refresh_tokens.create_refresh_token(uid, sessions.create_session(uid))
+    antes = _sessoes_e_refresh(uid)
+    assert antes == (1, 1)
+
+    assert db_signup_quiz.desfazer_conta_sem_codigo(uid, conta_id) is True
+    assert _linha(email) is None and int(_linha(outro)["user_id"]) == uid
+    assert _sessoes_e_refresh(uid) == antes
+
+
 def test_conversa_conta_me_e_checkout(env, monkeypatch):
     """A conta nova anda sozinha até o checkout: sem senha, sem plano, 200 no Stripe."""
     from tests.test_billing_checkout import _patch_stripe

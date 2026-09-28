@@ -156,7 +156,9 @@ def desfazer_conta_sem_codigo(user_id: int, conta_id: int) -> bool:
     dela, não qualquer uma do `user_id`: `auth_accounts` não tem unique em `user_id`)
     e a sessão já emitida desde então, quando a sessão falha no meio: sem isto o retry
     cai em `tem_conta`. Sem corte de tempo (a falha pode vir depois de minutos na fila
-    do pool); a guarda é a linha seguir sem senha e sem plano.
+    do pool); a guarda é a linha seguir sem senha e sem plano. As sessões só saem se
+    nenhuma outra linha do `user_id` sobrou: as desta requisição são inertes (nada saiu
+    do servidor), e as da outra linha podem ser um login legítimo feito na janela.
     `users`, `user_identities` e o link_code ficam: o id é o mesmo na recriação."""
     with get_conn() as conn, conn.cursor() as cur:
         cur.execute(
@@ -169,11 +171,12 @@ def desfazer_conta_sem_codigo(user_id: int, conta_id: int) -> bool:
             (int(conta_id), int(user_id)),
         )
         conta = cur.fetchone()
+        sozinha = "and not exists (select 1 from auth_accounts where user_id = %s)"
         if conta:
-            cur.execute("delete from auth_refresh_tokens where user_id = %s and issued_at >= %s",
-                        (int(user_id), conta["created_at"]))
-            cur.execute("delete from auth_sessions where user_id = %s and created_at >= %s",
-                        (int(user_id), conta["created_at"]))
+            cur.execute(f"delete from auth_refresh_tokens where user_id = %s and issued_at >= %s {sozinha}",
+                        (int(user_id), conta["created_at"], int(user_id)))
+            cur.execute(f"delete from auth_sessions where user_id = %s and created_at >= %s {sozinha}",
+                        (int(user_id), conta["created_at"], int(user_id)))
         conn.commit()
     if conta:
         db_support.invalidate_auth_user_cache(user_id)
