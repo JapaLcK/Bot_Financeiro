@@ -588,7 +588,8 @@ def _sync_pluggy_item_confirmado(provider_item_id: str, connection: dict, api_ke
                           f"{caixinha_result['caixinhas_sem_nome']} sem nome livre "
                           f"(user={connection['user_id']})")
         except Exception as exc:
-            print(f"[pluggy_sync] caixinha auto-import: {exc}")
+            print(f"[pluggy_sync] caixinha auto-import: motivo={type(exc).__name__} "
+                  f"sqlstate={getattr(exc, 'sqlstate', None)}")
 
         # Fase 1: conta BANK → launches (analytics, sem mover saldo); cartão → faturas (opção a).
         imported = import_open_finance_launches(connection["user_id"], connection["id"])
@@ -859,7 +860,9 @@ def _hold_aggregate_emails(user_id: int, origem: str) -> None:
         from core.services.piggy_agents import _AGENT_EMAIL_MIN_AGE_MIN, _SYNC_QUIET_MIN
         hold_agent_emails(user_id, list(_AGENT_EMAIL_MIN_AGE_MIN), _SYNC_QUIET_MIN)
     except Exception as exc:
-        print(f"[pluggy_sync] hold agregados ({origem}): {exc}")
+        # Tipo + `sqlstate`, nunca `str(exc)`: a FK do banco traz `Key (user_id)=` (#657, D4).
+        print(f"[pluggy_sync] hold agregados ({origem}): motivo={type(exc).__name__} "
+              f"sqlstate={getattr(exc, 'sqlstate', None)}")
 
 
 def _sync_item_contido(connection: dict, user_id: int) -> dict:
@@ -930,7 +933,8 @@ def marcar_leitura_falhou(conexao: dict, erro: BaseException | None = None) -> N
                          motivos_substituiveis=MOTIVOS_QUE_A_FALHA_SUBSTITUI,
                          dono_unico=True)
     except Exception as exc:  # banco fora do ar não pode derrubar o chamador também
-        print(f"[pluggy_sync] mark_sync_result falhou ({item_id}): {exc}")
+        print(f"[pluggy_sync] mark_sync_result falhou ({item_id}): "
+              f"motivo={type(exc).__name__} sqlstate={getattr(exc, 'sqlstate', None)}")
 
 
 def sync_pluggy_user(user_id: int) -> dict:

@@ -256,7 +256,7 @@ def test_falha_no_rastro_do_connect_token_tambem_nasce_com_dono(
 # ── 5. o `item_id` sobrevive quando o próprio diagnóstico não grava ──────────
 
 def test_item_id_sobrevive_ao_diagnostico_que_nao_grava(
-        user_id, monkeypatch, caplog, webhook_pluggy, auditados):
+        user_id, monkeypatch, capsys, webhook_pluggy, auditados):
     """Apontamento do Codex (PR #542), medido nas duas metades antes do conserto.
 
     Quando o teto do `_log_com_teto` estoura, o `wait_for` engole o `TimeoutError`;
@@ -271,9 +271,12 @@ def test_item_id_sobrevive_ao_diagnostico_que_nao_grava(
     Logger que LEVANTA não é o caso de produção — lá ele engole os próprios erros
     de banco (`core/admin_dashboard.py`) e imprime a mensagem genérica, que é
     exatamente o que faz o id se perder.
+
+    Desde a #657 o rastro do teto estourado também traz o `item_id`, então este
+    caso NÃO discrimina o aviso local; quem discrimina é
+    `test_of_log_dono_coluna.py::test_aviso_local_do_rastro_vai_ao_stderr_sem_espelho_e_sem_uid`.
     """
     import asyncio as _asyncio
-    import logging as _logging
 
     _mock_item(monkeypatch, user_id)
     monkeypatch.setattr(of_routes, "register_item", lambda *a, **k: (_ for _ in ()).throw(
@@ -286,14 +289,13 @@ def test_item_id_sobrevive_ao_diagnostico_que_nao_grava(
     monkeypatch.setattr(of_routes, "log_system_event", _log_que_pendura)
     client = TestClient(dashboard.app)
     try:
-        with caplog.at_level(_logging.WARNING, logger="frontend.routes.open_finance"):
-            r = _post(client, user_id, "pia-sem-log")
+        r = _post(client, user_id, "pia-sem-log")
 
         assert r.status_code == 200, f"{r.status_code}: {r.text}"
         assert len(db.get_connections_by_item_id("pia-sem-log")) == 1
         assert webhook_pluggy == ["pia-sem-log"], webhook_pluggy
 
-        texto = "\n".join(rec.getMessage() for rec in caplog.records)
+        texto = capsys.readouterr().err   # aviso local em stderr desde a #657 (D2)
         assert "pia-sem-log" in texto, (
             "o `item_id` não sobrou em canal nenhum: sem o aviso local, o único "
             f"rastro é a mensagem genérica do logger — {texto!r}")

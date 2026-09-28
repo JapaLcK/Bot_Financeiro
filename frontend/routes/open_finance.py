@@ -250,18 +250,19 @@ async def _log_com_teto(segundos: float, *args, **kwargs) -> None:
     Engolir o `TimeoutError` é deliberado: o log é DIAGNÓSTICO, e perder o
     diagnóstico não pode virar um segundo modo de falha em cima do 503. O que
     sobra quando o teto estoura é o `print` em stderr do `except` abaixo —
-    `event_type` + `motivo`, sem uid, SEM banco (mesmo espírito do "[admin]
-    failed to record" de `log_system_event`). Vale para todo chamador, num lugar só.
+    `event_type` + `motivo` + `item_id`, sem uid, SEM banco (mesmo espírito do
+    "[admin] failed to record" de `log_system_event`). Vale para todo chamador,
+    num lugar só.
 
     NÃO use `logging.warning` como canal "local" antes desta chamada: o
     `_DashboardHandler` (`core/observability.py`) o espelha com INSERT SÍNCRONO
     dentro do event loop, e com `system_event_logs` travada isso DOBRA o prazo e
     para o processo (issue #541; quem prende é
-    `tests/test_of_log_teto_e_status.py::test_teto_vale_com_o_espelho_do_logging_lento`).
-    Os avisos que já existem
-    (`of_reconnect_lock_retry`, `of_reconnect_lock_timeout` no
-    `_grava_reconexao` e `of_item_registry_failed` no `/pluggy-item`) pagam esse
-    custo hoje — registrado, fora do escopo da #541.
+    `tests/test_of_log_teto_e_status.py::test_teto_vale_com_o_espelho_do_logging_lento`
+    e, para os três avisos locais que existem — `of_reconnect_lock_retry`,
+    `of_reconnect_lock_timeout` e `of_item_registry_failed` do `/pluggy-item` —,
+    `tests/test_of_log_stderr.py`). O canal local é `print(..., file=sys.stderr)`,
+    sem texto de exceção nem uid (issue #657, D4).
 
     Só `asyncio.TimeoutError` é engolido. `CancelledError` de fora (cliente
     desistiu, shutdown) continua subindo — o `wait_for` só converte em
@@ -281,8 +282,9 @@ async def _log_com_teto(segundos: float, *args, **kwargs) -> None:
     except asyncio.TimeoutError:
         evento = args[1] if len(args) > 1 else kwargs.get("event_type")
         detalhes = kwargs.get("details")
-        motivo = detalhes.get("motivo") if isinstance(detalhes, dict) else None
-        print(f"[open_finance] log com teto estourado: {evento} motivo={motivo}",
+        detalhes = detalhes if isinstance(detalhes, dict) else {}
+        print(f"[open_finance] log com teto estourado: {evento} "
+              f"motivo={detalhes.get('motivo')} item_id={detalhes.get('item_id')}",
               file=sys.stderr)
 
 
@@ -615,6 +617,7 @@ async def _grava_reconexao(
     """
     fim = time.monotonic() + _RECONNECT_DEADLINE_MS / 1000.0
     causa = None   # None = lock ocupado; senão, o erro de infra da última tentativa
+    causa_tipo = None  # só o TIPO de `causa`: é o que vai para stderr e `motivo` (#657, D4)
     # A pergunta do desfazimento lá embaixo é "alguma tentativa pode ter
     # ESCRITO?", e ela tem duas metades.
     #
@@ -659,7 +662,7 @@ async def _grava_reconexao(
                 _salva_item_sob_lock, user_id, remote, item_id, restante_ms,
                 tinha_conexao_propria, criar_usuario, adocao_registro_id,
                 escrita_tentada=escrita_tentada)
-            causa = None
+            causa, causa_tipo = None, None
         except _ConflitoReconexao as exc:
             # O context manager já liberou o lock. O diagnóstico tem o mesmo
             # teto dos demais logs da reconexão e não prolonga sua seção crítica.
@@ -699,8 +702,9 @@ async def _grava_reconexao(
             # `causa` existe porque `(None, False)` sozinho é indistinguível de
             # "lock ocupado", e o log dizia isso para a categoria inteira — o
             # diagnóstico falso que o `_prazo_reconexao_ms` já tinha registrado
-            # uma vez. Ela vai para os dois `log_system_event` abaixo E para o
-            # `logging` local, e a segunda parte NÃO é redundância:
+            # uma vez. Ela vai para os dois `log_system_event` abaixo E, só o
+            # tipo (`causa_tipo`), para o stderr local, e a segunda parte NÃO é
+            # redundância:
             # `log_system_event` (`core/admin_dashboard.py`) abre conexão
             # NOVA para gravar e engole TODA exceção com um `print` que não
             # carrega nem `message` nem `details`. Na família "o banco recusa
@@ -722,6 +726,7 @@ async def _grava_reconexao(
             connection, sob_lock = None, False
             # Texto cru com coluna NULL (#541): só `OperationalError` (infra) chega aqui, sem dado de linha.
             causa = f"{type(exc).__name__}: {exc}"
+            causa_tipo = type(exc).__name__
         if sob_lock:
             return connection
         # O backoff também cabe no prazo: dormir "só mais um pouco" depois de
@@ -735,9 +740,10 @@ async def _grava_reconexao(
             # some na 2ª desaparece por completo justamente na família
             # (`TooManyConnections`/`DiskFull`/`AdminShutdown`) em que o
             # `log_system_event` não consegue gravar.
-            logging.getLogger(__name__).warning(
-                "of_reconnect_lock_retry item_id=%s tentativa=%s causa=%s",
-                item_id, tentativa, causa or "lock do item ocupado")
+            # `print` e não `logging`: ver o `_log_com_teto` (#657, D2).
+            print(f"[open_finance] of_reconnect_lock_retry item_id={item_id} "
+                  f"tentativa={tentativa} motivo={causa_tipo or 'lock_ocupado'}",
+                  file=sys.stderr)
             await _log_com_teto(
                 min(_LOG_DIAG_TIMEOUT_S, fim - time.monotonic()),
                 "warning", "of_reconnect_lock_retry",
@@ -750,7 +756,7 @@ async def _grava_reconexao(
                 # banco o número já venceu — gravava `10000` valendo `-20000`.
                 details={"item_id": item_id, "attempt": tentativa,
                          "restante_ms_antes_do_log": int(folga * 1000),
-                         "erro": causa},
+                         "erro": causa, "motivo": causa_tipo or "lock_ocupado"},
             )
             # RECONTA depois do log. Ele abre conexão async NOVA (o
             # `DB_CONNECT_TIMEOUT` de `core/admin_dashboard.py`, default 5) e
@@ -770,16 +776,15 @@ async def _grava_reconexao(
     # `except` acima), então sob `TooManyConnections`/`AdminShutdown` ele não
     # grava nada e engole a exceção. Mesmo padrão do `except` de
     # `gate_plan_selection`, em `frontend/routes/shared.py`.
-    logging.getLogger(__name__).warning(
-        "of_reconnect_lock_timeout item_id=%s causa=%s", item_id,
-        causa or "lock do item ocupado")
+    print(f"[open_finance] of_reconnect_lock_timeout item_id={item_id} "
+          f"motivo={causa_tipo or 'lock_ocupado'}", file=sys.stderr)
     await _log_com_teto(
         _LOG_DIAG_TIMEOUT_S,
         "error", "of_reconnect_lock_timeout",
         f"Reconexão NÃO gravada — {causa or 'lock do item ocupado'}: {item_id}",
         source="open_finance",
         details={"item_id": item_id, "deadline_ms": _RECONNECT_DEADLINE_MS,
-                 "erro": causa},
+                 "erro": causa, "motivo": causa_tipo or "lock_ocupado"},
     )
     # DESISTIR DO LOCK também desfaz a reivindicação da adoção — é o SEGUNDO
     # desfecho em que a escrita provadamente não aconteceu, e sem ele o conserto
@@ -2089,10 +2094,9 @@ async def open_finance_pluggy_item_route(request: Request, user_id: int, payload
         # `new_item_id` não sobrava em canal nenhum. Como este caminho deixa de
         # propósito uma conexão commitada SEM rastro `pluggy_item`, o id é a única
         # chave operacional que resta — perdê-lo é perder o item (Codex, PR #542).
-        logging.getLogger(__name__).warning(
-            "of_item_registry_failed item_id=%s user_id=%s motivo=%s sqlstate=%s",
-            new_item_id, session_uid, type(exc).__name__,
-            getattr(exc, "sqlstate", None), extra={"user_id": session_uid})
+        print(f"[open_finance] of_item_registry_failed item_id={new_item_id} "
+              f"motivo={type(exc).__name__} sqlstate={getattr(exc, 'sqlstate', None)}",
+              file=sys.stderr)
         await _log_com_teto(
             _LOG_DIAG_TIMEOUT_S,
             "warning", "of_item_registry_failed", "Falha ao registrar item conectado",
@@ -2107,7 +2111,7 @@ async def open_finance_pluggy_item_route(request: Request, user_id: int, payload
             # INTEIROS na exportação LGPD do próprio titular (`build_user_export_zip`,
             # `db/privacy.py`), e o texto cru do psycopg numa falha de conexão traz
             # host e porta. Mesma lista branca que a PR #539 adotou para exceção; o
-            # que o diagnóstico perde, o `logging` do servidor ainda tem.
+            # stderr local também só leva tipo + `sqlstate` (#657, D4).
             details={"item_id": new_item_id, "origin": "pluggy_item_route",
                      "motivo": type(exc).__name__,
                      "sqlstate": getattr(exc, "sqlstate", None)},

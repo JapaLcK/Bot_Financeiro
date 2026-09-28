@@ -1754,7 +1754,10 @@ async def _open_finance_tick(*, interval: int, com_patch: bool) -> None:
         print(f"[open_finance_push] erro: {type(exc).__name__}", file=sys.stderr)
     if com_patch:
         res = await asyncio.to_thread(request_pluggy_refresh, origin="periodic")
-        print(f"[open_finance_refresh] {res}", flush=True)
+        # Sem o `claimed`: ele traz o uid de cada dono (#657).
+        print(f"[open_finance_refresh] triggered={res.get('triggered')} "
+              f"total={res.get('total')} origin={res.get('origin')} "
+              f"failures={res.get('failures')}", flush=True)
         # Os eventos ficam AQUI porque `request_pluggy_refresh` roda numa
         # thread (log_system_event é async). Ela devolve o que reivindicou
         # e o que falhou; nada mais é engolido.
