@@ -1,0 +1,41 @@
+{
+  "_comentario": "Respostas da /api/v2 que os testes de navegador servem. tests/test_api_v2_contrato.py valida cada uma pelos modelos Pydantic (Me, ErroV2); a marcada fora_do_envelope tem de NÃO validar.",
+  "me": {
+    "free": { "plan_tier": "free" },
+    "essencial": { "plan_tier": "essencial" },
+    "plus": { "plan_tier": "plus" },
+    "pro": { "plan_tier": "pro" }
+  },
+  "erros": {
+    "401": {
+      "status": 401,
+      "headers": { "WWW-Authenticate": "Bearer realm=\"pigbank\", error=\"invalid_token\"" },
+      "body": { "error": { "code": "unauthenticated", "message": "Sessão encerrada. Faça login novamente." } }
+    },
+    "402": {
+      "status": 402,
+      "body": { "error": { "code": "subscription_required", "message": "Payment Required" } }
+    },
+    "403": {
+      "status": 403,
+      "body": { "error": { "code": "forbidden", "message": "Esta conta está agendada para exclusão em 12/10/2026." } }
+    },
+    "404": {
+      "status": 404,
+      "body": { "error": { "code": "dashboard_v2_disabled", "message": "Not Found" } }
+    },
+    "500": {
+      "status": 500,
+      "body": { "error": { "code": "internal_error", "message": "Erro interno do servidor." } }
+    },
+    "503": {
+      "status": 503,
+      "body": { "error": { "code": "service_unavailable", "message": "Serviço temporariamente indisponível. Tente novamente em instantes." } }
+    },
+    "403_csrf": {
+      "status": 403,
+      "fora_do_envelope": true,
+      "body": { "detail": "Token CSRF inválido ou ausente." }
+    }
+  }
+}

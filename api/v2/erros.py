@@ -11,6 +11,7 @@ from http.client import responses
 from fastapi import Request
 from fastapi.exceptions import RequestValidationError
 from fastapi.responses import JSONResponse
+from pydantic import BaseModel
 from starlette.exceptions import HTTPException as StarletteHTTPException
 from starlette.requests import ClientDisconnect
 
@@ -26,6 +27,25 @@ _CODIGOS = {
     429: "rate_limited",
     503: "service_unavailable",
 }
+
+
+# O envelope como contrato (o `default` do OpenAPI em `app.py`). A resposta real
+# continua saindo de `_envelope`; `tests/test_api_v2_contrato.py` valida respostas
+# reais contra estes modelos.
+class DetalheErro(BaseModel):
+    loc: list[str | int]
+    msg: str
+    type: str
+
+
+class CorpoErro(BaseModel):
+    code: str
+    message: str
+    details: list[DetalheErro] | None = None
+
+
+class ErroV2(BaseModel):
+    error: CorpoErro
 
 
 def _envelope(status: int, code: str, message: str, details=None, headers=None) -> JSONResponse:

@@ -9,7 +9,7 @@
  * Não é `*.test.mjs` de propósito: o `node --test tests/frontend/*.test.mjs` não deve
  * rodá-lo como suíte.
  */
-import { readdirSync, statSync } from "node:fs";
+import { readFileSync, readdirSync, statSync } from "node:fs";
 import { fileURLToPath } from "node:url";
 import { dirname, join } from "node:path";
 
@@ -33,11 +33,22 @@ export function exigeArtefatoEmDia() {
   }
 }
 
-/** Atende o contexto do disco: `raiz` = frontend/ (o /painel) ou RAIZ (o protótipo). */
-export async function servir(ctx, raiz = FRONTEND) {
+// As respostas da /api/v2 que os testes servem; tests/test_api_v2_contrato.py as valida
+// pelos modelos Pydantic.
+export const RESPOSTAS = JSON.parse(readFileSync(join(RAIZ, "tests", "frontend", "api_v2_respostas.json"), "utf8"));
+
+/**
+ * Atende o contexto do disco: `raiz` = frontend/ (o /painel) ou RAIZ (o protótipo). O
+ * `/api/v2/me` responde o `plano` pelas fixtures. Registrar de novo vale para as
+ * próximas requisições: no Playwright a rota registrada por último vence.
+ */
+export async function servir(ctx, raiz = FRONTEND, { plano = "pro" } = {}) {
+  const me = RESPOSTAS.me[plano];
+  if (!me) throw new Error(`plano sem fixture: ${plano}`);
   await ctx.route("**/*", (r) => {
     const url = new URL(r.request().url());
     if (url.origin !== ORIGIN) return r.abort();
+    if (url.pathname === "/api/v2/me") return r.fulfill({ json: me });
     const path = decodeURIComponent(url.pathname).replace(/\/$/, "/index.html");
     return r.fulfill({ path: join(raiz, path) }).catch(() => r.fulfill({ status: 404, body: "" }));
   });

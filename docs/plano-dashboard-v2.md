@@ -135,9 +135,19 @@ que não se sabe aparece como "sem comparação", "a conferir", "desatualizado" 
 
 - **Busca de dados:** TanStack Query (Q24).
 - **Bundle** commitado em `frontend/` com trava de rebuild no CI (Q7).
-- **Plano real** pelo `GET /api/v2/me` tipado (decisão do dono, 2026-09-26; hoje o
-  protótipo lê `?plano=`). O `/auth/me` só leva `dashboard_v2_enabled`, para o link do
-  `/app`.
+- **Plano real** pelo `GET /api/v2/me` tipado (decisão do dono, 2026-09-26). O bundle
+  nunca lê a URL; só o protótipo (`dashboard-v2/index.html`, sem backend) define
+  `window.PIGBANK_DEMO_PLAN` pelo `?plano=` dele. O `/auth/me` só leva
+  `dashboard_v2_enabled`, para o link do `/app`.
+- **Tipos** gerados do OpenAPI da `/api/v2` por um gerador próprio
+  (`scripts/gerar_tipos_api_v2.py` → `webapp/src/dashboard/lib/api-v2.gen.ts`), e não pelo
+  `openapi-typescript`: ele exige typescript@^5 e o webapp usa o TS 7 nativo, sem a API
+  JS da qual ele depende (o `npm install` recusa com ERESOLVE).
+- **Erro no cliente** é uma tela só ("Não deu para carregar o painel", texto fixo em
+  português — nunca a `message` do envelope, que em 402/404 sai em inglês —, "Recarregar"
+  e "Painel antigo"). Sem redirecionamento no cliente (decisão do dono): Recarregar passa
+  de novo pelo portão do servidor (`serve_painel`), que manda cada caso ao lugar certo.
+  O 401 comum o `auth-refresh.js` renova e repete.
 - **Um PR por tela** (Q8); tela que só consome a API é faixa Leve, com o time na versão
   leve.
 - **Testes** (Q32): pytest com Postgres real para isolamento e contrato; Playwright com
@@ -237,5 +247,6 @@ PR de cada etapa, não soluções prontas. Cada PR confere se ainda valem, decid
     `dashboard_v2_enabled` no `/auth/me`, links "Painel novo (beta)" no `/app` e "Painel
     antigo" no v2, e o bundle servido de `frontend/dashboard-app.*` com gate no CI. O v2
     ainda não chama a API e o `?plano=` continua.
-  - PR 2b: contrato OpenAPI → TS, TanStack Query, fim do `?plano=`, erros, Safari 14.
+  - PR 2b (feito): contrato OpenAPI → TS, TanStack Query, fim do `?plano=`, erros,
+    Safari 14. As telas seguem com dados sintéticos e a etiqueta de demonstração.
 - [ ] Etapa 0 · [ ] 1 · [ ] 2 · [ ] 3 · [ ] 4 · [ ] 5 · [ ] 6 · [ ] 7

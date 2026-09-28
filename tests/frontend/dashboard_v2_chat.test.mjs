@@ -21,15 +21,15 @@ before(async () => {
 });
 after(() => browser?.close());
 
-async function abrir({ width = 1440, hash = "#/", perfil = "padrao", qs = "", sorte = null } = {}) {
+async function abrir({ width = 1440, hash = "#/", perfil = "padrao", plano = "pro", sorte = null } = {}) {
   const ctx = await browser.newContext({ viewport: { width, height: 900 }, reducedMotion: "reduce" });
-  await servir(ctx);
+  await servir(ctx, undefined, { plano });
   await ctx.addInitScript((p) => localStorage.setItem("pigbank.dashboard.profile.v1", JSON.stringify(p)), perfil);
   if (sorte !== null) await ctx.addInitScript((v) => { Math.random = () => v; }, sorte);
   const page = await ctx.newPage();
   const erros = [];
   page.on("pageerror", (e) => erros.push(e.message));
-  await page.goto(`${PAINEL}${qs}${hash}`);
+  await page.goto(`${PAINEL}${hash}`);
   await page.locator("#page-title").waitFor();
   return { ctx, page, erros };
 }
@@ -171,7 +171,7 @@ test("estado vazio: as sugestões do perfil vêm primeiro e respondem", async ()
 });
 
 test("Essencial: conversa normal, a barra pergunta e o Piggy responde", async () => {
-  const { ctx, page, erros } = await abrir({ hash: "#/gastos", qs: "?plano=essencial" });
+  const { ctx, page, erros } = await abrir({ hash: "#/gastos", plano: "essencial" });
   const barra = await page.locator(".askbar").evaluate((a) => a.tagName);
   await perguntar(page, "oi");
   await page.locator(".chat > .msg-piggy").first().waitFor();
