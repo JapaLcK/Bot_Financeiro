@@ -633,7 +633,8 @@ def _sync_pluggy_item_confirmado(provider_item_id: str, connection: dict, api_ke
             from core.services.piggy_agents import run_agents_for_user
             run_agents_for_user(connection["user_id"], trigger="of_sync")
         except Exception as exc:  # nunca derruba o sync por causa de agente
-            print(f"[pluggy_sync] agents hook: {exc}")
+            print(f"[pluggy_sync] agents hook: motivo={type(exc).__name__} "
+                  f"sqlstate={getattr(exc, 'sqlstate', None)}")
 
     return {
         "ok": True,
@@ -887,7 +888,8 @@ def _sync_item_contido(connection: dict, user_id: int) -> dict:
     try:
         return sync_pluggy_item(item_id, expected_user_id=user_id)
     except Exception as exc:
-        print(f"[pluggy_sync] item {item_id} falhou no lote: {type(exc).__name__}: {exc}")
+        print(f"[pluggy_sync] item {item_id} falhou no lote: motivo={type(exc).__name__} "
+              f"sqlstate={getattr(exc, 'sqlstate', None)}")
         marcar_leitura_falhou(connection, exc)
         return {"ok": False, "reason": READ_FAILED, "item_id": item_id,
                 "connection_id": connection.get("id"), "error": type(exc).__name__}
@@ -966,7 +968,8 @@ def sync_pluggy_user(user_id: int) -> dict:
                 import core.services.piggy_agents as _agents
                 getattr(_agents, f"run_{nome}_once")(user_id=user_id)
             except Exception as exc:
-                print(f"[pluggy_sync] {nome} hook (user): {exc}")
+                print(f"[pluggy_sync] {nome} hook (user): motivo={type(exc).__name__} "
+                      f"sqlstate={getattr(exc, 'sqlstate', None)}")
 
     return {
         "ok": True,

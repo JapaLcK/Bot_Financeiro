@@ -1472,7 +1472,9 @@ def test_causa_e_a_da_ultima_tentativa(user_id, monkeypatch):
 
     CONTROLE NEGATIVO: tirar o `causa = None` do caminho de sucesso do `try` (a
     linha logo depois do `to_thread`) → a infra da 1ª tentativa gruda e o log
-    final passa a acusar `TooManyConnections`, vermelho na última asserção."""
+    final passa a acusar `TooManyConnections`, vermelho na última asserção. O
+    mesmo vale para o `motivo` (#657): zerar só `causa` e não `causa_tipo` → o
+    `motivo` final fica `TooManyConnections`, vermelho na asserção dele."""
     eventos = []
     tentativas = []
 
@@ -1503,6 +1505,8 @@ def test_causa_e_a_da_ultima_tentativa(user_id, monkeypatch):
     assert final[2].get("erro") is None, \
         f"a causa da 2ª tentativa é lock ocupado, não a infra da 1ª: {final}"
     assert "lock do item ocupado" in final[1], final
+    assert retry[2]["motivo"] == "TooManyConnections", retry
+    assert final[2]["motivo"] == "lock_ocupado", final
 
 
 def test_causa_sobrevive_ao_log_system_event_que_nao_grava(user_id, monkeypatch, capsys):
@@ -1622,7 +1626,7 @@ def test_log_do_diagnostico_nao_fura_o_prazo(user_id, monkeypatch, capsys):
     sobrevive ao log que estourou. Sem isso, limitar o log teria trocado
     lentidão por cegueira. Desde a #657 o rastro do teto estourado também traz
     `motivo` e `item_id`, então este caso NÃO discrimina o `print` local — quem
-    discrimina é o `test_causa_sobrevive_ao_log_system_event_que_nao_grava`."""
+    discrimina é o `tests/test_of_log_stderr.py::test_aviso_do_timeout_nao_paga_o_espelho`."""
 
     monkeypatch.setattr(of_routes, "_RECONNECT_DEADLINE_MS", 300)
     monkeypatch.setattr(of_routes, "_LOG_DIAG_TIMEOUT_S", 0.05)

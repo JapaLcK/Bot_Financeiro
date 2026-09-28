@@ -9,15 +9,17 @@ sem texto cru de exceção, e o rastro do teto estourado diz QUAL item.
    espelha com INSERT SÍNCRONO no event loop: com `system_event_logs` travada o
    prazo dobrava. Molde: `test_of_log_teto_e_status.py::
    test_teto_vale_com_o_espelho_do_logging_lento`.
-3. O `print` do tick de refresh não leva o `claimed` (uid dos donos), e o do
-   `_hold_aggregate_emails` não leva `str(exc)` (a FK traz `Key (user_id)=`).
+3. O `print` do tick de refresh não leva o `claimed` (uid dos donos), e os
+   prints de falha do `pluggy_sync` e do tick não levam `str(exc)`: a FK real
+   traz `Key (user_id)=`. Um caso por ponto, pela função que imprime.
 
 CONTROLES (CLAUDE.md §3), cada um medido num caso verde:
   • tirar `item_id=` do print do `_log_com_teto` → os 3 casos do item 1 vermelhos;
   • voltar qualquer um dos três avisos para `logging.getLogger(__name__).warning`
     → o caso daquele aviso no item 2 vermelho;
   • voltar `{res}` no print do tick → `test_tick_do_refresh_nao_imprime_uid`;
-  • voltar `{exc}` no `_hold_aggregate_emails` → `test_hold_..._nao_imprime_uid`.
+  • voltar `{exc}` num print de falha → o caso daquele ponto em
+    `test_print_de_falha_nao_leva_o_texto_da_excecao` vermelho.
 CLASSE CEGA: aviso NOVO com `logging.warning` antes de um `_log_com_teto` — só
 uma varredura pegaria (PR B da #657).
 """
@@ -32,14 +34,18 @@ from fastapi.testclient import TestClient
 
 import core.admin_dashboard as admin_dashboard
 import core.observability as observability
+import core.services.piggy_agents as piggy_agents
 import core.services.pluggy_sync as ps
 import db
 import frontend.finance_bot_websocket_custom as dashboard
 import frontend.routes.open_finance as of_routes
 from conftest import promote_to_pro
+from core.services import plan_service
 from db.connection import get_conn
 from test_of_item_ownership import _auth, eventos  # noqa: F401 — fixture
-from test_of_log_dono_coluna import HOST, _host_fora, _levanta
+from test_log_falha_user_id import coletor  # noqa: F401 — fixture
+from test_of_connection_state import ITEM_SAUDAVEL, _conta_pluggy, _mock_pluggy, _tx_pluggy
+from test_of_log_dono_coluna import HOST, _de, _host_fora, _levanta
 from test_of_refresh_schedule import _conexao
 from test_of_webhook_adopt_guards import _limpa_item, _mock_item, webhook_pluggy  # noqa: F401
 
@@ -116,7 +122,7 @@ def test_aviso_do_retry_nao_paga_o_espelho(user_id, monkeypatch, espelho_lento, 
     assert conexao["provider_item_id"] == "i657-retry" and len(tentativas) == 2
     assert dt < 1.0, f"o aviso do retry pagou o espelho síncrono: {dt:.2f}s"
     err = capsys.readouterr().err
-    assert "of_reconnect_lock_retry item_id=i657-retry tentativa=1 motivo=TooManyConnections" in err, err
+    assert "of_reconnect_lock_retry item_id=i657-retry tentativa=1 motivo=TooManyConnections sqlstate=53300" in err, err
 
 
 def test_aviso_do_timeout_nao_paga_o_espelho(user_id, monkeypatch, espelho_lento, capsys):
@@ -131,7 +137,7 @@ def test_aviso_do_timeout_nao_paga_o_espelho(user_id, monkeypatch, espelho_lento
     assert exc.value.status_code == 503
     assert dt < 1.0, f"o aviso do timeout pagou o espelho síncrono: {dt:.2f}s"
     err = capsys.readouterr().err
-    assert "of_reconnect_lock_timeout item_id=i657-timeout motivo=TooManyConnections" in err, err
+    assert "of_reconnect_lock_timeout item_id=i657-timeout motivo=TooManyConnections sqlstate=53300" in err, err
     assert _INFRA not in err, err
 
 
@@ -158,23 +164,35 @@ def test_aviso_do_registry_nao_paga_o_espelho(user_id, monkeypatch, espelho_lent
         _limpa_item("i657-reg")
 
 
-# ── 3. prints do tick de refresh e do hold ───────────────────────────────────
+def test_aviso_local_do_rastro_vai_ao_stderr_sem_espelho_e_sem_uid(
+        user_id, monkeypatch, coletor, eventos, webhook_pluggy, capsys):
+    # Veio de `test_of_log_dono_coluna.py`. O dono fica na coluna do `_log_com_teto`.
+    promote_to_pro(user_id)
+    _mock_item(monkeypatch, user_id)
+    monkeypatch.setattr(of_routes, "register_item", _levanta(psycopg.OperationalError(HOST)))
+    client = TestClient(dashboard.app)
+    try:
+        r = client.post(f"/open-finance/{user_id}/pluggy-item",
+                        json={"item": {"id": "i541-rastro"}}, headers=_auth(client, user_id))
+        assert r.status_code == 200, r.text
+        assert not [g for g in coletor if "of_item_registry_failed" in g["message"]], coletor
+        err = capsys.readouterr().err
+        assert "of_item_registry_failed item_id=i541-rastro motivo=OperationalError" in err, err
+        assert str(user_id) not in err, err
+        _host_fora(err)
+        assert _de(eventos, "of_item_registry_failed")[0]["user_id"] == user_id, eventos
+    finally:
+        db.disconnect_open_finance_connection(user_id)
+        _limpa_item("i541-rastro")
 
-def test_tick_do_refresh_nao_imprime_uid(user_id, monkeypatch, capsys):
-    """Tick real, uma volta, no molde de `test_of_refresh_claimed_sem_uid.py`."""
-    _conexao(user_id, "i657-tick")
-    monkeypatch.setenv("OF_REFRESH_ENABLED", "1")
-    monkeypatch.setenv("OF_REFRESH_JITTER_PCT", "0")
-    monkeypatch.setattr(ps, "update_pluggy_item", lambda item, key=None: True)
-    monkeypatch.setattr(ps, "_hold_aggregate_emails", lambda uid, origem: None)
-    monkeypatch.setattr(ps, "run_of_health_check", lambda **kw: {})
-    real = ps.request_pluggy_refresh
-    monkeypatch.setattr(ps, "request_pluggy_refresh", lambda **kw: real(**kw, user_id=user_id))
 
+# ── 3. prints do tick de refresh e de falha ───────────────────────────────────
+
+def _uma_volta_do_tick(monkeypatch) -> None:
+    """Roda o `_open_finance_refresh` de verdade por uma volta e corta na 2ª espera."""
     async def _log(*a, **kw):
         return None
     monkeypatch.setattr(admin_dashboard, "log_system_event", _log)
-
     voltas = []
     sleep_real = asyncio.sleep
 
@@ -188,25 +206,105 @@ def test_tick_do_refresh_nao_imprime_uid(user_id, monkeypatch, capsys):
         monkeypatch.setattr(asyncio, "sleep", _uma_volta)
         with pytest.raises(asyncio.CancelledError):
             await dashboard._open_finance_refresh()
-
     asyncio.run(_corre())
+
+
+def test_tick_do_refresh_nao_imprime_uid(user_id, monkeypatch, capsys):
+    """Tick real, uma volta, no molde de `test_of_refresh_claimed_sem_uid.py`."""
+    _conexao(user_id, "i657-tick")
+    monkeypatch.setenv("OF_REFRESH_ENABLED", "1")
+    monkeypatch.setenv("OF_REFRESH_JITTER_PCT", "0")
+    monkeypatch.setattr(ps, "update_pluggy_item", lambda item, key=None: True)
+    monkeypatch.setattr(ps, "_hold_aggregate_emails", lambda uid, origem: None)
+    monkeypatch.setattr(ps, "run_of_health_check", lambda **kw: {})
+    real = ps.request_pluggy_refresh
+    monkeypatch.setattr(ps, "request_pluggy_refresh", lambda **kw: real(**kw, user_id=user_id))
+    _uma_volta_do_tick(monkeypatch)
     linhas = [ln for ln in capsys.readouterr().out.splitlines() if "[open_finance_refresh]" in ln]
     assert linhas == ["[open_finance_refresh] triggered=1 total=1 origin=periodic failures=[]"], linhas
     assert str(user_id) not in linhas[0], linhas
 
 
-def test_hold_com_fk_real_nao_imprime_uid(monkeypatch, capsys):
-    alheio = 987654321657
+_ALHEIO = 987654321657
+
+
+def _fk_real() -> psycopg.errors.ForeignKeyViolation:
+    """A exceção do Postgres de verdade, com `Key (user_id)=(<alheio>)` no texto."""
     with get_conn() as c:
         try:
-            c.execute("insert into pockets (user_id, name) values (%s, 'x')", (alheio,))
+            c.execute("insert into pockets (user_id, name) values (%s, 'x')", (_ALHEIO,))
         except psycopg.errors.ForeignKeyViolation as e:
             c.rollback()
-            fk = e
-    assert str(alheio) in str(fk), "pré-condição: o texto cru traz o uid"
-    monkeypatch.setattr(db, "hold_agent_emails", _levanta(fk))
+            return e
+    raise AssertionError("pré-condição: a FK tinha de recusar")
 
-    ps._hold_aggregate_emails(alheio, "refresh_all")
-    out = capsys.readouterr().out
-    assert "hold agregados (refresh_all): motivo=ForeignKeyViolation sqlstate=23503" in out, out
-    assert str(alheio) not in out, out
+
+def _hold(mp, uid, fk):
+    mp.setattr(db, "hold_agent_emails", _levanta(fk))
+    ps._hold_aggregate_emails(_ALHEIO, "refresh_all")
+
+
+def _lote(mp, uid, fk):
+    mp.setattr(ps, "sync_pluggy_item", _levanta(fk))
+    mp.setattr(ps, "mark_sync_result", lambda *a, **k: None)
+    ps._sync_item_contido({"provider_item_id": "i657-lote", "id": 1}, _ALHEIO)
+
+
+def _mark(mp, uid, fk):
+    mp.setattr(ps, "sync_pluggy_item", _levanta(RuntimeError("x")))
+    mp.setattr(ps, "mark_sync_result", _levanta(fk))
+    ps._sync_item_contido({"provider_item_id": "i657-lote", "id": 1}, _ALHEIO)
+
+
+def _hook_user(mp, uid, fk):
+    mp.setattr(ps, "get_open_finance_snapshot", lambda u: {"connections": [
+        {"provider": "pluggy", "provider_item_id": "i657-u", "id": 1}]})
+    mp.setattr(ps, "_hold_aggregate_emails", lambda u, o: None)
+    mp.setattr(ps, "_sync_item_contido", lambda c, u: {"ok": True})
+    mp.setattr(piggy_agents, "run_faria_limer_once", _levanta(fk))
+    mp.setattr(piggy_agents, "run_barao_once", lambda **kw: {})
+    ps.sync_pluggy_user(_ALHEIO)
+
+
+def _sync_real(mp, uid, item_id):
+    """Sync real de um item com uma conta e uma transação; só a Pluggy é dublada."""
+    _conexao(uid, item_id)
+    _mock_pluggy(mp, item={**ITEM_SAUDAVEL, "id": item_id},
+                 contas=[_conta_pluggy()], txs=[_tx_pluggy()])
+    ps.sync_pluggy_item(item_id)
+
+
+def _caixinha(mp, uid, fk):
+    mp.setattr(plan_service, "require_min_tier", _levanta(fk))
+    _sync_real(mp, uid, "i657-caixinha")
+
+
+def _agentes(mp, uid, fk):
+    mp.setattr(ps, "import_open_finance_launches", lambda *a, **k: {"inserted": 1})
+    mp.setattr(piggy_agents, "run_agents_for_user", _levanta(fk))
+    _sync_real(mp, uid, "i657-agentes")
+
+
+def _tick(mp, uid, fk):
+    mp.setattr(ps, "run_of_health_check", _levanta(fk))
+    _uma_volta_do_tick(mp)
+
+
+@pytest.mark.parametrize("roda, prefixo", [
+    (_hold, "[pluggy_sync] hold agregados (refresh_all): "),
+    (_lote, "[pluggy_sync] item i657-lote falhou no lote: "),
+    (_mark, "[pluggy_sync] mark_sync_result falhou (i657-lote): "),
+    (_hook_user, "[pluggy_sync] faria_limer hook (user): "),
+    (_caixinha, "[pluggy_sync] caixinha auto-import: "),
+    (_agentes, "[pluggy_sync] agents hook: "),
+    (_tick, "[open_finance_refresh] erro: "),
+], ids=["hold_757", "lote_784", "mark_802", "hook_user_837", "caixinha_513",
+        "agentes_552", "tick_1782"])
+def test_print_de_falha_nao_leva_o_texto_da_excecao(user_id, monkeypatch, capsys,
+                                                     roda, prefixo):
+    fk = _fk_real()
+    assert f"Key (user_id)=({_ALHEIO})" in str(fk), "pré-condição: o texto cru traz o uid"
+    roda(monkeypatch, user_id, fk)
+    saida = "".join(capsys.readouterr())
+    assert f"{prefixo}motivo=ForeignKeyViolation sqlstate=23503" in saida, saida
+    assert str(_ALHEIO) not in saida and "Key (" not in saida, saida

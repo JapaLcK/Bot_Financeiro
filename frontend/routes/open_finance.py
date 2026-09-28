@@ -617,7 +617,7 @@ async def _grava_reconexao(
     """
     fim = time.monotonic() + _RECONNECT_DEADLINE_MS / 1000.0
     causa = None   # None = lock ocupado; senão, o erro de infra da última tentativa
-    causa_tipo = None  # só o TIPO de `causa`: é o que vai para stderr e `motivo` (#657, D4)
+    causa_tipo = causa_sqlstate = None  # sem o texto de `causa`: vão para stderr (#657, D4)
     # A pergunta do desfazimento lá embaixo é "alguma tentativa pode ter
     # ESCRITO?", e ela tem duas metades.
     #
@@ -662,7 +662,7 @@ async def _grava_reconexao(
                 _salva_item_sob_lock, user_id, remote, item_id, restante_ms,
                 tinha_conexao_propria, criar_usuario, adocao_registro_id,
                 escrita_tentada=escrita_tentada)
-            causa, causa_tipo = None, None
+            causa = causa_tipo = causa_sqlstate = None
         except _ConflitoReconexao as exc:
             # O context manager já liberou o lock. O diagnóstico tem o mesmo
             # teto dos demais logs da reconexão e não prolonga sua seção crítica.
@@ -726,7 +726,7 @@ async def _grava_reconexao(
             connection, sob_lock = None, False
             # Texto cru com coluna NULL (#541): só `OperationalError` (infra) chega aqui, sem dado de linha.
             causa = f"{type(exc).__name__}: {exc}"
-            causa_tipo = type(exc).__name__
+            causa_tipo, causa_sqlstate = type(exc).__name__, getattr(exc, "sqlstate", None)
         if sob_lock:
             return connection
         # O backoff também cabe no prazo: dormir "só mais um pouco" depois de
@@ -742,8 +742,8 @@ async def _grava_reconexao(
             # `log_system_event` não consegue gravar.
             # `print` e não `logging`: ver o `_log_com_teto` (#657, D2).
             print(f"[open_finance] of_reconnect_lock_retry item_id={item_id} "
-                  f"tentativa={tentativa} motivo={causa_tipo or 'lock_ocupado'}",
-                  file=sys.stderr)
+                  f"tentativa={tentativa} motivo={causa_tipo or 'lock_ocupado'} "
+                  f"sqlstate={causa_sqlstate}", file=sys.stderr)
             await _log_com_teto(
                 min(_LOG_DIAG_TIMEOUT_S, fim - time.monotonic()),
                 "warning", "of_reconnect_lock_retry",
@@ -777,7 +777,7 @@ async def _grava_reconexao(
     # grava nada e engole a exceção. Mesmo padrão do `except` de
     # `gate_plan_selection`, em `frontend/routes/shared.py`.
     print(f"[open_finance] of_reconnect_lock_timeout item_id={item_id} "
-          f"motivo={causa_tipo or 'lock_ocupado'}", file=sys.stderr)
+          f"motivo={causa_tipo or 'lock_ocupado'} sqlstate={causa_sqlstate}", file=sys.stderr)
     await _log_com_teto(
         _LOG_DIAG_TIMEOUT_S,
         "error", "of_reconnect_lock_timeout",

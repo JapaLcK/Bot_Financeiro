@@ -189,7 +189,7 @@ def test_sync_que_cai_em_fk_real_nao_grava_uid_com_coluna_nula(monkeypatch):
     assert str(alheio) not in falha[0]["message"], falha
 
 
-# ── logging espelhado pelo `_DashboardHandler` (1396 e 1856) ────────────────
+# ── logging espelhado pelo `_DashboardHandler` (1396; o 1856 foi p/ test_of_log_stderr) ──
 
 def test_falha_na_copia_do_402_espelha_com_dono_e_sem_traceback(user_id, monkeypatch, coletor):
     # Plano sem vaga de OF (`of_banks_max=0`) com acesso ao app: sem plano nenhum
@@ -208,29 +208,6 @@ def test_falha_na_copia_do_402_espelha_com_dono_e_sem_traceback(user_id, monkeyp
     assert linhas[0]["user_id"] == user_id, linhas
     assert "traceback" not in linhas[0]["details"], linhas
     _host_fora(linhas[0]["message"], linhas[0]["details"])
-
-
-def test_aviso_local_do_rastro_vai_ao_stderr_sem_espelho_e_sem_uid(
-        user_id, monkeypatch, coletor, eventos, webhook_pluggy, capsys):
-    # #657 (D2): o aviso local deixou de ser `logging` — o espelho síncrono do
-    # `_DashboardHandler` furava o teto. O dono fica na coluna do `_log_com_teto`.
-    promote_to_pro(user_id)
-    _mock_item(monkeypatch, user_id)
-    monkeypatch.setattr(of_routes, "register_item", _levanta(psycopg.OperationalError(HOST)))
-    client = TestClient(dashboard.app)
-    try:
-        r = client.post(f"/open-finance/{user_id}/pluggy-item",
-                        json={"item": {"id": "i541-rastro"}}, headers=_auth(client, user_id))
-        assert r.status_code == 200, r.text
-        assert not [g for g in coletor if "of_item_registry_failed" in g["message"]], coletor
-        err = capsys.readouterr().err
-        assert "of_item_registry_failed item_id=i541-rastro motivo=OperationalError" in err, err
-        assert str(user_id) not in err, err
-        _host_fora(err)
-        assert _de(eventos, "of_item_registry_failed")[0]["user_id"] == user_id, eventos
-    finally:
-        db.disconnect_open_finance_connection(user_id)
-        _limpa_item("i541-rastro")
 
 
 # ── connect-token (1671): o log com teto não pendura a emissão ──────────────

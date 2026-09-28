@@ -1810,7 +1810,8 @@ async def _open_finance_refresh():
         except asyncio.CancelledError:
             raise
         except Exception as exc:
-            print(f"[open_finance_refresh] erro: {exc}", file=sys.stderr)
+            print(f"[open_finance_refresh] erro: motivo={type(exc).__name__} "
+                  f"sqlstate={getattr(exc, 'sqlstate', None)}", file=sys.stderr)
 
 
 async def _tarefa_fk_indexes():
