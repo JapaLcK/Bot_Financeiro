@@ -19,7 +19,10 @@ Controles (medidos no PR 1 do funil v3):
   `do nothing`: só as duas juntas desligadas deixam G1 vermelho;
 - positivo: `test_email_novo_*` cria a conta e loga.
 """
+import asyncio
+import json
 import threading
+import time
 import uuid
 from types import SimpleNamespace
 
@@ -602,9 +605,6 @@ def test_corrida_real_so_quem_criou_tem_sessao(env, cenario, rodada):
     correm de verdade em paralelo. Nasce UMA conta, e só a requisição que a
     criou sai com sessão. Sem controle negativo próprio (a janela não é
     determinística): quem prova a trava é o `test_trava_*`."""
-    import asyncio
-    import json
-
     email = _email()
     corpo = {"email": email, "nome": NOME, "whatsapp": _telefone(), "aceitou_termos": True}
     if cenario == "duas_assinar_e_google":
@@ -621,30 +621,6 @@ def test_corrida_real_so_quem_criou_tem_sessao(env, cenario, rodada):
             "verify": ("/auth/verify-email", {"email": email, "code": _register(email)}),
         }
 
-    async def _post(caminho, dados):  # ASGI cru: o conftest bloqueia o httpx async
-        corpo_b = json.dumps(dados).encode()
-        scope = {
-            "type": "http", "asgi": {"version": "3.0"}, "http_version": "1.1", "method": "POST",
-            "scheme": "http", "path": caminho, "raw_path": caminho.encode(), "query_string": b"",
-            "root_path": "", "client": ("testclient", 50000), "server": ("testserver", 80),
-            "headers": [(b"host", b"testserver"), (b"content-type", b"application/json"),
-                        (b"content-length", str(len(corpo_b)).encode()),
-                        (b"cookie", f"{dashboard.CSRF_COOKIE_NAME}={CSRF}".encode()),
-                        (dashboard.CSRF_HEADER_NAME.lower().encode(), CSRF.encode())],
-        }
-        msgs = []
-
-        async def receive():
-            return {"type": "http.request", "body": corpo_b, "more_body": False}
-
-        async def send(msg):
-            msgs.append(msg)
-
-        await dashboard.app(scope, receive, send)
-        cookies = {v.decode().split("=", 1)[0] for k, v in msgs[0]["headers"] if k == b"set-cookie"}
-        texto = b"".join(m.get("body", b"") for m in msgs[1:]).decode()
-        return msgs[0]["status"], cookies, texto
-
     async def _todos():
         return await asyncio.gather(*(_post(*p) for p in pedidos.values()))
 
@@ -656,6 +632,31 @@ def test_corrida_real_so_quem_criou_tem_sessao(env, cenario, rodada):
         assert com_sessao == ["verify"] and _linha(email)["password_hash"] is not None, respostas
     assert all(st in (200, 400, 409) for st, _, _ in respostas.values()), respostas
     assert _contagens(email, uid)[:2] == (1, 1)
+
+
+async def _post(caminho, dados):  # ASGI cru: o conftest bloqueia o httpx async
+    corpo_b = json.dumps(dados).encode()
+    scope = {
+        "type": "http", "asgi": {"version": "3.0"}, "http_version": "1.1", "method": "POST",
+        "scheme": "http", "path": caminho, "raw_path": caminho.encode(), "query_string": b"",
+        "root_path": "", "client": ("testclient", 50000), "server": ("testserver", 80),
+        "headers": [(b"host", b"testserver"), (b"content-type", b"application/json"),
+                    (b"content-length", str(len(corpo_b)).encode()),
+                    (b"cookie", f"{dashboard.CSRF_COOKIE_NAME}={CSRF}".encode()),
+                    (dashboard.CSRF_HEADER_NAME.lower().encode(), CSRF.encode())],
+    }
+    msgs = []
+
+    async def receive():
+        return {"type": "http.request", "body": corpo_b, "more_body": False}
+
+    async def send(msg):
+        msgs.append(msg)
+
+    await dashboard.app(scope, receive, send)
+    cookies = {v.decode().split("=", 1)[0] for k, v in msgs[0]["headers"] if k == b"set-cookie"}
+    texto = b"".join(m.get("body", b"") for m in msgs[1:]).decode()
+    return msgs[0]["status"], cookies, texto
 
 
 def _segurando_a_trava(email: str):
@@ -722,6 +723,45 @@ def test_rajada_no_mesmo_email_nao_segura_o_pool(env):
     assert [e for e, _ in estados] == ["ocupado"] * 8, estados
     assert max(t for _, t in estados) < 5, estados
     assert _linha(email) is None
+
+
+@pytest.mark.parametrize("rota", ["/auth/register", "/auth/verify-email"])
+def test_register_e_verify_esperam_a_trava_fora_do_event_loop(env, monkeypatch, rota):
+    """O deploy tem um worker só: register/verify esperando a trava do e-mail
+    DENTRO do loop congelavam todas as requisições. Com a trava tomada, o pedido
+    fica parado no Postgres e um `sleep(0.5)` no mesmo loop acorda na hora; a
+    trava se solta sozinha em 3 s (numa thread: com o loop preso, o teste não
+    conseguiria soltá-la). Chamada síncrona de volta → o sleep acorda em ~3 s."""
+    monkeypatch.setattr(email_service, "send_verification_email", lambda to, code: True)
+    email = _email()
+    corpo = ({"email": email, "password": "senha-forte-123", "phone": _telefone()}
+             if rota == "/auth/register" else {"email": email, "code": _register(email)})
+    dono, conn = _segurando_a_trava(email)
+    solta = threading.Timer(3, conn.rollback)
+    solta.start()
+
+    def _esperando_a_trava() -> int:
+        with db.get_conn() as c:
+            return c.execute("select count(*) as n from pg_locks where locktype = 'advisory' and not granted"
+                             " and database = (select oid from pg_database where datname = current_database())"
+                             ).fetchone()["n"]
+
+    async def _cenario():
+        pedido = asyncio.create_task(_post(rota, corpo))
+        inicio = time.monotonic()
+        await asyncio.sleep(0.5)
+        acordou, ainda_esperando = time.monotonic() - inicio, not pedido.done()
+        parados = await asyncio.to_thread(_esperando_a_trava)
+        return acordou, ainda_esperando, parados, await pedido
+
+    try:
+        acordou, ainda_esperando, parados, (status, _, texto) = asyncio.run(_cenario())
+    finally:
+        solta.join()
+        dono.__exit__(None, None, None)
+    assert acordou < 1.5, acordou
+    assert ainda_esperando and parados == 1, (ainda_esperando, parados)
+    assert status == 200, texto  # solta a trava, o pedido termina
 
 
 # ── A extração: os outros dois chamadores do `_sessao_de_conta_nova` ─────────

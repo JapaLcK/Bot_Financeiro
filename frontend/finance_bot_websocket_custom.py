@@ -3321,8 +3321,8 @@ async def auth_register(request: Request, body: RegisterBody):
         raise HTTPException(status_code=400, detail=detalhe_seguro(e))
 
     try:
-        code = create_email_verification(
-            body.email, body.password, body.phone, display_name=name,
+        code = await asyncio.to_thread(
+            create_email_verification, body.email, body.password, body.phone, display_name=name,
         )
     except AccountAlreadyExistsError as exc:
         # Anti-enumeração: e-mail/telefone já existe. NÃO revela isso — responde
@@ -3365,8 +3365,8 @@ async def auth_verify_email(request: Request, response: Response, body: VerifyEm
 
     from frontend.routes.shared import signup_source_from_request
     try:
-        result = confirm_email_verification(
-            body.email, body.code, source=signup_source_from_request(request)
+        result = await asyncio.to_thread(
+            confirm_email_verification, body.email, body.code, source=signup_source_from_request(request)
         )
     except ValueError as e:
         raise HTTPException(status_code=400, detail=detalhe_seguro(e))
