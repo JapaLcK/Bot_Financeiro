@@ -13,6 +13,8 @@ segunda barreira.
 `criar_conta_sem_codigo` é a conta da /assinar (funil v3): nasce sem senha e sem
 código, pela rota `POST /auth/quiz/conta` (frontend/routes/quiz_signup.py).
 """
+import logging
+
 from psycopg.types.json import Jsonb
 
 import db_support
@@ -82,7 +84,7 @@ def record_signup_quiz(user_id: int, perfil: str, respostas: dict | None) -> boo
 
 
 def criar_conta_sem_codigo(email: str, telefone: str | None, nome: str | None, source: str) -> dict:
-    """{"estado": "criada", "user_id", "link_code"} | {"estado": "tem_conta", "user_id"}
+    """{"estado": "criada", "user_id"} | {"estado": "tem_conta", "user_id"}
     | {"estado": "cadastro_pendente"} | {"estado": "ocupado"} (outro pedido do mesmo
     e-mail está com a trava: não espera). Só "criada" pode ganhar sessão.
 
@@ -135,5 +137,11 @@ def criar_conta_sem_codigo(email: str, telefone: str | None, nome: str | None, s
         conn.commit()
     if resultado["estado"] == "criada":
         db_support.invalidate_auth_user_cache(resultado["user_id"])
-        resultado["link_code"] = db_support.boas_vindas(create_link_code, email, resultado["user_id"])
+        # A conta já está commitada: falha aqui (o INSERT do link_code) não pode virar
+        # 503, senão o retry cai em `tem_conta` e a conta sem senha fica sem sessão.
+        try:
+            db_support.boas_vindas(create_link_code, email, resultado["user_id"])
+        except Exception as exc:  # só o tipo: a mensagem do psycopg pode trazer e-mail/telefone
+            logging.getLogger(__name__).warning("boas_vindas falhou user=%s: %s", resultado["user_id"],
+                                                type(exc).__name__)
     return resultado

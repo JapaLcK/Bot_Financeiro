@@ -143,6 +143,33 @@ def test_email_novo_cria_conta_sem_senha_logada_e_grava_o_quiz(env):
         ("CompleteRegistration", email, f"{shared.DASHBOARD_URL}/assinar")]
 
 
+def test_link_code_falha_depois_do_commit_conta_nasce_logada_sem_pii(env, monkeypatch, caplog, capsys):
+    """O `create_link_code` roda depois do commit da conta: se ele lançasse até a rota,
+    ela respondia 503 sem sessão e o retry caía em `tem_conta` — conta sem senha presa."""
+    email, tel = _email(), _telefone()
+    chamadas = []
+
+    def explode(user_id, minutes_valid=15):
+        chamadas.append(user_id)
+        raise Exception(f"Failing row ({email}, {tel})")
+
+    monkeypatch.setattr(db_signup_quiz, "create_link_code", explode)
+    client = _navegador()
+    r = _conta_quiz(client, email, whatsapp=tel)
+    assert r.status_code == 200, r.text
+    assert r.json()["estado"] == "criada"
+    assert COOKIES_DE_SESSAO <= _cookies(r)
+    assert _linha(email)["password_hash"] is None
+    assert len(chamadas) == 1
+    assert env.boas_vindas == []
+    saida = caplog.text + "".join(capsys.readouterr()) + r.text
+    assert email not in saida and tel not in saida
+
+    r2 = _conta_quiz(client, email, whatsapp=tel)
+    assert (r2.status_code, r2.json()) == (200, {"estado": "logado"})
+    assert _contagens(email, _linha(email)["user_id"])[0] == 1
+
+
 def test_conversa_conta_me_e_checkout(env, monkeypatch):
     """A conta nova anda sozinha até o checkout: sem senha, sem plano, 200 no Stripe."""
     from tests.test_billing_checkout import _patch_stripe
