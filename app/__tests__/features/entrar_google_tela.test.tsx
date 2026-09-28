@@ -62,7 +62,7 @@ describe("(auth)/entrar — Continuar com Google", () => {
     expect(screen.getByLabelText("Senha").props.value).toBe("");
     expect(screen.getByLabelText("E-mail").props.accessibilityState).toMatchObject({ disabled: true });
     expect(screen.getByLabelText("Senha").props.accessibilityState).toMatchObject({ disabled: true });
-    for (const nome of ["Entrar", "Esqueci a senha", "Criar conta"]) expect(desativado(nome)).toBe(true);
+    for (const nome of ["Entrar", "Esqueci a senha"]) expect(desativado(nome)).toBe(true);
     expect(botao("Continuar com Google").props.accessibilityState).toMatchObject({ busy: true });
 
     await act(async () => {
@@ -134,7 +134,7 @@ describe("(auth)/entrar — Continuar com Google", () => {
       await respirar();
     });
     expect(botao("Continuar com Google").props.accessibilityState).toMatchObject({ busy: false });
-    expect(desativado("Criar conta")).toBe(false);
+    expect(desativado("Esqueci a senha")).toBe(false);
     await expect(lerCredenciais()).resolves.toBeNull();
   });
 

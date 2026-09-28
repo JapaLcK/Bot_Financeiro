@@ -14,7 +14,7 @@ import { GENERICO } from "@/features/auth/entrar";
 import * as authService from "@/services/auth";
 import { FalhaNoCofre, guardarCredenciais, lerCredenciais } from "@/storage/secure";
 
-import { S, falharEscrita, fetchFalso, prepararCaso, resposta, rotear, segurar } from "./auth_apoio";
+import { S, falharEscrita, fetchFalso, prepararCaso, resposta, segurar } from "./auth_apoio";
 import { CORPO, abrir, botao, campo, irAoCodigo, preencher, registers, respirar, rotas, verifies } from "./criar_conta_tela_apoio";
 
 beforeEach(() => {
@@ -24,26 +24,20 @@ beforeEach(() => {
 afterEach(() => jest.restoreAllMocks());
 
 describe("(auth)/criar-conta — tela real", () => {
-  it("T1 — Entrar leva a Criar conta; o link fica desativado enquanto o login envia", async () => {
-    const portao = segurar();
-    rotear({ "/auth/login": async () => { await portao.promessa; return resposta(401, { detail: "x" }); } });
-    renderRouter("./app", { initialUrl: "/entrar" });
-    await waitFor(() => expect(screen).toHavePathname("/entrar"));
-
-    fireEvent.changeText(screen.getByLabelText("E-mail"), "a@x.com");
-    fireEvent.changeText(screen.getByLabelText("Senha"), "s3nha");
-    fireEvent.press(botao("Entrar"));
-    expect(botao("Criar conta").props.accessibilityState).toMatchObject({ disabled: true });
-    await act(async () => {
-      portao.soltar();
-      await respirar();
-    });
+  it("T1 — a Boas-vindas leva a Criar conta, e voltar volta para ela", async () => {
+    renderRouter("./app", { initialUrl: "/" });
+    await waitFor(() => expect(screen).toHavePathname("/boas-vindas"));
 
     fireEvent.press(botao("Criar conta"));
     await waitFor(() => expect(screen).toHavePathname("/criar-conta"));
+    await act(async () => {
+      router.back();
+      await respirar();
+    });
+    await waitFor(() => expect(screen).toHavePathname("/boas-vindas"));
   });
 
-  it("T2 — deep link frio tem /entrar embaixo, e 'Já tem conta? Entrar' volta para lá", async () => {
+  it("T2 — deep link frio tem /boas-vindas embaixo; 'Já tem conta? Entrar' troca por /entrar, que volta para ela", async () => {
     await abrir();
     expect(router.canGoBack()).toBe(true);
 
@@ -52,6 +46,11 @@ describe("(auth)/criar-conta — tela real", () => {
       await respirar();
     });
     await waitFor(() => expect(screen).toHavePathname("/entrar"));
+    await act(async () => {
+      router.back();
+      await respirar();
+    });
+    await waitFor(() => expect(screen).toHavePathname("/boas-vindas"));
   });
 
   it("T3 — com sessão, /criar-conta não abre: cai na tela autenticada", async () => {
@@ -208,9 +207,9 @@ describe("(auth)/criar-conta — tela real", () => {
       textContentType: "newPassword",
       accessibilityHint: "Pelo menos 8 caracteres.",
     });
-    // Os dois primeiros campos da árvore são os de /entrar, montada embaixo na pilha.
+    // Embaixo na pilha fica a /boas-vindas, que não tem campo.
     const ordem = screen.UNSAFE_getAllByType(TextInput).map((c) => c.props.accessibilityLabel as string);
-    expect(ordem).toEqual(["E-mail", "Senha", "Nome", "E-mail", "WhatsApp", "Senha"]);
+    expect(ordem).toEqual(["Nome", "E-mail", "WhatsApp", "Senha"]);
   });
 
   it("T13 — FalhaNoCofre: mensagem, sem formulário nem código, e 'Ir para Entrar'", async () => {

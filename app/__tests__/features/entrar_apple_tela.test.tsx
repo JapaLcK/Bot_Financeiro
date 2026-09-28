@@ -91,7 +91,7 @@ describe("(auth)/entrar — Continuar com a Apple", () => {
     await tocar(APPLE);
     expect(screen.getByLabelText("Senha").props.value).toBe("");
     expect(screen.getByLabelText("E-mail").props.accessibilityState).toMatchObject({ disabled: true });
-    for (const nome of ["Entrar", "Esqueci a senha", "Criar conta", "Continuar com Google"]) expect(desativado(nome)).toBe(true);
+    for (const nome of ["Entrar", "Esqueci a senha", "Continuar com Google"]) expect(desativado(nome)).toBe(true);
     expect(screen.getByLabelText("Entrando com a Apple")).toBeTruthy();
     expect(involucro()).toEqual({ pointerEvents: "none", opacity: 1 });
     await tocar(APPLE);
