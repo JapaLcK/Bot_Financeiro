@@ -1,22 +1,18 @@
-import * as AppleAuthentication from "expo-apple-authentication";
-import { router } from "expo-router";
+import { router, Stack } from "expo-router";
+import { usePreventRemove } from "expo-router/react-navigation";
 import { useState } from "react";
-import { ActivityIndicator, KeyboardAvoidingView, Platform, View } from "react-native";
+import { KeyboardAvoidingView, Platform, View } from "react-native";
 
-import { continuarComApple } from "@/features/auth/apple";
-import { CodigoMfa } from "@/features/auth/CodigoMfa";
-import { CompletarCadastroSocial } from "@/features/auth/CompletarCadastroSocial";
-import { MENSAGEM_ERRO_COFRE, apagaSenhaNaFase, enviar, tentarDeNovo, tocar, type EstadoEntrar } from "@/features/auth/entrar";
-import { continuarComGoogle } from "@/features/auth/google";
+import { BotoesSociais, Ou } from "@/features/auth/BotoesSociais";
+import { apagaSenhaNaFase, enviar, tocar, type EstadoEntrar } from "@/features/auth/entrar";
+import { FasesDaEntrada } from "@/features/auth/FasesDaEntrada";
 import { useSessao } from "@/features/auth/sessao";
-import { Banner } from "@/ui/componentes/Banner";
-import { ALTURA, Button } from "@/ui/componentes/Button";
+import { Button } from "@/ui/componentes/Button";
 import { Card } from "@/ui/componentes/Card";
 import { Input } from "@/ui/componentes/Input";
 import { Screen } from "@/ui/componentes/Screen";
 import { Texto } from "@/ui/componentes/Texto";
-import { useTema } from "@/ui/tema";
-import { espaco, raio } from "@/ui/tokens";
+import { espaco } from "@/ui/tokens";
 
 /**
  * Formulário e fase de código do MFA na MESMA rota (`CodigoMfa`, montado
@@ -26,7 +22,6 @@ import { espaco, raio } from "@/ui/tokens";
  * (`CompletarCadastroSocial`).
  */
 export default function Entrar() {
-  const { cores, esquema } = useTema();
   const sessao = useSessao();
   const avisoInicial = sessao.estado.fase === "anonimo" ? sessao.estado.aviso : undefined;
   const [estado, setEstado] = useState<EstadoEntrar>({ fase: "formulario", aviso: avisoInicial });
@@ -39,6 +34,12 @@ export default function Entrar() {
   // Uma ação por vez: com o login, o Google ou a Apple em voo, nada mais do formulário responde.
   const ocupado = enviando || google || apple;
   const cadastro = estado.fase === "cadastro-social" || estado.fase === "criando-social";
+  // Com uma ação em voo, sair da rota a deixaria terminar sem ninguém para
+  // mostrar o resultado — e a fila de `entrar.ts` é do MÓDULO: a Boas-vindas,
+  // embaixo na pilha, ficaria presa no Google/Apple dela. Mesmo par
+  // `usePreventRemove` + `gestureEnabled` do `criar-conta.tsx`.
+  const emVoo = ocupado || estado.fase === "verificando" || estado.fase === "criando-social";
+  usePreventRemove(emVoo, () => undefined);
   const avisoFormulario = estado.fase === "formulario" ? estado.aviso : undefined;
   // Voltar a digitar é uma tentativa nova: o aviso da anterior sai da tela.
   const digitar = (definir: (v: string) => void) => (v: string) => {
@@ -53,23 +54,14 @@ export default function Entrar() {
 
   return (
     <KeyboardAvoidingView behavior={Platform.OS === "ios" ? "padding" : undefined} style={{ flex: 1 }}>
-      <Screen>
+      <Screen sobCabecalho>
+        <Stack.Screen options={{ gestureEnabled: !emVoo }} />
         <View style={{ gap: espaco.xl, paddingTop: espaco.xxl }}>
           <Texto variante="titulo">
             {cadastro ? "Criar conta" : "Entrar"}
           </Texto>
 
-          {estado.fase === "erro-cofre" ? (
-            <Banner
-              tom="danger"
-              mensagem={estado.mensagem ?? MENSAGEM_ERRO_COFRE}
-              acao={{ rotulo: "Tentar de novo", onPress: () => aplicar(tentarDeNovo()) }}
-            />
-          ) : estado.fase === "mfa" || estado.fase === "verificando" ? (
-            <CodigoMfa estado={estado} autenticar={sessao.autenticar} aplicar={aplicar} />
-          ) : estado.fase === "cadastro-social" || estado.fase === "criando-social" ? (
-            <CompletarCadastroSocial estado={estado} autenticar={sessao.autenticar} aplicar={aplicar} />
-          ) : (
+          <FasesDaEntrada estado={estado} aplicar={aplicar} autenticar={sessao.autenticar}>
             <>
               <Card>
                 <View style={{ gap: espaco.lg }}>
@@ -122,73 +114,11 @@ export default function Entrar() {
                 </View>
               </Card>
 
-              <View style={{ flexDirection: "row", alignItems: "center", gap: espaco.md }}>
-                <View style={{ flex: 1, height: 1, backgroundColor: cores.border }} />
-                <Texto variante="legenda" tom="inkMuted">
-                  ou
-                </Texto>
-                <View style={{ flex: 1, height: 1, backgroundColor: cores.border }} />
-              </View>
+              <Ou />
 
-              <View style={{ gap: espaco.sm }}>
-                <Button
-                  rotulo="Continuar com Google"
-                  variante="secondary"
-                  icone="GoogleLogo"
-                  carregando={google}
-                  desativado={enviando || apple}
-                  onPress={() => {
-                    // G antes de `tocar()`, pelo mesmo motivo do Entrar (B1).
-                    aplicar({ fase: "google" });
-                    void tocar(() => continuarComGoogle(sessao.autenticar), aplicar);
-                  }}
-                />
-                {/* Só iOS: no Android não há Apple (nem botão, nem legenda). Botão do
-                    sistema (decisão do dono): não desenha carregando, então em A
-                    ele fica inerte e o indicador aparece ao lado; em E e G, apagado. */}
-                {Platform.OS === "ios" ? (
-                  <View style={{ flexDirection: "row", alignItems: "center", gap: espaco.sm }}>
-                    <View
-                      testID="apple-involucro"
-                      style={{ flex: 1, opacity: enviando || google ? 0.5 : 1 }}
-                      pointerEvents={ocupado ? "none" : "auto"}
-                    >
-                      <AppleAuthentication.AppleAuthenticationButton
-                        // O nativo não redesenha ao trocar o estilo: `key` pelo tema remonta.
-                        key={esquema}
-                        buttonType={AppleAuthentication.AppleAuthenticationButtonType.CONTINUE}
-                        buttonStyle={
-                          esquema === "dark"
-                            ? AppleAuthentication.AppleAuthenticationButtonStyle.WHITE
-                            : AppleAuthentication.AppleAuthenticationButtonStyle.WHITE_OUTLINE
-                        }
-                        cornerRadius={raio.md}
-                        style={{ height: ALTURA.M }}
-                        onPress={() => {
-                          // A antes de `tocar()`, pelo mesmo motivo do Entrar (B1).
-                          aplicar({ fase: "apple" });
-                          void tocar(() => continuarComApple(sessao.autenticar), aplicar);
-                        }}
-                      />
-                    </View>
-                    {apple ? <ActivityIndicator color={cores.ink} accessibilityLabel="Entrando com a Apple" /> : null}
-                  </View>
-                ) : null}
-              </View>
-
-              <View style={{ alignItems: "center" }}>
-                <Texto variante="legenda" tom="inkMuted">
-                  Não tem conta?
-                </Texto>
-                <Button
-                  rotulo="Criar conta"
-                  variante="ghost"
-                  desativado={ocupado}
-                  onPress={() => router.push("/criar-conta")}
-                />
-              </View>
+              <BotoesSociais estado={estado} aplicar={aplicar} autenticar={sessao.autenticar} bloqueado={enviando} />
             </>
-          )}
+          </FasesDaEntrada>
         </View>
       </Screen>
     </KeyboardAvoidingView>

@@ -51,10 +51,10 @@ describe("_layout", () => {
     estadoDoEsquema.valor = "light";
   });
 
-  it("em produção (__DEV__=false), sem sessão: /_ds não existe, vai para /entrar", async () => {
+  it("em produção (__DEV__=false), sem sessão: /_ds não existe, vai para /boas-vindas", async () => {
     global.__DEV__ = false;
     renderRouter("./app", { initialUrl: "/_ds" });
-    await waitFor(() => expect(screen).toHavePathname("/entrar"));
+    await waitFor(() => expect(screen).toHavePathname("/boas-vindas"));
   });
 
   it("em dev (__DEV__=true) /_ds abre o catálogo", async () => {
@@ -63,15 +63,15 @@ describe("_layout", () => {
     await waitFor(() => expect(screen).toHavePathname("/_ds"));
   });
 
-  it("erro ao carregar a fonte não trava o app: a tela de Entrar ainda renderiza", async () => {
+  it("erro ao carregar a fonte não trava o app: a Boas-vindas ainda renderiza", async () => {
     global.__definirEstadoDaFonte({ carregado: false, erro: new Error("fonte falhou") });
     renderRouter("./app", { initialUrl: "/" });
-    await waitFor(() => expect(screen).toHavePathname("/entrar"));
+    await waitFor(() => expect(screen).toHavePathname("/boas-vindas"));
     // Sem isto, a mutação `if (!fontesCarregadas)` (tirando `&& !erroFontes`)
     // passa verde: `screen.toJSON()` nunca é `null` mesmo com o app travado na
     // View de espera (o `SafeAreaProvider` do `ExpoRoot` garante isso), então
-    // só o CONTEÚDO da tela de Entrar prova que ela montou de verdade.
-    expect(screen.getByText("E-mail")).toBeTruthy();
+    // só o CONTEÚDO da Boas-vindas prova que ela montou de verdade.
+    expect(screen.getByText("Sua grana. Tudo mais claro.")).toBeTruthy();
   });
 
   it("enquanto a fonte carrega, mostra a View de espera na cor do tema claro — não a tela de baixo, e não null", () => {
@@ -102,9 +102,9 @@ describe("_layout", () => {
   });
 
   describe("sessão decide a rota", () => {
-    it("cold start sem sessão no cofre: vai para /entrar", async () => {
+    it("cold start sem sessão no cofre: vai para /boas-vindas", async () => {
       renderRouter("./app", { initialUrl: "/" });
-      await waitFor(() => expect(screen).toHavePathname("/entrar"));
+      await waitFor(() => expect(screen).toHavePathname("/boas-vindas"));
     });
 
     it("cold start com sessão no cofre: fica em /", async () => {
@@ -140,14 +140,14 @@ describe("_layout", () => {
       expect(screen.getByText("Sua sessão expirou. Entre de novo.")).toBeTruthy();
     });
 
-    it("Sair leva de volta a /entrar com o cofre vazio", async () => {
+    it("N5 — Sair leva à /boas-vindas com o cofre vazio", async () => {
       await guardarCredenciais(S);
       renderRouter("./app", { initialUrl: "/" });
       await waitFor(() => expect(screen.getByText("Olá, S")).toBeTruthy());
 
       await act(async () => fireEvent.press(screen.getByRole("button", { name: "Sair" })));
 
-      await waitFor(() => expect(screen).toHavePathname("/entrar"));
+      await waitFor(() => expect(screen).toHavePathname("/boas-vindas"));
       await expect(lerCredenciais()).resolves.toBeNull();
     });
   });
