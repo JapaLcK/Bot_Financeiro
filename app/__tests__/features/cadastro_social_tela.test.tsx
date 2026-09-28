@@ -59,8 +59,10 @@ describe("(auth)/entrar — cadastro pelo Google (C/K)", () => {
     await irAoCadastro();
     expect(screen).toHavePathname("/entrar");
     expect(screen.getAllByText("Criar conta")).toHaveLength(2); // o título e o botão
-    expect(campo("E-mail").props.value).toBe(PENDENTE.email);
-    expect(campo("E-mail").props.editable).toBe(false);
+    // Só leitura é `Texto` (uma linha, letra que encolhe), não `TextInput`: o
+    // leitor de tela lê o valor pelo `accessibilityValue`.
+    expect(campo("E-mail").type).toBe("Text");
+    expect(campo("E-mail").props.accessibilityValue).toEqual({ text: PENDENTE.email });
     expect(campo("Nome").props.value).toBe(PENDENTE.name_hint);
     expect(campo("WhatsApp").props.value).toBe("");
     expect(screen.getByText(LEGENDA_WHATSAPP)).toBeTruthy();
@@ -187,8 +189,10 @@ describe("(auth)/entrar — cadastro pela Apple (C/K)", () => {
   it("C — copy da Apple, e-mail relay só leitura com a legenda, nome sugerido", async () => {
     await irAoCadastroApple();
     expect(screen.getByText(/^Sua conta Apple ainda não tem PigBank/)).toBeTruthy();
-    expect(campo("E-mail").props.value).toBe(PENDENTE_APPLE.email);
-    expect(campo("E-mail").props.editable).toBe(false);
+    // Só leitura é `Texto` (uma linha, letra que encolhe), não `TextInput`: o
+    // leitor de tela lê o valor pelo `accessibilityValue`.
+    expect(campo("E-mail").type).toBe("Text");
+    expect(campo("E-mail").props.accessibilityValue).toEqual({ text: PENDENTE_APPLE.email });
     expect(screen.getByText(LEGENDA_RELAY)).toBeTruthy();
     expect(campo("Nome").props.value).toBe(PENDENTE_APPLE.name_hint);
   });
