@@ -93,7 +93,8 @@ def criar_conta_sem_codigo(email: str, telefone: str | None, nome: str | None, s
     e o `confirm` fundia. Aqui, sob a trava do e-mail (a mesma que o register toma
     para gravar o código), numa transação só: conta existente → `tem_conta`; código
     de register vivo (com senha) → `cadastro_pendente`, sem tocar nele; senão o
-    INSERT que só cria (`inserir_conta_nova`).
+    INSERT que só cria (`inserir_conta_nova`). Se a sessão falhar depois, a rota
+    desfaz a conta com `desfazer_conta_sem_codigo`.
     """
     email = email.strip().lower()
     email_hash = hash_pii_optional(email, kind="email")
@@ -131,6 +132,9 @@ def criar_conta_sem_codigo(email: str, telefone: str | None, nome: str | None, s
                 phone_e164=db_support.telefone_livre(cur, telefone), display_name=nome, source=source,
             )
             resultado.update(estado="criada" if criou else "tem_conta", user_id=user_id)
+            if criou:  # a PK da linha nova: é ela que `desfazer_conta_sem_codigo` apaga
+                cur.execute("select id from auth_accounts where email_hash = %s", (email_hash,))
+                resultado["conta_id"] = int(cur.fetchone()["id"])
 
     with get_conn() as conn:
         db_support.gravar_descartando_telefone_disputado(conn, _gravar, telefone)
@@ -145,3 +149,32 @@ def criar_conta_sem_codigo(email: str, telefone: str | None, nome: str | None, s
             logging.getLogger(__name__).warning("boas_vindas falhou user=%s: %s", resultado["user_id"],
                                                 type(exc).__name__)
     return resultado
+
+
+def desfazer_conta_sem_codigo(user_id: int, conta_id: int) -> bool:
+    """Apaga a conta que `criar_conta_sem_codigo` acabou de criar (a linha `conta_id`
+    dela, não qualquer uma do `user_id`: `auth_accounts` não tem unique em `user_id`)
+    e a sessão já emitida desde então, quando a sessão falha no meio: sem isto o retry
+    cai em `tem_conta`. Sem corte de tempo (a falha pode vir depois de minutos na fila
+    do pool); a guarda é a linha seguir sem senha e sem plano.
+    `users`, `user_identities` e o link_code ficam: o id é o mesmo na recriação."""
+    with get_conn() as conn, conn.cursor() as cur:
+        cur.execute(
+            """
+            delete from auth_accounts
+             where id = %s and user_id = %s and password_hash is null and plan = 'free'
+               and plan_expires_at is null
+            returning created_at
+            """,
+            (int(conta_id), int(user_id)),
+        )
+        conta = cur.fetchone()
+        if conta:
+            cur.execute("delete from auth_refresh_tokens where user_id = %s and issued_at >= %s",
+                        (int(user_id), conta["created_at"]))
+            cur.execute("delete from auth_sessions where user_id = %s and created_at >= %s",
+                        (int(user_id), conta["created_at"]))
+        conn.commit()
+    if conta:
+        db_support.invalidate_auth_user_cache(user_id)
+    return bool(conta)

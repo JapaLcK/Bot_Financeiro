@@ -30,7 +30,7 @@ from core.services.email_service import send_account_exists_notice, send_verific
 from db.reports import (
     AccountAlreadyExistsError, create_email_verification, get_auth_user, quiz_signup_pendente,
 )
-from db.signup_quiz import criar_conta_sem_codigo
+from db.signup_quiz import criar_conta_sem_codigo, desfazer_conta_sem_codigo
 from frontend.routes.shared import DASHBOARD_URL, signup_source_from_request
 from utils_phone import normalize_phone_e164
 
@@ -219,8 +219,18 @@ async def quiz_conta(request: Request, response: Response, body: QuizContaBody,
         return {"estado": result["estado"]}
 
     user_id = int(result["user_id"])
-    credenciais = await _sessao_de_conta_nova(
-        request, response, background_tasks, user_id=user_id, email=email,
-        origem_url=f"{DASHBOARD_URL}/assinar",
-    )
+    try:
+        credenciais = await _sessao_de_conta_nova(
+            request, response, background_tasks, user_id=user_id, email=email,
+            origem_url=f"{DASHBOARD_URL}/assinar",
+        )
+    except Exception as exc:
+        # Conta commitada sem sessão: desfaz, e o retry recria e sai logado. O 503 não
+        # leva os Set-Cookie que já estejam no `response` (test_sessao_falha_*).
+        await _registra_falha("sessao", exc)
+        try:
+            await asyncio.to_thread(desfazer_conta_sem_codigo, user_id, result["conta_id"])
+        except Exception as exc2:
+            await _registra_falha("desfazer", exc2)
+        raise HTTPException(status_code=503, detail="Não deu para criar a conta. Tente de novo.")
     return {"estado": "criada", "user_id": user_id, **credenciais}

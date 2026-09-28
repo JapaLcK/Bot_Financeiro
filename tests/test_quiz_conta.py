@@ -170,6 +170,125 @@ def test_link_code_falha_depois_do_commit_conta_nasce_logada_sem_pii(env, monkey
     assert _contagens(email, _linha(email)["user_id"])[0] == 1
 
 
+def _sessoes_e_refresh(user_id: int) -> tuple[int, int]:
+    with db.get_conn() as conn, conn.cursor() as cur:
+        cur.execute("select count(*) as n from auth_sessions where user_id = %s", (user_id,))
+        sessoes = cur.fetchone()["n"]
+        cur.execute("select count(*) as n from auth_refresh_tokens where user_id = %s", (user_id,))
+        refresh = cur.fetchone()["n"]
+        conn.commit()
+    return sessoes, refresh
+
+
+@pytest.mark.parametrize("onde", [
+    "create_session", "create_refresh_token",
+    # Nenhuma `_apply_*` lança em produção (try/except interno); o patch só simula uma
+    # falha depois de os cookies estarem no `response`: o 503 não pode levá-los.
+    pytest.param("_apply_referral_attribution", id="depois_dos_cookies"),
+])
+def test_sessao_falha_depois_do_commit_desfaz_a_conta_e_o_retry_loga(env, monkeypatch, onde):
+    """A conta sem senha já está commitada quando a sessão falha: sem desfazer, a rota
+    dava 500 sem sessão e o retry caía em `tem_conta` — conta presa."""
+    import core.refresh_tokens as refresh_tokens
+    alvo = refresh_tokens if onde == "create_refresh_token" else dashboard
+
+    def explode(*_a, **_kw):
+        raise RuntimeError("banco caiu")
+
+    email, client = _email(), _navegador()
+    uid = int(db.get_or_create_canonical_user("email", email))
+    with monkeypatch.context() as m:
+        m.setattr(alvo, onde, explode)
+        r = _conta_quiz(client, email)
+    assert r.status_code == 503, r.text
+    assert not (_cookies(r) & COOKIES_DE_SESSAO), r.headers.get_list("set-cookie")
+    assert _linha(email) is None
+    assert _sessoes_e_refresh(uid) == (0, 0)
+
+    r = _conta_quiz(client, email)
+    assert (r.status_code, r.json()["estado"]) == (200, "criada"), r.text
+    assert COOKIES_DE_SESSAO <= _cookies(r)
+    assert _linha(email)["password_hash"] is None and int(_linha(email)["user_id"]) == uid
+
+
+def test_sessao_e_desfazer_falham_503_sem_pii(env, monkeypatch, caplog, capsys):
+    email, tel = _email(), _telefone()
+
+    def explode(*_a, **_kw):
+        raise Exception(f"Failing row ({email}, {tel})")
+
+    monkeypatch.setattr(dashboard, "create_session", explode)
+    monkeypatch.setattr(quiz_signup, "desfazer_conta_sem_codigo", explode)
+    r = _conta_quiz(_navegador(), email, whatsapp=tel)
+    assert r.status_code == 503, r.text
+    assert not (_cookies(r) & COOKIES_DE_SESSAO)
+    assert [a[2].split(":")[0] for a, _ in env.eventos] == ["sessao", "desfazer"]
+    saida = caplog.text + "".join(capsys.readouterr()) + str(env.eventos) + r.text
+    assert email not in saida and tel not in saida
+
+
+def _conta_id(email: str) -> int:
+    with db.get_conn() as conn, conn.cursor() as cur:
+        cur.execute("select id from auth_accounts where email_hash = %s", (hash_pii_optional(email, kind="email"),))
+        conta_id = int(cur.fetchone()["id"])
+        conn.commit()
+    return conta_id
+
+
+def _conta_sem_senha(email: str) -> tuple[int, int]:
+    r = db_signup_quiz.criar_conta_sem_codigo(email, None, None, "web")
+    assert r["conta_id"] == _conta_id(email)
+    return int(r["user_id"]), r["conta_id"]
+
+
+@pytest.mark.parametrize("conta", ["com_senha", "plano_pago", "com_expiracao", "conta_id_de_outra"])
+def test_desfazer_so_apaga_a_propria_conta_sem_senha_e_sem_plano(env, conta):
+    email, outra = _email(), _email()
+    if conta == "com_senha":
+        uid = _conta_com_senha(email, _telefone())
+        conta_id = _conta_id(email)
+    else:
+        uid, conta_id = _conta_sem_senha(email)
+    if conta == "conta_id_de_outra":  # o id existe, sem senha e sem plano, mas é de outro usuário
+        _, conta_id = _conta_sem_senha(outra)
+    elif conta != "com_senha":
+        muda = {"plano_pago": "plan = 'plus'",
+                "com_expiracao": "plan_expires_at = now() + interval '30 days'"}[conta]
+        with db.get_conn() as conn, conn.cursor() as cur:
+            cur.execute(f"update auth_accounts set {muda} where user_id = %s", (uid,))
+            conn.commit()
+    antes = (_linha(email), _linha(outra))
+    assert db_signup_quiz.desfazer_conta_sem_codigo(uid, conta_id) is False
+    assert (_linha(email), _linha(outra)) == antes
+
+
+def test_desfazer_apaga_mesmo_quando_a_sessao_demora_a_falhar(env):
+    """Sem corte de tempo: a sessão pode falhar minutos depois (fila do pool)."""
+    email = _email()
+    uid, conta_id = _conta_sem_senha(email)
+    with db.get_conn() as conn, conn.cursor() as cur:
+        cur.execute("update auth_accounts set created_at = now() - interval '2 minutes' where id = %s",
+                    (conta_id,))
+        conn.commit()
+    assert db_signup_quiz.desfazer_conta_sem_codigo(uid, conta_id) is True
+    assert _linha(email) is None
+
+
+def test_desfazer_apaga_so_a_conta_e_as_sessoes_do_proprio_user_id(env):
+    """Positivo e isolamento: a recém-criada some com as sessões; a vizinha, também
+    recém-criada e logada, fica inteira."""
+    email, vizinha = _email(), _email()
+    assert _conta_quiz(_navegador(), email).json()["estado"] == "criada"
+    assert _conta_quiz(_navegador(), vizinha).json()["estado"] == "criada"
+    uid, uid_vizinha = int(_linha(email)["user_id"]), int(_linha(vizinha)["user_id"])
+    antes_vizinha = (_linha(vizinha), _sessoes_e_refresh(uid_vizinha))
+    assert _sessoes_e_refresh(uid) == (1, 1)
+
+    assert db_signup_quiz.desfazer_conta_sem_codigo(uid, _conta_id(email)) is True
+    assert _linha(email) is None and _sessoes_e_refresh(uid) == (0, 0)
+    assert (_linha(vizinha), _sessoes_e_refresh(uid_vizinha)) == antes_vizinha
+
+
 def test_conversa_conta_me_e_checkout(env, monkeypatch):
     """A conta nova anda sozinha até o checkout: sem senha, sem plano, 200 no Stripe."""
     from tests.test_billing_checkout import _patch_stripe
