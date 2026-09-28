@@ -192,6 +192,23 @@ for (const [nome, responde] of [
   });
 }
 
+test("não refaz /me ao voltar para a aba depois da tela de erro", async () => {
+  const ctx = await contexto();
+  await ctx.route("**/api/v2/me", erroDoMe(RESPOSTAS.erros["500"]));
+  const { page, n } = await abrir(ctx);
+  await telaDeErro(page);
+
+  const novoPedido = page.waitForRequest((r) => new URL(r.url()).pathname === "/api/v2/me", { timeout: 1200 })
+    .then(() => true, () => false);
+  await page.evaluate(() => window.dispatchEvent(new Event("visibilitychange")));
+  const refez = await novoPedido;
+  const pedidos = n.api;
+  await ctx.close();
+
+  assert.equal(refez, false, "voltar para a aba não deve iniciar outra rodada de tentativas");
+  assert.equal(pedidos, 3);
+});
+
 // O TanStack pausa query e retry quando o navegador avisa `offline` (networkMode "online",
 // o padrão); o meQuery usa "always" para a rede caída virar a tela de erro, não um
 // "Carregando…" eterno.

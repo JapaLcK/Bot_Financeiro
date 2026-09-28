@@ -40,6 +40,8 @@ export const meQuery = {
   queryKey: ["me"],
   queryFn: ({ signal }: { signal: AbortSignal }) => apiGet("/me", signal),
   staleTime: Infinity,
+  // Após o portão mostrar erro, foco de aba não deve iniciar outra consulta; a recuperação é manual.
+  refetchOnWindowFocus: false,
   // "always": no padrão ("online") o evento `offline` pausa a query e o retry, e o portão
   // fica em "Carregando…" para sempre, sem erro nem Recarregar.
   networkMode: "always" as const,
