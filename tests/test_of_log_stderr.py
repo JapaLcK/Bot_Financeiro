@@ -43,7 +43,6 @@ from conftest import promote_to_pro
 from core.services import plan_service
 from db.connection import get_conn
 from test_of_item_ownership import _auth, eventos  # noqa: F401 — fixture
-from test_log_falha_user_id import coletor  # noqa: F401 — fixture
 from test_of_connection_state import ITEM_SAUDAVEL, _conta_pluggy, _mock_pluggy, _tx_pluggy
 from test_of_log_dono_coluna import HOST, _de, _host_fora, _levanta
 from test_of_refresh_schedule import _conexao
@@ -141,8 +140,18 @@ def test_aviso_do_timeout_nao_paga_o_espelho(user_id, monkeypatch, espelho_lento
     assert _INFRA not in err, err
 
 
-def test_aviso_do_registry_nao_paga_o_espelho(user_id, monkeypatch, espelho_lento, capsys,
-                                              webhook_pluggy):
+def test_aviso_do_registry_vai_ao_stderr_sem_espelho_e_sem_uid(
+        user_id, monkeypatch, eventos, webhook_pluggy, capsys):
+    """O espelho do `_DashboardHandler` real anota E dorme 1,5s (tabela travada):
+    um `logging.warning` no caminho aparece na lista e estoura o 1s. O dono fica
+    na coluna do evento do `_log_com_teto` (o `eventos` volta na hora)."""
+    espelhados: list[dict] = []
+
+    def _espelho_lento(level, **kw):
+        espelhados.append(kw)
+        time.sleep(1.5)
+    monkeypatch.setattr(observability, "log_system_event_sync", _espelho_lento)
+    observability._configure_root_logger()
     promote_to_pro(user_id)
     _mock_item(monkeypatch, user_id)
     monkeypatch.setattr(of_routes, "register_item", _levanta(psycopg.OperationalError(HOST)))
@@ -155,35 +164,16 @@ def test_aviso_do_registry_nao_paga_o_espelho(user_id, monkeypatch, espelho_lent
         dt = time.monotonic() - t0
         assert r.status_code == 200, r.text
         assert dt < 1.0, f"o aviso do registry pagou o espelho síncrono: {dt:.2f}s"
+        assert not [e for e in espelhados if "of_item_registry_failed" in e.get("message", "")], \
+            espelhados
         err = capsys.readouterr().err
         assert "of_item_registry_failed item_id=i657-reg motivo=OperationalError" in err, err
-        assert str(user_id) not in err, err
-        _host_fora(err)
-    finally:
-        db.disconnect_open_finance_connection(user_id)
-        _limpa_item("i657-reg")
-
-
-def test_aviso_local_do_rastro_vai_ao_stderr_sem_espelho_e_sem_uid(
-        user_id, monkeypatch, coletor, eventos, webhook_pluggy, capsys):
-    # Veio de `test_of_log_dono_coluna.py`. O dono fica na coluna do `_log_com_teto`.
-    promote_to_pro(user_id)
-    _mock_item(monkeypatch, user_id)
-    monkeypatch.setattr(of_routes, "register_item", _levanta(psycopg.OperationalError(HOST)))
-    client = TestClient(dashboard.app)
-    try:
-        r = client.post(f"/open-finance/{user_id}/pluggy-item",
-                        json={"item": {"id": "i541-rastro"}}, headers=_auth(client, user_id))
-        assert r.status_code == 200, r.text
-        assert not [g for g in coletor if "of_item_registry_failed" in g["message"]], coletor
-        err = capsys.readouterr().err
-        assert "of_item_registry_failed item_id=i541-rastro motivo=OperationalError" in err, err
         assert str(user_id) not in err, err
         _host_fora(err)
         assert _de(eventos, "of_item_registry_failed")[0]["user_id"] == user_id, eventos
     finally:
         db.disconnect_open_finance_connection(user_id)
-        _limpa_item("i541-rastro")
+        _limpa_item("i657-reg")
 
 
 # ── 3. prints do tick de refresh e de falha ───────────────────────────────────
@@ -298,8 +288,8 @@ def _tick(mp, uid, fk):
     (_caixinha, "[pluggy_sync] caixinha auto-import: "),
     (_agentes, "[pluggy_sync] agents hook: "),
     (_tick, "[open_finance_refresh] erro: "),
-], ids=["hold_757", "lote_784", "mark_802", "hook_user_837", "caixinha_513",
-        "agentes_552", "tick_1782"])
+], ids=["hold_aggregate_emails", "sync_item_contido", "mark_sync_result", "hook_user",
+        "caixinha", "agents_hook", "tick_erro"])
 def test_print_de_falha_nao_leva_o_texto_da_excecao(user_id, monkeypatch, capsys,
                                                      roda, prefixo):
     fk = _fk_real()

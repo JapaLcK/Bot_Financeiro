@@ -274,7 +274,7 @@ def test_item_id_sobrevive_ao_diagnostico_que_nao_grava(
 
     Desde a #657 o rastro do teto estourado também traz o `item_id`, então este
     caso NÃO discrimina o aviso local; quem discrimina é
-    `test_of_log_stderr.py::test_aviso_local_do_rastro_vai_ao_stderr_sem_espelho_e_sem_uid`.
+    `test_of_log_stderr.py::test_aviso_do_registry_vai_ao_stderr_sem_espelho_e_sem_uid`.
     """
     import asyncio as _asyncio
 

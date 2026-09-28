@@ -189,7 +189,8 @@ def test_sync_que_cai_em_fk_real_nao_grava_uid_com_coluna_nula(monkeypatch):
     assert str(alheio) not in falha[0]["message"], falha
 
 
-# ── logging espelhado pelo `_DashboardHandler` (1396; o 1856 foi p/ test_of_log_stderr) ──
+# ── logging espelhado pelo `_DashboardHandler` (`_msg_sem_open_finance`; o aviso do
+# `/pluggy-item` foi para `test_of_log_stderr.py`) ──
 
 def test_falha_na_copia_do_402_espelha_com_dono_e_sem_traceback(user_id, monkeypatch, coletor):
     # Plano sem vaga de OF (`of_banks_max=0`) com acesso ao app: sem plano nenhum

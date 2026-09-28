@@ -1461,7 +1461,7 @@ def test_log_diz_QUAL_falha_e_nao_so_lock_ocupado(
     assert "restante_ms_antes_do_log" in retry, retry
 
 
-def test_causa_e_a_da_ultima_tentativa(user_id, monkeypatch):
+def test_causa_e_a_da_ultima_tentativa(user_id, monkeypatch, capsys):
     """Infra na 1ª tentativa + lock ocupado na 2ª: o log FINAL diz "lock", não a
     infra — e a infra fica registrada no log do retry.
 
@@ -1474,7 +1474,9 @@ def test_causa_e_a_da_ultima_tentativa(user_id, monkeypatch):
     linha logo depois do `to_thread`) → a infra da 1ª tentativa gruda e o log
     final passa a acusar `TooManyConnections`, vermelho na última asserção. O
     mesmo vale para o `motivo` (#657): zerar só `causa` e não `causa_tipo` → o
-    `motivo` final fica `TooManyConnections`, vermelho na asserção dele."""
+    `motivo` final fica `TooManyConnections`, vermelho na asserção dele. Idem
+    para o `sqlstate` do stderr: zerar `causa_tipo` e não `causa_sqlstate` → o
+    print final sai com `sqlstate=53300`, vermelho na asserção do stderr."""
     eventos = []
     tentativas = []
 
@@ -1507,6 +1509,8 @@ def test_causa_e_a_da_ultima_tentativa(user_id, monkeypatch):
     assert "lock do item ocupado" in final[1], final
     assert retry[2]["motivo"] == "TooManyConnections", retry
     assert final[2]["motivo"] == "lock_ocupado", final
+    err = capsys.readouterr().err
+    assert "of_reconnect_lock_timeout item_id=item-mix motivo=lock_ocupado sqlstate=None" in err, err
 
 
 def test_causa_sobrevive_ao_log_system_event_que_nao_grava(user_id, monkeypatch, capsys):
@@ -1521,9 +1525,12 @@ def test_causa_sobrevive_ao_log_system_event_que_nao_grava(user_id, monkeypatch,
     exemplar: lá o `_log` stub SEMPRE grava, então ele prova composição, não
     gravação. Aqui o stub modela o desfecho real (engole e não grava nada).
 
-    CONTROLE NEGATIVO: apagar o `print(..., file=sys.stderr)` do
-    `_grava_reconexao` → vermelho na asserção do stderr, porque não sobra canal
-    nenhum com a causa (era `logging` até a #657, D2).
+    CONTROLE NEGATIVO: apagar OS DOIS `print(..., file=sys.stderr)` do
+    `_grava_reconexao` (retry e timeout) → vermelho na asserção do stderr, porque
+    não sobra canal nenhum com a causa (era `logging` até a #657, D2). Apagar só
+    o do timeout deixa este caso VERDE (o do retry já traz item e causa); quem
+    prende o do timeout sozinho é
+    `tests/test_of_log_stderr.py::test_aviso_do_timeout_nao_paga_o_espelho`.
     CONTROLE POSITIVO: o 503 continua saindo com o log mudo — o diagnóstico não
     pode virar um segundo modo de falha."""
 

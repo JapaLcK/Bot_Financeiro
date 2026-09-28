@@ -138,7 +138,7 @@ select status, status_reason, last_sync_at, reconnected_at, health->>'item_statu
 | B10 | sync concluído com o dashboard aberto | — | `open_finance_synced` chega e o dashboard repinta sozinho |
 | B11 | qualquer um dos acima | `settings.html` **não** abre WebSocket nenhum (hoje: zero ocorrências de `new WebSocket`) | — |
 | B12 | reconectar **enquanto** um sync escreve | a reconexão espera o `pluggy_item_lock`; só devolve 503 se as duas tentativas falharem | erro só no 503, e o mesmo POST reaproveita |
-| B13 | frequência real do 503 de B12 | contar `of_reconnect_lock_timeout` nos logs por uma semana | — |
+| B13 | frequência real do 503 de B12 | contar as linhas de `system_event_logs` com `event_type='of_reconnect_lock_timeout'` por uma semana (desde a #657 o aviso local vai ao stderr e não gera mais a linha `logger.warning` espelhada, então contar pelo texto dá a metade) | — |
 | B14 | que status a Pluggy JÁ nos devolveu | `select distinct status from open_finance_connections where provider='"'"'pluggy'"'"'` — leitura pura | — |
 | B15 | existe conector com QR / autorização por dispositivo na base? | DOIS campos, não um: `WAITING_USER_ACTION` no resultado de B14 **e** `select distinct health->>'execution_status' from open_finance_connections where provider='pluggy'` procurando `USER_AUTHORIZATION_PENDING` | decide o tamanho real da mudança da Onda 3 |
 
