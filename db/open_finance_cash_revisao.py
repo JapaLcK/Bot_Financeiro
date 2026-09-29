@@ -6,7 +6,7 @@ from decimal import Decimal
 
 from psycopg.types.json import Jsonb
 
-from .open_finance_cash import INTERNOS, RESERVADO_SQL, _do_usuario, _muda_status, _quando
+from .open_finance_cash import INTERNOS, _do_usuario, _muda_status, _quando
 
 
 def _corrige(cur, user_id, link, t) -> int:
@@ -41,19 +41,15 @@ def _candidatos(cur, user_id, kind, valor, dia, proprio=None) -> list[dict]:
     (`_candidato_manual`) e a revalidação (`casa_manual`) leem daqui: receita
     (saque) / despesa (depósito) manual, não interna, fora do débito recorrente
     e de fusão, mexendo na Carteira no sentido do dinheiro, mesmo valor ±3 dias,
-    sem reserva de outro vínculo nem pendência no conciliador comum (a que o
-    próprio dinheiro reserva não é acionável lá: `ACTIONABLE_PENDING_SQL`).
+    sem reserva de outro vínculo nem pendência ACIONÁVEL no conciliador comum
+    (`ACTIONABLE_PENDING_SQL`: a de conta pausada/apagada/não-BRL não prende o
+    manual, e a que o próprio dinheiro reserva não é acionável lá).
     Com `interno`: o manual interno com o mesmo resto não vira par, mas impede
     o crédito automático — o saque não se prova novo e vira pergunta."""
-    from .open_finance import _find_manual_candidates
+    from .open_finance import ACTIONABLE_PENDING_SQL, _find_manual_candidates, merged_wallet_delta_params
     tipo = "despesa" if kind == "deposito" else "receita"
-    cur.execute(f"""select o.match_launch_id from open_finance_transactions o
-                      join open_finance_accounts a on a.id = o.account_id
-                      join open_finance_connections c on c.id = a.connection_id
-                      join launches l on l.id = o.match_launch_id
-                     where c.user_id = %s and o.reconciliation_status = 'pending'
-                       and not {RESERVADO_SQL.format(t="l")}""", (user_id,))
-    usados = {r["match_launch_id"] for r in cur.fetchall()}
+    cur.execute(f"select id from ({ACTIONABLE_PENDING_SQL}) p", merged_wallet_delta_params(user_id))
+    usados = {r["id"] for r in cur.fetchall()}
     return [c for c in _find_manual_candidates(cur, user_id, tipo, abs(Decimal(str(valor))), dia, proprio, True)
             if c["source"] == "manual" and not c["of_recurring"] and c["id"] not in usados
             and c["delta_conta"] is not None

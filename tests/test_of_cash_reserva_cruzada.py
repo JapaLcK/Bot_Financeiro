@@ -164,3 +164,33 @@ def test_e_o_mesmo_recusa_debito_recorrente_ja_perguntado(caixa):
     r = answer_link(uid, links(uid)[0]["id"], "same")
     assert (r["changed"], r.get("reason")) == (False, "MANUAL_NOT_AVAILABLE")
     assert not _interno(x)
+
+
+@pytest.mark.parametrize("pausado", [True, False], ids=["pix_pausado", "pix_ativo"])
+def test_so_pendencia_acionavel_prende_o_manual(caixa, pausado):
+    """O Pix pendente no "recebi 200" está numa conexão hoje pausada: a pendência
+    não é acionável (`ACTIONABLE_PENDING_SQL`) e não prende o manual — o saque
+    de outra conexão pergunta "é o mesmo?" em vez de creditar sozinho. Casado,
+    a volta da conexão não deixa o Pix confirmar no mesmo manual. Positivo: com
+    a conexão ativa, a pendência continua prendendo e o saque credita."""
+    uid = usuario_pagante()
+    nu = conecta(uid, f"item-nu-{uid}", desde=datetime.now() - timedelta(days=10))
+    sync(nu, uid, [tx("p1", 200, date.today(), **PIX)])
+    x = _recebi(uid)
+    assert _pix(uid)["match_launch_id"] == x
+    if pausado:
+        q("update open_finance_connections set status='PAUSED' where id=%s", (nu,))
+    inter = conecta(uid, f"item-inter-{uid}", desde=datetime.now() - timedelta(days=10), instituicao=77, nome="Inter")
+    sync(inter, uid, [tx("t1", -200, date.today())], numero="5555-0")
+
+    if not pausado:
+        assert [(k["status"], k["manual_launch_id"]) for k in links(uid)] == [("ativo", None)]
+        assert carteira(uid) == Decimal("400")
+        return
+    assert [(k["status"], k["manual_launch_id"]) for k in links(uid)] == [("perguntar_manual", x)]
+    assert answer_link(uid, links(uid)[0]["id"], "same")["changed"]
+    assert _interno(x) and carteira(uid) == Decimal("200")
+    q("update open_finance_connections set status='UPDATED' where id=%s", (nu,))
+    assert _pix(uid)["id"] not in [r["of_tx_id"] for r in list_reconciliations(uid)]
+    with pytest.raises(ValueError, match="ALREADY_LINKED"):
+        confirm_reconciliation(uid, _pix(uid)["id"])

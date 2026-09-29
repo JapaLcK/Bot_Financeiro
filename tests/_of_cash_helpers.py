@@ -43,12 +43,12 @@ def conecta(uid, item, desde=CONECTADO, instituicao=612, nome="Nubank"):
     return conn_id
 
 
-def sync(conn_id, uid, txs, saldo="1000", numero="0001-9", conta="acc-1", corrige=True):
+def sync(conn_id, uid, txs, saldo="1000", numero="0001-9", conta="acc-1", corrige=True, moeda="BRL"):
     """Um ciclo do sync de produção sobre um espelho autoritativo. `corrige=False`
     para antes da correção das sombras (mede o import sozinho)."""
     db.save_open_finance_sync(conn_id, [{
         "provider_account_id": f"{conta}-{conn_id}", "name": "Conta", "type": "BANK",
-        "subtype": "CHECKING_ACCOUNT", "currency": "BRL", "balance": Decimal(saldo),
+        "subtype": "CHECKING_ACCOUNT", "currency": moeda, "balance": Decimal(saldo),
         "raw": {"number": numero}, "transactions": list(txs),
     }])
     db.import_open_finance_launches(uid, conn_id)

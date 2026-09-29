@@ -180,16 +180,22 @@ def reconcile_cash_transfers(cur, user_id) -> int:
         if not cur.fetchone():
             return 0
     from .bank_movements import _lock_user
+    from .open_finance import BANK_ACCOUNTS_SQL
     from .open_finance_cash_revisao import _candidato_manual, _revisa
     _lock_user(cur, user_id)
     ativacao = _activation(cur)
     # ponytail: varre as transações do usuário todo sync (≤1837/conexão); filtrar no SQL se pesar.
-    cur.execute("""select t.*, a.type as account_type, a.raw as account_raw, c.id as connection_id,
-                          a.provider_account_id, c.institution_name, c.created_at as connected_at
+    # Todas as contas contam como janela e 1ª conexão (visto é visto); só as do
+    # saldo consolidado (`BANK_ACCOUNTS_SQL`: BRL, conexão não pausada/apagada)
+    # criam ou revisam vínculo.
+    cur.execute(f"""select t.*, a.type as account_type, a.raw as account_raw, c.id as connection_id,
+                          a.provider_account_id, c.institution_name, c.created_at as connected_at,
+                          e.id is not null as no_escopo
                      from open_finance_transactions t
                      join open_finance_accounts a on a.id = t.account_id
                      join open_finance_connections c on c.id = a.connection_id
-                    where c.user_id = %s order by t.transaction_date, t.id""", (user_id,))
+                     left join ({BANK_ACCOUNTS_SQL}) e on e.id = a.id
+                    where c.user_id = %s order by t.transaction_date, t.id""", (user_id, user_id))
     txs = [dict(r) for r in cur.fetchall()]
     cur.execute("select * from of_cash_links where user_id=%s for update", (user_id,))
     links = {r["tx_key"]: dict(r) for r in cur.fetchall()}
@@ -245,6 +251,8 @@ def reconcile_cash_transfers(cur, user_id) -> int:
 
     mudou = 0
     for t in txs:
+        if not t["no_escopo"]:  # fora do escopo o vínculo existente fica como está (pausar não desfaz)
+            continue
         kind = kind_atual(t)
         chave, duravel = tx_key(t["akey"], t["raw"], t["provider_transaction_id"])
         # Pela transação local primeiro: nome da instituição e número da conta mudam
