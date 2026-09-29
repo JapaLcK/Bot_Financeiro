@@ -46,9 +46,9 @@ def _candidatos(cur, user_id, kind, valor, dia, proprio=None) -> list[dict]:
     manual, e a que o próprio dinheiro reserva não é acionável lá).
     Com `interno`: o manual interno com o mesmo resto não vira par, mas impede
     o crédito automático — o saque não se prova novo e vira pergunta."""
-    from .open_finance import ACTIONABLE_PENDING_SQL, _find_manual_candidates, merged_wallet_delta_params
+    from .open_finance import ACTIONABLE_PENDING_SQL, _find_manual_candidates, actionable_pending_params
     tipo = "despesa" if kind == "deposito" else "receita"
-    cur.execute(f"select id from ({ACTIONABLE_PENDING_SQL}) p", merged_wallet_delta_params(user_id))
+    cur.execute(f"select id from ({ACTIONABLE_PENDING_SQL}) p", actionable_pending_params(cur, user_id))
     usados = {r["id"] for r in cur.fetchall()}
     return [c for c in _find_manual_candidates(cur, user_id, tipo, abs(Decimal(str(valor))), dia, proprio, True)
             if c["source"] == "manual" and not c["of_recurring"] and c["id"] not in usados

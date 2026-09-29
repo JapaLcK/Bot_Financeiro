@@ -66,8 +66,9 @@ def cash_kind(account_type, amount, raw, description) -> str | None:
 
 
 def kind_atual(t) -> str | None:
-    """O tipo que o banco diz AGORA. Declaração bancária confirmada nunca é dinheiro."""
-    if t["reconciliation_status"] == "bank_movement_confirmed":
+    """O tipo que o banco diz AGORA. Linha com dono (declaração, fusão) nunca é dinheiro."""
+    from .reconciliation import FUSED_STATUSES
+    if t["reconciliation_status"] in ("bank_movement_confirmed", *FUSED_STATUSES):
         return None
     return cash_kind(t["account_type"], t["amount"], t["raw"], t["description"])
 
@@ -297,20 +298,26 @@ def reconcile_cash_transfers(cur, user_id) -> int:
     return mudou
 
 
+# SQL + filtro de `cash_internal_tx_ids`: o cursor async (db/reconciliation.py) lê a MESMA regra.
+INTERNOS_SQL = """select k.of_transaction_id, k.status, k.launch_id, t.amount, t.raw, t.description,
+                         t.reconciliation_status, a.type as account_type from of_cash_links k
+                    join open_finance_transactions t on t.id = k.of_transaction_id
+                    join open_finance_accounts a on a.id = t.account_id
+                    join open_finance_connections c on c.id = a.connection_id and c.user_id = k.user_id
+                   where k.user_id=%s and k.status = any(%s)"""
+
+
+def internos_de(rows) -> set:
+    return {r["of_transaction_id"] for r in rows if not _do_usuario(r) or kind_atual(r)}
+
+
 def cash_internal_tx_ids(cur, user_id) -> set:
-    """Transações OF cujo lado do banco fica fora dos relatórios. Os três sites
-    que classificam a sombra (import, correção, desfazer fusão) consultam isto.
-    Sem o switch de propósito: desligar não reinterpreta o que já foi gravado.
-    Decisão do usuário (desfeito) só esconde o lado do banco enquanto o banco
-    disser que é dinheiro: virou compra, conta como compra — sem recreditar."""
-    cur.execute("""select k.of_transaction_id, k.status, k.launch_id, t.amount, t.raw, t.description,
-                          t.reconciliation_status, a.type as account_type
-                     from of_cash_links k
-                     join open_finance_transactions t on t.id = k.of_transaction_id
-                     join open_finance_accounts a on a.id = t.account_id
-                     join open_finance_connections c on c.id = a.connection_id and c.user_id = k.user_id
-                    where k.user_id=%s and k.status = any(%s)""", (user_id, list(INTERNOS)))
-    return {r["of_transaction_id"] for r in cur.fetchall() if not _do_usuario(r) or kind_atual(r)}
+    """Transações OF cujo lado do banco fica fora dos relatórios e do conciliador
+    comum. Sem o switch de propósito: desligar não reinterpreta o que já foi
+    gravado. Decisão do usuário (desfeito) só esconde o lado do banco enquanto o
+    banco disser que é dinheiro: virou compra, conta como compra — sem recreditar."""
+    cur.execute(INTERNOS_SQL, (user_id, list(INTERNOS)))
+    return internos_de(cur.fetchall())
 
 
 def estorna_links(cur, user_id, of_tx_ids) -> int:

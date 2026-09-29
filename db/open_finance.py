@@ -2337,6 +2337,9 @@ def _propose_manual_reconciliation(user_id: int, launch_id: int) -> dict:
             # (`ACTIONABLE_PENDING_SQL`): transação de conexão PAUSED/DELETED ou de
             # conta não-BRL viraria um par que ninguém vê — e tomaria o lugar de
             # uma elegível. Os três primeiros %s: `merged_wallet_delta_params`.
+            # Nem a do saque em espécie (a sombra ainda não interna entre o sync e
+            # a correção dela): a pendência nasceria escondida e prenderia o manual.
+            from .open_finance_cash import cash_internal_tx_ids
             cur.execute(
                 f"""
                 select t.id as of_tx_id, t.description, l.id, l.valor,
@@ -2349,12 +2352,13 @@ def _propose_manual_reconciliation(user_id: int, launch_id: int) -> dict:
                    and t.reconciliation_status in ('imported', 'pending')
                    and abs(l.valor - %s) <= %s
                    and coalesce(l.posted_at, l.criado_em::date) between %s and %s
+                   and not t.id = any(%s)
                  order by t.transaction_date, t.id
                  for update of t
                 """,
                 (*merged_wallet_delta_params(user_id), m["tipo"], m["valor"], RECON_AMOUNT_TOL,
                  m["ref_date"] - timedelta(days=RECON_DATE_WINDOW),
-                 m["ref_date"] + timedelta(days=RECON_DATE_WINDOW)),
+                 m["ref_date"] + timedelta(days=RECON_DATE_WINDOW), list(cash_internal_tx_ids(cur, user_id))),
             )
             rows = cur.fetchall()
             pick = pick_reconciliation_match(
@@ -2862,12 +2866,15 @@ MERGED_WALLET_DELTA_SQL = f"""
 
 # Pendência ACIONÁVEL (`pending`: imported = sombra, match = X), uma linha por
 # transação: conta no recorte, X existente e X não ocupado por outra transação
-# nem pelo saque em espécie (`RESERVADO_SQL`)
+# nem pelo saque em espécie (`RESERVADO_SQL`), e transação que não é do saque
+# em espécie (`cash_internal_tx_ids`, o último %s)
 # (confirmar daria ALREADY_LINKED). Regra única da lista e do resumo (§0.7).
+# Params: `actionable_pending_params`.
 ACTIONABLE_PENDING_SQL = _fused_join_sql("match_launch_id", """
          and t.reconciliation_status = 'pending'
          and not exists (select 1 from open_finance_transactions o
                           where o.imported_launch_id = l.id)
+         and not t.id = any(%s)
          and not """ + RESERVADO_SQL.format(t="l"),
                                          cols="t.id as of_tx_id, l.id, (l.efeitos ->> 'delta_conta')::numeric as d")
 
@@ -2892,6 +2899,13 @@ def merged_wallet_delta_params(user_id: int) -> tuple:
     `BANK_ACCOUNTS_SQL`, o de `tc.user_id` e o de `l.user_id`. Fonte única da
     contagem — os três chamadores leem daqui em vez de montar a tupla (§0.7)."""
     return (user_id, user_id, user_id)
+
+
+def actionable_pending_params(cur, user_id: int) -> tuple:
+    """Os de `ACTIONABLE_PENDING_SQL`/`PENDING_RECONCILIATION_SQL`: os de
+    `merged_wallet_delta_params` e as transações do saque em espécie."""
+    from .open_finance_cash import cash_internal_tx_ids
+    return (*merged_wallet_delta_params(user_id), list(cash_internal_tx_ids(cur, user_id)))
 
 
 def merged_wallet_delta(cur, user_id: int) -> Decimal:
