@@ -30,7 +30,7 @@ from core.services.email_service import send_account_exists_notice, send_verific
 from db.reports import (
     AccountAlreadyExistsError, create_email_verification, get_auth_user, quiz_signup_pendente,
 )
-from db.signup_quiz import criar_conta_sem_codigo, desfazer_conta_sem_codigo
+from db.signup_quiz import boas_vindas_da_conta, criar_conta_sem_codigo, desfazer_conta_sem_codigo
 from frontend.routes.shared import DASHBOARD_URL, signup_source_from_request
 from utils_phone import normalize_phone_e164
 
@@ -233,4 +233,6 @@ async def quiz_conta(request: Request, response: Response, body: QuizContaBody,
         except Exception as exc2:
             await _registra_falha("desfazer", exc2)
         raise HTTPException(status_code=503, detail="Não deu para criar a conta. Tente de novo.")
+    # Só depois da sessão: com ela falhando a conta é desfeita, e o e-mail já teria saído.
+    await asyncio.to_thread(boas_vindas_da_conta, email, user_id)
     return {"estado": "criada", "user_id": user_id, **credenciais}

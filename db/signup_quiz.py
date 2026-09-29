@@ -11,7 +11,8 @@ aceita só o formato exato, e o CHECK de `dashboard_profile` (db/schema.py) é a
 segunda barreira.
 
 `criar_conta_sem_codigo` é a conta da /assinar (funil v3): nasce sem senha e sem
-código, pela rota `POST /auth/quiz/conta` (frontend/routes/quiz_signup.py).
+código, pela rota `POST /auth/quiz/conta` (frontend/routes/quiz_signup.py), que só
+chama `boas_vindas_da_conta` depois de a sessão sair.
 """
 import logging
 
@@ -141,14 +142,17 @@ def criar_conta_sem_codigo(email: str, telefone: str | None, nome: str | None, s
         conn.commit()
     if resultado["estado"] == "criada":
         db_support.invalidate_auth_user_cache(resultado["user_id"])
-        # A conta já está commitada: falha aqui (o INSERT do link_code) não pode virar
-        # 503, senão o retry cai em `tem_conta` e a conta sem senha fica sem sessão.
-        try:
-            db_support.boas_vindas(create_link_code, email, resultado["user_id"])
-        except Exception as exc:  # só o tipo: a mensagem do psycopg pode trazer e-mail/telefone
-            logging.getLogger(__name__).warning("boas_vindas falhou user=%s: %s", resultado["user_id"],
-                                                type(exc).__name__)
     return resultado
+
+
+def boas_vindas_da_conta(email: str, user_id: int) -> None:
+    """link_code + e-mail de boas-vindas da conta de `criar_conta_sem_codigo`. A rota
+    chama só DEPOIS da sessão: se ela falhar, a conta é desfeita e o e-mail de "conta
+    criada" não pode ter saído. Falha aqui não vira 503: a conta já está logada."""
+    try:
+        db_support.boas_vindas(create_link_code, email, user_id)
+    except Exception as exc:  # só o tipo: a mensagem do psycopg pode trazer e-mail/telefone
+        logging.getLogger(__name__).warning("boas_vindas falhou user=%s: %s", user_id, type(exc).__name__)
 
 
 def desfazer_conta_sem_codigo(user_id: int, conta_id: int) -> bool:
@@ -159,7 +163,7 @@ def desfazer_conta_sem_codigo(user_id: int, conta_id: int) -> bool:
     do pool); a guarda é a linha seguir sem senha e sem plano. As sessões só saem se
     nenhuma outra linha do `user_id` sobrou: as desta requisição são inertes (nada saiu
     do servidor), e as da outra linha podem ser um login legítimo feito na janela.
-    `users`, `user_identities` e o link_code ficam: o id é o mesmo na recriação."""
+    `users` e `user_identities` ficam: o id é o mesmo na recriação."""
     with get_conn() as conn, conn.cursor() as cur:
         cur.execute(
             """

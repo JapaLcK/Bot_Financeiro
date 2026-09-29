@@ -207,11 +207,13 @@ def test_sessao_falha_depois_do_commit_desfaz_a_conta_e_o_retry_loga(env, monkey
     assert not (_cookies(r) & COOKIES_DE_SESSAO), r.headers.get_list("set-cookie")
     assert _linha(email) is None
     assert _sessoes_e_refresh(uid) == (0, 0)
+    assert env.boas_vindas == []  # conta desfeita: o e-mail de "conta criada" não sai
 
     r = _conta_quiz(client, email)
     assert (r.status_code, r.json()["estado"]) == (200, "criada"), r.text
     assert COOKIES_DE_SESSAO <= _cookies(r)
     assert _linha(email)["password_hash"] is None and int(_linha(email)["user_id"]) == uid
+    assert env.boas_vindas == [email]  # um só, o do retry
 
 
 def test_sessao_e_desfazer_falham_503_sem_pii(env, monkeypatch, caplog, capsys):
