@@ -55,8 +55,9 @@ migração de contrato próprias.
    hipótese. Sem estimativa validada, não há "cabe".
 2. **Datas de parcelas supostas.** O simulador põe a primeira parcela um mês após a compra.
    Cartão depende de fechamento e vencimento; outras ofertas podem cobrar hoje. Capturar o
-   calendário contratual ou marcar a hipótese. Se a data puder alterar a conclusão, em qualquer
-   sentido, pedir confirmação em vez de concluir.
+   calendário contratual. No cartão, as datas vêm do calendário da fatura (fechamento e
+   vencimento), que é contratual. Fora do cartão, sem data contratual não sai veredito: a Piggy
+   pergunta quando vence a primeira parcela e qual é o intervalo entre elas.
 3. **Contrato maior que a janela.** O custo total inclui parcelas após 90 dias, mas o caixa não.
    Uma compra em 12 ou 36 vezes pode parecer segura por esconder a maior parte dos pagamentos.
    Orientação positiva exige avaliar todo o compromisso até um horizonte confiável explícito.
@@ -130,8 +131,8 @@ Uma entrada nova no simulador entra nesta tabela antes de entrar no código. Con
 | Declaração pendente | `bank_movements.pending_count > 0`, sem efeito quantificado | dois sentidos | os dois |
 | Ação financeira pendente de confirmação | `pending_actions` em aberto que mexe em dinheiro: lançamento aguardando "sim" (inclusive `confirm_media_launch`), pergunta de valor ou de forma de pagamento, e as pendências do chat (`db/ai_chat.py`). O valor ainda não está no saldo e pode entrar | dois sentidos | os dois; com valor quantificado no payload, vale o pior caso da direção, como na conciliação |
 | Receita fixa ativa em frequência fora da projeção | `once`, `weekly` ou `daily` legados: `_cashflow_events()` pula essas receitas | só piora | risco (ou estender a fonte de eventos) |
-| Ocorrência de receita fixa ainda por vir no mês corrente | o salário pode ter caído antes do `pay_day` e já estar no saldo. Não há marcador: receita recorrente só prevê, e `last_credited_ym` é resto do cobrador removido que nada escreve (`db/recurring_income.py`) | só melhora | cabe: calcular sem essa ocorrência; se o "cabe" depender dela, perguntar |
-| Ocorrência de gasto fixo automático ainda por vir no mês corrente | a cobrança pode ter saído antes do `due_day` e já estar no saldo. Não há marcador: `last_charged_ym` também não é escrito (`db/recurring.py`) | só piora | risco: calcular sem essa ocorrência; se o risco depender dela, perguntar |
+| Ocorrência de receita fixa do mês corrente | antecipada: o salário caiu antes do `pay_day`, já está no saldo e a ocorrência futura entra de novo. Atrasada: o `pay_day` já passou sem o salário cair, e `_recurring_occurrence_dates()` só emite datas depois de hoje, então ela some. Não há marcador: receita recorrente só prevê, e `last_credited_ym` é resto do cobrador removido que nada escreve (`db/recurring_income.py`) | dois sentidos | cada veredito no seu pior caso: o "cabe" sem a ocorrência do mês e o risco com ela (inclusive a atrasada). Se o veredito depender dela, perguntar se o salário já caiu |
+| Ocorrência de gasto fixo automático do mês corrente | antecipada: saiu antes do `due_day`, já está no saldo e a ocorrência futura sai de novo. Atrasada: o `due_day` já passou sem a cobrança, e a ocorrência some pelo mesmo motivo. Não há marcador: `last_charged_ym` também não é escrito (`db/recurring.py`) | dois sentidos | cada veredito no seu pior caso: o risco sem a ocorrência do mês e o "cabe" com ela (inclusive a atrasada). Se o veredito depender dela, perguntar se já foi cobrado |
 | Boleto pendente | pode já ter sido pago pelo banco: o débito aparece no saldo consolidado, mas o `bill_instances.status` segue `pending`, porque a importação do Open Finance não marca conta paga (nenhum módulo de Open Finance escreve em `bill_instances`), e `_cashflow_events()` subtrai o boleto de novo | só piora | risco: calcular sem o boleto; se o risco depender dele, perguntar se já foi pago |
 | Fatura de cartão em aberto | pode já ter sido paga pelo banco: o débito aparece no saldo consolidado, mas a importação do Open Finance pula o pagamento de fatura (`import_open_finance_credit` em `db/open_finance.py`), e só `pay_bill_amount` (`db/cards.py`) atualiza `paid_amount`/`status`. `_open_card_bills_detail()` subtrai o saldo da fatura de novo | só piora | risco: calcular sem essa fatura; se o risco depender dela, perguntar se já foi paga |
 | Leitura de boletos truncada | `_cashflow_events()` chama `list_bills(..., limit=1000)`, ordenado pelo vencimento mais próximo; acima de 1.000 pendentes, os mais distantes somem mesmo dentro do horizonte | só melhora | cabe: paginar ou tirar o teto, ou tratar leitura truncada como `dados_insuficientes` |
@@ -144,8 +145,9 @@ Uma entrada nova no simulador entra nesta tabela antes de entrar no código. Con
 | Gasto variável | fora da projeção até a Etapa 3 | só melhora | cabe |
 | Custos da oferta ausentes | frete, IOF, seguro, tarifa ou CET não informados | só melhora | cabe |
 | Parcela sem valor nem taxa | cronograma cotado ausente | dois sentidos | os dois (`dados_insuficientes`) |
-| Datas das parcelas | cadência mensal presumida | dois sentidos | os dois, se a data puder mudar a conclusão |
+| Datas das parcelas | data presumida fora do cartão | dois sentidos | os dois (`dados_insuficientes`, perguntar a data) |
 | Parcelas além da janela | contrato maior que o horizonte avaliado | só melhora | cabe |
+| Despesa mensal nova sem fim | `despesa_mensal_nova` não tem fim contratado: estender o horizonte até a última parcela não a cobre, e ela pode furar a reserva depois da janela | só melhora | cabe: exige que a sobra mensal recorrente (receitas fixas − gastos fixos − gasto variável estimado − a despesa nova) continue positiva; senão, sem "cabe" |
 | Reserva mínima | nunca informada | não se aplica | risco baseado em reserva (vale só o risco de saldo negativo) e cabe |
 
 Avaliar **caixa nas datas de pagamento** e **custo total do contrato** como dimensões diferentes.
@@ -163,13 +165,15 @@ receber ofertas do chat ou do print:
   15 e 90 dias, também não cabe. O cenário passa a aceitar o cronograma como pares
   **(valor, data)**, em que a data é opcional: parcela sem data informada fica marcada como
   **data presumida** (cadência mensal a partir da compra), e o código do veredito distingue data
-  contratual de data presumida. O que é exclusivo é o **modo de gerar as parcelas**: pelo cronograma cotado ou
+  contratual de data presumida. A data presumida serve só para a simulação informativa. O que é exclusivo é o **modo de gerar as parcelas**: pelo cronograma cotado ou
   pela taxa (`juros_mensal_pct`), nunca os dois. A taxa nominal anunciada e o CET, quando aparecem,
   entram como dados informativos ao lado do cronograma, sem gerar parcelas. O custo em relação ao
   à vista e a taxa implícita são calculados a partir do cronograma, e divergência entre a taxa
   implícita e a anunciada é mostrada ao usuário. Sem valor de parcela nem taxa, o estado é
-  `dados_insuficientes`, nunca taxa zero. Com data presumida, vale o item 2 das falhas: o código
-  testa se a conclusão muda com a data e, se mudar, a Piggy pede a confirmação.
+  `dados_insuficientes`, nunca taxa zero. Com data presumida fora do cartão, o estado é
+  `dados_insuficientes` e a Piggy pergunta a data (item 2 das falhas). Não há teste de
+  sensibilidade: sem um intervalo de datas admissíveis definido, ele não teria como provar que a
+  conclusão não muda.
 - **Mais de três opções numa leitura.** `Simulacao.cenarios` tem `max_length=3`. Uma varredura de
   1 a 12 vezes não cabe, e dividi-la em várias chamadas de `simulate()` compararia as opções
   contra leituras diferentes do saldo. O limite sobe até o teto operacional da varredura, numa
@@ -239,7 +243,7 @@ paralelo.
   compra no fechamento do cartão, salário antes/depois da parcela, fatura vencida, parcelas além
   de 90 dias, reserva já violada, banco indisponível, oferta sem CET, OCR errado, legenda ignorada,
   pendência de lançamento, receita ativa em frequência legada, boleto ou gasto fixo com valor
-  estimado (`variable_amount`), receita ou gasto fixo do mês já realizado antes do dia previsto (sem marcador), boleto ou fatura de
+  estimado (`variable_amount`), receita ou gasto fixo do mês antecipado ou atrasado em relação ao dia previsto (sem marcador), despesa mensal nova sem fim, boleto ou fatura de
   cartão paga pelo banco e ainda aberta no PigBank, gasto fixo automático pago no cartão
   (antes e depois de a cobrança entrar na fatura), conciliação ou declaração do Open
   Finance pendente (inclusive com
