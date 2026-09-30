@@ -10,7 +10,8 @@ Recebe um IntentResult + mensagem original e decide o que fazer:
 """
 from __future__ import annotations
 from core.financial_targets import (
-    ALVO_AMBIGUO, QUANTIDADE_AMBIGUA, alvo_ambiguo, eh_nome_do_catalogo as _eh_nome_do_catalogo,
+    ALVO_AMBIGUO, PREPOSICAO, QUANTIDADE_AMBIGUA, alvo_ambiguo,
+    eh_nome_do_catalogo as _eh_nome_do_catalogo,
     nome_do_alvo as _nome_do_alvo, pede_tudo as _pede_tudo,
     resolve_saque, texto_da_quantidade,
 )
@@ -1776,9 +1777,59 @@ _CHAVE_DO_NOME: dict[str, str] = {
     "funds.withdraw":       "target_name",
 }
 
+_PREP_NO_MEIO_RE = re.compile(rf"(?<=\s){PREPOSICAO}(?=\s)", re.I)
+# Cauda ESTREITA: só dinheiro. "viagem, a de 2027" e "tesouro, vence em 2035"
+# descrevem o nome. A unidade é a do `h_bills._UNIDADE` (§0.7), mas NÃO o
+# `h_bills._VALOR_RE` inteiro: o `_ENCHIMENTO` dele tem de/da/do e aceitaria
+# "tesouro, de 2029".
+_CAUDA_QUANTIA_RE = re.compile(
+    rf"(?:na\s+verdade\s+)?(?:r\$\s*)?\d[\d.,]*(?:\s*{h_bills._UNIDADE})?", re.I)
+
+
+def _quantia_explicita(resposta: str, crua: str, existentes: list[str]) -> str | None:
+    """O trecho da resposta a "de qual…?" que é QUANTIA, ou None (#567).
+
+    Fora destas formas o número é do nome: "tesouro 2029" não vira R$ 2.029.
+    Teto: "Tesouro 2029 80", sem vírgula, fica com o guardado.
+
+      só dinheiro     "80", "80 reais": não há nome para o número pertencer.
+      número + prep   "tira 100 da viagem", "na verdade 80 no tesouro": só
+                      quando o texto DEPOIS da preposição cita o catálogo (em
+                      "tesouro 2029 no nubank" o "no" não leva a nome nenhum)
+                      E o número fecha no texto SEM o nome do catálogo (em
+                      "a reserva 2025 do nubank", com `Nubank` e `Reserva 2025
+                      do Nubank`, o "nubank" é citado, mas o 2025 é do nome).
+      ", " + quantia  "tesouro 2029, 80", "…, R$ 80", "…, 80 reais", "tesouro,
+                      na verdade 80". Nada além disso, e sem citar o catálogo
+                      (a caixinha `R$ 5000`). O corte é na `crua`, de ANTES do
+                      `limpa_pontuacao_final`, que come a vírgula de "2029, R$ 80".
+
+    Limites aceitos pelo dono: "tira do tesouro 2029 no nubank" com `Tesouro`
+    dá R$ 2.029 (#703, as duas metades acima não exigem a MESMA preposição), e
+    nome CURTO do catálogo depois da preposição reativa a regra, igual à `main`:
+    "a reserva 2025 da casa" com a caixinha `casa` dá R$ 2.025.
+    """
+    def cita(texto: str) -> bool:
+        return any(contains_word(normalize_text(texto), normalize_text(n)) for n in existentes)
+
+    # ponytail: "tira do tesouro 2029 no nubank" com `Tesouro` dá R$ 2.029: o
+    # "do" cita o catálogo e o 2029 fecha antes do "no". Limite aceito, #703.
+    if any(cita(resposta[m.end():]) for m in _PREP_NO_MEIO_RE.finditer(resposta)):
+        sem_nome = texto_da_quantidade(resposta, existentes)
+        for m in _PREP_NO_MEIO_RE.finditer(sem_nome):
+            if _quantidade_fecha(sem_nome[:m.start()]):
+                return sem_nome[:m.start()]
+    cauda = crua.rpartition(", ")[2]
+    # Repõe a limpeza que a `crua` pula: sem ela "tesouro, 132,50." dá R$ 13.250.
+    cauda = limpa_pontuacao_final(cauda.strip())
+    if _CAUDA_QUANTIA_RE.fullmatch(cauda) and not cita(cauda):
+        return cauda
+    return None
+
 
 def _funde_a_resposta(
-    intent: str, ents: dict, resposta: str, existentes: list[str],
+    intent: str, ents: dict, resposta: str, existentes: list[str], *,
+    pede_nome: bool = False, crua: str = "",
 ) -> tuple[dict, str | None]:
     """Lê a resposta INTEIRA e funde nos slots. Pura: sem I/O, sem `db`.
 
@@ -1787,7 +1838,15 @@ def _funde_a_resposta(
     rodadas de revisão no #184: como seletor de LEITURA, cada ramo aprendia um
     pedaço diferente do mundo, e a rodada seguinte achava o pedaço que faltava no
     outro. `falta` agora só decide o que RE-PERGUNTAR (quem faz isso é o
-    chamador); o que se LÊ da resposta não depende dele.
+    chamador); o que se LÊ da resposta não depende dele (salvo a exceção abaixo).
+
+    EXCEÇÃO, uma só (#567): `pede_nome` (a pergunta era "de qual…?"). Aí o
+    número que sobra na resposta é, por padrão, parte do NOME: "tesouro 2029"
+    para o investimento `Tesouro` resgatava R$ 2.029 no lugar dos R$ 50
+    guardados. Só troca a quantia na forma explícita de `_quantia_explicita`,
+    que corta a vírgula na `crua` (a resposta antes do `limpa_pontuacao_final`).
+    Os ramos de TUDO não olham `pede_nome`. Não reverta para "não depende":
+    o catálogo só protege quando a resposta É um nome dele, igual.
 
     Dois slots, não três:
 
@@ -1833,6 +1892,7 @@ def _funde_a_resposta(
     # TETO conhecido: caixinha chamada `tudo`, respondida com `tudo`, é lida
     # como NOME — a mesma precedência já aceita em `meta 2028`.
     quantidade = texto_da_quantidade(resposta, existentes)
+    quantia = _quantia_explicita(resposta, crua or resposta, existentes) if pede_nome else quantidade
     if _pede_tudo(resposta, existentes) and _extract_valor(quantidade) is not None:
         ents.pop("amount", None)
         ents["want_all"] = False
@@ -1840,9 +1900,9 @@ def _funde_a_resposta(
     if _pede_tudo(resposta, existentes):
         ents["want_all"] = True
         ents.pop("amount", None)          # excludente: TUDO substitui a quantia
-    elif not eh_nome:
-        valor = _extract_valor(quantidade)
-        perigo = valor_perigoso(quantidade, valor)
+    elif not eh_nome and quantia is not None:
+        valor = _extract_valor(quantia)
+        perigo = valor_perigoso(quantia, valor)
         if perigo:
             # NÃO é `return` seco: o nome desta mesma resposta ainda vale. Antes
             # a recusa re-armava o payload ORIGINAL e o alvo novo se perdia.
@@ -1857,6 +1917,7 @@ def _funde_a_resposta(
             # que é precisamente o dano que a exclusividade existe para impedir.
             ents["want_all"] = False
     # `eh_nome` sem marcador: a resposta é só o nome. A quantidade guardada fica.
+    # Idem com `pede_nome` sem quantia explícita: o número era do nome (#567).
 
     # ── target ──────────────────────────────────────────────────────────────
     return _funde_o_nome(intent, ents, resposta, existentes, eh_nome), None
@@ -1960,8 +2021,8 @@ def _resolve_clarification(clarif: dict, user_response: str, user_id: int, platf
     # recusa ANTES do bloco do handler, da IA e do legado, que gravavam
     # R$ 2.025 (caixinha, aporte, resgate, gasto). Pendência recriada
     # condicional, como o `perigo` do ramo `launches.add` abaixo. Vale também
-    # quando o handler pedia o nome: `_funde_a_resposta` lê o ano como quantia e
-    # troca a guardada (R$ 50 viraria R$ 2.025). Fora daqui a clarification
+    # quando o handler pedia o nome: pergunta não é nome (antes do #567 o ano
+    # ainda virava quantia; hoje `pede_nome` já o barra). Fora daqui a clarification
     # genérica da IA pode pedir outra coisa ("de qual mês?").
     pede_valor_ou_nome = (
         (falta and original_intent in _INTENTS_PERGUNTA_DE_HANDLER)
@@ -1982,7 +2043,8 @@ def _resolve_clarification(clarif: dict, user_response: str, user_id: int, platf
         existentes = ([] if _SO_NUMERO_RE.fullmatch(resposta_h)
                       else _alvos_existentes(user_id, original_intent))
         ents, recusa = _funde_a_resposta(
-            original_intent, original_entities, resposta_h, existentes)
+            original_intent, original_entities, resposta_h, existentes,
+            pede_nome=falta == _CHAVE_DO_NOME[original_intent], crua=user_response)
 
         # A quantidade ainda falta? Pode ser recusa do filtro de dano, ou uma
         # resposta que só trouxe o nome. Nos dois casos a pergunta VOLTA viva —
