@@ -218,6 +218,8 @@ PR de cada etapa, não soluções prontas. Cada PR confere se ainda valem, decid
   - `normalize_pluggy_account()` põe `type` = `BANK` e `balance` = 0 quando faltam;
     `normalize_pluggy_transaction()` põe `amount` = 0 e data inválida = hoje; conta e
     transação sem `id` são descartadas em silêncio, e o sync segue `ok=True`;
+    `normalize_pluggy_investment()` põe `balance` = 0 e `type` vazio, e a posição, a
+    caixinha espelhada e a foto diária são sobrescritas com esse valor;
   - compra parcelada sem `creditCardMetadata.totalInstallments` vira compra única, e a
     importada nunca cria as faturas futuras (a manual cria, em
     `add_credit_purchase_installments()`);
@@ -259,6 +261,11 @@ PR de cada etapa, não soluções prontas. Cada PR confere se ainda valem, decid
     pula o pagamento de fatura; só `pay_bill_amount` a marca paga).
   - `list_bills(..., limit=1000)` corta os boletos mais distantes sem avisar, e boleto
     pendente entra com qualquer valor (um negativo vira entrada de dinheiro).
+  - Gasto fixo manual (`payment_mode="manual"`) só entra pelo boleto já gerado, e
+    `sync_manual_bills_once()` gera só o próximo ciclo: numa previsão de 90 dias, um
+    mensal entra uma vez e some nas duas seguintes, e o semanal e o diário quase somem.
+    Projetar as ocorrências (ou gerar o horizonte inteiro) sem contar duas vezes o boleto
+    que já existe.
   - Receita recorrente legada `once`, `weekly` ou `daily` fica fora de toda data:
     `_cashflow_events()` só aceita receita mensal e anual. Decidir o destino dessas linhas.
   - Fatura de cartão manual, ou sem fonte do Open Finance atualizada, entra pelo total
