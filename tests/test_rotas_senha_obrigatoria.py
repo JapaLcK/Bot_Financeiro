@@ -165,6 +165,7 @@ POST /open-finance/{user_id}/pluggy-item|POST /open-finance/{user_id}/sync|POST 
 POST /open-finance/{user_id}/mock-connect|DELETE /open-finance/{user_id}|GET /open-finance/{user_id}/movements
 POST /open-finance/{user_id}/movements/confirm|GET /open-finance/{user_id}/reconciliations
 POST /open-finance/{user_id}/reconciliations/{of_tx_id}/{action}
+GET /open-finance/{user_id}/cash-transfers|POST /open-finance/{user_id}/cash-transfers/{link_id}/{action}
 """
 for _linha in re.split(r"[|\n]", _ROTAS_DE_DADOS.strip()):
     _m, _p = _linha.split(" ", 1)
