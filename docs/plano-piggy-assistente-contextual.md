@@ -103,6 +103,22 @@ Parcela menor pode custar mais; à vista pode custar menos e quebrar o caixa. "Q
 exige varrer somente as opções realmente oferecidas, com o mesmo motor e um teto operacional.
 Não presumir "sem juros" se a oferta só mostra preço e número de parcelas.
 
+**O contrato atual do simulador não representa uma oferta real e precisa ser estendido** antes de
+receber ofertas do chat ou do print:
+
+- **Parcela cotada.** Hoje `Cenario` só aceita `preco`, `parcelas` e `juros_mensal_pct` e calcula as
+  parcelas ele mesmo. "À vista R$ 1.000 ou 12× R$ 100" não cabe: `preco=1200` com taxa 0 reporta
+  juros zero, e `preco=1000` não reproduz as parcelas. O cenário passa a aceitar o cronograma
+  cotado (valor de cada parcela), exclusivo com `juros_mensal_pct`. O custo em relação ao à vista
+  e a taxa implícita são calculados a partir dele. Sem valor de parcela nem taxa, o estado é
+  `dados_insuficientes`, nunca taxa zero.
+- **Data da primeira parcela.** Hoje ela é sempre um mês após a compra. O cenário passa a aceitar a
+  data informada; sem ela, a hipótese fica marcada (item 2 das falhas).
+- **Mais de três opções numa leitura.** `Simulacao.cenarios` tem `max_length=3`. Uma varredura de
+  1 a 12 vezes não cabe, e dividi-la em várias chamadas de `simulate()` compararia as opções
+  contra leituras diferentes do saldo. O limite sobe até o teto operacional da varredura, numa
+  única chamada de `simulate()`, que já lê saldo e eventos uma vez só para todos os cenários.
+
 Taxa nominal, taxa efetiva e CET são coisas distintas. Para "juros bons ou ruins", separar custo
 versus à vista, encaixe no orçamento e comparação com mercado. A última requer referência
 externa atual, mesma modalidade e prazo, com data e fonte. Sem CET e tarifas, a comparação de
@@ -134,7 +150,7 @@ provedor podem ter retenção própria. Validar política e texto ao usuário an
 | --- | --- | --- |
 | 0. Casos e dados | Inventariar fontes; montar casos rotulados de renda irregular, cartão, gastos variáveis, saldos parciais e prints | Casos cobrindo cada estado; regra de abstenção escrita |
 | 1. Alertas negativos e inconclusivos | Estados `dados_insuficientes`, `dados_desatualizados` e `risco_identificado` montados pelo código no simulador e no chat; confiabilidade de saldo e datas checada antes do veredito; "cabe" desligado | Teste pela conversa `handle_incoming` em duas mensagens com novo lançamento entre elas; saldo parcial e data suposta geram inconclusivo, não "não recomendo"; o modelo não reverte o estado |
-| 2. Parcelas e horizonte | Varredura das opções oferecidas; horizonte até a última parcela ou o teto; calendário real de pagamento | Casos de compra no fechamento, salário antes/depois da parcela, parcelas além de 90 dias |
+| 2. Parcelas e horizonte | Contrato do simulador estendido (parcela cotada, data da primeira parcela, mais de três opções numa leitura); varredura das opções oferecidas; horizonte até a última parcela ou o teto | Casos de compra no fechamento, salário antes/depois da parcela, parcelas além de 90 dias, oferta com parcela cotada sem taxa, oferta com mais de três opções |
 | 3. Caixa honesto e "cabe" | Estimativa variável explícita sem duplicar faturas; meta de falsos "cabe" definida; "cabe" ligado atrás de flag desligável | Taxa de falsos "cabe" medida nos casos rotulados abaixo da meta; dado incompleto nunca aprova |
 | 4. Print no WhatsApp | Legenda preservada, gate que falha fechado, prévia corrigível, consulta sem escrita, mesma simulação | OCR errado, recibo, imagem ambígua, "sim", mensagens fora de ordem e erro no gate não causam lançamento, gasto de visão nem orientação indevida; medir demanda e custo |
 | 5. Decisão sobre desktop | Comparar uso do print, abandono do fluxo, entrevistas e pedidos por acesso sobre outros apps | Só então especificar macOS/Windows; pouco uso do print sozinho não prova falta de demanda |
