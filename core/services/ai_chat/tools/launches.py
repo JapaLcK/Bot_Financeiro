@@ -52,13 +52,17 @@ def _list_recent_launches(user_id: int, args: dict[str, Any]) -> dict[str, Any]:
     limit = int(args.get("limit") or 10)
     limit = max(1, min(limit, 50))
 
+    # Saque em espécie/transferência (receita/despesa interna) vai como
+    # "entrada"/"saída": como "receita", o modelo o leria como ganho.
+    from core.handlers.launches import _rotulo_interno
+
     rows = db.list_launches(user_id, limit=limit)
     return {
         "launches": [
             {
                 "id": r["id"],
                 "user_seq": r.get("user_seq"),
-                "tipo": r["tipo"],
+                "tipo": _rotulo_interno(r) or r["tipo"],
                 "valor": float(r["valor"] or 0),
                 "alvo": r.get("alvo"),
                 "nota": r.get("nota"),

@@ -90,6 +90,21 @@ _INTERNAL_TIPOS = {
     "create_investment", "delete_investment",
 }
 
+# Receita/despesa de movimentação interna (saque em espécie espelhado na
+# Carteira, transferência) é dinheiro que mudou de lugar: a listagem diz a
+# DIREÇÃO. Par de `LAUNCH_INTERNAL_LABELS` (frontend/launch-type-labels.js),
+# comparado por tests/test_launch_type_labels_fonte_unica.py (CLAUDE.md §0.7).
+_INTERNAL_LABELS = {"receita": "entrada", "despesa": "saída"}
+
+
+def _rotulo_interno(r: dict) -> str | None:
+    """"entrada"/"saída" para receita/despesa interna (forma legada junto); senão None."""
+    if r.get("is_internal_movement"):
+        for canon, rotulo in _INTERNAL_LABELS.items():
+            if r.get("tipo") in _TIPO_ALIASES[canon]:
+                return rotulo
+    return None
+
 
 # --- eixo TIPO: despesa / receita / os dois ---------------------------------
 #
@@ -462,7 +477,7 @@ def _listar_categoria(
         # Linha de cartão não tem user_seq, e "#N" é o que o usuário digita em
         # "apagar #N" — mostrar um número que não existe seria pior que não mostrar.
         prefixo = f"#{r['user_seq']}" if r.get("user_seq") else "💳"
-        lines.append(f"{prefixo} • {r.get('tipo', '')} • {valor} • {desc} • {data_txt}")
+        lines.append(f"{prefixo} • {_rotulo_interno(r) or r.get('tipo', '')} • {valor} • {desc} • {data_txt}")
 
     # sumário do PERÍODO INTEIRO, não das linhas exibidas (ver docstring). Sem
     # período, o escopo vai escrito: número de total sem escopo é o que fazia a
@@ -566,7 +581,7 @@ def list_launches(user_id: int, limit: int = 10, entities: dict | None = None, o
 
         lines = []
         for r in rows:
-            tipo   = r.get("tipo", "")
+            tipo   = _rotulo_interno(r) or r.get("tipo", "")
             valor  = fmt_brl(float(r["valor"])) if r.get("valor") is not None else "-"
             nota   = r.get("nota") or r.get("alvo") or "-"
             cat    = r.get("categoria") or ""
@@ -630,8 +645,9 @@ def list_launches(user_id: int, limit: int = 10, entities: dict | None = None, o
 
         # descrição: prefere nota se informativa, senão usa alvo
         descricao = nota if nota and nota.lower() not in ("-", alvo.lower()) else alvo
+        rotulo = _rotulo_interno(r)
         if not descricao:
-            descricao = tipo
+            descricao = rotulo or tipo
 
         # formata data de forma amigável
         if criado is not None:
@@ -657,13 +673,15 @@ def list_launches(user_id: int, limit: int = 10, entities: dict | None = None, o
         else:
             data_str = "-"
 
-        emoji     = _TIPO_EMOJI.get(tipo, "•")
+        emoji     = "🔁" if rotulo else _TIPO_EMOJI.get(tipo, "•")
         valor_str = fmt_brl(float(valor)) if valor is not None else "-"
         # Mostra user_seq (numeração por usuário, começa em #1) em vez do
         # id global. Fallback pro id interno enquanto o backfill não rodou.
         display_id = r.get("user_seq") or r.get("id")
         id_str    = f" [#{display_id}]" if display_id else ""
-        lines.append(f"{emoji} {data_str} • {valor_str} • {descricao}{id_str}")
+        # interna: o 🔁 não diz a direção, o rótulo diz ("entrada"/"saída")
+        rotulo_str = f"{rotulo} • " if rotulo else ""
+        lines.append(f"{emoji} {data_str} • {rotulo_str}{valor_str} • {descricao}{id_str}")
 
     # mini resumo de despesas/receitas no período exibido
     total_despesas = sum(

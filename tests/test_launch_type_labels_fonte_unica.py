@@ -97,3 +97,14 @@ def test_na_home_a_fonte_nao_bloqueia_o_parse():
         "do <body> e a Início fica EM BRANCO — as guardas do home.html:969 não "
         "rodam porque renderGreeting nunca é alcançada. Ponha `defer` de volta."
     )
+
+
+def test_rotulo_interno_do_whatsapp_e_o_mesmo_do_js():
+    """`LAUNCH_INTERNAL_LABELS` (JS) e `_INTERNAL_LABELS` (core/handlers/launches.py)
+    são a mesma regra em duas línguas — o HTML não importa Python (§0.7)."""
+    from core.handlers.launches import _INTERNAL_LABELS
+
+    m = re.search(r"const LAUNCH_INTERNAL_LABELS = \{([^}]*)\}", FONTE.read_text(encoding="utf-8"))
+    assert m, "frontend/launch-type-labels.js não declara LAUNCH_INTERNAL_LABELS"
+    js = dict(re.findall(r'(\w+):\s*"([^"]*)"', m.group(1)))
+    assert js == _INTERNAL_LABELS
