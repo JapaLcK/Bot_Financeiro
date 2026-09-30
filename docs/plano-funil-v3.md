@@ -637,16 +637,22 @@ a rede.
        aplica a migração.
      - O consumo o **reivindica de forma atômica** (`update … set used_at = now() where
        token = %s and used_at is null and expires_at > now() returning user_id,
-       email_hash`) e, na **mesma transação** da troca de senha, confere esse hash
-       contra o e-mail atual da conta. Se for diferente, recusa.
+       email_hash`) e grava a senha com um **UPDATE condicional**:
+       `update auth_accounts set password_hash = %s where user_id = %s and email_hash =
+       <hash do token>`. Se nenhuma linha for atualizada, recusa. Ler o hash e depois
+       gravar, mesmo na mesma transação, **não basta** em READ COMMITTED (o padrão do
+       Postgres): a troca de e-mail pode ser gravada entre a leitura e a escrita. O UPDATE
+       condicional pega a trava da linha e reavalia a condição depois dela, então fica em
+       série com a `PATCH /settings/{uid}/security/contact`.
      - Com isso, o link emitido para o e-mail antigo nunca vale depois da troca, qualquer
        que seja a ordem dos pedidos.
      - A invalidação na troca de e-mail pode continuar, como limpeza, mas deixa de ser o
        que garante a segurança.
    - **Teste:** pedir o link, trocar o e-mail e consumir o link antigo → recusado.
      Também com o token gravado **depois** da troca, mas com o hash antigo (a corrida do
-     pedido). Dois consumos simultâneos do mesmo token → só um vence. O link pedido
-     depois da troca funciona.
+     pedido). Dois consumos simultâneos do mesmo token → só um vence. **Troca de e-mail e
+     consumo simultâneos** (duas conexões, com a troca gravada entre a reivindicação e a
+     escrita da senha) → a senha não é trocada. O link pedido depois da troca funciona.
    - **Isto já vale hoje na `main`**, para qualquer conta, e não só a do quiz. Se o
      conserto entrar antes num PR próprio, o PR 4 só confere que ele existe.
 4. Ordem dos overlays na `/home` (enumerar antes de codar: overlay de checkout,
