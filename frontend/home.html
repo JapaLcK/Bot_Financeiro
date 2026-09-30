@@ -383,11 +383,13 @@ body.balance-hidden .bignum {
 .activity-tag.income { background:rgba(198,241,26,.15); color:var(--green); }
 .activity-tag.expense { background:rgba(248,113,113,.15); color:var(--red); }
 .activity-tag.credit { background:rgba(255,45,142,.15); color:var(--purple); }
+.activity-tag.internal { background:rgba(255,255,255,.06); color:var(--text-2); }
 .activity-name { font-size:.86rem; font-weight:600; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
 .activity-cat { font-size:.72rem; color:var(--text-3); margin-top:2px; }
 .activity-amount { font-size:.92rem; font-weight:700; font-variant-numeric:tabular-nums; white-space:nowrap; }
 .activity-amount.income { color:var(--green); }
 .activity-amount.expense { color:var(--red); }
+.activity-amount.internal { color:var(--text-2); }
 .see-all-link {
   display:block; padding:14px; text-align:center; text-decoration:none;
   color:var(--text-2); font-size:.78rem; font-weight:650;
@@ -1030,8 +1032,12 @@ function renderGreeting(snapshot, email, displayName) {
     //   `String()` — o PAR do `hasOwnProperty`: um guarda a CHAVE, o outro o
     //     VALOR. Um número ou array no mapa faria `bruto.charAt` voltar a ser o
     //     mesmo TypeError que mata a página.
+    //   Receita/despesa de movimentação interna diz a DIREÇÃO ("Entrada"/
+    //     "Saída"), pelo segundo mapa do mesmo arquivo, com as mesmas guardas.
     const mapa = (typeof LAUNCH_TYPE_LABELS === "object" && LAUNCH_TYPE_LABELS) || {};
-    const bruto = (Object.prototype.hasOwnProperty.call(mapa, last.tipo) && String(mapa[last.tipo])) || "lançamento";
+    const internos = (typeof LAUNCH_INTERNAL_LABELS === "object" && LAUNCH_INTERNAL_LABELS) || {};
+    const rotulo = (m) => Object.prototype.hasOwnProperty.call(m, last.tipo) && String(m[last.tipo]);
+    const bruto = (last.is_internal_movement && rotulo(internos)) || rotulo(mapa) || "lançamento";
     const tipoLbl = bruto.charAt(0).toUpperCase() + bruto.slice(1);
     const desc = last.nota || last.alvo || "—";
     sub.innerHTML = `<span class="live-dot">●</span> Última atividade: <strong>${tipoLbl}</strong> · ${escapeHtml(desc)} · ${ago}`;
@@ -1247,8 +1253,11 @@ function renderActivity(snapshot) {
     const isReceita = r.tipo === "receita";
     const isDespesa = r.tipo === "despesa" || r.tipo === "saida";
     const isCredito = (r.alvo || "").toLowerCase().includes("cart") || (r.nota || "").toLowerCase().includes("cart");
-    const tagClass = isReceita ? "income" : (isCredito && isDespesa) ? "credit" : "expense";
-    const amtClass = isReceita ? "income" : "expense";
+    // Receita/despesa interna é dinheiro que mudou de lugar: cor neutra; o sinal
+    // continua dizendo a direção.
+    const isInterno = r.is_internal_movement && (isReceita || isDespesa);
+    const tagClass = isInterno ? "internal" : isReceita ? "income" : (isCredito && isDespesa) ? "credit" : "expense";
+    const amtClass = isInterno ? "internal" : isReceita ? "income" : "expense";
     const sign = isReceita ? "+" : "-";
     const desc = r.alvo || r.nota || "—";
     const cat  = r.categoria || (isReceita ? "outros" : "geral");
