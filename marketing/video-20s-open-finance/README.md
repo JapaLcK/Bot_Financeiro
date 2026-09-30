@@ -15,7 +15,8 @@ Só assets oficiais de `frontend/brand/` e `app/assets/brand/`; valores ilustrat
 | `dash.js`, `payoff.js` | 6–16s: dashboard no "mundo" e a câmera que viaja por ele; íris para o tema claro |
 | `finale.js` | 16–20s: cards → formas → linhas, toggle → escudo, contorno do Piggy (traçado do alfa do mascote) |
 | `scenes.js` | orquestra as passadas de tema (íris) |
-| `soundtrack.py` | trilha e sound design sintetizados (numpy), 120 bpm, sincronizados aos mesmos instantes |
+| `soundtrack.py` | partitura e sound design (numpy), 120 bpm, sincronizados aos mesmos instantes |
+| `synth.py` | primitivas de síntese (osciladores, filtros, percussão, efeitos) da trilha |
 | `render.mjs` | seek quadro a quadro no Chromium → ffmpeg → MP4 |
 
 As dependências Python ficam num venv local (`.venv/` está no `.gitignore`), fora do `requirements.txt`.
