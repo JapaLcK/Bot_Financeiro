@@ -25,7 +25,7 @@ O código da `main` vence o texto quando os dois divergem.
   O #658 entrou com `criar_conta_sem_codigo` + `inserir_conta_nova` + `trava_email`, sem
   `email_verification_codes`. O código da `main` e a nota "Ajustes do PR 1" (no fim)
   mandam.
-- **Próximo: PR 2** (checkout embutido e hospedado, mais a CSP). Depois vêm os PRs 3 a 6,
+- **PR 2 = #679, aberto** (checkout embutido e hospedado, mais a CSP). Depois vêm os PRs 3 a 6,
   na ordem da seção 5.
 - A etapa 0b-2 (túnel antes do merge do PR 5) continua pendente.
 - **Decisões do dono de 2026-09-29:**
@@ -368,21 +368,22 @@ anotado no corpo do PR 2 antes de codar**:
    - `_new_session`, se `origem == "assinar"` (**nos dois modos**, embutido e hospedado):
      `expires_at=now+3600` (D-n). Sem o campo, o Stripe usa 24 h, e o plano B hospedado
      manteria aberta por 24 h a janela de cobrança dupla (Pix numa aba, cartão na outra);
-   - `_new_session`, se o e-book é oferecido: `metadata["ebook_price"] = STRIPE_PRICE_ID_EBOOK`
-     e `metadata["ebook_url"] = EBOOK_URL`, também no `subscription_data.metadata`. O
-     PR 3 identifica o e-book e pega a URL por essa **foto**, e não pela env do momento
-     do webhook. Assim, trocar ou tirar a env com uma
+   - `_new_session`, se o e-book é oferecido: `metadata["ebook_price"] = STRIPE_PRICE_ID_EBOOK`,
+     também no `subscription_data.metadata` (feito no #679). O PR 3 identifica o e-book
+     por essa **foto**, e não pela env do momento do webhook. A foto da URL
+     (`ebook_url`) fica para o PR 3: nenhuma sessão oferece o e-book antes dele, porque
+     as duas envs só entram em produção com ele. Assim, trocar ou tirar a env com uma
      sessão aberta não faz a compra perder a entrega nem virar receita do plano;
    - `allow_promotion_codes=True` em **todos** os casos, como hoje (D-o);
    - `_new_session`, se `origem == "assinar"`: `adaptive_pricing={"enabled": False}`, para
      o preço sair sempre em BRL. A etapa 0 viu USD fora do Brasil (Adaptive Pricing). O
      teste confere o parâmetro na sessão da `/assinar`, e a `/precos` continua sem ele;
    - `metadata["td"] = str(trial_days)`;
-   - retorno: embutido → `{"client_secret", "trial_days", "plan", "interval",
-     "session_id"}`. Hospedado → como hoje, mais `trial_days`. **Hoje a rota descarta
-     o `session_id` sempre** (`result.pop("session_id", None)`, no handler de
-     `/billing/create-checkout` do monólito). No modo embutido esse `pop` tem de sair,
-     senão o contrato acima não se cumpre.
+   - retorno (como o #679 implementou): embutido → `{"client_secret",
+     "publishable_key", "trial_days", "plan", "interval"}`. Hospedado → como hoje, sem
+     `trial_days`. O `session_id` **continua fora do corpo**, como hoje (o
+     `result.pop("session_id", None)` do monólito): nenhum passo da `/assinar` (S3/S4) o
+     lê, e há teste que exige que ele não vaze.
 3. A rota: se `embutido`, acrescenta `publishable_key` (env nova
    `STRIPE_PUBLISHABLE_KEY`, e 503 se faltar). O `trial_days` de sessão reaproveitada
    vem de `metadata.td`.
@@ -429,7 +430,14 @@ tentativa aberta por cliente).
 
 ### PR 3: webhook entrega o e-book
 
-**Muda (só no `billing_webhook`, mais o e-mail):**
+**Muda (no `billing_webhook`, no e-mail e, para a foto da URL, no `_new_session`):**
+0. `_new_session` do checkout: quando o e-book é oferecido, grava
+   `metadata["ebook_url"] = EBOOK_URL` ao lado do `ebook_price`, também no
+   `subscription_data.metadata`. **O Stripe limita cada valor de `metadata` a 500
+   caracteres:** uma URL maior faz o `Session.create` falhar, e o 502 derruba toda a
+   `/assinar`. A validação é na leitura da env: com a `EBOOK_URL` vazia ou com mais de
+   500 caracteres, o e-book **não é oferecido**, e um log de configuração avisa. O
+   mesmo teste de config pela metade do PR 2 ganha esse caso.
 1. `checkout.session.completed`: se a sessão tem `metadata.ebook_price` (a foto do
    preço oferecido, gravada pelo PR 2) **e** veio da `/assinar` (`metadata.origem ==
    "assinar"`, embutida ou hospedada), **grava uma entrega pendente** do e-book: uma
