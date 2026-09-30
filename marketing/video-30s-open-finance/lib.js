@@ -1,7 +1,19 @@
 // Base da composição: matemática, easings, cores/temas, texto e morph de caminhos.
 // Tudo aqui é puro (função do tempo); quem desenha recebe o ctx.
 
-export const W = 1080, H = 1920, FPS = 60, DUR = 20;
+export const W = 1080, H = 1920, FPS = 60, DUR = 30;
+
+// O vídeo dura 30s, mas a composição foi escrita em "tempo de composição" (0–22s). Cada cena
+// ganhou tempo de leitura esticando o seu trecho: [tempo do vídeo, tempo de composição].
+// A trilha (soundtrack.py) usa a MESMA tabela; mude as duas juntas.
+export const TIME_KNOTS = [[0, 0], [5, 3], [9.5, 6], [19, 13], [23, 16], [30, 22]];
+export function toComp(T) {
+  const K = TIME_KNOTS;
+  for (let i = 1; i < K.length; i++) {
+    if (T <= K[i][0]) return K[i - 1][1] + (K[i][1] - K[i - 1][1]) * (T - K[i - 1][0]) / (K[i][0] - K[i - 1][0]);
+  }
+  return K[K.length - 1][1];
+}
 
 export const clamp = (x, a = 0, b = 1) => Math.min(b, Math.max(a, x));
 export const lerp = (a, b, t) => a + (b - a) * t;

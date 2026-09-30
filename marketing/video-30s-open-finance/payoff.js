@@ -1,4 +1,4 @@
-// 6–16s · Payoff + Organização. Uma câmera viaja pelo dashboard; cada funcionalidade nasce da anterior:
+// Payoff + Organização (composição 6–16s = vídeo 9,5–23s). Uma câmera viaja pelo dashboard; cada funcionalidade nasce da anterior:
 // linha → Gastos (donut) → cartão → parcelas → timeline → gráfico → dashboard inteiro.
 import { W, H, E, seg, bell, inv, lerp, clamp, PINK, rgba, mixHex, rr, rrc, txt, tw, brl, rollText, strokePts } from "./lib.js";
 import { ROWS, drawRow, drawCreditCard } from "./items.js";

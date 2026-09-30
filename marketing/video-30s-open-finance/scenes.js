@@ -1,7 +1,7 @@
 /* global document */
 // Orquestra as cenas no tempo. Cada cena é uma função de t; as janelas se sobrepõem de propósito,
 // porque cada uma nasce de um objeto da anterior.
-import { W, H, DARK, LIGHT, PINK, rgba, lerp, seg, E } from "./lib.js";
+import { W, H, DARK, LIGHT, PINK, rgba, lerp, seg, E, toComp } from "./lib.js";
 import { drawConnect, hubRadius, HUB } from "./connect.js";
 import { drawHook, drawHookText, drawVortexCore, prepareHook } from "./hook.js";
 import { drawPayoff } from "./payoff.js";
@@ -45,7 +45,8 @@ function withFinale(ctx, t, th) {
   drawFootnote(ctx, t, th);
 }
 
-export function draw(ctx, t) {
+export function draw(ctx, T) {
+  const t = toComp(T);
   if (t >= 13.0 && t < 14.0) {
     withFinale(ctx, t, DARK);
     ctx.save();

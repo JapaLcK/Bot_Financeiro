@@ -1,4 +1,4 @@
-// 0–3s · Gancho: excesso de informação em profundidade, câmera avançando, tudo atraído para um ponto.
+// Gancho (composição 0–3s = vídeo 0–5s): excesso de informação em profundidade, câmera avançando, tudo atraído para um ponto.
 import { W, H, E, seg, lerp, clamp, rng, DARK, PINK, rgba, FONT } from "./lib.js";
 import { HOOK, SIZE, drawHookItem } from "./items.js";
 
@@ -86,7 +86,9 @@ export function drawHook(ctx, t, th = DARK) {
 }
 
 // ------------------------------------------------------------------ título cinético
-const LINES = [["Sua vida"], ["financeira"], ["está", "espalhada?"]];
+// As letras entram espalhadas (bagunçadas) e se arrumam, linha por linha, até ficarem legíveis;
+// só "bagunçada?" segue com um leve tremor. Depois o texto também é sugado pelo vórtice.
+const LINES = [["Sua vida"], ["financeira"], ["está", "bagunçada?"]];
 const TS = 132;
 let letters = null;
 export function prepareHook(ctx) {
@@ -98,14 +100,14 @@ export function prepareHook(ctx) {
     const line = words.join(" ");
     const lw = ctx.measureText(line).width, bx = W / 2 - lw / 2;
     let off = 0;
-    words.forEach((wd, wi) => {
+    words.forEach(wd => {
       const start = line.indexOf(wd, off); off = start + wd.length;
       for (let k = 0; k < wd.length; k++) {
         const i = start + k;
         letters.push({
           ch: wd[k], x: bx + ctx.measureText(line.slice(0, i)).width, y: ys[li],
-          w: ctx.measureText(wd[k]).width, li, wi: li * 1.2 + (wd === "espalhada?" ? 2.2 : wi * .7),
-          sc: wd === "espalhada?", ph: r() * 6.28, rank: r(), ph2: r() * 6.28, n: letters.length,
+          w: ctx.measureText(wd[k]).width, li, sc: wd === "bagunçada?",
+          ph: r() * 6.28, rank: r(), ph2: r() * 6.28, rot0: r.between(-.5, .5), n: letters.length,
         });
       }
     });
@@ -115,7 +117,7 @@ export function prepareHook(ctx) {
 export function drawHookText(ctx, t) {
   if (!letters || t > 3.3) return;
   // escurece o miolo para o texto ler sobre o caos
-  const sc = seg(t, .05, .5, E.out2) * (1 - seg(t, 2.3, 3.0, E.io2));
+  const sc = seg(t, .05, .5, E.out2) * (1 - seg(t, 2.5, 3.0, E.io2));
   if (sc > 0) {
     const g = ctx.createRadialGradient(W / 2, 930, 60, W / 2, 930, 720);
     g.addColorStop(0, `rgba(9,9,11,${.62 * sc})`); g.addColorStop(1, "rgba(9,9,11,0)");
@@ -124,19 +126,17 @@ export function drawHookText(ctx, t) {
   ctx.textBaseline = "alphabetic"; ctx.textAlign = "left"; ctx.letterSpacing = "-5px";
   ctx.font = `850 ${TS}px ${FONT}`;
   for (const L of letters) {
-    const t0 = .08 + L.wi * .17;
-    const pin = seg(t, t0, t0 + .55, E.outExpo);
+    const t0 = .05 + .03 * L.n;
+    const pin = seg(t, t0, t0 + .5, E.outExpo);
     if (pin <= 0) continue;
-    let s = lerp(2.6, 1, pin), x = L.x + L.w / 2, y = L.y - TS * .34, rot = lerp(L.ph - 3.14 > 0 ? .25 : -.25, 0, pin);
-    // "espalhada?" realmente se espalha
-    if (L.sc) {
-      const amp = seg(t, .9, 2.0, E.outBack) * 95;
-      x += Math.cos(L.ph + t * 1.4) * amp * (.5 + L.rank);
-      y += Math.sin(L.ph2 + t * 1.1) * amp * .8;
-      rot += Math.sin(L.ph + t * 2) * .3 * (amp / 95);
-      s *= 1 + .12 * Math.sin(L.ph2 + t * 3) * (amp / 95);
-    }
-    const w = seg(t, 2.2 + L.n * .006, 2.98, E.in3);
+    // k: 1 = espalhada, 0 = arrumada. Cada linha se arruma um pouco depois da anterior.
+    const k = 1 - seg(t, .3 + .08 * L.li, 1.05 + .22 * L.li + (L.sc ? .2 : 0), E.io3);
+    const amp = 250 * (.45 + L.rank) * k + (L.sc ? 6 : 0);
+    let x = L.x + L.w / 2 + Math.cos(L.ph + t * 1.6) * amp, y = L.y - TS * .34 + Math.sin(L.ph2 + t * 1.3) * amp * .8;
+    x = clamp(x, 70, W - 70); y = clamp(y, 170, H - 170);
+    let s = lerp(2.6, 1, pin) * (1 + .12 * Math.sin(L.ph2 + t * 3) * k);
+    let rot = lerp(L.rot0, 0, pin) + Math.sin(L.ph + t * 2) * (.5 * k + (L.sc ? .05 : 0));
+    const w = seg(t, 2.4 + L.n * .006, 3.02, E.in3);
     if (w > 0) { [x, y] = spiral(x, y, w, L.rank, 2.0); s *= 1 - .92 * w ** 1.2; }
     if (s < .02) continue;
     const a = pin * (w > .92 ? 1 - (w - .92) * 12 : 1);

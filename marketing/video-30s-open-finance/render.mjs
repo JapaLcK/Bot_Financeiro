@@ -1,5 +1,5 @@
-// Renderiza index.html em MP4 quadro a quadro (determinístico: cada quadro é __seek(t)).
-//   FFMPEG=/caminho/ffmpeg node marketing/video-20s-open-finance/render.mjs
+// Renderiza index.html em MP4 de 30s quadro a quadro (determinístico: cada quadro é __seek(t)).
+//   FFMPEG=/caminho/ffmpeg node marketing/video-30s-open-finance/render.mjs
 //   render.mjs --stills 0.5,2.6,8.9     → PNGs soltos em out/, sem vídeo
 //   render.mjs --sheet 0,0.25,...       → uma folha de contato única (out/sheet.png), para revisar a sequência
 // Se out/soundtrack.wav existir (soundtrack.py), ele entra no MP4.
@@ -13,7 +13,7 @@ import { fileURLToPath } from "node:url";
 const HERE = dirname(fileURLToPath(import.meta.url));
 const ROOT = resolve(HERE, "../..");
 const OUT = join(HERE, "out");
-const FPS = 60, DUR = 20;
+const FPS = 60, DUR = 30;
 const arg = k => { const i = process.argv.indexOf(k); return i > 0 ? process.argv[i + 1] : null; };
 const stills = arg("--stills"), sheet = arg("--sheet");
 
@@ -26,7 +26,7 @@ const server = createServer(async (req, res) => {
 }).listen(0, "127.0.0.1"); // só loopback: o handler serve qualquer arquivo do repo
 await new Promise(r => server.once("listening", r));
 const ss = arg("--ss") || (stills || sheet ? "2" : "4");
-const url = `http://127.0.0.1:${server.address().port}/marketing/video-20s-open-finance/index.html?render=1&ss=${ss}`;
+const url = `http://127.0.0.1:${server.address().port}/marketing/video-30s-open-finance/index.html?render=1&ss=${ss}`;
 
 await mkdir(OUT, { recursive: true });
 const browser = await chromium.launch(process.env.CHROMIUM ? { executablePath: process.env.CHROMIUM } : {});
@@ -59,7 +59,7 @@ if (stills) {
   const ff = process.env.FFMPEG || "ffmpeg";
   const wav = join(OUT, "soundtrack.wav");
   const hasAudio = await access(wav).then(() => true, () => false);
-  const dest = join(OUT, "pigbank-open-finance-20s.mp4");
+  const dest = join(OUT, "pigbank-open-finance-30s.mp4");
   const args = ["-y", "-loglevel", "error", "-f", "image2pipe", "-framerate", String(FPS), "-c:v", "mjpeg", "-i", "-",
     ...(hasAudio ? ["-i", wav, "-c:a", "aac", "-b:a", "192k", "-shortest"] : []),
     "-c:v", "libx264", "-preset", "slow", "-crf", "18", "-pix_fmt", "yuv420p", "-movflags", "+faststart", dest];

@@ -1,5 +1,5 @@
-// 3–6s · Conecte: vórtice → celular PigBank → botão → bordas viram linhas até as instituições → hub → tela.
-import { E, seg, bell, lerp, clamp, inv, DARK, PINK, NEON, rgba, mixHex, rr, rrc, txt, icon, brl, IMG, rrPts, bez, strokePts, rollText } from "./lib.js";
+// Conecte (composição 3–6s = vídeo 5–9,5s): vórtice → celular PigBank → botão → bordas viram linhas até as instituições → hub → tela.
+import { W, H, E, seg, bell, lerp, clamp, inv, DARK, PINK, NEON, rgba, mixHex, rr, rrc, txt, icon, brl, IMG, rrPts, bez, strokePts, rollText } from "./lib.js";
 import { VORTEX, heroItems } from "./hook.js";
 import { drawRow, ROWS } from "./items.js";
 
@@ -139,7 +139,6 @@ function strands(ctx, t, g) {
   // fonte: a borda do botão, levada pela transformação do celular
   const btn = rrPts(0, 0, BTN.w, BTN.h, 56, K * SEGN + 1);
   const expand = 1 + .1 * bell(t, 4.5, 4.75);
-  const ret = []; // quanto cada linha já recolheu
   NODES.forEach((n, k) => {
     const src = [];
     for (let i = 0; i <= SEGN; i++) { const p = btn[k * SEGN + i]; src.push(toScreen(g, BTN.x + p[0] * expand, BTN.y + p[1] * expand)); }
@@ -169,9 +168,7 @@ function strands(ctx, t, g) {
         ctx.beginPath(); ctx.arc(p[0], p[1], 8, 0, 7); ctx.fillStyle = "#fff"; ctx.shadowColor = PINK; ctx.shadowBlur = 18; ctx.fill(); ctx.shadowBlur = 0;
       }
     }
-    ret[k] = { tip: pts[last], arrive };
   });
-  return ret;
 }
 
 function nodes(ctx, t) {
@@ -232,15 +229,24 @@ export function drawConnect(ctx, t) {
   const hubT = t > 5.88 ? hubRadius(t) : null;
   if (hubT && hubT > 1000) return;
   ctx.save();
-  if (t < 5.6) {
-    // a parte do celular some quando ele vira hub (continua visível como círculo)
-  }
   drawPhone(ctx, t, g);
   heroes(ctx, t, g);
   hubLogo(ctx, t, g);
   ctx.restore();
+  // Fios e nós passam POR TRÁS do celular/hub: fora dele eles aparecem inteiros; dentro dele só
+  // aparecem enquanto a borda do botão ainda se solta (hole: 0 → 1), e depois o hub os cobre.
+  ctx.save();
+  ctx.beginPath(); ctx.rect(0, 0, W, H); ctx.roundRect(g.cx - g.w / 2, g.cy - g.h / 2, g.w, g.h, g.r); ctx.clip("evenodd");
   strands(ctx, t, g);
   nodes(ctx, t);
+  ctx.restore();
+  const inside = 1 - seg(t, 4.68, 4.9);
+  if (inside > 0) {
+    ctx.save();
+    ctx.beginPath(); ctx.roundRect(g.cx - g.w / 2, g.cy - g.h / 2, g.w, g.h, g.r); ctx.clip();
+    ctx.globalAlpha = inside; strands(ctx, t, g);
+    ctx.restore();
+  }
   cursor(ctx, t);
   titles(ctx, t);
 }
