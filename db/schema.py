@@ -750,6 +750,37 @@ def init_db():
           unique(connection_id, provider_investment_id)
         )
         """,
+        # Foto diária por posição (dashboard v2, etapa 0): uma linha por posição
+        # por dia do app, gravada pelo sync (db/of_snapshots.py). Chave natural,
+        # SEM FK para open_finance_investments.id — a reconciliação apaga e
+        # recria a posição com id novo, e o histórico sobrevive. SEM user_id: o
+        # dono é open_finance_connections.user_id (o merge_users move a conexão);
+        # toda leitura filtra por `join open_finance_connections c on
+        # c.id = s.connection_id where c.user_id = %s`. A PK começa por
+        # connection_id e serve de índice ao FK/cascade.
+        # ponytail: sem poda; ~70 linhas/dia em 2026-09-29; revisitar a retenção
+        # quando a base crescer.
+        """
+        create table if not exists open_finance_investment_snapshots (
+          connection_id bigint not null references open_finance_connections(id) on delete cascade,
+          provider_investment_id text not null,
+          observed_on date not null,
+          observed_at timestamptz not null,
+          collection_confirmed boolean not null,
+          position_at timestamptz,
+          status text,
+          balance numeric,
+          amount numeric,
+          amount_original numeric,
+          quantity numeric,
+          contract_rate numeric,
+          contract_rate_type text,
+          last_month_rate numeric,
+          last_twelve_months_rate numeric,
+          annual_rate numeric,
+          primary key (connection_id, provider_investment_id, observed_on)
+        )
+        """,
 
         # -----------------------------
         # Banqueiro (agente cofre): vincula uma caixinha/meta do PigBank a um

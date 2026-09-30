@@ -18,6 +18,7 @@ from .cards import (
     remove_single_credit_transaction,
 )
 from .connection import TIPO_CANON_SQL, get_conn
+from .of_snapshots import grava_fotos_posicoes
 from .users import ensure_user, ensure_user_tx
 
 # `logging` da stdlib, mesmo padrão (e mesmo motivo) de `db/open_finance_state.py`:
@@ -1042,6 +1043,17 @@ def save_open_finance_investments(connection_id: int, investments: list[dict], *
                 )
                 count += 1
                 vistos.append(str(inv["provider_investment_id"]))
+
+            # Foto diária (histórico) no MESMO commit, mas sob SAVEPOINT: falha
+            # nela não pode congelar o espelho nem as caixinhas. Só o nome do
+            # tipo no log — `str(exc)` do psycopg traz valor da linha.
+            try:
+                with conn.transaction():
+                    grava_fotos_posicoes(cur, connection_id, investments, now, leitura_completa)
+            except Exception as exc:
+                logger.warning("foto das posições OF não gravada connection_id=%s erro=%s",
+                               connection_id, type(exc).__name__,
+                               extra={"user_id": owner["user_id"]})
 
             # RELIGAÇÃO pela lápide: a posição que tinha sumido voltou, com id NOVO
             # (a linha antiga foi apagada), e a meta que a perdeu a reconhece pela
