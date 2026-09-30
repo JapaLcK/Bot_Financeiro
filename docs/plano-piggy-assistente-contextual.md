@@ -89,8 +89,13 @@ o estado. A guarda atual, que só registra logs, não basta para isso.
   dentro do limite, sem conciliação nem declaração pendente capaz de mudar o resultado) e datas de
   pagamento conhecidas ou confirmadas. Faltando um deles, o estado é `dados_insuficientes` ou
   `dados_desatualizados`, com o dado que falta. Com pendência de conciliação, o veredito só sai se
-  sobreviver ao `delta_se_confirmar` aplicado no sentido que o enfraquece; senão, o estado é
-  `dados_desatualizados` e a Piggy pede a conferência. A falta **só** da
+  sobreviver ao pior caso **por direção**, e não ao `delta_se_confirmar` agregado: o agregado soma
+  ajustes de sinais opostos que se cancelam, mas cada pendência é confirmada sozinha
+  (`confirm_reconciliation` age por `of_tx_id`). O limite que enfraquece um "não recomendo" é a soma
+  só dos ajustes individuais a favor do saldo; o que enfraquece um "cabe" é a soma só dos contra. É
+  a mesma separação que `PENDING_RECONCILIATION_SQL` já faz para `receita_back`. Se o veredito não
+  sobreviver, o estado é `dados_desatualizados` e a Piggy pede a conferência. Declaração pendente
+  sem efeito quantificado no saldo impede o veredito. A falta **só** da
   estimativa variável não impede `risco_identificado`, porque ela apenas pioraria o caixa.
   Resposta: "não recomendo nesta condição", com data e valor.
 - `cabe_nas_premissas` fica **desligado** até a estimativa variável ser validada (Etapa 3). Quando
@@ -106,14 +111,16 @@ Não presumir "sem juros" se a oferta só mostra preço e número de parcelas.
 **O contrato atual do simulador não representa uma oferta real e precisa ser estendido** antes de
 receber ofertas do chat ou do print:
 
-- **Parcela cotada.** Hoje `Cenario` só aceita `preco`, `parcelas` e `juros_mensal_pct` e calcula as
-  parcelas ele mesmo. "À vista R$ 1.000 ou 12× R$ 100" não cabe: `preco=1200` com taxa 0 reporta
-  juros zero, e `preco=1000` não reproduz as parcelas. O cenário passa a aceitar o cronograma
-  cotado (valor de cada parcela), exclusivo com `juros_mensal_pct`. O custo em relação ao à vista
-  e a taxa implícita são calculados a partir dele. Sem valor de parcela nem taxa, o estado é
-  `dados_insuficientes`, nunca taxa zero.
-- **Data da primeira parcela.** Hoje ela é sempre um mês após a compra. O cenário passa a aceitar a
-  data informada; sem ela, a hipótese fica marcada (item 2 das falhas).
+- **Cronograma cotado.** Hoje `Cenario` só aceita `preco`, `parcelas` e `juros_mensal_pct`, calcula
+  as parcelas ele mesmo e põe cada uma um mês depois da anterior (`_add_months` em
+  `_decision_events`). "À vista R$ 1.000 ou 12× R$ 100" não cabe: `preco=1200` com taxa 0 reporta
+  juros zero, e `preco=1000` não reproduz as parcelas. Um cronograma irregular, como pagamentos em
+  15 e 90 dias, também não cabe. O cenário passa a aceitar o cronograma como pares
+  **(valor, data)**, exclusivo com `juros_mensal_pct`. O custo em relação ao à vista e a taxa
+  implícita são calculados a partir dele. Sem valor de parcela nem taxa, o estado é
+  `dados_insuficientes`, nunca taxa zero. Sem as datas, a cadência mensal a partir da compra é
+  hipótese marcada e segue o item 2 das falhas: se a data puder mudar a conclusão, a Piggy pede
+  a confirmação.
 - **Mais de três opções numa leitura.** `Simulacao.cenarios` tem `max_length=3`. Uma varredura de
   1 a 12 vezes não cabe, e dividi-la em várias chamadas de `simulate()` compararia as opções
   contra leituras diferentes do saldo. O limite sobe até o teto operacional da varredura, numa
@@ -150,7 +157,7 @@ provedor podem ter retenção própria. Validar política e texto ao usuário an
 | --- | --- | --- |
 | 0. Casos e dados | Inventariar fontes; montar casos rotulados de renda irregular, cartão, gastos variáveis, saldos parciais e prints | Casos cobrindo cada estado; regra de abstenção escrita |
 | 1. Alertas negativos e inconclusivos | Estados `dados_insuficientes`, `dados_desatualizados` e `risco_identificado` montados pelo código no simulador e no chat; confiabilidade de saldo e datas checada antes do veredito; "cabe" desligado | Teste pela conversa `handle_incoming` em duas mensagens com novo lançamento entre elas; saldo parcial e data suposta geram inconclusivo, não "não recomendo"; o modelo não reverte o estado |
-| 2. Parcelas e horizonte | Contrato do simulador estendido (parcela cotada, data da primeira parcela, mais de três opções numa leitura); varredura das opções oferecidas; horizonte até a última parcela ou o teto | Casos de compra no fechamento, salário antes/depois da parcela, parcelas além de 90 dias, oferta com parcela cotada sem taxa, oferta com mais de três opções |
+| 2. Parcelas e horizonte | Contrato do simulador estendido (cronograma cotado em pares valor/data, mais de três opções numa leitura); varredura das opções oferecidas; horizonte até a última parcela ou o teto | Casos de compra no fechamento, salário antes/depois da parcela, parcelas além de 90 dias, oferta com parcela cotada sem taxa, cronograma irregular, oferta com mais de três opções |
 | 3. Caixa honesto e "cabe" | Estimativa variável explícita sem duplicar faturas; meta de falsos "cabe" definida; "cabe" ligado atrás de flag desligável | Taxa de falsos "cabe" medida nos casos rotulados abaixo da meta; dado incompleto nunca aprova |
 | 4. Print no WhatsApp | Legenda preservada, gate que falha fechado, prévia corrigível, consulta sem escrita, mesma simulação | OCR errado, recibo, imagem ambígua, "sim", mensagens fora de ordem e erro no gate não causam lançamento, gasto de visão nem orientação indevida; medir demanda e custo |
 | 5. Decisão sobre desktop | Comparar uso do print, abandono do fluxo, entrevistas e pedidos por acesso sobre outros apps | Só então especificar macOS/Windows; pouco uso do print sozinho não prova falta de demanda |
@@ -177,7 +184,8 @@ paralelo.
 - **Regressão (inventário, não escopo de um PR só):** gastos variáveis ausentes e duplicados,
   compra no fechamento do cartão, salário antes/depois da parcela, fatura vencida, parcelas além
   de 90 dias, reserva já violada, banco indisponível, oferta sem CET, OCR errado, legenda ignorada,
-  pendência de lançamento, conciliação ou declaração do Open Finance pendente, saldo alterado
+  pendência de lançamento, conciliação ou declaração do Open Finance pendente (inclusive com
+  ajustes de sinais opostos que se cancelam no agregado), saldo alterado
   após novo gasto, erro no gate do print.
 - **Lançamento gradual:** alertas negativos e inconclusivos primeiro; "cabe" só após a meta de
   falsos "cabe" definida e atingida. Poder desligar a orientação sem desligar a simulação
