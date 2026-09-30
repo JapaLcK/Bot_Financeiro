@@ -434,7 +434,10 @@ tentativa aberta por cliente).
    preço oferecido, gravada pelo PR 2) **e** veio da `/assinar` (`metadata.origem ==
    "assinar"`, embutida ou hospedada), **grava uma entrega pendente** do e-book: uma
    linha por `user_id` + `session_id`, idempotente, para a reentrega do evento não
-   criar outra. O webhook **não** envia e **não** chama a Stripe para isso.
+   criar outra. Ela guarda também a **URL do e-book no momento da compra** (foto do
+   `EBOOK_URL`), porque o envio pode esperar dias pela senha, e a env pode mudar ou
+   sumir nesse tempo. O webhook **não** envia e **não** chama a Stripe para isso. Sem
+   `EBOOK_URL` na hora da compra, o PR 2 nem oferece o e-book.
    - **Onde e em que ordem:** logo depois do grant, **antes** dos outros efeitos do
      ramo (funil, e-mails, `notify_new_pro`). Se a gravação falhar, o ramo responde
      **5xx** como já faz quando o grant falha ("o grant vem primeiro"). Nada depois dele
@@ -455,7 +458,9 @@ tentativa aberta por cliente).
        ciclo.
    - **O que o job faz:** confirma pela `list_line_items` (preço = `ebook_price`) que o
      e-book foi comprado. Se não foi, fecha a pendência sem enviar. Se foi, envia com
-     `_fire_email(user_id, send_ebook_email, EBOOK_URL, dedup_days=3650)`. A chave interna
+     `_fire_email(user_id, send_ebook_email, <URL da pendência>, dedup_days=3650)`, com a
+     foto e nunca a env do momento. URL vazia na pendência não conta como enviado: a
+     pendência fica aberta e gera alerta. A chave interna
      dele (`send_ebook_email_sent`) é a única marca de "enviado", **sem segunda chave**.
      A pendência é fechada quando o `_fire_email` devolve True ou quando a chave já
      existe. Uma falha (Stripe fora, e-mail recusado) mantém a pendência para o próximo
@@ -591,6 +596,20 @@ a rede.
    "Reenviar" + "E-mail errado? Corrigir" (→ `/settings`, que já troca o e-mail) +
    "Sair". Quando a aba volta ao foco, relê o `/auth/me`: o reset revoga todas as
    sessões (monólito :3711), e se vier 401 vai para `/login`.
+3b. **Trocar o e-mail invalida os links de reset em aberto.** Hoje o token de reset
+   guarda só o `user_id` (`password_reset_tokens`, gravado por
+   `create_password_reset_token_impl`), o consumo não confere o e-mail atual, e a troca
+   de e-mail (`PATCH /settings/{uid}/security/contact`) não mexe nos tokens.
+   - **O risco:** quem clicou em "Enviar link" com o e-mail errado e depois corrigiu
+     deixa, por 30 min, um link válido na caixa do dono do e-mail errado. Ele cria a
+     senha, derruba as sessões do comprador e fica com a conta paga.
+   - **Conserto:** na mesma transação da troca de e-mail, marcar como usados os tokens em
+     aberto do usuário (`update password_reset_tokens set used_at = now() where user_id
+     = %s and used_at is null`).
+   - **Teste:** pedir o link, trocar o e-mail e tentar consumir o link antigo → recusado.
+     O link pedido depois da troca funciona.
+   - **Isto já vale hoje na `main`**, para qualquer conta, e não só a do quiz. Se o
+     conserto entrar antes num PR próprio, o PR 4 só confere que ele existe.
 4. Ordem dos overlays na `/home` (enumerar antes de codar: overlay de checkout,
    boas-vindas do Pro, onboarding do MFA e este): o gate só sobe **depois** de o overlay
    de checkout fechar e fica **acima** das boas-vindas. Com o gate de pé, o onboarding
