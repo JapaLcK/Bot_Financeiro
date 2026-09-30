@@ -464,6 +464,8 @@ tentativa aberta por cliente).
      - Assim, quem digitou um e-mail errado e o corrigiu na `/settings` recebe no
        endereço certo, e o dono de um e-mail alheio nunca recebe o e-book de outro.
      - Custo aceito: quem paga e nunca cria a senha não recebe o e-book.
+     - Quem cancela o trial recebe o e-book que pagou (decisão do dono em 2026-09-30):
+       o job não passa pelo `filtrar_por_acesso`.
      - O PR 4 pode acordar o job na hora em que a senha é criada, sem esperar o próximo
        ciclo.
    - **O que o job faz:** confirma pela `list_line_items` (preço = `ebook_price`) que o
