@@ -244,6 +244,29 @@ Stripe: `/billing/create-checkout`, `webhook`, `portal`, `subscription`,
 com 410: a escolha do plano Grátis saiu da /precos em 2026-09-02; a rota
 sobrevive pra devolver `detail.message` a cliente antigo em cache).
 
+**`/billing/create-checkout` serve a `/precos` e a `/assinar`.** O corpo ganha
+`origem` (`"precos"` default | `"assinar"`; outro valor é 400) e `embutido` (default
+`false`). Hospedado responde `{checkout_url, interval, plan}`; embutido responde
+`{client_secret, publishable_key, trial_days, interval, plan}` (`ui_mode="embedded_page"`,
+`return_url` = a mesma URL de sucesso do hospedado). O `session_id`
+nunca vai no corpo. A sessão grava `origem` e `td` (dias de trial) no metadata e no
+da assinatura; uma sessão aberta só é reaproveitada pelo mesmo plano × intervalo ×
+origem × modo (sessão sem `origem` = `/precos`), e a embutida reaproveitada devolve o
+trial com que nasceu (`td`). Só a `/assinar` fixa BRL (`adaptive_pricing` off), volta
+para `/assinar?plano=&ciclo=` no abandono e oferece o e-book (`optional_items`); a
+`/precos` segue com os kwargs de antes. Toda sessão da `/assinar` (embutida **e**
+hospedada), e todo embutido, expira em 1 h (`expires_at`): o default de 24 h do Stripe
+deixaria aberta a janela de cobrança dupla (Pix numa aba, cartão na outra); o
+hospedado da `/precos` segue sem. Envs:
+`STRIPE_PUBLISHABLE_KEY` (sem ela o embutido é 503, antes de tocar no Stripe),
+`STRIPE_PRICE_ID_EBOOK` e `EBOOK_URL` — o e-book só é oferecido com **as duas**
+preenchidas (preço sem URL venderia o que o webhook não tem como entregar). Quando
+oferecido, a sessão grava `ebook_price` (o preço do e-book no nascimento) no metadata
+e no da assinatura; sem e-book a chave não existe. O PR 3 identifica o e-book por essa
+foto, não pela env do momento do webhook. **Não setar `STRIPE_PRICE_ID_EBOOK` nem
+`EBOOK_URL` em produção antes do PR 3 do funil v3** (a entrega do e-book): um POST com
+`origem:"assinar"` venderia o e-book sem entrega.
+
 A **escada de planos é `free < essencial < plus < pro`**, atrás do flag
 `PLANS_V2_ENABLED` (lido dinamicamente, sem redeploy; `0`/`false` é freio de
 emergência e colapsa no binário legado). **A fonte de verdade é
@@ -408,7 +431,9 @@ mora; não duplicar aqui). O essencial de domínio:
   nascer em arquivo próprio (§0.5 da raiz), com rota própria em `static_pages.py`.
 - **Segurança de borda** (medida em produção): CSP com allowlist explícita
   (`cdnjs`, `jsdelivr`, `cdn.pluggy.ai`, `connect.facebook.net`,
-  `static.cloudflareinsights.com`), HSTS, `X-Frame-Options: DENY`,
+  `static.cloudflareinsights.com`; o Stripe em `script-src` — `js.stripe.com`,
+  `*.js.stripe.com`, `checkout.stripe.com` — e em `frame-src` — os mesmos mais
+  `hooks.stripe.com` —, para o checkout embutido da `/assinar`), HSTS, `X-Frame-Options: DENY`,
   `Permissions-Policy` zerando câmera/microfone/geolocalização,
   `Referrer-Policy: strict-origin-when-cross-origin`, `X-Content-Type-Options: nosniff`.
   O `'unsafe-inline'` do `script-src` só sai quando os handlers inline saírem.
