@@ -245,6 +245,26 @@ PR de cada etapa, não soluções prontas. Cada PR confere se ainda valem, decid
   - banco religado guarda o `last_sync_at` antigo; `connection_ui_state()` já trata
     `last_sync_at < reconnected_at` como não sincronizado, e é essa a fonte do estado da
     conexão, não a idade do sync.
+  - Transação e fatura do cartão:
+    - o `status` da transação (PENDING × POSTED) é ignorado: autorização pendente entra
+      na fatura e, se for lançada com outro id, conta duas vezes;
+    - a moeda da transação (`currencyCode`, `amountInAccountCurrency`) é ignorada: compra
+      internacional entra em reais pelo valor na moeda original;
+    - a fatura é calculada localmente pelo fechamento do cartão; o `billId` e o endpoint
+      `/bills` da Pluggy (total, vencimento, mínimo) nunca são lidos, e nada confere o
+      `balance` da conta de crédito;
+    - o pagamento de fatura é reconhecido por palavra-chave (`is_credit_card_payment`):
+      outro texto vira estorno e reduz a fatura, e estorno com o texto certo é pulado. Como
+      nada fecha a fatura importada, o histórico importado aparece como vencido;
+    - o sinal do estorno (`amount > 0`) só foi conferido no sandbox;
+    - a chave do grupo de parcelas inclui a descrição, e banco que escreve "01/10",
+      "02/10" divide uma compra em vários grupos.
+  - Cartão em duplicidade: adotar um cartão manual mantém as compras já lançadas nele e
+    importa as mesmas de novo; OFX e Open Finance podem encher o mesmo cartão (o OFX só
+    deduplica `source='ofx'`); reconectar com item novo pode criar um segundo cartão
+    "· Open Finance" e deixar o primeiro com as faturas congeladas.
+  - Falha na leitura de investimentos ou no espelho de caixinhas sai como conexão
+    `ACTIVE`/`ok=True`, só com log (afeta patrimônio, não a previsão).
 - Quando o dado do Open Finance conta como desatualizado (limite por produto) e como a
   tela aberta percebe isso sem escrita.
 - Rentabilidade do Open Finance: medida em produção em 2026-09-29 (leitura, pelo dono;
@@ -309,6 +329,36 @@ PR de cada etapa, não soluções prontas. Cada PR confere se ainda valem, decid
     atrasadas mais antigas, e projetar desde o `start_date` repete anos já realizados:
     definir uma janela de conferência limitada, com a premissa do que veio antes dela dita
     na tela (é a decisão aberta 7 do plano da Piggy).
+  - Gasto variável do dia a dia (mercado, transporte) fica fora: a previsão supõe que ele
+    para hoje. O protótipo do v2 já desconta o ritmo dos últimos 60 dias
+    (`webapp/src/dashboard/lib/model.js`); a Etapa 3 leva uma estimativa assim para o
+    backend, marcada como estimativa e sem duplicar o que já está em fatura.
+  - A carteira Piggy não tem data de atualização: a confirmação da Q37 vale na primeira
+    visita e envelhece. Com a carteira no saldo, pedir confirmação atual ou mostrar "a
+    conferir".
+  - Recorrente e boleto fora de sincronia:
+    - gasto de valor variável sem estimativa é gravado com valor 0 (`db/recurring.py`) e
+      some da previsão;
+    - desativar o gasto fixo não cancela o boleto pendente (`list_bills` não olha
+      `is_active`);
+    - trocar de manual para automático conta duas vezes (o boleto pendente fica e a
+      ocorrência automática entra);
+    - mudar dia ou frequência deixa o boleto velho, e o novo também entra;
+    - o valor do boleto é copiado ao gerar e não acompanha a edição do gasto fixo;
+    - boleto manual de gasto pago no cartão sai como dinheiro na data do boleto;
+    - não existe data de fim nem número de parcelas restantes na recorrência, então
+      financiamento ou contrato que termina dentro do horizonte segue projetado;
+    - recorrência anual legada sem mês some.
+  - Conta marcada como paga "pelo banco" sai da previsão na hora, mas o saldo só cai na
+    próxima sincronização: por um tempo o dinheiro conta duas vezes.
+  - Datas sem dia útil: vencimento no fim de semana ou feriado e salário pago no dia útil
+    anterior mudam o pior dia nos dois sentidos.
+  - Fatura com total negativo (crédito por estorno) é ignorada, e o `credit_bills.total` é
+    um contador (`greatest(0, total - x)` ao desfazer) lido sem reconstruir.
+  - Saldo de partida: o `BANK_ACCOUNTS_SQL` escolhe a conexão mais nova por `id` antes de
+    filtrar as pausadas, então a conta some se a mais nova estiver pausada, mesmo com uma
+    antiga ativa; o `balance` do banco é usado sem conferir o que ele inclui (aplicação
+    automática, cheque especial); a caixinha do banco que resgata sozinha fica fora.
 - Etapa 4: reserva designada, custo mensal por frequência, reserva só em reais; caixinha
   manual versus a do banco.
 - Etapa 6: variação do período só dentro de um trecho sem quebra.
