@@ -132,6 +132,7 @@ Uma entrada nova no simulador entra nesta tabela antes de entrar no código. Con
 | Ocorrência de receita fixa ainda por vir no mês corrente | o salário pode ter caído antes do `pay_day` e já estar no saldo. Não há marcador: receita recorrente só prevê, e `last_credited_ym` é resto do cobrador removido que nada escreve (`db/recurring_income.py`) | só melhora | cabe: calcular sem essa ocorrência; se o "cabe" depender dela, perguntar |
 | Ocorrência de gasto fixo automático ainda por vir no mês corrente | a cobrança pode ter saído antes do `due_day` e já estar no saldo. Não há marcador: `last_charged_ym` também não é escrito (`db/recurring.py`) | só piora | risco: calcular sem essa ocorrência; se o risco depender dela, perguntar |
 | Boleto pendente | pode já ter sido pago pelo banco: o débito aparece no saldo consolidado, mas o `bill_instances.status` segue `pending`, porque a importação do Open Finance não marca conta paga (nenhum módulo de Open Finance escreve em `bill_instances`), e `_cashflow_events()` subtrai o boleto de novo | só piora | risco: calcular sem o boleto; se o risco depender dele, perguntar se já foi pago |
+| Fatura de cartão em aberto | pode já ter sido paga pelo banco: o débito aparece no saldo consolidado, mas a importação do Open Finance pula o pagamento de fatura (`import_open_finance_credit` em `db/open_finance.py`), e só `pay_bill_amount` (`db/cards.py`) atualiza `paid_amount`/`status`. `_open_card_bills_detail()` subtrai o saldo da fatura de novo | só piora | risco: calcular sem essa fatura; se o risco depender dela, perguntar se já foi paga |
 | Receita fixa projetada que pode não vir | renda apenas inferida, ou renda irregular | só melhora | cabe |
 | Gasto fixo automático pago no cartão | `payment_type="credit_card"`: `_cashflow_events()` ignora `payment_type` e tira o valor do caixa no `due_day`, e a mesma função tira a fatura aberta no vencimento dela. Depois que a cobrança é lançada no cartão, o valor sai duas vezes; antes, sai na data da cobrança em vez da data de pagar a fatura | só piora (dupla contagem ou saída antecipada) | risco, até esses gastos passarem pelo calendário da fatura sem duplicar |
 | Gasto fixo manual sem boleto gerado | só entra quando o boleto pendente já existe; conferir na implementação se as ocorrências futuras sem boleto ficam fora | só melhora | cabe |
@@ -156,8 +157,11 @@ receber ofertas do chat ou do print:
   `_decision_events`). "À vista R$ 1.000 ou 12× R$ 100" não cabe: `preco=1200` com taxa 0 reporta
   juros zero, e `preco=1000` não reproduz as parcelas. Um cronograma irregular, como pagamentos em
   15 e 90 dias, também não cabe. O cenário passa a aceitar o cronograma como pares
-  **(valor, data)**, exclusivo com `juros_mensal_pct`. O custo em relação ao à vista e a taxa
-  implícita são calculados a partir dele. Sem valor de parcela nem taxa, o estado é
+  **(valor, data)**. O que é exclusivo é o **modo de gerar as parcelas**: pelo cronograma cotado ou
+  pela taxa (`juros_mensal_pct`), nunca os dois. A taxa nominal anunciada e o CET, quando aparecem,
+  entram como dados informativos ao lado do cronograma, sem gerar parcelas. O custo em relação ao
+  à vista e a taxa implícita são calculados a partir do cronograma, e divergência entre a taxa
+  implícita e a anunciada é mostrada ao usuário. Sem valor de parcela nem taxa, o estado é
   `dados_insuficientes`, nunca taxa zero. Sem as datas, a cadência mensal a partir da compra é
   hipótese marcada e segue o item 2 das falhas: se a data puder mudar a conclusão, a Piggy pede
   a confirmação.
@@ -230,8 +234,8 @@ paralelo.
   compra no fechamento do cartão, salário antes/depois da parcela, fatura vencida, parcelas além
   de 90 dias, reserva já violada, banco indisponível, oferta sem CET, OCR errado, legenda ignorada,
   pendência de lançamento, receita ativa em frequência legada, boleto ou gasto fixo com valor
-  estimado (`variable_amount`), receita ou gasto fixo do mês já realizado antes do dia previsto (sem marcador), boleto pago pelo
-  banco e ainda pendente no PigBank, gasto fixo automático pago no cartão
+  estimado (`variable_amount`), receita ou gasto fixo do mês já realizado antes do dia previsto (sem marcador), boleto ou fatura de
+  cartão paga pelo banco e ainda aberta no PigBank, gasto fixo automático pago no cartão
   (antes e depois de a cobrança entrar na fatura), conciliação ou declaração do Open
   Finance pendente (inclusive com
   ajustes de sinais opostos que se cancelam no agregado), saldo alterado
