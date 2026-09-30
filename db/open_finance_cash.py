@@ -198,6 +198,7 @@ def reconcile_cash_transfers(cur, user_id) -> int:
                      left join ({BANK_ACCOUNTS_SQL}) e on e.id = a.id
                     where c.user_id = %s order by t.transaction_date, t.id""", (user_id, user_id))
     txs = [dict(r) for r in cur.fetchall()]
+    escopo = {t["id"] for t in txs if t["no_escopo"]}
     cur.execute("select * from of_cash_links where user_id=%s for update", (user_id,))
     links = {r["tx_key"]: dict(r) for r in cur.fetchall()}
     por_tx = {k["of_transaction_id"]: k for k in links.values() if k["of_transaction_id"]}
@@ -265,7 +266,7 @@ def reconcile_cash_transfers(cur, user_id) -> int:
                             (chave, t["akey"], duravel, link["id"], user_id))
                 links[chave] = links.pop(link["tx_key"])
                 link.update(tx_key=chave, account_key=t["akey"], key_durable=duravel)
-            n, reavaliar = _revisa(cur, user_id, link, t, kind)
+            n, reavaliar = _revisa(cur, user_id, link, t, kind, escopo)
             mudou += n
             if reavaliar:
                 status, manual = decide(t, kind, link["key_durable"], link["id"])

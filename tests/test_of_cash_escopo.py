@@ -8,7 +8,9 @@ from decimal import Decimal
 import pytest
 
 from conftest import usuario_pagante
-from tests._of_cash_helpers import caixa, carteira, conecta, dia, links, q, sync, tx  # noqa: F401
+from db.open_finance_cash_answers import answer_link
+from tests._of_cash_helpers import caixa, carteira, conecta, dia, launches_visiveis, links, q, sync, tx  # noqa: F401
+from tests.test_of_cash_estorno import _webhook_apaga
 
 
 def _status(conn_id, uid, status):
@@ -74,3 +76,60 @@ def test_janela_da_conexao_pausada_continua_contando(caixa):
 
     assert [r["status"] for r in links(uid)] == ["ativo", "perguntar_novo"]
     assert carteira(uid) == Decimal("200")
+
+
+def _extrato(p, saque=-200):
+    """Saque com categoria que não é interna por si (banco sem a categoria
+    enriquecida) e depósito: só o vínculo os tira de gasto/receita."""
+    return [tx(f"{p}-1", saque, dia(10), pid="P1", category="Transfers"),
+            tx(f"{p}-2", 300, dia(11), op="DEPOSITO", desc="Deposito em dinheiro", pid="P2")]
+
+
+def _pausada_e_nova(uid):
+    """Conexão A credita o saque e o depósito respondido; A é pausada; B, do
+    mesmo banco e conta, traz as mesmas transações (mesmo providerId)."""
+    a = conecta(uid, f"item-a-{uid}")
+    sync(a, uid, _extrato("a"))
+    answer_link(uid, next(r["id"] for r in links(uid) if r["kind"] == "deposito"), "cash")
+    _status(a, uid, "PAUSED")
+    b = conecta(uid, f"item-b-{uid}")
+    sync(b, uid, _extrato("b"))
+    return a, b
+
+
+def _ids_de(conn_id):
+    return {r["id"] for r in q("select t.id from open_finance_transactions t join open_finance_accounts a "
+                                "on a.id = t.account_id where a.connection_id=%s", (conn_id,), True)}
+
+
+def test_copia_da_conexao_nova_segue_fora_de_gasto_e_receita(caixa):
+    """A cópia de B não vira gasto/receita comum: o vínculo segue a cópia do escopo."""
+    uid = usuario_pagante()
+    _, b = _pausada_e_nova(uid)
+
+    assert launches_visiveis(uid) == []
+    assert carteira(uid) == Decimal("-100")
+    assert [r["status"] for r in links(uid)] == ["ativo", "ativo"]
+    assert {r["of_transaction_id"] for r in links(uid)} == _ids_de(b)
+
+
+def test_correcao_e_estorno_seguem_a_copia_do_escopo(caixa, monkeypatch):
+    uid = usuario_pagante()
+    _, b = _pausada_e_nova(uid)
+    sync(b, uid, _extrato("b", saque=-210))
+    assert carteira(uid) == Decimal("-90")
+
+    _webhook_apaga(monkeypatch, f"item-b-{uid}", ["b-1"])
+    assert carteira(uid) == Decimal("-300")
+    assert [r["status"] for r in links(uid)] == ["estornado", "ativo"]
+
+
+def test_despausar_a_antiga_nao_oscila_nem_credita(caixa):
+    """As duas no escopo: o vínculo fica na cópia de B, sync após sync."""
+    uid = usuario_pagante()
+    a, b = _pausada_e_nova(uid)
+    _status(a, uid, "UPDATED")
+    for c, p in ((a, "a"), (b, "b"), (a, "a")):
+        sync(c, uid, _extrato(p))
+        assert {r["of_transaction_id"] for r in links(uid)} == _ids_de(b)
+    assert carteira(uid) == Decimal("-100") and len(links(uid)) == 2

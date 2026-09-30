@@ -91,16 +91,19 @@ def _descasa(cur, user_id, link, corrigiu) -> bool:
     return True
 
 
-def _revisa(cur, user_id, link, t, kind) -> tuple[int, bool]:
+def _revisa(cur, user_id, link, t, kind, escopo) -> tuple[int, bool]:
     """Transação que já tem vínculo: religa, corrige ou estorna. Devolve
     (mudou, reavaliar) — reavaliar = volta à decisão (o manual não casa mais, ou
-    o banco mudou de novo um estado que ele mesmo encerrou)."""
-    if link["of_transaction_id"] is None:  # reconexão: mesma transação, espelho novo
+    o banco mudou de novo um estado que ele mesmo encerrou). `escopo`: ids das
+    transações do saldo consolidado (`BANK_ACCOUNTS_SQL`)."""
+    # Reconexão (espelho apagado) ou cópia numa conexão fora do escopo (pausada):
+    # o vínculo segue a cópia que o banco atualiza, e é ela que fica interna.
+    if link["of_transaction_id"] not in escopo:
         link["of_transaction_id"] = t["id"]
         cur.execute("update of_cash_links set of_transaction_id=%s, updated_at=now() where id=%s "
                     "and user_id=%s", (t["id"], link["id"], user_id))
     elif link["of_transaction_id"] != t["id"]:
-        return 0, False  # a mesma transação vista por outra conexão viva
+        return 0, False  # a mesma transação vista por outra conexão viva (as duas no escopo)
     if _do_usuario(link):  # só acompanha valor/data; o status não muda
         return _corrige(cur, user_id, link, t), False
     mudou = 0
