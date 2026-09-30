@@ -137,6 +137,7 @@ def install_runtime_boundaries(
         },
         claim_pending_action=lambda *_a, **_k: False,
         consume_pending_action=lambda *_a, **_k: False,
+        conta_sem_credencial=lambda _uid: False,
         get_conn=lambda: deny_boundary("database:get_conn"),
         get_or_create_canonical_user=canonical_user,
         get_pending_action=lambda _uid: None,

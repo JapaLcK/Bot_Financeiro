@@ -39,6 +39,10 @@ Resumo, Lançamentos, Previsão, Metas e caixinhas, Para onde vai, Patrimônio e
 Piggy com IA real e blocos. Pix, conexão do Open Finance, MFA e notificações continuam em
 `settings.html`/`precos.html`. O resto abre no antigo até ser migrado, um de cada vez.
 
+O Resumo tem um bloco de **contas**: o saldo de hoje no total e o de cada conta conectada
+no Open Finance, mais a carteira Piggy (dono, 2026-09-30: o protótipo não mostrava o saldo
+em lugar nenhum).
+
 ## 2. Fonte da verdade: Open Finance (Q36–Q43)
 
 - **Q36 — Open Finance é a fonte única** de Pix, contas, cartões, investimentos, aportes,
@@ -99,11 +103,11 @@ calma (Q5).
   a tela pede o dado de novo. Princípios: o aviso vai só para o dono do dado, só depois de
   gravado, e a tela nunca fica desatualizada em silêncio (reconectar refaz tudo; sessão
   encerrada fecha o stream). Toda escrita de dado financeiro avisa, venha de onde vier.
-  Processo único hoje; com mais de um processo, `LISTEN/NOTIFY` do Postgres: quem grava
-  faz `pg_notify` dentro da própria transação (sai só no commit; serve para thread e para
-  o `bot.py`) e cada processo web mantém uma conexão `LISTEN` que repassa aos streams
-  dele (desenho no docstring de `api/v2/eventos.py`, não construído). A etapa 0
-  confirma com o dono se o `bot.py` (Discord) sai do `launch.py`.
+  Construído com `LISTEN/NOTIFY` do Postgres: um trigger nas tabelas financeiras faz
+  `pg_notify` na transação de quem grava (sai só no commit; serve para thread e para
+  outro processo) e cada processo web mantém uma conexão `LISTEN` que repassa aos streams
+  dele (lista em `db/schema.py::TABELAS_QUE_AVISAM`, laço em `api/v2/eventos.py`). O
+  `bot.py` (Discord) sai do `launch.py`: decidido pelo dono, feito no PR 5a da etapa 0.
 - **Processo** (Q21): todo PR que cria ou muda endpoint da `/api/v2` é faixa Completo.
 
 ## 4. Dados e números
@@ -176,7 +180,7 @@ e esse histórico não se refaz:
 | Etapa | O que entra | Faixa |
 |---|---|---|
 | 0 | Esqueleto da `/api/v2` (usuário, erro, contrato, SSE), `/painel` com a chave, plano pelo `GET /api/v2/me`, TanStack Query, job da foto diária e histórico da rentabilidade do Open Finance | Completo |
-| 1 | Resumo (perfil no servidor) | API Completo, tela Leve |
+| 1 | Resumo (perfil no servidor), com o bloco de contas: saldo de hoje por conta | API Completo, tela Leve |
 | 2 | Lançamentos: ver tudo; lançar, editar e apagar na carteira (Q36) | idem |
 | 3 | Previsão | idem |
 | 4 | Metas e caixinhas | idem |
@@ -256,8 +260,9 @@ PR de cada etapa, não soluções prontas. Cada PR confere se ainda valem, decid
 - Etapa 0 em andamento, em 6 PRs (divisão aprovada pelo dono em 2026-09-26): 1 esqueleto
   (#632) · 2a `/painel` (#659) · 2b contrato TS + TanStack (#669) · 3 foto diária por
   posição do Open Finance (#675) · 4 SSE básico com os 2 avisos de hoje + conserto do
-  re-raise · 5 toda escrita financeira avisa + o Discord sai do `launch.py` · 6 job da
-  foto diária desligado por chave.
+  re-raise (#678) · 5 toda escrita financeira avisa + o Discord sai do `launch.py` · 6 job da
+  foto diária desligado por chave. O 5 foi dividido depois pelo dono: 5a o Discord sai do
+  `launch.py` · 5b toda escrita financeira avisa, por trigger do Postgres + `LISTEN`.
   - PR 1 (#632, mergeado): esqueleto da `/api/v2` (`usuario_atual`, envelope de erro,
     `GET /api/v2/me`, varredura de rotas).
   - PR 2a: a página `/painel` (gate de sessão, chave, UA do app e os gates do `/app`),
@@ -269,8 +274,9 @@ PR de cada etapa, não soluções prontas. Cada PR confere se ainda valem, decid
   - PR 3: foto diária por posição do Open Finance (`open_finance_investment_snapshots`,
     gravada no sync; coleta não confirmada entra marcada e a confirmada do mesmo dia vence;
     desconectar apaga; entra na exportação junto com as posições). Só a gravação: nada lê
-    ainda, e a fonte do Rendimento × CDI ficou para o dono (§4, §7).
-  - PR 4: `GET /api/v2/eventos` (SSE), com os 2 avisos que o `/ws` já dá (fim do sync do
+    ainda, e a fonte do Rendimento × CDI ficou para o dono (§4, §7). Conferência
+    pós-deploy: `scripts/conferir_fotos_of.py`.
+  - PR 4 (#678, mergeado): `GET /api/v2/eventos` (SSE), com os 2 avisos que o `/ws` já dá (fim do sync do
     Open Finance e "Recomeçar do zero"); sessão rechecada antes de cada envio e a cada
     30 s, teto de 5 streams por usuário; o `/painel` invalida as consultas a cada aviso.
     E o sub-app para de re-levantar a exceção que já respondeu. `LISTEN/NOTIFY` só no

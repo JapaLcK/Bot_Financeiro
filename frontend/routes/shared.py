@@ -1074,8 +1074,21 @@ def signup_source_from_request(request: Request, *, provedor: str | None = None)
     return "app" if in_app else "web"
 
 
+def exigir_credencial(user_id: int) -> None:
+    """403 `password_required` para conta sem senha e sem Google/Apple (a do
+    quiz, antes de clicar no link do e-mail). Sem isto, quem pagou com o
+    e-mail de outra pessoa usaria as APIs por baixo do overlay, e o dono do
+    e-mail depois leria os dados pelo "esqueci a senha" (docs/plano-funil-v3.md,
+    PR 4). Toda rota que bloqueia fora do gate central chama esta função; a
+    tabela rota a rota mora em `tests/test_rotas_senha_obrigatoria.py`."""
+    from db import conta_sem_credencial
+    if conta_sem_credencial(user_id):
+        raise HTTPException(status_code=403, detail={"error": "password_required"})
+
+
 def _enforce_subscription_gate(
-    request: Request, user_id: int, *, exige_direito: bool = True
+    request: Request, user_id: int, *, exige_direito: bool = True,
+    exige_credencial: bool = True,
 ) -> None:
     """Backstop server-side das rotas de dados do dashboard. Além do paywall
     (assinatura ativa/trial), fecha o gate de escolha de plano no cadastro: sem
@@ -1088,7 +1101,14 @@ def _enforce_subscription_gate(
     deixa a da ESCOLHA valendo. Mesmo nome e mesma semântica do
     `gate_plan_selection(request, exige_direito=False)` que serve o HTML de
     /settings — um conceito, um parâmetro, uma regra (§0.7). O único chamador
-    com `False` é `authorize_account_access`; leia a docstring dela."""
+    com `False` é `authorize_account_access`; leia a docstring dela.
+
+    A perna da CREDENCIAL (`exigir_credencial`, 403 `password_required`) vem
+    depois das duas do 402 e só com `exige_direito`: a saída de emergência
+    (`authorize_account_access`) também é a saída de quem precisa criar a
+    senha. Ela NÃO lê `ACCESS_GATE_ENABLED` nem `PLANS_V2_ENABLED`: é
+    segurança, não cobrança. `exige_credencial=False` tem um chamador só, o
+    `PATCH /settings/{id}/security/contact` (corrigir o e-mail é a saída)."""
     path = request.url.path or ""
     if any(path.startswith(p) for p in _GATE_EXEMPT_PREFIXES):
         return
@@ -1099,6 +1119,11 @@ def _enforce_subscription_gate(
         raise HTTPException(status_code=402, detail={"error": "plan_selection_required"})
     if exige_direito and not has_app_access(user_id):
         raise HTTPException(status_code=402, detail={"error": "subscription_required"})
+    # ponytail: +1 query por rota de dados. Se pesar, põe `password_hash is null
+    # as sem_senha` no SELECT cacheado do get_auth_user (db_support) — o reset já
+    # invalida esse cache.
+    if exige_direito and exige_credencial:
+        exigir_credencial(user_id)
 
 
 def authorize_account_access(request: Request, user_id: int) -> int:
@@ -1155,7 +1180,9 @@ def authorize_account_access(request: Request, user_id: int) -> int:
     mandar o link — e responde 400 com instrução, não 500
     (`test_conta_sem_email_sai_por_400_e_nao_por_500`,
     `tests/test_settings_saida_guardas.py`). Não "conserte" isso isentando o
-    `/contact` por conta própria.
+    `/contact` por conta própria. (O `/contact` pula só a perna da CREDENCIAL,
+    `authorize_dashboard_access(..., exige_credencial=False)`: corrigir o e-mail
+    é a saída de quem precisa criar a senha. A do DIREITO continua valendo.)
 
     Também seguem NÃO isentas, e é intencional: `/settings/{id}/activity`,
     `/settings/{id}/notifications` (GET e PATCH) e `/open-finance/*`. O 402
@@ -1164,7 +1191,9 @@ def authorize_account_access(request: Request, user_id: int) -> int:
 
     Ordem das exceções, idêntica à de `authorize_dashboard_access`: 401 (sessão
     inválida/revogada) -> 403 (não é o dono) -> 403 (conta agendada para
-    exclusão) -> 402 da ESCOLHA. Só o 402 do DIREITO cai."""
+    exclusão) -> 402 da ESCOLHA. Só o 402 do DIREITO cai, e com ele o 403
+    `password_required` (a perna da CREDENCIAL só vale com `exige_direito`):
+    estas cinco rotas também são a saída de quem ainda não criou a senha."""
     current_user_id = resolve_dashboard_user_id(request)
     if current_user_id != int(user_id):
         raise HTTPException(status_code=403, detail="Acesso negado para este usuário.")
@@ -1180,10 +1209,13 @@ def require_plan_feature(user_id: int, feature: str) -> None:
         raise HTTPException(status_code=403, detail={"error": "pro_required", "feature": feature})
 
 
-def authorize_dashboard_access(request: Request, user_id: int) -> int:
+def authorize_dashboard_access(
+    request: Request, user_id: int, *, exige_credencial: bool = True
+) -> int:
     """Gate completo das rotas de DADOS: a conta (`authorize_account_access`)
-    MAIS a perna do DIREITO. É o DEFAULT — descer para
-    `authorize_account_access` exige decisão do dono; leia a docstring dela."""
+    MAIS a perna do DIREITO e a da CREDENCIAL. É o DEFAULT — descer para
+    `authorize_account_access` exige decisão do dono; leia a docstring dela.
+    `exige_credencial=False` só no `PATCH /settings/{id}/security/contact`."""
     current_user_id = authorize_account_access(request, user_id)
     # ponytail: a perna da ESCOLHA é avaliada duas vezes nas rotas de dados (uma
     # aqui, outra dentro de authorize_account_access). O preço é um
@@ -1191,7 +1223,7 @@ def authorize_dashboard_access(request: Request, user_id: int) -> int:
     # SECONDS) — uma deepcopy de dict, não um round-trip. Vale menos que manter
     # duas cópias da regra do 402; se algum dia pesar, o caminho é o gate
     # devolver o veredito em vez de levantar.
-    _enforce_subscription_gate(request, current_user_id)
+    _enforce_subscription_gate(request, current_user_id, exige_credencial=exige_credencial)
     return current_user_id
 
 
@@ -1419,8 +1451,10 @@ def gate_onboarding(request: Request):
     if user_id is None:
         return None
     try:
-        from db import needs_onboarding
-        if needs_onboarding(user_id):
+        from db import conta_sem_credencial, needs_onboarding
+        # Conta sem credencial fica na /home, onde o overlay "Crie sua senha"
+        # sobe: no wizard, tudo daria 403 password_required.
+        if needs_onboarding(user_id) and not conta_sem_credencial(user_id):
             return RedirectResponse(url="/onboarding", status_code=302)
     except Exception:
         # Fail-open: onboarding é UX, não paywall. Erro aqui nunca pode trancar
