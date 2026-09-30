@@ -212,6 +212,21 @@ PR de cada etapa, não soluções prontas. Cada PR confere se ainda valem, decid
   também traz.
 - Moeda: o import grava tudo como `BRL` hoje (inclusive cartão); moeda omitida pelo
   conector; moeda corrigida depois.
+- Ingestão do Open Finance que devolve dado incompleto com cara de completo, e o sync
+  segue como sucesso (achados na revisão do PR #689; afetam saldo, fatura e parcelas em
+  toda tela). Além da moeda:
+  - `normalize_pluggy_account()` põe `type` = `BANK` e `balance` = 0 quando faltam;
+    `normalize_pluggy_transaction()` põe `amount` = 0 e data inválida = hoje; transação
+    sem `id` é descartada em silêncio;
+  - compra parcelada sem `creditCardMetadata.totalInstallments` vira compra única, e a
+    importada nunca cria as faturas futuras (a manual cria, em
+    `add_credit_purchase_installments()`);
+  - cartão sem as datas da Pluggy ganha fechamento dia 1 e vencimento dia 10
+    (`get_or_create_open_finance_card()`), e o calendário de cartão já ligado não é
+    atualizado;
+  - `list_pluggy_transactions()` para em `max_pages=60` sem conferir o cursor `next`, e
+    `list_pluggy_accounts()` lê só a primeira página de `/accounts`;
+  - conta que some da resposta de `/accounts` segue somada com o saldo antigo.
 - Quando o dado do Open Finance conta como desatualizado (limite por produto) e como a
   tela aberta percebe isso sem escrita.
 - Rentabilidade do Open Finance: medida em produção em 2026-09-29 (leitura, pelo dono;
@@ -231,6 +246,21 @@ PR de cada etapa, não soluções prontas. Cada PR confere se ainda valem, decid
 - Etapa 3: desde a Q42 o gasto fixo diário, semanal e único entra na Previsão, uma
   ocorrência por data — um diário gera até 90 itens em `compromissos`/`causas`. A tela
   `/previsao` tem de agrupar por nome; o código de hoje não agrega nem limita.
+- Etapa 3: defeitos da previsão de hoje (`cashflow._cashflow_events()`), achados na
+  revisão do `docs/plano-piggy-assistente-contextual.md` (PR #689). Não se consertam no
+  painel antigo: a regra reescrita para a Previsão da `/api/v2` passa a servir também o
+  simulador e o `check_cashflow` da IA (Q18).
+  - Gasto fixo pago no cartão (`payment_type="credit_card"`): sai do caixa no `due_day` e
+    de novo dentro da fatura aberta, ou sai antes da data de pagar a fatura.
+  - Valor estimado (`variable_amount`) entra como exato, no boleto e no gasto fixo.
+  - Conta paga pelo banco sem passar pelo PigBank continua pendente e sai de novo: o
+    boleto (nada do Open Finance escreve em `bill_instances`) e a fatura (a importação
+    pula o pagamento de fatura; só `pay_bill_amount` a marca paga).
+  - `list_bills(..., limit=1000)` corta os boletos mais distantes sem avisar.
+  - Ocorrência de recorrente com dia já passado e ainda não realizada some da previsão
+    (`_recurring_occurrence_dates()` só emite datas depois de hoje), e a que se realizou
+    antes do dia entra de novo; não há marcador de realização (`last_charged_ym` e
+    `last_credited_ym` não são escritos).
 - Etapa 4: reserva designada, custo mensal por frequência, reserva só em reais; caixinha
   manual versus a do banco.
 - Etapa 6: variação do período só dentro de um trecho sem quebra.
