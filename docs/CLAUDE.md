@@ -196,6 +196,27 @@ mesma `pending_google_signups`, com `provider='apple'`);
 `dashboard-link`/`dashboard-token` (link mágico); `link-code` (vincula WhatsApp e
 Discord à conta); `logout`; `refresh`; `account` (exclusão) e `account/export`.
 
+**Conta pela `/assinar` (funil v3 do quiz): `POST /auth/quiz/conta`**
+(`frontend/routes/quiz_signup.py`, com CSRF). Recebe e-mail, nome, WhatsApp
+(obrigatório) e o aceite dos termos, e cria a conta **sem senha e sem código** na
+mesma requisição (`db/signup_quiz.criar_conta_sem_codigo`, que NÃO passa por
+`email_verification_codes`), já logada. Responde `criada`, `logado` (a sessão do
+pedido já é dessa conta), `tem_conta`, `cadastro_pendente` (há código de
+`/auth/register` vivo para o e-mail: alguém está no meio do cadastro, e o código dele
+não é tocado) ou `ocupado` (409: outro pedido do mesmo e-mail está com a trava; a rota
+não espera, para uma rajada não segurar o pool de conexões). Só `criada` escreve e dá
+sessão. É o único lugar do site que diz se um e-mail tem conta (aceito pelo dono), com
+10/h por IP (balde `quiz`) e 3/h por e-mail (balde `quiz-conta`, separado do
+`register` para o anônimo não gastar o teto do cadastro da vítima). A prova do e-mail vem depois, no "Crie sua senha".
+
+**Os três criadores de conta** (o `confirm` do register, o `complete-signup` do
+Google/Apple e a `/assinar`) gravam pelo mesmo `db_support.inserir_conta_nova`:
+trava por e-mail + `on conflict (email) do nothing`. O e-mail que ganhou conta no meio
+é **recusado**, nunca fundido; o `verify-email` responde "Este e-mail já tem conta" e a
+saída é o "Esqueci a senha". A sessão, as atribuições (afiliado, prospecção, quiz) e o
+CAPI CompleteRegistration de conta nova moram num helper só, `_sessao_de_conta_nova`
+no monólito, usado pelas três rotas.
+
 ### MFA
 
 TOTP (`pyotp`) com códigos de backup: `/auth/mfa/setup`, `enable`, `disable`,
@@ -282,7 +303,8 @@ Via **Pluggy**. Endpoints em `frontend/routes/open_finance.py`
 (`/open-finance/{user_id}` e `connect-token`, `connectors`, `sync`, `refresh`,
 `pluggy-item`, `caixinhas`, `caixinhas/bind`, `mock-connect`) mais o webhook
 `/open-finance/pluggy/webhook`. Serviços em `core/services/pluggy*.py` e
-`open_finance*.py`; tabelas `open_finance_connections/accounts/transactions/investments` mais
+`open_finance*.py`; tabelas `open_finance_connections/accounts/transactions/investments`,
+`open_finance_investment_snapshots` (foto diária por posição, `db/of_snapshots.py`) e
 `open_finance_item_registry` — o rastro de todo item que passou por aqui, inclusive o
 que nunca virou conexão (token emitido e abandonado, webhook de item desconhecido); o
 `GET /items` da Pluggy devolve 401, então sem ela o universo remoto não é enumerável;

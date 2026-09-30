@@ -395,6 +395,26 @@ def build_user_export_zip(user_id: int) -> bytes:
                 """,
                 (user_id,),
             ),
+            (
+                "investimentos_open_finance",
+                """
+                select i.*
+                from open_finance_investments i
+                join open_finance_connections c on c.id = i.connection_id
+                where c.user_id = %s
+                """,
+                (user_id,),
+            ),
+            (
+                "historico_investimentos_open_finance",
+                """
+                select s.*
+                from open_finance_investment_snapshots s
+                join open_finance_connections c on c.id = s.connection_id
+                where c.user_id = %s
+                """,
+                (user_id,),
+            ),
         ]
 
         for name, sql, params in queries:
