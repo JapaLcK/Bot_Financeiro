@@ -57,7 +57,7 @@ export default defineConfig([
     // para o escopo léxico global e NÃO vira propriedade de `window`.
     files: ["frontend/dashboard.js"],
     languageOptions: {
-      globals: { LAUNCH_TYPE_LABELS: "readonly" },
+      globals: { LAUNCH_TYPE_LABELS: "readonly", LAUNCH_INTERNAL_LABELS: "readonly" },
     },
   },
   {

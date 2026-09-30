@@ -8750,6 +8750,8 @@ function renderLaunchesPagination(totalItems, totalPages) {
 // `window`. Uma guarda só, no lugar onde o literal morava, para os dois
 // consumidores (renderLaunches e _renderLaunchDetail).
 const TYPE_LABELS = (typeof LAUNCH_TYPE_LABELS === "object" && LAUNCH_TYPE_LABELS) || {};
+// Receita/despesa de movimentação interna: "entrada"/"saída" (mesma guarda).
+const INTERNAL_LABELS = (typeof LAUNCH_INTERNAL_LABELS === "object" && LAUNCH_INTERNAL_LABELS) || {};
 
 // Guarda os lançamentos renderizados pra o clique na linha abrir o detalhe.
 let _renderedLaunches = [];
@@ -8786,13 +8788,14 @@ function renderLaunches() {
       const isInternal = l.is_internal_movement;
       const valClass   = isInternal ? '' : (l.tipo==='receita'||l.tipo==='entrada' ? 'g' : 'r');
       const valStyle   = isInternal ? 'color:var(--text-2)' : '';
-      const typeLabel  = TYPE_LABELS[l.tipo] || l.tipo.replaceAll("_", " ");
+      const internalLabel = isInternal && INTERNAL_LABELS[l.tipo];
+      const typeLabel  = internalLabel || TYPE_LABELS[l.tipo] || l.tipo.replaceAll("_", " ");
       // Editar/Excluir migraram pro modal de detalhe (clique na linha) — sem
       // ícones inline, que causavam toque errado no celular.
       return `
       <div class="row" style="cursor:pointer;${isInternal?'opacity:.75':''}" onclick="openLaunchDetail(${idx})">
         <span class="lbl">
-	          <span class="tag ${l.tipo}">${typeLabel}</span>
+	          <span class="tag ${internalLabel ? "x" : l.tipo}">${typeLabel}</span>
 	          ${isInternal ? '<span class="tag interno">mov. interna</span>' : ''}
 	          ${escapeHtmlSafe(describeLaunch(l))}
 	          ${l.categoria ? `<span class="tag x">${escapeHtmlSafe(l.categoria)}</span>` : ''}
@@ -8869,7 +8872,8 @@ function closeLaunchDetail() {
 
 function _renderLaunchDetail(l) {
   _ensureLaunchDetailModal();
-  const typeLabel = TYPE_LABELS[l.tipo] || String(l.tipo || "").replaceAll("_", " ");
+  const typeLabel = (l.is_internal_movement && INTERNAL_LABELS[l.tipo])
+    || TYPE_LABELS[l.tipo] || String(l.tipo || "").replaceAll("_", " ");
   const desc = describeLaunch(l).replace(/<[^>]+>/g, "").trim() || "—";
   document.getElementById("ld-desc").textContent = desc;
 
