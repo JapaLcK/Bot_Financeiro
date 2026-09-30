@@ -341,7 +341,7 @@ ponto de intercalação em processo.
 
 Isto foi escrito primeiro como "alargou", com a ressalva de que dependia de
 quantos workers a produção roda, e a resposta foi conferida depois:
-**`launch.py:26-33` sobe o uvicorn SEM `--workers`, ou seja um worker** (o
+**o `launch.py` sobe o uvicorn SEM `--workers`, ou seja um worker** (o
 default). Logo não havia corrida entre processos para alargar — com um worker e
 sem `await` entre checagem e escrita, o handler ia até o fim sem ceder, e
 nenhuma outra requisição se intercalava. **Fomos de zero pontos de intercalação
