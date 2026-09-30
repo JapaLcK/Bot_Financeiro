@@ -1156,3 +1156,9 @@ async def serve_bank_movements_js():
 async def serve_reconciliations_js():
     return FileResponse(FRONTEND_DIR / "reconciliations.js", media_type="application/javascript",
                         headers={"Cache-Control": "no-cache"})
+
+
+@router.get("/cash-transfers.js")
+async def serve_cash_transfers_js():
+    return FileResponse(FRONTEND_DIR / "cash-transfers.js", media_type="application/javascript",
+                        headers={"Cache-Control": "no-cache"})
