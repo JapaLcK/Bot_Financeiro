@@ -39,7 +39,8 @@ export const RESPOSTAS = JSON.parse(readFileSync(join(RAIZ, "tests", "frontend",
 
 /**
  * Atende o contexto do disco: `raiz` = frontend/ (o /painel) ou RAIZ (o protótipo). O
- * `/api/v2/me` responde o `plano` pelas fixtures. Registrar de novo vale para as
+ * `/api/v2/me` responde o `plano` pelas fixtures, e o `/api/v2/eventos` (SSE) fica
+ * pendente para sempre: stream aberto e mudo. Registrar de novo vale para as
  * próximas requisições: no Playwright a rota registrada por último vence.
  */
 export async function servir(ctx, raiz = FRONTEND, { plano = "pro" } = {}) {
@@ -49,6 +50,7 @@ export async function servir(ctx, raiz = FRONTEND, { plano = "pro" } = {}) {
     const url = new URL(r.request().url());
     if (url.origin !== ORIGIN) return r.abort();
     if (url.pathname === "/api/v2/me") return r.fulfill({ json: me });
+    if (url.pathname === "/api/v2/eventos") return;
     const path = decodeURIComponent(url.pathname).replace(/\/$/, "/index.html");
     return r.fulfill({ path: join(raiz, path) }).catch(() => r.fulfill({ status: 404, body: "" }));
   });

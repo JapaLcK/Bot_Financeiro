@@ -99,7 +99,10 @@ calma (Q5).
   a tela pede o dado de novo. Princípios: o aviso vai só para o dono do dado, só depois de
   gravado, e a tela nunca fica desatualizada em silêncio (reconectar refaz tudo; sessão
   encerrada fecha o stream). Toda escrita de dado financeiro avisa, venha de onde vier.
-  Processo único hoje; com mais de um processo, `LISTEN/NOTIFY` do Postgres. A etapa 0
+  Processo único hoje; com mais de um processo, `LISTEN/NOTIFY` do Postgres: quem grava
+  faz `pg_notify` dentro da própria transação (sai só no commit; serve para thread e para
+  o `bot.py`) e cada processo web mantém uma conexão `LISTEN` que repassa aos streams
+  dele (desenho no docstring de `api/v2/eventos.py`, não construído). A etapa 0
   confirma com o dono se o `bot.py` (Discord) sai do `launch.py`.
 - **Processo** (Q21): todo PR que cria ou muda endpoint da `/api/v2` é faixa Completo.
 
@@ -250,7 +253,11 @@ PR de cada etapa, não soluções prontas. Cada PR confere se ainda valem, decid
   #634, mergeados; deploy não conferido) · Q40 (#633, mergeado; deploy não conferido) ·
   Q41 (#627, aberto)
   - Q41: núcleo no #627, atrás de `OF_CASH_ENABLED` (desligado); falta o PR B (painel, WhatsApp e o switch ligado).
-- Etapa 0 em andamento:
+- Etapa 0 em andamento, em 6 PRs (divisão aprovada pelo dono em 2026-09-26): 1 esqueleto
+  (#632) · 2a `/painel` (#659) · 2b contrato TS + TanStack (#669) · 3 foto diária por
+  posição do Open Finance (#675) · 4 SSE básico com os 2 avisos de hoje + conserto do
+  re-raise · 5 toda escrita financeira avisa + o Discord sai do `launch.py` · 6 job da
+  foto diária desligado por chave.
   - PR 1 (#632, mergeado): esqueleto da `/api/v2` (`usuario_atual`, envelope de erro,
     `GET /api/v2/me`, varredura de rotas).
   - PR 2a: a página `/painel` (gate de sessão, chave, UA do app e os gates do `/app`),
@@ -263,4 +270,9 @@ PR de cada etapa, não soluções prontas. Cada PR confere se ainda valem, decid
     gravada no sync; coleta não confirmada entra marcada e a confirmada do mesmo dia vence;
     desconectar apaga; entra na exportação junto com as posições). Só a gravação: nada lê
     ainda, e a fonte do Rendimento × CDI ficou para o dono (§4, §7).
+  - PR 4: `GET /api/v2/eventos` (SSE), com os 2 avisos que o `/ws` já dá (fim do sync do
+    Open Finance e "Recomeçar do zero"); sessão rechecada antes de cada envio e a cada
+    30 s, teto de 5 streams por usuário; o `/painel` invalida as consultas a cada aviso.
+    E o sub-app para de re-levantar a exceção que já respondeu. `LISTEN/NOTIFY` só no
+    desenho (§3).
 - [ ] Etapa 0 · [ ] 1 · [ ] 2 · [ ] 3 · [ ] 4 · [ ] 5 · [ ] 6 · [ ] 7

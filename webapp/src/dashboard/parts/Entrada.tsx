@@ -1,7 +1,14 @@
 import type { ReactNode } from "react";
 import { useQuery } from "@tanstack/react-query";
 import { ICON } from "../lib/brand";
+import { useEventosV2 } from "../lib/eventos";
 import { meQuery } from "../lib/v2";
+
+// Os avisos ao vivo só com o /me de pé: no erro, o portão desmonta e o stream fecha.
+function Eventos() {
+  useEventosV2();
+  return null;
+}
 
 // Portão do painel: nada do painel monta antes do /api/v2/me (para não piscar o plano
 // errado). Erro de qualquer tipo é uma tela só. Recarregar passa de novo pelo portão
@@ -10,7 +17,7 @@ import { meQuery } from "../lib/v2";
 // leva 403 e o serve_painel não barra exclusão, então Recarregar volta a esta tela.
 export function Entrada({ children }: { children: ReactNode }) {
   const { status } = useQuery(meQuery);
-  if (status === "success") return <>{children}</>;
+  if (status === "success") return <><Eventos />{children}</>;
   if (status === "pending") {
     return (
       <div className="entrada" role="status">

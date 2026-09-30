@@ -36,15 +36,16 @@ async function contexto({ raiz, plano = "pro" } = {}) {
   return ctx;
 }
 
-// Abre a página e conta o que interessa: erros de JS, pedidos à /api/v2 e ao refresh,
-// e navegações do documento (o reload).
+// Abre a página e conta o que interessa: erros de JS, pedidos ao /api/v2/me (o stream
+// /api/v2/eventos tem teste próprio, painel_v2_eventos) e ao refresh, e navegações do
+// documento (o reload).
 async function abrir(ctx, url = `${PAINEL}#/`) {
   const page = await ctx.newPage();
   const n = { erros: [], api: 0, refresh: 0, navegacoes: 0 };
   page.on("pageerror", (e) => n.erros.push(e.message));
   page.on("request", (r) => {
     const p = new URL(r.url()).pathname;
-    if (p.startsWith("/api/v2")) n.api++;
+    if (p === "/api/v2/me") n.api++;
     if (p === "/auth/refresh") n.refresh++;
   });
   page.on("framenavigated", (f) => { if (f === page.mainFrame()) n.navegacoes++; });
