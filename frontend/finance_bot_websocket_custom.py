@@ -3341,7 +3341,7 @@ async def auth_register(request: Request, body: RegisterBody):
     except ValueError as e:
         raise HTTPException(status_code=409, detail=detalhe_seguro(e))
 
-    sent = send_verification_email(body.email.strip().lower(), code)
+    sent = await asyncio.to_thread(send_verification_email, body.email.strip().lower(), code)
     if not sent:
         raise HTTPException(status_code=500, detail="Não foi possível enviar o e-mail de verificação. Tente novamente.")
 
@@ -3704,13 +3704,14 @@ async def auth_forgot_password(request: Request, body: EmailBody):
 
     await _check_auth_rate_limits("forgot-password", request, body.email)
 
-    token = create_password_reset_token(body.email)
+    token = await asyncio.to_thread(create_password_reset_token, body.email)
     if token:
         reset_url = f"{DASHBOARD_URL}/reset-password#token={token}"
         # a consulta fica DENTRO do if: o ramo "e-mail não existe" continua
         # instrução por instrução igual, e a resposta abaixo nunca muda
-        send_password_reset_email(
-            body.email.strip().lower(), reset_url, email_has_password(body.email)
+        has_password = await asyncio.to_thread(email_has_password, body.email)
+        await asyncio.to_thread(
+            send_password_reset_email, body.email.strip().lower(), reset_url, has_password
         )
 
     # sempre retorna 200 — não revela se o e-mail existe ou não
