@@ -176,6 +176,15 @@ receber ofertas do chat ou do print:
   `dados_insuficientes` e a Piggy pergunta a data (item 2 das falhas). Não há teste de
   sensibilidade: sem um intervalo de datas admissíveis definido, ele não teria como provar que a
   conclusão não muda.
+- **Forma de pagamento e cartão.** O cenário passa a levar a forma de pagamento e, no cartão, o
+  `card_id`. As datas das parcelas no cartão saem do fechamento e do vencimento **desse** cartão;
+  com mais de um cartão e nenhum escolhido, a Piggy pergunta qual antes do veredito. Cartão não é
+  data presumida mensal.
+- **Toda saída com data é contratual ou presumida.** Vale para cada fluxo do cenário, não só para
+  as parcelas: data da compra, entrada, custos únicos e a `despesa_mensal_nova`, que hoje começa
+  sempre um mês após a compra (`_decision_events`). A despesa nova passa a levar data da primeira
+  cobrança e cadência. Qualquer data presumida que possa decidir o veredito leva a
+  `dados_insuficientes` e à pergunta da data.
 - **Mais de três opções numa leitura.** `Simulacao.cenarios` tem `max_length=3`. Uma varredura de
   1 a 12 vezes não cabe, e dividi-la em várias chamadas de `simulate()` compararia as opções
   contra leituras diferentes do saldo. O limite sobe até o teto operacional da varredura, numa
