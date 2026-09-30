@@ -4,6 +4,8 @@ import { useEffect } from "react";
 import { useColorScheme, View } from "react-native";
 
 import { SessaoProvider, useSessao } from "@/features/auth/sessao";
+import { BloqueioProvider, useBloqueio } from "@/features/bloqueio/bloqueio";
+import { CoberturaPorCima, TelaDeBloqueio } from "@/features/bloqueio/TelaDeBloqueio";
 import { rastrear } from "@/services/analytics";
 import { Button } from "@/ui/componentes/Button";
 import { Texto } from "@/ui/componentes/Texto";
@@ -52,7 +54,9 @@ export default function Layout() {
   return (
     <TemaProvider>
       <SessaoProvider>
-        <Roteador />
+        <BloqueioProvider>
+          <Roteador />
+        </BloqueioProvider>
       </SessaoProvider>
     </TemaProvider>
   );
@@ -66,6 +70,7 @@ export default function Layout() {
  */
 function Roteador() {
   const { estado, tentarDeNovo } = useSessao();
+  const trava = useBloqueio().estado;
   const { cores } = useTema();
 
   if (estado.fase === "verificando") {
@@ -83,7 +88,18 @@ function Roteador() {
     );
   }
 
-  return (
+  // Lendo a preferência da trava: a mesma View de espera — a pilha ainda não pode montar.
+  if (trava.fase === "lendo") {
+    return <View style={{ flex: 1, backgroundColor: cores.bg }} />;
+  }
+
+  // Abertura com sessão salva: a trava NO LUGAR da pilha, que só monta depois
+  // de liberar (o Início não busca /auth/me antes disso).
+  if (trava.fase === "travado" && !trava.jaLiberou) {
+    return <TelaDeBloqueio />;
+  }
+
+  const pilha = (
     <Stack
       screenOptions={{
         headerShown: false,
@@ -110,5 +126,14 @@ function Roteador() {
         <Stack.Screen name="_ds" />
       </Stack.Protected>
     </Stack>
+  );
+
+  // Trava depois de já ter liberado: a cobertura POR CIMA, com a pilha (e as
+  // sheets) intacta embaixo. O app fora de foco é da tampa nativa (`modules/tampa`).
+  return (
+    <>
+      {pilha}
+      {trava.fase === "travado" ? <CoberturaPorCima /> : null}
+    </>
   );
 }

@@ -35,6 +35,13 @@ describe("app.config — iOS", () => {
     expect(config.plugins).not.toContain("expo-apple-authentication");
   });
 
+  it.each(["production", "staging", "development"])("%s: plugin do Face ID com o texto da permissão", (ambiente) => {
+    expect(configEm(ambiente).plugins).toContainEqual([
+      "expo-local-authentication",
+      { faceIDPermission: "O PigBank usa o Face ID para proteger seu app quando você volta para ele." },
+    ]);
+  });
+
   it.each(["production", "development"])("%s: time, build e criptografia isenta", (ambiente) => {
     expect(configEm(ambiente).ios).toMatchObject({
       appleTeamId: "S849YDA49P",

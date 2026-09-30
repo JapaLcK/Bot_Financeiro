@@ -86,6 +86,12 @@ const config: ExpoConfig = {
     "expo-secure-store",
     "@sentry/react-native/expo",
     ["expo-build-properties", { ios: { enableSceneSupport: true } }],
+    // Grava o `NSFaceIDUsageDescription`: sem ele o iOS derruba o app no
+    // primeiro prompt de Face ID. Em todos os ambientes — a trava existe em todos.
+    [
+      "expo-local-authentication",
+      { faceIDPermission: "O PigBank usa o Face ID para proteger seu app quando você volta para ele." },
+    ],
     // Grava o entitlement da Apple e deixa o botão do sistema em português
     // (`CFBundleAllowMixedLocalizations`). Só produção, como o `usesAppleSignIn`.
     ...(AMBIENTE === "production" ? ["expo-apple-authentication"] : []),
