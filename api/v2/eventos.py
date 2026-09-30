@@ -62,35 +62,35 @@ def avisar(user_id: int, recurso: Recurso) -> None:
         ins.acordar.set()
 
 
-async def _vaga(uid: int = Depends(usuario_atual)) -> int:
-    # Aqui e não no gerador: lá os headers já saíram e o 429 não chegaria.
-    # Teto mole: aberturas simultâneas passam juntas antes de se inscrever (6 no pior caso).
-    if len(_inscritos.get(uid, ())) >= MAX_STREAMS:
+async def _vaga(uid: int = Depends(usuario_atual)):
+    """Confere e reserva a vaga sem `await` no meio: aberturas simultâneas não
+    passam juntas. Aqui e não no gerador, que só roda com os headers já fora (o
+    429 não chegaria). A saída do `yield` roda depois de o stream terminar."""
+    vizinhos = _inscritos.setdefault(uid, set())
+    if len(vizinhos) >= MAX_STREAMS:
         raise HTTPException(status_code=429, detail="Limite de conexões simultâneas atingido.")
-    return uid
+    ins = _Inscrito()
+    vizinhos.add(ins)
+    try:
+        yield ins
+    finally:
+        vizinhos.discard(ins)
+        if not vizinhos:
+            del _inscritos[uid]
 
 
 @router.get("/eventos", response_class=EventSourceResponse)
-async def eventos(request: Request, uid: int = Depends(_vaga)) -> AsyncIterable[Aviso]:
-    ins = _Inscrito()
-    _inscritos.setdefault(uid, set()).add(ins)  # antes de qualquer await
-    try:
-        while True:
-            try:
-                await asyncio.wait_for(ins.acordar.wait(), RECHECAGEM_S)
-            except TimeoutError:
-                pass
-            ins.acordar.clear()
-            lote, ins.pendentes = ins.pendentes, set()
-            try:
-                await run_in_threadpool(usuario_atual, request)
-            except StarletteHTTPException:
-                return  # sessão, plano ou chave caiu: fecha sem mandar o lote
-            for recurso in sorted(lote):
-                yield Aviso(recurso=recurso)
-    finally:
-        vizinhos = _inscritos.get(uid)
-        if vizinhos is not None:
-            vizinhos.discard(ins)
-            if not vizinhos:
-                del _inscritos[uid]
+async def eventos(request: Request, ins: _Inscrito = Depends(_vaga)) -> AsyncIterable[Aviso]:
+    while True:
+        try:
+            await asyncio.wait_for(ins.acordar.wait(), RECHECAGEM_S)
+        except TimeoutError:
+            pass
+        ins.acordar.clear()
+        lote, ins.pendentes = ins.pendentes, set()
+        try:
+            await run_in_threadpool(usuario_atual, request)
+        except StarletteHTTPException:
+            return  # sessão, plano ou chave caiu: fecha sem mandar o lote
+        for recurso in sorted(lote):
+            yield Aviso(recurso=recurso)
