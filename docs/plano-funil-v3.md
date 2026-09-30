@@ -18,12 +18,25 @@ O código da `main` vence o texto quando os dois divergem.
     senha e sem plano) e a rota responde 503;
   - a limpeza de sessões só roda quando nenhuma outra linha do `user_id` sobrou;
   - `/auth/register` e `/auth/verify-email` chamam o banco via `asyncio.to_thread`.
-- **Etapa 0 feita**: o embutido funciona no Instagram iOS (ver a última seção).
+- **Etapa 0 PARCIAL.** O embutido funciona no Instagram iOS (ver a última seção), mas os
+  itens 2, 4 e 5 e a lista de hosts da CSP do item 6 **nunca foram medidos**. Eles são
+  o portão do PR 2 (ver lá).
+- **O texto do PR 1 e a D-c abaixo descrevem o desenho ANTIGO** (`create/confirm_email_verification`).
+  O #658 entrou com `criar_conta_sem_codigo` + `inserir_conta_nova` + `trava_email`, sem
+  `email_verification_codes`. O código da `main` e a nota "Ajustes do PR 1" (no fim)
+  mandam.
 - **Próximo: PR 2** (checkout embutido e hospedado, mais a CSP). Depois vêm os PRs 3 a 6,
   na ordem da seção 5.
 - A etapa 0b-2 (túnel antes do merge do PR 5) continua pendente.
-- **Decisão do dono de 2026-09-29:** o "Crie sua senha" do PR 4 bloqueia no SERVIDOR (403
-  nas rotas de dados), não só na tela. Ver o item 2b do PR 4.
+- **Decisões do dono de 2026-09-29:**
+  - o "Crie sua senha" do PR 4 bloqueia no SERVIDOR (403 nas rotas de dados), e não só
+    na tela. Ver o item 2b do PR 4;
+  - o e-book do PR 3 sai por uma entrega pendente mais um job de nova tentativa, e não
+    pelo 5xx do webhook.
+- **Auditoria de 2026-09-29:** o plano inteiro foi conferido contra a `main` e o SDK do
+  Stripe instalado, com 14 achados corrigidos neste arquivo. O que o plano ainda afirma
+  sem ter medido está marcado como "medir" (a Etapa 0 parcial e o desconto da linha de
+  fatura).
 
 ---
 
@@ -76,7 +89,7 @@ na seção 9.
 |---|---|---|
 | D-a | Entrada do XQuiz continua sendo a **`/q`**, que redireciona para a **`/assinar`** quando o link traz `plano` | A `/q` já é dona do fragmento (p/r → cookie `quiz_result`, com a disciplina de PII). Se a `/assinar` também lesse p/r, a lista de perfis ganharia uma 4ª cópia (§0.7; `tests/test_signup_quiz.py` compara três). |
 | D-b | Página nova **`/assinar`**, em arquivos próprios (`assinar.html/.js/.css`), e não um "modo" da `precos.html` | A `precos.html` já tem três modos (`/precos`, `/continuar-compra`, Pix). O b9dc2c4 tentou o "modo assinar" e foi descartado. |
-| D-c | A conta é criada chamando **as duas funções que já existem**, `create_email_verification(email, None, phone, display_name)` e `confirm_email_verification(email, code)`, na mesma requisição | Reaproveita tudo: usuário canônico, `link_code`, e-mail de boas-vindas e o descarte do telefone disputado nas **duas camadas que já existem**: o SELECT por `phone_hash` em `create_email_verification_impl` (`db_support.py:837-851`), que zera o telefone da linha pendente, e o `gravar_descartando_telefone_disputado` no INSERT de `auth_accounts` dentro de `confirm_email_verification_impl` (`db_support.py:993`), que pega a corrida pelos dois índices únicos. Como a `/assinar` chama as duas funções na mesma requisição, a corrida está coberta. É o caminho sem senha do #640, só que sem o código ir e voltar pelo e-mail. |
+| D-c | **(Superada pelo #658.)** A conta nasce em `db/signup_quiz.criar_conta_sem_codigo`, que **não** passa por `email_verification_codes`. Sob a trava do e-mail (`db_support.trava_email`, sem esperar): conta existente → `tem_conta`; código de register vivo → `cadastro_pendente`; senão `db_support.inserir_conta_nova` (`ON CONFLICT DO NOTHING`) | O desenho original (chamar `create_email_verification` + `confirm_email_verification`) deixava o quiz invalidar o código de quem estava no meio do `/auth/register`, e o confirm fundia contas. O telefone disputado é descartado por `db_support.telefone_livre` e `db_support.gravar_descartando_telefone_disputado`, as mesmas funções dos três criadores de conta. |
 | D-d | O bloco de "conta acabou de nascer" (sessão, as três atribuições e o CAPI CompleteRegistration) vira um helper no monólito, chamado pelos **três** lugares: `/auth/verify-email`, `_completar_cadastro_social` (Google/Apple, monólito :4700-4763) e a rota nova | Reúso real (§0.1, "extrair"). O bloco já está repetido hoje, linha por linha, entre o `verify-email` e o `_completar_cadastro_social`, que só muda o `event_source_url` (`/cadastro` × `/completar-cadastro`). Extrair para dois e deixar o terceiro seria criar a duplicata órfã que o §0.1 proíbe. O diff continua pequeno: um parâmetro `origem_url`. O `log_auth_login_event` do social fica fora do helper, porque só ele o tem. |
 | D-e | O checkout da `/assinar` é o **`/billing/create-checkout` de hoje com dois campos novos**: `origem: "assinar"` (oferece o e-book e ajusta o `cancel_url`) e `embutido: bool` (formulário embutido ou página do Stripe). Não é uma rota nova | O lock, o rastreio (`_ga/_fbp/_fbc`), a elegibilidade do trial, os 409 (`already_subscribed`, `lifetime`, `pix_active`) e o `record_checkout_started` já estão lá. São **dois** campos, e não um, por causa do plano B: o checkout hospedado da `/assinar` também leva o e-book, então o e-book não pode depender do modo embutido. |
 | D-f | `return_url` = a **mesma** `success_url` de hoje (`/home?upgrade=success&sid=…&ev=…&td=…&pl=…&ia=…`) | A `/home` já espera o webhook (overlay de ~20 s, fail-open) e dispara StartTrial/Purchase com o `sid`. Não se mexe nisso. |
@@ -123,7 +136,7 @@ na seção 9.
 |---|---|
 | `/q` + `quiz-resultado.js` (p/r → cookie) | **reusa**, com um ramo novo: com `plano` na query, vai para a `/assinar` (PR 5) |
 | `_apply_quiz_attribution` | **reusa** sem mudança (roda dentro do helper D-d) |
-| `create_email_verification` / `confirm_email_verification` (caminho sem senha) | **reusa** (D-c) |
+| `inserir_conta_nova`, `trava_email`, `telefone_livre`, `gravar_descartando_telefone_disputado` (`db_support.py`) | **reusa** (D-c, já na main pelo #658) |
 | `/billing/create-checkout` + `_billing_checkout_for_user` | **estende** (PR 2) |
 | `/continuar-compra`, `purchase-intent.js`, `pix-checkout.js` | **reusa** para o Pix (D-g) |
 | `/auth/login`, `/auth/forgot-password`, `/auth/google/start?next=/continuar-compra` | **reusa** no "já tem conta" |
@@ -209,8 +222,9 @@ no corpo do PR 2:
 6. o nome da chamada do Stripe.js (`initEmbeddedCheckout` ou o sucessor) e a **lista de
    hosts da CSP**, medida pelo console sem violação: esperado `script-src
    https://js.stripe.com`; `frame-src https://js.stripe.com https://checkout.stripe.com
-   https://hooks.stripe.com`. O `connect-src 'self' https:` e o `img-src https:` de hoje
-   já cobrem;
+   https://hooks.stripe.com`, somados ao que já existe (o `frame-src` tem o Pluggy). O
+   `connect-src 'self' https: wss:` e o `img-src 'self' data: blob: https:` de hoje já
+   cobrem;
 7. o cartão de 3DS de teste completa dentro do iframe;
 8. `optional_items` também é aceito na sessão **hospedada** (o plano B leva o e-book).
 
@@ -248,6 +262,12 @@ e a nossa página no WebView.
 Isso substitui a "verificação em staging" das versões anteriores deste plano.
 
 ### PR 1: conta nasce na `/assinar` (backend, fica parado até o PR 5)
+
+> **MERGEADO como #658 (2026-09-29). O texto desta seção é o plano ORIGINAL e está
+> SUPERADO** no mecanismo de criação: `create/confirm_email_verification`, o 409 do
+> confirm e o teste do upsert não existem no que entrou. Para o que existe, veja o
+> código (`frontend/routes/quiz_signup.py`, `db/signup_quiz.py`), o "Estado" no topo e a
+> nota "Ajustes do PR 1" no fim. A seção fica pelo histórico das decisões.
 
 **Muda, nesta ordem:**
 1. `frontend/finance_bot_websocket_custom.py`: extrair o bloco repetido
@@ -314,7 +334,16 @@ no `/cadastro` de hoje e não é agravado aqui.
 
 ### PR 2: checkout da `/assinar` (embutido e hospedado) + CSP (backend)
 
-Portão: a Etapa 0 e a Etapa 0b-1 feitas.
+Portão: a Etapa 0b-1 (feita) e **o que falta da Etapa 0, medido com a chave de teste e
+anotado no corpo do PR 2 antes de codar**:
+- item 2: `mode=subscription` + `customer` + trial + `optional_items` + `locale=pt-BR` +
+  `payment_method_types=["card"]` + `adaptive_pricing` desligado, tudo na mesma sessão;
+- item 4: o e-book **não** entra em `subscription.items.data`. O PR 3 depende disso,
+  porque o `_subscription_price_id` lê `data[0]`;
+- item 5: o `checkout.Session.list(status="open")` devolve o `client_secret` da sessão
+  embutida. Se não devolver, o reaproveitamento da seção 4 (S4, "duas abas" e "recarrega")
+  segue o caminho alternativo já escrito lá;
+- item 6: a lista de hosts da CSP, medida no console sem violação.
 
 **Muda:**
 1. `CreateCheckoutBody`: `embutido: bool = False` e `origem: str = "precos"`
@@ -341,11 +370,17 @@ Portão: a Etapa 0 e a Etapa 0b-1 feitas.
      teste confere o parâmetro na sessão da `/assinar`, e a `/precos` continua sem ele;
    - `metadata["td"] = str(trial_days)`;
    - retorno: embutido → `{"client_secret", "trial_days", "plan", "interval",
-     "session_id"}`. Hospedado → como hoje, mais `trial_days`.
+     "session_id"}`. Hospedado → como hoje, mais `trial_days`. **Hoje a rota descarta
+     o `session_id` sempre** (`result.pop("session_id", None)`, no handler de
+     `/billing/create-checkout` do monólito). No modo embutido esse `pop` tem de sair,
+     senão o contrato acima não se cumpre.
 3. A rota: se `embutido`, acrescenta `publishable_key` (env nova
    `STRIPE_PUBLISHABLE_KEY`, e 503 se faltar). O `trial_days` de sessão reaproveitada
    vem de `metadata.td`.
-4. `_SECURITY_HEADERS["Content-Security-Policy"]`: os hosts medidos na Etapa 0.
+4. `_SECURITY_HEADERS["Content-Security-Policy"]`: os hosts medidos na Etapa 0,
+   **somados** aos de hoje, nunca por cima. O `frame-src` já tem o Pluggy
+   (`https://cdn.pluggy.ai https://connect.pluggy.ai`), e trocar a diretiva quebraria o
+   widget do Open Finance. Um teste confere que os hosts do Pluggy continuam lá.
 5. `docs/CLAUDE.md`: "Pagamentos" (o modo embutido e as duas envs) e "Frontend"
    (a allowlist da CSP).
 
@@ -388,26 +423,39 @@ tentativa aberta por cliente).
 **Muda (só no `billing_webhook`, mais o e-mail):**
 1. `checkout.session.completed`: se `STRIPE_PRICE_ID_EBOOK` existe **e** a sessão veio
    da `/assinar` (`metadata.origem == "assinar"`, embutida ou hospedada), faz `await asyncio.to_thread(stripe.checkout.Session.list_line_items,
-   sid)`. Se o price do e-book está lá e `not recent_event_exists("ebook_email_sent",
-   user_id, within_days=3650)`, chama `_fire_email(user_id, send_ebook_email, EBOOK_URL)`
-   e, **só se ele devolver True**, grava `log_system_event("info","ebook_email_sent",…)`.
-   Gravar com o envio falho suprimiria a nova tentativa, e o cliente ficaria sem o
-   e-book. É o mesmo padrão do `trial_will_end` (#441). Uma exceção no bloco do e-book
-   **não desfaz o grant**, porque ele roda depois, num try próprio.
-   **A falha precisa voltar a ser tentada.** Com o `_fire_email` devolvendo False (ou o
-   `list_line_items` lançando), o ramo responde **5xx no fim**, depois do grant e dos
-   outros efeitos, e a Stripe entrega o evento de novo (por até 3 dias). É o mesmo
-   mecanismo que o webhook já usa quando a materialização falha: um 2xx aqui faria a
-   Stripe nunca mais entregar o evento, e sem job nem varredura o cliente pagante
-   ficaria sem o e-book para sempre. **Condição do PR 3:** listar os efeitos do ramo
-   `checkout.session.completed` e provar com teste que a entrega repetida não os
-   duplica: um grant, um e-mail de cada (a chave do `_fire_email`), e um evento de
-   compra no funil/CAPI/GA4. Se algum efeito não for idempotente, a saída é gravar a
-   entrega pendente e ter um job que a refaz, e não o 5xx.
-2. `invoice.paid`: `amount_plano = amount_paid − valor líquido das linhas de
-   `invoice.lines.data` com `pricing.price_details.price == EBOOK`, onde líquido = `amount` − soma dos
-   `discount_amounts` da linha (com cupom ligado, o desconto pode cair na linha do
-   e-book). O e-mail de cobrança e a comissão de afiliado usam o `amount_plano`
+   sid)`. Se o price do e-book está lá, **grava uma entrega pendente** do e-book (uma
+   linha por `user_id` + `session_id`, idempotente: a reentrega do evento não cria
+   outra) e tenta enviar na hora. O ramo responde 2xx como hoje: a falha do e-book
+   **não** gera 5xx.
+   **Por que não o 5xx:** a reentrega da Stripe repete o ramo INTEIRO por até 3 dias.
+   A dedupe do `_fire_email` vale 1 dia por padrão, e o `notify_new_pro` não tem
+   nenhuma. A reentrega mandaria de novo o e-mail de boas-vindas do plano e o alerta ao
+   admin.
+   **Quem refaz:** um job (no molde das tarefas de fundo que já existem) relê as
+   entregas pendentes e reenvia até sair. O envio é
+   `_fire_email(user_id, send_ebook_email, EBOOK_URL, dedup_days=3650)`, e a chave
+   interna dele (`send_ebook_email_sent`) é a única marca de "enviado", **sem segunda
+   chave**. A pendência é fechada quando o `_fire_email` devolve True, ou quando a
+   chave já existe.
+   Uma exceção no bloco do e-book não desfaz o grant, porque ele roda depois, num try
+   próprio. Um `list_line_items` que lança também vira pendência, a ser resolvida pelo
+   job.
+   **Condição do PR 3:** a tabela ou o registro da pendência segue §0.1. Procure antes se
+   já existe outbox ou fila de e-mail no repositório; se existir, reuse. **O
+   `_fire_email` hoje é uma função ANINHADA dentro do `billing_webhook`**, e um job não
+   a alcança. O PR 3 a extrai para o nível do módulo (extrair, §0.1: o webhook e o job
+   passam a chamar a mesma), sem mudar a chave nem o comportamento. Não crie uma
+   segunda dedupe.
+2. O ramo de fatura paga **que já existe** trata os DOIS eventos juntos:
+   `elif event["type"] in ("invoice.paid", "invoice.payment_succeeded")` (monólito).
+   A mudança é **dentro dele**. Um ramo só para `invoice.paid` deixaria o
+   `payment_succeeded` calculando e-mail e comissão sobre o valor cheio, com o e-book.
+   `amount_plano = amount_paid − valor líquido das linhas de
+   `invoice.lines.data` com `pricing.price_details.price == EBOOK`. **O "valor líquido"
+   da linha é MEDIDO, não suposto:** numa fatura de teste com cupom que desconta o
+   e-book, anote no corpo do PR 3 se o `amount` da linha já sai descontado. Se sair, o
+   líquido é o próprio `amount`. Se não, é `amount − soma(discount_amounts)`. Subtrair o
+   desconto duas vezes inflaria o `amount_plano`. O e-mail de cobrança e a comissão de afiliado usam o `amount_plano`
    (comissão só sobre o plano, decisão do dono), e com `amount_plano <= 0` os dois são
    pulados. Motivo: **com trial, a 1ª fatura é só o e-book**, e hoje ela mandaria
    "cobrança do seu plano" e daria comissão sobre o e-book.
@@ -436,7 +484,11 @@ a rede.
 **Testes (payloads de webhook, com o Stripe falso para `Subscription.retrieve` e `list_line_items`):**
 - trial + e-book: StartTrial sai, o e-mail do e-book sai **uma vez** mesmo com o
   evento entregue duas vezes, e o `invoice.paid` da 1ª fatura **não** manda e-mail de
-  cobrança nem cria comissão;
+  cobrança nem cria comissão. O mesmo vale com `invoice.payment_succeeded` no lugar do
+  `invoice.paid`;
+- envio do e-book falhando: o evento responde 2xx, a pendência fica gravada, e o job
+  envia depois. A reentrega do evento **não** repete o e-mail de boas-vindas nem o
+  alerta ao admin, e não cria uma segunda pendência;
 - sem trial + e-book: o e-mail de cobrança e a comissão usam **só** o valor do plano;
 - sem trial + e-book + cupom que desconta o e-book: a subtração usa o valor líquido da
   linha;
@@ -479,10 +531,21 @@ a rede.
      `/api/v2`, e não de memória. Ela inclui o `/ws`, o bot
      (`core/handle_incoming.py`, conta com WhatsApp vinculado) e o HTML servido. Cada
      linha é classificada em **bloqueia** ou **libera**, com o motivo.
-   - **Libera, no mínimo:** `/auth/*` (inclusive `/auth/me` e o logout), `/billing/*`, as
-     rotas de `authorize_account_access`, `POST /settings/{uid}/password-reset` e
-     `PATCH /settings/{uid}/security/contact`. Esta última passa a pular **só** a perna
-     da credencial e continua com a checagem de dono e o CSRF.
+   - **Libera, no mínimo:** `/auth/*` (inclusive `/auth/me` e o logout), do `/billing`
+     **só** `create-checkout` e `plans-config`, as rotas de `authorize_account_access`,
+     `POST /settings/{uid}/password-reset` e `PATCH /settings/{uid}/security/contact`.
+     - Esta última passa a pular **só** a perna da credencial e continua com a checagem
+       de dono e o CSRF.
+     - Atenção: o docstring de `authorize_account_access` tem um aviso do dono ("não
+       isente o `/contact`"). O aviso é sobre a perna do DIREITO, e ela **continua**
+       valendo nessa rota. Não afrouxe as duas ao mexer na chamada.
+   - **O resto do `/billing` BLOQUEIA:** `portal` (faturas e cartão no Stripe),
+     `subscription`, `change-plan` e `cancel-change`. Hoje o prefixo `/billing` inteiro é
+     isento do gate central (`_GATE_EXEMPT_PREFIXES`), então a perna da credencial
+     precisa valer nessas rotas de outro jeito. A tabela diz como.
+   - **O `/ws` não chama o gate central:** tem uma cópia manual da checagem
+     (`needs_plan_selection` ou `not has_app_access`) e fecha com o código 4402. A perna da
+     credencial entra nessa cópia também, com um código de fechamento próprio.
    - **Bloqueia:** toda rota que lê ou grava dado financeiro, inclusive a IA
      (`require_pro_feature` também chama a checagem da credencial).
    - **Um teste percorre as rotas** e reprova a rota autenticada que não está na
@@ -531,7 +594,9 @@ gate, o que é correto: hoje ela só entra de novo pelo "esqueci a senha".
   (`precisa_criar_senha:false`).
 - **bloqueio no servidor, com chamadas DIRETAS às APIs, sem passar pela tela:** a conta
   sem credencial e com plano pago leva 403 `password_required` em rota de dados, em
-  `GET /ai/messages` e `POST /ai/chat`, na `/api/v2/me` e no WebSocket. A mesma conta
+  `GET /ai/messages`, `POST /ai/chat`, `/billing/portal`, `/billing/subscription` e
+  `/billing/change-plan`, e na `/api/v2/me`. No WebSocket, o **código de fechamento**
+  próprio (não um 403). A mesma conta
   consegue `/auth/me`, `POST /settings/{uid}/password-reset`,
   `PATCH /settings/{uid}/security/contact` (a troca de e-mail) e o logout. Depois
   de criar a senha, as rotas de dados voltam a responder 200.
@@ -560,6 +625,12 @@ gate, o que é correto: hoje ela só entra de novo pelo "esqueci a senha".
    `URLSearchParams`**, nunca por concatenação, para um `&`, `#` ou `+` no nome ou no
    e-mail não quebrar os campos. Os outros ramos ficam iguais. O `+` do e-mail recebe o
    mesmo tratamento que já existe.
+   **Tire `n` e `w` do fragmento junto com `p`, `r`, `e` e `c`.** Hoje o arquivo só
+   remove `["p", "r", "e", "c"]`, e toda chave que sobra no fragmento vai para a query
+   visível (`query.append`, depois `history.replaceState`). Sem isso, o nome e o WhatsApp
+   do link novo do XQuiz (`…#…&n=…&w=…`) apareceriam na URL da `/q`, contra a D-a e a
+   seção 7. Um teste em `quiz_resultado.test.mjs` confere a URL **da `/q`** depois da
+   limpeza (sem `n`, `w` nem `e` na query), e não só a da `/assinar`.
 4. `frontend/login.html`: `/assinar` entra na allowlist do `nextParam`. Quem manda
    para o login usa `encodeURIComponent` no valor do `next` (seção 4, S2).
 5. Plano B (D-p), dentro do `assinar.js`: a constante `HOSPEDADO_UA = /PigBankApp/`
@@ -644,9 +715,9 @@ do e-book.
 | E-mail de outra pessoa ou com erro de digitação | A conta nasce com um e-mail não provado. **A prova vem no "Crie sua senha"** (link no e-mail, decisão do dono). Quem digitou errado paga, não recebe o link e vê "E-mail errado? Corrigir" (a `/settings` já troca o e-mail). Sem essa prova, o verdadeiro dono do e-mail poderia usar o "esqueci a senha" e ler as finanças de quem pagou. |
 | Link forjado (`#e=atacante@x`) | O e-mail aparece e pode ser editado antes do Continuar. Para ganhar alguma coisa, o atacante precisaria que a vítima pagasse, e o gate de senha manda o link para o e-mail do atacante, então a vítima fica travada e percebe. Risco baixo, registrado. |
 | "Esqueci a senha" em conta sem senha | Já funciona: `create_password_reset_token` acha pelo `email_hash`, a copy muda para "Definir senha", e o reset revoga as sessões. |
-| Sessão sem senha | É a mesma do login: JWT de 15 min + refresh de 14 dias + CSRF. Antes de pagar, ela só abre o que conta sem plano abre hoje (o gate de plano manda para `/precos` e dá 402 nas rotas de dados). Depois de pagar, abre o painel do dono da conta. Não há token novo. |
-| Telefone disputado | Descartado em silêncio pelo código de hoje, nas duas camadas da D-c (o SELECT em `db_support.py:837-851` e o `gravar_descartando_telefone_disputado` em `:993`): a conta nasce sem telefone e sem teste grátis, com o texto neutro D-m. **Risco antigo, que o v3 não piora:** o telefone não é confirmado no cadastro, então alguém pode registrar o número de outra pessoa (vale igual no `/cadastro` de hoje). Fica fora do escopo e vai para uma issue própria. |
-| Tomada de conta pelo upsert | O `confirm_email_verification_impl` faz `on conflict (email) do update set password_hash = excluded.password_hash`. A proteção é conferir que o e-mail não existe antes; a janela é de milissegundos. O PR 1 tem o teste "antes = depois". |
+| Sessão sem senha | É a mesma do login: JWT de 15 min + refresh de 14 dias + CSRF. Antes de pagar, ela só abre o que conta sem plano abre hoje (o gate de plano manda para `/precos` e dá 402 nas rotas de dados). Depois de pagar, **continua sem abrir dado** até a senha ser criada: 403 `password_required` (PR 4, item 2b, decisão do dono). Não há token novo. |
+| Telefone disputado | Descartado em silêncio pelo código de hoje, em `db_support.telefone_livre` (na busca) e `db_support.gravar_descartando_telefone_disputado` (na corrida do INSERT), as funções dos três criadores de conta: a conta nasce sem telefone e sem teste grátis, com o texto neutro D-m. **Risco antigo, que o v3 não piora:** o telefone não é confirmado no cadastro, então alguém pode registrar o número de outra pessoa (vale igual no `/cadastro` de hoje). Fica fora do escopo e vai para uma issue própria. |
+| Tomada de conta pelo upsert | **Fechada pelo #658:** os três criadores passam por `inserir_conta_nova` (trava por e-mail + `ON CONFLICT DO NOTHING`) e recusam o e-mail que ganhou conta no meio. Ver a nota "Ajustes do PR 1". |
 
 ---
 
@@ -804,7 +875,7 @@ apagar a env → 24 h → PR 6 → rodar o script de limpeza dos leads.
 5. **Contas antigas do quiz (#640): não precisa tratar** — o dono afirma que nenhuma conta foi criada pelo quiz ainda. Não fazer contagem em produção.
 6. **"Você já tem conta" na `/assinar`: aceito**, com os limites (10/h por IP, 3/h por e-mail).
 
-## Ajustes do PR 1 (2026-09-27), valem por cima da seção 6
+## Ajustes do PR 1 (2026-09-27), valem por cima da D-c (seção 2), do PR 1 (seção 5) e da seção 6
 
 - A "tomada de conta pelo upsert" deixou de ser limite aceito: os três criadores de conta (confirm do register, Google/Apple, `/assinar`) passam por `inserir_conta_nova` (advisory lock por `email_hash` + `ON CONFLICT DO NOTHING`) e recusam, sem sessão, e-mail que já tem conta. A `/assinar` não usa `email_verification_codes` (`criar_conta_sem_codigo`) e responde `cadastro_pendente` quando há register com senha em curso, e 409 `ocupado` quando a trava está tomada (não espera). Balde por e-mail próprio: `quiz-conta`.
 - O `/xquiz/webhook` (#640) ainda usa o balde `register`: sai no PR 6.
