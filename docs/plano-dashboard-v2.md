@@ -39,6 +39,10 @@ Resumo, Lançamentos, Previsão, Metas e caixinhas, Para onde vai, Patrimônio e
 Piggy com IA real e blocos. Pix, conexão do Open Finance, MFA e notificações continuam em
 `settings.html`/`precos.html`. O resto abre no antigo até ser migrado, um de cada vez.
 
+O Resumo tem um bloco de **contas**: o saldo de hoje no total e o de cada conta conectada
+no Open Finance, mais a carteira Piggy (dono, 2026-09-30: o protótipo não mostrava o saldo
+em lugar nenhum).
+
 ## 2. Fonte da verdade: Open Finance (Q36–Q43)
 
 - **Q36 — Open Finance é a fonte única** de Pix, contas, cartões, investimentos, aportes,
@@ -176,7 +180,7 @@ e esse histórico não se refaz:
 | Etapa | O que entra | Faixa |
 |---|---|---|
 | 0 | Esqueleto da `/api/v2` (usuário, erro, contrato, SSE), `/painel` com a chave, plano pelo `GET /api/v2/me`, TanStack Query, job da foto diária e histórico da rentabilidade do Open Finance | Completo |
-| 1 | Resumo (perfil no servidor) | API Completo, tela Leve |
+| 1 | Resumo (perfil no servidor), com o bloco de contas: saldo de hoje por conta | API Completo, tela Leve |
 | 2 | Lançamentos: ver tudo; lançar, editar e apagar na carteira (Q36) | idem |
 | 3 | Previsão | idem |
 | 4 | Metas e caixinhas | idem |
