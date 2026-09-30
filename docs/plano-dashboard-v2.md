@@ -237,7 +237,11 @@ PR de cada etapa, não soluções prontas. Cada PR confere se ainda valem, decid
   - conta que some da resposta de `/accounts` segue somada com o saldo antigo, e
     transação que some de uma sincronização completa também fica: `save_open_finance_sync()`
     só faz upsert do que veio, então um `transactions/deleted` perdido deixa a compra ou o
-    estorno (e o lançamento e a fatura ligados) para sempre;
+    estorno (e o lançamento e a fatura ligados) para sempre. Conciliar ausências só com
+    coleta saudável e geração estável: mesmo com resposta bem formada e cursor terminal,
+    um `PARTIAL_SUCCESS`/`UPDATING` ou uma coleta nova no meio da leitura apagaria
+    transação legítima. Reusar o portão que a conciliação de investimentos já tem (produto
+    saudável e a mesma geração em duas fotos do item);
   - banco religado guarda o `last_sync_at` antigo; `connection_ui_state()` já trata
     `last_sync_at < reconnected_at` como não sincronizado, e é essa a fonte do estado da
     conexão, não a idade do sync.
