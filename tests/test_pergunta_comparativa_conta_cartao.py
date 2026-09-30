@@ -234,6 +234,60 @@ def test_fatura_com_duas_abertas_o_aviso_manda_responder_antes(uid, ia_fora):
     assert despesas(uid) == [] and r.count(_AVISO) == 1 and _DEPOIS in r, r
 
 
+# ── a leitura da pendência falha DEPOIS de gravar: devolve o sucesso ─────────
+
+@pytest.fixture
+def leitura_da_pendencia_falha(monkeypatch):
+    """`get_pending_action` do `launches` levanta (conexão caída, fim do pool).
+    Só o `launches.db` é trocado: o roteamento que já leu a pendência antes de
+    gravar segue normal, como numa queda que vem depois da gravação."""
+    import psycopg
+    import core.handlers.launches as L
+    real = L.db
+
+    class _Db:
+        def __getattr__(self, nome):
+            if nome != "get_pending_action":
+                return getattr(real, nome)
+
+            def _falha(*a, **k):
+                raise psycopg.OperationalError("connection lost")
+            return _falha
+
+    monkeypatch.setattr(L, "db", _Db())
+
+
+def _fatura_de_3000(uid):
+    db.add_launch_and_update_balance(uid, "receita", 5000, None, "seed")
+    db.add_credit_purchase(uid, nubank(uid), 3000, "outros", "compra teste", today_tz())
+
+
+@pytest.mark.parametrize("frase,prepara,gravado,sucesso", [
+    (f"paguei a luz e {_ANO}", lambda uid: luz(uid),
+     lambda uid: contas_pagas(uid) == [150.0], "Conta paga"),
+    (f"comprei tenis 300 no credito e {_ANO}", lambda uid: nubank(uid),
+     lambda uid: no_cartao(uid) == [300.0], "Compra no Crédito Registrada"),
+    (f"paguei a fatura do nubank e {_ANO}", _fatura_de_3000,
+     lambda uid: despesas(uid) == [3000.0], "Pagamento registrado"),
+], ids=["conta", "credito", "fatura"])
+def test_leitura_da_pendencia_falha_depois_de_gravar_devolve_o_sucesso(
+        uid, ia_fora, leitura_da_pendencia_falha, caplog, frase, prepara, gravado, sucesso):
+    prepara(uid)
+    r = manda(uid, frase)
+    assert gravado(uid), r                                   # a gravação aconteceu
+    assert sucesso in r and "erro interno" not in r, r        # e o usuário vê o sucesso
+    assert r.count(_AVISO) == 1 and _DEPOIS not in r, r       # aviso básico, uma vez
+    assert "avisos_depois_de: falha" in caplog.text and "OperationalError" in caplog.text
+    assert "connection lost" not in caplog.text               # causa por tipo, nunca str(e)
+
+
+def test_leitura_da_pendencia_ok_com_pergunta_armada_manda_responder_antes(uid):  # positivo
+    from core.handlers.launches import avisos_depois_de
+    assert _DEPOIS not in avisos_depois_de(uid, [_ANO])[0]   # sem pendência: aviso básico
+    db.set_pending_action(uid, "bill_amount_expected", {"bill_id": 1, "bill_name": "Luz"})
+    assert _DEPOIS in avisos_depois_de(uid, [_ANO])[0]       # pergunta armada: responde antes
+
+
 # ── D1 = A: o "cartão" só na pergunta não faz a compra ir para o cartão ──────
 
 @pytest.mark.parametrize("frase", [

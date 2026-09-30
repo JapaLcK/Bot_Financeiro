@@ -17,6 +17,7 @@ from utils_date import (
 )
 from core.intent_classifier import (contains_comparative_question, is_comparative_question,
                                     sem_perguntas_comparativas)
+from core.observability import _log_falha
 from core.services.category_service import infer_category, learn_from_inference
 from parsers import (
     parse_receita_despesa_natural,
@@ -1386,8 +1387,14 @@ def avisos_depois_de(user_id: int, puladas: list[str]) -> list[str]:
     como o do multi: "gastei 50 no bar" derrubaria a pergunta."""
     if not puladas:
         return []
-    pend = db.get_pending_action(user_id)
-    de_pe = [{}] if pend and not db.eh_oferta_de_conveniencia(pend["action_type"]) else ()
+    # Roda DEPOIS de a conta, a fatura ou a compra terem sido gravadas: se a leitura
+    # falhar, o erro faria o usuário repetir e duplicar. Falha aberta: aviso básico.
+    try:
+        pend = db.get_pending_action(user_id)
+        de_pe = [{}] if pend and not db.eh_oferta_de_conveniencia(pend["action_type"]) else ()
+    except Exception as e:
+        _log_falha("avisos_depois_de", user_id, e)
+        de_pe = ()
     return [aviso_pergunta_pulada(p, de_pe) for p in puladas]
 
 
