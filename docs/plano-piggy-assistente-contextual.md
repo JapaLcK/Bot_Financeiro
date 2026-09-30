@@ -63,8 +63,9 @@ migração de contrato próprias.
    Acima dele, mostrar somente a simulação limitada.
 4. **Saldo parcial ou desatualizado.** Carteira manual, Open Finance, lançamentos a conciliar e
    renda prevista têm confiabilidades diferentes. `balance_source="unavailable"`, bancos
-   excluídos, sincronização antiga ou renda apenas inferida impedem **qualquer** veredito, positivo
-   ou negativo: um saldo parcial pode tanto esconder um risco quanto fabricar um. Pendências de
+   excluídos e sincronização antiga impedem **qualquer** veredito, positivo ou negativo: um saldo
+   parcial pode tanto esconder um risco quanto fabricar um. Renda apenas inferida só pode esconder
+   risco e bloqueia o "cabe"; a matriz do contrato da resposta classifica cada caso. Pendências de
    conferência também contam: conciliação do Open Finance a confirmar
    (`reconciliation.pending_count` e `delta_se_confirmar`, expostos por `get_balance`) e
    declarações não confirmadas (`bank_movements.pending_count`). Hoje
@@ -85,9 +86,10 @@ O cálculo retorna um estado estruturado: `dados_insuficientes`, `dados_desatual
 pelo código a partir desse resultado; o modelo pode explicar, mas sua redação não pode inverter
 o estado. A guarda atual, que só registra logs, não basta para isso.
 
-- `risco_identificado` exige saldo confiável (fonte disponível, sem bancos excluídos, sincronização
-  dentro do limite, sem conciliação nem declaração pendente capaz de mudar o resultado) e datas de
-  pagamento conhecidas ou confirmadas. Faltando um deles, o estado é `dados_insuficientes` ou
+- `risco_identificado` exige que nenhuma entrada cuja coluna "Bloqueia" da matriz abaixo inclua o
+  risco esteja não confiável: saldo confiável (fonte disponível, sem bancos excluídos, sincronização dentro do limite,
+  sem conciliação nem declaração pendente capaz de mudar o resultado), nenhuma receita ativa fora da
+  projeção e datas de pagamento conhecidas ou confirmadas. Faltando um deles, o estado é `dados_insuficientes` ou
   `dados_desatualizados`, com o dado que falta. Com pendência de conciliação, o veredito só sai se
   sobreviver ao pior caso **por direção**, e não ao `delta_se_confirmar` agregado: o agregado soma
   ajustes de sinais opostos que se cancelam, mas cada pendência é confirmada sozinha
@@ -98,10 +100,38 @@ o estado. A guarda atual, que só registra logs, não basta para isso.
   sem efeito quantificado no saldo impede o veredito. A falta **só** da
   estimativa variável não impede `risco_identificado`, porque ela apenas pioraria o caixa.
   Resposta: "não recomendo nesta condição", com data e valor.
-- `cabe_nas_premissas` fica **desligado** até a estimativa variável ser validada (Etapa 3). Quando
+- `cabe_nas_premissas` fica **desligado** até a estimativa variável ser validada (Etapa 3), e depois
+  exige que nenhuma entrada cuja coluna "Bloqueia" inclua o cabe esteja não confiável. Quando
   ligado: "pelos dados informados, cabe mantendo a reserva de R$ X; confira Y".
 - Se a situação já está ruim sem a compra, explicar separadamente o estado atual e o impacto
   incremental.
+
+### Matriz das entradas do veredito
+
+Fonte única da regra de abstenção. Cada entrada do cálculo é classificada pela direção do erro
+quando ela falta ou está errada:
+
+- se o erro **só piora** a projeção, a entrada pode fabricar um risco e bloqueia `risco_identificado`;
+- se o erro **só melhora** a projeção, a entrada pode esconder um risco e bloqueia `cabe_nas_premissas`;
+- se o erro vai **nos dois sentidos**, a entrada bloqueia os dois.
+
+Uma entrada nova no simulador entra nesta tabela antes de entrar no código. Conferido em
+`cashflow._starting_balance()`, `cashflow._cashflow_events()` e `decision_simulator`.
+
+| Entrada | Situação que a torna não confiável | Direção do erro | Bloqueia |
+| --- | --- | --- | --- |
+| Saldo de partida | `balance_source="unavailable"`, bancos excluídos, sincronização do Open Finance acima do limite | dois sentidos | os dois |
+| Conciliação pendente | pendência em `PENDING_RECONCILIATION_SQL` | dois sentidos, item a item | o veredito que não sobreviver à soma na direção que o enfraquece |
+| Declaração pendente | `bank_movements.pending_count > 0`, sem efeito quantificado | dois sentidos | os dois |
+| Receita fixa ativa em frequência fora da projeção | `once`, `weekly` ou `daily` legados: `_cashflow_events()` pula essas receitas | só piora | risco (ou estender a fonte de eventos) |
+| Receita fixa projetada que pode não vir | renda apenas inferida, ou renda irregular | só melhora | cabe |
+| Gasto fixo manual | só entra quando o boleto pendente já existe; conferir na implementação se as ocorrências futuras sem boleto ficam fora | só melhora | cabe |
+| Gasto variável | fora da projeção até a Etapa 3 | só melhora | cabe |
+| Custos da oferta ausentes | frete, IOF, seguro, tarifa ou CET não informados | só melhora | cabe |
+| Parcela sem valor nem taxa | cronograma cotado ausente | dois sentidos | os dois (`dados_insuficientes`) |
+| Datas das parcelas | cadência mensal presumida | dois sentidos | os dois, se a data puder mudar a conclusão |
+| Parcelas além da janela | contrato maior que o horizonte avaliado | só melhora | cabe |
+| Reserva mínima | nunca informada | não se aplica | risco baseado em reserva (vale só o risco de saldo negativo) e cabe |
 
 Avaliar **caixa nas datas de pagamento** e **custo total do contrato** como dimensões diferentes.
 Parcela menor pode custar mais; à vista pode custar menos e quebrar o caixa. "Quantas vezes?"
@@ -184,7 +214,8 @@ paralelo.
 - **Regressão (inventário, não escopo de um PR só):** gastos variáveis ausentes e duplicados,
   compra no fechamento do cartão, salário antes/depois da parcela, fatura vencida, parcelas além
   de 90 dias, reserva já violada, banco indisponível, oferta sem CET, OCR errado, legenda ignorada,
-  pendência de lançamento, conciliação ou declaração do Open Finance pendente (inclusive com
+  pendência de lançamento, receita ativa em frequência legada, conciliação ou declaração do Open
+  Finance pendente (inclusive com
   ajustes de sinais opostos que se cancelam no agregado), saldo alterado
   após novo gasto, erro no gate do print.
 - **Lançamento gradual:** alertas negativos e inconclusivos primeiro; "cabe" só após a meta de
