@@ -588,6 +588,11 @@ senha" fica só para número sem dados. Limite aceito: quem pagou e já usava o 
 dados no mesmo número segue como a conta do WhatsApp até criar a senha. O vazamento que
 já existe na `main` (conta **com** credencial que digita o número de outra pessoa recebe
 os dados dela pela mescla) está na issue #711, fora do PR 4.
+Exceção ao bloqueio, pela regra do `_WA_INTERACTIVE_ISENTOS` (quem não pode usar tem de
+conseguir parar de receber mensagem): os botões de opt-out (relatórios diário, semanal e
+mensal, e atualizações) funcionam no número já ligado, no `precisa_senha` (desligam a
+preferência da conta sem credencial) e no `remetente_com_dados` (a do remetente e a da
+conta que digitou o número); nada além da preferência é gravado.
 
 **Muda:**
 1. `db/google_auth.py`: `conta_sem_credencial(user_id) -> bool` = `password_hash is

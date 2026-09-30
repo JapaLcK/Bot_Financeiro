@@ -230,6 +230,11 @@ liga o número pelo telefone (responde com o texto fixo). O bot também barra to
 mensagem de número já ligado a conta sem credencial; no auto-vínculo, remetente que já
 tem dados financeiros segue na própria conta, sem vínculo nem mescla
 (`remetente_com_dados`); o vazamento da mescla por telefone digitado está na #711.
+A exceção do bot são os botões de opt-out de `_WA_INTERACTIVE_ISENTOS` (relatórios diário,
+semanal e mensal, e atualizações): quem não pode usar tem de conseguir parar de receber
+mensagem, então eles funcionam no número já ligado, no `precisa_senha` (desligam a
+preferência da conta sem credencial) e no `remetente_com_dados` (a do remetente e a da
+conta que digitou o número), e nada além da preferência é gravado.
 Saem livres as rotas da própria conta (`authorize_account_access`), o `PATCH /settings/{id}/security/contact`
 (`exige_credencial=False`), o `/auth/me` (campo `precisa_criar_senha`), login,
 logout, refresh e o reset. Quem bloqueia e quem libera, rota a rota, está em

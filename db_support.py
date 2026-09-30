@@ -1154,8 +1154,12 @@ def attempt_whatsapp_phone_link_impl(
             # `process_message` não trata). O critério de dados é o do merge (#607).
             with get_conn() as conn, conn.cursor() as cur:
                 if _tem_dados_financeiros(cur, int(current_user_id)):
-                    return {"status": "remetente_com_dados", "wa_phone": wa_phone}
-            return {"status": "precisa_senha", "wa_phone": wa_phone}
+                    return {"status": "remetente_com_dados", "wa_phone": wa_phone,
+                            "target_user_id": target_user_id}
+            # `target_user_id`: os envios proativos vão ao `phone_e164` dela, e o
+            # clique de opt-out deste número tem de desligar a preferência dela.
+            return {"status": "precisa_senha", "wa_phone": wa_phone,
+                    "target_user_id": target_user_id}
 
         try:
             merge_users(int(current_user_id), target_user_id)

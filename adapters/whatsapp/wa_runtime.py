@@ -651,18 +651,24 @@ def _pergunta_da_ia(uid: int):
         return None, None
 
 
-def _tratar_opt_out(uid: int, reply_to: str, interactive_id: str | None) -> bool:
+def _tratar_opt_out(uid: int, reply_to: str, interactive_id: str | None,
+                    tambem: int | None = None) -> bool:
     """Botões de opt-out (`_WA_INTERACTIVE_ISENTOS`): True se tratou o clique.
 
     Chamado também pela guarda de conta sem credencial: quem não consegue usar
-    o bot tem de conseguir PARAR de receber mensagem nossa.
+    o bot tem de conseguir PARAR de receber mensagem nossa. `tambem`: outra conta
+    que recebe envios neste número (a sem credencial do auto-vínculo); só a
+    preferência dela muda, e a resposta é uma só.
     """
     if not interactive_id:
         return False
+    uids = (uid,) if tambem is None else (uid, tambem)
     if interactive_id == WA_DAILY_REPORT_DISABLE_ID:
         logger.info("WA daily_report_disable button clicked wa_id=%s uid=%s", reply_to, uid)
         try:
-            _send_reply(reply_to, h_report.disable(uid))
+            for u in uids:
+                texto = h_report.disable(u)
+            _send_reply(reply_to, texto)
         except Exception as e:
             logger.exception("WA daily_report_disable button error wa_id=%s: %s", reply_to, e)
             log_system_event_sync(
@@ -676,7 +682,9 @@ def _tratar_opt_out(uid: int, reply_to: str, interactive_id: str | None) -> bool
     elif interactive_id == WA_WEEKLY_REPORT_DISABLE_ID:
         logger.info("WA weekly_report_disable button clicked wa_id=%s uid=%s", reply_to, uid)
         try:
-            _send_reply(reply_to, h_report.disable_weekly(uid))
+            for u in uids:
+                texto = h_report.disable_weekly(u)
+            _send_reply(reply_to, texto)
         except Exception as e:
             logger.exception("WA weekly_report_disable button error wa_id=%s: %s", reply_to, e)
             log_system_event_sync(
@@ -690,7 +698,9 @@ def _tratar_opt_out(uid: int, reply_to: str, interactive_id: str | None) -> bool
     elif interactive_id == WA_MONTHLY_REPORT_DISABLE_ID:
         logger.info("WA monthly_report_disable button clicked wa_id=%s uid=%s", reply_to, uid)
         try:
-            _send_reply(reply_to, h_report.disable_monthly(uid))
+            for u in uids:
+                texto = h_report.disable_monthly(u)
+            _send_reply(reply_to, texto)
         except Exception as e:
             logger.exception("WA monthly_report_disable button error wa_id=%s: %s", reply_to, e)
             log_system_event_sync(
@@ -704,7 +714,8 @@ def _tratar_opt_out(uid: int, reply_to: str, interactive_id: str | None) -> bool
     elif interactive_id.strip().lower() in WA_UPDATES_DISABLE_IDS:
         logger.info("WA updates disable button clicked wa_id=%s uid=%s", reply_to, uid)
         try:
-            set_whatsapp_updates_opt_out(uid, True)
+            for u in uids:
+                set_whatsapp_updates_opt_out(u, True)
             _send_reply(
                 reply_to,
                 "Pronto, parei as atualizações do Piggy por aqui. Você pode religar quando quiser em Configurações > Notificações.",
@@ -820,8 +831,11 @@ def process_message(message: InboundMessage) -> None:
             # O número é da conta paga que ainda não criou a senha: não vincula
             # e não processa (decisão do dono, PR 4 do funil v3). Sem exceção
             # para o código de vínculo: seguindo, ele pararia no _paywall_gate
-            # do usuário do WhatsApp (sem plano) com a copy de "assine".
-            _send_reply(reply_to, PRECISA_SENHA_WA)
+            # do usuário do WhatsApp (sem plano) com a copy de "assine". O opt-out
+            # desliga a conta paga: é ela que recebe os envios por `phone_e164`.
+            if not _tratar_opt_out(auto_link_result["target_user_id"], reply_to,
+                                   get_interactive_id(message.raw or {})):
+                _send_reply(reply_to, PRECISA_SENHA_WA)
             return
         elif auto_link_result["status"] in {
             "multiple_accounts",
@@ -1156,7 +1170,10 @@ def process_message(message: InboundMessage) -> None:
                 logger.info("WA undo_launch button clicked wa_id=%s", reply_to)
                 # Injeta "desfazer" para o classificador tratar normalmente
                 message.text = "desfazer"
-            elif _tratar_opt_out(uid, reply_to, interactive_id):
+            # `target_user_id` só existe no `remetente_com_dados`: a conta sem
+            # credencial que digitou este número também recebe envios nele.
+            elif _tratar_opt_out(uid, reply_to, interactive_id,
+                                 auto_link_result.get("target_user_id")):
                 return
 
         ignora_pendencias = False  # ver o CAS da porta 4, mais abaixo

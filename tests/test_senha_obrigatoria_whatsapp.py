@@ -194,3 +194,54 @@ def test_conta_sem_senha_consegue_desligar_notificacoes(enviadas, botao, desligo
     enviadas.clear()
     _manda(wa_id, "gastei 50 mercado")
     assert enviadas == [wr.PRECISA_SENHA_WA] and _gastos(uid) == 0
+
+
+# Apontamento do Codex no #716: o envio de atualizações vai ao `phone_e164` da conta
+# paga mesmo sem o número ligado (`send_update_whatsapp.get_all_update_targets`). O
+# clique chega com o uid do usuário só-WhatsApp, cai no `precisa_senha` do
+# auto-vínculo e tem de desligar a conta ALVO. Controle negativo: trocar o
+# `_tratar_opt_out` do ramo `precisa_senha` pelo PRECISA_SENHA_WA de antes deixa os
+# dois vermelhos. Positivo: texto em seguida recebe o PRECISA_SENHA_WA e não liga.
+@pytest.mark.parametrize("botao,desligou", [
+    ("daily_report_disable", lambda uid: not db.get_daily_report_prefs(uid)["enabled"]),
+    ("whatsapp_updates_disable", lambda uid: db.get_whatsapp_updates_opt_out(uid)),
+])
+def test_numero_nao_ligado_da_conta_sem_senha_desliga_a_conta_paga(enviadas, botao, desligou):
+    b, _, _ = conta_paga_sem_credencial()
+    wa_id = _fone(b)
+    antes = _vinculo(b)
+    assert not desligou(b)
+
+    _clique(wa_id, botao)
+    assert desligou(b), enviadas
+    assert len(enviadas) == 1 and enviadas[0] != wr.PRECISA_SENHA_WA, enviadas
+    assert _dono_do_numero(wa_id) != b and _vinculo(b) == antes and _gastos(b) == 0
+
+    enviadas.clear()
+    _manda(wa_id, "gastei 50 mercado")
+    assert enviadas == [wr.PRECISA_SENHA_WA], enviadas
+    assert _dono_do_numero(wa_id) != b and _vinculo(b) == antes and _gastos(b) == 0
+
+
+# `remetente_com_dados`: o número é de A, e B (sem credencial) o digitou e recebe
+# envios nele. O clique é "parem de mandar para este número": desliga os dois, com
+# uma resposta. Controle negativo: tirar o `target_user_id` da chamada do
+# `_tratar_opt_out` na cadeia interativa deixa este vermelho (B segue ligado).
+@pytest.mark.parametrize("com_plano", [False, True])
+def test_remetente_com_dados_opt_out_desliga_os_dois(enviadas, com_plano):
+    b, _, _ = conta_paga_sem_credencial()
+    wa_id = _fone(b)
+    if com_plano:
+        a, _, _ = conta_paga_sem_credencial()
+        _com_senha(a)
+        db.bind_identity("whatsapp", wa_id, a)
+    else:
+        a = db.get_or_create_canonical_user("whatsapp", wa_id)
+    db.add_launch_and_update_balance(a, "despesa", 50, None, "mercado")
+    antes = _vinculo(b)
+
+    _clique(wa_id, "whatsapp_updates_disable")
+    assert db.get_whatsapp_updates_opt_out(a) and db.get_whatsapp_updates_opt_out(b), enviadas
+    assert len(enviadas) == 1 and enviadas[0] != wr.PRECISA_SENHA_WA, enviadas
+    assert _dono_do_numero(wa_id) == a, "o número mudou de conta (vínculo ou merge)"
+    assert _gastos(a) == 1 and _gastos(b) == 0 and _vinculo(b) == antes
