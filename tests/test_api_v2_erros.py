@@ -94,9 +94,9 @@ def test_500_no_envelope_registra_uma_vez_e_nao_vaza_traceback(monkeypatch, rota
         raise RuntimeError("detalhe-interno-secreto")
 
     rota_temporaria("/_teste_500", explode, "GET")
-    # Obrigatório, não cosmético: o starlette re-levanta a exceção depois do envelope
-    # (ver `erro_interno`), e com o default `True` o próprio teste a levantaria.
-    r = TestClient(dashboard.app, raise_server_exceptions=False).get("/api/v2/_teste_500")
+    # `TestClient` padrão (`raise_server_exceptions=True`): a exceção não pode sair do
+    # sub-app depois do envelope (`erros.sem_reraise`).
+    r = TestClient(dashboard.app).get("/api/v2/_teste_500")
     assert r.status_code == 500, r.text
     assert r.json() == {"error": {"code": "internal_error", "message": "Erro interno do servidor."}}
     assert "detalhe-interno-secreto" not in r.text and "Traceback" not in r.text
@@ -152,10 +152,36 @@ def test_classificacao_do_erro_e_a_mesma_do_pai(monkeypatch, rota_temporaria, fn
     monkeypatch.setattr(admin, "log_system_event", grava)
 
     rota_temporaria("/_teste_classe", fn, "GET")
-    r = TestClient(dashboard.app, raise_server_exceptions=False).get("/api/v2/_teste_classe")
+    r = TestClient(dashboard.app).get("/api/v2/_teste_classe")
     assert r.status_code == status, r.text
     if corpo is None:
         assert r.content == b"" and chamadas == []
     else:
         assert r.json() == corpo
         assert [c["details"]["status_code"] for c in chamadas] == [eventos]
+
+
+@pytest.fixture
+def pilha_refeita():
+    """O sub-app guarda a pilha de middlewares montada no 1º pedido: zera antes e
+    depois, para o teste montar a sua e o próximo voltar à de verdade."""
+    app_v2.middleware_stack = None
+    yield
+    app_v2.middleware_stack = None
+
+
+def test_controle_negativo_sem_o_sem_reraise_a_excecao_sai_do_app(monkeypatch, rota_temporaria, pilha_refeita):
+    """Prova que os testes acima medem o conserto: sem o `sem_reraise`, a exceção
+    que o sub-app já respondeu 500 sai do app inteiro e o `TestClient` a levanta."""
+    import api.v2.erros as erros
+    import core.admin_dashboard as admin
+
+    async def grava(*args, **kwargs):
+        return None
+
+    monkeypatch.setattr(erros, "log_system_event", grava)
+    monkeypatch.setattr(admin, "log_system_event", grava)
+    monkeypatch.setattr(erros, "sem_reraise", lambda app: app)
+    rota_temporaria("/_teste_sem_wrapper", _bug, "GET")
+    with pytest.raises(RuntimeError, match="bug de verdade"):
+        TestClient(dashboard.app).get("/api/v2/_teste_sem_wrapper")

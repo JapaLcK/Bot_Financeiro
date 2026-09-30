@@ -80,7 +80,34 @@ async def validacao_erro(request: Request, exc: RequestValidationError) -> JSONR
     return _envelope(422, "validation_error", "Dados inválidos.", details)
 
 
+def sem_reraise(app):
+    """Por fora do `ServerErrorMiddleware` do sub-app (ver `app.py`): ele re-levanta
+    toda exceção depois de chamar `erro_interno` ("We always continue to raise"), e
+    ela sairia do app ASGI inteiro — traceback de novo no uvicorn, e o `TestClient`
+    a levantaria no teste. Depois de a resposta começar, `erro_interno` já registrou:
+    engole. Antes, deixa subir: é o `ClientDisconnect`, que o pai responde 499.
+    ASGI puro e não `BaseHTTPMiddleware`, que atrapalharia o SSE."""
+    async def _app(scope, receive, send):
+        comecou = False
+
+        async def _send(msg):
+            nonlocal comecou
+            comecou = comecou or msg["type"] == "http.response.start"
+            await send(msg)
+
+        try:
+            await app(scope, receive, _send)
+        except Exception:
+            if not comecou:
+                raise
+    return _app
+
+
 async def erro_interno(request: Request, exc: Exception) -> JSONResponse:
+    # O SSE que explode no meio chega embrulhado no `ExceptionGroup` do task group
+    # do FastAPI: a classificação e o log são da exceção de dentro.
+    if isinstance(exc, BaseExceptionGroup) and len(exc.exceptions) == 1:
+        exc = exc.exceptions[0]
     # Cliente sumiu: levantar de novo ANTES de responder faz a exceção sair do sub-app
     # e cair no `except ClientDisconnect` do `admin_error_logging_middleware` do
     # pai (499, sem evento) — a regra fica só lá.
@@ -88,11 +115,6 @@ async def erro_interno(request: Request, exc: Exception) -> JSONResponse:
         raise exc
     # O resto o pai não enxerga (o sub-app já respondeu): sem o
     # `log_system_event` aqui, o erro some do painel de admin.
-    # Limite conhecido: depois desta resposta o `ServerErrorMiddleware` do sub-app
-    # re-levanta a exceção ("We always continue to raise"), e ela sai do app ASGI
-    # inteiro: o uvicorn deve logar o traceback de novo (não visto no Railway) e o
-    # `TestClient` a levanta no teste. Engolir pede `BaseHTTPMiddleware`, que
-    # atrapalha o SSE: fica para o PR 4.
     status, message = status_do_erro(exc)
     tb = "".join(traceback.format_exception(exc))
     err = str(exc) or exc.__class__.__name__
