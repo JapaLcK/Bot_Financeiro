@@ -367,8 +367,9 @@ fixo de toda mudança de layout.
 - **Isolamento por usuário é regra dura.** A formulação da regra mora no §0 do
   `CLAUDE.md`, que é auto-carregado — instrução de segurança não pode depender de
   alguém abrir este arquivo. Aqui fica só o lembrete de que ela vale em todo `db/`.
-- **`launch.py` sobe dois processos**: o uvicorn (que atende o `$PORT` do Railway) e o
-  `bot.py` do Discord. Um `web` no Procfile, dois processos filhos.
+- **`launch.py` vira o uvicorn** (`os.execv`, que atende o `$PORT` do Railway): um `web`
+  no Procfile, um processo, e o SIGTERM chega direto ao uvicorn. O `bot.py` do Discord
+  saiu dele no PR 5a do dashboard v2 e não roda mais.
 - **Tarefas de fundo sobem no startup do app** quando `RUN_BACKGROUND_TASKS != "0"`
   (agendadores de investimento, Open Finance, engajamento, cobrança recorrente, poda
   das tabelas de token/challenge…). Dois arquivos põem o `0`, e por `setdefault`

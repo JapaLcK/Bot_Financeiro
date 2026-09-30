@@ -31,8 +31,8 @@ tomadas". App iOS em Capacitor carregando o próprio site.
 ## Mapa do repositório
 
 ```
-launch.py                 — entrypoint do Railway: sobe uvicorn ($PORT) + bot.py em paralelo
-bot.py                    — bot do Discord (processo 2)
+launch.py                 — entrypoint do Railway: carrega o ambiente e vira o uvicorn ($PORT)
+bot.py                    — bot do Discord (fora do launch.py desde o PR 5a; não roda)
 ai_router.py              — chamada à OpenAI (modelo em OPENAI_MODEL, default gpt-4o-mini)
 parsers.py                — parse de linguagem natural ("gastei 50 mercado")
 statement_import.py       — importação de extrato (OFX/CSV/PDF)
@@ -487,7 +487,7 @@ Os agrupamentos, para orientar a busca: **core** (`users`, `accounts`, `launches
 | Serviço | Para quê | Onde |
 |---|---|---|
 | WhatsApp **Cloud API oficial** (`graph.facebook.com`) | canal principal | `adapters/whatsapp/` |
-| Discord | canal secundário | `adapters/discord/`, `bot.py` |
+| Discord | fora do `launch.py` desde o PR 5a do dashboard v2: o código segue e não roda | `adapters/discord/`, `bot.py` |
 | OpenAI | categorização, chat, agentes | `ai_router.py`, `core/services/ai_chat/` |
 | Stripe | assinaturas | billing no monólito |
 | Pluggy | Open Finance | `core/services/pluggy*.py` |
