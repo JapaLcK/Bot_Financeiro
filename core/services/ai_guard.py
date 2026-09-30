@@ -87,7 +87,7 @@ _ANY_NUM_RE = re.compile(r"-?\d[\d.,]*")
 #
 # E não basta a chave ser "de identificação": tem que ser o ID que o USUÁRIO
 # VÊ. `list_recent_launches` devolve `id` (interno) E `user_seq` lado a lado
-# (`tools/launches.py:59-60`), e o `#N` que o usuário digita é o user_seq —
+# (`tools/launches.py:63-64`), e o `#N` que o usuário digita é o user_seq —
 # `db.resolve_user_seq_to_id` existe exatamente pra traduzir um no outro.
 # Aceitar `id` fazia uma resposta com `#4242` passar por sustentada contra a
 # linha `{"id": 4242, "user_seq": 1}`, sendo que #4242 não existe pro usuário.
