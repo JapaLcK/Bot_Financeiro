@@ -1231,6 +1231,9 @@ def consume_password_reset_token_impl(get_conn, hash_password, token: str, new_p
         # A condição de e-mail fica no próprio UPDATE: ele pega a trava da linha e
         # reavalia depois dela (READ COMMITTED), em série com a troca de e-mail.
         # email_hash NULL (token de antes da coluna) nunca casa: recusado.
+        # O link vale enquanto a conta tiver o e-mail que o recebeu — e nesse
+        # estado quem lê essa caixa já pode pedir outro. Por isso a volta A→B→A
+        # reanimar o link não dá poder novo a ninguém.
         cur.execute(
             # password_changed_at: invalida tokens legados sem jti emitidos
             # antes do reset (os com jti já são revogados via sessão).
