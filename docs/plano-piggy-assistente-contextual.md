@@ -124,6 +124,8 @@ Uma entrada nova no simulador entra nesta tabela antes de entrar no código. Con
 | Conciliação pendente | pendência em `PENDING_RECONCILIATION_SQL` | dois sentidos, item a item | o veredito que não sobreviver à soma na direção que o enfraquece |
 | Declaração pendente | `bank_movements.pending_count > 0`, sem efeito quantificado | dois sentidos | os dois |
 | Receita fixa ativa em frequência fora da projeção | `once`, `weekly` ou `daily` legados: `_cashflow_events()` pula essas receitas | só piora | risco (ou estender a fonte de eventos) |
+| Receita fixa já recebida antes do dia previsto | salário que caiu antes do `pay_day`: já está no saldo, e `_cashflow_events()` não olha `last_credited_ym`, então a ocorrência do mês entra de novo | só melhora | cabe |
+| Gasto fixo automático já pago antes do dia previsto | cobrança lançada antes do `due_day`: já saiu do saldo, e `_cashflow_events()` não olha `last_charged_ym`, então a ocorrência do mês sai de novo | só piora | risco |
 | Receita fixa projetada que pode não vir | renda apenas inferida, ou renda irregular | só melhora | cabe |
 | Gasto fixo automático pago no cartão | `payment_type="credit_card"`: `_cashflow_events()` ignora `payment_type` e tira o valor do caixa no `due_day`, e a mesma função tira a fatura aberta no vencimento dela. Depois que a cobrança é lançada no cartão, o valor sai duas vezes; antes, sai na data da cobrança em vez da data de pagar a fatura | só piora (dupla contagem ou saída antecipada) | risco, até esses gastos passarem pelo calendário da fatura sem duplicar |
 | Gasto fixo manual sem boleto gerado | só entra quando o boleto pendente já existe; conferir na implementação se as ocorrências futuras sem boleto ficam fora | só melhora | cabe |
@@ -222,7 +224,7 @@ paralelo.
   compra no fechamento do cartão, salário antes/depois da parcela, fatura vencida, parcelas além
   de 90 dias, reserva já violada, banco indisponível, oferta sem CET, OCR errado, legenda ignorada,
   pendência de lançamento, receita ativa em frequência legada, boleto ou gasto fixo com valor
-  estimado (`variable_amount`), gasto fixo automático pago no cartão
+  estimado (`variable_amount`), receita ou gasto fixo do mês já realizado antes do dia previsto, gasto fixo automático pago no cartão
   (antes e depois de a cobrança entrar na fatura), conciliação ou declaração do Open
   Finance pendente (inclusive com
   ajustes de sinais opostos que se cancelam no agregado), saldo alterado
