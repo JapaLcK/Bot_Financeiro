@@ -718,7 +718,8 @@ async def get_financial_data(
               AND (
                 tipo IN ('aporte_investimento', 'deposito_caixinha',
                          'saque_caixinha', 'resgate_investimento')
-                OR ({TIPO_DESPESA_SQL} AND LOWER(REPLACE(COALESCE(categoria, ''), ' ', '_')) IN (
+                OR ({TIPO_DESPESA_SQL} AND COALESCE(source, '') <> 'open_finance'
+                    AND LOWER(REPLACE(COALESCE(categoria, ''), ' ', '_')) IN (
                     'investimentos', 'investimento_aporte', 'criptomoedas'
                 ))
               )
@@ -1145,7 +1146,7 @@ _EXPORT_TIPO_LABEL = {
 }
 
 
-def _classify_launch(tipo: str, is_internal: bool, categoria: str = ""):
+def _classify_launch(tipo: str, is_internal: bool, categoria: str = "", source: str | None = None):
     """Retorna (natureza, sinal, label) ou None se a ação não entra no relatório.
 
     natureza ∈ {despesa, receita, aporte}; sinal '+'/'-' = entrou/saiu na conta.
@@ -1161,7 +1162,8 @@ def _classify_launch(tipo: str, is_internal: bool, categoria: str = ""):
             return ("aporte", "-", _EXPORT_TIPO_LABEL[t])
         if t in _EXPORT_APORTE_IN:
             return ("aporte", "+", _EXPORT_TIPO_LABEL[t])
-        if cat_norm in _EXPORT_INVEST_CATS:
+        # Open Finance fora (#149): a aplicação chega bruta, sem o resgate abatido.
+        if cat_norm in _EXPORT_INVEST_CATS and source != "open_finance":
             if t in _EXPORT_RECEITA_TIPOS:
                 return ("aporte", "+", "Resgate")
             return ("aporte", "-", "Aporte")
@@ -1218,7 +1220,7 @@ async def _fetch_export_items(user_id: int, start_date: date | int, end_date: da
         async with conn.cursor() as cur:
             await cur.execute(
                 """
-                SELECT tipo, valor, alvo, nota, categoria, criado_em, is_internal_movement
+                SELECT tipo, valor, alvo, nota, categoria, criado_em, is_internal_movement, source
                 FROM launches
                 WHERE user_id = %s
                   AND criado_em >= %s AND criado_em < %s
@@ -1226,7 +1228,7 @@ async def _fetch_export_items(user_id: int, start_date: date | int, end_date: da
                 (user_id, period_start, exclusive_end),
             )
             for r in await cur.fetchall():
-                cls = _classify_launch(r["tipo"], r.get("is_internal_movement"), r.get("categoria"))
+                cls = _classify_launch(r["tipo"], r.get("is_internal_movement"), r.get("categoria"), r.get("source"))
                 if not cls:
                     continue
                 natureza, sign, label = cls
