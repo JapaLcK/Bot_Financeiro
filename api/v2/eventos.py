@@ -13,7 +13,7 @@ e leva a recusa no envelope.
 `avisar` fala com os streams DESTE loop. As escritas financeiras chegam por
 LISTEN/NOTIFY: o trigger `trg_pb_aviso_escrita` (`db/schema.py`,
 `TABELAS_QUE_AVISAM`) faz `pg_notify('pb_escrita', <uid>)`, que sai só no commit
-e vale para qualquer thread ou processo que grave (WhatsApp, `bot.py`, rota);
+e vale para qualquer thread ou processo que grave (WhatsApp, rota, job, script);
 `escutar_banco`, uma tarefa do lifespan com conexão própria, repassa cada uid
 ao `avisar` como `"tudo"`. Depois de uma queda ela avisa todo inscrito, porque o
 que foi gravado no meio não chegou.
