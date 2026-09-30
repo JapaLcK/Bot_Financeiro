@@ -92,10 +92,12 @@ def conferir(cur, dias):
 
     # observed_on vem de `now()` do app no fuso `_tz()`. Se o Railway rodar com
     # outro fuso efetivo, as fotos gravadas entre 21h e 24h de SP caem no dia errado.
-    tabela(cur, "4. dia da foto x dia de SP do instante gravado", f"""
+    tabela(cur, f"4. dia da foto x dia de SP do instante gravado (últimos {dias} dias)", f"""
         select case when s.observed_on = (s.observed_at at time zone %s)::date then 'bate'
                     else 'NAO BATE' end as dia, count(*) as fotos
-          from {T} s group by 1 order by 1""", (SP,))
+          from {T} s
+         where s.observed_on >= (now() at time zone %s)::date - %s
+         group by 1 order by 1""", (SP, SP, dias))
 
     colunas = ["position_at", "status", "balance", "amount", "amount_original", "quantity",
                "contract_rate", "contract_rate_type", "last_month_rate",

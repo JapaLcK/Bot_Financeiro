@@ -21,7 +21,9 @@ CONTROLES (CLAUDE.md §3), medidos:
     (hoje são 5 × 2, assimétrico de propósito);
   • tirar o `where dia_ant = observed_on - 1` da seção 7 → vermelho (a lacuna da
     inv-a2 e as linhas sem dia anterior entram na conta);
-  • tirar a janela da seção 7 → vermelho (com dias=2 contaria os 5 pares).
+  • tirar a janela da seção 7 → vermelho (com dias=2 contaria os 5 pares);
+  • tirar a janela da seção 4 → vermelho (a foto antiga fora do dia de SP, em
+    hoje-20, apareceria como `NAO BATE` com dias=14).
 """
 from db.connection import get_conn
 from scripts.conferir_fotos_of import conferir
@@ -70,11 +72,15 @@ def test_conferir_conta_o_que_foi_semeado(user_id, capsys):
                                    for pid in ("inv-c1", "inv-c2", "inv-c9")])
             cur.executemany(foto, [(d, "inv-d1", hoje, 0, 0, True, "ACTIVE", 1, 1),
                                    (e, "inv-e1", hoje, 0, 0, False, "ACTIVE", 1, 1)])
+            # Descompasso de fuso antigo: foto de hoje-20 gravada no instante de hoje-19.
+            cur.execute(foto, (a, "inv-a0", hoje, 20, 19, True, "ACTIVE", 1, 1))
             capsys.readouterr()
             conferir(cur, 14)
             saida = capsys.readouterr().out
             conferir(cur, 2)
             saida2 = capsys.readouterr().out
+            conferir(cur, 30)
+            saida30 = capsys.readouterr().out
         finally:
             c.rollback()
 
@@ -83,6 +89,8 @@ def test_conferir_conta_o_que_foi_semeado(user_id, capsys):
                                 "situacao=foto parcial | conexoes=2", "situacao=ok | conexoes=1",
                                 "situacao=sem foto nenhuma | conexoes=1"]
     assert _secao(saida, 4) == ["dia=bate | fotos=13"]
+    # sorted: a ordem de 'NAO BATE' × 'bate' depende da collation do banco.
+    assert sorted(_secao(saida30, 4)) == ["dia=NAO BATE | fotos=1", "dia=bate | fotos=13"]
     assert _secao(saida, 6) == ["status=ACTIVE | fotos=6", "status=TOTAL_WITHDRAWAL | fotos=1"]
     assert _secao(saida, 7) == [
         "pares=5 | nada_mudou=0 | so_saldo_mudou=4 | aplicado_e_saldo_mesmo_delta=0"
