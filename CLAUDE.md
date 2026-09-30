@@ -255,8 +255,12 @@ Isso gerou dois apontamentos separados.
 
 ## 3. Testar e validar antes de empurrar
 
-**Nunca empurrar sem rodar a suíte.** Se ela morrer com `INTERNALERROR` no import,
-isso **não** é falha de teste — é ambiente, e não se lê como tal.
+**Nunca empurrar sem rodar os testes do que você mudou.** Na máquina, rode só os
+arquivos de teste da área tocada. **A suíte inteira roda no CI** de todo PR, e o CI
+verde é condição de merge (decisão do dono, 2026-09-30: várias sessões rodando a
+suíte inteira ao mesmo tempo levaram a carga da máquina a 280 e derrubaram o
+simulador de outra tarefa). Se o teste morrer com `INTERNALERROR` no import, isso
+**não** é falha de teste — é ambiente, e não se lê como tal.
 
 **Como rodar é assunto da skill `baseline-testes`, e só dela.** Invoque-a antes de
 qualquer `pytest` neste repositório: ela tem o interpretador certo, a única variável
@@ -269,7 +273,9 @@ Playwright). O `package.json` da raiz existe só para isso e segue **sem script
 ilhas React), que é projeto npm separado, tem artefatos commitados e gate próprio
 no CI — `docs/CLAUDE.md`, "Decisões tomadas". Rodar a suíte não o invoca.
 
-Não use o CI como primeiro teste — ele é a confirmação, não a descoberta.
+O CI não substitui rodar os testes da área: ele mede o resto (a suíte inteira, com o
+`requirements.txt` de verdade). **Leia o resultado dele** antes de dizer que está
+pronto ou de pedir revisão (§7).
 
 **Antes de afirmar que algo "não existe", confirme contra qual árvore.** Um branch
 atrasado em relação à `main` mente com toda a confiança do mundo: o `grep` não acha o
@@ -288,8 +294,9 @@ conferir `main` sem trocar de branch. Vale o mesmo para revisores automáticos: 
 lê a árvore **do branch**, então um achado de "isso não existe" num branch atrasado
 pode ser artefato do atraso, não um defeito. Cheque antes de aceitar.
 
-**Compare com a baseline, não com zero.** Rode a suíte **antes** de mexer e guarde a
-**lista de nomes** que falharam — nunca a contagem. Falha que já existia não é
+**Compare com a baseline, não com zero.** Rode os testes da área **antes** de mexer e
+guarde a **lista de nomes** que falharam — nunca a contagem. No CI, a baseline é o
+último run da `main`. Falha que já existia não é
 regressão sua; falha nova é. Contagem igual não prova ausência de regressão: um teste
 novo mascara um quebrado. Como ler o resultado, quando a baseline deixa de valer e
 como isolar uma falha: skill `baseline-testes`.

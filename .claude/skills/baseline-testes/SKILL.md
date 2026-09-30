@@ -10,8 +10,19 @@ description: Como rodar a suíte do PigBank e ler o resultado — qual interpret
 ```bash
 export DATABASE_URL=$(grep -m1 '^DATABASE_URL=' .env | cut -d= -f2- | tr -d "\"'")
 export PYTHONPATH=.
-.venv/bin/python -m pytest -q        # suíte inteira, sem exclusão nenhuma
-.venv/bin/python -m pytest -q -n 4      # a mesma, em paralelo (pytest-xdist)
+.venv/bin/python -m pytest -q tests/test_x.py tests/test_y.py   # os testes da área que você mexeu
+```
+
+**Na máquina, rode só os testes do que você mudou. A suíte inteira roda no CI**
+(decisão do dono, 2026-09-30). Várias sessões rodando a suíte inteira ao mesmo
+tempo levaram a carga da máquina a 280 e derrubaram o simulador de outra tarefa.
+Para achar os testes da área: `grep -rln "<módulo ou função>" tests/`.
+
+Suíte inteira local só quando o dono pedir, ou para reproduzir uma falha do CI
+que os testes da área não mostram:
+
+```bash
+.venv/bin/python -m pytest -q -n 4   # suíte inteira, sem exclusão nenhuma, em paralelo (pytest-xdist)
 ```
 
 Com `-n`, cada worker cria o próprio database `pytest_*` (o `pytest_configure` do
@@ -118,7 +129,8 @@ pytest destruir dado de verdade. A falha é segura por design.
 
 ## Ler o resultado
 
-**Tire a baseline ANTES de mexer.** Falha que já existia não é regressão sua.
+**Tire a baseline ANTES de mexer**, com os mesmos testes da área que você vai rodar
+depois. Falha que já existia não é regressão sua.
 Sem baseline não dá para separar as duas, e sobra "os testes estão vermelhos"
 sem conclusão.
 
@@ -171,5 +183,11 @@ sobre o não-verificado lê-se como verificado.
 
 `.github/workflows/tests.yml` sobe o próprio Postgres 16, instala o
 `requirements.txt` inteiro (com `ofxparse`) e roda `pytest` (bloqueante) e `audit`
-de CVEs (não-bloqueante), em push na `main` e em todo PR. O CI é confirmação, não
-descoberta — não use como primeiro teste.
+de CVEs (não-bloqueante), em push na `main` e em todo PR. É ali que a suíte inteira
+roda, com o `requirements.txt` de verdade (o `.venv` local diverge dele). Não empurre
+sem ter rodado os testes da área, e **leia o resultado do CI** antes de dizer que
+está pronto ou de pedir revisão.
+
+A baseline da suíte inteira é a `main`: um teste vermelho no seu PR que também está
+vermelho no último run da `main` não é regressão sua. Compare por nome de teste,
+como acima.
