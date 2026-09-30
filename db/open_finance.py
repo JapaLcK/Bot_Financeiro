@@ -19,6 +19,7 @@ from .cards import (
 )
 from .connection import TIPO_CANON_SQL, get_conn
 from .of_snapshots import grava_fotos_posicoes
+from .open_finance_cash import RESERVA_SQL, RESERVADO_SQL
 from .users import ensure_user, ensure_user_tx
 
 # `logging` da stdlib, mesmo padrão (e mesmo motivo) de `db/open_finance_state.py`:
@@ -1795,6 +1796,9 @@ def delete_open_finance_transactions(
             )
             for row in cur.fetchall():
                 delete_if_shadow(cur, row["user_id"], row["imported_launch_id"])
+            from .open_finance_cash import estorna_links
+            for owner in owners:
+                estorna_links(cur, owner, [r["id"] for r in rows if r["user_id"] == owner])
             cur.execute(
                 "delete from open_finance_transactions where id = any(%s)",
                 ([r["id"] for r in rows],),
@@ -1894,6 +1898,8 @@ def save_open_finance_sync(connection_id: int, accounts: list[dict]) -> dict:
             # ressuscitava conexão morta — DELETED/ERROR viravam ACTIVE com
             # "sincronizado agora". Quem afirma sucesso é `mark_sync_result`, no
             # sync, DEPOIS de o `GET /items/{id}` confirmar que o item existe.
+            from .open_finance_cash import reconcile_cash_transfers
+            reconcile_cash_transfers(cur, owner["user_id"])
             reconcile_bank_movements(cur, owner["user_id"])
         conn.commit()
 
@@ -2037,7 +2043,14 @@ def pick_reconciliation_match(valor, tx_date, description, candidates) -> dict:
     return {"launch_id": best["id"], "verdict": "ask"}
 
 
-def _find_manual_candidates(cur, user_id: int, tipo: str, valor, tx_date) -> list[dict]:
+# Débito recorrente em conta: o lançamento É o débito do banco, não dinheiro em
+# espécie. Fonte única de quem o reconhece (importador, ordem inversa e o saque
+# em espécie, db/open_finance_cash*.py). Sem alias: a coluna é de `launches`.
+OF_RECURRING_SQL = "coalesce(efeitos ? 'of_recurring', false)"
+
+
+def _find_manual_candidates(cur, user_id: int, tipo: str, valor, tx_date, proprio=None,
+                            internos=False) -> list[dict]:
     """Lançamentos não-OF elegíveis a casar com uma tx OF, ainda não vinculados.
 
     Inclui `source = 'manual'` DE PROPÓSITO, mas só como candidato a 'ask':
@@ -2056,25 +2069,39 @@ def _find_manual_candidates(cur, user_id: int, tipo: str, valor, tx_date) -> lis
     `list_launches_by_tipo`: 'saida'/'entrada' passadas como ARGUMENTO passam a
     não casar nada (antes casavam as linhas legadas). Inalcançável daqui — o
     único produtor do argumento é `classify_open_finance_launch` — mas quem
-    ligar outro chamador precisa saber."""
+    ligar outro chamador precisa saber.
+
+    `proprio`: id do vínculo de saque em espécie que revalida o PRÓPRIO manual
+    (db/open_finance_cash_revisao.py) — a reserva dele e o interno que o "é o
+    mesmo" pôs não contam; o resto do predicado é o da escolha. `internos=True`
+    devolve também os internos (`interno`), que o saque em espécie usa como
+    bloqueio do crédito automático — nunca como par."""
     cur.execute(
         f"""
+        select * from (
         select id, valor, coalesce(posted_at, criado_em::date) as ref_date, alvo, nota,
                coalesce(source, 'manual') as source,
-               (efeitos ? 'of_recurring') as of_recurring
+               {OF_RECURRING_SQL} as of_recurring,
+               case when jsonb_typeof(efeitos -> 'delta_conta') = 'number'
+                    then (efeitos ->> 'delta_conta')::numeric end as delta_conta,
+               is_internal_movement and not exists (
+                   select 1 from of_cash_links p where p.id = %s and p.user_id = launches.user_id
+                      and p.status = 'ativo' and p.launch_id = launches.id) as interno
         from launches
         where user_id = %s
           and {TIPO_CANON_SQL} = %s
           and coalesce(source, 'manual') <> 'open_finance'
-          and is_internal_movement = false
           and abs(valor - %s) <= %s
           and coalesce(posted_at, criado_em::date) between %s and %s
           and not exists (
               select 1 from open_finance_transactions o where o.imported_launch_id = launches.id
           )
+          and not {RESERVA_SQL.format(t="launches", proprio="%s")}
+        ) c where %s or not c.interno
         """,
-        (user_id, tipo, Decimal(str(valor)), RECON_AMOUNT_TOL,
-         tx_date - timedelta(days=RECON_DATE_WINDOW), tx_date + timedelta(days=RECON_DATE_WINDOW)),
+        (proprio, user_id, tipo, Decimal(str(valor)), RECON_AMOUNT_TOL,
+         tx_date - timedelta(days=RECON_DATE_WINDOW), tx_date + timedelta(days=RECON_DATE_WINDOW),
+         proprio, internos),
     )
     return cur.fetchall()
 
@@ -2163,6 +2190,8 @@ def import_open_finance_launches(user_id: int, connection_id: int | None = None)
                 (user_id, connection_id, connection_id),
             )
             rows = cur.fetchall()
+            from .open_finance_cash import cash_internal_tx_ids
+            caixa = cash_internal_tx_ids(cur, user_id)
 
             for r in rows:
                 if (r["account_type"] or "").upper() != "BANK":
@@ -2170,6 +2199,8 @@ def import_open_finance_launches(user_id: int, connection_id: int | None = None)
                     continue
 
                 cls = classify_open_finance_launch(r["amount"], r["category"], r["description"])
+                if r["of_tx_id"] in caixa:  # saque/depósito em espécie: par da Carteira
+                    cls["is_internal_movement"] = True
 
                 # Reconciliação (Fase 2): gasto/receita não-interno tenta casar com manual.
                 verdict, match_id = "none", None
@@ -2283,7 +2314,7 @@ def _propose_manual_reconciliation(user_id: int, launch_id: int) -> dict:
                  where id=%s and user_id=%s
                    and coalesce(source, 'manual') = 'manual'
                    and is_internal_movement = false
-                   and not (coalesce(efeitos, '{{}}'::jsonb) ? 'of_recurring')
+                   and not {OF_RECURRING_SQL}
                    and not exists (
                        -- Só as transações do PRÓPRIO usuário (§0 e custo):
                        -- `match_launch_id` não tem índice, e sem o join isto
@@ -2293,6 +2324,7 @@ def _propose_manual_reconciliation(user_id: int, launch_id: int) -> dict:
                          join open_finance_connections c on c.id = a.connection_id
                         where c.user_id = %s
                           and (o.imported_launch_id = m.id or o.match_launch_id = m.id))
+                   and not {RESERVADO_SQL.format(t="m")}
                 """,
                 (launch_id, user_id, user_id),
             )
@@ -2305,6 +2337,9 @@ def _propose_manual_reconciliation(user_id: int, launch_id: int) -> dict:
             # (`ACTIONABLE_PENDING_SQL`): transação de conexão PAUSED/DELETED ou de
             # conta não-BRL viraria um par que ninguém vê — e tomaria o lugar de
             # uma elegível. Os três primeiros %s: `merged_wallet_delta_params`.
+            # Nem a do saque em espécie (a sombra ainda não interna entre o sync e
+            # a correção dela): a pendência nasceria escondida e prenderia o manual.
+            from .open_finance_cash import cash_internal_tx_ids
             cur.execute(
                 f"""
                 select t.id as of_tx_id, t.description, l.id, l.valor,
@@ -2317,12 +2352,13 @@ def _propose_manual_reconciliation(user_id: int, launch_id: int) -> dict:
                    and t.reconciliation_status in ('imported', 'pending')
                    and abs(l.valor - %s) <= %s
                    and coalesce(l.posted_at, l.criado_em::date) between %s and %s
+                   and not t.id = any(%s)
                  order by t.transaction_date, t.id
                  for update of t
                 """,
                 (*merged_wallet_delta_params(user_id), m["tipo"], m["valor"], RECON_AMOUNT_TOL,
                  m["ref_date"] - timedelta(days=RECON_DATE_WINDOW),
-                 m["ref_date"] + timedelta(days=RECON_DATE_WINDOW)),
+                 m["ref_date"] + timedelta(days=RECON_DATE_WINDOW), list(cash_internal_tx_ids(cur, user_id))),
             )
             rows = cur.fetchall()
             pick = pick_reconciliation_match(
@@ -2563,7 +2599,7 @@ def sync_imported_open_finance_updates(user_id: int, connection_id: int | None =
             # 1) Launches próprios do OF (conta BANK)
             cur.execute(
                 """
-                select o.amount, o.transaction_date, o.category, o.description,
+                select o.id as of_tx_id, o.amount, o.transaction_date, o.category, o.description,
                        l.id as launch_id, l.valor as cur_valor, l.categoria as cur_cat,
                        l.tipo as cur_tipo, l.is_internal_movement as cur_internal,
                        coalesce(l.posted_at, l.criado_em::date) as cur_date
@@ -2576,8 +2612,12 @@ def sync_imported_open_finance_updates(user_id: int, connection_id: int | None =
                 """,
                 (user_id, connection_id, connection_id),
             )
-            for r in cur.fetchall():
+            from .open_finance_cash import cash_internal_tx_ids
+            rows, caixa = cur.fetchall(), cash_internal_tx_ids(cur, user_id)
+            for r in rows:
                 cls = classify_open_finance_launch(r["amount"], r["category"], r["description"])
+                if r["of_tx_id"] in caixa:  # saque/depósito em espécie: par da Carteira
+                    cls["is_internal_movement"] = True
                 new_cat = r["category"] or "outros"
                 changed = (
                     Decimal(str(r["cur_valor"])) != cls["valor"]
@@ -2826,11 +2866,16 @@ MERGED_WALLET_DELTA_SQL = f"""
 
 # Pendência ACIONÁVEL (`pending`: imported = sombra, match = X), uma linha por
 # transação: conta no recorte, X existente e X não ocupado por outra transação
+# nem pelo saque em espécie (`RESERVADO_SQL`), e transação que não é do saque
+# em espécie (`cash_internal_tx_ids`, o último %s)
 # (confirmar daria ALREADY_LINKED). Regra única da lista e do resumo (§0.7).
+# Params: `actionable_pending_params`.
 ACTIONABLE_PENDING_SQL = _fused_join_sql("match_launch_id", """
          and t.reconciliation_status = 'pending'
          and not exists (select 1 from open_finance_transactions o
-                          where o.imported_launch_id = l.id)""",
+                          where o.imported_launch_id = l.id)
+         and not t.id = any(%s)
+         and not """ + RESERVADO_SQL.format(t="l"),
                                          cols="t.id as of_tx_id, l.id, (l.efeitos ->> 'delta_conta')::numeric as d")
 
 # O que mudaria na Carteira exibida se o usuário confirmasse: mesmo sinal da
@@ -2854,6 +2899,13 @@ def merged_wallet_delta_params(user_id: int) -> tuple:
     `BANK_ACCOUNTS_SQL`, o de `tc.user_id` e o de `l.user_id`. Fonte única da
     contagem — os três chamadores leem daqui em vez de montar a tupla (§0.7)."""
     return (user_id, user_id, user_id)
+
+
+def actionable_pending_params(cur, user_id: int) -> tuple:
+    """Os de `ACTIONABLE_PENDING_SQL`/`PENDING_RECONCILIATION_SQL`: os de
+    `merged_wallet_delta_params` e as transações do saque em espécie."""
+    from .open_finance_cash import cash_internal_tx_ids
+    return (*merged_wallet_delta_params(user_id), list(cash_internal_tx_ids(cur, user_id)))
 
 
 def merged_wallet_delta(cur, user_id: int) -> Decimal:
@@ -3258,6 +3310,8 @@ def disconnect_open_finance_connection(
             )
             for row in cur.fetchall():
                 delete_if_shadow(cur, row["user_id"], row["imported_launch_id"])
+            from .open_finance_cash import record_coverage
+            record_coverage(cur, user_id, connection_id)
             if connection_id is None:
                 cur.execute(
                     "delete from open_finance_connections where user_id=%s "
