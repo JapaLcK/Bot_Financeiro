@@ -458,18 +458,25 @@ tentativa aberta por cliente).
        ciclo.
    - **O que o job faz:** confirma pela `list_line_items` (preço = `ebook_price`) que o
      e-book foi comprado. Se não foi, fecha a pendência sem enviar. Se foi, envia com
-     `_fire_email(user_id, send_ebook_email, <URL da pendência>, dedup_days=3650)`, com a
-     foto e nunca a env do momento. URL vazia na pendência não conta como enviado: a
-     pendência fica aberta e gera alerta. A chave interna
-     dele (`send_ebook_email_sent`) é a única marca de "enviado", **sem segunda chave**.
-     A pendência é fechada quando o `_fire_email` devolve True ou quando a chave já
-     existe. Uma falha (Stripe fora, e-mail recusado) mantém a pendência para o próximo
+     `send_ebook_email` (pelo `_fire_email` extraído), com a foto da URL e nunca a env do
+     momento. URL vazia na pendência não conta como enviado: a pendência fica aberta e
+     gera alerta.
+     - **A marca de "enviado" é a própria linha da pendência** (`user_id` + `session_id`),
+       e não a chave de 3650 dias do `_fire_email` por usuário. Com a chave por usuário,
+       quem comprasse o e-book de novo, depois de cancelar e assinar outra vez, pagaria e
+       não receberia.
+     - O job reivindica a linha de forma atômica antes de enviar, com uma expiração para
+       não travar se cair no meio, e a fecha só com o envio confirmado. O `_fire_email`
+       roda com a dedupe padrão, que só protege contra duas rodadas do job no mesmo
+       dia.
+     - A pendência é fechada quando o `_fire_email` devolve True. Uma falha (Stripe fora, e-mail recusado) mantém a pendência para o próximo
      ciclo.
    - **Condição do PR 3:** o registro da pendência segue §0.1. Procure antes se já existe
      outbox ou fila de e-mail no repositório; se existir, reuse. **O `_fire_email` hoje é
      uma função ANINHADA dentro do `billing_webhook`**, e um job não a alcança. O PR 3 a
      extrai para o nível do módulo (extrair, §0.1: o webhook e o job passam a chamar a
-     mesma), sem mudar a chave nem o comportamento. Não crie uma segunda dedupe.
+     mesma), sem mudar a chave nem o comportamento. Para o e-book, a marca de enviado é a
+     linha da pendência (por compra), e não outra chave por usuário.
 2. O ramo de fatura paga **que já existe** trata os DOIS eventos juntos:
    `elif event["type"] in ("invoice.paid", "invoice.payment_succeeded")` (monólito).
    A mudança é **dentro dele**. Um ramo só para `invoice.paid` deixaria o
@@ -603,11 +610,22 @@ a rede.
    - **O risco:** quem clicou em "Enviar link" com o e-mail errado e depois corrigiu
      deixa, por 30 min, um link válido na caixa do dono do e-mail errado. Ele cria a
      senha, derruba as sessões do comprador e fica com a conta paga.
-   - **Conserto:** na mesma transação da troca de e-mail, marcar como usados os tokens em
-     aberto do usuário (`update password_reset_tokens set used_at = now() where user_id
-     = %s and used_at is null`).
-   - **Teste:** pedir o link, trocar o e-mail e tentar consumir o link antigo → recusado.
-     O link pedido depois da troca funciona.
+   - **Conserto: amarrar o token ao e-mail**, e não só invalidar na troca. Invalidar na
+     troca tem duas corridas: o pedido de reset lê o usuário numa transação e grava o
+     token em outra, e o consumo confere o `used_at` separado da troca de senha.
+     - O token passa a guardar o `email_hash` da conta no momento em que é emitido.
+     - O consumo o **reivindica de forma atômica** (`update … set used_at = now() where
+       token = %s and used_at is null and expires_at > now() returning user_id,
+       email_hash`) e, na **mesma transação** da troca de senha, confere esse hash
+       contra o e-mail atual da conta. Se for diferente, recusa.
+     - Com isso, o link emitido para o e-mail antigo nunca vale depois da troca, qualquer
+       que seja a ordem dos pedidos.
+     - A invalidação na troca de e-mail pode continuar, como limpeza, mas deixa de ser o
+       que garante a segurança.
+   - **Teste:** pedir o link, trocar o e-mail e consumir o link antigo → recusado.
+     Também com o token gravado **depois** da troca, mas com o hash antigo (a corrida do
+     pedido). Dois consumos simultâneos do mesmo token → só um vence. O link pedido
+     depois da troca funciona.
    - **Isto já vale hoje na `main`**, para qualquer conta, e não só a do quiz. Se o
      conserto entrar antes num PR próprio, o PR 4 só confere que ele existe.
 4. Ordem dos overlays na `/home` (enumerar antes de codar: overlay de checkout,
