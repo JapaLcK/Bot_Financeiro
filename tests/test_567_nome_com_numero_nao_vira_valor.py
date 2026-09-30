@@ -10,44 +10,37 @@ resposta só troca o valor guardado em forma explícita:
     SEM o nome: "tesouro 2029 no nubank" e "a reserva 2025 do nubank" (`Nubank` e
     `Reserva 2025 do Nubank`, N13) não são essa forma;
   - quantia depois de ", ": "80", "R$ 80", "80 reais", "na verdade 80"; decimal
-    com espaço ("132, 50", também com "R$"/"reais") só se a parte antes não é
-    ano: "tesouro, 2029, 80" -> 80 (N14); SEM "R$" sem vírgula;
-  - d046-1: com "esvaziar" guardado, cauda com dígito ou palavra de número que
-    não é quantia ("2 mil", "cem", "uns 80", "1k", "dia 15", "a de 2027") NÃO
-    esvazia: pergunta o valor (N15/N16). Não ensina forma nova de quantia.
-  Limites aceitos, sem re-perguntar: "tesouro, 2025, 50" -> 50, "Tesouro 2029
-  80" -> 50, "tesouro,80" -> 50, "tesouro, 2 mil" -> 50 (valor numérico
-  guardado; vale também no aporte), "tesouro 2029 no valor de 80" -> 50, "tira
-  100 da viajem" não acha alvo; nome CURTO do catálogo depois da preposição
-  reativa a regra como na `main` ("a reserva 2025 da casa" com `casa` ->
-  2.025) e "tira do tesouro 2029 no nubank" com `Tesouro` -> 2.029 (#703).
-EXTENSÃO DO CODER: resposta SÓ com dinheiro ("80", "80 reais") é quantia, como
-na `main` (N7); a cauda aceita a unidade inteira do `h_bills._UNIDADE`; o corte
-em ", " é feito antes do `limpa_pontuacao_final`, que come a vírgula de "2029,
-R$ 80". Os ramos de "tudo" (#259) não mudam. FORA (#704): "caixinha 13º".
+    com espaço ("132, 50") só se a parte antes não é ano: "tesouro, 2029, 80" ->
+    80 (N14); SEM "R$" sem vírgula;
+  - d046-1/e1c-1: com "esvaziar" guardado, se sobra dígito ou palavra de número
+    depois de tirar o nome do alvo e não há quantia reconhecida ("viagem, 2 mil",
+    "viagem 80", "80 viagem", "viagem 2027", "viagem (80)"), NÃO esvazia: pergunta
+    o valor e nada se move (N15/N16/N17). Não ensina forma nova de quantia.
+  Limites aceitos: "tesouro, 2025, 50" -> 50, "Tesouro 2029 80" -> 50, "tesouro,80"
+  -> 50, "tesouro, 2 mil" -> 50 (valor numérico guardado, também no aporte),
+  "tesouro 2029 no valor de 80" -> 50, "tira 100 da viajem" não acha alvo, "meia"/
+  "metade"/"sem nada" esvaziam (como na `main`), "tira do tesouro 2029 no nubank"
+  -> 2.029 (#703), nome CURTO depois da preposição reativa a regra ("a reserva
+  2025 da casa" com `casa` -> 2.025).
+EXTENSÃO DO CODER: resposta SÓ com dinheiro ("80", "80 reais") é quantia, como na
+`main` (N7); a cauda aceita a unidade inteira do `h_bills._UNIDADE`; o corte em
+", " é feito antes do `limpa_pontuacao_final`. Os ramos de "tudo" (#259) não mudam.
+FORA (#704): "caixinha 13º".
 
-CONTROLE NEGATIVO (medido em 2026-09-30 sobre 529cf96e; cada mutação, num caso
-verde com o fix). (a) `pede_nome=False`: 34 VERMELHOS, P1-P3 verdes. (b)
-`_quantia_explicita` devolvendo (None, False): 50 (42 daqui e 8 de
-`test_perguntas_guardam_contexto.py`, entre eles `test_tudo_guardado_mais_quantia_
-nova_nao_esvazia`). Versões anteriores do conserto deixavam vermelhos: N6 (ano no
-nome, "R$" no nome, cauda descritiva, preposição sem catálogo), N13, N14. Por
-regra: sem o catálogo depois da preposição, N6 e 7 da tabela; número lido sem
-tirar o nome, N13; sem a `crua`, N4 "R$ 80"/"r$ 80" (em N14) e 2 da tabela; sem
-limpar a cauda, "132,50." e "80!"; exigir ", " de volta, N7/"80"/"80 reais"; sem
-o alvo inteiro antes da ", ", N14 "a viagem, 2027"; sem colar o decimal, N14
-"132, 50"; sem `_ANO_RE`, N14 "2029, 80"/"2025, 50"; sem a cauda malformada ao
-`valor_perigoso`, N15 "-80"/"132 50". d046-1: sem o ramo `quantidade_nao_
-reconhecida`, 10 (os 6 N15 "esvaziar", N16, 3 da tabela de esvaziar); sem exigir
-`want_all`, 10 (N6 cauda descritiva, N15 "saquei 50" + "2 mil", tabela); `inicio
-0` contando, "2 mil" da tabela; sem re-armar `falta=amount`, N16; só o teste
-de dígito sem `_extract_valor`, "cem"; só `_extract_valor` sem o de dígito,
-"dia 1.2.3".
+CONTROLE NEGATIVO (2026-09-30 sobre 1c31e30b; cada mutação, num caso verde com o
+fix). (a) `pede_nome=False`: 46 VERMELHOS. (b) `_quantia_explicita` devolvendo
+None: 32 daqui e 8 de `test_perguntas_guardam_contexto.py` (entre eles `test_tudo_
+guardado_mais_quantia_nova_nao_esvazia`). Regras antigas: cada uma tem linhas em
+N4/N6/N7/N13/N14/N15 e na tabela (catálogo depois da preposição, número sem o
+nome, `crua`, limpeza da cauda, alvo inteiro antes da ", ", `_ANO_RE`, cauda
+malformada). e1c-1: sem o ramo `quantidade_nao_reconhecida` 32 (19 N15, 11 da
+tabela, N16, N17); sem `want_all` 40; só o teste de dígito, 2 N15; só
+`_extract_valor`, "dia 1.2.3"; detectar na resposta e não no texto sem o nome,
+N17 "Viagem 2027" e 1 da tabela; sem re-armar `falta=amount`, N16 e N17 Tesouro.
+`1c31e30b` deixa 22 vermelhos (13 N15, 8 da tabela, N17).
 
-CONTROLE POSITIVO: P1 (pergunta de VALOR), P2 (nome exato com dígitos), P3
-(correção explícita): o conserto restringe, o caminho bom tem de fechar.
-
-Conversa pelo `handle_incoming`, banco real, asserção pelo SALDO. CLASSE CEGA: sem LLM.
+CONTROLE POSITIVO: P1 (pergunta de VALOR), P2 (nome exato com dígitos), P3 (correção
+explícita). Conversa pelo `handle_incoming`, banco real, SALDO. CLASSE CEGA: sem LLM.
 """
 from __future__ import annotations
 
@@ -188,16 +181,34 @@ def test_n14_virgula_do_nome_e_decimal_com_espaco(uid, caixinha, investimento, r
 @pytest.mark.parametrize("primeira,resposta,fim", [
     ("saquei 50", "viagem, -80", 3000.0), ("saquei 50", "viagem, 132 50", 3000.0),
     ("esvaziar caixinha", "viagem, -80", 3000.0), ("esvaziar caixinha", "viagem, R$ -80", 3000.0),
-    *[("esvaziar caixinha", f"viagem, {c}", 3000.0) for c in (
-        "2 mil", "cem", "uns 80", "1k", "dia 15", "a de 2027")],
+    # "-80"/"132 50" vão ao `valor_perigoso` (#709); d046-1/e1c-1: o resto pergunta
+    *[("esvaziar caixinha", c, 3000.0) for c in (
+        "viagem, 2 mil", "viagem, cem", "viagem, uns 80", "viagem, 1k", "viagem, dia 15",
+        "viagem, a de 2027", "viagem 80", "viagem 80 reais", "viagem R$ 80", "80 viagem",
+        "minha viagem 80", "viagem: 80", "viagem 2 mil", "viagem cem", "viagem e 2 mil",
+        "viagem,80", "viagem (80)", "viagem 132 50", "viagem 2027")],
     ("esvaziar caixinha", "viagem, 80", 2920.0),   # positivo: quantia reconhecida
+    ("esvaziar caixinha", "tira 100 da viagem", 2900.0),
+    ("esvaziar caixinha", "tira 2 mil da viagem", 1000.0),
     ("esvaziar caixinha", "viagem", 0.0),          # positivo: só o nome esvazia
-    ("saquei 50", "viagem, 2 mil", 2950.0),        # limite aceito: valor numérico guardado
+    ("esvaziar caixinha", "viagem, a de férias", 0.0),   # sem dígito: descrição
+    ("saquei 50", "viagem 2 mil", 2950.0),         # limite aceito: valor numérico guardado
+    ("saquei 50", "viagem, 2 mil", 2950.0),
 ])
-def test_n15_cauda_que_nao_vira_quantia_nao_esvazia(uid, primeira, resposta, fim):
-    """"-80"/"132 50" (Codex #709) vão ao `valor_perigoso`; "2 mil"/"cem"/"dia 15" (d046-1)
-    perguntam o valor. Com "esvaziar" guardado, nada sai."""
+def test_n15_sobra_numero_que_nao_e_quantia_nao_esvazia(uid, primeira, resposta, fim):
     assert _saca(uid, "viagem", None, resposta, primeira=primeira)[0] == fim
+
+
+@pytest.mark.parametrize("caixinha,resposta", [("Viagem 2027", "viagem 2027"), ("Viagem, 2027", "a viagem, 2027")])
+def test_n17_o_nome_inteiro_sai_e_nao_sobra_numero_esvazia(uid, caixinha, resposta):
+    assert _saca(uid, caixinha, None, resposta, primeira="esvaziar caixinha")[0] == 0.00
+
+
+def test_n17_investimento_esvaziar_com_ano_no_nome_pergunta(uid):
+    _investimento(uid, "Tesouro")
+    _pergunta_injetada(uid, "investments.withdraw", {"want_all": True}, "resgatar tudo")
+    r = _responde(uid, "tesouro 2029 no nubank")
+    assert _inv(uid, "Tesouro") == 3000.00 and "Qual o valor" in r[-1], r
 
 
 def test_n16_a_pergunta_do_valor_fica_viva(uid):
@@ -320,19 +331,20 @@ def test_tabela_tudo_mais_numero_continua_ambiguo():
     assert recusa == "quantidade_ambigua" and "amount" not in ents
 
 
-@pytest.mark.parametrize("resposta,recusa,tudo", [
-    ("viagem, 2 mil", "quantidade_nao_reconhecida", False),
-    ("viagem, a de 2027", "quantidade_nao_reconhecida", False),
-    ("viagem, dia 1.2.3", "quantidade_nao_reconhecida", False),   # só o dígito pega
-    ("viagem, a grande", None, True),          # sem dígito nem número: é o nome
-    ("viagem", None, True),
-    ("viagem, tudo", None, True),
-    ("caixinha, viagem 2027", None, True),     # o nome vem depois da vírgula
-    ("2 mil", None, True),                     # sem nome, sem ", ": não é cauda
+@pytest.mark.parametrize("catalogo,resposta,pergunta", [
+    *[("viagem", c, True) for c in (
+        "viagem, 2 mil", "viagem, a de 2027", "viagem, dia 1.2.3", "viagem 80", "80 viagem",
+        "viagem R$ 80", "viagem (80)", "viagem 2027", "caixinha, viagem 2027", "viagem 132 50")],
+    ("viagem", "2 mil", True),                 # sem nome: sobra número, pergunta
+    *[("viagem", c, False) for c in (
+        "viagem", "viagem, tudo", "viagem, a grande", "viagem, a de férias", "meia viagem")],
+    ("Viagem 2027", "viagem 2027", False),     # o nome inteiro sai: não sobra nada
+    ("Viagem, 2027", "a viagem, 2027", False),
 ])
-def test_tabela_esvaziar_guardado(resposta, recusa, tudo):
-    """d046-1: só a cauda com número que não é quantia tira o `want_all`."""
+def test_tabela_esvaziar_guardado(catalogo, resposta, pergunta):
+    """e1c-1: com `want_all`, sobrar número depois de tirar o nome tira o `want_all`."""
     ents, r = _funde_a_resposta("pockets.withdraw", {"want_all": True},
-                                limpa_pontuacao_final(resposta), ["viagem"],
+                                limpa_pontuacao_final(resposta), [catalogo],
                                 pede_nome=True, crua=resposta)
-    assert (r, bool(ents.get("want_all"))) == (recusa, tudo)
+    assert (r, bool(ents.get("want_all"))) == (
+        ("quantidade_nao_reconhecida", False) if pergunta else (None, True))
