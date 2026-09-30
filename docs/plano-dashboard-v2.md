@@ -222,8 +222,9 @@ PR de cada etapa, não soluções prontas. Cada PR confere se ainda valem, decid
     importada nunca cria as faturas futuras (a manual cria, em
     `add_credit_purchase_installments()`);
   - cartão sem as datas da Pluggy ganha fechamento dia 1 e vencimento dia 10
-    (`get_or_create_open_finance_card()`), e o calendário de cartão já ligado não é
-    atualizado;
+    (`get_or_create_open_finance_card()`); o calendário de cartão já ligado não é
+    atualizado, e o cartão manual adotado pelo nome fica com as datas manuais, sem conferir
+    as da Pluggy;
   - `list_pluggy_transactions()` para em `max_pages=60` sem conferir o cursor `next`, e
     `list_pluggy_accounts()` lê só a primeira página de `/accounts`;
   - conta que some da resposta de `/accounts` segue somada com o saldo antigo.
@@ -257,8 +258,9 @@ PR de cada etapa, não soluções prontas. Cada PR confere se ainda valem, decid
     boleto (nada do Open Finance escreve em `bill_instances`) e a fatura (a importação
     pula o pagamento de fatura; só `pay_bill_amount` a marca paga).
   - `list_bills(..., limit=1000)` corta os boletos mais distantes sem avisar.
-  - Ocorrência de recorrente com dia já passado e ainda não realizada some da previsão
-    (`_recurring_occurrence_dates()` só emite datas depois de hoje), e a que se realizou
+  - Ocorrência de recorrente com vencimento hoje ou já passado, ainda não realizada, some
+    da previsão (`_recurring_occurrence_dates()` só emite datas estritamente depois de
+    hoje), e a que se realizou
     antes do dia entra de novo; não há marcador de realização (`last_charged_ym` e
     `last_credited_ym` não são escritos).
 - Etapa 4: reserva designada, custo mensal por frequência, reserva só em reais; caixinha
