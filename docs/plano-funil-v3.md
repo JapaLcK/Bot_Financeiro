@@ -326,7 +326,10 @@ Portão: a Etapa 0 e a Etapa 0b-1 feitas.
      reaproveitada por outro modo ou por outra página; ela é expirada pelo laço que já
      existe;
    - `_new_session`, se `origem == "assinar"`: `optional_items=[{"price":
-     STRIPE_PRICE_ID_EBOOK, "quantity": 1}]` só se a env existir; `cancel_url` =
+     STRIPE_PRICE_ID_EBOOK, "quantity": 1}]` só se **as duas** envs estiverem preenchidas:
+     `STRIPE_PRICE_ID_EBOOK` e `EBOOK_URL`. Com só o preço, a pessoa pagaria por um e-book
+     que o webhook não tem como entregar. Um teste cobre a config pela metade (só o preço,
+     ou só a URL): a sessão sai sem o e-book. `cancel_url` =
      `f"{DASHBOARD_URL}/assinar?plano={plan}&ciclo={interval}"` (valores já validados;
      só vale no hospedado);
    - `_new_session`, se `embutido`: usa `ui_mode` (o valor da Etapa 0), `return_url` =
@@ -464,11 +467,28 @@ a rede.
      `exige_direito=False`: a `/settings`, que corrige o e-mail e manda o
      `password-reset`) e os prefixos isentos (`/auth`, `/billing`, `/conta`). É por elas
      que a pessoa sai do bloqueio.
-   - **Inventário antes de codar (§2), com grep:** os outros pontos que usam
-     `has_app_access` sem passar por esse gate também entram. São o WebSocket (monólito,
-     `has_app_access` no `/ws`), o bot (`core/handle_incoming.py`, se a conta tiver
-     WhatsApp vinculado) e o HTML servido. O PR lista cada um e diz se bloqueia, e por
-     quê.
+   - **A perna no gate central NÃO basta sozinha.** Muitas rotas não passam por ele.
+     - As rotas de IA (`GET /ai/messages`, `POST /ai/chat`) usam `require_pro_feature`,
+       que só confere `_plan_gate_ok`.
+     - Várias rotas só autenticam, com `Depends(_get_current_user)`.
+     - E a própria rota que corrige o e-mail, `PATCH /settings/{uid}/security/contact`,
+       usa `authorize_dashboard_access`. Com a perna nova, ela seria BLOQUEADA, e a saída
+       do gate deixaria de existir.
+   - **Por isso o PR 4 começa por uma TABELA DE TODAS as rotas autenticadas**, em vez de
+     uma lista de exceções. A tabela sai de percorrer o `app.routes` e o sub-app da
+     `/api/v2`, e não de memória. Ela inclui o `/ws`, o bot
+     (`core/handle_incoming.py`, conta com WhatsApp vinculado) e o HTML servido. Cada
+     linha é classificada em **bloqueia** ou **libera**, com o motivo.
+   - **Libera, no mínimo:** `/auth/*` (inclusive `/auth/me` e o logout), `/billing/*`, as
+     rotas de `authorize_account_access`, `POST /settings/{uid}/password-reset` e
+     `PATCH /settings/{uid}/security/contact`. Esta última passa a pular **só** a perna
+     da credencial e continua com a checagem de dono e o CSRF.
+   - **Bloqueia:** toda rota que lê ou grava dado financeiro, inclusive a IA
+     (`require_pro_feature` também chama a checagem da credencial).
+   - **Um teste percorre as rotas** e reprova a rota autenticada que não está na
+     tabela, no molde do `tests/test_api_v2_rotas.py`. Sem isso, a próxima rota nova
+     nasce sem o bloqueio e ninguém percebe. É a classe inteira, e não as duas
+     instâncias que a revisão achou.
    - **Front:** o `criar-senha.js` trata o 403 `password_required` como "mostrar o
      overlay", e não como erro.
 3. `frontend/criar-senha.js` + `criar-senha.css` (rotas em `static_pages.py`),
@@ -510,9 +530,10 @@ gate, o que é correto: hoje ela só entra de novo pelo "esqueci a senha".
   `/settings/{uid}/password-reset` → consumir o token → `/auth/me` depois de logar
   (`precisa_criar_senha:false`).
 - **bloqueio no servidor, com chamadas DIRETAS às APIs, sem passar pela tela:** a conta
-  sem credencial e com plano pago leva 403 `password_required` em rota de dados, na
-  `/api/v2/me` e no WebSocket. A mesma conta consegue `/auth/me`,
-  `/settings/{uid}/password-reset`, a troca de e-mail na `/settings` e o logout. Depois
+  sem credencial e com plano pago leva 403 `password_required` em rota de dados, em
+  `GET /ai/messages` e `POST /ai/chat`, na `/api/v2/me` e no WebSocket. A mesma conta
+  consegue `/auth/me`, `POST /settings/{uid}/password-reset`,
+  `PATCH /settings/{uid}/security/contact` (a troca de e-mail) e o logout. Depois
   de criar a senha, as rotas de dados voltam a responder 200.
 - **Controles:** *negativo*: fazer `conta_sem_credencial` ignorar
   `auth_identities` deixa vermelho "só-Google = false"; tirar a perna nova do gate deixa
