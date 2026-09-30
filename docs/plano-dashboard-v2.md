@@ -234,7 +234,10 @@ PR de cada etapa, não soluções prontas. Cada PR confere se ainda valem, decid
     `list_pluggy_accounts()` lê só a primeira página de `/accounts`. Além do teto, as duas
     aceitam resposta malformada como leitura completa: `results` ausente ou fora de lista
     vira lista vazia, e página vazia com `next` ou cursor ilegível encerra a leitura. Validar
-    o formato e o cursor terminal antes de dar o sync como completo, e antes de qualquer
+    o formato e o cursor terminal antes de dar o sync como completo, e detectar cursor
+    repetido ou sem progresso: ao tirar o `max_pages`, um `next` que volta ao mesmo cursor
+    roda para sempre. Um teto de segurança que se mantenha, quando esgotado, marca a
+    leitura como incompleta, nunca como sucesso. Tudo isso vem antes de qualquer
     conciliação de ausências (item abaixo), que com leitura parcial apagaria transação
     legítima;
   - conta que some da resposta de `/accounts` segue somada com o saldo antigo, e
