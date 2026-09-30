@@ -111,7 +111,8 @@ async def escutar_banco() -> None:
     """LISTEN `pb_escrita` → `avisar(uid, "tudo")`, para sempre. Conexão própria
     (não o pool: ela fica presa no LISTEN) e `DATABASE_URL` lido na hora, como o
     `_get_pool`. Caiu: reconecta com espera crescente, loga a 1ª falha e, enquanto seguir
-    caído, de novo a cada `RELOG_CAIDO_S`."""
+    caído, de novo a cada `RELOG_CAIDO_S`. A queda só acaba depois de um batimento
+    (`select 1`) de pé: cair logo depois do LISTEN é a mesma queda."""
     espera = caiu_em = logado_em = 0.0
     while True:
         try:
@@ -120,7 +121,6 @@ async def escutar_banco() -> None:
                 application_name="pb_escrita_listen",
             ) as conn:
                 await conn.execute("LISTEN pb_escrita")
-                espera = 0.0
                 for uid in _inscritos:
                     avisar(uid, "tudo")
                 while True:
@@ -130,6 +130,7 @@ async def escutar_banco() -> None:
                         except ValueError:
                             pass
                     await conn.execute("select 1")
+                    espera = 0.0  # um batimento inteiro de pé: a queda acabou
         except Exception as exc:
             agora = time.monotonic()
             if not espera:

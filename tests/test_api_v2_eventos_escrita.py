@@ -348,29 +348,91 @@ def test_lifespan_sobe_o_ouvinte_sem_as_tarefas_de_fundo_e_fecha_ao_sair(monkeyp
     assert (durante, espera(0)) == (1, 0)
 
 
-def test_listen_caido_para_sempre_reloga_a_cada_intervalo(monkeypatch, capsys):
-    """Queda sem volta: loga na 1ª falha, cala até `RELOG_CAIDO_S` e loga de novo.
-    Espera 1,2,4…60 → falhas em t=0,1,3,7,15,31,63,123,183,243."""
+class _ConnFalsa:
+    """Aceita o `connect` e o LISTEN; fica de pé `batimentos` batimentos sem aviso
+    e depois cai no `notifies`, como um proxy que derruba a sessão."""
+
+    def __init__(self, batimentos=0):
+        self.batimentos = batimentos
+
+    async def __aenter__(self):
+        return self
+
+    async def __aexit__(self, *a):
+        return False
+
+    async def execute(self, sql):
+        pass
+
+    async def notifies(self, timeout):
+        if self.batimentos <= 0:
+            raise OSError("derrubada")
+        self.batimentos -= 1
+        return
+        yield  # gerador assíncrono: um batimento sem aviso
+
+
+def _relogio_falso(monkeypatch, esperas, ate):
     relogio = [0.0]
 
-    async def falha(*a, **kw):
-        raise OSError("recusada")
-
     async def dorme(s):
+        esperas.append(s)
         relogio[0] += s
-        if relogio[0] > 250:
+        if relogio[0] > ate:
             raise asyncio.CancelledError
 
-    monkeypatch.setattr(eventos.psycopg.AsyncConnection, "connect", falha)
     monkeypatch.setattr(eventos, "asyncio", SimpleNamespace(sleep=dorme))
     monkeypatch.setattr(eventos, "time", SimpleNamespace(monotonic=lambda: relogio[0]))
+
+
+async def _recusa(*a, **kw):
+    raise OSError("recusada")
+
+
+async def _derruba_depois_do_listen(*a, **kw):
+    return _ConnFalsa()
+
+
+@pytest.mark.parametrize("connect", [_recusa, _derruba_depois_do_listen])
+def test_listen_caido_para_sempre_reloga_a_cada_intervalo(monkeypatch, capsys, connect):
+    """Queda sem volta: loga na 1ª falha, cala até `RELOG_CAIDO_S` e loga de novo.
+    Espera 1,2,4…60 → falhas em t=0,1,3,7,15,31,63,123,183,243. Vale também quando
+    o connect e o LISTEN passam e a sessão cai logo depois: sem um batimento de pé,
+    é a mesma queda (apontamento do Codex no #691)."""
+    esperas = []
+    _relogio_falso(monkeypatch, esperas, ate=250)
+    monkeypatch.setattr(eventos.psycopg.AsyncConnection, "connect", connect)
     monkeypatch.setattr(eventos, "RELOG_CAIDO_S", 100.0)
     with pytest.raises(asyncio.CancelledError):
         eventos.escutar_banco().send(None)  # `dorme` nunca suspende: roda sem loop
+    assert esperas == [1, 2, 4, 8, 16, 32, 60, 60, 60, 60]
     assert [linha.split(":")[0] for linha in capsys.readouterr().err.splitlines()] == [
         "[eventos] LISTEN pb_escrita caiu",
         "[eventos] LISTEN pb_escrita segue caído há 123 s",
         "[eventos] LISTEN pb_escrita segue caído há 243 s",
+    ]
+
+
+def test_um_batimento_de_pe_encerra_a_queda(monkeypatch, capsys):
+    """Cai → volta e passa um batimento → cai: a 2ª queda é nova (loga "caiu" e
+    a espera recomeça de 1). A 3ª, logo depois do LISTEN, segue a 2ª."""
+    conexoes = iter([_ConnFalsa(0), _ConnFalsa(1), _ConnFalsa(0)])
+
+    async def connect(*a, **kw):
+        try:
+            return next(conexoes)
+        except StopIteration:
+            raise asyncio.CancelledError from None
+
+    esperas = []
+    _relogio_falso(monkeypatch, esperas, ate=1000)
+    monkeypatch.setattr(eventos.psycopg.AsyncConnection, "connect", connect)
+    with pytest.raises(asyncio.CancelledError):
+        eventos.escutar_banco().send(None)
+    assert esperas == [1, 1, 2]
+    assert [linha.split(":")[0] for linha in capsys.readouterr().err.splitlines()] == [
+        "[eventos] LISTEN pb_escrita caiu",
+        "[eventos] LISTEN pb_escrita caiu",
     ]
 
 
