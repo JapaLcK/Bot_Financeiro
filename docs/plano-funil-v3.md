@@ -100,7 +100,7 @@ na seção 9.
 | D-k | WhatsApp obrigatório e válido (400 se inválido) | Igual ao `/auth/register`. Sem número não há teste grátis nem produto. |
 | D-l | Limites: **10/h por IP** (balde `quiz`) e **3/h por e-mail** (balde do `register`), **sem teto global** | O 10/h por IP foi decidido pelo dono em 2026-09-27 (b9dc2c4). Um teto global numa rota pública deixaria qualquer um derrubar o funil. O webhook tinha teto global porque todo pedido vinha do IP do XQuiz. |
 | D-m | Texto do "sem teste grátis" **neutro, o mesmo para os dois motivos** ("sem telefone" e "telefone já usou") | O telefone digitado não é confirmado. Diferenciar os dois deixaria qualquer um descobrir quais números já usaram o teste. Continua valendo "quem já usou vê *sem teste* antes de pagar". |
-| D-n | Sessão Stripe embutida com **`expires_at` de 1 h** | Encurta a janela em que uma aba esquecida ainda cobra, por exemplo quando a pessoa já pagou no Pix em outra aba. É um valor chutado, pode ser ajustado. |
+| D-n | Sessão Stripe da `/assinar` (embutida **e** hospedada) com **`expires_at` de 1 h** | Encurta a janela em que uma aba esquecida ainda cobra, por exemplo quando a pessoa já pagou no Pix em outra aba. É um valor chutado, pode ser ajustado. |
 | D-o | **Cupons ligados** também na `/assinar` (`allow_promotion_codes=True`, igual à `/precos`) | Decisão do dono (pergunta 1). O parâmetro fica igual nos dois modos, sem ramo. |
 | D-p | **Plano B do embutido:** a `/assinar` cai no checkout **hospedado** (`embutido:false`, `origem:"assinar"`) em três casos: user agent na lista `HOSPEDADO_UA` (começa só com `PigBankApp`, o app iOS); falha de montagem do Stripe.js (script não carrega, a chamada de montar rejeita, ou nenhum `<iframe>` no contêiner em 10 s); e um link sempre visível, "Problemas com o pagamento? Abrir a página segura do Stripe" | É o pedido da revisão. Um iframe que monta mas fica em branco não é detectável com segurança, e o link manual cobre esse caso. O Instagram e o Facebook só entram na lista se a Etapa 0b mostrar que o embutido falha lá: tirá-los de saída mandaria quase todo o tráfego de anúncio para fora do domínio sem evidência. |
 
@@ -362,8 +362,14 @@ anotado no corpo do PR 2 antes de codar**:
      `f"{DASHBOARD_URL}/assinar?plano={plan}&ciclo={interval}"` (valores já validados;
      só vale no hospedado);
    - `_new_session`, se `embutido`: usa `ui_mode` (o valor da Etapa 0), `return_url` =
-     a string da `success_url` de hoje, `expires_at=now+3600`, e não manda
-     `success_url`/`cancel_url`;
+     a string da `success_url` de hoje, e não manda `success_url`/`cancel_url`;
+   - `_new_session`, se `origem == "assinar"` (**nos dois modos**, embutido e hospedado):
+     `expires_at=now+3600` (D-n). Sem o campo, o Stripe usa 24 h, e o plano B hospedado
+     manteria aberta por 24 h a janela de cobrança dupla (Pix numa aba, cartão na outra);
+   - `_new_session`, se o e-book é oferecido: `metadata["ebook_price"] = STRIPE_PRICE_ID_EBOOK`
+     (também no `subscription_data.metadata`). O PR 3 identifica o e-book por essa
+     **foto**, e não pela env do momento do webhook. Assim, trocar ou tirar a env com uma
+     sessão aberta não faz a compra perder a entrega nem virar receita do plano;
    - `allow_promotion_codes=True` em **todos** os casos, como hoje (D-o);
    - `_new_session`, se `origem == "assinar"`: `adaptive_pricing={"enabled": False}`, para
      o preço sair sempre em BRL. A etapa 0 viu USD fora do Brasil (Adaptive Pricing). O
@@ -421,9 +427,10 @@ tentativa aberta por cliente).
 ### PR 3: webhook entrega o e-book
 
 **Muda (só no `billing_webhook`, mais o e-mail):**
-1. `checkout.session.completed`: se `STRIPE_PRICE_ID_EBOOK` existe **e** a sessão veio
-   da `/assinar` (`metadata.origem == "assinar"`, embutida ou hospedada), faz `await asyncio.to_thread(stripe.checkout.Session.list_line_items,
-   sid)`. Se o price do e-book está lá, **grava uma entrega pendente** do e-book (uma
+1. `checkout.session.completed`: se a sessão tem `metadata.ebook_price` (a foto do
+   preço oferecido, gravada pelo PR 2) **e** veio da `/assinar` (`metadata.origem ==
+   "assinar"`, embutida ou hospedada), faz `await asyncio.to_thread(stripe.checkout.Session.list_line_items,
+   sid)`. Se esse price está lá, **grava uma entrega pendente** do e-book (uma
    linha por `user_id` + `session_id`, idempotente: a reentrega do evento não cria
    outra) e tenta enviar na hora. O ramo responde 2xx como hoje: a falha do e-book
    **não** gera 5xx.
@@ -451,7 +458,8 @@ tentativa aberta por cliente).
    A mudança é **dentro dele**. Um ramo só para `invoice.paid` deixaria o
    `payment_succeeded` calculando e-mail e comissão sobre o valor cheio, com o e-book.
    `amount_plano = amount_paid − valor líquido das linhas de
-   `invoice.lines.data` com `pricing.price_details.price == EBOOK`. **O "valor líquido"
+   `invoice.lines.data` com `pricing.price_details.price` igual ao `ebook_price` da
+   `metadata` da assinatura (a foto do PR 2), e não à env do momento. **O "valor líquido"
    da linha é MEDIDO, não suposto:** numa fatura de teste com cupom que desconta o
    e-book, anote no corpo do PR 3 se o `amount` da linha já sai descontado. Se sair, o
    líquido é o próprio `amount`. Se não, é `amount − soma(discount_amounts)`. Subtrair o
@@ -543,6 +551,10 @@ a rede.
      `subscription`, `change-plan` e `cancel-change`. Hoje o prefixo `/billing` inteiro é
      isento do gate central (`_GATE_EXEMPT_PREFIXES`), então a perna da credencial
      precisa valer nessas rotas de outro jeito. A tabela diz como.
+   - **O `GET /conta` também BLOQUEIA:** ele chama o mesmo `_create_billing_portal` e
+     redireciona para o portal do Stripe. É um atalho do `/billing/portal`, e o prefixo
+     `/conta` também é isento hoje. Sem senha, ele manda para o overlay de "Crie sua
+     senha", e não para o portal.
    - **O `/ws` não chama o gate central:** tem uma cópia manual da checagem
      (`needs_plan_selection` ou `not has_app_access`) e fecha com o código 4402. A perna da
      credencial entra nessa cópia também, com um código de fechamento próprio.
@@ -595,7 +607,8 @@ gate, o que é correto: hoje ela só entra de novo pelo "esqueci a senha".
 - **bloqueio no servidor, com chamadas DIRETAS às APIs, sem passar pela tela:** a conta
   sem credencial e com plano pago leva 403 `password_required` em rota de dados, em
   `GET /ai/messages`, `POST /ai/chat`, `/billing/portal`, `/billing/subscription` e
-  `/billing/change-plan`, e na `/api/v2/me`. No WebSocket, o **código de fechamento**
+  `/billing/change-plan`, e na `/api/v2/me`. O `GET /conta` **não** redireciona para o
+  portal do Stripe. No WebSocket, o **código de fechamento**
   próprio (não um 403). A mesma conta
   consegue `/auth/me`, `POST /settings/{uid}/password-reset`,
   `PATCH /settings/{uid}/security/contact` (a troca de e-mail) e o logout. Depois
@@ -759,7 +772,7 @@ do e-book.
   Um "entrar por código no e-mail" resolveria isso, e fica como follow-up se a métrica
   mostrar que dói.
 - **Duas cobranças (Pix + cartão)** em abas diferentes: a janela vai de 24 h para 1 h
-  (D-n). Não foi fechada de todo.
+  (D-n), nos dois modos da `/assinar`. Não foi fechada de todo.
 - **Contas sem plano criadas por bots:** somam na base e podem entrar nos e-mails de
   ciclo de vida de quem não assinou (o mesmo de hoje com o `/cadastro`). O Coder faz o
   inventário no PR 1 (`grep` dos jobs que mandam e-mail para conta sem plano) e cita
