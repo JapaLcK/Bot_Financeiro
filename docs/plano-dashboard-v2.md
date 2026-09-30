@@ -99,11 +99,11 @@ calma (Q5).
   a tela pede o dado de novo. Princípios: o aviso vai só para o dono do dado, só depois de
   gravado, e a tela nunca fica desatualizada em silêncio (reconectar refaz tudo; sessão
   encerrada fecha o stream). Toda escrita de dado financeiro avisa, venha de onde vier.
-  Processo único hoje; com mais de um processo, `LISTEN/NOTIFY` do Postgres: quem grava
-  faz `pg_notify` dentro da própria transação (sai só no commit; serve para thread e para
-  o `bot.py`) e cada processo web mantém uma conexão `LISTEN` que repassa aos streams
-  dele (desenho no docstring de `api/v2/eventos.py`, não construído). O `bot.py`
-  (Discord) sai do `launch.py`: decidido pelo dono, feito no PR 5a da etapa 0.
+  Construído com `LISTEN/NOTIFY` do Postgres: um trigger nas tabelas financeiras faz
+  `pg_notify` na transação de quem grava (sai só no commit; serve para thread e para
+  outro processo) e cada processo web mantém uma conexão `LISTEN` que repassa aos streams
+  dele (lista em `db/schema.py::TABELAS_QUE_AVISAM`, laço em `api/v2/eventos.py`). O
+  `bot.py` (Discord) sai do `launch.py`: decidido pelo dono, feito no PR 5a da etapa 0.
 - **Processo** (Q21): todo PR que cria ou muda endpoint da `/api/v2` é faixa Completo.
 
 ## 4. Dados e números

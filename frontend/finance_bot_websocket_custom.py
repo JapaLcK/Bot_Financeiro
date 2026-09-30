@@ -116,7 +116,7 @@ from db.investment_undo import MENSAGEM_NAO_E_O_ULTIMO
 from core.observability import _log_falha, get_logger
 from core.pg_text import detalhe_seguro, limpa_para_pg, recusa_veneno, tem_veneno
 from core.secure_compare import constant_time_eq
-from api.v2 import app as api_v2_app
+from api.v2 import app as api_v2_app, eventos as api_v2_eventos
 from frontend.routes.affiliates import router as affiliates_router
 from frontend.routes.billing_pix import router as billing_pix_router
 from frontend.routes.agents import router as agents_router
@@ -2142,7 +2142,9 @@ async def lifespan(app: FastAPI):
     _elapsed = _startup_time.monotonic() - _t0
     print(f"[app] Startup interno concluído em {_elapsed:.1f}s.", flush=True)
 
-    tasks = []
+    # Não é job: é o aviso ao vivo do `/painel`, e vale também com as tarefas
+    # de fundo desligadas (`dashboard_dev`).
+    tasks = [asyncio.create_task(api_v2_eventos.escutar_banco(), name="eventos_listen")]
     if RUN_BACKGROUND_TASKS:
         tasks.extend(
             [
