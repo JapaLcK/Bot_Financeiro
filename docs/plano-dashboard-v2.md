@@ -251,7 +251,7 @@ PR de cada etapa, não soluções prontas. Cada PR confere se ainda valem, decid
 - [x] Protótipo: blocos que expandem na conversa, com estado por resposta e "Abrir no painel" (PR 3 do chat).
 - [ ] Pré-requisitos: ~~#594~~ ✓ · Q42 (#620, mergeado; conferir o deploy) · Q43 (#623 e
   #634, mergeados; deploy não conferido) · Q40 (#633, mergeado; deploy não conferido) ·
-  Q41 (#627, aberto)
+  Q41 (#627 mergeado; falta o PR B, #706, aberto)
   - Q41: núcleo no #627, atrás de `OF_CASH_ENABLED` (desligado); falta o PR B (painel, WhatsApp e o switch ligado).
 - Etapa 0 em andamento, em 6 PRs (divisão aprovada pelo dono em 2026-09-26): 1 esqueleto
   (#632) · 2a `/painel` (#659) · 2b contrato TS + TanStack (#669) · 3 foto diária por
@@ -275,6 +275,26 @@ PR de cada etapa, não soluções prontas. Cada PR confere se ainda valem, decid
   - PR 4 (#678, mergeado): `GET /api/v2/eventos` (SSE), com os 2 avisos que o `/ws` já dá (fim do sync do
     Open Finance e "Recomeçar do zero"); sessão rechecada antes de cada envio e a cada
     30 s, teto de 5 streams por usuário; o `/painel` invalida as consultas a cada aviso.
-    E o sub-app para de re-levantar a exceção que já respondeu. `LISTEN/NOTIFY` só no
-    desenho (§3).
+    E o sub-app para de re-levantar a exceção que já respondeu. O `LISTEN/NOTIFY` veio
+    no PR 5b.
+  - PR 5a (#688, mergeado): o `launch.py` vira o uvicorn por `os.execv` e o `bot.py` do
+    Discord não sobe mais.
+  - PR 5b (#691, mergeado): trigger `pg_notify('pb_escrita', dono)` nas tabelas de
+    `db/schema.py::TABELAS_QUE_AVISAM` (núcleo financeiro, categorias e regras,
+    orçamentos, Open Finance; `auth_accounts` só quando `plan`/`plan_expires_at` mudam;
+    `pix_*` fora) e `escutar_banco()` com `LISTEN` no lifespan (`api/v2/eventos.py`),
+    que repassa "tudo" ao SSE. `LISTEN` caído reloga a cada 10 min; o backoff só zera
+    depois de um `select 1` de pé.
+  - PR 6: foto diária do patrimônio (`patrimonio_fotos`, uma por usuário por dia do app,
+    a partir das 18h), pela conta única `db/patrimonio.calcular` que a tela da etapa 6
+    vai reusar; job `core/services/patrimonio_foto.py` atrás de
+    `PATRIMONIO_FOTO_ENABLED` (desligado). Carteira com a fusão devolvida, contas do
+    `BANK_ACCOUNTS_SQL`, posições do banco em reais (outra moeda, resgatada e conexão
+    pausada ficam fora e contadas em `base.fora`), caixinhas manuais e investimentos
+    manuais; cartão fora. Toda foto sai com `motivos` (`carteira_nao_confirmada` até a
+    Q37, e mais os de banco desatualizado, espécie, pendências, moeda presumida, saldo
+    ausente e `caixinha_espelhada_fora` — a caixinha do banco cuja posição ficou fora
+    não entra no total nem como caixinha, e é contada em `base.fora`). Entra na exportação, no reset e na exclusão. Fora: reconstrução do
+    passado, câmbio, poda, a confirmação da Q37, leitura por rota ou tela e script de
+    conferência pós-deploy.
 - [ ] Etapa 0 · [ ] 1 · [ ] 2 · [ ] 3 · [ ] 4 · [ ] 5 · [ ] 6 · [ ] 7

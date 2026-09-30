@@ -1939,6 +1939,14 @@ async def lifespan(app: FastAPI):
         except Exception as exc:
             print(f"[investment_accrual] erro: {exc}", file=sys.stderr)
 
+    async def _patrimonio_foto():
+        try:
+            await asyncio.sleep(1)
+            from core.services.patrimonio_foto import run_patrimonio_foto_loop  # noqa: PLC0415
+            await run_patrimonio_foto_loop()
+        except Exception as exc:
+            print(f"[patrimonio_foto] erro: {exc}", file=sys.stderr)
+
     async def _recurring_charger():
         try:
             await asyncio.sleep(5)
@@ -2175,6 +2183,7 @@ async def lifespan(app: FastAPI):
                 asyncio.create_task(_wa_periodic(), name="wa_periodic"),
                 asyncio.create_task(_engagement(), name="engagement"),
                 asyncio.create_task(_investment_accrual(), name="investment_accrual"),
+                asyncio.create_task(_patrimonio_foto(), name="patrimonio_foto"),
                 asyncio.create_task(_account_deletion_worker(), name="account_deletion"),
                 asyncio.create_task(_recurring_charger(), name="recurring_charger"),
                 asyncio.create_task(_proactive_ai(), name="proactive_ai"),

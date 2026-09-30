@@ -25,7 +25,7 @@ TABELAS_QUE_AVISAM: dict[str, str | None] = {
         "recurring_charges", "category_budgets", "household_budget_config",
         "household_budget_income", "user_categories", "user_category_rules",
         "bank_movement_declarations", "of_cash_coverage", "of_cash_links",
-        "open_finance_connections",
+        "open_finance_connections", "patrimonio_fotos",
     )),
     "open_finance_accounts": "conexao",
     "open_finance_investments": "conexao",
@@ -802,6 +802,27 @@ def init_db():
           last_twelve_months_rate numeric,
           annual_rate numeric,
           primary key (connection_id, provider_investment_id, observed_on)
+        )
+        """,
+        # Foto diária do patrimônio (dashboard v2, etapa 0 PR 6): uma por usuário
+        # por dia do app, gravada pelo job `core/services/patrimonio_foto.py` com a
+        # conta de `db/patrimonio.calcular`. `base` diz o que entrou (o gráfico
+        # quebra a linha quando muda) e `motivos` por que a foto não é exata.
+        # ponytail: sem poda; uma linha por usuário por dia.
+        """
+        create table if not exists patrimonio_fotos (
+          user_id bigint not null references users(id) on delete cascade,
+          dia date not null,
+          gravada_em timestamptz not null,
+          total numeric not null,
+          carteira numeric not null,
+          bancos numeric not null,
+          investimentos_banco numeric not null,
+          caixinhas numeric not null,
+          investimentos_manuais numeric not null,
+          base jsonb not null,
+          motivos text[] not null,
+          primary key (user_id, dia)
         )
         """,
 
