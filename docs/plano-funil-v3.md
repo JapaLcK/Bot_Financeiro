@@ -523,6 +523,10 @@ tentativa aberta por cliente).
 4. Envs novas: `STRIPE_PRICE_ID_EBOOK` e `EBOOK_URL` (link de download do PDF que o
    dono hospeda, decisão do dono).
 
+**Decisão pendente do dono (seção 7):** mandar ou não um `purchase` só com o e-book na
+fatura de trial. Se a resposta for "mandar", entra neste PR, reusando a separação de
+linhas do item 2.
+
 **Não muda:** o grant (`_subscription_price_id`, salvo o item 4 da Etapa 0), o
 StartTrial/Purchase do CAPI, a regra "`subscription_create` já contado no checkout" do
 GA4, e o `claim_trial_for_user`.
@@ -846,9 +850,16 @@ do e-book.
   como hoje (a `/home` com o `sid` e o CAPI do webhook).
 - **Resultado do quiz:** só vai no cookie `quiz_result` e fica no banco, como hoje. Nunca
   em query, log, Pixel ou GA4 (o teste de PII do PR 5).
-- **Lacuna conhecida:** com trial, a receita do e-book não vai para o GA4 nem para a
-  Meta. O GA4 só manda `purchase` sem trial, e aí o `amount_total` já inclui o e-book.
-  Se o dono quiser, é um follow-up.
+- **Lacuna conhecida, com decisão do dono PENDENTE antes do PR 3:** com trial, o
+  e-book é cobrado na 1ª fatura (`subscription_create`), mas o webhook manda só o
+  `StartTrial` e suprime o `purchase` no GA4 e na Meta. Resultado: toda venda de e-book
+  com trial some do rastreio de conversão e de receita. Sem trial, o `purchase` sai, e o
+  `amount_total` já inclui o e-book. O Codex apontou isso no #679, e lá foi encaminhado
+  para cá.
+  - **Opção A:** o ramo de fatura do PR 3, que já separa a linha do e-book para o
+    `amount_plano`, manda um `purchase` só com o valor do e-book na fatura de trial,
+    com `event_id` próprio para não colidir com o `StartTrial`.
+  - **Opção B:** manter como lacuna aceita.
 
 ---
 
