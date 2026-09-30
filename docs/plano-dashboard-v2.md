@@ -216,7 +216,10 @@ PR de cada etapa, não soluções prontas. Cada PR confere se ainda valem, decid
   segue como sucesso (achados na revisão do PR #689; afetam saldo, fatura e parcelas em
   toda tela). Além da moeda:
   - `normalize_pluggy_account()` põe `type` = `BANK` e `balance` = 0 quando faltam;
-    `normalize_pluggy_transaction()` põe `amount` = 0 e data inválida = hoje; conta e
+    `normalize_pluggy_transaction()` põe `amount` = 0 e data inválida = hoje (conta de
+    crédito gravada como `BANK` já tem as transações importadas como lançamento; quando o
+    tipo certo chega, o importador de cartão cria as compras e os lançamentos antigos
+    ficam: o conserto inclui reclassificar o que foi criado com o tipo errado); conta e
     transação sem `id` são descartadas em silêncio, e o sync segue `ok=True`;
     `normalize_pluggy_investment()` põe `balance` = 0 e `type` vazio, e a posição, a
     caixinha espelhada e a foto diária são sobrescritas com esse valor;
@@ -332,7 +335,9 @@ PR de cada etapa, não soluções prontas. Cada PR confere se ainda valem, decid
   - Gasto variável do dia a dia (mercado, transporte) fica fora: a previsão supõe que ele
     para hoje. O protótipo do v2 já desconta o ritmo dos últimos 60 dias
     (`webapp/src/dashboard/lib/model.js`); a Etapa 3 leva uma estimativa assim para o
-    backend, marcada como estimativa e sem duplicar o que já está em fatura.
+    backend, marcada como estimativa e sem contar duas vezes: o ritmo exclui todo gasto que
+    já entra como evento agendado (gasto fixo, boleto pago, fatura), como o protótipo já
+    faz com os lançamentos de recorrente.
   - A carteira Piggy não tem data de atualização: a confirmação da Q37 vale na primeira
     visita e envelhece. Com a carteira no saldo, pedir confirmação atual ou mostrar "a
     conferir".
