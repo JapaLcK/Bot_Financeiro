@@ -131,6 +131,12 @@ def _semeia(uid: int) -> None:
                 "values (%s, 'inv-1', 'Caixinha')",
                 (con,),
             )
+            cur.execute(
+                "insert into open_finance_investment_snapshots (connection_id, provider_investment_id, "
+                "observed_on, observed_at, collection_confirmed, balance) "
+                "values (%s, 'inv-1', %s, now(), true, 10)",
+                (con, hoje),
+            )
 
             # ── crédito (apagado) ───────────────────────────────────────────
             cur.execute(
@@ -294,6 +300,10 @@ _OF_JOINS = {
     "open_finance_investments": (
         "select count(*) as n from open_finance_investments i "
         "join open_finance_connections c on c.id = i.connection_id where c.user_id = %s"
+    ),
+    "open_finance_investment_snapshots": (
+        "select count(*) as n from open_finance_investment_snapshots s "
+        "join open_finance_connections c on c.id = s.connection_id where c.user_id = %s"
     ),
 }
 _TABELAS_SIMPLES = (
@@ -1022,6 +1032,7 @@ def test_sync_de_item_varrido_pelo_reset_nao_recria_nada(user_id):
 
     assert resultado == {"ok": False, "reason": "connection_not_found", "item_id": item}
     assert _contagens(user_id)["open_finance_connections"] == 0
+    assert _contagens(user_id)["open_finance_investment_snapshots"] == 0
 
 
 # ── 7c-bis. item salvo entre a enumeração remota e o DELETE local ───────────

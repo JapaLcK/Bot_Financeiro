@@ -118,10 +118,13 @@ que não se sabe aparece como "sem comparação", "a conferir", "desatualizado" 
   (Q37) e a transferência em espécie (Q41) funcionando com o ciclo de vida inteiro. Antes
   disso — inclusive para quem ainda não abriu o v2 — a foto é gravada, mas marcada como
   incerta; o histórico enche desde a etapa 0 sem afirmar nada que depois não se sustente.
-- **Rendimento × CDI** (Q35): por investimento, sem número da carteira somada. A fonte é a
-  rentabilidade que o banco informa pelo Open Finance, gravada a cada sincronização para
-  formar histórico. Só compara com o CDI quando se sabe o período exato e que a posição
-  existiu nele o tempo todo.
+- **Rendimento × CDI** (Q35): por investimento, sem número da carteira somada. A fonte
+  prevista era a rentabilidade que o banco informa pelo Open Finance, e **ela não chega
+  hoje** (medição de 2026-09-29, abaixo, §7). O que já se grava a cada sincronização é a
+  foto diária por posição (`open_finance_investment_snapshots`): saldo, aplicado, data da
+  posição, taxa de contrato e as três taxas do banco em colunas próprias, vazias até algum
+  banco mandar. A fonte do Rendimento × CDI volta ao dono na etapa de tela. Só compara com o
+  CDI quando se sabe o período exato e que a posição existiu nele o tempo todo.
 - **Reserva em meses**: a caixinha de reserva é designada pelo usuário (hoje só existe o
   palpite pelo nome, `_is_reserva`); a conta divide pelo custo mensal das contas fixas.
 - **Só reais**: o que estiver em outra moeda fica fora das somas, com aviso. Câmbio fica
@@ -204,10 +207,16 @@ PR de cada etapa, não soluções prontas. Cada PR confere se ainda valem, decid
   conector; moeda corrigida depois.
 - Quando o dado do Open Finance conta como desatualizado (limite por produto) e como a
   tela aberta percebe isso sem escrita.
-- Rentabilidade do Open Finance: medir na API real o que o Pluggy manda (mês de
-  referência, datas da posição, e se a taxa do banco já desconta aporte e resgate no
-  período) antes de decidir o que comparar. A comparação usa a taxa que o banco calcula,
-  nunca a diferença entre fotos do rendimento acumulado.
+- Rentabilidade do Open Finance: medida em produção em 2026-09-29 (leitura, pelo dono;
+  remeça antes de reusar). `lastMonthRate`, `lastTwelveMonthsRate`, `annualRate`,
+  `fixedAnnualRate` e `amountProfit` vieram nulos em todas as posições; no CDB, `rate` +
+  `rateType` = `CDI` é a taxa de CONTRATO (100 = 100% do CDI), não rentabilidade; `date` é a
+  data da posição informada pelo banco, dias atrás da coleta e diferente entre posições da
+  mesma conexão; posições resgatadas (`TOTAL_WITHDRAWAL`) continuam no espelho; e há
+  conexão `PARTIAL_SUCCESS` com investimentos não confirmados. Resultado: não há hoje taxa
+  do banco para comparar. **Pendência com o dono na etapa de tela:** de onde sai o
+  Rendimento × CDI. A regra continua — a comparação usa a taxa que o banco calcula, nunca a
+  diferença entre fotos do rendimento acumulado.
 
 **Etapas de tela (1 a 6)**
 - Etapa 2: identidade das transações importadas por conta (conta e cartão); editar a data
@@ -249,4 +258,8 @@ PR de cada etapa, não soluções prontas. Cada PR confere se ainda valem, decid
     ainda não chama a API e o `?plano=` continua.
   - PR 2b (feito): contrato OpenAPI → TS, TanStack Query, fim do `?plano=`, erros,
     Safari 14. As telas seguem com dados sintéticos e a etiqueta de demonstração.
+  - PR 3: foto diária por posição do Open Finance (`open_finance_investment_snapshots`,
+    gravada no sync; coleta não confirmada entra marcada e a confirmada do mesmo dia vence;
+    desconectar apaga; entra na exportação junto com as posições). Só a gravação: nada lê
+    ainda, e a fonte do Rendimento × CDI ficou para o dono (§4, §7).
 - [ ] Etapa 0 · [ ] 1 · [ ] 2 · [ ] 3 · [ ] 4 · [ ] 5 · [ ] 6 · [ ] 7
