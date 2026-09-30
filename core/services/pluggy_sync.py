@@ -430,13 +430,9 @@ def _sync_pluggy_item_confirmado(provider_item_id: str, connection: dict, api_ke
         #     `has_data=False`, e o `investments_ok=False` vira `read_failed` —
         #     "não consegui ler", não "o banco não tem nada";
         #   - COM contas (o caso comum): `resolve_connection_state` devolve
-        #     ("ACTIVE", "") no `if has_data:` ANTES de olhar `leitura_completa`
-        #     (core/services/pluggy_health.py), então a conexão fica ACTIVE sem
-        #     motivo e a falha dos investimentos só aparece no log abaixo. É o
-        #     MESMO comportamento pré-existente do 429 na leitura
-        #     (`test_429_em_investimentos_nao_descarta_as_contas_ja_lidas`), e
-        #     mudá-lo seria mexer na semântica de estado da conexão, que este PR
-        #     não toca.
+        #     ("ACTIVE", `investments_read_failed`) e a tela diz "Parcial ·
+        #     Investimentos não vieram nesta atualização" (Onda 5, R4 — antes
+        #     era "Atualizado" e a falha só aparecia no log abaixo).
         inv_result: dict = {}
         investimentos_gravados = False
         try:
@@ -700,12 +696,15 @@ def run_of_health_check(*, limit: int = 200) -> dict:
         # "Refaça a conexão" por "Erro temporário" — para sempre (medido). Igual
         # para `no_accounts`: quem responde se ele ainda vale é o espelho
         # (`has_data`, lido na mesma query), não a memória da última passada.
+        # `status_reason_visto`: o par é decidido sobre o motivo LIDO na
+        # listagem, e um sync pode tê-lo gravado ou limpado durante o GET. Se
+        # mudou, não grava nada (ver `mark_sync_result`).
         health = derive_item_health(item)
         status, reason = resolve_connection_state(
             health=health, has_data=bool(row.get("has_data")),
             reason_atual=str(row.get("status_reason") or ""))
         mark_sync_result(row["id"], ok=None, status=status, status_reason=reason,
-                         health=health)
+                         health=health, status_reason_visto=row.get("status_reason"))
         checked += 1
 
     limite = _env_int("OF_HEALTH_MISSING_ABORT_PCT", 50) / 100.0
@@ -785,14 +784,11 @@ def _sync_item_contido(connection: dict, user_id: int) -> dict:
             # certo), e o motivo pendente faz `connection_ui_state` recusar
             # "Atualizado" pelo default seguro dele.
             #
-            # LIMITE MEDIDO: quem limpa `read_failed` é só um sync que consiga
-            # ler as contas. O job de saúde NÃO lê contas (só `GET /items`), e o
-            # early return `if has_data:` de `resolve_connection_state` devolve
-            # ("ACTIVE","") antes do ramo que preservaria o motivo — então um
-            # banco que 429 de forma persistente volta ao verde em até
-            # OF_HEALTH_MAX_AGE_SEC (12h) com o espelho velho. A pílula não olha
-            # a idade de `last_sync_at`; "Atualizado" quer dizer "o item está
-            # saudável na Pluggy", não "nosso espelho está fresco". Onda 2.
+            # Quem limpa `read_failed` é só um sync com leitura completa. O job
+            # de saúde NÃO lê contas (só `GET /items`) e mantém o motivo
+            # (`resolve_connection_state`, linha H; Onda 5, R5 — antes ele o
+            # apagava e o espelho velho voltava ao verde em até 12 h). Quem
+            # retenta a leitura: `docs/open_finance_estados.md`.
             mark_sync_result(connection["id"], ok=False, status=None,
                              status_reason=READ_FAILED)
         except Exception as exc2:  # banco fora do ar não pode derrubar o lote também

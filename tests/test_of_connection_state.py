@@ -2306,10 +2306,11 @@ def test_falha_ao_gravar_investimentos_nao_descarta_as_contas(user_id, monkeypat
     assert res["ok"] is True, "o que deu certo, deu certo — contas e transações"
     assert res["investments_ok"] is False, "leitura incompleta é o que sobra"
     # `read_failed` é o motivo do ESPELHO VAZIO (`has_data=False`, ver
-    # `resolve_connection_state`): com contas gravadas a conexão segue ACTIVE sem
-    # motivo, exatamente como no irmão do 429. O caso de espelho vazio está no
-    # teste abaixo.
+    # `resolve_connection_state`): com contas gravadas a conexão segue ACTIVE com
+    # `investments_read_failed` ("Parcial"), como no irmão do 429. O caso de
+    # espelho vazio está no teste abaixo.
     assert _linha()["status"] == "ACTIVE"
+    assert _linha()["status_reason"] == "investments_read_failed"
     assert _espelho_investimentos(conexao["id"]) == {"cx-a", "cx-b"}, (
         "o espelho de investimentos fica como estava — aqui a função nem chegou a "
         "rodar (o mock levanta na entrada), então o que isto prova é que a falha "
