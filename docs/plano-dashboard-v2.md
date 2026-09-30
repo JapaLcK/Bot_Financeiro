@@ -269,8 +269,10 @@ PR de cada etapa, não soluções prontas. Cada PR confere se ainda valem, decid
     importa as mesmas de novo; OFX e Open Finance podem encher o mesmo cartão (o OFX só
     deduplica `source='ofx'`); reconectar com item novo pode criar um segundo cartão
     "· Open Finance" e deixar o primeiro com as faturas congeladas.
-  - Falha na leitura de investimentos ou no espelho de caixinhas sai como conexão
-    `ACTIVE`/`ok=True`, só com log (afeta patrimônio, não a previsão).
+  - Falha na leitura de investimentos, no espelho de caixinhas ou na gravação da foto
+    diária (`grava_fotos_posicoes()`, que só desfaz o savepoint e loga) sai como conexão
+    `ACTIVE`/`ok=True`, só com log. Sem outro sync no mesmo dia, o histórico fica com um
+    buraco permanente, sem nova tentativa (afeta patrimônio e rentabilidade, não a previsão).
 - Quando o dado do Open Finance conta como desatualizado (limite por produto) e como a
   tela aberta percebe isso sem escrita.
 - Rentabilidade do Open Finance: medida em produção em 2026-09-29 (leitura, pelo dono;
@@ -293,9 +295,9 @@ PR de cada etapa, não soluções prontas. Cada PR confere se ainda valem, decid
 - Etapa 3: defeitos da previsão de hoje (`cashflow._cashflow_events()`), achados na
   revisão do `docs/plano-piggy-assistente-contextual.md` (PR #689). Não se consertam no
   painel antigo: a regra reescrita para a Previsão da `/api/v2` passa a servir também o
-  simulador e o `check_cashflow` da IA (Q18). O inventário completo, com a direção de erro
-  de cada entrada, é a matriz do plano da Piggy; a Etapa 3 usa aquela matriz como lista de
-  verificação, e esta lista é o resumo.
+  simulador e o `check_cashflow` da IA (Q18). A lista de verificação da Etapa 3 é a soma
+  das duas fontes: esta seção, que tem itens que a matriz não tem, e a matriz do plano da
+  Piggy, que dá a direção de erro de cada entrada. Nenhuma das duas sozinha é completa.
   - Gasto fixo pago no cartão (`payment_type="credit_card"`): sai do caixa no `due_day` e
     de novo dentro da fatura aberta, ou sai antes da data de pagar a fatura.
   - Valor estimado (`variable_amount`) entra como exato, no boleto e no gasto fixo.
