@@ -51,13 +51,26 @@ def _tipo(s: dict) -> str:
     raise _recusa(s)
 
 
-def _resposta_200(path: str, item: dict) -> str:
+def _resposta_200(path: str, item: dict) -> tuple[str, str]:
+    """(`"json"` ou `"sse"`, tipo): o do corpo JSON, ou o do `data` de cada evento SSE."""
     if set(item) != {"get"} or set(item["get"]) - _OPERACAO:
         raise _recusa({path: item})
-    schema = item["get"]["responses"]["200"]["content"]["application/json"]["schema"]
-    if set(schema) != {"$ref"}:
-        raise _recusa({path: schema})
-    return _tipo(schema)
+    content = item["get"]["responses"]["200"]["content"]
+    if set(content) == {"application/json"}:
+        schema = content["application/json"]["schema"]
+        if set(schema) != {"$ref"}:
+            raise _recusa({path: schema})
+        return "json", _tipo(schema)
+    # A forma exata que o FastAPI emite para `EventSourceResponse` com item tipado.
+    item_schema = content.get("text/event-stream", {}).get("itemSchema", {})
+    props = item_schema.get("properties", {})
+    data = props.get("data", {})
+    if (set(content) == {"text/event-stream"} and set(item_schema) == {"type", "properties", "required"}
+            and set(props) == {"data", "event", "id", "retry"}
+            and data.get("contentMediaType") == "application/json"
+            and set(data.get("contentSchema", {})) == {"$ref"}):
+        return "sse", _tipo(data["contentSchema"])
+    raise _recusa({path: content})
 
 
 def gerar(spec: dict) -> str:
@@ -67,8 +80,13 @@ def gerar(spec: dict) -> str:
         if not _IDENT.fullmatch(nome):
             raise _recusa(nome)
         linhas.append(f"export type {nome} = {_tipo(schemas[nome])};\n")
-    rotas = "; ".join(f"{json.dumps(p)}: {_resposta_200(p, spec['paths'][p])}" for p in sorted(spec["paths"]))
-    linhas.append(f"export type RotasGet = {{ {rotas} }};\n")
+    rotas = {"json": [], "sse": []}
+    for p in sorted(spec["paths"]):
+        tipo_resposta, tipo = _resposta_200(p, spec["paths"][p])
+        rotas[tipo_resposta].append(f"{json.dumps(p)}: {tipo}")
+    linhas.append(f"export type RotasGet = {{ {'; '.join(rotas['json'])} }};\n")
+    if rotas["sse"]:
+        linhas.append(f"export type RotasSSE = {{ {'; '.join(rotas['sse'])} }};\n")
     return "".join(linhas)
 
 

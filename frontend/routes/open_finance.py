@@ -878,6 +878,8 @@ async def _run_pluggy_sync_bg(item_id: str) -> None:
                 )
             except Exception:
                 pass
+            from api.v2 import eventos
+            eventos.avisar(int(uid), "open_finance")
 
         ok = bool(result.get("ok"))
         reason = str(result.get("reason") or "")

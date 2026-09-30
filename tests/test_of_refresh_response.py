@@ -144,6 +144,34 @@ def test_sync_com_item_perdido_e_logado_como_error(monkeypatch):
     assert eventos[0]["event"] == "of_item_missing"
 
 
+@pytest.mark.parametrize("resultado, avisos", [
+    ({"ok": True, "user_id": 42}, [(42, "open_finance")]),
+    ({"ok": False, "reason": "no_accounts", "user_id": 42}, [(42, "open_finance")]),
+    ({"ok": False, "reason": "item_missing"}, []),
+], ids=["sucesso", "sem_sucesso_avisa_igual", "sem_dono_nao_avisa"])
+def test_sync_avisa_o_sse_do_dono_depois_do_sync(monkeypatch, resultado, avisos):
+    """O `/api/v2/eventos` do dono (PR 4) recebe o mesmo aviso que o `/ws`: depois do
+    sync voltar (commit feito), e só com dono."""
+    from api.v2 import eventos
+
+    ordem: list = []
+
+    async def _log(*args, **kw):
+        return None
+
+    def _sync(item_id):
+        ordem.append("sync")
+        return {**resultado, "item_id": item_id}
+
+    monkeypatch.setattr(of_routes, "log_system_event", _log)
+    monkeypatch.setattr(of_routes, "sync_pluggy_item", _sync)
+    monkeypatch.setattr(eventos, "avisar", lambda uid, recurso: ordem.append((uid, recurso)))
+
+    asyncio.run(of_routes._run_pluggy_sync_bg("item-x"))
+
+    assert ordem == ["sync", *avisos]
+
+
 # ── RODADA 3: relatório coerente e refresh manual que ainda sincroniza ───────
 
 def test_label_acompanha_o_state_sobreposto(user_id, monkeypatch):

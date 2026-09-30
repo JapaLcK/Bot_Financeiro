@@ -52,7 +52,7 @@ core/
 api/v2/                   — a /api/v2 do dashboard v2: sub-app FastAPI montado pelo
                             monólito em /api/v2, com envelope de erro próprio
                             (erros.py), a dependência única do usuário (sessao.py)
-                            e um router por assunto (me.py)
+                            e um router por assunto (me.py, eventos.py)
 
 db/                       — PACOTE com ~30 módulos, um por domínio
   schema.py               — DDL de TODAS as tabelas (init_db) — fonte de verdade
@@ -129,7 +129,7 @@ Sub-app FastAPI (`api/v2/app.py`) montado pelo monólito com `app.mount("/api/v2
   cookie `dashboard_token`) → conta agendada para exclusão (403) → gate de plano
   (`_enforce_subscription_gate`, 402) → chave `dashboard_v2_enabled` (404
   `dashboard_v2_disabled`). O user agent não entra.
-- Toda rota tem `response_model`.
+- Toda rota tem `response_model` (a de SSE, o tipo do item do stream; ver `/eventos`).
 - **Erro** sai no envelope `{"error": {"code", "message", "details"?}}`
   (`api/v2/erros.py`), com os headers da exceção preservados (`WWW-Authenticate` do
   401, `Allow` do 405). A exceção não tratada sai 500 `internal_error` ou, se for
@@ -137,12 +137,22 @@ Sub-app FastAPI (`api/v2/app.py`) montado pelo monólito com `app.mount("/api/v2
   `status_do_erro` (`core/admin_dashboard.py`), a mesma do pai — e registra
   `log_system_event` ali mesmo: o `admin_error_logging_middleware` do pai não enxerga
   exceção que o sub-app já respondeu. `ClientDisconnect` é levantada de novo para o
-  pai, que responde 499 sem evento. Limite: depois de responder, o starlette re-levanta
-  a exceção e ela sai do app inteiro (traceback de novo no log do servidor; teste de
-  500/503 usa `raise_server_exceptions=False`) — revisitar no PR do SSE. Ficam **fora**
-  do envelope o 403 do CSRF e o 422 do `query_venenosa_middleware`, que nascem nos
-  middlewares do pai e saem `{"detail": ...}`.
+  pai, que responde 499 sem evento. O `ServerErrorMiddleware` do sub-app re-levanta a
+  exceção depois de responder; o `erros.sem_reraise`, por fora dele (`_AppV2` em
+  `api/v2/app.py`), a engole quando a resposta já começou, e o `TestClient` padrão não
+  a vê. Erro no meio de um stream SSE chega num `ExceptionGroup` e é desembrulhado
+  antes de classificar. Ficam **fora** do envelope o 403 do CSRF e o 422 do
+  `query_venenosa_middleware`, que nascem nos middlewares do pai e saem `{"detail": ...}`.
 - `GET /api/v2/me` devolve `{"plan_tier": "free"|"essencial"|"plus"|"pro"}`, sem PII.
+- `GET /api/v2/eventos` (`api/v2/eventos.py`): SSE, `data: {"recurso": "open_finance"|"tudo"}`
+  (sem dado financeiro, sem id, sem `id:`/replay) e `: ping` a cada 15 s. Quem avisa chama
+  `eventos.avisar(user_id, recurso)` na thread do loop, depois do commit; hoje são o fim
+  do sync do Open Finance e o "Recomeçar do zero". `usuario_atual` roda de novo antes de
+  cada envio e a cada 30 s: sessão ou plano caídos fecham o stream sem aviso. Teto de 5
+  streams por usuário (429 no envelope). Rota SSE tipa o item pela anotação de retorno
+  (`-> AsyncIterable[Aviso]`), e a varredura aceita isso no lugar do `response_model`. O
+  cliente (`webapp/src/dashboard/lib/eventos.ts`) invalida todas as consultas a cada
+  aviso e a cada conexão aberta.
 - **Contrato:** o envelope entra no OpenAPI como resposta `default` (`ErroV2`, em
   `api/v2/erros.py`; a resposta real continua saindo de `_envelope`). Os tipos TS saem de
   `python scripts/gerar_tipos_api_v2.py` para `webapp/src/dashboard/lib/api-v2.gen.ts`
@@ -233,7 +243,8 @@ por cima deles perde os códigos do usuário — já quase aconteceu (registro n
 `ConnectionManager` + endpoint `@app.websocket("/ws/{user_id}")` no monólito. O
 dashboard pede dados por ele (pergunta e resposta); empurrar algo sem o cliente pedir
 só acontece em `open_finance_synced`, do fim do sync do Open Finance e do "Recomeçar do
-zero" — confira com `grep -rn "broadcast_to_user(" --include="*.py" frontend/ core/`.
+zero" — confira com `grep -rn "broadcast_to_user(" --include="*.py" frontend/ core/`. Os
+mesmos 2 avisos também saem pelo `/api/v2/eventos` (`eventos.avisar`).
 **Lançamento feito pelo WhatsApp não avisa o dashboard.** Mudou o formato
 de mensagem? Os dois lados mudam junto — o consumidor está no `dashboard.js`.
 
