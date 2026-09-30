@@ -96,7 +96,7 @@
    * NÃO usar `whatsapp_linked` do /auth/dashboard-profile: ele é
    * `bool(whatsapp_verified_at)`, e essa coluna só é escrita pelo auto-link por
    * telefone (db_support.py:926). Quem vinculou pelo código — `link 123456` →
-   * link_platform_identity (db/users.py:323) — nunca ganha o carimbo, e a
+   * link_platform_identity (db/users.py) — nunca ganha o carimbo, e a
    * confirmação nunca apareceria pra ele. `identities` cobre os dois caminhos.
    */
   function isWhatsAppLinked(security) {

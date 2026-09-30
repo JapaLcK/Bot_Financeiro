@@ -439,8 +439,9 @@ jobs:
       - name: Lint (ESLint)
         run: npm run lint
 
-      # Gate do artefato da ilha React: o `frontend/precos-app.js` é BUILDADO de
-      # `webapp/src` e COMMITADO, então ele pode ficar velho em silêncio — editei
+      # Gate do artefato das ilhas React: `frontend/precos-app.*`, `chat-app.*` e
+      # `dashboard-app.*` (o /painel) são BUILDADOS de `webapp/src` e COMMITADOS,
+      # então podem ficar velhos em silêncio — editei
       # o `.jsx`, esqueci de buildar, e a produção continua servindo o bundle
       # anterior com o CI verde. É o mesmo mecanismo do gate do CACHE_NAME: o
       # repositório carrega dois artefatos que só um comando reconcilia.
@@ -482,7 +483,7 @@ jobs:
       # O que este gate NÃO garante: que o bundle RENDERIZA. Quem prova o render é
       # o `npm run test:frontend` (step abaixo), e quem prova que a ROTA existe é
       # o pytest (`tests/test_frontend_assets_e_rotas.py`).
-      - name: Gate do artefato da ilha React (webapp -> frontend/precos-app.*)
+      - name: Gate do artefato das ilhas React (webapp -> frontend/precos-app.*, chat-app.*, dashboard-app.*)
         run: |
           npm --prefix webapp ci
           npm --prefix webapp run build
@@ -490,7 +491,7 @@ jobs:
           if [ -n "$sujo" ]; then
             git diff --stat -- frontend/
             echo "$sujo"
-            echo "::error title=Artefato da ilha React desatualizado::O build de webapp/ neste runner não reproduziu o que está commitado em frontend/precos-app.*. Se você editou webapp/, rode \`npm --prefix webapp ci && npm --prefix webapp run build\` e commite o resultado. Se não editou, o build não é reprodutível entre plataformas — leve o diff acima para a decisão (container ou comparação normalizada)."
+            echo "::error title=Artefato da ilha React desatualizado::O build de webapp/ neste runner não reproduziu o que está commitado em frontend/ (precos-app.*, chat-app.*, dashboard-app.*). Se você editou webapp/, rode \`npm --prefix webapp ci && npm --prefix webapp run build\` e commite o resultado. Se não editou, o build não é reprodutível entre plataformas — leve o diff acima para a decisão (container ou comparação normalizada)."
             exit 1
           fi
 

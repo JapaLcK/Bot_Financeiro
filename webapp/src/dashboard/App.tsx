@@ -9,6 +9,7 @@ import { Command } from "./parts/Command";
 import { Tip } from "./parts/Tip";
 import { PAGES } from "./pages";
 import { NO_MONTH, RAIL, TABBAR, href, route, useRoute, type Path } from "./router";
+import { ICON } from "./lib/brand";
 
 function Topbar({ s, path }: { s: DashState; path: Path }) {
   const [stuck, setStuck] = useState(false);
@@ -25,7 +26,7 @@ function Topbar({ s, path }: { s: DashState; path: Path }) {
         <p className="month-title" aria-live="polite">{monthTitle(s.month).replace(/ (\d{4})$/, "")}<span className="month-year"> {s.month.slice(0, 4)}</span></p>
         <button className="icon-btn" type="button" aria-label="Próximo mês" disabled={i === MONTHS.length - 1} onClick={() => set({ month: MONTHS[i + 1] })}><i className="ph ph-arrow-right" aria-hidden="true" /></button>
       </div>}
-      <span className="tag-demo">Demonstração</span>
+      <span className="tag-demo">Dados de demonstração</span>
       <span className="topbar-spacer" />
       <button className="cmd-trigger" type="button" aria-label="Buscar ou ir para" aria-keyshortcuts="Meta+K Control+K /" onClick={() => window.dispatchEvent(new Event("dash:command"))}>
         <i className="ph ph-magnifying-glass" aria-hidden="true" />
@@ -56,7 +57,7 @@ export function App() {
       <div className="shell">
         <nav className="rail" aria-label="Páginas do painel">
           <a className="brand" href={href("/")}>
-            <img src="../frontend/brand/icon.png" alt="" width={28} height={28} />
+            <img src={ICON} alt="" width={28} height={28} />
             <span>PigBank</span>
           </a>
           <ul className="rail-list">
@@ -70,10 +71,11 @@ export function App() {
           </ul>
           <div className="rail-foot">
             <p className="rail-sync"><span className="dot-live" aria-hidden="true" />2 bancos via Open Finance</p>
-            <p className="faint">Dados de demonstração</p>
           </div>
         </nav>
         <div className="main-col">
+          {/* no celular a barra de cima não tem lugar para a etiqueta: ela vem numa linha acima */}
+          <p className="demo-strip">Dados de demonstração</p>
           <Topbar s={s} path={path} />
           <main id="main" className="page" data-page={path}>
             <Page s={s} />
@@ -87,7 +89,7 @@ export function App() {
           return (
             <a key={p} href={href(p)} aria-current={path === p ? "page" : undefined} data-tab={p === "/piggy" ? "piggy" : undefined}>
               {p === "/piggy"
-                ? <img src="../frontend/brand/icon.png" alt="" width={26} height={26} />
+                ? <img src={ICON} alt="" width={26} height={26} />
                 : <i className={`ph ${r.icon}`} aria-hidden="true" />}
               <span>{r.short}</span>
             </a>

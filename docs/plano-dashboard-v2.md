@@ -99,8 +99,11 @@ calma (Q5).
   a tela pede o dado de novo. Princípios: o aviso vai só para o dono do dado, só depois de
   gravado, e a tela nunca fica desatualizada em silêncio (reconectar refaz tudo; sessão
   encerrada fecha o stream). Toda escrita de dado financeiro avisa, venha de onde vier.
-  Processo único hoje; com mais de um processo, `LISTEN/NOTIFY` do Postgres. A etapa 0
-  confirma com o dono se o `bot.py` (Discord) sai do `launch.py`.
+  Processo único hoje; com mais de um processo, `LISTEN/NOTIFY` do Postgres: quem grava
+  faz `pg_notify` dentro da própria transação (sai só no commit; serve para thread e para
+  o `bot.py`) e cada processo web mantém uma conexão `LISTEN` que repassa aos streams
+  dele (desenho no docstring de `api/v2/eventos.py`, não construído). O `bot.py`
+  (Discord) sai do `launch.py`: decidido pelo dono, feito no PR 5a da etapa 0.
 - **Processo** (Q21): todo PR que cria ou muda endpoint da `/api/v2` é faixa Completo.
 
 ## 4. Dados e números
@@ -118,10 +121,13 @@ que não se sabe aparece como "sem comparação", "a conferir", "desatualizado" 
   (Q37) e a transferência em espécie (Q41) funcionando com o ciclo de vida inteiro. Antes
   disso — inclusive para quem ainda não abriu o v2 — a foto é gravada, mas marcada como
   incerta; o histórico enche desde a etapa 0 sem afirmar nada que depois não se sustente.
-- **Rendimento × CDI** (Q35): por investimento, sem número da carteira somada. A fonte é a
-  rentabilidade que o banco informa pelo Open Finance, gravada a cada sincronização para
-  formar histórico. Só compara com o CDI quando se sabe o período exato e que a posição
-  existiu nele o tempo todo.
+- **Rendimento × CDI** (Q35): por investimento, sem número da carteira somada. A fonte
+  prevista era a rentabilidade que o banco informa pelo Open Finance, e **ela não chega
+  hoje** (medição de 2026-09-29, abaixo, §7). O que já se grava a cada sincronização é a
+  foto diária por posição (`open_finance_investment_snapshots`): saldo, aplicado, data da
+  posição, taxa de contrato e as três taxas do banco em colunas próprias, vazias até algum
+  banco mandar. A fonte do Rendimento × CDI volta ao dono na etapa de tela. Só compara com o
+  CDI quando se sabe o período exato e que a posição existiu nele o tempo todo.
 - **Reserva em meses**: a caixinha de reserva é designada pelo usuário (hoje só existe o
   palpite pelo nome, `_is_reserva`); a conta divide pelo custo mensal das contas fixas.
 - **Só reais**: o que estiver em outra moeda fica fora das somas, com aviso. Câmbio fica
@@ -135,9 +141,19 @@ que não se sabe aparece como "sem comparação", "a conferir", "desatualizado" 
 
 - **Busca de dados:** TanStack Query (Q24).
 - **Bundle** commitado em `frontend/` com trava de rebuild no CI (Q7).
-- **Plano real** pelo `GET /api/v2/me` tipado (decisão do dono, 2026-09-26; hoje o
-  protótipo lê `?plano=`). O `/auth/me` só leva `dashboard_v2_enabled`, para o link do
-  `/app`.
+- **Plano real** pelo `GET /api/v2/me` tipado (decisão do dono, 2026-09-26). O bundle
+  nunca lê a URL; só o protótipo (`dashboard-v2/index.html`, sem backend) define
+  `window.PIGBANK_DEMO_PLAN` pelo `?plano=` dele. O `/auth/me` só leva
+  `dashboard_v2_enabled`, para o link do `/app`.
+- **Tipos** gerados do OpenAPI da `/api/v2` por um gerador próprio
+  (`scripts/gerar_tipos_api_v2.py` → `webapp/src/dashboard/lib/api-v2.gen.ts`), e não pelo
+  `openapi-typescript`: ele exige typescript@^5 e o webapp usa o TS 7 nativo, sem a API
+  JS da qual ele depende (o `npm install` recusa com ERESOLVE).
+- **Erro no cliente** é uma tela só ("Não deu para carregar o painel", texto fixo em
+  português — nunca a `message` do envelope, que em 402/404 sai em inglês —, "Recarregar"
+  e "Painel antigo"). Sem redirecionamento no cliente (decisão do dono): Recarregar passa
+  de novo pelo portão do servidor (`serve_painel`), que manda cada caso ao lugar certo.
+  O 401 comum o `auth-refresh.js` renova e repete.
 - **Um PR por tela** (Q8); tela que só consome a API é faixa Leve, com o time na versão
   leve.
 - **Testes** (Q32): pytest com Postgres real para isolamento e contrato; Playwright com
@@ -194,10 +210,16 @@ PR de cada etapa, não soluções prontas. Cada PR confere se ainda valem, decid
   conector; moeda corrigida depois.
 - Quando o dado do Open Finance conta como desatualizado (limite por produto) e como a
   tela aberta percebe isso sem escrita.
-- Rentabilidade do Open Finance: medir na API real o que o Pluggy manda (mês de
-  referência, datas da posição, e se a taxa do banco já desconta aporte e resgate no
-  período) antes de decidir o que comparar. A comparação usa a taxa que o banco calcula,
-  nunca a diferença entre fotos do rendimento acumulado.
+- Rentabilidade do Open Finance: medida em produção em 2026-09-29 (leitura, pelo dono;
+  remeça antes de reusar). `lastMonthRate`, `lastTwelveMonthsRate`, `annualRate`,
+  `fixedAnnualRate` e `amountProfit` vieram nulos em todas as posições; no CDB, `rate` +
+  `rateType` = `CDI` é a taxa de CONTRATO (100 = 100% do CDI), não rentabilidade; `date` é a
+  data da posição informada pelo banco, dias atrás da coleta e diferente entre posições da
+  mesma conexão; posições resgatadas (`TOTAL_WITHDRAWAL`) continuam no espelho; e há
+  conexão `PARTIAL_SUCCESS` com investimentos não confirmados. Resultado: não há hoje taxa
+  do banco para comparar. **Pendência com o dono na etapa de tela:** de onde sai o
+  Rendimento × CDI. A regra continua — a comparação usa a taxa que o banco calcula, nunca a
+  diferença entre fotos do rendimento acumulado.
 
 **Etapas de tela (1 a 6)**
 - Etapa 2: identidade das transações importadas por conta (conta e cartão); editar a data
@@ -227,7 +249,32 @@ PR de cada etapa, não soluções prontas. Cada PR confere se ainda valem, decid
 - [x] Protótipo: perfis do Resumo (#573, #575), faixa do Piggy (#579), navegação com o
   Piggy no meio e Ferramentas (#582), página do chat (#584).
 - [x] Protótipo: blocos que expandem na conversa, com estado por resposta e "Abrir no painel" (PR 3 do chat).
-- [ ] Pré-requisitos: ~~#594~~ ✓ · Q42 (#620, mergeado; conferir o deploy) · Q43 · Q40 (regra) · Q41
-- Etapa 0 em andamento: PR 1 (esqueleto da `/api/v2`: `usuario_atual`, envelope de
-  erro, `GET /api/v2/me`, varredura de rotas).
+- [ ] Pré-requisitos: ~~#594~~ ✓ · Q42 (#620, mergeado; conferir o deploy) · Q43 (#623 e
+  #634, mergeados; deploy não conferido) · Q40 (#633, mergeado; deploy não conferido) ·
+  Q41 (#627, aberto)
+  - Q41: núcleo no #627, atrás de `OF_CASH_ENABLED` (desligado); falta o PR B (painel, WhatsApp e o switch ligado).
+- Etapa 0 em andamento, em 6 PRs (divisão aprovada pelo dono em 2026-09-26): 1 esqueleto
+  (#632) · 2a `/painel` (#659) · 2b contrato TS + TanStack (#669) · 3 foto diária por
+  posição do Open Finance (#675) · 4 SSE básico com os 2 avisos de hoje + conserto do
+  re-raise (#678) · 5 toda escrita financeira avisa + o Discord sai do `launch.py` · 6 job da
+  foto diária desligado por chave. O 5 foi dividido depois pelo dono: 5a o Discord sai do
+  `launch.py` · 5b toda escrita financeira avisa, por trigger do Postgres + `LISTEN`.
+  - PR 1 (#632, mergeado): esqueleto da `/api/v2` (`usuario_atual`, envelope de erro,
+    `GET /api/v2/me`, varredura de rotas).
+  - PR 2a: a página `/painel` (gate de sessão, chave, UA do app e os gates do `/app`),
+    `dashboard_v2_enabled` no `/auth/me`, links "Painel novo (beta)" no `/app` e "Painel
+    antigo" no v2, e o bundle servido de `frontend/dashboard-app.*` com gate no CI. O v2
+    ainda não chama a API e o `?plano=` continua.
+  - PR 2b (feito): contrato OpenAPI → TS, TanStack Query, fim do `?plano=`, erros,
+    Safari 14. As telas seguem com dados sintéticos e a etiqueta de demonstração.
+  - PR 3: foto diária por posição do Open Finance (`open_finance_investment_snapshots`,
+    gravada no sync; coleta não confirmada entra marcada e a confirmada do mesmo dia vence;
+    desconectar apaga; entra na exportação junto com as posições). Só a gravação: nada lê
+    ainda, e a fonte do Rendimento × CDI ficou para o dono (§4, §7). Conferência
+    pós-deploy: `scripts/conferir_fotos_of.py`.
+  - PR 4 (#678, mergeado): `GET /api/v2/eventos` (SSE), com os 2 avisos que o `/ws` já dá (fim do sync do
+    Open Finance e "Recomeçar do zero"); sessão rechecada antes de cada envio e a cada
+    30 s, teto de 5 streams por usuário; o `/painel` invalida as consultas a cada aviso.
+    E o sub-app para de re-levantar a exceção que já respondeu. `LISTEN/NOTIFY` só no
+    desenho (§3).
 - [ ] Etapa 0 · [ ] 1 · [ ] 2 · [ ] 3 · [ ] 4 · [ ] 5 · [ ] 6 · [ ] 7

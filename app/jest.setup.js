@@ -150,3 +150,47 @@ jest.mock("expo-crypto", () => {
     ),
   };
 });
+
+// expo-local-authentication é nativo (LAContext). PADRÃO: aparelho sem código
+// (NONE) — a trava fica inerte e nenhum teste antigo vê prompt. Quem testa a
+// trava troca o retorno com `jest.mocked(...)`.
+jest.mock("expo-local-authentication", () => ({
+  SecurityLevel: { NONE: 0, SECRET: 1, BIOMETRIC: 2, BIOMETRIC_WEAK: 2, BIOMETRIC_STRONG: 3 },
+  AuthenticationType: { FINGERPRINT: 1, FACIAL_RECOGNITION: 2, IRIS: 3 },
+  getEnrolledLevelAsync: jest.fn(() => Promise.resolve(0)),
+  supportedAuthenticationTypesAsync: jest.fn(() => Promise.resolve([])),
+  authenticateAsync: jest.fn(() => Promise.resolve({ success: true })),
+}));
+
+// AppState: o dublê do RN não dispara eventos. Este guarda `currentState` num
+// objeto (mesmo padrão do AccessibilityInfo acima: só o CAMPO muda) e dispara
+// "change" para quem assinou. Outros eventos (memoryWarning, focus...) são
+// aceitos e nunca disparam.
+const mockAppState = { atual: "active", ouvintes: new Set() };
+global.__definirAppState = (v) => (mockAppState.atual = v);
+global.__dispararAppState = (v) => {
+  mockAppState.atual = v;
+  mockAppState.ouvintes.forEach((fn) => fn(v));
+};
+jest.mock("react-native/Libraries/AppState/AppState", () => ({
+  __esModule: true,
+  default: {
+    get currentState() {
+      return mockAppState.atual;
+    },
+    isAvailable: true,
+    addEventListener: (evento, fn) => {
+      if (evento !== "change") return { remove: () => undefined };
+      mockAppState.ouvintes.add(fn);
+      return { remove: () => mockAppState.ouvintes.delete(fn) };
+    },
+  },
+}));
+
+// A tampa nativa (`modules/tampa`) não existe no Jest: `requireNativeModule`
+// lançaria. Espiãs globais; `bloqueio_tampa.test.tsx` testa o `tampa.ts` real
+// com `jest.requireActual`.
+jest.mock("@/features/bloqueio/tampa", () => ({
+  descobrir: jest.fn(),
+  pular: jest.fn(() => Promise.resolve()),
+}));

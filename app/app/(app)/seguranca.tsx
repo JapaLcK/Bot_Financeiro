@@ -3,6 +3,7 @@ import { useCallback, useState } from "react";
 import { ActivityIndicator, ScrollView, View } from "react-native";
 
 import type { MfaStatus } from "@/api/schemas/auth";
+import { Desbloqueio } from "@/features/seguranca/Desbloqueio";
 import { useFalha } from "@/features/seguranca/falha";
 import { statusMfa } from "@/services/mfa";
 import { Button } from "@/ui/componentes/Button";
@@ -13,8 +14,9 @@ import { espaco } from "@/ui/tokens";
 type Estado = { fase: "carregando" } | { fase: "erro"; mensagem: string } | { fase: "pronto"; status: MfaStatus };
 
 /**
- * Segurança, aberta pelo Início até o Perfil (Fase 10) existir. Por ora só o
- * MFA; sessões e biometria entram como seções irmãs.
+ * Segurança, aberta pelo Início até o Perfil (Fase 10) existir: o MFA e a
+ * trava do aparelho (`Desbloqueio`, independente do status do MFA); sessões
+ * entram como seção irmã.
  *
  * O status recarrega a cada FOCO: é assim que a tela reflete o que as sheets
  * de ativar/gerar/desativar acabaram de fazer ao fechar. Sem voltar a
@@ -84,6 +86,8 @@ export default function Seguranca() {
             <Button rotulo="Ativar" onPress={() => router.push("/mfa-ativar")} />
           </View>
         ))}
+
+      <Desbloqueio />
     </ScrollView>
   );
 }

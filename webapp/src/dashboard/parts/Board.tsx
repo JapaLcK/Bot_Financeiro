@@ -1,8 +1,8 @@
 import { useEffect, useState, type ReactNode } from "react";
 import DraggableWidgetGrid, { type WidgetItem } from "@/components/ui/draggable-widget-grid";
-import { PLAN } from "../lib/api";
 import { PROFILES, locked, readLayout, readProfile, saveLayout, saveProfile } from "../lib/profiles.js";
 import { set } from "../lib/store.js";
+import { usePlan } from "../lib/v2";
 import type { Path } from "../router";
 import { FrameLink } from "./Frame";
 import type { DashState } from "../lib/types";
@@ -65,8 +65,8 @@ const PAGE: Record<string, Path | null> = {
 };
 
 const presetOf = (p: string): string[] => PROFILES.find((x) => x.id === p)?.preset ?? DEFAULT.map((w) => w.id);
-const layoutOf = (p: string): string[] => readLayout(p, presetOf(p), KNOWN, PLAN);
-const shownPreset = (p: string) => presetOf(p).filter((id) => KNOWN.includes(id) && !locked(id, PLAN));
+const layoutOf = (p: string, plan: string): string[] => readLayout(p, presetOf(p), KNOWN, plan);
+const shownPreset = (p: string, plan: string) => presetOf(p).filter((id) => KNOWN.includes(id) && !locked(id, plan));
 
 function useColumns() {
   const query = "(max-width: 640px)";
@@ -83,18 +83,19 @@ function useColumns() {
 export function Board({ s }: { s: DashState }) {
   const [profile, setProfile] = useState<string | null>(readProfile); // null: o modal está aberto
   const shown = profile ?? "padrao";
-  const [ids, setIds] = useState(() => layoutOf(shown));
+  const plan = usePlan();
+  const [ids, setIds] = useState(() => layoutOf(shown, plan));
   // ponytail: o grid só lê `items` ao montar; perfil, catálogo e restaurar o remontam (key),
   // o que reanima a entrada dos blocos. Sincronizar `items` dentro do grid evita isso.
   const [version, setVersion] = useState(0);
   const [said, setSaid] = useState("");
   const columns = useColumns();
-  const custom = ids.join() !== shownPreset(shown).join();
+  const custom = ids.join() !== shownPreset(shown, plan).join();
 
   const choose = (p: string) => {
     saveProfile(p);
     setProfile(p);
-    setIds(layoutOf(p));
+    setIds(layoutOf(p, plan));
     setVersion((v) => v + 1);
     document.getElementById("board-profile")?.focus();
   };
@@ -105,7 +106,7 @@ export function Board({ s }: { s: DashState }) {
     setVersion((v) => v + 1);
     setSaid(`${ITEM.get(id)!.label} adicionado ao fim do painel`);
   };
-  const restore = () => { saveLayout(shown, null); setIds(layoutOf(shown)); setVersion((v) => v + 1); };
+  const restore = () => { saveLayout(shown, null); setIds(layoutOf(shown, plan)); setVersion((v) => v + 1); };
 
   return (
     <section className="board" data-editing={s.editing || undefined} data-fit={columns === 1 || undefined} aria-label="Seu painel">
@@ -114,7 +115,7 @@ export function Board({ s }: { s: DashState }) {
         <p className="board-hint" aria-live="polite">
           {s.editing
             ? <>Arraste os blocos para organizar. No celular, segure antes de arrastar. No teclado: <kbd>Alt</kbd> + setas.</>
-            : <span className="faint">Dados de demonstração · hoje é 23 de setembro de 2026</span>}
+            : <span className="faint">hoje é 23 de setembro de 2026</span>}
         </p>
         <div className="board-actions">
           {s.editing && custom && <button type="button" className="btn btn-quiet" onClick={restore}>Restaurar padrão</button>}

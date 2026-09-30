@@ -7,6 +7,7 @@ import type { TopicId } from "../lib/topics";
 import type { DashState, Launch } from "../lib/types";
 import { Frame } from "../parts/Frame";
 import { go } from "../router";
+import { ICON } from "../lib/brand";
 
 // `head`, `ask` e `topic` são o que a faixa do topo do Resumo usa: a manchete, a pergunta
 // que vai para a conversa e o assunto da resposta (lib/topics.tsx).
@@ -73,7 +74,7 @@ export function insights(s: DashState): Insight[] {
 
 export function Piggy({ s }: { s: DashState }) {
   return (
-    <Frame id="piggy" title={<span className="piggy-title"><img src="../frontend/brand/icon.png" alt="" width={22} height={22} />Piggy notou</span>}>
+    <Frame id="piggy" title={<span className="piggy-title"><img src={ICON} alt="" width={22} height={22} />Piggy notou</span>}>
       <ul className="insights">
         {insights(s).map((i) => (
           <li key={i.key}>

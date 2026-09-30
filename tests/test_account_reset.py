@@ -131,6 +131,12 @@ def _semeia(uid: int) -> None:
                 "values (%s, 'inv-1', 'Caixinha')",
                 (con,),
             )
+            cur.execute(
+                "insert into open_finance_investment_snapshots (connection_id, provider_investment_id, "
+                "observed_on, observed_at, collection_confirmed, balance) "
+                "values (%s, 'inv-1', %s, now(), true, 10)",
+                (con, hoje),
+            )
 
             # ── crédito (apagado) ───────────────────────────────────────────
             cur.execute(
@@ -294,6 +300,10 @@ _OF_JOINS = {
     "open_finance_investments": (
         "select count(*) as n from open_finance_investments i "
         "join open_finance_connections c on c.id = i.connection_id where c.user_id = %s"
+    ),
+    "open_finance_investment_snapshots": (
+        "select count(*) as n from open_finance_investment_snapshots s "
+        "join open_finance_connections c on c.id = s.connection_id where c.user_id = %s"
     ),
 }
 _TABELAS_SIMPLES = (
@@ -674,10 +684,9 @@ def test_reset_sem_corrida_zera_a_conta_e_o_caminho_normal_continua(user_id):
 def test_reset_de_conta_sem_linha_de_accounts_nao_deixa_divida_fantasma(user_id, monkeypatch):
     """NEGATIVO do `ensure_user_tx`: sem ele o `update` casa 0 e não trava NADA.
 
-    Estado real e alcançável: `merge_users` apaga accounts do usuário de origem
-    (db/users.py:88) e migra auth_accounts sem recriar a linha (:155-162) — a
-    conta fica com login válido e ZERO linhas em accounts. Todo reset rodado na
-    versão anterior deixava a conta assim também.
+    Estado real em conta antiga: o `merge_users` anterior ao #635 apagava accounts
+    da origem e a deixava com login válido e ZERO linhas em accounts. Todo reset
+    rodado na versão anterior deixava a conta assim também.
 
     O gatilho aqui é a PRIMEIRA tabela do laço, não a última: é a posição
     discriminante deste caso. Sem `ensure_user_tx` o lançamento entra livre (não
@@ -768,6 +777,14 @@ def test_rota_deleta_os_items_do_usuario_na_pluggy(user_id, monkeypatch):
 
     monkeypatch.setattr(dashboard.manager, "broadcast_to_user", _broadcast)
 
+    # O mesmo aviso sai pelo /api/v2/eventos, e só DEPOIS do commit: a contagem é
+    # lida por outra conexão no momento do aviso, e o cliente refaz a consulta na hora.
+    from api.v2 import eventos
+
+    sse: list = []
+    monkeypatch.setattr(eventos, "avisar", lambda uid, recurso: sse.append(
+        (uid, recurso, "apagado" if all(n == 0 for n in _contagens(uid).values()) else "ainda existe")))
+
     client = TestClient(dashboard.app)
     headers = _auth(client, user_id)
     resp = client.post("/settings/reset", json={"password": SENHA}, headers=headers)
@@ -779,6 +796,7 @@ def test_rota_deleta_os_items_do_usuario_na_pluggy(user_id, monkeypatch):
         "o snapshot cacheado do dashboard sobreviveu ao reset (Codex PR #217, rodada 2)"
     assert avisados == [user_id], \
         "o reset tinha que avisar os dashboards conectados via broadcast_to_user"
+    assert sse == [(user_id, "tudo", "apagado")]
 
     with get_conn() as conn:
         with conn.cursor() as cur:
@@ -1023,6 +1041,7 @@ def test_sync_de_item_varrido_pelo_reset_nao_recria_nada(user_id):
 
     assert resultado == {"ok": False, "reason": "connection_not_found", "item_id": item}
     assert _contagens(user_id)["open_finance_connections"] == 0
+    assert _contagens(user_id)["open_finance_investment_snapshots"] == 0
 
 
 # ── 7c-bis. item salvo entre a enumeração remota e o DELETE local ───────────

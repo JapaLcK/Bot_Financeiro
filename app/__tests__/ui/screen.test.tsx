@@ -47,6 +47,28 @@ describe("Screen", () => {
     expect(refresh.props.colors).toEqual([claro.brand]);
   });
 
+  // Entrar e Criar conta vivem sob o cabeçalho nativo (só a seta), que já
+  // ocupa a área segura de cima: somar `insets.top` de novo dobrava a margem.
+  it("sobCabecalho zera o topo (padding e progressViewOffset) nos dois ramos; sem ele, soma", () => {
+    const topoDe = (el: React.ReactElement) => {
+      const { claro: c } = renderComAreaSegura(el);
+      const tela = c.getByTestId("tela");
+      return StyleSheet.flatten([tela.props.style, tela.props.contentContainerStyle]).paddingTop;
+    };
+    const t = METRICAS_DE_TESTE.insets.top;
+    expect(topoDe(<Screen><Text>x</Text></Screen>)).toBe(t);
+    expect(topoDe(<Screen rolar={false}><Text>x</Text></Screen>)).toBe(t);
+    expect(topoDe(<Screen sobCabecalho><Text>x</Text></Screen>)).toBe(0);
+    expect(topoDe(<Screen sobCabecalho rolar={false}><Text>x</Text></Screen>)).toBe(0);
+
+    const { claro: c } = renderComAreaSegura(
+      <Screen sobCabecalho onAtualizar={jest.fn()}>
+        <Text>x</Text>
+      </Screen>,
+    );
+    expect(c.UNSAFE_getByType(RefreshControl).props.progressViewOffset).toBe(0);
+  });
+
   it("fundo muda de cor entre os dois temas", () => {
     const { claro: c, escuro: e } = renderComAreaSegura(
       <Screen>

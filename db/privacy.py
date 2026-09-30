@@ -277,7 +277,7 @@ def schedule_account_deletion(user_id: int, password: str, grace_days: int = 7) 
                 raise LookupError("Conta de login não encontrada.")
             # Este caminho NÃO passa por verify_user_password (select próprio):
             # sem esta guarda, _check_password(password, None) estoura
-            # AttributeError, é engolido em db/users.py:350-354 e vira
+            # AttributeError, é engolido no `except` do `_check_password` e vira
             # "Senha incorreta." — mesma raiz, segundo caminho de código.
             if not account["password_hash"]:
                 raise PasswordNotSetError(PASSWORD_NOT_SET_MSG)
@@ -354,6 +354,8 @@ def build_user_export_zip(user_id: int) -> bytes:
             ("contas", "select * from accounts where user_id = %s", (user_id,)),
             ("lancamentos", "select * from launches where user_id = %s", (user_id,)),
             ("declaracoes_bancarias", "select * from bank_movement_declarations where user_id = %s", (user_id,)),
+            ("saques_depositos_dinheiro", "select * from of_cash_links where user_id = %s", (user_id,)),
+            ("cobertura_open_finance", "select * from of_cash_coverage where user_id = %s", (user_id,)),
             ("orcamentos", "select * from category_budgets where user_id = %s", (user_id,)),
             ("regras_categorias", "select * from user_category_rules where user_id = %s", (user_id,)),
             ("gatilhos_categorias", "select * from user_category_triggers where user_id = %s", (user_id,)),
@@ -391,6 +393,26 @@ def build_user_export_zip(user_id: int) -> bytes:
                 from open_finance_transactions t
                 join open_finance_accounts a on a.id = t.account_id
                 join open_finance_connections c on c.id = a.connection_id
+                where c.user_id = %s
+                """,
+                (user_id,),
+            ),
+            (
+                "investimentos_open_finance",
+                """
+                select i.*
+                from open_finance_investments i
+                join open_finance_connections c on c.id = i.connection_id
+                where c.user_id = %s
+                """,
+                (user_id,),
+            ),
+            (
+                "historico_investimentos_open_finance",
+                """
+                select s.*
+                from open_finance_investment_snapshots s
+                join open_finance_connections c on c.id = s.connection_id
                 where c.user_id = %s
                 """,
                 (user_id,),
@@ -530,6 +552,8 @@ _RESET_TABLES = (
     # primeiro evita o set null inútil da FK composta (user_id, space_id).
     "ofx_imports",
     "daily_report_prefs",
+    "of_cash_links",
+    "of_cash_coverage",
     "launches",
     "financial_spaces",
     # `accounts` NÃO entra aqui: a linha é preservada e o saldo é zerado no
@@ -645,9 +669,10 @@ def reset_user_data(
                 # escreve depois, sobre saldo 0. Saldo NEGATIVO após o reset é o
                 # certo — o lançamento sobreviveu (decisão do dono) com o
                 # dinheiro dele. `ensure_user_tx` ANTES porque sem a linha o
-                # update casa 0 e não trava nada, e o estado é alcançável
-                # (`merge_users` apaga accounts da origem, db/users.py:88); o
-                # `on conflict do nothing` (:19) é inócuo no caso normal.
+                # update casa 0 e não trava nada, e o estado existe em conta
+                # antiga (o `merge_users` anterior ao #635 deixava a origem com
+                # login e sem accounts); o `on conflict do nothing` é inócuo no
+                # caso normal.
                 #
                 # ponytail: o lock inverte a ordem accounts×pockets/investments
                 # de 4 fluxos (db/pockets.py:336→466, db/investments.py:1041→1096
@@ -886,6 +911,8 @@ def delete_user_data(
         "platform_onboarding_tokens",
         "password_reset_tokens",
         "accounts",
+        "of_cash_links",
+        "of_cash_coverage",
         "launches",
         "pockets",
         "user_identities",

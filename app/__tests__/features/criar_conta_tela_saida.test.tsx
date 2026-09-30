@@ -54,7 +54,7 @@ describe("(auth)/criar-conta — saída da rota durante a verificação", () => 
       router.back();
       await respirar();
     });
-    await waitFor(() => expect(screen).toHavePathname("/entrar"));
+    await waitFor(() => expect(screen).toHavePathname("/boas-vindas"));
   });
 
   // Duas instâncias da rota: o verify de A em voo, B confirma primeiro
@@ -108,6 +108,6 @@ describe("(auth)/criar-conta — saída da rota durante a verificação", () => 
       router.back();
       await respirar();
     });
-    await waitFor(() => expect(screen).toHavePathname("/entrar"));
+    await waitFor(() => expect(screen).toHavePathname("/boas-vindas"));
   });
 });

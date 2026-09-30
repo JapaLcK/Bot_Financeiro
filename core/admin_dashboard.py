@@ -146,6 +146,13 @@ async def ensure_admin_tables():
                 ON system_event_logs (level, event_type, created_at DESC)
                 """
             )
+            # Junção de contas e apagamento filtram por user_id (#641).
+            await cur.execute(
+                """
+                CREATE INDEX IF NOT EXISTS idx_system_event_logs_user
+                ON system_event_logs (user_id)
+                """
+            )
         await conn.commit()
 
 

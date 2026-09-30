@@ -1,8 +1,9 @@
 """Portão da /api/v2: segurança por construção, varrida rota a rota.
 
 Toda rota do sub-app é `APIRoute`, depende de `usuario_atual`, tem
-`response_model` e não recebe parâmetro de usuário (path, query, header, cookie
-ou campo de corpo, em qualquer profundidade). E nada sob `/api/v2` é registrado
+`response_model` (a de SSE, o tipo do item do stream no lugar dele) e não
+recebe parâmetro de usuário (path, query, header, cookie ou campo de corpo, em
+qualquer profundidade). E nada sob `/api/v2` é registrado
 direto no monólito — lá os tratadores do envelope não valem e a rota escaparia
 desta varredura.
 
@@ -24,6 +25,7 @@ from collections import Counter
 
 import pytest
 from fastapi import APIRouter, Cookie, Depends, FastAPI, Header
+from fastapi.sse import EventSourceResponse
 from pydantic import BaseModel
 
 from api.v2 import app as app_v2
@@ -76,7 +78,8 @@ def violacoes(app_pai, app_v2) -> list[str]:
             continue
         if not any(d.call is usuario_atual for d in _dependants(route.dependant)):
             achados.append(f"{path}: sem a dependência usuario_atual")
-        if route.response_model is None:
+        # SSE (`EventSourceResponse` + gerador) tipa o ITEM do stream pela anotação de retorno.
+        if (route.stream_item_field if route.is_sse_stream else route.response_model) is None:
             achados.append(f"{path}: sem response_model")
         suspeitos = sorted({n for n in _nomes_de_parametro(route)
                             if n and _PARAM_DE_USUARIO.search(n)})
@@ -149,6 +152,12 @@ def _sem_response_model(r):
         return {}
 
 
+def _sse_sem_tipo_de_item(r):
+    @r.get("/x", response_class=EventSourceResponse)
+    async def _x(uid: int = Depends(usuario_atual)):  # pragma: no cover
+        yield Saida(ok=True)
+
+
 def _usuario_no_header(r):
     @r.get("/x", response_model=Saida)
     def _x(x_user: str = Header(), uid: int = Depends(usuario_atual)):  # pragma: no cover
@@ -184,6 +193,7 @@ def _rota_no_pai():
     (_sem_dependencia, "sem a dependência usuario_atual"),
     (_user_id_na_query, "parâmetro de usuário ['user_id']"),
     (_sem_response_model, "sem response_model"),
+    (_sse_sem_tipo_de_item, "sem response_model"),
     (_usuario_no_header, "parâmetro de usuário"),
     (_dono_no_cookie, "parâmetro de usuário ['dono']"),
     (_usuario_aninhado_no_corpo, "parâmetro de usuário ['owner_id']"),
@@ -216,5 +226,5 @@ def test_app_real_nao_tem_violacao():
     import frontend.finance_bot_websocket_custom as dashboard
 
     rotas = [p for p, _ in _andar_nas_rotas(app_v2.routes, com_rota=True)]
-    assert "/me" in rotas, "a varredura não achou o /me — o walk quebrou"
+    assert {"/me", "/eventos"} <= set(rotas), "a varredura não achou o /me ou o /eventos — o walk quebrou"
     assert violacoes(dashboard.app, app_v2) == []

@@ -176,8 +176,9 @@ updates:
         patterns:
           - "react"
           - "react-dom"
-    # ATENÇÃO ao mergear qualquer PR daqui: o artefato `frontend/precos-app.*` é
-    # COMMITADO, e o Dependabot não roda o build. Depois de subir dep, rode
+    # ATENÇÃO ao mergear qualquer PR daqui: os artefatos `frontend/precos-app.*`,
+    # `chat-app.*` e `dashboard-app.*` são COMMITADOS, e o Dependabot não roda o
+    # build. Depois de subir dep, rode
     # `npm --prefix webapp ci && npm --prefix webapp run build` e commite o
     # resultado junto — senão o gate que rebuilda no CI reprova (e é para reprovar: a
     # produção estaria servindo o bundle da versão anterior).

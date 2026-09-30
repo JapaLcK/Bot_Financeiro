@@ -31,8 +31,8 @@ tomadas". App iOS em Capacitor carregando o próprio site.
 ## Mapa do repositório
 
 ```
-launch.py                 — entrypoint do Railway: sobe uvicorn ($PORT) + bot.py em paralelo
-bot.py                    — bot do Discord (processo 2)
+launch.py                 — entrypoint do Railway: carrega o ambiente e vira o uvicorn ($PORT)
+bot.py                    — bot do Discord (fora do launch.py desde o PR 5a; não roda)
 ai_router.py              — chamada à OpenAI (modelo em OPENAI_MODEL, default gpt-4o-mini)
 parsers.py                — parse de linguagem natural ("gastei 50 mercado")
 statement_import.py       — importação de extrato (OFX/CSV/PDF)
@@ -52,7 +52,7 @@ core/
 api/v2/                   — a /api/v2 do dashboard v2: sub-app FastAPI montado pelo
                             monólito em /api/v2, com envelope de erro próprio
                             (erros.py), a dependência única do usuário (sessao.py)
-                            e um router por assunto (me.py)
+                            e um router por assunto (me.py, eventos.py)
 
 db/                       — PACOTE com ~30 módulos, um por domínio
   schema.py               — DDL de TODAS as tabelas (init_db) — fonte de verdade
@@ -129,7 +129,7 @@ Sub-app FastAPI (`api/v2/app.py`) montado pelo monólito com `app.mount("/api/v2
   cookie `dashboard_token`) → conta agendada para exclusão (403) → gate de plano
   (`_enforce_subscription_gate`, 402) → chave `dashboard_v2_enabled` (404
   `dashboard_v2_disabled`). O user agent não entra.
-- Toda rota tem `response_model`.
+- Toda rota tem `response_model` (a de SSE, o tipo do item do stream; ver `/eventos`).
 - **Erro** sai no envelope `{"error": {"code", "message", "details"?}}`
   (`api/v2/erros.py`), com os headers da exceção preservados (`WWW-Authenticate` do
   401, `Allow` do 405). A exceção não tratada sai 500 `internal_error` ou, se for
@@ -137,14 +137,48 @@ Sub-app FastAPI (`api/v2/app.py`) montado pelo monólito com `app.mount("/api/v2
   `status_do_erro` (`core/admin_dashboard.py`), a mesma do pai — e registra
   `log_system_event` ali mesmo: o `admin_error_logging_middleware` do pai não enxerga
   exceção que o sub-app já respondeu. `ClientDisconnect` é levantada de novo para o
-  pai, que responde 499 sem evento. Limite: depois de responder, o starlette re-levanta
-  a exceção e ela sai do app inteiro (traceback de novo no log do servidor; teste de
-  500/503 usa `raise_server_exceptions=False`) — revisitar no PR do SSE. Ficam **fora**
-  do envelope o 403 do CSRF e o 422 do `query_venenosa_middleware`, que nascem nos
-  middlewares do pai e saem `{"detail": ...}`.
+  pai, que responde 499 sem evento. O `ServerErrorMiddleware` do sub-app re-levanta a
+  exceção depois de responder; o `erros.sem_reraise`, por fora dele (`_AppV2` em
+  `api/v2/app.py`), a engole quando a resposta já começou, e o `TestClient` padrão não
+  a vê. Erro no meio de um stream SSE chega num `ExceptionGroup` e é desembrulhado
+  antes de classificar. Ficam **fora** do envelope o 403 do CSRF e o 422 do
+  `query_venenosa_middleware`, que nascem nos middlewares do pai e saem `{"detail": ...}`.
 - `GET /api/v2/me` devolve `{"plan_tier": "free"|"essencial"|"plus"|"pro"}`, sem PII.
+- `GET /api/v2/eventos` (`api/v2/eventos.py`): SSE, `data: {"recurso": "open_finance"|"tudo"}`
+  (sem dado financeiro, sem id, sem `id:`/replay) e `: ping` a cada 15 s. Quem avisa chama
+  `eventos.avisar(user_id, recurso)` na thread do loop, depois do commit; hoje são o fim
+  do sync do Open Finance e o "Recomeçar do zero". `usuario_atual` roda de novo antes de
+  cada envio e a cada 30 s: sessão ou plano caídos fecham o stream sem aviso. Teto de 5
+  streams por usuário (429 no envelope). Rota SSE tipa o item pela anotação de retorno
+  (`-> AsyncIterable[Aviso]`), e a varredura aceita isso no lugar do `response_model`. O
+  cliente (`webapp/src/dashboard/lib/eventos.ts`) invalida todas as consultas a cada
+  aviso e a cada conexão aberta.
+- **Contrato:** o envelope entra no OpenAPI como resposta `default` (`ErroV2`, em
+  `api/v2/erros.py`; a resposta real continua saindo de `_envelope`). Os tipos TS saem de
+  `python scripts/gerar_tipos_api_v2.py` para `webapp/src/dashboard/lib/api-v2.gen.ts`
+  (gerado e commitado; construção fora da lista aceita levanta `ValueError`), e
+  `tests/test_api_v2_contrato.py` compara o arquivo com o `openapi()` de hoje e valida as
+  fixtures dos testes de navegador (`tests/frontend/api_v2_respostas.json`). Mudou modelo:
+  rode o gerador e depois o build do `webapp/`.
 - Chave: `DASHBOARD_V2_BETA_EMAILS` (sem a env = os e-mails de teste do beta de
   Agentes; definida e vazia = ninguém) e `DASHBOARD_V2_BETA_USER_IDS`.
+- A página é `/painel` (`frontend/painel.html` + o artefato `frontend/dashboard-app.*`,
+  de `webapp/src/dashboard`): sessão por `auth_token` ou `dashboard_token`
+  (`_resolve_page_user_id`), senão `/login?next=/painel`; UA do app ou fora da chave
+  (ou a chave falhando) vai para `/app`; depois os gates de plano e onboarding do `/app`.
+  O `/auth/me` devolve `dashboard_v2_enabled`, que revela o link no menu do `/app`
+  (fora do app). O `/painel` carrega o `/static/auth-refresh.js` antes do bundle: o 401
+  de autenticação da `/api/v2` (só aceita `dashboard_token`/Bearer) é renovado e repetido
+  por ele.
+- **Erro no cliente** (`webapp/src/dashboard/parts/Entrada.tsx`): nada do painel monta
+  antes do `/me`; qualquer erro é uma tela só, com texto fixo em português (a `message`
+  do envelope não vai para a tela: em 402/404 ela sai em inglês), Recarregar e "Painel
+  antigo", **sem redirecionamento no cliente** — o Recarregar passa pelo `serve_painel`, que já manda cada
+  caso ao lugar certo. Rede e 5xx tentam 3 vezes (com `networkMode: "always"`, para o evento `offline`
+  não pausar o `/me` em "Carregando…"); 4xx (inclusive 429) nunca repete. Limite
+  conhecido: conta agendada para exclusão leva 403 da `/api/v2` e o Recarregar serve a
+  mesma tela, porque o `serve_painel` não barra exclusão (herdado do #659; o `/app`
+  também não) — a única saída visível é o "Painel antigo".
 
 ### Autenticação
 
@@ -172,6 +206,27 @@ mesma `pending_google_signups`, com `provider='apple'`);
 `dashboard-link`/`dashboard-token` (link mágico); `link-code` (vincula WhatsApp e
 Discord à conta); `logout`; `refresh`; `account` (exclusão) e `account/export`.
 
+**Conta pela `/assinar` (funil v3 do quiz): `POST /auth/quiz/conta`**
+(`frontend/routes/quiz_signup.py`, com CSRF). Recebe e-mail, nome, WhatsApp
+(obrigatório) e o aceite dos termos, e cria a conta **sem senha e sem código** na
+mesma requisição (`db/signup_quiz.criar_conta_sem_codigo`, que NÃO passa por
+`email_verification_codes`), já logada. Responde `criada`, `logado` (a sessão do
+pedido já é dessa conta), `tem_conta`, `cadastro_pendente` (há código de
+`/auth/register` vivo para o e-mail: alguém está no meio do cadastro, e o código dele
+não é tocado) ou `ocupado` (409: outro pedido do mesmo e-mail está com a trava; a rota
+não espera, para uma rajada não segurar o pool de conexões). Só `criada` escreve e dá
+sessão. É o único lugar do site que diz se um e-mail tem conta (aceito pelo dono), com
+10/h por IP (balde `quiz`) e 3/h por e-mail (balde `quiz-conta`, separado do
+`register` para o anônimo não gastar o teto do cadastro da vítima). A prova do e-mail vem depois, no "Crie sua senha".
+
+**Os três criadores de conta** (o `confirm` do register, o `complete-signup` do
+Google/Apple e a `/assinar`) gravam pelo mesmo `db_support.inserir_conta_nova`:
+trava por e-mail + `on conflict (email) do nothing`. O e-mail que ganhou conta no meio
+é **recusado**, nunca fundido; o `verify-email` responde "Este e-mail já tem conta" e a
+saída é o "Esqueci a senha". A sessão, as atribuições (afiliado, prospecção, quiz) e o
+CAPI CompleteRegistration de conta nova moram num helper só, `_sessao_de_conta_nova`
+no monólito, usado pelas três rotas.
+
 ### MFA
 
 TOTP (`pyotp`) com códigos de backup: `/auth/mfa/setup`, `enable`, `disable`,
@@ -188,7 +243,8 @@ por cima deles perde os códigos do usuário — já quase aconteceu (registro n
 `ConnectionManager` + endpoint `@app.websocket("/ws/{user_id}")` no monólito. O
 dashboard pede dados por ele (pergunta e resposta); empurrar algo sem o cliente pedir
 só acontece em `open_finance_synced`, do fim do sync do Open Finance e do "Recomeçar do
-zero" — confira com `grep -rn "broadcast_to_user(" --include="*.py" frontend/ core/`.
+zero" — confira com `grep -rn "broadcast_to_user(" --include="*.py" frontend/ core/`. Os
+mesmos 2 avisos também saem pelo `/api/v2/eventos` (`eventos.avisar`).
 **Lançamento feito pelo WhatsApp não avisa o dashboard.** Mudou o formato
 de mensagem? Os dois lados mudam junto — o consumidor está no `dashboard.js`.
 
@@ -198,6 +254,29 @@ Stripe: `/billing/create-checkout`, `webhook`, `portal`, `subscription`,
 `change-plan`, `cancel-change`, `plans-config` e `select-free` (esta só RECUSA
 com 410: a escolha do plano Grátis saiu da /precos em 2026-09-02; a rota
 sobrevive pra devolver `detail.message` a cliente antigo em cache).
+
+**`/billing/create-checkout` serve a `/precos` e a `/assinar`.** O corpo ganha
+`origem` (`"precos"` default | `"assinar"`; outro valor é 400) e `embutido` (default
+`false`). Hospedado responde `{checkout_url, interval, plan}`; embutido responde
+`{client_secret, publishable_key, trial_days, interval, plan}` (`ui_mode="embedded_page"`,
+`return_url` = a mesma URL de sucesso do hospedado). O `session_id`
+nunca vai no corpo. A sessão grava `origem` e `td` (dias de trial) no metadata e no
+da assinatura; uma sessão aberta só é reaproveitada pelo mesmo plano × intervalo ×
+origem × modo (sessão sem `origem` = `/precos`), e a embutida reaproveitada devolve o
+trial com que nasceu (`td`). Só a `/assinar` fixa BRL (`adaptive_pricing` off), volta
+para `/assinar?plano=&ciclo=` no abandono e oferece o e-book (`optional_items`); a
+`/precos` segue com os kwargs de antes. Toda sessão da `/assinar` (embutida **e**
+hospedada), e todo embutido, expira em 1 h (`expires_at`): o default de 24 h do Stripe
+deixaria aberta a janela de cobrança dupla (Pix numa aba, cartão na outra); o
+hospedado da `/precos` segue sem. Envs:
+`STRIPE_PUBLISHABLE_KEY` (sem ela o embutido é 503, antes de tocar no Stripe),
+`STRIPE_PRICE_ID_EBOOK` e `EBOOK_URL` — o e-book só é oferecido com **as duas**
+preenchidas (preço sem URL venderia o que o webhook não tem como entregar). Quando
+oferecido, a sessão grava `ebook_price` (o preço do e-book no nascimento) no metadata
+e no da assinatura; sem e-book a chave não existe. O PR 3 identifica o e-book por essa
+foto, não pela env do momento do webhook. **Não setar `STRIPE_PRICE_ID_EBOOK` nem
+`EBOOK_URL` em produção antes do PR 3 do funil v3** (a entrega do e-book): um POST com
+`origem:"assinar"` venderia o e-book sem entrega.
 
 A **escada de planos é `free < essencial < plus < pro`**, atrás do flag
 `PLANS_V2_ENABLED` (lido dinamicamente, sem redeploy; `0`/`false` é freio de
@@ -258,7 +337,8 @@ Via **Pluggy**. Endpoints em `frontend/routes/open_finance.py`
 (`/open-finance/{user_id}` e `connect-token`, `connectors`, `sync`, `refresh`,
 `pluggy-item`, `caixinhas`, `caixinhas/bind`, `mock-connect`) mais o webhook
 `/open-finance/pluggy/webhook`. Serviços em `core/services/pluggy*.py` e
-`open_finance*.py`; tabelas `open_finance_connections/accounts/transactions/investments` mais
+`open_finance*.py`; tabelas `open_finance_connections/accounts/transactions/investments`,
+`open_finance_investment_snapshots` (foto diária por posição, `db/of_snapshots.py`) e
 `open_finance_item_registry` — o rastro de todo item que passou por aqui, inclusive o
 que nunca virou conexão (token emitido e abandonado, webhook de item desconhecido); o
 `GET /items` da Pluggy devolve 401, então sem ela o universo remoto não é enumerável;
@@ -362,7 +442,9 @@ mora; não duplicar aqui). O essencial de domínio:
   nascer em arquivo próprio (§0.5 da raiz), com rota própria em `static_pages.py`.
 - **Segurança de borda** (medida em produção): CSP com allowlist explícita
   (`cdnjs`, `jsdelivr`, `cdn.pluggy.ai`, `connect.facebook.net`,
-  `static.cloudflareinsights.com`), HSTS, `X-Frame-Options: DENY`,
+  `static.cloudflareinsights.com`; o Stripe em `script-src` — `js.stripe.com`,
+  `*.js.stripe.com`, `checkout.stripe.com` — e em `frame-src` — os mesmos mais
+  `hooks.stripe.com` —, para o checkout embutido da `/assinar`), HSTS, `X-Frame-Options: DENY`,
   `Permissions-Policy` zerando câmera/microfone/geolocalização,
   `Referrer-Policy: strict-origin-when-cross-origin`, `X-Content-Type-Options: nosniff`.
   O `'unsafe-inline'` do `script-src` só sai quando os handlers inline saírem.
@@ -405,7 +487,7 @@ Os agrupamentos, para orientar a busca: **core** (`users`, `accounts`, `launches
 | Serviço | Para quê | Onde |
 |---|---|---|
 | WhatsApp **Cloud API oficial** (`graph.facebook.com`) | canal principal | `adapters/whatsapp/` |
-| Discord | canal secundário | `adapters/discord/`, `bot.py` |
+| Discord | fora do `launch.py` desde o PR 5a do dashboard v2: o código segue e não roda | `adapters/discord/`, `bot.py` |
 | OpenAI | categorização, chat, agentes | `ai_router.py`, `core/services/ai_chat/` |
 | Stripe | assinaturas | billing no monólito |
 | Pluggy | Open Finance | `core/services/pluggy*.py` |
@@ -483,6 +565,12 @@ de job que apaga linha; `TABLE_CLEANUP_INTERVAL_HOURS=0` desliga a poda).
   [ADR 0002](adr/0002-piloto-como-funciona-como-ilha-react.md).
   Ao alterar o build, preserve o alvo Safari 14 nos artefatos JS e CSS e
   `emptyOutDir: false`: o destino é o diretório do site.
+  A ilha do v2 (`/painel`) busca dados com **TanStack Query v5**. O alvo safari14 só
+  rebaixa sintaxe (os `this.#x` viram WeakMap), não faz polyfill de API: por isso
+  `tests/frontend/dashboard_v2_safari14.test.mjs` varre o `dashboard-app.js` commitado
+  atrás das APIs que o Safari 14 não tem (`.at(`, `structuredClone`, `Object.hasOwn(`,
+  `WeakRef`, `static{`, `this.#` e outras) e monta o `/painel` no Chromium com elas
+  apagadas.
   O gate do CI recompila `webapp/` e exige artefatos idênticos aos commitados.
   Dependências novas exigem rebuild e inclusão dos artefatos afetados no commit.
   **O que isto NÃO autoriza:** transformar a área logada em SPA, adicionar

@@ -99,6 +99,24 @@ export function limparCredenciais(): Promise<void> {
 }
 
 /**
+ * Preferência do APARELHO, não da conta: sobrevive a Sair, a sessão expirada e
+ * a login de outra conta (decisão do dono). Por isso nenhuma limpeza de sessão
+ * toca nela — elas só apagam `PAR`. Ausência = trava ligada.
+ */
+const TRAVA_DESLIGADA = "pb.trava.desligada";
+
+export function lerTravaDesligada(): Promise<boolean> {
+  return naFila(async () => (await SecureStore.getItemAsync(TRAVA_DESLIGADA)) === "1");
+}
+
+/** `true` grava a chave; `false` APAGA — o padrão (ligada) é a ausência. */
+export function gravarTravaDesligada(desligada: boolean): Promise<void> {
+  return naFila(() =>
+    desligada ? SecureStore.setItemAsync(TRAVA_DESLIGADA, "1") : SecureStore.deleteItemAsync(TRAVA_DESLIGADA),
+  );
+}
+
+/**
  * Compara-e-troca: só grava se a sessão guardada ainda for `esperado`.
  *
  * É o que a renovação precisa. Conferir o dono e depois gravar em duas chamadas

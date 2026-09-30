@@ -878,6 +878,8 @@ async def _run_pluggy_sync_bg(item_id: str) -> None:
                 )
             except Exception:
                 pass
+            from api.v2 import eventos
+            eventos.avisar(int(uid), "open_finance")
 
         ok = bool(result.get("ok"))
         reason = str(result.get("reason") or "")
@@ -1293,8 +1295,9 @@ async def _adota_item_orfao(item_id: str, last_event: str | None = None) -> int 
         # abaixo registra e o webhook responde 200 sem adotar.
         # Registrado, não consertado: sem o `ensure_user_tx` a adoção também
         # deixa de REPOR a linha de `accounts`, e existe estado de produção com
-        # `users` sem `accounts` (`merge_users` apaga a do `from_user_id` e nunca
-        # apaga o `users` dele, db/users.py:109). Medido: a adoção grava, o
+        # `users` sem `accounts` (o `merge_users` anterior ao #635 apagava a do
+        # `from_user_id` e deixava o `users` dele; desde o #635 apaga os dois, mas
+        # as origens antigas seguem no banco). Medido: a adoção grava, o
         # snapshot responde e `get_consolidated_balance` devolve zeros sem
         # estourar; qualquer `ensure_user` posterior (o próximo login) repara.
         # `adocao_registro_id`: a 1ª guarda (rastro sem dono) é REFEITA dentro do

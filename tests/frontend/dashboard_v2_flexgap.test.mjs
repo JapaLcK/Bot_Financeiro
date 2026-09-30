@@ -10,22 +10,18 @@
  * contêiner que continua flex — e mede de novo. Tem de dar a mesma geometria (±1 px).
  * Controle negativo: a mesma simulação SEM o fallback tem de mexer na geometria.
  *
- * Rodar:  npm run test:frontend   (o `before` gera o bundle, gitignored, em dashboard-v2/)
+ * Rodar:  npm run test:frontend   (abre o artefato commitado frontend/dashboard-app.*: mudou webapp/src, rode `npm --prefix webapp run build`)
  */
 import { test, before, after } from "node:test";
 import assert from "node:assert/strict";
-import { execSync } from "node:child_process";
-import { fileURLToPath } from "node:url";
-import { dirname, join } from "node:path";
 import { chromium } from "playwright";
+import { PAINEL, exigeArtefatoEmDia, servir } from "./_painel.mjs";
 
-const ROOT = join(dirname(fileURLToPath(import.meta.url)), "..", "..");
-const ORIGIN = "http://127.0.0.1:1"; // fictícia: a rota atende da raiz do repositório
 const PAGES = ["/", "/previsao", "/gastos", "/simulador", "/metas", "/patrimonio", "/lancamentos"];
 
 let browser;
 before(async () => {
-  execSync("npm --prefix webapp run build:dashboard", { cwd: ROOT, stdio: "pipe" });
+  exigeArtefatoEmDia();
   browser = await chromium.launch();
 });
 after(() => browser?.close());
@@ -75,16 +71,11 @@ const simulate = (page, withFallback) => page.evaluate((withFallback) => {
 
 async function measure(width, hash, withFallback, setup, semente = true) {
   const ctx = await browser.newContext({ viewport: { width, height: 900 }, reducedMotion: "reduce" });
-  await ctx.route("**/*", (r) => {
-    const url = new URL(r.request().url());
-    if (url.origin !== ORIGIN) return r.abort();
-    const path = decodeURIComponent(url.pathname).replace(/\/$/, "/index.html");
-    return r.fulfill({ path: join(ROOT, path) }).catch(() => r.fulfill({ status: 404, body: "" }));
-  });
+  await servir(ctx);
   // já escolheu o perfil (Pular): sem isso o modal da 1ª visita cobre o Resumo
   if (semente) await ctx.addInitScript(() => localStorage.setItem("pigbank.dashboard.profile.v1", '"padrao"'));
   const page = await ctx.newPage();
-  await page.goto(`${ORIGIN}/dashboard-v2/#${hash}`);
+  await page.goto(`${PAINEL}#${hash}`);
   await page.locator("#page-title").waitFor({ state: "attached" });
   if (setup) await setup(page);
   await page.waitForTimeout(700);

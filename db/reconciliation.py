@@ -23,9 +23,10 @@ from utils_date import today_tz
 
 from .bank_movements import _lock_user, delete_if_shadow
 from .connection import TIPO_CANON_SQL, get_conn
+from .open_finance_cash import INTERNOS, INTERNOS_SQL, RESERVADO_SQL, cash_internal_tx_ids, internos_de
 from .open_finance import (
     ACTIONABLE_PENDING_SQL, MERGED_WALLET_DELTA_SQL, PENDING_RECONCILIATION_SQL, _insert_of_shadow,
-    classify_open_finance_launch, merged_wallet_delta_params,
+    actionable_pending_params, classify_open_finance_launch, merged_wallet_delta_params,
 )
 
 # Fonte única: quem desfaz e quem lista leem daqui (CLAUDE.md §0.7).
@@ -80,7 +81,11 @@ def confirm_reconciliation(user_id: int, of_tx_id: int) -> dict:
             raise ValueError("MATCH_NOT_FOUND")
         cur.execute("select 1 from open_finance_transactions where imported_launch_id=%s and id<>%s",
                     (x, o["id"]))
-        if cur.fetchone():
+        taken = cur.fetchone()
+        cur.execute(f"select 1 from launches where id=%s and user_id=%s and {RESERVADO_SQL.format(t='launches')}",
+                    (x, user_id))
+        # ou X, ou a própria transação, é do saque em espécie (db/open_finance_cash.py)
+        if taken or cur.fetchone() or o["id"] in cash_internal_tx_ids(cur, user_id):
             raise ValueError("ALREADY_LINKED")
         cur.execute(
             """update open_finance_transactions
@@ -121,6 +126,8 @@ def undo_reconciliation(user_id: int, of_tx_id: int) -> dict:
                 or o["match_launch_id"] not in (None, x)):
             return {"ok": True, "changed": False}
         cls = classify_open_finance_launch(o["amount"], o["category"], o["description"])
+        if o["id"] in cash_internal_tx_ids(cur, user_id):  # par da Carteira (saque/depósito)
+            cls["is_internal_movement"] = True
         shadow_id, _ = _insert_of_shadow(cur, user_id, o, cls)
         if shadow_id is None:
             raise ReconciliationConflict("SHADOW_NOT_CREATED")
@@ -150,7 +157,7 @@ def list_reconciliations(user_id: int) -> list[dict]:
                            and o.imported_launch_id = l.id
                            and o.transaction_date >= %s))
                 order by o.transaction_date desc, o.id desc""",
-            (user_id, user_id, *merged_wallet_delta_params(user_id), list(FUSED_STATUSES),
+            (user_id, user_id, *actionable_pending_params(cur, user_id), list(FUSED_STATUSES),
              today_tz() - timedelta(days=60)),
         )
         rows = cur.fetchall()
@@ -167,7 +174,7 @@ def reconciliation_summary(user_id: int) -> dict:
     """`delta_se_confirmar`: quanto a Carteira exibida mudaria se o usuário
     confirmasse todas as pendências (o "pode ser R$ X" = exibido + isto)."""
     with get_conn() as conn, conn.cursor() as cur:
-        cur.execute(PENDING_RECONCILIATION_SQL, merged_wallet_delta_params(user_id))
+        cur.execute(PENDING_RECONCILIATION_SQL, actionable_pending_params(cur, user_id))
         r = cur.fetchone()
     return {"pending_count": int(r["pending_count"]),
             "delta_se_confirmar": r["delta_se_confirmar"],
@@ -184,10 +191,12 @@ _GUARD_SQL = (
 
 
 def wallet_guard_delta(cur, user_id: int) -> Decimal:
-    cur.execute(_GUARD_SQL, merged_wallet_delta_params(user_id) * 2)
+    cur.execute(_GUARD_SQL, (*merged_wallet_delta_params(user_id), *actionable_pending_params(cur, user_id)))
     return cur.fetchone()["d"]
 
 
 async def wallet_guard_delta_async(cur, user_id: int) -> Decimal:
-    await cur.execute(_GUARD_SQL, merged_wallet_delta_params(user_id) * 2)
+    await cur.execute(INTERNOS_SQL, (user_id, list(INTERNOS)))  # = `actionable_pending_params`
+    caixa = list(internos_de(await cur.fetchall()))
+    await cur.execute(_GUARD_SQL, (*merged_wallet_delta_params(user_id) * 2, caixa))
     return (await cur.fetchone())["d"]

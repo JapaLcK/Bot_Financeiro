@@ -260,6 +260,8 @@ async def account_reset_route(request: Request, payload: AccountResetPayload):
         )
     except Exception:  # noqa: BLE001 — atualização ao vivo é conveniência, nunca bloqueia o reset
         pass
+    from api.v2 import eventos
+    eventos.avisar(user_id, "tudo")
 
     await asyncio.to_thread(
         record_audit_event, user_id, AuditEvent.ACCOUNT_RESET, request=request,

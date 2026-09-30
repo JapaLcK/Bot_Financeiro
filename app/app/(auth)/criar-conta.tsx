@@ -99,7 +99,7 @@ export default function CriarConta() {
 
   return (
     <KeyboardAvoidingView behavior={Platform.OS === "ios" ? "padding" : undefined} style={{ flex: 1 }}>
-      <Screen>
+      <Screen sobCabecalho>
         <Stack.Screen options={{ gestureEnabled: !verificando }} />
         <View style={{ gap: espaco.xl, paddingTop: espaco.xxl }}>
           <Texto variante="titulo">Criar conta</Texto>
@@ -193,7 +193,7 @@ export default function CriarConta() {
                 <Texto variante="legenda" tom="inkMuted">
                   Já tem conta?
                 </Texto>
-                <Button rotulo="Entrar" variante="ghost" desativado={ocupado} onPress={() => router.back()} />
+                <Button rotulo="Entrar" variante="ghost" desativado={ocupado} onPress={() => router.replace("/entrar")} />
               </View>
             </>
           )}

@@ -808,3 +808,52 @@ def test_G12_selic_na_falha_devolve_so_o_prefixo_sem_buraco(monkeypatch, semeado
         conn.rollback()
     assert chamadas
     assert sorted(out) == esperado
+
+
+@pytest.mark.parametrize("semeia, resposta, rendeu, carimba, busca", [
+    (False, [G_HOJE], True, True, True),
+    (True, None, True, True, False),
+    (False, None, False, False, True),
+    (False, [], False, True, True),  # positivo: dia sem índice é descartado
+], ids=["publicado_no_bcb", "ja_no_cache", "rede_caiu", "sem_valores"])
+def test_G13_janela_de_um_dia_busca_o_indice_de_hoje(user_id, bcb, monkeypatch,
+                                                      semeia, resposta, rendeu, carimba, busca):
+    """Cursor no dia útil anterior: a janela é [hoje, hoje]. Com `end <= start` ela
+    voltava vazia sem ler o cache nem a rede, e a final carimbava sem o índice de hoje."""
+    monkeypatch.setattr(investments_db, "_sgs_answered", {})
+    if semeia:
+        bcb["semeia"](G_HOJE, G_HOJE)
+    bcb["resposta"] = resposta
+    inv = _investimento_com_lote(user_id, "cdb", "cdi", 1.0, G_CAUDA[1])
+    db.accrue_all_investments(user_id, today=G_HOJE)
+    saldo, _, _, cursor = _lotes(user_id, inv)[0]
+    assert (bcb["chamadas"] > 0) is busca
+    assert _approx(saldo, 1000 * 1.0005 if rendeu else 1000)
+    assert cursor == (G_HOJE if rendeu else G_CAUDA[1])
+    assert (_linha("investments", user_id, inv)["interest_frozen_at"] is not None) is carimba
+
+
+def test_G14_selic_janela_de_um_dia_vai_a_rede(monkeypatch):
+    """O mesmo `end < start` em `_get_sgs_daily_map`, que G13 não passa."""
+    chamadas = []
+    monkeypatch.setattr(investments_db, "_sgs_answered", {})
+    monkeypatch.setattr(investments_db, "_fetch_sgs_series_json",
+                        lambda *a: chamadas.append(a) or [_br(G_HOJE)])
+    with db.get_conn() as conn, conn.cursor() as cur:
+        cur.execute("delete from market_rates where code='SELIC_DAILY' and ref_date = %s", (G_HOJE,))
+        out = investments_db._get_sgs_daily_map(cur, "SELIC_DAILY", 11, G_HOJE, G_HOJE)
+        conn.rollback()
+    assert chamadas
+    assert out == {G_HOJE: 0.04}
+
+
+def test_G15_caixinha_janela_de_um_dia_rende_e_carimba(user_id, bcb, monkeypatch):
+    """A caixinha passa pelo mesmo `_growth_for_period`: janela [hoje, hoje] rende e carimba."""
+    monkeypatch.setattr(investments_db, "_sgs_answered", {})
+    bcb["resposta"] = [G_HOJE]
+    pid = _caixinha_com_lote(user_id, "viagem", legado=True, cursor=G_CAUDA[1])
+    db.accrue_all_pockets(user_id, today=G_HOJE)
+    assert bcb["chamadas"] > 0
+    row = _linha("pockets", user_id, pid)
+    assert _approx(row["balance"], 1000 * 1.0005)
+    assert row["interest_frozen_at"] is not None

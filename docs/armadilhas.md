@@ -21,8 +21,8 @@ O app iOS (Capacitor, `mobile/`) carrega `https://pigbankai.com` num WKWebView c
   | quantas | o que carregam | quem |
   |---|---|---|
   | 6 | `app-mode.css`/`app-mode.js` | `login`, `cadastro`, `home`, `dashboard`, `comandos-app`, `settings` — mais a `changelog`, que carrega **os dois** (`changelog.html:15` shim, `:16-17` app-mode) e está contada na linha de baixo |
-  | 16 | o shim `frontend/safe-area.js` | as estáticas: `index`, `precos`, `termos`, `privacy`, `completar-cadastro`, `comecar`, `suporte`, `agents`, `changelog`, `comandos`, `como-funciona`, `funcionalidades`, `blog-article`, `reset-password`, `whatsapp` — mais a `error`, que **não é rota**: é template servido pelo `error_page_response` (`frontend/routes/shared.py`) em quase toda URL que dá erro. Quase: as **4** exceções são `/webhook` e `/wa/webhook` (403 `text/plain` "forbidden", `adapters/whatsapp/wa_app.py:224,241,255`) e `/fonts/{name}` e `/brand/{path}` (404 de corpo vazio, `static_pages.py:536,559,564,567`) — endpoints de máquina e de subrecurso, que de propósito não gastam 1,4 KB de HTML |
-  | 5 | nada, de propósito | `admin-login`, `admin-dashboard`, `preview_agentes`, `quiz-resultado` (a /q: redireciona na hora para o /cadastro e não é alcançável pelo app), e o `ddf99f17-…` — o `_dash_mockup` saiu no PR #209, e o `tests/test_frontend_assets_e_rotas.py` agora reprova página sem rota |
+  | 19 | o shim `frontend/safe-area.js` | as estáticas: `index`, `precos`, `termos`, `privacy`, `completar-cadastro`, `comecar`, `suporte`, `agents`, `changelog`, `comandos`, `como-funciona`, `funcionalidades`, `blog`, `blog-article`, `contato`, `recuperar-senha`, `reset-password`, `whatsapp` — mais a `error`, que **não é rota**: é template servido pelo `error_page_response` (`frontend/routes/shared.py`) em quase toda URL que dá erro. Quase: as **4** exceções são `/webhook` e `/wa/webhook` (403 `text/plain` "forbidden", `adapters/whatsapp/wa_app.py:224,241,255`) e `/fonts/{name}` e `/brand/{path}` (404 de corpo vazio, `static_pages.py:536,559,564,567`) — endpoints de máquina e de subrecurso, que de propósito não gastam 1,4 KB de HTML |
+  | 6 | nada, de propósito | `admin-login`, `admin-dashboard`, `preview_agentes`, `quiz-resultado` (a /q: redireciona na hora para o /cadastro e não é alcançável pelo app), `painel` (o /painel, dashboard v2: o servidor manda o UA `PigBankApp` para o /app e o /app esconde o link no app, então o WebView não chega lá; a PWA do Safari chega, sem tratamento de área segura) e o `ddf99f17-…` — o `_dash_mockup` saiu no PR #209, e o `tests/test_frontend_assets_e_rotas.py` agora reprova página sem rota |
 
   As duas páginas geradas em Python (bullet seguinte) também carregam o shim.
   `env(safe-area-inset-*)` aparece em **seis** arquivos de `frontend/`
@@ -367,8 +367,9 @@ fixo de toda mudança de layout.
 - **Isolamento por usuário é regra dura.** A formulação da regra mora no §0 do
   `CLAUDE.md`, que é auto-carregado — instrução de segurança não pode depender de
   alguém abrir este arquivo. Aqui fica só o lembrete de que ela vale em todo `db/`.
-- **`launch.py` sobe dois processos**: o uvicorn (que atende o `$PORT` do Railway) e o
-  `bot.py` do Discord. Um `web` no Procfile, dois processos filhos.
+- **`launch.py` vira o uvicorn** (`os.execv`, que atende o `$PORT` do Railway): um `web`
+  no Procfile, um processo, e o SIGTERM chega direto ao uvicorn. O `bot.py` do Discord
+  saiu dele no PR 5a do dashboard v2 e não roda mais.
 - **Tarefas de fundo sobem no startup do app** quando `RUN_BACKGROUND_TASKS != "0"`
   (agendadores de investimento, Open Finance, engajamento, cobrança recorrente, poda
   das tabelas de token/challenge…). Dois arquivos põem o `0`, e por `setdefault`

@@ -207,6 +207,14 @@ STRIPE_PRICE_ID_ESSENCIAL_MENSAL = os.getenv("STRIPE_PRICE_ID_ESSENCIAL_MENSAL",
 STRIPE_PRICE_ID_ESSENCIAL_ANUAL  = os.getenv("STRIPE_PRICE_ID_ESSENCIAL_ANUAL", "")
 STRIPE_PRICE_ID_PROMAX_MENSAL = os.getenv("STRIPE_PRICE_ID_PROMAX_MENSAL", "")
 STRIPE_PRICE_ID_PROMAX_ANUAL  = os.getenv("STRIPE_PRICE_ID_PROMAX_ANUAL", "")
+# Checkout embutido da /assinar: a chave publicável vai ao Stripe.js no navegador
+# (é pública por natureza). O e-book é item OPCIONAL da /assinar, não plano —
+# não entra em _plan_interval_for_price. NÃO setar em produção antes do PR 3
+# (entrega do e-book): sem ele a venda sai sem entrega. O e-book só é oferecido
+# com as DUAS envs: preço sem URL venderia algo que o webhook não tem como entregar.
+STRIPE_PUBLISHABLE_KEY = os.getenv("STRIPE_PUBLISHABLE_KEY", "")
+STRIPE_PRICE_ID_EBOOK  = os.getenv("STRIPE_PRICE_ID_EBOOK", "")
+EBOOK_URL = os.getenv("EBOOK_URL", "")
 
 
 def _plan_interval_for_price(price_id: str | None) -> tuple[str | None, str | None]:
@@ -2222,14 +2230,17 @@ _SECURITY_HEADERS = {
         "https://cdnjs.cloudflare.com https://cdn.pluggy.ai https://cdn.jsdelivr.net "
         "https://static.cloudflareinsights.com https://connect.facebook.net "
         "https://www.googletagmanager.com https://www.clarity.ms https://scripts.clarity.ms "
-        "https://app.trysoro.com; "
+        "https://app.trysoro.com "
+        "https://js.stripe.com https://*.js.stripe.com https://checkout.stripe.com; "
         "style-src 'self' 'unsafe-inline' "
         "https://cdnjs.cloudflare.com https://cdn.jsdelivr.net; "
         "img-src 'self' data: blob: https:; "
         "font-src 'self' data: "
         "https://cdnjs.cloudflare.com https://cdn.jsdelivr.net; "
         "connect-src 'self' https: wss:; "
-        "frame-src 'self' https://cdn.pluggy.ai https://connect.pluggy.ai; "
+        "frame-src 'self' https://cdn.pluggy.ai https://connect.pluggy.ai "
+        "https://js.stripe.com https://*.js.stripe.com https://hooks.stripe.com "
+        "https://checkout.stripe.com; "
         "frame-ancestors 'none'; "
         "base-uri 'self'; "
         "form-action 'self'; "
@@ -3238,6 +3249,59 @@ async def _apply_quiz_attribution(request: Request, response: Response, user_id:
         response.delete_cookie(QUIZ_COOKIE, secure=COOKIE_SECURE, samesite="lax")
 
 
+async def _sessao_de_conta_nova(
+    request: Request,
+    response: Response,
+    background_tasks: BackgroundTasks,
+    *,
+    user_id: int,
+    email: str,
+    origem_url: str,
+) -> dict[str, str | int]:
+    """Conta acabou de nascer: sessão, as três atribuições e o CAPI
+    CompleteRegistration. Chamadores: `/auth/verify-email`,
+    `_completar_cadastro_social` (Google/Apple) e `/auth/quiz/conta`
+    (`frontend/routes/quiz_signup.py`). `response` tem de ser o da rota: as
+    atribuições apagam os cookies de origem nele. Devolve o que vai no CORPO
+    (ver `_entrega_sessao`)."""
+    token, jti, refresh = _issue_session_token(user_id, email, request)
+    credenciais = _entrega_sessao(
+        request, response, user_id=user_id, access=token, jti=jti, refresh=refresh
+    )
+
+    await _apply_referral_attribution(request, response, user_id)
+    await _apply_prospect_attribution(request, response, user_id)
+    await _apply_quiz_attribution(request, response, user_id)
+
+    # Meta Conversions API — CompleteRegistration (conta criada). Agendado como
+    # background task (roda DEPOIS da resposta) pra um Meta lento/fora nunca
+    # atrasar o cadastro. event_id signup_<uid> casa com o pixel da página de
+    # origem (`origem_url`) pro Meta deduplicar.
+    try:
+        from core.services.meta_capi import (
+            capi_configured,
+            registration_event_id,
+            sanitize_fb_cookie,
+            send_event,
+        )
+        if capi_configured():
+            background_tasks.add_task(
+                send_event,
+                event_name="CompleteRegistration",
+                event_id=registration_event_id(user_id),
+                event_time=int(datetime.now(timezone.utc).timestamp()),
+                email=email,
+                # Mesma classe do Purchase: sem os cookies do pixel, o cadastro
+                # chega ao Meta sem o clique que o originou.
+                fbp=sanitize_fb_cookie(request.cookies.get("_fbp")),
+                fbc=sanitize_fb_cookie(request.cookies.get("_fbc")),
+                event_source_url=origem_url,
+            )
+    except Exception as exc:
+        print(f"[auth] meta capi registration falhou user={user_id}: {type(exc).__name__}")
+    return credenciais
+
+
 @app.post("/auth/register")
 @limiter.limit("3/hour")
 async def auth_register(request: Request, body: RegisterBody):
@@ -3268,8 +3332,8 @@ async def auth_register(request: Request, body: RegisterBody):
         raise HTTPException(status_code=400, detail=detalhe_seguro(e))
 
     try:
-        code = create_email_verification(
-            body.email, body.password, body.phone, display_name=name,
+        code = await asyncio.to_thread(
+            create_email_verification, body.email, body.password, body.phone, display_name=name,
         )
     except AccountAlreadyExistsError as exc:
         # Anti-enumeração: e-mail/telefone já existe. NÃO revela isso — responde
@@ -3288,7 +3352,7 @@ async def auth_register(request: Request, body: RegisterBody):
     except ValueError as e:
         raise HTTPException(status_code=409, detail=detalhe_seguro(e))
 
-    sent = send_verification_email(body.email.strip().lower(), code)
+    sent = await asyncio.to_thread(send_verification_email, body.email.strip().lower(), code)
     if not sent:
         raise HTTPException(status_code=500, detail="Não foi possível enviar o e-mail de verificação. Tente novamente.")
 
@@ -3312,48 +3376,18 @@ async def auth_verify_email(request: Request, response: Response, body: VerifyEm
 
     from frontend.routes.shared import signup_source_from_request
     try:
-        result = confirm_email_verification(
-            body.email, body.code, source=signup_source_from_request(request)
+        result = await asyncio.to_thread(
+            confirm_email_verification, body.email, body.code, source=signup_source_from_request(request)
         )
     except ValueError as e:
         raise HTTPException(status_code=400, detail=detalhe_seguro(e))
 
     user_id    = result["user_id"]
     link_code  = result["link_code"]
-    token, jti, refresh = _issue_session_token(user_id, body.email.strip().lower(), request)
-    credenciais = _entrega_sessao(
-        request, response, user_id=user_id, access=token, jti=jti, refresh=refresh
+    credenciais = await _sessao_de_conta_nova(
+        request, response, background_tasks, user_id=int(user_id),
+        email=body.email.strip().lower(), origem_url=f"{DASHBOARD_URL}/cadastro",
     )
-
-    await _apply_referral_attribution(request, response, int(user_id))
-    await _apply_prospect_attribution(request, response, int(user_id))
-    await _apply_quiz_attribution(request, response, int(user_id))
-
-    # Meta Conversions API — CompleteRegistration (conta criada). Agendado como
-    # background task (roda DEPOIS da resposta) pra um Meta lento/fora nunca
-    # atrasar o cadastro. event_id signup_<uid> casa com o pixel do /cadastro.
-    try:
-        from core.services.meta_capi import (
-            capi_configured,
-            registration_event_id,
-            sanitize_fb_cookie,
-            send_event,
-        )
-        if capi_configured():
-            background_tasks.add_task(
-                send_event,
-                event_name="CompleteRegistration",
-                event_id=registration_event_id(user_id),
-                event_time=int(datetime.now(timezone.utc).timestamp()),
-                email=body.email.strip().lower(),
-                # Mesma classe do Purchase: sem os cookies do pixel, o cadastro
-                # chega ao Meta sem o clique que o originou.
-                fbp=sanitize_fb_cookie(request.cookies.get("_fbp")),
-                fbc=sanitize_fb_cookie(request.cookies.get("_fbc")),
-                event_source_url=f"{DASHBOARD_URL}/cadastro",
-            )
-    except Exception as exc:
-        print(f"[auth] meta capi registration falhou user={user_id}: {exc}")
 
     wa_link = _build_whatsapp_onboarding_link(user_id)
 
@@ -3681,13 +3715,14 @@ async def auth_forgot_password(request: Request, body: EmailBody):
 
     await _check_auth_rate_limits("forgot-password", request, body.email)
 
-    token = create_password_reset_token(body.email)
+    token = await asyncio.to_thread(create_password_reset_token, body.email)
     if token:
         reset_url = f"{DASHBOARD_URL}/reset-password#token={token}"
         # a consulta fica DENTRO do if: o ramo "e-mail não existe" continua
         # instrução por instrução igual, e a resposta abaixo nunca muda
-        send_password_reset_email(
-            body.email.strip().lower(), reset_url, email_has_password(body.email)
+        has_password = await asyncio.to_thread(email_has_password, body.email)
+        await asyncio.to_thread(
+            send_password_reset_email, body.email.strip().lower(), reset_url, has_password
         )
 
     # sempre retorna 200 — não revela se o e-mail existe ou não
@@ -3784,6 +3819,7 @@ async def auth_me(user_id: int = Depends(_get_current_user)):
     from core.services import billing_copy
     of_ui_enabled = _open_finance_ui_enabled(user_id, user_dict.get("email"))
     from core.services.plan_service import agents_ui_enabled as _agents_ui_enabled
+    from core.services.plan_service import dashboard_v2_enabled
     agents_ui = _agents_ui_enabled(user_id, user_dict.get("email"))
     # Planos v2: tier efetivo da escada + estado do trial (30d via Stripe).
     plan_tier = await asyncio.to_thread(get_plan_tier, user_id)
@@ -3834,6 +3870,9 @@ async def auth_me(user_id: int = Depends(_get_current_user)):
         "history_earliest_date": earliest_history.isoformat() if earliest_history else None,
         "of_ui_enabled": of_ui_enabled,
         "agents_ui_enabled": agents_ui,
+        # A chave pura: o /app esconde o link no app (window.PB_IN_APP), e o
+        # /painel manda o app para o /app no servidor.
+        "dashboard_v2_enabled": dashboard_v2_enabled(user_id, user_dict.get("email")),
     }
 
 
@@ -4734,38 +4773,10 @@ async def _completar_cadastro_social(
     user_id = int(result["user_id"])
     email = result["email"]
 
-    jwt_token, jti, refresh = _issue_session_token(user_id, email, request)
-    credenciais = _entrega_sessao(
-        request, response, user_id=user_id, access=jwt_token, jti=jti, refresh=refresh
+    credenciais = await _sessao_de_conta_nova(
+        request, response, background_tasks, user_id=user_id,
+        email=email, origem_url=f"{DASHBOARD_URL}/completar-cadastro",
     )
-
-    await _apply_referral_attribution(request, response, user_id)
-    await _apply_prospect_attribution(request, response, user_id)
-    await _apply_quiz_attribution(request, response, user_id)
-
-    # Meta Conversions API — CompleteRegistration (conta criada via Google/Apple).
-    # Background task (roda após a resposta); event_id signup_<uid> casa com o
-    # pixel do /completar-cadastro pro Meta deduplicar.
-    try:
-        from core.services.meta_capi import (
-            capi_configured,
-            registration_event_id,
-            sanitize_fb_cookie,
-            send_event,
-        )
-        if capi_configured():
-            background_tasks.add_task(
-                send_event,
-                event_name="CompleteRegistration",
-                event_id=registration_event_id(user_id),
-                event_time=int(datetime.now(timezone.utc).timestamp()),
-                email=email,
-                fbp=sanitize_fb_cookie(request.cookies.get("_fbp")),
-                fbc=sanitize_fb_cookie(request.cookies.get("_fbc")),
-                event_source_url=f"{DASHBOARD_URL}/completar-cadastro",
-            )
-    except Exception as exc:
-        print(f"[auth] meta capi registration ({provider}) falhou user={user_id}: {exc}")
 
     await log_auth_login_event(
         email,
@@ -4901,6 +4912,8 @@ class CreateCheckoutBody(BaseModel):
     # com `plan: str`, dá 422 na ausente: anotado em
     # `tests/test_vocabulario_de_plano.py`.
     plan: str = ""             # "essencial" | "plus" | "pro"
+    embutido: bool = False     # True = Checkout embutido (client_secret), só a /assinar usa
+    origem: str = "precos"     # "precos" | "assinar"
 
 
 def _resolve_price_id(plan: str, interval: str) -> str:
@@ -4942,19 +4955,31 @@ async def _billing_user_lock(user_id: int):
                 await cur.execute("select pg_advisory_unlock(hashtext(%s))", (lock_key,))
 
 
-def _checkout_session_matches(session, user_id: int, plan: str, interval: str, price_id: str) -> bool:
+def _checkout_session_matches(session, user_id: int, plan: str, interval: str, price_id: str,
+                              origem: str = "precos", embutido: bool = False) -> bool:
     metadata = _sg(session, "metadata", {}) or {}
+    # Sem `origem` no metadata = sessão anterior a este campo, e toda sessão
+    # daquela época nasceu na /precos. O modo sai de `url` (hospedado) ou
+    # `client_secret` (embutido): cada um só existe num ui_mode. O embutido
+    # exige `td` numérico porque a resposta reaproveitada devolve o trial DA
+    # sessão, não o recalculado.
+    if embutido:
+        modo_ok = bool(_sg(session, "client_secret")) and str(_sg(metadata, "td", "")).isdecimal()
+    else:
+        modo_ok = bool(_sg(session, "url"))
     return (
         str(_sg(metadata, "finbot_user_id", "")) == str(user_id)
         and _sg(metadata, "plan") == plan
         and _sg(metadata, "interval") == interval
         and _sg(metadata, "price_id") == price_id
-        and bool(_sg(session, "url"))
+        and (_sg(metadata, "origem") or "precos") == origem
+        and modo_ok
     )
 
 
 async def _billing_checkout_for_user(stripe_mod, user_id: int, plan: str, interval: str,
-                                     price_id: str, rastreio: dict[str, str] | None = None):
+                                     price_id: str, rastreio: dict[str, str] | None = None,
+                                     origem: str = "precos", embutido: bool = False):
     """Cria ou reutiliza um checkout. Deve rodar sob ``_billing_user_lock``.
 
     `rastreio` são os identificadores de anúncio já validados (`ga_client_id`,
@@ -5045,7 +5070,7 @@ async def _billing_checkout_for_user(stripe_mod, user_id: int, plan: str, interv
 
     reusable = next(
         (s for s in open_sessions if _checkout_session_matches(
-            s, user_id, plan, interval, price_id)),
+            s, user_id, plan, interval, price_id, origem, embutido)),
         None,
     )
     for open_session in open_sessions:
@@ -5069,6 +5094,15 @@ async def _billing_checkout_for_user(stripe_mod, user_id: int, plan: str, interv
         # session_id da sessão REAPROVEITADA: sem ele, o started iria com NULL
         # e a sessão nunca correlacionaria a conclusão no funil (só entraria
         # people, não sessions). Mesma chave que o caminho de sessão nova.
+        if embutido:
+            # trial_days da SESSÃO (o `td` com que ela nasceu), nunca o
+            # recalculado: é o que ela vai cobrar, e o que a tela tem de dizer.
+            return {
+                "client_secret": _sg(reusable, "client_secret"),
+                "trial_days": int(_sg(_sg(reusable, "metadata"), "td")),
+                "interval": interval, "plan": plan,
+                "session_id": _sg(reusable, "id"),
+            }
         return {
             "checkout_url": _sg(reusable, "url"), "interval": interval, "plan": plan,
             "session_id": _sg(reusable, "id"),
@@ -5126,43 +5160,72 @@ async def _billing_checkout_for_user(stripe_mod, user_id: int, plan: str, interv
             "interval": interval,
             "plan": plan,
             "price_id": price_id,
+            "origem": origem,
+            "td": str(trial_days),
         }
         metadata.update(rastreio or {})
+        # Foto do preço do e-book no nascimento da sessão: o webhook (PR 3)
+        # identifica o e-book por ela, não pela env do momento em que chega.
+        oferece_ebook = origem == "assinar" and bool(STRIPE_PRICE_ID_EBOOK and EBOOK_URL)
+        if oferece_ebook:
+            metadata["ebook_price"] = STRIPE_PRICE_ID_EBOOK
         subscription_data = {"metadata": metadata.copy()}
         if trial_days > 0:
             subscription_data["trial_period_days"] = trial_days
-        return stripe_mod.checkout.Session.create(
+        # `td` = dias de trial concedidos NESTA sessão. `pl` = plano escolhido.
+        # `ia` = cota mensal de mensagens do Piggy nesse plano. A tela de
+        # confirmação usa os três na cópia. Sem `td` o front chutava 30, que
+        # quebra se trial_days_total()/PRO_TRIAL_DAYS mudar; sem `pl` ele
+        # parabenizava TODO mundo pelo Plus, inclusive quem comprou Essencial
+        # ou Pro; sem `ia` ele prometia IA "sem limite de mensagens", que o
+        # backend não entrega. Tudo isso tem que vir na URL e não do
+        # /auth/me porque o modal abre ~450ms depois da volta, quando o
+        # webhook ainda pode não ter caído e o plano gravado ainda ser o antigo.
+        success_url = (
+            f"{DASHBOARD_URL}/home?upgrade=success&sid={{CHECKOUT_SESSION_ID}}"
+            f"&ev={'trial' if trial_days > 0 else 'purchase'}"
+            f"&td={trial_days}&pl={plan}&ia={ia_quota}"
+        )
+        kwargs = dict(
             customer=cust_id,
             payment_method_types=["card"],
             line_items=[{"price": price_id, "quantity": 1}],
             mode="subscription",
             locale="pt-BR",
             allow_promotion_codes=True,
-            # `td` = dias de trial concedidos NESTA sessão. `pl` = plano escolhido.
-            # `ia` = cota mensal de mensagens do Piggy nesse plano. A tela de
-            # confirmação usa os três na cópia. Sem `td` o front chutava 30, que
-            # quebra se trial_days_total()/PRO_TRIAL_DAYS mudar; sem `pl` ele
-            # parabenizava TODO mundo pelo Plus, inclusive quem comprou Essencial
-            # ou Pro; sem `ia` ele prometia IA "sem limite de mensagens", que o
-            # backend não entrega. Tudo isso tem que vir na URL e não do
-            # /auth/me porque o modal abre ~450ms depois da volta, quando o
-            # webhook ainda pode não ter caído e o plano gravado ainda ser o antigo.
-            success_url=(
-                f"{DASHBOARD_URL}/home?upgrade=success&sid={{CHECKOUT_SESSION_ID}}"
-                f"&ev={'trial' if trial_days > 0 else 'purchase'}"
-                f"&td={trial_days}&pl={plan}&ia={ia_quota}"
-            ),
-            # Abandonou o checkout → volta pra /precos escolher um plano PAGO
-            # (o Grátis não é mais escolha). O escolha=1 fica como rastro de
-            # origem: a copy "Escolha um plano pra continuar" da precos.html é
-            # decidida pelo needs_plan_selection do /auth/me (que segue true,
-            # pois o gate não fechou), não por este marcador — ele se perde num
-            # clique no "Planos" do próprio nav. Não anexo upgrade=cancelled
-            # porque /precos não consome esse marcador (o toast vive só na /home).
-            cancel_url=f"{DASHBOARD_URL}/precos?escolha=1",
             metadata=metadata,
             subscription_data=subscription_data,
         )
+        if origem == "assinar":
+            # BRL fixo (sem Adaptive Pricing, que mostrou USD) e o e-book
+            # opcional — só na /assinar; a /precos segue com os kwargs de antes.
+            kwargs["adaptive_pricing"] = {"enabled": False}
+            if oferece_ebook:
+                kwargs["optional_items"] = [{"price": STRIPE_PRICE_ID_EBOOK, "quantity": 1}]
+        if origem == "assinar" or embutido:
+            # 1 h na /assinar (os dois modos) e em todo embutido: sem isso o
+            # Stripe usa 24 h, e o hospedado deixaria aberta por 24 h a cobrança
+            # dupla (Pix numa aba, cartão na outra). A /precos segue sem.
+            kwargs["expires_at"] = int(datetime.now(timezone.utc).timestamp()) + 3600
+        if embutido:
+            # `embedded_page` recusa success_url/cancel_url: a volta é o return_url.
+            kwargs["ui_mode"] = "embedded_page"
+            kwargs["return_url"] = success_url
+        else:
+            kwargs["success_url"] = success_url
+            # Abandonou o checkout → volta pra página de onde veio. Na /precos,
+            # pra escolher um plano PAGO (o Grátis não é mais escolha). O
+            # escolha=1 fica como rastro de origem: a copy "Escolha um plano pra
+            # continuar" da precos.html é decidida pelo needs_plan_selection do
+            # /auth/me (que segue true, pois o gate não fechou), não por este
+            # marcador — ele se perde num clique no "Planos" do próprio nav. Não
+            # anexo upgrade=cancelled porque /precos não consome esse marcador
+            # (o toast vive só na /home). `plan`/`interval` já foram validados na rota.
+            kwargs["cancel_url"] = (
+                f"{DASHBOARD_URL}/assinar?plano={plan}&ciclo={interval}" if origem == "assinar"
+                else f"{DASHBOARD_URL}/precos?escolha=1"
+            )
+        return stripe_mod.checkout.Session.create(**kwargs)
 
     try:
         session = await asyncio.to_thread(_new_session, customer_id)
@@ -5177,6 +5240,12 @@ async def _billing_checkout_for_user(stripe_mod, user_id: int, plan: str, interv
         logging.getLogger(__name__).error("billing_checkout_stripe_error: %s", exc)
         raise HTTPException(status_code=502, detail="Erro no Stripe ao iniciar o checkout.")
 
+    if embutido:
+        return {
+            "client_secret": session.client_secret, "trial_days": trial_days,
+            "interval": interval, "plan": plan,
+            "session_id": getattr(session, "id", None),
+        }
     return {
         "checkout_url": session.url, "interval": interval, "plan": plan,
         "session_id": getattr(session, "id", None),
@@ -5215,8 +5284,14 @@ async def billing_create_checkout(
     """Cria a sessão de checkout no Stripe para o plano escolhido.
 
     Body: {"plan": "essencial" | "plus" | "pro" (obrigatório),
-           "interval": "monthly" | "annual" (default monthly)}.
-    Requer: STRIPE_SECRET_KEY + price ID do interval escolhido.
+           "interval": "monthly" | "annual" (default monthly),
+           "origem": "precos" | "assinar" (default precos),
+           "embutido": bool (default false)}.
+    Requer: STRIPE_SECRET_KEY + price ID do interval escolhido; o embutido
+    também STRIPE_PUBLISHABLE_KEY.
+
+    Resposta hospedada: {checkout_url, interval, plan}. Embutida:
+    {client_secret, publishable_key, trial_days, interval, plan}.
 
     `plan` é obrigatório NA ROTA e opcional no modelo. Corpo obrigatório
     (sem `| None`) fecharia no Pydantic e foi descartado por UM motivo: troca o
@@ -5252,8 +5327,15 @@ async def billing_create_checkout(
     if plan not in TIER_TO_STORED_PLAN:
         raise HTTPException(status_code=400, detail="plan inválido (use 'essencial', 'plus' ou 'pro').")
 
+    # Match exato: só o nosso JS manda o campo.
+    origem = payload.origem
+    if origem not in ("precos", "assinar"):
+        raise HTTPException(status_code=400, detail="origem inválida (use 'precos' ou 'assinar').")
+
     price_id = _resolve_price_id(plan, interval)
-    if not STRIPE_SECRET_KEY or not price_id:
+    # O embutido sem chave publicável é 503 AQUI, antes do lock e de qualquer
+    # customer/sessão no Stripe: sessão criada sem como abri-la é lixo aberto.
+    if not STRIPE_SECRET_KEY or not price_id or (payload.embutido and not STRIPE_PUBLISHABLE_KEY):
         raise HTTPException(status_code=503, detail="Pagamentos ainda não configurados.")
 
     # Identificadores de anúncio, todos lidos dos COOKIES que o navegador já
@@ -5279,7 +5361,9 @@ async def billing_create_checkout(
     try:
         async with _billing_user_lock(user_id):
             result = await _billing_checkout_for_user(
-                stripe, user_id, plan, interval, price_id, rastreio)
+                stripe, user_id, plan, interval, price_id, rastreio, origem, payload.embutido)
+        if payload.embutido:
+            result["publishable_key"] = STRIPE_PUBLISHABLE_KEY
         # Funil de checkout: registra a ABERTURA na tabela dedicada, com o
         # session_id do Stripe (par do record_checkout_completed no webhook —
         # correlaciona a mesma tentativa). Só depois da sessão nascer de fato.
@@ -6061,6 +6145,17 @@ async def billing_webhook(request: Request, background_tasks: BackgroundTasks):
             # assinante de PigBank+, que é só o Plus (#351).
             from core.services.email_service import send_pro_welcome_email
             await _fire_email(user_id, send_pro_welcome_email, plan_value, expires_dt)
+            # E-mail pessoal do fundador, agendado para 3h depois; só na primeira
+            # assinatura da conta. `send_founder_email_once` não levanta — o
+            # try aqui cobre o `_user_email`.
+            try:
+                from core.services.email_service import send_founder_email_once
+                _dest = await _user_email(user_id)
+                if _dest:
+                    await asyncio.to_thread(send_founder_email_once, int(user_id),
+                                            _dest, "stripe", str(sub_id))
+            except Exception as exc:
+                print(f"[billing] email do fundador falhou user={user_id}: {exc}")
             # Notificação admin (Slack/Discord webhook)
             try:
                 from core.services.admin_notify import notify_new_pro

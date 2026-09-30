@@ -11,7 +11,13 @@ import { espaco } from "@/ui/tokens";
  * antes era aceito pelo tipo e descartado em silêncio — união discriminada
  * torna isso erro de compilação, não comportamento surpresa em runtime.
  */
-type Props =
+type Props = {
+  /**
+   * Tela sob cabeçalho nativo (`headerShown: true`): o cabeçalho já ocupa a
+   * área segura de cima, então somar `insets.top` de novo dobrava a margem.
+   */
+  sobCabecalho?: boolean;
+} & (
   | {
       children: ReactNode;
       rolar?: true;
@@ -22,19 +28,21 @@ type Props =
       children: ReactNode;
       /** Quando falso, a tela não rola (formulário curto que já cabe). */
       rolar: false;
-    };
+    }
+);
 
 /**
  * Casca de tela: fundo do tema + área segura nos QUATRO lados (top/bottom
- * viram padding sempre; left/right somam ao respiro horizontal — paisagem
- * com notch lateral tem os dois diferentes de zero, e ignorá-los cortava
+ * viram padding — o top não, com `sobCabecalho`; left/right somam ao respiro
+ * horizontal — paisagem com notch lateral tem os dois diferentes de zero, e ignorá-los cortava
  * conteúdo sob a área segura).
  */
 export function Screen(props: Props) {
   const { cores } = useTema();
   const insets = useSafeAreaInsets();
+  const topo = props.sobCabecalho ? 0 : insets.top;
   const preenchimento = {
-    paddingTop: insets.top,
+    paddingTop: topo,
     paddingBottom: insets.bottom,
     paddingLeft: espaco.lg + insets.left,
     paddingRight: espaco.lg + insets.right,
@@ -74,7 +82,7 @@ export function Screen(props: Props) {
             // um dos sistemas cai no indicador padrão da plataforma.
             tintColor={cores.brand}
             colors={[cores.brand]}
-            progressViewOffset={insets.top}
+            progressViewOffset={topo}
           />
         ) : undefined
       }

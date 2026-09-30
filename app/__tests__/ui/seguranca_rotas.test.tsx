@@ -100,10 +100,10 @@ beforeEach(() => {
 });
 
 describe("Segurança — rotas", () => {
-  it("sem sessão, /seguranca cai em /entrar", async () => {
+  it("sem sessão, /seguranca cai em /boas-vindas", async () => {
     servidorMfa({ ligado: false });
     renderRouter("./app", { initialUrl: "/seguranca" });
-    await waitFor(() => expect(screen).toHavePathname("/entrar"));
+    await waitFor(() => expect(screen).toHavePathname("/boas-vindas"));
   });
 
   it("com sessão, o botão Segurança do Início leva a /seguranca, que mostra Ativar", async () => {

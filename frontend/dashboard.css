@@ -1000,6 +1000,8 @@ header h1 { font-size:1.1rem; font-weight:650; letter-spacing:-.02em; }
   cursor:pointer;
   transition:background .2s var(--ease), color .2s var(--ease);
 }
+/* O `display:flex` acima anula o `hidden` do navegador: o link do /painel nasce oculto. */
+.user-menu-link[hidden] { display:none; }
 .user-menu-link:hover {
   background:rgba(255,255,255,.08);
   color:var(--text);

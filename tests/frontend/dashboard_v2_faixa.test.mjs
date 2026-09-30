@@ -6,14 +6,10 @@
 //   · 320 e 390 sem rolagem para o lado.
 import { test, before, after } from "node:test";
 import assert from "node:assert/strict";
-import { execSync } from "node:child_process";
-import { fileURLToPath } from "node:url";
-import { dirname, join } from "node:path";
 import { chromium } from "playwright";
+import { PAINEL, exigeArtefatoEmDia, servir } from "./_painel.mjs";
 import { BY_PROFILE, COMMON, pick } from "../../webapp/src/dashboard/lib/prompts.js";
 
-const ROOT = join(dirname(fileURLToPath(import.meta.url)), "..", "..");
-const ORIGIN = "http://127.0.0.1:1"; // fictícia: a rota atende da raiz do repositório
 const PERFIS = ["padrao", "economizar", "investir", "controlar", "dividas", "autonomo"];
 
 test("sorteio: respeita o peso e não repete a última", () => {
@@ -34,26 +30,21 @@ test("frases: chaves únicas, todo perfil tem 2 ou 3, toda pergunta tem convite"
 
 let browser;
 before(async () => {
-  execSync("npm --prefix webapp run build:dashboard", { cwd: ROOT, stdio: "pipe" });
+  exigeArtefatoEmDia();
   browser = await chromium.launch();
 });
 after(() => browser?.close());
 
 // `sorte` fixa o Math.random (0 = sempre a primeira opção do sorteio).
-async function abrir({ width = 1440, perfil = "padrao", qs = "", sorte = null } = {}) {
+async function abrir({ width = 1440, perfil = "padrao", plano = "pro", sorte = null } = {}) {
   const ctx = await browser.newContext({ viewport: { width, height: 900 }, reducedMotion: "reduce" });
-  await ctx.route("**/*", (r) => {
-    const url = new URL(r.request().url());
-    if (url.origin !== ORIGIN) return r.abort();
-    const path = decodeURIComponent(url.pathname).replace(/\/$/, "/index.html");
-    return r.fulfill({ path: join(ROOT, path) }).catch(() => r.fulfill({ status: 404, body: "" }));
-  });
+  await servir(ctx, undefined, { plano });
   await ctx.addInitScript((p) => localStorage.setItem("pigbank.dashboard.profile.v1", JSON.stringify(p)), perfil);
   if (sorte !== null) await ctx.addInitScript((v) => { Math.random = () => v; }, sorte);
   const page = await ctx.newPage();
   const erros = [];
   page.on("pageerror", (e) => erros.push(e.message));
-  await page.goto(`${ORIGIN}/dashboard-v2/${qs}#/`);
+  await page.goto(`${PAINEL}#/`);
   await page.locator(".piggy-band").waitFor();
   return { ctx, page, erros };
 }
@@ -99,7 +90,7 @@ test("Essencial: a faixa abre a conversa e nunca sorteia um insight", async () =
   const sorteio = async (plano) => {
     const vistas = [];
     for (const sorte of SORTES) {
-      const { ctx, page } = await abrir({ perfil: "investir", qs: `?plano=${plano}`, sorte });
+      const { ctx, page } = await abrir({ perfil: "investir", plano, sorte });
       vistas.push([await faixa(page), await page.locator(".piggy-band").evaluate((b) => b.tagName)]);
       await ctx.close();
     }
@@ -107,7 +98,7 @@ test("Essencial: a faixa abre a conversa e nunca sorteia um insight", async () =
   };
   const essencial = await sorteio("essencial");
   const plus = await sorteio("plus");
-  const { ctx, page, erros } = await abrir({ perfil: "investir", qs: "?plano=essencial", sorte: 0 });
+  const { ctx, page, erros } = await abrir({ perfil: "investir", plano: "essencial", sorte: 0 });
   await page.locator(".piggy-band").click();
   await page.locator(".chat > .msg-piggy .msg-text").first().waitFor();
   const hash = await page.evaluate(() => location.hash);

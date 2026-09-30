@@ -11,35 +11,25 @@
 //     core/services/plan_limits.py, `ai_conversational_enabled`).
 import { test, before, after } from "node:test";
 import assert from "node:assert/strict";
-import { execSync } from "node:child_process";
-import { fileURLToPath } from "node:url";
-import { dirname, join } from "node:path";
 import { chromium } from "playwright";
-
-const ROOT = join(dirname(fileURLToPath(import.meta.url)), "..", "..");
-const ORIGIN = "http://127.0.0.1:1"; // fictícia: a rota atende da raiz do repositório
+import { PAINEL, exigeArtefatoEmDia, servir } from "./_painel.mjs";
 
 let browser;
 before(async () => {
-  execSync("npm --prefix webapp run build:dashboard", { cwd: ROOT, stdio: "pipe" });
+  exigeArtefatoEmDia();
   browser = await chromium.launch();
 });
 after(() => browser?.close());
 
-async function abrir({ width = 1440, hash = "#/", perfil = "padrao", qs = "", sorte = null } = {}) {
+async function abrir({ width = 1440, hash = "#/", perfil = "padrao", plano = "pro", sorte = null } = {}) {
   const ctx = await browser.newContext({ viewport: { width, height: 900 }, reducedMotion: "reduce" });
-  await ctx.route("**/*", (r) => {
-    const url = new URL(r.request().url());
-    if (url.origin !== ORIGIN) return r.abort();
-    const path = decodeURIComponent(url.pathname).replace(/\/$/, "/index.html");
-    return r.fulfill({ path: join(ROOT, path) }).catch(() => r.fulfill({ status: 404, body: "" }));
-  });
+  await servir(ctx, undefined, { plano });
   await ctx.addInitScript((p) => localStorage.setItem("pigbank.dashboard.profile.v1", JSON.stringify(p)), perfil);
   if (sorte !== null) await ctx.addInitScript((v) => { Math.random = () => v; }, sorte);
   const page = await ctx.newPage();
   const erros = [];
   page.on("pageerror", (e) => erros.push(e.message));
-  await page.goto(`${ORIGIN}/dashboard-v2/${qs}${hash}`);
+  await page.goto(`${PAINEL}${hash}`);
   await page.locator("#page-title").waitFor();
   return { ctx, page, erros };
 }
@@ -181,7 +171,7 @@ test("estado vazio: as sugestões do perfil vêm primeiro e respondem", async ()
 });
 
 test("Essencial: conversa normal, a barra pergunta e o Piggy responde", async () => {
-  const { ctx, page, erros } = await abrir({ hash: "#/gastos", qs: "?plano=essencial" });
+  const { ctx, page, erros } = await abrir({ hash: "#/gastos", plano: "essencial" });
   const barra = await page.locator(".askbar").evaluate((a) => a.tagName);
   await perguntar(page, "oi");
   await page.locator(".chat > .msg-piggy").first().waitFor();
