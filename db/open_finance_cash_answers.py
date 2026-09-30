@@ -1,9 +1,15 @@
 """Respostas do usuário aos saques/depósitos em espécie (db/open_finance_cash.py):
 desfazer, responder pergunta, listar pendências. Cada uma trava `accounts` antes
 (`_lock_user`), na mesma ordem do reconciliador."""
+from utils_date import _tz
+
 from .connection import get_conn
 from .open_finance_cash import PERGUNTAS, RESPOSTAS, _credita, _muda_status
 from .open_finance_cash_revisao import casa_manual
+
+# Aviso = crédito/débito na Carteira que o usuário ainda não viu. Fonte única da
+# lista (`list_pending`) e do contador (`cash_transfer_summary`).
+AVISO_SQL = "k.status='ativo' and k.launch_id is not null and k.seen_at is null"
 
 
 def _link_travado(cur, user_id, link_id) -> dict:
@@ -33,7 +39,7 @@ def answer_link(user_id, link_id, resposta) -> dict:
         raise ValueError("CASH_ANSWER_INVALID")
     with get_conn() as conn, conn.cursor() as cur:
         link = _link_travado(cur, user_id, link_id)
-        result = {"ok": True, "changed": resposta in RESPOSTAS.get(link["status"], ())}
+        result = {"ok": True, "changed": resposta in respostas(link)}
         if result["changed"] and resposta == "seen":
             cur.execute("update of_cash_links set seen_at=now() where id=%s and user_id=%s", (link_id, user_id))
         elif result["changed"] and resposta == "same":
@@ -53,25 +59,47 @@ def answer_link(user_id, link_id, resposta) -> dict:
             _muda_status(cur, user_id, link, "desfeito" if resposta == "already" else "nao_dinheiro")
         elif result["changed"]:  # different, credit, cash
             _credita(cur, user_id, link)
+        if result["changed"] and resposta != "seen":  # responder já é ver: o crédito da resposta não vira aviso
+            cur.execute("update of_cash_links set seen_at=now() where id=%s and user_id=%s", (link_id, user_id))
         conn.commit()
     return result
 
 
+def respostas(link) -> set:
+    """"Não era dinheiro vivo" vale em toda pergunta de depósito e de Pix Saque
+    (decisão do dono); o saque (`operationType=SAQUE`) é sempre dinheiro. O Ok
+    só vale no aviso (visto uma vez: o 2º toque é no-op)."""
+    if link["status"] == "ativo" and (link["seen_at"] or not link["launch_id"]):
+        return set()
+    validas = RESPOSTAS.get(link["status"], set())
+    if link["status"] in PERGUNTAS and link["kind"] != "saque":
+        return validas | {"not_cash"}
+    return validas
+
+
 def list_pending(user_id) -> list[dict]:
+    """Perguntas abertas e avisos não vistos. `manual_date` é a data no fuso do app."""
     with get_conn() as conn, conn.cursor() as cur:
-        cur.execute("""select k.id, k.kind, k.status, k.amount, k.tx_date, k.manual_launch_id,
-                              m.alvo as manual_alvo, m.valor as manual_valor
-                         from of_cash_links k
-                         left join launches m on m.id = k.manual_launch_id and m.user_id = k.user_id
-                        where k.user_id=%s and k.status = any(%s)
-                        order by k.tx_date desc, k.id desc""", (user_id, list(PERGUNTAS)))
-        return [dict(r) for r in cur.fetchall()]
+        cur.execute(f"""select k.id, k.kind, k.status, k.amount, k.tx_date, c.institution_name as institution,
+                               m.alvo as manual_alvo, m.valor as manual_valor, m.criado_em as manual_date
+                          from of_cash_links k
+                          left join launches m on m.id = k.manual_launch_id and m.user_id = k.user_id
+                          left join open_finance_transactions t on t.id = k.of_transaction_id
+                          left join open_finance_accounts a on a.id = t.account_id
+                          left join open_finance_connections c on c.id = a.connection_id and c.user_id = k.user_id
+                         where k.user_id=%s and (k.status = any(%s) or {AVISO_SQL})
+                         order by k.tx_date desc, k.id desc""", (user_id, list(PERGUNTAS)))
+        rows = [dict(r) for r in cur.fetchall()]
+    for r in rows:
+        if r["manual_date"]:
+            r["manual_date"] = r["manual_date"].astimezone(_tz()).date()
+    return rows
 
 
 def cash_transfer_summary(user_id) -> dict:
     with get_conn() as conn, conn.cursor() as cur:
-        cur.execute("""select count(*) filter (where status = any(%s)) as pending_count, count(*) filter
-                         (where status='ativo' and launch_id is not null and seen_at is null) as unseen_count
-                         from of_cash_links where user_id=%s""", (list(PERGUNTAS), user_id))
+        cur.execute(f"""select count(*) filter (where k.status = any(%s)) as pending_count,
+                               count(*) filter (where {AVISO_SQL}) as unseen_count
+                          from of_cash_links k where k.user_id=%s""", (list(PERGUNTAS), user_id))
         row = cur.fetchone()
     return {"pending_count": int(row["pending_count"]), "unseen_count": int(row["unseen_count"])}
