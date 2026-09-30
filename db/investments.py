@@ -280,7 +280,7 @@ def _get_cdi_daily_map(cur, start: date, end: date) -> dict[date, float]:
     Retorna {date: cdi_percent_per_day}.
     Usa cache em market_rates e busca do BCB o que estiver faltando.
     """
-    if end <= start:
+    if end < start:
         return {}
 
     cur.execute(
@@ -357,7 +357,7 @@ def _get_cdi_daily_map(cur, start: date, end: date) -> dict[date, float]:
 
 def _get_sgs_daily_map(cur, code: str, series_code: int, start: date, end: date) -> dict[date, float]:
     """Retorna {date: percent_per_day} para séries SGS diárias, com cache em market_rates."""
-    if end <= start:
+    if end < start:
         return {}
 
     cur.execute(
