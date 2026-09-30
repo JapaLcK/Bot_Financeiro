@@ -2069,6 +2069,22 @@ async def lifespan(app: FastAPI):
                 print(f"[pix] erro: {exc}", file=sys.stderr)
             await asyncio.sleep(60)
 
+    async def _ebook_worker():
+        """Entrega do e-book comprado na /assinar, a cada 5 min (decisão do
+        dono), a 1ª volta sem delay. Só envia a quem já provou o e-mail — ver
+        `core/services/ebook_entrega.py`. Inerte sem `STRIPE_SECRET_KEY`."""
+        from core.services.ebook_entrega import entregar_pendentes  # noqa: PLC0415
+        while True:
+            try:
+                n = await asyncio.to_thread(entregar_pendentes)
+                if n:
+                    print(f"[ebook] {n} e-book(s) entregue(s).", flush=True)
+            except asyncio.CancelledError:
+                raise
+            except Exception as exc:
+                print(f"[ebook] erro: {exc}", file=sys.stderr)
+            await asyncio.sleep(300)
+
     async def _account_deletion_worker():
         while True:
             try:
@@ -2166,6 +2182,7 @@ async def lifespan(app: FastAPI):
                 asyncio.create_task(_table_cleanup(), name="table_cleanup"),
                 asyncio.create_task(_plan_grants_reprojection(), name="plan_grants_reprojection"),
                 asyncio.create_task(_pix_worker(), name="pix_worker"),
+                asyncio.create_task(_ebook_worker(), name="ebook_worker"),
             ]
         )
     else:
@@ -5168,9 +5185,21 @@ async def _billing_checkout_for_user(stripe_mod, user_id: int, plan: str, interv
         metadata.update(rastreio or {})
         # Foto do preço do e-book no nascimento da sessão: o webhook (PR 3)
         # identifica o e-book por ela, não pela env do momento em que chega.
-        oferece_ebook = origem == "assinar" and bool(STRIPE_PRICE_ID_EBOOK and EBOOK_URL)
+        # A URL vai junto (o job entrega a da compra); o Stripe recusa metadata
+        # acima de 500 caracteres (medido), então acima disso não oferece.
+        oferece_ebook = (
+            origem == "assinar" and bool(STRIPE_PRICE_ID_EBOOK and EBOOK_URL)
+            and len(EBOOK_URL) <= 500
+        )
         if oferece_ebook:
             metadata["ebook_price"] = STRIPE_PRICE_ID_EBOOK
+            metadata["ebook_url"] = EBOOK_URL
+        elif origem == "assinar" and STRIPE_PRICE_ID_EBOOK:
+            # Nunca logar a URL: é o acesso ao PDF pago.
+            logging.getLogger(__name__).warning(
+                "ebook_nao_oferecido: EBOOK_URL vazia ou com %d caracteres (max 500)",
+                len(EBOOK_URL),
+            )
         subscription_data = {"metadata": metadata.copy()}
         if trial_days > 0:
             subscription_data["trial_period_days"] = trial_days
@@ -5802,6 +5831,22 @@ async def billing_webhook(request: Request, background_tasks: BackgroundTasks):
         value = (float(unit) / 100.0) if unit is not None else 0.0
         return (value, str(cur).upper())
 
+    def _ebook_liquido_cents(invoice, ebook_price) -> int:
+        """Centavos LÍQUIDOS das linhas do e-book na fatura. O e-book é
+        identificado pela foto `ebook_price` da metadata, não pela env do
+        momento. Medido: `amount` da linha é BRUTO; o cupom vem só em
+        `discount_amounts`. `price` vem string ou expandido (`.id`)."""
+        if not ebook_price:
+            return 0
+        total = 0
+        for line in _g(_g(invoice, "lines", {}), "data", []) or []:
+            price = _g(_g(_g(line, "pricing", {}), "price_details", {}), "price")
+            if (price if isinstance(price, str) else _g(price, "id")) != ebook_price:
+                continue
+            desconto = sum(_g(d, "amount", 0) for d in _g(line, "discount_amounts", []) or [])
+            total += (_g(line, "amount", 0) or 0) - desconto
+        return total
+
     def _ga_plano_publico(*objetos) -> str | None:
         """Nome PÚBLICO do plano ('essencial'/'plus'/'pro') pro item do GA4.
 
@@ -6112,6 +6157,23 @@ async def billing_webhook(request: Request, background_tasks: BackgroundTasks):
                 await asyncio.to_thread(
                     clear_past_due_since, int(user_id),
                     nao_mais_novo_que=_event_version(event))
+            # Pendência do e-book: a prova da compra, gravada ANTES dos outros
+            # efeitos e sem try — falha → 5xx e a reentrega refaz tudo. Grava
+            # mesmo com `_decidiu_acesso` False: a compra aconteceu igual. O
+            # job (`core/services/ebook_entrega.py`) entrega depois.
+            _meta = _g(session, "metadata", {})
+            _ebook_price = _g(_meta, "ebook_price")
+            if _ebook_price:
+                from db.ebook_entregas import registrar as _registrar_ebook
+                await asyncio.to_thread(
+                    _registrar_ebook, int(user_id), _g(session, "id"),
+                    _ebook_price, _g(_meta, "ebook_url") or None)
+                if not _g(_meta, "ebook_url"):
+                    await log_system_event(
+                        "error", "ebook_sem_url",
+                        "Compra de e-book sem a foto ebook_url; o job não entrega.",
+                        source="billing", user_id=int(user_id),
+                        details={"session_id": _g(session, "id")})
         # Funil: registra a CONCLUSÃO na tabela dedicada, com o session_id
         # (correlaciona com o record_checkout_started da mesma tentativa).
         # Vale pra trial e compra imediata — os dois disparam este evento.
@@ -6186,6 +6248,12 @@ async def billing_webhook(request: Request, background_tasks: BackgroundTasks):
             except Exception as exc:
                 print(f"[billing] rastreio checkout: log falhou: {exc}")
 
+            # Valor REALMENTE cobrado nesta sessão (com cupom e com e-book). Com
+            # trial o plano vale 0, então aqui ele é exatamente o e-book (medido:
+            # 990, e 495 com cupom). `None` = campo ausente; 0 é legítimo.
+            _cobrado = _g(session, "amount_total")
+            _cobrado_moeda = (_g(session, "currency") or "brl").upper()
+            _ebook_no_trial = sub_status == "trialing" and bool(_cobrado and _cobrado > 0)
             # Meta Conversions API — conversão server-side, deduplicada com o
             # pixel via event_id derivado da sessão. Trial → StartTrial; compra
             # imediata (sem trial) → Purchase. A cobrança REAL pós-trial e as
@@ -6193,6 +6261,7 @@ async def billing_webhook(request: Request, background_tasks: BackgroundTasks):
             try:
                 from core.services.meta_capi import (
                     capi_configured,
+                    ebook_event_id,
                     purchase_event_id,
                     send_event,
                     trial_event_id,
@@ -6206,24 +6275,32 @@ async def billing_webhook(request: Request, background_tasks: BackgroundTasks):
                         _ev_name, _ev_id = "StartTrial", trial_event_id(_sid)
                     else:
                         _ev_name, _ev_id = "Purchase", purchase_event_id(_sid)
+                        # O Purchase leva o valor cobrado, o mesmo número do GA4.
+                        if _cobrado is not None:
+                            _value, _currency = float(_cobrado) / 100.0, _cobrado_moeda
                     _fbp, _fbc = _fb_ids(sub, session)
-                    background_tasks.add_task(
-                        send_event,
-                        event_name=_ev_name,
-                        event_id=_ev_id,
+                    _capi_kw = dict(
                         event_time=_evt_time,
-                        value=_value,
-                        currency=_currency,
                         email=_capi_email,
                         fbp=_fbp,
                         fbc=_fbc,
                         event_source_url=f"{DASHBOARD_URL}/home",
                     )
+                    background_tasks.add_task(
+                        send_event, event_name=_ev_name, event_id=_ev_id,
+                        value=_value, currency=_currency, **_capi_kw)
+                    if _ebook_no_trial:
+                        background_tasks.add_task(
+                            send_event, event_name="Purchase",
+                            event_id=ebook_event_id(_sid),
+                            value=float(_cobrado) / 100.0, currency=_cobrado_moeda,
+                            **_capi_kw)
             except Exception as exc:
                 print(f"[billing] meta capi checkout ({sub_status}) falhou user={user_id}: {exc}")
             # GA4 (Measurement Protocol) — a compra com o VALOR real cobrado.
             # Só a compra IMEDIATA: quando a assinatura nasce em trial o dinheiro
-            # entra semanas depois, e o purchase daquele caso sai no invoice.paid.
+            # entra semanas depois, e o purchase daquele caso sai no invoice.paid
+            # (exceção: o e-book comprado junto do trial, que é cobrado agora).
             # É server-only de propósito: o navegador manda `start_trial` (que não
             # tem valor), e deixar os dois mandarem `purchase` criaria duas versões
             # do mesmo evento, uma delas sem receita.
@@ -6234,19 +6311,18 @@ async def billing_webhook(request: Request, background_tasks: BackgroundTasks):
                     send_purchase,
                 )
                 _ga_sid = _g(session, "id")
-                if mp_configured() and _ga_sid and sub_status != "trialing":
+                if mp_configured() and _ga_sid and (sub_status != "trialing" or _ebook_no_trial):
                     # Valor REALMENTE cobrado: `amount_total` da sessão já vem
                     # com cupom aplicado, e o `unit_amount` do plano não — este
                     # checkout aceita cupom (`allow_promotion_codes=True`), então
                     # o preço de tabela superestimaria a receita (Codex, #244).
                     # Zero é resposta legítima (cupom de 100%): o teste é
                     # `is None`, não falsy. Sem o campo, cai no valor do plano.
-                    _ga_total = _g(session, "amount_total")
-                    if _ga_total is None:
+                    if _cobrado is None:
                         _ga_value, _ga_currency = _subscription_amount(sub)
                     else:
-                        _ga_value = float(_ga_total) / 100.0
-                        _ga_currency = (_g(session, "currency") or "brl").upper()
+                        _ga_value = float(_cobrado) / 100.0
+                        _ga_currency = _cobrado_moeda
                     # O client_id foi gravado no metadata na criação do checkout
                     # (/billing/create-checkout). Sem ele a venda ainda entra, como
                     # usuário novo sem origem — ver fallback_client_id.
@@ -6256,12 +6332,19 @@ async def billing_webhook(request: Request, background_tasks: BackgroundTasks):
                     _ga_cid = (_g(_g(sub, "metadata", {}), "ga_client_id")
                                or _g(_g(session, "metadata", {}), "ga_client_id")
                                or fallback_client_id(user_id))
+                    if sub_status == "trialing":
+                        # Trial com e-book: a venda é só o e-book (id próprio).
+                        from core.services.meta_capi import ebook_event_id
+                        _ga_tid, _ga_plan = ebook_event_id(_ga_sid), "ebook"
+                    else:
+                        _ga_tid = _ga_sid
+                        _ga_plan = _ga_plano_publico(sub, session) or plan_value
                     background_tasks.add_task(
                         send_purchase,
-                        transaction_id=_ga_sid,
+                        transaction_id=_ga_tid,
                         value=_ga_value,
                         currency=_ga_currency,
-                        plan=_ga_plano_publico(sub, session) or plan_value,
+                        plan=_ga_plan,
                         client_id=_ga_cid,
                         user_id=user_id,
                     )
@@ -6340,7 +6423,12 @@ async def billing_webhook(request: Request, background_tasks: BackgroundTasks):
             )
             # Email de confirmacao de cobranca (item 39) — so quando valor > 0
             # (invoices do trial vem com amount_paid=0 e nao precisam de notificacao).
-            amount_cents = _g(invoice, "amount_paid") or 0
+            # `amount_cents` é só o PLANO: o e-book comprado junto sai da conta,
+            # então e-mail, comissão e rastreio da fatura não o veem. A 1ª
+            # fatura de trial + e-book dá 0 e pula tudo (a comissão fica para a
+            # fatura do plano — `record_commission_for_invoice` só paga a 1ª).
+            amount_cents = max(0, (_g(invoice, "amount_paid") or 0) - _ebook_liquido_cents(
+                invoice, _g(_g(sub, "metadata", {}), "ebook_price")))
             if amount_cents and amount_cents > 0:
                 amount_brl = float(amount_cents) / 100.0
                 from core.services.email_service import send_pro_charged_email

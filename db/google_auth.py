@@ -69,6 +69,21 @@ def auth_account_has_password(user_id: int) -> bool:
     return bool(row and row["password_hash"])
 
 
+def conta_sem_credencial(user_id: int) -> bool:
+    """True se a conta ainda não provou o e-mail: sem senha (`''` conta como sem,
+    igual a `auth_account_has_password`) e sem identidade Google/Apple. Sem linha
+    em `auth_accounts` também é True (não entrega)."""
+    with get_conn() as conn, conn.cursor() as cur:
+        cur.execute(
+            "select (a.password_hash is null or a.password_hash = '')"
+            " and not exists (select 1 from auth_identities i where i.user_id = a.user_id) as sem"
+            " from auth_accounts a where a.user_id = %s",
+            (int(user_id),),
+        )
+        row = cur.fetchone()
+    return row is None or bool(row["sem"])
+
+
 def email_has_password(email: str) -> bool:
     """True se existe conta com senha para este email."""
     email = (email or "").strip().lower()
