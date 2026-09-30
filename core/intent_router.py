@@ -1795,8 +1795,15 @@ _CAUDA_COM_FORMA_DE_VALOR_RE = re.compile(
     rf"(?:r\$\s*)?-?\s*{_SO_NUMERO_RE.pattern}(?:{h_bills._UNIDADE})?", re.I)
 
 
-def _quantia_explicita(resposta: str, crua: str, existentes: list[str]) -> str | None:
-    """O trecho da resposta a "de qual…?" que é QUANTIA, ou None (#567).
+def _quantia_explicita(
+    resposta: str, crua: str, existentes: list[str],
+) -> tuple[str | None, bool]:
+    """`(quantia, nao_reconhecida)` da resposta a "de qual…?" (#567).
+
+    `quantia` é o trecho que é QUANTIA, ou None. `nao_reconhecida` é True quando
+    não há quantia mas depois de uma ", " vem dígito ou palavra de número que o
+    bot não sabe ler ("viagem, 2 mil", "cem", "uns 80", "dia 15", "a de 2027"):
+    com "esvaziar" guardado quem decidiria é o `want_all` (d046-1; ver o chamador).
 
     Fora destas formas o número é do nome: "tesouro 2029" não vira R$ 2.029.
     Teto: "Tesouro 2029 80", sem vírgula, fica com o guardado.
@@ -1819,6 +1826,8 @@ def _quantia_explicita(resposta: str, crua: str, existentes: list[str]) -> str |
     nome CURTO do catálogo depois da preposição reativa a regra, igual à `main`:
     "a reserva 2025 da casa" com a caixinha `casa` dá R$ 2.025.
     """
+    from parsers import _extract_valor
+
     def cita(texto: str) -> bool:
         return any(contains_word(normalize_text(texto), normalize_text(n)) for n in existentes)
 
@@ -1828,13 +1837,14 @@ def _quantia_explicita(resposta: str, crua: str, existentes: list[str]) -> str |
         sem_nome = texto_da_quantidade(resposta, existentes)
         for m in _PREP_NO_MEIO_RE.finditer(sem_nome):
             if _quantidade_fecha(sem_nome[:m.start()]):
-                return sem_nome[:m.start()]
+                return sem_nome[:m.start()], False
     # A PRIMEIRA ", " depois do alvo inteiro: "tesouro, 132, 50" é R$ 132,50
     # (também com "R$"/"reais"; a regex da cauda barra o resto), e na caixinha
     # `Viagem, 2027` o 2027 de "a viagem, 2027" é do nome.
     alvo = _nome_do_alvo(resposta, existentes)
     no_catalogo = _eh_nome_do_catalogo(alvo, existentes)
     malformada = None
+    nao_reconhecida = False
     for inicio in [0, *(m.end() for m in re.finditer(", ", crua))]:
         if no_catalogo and not contains_word(normalize_text(crua[:inicio]), normalize_text(alvo)):
             continue
@@ -1843,10 +1853,14 @@ def _quantia_explicita(resposta: str, crua: str, existentes: list[str]) -> str |
         if not _ANO_RE.match(cauda):   # "2029, 80": ano não é decimal
             cauda = _ESPACO_NO_SEPARADOR_RE.sub(r"\1", cauda)
         if _CAUDA_QUANTIA_RE.fullmatch(cauda):
-            return cauda
+            return cauda, False
         if malformada is None and _CAUDA_COM_FORMA_DE_VALOR_RE.fullmatch(cauda):
             malformada = cauda
-    return malformada
+        # `_extract_valor` só DETECTA aqui (lê "cem"/"mil"; o valor é descartado):
+        # não ensina forma nova de quantia. inicio 0 é a resposta toda, não cauda.
+        if inicio and (re.search(r"\d", cauda) or _extract_valor(cauda) is not None):
+            nao_reconhecida = True
+    return malformada, nao_reconhecida
 
 
 def _funde_a_resposta(
@@ -1914,7 +1928,8 @@ def _funde_a_resposta(
     # TETO conhecido: caixinha chamada `tudo`, respondida com `tudo`, é lida
     # como NOME — a mesma precedência já aceita em `meta 2028`.
     quantidade = texto_da_quantidade(resposta, existentes)
-    quantia = _quantia_explicita(resposta, crua or resposta, existentes) if pede_nome else quantidade
+    quantia, nao_reconhecida = (_quantia_explicita(resposta, crua or resposta, existentes)
+                                if pede_nome else (quantidade, False))
     if _pede_tudo(resposta, existentes) and _extract_valor(quantidade) is not None:
         ents.pop("amount", None)
         ents["want_all"] = False
@@ -1938,6 +1953,13 @@ def _funde_a_resposta(
             # "esvaziar caixinha" + "tira 100 da viagem" ESVAZIAVA a caixinha,
             # que é precisamente o dano que a exclusividade existe para impedir.
             ents["want_all"] = False
+    elif not eh_nome and quantia is None and nao_reconhecida and ents.get("want_all"):
+        # Com "esvaziar" guardado, "viagem, 2 mil" esvaziava a caixinha. Não decide:
+        # pergunta o valor e nada se move (d046-1). Os handlers de saque gravam
+        # `want_all` sempre, então é ele o "tudo" guardado (medido, injetando `{}`).
+        ents.pop("amount", None)
+        ents["want_all"] = False
+        return _funde_o_nome(intent, ents, resposta, existentes, eh_nome), "quantidade_nao_reconhecida"
     # `eh_nome` sem marcador: a resposta é só o nome. A quantidade guardada fica.
     # Idem com `pede_nome` sem quantia explícita: o número era do nome (#567).
 
@@ -2083,6 +2105,8 @@ def _resolve_clarification(clarif: dict, user_response: str, user_id: int, platf
                            "question": ALVO_AMBIGUO, "orig_text": ""}
             if recusa == "quantidade_ambigua":
                 payload = {**payload, "falta": "amount", "question": QUANTIDADE_AMBIGUA}
+            if recusa == "quantidade_nao_reconhecida":
+                payload = {**payload, "falta": "amount", "question": "Qual o valor?"}
             db.create_pending_action_if_absent(
                 user_id, "clarification", {**payload, "entities": ents})
             if recusa == "alvo_ambiguo":
