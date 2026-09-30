@@ -667,7 +667,7 @@ a rede.
      escrita da senha) → a senha não é trocada. O link pedido depois da troca funciona.
    - **Isto já vale hoje na `main`**, para qualquer conta, e não só a do quiz. Se o
      conserto entrar antes num PR próprio, o PR 4 só confere que ele existe.
-   - **Feito no PR do reset amarrado ao e-mail** (#NNN); o PR 4 só confere que existe.
+   - **Feito no PR do reset amarrado ao e-mail** (#690); o PR 4 só confere que existe.
 3c. **A troca de e-mail também atualiza o cliente no Stripe.** Hoje a `PATCH
    /settings/{uid}/security/contact` só grava em `auth_accounts`. O `stripe_customer_id`
    continua com o e-mail antigo, que recebe recibos, faturas e aparece no portal. Isso já
