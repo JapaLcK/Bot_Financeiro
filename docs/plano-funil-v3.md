@@ -655,6 +655,16 @@ a rede.
      escrita da senha) → a senha não é trocada. O link pedido depois da troca funciona.
    - **Isto já vale hoje na `main`**, para qualquer conta, e não só a do quiz. Se o
      conserto entrar antes num PR próprio, o PR 4 só confere que ele existe.
+3c. **A troca de e-mail também atualiza o cliente no Stripe.** Hoje a `PATCH
+   /settings/{uid}/security/contact` só grava em `auth_accounts`. O `stripe_customer_id`
+   continua com o e-mail antigo, que recebe recibos, faturas e aparece no portal. Isso já
+   vale na `main` para qualquer conta.
+   - **Conserto:** depois da troca, `stripe.Customer.modify(customer_id, email=novo)`.
+   - Se o Stripe falhar, a troca de e-mail no app **não** é desfeita, mas a atualização
+     fica pendente e é refeita. Pode ser o mesmo job da pendência do e-book, ou um
+     registro próprio (§0.1).
+   - **Teste:** troca bem-sucedida chama o `modify`; falha do Stripe deixa a pendência e
+     a nova tentativa a fecha.
 4. Ordem dos overlays na `/home` (enumerar antes de codar: overlay de checkout,
    boas-vindas do Pro, onboarding do MFA e este): o gate só sobe **depois** de o overlay
    de checkout fechar e fica **acima** das boas-vindas. Com o gate de pé, o onboarding
@@ -853,6 +863,12 @@ do e-book.
   O caminho é o link por e-mail → login → `/precos` (checkout hospedado, sem e-book).
   Um "entrar por código no e-mail" resolveria isso, e fica como follow-up se a métrica
   mostrar que dói.
+- **Recibo do Stripe para um e-mail não provado:** o checkout cria o cliente no Stripe
+  com o e-mail digitado, antes da prova (que vem com a senha). Se os e-mails do Stripe
+  para clientes estiverem ligados (recibo de pagamento, fatura), o dono de um e-mail
+  digitado errado recebe o recibo: valor, produto e final do cartão. **Decisão do dono,
+  pendente:** desligar esses e-mails no painel do Stripe (seção 9, item novo) ou aceitar
+  o risco. Depois da correção do e-mail, o item 3c do PR 4 atualiza o cliente.
 - **Duas cobranças (Pix + cartão)** em abas diferentes: a janela vai de 24 h para 1 h
   (D-n), nos dois modos da `/assinar`. Não foi fechada de todo.
 - **Contas sem plano criadas por bots:** somam na base e podem entrar nos e-mails de
@@ -875,6 +891,9 @@ do e-book.
 **Stripe (fazer em modo teste primeiro, depois em produção):**
 1. Produtos → criar "E-book …" com **preço avulso** (pagamento único, BRL) → copiar o
    `price_…` para a env **`STRIPE_PRICE_ID_EBOOK`** (Railway; a de teste vai no `.env` local da Etapa 0b-2).
+2a. Configurações → E-mails para clientes: conferir se o Stripe manda recibo de pagamento
+   e fatura. Se mandar, decidir se desliga (seção 8, "Recibo do Stripe para um e-mail
+   não provado").
 2. Desenvolvedores → Chaves de API → copiar a **chave publicável** (`pk_live_…`, e a
    `pk_test_…` no `.env` local da Etapa 0b-2) para **`STRIPE_PUBLISHABLE_KEY`**.
 3. Configurações → Marca: logo, ícone e cor `#FF2D8E`. O formulário embutido usa isso.
