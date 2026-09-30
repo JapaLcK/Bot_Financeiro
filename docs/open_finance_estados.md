@@ -143,6 +143,13 @@ verificação externa pendente.
 | Atualizado | E11 no botão | toast de erro; o servidor pode ter concluído | n/a | ? H1 |
 | Parcial (Pluggy) | E2 ou E6 com produto voltando | Atualizado | não | ✓ (#473) |
 | Parcial (Pluggy) | foto nova em `UPDATING` | mantém o produto atrasado | não | ✓ (#473) |
+| Parcial (Pluggy) | E6 com `/investments` 429 e contas lidas | Parcial · "Cartão desatualizado desde dd/mm; investimentos não vieram nesta atualização" (antes só o da Pluggy) | não | ✓ **PR-A** (Codex, #692) |
+| Parcial (Pluggy) | E6 com `/accounts` 429 (`read_failed`, nada lido) | **Erro temporário** · "Tentaremos de novo automaticamente"; toast "Não consegui atualizar o {banco} agora…" (antes: Parcial e "Atualizei o que deu…" sem ter lido nada). Vale também depois de reconectar (`sem_sync`), como no default seguro | não | ✓ **PR-A** |
+| Parcial (Pluggy) | E6 com leitura completa e zero espelhado (`no_accounts`) | **Sem dados** · "O banco não devolveu contas nem investimentos"; toast "{banco}: o banco não devolveu contas nem investimentos." (antes: Parcial e "Atualizei o que deu…" com nada espelhado) | não | ✓ **PR-A** |
+| Parcial (Pluggy) | motivo que o código não conhece | Erro temporário (o mesmo default seguro do verde; antes: Parcial) | não | ✓ **PR-A** |
+| Parcial (Pluggy) com `investments_read_failed` de antes da autorização atual (`sem_sync`) | leitura da tela | só o detalhe da Pluggy, sem "investimentos não vieram" | não | ✓ **PR-A** |
+| Parcial (Pluggy) com INVESTMENTS já atrasado | E6 com `/investments` 429 | só o detalhe da Pluggy ("Investimentos desatualizado desde dd/mm"), sem repetir | não | ✓ **PR-A** |
+| Erro temporário (`read_failed`) depois de reconectar | um sync VELHO (de antes da reconexão) falhando depois dela | `_sync_item_contido` grava `read_failed` sem guarda de geração: "Erro temporário" por uma falha da autorização antiga (ramo verde e `partial`) | não | ✗ pré-existente, fechado pelo PR-B1 (`geracao_vista` no `mark_sync_result`) |
 | Parcial (`investments_read_failed`) | E8 | mantém Parcial | não | ✓ **PR-A (R5)** |
 | Parcial (`investments_read_failed`) | E2 ou E6 com leitura completa | Atualizado | não | ✓ **PR-A** |
 | Parcial (`investments_read_failed`) | E3 | "Erro temporário" com o motivo apagado; o E8 seguinte, com o item vivo, pinta Atualizado sem os investimentos terem sido lidos | avisa (classifica por `status`) | ✗ (PR-C) |
@@ -195,6 +202,10 @@ Texto novo do PR-A, visível ao usuário: o detalhe
 "Investimentos não vieram nesta atualização" (pílula "Parcial").
 
 ## 4. Achados registrados, fora do escopo da Onda 5
+
+- **Concordância do detalhe da Pluggy.** `_stale_detail` escreve "Investimentos
+  desatualizado desde dd/mm" (e "Transações desatualizado") para produto de nome
+  plural. Pré-existente, não corrigido.
 
 - **Painel admin cego para falha de leitura nossa.** `of_health_counters`
   (`db/open_finance_state.py`) conta `ativas` por `status` e `parciais` só por

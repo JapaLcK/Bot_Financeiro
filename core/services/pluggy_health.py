@@ -968,7 +968,24 @@ def connection_ui_state(connection_row: dict) -> dict:
             return out("no_accounts" if reason == "no_accounts" and item_status != "ERROR"
                        else "error_recoverable")
         if stale or str(health.get("execution_status") or "").upper() == "PARTIAL_SUCCESS":
-            return out("partial", _stale_detail(health))
+            # Motivo pendente fala antes do produto atrasado, pela MESMA regra do
+            # verde: o default seguro do `out("updated")` decide (`read_failed` e
+            # desconhecido → "Erro temporário", `no_accounts` → "Sem dados").
+            # "Atualizei o que deu" sobre nada lido/espelhado seria falso. Como no
+            # verde, sem olhar `sem_sync`: a reconexão zera o motivo — exceto um
+            # run velho de `_sync_item_contido` gravando depois dela, corrida que
+            # o PR-B1 da Onda 5 fecha (`geracao_vista`).
+            if reason not in _REASONS_OK and reason != INVESTMENTS_READ_FAILED:
+                return out("updated")
+            detalhe = _stale_detail(health)
+            # Parcial da Pluggy E leitura parcial nossa: as duas coisas faltam, e
+            # o detalhe da Pluggy sozinho escondia os investimentos (Codex, #692).
+            # Com `sem_sync` o motivo é de antes da autorização atual e não vale.
+            # Com INVESTMENTS já atrasado na Pluggy, o detalhe dela já os nomeia.
+            if (reason == INVESTMENTS_READ_FAILED and not sem_sync
+                    and "INVESTMENTS" not in stale):
+                detalhe += "; " + _DETALHE_INVESTIMENTOS_FALTANDO.lower()
+            return out("partial", detalhe)
         return out("updated")
 
     # Sem health medido: cai no status local (comportamento de hoje).

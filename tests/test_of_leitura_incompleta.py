@@ -21,6 +21,14 @@ asserção; medidos em 2026-09-27, remeça se mexer no código):
       para só `read_failed`/`investments_read_failed` deixa (g) e (i) vermelhos.
   positivo do CAS: `test_job_sem_corrida_limpa_no_accounts_com_espelho_cheio`.
   (h) negativo: tirar o `if sem_sync` do ramo `INVESTMENTS_READ_FAILED` do `out()`.
+  (j) negativo: tirar o acréscimo de `_DETALHE_INVESTIMENTOS_FALTANDO` ao
+      `_stale_detail` no ramo `partial` de `connection_ui_state`.
+  (k) positivo: `partial` só da Pluggy continua com o `_stale_detail` puro.
+  (l), (m), (o), (p) negativo: tirar o desvio para o default seguro
+      (`if reason not in _REASONS_OK ...: return out("updated")`) do ramo
+      `partial`; (m) sozinho: condicioná-lo a `not sem_sync`.
+  (n) negativo: tirar o `not sem_sync` do acréscimo de investimentos no `partial`.
+  (q) negativo: tirar o `"INVESTMENTS" not in stale` do mesmo acréscimo.
 """
 
 from __future__ import annotations
@@ -33,6 +41,7 @@ import db
 import frontend.finance_bot_websocket_custom as dashboard
 from conftest import promote_to_pro
 from core.services.pluggy import PluggyApiError
+from core.services.pluggy_health import connection_ui_state, derive_item_health
 from db.connection import get_conn
 from test_of_connection_state import (
     ITEM_SAUDAVEL, _auth, _conexao, _conta_pluggy, _linha, _mock_pluggy, _tx_pluggy)
@@ -295,3 +304,150 @@ def test_parcial_anterior_a_autorizacao_atual_e_atualizando(user_id, monkeypatch
     ui = _ui_pela_rota(user_id)
     assert (ui["state"], ui["label"], ui["detail"]) == (
         "updating", "Atualizando…", "Ainda não sincronizou")
+
+
+# ── Rodada 4 (Codex, #692): Parcial da Pluggy E leitura parcial nossa ───────
+# O ramo `partial` do `connection_ui_state` (produto atrasado na Pluggy ou
+# `PARTIAL_SUCCESS`) devolvia só o `_stale_detail`, e o motivo nosso sumia.
+
+ITEM_CARTAO_ATRASADO = {
+    **ITEM_SAUDAVEL, "executionStatus": "PARTIAL_SUCCESS",
+    "statusDetail": {**ITEM_SAUDAVEL["statusDetail"], "creditCards": {
+        "isUpdated": False, "lastUpdatedAt": "2026-09-20T11:00:00.000Z", "warnings": []}},
+}
+CARTAO = "Cartão desatualizado desde 20/09"
+
+
+# (j) as duas faltas aparecem, na tela e no que o toast lê
+def test_parcial_da_pluggy_com_investimentos_falhando_nomeia_os_dois(user_id, monkeypatch):
+    promote_to_pro(user_id)
+    _conexao(user_id)
+    _mock_pluggy(monkeypatch, item=ITEM_CARTAO_ATRASADO,
+                 contas=[_conta_pluggy()], txs=[_tx_pluggy()])
+    monkeypatch.setattr(ps, "list_pluggy_investments", _429)
+
+    sync = _refresh(user_id, monkeypatch)
+
+    esperado = ("partial", "Parcial", f"{CARTAO}; investimentos não vieram nesta atualização")
+    item = next(i for i in sync["items"] if i["item_id"] == "item-g1")
+    assert (item["state"], item["label"], item["detail"]) == esperado
+    assert sync["ok"] is False
+    ui = _ui_pela_rota(user_id)
+    assert (ui["state"], ui["label"], ui["detail"]) == esperado
+
+
+# (k) positivo: leitura completa, Parcial só da Pluggy — detalhe puro
+def test_parcial_so_da_pluggy_mantem_o_detalhe_dela(user_id, monkeypatch):
+    promote_to_pro(user_id)
+    _conexao(user_id)
+    _mock_pluggy(monkeypatch, item=ITEM_CARTAO_ATRASADO,
+                 contas=[_conta_pluggy()], txs=[_tx_pluggy()])
+
+    sync = _refresh(user_id, monkeypatch)
+
+    item = next(i for i in sync["items"] if i["item_id"] == "item-g1")
+    assert (item["state"], item["detail"]) == ("partial", CARTAO)
+    assert _ui_pela_rota(user_id)["detail"] == CARTAO
+
+
+# (l) Parcial da Pluggy e o Atualizar sem conseguir ler NADA (`read_failed`):
+# "Atualizei o que deu" seria falso — é "Erro temporário", como em todo estado
+# não terminal com `read_failed`.
+def test_parcial_da_pluggy_com_contas_falhando_e_erro_temporario(user_id, monkeypatch):
+    promote_to_pro(user_id)
+    _conexao(user_id)
+    _mock_pluggy(monkeypatch, item=ITEM_CARTAO_ATRASADO,
+                 contas=[_conta_pluggy()], txs=[_tx_pluggy()])
+    assert ps.sync_pluggy_item("item-g1")["ok"] is True
+    assert _ui_pela_rota(user_id)["state"] == "partial"
+    monkeypatch.setattr(ps, "list_pluggy_accounts", _429)
+
+    sync = _refresh(user_id, monkeypatch)
+
+    item = next(i for i in sync["items"] if i["item_id"] == "item-g1")
+    assert (item["state"], item["reason"]) == ("error_recoverable", "read_failed")
+    assert sync["ok"] is False
+    assert _ui_pela_rota(user_id)["state"] == "error_recoverable"
+
+
+# (m) o mesmo depois de reconectar (`sem_sync`): a reconexão zerou o motivo, e o
+# `read_failed` foi gravado por um Atualizar posterior — vale. O que este caso NÃO
+# cobre: `_sync_item_contido` grava `read_failed` sem guarda de geração, então um
+# run VELHO que falhe depois da reconexão também o grava (aqui e no ramo verde,
+# pré-existente). Quem fecha é o PR-B1 da Onda 5 (`geracao_vista`).
+def test_read_failed_sobre_parcial_depois_de_reconectar_e_erro_temporario(user_id, monkeypatch):
+    promote_to_pro(user_id)
+    _conexao(user_id)
+    _mock_pluggy(monkeypatch, item=ITEM_CARTAO_ATRASADO,
+                 contas=[_conta_pluggy()], txs=[_tx_pluggy()])
+    assert ps.sync_pluggy_item("item-g1")["ok"] is True
+    db.save_pluggy_open_finance_item(
+        user_id, {"id": "item-g1", "status": "UPDATED", "connector": {"id": 612, "name": "Nubank"}})
+    ps.run_of_health_check()                    # health null → mede o item: cartão atrasado
+    assert _linha()["health"]["stale_products"] == ["CREDIT"]
+    monkeypatch.setattr(ps, "list_pluggy_accounts", _429)
+
+    _refresh(user_id, monkeypatch)
+
+    assert _linha()["status_reason"] == "read_failed"
+    assert _ui_pela_rota(user_id)["state"] == "error_recoverable"
+
+
+
+# (o) Parcial da Pluggy com ZERO espelhado (`no_accounts`): "Sem dados", como no
+# verde — "Atualizei o que deu" seria falso.
+def test_parcial_da_pluggy_sem_nada_espelhado_e_sem_dados(user_id, monkeypatch):
+    promote_to_pro(user_id)
+    _conexao(user_id)
+    _mock_pluggy(monkeypatch, item=ITEM_CARTAO_ATRASADO, contas=[])
+
+    sync = _refresh(user_id, monkeypatch)
+
+    item = next(i for i in sync["items"] if i["item_id"] == "item-g1")
+    assert (item["state"], item["reason"]) == ("no_accounts", "no_accounts")
+    assert sync["ok"] is False
+    assert _ui_pela_rota(user_id)["state"] == "no_accounts"
+
+
+def _linha_parcial(**campos) -> dict:
+    """Linha de `open_finance_connections` com o cartão atrasado na Pluggy."""
+    from datetime import datetime, timezone
+    base = {"status": "ACTIVE", "status_reason": "", "reconnected_at": None,
+            "last_sync_at": datetime(2026, 9, 21, tzinfo=timezone.utc),
+            "health": derive_item_health(ITEM_CARTAO_ATRASADO)}
+    return base | campos
+
+
+# (p) motivo que este arquivo não conhece: o default seguro do verde vale aqui
+def test_motivo_desconhecido_no_parcial_e_erro_temporario():
+    assert connection_ui_state(_linha_parcial(status_reason="motivo_novo"))["state"] == (
+        "error_recoverable")
+    assert connection_ui_state(_linha_parcial())["state"] == "partial", "positivo"
+
+
+# (n) análogo do (h) no `partial`: leitura parcial de antes da autorização atual
+# não é acrescentada ao detalhe da Pluggy
+def test_parcial_da_pluggy_com_motivo_anterior_a_reconexao_nao_cita_investimentos():
+    from datetime import timedelta
+    linha = _linha_parcial(status_reason="investments_read_failed")
+    linha["reconnected_at"] = linha["last_sync_at"] + timedelta(minutes=1)
+    ui = connection_ui_state(linha)
+    assert (ui["state"], ui["detail"]) == ("partial", CARTAO)
+
+
+# (q) INVESTMENTS já atrasado na Pluggy: o detalhe dela já os nomeia; repetir
+# "investimentos não vieram" seria redundante (e contraditório com warning)
+def test_investimentos_atrasados_na_pluggy_e_falhando_nao_repete(user_id, monkeypatch):
+    item = {**ITEM_SAUDAVEL, "executionStatus": "PARTIAL_SUCCESS",
+            "statusDetail": {**ITEM_SAUDAVEL["statusDetail"], "investments": {
+                "isUpdated": False, "lastUpdatedAt": "2026-09-20T11:00:00.000Z", "warnings": []}}}
+    promote_to_pro(user_id)
+    _conexao(user_id)
+    _mock_pluggy(monkeypatch, item=item, contas=[_conta_pluggy()], txs=[_tx_pluggy()])
+    monkeypatch.setattr(ps, "list_pluggy_investments", _429)
+
+    _refresh(user_id, monkeypatch)
+
+    assert _linha()["status_reason"] == "investments_read_failed"
+    ui = _ui_pela_rota(user_id)
+    assert (ui["state"], ui["detail"]) == ("partial", "Investimentos desatualizado desde 20/09")
