@@ -126,7 +126,7 @@ Uma entrada nova no simulador entra nesta tabela antes de entrar no código. Con
 
 | Entrada | Situação que a torna não confiável | Direção do erro | Bloqueia |
 | --- | --- | --- | --- |
-| Saldo de partida | `balance_source="unavailable"`, bancos excluídos, sincronização do Open Finance acima do limite, ou qualquer conexão fora do estado `updated` de `connection_ui_state()` (`core/services/pluggy_health.py`). Esse classificador é a fonte única do estado da conexão: já trata sincronização parcial (`stale_products`, `PARTIAL_SUCCESS`, com `last_sync_at` recente) e banco religado cujo `last_sync_at` é anterior ao `reconnected_at`. O simulador consulta esse estado, não a idade do sync sozinha | dois sentidos | os dois |
+| Saldo de partida | carteira manual sem Open Finance: `accounts` guarda só `balance`, sem data de atualização nem confirmação, e `_starting_balance()` a aceita como `manual`; um gasto ou receita não lançado deixa o saldo velho. Nesse caso, a Piggy pede que o usuário confirme o saldo de hoje antes do veredito. Também: `balance_source="unavailable"`, bancos excluídos, sincronização do Open Finance acima do limite, ou qualquer conexão fora do estado `updated` de `connection_ui_state()` (`core/services/pluggy_health.py`). Esse classificador é a fonte única do estado da conexão: já trata sincronização parcial (`stale_products`, `PARTIAL_SUCCESS`, com `last_sync_at` recente) e banco religado cujo `last_sync_at` é anterior ao `reconnected_at`. O simulador consulta esse estado, não a idade do sync sozinha | dois sentidos | os dois |
 | Conciliação pendente | pendência em `PENDING_RECONCILIATION_SQL` | dois sentidos, item a item | o veredito que não sobreviver à soma na direção que o enfraquece |
 | Declaração pendente | `bank_movements.pending_count > 0`, sem efeito quantificado | dois sentidos | os dois |
 | Ação financeira pendente de confirmação | `pending_actions` em aberto que mexe em dinheiro: lançamento aguardando "sim" (inclusive `confirm_media_launch`), pergunta de valor ou de forma de pagamento, e as pendências do chat (`db/ai_chat.py`). O valor ainda não está no saldo e pode entrar | dois sentidos | os dois; com valor quantificado no payload, vale o pior caso da direção, como na conciliação |
@@ -148,6 +148,7 @@ Uma entrada nova no simulador entra nesta tabela antes de entrar no código. Con
 | Datas das parcelas | data presumida fora do cartão | dois sentidos | os dois (`dados_insuficientes`, perguntar a data) |
 | Parcelas além da janela | contrato maior que o horizonte avaliado | só melhora | cabe |
 | Despesa mensal nova sem fim | `despesa_mensal_nova` não tem fim contratado: estender o horizonte até a última parcela não a cobre, e ela pode furar a reserva depois da janela | só melhora | cabe: exige que a sobra mensal recorrente (receitas fixas − gastos fixos − gasto variável estimado − a despesa nova) continue positiva; senão, sem "cabe" |
+| Horizonte que não fecha um ciclo de recorrências | `_cashflow_events()` projeta gastos fixos anuais; um seguro anual pode furar a reserva depois da última parcela mesmo com sobra mensal positiva | só melhora | cabe: a trajetória vai até o mais distante entre a última parcela e 12 meses a partir de hoje, cobrindo todas as fases das recorrências suportadas, e o pior dia dela tem de ficar acima da reserva |
 | Reserva mínima | nunca informada | não se aplica | risco baseado em reserva (vale só o risco de saldo negativo) e cabe |
 
 Avaliar **caixa nas datas de pagamento** e **custo total do contrato** como dimensões diferentes.
@@ -243,7 +244,8 @@ paralelo.
   compra no fechamento do cartão, salário antes/depois da parcela, fatura vencida, parcelas além
   de 90 dias, reserva já violada, banco indisponível, oferta sem CET, OCR errado, legenda ignorada,
   pendência de lançamento, receita ativa em frequência legada, boleto ou gasto fixo com valor
-  estimado (`variable_amount`), receita ou gasto fixo do mês antecipado ou atrasado em relação ao dia previsto (sem marcador), despesa mensal nova sem fim, boleto ou fatura de
+  estimado (`variable_amount`), receita ou gasto fixo do mês antecipado ou atrasado em relação ao dia previsto (sem marcador), despesa mensal nova sem fim,
+  gasto fixo anual depois da última parcela, carteira manual com saldo não confirmado, boleto ou fatura de
   cartão paga pelo banco e ainda aberta no PigBank, gasto fixo automático pago no cartão
   (antes e depois de a cobrança entrar na fatura), conciliação ou declaração do Open
   Finance pendente (inclusive com
