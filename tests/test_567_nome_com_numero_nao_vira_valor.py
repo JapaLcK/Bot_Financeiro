@@ -12,8 +12,11 @@ o número da resposta só troca o valor em forma explícita:
     `Reserva 2025 do Nubank` (o 2025 é do nome longo, N13);
   - quantia depois de ", " no fim: "80", e as extensões aprovadas "R$ 80",
     "80 reais" e "na verdade 80";
-  - SEM a forma "R$" sem vírgula: "tesouro 2029 R$ 80" fica com o guardado.
-  Limites aceitos, sem re-perguntar: "Tesouro 2029 80" -> 50, "tesouro,80" ->
+  - SEM a forma "R$" sem vírgula: "tesouro 2029 R$ 80" fica com o guardado;
+  - decimal com espaço na cauda ("132, 50", também com "R$"/"reais") só se a
+    parte antes não parece ano: "tesouro, 2029, 80" -> 80 (N14).
+  Limites aceitos, sem re-perguntar: "tesouro, 2025, 50" -> 50 (querendo
+  2.025,50), "Tesouro 2029 80" -> 50, "tesouro,80" ->
   50, "tesouro, 2 mil" -> 50, "tesouro 2029 no valor de 80" -> 50,
   "tira 100 da viajem" (nome errado) não acha alvo; nome CURTO do catálogo
   depois da preposição reativa a regra, igual à `main`: "a reserva 2025 da
@@ -30,9 +33,9 @@ FORA (#704): "caixinha 13º" saiu porque, com e sem o conserto, cai no desempate
 e termina em "Não encontrei": o defeito é resolver o nome com "º".
 
 CONTROLE NEGATIVO (medido em 2026-09-30 sobre 5b558ecf, num caso verde com o fix):
-  (a) `pede_nome=False` no `_resolve_clarification` -> 21 VERMELHOS (N1, N2,
-      N3, N4 "2029, 80"/"R$ 80"/"r$ 80", N9, N10, N12, N5); P1-P4 verdes.
-  (b) `_quantia_explicita` devolvendo None -> 25 daqui e 8 de
+  (a) `pede_nome=False` no `_resolve_clarification` -> 23 VERMELHOS (N1, N2,
+      N3, N4 "2029, 80"/"R$ 80"/"r$ 80", N9, N10, N12, N14 com ano, N5).
+  (b) `_quantia_explicita` devolvendo None -> 27 daqui e 8 de
       `test_perguntas_guardam_contexto.py` (entre eles
       `test_tudo_guardado_mais_quantia_nova_nao_esvazia`) VERMELHOS.
   (c) versões anteriores: a 1ª deixava N6 vermelho, a 2ª N8/N9, a 3ª N10/
@@ -44,16 +47,14 @@ CONTROLE NEGATIVO (medido em 2026-09-30 sobre 5b558ecf, num caso verde com o fix
   (h) `limpa_pontuacao_final(cauda.strip())` -> `cauda.strip()`: "tesouro,
       132,50." (dava 13.250) e "tesouro, 80!" (dava 50) VERMELHOS.
   (i) exigir ", " na `crua` de volta: N7, "80" e "80 reais" VERMELHOS.
-  (j) sem exigir o alvo inteiro antes da ", ": N14 "a viagem, 2027"/"…, 80" e
-      "caixinha, R$ 5000" VERMELHOS; sem `_cola_separador_decimal`: N14
-      "tesouro, 132, 50" VERMELHO.
+  (j) sem exigir o alvo inteiro antes da ", ": N14 "a viagem, 2027" e
+      "caixinha, R$ 5000" VERMELHOS; sem colar o decimal: N14 "132, 50" e
+      "R$ 132, 50" VERMELHOS; (k) sem o `_ANO_RE`: N14 "2029, 80" e "2025, 50".
 
-CONTROLE POSITIVO: P1 (a pergunta era do VALOR), P2 (nome exato com dígitos),
-P3 (correção explícita) — o conserto restringe, então o caminho bom tem de
-continuar fechando.
+CONTROLE POSITIVO: P1 (pergunta de VALOR), P2 (nome exato com dígitos), P3
+(correção explícita): o conserto restringe, o caminho bom tem de fechar.
 
-Tudo pelo `handle_incoming`, banco real, asserção pelo SALDO do alvo.
-CLASSE CEGA: sem LLM nos testes; o caminho da IA (Pro) não é exercitado.
+Conversa pelo `handle_incoming`, banco real, asserção pelo SALDO. CLASSE CEGA: sem LLM.
 """
 from __future__ import annotations
 
@@ -91,7 +92,6 @@ def _responde(uid: int, *mensagens: str) -> list[str]:
 
 
 def _saca(uid, caixinha, investimento, resposta, saldo=3000.0):
-    """ "saquei 50" -> resposta; devolve (saldo do alvo, conversa)."""
     if caixinha:
         _caixinhas_com_saldo(uid, caixinha, saldo=saldo)
     else:
@@ -146,7 +146,6 @@ def test_n4_nome_virgula_valor_troca_o_valor(uid, resposta):
     ("Reserva 2025", None, "reserva 2025 de emergência"),
 ])
 def test_n6_ano_do_nome_do_catalogo_antes_da_preposicao(uid, caixinha, investimento, resposta):
-    """O ano do PRÓPRIO nome não fecha como quantia antes do "no/da/de"."""
     saldo, r = _saca(uid, caixinha, investimento, resposta)
     assert saldo == 2950.00, r
 
@@ -165,7 +164,6 @@ def test_n7_so_numero_a_pergunta_de_nome_nao_vira_nome(uid):
     ("R$ 5 mil", "caixinha R$ 5 mil"),
 ])
 def test_n8_nome_com_reais_nao_vira_valor(uid, caixinha, resposta):
-    """O "R$" do PRÓPRIO nome não é a forma "R$ + número"."""
     _caixinhas_com_saldo(uid, caixinha, saldo=6000.0)
     r = _responde(uid, "saquei 50", resposta)
     assert _caixinha(uid, caixinha) == 5950.00, r
@@ -178,7 +176,6 @@ def test_n8_nome_com_reais_nao_vira_valor(uid, caixinha, resposta):
     ("viagem", None, "viagem, dia 15"),
 ])
 def test_n9_cauda_descritiva_depois_da_virgula_nao_vira_valor(uid, caixinha, investimento, resposta):
-    """Depois de ", " só vale dinheiro; o ano ou o dia que descreve o nome, não."""
     saldo, r = _saca(uid, caixinha, investimento, resposta)
     assert saldo == 2950.00, r
 
@@ -199,7 +196,6 @@ def test_n10_preposicao_que_nao_leva_ao_catalogo(uid, caixinha, investimento, re
 
 
 def test_n12_deposito_nome_com_ano(uid):
-    """O mesmo conserto na porta de DEPÓSITO: "guardar 50" -> "viagem 2027"."""
     _caixinhas_com_saldo(uid, "viagem", saldo=3000.0)
     _pergunta_injetada(uid, "pockets.deposit", {"amount": 50.0}, "guardar 50")
     r = _responde(uid, "viagem 2027")
@@ -225,9 +221,13 @@ def test_n13_nome_curto_dentro_do_longo(uid, sem_teto_de_caixinha, caixinhas, in
     ("Viagem, 2027", None, "a viagem, 2027", 2950.0),     # o ", 2027" é do nome
     ("Viagem, 2027", None, "a viagem, 2027, 80", 2920.0),  # positivo: vírgula depois do nome
     (None, "Tesouro", "tesouro, 132, 50", 2867.5),         # decimal com espaço
+    (None, "Tesouro", "tesouro, R$ 132, 50", 2867.5),
+    (None, "Tesouro", "tesouro, 2029, 80", 2920.0),        # ano não é decimal (dono)
+    (None, "Tesouro", "tesouro, 2025, 50", 2950.0),        # limite aceito pelo dono
 ])
 def test_n14_virgula_do_nome_e_decimal_com_espaco(uid, caixinha, investimento, resposta, fim):
-    """Codex no #709: a cauda começa depois do nome INTEIRO e cola "132, 50"."""
+    """Codex no #709: a cauda começa depois do nome INTEIRO e cola "132, 50",
+    salvo quando a parte antes da vírgula é um ano."""
     saldo, r = _saca(uid, caixinha, investimento, resposta)
     assert saldo == fim, r
 

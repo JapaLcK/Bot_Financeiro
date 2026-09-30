@@ -1784,6 +1784,10 @@ _PREP_NO_MEIO_RE = re.compile(rf"(?<=\s){PREPOSICAO}(?=\s)", re.I)
 # "tesouro, de 2029".
 _CAUDA_QUANTIA_RE = re.compile(
     rf"(?:na\s+verdade\s+)?(?:r\$\s*)?\d[\d.,]*(?:\s*{h_bills._UNIDADE})?", re.I)
+# Ano solto na cauda: "tesouro, 2029, 80" é R$ 80, não 2.029,80 (decisão do dono).
+# Não há predicado de ano reusável: o do `ai_guard` só existe dentro de uma
+# alternância com "em/de/desde/até" na frente.
+_ANO_RE = re.compile(r"(?:19|20)\d\d\b")
 
 
 def _quantia_explicita(resposta: str, crua: str, existentes: list[str]) -> str | None:
@@ -1820,15 +1824,18 @@ def _quantia_explicita(resposta: str, crua: str, existentes: list[str]) -> str |
         for m in _PREP_NO_MEIO_RE.finditer(sem_nome):
             if _quantidade_fecha(sem_nome[:m.start()]):
                 return sem_nome[:m.start()]
-    # A PRIMEIRA ", " depois do alvo inteiro: "tesouro, 132, 50" é R$ 132,50, e
-    # na caixinha `Viagem, 2027` o 2027 de "a viagem, 2027" é do nome.
+    # A PRIMEIRA ", " depois do alvo inteiro: "tesouro, 132, 50" é R$ 132,50
+    # (também com "R$"/"reais"; a regex da cauda barra o resto), e na caixinha
+    # `Viagem, 2027` o 2027 de "a viagem, 2027" é do nome.
     alvo = _nome_do_alvo(resposta, existentes)
     no_catalogo = _eh_nome_do_catalogo(alvo, existentes)
     for inicio in [0, *(m.end() for m in re.finditer(", ", crua))]:
         if no_catalogo and not contains_word(normalize_text(crua[:inicio]), normalize_text(alvo)):
             continue
         # Repõe a limpeza que a `crua` pula: sem ela "tesouro, 132,50." dá R$ 13.250.
-        cauda = _cola_separador_decimal(limpa_pontuacao_final(crua[inicio:].strip()))
+        cauda = limpa_pontuacao_final(crua[inicio:].strip())
+        if not _ANO_RE.match(cauda):   # "2029, 80": ano não é decimal
+            cauda = _ESPACO_NO_SEPARADOR_RE.sub(r"\1", cauda)
         if _CAUDA_QUANTIA_RE.fullmatch(cauda):
             return cauda
     return None
