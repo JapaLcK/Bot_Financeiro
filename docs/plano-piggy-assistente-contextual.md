@@ -142,7 +142,7 @@ Uma entrada nova no simulador entra nesta tabela antes de entrar no código. Con
 | Gasto fixo automático pago no cartão | `payment_type="credit_card"`: `_cashflow_events()` ignora `payment_type` e tira o valor do caixa no `due_day`, e a mesma função tira a fatura aberta no vencimento dela. Depois que a cobrança é lançada no cartão, o valor sai duas vezes; antes, sai na data da cobrança em vez da data de pagar a fatura | só piora (dupla contagem ou saída antecipada) | risco, até esses gastos passarem pelo calendário da fatura sem duplicar |
 | Gasto fixo manual sem boleto gerado | só entra quando o boleto pendente já existe; conferir na implementação se as ocorrências futuras sem boleto ficam fora | só melhora | cabe |
 | Valor estimado | `variable_amount=true` no gasto fixo, exposto por `db/bills.py` e `db/recurring.py`: `_cashflow_events()` ignora a flag e subtrai a estimativa como valor exato, tanto no boleto pendente quanto no gasto fixo automático. A conta real pode vir maior ou menor | dois sentidos | os dois, até o valor ser confirmado |
-| Gasto variável | fora da projeção até a Etapa 3 | só melhora | cabe |
+| Gasto variável | fora da projeção até a Etapa 3; depois dela, a estimativa é hipótese e pode vir acima do gasto real | ausente: só melhora; estimada: dois sentidos | a estimativa entra só no cálculo do "cabe". O risco é sempre calculado sem ela, o pior caso da direção dele |
 | Custos da oferta ausentes | frete, IOF, seguro, tarifa ou CET não informados | só melhora | cabe |
 | Parcela sem valor nem taxa | cronograma cotado ausente | dois sentidos | os dois (`dados_insuficientes`) |
 | Datas das parcelas | data presumida fora do cartão | dois sentidos | os dois (`dados_insuficientes`, perguntar a data) |
@@ -239,7 +239,12 @@ paralelo.
   hipóteses, sem imagem ou texto financeiro bruto em logs.
 - **Consistência:** na primeira entrega, carimbar a hora do cálculo e reler os dados a cada
   pergunta. Controle de snapshot ou detecção de mudança concorrente fica para quando houver
-  incidente medido.
+  incidente medido. Janela conhecida e aceita: pagar conta e pagar fatura fazem dois commits
+  (`mark_bill_paid` reserva a conta antes de debitar, de propósito, e `db/cards.py` debita antes de
+  atualizar a fatura), então uma simulação que leia entre eles vê um estado intermediário. A janela
+  dura o intervalo entre dois commits da mesma requisição, e exige o mesmo usuário pagando e
+  perguntando ao mesmo tempo. Se virar incidente, o primeiro gate é a assinatura que o próprio
+  `mark_bill_paid` já usa para a reserva (conta `paid` sem `launch_id`).
 - **Regressão (inventário, não escopo de um PR só):** gastos variáveis ausentes e duplicados,
   compra no fechamento do cartão, salário antes/depois da parcela, fatura vencida, parcelas além
   de 90 dias, reserva já violada, banco indisponível, oferta sem CET, OCR errado, legenda ignorada,
