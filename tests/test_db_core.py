@@ -1,5 +1,9 @@
+import re
 from decimal import Decimal
 
+import pytest
+
+import db_support
 from db import (
     get_balance,
     add_launch_and_update_balance,
@@ -388,9 +392,10 @@ def test_confirm_email_verification_grava_signup_source():
     assert src == "app"
 
 
-def test_confirm_email_preserva_origem_no_re_registro():
-    # O insert usa `on conflict (email) do update ... coalesce(signup_source)`:
-    # se a conta já existe, a origem da 1ª criação é preservada. O guard
+def test_confirm_email_recusa_re_registro_e_preserva_a_conta():
+    # O insert é `on conflict (email) do nothing` (`db_support.inserir_conta_nova`):
+    # código de um e-mail que ganhou conta depois é RECUSADO, e a conta fica como
+    # estava — o antigo `do update` punha a senha deste código nela. O guard
     # anti-duplicata de create_email_verification bloqueia o 2º cadastro pela
     # API, então semeamos o 2º código direto na tabela (como o teste de
     # normalização de telefone faz) pra exercitar o caminho on-conflict.
@@ -415,11 +420,14 @@ def test_confirm_email_preserva_origem_no_re_registro():
             )
         conn.commit()
 
-    result = confirm_email_verification(email, code2, "web")
-    with get_conn() as conn:
-        with conn.cursor() as cur:
-            cur.execute("select signup_source from auth_accounts where user_id = %s",
-                        (result["user_id"],))
-            src2 = cur.fetchone()["signup_source"]
-    assert result["user_id"] == uid1
-    assert src2 == "app"  # coalesce preservou a 1ª origem
+    def _conta():
+        with get_conn() as conn:
+            with conn.cursor() as cur:
+                cur.execute("select signup_source, password_hash from auth_accounts where user_id = %s",
+                            (uid1,))
+                return cur.fetchone()
+
+    antes = _conta()
+    with pytest.raises(ValueError, match=re.escape(db_support.EMAIL_JA_TEM_CONTA)):
+        confirm_email_verification(email, code2, "web")
+    assert _conta() == antes and antes["signup_source"] == "app"

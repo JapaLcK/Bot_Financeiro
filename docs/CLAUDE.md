@@ -196,6 +196,27 @@ mesma `pending_google_signups`, com `provider='apple'`);
 `dashboard-link`/`dashboard-token` (link mágico); `link-code` (vincula WhatsApp e
 Discord à conta); `logout`; `refresh`; `account` (exclusão) e `account/export`.
 
+**Conta pela `/assinar` (funil v3 do quiz): `POST /auth/quiz/conta`**
+(`frontend/routes/quiz_signup.py`, com CSRF). Recebe e-mail, nome, WhatsApp
+(obrigatório) e o aceite dos termos, e cria a conta **sem senha e sem código** na
+mesma requisição (`db/signup_quiz.criar_conta_sem_codigo`, que NÃO passa por
+`email_verification_codes`), já logada. Responde `criada`, `logado` (a sessão do
+pedido já é dessa conta), `tem_conta`, `cadastro_pendente` (há código de
+`/auth/register` vivo para o e-mail: alguém está no meio do cadastro, e o código dele
+não é tocado) ou `ocupado` (409: outro pedido do mesmo e-mail está com a trava; a rota
+não espera, para uma rajada não segurar o pool de conexões). Só `criada` escreve e dá
+sessão. É o único lugar do site que diz se um e-mail tem conta (aceito pelo dono), com
+10/h por IP (balde `quiz`) e 3/h por e-mail (balde `quiz-conta`, separado do
+`register` para o anônimo não gastar o teto do cadastro da vítima). A prova do e-mail vem depois, no "Crie sua senha".
+
+**Os três criadores de conta** (o `confirm` do register, o `complete-signup` do
+Google/Apple e a `/assinar`) gravam pelo mesmo `db_support.inserir_conta_nova`:
+trava por e-mail + `on conflict (email) do nothing`. O e-mail que ganhou conta no meio
+é **recusado**, nunca fundido; o `verify-email` responde "Este e-mail já tem conta" e a
+saída é o "Esqueci a senha". A sessão, as atribuições (afiliado, prospecção, quiz) e o
+CAPI CompleteRegistration de conta nova moram num helper só, `_sessao_de_conta_nova`
+no monólito, usado pelas três rotas.
+
 ### MFA
 
 TOTP (`pyotp`) com códigos de backup: `/auth/mfa/setup`, `enable`, `disable`,
