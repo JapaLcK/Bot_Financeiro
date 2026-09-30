@@ -1116,6 +1116,11 @@ def init_db():
         """
         create index if not exists idx_password_reset_tokens_expires on password_reset_tokens (expires_at)
         """,
+        # O hash do e-mail da conta no instante da emissão: o reset só troca a
+        # senha se a conta ainda tiver esse e-mail (link no e-mail antigo morre).
+        """
+        alter table password_reset_tokens add column if not exists email_hash text
+        """,
         """
         create table if not exists data_export_tokens (
           token text primary key,
