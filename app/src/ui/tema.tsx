@@ -1,3 +1,4 @@
+import { DarkTheme, DefaultTheme, ThemeProvider } from "expo-router";
 import * as SystemUI from "expo-system-ui";
 import { createContext, useContext, useEffect, useMemo, type ReactNode } from "react";
 import { useColorScheme } from "react-native";
@@ -47,7 +48,19 @@ export function TemaProvider(props: { esquema?: Esquema; children: ReactNode }) 
     };
   }, [valor.cores.bg, bgPai]);
 
-  return <Contexto.Provider value={valor}>{props.children}</Contexto.Provider>;
+  // O container nativo do native-stack pinta `colors.background` do tema de
+  // navegação; sem isto era o #F2F2F2 do DefaultTheme, nos cantos das
+  // transições do iOS 26 (até no escuro).
+  const navegacao = useMemo(() => {
+    const base = esquema === "dark" ? DarkTheme : DefaultTheme;
+    return { ...base, colors: { ...base.colors, background: valor.cores.bg } };
+  }, [esquema, valor.cores.bg]);
+
+  return (
+    <Contexto.Provider value={valor}>
+      <ThemeProvider value={navegacao}>{props.children}</ThemeProvider>
+    </Contexto.Provider>
+  );
 }
 
 export function useTema(): ContextoTema {
