@@ -229,7 +229,13 @@ PR de cada etapa, não soluções prontas. Cada PR confere se ainda valem, decid
     as da Pluggy;
   - `list_pluggy_transactions()` para em `max_pages=60` sem conferir o cursor `next`, e
     `list_pluggy_accounts()` lê só a primeira página de `/accounts`;
-  - conta que some da resposta de `/accounts` segue somada com o saldo antigo.
+  - conta que some da resposta de `/accounts` segue somada com o saldo antigo, e
+    transação que some de uma sincronização completa também fica: `save_open_finance_sync()`
+    só faz upsert do que veio, então um `transactions/deleted` perdido deixa a compra ou o
+    estorno (e o lançamento e a fatura ligados) para sempre;
+  - banco religado guarda o `last_sync_at` antigo; `connection_ui_state()` já trata
+    `last_sync_at < reconnected_at` como não sincronizado, e é essa a fonte do estado da
+    conexão, não a idade do sync.
 - Quando o dado do Open Finance conta como desatualizado (limite por produto) e como a
   tela aberta percebe isso sem escrita.
 - Rentabilidade do Open Finance: medida em produção em 2026-09-29 (leitura, pelo dono;
@@ -266,6 +272,12 @@ PR de cada etapa, não soluções prontas. Cada PR confere se ainda valem, decid
     mensal entra uma vez e some nas duas seguintes, e o semanal e o diário quase somem.
     Projetar as ocorrências (ou gerar o horizonte inteiro) sem contar duas vezes o boleto
     que já existe.
+  - O saldo de partida perde as pendências: `get_consolidated_balance()` devolve
+    `reconciliation` (conciliação a confirmar, com `delta_se_confirmar`) e
+    `bank_movements` (declaração não confirmada), e `_starting_balance()` guarda só o
+    número. O mesmo vale para lançamento esperando "sim" em `pending_actions`. A previsão
+    compartilhada tem de levar essas pendências e mostrar o resultado como "a conferir",
+    não como exato.
   - Receita recorrente legada `once`, `weekly` ou `daily` fica fora de toda data:
     `_cashflow_events()` só aceita receita mensal e anual. Decidir o destino dessas linhas.
   - Fatura de cartão manual, ou sem fonte do Open Finance atualizada, entra pelo total
