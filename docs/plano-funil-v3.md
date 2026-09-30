@@ -27,7 +27,7 @@ O código da `main` vence o texto quando os dois divergem.
   mandam.
 - **PR 2 = #679, aberto** (checkout embutido e hospedado, mais a CSP). Depois vêm os PRs 3 a 6,
   na ordem da seção 5.
-- **PR 3 (webhook entrega o e-book) = #NNN.** O código da `main` e o `docs/CLAUDE.md`
+- **PR 3 (webhook entrega o e-book) = #708.** O código da `main` e o `docs/CLAUDE.md`
   ("Pagamentos") mandam sobre o texto do PR 3 abaixo.
 - A etapa 0b-2 (túnel antes do merge do PR 5) continua pendente.
 - **Decisões do dono de 2026-09-29:**
@@ -493,7 +493,7 @@ tentativa aberta por cliente).
        `session_id`.
      - A pendência é fechada quando o envio devolve True. Uma falha (Stripe fora, e-mail recusado) mantém a pendência para o próximo
      ciclo.
-   - **Feito no #NNN sem extrair o `_fire_email`:** o job chama `send_ebook_email`
+   - **Feito no #708 sem extrair o `_fire_email`:** o job chama `send_ebook_email`
      direto e grava o resultado na linha da pendência (a segunda saída prevista acima).
      Extrair a função sem nenhum consumidor seria refatoração sem pedido (§0.3).
    - **Condição do PR 3:** o registro da pendência segue §0.1. Procure antes se já existe
@@ -861,7 +861,7 @@ do e-book.
   como hoje (a `/home` com o `sid` e o CAPI do webhook).
 - **Resultado do quiz:** só vai no cookie `quiz_result` e fica no banco, como hoje. Nunca
   em query, log, Pixel ou GA4 (o teste de PII do PR 5).
-- **Lacuna conhecida — decidido: opção A, feito no #NNN, no `checkout.session.completed`
+- **Lacuna conhecida — decidido: opção A, feito no #708, no `checkout.session.completed`
   e não no ramo de fatura.** Com trial, o `amount_total` da sessão É o e-book líquido
   (o plano vale 0 no trial; medido 990, e 495 com cupom), o evento sai na hora da
   compra com os mesmos `fbp/fbc/ga_client_id` do `StartTrial`, e no ramo de fatura ele

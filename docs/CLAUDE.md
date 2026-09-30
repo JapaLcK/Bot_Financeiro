@@ -277,9 +277,9 @@ nascimento) no metadata e no da assinatura; sem e-book as chaves não existem. O
 identifica o e-book por essa foto, nunca pela env do momento. `EBOOK_URL` tem no máximo
 **500 caracteres** (limite de metadata do Stripe, medido): acima disso o e-book não é
 oferecido e sai o warning `ebook_nao_oferecido` (com o tamanho, **nunca a URL** — ela é
-o acesso ao PDF pago). As duas envs só entram em produção **depois do merge do #NNN**.
+o acesso ao PDF pago). As duas envs só entram em produção **depois do merge do #708**.
 
-**Entrega do e-book (#NNN).** O `checkout.session.completed` com `ebook_price` grava
+**Entrega do e-book (#708).** O `checkout.session.completed` com `ebook_price` grava
 uma linha em `ebook_entregas` (`db/ebook_entregas.py`, PK `user_id + session_id`, com a
 foto) logo depois do grant e ANTES dos outros efeitos, sem try: falha → 5xx e a
 reentrega refaz tudo. Sessão sem a foto `ebook_url` grava assim mesmo e loga
