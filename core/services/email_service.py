@@ -6,6 +6,7 @@ Variáveis de ambiente necessárias:
   RESEND_API_KEY      — chave da API do Resend (re_xxxxxxxx)
   EMAIL_FROM          — remetente institucional (default: "PigBank <suporte@pigbankai.com>")
   EMAIL_FROM_PIGGY    — remetente Piggy/conversacional (default: "Piggy do PigBank <oi@pigbankai.com>")
+  EMAIL_FROM_FOUNDER  — remetente do e-mail pessoal do fundador (default: "Lucas do PigBank <lucas@pigbankai.com>")
   SUPPORT_EMAIL       — e-mail público de suporte (default: "suporte@pigbankai.com")
 """
 
@@ -13,12 +14,14 @@ from __future__ import annotations
 
 import logging
 import os
+from datetime import datetime, timedelta, timezone
 from typing import Optional
 
 logger = logging.getLogger(__name__)
 
 EMAIL_FROM          = os.getenv("EMAIL_FROM",          "PigBank <suporte@pigbankai.com>")
 EMAIL_FROM_PIGGY    = os.getenv("EMAIL_FROM_PIGGY",    "Piggy do PigBank <oi@pigbankai.com>")
+EMAIL_FROM_FOUNDER  = os.getenv("EMAIL_FROM_FOUNDER",  "Lucas do PigBank <lucas@pigbankai.com>")
 SUPPORT_EMAIL       = os.getenv("SUPPORT_EMAIL",       "suporte@pigbankai.com")
 
 
@@ -61,6 +64,7 @@ def send_email(
     headers: Optional[dict] = None,
     attachments: Optional[list] = None,
     log_recipient: bool = True,
+    scheduled_at: Optional[str] = None,
 ) -> bool:
     """Envia e-mail via Resend API. Retorna True em sucesso, nunca lança exceção.
 
@@ -105,6 +109,8 @@ def send_email(
                 params["headers"] = hdrs
         if attachments:
             params["attachments"] = attachments
+        if scheduled_at:
+            params["scheduled_at"] = scheduled_at  # ISO 8601; o Resend segura e envia na hora
         resend.Emails.send(params)
         logger.info("E-mail enviado para <%s>: %s", to_log, subject)
         _log_email_event("info", "email_sent", f"E-mail enviado para {to_log}", to=to_log, subject=subject)
@@ -133,7 +139,12 @@ def send_email(
         return False
 
 
-def _base_html(title: str, content: str) -> str:
+_RODAPE_PADRAO = ('Você recebeu este e-mail porque criou uma conta no PigBank.<br/>\n'
+                  '      Dúvidas? Use o comando <strong>ajuda</strong> no bot ou acesse '
+                  '<a href="https://pigbankai.com">pigbankai.com</a>')
+
+
+def _base_html(title: str, content: str, footer: str = _RODAPE_PADRAO) -> str:
     """Template transacional — dark premium com as cores da marca (preto #0C0C0D /
     rosa #FF2D8E / off-white #F6F4F1), pareado com _piggy_html. Logo do Piggy
     (PNG hospedado — Gmail não renderiza SVG) num medalhão off-white pro
@@ -179,8 +190,7 @@ def _base_html(title: str, content: str) -> str:
     </div>
     <div class="body">{content}</div>
     <div class="footer">
-      Você recebeu este e-mail porque criou uma conta no PigBank.<br/>
-      Dúvidas? Use o comando <strong>ajuda</strong> no bot ou acesse <a href="https://pigbankai.com">pigbankai.com</a>
+      {footer}
     </div>
   </div>
 </body>
@@ -1268,6 +1278,119 @@ def send_pix_paid_email(to: str, plan: str, amount_brl: float, access_starts_at,
         to=to, subject=f"✓ Pagamento confirmado — {nome} anual ({valor})",
         html_body=html, text_body=text,
     )
+
+
+FOUNDER_EMAIL_DELAY = timedelta(hours=3)
+
+
+def send_founder_email(to: str) -> bool:
+    """E-mail pessoal do fundador, AGENDADO no Resend para 3h depois do envio
+    (`scheduled_at`) — sem job nem tabela. Quem decide se sai é o
+    `send_founder_email_once`; chame por ele, não direto.
+
+    A copy é a aprovada pelo dono, palavra por palavra. O CTA do banco passa pelo
+    /login com `next` (a lista do `nextParam()` do login.html aceita /settings):
+    logado, o login pula direto para a view de Open Finance.
+    """
+    base = _public_base_url()
+    banco = f"{base}/login?next=%2Fsettings%3Fview%3Dopen-finance"
+    wpp = _whatsapp_link("Oi, Piggy!")
+    app = f"{base}/app"
+    assunto = "oi, aqui é o Lucas do PigBank 🐷"
+    content = f"""
+      <p>Oi!</p>
+      <p>Valeu demais por assinar o PigBank.</p>
+      <p>Você chegou agora, e o produto ainda é bem novo. Deixa eu te contar onde a gente está.</p>
+      <p>Meu nome é Lucas. Eu criei o PigBank.</p>
+      <p><strong>Meu objetivo</strong></p>
+      <p>Todo mundo sabe que devia entender o próprio dinheiro. Quase ninguém entende.</p>
+      <p>E não é por preguiça. É porque as ferramentas são chatas: planilha que você abandona na segunda semana, app cheio de tela e botão, gasto pra anotar um por um.</p>
+      <p>Eu acho que isso é um problema de interface. Entender o seu dinheiro tinha que ser tão fácil quanto mandar mensagem pra um amigo.</p>
+      <p>Quero que qualquer pessoa, do estudante que recebeu o primeiro salário a quem está juntando pra sair de casa, saiba exatamente pra onde o dinheiro vai. E que isso aconteça sem esforço.</p>
+      <p>O PigBank é a nossa tentativa de fazer isso.</p>
+      <p><strong>O que dá pra fazer hoje</strong></p>
+      <ol>
+        <li>Conectar o seu banco. Pelo Open Finance, suas transações entram sozinhas, já organizadas. Você não precisa anotar nada.</li>
+        <li>Perguntar qualquer coisa pro Piggy. Esse é o coração do produto. O Piggy é o nosso assistente com IA, e fala com você pelo WhatsApp. Pergunta do jeito que você fala: "quanto eu gastei com delivery esse mês?", "pra onde foi meu dinheiro essa semana?", "dá pra eu guardar 300 por mês?". Ele responde olhando os seus números de verdade, não uma dica genérica.</li>
+        <li>Ver tudo no dashboard. Em <a href="{app}">{app}</a> você vê o mês inteiro: onde o dinheiro foi, as suas caixinhas, os cartões e os investimentos.</li>
+      </ol>
+      <p><strong>Por onde começar</strong></p>
+      <p>Se for fazer uma coisa só hoje, que seja esta: conecta o seu banco e depois manda uma pergunta pro Piggy no WhatsApp. Leva 2 minutos, e você vai entender o produto na hora.</p>
+      <p style="text-align:center;margin:24px 0 8px"><a class="btn" href="{banco}">Conectar meu banco</a></p>
+      <p style="text-align:center;margin:0 0 24px"><a href="{wpp}">Falar com o Piggy no WhatsApp</a></p>
+      <p><strong>Sobre privacidade</strong></p>
+      <p>Dinheiro é assunto sério, e eu trato como tal. Seus dados são só seus: a gente não vende seus dados pra ninguém. A conexão com o banco é só de leitura, a gente nunca movimenta o seu dinheiro. E se quiser, você apaga tudo pela sua conta. Se tiver qualquer dúvida sobre isso, me pergunta.</p>
+      <p><strong>Uma última coisa</strong></p>
+      <p>O PigBank ainda é novo. Tem coisa que vai quebrar, e tem coisa que você vai querer que exista e ainda não existe. Quero saber das duas.</p>
+      <p>É só responder este e-mail. Eu leio todos, e quem responde sou eu, não uma IA. 😅</p>
+      <p>Valeu!!<br/>Lucas</p>
+    """
+    text = (
+        "Oi!\n\n"
+        "Valeu demais por assinar o PigBank.\n\n"
+        "Você chegou agora, e o produto ainda é bem novo. Deixa eu te contar onde a gente está.\n\n"
+        "Meu nome é Lucas. Eu criei o PigBank.\n\n"
+        "MEU OBJETIVO\n"
+        "Todo mundo sabe que devia entender o próprio dinheiro. Quase ninguém entende.\n"
+        "E não é por preguiça. É porque as ferramentas são chatas: planilha que você abandona na segunda semana, app cheio de tela e botão, gasto pra anotar um por um.\n"
+        "Eu acho que isso é um problema de interface. Entender o seu dinheiro tinha que ser tão fácil quanto mandar mensagem pra um amigo.\n"
+        "Quero que qualquer pessoa, do estudante que recebeu o primeiro salário a quem está juntando pra sair de casa, saiba exatamente pra onde o dinheiro vai. E que isso aconteça sem esforço.\n"
+        "O PigBank é a nossa tentativa de fazer isso.\n\n"
+        "O QUE DÁ PRA FAZER HOJE\n"
+        "1. Conectar o seu banco. Pelo Open Finance, suas transações entram sozinhas, já organizadas. Você não precisa anotar nada.\n"
+        "2. Perguntar qualquer coisa pro Piggy. Esse é o coração do produto. O Piggy é o nosso assistente com IA, e fala com você pelo WhatsApp. Pergunta do jeito que você fala: \"quanto eu gastei com delivery esse mês?\", \"pra onde foi meu dinheiro essa semana?\", \"dá pra eu guardar 300 por mês?\". Ele responde olhando os seus números de verdade, não uma dica genérica.\n"
+        f"3. Ver tudo no dashboard. Em {app} você vê o mês inteiro: onde o dinheiro foi, as suas caixinhas, os cartões e os investimentos.\n\n"
+        "POR ONDE COMEÇAR\n"
+        "Se for fazer uma coisa só hoje, que seja esta: conecta o seu banco e depois manda uma pergunta pro Piggy no WhatsApp. Leva 2 minutos, e você vai entender o produto na hora.\n"
+        f"Conectar meu banco: {banco}\n"
+        f"Falar com o Piggy no WhatsApp: {wpp}\n\n"
+        "SOBRE PRIVACIDADE\n"
+        "Dinheiro é assunto sério, e eu trato como tal. Seus dados são só seus: a gente não vende seus dados pra ninguém. A conexão com o banco é só de leitura, a gente nunca movimenta o seu dinheiro. E se quiser, você apaga tudo pela sua conta. Se tiver qualquer dúvida sobre isso, me pergunta.\n\n"
+        "UMA ÚLTIMA COISA\n"
+        "O PigBank ainda é novo. Tem coisa que vai quebrar, e tem coisa que você vai querer que exista e ainda não existe. Quero saber das duas.\n"
+        "É só responder este e-mail. Eu leio todos, e quem responde sou eu, não uma IA. 😅\n\n"
+        "Valeu!!\nLucas\n"
+    )
+    quando = (datetime.now(timezone.utc) + FOUNDER_EMAIL_DELAY).isoformat(timespec="seconds")
+    return send_email(to=to, subject=assunto, html_body=_base_html(
+                          assunto, content,
+                          footer="Você recebeu este e-mail porque assinou o PigBank."),
+                      text_body=text, from_addr=EMAIL_FROM_FOUNDER, scheduled_at=quando)
+
+
+def send_founder_email_once(user_id: int, to: str, source: str, external_ref: str) -> bool:
+    """O e-mail do fundador, uma vez por conta — o único caminho de envio,
+    usado pelo checkout do Stripe e pelo efeito `email` do Pix (§0.7).
+
+    Duas travas, as duas precisam passar:
+      • `founder_email_sent` já registrado (reentrega do mesmo evento);
+      • `e_primeira_assinatura`: nenhum grant além deste, fora cortesia do admin
+        (renovação, volta depois de cancelar, upgrade e migração ficam de fora).
+    A marca só é gravada com envio confirmado: `False` do Resend deixa a
+    reentrega tentar de novo.
+
+    **Nunca levanta.** Roda dentro do webhook e do dreno do Pix, depois do
+    grant: e-mail de boas-vindas não pode derrubar nem atrasar a materialização
+    do pagamento. Falha vira log e `False`.
+    """
+    try:
+        from core.observability import log_system_event_sync, recent_event_exists
+        from db.plan_grants import e_primeira_assinatura
+
+        if recent_event_exists("founder_email_sent", int(user_id), 3650):
+            return False
+        if not e_primeira_assinatura(int(user_id), source, external_ref):
+            return False
+        if not send_founder_email(to):
+            return False
+        log_system_event_sync("info", "founder_email_sent",
+                              "E-mail do fundador agendado.",
+                              source="billing", user_id=int(user_id))
+        return True
+    except Exception as exc:  # noqa: BLE001 — ver docstring
+        logger.error("E-mail do fundador falhou user=%s: %s", user_id, exc)
+        return False
+
 
 def send_payment_failed_email(to: str, plan: str | None, dashboard_url: str = "") -> bool:
     """E-mail quando pagamento falha — Stripe vai retentar (item 40).

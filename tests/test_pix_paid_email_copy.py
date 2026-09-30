@@ -158,8 +158,9 @@ def test_o_chamador_manda_o_plano_e_o_comeco(monkeypatch):
     visto = {}
     monkeypatch.setattr(es, "send_pix_paid_email",
                         lambda *a, **kw: visto.update(args=a, kw=kw) or True)
+    monkeypatch.setattr(es, "send_founder_email_once", lambda *a: True)
 
-    pde._email({"user_id": 7, "plan": "pro_max", "plan_stored": "pro_max",
+    pde._email({"id": 1, "user_id": 7, "plan": "pro_max", "plan_stored": "pro_max",
                 "amount_cents": 49900, "access_starts_at": FUTURO,
                 "access_expires_at": FUTURO + timedelta(days=365)}, {})
 
