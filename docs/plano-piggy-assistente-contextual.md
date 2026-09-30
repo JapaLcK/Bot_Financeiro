@@ -2,7 +2,9 @@
 
 > Planejamento, sem autorização para implementar. Código conferido em `origin/main` `a4a5e251`
 > em 30/09/2026. Antes de implementar, partir da `main` atual e repetir a conferência
-> (`git rev-list --count a4a5e251..origin/main`; qualquer número acima de 0 é aviso).
+> (`git fetch origin main` com sucesso **antes** de `git rev-list --count a4a5e251..origin/main`:
+> sem o fetch, uma referência remota velha dá 0 e valida premissas obsoletas; qualquer número
+> acima de 0 é aviso).
 
 ## Objetivo e decisões do dono
 
@@ -62,8 +64,12 @@ migração de contrato próprias.
 4. **Saldo parcial ou desatualizado.** Carteira manual, Open Finance, lançamentos a conciliar e
    renda prevista têm confiabilidades diferentes. `balance_source="unavailable"`, bancos
    excluídos, sincronização antiga ou renda apenas inferida impedem **qualquer** veredito, positivo
-   ou negativo: um saldo parcial pode tanto esconder um risco quanto fabricar um. Limite do cartão
-   não é capacidade de pagar a fatura.
+   ou negativo: um saldo parcial pode tanto esconder um risco quanto fabricar um. Pendências de
+   conferência também contam: conciliação do Open Finance a confirmar
+   (`reconciliation.pending_count` e `delta_se_confirmar`, expostos por `get_balance`) e
+   declarações não confirmadas (`bank_movements.pending_count`). Hoje
+   `cashflow._starting_balance()` descarta esse estado, então o simulador precisa lê-lo à parte.
+   Limite do cartão não é capacidade de pagar a fatura.
 5. **Reserva padrão de zero.** O simulador aceita `reserva_minima=0`, insuficiente para concluir
    que a compra é prudente. Pedir uma reserva ou definir uma regra conservadora, visível e
    editável. Se o cenário atual já estiver abaixo da reserva, distinguir problema prévio do
@@ -80,8 +86,11 @@ pelo código a partir desse resultado; o modelo pode explicar, mas sua redação
 o estado. A guarda atual, que só registra logs, não basta para isso.
 
 - `risco_identificado` exige saldo confiável (fonte disponível, sem bancos excluídos, sincronização
-  dentro do limite) e datas de pagamento conhecidas ou confirmadas. Faltando um deles, o estado é
-  `dados_insuficientes` ou `dados_desatualizados`, com o dado que falta. A falta **só** da
+  dentro do limite, sem conciliação nem declaração pendente capaz de mudar o resultado) e datas de
+  pagamento conhecidas ou confirmadas. Faltando um deles, o estado é `dados_insuficientes` ou
+  `dados_desatualizados`, com o dado que falta. Com pendência de conciliação, o veredito só sai se
+  sobreviver ao `delta_se_confirmar` aplicado no sentido que o enfraquece; senão, o estado é
+  `dados_desatualizados` e a Piggy pede a conferência. A falta **só** da
   estimativa variável não impede `risco_identificado`, porque ela apenas pioraria o caixa.
   Resposta: "não recomendo nesta condição", com data e valor.
 - `cabe_nas_premissas` fica **desligado** até a estimativa variável ser validada (Etapa 3). Quando
@@ -152,7 +161,8 @@ paralelo.
 - **Regressão (inventário, não escopo de um PR só):** gastos variáveis ausentes e duplicados,
   compra no fechamento do cartão, salário antes/depois da parcela, fatura vencida, parcelas além
   de 90 dias, reserva já violada, banco indisponível, oferta sem CET, OCR errado, legenda ignorada,
-  pendência de lançamento, saldo alterado após novo gasto, erro no gate do print.
+  pendência de lançamento, conciliação ou declaração do Open Finance pendente, saldo alterado
+  após novo gasto, erro no gate do print.
 - **Lançamento gradual:** alertas negativos e inconclusivos primeiro; "cabe" só após a meta de
   falsos "cabe" definida e atingida. Poder desligar a orientação sem desligar a simulação
   informativa.
