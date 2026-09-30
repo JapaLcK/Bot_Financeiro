@@ -61,6 +61,14 @@ export default defineConfig([
     },
   },
   {
+    // `fmt` é `const` de topo do dashboard.js (escopo léxico global, não
+    // `window`): carregado depois deste arquivo, e lido só quando o modal abre.
+    files: ["frontend/cash-transfers.js"],
+    languageOptions: {
+      globals: { fmt: "readonly" },
+    },
+  },
+  {
     // Bloco PRÓPRIO, e não nomes soltos no `frontend/**` acima: global
     // declarada lá enfraquece o `no-undef` do repositório INTEIRO — `showToast`
     // ou `getCsrfToken` escrito por engano num arquivo que não os carrega
