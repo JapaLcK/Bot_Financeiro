@@ -34,7 +34,9 @@ const item = (o) => ({ id: 1, kind: "saque", status: "ativo", amount: 200, tx_da
 
 // `state` é mutável: a ação padrão tira o item da lista e baixa o contador do
 // /data, como o servidor faria — prova que o reload é busca nova.
-async function pageFor(width, { items = [], alerts = [CASH(1)], actionHandler, js404 = false } = {}) {
+// `listDelay`: a lista chega atrasada — o `state.lists` sobe antes de a página
+// renderizar, então quem espera o reload espera pelo DOM, não pelo contador.
+async function pageFor(width, { items = [], alerts = [CASH(1)], actionHandler, js404 = false, listDelay = 0 } = {}) {
   const page = await browser.newPage({ viewport: { width, height: 900 } });
   const state = { items: items.slice(), alerts, posts: [], lists: 0, errs: [] };
   page.on("pageerror", (e) => state.errs.push(String(e)));
@@ -57,6 +59,7 @@ async function pageFor(width, { items = [], alerts = [CASH(1)], actionHandler, j
     }
     if (url.pathname === "/open-finance/1/cash-transfers") {
       state.lists += 1;
+      if (listDelay) await new Promise((r) => setTimeout(r, listDelay));
       return route.fulfill(json({ ok: true, items: state.items }));
     }
     return route.fulfill(json({}));
@@ -231,14 +234,14 @@ test("os botões da linha travam juntos durante o POST", async () => {
 });
 
 test("depois da ação: lista nova e o /data novo baixa o contador da faixa para 1", async () => {
-  const { page, state } = await pageFor(1280, { items: [item({ id: 1 }), item({ id: 2, status: "perguntar_novo" })], alerts: [CASH(2)] });
+  const { page, state } = await pageFor(1280, { items: [item({ id: 1 }), item({ id: 2, status: "perguntar_novo" })], alerts: [CASH(2)], listDelay: 300 });
   try {
     await faixa(page).getByText("2", { exact: true }).waitFor();
     await faixa(page).getByRole("button", { name: "Conferir" }).click();
     const listas = await waitFor(() => state.lists === 1).then(() => state.lists);
     await modal(page).getByRole("button", { name: "Ok", exact: true }).click();
-    await waitFor(() => state.lists > listas);
-    assert.equal(await modal(page).locator(".modal-row").count(), 1);
+    await waitFor(async () => (await modal(page).locator(".modal-row").count()) === 1);
+    assert.ok(state.lists > listas);
     await waitFor(async () => /Dinheiro vivo · 1 para conferir/.test(await faixaTexto(page)));
     assert.deepEqual(state.errs, []);
   } finally { await page.close(); }
@@ -248,7 +251,9 @@ test("409: mostra a mensagem do servidor e recarrega a lista", async () => {
   const msg = "O lançamento que você anotou mudou e não bate mais com este. Se forem diferentes, toque em “São diferentes”.";
   const { page, state } = await pageFor(1280, {
     items: [item({ id: 8, status: "perguntar_manual", manual_alvo: "meu pai", manual_valor: 200, manual_date: "2026-03-09" })],
-    actionHandler: () => ({ status: 409, body: { detail: msg } }),
+    // O caso real do 409: o manual mudou; a lista nova já traz o valor novo.
+    actionHandler: () => { state.items = [{ ...state.items[0], manual_valor: 250 }]; return { status: 409, body: { detail: msg } }; },
+    listDelay: 300,
   });
   try {
     await page.evaluate(() => window.CashTransfers.open(1));
@@ -256,11 +261,12 @@ test("409: mostra a mensagem do servidor e recarrega a lista", async () => {
     await page.locator("#generic-confirm-body", { hasText: "mudou e não bate" }).waitFor();
     assert.equal(await page.locator("#generic-confirm-body").textContent(), msg);
     await page.locator("#generic-confirm-ok").click();
-    await waitFor(() => state.lists === 2);
+    await modal(page).getByText("Você anotou “meu pai”, R$ 250,00 em 09/03. É o mesmo dinheiro?").waitFor();
+    assert.equal(state.lists, 2);
   } finally { await page.close(); }
 });
 
-test("200 changed:false (respondida noutra aba/no WhatsApp): avisa e recarrega", async () => {
+test("200 changed:false (outra aba, WhatsApp ou o sync mudou antes): avisa e recarrega", async () => {
   const { page, state } = await pageFor(1280, {
     items: [item({ id: 5, status: "perguntar_novo" })],
     actionHandler: () => { state.items = []; return { status: 200, body: { ok: true, changed: false } }; },
@@ -269,7 +275,7 @@ test("200 changed:false (respondida noutra aba/no WhatsApp): avisa e recarrega",
     await page.evaluate(() => window.CashTransfers.open(1));
     await modal(page).getByRole("button", { name: "Já anotei" }).click();
     await page.locator("#generic-confirm-overlay.open").waitFor();
-    assert.equal(await page.locator("#generic-confirm-body").textContent(), "Esse já tinha sido conferido. A lista foi atualizada.");
+    assert.equal(await page.locator("#generic-confirm-body").textContent(), "Isso já tinha mudado. A lista foi atualizada.");
     await page.locator("#generic-confirm-ok").click();
     await modal(page).getByText("Nada para conferir.").waitFor();
     assert.equal(state.lists, 2);

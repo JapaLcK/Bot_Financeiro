@@ -72,8 +72,8 @@
     buttons.forEach(b => { b.disabled = true; });
     try {
       const { changed } = await act(id, action);
-      // Botões travados no POST: changed:false é resposta dada noutra aba/no WhatsApp.
-      if (!changed && overlay) await window.alertModal("Esse já tinha sido conferido. A lista foi atualizada.");
+      // Botões travados no POST: changed:false = o estado mudou antes (outra aba, WhatsApp, sync).
+      if (!changed && overlay) await window.alertModal("Isso já tinha mudado. A lista foi atualizada.");
       if (overlay) await load();
       if (afterSave) await afterSave();
     } catch (err) {
