@@ -216,8 +216,8 @@ PR de cada etapa, não soluções prontas. Cada PR confere se ainda valem, decid
   segue como sucesso (achados na revisão do PR #689; afetam saldo, fatura e parcelas em
   toda tela). Além da moeda:
   - `normalize_pluggy_account()` põe `type` = `BANK` e `balance` = 0 quando faltam;
-    `normalize_pluggy_transaction()` põe `amount` = 0 e data inválida = hoje; transação
-    sem `id` é descartada em silêncio;
+    `normalize_pluggy_transaction()` põe `amount` = 0 e data inválida = hoje; conta e
+    transação sem `id` são descartadas em silêncio, e o sync segue `ok=True`;
   - compra parcelada sem `creditCardMetadata.totalInstallments` vira compra única, e a
     importada nunca cria as faturas futuras (a manual cria, em
     `add_credit_purchase_installments()`);
@@ -257,7 +257,14 @@ PR de cada etapa, não soluções prontas. Cada PR confere se ainda valem, decid
   - Conta paga pelo banco sem passar pelo PigBank continua pendente e sai de novo: o
     boleto (nada do Open Finance escreve em `bill_instances`) e a fatura (a importação
     pula o pagamento de fatura; só `pay_bill_amount` a marca paga).
-  - `list_bills(..., limit=1000)` corta os boletos mais distantes sem avisar.
+  - `list_bills(..., limit=1000)` corta os boletos mais distantes sem avisar, e boleto
+    pendente entra com qualquer valor (um negativo vira entrada de dinheiro).
+  - Receita recorrente legada `once`, `weekly` ou `daily` fica fora de toda data:
+    `_cashflow_events()` só aceita receita mensal e anual. Decidir o destino dessas linhas.
+  - Fatura de cartão manual, ou sem fonte do Open Finance atualizada, entra pelo total
+    gravado, que não tem compra não lançada nem parcela restante. Com o cartão manual só
+    para leitura (Q37), decidir se essa fatura é confirmada pelo usuário ou sai como "a
+    conferir".
   - Ocorrência de recorrente com vencimento hoje ou já passado, ainda não realizada, some
     da previsão (`_recurring_occurrence_dates()` só emite datas estritamente depois de
     hoje), e a que se realizou
