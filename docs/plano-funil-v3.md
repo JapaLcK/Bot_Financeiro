@@ -400,12 +400,18 @@ tentativa aberta por cliente).
    compra no funil/CAPI/GA4. Se algum efeito não for idempotente, a saída é gravar a
    entrega pendente e ter um job que a refaz, e não o 5xx.
 2. `invoice.paid`: `amount_plano = amount_paid − valor líquido das linhas de
-   `invoice.lines.data` com `price.id == EBOOK`, onde líquido = `amount` − soma dos
+   `invoice.lines.data` com `pricing.price_details.price == EBOOK`, onde líquido = `amount` − soma dos
    `discount_amounts` da linha (com cupom ligado, o desconto pode cair na linha do
    e-book). O e-mail de cobrança e a comissão de afiliado usam o `amount_plano`
    (comissão só sobre o plano, decisão do dono), e com `amount_plano <= 0` os dois são
    pulados. Motivo: **com trial, a 1ª fatura é só o e-book**, e hoje ela mandaria
    "cobrança do seu plano" e daria comissão sobre o e-book.
+   **Formato da API `dahlia`** (conferido no SDK 15.6.1): a linha de FATURA
+   (`InvoiceLineItem`) não tem `price` no nível de cima. O id fica em
+   `pricing.price_details.price`, que pode vir expandido: aceite o id ou `.id`. A linha
+   da SESSÃO de checkout (`LineItem`, a do `list_line_items` do item 1) continua com
+   `price`. Os payloads dos testes seguem esse formato; comparar por `price.id` nunca
+   acharia o e-book.
 3. `core/services/email_service.py`: `send_ebook_email(to, url, dashboard_url="")`. Ela
    precisa aceitar o terceiro argumento, porque o `_fire_email` chama
    `fn(email, *args, DASHBOARD_URL)`, como o `send_trial_ending_email`. Com dois
