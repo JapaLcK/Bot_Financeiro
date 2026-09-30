@@ -52,7 +52,7 @@ def test_composicao_exata(uid):
         "caixinhas": D("50"), "investimentos_manuais": D("70"), "total": D("1720")}
     assert f["base"]["contas"] == ["acc-brl"]
     assert f["base"]["posicoes"] == ["inv-500"]
-    assert f["base"]["fora"] == {"moeda": 1, "resgatada": 1, "pausada": 1, "caixinha_espelhada": 0}
+    assert f["base"]["fora"] == {"moeda": 2, "resgatada": 1, "pausada": 1, "caixinha_espelhada": 0}
     assert sorted(f["base"]["conexoes"].values()) == ["paused", "updated", "updated"]
     assert f["motivos"] == ["carteira_nao_confirmada", "manual_e_banco"]
 
@@ -77,10 +77,28 @@ def test_outro_usuario_com_os_mesmos_ids_nao_muda_a_foto(uid):
     conta(cb, "acc-brl", "5000")
     posicao(cb, "inv-500", "9999")
     posicao(cb, "inv-pausada", "1")
+    conta(cb, "acc-usd", "1", moeda="USD", code="USD")
+    conta(cb, "acc-usd-b", "1", moeda="USD", code="USD")
     investimento_manual(b, "CDB manual", "1")
     caixinha(b, "Viagem", "1")
     db.set_balance(b, D("12345"))
     assert foto(uid) == antes
+
+
+@pytest.mark.parametrize("contas,bancos,moeda", [
+    ([("UPDATED", "acc-usd", "USD")], 0, 1),                                # só a conta em dólar
+    ([("UPDATED", "acc-1", "BRL")], 50, 0),                                 # real vai para a soma
+    ([("PAUSED", "acc-usd", "USD")], 0, 0),                                 # pausada já está fora
+    ([("UPDATED", "acc-usd", "USD"), ("PAUSED", "acc-usd", "USD")], 0, 0),  # a mais nova pausou
+    ([("UPDATED", "acc-usd", "USD"), ("UPDATED", "acc-usd", "USD")], 0, 1),  # reconectou
+])
+def test_conta_em_outra_moeda_fica_fora_e_contada(uid, contas, bancos, moeda):
+    for i, (status, pid, m) in enumerate(contas):  # conexões em ordem: a última é a mais nova
+        conta(conexao(uid, f"item-{i}-{uid}", status=status), pid, "50", moeda=m, code=m)
+    f = foto(uid)
+    assert (f["bancos"], f["total"]) == (D(bancos), f["carteira"] + D(bancos))
+    assert f["base"]["fora"]["moeda"] == moeda
+    assert f["motivos"] == ["carteira_nao_confirmada"]
 
 
 # ── motivos ──────────────────────────────────────────────────────────────────

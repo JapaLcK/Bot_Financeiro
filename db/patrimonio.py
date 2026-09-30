@@ -75,6 +75,18 @@ def calcular(cur, user_id: int) -> dict:
             fora["resgatada"] += 1
         else:
             posicoes.append(p)
+    # Conta do banco em outra moeda: o `BANK_ACCOUNTS_SQL` a tira da soma sem avisar.
+    # Aqui só se conta, no mesmo recorte dele (identidade, conexão mais nova, sem pausada).
+    cur.execute("""select count(*) as n from (
+                       select distinct on (a.provider_account_id)
+                              upper(coalesce(c.status, '')) as connection_status
+                         from open_finance_accounts a
+                         join open_finance_connections c on c.id = a.connection_id
+                        where c.user_id=%s and upper(a.type) = 'BANK'
+                          and upper(coalesce(a.currency, 'BRL')) <> 'BRL'
+                        order by a.provider_account_id, c.id desc) u
+                    where connection_status not in ('PAUSED', 'DELETED')""", (user_id,))
+    fora["moeda"] += cur.fetchone()["n"]
 
     cur.execute("select coalesce(sum(balance), 0) as s, coalesce(bool_or(balance > 0), false) as pos"
                 " from pockets where user_id=%s and of_investment_id is null", (user_id,))

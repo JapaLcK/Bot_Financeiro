@@ -294,7 +294,8 @@ PR de cada etapa, não soluções prontas. Cada PR confere se ainda valem, decid
     vai reusar; job `core/services/patrimonio_foto.py` atrás de
     `PATRIMONIO_FOTO_ENABLED` (desligado). Carteira com a fusão devolvida, contas do
     `BANK_ACCOUNTS_SQL`, posições do banco em reais (outra moeda, resgatada e conexão
-    pausada ficam fora e contadas em `base.fora`), caixinhas manuais e investimentos
+    pausada ficam fora e contadas em `base.fora`; a conta do banco em outra moeda também
+    entra na contagem `base.fora.moeda`), caixinhas manuais e investimentos
     manuais; cartão fora. Toda foto sai com `motivos` (`carteira_nao_confirmada` até a
     Q37, e mais os de banco desatualizado, espécie, pendências, moeda presumida, saldo
     ausente e `caixinha_espelhada_fora` — a caixinha do banco cuja posição ficou fora
