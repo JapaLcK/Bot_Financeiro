@@ -63,6 +63,7 @@ def _cents(v) -> float:
 async def affiliate_me(request: Request):
     user_id = shared.resolve_dashboard_user_id(request)
     shared.raise_if_account_scheduled_for_deletion(user_id)
+    await asyncio.to_thread(shared.exigir_credencial, user_id)
 
     affiliate = await asyncio.to_thread(get_affiliate_by_user, user_id)
     if not affiliate:
@@ -120,6 +121,7 @@ class PayoutRequestBody(BaseModel):
 async def affiliate_request_payout(request: Request, body: PayoutRequestBody):
     user_id = shared.resolve_dashboard_user_id(request)
     shared.raise_if_account_scheduled_for_deletion(user_id)
+    await asyncio.to_thread(shared.exigir_credencial, user_id)
 
     affiliate = await asyncio.to_thread(get_affiliate_by_user, user_id)
     if not affiliate:

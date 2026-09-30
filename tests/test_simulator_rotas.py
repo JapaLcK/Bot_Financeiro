@@ -29,7 +29,7 @@ def cliente(monkeypatch):
     sessao = {"user_id": 1}
     monkeypatch.setattr(shared, "resolve_dashboard_user_id", lambda req: sessao["user_id"])
     monkeypatch.setattr(shared, "raise_if_account_scheduled_for_deletion", lambda uid: None)
-    monkeypatch.setattr(shared, "_enforce_subscription_gate", lambda req, uid, exige_direito=True: None)
+    monkeypatch.setattr(shared, "_enforce_subscription_gate", lambda req, uid, **_kw: None)
     conta = {"plan": "pro_max", "plan_expires_at": None}  # tier pro, vitalício
     monkeypatch.setattr(plan_service, "get_auth_user", lambda uid: dict(conta))
     _mock_sources(monkeypatch, saldo=50000.0)

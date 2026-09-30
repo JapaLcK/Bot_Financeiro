@@ -124,6 +124,7 @@ from frontend.routes.analytics import router as analytics_router
 from frontend.routes.cards import router as cards_router
 from frontend.routes.categories import router as categories_router
 from frontend.routes.open_finance import router as open_finance_router
+from frontend.routes.open_finance_cash import router as open_finance_cash_router
 from frontend.routes.pockets import router as pockets_router
 from frontend.routes.prospects import router as prospects_router
 from frontend.routes.push import router as push_router
@@ -144,6 +145,7 @@ from frontend.routes.shared import (
     db_connect,
     decode_jwt as _decode_jwt,
     error_page_response,
+    exigir_credencial as _exigir_credencial,
     extract_bearer_token as _extract_bearer_token,
     get_auth_token_from_request as _get_auth_token_from_request,
     invalidate_dashboard_current_cache as _invalidate_dashboard_current_cache,
@@ -990,6 +992,12 @@ async def get_financial_data(
     movement_summary = await asyncio.to_thread(bank_movement_summary, user_id)
     from db.reconciliation import reconciliation_summary
     recon_summary = await asyncio.to_thread(reconciliation_summary, user_id)
+    # Saque/depósito em espécie (Q41): perguntas + avisos não vistos. Um item só,
+    # lido pela faixa do /app e pelo aviso do /home (a mesma fonte).
+    from db.open_finance_cash_answers import cash_transfer_summary
+    cash = await asyncio.to_thread(cash_transfer_summary, user_id)
+    if (n := cash["pending_count"] + cash["unseen_count"]) > 0:
+        alerts.insert(0, {"type": "cash_transfers", "count": n})
     return {
         "bank_movements": movement_summary,
         "reconciliation": recon_summary,
@@ -3046,6 +3054,7 @@ def require_pro_feature(feature: str = "generic"):
     para o frontend abrir modal de upgrade contextual.
     """
     async def _dep(user_id: int = Depends(_get_current_user)) -> int:
+        await asyncio.to_thread(_exigir_credencial, user_id)
         if not _plan_gate_ok(user_id, feature):
             raise HTTPException(
                 status_code=403,
@@ -3801,6 +3810,9 @@ async def auth_reset_password(request: Request, body: ResetPasswordBody):
 @limiter.limit("15/hour")
 async def auth_new_link_code(request: Request, user_id: int = Depends(_get_current_user)):
     """Gera um novo link_code para o usuário autenticado vincular uma nova plataforma."""
+    # Sem senha, não: quem pagou com o e-mail de outra pessoa ligaria o próprio
+    # WhatsApp antes de provar o e-mail (PR 4 do funil v3).
+    await asyncio.to_thread(_exigir_credencial, user_id)
     import sys
     sys.path.insert(0, str(pathlib.Path(__file__).parent.parent))
     from db import create_link_code
@@ -3830,8 +3842,8 @@ async def auth_me(user_id: int = Depends(_get_current_user)):
     import sys
     sys.path.insert(0, str(pathlib.Path(__file__).parent.parent))
     from db import (
-        auth_account_has_password, get_auth_user, should_show_mfa_onboarding,
-        get_mfa_status,
+        auth_account_has_password, conta_sem_credencial, get_auth_user,
+        should_show_mfa_onboarding, get_mfa_status,
     )
 
     user = get_auth_user(user_id)
@@ -3877,6 +3889,9 @@ async def auth_me(user_id: int = Depends(_get_current_user)):
         # DEFINIR senha em vez de mostrar campo de senha que nunca aceita nada.
         # Lido do banco, não do cache do get_auth_user — uma fonte de verdade.
         "has_password": await asyncio.to_thread(auth_account_has_password, user_id),
+        # True = sem senha E sem Google/Apple: o front sobe o "Crie sua senha" e
+        # as rotas de dados respondem 403 password_required.
+        "precisa_criar_senha": await asyncio.to_thread(conta_sem_credencial, user_id),
         "mfa_enabled": bool(mfa.get("enabled")),
         # `user=user_dict` pelo mesmo motivo do `needs_plan_selection` da linha
         # de baixo: a linha JÁ está em mão (get_auth_user, :3290). Sem ela o
@@ -5488,6 +5503,7 @@ class ChangePlanBody(BaseModel):
 async def billing_subscription(user_id: int = Depends(_get_current_user)):
     """Estado da assinatura pro front (/precos): plano/intervalo atual, fim do
     período pago e troca agendada (se houver). Sem assinatura → active: False."""
+    await asyncio.to_thread(_exigir_credencial, user_id)
     import stripe
     import sys
     sys.path.insert(0, str(pathlib.Path(__file__).parent.parent))
@@ -5595,6 +5611,7 @@ async def billing_change_plan(
 ):
     """Agenda a troca de plano pro fim do período já pago. Sem cobrança agora;
     a primeira fatura do plano novo sai na data da virada (cartão em arquivo)."""
+    await asyncio.to_thread(_exigir_credencial, user_id)
     from core.services.plan_service import TIER_TO_STORED_PLAN  # noqa: PLC0415
 
     # Expressão IDÊNTICA à da `/billing/create-checkout` (§0.7): são as duas
@@ -5705,6 +5722,7 @@ async def billing_change_plan(
 async def billing_cancel_change(request: Request, user_id: int = Depends(_get_current_user)):
     """Desfaz uma troca de plano agendada (solta o schedule; assinatura segue
     no plano atual como se nada tivesse acontecido)."""
+    await asyncio.to_thread(_exigir_credencial, user_id)
     import stripe
     import sys
     sys.path.insert(0, str(pathlib.Path(__file__).parent.parent))
@@ -6895,6 +6913,7 @@ async def billing_portal(request: Request, user_id: int = Depends(_get_current_u
     Cria uma sessão no Stripe Customer Portal para o usuário gerenciar
     a assinatura (cancelar, trocar cartão, ver faturas).
     """
+    await asyncio.to_thread(_exigir_credencial, user_id)
     if not STRIPE_SECRET_KEY:
         raise HTTPException(status_code=503, detail="Pagamentos ainda não configurados.")
 
@@ -7018,6 +7037,10 @@ async def conta_redirect(request: Request):
     user_id = await asyncio.to_thread(_resolve_page_user_id, request)
     if user_id is None:
         return RedirectResponse(url=_dashboard_url("/login?next=/conta"), status_code=302)
+    # Sem senha, o portal do Stripe não abre: a /home mostra o "Crie sua senha".
+    from db import conta_sem_credencial
+    if await asyncio.to_thread(conta_sem_credencial, user_id):
+        return RedirectResponse(url=_dashboard_url("/home"), status_code=302)
 
     if not STRIPE_SECRET_KEY:
         return RedirectResponse(url=_dashboard_url("/precos"), status_code=302)
@@ -9229,6 +9252,7 @@ app.include_router(settings_router)
 
 # ─── Open Finance (Pluggy + mock) → frontend/routes/open_finance.py (F1 E4) ──
 app.include_router(open_finance_router)
+app.include_router(open_finance_cash_router)  # saque/depósito em espécie (Q41)
 
 # ─── Push notifications (app iOS) → frontend/routes/push.py ──────────────────
 app.include_router(push_router)
@@ -9280,6 +9304,11 @@ async def websocket_endpoint(ws: WebSocket, user_id: int):
     )
     if sem_plano:
         await ws.close(code=4402, reason="subscription_required")
+        return
+    # A perna da CREDENCIAL do mesmo gate (shared.exigir_credencial).
+    from db import conta_sem_credencial
+    if await asyncio.to_thread(conta_sem_credencial, user_id):
+        await ws.close(code=4403, reason="password_required")
         return
 
     # now_tz() (main, 8ea113a): o mês do snapshot é o do USUÁRIO, não o do UTC

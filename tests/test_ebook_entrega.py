@@ -263,8 +263,12 @@ def test_f_conta_sem_credencial(senha, identidade, esperado):
     assert conta_sem_credencial(uid) is esperado
 
 
-def test_f_sem_auth_accounts_conta_como_sem_credencial(user_id):
-    assert conta_sem_credencial(user_id) is True
+def test_f_sem_auth_accounts_nao_conta_como_sem_credencial(user_id):
+    # False: a função é também o gate do PR 4 e a guarda do bot, que roda para
+    # o só-WhatsApp (sem auth_accounts). O job segue sem enviar nesse estado
+    # porque `get_auth_user` não acha e-mail; e o estado não nasce, porque a
+    # pendência exige o checkout da /assinar, que exige conta.
+    assert conta_sem_credencial(user_id) is False
 
 
 # ── G. o lifespan chama o job ────────────────────────────────────────────────

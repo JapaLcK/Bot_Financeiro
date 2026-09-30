@@ -219,6 +219,30 @@ sessão. É o único lugar do site que diz se um e-mail tem conta (aceito pelo d
 10/h por IP (balde `quiz`) e 3/h por e-mail (balde `quiz-conta`, separado do
 `register` para o anônimo não gastar o teto do cadastro da vítima). A prova do e-mail vem depois, no "Crie sua senha".
 
+**Conta sem credencial: 403 `password_required`.** Conta sem senha (`''` conta como sem)
+e sem identidade Google/Apple (`db.conta_sem_credencial`, a fonte única, a mesma que o
+job do e-book usa; sem linha em `auth_accounts`, o só-WhatsApp, é False) não lê nem grava dado, mesmo
+paga, até criar a senha pelo link do e-mail. Vale no servidor: a perna da credencial do
+`_enforce_subscription_gate` (depois das duas do 402; não lê `ACCESS_GATE_ENABLED` nem
+`PLANS_V2_ENABLED`, porque é segurança e não cobrança) e `shared.exigir_credencial` nos
+pontos fora dele; o `/ws` fecha com 4403, o `/conta` manda para a `/home`, e o bot não
+liga o número pelo telefone (responde com o texto fixo). O bot também barra toda
+mensagem de número já ligado a conta sem credencial; no auto-vínculo, remetente que já
+tem dados financeiros segue na própria conta, sem vínculo nem mescla
+(`remetente_com_dados`); o vazamento da mescla por telefone digitado está na #711.
+A exceção do bot são os botões de opt-out de `_WA_INTERACTIVE_ISENTOS` (relatórios diário,
+semanal e mensal, e atualizações): quem não pode usar tem de conseguir parar de receber
+mensagem, então eles funcionam no número já ligado, no `precisa_senha` (desligam a
+preferência da conta sem credencial) e no `remetente_com_dados` (a do remetente e a da
+conta que digitou o número), e nada além da preferência é gravado.
+Saem livres as rotas da própria conta (`authorize_account_access`), o `PATCH /settings/{id}/security/contact`
+(`exige_credencial=False`), o `/auth/me` (campo `precisa_criar_senha`), login,
+logout, refresh e o reset. Quem bloqueia e quem libera, rota a rota, está em
+`tests/test_rotas_senha_obrigatoria.py`, que reprova rota nova sem linha. Na tela, a
+`/home` e o `/app` carregam `frontend/criar-senha.js`: overlay que não fecha, também
+disparado por qualquer 403 `password_required`. A `/settings` não o carrega (é a saída),
+e o convite do MFA fica calado no servidor enquanto não há credencial.
+
 **Os três criadores de conta** (o `confirm` do register, o `complete-signup` do
 Google/Apple e a `/assinar`) gravam pelo mesmo `db_support.inserir_conta_nova`:
 trava por e-mail + `on conflict (email) do nothing`. O e-mail que ganhou conta no meio
@@ -285,7 +309,8 @@ foto) logo depois do grant e ANTES dos outros efeitos, sem try: falha → 5xx e 
 reentrega refaz tudo. Sessão sem a foto `ebook_url` grava assim mesmo e loga
 `ebook_sem_url`. Quem entrega é o job `_ebook_worker` (abaixo, "Tarefas de fundo"):
 só envia com `not conta_sem_credencial(uid)` (`db/google_auth.py`: senha não vazia ou
-identidade Google/Apple — a prova do e-mail), confirma a compra pelo
+identidade Google/Apple — a prova do e-mail; sem linha em `auth_accounts` a função dá
+False, e o job não envia porque não acha e-mail), confirma a compra pelo
 `checkout.Session.list_line_items` (senão fecha `nao_comprou`), manda
 `send_ebook_email` para o e-mail ATUAL da conta e fecha `enviado` na linha. O claim
 (`reivindicada_ate`, 10 min dobrando a cada tentativa até 1 dia, contadas em
