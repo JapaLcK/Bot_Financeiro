@@ -151,10 +151,20 @@ const TABELA = [
     "Você anotou “meu pai”, R$ 200,00 em 09/03. É o mesmo dinheiro?", [["É o mesmo", "same"], ["São diferentes, soma na Carteira", "different"]]],
   [item({ id: 9, kind: "deposito", status: "perguntar_manual", manual_alvo: "banco", manual_valor: 200, manual_date: "2026-03-09" }),
     "Você anotou “banco”, R$ 200,00 em 09/03. É o mesmo dinheiro?", [["É o mesmo", "same"], ["São diferentes, tira da Carteira", "different"], NAO]],
+  // Manual apagado antes do sync: sem "É o mesmo" (daria 409) e sem "“—”, R$ 0,00 em ."
+  [item({ id: 10, status: "perguntar_manual" }), "O lançamento que você anotou foi apagado.", [["Soma na Carteira", "different"]]],
+  [item({ id: 11, kind: "deposito", status: "perguntar_manual" }), "O lançamento que você anotou foi apagado.", [["Tira da Carteira", "different"], NAO]],
+  [item({ id: 12, kind: "fraco", amount: 250 }), "Somamos R$ 250,00 na sua Carteira.", [["Ok", "seen"], ["Desfazer", "undo"]]],
 ];
+// A confirmação do Desfazer, por tipo (frase inteira).
+const DESFAZ = {
+  saque: "A Carteira volta a como estava. O saque continua fora dos seus gastos.",
+  fraco: "A Carteira volta a como estava. O saque continua fora dos seus gastos.",
+  deposito: "A Carteira volta a como estava. O depósito continua fora das suas receitas.",
+};
 
 test("cada estado × tipo mostra a frase e os botões da tabela, e cada botão manda a sua ação", async () => {
-  const keep = () => ({ status: 200, body: { ok: true, changed: false } });
+  const keep = () => ({ status: 200, body: { ok: true, changed: true } });
   const { page, state } = await pageFor(1280, { items: TABELA.map((t) => t[0]), actionHandler: keep });
   try {
     await page.evaluate(() => window.CashTransfers.open(1));
@@ -171,12 +181,13 @@ test("cada estado × tipo mostra a frase e os botões da tabela, e cada botão m
         const n = state.posts.length;
         await linha().getByRole("button", { name: rotulo, exact: true }).click();
         if (acao === "undo") {
-          assert.match(await page.locator("#generic-confirm-body").textContent(), /A Carteira volta a como estava/);
+          assert.equal(await page.locator("#generic-confirm-body").textContent(), DESFAZ[it.kind], `${it.id} Desfazer`);
           await page.locator("#generic-confirm-ok").click();
         }
         await waitFor(() => state.posts.length > n);
         assert.deepEqual(state.posts.at(-1), { id: it.id, action: acao, csrf: "tok123" }, `${it.id} ${rotulo}`);
         await waitFor(() => page.evaluate(() => !document.querySelector("#cash-transfers-overlay button:disabled")));
+        assert.equal(await page.locator("#generic-confirm-overlay.open").count(), 0, `aviso no clique normal: ${it.id} ${rotulo}`);
       }
     }
     assert.deepEqual(state.errs, []);
@@ -246,5 +257,22 @@ test("409: mostra a mensagem do servidor e recarrega a lista", async () => {
     assert.equal(await page.locator("#generic-confirm-body").textContent(), msg);
     await page.locator("#generic-confirm-ok").click();
     await waitFor(() => state.lists === 2);
+  } finally { await page.close(); }
+});
+
+test("200 changed:false (respondida noutra aba/no WhatsApp): avisa e recarrega", async () => {
+  const { page, state } = await pageFor(1280, {
+    items: [item({ id: 5, status: "perguntar_novo" })],
+    actionHandler: () => { state.items = []; return { status: 200, body: { ok: true, changed: false } }; },
+  });
+  try {
+    await page.evaluate(() => window.CashTransfers.open(1));
+    await modal(page).getByRole("button", { name: "Já anotei" }).click();
+    await page.locator("#generic-confirm-overlay.open").waitFor();
+    assert.equal(await page.locator("#generic-confirm-body").textContent(), "Esse já tinha sido conferido. A lista foi atualizada.");
+    await page.locator("#generic-confirm-ok").click();
+    await modal(page).getByText("Nada para conferir.").waitFor();
+    assert.equal(state.lists, 2);
+    assert.deepEqual(state.errs, []);
   } finally { await page.close(); }
 });

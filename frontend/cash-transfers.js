@@ -57,6 +57,11 @@
       return [dep ? "Você já tirou esse dinheiro da Carteira?" : "Você já anotou esse dinheiro na Carteira?",
         [[dep ? "Já tirei" : "Já anotei", "already"], [dep ? "Não, tira da Carteira" : "Não, soma na Carteira", "credit"], ...extra]];
     }
+    // Manual apagado depois da pergunta: "É o mesmo" daria 409; o próximo sync redecide.
+    if (r.manual_valor == null) {
+      return ["O lançamento que você anotou foi apagado.",
+        [[dep ? "Tira da Carteira" : "Soma na Carteira", "different"], ...extra]];
+    }
     return [`Você anotou “${r.manual_alvo || "—"}”, ${fmt(r.manual_valor)} em ${ddmm(r.manual_date)}. É o mesmo dinheiro?`,
       [["É o mesmo", "same"], [dep ? "São diferentes, tira da Carteira" : "São diferentes, soma na Carteira", "different"], ...extra]];
   }
@@ -66,7 +71,9 @@
   async function _run(id, action, buttons) {
     buttons.forEach(b => { b.disabled = true; });
     try {
-      await act(id, action);
+      const { changed } = await act(id, action);
+      // Botões travados no POST: changed:false é resposta dada noutra aba/no WhatsApp.
+      if (!changed && overlay) await window.alertModal("Esse já tinha sido conferido. A lista foi atualizada.");
       if (overlay) await load();
       if (afterSave) await afterSave();
     } catch (err) {
@@ -76,10 +83,11 @@
       await load();
     }
   }
-  async function _undo(id, button, buttons) {
+  async function _undo(id, kind, button, buttons) {
     overlay.classList.remove("open");
-    const confirmed = await window.confirmModal(
-      "A Carteira volta a como estava. O saque continua fora dos seus gastos.",
+    const confirmed = await window.confirmModal(kind === "deposito"
+      ? "A Carteira volta a como estava. O depósito continua fora das suas receitas."
+      : "A Carteira volta a como estava. O saque continua fora dos seus gastos.",
       { title: "Desfazer", okText: "Desfazer", destructive: true, danger: true });
     if (!overlay) return;
     overlay.classList.add("open");
@@ -100,7 +108,7 @@
     });
     buttons.forEach((b, i) => {
       const action = opcoes[i][1];
-      b.addEventListener("click", () => (action === "undo" ? _undo(r.id, b, buttons) : _run(r.id, action, buttons)));
+      b.addEventListener("click", () => (action === "undo" ? _undo(r.id, r.kind, b, buttons) : _run(r.id, action, buttons)));
     });
     const acts = element("div", null, "modal-acts");
     acts.style.cssText = "margin-top:12px;flex-wrap:wrap";
