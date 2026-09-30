@@ -69,6 +69,28 @@ def test_gerador_traduz_cada_construcao():
     assert gerar(_spec(schemas, paths)) == esperado
 
 
+def _sse(content_schema=None):
+    """Rota SSE na forma que o FastAPI emite; sem `content_schema`, o `data` sem tipo."""
+    data = {"type": "string"}
+    if content_schema is not None:
+        data |= {"contentMediaType": "application/json", "contentSchema": content_schema}
+    item = {"type": "object", "required": ["data"], "properties": {
+        "data": data, "event": {"type": "string"}, "id": {"type": "string"},
+        "retry": {"type": "integer", "minimum": 0}}}
+    return {"get": {"summary": "x", "operationId": "x", "responses": {
+        "200": {"description": "ok", "content": {"text/event-stream": {"itemSchema": item}}}}}}
+
+
+def test_gerador_traduz_rota_sse():
+    schemas = {"Aa": {"type": "object", "properties": {"x": {"type": "string"}}}}
+    paths = {"/a": _get("#/components/schemas/Aa"), "/s": _sse({"$ref": "#/components/schemas/Aa"})}
+    assert gerar(_spec(schemas, paths)) == CABECALHO + (
+        "export type Aa = { x?: string };\n"
+        'export type RotasGet = { "/a": Aa };\n'
+        'export type RotasSSE = { "/s": Aa };\n'
+    )
+
+
 @pytest.mark.parametrize("spec", [
     _spec({"X": {"type": "object", "properties": {}, "additionalProperties": True}}),
     _spec({"X": {"oneOf": [{"type": "string"}, {"type": "integer"}]}}),
@@ -76,7 +98,9 @@ def test_gerador_traduz_cada_construcao():
     _spec({"X": {"const": "a"}}),
     _spec({"X": {"type": "object", "properties": {"a": {"type": "string"}}}},
           {"/x": {"post": _get("#/components/schemas/X")["get"]}}),
-], ids=["additionalProperties", "oneOf", "allOf", "const", "post"])
+    _spec({}, {"/s": _sse({"type": "string"})}),
+    _spec({}, {"/s": _sse()}),
+], ids=["additionalProperties", "oneOf", "allOf", "const", "post", "sse_sem_ref", "sse_sem_contentSchema"])
 def test_gerador_recusa_o_que_nao_traduz(spec):
     with pytest.raises(ValueError, match="construção não suportada"):
         gerar(spec)

@@ -777,6 +777,14 @@ def test_rota_deleta_os_items_do_usuario_na_pluggy(user_id, monkeypatch):
 
     monkeypatch.setattr(dashboard.manager, "broadcast_to_user", _broadcast)
 
+    # O mesmo aviso sai pelo /api/v2/eventos, e só DEPOIS do commit: a contagem é
+    # lida por outra conexão no momento do aviso, e o cliente refaz a consulta na hora.
+    from api.v2 import eventos
+
+    sse: list = []
+    monkeypatch.setattr(eventos, "avisar", lambda uid, recurso: sse.append(
+        (uid, recurso, "apagado" if all(n == 0 for n in _contagens(uid).values()) else "ainda existe")))
+
     client = TestClient(dashboard.app)
     headers = _auth(client, user_id)
     resp = client.post("/settings/reset", json={"password": SENHA}, headers=headers)
@@ -788,6 +796,7 @@ def test_rota_deleta_os_items_do_usuario_na_pluggy(user_id, monkeypatch):
         "o snapshot cacheado do dashboard sobreviveu ao reset (Codex PR #217, rodada 2)"
     assert avisados == [user_id], \
         "o reset tinha que avisar os dashboards conectados via broadcast_to_user"
+    assert sse == [(user_id, "tudo", "apagado")]
 
     with get_conn() as conn:
         with conn.cursor() as cur:

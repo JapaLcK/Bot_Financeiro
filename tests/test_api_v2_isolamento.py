@@ -43,3 +43,34 @@ def test_bearer_de_a_com_cookie_de_b_vale_o_bearer(a_e_b):
     r = get_com_cookie(sessao(b)["dashboard"], Authorization=f"Bearer {sessao(a)['access']}")
     assert r.status_code == 200, r.text
     assert r.json() == {"plan_tier": "pro"}
+
+
+def test_aviso_de_a_nao_chega_ao_stream_de_b(a_e_b):
+    """B com stream aberto (e `?user_id=A` na query) não recebe o aviso de A; A recebe
+    — o controle positivo que impede o grupo de passar num stream que não entrega nada."""
+    import asyncio
+
+    import frontend.finance_bot_websocket_custom as dashboard
+    from _apoio_sse import Pedido
+    from api.v2 import eventos
+
+    a, b = a_e_b
+
+    def pedido(uid, query=""):
+        cookie = {dashboard.DASHBOARD_COOKIE_NAME: sessao(uid)["dashboard"]}
+        return Pedido(dashboard.app, "/api/v2/eventos", cookies=cookie, query=query)
+
+    async def cena():
+        pa = await pedido(a).abrir()
+        pb = await pedido(b, f"user_id={a}&uid={a}").abrir()
+        eventos.avisar(a, "open_finance")
+        de_a = await pa.ler()
+        try:
+            de_b = await pb.ler(prazo=0.5)
+        except TimeoutError:
+            de_b = None
+        await pa.fechar()
+        await pb.fechar()
+        return pa.status, pb.status, de_a, de_b
+
+    assert asyncio.run(cena()) == (200, 200, b'data: {"recurso":"open_finance"}\n\n', None)
