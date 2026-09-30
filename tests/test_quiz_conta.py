@@ -330,6 +330,51 @@ def test_conversa_conta_me_e_checkout(env, monkeypatch):
     assert r.json()["checkout_url"].startswith("https://checkout.stripe.com/")
 
 
+def _checkout_assinar(client: TestClient):
+    return client.post("/billing/create-checkout", headers={dashboard.CSRF_HEADER_NAME: CSRF},
+                       json={"plan": "plus", "origem": "assinar", "embutido": True})
+
+
+def test_conversa_conta_e_checkout_embutido_trial_pelo_telefone_real(env, monkeypatch):
+    """Sem monkeypatch na elegibilidade: é a regra real (1 trial por telefone),
+    lida do telefone que a /auth/quiz/conta gravou. Depois o mesmo número numa
+    conta nova, já queimado em `plan_trials`, sai sem trial."""
+    import db.plans as db_plans
+    from tests.test_billing_checkout import _patch_stripe
+    monkeypatch.setenv("PLANS_V2_ENABLED", "1")
+    monkeypatch.setenv("PLANS_TRIAL_DAYS", "15")
+    monkeypatch.setattr(dashboard, "STRIPE_SECRET_KEY", "sk_test_xxx")
+    monkeypatch.setattr(dashboard, "STRIPE_PRICE_ID_PRO_MENSAL", "price_m")
+    monkeypatch.setattr(dashboard, "STRIPE_PUBLISHABLE_KEY", "pk_test_abc")
+    _patch_stripe(monkeypatch)
+    tel = _telefone()
+
+    primeira, email_a = _navegador(), _email()
+    assert _conta_quiz(primeira, email_a, whatsapp=tel).status_code == 200
+    r = _checkout_assinar(primeira)
+    assert r.status_code == 200, r.text
+    assert r.json()["trial_days"] == 15 and r.json()["client_secret"]
+
+    # A 1ª conta usa o trial e solta o número (como numa exclusão: a trava
+    # em plan_trials sobrevive). O número volta livre para uma conta nova. O
+    # customer sai junto só porque o fake dá `cus_test_123` a todo mundo, e a
+    # coluna é unique.
+    uid_a = int(_linha(email_a)["user_id"])
+    db_plans.claim_trial_for_user(uid_a)
+    with db.get_conn() as conn, conn.cursor() as cur:
+        cur.execute("update auth_accounts set phone_e164 = null, phone_hash = null,"
+                    " stripe_customer_id = null where user_id = %s", (uid_a,))
+        conn.commit()
+    db_support.invalidate_auth_user_cache(uid_a)
+
+    segunda, email_b = _navegador(), _email()
+    assert _conta_quiz(segunda, email_b, whatsapp=tel).status_code == 200
+    assert _linha(email_b)["phone_e164"] == normalize_phone_e164(tel), "sem o telefone mediria outro motivo"
+    r = _checkout_assinar(segunda)
+    assert r.status_code == 200, r.text
+    assert r.json()["trial_days"] == 0 and r.json()["client_secret"]
+
+
 # ── G1: e-mail que já tem conta ──────────────────────────────────────────────
 
 @pytest.mark.parametrize("jar", ["vazio", "sessao_de_outra_conta"])
