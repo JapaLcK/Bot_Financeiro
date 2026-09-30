@@ -228,7 +228,12 @@ PR de cada etapa, não soluções prontas. Cada PR confere se ainda valem, decid
     atualizado, e o cartão manual adotado pelo nome fica com as datas manuais, sem conferir
     as da Pluggy;
   - `list_pluggy_transactions()` para em `max_pages=60` sem conferir o cursor `next`, e
-    `list_pluggy_accounts()` lê só a primeira página de `/accounts`;
+    `list_pluggy_accounts()` lê só a primeira página de `/accounts`. Além do teto, as duas
+    aceitam resposta malformada como leitura completa: `results` ausente ou fora de lista
+    vira lista vazia, e página vazia com `next` ou cursor ilegível encerra a leitura. Validar
+    o formato e o cursor terminal antes de dar o sync como completo, e antes de qualquer
+    conciliação de ausências (item abaixo), que com leitura parcial apagaria transação
+    legítima;
   - conta que some da resposta de `/accounts` segue somada com o saldo antigo, e
     transação que some de uma sincronização completa também fica: `save_open_finance_sync()`
     só faz upsert do que veio, então um `transactions/deleted` perdido deixa a compra ou o
@@ -258,7 +263,9 @@ PR de cada etapa, não soluções prontas. Cada PR confere se ainda valem, decid
 - Etapa 3: defeitos da previsão de hoje (`cashflow._cashflow_events()`), achados na
   revisão do `docs/plano-piggy-assistente-contextual.md` (PR #689). Não se consertam no
   painel antigo: a regra reescrita para a Previsão da `/api/v2` passa a servir também o
-  simulador e o `check_cashflow` da IA (Q18).
+  simulador e o `check_cashflow` da IA (Q18). O inventário completo, com a direção de erro
+  de cada entrada, é a matriz do plano da Piggy; a Etapa 3 usa aquela matriz como lista de
+  verificação, e esta lista é o resumo.
   - Gasto fixo pago no cartão (`payment_type="credit_card"`): sai do caixa no `due_day` e
     de novo dentro da fatura aberta, ou sai antes da data de pagar a fatura.
   - Valor estimado (`variable_amount`) entra como exato, no boleto e no gasto fixo.
@@ -275,9 +282,15 @@ PR de cada etapa, não soluções prontas. Cada PR confere se ainda valem, decid
   - O saldo de partida perde as pendências: `get_consolidated_balance()` devolve
     `reconciliation` (conciliação a confirmar, com `delta_se_confirmar`) e
     `bank_movements` (declaração não confirmada), e `_starting_balance()` guarda só o
-    número. O mesmo vale para lançamento esperando "sim" em `pending_actions`. A previsão
+    número. O mesmo vale para toda pendência que pode criar, pagar ou mover dinheiro, com
+    valor conhecido ou não: lançamento esperando "sim" e as perguntas de valor e de forma
+    de pagamento em `pending_actions` (`multi_launch_values`, `bill_pay_amount`,
+    `payment_method_choice`) e as escritas propostas pela IA em `ai_pending_actions`. A previsão
     compartilhada tem de levar essas pendências e mostrar o resultado como "a conferir",
     não como exato.
+  - Receita recorrente mensal ou anual entra pelo valor cheio, sem marcador de
+    confiança: renda irregular (freela, comissão) cadastrada como fixa parece garantida.
+    Decidir uma política de confirmação ou de confiança da receita projetada.
   - Receita recorrente legada `once`, `weekly` ou `daily` fica fora de toda data:
     `_cashflow_events()` só aceita receita mensal e anual. Decidir o destino dessas linhas.
   - Fatura de cartão manual, ou sem fonte do Open Finance atualizada, entra pelo total
@@ -288,7 +301,10 @@ PR de cada etapa, não soluções prontas. Cada PR confere se ainda valem, decid
     da previsão (`_recurring_occurrence_dates()` só emite datas estritamente depois de
     hoje), e a que se realizou
     antes do dia entra de novo; não há marcador de realização (`last_charged_ym` e
-    `last_credited_ym` não são escritos).
+    `last_credited_ym` não são escritos). Consertar só o `>` estrito deixa de fora as
+    atrasadas mais antigas, e projetar desde o `start_date` repete anos já realizados:
+    definir uma janela de conferência limitada, com a premissa do que veio antes dela dita
+    na tela (é a decisão aberta 7 do plano da Piggy).
 - Etapa 4: reserva designada, custo mensal por frequência, reserva só em reais; caixinha
   manual versus a do banco.
 - Etapa 6: variação do período só dentro de um trecho sem quebra.
