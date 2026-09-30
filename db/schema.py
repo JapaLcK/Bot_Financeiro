@@ -10,6 +10,29 @@ from .schema_repairs import (
 # Valor arbitrário e estável; só precisa não colidir com outro lock do processo.
 SCHEMA_INIT_LOCK = 728_531_004
 
+# Tabelas cuja escrita avisa o `/painel` ao vivo: `pg_notify('pb_escrita', <uid>)`
+# pelo trigger `trg_pb_aviso_escrita`, que a tarefa `escutar_banco` de
+# `api/v2/eventos.py` repassa aos streams do dono. Valor = como achar o dono:
+# `None` lê `user_id` da própria linha; as filhas do Open Finance sem `user_id`
+# sobem pela conexão (`conexao`) ou pela conta (`conta`). `auth_accounts` avisa
+# só a troca de plano, num trigger à parte (`trg_pb_aviso_plano`).
+# `tests/test_api_v2_eventos_escrita.py` confere esta lista contra o banco.
+TABELAS_QUE_AVISAM: dict[str, str | None] = {
+    **dict.fromkeys((
+        "accounts", "launches", "pockets", "pocket_lots", "investments", "investment_lots",
+        "credit_cards", "credit_bills", "credit_transactions", "bill_instances",
+        "recurring_expenses", "recurring_incomes", "recurring_income_credits",
+        "recurring_charges", "category_budgets", "household_budget_config",
+        "household_budget_income", "user_categories", "user_category_rules",
+        "bank_movement_declarations", "of_cash_coverage", "of_cash_links",
+        "open_finance_connections",
+    )),
+    "open_finance_accounts": "conexao",
+    "open_finance_investments": "conexao",
+    "open_finance_investment_snapshots": "conexao",
+    "open_finance_transactions": "conta",
+}
+
 # BACKFILL INICIAL dos assinantes que já existiam quando plan_grants nasceu
 # (§5.1 do docs/plano_pix_anual_asaas.md). Roda no boot, dentro do init_db.
 #
@@ -2708,6 +2731,86 @@ def init_db():
         """alter table pix_unmatched_payments
              add constraint pix_unmatched_ref_formato
              check (external_reference ~ '^pix:[0-9]+$') not valid""",
+        # Pendência do e-book comprado na /assinar (funil v3, PR 3): o webhook do
+        # checkout grava, o job `core/services/ebook_entrega.py` entrega quando a
+        # conta já provou o e-mail. `ebook_price`/`ebook_url` são a FOTO da
+        # metadata da sessão; `ebook_url` nulo = sessão sem a foto (o job ignora).
+        # `reivindicada_ate` é o claim com expiração (nenhuma transação aberta
+        # durante o Stripe/Resend). Fica fora do merge (conta com
+        # stripe_customer_id é recusada como origem) e do export LGPD.
+        """
+        create table if not exists ebook_entregas (
+          user_id bigint not null references users(id) on delete cascade,
+          session_id text not null,
+          ebook_price text not null,
+          ebook_url text,
+          criada_em timestamptz not null default now(),
+          reivindicada_ate timestamptz,
+          tentativas int not null default 0,
+          fechada_em timestamptz,
+          resultado text check (resultado in ('enviado', 'nao_comprou')),
+          primary key (user_id, session_id)
+        )
+        """,
+        """
+        create index if not exists idx_ebook_entregas_abertas
+          on ebook_entregas (criada_em) where fechada_em is null
+        """,
+
+        # ── Aviso de escrita ao `/painel` (TABELAS_QUE_AVISAM, no topo) ──────
+        # O NOTIFY sai só no commit (rollback não avisa) e o Postgres funde os
+        # repetidos da mesma transação. UPDATE que troca o dono (`merge_users`)
+        # avisa os dois: o aviso não leva dado, só manda o cliente reconsultar.
+        # Não pode derrubar a escrita de dinheiro: sem bloco EXCEPTION (vira
+        # subtransação por linha) e sem comparar registro inteiro (`json` não
+        # tem igualdade). Filha cujo pai sumiu na cascata não acha dono e pula:
+        # o trigger do pai já avisou.
+        # ponytail: a fila de NOTIFY tem 8 GB e só enche com um LISTEN que não
+        # lê; cheia, o COMMIT de quem escreve falha. Monitorar
+        # `pg_notification_queue_usage()` se aparecer listener fora do app.
+        # ponytail: commit com NOTIFY serializa num lock global do Postgres;
+        # irrelevante com um worker e o volume de hoje, remedir se escalar.
+        """
+        create or replace function pb_aviso_escrita()
+        returns trigger as $$
+        begin
+          if tg_argv[0] is null then
+            perform pg_notify('pb_escrita', u::text)
+              from unnest(array[old.user_id, new.user_id]) u where u is not null;
+          elsif tg_argv[0] = 'conexao' then
+            perform pg_notify('pb_escrita', c.user_id::text)
+              from open_finance_connections c
+             where c.id in (old.connection_id, new.connection_id);
+          else
+            perform pg_notify('pb_escrita', c.user_id::text)
+              from open_finance_accounts a
+              join open_finance_connections c on c.id = a.connection_id
+             where a.id in (old.account_id, new.account_id);
+          end if;
+          return null;
+        end;
+        $$ language plpgsql
+        """,
+        *(stmt for tabela, dono in TABELAS_QUE_AVISAM.items() for stmt in (
+            f"drop trigger if exists trg_pb_aviso_escrita on {tabela}",
+            f"""
+            create trigger trg_pb_aviso_escrita
+              after insert or update or delete on {tabela}
+              for each row execute function pb_aviso_escrita({f"'{dono}'" if dono else ''})
+            """,
+        )),
+        # O tier do `get_plan_tier` (via `_tem_plano_pago_vigente`) sai de
+        # `plan` e `plan_expires_at`; login, senha e o resto não avisam. Plano
+        # que vence só pela data não grava nada, então não avisa.
+        """drop trigger if exists trg_pb_aviso_plano on auth_accounts""",
+        """
+        create trigger trg_pb_aviso_plano
+          after update on auth_accounts
+          for each row
+          when (old.plan is distinct from new.plan
+                or old.plan_expires_at is distinct from new.plan_expires_at)
+          execute function pb_aviso_escrita()
+        """,
     ]
 
     # autocommit: cada DDL roda em sua propria transacao e libera locks

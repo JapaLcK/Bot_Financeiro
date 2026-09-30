@@ -58,7 +58,7 @@ def _conta_crua(uid: int, senha: str | None) -> None:
 
 # ── 1. a fonte única ─────────────────────────────────────────────────────────
 
-def test_conta_sem_credencial_os_cinco_casos(user_id):
+def test_conta_sem_credencial_os_seis_casos(user_id):
     assert db.conta_sem_credencial(user_id) is False, "sem auth_accounts não é 'sem credencial'"
     _conta_crua(user_id, None)
     assert db.conta_sem_credencial(user_id) is True
@@ -75,6 +75,10 @@ def test_conta_sem_credencial_os_cinco_casos(user_id):
     assert db.conta_sem_credencial(user_id) is False, "só-Apple tem credencial"
     with get_conn() as conn, conn.cursor() as cur:
         cur.execute("delete from auth_identities where user_id = %s", (user_id,))
+        cur.execute("update auth_accounts set password_hash = '' where user_id = %s", (user_id,))
+        conn.commit()
+    assert db.conta_sem_credencial(user_id) is True, "senha vazia não é credencial"
+    with get_conn() as conn, conn.cursor() as cur:
         cur.execute("update auth_accounts set password_hash = 'x' where user_id = %s", (user_id,))
         conn.commit()
     assert db.conta_sem_credencial(user_id) is False, "com senha tem credencial"

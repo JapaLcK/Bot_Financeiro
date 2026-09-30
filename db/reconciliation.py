@@ -23,6 +23,7 @@ from utils_date import today_tz
 
 from .bank_movements import _lock_user, delete_if_shadow
 from .connection import TIPO_CANON_SQL, get_conn
+from .open_finance_categories import categoria_pigbank, garantir_no_catalogo
 from .open_finance_cash import INTERNOS, INTERNOS_SQL, RESERVADO_SQL, cash_internal_tx_ids, internos_de
 from .open_finance import (
     ACTIONABLE_PENDING_SQL, MERGED_WALLET_DELTA_SQL, PENDING_RECONCILIATION_SQL, _insert_of_shadow,
@@ -120,6 +121,8 @@ def undo_reconciliation(user_id: int, of_tx_id: int) -> dict:
     """Desfaz uma fusão (automática ou confirmada): recria a sombra do banco e
     solta X, que volta a contar na Carteira. Vale nos dois sentidos — no reverso
     a sombra foi apagada e renasce com o mesmo `external_id` do provedor."""
+    novas = []
+
     def fn(cur, o):
         x = o["imported_launch_id"]
         if (o["reconciliation_status"] not in FUSED_STATUSES or not x
@@ -131,13 +134,16 @@ def undo_reconciliation(user_id: int, of_tx_id: int) -> dict:
         shadow_id, _ = _insert_of_shadow(cur, user_id, o, cls)
         if shadow_id is None:
             raise ReconciliationConflict("SHADOW_NOT_CREATED")
+        novas.extend(filter(None, [categoria_pigbank(o["category"])]))
         cur.execute(
             """update open_finance_transactions
                   set imported_launch_id=%s, match_launch_id=null, reconciliation_status='imported'
                 where id=%s""",
             (shadow_id, o["id"]))
         return {"ok": True, "changed": True, "launch_id": shadow_id}
-    return _write(user_id, of_tx_id, fn)
+    result = _write(user_id, of_tx_id, fn)
+    garantir_no_catalogo(user_id, novas)  # depois do commit, fora da trava
+    return result
 
 
 def list_reconciliations(user_id: int) -> list[dict]:

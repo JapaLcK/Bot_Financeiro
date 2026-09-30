@@ -936,14 +936,15 @@ def _custom_categories_allowed(user_id: int) -> bool:
     return plan_gate_ok(user_id, "custom_categories")
 
 
-def ensure_user_category(user_id: int, name: str) -> None:
+def ensure_user_category(user_id: int, name: str, *, exigir_plano: bool = True) -> None:
     """Garante a linha em `user_categories` do nome que acabou de ser gravado.
 
     Idempotente e best-effort: roda DEPOIS do UPDATE (senão sobra categoria
     órfã quando o alvo não existe) e nunca derruba a resposta — a correção já
     está no banco. No-op pra rótulo do sistema, pra nome que já existe e pra
     quem não tem plano com categoria custom (aí o texto fica só no lançamento,
-    como era antes da normalização).
+    como era antes da normalização). `exigir_plano=False` é do import do Open
+    Finance: a categoria vem do mapa do sistema, não é custom do cliente.
     """
     from utils_text import CATEGORY_LABELS
 
@@ -956,7 +957,7 @@ def ensure_user_category(user_id: int, name: str) -> None:
         # ponytail: 2ª leitura de plano no mesmo PATCH (a 1ª é o
         # `resolve_category_input`). Fica porque esta função é pública e GRAVA;
         # se pesar, passa o veredito como argumento.
-        if not _custom_categories_allowed(user_id):
+        if exigir_plano and not _custom_categories_allowed(user_id):
             return
         create_user_category(user_id, name)
     except ValueError:

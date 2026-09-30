@@ -828,30 +828,42 @@ def test_assinar_embutido_kwargs_e_resposta(user_id, monkeypatch):
     assert corpo["trial_days"] == 15
 
 
+_URL_500 = "https://exemplo.test/" + "a" * (500 - len("https://exemplo.test/"))
+
+
 @pytest.mark.parametrize("ebook,ebook_url,oferece", [
     ("price_ebook_abc", "", False),
     ("", "https://exemplo.test/ebook.pdf", False),
     ("price_ebook_abc", "https://exemplo.test/ebook.pdf", True),
-], ids=["so-o-preco", "so-a-url", "as-duas"])
+    ("price_ebook_abc", _URL_500, True),
+    ("price_ebook_abc", _URL_500 + "b", False),
+], ids=["so-o-preco", "so-a-url", "as-duas", "url-500", "url-501"])
 @pytest.mark.parametrize("corpo", [_ASSINAR_E, _ASSINAR_H], ids=["embutido", "hospedado"])
-def test_assinar_ebook_so_com_as_duas_envs(request, user_id, monkeypatch, corpo, ebook, ebook_url, oferece):
+def test_assinar_ebook_so_com_as_duas_envs(request, user_id, monkeypatch, caplog, corpo, ebook,
+                                           ebook_url, oferece):
     """Preço sem URL venderia um e-book que o webhook não tem como entregar.
-    Quando oferecido, o preço vai de foto nos DOIS metadatas (o PR 3 lê dali);
-    quando não, a chave nem existe."""
+    Quando oferecido, o preço E a URL vão de foto nos DOIS metadatas (o PR 3 lê
+    dali); quando não, as chaves nem existem. O Stripe recusa metadata acima de
+    500 caracteres (medido): acima disso não oferece, e o log não leva a URL."""
     _, _, client = _auth_user_setup(f"ebook-{request.node.callspec.id}-{user_id}")
     fake = _assinar_pronto(monkeypatch, ebook=ebook, ebook_url=ebook_url)
 
-    assert _post(client, corpo).status_code == 200
+    with caplog.at_level("WARNING"):
+        assert _post(client, corpo).status_code == 200
     kw = fake.last_session_kwargs
     for meta in (kw["metadata"], kw["subscription_data"]["metadata"]):
         if oferece:
             assert meta["ebook_price"] == "price_ebook_abc"
+            assert meta["ebook_url"] == ebook_url
         else:
-            assert "ebook_price" not in meta
+            assert "ebook_price" not in meta and "ebook_url" not in meta
     if oferece:
         assert kw["optional_items"] == [{"price": "price_ebook_abc", "quantity": 1}]
     else:
         assert "optional_items" not in kw
+    avisos = [r.getMessage() for r in caplog.records if "ebook_nao_oferecido" in r.getMessage()]
+    assert len(avisos) == (1 if ebook and not oferece else 0)
+    assert not any(ebook_url and ebook_url in r.getMessage() for r in caplog.records)
 
 
 def test_assinar_hospedado_plano_b(user_id, monkeypatch):
