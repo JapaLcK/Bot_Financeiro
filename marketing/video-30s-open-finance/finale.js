@@ -19,7 +19,7 @@ const SHIELD = shieldPts(C[0], C[1], SH.w, SH.h, N);
 const PILL = rrPts(TOG.x, TOG.y, TOG.w, TOG.h, TOG.h / 2, N);
 const RING_B = rrPts(B[0], B[1], NODE_R * 2, NODE_R * 2, NODE_R, N);
 const RING_P = rrPts(P[0], P[1], NODE_R * 2, NODE_R * 2, NODE_R, N);
-const SOURCES = [MAIN, ARC_UP, ARC_DN, SHIELD, PILL, RING_B, RING_P];
+const SOURCES = [MAIN, ARC_UP, ARC_DN, PILL, RING_B, RING_P]; // o escudo já sumiu quando as linhas convergem
 
 // ------------------------------------------------------------------ contorno do Piggy (do alfa do mascote oficial)
 const MASCOT = { cx: 540, cy: 900, bh: 720, bbox: [28, 33, 282, 460] };
@@ -58,7 +58,8 @@ const knobAt = t => seg(t, 17.1, 17.55, E.io3); // 0 = desligado, 1 = ligado (su
 const V = (SH_L - X0) / .4; // px por segundo de composição: a conexão leva 0,4s até o escudo
 const BLOCKED = [16.45, 16.78]; // chegam com o toggle desligado e batem no escudo
 const PASSING = Array.from({ length: 10 }, (_, i) => 17.45 + .22 * i); // com ele ligado, atravessam
-const COINS = [18.05, 18.6]; // o dinheiro tenta passar e volta
+const COINS = [18.0, 18.75]; // o dinheiro tenta entrar no PigBank e volta (só leitura)
+const COIN_STOP = X1 - 75;
 
 function packet(tl, t) {
   const dt = t - tl;
@@ -72,10 +73,10 @@ function packet(tl, t) {
 
 function coin(tl, t) {
   const dt = t - tl;
-  if (dt < 0 || dt > .8) return null;
-  if (dt < .4) return { x: lerp(X0 + 40, SH_L - 44, E.in2(dt / .4)), sq: 0, a: 1 };
-  const q = (dt - .4) / .4;
-  return { x: lerp(SH_L - 44, X0 + 70, E.out3(q)), sq: clamp(1 - q * 3), a: 1 - seg(q, .6, 1) };
+  if (dt < 0 || dt > 1) return null;
+  if (dt < .6) return { x: lerp(X0 + 40, COIN_STOP, E.in2(dt / .6)), sq: 0, a: 1 };
+  const q = (dt - .6) / .4;
+  return { x: lerp(COIN_STOP, COIN_STOP - 280, E.out3(q)), sq: clamp(1 - q * 3), a: 1 - seg(q, .6, 1) };
 }
 
 // ------------------------------------------------------------------ peças
@@ -169,6 +170,7 @@ export function drawFinale(ctx, t, th) {
 
   const done = seg(t, 16.55, 16.85); // a partir daqui os objetos já são os de verdade
   const fade = 1 - seg(t, 19.85, 20.1); // na convergência, preenchimentos e ícones somem e ficam só os contornos
+  const gone = seg(t, 17.65, 17.95, E.in2); // destravado: o escudo se dissolve e a linha segue livre
   if (done > 0 && t < 20.5) {
     ctx.save(); ctx.globalAlpha = done;
     // fios: um principal e dois bem discretos
@@ -176,11 +178,12 @@ export function drawFinale(ctx, t, th) {
     const on = knobAt(t), iL = Math.round(((SH_L - X0) / (X1 - X0)) * (N - 1)), iR = Math.round(((SH_R - X0) / (X1 - X0)) * (N - 1));
     if (fade > 0) {
       glow(ctx, MAIN.slice(0, iL + 1), fade, 6);
+      glow(ctx, MAIN.slice(iL, iR + 1), gone * fade, 6);
       glow(ctx, MAIN.slice(iR), (.18 + .82 * on) * fade, 6);
     }
     // conexão: bate no escudo com o toggle desligado, atravessa ligado
     ctx.save(); ctx.globalAlpha *= fade;
-    let hit = 0, recv = 0;
+    let hit = 0, recv = 0, coinHit = 0;
     [...BLOCKED, ...PASSING].forEach(tl => {
       const p = packet(tl, t); if (!p) return;
       ctx.globalAlpha = p.a * fade * done; ctx.beginPath(); ctx.arc(p.x, C[1], 9, 0, 7); ctx.fillStyle = "#fff"; ctx.shadowColor = PINK; ctx.shadowBlur = 20; ctx.fill(); ctx.shadowBlur = 0;
@@ -188,13 +191,14 @@ export function drawFinale(ctx, t, th) {
     ctx.globalAlpha = done * fade;
     BLOCKED.forEach(tl => { hit += bell(t, tl + .4, tl + .6) * .05 * (knobAt(tl + .4) < .5 ? 1 : 0); });
     PASSING.forEach(tl => { recv += bell(t, tl + .4 + (X1 - SH_L) / V - .05, tl + .4 + (X1 - SH_L) / V + .25) * .05; });
-    COINS.forEach(tl => { const c = coin(tl, t); if (c) { coinDraw(ctx, c.x, c.sq, c.a); hit += bell(t, tl + .4, tl + .6) * .06; } });
+    COINS.forEach(tl => { const c = coin(tl, t); if (c) coinDraw(ctx, c.x, c.sq, c.a); coinHit += bell(t, tl + .6, tl + .8); });
+    recv += coinHit * .07;
     ctx.restore();
     ctx.globalAlpha = done * fade;
     node(ctx, th, B, "Seu banco", "bank", 1);
     node(ctx, th, P, "PigBank", "pig", 1, 1 + recv);
     // "só leitura" junto do PigBank
-    const ro = seg(t, 18.1, 18.4, E.outBack) * fade;
+    const ro = seg(t, 18.1, 18.4, E.outBack) * fade * (1 + .1 * coinHit);
     if (ro > 0) {
       ctx.save(); ctx.translate(P[0], P[1] - NODE_R - 50); ctx.scale(ro, ro);
       const s = "Só leitura", w = tw(ctx, s, 25, 700) + 84;
@@ -203,12 +207,12 @@ export function drawFinale(ctx, t, th) {
       ctx.restore();
     }
     ctx.globalAlpha = done * fade;
-    shield(ctx, th, t, hit, 1);
+    if (gone < 1) shield(ctx, th, t, hit + .25 * gone, 1 - gone);
     toggle(ctx, th, t, 1);
     // ondas: ao ligar e a cada batida do dinheiro
-    [[17.3, NEON, 300], ...COINS.map(c => [c + .4, PINK, 240])].forEach(([t0, col, r1]) => {
+    [[17.3, NEON, 300, C, 150], ...COINS.map(c => [c + .6, PINK, NODE_R + 120, P, NODE_R + 8])].forEach(([t0, col, r1, at, r0]) => {
       const q = seg(t, t0, t0 + .5, E.out3);
-      if (q > 0 && q < 1) { ctx.beginPath(); ctx.arc(C[0], C[1], lerp(150, r1, q), 0, 7); ctx.lineWidth = 6 * (1 - q); ctx.strokeStyle = rgba(col, .8 * (1 - q)); ctx.stroke(); }
+      if (q > 0 && q < 1) { ctx.beginPath(); ctx.arc(at[0], at[1], lerp(r0, r1, q), 0, 7); ctx.lineWidth = 6 * (1 - q); ctx.strokeStyle = rgba(col, .8 * (1 - q)); ctx.stroke(); }
     });
     ctx.restore();
     touch(ctx, t);

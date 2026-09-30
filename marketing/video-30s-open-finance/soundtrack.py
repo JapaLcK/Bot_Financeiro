@@ -224,9 +224,11 @@ ev(17.55, bell(91, 1.5, .6), .1, rev=.6)
 for t in np.arange(17.85, 19.8, .22):  # a conexão agora atravessa
     ev(t, tick(3300), .06, pan=.4)
 ev(17.6, pop(620, 1000, .09), .3, rev=.3)  # "Você controla."
+ev(17.68, whoosh(.5, rising=False) * .5, .3, rev=.4)  # o escudo se dissolve: destravado
+ev(17.72, bell(96, 1.0, .4), .08, rev=.6)
 ev(18.0, pop(620, 1000, .09), .3, rev=.3)  # "O PigBank não movimenta..."
 ev(18.1, bell(86, .8, .3), .1, rev=.5)  # só leitura
-for t in (18.45, 19.0):  # o dinheiro bate e volta
+for t in (18.6, 19.35):  # o dinheiro tenta entrar no PigBank e volta
     ev(t, kick() * .8, .6)
     ev(t, sine(120, .3, 70) * env(int(.3 * SR), .002, .12), .35)
     ev(t, click(), .5)
