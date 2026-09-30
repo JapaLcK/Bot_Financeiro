@@ -269,7 +269,8 @@ PR de cada etapa, não soluções prontas. Cada PR confere se ainda valem, decid
   - PR 3: foto diária por posição do Open Finance (`open_finance_investment_snapshots`,
     gravada no sync; coleta não confirmada entra marcada e a confirmada do mesmo dia vence;
     desconectar apaga; entra na exportação junto com as posições). Só a gravação: nada lê
-    ainda, e a fonte do Rendimento × CDI ficou para o dono (§4, §7).
+    ainda, e a fonte do Rendimento × CDI ficou para o dono (§4, §7). Conferência
+    pós-deploy: `scripts/conferir_fotos_of.py`.
   - PR 4: `GET /api/v2/eventos` (SSE), com os 2 avisos que o `/ws` já dá (fim do sync do
     Open Finance e "Recomeçar do zero"); sessão rechecada antes de cada envio e a cada
     30 s, teto de 5 streams por usuário; o `/painel` invalida as consultas a cada aviso.
