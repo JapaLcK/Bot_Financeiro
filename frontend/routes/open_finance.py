@@ -45,11 +45,13 @@ from core.services.plan_service import is_pro
 from core.services.pluggy_sync import (
     ITEM_UPDATING,
     _env_int,
+    marcar_leitura_falhou,
     refresh_and_sync_pluggy_user,
     sync_pluggy_item,
     sync_pluggy_user,
 )
 from db import (
+    AmbiguousItemError,
     count_open_finance_connections,
     create_mock_open_finance_connection,
     delete_open_finance_transactions,
@@ -824,6 +826,20 @@ async def _run_pluggy_sync_bg(item_id: str) -> None:
     397 sucessos e 41 falhas na mesma prateleira, e ninguém procurando por elas.
     """
     result: dict | None = None
+    # A linha ANTES da 1ª tentativa: é contra ela que a falha final marca
+    # (`marcar_leitura_falhou`), para não desfazer um sync bom nem uma reconexão
+    # mais novos que este run. Sem linha, a falha não marca ninguém e o sync
+    # decide e loga o próprio desfecho.
+    try:
+        conexao = await asyncio.to_thread(get_open_finance_connection_by_item_id, item_id)
+    except AmbiguousItemError:
+        conexao = None
+        print(f"[open_finance] item {item_id} ligado a mais de uma conexão: "
+              "falha do sync não será marcada", flush=True)
+    except Exception as exc:  # banco fora: o sync ainda tenta
+        conexao = None
+        print(f"[open_finance] leitura da conexão falhou ({item_id}): "
+              f"{type(exc).__name__}", flush=True)
     try:
         for tentativa in range(1, _SYNC_MAX_ATTEMPTS + 1):
             try:
@@ -856,6 +872,11 @@ async def _run_pluggy_sync_bg(item_id: str) -> None:
                 await asyncio.sleep(espera)
             except Exception as exc:
                 if not _retryable(exc) or tentativa == _SYNC_MAX_ATTEMPTS:
+                    # Falha FINAL do sync, e só dela (não do aviso nem do log
+                    # abaixo, que rodam depois de um sync bom): sem a marca, a
+                    # tela ficava "Atualizando…" para sempre (Onda 5, R1).
+                    if conexao:
+                        await asyncio.to_thread(marcar_leitura_falhou, conexao)
                     raise
                 espera = _backoff_sec(tentativa)
                 await log_system_event(

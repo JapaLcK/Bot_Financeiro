@@ -257,7 +257,8 @@ def get_open_finance_snapshot(user_id: int, limit: int = 8) -> dict:
     ensure_user(user_id)
     # Import LOCAL: `open_finance_state` importa `_CursorComTeto` daqui no topo,
     # então a mão única é esta (ver o comentário lá).
-    from .open_finance_state import SQL_EXECUTION_STATUS, janela_device_auth_min
+    from .open_finance_state import (
+        SQL_COLETA_VENCIDA, SQL_EXECUTION_STATUS, janela_device_auth_min)
 
     with get_conn() as conn:
         with conn.cursor() as cur:
@@ -289,7 +290,8 @@ def get_open_finance_snapshot(user_id: int, limit: int = 8) -> dict:
                 -- idêntico em chaves ao de antes deste PR.
                 select id, provider, provider_item_id, status, institution_name, last_sync_at,
                        last_attempt_at, status_reason, health, reconnected_at,
-                       {SQL_EXECUTION_STATUS}
+                       {SQL_EXECUTION_STATUS},
+                       {SQL_COLETA_VENCIDA}
                 from open_finance_connections
                 where user_id=%s
                 order by updated_at desc, id desc
@@ -309,6 +311,7 @@ def get_open_finance_snapshot(user_id: int, limit: int = 8) -> dict:
                 # é o que impede um campo derivado do `raw` de virar API pública
                 # sem ninguém ter decidido isso.
                 c.pop("execution_status", None)
+                c.pop("coleta_vencida", None)
 
             cur.execute(
                 """

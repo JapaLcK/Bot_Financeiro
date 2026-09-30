@@ -48,6 +48,9 @@ observação nova, que é exatamente o bug.
 |   |                                                       |         | ""          |
 | G | reconexão pelo widget (`save_pluggy_open_finance_item`)| remoto | "" + health |
 |   |                                                       |         | zerado      |
+| O | sync: `GET /items` ok e o run falhou DEPOIS (D com a  | ACTIVE  | read_failed |
+|   | foto 1; B/C se a foto diz). Grava a foto, e só se     | (ERROR) | ("")        |
+|   | ninguém observou o item desde o começo do run         |         |             |
 
 B e C devolvem motivo vazio de propósito: quem conta a história ali é o
 `health`, e o motivo velho (`item_missing` de ontem) só atrapalharia.
@@ -706,9 +709,25 @@ READ_FAILED = "read_failed"
 INVESTMENTS_READ_FAILED = "investments_read_failed"
 _DETALHE_INVESTIMENTOS_FALTANDO = "Investimentos não vieram nesta atualização"
 
+# "Atualizando…" passado o prazo da coleta (Onda 5, D1): mesma pílula, âmbar.
+# Quem decide o prazo é o derivado `coleta_vencida` (`SQL_COLETA_VENCIDA`, em
+# `db/open_finance_state.py`), lido na linha; esta função não tem relógio.
+_DETALHE_COLETA_VENCIDA = "Está demorando mais que o normal — atualize de novo"
+
 # Falha de leitura NOSSA. Só um sync com leitura completa a limpa: o job de
 # saúde (`leitura_completa=None`) não leu nada, então não pode apagá-la.
 _MOTIVOS_DE_LEITURA = (READ_FAILED, INVESTMENTS_READ_FAILED)
+
+# Motivos que uma falha de sync pode TROCAR por `read_failed` (Onda 5, PR-B1):
+# CAS por espécie no `mark_sync_result(motivos_substituiveis=...)`, lista de
+# permissão. Veredito de observação (`no_accounts`, `item_missing`) fica de fora:
+# a falha sem observação (`marcar_leitura_falhou`) nunca o troca, e motivo
+# desconhecido também não (o default seguro do `out()` já o pinta não-verde).
+MOTIVOS_QUE_A_FALHA_SUBSTITUI = _REASONS_OK + _MOTIVOS_DE_LEITURA
+# A foto do item VIVO tirada pelo próprio run que falhou depois dela prova que
+# o item existe e tira o `item_missing` (contrato §1 item 2). Não leu contas,
+# então não tem autoridade sobre `no_accounts`.
+MOTIVOS_QUE_A_FOTO_VIVA_SUBSTITUI = MOTIVOS_QUE_A_FALHA_SUBSTITUI + ("item_missing",)
 
 
 def resolve_connection_state(
@@ -927,6 +946,10 @@ def connection_ui_state(connection_row: dict) -> dict:
         if state == "no_accounts":
             detail = (detail or _FIXED_DETAIL[state]) + _motivo_do_warning(
                 health, ("BANK", "INVESTMENTS"))
+        # D1: todo "Atualizando…" sem sync desde a autorização atual, passado o
+        # prazo. Só troca o detalhe: estado, rótulo e pílula continuam os mesmos.
+        if state == "updating" and row.get("coleta_vencida"):
+            detail = _DETALHE_COLETA_VENCIDA
         return {
             "state": state,
             "label": _LABELS[state],
@@ -954,8 +977,13 @@ def connection_ui_state(connection_row: dict) -> dict:
         # dados"/"Erro temporário"). Sem sync — 1ª conexão ou reconexão ainda não
         # espelhada — "Atualizando…" é verdade e continua sendo a guarda que
         # impede o card de dizer "tudo em dia" com espelho vazio.
+        # Falha de LEITURA nossa registrada fala aqui também (Onda 5, contrato
+        # item 8): o `out("updated")` a entrega ao default seguro — `read_failed`
+        # vira "Erro temporário" e `investments_read_failed` sem sync continua
+        # "Atualizando…" (regra do PR-A). Só esses dois: `no_accounts` numa 1ª
+        # coleta em curso é a Pluggy ainda sem contas, e continua "Atualizando…".
         if item_status in _UPDATING and sem_sync:
-            return out("updating")
+            return out("updated" if reason in _MOTIVOS_DE_LEITURA else "updating")
         # ERROR vem ANTES de "parcial": item em erro COM produto atrasado é erro,
         # e rotulá-lo de "Parcial" ("atualizei o que deu") subestima o estado.
         if status == "ERROR" or item_status == "ERROR":
@@ -989,7 +1017,14 @@ def connection_ui_state(connection_row: dict) -> dict:
         return out("updated")
 
     # Sem health medido: cai no status local (comportamento de hoje).
-    if status in _UPDATING:
+    # R1b (Onda 5): falha registrada fala ANTES do "Atualizando…" deste ramo. O
+    # `status` local `UPDATING` veio do webhook ou do upsert, não de uma
+    # observação; com `read_failed` do sync de fundo ele girava para sempre. Com
+    # motivo pendente os dois early-returns de "Atualizando…" abaixo (este e o
+    # `ultimo is None`) cedem ao `out("updated")` do fim, cujo default seguro
+    # decide. `_NEEDS_USER` (instrução de dispositivo) continua vindo antes dele.
+    pendente = reason not in _REASONS_OK
+    if status in _UPDATING and not pendente:
         return out("updating")
     if status in _NEEDS_USER:
         # O status LOCAL também pode trazer `WAITING_USER_ACTION` (o upsert grava
@@ -1008,10 +1043,12 @@ def connection_ui_state(connection_row: dict) -> dict:
         # Mesma classe do ramo com health: o motivo explica melhor que "Erro
         # temporário" (linha legada gravada antes desta onda também cai aqui).
         return out("no_accounts" if reason == "no_accounts" else "error_recoverable")
-    if ultimo is None:
+    if ultimo is None and not pendente:
         # `ultimo is None`, NÃO `sem_sync`: este early-return pula o default
-        # seguro do `out()` — é assim na base, e por isso ele só pode valer no
-        # escopo EXATO que a base lhe dava ("nunca sincronizou"). Alargá-lo para
+        # seguro do `out()`, e por isso ele só pode valer no escopo EXATO que a
+        # base lhe dava ("nunca sincronizou") e sem motivo pendente (o
+        # `not pendente`, Onda 5 R1b: a 1ª conexão com `status` local `UPDATED`
+        # cujo sync falhou caía aqui e girava para sempre). Alargá-lo para
         # `sem_sync` fez o caso da reconexão descartar `no_accounts`,
         # `read_failed` e motivo desconhecido: medido, 60 combinações com perda,
         # e a pílula do `read_failed` caindo de vermelho para âmbar logo depois
