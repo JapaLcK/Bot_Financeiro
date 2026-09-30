@@ -125,6 +125,7 @@ Uma entrada nova no simulador entra nesta tabela antes de entrar no código. Con
 | Declaração pendente | `bank_movements.pending_count > 0`, sem efeito quantificado | dois sentidos | os dois |
 | Receita fixa ativa em frequência fora da projeção | `once`, `weekly` ou `daily` legados: `_cashflow_events()` pula essas receitas | só piora | risco (ou estender a fonte de eventos) |
 | Receita fixa projetada que pode não vir | renda apenas inferida, ou renda irregular | só melhora | cabe |
+| Gasto fixo automático pago no cartão | `payment_type="credit_card"`: `_cashflow_events()` ignora `payment_type` e tira o valor do caixa no `due_day`, e a mesma função tira a fatura aberta no vencimento dela. Depois que a cobrança é lançada no cartão, o valor sai duas vezes; antes, sai na data da cobrança em vez da data de pagar a fatura | só piora (dupla contagem ou saída antecipada) | risco, até esses gastos passarem pelo calendário da fatura sem duplicar |
 | Gasto fixo manual | só entra quando o boleto pendente já existe; conferir na implementação se as ocorrências futuras sem boleto ficam fora | só melhora | cabe |
 | Gasto variável | fora da projeção até a Etapa 3 | só melhora | cabe |
 | Custos da oferta ausentes | frete, IOF, seguro, tarifa ou CET não informados | só melhora | cabe |
@@ -214,7 +215,8 @@ paralelo.
 - **Regressão (inventário, não escopo de um PR só):** gastos variáveis ausentes e duplicados,
   compra no fechamento do cartão, salário antes/depois da parcela, fatura vencida, parcelas além
   de 90 dias, reserva já violada, banco indisponível, oferta sem CET, OCR errado, legenda ignorada,
-  pendência de lançamento, receita ativa em frequência legada, conciliação ou declaração do Open
+  pendência de lançamento, receita ativa em frequência legada, gasto fixo automático pago no cartão
+  (antes e depois de a cobrança entrar na fatura), conciliação ou declaração do Open
   Finance pendente (inclusive com
   ajustes de sinais opostos que se cancelam no agregado), saldo alterado
   após novo gasto, erro no gate do print.
