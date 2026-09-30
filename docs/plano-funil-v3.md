@@ -161,7 +161,7 @@ Entrada: `/assinar?plano=essencial|plus|pro&ciclo=monthly|annual[&utm…&fbclid�
 | S2 | 401 | S2: "Senha incorreta" |
 | S2 | "Entrar com Google" | `PBPurchaseIntent.begin(plan,cycle,"card")` + `markAwaitingAuth()` → `/auth/google/start?next=/continuar-compra` (checkout hospedado, sem e-book: é o limite aceito) |
 | S2 | "Não tenho ou esqueci a senha" | `POST /auth/forgot-password`, com a mensagem de sempre (o link serve para conta sem senha: a copy muda para "definir", monólito :3686) |
-| S3 checkout | `POST /billing/create-checkout {plan, interval, embutido:true}` 200 | mostra o texto do teste grátis (`trial_days`), monta o Stripe (`client_secret` + `publishable_key`), dispara `InitiateCheckout`/`begin_checkout` e mostra o link do Pix se `plans-config.pix_annual_available` → **S4** |
+| S3 checkout | `POST /billing/create-checkout {plan, interval, embutido:true, origem:"assinar"}` 200 (sem `origem`, o padrão é `"precos"`: a sessão sai sem o e-book e sem o `metadata.origem` da entrega) | mostra o texto do teste grátis (`trial_days`), monta o Stripe (`client_secret` + `publishable_key`), dispara `InitiateCheckout`/`begin_checkout` e mostra o link do Pix se `plans-config.pix_annual_available` → **S4** |
 | S3 | 409 `already_subscribed` / `lifetime` | "Você já é assinante" + botão `/home` (**F1**) |
 | S3 | 409 `pix_active` | a mensagem do 409 + botão `/home` (**F1**) |
 | S3 | 401 depois do auth-refresh (sessão morreu) | S1: "Sua sessão expirou, entre de novo" |
@@ -382,8 +382,9 @@ tentativa aberta por cliente).
    da `/assinar` (`metadata.origem == "assinar"`, embutida ou hospedada), faz `await asyncio.to_thread(stripe.checkout.Session.list_line_items,
    sid)`. Se o price do e-book está lá e `not recent_event_exists("ebook_email_sent",
    user_id, within_days=3650)`, chama `_fire_email(user_id, send_ebook_email, EBOOK_URL)`
-   e depois `log_system_event("info","ebook_email_sent",…)`. É o mesmo padrão de
-   dedupe do `trial_will_end`. Falha aqui **não** derruba o webhook (try próprio,
+   e, **só se ele devolver True**, grava `log_system_event("info","ebook_email_sent",…)`.
+   Gravar com o envio falho suprimiria a nova tentativa, e o cliente ficaria sem o
+   e-book. É o mesmo padrão do `trial_will_end` (#441). Falha aqui **não** derruba o webhook (try próprio,
    depois do grant).
 2. `invoice.paid`: `amount_plano = amount_paid − valor líquido das linhas de
    `invoice.lines.data` com `price.id == EBOOK`, onde líquido = `amount` − soma dos
@@ -392,8 +393,11 @@ tentativa aberta por cliente).
    (comissão só sobre o plano, decisão do dono), e com `amount_plano <= 0` os dois são
    pulados. Motivo: **com trial, a 1ª fatura é só o e-book**, e hoje ela mandaria
    "cobrança do seu plano" e daria comissão sobre o e-book.
-3. `core/services/email_service.py`: `send_ebook_email(to, url)`. **A copy precisa da
-   aprovação do dono.**
+3. `core/services/email_service.py`: `send_ebook_email(to, url, dashboard_url="")`. Ela
+   precisa aceitar o terceiro argumento, porque o `_fire_email` chama
+   `fn(email, *args, DASHBOARD_URL)`, como o `send_trial_ending_email`. Com dois
+   parâmetros ela dá `TypeError`, e o `_fire_email` engole o erro e devolve False.
+   **A copy precisa da aprovação do dono.**
 4. Envs novas: `STRIPE_PRICE_ID_EBOOK` e `EBOOK_URL` (link de download do PDF que o
    dono hospeda, decisão do dono).
 
@@ -473,8 +477,10 @@ gate, o que é correto: hoje ela só entra de novo pelo "esqueci a senha".
    separar o Stripe em `assinar-stripe.js`) e `assinar.css`. O script que lê o
    fragmento fica no `<head>`, **antes** do `</head>`, que é onde o `inject_tracking`
    injeta o Pixel. Carrega `auth-refresh.js` (`/static/auth-refresh.js`),
-   `purchase-intent.js`, `safe-area.js` e `https://js.stripe.com/v3/` (o Stripe.js tem de
-   vir do Stripe). Implementa a máquina da seção 4.
+   `purchase-intent.js`, `safe-area.js` e `https://js.stripe.com/dahlia/stripe.js`, com
+   `stripe.createEmbeddedCheckoutPage`. O Stripe.js tem de vir do Stripe. O `/v3/` dá
+   "Something went wrong" com a API `dahlia` (resultado da etapa 0, no fim deste
+   arquivo). Implementa a máquina da seção 4.
 3. `frontend/quiz-resultado.js`: com `plano` válido na query (depois de gravar o cookie
    e limpar o fragmento, como já faz), `location.replace("/assinar?" + qs + "#" +
    new URLSearchParams({n, e, w}).toString())`. O fragmento é **montado com
