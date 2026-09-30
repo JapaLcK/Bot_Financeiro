@@ -70,18 +70,25 @@ def auth_account_has_password(user_id: int) -> bool:
 
 
 def conta_sem_credencial(user_id: int) -> bool:
-    """True se a conta ainda não provou o e-mail: sem senha (`''` conta como sem,
-    igual a `auth_account_has_password`) e sem identidade Google/Apple. Sem linha
-    em `auth_accounts` também é True (não entrega)."""
+    """True se a conta não tem senha (`''` conta como sem, igual a
+    `auth_account_has_password`) NEM identidade Google/Apple: só entra pelo link
+    do e-mail. Dois usos: o gate do PR 4 (`password_required` em
+    `frontend/routes/shared.py::exigir_credencial`, `precisa_criar_senha` do
+    /auth/me, guarda do bot) e a espera do e-book do PR 3
+    (`core/services/ebook_entrega.py`, só entrega depois da prova do e-mail).
+    Sem linha em auth_accounts → False: o só-WhatsApp não tem linha e o bot não
+    pode bloqueá-lo; o e-book não entrega nesse caso porque não acha e-mail.
+    Erro de banco sobe (é segurança, não UX)."""
     with get_conn() as conn, conn.cursor() as cur:
         cur.execute(
-            "select (a.password_hash is null or a.password_hash = '')"
-            " and not exists (select 1 from auth_identities i where i.user_id = a.user_id) as sem"
-            " from auth_accounts a where a.user_id = %s",
+            """
+            select 1 from auth_accounts a
+            where a.user_id = %s and (a.password_hash is null or a.password_hash = '')
+              and not exists (select 1 from auth_identities i where i.user_id = a.user_id)
+            """,
             (int(user_id),),
         )
-        row = cur.fetchone()
-    return row is None or bool(row["sem"])
+        return cur.fetchone() is not None
 
 
 def email_has_password(email: str) -> bool:

@@ -446,7 +446,9 @@ def cleanup_expired_challenges() -> int:
 # ──────────────────────────────────────────────────────────────────────────────
 
 def should_show_mfa_onboarding(user_id: int) -> bool:
-    """True se o usuario ainda nao viu a tela de onboarding E nao tem MFA ativado."""
+    """True se o usuario ainda nao viu a tela de onboarding E nao tem MFA ativado
+    E tem credencial: sem senha nem Google/Apple, o "Crie sua senha" vem antes
+    (e sem senha não dá para ativar MFA). O convite não é marcado como visto."""
     with get_conn() as conn:
         with conn.cursor() as cur:
             cur.execute(
@@ -463,7 +465,10 @@ def should_show_mfa_onboarding(user_id: int) -> bool:
                 return False
             already_shown = row["mfa_onboarding_shown_at"] is not None
             mfa_enabled = bool(row["enabled"])
-            return not already_shown and not mfa_enabled
+    if already_shown or mfa_enabled:
+        return False
+    from .google_auth import conta_sem_credencial
+    return not conta_sem_credencial(user_id)
 
 
 def mark_mfa_onboarding_shown(user_id: int) -> None:
