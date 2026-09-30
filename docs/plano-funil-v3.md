@@ -370,8 +370,9 @@ anotado no corpo do PR 2 antes de codar**:
      `expires_at=now+3600` (D-n). Sem o campo, o Stripe usa 24 h, e o plano B hospedado
      manteria aberta por 24 h a janela de cobrança dupla (Pix numa aba, cartão na outra);
    - `_new_session`, se o e-book é oferecido: `metadata["ebook_price"] = STRIPE_PRICE_ID_EBOOK`
-     (também no `subscription_data.metadata`). O PR 3 identifica o e-book por essa
-     **foto**, e não pela env do momento do webhook. Assim, trocar ou tirar a env com uma
+     e `metadata["ebook_url"] = EBOOK_URL`, também no `subscription_data.metadata`. O
+     PR 3 identifica o e-book e pega a URL por essa **foto**, e não pela env do momento
+     do webhook. Assim, trocar ou tirar a env com uma
      sessão aberta não faz a compra perder a entrega nem virar receita do plano;
    - `allow_promotion_codes=True` em **todos** os casos, como hoje (D-o);
    - `_new_session`, se `origem == "assinar"`: `adaptive_pricing={"enabled": False}`, para
@@ -434,9 +435,9 @@ tentativa aberta por cliente).
    preço oferecido, gravada pelo PR 2) **e** veio da `/assinar` (`metadata.origem ==
    "assinar"`, embutida ou hospedada), **grava uma entrega pendente** do e-book: uma
    linha por `user_id` + `session_id`, idempotente, para a reentrega do evento não
-   criar outra. Ela guarda também a **URL do e-book no momento da compra** (foto do
-   `EBOOK_URL`), porque o envio pode esperar dias pela senha, e a env pode mudar ou
-   sumir nesse tempo. O webhook **não** envia e **não** chama a Stripe para isso. Sem
+   criar outra. Ela guarda também a **URL do e-book oferecida**, copiada de
+   `metadata.ebook_url` da sessão (a foto do PR 2, e nunca a env na hora do webhook).
+   O envio pode esperar dias pela senha, e a env pode mudar ou sumir nesse tempo. O webhook **não** envia e **não** chama a Stripe para isso. Sem
    `EBOOK_URL` na hora da compra, o PR 2 nem oferece o e-book.
    - **Onde e em que ordem:** logo depois do grant, **antes** dos outros efeitos do
      ramo (funil, e-mails, `notify_new_pro`). Se a gravação falhar, o ramo responde
@@ -458,18 +459,22 @@ tentativa aberta por cliente).
        ciclo.
    - **O que o job faz:** confirma pela `list_line_items` (preço = `ebook_price`) que o
      e-book foi comprado. Se não foi, fecha a pendência sem enviar. Se foi, envia com
-     `send_ebook_email` (pelo `_fire_email` extraído), com a foto da URL e nunca a env do
-     momento. URL vazia na pendência não conta como enviado: a pendência fica aberta e
+     `send_ebook_email`, com a foto da URL e nunca a env do momento. O envio **não**
+     passa pela dedupe por usuário do `_fire_email`. Essa dedupe tem a chave
+     `fn.__name__` + `uid` e devolve True se a chave existe, então engoliria a segunda
+     compra do mesmo dia e fecharia a pendência sem enviar. O job chama o remetente com
+     a chave da **pendência** (`user_id` + `session_id`): ou passa a chave ao
+     `_fire_email` extraído (um parâmetro opcional de chave), ou chama `send_ebook_email`
+     direto e grava o resultado na linha. URL vazia na pendência não conta como enviado: a pendência fica aberta e
      gera alerta.
      - **A marca de "enviado" é a própria linha da pendência** (`user_id` + `session_id`),
        e não a chave de 3650 dias do `_fire_email` por usuário. Com a chave por usuário,
        quem comprasse o e-book de novo, depois de cancelar e assinar outra vez, pagaria e
        não receberia.
      - O job reivindica a linha de forma atômica antes de enviar, com uma expiração para
-       não travar se cair no meio, e a fecha só com o envio confirmado. O `_fire_email`
-       roda com a dedupe padrão, que só protege contra duas rodadas do job no mesmo
-       dia.
-     - A pendência é fechada quando o `_fire_email` devolve True. Uma falha (Stripe fora, e-mail recusado) mantém a pendência para o próximo
+       não travar se cair no meio, e a fecha só com o envio confirmado. O claim é o que
+       impede duas rodadas do job de enviarem a mesma pendência.
+     - A pendência é fechada quando o envio devolve True. Uma falha (Stripe fora, e-mail recusado) mantém a pendência para o próximo
      ciclo.
    - **Condição do PR 3:** o registro da pendência segue §0.1. Procure antes se já existe
      outbox ou fila de e-mail no repositório; se existir, reuse. **O `_fire_email` hoje é
@@ -568,7 +573,13 @@ a rede.
      `/api/v2`, e não de memória. Ela inclui o `/ws`, o bot
      (`core/handle_incoming.py`, conta com WhatsApp vinculado) e o HTML servido. Cada
      linha é classificada em **bloqueia** ou **libera**, com o motivo.
-   - **Libera, no mínimo:** `/auth/*` (inclusive `/auth/me` e o logout), do `/billing`
+   - **Libera, no mínimo:** do `/auth`, **só** o que serve para sair do bloqueio:
+     `/auth/me`, o logout, o refresh, o login e a recuperação (`forgot-password`,
+     `reset-password`). **O `POST /auth/link-code` BLOQUEIA:** ele vincula o WhatsApp de
+     quem chama à conta, e quem pagou com o e-mail de outra pessoa ligaria o próprio
+     telefone antes de provar o e-mail. Quando o dono do e-mail recuperasse a conta, o
+     WhatsApp do outro continuaria com acesso pelo bot. A tabela classifica cada rota do
+     `/auth` uma a uma. Do `/billing`
      **só** `create-checkout` e `plans-config`, as rotas de `authorize_account_access`,
      `POST /settings/{uid}/password-reset` e `PATCH /settings/{uid}/security/contact`.
      - Esta última passa a pular **só** a perna da credencial e continua com a checagem
@@ -613,7 +624,11 @@ a rede.
    - **Conserto: amarrar o token ao e-mail**, e não só invalidar na troca. Invalidar na
      troca tem duas corridas: o pedido de reset lê o usuário numa transação e grava o
      token em outra, e o consumo confere o `used_at` separado da troca de senha.
-     - O token passa a guardar o `email_hash` da conta no momento em que é emitido.
+     - O token passa a guardar o `email_hash` da conta no momento em que é emitido. A
+       coluna é nova numa tabela que já existe em produção: o `CREATE TABLE IF NOT
+       EXISTS` não a cria lá. Precisa de `ALTER TABLE password_reset_tokens ADD COLUMN IF
+       NOT EXISTS email_hash text` no `init_db`, com um teste que sobe o schema ANTIGO e
+       aplica a migração.
      - O consumo o **reivindica de forma atômica** (`update … set used_at = now() where
        token = %s and used_at is null and expires_at > now() returning user_id,
        email_hash`) e, na **mesma transação** da troca de senha, confere esse hash
@@ -660,7 +675,8 @@ gate, o que é correto: hoje ela só entra de novo pelo "esqueci a senha".
   (`precisa_criar_senha:false`).
 - **bloqueio no servidor, com chamadas DIRETAS às APIs, sem passar pela tela:** a conta
   sem credencial e com plano pago leva 403 `password_required` em rota de dados, em
-  `GET /ai/messages`, `POST /ai/chat`, `/billing/portal`, `/billing/subscription` e
+  `GET /ai/messages`, `POST /ai/chat`, `POST /auth/link-code`, `/billing/portal`,
+  `/billing/subscription` e
   `/billing/change-plan`, e na `/api/v2/me`. O `GET /conta` **não** redireciona para o
   portal do Stripe. No WebSocket, o **código de fechamento**
   próprio (não um 403). A mesma conta
