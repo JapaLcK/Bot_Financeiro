@@ -156,6 +156,11 @@ receber ofertas do chat ou do print:
   1 a 12 vezes não cabe, e dividi-la em várias chamadas de `simulate()` compararia as opções
   contra leituras diferentes do saldo. O limite sobe até o teto operacional da varredura, numa
   única chamada de `simulate()`, que já lê saldo e eventos uma vez só para todos os cenários.
+  O limite tem cópias no caminho do chat que sobem juntas: `maxItems: 3` e a descrição "1 a 3
+  cenários" do schema em `core/services/ai_chat/tools/simulator.py`, e o roteamento em
+  `core/services/ai_chat/system_prompt.py` ("Monta 1 a 3 cenários"). Os mesmos dois arquivos
+  mandam o modelo não apontar vencedor; isso muda junto com o contrato de veredito. O teste passa
+  pelo despacho real da tool com mais de três opções, não só pelo `Simulacao`.
 
 Taxa nominal, taxa efetiva e CET são coisas distintas. Para "juros bons ou ruins", separar custo
 versus à vista, encaixe no orçamento e comparação com mercado. A última requer referência
