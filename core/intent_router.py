@@ -1800,9 +1800,10 @@ def _quantia_explicita(resposta: str, crua: str, existentes: list[str]) -> str |
                       "a reserva 2025 do nubank", com `Nubank` e `Reserva 2025
                       do Nubank`, o "nubank" é citado, mas o 2025 é do nome).
       ", " + quantia  "tesouro 2029, 80", "…, R$ 80", "…, 80 reais", "tesouro,
-                      na verdade 80". Nada além disso, e sem citar o catálogo
-                      (a caixinha `R$ 5000`). O corte é na `crua`, de ANTES do
-                      `limpa_pontuacao_final`, que come a vírgula de "2029, R$ 80".
+                      na verdade 80". Nada além disso. O corte é na `crua`, de
+                      ANTES do `limpa_pontuacao_final` (que come a vírgula de
+                      "2029, R$ 80"), e só depois do nome INTEIRO do alvo: na
+                      caixinha `R$ 5000`, "caixinha, R$ 5000" não é quantia.
 
     Limites aceitos pelo dono: "tira do tesouro 2029 no nubank" com `Tesouro`
     dá R$ 2.029 (#703, as duas metades acima não exigem a MESMA preposição), e
@@ -1819,11 +1820,17 @@ def _quantia_explicita(resposta: str, crua: str, existentes: list[str]) -> str |
         for m in _PREP_NO_MEIO_RE.finditer(sem_nome):
             if _quantidade_fecha(sem_nome[:m.start()]):
                 return sem_nome[:m.start()]
-    cauda = crua.rpartition(", ")[2]
-    # Repõe a limpeza que a `crua` pula: sem ela "tesouro, 132,50." dá R$ 13.250.
-    cauda = limpa_pontuacao_final(cauda.strip())
-    if _CAUDA_QUANTIA_RE.fullmatch(cauda) and not cita(cauda):
-        return cauda
+    # A PRIMEIRA ", " depois do alvo inteiro: "tesouro, 132, 50" é R$ 132,50, e
+    # na caixinha `Viagem, 2027` o 2027 de "a viagem, 2027" é do nome.
+    alvo = _nome_do_alvo(resposta, existentes)
+    no_catalogo = _eh_nome_do_catalogo(alvo, existentes)
+    for inicio in [0, *(m.end() for m in re.finditer(", ", crua))]:
+        if no_catalogo and not contains_word(normalize_text(crua[:inicio]), normalize_text(alvo)):
+            continue
+        # Repõe a limpeza que a `crua` pula: sem ela "tesouro, 132,50." dá R$ 13.250.
+        cauda = _cola_separador_decimal(limpa_pontuacao_final(crua[inicio:].strip()))
+        if _CAUDA_QUANTIA_RE.fullmatch(cauda):
+            return cauda
     return None
 
 

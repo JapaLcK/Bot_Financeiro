@@ -1,9 +1,8 @@
 """#567: o número que faz parte do NOME não vira o valor da retirada.
 
 "saquei 50" -> "De qual caixinha ou investimento?" -> "tesouro 2029" resgatava
-R$ 2.029 do investimento `Tesouro` no lugar dos R$ 50 guardados. O catálogo só
-protegia a resposta IGUAL a um nome dele ("tesouro ipca 2029"); qualquer número
-que sobrasse ao lado de um nome virava quantia.
+R$ 2.029 do investimento `Tesouro` no lugar dos R$ 50 guardados: o catálogo só
+protegia a resposta IGUAL a um nome dele.
 
 DECIDIDO PELO DONO (opção B + rodada do Manager): quando a pergunta é de NOME,
 o número da resposta só troca o valor em forma explícita:
@@ -32,20 +31,22 @@ e termina em "Não encontrei": o defeito é resolver o nome com "º".
 
 CONTROLE NEGATIVO (medido em 2026-09-30 sobre 5b558ecf, num caso verde com o fix):
   (a) `pede_nome=False` no `_resolve_clarification` -> 21 VERMELHOS (N1, N2,
-      N3, N4 "2029, 80"/"R$ 80"/"r$ 80", N9, N10, N11, N12, N5); P1-P4 verdes.
-  (b) `_quantia_explicita` devolvendo None -> 23 daqui e 8 de
+      N3, N4 "2029, 80"/"R$ 80"/"r$ 80", N9, N10, N12, N5); P1-P4 verdes.
+  (b) `_quantia_explicita` devolvendo None -> 25 daqui e 8 de
       `test_perguntas_guardam_contexto.py` (entre eles
       `test_tudo_guardado_mais_quantia_nova_nao_esvazia`) VERMELHOS.
-  (c) versões anteriores: a 1ª deixava N6 vermelho, a 2ª N8/N9, a 3ª N10/N11/
+  (c) versões anteriores: a 1ª deixava N6 vermelho, a 2ª N8/N9, a 3ª N10/
       N4 "80 real" e a 4ª (número lido na resposta crua) os 4 N13.
-  (d) sem checar o catálogo na cauda: "caixinha, R$ 5000" VERMELHO.
   (e) sem exigir o catálogo depois da preposição: os 4 N10 e 7 linhas da
       tabela VERMELHOS. (g) número lido sem tirar o nome: os 4 N13 VERMELHOS.
   (f) `_quantia_explicita` sem a `crua` (corte na resposta JÁ limpa): N4
       "R$ 80"/"r$ 80" e as 2 linhas da tabela VERMELHOS (4).
   (h) `limpa_pontuacao_final(cauda.strip())` -> `cauda.strip()`: "tesouro,
       132,50." (dava 13.250) e "tesouro, 80!" (dava 50) VERMELHOS.
-  (i) exigir ", " na `crua` de volta: "80 reais" VERMELHO.
+  (i) exigir ", " na `crua` de volta: N7, "80" e "80 reais" VERMELHOS.
+  (j) sem exigir o alvo inteiro antes da ", ": N14 "a viagem, 2027"/"…, 80" e
+      "caixinha, R$ 5000" VERMELHOS; sem `_cola_separador_decimal`: N14
+      "tesouro, 132, 50" VERMELHO.
 
 CONTROLE POSITIVO: P1 (a pergunta era do VALOR), P2 (nome exato com dígitos),
 P3 (correção explícita) — o conserto restringe, então o caminho bom tem de
@@ -187,21 +188,14 @@ def test_n9_cauda_descritiva_depois_da_virgula_nao_vira_valor(uid, caixinha, inv
     (None, "CDB", "cdb 2027 do inter"),
     ("viagem", None, "viagem 2027 da família"),
     ("Reserva", None, "reserva 2025 de emergência"),
-])
-def test_n10_preposicao_que_nao_leva_ao_catalogo(uid, caixinha, investimento, resposta):
-    """Decisão do dono: "+ nome" é literal. O "no nubank" não cita o catálogo."""
-    saldo, r = _saca(uid, caixinha, investimento, resposta)
-    assert saldo == 2950.00, r
-
-
-@pytest.mark.parametrize("caixinha,investimento,resposta", [
-    (None, "Tesouro", "Tesouro 2029 R$ 80"),
+    (None, "Tesouro", "Tesouro 2029 R$ 80"),   # sem a forma "R$" sem vírgula
     ("Meta", None, "meta R$ 5000"),
 ])
-def test_n11_reais_sem_virgula_nao_troca_o_valor(uid, caixinha, investimento, resposta):
-    """Decisão do dono: sem a forma "R$" sem vírgula."""
-    saldo, r = _saca(uid, caixinha, investimento, resposta, saldo=6000.0)
-    assert saldo == 5950.00, r
+def test_n10_preposicao_que_nao_leva_ao_catalogo(uid, caixinha, investimento, resposta):
+    """Decisão do dono: "+ nome" é literal (o "no nubank" não cita o catálogo) e
+    não há forma "R$" sem vírgula."""
+    saldo, r = _saca(uid, caixinha, investimento, resposta)
+    assert saldo == 2950.00, r
 
 
 def test_n12_deposito_nome_com_ano(uid):
@@ -225,6 +219,17 @@ def test_n13_nome_curto_dentro_do_longo(uid, sem_teto_de_caixinha, caixinhas, in
         _investimento(uid, investimento)
     r = _responde(uid, "saquei 50", resposta)
     assert (_inv(uid, alvo) if investimento else _caixinha(uid, alvo)) == 2950.00, r
+
+
+@pytest.mark.parametrize("caixinha,investimento,resposta,fim", [
+    ("Viagem, 2027", None, "a viagem, 2027", 2950.0),     # o ", 2027" é do nome
+    ("Viagem, 2027", None, "a viagem, 2027, 80", 2920.0),  # positivo: vírgula depois do nome
+    (None, "Tesouro", "tesouro, 132, 50", 2867.5),         # decimal com espaço
+])
+def test_n14_virgula_do_nome_e_decimal_com_espaco(uid, caixinha, investimento, resposta, fim):
+    """Codex no #709: a cauda começa depois do nome INTEIRO e cola "132, 50"."""
+    saldo, r = _saca(uid, caixinha, investimento, resposta)
+    assert saldo == fim, r
 
 
 def test_n5_sem_valor_guardado_pergunta_o_valor_e_nao_move(uid):
