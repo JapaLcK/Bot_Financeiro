@@ -21,7 +21,9 @@ def _numero(v) -> Decimal | None:
     """Número do banco, ou None. Nunca 0 no lugar do que não se leu."""
     if isinstance(v, bool):
         return None
-    if isinstance(v, (int, float)):
+    if isinstance(v, int):
+        return Decimal(v)  # sem passar por float: 10**400 estouraria o isfinite
+    if isinstance(v, float):
         return Decimal(str(v)) if math.isfinite(v) else None
     if isinstance(v, str) and _NUMERO.fullmatch(v):
         return Decimal(v)
