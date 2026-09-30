@@ -274,21 +274,25 @@ def _email(cobranca, evt) -> None:
     motivo. `ponytail:` teto — sem `RESEND_API_KEY` o evento retenta para
     sempre; quem quiser o no-op registrado (padrão de `ga4`/`capi`) precisa de
     uma leitura de env que hoje mora só no `email_service` (§0.7).
+
+    O e-mail do fundador vem depois e nunca levanta: não pode fazer o efeito
+    retentar nem repetir a confirmação.
     """
-    from core.services.email_service import send_pix_paid_email
+    from core.services.email_service import send_founder_email_once, send_pix_paid_email
 
     destino = _email_do_titular(cobranca["user_id"])
-    if not destino or recent_event_exists("pix_paid_email_sent",
-                                          cobranca["user_id"], 1.0):
+    if not destino:
         return
-    if not send_pix_paid_email(destino, cobranca["plan"],
-                               int(cobranca["amount_cents"]) / 100,
-                               cobranca["access_starts_at"],
-                               cobranca["access_expires_at"]):
-        raise RuntimeError("send_pix_paid_email devolveu False")
-    log_system_event_sync("info", "pix_paid_email_sent",
-                          "E-mail de confirmacao da compra Pix enviado.",
-                          source="pix", user_id=cobranca["user_id"])
+    if not recent_event_exists("pix_paid_email_sent", cobranca["user_id"], 1.0):
+        if not send_pix_paid_email(destino, cobranca["plan"],
+                                   int(cobranca["amount_cents"]) / 100,
+                                   cobranca["access_starts_at"],
+                                   cobranca["access_expires_at"]):
+            raise RuntimeError("send_pix_paid_email devolveu False")
+        log_system_event_sync("info", "pix_paid_email_sent",
+                              "E-mail de confirmacao da compra Pix enviado.",
+                              source="pix", user_id=cobranca["user_id"])
+    send_founder_email_once(cobranca["user_id"], destino, "pix", str(cobranca["id"]))
 
 
 def _revoke(cobranca, evt) -> None:

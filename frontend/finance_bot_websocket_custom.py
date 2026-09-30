@@ -6061,6 +6061,17 @@ async def billing_webhook(request: Request, background_tasks: BackgroundTasks):
             # assinante de PigBank+, que é só o Plus (#351).
             from core.services.email_service import send_pro_welcome_email
             await _fire_email(user_id, send_pro_welcome_email, plan_value, expires_dt)
+            # E-mail pessoal do fundador, agendado para 3h depois; só na primeira
+            # assinatura da conta. `send_founder_email_once` não levanta — o
+            # try aqui cobre o `_user_email`.
+            try:
+                from core.services.email_service import send_founder_email_once
+                _dest = await _user_email(user_id)
+                if _dest:
+                    await asyncio.to_thread(send_founder_email_once, int(user_id),
+                                            _dest, "stripe", str(sub_id))
+            except Exception as exc:
+                print(f"[billing] email do fundador falhou user={user_id}: {exc}")
             # Notificação admin (Slack/Discord webhook)
             try:
                 from core.services.admin_notify import notify_new_pro
