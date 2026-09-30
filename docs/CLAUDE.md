@@ -219,6 +219,24 @@ sessão. É o único lugar do site que diz se um e-mail tem conta (aceito pelo d
 10/h por IP (balde `quiz`) e 3/h por e-mail (balde `quiz-conta`, separado do
 `register` para o anônimo não gastar o teto do cadastro da vítima). A prova do e-mail vem depois, no "Crie sua senha".
 
+**Conta sem credencial: 403 `password_required`.** Conta sem senha e sem identidade
+Google/Apple (`db.conta_sem_credencial`, a fonte única) não lê nem grava dado, mesmo
+paga, até criar a senha pelo link do e-mail. Vale no servidor: a perna da credencial do
+`_enforce_subscription_gate` (depois das duas do 402; não lê `ACCESS_GATE_ENABLED` nem
+`PLANS_V2_ENABLED`, porque é segurança e não cobrança) e `shared.exigir_credencial` nos
+pontos fora dele; o `/ws` fecha com 4403, o `/conta` manda para a `/home`, e o bot não
+liga o número pelo telefone (responde com o texto fixo). O bot também barra toda
+mensagem de número já ligado a conta sem credencial; no auto-vínculo, remetente que já
+tem dados financeiros segue na própria conta, sem vínculo nem mescla
+(`remetente_com_dados`); o vazamento da mescla por telefone digitado está na #711.
+Saem livres as rotas da própria conta (`authorize_account_access`), o `PATCH /settings/{id}/security/contact`
+(`exige_credencial=False`), o `/auth/me` (campo `precisa_criar_senha`), login,
+logout, refresh e o reset. Quem bloqueia e quem libera, rota a rota, está em
+`tests/test_rotas_senha_obrigatoria.py`, que reprova rota nova sem linha. Na tela, a
+`/home` e o `/app` carregam `frontend/criar-senha.js`: overlay que não fecha, também
+disparado por qualquer 403 `password_required`. A `/settings` não o carrega (é a saída),
+e o convite do MFA fica calado no servidor enquanto não há credencial.
+
 **Os três criadores de conta** (o `confirm` do register, o `complete-signup` do
 Google/Apple e a `/assinar`) gravam pelo mesmo `db_support.inserir_conta_nova`:
 trava por e-mail + `on conflict (email) do nothing`. O e-mail que ganhou conta no meio

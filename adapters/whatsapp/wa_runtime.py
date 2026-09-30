@@ -46,6 +46,7 @@ from db import (
     attempt_whatsapp_phone_link,
     claim_pending_action,
     consume_pending_action,
+    conta_sem_credencial,
     get_conn,
     get_or_create_canonical_user,
     get_pending_action,
@@ -506,6 +507,13 @@ def _is_greeting(text: str) -> bool:
     return normalized in {"oi", "ola", "olá", "hello", "hi", "hey", "bom dia", "boa tarde", "boa noite"}
 
 
+# Resposta ao número da conta paga que ainda não criou a senha (status
+# `precisa_senha` do auto-vínculo; texto do dono, PR 4 do funil v3).
+PRECISA_SENHA_WA = (
+    "Sua conta PigBank está quase pronta. Para ligar este WhatsApp, crie sua "
+    "senha pelo link que enviamos para o seu e-mail."
+)
+
 # Tentativa de vincular por código ("link 123456" / "vincular 123456"). Espelha
 # os padrões do intent_classifier (account.link / account.vincular). Um número
 # SEM conta usa exatamente esse fluxo pra se vincular, então não pode ser barrado
@@ -663,6 +671,14 @@ def process_message(message: InboundMessage) -> None:
         )
         uid = get_or_create_canonical_user("whatsapp", message.wa_id)
         logger.info("WA canonical user resolved uid=%s from=%s", uid, message.wa_id)
+        # Número JÁ ligado à conta sem senha (vínculo anterior ao PR 4 ou por
+        # `vincular CODIGO`): não lê nem grava nada. O auto-vínculo abaixo barra
+        # o outro caminho, o de ligar o número agora (`precisa_senha`).
+        # ponytail: +1 query por mensagem; se pesar, `password_hash is null` no
+        # SELECT cacheado do get_auth_user (o reset já invalida esse cache).
+        if conta_sem_credencial(uid):
+            _send_reply(reply_to, PRECISA_SENHA_WA)
+            return
         # Âncora lida antes de qualquer tratamento pré-núcleo: pergunta que o app
         # criar durante este turno não é deste turno e fica aberta.
         pid, ancora = _pergunta_da_ia(uid)
@@ -728,6 +744,13 @@ def process_message(message: InboundMessage) -> None:
             if not _is_link_code_attempt(message.text or ""):
                 _send_no_account_notice(reply_to, auto_link_result, user_id=uid)
                 return
+        elif auto_link_result["status"] == "precisa_senha":
+            # O número é da conta paga que ainda não criou a senha: não vincula
+            # e não processa (decisão do dono, PR 4 do funil v3). Sem exceção
+            # para o código de vínculo: seguindo, ele pararia no _paywall_gate
+            # do usuário do WhatsApp (sem plano) com a copy de "assine".
+            _send_reply(reply_to, PRECISA_SENHA_WA)
+            return
         elif auto_link_result["status"] in {
             "multiple_accounts",
             "wa_linked_other_account",

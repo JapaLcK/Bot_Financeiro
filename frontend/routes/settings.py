@@ -289,7 +289,10 @@ async def update_security_contact_route(
     # O teto tem caso: `test_conta_sem_email_sai_por_400_e_nao_por_500`
     # (`tests/test_settings_saida_guardas.py`) fixa que o /password-reset dessa
     # conta responde 400 com instrução, não 500.
-    shared.authorize_dashboard_access(request, user_id)
+    # `exige_credencial=False` pula SÓ a perna da senha (403 password_required):
+    # corrigir o e-mail é a saída de quem pagou sem senha (PR 4 do funil v3).
+    # Dono, exclusão agendada, DIREITO e CSRF continuam valendo.
+    shared.authorize_dashboard_access(request, user_id, exige_credencial=False)
     auth_user = await asyncio.to_thread(get_auth_user, user_id)
     if not auth_user:
         raise HTTPException(status_code=400, detail="Esta conta ainda não tem login por e-mail configurado.")

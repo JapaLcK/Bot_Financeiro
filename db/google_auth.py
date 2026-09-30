@@ -69,6 +69,23 @@ def auth_account_has_password(user_id: int) -> bool:
     return bool(row and row["password_hash"])
 
 
+def conta_sem_credencial(user_id: int) -> bool:
+    """True se a conta não tem senha NEM identidade Google/Apple: só entra pelo
+    link do e-mail. É o `password_required` do gate (`frontend/routes/shared.py`,
+    `exigir_credencial`) e o `precisa_criar_senha` do /auth/me. Sem linha em
+    auth_accounts → False. Erro de banco sobe (é segurança, não UX)."""
+    with get_conn() as conn, conn.cursor() as cur:
+        cur.execute(
+            """
+            select 1 from auth_accounts a
+            where a.user_id = %s and a.password_hash is null
+              and not exists (select 1 from auth_identities i where i.user_id = a.user_id)
+            """,
+            (int(user_id),),
+        )
+        return cur.fetchone() is not None
+
+
 def email_has_password(email: str) -> bool:
     """True se existe conta com senha para este email."""
     email = (email or "").strip().lower()

@@ -560,6 +560,23 @@ a rede.
 
 ### PR 4: "Crie sua senha" obrigatório no painel
 
+**Feito** (PR 4 do funil v3). O item 3c saiu para um **PR 4b** separado (decisão do dono,
+2026-09-30). Decisões do dono na mesma data: o bot bloqueia o auto-vínculo por telefone
+com texto fixo; `POST /api/push/register` e `/api/affiliate/*` também bloqueiam; `/painel`
+e `/onboarding` acessados direto ficam como resíduo declarado.
+
+No bot, número **já** ligado a conta sem credencial tem toda mensagem barrada com o
+mesmo texto fixo (guarda em `wa_runtime.process_message`, antes do auto-vínculo).
+Colisão de telefone no auto-vínculo (decisão do dono, 2026-09-30): quando o número
+digitado pela conta sem credencial é o de um remetente que **já** tem dados financeiros
+(`db.users._tem_dados_financeiros`, o critério do `merge_users` do #607),
+`attempt_whatsapp_phone_link_impl` devolve `remetente_com_dados` e a mensagem segue na
+conta do remetente: sem vínculo, sem mescla e sem o aviso de senha. O aviso "crie sua
+senha" fica só para número sem dados. Limite aceito: quem pagou e já usava o bot com
+dados no mesmo número segue como a conta do WhatsApp até criar a senha. O vazamento que
+já existe na `main` (conta **com** credencial que digita o número de outra pessoa recebe
+os dados dela pela mescla) está na issue #711, fora do PR 4.
+
 **Muda:**
 1. `db/google_auth.py`: `conta_sem_credencial(user_id) -> bool` = `password_hash is
    null` **e** nenhuma linha em `auth_identities` (nem Google, nem Apple). Uma query,
@@ -668,7 +685,7 @@ a rede.
    - **Isto já vale hoje na `main`**, para qualquer conta, e não só a do quiz. Se o
      conserto entrar antes num PR próprio, o PR 4 só confere que ele existe.
    - **Feito no PR do reset amarrado ao e-mail** (#690); o PR 4 só confere que existe.
-3c. **A troca de e-mail também atualiza o cliente no Stripe.** Hoje a `PATCH
+3c. **Movido para o PR 4b.** **A troca de e-mail também atualiza o cliente no Stripe.** Hoje a `PATCH
    /settings/{uid}/security/contact` só grava em `auth_accounts`. O `stripe_customer_id`
    continua com o e-mail antigo, que recebe recibos, faturas e aparece no portal. Isso já
    vale na `main` para qualquer conta.
@@ -888,7 +905,7 @@ do e-book.
   para clientes estiverem ligados (recibo de pagamento, fatura), o dono de um e-mail
   digitado errado recebe o recibo: valor, produto e final do cartão. **Decisão do dono,
   pendente:** desligar esses e-mails no painel do Stripe (seção 9, item novo) ou aceitar
-  o risco. Depois da correção do e-mail, o item 3c do PR 4 atualiza o cliente.
+  o risco. Depois da correção do e-mail, o item 3c (agora PR 4b) atualiza o cliente.
 - **Duas cobranças (Pix + cartão)** em abas diferentes: a janela vai de 24 h para 1 h
   (D-n), nos dois modos da `/assinar`. Não foi fechada de todo.
 - **Contas sem plano criadas por bots:** somam na base e podem entrar nos e-mails de
