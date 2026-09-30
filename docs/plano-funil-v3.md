@@ -331,6 +331,9 @@ Portão: a Etapa 0 e a Etapa 0b-1 feitas.
      a string da `success_url` de hoje, `expires_at=now+3600`, e não manda
      `success_url`/`cancel_url`;
    - `allow_promotion_codes=True` em **todos** os casos, como hoje (D-o);
+   - `_new_session`, se `origem == "assinar"`: `adaptive_pricing={"enabled": False}`, para
+     o preço sair sempre em BRL. A etapa 0 viu USD fora do Brasil (Adaptive Pricing). O
+     teste confere o parâmetro na sessão da `/assinar`, e a `/precos` continua sem ele;
    - `metadata["td"] = str(trial_days)`;
    - retorno: embutido → `{"client_secret", "trial_days", "plan", "interval",
      "session_id"}`. Hospedado → como hoje, mais `trial_days`.
@@ -384,8 +387,18 @@ tentativa aberta por cliente).
    user_id, within_days=3650)`, chama `_fire_email(user_id, send_ebook_email, EBOOK_URL)`
    e, **só se ele devolver True**, grava `log_system_event("info","ebook_email_sent",…)`.
    Gravar com o envio falho suprimiria a nova tentativa, e o cliente ficaria sem o
-   e-book. É o mesmo padrão do `trial_will_end` (#441). Falha aqui **não** derruba o webhook (try próprio,
-   depois do grant).
+   e-book. É o mesmo padrão do `trial_will_end` (#441). Uma exceção no bloco do e-book
+   **não desfaz o grant**, porque ele roda depois, num try próprio.
+   **A falha precisa voltar a ser tentada.** Com o `_fire_email` devolvendo False (ou o
+   `list_line_items` lançando), o ramo responde **5xx no fim**, depois do grant e dos
+   outros efeitos, e a Stripe entrega o evento de novo (por até 3 dias). É o mesmo
+   mecanismo que o webhook já usa quando a materialização falha: um 2xx aqui faria a
+   Stripe nunca mais entregar o evento, e sem job nem varredura o cliente pagante
+   ficaria sem o e-book para sempre. **Condição do PR 3:** listar os efeitos do ramo
+   `checkout.session.completed` e provar com teste que a entrega repetida não os
+   duplica: um grant, um e-mail de cada (a chave do `_fire_email`), e um evento de
+   compra no funil/CAPI/GA4. Se algum efeito não for idempotente, a saída é gravar a
+   entrega pendente e ter um job que a refaz, e não o 5xx.
 2. `invoice.paid`: `amount_plano = amount_paid − valor líquido das linhas de
    `invoice.lines.data` com `price.id == EBOOK`, onde líquido = `amount` − soma dos
    `discount_amounts` da linha (com cupom ligado, o desconto pode cair na linha do
