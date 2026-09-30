@@ -23,3 +23,11 @@ const LAUNCH_TYPE_LABELS = {
   despesa: "despesa",
   receita: "receita",
 };
+
+/* `receita`/`despesa` com `is_internal_movement` é dinheiro que mudou de lugar
+   (saque em espécie espelhado na Carteira, transferência): o rótulo diz a
+   DIREÇÃO, não "receita"/"despesa" (decisão do dono). Só esses dois tipos —
+   os internos com nome próprio ficam no mapa de cima. Par em Python:
+   `_INTERNAL_LABELS` (core/handlers/launches.py), comparado por
+   tests/test_launch_type_labels_fonte_unica.py (CLAUDE.md §0.7). */
+const LAUNCH_INTERNAL_LABELS = { receita: "entrada", despesa: "saída" };
