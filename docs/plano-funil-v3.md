@@ -172,10 +172,9 @@ Entrada: `/assinar?plano=essencial|plus|pro&ciclo=monthly|annual[&utm…&fbclid�
 | S1 | 200 `tem_conta` | **S2** |
 | S1 | 400 (e-mail, telefone, nome ou termos) | S1 com o erro no campo |
 | S1 | 429 | S1: "Muitas tentativas, aguarde" |
-| S1 | 409 (corrida: o código foi consumido por outro pedido) | refaz 1 vez. Se falhar de novo, S1 com erro genérico |
-| S2 login | `POST /auth/login` ok | **S3** |
-| S2 | ok com `mfa_required` | `location.href = "/login?next=" + encodeURIComponent(location.pathname + location.search)`, no padrão da `precos.html:587` e da `shared.py:1212`. **Sem o `encodeURIComponent`, o `nextParam` do `login.html:144` (que lê com `URLSearchParams`) corta o `next` no primeiro `&`**, e quem passa por MFA volta sem o `ciclo` e sem a UTM e cai em "link inválido". O `/login` já sabe fazer MFA; `/assinar` entra na allowlist do `nextParam`, que compara por prefixo e mantém a query |
-| S2 | 401 | S2: "Senha incorreta" |
+| S1 | 200 `cadastro_pendente` (há um `/auth/register` com senha em andamento para o e-mail; nada foi criado nem tocado) | S1 com o aviso "Já existe um cadastro em andamento com este e-mail. Termine pelo código que enviamos para ele, ou use outro e-mail", e um link para o `/cadastro`. Sem sessão e sem checkout |
+| S1 | 409 `ocupado` (outro pedido do mesmo e-mail está com a trava, por exemplo um duplo clique) | refaz 1 vez depois de ~1 s. Se falhar de novo, S1 com erro genérico |
+| S2 | "Entrar com sua senha" | **não faz login dentro da `/assinar`**: `location.href = "/login?next=" + encodeURIComponent(location.pathname + location.search)`, no padrão da `precos.html:587` e da `shared.py:1212`. O `/login` faz a senha e o MFA inteiros. Com MFA, o `/auth/login` devolve só o `mfa_challenge`, sem cookie, e um login feito aqui perderia o desafio: a pessoa digitaria tudo de novo. **Sem o `encodeURIComponent`, o `nextParam` do `login.html:144` (que lê com `URLSearchParams`) corta o `next` no primeiro `&`**, e a pessoa volta sem o `ciclo` e sem a UTM e cai em "link inválido". `/assinar` entra na allowlist do `nextParam`, que compara por prefixo e mantém a query. Na volta, a carga cai no S3 |
 | S2 | "Entrar com Google" | `PBPurchaseIntent.begin(plan,cycle,"card")` + `markAwaitingAuth()` → `/auth/google/start?next=/continuar-compra` (checkout hospedado, sem e-book: é o limite aceito) |
 | S2 | "Não tenho ou esqueci a senha" | `POST /auth/forgot-password`, com a mensagem de sempre (o link serve para conta sem senha: a copy muda para "definir", monólito :3686) |
 | S3 checkout | `POST /billing/create-checkout {plan, interval, embutido:true, origem:"assinar"}` 200 (sem `origem`, o padrão é `"precos"`: a sessão sai sem o e-book e sem o `metadata.origem` da entrega) | mostra o texto do teste grátis (`trial_days`), monta o Stripe (`client_secret` + `publishable_key`), dispara `InitiateCheckout`/`begin_checkout` e mostra o link do Pix se `plans-config.pix_annual_available` → **S4** |
@@ -472,8 +471,14 @@ tentativa aberta por cliente).
        quem comprasse o e-book de novo, depois de cancelar e assinar outra vez, pagaria e
        não receberia.
      - O job reivindica a linha de forma atômica antes de enviar, com uma expiração para
-       não travar se cair no meio, e a fecha só com o envio confirmado. O claim é o que
-       impede duas rodadas do job de enviarem a mesma pendência.
+       não travar se cair no meio, e a fecha só com o envio confirmado. O claim impede
+       duas rodadas SIMULTÂNEAS do job de enviarem a mesma pendência.
+     - **Entrega "pelo menos uma vez", aceita de propósito:** se o job cair depois de o
+       provedor aceitar o e-mail e antes de fechar a linha, a expiração do claim faz a
+       rodada seguinte enviar de novo. Um e-mail repetido com o mesmo link de download é
+       inofensivo, e fechar essa janela pediria uma chave de idempotência no provedor,
+       que o `send_email` de hoje não usa. Se um dia valer a pena, a chave natural é o
+       `session_id`.
      - A pendência é fechada quando o envio devolve True. Uma falha (Stripe fora, e-mail recusado) mantém a pendência para o próximo
      ciclo.
    - **Condição do PR 3:** o registro da pendência segue §0.1. Procure antes se já existe
@@ -528,7 +533,8 @@ a rede.
   reentrega não cria uma segunda pendência nem repete o e-mail de boas-vindas ou o
   alerta ao admin;
 - job: a conta sem credencial **não** recebe o e-book (a pendência fica). Depois de
-  criar a senha, recebe uma vez. A conta que trocou o e-mail antes de criar a senha
+  criar a senha, recebe (pelo menos uma vez; a duplicata só acontece se o job cair
+  entre o envio e o fechamento, e o teste cobre esse caso como aceito). A conta que trocou o e-mail antes de criar a senha
   recebe no e-mail novo. O envio falhando mantém a pendência, e o próximo ciclo
   envia;
 - sem trial + e-book: o e-mail de cobrança e a comissão usam **só** o valor do plano;
