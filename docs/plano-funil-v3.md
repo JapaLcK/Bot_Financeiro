@@ -22,6 +22,8 @@ O código da `main` vence o texto quando os dois divergem.
 - **Próximo: PR 2** (checkout embutido e hospedado, mais a CSP). Depois vêm os PRs 3 a 6,
   na ordem da seção 5.
 - A etapa 0b-2 (túnel antes do merge do PR 5) continua pendente.
+- **Decisão do dono de 2026-09-29:** o "Crie sua senha" do PR 4 bloqueia no SERVIDOR (403
+  nas rotas de dados), não só na tela. Ver o item 2b do PR 4.
 
 ---
 
@@ -448,6 +450,27 @@ a rede.
    null` **e** nenhuma linha em `auth_identities` (nem Google, nem Apple). Uma query,
    ao lado de `auth_account_has_password`.
 2. `/auth/me`: campo `precisa_criar_senha`.
+2b. **O bloqueio vale no SERVIDOR, não só na tela** (decisão do dono em 2026-09-29, a
+   partir de um P1 do Codex no #676). O motivo: quem pagou com um e-mail digitado
+   errado, que é de outra pessoa, usaria as APIs por baixo do overlay. Depois, o dono
+   verdadeiro do e-mail pediria "esqueci a senha" e leria os dados financeiros.
+   - **Onde:** mais uma perna no gate central `_enforce_subscription_gate`
+     (`frontend/routes/shared.py`). Com `exige_direito=True` e
+     `conta_sem_credencial(user_id)`, ela responde 403
+     `{"error": "password_required"}`.
+   - **Quem já herda sem mudança:** as rotas de dados (`authorize_dashboard_access`) e a
+     `/api/v2` (`api/v2/sessao.py`).
+   - **O que continua liberado:** as rotas da própria conta (`authorize_account_access`,
+     `exige_direito=False`: a `/settings`, que corrige o e-mail e manda o
+     `password-reset`) e os prefixos isentos (`/auth`, `/billing`, `/conta`). É por elas
+     que a pessoa sai do bloqueio.
+   - **Inventário antes de codar (§2), com grep:** os outros pontos que usam
+     `has_app_access` sem passar por esse gate também entram. São o WebSocket (monólito,
+     `has_app_access` no `/ws`), o bot (`core/handle_incoming.py`, se a conta tiver
+     WhatsApp vinculado) e o HTML servido. O PR lista cada um e diz se bloqueia, e por
+     quê.
+   - **Front:** o `criar-senha.js` trata o 403 `password_required` como "mostrar o
+     overlay", e não como erro.
 3. `frontend/criar-senha.js` + `criar-senha.css` (rotas em `static_pages.py`),
    carregados pela `home.html` e pela `dashboard.html`: um overlay que não fecha,
    "Crie sua senha para proteger sua conta", com o botão "Enviar link para
@@ -467,6 +490,10 @@ a rede.
 campo sai `false`), a `/settings` (não carrega o gate: é a saída para corrigir o e-mail),
 e o backend de reset.
 
+**Custo aceito pelo dono:** quem pagou só usa o app depois de clicar no link do e-mail.
+Quem digitou o e-mail errado corrige na `/settings` (o reset vai para o e-mail novo) ou,
+se não perceber, depende do suporte.
+
 **Pode quebrar:** nada em contas existentes, pelo que o dono afirma: nenhuma conta foi
 criada pelo quiz antigo (#640), e ele pediu para não tratar nem medir (pergunta 5). Se
 alguma conta sem senha e sem Google/Apple existir por outro caminho, ela passa a ver o
@@ -482,9 +509,15 @@ gate, o que é correto: hoje ela só entra de novo pelo "esqueci a senha".
   `/auth/me` (`app_access:true`, `precisa_criar_senha:true`) →
   `/settings/{uid}/password-reset` → consumir o token → `/auth/me` depois de logar
   (`precisa_criar_senha:false`).
+- **bloqueio no servidor, com chamadas DIRETAS às APIs, sem passar pela tela:** a conta
+  sem credencial e com plano pago leva 403 `password_required` em rota de dados, na
+  `/api/v2/me` e no WebSocket. A mesma conta consegue `/auth/me`,
+  `/settings/{uid}/password-reset`, a troca de e-mail na `/settings` e o logout. Depois
+  de criar a senha, as rotas de dados voltam a responder 200.
 - **Controles:** *negativo*: fazer `conta_sem_credencial` ignorar
-  `auth_identities` deixa vermelho "só-Google = false"; *positivo*: a conta sem senha
-  ganha o gate.
+  `auth_identities` deixa vermelho "só-Google = false"; tirar a perna nova do gate deixa
+  vermelho o 403 da rota de dados; *positivo*: a conta sem senha ganha o gate, e a
+  conta com senha continua com 200 em tudo.
 
 ### PR 5: a página `/assinar` (liga o funil)
 
