@@ -239,8 +239,9 @@ def _spent_by_bucket(user_id: int, year: int, mon: int) -> dict[str, float]:
     O filtro de movimento interno tem a exceção do aporte: entra
     `is_internal_movement = false` OU categoria = investimento_aporte.
     """
-    cat_l = cat_key_sql("categoria")
-    cat_ct = cat_key_sql("ct.categoria")
+    # OF: "Investments" virou investimento_aporte (#149), mas no pote segue como antes.
+    k = lambda t: f"case when {t}source = 'open_finance' and {cat_key_sql(t + 'categoria')} = '{_APORTE_KEY}' then 'investments' else {cat_key_sql(t + 'categoria')} end"  # noqa: E731
+    cat_l, cat_ct = k(""), k("ct.")
     with get_conn() as conn:
         with conn.cursor() as cur:
             cur.execute(

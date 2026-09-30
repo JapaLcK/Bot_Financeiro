@@ -2731,6 +2731,31 @@ def init_db():
         """alter table pix_unmatched_payments
              add constraint pix_unmatched_ref_formato
              check (external_reference ~ '^pix:[0-9]+$') not valid""",
+        # Pendência do e-book comprado na /assinar (funil v3, PR 3): o webhook do
+        # checkout grava, o job `core/services/ebook_entrega.py` entrega quando a
+        # conta já provou o e-mail. `ebook_price`/`ebook_url` são a FOTO da
+        # metadata da sessão; `ebook_url` nulo = sessão sem a foto (o job ignora).
+        # `reivindicada_ate` é o claim com expiração (nenhuma transação aberta
+        # durante o Stripe/Resend). Fica fora do merge (conta com
+        # stripe_customer_id é recusada como origem) e do export LGPD.
+        """
+        create table if not exists ebook_entregas (
+          user_id bigint not null references users(id) on delete cascade,
+          session_id text not null,
+          ebook_price text not null,
+          ebook_url text,
+          criada_em timestamptz not null default now(),
+          reivindicada_ate timestamptz,
+          tentativas int not null default 0,
+          fechada_em timestamptz,
+          resultado text check (resultado in ('enviado', 'nao_comprou')),
+          primary key (user_id, session_id)
+        )
+        """,
+        """
+        create index if not exists idx_ebook_entregas_abertas
+          on ebook_entregas (criada_em) where fechada_em is null
+        """,
 
         # ── Aviso de escrita ao `/painel` (TABELAS_QUE_AVISAM, no topo) ──────
         # O NOTIFY sai só no commit (rollback não avisa) e o Postgres funde os
