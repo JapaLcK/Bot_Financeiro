@@ -1,0 +1,15 @@
+appId: ${APP_ID}
+---
+- launchApp:
+    clearState: true
+    clearKeychain: true
+- tapOn: "Já tenho conta"
+- runFlow: _entrar.yaml
+- tapOn:
+    text: "Código de 6 dígitos"
+    below: "Código de 6 dígitos"
+- inputText: ${TOTP} # o 6º dígito envia sozinho
+- extendedWaitUntil:
+    visible: "Olá, .*|Código inválido.*|Muitas tentativas.*"
+    timeout: 20000
+- assertVisible: "Olá, E2E"

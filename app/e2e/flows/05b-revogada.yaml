@@ -1,0 +1,14 @@
+# Continua o 05a: o rodar.sh revogou a sessão por "outro aparelho". O app
+# reabre a frio com a sessão salva, a trava pede o Face ID (o rodar.sh
+# cadastrou um rosto no simulador e manda "rosto certo" em laço enquanto este
+# fluxo roda), e a primeira chamada da API cai no expirou().
+appId: ${APP_ID}
+---
+# O alerta "Do you want to allow … to use Face ID?" não aparece no simulador
+# (medido: 1º uso depois de instalar e cadastrar o rosto).
+- launchApp # sem clearState: a sessão do 05a fica no cofre
+- extendedWaitUntil:
+    visible: "Sua sessão expirou. Entre de novo."
+    timeout: 20000
+- assertVisible:
+    id: "entrar-enviar"
