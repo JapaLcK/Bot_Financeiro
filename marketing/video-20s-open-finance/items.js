@@ -1,6 +1,6 @@
 // Objetos financeiros reutilizados no caos do início, nas linhas do app e no dashboard.
 // Todas as funções desenham centradas em (0,0) e se adaptam ao w/h recebido, para poder sofrer morph de tamanho.
-import { CAT, PINK, NEON, GAIN, rgba, rr, rrc, txt, tw, icon, brl, lerp, rng } from "./lib.js";
+import { CAT, PINK, GAIN, rgba, rr, rrc, txt, tw, icon, brl, rng } from "./lib.js";
 
 export const ROWS = [
   { icon: "shopping-cart", col: CAT.mercado, title: "Mercado", sub: "Débito", val: -86.40 },

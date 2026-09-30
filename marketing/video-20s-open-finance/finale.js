@@ -1,5 +1,6 @@
+/* global document */
 // 16–20s · Segurança + marca. Cards → formas → linhas → conexão protegida → contorno do Piggy → PigBank.
-import { W, H, E, seg, bell, inv, lerp, clamp, PINK, NEON, GAIN, rgba, mixHex, rr, rrc, txt, tw, icon, rollText, rrPts, shieldPts, morph, strokePts, bez, resample, IMG, FONT } from "./lib.js";
+import { W, H, E, seg, bell, inv, lerp, clamp, PINK, NEON, rgba, mixHex, rrc, txt, tw, icon, rollText, rrPts, shieldPts, morph, strokePts, bez, resample, IMG } from "./lib.js";
 import { cardRects } from "./payoff.js";
 
 const N = 96;

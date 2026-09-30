@@ -1,3 +1,4 @@
+/* global document */
 // Orquestra as cenas no tempo. Cada cena é uma função de t; as janelas se sobrepõem de propósito,
 // porque cada uma nasce de um objeto da anterior.
 import { W, H, DARK, LIGHT, PINK, rgba, lerp, seg, E } from "./lib.js";

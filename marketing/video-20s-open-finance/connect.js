@@ -1,5 +1,5 @@
 // 3–6s · Conecte: vórtice → celular PigBank → botão → bordas viram linhas até as instituições → hub → tela.
-import { W, H, E, seg, bell, lerp, clamp, inv, DARK, PINK, NEON, GAIN, rgba, mixHex, rr, rrc, txt, tw, icon, brl, IMG, rrPts, bez, morph, strokePts, rollText, FONT } from "./lib.js";
+import { E, seg, bell, lerp, clamp, inv, DARK, PINK, NEON, rgba, mixHex, rr, rrc, txt, icon, brl, IMG, rrPts, bez, strokePts, rollText } from "./lib.js";
 import { VORTEX, heroItems } from "./hook.js";
 import { drawRow, ROWS } from "./items.js";
 
@@ -174,7 +174,7 @@ function strands(ctx, t, g) {
   return ret;
 }
 
-function nodes(ctx, t, tips) {
+function nodes(ctx, t) {
   NODES.forEach((n, k) => {
     const tN = 4.52 + .03 * k + .6, born = seg(t, tN, tN + .4, E.outBack);
     const r = seg(t, 5.52 + .035 * k, 5.88 + .035 * k, E.io3);
@@ -239,8 +239,8 @@ export function drawConnect(ctx, t) {
   heroes(ctx, t, g);
   hubLogo(ctx, t, g);
   ctx.restore();
-  const tips = strands(ctx, t, g);
-  nodes(ctx, t, tips);
+  strands(ctx, t, g);
+  nodes(ctx, t);
   cursor(ctx, t);
   titles(ctx, t);
 }

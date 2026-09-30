@@ -1,3 +1,4 @@
+/* global document, window, location, URLSearchParams, Image, FontFace, fetch, performance, requestAnimationFrame */
 // Boot: fontes, imagens oficiais, canvas e window.__seek(t) (motion blur por subamostragem + grão).
 import { W, H, DUR, ICON, IMG } from "./lib.js";
 import { draw } from "./scenes.js";

@@ -1,6 +1,6 @@
 // 0–3s · Gancho: excesso de informação em profundidade, câmera avançando, tudo atraído para um ponto.
-import { W, H, E, seg, inv, lerp, clamp, rng, DARK, PINK, txt, tw, rgba, FONT, bell } from "./lib.js";
-import { HOOK, SIZE, drawHookItem, ROWS } from "./items.js";
+import { W, H, E, seg, lerp, clamp, rng, DARK, PINK, rgba, FONT } from "./lib.js";
+import { HOOK, SIZE, drawHookItem } from "./items.js";
 
 export const VORTEX = [540, 1110];
 const F = 1250;

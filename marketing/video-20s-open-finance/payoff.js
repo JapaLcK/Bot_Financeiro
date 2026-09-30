@@ -1,8 +1,8 @@
 // 6–16s · Payoff + Organização. Uma câmera viaja pelo dashboard; cada funcionalidade nasce da anterior:
 // linha → Gastos (donut) → cartão → parcelas → timeline → gráfico → dashboard inteiro.
-import { W, H, E, seg, bell, inv, lerp, clamp, PINK, NEON, GAIN, rgba, mixHex, rr, rrc, txt, tw, icon, brl, rollText, rng, strokePts, FONT } from "./lib.js";
-import { ROWS, drawRow, drawCreditCard, CARD_SKINS } from "./items.js";
-import { SLOT, cx, cy, cardBg, ghost, cardTitle, DONUT, SEGS, ANG, TOTAL_GASTO, drawDonut, drawHeader, drawSaldo, listRows, RAD } from "./dash.js";
+import { W, H, E, seg, bell, inv, lerp, clamp, PINK, rgba, mixHex, rr, rrc, txt, tw, brl, rollText, strokePts } from "./lib.js";
+import { ROWS, drawRow, drawCreditCard } from "./items.js";
+import { SLOT, cardBg, ghost, cardTitle, DONUT, SEGS, ANG, TOTAL_GASTO, drawDonut, drawHeader, drawSaldo, listRows, RAD } from "./dash.js";
 
 // ------------------------------------------------------------------ câmera
 const KEYS = [
@@ -70,7 +70,7 @@ const rowIcon = i => [SLOT.trans.x + SLOT.trans.w / 2 - (SLOT.trans.w - 48) / 2 
 const ringPos = i => { const R = DONUT.r - DONUT.w / 2, a = ANG[i][2]; return [DONUT.x + Math.cos(a) * R, DONUT.y + Math.sin(a) * R]; };
 
 // ------------------------------------------------------------------ mundo
-function world(ctx, t, th, cam) {
+function world(ctx, t, th) {
   const cur = cursorAt(t);
 
   // --- cards do dashboard (fantasmas até serem construídos)
@@ -217,7 +217,7 @@ function parcelas(ctx, t, th, cur) {
   // fase 2: o cartão se desdobra em seis tiras que viram chips
   const SN = 6, sw = CARD_W / SN;
   for (let i = 0; i < SN; i++) {
-    const t0 = 8.5 + .05 * i, q = seg(t, t0, t0 + .7, E.outBack), lin = inv(t0, t0 + .7, t);
+    const t0 = 8.5 + .05 * i, lin = inv(t0, t0 + .7, t);
     if (t < 8.5 || lin <= 0) continue;
     const sx = CARD_C[0] - CARD_W / 2 + sw * (i + .5), sy = CARD_C[1];
     const ex = XS[i], ey = CHIP_Y;
@@ -231,8 +231,7 @@ function parcelas(ctx, t, th, cur) {
     const pr = cur && t > 9.3 && t < 10.2 ? prox(cur.x, ex) : 0;
     const chipT = seg(t, 10.25, 11.15);
     const eC = E.io3(clamp(chipT * 1.6 - ((ex + 440) / 880) * .6));
-    if (eC > 0) { const tx = lerp(ex, ex, eC); y = lerp(y, Y_DOT[i], eC); }
-    const sz = lerp(1, .2, eC);
+    if (eC > 0) y = lerp(y, Y_DOT[i], eC);
     ctx.save();
     ctx.translate(x, y - pr * 26 * (1 - eC));
     const pop = 1 + .1 * pr;
@@ -388,7 +387,7 @@ const TITLES = [
 
 export function drawPayoff(ctx, t, th) {
   const cam = camAt(t);
-  ctx.save(); applyCam(ctx, cam); world(ctx, t, th, cam); ctx.restore();
+  ctx.save(); applyCam(ctx, cam); world(ctx, t, th); ctx.restore();
   // escurece (ou clareia) o topo para o título ler sobre o conteúdo
   const scr = seg(t, 6.0, 6.3) * (1 - seg(t, 13.0, 13.6));
   if (scr > 0) {

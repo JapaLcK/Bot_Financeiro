@@ -1,6 +1,6 @@
 // O dashboard do PigBank vive no "mundo": a câmera viaja por ele durante o payoff e,
 // no fim, recua para revelar o conjunto. Cada widget é desenhado aqui; a coreografia mora em payoff.js.
-import { E, seg, lerp, clamp, PINK, NEON, CAT, rgba, rr, rrc, txt, tw, icon, brl, IMG, rng } from "./lib.js";
+import { E, clamp, PINK, NEON, CAT, rgba, rr, txt, tw, brl, IMG, rng } from "./lib.js";
 import { drawRow, ROWS } from "./items.js";
 
 export const SLOT = {
@@ -125,7 +125,7 @@ export function drawSaldo(ctx, th, p, o = {}) {
 }
 
 // caixa de título que nasce para cada card
-export function listRows(ctx, th, vis, o = {}) {
+export function listRows(ctx, th, vis) {
   // vis: por linha {a (alpha 0..1), y (deslocamento), s (escala)}
   const s = SLOT.trans;
   for (let i = 0; i < 5; i++) {
