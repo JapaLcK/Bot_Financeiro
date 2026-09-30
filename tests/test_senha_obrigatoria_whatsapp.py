@@ -159,3 +159,38 @@ def test_numero_so_whatsapp_segue_o_fluxo_de_antes(enviadas):
         _manda(wa_id, "gastei 50 mercado")
         assert len(enviadas) == 1 and "/cadastro" in enviadas[0], enviadas
     assert not db.conta_sem_credencial(_dono_do_numero(wa_id))
+
+
+def _clique(wa_id: str, botao: str) -> None:
+    wr.process_message(InboundMessage(
+        wa_id=wa_id, text="", timestamp="1", attachments=[],
+        raw={"id": f"wamid.{uuid.uuid4().hex}", "type": "interactive",
+             "interactive": {"type": "button_reply", "button_reply": {"id": botao, "title": "x"}}}))
+
+
+# Apontamento do Codex no #716: a guarda de conta sem credencial rodava antes dos
+# botões de opt-out, e quem não tem senha não conseguia PARAR as notificações
+# (`_WA_INTERACTIVE_ISENTOS`). Controle negativo: tirar o `_tratar_opt_out` de
+# dentro da guarda deixa os dois vermelhos (a resposta vira PRECISA_SENHA_WA e a
+# preferência não muda). Positivo: texto continua recebendo só o PRECISA_SENHA_WA.
+@pytest.mark.parametrize("botao,desligou", [
+    ("daily_report_disable", lambda uid: not db.get_daily_report_prefs(uid)["enabled"]),
+    ("whatsapp_updates_disable", lambda uid: db.get_whatsapp_updates_opt_out(uid)),
+])
+def test_conta_sem_senha_consegue_desligar_notificacoes(enviadas, botao, desligou):
+    uid, _, _ = conta_paga_sem_credencial()
+    wa_id = _fone(uid)
+    db.bind_identity("whatsapp", wa_id, uid)
+    antes = _vinculo(uid)
+    assert not desligou(uid)
+
+    _clique(wa_id, botao)
+    assert desligou(uid), enviadas
+    assert len(enviadas) == 1 and enviadas[0] != wr.PRECISA_SENHA_WA, enviadas
+    if botao == "daily_report_disable":
+        assert enviadas == [wr.h_report.disable(uid)], enviadas
+    assert _vinculo(uid) == antes and _gastos(uid) == 0
+
+    enviadas.clear()
+    _manda(wa_id, "gastei 50 mercado")
+    assert enviadas == [wr.PRECISA_SENHA_WA] and _gastos(uid) == 0

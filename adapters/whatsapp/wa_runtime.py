@@ -651,6 +651,77 @@ def _pergunta_da_ia(uid: int):
         return None, None
 
 
+def _tratar_opt_out(uid: int, reply_to: str, interactive_id: str | None) -> bool:
+    """Botões de opt-out (`_WA_INTERACTIVE_ISENTOS`): True se tratou o clique.
+
+    Chamado também pela guarda de conta sem credencial: quem não consegue usar
+    o bot tem de conseguir PARAR de receber mensagem nossa.
+    """
+    if not interactive_id:
+        return False
+    if interactive_id == WA_DAILY_REPORT_DISABLE_ID:
+        logger.info("WA daily_report_disable button clicked wa_id=%s uid=%s", reply_to, uid)
+        try:
+            _send_reply(reply_to, h_report.disable(uid))
+        except Exception as e:
+            logger.exception("WA daily_report_disable button error wa_id=%s: %s", reply_to, e)
+            log_system_event_sync(
+                "warning",
+                "whatsapp_daily_report_disable_button_error",
+                f"Erro ao processar botão de desligar report diário: {e}",
+                source="wa_runtime",
+                user_id=uid,
+            )
+        return True
+    elif interactive_id == WA_WEEKLY_REPORT_DISABLE_ID:
+        logger.info("WA weekly_report_disable button clicked wa_id=%s uid=%s", reply_to, uid)
+        try:
+            _send_reply(reply_to, h_report.disable_weekly(uid))
+        except Exception as e:
+            logger.exception("WA weekly_report_disable button error wa_id=%s: %s", reply_to, e)
+            log_system_event_sync(
+                "warning",
+                "whatsapp_weekly_report_disable_button_error",
+                f"Erro ao processar botão de desligar resumo semanal: {e}",
+                source="wa_runtime",
+                user_id=uid,
+            )
+        return True
+    elif interactive_id == WA_MONTHLY_REPORT_DISABLE_ID:
+        logger.info("WA monthly_report_disable button clicked wa_id=%s uid=%s", reply_to, uid)
+        try:
+            _send_reply(reply_to, h_report.disable_monthly(uid))
+        except Exception as e:
+            logger.exception("WA monthly_report_disable button error wa_id=%s: %s", reply_to, e)
+            log_system_event_sync(
+                "warning",
+                "whatsapp_monthly_report_disable_button_error",
+                f"Erro ao processar botão de desligar resumo mensal: {e}",
+                source="wa_runtime",
+                user_id=uid,
+            )
+        return True
+    elif interactive_id.strip().lower() in WA_UPDATES_DISABLE_IDS:
+        logger.info("WA updates disable button clicked wa_id=%s uid=%s", reply_to, uid)
+        try:
+            set_whatsapp_updates_opt_out(uid, True)
+            _send_reply(
+                reply_to,
+                "Pronto, parei as atualizações do Piggy por aqui. Você pode religar quando quiser em Configurações > Notificações.",
+            )
+        except Exception as e:
+            logger.exception("WA updates disable button error wa_id=%s: %s", reply_to, e)
+            log_system_event_sync(
+                "warning",
+                "whatsapp_updates_disable_button_error",
+                f"Erro ao processar botão de parar atualizações: {e}",
+                source="wa_runtime",
+                user_id=uid,
+            )
+        return True
+    return False
+
+
 def process_message(message: InboundMessage) -> None:
     core_started = False
     # Turno atendido aqui, sem chegar ao `handle_incoming` (botão, `ajuda`,
@@ -677,7 +748,8 @@ def process_message(message: InboundMessage) -> None:
         # ponytail: +1 query por mensagem; se pesar, `password_hash is null` no
         # SELECT cacheado do get_auth_user (o reset já invalida esse cache).
         if conta_sem_credencial(uid):
-            _send_reply(reply_to, PRECISA_SENHA_WA)
+            if not _tratar_opt_out(uid, reply_to, get_interactive_id(message.raw or {})):
+                _send_reply(reply_to, PRECISA_SENHA_WA)
             return
         # Âncora lida antes de qualquer tratamento pré-núcleo: pergunta que o app
         # criar durante este turno não é deste turno e fica aberta.
@@ -1084,65 +1156,7 @@ def process_message(message: InboundMessage) -> None:
                 logger.info("WA undo_launch button clicked wa_id=%s", reply_to)
                 # Injeta "desfazer" para o classificador tratar normalmente
                 message.text = "desfazer"
-            elif interactive_id == WA_DAILY_REPORT_DISABLE_ID:
-                logger.info("WA daily_report_disable button clicked wa_id=%s uid=%s", reply_to, uid)
-                try:
-                    _send_reply(reply_to, h_report.disable(uid))
-                except Exception as e:
-                    logger.exception("WA daily_report_disable button error wa_id=%s: %s", reply_to, e)
-                    log_system_event_sync(
-                        "warning",
-                        "whatsapp_daily_report_disable_button_error",
-                        f"Erro ao processar botão de desligar report diário: {e}",
-                        source="wa_runtime",
-                        user_id=uid,
-                    )
-                return
-            elif interactive_id == WA_WEEKLY_REPORT_DISABLE_ID:
-                logger.info("WA weekly_report_disable button clicked wa_id=%s uid=%s", reply_to, uid)
-                try:
-                    _send_reply(reply_to, h_report.disable_weekly(uid))
-                except Exception as e:
-                    logger.exception("WA weekly_report_disable button error wa_id=%s: %s", reply_to, e)
-                    log_system_event_sync(
-                        "warning",
-                        "whatsapp_weekly_report_disable_button_error",
-                        f"Erro ao processar botão de desligar resumo semanal: {e}",
-                        source="wa_runtime",
-                        user_id=uid,
-                    )
-                return
-            elif interactive_id == WA_MONTHLY_REPORT_DISABLE_ID:
-                logger.info("WA monthly_report_disable button clicked wa_id=%s uid=%s", reply_to, uid)
-                try:
-                    _send_reply(reply_to, h_report.disable_monthly(uid))
-                except Exception as e:
-                    logger.exception("WA monthly_report_disable button error wa_id=%s: %s", reply_to, e)
-                    log_system_event_sync(
-                        "warning",
-                        "whatsapp_monthly_report_disable_button_error",
-                        f"Erro ao processar botão de desligar resumo mensal: {e}",
-                        source="wa_runtime",
-                        user_id=uid,
-                    )
-                return
-            elif interactive_id.strip().lower() in WA_UPDATES_DISABLE_IDS:
-                logger.info("WA updates disable button clicked wa_id=%s uid=%s", reply_to, uid)
-                try:
-                    set_whatsapp_updates_opt_out(uid, True)
-                    _send_reply(
-                        reply_to,
-                        "Pronto, parei as atualizações do Piggy por aqui. Você pode religar quando quiser em Configurações > Notificações.",
-                    )
-                except Exception as e:
-                    logger.exception("WA updates disable button error wa_id=%s: %s", reply_to, e)
-                    log_system_event_sync(
-                        "warning",
-                        "whatsapp_updates_disable_button_error",
-                        f"Erro ao processar botão de parar atualizações: {e}",
-                        source="wa_runtime",
-                        user_id=uid,
-                    )
+            elif _tratar_opt_out(uid, reply_to, interactive_id):
                 return
 
         ignora_pendencias = False  # ver o CAS da porta 4, mais abaixo
