@@ -32,7 +32,9 @@ O código da `main` vence o texto quando os dois divergem.
   - o "Crie sua senha" do PR 4 bloqueia no SERVIDOR (403 nas rotas de dados), e não só
     na tela. Ver o item 2b do PR 4;
   - o e-book do PR 3 sai por uma entrega pendente mais um job de nova tentativa, e não
-    pelo 5xx do webhook.
+    pelo 5xx do webhook;
+  - (2026-09-30) o job só envia o e-book **depois que o e-mail foi provado**, com a
+    senha criada ou Google/Apple.
 - **Auditoria de 2026-09-29:** o plano inteiro foi conferido contra a `main` e o SDK do
   Stripe instalado, com 14 achados corrigidos neste arquivo. O que o plano ainda afirma
   sem ter medido está marcado como "medir" (a Etapa 0 parcial e o desconto da linha de
@@ -201,7 +203,8 @@ Entrada: `/assinar?plano=essencial|plus|pro&ciclo=monthly|annual[&utm…&fbclid�
 ## 5. PRs, na ordem
 
 A ordem garante que o funil só abre (PR 5) com todas as peças no ar. PR 3 e PR 4 podem
-correr em paralelo depois do PR 2.
+correr em paralelo depois do PR 2, com uma dependência: o job do e-book (PR 3) usa o
+`conta_sem_credencial` do PR 4. Quem chegar primeiro cria a função, e o outro reusa.
 
 ### Etapa 0: prova no Stripe em modo teste (não é PR; é o portão do PR 2)
 
@@ -429,30 +432,39 @@ tentativa aberta por cliente).
 **Muda (só no `billing_webhook`, mais o e-mail):**
 1. `checkout.session.completed`: se a sessão tem `metadata.ebook_price` (a foto do
    preço oferecido, gravada pelo PR 2) **e** veio da `/assinar` (`metadata.origem ==
-   "assinar"`, embutida ou hospedada), faz `await asyncio.to_thread(stripe.checkout.Session.list_line_items,
-   sid)`. Se esse price está lá, **grava uma entrega pendente** do e-book (uma
-   linha por `user_id` + `session_id`, idempotente: a reentrega do evento não cria
-   outra) e tenta enviar na hora. O ramo responde 2xx como hoje: a falha do e-book
-   **não** gera 5xx.
-   **Por que não o 5xx:** a reentrega da Stripe repete o ramo INTEIRO por até 3 dias.
-   A dedupe do `_fire_email` vale 1 dia por padrão, e o `notify_new_pro` não tem
-   nenhuma. A reentrega mandaria de novo o e-mail de boas-vindas do plano e o alerta ao
-   admin.
-   **Quem refaz:** um job (no molde das tarefas de fundo que já existem) relê as
-   entregas pendentes e reenvia até sair. O envio é
-   `_fire_email(user_id, send_ebook_email, EBOOK_URL, dedup_days=3650)`, e a chave
-   interna dele (`send_ebook_email_sent`) é a única marca de "enviado", **sem segunda
-   chave**. A pendência é fechada quando o `_fire_email` devolve True, ou quando a
-   chave já existe.
-   Uma exceção no bloco do e-book não desfaz o grant, porque ele roda depois, num try
-   próprio. Um `list_line_items` que lança também vira pendência, a ser resolvida pelo
-   job.
-   **Condição do PR 3:** a tabela ou o registro da pendência segue §0.1. Procure antes se
-   já existe outbox ou fila de e-mail no repositório; se existir, reuse. **O
-   `_fire_email` hoje é uma função ANINHADA dentro do `billing_webhook`**, e um job não
-   a alcança. O PR 3 a extrai para o nível do módulo (extrair, §0.1: o webhook e o job
-   passam a chamar a mesma), sem mudar a chave nem o comportamento. Não crie uma
-   segunda dedupe.
+   "assinar"`, embutida ou hospedada), **grava uma entrega pendente** do e-book: uma
+   linha por `user_id` + `session_id`, idempotente, para a reentrega do evento não
+   criar outra. O webhook **não** envia e **não** chama a Stripe para isso.
+   - **Onde e em que ordem:** logo depois do grant, **antes** dos outros efeitos do
+     ramo (funil, e-mails, `notify_new_pro`). Se a gravação falhar, o ramo responde
+     **5xx** como já faz quando o grant falha ("o grant vem primeiro"). Nada depois dele
+     rodou, e a reentrega executa tudo uma vez só. Com a pendência gravada, o resto
+     segue como hoje e responde 2xx. O e-book nunca depende de um 2xx dado sem registro
+     durável.
+   - **Por que não enviar no webhook nem responder 5xx por falha de envio:** a reentrega
+     da Stripe repete o ramo INTEIRO por até 3 dias. A dedupe do `_fire_email` vale 1
+     dia por padrão, e o `notify_new_pro` não tem nenhuma.
+   - **Quem envia:** um job, no molde das tarefas de fundo que já existem. **Só envia
+     depois que o e-mail foi provado** (decisão do dono em 2026-09-30), ou seja, quando
+     a conta já tem credencial (`not conta_sem_credencial`, do PR 4): a pessoa criou a
+     senha pelo link do e-mail, ou tem Google/Apple. Antes disso a pendência espera.
+     - Assim, quem digitou um e-mail errado e o corrigiu na `/settings` recebe no
+       endereço certo, e o dono de um e-mail alheio nunca recebe o e-book de outro.
+     - Custo aceito: quem paga e nunca cria a senha não recebe o e-book.
+     - O PR 4 pode acordar o job na hora em que a senha é criada, sem esperar o próximo
+       ciclo.
+   - **O que o job faz:** confirma pela `list_line_items` (preço = `ebook_price`) que o
+     e-book foi comprado. Se não foi, fecha a pendência sem enviar. Se foi, envia com
+     `_fire_email(user_id, send_ebook_email, EBOOK_URL, dedup_days=3650)`. A chave interna
+     dele (`send_ebook_email_sent`) é a única marca de "enviado", **sem segunda chave**.
+     A pendência é fechada quando o `_fire_email` devolve True ou quando a chave já
+     existe. Uma falha (Stripe fora, e-mail recusado) mantém a pendência para o próximo
+     ciclo.
+   - **Condição do PR 3:** o registro da pendência segue §0.1. Procure antes se já existe
+     outbox ou fila de e-mail no repositório; se existir, reuse. **O `_fire_email` hoje é
+     uma função ANINHADA dentro do `billing_webhook`**, e um job não a alcança. O PR 3 a
+     extrai para o nível do módulo (extrair, §0.1: o webhook e o job passam a chamar a
+     mesma), sem mudar a chave nem o comportamento. Não crie uma segunda dedupe.
 2. O ramo de fatura paga **que já existe** trata os DOIS eventos juntos:
    `elif event["type"] in ("invoice.paid", "invoice.payment_succeeded")` (monólito).
    A mudança é **dentro dele**. Um ramo só para `invoice.paid` deixaria o
@@ -490,19 +502,24 @@ GA4, e o `claim_trial_for_user`.
 a rede.
 
 **Testes (payloads de webhook, com o Stripe falso para `Subscription.retrieve` e `list_line_items`):**
-- trial + e-book: StartTrial sai, o e-mail do e-book sai **uma vez** mesmo com o
-  evento entregue duas vezes, e o `invoice.paid` da 1ª fatura **não** manda e-mail de
+- trial + e-book: StartTrial sai, e há **uma** pendência do e-book mesmo com o evento
+  entregue duas vezes, e o `invoice.paid` da 1ª fatura **não** manda e-mail de
   cobrança nem cria comissão. O mesmo vale com `invoice.payment_succeeded` no lugar do
   `invoice.paid`;
-- envio do e-book falhando: o evento responde 2xx, a pendência fica gravada, e o job
-  envia depois. A reentrega do evento **não** repete o e-mail de boas-vindas nem o
-  alerta ao admin, e não cria uma segunda pendência;
+- pendência: o `checkout.session.completed` com e-book grava a pendência e responde
+  2xx. Se a gravação falhar, responde 5xx sem ter rodado os efeitos seguintes. A
+  reentrega não cria uma segunda pendência nem repete o e-mail de boas-vindas ou o
+  alerta ao admin;
+- job: a conta sem credencial **não** recebe o e-book (a pendência fica). Depois de
+  criar a senha, recebe uma vez. A conta que trocou o e-mail antes de criar a senha
+  recebe no e-mail novo. O envio falhando mantém a pendência, e o próximo ciclo
+  envia;
 - sem trial + e-book: o e-mail de cobrança e a comissão usam **só** o valor do plano;
 - sem trial + e-book + cupom que desconta o e-book: a subtração usa o valor líquido da
   linha;
-- sessão hospedada da `/assinar` (o plano B) com e-book: o e-mail do e-book sai;
+- sessão hospedada da `/assinar` (o plano B) com e-book: a pendência é gravada igual;
 - sem e-book: tudo igual a hoje (renovação manda e-mail de cobrança e comissão);
-- sessão da `/precos`: `list_line_items` **não** é chamado.
+- sessão da `/precos` (sem `ebook_price`): nenhuma pendência é gravada.
 - **Controles:** *negativo*: tirar a subtração deixa vermelho "trial + e-book não
   cobra e-mail"; *positivo*: a renovação comum continua mandando.
 
