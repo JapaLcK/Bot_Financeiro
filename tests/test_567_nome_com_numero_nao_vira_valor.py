@@ -32,10 +32,10 @@ Os ramos de "tudo" (#259) não mudam.
 FORA (#704): "caixinha 13º" saiu porque, com e sem o conserto, cai no desempate
 e termina em "Não encontrei": o defeito é resolver o nome com "º".
 
-CONTROLE NEGATIVO (medido em 2026-09-30 sobre 5b558ecf, num caso verde com o fix):
-  (a) `pede_nome=False` no `_resolve_clarification` -> 23 VERMELHOS (N1, N2,
-      N3, N4 "2029, 80"/"R$ 80"/"r$ 80", N9, N10, N12, N14 com ano, N5).
-  (b) `_quantia_explicita` devolvendo None -> 27 daqui e 8 de
+CONTROLE NEGATIVO (medido em 2026-09-30 sobre abb306c3, num caso verde com o fix):
+  (a) `pede_nome=False` -> 26 VERMELHOS (N3, N4, N5, N6 "tesouro 2029"/"viagem
+      2027", N9, N10, N12, N14 com ano, N15 com "-80"); P1-P4 verdes.
+  (b) `_quantia_explicita` devolvendo None -> 31 daqui e 8 de
       `test_perguntas_guardam_contexto.py` (entre eles
       `test_tudo_guardado_mais_quantia_nova_nao_esvazia`) VERMELHOS.
   (c) versões anteriores: a 1ª deixava N6 vermelho, a 2ª N8/N9, a 3ª N10/
@@ -50,6 +50,7 @@ CONTROLE NEGATIVO (medido em 2026-09-30 sobre 5b558ecf, num caso verde com o fix
   (j) sem exigir o alvo inteiro antes da ", ": N14 "a viagem, 2027" e
       "caixinha, R$ 5000" VERMELHOS; sem colar o decimal: N14 "132, 50" e
       "R$ 132, 50" VERMELHOS; (k) sem o `_ANO_RE`: N14 "2029, 80" e "2025, 50".
+  (l) sem a cauda malformada ir ao `valor_perigoso`: os 4 N15 VERMELHOS.
 
 CONTROLE POSITIVO: P1 (pergunta de VALOR), P2 (nome exato com dígitos), P3
 (correção explícita): o conserto restringe, o caminho bom tem de fechar.
@@ -91,28 +92,16 @@ def _responde(uid: int, *mensagens: str) -> list[str]:
     return respostas
 
 
-def _saca(uid, caixinha, investimento, resposta, saldo=3000.0):
+def _saca(uid, caixinha, investimento, resposta, saldo=3000.0, primeira="saquei 50"):
     if caixinha:
         _caixinhas_com_saldo(uid, caixinha, saldo=saldo)
     else:
         _investimento(uid, investimento, saldo)
-    r = _responde(uid, "saquei 50", resposta)
+    r = _responde(uid, primeira, resposta)
     return (_caixinha(uid, caixinha) if caixinha else _inv(uid, investimento)), r
 
 
 # ── Grupo do conserto: vermelho sem ele ──────────────────────────────────────
-
-def test_n1_ano_no_nome_do_investimento_nao_vira_valor(uid):
-    _investimento(uid, "Tesouro")
-    r = _responde(uid, "saquei 50", "tesouro 2029")
-    assert _inv(uid, "Tesouro") == 2950.00, r
-
-
-def test_n2_ano_no_nome_da_caixinha_nao_vira_valor(uid):
-    _caixinhas_com_saldo(uid, "viagem", saldo=3000.0)
-    r = _responde(uid, "saquei 50", "viagem 2027")
-    assert _caixinha(uid, "viagem") == 2950.00, r
-
 
 @pytest.mark.parametrize("nome,resposta", [
     ("Tesouro", "Tesouro Prefixado 2029"),
@@ -141,6 +130,8 @@ def test_n4_nome_virgula_valor_troca_o_valor(uid, resposta):
 
 
 @pytest.mark.parametrize("caixinha,investimento,resposta", [
+    (None, "Tesouro", "tesouro 2029"),         # o caso da issue
+    ("viagem", None, "viagem 2027"),
     (None, "Tesouro 2029", "tesouro 2029 no nubank"),
     ("viagem 2027", None, "viagem 2027 da família"),
     ("Reserva 2025", None, "reserva 2025 de emergência"),
@@ -230,6 +221,15 @@ def test_n14_virgula_do_nome_e_decimal_com_espaco(uid, caixinha, investimento, r
     salvo quando a parte antes da vírgula é um ano."""
     saldo, r = _saca(uid, caixinha, investimento, resposta)
     assert saldo == fim, r
+
+
+@pytest.mark.parametrize("primeira,resposta", [
+    ("saquei 50", "viagem, -80"), ("saquei 50", "viagem, 132 50"),
+    ("esvaziar caixinha", "viagem, -80"), ("esvaziar caixinha", "viagem, R$ -80"),
+])
+def test_n15_cauda_com_forma_de_valor_invalida_recusa(uid, primeira, resposta):
+    """Codex no #709: "-80"/"132 50" vão ao `valor_perigoso`; nada sai, nem esvazia."""
+    assert _saca(uid, "viagem", None, resposta, primeira=primeira)[0] == 3000.00
 
 
 def test_n5_sem_valor_guardado_pergunta_o_valor_e_nao_move(uid):

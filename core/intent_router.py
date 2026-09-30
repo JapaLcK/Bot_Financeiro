@@ -1788,6 +1788,11 @@ _CAUDA_QUANTIA_RE = re.compile(
 # Não há predicado de ano reusável: o do `ai_guard` só existe dentro de uma
 # alternância com "em/de/desde/até" na frente.
 _ANO_RE = re.compile(r"(?:19|20)\d\d\b")
+# Cauda com FORMA de valor que a estreita recusa ("-80", "132 50"): vai para o
+# `valor_perigoso` recusar, em vez de deixar valer o valor guardado (ou o
+# "esvaziar"). É o `_SO_NUMERO_RE` com o "R$", o sinal e a unidade da estreita.
+_CAUDA_COM_FORMA_DE_VALOR_RE = re.compile(
+    rf"(?:r\$\s*)?-?\s*{_SO_NUMERO_RE.pattern}(?:{h_bills._UNIDADE})?", re.I)
 
 
 def _quantia_explicita(resposta: str, crua: str, existentes: list[str]) -> str | None:
@@ -1829,6 +1834,7 @@ def _quantia_explicita(resposta: str, crua: str, existentes: list[str]) -> str |
     # `Viagem, 2027` o 2027 de "a viagem, 2027" é do nome.
     alvo = _nome_do_alvo(resposta, existentes)
     no_catalogo = _eh_nome_do_catalogo(alvo, existentes)
+    malformada = None
     for inicio in [0, *(m.end() for m in re.finditer(", ", crua))]:
         if no_catalogo and not contains_word(normalize_text(crua[:inicio]), normalize_text(alvo)):
             continue
@@ -1838,7 +1844,9 @@ def _quantia_explicita(resposta: str, crua: str, existentes: list[str]) -> str |
             cauda = _ESPACO_NO_SEPARADOR_RE.sub(r"\1", cauda)
         if _CAUDA_QUANTIA_RE.fullmatch(cauda):
             return cauda
-    return None
+        if malformada is None and _CAUDA_COM_FORMA_DE_VALOR_RE.fullmatch(cauda):
+            malformada = cauda
+    return malformada
 
 
 def _funde_a_resposta(
