@@ -8536,6 +8536,9 @@ let _lastAlerts = [];
 
 function renderAlerts(alerts) {
   const b = document.getElementById("alert-banner");
+  // Sem /cash-transfers.js (arquivo novo: 404 logo após deploy, rede caída) o
+  // "Conferir" não abriria nada — a linha sai, e a faixa não abre só com ela.
+  if (!window.CashTransfers) alerts = (alerts || []).filter(a => a.type !== "cash_transfers");
   _lastAlerts = alerts || [];
   if (!alerts || !alerts.length || alertsDismissed) {
     b.style.display = "none";
@@ -8556,6 +8559,8 @@ function renderAlerts(alerts) {
       html += `<div class="alert-row"><i class="ph ph-piggy-bank" aria-hidden="true"></i> ${msg} <button onclick="ackRecurringCharge(${a.charge_id})" aria-label="Marcar como visto" title="Marcar como visto" style="background:none;border:none;color:var(--text-3);cursor:pointer;font-size:.85rem;line-height:1;padding:2px 6px;margin-left:6px;border-radius:6px;opacity:.7;transition:opacity .15s,background .15s" onmouseover="this.style.opacity=1;this.style.background='rgba(255,255,255,.08)'" onmouseout="this.style.opacity=.7;this.style.background='none'"><i class="ph ph-x" aria-hidden="true"></i></button></div>`;
     } else if (a.type === "recurring_credited") {
       html += `<div class="alert-row"><i class="ph ph-piggy-bank" aria-hidden="true"></i> Piggy recebeu <b>${escapeHtmlSafe(a.name)}</b> ${fmt(a.amount)} na conta ${_alertWhenLabel(a.credited_at)}. <button onclick="ackRecurringIncomeCredit(${a.credit_id})" aria-label="Marcar como visto" title="Marcar como visto" style="background:none;border:none;color:var(--text-3);cursor:pointer;font-size:.85rem;line-height:1;padding:2px 6px;margin-left:6px;border-radius:6px;opacity:.7;transition:opacity .15s,background .15s" onmouseover="this.style.opacity=1;this.style.background='rgba(255,255,255,.08)'" onmouseout="this.style.opacity=.7;this.style.background='none'"><i class="ph ph-x" aria-hidden="true"></i></button></div>`;
+    } else if (a.type === "cash_transfers") {
+      html += `<div class="alert-row"><i class="ph ph-hand-coins" aria-hidden="true"></i> Dinheiro vivo · <b>${Number(a.count) || 0}</b> para conferir · <button type="button" class="ov-adjust-lnk" onclick="CashTransfers.open(USER_ID, refreshDashboardAfterInvestment)">Conferir</button></div>`;
     } else {
       const icon = a.type === "budget_exceeded" ? '<i class="ph ph-warning-circle" aria-hidden="true"></i>' : '<i class="ph ph-warning" aria-hidden="true"></i>';
       html += `<div class="alert-row">${icon} <b>${escapeHtmlSafe(a.categoria)}</b>: ${fmt(a.spent)} de ${fmt(a.budget)} (${a.pct}%)</div>`;

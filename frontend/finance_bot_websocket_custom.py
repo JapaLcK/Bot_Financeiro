@@ -124,6 +124,7 @@ from frontend.routes.analytics import router as analytics_router
 from frontend.routes.cards import router as cards_router
 from frontend.routes.categories import router as categories_router
 from frontend.routes.open_finance import router as open_finance_router
+from frontend.routes.open_finance_cash import router as open_finance_cash_router
 from frontend.routes.pockets import router as pockets_router
 from frontend.routes.prospects import router as prospects_router
 from frontend.routes.push import router as push_router
@@ -989,6 +990,12 @@ async def get_financial_data(
     movement_summary = await asyncio.to_thread(bank_movement_summary, user_id)
     from db.reconciliation import reconciliation_summary
     recon_summary = await asyncio.to_thread(reconciliation_summary, user_id)
+    # Saque/depósito em espécie (Q41): perguntas + avisos não vistos. Um item só,
+    # lido pela faixa do /app e pelo aviso do /home (a mesma fonte).
+    from db.open_finance_cash_answers import cash_transfer_summary
+    cash = await asyncio.to_thread(cash_transfer_summary, user_id)
+    if (n := cash["pending_count"] + cash["unseen_count"]) > 0:
+        alerts.insert(0, {"type": "cash_transfers", "count": n})
     return {
         "bank_movements": movement_summary,
         "reconciliation": recon_summary,
@@ -9128,6 +9135,7 @@ app.include_router(settings_router)
 
 # ─── Open Finance (Pluggy + mock) → frontend/routes/open_finance.py (F1 E4) ──
 app.include_router(open_finance_router)
+app.include_router(open_finance_cash_router)  # saque/depósito em espécie (Q41)
 
 # ─── Push notifications (app iOS) → frontend/routes/push.py ──────────────────
 app.include_router(push_router)
