@@ -25,8 +25,8 @@ from core.intent_classifier import (IntentResult, classify, contains_comparative
                                     sem_perguntas_comparativas)
 from core.response_formatter import wrap_wa_markup
 from core.types import IncomingMessage
-from utils_text import (contains_word, limpa_pontuacao_final, marcador_de_tudo,
-                        normalize_text, valor_perigoso)
+from utils_text import (_MENOS_RE, _TRACOS, contains_word, limpa_pontuacao_final,
+                        marcador_de_tudo, normalize_text, valor_perigoso)
 
 # handlers
 from core.handlers import (
@@ -1841,7 +1841,9 @@ def _quantia_explicita(resposta: str, crua: str, existentes: list[str]) -> str |
     Limites aceitos pelo dono: "tira do tesouro 2029 no nubank" com `Tesouro`
     dá R$ 2.029 (#703, as duas metades acima não exigem a MESMA preposição), e
     nome CURTO do catálogo depois da preposição reativa a regra, igual à `main`:
-    "a reserva 2025 da casa" com a caixinha `casa` dá R$ 2.025.
+    "a reserva 2025 da casa" com a caixinha `casa` dá R$ 2.025. Prefixo de prosa
+    antes do número ("digo 132 50", "melhor 132 50", "quer dizer -80") é um
+    conjunto aberto: a cauda não é reconhecida e vale o valor guardado.
     """
     def cita(texto: str) -> bool:
         return any(contains_word(normalize_text(texto), normalize_text(n)) for n in existentes)
@@ -1863,7 +1865,11 @@ def _quantia_explicita(resposta: str, crua: str, existentes: list[str]) -> str |
         if no_catalogo and not contains_word(normalize_text(crua[:inicio]), normalize_text(alvo)):
             continue
         # Repõe a limpeza que a `crua` pula: sem ela "tesouro, 132,50." dá R$ 13.250.
-        cauda = _NA_VERDADE_RE.sub("", limpa_pontuacao_final(crua[inicio:].strip()), count=1)
+        # O sinal é o do `valor_perigoso`: os glifos de `_TRACOS` ("−80", "–80") e o
+        # "menos" falado viram "-" antes de casar, senão a cauda não chegava a ele.
+        cauda = _MENOS_RE.sub("-", limpa_pontuacao_final(crua[inicio:].strip())
+                              .translate(_TRACOS).lower())
+        cauda = _NA_VERDADE_RE.sub("", cauda, count=1)
         if not _ANO_RE.match(cauda):   # "2029, 80": ano não é decimal
             cauda = _ESPACO_NO_SEPARADOR_RE.sub(r"\1", cauda)
         if _CAUDA_QUANTIA_RE.fullmatch(cauda):

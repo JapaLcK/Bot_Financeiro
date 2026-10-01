@@ -19,22 +19,19 @@ EXTENSÃO DO CODER: resposta SÓ com dinheiro ("80") é quantia, como na `main` 
 unidade inteira do `h_bills._UNIDADE`; corte em ", " antes do `limpa_pontuacao_final`.
 Os ramos de "tudo" (#259) não mudam. FORA (#704): "caixinha 13º".
 
-CONTROLE NEGATIVO (2026-09-30 sobre 2344c895; cada mutação, num caso verde com o
-fix). (a) `pede_nome=False`: 50 VERMELHOS. (b) `_quantia_explicita` devolvendo
-None: 40 daqui e 8 de `test_perguntas_guardam_contexto.py` (entre eles `test_tudo_
+CONTROLE NEGATIVO (2026-10-01 sobre 49d07651; cada mutação, num caso verde com o
+fix). (a) `pede_nome=False`: 64 VERMELHOS. (b) `_quantia_explicita` devolvendo None:
+56 daqui e 8 de `test_perguntas_guardam_contexto.py` (entre eles `test_tudo_
 guardado_mais_quantia_nova_nao_esvazia`). Regras anteriores (catálogo depois da
 preposição, número sem o nome, `crua`, limpeza da cauda, alvo inteiro antes da
-", ", `_ANO_RE`): linhas de N4/N6/N7/N13/N14/N15 e da tabela. `want_all`
-(d046-1/e1c-1): sem o ramo, 32 (N15, tabela, N16, N17); só o teste de dígito ou só
-`_extract_valor`, 2 e 1; sem `want_all`, 40; detectar na resposta e não no
-texto sem o nome, 2; sem re-armar `falta=amount`, N16 e N17.
-Prefixo/unidade/sinal da cauda malformada (Codex #709, 4150138423): `2344c895`
-deixa 7 vermelhos (5 N14, 2 N12); "na verdade" só na válida, 6; sem o sinal
-antes do "R$", "-R$ 80"; sem a unidade na malformada, "132 50 reais"; sem a
-cauda malformada ir ao `valor_perigoso`, 9.
+", ", `_ANO_RE`, `want_all`, "na verdade", unidade, sinal antes do "R$"): linhas
+de N4/N6/N7/N12-N17 e da tabela. Sinal da cauda malformada (Codex #709): `49d07651`
+deixa 13 vermelhos (N12 "–80", N14 nos 9 glifos de `_TRACOS`, "−R$ 80", "na
+verdade −80", "menos 80"); sem o `translate(_TRACOS)` 12; sem o `_MENOS_RE` 1;
+com só 3 glifos (a lista que o `utils_text` já corrigiu) 6. Limite declarado:
+prefixo de prosa ("digo 132 50", "quer dizer -80") deixa o valor guardado.
 
-CONTROLE POSITIVO: P1 (pergunta de VALOR), P2 (nome exato com dígitos), P3 (correção
-explícita). Conversa pelo `handle_incoming`, banco real, SALDO. CLASSE CEGA: sem LLM.
+POSITIVOS: P1-P3. Conversa pelo `handle_incoming`, banco real, SALDO. CLASSE CEGA: sem LLM.
 """
 from __future__ import annotations
 
@@ -42,7 +39,7 @@ import pytest
 
 import db
 from core.intent_router import _funde_a_resposta
-from utils_text import limpa_pontuacao_final
+from utils_text import _TRACOS, limpa_pontuacao_final
 from tests.test_perguntas_guardam_contexto import (  # noqa: F401  (fixtures)
     _caixinhas_com_saldo, _conversa, _pergunta_injetada, sem_teto_de_caixinha, uid,
 )
@@ -134,6 +131,7 @@ def test_n7_so_numero_a_pergunta_de_nome_nao_vira_nome(uid):
     ("viagem 2027", 3050.0),                                   # o ano é do nome
     ("viagem, na verdade 80", 3080.0),                         # positivo
     ("viagem, na verdade 132 50", 3000.0), ("viagem, na verdade -80", 3000.0),
+    ("viagem, –80", 3000.0),
 ])
 def test_n12_deposito_nome_com_ano_e_correcao_malformada(uid, resposta, fim):
     _caixinhas_com_saldo(uid, "viagem", saldo=3000.0)
@@ -167,7 +165,9 @@ def test_n13_nome_curto_dentro_do_longo(uid, sem_teto_de_caixinha, caixinhas, in
     # Codex #709: "na verdade"/sinal antes do "R$" também vão ao `valor_perigoso`
     *[(None, "Tesouro", r, 3000.0) for r in (
         "tesouro, na verdade 132 50", "tesouro, na  verdade 132 50", "tesouro, na verdade -80",
-        "tesouro, na verdade R$ -80", "tesouro, -R$ 80", "tesouro, na verdade 132 50 reais")],
+        "tesouro, na verdade R$ -80", "tesouro, -R$ 80", "tesouro, na verdade 132 50 reais",
+        "tesouro, −R$ 80", "tesouro, na verdade −80", "tesouro, menos 80")],
+    *[(None, "Tesouro", f"tesouro, {g}80", 3000.0) for g in ("-", *map(chr, _TRACOS))],
     # N4: quantia reconhecida depois da vírgula troca o valor
     *[(None, "Tesouro", r, 2920.0) for r in (
         "tesouro 2029, 80", "tesouro 2029, R$ 80", "tesouro 2029, r$ 80",
