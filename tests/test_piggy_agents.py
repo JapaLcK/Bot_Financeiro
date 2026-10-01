@@ -1747,3 +1747,34 @@ def test_detetive_duplicate_sem_achados_nao_emite(monkeypatch):
     fired = pa._detetive_duplicate_detect_for_user(
         {"agent_id": 1, "user_id": 42}, _date(2026, 8, 19))
     assert fired == 0
+
+
+# ── Manchete: sem % de variação, cita o mês anterior em valor ────────────────
+
+def _m(entrou, saiu, aportes=0.0):
+    return {"entrou": entrou, "saiu": saiu, "aportes": aportes,
+            "sobrou": entrou - saiu - aportes}
+
+
+def test_manchete_virada_de_sinal():
+    from core.services.piggy_agents import _manchete_texto
+    texto = _manchete_texto(_m(10163.02, 11507.05), _m(5000, 3341))
+    assert texto == (
+        "Neste mês, entraram R$ 10.163,02 e saíram R$ 11.507,05, resultando em "
+        "um saldo negativo de R$ 1.344,03. No mês anterior, você havia encerrado "
+        "com uma sobra de R$ 1.659,00."
+    )
+    assert "%" not in texto and "—" not in texto
+
+
+def test_manchete_sobra_nos_dois_meses():
+    from core.services.piggy_agents import _manchete_texto
+    texto = _manchete_texto(_m(3000, 1000), _m(2000, 1000))
+    assert "resultando em uma sobra de R$ 2.000,00." in texto
+    assert texto.endswith("com uma sobra de R$ 1.000,00.")
+
+
+def test_manchete_mes_anterior_sem_movimento_nao_cita():
+    from core.services.piggy_agents import _manchete_texto
+    texto = _manchete_texto(_m(100, 40), _m(0, 0))
+    assert texto.endswith("resultando em uma sobra de R$ 60,00.")

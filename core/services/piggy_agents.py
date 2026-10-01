@@ -224,6 +224,22 @@ def _month_stats(cur, user_id: int, first: date, nxt: date) -> dict[str, float]:
             "sobrou": entrou - saiu - aportes}
 
 
+def _resultado_frase(sobrou: float) -> str:
+    if sobrou >= 0:
+        return f"uma sobra de {_fmt_brl(sobrou)}"
+    return f"um saldo negativo de {_fmt_brl(-sobrou)}"
+
+
+def _manchete_texto(stats: dict, prev: dict) -> str:
+    """Sem "%" de variação: com sobra negativa ou troca de sinal ela vira número
+    sem sentido (-181%). Cita o resultado do mês anterior em valor."""
+    texto = (f"Neste mês, entraram {_fmt_brl(stats['entrou'])} e saíram "
+             f"{_fmt_brl(stats['saiu'])}, resultando em {_resultado_frase(stats['sobrou'])}.")
+    if prev["entrou"] or prev["saiu"]:
+        texto += f" No mês anterior, você havia encerrado com {_resultado_frase(prev['sobrou'])}."
+    return texto
+
+
 def _reporter_run_for_user(agent: dict[str, Any], today: date) -> bool:
     from db import record_agent_event
 
@@ -242,18 +258,9 @@ def _reporter_run_for_user(agent: dict[str, Any], today: date) -> bool:
     if stats["entrou"] == 0 and stats["saiu"] == 0:
         return False  # mês sem movimento não rende manchete
 
-    delta_pct = None
-    if prev["sobrou"] != 0:
-        delta_pct = round((stats["sobrou"] - prev["sobrou"]) / abs(prev["sobrou"]) * 100)
-
     mes_nome = MESES_PT[first_prev.month]
     titulo = f"A manchete de {mes_nome}"
-    resumo = (
-        f"Entrou {_fmt_brl(stats['entrou'])}, saiu {_fmt_brl(stats['saiu'])} — "
-        f"sobrou {_fmt_brl(stats['sobrou'])}"
-        + (f" ({'+' if delta_pct >= 0 else ''}{delta_pct}% vs mês anterior)."
-           if delta_pct is not None else ".")
-    )
+    resumo = _manchete_texto(stats, prev)
 
     inserted = record_agent_event(
         agent["agent_id"], user_id, "reporter",
@@ -263,7 +270,6 @@ def _reporter_run_for_user(agent: dict[str, Any], today: date) -> bool:
             "titulo": titulo, "mensagem": resumo,
             "entrou": round(stats["entrou"], 2), "saiu": round(stats["saiu"], 2),
             "aportes": round(stats["aportes"], 2), "sobrou": round(stats["sobrou"], 2),
-            "delta_pct": delta_pct,
         },
         channel="email",
     )
