@@ -225,7 +225,8 @@ def _month_stats(cur, user_id: int, first: date, nxt: date) -> dict[str, float]:
 
 
 def _resultado_frase(sobrou: float) -> str:
-    sobrou = round(sobrou, 2)  # float: 0.3-0.1-0.2 = -2.8e-17 viraria "déficit de R$ 0,00"
+    # float: 0.3-0.1-0.2 = -2.8e-17 viraria "déficit de R$ 0,00"; round dá -0.0, e +0.0 o normaliza
+    sobrou = round(sobrou, 2) + 0.0
     if sobrou >= 0:
         return f"uma sobra de {_fmt_brl(sobrou)}"
     return f"um déficit de {_fmt_brl(-sobrou)}"
