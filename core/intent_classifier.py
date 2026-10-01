@@ -734,6 +734,24 @@ def contains_comparative_question(text: str) -> bool:
         is_comparative_question(p) for p in split_financial_transactions(text))
 
 
+def sem_perguntas_comparativas(text: str) -> tuple[str, list[str]]:
+    """(texto sem os pedaços comparativos, pedaços tirados). Sem pergunta, o
+    texto volta intacto; só pergunta, volta "". Quem lê o valor da mensagem
+    inteira (conta, compra no crédito, fatura) lê deste texto: o 2025 de "paguei
+    a luz e gastei mais em 2025 ou 2026?" é da pergunta (#568).
+
+    Tem de concordar com `contains_comparative_question` (tira algo ⇔ ela diz
+    True); quem prende isso é `test_sem_perguntas_comparativas_concorda_com_contains`.
+    A #569, quando estender o detector à varredura por verbo, estende esta função
+    junto, senão a conta volta a ler o valor da pergunta."""
+    from parsers import split_financial_transactions  # local: parsers importa daqui
+    partes = split_financial_transactions(text)
+    puladas = [p for p in partes if is_comparative_question(p)]
+    if puladas:
+        return " e ".join(p for p in partes if p not in puladas), puladas
+    return ("", [text]) if is_comparative_question(text) else (text, [])
+
+
 # ---------------------------------------------------------------------------
 # Tier 1 — busca exata
 # ---------------------------------------------------------------------------
