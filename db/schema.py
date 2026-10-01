@@ -320,6 +320,10 @@ def init_db():
           is_internal_movement boolean not null default false
         """,
         """
+        -- categoria/interno editados pelo cliente: o sync do OF não desfaz (#712)
+        alter table launches add column if not exists categoria_editada boolean not null default false
+        """,
+        """
         -- migration: marca retroativamente aportes, resgates e categorias de investimento como movimentações internas
         update launches set is_internal_movement = true
         where (
@@ -1346,6 +1350,9 @@ def init_db():
         """,
         """
         alter table credit_transactions add column if not exists external_id text
+        """,
+        """
+        alter table credit_transactions add column if not exists categoria_editada boolean not null default false
         """,
         """
         create unique index if not exists uq_credit_tx_ofx_external
