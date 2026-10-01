@@ -172,7 +172,7 @@ def rotear_partes(uid: int, parts: list[str], msg: IncomingMessage, platform: st
     puladas: list[str] = []
     if is_multi:
         from parsers import describe_valueless_launch
-        from core.handlers.launches import _aviso_pergunta_pulada, register_if_recurring
+        from core.handlers.launches import aviso_pergunta_pulada, register_if_recurring
     for i, part in enumerate(parts):
         if is_multi and is_comparative_question(part):
             puladas.append(part)  # igual ao texto
@@ -246,7 +246,7 @@ def rotear_partes(uid: int, parts: list[str], msg: IncomingMessage, platform: st
 
     # Aviso depois da pergunta: o texto com pergunta diz "a pergunta acima".
     # Fila que já existia não chega aqui: com ela o áudio não é dividido (_handle_audio).
-    avisos = [_aviso_pergunta_pulada(p, na_fila) for p in puladas]
+    avisos = [aviso_pergunta_pulada(p, na_fila) for p in puladas]
     body = "\n\n".join(b for b in [body, ask_value_question, *avisos] if b)
     return body, bool(missing)
 
