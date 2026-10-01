@@ -1792,3 +1792,9 @@ def test_manchete_mes_anterior_so_com_aporte_conta_como_movimento():
     from core.services.piggy_agents import _manchete_texto
     texto = _manchete_texto(_m(100, 40), _m(0, 0, 300), "setembro", "agosto")
     assert texto.endswith("Em agosto, você havia encerrado com um déficit de R$ 300,00.")
+
+
+def test_manchete_mes_zerado_com_ruido_de_float_nao_vira_deficit():
+    from core.services.piggy_agents import _manchete_texto
+    texto = _manchete_texto(_m(0.3, 0.1, 0.2), _m(0, 0), "setembro", "agosto")
+    assert "uma sobra de R$ 0,00" in texto and "déficit" not in texto
