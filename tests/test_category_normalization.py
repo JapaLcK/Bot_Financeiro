@@ -1317,6 +1317,20 @@ def test_rename_cascateia_para_a_receita_recorrente(pro_user_id):
     assert get_recurring_income(pro_user_id, inc["id"])["category"] == "renda extra"
 
 
+def test_rename_cascateia_para_a_conta_avulsa(pro_user_id):
+    """#149: `bill_instances.category` guarda o texto e `mark_bill_paid` o copia
+    para o lançamento. Controle negativo: sem o `update bill_instances` no
+    cascade, o assert lê "academia"."""
+    from datetime import date
+    from db.bills import create_boleto, get_bill
+
+    cat = create_user_category(pro_user_id, "academia")
+    bill = create_boleto(pro_user_id, "Smart Fit", 99.90, date.today(), "academia")
+    update_user_category(pro_user_id, cat["id"], new_name="esporte")
+
+    assert get_bill(pro_user_id, bill["id"])["category"] == "esporte"
+
+
 def test_rename_nao_toca_recorrente_de_outra_categoria(pro_user_id):
     """POSITIVO do par: o cascade é `where lower(category)=lower(old_name)` —
     recorrente de OUTRA categoria fica intocado. Sem este caso, um cascade que

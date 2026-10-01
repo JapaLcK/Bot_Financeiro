@@ -8,6 +8,7 @@ from datetime import date
 import pytest
 
 import db
+import db.bills
 from conftest import _cleanup_user
 from db.categories import (
     create_user_category,
@@ -58,6 +59,10 @@ def _receita(uid, cat):
        "values (%s, 'x', 10, %s, 5)", (uid, cat))
 
 
+def _conta_avulsa(uid, cat):
+    return db.bills.create_boleto(uid, "Vivo", 100, date.today(), cat)["id"]
+
+
 def _orcamento(uid, cat):
     _q("insert into category_budgets (user_id, categoria, budget) values (%s,%s,100)", (uid, cat))
 
@@ -85,6 +90,7 @@ def _snapshot(uid):
         "category_budgets": "id, categoria",
         "budget_alert_sent": "categoria, ym, threshold",
         "recurring_incomes": "id, category",
+        "bill_instances": "id, category",
     }
     return {t: _q(f"select {c} from {t} where user_id=%s order by 1", (uid,)) for t, c in tabelas.items()}
 
@@ -181,6 +187,30 @@ def test_destino_ausente_nasce_no_catalogo(uid):
     assert "compras" in _nomes(uid) and "shopping" not in _nomes(uid)
 
 
+def test_apply_diz_criou_e_sai_com_zero(uid, capsys):
+    """Irmão positivo da falha abaixo: com o destino criado, "criou" e sem exit 1."""
+    _cat(uid, "shopping")
+    _launch(uid, "shopping", "open_finance")
+    main(["--user", str(uid), "--apply"])   # SystemExit aqui = falha
+    out = capsys.readouterr().out
+    assert "criou 'compras'" in out and "FALHOU" not in out
+
+
+def test_destino_que_nao_nasce_e_relatado_e_sai_com_1(uid, capsys, monkeypatch):
+    """`ensure_user_category` engole falha de banco: o script confere o catálogo."""
+    import scripts.fundir_categorias as script
+    monkeypatch.setattr(script, "garantir_no_catalogo", lambda *a, **k: None)
+    _cat(uid, "shopping")
+    lid = _launch(uid, "shopping", "open_finance")
+    with pytest.raises(SystemExit) as exc:
+        main(["--user", str(uid), "--apply"])
+    assert exc.value.code == 1
+    out = capsys.readouterr().out
+    assert "FALHOU ao criar 'compras'" in out and "criou 'compras'" not in out
+    assert _q("select categoria from launches where id=%s", (lid,))[0]["categoria"] == "compras"
+    assert "shopping" not in _nomes(uid) and "compras" not in _nomes(uid)
+
+
 def test_dry_run_diz_criaria_e_nao_cria(uid, capsys):
     _cat(uid, "shopping")
     _launch(uid, "shopping", "open_finance")
@@ -214,6 +244,7 @@ _USO_FORA_DO_OF = {   # uma entrada por linha de `_FORA_DO_OF` no script
     "recorrente_despesa": lambda u: _recorrente(u, "internet"),
     "recorrente_receita": lambda u: _receita(u, "internet"),
     "orcamento": lambda u: _orcamento(u, "internet"),
+    "conta_avulsa": lambda u: _conta_avulsa(u, "internet"),
 }
 
 
@@ -263,6 +294,15 @@ def test_gemea_leva_launch_regra_e_recorrente_para_o_sistema(uid):
     assert _q("select category from user_category_rules where user_id=%s", (uid,))[0]["category"] == "mercado"
     assert _q("select category from recurring_expenses where user_id=%s", (uid,))[0]["category"] == "mercado"
     assert _q("select category from recurring_incomes where user_id=%s", (uid,))[0]["category"] == "mercado"
+    assert "mercádo" not in _nomes(uid)
+
+
+def test_gemea_leva_a_conta_avulsa_para_o_sistema(uid):
+    """Sem a cascata em `bill_instances`, pagar a conta recriava "mercádo"."""
+    _cat(uid, "mercádo")
+    bid = _conta_avulsa(uid, "mercádo")
+    fundir_usuario(uid, aplicar=True)
+    assert _q("select category from bill_instances where id=%s", (bid,))[0]["category"] == "mercado"
     assert "mercádo" not in _nomes(uid)
 
 

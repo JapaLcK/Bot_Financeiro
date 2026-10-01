@@ -578,6 +578,13 @@ def cascata_nome_categoria(cur, user_id: int, antigo: str, novo: str) -> dict[st
         "where user_id=%s and lower(category)=lower(%s)",
         (novo, user_id, antigo),
     )
+    # #149: a conta avulsa guarda o texto e `mark_bill_paid` o copia para o
+    # lançamento — fora daqui, pagar a conta ressuscitava a categoria velha.
+    ex(
+        "update bill_instances set category=%s "
+        "where user_id=%s and lower(category)=lower(%s)",
+        (novo, user_id, antigo),
+    )
     return n
 
 

@@ -7,7 +7,7 @@ gêmeas ("cafe"/"café"). Este script, por usuário e numa transação só:
 
   * linha em inglês (chave de `PLUGGY_PARA_PIGBANK`) sem uso fora do OF vai para a
     categoria do PigBank; com uso fora do OF (lançamento manual, regra, recorrente,
-    orçamento) é pulada e listada;
+    orçamento, conta avulsa) é pulada e listada;
   * gêmeas de grafia (mesmo `normalize_text`) viram uma: vence a de sistema, depois
     a ativa, depois a mais usada, depois o menor id; se mais de uma do grupo tem
     orçamento, ou se a vencedora está arquivada e alguma perdedora ativa (que não seja
@@ -44,6 +44,7 @@ _FORA_DO_OF = (
     ("recurring_expenses", "category", ""),
     ("recurring_incomes", "category", ""),
     ("category_budgets", "categoria", ""),
+    ("bill_instances", "category", ""),
 )
 
 
@@ -66,7 +67,7 @@ def _ids() -> list[int]:
 
 
 def fundir_usuario(user_id: int, aplicar: bool) -> dict:
-    rel = {"user": user_id, "fundidas": [], "puladas": [], "arquivadas": [], "criar": []}
+    rel = {"user": user_id, "fundidas": [], "puladas": [], "arquivadas": [], "criar": [], "falhou": []}
     with db.get_conn() as conn, conn.cursor() as cur:
         cur.execute(
             "select id, name, is_system, is_archived from user_categories "
@@ -127,6 +128,13 @@ def fundir_usuario(user_id: int, aplicar: bool) -> dict:
 
     if aplicar and rel["criar"]:
         garantir_no_catalogo(user_id, rel["criar"])  # abre conexão própria: fora da transação
+        # `ensure_user_category` engole falha de banco: confere o que nasceu de fato.
+        # A linha em inglês já foi apagada, então reexecutar não repara.
+        with db.get_conn() as conn, conn.cursor() as cur:
+            cur.execute("select lower(name) as n from user_categories where user_id=%s", (user_id,))
+            existe = {r["n"] for r in cur.fetchall()}
+        rel["falhou"] = [x for x in rel["criar"] if x.lower() not in existe]
+        rel["criar"] = [x for x in rel["criar"] if x.lower() in existe]
     return rel
 
 
@@ -141,6 +149,8 @@ def _imprime(rel: dict, aplicar: bool) -> None:
         print(f"  vencedora arquivada: '{nome}'")
     for nome in rel["criar"]:
         print(f"  {'criou' if aplicar else 'criaria'} '{nome}' no catálogo")
+    for nome in rel["falhou"]:
+        print(f"  FALHOU ao criar '{nome}' (linha de catálogo ausente; crie pela tela ou reexecute a sync)")
 
 
 def main(argv: list[str] | None = None) -> None:
@@ -151,14 +161,18 @@ def main(argv: list[str] | None = None) -> None:
     if args.user is not None and not db.user_exists(args.user):
         ap.error(f"user {args.user} não existe — confira o id.")
 
-    total = 0
+    total = falhas = 0
     for uid in [args.user] if args.user is not None else _ids():
         rel = fundir_usuario(uid, args.apply)
-        if rel["fundidas"] or rel["puladas"] or rel["criar"]:
+        if rel["fundidas"] or rel["puladas"] or rel["criar"] or rel["falhou"]:
             _imprime(rel, args.apply)
         total += len(rel["fundidas"])
+        falhas += bool(rel["falhou"])
     verbo = "gravada(s)" if args.apply else "encontrada(s) — dry-run, nada foi gravado"
     print(f"\n{total} fusão(ões) {verbo}.")
+    if falhas:
+        print(f"{falhas} usuário(s) com categoria de destino que não nasceu no catálogo.")
+        raise SystemExit(1)
 
 
 if __name__ == "__main__":
