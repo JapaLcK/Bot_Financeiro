@@ -353,6 +353,10 @@ PR de cada etapa, não soluções prontas. Cada PR confere se ainda valem, decid
     não 60 fixo: conta recém-conectada ou com histórico incompleto (dez dias divididos por
     60 dão um sexto do ritmo real) tem amostra mínima, e abaixo dela a estimativa sai como
     "a conferir".
+    O ritmo se divide pela forma de pagamento: o gasto em dinheiro, Pix e débito sai do
+    caixa no dia, e o gasto no cartão entra na fatura de cada cartão pelo calendário de
+    fechamento e vencimento dele (o protótipo desconta tudo por dia, e isso põe o gasto no
+    cartão na data errada e muda o pior dia).
   - A carteira Piggy não tem data de atualização: a confirmação da Q37 vale na primeira
     visita e envelhece. Com a carteira no saldo, pedir confirmação atual ou mostrar "a
     conferir".
