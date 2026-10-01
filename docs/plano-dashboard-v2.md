@@ -268,7 +268,10 @@ PR de cada etapa, não soluções prontas. Cada PR confere se ainda valem, decid
     lançamento manual fundido e desligando o cartão), e
     transação que some de uma sincronização completa também fica: `save_open_finance_sync()`
     só faz upsert do que veio, então um `transactions/deleted` perdido deixa a compra ou o
-    estorno (e o lançamento e a fatura ligados) para sempre. Conciliar ausências só com
+    estorno (e o lançamento e a fatura ligados) para sempre. A conciliação de transação
+    ausente usa o mesmo ciclo da conta: `delete_open_finance_transactions()`, que chama
+    `_rollback_imported_of()`, tira a sombra, desfaz o vínculo com o dinheiro em espécie e
+    reconcilia os movimentos de banco, nunca um delete direto. Conciliar ausências só com
     coleta saudável e geração estável: mesmo com resposta bem formada e cursor terminal,
     um `PARTIAL_SUCCESS`/`UPDATING` ou uma coleta nova no meio da leitura apagaria
     transação legítima. Reusar o portão que a conciliação de investimentos já tem (produto
