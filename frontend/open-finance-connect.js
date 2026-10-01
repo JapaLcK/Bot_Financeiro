@@ -72,15 +72,6 @@
     return (s || "").normalize("NFD").replace(/[̀-ͯ]/g, "").toLowerCase();
   }
 
-  // Espelha `utils_text.normalize_text` (exceto ligaduras/ordinais: NFD aqui,
-  // NFKD lá): o nome gravado em
-  // institution_name vem cru da Pluggy (espaço no fim, hífen, espaço duplo) e o
-  // do catálogo vem com .strip() — comparar com stripAccent sozinho recusa
-  // reconexão legítima no teto do plano.
-  function normName(s) {
-    return stripAccent(s).replace(/[^a-z0-9_\s]/g, " ").replace(/\s+/g, " ").trim();
-  }
-
   function bankInitials(name) {
     const small = { de: 1, do: 1, da: 1, dos: 1, das: 1, e: 1, "-": 1 };
     const parts = (name || "").replace(/[^\wÀ-ÿ\s-]/g, "").split(/\s+/)
@@ -202,7 +193,7 @@
       banksMax: (me && me.of_banks_max !== undefined) ? me.of_banks_max : null,
       cobrancaEmAtraso: !!(me && me.cobranca_em_atraso),
       count: counted.length,
-      names: counted.map(function (c) { return normName(c.institution_name); }),
+      ids: counted.map(function (c) { return String(c.institution_id); }),
     };
   }
 
@@ -526,7 +517,10 @@
       // nome). Banco novo abriria o widget da Pluggy só pra tomar 402 no
       // /pluggy-item — deixando item e consentimento órfãos. Bloqueia antes.
       if (plano.banksMax !== null && plano.banksMax > 0 && plano.count >= plano.banksMax) {
-        const isReconnect = plano.names.indexOf(normName(selected.name)) !== -1;
+        // Por id do conector, não por nome: o nome gravado vem cru da Pluggy, e o
+        // gêmeo Open Finance de um direto tem nome igual mas id diferente — o widget
+        // abriria um item NOVO e o /pluggy-item daria 402 depois da autorização.
+        const isReconnect = plano.ids.indexOf(String(selected.id)) !== -1;
         if (!isReconnect) {
           const n = plano.banksMax;
           conf("notify")("Seu plano conecta até " + n + " banco" + (n > 1 ? "s" : "") +

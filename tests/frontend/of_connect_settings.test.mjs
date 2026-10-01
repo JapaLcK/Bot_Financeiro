@@ -224,7 +224,7 @@ test("teto do plano atingido bloqueia banco NOVO antes de abrir a Pluggy", async
   // recusaria com 402 depois de o banco já ter autorizado.
   const page = await abrirSettings({
     banksMax: 1,
-    conexoes: [{ id: 9, institution_name: "Nubank", status: "UPDATED" }],
+    conexoes: [{ id: 9, institution_name: "Nubank", institution_id: "612", status: "UPDATED" }],
   });
   await abrirPicker(page);
   await page.click('#bankpick-list .bank-row[data-name="Itaú"]');
@@ -239,7 +239,7 @@ test("teto atingido AINDA permite reconectar o mesmo banco", async () => {
   // Controle positivo do par: sem ele, um bloqueio que recusasse tudo passaria.
   const page = await abrirSettings({
     banksMax: 1,
-    conexoes: [{ id: 9, institution_name: "Nubank", status: "UPDATED" }],
+    conexoes: [{ id: 9, institution_name: "Nubank", institution_id: "612", status: "UPDATED" }],
   });
   await abrirPicker(page);
   await page.click('#bankpick-list .bank-row[data-name="Nubank"]');
@@ -252,12 +252,12 @@ test("teto atingido AINDA permite reconectar o mesmo banco", async () => {
   await page.__ctx.close();
 });
 
-test("teto atingido reconecta mesmo com nome gravado cru (espaço, hífen, caixa)", async () => {
-  // Issue #732: institution_name vem cru da Pluggy; o gate comparava só com
-  // stripAccent. Controle negativo: voltar a `stripAccent` no gate deixa vermelho.
+test("teto atingido reconecta pelo ID do conector, mesmo com nome gravado cru", async () => {
+  // Issue #732: institution_name vem cru da Pluggy (espaço, caixa). Controle
+  // negativo: comparar por nome de novo deixa este caso vermelho.
   const page = await abrirSettings({
     banksMax: 1,
-    conexoes: [{ id: 9, institution_name: "  NUBANK  ", status: "UPDATED" }],
+    conexoes: [{ id: 9, institution_name: "  NUBANK  ", institution_id: "612", status: "UPDATED" }],
   });
   await abrirPicker(page);
   await page.click('#bankpick-list .bank-row[data-name="Nubank"]');
@@ -266,7 +266,25 @@ test("teto atingido reconecta mesmo com nome gravado cru (espaço, hífen, caixa
   await page.waitForFunction(() =>
     !document.getElementById("bankpick-overlay").classList.contains("open"));
   assert.equal(await pickerAberto(page), false,
-    "nome gravado com espaço/caixa diferentes ainda é o mesmo banco");
+    "mesmo conector, nome gravado diferente: é reconexão");
+  await page.__ctx.close();
+});
+
+test("teto atingido NÃO trata o gêmeo Open Finance como reconexão do direto", async () => {
+  // Codex no #734: o gêmeo tem nome igual e id diferente; o widget abriria um
+  // item novo e o /pluggy-item recusaria (402) depois da autorização.
+  const page = await abrirSettings({
+    banksMax: 1,
+    conectores: [{ id: 619, name: "Caixa Econômica Federal", color: "005ca9", logo: "", inv: false }],
+    conexoes: [{ id: 9, institution_name: "Caixa Econômica Federal ", institution_id: "219", status: "UPDATED" }],
+  });
+  await abrirPicker(page);
+  await page.click('#bankpick-list .bank-row[data-name="Caixa Econômica Federal"]');
+  await page.click("#bankpick-go");
+
+  await sleep(500);
+  assert.equal(await pickerAberto(page), true,
+    "gêmeo com id diferente tem de bater no teto antes de abrir a Pluggy");
   await page.__ctx.close();
 });
 
@@ -431,7 +449,7 @@ test("conexão PAUSED não consome o teto do plano", async () => {
   // Espelha a contagem do backend (_ofCountsTowardBankLimit).
   const page = await abrirSettings({
     banksMax: 1,
-    conexoes: [{ id: 9, institution_name: "Nubank", status: "PAUSED" }],
+    conexoes: [{ id: 9, institution_name: "Nubank", institution_id: "612", status: "PAUSED" }],
   });
   await abrirPicker(page);
   await page.click('#bankpick-list .bank-row[data-name="Itaú"]');
