@@ -1140,7 +1140,26 @@ def attempt_whatsapp_phone_link_impl(
 
     final_user_id = target_user_id
     if int(current_user_id) != target_user_id:
-        from db.users import MergeRefused  # tardio: db/ importa este módulo
+        from db.google_auth import conta_sem_credencial  # tardio: db/ importa este módulo
+        from db.users import MergeRefused, _tem_dados_financeiros
+
+        # Conta sem senha nem Google/Apple (a do quiz) não se liga pelo telefone:
+        # o número foi digitado por quem pagou, e o e-mail ainda não foi provado.
+        # Sem mesclar e sem gravar user_identities (PR 4 do funil v3). Número já
+        # ligado a ela (current == target) não passa aqui: o `process_message`
+        # barra antes de chamar o auto-vínculo.
+        if conta_sem_credencial(target_user_id):
+            # Remetente com dados é o dono do número usando o bot, não quem acabou
+            # de pagar: segue na conta dele, sem vínculo e sem aviso (status que o
+            # `process_message` não trata). O critério de dados é o do merge (#607).
+            with get_conn() as conn, conn.cursor() as cur:
+                if _tem_dados_financeiros(cur, int(current_user_id)):
+                    return {"status": "remetente_com_dados", "wa_phone": wa_phone,
+                            "target_user_id": target_user_id}
+            # `target_user_id`: os envios proativos vão ao `phone_e164` dela, e o
+            # clique de opt-out deste número tem de desligar a preferência dela.
+            return {"status": "precisa_senha", "wa_phone": wa_phone,
+                    "target_user_id": target_user_id}
 
         try:
             merge_users(int(current_user_id), target_user_id)
@@ -1186,82 +1205,70 @@ def attempt_whatsapp_phone_link_impl(
 
 def create_password_reset_token_impl(get_conn, email: str, minutes_valid: int = 30) -> str | None:
     email = email.strip().lower()
-
-    with get_conn() as conn:
-        with conn.cursor() as cur:
-            cur.execute(
-                "select user_id from auth_accounts where email_hash = %s",
-                (hash_pii_optional(email, kind="email"),),
-            )
-            row = cur.fetchone()
-
-    if not row:
-        return None
-
-    user_id = row["user_id"]
     token = secrets.token_urlsafe(32)
     expires_at = datetime.now(timezone.utc) + timedelta(minutes=minutes_valid)
 
+    # Um INSERT…SELECT: o token nasce com o email_hash que a conta tem AGORA.
     with get_conn() as conn:
         with conn.cursor() as cur:
             cur.execute(
                 """
-                insert into password_reset_tokens (token, user_id, expires_at)
-                values (%s, %s, %s)
+                insert into password_reset_tokens (token, user_id, expires_at, email_hash)
+                select %s, user_id, %s, email_hash from auth_accounts where email_hash = %s
+                returning user_id
                 """,
-                (token, user_id, expires_at),
+                (token, expires_at, hash_pii_optional(email, kind="email")),
             )
+            row = cur.fetchone()
         conn.commit()
 
-    return token
+    return token if row else None
 
 
 def consume_password_reset_token_impl(get_conn, hash_password, token: str, new_password: str) -> int | None:
     """
     Consome o token de reset e atualiza a senha. Retorna o user_id (truthy) em
-    sucesso ou None em falha (token invalido/expirado/ja usado).
+    sucesso ou None em falha (token invalido/expirado/ja usado, ou a conta nao
+    tem mais o e-mail para o qual o link foi emitido).
     Callers continuam podendo usar `if ok:` graças à truthiness de int positivo.
     """
     now = datetime.now(timezone.utc)
 
-    with get_conn() as conn:
-        with conn.cursor() as cur:
-            cur.execute(
-                """
-                select user_id, expires_at, used_at
-                from password_reset_tokens
-                where token = %s
-                """,
-                (token,),
-            )
-            row = cur.fetchone()
+    with get_conn() as conn, conn.cursor() as cur:
+        cur.execute(
+            """
+            update password_reset_tokens set used_at = %s
+            where token = %s and used_at is null and expires_at > %s
+            returning user_id, email_hash
+            """,
+            (now, token, now),
+        )
+        row = cur.fetchone()
+        if not row:
+            return None
+        new_hash = hash_password(new_password)  # bcrypt só para token válido
+        # A condição de e-mail fica no próprio UPDATE: ele pega a trava da linha e
+        # reavalia depois dela (READ COMMITTED), em série com a troca de e-mail.
+        # email_hash NULL (token de antes da coluna) nunca casa: recusado.
+        # O link vale enquanto a conta tiver o e-mail que o recebeu — e nesse
+        # estado quem lê essa caixa já pode pedir outro. Por isso a volta A→B→A
+        # reanimar o link não dá poder novo a ninguém.
+        cur.execute(
+            # password_changed_at: invalida tokens legados sem jti emitidos
+            # antes do reset (os com jti já são revogados via sessão).
+            """
+            update auth_accounts set password_hash = %s, password_changed_at = %s
+            where user_id = %s and email_hash = %s
+            """,
+            (new_hash, now, row["user_id"], row["email_hash"]),
+        )
+        ok = cur.rowcount > 0
+        conn.commit()  # a recusa também grava: o token fica queimado
 
-    if not row:
+    if not ok:
         return None
-    if row["used_at"] is not None:
-        return None
-    if row["expires_at"] < now:
-        return None
-
-    user_id = row["user_id"]
-    new_hash = hash_password(new_password)
-
-    with get_conn() as conn:
-        with conn.cursor() as cur:
-            cur.execute(
-                # password_changed_at: invalida tokens legados sem jti emitidos
-                # antes do reset (os com jti já são revogados via sessão).
-                "update auth_accounts set password_hash = %s, password_changed_at = %s where user_id = %s",
-                (new_hash, now, user_id),
-            )
-            cur.execute(
-                "update password_reset_tokens set used_at = %s where token = %s",
-                (now, token),
-            )
-        conn.commit()
-    invalidate_auth_user_cache(user_id)
-
-    return user_id
+    invalidate_auth_user_cache(row["user_id"])
+    return row["user_id"]
 
 
 def get_password_changed_at_impl(get_conn, user_id: int):

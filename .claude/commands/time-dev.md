@@ -123,6 +123,9 @@ usuário confirma, como pede o `CLAUDE.md` §1. Na **Direto** este fluxo não se
 - No fim, resuma para o usuário: o que foi implementado, o veredito do
   Manager, e o que ficou explicitamente fora do escopo verificado (ex: "só
   testado localmente", "não verificado em produção").
-- Ações arriscadas (commit, push, merge, deploy) continuam exigindo
-  confirmação explícita do usuário, mesmo com o Manager aprovando — aprovação
-  do time deixa o trabalho pronto, não autoriza a ação.
+- Ações arriscadas (commit, push, deploy) continuam exigindo confirmação
+  explícita do usuário, mesmo com o Manager aprovando — aprovação do time
+  deixa o trabalho pronto, não autoriza a ação. O **merge** é a exceção, e só
+  por esta regra: o dono deixou autorizado mergear todo PR aberto pela sessão
+  quando o Codex liberar no head atual e os checks estiverem verdes (CLAUDE.md
+  §4). O veredito do Manager sozinho continua não autorizando nada.

@@ -217,7 +217,7 @@ def test_audio_q40_fila_recusada_aviso_nao_cita_a_fila(monkeypatch):
     ([{"desc": "a"}, {"desc": "b"}, {"desc": "c"}], "depois de me passar o valor de *a*, *b* e *c*, "),
 ])
 def test_aviso_cita_a_fila(fila, depois):
-    assert L._aviso_pergunta_pulada(" x? ", fila) == (
+    assert L.aviso_pergunta_pulada(" x? ", fila) == (
         'ℹ️ Não registrei "x?" porque parece uma pergunta. '
         f"Se era gasto, {depois}me manda só o valor e o lugar, tipo *gastei 50 no bar*.")
 
@@ -226,13 +226,13 @@ def test_aviso_corta_trecho_longo_e_mantem_o_curto():
     # Citado inteiro, um trecho de 3000 levava a resposta acima dos 4096 do
     # WhatsApp e a Meta recusava tudo, confirmações dos gravados inclusive.
     longo = "gastei mais que no mês passado " * 100
-    aviso = L._aviso_pergunta_pulada(longo)
+    aviso = L.aviso_pergunta_pulada(longo)
     assert aviso.startswith('ℹ️ Não registrei "gastei mais que no mês passado gastei')
     assert '…" porque parece uma pergunta.' in aviso and len(aviso) < 200
-    sem_espaco = L._aviso_pergunta_pulada("x" * 3000)
+    sem_espaco = L.aviso_pergunta_pulada("x" * 3000)
     assert f'"{"x" * 79}…"' in sem_espaco
     curto = "a" * 80  # no limite: sai igual, sem "…"
-    assert L._aviso_pergunta_pulada(curto) == _aviso(curto)
+    assert L.aviso_pergunta_pulada(curto) == _aviso(curto)
 
 
 # ── Pedaço pulado de RECEITA: a dica não manda regravar como gasto (Codex #570) ──
@@ -253,7 +253,7 @@ def _aviso_receita(pedaco: str, depois: str = "") -> str:
     ([{"desc": "a"}, {"desc": "b"}], "depois de me passar o valor de *a* e *b*, "),
 ])
 def test_aviso_de_receita_pede_receita(pedaco, fila, depois):
-    assert L._aviso_pergunta_pulada(pedaco, fila) == _aviso_receita(pedaco, depois)
+    assert L.aviso_pergunta_pulada(pedaco, fila) == _aviso_receita(pedaco, depois)
 
 
 def test_multi_receita_pulada_avisa_como_receita(add_sem_banco):

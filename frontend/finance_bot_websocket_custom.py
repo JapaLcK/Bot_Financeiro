@@ -116,7 +116,7 @@ from db.investment_undo import MENSAGEM_NAO_E_O_ULTIMO
 from core.observability import _log_falha, get_logger
 from core.pg_text import detalhe_seguro, limpa_para_pg, recusa_veneno, tem_veneno
 from core.secure_compare import constant_time_eq
-from api.v2 import app as api_v2_app
+from api.v2 import app as api_v2_app, eventos as api_v2_eventos
 from frontend.routes.affiliates import router as affiliates_router
 from frontend.routes.billing_pix import router as billing_pix_router
 from frontend.routes.agents import router as agents_router
@@ -124,6 +124,7 @@ from frontend.routes.analytics import router as analytics_router
 from frontend.routes.cards import router as cards_router
 from frontend.routes.categories import router as categories_router
 from frontend.routes.open_finance import router as open_finance_router
+from frontend.routes.open_finance_cash import router as open_finance_cash_router
 from frontend.routes.pockets import router as pockets_router
 from frontend.routes.prospects import router as prospects_router
 from frontend.routes.push import router as push_router
@@ -144,6 +145,7 @@ from frontend.routes.shared import (
     db_connect,
     decode_jwt as _decode_jwt,
     error_page_response,
+    exigir_credencial as _exigir_credencial,
     extract_bearer_token as _extract_bearer_token,
     get_auth_token_from_request as _get_auth_token_from_request,
     invalidate_dashboard_current_cache as _invalidate_dashboard_current_cache,
@@ -718,7 +720,8 @@ async def get_financial_data(
               AND (
                 tipo IN ('aporte_investimento', 'deposito_caixinha',
                          'saque_caixinha', 'resgate_investimento')
-                OR ({TIPO_DESPESA_SQL} AND LOWER(REPLACE(COALESCE(categoria, ''), ' ', '_')) IN (
+                OR ({TIPO_DESPESA_SQL} AND COALESCE(source, '') <> 'open_finance'
+                    AND LOWER(REPLACE(COALESCE(categoria, ''), ' ', '_')) IN (
                     'investimentos', 'investimento_aporte', 'criptomoedas'
                 ))
               )
@@ -989,6 +992,12 @@ async def get_financial_data(
     movement_summary = await asyncio.to_thread(bank_movement_summary, user_id)
     from db.reconciliation import reconciliation_summary
     recon_summary = await asyncio.to_thread(reconciliation_summary, user_id)
+    # Saque/depósito em espécie (Q41): perguntas + avisos não vistos. Um item só,
+    # lido pela faixa do /app e pelo aviso do /home (a mesma fonte).
+    from db.open_finance_cash_answers import cash_transfer_summary
+    cash = await asyncio.to_thread(cash_transfer_summary, user_id)
+    if (n := cash["pending_count"] + cash["unseen_count"]) > 0:
+        alerts.insert(0, {"type": "cash_transfers", "count": n})
     return {
         "bank_movements": movement_summary,
         "reconciliation": recon_summary,
@@ -1145,7 +1154,7 @@ _EXPORT_TIPO_LABEL = {
 }
 
 
-def _classify_launch(tipo: str, is_internal: bool, categoria: str = ""):
+def _classify_launch(tipo: str, is_internal: bool, categoria: str = "", source: str | None = None):
     """Retorna (natureza, sinal, label) ou None se a ação não entra no relatório.
 
     natureza ∈ {despesa, receita, aporte}; sinal '+'/'-' = entrou/saiu na conta.
@@ -1161,7 +1170,8 @@ def _classify_launch(tipo: str, is_internal: bool, categoria: str = ""):
             return ("aporte", "-", _EXPORT_TIPO_LABEL[t])
         if t in _EXPORT_APORTE_IN:
             return ("aporte", "+", _EXPORT_TIPO_LABEL[t])
-        if cat_norm in _EXPORT_INVEST_CATS:
+        # Open Finance fora (#149): a aplicação chega bruta, sem o resgate abatido.
+        if cat_norm in _EXPORT_INVEST_CATS and source != "open_finance":
             if t in _EXPORT_RECEITA_TIPOS:
                 return ("aporte", "+", "Resgate")
             return ("aporte", "-", "Aporte")
@@ -1218,7 +1228,7 @@ async def _fetch_export_items(user_id: int, start_date: date | int, end_date: da
         async with conn.cursor() as cur:
             await cur.execute(
                 """
-                SELECT tipo, valor, alvo, nota, categoria, criado_em, is_internal_movement
+                SELECT tipo, valor, alvo, nota, categoria, criado_em, is_internal_movement, source
                 FROM launches
                 WHERE user_id = %s
                   AND criado_em >= %s AND criado_em < %s
@@ -1226,7 +1236,7 @@ async def _fetch_export_items(user_id: int, start_date: date | int, end_date: da
                 (user_id, period_start, exclusive_end),
             )
             for r in await cur.fetchall():
-                cls = _classify_launch(r["tipo"], r.get("is_internal_movement"), r.get("categoria"))
+                cls = _classify_launch(r["tipo"], r.get("is_internal_movement"), r.get("categoria"), r.get("source"))
                 if not cls:
                     continue
                 natureza, sign, label = cls
@@ -1937,6 +1947,14 @@ async def lifespan(app: FastAPI):
         except Exception as exc:
             print(f"[investment_accrual] erro: {exc}", file=sys.stderr)
 
+    async def _patrimonio_foto():
+        try:
+            await asyncio.sleep(1)
+            from core.services.patrimonio_foto import run_patrimonio_foto_loop  # noqa: PLC0415
+            await run_patrimonio_foto_loop()
+        except Exception as exc:
+            print(f"[patrimonio_foto] erro: {exc}", file=sys.stderr)
+
     async def _recurring_charger():
         try:
             await asyncio.sleep(5)
@@ -2069,6 +2087,22 @@ async def lifespan(app: FastAPI):
                 print(f"[pix] erro: {exc}", file=sys.stderr)
             await asyncio.sleep(60)
 
+    async def _ebook_worker():
+        """Entrega do e-book comprado na /assinar, a cada 5 min (decisão do
+        dono), a 1ª volta sem delay. Só envia a quem já provou o e-mail — ver
+        `core/services/ebook_entrega.py`. Inerte sem `STRIPE_SECRET_KEY`."""
+        from core.services.ebook_entrega import entregar_pendentes  # noqa: PLC0415
+        while True:
+            try:
+                n = await asyncio.to_thread(entregar_pendentes)
+                if n:
+                    print(f"[ebook] {n} e-book(s) entregue(s).", flush=True)
+            except asyncio.CancelledError:
+                raise
+            except Exception as exc:
+                print(f"[ebook] erro: {exc}", file=sys.stderr)
+            await asyncio.sleep(300)
+
     async def _account_deletion_worker():
         while True:
             try:
@@ -2142,7 +2176,9 @@ async def lifespan(app: FastAPI):
     _elapsed = _startup_time.monotonic() - _t0
     print(f"[app] Startup interno concluído em {_elapsed:.1f}s.", flush=True)
 
-    tasks = []
+    # Não é job: é o aviso ao vivo do `/painel`, e vale também com as tarefas
+    # de fundo desligadas (`dashboard_dev`).
+    tasks = [asyncio.create_task(api_v2_eventos.escutar_banco(), name="eventos_listen")]
     if RUN_BACKGROUND_TASKS:
         tasks.extend(
             [
@@ -2155,6 +2191,7 @@ async def lifespan(app: FastAPI):
                 asyncio.create_task(_wa_periodic(), name="wa_periodic"),
                 asyncio.create_task(_engagement(), name="engagement"),
                 asyncio.create_task(_investment_accrual(), name="investment_accrual"),
+                asyncio.create_task(_patrimonio_foto(), name="patrimonio_foto"),
                 asyncio.create_task(_account_deletion_worker(), name="account_deletion"),
                 asyncio.create_task(_recurring_charger(), name="recurring_charger"),
                 asyncio.create_task(_proactive_ai(), name="proactive_ai"),
@@ -2164,6 +2201,7 @@ async def lifespan(app: FastAPI):
                 asyncio.create_task(_table_cleanup(), name="table_cleanup"),
                 asyncio.create_task(_plan_grants_reprojection(), name="plan_grants_reprojection"),
                 asyncio.create_task(_pix_worker(), name="pix_worker"),
+                asyncio.create_task(_ebook_worker(), name="ebook_worker"),
             ]
         )
     else:
@@ -3016,6 +3054,7 @@ def require_pro_feature(feature: str = "generic"):
     para o frontend abrir modal de upgrade contextual.
     """
     async def _dep(user_id: int = Depends(_get_current_user)) -> int:
+        await asyncio.to_thread(_exigir_credencial, user_id)
         if not _plan_gate_ok(user_id, feature):
             raise HTTPException(
                 status_code=403,
@@ -3771,6 +3810,9 @@ async def auth_reset_password(request: Request, body: ResetPasswordBody):
 @limiter.limit("15/hour")
 async def auth_new_link_code(request: Request, user_id: int = Depends(_get_current_user)):
     """Gera um novo link_code para o usuário autenticado vincular uma nova plataforma."""
+    # Sem senha, não: quem pagou com o e-mail de outra pessoa ligaria o próprio
+    # WhatsApp antes de provar o e-mail (PR 4 do funil v3).
+    await asyncio.to_thread(_exigir_credencial, user_id)
     import sys
     sys.path.insert(0, str(pathlib.Path(__file__).parent.parent))
     from db import create_link_code
@@ -3800,8 +3842,8 @@ async def auth_me(user_id: int = Depends(_get_current_user)):
     import sys
     sys.path.insert(0, str(pathlib.Path(__file__).parent.parent))
     from db import (
-        auth_account_has_password, get_auth_user, should_show_mfa_onboarding,
-        get_mfa_status,
+        auth_account_has_password, conta_sem_credencial, get_auth_user,
+        should_show_mfa_onboarding, get_mfa_status,
     )
 
     user = get_auth_user(user_id)
@@ -3847,6 +3889,9 @@ async def auth_me(user_id: int = Depends(_get_current_user)):
         # DEFINIR senha em vez de mostrar campo de senha que nunca aceita nada.
         # Lido do banco, não do cache do get_auth_user — uma fonte de verdade.
         "has_password": await asyncio.to_thread(auth_account_has_password, user_id),
+        # True = sem senha E sem Google/Apple: o front sobe o "Crie sua senha" e
+        # as rotas de dados respondem 403 password_required.
+        "precisa_criar_senha": await asyncio.to_thread(conta_sem_credencial, user_id),
         "mfa_enabled": bool(mfa.get("enabled")),
         # `user=user_dict` pelo mesmo motivo do `needs_plan_selection` da linha
         # de baixo: a linha JÁ está em mão (get_auth_user, :3290). Sem ela o
@@ -5166,9 +5211,21 @@ async def _billing_checkout_for_user(stripe_mod, user_id: int, plan: str, interv
         metadata.update(rastreio or {})
         # Foto do preço do e-book no nascimento da sessão: o webhook (PR 3)
         # identifica o e-book por ela, não pela env do momento em que chega.
-        oferece_ebook = origem == "assinar" and bool(STRIPE_PRICE_ID_EBOOK and EBOOK_URL)
+        # A URL vai junto (o job entrega a da compra); o Stripe recusa metadata
+        # acima de 500 caracteres (medido), então acima disso não oferece.
+        oferece_ebook = (
+            origem == "assinar" and bool(STRIPE_PRICE_ID_EBOOK and EBOOK_URL)
+            and len(EBOOK_URL) <= 500
+        )
         if oferece_ebook:
             metadata["ebook_price"] = STRIPE_PRICE_ID_EBOOK
+            metadata["ebook_url"] = EBOOK_URL
+        elif origem == "assinar" and STRIPE_PRICE_ID_EBOOK:
+            # Nunca logar a URL: é o acesso ao PDF pago.
+            logging.getLogger(__name__).warning(
+                "ebook_nao_oferecido: EBOOK_URL vazia ou com %d caracteres (max 500)",
+                len(EBOOK_URL),
+            )
         subscription_data = {"metadata": metadata.copy()}
         if trial_days > 0:
             subscription_data["trial_period_days"] = trial_days
@@ -5446,6 +5503,7 @@ class ChangePlanBody(BaseModel):
 async def billing_subscription(user_id: int = Depends(_get_current_user)):
     """Estado da assinatura pro front (/precos): plano/intervalo atual, fim do
     período pago e troca agendada (se houver). Sem assinatura → active: False."""
+    await asyncio.to_thread(_exigir_credencial, user_id)
     import stripe
     import sys
     sys.path.insert(0, str(pathlib.Path(__file__).parent.parent))
@@ -5553,6 +5611,7 @@ async def billing_change_plan(
 ):
     """Agenda a troca de plano pro fim do período já pago. Sem cobrança agora;
     a primeira fatura do plano novo sai na data da virada (cartão em arquivo)."""
+    await asyncio.to_thread(_exigir_credencial, user_id)
     from core.services.plan_service import TIER_TO_STORED_PLAN  # noqa: PLC0415
 
     # Expressão IDÊNTICA à da `/billing/create-checkout` (§0.7): são as duas
@@ -5663,6 +5722,7 @@ async def billing_change_plan(
 async def billing_cancel_change(request: Request, user_id: int = Depends(_get_current_user)):
     """Desfaz uma troca de plano agendada (solta o schedule; assinatura segue
     no plano atual como se nada tivesse acontecido)."""
+    await asyncio.to_thread(_exigir_credencial, user_id)
     import stripe
     import sys
     sys.path.insert(0, str(pathlib.Path(__file__).parent.parent))
@@ -5799,6 +5859,22 @@ async def billing_webhook(request: Request, background_tasks: BackgroundTasks):
         cur = _g(price, "currency") or "brl"
         value = (float(unit) / 100.0) if unit is not None else 0.0
         return (value, str(cur).upper())
+
+    def _ebook_liquido_cents(invoice, ebook_price) -> int:
+        """Centavos LÍQUIDOS das linhas do e-book na fatura. O e-book é
+        identificado pela foto `ebook_price` da metadata, não pela env do
+        momento. Medido: `amount` da linha é BRUTO; o cupom vem só em
+        `discount_amounts`. `price` vem string ou expandido (`.id`)."""
+        if not ebook_price:
+            return 0
+        total = 0
+        for line in _g(_g(invoice, "lines", {}), "data", []) or []:
+            price = _g(_g(_g(line, "pricing", {}), "price_details", {}), "price")
+            if (price if isinstance(price, str) else _g(price, "id")) != ebook_price:
+                continue
+            desconto = sum(_g(d, "amount", 0) for d in _g(line, "discount_amounts", []) or [])
+            total += (_g(line, "amount", 0) or 0) - desconto
+        return total
 
     def _ga_plano_publico(*objetos) -> str | None:
         """Nome PÚBLICO do plano ('essencial'/'plus'/'pro') pro item do GA4.
@@ -6110,6 +6186,23 @@ async def billing_webhook(request: Request, background_tasks: BackgroundTasks):
                 await asyncio.to_thread(
                     clear_past_due_since, int(user_id),
                     nao_mais_novo_que=_event_version(event))
+            # Pendência do e-book: a prova da compra, gravada ANTES dos outros
+            # efeitos e sem try — falha → 5xx e a reentrega refaz tudo. Grava
+            # mesmo com `_decidiu_acesso` False: a compra aconteceu igual. O
+            # job (`core/services/ebook_entrega.py`) entrega depois.
+            _meta = _g(session, "metadata", {})
+            _ebook_price = _g(_meta, "ebook_price")
+            if _ebook_price:
+                from db.ebook_entregas import registrar as _registrar_ebook
+                await asyncio.to_thread(
+                    _registrar_ebook, int(user_id), _g(session, "id"),
+                    _ebook_price, _g(_meta, "ebook_url") or None)
+                if not _g(_meta, "ebook_url"):
+                    await log_system_event(
+                        "error", "ebook_sem_url",
+                        "Compra de e-book sem a foto ebook_url; o job não entrega.",
+                        source="billing", user_id=int(user_id),
+                        details={"session_id": _g(session, "id")})
         # Funil: registra a CONCLUSÃO na tabela dedicada, com o session_id
         # (correlaciona com o record_checkout_started da mesma tentativa).
         # Vale pra trial e compra imediata — os dois disparam este evento.
@@ -6184,6 +6277,12 @@ async def billing_webhook(request: Request, background_tasks: BackgroundTasks):
             except Exception as exc:
                 print(f"[billing] rastreio checkout: log falhou: {exc}")
 
+            # Valor REALMENTE cobrado nesta sessão (com cupom e com e-book). Com
+            # trial o plano vale 0, então aqui ele é exatamente o e-book (medido:
+            # 990, e 495 com cupom). `None` = campo ausente; 0 é legítimo.
+            _cobrado = _g(session, "amount_total")
+            _cobrado_moeda = (_g(session, "currency") or "brl").upper()
+            _ebook_no_trial = sub_status == "trialing" and bool(_cobrado and _cobrado > 0)
             # Meta Conversions API — conversão server-side, deduplicada com o
             # pixel via event_id derivado da sessão. Trial → StartTrial; compra
             # imediata (sem trial) → Purchase. A cobrança REAL pós-trial e as
@@ -6191,6 +6290,7 @@ async def billing_webhook(request: Request, background_tasks: BackgroundTasks):
             try:
                 from core.services.meta_capi import (
                     capi_configured,
+                    ebook_event_id,
                     purchase_event_id,
                     send_event,
                     trial_event_id,
@@ -6204,24 +6304,32 @@ async def billing_webhook(request: Request, background_tasks: BackgroundTasks):
                         _ev_name, _ev_id = "StartTrial", trial_event_id(_sid)
                     else:
                         _ev_name, _ev_id = "Purchase", purchase_event_id(_sid)
+                        # O Purchase leva o valor cobrado, o mesmo número do GA4.
+                        if _cobrado is not None:
+                            _value, _currency = float(_cobrado) / 100.0, _cobrado_moeda
                     _fbp, _fbc = _fb_ids(sub, session)
-                    background_tasks.add_task(
-                        send_event,
-                        event_name=_ev_name,
-                        event_id=_ev_id,
+                    _capi_kw = dict(
                         event_time=_evt_time,
-                        value=_value,
-                        currency=_currency,
                         email=_capi_email,
                         fbp=_fbp,
                         fbc=_fbc,
                         event_source_url=f"{DASHBOARD_URL}/home",
                     )
+                    background_tasks.add_task(
+                        send_event, event_name=_ev_name, event_id=_ev_id,
+                        value=_value, currency=_currency, **_capi_kw)
+                    if _ebook_no_trial:
+                        background_tasks.add_task(
+                            send_event, event_name="Purchase",
+                            event_id=ebook_event_id(_sid),
+                            value=float(_cobrado) / 100.0, currency=_cobrado_moeda,
+                            **_capi_kw)
             except Exception as exc:
                 print(f"[billing] meta capi checkout ({sub_status}) falhou user={user_id}: {exc}")
             # GA4 (Measurement Protocol) — a compra com o VALOR real cobrado.
             # Só a compra IMEDIATA: quando a assinatura nasce em trial o dinheiro
-            # entra semanas depois, e o purchase daquele caso sai no invoice.paid.
+            # entra semanas depois, e o purchase daquele caso sai no invoice.paid
+            # (exceção: o e-book comprado junto do trial, que é cobrado agora).
             # É server-only de propósito: o navegador manda `start_trial` (que não
             # tem valor), e deixar os dois mandarem `purchase` criaria duas versões
             # do mesmo evento, uma delas sem receita.
@@ -6232,19 +6340,18 @@ async def billing_webhook(request: Request, background_tasks: BackgroundTasks):
                     send_purchase,
                 )
                 _ga_sid = _g(session, "id")
-                if mp_configured() and _ga_sid and sub_status != "trialing":
+                if mp_configured() and _ga_sid and (sub_status != "trialing" or _ebook_no_trial):
                     # Valor REALMENTE cobrado: `amount_total` da sessão já vem
                     # com cupom aplicado, e o `unit_amount` do plano não — este
                     # checkout aceita cupom (`allow_promotion_codes=True`), então
                     # o preço de tabela superestimaria a receita (Codex, #244).
                     # Zero é resposta legítima (cupom de 100%): o teste é
                     # `is None`, não falsy. Sem o campo, cai no valor do plano.
-                    _ga_total = _g(session, "amount_total")
-                    if _ga_total is None:
+                    if _cobrado is None:
                         _ga_value, _ga_currency = _subscription_amount(sub)
                     else:
-                        _ga_value = float(_ga_total) / 100.0
-                        _ga_currency = (_g(session, "currency") or "brl").upper()
+                        _ga_value = float(_cobrado) / 100.0
+                        _ga_currency = _cobrado_moeda
                     # O client_id foi gravado no metadata na criação do checkout
                     # (/billing/create-checkout). Sem ele a venda ainda entra, como
                     # usuário novo sem origem — ver fallback_client_id.
@@ -6254,12 +6361,19 @@ async def billing_webhook(request: Request, background_tasks: BackgroundTasks):
                     _ga_cid = (_g(_g(sub, "metadata", {}), "ga_client_id")
                                or _g(_g(session, "metadata", {}), "ga_client_id")
                                or fallback_client_id(user_id))
+                    if sub_status == "trialing":
+                        # Trial com e-book: a venda é só o e-book (id próprio).
+                        from core.services.meta_capi import ebook_event_id
+                        _ga_tid, _ga_plan = ebook_event_id(_ga_sid), "ebook"
+                    else:
+                        _ga_tid = _ga_sid
+                        _ga_plan = _ga_plano_publico(sub, session) or plan_value
                     background_tasks.add_task(
                         send_purchase,
-                        transaction_id=_ga_sid,
+                        transaction_id=_ga_tid,
                         value=_ga_value,
                         currency=_ga_currency,
-                        plan=_ga_plano_publico(sub, session) or plan_value,
+                        plan=_ga_plan,
                         client_id=_ga_cid,
                         user_id=user_id,
                     )
@@ -6338,7 +6452,12 @@ async def billing_webhook(request: Request, background_tasks: BackgroundTasks):
             )
             # Email de confirmacao de cobranca (item 39) — so quando valor > 0
             # (invoices do trial vem com amount_paid=0 e nao precisam de notificacao).
-            amount_cents = _g(invoice, "amount_paid") or 0
+            # `amount_cents` é só o PLANO: o e-book comprado junto sai da conta,
+            # então e-mail, comissão e rastreio da fatura não o veem. A 1ª
+            # fatura de trial + e-book dá 0 e pula tudo (a comissão fica para a
+            # fatura do plano — `record_commission_for_invoice` só paga a 1ª).
+            amount_cents = max(0, (_g(invoice, "amount_paid") or 0) - _ebook_liquido_cents(
+                invoice, _g(_g(sub, "metadata", {}), "ebook_price")))
             if amount_cents and amount_cents > 0:
                 amount_brl = float(amount_cents) / 100.0
                 from core.services.email_service import send_pro_charged_email
@@ -6794,6 +6913,7 @@ async def billing_portal(request: Request, user_id: int = Depends(_get_current_u
     Cria uma sessão no Stripe Customer Portal para o usuário gerenciar
     a assinatura (cancelar, trocar cartão, ver faturas).
     """
+    await asyncio.to_thread(_exigir_credencial, user_id)
     if not STRIPE_SECRET_KEY:
         raise HTTPException(status_code=503, detail="Pagamentos ainda não configurados.")
 
@@ -6917,6 +7037,10 @@ async def conta_redirect(request: Request):
     user_id = await asyncio.to_thread(_resolve_page_user_id, request)
     if user_id is None:
         return RedirectResponse(url=_dashboard_url("/login?next=/conta"), status_code=302)
+    # Sem senha, o portal do Stripe não abre: a /home mostra o "Crie sua senha".
+    from db import conta_sem_credencial
+    if await asyncio.to_thread(conta_sem_credencial, user_id):
+        return RedirectResponse(url=_dashboard_url("/home"), status_code=302)
 
     if not STRIPE_SECRET_KEY:
         return RedirectResponse(url=_dashboard_url("/precos"), status_code=302)
@@ -9128,6 +9252,7 @@ app.include_router(settings_router)
 
 # ─── Open Finance (Pluggy + mock) → frontend/routes/open_finance.py (F1 E4) ──
 app.include_router(open_finance_router)
+app.include_router(open_finance_cash_router)  # saque/depósito em espécie (Q41)
 
 # ─── Push notifications (app iOS) → frontend/routes/push.py ──────────────────
 app.include_router(push_router)
@@ -9179,6 +9304,11 @@ async def websocket_endpoint(ws: WebSocket, user_id: int):
     )
     if sem_plano:
         await ws.close(code=4402, reason="subscription_required")
+        return
+    # A perna da CREDENCIAL do mesmo gate (shared.exigir_credencial).
+    from db import conta_sem_credencial
+    if await asyncio.to_thread(conta_sem_credencial, user_id):
+        await ws.close(code=4403, reason="password_required")
         return
 
     # now_tz() (main, 8ea113a): o mês do snapshot é o do USUÁRIO, não o do UTC

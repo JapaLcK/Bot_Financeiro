@@ -47,8 +47,14 @@ const json = (body) => (r) => r.fulfill({
  * O WebSocket é um stub ABERTO — `_doRefresh` só marca `.spinning` com
  * `ws.readyState === WebSocket.OPEN`.
  */
-async function abrirDash(w, { gates = {}, plano = "free" } = {}) {
-  const ctx = await browser.newContext({ viewport: { width: w, height: 812 } });
+async function abrirDash(w, { gates = {}, plano = "free", agora = "2026-09-15T15:00:00Z" } = {}) {
+  // UTC como o runner do CI: o mês do rótulo não pode depender do fuso da máquina.
+  const ctx = await browser.newContext({ viewport: { width: w, height: 812 }, timezoneId: "UTC" });
+  // O `#month-label` mostra o mês do relógio do aparelho, e a LARGURA do nome
+  // muda a contagem de faixas a 375 (ver o caso "meses"): "Maio 2026" tem 73px,
+  // "Setembro 2026" 103px. Com o relógio solto o 3 medido aqui só valia em
+  // fev/set/nov/dez — a suíte ficou vermelha em 1º/10, e vermelha em maio, jun…
+  await ctx.clock.setFixedTime(new Date(agora));
   await ctx.route("**/auth/validate", json({ ok: true, user_id: 42 }));
   await ctx.route("**/auth/me", json({ app_access: true, plan_tier: "essencial" }));
   await ctx.route("**/auth/dashboard-profile", json({
@@ -173,6 +179,25 @@ test("1) 375 e 320: header nas faixas medidas, ≤160px, alvos de 44px", async (
     assert.equal(m.h1Visivel, w > 360,
       `${w}: header h1 ${m.h1Visivel ? "visível" : "oculto"} — esperado o contrário`);
     await ctx.close();
+  }
+});
+
+test("1b) o mês do relógio não estoura o header: 375 conta 3 faixas só com nome longo; 320 cabe em 160px", async () => {
+  // Medido (setFixedTime, 375×812): Jan/Mar–Ago/Out = 112px (2 faixas: o mês
+  // cabe ao lado da marca); Fev/Set/Nov/Dez = 154px (3 faixas).
+  // A 320 NÃO se conta faixa: a largura do rótulo depende da fonte do ambiente
+  // e "Novembro 2026" deu 2 faixas no Mac e 3 no runner Linux do CI (o caso 1)
+  // já mede o 2 a 320 com Setembro). Ali só valem os limites do header.
+  for (const [agora, faixas375] of [["2026-02-15T15:00:00Z", 3], ["2026-05-15T15:00:00Z", 2],
+                                    ["2026-09-15T15:00:00Z", 3], ["2026-10-01T00:30:00Z", 2],
+                                    ["2026-11-15T15:00:00Z", 3]]) {
+    for (const w of [375, 320]) {
+      const { ctx, page } = await abrirDash(w, { agora });
+      const m = await medirHeader(page);
+      if (w === 375) assert.equal(m.faixas, faixas375, `${agora} 375: ${m.faixas} faixas (${m.altura}px, "${m.mes}")`);
+      assert.ok(m.altura <= 160 && m.fora === 0 && m.hbtns.length >= 5, `${agora} ${w}: ${JSON.stringify(m)}`);
+      await ctx.close();
+    }
   }
 });
 

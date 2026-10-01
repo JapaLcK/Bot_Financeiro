@@ -100,6 +100,12 @@ def trial_event_id(session_id: str) -> str:
     return f"trial_{session_id}"
 
 
+def ebook_event_id(session_id: str) -> str:
+    """Purchase do e-book comprado junto de um trial — só servidor (o navegador
+    não manda nada para o e-book), então não há par a deduplicar."""
+    return f"ebook_{session_id}"
+
+
 def registration_event_id(user_id: int | str) -> str:
     """CompleteRegistration — derivado do user_id recém-criado; casa com o
     pixel disparado no /cadastro após a conta ser criada."""

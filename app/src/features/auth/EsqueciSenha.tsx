@@ -85,6 +85,7 @@ export function EsqueciSenha() {
         autoComplete="email"
         textContentType="username"
         desativado={enviando}
+        testID="esqueci-email"
       />
       {estado.fase === "erro" ? <Banner tom="danger" mensagem={estado.mensagem} /> : null}
       <Button rotulo="Enviar" onPress={() => void enviar()} desativado={!email.trim() || enviando} carregando={enviando} />

@@ -131,7 +131,7 @@ def _credita(cur, user_id, link) -> int:
                  "Depósito em dinheiro" if deposito else "Saque em dinheiro", criado_em,
                  Jsonb({"delta_conta": float(delta), "time_known": known})))
     launch_id = cur.fetchone()["id"]
-    cur.execute("""update of_cash_links set status='ativo', origem='auto', launch_id=%s,
+    cur.execute("""update of_cash_links set status='ativo', origem='auto', launch_id=%s, seen_at=null,
                    updated_at=now() where id=%s and user_id=%s""", (launch_id, link["id"], user_id))
     return launch_id
 
