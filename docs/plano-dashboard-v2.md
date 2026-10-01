@@ -349,7 +349,10 @@ PR de cada etapa, não soluções prontas. Cada PR confere se ainda valem, decid
     (`webapp/src/dashboard/lib/model.js`); a Etapa 3 leva uma estimativa assim para o
     backend, marcada como estimativa e sem contar duas vezes: o ritmo exclui todo gasto que
     já entra como evento agendado (gasto fixo, boleto pago, fatura), como o protótipo já
-    faz com os lançamentos de recorrente.
+    faz com os lançamentos de recorrente. O denominador é o período coberto de verdade,
+    não 60 fixo: conta recém-conectada ou com histórico incompleto (dez dias divididos por
+    60 dão um sexto do ritmo real) tem amostra mínima, e abaixo dela a estimativa sai como
+    "a conferir".
   - A carteira Piggy não tem data de atualização: a confirmação da Q37 vale na primeira
     visita e envelhece. Com a carteira no saldo, pedir confirmação atual ou mostrar "a
     conferir".
