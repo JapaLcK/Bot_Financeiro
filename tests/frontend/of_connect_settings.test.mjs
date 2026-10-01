@@ -252,6 +252,24 @@ test("teto atingido AINDA permite reconectar o mesmo banco", async () => {
   await page.__ctx.close();
 });
 
+test("teto atingido reconecta mesmo com nome gravado cru (espaço, hífen, caixa)", async () => {
+  // Issue #732: institution_name vem cru da Pluggy; o gate comparava só com
+  // stripAccent. Controle negativo: voltar a `stripAccent` no gate deixa vermelho.
+  const page = await abrirSettings({
+    banksMax: 1,
+    conexoes: [{ id: 9, institution_name: "  NUBANK  ", status: "UPDATED" }],
+  });
+  await abrirPicker(page);
+  await page.click('#bankpick-list .bank-row[data-name="Nubank"]');
+  await page.click("#bankpick-go");
+
+  await page.waitForFunction(() =>
+    !document.getElementById("bankpick-overlay").classList.contains("open"));
+  assert.equal(await pickerAberto(page), false,
+    "nome gravado com espaço/caixa diferentes ainda é o mesmo banco");
+  await page.__ctx.close();
+});
+
 test("estado de plano indisponível não deixa CONECTAR", async () => {
   // A garantia é a mesma que o Codex pediu (não autorizar na Pluggy sem saber o
   // teto), mas no ponto certo: o modal abre normalmente — abrir não autoriza
