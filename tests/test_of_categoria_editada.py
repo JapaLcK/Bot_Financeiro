@@ -8,13 +8,16 @@ Controles negativos (CLAUDE.md §3), medidos:
 - os dois CASE de db/open_finance.py voltam a gravar o que o banco diz → A1, A2, A4, B1, B2, E;
 - `_SET_CATEGORIA` sem `categoria_editada = true` → A1, A2, A4, D, E (lançamento);
 - db/cards.py sem a marca → B1, B2, D, E (cartão);
-- o interno sem o `not %s` do par da Carteira → A4;
+- o alvo da editada sem `forcado` (o par da Carteira) → A4, A5;
+- o CASE antigo (`categoria_editada and not forcado`): o par acaba e o interno fica preso → A5;
+- o CASE sem `categoria is not distinct from` (o lido) → A7;
+- o alvo da editada só `forcado`, sem `is_internal_category` → A6;
 - o CASE trocado por guarda só em Python (o que o SELECT leu) → E;
 - o auto-merge do import sem `not categoria_editada` → F[*-editada];
 - `update_launch_fields` marcando também quando só a nota muda → A1 só a nota.
 Positivos: A3, B3 e F[*-nao_editada] (linha não editada segue o banco), A4 (o
-par da Carteira segue interno mesmo editado), D (a marca de um usuário não vale
-para outro).
+par da Carteira segue interno mesmo editado), A6 (categoria interna segue interna
+depois do par), D (a marca de um usuário não vale para outro).
 """
 from __future__ import annotations
 
@@ -97,6 +100,27 @@ def test_a4_par_da_carteira_segue_interno_mesmo_editado(caixa):
 
     r = _l(lid)
     assert (r["categoria"], r["interno"]) == ("outros", True)
+
+
+@pytest.mark.parametrize("cat,interno", [("outros", False), ("investimentos", True)],
+                         ids=["a5_comum_volta", "a6_interna_fica"])
+def test_a5_a6_par_da_carteira_acaba_e_o_interno_segue_a_categoria(caixa, cat, interno):
+    """O banco reclassifica o saque para compra: o par acaba e o interno da linha
+    editada volta a ser o que a categoria dela diz."""
+    uid = usuario_pagante()
+    cid = conecta(uid, f"item-{uid}")
+    sync(cid, uid, [tx("t1", -200, dia(10))])
+    lid = _launch(uid, "t1")["id"]
+    assert db.update_launch_fields(uid, lid, categoria=cat)
+    sync(cid, uid, [tx("t1", -200, dia(10))])
+    assert _l(lid)["interno"] is True  # A4: enquanto o par vale
+
+    sync(cid, uid, [tx("t1", -200, dia(10), op="CARTAO", desc="Compra", category="Shopping")])
+
+    assert q("select status from of_cash_links where user_id=%s", (uid,), True) == [
+        {"status": "estornado"}]
+    r = _l(lid)
+    assert (r["categoria"], r["interno"]) == (cat, interno)
 
 
 def test_a1_so_a_nota_nao_marca(user_id):
@@ -204,6 +228,22 @@ def test_e_edicao_no_meio_do_sync_lancamento(user_id, monkeypatch):
     db.sync_imported_open_finance_updates(user_id, cid)
 
     assert feito and _l(lid)["categoria"] == "lazer"
+
+
+def test_a7_edicao_no_meio_do_sync_nao_perde_o_interno(user_id, monkeypatch):
+    """O sync leu 'outros' (não interno); a edição concorrente grava 'investimentos'
+    (interno). O UPDATE não reescreve o interno com o alvo da categoria velha."""
+    cid = _banco(user_id, [_tx("a", -10, "Shopping")])
+    lid = _launch(user_id, "a")["id"]
+    assert db.update_launch_fields(user_id, lid, categoria="outros")
+    sync(cid, user_id, [_tx("a", -12, "Shopping")], corrige=False)  # valor muda: o UPDATE roda
+    feito = _edita_no_meio(
+        monkeypatch, lambda: db.update_launch_fields(user_id, lid, categoria="investimentos"))
+
+    db.sync_imported_open_finance_updates(user_id, cid)
+
+    r = _l(lid)
+    assert feito and (r["categoria"], r["interno"], r["valor"]) == ("investimentos", True, 12)
 
 
 def test_e_edicao_no_meio_do_sync_cartao(user_id, monkeypatch):

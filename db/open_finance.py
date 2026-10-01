@@ -9,6 +9,7 @@ from uuid import NAMESPACE_OID, uuid5
 from psycopg.types.json import Jsonb
 
 from utils_date import _tz, add_months, billing_period_for_close_day
+from utils_text import is_internal_category
 
 from .accounts import delete_launch_and_rollback
 from .cards import (
@@ -2610,7 +2611,8 @@ def sync_imported_open_finance_updates(user_id: int, connection_id: int | None =
     a credit_transaction e o total da fatura ficavam com o valor velho. Mexe apenas em
     registros DO OF (source=open_finance); nunca sobrescreve lançamento manual auto-mesclado.
     Categoria e interno editados pelo cliente (`categoria_editada`) ficam como ele deixou
-    (#712) — menos o interno do par da Carteira, que segue interno com qualquer categoria.
+    (#712). O interno de linha editada = o da própria categoria, ou interno enquanto
+    o par da Carteira vale (depois do par, volta ao que a categoria diz).
     """
     ensure_user(user_id)
     launches_updated = 0
@@ -2649,27 +2651,33 @@ def sync_imported_open_finance_updates(user_id: int, connection_id: int | None =
                     cls["is_internal_movement"] = True
                 new_cat = categoria_pigbank(r["category"]) or "outros"
                 editada = bool(r["editada"])
+                # editada: interno = o que a categoria dela diz (como a edição grava), ou forçado pelo
+                # par da Carteira; reavaliado quando o par acaba — senão o `true` forçado fica preso
+                alvo_editada = forcado or is_internal_category(r["cur_cat"])
+                alvo = alvo_editada if editada else cls["is_internal_movement"]
                 changed = (
                     Decimal(str(r["cur_valor"])) != cls["valor"]
                     or r["cur_tipo"] != cls["tipo"]
                     or (not editada and (r["cur_cat"] or "") != new_cat)
-                    or ((forcado or not editada)
-                        and bool(r["cur_internal"]) != cls["is_internal_movement"])
+                    or bool(r["cur_internal"]) != alvo
                     or r["cur_date"] != r["transaction_date"]
                 )
                 if changed:
-                    # a marca decide NO UPDATE: edição commitada depois do select vale (#712)
+                    # a marca decide NO UPDATE: edição commitada depois do select vale (#712);
+                    # o interno da editada só se reescreve se a categoria ainda é a que foi lida
                     cur.execute(
                         """
                         update launches set valor=%s, tipo=%s,
                                categoria = case when categoria_editada then categoria else %s end,
-                               is_internal_movement = case when categoria_editada and not %s
-                                                           then is_internal_movement else %s end,
+                               is_internal_movement = case when not categoria_editada then %s
+                                   when categoria is not distinct from %s then %s
+                                   else is_internal_movement end,
                                posted_at=%s
                         where id=%s and user_id=%s
                         returning categoria
                         """,
-                        (cls["valor"], cls["tipo"], new_cat, forcado, cls["is_internal_movement"],
+                        (cls["valor"], cls["tipo"], new_cat, cls["is_internal_movement"],
+                         r["cur_cat"], alvo_editada,
                          r["transaction_date"], r["launch_id"], user_id),
                     )
                     gravada = (cur.fetchone() or {}).get("categoria")
