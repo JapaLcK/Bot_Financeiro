@@ -131,10 +131,10 @@ EOF
 }
 
 preparar_simulador() {
-  UDID=$(xcrun simctl list devices | grep -m1 "    $SIM (" | grep -Eo '[0-9A-F-]{36}' || true)
+  UDID=$(xcrun simctl list devices available | grep -m1 "    $SIM (" | grep -Eo '[0-9A-F-]{36}' || true)
   if [ -z "$UDID" ]; then
     local runtime
-    runtime=$(xcrun simctl list runtimes | awk '/^iOS /{r=$NF} END{print r}')
+    runtime=$(xcrun simctl list runtimes available | awk '/^iOS /{r=$NF} END{print r}')
     UDID=$(xcrun simctl create "$SIM" "iPhone 17" "$runtime")
   fi
   xcrun simctl bootstatus "$UDID" -b >/dev/null
