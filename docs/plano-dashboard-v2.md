@@ -272,9 +272,12 @@ PR de cada etapa, não soluções prontas. Cada PR confere se ainda valem, decid
     coleta saudável e geração estável: mesmo com resposta bem formada e cursor terminal,
     um `PARTIAL_SUCCESS`/`UPDATING` ou uma coleta nova no meio da leitura apagaria
     transação legítima. Reusar o portão que a conciliação de investimentos já tem (produto
-    saudável e a mesma geração em duas fotos do item). E conciliar só dentro do intervalo de
-    datas que a resposta cobre: o banco pode devolver uma janela de histórico mais curta
-    que a anterior, e o que ficou fora dela continua gravado, não vira exclusão;
+    saudável e a mesma geração em duas fotos do item). E conciliar só dentro de um intervalo
+    de datas explícito: hoje `list_pluggy_transactions()` pede só `accountId` e o cursor, e
+    uma resposta vazia não diz nada sobre datas. O intervalo tem de vir do pedido (datas
+    `from`/`to` enviadas) ou de uma marca do provedor guardada; tirar das transações
+    devolvidas não serve. Fora do intervalo, o que está gravado fica, porque o banco pode
+    devolver um histórico mais curto que o anterior;
   - banco religado guarda o `last_sync_at` antigo; `connection_ui_state()` já trata
     `last_sync_at < reconnected_at` como não sincronizado, e é essa a fonte do estado da
     conexão, não a idade do sync.
@@ -351,7 +354,9 @@ PR de cada etapa, não soluções prontas. Cada PR confere se ainda valem, decid
     `bank_movements` (declaração não confirmada), e `_starting_balance()` guarda só o
     número. O mesmo vale para toda pendência que pode criar, pagar ou mover dinheiro, com
     valor conhecido ou não. A lista sai do registro, não de nomes escritos aqui: todo tipo
-    de `_REGISTRO` em `db/pending.py` cujo efeito cria, paga ou move dinheiro (lançamento,
+    de `_REGISTRO` em `db/pending.py` cujo efeito muda dinheiro em qualquer sentido, inclusive
+    apagar e desfazer (`delete_launch`, `delete_launch_bulk`, `delete_credit_purchase`,
+    `undo_audio`), além de criar, pagar ou mover (lançamento,
     parcelas no cartão, pagamento de conta, débito de uma fonte, recorrente nova; hoje,
     entre outros, `multi_launch_values`, `bill_pay_amount`, `payment_method_choice`,
     `installment_pending`, `pay_bill_choice`, `bill_amount_expected`, `investment_pick`,
