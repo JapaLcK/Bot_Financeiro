@@ -97,10 +97,12 @@ def list_pluggy_investments(item_id: str, api_key: str | None = None, *,
         # inteira, e página não lida vira posição "ausente" → remoção de caixinha com
         # dinheiro dentro. Por isso eco divergente é LEITURA INCOMPLETA, não
         # adaptação silenciosa.
-        # O LIMITE disto: se a API for 0-based de verdade, TODA conexão cai em
-        # READ_FAILED — ninguém perde dado (nada é removido, o espelho anterior fica
-        # de pé), mas a tela mostra erro e as caixinhas congelam no último saldo até
-        # alguém remedir. Se isso aparecer em produção, o conserto é uma linha:
+        # O LIMITE disto: se a API for 0-based de verdade, TODA leitura de
+        # investimentos falha — ninguém perde dado (nada é removido, o espelho
+        # anterior fica de pé), mas a tela mostra "Parcial · Investimentos não
+        # vieram" em toda conexão com contas (`investments_read_failed`) e "Erro
+        # temporário" nas sem conta (`read_failed`), e as caixinhas congelam no
+        # último saldo até alguém remedir. Se isso aparecer em produção, o conserto é uma linha:
         # começar o laço em 0 e exigir o eco igual ao pedido. Não há flag de
         # ambiente para isso de propósito.
         if "page" in data and _inv_int(data.get("page")) != pagina:

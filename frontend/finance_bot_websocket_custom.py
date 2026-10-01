@@ -1747,12 +1747,62 @@ manager = ConnectionManager()
 
 # ─── App startup ──────────────────────────────────────────────────────────────
 
+# Espera do 1º tique depois do boot: tempo para o processo estabilizar depois do deploy.
+_PRIMEIRO_TIQUE_SEC = 600
+
+
+async def _open_finance_tick(*, interval: int, com_patch: bool) -> None:
+    """Um tique: saúde, retentativa e, só com `com_patch`, o PATCH periódico."""
+    from core.services.pluggy_sync import request_pluggy_refresh, run_of_health_check
+    from frontend.routes.of_retentativa import retentar_leituras
+    saude = await asyncio.to_thread(run_of_health_check)
+    print(f"[open_finance_health] {saude}", flush=True)
+    # Depois da saúde de propósito: o 404 e o `needs_user` que ela acabou
+    # de gravar já tiram a linha da retentativa (Onda 5, PR-B2).
+    try:
+        print(f"[open_finance_retry] {await retentar_leituras(prazo_sec=interval / 2)}",
+              flush=True)
+    except Exception as exc:
+        # Falha da retentativa não segura o PATCH periódico logo abaixo. Só o
+        # tipo: a mensagem pode trazer dado de usuário (FK/CHECK do Postgres).
+        print(f"[open_finance_retry] erro: {type(exc).__name__}", file=sys.stderr)
+    if com_patch:
+        res = await asyncio.to_thread(request_pluggy_refresh, origin="periodic")
+        print(f"[open_finance_refresh] {res}", flush=True)
+        # Os eventos ficam AQUI porque `request_pluggy_refresh` roda numa
+        # thread (log_system_event é async). Ela devolve o que reivindicou
+        # e o que falhou; nada mais é engolido.
+        from core.admin_dashboard import log_system_event  # noqa: PLC0415
+        if res.get("claimed"):
+            await log_system_event(
+                "info", "of_refresh_claimed",
+                f"Refresh periódico reivindicou {len(res['claimed'])} item(ns)",
+                source="open_finance",
+                # Só os `item_id`: `claimed` traz o `user_id` de cada dono, e
+                # a coluna fica NULL (vários donos) — uid em `details`
+                # sobreviveria à exclusão da conta (issue #541).
+                details={"origin": res.get("origin"),
+                         "items": [c.get("item_id") for c in res["claimed"]],
+                         "triggered": res.get("triggered")},
+            )
+        for falha in res.get("failures") or []:
+            await log_system_event(
+                "warning", "pluggy_refresh_patch_failed",
+                f"PATCH de refresh falhou: {falha.get('item_id')}",
+                source="open_finance", details=falha,
+            )
+
+
 async def _open_finance_refresh():
-    # Tick periódico do Open Finance. DORME PRIMEIRO, de propósito: a versão
+    # Tick periódico do Open Finance. O PATCH NÃO RODA NO BOOT, de propósito: a versão
     # anterior refrescava no boot, e o Railway sobe container novo a cada
     # deploy — medido, 15 rodadas em 48h, 10 delas nos 5 min seguintes a um
     # deploy. O cooldown real vive em `next_refresh_at` (persistido), então
     # reiniciar o processo não adianta nada pra quem quer forçar refresh.
+    # O 1º tique roda `_PRIMEIRO_TIQUE_SEC` depois do boot, SÓ com a saúde e a
+    # retentativa (que só fazem GET): com merges diários o processo quase nunca
+    # chegava aos 6 h, e a retentativa nunca disparava. O PATCH só entra do 2º tique
+    # em diante, a cada `OF_REFRESH_INTERVAL_SEC`.
     #
     # O JOB DE SAÚDE roda mesmo com OF_REFRESH_ENABLED desligado: ele só faz
     # GET /items (não consome cota de coleta) e é o que tira do "Atualizado"
@@ -1760,37 +1810,14 @@ async def _open_finance_refresh():
     # nada mais executaria essa verificação.
     interval = int(os.getenv("OF_REFRESH_INTERVAL_SEC", str(6 * 60 * 60)))
     refresh_ligado = (os.getenv("OF_REFRESH_ENABLED") or "").strip().lower() in ("1", "true", "yes", "on")
-    from core.services.pluggy_sync import request_pluggy_refresh, run_of_health_check
+    primeiro = True
     while True:
         try:
-            await asyncio.sleep(interval)
-            saude = await asyncio.to_thread(run_of_health_check)
-            print(f"[open_finance_health] {saude}", flush=True)
-            if refresh_ligado:
-                res = await asyncio.to_thread(request_pluggy_refresh, origin="periodic")
-                print(f"[open_finance_refresh] {res}", flush=True)
-                # Os eventos ficam AQUI porque `request_pluggy_refresh` roda numa
-                # thread (log_system_event é async). Ela devolve o que reivindicou
-                # e o que falhou; nada mais é engolido.
-                from core.admin_dashboard import log_system_event  # noqa: PLC0415
-                if res.get("claimed"):
-                    await log_system_event(
-                        "info", "of_refresh_claimed",
-                        f"Refresh periódico reivindicou {len(res['claimed'])} item(ns)",
-                        source="open_finance",
-                        # Só os `item_id`: `claimed` traz o `user_id` de cada dono, e
-                        # a coluna fica NULL (vários donos) — uid em `details`
-                        # sobreviveria à exclusão da conta (issue #541).
-                        details={"origin": res.get("origin"),
-                                 "items": [c.get("item_id") for c in res["claimed"]],
-                                 "triggered": res.get("triggered")},
-                    )
-                for falha in res.get("failures") or []:
-                    await log_system_event(
-                        "warning", "pluggy_refresh_patch_failed",
-                        f"PATCH de refresh falhou: {falha.get('item_id')}",
-                        source="open_finance", details=falha,
-                    )
+            # `min`: com `OF_REFRESH_INTERVAL_SEC` menor que o 1º tique, ele não espera mais que o intervalo.
+            await asyncio.sleep(min(_PRIMEIRO_TIQUE_SEC, interval) if primeiro else interval)
+            com_patch = refresh_ligado and not primeiro
+            primeiro = False
+            await _open_finance_tick(interval=interval, com_patch=com_patch)
         except asyncio.CancelledError:
             raise
         except Exception as exc:

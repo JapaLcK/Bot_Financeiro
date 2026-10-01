@@ -27,6 +27,8 @@ from core.services.pluggy import (
     update_pluggy_item,
 )
 from core.services.pluggy_health import (
+    MOTIVOS_QUE_A_FALHA_SUBSTITUI,
+    MOTIVOS_QUE_A_FOTO_VIVA_SUBSTITUI,
     READ_FAILED,
     # "ainda buscando no banco": esperamos sair disto antes de sincronizar, senão
     # lemos o snapshot velho. Vem do `pluggy_health` porque lá é a fonte do
@@ -38,6 +40,7 @@ from core.services.pluggy_health import (
 )
 from core.services.pluggy_investments import list_pluggy_investments
 from db import (
+    AmbiguousItemError,
     claim_items_for_refresh,
     claim_manual_refresh,
     get_connections_by_item_id,
@@ -56,7 +59,7 @@ from db import (
 )
 # "Conexão terminal" (PAUSED/DELETED) pela lista que o `claim_manual_refresh`
 # usa — é ela que decide quem cai em `rate_limited` sem ser cooldown (§0.7).
-from db.open_finance_state import _TERMINAL as CONEXAO_TERMINAL
+from db.open_finance_state import _SEM_CHECAGEM, _TERMINAL as CONEXAO_TERMINAL
 
 
 def _HEALTH_MISSING() -> dict:
@@ -244,7 +247,37 @@ def sync_pluggy_item(provider_item_id: str, *, expected_user_id: int | None = No
 
     health = derive_item_health(item)
     geracao = (item.get("updatedAt"), item.get("lastUpdatedAt"))
-    return _sync_pluggy_item_confirmado(provider_item_id, connection, api_key, health, geracao)
+    try:
+        return _sync_pluggy_item_confirmado(provider_item_id, connection, api_key, health, geracao)
+    except AmbiguousItemError:
+        # A releitura de posse viu o item em mais de uma conexão (outro usuário o
+        # ganhou depois da leitura inicial): item ambíguo não grava em linha
+        # nenhuma, nem a foto abaixo (Codex #718).
+        raise
+    except Exception:
+        # O run falhou DEPOIS do `GET /items`: a foto acima é uma observação, e
+        # jogá-la fora deixava "Conexão perdida" num item que o próprio run viu
+        # vivo (linha O da tabela de `pluggy_health`). Só grava se, desde o
+        # começo do run, ninguém sincronizou bem nem reconectou (`geracao_vista`)
+        # nem observou o item (`observacao_vista`). Item vivo: só troca o que a
+        # foto tem autoridade para trocar (não `no_accounts`: ela não leu contas).
+        # Item em erro: grava como o sync e o job gravam. Nunca levanta: quem
+        # decide retentar é o chamador, com a exceção original.
+        # `has_data=False` aqui é "esta leitura não espelhou", não o espelho.
+        status, reason = resolve_connection_state(health=health, has_data=False,
+                                                  leitura_completa=False)
+        try:
+            mark_sync_result(
+                connection["id"], ok=False, status=status, status_reason=reason, health=health,
+                geracao_vista=(connection["reconnected_at"], connection["last_sync_at"]),
+                observacao_vista=(connection.get("health") or {}).get("observed_at"),
+                motivos_substituiveis=(MOTIVOS_QUE_A_FOTO_VIVA_SUBSTITUI if status == "ACTIVE"
+                                       else _SEM_CHECAGEM),
+                dono_unico=True)
+        except Exception as exc:
+            print(f"[pluggy_sync] foto do run que falhou não gravada ({provider_item_id}): "
+                  f"{type(exc).__name__}: {exc}")
+        raise
 
 
 def _sync_pluggy_item_confirmado(provider_item_id: str, connection: dict, api_key: str,
@@ -310,11 +343,13 @@ def _sync_pluggy_item_confirmado(provider_item_id: str, connection: dict, api_ke
     # autoriza `no_accounts`.
     investments: list[dict] = []
     investments_ok = True
+    investments_status = None   # o HTTP do erro de `/investments`, p/ o disjuntor da retentativa
     try:
         investments = [normalize_pluggy_investment(i)
                        for i in list_pluggy_investments(provider_item_id, api_key)]
     except Exception as exc:
         investments_ok = False
+        investments_status = getattr(exc, "status_code", None)
         print(f"[pluggy_sync] investimentos indisponíveis item={provider_item_id} "
               f"erro={type(exc).__name__}: {exc}", flush=True)
     heartbeat()
@@ -430,13 +465,9 @@ def _sync_pluggy_item_confirmado(provider_item_id: str, connection: dict, api_ke
         #     `has_data=False`, e o `investments_ok=False` vira `read_failed` —
         #     "não consegui ler", não "o banco não tem nada";
         #   - COM contas (o caso comum): `resolve_connection_state` devolve
-        #     ("ACTIVE", "") no `if has_data:` ANTES de olhar `leitura_completa`
-        #     (core/services/pluggy_health.py), então a conexão fica ACTIVE sem
-        #     motivo e a falha dos investimentos só aparece no log abaixo. É o
-        #     MESMO comportamento pré-existente do 429 na leitura
-        #     (`test_429_em_investimentos_nao_descarta_as_contas_ja_lidas`), e
-        #     mudá-lo seria mexer na semântica de estado da conexão, que este PR
-        #     não toca.
+        #     ("ACTIVE", `investments_read_failed`) e a tela diz "Parcial ·
+        #     Investimentos não vieram nesta atualização" (Onda 5, R4 — antes
+        #     era "Atualizado" e a falha só aparecia no log abaixo).
         inv_result: dict = {}
         investimentos_gravados = False
         try:
@@ -472,7 +503,8 @@ def _sync_pluggy_item_confirmado(provider_item_id: str, connection: dict, api_ke
                              status_reason=reason, health=health)
             return {"ok": False, "reason": reason, "item_id": provider_item_id,
                     "connection_id": connection["id"], "user_id": connection["user_id"],
-                    "accounts_synced": 0, "transactions_synced": 0, **inv_result}
+                    "accounts_synced": 0, "transactions_synced": 0,
+                    "investments_status": investments_status, **inv_result}
 
         result = save_open_finance_sync(connection["id"], accounts)
 
@@ -559,6 +591,7 @@ def _sync_pluggy_item_confirmado(provider_item_id: str, connection: dict, api_ke
         # quem lê o resultado precisa saber o que ficou pra trás.
         "stale_products": list(health.get("stale_products") or []),
         "investments_ok": investments_ok,
+        "investments_status": investments_status,
         **result,
         **inv_result,
         **caixinha_result,
@@ -645,6 +678,14 @@ def request_pluggy_refresh(*, origin: str, user_id: int | None = None, limit: in
                         for r in claimed]}
 
 
+def of_health_check_ligado() -> bool:
+    """`OF_HEALTH_CHECK_ENABLED` (default ligado). Uma leitura só para o job de
+    saúde e a retentativa do mesmo tique (`frontend/routes/of_retentativa.py`):
+    desligar a flag desliga os dois."""
+    return (os.getenv("OF_HEALTH_CHECK_ENABLED") or "1").strip().lower() not in (
+        "0", "false", "no", "off")
+
+
 def run_of_health_check(*, limit: int = 200) -> dict:
     """Mede a saúde das conexões ativas com um `GET /items/{id}` por item.
 
@@ -672,7 +713,7 @@ def run_of_health_check(*, limit: int = 200) -> dict:
     `OF_HEALTH_MIN_SAMPLE` items, a passada aborta sem gravar os ausentes e
     loga. 100% desliga o disjuntor.
     """
-    if (os.getenv("OF_HEALTH_CHECK_ENABLED") or "1").strip().lower() in ("0", "false", "no", "off"):
+    if not of_health_check_ligado():
         return {"checked": 0, "missing": 0, "skipped": "disabled"}
 
     rows = list_connections_for_health_check(
@@ -700,12 +741,15 @@ def run_of_health_check(*, limit: int = 200) -> dict:
         # "Refaça a conexão" por "Erro temporário" — para sempre (medido). Igual
         # para `no_accounts`: quem responde se ele ainda vale é o espelho
         # (`has_data`, lido na mesma query), não a memória da última passada.
+        # `status_reason_visto`: o par é decidido sobre o motivo LIDO na
+        # listagem, e um sync pode tê-lo gravado ou limpado durante o GET. Se
+        # mudou, não grava nada (ver `mark_sync_result`).
         health = derive_item_health(item)
         status, reason = resolve_connection_state(
             health=health, has_data=bool(row.get("has_data")),
             reason_atual=str(row.get("status_reason") or ""))
         mark_sync_result(row["id"], ok=None, status=status, status_reason=reason,
-                         health=health)
+                         health=health, status_reason_visto=row.get("status_reason"))
         checked += 1
 
     limite = _env_int("OF_HEALTH_MISSING_ABORT_PCT", 50) / 100.0
@@ -779,26 +823,52 @@ def _sync_item_contido(connection: dict, user_id: int) -> dict:
         return sync_pluggy_item(item_id, expected_user_id=user_id)
     except Exception as exc:
         print(f"[pluggy_sync] item {item_id} falhou no lote: {type(exc).__name__}: {exc}")
-        try:
-            # Tira o item do verde na tela: `status=None` é "não mexe" (a chamada
-            # falhou, não observamos a saúde do item — só que a tentativa não deu
-            # certo), e o motivo pendente faz `connection_ui_state` recusar
-            # "Atualizado" pelo default seguro dele.
-            #
-            # LIMITE MEDIDO: quem limpa `read_failed` é só um sync que consiga
-            # ler as contas. O job de saúde NÃO lê contas (só `GET /items`), e o
-            # early return `if has_data:` de `resolve_connection_state` devolve
-            # ("ACTIVE","") antes do ramo que preservaria o motivo — então um
-            # banco que 429 de forma persistente volta ao verde em até
-            # OF_HEALTH_MAX_AGE_SEC (12h) com o espelho velho. A pílula não olha
-            # a idade de `last_sync_at`; "Atualizado" quer dizer "o item está
-            # saudável na Pluggy", não "nosso espelho está fresco". Onda 2.
-            mark_sync_result(connection["id"], ok=False, status=None,
-                             status_reason=READ_FAILED)
-        except Exception as exc2:  # banco fora do ar não pode derrubar o lote também
-            print(f"[pluggy_sync] mark_sync_result falhou ({item_id}): {exc2}")
+        marcar_leitura_falhou(connection, exc)
         return {"ok": False, "reason": READ_FAILED, "item_id": item_id,
                 "connection_id": connection.get("id"), "error": type(exc).__name__}
+
+
+def marcar_leitura_falhou(conexao: dict, erro: BaseException | None = None) -> None:
+    """Falha FINAL de um sync: grava `read_failed` na conexão. Nunca levanta.
+
+    `erro` é a exceção do sync: `AmbiguousItemError` (o item ganhou um segundo
+    dono, no início do run ou na releitura de posse) não grava nada (Codex #718).
+
+    Tira o item do verde e do "Atualizando…" na tela: `status=None` é "não mexe"
+    (a chamada falhou, não observamos a saúde do item — só que a tentativa não
+    deu certo), e o motivo pendente faz `connection_ui_state` recusar "Atualizado"
+    pelo default seguro dele (e, sem sync, fala antes do "Atualizando…": Onda 5,
+    R1b).
+
+    Quem limpa `read_failed` é só um sync com leitura completa. O job de saúde NÃO
+    lê contas (só `GET /items`) e mantém o motivo (`resolve_connection_state`,
+    linha H; Onda 5, R5). Quem retenta a leitura: `docs/open_finance_estados.md`.
+
+    `conexao` é a linha lida quando o run COMEÇOU (`id`, `reconnected_at`,
+    `last_sync_at`), e não uma releitura: a marca vai pelo `id` capturado (item
+    readotado noutra conexão não é tocado) e só grava se, desde então, ninguém
+    sincronizou bem nem reconectou (`geracao_vista`). Os próprios attempts do run
+    não mexem no par (só `mark_sync_attempt`). Os dois chamadores já têm a linha:
+    o lote (`_sync_item_contido`, pelo snapshot) e o sync de fundo
+    (`_run_pluggy_sync_bg`, que a lê antes da 1ª tentativa).
+
+    E só troca o motivo ATUAL se ele estiver em `MOTIVOS_QUE_A_FALHA_SUBSTITUI`
+    (CAS por espécie, no próprio `UPDATE`): uma falha sem observação nunca troca
+    um veredito (`no_accounts`, `item_missing`), nem o mais velho nem um observado
+    no meio do run. `item_missing` só sai por observação do item vivo (contrato,
+    `docs/open_finance_estados.md` §1 item 2), inclusive a foto do próprio run
+    que falhou depois do `GET /items` (`sync_pluggy_item`).
+    """
+    item_id = conexao.get("provider_item_id")
+    if isinstance(erro, AmbiguousItemError):
+        return
+    try:
+        mark_sync_result(conexao["id"], ok=False, status=None, status_reason=READ_FAILED,
+                         geracao_vista=(conexao["reconnected_at"], conexao["last_sync_at"]),
+                         motivos_substituiveis=MOTIVOS_QUE_A_FALHA_SUBSTITUI,
+                         dono_unico=True)
+    except Exception as exc:  # banco fora do ar não pode derrubar o chamador também
+        print(f"[pluggy_sync] mark_sync_result falhou ({item_id}): {exc}")
 
 
 def sync_pluggy_user(user_id: int) -> dict:
