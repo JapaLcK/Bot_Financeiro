@@ -1,0 +1,22 @@
+# O rodar.sh trocou a senha pelo token do 04a. A antiga não entra; a nova entra.
+appId: ${APP_ID}
+---
+- launchApp:
+    clearState: true
+    clearKeychain: true
+- tapOn: "Já tenho conta"
+- runFlow:
+    file: _entrar.yaml
+    env:
+      SENHA: ${ANTIGA}
+- assertVisible: "E-mail ou senha incorretos."
+# Do zero de novo: o campo E-mail continua preenchido depois do erro.
+- launchApp:
+    clearState: true
+    clearKeychain: true
+- tapOn: "Já tenho conta"
+- runFlow:
+    file: _entrar.yaml
+    env:
+      SENHA: ${NOVA}
+- assertVisible: "Olá, E2E"

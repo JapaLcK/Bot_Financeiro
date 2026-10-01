@@ -638,7 +638,7 @@ def test_editar_a_data_de_um_lancamento_manual_continua_valendo(pro_user_id):
 # do formulário continua editável nessas linhas.
 
 def _of_do_dia(user_id: int, dia: date, *, legado: bool = False,
-               valor: str = "137.77", categoria: str = "mercado") -> tuple[int, int]:
+               valor: str = "137.77", categoria: str = "Groceries") -> tuple[int, int]:
     """Linha do Open Finance pelo caminho de PRODUÇÃO → (launch_id, of_tx_id).
 
     Espelho real (`save_pluggy_open_finance_item` + `save_open_finance_sync`) →

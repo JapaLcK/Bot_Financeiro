@@ -442,3 +442,41 @@ for (const tipo of ["constructor", "__proto__", "toString"]) {
     } finally { await fechar(page); }
   });
 }
+
+/* ─── Receita/despesa de movimentação interna: rótulo pela DIREÇÃO ──────────
+ * O saque em espécie espelhado na Carteira (`_credita`, db/open_finance_cash.py)
+ * é `receita` + `is_internal_movement`; o depósito é `despesa`. Decisão do dono:
+ * "Entrada"/"Saída", cor neutra, sinal +/- mantido.
+ * NEGATIVO: tirar o `last.is_internal_movement && rotulo(internos)` do
+ * renderGreeting e o `isInterno` do renderActivity (home.html) → vermelhos aqui.
+ * POSITIVO: os mesmos tipos NÃO internos continuam "Receita"/"Despesa", verde/
+ * vermelho — o caso de baixo, e os de "despesa:"/"receita:" do topo. */
+for (const [tipo, rotulo, sinal] of [["receita", "Entrada", "+"], ["despesa", "Saída", "-"]]) {
+  test(`${tipo} interna: saudação "${rotulo}", linha neutra com "${sinal}"`, async () => {
+    const page = await abrirHome([lancamento({ tipo, valor: 200, alvo: "Saque em dinheiro",
+                                               categoria: "transferencia_interna",
+                                               is_internal_movement: true })]);
+    try {
+      const { forte } = await saudacao(page);
+      assert.equal(forte, rotulo);
+      const [linha] = await linhasDaAtividade(page);
+      assert.match(linha.tag, /\binternal\b/, linha.tag);
+      assert.doesNotMatch(linha.tag, /\b(income|expense|credit)\b/, linha.tag);
+      assert.ok(linha.valor.startsWith(sinal), linha.valor);
+      const cor = await page.$eval("#activity-list .activity-amount", (el) => getComputedStyle(el).color);
+      assert.equal(cor, "rgba(255, 255, 255, 0.62)", `valor devia sair em --text-2, veio ${cor}`);
+    } finally { await fechar(page); }
+  });
+}
+
+test("receita/despesa NÃO internas continuam Receita/Despesa, verde/vermelho", async () => {
+  for (const [tipo, rotulo, classe] of [["receita", "Receita", "income"], ["despesa", "Despesa", "expense"]]) {
+    const page = await abrirHome([lancamento({ tipo, valor: 80, alvo: "freela" })]);
+    try {
+      assert.equal((await saudacao(page)).forte, rotulo);
+      const [linha] = await linhasDaAtividade(page);
+      assert.match(linha.tag, new RegExp(`\\b${classe}\\b`), linha.tag);
+      assert.doesNotMatch(linha.tag, /\binternal\b/, linha.tag);
+    } finally { await fechar(page); }
+  }
+});

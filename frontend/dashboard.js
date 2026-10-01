@@ -8393,6 +8393,13 @@ function applyAccessVerdict(me) {
     }
     return false;
   }
+  // Conta paga sem senha nem Google/Apple: dados e WS respondem 403/4403.
+  if (me && me.precisa_criar_senha) {
+    clearSessionSnapshots();
+    stopWsRetries();
+    window.PBCriarSenha.mostrar(me);
+    return false;
+  }
   return true;
 }
 
@@ -8536,6 +8543,9 @@ let _lastAlerts = [];
 
 function renderAlerts(alerts) {
   const b = document.getElementById("alert-banner");
+  // Sem /cash-transfers.js (arquivo novo: 404 logo após deploy, rede caída) o
+  // "Conferir" não abriria nada — a linha sai, e a faixa não abre só com ela.
+  if (!window.CashTransfers) alerts = (alerts || []).filter(a => a.type !== "cash_transfers");
   _lastAlerts = alerts || [];
   if (!alerts || !alerts.length || alertsDismissed) {
     b.style.display = "none";
@@ -8556,6 +8566,8 @@ function renderAlerts(alerts) {
       html += `<div class="alert-row"><i class="ph ph-piggy-bank" aria-hidden="true"></i> ${msg} <button onclick="ackRecurringCharge(${a.charge_id})" aria-label="Marcar como visto" title="Marcar como visto" style="background:none;border:none;color:var(--text-3);cursor:pointer;font-size:.85rem;line-height:1;padding:2px 6px;margin-left:6px;border-radius:6px;opacity:.7;transition:opacity .15s,background .15s" onmouseover="this.style.opacity=1;this.style.background='rgba(255,255,255,.08)'" onmouseout="this.style.opacity=.7;this.style.background='none'"><i class="ph ph-x" aria-hidden="true"></i></button></div>`;
     } else if (a.type === "recurring_credited") {
       html += `<div class="alert-row"><i class="ph ph-piggy-bank" aria-hidden="true"></i> Piggy recebeu <b>${escapeHtmlSafe(a.name)}</b> ${fmt(a.amount)} na conta ${_alertWhenLabel(a.credited_at)}. <button onclick="ackRecurringIncomeCredit(${a.credit_id})" aria-label="Marcar como visto" title="Marcar como visto" style="background:none;border:none;color:var(--text-3);cursor:pointer;font-size:.85rem;line-height:1;padding:2px 6px;margin-left:6px;border-radius:6px;opacity:.7;transition:opacity .15s,background .15s" onmouseover="this.style.opacity=1;this.style.background='rgba(255,255,255,.08)'" onmouseout="this.style.opacity=.7;this.style.background='none'"><i class="ph ph-x" aria-hidden="true"></i></button></div>`;
+    } else if (a.type === "cash_transfers") {
+      html += `<div class="alert-row"><i class="ph ph-hand-coins" aria-hidden="true"></i> Dinheiro vivo · <b>${Number(a.count) || 0}</b> para conferir · <button type="button" class="ov-adjust-lnk" onclick="CashTransfers.open(USER_ID, refreshDashboardAfterInvestment)">Conferir</button></div>`;
     } else {
       const icon = a.type === "budget_exceeded" ? '<i class="ph ph-warning-circle" aria-hidden="true"></i>' : '<i class="ph ph-warning" aria-hidden="true"></i>';
       html += `<div class="alert-row">${icon} <b>${escapeHtmlSafe(a.categoria)}</b>: ${fmt(a.spent)} de ${fmt(a.budget)} (${a.pct}%)</div>`;
@@ -8750,6 +8762,8 @@ function renderLaunchesPagination(totalItems, totalPages) {
 // `window`. Uma guarda só, no lugar onde o literal morava, para os dois
 // consumidores (renderLaunches e _renderLaunchDetail).
 const TYPE_LABELS = (typeof LAUNCH_TYPE_LABELS === "object" && LAUNCH_TYPE_LABELS) || {};
+// Receita/despesa de movimentação interna: "entrada"/"saída" (mesma guarda).
+const INTERNAL_LABELS = (typeof LAUNCH_INTERNAL_LABELS === "object" && LAUNCH_INTERNAL_LABELS) || {};
 
 // Guarda os lançamentos renderizados pra o clique na linha abrir o detalhe.
 let _renderedLaunches = [];
@@ -8786,13 +8800,14 @@ function renderLaunches() {
       const isInternal = l.is_internal_movement;
       const valClass   = isInternal ? '' : (l.tipo==='receita'||l.tipo==='entrada' ? 'g' : 'r');
       const valStyle   = isInternal ? 'color:var(--text-2)' : '';
-      const typeLabel  = TYPE_LABELS[l.tipo] || l.tipo.replaceAll("_", " ");
+      const internalLabel = isInternal && INTERNAL_LABELS[l.tipo];
+      const typeLabel  = internalLabel || TYPE_LABELS[l.tipo] || l.tipo.replaceAll("_", " ");
       // Editar/Excluir migraram pro modal de detalhe (clique na linha) — sem
       // ícones inline, que causavam toque errado no celular.
       return `
       <div class="row" style="cursor:pointer;${isInternal?'opacity:.75':''}" onclick="openLaunchDetail(${idx})">
         <span class="lbl">
-	          <span class="tag ${l.tipo}">${typeLabel}</span>
+	          <span class="tag ${internalLabel ? "x" : l.tipo}">${typeLabel}</span>
 	          ${isInternal ? '<span class="tag interno">mov. interna</span>' : ''}
 	          ${escapeHtmlSafe(describeLaunch(l))}
 	          ${l.categoria ? `<span class="tag x">${escapeHtmlSafe(l.categoria)}</span>` : ''}
@@ -8869,7 +8884,8 @@ function closeLaunchDetail() {
 
 function _renderLaunchDetail(l) {
   _ensureLaunchDetailModal();
-  const typeLabel = TYPE_LABELS[l.tipo] || String(l.tipo || "").replaceAll("_", " ");
+  const typeLabel = (l.is_internal_movement && INTERNAL_LABELS[l.tipo])
+    || TYPE_LABELS[l.tipo] || String(l.tipo || "").replaceAll("_", " ");
   const desc = describeLaunch(l).replace(/<[^>]+>/g, "").trim() || "—";
   document.getElementById("ld-desc").textContent = desc;
 

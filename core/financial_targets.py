@@ -1,4 +1,7 @@
-"""Resolução textual de alvos e quantidades de caixinhas/investimentos."""
+"""Resolução textual de alvos e quantidades de caixinhas/investimentos.
+
+`texto_da_quantidade` também é a fonte do valor em "paguei <conta>"
+(`core/handlers/bills.py`): o número do nome da conta não é valor (#568, #700)."""
 from __future__ import annotations
 
 import re

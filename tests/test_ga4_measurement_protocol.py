@@ -237,6 +237,28 @@ def test_trial_nao_manda_purchase(user_id, monkeypatch):
         _cleanup_trial(uid)
 
 
+def test_trial_com_ebook_manda_o_purchase_do_ebook(user_id, monkeypatch):
+    """D1 (funil v3, PR 3): com trial o `amount_total` é só o e-book (medido:
+    990). Vira um purchase com `transaction_id` próprio e item `ebook` — o
+    plano continua sem purchase até a cobrança do fim do trial."""
+    uid, client, fake = _setup(monkeypatch, f"ga4-eb-{user_id}")
+    captura = _ligar_ga4(monkeypatch)
+    try:
+        r = _post(
+            client, fake,
+            _evento_checkout(uid, metadata={"ga_client_id": _CID_REAL}, amount_total=990),
+            subs={"sub_ga4": _sub_pago("trialing", metadata={"ga_client_id": _CID_REAL})},
+        )
+        assert r.status_code == 200, r.text
+        corpo, evento = captura.unico()
+        assert corpo["client_id"] == _CID_REAL
+        p = evento["params"]
+        assert (evento["name"], p["transaction_id"], p["value"]) == ("purchase", "ebook_cs_ga4_1", 9.9)
+        assert p["items"][0]["item_id"] == "ebook"
+    finally:
+        _cleanup_trial(uid)
+
+
 # ── cobrança do fim do trial e renovações ────────────────────────────────────
 
 def test_renovacao_manda_purchase_com_o_valor_pago_e_o_id_da_fatura(user_id, monkeypatch):

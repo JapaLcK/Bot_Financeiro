@@ -15,7 +15,9 @@ from utils_date import (
     launch_day, extract_date_from_text, today_tz, parse_period_from_text,
     month_range_today,
 )
-from core.intent_classifier import contains_comparative_question, is_comparative_question
+from core.intent_classifier import (contains_comparative_question, is_comparative_question,
+                                    sem_perguntas_comparativas)
+from core.observability import _log_falha
 from core.services.category_service import infer_category, learn_from_inference
 from parsers import (
     parse_receita_despesa_natural,
@@ -89,6 +91,21 @@ _INTERNAL_TIPOS = {
     "criar_caixinha", "delete_pocket",
     "create_investment", "delete_investment",
 }
+
+# Receita/despesa de movimentação interna (saque em espécie espelhado na
+# Carteira, transferência) é dinheiro que mudou de lugar: a listagem diz a
+# DIREÇÃO. Par de `LAUNCH_INTERNAL_LABELS` (frontend/launch-type-labels.js),
+# comparado por tests/test_launch_type_labels_fonte_unica.py (CLAUDE.md §0.7).
+_INTERNAL_LABELS = {"receita": "entrada", "despesa": "saída"}
+
+
+def _rotulo_interno(r: dict) -> str | None:
+    """"entrada"/"saída" para receita/despesa interna (forma legada junto); senão None."""
+    if r.get("is_internal_movement"):
+        for canon, rotulo in _INTERNAL_LABELS.items():
+            if r.get("tipo") in _TIPO_ALIASES[canon]:
+                return rotulo
+    return None
 
 
 # --- eixo TIPO: despesa / receita / os dois ---------------------------------
@@ -462,7 +479,7 @@ def _listar_categoria(
         # Linha de cartão não tem user_seq, e "#N" é o que o usuário digita em
         # "apagar #N" — mostrar um número que não existe seria pior que não mostrar.
         prefixo = f"#{r['user_seq']}" if r.get("user_seq") else "💳"
-        lines.append(f"{prefixo} • {r.get('tipo', '')} • {valor} • {desc} • {data_txt}")
+        lines.append(f"{prefixo} • {_rotulo_interno(r) or r.get('tipo', '')} • {valor} • {desc} • {data_txt}")
 
     # sumário do PERÍODO INTEIRO, não das linhas exibidas (ver docstring). Sem
     # período, o escopo vai escrito: número de total sem escopo é o que fazia a
@@ -566,7 +583,7 @@ def list_launches(user_id: int, limit: int = 10, entities: dict | None = None, o
 
         lines = []
         for r in rows:
-            tipo   = r.get("tipo", "")
+            tipo   = _rotulo_interno(r) or r.get("tipo", "")
             valor  = fmt_brl(float(r["valor"])) if r.get("valor") is not None else "-"
             nota   = r.get("nota") or r.get("alvo") or "-"
             cat    = r.get("categoria") or ""
@@ -630,8 +647,9 @@ def list_launches(user_id: int, limit: int = 10, entities: dict | None = None, o
 
         # descrição: prefere nota se informativa, senão usa alvo
         descricao = nota if nota and nota.lower() not in ("-", alvo.lower()) else alvo
+        rotulo = _rotulo_interno(r)
         if not descricao:
-            descricao = tipo
+            descricao = rotulo or tipo
 
         # formata data de forma amigável
         if criado is not None:
@@ -657,13 +675,15 @@ def list_launches(user_id: int, limit: int = 10, entities: dict | None = None, o
         else:
             data_str = "-"
 
-        emoji     = _TIPO_EMOJI.get(tipo, "•")
+        emoji     = "🔁" if rotulo else _TIPO_EMOJI.get(tipo, "•")
         valor_str = fmt_brl(float(valor)) if valor is not None else "-"
         # Mostra user_seq (numeração por usuário, começa em #1) em vez do
         # id global. Fallback pro id interno enquanto o backfill não rodou.
         display_id = r.get("user_seq") or r.get("id")
         id_str    = f" [#{display_id}]" if display_id else ""
-        lines.append(f"{emoji} {data_str} • {valor_str} • {descricao}{id_str}")
+        # interna: o 🔁 não diz a direção, o rótulo diz ("entrada"/"saída")
+        rotulo_str = f"{rotulo} • " if rotulo else ""
+        lines.append(f"{emoji} {data_str} • {rotulo_str}{valor_str} • {descricao}{id_str}")
 
     # mini resumo de despesas/receitas no período exibido
     total_despesas = sum(
@@ -1335,7 +1355,7 @@ def _ask_value_question(item: dict) -> str:
     return f"🐷 Faltou o valor de *{desc}*. Quanto foi? (só o número)"
 
 
-def _aviso_pergunta_pulada(part: str, fila: list[dict] = ()) -> str:
+def aviso_pergunta_pulada(part: str, fila: list[dict] = ()) -> str:
     """Aviso do pedaço de multi-lançamento pulado por ser pergunta comparativa
     (texto e áudio). Aspas, e não `wrap_wa_markup`: o bot não abre marcação aqui.
     Limite conhecido: um `*` solto dentro do pedaço do usuário pode formar par
@@ -1359,6 +1379,23 @@ def _aviso_pergunta_pulada(part: str, fila: list[dict] = ()) -> str:
     else:
         dica = f"Se era gasto, {depois}me manda só o valor e o lugar, tipo *gastei 50 no bar*."
     return f'ℹ️ Não registrei "{trecho}" porque parece uma pergunta. {dica}'
+
+
+def avisos_depois_de(user_id: int, puladas: list[str]) -> list[str]:
+    """Avisos dos pedaços pulados depois da resposta da conta, do cartão ou da
+    fatura (#568). Se ela armou uma pergunta, o aviso manda responder antes,
+    como o do multi: "gastei 50 no bar" derrubaria a pergunta."""
+    if not puladas:
+        return []
+    # Roda DEPOIS de a conta, a fatura ou a compra terem sido gravadas: se a leitura
+    # falhar, o erro faria o usuário repetir e duplicar. Falha aberta: aviso básico.
+    try:
+        pend = db.get_pending_action(user_id)
+        de_pe = [{}] if pend and not db.eh_oferta_de_conveniencia(pend["action_type"]) else ()
+    except Exception as e:
+        _log_falha("avisos_depois_de", user_id, e)
+        de_pe = ()
+    return [aviso_pergunta_pulada(p, de_pe) for p in puladas]
 
 
 # Quantas vezes o MESMO valor precisa ter aparecido antes (pro mesmo tipo/descrição)
@@ -1712,7 +1749,9 @@ def add(user_id: int, text: str, entities: dict, platform: str = "whatsapp", *,
     if credit_response is not None:
         return credit_response
 
-    declarada = forma_pagamento or fp.detectar(text)
+    # A forma sai do pedaço sem a pergunta: o "cartão" de "… e gastei mais no
+    # cartão esse mês?" não declara nada (#568).
+    declarada = forma_pagamento or fp.detectar(sem_perguntas_comparativas(text)[0] or text)
     decisao = fp.decidir(user_id, declarada)
     if decisao == fp.MISTO:
         return fp.msg_misto()
@@ -1775,10 +1814,10 @@ def add(user_id: int, text: str, entities: dict, platform: str = "whatsapp", *,
             )
             question = _ask_value_question(missing[0])
             return "\n\n".join(responses + [question]
-                               + [_aviso_pergunta_pulada(p, missing) for p in puladas])
+                               + [aviso_pergunta_pulada(p, missing) for p in puladas])
         if responses or puladas:
             # só avisos: não cai no single, que gravaria o texto inteiro (R$ 2.025)
-            return "\n\n".join(responses + [_aviso_pergunta_pulada(p) for p in puladas])
+            return "\n\n".join(responses + [aviso_pergunta_pulada(p) for p in puladas])
         # nenhum pedaço virou lançamento válido — cai no fluxo single abaixo
 
     parsed = parse_receita_despesa_natural(user_id, text)

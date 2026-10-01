@@ -39,6 +39,10 @@ Resumo, Lançamentos, Previsão, Metas e caixinhas, Para onde vai, Patrimônio e
 Piggy com IA real e blocos. Pix, conexão do Open Finance, MFA e notificações continuam em
 `settings.html`/`precos.html`. O resto abre no antigo até ser migrado, um de cada vez.
 
+O Resumo tem um bloco de **contas**: o saldo de hoje no total e o de cada conta conectada
+no Open Finance, mais a carteira Piggy (dono, 2026-09-30: o protótipo não mostrava o saldo
+em lugar nenhum).
+
 ## 2. Fonte da verdade: Open Finance (Q36–Q43)
 
 - **Q36 — Open Finance é a fonte única** de Pix, contas, cartões, investimentos, aportes,
@@ -99,11 +103,11 @@ calma (Q5).
   a tela pede o dado de novo. Princípios: o aviso vai só para o dono do dado, só depois de
   gravado, e a tela nunca fica desatualizada em silêncio (reconectar refaz tudo; sessão
   encerrada fecha o stream). Toda escrita de dado financeiro avisa, venha de onde vier.
-  Processo único hoje; com mais de um processo, `LISTEN/NOTIFY` do Postgres: quem grava
-  faz `pg_notify` dentro da própria transação (sai só no commit; serve para thread e para
-  o `bot.py`) e cada processo web mantém uma conexão `LISTEN` que repassa aos streams
-  dele (desenho no docstring de `api/v2/eventos.py`, não construído). O `bot.py`
-  (Discord) sai do `launch.py`: decidido pelo dono, feito no PR 5a da etapa 0.
+  Construído com `LISTEN/NOTIFY` do Postgres: um trigger nas tabelas financeiras faz
+  `pg_notify` na transação de quem grava (sai só no commit; serve para thread e para
+  outro processo) e cada processo web mantém uma conexão `LISTEN` que repassa aos streams
+  dele (lista em `db/schema.py::TABELAS_QUE_AVISAM`, laço em `api/v2/eventos.py`). O
+  `bot.py` (Discord) sai do `launch.py`: decidido pelo dono, feito no PR 5a da etapa 0.
 - **Processo** (Q21): todo PR que cria ou muda endpoint da `/api/v2` é faixa Completo.
 
 ## 4. Dados e números
@@ -176,7 +180,7 @@ e esse histórico não se refaz:
 | Etapa | O que entra | Faixa |
 |---|---|---|
 | 0 | Esqueleto da `/api/v2` (usuário, erro, contrato, SSE), `/painel` com a chave, plano pelo `GET /api/v2/me`, TanStack Query, job da foto diária e histórico da rentabilidade do Open Finance | Completo |
-| 1 | Resumo (perfil no servidor) | API Completo, tela Leve |
+| 1 | Resumo (perfil no servidor), com o bloco de contas: saldo de hoje por conta | API Completo, tela Leve |
 | 2 | Lançamentos: ver tudo; lançar, editar e apagar na carteira (Q36) | idem |
 | 3 | Previsão | idem |
 | 4 | Metas e caixinhas | idem |
@@ -208,6 +212,39 @@ PR de cada etapa, não soluções prontas. Cada PR confere se ainda valem, decid
   também traz.
 - Moeda: o import grava tudo como `BRL` hoje (inclusive cartão); moeda omitida pelo
   conector; moeda corrigida depois.
+- Ingestão do Open Finance (defeitos achados na revisão dos PRs #689 e #720; detalhes e
+  casos nas threads do #720). Pergunta geral: como a ingestão marca uma leitura como
+  incompleta em vez de gravar dado incompleto com cara de completo, e como o conserto
+  alcança o que já foi gravado errado?
+  - Valor padrão no lugar do dado ausente ou inválido (`normalize_pluggy_account`,
+    `normalize_pluggy_transaction`, `normalize_pluggy_investment`, `_to_decimal`): tipo,
+    saldo, valor, data, nome, `NaN`/`Infinity`, texto ilegível. Como distinguir
+    "desconhecido" de zero e de `BRL`?
+  - Registro sem `id` ou com `id` malformado (branco, objeto: `str(raw.get("id") or "")`
+    aceita os dois), ou com `type`/`subtype` que o código não trata, some, colide ou é
+    rotulado errado com o sync dando sucesso (conta, transação e investimento;
+    `pluggy_rv_kind()` trata todo `EQUITY` que não é FII como ação). Que forma de `id` e
+    que pares `(type, subtype)` são aceitos?
+  - Leitura truncada ou malformada: `max_pages=60` sem conferir o cursor, `/accounts` só na
+    primeira página, `results` ausente, cursor repetido. Quando uma leitura conta como
+    completa?
+  - Exceção engolida em `_sync_pluggy_item_confirmado()` (investimentos, espelho de
+    caixinhas, foto diária) sai como `ok=True`. Que falhas marcam o sync incompleto?
+  - Ausências: conta ou transação que some da resposta fica para sempre. Se a conciliação
+    for criada, como ela sabe que a ausência é real (intervalo de datas, data corrigida,
+    sync concorrente depois da trava — o furo da trava já existe na conciliação de
+    investimentos) e como desfaz o que foi derivado (`_rollback_imported_of()` engole erro)?
+  - Transação PENDING que depois é lançada com outro id vira dois registros, em conta e em
+    cartão (`normalize_pluggy_transaction()` descarta o `status`). Como casar a pendente com
+    a lançada?
+  - Cartão: moeda por transação, fatura calculada localmente sem o
+    `/bills` da Pluggy, pagamento de fatura por palavra-chave, sinal do estorno, calendário
+    padrão 1/10, grupo de parcelas (chave que divide e que colide, metadado incompleto,
+    parcelas futuras não criadas e a troca da projetada pela real).
+  - Cartão em duplicidade: adoção de cartão manual, OFX e Open Finance no mesmo cartão,
+    reconexão com item novo, nome padrão `"CREDIT"`.
+  - Banco religado guarda o `last_sync_at` antigo; a fonte do estado da conexão é
+    `connection_ui_state()`.
 - Quando o dado do Open Finance conta como desatualizado (limite por produto) e como a
   tela aberta percebe isso sem escrita.
 - Rentabilidade do Open Finance: medida em produção em 2026-09-29 (leitura, pelo dono;
@@ -227,6 +264,36 @@ PR de cada etapa, não soluções prontas. Cada PR confere se ainda valem, decid
 - Etapa 3: desde a Q42 o gasto fixo diário, semanal e único entra na Previsão, uma
   ocorrência por data — um diário gera até 90 itens em `compromissos`/`causas`. A tela
   `/previsao` tem de agrupar por nome; o código de hoje não agrega nem limita.
+- Etapa 3: defeitos da previsão de hoje (`cashflow._cashflow_events()`), achados na
+  revisão dos PRs #689 e #720 (detalhes e casos nas threads do #720). Não se consertam no
+  painel antigo: a regra reescrita para a Previsão da `/api/v2` passa a servir também o
+  simulador e o `check_cashflow` da IA (Q18). A matriz do
+  `docs/plano-piggy-assistente-contextual.md` dá a direção de erro de cada entrada; esta
+  lista e a matriz se completam. Perguntas para o plano da Etapa 3:
+  - Gasto fixo pago no cartão sai do caixa no `due_day` e de novo na fatura. Como ele entra
+    pelo calendário da fatura?
+  - Valor estimado (`variable_amount`), valor 0 de gasto variável sem estimativa e boleto
+    com valor negativo entram como exatos. Como a previsão mostra o que é estimado?
+  - Conta ou fatura paga fora do PigBank segue pendente, e a paga pelo PigBank sai antes
+    de o saldo cair. Como a previsão trata o intervalo até o banco confirmar?
+  - Gasto fixo manual só entra pelo boleto já gerado (`sync_manual_bills_once()` gera só o
+    próximo ciclo), e boleto e recorrência saem de sincronia (desativar, trocar de modo,
+    mudar calendário ou valor). Quem é a fonte das ocorrências futuras?
+  - Ocorrência que vence hoje, atrasada ou adiantada: não há marcador de realização. Qual
+    janela de conferência (decisão aberta 7 do plano da Piggy)?
+  - Receita: irregular cadastrada como fixa, legada `once`/`weekly`/`daily` fora da
+    previsão, recorrência sem data de fim. Que política de confiança e de fim?
+  - Gasto variável do dia a dia fica fora. Que estimativa (o protótipo usa o ritmo de 60
+    dias e a faixa provável) sem contar duas vezes o agendado, separando cartão de caixa,
+    e com que amostra mínima?
+  - Saldo de partida: pendências (`reconciliation`, `bank_movements`, `pending_actions` e
+    `ai_pending_actions` que mudam dinheiro), carteira Piggy sem data, conta escolhida pelo
+    `BANK_ACCOUNTS_SQL` antes de filtrar pausadas, o que o `balance` inclui. Quando o
+    resultado sai como "a conferir"?
+  - Fatura: total negativo ignorado, `credit_bills.total` como contador, `status` gravado
+    que não acompanha correção, cartão manual sem as compras não lançadas, `list_bills`
+    com teto de 1.000. De onde sai o valor e o estado de cada fatura?
+  - Datas sem dia útil mudam o pior dia.
 - Etapa 4: reserva designada, custo mensal por frequência, reserva só em reais; caixinha
   manual versus a do banco.
 - Etapa 6: variação do período só dentro de um trecho sem quebra.
@@ -249,10 +316,9 @@ PR de cada etapa, não soluções prontas. Cada PR confere se ainda valem, decid
 - [x] Protótipo: perfis do Resumo (#573, #575), faixa do Piggy (#579), navegação com o
   Piggy no meio e Ferramentas (#582), página do chat (#584).
 - [x] Protótipo: blocos que expandem na conversa, com estado por resposta e "Abrir no painel" (PR 3 do chat).
-- [ ] Pré-requisitos: ~~#594~~ ✓ · Q42 (#620, mergeado; conferir o deploy) · Q43 (#623 e
-  #634, mergeados; deploy não conferido) · Q40 (#633, mergeado; deploy não conferido) ·
-  Q41 (#627, aberto)
-  - Q41: núcleo no #627, atrás de `OF_CASH_ENABLED` (desligado); falta o PR B (painel, WhatsApp e o switch ligado).
+- [x] Pré-requisitos: ~~#594~~ ✓ · Q42 (#620) · Q43 (#623 e #634) · Q40 (#633) · Q41
+  (#627 e o PR B, #706). Os quatro mergeados, deployados e conferidos no ar pelo dono em
+  2026-10-01, com `OF_CASH_ENABLED` ligada.
 - Etapa 0 em andamento, em 6 PRs (divisão aprovada pelo dono em 2026-09-26): 1 esqueleto
   (#632) · 2a `/painel` (#659) · 2b contrato TS + TanStack (#669) · 3 foto diária por
   posição do Open Finance (#675) · 4 SSE básico com os 2 avisos de hoje + conserto do
@@ -275,6 +341,59 @@ PR de cada etapa, não soluções prontas. Cada PR confere se ainda valem, decid
   - PR 4 (#678, mergeado): `GET /api/v2/eventos` (SSE), com os 2 avisos que o `/ws` já dá (fim do sync do
     Open Finance e "Recomeçar do zero"); sessão rechecada antes de cada envio e a cada
     30 s, teto de 5 streams por usuário; o `/painel` invalida as consultas a cada aviso.
-    E o sub-app para de re-levantar a exceção que já respondeu. `LISTEN/NOTIFY` só no
-    desenho (§3).
+    E o sub-app para de re-levantar a exceção que já respondeu. O `LISTEN/NOTIFY` veio
+    no PR 5b.
+  - PR 5a (#688, mergeado): o `launch.py` vira o uvicorn por `os.execv` e o `bot.py` do
+    Discord não sobe mais.
+  - PR 5b (#691, mergeado): trigger `pg_notify('pb_escrita', dono)` nas tabelas de
+    `db/schema.py::TABELAS_QUE_AVISAM` (núcleo financeiro, categorias e regras,
+    orçamentos, Open Finance; `auth_accounts` só quando `plan`/`plan_expires_at` mudam;
+    `pix_*` fora) e `escutar_banco()` com `LISTEN` no lifespan (`api/v2/eventos.py`),
+    que repassa "tudo" ao SSE. `LISTEN` caído reloga a cada 10 min; o backoff só zera
+    depois de um `select 1` de pé.
+  - PR 6 (#723, mergeado): foto diária do patrimônio (`patrimonio_fotos`, uma por usuário por dia do app,
+    a partir das 18h), pela conta única `db/patrimonio.calcular` que a tela da etapa 6
+    vai reusar; job `core/services/patrimonio_foto.py` atrás de
+    `PATRIMONIO_FOTO_ENABLED` (desligado). Carteira com a fusão devolvida, contas BANK
+    e posições do banco em reais, uma por identidade do provedor (a da conexão mais nova;
+    moeda, pausa e resgate decididos depois desse recorte; outra moeda, resgatada e
+    posição de conexão pausada ficam fora e contadas em `base.fora`, a conta em outra
+    moeda também em `base.fora.moeda`), caixinhas manuais e investimentos
+    manuais; cartão fora. Toda foto sai com `motivos` (`carteira_nao_confirmada` até a
+    Q37, e mais os de banco desatualizado, espécie, pendências, moeda presumida, saldo
+    ausente e `caixinha_espelhada_fora` — a caixinha do banco cuja posição ficou fora
+    não entra no total nem como caixinha, e é contada em `base.fora`; e
+    `conta_fora_do_ultimo_sync` — conta ou posição do banco com `updated_at` abaixo do
+    máximo da mesma conexão na mesma tabela não veio no último save: cada save do sync
+    carimba a chamada com um `now` só; o saldo velho fica na soma e o motivo marca a
+    dúvida). Entra na exportação, no reset e na exclusão. Fora: reconstrução do
+    passado, câmbio, poda, a confirmação da Q37, leitura por rota ou tela e script de
+    conferência pós-deploy.
+    Espelho do Open Finance lido pela foto (`db/patrimonio.calcular`; testes em
+    `tests/test_patrimonio_foto.py`, "rec." = `tests/test_of_investimento_reconciliacao.py`):
+
+    | estado da linha | conta | posição | teste |
+    |---|---|---|---|
+    | fresca | soma | soma | `composicao_exata` |
+    | 2 conexões, mesma moeda | a mais nova, 1× | idem | `conta_em_outra_moeda`, `posicao_em_duas_conexoes` |
+    | 2 conexões, moeda diferente | vale a mais nova (USD → fora e contada; a BRL velha não soma) | idem | idem |
+    | outra moeda | fora, `fora.moeda` | idem | `conta_em_outra_moeda`, `composicao_exata` |
+    | conexão mais nova pausada/apagada | fora, **não contada** | fora, `fora.pausada` | idem |
+    | resgatada | — | fora, `fora.resgatada` | `composicao_exata` |
+    | saldo ausente/malformado/±Inf/NaN (raw ou coluna) | soma o finito da coluna + `saldo_ausente` | idem | `saldo_ausente_*`, `saldo_nao_finito_na_coluna_soma_zero` |
+    | omitida do último sync | soma + `conta_fora_do_ultimo_sync` (`updated_at` < máximo da conexão na tabela) | idem; leitura completa poda (sai sem motivo) | `_sync`: `syncs_em_sequencia`, `leitura_completa_poda_a_posicao`, `conexao_mais_nova_nao_envelhece_a_outra`; rec. `posicao_que_some_leva_a_caixinha` |
+    | sync pela metade (tentativa > sync) | `banco_desatualizado` | idem | `banco_desatualizado` |
+    | sync nunca feito | `banco_desatualizado` | idem | `banco_desatualizado` |
+    | outro usuário com os mesmos ids | não entra | idem | `outro_usuario_com_os_mesmos_ids_nao_muda_a_foto`, `_sync`: `nao_cruza_usuario` |
+
+    Limites em aberto: (1) `conta_fora_do_ultimo_sync` é cego quando o último sync
+    omitiu TODAS as contas (ou todas as posições) da conexão — o máximo segue sendo o da
+    geração anterior; e um caminho que carimbe `updated_at` de só uma linha faz as
+    outras da conexão parecerem velhas (falso positivo: só o motivo, o total não muda);
+    hoje só os três saves de `db/open_finance.py` (sync, investimentos e o mock) gravam
+    `updated_at`, cada um com um `now` por chamada; (2) a conta da
+    BRL velha (2 conexões, moeda diferente) ainda entra na fusão (`merged_wallet_delta`)
+    e na conciliação, que seguem o `BANK_ACCOUNTS_SQL`; (3) conexão velha ainda viva
+    da mesma conta liga `banco_desatualizado` quando envelhece (sem teste); (4) conta de
+    conexão pausada não é contada em `base.fora`, a posição é.
 - [ ] Etapa 0 · [ ] 1 · [ ] 2 · [ ] 3 · [ ] 4 · [ ] 5 · [ ] 6 · [ ] 7

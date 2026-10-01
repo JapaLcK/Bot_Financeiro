@@ -145,8 +145,10 @@ def list_launches(user_id: int, limit: int = 10):
                 -- `launches` (`add_credit_purchase`, db/cards.py), e esta query
                 -- lê só `launches`. A divergência é a que `launch_day`
                 -- (utils_date) fecha.
+                -- `is_internal_movement`: o rodapé de "últimos N" o descarta dos
+                -- totais e a linha ganha 🔁 (core/handlers/launches.py).
                 select id, user_seq, tipo, valor, alvo, nota, categoria, source, criado_em,
-                       posted_at, {LAUNCH_HAS_TIME_SQL} as has_time
+                       posted_at, {LAUNCH_HAS_TIME_SQL} as has_time, is_internal_movement
                 from launches
                 where user_id=%s
                 order by criado_em desc, id desc

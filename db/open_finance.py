@@ -19,6 +19,7 @@ from .cards import (
 )
 from .connection import TIPO_CANON_SQL, get_conn
 from .of_snapshots import grava_fotos_posicoes
+from .open_finance_categories import categoria_pigbank, garantir_no_catalogo
 from .open_finance_cash import RESERVA_SQL, RESERVADO_SQL
 from .users import ensure_user, ensure_user_tx
 
@@ -340,6 +341,8 @@ def get_open_finance_snapshot(user_id: int, limit: int = 8) -> dict:
                 (user_id, limit),
             )
             transactions = cur.fetchall()
+            for t in transactions:
+                t["category"] = categoria_pigbank(t["category"])
 
             cur.execute(
                 """
@@ -2141,7 +2144,7 @@ def _insert_of_shadow(cur, user_id: int, r, cls) -> tuple[int | None, bool]:
         returning id
         """,
         (
-            user_id, cls["tipo"], cls["valor"], (r["category"] or "outros"),
+            user_id, cls["tipo"], cls["valor"], (categoria_pigbank(r["category"]) or "outros"),
             r["description"], None, criado_em, Jsonb(efeitos),
             "open_finance", r["provider_transaction_id"], r["transaction_date"], "BRL",
             cls["is_internal_movement"],
@@ -2172,6 +2175,7 @@ def import_open_finance_launches(user_id: int, connection_id: int | None = None)
     auto_merged = 0
     pending = 0
     skipped_non_bank = 0
+    novas: set[str] = set()  # categorias gravadas, para o catálogo do cliente
 
     with get_conn() as conn:
         with conn.cursor() as cur:
@@ -2235,12 +2239,15 @@ def import_open_finance_launches(user_id: int, connection_id: int | None = None)
 
                 if verdict == "auto":
                     # Alto-confiança: mescla no lançamento manual — NÃO cria OF launch (1 real = 1 linha).
-                    if r["category"]:
+                    cat = categoria_pigbank(r["category"])
+                    if cat:
                         cur.execute(
-                            "update launches set categoria=%s "
-                            "where id=%s and (categoria is null or categoria in ('outros',''))",
-                            (r["category"], match_id),
+                            "update launches set categoria=%s where id=%s and user_id=%s "
+                            "and (categoria is null or categoria in ('outros',''))",
+                            (cat, match_id, user_id),
                         )
+                        if cur.rowcount:
+                            novas.add(cat)
                     cur.execute(
                         "update open_finance_transactions "
                         "set imported_launch_id=%s, match_launch_id=%s, reconciliation_status='auto_merged' "
@@ -2253,6 +2260,8 @@ def import_open_finance_launches(user_id: int, connection_id: int | None = None)
                 # Sem match ('none') ou ambíguo ('ask'): cria o OF launch.
                 launch_id, created = _insert_of_shadow(cur, user_id, r, cls)
                 inserted += created
+                if created and categoria_pigbank(r["category"]):
+                    novas.add(categoria_pigbank(r["category"]))
 
                 if launch_id is not None:
                     status = "pending" if verdict == "ask" else "imported"
@@ -2265,6 +2274,7 @@ def import_open_finance_launches(user_id: int, connection_id: int | None = None)
                         pending += 1
 
         conn.commit()
+    garantir_no_catalogo(user_id, novas)
 
     return {
         "inserted": inserted,
@@ -2404,6 +2414,7 @@ def import_open_finance_credit(user_id: int, connection_id: int | None = None) -
     card_cache: dict[int, int] = {}
     links: list[tuple[int, int]] = []
     inserted = 0
+    novas: set[str] = set()
 
     with get_conn() as conn:
         with conn.cursor() as cur:
@@ -2462,13 +2473,16 @@ def import_open_finance_credit(user_id: int, connection_id: int | None = None) -
                 origin_ym,
             ])
             group_id = uuid5(NAMESPACE_OID, key)
+        cat = categoria_pigbank(r["category"])
         tx_id, created = add_imported_credit_purchase(
-            user_id, card_cache[of_acc_id], r["amount"], r["category"],
+            user_id, card_cache[of_acc_id], r["amount"], cat,
             r["transaction_date"], r["provider_transaction_id"],
             installment_no=inst_no, installments_total=inst_total, group_id=group_id,
         )
         if created:
             inserted += 1
+            if cat:
+                novas.add(cat)
         if tx_id is not None:
             links.append((r["of_tx_id"], tx_id))
 
@@ -2481,6 +2495,7 @@ def import_open_finance_credit(user_id: int, connection_id: int | None = None) -
                         (credit_tx_id, of_tx_id),
                     )
             conn.commit()
+    garantir_no_catalogo(user_id, novas)
 
     return {"inserted": inserted, "linked": len(links), "cards": len(card_cache)}
 
@@ -2513,6 +2528,7 @@ def _get_or_create_open_bill_cur(cur, user_id: int, card_id: int, ref_date) -> i
 def _sync_imported_credit_updates(user_id: int, connection_id: int | None) -> int:
     """Cartão e totais de faturas são uma transação, sem trava da Carteira."""
     credit_updated = 0
+    novas: set[str] = set()
     with get_conn() as conn:
         with conn.cursor() as cur:
             # 2) Transações de cartão (ajusta o total da fatura pela diferença)
@@ -2535,7 +2551,7 @@ def _sync_imported_credit_updates(user_id: int, connection_id: int | None) -> in
                 amt = Decimal(str(r["amount"]))
                 new_valor = -amt  # convenção canônica assinada (compra +, estorno -)
                 new_refund = amt > 0
-                new_cat = r["category"]
+                new_cat = categoria_pigbank(r["category"])
                 changed = (
                     Decimal(str(r["cur_valor"])) != new_valor
                     or bool(r["cur_refund"]) != new_refund
@@ -2557,9 +2573,12 @@ def _sync_imported_credit_updates(user_id: int, connection_id: int | None) -> in
                             new_bill_id = resolved
                     cur.execute(
                         "update credit_transactions set valor=%s, is_refund=%s, categoria=%s, "
-                        "purchased_at=%s, bill_id=%s where id=%s",
-                        (new_valor, new_refund, new_cat, r["transaction_date"], new_bill_id, r["ct_id"]),
+                        "purchased_at=%s, bill_id=%s where id=%s and user_id=%s",
+                        (new_valor, new_refund, new_cat, r["transaction_date"], new_bill_id,
+                         r["ct_id"], user_id),
                     )
+                    if new_cat and new_cat != r["cur_cat"]:
+                        novas.add(new_cat)
                     if new_bill_id == old_bill_id:
                         # mesma fatura: ajusta só pela diferença de valor (fatura foi `total += valor`).
                         cur.execute(
@@ -2579,6 +2598,7 @@ def _sync_imported_credit_updates(user_id: int, connection_id: int | None) -> in
                     credit_updated += 1
 
         conn.commit()
+    garantir_no_catalogo(user_id, novas)
     return credit_updated
 
 
@@ -2591,6 +2611,7 @@ def sync_imported_open_finance_updates(user_id: int, connection_id: int | None =
     """
     ensure_user(user_id)
     launches_updated = 0
+    novas: set[str] = set()
     # CREDIT commita antes de BANK: pagamento segura fatura enquanto seu
     # helper debita accounts em outra conexão. Não inverter essa ordem.
     credit_updated = _sync_imported_credit_updates(user_id, connection_id)
@@ -2621,7 +2642,7 @@ def sync_imported_open_finance_updates(user_id: int, connection_id: int | None =
                 cls = classify_open_finance_launch(r["amount"], r["category"], r["description"])
                 if r["of_tx_id"] in caixa:  # saque/depósito em espécie: par da Carteira
                     cls["is_internal_movement"] = True
-                new_cat = r["category"] or "outros"
+                new_cat = categoria_pigbank(r["category"]) or "outros"
                 changed = (
                     Decimal(str(r["cur_valor"])) != cls["valor"]
                     or r["cur_tipo"] != cls["tipo"]
@@ -2634,15 +2655,18 @@ def sync_imported_open_finance_updates(user_id: int, connection_id: int | None =
                         """
                         update launches set valor=%s, tipo=%s, categoria=%s,
                                is_internal_movement=%s, posted_at=%s
-                        where id=%s
+                        where id=%s and user_id=%s
                         """,
                         (cls["valor"], cls["tipo"], new_cat, cls["is_internal_movement"],
-                         r["transaction_date"], r["launch_id"]),
+                         r["transaction_date"], r["launch_id"], user_id),
                     )
+                    if new_cat != r["cur_cat"]:
+                        novas.add(new_cat)
                     launches_updated += 1
 
 
         conn.commit()
+    garantir_no_catalogo(user_id, novas)
 
     return {"launches_updated": launches_updated, "credit_updated": credit_updated}
 
