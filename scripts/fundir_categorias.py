@@ -9,8 +9,8 @@ gêmeas ("cafe"/"café"). Este script, por usuário e numa transação só:
     categoria do PigBank; com uso fora do OF (lançamento manual, regra, recorrente,
     orçamento, conta avulsa) é pulada e listada;
   * gêmeas de grafia (mesmo `normalize_text`) viram uma: vence a de sistema, depois
-    a ativa, depois a mais usada, depois o menor id; se mais de uma do grupo tem
-    orçamento, ou se a vencedora está arquivada e alguma perdedora ativa (que não seja
+    a ativa, depois a mais usada, depois o menor id; se o grupo tem mais de uma
+    linha de orçamento, ou se a vencedora está arquivada e alguma perdedora ativa (que não seja
     a em inglês), pula.
 
 Fundir = `cascata_nome_categoria` (a mesma do rename) + apagar os alertas de
@@ -79,7 +79,6 @@ def fundir_usuario(user_id: int, aplicar: bool) -> dict:
             nome = c["name"]
             c["uso"] = (_conta(cur, "launches", "categoria", user_id, nome)
                         + _conta(cur, "credit_transactions", "categoria", user_id, nome))
-            c["orcamento"] = _conta(cur, "category_budgets", "categoria", user_id, nome) > 0
             # Exato em minúsculas: sem o fallback " - " de `categoria_pigbank`, que
             # fundiria a custom "Travel - Japão" em "lazer". Nunca normalize_text.
             c["destino"] = PLUGGY_PARA_PIGBANK.get(nome.strip().lower())
@@ -96,7 +95,12 @@ def fundir_usuario(user_id: int, aplicar: bool) -> dict:
                 continue
             # A cascata de orçamento não sobrescreve um orçamento que já existe no
             # alvo (not exists): com dois no grupo, o da perdedora ficaria órfão.
-            if sum(c["orcamento"] for c in grupo) > 1:
+            # Conta as linhas de orçamento, não as do catálogo: "Cafe"/"cafe" casam
+            # o mesmo orçamento no lower() e não são dois.
+            cur.execute("select count(*) as n from category_budgets where user_id=%s and "
+                        "lower(categoria) = any(select lower(x) from unnest(%s::text[]) x)",
+                        (user_id, [c["name"] for c in grupo]))
+            if cur.fetchone()["n"] > 1:
                 rel["puladas"].append((", ".join(c["name"] for c in grupo),
                                        "orçamento em mais de uma"))
                 continue

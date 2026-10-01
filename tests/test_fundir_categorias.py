@@ -335,6 +335,20 @@ def test_orcamento_nas_duas_pula_o_grupo(uid):
     assert _snapshot(uid) == antes
 
 
+def test_gemeas_so_de_caixa_com_um_orcamento_fundem(uid):
+    """Um orçamento só: o lower() casa as duas linhas do catálogo, mas não são dois."""
+    _cat(uid, "cafe")   # menor id: vence
+    _cat(uid, "Cafe")
+    _orcamento(uid, "cafe")
+    lid = _launch(uid, "Cafe")
+    rel = fundir_usuario(uid, aplicar=True)
+    assert rel["puladas"] == []
+    assert [(de, para) for de, para, _ in rel["fundidas"]] == [("Cafe", "cafe")]
+    assert "Cafe" not in _nomes(uid) and "cafe" in _nomes(uid)
+    assert [r["categoria"] for r in _q("select categoria from category_budgets where user_id=%s", (uid,))] == ["cafe"]
+    assert _q("select categoria from launches where id=%s", (lid,))[0]["categoria"] == "cafe"
+
+
 # ─── 7b. correções do Tester: prefixo, arquivada e alerta órfão ─────────────
 
 
@@ -444,6 +458,19 @@ def test_apply_de_um_usuario_nao_toca_o_outro(uid, outro_uid):
     main(["--user", str(uid), "--apply"])
     assert "groceries" not in _nomes(uid)
     assert _snapshot(outro_uid) == antes_b
+
+
+def test_orcamento_do_outro_nao_conta_na_guarda(uid, outro_uid):
+    """A tem um orçamento no grupo; B tem "café" também. Vazando, a soma daria 2 e pularia."""
+    _cat(uid, "cafe")   # menor id: vence
+    _cat(uid, "café")
+    _orcamento(uid, "cafe")
+    _orcamento(outro_uid, "café")
+    antes_b = _q("select id, categoria from category_budgets where user_id=%s", (outro_uid,))
+    rel = fundir_usuario(uid, aplicar=True)
+    assert rel["puladas"] == []
+    assert [(de, para) for de, para, _ in rel["fundidas"]] == [("café", "cafe")]
+    assert _q("select id, categoria from category_budgets where user_id=%s", (outro_uid,)) == antes_b
 
 
 # ─── 9. seed ────────────────────────────────────────────────────────────────
