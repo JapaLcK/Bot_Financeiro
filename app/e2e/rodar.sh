@@ -91,6 +91,13 @@ if [ "$ALVO" = staging ]; then
 fi
 
 subir_local() {
+  # O backend chama load_app_env(), que preenche o que falta com o .env (e o .env.dev)
+  # da raiz do código mesmo depois do `env -i`: Resend, OpenAI, Sentry… de verdade.
+  for f in "$RAIZ/.env" "$RAIZ/.env.dev"; do
+    if [ -e "$f" ]; then
+      echo "$f existe: o backend local herdaria as credenciais dele. Rode de um worktree sem .env." >&2; exit 1
+    fi
+  done
   if lsof -iTCP:8000 -sTCP:LISTEN >/dev/null 2>&1; then
     echo "a porta 8000 já está ocupada — não vou testar contra um servidor que não subi" >&2; exit 1
   fi
