@@ -9,14 +9,21 @@ from __future__ import annotations
 import pytest
 
 import core.handle_incoming as hi
+import core.handlers.launches as L
 import db
+from core.handlers import forma_pagamento as fp
 from core.intent_classifier import contains_comparative_question, sem_perguntas_comparativas
 from core.types import IncomingMessage
 from tests._fusao_of_helpers import ia_fora, manda  # noqa: F401 (fixture)
 from tests.test_handle_incoming_routing import _Audio, _msg, _valores, free_small_uid  # noqa: F401 (fixture)
+from conftest import usuario_pagante
+from tests.test_manual_launches_carteira_piggy import _connect_fake_bank
 from tests.test_pergunta_comparativa_conta_cartao import (  # noqa: F401 (fixtures)
     _AVISO, contas_pagas, despesas, luz, nubank, uid)
 from utils_date import today_tz
+
+
+_REGRA_REAL = fp.regra_ativa
 
 
 @pytest.fixture(autouse=True)
@@ -211,4 +218,39 @@ def test_add_pedaco_legitimo_com_valor_grava_so_ele_e_avisa(free_small_uid, sepa
     out = hi.handle_incoming(_msg(uid, f"gastei 30 no uber{separador}gastei mais em 2025 ou 2026?"))
     assert _valores(uid) == [30]
     assert "\n".join(o.text for o in out).count(_AVISO) == 1
+
+
+@pytest.mark.parametrize("pedaco", ["gastei.", "paguei.", "recebi.", "gastei no."])
+def test_add_direto_nao_usa_o_valor_das_entities_do_texto_inteiro(free_small_uid, pedaco):
+    # O tier 3 (LLM) pode devolver o ano da pergunta como `valor`: o pedaço legítimo não o tem.
+    uid = free_small_uid
+    L.add(uid, f"{pedaco} gastei mais em 2025 ou 2026?", {"tipo": "despesa", "valor": 2025.0})
+    assert _valores(uid) == []
+
+
+def test_add_com_banco_pergunta_a_forma_e_depois_o_valor_do_pedaco(monkeypatch, ia_fora):
+    monkeypatch.setattr(fp, "regra_ativa", _REGRA_REAL)
+    uid = usuario_pagante()
+    _connect_fake_bank(uid)
+    r = manda(uid, "gastei no uber. gastei mais em 2025 ou 2026?")
+    assert db.get_pending_action(uid)["action_type"] == "payment_method_choice" and r.count(_AVISO) == 1, r
+    assert "Quanto foi no *uber*?" in manda(uid, "dinheiro")
+    manda(uid, "30")
+    assert despesas(uid) == [30.0]
+
+
+def test_audio_pedaco_legitimo_sem_valor_pergunta_o_valor(uid, monkeypatch):
+    monkeypatch.setattr(hi, "transcribe_audio", lambda data, fn: "gastei no uber. gastei mais em 2025 ou 2026")
+    out = hi._handle_audio(IncomingMessage(platform="whatsapp", user_id=uid, text="", message_id="m",
+                                           attachments=[_Audio()], external_id="e", raw={}), "whatsapp")
+    assert "Quanto foi no *uber*?" in "\n".join(o.text for o in out)
+    assert despesas(uid) == []
+
+
+def test_receita_pedaco_legitimo_sem_valor_pergunta_o_valor(free_small_uid):
+    uid = free_small_uid
+    out = hi.handle_incoming(_msg(uid, "recebi no freela. recebi mais em 2025 ou 2026?"))
+    assert "Quanto foi de *freela*?" in "\n".join(o.text for o in out) and _valores(uid) == []
+    hi.handle_incoming(_msg(uid, "500"))
+    assert _valores(uid) == [500]
 

@@ -713,10 +713,17 @@ def _is_boleto_ai_query(norm: str) -> bool:
 #   mais nos ultimos tres meses" (R$ 3); "gastei 200 a mais do mes passado?" (sem
 #   "que") e "gastei 200 a mais em relacao ao mes passado?" (R$ 200, mesmo com
 #   "?"); e, por decisão do dono, sem "?": "N a mais que", "acima de" e
-#   percentual ("gastei mais 30% esse mês" grava R$ 30); e o #693 (o split não
-#   corta em "." nem ";"): com 2+ lançamentos e a pergunta colada ao último por
-#   "." ("gastei 30 no uber e gastei no bar. gastei mais em 2025 ou 2026?") o
-#   `add()` ainda grava R$ 2.025 no bar. Com UM lançamento ele já lê só o pedaço.
+#   percentual ("gastei mais 30% esse mês" grava R$ 30); e, no `add()`, #693
+#   (o split não corta em "." nem ";"): com 2+ lançamentos e a pergunta colada
+#   por "." ("gastei 30 no uber e gastei no bar. gastei mais em 2025 ou 2026?"
+#   grava R$ 30 e R$ 2.025; "paguei a luz. gastei mais em 2025 ou 2026? e paguei
+#   50 no mercado" grava R$ 2.025 e R$ 50, porque o split corta no "e" e o 1º
+#   pedaço não começa com o verbo da pergunta). Conserto possível, fora deste PR:
+#   no laço do multi do `add()` (texto e áudio), `sem_perguntas_comparativas(part)`
+#   no lugar de `is_comparative_question(part)`. Com UM lançamento o `add()` já lê
+#   só o pedaço. E #699: verbo acentuado ("gastei no uber. Gastéi mais em 2025 ou
+#   2026?") grava R$ 2.025: a contagem de verbos diverge, `sem_perguntas` devolve
+#   ("", [texto]) e o `add()` cai no fluxo antigo com o texto inteiro.
 #   SÓ NÃO VAI PRA IA: prefixo fora da lista ("tipo gastei mais em 2025?") escapa
 #   do `classify`, mas as portas pegam pela varredura e a conversa nova não grava.
 # "gastou"/"gastamos" só aqui (não estão em `VERBOS_DE_LANCAMENTO`). Que "gastamos
@@ -819,7 +826,8 @@ def sem_perguntas_comparativas(text: str) -> tuple[str, list[str]]:
 
     Quem lê o valor do texto passa por aqui: o `add()` com UM pedaço legítimo (D4
     revista), a conta, o crédito e a fatura. Com 2+ lançamentos o `add()` ainda
-    separa só pelo split (limite do #693, no `ponytail:` acima).
+    separa só pelo split (#693), e verbo acentuado devolve ("", [texto]) e cai no
+    fluxo antigo (#699): os dois no `ponytail:` acima.
 
     Única detecção das portas e dos guardas da conta: `contains_comparative_question`
     é `bool(puladas)` (§0.7). O `is_comparative_question` segue decidindo no

@@ -1754,7 +1754,9 @@ def add(user_id: int, text: str, entities: dict, platform: str = "whatsapp", *,
     if limpo and puladas and len(split_financial_transactions(text)) == 1:
         # UM pedaço legítimo e a pergunta que o split não cortou ("gastei no uber.
         # gastei mais em 2025 ou 2026?"): o valor sai do pedaço, não do 2025 (#569).
-        resposta = add(user_id, limpo, entities, platform, forma_pagamento=forma_pagamento)
+        # Sem o `valor` das entities: o do tier 3 (LLM) pode ser o ano da pergunta.
+        sem_valor = {k: v for k, v in entities.items() if k != "valor"}
+        resposta = add(user_id, limpo, sem_valor, platform, forma_pagamento=forma_pagamento)
         return "\n\n".join([resposta, *avisos_depois_de(user_id, puladas)])
     # A forma sai do pedaço sem a pergunta: o "cartão" de "… e gastei mais no
     # cartão esse mês?" não declara nada (#568).
