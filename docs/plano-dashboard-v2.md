@@ -387,7 +387,9 @@ PR de cada etapa, não soluções prontas. Cada PR confere se ainda valem, decid
   - Gasto variável do dia a dia (mercado, transporte) fica fora: a previsão supõe que ele
     para hoje. O protótipo do v2 já desconta o ritmo dos últimos 60 dias
     (`webapp/src/dashboard/lib/model.js`); a Etapa 3 leva uma estimativa assim para o
-    backend, marcada como estimativa e sem contar duas vezes: o ritmo exclui todo gasto que
+    backend, marcada como estimativa, com a medida de variação e a faixa provável
+    (`lo`/`hi`, que `TrajectoryChart.tsx` e `Hero.tsx` mostram como "Faixa provável"),
+    e sem contar duas vezes: o ritmo exclui todo gasto que
     já entra como evento agendado (gasto fixo, boleto pago, parcela de compra parcelada que
     já existe, cujo restante vai para as faturas futuras) e todo movimento interno
     (`is_internal_movement`: transferência entre contas próprias e pagamento de fatura). A
@@ -412,7 +414,9 @@ PR de cada etapa, não soluções prontas. Cada PR confere se ainda valem, decid
       `is_active`);
     - trocar de manual para automático conta duas vezes (o boleto pendente fica e a
       ocorrência automática entra);
-    - mudar dia ou frequência deixa o boleto velho, e o novo também entra;
+    - mudar o calendário (dia, frequência, `due_month` ou `start_date`) deixa o boleto
+      velho na data antiga, e o novo também entra: toda mudança de calendário cancela ou
+      refaz os boletos pendentes;
     - o valor do boleto é copiado ao gerar e não acompanha a edição do gasto fixo;
     - boleto manual de gasto pago no cartão sai como dinheiro na data do boleto;
     - não existe data de fim nem número de parcelas restantes na recorrência, então
