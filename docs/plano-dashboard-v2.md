@@ -212,137 +212,33 @@ PR de cada etapa, não soluções prontas. Cada PR confere se ainda valem, decid
   também traz.
 - Moeda: o import grava tudo como `BRL` hoje (inclusive cartão); moeda omitida pelo
   conector; moeda corrigida depois.
-- Ingestão do Open Finance que devolve dado incompleto com cara de completo, e o sync
-  segue como sucesso (achados na revisão do PR #689; afetam saldo, fatura e parcelas em
-  toda tela). **Regra para todos os itens abaixo: o conserto inclui o passado.**
-  Corrigir a ingestão daqui em diante não arruma o que já foi gravado com o dado errado,
-  porque o sync seguinte não revisita esses registros (`sync_imported_open_finance_updates()`
-  só move compra quando a data muda). Cada item precisa de um caminho de reprocessamento
-  dos registros derivados: lançamento criado com o tipo errado, compra parcelada gravada
-  sem grupo (sem `installment_no`, `installments_total` e `group_id`, e sem as faturas
-  futuras), compra com `bill_id` escolhido por um calendário errado, valor em moeda errada,
-  pagamento de fatura lido como estorno. O que foi descartado sem deixar registro (conta ou
-  transação sem `id`) não tem o que reprocessar: ou se busca de novo o histórico pelo
-  provedor, ou fica gravado que a cobertura daquele período está incompleta. Além da moeda:
-  - `_to_decimal()` aceita `"NaN"` e `"Infinity"` como valor válido, o Postgres grava, e um
-    saldo `NaN` envenena o `sum(balance)` do consolidado e as caixinhas e fotos dos
-    investimentos; e um texto inválido (`"invalid"`) vira `Decimal("0")`, que é finito. Todo
-    valor de dinheiro exige leitura estrita (o parse tem de dar certo, sem cair no zero) **e**
-    `Decimal.is_finite()`; o que não passa torna a leitura incompleta;
-  - `type` fora da lista que o código trata faz o registro sumir do produto com o sync
-    dando sucesso, em conta e em investimento. Conta: só `BANK` e `CREDIT` são tratados
-    (`BANK_ACCOUNTS_SQL` e os importadores). Investimento: `normalize_pluggy_investment()`
-    grava `type` vazio, e os leitores de `db/rv.py` só pegam `EQUITY` e `FIXED_INCOME`,
-    enquanto a foto diária segue gravando o saldo. Validar o tipo contra uma lista aceita
-    nos dois; fora dela, o registro fica como desconhecido, a leitura daquele produto fica
-    incompleta e vale o reprocessamento do passado;
-  - `normalize_pluggy_account()` põe `type` = `BANK` e `balance` = 0 quando faltam, e o
-    nome vira o tipo (`"CREDIT"`): como a adoção de cartão manual é pelo nome exato, nasce
-    um cartão genérico em duplicidade que o nome certo, quando chega, não renomeia nem junta;
-    `normalize_pluggy_transaction()` põe `amount` = 0 e data inválida = hoje (conta de
-    crédito gravada como `BANK` já tem as transações importadas como lançamento; quando o
-    tipo certo chega, o importador de cartão cria as compras e os lançamentos antigos
-    ficam: o conserto inclui reclassificar o que foi criado com o tipo errado); conta e
-    transação sem `id` são descartadas em silêncio, e o sync segue `ok=True`;
-    `normalize_pluggy_investment()` põe `balance` = 0 e `type` vazio, e a posição, a
-    caixinha espelhada e a foto diária são sobrescritas com esse valor;
-  - registro sem `id` de **qualquer** produto (conta, transação ou investimento) é pulado
-    em silêncio. No investimento é pior: com `leitura_completa=True`, a posição gravada
-    antes é conciliada como ausente e apagada, junto com a caixinha ligada. Qualquer
-    registro sem `id` torna a leitura incompleta e bloqueia a conciliação de ausências
-    daquele produto;
-  - compra parcelada sem `creditCardMetadata.totalInstallments` vira compra única (e
-    `extract_installment_info()` aceita `installmentNumber` ausente, 0 ou maior que o
-    total: o par só vale com o número entre 1 e o total), e a
-    importada nunca cria as faturas futuras (a manual cria, em
-    `add_credit_purchase_installments()`). Ao materializar as parcelas restantes, a parcela
-    real que chega depois tem outro id externo e entraria ao lado da projetada (a deduplicação
-    é por `(user_id, source, external_id)`), cobrando a fatura duas vezes: a parcela
-    projetada é substituída pela real por identidade da compra mais número da parcela, ou a
-    projeção fica fora das transações importadas;
-  - cartão sem as datas da Pluggy ganha fechamento dia 1 e vencimento dia 10
-    (`get_or_create_open_finance_card()`); o calendário de cartão já ligado não é
-    atualizado, e o cartão manual adotado pelo nome fica com as datas manuais, sem conferir
-    as da Pluggy;
-  - `list_pluggy_transactions()` para em `max_pages=60` sem conferir o cursor `next`, e
-    `list_pluggy_accounts()` lê só a primeira página de `/accounts`, cuja paginação é
-    outra (página e total no próprio corpo, não o cursor `next` das transações): ela precisa
-    da sua própria validação e de percorrer todas as páginas, separada da regra do cursor. Além do teto, as duas
-    aceitam resposta malformada como leitura completa: `results` ausente ou fora de lista
-    vira lista vazia, e página vazia com `next` ou cursor ilegível encerra a leitura. Validar
-    o formato e o cursor terminal antes de dar o sync como completo, e detectar cursor
-    repetido ou sem progresso: ao tirar o `max_pages`, um `next` que volta ao mesmo cursor
-    roda para sempre. Um teto de segurança que se mantenha, quando esgotado, marca a
-    leitura como incompleta, nunca como sucesso. Tudo isso vem antes de qualquer
-    conciliação de ausências (item abaixo), que com leitura parcial apagaria transação
-    legítima;
-  - conta que some da resposta de `/accounts` segue somada com o saldo antigo (e apagar a
-    conta direto leva as transações em cascata sem desfazer lançamentos e compras ligados:
-    a conciliação de conta segue o ciclo de `delete_open_finance_transactions()` e
-    `disconnect_open_finance_connection()`, com `_rollback_imported_of()`, preservando o
-    lançamento manual fundido e desligando o cartão), e
-    transação que some de uma sincronização completa também fica: `save_open_finance_sync()`
-    só faz upsert do que veio, então um `transactions/deleted` perdido deixa a compra ou o
-    estorno (e o lançamento e a fatura ligados) para sempre. A conciliação de transação
-    ausente usa o mesmo ciclo da conta: `delete_open_finance_transactions()`, que chama
-    `_rollback_imported_of()`, tira a sombra, desfaz o vínculo com o dinheiro em espécie e
-    reconcilia os movimentos de banco, nunca um delete direto. Só que hoje
-    `_rollback_imported_of()` engole a exceção ao desfazer a compra ou o lançamento, e a linha
-    do Open Finance é apagada assim mesmo, sem nada para tentar de novo: a conciliação só
-    apaga a linha quando o rollback deu certo; se falhar, a linha fica e é marcada como
-    incompleta. Conciliar ausências só com
-    coleta saudável e geração estável: mesmo com resposta bem formada e cursor terminal,
-    um `PARTIAL_SUCCESS`/`UPDATING` ou uma coleta nova no meio da leitura apagaria
-    transação legítima. Reusar o portão que a conciliação de investimentos já tem (produto
-    saudável e a mesma geração em duas fotos do item), e conferir a geração de novo **depois**
-    de pegar o `pluggy_item_lock`: hoje a segunda foto é tirada antes da trava, e um sync
-    antigo que pega a trava depois de um mais novo apagaria como ausentes as contas e
-    transações que o novo acabou de gravar. O mesmo furo já existe hoje na conciliação de
-    investimentos: o `confiavel` é calculado antes da trava e passado para
-    `save_open_finance_investments(..., leitura_completa=confiavel)` depois dela, então um
-    sync antigo pode apagar posições e caixinhas espelhadas do mais novo. A conferência
-    depois da trava vale para os dois. E conciliar só dentro de um intervalo
-    de datas explícito: hoje `list_pluggy_transactions()` pede só `accountId` e o cursor, e
-    uma resposta vazia não diz nada sobre datas. O intervalo tem de vir do pedido (datas
-    `from`/`to` enviadas) ou de uma marca do provedor guardada; tirar das transações
-    devolvidas não serve. E nem dentro do intervalo a ausência basta: o provedor pode
-    corrigir a data de uma transação para fora dele (`_sync_imported_credit_updates()` já
-    trata correção de data). Antes de apagar, buscar o id ausente direto no provedor ou
-    exigir um sinal de exclusão. Fora do intervalo, o que está gravado fica, porque o banco pode
-    devolver um histórico mais curto que o anterior;
-  - banco religado guarda o `last_sync_at` antigo; `connection_ui_state()` já trata
-    `last_sync_at < reconnected_at` como não sincronizado, e é essa a fonte do estado da
-    conexão, não a idade do sync.
-  - Transação e fatura do cartão:
-    - o `status` da transação (PENDING × POSTED) é ignorado: autorização pendente entra
-      na fatura e, se for lançada com outro id, conta duas vezes;
-    - a moeda da transação (`currencyCode`, `amountInAccountCurrency`) é ignorada: compra
-      internacional entra em reais pelo valor na moeda original;
-    - a fatura é calculada localmente pelo fechamento do cartão; o `billId` e o endpoint
-      `/bills` da Pluggy (total, vencimento, mínimo) nunca são lidos, e nada confere o
-      `balance` da conta de crédito;
-    - o pagamento de fatura é reconhecido por palavra-chave (`is_credit_card_payment`):
-      outro texto vira estorno e reduz a fatura, e estorno com o texto certo é pulado. Como
-      nada fecha a fatura importada, o histórico importado aparece como vencido;
-    - o sinal do estorno (`amount > 0`) só foi conferido no sandbox;
-    - a chave do grupo de parcelas (cartão, descrição, número de parcelas, `totalAmount` e
-      mês de origem estimado) erra nos dois sentidos: banco que escreve "01/10", "02/10"
-      divide uma compra em vários grupos, e duas compras iguais no mesmo lugar e no mesmo
-      mês (ou duas sem descrição, que viram "Transação") caem no mesmo grupo, e
-      `undo_installment_group()` mexe nas duas. Precisa de identidade sem colisão, ou o
-      grupo ambíguo conta como incompleto.
-  - Cartão em duplicidade: adotar um cartão manual mantém as compras já lançadas nele e
-    importa as mesmas de novo; OFX e Open Finance podem encher o mesmo cartão (o OFX só
-    deduplica `source='ofx'`); reconectar com item novo pode criar um segundo cartão
-    "· Open Finance" e deixar o primeiro com as faturas congeladas.
-  - Toda exceção engolida dentro de `_sync_pluggy_item_confirmado()` sai como conexão
-    `ACTIVE`/`ok=True`, só com log: falha ao ler investimentos, ao gravar o espelho de
-    investimentos (`save_open_finance_investments()`), ao espelhar caixinhas e ao gravar a
-    foto diária (`grava_fotos_posicoes()`, que só desfaz o savepoint). Regra para a classe:
-    qualquer parte do sync que grava dado financeiro e falhe marca a sincronização como
-    incompleta, com o produto que faltou. Fica de fora o que não é dado financeiro, como o
-    disparo de agentes, que o código já isola de propósito. Sem outro sync no mesmo dia, o histórico fica com um
-    buraco permanente, sem nova tentativa (afeta patrimônio e rentabilidade, não a previsão).
+- Ingestão do Open Finance (defeitos achados na revisão dos PRs #689 e #720; detalhes e
+  casos nas threads do #720). Pergunta geral: como a ingestão marca uma leitura como
+  incompleta em vez de gravar dado incompleto com cara de completo, e como o conserto
+  alcança o que já foi gravado errado?
+  - Valor padrão no lugar do dado ausente ou inválido (`normalize_pluggy_account`,
+    `normalize_pluggy_transaction`, `normalize_pluggy_investment`, `_to_decimal`): tipo,
+    saldo, valor, data, nome, `NaN`/`Infinity`, texto ilegível. Como distinguir
+    "desconhecido" de zero e de `BRL`?
+  - Registro sem `id`, ou com `type` que o código não trata, some do produto com o sync
+    dando sucesso (conta, transação e investimento). Que lista de tipos é aceita?
+  - Leitura truncada ou malformada: `max_pages=60` sem conferir o cursor, `/accounts` só na
+    primeira página, `results` ausente, cursor repetido. Quando uma leitura conta como
+    completa?
+  - Exceção engolida em `_sync_pluggy_item_confirmado()` (investimentos, espelho de
+    caixinhas, foto diária) sai como `ok=True`. Que falhas marcam o sync incompleto?
+  - Ausências: conta ou transação que some da resposta fica para sempre. Se a conciliação
+    for criada, como ela sabe que a ausência é real (intervalo de datas, data corrigida,
+    sync concorrente depois da trava — o furo da trava já existe na conciliação de
+    investimentos) e como desfaz o que foi derivado (`_rollback_imported_of()` engole erro)?
+  - Cartão: status PENDING × POSTED, moeda por transação, fatura calculada localmente sem o
+    `/bills` da Pluggy, pagamento de fatura por palavra-chave, sinal do estorno, calendário
+    padrão 1/10, grupo de parcelas (chave que divide e que colide, metadado incompleto,
+    parcelas futuras não criadas e a troca da projetada pela real).
+  - Cartão em duplicidade: adoção de cartão manual, OFX e Open Finance no mesmo cartão,
+    reconexão com item novo, nome padrão `"CREDIT"`.
+  - Banco religado guarda o `last_sync_at` antigo; a fonte do estado da conexão é
+    `connection_ui_state()`.
 - Quando o dado do Open Finance conta como desatualizado (limite por produto) e como a
   tela aberta percebe isso sem escrita.
 - Rentabilidade do Open Finance: medida em produção em 2026-09-29 (leitura, pelo dono;
@@ -363,115 +259,35 @@ PR de cada etapa, não soluções prontas. Cada PR confere se ainda valem, decid
   ocorrência por data — um diário gera até 90 itens em `compromissos`/`causas`. A tela
   `/previsao` tem de agrupar por nome; o código de hoje não agrega nem limita.
 - Etapa 3: defeitos da previsão de hoje (`cashflow._cashflow_events()`), achados na
-  revisão do `docs/plano-piggy-assistente-contextual.md` (PR #689). Não se consertam no
+  revisão dos PRs #689 e #720 (detalhes e casos nas threads do #720). Não se consertam no
   painel antigo: a regra reescrita para a Previsão da `/api/v2` passa a servir também o
-  simulador e o `check_cashflow` da IA (Q18). A lista de verificação da Etapa 3 é a soma
-  das duas fontes: esta seção, que tem itens que a matriz não tem, e a matriz do plano da
-  Piggy, que dá a direção de erro de cada entrada. Nenhuma das duas sozinha é completa.
-  - Gasto fixo pago no cartão (`payment_type="credit_card"`): sai do caixa no `due_day` e
-    de novo dentro da fatura aberta, ou sai antes da data de pagar a fatura.
-  - Valor estimado (`variable_amount`) entra como exato, no boleto e no gasto fixo.
-  - Conta paga pelo banco sem passar pelo PigBank continua pendente e sai de novo: o
-    boleto (nada do Open Finance escreve em `bill_instances`) e a fatura (a importação
-    pula o pagamento de fatura; só `pay_bill_amount` a marca paga).
-  - `list_bills(..., limit=1000)` corta os boletos mais distantes sem avisar, e boleto
-    pendente entra com qualquer valor (um negativo vira entrada de dinheiro).
-  - Gasto fixo manual (`payment_mode="manual"`) só entra pelo boleto já gerado, e
-    `sync_manual_bills_once()` gera só o próximo ciclo: numa previsão de 90 dias, um
-    mensal entra uma vez e some nas duas seguintes, e o semanal e o diário quase somem.
-    Projetar as ocorrências (ou gerar o horizonte inteiro) sem contar duas vezes o boleto
-    que já existe.
-  - O saldo de partida perde as pendências: `get_consolidated_balance()` devolve
-    `reconciliation` (conciliação a confirmar, com `delta_se_confirmar`) e
-    `bank_movements` (declaração não confirmada), e `_starting_balance()` guarda só o
-    número. O mesmo vale para toda pendência que pode criar, pagar ou mover dinheiro, com
-    valor conhecido ou não. A lista sai do registro, não de nomes escritos aqui: todo tipo
-    de `_REGISTRO` em `db/pending.py` cujo efeito muda dinheiro em qualquer sentido, inclusive
-    apagar e desfazer (`delete_launch`, `delete_launch_bulk`, `delete_credit_purchase`,
-    `undo_audio`), além de criar, pagar ou mover (lançamento,
-    parcelas no cartão, pagamento de conta, débito de uma fonte, recorrente nova; hoje,
-    entre outros, `multi_launch_values`, `bill_pay_amount`, `payment_method_choice`,
-    `installment_pending`, `pay_bill_choice`, `bill_amount_expected`, `investment_pick`,
-    `funding_source_choice` e `confirm_recurring_offer`), mais as escritas propostas pela
-    IA em `ai_pending_actions`. Tipo novo no registro entra pela classificação do efeito. A previsão
-    compartilhada tem de levar essas pendências e mostrar o resultado como "a conferir",
-    não como exato.
-  - Receita recorrente mensal ou anual entra pelo valor cheio, sem marcador de
-    confiança: renda irregular (freela, comissão) cadastrada como fixa parece garantida.
-    Decidir uma política de confirmação ou de confiança da receita projetada.
-  - Receita recorrente legada `once`, `weekly` ou `daily` fica fora de toda data:
-    `_cashflow_events()` só aceita receita mensal e anual. Decidir o destino dessas linhas.
-  - Fatura de cartão manual, ou sem fonte do Open Finance atualizada, entra pelo total
-    gravado, que não tem compra não lançada nem parcela restante. Com o cartão manual só
-    para leitura (Q37), decidir se essa fatura é confirmada pelo usuário ou sai como "a
-    conferir".
-  - Ocorrência de recorrente com vencimento hoje ou já passado, ainda não realizada, some
-    da previsão (`_recurring_occurrence_dates()` só emite datas estritamente depois de
-    hoje), e a que se realizou
-    antes do dia entra de novo; não há marcador de realização (`last_charged_ym` e
-    `last_credited_ym` não são escritos). Consertar só o `>` estrito deixa de fora as
-    atrasadas mais antigas, e projetar desde o `start_date` repete anos já realizados:
-    definir uma janela de conferência limitada, com a premissa do que veio antes dela dita
-    na tela (é a decisão aberta 7 do plano da Piggy).
-  - Gasto variável do dia a dia (mercado, transporte) fica fora: a previsão supõe que ele
-    para hoje. O protótipo do v2 já desconta o ritmo dos últimos 60 dias
-    (`webapp/src/dashboard/lib/model.js`); a Etapa 3 leva uma estimativa assim para o
-    backend, marcada como estimativa, com a medida de variação e a faixa provável
-    (`lo`/`hi`, que `TrajectoryChart.tsx` e `Hero.tsx` mostram como "Faixa provável"),
-    e sem contar duas vezes: o ritmo exclui todo gasto que
-    já entra como evento agendado (gasto fixo, boleto pago, parcela de compra parcelada que
-    já existe, cujo restante vai para as faturas futuras) e todo movimento interno
-    (`is_internal_movement`: transferência entre contas próprias e pagamento de fatura). A
-    compra comum no cartão **fica** na amostra: ela é o comportamento futuro; o que não se
-    projeta de novo é a compra já lançada na fatura. A parte do cartão é projetada a partir
-    de amanhã, e cada compra estimada cai na fatura atual ou numa seguinte pelo calendário de
-    fechamento, inclusive o resto do ciclo atual até o fechamento. O protótipo já exclui os lançamentos
-    de recorrente. O denominador é o período coberto de verdade,
-    não 60 fixo: conta recém-conectada ou com histórico incompleto (dez dias divididos por
-    60 dão um sexto do ritmo real) tem amostra mínima, e abaixo dela a estimativa sai como
-    "a conferir".
-    O ritmo e a variação se dividem pela forma de pagamento (a faixa provável do cartão se
-    acumula nas mesmas faturas que a média dele, não por dia no caixa): o gasto em dinheiro, Pix e débito sai do
-    caixa no dia, e o gasto no cartão entra na fatura de cada cartão pelo calendário de
-    fechamento e vencimento dele (o protótipo desconta tudo por dia, e isso põe o gasto no
-    cartão na data errada e muda o pior dia).
-  - A carteira Piggy não tem data de atualização: a confirmação da Q37 vale na primeira
-    visita e envelhece. Com a carteira no saldo, pedir confirmação atual ou mostrar "a
-    conferir".
-  - Recorrente e boleto fora de sincronia:
-    - gasto de valor variável sem estimativa é gravado com valor 0 (`db/recurring.py`) e
-      some da previsão;
-    - desativar o gasto fixo não cancela o boleto pendente (`list_bills` não olha
-      `is_active`);
-    - trocar de manual para automático conta duas vezes (o boleto pendente fica e a
-      ocorrência automática entra);
-    - mudar o calendário (dia, frequência, `due_month` ou `start_date`) deixa o boleto
-      velho na data antiga, e o novo também entra: toda mudança de calendário cancela ou
-      refaz os boletos pendentes;
-    - o valor do boleto é copiado ao gerar e não acompanha a edição do gasto fixo;
-    - boleto manual de gasto pago no cartão sai como dinheiro na data do boleto;
-    - não existe data de fim nem número de parcelas restantes na recorrência, então
-      financiamento ou contrato que termina dentro do horizonte segue projetado;
-    - recorrência anual legada sem mês some.
-  - Conta marcada como paga "pelo banco" sai da previsão na hora, mas o saldo só cai na
-    próxima sincronização: por um tempo o dinheiro conta duas vezes. O mesmo vale para o
-    pagamento de fatura pelo PigBank com Open Finance (`pay_bill_amount()` grava com
-    `apply_delta=False`, sem `bank_movement_declarations`): a fatura some na hora e o saldo
-    só cai depois. Até a sincronização seguinte, a previsão leva essa saída pendente ou
-    mostra "a conferir".
-  - Datas sem dia útil: vencimento no fim de semana ou feriado e salário pago no dia útil
-    anterior mudam o pior dia nos dois sentidos.
-  - Fatura com total negativo (crédito por estorno) é ignorada, e o `credit_bills.total` é
-    um contador (`greatest(0, total - x)` ao desfazer) lido sem reconstruir. O `status`
-    também não acompanha: quando uma correção da Pluggy aumenta o valor de uma compra de
-    fatura já paga, o total sobe e a fatura segue `paid`, fora da previsão. O "paga ou não"
-    tem de sair de `total - paid_amount`, não ficar gravado; o "aberta ou fechada" continua
-    vindo do calendário de fechamento, porque `close_bill()`, `list_open_bills()` e
-    `list_bills_with_debt()` dependem dele para achar a fatura atual e a atrasada.
-  - Saldo de partida: o `BANK_ACCOUNTS_SQL` escolhe a conexão mais nova por `id` antes de
-    filtrar as pausadas, então a conta some se a mais nova estiver pausada, mesmo com uma
-    antiga ativa; o `balance` do banco é usado sem conferir o que ele inclui (aplicação
-    automática, cheque especial); a caixinha do banco que resgata sozinha fica fora.
+  simulador e o `check_cashflow` da IA (Q18). A matriz do
+  `docs/plano-piggy-assistente-contextual.md` dá a direção de erro de cada entrada; esta
+  lista e a matriz se completam. Perguntas para o plano da Etapa 3:
+  - Gasto fixo pago no cartão sai do caixa no `due_day` e de novo na fatura. Como ele entra
+    pelo calendário da fatura?
+  - Valor estimado (`variable_amount`), valor 0 de gasto variável sem estimativa e boleto
+    com valor negativo entram como exatos. Como a previsão mostra o que é estimado?
+  - Conta ou fatura paga fora do PigBank segue pendente, e a paga pelo PigBank sai antes
+    de o saldo cair. Como a previsão trata o intervalo até o banco confirmar?
+  - Gasto fixo manual só entra pelo boleto já gerado (`sync_manual_bills_once()` gera só o
+    próximo ciclo), e boleto e recorrência saem de sincronia (desativar, trocar de modo,
+    mudar calendário ou valor). Quem é a fonte das ocorrências futuras?
+  - Ocorrência que vence hoje, atrasada ou adiantada: não há marcador de realização. Qual
+    janela de conferência (decisão aberta 7 do plano da Piggy)?
+  - Receita: irregular cadastrada como fixa, legada `once`/`weekly`/`daily` fora da
+    previsão, recorrência sem data de fim. Que política de confiança e de fim?
+  - Gasto variável do dia a dia fica fora. Que estimativa (o protótipo usa o ritmo de 60
+    dias e a faixa provável) sem contar duas vezes o agendado, separando cartão de caixa,
+    e com que amostra mínima?
+  - Saldo de partida: pendências (`reconciliation`, `bank_movements`, `pending_actions` e
+    `ai_pending_actions` que mudam dinheiro), carteira Piggy sem data, conta escolhida pelo
+    `BANK_ACCOUNTS_SQL` antes de filtrar pausadas, o que o `balance` inclui. Quando o
+    resultado sai como "a conferir"?
+  - Fatura: total negativo ignorado, `credit_bills.total` como contador, `status` gravado
+    que não acompanha correção, cartão manual sem as compras não lançadas, `list_bills`
+    com teto de 1.000. De onde sai o valor e o estado de cada fatura?
+  - Datas sem dia útil mudam o pior dia.
 - Etapa 4: reserva designada, custo mensal por frequência, reserva só em reais; caixinha
   manual versus a do banco.
 - Etapa 6: variação do período só dentro de um trecho sem quebra.
