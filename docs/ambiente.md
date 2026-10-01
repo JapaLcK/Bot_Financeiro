@@ -8,7 +8,7 @@ as citações `CLAUDE.md §6` no código e nos testes seguem válidas.
 diferentes, e confundi-los já produziu documentação errada neste próprio arquivo.
 
 ```bash
-ls -d /Users/<user>/Desktop/bot/bot_wa/.venv   # existe → máquina local
+ls -d /Users/<user>/Projetos/bot/bot_wa/.venv   # existe → máquina local
 python3 -c "import fastapi" 2>&1 | tail -1     # ModuleNotFoundError → não é o venv
 ```
 
@@ -23,8 +23,12 @@ python3 -c "import fastapi" 2>&1 | tail -1     # ModuleNotFoundError → não é
   **não é falha de teste**. Use o interpretador do venv, com caminho absoluto:
 
   ```bash
-  PYTHONPATH=. /Users/<user>/Desktop/bot/bot_wa/.venv/bin/python -m pytest -q
+  PYTHONPATH=. /Users/<user>/Projetos/bot/bot_wa/.venv/bin/python -m pytest -q tests/test_x.py   # os testes da área
   ```
+
+  Aqui, só os testes da área que você mexeu: a suíte inteira roda no CI, e na
+  máquina só quando o dono pedir (§3 do `CLAUDE.md`, skill `baseline-testes`).
+  Várias sessões rodando a suíte inteira ao mesmo tempo derrubam a máquina.
 
   Vale também a partir de um worktree de `.claude/worktrees/` — o venv da raiz serve
   os dois.
@@ -45,7 +49,9 @@ python3 -c "import fastapi" 2>&1 | tail -1     # ModuleNotFoundError → não é
   `pypdf` (o `pip install` falha pelo proxy). A ausência do `ofxparse` não
   faz "alguns testes falharem": são **9 erros de coleta**, e o pytest **interrompe a
   suíte inteira** antes de rodar qualquer teste. Sem tratar isso você não tem sinal
-  nenhum — nem verde, nem vermelho. Para obter baseline local:
+  nenhum — nem verde, nem vermelho. Para obter baseline neste sandbox (aqui a
+  máquina é só da sessão, então a suíte inteira não disputa CPU com ninguém; na
+  máquina local vale o §6a: só os testes da área):
 
   A lista é **fixa** — são estes 9, e só estes:
 
