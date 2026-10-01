@@ -212,6 +212,39 @@ PR de cada etapa, não soluções prontas. Cada PR confere se ainda valem, decid
   também traz.
 - Moeda: o import grava tudo como `BRL` hoje (inclusive cartão); moeda omitida pelo
   conector; moeda corrigida depois.
+- Ingestão do Open Finance (defeitos achados na revisão dos PRs #689 e #720; detalhes e
+  casos nas threads do #720). Pergunta geral: como a ingestão marca uma leitura como
+  incompleta em vez de gravar dado incompleto com cara de completo, e como o conserto
+  alcança o que já foi gravado errado?
+  - Valor padrão no lugar do dado ausente ou inválido (`normalize_pluggy_account`,
+    `normalize_pluggy_transaction`, `normalize_pluggy_investment`, `_to_decimal`): tipo,
+    saldo, valor, data, nome, `NaN`/`Infinity`, texto ilegível. Como distinguir
+    "desconhecido" de zero e de `BRL`?
+  - Registro sem `id` ou com `id` malformado (branco, objeto: `str(raw.get("id") or "")`
+    aceita os dois), ou com `type`/`subtype` que o código não trata, some, colide ou é
+    rotulado errado com o sync dando sucesso (conta, transação e investimento;
+    `pluggy_rv_kind()` trata todo `EQUITY` que não é FII como ação). Que forma de `id` e
+    que pares `(type, subtype)` são aceitos?
+  - Leitura truncada ou malformada: `max_pages=60` sem conferir o cursor, `/accounts` só na
+    primeira página, `results` ausente, cursor repetido. Quando uma leitura conta como
+    completa?
+  - Exceção engolida em `_sync_pluggy_item_confirmado()` (investimentos, espelho de
+    caixinhas, foto diária) sai como `ok=True`. Que falhas marcam o sync incompleto?
+  - Ausências: conta ou transação que some da resposta fica para sempre. Se a conciliação
+    for criada, como ela sabe que a ausência é real (intervalo de datas, data corrigida,
+    sync concorrente depois da trava — o furo da trava já existe na conciliação de
+    investimentos) e como desfaz o que foi derivado (`_rollback_imported_of()` engole erro)?
+  - Transação PENDING que depois é lançada com outro id vira dois registros, em conta e em
+    cartão (`normalize_pluggy_transaction()` descarta o `status`). Como casar a pendente com
+    a lançada?
+  - Cartão: moeda por transação, fatura calculada localmente sem o
+    `/bills` da Pluggy, pagamento de fatura por palavra-chave, sinal do estorno, calendário
+    padrão 1/10, grupo de parcelas (chave que divide e que colide, metadado incompleto,
+    parcelas futuras não criadas e a troca da projetada pela real).
+  - Cartão em duplicidade: adoção de cartão manual, OFX e Open Finance no mesmo cartão,
+    reconexão com item novo, nome padrão `"CREDIT"`.
+  - Banco religado guarda o `last_sync_at` antigo; a fonte do estado da conexão é
+    `connection_ui_state()`.
 - Quando o dado do Open Finance conta como desatualizado (limite por produto) e como a
   tela aberta percebe isso sem escrita.
 - Rentabilidade do Open Finance: medida em produção em 2026-09-29 (leitura, pelo dono;
@@ -231,6 +264,36 @@ PR de cada etapa, não soluções prontas. Cada PR confere se ainda valem, decid
 - Etapa 3: desde a Q42 o gasto fixo diário, semanal e único entra na Previsão, uma
   ocorrência por data — um diário gera até 90 itens em `compromissos`/`causas`. A tela
   `/previsao` tem de agrupar por nome; o código de hoje não agrega nem limita.
+- Etapa 3: defeitos da previsão de hoje (`cashflow._cashflow_events()`), achados na
+  revisão dos PRs #689 e #720 (detalhes e casos nas threads do #720). Não se consertam no
+  painel antigo: a regra reescrita para a Previsão da `/api/v2` passa a servir também o
+  simulador e o `check_cashflow` da IA (Q18). A matriz do
+  `docs/plano-piggy-assistente-contextual.md` dá a direção de erro de cada entrada; esta
+  lista e a matriz se completam. Perguntas para o plano da Etapa 3:
+  - Gasto fixo pago no cartão sai do caixa no `due_day` e de novo na fatura. Como ele entra
+    pelo calendário da fatura?
+  - Valor estimado (`variable_amount`), valor 0 de gasto variável sem estimativa e boleto
+    com valor negativo entram como exatos. Como a previsão mostra o que é estimado?
+  - Conta ou fatura paga fora do PigBank segue pendente, e a paga pelo PigBank sai antes
+    de o saldo cair. Como a previsão trata o intervalo até o banco confirmar?
+  - Gasto fixo manual só entra pelo boleto já gerado (`sync_manual_bills_once()` gera só o
+    próximo ciclo), e boleto e recorrência saem de sincronia (desativar, trocar de modo,
+    mudar calendário ou valor). Quem é a fonte das ocorrências futuras?
+  - Ocorrência que vence hoje, atrasada ou adiantada: não há marcador de realização. Qual
+    janela de conferência (decisão aberta 7 do plano da Piggy)?
+  - Receita: irregular cadastrada como fixa, legada `once`/`weekly`/`daily` fora da
+    previsão, recorrência sem data de fim. Que política de confiança e de fim?
+  - Gasto variável do dia a dia fica fora. Que estimativa (o protótipo usa o ritmo de 60
+    dias e a faixa provável) sem contar duas vezes o agendado, separando cartão de caixa,
+    e com que amostra mínima?
+  - Saldo de partida: pendências (`reconciliation`, `bank_movements`, `pending_actions` e
+    `ai_pending_actions` que mudam dinheiro), carteira Piggy sem data, conta escolhida pelo
+    `BANK_ACCOUNTS_SQL` antes de filtrar pausadas, o que o `balance` inclui. Quando o
+    resultado sai como "a conferir"?
+  - Fatura: total negativo ignorado, `credit_bills.total` como contador, `status` gravado
+    que não acompanha correção, cartão manual sem as compras não lançadas, `list_bills`
+    com teto de 1.000. De onde sai o valor e o estado de cada fatura?
+  - Datas sem dia útil mudam o pior dia.
 - Etapa 4: reserva designada, custo mensal por frequência, reserva só em reais; caixinha
   manual versus a do banco.
 - Etapa 6: variação do período só dentro de um trecho sem quebra.

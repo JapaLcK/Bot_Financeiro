@@ -26,6 +26,7 @@ from core.reports.reports_daily import (
     filtrar_por_acesso,
 )
 from core.secure_compare import constant_time_eq
+from core.services.recurring_charger import bill_reminder_hour
 from db import (
     claim_daily_report_send,
     claim_weekly_report_send,
@@ -544,12 +545,14 @@ def _bill_reminder_tick() -> None:
         return  # dormente: template Meta ainda não configurado
 
     now = now_tz()
-    send_hour = int(os.getenv("WA_BILL_REMINDER_HOUR", "9") or 9)
-    if now.hour < send_hour:
+    if now.hour < bill_reminder_hour():
         return  # manda de manhã (>= hora configurada), 1x/dia por conta
 
     today = now.date()
-    days_before = int(os.getenv("WA_BILL_REMINDER_DAYS_BEFORE", "3") or 3)
+    try:
+        days_before = int(os.getenv("WA_BILL_REMINDER_DAYS_BEFORE", "3") or 3)
+    except ValueError:
+        days_before = 3  # env inválida vale o padrão, em vez de calar o lembrete
 
     from db.bills import (
         list_users_with_pending_bills,

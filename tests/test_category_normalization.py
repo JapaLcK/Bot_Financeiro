@@ -348,7 +348,12 @@ def test_display_map_desempate_nao_depende_de_id(pro_user_id):
     mais nova é apagada — antes o `order by id` fazia a resposta depender de
     quem foi criado/apagado por último."""
     velha = create_user_category(pro_user_id, "Cafe")
-    nova = create_user_category(pro_user_id, "Café")
+    # A gêmea entra por SQL: `create_user_category` passou a recusá-la (#149).
+    with db.get_conn() as conn, conn.cursor() as cur:
+        cur.execute("insert into user_categories (user_id, name, emoji, color, is_system) "
+                    "values (%s, 'café', '🏷️', '#7c3aed', false) returning id", (pro_user_id,))
+        nova = cur.fetchone()
+        conn.commit()
 
     antes = resolve_category_input(pro_user_id, "cafe")
     delete_user_category(pro_user_id, nova["id"])
@@ -1310,6 +1315,20 @@ def test_rename_cascateia_para_a_receita_recorrente(pro_user_id):
     update_user_category(pro_user_id, cat["id"], new_name="renda extra")
 
     assert get_recurring_income(pro_user_id, inc["id"])["category"] == "renda extra"
+
+
+def test_rename_cascateia_para_a_conta_avulsa(pro_user_id):
+    """#149: `bill_instances.category` guarda o texto e `mark_bill_paid` o copia
+    para o lançamento. Controle negativo: sem o `update bill_instances` no
+    cascade, o assert lê "academia"."""
+    from datetime import date
+    from db.bills import create_boleto, get_bill
+
+    cat = create_user_category(pro_user_id, "academia")
+    bill = create_boleto(pro_user_id, "Smart Fit", 99.90, date.today(), "academia")
+    update_user_category(pro_user_id, cat["id"], new_name="esporte")
+
+    assert get_bill(pro_user_id, bill["id"])["category"] == "esporte"
 
 
 def test_rename_nao_toca_recorrente_de_outra_categoria(pro_user_id):
