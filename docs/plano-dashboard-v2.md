@@ -288,7 +288,11 @@ PR de cada etapa, não soluções prontas. Cada PR confere se ainda valem, decid
     saudável e a mesma geração em duas fotos do item), e conferir a geração de novo **depois**
     de pegar o `pluggy_item_lock`: hoje a segunda foto é tirada antes da trava, e um sync
     antigo que pega a trava depois de um mais novo apagaria como ausentes as contas e
-    transações que o novo acabou de gravar. E conciliar só dentro de um intervalo
+    transações que o novo acabou de gravar. O mesmo furo já existe hoje na conciliação de
+    investimentos: o `confiavel` é calculado antes da trava e passado para
+    `save_open_finance_investments(..., leitura_completa=confiavel)` depois dela, então um
+    sync antigo pode apagar posições e caixinhas espelhadas do mais novo. A conferência
+    depois da trava vale para os dois. E conciliar só dentro de um intervalo
     de datas explícito: hoje `list_pluggy_transactions()` pede só `accountId` e o cursor, e
     uma resposta vazia não diz nada sobre datas. O intervalo tem de vir do pedido (datas
     `from`/`to` enviadas) ou de uma marca do provedor guardada; tirar das transações
