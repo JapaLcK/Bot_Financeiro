@@ -1811,17 +1811,57 @@ _CAUDA_QUANTIA_RE = re.compile(rf"{_RS_CAUDA}\d[\d.,]*{_UNIDADE_CAUDA}", re.I)
 # Não há predicado de ano reusável: o do `ai_guard` só existe dentro de uma
 # alternância com "em/de/desde/até" na frente.
 _ANO_RE = re.compile(r"(?:19|20)\d\d\b")
+# Tetos de comprimento, antes de qualquer regex: uma resposta a "de qual…?" com mais de
+# `_RESPOSTA_MAX` caracteres não é quantia explícita e uma cauda com mais de `_CAUDA_MAX`
+# não é valor (a maior real, "R$ 1.000.000.000,00 reais", tem 25). O webhook tem um worker
+# só: sem o teto, mensagem montada trava a fila (varredura por preposição e por vírgula
+# era quadrática, e a regex da forma de valor, exponencial).
+_RESPOSTA_MAX, _CAUDA_MAX = 200, 64
 # Cauda com FORMA de valor que a estreita recusa ("-80", "(80)", "80-", "132 50"): vai
 # para o `valor_perigoso` decidir (recusar o negativo e o ambíguo, ler o "+80"), em
-# vez de deixar valer o valor guardado (ou o "esvaziar"). A forma é por CARACTERES,
-# não por lista de formas: dígitos e separadores, e os sinais (`+`, `-`, parênteses)
-# só nas BORDAS, antes ou depois do "R$" e da unidade. Sem dígito não há quantia
-# (`_extract_valor` None) e nada muda, então não exijo um dígito aqui.
-# Sinal no meio ("80-90", "2029-12") é faixa ou data, não valor: lê-lo sacaria 80.
-_SINAL_INI, _SINAL_FIM = r"[(+\-\s]*", r"[)+\-\s]*"
-_CAUDA_COM_FORMA_DE_VALOR_RE = re.compile(
-    rf"{_SINAL_INI}{_RS_CAUDA}{_SINAL_INI}{_SO_NUMERO_RE.pattern}"
-    rf"{_SINAL_FIM}{_UNIDADE_CAUDA}{_SINAL_FIM}", re.I)
+# vez de deixar valer o valor guardado (ou o "esvaziar"). A forma é por CARACTERES:
+# dígitos e separadores, e os sinais (`+`, `-`, parênteses) só nas BORDAS, antes ou
+# depois do "R$" e da unidade. Sinal no meio ("80-90", "2029-12") é faixa ou data,
+# não valor: lê-lo sacaria 80.
+# Em PASSOS de uma classe cada, não numa regex só: a regex era `[(+\-\s]*` duas vezes,
+# `[\d.,\s]+` e `[)+\-\s]*` duas vezes, todas comendo o mesmo espaço, e backtrackava de
+# forma exponencial ("- " * 200 + "1x" levava 4 s). Mesma linguagem, medida contra a
+# regex antiga em `tests/test_567_cauda_regex.py`.
+_PRE_CLS, _POS_CLS, _NUM_CLS = (re.compile(c) for c in (r"[(+\-\s]*", r"[)+\-\s]*", r"[\d.,\s]*"))
+_UM_NUM_RE, _RS_RE = re.compile(r"[\d.,]"), re.compile(r"r\$", re.I)
+_FORA_DAS_CLASSES_RE = re.compile(r"[^\d.,()+\-\s]")
+_UNIDADE_E_FIM_RE = re.compile(rf"{h_bills._UNIDADE}[)+\-\s]*", re.I)
+
+
+def _nucleo_de_valor(t: str) -> bool:
+    """`[(+-ESP]* [dígito.,ESP]+ [)+-ESP]*`: o espaço é de todas as classes, então a
+    fatia do meio é a que vai do primeiro ao último dígito (ou, sem dígito, um espaço)."""
+    primeiro = _UM_NUM_RE.search(t)
+    if primeiro:
+        ultimo = len(t) - 1 - _UM_NUM_RE.search(t[::-1]).start()
+        return bool(_PRE_CLS.fullmatch(t, 0, primeiro.start())
+                    and _NUM_CLS.fullmatch(t, primeiro.start(), ultimo + 1)
+                    and _POS_CLS.fullmatch(t, ultimo + 1))
+    ate_aqui = _PRE_CLS.match(t).end()                    # o espaço do meio, sem dígito:
+    desde = len(t) - _POS_CLS.match(t[::-1]).end()        # prefixo e sufixo o cercam
+    return any(t[w].isspace() for w in range(max(desde - 1, 0), min(ate_aqui, len(t) - 1) + 1))
+
+
+def _forma_de_valor(cauda: str) -> bool:
+    """A cauda tem forma de valor: sinais nas bordas, "R$" e unidade opcionais."""
+    if len(cauda) > _CAUDA_MAX:
+        return False
+    rs = _RS_RE.search(cauda)
+    if rs:
+        if not _PRE_CLS.fullmatch(cauda, 0, rs.start()):
+            return False
+        cauda = cauda[rs.end():]
+    fora = _FORA_DAS_CLASSES_RE.search(cauda)            # só a unidade pode ser letra
+    if fora:
+        if not _UNIDADE_E_FIM_RE.fullmatch(cauda, fora.start()):
+            return False
+        cauda = cauda[:fora.start()]
+    return _nucleo_de_valor(cauda)
 
 
 def _quantia_explicita(resposta: str, crua: str, existentes: list[str]) -> str | None:
@@ -1850,6 +1890,9 @@ def _quantia_explicita(resposta: str, crua: str, existentes: list[str]) -> str |
     antes do número ("digo 132 50", "melhor 132 50", "quer dizer -80") é um
     conjunto aberto: a cauda não é reconhecida e vale o valor guardado.
     """
+    if len(crua) > _RESPOSTA_MAX:
+        return None
+
     def cita(texto: str) -> bool:
         return any(contains_word(normalize_text(texto), normalize_text(n)) for n in existentes)
 
@@ -1867,6 +1910,8 @@ def _quantia_explicita(resposta: str, crua: str, existentes: list[str]) -> str |
     no_catalogo = _eh_nome_do_catalogo(alvo, existentes)
     malformada = None
     for inicio in [0, *(m.end() for m in re.finditer(", ", crua))]:
+        if len(crua) - inicio > _CAUDA_MAX:
+            continue
         if no_catalogo and not contains_word(normalize_text(crua[:inicio]), normalize_text(alvo)):
             continue
         # Repõe a limpeza que a `crua` pula: sem ela "tesouro, 132,50." dá R$ 13.250.
@@ -1879,7 +1924,7 @@ def _quantia_explicita(resposta: str, crua: str, existentes: list[str]) -> str |
             cauda = _ESPACO_NO_SEPARADOR_RE.sub(r"\1", cauda)
         if _CAUDA_QUANTIA_RE.fullmatch(cauda):
             return cauda
-        if malformada is None and _CAUDA_COM_FORMA_DE_VALOR_RE.fullmatch(cauda):
+        if malformada is None and _forma_de_valor(cauda):
             malformada = cauda
     return malformada
 
