@@ -222,7 +222,9 @@ PR de cada etapa, não soluções prontas. Cada PR confere se ainda valem, decid
   sem grupo (sem `installment_no`, `installments_total` e `group_id`, e sem as faturas
   futuras), compra com `bill_id` escolhido por um calendário errado, valor em moeda errada,
   pagamento de fatura lido como estorno. Além da moeda:
-  - `normalize_pluggy_account()` põe `type` = `BANK` e `balance` = 0 quando faltam;
+  - `normalize_pluggy_account()` põe `type` = `BANK` e `balance` = 0 quando faltam, e o
+    nome vira o tipo (`"CREDIT"`): como a adoção de cartão manual é pelo nome exato, nasce
+    um cartão genérico em duplicidade que o nome certo, quando chega, não renomeia nem junta;
     `normalize_pluggy_transaction()` põe `amount` = 0 e data inválida = hoje (conta de
     crédito gravada como `BANK` já tem as transações importadas como lançamento; quando o
     tipo certo chega, o importador de cartão cria as compras e os lançamentos antigos
