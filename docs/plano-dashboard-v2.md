@@ -276,9 +276,12 @@ PR de cada etapa, não soluções prontas. Cada PR confere se ainda valem, decid
     importa as mesmas de novo; OFX e Open Finance podem encher o mesmo cartão (o OFX só
     deduplica `source='ofx'`); reconectar com item novo pode criar um segundo cartão
     "· Open Finance" e deixar o primeiro com as faturas congeladas.
-  - Falha na leitura de investimentos, no espelho de caixinhas ou na gravação da foto
-    diária (`grava_fotos_posicoes()`, que só desfaz o savepoint e loga) sai como conexão
-    `ACTIVE`/`ok=True`, só com log. Sem outro sync no mesmo dia, o histórico fica com um
+  - Toda exceção engolida dentro de `_sync_pluggy_item_confirmado()` sai como conexão
+    `ACTIVE`/`ok=True`, só com log: falha ao ler investimentos, ao gravar o espelho de
+    investimentos (`save_open_finance_investments()`), ao espelhar caixinhas e ao gravar a
+    foto diária (`grava_fotos_posicoes()`, que só desfaz o savepoint). Regra para a classe:
+    qualquer parte do sync que falhe marca a sincronização como incompleta, com o produto
+    que faltou. Sem outro sync no mesmo dia, o histórico fica com um
     buraco permanente, sem nova tentativa (afeta patrimônio e rentabilidade, não a previsão).
 - Quando o dado do Open Finance conta como desatualizado (limite por produto) e como a
   tela aberta percebe isso sem escrita.
