@@ -3,33 +3,34 @@
 "saquei 50" -> "De qual caixinha ou investimento?" -> "tesouro 2029" resgatava R$ 2.029
 no lugar dos R$ 50 guardados. DECIDIDO PELO DONO: na pergunta de NOME o número da
 resposta só troca o valor guardado em forma explícita:
-  - número + do/da/no/na/em/pra + nome do CATÁLOGO ("tira 80 do tesouro"), lido SEM o
-    nome ("tesouro 2029 no nubank", N6; "a reserva 2025 do nubank", N13: não);
+  - número + das/dos/da/do/nas/nos/na/no/em/pra + nome do CATÁLOGO, lido SEM o nome
+    ("tira 80 das férias"; "tesouro 2029 no nubank", N6, e "a reserva 2025 do nubank",
+    N13, não);
   - quantia depois de ", ": "80", "R$ 80", "80 reais", "na verdade 80"; decimal com
     espaço ("132, 50") só se a parte antes não é ano (N14); SEM "R$" sem vírgula;
+  - cauda com FORMA de valor por caracteres, sinais nas bordas ("(80)", "80-", "-80",
+    "132 50"): vai ao `valor_perigoso`, que recusa o negativo e lê o "+80" (N12/N14);
   - com "esvaziar" guardado, sobrar dígito ou palavra de número depois de tirar o nome
-    e sem quantia reconhecida ("viagem, 2 mil", "viagem 80", "80 viagem") NÃO esvazia:
-    pergunta o valor (N15/N16/N17, d046-1/e1c-1). Não ensina forma nova de quantia.
-  Limites aceitos: "tesouro, 2025, 50" -> 50, "Tesouro 2029 80" -> 50, "tesouro,80" ->
-  50, "tesouro, 2 mil" -> 50 (valor numérico guardado, também no aporte), "tesouro
-  2029 no valor de 80" -> 50, "meia"/"metade"/"sem nada" esvaziam (como na `main`),
-  "tira do tesouro 2029 no nubank" -> 2.029 (#703), nome CURTO depois da preposição
-  reativa a regra ("a reserva 2025 da casa" com `casa` -> 2.025).
+    e sem quantia reconhecida ("viagem, 2 mil", "viagem 80") NÃO esvazia: pergunta o
+    valor (N15/N16/N17). Não ensina forma nova de quantia.
+LIMITES ACEITOS (valor guardado): "tesouro, 2025, 50", "Tesouro 2029 80", "tesouro,80",
+"tesouro, 2 mil" (também no aporte), "tesouro 2029 no valor de 80", faixa/data/"%"
+("80-90", "2029-12", "80%"), prefixo de prosa ("digo 132 50", "foi -80"), contrações fora
+de das/dos/nas/nos ("pelas", "numa", "àquela", "desta"), "tira do tesouro 2029 no nubank"
+(#703), nome CURTO depois da preposição ("a reserva 2025 da casa" com `casa`); "meia",
+"metade" e "sem nada" esvaziam (como na `main`).
 EXTENSÃO DO CODER: resposta SÓ com dinheiro ("80") é quantia, como na `main` (N7);
-unidade inteira do `h_bills._UNIDADE`; corte em ", " antes do `limpa_pontuacao_final`.
-Os ramos de "tudo" (#259) não mudam. FORA (#704): "caixinha 13º".
+unidade inteira do `h_bills._UNIDADE`. Os ramos de "tudo" (#259) não mudam.
 
-CONTROLE NEGATIVO (2026-10-01 sobre 49d07651; cada mutação, num caso verde com o
-fix). (a) `pede_nome=False`: 64 VERMELHOS. (b) `_quantia_explicita` devolvendo None:
-56 daqui e 8 de `test_perguntas_guardam_contexto.py` (entre eles `test_tudo_
-guardado_mais_quantia_nova_nao_esvazia`). Regras anteriores (catálogo depois da
-preposição, número sem o nome, `crua`, limpeza da cauda, alvo inteiro antes da
-", ", `_ANO_RE`, `want_all`, "na verdade", unidade, sinal antes do "R$"): linhas
-de N4/N6/N7/N12-N17 e da tabela. Sinal da cauda malformada (Codex #709): `49d07651`
-deixa 13 vermelhos (N12 "–80", N14 nos 9 glifos de `_TRACOS`, "−R$ 80", "na
-verdade −80", "menos 80"); sem o `translate(_TRACOS)` 12; sem o `_MENOS_RE` 1;
-com só 3 glifos (a lista que o `utils_text` já corrigiu) 6. Limite declarado:
-prefixo de prosa ("digo 132 50", "quer dizer -80") deixa o valor guardado.
+CONTROLE NEGATIVO (2026-10-01 sobre 39cfe844; cada mutação, num caso verde com o fix).
+(a) `pede_nome=False`: 67 VERMELHOS. (b) `_quantia_explicita` devolvendo None: 74 daqui
+e 8 de `test_perguntas_guardam_contexto.py` (entre eles `test_tudo_guardado_mais_
+quantia_nova_nao_esvazia`). Regras anteriores (catálogo depois da preposição, número
+sem o nome, `crua`, limpeza, alvo inteiro, `_ANO_RE`, `want_all`, "na verdade",
+unidade, glifos de `_TRACOS`, "menos"): linhas de N4/N6/N7/N12-N17 e da tabela.
+P1 4158570255/4158570261: `39cfe844` deixa 17 vermelhos (N12 "(80)"/"80-"/"+80", N14
+nos parênteses, "80-", "+80" e nos 4 plurais); sem o plural em `PREPOSICAO`, 4; com
+sinais livres no meio da cauda, 2 ("80-90", "2029-12"); sem sinal no fim, 11.
 
 POSITIVOS: P1-P3. Conversa pelo `handle_incoming`, banco real, SALDO. CLASSE CEGA: sem LLM.
 """
@@ -94,26 +95,18 @@ def test_n3_numero_ao_lado_do_nome_no_resgate(uid, nome, resposta):
 
 @pytest.mark.parametrize("caixinha,investimento,resposta", [
     (None, "Tesouro", "tesouro 2029"),         # o caso da issue
-    ("viagem", None, "viagem 2027"),
-    (None, "Tesouro 2029", "tesouro 2029 no nubank"),
-    ("viagem 2027", None, "viagem 2027 da família"),
-    ("Reserva 2025", None, "reserva 2025 de emergência"),
+    ("viagem", None, "viagem 2027"), (None, "Tesouro 2029", "tesouro 2029 no nubank"),
+    ("viagem 2027", None, "viagem 2027 da família"), ("Reserva 2025", None, "reserva 2025 de emergência"),
     # N8: o "R$" do PRÓPRIO nome não é a forma "R$ + número"
-    ("meta R$ 5000", None, "caixinha meta R$ 5000"),
-    ("meta R$ 5000", None, "a meta R$ 5000"),
+    ("meta R$ 5000", None, "caixinha meta R$ 5000"), ("meta R$ 5000", None, "a meta R$ 5000"),
     ("R$ 5 mil", None, "caixinha R$ 5 mil"),
     # N9: depois de ", " só vale dinheiro; o ano ou o dia que descreve o nome, não
-    ("viagem", None, "viagem, a de 2027"),
-    (None, "Tesouro", "tesouro, o de 2029"),
-    (None, "Tesouro", "tesouro, vence em 2035"),
-    ("viagem", None, "viagem, dia 15"),
+    ("viagem", None, "viagem, a de 2027"), (None, "Tesouro", "tesouro, o de 2029"),
+    (None, "Tesouro", "tesouro, vence em 2035"), ("viagem", None, "viagem, dia 15"),
     # N10: "+ nome" é literal (o "no nubank" não cita o catálogo); sem "R$" sem vírgula
-    (None, "Tesouro", "tesouro 2029 no nubank"),
-    (None, "CDB", "cdb 2027 do inter"),
-    ("viagem", None, "viagem 2027 da família"),
-    ("Reserva", None, "reserva 2025 de emergência"),
-    (None, "Tesouro", "Tesouro 2029 R$ 80"),
-    ("Meta", None, "meta R$ 5000"),
+    (None, "Tesouro", "tesouro 2029 no nubank"), (None, "CDB", "cdb 2027 do inter"),
+    ("viagem", None, "viagem 2027 da família"), ("Reserva", None, "reserva 2025 de emergência"),
+    (None, "Tesouro", "Tesouro 2029 R$ 80"), ("Meta", None, "meta R$ 5000"),
 ])
 def test_n6_numero_ou_ano_do_nome_nao_vira_valor(uid, caixinha, investimento, resposta):
     saldo, r = _saca(uid, caixinha, investimento, resposta)
@@ -131,7 +124,7 @@ def test_n7_so_numero_a_pergunta_de_nome_nao_vira_nome(uid):
     ("viagem 2027", 3050.0),                                   # o ano é do nome
     ("viagem, na verdade 80", 3080.0),                         # positivo
     ("viagem, na verdade 132 50", 3000.0), ("viagem, na verdade -80", 3000.0),
-    ("viagem, –80", 3000.0),
+    ("viagem, –80", 3000.0), ("viagem, (80)", 3000.0), ("viagem, 80-", 3000.0), ("viagem, +80", 3080.0),
 ])
 def test_n12_deposito_nome_com_ano_e_correcao_malformada(uid, resposta, fim):
     _caixinhas_com_saldo(uid, "viagem", saldo=3000.0)
@@ -157,8 +150,7 @@ def test_n13_nome_curto_dentro_do_longo(uid, sem_teto_de_caixinha, caixinhas, in
 @pytest.mark.parametrize("caixinha,investimento,resposta,fim", [
     ("Viagem, 2027", None, "a viagem, 2027", 2950.0),     # o ", 2027" é do nome
     ("Viagem, 2027", None, "a viagem, 2027, 80", 2920.0),  # positivo: vírgula depois do nome
-    (None, "Tesouro", "tesouro, 132, 50", 2867.5),         # decimal com espaço
-    (None, "Tesouro", "tesouro, R$ 132, 50", 2867.5),
+    (None, "Tesouro", "tesouro, 132, 50", 2867.5), (None, "Tesouro", "tesouro, R$ 132, 50", 2867.5),
     (None, "Tesouro", "tesouro, 2029, 80", 2920.0),        # ano não é decimal (dono)
     (None, "Tesouro", "tesouro, 2025, 50", 2950.0),        # limite aceito pelo dono
     (None, "Tesouro", "tesouro, na verdade 132, 50", 2867.5),   # positivo do prefixo
@@ -168,6 +160,14 @@ def test_n13_nome_curto_dentro_do_longo(uid, sem_teto_de_caixinha, caixinhas, in
         "tesouro, na verdade R$ -80", "tesouro, -R$ 80", "tesouro, na verdade 132 50 reais",
         "tesouro, −R$ 80", "tesouro, na verdade −80", "tesouro, menos 80")],
     *[(None, "Tesouro", f"tesouro, {g}80", 3000.0) for g in ("-", *map(chr, _TRACOS))],
+    # P1 4158570255: forma de valor por CARACTERES (sinais nas bordas); `valor_perigoso` decide
+    *[(None, "Tesouro", f"tesouro, {c}", 3000.0) for c in (
+        "(80)", "( 80 )", "(80,00)", "(-80)", "80-", "80 -", "80--", "R$ (80)", "(80) reais")],
+    (None, "Tesouro", "tesouro, +80", 2920.0),             # positivo: lê 80
+    (None, "Tesouro", "tesouro, 80-90", 2950.0), (None, "Tesouro", "tesouro, 2029-12", 2950.0),  # faixa/data
+    # P1 4158570261: preposição no plural
+    *[("Férias", None, f"tira 80 {p} férias", 2920.0) for p in ("das", "nas", "da caixinha")],
+    *[(None, "Tesouros", f"tira 80 {p} tesouros", 2920.0) for p in ("dos", "nos")],
     # N4: quantia reconhecida depois da vírgula troca o valor
     *[(None, "Tesouro", r, 2920.0) for r in (
         "tesouro 2029, 80", "tesouro 2029, R$ 80", "tesouro 2029, r$ 80",

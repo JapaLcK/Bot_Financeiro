@@ -1811,12 +1811,17 @@ _CAUDA_QUANTIA_RE = re.compile(rf"{_RS_CAUDA}\d[\d.,]*{_UNIDADE_CAUDA}", re.I)
 # Não há predicado de ano reusável: o do `ai_guard` só existe dentro de uma
 # alternância com "em/de/desde/até" na frente.
 _ANO_RE = re.compile(r"(?:19|20)\d\d\b")
-# Cauda com FORMA de valor que a estreita recusa ("-80", "132 50"): vai para o
-# `valor_perigoso` recusar, em vez de deixar valer o valor guardado (ou o
-# "esvaziar"). É o `_SO_NUMERO_RE` com o "R$" e a unidade da estreita e o sinal,
-# antes ou depois do "R$" ("-R$ 80", "R$ -80"): o `valor_perigoso` recusa os dois.
+# Cauda com FORMA de valor que a estreita recusa ("-80", "(80)", "80-", "132 50"): vai
+# para o `valor_perigoso` decidir (recusar o negativo e o ambíguo, ler o "+80"), em
+# vez de deixar valer o valor guardado (ou o "esvaziar"). A forma é por CARACTERES,
+# não por lista de formas: dígitos e separadores, e os sinais (`+`, `-`, parênteses)
+# só nas BORDAS, antes ou depois do "R$" e da unidade. Sem dígito não há quantia
+# (`_extract_valor` None) e nada muda, então não exijo um dígito aqui.
+# Sinal no meio ("80-90", "2029-12") é faixa ou data, não valor: lê-lo sacaria 80.
+_SINAL_INI, _SINAL_FIM = r"[(+\-\s]*", r"[)+\-\s]*"
 _CAUDA_COM_FORMA_DE_VALOR_RE = re.compile(
-    rf"(?:-\s*)?{_RS_CAUDA}-?\s*{_SO_NUMERO_RE.pattern}{_UNIDADE_CAUDA}", re.I)
+    rf"{_SINAL_INI}{_RS_CAUDA}{_SINAL_INI}{_SO_NUMERO_RE.pattern}"
+    rf"{_SINAL_FIM}{_UNIDADE_CAUDA}{_SINAL_FIM}", re.I)
 
 
 def _quantia_explicita(resposta: str, crua: str, existentes: list[str]) -> str | None:
