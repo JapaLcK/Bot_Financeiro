@@ -949,7 +949,8 @@ def update_credit_transaction_fields(
     sets: list[str] = []
     params: list = []
     if categoria is not None:
-        sets.append("categoria = %s")
+        # a marca segura a categoria do cliente contra o sync do Open Finance (#712)
+        sets.append("categoria = %s, categoria_editada = true")
         params.append(categoria)
     if nota is not None:
         sets.append("nota = %s")
@@ -1437,7 +1438,7 @@ def update_installment_group_meta(user_id: int, group_id: str,
         sets.append("nota = %s")
         params.append((nome or "").strip() or None)
     if categoria is not None:
-        sets.append("categoria = %s")
+        sets.append("categoria = %s, categoria_editada = true")  # #712: o sync não desfaz
         params.append((categoria or "").strip() or None)
     params.extend([user_id, group_id])
 
