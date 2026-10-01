@@ -1342,6 +1342,7 @@ ITEM_CAIXA_QR = {
 # e é isso que o `pop` garante.
 CHAVES_DA_CONEXAO = {
     "id", "provider", "provider_item_id", "status", "institution_name",
+    "institution_id",   # #732: o gate de reconexão do front compara por id do conector
     "last_sync_at", "last_attempt_at", "status_reason", "health",
     "reconnected_at", "ui",
 }
