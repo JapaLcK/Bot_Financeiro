@@ -661,3 +661,151 @@ def test_sync_in_progress_esgotado_so_marca_a_linha_do_dono_esperado(
     esperado = {None: None, "dono": user_id, "outro": user_id + 7}[expected]
     asyncio.run(of_routes._run_pluggy_sync_bg(c["item"], esperado))
     assert (_linha(c["id"])["status_reason"] == "read_failed") is marca
+
+
+# ── a retentativa que encontra o item em voo NÃO marca `_DIRTY` (Codex, #727) ─────────
+# O `_DIRTY` não tem dono: a rodada suja roda sem `expected_user_id` e sem
+# `filtrar_por_acesso` (é a semântica do webhook). Se a retentativa o marcasse, a rodada
+# extra sincronizaria depois de o dono perder o acesso, ou o OUTRO dono de uma readoção.
+# A retentativa é melhor esforço: o próximo tique reavalia a elegibilidade e o acesso.
+
+def _em_voo_e_depois(user_id, amb, monkeypatch, *, muda, quem_encontra="retentativa"):
+    """O item está em `_INFLIGHT` (um sync bloqueado, como o do webhook). Chega `quem_encontra`
+    (a retentativa ou um webhook) e o item é coalescido; `muda()` altera o mundo; o sync em
+    voo é solto. Devolve `(resumo da retentativa ou None, dirty marcado, leituras de contas)`."""
+    monkeypatch.setenv("PLANS_V2_ENABLED", "1")
+    monkeypatch.setenv("ACCESS_GATE_ENABLED", "1")
+    c = _nova(user_id, reason="read_failed")
+    solta, dentro, n = threading.Event(), threading.Event(), {"v": 0}
+
+    def _hook(_item):
+        n["v"] += 1
+        if n["v"] == 1:          # só o 1º sync (o em voo) bloqueia; a rodada suja não
+            dentro.set()
+            solta.wait(10)
+
+    amb.pluggy.durante_contas = _hook
+    saida = {}
+
+    async def _main():
+        em_voo = of_routes._schedule_pluggy_sync(c["item"])   # o sync em voo
+        for _ in range(200):
+            if dentro.is_set():
+                break
+            await asyncio.sleep(0.02)
+        if quem_encontra == "retentativa":
+            saida["resumo"] = await amb.orq.retentar_leituras(prazo_sec=1.0)
+        else:
+            assert of_routes._schedule_pluggy_sync(c["item"]) is None     # webhook
+        saida["dirty"] = c["item"] in of_routes._DIRTY
+        muda(c)
+        solta.set()
+        await em_voo
+        for _ in range(100):                      # espera uma eventual rodada suja acabar
+            if c["item"] not in of_routes._INFLIGHT:
+                break
+            await asyncio.sleep(0.05)
+        await asyncio.sleep(0.2)
+
+    asyncio.run(_main())
+    return c, saida.get("resumo"), saida["dirty"], amb.pluggy.contas[c["item"]]
+
+
+def _expira_o_plano(user_id):
+    def _f(_c):
+        with get_conn() as conn:
+            conn.execute("update auth_accounts set plan='free' where user_id=%s", (user_id,))
+            conn.commit()
+        invalidate_auth_user_cache(user_id)
+    return _f
+
+
+def _readota_para(amb, outro):
+    def _f(c):
+        db.ensure_user(outro)
+        amb.meus.add(outro)
+        with get_conn() as conn:
+            conn.execute("delete from open_finance_connections where id=%s", (c["id"],))
+            conn.commit()
+        _nova(outro, reason="read_failed", item=c["item"])
+    return _f
+
+
+@pytest.mark.parametrize("mundo", ["acesso_expira", "readocao"])
+def test_retentativa_que_encontra_o_item_em_voo_nao_marca_dirty_nem_relê(
+        user_id, amb, monkeypatch, mundo):
+    """Depois de o sync em voo terminar não há leitura extra: nem com o plano do dono
+    expirado no meio, nem com a linha readotada por outro dono. O desfecho segue contando
+    como coalescido."""
+    muda = _expira_o_plano(user_id) if mundo == "acesso_expira" else _readota_para(amb, user_id + 1)
+    c, resumo, dirty, leituras = _em_voo_e_depois(user_id, amb, monkeypatch, muda=muda)
+    assert resumo["coalescidos"] == 1 and resumo["tentados"] == 1
+    assert dirty is False, "a retentativa marcou `_DIRTY`"
+    assert leituras == 1, f"{leituras} leituras: a rodada suja sincronizou depois da mudança"
+
+
+def test_webhook_que_encontra_o_item_em_voo_continua_marcando_dirty_e_relê(
+        user_id, amb, monkeypatch):
+    """Positivo: a base não muda. O webhook coalesce em `_DIRTY` e a rodada suja roda uma
+    vez mais, como sempre (sem dono e sem corte por plano: comportamento da base)."""
+    c, _resumo, dirty, leituras = _em_voo_e_depois(
+        user_id, amb, monkeypatch, muda=lambda c: None, quem_encontra="webhook")
+    assert dirty is True and leituras == 2
+    assert of_routes._INFLIGHT == {} and of_routes._DIRTY == set()
+
+
+def test_webhook_no_meio_de_um_sync_da_retentativa_vira_dirty_e_relê_uma_vez(user_id, amb):
+    """C2: o sync em voo é o da PRÓPRIA retentativa e chega um webhook. O webhook marca
+    `_DIRTY` e a re-execução cobre o evento (a retentativa não perde nada)."""
+    c = _nova(user_id, reason="read_failed")
+    solta = threading.Event()
+    amb.pluggy.durante_contas = lambda item: solta.wait(5)
+
+    async def _main():
+        alvo = asyncio.create_task(amb.orq.retentar_leituras(prazo_sec=3600))
+        for _ in range(200):
+            if c["item"] in of_routes._INFLIGHT:
+                break
+            await asyncio.sleep(0.02)
+        assert of_routes._schedule_pluggy_sync(c["item"]) is None
+        assert c["item"] in of_routes._DIRTY
+        amb.pluggy.durante_contas = None
+        solta.set()
+        await alvo
+        for _ in range(100):
+            if amb.pluggy.contas[c["item"]] >= 2 and c["item"] not in of_routes._INFLIGHT:
+                break
+            await asyncio.sleep(0.05)
+
+    asyncio.run(_main())
+    assert amb.pluggy.contas[c["item"]] == 2
+    assert of_routes._INFLIGHT == {} and of_routes._DIRTY == set()
+
+
+def test_sync_solto_pelo_prazo_e_coalescido_no_tique_seguinte_nao_ganha_rodada_suja(user_id, amb):
+    """O `shield` solta o tique e o sync segue vivo; o tique seguinte o encontra em voo e só
+    o conta como coalescido. Liberado, ele NÃO roda de novo (antes a retentativa marcava
+    `_DIRTY` e havia uma 2ª leitura); o webhook, esse sim, ganha a rodada suja
+    (`test_webhook_que_encontra_o_item_em_voo_continua_marcando_dirty_e_relê`)."""
+    c = _nova(user_id, reason="read_failed")
+    solta = threading.Event()
+    amb.pluggy.durante_contas = lambda item: solta.wait(10)
+    saida = {}
+
+    async def _main():
+        saida["r1"] = await amb.orq.retentar_leituras(prazo_sec=0.4)
+        t1 = of_routes._INFLIGHT.get(c["item"])
+        saida["vivo"] = t1 is not None and not t1.done()
+        saida["r2"] = await amb.orq.retentar_leituras(prazo_sec=0.4)
+        saida["dirty"] = c["item"] in of_routes._DIRTY
+        amb.pluggy.durante_contas = None
+        solta.set()
+        await t1
+        await asyncio.sleep(0.3)
+
+    asyncio.run(_main())
+    assert saida["r1"]["interrompido"] == "prazo" and saida["r1"]["pendurados"] == 1
+    assert saida["vivo"] and saida["dirty"] is False
+    assert saida["r2"]["coalescidos"] == 1 and saida["r2"]["tentados"] == 1
+    assert amb.pluggy.contas[c["item"]] == 1
+    assert of_routes._INFLIGHT == {} and of_routes._DIRTY == set()

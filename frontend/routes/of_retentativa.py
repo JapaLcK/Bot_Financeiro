@@ -2,8 +2,8 @@
 
 Depois do job de saúde, relê a Pluggy (só GET) para até K conexões com dado
 atrás, uma de cada vez, pelo MESMO caminho do webhook (`_schedule_pluggy_sync`,
-com `_INFLIGHT`/`_DIRTY`): um webhook do mesmo item no meio vira `_DIRTY` em vez
-de um sync paralelo, e a atualização ao vivo sai de graça. Mora aqui, e não em
+com `_INFLIGHT`): um webhook do mesmo item no meio vira `_DIRTY` em vez de um
+sync paralelo (a retentativa que encontra o item em voo NÃO marca `_DIRTY`), e a atualização ao vivo sai de graça. Mora aqui, e não em
 `core/`, porque `_INFLIGHT` é memória do laço deste pacote.
 
 Quem entra: `classe_de_retentativa` (`core/services/of_retentativa.py`), sobre a
@@ -122,8 +122,11 @@ async def retentar_leituras(*, prazo_sec: float) -> dict:
             # o tirava da lista até a Pluggy coletar de novo; também carimbava o
             # coalescido, que ninguém tentou. A ordem da fila vem de `_TENTADOS`
             # (memória), não da coluna (`docs/open_finance_estados.md` §2.2).
+            # `marcar_sujo=False`: o item em voo é só contado como coalescido. O `_DIRTY` não
+            # tem dono (a rodada suja roda sem `expected_user_id` e sem `filtrar_por_acesso`).
             tarefa = _of._schedule_pluggy_sync(linha["provider_item_id"],
-                                               expected_user_id=linha["user_id"])
+                                               expected_user_id=linha["user_id"],
+                                               marcar_sujo=False)
             tentados.append(linha["provider_item_id"])
             _TENTADOS[linha["id"]] = _quando()
             if tarefa is None:

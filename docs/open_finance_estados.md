@@ -370,7 +370,7 @@ próximo. Só GET: nenhum PATCH, nenhuma cota de coleta.
   resultado do sync, `investments_status`). 3 falhas seguidas (exceção: 5xx,
   timeout, rede) sem uma resposta no meio também. Neutros não contam:
   `sync_in_progress`, `stale_authorization`, `connection_not_found`,
-  pausada/removida e o coalescido em `_DIRTY`. Resposta da Pluggy (`ok`,
+  pausada/removida e o coalescido (item já em voo). Resposta da Pluggy (`ok`,
   `no_accounts`, `item_missing`) zera a conta.
   **Sem fome, mas não em `ceil(E/K)`:** cada tique gasta 3 tentativas em itens que
   falham sempre, e a fila (a coluna `last_attempt_at` quando a falha é gravada, a
@@ -388,6 +388,15 @@ próximo. Só GET: nenhum PATCH, nenhuma cota de coleta.
 - **Falha na etapa:** exceção em `retentar_leituras` vai só como tipo para o
   stderr (sem dado de usuário) e não segura o PATCH periódico; o `of_retry_tick`
   sai mesmo assim, com `interrompido: "erro"`.
+- **Quem marca `_DIRTY`:** só o webhook, a adoção e a reconexão
+  (`_schedule_pluggy_sync` com o padrão `marcar_sujo=True`). O `_DIRTY` não tem dono:
+  a rodada suja roda sem `expected_user_id` e sem `filtrar_por_acesso`, que é a
+  semântica do webhook e vem da base (não é do B2). A retentativa passa
+  `marcar_sujo=False`: encontrar o item em voo só o conta como coalescido, sem
+  rodada extra. Marcar `_DIRTY` faria a retentativa sincronizar depois de o dono
+  perder o acesso, ou o OUTRO dono de uma readoção. Fica de fora do B2, para decisão
+  do dono: a rodada suja do próprio webhook continuar sem corte por plano e sem
+  `expected_user_id`.
 - **Rechecagem:** antes de agendar, relê a linha pelo `id` com a mesma query e o
   mesmo classificador.
 - **Reavaliado por item (valor capturado antes de um `await`).** Uma passada dura
@@ -475,10 +484,10 @@ comportamental em `tests/frontend/of_refresh_ui.test.mjs`.
 
 | # | ordem | o que acontece | quem protege |
 |---|---|---|---|
-| C1 | webhook em voo, depois R do mesmo item | R não cria tarefa: `_DIRTY` e uma re-execução no fim; conta como coalescido | `_INFLIGHT`/`_DIRTY` |
-| C2 | R em voo, depois webhook | o webhook vira `_DIRTY` | idem |
+| C1 | webhook em voo, depois R do mesmo item | R não cria tarefa e **NÃO marca `_DIRTY`** (`marcar_sujo=False`); conta como coalescido, sem nova leitura. O sync em voo já está lendo, e o próximo tique reavalia elegibilidade e acesso | `_INFLIGHT` |
+| C2 | R em voo, depois webhook | o webhook marca `_DIRTY` e há uma re-execução no fim, como sempre | `_INFLIGHT`/`_DIRTY` |
 | C3 | Atualizar manual × R | leituras em paralelo, escritas serializadas pelo `pluggy_item_lock`; o perdedor devolve `sync_in_progress` (neutro) | lock + `geracao_vista`; o cooldown evita a maior parte |
-| C4 | reconexão durante R | a relectura sob o lock recusa o run (`stale_authorization`, neutro); a linha nova fica como a reconexão a deixou | relectura + par + `_DIRTY` |
+| C4 | reconexão durante R | a relectura sob o lock recusa o run (`stale_authorization`, neutro); a linha nova fica como a reconexão a deixou; a rota de reconexão (que marca `_DIRTY`) cobre a rodada da autorização nova | relectura + par + `_DIRTY` da reconexão |
 | C5 | job de saúde, depois R, no mesmo tique | sequenciais; o 404 e o `needs_user` recém-gravados saem da lista | ordem do laço |
 | C6 | duas réplicas no deploy | leituras duplicadas, escrita segura | lock + CAS |
 | C7 | a O/F do próprio R | a tabela §2.1 | PR-B1 |

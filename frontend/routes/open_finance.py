@@ -978,14 +978,20 @@ def _on_sync_done(item_id: str) -> None:
         _schedule_pluggy_sync(item_id)
 
 
-def _schedule_pluggy_sync(item_id: str, expected_user_id: int | None = None) -> asyncio.Task | None:
+def _schedule_pluggy_sync(item_id: str, expected_user_id: int | None = None, *,
+                          marcar_sujo: bool = True) -> asyncio.Task | None:
     """Agenda o sync de fundo do item e devolve a tarefa, ou None quando não criou
-    (item vazio, ou já em voo: coalescido em `_DIRTY`). A re-execução do `_DIRTY`
-    (`_on_sync_done`) roda sem `expected_user_id`, como o webhook."""
+    (item vazio, ou já em voo). Já em voo, `marcar_sujo` (o padrão: webhook, adoção,
+    reconexão) coalesce em `_DIRTY`, e a re-execução (`_on_sync_done`) roda sem
+    `expected_user_id` e sem corte por plano, como o webhook. A retentativa do tique
+    passa `marcar_sujo=False`: o `_DIRTY` não tem dono, e uma rodada extra dela
+    sincronizaria depois de o dono perder o acesso ou de uma readoção. Ela é melhor
+    esforço: o sync em voo já está lendo e o próximo tique reavalia o item."""
     if not item_id:
         return None
     if item_id in _INFLIGHT:
-        _DIRTY.add(item_id)   # coalesce: uma re-execução no fim, não uma task por evento
+        if marcar_sujo:
+            _DIRTY.add(item_id)   # coalesce: uma re-execução no fim, não uma task por evento
         return None
     dono = {} if expected_user_id is None else {"expected_user_id": expected_user_id}
     task = asyncio.create_task(_run_pluggy_sync_bg(item_id, **dono), name=f"pluggy_sync_{item_id}")

@@ -441,11 +441,13 @@ def test_disjuntor_de_falhas_seguidas(user_id, amb, sequencia, tentados):
                                                else None)
 
 
-def test_coalescido_marca_dirty_e_nao_cria_tarefa(user_id, amb):
+def test_coalescido_nao_cria_tarefa_e_nao_marca_dirty(user_id, amb):
+    """A retentativa que encontra o item em voo só o conta como coalescido: não cria tarefa
+    e NÃO marca `_DIRTY` (o webhook marca; ver `test_of_retentativa_tique.py`)."""
     c = _nova(user_id, reason="read_failed")
     of_routes._INFLIGHT[c["item"]] = object()
     tick = _retenta(amb)
-    assert amb.pluggy.chamadas[c["item"]] == 0 and c["item"] in of_routes._DIRTY
+    assert amb.pluggy.chamadas[c["item"]] == 0 and c["item"] not in of_routes._DIRTY
     assert tick["details"]["coalescidos"] == 1
 
 
@@ -525,7 +527,7 @@ def test_no_accounts_a_frente_com_5xx_passageiro_volta_a_ser_retentado(user_id, 
 
 
 def test_coalescido_nao_gasta_a_janela_da_tentativa(user_id, amb):
-    """Item em voo (coalescido em `_DIRTY`): ninguém o tentou, e o `last_attempt_at`
+    """Item em voo (coalescido, sem `_DIRTY`): ninguém o tentou, e o `last_attempt_at`
     e a origem ficam como estavam."""
     c = _nova(user_id, reason="read_failed")
     antes = _linha(c["id"])
