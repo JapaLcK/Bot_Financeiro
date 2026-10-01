@@ -336,6 +336,23 @@ async def update_security_contact_route(
                 # claro deixa o hash apontando pro valor antigo e o bot nunca
                 # reconhece o número novo.
                 if email:
+                    # Pendência do e-mail no Stripe (PR 4b), na MESMA transação: o
+                    # 409 do e-mail repetido desfaz as duas. Compara no banco, não
+                    # no `old_email` do cache. O `on conflict` NÃO zera o claim de
+                    # propósito: com B em envio, C espera o `fechar` de B falhar
+                    # pela versão — senão outra rodada mandaria C com B ainda em
+                    # voo, e B podia chegar ao Stripe depois de C.
+                    await cur.execute(
+                        """
+                        INSERT INTO stripe_email_pendente (user_id)
+                        SELECT DISTINCT user_id FROM auth_accounts
+                         WHERE user_id = %s AND stripe_customer_id IS NOT NULL
+                           AND email_hash IS DISTINCT FROM %s
+                        ON CONFLICT (user_id) DO UPDATE
+                           SET versao = stripe_email_pendente.versao + 1, tentativas = 0
+                        """,
+                        (user_id, hash_pii_optional(email, kind="email")),
+                    )
                     await cur.execute(
                         """
                         UPDATE auth_accounts

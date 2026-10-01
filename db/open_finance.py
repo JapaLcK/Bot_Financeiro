@@ -289,8 +289,8 @@ def get_open_finance_snapshot(user_id: int, limit: int = 8) -> dict:
                 -- sair (logo abaixo, DENTRO do laço, por item, logo depois do
                 -- `connection_ui_state` que o consome): o corpo HTTP fica
                 -- idêntico em chaves ao de antes deste PR.
-                select id, provider, provider_item_id, status, institution_name, last_sync_at,
-                       last_attempt_at, status_reason, health, reconnected_at,
+                select id, provider, provider_item_id, status, institution_name, institution_id,
+                       last_sync_at, last_attempt_at, status_reason, health, reconnected_at,
                        {SQL_EXECUTION_STATUS},
                        {SQL_COLETA_VENCIDA}
                 from open_finance_connections
