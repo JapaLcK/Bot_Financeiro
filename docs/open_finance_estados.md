@@ -81,9 +81,13 @@ comando; não copie o resultado para cá (`CLAUDE.md` §2).
    legitimamente em curso. Passado o prazo (D1) ou registrada uma falha, a tela diz
    o que houve. **Vigente desde o PR-B1:**
    - a falha de um sync grava `read_failed`: a foto do run (**O**, abaixo) a cada
-     tentativa que falha depois do `GET /items`, e a marca (**F**) na falha final.
+     tentativa que falha depois do `GET /items`, e a marca (**F**) na falha final,
+     que é a exceção final do sync de fundo OU o `sync_in_progress` devolvido nas
+     três tentativas (lock do item ou semáforo do processo ocupado: célula 30).
      No sync de fundo, portanto, "Erro temporário" já aparece durante o backoff
-     entre as tentativas (célula 29 da §2.1). O motivo pendente fala
+     entre as tentativas (célula 29 da §2.1). A frase "Tentaremos de novo
+     automaticamente" só passa a ser verdade com a retentativa do PR-B2: o B1
+     sozinho marca e para. O motivo pendente fala
      antes do "Atualizando…" ("Erro temporário"): no ramo sem `health` qualquer
      motivo pendente; no ramo com `health` em coleta (`UPDATING`/`CREATED`) só
      falha de LEITURA (`read_failed`; `investments_read_failed` sem sync continua
@@ -283,6 +287,9 @@ nome (`test_c9b_…`).
 | 28 | — | dois donos do mesmo item desde o início do run | G | nada gravado em nenhuma linha (a captura do sync de fundo e o sync levantam `AmbiguousItemError`; no lote, a F recebe a exceção e sai). Com um dono e o banco fora só na captura do sync de fundo, a O roda e grava na linha do dono | `c28_…`, `c28c_…` |
 | 28b | — | um segundo dono aparece depois da leitura inicial e antes da releitura de posse | L (a releitura levanta `AmbiguousItemError`) | nada gravado em nenhuma linha: nem a O nem a F (Codex #718). Antes, a O gravava a foto e `read_failed` na linha do 1º dono | `c28b_…[sync, bg, lote]`; positivo `c28d_…` |
 | 29 | nenhum | sync de fundo: 1ª tentativa falha em L, as outras em G | L, G | a O da 1ª grava; a F final regrava. **Erro temporário** já durante o backoff | `c29_…` |
+| 30 | nenhum | `sync_in_progress` (devolvido, não levantado) nas 3 tentativas do sync de fundo, ninguém sincroniza | — | a F marca `read_failed` (antes: nada, e a 1ª conexão ficava **Atualizando…** até o prazo e depois "demorando mais que o normal"). **Erro temporário**; a promessa "Tentaremos de novo" é do PR-B2 | `c30_…` |
+| 30b | nenhum | o mesmo, mas o sync que segurava o lock termina bem antes da marca | — | a F recusa (o par mudou). **Atualizado** | `c30b_…` |
+| 30c | nenhum | `sync_in_progress` na 1ª tentativa e sucesso na 2ª | — | sem marca. **Atualizado** | `c30c_…` |
 
 **Conserto de classe previsto para as corridas do job (PR-C):** o CAS do PR-A
 compara só `status_reason`, que é o dado de que a decisão do job depende, e
