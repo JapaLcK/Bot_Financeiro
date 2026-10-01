@@ -38,9 +38,12 @@ def gravar_fotos_do_dia(now: datetime | None = None) -> dict | None:
 
     dia = local.date()
     gravadas = falhas = 0
-    for uid in filtrar_por_acesso(patrimonio.candidatos(dia)):
+    for uid in patrimonio.candidatos(dia):
         try:
-            gravadas += patrimonio.gravar_foto(uid, dia)
+            # Um por vez, dentro do try: sobre a lista inteira, a checagem de UM
+            # usuário que levantasse matava a volta de todos.
+            if filtrar_por_acesso([uid]):
+                gravadas += patrimonio.gravar_foto(uid, dia)
         except Exception as exc:
             falhas += 1
             # Só o tipo: a mensagem do psycopg pode trazer valor da linha.

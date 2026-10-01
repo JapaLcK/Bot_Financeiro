@@ -209,6 +209,23 @@ def test_falha_de_um_usuario_nao_para_os_outros(monkeypatch, ligado):
     assert _fotos(a) == [] and len(_fotos(b)) == 1
 
 
+def test_checagem_de_acesso_que_levanta_nao_para_os_outros(monkeypatch, ligado):
+    import core.reports.reports_daily as rd
+    a, b = usuario_pagante(), usuario_pagante()
+    _so(monkeypatch, a, b)
+    real = rd.filtrar_por_acesso
+
+    def quebra_o_a(user_ids):
+        if a in user_ids:
+            raise RuntimeError("x")
+        return real(user_ids)
+
+    monkeypatch.setattr(rd, "filtrar_por_acesso", quebra_o_a)
+    r = job.gravar_fotos_do_dia(_utc(30, 23))
+    assert (r["gravadas"], r["falhas"]) == (1, 1)
+    assert _fotos(a) == [] and len(_fotos(b)) == 1
+
+
 # ── LGPD ─────────────────────────────────────────────────────────────────────
 
 def test_exportacao_leva_o_historico(uid):
