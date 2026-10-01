@@ -301,6 +301,8 @@ _VERBOS_SAIDA_SOLTA = _VERBOS_SAIDA + ("gastando",)
 # A UNIÃO — o que o veto do crédito lê. Verbo novo em QUALQUER uma das tuplas
 # entra no veto sem ninguém precisar lembrar de mexer no outro arquivo.
 VERBOS_DE_LANCAMENTO = frozenset(_VERBOS_SAIDA_SOLTA + _VERBOS_ENTRADA)
+# `_VERBOS_LANC_RE` (pergunta comparativa, mais abaixo) estende esta união com
+# "gastou" e "gastamos", só para aquela heurística.
 
 # ---------------------------------------------------------------------------
 # Tier 2 — Regex / alias (normalizado)
@@ -700,38 +702,105 @@ def _is_boleto_ai_query(norm: str) -> bool:
 # que no passado?", "gastei mais em 2025 ou 2026?") vai pra IA (compare_periods),
 # não pro launches.add — que perguntava o valor ou gravava o ano como R$ 2.025.
 # Só vale com mais/menos/muito/demais SEM quantidade logo depois ("gastei mais 30"
-# e "gastei mais ou menos 50" seguem lançamento) E com "?" ou marcador.
-# ponytail: heurística de prefixo; "gastei bem mais esse mês?" escapa.
-_VERBOS_LANC_RE = "|".join(sorted(VERBOS_DE_LANCAMENTO, key=len, reverse=True))
-_QTD = rf"(?:(?:uns|umas)\s+)?(?:\d|r\s|(?:{PT_NUM_ALT_NO_ARTICLE})\b)"   # "r\s" = "R$" depois do _normalize
+# e "gastei mais ou menos 50" seguem lançamento) E com "?" ou marcador. Antes do
+# verbo, pula um prefixo de lista FECHADA ("oi", "eu", "sera que").
+# ponytail: heurística. Limites medidos em 2026-09-30 (remeça antes de reusar):
+#   GRAVAM dinheiro: "gastei mais 2025?" (R$ 2.025, um ano só); "gastei mais no
+#   ano de 2025" e "gastei mais de 2025 pra ca" (R$ 2.025: o marcador de ano não
+#   tem "de", decisão do dono); "gastei mais de 2024 do que 2025" (R$ 2.024);
+#   "gastei+ em 2025 ou 2026?" (R$ 2.025); "gastei uns 200 a mais que no mes
+#   passado?" e "gastei duzentos a mais que no mes passado?" (R$ 200); "gastei
+#   mais nos ultimos tres meses" (R$ 3); "gastei 200 a mais do mes passado?" (sem
+#   "que") e "gastei 200 a mais em relacao ao mes passado?" (R$ 200, mesmo com
+#   "?"); e, por decisão do dono, sem "?": "N a mais que", "acima de" e
+#   percentual ("gastei mais 30% esse mês" grava R$ 30).
+#   SÓ NÃO VAI PRA IA: prefixo fora da lista ("tipo gastei mais em 2025?") escapa
+#   do `classify`, mas as portas pegam pela varredura e a conversa nova não grava.
+# "gastou"/"gastamos" só aqui (não estão em `VERBOS_DE_LANCAMENTO`). Que "gastamos
+# 50 no mercado" não grave é lacuna preexistente do Tier 2, não decisão.
+_VERBOS_LANC_RE = "|".join(sorted(VERBOS_DE_LANCAMENTO | {"gastou", "gastamos"},
+                                  key=len, reverse=True))
+_ANO = r"(?:19|20)\d\d"
+# "mais 2025 ou 2026": ano seguido de conector e outro ano não é quantidade.
+_QTD = (rf"(?:(?:uns|umas)\s+)?(?:(?!{_ANO}\s+(?:ou|x|vs|e|q|que|do que)\s+(?:em\s+)?{_ANO}\b)\d"
+        rf"|r\s|(?:{PT_NUM_ALT_NO_ARTICLE})\b)")   # "r\s" = "R$" depois do _normalize
+# Sem "^": as regexes rodam com `.match(norm, pos)` a partir de cada verbo.
 _COMPARATIVO_RE = re.compile(
-    rf"^(?:{_VERBOS_LANC_RE})\s+(?:mais|menos|muito|demais)\b"
+    rf"(?:{_VERBOS_LANC_RE})\s+(?:(?:bem|mto|mt)\s+)?(?:mais|menos|muito|demais)\b"
     rf"(?!\s+{_QTD})"                  # "gastei mais (uns) 30", "paguei menos 10", "mais trinta"
     rf"(?!\s+ou\s+menos\s+{_QTD})"     # "gastei mais ou menos (uns) 50 no mercado"
 )
-# "que" só COLADO ao comparativo ("mais que", "menos do que"): o "que" relativo
-# ("mais um pix de 50 que o joao mandou") é lançamento. O "ou" de "mais ou
-# menos" é aproximação, não alternativa.
-_MARCADOR_COMPARACAO_RE = re.compile(
-    r"\b(?:(?:mais|menos) (?:do )?que|(?<!\bmais )ou|passado|passada|anterior|normal|comum|antes)\b"
+# Só com "?". Sem, informam o valor: "paguei 20 a mais que o normal na luz",
+# "paguei acima do normal 200 na luz", "gastei 30% a mais no uber".
+_SO_COM_PERGUNTA_RE = re.compile(
+    rf"(?:{_VERBOS_LANC_RE})\s+(?:(?:r\s+)?[\d\s]+(?:reais\s+)?a\s+(?:mais|menos)\s+(?:do\s+)?(?:que|q)\b"
+    rf"|porcento\s+(?:a\s+)?(?:mais|menos)\b"
+    rf"|(?:acima|abaixo)\b(?!\s+{_QTD}))"
 )
+# "que" só COLADO ao comparativo ("mais que", "menos do que"; "q" é o mesmo "que"
+# abreviado): o "que" relativo ("mais um pix de 50 que o joao mandou") é
+# lançamento. O "ou" de "mais ou menos" é aproximação, não alternativa. Ano só
+# depois de preposição, e sem "de": "gastei mais de 2000 no carro" é lançamento,
+# igual a "mais de 100".
+_MARCADOR_COMPARACAO_RE = re.compile(
+    r"\b(?:(?:mais|menos) (?:do )?(?:que|q)|(?<!\bmais )ou|passado|passada|anterior|normal|comum|antes"
+    rf"|comparad[oa]s?|(?:em|no|desde|ate) {_ANO}|ultim[oa]s \d+ (?:dias|semanas|meses|anos))\b"
+)
+_PREFIXO_RE = re.compile(
+    r"^(?:(?:oi|ola|opa|eai|e ai|piggy|eu|sera que|sera q|sera|sabe se|me diz se|me fala se)\s+)*")
+_VERBO_LANC_RE = re.compile(rf"\b(?:{_VERBOS_LANC_RE})\b", re.IGNORECASE)
+
+
+def _sem_simbolo(text: str) -> str:
+    """O _normalize apaga "%", "+" e "-": "mais 30%" não é quantidade, "+ ou -" é
+    "mais ou menos", e "+" solto é "mais"."""
+    # Quem garante a linearidade é o `(?<!\d)`: a regex só tenta do início de cada
+    # número (sem ele, "1"*20000 + " x%" é O(n²)). O `if "%"` só poupa o trabalho.
+    t = re.sub(r"(?<!\d)\d+(?:[.,]\d+)?\s*%", "porcento", text) if "%" in text else text
+    t = re.sub(r"\+\s*ou\s*-", "mais ou menos", t)
+    return re.sub(r"(?<!\S)\+(?=\s)", "mais", t)
+
+
+def _comparativa_em(norm: str, pos: int, tem_pergunta: bool, tem_marcador: bool) -> bool:
+    """Pergunta comparativa começando no verbo em `norm[pos]`."""
+    if tem_pergunta and _SO_COM_PERGUNTA_RE.match(norm, pos):
+        return True
+    return (tem_pergunta or tem_marcador) and bool(_COMPARATIVO_RE.match(norm, pos))
 
 
 def is_comparative_question(text: str) -> bool:
     """True se a mensagem é pergunta comparativa com verbo de lançamento."""
-    norm = _normalize(text)
-    if not _COMPARATIVO_RE.match(norm):
-        return False
-    return "?" in (text or "") or bool(_MARCADOR_COMPARACAO_RE.search(norm))
+    raw = _sem_simbolo(text or "")
+    norm = _PREFIXO_RE.sub("", _normalize(raw))
+    return _comparativa_em(norm, 0, "?" in raw, bool(_MARCADOR_COMPARACAO_RE.search(norm)))
 
 
-def contains_comparative_question(text: str) -> bool:
-    """`is_comparative_question` no texto inteiro OU em algum pedaço dele. As
-    portas da pergunta de valor usam esta: em "paguei a luz e gastei mais em
-    2025 ou 2026?" o texto inteiro não é comparativo e o valor extraído é 2025."""
-    from parsers import split_financial_transactions  # local: parsers importa daqui
-    return is_comparative_question(text) or any(
-        is_comparative_question(p) for p in split_financial_transactions(text))
+def _sem_conector_final(cabeca: str) -> str:
+    """Tira de "paguei a luz e " / "gastei 30 no uber. " o que liga ao pedaço cortado.
+    Sem regex ancorada no fim: sobre uma corrida de espaços ela seria O(n²)."""
+    cabeca = cabeca.rstrip(" \t\n,.;")
+    resto, _, ultima = cabeca.rpartition(" ")
+    return resto.rstrip(" \t\n,.;") if ultima.lower() in ("e", "tb", "mas") else cabeca
+
+
+def _inicio_da_pergunta(text: str) -> int | None:
+    """Índice em `text` do verbo onde começa a 1ª pergunta comparativa, ou None.
+    Linear: normaliza uma vez e vale para cada verbo o "?" e o marcador que vêm
+    DEPOIS dele. O verbo do texto original é o de mesma ordem no normalizado."""
+    raw = _sem_simbolo(text)
+    norm = _normalize(raw)
+    ultima_pergunta = raw.rfind("?")
+    # O "?" vira espaço no _normalize, então o texto antes dele normaliza para um prefixo de `norm`.
+    corte = len(_normalize(raw[:ultima_pergunta])) if ultima_pergunta >= 0 else -1
+    ultimo_marcador = max((m.start() for m in _MARCADOR_COMPARACAO_RE.finditer(norm)), default=-1)
+    verbos = [m.start() for m in _VERBO_LANC_RE.finditer(norm)]
+    for k, pos in enumerate(verbos):
+        if _comparativa_em(norm, pos, pos < corte, pos <= ultimo_marcador):
+            brutos = [m.start() for m in _VERBO_LANC_RE.finditer(text)]
+            # Verbo que o `_normalize` achou e o original não (ex.: largura total): sem
+            # como cortar com segurança, a mensagem inteira é pergunta.
+            return brutos[k] if len(brutos) == len(verbos) else 0
+    return None
 
 
 def sem_perguntas_comparativas(text: str) -> tuple[str, list[str]]:
@@ -740,16 +809,33 @@ def sem_perguntas_comparativas(text: str) -> tuple[str, list[str]]:
     inteira (conta, compra no crédito, fatura) lê deste texto: o 2025 de "paguei
     a luz e gastei mais em 2025 ou 2026?" é da pergunta (#568).
 
-    Tem de concordar com `contains_comparative_question` (tira algo ⇔ ela diz
-    True); quem prende isso é `test_sem_perguntas_comparativas_concorda_com_contains`.
-    A #569, quando estender o detector à varredura por verbo, estende esta função
-    junto, senão a conta volta a ler o valor da pergunta."""
+    A pergunta começa no 1º verbo de lançamento que a abre (`_inicio_da_pergunta`,
+    vale ".", ";", "tb" e fala sem conector): o que vem ANTES é o pedaço legítimo
+    e o que vem DEPOIS sai junto. Pedaço do split sem verbo próprio ("... e mais
+    que o normal no bar?") herda o do anterior e só o split o acha.
+
+    É a ÚNICA detecção: `contains_comparative_question` é `bool(puladas)` (§0.7)."""
     from parsers import split_financial_transactions  # local: parsers importa daqui
-    partes = split_financial_transactions(text)
+    t = text or ""
+    pos = _inicio_da_pergunta(t)
+    if pos is not None:
+        cabeca = t[:pos]
+        if not _PREFIXO_RE.sub("", _normalize(cabeca) + " "):  # "oi gastei mais...": só prefixo antes
+            return "", [t]
+        return _sem_conector_final(cabeca), [t[pos:]]
+    partes = split_financial_transactions(t)
     puladas = [p for p in partes if is_comparative_question(p)]
     if puladas:
         return " e ".join(p for p in partes if p not in puladas), puladas
-    return ("", [text]) if is_comparative_question(text) else (text, [])
+    return text, []
+
+
+def contains_comparative_question(text: str) -> bool:
+    """True se `sem_perguntas_comparativas` tira algo: a pergunta no texto inteiro,
+    em algum pedaço do split OU a partir de algum verbo. As portas da pergunta de
+    valor usam esta: em "paguei a luz e gastei mais em 2025 ou 2026?" o texto
+    inteiro não é comparativo e o valor extraído é 2025."""
+    return bool(sem_perguntas_comparativas(text)[1])
 
 
 # ---------------------------------------------------------------------------
