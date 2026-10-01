@@ -724,6 +724,15 @@ def _is_boleto_ai_query(norm: str) -> bool:
 #   só o pedaço. E #699: verbo acentuado ("gastei no uber. Gastéi mais em 2025 ou
 #   2026?") grava R$ 2.025: a contagem de verbos diverge, `sem_perguntas` devolve
 #   ("", [texto]) e o `add()` cai no fluxo antigo com o texto inteiro.
+#   Contexto fora da lista antes do verbo ("ontem gastei muito no bar 80?", Codex
+#   P2 do #739): o `classify` o manda ao `launches.add` e o `add()` recusa pelo "?"
+#   ("Não consegui identificar o valor" + o aviso). Medido em 2026-10-02 pela
+#   conversa: sem "ontem"/"hoje" a frase já não grava na main (vai à IA/ajuda,
+#   regra "? basta" do #570); com eles a main gravava R$ 80 por acidente. "ontem
+#   gastei 80 no bar?", "ontem paguei 120 de luz?" e "ontem recebi 500 do freela?"
+#   gravam igual na main e aqui. Coerente com a regra do dono, só a mensagem
+#   destoa. Pôr "ontem/hoje" em `_PREFIXO_RE` alinharia o `classify`, mas é
+#   decisão de produto.
 #   SÓ NÃO VAI PRA IA: prefixo fora da lista ("tipo gastei mais em 2025?") escapa
 #   do `classify`, mas as portas pegam pela varredura e a conversa nova não grava.
 # "gastou"/"gastamos" só aqui (não estão em `VERBOS_DE_LANCAMENTO`). Que "gastamos
