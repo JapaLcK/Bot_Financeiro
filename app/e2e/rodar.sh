@@ -46,6 +46,7 @@ APP_ID=com.pigbankai.mobile$([ $APP_ENV = development ] && echo .dev || echo .$A
 
 UVICORN=""
 ROSTO=""
+RESTAURAR=0  # 1 enquanto o build pode ter reescrito app/package.json e app/.gitignore
 DB=pigbank_e2e_$E2E_RUN
 limpar() {
   local rc=$?
@@ -57,6 +58,8 @@ limpar() {
   # O laço do Face ID do 05b: um TERM no meio dele sairia antes do `kill $ROSTO` lá embaixo.
   if [ -n "$ROSTO" ]; then kill "$ROSTO" 2>/dev/null || true; fi
   if [ "$ALVO" = local ]; then dropdb --if-exists --force "$DB" || true; fi
+  # Sinal no meio do build: o `git checkout` do fim do compilar não chega a rodar.
+  if [ "$RESTAURAR" = 1 ]; then git -C "$RAIZ/app" checkout -- package.json .gitignore || true; fi
   rm -rf "$E2E_DIR"
 }
 trap limpar EXIT
@@ -147,12 +150,14 @@ compilar() {
     echo "app/package.json ou app/.gitignore com mudança local — recuso compilar" >&2; exit 1
   fi
   local ok=0
+  RESTAURAR=1
   # prebuild --clean: o bundle id (e o Info.plist) muda com o APP_ENV.
   APP_ENV=$APP_ENV EXPO_PUBLIC_API_URL=$E2E_API SENTRY_DISABLE_AUTO_UPLOAD=true LANG=en_US.UTF-8 \
     npx expo prebuild --clean --platform ios &&
     APP_ENV=$APP_ENV EXPO_PUBLIC_API_URL=$E2E_API SENTRY_DISABLE_AUTO_UPLOAD=true LANG=en_US.UTF-8 \
       npx expo run:ios --configuration Release --device "$UDID" --no-bundler || ok=$?
   git checkout -- package.json .gitignore
+  RESTAURAR=0
   cd "$RAIZ"
   [ $ok = 0 ] || { echo "build falhou" >&2; exit 1; }
 }
