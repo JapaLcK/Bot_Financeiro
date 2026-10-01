@@ -121,7 +121,16 @@ comando; não copie o resultado para cá (`CLAUDE.md` §2).
        com `dono_unico`, e a condição `not exists` (outra conexão com o mesmo
        `provider` e `provider_item_id`, o critério de
        `get_connections_by_item_id`) é atômica com a escrita. Nenhuma janela
-       entre ler a posse e gravar;
+       entre ler a posse e gravar. **Limite conhecido:** um item compartilhado só
+       existe onde o índice `uq_of_conn_provider_item` não foi criado (a criação
+       só emite warning se falhar; em produção ele existe, medido em 2026-09-23).
+       Nesse banco, uma inserção concorrente do segundo dono, dentro da mesma
+       instrução do `UPDATE`, não é vista pelo `not exists` (snapshot de
+       instrução). Consequência: um `read_failed` e a foto na linha do usuário do
+       run, que o próximo sync ou a próxima observação reescrevem. Não se toma o
+       `pluggy_item_lock` na marca: seria uma segunda aquisição por quem às vezes
+       já o segura, e ocuparia o semáforo `OF_SYNC_LOCK_MAX_CONN`. Quem rodar sem o
+       índice precisa criá-lo;
    - "sem sync desde a autorização atual" é o MESMO predicado nos dois lados:
      `last_sync_at` nulo ou anterior a `reconnected_at` (nunca `created_at`, que é
      relógio do Postgres contra o `last_sync_at` do Python);
