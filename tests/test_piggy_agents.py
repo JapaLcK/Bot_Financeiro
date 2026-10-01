@@ -1747,3 +1747,54 @@ def test_detetive_duplicate_sem_achados_nao_emite(monkeypatch):
     fired = pa._detetive_duplicate_detect_for_user(
         {"agent_id": 1, "user_id": 42}, _date(2026, 8, 19))
     assert fired == 0
+
+
+# ── Manchete: sem % de variação, cita o mês anterior em valor ────────────────
+
+def _m(entrou, saiu, aportes=0.0):
+    return {"entrou": entrou, "saiu": saiu, "aportes": aportes,
+            "sobrou": entrou - saiu - aportes}
+
+
+def test_manchete_virada_de_sinal():
+    from core.services.piggy_agents import _manchete_texto
+    texto = _manchete_texto(_m(10163.02, 11507.05), _m(5000, 3341), "setembro", "agosto")
+    assert texto == (
+        "Em setembro, entraram R$ 10.163,02 e saíram R$ 11.507,05, resultando em "
+        "um déficit de R$ 1.344,03. Em agosto, você havia encerrado "
+        "com uma sobra de R$ 1.659,00."
+    )
+    assert "%" not in texto and "—" not in texto
+
+
+def test_manchete_sobra_nos_dois_meses():
+    from core.services.piggy_agents import _manchete_texto
+    texto = _manchete_texto(_m(3000, 1000), _m(2000, 1000), "setembro", "agosto")
+    assert "resultando em uma sobra de R$ 2.000,00." in texto
+    assert texto.endswith("com uma sobra de R$ 1.000,00.")
+
+
+def test_manchete_mes_anterior_sem_movimento_nao_cita():
+    from core.services.piggy_agents import _manchete_texto
+    texto = _manchete_texto(_m(100, 40), _m(0, 0), "setembro", "agosto")
+    assert texto.endswith("resultando em uma sobra de R$ 60,00.")
+
+
+def test_manchete_cita_aporte_para_a_conta_fechar():
+    from core.services.piggy_agents import _manchete_texto
+    texto = _manchete_texto(_m(3000, 1000, 500), _m(0, 0), "setembro", "agosto")
+    assert "saíram R$ 1.000,00, R$ 500,00 foram para as caixinhas, resultando em uma sobra de R$ 1.500,00." in texto
+    texto = _manchete_texto(_m(3000, 1000, -500), _m(0, 0), "setembro", "agosto")
+    assert "R$ 500,00 voltaram das caixinhas, resultando em uma sobra de R$ 2.500,00." in texto
+
+
+def test_manchete_mes_anterior_so_com_aporte_conta_como_movimento():
+    from core.services.piggy_agents import _manchete_texto
+    texto = _manchete_texto(_m(100, 40), _m(0, 0, 300), "setembro", "agosto")
+    assert texto.endswith("Em agosto, você havia encerrado com um déficit de R$ 300,00.")
+
+
+def test_manchete_mes_zerado_com_ruido_de_float_nao_vira_deficit():
+    from core.services.piggy_agents import _manchete_texto
+    texto = _manchete_texto(_m(0.3, 0.1, 0.2), _m(0, 0), "setembro", "agosto")
+    assert "uma sobra de R$ 0,00" in texto and "déficit" not in texto
