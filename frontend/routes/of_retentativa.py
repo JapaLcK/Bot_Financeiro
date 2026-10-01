@@ -75,27 +75,34 @@ async def retentar_leituras(*, prazo_sec: float) -> dict:
     seguidas = 0
     try:
         candidatas = elegiveis(await asyncio.to_thread(list_connections_para_retentar))
-        # D3 = A: sem direito de uso hoje não entra, como todo laço proativo. Filtra
-        # ANTES do corte, senão conta cortada tomaria vaga do K.
-        donos = sorted({r["user_id"] for r, _ in candidatas})
-        com_acesso = set(await asyncio.to_thread(filtrar_por_acesso, donos)) if donos else set()
-        fila = [(r, c) for r, c in candidatas if r["user_id"] in com_acesso]
         # Quem este processo ainda não tentou vem primeiro; entre os tentados, o mais
         # antigo primeiro (rodízio). `sorted` é estável: os empates seguem a ordem da
-        # listagem (`last_attempt_at nulls first, id`). Ordena ANTES do corte K.
+        # listagem (`last_attempt_at nulls first, id`).
         ids = {r["id"] for r, _ in candidatas}
         for i in [i for i in _TENTADOS if i not in ids]:
             del _TENTADOS[i]
-        fila = sorted(fila, key=lambda rc: _TENTADOS.get(rc[0]["id"], float("-inf")))[:k]
+        fila = sorted(candidatas, key=lambda rc: _TENTADOS.get(rc[0]["id"], float("-inf")))
+        # Dono já visto SEM acesso nesta passada: o resto das conexões dele é pulado sem
+        # consulta (o acesso é por dono). Só guarda o NEGATIVO: o positivo é refeito antes
+        # de cada item agendado, porque o plano pode expirar durante a passada.
+        cortados: set[int] = set()
 
+        # A passada percorre a fila JÁ ORDENADA e para ao agendar K itens, ou no prazo.
+        # Nada é consultado por candidato antes do laço: a listagem e a classificação
+        # (pura) são as únicas O(candidatos); a rechecagem e o acesso são por item
+        # percorrido, e o acesso no máximo uma vez por dono cortado + uma por item agendado.
         for row, _classe in fila:
-            # Tudo o que foi decidido antes da passada (o acesso, a linha, o prazo) vale
-            # no máximo até aqui: uma passada dura até metade do intervalo, e a
-            # rechecagem pode esperar o pool por até 30 s. Cada um é REAVALIADO por
-            # item, imediatamente antes de agendar (abaixo).
+            if len(tentados) >= k:
+                break
+            # Tudo o que foi decidido antes da passada (a linha, o prazo) vale no máximo até
+            # aqui: uma passada dura até metade do intervalo, e a rechecagem pode esperar o
+            # pool por até 30 s. Cada um é REAVALIADO por item, imediatamente antes de agendar.
             if prazo_sec - (_relogio() - inicio) <= 0:
                 interrompido = "prazo"
                 break
+            if row["user_id"] in cortados:
+                conta["sem_acesso"] += 1
+                continue
             # Rechecagem: o tique pode levar dezenas de minutos, e um Atualizar ou uma
             # reconexão no meio tiram a linha sem custo de Pluggy.
             atual = await asyncio.to_thread(list_connections_para_retentar, id=row["id"])
@@ -104,10 +111,11 @@ async def retentar_leituras(*, prazo_sec: float) -> dict:
                 continue
             linha = atual[0]
             # Acesso do dono AGORA: um plano ou trial que expirou durante a passada não
-            # sincroniza o item seguinte. A mesma `filtrar_por_acesso` do corte inicial
-            # (§0.7), com o dono deste item (uma consulta por item tentado, no máximo K).
-            # Pulado não é tentado: fica fora de `_TENTADOS` e de `tentados`.
+            # sincroniza o item seguinte. É a mesma `filtrar_por_acesso` dos laços proativos
+            # (§0.7), com o dono deste item. Item de dono cortado é pulado e NÃO toma vaga do
+            # K: fica fora de `_TENTADOS` e de `tentados`.
             if not await asyncio.to_thread(filtrar_por_acesso, [linha["user_id"]]):
+                cortados.add(linha["user_id"])
                 conta["sem_acesso"] += 1
                 continue
             # O prazo restante DEPOIS das duas consultas acima: o valor do começo da

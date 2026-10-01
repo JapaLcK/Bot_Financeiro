@@ -809,3 +809,122 @@ def test_sync_solto_pelo_prazo_e_coalescido_no_tique_seguinte_nao_ganha_rodada_s
     assert saida["r2"]["coalescidos"] == 1 and saida["r2"]["tentados"] == 1
     assert amb.pluggy.contas[c["item"]] == 1
     assert of_routes._INFLIGHT == {} and of_routes._DIRTY == set()
+
+
+# ── o custo do acesso é limitado por K e pelo prazo, não pelo backlog (Codex, #727) ──
+# Antes o orquestrador passava TODOS os donos elegíveis ao `filtrar_por_acesso` antes do
+# corte K: um backlog de milhares de conexões virava milhares de consultas sequenciais
+# por tique, fora da checagem de prazo. Agora a checagem é preguiçosa, por item.
+
+def _muitos_donos(user_id, amb, n):
+    """`n` donos distintos (o `user_id` e mais `n - 1`), cada um com uma conexão
+    `read_failed`, da mais antiga para a mais nova."""
+    conexoes = []
+    for i in range(n):
+        dono = user_id + i
+        if i:
+            db.ensure_user(dono)
+            promote_to_pro(dono)
+            amb.meus.add(dono)
+        conexoes.append(_nova(dono, reason="read_failed",
+                              last_attempt_at=f"now() - interval '{100 - i} hours'"))
+    return conexoes
+
+
+def test_50_candidatos_com_k_2_so_consultam_o_acesso_de_quem_vai_ser_tentado(
+        user_id, amb, monkeypatch):
+    """Todos com acesso: o tique faz no máximo K consultas de acesso (uma por item
+    agendado), e não uma por candidato."""
+    import db.reports as reports
+    monkeypatch.setenv("OF_RETRY_MAX_PER_TICK", "2")
+    conexoes = _muitos_donos(user_id, amb, 50)
+    consultas: list[int] = []
+    real = reports.get_plan_gate_state
+    monkeypatch.setattr(reports, "get_plan_gate_state", lambda uid: consultas.append(uid) or real(uid))
+    tick = _retenta(amb)
+    assert tick["details"]["tentados"] == 2 and tick["details"]["elegiveis"] == 50
+    assert len(consultas) <= 2, f"{len(consultas)} consultas de acesso para K=2"
+    assert [amb.pluggy.contas[c["item"]] for c in conexoes[:2]] == [1, 1]
+
+
+def test_dono_cortado_no_comeco_da_fila_nao_toma_vaga_e_e_consultado_uma_vez(
+        user_id, amb, monkeypatch):
+    """Um dono cortado com 5 conexões na frente da fila: pulado sem tomar vaga do K, com UMA
+    consulta de acesso (as outras 4 conexões dele saem pela memória do tique)."""
+    monkeypatch.setenv("OF_RETRY_MAX_PER_TICK", "2")
+    cortado = user_id + 1
+    db.ensure_user(cortado)
+    amb.meus.add(cortado)
+    cortadas = [_nova(cortado, reason="read_failed", last_attempt_at=f"now() - interval '{90 + i} hours'")
+                for i in range(5)]
+    com = [_nova(user_id, reason="read_failed", last_attempt_at=f"now() - interval '{3 + i} hours'")
+           for i in range(2)]
+    consultas: list[list] = []
+    real = amb.orq.filtrar_por_acesso
+
+    def _conta(ids):
+        consultas.append(list(ids))
+        return [i for i in ids if i != cortado]
+
+    monkeypatch.setattr(amb.orq, "filtrar_por_acesso", _conta)
+    tick = _retenta(amb)
+    assert [amb.pluggy.contas[c["item"]] for c in com] == [1, 1]
+    assert all(amb.pluggy.chamadas[c["item"]] == 0 for c in cortadas)
+    assert [i for ids in consultas for i in ids].count(cortado) == 1
+    assert tick["details"]["sem_acesso"] == 5 and tick["details"]["tentados"] == 2
+
+
+def test_todos_cortados_com_consulta_lenta_para_pelo_prazo_sem_varrer_a_fila(
+        user_id, amb, monkeypatch):
+    """Todos cortados e cada consulta de acesso lenta: o tique para por `prazo`, e não
+    consulta os 50 donos (nem passa muito do prazo)."""
+    _muitos_donos(user_id, amb, 50)
+    consultas: list[int] = []
+
+    def _lenta(ids):
+        consultas.extend(ids)
+        time.sleep(0.05 * len(ids))
+        return []
+
+    monkeypatch.setattr(amb.orq, "filtrar_por_acesso", _lenta)
+    t0 = time.monotonic()
+    tick = _retenta(amb, prazo_sec=1.0)
+    demorou = time.monotonic() - t0
+    assert tick["details"]["interrompido"] == "prazo" and tick["details"]["tentados"] == 0
+    assert len(consultas) < 50, f"consultou os {len(consultas)} donos do backlog"
+    assert demorou < 2.0, f"o tique levou {demorou:.1f}s com prazo de 1,0 s"
+
+
+def test_item_rechecado_fora_nao_toma_vaga_do_k(user_id, amb, monkeypatch):
+    """K=1: o 1º da fila sai na rechecagem (um Atualizar entre a listagem e a vez dele). A vaga
+    do K é de quem foi AGENDADO, então o 2º é lido."""
+    monkeypatch.setenv("OF_RETRY_MAX_PER_TICK", "1")
+    a = _nova(user_id, reason="read_failed", last_attempt_at="now() - interval '5 hours'")
+    b = _nova(user_id, reason="read_failed", last_attempt_at="now() - interval '4 hours'")
+
+    def _atualizou():
+        with get_conn() as conn:
+            conn.execute("update open_finance_connections set status_reason=null, "
+                         "last_sync_at=now(), last_attempt_at=now() where id=%s", (a["id"],))
+            conn.commit()
+
+    amb.ganchos[a["id"]] = _atualizou
+    tick = _retenta(amb)
+    assert (amb.pluggy.chamadas[a["item"]], amb.pluggy.contas[b["item"]]) == (0, 1)
+    assert tick["details"]["rechecados"] == 1 and tick["details"]["tentados"] == 1
+
+
+def test_acesso_que_expira_no_meio_vale_tambem_para_o_proximo_item_do_mesmo_dono(
+        user_id, amb, monkeypatch):
+    """Só o NEGATIVO fica em memória na passada. O positivo é refeito antes de cada item
+    agendado: o dono passou na consulta do 1º item, o plano expira durante o sync dele, e
+    o 2º item DO MESMO DONO não pode sincronizar."""
+    monkeypatch.setenv("PLANS_V2_ENABLED", "1")
+    monkeypatch.setenv("ACCESS_GATE_ENABLED", "1")
+    a = _nova(user_id, reason="read_failed", last_attempt_at="now() - interval '5 hours'")
+    b = _nova(user_id, reason="read_failed", last_attempt_at="now() - interval '3 hours'")
+    amb.pluggy.durante_contas = lambda item: _expira_o_plano(user_id)(None) if item == a["item"] else None
+    tick = _retenta(amb)
+    assert amb.pluggy.contas[a["item"]] == 1
+    assert amb.pluggy.chamadas[b["item"]] == 0, "o 2º item do dono sem acesso sincronizou"
+    assert tick["details"]["sem_acesso"] == 1 and tick["details"]["tentados"] == 1

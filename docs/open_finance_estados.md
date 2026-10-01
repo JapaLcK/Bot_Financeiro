@@ -333,8 +333,9 @@ próximo. Só GET: nenhum PATCH, nenhuma cota de coleta.
   mais antiga primeiro (`last_attempt_at nulls first, id`), sem prioridade por
   classe. **Só `0` ou negativo desliga a etapa**: valor que não é inteiro (`""`,
   `abc`, `off`, `1.5`) cai no padrão 20, como toda `OF_*` inteira (`_env_int`).
-  O corte por acesso (`filtrar_por_acesso`) vem ANTES do K, e é REFEITO POR ITEM,
-  imediatamente antes de agendar o sync (ver "Reavaliado por item" abaixo).
+  O acesso (`filtrar_por_acesso`) é checado PREGUIÇOSAMENTE, por item, dentro do
+  laço (ver "Custo do acesso" e "Reavaliado por item" abaixo); o K é o número de
+  itens AGENDADOS (o item de dono cortado ou rechecado fora não toma vaga).
 - **Quem carimba a tentativa NA LINHA** é o próprio sync (e a marca de falha F): o
   orquestrador não carimba. Carimbar antes de agendar empurrava `last_attempt_at`
   para depois do dado da Pluggy e tirava do "à frente" um `no_accounts` cujo
@@ -412,12 +413,30 @@ próximo. Só GET: nenhum PATCH, nenhuma cota de coleta.
   até metade do intervalo, então nada decidido no começo vale até o fim. Por item,
   imediatamente antes de agendar, a retentativa refaz: a linha (pelo `id`), a classe
   (`classe_de_retentativa` sobre a linha nova), o ACESSO do dono
-  (`filtrar_por_acesso([dono])`, a mesma função do corte inicial, uma consulta por
-  item tentado, no máximo K) e o PRAZO restante. Item cujo dono perdeu o acesso no
+  (`filtrar_por_acesso([dono])`, a mesma função dos laços proativos, §0.7) e o
+  PRAZO restante. Item cujo dono perdeu o acesso no
   meio da passada é PULADO: conta em `sem_acesso` no `of_retry_tick`, não entra em
   `tentados` nem em `_TENTADOS`. O `expected_user_id` vem da linha rechecada, e a
   marca de falha do run só grava na linha capturada se ela é do dono esperado, nos
   DOIS ramos de falha final (a exceção e o `sync_in_progress` esgotado).
+- **Custo do acesso (limitado por K e pelo prazo, não pelo backlog).** O orquestrador
+  NÃO consulta o acesso de todos os candidatos antes do corte (o helper faz uma
+  consulta e um checkout de conexão por usuário, e um backlog de milhares de
+  conexões virava milhares de consultas sequenciais fora da checagem de prazo).
+  Percorre a fila já ordenada e, por item: confere o prazo; pula sem consulta se o
+  dono já foi visto SEM acesso nesta passada; relê a linha; consulta o acesso do
+  dono; e para ao AGENDAR K itens ou no prazo. Só o resultado negativo fica em
+  memória (por dono, na passada): o positivo é refeito antes de cada item agendado,
+  porque o plano pode expirar durante a passada. Enumerando o que é O(candidatos) e
+  o que não é: a listagem e a classificação (pura) são O(candidatos); a rechecagem
+  por `id` e a consulta de acesso são por item percorrido, no máximo K consultas de
+  acesso para quem tem acesso mais UMA por dono cortado. Pior caso (todos os donos
+  cortados): a passada percorre a fila até o prazo, com no máximo uma rechecagem e
+  uma consulta de acesso por dono distinto. Testes:
+  `test_50_candidatos_com_k_2_so_consultam_o_acesso_de_quem_vai_ser_tentado`,
+  `test_dono_cortado_no_comeco_da_fila_nao_toma_vaga_e_e_consultado_uma_vez`,
+  `test_todos_cortados_com_consulta_lenta_para_pelo_prazo_sem_varrer_a_fila` e
+  `test_acesso_que_expira_no_meio_vale_tambem_para_o_proximo_item_do_mesmo_dono`.
 - **Quando o tique roda:** o 1º, `min(_PRIMEIRO_TIQUE_SEC, OF_REFRESH_INTERVAL_SEC)`
   (10 min por padrão; com intervalo menor, o intervalo) depois do boot, só
   com a saúde e a retentativa (as duas só fazem GET); o PATCH periódico NÃO roda no
@@ -470,7 +489,7 @@ no meio, flag e o texto do E13).
 | E19 | item com dois donos | qualquer | não | SQL (o sync levantaria `AmbiguousItemError`) |
 | E20 | linha readotada por outro usuário entre a listagem e o run | qualquer | agenda e o sync recusa | `expected_user_id` → `connection_not_found`; a marca de falha não grava em linha de outro dono |
 | E21 | provider `mock_pluggy` | qualquer | não | SQL |
-| E22 | usuário sem direito de uso hoje | Indisponível sem plano ativo | não (DECISÃO 3 = A) | `filtrar_por_acesso`, antes do corte K |
+| E22 | usuário sem direito de uso hoje | Indisponível sem plano ativo | não (DECISÃO 3 = A) | `filtrar_por_acesso`, por item, sem tomar vaga do K |
 | E23 | motivo desconhecido | Erro temporário | não | fora da lista de permissão |
 | E24 | reconectado há menos de 30 min, sem sync | Atualizando… | não | = E6 |
 
