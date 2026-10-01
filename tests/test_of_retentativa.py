@@ -466,7 +466,7 @@ def test_k_zero_desliga_so_a_retentativa(user_id, amb, monkeypatch):
 
 def test_prazo_do_tique_nao_comeca_item_novo(user_id, amb, monkeypatch):
     conexoes = [_nova(user_id, reason="read_failed") for _ in range(2)]
-    relogio = iter([0.0, 0.0, 10_000.0])   # início, 1º item, 2º item
+    relogio = iter([0.0, 0.0, 0.0, 10_000.0])   # início, 1º item (começo e depois da rechecagem), 2º item
     monkeypatch.setattr(amb.orq, "_relogio", lambda: next(relogio))
     tick = _retenta(amb, prazo_sec=60)
     assert [amb.pluggy.contas[c["item"]] for c in conexoes] == [1, 0]

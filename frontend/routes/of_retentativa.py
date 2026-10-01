@@ -89,8 +89,11 @@ async def retentar_leituras(*, prazo_sec: float) -> dict:
         fila = sorted(fila, key=lambda rc: _TENTADOS.get(rc[0]["id"], float("-inf")))[:k]
 
         for row, _classe in fila:
-            restante = prazo_sec - (_relogio() - inicio)
-            if restante <= 0:
+            # Tudo o que foi decidido antes da passada (o acesso, a linha, o prazo) vale
+            # no máximo até aqui: uma passada dura até metade do intervalo, e a
+            # rechecagem pode esperar o pool por até 30 s. Cada um é REAVALIADO por
+            # item, imediatamente antes de agendar (abaixo).
+            if prazo_sec - (_relogio() - inicio) <= 0:
                 interrompido = "prazo"
                 break
             # Rechecagem: o tique pode levar dezenas de minutos, e um Atualizar ou uma
@@ -100,6 +103,19 @@ async def retentar_leituras(*, prazo_sec: float) -> dict:
                 conta["rechecados"] += 1
                 continue
             linha = atual[0]
+            # Acesso do dono AGORA: um plano ou trial que expirou durante a passada não
+            # sincroniza o item seguinte. A mesma `filtrar_por_acesso` do corte inicial
+            # (§0.7), com o dono deste item (uma consulta por item tentado, no máximo K).
+            # Pulado não é tentado: fica fora de `_TENTADOS` e de `tentados`.
+            if not await asyncio.to_thread(filtrar_por_acesso, [linha["user_id"]]):
+                conta["sem_acesso"] += 1
+                continue
+            # O prazo restante DEPOIS das duas consultas acima: o valor do começo da
+            # iteração podia estar velho e agendar um sync novo com o prazo estourado.
+            restante = prazo_sec - (_relogio() - inicio)
+            if restante <= 0:
+                interrompido = "prazo"
+                break
             # Sem carimbo de tentativa NA LINHA: quem grava `last_attempt_at` é o próprio
             # sync (e a marca de falha). Carimbar antes empurrava a âncora da "Pluggy
             # à frente" para depois do dado dela, e um 5xx passageiro num `no_accounts`
@@ -139,7 +155,8 @@ async def retentar_leituras(*, prazo_sec: float) -> dict:
                   "tentados": len(tentados), "ok": conta["ok"],
                   "falhas": conta["falha"] + conta["429"], "neutros": conta["neutro"],
                   "coalescidos": conta["coalescidos"], "pendurados": conta["pendurados"],
-                  "rechecados": conta["rechecados"], "interrompido": interrompido,
+                  "rechecados": conta["rechecados"], "sem_acesso": conta["sem_acesso"],
+                  "interrompido": interrompido,
                   "items": tentados}
         # Sem `user_id` (a coluna fica NULL: o tique tem vários donos) e sem uid em
         # `details`, que sobreviveria à exclusão da conta (issue #541).

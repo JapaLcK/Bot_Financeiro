@@ -317,7 +317,8 @@ próximo. Só GET: nenhum PATCH, nenhuma cota de coleta.
   mais antiga primeiro (`last_attempt_at nulls first, id`), sem prioridade por
   classe. **Só `0` ou negativo desliga a etapa**: valor que não é inteiro (`""`,
   `abc`, `off`, `1.5`) cai no padrão 20, como toda `OF_*` inteira (`_env_int`).
-  O corte por acesso (`filtrar_por_acesso`) vem ANTES do K.
+  O corte por acesso (`filtrar_por_acesso`) vem ANTES do K, e é REFEITO POR ITEM,
+  imediatamente antes de agendar o sync (ver "Reavaliado por item" abaixo).
 - **Quem carimba a tentativa NA LINHA** é o próprio sync (e a marca de falha F): o
   orquestrador não carimba. Carimbar antes de agendar empurrava `last_attempt_at`
   para depois do dado da Pluggy e tirava do "à frente" um `no_accounts` cujo
@@ -374,12 +375,24 @@ próximo. Só GET: nenhum PATCH, nenhuma cota de coleta.
 - **Prazo:** não começa item novo depois de metade de `OF_REFRESH_INTERVAL_SEC`, e
   também não espera mais um sync em voo depois dele (`wait_for` sobre `shield`: o
   tique segue e o sync continua vivo no `_INFLIGHT`; o webhook do mesmo item vira
-  `_DIRTY`).
+  `_DIRTY`). O restante é recalculado POR ITEM, depois da rechecagem e da checagem
+  de acesso (as duas consultas podem demorar, a rechecagem até 30 s no pool): com
+  `restante <= 0` o tique para ANTES de agendar (`interrompido="prazo"`).
 - **Falha na etapa:** exceção em `retentar_leituras` vai só como tipo para o
   stderr (sem dado de usuário) e não segura o PATCH periódico; o `of_retry_tick`
   sai mesmo assim, com `interrompido: "erro"`.
 - **Rechecagem:** antes de agendar, relê a linha pelo `id` com a mesma query e o
   mesmo classificador.
+- **Reavaliado por item (valor capturado antes de um `await`).** Uma passada dura
+  até metade do intervalo, então nada decidido no começo vale até o fim. Por item,
+  imediatamente antes de agendar, a retentativa refaz: a linha (pelo `id`), a classe
+  (`classe_de_retentativa` sobre a linha nova), o ACESSO do dono
+  (`filtrar_por_acesso([dono])`, a mesma função do corte inicial, uma consulta por
+  item tentado, no máximo K) e o PRAZO restante. Item cujo dono perdeu o acesso no
+  meio da passada é PULADO: conta em `sem_acesso` no `of_retry_tick`, não entra em
+  `tentados` nem em `_TENTADOS`. O `expected_user_id` vem da linha rechecada, e a
+  marca de falha do run só grava na linha capturada se ela é do dono esperado, nos
+  DOIS ramos de falha final (a exceção e o `sync_in_progress` esgotado).
 - **Quando o tique roda:** o 1º, `min(_PRIMEIRO_TIQUE_SEC, OF_REFRESH_INTERVAL_SEC)`
   (10 min por padrão; com intervalo menor, o intervalo) depois do boot, só
   com a saúde e a retentativa (as duas só fazem GET); o PATCH periódico NÃO roda no

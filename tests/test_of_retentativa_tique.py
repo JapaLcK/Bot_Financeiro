@@ -48,6 +48,7 @@ from psycopg.types.json import Jsonb
 import core.services.pluggy_sync as ps
 import db
 from conftest import promote_to_pro
+from db_support import invalidate_auth_user_cache
 import frontend.finance_bot_websocket_custom as dashboard
 import frontend.routes.of_retentativa as orq
 import frontend.routes.open_finance as of_routes
@@ -579,3 +580,84 @@ def test_limite_conhecido_com_deploy_a_cada_tique_a_fila_em_memoria_e_inerte(
         lido = lido or any(amb.pluggy.contas[c["item"]] for c in sadios)
         _envelhece(*[c["id"] for c in ruins + sadios], horas=24)
     assert lido is False
+
+
+# ── valor capturado antes de um `await` e usado depois (apontamentos do Codex, #727) ──
+# O acesso (`filtrar_por_acesso`) e o prazo restante eram decididos uma vez e usados
+# depois de uma passada que pode durar horas ou de uma consulta lenta. Agora são
+# reavaliados POR ITEM, imediatamente antes de agendar o sync.
+
+def _dois_donos_com_acesso(user_id, amb, monkeypatch):
+    """A (o `user_id`, na frente da fila) e B, ambos com direito de uso e uma conexão
+    `read_failed`; devolve `(a, b, expira_b)`, onde `expira_b()` tira o plano de B."""
+    monkeypatch.setenv("PLANS_V2_ENABLED", "1")
+    monkeypatch.setenv("ACCESS_GATE_ENABLED", "1")
+    dono_b = user_id + 1
+    db.ensure_user(dono_b)
+    promote_to_pro(dono_b)
+    amb.meus.add(dono_b)
+    a = _nova(user_id, reason="read_failed", last_attempt_at="now() - interval '5 hours'")
+    b = _nova(dono_b, reason="read_failed", last_attempt_at="now() - interval '3 hours'")
+
+    def _expira_b():
+        with get_conn() as conn:
+            conn.execute("update auth_accounts set plan='free' where user_id=%s", (dono_b,))
+            conn.commit()
+        invalidate_auth_user_cache(dono_b)
+
+    return a, b, _expira_b
+
+
+def test_acesso_que_expira_durante_a_passada_barra_o_item_seguinte(user_id, amb, monkeypatch):
+    """O plano do dono do 2º item expira enquanto o 1º sincroniza: `filtrar_por_acesso` já
+    tinha aprovado B no começo da passada. O 2º não pode sincronizar (0 chamadas à
+    Pluggy), e como foi PULADO não entra em `_TENTADOS` nem conta como tentado."""
+    a, b, expira_b = _dois_donos_com_acesso(user_id, amb, monkeypatch)
+    amb.pluggy.durante_contas = lambda item: expira_b() if item == a["item"] else None
+    tick = _retenta(amb)
+    assert amb.pluggy.contas[a["item"]] == 1
+    assert amb.pluggy.chamadas[b["item"]] == 0, "o item de quem perdeu o acesso sincronizou"
+    d = tick["details"]
+    assert d["sem_acesso"] == 1 and d["tentados"] == 1 and b["item"] not in d["items"]
+    assert b["id"] not in amb.orq._TENTADOS
+
+
+def test_acesso_valido_durante_a_passada_continua_sincronizando(user_id, amb, monkeypatch):
+    a, b, _expira_b = _dois_donos_com_acesso(user_id, amb, monkeypatch)
+    tick = _retenta(amb)
+    assert (amb.pluggy.contas[a["item"]], amb.pluggy.contas[b["item"]]) == (1, 1)
+    assert tick["details"]["sem_acesso"] == 0 and tick["details"]["tentados"] == 2
+
+
+def test_rechecagem_lenta_que_estoura_o_prazo_nao_agenda_o_sync(user_id, amb):
+    """A consulta da rechecagem demora mais que o prazo restante (no pool pode esperar até
+    30 s): o `restante` calculado ANTES dela estava velho e o sync era agendado mesmo
+    assim. Depois dela, `restante <= 0` para o tique antes de agendar."""
+    c = _nova(user_id, reason="read_failed")
+    amb.ganchos[("depois", c["id"])] = lambda: time.sleep(1.3)
+    tick = _retenta(amb, prazo_sec=1.0)
+    assert amb.pluggy.chamadas[c["item"]] == 0, "agendou um sync depois do prazo"
+    d = tick["details"]
+    assert d["interrompido"] == "prazo" and d["tentados"] == 0 and c["id"] not in amb.orq._TENTADOS
+
+
+def test_rechecagem_lenta_com_prazo_folgado_sincroniza(user_id, amb):
+    c = _nova(user_id, reason="read_failed")
+    amb.ganchos[("depois", c["id"])] = lambda: time.sleep(0.3)
+    tick = _retenta(amb, prazo_sec=60)
+    assert amb.pluggy.contas[c["item"]] == 1 and tick["details"]["interrompido"] is None
+
+
+@pytest.mark.parametrize("expected, marca", [(None, True), ("dono", True), ("outro", False)])
+def test_sync_in_progress_esgotado_so_marca_a_linha_do_dono_esperado(
+        user_id, amb, monkeypatch, expected, marca):
+    """O ramo do `sync_in_progress` esgotado (B1) usa a MESMA regra de dono da exceção
+    final: a linha capturada é de OUTRO dono (readoção) → não marca nada. Sem
+    `expected_user_id` (webhook) ou com o dono certo, marca `read_failed`."""
+    c = _nova(user_id, reason=None)
+    monkeypatch.setattr(of_routes, "sync_pluggy_item",
+                        lambda item, **kw: {"ok": False, "reason": "sync_in_progress",
+                                            "item_id": item})
+    esperado = {None: None, "dono": user_id, "outro": user_id + 7}[expected]
+    asyncio.run(of_routes._run_pluggy_sync_bg(c["item"], esperado))
+    assert (_linha(c["id"])["status_reason"] == "read_failed") is marca

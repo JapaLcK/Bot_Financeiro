@@ -847,6 +847,11 @@ async def _run_pluggy_sync_bg(item_id: str, expected_user_id: int | None = None)
         conexao = None
         print(f"[open_finance] leitura da conexão falhou ({item_id}): "
               f"{type(exc).__name__}", flush=True)
+    # A marca de falha só vai para a linha capturada se ela é do dono esperado (a
+    # retentativa passa `expected_user_id`; o webhook não): item readotado por OUTRO
+    # usuário não é marcado, em NENHUM dos dois ramos de falha final abaixo.
+    if conexao and expected_user_id is not None and int(conexao["user_id"]) != int(expected_user_id):
+        conexao = None
     try:
         for tentativa in range(1, _SYNC_MAX_ATTEMPTS + 1):
             try:
@@ -892,8 +897,7 @@ async def _run_pluggy_sync_bg(item_id: str, expected_user_id: int | None = None)
                     # Falha FINAL do sync, e só dela (não do aviso nem do log
                     # abaixo, que rodam depois de um sync bom): sem a marca, a
                     # tela ficava "Atualizando…" para sempre (Onda 5, R1).
-                    if conexao and (expected_user_id is None
-                                    or int(conexao["user_id"]) == int(expected_user_id)):
+                    if conexao:
                         await asyncio.to_thread(marcar_leitura_falhou, conexao, exc)
                     raise
                 espera = _backoff_sec(tentativa)
