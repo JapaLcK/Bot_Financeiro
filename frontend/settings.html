@@ -3357,7 +3357,8 @@ const OF_VERDICT_OK = ["updated", "rate_limited"];
    mensagem. Trocar a ordem muda o que o usuário vê quando tem dois bancos.
 
    QUEM MANDA NA INSTRUÇÃO É O BACKEND, não esta tabela. Estado cujo `detail`
-   VARIA entre itens (hoje `needs_user_action`, `updating` e `partial`) TEM de
+   VARIA entre itens (hoje `needs_user_action`, `updating`, `partial` e
+   `error_recoverable`) TEM de
    ler `i.detail` — a frase fixa aqui só vale para estado de detalhe constante.
    Terceira rodada do mesmo defeito: "Ação necessária" é um balde só, e um
    `WAITING_USER_ACTION` (autorizar o dispositivo / ler o QR antes do
@@ -3414,7 +3415,10 @@ const OF_VERDICT = [
   ["partial",           (i) => i.detail
       ? `Atualizei o que deu no ${ofNome(i)}: ${ofInstrucao(i.detail)}.`
       : `Atualizei o que deu no ${ofNome(i)} — parte dos dados não veio.`],
-  ["error_recoverable", (i) => `Não consegui atualizar o ${ofNome(i)} agora. Tente de novo em instantes.`],
+  // Detalhe VARIÁVEL desde o PR-B2: o item em ERROR na Pluggy (E13) diz que o banco
+  // errou e que só um novo Atualizar ajuda; o erro comum promete a retentativa.
+  // Sem ternário: o `_FIXED_DETAIL` do backend sempre preenche o detalhe.
+  ["error_recoverable", (i) => `Não consegui atualizar o ${ofNome(i)}: ${ofInstrucao(i.detail)}.`],
   ["updating",          (i) => i.detail
       ? `${ofNome(i)}: ${ofInstrucao(i.detail)}. Toque em Atualizar de novo em instantes.`
       : `O ${ofNome(i)} ainda está atualizando. Se faltar algo, toque em Atualizar de novo.`],

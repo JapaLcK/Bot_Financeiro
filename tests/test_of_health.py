@@ -1248,7 +1248,7 @@ def test_execution_status_no_status_local_ainda_e_lido(status_local, estado_espe
 def _detalhe_por_estado() -> dict[str, set]:
     """estado → conjunto dos `detail` que ele consegue produzir."""
     from core.services.pluggy_health import (
-        _LABELS, _NEEDS_USER, _UPDATING, READ_FAILED)
+        _LABELS, _NEEDS_USER, _UPDATING, INVESTMENTS_READ_FAILED, READ_FAILED)
 
     mapa: dict[str, set] = {}
 
@@ -1257,7 +1257,7 @@ def _detalhe_por_estado() -> dict[str, set]:
         mapa.setdefault(ui["state"], set()).add(ui["detail"])
 
     for item_status in sorted(_NEEDS_USER | _UPDATING | {"ERROR", "UPDATED"}):
-        for reason in sorted(set(_LABELS) | {"", READ_FAILED}):
+        for reason in sorted(set(_LABELS) | {"", READ_FAILED, INVESTMENTS_READ_FAILED}):
             for sync in (AGORA, None):
                 for status_local in ("ACTIVE", "ERROR", "DELETED", "PAUSED", item_status):
                     base = {"status": status_local, "status_reason": reason,

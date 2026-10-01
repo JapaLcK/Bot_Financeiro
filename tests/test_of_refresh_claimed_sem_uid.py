@@ -27,6 +27,10 @@ def test_tick_do_refresh_nao_grava_uid_dos_donos(user_id, monkeypatch):
     monkeypatch.setattr(ps, "update_pluggy_item", lambda item, key=None: True)
     monkeypatch.setattr(ps, "_hold_aggregate_emails", lambda uid, origem: None)
     monkeypatch.setattr(ps, "run_of_health_check", lambda **kw: {})
+
+    async def _sem_retentativa(**kw):   # a retentativa varreria as conexões de outros testes
+        return {}
+    monkeypatch.setattr("frontend.routes.of_retentativa.retentar_leituras", _sem_retentativa)
     real = ps.request_pluggy_refresh  # real, só sem varrer as conexões de outros testes
     monkeypatch.setattr(ps, "request_pluggy_refresh", lambda **kw: real(**kw, user_id=user_id))
 
@@ -41,8 +45,8 @@ def test_tick_do_refresh_nao_grava_uid_dos_donos(user_id, monkeypatch):
 
     async def _uma_volta(segundos):
         voltas.append(segundos)
-        if len(voltas) > 1:
-            raise asyncio.CancelledError  # corta na 2ª espera
+        if len(voltas) > 2:
+            raise asyncio.CancelledError  # corta na 3ª espera: o PATCH só roda do 2º tique
         await sleep_real(0)
 
     async def _corre():

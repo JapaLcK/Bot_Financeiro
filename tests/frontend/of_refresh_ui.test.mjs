@@ -253,6 +253,12 @@ test("veredito do refresh: só estado conhecido-bom fica verde", async () => {
       // detalhe do caso comum é este, e é ele que sai.
       ["needs_user_action", "Reautorize o banco", null],
       ["updating",          "Ainda não sincronizou", null],
+      // Erro temporário (PR-B2): o E13 (item em ERROR na Pluggy) NÃO promete a
+      // retentativa; o erro comum promete. As duas frases são valores REAIS do
+      // backend (`_DETALHE_ITEM_EM_ERRO` e `_FIXED_DETAIL`).
+      ["error_recoverable", "O banco teve um erro — atualize de novo mais tarde",
+                            /automaticamente/i],
+      ["error_recoverable", "Tentaremos de novo automaticamente", /banco teve um erro/i],
       ["partial",           "Cartão desatualizado desde 12/08", null],
       // Saída real do backend para `no_accounts` + `ACCT_001`. A frase fixa que o
       // `OF_VERDICT` tinha aqui apagava o motivo que o backend anexa.

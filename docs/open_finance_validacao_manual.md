@@ -131,7 +131,7 @@ select status, status_reason, last_sync_at, reconnected_at, health->>'item_statu
 | B3 | item deletado na Pluggy (`GET /items/{id}` → 404) | `status=ERROR`, `status_reason=item_missing`, espelho **intacto** | "Conexão perdida" |
 | B4 | B3 seguido de webhook `item/updated` atrasado | `item_missing` **preservado** | não volta a verde sozinho |
 | B5 | corretora (0 contas, carteira em `/investments`) | `ACTIVE` + `no_accounts` só se `/investments` também veio vazio | "Sem dados" |
-| B6 | 429 em `/investments` no meio do sync | `ACTIVE` + `read_failed`, e as contas já lidas **não** são descartadas | "Erro temporário" |
+| B6 | 429 em `/investments` no meio do sync | com contas: `ACTIVE` + `investments_read_failed`, e as contas já lidas **não** são descartadas; sem conta nenhuma: `ACTIVE` + `read_failed` | com contas: "Parcial · Investimentos não vieram nesta atualização"; sem: "Erro temporário". Nos dois, o job de saúde não volta a verde; só um sync completo |
 | B7 | sync real concluído | `last_sync_at` muda | "Atualizado" |
 | B8 | reconexão pelo widget (upsert), **sem** sync depois | `last_sync_at` **não** muda, `reconnected_at` recebe agora, `health` e `status_reason` zerados | **não** diz "Atualizado" |
 | B9 | B8 seguido de sync real | `last_sync_at > reconnected_at` | "Atualizado" |
