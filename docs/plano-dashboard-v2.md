@@ -285,7 +285,10 @@ PR de cada etapa, não soluções prontas. Cada PR confere se ainda valem, decid
     coleta saudável e geração estável: mesmo com resposta bem formada e cursor terminal,
     um `PARTIAL_SUCCESS`/`UPDATING` ou uma coleta nova no meio da leitura apagaria
     transação legítima. Reusar o portão que a conciliação de investimentos já tem (produto
-    saudável e a mesma geração em duas fotos do item). E conciliar só dentro de um intervalo
+    saudável e a mesma geração em duas fotos do item), e conferir a geração de novo **depois**
+    de pegar o `pluggy_item_lock`: hoje a segunda foto é tirada antes da trava, e um sync
+    antigo que pega a trava depois de um mais novo apagaria como ausentes as contas e
+    transações que o novo acabou de gravar. E conciliar só dentro de um intervalo
     de datas explícito: hoje `list_pluggy_transactions()` pede só `accountId` e o cursor, e
     uma resposta vazia não diz nada sobre datas. O intervalo tem de vir do pedido (datas
     `from`/`to` enviadas) ou de uma marca do provedor guardada; tirar das transações
