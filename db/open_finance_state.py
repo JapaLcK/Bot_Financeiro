@@ -239,6 +239,7 @@ def mark_sync_result(
     health: dict | None = None,
     at: datetime | None = None,
     reconnected_at_visto: Any = _SEM_CHECAGEM,
+    status_reason_visto: Any = _SEM_CHECAGEM,
 ) -> int:
     """Resultado de um sync (ou do job de saúde, com ok=None).
 
@@ -265,6 +266,16 @@ def mark_sync_result(
     este carimbo. Nessa janela o espelho fica (o dado é real, só velho); o que se
     recusa é chamá-la de sucesso — e a própria rota de reconexão agenda um sync
     novo, então o âmbar é transitório.
+
+    `status_reason_visto`: o motivo que o JOB DE SAÚDE leu ao listar a linha. O
+    par que ele grava é decidido a partir desse motivo (manter/limpar, linha H de
+    `core/services/pluggy_health.py`), e o `GET /items` roda fora de qualquer lock:
+    um sync que gravou ou limpou o motivo nesse meio tempo seria desfeito por uma
+    decisão tomada sobre a leitura velha. Mesmo idioma: se o motivo mudou, a
+    linha inteira fica como está (0 linhas). Quem mudou o motivo tem informação
+    pelo menos tão nova: o sync grava a foto do item junto; quem não grava
+    (`_sync_item_contido`, webhook) deixa o `health` velho, e a reconexão o
+    zera — nos dois casos a linha continua elegível no próximo tique.
     """
     now = at or datetime.now(_tz())
     with get_conn() as conn:
@@ -303,6 +314,7 @@ def mark_sync_result(
                        updated_at = %s
                  where id=%s
                    and upper(coalesce(status,'')) not in {_TERMINAL}
+                   and (%s or status_reason is not distinct from %s)
                 """,
                 (
                     (str(status).upper() if status else None),
@@ -317,6 +329,8 @@ def mark_sync_result(
                     now,
                     now,
                     connection_id,
+                    status_reason_visto is _SEM_CHECAGEM,
+                    (None if status_reason_visto is _SEM_CHECAGEM else status_reason_visto),
                 ),
             )
             updated = cur.rowcount

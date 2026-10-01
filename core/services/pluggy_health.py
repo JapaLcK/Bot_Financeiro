@@ -38,9 +38,14 @@ observação nova, que é exatamente o bug.
 | D | sync: leitura remota incompleta (ex.: 429 em          | ACTIVE  | read_failed |
 |   | `/investments`) E espelho vazio                       |         |             |
 | E | sync: leitura COMPLETA e espelho vazio                | ACTIVE  | no_accounts |
-| F | item vivo com espelho cheio (sync ok ou só medido)    | ACTIVE  | ""          |
-| H | job de saúde: item vivo, espelho vazio                | ACTIVE  | mantém D/E, |
-|   | (não leu `/accounts`, então não INVENTA motivo)       |         | senão ""    |
+| P | sync: contas lidas, `/investments` falhou             | ACTIVE  | investments_|
+|   | (espelho cheio; a tela diz "Parcial")                 |         | read_failed |
+| F | sync com leitura COMPLETA e espelho cheio             | ACTIVE  | ""          |
+| H | job de saúde: item vivo (não leu `/accounts`, então   | ACTIVE  | mantém D/P  |
+|   | não INVENTA nem APAGA falha de leitura)               |         | sempre, E só|
+|   |                                                       |         | c/ espelho  |
+|   |                                                       |         | vazio; senão|
+|   |                                                       |         | ""          |
 | G | reconexão pelo widget (`save_pluggy_open_finance_item`)| remoto | "" + health |
 |   |                                                       |         | zerado      |
 
@@ -49,7 +54,9 @@ B e C devolvem motivo vazio de propósito: quem conta a história ali é o
 
 E ≠ D: "li e veio vazio" não é "não consegui ler". Só o primeiro autoriza
 `no_accounts` — foi confundir os dois que fez um 429 em `/investments` descartar
-contas já lidas.
+contas já lidas. P é D com contas: antes caía em F e a tela dizia "Atualizado"
+sem os investimentos (Onda 5, R4). O job de saúde (H) não limpa D nem P
+(Onda 5, R5): quem limpa é uma leitura completa (E/F), ou B/C/G.
 
 H é o que tira o caráter pegajoso de `no_accounts`: `has_data` é OBSERVAÇÃO (o
 job pergunta ao espelho em `list_connections_for_health_check`, não à memória),
@@ -693,10 +700,15 @@ def mesclar_health_em_coleta(anterior: Any, novo: Any) -> Any:
 # ("Erro temporário / Tentaremos de novo automaticamente"), que é a verdade.
 READ_FAILED = "read_failed"
 
+# As contas vieram, `/investments` não (429, paginação incoerente, falha ao
+# gravar). Não é `READ_FAILED`: o espelho das contas É desta leitura. A tela diz
+# "Parcial" (`connection_ui_state`), nunca "Atualizado".
+INVESTMENTS_READ_FAILED = "investments_read_failed"
+_DETALHE_INVESTIMENTOS_FALTANDO = "Investimentos não vieram nesta atualização"
 
-# Motivos que só o espelho vazio explica — os únicos que uma observação SEM
-# leitura do provedor (o job de saúde) pode manter de pé.
-_MOTIVOS_DE_ESPELHO_VAZIO = ("no_accounts", READ_FAILED)
+# Falha de leitura NOSSA. Só um sync com leitura completa a limpa: o job de
+# saúde (`leitura_completa=None`) não leu nada, então não pode apagá-la.
+_MOTIVOS_DE_LEITURA = (READ_FAILED, INVESTMENTS_READ_FAILED)
 
 
 def resolve_connection_state(
@@ -717,8 +729,10 @@ def resolve_connection_state(
     `leitura_completa` — `True` lemos contas E investimentos; `False` a leitura
                          caiu no meio (429 em `/investments`); `None` esta
                          observação NÃO leu o provedor (job de saúde: só
-                         `GET /items`). Com `None` o motivo de espelho vazio não
-                         é INVENTADO — só mantido se já estava lá.
+                         `GET /items`). Com `None` nenhum motivo é INVENTADO:
+                         falha de leitura (`read_failed`,
+                         `investments_read_failed`) é mantida sempre, e
+                         `no_accounts` só com o espelho ainda vazio.
     `reason_atual`     — o motivo gravado hoje, para a decisão de manter/limpar.
     """
     if missing:
@@ -773,8 +787,17 @@ def resolve_connection_state(
     #     `reconnected_at`; o de insert nasce com `last_sync_at` NULL). É
     #     armadilha latente, não sangramento.
 
-    if has_data:
+    # H: sem leitura não se inventa motivo, e também não se apaga falha de
+    # leitura — era o `if has_data:` daqui que devolvia verde a um espelho velho
+    # (R5). `no_accounts` só se mantém com o espelho ainda vazio.
+    if leitura_completa is None:
+        motivo = str(reason_atual or "").lower()
+        if motivo in _MOTIVOS_DE_LEITURA or (motivo == "no_accounts" and not has_data):
+            return "ACTIVE", motivo
         return "ACTIVE", ""
+
+    if has_data:
+        return "ACTIVE", ("" if leitura_completa else INVESTMENTS_READ_FAILED)
 
     # Espelho vazio NÃO é erro do ITEM — ele respondeu, e respondeu saudável
     # (qualquer outra coisa já saiu acima). O `status` é a saúde do item; quem
@@ -783,9 +806,6 @@ def resolve_connection_state(
     # `OF_REFRESH_ENABLED` off (o default) não há PATCH → não há webhook → não há
     # sync completo, e ERROR virava TERMINAL na prática — medido, 404 no tick 0 e
     # item vivo nos 5 seguintes continuava "Erro temporário".
-    if leitura_completa is None:
-        motivo = str(reason_atual or "").lower()
-        return "ACTIVE", (motivo if motivo in _MOTIVOS_DE_ESPELHO_VAZIO else "")
     return "ACTIVE", ("no_accounts" if leitura_completa else READ_FAILED)
 
 
@@ -863,7 +883,13 @@ def connection_ui_state(connection_row: dict) -> dict:
         # pendente que este arquivo não conhece (gravado por um caminho novo)
         # não pode virar "Atualizado" — foi exatamente assim que `no_accounts`
         # (item vivo que não espelhou nada) chegou à tela como "Tudo em dia!".
-        if state == "updated" and reason not in _REASONS_OK:
+        # Leitura parcial nossa é "Parcial", não "Erro temporário": as contas vieram.
+        # Mas só se essa leitura é da autorização atual: com `sem_sync` o motivo
+        # veio de um sync cujo carimbo a reconexão recusou, e ele não vale.
+        if state == "updated" and reason == INVESTMENTS_READ_FAILED:
+            state, detail = (("updating", "Ainda não sincronizou") if sem_sync
+                             else ("partial", _DETALHE_INVESTIMENTOS_FALTANDO))
+        elif state == "updated" and reason not in _REASONS_OK:
             state = reason if reason in _LABELS else "error_recoverable"
             detail = _FIXED_DETAIL.get(state)
         # ONDA 2: "Atualizado" exige SYNC REAL, não só item saudável. O job de
@@ -942,7 +968,24 @@ def connection_ui_state(connection_row: dict) -> dict:
             return out("no_accounts" if reason == "no_accounts" and item_status != "ERROR"
                        else "error_recoverable")
         if stale or str(health.get("execution_status") or "").upper() == "PARTIAL_SUCCESS":
-            return out("partial", _stale_detail(health))
+            # Motivo pendente fala antes do produto atrasado, pela MESMA regra do
+            # verde: o default seguro do `out("updated")` decide (`read_failed` e
+            # desconhecido → "Erro temporário", `no_accounts` → "Sem dados").
+            # "Atualizei o que deu" sobre nada lido/espelhado seria falso. Como no
+            # verde, sem olhar `sem_sync`: a reconexão zera o motivo — exceto um
+            # run velho de `_sync_item_contido` gravando depois dela, corrida que
+            # o PR-B1 da Onda 5 fecha (`geracao_vista`).
+            if reason not in _REASONS_OK and reason != INVESTMENTS_READ_FAILED:
+                return out("updated")
+            detalhe = _stale_detail(health)
+            # Parcial da Pluggy E leitura parcial nossa: as duas coisas faltam, e
+            # o detalhe da Pluggy sozinho escondia os investimentos (Codex, #692).
+            # Com `sem_sync` o motivo é de antes da autorização atual e não vale.
+            # Com INVESTMENTS já atrasado na Pluggy, o detalhe dela já os nomeia.
+            if (reason == INVESTMENTS_READ_FAILED and not sem_sync
+                    and "INVESTMENTS" not in stale):
+                detalhe += "; " + _DETALHE_INVESTIMENTOS_FALTANDO.lower()
+            return out("partial", detalhe)
         return out("updated")
 
     # Sem health medido: cai no status local (comportamento de hoje).
