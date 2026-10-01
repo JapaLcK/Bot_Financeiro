@@ -222,6 +222,10 @@ PR de cada etapa, não soluções prontas. Cada PR confere se ainda valem, decid
   sem grupo (sem `installment_no`, `installments_total` e `group_id`, e sem as faturas
   futuras), compra com `bill_id` escolhido por um calendário errado, valor em moeda errada,
   pagamento de fatura lido como estorno. Além da moeda:
+  - `_to_decimal()` aceita `"NaN"` e `"Infinity"` como valor válido, o Postgres grava, e um
+    saldo `NaN` envenena o `sum(balance)` do consolidado e as caixinhas e fotos dos
+    investimentos. Todo valor de dinheiro exige `Decimal.is_finite()`; o que não passa
+    torna a leitura incompleta;
   - `normalize_pluggy_account()` põe `type` = `BANK` e `balance` = 0 quando faltam, e o
     nome vira o tipo (`"CREDIT"`): como a adoção de cartão manual é pelo nome exato, nasce
     um cartão genérico em duplicidade que o nome certo, quando chega, não renomeia nem junta;
@@ -242,7 +246,9 @@ PR de cada etapa, não soluções prontas. Cada PR confere se ainda valem, decid
     atualizado, e o cartão manual adotado pelo nome fica com as datas manuais, sem conferir
     as da Pluggy;
   - `list_pluggy_transactions()` para em `max_pages=60` sem conferir o cursor `next`, e
-    `list_pluggy_accounts()` lê só a primeira página de `/accounts`. Além do teto, as duas
+    `list_pluggy_accounts()` lê só a primeira página de `/accounts`, cuja paginação é
+    outra (página e total no próprio corpo, não o cursor `next` das transações): ela precisa
+    da sua própria validação e de percorrer todas as páginas, separada da regra do cursor. Além do teto, as duas
     aceitam resposta malformada como leitura completa: `results` ausente ou fora de lista
     vira lista vazia, e página vazia com `next` ou cursor ilegível encerra a leitura. Validar
     o formato e o cursor terminal antes de dar o sync como completo, e detectar cursor
