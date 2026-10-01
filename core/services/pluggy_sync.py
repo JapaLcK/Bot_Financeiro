@@ -40,6 +40,7 @@ from core.services.pluggy_health import (
 )
 from core.services.pluggy_investments import list_pluggy_investments
 from db import (
+    AmbiguousItemError,
     claim_items_for_refresh,
     claim_manual_refresh,
     get_connections_by_item_id,
@@ -248,6 +249,11 @@ def sync_pluggy_item(provider_item_id: str, *, expected_user_id: int | None = No
     geracao = (item.get("updatedAt"), item.get("lastUpdatedAt"))
     try:
         return _sync_pluggy_item_confirmado(provider_item_id, connection, api_key, health, geracao)
+    except AmbiguousItemError:
+        # A releitura de posse viu o item em mais de uma conexão (outro usuário o
+        # ganhou depois da leitura inicial): item ambíguo não grava em linha
+        # nenhuma, nem a foto abaixo (Codex #718).
+        raise
     except Exception:
         # O run falhou DEPOIS do `GET /items`: a foto acima é uma observação, e
         # jogá-la fora deixava "Conexão perdida" num item que o próprio run viu
@@ -816,13 +822,16 @@ def _sync_item_contido(connection: dict, user_id: int) -> dict:
         return sync_pluggy_item(item_id, expected_user_id=user_id)
     except Exception as exc:
         print(f"[pluggy_sync] item {item_id} falhou no lote: {type(exc).__name__}: {exc}")
-        marcar_leitura_falhou(connection)
+        marcar_leitura_falhou(connection, exc)
         return {"ok": False, "reason": READ_FAILED, "item_id": item_id,
                 "connection_id": connection.get("id"), "error": type(exc).__name__}
 
 
-def marcar_leitura_falhou(conexao: dict) -> None:
+def marcar_leitura_falhou(conexao: dict, erro: BaseException | None = None) -> None:
     """Falha FINAL de um sync: grava `read_failed` na conexão. Nunca levanta.
+
+    `erro` é a exceção do sync: `AmbiguousItemError` (o item ganhou um segundo
+    dono, no início do run ou na releitura de posse) não grava nada (Codex #718).
 
     Tira o item do verde e do "Atualizando…" na tela: `status=None` é "não mexe"
     (a chamada falhou, não observamos a saúde do item — só que a tentativa não
@@ -850,6 +859,8 @@ def marcar_leitura_falhou(conexao: dict) -> None:
     que falhou depois do `GET /items` (`sync_pluggy_item`).
     """
     item_id = conexao.get("provider_item_id")
+    if isinstance(erro, AmbiguousItemError):
+        return
     try:
         mark_sync_result(conexao["id"], ok=False, status=None, status_reason=READ_FAILED,
                          geracao_vista=(conexao["reconnected_at"], conexao["last_sync_at"]),

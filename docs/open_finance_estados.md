@@ -110,8 +110,12 @@ comando; não copie o resultado para cá (`CLAUDE.md` §2).
        Ela não leu contas, então não troca `no_accounts`. A O usa a linha que o
        próprio sync lê, não a captura do sync de fundo: com o banco fora só
        naquela captura e um dono só, a O roda e grava na linha do dono (a F é
-       que fica sem linha). Com dois donos do mesmo item, a leitura do sync
-       levanta antes do `GET /items` e nenhuma das duas roda;
+       que fica sem linha). Item ligado a mais de um usuário (`AmbiguousItemError`,
+       no início do run ou na releitura de posse dentro do lock) não grava em
+       linha nenhuma: nem a O nem a F (a O não tem foto antes da 1ª leitura; a F
+       recebe a exceção e sai). Sem exceção que prove a ambiguidade (um segundo
+       dono que aparece depois de uma falha de leitura comum), a O e a F gravam
+       na linha do run, que é a do próprio usuário;
    - "sem sync desde a autorização atual" é o MESMO predicado nos dois lados:
      `last_sync_at` nulo ou anterior a `reconnected_at` (nunca `created_at`, que é
      relógio do Postgres contra o `last_sync_at` do Python);
@@ -279,7 +283,8 @@ nome (`test_c9b_…`).
 | 25 | nenhum | outra falha concorrente | G, L | as duas gravam o mesmo valor | sem teste (idempotente) |
 | 26 | nenhum | só os attempts do próprio run | L | grava (o attempt não mexe no par nem no `observed_at`) | `c26_…` |
 | 27 | nenhum | nenhum, pelo lote do Atualizar | L | grava pela linha do snapshot. **Erro temporário** | `c27_…` |
-| 28 | — | dois donos do mesmo item | — | nem a F nem a O rodam. Com um dono e o banco fora só na captura do sync de fundo, a O roda e grava na linha do dono | `c28_…` |
+| 28 | — | dois donos do mesmo item desde o início do run | G | nada gravado em nenhuma linha (a captura do sync de fundo e o sync levantam `AmbiguousItemError`; no lote, a F recebe a exceção e sai). Com um dono e o banco fora só na captura do sync de fundo, a O roda e grava na linha do dono | `c28_…`, `c28c_…` |
+| 28b | — | um segundo dono aparece depois da leitura inicial e antes da releitura de posse | L (a releitura levanta `AmbiguousItemError`) | nada gravado em nenhuma linha: nem a O nem a F (Codex #718). Antes, a O gravava a foto e `read_failed` na linha do 1º dono | `c28b_…[sync, bg, lote]`; positivo `c28d_…` |
 | 29 | nenhum | sync de fundo: 1ª tentativa falha em L, as outras em G | L, G | a O da 1ª grava; a F final regrava. **Erro temporário** já durante o backoff | `c29_…` |
 
 **Conserto de classe previsto para as corridas do job (PR-C):** o CAS do PR-A

@@ -884,7 +884,7 @@ async def _run_pluggy_sync_bg(item_id: str, expected_user_id: int | None = None)
                     # tela ficava "Atualizando…" para sempre (Onda 5, R1).
                     if conexao and (expected_user_id is None
                                     or int(conexao["user_id"]) == int(expected_user_id)):
-                        await asyncio.to_thread(marcar_leitura_falhou, conexao)
+                        await asyncio.to_thread(marcar_leitura_falhou, conexao, exc)
                     raise
                 espera = _backoff_sec(tentativa)
                 await log_system_event(
