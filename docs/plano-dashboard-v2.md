@@ -253,10 +253,9 @@ PR de cada etapa, não soluções prontas. Cada PR confere se ainda valem, decid
 - [x] Protótipo: perfis do Resumo (#573, #575), faixa do Piggy (#579), navegação com o
   Piggy no meio e Ferramentas (#582), página do chat (#584).
 - [x] Protótipo: blocos que expandem na conversa, com estado por resposta e "Abrir no painel" (PR 3 do chat).
-- [ ] Pré-requisitos: ~~#594~~ ✓ · Q42 (#620, mergeado; conferir o deploy) · Q43 (#623 e
-  #634, mergeados; deploy não conferido) · Q40 (#633, mergeado; deploy não conferido) ·
-  Q41 (#627 mergeado; falta o PR B, #706, aberto)
-  - Q41: núcleo no #627, atrás de `OF_CASH_ENABLED` (desligado); falta o PR B (painel, WhatsApp e o switch ligado).
+- [x] Pré-requisitos: ~~#594~~ ✓ · Q42 (#620) · Q43 (#623 e #634) · Q40 (#633) · Q41
+  (#627 e o PR B, #706). Os quatro mergeados, deployados e conferidos no ar pelo dono em
+  2026-10-01, com `OF_CASH_ENABLED` ligada.
 - Etapa 0 em andamento, em 6 PRs (divisão aprovada pelo dono em 2026-09-26): 1 esqueleto
   (#632) · 2a `/painel` (#659) · 2b contrato TS + TanStack (#669) · 3 foto diária por
   posição do Open Finance (#675) · 4 SSE básico com os 2 avisos de hoje + conserto do
@@ -289,7 +288,7 @@ PR de cada etapa, não soluções prontas. Cada PR confere se ainda valem, decid
     `pix_*` fora) e `escutar_banco()` com `LISTEN` no lifespan (`api/v2/eventos.py`),
     que repassa "tudo" ao SSE. `LISTEN` caído reloga a cada 10 min; o backoff só zera
     depois de um `select 1` de pé.
-  - PR 6: foto diária do patrimônio (`patrimonio_fotos`, uma por usuário por dia do app,
+  - PR 6 (#723, mergeado): foto diária do patrimônio (`patrimonio_fotos`, uma por usuário por dia do app,
     a partir das 18h), pela conta única `db/patrimonio.calcular` que a tela da etapa 6
     vai reusar; job `core/services/patrimonio_foto.py` atrás de
     `PATRIMONIO_FOTO_ENABLED` (desligado). Carteira com a fusão devolvida, contas BANK
