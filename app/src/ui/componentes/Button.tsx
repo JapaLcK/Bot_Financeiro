@@ -21,6 +21,8 @@ interface Props {
   icone?: NomeIcone;
   /** Anunciado pelo leitor de tela depois do rótulo — "Em breve" nos botões sociais desativados, por exemplo. Sem ele, o botão é IDÊNTICO ao de antes. */
   accessibilityHint?: string;
+  /** Âncora do Maestro (`app/e2e/`); sem efeito visual. */
+  testID?: string;
 }
 
 /** Exportada para o botão do sistema da Apple (Entrar) ter a MESMA altura do botão do Google. */
@@ -48,6 +50,7 @@ export function Button({
   onPress,
   icone,
   accessibilityHint,
+  testID,
 }: Props) {
   const { cores } = useTema();
   const pressao = usePressao();
@@ -63,6 +66,7 @@ export function Button({
       accessibilityRole="button"
       accessibilityState={{ disabled: desativado, busy: carregando }}
       accessibilityHint={accessibilityHint}
+      testID={testID}
     >
       <Animated.View
         style={[
