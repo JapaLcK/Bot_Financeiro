@@ -424,6 +424,14 @@ olhar para nada ser encontrado.
 **Merge só com autorização explícita do dono do repositório.** Aprovação do Codex e
 CI verde deixam o PR *pronto*; não autorizam o merge. Avise e pergunte.
 
+**Exceção, só por PR e só quando o dono pedir:** "fica de olho no Codex, corrija o que
+ele apontar e, se liberar, mergeie e me avise" é a autorização explícita daquele PR.
+Então: peça `@codex review`, corrija o que procede (e responda na thread, como acima),
+e só mergeie com o Codex liberando (👍 ou "Didn't find any major issues" **no head
+atual**) e todos os checks verdes. Se algo falhar, fique no PR e avise o dono, sem
+forçar. Depois do merge, avise o dono e apague a branch pelas regras abaixo. A
+autorização não passa para outro PR.
+
 **Depois do merge, apague a branch — se estiver limpa e sem uso.** Antes de apagar,
 confira: o PR está `MERGED` (`gh pr view <n> --json state`); `git status --short` vazio;
 nenhum worktree nem sessão usa a branch (`git worktree list`); nenhum outro PR aberto a usa
