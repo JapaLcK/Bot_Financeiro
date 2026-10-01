@@ -371,10 +371,9 @@ def test_parcial_da_pluggy_com_contas_falhando_e_erro_temporario(user_id, monkey
 
 
 # (m) o mesmo depois de reconectar (`sem_sync`): a reconexão zerou o motivo, e o
-# `read_failed` foi gravado por um Atualizar posterior — vale. O que este caso NÃO
-# cobre: `_sync_item_contido` grava `read_failed` sem guarda de geração, então um
-# run VELHO que falhe depois da reconexão também o grava (aqui e no ramo verde,
-# pré-existente). Quem fecha é o PR-B1 da Onda 5 (`geracao_vista`).
+# `read_failed` foi gravado por um Atualizar posterior — vale. O run VELHO que
+# falha depois da reconexão não grava (guarda de geração, PR-B1):
+# `tests/test_of_marca_de_falha.py::test_c2_c3_lote_com_linha_velha_nao_desfaz_o_que_veio_depois`.
 def test_read_failed_sobre_parcial_depois_de_reconectar_e_erro_temporario(user_id, monkeypatch):
     promote_to_pro(user_id)
     _conexao(user_id)

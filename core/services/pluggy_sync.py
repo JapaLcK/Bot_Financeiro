@@ -27,6 +27,8 @@ from core.services.pluggy import (
     update_pluggy_item,
 )
 from core.services.pluggy_health import (
+    MOTIVOS_QUE_A_FALHA_SUBSTITUI,
+    MOTIVOS_QUE_A_FOTO_VIVA_SUBSTITUI,
     READ_FAILED,
     # "ainda buscando no banco": esperamos sair disto antes de sincronizar, senão
     # lemos o snapshot velho. Vem do `pluggy_health` porque lá é a fonte do
@@ -38,6 +40,7 @@ from core.services.pluggy_health import (
 )
 from core.services.pluggy_investments import list_pluggy_investments
 from db import (
+    AmbiguousItemError,
     claim_items_for_refresh,
     claim_manual_refresh,
     get_connections_by_item_id,
@@ -56,7 +59,7 @@ from db import (
 )
 # "Conexão terminal" (PAUSED/DELETED) pela lista que o `claim_manual_refresh`
 # usa — é ela que decide quem cai em `rate_limited` sem ser cooldown (§0.7).
-from db.open_finance_state import _TERMINAL as CONEXAO_TERMINAL
+from db.open_finance_state import _SEM_CHECAGEM, _TERMINAL as CONEXAO_TERMINAL
 
 
 def _HEALTH_MISSING() -> dict:
@@ -244,7 +247,37 @@ def sync_pluggy_item(provider_item_id: str, *, expected_user_id: int | None = No
 
     health = derive_item_health(item)
     geracao = (item.get("updatedAt"), item.get("lastUpdatedAt"))
-    return _sync_pluggy_item_confirmado(provider_item_id, connection, api_key, health, geracao)
+    try:
+        return _sync_pluggy_item_confirmado(provider_item_id, connection, api_key, health, geracao)
+    except AmbiguousItemError:
+        # A releitura de posse viu o item em mais de uma conexão (outro usuário o
+        # ganhou depois da leitura inicial): item ambíguo não grava em linha
+        # nenhuma, nem a foto abaixo (Codex #718).
+        raise
+    except Exception:
+        # O run falhou DEPOIS do `GET /items`: a foto acima é uma observação, e
+        # jogá-la fora deixava "Conexão perdida" num item que o próprio run viu
+        # vivo (linha O da tabela de `pluggy_health`). Só grava se, desde o
+        # começo do run, ninguém sincronizou bem nem reconectou (`geracao_vista`)
+        # nem observou o item (`observacao_vista`). Item vivo: só troca o que a
+        # foto tem autoridade para trocar (não `no_accounts`: ela não leu contas).
+        # Item em erro: grava como o sync e o job gravam. Nunca levanta: quem
+        # decide retentar é o chamador, com a exceção original.
+        # `has_data=False` aqui é "esta leitura não espelhou", não o espelho.
+        status, reason = resolve_connection_state(health=health, has_data=False,
+                                                  leitura_completa=False)
+        try:
+            mark_sync_result(
+                connection["id"], ok=False, status=status, status_reason=reason, health=health,
+                geracao_vista=(connection["reconnected_at"], connection["last_sync_at"]),
+                observacao_vista=(connection.get("health") or {}).get("observed_at"),
+                motivos_substituiveis=(MOTIVOS_QUE_A_FOTO_VIVA_SUBSTITUI if status == "ACTIVE"
+                                       else _SEM_CHECAGEM),
+                dono_unico=True)
+        except Exception as exc:
+            print(f"[pluggy_sync] foto do run que falhou não gravada ({provider_item_id}): "
+                  f"{type(exc).__name__}: {exc}")
+        raise
 
 
 def _sync_pluggy_item_confirmado(provider_item_id: str, connection: dict, api_key: str,
@@ -778,23 +811,52 @@ def _sync_item_contido(connection: dict, user_id: int) -> dict:
         return sync_pluggy_item(item_id, expected_user_id=user_id)
     except Exception as exc:
         print(f"[pluggy_sync] item {item_id} falhou no lote: {type(exc).__name__}: {exc}")
-        try:
-            # Tira o item do verde na tela: `status=None` é "não mexe" (a chamada
-            # falhou, não observamos a saúde do item — só que a tentativa não deu
-            # certo), e o motivo pendente faz `connection_ui_state` recusar
-            # "Atualizado" pelo default seguro dele.
-            #
-            # Quem limpa `read_failed` é só um sync com leitura completa. O job
-            # de saúde NÃO lê contas (só `GET /items`) e mantém o motivo
-            # (`resolve_connection_state`, linha H; Onda 5, R5 — antes ele o
-            # apagava e o espelho velho voltava ao verde em até 12 h). Quem
-            # retenta a leitura: `docs/open_finance_estados.md`.
-            mark_sync_result(connection["id"], ok=False, status=None,
-                             status_reason=READ_FAILED)
-        except Exception as exc2:  # banco fora do ar não pode derrubar o lote também
-            print(f"[pluggy_sync] mark_sync_result falhou ({item_id}): {exc2}")
+        marcar_leitura_falhou(connection, exc)
         return {"ok": False, "reason": READ_FAILED, "item_id": item_id,
                 "connection_id": connection.get("id"), "error": type(exc).__name__}
+
+
+def marcar_leitura_falhou(conexao: dict, erro: BaseException | None = None) -> None:
+    """Falha FINAL de um sync: grava `read_failed` na conexão. Nunca levanta.
+
+    `erro` é a exceção do sync: `AmbiguousItemError` (o item ganhou um segundo
+    dono, no início do run ou na releitura de posse) não grava nada (Codex #718).
+
+    Tira o item do verde e do "Atualizando…" na tela: `status=None` é "não mexe"
+    (a chamada falhou, não observamos a saúde do item — só que a tentativa não
+    deu certo), e o motivo pendente faz `connection_ui_state` recusar "Atualizado"
+    pelo default seguro dele (e, sem sync, fala antes do "Atualizando…": Onda 5,
+    R1b).
+
+    Quem limpa `read_failed` é só um sync com leitura completa. O job de saúde NÃO
+    lê contas (só `GET /items`) e mantém o motivo (`resolve_connection_state`,
+    linha H; Onda 5, R5). Quem retenta a leitura: `docs/open_finance_estados.md`.
+
+    `conexao` é a linha lida quando o run COMEÇOU (`id`, `reconnected_at`,
+    `last_sync_at`), e não uma releitura: a marca vai pelo `id` capturado (item
+    readotado noutra conexão não é tocado) e só grava se, desde então, ninguém
+    sincronizou bem nem reconectou (`geracao_vista`). Os próprios attempts do run
+    não mexem no par (só `mark_sync_attempt`). Os dois chamadores já têm a linha:
+    o lote (`_sync_item_contido`, pelo snapshot) e o sync de fundo
+    (`_run_pluggy_sync_bg`, que a lê antes da 1ª tentativa).
+
+    E só troca o motivo ATUAL se ele estiver em `MOTIVOS_QUE_A_FALHA_SUBSTITUI`
+    (CAS por espécie, no próprio `UPDATE`): uma falha sem observação nunca troca
+    um veredito (`no_accounts`, `item_missing`), nem o mais velho nem um observado
+    no meio do run. `item_missing` só sai por observação do item vivo (contrato,
+    `docs/open_finance_estados.md` §1 item 2), inclusive a foto do próprio run
+    que falhou depois do `GET /items` (`sync_pluggy_item`).
+    """
+    item_id = conexao.get("provider_item_id")
+    if isinstance(erro, AmbiguousItemError):
+        return
+    try:
+        mark_sync_result(conexao["id"], ok=False, status=None, status_reason=READ_FAILED,
+                         geracao_vista=(conexao["reconnected_at"], conexao["last_sync_at"]),
+                         motivos_substituiveis=MOTIVOS_QUE_A_FALHA_SUBSTITUI,
+                         dono_unico=True)
+    except Exception as exc:  # banco fora do ar não pode derrubar o chamador também
+        print(f"[pluggy_sync] mark_sync_result falhou ({item_id}): {exc}")
 
 
 def sync_pluggy_user(user_id: int) -> dict:

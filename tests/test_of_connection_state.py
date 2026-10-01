@@ -480,6 +480,9 @@ def test_reconexao_nao_devolve_o_verde_sozinha(user_id, monkeypatch, relogio_fix
     db.save_pluggy_open_finance_item(
         user_id, {"id": "item-reconecta", "status": "UPDATED",
                   "connector": {"id": 612, "name": "Nubank"}})
+    # O `relogio_fixo` carimba a reconexão semanas atrás, e aí o prazo da coleta
+    # (D1) já venceu. Este caso é a reconexão RECÉM-feita: âncora no `now()` do banco.
+    _envelhece_autorizacao(conexao["id"])
     monkeypatch.setattr(ps, "create_pluggy_api_key", lambda: "k")
     monkeypatch.setattr(ps, "get_pluggy_item",
                         lambda i, k=None: {**ITEM_SAUDAVEL, "id": i})
@@ -503,7 +506,7 @@ def test_reconexao_nao_devolve_o_verde_sozinha(user_id, monkeypatch, relogio_fix
 # `connection_ui_state` deixa o 1º teste vermelho.
 
 def test_reconexao_nao_reaproveita_o_sync_anterior(user_id, monkeypatch, relogio_fixo):
-    _conexao(user_id, "item-religa")                    # nasce com last_sync_at=ANTES
+    conexao = _conexao(user_id, "item-religa")          # nasce com last_sync_at=ANTES
     assert _linha("item-religa")["last_sync_at"] == ANTES
 
     db.save_pluggy_open_finance_item(
@@ -512,6 +515,7 @@ def test_reconexao_nao_reaproveita_o_sync_anterior(user_id, monkeypatch, relogio
     linha = _linha("item-religa")
     assert linha["last_sync_at"] == ANTES, "reconectar não pode MEXER no last_sync_at"
     assert linha["reconnected_at"] is not None, "mas tem que registrar a reconexão"
+    _envelhece_autorizacao(conexao["id"])  # recém-reconectada: dentro do prazo (D1)
 
     monkeypatch.setattr(ps, "create_pluggy_api_key", lambda: "k")
     monkeypatch.setattr(ps, "get_pluggy_item", lambda i, k=None: {**ITEM_SAUDAVEL, "id": i})

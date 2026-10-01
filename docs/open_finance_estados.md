@@ -10,13 +10,16 @@ Código de referência:
 
 - `core/services/pluggy_health.py`: `resolve_connection_state` (DECIDE o par
   `status` + `status_reason` a partir de uma observação, para o sync, o job de
-  saúde e o 404; quem grava é `mark_sync_result`) e `connection_ui_state` (única que decide
+  saúde, o 404 e a foto do sync que falhou depois do `GET /items`; quem grava é
+  `mark_sync_result`) e `connection_ui_state` (única que decide
   o estado exibido, um dos de `_LABELS`). A máquina de estados por escrito está no
   topo desse módulo.
 - Também GRAVAM `status` e/ou `status_reason` sem passar pelo resolvedor: o
   webhook (`update_pluggy_open_finance_item_status`), a reconexão
-  (`save_pluggy_open_finance_item`, linha G), `_sync_item_contido` (`read_failed`
-  com `status` intocado) e a pausa (`pause_open_finance_connection`, `PAUSED`).
+  (`save_pluggy_open_finance_item`, linha G), `marcar_leitura_falhou`
+  (só `read_failed`, com `status` intocado, e só sobre motivo substituível,
+  `MOTIVOS_QUE_A_FALHA_SUBSTITUI`; chamada pelo lote, `_sync_item_contido`, e
+  desde o PR-B1 pela falha final do sync de fundo, `_run_pluggy_sync_bg`) e a pausa (`pause_open_finance_connection`, `PAUSED`).
 - `core/services/pluggy_sync.py`: `sync_pluggy_item` (sync), `run_of_health_check`
   (job de saúde, só `GET /items`), `_refresh_items_report` (o que o toast lê).
 - `frontend/settings.html`: `renderConnections` (pílula) e `refreshVerdict` (toast).
@@ -33,7 +36,8 @@ comando; não copie o resultado para cá (`CLAUDE.md` §2).
 
 1. **Terminal local** (`DELETED` e `PAUSED`) vence tudo. *Vigente.*
 2. **`item_missing`** (404 observado) só sai por uma **observação** do item vivo,
-   do job de saúde ou do sync. Webhook não limpa. *Vigente.*
+   do job de saúde ou do sync, inclusive a foto do sync que falhou depois do
+   `GET /items`. Webhook não limpa. *Vigente.*
 3. **Autorização atual** = `coalesce(reconnected_at, created_at)`. Observação e
    sync anteriores a ela não valem: `sem_sync`, `health` zerado na reconexão e
    guarda de geração do sync. *Vigente.*
@@ -75,13 +79,78 @@ comando; não copie o resultado para cá (`CLAUDE.md` §2).
    *Proposto:* D2 e D7.
 8. **"Atualizando…"** só vale enquanto a coleta da autorização atual pode estar
    legitimamente em curso. Passado o prazo (D1) ou registrada uma falha, a tela diz
-   o que houve. *Hoje não tem limite* (R1, PR-B1).
+   o que houve. **Vigente desde o PR-B1:**
+   - a falha de um sync grava `read_failed`: a foto do run (**O**, abaixo) a cada
+     tentativa que falha depois do `GET /items`, e a marca (**F**) na falha final,
+     que é a exceção final do sync de fundo OU o `sync_in_progress` devolvido nas
+     três tentativas (lock do item ou semáforo do processo ocupado: célula 30).
+     No sync de fundo, portanto, "Erro temporário" já aparece durante o backoff
+     entre as tentativas (célula 29 da §2.1). A frase "Tentaremos de novo
+     automaticamente" só passa a ser verdade com a retentativa do PR-B2: o B1
+     sozinho marca e para. O motivo pendente fala
+     antes do "Atualizando…" ("Erro temporário"): no ramo sem `health` qualquer
+     motivo pendente; no ramo com `health` em coleta (`UPDATING`/`CREATED`) só
+     falha de LEITURA (`read_failed`; `investments_read_failed` sem sync continua
+     "Atualizando…", regra do PR-A), porque `no_accounts` numa 1ª coleta em curso é
+     a Pluggy ainda sem contas;
+   - a falha de um sync grava em até duas vezes, cada uma com a autoridade da
+     sua espécie, e as duas vão pelo `id` lido quando o run começou e só gravam
+     se o par `(reconnected_at, last_sync_at)` (`geracao_vista`) ainda for o
+     lido (sync bom ou reconexão no meio → nada):
+     - **F**, a falha sem observação (`marcar_leitura_falhou`, os dois chamadores:
+       sync de fundo e lote do Atualizar): grava `read_failed` só se o motivo
+       ATUAL está em `MOTIVOS_QUE_A_FALHA_SUBSTITUI` (vazio, `ok` e as falhas de
+       leitura), no próprio `UPDATE` (CAS por espécie, `motivos_substituiveis`).
+       A falha sem observação nunca troca um veredito (`no_accounts`,
+       `item_missing`), nem o de antes do run nem um observado no meio;
+     - **O**, a foto do `GET /items` do próprio run quando ele falha depois dela
+       (`sync_pluggy_item`): grava o par do resolvedor (`ACTIVE`/`read_failed`,
+       ou `ERROR`/`""` com o item em erro) e a foto, só se ninguém observou o
+       item desde o começo do run (`observacao_vista`, o `health.observed_at`).
+       Com o item vivo, só sobre `MOTIVOS_QUE_A_FOTO_VIVA_SUBSTITUI` (a lista da
+       F mais `item_missing`: a foto do item vivo troca `item_missing`, item 2).
+       Ela não leu contas, então não troca `no_accounts`. A O usa a linha que o
+       próprio sync lê, não a captura do sync de fundo: com o banco fora só
+       naquela captura e um dono só, a O roda e grava na linha do dono (a F é
+       que fica sem linha). Item ligado a mais de um usuário (`AmbiguousItemError`,
+       no início do run ou na releitura de posse dentro do lock) não grava em
+       linha nenhuma: nem a O nem a F (a O não tem foto antes da 1ª leitura; a F
+       recebe a exceção e sai). Sem exceção que prove a ambiguidade (o
+       `sync_in_progress` devolvido, ou uma falha de leitura comum antes da
+       releitura de posse), quem decide é o próprio `UPDATE`: a O e a F gravam
+       com `dono_unico`, e a condição `not exists` (outra conexão com o mesmo
+       `provider` e `provider_item_id`, o critério de
+       `get_connections_by_item_id`) é atômica com a escrita. Nenhuma janela
+       entre ler a posse e gravar. **Limite conhecido:** um item compartilhado só
+       existe onde o índice `uq_of_conn_provider_item` não foi criado (a criação
+       só emite warning se falhar; em produção ele existe, medido em 2026-09-23).
+       Nesse banco, uma inserção concorrente do segundo dono, dentro da mesma
+       instrução do `UPDATE`, não é vista pelo `not exists` (snapshot de
+       instrução). Consequência: um `read_failed` e a foto na linha do usuário do
+       run, que o próximo sync ou a próxima observação reescrevem. Não se toma o
+       `pluggy_item_lock` na marca: seria uma segunda aquisição por quem às vezes
+       já o segura, e ocuparia o semáforo `OF_SYNC_LOCK_MAX_CONN`. Quem rodar sem o
+       índice precisa criá-lo;
+   - "sem sync desde a autorização atual" é o MESMO predicado nos dois lados:
+     `last_sync_at` nulo ou anterior a `reconnected_at` (nunca `created_at`, que é
+     relógio do Postgres contra o `last_sync_at` do Python);
+   - sem sync desde a autorização atual e com a âncora
+     `coalesce(reconnected_at, created_at)` fora de `(now() - 30 min, now() + 5 min]`
+     (`SQL_COLETA_VENCIDA`, derivado no Postgres), a pílula continua
+     "Atualizando…" em âmbar e o detalhe vira **"Está demorando mais que o normal —
+     atualize de novo"** (o app não tem botão Atualizar: lá se puxa a tela). Vale nos dois ramos (com e sem `health`), porque o job
+     de saúde grava `health` sem sincronizar. A instrução de dispositivo dentro da
+     janela continua vencendo (ela é `needs_user_action`, não "Atualizando…").
+   - quem RELÊ sozinho depois do prazo ou da falha é o PR-B2 (D3).
 9. **Aviso proativo = função do mesmo estado da tela** (`connection_ui_state`), não
    um classificador paralelo por `status`. *Proposto (D4, PR-D).*
 10. **`health` e `status` local discordando** (`status=ERROR` do webhook com
     `health.item_status=UPDATED`): hoje `ERROR` vence. *Proposto:* não comparar
     relógios; a observação imediata do item 5 resolve. Até ela terminar, `ERROR`
-    continua vencendo, que é o lado conservador.
+    continua vencendo, que é o lado conservador, salvo quando um sync em voo
+    grava a sua foto do item (o sucesso, ou a O do item 8 quando ele falha
+    depois do `GET /items`): aí o `status` observado troca esse `ERROR`
+    (célula 13b da §2.1).
 
 Ações para dado antigo, em ordem de custo: (a) reler a Pluggy (sync, só GET, sem
 cota de coleta); (b) pedir coleta nova (PATCH, gasta cota); (c) pedir ação do
@@ -119,10 +188,21 @@ verificação externa pendente.
 | estado de partida | evento | tela | aviso (se ligado) | veredito |
 |---|---|---|---|---|
 | Atualizando, 1ª conexão sem sync | E2 com sync ok | Atualizado (os Ajustes só repintam se o usuário agir) | não | ✓ backend; ✗ front (F1, PR-E) |
-| Atualizando, 1ª conexão sem sync | E2 com sync levantando (5xx/429/rede) | Atualizando… para sempre | não | ✗ R1 (PR-B1) |
-| Atualizando, 1ª conexão sem sync | processo reinicia no meio do sync | Atualizando… para sempre | não | ✗ família R1 (PR-B1) |
-| Atualizando, 1ª conexão sem sync | E8 | Atualizando… ("Ainda não sincronizou") | não | ✗ R1: o tique mede e não recupera (PR-B1, PR-B2) |
-| Atualizando, 1ª conexão sem sync | E12 (horas) | Atualizando… | não | ✗ sem limite (D1, PR-B1) |
+| Atualizando, 1ª conexão sem sync | E2 com sync levantando (5xx/429/rede) | **Erro temporário · Tentaremos de novo automaticamente** (a falha final grava `read_failed`) | não | ✓ **PR-B1 (R1, R1b)**; a retentativa que a frase promete é o PR-B2 |
+| Atualizando, 1ª conexão sem sync, `health` do job com o item em `UPDATING` | E2 com sync levantando | **Erro temporário · Tentaremos de novo automaticamente** | não | ✓ **PR-B1** (rodada 2) |
+| Atualizando, 1ª conexão sem sync, `health` em `UPDATING` | sync lê e não vem conta (`no_accounts`, Pluggy ainda coletando) | Atualizando… (e o detalhe do prazo depois de 30 min) | não | ✓ **PR-B1** |
+| Atualizado (ou qualquer) | falha final de um sync de fundo que começou ANTES de um sync bom ou de uma reconexão | mantém o que o mais novo gravou (a falha velha não marca) | não | ✓ **PR-B1** (rodada 2) |
+| qualquer | falha final de um sync que começou ANTES de um veredito mais novo (`no_accounts`, 404 → `item_missing`), inclusive o mesmo veredito observado de novo | mantém "Sem dados" / "Conexão perdida" | avisa conforme o estado | ✓ **PR-B1** (células 4, 5, 6, 11 e 20 de `tests/test_of_marca_de_falha.py`) |
+| qualquer | falha final de um sync que começou ANTES de o job ver o item vivo e **limpar** o motivo (`item_missing`, ou `no_accounts` com espelho cheio) | **Erro temporário · Tentaremos de novo automaticamente** (antes: verde falso) | não | ✓ **PR-B1** (células 9, 9b e 9c) |
+| Conexão perdida (`item_missing`) | falha final de um sync no próprio `GET /items` (5xx/429, sem foto) | mantém "Conexão perdida · Refaça a conexão" | avisa | ✓ **PR-B1** (célula 7) |
+| Conexão perdida (`item_missing`) | o próprio sync vê o item vivo (`GET /items` 200) e falha depois (`/accounts` 5xx/429) | **Erro temporário · Tentaremos de novo automaticamente** (DECISÃO 2 = A) | para | ✓ **PR-B1** (célula 8) |
+| Sem dados (`no_accounts`) | falha final de um sync, sem evento no meio (no `GET /items` ou depois) | mantém "Sem dados"; em L a foto do run não é gravada (DECISÃO 1 = A) | não | ✓ **PR-B1** (células 18 e 19) |
+| Sem dados (`no_accounts`) | o sync vê o item em `LOGIN_ERROR` e falha depois | **Ação necessária · Reautorize o banco** (antes: Erro temporário, com a foto de ontem) | avisa | ✓ **PR-B1** (célula 22) |
+| qualquer sem motivo | E3 no meio de um sync que falha depois do `GET /items` | Erro temporário; a foto (mais velha que a pista do webhook) troca `status` `ERROR` por `ACTIVE`, e o aviso proativo, que ainda lê `status`, é afetado até o PR-D | não | ✓ tela **PR-B1** (célula 13b); aviso registrado em `decisoes.md` |
+| Atualizando, com o prazo vencido | E6 (Atualizar) com a Pluggy ainda coletando e sem conta | toast "{banco}: está demorando mais que o normal — atualize de novo. Toque em Atualizar de novo em instantes.", em tom de ERRO (o `reason` é `no_accounts`) | não | ✗ instrução repetida, "Toque em Atualizar" num app sem o botão e tom de erro: frontend (`refreshVerdict`), fica para o PR-E |
+| Atualizando, 1ª conexão sem sync | processo reinicia no meio do sync | Atualizando… até 30 min da autorização; depois **Atualizando… · Está demorando mais que o normal — atualize de novo** (âmbar) | não | ✓ **PR-B1 (D1)**; recuperar sozinho: PR-B2 |
+| Atualizando, 1ª conexão sem sync | E8 | Atualizando… ("Ainda não sincronizou") dentro do prazo, depois o detalhe do prazo; com `read_failed`, Erro temporário | não | ✓ **PR-B1**; o tique ainda não relê (PR-B2) |
+| Atualizando, 1ª conexão sem sync | E12 (horas) | depois de 30 min: **Atualizando… · Está demorando mais que o normal — atualize de novo** | não | ✓ **PR-B1 (D1)** |
 | Atualizando, 1ª conexão sem sync | E11 (Ajustes aberto) | card parado em Atualizando… | n/a | ✗ F1 (PR-E) |
 | Autorize no app (device, `health` null, dentro de `JANELA_DEVICE_AUTH_MIN`) | E8 com GET falhando | mantém; vencida a janela, "Reautorize" | calado, depois avisa | ✓ (#428) |
 | Autorize no app (device, `health` null, dentro de `JANELA_DEVICE_AUTH_MIN`) | E8 com GET ok e mesmo estado | "Autorize no app" para sempre | calado para sempre | ✗ R7 (D5, PR-D) |
@@ -149,7 +229,7 @@ verificação externa pendente.
 | Parcial (Pluggy) | motivo que o código não conhece | Erro temporário (o mesmo default seguro do verde; antes: Parcial) | não | ✓ **PR-A** |
 | Parcial (Pluggy) com `investments_read_failed` de antes da autorização atual (`sem_sync`) | leitura da tela | só o detalhe da Pluggy, sem "investimentos não vieram" | não | ✓ **PR-A** |
 | Parcial (Pluggy) com INVESTMENTS já atrasado | E6 com `/investments` 429 | só o detalhe da Pluggy ("Investimentos desatualizado desde dd/mm"), sem repetir | não | ✓ **PR-A** |
-| Erro temporário (`read_failed`) depois de reconectar | um sync VELHO (de antes da reconexão) falhando depois dela | `_sync_item_contido` grava `read_failed` sem guarda de geração: "Erro temporário" por uma falha da autorização antiga (ramo verde e `partial`) | não | ✗ pré-existente, fechado pelo PR-B1 (`geracao_vista` no `mark_sync_result`) |
+| Erro temporário (`read_failed`) depois de reconectar | um sync VELHO (de antes da reconexão) falhando depois dela | a falha velha não grava (`geracao_vista`): a tela é a da autorização nova | não | ✓ **PR-B1** (`tests/test_of_marca_de_falha.py::test_c2_c3_lote_com_linha_velha_nao_desfaz_o_que_veio_depois[reconexao]`) |
 | Parcial (`investments_read_failed`) | E8 | mantém Parcial | não | ✓ **PR-A (R5)** |
 | Parcial (`investments_read_failed`) | E2 ou E6 com leitura completa | Atualizado | não | ✓ **PR-A** |
 | Parcial (`investments_read_failed`) | E3 | "Erro temporário" com o motivo apagado; o E8 seguinte, com o item vivo, pinta Atualizado sem os investimentos terem sido lidos | avisa (classifica por `status`) | ✗ (PR-C) |
@@ -172,7 +252,60 @@ verificação externa pendente.
 | qualquer | E9 | zera `health` e motivo: Atualizando… ou instrução de device | calado conforme o prazo | ✓ fora de corrida; ✗ com o job de saúde em voo (linha "E9 no meio do `GET /items`" acima, PR-C) |
 | qualquer | E10 | linha apagada, marca `removed`; webhook tardio não ressuscita | – | ✓ (Onda 4) |
 
-Testes das células do PR-A: `tests/test_of_leitura_incompleta.py`.
+Testes das células do PR-A: `tests/test_of_leitura_incompleta.py`. Do PR-B1:
+`tests/test_of_coleta_sem_fim.py` (prazo, R1, R1b, irmão com `health`) e
+`tests/test_of_marca_de_falha.py` (a marca de falha, células da §2.1).
+
+### 2.1 A marca de falha do PR-B1, célula por célula
+
+Um sync falha; o que a linha e a tela dizem depende do motivo gravado quando o
+run começou, do que aconteceu no meio e de onde ele falhou: **G** = no próprio
+`GET /items` (sem foto: só a F); **L** = depois da foto (`/accounts`,
+transações, escrita: a O e depois a F). As regras estão no item 8 do contrato.
+Os testes ficam em `tests/test_of_marca_de_falha.py`, com o número da célula no
+nome (`test_c9b_…`).
+
+| # | motivo no início | evento durante o run | onde | resultado: motivo e tela | teste |
+|---|---|---|---|---|---|
+| 1 | nenhum | nenhum | G, L | `read_failed` (L: e a foto, `ACTIVE`). **Erro temporário** | `test_of_coleta_sem_fim.py::test_sync_de_fundo_que_falha_…` |
+| 2 | qualquer | sync bom | G, L | a falha não grava (par mudou). **Atualizado** | `c2_…`, `c2_c3_lote_…[sync_bom]` |
+| 3 | qualquer | reconexão | G, L | não grava (par mudou). **Atualizando…** | `c3_…`, `c3_L_…`, `c2_c3_lote_…[reconexao]` |
+| 4 | nenhum | sync lê zero contas (`no_accounts`) | G | mantém. **Sem dados** | `c4_c5_…[c4_no_accounts]` |
+| 5 | nenhum | sync vê 404 (`item_missing`) | G | mantém. **Conexão perdida** | `c4_c5_…[c5_item_missing]` |
+| 6 | `no_accounts` | sync lê zero de novo | G, L | mantém. **Sem dados** | `c6_…` |
+| 7 | `item_missing` | nenhum | G | mantém (sem foto). **Conexão perdida** | `c7_…` |
+| 8 | `item_missing` | nenhum; o run vê o item vivo | L | `ACTIVE`/`read_failed` e a foto. **Erro temporário** (DECISÃO 2 = A) | `c8_…` |
+| 9 | `item_missing` | job vê o item vivo e limpa | G | `read_failed`. **Erro temporário** | `c9_…` |
+| 9b | `item_missing` | idem | L | a O recusa (`observed_at` do job); a F grava. **Erro temporário** | `c9b_…` |
+| 9c | `no_accounts` com espelho cheio | job limpa (`has_data`) | G | `read_failed`. **Erro temporário** | `c9c_…` |
+| 10 | nenhum | job mede e mantém sem motivo | G, L | `read_failed`. **Erro temporário** | `c10_…` |
+| 11 | nenhum | job vê 404 | G, L | mantém `item_missing`. **Conexão perdida** | `c11_…` |
+| 12 | `read_failed` | nenhum | G, L | regrava. **Erro temporário** | `c12_c17_…[c12-…]` |
+| 13 | nenhum | webhook `item/error` | G | `read_failed`, `status` segue `ERROR`. **Erro temporário** | `c13_…[c13_G]` |
+| 13b | nenhum | webhook `item/error` | L | a foto troca `ERROR` por `ACTIVE`; tela igual. O aviso proativo, que lê `status`, deixa de sair até o PR-D | `c13_…[c13b_L]` |
+| 14 | qualquer | item readotado (linha nova) | G | a marca vai pelo `id` antigo: a linha nova fica intocada | `c14_…` |
+| 15 | qualquer | `PAUSED` ou `DELETED` | G | não grava (terminal) | `c15_…` |
+| 16 | nenhum | webhook `item/created` | G, L | `read_failed`. **Erro temporário** | `c16_…` |
+| 17 | `investments_read_failed` | nenhum | G, L | `read_failed`. **Erro temporário** | `c12_c17_…[c17-…]` |
+| 18 | `no_accounts` | nenhum | L | mantém, e a foto não é gravada. **Sem dados** (DECISÃO 1 = A) | `c18_c19_…[c18_L]` |
+| 19 | `no_accounts` | nenhum | G | mantém. **Sem dados** (DECISÃO 1 = A) | `c18_c19_…[c19_G]` |
+| 20 | `item_missing` | job vê 404 de novo depois da foto | L | a O recusa (`observed_at`); mantém. **Conexão perdida** | `c20_…` |
+| 21 | `item_missing` | job vê o item vivo depois da foto | L | = 9b | `c9b_…` |
+| 22 | `no_accounts` | nenhum; a foto diz `LOGIN_ERROR` | L | a O grava `ERROR` e a foto (sem lista); a F grava `read_failed`. **Ação necessária · Reautorize o banco** | `c22_foto_…`; com um `no_accounts` mais novo no meio, a O recusa: `c22_error_depois_…` |
+| 23 | nenhum | sync bom Parcial (`investments_read_failed`) | G | não grava (par mudou). **Parcial** | `c23_…` |
+| 24 | nenhum | sync lê zero contas com `/investments` falhando (`read_failed`) | G, L | regrava o mesmo valor. **Erro temporário** | = 12 |
+| 25 | nenhum | outra falha concorrente | G, L | as duas gravam o mesmo valor | sem teste (idempotente) |
+| 26 | nenhum | só os attempts do próprio run | L | grava (o attempt não mexe no par nem no `observed_at`) | `c26_…` |
+| 27 | nenhum | nenhum, pelo lote do Atualizar | L | grava pela linha do snapshot. **Erro temporário** | `c27_…` |
+| 28 | — | dois donos do mesmo item desde o início do run | G | nada gravado em nenhuma linha (a captura do sync de fundo e o sync levantam `AmbiguousItemError`; no lote, a F recebe a exceção e sai). Com um dono e o banco fora só na captura do sync de fundo, a O roda e grava na linha do dono | `c28_…`, `c28c_…` |
+| 28b | — | um segundo dono aparece depois da leitura inicial e antes da releitura de posse | L (a releitura levanta `AmbiguousItemError`) | nada gravado em nenhuma linha: nem a O nem a F (Codex #718). Antes, a O gravava a foto e `read_failed` na linha do 1º dono | `c28b_…[sync, bg, lote]`; positivo `c28d_…` |
+| 29 | nenhum | sync de fundo: 1ª tentativa falha em L, as outras em G | L, G | a O da 1ª grava; a F final regrava. **Erro temporário** já durante o backoff | `c29_…` |
+| 30 | nenhum | `sync_in_progress` (devolvido, não levantado) nas 3 tentativas do sync de fundo, ninguém sincroniza | — | a F marca `read_failed` (antes: nada, e a 1ª conexão ficava **Atualizando…** até o prazo e depois "demorando mais que o normal"). **Erro temporário**; a promessa "Tentaremos de novo" é do PR-B2 | `c30_…` |
+| 30b | nenhum | o mesmo, mas o sync que segurava o lock termina bem antes da marca | — | a F recusa (o par mudou). **Atualizado** | `c30b_…` |
+| 30c | nenhum | `sync_in_progress` na 1ª tentativa e sucesso na 2ª | — | sem marca. **Atualizado** | `c30c_…` |
+| 31 | nenhum | `sync_in_progress` esgotado e um segundo dono aparece entre a consulta de posse da última tentativa e a marca | — | nada gravado em nenhuma linha (`dono_unico` no `UPDATE`) | `c31_…`; positivo `c31_…[um_dono]` |
+| 31b | nenhum | falha final comum (500) do sync de fundo e um segundo dono aparece antes da marca | G (só a F), L (a O e a F) | nada gravado em nenhuma linha | `c31b_…[G, L]`; positivos `[…-um_dono]` |
+| 31c | nenhum | a foto do run (O) e um segundo dono que aparece durante a leitura, antes da releitura de posse | L | nada gravado em nenhuma linha | `c31c_…`; positivo `c31c_…[um_dono]` |
 
 **Conserto de classe previsto para as corridas do job (PR-C):** o CAS do PR-A
 compara só `status_reason`, que é o dado de que a decisão do job depende, e
@@ -185,18 +318,22 @@ PR-C extrai de `run_of_health_check`, usado também pelo caminho do 404.
 
 ## 3. Decisões do dono (2026-09-27) e quem as implementa
 
-Todas decididas. Nenhuma está implementada no PR-A, que também não altera o
-texto que a D3 vai tornar verdade ("Tentaremos de novo automaticamente").
+Todas decididas. O PR-A não implementou nenhuma; o PR-B1 implementa a D1. Nenhum
+dos dois altera o texto que a D3 vai tornar verdade ("Tentaremos de novo
+automaticamente").
 
 | decisão | escolha | PR |
 |---|---|---|
-| D1: por quanto tempo "Atualizando…" é honesto sem sync | 30 min desde a autorização atual; depois pílula âmbar, mesma "Atualizando…", detalhe "Está demorando mais que o normal — toque em Atualizar" | PR-B1 |
+| D1: por quanto tempo "Atualizando…" é honesto sem sync | 30 min desde a autorização atual; depois pílula âmbar, mesma "Atualizando…", detalhe "Está demorando mais que o normal — atualize de novo" (texto trocado pelo dono em 2026-09-30: o app não tem botão Atualizar) | PR-B1 (**implementada**) |
 | D2: o que a tela diz com dado antigo | âmbar só com prova (Pluggy com dado mais novo que o nosso); sem limite de idade absoluta até medir o auto-update da Pluggy | sem PR atribuído no plano da Onda 5 (a atribuir) |
 | D3: alguém tenta de novo sozinho quando nosso dado está atrás | sim: o tique de saúde agenda sync para conexões com dado atrás (motivo de leitura pendente, coleta vencida, Pluggy à frente), teto K por tique, só GET. "Tentaremos de novo automaticamente" passa a ser verdade | PR-B2 |
 | D4: quais estados geram o aviso "reconecte" | só `needs_user_action` sem instrução de dispositivo e `item_missing`; a mesma função da tela | PR-D |
 | D5: prazo da instrução de device/QR com `health` medido | a mesma `JANELA_DEVICE_AUTH_MIN` (`core/services/pluggy_health.py`), ancorada na autorização atual, nos dois ramos | PR-D |
 | D6: como os Ajustes acompanham a coleta | relê o snapshot em 5/10/20/40 s e depois a cada 60 s, para no estado final ou em 30 min, pausa com a aba oculta, relê no `visibilitychange` | PR-E |
 | D7: "Última sync" mostra a data de quê | mantém "Última sync" e acrescenta "· dados de dd/mm" quando a data do banco difere mais de 1 dia | sem PR atribuído no plano da Onda 5 (a atribuir) |
+
+Texto novo do PR-B1, visível ao usuário: o detalhe "Está demorando mais que o
+normal — atualize de novo" (pílula "Atualizando…", âmbar).
 
 Texto novo do PR-A, visível ao usuário: o detalhe
 "Investimentos não vieram nesta atualização" (pílula "Parcial").
