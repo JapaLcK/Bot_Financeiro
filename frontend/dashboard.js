@@ -8393,6 +8393,13 @@ function applyAccessVerdict(me) {
     }
     return false;
   }
+  // Conta paga sem senha nem Google/Apple: dados e WS respondem 403/4403.
+  if (me && me.precisa_criar_senha) {
+    clearSessionSnapshots();
+    stopWsRetries();
+    window.PBCriarSenha.mostrar(me);
+    return false;
+  }
   return true;
 }
 

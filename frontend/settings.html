@@ -1907,6 +1907,7 @@ window.addEventListener("storage", (event) => {
 const ERRO_DE_GATE = new Map([
   ["subscription_required", "Sua conta está sem plano ativo."],
   ["plan_selection_required", "Escolha um plano para continuar."],
+  ["password_required", "Crie sua senha para liberar isto."],
 ]);
 async function readApiError(resp) {
   const raw = await resp.text();

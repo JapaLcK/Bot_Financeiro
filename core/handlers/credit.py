@@ -7,7 +7,8 @@ from collections import defaultdict
 from core.handlers.forma_pagamento import NEGACAO_RE
 # Helper único das portas destrutivas (a docstring dele lista quais e explica o
 # critério de nível). Ele nunca põe `str(e)` no log.
-from core.intent_classifier import classify, is_comparative_question, NEGATIVAS_EXATAS
+from core.intent_classifier import (classify, is_comparative_question, NEGATIVAS_EXATAS,
+                                    sem_perguntas_comparativas)
 from core.observability import _log_falha
 from core.services.category_service import infer_category, learn_from_inference
 from core.services.plan_limits import PlanLimitExceeded
@@ -955,8 +956,18 @@ def negada_com_o_of(user_id: int, text: str) -> bool:
 
 
 def try_handle_natural_credit_purchase(user_id: int, text: str) -> str | None:
-    if not _is_natural_credit_purchase(text) or negada_com_o_of(user_id, text):
+    # Tipo e valor saem do pedaço sem a pergunta (#568): em "gastei 50 no mercado e
+    # gastei mais no cartão esse mês?" o cartão é da pergunta. Tudo pergunta: o
+    # portão lê a mensagem inteira e responde só os avisos (nada grava 2025).
+    limpo, puladas = sem_perguntas_comparativas(text)
+    if not _is_natural_credit_purchase(limpo or text) or negada_com_o_of(user_id, text):
         return None
+    from core.handlers.launches import avisos_depois_de  # local: launches importa daqui
+    resp = [_compra_no_credito(user_id, limpo)] if limpo else []
+    return "\n\n".join(resp + avisos_depois_de(user_id, puladas))
+
+
+def _compra_no_credito(user_id: int, text: str) -> str:
     # Q2b/Q40: com banco conectado, só cartão MANUAL (fora do OF) registra na
     # fatura; o resto chega pelo Open Finance. Aqui, e não em cada chamador:
     # `add()`, a entrada rápida e o `credit.handle` passam todos por esta porta.
@@ -2479,9 +2490,16 @@ def handle(user_id: int, text: str) -> str | None:
         )
 
     if re.match(r"^(?:pagar|paguei)\b", t_low):
-        resp = _handle_pay_bill_command(user_id, t)
+        # O último número vira valor: o 2026 de "... e gastei mais em 2025 ou 2026?" (#568).
+        # Com pergunta, só paga com o cartão nomeado, como a conta: "paguei a
+        # fatura e gastei mais…?" pagaria a do padrão; responde só o aviso.
+        from core.handlers.launches import avisos_depois_de  # local: launches importa daqui
+        t_fatura, puladas = sem_perguntas_comparativas(t)
+        if puladas and not _find_card_name_in_text(user_id, t_fatura):
+            return "\n\n".join(avisos_depois_de(user_id, puladas))
+        resp = _handle_pay_bill_command(user_id, t_fatura)
         if resp is not None:
-            return resp
+            return "\n\n".join([resp, *avisos_depois_de(user_id, puladas)])
 
     if t_low in ("faturas", "listar faturas", "faturas abertas", "listar faturas abertas", "listar fatura", "listar faturas em aberto"):
         try:

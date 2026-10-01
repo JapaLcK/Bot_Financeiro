@@ -463,6 +463,8 @@ footer a:hover { color:var(--text); }
 <script defer src="/reconciliations.js"></script>
 <script defer src="/launch-type-labels.js?v=1"></script>
 <script src="/purchase-intent.js?v=1"></script>
+<link rel="stylesheet" href="/criar-senha.css?v=1" />
+<script src="/criar-senha.js?v=1"></script>
   <link rel="stylesheet" href="/app-mode.css?v=34" />
   <script src="/app-mode.js?v=34"></script>
   <script src="/pb-nav.js?v=6"></script>
@@ -1521,6 +1523,9 @@ async function awaitCheckoutConfirmation() {
     // fechamento também ocorre no fail-open, portanto ele sozinho não prova
     // pagamento concluído.
     window._pbCheckoutConfirmed = _checkoutSettled(me);
+    // ANTES do close: ele dispara o `pb:checkout-confirmado`, e o `celebrar()`
+    // das boas-vindas lê esta flag para não abrir por baixo do "Crie sua senha".
+    window._pbPrecisaSenha = !!(me && me.precisa_criar_senha);
     _closeCheckoutOverlay();
   }
   return me;
@@ -1764,6 +1769,20 @@ let _homeMe = null;   // /auth/me da abertura, reusado pelas recargas
       return;
     }
     window.location.replace("/precos?ativar=1");
+    return;
+  }
+  // Conta paga sem senha nem Google/Apple: o "Crie sua senha" sobe e os dados
+  // não carregam (dariam 403 password_required). A ordem dos overlays desta
+  // página, na sequência em que podem subir:
+  //   1) checkout (_openCheckoutOverlay, síncrono no topo, só com ?upgrade=success);
+  //   2) onboarding do MFA pelo /auth/validate — o servidor já o cala sem senha;
+  //   3) awaitCheckoutConfirmation fecha o checkout e grava _pbPrecisaSenha
+  //      antes do `pb:checkout-confirmado`, e o celebrar() das boas-vindas desiste;
+  //   4) os vereditos de plano acima (402 vem antes do 403);
+  //   5) este, e só então o loadHomeData.
+  if (me && me.precisa_criar_senha) {
+    _limparSnapshots();
+    window.PBCriarSenha.mostrar(me);
     return;
   }
 
@@ -2541,8 +2560,9 @@ function wpInicioValido(s) {
       if (window._pbAccessDenied) return;
       const celebrar = () => {
         // relido AGORA, não na hora de agendar: entre os 450ms e o fim do poll
-        // a validação pode ter falhado, e aí não se celebra
-        if (window._pbAccessDenied) return;
+        // a validação pode ter falhado, e aí não se celebra. Nem com o "Crie
+        // sua senha" de pé: sem senha, o /app daria 403 em tudo.
+        if (window._pbAccessDenied || window._pbPrecisaSenha) return;
         // Compra iniciada pelo fluxo contínuo: depois da confirmação, /app usa
         // os gates existentes para mandar cadastro novo ao onboarding e usuário
         // já configurado ao dashboard. Retornos antigos, sem intenção na aba,

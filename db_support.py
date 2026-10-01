@@ -1140,7 +1140,26 @@ def attempt_whatsapp_phone_link_impl(
 
     final_user_id = target_user_id
     if int(current_user_id) != target_user_id:
-        from db.users import MergeRefused  # tardio: db/ importa este módulo
+        from db.google_auth import conta_sem_credencial  # tardio: db/ importa este módulo
+        from db.users import MergeRefused, _tem_dados_financeiros
+
+        # Conta sem senha nem Google/Apple (a do quiz) não se liga pelo telefone:
+        # o número foi digitado por quem pagou, e o e-mail ainda não foi provado.
+        # Sem mesclar e sem gravar user_identities (PR 4 do funil v3). Número já
+        # ligado a ela (current == target) não passa aqui: o `process_message`
+        # barra antes de chamar o auto-vínculo.
+        if conta_sem_credencial(target_user_id):
+            # Remetente com dados é o dono do número usando o bot, não quem acabou
+            # de pagar: segue na conta dele, sem vínculo e sem aviso (status que o
+            # `process_message` não trata). O critério de dados é o do merge (#607).
+            with get_conn() as conn, conn.cursor() as cur:
+                if _tem_dados_financeiros(cur, int(current_user_id)):
+                    return {"status": "remetente_com_dados", "wa_phone": wa_phone,
+                            "target_user_id": target_user_id}
+            # `target_user_id`: os envios proativos vão ao `phone_e164` dela, e o
+            # clique de opt-out deste número tem de desligar a preferência dela.
+            return {"status": "precisa_senha", "wa_phone": wa_phone,
+                    "target_user_id": target_user_id}
 
         try:
             merge_users(int(current_user_id), target_user_id)
