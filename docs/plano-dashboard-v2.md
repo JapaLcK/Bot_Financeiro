@@ -261,7 +261,11 @@ PR de cada etapa, não soluções prontas. Cada PR confere se ainda valem, decid
     leitura como incompleta, nunca como sucesso. Tudo isso vem antes de qualquer
     conciliação de ausências (item abaixo), que com leitura parcial apagaria transação
     legítima;
-  - conta que some da resposta de `/accounts` segue somada com o saldo antigo, e
+  - conta que some da resposta de `/accounts` segue somada com o saldo antigo (e apagar a
+    conta direto leva as transações em cascata sem desfazer lançamentos e compras ligados:
+    a conciliação de conta segue o ciclo de `delete_open_finance_transactions()` e
+    `disconnect_open_finance_connection()`, com `_rollback_imported_of()`, preservando o
+    lançamento manual fundido e desligando o cartão), e
     transação que some de uma sincronização completa também fica: `save_open_finance_sync()`
     só faz upsert do que veio, então um `transactions/deleted` perdido deixa a compra ou o
     estorno (e o lançamento e a fatura ligados) para sempre. Conciliar ausências só com
@@ -403,7 +407,11 @@ PR de cada etapa, não soluções prontas. Cada PR confere se ainda valem, decid
       financiamento ou contrato que termina dentro do horizonte segue projetado;
     - recorrência anual legada sem mês some.
   - Conta marcada como paga "pelo banco" sai da previsão na hora, mas o saldo só cai na
-    próxima sincronização: por um tempo o dinheiro conta duas vezes.
+    próxima sincronização: por um tempo o dinheiro conta duas vezes. O mesmo vale para o
+    pagamento de fatura pelo PigBank com Open Finance (`pay_bill_amount()` grava com
+    `apply_delta=False`, sem `bank_movement_declarations`): a fatura some na hora e o saldo
+    só cai depois. Até a sincronização seguinte, a previsão leva essa saída pendente ou
+    mostra "a conferir".
   - Datas sem dia útil: vencimento no fim de semana ou feriado e salário pago no dia útil
     anterior mudam o pior dia nos dois sentidos.
   - Fatura com total negativo (crédito por estorno) é ignorada, e o `credit_bills.total` é
