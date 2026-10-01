@@ -317,6 +317,15 @@ False, e o job não envia porque não acha e-mail), confirma a compra pelo
 `tentativas`; a linha nunca fecha sozinha) não segura transação durante o Stripe/Resend; entrega é
 "pelo menos uma vez". A tabela fica fora do export LGPD e sai com a conta (cascade).
 
+**E-mail trocado chega ao Stripe (PR 4b).** A `PATCH /settings/{uid}/security/contact`
+que troca o e-mail de conta com `stripe_customer_id` grava, na MESMA transação, uma linha
+em `stripe_email_pendente` (`db/stripe_email_pendente.py`, PK `user_id`, só `versao` —
+sem PII; troca de novo sobe a versão). O job `_stripe_email_worker` manda
+`stripe.Customer.modify(email=<e-mail ATUAL da conta>)` e apaga a linha só se a versão
+não mudou durante o envio. A troca no app nunca é desfeita: falha transitória espera o
+claim (mesma régua do e-book); `InvalidRequestError` (cliente apagado, e-mail recusado)
+fecha e loga `stripe_email_sync_recusado`, sem o e-mail. Fora do export LGPD; cascade.
+
 **Fatura com e-book:** no `invoice.paid`/`payment_succeeded`, `amount_cents` é só o
 plano: `amount_paid` menos o líquido das linhas cujo `pricing.price_details.price` é
 o `ebook_price` da metadata da assinatura (`amount` da linha é BRUTO; o cupom vem em
@@ -458,7 +467,10 @@ engajamento e de IA proativa, retenção de eventos de login, poda das tabelas d
 refresh token / challenge de MFA / cadastro Google pendente
 (`core/services/table_cleanup.py`), e a entrega do e-book da `/assinar`
 (`_ebook_worker` → `core/services/ebook_entrega.entregar_pendentes`, a cada 5 min, a
-1ª volta sem delay; inerte sem `STRIPE_SECRET_KEY` no ambiente), e a foto diária do
+1ª volta sem delay; inerte sem `STRIPE_SECRET_KEY` no ambiente), o e-mail trocado em
+`/settings` levado ao cliente do Stripe (`_stripe_email_worker` →
+`core/services/stripe_email_sync.sincronizar_pendentes`, mesma cadência e mesma guarda da
+chave), e a foto diária do
 patrimônio (`_patrimonio_foto` → `core/services/patrimonio_foto.py`, a cada hora, a partir
 das 18h do fuso do app, uma por usuário com acesso por dia em `patrimonio_fotos`; atrás de
 `PATRIMONIO_FOTO_ENABLED`, desligada por padrão e lida a cada volta — desligada, não

@@ -2103,6 +2103,23 @@ async def lifespan(app: FastAPI):
                 print(f"[ebook] erro: {exc}", file=sys.stderr)
             await asyncio.sleep(300)
 
+    async def _stripe_email_worker():
+        """Leva ao cliente do Stripe o e-mail trocado em /settings, a cada 5 min,
+        a 1ª volta sem delay. Laço separado do e-book de propósito: um não
+        atrasa o outro. Ver `core/services/stripe_email_sync.py`. Inerte sem
+        `STRIPE_SECRET_KEY`."""
+        from core.services.stripe_email_sync import sincronizar_pendentes  # noqa: PLC0415
+        while True:
+            try:
+                n = await asyncio.to_thread(sincronizar_pendentes)
+                if n:
+                    print(f"[stripe_email] {n} cliente(s) atualizado(s).", flush=True)
+            except asyncio.CancelledError:
+                raise
+            except Exception as exc:
+                print(f"[stripe_email] erro: {exc}", file=sys.stderr)
+            await asyncio.sleep(300)
+
     async def _account_deletion_worker():
         while True:
             try:
@@ -2202,6 +2219,7 @@ async def lifespan(app: FastAPI):
                 asyncio.create_task(_plan_grants_reprojection(), name="plan_grants_reprojection"),
                 asyncio.create_task(_pix_worker(), name="pix_worker"),
                 asyncio.create_task(_ebook_worker(), name="ebook_worker"),
+                asyncio.create_task(_stripe_email_worker(), name="stripe_email_worker"),
             ]
         )
     else:
