@@ -180,6 +180,21 @@ class AmbiguousItemError(RuntimeError):
         self.connections = connections
 
 
+# As colunas da conexão lidas por quem decide com `connection_ui_state`: o sync
+# (`get_connections_by_item_id`) e a retentativa (`list_connections_para_retentar`).
+# Uma lista só (§0.7): o `%s` de `SQL_EXECUTION_STATUS` é `janela_device_auth_min()`.
+# `SQL_EXECUTION_STATUS`: sem ele, o toast do /refresh manda "Reautorize o banco"
+# na janela do QR (`_refresh_items_report` lê esta linha). `mark_sync_result`
+# recebe `health` como OPCIONAL, então um sync que falhe antes do `GET /items` não
+# grava saúde e cai aqui. Sem `pop` do lado de fora: estas linhas são internas
+# (nenhum consumidor as devolve cruas ao navegador).
+_COLUNAS_DA_CONEXAO = f"""id, user_id, provider, provider_item_id, status, institution_name,
+       last_sync_at, last_attempt_at, status_reason, health,
+       next_refresh_at, last_refresh_origin, reconnected_at,
+       {SQL_EXECUTION_STATUS},
+       {SQL_COLETA_VENCIDA}"""
+
+
 def get_connections_by_item_id(item_id: str, provider: str = "pluggy", *,
                                budget_ms: int | None = None) -> list[dict]:
     """TODAS as conexões daquele item — sem `limit`, para que a ambiguidade apareça.
@@ -209,18 +224,7 @@ def get_connections_by_item_id(item_id: str, provider: str = "pluggy", *,
                 cur = _CursorComTeto(cur, budget_ms, t0)
             cur.execute(
                 f"""
-                select id, user_id, provider, provider_item_id, status, institution_name,
-                       last_sync_at, last_attempt_at, status_reason, health,
-                       next_refresh_at, last_refresh_origin, reconnected_at,
-                       -- Para o `connection_ui_state`: sem ele, o toast do
-                       -- /refresh manda "Reautorize o banco" na janela do QR
-                       -- (`_refresh_items_report` lê ESTA linha). `mark_sync_result`
-                       -- recebe `health` como OPCIONAL, então um sync que falhe
-                       -- antes do `GET /items` não grava saúde e cai aqui.
-                       -- Sem `pop` do lado de fora: estas linhas são internas
-                       -- (nenhum consumidor as devolve cruas ao navegador).
-                       {SQL_EXECUTION_STATUS},
-                       {SQL_COLETA_VENCIDA}
+                select {_COLUNAS_DA_CONEXAO}
                 from open_finance_connections
                 where provider=%s and provider_item_id=%s
                 order by id
@@ -541,6 +545,43 @@ def list_connections_for_health_check(*, older_than_sec: int, limit: int) -> lis
                  limit %s
                 """,
                 (older_than_sec, limit),
+            )
+            return [dict(r) for r in (cur.fetchall() or [])]
+
+
+def list_connections_para_retentar(*, id: int | None = None) -> list[dict]:
+    """Candidatas da retentativa do tique (Onda 5, PR-B2), da mais antiga tentativa
+    para a mais nova. Com `id`, só aquela linha: a rechecagem antes de agendar.
+
+    Só os filtros baratos ficam aqui; quem decide é `classe_de_retentativa`
+    (`core/services/of_retentativa.py`), em Python, porque "a Pluggy à frente" lê
+    datas cruas do provedor. Fora: terminal, cooldown (tentativa nos últimos
+    `PRAZO_COLETA_MIN`, que pode estar em curso) e item com dois donos (o sync
+    levanta `AmbiguousItemError` a cada tique, para sempre). Query de job, entre
+    usuários, como `list_connections_for_health_check`: nunca vai a uma rota.
+
+    ponytail: lê toda conexão fora do cooldown a cada tique (6 h); paginar se a
+    base passar de alguns milhares de conexões.
+    """
+    with get_conn() as conn:
+        with conn.cursor() as cur:
+            cur.execute(
+                f"""
+                select {_COLUNAS_DA_CONEXAO}
+                  from open_finance_connections c
+                 where provider='pluggy'
+                   and provider_item_id is not null
+                   and upper(coalesce(status,'')) not in {_TERMINAL}
+                   and (last_attempt_at is null
+                        or last_attempt_at <= now() - interval '{PRAZO_COLETA_MIN} minutes')
+                   and not exists (select 1 from open_finance_connections o
+                                    where o.provider = c.provider
+                                      and o.provider_item_id = c.provider_item_id
+                                      and o.id <> c.id)
+                   and (%s::bigint is null or id = %s)
+                 order by last_attempt_at nulls first, id
+                """,
+                (janela_device_auth_min(), id, id),
             )
             return [dict(r) for r in (cur.fetchall() or [])]
 

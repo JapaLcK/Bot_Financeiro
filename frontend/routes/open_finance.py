@@ -820,13 +820,20 @@ async def _grava_reconexao(
     )
 
 
-async def _run_pluggy_sync_bg(item_id: str) -> None:
+async def _run_pluggy_sync_bg(item_id: str, expected_user_id: int | None = None) -> dict:
     """Roda o sync fora do request (fire-and-forget), logando o resultado REAL.
 
     Antes isto logava `pluggy_sync_done` em nível info mesmo com `ok:false` —
     397 sucessos e 41 falhas na mesma prateleira, e ninguém procurando por elas.
+
+    Devolve o desfecho `{"ok", "reason", "status_code"}` (`reason="excecao"`
+    quando o sync levantou até o fim), que o disjuntor da retentativa lê
+    (`frontend/routes/of_retentativa.py`). `expected_user_id`: só a retentativa
+    passa; o sync recusa item de outro dono antes de ler, e a marca de falha não
+    grava na linha de outro dono. O webhook não passa (sincroniza o dono da linha).
     """
     result: dict | None = None
+    dono = {} if expected_user_id is None else {"expected_user_id": expected_user_id}
     # A linha ANTES da 1ª tentativa: é contra ela que a falha final marca
     # (`marcar_leitura_falhou`), para não desfazer um sync bom nem uma reconexão
     # mais novos que este run. Sem linha, a falha não marca ninguém e o sync
@@ -841,10 +848,15 @@ async def _run_pluggy_sync_bg(item_id: str) -> None:
         conexao = None
         print(f"[open_finance] leitura da conexão falhou ({item_id}): "
               f"{type(exc).__name__}", flush=True)
+    # A marca de falha só vai para a linha capturada se ela é do dono esperado (a
+    # retentativa passa `expected_user_id`; o webhook não): item readotado por OUTRO
+    # usuário não é marcado, em NENHUM dos dois ramos de falha final abaixo.
+    if conexao and expected_user_id is not None and int(conexao["user_id"]) != int(expected_user_id):
+        conexao = None
     try:
         for tentativa in range(1, _SYNC_MAX_ATTEMPTS + 1):
             try:
-                result = await asyncio.to_thread(sync_pluggy_item, item_id)
+                result = await asyncio.to_thread(sync_pluggy_item, item_id, **dono)
                 # `sync_in_progress` não é exceção: volta como dict, então o
                 # `break` abaixo encerrava a tarefa em silêncio e NINGUÉM mais
                 # sincronizava. Cenário medido (Codex #162): o run de geração
@@ -939,6 +951,9 @@ async def _run_pluggy_sync_bg(item_id: str) -> None:
             details={**{k: v for k, v in result.items() if k != "user_id"},
                      "reason": reason or None},
         )
+        # `/investments` é fail-soft (o sync devolve `ok`), mas um 429 ali é rate
+        # limit do mesmo jeito: o status viaja no resultado, sem canal paralelo.
+        return {"ok": ok, "reason": reason, "status_code": result.get("investments_status")}
     except Exception as exc:  # noqa: BLE001 — background, não pode derrubar nada
         # Coluna NULL (aqui só se sabe o item), logo nada de `str(exc)`: o texto de
         # FK/CHECK do Postgres traz `Key (user_id)=(…)` e `Failing row contains (…)`,
@@ -952,6 +967,8 @@ async def _run_pluggy_sync_bg(item_id: str) -> None:
                      "sqlstate": getattr(exc, "sqlstate", None),
                      "status_code": getattr(exc, "status_code", None)},
         )
+        return {"ok": False, "reason": "excecao",
+                "status_code": getattr(exc, "status_code", None)}
 
 
 def _on_sync_done(item_id: str) -> None:
@@ -962,15 +979,26 @@ def _on_sync_done(item_id: str) -> None:
         _schedule_pluggy_sync(item_id)
 
 
-def _schedule_pluggy_sync(item_id: str) -> None:
+def _schedule_pluggy_sync(item_id: str, expected_user_id: int | None = None, *,
+                          marcar_sujo: bool = True) -> asyncio.Task | None:
+    """Agenda o sync de fundo do item e devolve a tarefa, ou None quando não criou
+    (item vazio, ou já em voo). Já em voo, `marcar_sujo` (o padrão: webhook, adoção,
+    reconexão) coalesce em `_DIRTY`, e a re-execução (`_on_sync_done`) roda sem
+    `expected_user_id` e sem corte por plano, como o webhook. A retentativa do tique
+    passa `marcar_sujo=False`: o `_DIRTY` não tem dono, e uma rodada extra dela
+    sincronizaria depois de o dono perder o acesso ou de uma readoção. Ela é melhor
+    esforço: o sync em voo já está lendo e o próximo tique reavalia o item."""
     if not item_id:
-        return
+        return None
     if item_id in _INFLIGHT:
-        _DIRTY.add(item_id)   # coalesce: uma re-execução no fim, não uma task por evento
-        return
-    task = asyncio.create_task(_run_pluggy_sync_bg(item_id), name=f"pluggy_sync_{item_id}")
+        if marcar_sujo:
+            _DIRTY.add(item_id)   # coalesce: uma re-execução no fim, não uma task por evento
+        return None
+    dono = {} if expected_user_id is None else {"expected_user_id": expected_user_id}
+    task = asyncio.create_task(_run_pluggy_sync_bg(item_id, **dono), name=f"pluggy_sync_{item_id}")
     _INFLIGHT[item_id] = task
     task.add_done_callback(lambda _t: _on_sync_done(item_id))
+    return task
 
 
 async def _adota_item_orfao(item_id: str, last_event: str | None = None) -> int | None:

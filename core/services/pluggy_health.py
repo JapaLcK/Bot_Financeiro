@@ -653,6 +653,33 @@ def derive_item_health(item: dict, *, now: datetime | None = None) -> dict:
     }
 
 
+def pluggy_tem_dado_depois_de(health: Any, instante: Any) -> bool:
+    """A Pluggy coletou algum produto DEPOIS de `instante`? (Onda 5, PR-B2)
+
+    Lê `products[*].last_updated_at`, que `derive_item_health` grava CRU: o parse
+    é aqui, em Python, protegido. Um `::timestamptz` em SQL sobre string do
+    provedor derrubaria a query inteira (a armadilha do `SQL_EXECUTION_STATUS`).
+    Data ilegível, sem fuso ou ausente é ignorada: sem prova, não há "à frente".
+    `instante` sem fuso também devolve False, em vez de estourar a comparação.
+
+    Uma regra, a âncora como parâmetro: a retentativa pergunta contra
+    `last_attempt_at` (a Pluggy coletou depois da nossa última leitura?); a tela
+    da D2 (PR-B3) perguntará contra `last_sync_at`.
+    """
+    produtos = health.get("products") if isinstance(health, dict) else None
+    if not isinstance(produtos, dict) or getattr(instante, "tzinfo", None) is None:
+        return False
+    datas = []
+    for detalhe in produtos.values():
+        try:
+            data = datetime.fromisoformat(detalhe["last_updated_at"])
+        except (TypeError, ValueError, KeyError):
+            continue
+        if data.tzinfo is not None:
+            datas.append(data)
+    return bool(datas) and max(datas) > instante
+
+
 def mesclar_health_em_coleta(anterior: Any, novo: Any) -> Any:
     """Preserva os produtos da foto ANTERIOR que a foto NOVA omite, quando a nova
     é de uma coleta em andamento (issue #444) — o último estado conhecido de cada um.
@@ -713,6 +740,11 @@ _DETALHE_INVESTIMENTOS_FALTANDO = "Investimentos não vieram nesta atualização
 # Quem decide o prazo é o derivado `coleta_vencida` (`SQL_COLETA_VENCIDA`, em
 # `db/open_finance_state.py`), lido na linha; esta função não tem relógio.
 _DETALHE_COLETA_VENCIDA = "Está demorando mais que o normal — atualize de novo"
+
+# Item em `ERROR` na Pluggy (E13): a execução falhou do lado do banco. Só o
+# "Erro temporário" com este detalhe; o `_FIXED_DETAIL` dele ("Tentaremos de novo
+# automaticamente") continua valendo para os outros, que a retentativa relê.
+_DETALHE_ITEM_EM_ERRO = "O banco teve um erro — atualize de novo mais tarde"
 
 # Falha de leitura NOSSA. Só um sync com leitura completa a limpa: o job de
 # saúde (`leitura_completa=None`) não leu nada, então não pode apagá-la.
@@ -986,15 +1018,19 @@ def connection_ui_state(connection_row: dict) -> dict:
             return out("updated" if reason in _MOTIVOS_DE_LEITURA else "updating")
         # ERROR vem ANTES de "parcial": item em erro COM produto atrasado é erro,
         # e rotulá-lo de "Parcial" ("atualizei o que deu") subestima o estado.
-        if status == "ERROR" or item_status == "ERROR":
-            # ...mas `status` local em ERROR com o ITEM vivo e o motivo dizendo
-            # por que o espelho está vazio: quem explica é o motivo. O override
-            # do `out()` só rodava no ramo verde, então ERROR/no_accounts nunca
-            # mostrava "Sem dados" — o estado desta onda ficava invisível.
+        if item_status == "ERROR":
             # Item em ERROR de verdade continua "Erro temporário": motivo velho
-            # não subestima erro, e este ramo nunca vira verde.
-            return out("no_accounts" if reason == "no_accounts" and item_status != "ERROR"
-                       else "error_recoverable")
+            # não subestima erro, e este ramo nunca vira verde. Com detalhe PRÓPRIO
+            # (Onda 5, PR-B2, E13): a execução falhou na Pluggy e reler (GET) não
+            # tira o item de ERROR, então a retentativa não promete "Tentaremos de
+            # novo automaticamente" aqui (`core/services/of_retentativa.py`).
+            return out("error_recoverable", _DETALHE_ITEM_EM_ERRO)
+        if status == "ERROR":
+            # `status` local em ERROR com o ITEM vivo e o motivo dizendo por que o
+            # espelho está vazio: quem explica é o motivo. O override do `out()` só
+            # rodava no ramo verde, então ERROR/no_accounts nunca mostrava "Sem
+            # dados" — o estado desta onda ficava invisível.
+            return out("no_accounts" if reason == "no_accounts" else "error_recoverable")
         if stale or str(health.get("execution_status") or "").upper() == "PARTIAL_SUCCESS":
             # Motivo pendente fala antes do produto atrasado, pela MESMA regra do
             # verde: o default seguro do `out("updated")` decide (`read_failed` e
