@@ -299,7 +299,10 @@ PR de cada etapa, não soluções prontas. Cada PR confere se ainda valem, decid
     manuais; cartão fora. Toda foto sai com `motivos` (`carteira_nao_confirmada` até a
     Q37, e mais os de banco desatualizado, espécie, pendências, moeda presumida, saldo
     ausente e `caixinha_espelhada_fora` — a caixinha do banco cuja posição ficou fora
-    não entra no total nem como caixinha, e é contada em `base.fora`). Entra na exportação, no reset e na exclusão. Fora: reconstrução do
+    não entra no total nem como caixinha, e é contada em `base.fora`; e
+    `conta_fora_do_ultimo_sync` — conta ou posição do banco gravada mais de 1 h antes do
+    último sync com sucesso da conexão dela não veio nele: o saldo velho fica na soma e
+    o motivo marca a dúvida). Entra na exportação, no reset e na exclusão. Fora: reconstrução do
     passado, câmbio, poda, a confirmação da Q37, leitura por rota ou tela e script de
     conferência pós-deploy.
 - [ ] Etapa 0 · [ ] 1 · [ ] 2 · [ ] 3 · [ ] 4 · [ ] 5 · [ ] 6 · [ ] 7

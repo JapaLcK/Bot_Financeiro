@@ -272,3 +272,47 @@ def test_saldo_ausente_na_coluna(uid):
     posicao(c, "inv-1", None)
     f = foto(uid)
     assert "saldo_ausente" in f["motivos"] and f["investimentos_banco"] == 0
+
+
+# Conta ou posição que deixou de vir no sync fica no espelho com o saldo velho
+# e a conexão continua fresca: o saldo fica na soma, o motivo marca a dúvida.
+@pytest.mark.parametrize("tabela", ["open_finance_accounts", "open_finance_investments"])
+@pytest.mark.parametrize("idade,esperado", [(None, False), (0.5, False), (72, True)])
+def test_linha_fora_do_ultimo_sync(uid, tabela, idade, esperado):
+    c, velha = _limpo(uid, sync=horas_atras(2))
+    conta(c, "acc-2", "50")
+    inv = posicao(c, "inv-1", "500")
+    posicao(c, "inv-2", "30")
+    if idade is not None:  # idade antes do last_sync_at da conexão
+        q(f"update {tabela} set updated_at=%s where id=%s",
+          (horas_atras(2 + idade), velha if tabela == "open_finance_accounts" else inv))
+    f = foto(uid)
+    assert ("conta_fora_do_ultimo_sync" in f["motivos"]) is esperado
+    assert (f["bancos"], f["investimentos_banco"]) == (D("150"), D("530"))
+
+
+def test_conta_que_sumiu_do_sync_da_pluggy(uid):
+    c, _ = _limpo(uid)
+    sync = [normalize_pluggy_account({"id": p, "type": "BANK", "currencyCode": "BRL",
+                                      "balance": 10}) for p in ("acc-1", "acc-2")]
+    db.save_open_finance_sync(c, sync)
+    q("update open_finance_accounts set updated_at=%s where connection_id=%s", (horas_atras(72), c))
+    db.save_open_finance_sync(c, sync[:1])  # o sync de hoje não trouxe a acc-2
+    q("update open_finance_connections set last_sync_at=now() where id=%s", (c,))
+    f = foto(uid)
+    assert "conta_fora_do_ultimo_sync" in f["motivos"] and f["bancos"] == D("20")
+    db.save_open_finance_sync(c, sync)  # voltou
+    assert "conta_fora_do_ultimo_sync" not in foto(uid)["motivos"]
+
+
+def test_fora_do_sync_nao_cruza_usuario_nem_conexao_sem_sync(uid):
+    c, velha = _limpo(uid, sync=None)  # nunca sincronizou: só banco_desatualizado
+    q("update open_finance_accounts set updated_at=%s where id=%s", (horas_atras(72), velha))
+    antes = foto(uid)
+    assert "conta_fora_do_ultimo_sync" not in antes["motivos"]
+    b = usuario_pagante()
+    cb = conexao(b, f"item-b-{b}")  # mais nova, mesmo id do provedor, linha velha
+    q("update open_finance_accounts set updated_at=%s where id=%s",
+      (horas_atras(72), conta(cb, "acc-1", "5000")))
+    assert "conta_fora_do_ultimo_sync" in foto(b)["motivos"]
+    assert foto(uid) == antes

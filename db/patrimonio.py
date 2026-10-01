@@ -34,7 +34,7 @@ POSICOES_BANCO_SQL = """
         upper(coalesce(i.currency, 'BRL')) as currency,
         upper(coalesce(i.raw->>'status', '')) as status,
         i.raw->>'currencyCode' as currency_code,
-        i.raw->>'balance' as raw_balance,
+        i.raw->>'balance' as raw_balance, i.connection_id, i.updated_at,
         upper(coalesce(c.status, '')) as connection_status
     from open_finance_investments i
     join open_finance_connections c on c.id = i.connection_id
@@ -44,13 +44,17 @@ POSICOES_BANCO_SQL = """
 
 _CONTAS_SQL = f"""
     select a.balance, ra.provider_account_id, ra.raw->>'currencyCode' as currency_code,
-           ra.raw->>'balance' as raw_balance
+           ra.raw->>'balance' as raw_balance, ra.connection_id, ra.updated_at
       from ({BANK_ACCOUNTS_SQL}) a
       join open_finance_accounts ra on ra.id = a.id
 """
 
 # Sincronização mais velha que isto é banco desatualizado (decisão do dono, P3).
 BANCO_VELHO = timedelta(hours=48)
+# O sync faz o upsert de contas e posições e só carimba `last_sync_at` no fim
+# (core/services/pluggy_sync.py): a linha que veio nele fica um pouco antes do
+# carimbo. Mais velha que isto, ela não veio no último sync com sucesso.
+FOLGA_SYNC = timedelta(hours=1)
 
 
 def calcular(cur, user_id: int) -> dict:
@@ -132,6 +136,19 @@ def calcular(cur, user_id: int) -> dict:
         except (TypeError, ArithmeticError):  # None ou texto que não é número
             return True
 
+    # Conta ou posição que deixou de vir no /accounts ou /investments fica no
+    # espelho com o saldo velho (`save_open_finance_sync` não poda conta; a posição
+    # só é podada com `leitura_completa`), e a conexão continua fresca. O saldo
+    # fica na soma; o motivo marca a dúvida. Limite: só o upsert do sync carimba
+    # `updated_at` hoje; quem passar a carimbá-lo deixa a linha mais fresca do que
+    # é (falso negativo). Sem `last_sync_at`, `banco_desatualizado` já cobre.
+    sync_de = {c["id"]: c["last_sync_at"] for c in conexoes}
+
+    def fora_do_sync(p) -> bool:
+        ultimo = sync_de.get(p["connection_id"])
+        return ultimo is not None and (p["updated_at"] is None
+                                       or p["updated_at"] < ultimo - FOLGA_SYNC)
+
     cur.execute(PENDING_RECONCILIATION_SQL, actionable_pending_params(cur, user_id))
     conciliacao = cur.fetchone()["pending_count"]
 
@@ -146,6 +163,7 @@ def calcular(cur, user_id: int) -> dict:
         ("caixinha_espelhada_fora", fora["caixinha_espelhada"] > 0),
         ("moeda_presumida", any(not r["currency_code"] for r in [*contas, *posicoes])),
         ("saldo_ausente", any(sem_saldo(p) for p in [*contas, *posicoes])),
+        ("conta_fora_do_ultimo_sync", any(fora_do_sync(p) for p in [*contas, *posicoes])),
     ) if sim]
 
     partes = {
