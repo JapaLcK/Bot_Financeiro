@@ -348,7 +348,12 @@ def test_display_map_desempate_nao_depende_de_id(pro_user_id):
     mais nova é apagada — antes o `order by id` fazia a resposta depender de
     quem foi criado/apagado por último."""
     velha = create_user_category(pro_user_id, "Cafe")
-    nova = create_user_category(pro_user_id, "Café")
+    # A gêmea entra por SQL: `create_user_category` passou a recusá-la (#149).
+    with db.get_conn() as conn, conn.cursor() as cur:
+        cur.execute("insert into user_categories (user_id, name, emoji, color, is_system) "
+                    "values (%s, 'café', '🏷️', '#7c3aed', false) returning id", (pro_user_id,))
+        nova = cur.fetchone()
+        conn.commit()
 
     antes = resolve_category_input(pro_user_id, "cafe")
     delete_user_category(pro_user_id, nova["id"])
