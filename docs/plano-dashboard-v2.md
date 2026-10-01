@@ -372,11 +372,13 @@ PR de cada etapa, não soluções prontas. Cada PR confere se ainda valem, decid
     para hoje. O protótipo do v2 já desconta o ritmo dos últimos 60 dias
     (`webapp/src/dashboard/lib/model.js`); a Etapa 3 leva uma estimativa assim para o
     backend, marcada como estimativa e sem contar duas vezes: o ritmo exclui todo gasto que
-    já entra como evento agendado (gasto fixo, boleto pago, fatura, parcela de compra
-    parcelada que já existe, cujo restante vai para as faturas futuras) e todo movimento
-    interno (`is_internal_movement`: transferência entre contas próprias e pagamento de
-    fatura), como o protótipo já
-    faz com os lançamentos de recorrente. O denominador é o período coberto de verdade,
+    já entra como evento agendado (gasto fixo, boleto pago, parcela de compra parcelada que
+    já existe, cujo restante vai para as faturas futuras) e todo movimento interno
+    (`is_internal_movement`: transferência entre contas próprias e pagamento de fatura). A
+    compra comum no cartão **fica** na amostra: ela é o comportamento futuro; o que não se
+    projeta de novo é o que já está na fatura aberta, então a parte do cartão só entra a
+    partir do período que essa fatura ainda não cobre. O protótipo já exclui os lançamentos
+    de recorrente. O denominador é o período coberto de verdade,
     não 60 fixo: conta recém-conectada ou com histórico incompleto (dez dias divididos por
     60 dão um sexto do ritmo real) tem amostra mínima, e abaixo dela a estimativa sai como
     "a conferir".
@@ -407,8 +409,10 @@ PR de cada etapa, não soluções prontas. Cada PR confere se ainda valem, decid
   - Fatura com total negativo (crédito por estorno) é ignorada, e o `credit_bills.total` é
     um contador (`greatest(0, total - x)` ao desfazer) lido sem reconstruir. O `status`
     também não acompanha: quando uma correção da Pluggy aumenta o valor de uma compra de
-    fatura já paga, o total sobe e a fatura segue `paid`, fora da previsão. O status tem
-    de sair de `total - paid_amount`, não ficar gravado.
+    fatura já paga, o total sobe e a fatura segue `paid`, fora da previsão. O "paga ou não"
+    tem de sair de `total - paid_amount`, não ficar gravado; o "aberta ou fechada" continua
+    vindo do calendário de fechamento, porque `close_bill()`, `list_open_bills()` e
+    `list_bills_with_debt()` dependem dele para achar a fatura atual e a atrasada.
   - Saldo de partida: o `BANK_ACCOUNTS_SQL` escolhe a conexão mais nova por `id` antes de
     filtrar as pausadas, então a conta some se a mais nova estiver pausada, mesmo com uma
     antiga ativa; o `balance` do banco é usado sem conferir o que ele inclui (aplicação
