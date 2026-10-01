@@ -99,6 +99,7 @@ export default function Entrar() {
                   <Button
                     rotulo="Entrar"
                     tamanho="L"
+                    testID="entrar-enviar"
                     carregando={enviando}
                     desativado={google || apple || !email.trim() || !senha}
                     onPress={() => {

@@ -364,6 +364,7 @@ def build_user_export_zip(user_id: int) -> bytes:
             ("acoes_pendentes", "select * from pending_actions where user_id = %s", (user_id,)),
             ("caixinhas", "select * from pockets where user_id = %s", (user_id,)),
             ("investimentos", "select * from investments where user_id = %s", (user_id,)),
+            ("historico_patrimonio", "select * from patrimonio_fotos where user_id = %s", (user_id,)),
             ("lotes_investimentos", "select * from investment_lots where user_id = %s", (user_id,)),
             ("cartoes", "select * from credit_cards where user_id = %s", (user_id,)),
             ("faturas_cartao", "select * from credit_bills where user_id = %s", (user_id,)),
@@ -554,6 +555,7 @@ _RESET_TABLES = (
     "daily_report_prefs",
     "of_cash_links",
     "of_cash_coverage",
+    "patrimonio_fotos",
     "launches",
     "financial_spaces",
     # `accounts` NÃO entra aqui: a linha é preservada e o saldo é zerado no
@@ -913,6 +915,7 @@ def delete_user_data(
         "accounts",
         "of_cash_links",
         "of_cash_coverage",
+        "patrimonio_fotos",
         "launches",
         "pockets",
         "user_identities",

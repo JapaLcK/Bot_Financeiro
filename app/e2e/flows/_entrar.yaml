@@ -1,0 +1,33 @@
+# Subfluxo: do Entrar até a resposta do /auth/login. O 429 falha AQUI, com
+# nome próprio — nunca no passo que o controle negativo mede.
+appId: ${APP_ID}
+---
+# O rótulo e o campo têm o mesmo texto acessível; o campo é o que fica abaixo do rótulo.
+- tapOn:
+    text: "E-mail"
+    below: "E-mail"
+- inputText: ${EMAIL}
+- tapOn:
+    text: "Senha"
+    below: "Senha"
+- inputText: ${SENHA}
+- tapOn:
+    id: "entrar-enviar"
+- extendedWaitUntil:
+    visible: "Olá, .*|Código de 6 dígitos|E-mail ou senha incorretos\\.|Muitas tentativas.*|Algo deu errado.*|Not Now"
+    timeout: 20000
+# O iOS oferece "Salvar senha" quando o campo Senha sai da tela preenchido
+# (sucesso ou MFA). O alerta esconde o app do Maestro, e às vezes chega depois
+# da tela seguinte — daí a espera curta antes de dispensar.
+# ponytail: "Not Now" é o simulador em inglês (o padrão do `simctl create`);
+# simulador em português diz "Agora Não" e o fluxo trava aqui.
+- extendedWaitUntil:
+    visible: "Not Now"
+    timeout: 3000
+    optional: true
+- tapOn:
+    text: "Not Now"
+    optional: true
+- assertNotVisible: "Muitas tentativas.*"
+# 5xx, tempo limite ou resposta que não é JSON (página do Cloudflare): também falha aqui.
+- assertNotVisible: "Algo deu errado.*"
