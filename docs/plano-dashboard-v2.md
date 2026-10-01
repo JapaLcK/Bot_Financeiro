@@ -226,8 +226,9 @@ PR de cada etapa, não soluções prontas. Cada PR confere se ainda valem, decid
   provedor, ou fica gravado que a cobertura daquele período está incompleta. Além da moeda:
   - `_to_decimal()` aceita `"NaN"` e `"Infinity"` como valor válido, o Postgres grava, e um
     saldo `NaN` envenena o `sum(balance)` do consolidado e as caixinhas e fotos dos
-    investimentos. Todo valor de dinheiro exige `Decimal.is_finite()`; o que não passa
-    torna a leitura incompleta;
+    investimentos; e um texto inválido (`"invalid"`) vira `Decimal("0")`, que é finito. Todo
+    valor de dinheiro exige leitura estrita (o parse tem de dar certo, sem cair no zero) **e**
+    `Decimal.is_finite()`; o que não passa torna a leitura incompleta;
   - `type` de conta que não é `BANK` nem `CREDIT` é guardado como veio, mas o saldo
     (`BANK_ACCOUNTS_SQL`) e os importadores só tratam esses dois: a conta some do produto
     com o sync dando sucesso. Validar o tipo contra uma lista aceita; fora dela, a conta
@@ -301,7 +302,10 @@ PR de cada etapa, não soluções prontas. Cada PR confere se ainda valem, decid
     de datas explícito: hoje `list_pluggy_transactions()` pede só `accountId` e o cursor, e
     uma resposta vazia não diz nada sobre datas. O intervalo tem de vir do pedido (datas
     `from`/`to` enviadas) ou de uma marca do provedor guardada; tirar das transações
-    devolvidas não serve. Fora do intervalo, o que está gravado fica, porque o banco pode
+    devolvidas não serve. E nem dentro do intervalo a ausência basta: o provedor pode
+    corrigir a data de uma transação para fora dele (`_sync_imported_credit_updates()` já
+    trata correção de data). Antes de apagar, buscar o id ausente direto no provedor ou
+    exigir um sinal de exclusão. Fora do intervalo, o que está gravado fica, porque o banco pode
     devolver um histórico mais curto que o anterior;
   - banco religado guarda o `last_sync_at` antigo; `connection_ui_state()` já trata
     `last_sync_at < reconnected_at` como não sincronizado, e é essa a fonte do estado da
