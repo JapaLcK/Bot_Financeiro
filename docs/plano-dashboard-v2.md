@@ -220,8 +220,11 @@ PR de cada etapa, não soluções prontas. Cada PR confere se ainda valem, decid
     `normalize_pluggy_transaction`, `normalize_pluggy_investment`, `_to_decimal`): tipo,
     saldo, valor, data, nome, `NaN`/`Infinity`, texto ilegível. Como distinguir
     "desconhecido" de zero e de `BRL`?
-  - Registro sem `id`, ou com `type` que o código não trata, some do produto com o sync
-    dando sucesso (conta, transação e investimento). Que lista de tipos é aceita?
+  - Registro sem `id` ou com `id` malformado (branco, objeto: `str(raw.get("id") or "")`
+    aceita os dois), ou com `type`/`subtype` que o código não trata, some, colide ou é
+    rotulado errado com o sync dando sucesso (conta, transação e investimento;
+    `pluggy_rv_kind()` trata todo `EQUITY` que não é FII como ação). Que forma de `id` e
+    que pares `(type, subtype)` são aceitos?
   - Leitura truncada ou malformada: `max_pages=60` sem conferir o cursor, `/accounts` só na
     primeira página, `results` ausente, cursor repetido. Quando uma leitura conta como
     completa?
