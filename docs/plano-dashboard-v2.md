@@ -231,7 +231,10 @@ PR de cada etapa, não soluções prontas. Cada PR confere se ainda valem, decid
     for criada, como ela sabe que a ausência é real (intervalo de datas, data corrigida,
     sync concorrente depois da trava — o furo da trava já existe na conciliação de
     investimentos) e como desfaz o que foi derivado (`_rollback_imported_of()` engole erro)?
-  - Cartão: status PENDING × POSTED, moeda por transação, fatura calculada localmente sem o
+  - Transação PENDING que depois é lançada com outro id vira dois registros, em conta e em
+    cartão (`normalize_pluggy_transaction()` descarta o `status`). Como casar a pendente com
+    a lançada?
+  - Cartão: moeda por transação, fatura calculada localmente sem o
     `/bills` da Pluggy, pagamento de fatura por palavra-chave, sinal do estorno, calendário
     padrão 1/10, grupo de parcelas (chave que divide e que colide, metadado incompleto,
     parcelas futuras não criadas e a troca da projetada pela real).
