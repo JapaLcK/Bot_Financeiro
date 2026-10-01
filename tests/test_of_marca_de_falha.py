@@ -33,12 +33,18 @@ CONTROLES (medidos em 2026-09-30; remeça se mexer no código):
       vermelhos;
   negativo, sem o par na O: c3_L vermelho (1ª conexão, `health` NULL antes e
       depois da reconexão, então o `observed_at` não distingue);
-  negativo, sem o ramo `except AmbiguousItemError: raise` da O: c28b[sync, bg,
-      lote] vermelhos; sem a guarda da F (`isinstance(erro, AmbiguousItemError)`)
-      ou sem os chamadores passarem a exceção: c28b[bg, lote] e c28c vermelhos;
-      positivo: c28d (um dono, falha comum, continua gravando);
+  c28b/c28c: o ramo `except AmbiguousItemError: raise` da O e a guarda da F
+      (`isinstance(erro, AmbiguousItemError)`) deixaram de ser os únicos guardas:
+      o `dono_unico` do `UPDATE` (c31) também recusa com dois donos. Medido em
+      2026-09-30: sem os dois ramos, c28b, c28c e c31 seguem verdes; eles
+      ficam como saída antes do `UPDATE`, e é o `dono_unico` que os testes de
+      c31 guardam. Positivo: c28d (um dono, falha comum, continua gravando);
   negativo, sem a F no `sync_in_progress` final do sync de fundo: c30 vermelho;
       sem o par na F: também c30b; positivo: c30c (libera na 2ª tentativa);
+  negativo, sem a condição `not exists` do `UPDATE` (ou sem `dono_unico=True` nos
+      dois chamadores): c31, c31b[G, L] e c31c `[com_segundo_dono]` vermelhos;
+      só na F: c31 e c31b; só na O: c31b[L] e c31c; positivos: os gêmeos
+      `[um_dono]` de cada um;
   positivos (o caminho legítimo continua gravando): c1 (em
       `test_of_coleta_sem_fim.py`), c10, c12, c17, c26, c27 e c29.
 """
@@ -722,3 +728,95 @@ def test_c30c_lock_que_libera_na_segunda_tentativa_nao_marca(user_id, monkeypatc
     assert estado["reasons"] == ["sync_in_progress", None]
     assert _linha()["status_reason"] is None
     assert _tela(user_id)[:2] == ("updated", "Atualizado")
+
+
+# ── c31: o segundo dono aparece ANTES da marca, sem exceção que o prove ──────
+# A F e a O gravam com a posse lida no começo do run. Sem `AmbiguousItemError` (o
+# `sync_in_progress` volta antes da releitura de posse; a falha comum levanta
+# antes dela), só o próprio `UPDATE` pode saber que o item ganhou outro dono:
+# `dono_unico`, atômico com a escrita. Cada teste tem o seu gêmeo positivo
+# (`segundo_dono=False`: um dono só continua gravando).
+
+def _estado(item: str = ITEM) -> dict:
+    """O que a marca grava, por dono (sem `last_attempt_at`, que o attempt do
+    próprio run já carimba na falha de leitura)."""
+    return {r["user_id"]: (r["status"], r["status_reason"], r["health"])
+            for r in db.get_connections_by_item_id(item)}
+
+
+def _outro_dono(outro: int) -> None:
+    db.save_pluggy_open_finance_item(
+        outro, {"id": ITEM, "status": "UPDATED", "connector": {"id": 612, "name": "Nubank"}})
+
+
+def _confere_c31(user_id, outro, antes, segundo_dono: bool, tela=None) -> None:
+    depois = _estado()
+    if segundo_dono:
+        assert set(depois) == {user_id, outro}, "o segundo dono devia existir"
+        assert depois[user_id] == antes[user_id], "a linha do dono do run foi gravada"
+        assert depois[outro][1:] == (None, None), "a linha do outro dono foi gravada"
+    else:
+        assert depois[user_id][1] == "read_failed", depois
+        if tela:
+            assert _tela(user_id) == tela
+
+
+@pytest.mark.parametrize("segundo_dono", [True, False], ids=["com_segundo_dono", "um_dono"])
+def test_c31_sync_in_progress_esgotado_com_segundo_dono_antes_da_marca(
+        user_id, outro_usuario, monkeypatch, eventos, sem_indice_unico, segundo_dono):
+    """Codex #718, thread 3: o `sync_in_progress` não leva `AmbiguousItemError`, e a
+    F marcava a linha do dono capturado mesmo com outro dono agora."""
+    _conecta(user_id)
+    _mock_pluggy(monkeypatch, item=ITEM_SAUDAVEL, contas=[_conta_pluggy()], txs=[_tx_pluggy()])
+    antes = _estado()
+
+    estado = _bg_com_lock_ocupado(monkeypatch, {
+        of_routes._SYNC_MAX_ATTEMPTS: lambda _libera: segundo_dono and _outro_dono(outro_usuario)})
+
+    assert estado["reasons"] == ["sync_in_progress"] * of_routes._SYNC_MAX_ATTEMPTS
+    _confere_c31(user_id, outro_usuario, antes, segundo_dono, ERRO)
+
+
+@pytest.mark.parametrize("segundo_dono", [True, False], ids=["com_segundo_dono", "um_dono"])
+@pytest.mark.parametrize("onde", ["G", "L"])
+def test_c31b_excecao_final_comum_com_segundo_dono_antes_da_marca(
+        user_id, outro_usuario, monkeypatch, eventos, sem_indice_unico, onde, segundo_dono):
+    """O sync de fundo falha de vez (500, uma tentativa) e o item ganha outro dono
+    antes da marca: G = no `GET /items` (só a F); L = em `/accounts` (a O e a F)."""
+    _conecta(user_id, "UPDATED")
+    _mock_pluggy(monkeypatch, item=ITEM_SAUDAVEL)
+    monkeypatch.setattr(of_routes, "_SYNC_MAX_ATTEMPTS", 1)
+    antes = _estado()
+
+    def falha(*_a, **_k):
+        if segundo_dono:
+            _outro_dono(outro_usuario)
+        raise PluggyApiError("boom", status_code=500)
+
+    monkeypatch.setattr(ps, "get_pluggy_item" if onde == "G" else "list_pluggy_accounts", falha)
+    _sync_de_fundo(monkeypatch)
+
+    _confere_c31(user_id, outro_usuario, antes, segundo_dono, ERRO)
+
+
+@pytest.mark.parametrize("segundo_dono", [True, False], ids=["com_segundo_dono", "um_dono"])
+def test_c31c_foto_do_run_com_segundo_dono_depois_do_get_items(
+        user_id, outro_usuario, monkeypatch, eventos, sem_indice_unico, segundo_dono):
+    """Só a O (o `sync_pluggy_item` direto, sem a F): a foto foi tirada, o item ganha
+    outro dono durante a leitura, e a leitura falha antes da releitura de posse."""
+    _conecta(user_id, "UPDATED")
+    _mock_pluggy(monkeypatch, item=ITEM_SAUDAVEL)
+    antes = _estado()
+
+    def falha(*_a, **_k):
+        if segundo_dono:
+            _outro_dono(outro_usuario)
+        raise PluggyApiError("boom", status_code=500)
+
+    monkeypatch.setattr(ps, "list_pluggy_accounts", falha)
+    with pytest.raises(PluggyApiError):
+        ps.sync_pluggy_item(ITEM)
+
+    _confere_c31(user_id, outro_usuario, antes, segundo_dono)
+    if not segundo_dono:
+        assert _estado()[user_id][2]["item_status"] == "UPDATED", "a O devia gravar a foto"

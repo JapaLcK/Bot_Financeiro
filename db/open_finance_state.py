@@ -272,6 +272,7 @@ def mark_sync_result(
     geracao_vista: Any = _SEM_CHECAGEM,
     motivos_substituiveis: Any = _SEM_CHECAGEM,
     observacao_vista: Any = _SEM_CHECAGEM,
+    dono_unico: bool = False,
 ) -> int:
     """Resultado de um sync (ou do job de saúde, com ok=None).
 
@@ -329,6 +330,16 @@ def mark_sync_result(
     `health`). Só para a foto do run que falhou depois do `GET /items`: se alguém
     observou o item depois (job de saúde, 404, outro sync), a foto é mais velha e
     não grava nada — senão um 404 do job seria desfeito pela foto do item vivo.
+
+    `dono_unico`: só grava se nenhuma OUTRA conexão tem o mesmo `(provider,
+    provider_item_id)` — o critério de `get_connections_by_item_id`, que decide a
+    ambiguidade (`AmbiguousItemError`). A falha do sync (F e O) grava pela linha
+    lida no começo do run; um segundo dono que aparece depois, sem exceção que o
+    prove (`sync_in_progress`, falha de leitura antes da releitura de posse), só é
+    visto pelo próprio `UPDATE`: atômico com a escrita, sem janela entre ler e
+    gravar (Codex #718). Custo: uma checagem pelo `uq_of_conn_provider_item`
+    (provider, provider_item_id), que num banco sem o índice é uma varredura da
+    tabela de conexões.
     """
     now = at or datetime.now(_tz())
     with get_conn() as conn:
@@ -372,6 +383,11 @@ def mark_sync_result(
                                and last_sync_at is not distinct from %s))
                    and (%s or coalesce(lower(status_reason),'') = any(%s::text[]))
                    and (%s or health->>'observed_at' is not distinct from %s)
+                   and (not %s or not exists (
+                        select 1 from open_finance_connections o
+                         where o.provider = open_finance_connections.provider
+                           and o.provider_item_id = open_finance_connections.provider_item_id
+                           and o.id <> open_finance_connections.id))
                 """,
                 (
                     (str(status).upper() if status else None),
@@ -394,6 +410,7 @@ def mark_sync_result(
                     ([] if motivos_substituiveis is _SEM_CHECAGEM else list(motivos_substituiveis)),
                     observacao_vista is _SEM_CHECAGEM,
                     (None if observacao_vista is _SEM_CHECAGEM else observacao_vista),
+                    dono_unico,
                 ),
             )
             updated = cur.rowcount
