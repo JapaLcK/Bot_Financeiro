@@ -867,6 +867,16 @@ async def _run_pluggy_sync_bg(item_id: str, expected_user_id: int | None = None)
                 if (result or {}).get("reason") != "sync_in_progress":
                     break
                 if tentativa == _SYNC_MAX_ATTEMPTS:
+                    # `sync_in_progress` FINAL é falha de leitura do run, como a
+                    # exceção final abaixo: o lock (ou o semáforo do processo,
+                    # esgotado por itens sem relação) pode não ter dono que
+                    # atualize ESTE item depois, e sem refresh periódico a 1ª
+                    # conexão ficava "Atualizando…" (Codex #718). A mesma F, com a
+                    # mesma `geracao_vista`: um sync que de fato rodou nesse meio
+                    # tempo mudou o par e a marca não grava. Sem exceção, então
+                    # sem o caso `AmbiguousItemError` (que só levanta).
+                    if conexao:
+                        await asyncio.to_thread(marcar_leitura_falhou, conexao)
                     break
                 espera = _backoff_sec(tentativa)
                 await log_system_event(

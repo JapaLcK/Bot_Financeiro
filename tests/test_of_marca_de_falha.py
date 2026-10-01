@@ -37,11 +37,15 @@ CONTROLES (medidos em 2026-09-30; remeça se mexer no código):
       lote] vermelhos; sem a guarda da F (`isinstance(erro, AmbiguousItemError)`)
       ou sem os chamadores passarem a exceção: c28b[bg, lote] e c28c vermelhos;
       positivo: c28d (um dono, falha comum, continua gravando);
+  negativo, sem a F no `sync_in_progress` final do sync de fundo: c30 vermelho;
+      sem o par na F: também c30b; positivo: c30c (libera na 2ª tentativa);
   positivos (o caminho legítimo continua gravando): c1 (em
       `test_of_coleta_sem_fim.py`), c10, c12, c17, c26, c27 e c29.
 """
 
 from __future__ import annotations
+
+from contextlib import ExitStack
 
 import pytest
 
@@ -648,3 +652,73 @@ def test_c29_bg_falha_em_l_e_depois_em_g(user_id, monkeypatch, eventos):
     assert (linha["status"], linha["status_reason"], linha["health"]["item_status"]) == (
         "ACTIVE", "read_failed", "UPDATED")
     assert _tela(user_id) == ERRO
+
+
+# ── c30: `sync_in_progress` final (devolvido, não levantado) ─────────────────
+# O lock do item (ou o semáforo do processo) ocupado devolve `sync_in_progress` em
+# vez de exceção. Nas 3 tentativas do sync de fundo, a tarefa desiste sem dizer
+# nada: sem refresh periódico (o default) a 1ª conexão ficava "Atualizando…" até o
+# prazo e depois "demorando mais que o normal". Agora a F marca a falha final.
+
+def _bg_com_lock_ocupado(monkeypatch, depois=None) -> dict:
+    """O sync de fundo REAL contra um advisory lock REAL segurado por outra
+    conexão (a do teste), com espera curta. `depois[n]()` roda depois da n-ésima
+    tentativa; `libera()` solta o lock."""
+    monkeypatch.setenv("OF_SYNC_LOCK_WAIT_MS", "50")
+    real = of_routes.sync_pluggy_item
+    estado = {"n": 0, "reasons": []}
+    with ExitStack() as pilha:
+        assert pilha.enter_context(db.pluggy_item_lock(ITEM)), "o teste devia pegar o lock"
+
+        def sync(item_id, **kw):
+            estado["n"] += 1
+            r = real(item_id, **kw)
+            estado["reasons"].append(r.get("reason"))
+            if (depois or {}).get(estado["n"]):
+                depois[estado["n"]](pilha.close)
+            return r
+
+        monkeypatch.setattr(of_routes, "sync_pluggy_item", sync)
+        _sync_de_fundo(monkeypatch)
+    return estado
+
+
+def test_c30_sync_in_progress_nas_tres_tentativas_marca_a_falha(user_id, monkeypatch, eventos):
+    _conecta(user_id)
+    _mock_pluggy(monkeypatch, item=ITEM_SAUDAVEL, contas=[_conta_pluggy()], txs=[_tx_pluggy()])
+
+    estado = _bg_com_lock_ocupado(monkeypatch)
+
+    assert estado["reasons"] == ["sync_in_progress"] * of_routes._SYNC_MAX_ATTEMPTS
+    assert (_linha()["status_reason"], _linha()["last_sync_at"]) == ("read_failed", None)
+    assert _tela(user_id) == ERRO
+
+
+def test_c30b_sync_bom_concorrente_que_termina_no_meio_nao_e_desfeito(user_id, monkeypatch, eventos):
+    """O sync que segurava o lock termina bem DEPOIS da última tentativa e ANTES da
+    marca: o par `(reconnected_at, last_sync_at)` mudou e a F não grava."""
+    _conecta(user_id)
+    _mock_pluggy(monkeypatch, item=ITEM_SAUDAVEL, contas=[_conta_pluggy()], txs=[_tx_pluggy()])
+
+    def sync_concorrente_bom(libera):
+        libera()
+        assert ps.sync_pluggy_item(ITEM)["ok"]
+
+    estado = _bg_com_lock_ocupado(
+        monkeypatch, {of_routes._SYNC_MAX_ATTEMPTS: sync_concorrente_bom})
+
+    assert estado["reasons"] == ["sync_in_progress"] * of_routes._SYNC_MAX_ATTEMPTS
+    assert _linha()["status_reason"] is None
+    assert _tela(user_id)[:2] == ("updated", "Atualizado")
+
+
+def test_c30c_lock_que_libera_na_segunda_tentativa_nao_marca(user_id, monkeypatch, eventos):
+    """Positivo: o retry alcança o sync (1ª `sync_in_progress`, 2ª ok), sem marca."""
+    _conecta(user_id)
+    _mock_pluggy(monkeypatch, item=ITEM_SAUDAVEL, contas=[_conta_pluggy()], txs=[_tx_pluggy()])
+
+    estado = _bg_com_lock_ocupado(monkeypatch, {1: lambda libera: libera()})
+
+    assert estado["reasons"] == ["sync_in_progress", None]
+    assert _linha()["status_reason"] is None
+    assert _tela(user_id)[:2] == ("updated", "Atualizado")
