@@ -458,7 +458,11 @@ engajamento e de IA proativa, retenção de eventos de login, poda das tabelas d
 refresh token / challenge de MFA / cadastro Google pendente
 (`core/services/table_cleanup.py`), e a entrega do e-book da `/assinar`
 (`_ebook_worker` → `core/services/ebook_entrega.entregar_pendentes`, a cada 5 min, a
-1ª volta sem delay; inerte sem `STRIPE_SECRET_KEY` no ambiente). Ficam desligadas só onde
+1ª volta sem delay; inerte sem `STRIPE_SECRET_KEY` no ambiente), e a foto diária do
+patrimônio (`_patrimonio_foto` → `core/services/patrimonio_foto.py`, a cada hora, a partir
+das 18h do fuso do app, uma por usuário com acesso por dia em `patrimonio_fotos`; atrás de
+`PATRIMONIO_FOTO_ENABLED`, desligada por padrão e lida a cada volta — desligada, não
+consulta nada). Ficam desligadas só onde
 `RUN_BACKGROUND_TASKS=0` é forçado: `dashboard_dev.py` e
 `scripts/whatsapp_qa_vault_harness.py`. O `tests/conftest.py` **não** força, então
 teste que sobe o `app` herda o default (`1`) — `tests/test_table_cleanup.py` passa
