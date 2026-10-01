@@ -86,6 +86,11 @@ async def retentar_leituras(*, prazo_sec: float) -> dict:
         # consulta (o acesso é por dono). Só guarda o NEGATIVO: o positivo é refeito antes
         # de cada item agendado, porque o plano pode expirar durante a passada.
         cortados: set[int] = set()
+        # As conexões de cada dono na fila, para mandar o dono INTEIRO para o fim quando
+        # ele é negado (abaixo). Em memória, O(candidatos).
+        por_dono: dict[int, list[int]] = {}
+        for r, _ in fila:
+            por_dono.setdefault(r["user_id"], []).append(r["id"])
 
         # A passada percorre a fila JÁ ORDENADA e para ao agendar K itens, ou no prazo.
         # Nada é consultado por candidato antes do laço: a listagem e a classificação
@@ -113,9 +118,14 @@ async def retentar_leituras(*, prazo_sec: float) -> dict:
             # Acesso do dono AGORA: um plano ou trial que expirou durante a passada não
             # sincroniza o item seguinte. É a mesma `filtrar_por_acesso` dos laços proativos
             # (§0.7), com o dono deste item. Item de dono cortado é pulado e NÃO toma vaga do
-            # K: fica fora de `_TENTADOS` e de `tentados`.
+            # K nem conta em `tentados`, mas CUSTOU tempo (a consulta): o dono inteiro vai
+            # para o fim da fila (`_TENTADOS`), senão M donos sem acesso à frente gastariam
+            # o prazo de todo tique e os pagantes atrás ficariam com fome.
             if not await asyncio.to_thread(filtrar_por_acesso, [linha["user_id"]]):
                 cortados.add(linha["user_id"])
+                agora = _quando()
+                for i in (*por_dono.get(linha["user_id"], ()), row["id"]):
+                    _TENTADOS[i] = agora
                 conta["sem_acesso"] += 1
                 continue
             # O prazo restante DEPOIS das duas consultas acima: o valor do começo da

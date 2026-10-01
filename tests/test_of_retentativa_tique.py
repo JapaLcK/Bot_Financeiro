@@ -619,7 +619,9 @@ def test_acesso_que_expira_durante_a_passada_barra_o_item_seguinte(user_id, amb,
     assert amb.pluggy.chamadas[b["item"]] == 0, "o item de quem perdeu o acesso sincronizou"
     d = tick["details"]
     assert d["sem_acesso"] == 1 and d["tentados"] == 1 and b["item"] not in d["items"]
-    assert b["id"] not in amb.orq._TENTADOS
+    # INVERTIDO na rodada 9: pular por acesso CUSTA tempo (a consulta), então o item entra em
+    # `_TENTADOS` e vai para o fim da fila. Continua fora de `tentados` e não toma vaga do K.
+    assert b["id"] in amb.orq._TENTADOS
 
 
 def test_acesso_valido_durante_a_passada_continua_sincronizando(user_id, amb, monkeypatch):
@@ -826,8 +828,8 @@ def _muitos_donos(user_id, amb, n):
             db.ensure_user(dono)
             promote_to_pro(dono)
             amb.meus.add(dono)
-        conexoes.append(_nova(dono, reason="read_failed",
-                              last_attempt_at=f"now() - interval '{100 - i} hours'"))
+        conexoes.append({**_nova(dono, reason="read_failed",
+                                 last_attempt_at=f"now() - interval '{100 - i} hours'")})
     return conexoes
 
 
@@ -928,3 +930,97 @@ def test_acesso_que_expira_no_meio_vale_tambem_para_o_proximo_item_do_mesmo_dono
     assert amb.pluggy.contas[a["item"]] == 1
     assert amb.pluggy.chamadas[b["item"]] == 0, "o 2º item do dono sem acesso sincronizou"
     assert tick["details"]["sem_acesso"] == 1 and tick["details"]["tentados"] == 1
+
+
+# ── o dono sem acesso também roda na fila (Codex, #727, rodada 9) ────────────────────
+# Com o acesso por item, pular um dono cortado CUSTA tempo. Se os cortados não forem para
+# o fim da fila, M donos sem acesso à frente gastam o prazo de todo tique e os pagantes
+# atrás nunca são lidos. Por isso o item (e o dono inteiro) pulado por acesso negado entra em
+# `_TENTADOS`, como o tentado: a decisão da rodada 6 ("pulado fica fora da memória") valia
+# enquanto o pulado era de graça.
+
+def _passada_com_relogio_falso(monkeypatch, amb, negados, custo=0.25):
+    """Relógio do PRAZO falso e determinístico: cada consulta de acesso gasta `custo` s (com
+    prazo 1,0 s e custo 0,25 cabem 4 consultas por tique). `_quando` (a memória da fila) anda
+    como em produção. Devolve `avanca_tique`."""
+    t = {"v": 0.0}
+    monkeypatch.setattr(amb.orq, "_relogio", lambda: t["v"])
+
+    def _acesso(ids):
+        t["v"] += custo
+        return [i for i in ids if i not in negados]
+
+    monkeypatch.setattr(amb.orq, "filtrar_por_acesso", _acesso)
+    return _relogio_de_producao(monkeypatch, amb)
+
+
+@pytest.mark.parametrize("negados_n, tique_dos_pagantes", [(4, 2), (10, 3), (12, 4)])
+def test_donos_sem_acesso_que_gastam_o_prazo_nao_deixam_os_pagantes_com_fome(
+        user_id, amb, monkeypatch, negados_n, tique_dos_pagantes):
+    """M donos sem acesso à frente (os mais antigos) e P pagantes atrás; só 4 consultas de
+    acesso cabem no prazo. Sem registrar os negados, todo tique repete os mesmos 4 e os
+    pagantes nunca são lidos. Com o rodízio, os negados já percorridos vão para o fim e os
+    pagantes são lidos no tique `M // 4 + 1` (medido: 4 → 2, 10 → 3, 12 → 4), no máximo
+    `ceil(M / 4) + 1`."""
+    conexoes = _muitos_donos(user_id, amb, negados_n + 2)
+    negados = {c["uid"] for c in conexoes[:negados_n]}
+    pagantes = conexoes[negados_n:]
+    avanca = _passada_com_relogio_falso(monkeypatch, amb, negados)
+    lido = None
+    for n in range(1, 8):
+        amb.pluggy.contas.clear()
+        _retenta(amb, prazo_sec=1.0)
+        if any(amb.pluggy.contas[c["item"]] for c in pagantes):
+            lido = n
+            break
+        avanca()
+    assert lido == tique_dos_pagantes
+    assert lido <= -(-negados_n // 4) + 1
+
+
+def test_dono_que_recupera_o_acesso_e_lido_quando_chega_a_vez_dele(user_id, amb, monkeypatch):
+    """Positivo: um negado que já foi percorrido (e foi para o fim da fila) recupera o acesso
+    e é lido assim que o rodízio chega nele, no tique seguinte, junto do pagante."""
+    conexoes = _muitos_donos(user_id, amb, 7)
+    negados = {c["uid"] for c in conexoes[:6]}
+    pagante, recupera = conexoes[6], conexoes[0]
+    avanca = _passada_com_relogio_falso(monkeypatch, amb, negados)
+    _retenta(amb, prazo_sec=1.0)               # tique 1: percorre 4 negados (0 a 3)
+    assert amb.pluggy.contas[recupera["item"]] == 0
+    negados.discard(recupera["uid"])           # o dono 0 volta a ter acesso
+    avanca()
+    # tique 2 (prazo 1,3 s: 4 consultas e ainda sobra para agendar): negados 4 e 5, o pagante
+    # e, na vez dele, o dono 0
+    _retenta(amb, prazo_sec=1.3)
+    assert (amb.pluggy.contas[pagante["item"]], amb.pluggy.contas[recupera["item"]]) == (1, 1)
+
+
+def test_dono_negado_com_varias_conexoes_vai_inteiro_para_o_fim_da_fila(
+        user_id, amb, monkeypatch):
+    """8 donos sem acesso com 2 conexões cada, à frente de 2 pagantes; 4 consultas por tique.
+    Só o item percorrido ir para o fim deixaria a 2ª conexão de cada dono "nunca tentada" à
+    frente, e todo tique gastaria uma consulta em dono já negado (pagantes com fome). O dono
+    inteiro vai: os pagantes são lidos no tique `8 // 4 + 1 = 3`."""
+    negados, pagantes = set(), []
+    for i in range(10):
+        dono = user_id + i
+        if i:
+            db.ensure_user(dono)
+            amb.meus.add(dono)
+        for j in range(2 if i < 8 else 1):
+            c = _nova(dono, reason="read_failed",
+                      last_attempt_at=f"now() - interval '{100 - i}.{j} hours'")
+            if i < 8:
+                negados.add(dono)
+            else:
+                pagantes.append(c)
+    avanca = _passada_com_relogio_falso(monkeypatch, amb, negados)
+    lido = None
+    for n in range(1, 8):
+        amb.pluggy.contas.clear()
+        _retenta(amb, prazo_sec=1.0)
+        if any(amb.pluggy.contas[c["item"]] for c in pagantes):
+            lido = n
+            break
+        avanca()
+    assert lido == 3

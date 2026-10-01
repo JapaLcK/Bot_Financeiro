@@ -345,9 +345,10 @@ próximo. Só GET: nenhum PATCH, nenhuma cota de coleta.
   cujo `GET /items` falha sempre não grava nada, não sai da frente da fila, e com 3
   ou mais assim o disjuntor abria antes de qualquer saudável (fome total); um
   `_INFLIGHT` preso também ficava com a vaga do K. O orquestrador guarda `id →
-  instante` (`_TENTADOS`, no módulo) de quem tentou ou coalesceu, e ordena a fila
-  (antes do corte K) com os nunca tentados primeiro e, entre os tentados, o mais
-  antigo primeiro. Isso vira atraso, como o dos outros "venenos". Não grava nada na
+  instante` (`_TENTADOS`, no módulo) de quem tentou, coalesceu OU foi pulado por
+  acesso negado (o dono inteiro: pular custa tempo, ver "Custo do acesso"), e
+  ordena a fila com os nunca tentados primeiro e, entre os tentados, o mais antigo
+  primeiro. Isso vira atraso, como o dos outros "venenos". Não grava nada na
   linha e não muda a âncora da "Pluggy à frente". O `id` sai da memória quando
   deixa de estar entre as candidatas elegíveis do tique (o item saiu da fila), e
   não por idade: por idade (`4 × prazo_sec`) a rotação se perdia, porque cada tique
@@ -416,7 +417,8 @@ próximo. Só GET: nenhum PATCH, nenhuma cota de coleta.
   (`filtrar_por_acesso([dono])`, a mesma função dos laços proativos, §0.7) e o
   PRAZO restante. Item cujo dono perdeu o acesso no
   meio da passada é PULADO: conta em `sem_acesso` no `of_retry_tick`, não entra em
-  `tentados` nem em `_TENTADOS`. O `expected_user_id` vem da linha rechecada, e a
+  `tentados` nem toma vaga do K, e vai para o fim da fila (`_TENTADOS`, o dono
+  inteiro). O `expected_user_id` vem da linha rechecada, e a
   marca de falha do run só grava na linha capturada se ela é do dono esperado, nos
   DOIS ramos de falha final (a exceção e o `sync_in_progress` esgotado).
 - **Custo do acesso (limitado por K e pelo prazo, não pelo backlog).** O orquestrador
@@ -437,6 +439,22 @@ próximo. Só GET: nenhum PATCH, nenhuma cota de coleta.
   `test_dono_cortado_no_comeco_da_fila_nao_toma_vaga_e_e_consultado_uma_vez`,
   `test_todos_cortados_com_consulta_lenta_para_pelo_prazo_sem_varrer_a_fila` e
   `test_acesso_que_expira_no_meio_vale_tambem_para_o_proximo_item_do_mesmo_dono`.
+  **O negado também roda na fila.** Pular por acesso negado custa a consulta e a
+  rechecagem; sem ir para o fim, M donos sem acesso à frente gastariam o prazo de
+  todo tique e os pagantes atrás ficariam com fome para sempre. Ao negar um dono, a
+  passada registra em `_TENTADOS` todas as conexões dele (o `sorted` estável as põe
+  depois dos nunca percorridos). Não carimba a linha. Com `c` itens percorridos por
+  tique (o que cabe no prazo), os pagantes atrás de M negados são lidos no tique
+  `M // c + 1` (medido com `c = 4`: 4 → 2, 10 → 3, 12 → 4; no máximo `ceil(M/c)+1`).
+  **Atraso máximo do dono que recupera o acesso:** ele fica na memória (ainda é
+  candidato) e espera a vez no rodízio, no máximo uma volta completa dos itens à
+  frente: `ceil(fila / c)` tiques, medido no mesmo `c`; aceitável porque é o mesmo
+  atraso dos outros "venenos" e a alternativa (reconsultar o dono a cada tique) é a
+  fome que se quer evitar. Os outros ramos de "pulou" e o rodízio de cada um:
+  rechecado que saiu da classe (a linha deixa a lista de candidatas e a memória a
+  descarta, sem rodízio); `restante <= 0` (a passada termina e os não percorridos
+  ficam à frente, que é a ordem certa); coalescido (já registrado); dono cortado na
+  mesma passada (já registrado com o dono inteiro, sem consulta).
 - **Quando o tique roda:** o 1º, `min(_PRIMEIRO_TIQUE_SEC, OF_REFRESH_INTERVAL_SEC)`
   (10 min por padrão; com intervalo menor, o intervalo) depois do boot, só
   com a saúde e a retentativa (as duas só fazem GET); o PATCH periódico NÃO roda no
