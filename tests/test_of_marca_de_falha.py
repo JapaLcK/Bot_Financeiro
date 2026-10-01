@@ -33,6 +33,10 @@ CONTROLES (medidos em 2026-09-30; remeça se mexer no código):
       vermelhos;
   negativo, sem o par na O: c3_L vermelho (1ª conexão, `health` NULL antes e
       depois da reconexão, então o `observed_at` não distingue);
+  negativo, sem o ramo `except AmbiguousItemError: raise` da O: c28b[sync, bg,
+      lote] vermelhos; sem a guarda da F (`isinstance(erro, AmbiguousItemError)`)
+      ou sem os chamadores passarem a exceção: c28b[bg, lote] e c28c vermelhos;
+      positivo: c28d (um dono, falha comum, continua gravando);
   positivos (o caminho legítimo continua gravando): c1 (em
       `test_of_coleta_sem_fim.py`), c10, c12, c17, c26, c27 e c29.
 """
@@ -134,7 +138,8 @@ def test_c28_falha_de_item_com_dois_donos_nao_marca_ninguem(
     mesmo item, a marca não escolhe dono (o `AmbiguousItemError` do sync e o da
     marca são o mesmo), e a O também não roda: a leitura do próprio sync levanta
     antes do `GET /items`. Com UM dono e o banco fora só na captura do sync de
-    fundo, a O roda e grava na linha do dono (a F é que fica sem linha)."""
+    fundo, a O roda e grava na linha do dono (a F é que fica sem linha). O
+    segundo dono que aparece no meio do run é `c28b`."""
     outro = user_id + 1
     db.ensure_user(outro)
     try:
@@ -153,6 +158,97 @@ def test_c28_falha_de_item_com_dois_donos_nao_marca_ninguem(
         with get_conn() as c:
             c.execute("delete from users where id=%s", (outro,))
             c.commit()
+
+
+@pytest.fixture
+def outro_usuario(user_id):
+    """Um segundo usuário que pode ganhar o mesmo item (precisa de `sem_indice_unico`)."""
+    outro = user_id + 1
+    db.ensure_user(outro)
+    yield outro
+    db.disconnect_open_finance_connection(outro)
+    with get_conn() as c:
+        c.execute("delete from users where id=%s", (outro,))
+        c.commit()
+
+
+def _rios(item: str = ITEM) -> dict:
+    """O que cada linha do item guarda (por dono), para provar "nada gravado"."""
+    return {r["user_id"]: (r["status"], r["status_reason"], r["health"],
+                           r["last_attempt_at"], r["last_sync_at"])
+            for r in db.get_connections_by_item_id(item)}
+
+
+def _item_ganha_segundo_dono(monkeypatch, outro: int) -> None:
+    """O outro usuário ganha o item DEPOIS da leitura inicial do run e ANTES da
+    releitura de posse, dentro do lock (a leitura de `/investments` roda no meio):
+    a releitura levanta `AmbiguousItemError` no próprio `sync_pluggy_item`."""
+    def investimentos(*_a, **_k):
+        db.save_pluggy_open_finance_item(
+            outro, {"id": ITEM, "status": "UPDATED", "connector": {"id": 612, "name": "Nubank"}})
+        return []
+
+    monkeypatch.setattr(ps, "list_pluggy_investments", investimentos)
+
+
+@pytest.mark.parametrize("caminho", ["sync", "bg", "lote"])
+def test_c28b_segundo_dono_depois_da_leitura_inicial_nao_grava_em_nenhuma_linha(
+        user_id, outro_usuario, monkeypatch, eventos, sem_indice_unico, caminho):
+    """Codex #718: a releitura de posse levanta `AmbiguousItemError` e a salvaguarda
+    trata o item como ambíguo de propósito. Nem a O (foto) nem a F (`read_failed`)
+    gravam na linha do dono escolhido antes: nada em nenhuma das duas linhas.
+    Antes: a O gravava `ACTIVE`/`read_failed` e a foto na linha de quem começou o
+    run (o teste do Tester afirmava isso: "só toca a linha do run")."""
+    _conecta(user_id, "UPDATED")
+    _mock_pluggy(monkeypatch, item=ITEM_SAUDAVEL, contas=[_conta_pluggy()], txs=[_tx_pluggy()])
+    _item_ganha_segundo_dono(monkeypatch, outro_usuario)
+    linha_do_lote = next(c for c in db.get_open_finance_snapshot(user_id)["connections"]
+                         if c["provider_item_id"] == ITEM)
+    antes = _rios()
+
+    if caminho == "sync":
+        with pytest.raises(db.AmbiguousItemError):
+            ps.sync_pluggy_item(ITEM)
+    elif caminho == "bg":
+        _sync_de_fundo(monkeypatch)
+        assert any(e["event"] == "pluggy_sync_failed" for e in eventos), eventos
+    else:
+        assert ps._sync_item_contido(linha_do_lote, user_id)["error"] == "AmbiguousItemError"
+
+    depois = _rios()
+    assert set(depois) == {user_id, outro_usuario}, "o segundo dono devia existir"
+    assert depois[user_id] == antes[user_id], "a linha do dono do run foi gravada"
+    assert depois[outro_usuario][1:3] == (None, None), "a linha do outro dono foi gravada"
+
+
+def test_c28c_lote_com_dois_donos_desde_o_inicio_nao_marca_a_propria_linha(
+        user_id, outro_usuario, monkeypatch, sem_indice_unico):
+    """O caminho que já existia na base: o item já é ambíguo quando o lote começa, o
+    sync levanta na 1ª leitura (sem foto, sem O) e a F gravava `read_failed` na
+    linha do requerente. A mesma salvaguarda vale: nada gravado."""
+    for uid in (user_id, outro_usuario):
+        db.save_pluggy_open_finance_item(
+            uid, {"id": ITEM, "status": "UPDATED", "connector": {"id": 612, "name": "Nubank"}})
+    linha_do_lote = next(c for c in db.get_open_finance_snapshot(user_id)["connections"]
+                         if c["provider_item_id"] == ITEM)
+    antes = _rios()
+
+    assert ps._sync_item_contido(linha_do_lote, user_id)["error"] == "AmbiguousItemError"
+
+    assert _rios() == antes
+
+
+@pytest.mark.parametrize("caminho", ["bg", "lote"])
+def test_c28d_um_dono_e_falha_comum_continua_gravando(user_id, monkeypatch, eventos, caminho):
+    """Positivo do grupo c28b/c28c: o mesmo cenário sem o segundo dono (`/accounts`
+    500) grava a foto e `read_failed` na linha do dono."""
+    _conecta(user_id, "UPDATED")
+    _mock_pluggy(monkeypatch, item=ITEM_SAUDAVEL)
+
+    _run_que_falha(monkeypatch, user_id, "G" if caminho == "bg" else "L")
+
+    assert _rios()[user_id][1] == "read_failed"
+    assert _tela(user_id) == ERRO
 
 
 def test_c2_run_velho_que_falha_nao_desfaz_sync_novo_bom(user_id, monkeypatch, eventos):
