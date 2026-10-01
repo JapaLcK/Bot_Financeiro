@@ -24,8 +24,8 @@ after(async () => { await browser?.close(); server?.kill(); });
 const json = (body, status = 200) => ({ status, contentType: "application/json", body: JSON.stringify(body) });
 const CASH = (count) => ({ type: "cash_transfers", count });
 const BUDGET = { type: "budget_warning", categoria: "mercado", spent: 90, budget: 100, pct: 90 };
-const DATA = (alerts) => ({
-  user_id: 1, year: 2026, month: 9, is_current_month: true, balance: 300, of_bank_count: 0,
+const DATA = (alerts, year = 2026, month = 9) => ({
+  user_id: 1, year, month, is_current_month: true, balance: 300, of_bank_count: 0,
   of_bank_balance: 0, pockets: [{ name: "Viagem", balance: 100 }], investments: [], credit_cards: [],
   bank_movements: { pending_count: 0 }, reconciliation: { pending_count: 0, delta_se_confirmar: 0 }, alerts,
 });
@@ -34,10 +34,15 @@ const item = (o) => ({ id: 1, kind: "saque", status: "ativo", amount: 200, tx_da
 
 // `state` é mutável: a ação padrão tira o item da lista e baixa o contador do
 // /data, como o servidor faria — prova que o reload é busca nova.
+// `agora`: fixa o relógio do navegador (ISO). O dashboard decide o mês da tela
+// pelo relógio do aparelho (#257) e pede `/data/1?year=&month=` com ele; o
+// servidor responde o mês PEDIDO, então o mock faz o mesmo — com o mês fixo em
+// setembro o teste só passava em setembro.
 // `listDelay`: a lista chega atrasada — o `state.lists` sobe antes de a página
 // renderizar, então quem espera o reload espera pelo DOM, não pelo contador.
-async function pageFor(width, { items = [], alerts = [CASH(1)], actionHandler, js404 = false, listDelay = 0 } = {}) {
-  const page = await browser.newPage({ viewport: { width, height: 900 } });
+async function pageFor(width, { items = [], alerts = [CASH(1)], actionHandler, js404 = false, listDelay = 0, agora } = {}) {
+  const page = await browser.newPage({ viewport: { width, height: 900 }, timezoneId: "UTC" }); // UTC como o runner do CI
+  if (agora) await page.clock.setFixedTime(new Date(agora));
   const state = { items: items.slice(), alerts, posts: [], lists: 0, errs: [] };
   page.on("pageerror", (e) => state.errs.push(String(e)));
   await page.route("**/*", async (route) => {
@@ -46,7 +51,10 @@ async function pageFor(width, { items = [], alerts = [CASH(1)], actionHandler, j
     if (js404 && url.pathname === "/cash-transfers.js") return route.fulfill({ status: 404, body: "nao existe" });
     if (/\.[a-z0-9]+$/i.test(url.pathname)) return route.continue();
     if (url.pathname === "/auth/validate") return route.fulfill(json({ user_id: 1 }));
-    if (url.pathname === "/data/1") return route.fulfill(json(DATA(state.alerts)));
+    if (url.pathname === "/data/1") {
+      const q = url.searchParams;
+      return route.fulfill(json(DATA(state.alerts, Number(q.get("year")) || 2026, Number(q.get("month")) || 9)));
+    }
     const m = url.pathname.match(/^\/open-finance\/1\/cash-transfers\/(\d+)\/(\w+)$/);
     if (m && route.request().method() === "POST") {
       const id = Number(m[1]), action = m[2];
@@ -233,8 +241,11 @@ test("os botões da linha travam juntos durante o POST", async () => {
   } finally { await page.close(); }
 });
 
-test("depois da ação: lista nova e o /data novo baixa o contador da faixa para 1", async () => {
-  const { page, state } = await pageFor(1280, { items: [item({ id: 1 }), item({ id: 2, status: "perguntar_novo" })], alerts: [CASH(2)], listDelay: 300 });
+// Relógio real + as viradas que derrubaram o CI: 1º/10 00:30 UTC (já outubro no
+// navegador do runner, ainda 30/09 em São Paulo) e a virada de ano.
+for (const agora of [undefined, "2026-10-01T00:30:00Z", "2027-01-01T00:30:00Z"])
+test(`depois da ação: lista nova e o /data novo baixa o contador da faixa para 1${agora ? ` (relógio ${agora})` : ""}`, async () => {
+  const { page, state } = await pageFor(1280, { items: [item({ id: 1 }), item({ id: 2, status: "perguntar_novo" })], alerts: [CASH(2)], listDelay: 300, agora });
   try {
     await faixa(page).getByText("2", { exact: true }).waitFor();
     await faixa(page).getByRole("button", { name: "Conferir" }).click();

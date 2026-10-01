@@ -362,12 +362,13 @@ Observações:
 
 ### Rodar testes automatizados
 
-Comando:
+Comando (os testes da área que você mexeu):
 
-pytest -q
+.venv/bin/python -m pytest -q tests/test_x.py
 
 Função:
-Executa a suíte de testes automatizados para validar as principais funcionalidades do projeto.
+Valida a área alterada. A suíte inteira roda no CI de todo PR; na máquina, só quando
+o dono pedir. Como rodar e ler o resultado: skill `baseline-testes` e §3 do `CLAUDE.md`.
 
 ## E-mail Transacional (Boas-vindas no Cadastro)
 

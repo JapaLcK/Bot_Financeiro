@@ -1,0 +1,8 @@
+appId: ${APP_ID}
+---
+- launchApp:
+    clearState: true
+    clearKeychain: true
+- tapOn: "Já tenho conta"
+- runFlow: _entrar.yaml
+- assertVisible: "Olá, E2E"
