@@ -226,6 +226,10 @@ PR de cada etapa, não soluções prontas. Cada PR confere se ainda valem, decid
     saldo `NaN` envenena o `sum(balance)` do consolidado e as caixinhas e fotos dos
     investimentos. Todo valor de dinheiro exige `Decimal.is_finite()`; o que não passa
     torna a leitura incompleta;
+  - `type` de conta que não é `BANK` nem `CREDIT` é guardado como veio, mas o saldo
+    (`BANK_ACCOUNTS_SQL`) e os importadores só tratam esses dois: a conta some do produto
+    com o sync dando sucesso. Validar o tipo contra uma lista aceita; fora dela, a conta
+    fica como desconhecida e a leitura, incompleta;
   - `normalize_pluggy_account()` põe `type` = `BANK` e `balance` = 0 quando faltam, e o
     nome vira o tipo (`"CREDIT"`): como a adoção de cartão manual é pelo nome exato, nasce
     um cartão genérico em duplicidade que o nome certo, quando chega, não renomeia nem junta;
@@ -369,7 +373,9 @@ PR de cada etapa, não soluções prontas. Cada PR confere se ainda valem, decid
     (`webapp/src/dashboard/lib/model.js`); a Etapa 3 leva uma estimativa assim para o
     backend, marcada como estimativa e sem contar duas vezes: o ritmo exclui todo gasto que
     já entra como evento agendado (gasto fixo, boleto pago, fatura, parcela de compra
-    parcelada que já existe, cujo restante vai para as faturas futuras), como o protótipo já
+    parcelada que já existe, cujo restante vai para as faturas futuras) e todo movimento
+    interno (`is_internal_movement`: transferência entre contas próprias e pagamento de
+    fatura), como o protótipo já
     faz com os lançamentos de recorrente. O denominador é o período coberto de verdade,
     não 60 fixo: conta recém-conectada ou com histórico incompleto (dez dias divididos por
     60 dão um sexto do ritmo real) tem amostra mínima, e abaixo dela a estimativa sai como
