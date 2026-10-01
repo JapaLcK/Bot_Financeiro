@@ -63,7 +63,7 @@ npm --prefix webapp ci
 NODE_ENV=production npm --prefix webapp run build
 npm --prefix webapp run typecheck
 npm run test:frontend
-python -m pytest -q tests/test_agent_chat*.py tests/test_ai_chat_*.py   # a área; a suíte inteira roda no CI
+python -m pytest -q tests/test_agent_chat*.py tests/test_ai_chat_*.py tests/test_chat_ui_assets.py   # a área; a suíte inteira roda no CI
 ```
 
 O ambiente de pytest deve usar PostgreSQL descartável conforme a skill
