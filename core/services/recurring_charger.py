@@ -214,6 +214,17 @@ def _mensagem_autopay(avisos: list[dict]) -> str:
     return f"🐷 Hoje vencem {len(avisos)} gastos fixos seus:\n{linhas}{rodape}"
 
 
+def bill_reminder_hour() -> int:
+    """Hora (APP_TZ) a partir da qual o WhatsApp avisa de conta/autopay.
+    WA_BILL_REMINDER_HOUR inválida ou fora de 0–23 vale o padrão 9: -1 mandaria
+    de madrugada e 25 nunca mandaria, em silêncio. Fonte única dos dois ticks."""
+    try:
+        hora = int(os.getenv("WA_BILL_REMINDER_HOUR", "9") or 9)
+    except ValueError:
+        return 9
+    return hora if 0 <= hora <= 23 else 9
+
+
 def notify_autopay_notices_whatsapp_once(now: datetime | None = None) -> int:
     """Manda pro WhatsApp do DONO os avisos de autopay de hoje ainda não
     reservados, a partir de WA_BILL_REMINDER_HOUR, numa mensagem de texto livre
@@ -224,13 +235,7 @@ def notify_autopay_notices_whatsapp_once(now: datetime | None = None) -> int:
     if (os.getenv("WA_AUTOPAY_NOTICE_ENABLED") or "").strip().lower() not in ("1", "true", "yes", "on"):
         return 0  # desligado: nem lê o banco
     now = now or now_tz()
-    try:
-        hora = int(os.getenv("WA_BILL_REMINDER_HOUR", "9") or 9)
-    except ValueError:
-        hora = 9  # env inválida vale o padrão, em vez de derrubar o tick
-    if not 0 <= hora <= 23:
-        hora = 9  # -1 mandaria de madrugada e 25 nunca mandaria, em silêncio
-    if now.hour < hora:
+    if now.hour < bill_reminder_hour():
         return 0
 
     from adapters.whatsapp.wa_app import _dedupe_whatsapp_targets
