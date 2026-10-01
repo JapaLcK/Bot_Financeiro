@@ -410,14 +410,22 @@ refresh token / challenge de MFA / cadastro Google pendente
 teste que sobe o `app` herda o default (`1`) — `tests/test_table_cleanup.py` passa
 `"1"` de propósito, para ver a tarefa subir.
 
-O Open Finance tem **três** trabalhos, não dois: expiração de trial
-(`_open_finance_trial_expiry`), refresh proativo e **job de saúde** — os dois últimos no
-mesmo tick de `_open_finance_refresh`. O refresh proativo depende de
-`OF_REFRESH_ENABLED` (off por padrão em produção); o job de saúde roda MESMO com ele
-desligado e ESCREVE `status`/`status_reason`/`health` na conexão do usuário. É de
-propósito: ele só faz `GET /items` (não consome cota de coleta) e é o que tira do
-"Atualizado" a conexão cujo item sumiu da Pluggy — sem refresh e sem webhook, nada mais
-faria essa verificação. Kill switch: `OF_HEALTH_CHECK_ENABLED=0` (default `1`).
+O Open Finance tem **quatro** trabalhos: expiração de trial
+(`_open_finance_trial_expiry`), **job de saúde**, **retentativa** e refresh proativo —
+os três últimos no mesmo tick de `_open_finance_refresh`, nessa ordem. O 1º tick
+roda 10 min depois do boot (`_PRIMEIRO_TIQUE_SEC`) só com saúde e retentativa (GET); o
+PATCH periódico não roda no boot e entra do 2º tick em diante, a cada
+`OF_REFRESH_INTERVAL_SEC` (6 h). O refresh
+proativo depende de `OF_REFRESH_ENABLED` (off por padrão em produção); o job de saúde
+roda MESMO com ele desligado e ESCREVE `status`/`status_reason`/`health` na conexão do
+usuário. É de propósito: ele só faz `GET /items` (não consome cota de coleta) e é o que
+tira do "Atualizado" a conexão cujo item sumiu da Pluggy — sem refresh e sem webhook,
+nada mais faria essa verificação. A retentativa (Onda 5, PR-B2,
+`frontend/routes/of_retentativa.py`) vem logo depois: relê a Pluggy, também só com GET,
+para até `OF_RETRY_MAX_PER_TICK` conexões com dado atrás (default 20; só `0` ou
+negativo desliga só ela, valor que não é inteiro cai no padrão), uma de cada vez, pelo mesmo caminho de sync do webhook. Quem entra e por quê:
+`docs/open_finance_estados.md` §2.2. Kill switch dos dois: `OF_HEALTH_CHECK_ENABLED=0`
+(default `1`).
 (Há ainda `_open_finance_proactive`, que retorna na hora sem `OF_PROACTIVE_ENABLED`.)
 
 ---

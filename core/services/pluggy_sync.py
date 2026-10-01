@@ -336,11 +336,13 @@ def _sync_pluggy_item_confirmado(provider_item_id: str, connection: dict, api_ke
     # autoriza `no_accounts`.
     investments: list[dict] = []
     investments_ok = True
+    investments_status = None   # o HTTP do erro de `/investments`, p/ o disjuntor da retentativa
     try:
         investments = [normalize_pluggy_investment(i)
                        for i in list_pluggy_investments(provider_item_id, api_key)]
     except Exception as exc:
         investments_ok = False
+        investments_status = getattr(exc, "status_code", None)
         print(f"[pluggy_sync] investimentos indisponíveis item={provider_item_id} "
               f"erro={type(exc).__name__}: {exc}", flush=True)
     heartbeat()
@@ -494,7 +496,8 @@ def _sync_pluggy_item_confirmado(provider_item_id: str, connection: dict, api_ke
                              status_reason=reason, health=health)
             return {"ok": False, "reason": reason, "item_id": provider_item_id,
                     "connection_id": connection["id"], "user_id": connection["user_id"],
-                    "accounts_synced": 0, "transactions_synced": 0, **inv_result}
+                    "accounts_synced": 0, "transactions_synced": 0,
+                    "investments_status": investments_status, **inv_result}
 
         result = save_open_finance_sync(connection["id"], accounts)
 
@@ -581,6 +584,7 @@ def _sync_pluggy_item_confirmado(provider_item_id: str, connection: dict, api_ke
         # quem lê o resultado precisa saber o que ficou pra trás.
         "stale_products": list(health.get("stale_products") or []),
         "investments_ok": investments_ok,
+        "investments_status": investments_status,
         **result,
         **inv_result,
         **caixinha_result,
@@ -667,6 +671,14 @@ def request_pluggy_refresh(*, origin: str, user_id: int | None = None, limit: in
                         for r in claimed]}
 
 
+def of_health_check_ligado() -> bool:
+    """`OF_HEALTH_CHECK_ENABLED` (default ligado). Uma leitura só para o job de
+    saúde e a retentativa do mesmo tique (`frontend/routes/of_retentativa.py`):
+    desligar a flag desliga os dois."""
+    return (os.getenv("OF_HEALTH_CHECK_ENABLED") or "1").strip().lower() not in (
+        "0", "false", "no", "off")
+
+
 def run_of_health_check(*, limit: int = 200) -> dict:
     """Mede a saúde das conexões ativas com um `GET /items/{id}` por item.
 
@@ -694,7 +706,7 @@ def run_of_health_check(*, limit: int = 200) -> dict:
     `OF_HEALTH_MIN_SAMPLE` items, a passada aborta sem gravar os ausentes e
     loga. 100% desliga o disjuntor.
     """
-    if (os.getenv("OF_HEALTH_CHECK_ENABLED") or "1").strip().lower() in ("0", "false", "no", "off"):
+    if not of_health_check_ligado():
         return {"checked": 0, "missing": 0, "skipped": "disabled"}
 
     rows = list_connections_for_health_check(
