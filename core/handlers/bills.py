@@ -16,16 +16,12 @@ from __future__ import annotations
 import logging
 import re
 
+from core.financial_targets import texto_da_quantidade
+from core.handlers.conta_por_nome import PAY_RE, escolher_conta
 from core.response_formatter import wrap_wa_markup
 from utils_text import (_ENCHIMENTO, _TRACOS, fmt_brl, limpa_pontuacao_final,
                         normalize_text, parse_money, valor_perigoso)
 
-_PAY_RE = re.compile(r"^(ja\s+)?(paguei|quitei)\b")
-_STOP_TOKENS = {
-    "o", "a", "os", "as", "de", "do", "da", "dos", "das", "meu", "minha",
-    "conta", "boleto", "boletos", "fatura", "reais", "real", "rs", "r",
-    "ja", "hoje", "ontem", "esse", "essa", "esta", "este",
-}
 logger = logging.getLogger(__name__)
 
 
@@ -100,12 +96,14 @@ def conta_paga(user_id: int, paid: dict, val) -> str:
     )
 
 
-def try_pay_from_text(user_id: int, text: str, forma_pagamento: str | None = None) -> str | None:
+def try_pay_from_text(user_id: int, text: str, forma_pagamento: str | None = None,
+                      exige_nome: bool = False) -> str | None:
     """Se o texto for 'paguei/quitei <conta>' E houver uma conta a pagar
     pendente que casa, marca como paga e retorna a confirmação. Senão None.
-    Com Open Finance, a forma vem ANTES do valor (Q7, `forma_pagamento`)."""
+    Com Open Finance, a forma vem ANTES do valor (Q7, `forma_pagamento`).
+    Qual conta: `conta_por_nome.escolher_conta` (e o que é `exige_nome`)."""
     norm = normalize_text(text or "")
-    if not _PAY_RE.match(norm):
+    if not PAY_RE.match(norm):
         return None
 
     from core.handlers import forma_pagamento as fp
@@ -115,53 +113,18 @@ def try_pay_from_text(user_id: int, text: str, forma_pagamento: str | None = Non
     if not pend:
         return None
 
-    # valor real do boleto, se o usuário disser ("paguei 152 de luz")
+    best = escolher_conta(pend, norm, exige_nome)
+    if not isinstance(best, dict):
+        return best  # a pergunta "qual delas" ou None (lançamento avulso)
+
+    # valor real do boleto, se o usuário disser ("paguei 152 de luz"). O número
+    # do nome da conta não é valor: "paguei IPVA 2025" paga o IPVA, não R$ 2.025 (#700).
     try:
-        amount = parse_money(text)
+        amount = parse_money(texto_da_quantidade(text, [best.get("name") or ""]))
     except Exception:
         amount = None
     if amount is not None and amount <= 0:
         amount = None
-
-    # alvo: tira o verbo, o valor e stopwords → sobra o "nome" da conta
-    target = _PAY_RE.sub("", norm).strip()
-    target = re.sub(r"\b\d[\d.,]*\b", " ", target)
-    target = " ".join(t for t in target.split() if t not in _STOP_TOKENS).strip()
-
-    def _score(b: dict) -> int:
-        bn = normalize_text(b.get("name") or "")
-        if not bn:
-            return 0
-        if bn in norm or (target and (bn in target or target in bn)):
-            return 3
-        toks = [t for t in bn.split() if len(t) > 2 and t not in _STOP_TOKENS]
-        if target and any(t in target.split() for t in toks):
-            return 2
-        if any(t in norm.split() for t in toks):
-            return 1
-        return 0
-
-    scored = sorted(((_score(b), b) for b in pend), key=lambda x: x[0], reverse=True)
-    best_score, best = scored[0]
-
-    if best_score == 0:
-        # Nenhuma conta casou pelo nome. Se o usuário NÃO deu um alvo específico
-        # (respondeu só "paguei" / "paguei essa conta" — como o lembrete pede) e
-        # só existe UMA conta pendente, paga ela. Se houver várias, pergunta qual.
-        # Se o alvo era específico e não casou, deixa virar lançamento avulso.
-        if target:
-            return None
-        if len(pend) == 1:
-            best = pend[0]
-        else:
-            nomes = ", ".join(b.get("name") or "?" for b in pend[:5])
-            return f"Você tem contas a pagar pendentes: {nomes}. Qual delas você pagou?"
-    else:
-        # empate real e usuário não deu pista suficiente → pergunta qual
-        ties = [b for s, b in scored if s == best_score]
-        if len(ties) > 1 and best_score < 3:
-            nomes = ", ".join(b.get("name") or "?" for b in ties[:5])
-            return f"Você tem contas a pagar pendentes: {nomes}. Qual delas você pagou?"
 
     declarada = forma_pagamento or fp.detectar(text)
     decisao = fp.decidir(user_id, declarada)
