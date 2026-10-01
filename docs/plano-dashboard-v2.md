@@ -221,7 +221,9 @@ PR de cada etapa, não soluções prontas. Cada PR confere se ainda valem, decid
   dos registros derivados: lançamento criado com o tipo errado, compra parcelada gravada
   sem grupo (sem `installment_no`, `installments_total` e `group_id`, e sem as faturas
   futuras), compra com `bill_id` escolhido por um calendário errado, valor em moeda errada,
-  pagamento de fatura lido como estorno. Além da moeda:
+  pagamento de fatura lido como estorno. O que foi descartado sem deixar registro (conta ou
+  transação sem `id`) não tem o que reprocessar: ou se busca de novo o histórico pelo
+  provedor, ou fica gravado que a cobertura daquele período está incompleta. Além da moeda:
   - `_to_decimal()` aceita `"NaN"` e `"Infinity"` como valor válido, o Postgres grava, e um
     saldo `NaN` envenena o `sum(balance)` do consolidado e as caixinhas e fotos dos
     investimentos. Todo valor de dinheiro exige `Decimal.is_finite()`; o que não passa
@@ -244,7 +246,11 @@ PR de cada etapa, não soluções prontas. Cada PR confere se ainda valem, decid
     `extract_installment_info()` aceita `installmentNumber` ausente, 0 ou maior que o
     total: o par só vale com o número entre 1 e o total), e a
     importada nunca cria as faturas futuras (a manual cria, em
-    `add_credit_purchase_installments()`);
+    `add_credit_purchase_installments()`). Ao materializar as parcelas restantes, a parcela
+    real que chega depois tem outro id externo e entraria ao lado da projetada (a deduplicação
+    é por `(user_id, source, external_id)`), cobrando a fatura duas vezes: a parcela
+    projetada é substituída pela real por identidade da compra mais número da parcela, ou a
+    projeção fica fora das transações importadas;
   - cartão sem as datas da Pluggy ganha fechamento dia 1 e vencimento dia 10
     (`get_or_create_open_finance_card()`); o calendário de cartão já ligado não é
     atualizado, e o cartão manual adotado pelo nome fica com as datas manuais, sem conferir
