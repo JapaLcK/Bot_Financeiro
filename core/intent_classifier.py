@@ -732,7 +732,10 @@ def _is_boleto_ai_query(norm: str) -> bool:
 #   gastei 80 no bar?", "ontem paguei 120 de luz?" e "ontem recebi 500 do freela?"
 #   gravam igual na main e aqui. Coerente com a regra do dono, só a mensagem
 #   destoa. Pôr "ontem/hoje" em `_PREFIXO_RE` alinharia o `classify`, mas é
-#   decisão de produto.
+#   decisão de produto. Idem com o "?" em outra cláusula ("ontem gastei muito no
+#   bar 80 e qual meu saldo?", Codex P2 do #739): o "?" vale para todo verbo
+#   antes dele, e sem o "ontem" a frase já não grava na main. Limitar o "?" à
+#   cláusula mudaria a regra "? basta" também para a versão sem prefixo.
 #   SÓ NÃO VAI PRA IA: prefixo fora da lista ("tipo gastei mais em 2025?") escapa
 #   do `classify`, mas as portas pegam pela varredura e a conversa nova não grava.
 # "gastou"/"gastamos" só aqui (não estão em `VERBOS_DE_LANCAMENTO`). Que "gastamos
