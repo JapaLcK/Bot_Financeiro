@@ -7,8 +7,11 @@ appId: ${APP_ID}
 # O alerta "Do you want to allow … to use Face ID?" não aparece no simulador
 # (medido: 1º uso depois de instalar e cadastrar o rosto).
 - launchApp # sem clearState: a sessão do 05a fica no cofre
+# Um dos dois desfechos tem de aparecer: app preso na trava ou que não abriu
+# falha AQUI, e não no passo que o negativo mede (onde o esperado é o "Olá").
 - extendedWaitUntil:
-    visible: "Sua sessão expirou. Entre de novo."
+    visible: "Olá, .*|Sua sessão expirou\\. Entre de novo\\."
     timeout: 20000
+- assertVisible: "Sua sessão expirou. Entre de novo."
 - assertVisible:
     id: "entrar-enviar"

@@ -10,6 +10,9 @@ appId: ${APP_ID}
     below: "Código de 6 dígitos"
 - inputText: ${TOTP} # o 6º dígito envia sozinho
 - extendedWaitUntil:
-    visible: "Olá, .*|Código inválido.*|Muitas tentativas.*"
+    visible: "Olá, .*|Código inválido.*|Muitas tentativas.*|Algo deu errado.*"
     timeout: 20000
+# 429 ou falha genérica caem aqui, com nome próprio: nunca no passo que o negativo mede.
+- assertNotVisible: "Muitas tentativas.*"
+- assertNotVisible: "Algo deu errado.*"
 - assertVisible: "Olá, E2E"
