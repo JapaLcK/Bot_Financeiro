@@ -280,8 +280,9 @@ PR de cada etapa, não soluções prontas. Cada PR confere se ainda valem, decid
     `ACTIVE`/`ok=True`, só com log: falha ao ler investimentos, ao gravar o espelho de
     investimentos (`save_open_finance_investments()`), ao espelhar caixinhas e ao gravar a
     foto diária (`grava_fotos_posicoes()`, que só desfaz o savepoint). Regra para a classe:
-    qualquer parte do sync que falhe marca a sincronização como incompleta, com o produto
-    que faltou. Sem outro sync no mesmo dia, o histórico fica com um
+    qualquer parte do sync que grava dado financeiro e falhe marca a sincronização como
+    incompleta, com o produto que faltou. Fica de fora o que não é dado financeiro, como o
+    disparo de agentes, que o código já isola de propósito. Sem outro sync no mesmo dia, o histórico fica com um
     buraco permanente, sem nova tentativa (afeta patrimônio e rentabilidade, não a previsão).
 - Quando o dado do Open Finance conta como desatualizado (limite por produto) e como a
   tela aberta percebe isso sem escrita.
