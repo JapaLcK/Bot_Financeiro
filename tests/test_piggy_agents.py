@@ -1761,7 +1761,7 @@ def test_manchete_virada_de_sinal():
     texto = _manchete_texto(_m(10163.02, 11507.05), _m(5000, 3341))
     assert texto == (
         "Neste mês, entraram R$ 10.163,02 e saíram R$ 11.507,05, resultando em "
-        "um saldo negativo de R$ 1.344,03. No mês anterior, você havia encerrado "
+        "um déficit de R$ 1.344,03. No mês anterior, você havia encerrado "
         "com uma sobra de R$ 1.659,00."
     )
     assert "%" not in texto and "—" not in texto
@@ -1778,3 +1778,17 @@ def test_manchete_mes_anterior_sem_movimento_nao_cita():
     from core.services.piggy_agents import _manchete_texto
     texto = _manchete_texto(_m(100, 40), _m(0, 0))
     assert texto.endswith("resultando em uma sobra de R$ 60,00.")
+
+
+def test_manchete_cita_aporte_para_a_conta_fechar():
+    from core.services.piggy_agents import _manchete_texto
+    texto = _manchete_texto(_m(3000, 1000, 500), _m(0, 0))
+    assert "saíram R$ 1.000,00, R$ 500,00 foram para as caixinhas, resultando em uma sobra de R$ 1.500,00." in texto
+    texto = _manchete_texto(_m(3000, 1000, -500), _m(0, 0))
+    assert "R$ 500,00 voltaram das caixinhas, resultando em uma sobra de R$ 2.500,00." in texto
+
+
+def test_manchete_mes_anterior_so_com_aporte_conta_como_movimento():
+    from core.services.piggy_agents import _manchete_texto
+    texto = _manchete_texto(_m(100, 40), _m(0, 0, 300))
+    assert texto.endswith("No mês anterior, você havia encerrado com um déficit de R$ 300,00.")

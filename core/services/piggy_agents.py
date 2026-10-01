@@ -227,15 +227,25 @@ def _month_stats(cur, user_id: int, first: date, nxt: date) -> dict[str, float]:
 def _resultado_frase(sobrou: float) -> str:
     if sobrou >= 0:
         return f"uma sobra de {_fmt_brl(sobrou)}"
-    return f"um saldo negativo de {_fmt_brl(-sobrou)}"
+    return f"um déficit de {_fmt_brl(-sobrou)}"
+
+
+def _aportes_frase(aportes: float) -> str:
+    # sobrou = entrou - saiu - aportes: a frase só fecha a conta se citar o aporte.
+    if aportes > 0.005:
+        return f", {_fmt_brl(aportes)} foram para as caixinhas"
+    if aportes < -0.005:
+        return f", {_fmt_brl(-aportes)} voltaram das caixinhas"
+    return ""
 
 
 def _manchete_texto(stats: dict, prev: dict) -> str:
     """Sem "%" de variação: com sobra negativa ou troca de sinal ela vira número
     sem sentido (-181%). Cita o resultado do mês anterior em valor."""
     texto = (f"Neste mês, entraram {_fmt_brl(stats['entrou'])} e saíram "
-             f"{_fmt_brl(stats['saiu'])}, resultando em {_resultado_frase(stats['sobrou'])}.")
-    if prev["entrou"] or prev["saiu"]:
+             f"{_fmt_brl(stats['saiu'])}{_aportes_frase(stats['aportes'])}, "
+             f"resultando em {_resultado_frase(stats['sobrou'])}.")
+    if prev["entrou"] or prev["saiu"] or prev["aportes"]:
         texto += f" No mês anterior, você havia encerrado com {_resultado_frase(prev['sobrou'])}."
     return texto
 
