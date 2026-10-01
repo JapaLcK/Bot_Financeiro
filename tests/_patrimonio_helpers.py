@@ -32,9 +32,11 @@ def conexao(uid, item, status="UPDATED", sync=AGORA, tentativa=None) -> int:
 
 
 def conta(cid, pid, saldo, moeda="BRL", code="BRL") -> int:
+    raw = {"currencyCode": code} if code else {}
+    raw["balance"] = float(saldo)  # a Pluggy manda número
     return q("""insert into open_finance_accounts (connection_id, provider_account_id, name, type,
                     currency, balance, raw) values (%s, %s, 'Conta', 'BANK', %s, %s, %s) returning id""",
-             (cid, pid, moeda, saldo, Jsonb({"currencyCode": code} if code else {})))["id"]
+             (cid, pid, moeda, saldo, Jsonb(raw)))["id"]
 
 
 def posicao(cid, pid, saldo, moeda="BRL", status=None, code="BRL") -> int:

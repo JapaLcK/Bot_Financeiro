@@ -11,7 +11,7 @@ import pytest
 import db
 import db.bills as B
 from conftest import usuario_pagante
-from core.services.pluggy_sync import normalize_pluggy_investment
+from core.services.pluggy_sync import normalize_pluggy_account, normalize_pluggy_investment
 from tests._fusao_of_helpers import conecta_banco, ia_fora, manda  # noqa: F401 (fixture)
 from tests._patrimonio_helpers import (caixinha, conexao, conta, foto, horas_atras,
                                        investimento_manual, lancamento, posicao, q, tx_banco)
@@ -212,12 +212,15 @@ def test_moeda_presumida_na_conta_e_na_posicao(uid):
 _SEM_CHAVE = object()
 
 
-@pytest.mark.parametrize("saldo,ausente,coluna", [
+_SALDOS_DA_PLUGGY = pytest.mark.parametrize("saldo,ausente,coluna", [
     (_SEM_CHAVE, True, "0"), (None, True, "0"), ("abc", True, "0"),  # o sync grava 0
     ("NaN", True, "NaN"),               # `_to_decimal` aceita "NaN": a coluna fica NaN
     ("Infinity", True, "Infinity"), ("-Infinity", True, "-Infinity"),
     (0, False, "0"), ("0", False, "0"), (1234.56, False, "1234.56"),
 ])
+
+
+@_SALDOS_DA_PLUGGY
 def test_saldo_ausente_pelo_sync_da_pluggy(uid, saldo, ausente, coluna):
     c, _ = _limpo(uid)
     raw = {"id": "inv-1", "currencyCode": "BRL"}
@@ -232,6 +235,23 @@ def test_saldo_ausente_pelo_sync_da_pluggy(uid, saldo, ausente, coluna):
     assert gravado.is_nan() if coluna == "NaN" else gravado == D(coluna)
     inv = gravado if gravado.is_finite() else D(0)  # não finito soma 0, não envenena o total
     assert (f["investimentos_banco"], f["total"]) == (inv, f["carteira"] + D("100") + inv)
+
+
+@_SALDOS_DA_PLUGGY
+def test_saldo_ausente_da_conta_pelo_sync_da_pluggy(uid, saldo, ausente, coluna):
+    c, _ = _limpo(uid)  # a conta "acc-1" do _limpo é sobrescrita pelo sync
+    raw = {"id": "acc-1", "type": "BANK", "currencyCode": "BRL"}
+    if saldo is not _SEM_CHAVE:
+        raw["balance"] = saldo
+    db.save_open_finance_sync(c, [normalize_pluggy_account(raw)])
+    f = foto(uid)
+    assert ("saldo_ausente" in f["motivos"]) is ausente
+    assert f["base"]["contas"] == ["acc-1"]
+    gravado = q("select balance from open_finance_accounts where connection_id=%s",
+                (c,))["balance"]
+    assert gravado.is_nan() if coluna == "NaN" else gravado == D(coluna)
+    banco = gravado if gravado.is_finite() else D(0)
+    assert (f["bancos"], f["total"]) == (banco, f["carteira"] + banco)
 
 
 @pytest.mark.parametrize("tabela,bancos,inv", [

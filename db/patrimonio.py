@@ -43,7 +43,8 @@ POSICOES_BANCO_SQL = """
 """
 
 _CONTAS_SQL = f"""
-    select a.balance, ra.provider_account_id, ra.raw->>'currencyCode' as currency_code
+    select a.balance, ra.provider_account_id, ra.raw->>'currencyCode' as currency_code,
+           ra.raw->>'balance' as raw_balance
       from ({BANK_ACCOUNTS_SQL}) a
       join open_finance_accounts ra on ra.id = a.id
 """
@@ -123,7 +124,8 @@ def calcular(cur, user_id: int) -> dict:
         return v is not None and v.is_finite()
 
     # O sync grava 0 na coluna quando a Pluggy omite ou estraga o saldo
-    # (`pluggy_sync._to_decimal`); só o `raw` diz que o 0 não veio do banco.
+    # (`pluggy_sync._to_decimal`, e `save_open_finance_sync` no `or 0` das contas);
+    # só o `raw` diz que o 0 não veio do banco. Vale para conta e posição.
     def sem_saldo(p) -> bool:
         try:
             return not finito(p["balance"]) or not Decimal(p["raw_balance"]).is_finite()
@@ -143,8 +145,7 @@ def calcular(cur, user_id: int) -> dict:
         ("manual_e_banco", (caixinhas["pos"] or manuais["pos"]) and bool(posicoes)),
         ("caixinha_espelhada_fora", fora["caixinha_espelhada"] > 0),
         ("moeda_presumida", any(not r["currency_code"] for r in [*contas, *posicoes])),
-        ("saldo_ausente", any(sem_saldo(p) for p in posicoes)
-                          or not all(finito(r["balance"]) for r in contas)),
+        ("saldo_ausente", any(sem_saldo(p) for p in [*contas, *posicoes])),
     ) if sim]
 
     partes = {
