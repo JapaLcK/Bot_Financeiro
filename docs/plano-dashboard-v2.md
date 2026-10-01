@@ -350,9 +350,13 @@ PR de cada etapa, não soluções prontas. Cada PR confere se ainda valem, decid
     `reconciliation` (conciliação a confirmar, com `delta_se_confirmar`) e
     `bank_movements` (declaração não confirmada), e `_starting_balance()` guarda só o
     número. O mesmo vale para toda pendência que pode criar, pagar ou mover dinheiro, com
-    valor conhecido ou não: lançamento esperando "sim" e as perguntas de valor e de forma
-    de pagamento em `pending_actions` (`multi_launch_values`, `bill_pay_amount`,
-    `payment_method_choice`) e as escritas propostas pela IA em `ai_pending_actions`. A previsão
+    valor conhecido ou não. A lista sai do registro, não de nomes escritos aqui: todo tipo
+    de `_REGISTRO` em `db/pending.py` cujo efeito cria, paga ou move dinheiro (lançamento,
+    parcelas no cartão, pagamento de conta, débito de uma fonte, recorrente nova; hoje,
+    entre outros, `multi_launch_values`, `bill_pay_amount`, `payment_method_choice`,
+    `installment_pending`, `pay_bill_choice`, `bill_amount_expected`, `investment_pick`,
+    `funding_source_choice` e `confirm_recurring_offer`), mais as escritas propostas pela
+    IA em `ai_pending_actions`. Tipo novo no registro entra pela classificação do efeito. A previsão
     compartilhada tem de levar essas pendências e mostrar o resultado como "a conferir",
     não como exato.
   - Receita recorrente mensal ou anual entra pelo valor cheio, sem marcador de
