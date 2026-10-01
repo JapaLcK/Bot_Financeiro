@@ -1,7 +1,8 @@
 """Molde dos testes da foto do patrimônio (tests/test_patrimonio_foto*.py).
 
 Espelho do Open Finance escrito direto no banco: cada teste controla status,
-datas de sync, moeda e `raw` sem passar pelo sync da Pluggy.
+datas de sync, moeda e `raw` sem passar pelo sync da Pluggy. Toda conta e posição
+sai com `updated_at = AGORA`, como se viesse do mesmo save (`conta_fora_do_ultimo_sync`).
 """
 from __future__ import annotations
 
@@ -35,16 +36,18 @@ def conta(cid, pid, saldo, moeda="BRL", code="BRL") -> int:
     raw = {"currencyCode": code} if code else {}
     raw["balance"] = float(saldo)  # a Pluggy manda número
     return q("""insert into open_finance_accounts (connection_id, provider_account_id, name, type,
-                    currency, balance, raw) values (%s, %s, 'Conta', 'BANK', %s, %s, %s) returning id""",
-             (cid, pid, moeda, saldo, Jsonb(raw)))["id"]
+                    currency, balance, raw, updated_at)
+                values (%s, %s, 'Conta', 'BANK', %s, %s, %s, %s) returning id""",
+             (cid, pid, moeda, saldo, Jsonb(raw), AGORA))["id"]
 
 
 def posicao(cid, pid, saldo, moeda="BRL", status=None, code="BRL") -> int:
     raw = {k: v for k, v in (("currencyCode", code), ("status", status)) if v}
     raw["balance"] = None if saldo is None else float(saldo)  # a Pluggy manda número
     return q("""insert into open_finance_investments (connection_id, provider_investment_id, name,
-                    type, currency, balance, raw) values (%s, %s, 'CDB', 'FIXED_INCOME', %s, %s, %s)
-                returning id""", (cid, pid, moeda, saldo, Jsonb(raw)))["id"]
+                    type, currency, balance, raw, updated_at)
+                values (%s, %s, 'CDB', 'FIXED_INCOME', %s, %s, %s, %s)
+                returning id""", (cid, pid, moeda, saldo, Jsonb(raw), AGORA))["id"]
 
 
 def caixinha(uid, nome, saldo, of_investment_id=None):

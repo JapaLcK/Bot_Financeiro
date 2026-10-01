@@ -1,6 +1,7 @@
 """A conta do patrimônio (`db/patrimonio.calcular`): composição, isolamento e motivos.
 
-O job, a gravação e a privacidade estão em `tests/test_patrimonio_foto_job.py`.
+O job, a gravação e a privacidade estão em `tests/test_patrimonio_foto_job.py`;
+`conta_fora_do_ultimo_sync` em `tests/test_patrimonio_foto_sync.py`.
 """
 from __future__ import annotations
 
@@ -92,6 +93,11 @@ def test_outro_usuario_com_os_mesmos_ids_nao_muda_a_foto(uid):
     ([("PAUSED", "acc-usd", "USD")], 0, 0),                                 # pausada já está fora
     ([("UPDATED", "acc-usd", "USD"), ("PAUSED", "acc-usd", "USD")], 0, 0),  # a mais nova pausou
     ([("UPDATED", "acc-usd", "USD"), ("UPDATED", "acc-usd", "USD")], 0, 1),  # reconectou
+    ([("UPDATED", "acc-1", "BRL"), ("UPDATED", "acc-1", "BRL")], 50, 0),    # soma uma vez
+    ([("UPDATED", "acc-1", "BRL"), ("PAUSED", "acc-1", "BRL")], 0, 0),      # a mais nova pausou
+    # Reconexão que corrigiu a moeda: vale a linha nova; a velha não soma nem conta.
+    ([("UPDATED", "acc-1", "BRL"), ("UPDATED", "acc-1", "USD")], 0, 1),
+    ([("UPDATED", "acc-1", "USD"), ("UPDATED", "acc-1", "BRL")], 50, 0),
 ])
 def test_conta_em_outra_moeda_fica_fora_e_contada(uid, contas, bancos, moeda):
     for i, (status, pid, m) in enumerate(contas):  # conexões em ordem: a última é a mais nova
@@ -100,6 +106,15 @@ def test_conta_em_outra_moeda_fica_fora_e_contada(uid, contas, bancos, moeda):
     assert (f["bancos"], f["total"]) == (D(bancos), f["carteira"] + D(bancos))
     assert f["base"]["fora"]["moeda"] == moeda
     assert f["motivos"] == ["carteira_nao_confirmada"]
+
+
+@pytest.mark.parametrize("moedas,soma,moeda", [
+    (("BRL", "BRL"), 50, 0), (("BRL", "USD"), 0, 1), (("USD", "BRL"), 50, 0)])
+def test_posicao_em_duas_conexoes_vale_a_mais_nova(uid, moedas, soma, moeda):
+    for i, m in enumerate(moedas):  # a última conexão é a mais nova
+        posicao(conexao(uid, f"item-{i}-{uid}"), "inv-1", "50", moeda=m, code=m)
+    f = foto(uid)
+    assert (f["investimentos_banco"], f["base"]["fora"]["moeda"]) == (D(soma), moeda)
 
 
 # ── motivos ──────────────────────────────────────────────────────────────────
@@ -272,47 +287,3 @@ def test_saldo_ausente_na_coluna(uid):
     posicao(c, "inv-1", None)
     f = foto(uid)
     assert "saldo_ausente" in f["motivos"] and f["investimentos_banco"] == 0
-
-
-# Conta ou posição que deixou de vir no sync fica no espelho com o saldo velho
-# e a conexão continua fresca: o saldo fica na soma, o motivo marca a dúvida.
-@pytest.mark.parametrize("tabela", ["open_finance_accounts", "open_finance_investments"])
-@pytest.mark.parametrize("idade,esperado", [(None, False), (0.5, False), (72, True)])
-def test_linha_fora_do_ultimo_sync(uid, tabela, idade, esperado):
-    c, velha = _limpo(uid, sync=horas_atras(2))
-    conta(c, "acc-2", "50")
-    inv = posicao(c, "inv-1", "500")
-    posicao(c, "inv-2", "30")
-    if idade is not None:  # idade antes do last_sync_at da conexão
-        q(f"update {tabela} set updated_at=%s where id=%s",
-          (horas_atras(2 + idade), velha if tabela == "open_finance_accounts" else inv))
-    f = foto(uid)
-    assert ("conta_fora_do_ultimo_sync" in f["motivos"]) is esperado
-    assert (f["bancos"], f["investimentos_banco"]) == (D("150"), D("530"))
-
-
-def test_conta_que_sumiu_do_sync_da_pluggy(uid):
-    c, _ = _limpo(uid)
-    sync = [normalize_pluggy_account({"id": p, "type": "BANK", "currencyCode": "BRL",
-                                      "balance": 10}) for p in ("acc-1", "acc-2")]
-    db.save_open_finance_sync(c, sync)
-    q("update open_finance_accounts set updated_at=%s where connection_id=%s", (horas_atras(72), c))
-    db.save_open_finance_sync(c, sync[:1])  # o sync de hoje não trouxe a acc-2
-    q("update open_finance_connections set last_sync_at=now() where id=%s", (c,))
-    f = foto(uid)
-    assert "conta_fora_do_ultimo_sync" in f["motivos"] and f["bancos"] == D("20")
-    db.save_open_finance_sync(c, sync)  # voltou
-    assert "conta_fora_do_ultimo_sync" not in foto(uid)["motivos"]
-
-
-def test_fora_do_sync_nao_cruza_usuario_nem_conexao_sem_sync(uid):
-    c, velha = _limpo(uid, sync=None)  # nunca sincronizou: só banco_desatualizado
-    q("update open_finance_accounts set updated_at=%s where id=%s", (horas_atras(72), velha))
-    antes = foto(uid)
-    assert "conta_fora_do_ultimo_sync" not in antes["motivos"]
-    b = usuario_pagante()
-    cb = conexao(b, f"item-b-{b}")  # mais nova, mesmo id do provedor, linha velha
-    q("update open_finance_accounts set updated_at=%s where id=%s",
-      (horas_atras(72), conta(cb, "acc-1", "5000")))
-    assert "conta_fora_do_ultimo_sync" in foto(b)["motivos"]
-    assert foto(uid) == antes

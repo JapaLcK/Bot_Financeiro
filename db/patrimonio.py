@@ -6,7 +6,7 @@ db/patrimonio.py — o patrimônio em reais, numa conta só (docs/plano-dashboar
 pelo cursor recebido: quem chama decide a transação.
 
 Soma: Carteira (com a fusão devolvida, `merged_wallet_delta`) + contas do banco
-(`BANK_ACCOUNTS_SQL`, o mesmo recorte do saldo consolidado) + posições de
+(`CONTAS_BANCO_SQL`, o recorte do saldo consolidado) + posições de
 investimento do banco em reais + caixinhas manuais (a espelhada já vem pela
 posição) + investimentos manuais. Cartão fica de fora. `motivos` lista por que o
 número não é exato; vazio só quando nada o põe em dúvida.
@@ -20,12 +20,12 @@ import psycopg
 from psycopg.types.json import Jsonb
 
 from .connection import get_conn
-from .open_finance import (BANK_ACCOUNTS_SQL, PENDING_RECONCILIATION_SQL,
-                           actionable_pending_params, merged_wallet_delta)
+from .open_finance import (PENDING_RECONCILIATION_SQL, actionable_pending_params,
+                           merged_wallet_delta)
 from .open_finance_state import _TERMINAL
 
 # Posições do banco, uma por identidade do provedor (reconectar cria outra linha
-# para a mesma posição): fica a da conexão mais nova, como em `BANK_ACCOUNTS_SQL`.
+# para a mesma posição): fica a da conexão mais nova, como em `CONTAS_BANCO_SQL`.
 # O que sai da soma (conexão pausada/apagada, outra moeda, resgatada) é decidido
 # em `calcular`, para ser contado em `base.fora`.
 POSICOES_BANCO_SQL = """
@@ -42,19 +42,37 @@ POSICOES_BANCO_SQL = """
     order by i.provider_investment_id, c.id desc
 """
 
-_CONTAS_SQL = f"""
-    select a.balance, ra.provider_account_id, ra.raw->>'currencyCode' as currency_code,
-           ra.raw->>'balance' as raw_balance, ra.connection_id, ra.updated_at
-      from ({BANK_ACCOUNTS_SQL}) a
-      join open_finance_accounts ra on ra.id = a.id
+# Contas BANK, uma por identidade do provedor, a da conexão mais nova; a moeda e a
+# pausa são decididas DEPOIS do `distinct on`, em `calcular`, como nas posições.
+# O `BANK_ACCOUNTS_SQL` filtra a moeda antes: com a mesma conta em USD na conexão
+# nova e em BRL numa velha ainda viva, ele soma o BRL velho. Nesse caso (e só
+# nele) a foto diverge do saldo consolidado de propósito. Limite: a fusão
+# (`merged_wallet_delta`) e a conciliação seguem o `BANK_ACCOUNTS_SQL` e ainda
+# contam a conta BRL velha.
+CONTAS_BANCO_SQL = """
+    select distinct on (a.provider_account_id)
+        a.provider_account_id, a.balance,
+        upper(coalesce(a.currency, 'BRL')) as currency,
+        a.raw->>'currencyCode' as currency_code,
+        a.raw->>'balance' as raw_balance, a.connection_id, a.updated_at,
+        upper(coalesce(c.status, '')) as connection_status
+    from open_finance_accounts a
+    join open_finance_connections c on c.id = a.connection_id
+    where c.user_id=%s and upper(a.type) = 'BANK'
+    order by a.provider_account_id, c.id desc
 """
 
 # Sincronização mais velha que isto é banco desatualizado (decisão do dono, P3).
 BANCO_VELHO = timedelta(hours=48)
-# O sync faz o upsert de contas e posições e só carimba `last_sync_at` no fim
-# (core/services/pluggy_sync.py): a linha que veio nele fica um pouco antes do
-# carimbo. Mais velha que isto, ela não veio no último sync com sucesso.
-FOLGA_SYNC = timedelta(hours=1)
+
+# `updated_at` mais novo de cada conexão do usuário, numa tabela do espelho. Os
+# saves (`save_open_finance_sync`, `save_open_finance_investments`) carimbam todas
+# as linhas de uma chamada com o MESMO `now`: a última geração tem esse máximo.
+_ULTIMA_GERACAO_SQL = """
+    select x.connection_id, max(x.updated_at) as m
+      from {} x join open_finance_connections c on c.id = x.connection_id
+     where c.user_id=%s group by x.connection_id
+"""
 
 
 def calcular(cur, user_id: int) -> dict:
@@ -65,9 +83,6 @@ def calcular(cur, user_id: int) -> dict:
     cur.execute("select balance from accounts where user_id=%s", (user_id,))
     row = cur.fetchone()
     carteira = (row["balance"] if row else Decimal(0)) + merged_wallet_delta(cur, user_id)
-
-    cur.execute(_CONTAS_SQL, (user_id,))
-    contas = cur.fetchall()
 
     cur.execute(POSICOES_BANCO_SQL, (user_id,))
     fora = {"moeda": 0, "resgatada": 0, "pausada": 0}
@@ -81,18 +96,16 @@ def calcular(cur, user_id: int) -> dict:
             fora["resgatada"] += 1
         else:
             posicoes.append(p)
-    # Conta do banco em outra moeda: o `BANK_ACCOUNTS_SQL` a tira da soma sem avisar.
-    # Aqui só se conta, no mesmo recorte dele (identidade, conexão mais nova, sem pausada).
-    cur.execute("""select count(*) as n from (
-                       select distinct on (a.provider_account_id)
-                              upper(coalesce(c.status, '')) as connection_status
-                         from open_finance_accounts a
-                         join open_finance_connections c on c.id = a.connection_id
-                        where c.user_id=%s and upper(a.type) = 'BANK'
-                          and upper(coalesce(a.currency, 'BRL')) <> 'BRL'
-                        order by a.provider_account_id, c.id desc) u
-                    where connection_status not in ('PAUSED', 'DELETED')""", (user_id,))
-    fora["moeda"] += cur.fetchone()["n"]
+    # Conta de conexão pausada fica fora sem contar, como no saldo consolidado.
+    cur.execute(CONTAS_BANCO_SQL, (user_id,))
+    contas = []
+    for r in cur.fetchall():
+        if r["connection_status"] in _TERMINAL:
+            continue
+        if r["currency"] != "BRL":
+            fora["moeda"] += 1
+        else:
+            contas.append(r)
 
     cur.execute("select coalesce(sum(balance), 0) as s, coalesce(bool_or(balance > 0), false) as pos"
                 " from pockets where user_id=%s and of_investment_id is null", (user_id,))
@@ -138,16 +151,20 @@ def calcular(cur, user_id: int) -> dict:
 
     # Conta ou posição que deixou de vir no /accounts ou /investments fica no
     # espelho com o saldo velho (`save_open_finance_sync` não poda conta; a posição
-    # só é podada com `leitura_completa`), e a conexão continua fresca. O saldo
-    # fica na soma; o motivo marca a dúvida. Limite: só o upsert do sync carimba
-    # `updated_at` hoje; quem passar a carimbá-lo deixa a linha mais fresca do que
-    # é (falso negativo). Sem `last_sync_at`, `banco_desatualizado` já cobre.
-    sync_de = {c["id"]: c["last_sync_at"] for c in conexoes}
+    # só é podada com `leitura_completa`), e a conexão continua fresca. Ela fica
+    # com `updated_at` abaixo do máximo da sua conexão na mesma tabela (todas as
+    # linhas, de qualquer tipo/moeda: o save grava todas). O saldo fica na soma; o
+    # motivo marca a dúvida. Limites: cego quando o último sync omitiu TODAS as
+    # linhas da conexão; um caminho que carimbe `updated_at` de só uma linha faz as
+    # outras parecerem velhas (falso positivo: só o motivo, o total não muda).
+    ultima = {}
+    for tabela in ("open_finance_accounts", "open_finance_investments"):
+        cur.execute(_ULTIMA_GERACAO_SQL.format(tabela), (user_id,))
+        ultima[tabela] = {r["connection_id"]: r["m"] for r in cur.fetchall()}
 
-    def fora_do_sync(p) -> bool:
-        ultimo = sync_de.get(p["connection_id"])
-        return ultimo is not None and (p["updated_at"] is None
-                                       or p["updated_at"] < ultimo - FOLGA_SYNC)
+    def fora_do_sync(p, tabela) -> bool:
+        m = ultima[tabela].get(p["connection_id"])
+        return m is not None and p["updated_at"] is not None and p["updated_at"] < m
 
     cur.execute(PENDING_RECONCILIATION_SQL, actionable_pending_params(cur, user_id))
     conciliacao = cur.fetchone()["pending_count"]
@@ -163,7 +180,9 @@ def calcular(cur, user_id: int) -> dict:
         ("caixinha_espelhada_fora", fora["caixinha_espelhada"] > 0),
         ("moeda_presumida", any(not r["currency_code"] for r in [*contas, *posicoes])),
         ("saldo_ausente", any(sem_saldo(p) for p in [*contas, *posicoes])),
-        ("conta_fora_do_ultimo_sync", any(fora_do_sync(p) for p in [*contas, *posicoes])),
+        ("conta_fora_do_ultimo_sync",
+         any(fora_do_sync(r, "open_finance_accounts") for r in contas)
+         or any(fora_do_sync(p, "open_finance_investments") for p in posicoes)),
     ) if sim]
 
     partes = {

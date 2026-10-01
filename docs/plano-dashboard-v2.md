@@ -292,17 +292,46 @@ PR de cada etapa, não soluções prontas. Cada PR confere se ainda valem, decid
   - PR 6: foto diária do patrimônio (`patrimonio_fotos`, uma por usuário por dia do app,
     a partir das 18h), pela conta única `db/patrimonio.calcular` que a tela da etapa 6
     vai reusar; job `core/services/patrimonio_foto.py` atrás de
-    `PATRIMONIO_FOTO_ENABLED` (desligado). Carteira com a fusão devolvida, contas do
-    `BANK_ACCOUNTS_SQL`, posições do banco em reais (outra moeda, resgatada e conexão
-    pausada ficam fora e contadas em `base.fora`; a conta do banco em outra moeda também
-    entra na contagem `base.fora.moeda`), caixinhas manuais e investimentos
+    `PATRIMONIO_FOTO_ENABLED` (desligado). Carteira com a fusão devolvida, contas BANK
+    e posições do banco em reais, uma por identidade do provedor (a da conexão mais nova;
+    moeda, pausa e resgate decididos depois desse recorte; outra moeda, resgatada e
+    posição de conexão pausada ficam fora e contadas em `base.fora`, a conta em outra
+    moeda também em `base.fora.moeda`), caixinhas manuais e investimentos
     manuais; cartão fora. Toda foto sai com `motivos` (`carteira_nao_confirmada` até a
     Q37, e mais os de banco desatualizado, espécie, pendências, moeda presumida, saldo
     ausente e `caixinha_espelhada_fora` — a caixinha do banco cuja posição ficou fora
     não entra no total nem como caixinha, e é contada em `base.fora`; e
-    `conta_fora_do_ultimo_sync` — conta ou posição do banco gravada mais de 1 h antes do
-    último sync com sucesso da conexão dela não veio nele: o saldo velho fica na soma e
-    o motivo marca a dúvida). Entra na exportação, no reset e na exclusão. Fora: reconstrução do
+    `conta_fora_do_ultimo_sync` — conta ou posição do banco com `updated_at` abaixo do
+    máximo da mesma conexão na mesma tabela não veio no último save: cada save do sync
+    carimba a chamada com um `now` só; o saldo velho fica na soma e o motivo marca a
+    dúvida). Entra na exportação, no reset e na exclusão. Fora: reconstrução do
     passado, câmbio, poda, a confirmação da Q37, leitura por rota ou tela e script de
     conferência pós-deploy.
+    Espelho do Open Finance lido pela foto (`db/patrimonio.calcular`; testes em
+    `tests/test_patrimonio_foto.py`, "rec." = `tests/test_of_investimento_reconciliacao.py`):
+
+    | estado da linha | conta | posição | teste |
+    |---|---|---|---|
+    | fresca | soma | soma | `composicao_exata` |
+    | 2 conexões, mesma moeda | a mais nova, 1× | idem | `conta_em_outra_moeda`, `posicao_em_duas_conexoes` |
+    | 2 conexões, moeda diferente | vale a mais nova (USD → fora e contada; a BRL velha não soma) | idem | idem |
+    | outra moeda | fora, `fora.moeda` | idem | `conta_em_outra_moeda`, `composicao_exata` |
+    | conexão mais nova pausada/apagada | fora, **não contada** | fora, `fora.pausada` | idem |
+    | resgatada | — | fora, `fora.resgatada` | `composicao_exata` |
+    | saldo ausente/malformado/±Inf/NaN (raw ou coluna) | soma o finito da coluna + `saldo_ausente` | idem | `saldo_ausente_*`, `saldo_nao_finito_na_coluna_soma_zero` |
+    | omitida do último sync | soma + `conta_fora_do_ultimo_sync` (`updated_at` < máximo da conexão na tabela) | idem; leitura completa poda (sai sem motivo) | `_sync`: `syncs_em_sequencia`, `leitura_completa_poda_a_posicao`, `conexao_mais_nova_nao_envelhece_a_outra`; rec. `posicao_que_some_leva_a_caixinha` |
+    | sync pela metade (tentativa > sync) | `banco_desatualizado` | idem | `banco_desatualizado` |
+    | sync nunca feito | `banco_desatualizado` | idem | `banco_desatualizado` |
+    | outro usuário com os mesmos ids | não entra | idem | `outro_usuario_com_os_mesmos_ids_nao_muda_a_foto`, `_sync`: `nao_cruza_usuario` |
+
+    Limites em aberto: (1) `conta_fora_do_ultimo_sync` é cego quando o último sync
+    omitiu TODAS as contas (ou todas as posições) da conexão — o máximo segue sendo o da
+    geração anterior; e um caminho que carimbe `updated_at` de só uma linha faz as
+    outras da conexão parecerem velhas (falso positivo: só o motivo, o total não muda);
+    hoje só os três saves de `db/open_finance.py` (sync, investimentos e o mock) gravam
+    `updated_at`, cada um com um `now` por chamada; (2) a conta da
+    BRL velha (2 conexões, moeda diferente) ainda entra na fusão (`merged_wallet_delta`)
+    e na conciliação, que seguem o `BANK_ACCOUNTS_SQL`; (3) conexão velha ainda viva
+    da mesma conta liga `banco_desatualizado` quando envelhece (sem teste); (4) conta de
+    conexão pausada não é contada em `base.fora`, a posição é.
 - [ ] Etapa 0 · [ ] 1 · [ ] 2 · [ ] 3 · [ ] 4 · [ ] 5 · [ ] 6 · [ ] 7
