@@ -45,6 +45,7 @@ esac
 APP_ID=com.pigbankai.mobile$([ $APP_ENV = development ] && echo .dev || echo .$APP_ENV) # app.config.ts
 
 UVICORN=""
+ROSTO=""
 DB=pigbank_e2e_$E2E_RUN
 limpar() {
   local rc=$?
@@ -53,6 +54,8 @@ limpar() {
     mv "$E2E_DIR/maestro" "${TMPDIR:-/tmp}/pigbank-e2e-falha-$E2E_RUN" && echo "capturas: ${TMPDIR:-/tmp}/pigbank-e2e-falha-$E2E_RUN" >&2
   fi
   if [ -n "$UVICORN" ]; then kill "$UVICORN" 2>/dev/null || true; wait "$UVICORN" 2>/dev/null || true; fi
+  # O laço do Face ID do 05b: um TERM no meio dele sairia antes do `kill $ROSTO` lá embaixo.
+  if [ -n "$ROSTO" ]; then kill "$ROSTO" 2>/dev/null || true; fi
   if [ "$ALVO" = local ]; then dropdb --if-exists --force "$DB" || true; fi
   rm -rf "$E2E_DIR"
 }
