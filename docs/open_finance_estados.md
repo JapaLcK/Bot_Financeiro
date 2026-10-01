@@ -115,9 +115,13 @@ comando; não copie o resultado para cá (`CLAUDE.md` §2).
        que fica sem linha). Item ligado a mais de um usuário (`AmbiguousItemError`,
        no início do run ou na releitura de posse dentro do lock) não grava em
        linha nenhuma: nem a O nem a F (a O não tem foto antes da 1ª leitura; a F
-       recebe a exceção e sai). Sem exceção que prove a ambiguidade (um segundo
-       dono que aparece depois de uma falha de leitura comum), a O e a F gravam
-       na linha do run, que é a do próprio usuário;
+       recebe a exceção e sai). Sem exceção que prove a ambiguidade (o
+       `sync_in_progress` devolvido, ou uma falha de leitura comum antes da
+       releitura de posse), quem decide é o próprio `UPDATE`: a O e a F gravam
+       com `dono_unico`, e a condição `not exists` (outra conexão com o mesmo
+       `provider` e `provider_item_id`, o critério de
+       `get_connections_by_item_id`) é atômica com a escrita. Nenhuma janela
+       entre ler a posse e gravar;
    - "sem sync desde a autorização atual" é o MESMO predicado nos dois lados:
      `last_sync_at` nulo ou anterior a `reconnected_at` (nunca `created_at`, que é
      relógio do Postgres contra o `last_sync_at` do Python);
@@ -290,6 +294,9 @@ nome (`test_c9b_…`).
 | 30 | nenhum | `sync_in_progress` (devolvido, não levantado) nas 3 tentativas do sync de fundo, ninguém sincroniza | — | a F marca `read_failed` (antes: nada, e a 1ª conexão ficava **Atualizando…** até o prazo e depois "demorando mais que o normal"). **Erro temporário**; a promessa "Tentaremos de novo" é do PR-B2 | `c30_…` |
 | 30b | nenhum | o mesmo, mas o sync que segurava o lock termina bem antes da marca | — | a F recusa (o par mudou). **Atualizado** | `c30b_…` |
 | 30c | nenhum | `sync_in_progress` na 1ª tentativa e sucesso na 2ª | — | sem marca. **Atualizado** | `c30c_…` |
+| 31 | nenhum | `sync_in_progress` esgotado e um segundo dono aparece entre a consulta de posse da última tentativa e a marca | — | nada gravado em nenhuma linha (`dono_unico` no `UPDATE`) | `c31_…`; positivo `c31_…[um_dono]` |
+| 31b | nenhum | falha final comum (500) do sync de fundo e um segundo dono aparece antes da marca | G (só a F), L (a O e a F) | nada gravado em nenhuma linha | `c31b_…[G, L]`; positivos `[…-um_dono]` |
+| 31c | nenhum | a foto do run (O) e um segundo dono que aparece durante a leitura, antes da releitura de posse | L | nada gravado em nenhuma linha | `c31c_…`; positivo `c31c_…[um_dono]` |
 
 **Conserto de classe previsto para as corridas do job (PR-C):** o CAS do PR-A
 compara só `status_reason`, que é o dado de que a decisão do job depende, e

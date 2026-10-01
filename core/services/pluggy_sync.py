@@ -272,7 +272,8 @@ def sync_pluggy_item(provider_item_id: str, *, expected_user_id: int | None = No
                 geracao_vista=(connection["reconnected_at"], connection["last_sync_at"]),
                 observacao_vista=(connection.get("health") or {}).get("observed_at"),
                 motivos_substituiveis=(MOTIVOS_QUE_A_FOTO_VIVA_SUBSTITUI if status == "ACTIVE"
-                                       else _SEM_CHECAGEM))
+                                       else _SEM_CHECAGEM),
+                dono_unico=True)
         except Exception as exc:
             print(f"[pluggy_sync] foto do run que falhou não gravada ({provider_item_id}): "
                   f"{type(exc).__name__}: {exc}")
@@ -852,7 +853,8 @@ def marcar_leitura_falhou(conexao: dict, erro: BaseException | None = None) -> N
     try:
         mark_sync_result(conexao["id"], ok=False, status=None, status_reason=READ_FAILED,
                          geracao_vista=(conexao["reconnected_at"], conexao["last_sync_at"]),
-                         motivos_substituiveis=MOTIVOS_QUE_A_FALHA_SUBSTITUI)
+                         motivos_substituiveis=MOTIVOS_QUE_A_FALHA_SUBSTITUI,
+                         dono_unico=True)
     except Exception as exc:  # banco fora do ar não pode derrubar o chamador também
         print(f"[pluggy_sync] mark_sync_result falhou ({item_id}): {exc}")
 
