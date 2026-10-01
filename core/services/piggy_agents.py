@@ -239,14 +239,14 @@ def _aportes_frase(aportes: float) -> str:
     return ""
 
 
-def _manchete_texto(stats: dict, prev: dict) -> str:
+def _manchete_texto(stats: dict, prev: dict, mes: str, mes_prev: str) -> str:
     """Sem "%" de variação: com sobra negativa ou troca de sinal ela vira número
     sem sentido (-181%). Cita o resultado do mês anterior em valor."""
-    texto = (f"Neste mês, entraram {_fmt_brl(stats['entrou'])} e saíram "
+    texto = (f"Em {mes}, entraram {_fmt_brl(stats['entrou'])} e saíram "
              f"{_fmt_brl(stats['saiu'])}{_aportes_frase(stats['aportes'])}, "
              f"resultando em {_resultado_frase(stats['sobrou'])}.")
     if prev["entrou"] or prev["saiu"] or prev["aportes"]:
-        texto += f" No mês anterior, você havia encerrado com {_resultado_frase(prev['sobrou'])}."
+        texto += f" Em {mes_prev}, você havia encerrado com {_resultado_frase(prev['sobrou'])}."
     return texto
 
 
@@ -270,7 +270,7 @@ def _reporter_run_for_user(agent: dict[str, Any], today: date) -> bool:
 
     mes_nome = MESES_PT[first_prev.month]
     titulo = f"A manchete de {mes_nome}"
-    resumo = _manchete_texto(stats, prev)
+    resumo = _manchete_texto(stats, prev, mes_nome, MESES_PT[first_prev2.month])
 
     inserted = record_agent_event(
         agent["agent_id"], user_id, "reporter",
