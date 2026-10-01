@@ -232,7 +232,9 @@ PR de cada etapa, não soluções prontas. Cada PR confere se ainda valem, decid
     transação sem `id` são descartadas em silêncio, e o sync segue `ok=True`;
     `normalize_pluggy_investment()` põe `balance` = 0 e `type` vazio, e a posição, a
     caixinha espelhada e a foto diária são sobrescritas com esse valor;
-  - compra parcelada sem `creditCardMetadata.totalInstallments` vira compra única, e a
+  - compra parcelada sem `creditCardMetadata.totalInstallments` vira compra única (e
+    `extract_installment_info()` aceita `installmentNumber` ausente, 0 ou maior que o
+    total: o par só vale com o número entre 1 e o total), e a
     importada nunca cria as faturas futuras (a manual cria, em
     `add_credit_purchase_installments()`);
   - cartão sem as datas da Pluggy ganha fechamento dia 1 e vencimento dia 10
