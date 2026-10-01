@@ -254,7 +254,9 @@ PR de cada etapa, não soluções prontas. Cada PR confere se ainda valem, decid
     coleta saudável e geração estável: mesmo com resposta bem formada e cursor terminal,
     um `PARTIAL_SUCCESS`/`UPDATING` ou uma coleta nova no meio da leitura apagaria
     transação legítima. Reusar o portão que a conciliação de investimentos já tem (produto
-    saudável e a mesma geração em duas fotos do item);
+    saudável e a mesma geração em duas fotos do item). E conciliar só dentro do intervalo de
+    datas que a resposta cobre: o banco pode devolver uma janela de histórico mais curta
+    que a anterior, e o que ficou fora dela continua gravado, não vira exclusão;
   - banco religado guarda o `last_sync_at` antigo; `connection_ui_state()` já trata
     `last_sync_at < reconnected_at` como não sincronizado, e é essa a fonte do estado da
     conexão, não a idade do sync.
