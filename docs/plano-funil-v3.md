@@ -703,7 +703,8 @@ conta que digitou o número); nada além da preferência é gravado.
    - **Isto já vale hoje na `main`**, para qualquer conta, e não só a do quiz. Se o
      conserto entrar antes num PR próprio, o PR 4 só confere que ele existe.
    - **Feito no PR do reset amarrado ao e-mail** (#690); o PR 4 só confere que existe.
-3c. **Movido para o PR 4b.** **A troca de e-mail também atualiza o cliente no Stripe.** Hoje a `PATCH
+3c. **Feito no PR 4b** (`stripe_email_pendente` + job `_stripe_email_worker`; ver
+   `docs/CLAUDE.md`). **A troca de e-mail também atualiza o cliente no Stripe.** Hoje a `PATCH
    /settings/{uid}/security/contact` só grava em `auth_accounts`. O `stripe_customer_id`
    continua com o e-mail antigo, que recebe recibos, faturas e aparece no portal. Isso já
    vale na `main` para qualquer conta.
@@ -713,6 +714,23 @@ conta que digitou o número); nada além da preferência é gravado.
      registro próprio (§0.1).
    - **Teste:** troca bem-sucedida chama o `modify`; falha do Stripe deixa a pendência e
      a nova tentativa a fecha.
+   - **Decidido e aceito no PR 4b:**
+     - O Stripe **não** é atualizado na requisição: quem envia é o job, de 5 em 5 min,
+       também com o Stripe de pé. Atraso típico de até 5 min; se a linha estava em
+       backoff por falha anterior, até 1 dia.
+     - Só trocas feitas depois do deploy criam pendência: quem trocou de e-mail antes
+       continua com o antigo no Stripe.
+     - Risco aceito: troca de e-mail e criação do cliente no checkout no mesmo instante,
+       em duas abas, pode deixar o cliente com o e-mail antigo (janela < 1 s; não há
+       pendência porque o cliente ainda não existia na troca).
+     - Chave do Stripe errada ou sem permissão retenta para sempre, com backoff até
+       1 dia, e aparece em `system_event_logs` (`stripe_email_sync_falhou`). Erro
+       `invalid request` (cliente apagado, e-mail recusado) fecha a pendência e loga
+       `stripe_email_sync_recusado`. A premissa foi medida na API de **teste** do Stripe
+       em 2026-10-01: `modify` em cliente apagado levanta `InvalidRequestError` com
+       `code=resource_missing`.
+     - Se o portal do Stripe deixar o cliente editar o e-mail lá, os dois podem divergir
+       até a próxima troca no app (fora deste PR).
 4. Ordem dos overlays na `/home` (enumerar antes de codar: overlay de checkout,
    boas-vindas do Pro, onboarding do MFA e este): o gate só sobe **depois** de o overlay
    de checkout fechar e fica **acima** das boas-vindas. Com o gate de pé, o onboarding
@@ -928,7 +946,7 @@ do e-book.
   para clientes estiverem ligados (recibo de pagamento, fatura), o dono de um e-mail
   digitado errado recebe o recibo: valor, produto e final do cartão. **Decisão do dono
   (2026-09-30): recibos LIGADOS, risco aceito** (nada no código). Depois da correção do
-  e-mail, o item 3c (agora PR 4b) atualiza o cliente.
+  e-mail, o item 3c (feito no PR 4b) atualiza o cliente.
 - **Duas cobranças (Pix + cartão)** em abas diferentes: a janela vai de 24 h para 1 h
   (D-n), nos dois modos da `/assinar`. Não foi fechada de todo.
 - **Contas sem plano criadas por bots:** somam na base e podem entrar nos e-mails de

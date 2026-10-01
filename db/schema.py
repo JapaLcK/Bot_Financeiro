@@ -2777,6 +2777,21 @@ def init_db():
         create index if not exists idx_ebook_entregas_abertas
           on ebook_entregas (criada_em) where fechada_em is null
         """,
+        # E-mail novo a levar ao cliente do Stripe (funil v3, PR 4b): a PATCH
+        # /settings/{uid}/security/contact grava na MESMA transação da troca, o
+        # job `core/services/stripe_email_sync.py` manda o e-mail ATUAL da conta
+        # (lido de `auth_accounts` na hora; aqui só a `versao`, sem PII) e apaga a
+        # linha. Fora do merge (conta com stripe_customer_id é recusada como
+        # origem) e do export LGPD (sem PII); sai com a conta (cascade).
+        """
+        create table if not exists stripe_email_pendente (
+          user_id bigint primary key references users(id) on delete cascade,
+          versao bigint not null default 1,
+          tentativas int not null default 0,
+          reivindicada_ate timestamptz,
+          criada_em timestamptz not null default now()
+        )
+        """,
 
         # ── Aviso de escrita ao `/painel` (TABELAS_QUE_AVISAM, no topo) ──────
         # O NOTIFY sai só no commit (rollback não avisa) e o Postgres funde os
