@@ -276,8 +276,12 @@ PR de cada etapa, não soluções prontas. Cada PR confere se ainda valem, decid
       outro texto vira estorno e reduz a fatura, e estorno com o texto certo é pulado. Como
       nada fecha a fatura importada, o histórico importado aparece como vencido;
     - o sinal do estorno (`amount > 0`) só foi conferido no sandbox;
-    - a chave do grupo de parcelas inclui a descrição, e banco que escreve "01/10",
-      "02/10" divide uma compra em vários grupos.
+    - a chave do grupo de parcelas (cartão, descrição, número de parcelas, `totalAmount` e
+      mês de origem estimado) erra nos dois sentidos: banco que escreve "01/10", "02/10"
+      divide uma compra em vários grupos, e duas compras iguais no mesmo lugar e no mesmo
+      mês (ou duas sem descrição, que viram "Transação") caem no mesmo grupo, e
+      `undo_installment_group()` mexe nas duas. Precisa de identidade sem colisão, ou o
+      grupo ambíguo conta como incompleto.
   - Cartão em duplicidade: adotar um cartão manual mantém as compras já lançadas nele e
     importa as mesmas de novo; OFX e Open Finance podem encher o mesmo cartão (o OFX só
     deduplica `source='ofx'`); reconectar com item novo pode criar um segundo cartão
@@ -389,7 +393,10 @@ PR de cada etapa, não soluções prontas. Cada PR confere se ainda valem, decid
   - Datas sem dia útil: vencimento no fim de semana ou feriado e salário pago no dia útil
     anterior mudam o pior dia nos dois sentidos.
   - Fatura com total negativo (crédito por estorno) é ignorada, e o `credit_bills.total` é
-    um contador (`greatest(0, total - x)` ao desfazer) lido sem reconstruir.
+    um contador (`greatest(0, total - x)` ao desfazer) lido sem reconstruir. O `status`
+    também não acompanha: quando uma correção da Pluggy aumenta o valor de uma compra de
+    fatura já paga, o total sobe e a fatura segue `paid`, fora da previsão. O status tem
+    de sair de `total - paid_amount`, não ficar gravado.
   - Saldo de partida: o `BANK_ACCOUNTS_SQL` escolhe a conexão mais nova por `id` antes de
     filtrar as pausadas, então a conta some se a mais nova estiver pausada, mesmo com uma
     antiga ativa; o `balance` do banco é usado sem conferir o que ele inclui (aplicação
