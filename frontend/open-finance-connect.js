@@ -160,9 +160,11 @@
     return resp.json();
   }
 
-  /** Conexões que contam no teto — espelha o backend: PAUSED não conta. */
+  /** Conexões que contam no teto — espelha o backend (`count_open_finance_connections`):
+   *  só provider "pluggy" (mock não conta) e PAUSED não conta. */
   function countsTowardLimit(conn) {
-    return String((conn && conn.status) || "").toUpperCase() !== "PAUSED";
+    return !!conn && conn.provider === "pluggy" &&
+      String(conn.status || "").toUpperCase() !== "PAUSED";
   }
 
   /**
