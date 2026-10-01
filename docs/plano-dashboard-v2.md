@@ -277,7 +277,11 @@ PR de cada etapa, não soluções prontas. Cada PR confere se ainda valem, decid
     estorno (e o lançamento e a fatura ligados) para sempre. A conciliação de transação
     ausente usa o mesmo ciclo da conta: `delete_open_finance_transactions()`, que chama
     `_rollback_imported_of()`, tira a sombra, desfaz o vínculo com o dinheiro em espécie e
-    reconcilia os movimentos de banco, nunca um delete direto. Conciliar ausências só com
+    reconcilia os movimentos de banco, nunca um delete direto. Só que hoje
+    `_rollback_imported_of()` engole a exceção ao desfazer a compra ou o lançamento, e a linha
+    do Open Finance é apagada assim mesmo, sem nada para tentar de novo: a conciliação só
+    apaga a linha quando o rollback deu certo; se falhar, a linha fica e é marcada como
+    incompleta. Conciliar ausências só com
     coleta saudável e geração estável: mesmo com resposta bem formada e cursor terminal,
     um `PARTIAL_SUCCESS`/`UPDATING` ou uma coleta nova no meio da leitura apagaria
     transação legítima. Reusar o portão que a conciliação de investimentos já tem (produto
