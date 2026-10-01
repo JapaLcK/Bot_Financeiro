@@ -214,7 +214,14 @@ PR de cada etapa, não soluções prontas. Cada PR confere se ainda valem, decid
   conector; moeda corrigida depois.
 - Ingestão do Open Finance que devolve dado incompleto com cara de completo, e o sync
   segue como sucesso (achados na revisão do PR #689; afetam saldo, fatura e parcelas em
-  toda tela). Além da moeda:
+  toda tela). **Regra para todos os itens abaixo: o conserto inclui o passado.**
+  Corrigir a ingestão daqui em diante não arruma o que já foi gravado com o dado errado,
+  porque o sync seguinte não revisita esses registros (`sync_imported_open_finance_updates()`
+  só move compra quando a data muda). Cada item precisa de um caminho de reprocessamento
+  dos registros derivados: lançamento criado com o tipo errado, compra parcelada gravada
+  sem grupo (sem `installment_no`, `installments_total` e `group_id`, e sem as faturas
+  futuras), compra com `bill_id` escolhido por um calendário errado, valor em moeda errada,
+  pagamento de fatura lido como estorno. Além da moeda:
   - `normalize_pluggy_account()` põe `type` = `BANK` e `balance` = 0 quando faltam;
     `normalize_pluggy_transaction()` põe `amount` = 0 e data inválida = hoje (conta de
     crédito gravada como `BANK` já tem as transações importadas como lançamento; quando o
