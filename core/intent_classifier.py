@@ -713,7 +713,10 @@ def _is_boleto_ai_query(norm: str) -> bool:
 #   mais nos ultimos tres meses" (R$ 3); "gastei 200 a mais do mes passado?" (sem
 #   "que") e "gastei 200 a mais em relacao ao mes passado?" (R$ 200, mesmo com
 #   "?"); e, por decisão do dono, sem "?": "N a mais que", "acima de" e
-#   percentual ("gastei mais 30% esse mês" grava R$ 30).
+#   percentual ("gastei mais 30% esse mês" grava R$ 30); e o #693 (o split não
+#   corta em "." nem ";"): com 2+ lançamentos e a pergunta colada ao último por
+#   "." ("gastei 30 no uber e gastei no bar. gastei mais em 2025 ou 2026?") o
+#   `add()` ainda grava R$ 2.025 no bar. Com UM lançamento ele já lê só o pedaço.
 #   SÓ NÃO VAI PRA IA: prefixo fora da lista ("tipo gastei mais em 2025?") escapa
 #   do `classify`, mas as portas pegam pela varredura e a conversa nova não grava.
 # "gastou"/"gastamos" só aqui (não estão em `VERBOS_DE_LANCAMENTO`). Que "gastamos
@@ -814,11 +817,13 @@ def sem_perguntas_comparativas(text: str) -> tuple[str, list[str]]:
     e o que vem DEPOIS sai junto. Pedaço do split sem verbo próprio ("... e mais
     que o normal no bar?") herda o do anterior e só o split o acha.
 
-    Limite (D4, #693/#699): o `add()` de um pedaço legítimo lê o valor do texto
-    INTEIRO, então "paguei hoje. gastei mais em 2025 ou 2026?" ainda grava R$ 2.025
-    como despesa; esta função só devolve o corte certo para quem a chama.
+    Quem lê o valor do texto passa por aqui: o `add()` com UM pedaço legítimo (D4
+    revista), a conta, o crédito e a fatura. Com 2+ lançamentos o `add()` ainda
+    separa só pelo split (limite do #693, no `ponytail:` acima).
 
-    É a ÚNICA detecção: `contains_comparative_question` é `bool(puladas)` (§0.7)."""
+    Única detecção das portas e dos guardas da conta: `contains_comparative_question`
+    é `bool(puladas)` (§0.7). O `is_comparative_question` segue decidindo no
+    `classify`, nos laços do multi e no fluxo cartão da forma de pagamento."""
     from parsers import split_financial_transactions  # local: parsers importa daqui
     t = text or ""
     pos = _inicio_da_pergunta(t)

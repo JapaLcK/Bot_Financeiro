@@ -135,9 +135,12 @@ def test_audio_com_fila_de_pe_nao_grava_no_aluguel(pro_small_uid, monkeypatch):
     ("gastei 30 no uber; gastei mais em 2025 ou 2026?", ("gastei 30 no uber", ["gastei mais em 2025 ou 2026?"])),
     ("gastei 30 no uber tb gastei mais em 2025 ou 2026?", ("gastei 30 no uber", ["gastei mais em 2025 ou 2026?"])),
     ("oi gastei mais em 2025?", ("", ["oi gastei mais em 2025?"])),   # só prefixo antes: nada legítimo
-    # O que vem DEPOIS do verbo da pergunta sai junto (decisão do dono).
+    # O que vem DEPOIS do verbo da pergunta sai junto (regra do corte, ratificada pelo dono).
     ("gastei mais em 2025 ou 2026? e paguei 50 no mercado",
      ("", ["gastei mais em 2025 ou 2026? e paguei 50 no mercado"])),
+    # Duas perguntas: o corte é na PRIMEIRA, senão o 2025 da 1ª voltaria como legítimo.
+    ("paguei a luz e gastei mais em 2025 ou 2026? e gastei mais que o normal?",
+     ("paguei a luz", ["gastei mais em 2025 ou 2026? e gastei mais que o normal?"])),
     # Pedaço do split sem verbo próprio: só o split o acha.
     ("paguei 50 no mercado e 30 a mais que o normal na luz?",
      ("paguei 50 no mercado", ["paguei 30 a mais que o normal na luz?"])),
@@ -170,3 +173,42 @@ def test_conta_com_separador_sem_conector_paga_a_luz_e_avisa(uid, ia_fora, separ
     r = manda(uid, f"paguei a luz{separador}gastei mais em 2025 ou 2026?")
     assert contas_pagas(uid) == [150.0] and despesas(uid) == [150.0], r
     assert r.count(_AVISO) == 1, r
+
+
+def test_conta_com_duas_perguntas_paga_a_luz_pelo_valor_da_conta(uid, ia_fora):
+    luz(uid)
+    r = manda(uid, "paguei a luz e gastei mais em 2025 ou 2026? e gastei mais que o normal?")
+    assert contas_pagas(uid) == [150.0] and despesas(uid) == [150.0], r  # cortando na última: R$ 2.025
+    assert r.count(_AVISO) == 1, r
+
+
+# ── #569 D4 revista: o add() com UM pedaço legítimo lê o valor só dele ──────────
+
+@pytest.mark.parametrize("frase,desc", [
+    ("gastei no uber. gastei mais em 2025 ou 2026?", "uber"),
+    ("paguei hoje. gastei mais em 2025 ou 2026?", "hoje"),   # o que o add() já faz com "paguei hoje"
+])
+def test_add_pedaco_legitimo_sem_valor_pergunta_o_valor_e_nao_grava(free_small_uid, frase, desc):
+    uid = free_small_uid
+    out = hi.handle_incoming(_msg(uid, frase))
+    assert _valores(uid) == []                                  # gravava R$ 2.025
+    assert _pendencia(uid) == "clarification"
+    texto = "\n".join(o.text for o in out)
+    assert f"Quanto foi no *{desc}*?" in texto and texto.count(_AVISO) == 1, texto
+    assert "depois de responder a pergunta acima" in texto, texto
+
+
+def test_add_pedaco_legitimo_sem_valor_aceita_a_resposta(free_small_uid):  # positivo
+    uid = free_small_uid
+    hi.handle_incoming(_msg(uid, "gastei no uber. gastei mais em 2025 ou 2026?"))
+    hi.handle_incoming(_msg(uid, "30"))
+    assert _valores(uid) == [30] and "uber" in _alvo(uid, 30)
+
+
+@pytest.mark.parametrize("separador", [". ", "; ", " tb "])
+def test_add_pedaco_legitimo_com_valor_grava_so_ele_e_avisa(free_small_uid, separador):  # positivo
+    uid = free_small_uid
+    out = hi.handle_incoming(_msg(uid, f"gastei 30 no uber{separador}gastei mais em 2025 ou 2026?"))
+    assert _valores(uid) == [30]
+    assert "\n".join(o.text for o in out).count(_AVISO) == 1
+
