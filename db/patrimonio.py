@@ -34,6 +34,7 @@ POSICOES_BANCO_SQL = """
         upper(coalesce(i.currency, 'BRL')) as currency,
         upper(coalesce(i.raw->>'status', '')) as status,
         i.raw->>'currencyCode' as currency_code,
+        i.raw->>'balance' as raw_balance,
         upper(coalesce(c.status, '')) as connection_status
     from open_finance_investments i
     join open_finance_connections c on c.id = i.connection_id
@@ -116,6 +117,19 @@ def calcular(cur, user_id: int) -> dict:
         return (estados[str(c["id"])] != "updated" or ultimo is None or ultimo < limite
                 or (tentativa is not None and tentativa > ultimo))
 
+    # `_to_decimal` deixa "NaN"/"Infinity" passar e a coluna numeric aceita: um só
+    # zeraria o total (a foto é permanente). Saldo não finito soma 0 e vira motivo.
+    def finito(v) -> bool:
+        return v is not None and v.is_finite()
+
+    # O sync grava 0 na coluna quando a Pluggy omite ou estraga o saldo
+    # (`pluggy_sync._to_decimal`); só o `raw` diz que o 0 não veio do banco.
+    def sem_saldo(p) -> bool:
+        try:
+            return not finito(p["balance"]) or not Decimal(p["raw_balance"]).is_finite()
+        except (TypeError, ArithmeticError):  # None ou texto que não é número
+            return True
+
     cur.execute(PENDING_RECONCILIATION_SQL, actionable_pending_params(cur, user_id))
     conciliacao = cur.fetchone()["pending_count"]
 
@@ -129,13 +143,15 @@ def calcular(cur, user_id: int) -> dict:
         ("manual_e_banco", (caixinhas["pos"] or manuais["pos"]) and bool(posicoes)),
         ("caixinha_espelhada_fora", fora["caixinha_espelhada"] > 0),
         ("moeda_presumida", any(not r["currency_code"] for r in [*contas, *posicoes])),
-        ("saldo_ausente", any(p["balance"] is None for p in posicoes)),
+        ("saldo_ausente", any(sem_saldo(p) for p in posicoes)
+                          or not all(finito(r["balance"]) for r in contas)),
     ) if sim]
 
     partes = {
         "carteira": carteira,
-        "bancos": sum((r["balance"] for r in contas), Decimal(0)),
-        "investimentos_banco": sum((p["balance"] or Decimal(0) for p in posicoes), Decimal(0)),
+        "bancos": sum((r["balance"] for r in contas if finito(r["balance"])), Decimal(0)),
+        "investimentos_banco": sum((p["balance"] for p in posicoes if finito(p["balance"])),
+                                   Decimal(0)),
         "caixinhas": caixinhas["s"],
         "investimentos_manuais": manuais["s"],
     }

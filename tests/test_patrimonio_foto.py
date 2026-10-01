@@ -11,6 +11,7 @@ import pytest
 import db
 import db.bills as B
 from conftest import usuario_pagante
+from core.services.pluggy_sync import normalize_pluggy_investment
 from tests._fusao_of_helpers import conecta_banco, ia_fora, manda  # noqa: F401 (fixture)
 from tests._patrimonio_helpers import (caixinha, conexao, conta, foto, horas_atras,
                                        investimento_manual, lancamento, posicao, q, tx_banco)
@@ -208,9 +209,46 @@ def test_moeda_presumida_na_conta_e_na_posicao(uid):
     assert "moeda_presumida" in foto(uid)["motivos"]
 
 
-def test_saldo_ausente(uid):
+_SEM_CHAVE = object()
+
+
+@pytest.mark.parametrize("saldo,ausente,coluna", [
+    (_SEM_CHAVE, True, "0"), (None, True, "0"), ("abc", True, "0"),  # o sync grava 0
+    ("NaN", True, "NaN"),               # `_to_decimal` aceita "NaN": a coluna fica NaN
+    ("Infinity", True, "Infinity"), ("-Infinity", True, "-Infinity"),
+    (0, False, "0"), ("0", False, "0"), (1234.56, False, "1234.56"),
+])
+def test_saldo_ausente_pelo_sync_da_pluggy(uid, saldo, ausente, coluna):
+    c, _ = _limpo(uid)
+    raw = {"id": "inv-1", "currencyCode": "BRL"}
+    if saldo is not _SEM_CHAVE:
+        raw["balance"] = saldo
+    db.save_open_finance_investments(c, [normalize_pluggy_investment(raw)])
+    f = foto(uid)
+    assert ("saldo_ausente" in f["motivos"]) is ausente
+    assert f["base"]["posicoes"] == ["inv-1"]
+    gravado = q("select balance from open_finance_investments where connection_id=%s",
+                (c,))["balance"]
+    assert gravado.is_nan() if coluna == "NaN" else gravado == D(coluna)
+    inv = gravado if gravado.is_finite() else D(0)  # não finito soma 0, não envenena o total
+    assert (f["investimentos_banco"], f["total"]) == (inv, f["carteira"] + D("100") + inv)
+
+
+@pytest.mark.parametrize("tabela,bancos,inv", [
+    ("open_finance_accounts", "0", "500"), ("open_finance_investments", "100", "0")])
+@pytest.mark.parametrize("valor", ["NaN", "Infinity", "-Infinity"])
+def test_saldo_nao_finito_na_coluna_soma_zero(uid, tabela, bancos, inv, valor):
+    c, _ = _limpo(uid)
+    posicao(c, "inv-1", "500")  # o `raw` diz 500: só a coluna estragou
+    q(f"update {tabela} set balance=%s::numeric where connection_id=%s", (valor, c))
+    f = foto(uid)
+    assert (f["bancos"], f["investimentos_banco"]) == (D(bancos), D(inv))
+    assert f["total"] == f["carteira"] + D(bancos) + D(inv)
+    assert "saldo_ausente" in f["motivos"]
+
+
+def test_saldo_ausente_na_coluna(uid):
     c, _ = _limpo(uid)
     posicao(c, "inv-1", None)
     f = foto(uid)
     assert "saldo_ausente" in f["motivos"] and f["investimentos_banco"] == 0
-    assert f["base"]["posicoes"] == ["inv-1"]

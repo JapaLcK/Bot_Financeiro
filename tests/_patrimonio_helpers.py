@@ -39,6 +39,7 @@ def conta(cid, pid, saldo, moeda="BRL", code="BRL") -> int:
 
 def posicao(cid, pid, saldo, moeda="BRL", status=None, code="BRL") -> int:
     raw = {k: v for k, v in (("currencyCode", code), ("status", status)) if v}
+    raw["balance"] = None if saldo is None else float(saldo)  # a Pluggy manda número
     return q("""insert into open_finance_investments (connection_id, provider_investment_id, name,
                     type, currency, balance, raw) values (%s, %s, 'CDB', 'FIXED_INCOME', %s, %s, %s)
                 returning id""", (cid, pid, moeda, saldo, Jsonb(raw)))["id"]
