@@ -1,43 +1,37 @@
 """#567: o número que faz parte do NOME não vira o valor da retirada.
 
-"saquei 50" -> "De qual caixinha ou investimento?" -> "tesouro 2029" resgatava
-R$ 2.029 do investimento `Tesouro` no lugar dos R$ 50 guardados: o catálogo só
-protegia a resposta IGUAL a um nome dele.
-
-DECIDIDO PELO DONO (opção B + Manager + #709): na pergunta de NOME o número da
+"saquei 50" -> "De qual caixinha ou investimento?" -> "tesouro 2029" resgatava R$ 2.029
+no lugar dos R$ 50 guardados. DECIDIDO PELO DONO: na pergunta de NOME o número da
 resposta só troca o valor guardado em forma explícita:
-  - número + do/da/no/na/em/pra + nome do CATÁLOGO ("tira 80 do tesouro"), lido
-    SEM o nome: "tesouro 2029 no nubank" e "a reserva 2025 do nubank" (`Nubank` e
-    `Reserva 2025 do Nubank`, N13) não são essa forma;
-  - quantia depois de ", ": "80", "R$ 80", "80 reais", "na verdade 80"; decimal
-    com espaço ("132, 50") só se a parte antes não é ano: "tesouro, 2029, 80" ->
-    80 (N14); SEM "R$" sem vírgula;
-  - d046-1/e1c-1: com "esvaziar" guardado, se sobra dígito ou palavra de número
-    depois de tirar o nome do alvo e não há quantia reconhecida ("viagem, 2 mil",
-    "viagem 80", "80 viagem", "viagem 2027", "viagem (80)"), NÃO esvazia: pergunta
-    o valor e nada se move (N15/N16/N17). Não ensina forma nova de quantia.
-  Limites aceitos: "tesouro, 2025, 50" -> 50, "Tesouro 2029 80" -> 50, "tesouro,80"
-  -> 50, "tesouro, 2 mil" -> 50 (valor numérico guardado, também no aporte),
-  "tesouro 2029 no valor de 80" -> 50, "tira 100 da viajem" não acha alvo, "meia"/
-  "metade"/"sem nada" esvaziam (como na `main`), "tira do tesouro 2029 no nubank"
-  -> 2.029 (#703), nome CURTO depois da preposição reativa a regra ("a reserva
-  2025 da casa" com `casa` -> 2.025).
-EXTENSÃO DO CODER: resposta SÓ com dinheiro ("80", "80 reais") é quantia, como na
-`main` (N7); a cauda aceita a unidade inteira do `h_bills._UNIDADE`; o corte em
-", " é feito antes do `limpa_pontuacao_final`. Os ramos de "tudo" (#259) não mudam.
-FORA (#704): "caixinha 13º".
+  - número + do/da/no/na/em/pra + nome do CATÁLOGO ("tira 80 do tesouro"), lido SEM o
+    nome ("tesouro 2029 no nubank", N6; "a reserva 2025 do nubank", N13: não);
+  - quantia depois de ", ": "80", "R$ 80", "80 reais", "na verdade 80"; decimal com
+    espaço ("132, 50") só se a parte antes não é ano (N14); SEM "R$" sem vírgula;
+  - com "esvaziar" guardado, sobrar dígito ou palavra de número depois de tirar o nome
+    e sem quantia reconhecida ("viagem, 2 mil", "viagem 80", "80 viagem") NÃO esvazia:
+    pergunta o valor (N15/N16/N17, d046-1/e1c-1). Não ensina forma nova de quantia.
+  Limites aceitos: "tesouro, 2025, 50" -> 50, "Tesouro 2029 80" -> 50, "tesouro,80" ->
+  50, "tesouro, 2 mil" -> 50 (valor numérico guardado, também no aporte), "tesouro
+  2029 no valor de 80" -> 50, "meia"/"metade"/"sem nada" esvaziam (como na `main`),
+  "tira do tesouro 2029 no nubank" -> 2.029 (#703), nome CURTO depois da preposição
+  reativa a regra ("a reserva 2025 da casa" com `casa` -> 2.025).
+EXTENSÃO DO CODER: resposta SÓ com dinheiro ("80") é quantia, como na `main` (N7);
+unidade inteira do `h_bills._UNIDADE`; corte em ", " antes do `limpa_pontuacao_final`.
+Os ramos de "tudo" (#259) não mudam. FORA (#704): "caixinha 13º".
 
-CONTROLE NEGATIVO (2026-09-30 sobre 1c31e30b; cada mutação, num caso verde com o
-fix). (a) `pede_nome=False`: 46 VERMELHOS. (b) `_quantia_explicita` devolvendo
-None: 32 daqui e 8 de `test_perguntas_guardam_contexto.py` (entre eles `test_tudo_
-guardado_mais_quantia_nova_nao_esvazia`). Regras antigas: cada uma tem linhas em
-N4/N6/N7/N13/N14/N15 e na tabela (catálogo depois da preposição, número sem o
-nome, `crua`, limpeza da cauda, alvo inteiro antes da ", ", `_ANO_RE`, cauda
-malformada). e1c-1: sem o ramo `quantidade_nao_reconhecida` 32 (19 N15, 11 da
-tabela, N16, N17); sem `want_all` 40; só o teste de dígito, 2 N15; só
-`_extract_valor`, "dia 1.2.3"; detectar na resposta e não no texto sem o nome,
-N17 "Viagem 2027" e 1 da tabela; sem re-armar `falta=amount`, N16 e N17 Tesouro.
-`1c31e30b` deixa 22 vermelhos (13 N15, 8 da tabela, N17).
+CONTROLE NEGATIVO (2026-09-30 sobre 2344c895; cada mutação, num caso verde com o
+fix). (a) `pede_nome=False`: 50 VERMELHOS. (b) `_quantia_explicita` devolvendo
+None: 40 daqui e 8 de `test_perguntas_guardam_contexto.py` (entre eles `test_tudo_
+guardado_mais_quantia_nova_nao_esvazia`). Regras anteriores (catálogo depois da
+preposição, número sem o nome, `crua`, limpeza da cauda, alvo inteiro antes da
+", ", `_ANO_RE`): linhas de N4/N6/N7/N13/N14/N15 e da tabela. `want_all`
+(d046-1/e1c-1): sem o ramo, 32 (N15, tabela, N16, N17); só o teste de dígito ou só
+`_extract_valor`, 2 e 1; sem `want_all`, 40; detectar na resposta e não no
+texto sem o nome, 2; sem re-armar `falta=amount`, N16 e N17.
+Prefixo/unidade/sinal da cauda malformada (Codex #709, 4150138423): `2344c895`
+deixa 7 vermelhos (5 N14, 2 N12); "na verdade" só na válida, 6; sem o sinal
+antes do "R$", "-R$ 80"; sem a unidade na malformada, "132 50 reais"; sem a
+cauda malformada ir ao `valor_perigoso`, 9.
 
 CONTROLE POSITIVO: P1 (pergunta de VALOR), P2 (nome exato com dígitos), P3 (correção
 explícita). Conversa pelo `handle_incoming`, banco real, SALDO. CLASSE CEGA: sem LLM.
@@ -130,18 +124,22 @@ def test_n6_numero_ou_ano_do_nome_nao_vira_valor(uid, caixinha, investimento, re
 
 
 def test_n7_so_numero_a_pergunta_de_nome_nao_vira_nome(uid):
-    """UX: "80" a "Qual caixinha?" é valor sem nome, como na `main`."""
     _caixinhas_com_saldo(uid, "viagem", saldo=3000.0)
     r = _conversa(uid, "tirar da caixinha viagem", "80")
     assert "*80* não encontrada" in r[-1], r
     assert _caixinha(uid, "viagem") == 3000.00
 
 
-def test_n12_deposito_nome_com_ano(uid):
+@pytest.mark.parametrize("resposta,fim", [
+    ("viagem 2027", 3050.0),                                   # o ano é do nome
+    ("viagem, na verdade 80", 3080.0),                         # positivo
+    ("viagem, na verdade 132 50", 3000.0), ("viagem, na verdade -80", 3000.0),
+])
+def test_n12_deposito_nome_com_ano_e_correcao_malformada(uid, resposta, fim):
     _caixinhas_com_saldo(uid, "viagem", saldo=3000.0)
     _pergunta_injetada(uid, "pockets.deposit", {"amount": 50.0}, "guardar 50")
-    r = _responde(uid, "viagem 2027")
-    assert _caixinha(uid, "viagem") == 3050.00, r
+    r = _responde(uid, resposta)
+    assert _caixinha(uid, "viagem") == fim, r
 
 
 @pytest.mark.parametrize("caixinhas,investimento,alvo,resposta", [
@@ -151,7 +149,6 @@ def test_n12_deposito_nome_com_ano(uid):
     (("Praia", "Casa 2025 da Praia"), None, "Casa 2025 da Praia", "a casa 2025 da praia"),
 ])
 def test_n13_nome_curto_dentro_do_longo(uid, sem_teto_de_caixinha, caixinhas, investimento, alvo, resposta):
-    """O nome curto citado depois do "do/da" é parte do nome longo: o ano é do nome."""
     _caixinhas_com_saldo(uid, *caixinhas, saldo=3000.0)
     if investimento:
         _investimento(uid, investimento)
@@ -166,14 +163,17 @@ def test_n13_nome_curto_dentro_do_longo(uid, sem_teto_de_caixinha, caixinhas, in
     (None, "Tesouro", "tesouro, R$ 132, 50", 2867.5),
     (None, "Tesouro", "tesouro, 2029, 80", 2920.0),        # ano não é decimal (dono)
     (None, "Tesouro", "tesouro, 2025, 50", 2950.0),        # limite aceito pelo dono
+    (None, "Tesouro", "tesouro, na verdade 132, 50", 2867.5),   # positivo do prefixo
+    # Codex #709: "na verdade"/sinal antes do "R$" também vão ao `valor_perigoso`
+    *[(None, "Tesouro", r, 3000.0) for r in (
+        "tesouro, na verdade 132 50", "tesouro, na  verdade 132 50", "tesouro, na verdade -80",
+        "tesouro, na verdade R$ -80", "tesouro, -R$ 80", "tesouro, na verdade 132 50 reais")],
     # N4: quantia reconhecida depois da vírgula troca o valor
     *[(None, "Tesouro", r, 2920.0) for r in (
         "tesouro 2029, 80", "tesouro 2029, R$ 80", "tesouro 2029, r$ 80",
         "tesouro, na verdade 80", "tesouro, 80 real")],
 ])
 def test_n14_virgula_do_nome_e_decimal_com_espaco(uid, caixinha, investimento, resposta, fim):
-    """Codex no #709: a cauda começa depois do nome INTEIRO e cola "132, 50",
-    salvo quando a parte antes da vírgula é um ano."""
     saldo, r = _saca(uid, caixinha, investimento, resposta)
     assert saldo == fim, r
 

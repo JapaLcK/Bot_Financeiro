@@ -1782,17 +1782,26 @@ _PREP_NO_MEIO_RE = re.compile(rf"(?<=\s){PREPOSICAO}(?=\s)", re.I)
 # descrevem o nome. A unidade é a do `h_bills._UNIDADE` (§0.7), mas NÃO o
 # `h_bills._VALOR_RE` inteiro: o `_ENCHIMENTO` dele tem de/da/do e aceitaria
 # "tesouro, de 2029".
-_CAUDA_QUANTIA_RE = re.compile(
-    rf"(?:na\s+verdade\s+)?(?:r\$\s*)?\d[\d.,]*(?:\s*{h_bills._UNIDADE})?", re.I)
+# O "R$" e a UNIDADE são UMA peça para as duas regexes da cauda (a estreita e a
+# malformada abaixo): o que a válida aceita ao redor do número, a malformada
+# também (§0.7). "na verdade" sai ANTES de casar (`_NA_VERDADE_RE`), em vez de ser
+# prefixo de uma só: com ele, "na verdade 132 50" não chegava ao `valor_perigoso`
+# e valia o valor guardado, e o `_sinal_negativo` lia o "-" de "na verdade -80"
+# como prosa (palavra de conteúdo antes do traço) e pagava R$ 80.
+_NA_VERDADE_RE = re.compile(r"^na\s+verdade\s+", re.I)
+_RS_CAUDA = r"(?:r\$\s*)?"
+_UNIDADE_CAUDA = rf"(?:\s*{h_bills._UNIDADE})?"
+_CAUDA_QUANTIA_RE = re.compile(rf"{_RS_CAUDA}\d[\d.,]*{_UNIDADE_CAUDA}", re.I)
 # Ano solto na cauda: "tesouro, 2029, 80" é R$ 80, não 2.029,80 (decisão do dono).
 # Não há predicado de ano reusável: o do `ai_guard` só existe dentro de uma
 # alternância com "em/de/desde/até" na frente.
 _ANO_RE = re.compile(r"(?:19|20)\d\d\b")
 # Cauda com FORMA de valor que a estreita recusa ("-80", "132 50"): vai para o
 # `valor_perigoso` recusar, em vez de deixar valer o valor guardado (ou o
-# "esvaziar"). É o `_SO_NUMERO_RE` com o "R$", o sinal e a unidade da estreita.
+# "esvaziar"). É o `_SO_NUMERO_RE` com o "R$" e a unidade da estreita e o sinal,
+# antes ou depois do "R$" ("-R$ 80", "R$ -80"): o `valor_perigoso` recusa os dois.
 _CAUDA_COM_FORMA_DE_VALOR_RE = re.compile(
-    rf"(?:r\$\s*)?-?\s*{_SO_NUMERO_RE.pattern}(?:{h_bills._UNIDADE})?", re.I)
+    rf"(?:-\s*)?{_RS_CAUDA}-?\s*{_SO_NUMERO_RE.pattern}{_UNIDADE_CAUDA}", re.I)
 
 
 def _quantia_explicita(resposta: str, crua: str, existentes: list[str]) -> str | None:
@@ -1839,7 +1848,7 @@ def _quantia_explicita(resposta: str, crua: str, existentes: list[str]) -> str |
         if no_catalogo and not contains_word(normalize_text(crua[:inicio]), normalize_text(alvo)):
             continue
         # Repõe a limpeza que a `crua` pula: sem ela "tesouro, 132,50." dá R$ 13.250.
-        cauda = limpa_pontuacao_final(crua[inicio:].strip())
+        cauda = _NA_VERDADE_RE.sub("", limpa_pontuacao_final(crua[inicio:].strip()), count=1)
         if not _ANO_RE.match(cauda):   # "2029, 80": ano não é decimal
             cauda = _ESPACO_NO_SEPARADOR_RE.sub(r"\1", cauda)
         if _CAUDA_QUANTIA_RE.fullmatch(cauda):
