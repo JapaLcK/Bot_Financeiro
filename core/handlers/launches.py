@@ -15,7 +15,9 @@ from utils_date import (
     launch_day, extract_date_from_text, today_tz, parse_period_from_text,
     month_range_today,
 )
-from core.intent_classifier import contains_comparative_question, is_comparative_question
+from core.intent_classifier import (contains_comparative_question, is_comparative_question,
+                                    sem_perguntas_comparativas)
+from core.observability import _log_falha
 from core.services.category_service import infer_category, learn_from_inference
 from parsers import (
     parse_receita_despesa_natural,
@@ -1353,7 +1355,7 @@ def _ask_value_question(item: dict) -> str:
     return f"🐷 Faltou o valor de *{desc}*. Quanto foi? (só o número)"
 
 
-def _aviso_pergunta_pulada(part: str, fila: list[dict] = ()) -> str:
+def aviso_pergunta_pulada(part: str, fila: list[dict] = ()) -> str:
     """Aviso do pedaço de multi-lançamento pulado por ser pergunta comparativa
     (texto e áudio). Aspas, e não `wrap_wa_markup`: o bot não abre marcação aqui.
     Limite conhecido: um `*` solto dentro do pedaço do usuário pode formar par
@@ -1377,6 +1379,23 @@ def _aviso_pergunta_pulada(part: str, fila: list[dict] = ()) -> str:
     else:
         dica = f"Se era gasto, {depois}me manda só o valor e o lugar, tipo *gastei 50 no bar*."
     return f'ℹ️ Não registrei "{trecho}" porque parece uma pergunta. {dica}'
+
+
+def avisos_depois_de(user_id: int, puladas: list[str]) -> list[str]:
+    """Avisos dos pedaços pulados depois da resposta da conta, do cartão ou da
+    fatura (#568). Se ela armou uma pergunta, o aviso manda responder antes,
+    como o do multi: "gastei 50 no bar" derrubaria a pergunta."""
+    if not puladas:
+        return []
+    # Roda DEPOIS de a conta, a fatura ou a compra terem sido gravadas: se a leitura
+    # falhar, o erro faria o usuário repetir e duplicar. Falha aberta: aviso básico.
+    try:
+        pend = db.get_pending_action(user_id)
+        de_pe = [{}] if pend and not db.eh_oferta_de_conveniencia(pend["action_type"]) else ()
+    except Exception as e:
+        _log_falha("avisos_depois_de", user_id, e)
+        de_pe = ()
+    return [aviso_pergunta_pulada(p, de_pe) for p in puladas]
 
 
 # Quantas vezes o MESMO valor precisa ter aparecido antes (pro mesmo tipo/descrição)
@@ -1730,7 +1749,9 @@ def add(user_id: int, text: str, entities: dict, platform: str = "whatsapp", *,
     if credit_response is not None:
         return credit_response
 
-    declarada = forma_pagamento or fp.detectar(text)
+    # A forma sai do pedaço sem a pergunta: o "cartão" de "… e gastei mais no
+    # cartão esse mês?" não declara nada (#568).
+    declarada = forma_pagamento or fp.detectar(sem_perguntas_comparativas(text)[0] or text)
     decisao = fp.decidir(user_id, declarada)
     if decisao == fp.MISTO:
         return fp.msg_misto()
@@ -1793,10 +1814,10 @@ def add(user_id: int, text: str, entities: dict, platform: str = "whatsapp", *,
             )
             question = _ask_value_question(missing[0])
             return "\n\n".join(responses + [question]
-                               + [_aviso_pergunta_pulada(p, missing) for p in puladas])
+                               + [aviso_pergunta_pulada(p, missing) for p in puladas])
         if responses or puladas:
             # só avisos: não cai no single, que gravaria o texto inteiro (R$ 2.025)
-            return "\n\n".join(responses + [_aviso_pergunta_pulada(p) for p in puladas])
+            return "\n\n".join(responses + [aviso_pergunta_pulada(p) for p in puladas])
         # nenhum pedaço virou lançamento válido — cai no fluxo single abaixo
 
     parsed = parse_receita_despesa_natural(user_id, text)

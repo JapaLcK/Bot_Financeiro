@@ -20,7 +20,8 @@ import re
 from dataclasses import replace
 
 import db
-from core.intent_classifier import IntentResult, classify, contains_comparative_question
+from core.intent_classifier import (IntentResult, classify, contains_comparative_question,
+                                    sem_perguntas_comparativas)
 from core.response_formatter import wrap_wa_markup
 from core.types import IncomingMessage
 from utils_text import (contains_word, limpa_pontuacao_final, marcador_de_tudo,
@@ -1302,9 +1303,19 @@ def _execute(intent: str, user_id: int, text: str, entities: dict, platform: str
         # pendente; senão segue o fluxo normal de despesa.
         # `forma_pagamento`: a forma já declarada que uma pergunta anterior
         # guardou no payload (Q40); None = sai do texto.
-        paid = h_bills.try_pay_from_text(user_id, text, forma_pagamento)
+        # A conta lê o valor só do pedaço legítimo (#568): o 2025 de "paguei a
+        # luz e gastei mais em 2025 ou 2026?" é da pergunta. A guarda mora aqui
+        # porque, quando entrou, bills.py estava no teto de 350 linhas; hoje
+        # caberia em `try_pay_from_text`. O ratchet de
+        # tests/test_forma_pagamento_funil.py reprova chamador novo sem ela.
+        # Com pergunta, só quita se o pedaço NOMEIA a conta: "paguei hoje e gastei
+        # mais em 2025 ou 2026?" não quita a única pendente; o add() só avisa.
+        conta, puladas = sem_perguntas_comparativas(text)
+        paid = h_bills.try_pay_from_text(user_id, conta, forma_pagamento,
+                                         exige_nome=bool(puladas))
         if paid is not None:
-            return paid
+            return "\n\n".join([paid, *h_launches.avisos_depois_de(user_id, puladas)])
+        # O add() recebe o texto INTEIRO: o multi dele já avisa da pergunta.
         return h_launches.add(user_id, text, entities, platform=platform,
                               forma_pagamento=forma_pagamento)
 
@@ -1317,7 +1328,11 @@ def _execute(intent: str, user_id: int, text: str, entities: dict, platform: str
 
     # --- cartões / crédito ---
     if intent == "credit.handle":
-        if h_credit.e_compra_no_debito(text) or h_credit.negada_com_o_of(user_id, text):
+        # O "cartão" pode estar só na pergunta ("gastei 50 no mercado e gastei mais
+        # no cartão esse mês?"): o tipo sai do pedaço sem ela (#568, D1 = A).
+        limpo = sem_perguntas_comparativas(text)[0] or text
+        if ((limpo != text and classify(limpo, allow_ai=False).intent == "launches.add")
+                or h_credit.e_compra_no_debito(limpo) or h_credit.negada_com_o_of(user_id, text)):
             # O classificador lê "cartão" e manda para o cartão; débito é gasto
             # da conta (Q2b), e a negação com banco pergunta a forma (Q40):
             # segue o caminho de qualquer despesa.

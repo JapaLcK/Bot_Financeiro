@@ -96,6 +96,8 @@ _IGNORADOS = {".venv", ".claude", ".git", "tests", "harness_tests", "node_module
 # do dono (plano, seção 1).
 _PERMITIDOS = {
     "mark_bill_paid": {"core/handlers/forma_pagamento.py": 1},
+    # a guarda da pergunta comparativa (#568) mora no chamador; chamador novo reprova
+    "try_pay_from_text": {"core/intent_router.py": 1},
     "add_launch_and_update_balance": {
         "core/handlers/launches.py": 1,          # add_from_entities (com a guarda)
         "core/services/quick_entry.py": 1,       # entrada rápida (com a regra)
