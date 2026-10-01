@@ -69,6 +69,7 @@ from db import (
     user_exists,
 )
 from frontend.routes import shared
+from utils_text import normalize_text
 
 router = APIRouter()
 
@@ -1572,7 +1573,8 @@ async def open_finance_connectors_route(request: Request, user_id: int):
     """Catálogo completo de bancos da Pluggy pro modal "Conectar banco".
 
     Fluxo padrão: a escolha do banco acontece no site (modal com busca) e o widget da
-    Pluggy abre já no banco escolhido. Retorna dicts enxutos (id/name/type/color/inv)."""
+    Pluggy abre já no banco escolhido. Retorna dicts enxutos (id/name/type/color/inv).
+    Conector direto some quando a lista já tem o gêmeo Open Finance (mesmo nome e tipo)."""
     shared.authorize_dashboard_access(request, user_id)
     try:
         raw = await asyncio.to_thread(
@@ -1583,9 +1585,18 @@ async def open_finance_connectors_route(request: Request, user_id: int):
     except PluggyApiError as exc:
         raise HTTPException(status_code=502, detail=str(exc)) from exc
 
+    visiveis = [c for c in raw if str(c.get("type") or "") in _CONNECTABLE_TYPES]
+    # A Caixa direta (219) pede QR no próprio celular e o usuário trava; com o
+    # gêmeo Open Finance na lista (619), ele é a escolha certa e o direto sai.
+    of_keys = {
+        (normalize_text(c.get("name")), str(c.get("type") or ""))
+        for c in visiveis if c.get("isOpenFinance") is True
+    }
     banks = []
-    for c in raw:
-        if str(c.get("type") or "") not in _CONNECTABLE_TYPES:
+    for c in visiveis:
+        if c.get("isOpenFinance") is not True and (
+            normalize_text(c.get("name")), str(c.get("type") or "")
+        ) in of_keys:
             continue
         products = [str(p).upper() for p in (c.get("products") or [])]
         banks.append({
