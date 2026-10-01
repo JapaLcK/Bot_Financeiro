@@ -811,6 +811,26 @@ async def serve_purchase_intent_js():
     )
 
 
+@router.get("/criar-senha.js")
+async def serve_criar_senha_js():
+    """Overlay "Crie sua senha" da /home e do /app (conta sem credencial)."""
+    return FileResponse(
+        FRONTEND_DIR / "criar-senha.js",
+        media_type="application/javascript",
+        headers={"Cache-Control": "no-cache"},
+    )
+
+
+@router.get("/criar-senha.css")
+async def serve_criar_senha_css():
+    """CSS do overlay "Crie sua senha" (ver /criar-senha.js)."""
+    return FileResponse(
+        FRONTEND_DIR / "criar-senha.css",
+        media_type="text/css",
+        headers={"Cache-Control": "no-cache"},
+    )
+
+
 @router.get("/comecar.css")
 async def serve_comecar_css():
     """CSS do wizard de primeira configuração (ver /comecar.js)."""
@@ -1155,4 +1175,10 @@ async def serve_bank_movements_js():
 @router.get("/reconciliations.js")
 async def serve_reconciliations_js():
     return FileResponse(FRONTEND_DIR / "reconciliations.js", media_type="application/javascript",
+                        headers={"Cache-Control": "no-cache"})
+
+
+@router.get("/cash-transfers.js")
+async def serve_cash_transfers_js():
+    return FileResponse(FRONTEND_DIR / "cash-transfers.js", media_type="application/javascript",
                         headers={"Cache-Control": "no-cache"})

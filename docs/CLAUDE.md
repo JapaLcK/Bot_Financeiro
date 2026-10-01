@@ -219,6 +219,30 @@ sessão. É o único lugar do site que diz se um e-mail tem conta (aceito pelo d
 10/h por IP (balde `quiz`) e 3/h por e-mail (balde `quiz-conta`, separado do
 `register` para o anônimo não gastar o teto do cadastro da vítima). A prova do e-mail vem depois, no "Crie sua senha".
 
+**Conta sem credencial: 403 `password_required`.** Conta sem senha (`''` conta como sem)
+e sem identidade Google/Apple (`db.conta_sem_credencial`, a fonte única, a mesma que o
+job do e-book usa; sem linha em `auth_accounts`, o só-WhatsApp, é False) não lê nem grava dado, mesmo
+paga, até criar a senha pelo link do e-mail. Vale no servidor: a perna da credencial do
+`_enforce_subscription_gate` (depois das duas do 402; não lê `ACCESS_GATE_ENABLED` nem
+`PLANS_V2_ENABLED`, porque é segurança e não cobrança) e `shared.exigir_credencial` nos
+pontos fora dele; o `/ws` fecha com 4403, o `/conta` manda para a `/home`, e o bot não
+liga o número pelo telefone (responde com o texto fixo). O bot também barra toda
+mensagem de número já ligado a conta sem credencial; no auto-vínculo, remetente que já
+tem dados financeiros segue na própria conta, sem vínculo nem mescla
+(`remetente_com_dados`); o vazamento da mescla por telefone digitado está na #711.
+A exceção do bot são os botões de opt-out de `_WA_INTERACTIVE_ISENTOS` (relatórios diário,
+semanal e mensal, e atualizações): quem não pode usar tem de conseguir parar de receber
+mensagem, então eles funcionam no número já ligado, no `precisa_senha` (desligam a
+preferência da conta sem credencial) e no `remetente_com_dados` (a do remetente e a da
+conta que digitou o número), e nada além da preferência é gravado.
+Saem livres as rotas da própria conta (`authorize_account_access`), o `PATCH /settings/{id}/security/contact`
+(`exige_credencial=False`), o `/auth/me` (campo `precisa_criar_senha`), login,
+logout, refresh e o reset. Quem bloqueia e quem libera, rota a rota, está em
+`tests/test_rotas_senha_obrigatoria.py`, que reprova rota nova sem linha. Na tela, a
+`/home` e o `/app` carregam `frontend/criar-senha.js`: overlay que não fecha, também
+disparado por qualquer 403 `password_required`. A `/settings` não o carrega (é a saída),
+e o convite do MFA fica calado no servidor enquanto não há credencial.
+
 **Os três criadores de conta** (o `confirm` do register, o `complete-signup` do
 Google/Apple e a `/assinar`) gravam pelo mesmo `db_support.inserir_conta_nova`:
 trava por e-mail + `on conflict (email) do nothing`. O e-mail que ganhou conta no meio
@@ -272,11 +296,39 @@ hospedado da `/precos` segue sem. Envs:
 `STRIPE_PUBLISHABLE_KEY` (sem ela o embutido é 503, antes de tocar no Stripe),
 `STRIPE_PRICE_ID_EBOOK` e `EBOOK_URL` — o e-book só é oferecido com **as duas**
 preenchidas (preço sem URL venderia o que o webhook não tem como entregar). Quando
-oferecido, a sessão grava `ebook_price` (o preço do e-book no nascimento) no metadata
-e no da assinatura; sem e-book a chave não existe. O PR 3 identifica o e-book por essa
-foto, não pela env do momento do webhook. **Não setar `STRIPE_PRICE_ID_EBOOK` nem
-`EBOOK_URL` em produção antes do PR 3 do funil v3** (a entrega do e-book): um POST com
-`origem:"assinar"` venderia o e-book sem entrega.
+oferecido, a sessão grava `ebook_price` e `ebook_url` (o preço e a URL do e-book no
+nascimento) no metadata e no da assinatura; sem e-book as chaves não existem. O webhook
+identifica o e-book por essa foto, nunca pela env do momento. `EBOOK_URL` tem no máximo
+**500 caracteres** (limite de metadata do Stripe, medido): acima disso o e-book não é
+oferecido e sai o warning `ebook_nao_oferecido` (com o tamanho, **nunca a URL** — ela é
+o acesso ao PDF pago). As duas envs só entram em produção **depois do merge do #708**.
+
+**Entrega do e-book (#708).** O `checkout.session.completed` com `ebook_price` grava
+uma linha em `ebook_entregas` (`db/ebook_entregas.py`, PK `user_id + session_id`, com a
+foto) logo depois do grant e ANTES dos outros efeitos, sem try: falha → 5xx e a
+reentrega refaz tudo. Sessão sem a foto `ebook_url` grava assim mesmo e loga
+`ebook_sem_url`. Quem entrega é o job `_ebook_worker` (abaixo, "Tarefas de fundo"):
+só envia com `not conta_sem_credencial(uid)` (`db/google_auth.py`: senha não vazia ou
+identidade Google/Apple — a prova do e-mail; sem linha em `auth_accounts` a função dá
+False, e o job não envia porque não acha e-mail), confirma a compra pelo
+`checkout.Session.list_line_items` (senão fecha `nao_comprou`), manda
+`send_ebook_email` para o e-mail ATUAL da conta e fecha `enviado` na linha. O claim
+(`reivindicada_ate`, 10 min dobrando a cada tentativa até 1 dia, contadas em
+`tentativas`; a linha nunca fecha sozinha) não segura transação durante o Stripe/Resend; entrega é
+"pelo menos uma vez". A tabela fica fora do export LGPD e sai com a conta (cascade).
+
+**Fatura com e-book:** no `invoice.paid`/`payment_succeeded`, `amount_cents` é só o
+plano: `amount_paid` menos o líquido das linhas cujo `pricing.price_details.price` é
+o `ebook_price` da metadata da assinatura (`amount` da linha é BRUTO; o cupom vem em
+`discount_amounts`). É esse valor que vai para o e-mail de cobrança, a comissão de
+afiliado e o rastreio da fatura — a 1ª fatura de trial + e-book dá 0 e pula os três
+(a comissão, que só paga a 1ª fatura paga, fica para a do plano).
+
+**Rastreio do checkout:** o Meta `Purchase` sem trial leva o `amount_total` da sessão
+(com cupom e e-book — o mesmo número do GA4; sem o campo, cai no `unit_amount`). Com
+trial e `amount_total > 0` (o e-book), saem um Meta `Purchase` e um GA4 `purchase`
+server-only com id `ebook_<sid>` (`meta_capi.ebook_event_id`) e item `ebook`; o
+`StartTrial` não muda.
 
 A **escada de planos é `free < essencial < plus < pro`**, atrás do flag
 `PLANS_V2_ENABLED` (lido dinamicamente, sem redeploy; `0`/`false` é freio de
@@ -404,7 +456,13 @@ Sobem no startup do app quando `RUN_BACKGROUND_TASKS != "0"`: rendimento de
 investimento, Open Finance (abaixo), contas a pagar dos recorrentes, agendadores de
 engajamento e de IA proativa, retenção de eventos de login, poda das tabelas de
 refresh token / challenge de MFA / cadastro Google pendente
-(`core/services/table_cleanup.py`). Ficam desligadas só onde
+(`core/services/table_cleanup.py`), e a entrega do e-book da `/assinar`
+(`_ebook_worker` → `core/services/ebook_entrega.entregar_pendentes`, a cada 5 min, a
+1ª volta sem delay; inerte sem `STRIPE_SECRET_KEY` no ambiente), e a foto diária do
+patrimônio (`_patrimonio_foto` → `core/services/patrimonio_foto.py`, a cada hora, a partir
+das 18h do fuso do app, uma por usuário com acesso por dia em `patrimonio_fotos`; atrás de
+`PATRIMONIO_FOTO_ENABLED`, desligada por padrão e lida a cada volta — desligada, não
+consulta nada). Ficam desligadas só onde
 `RUN_BACKGROUND_TASKS=0` é forçado: `dashboard_dev.py` e
 `scripts/whatsapp_qa_vault_harness.py`. O `tests/conftest.py` **não** força, então
 teste que sobe o `app` herda o default (`1`) — `tests/test_table_cleanup.py` passa

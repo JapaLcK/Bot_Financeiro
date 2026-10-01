@@ -187,6 +187,7 @@
     ],
     "variaveis": [
       "BankMovements",
+      "CashTransfers",
       "Reconciliations",
       "USER_ID",
       "refreshDashboardAfterInvestment"

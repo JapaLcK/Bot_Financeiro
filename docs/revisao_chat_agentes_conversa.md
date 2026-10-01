@@ -128,7 +128,7 @@ Comandos de referência, em ambiente com dependências instaladas e PostgreSQL
 descartável configurado conforme a skill `baseline-testes`:
 
 ```sh
-python -m pytest -q
+# a suíte inteira roda no CI do PR (§3 do CLAUDE.md); aqui, só os testes da área abaixo
 npm run test:frontend
 python -m pytest tests/test_agent_chat*.py tests/test_ai_chat_*.py -q
 python scripts/eval_agent_chat.py --suite extended --output /tmp/agent-chat-eval.json

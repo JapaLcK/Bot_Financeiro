@@ -48,7 +48,7 @@ Revisão de 13/09/2026. Escopo: diff completo do PR contra o merge-base de `main
 Os testes usam PostgreSQL descartável e o isolamento de banco criado pelo `conftest.py`. Não usar banco de produção. As regressões dos apontamentos foram executadas antes das correções e falharam no sintoma esperado.
 
 ```sh
-PYTHONPATH=. python -m pytest -q
+# a suíte inteira roda no CI do PR (§3 do CLAUDE.md); aqui, só os testes da área abaixo
 npm run test:frontend
 node --test tests/frontend/agent_chat.test.mjs tests/frontend/handlers_inline.test.mjs
 python -m pytest -q tests/test_ai_chat_*.py tests/test_agent_chat*.py tests/test_piggy_agents.py tests/test_agents_energy_sweep.py tests/test_plan_tiers.py tests/test_pockets_endpoints.py tests/test_routes_pockets_cards.py tests/test_rv.py
