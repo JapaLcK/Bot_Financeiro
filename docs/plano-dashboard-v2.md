@@ -242,6 +242,11 @@ PR de cada etapa, não soluções prontas. Cada PR confere se ainda valem, decid
     transação sem `id` são descartadas em silêncio, e o sync segue `ok=True`;
     `normalize_pluggy_investment()` põe `balance` = 0 e `type` vazio, e a posição, a
     caixinha espelhada e a foto diária são sobrescritas com esse valor;
+  - registro sem `id` de **qualquer** produto (conta, transação ou investimento) é pulado
+    em silêncio. No investimento é pior: com `leitura_completa=True`, a posição gravada
+    antes é conciliada como ausente e apagada, junto com a caixinha ligada. Qualquer
+    registro sem `id` torna a leitura incompleta e bloqueia a conciliação de ausências
+    daquele produto;
   - compra parcelada sem `creditCardMetadata.totalInstallments` vira compra única (e
     `extract_installment_info()` aceita `installmentNumber` ausente, 0 ou maior que o
     total: o par só vale com o número entre 1 e o total), e a
