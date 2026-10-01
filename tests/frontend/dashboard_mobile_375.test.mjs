@@ -182,16 +182,19 @@ test("1) 375 e 320: header nas faixas medidas, ≤160px, alvos de 44px", async (
   }
 });
 
-test("1b) o mês do relógio não estoura o header: 375 conta 3 faixas só com nome longo, 320 sempre 2", async () => {
+test("1b) o mês do relógio não estoura o header: 375 conta 3 faixas só com nome longo; 320 cabe em 160px", async () => {
   // Medido (setFixedTime, 375×812): Jan/Mar–Ago/Out = 112px (2 faixas: o mês
   // cabe ao lado da marca); Fev/Set/Nov/Dez = 154px (3 faixas).
+  // A 320 NÃO se conta faixa: a largura do rótulo depende da fonte do ambiente
+  // e "Novembro 2026" deu 2 faixas no Mac e 3 no runner Linux do CI (o caso 1)
+  // já mede o 2 a 320 com Setembro). Ali só valem os limites do header.
   for (const [agora, faixas375] of [["2026-02-15T15:00:00Z", 3], ["2026-05-15T15:00:00Z", 2],
                                     ["2026-09-15T15:00:00Z", 3], ["2026-10-01T00:30:00Z", 2],
                                     ["2026-11-15T15:00:00Z", 3]]) {
-    for (const [w, esperado] of [[375, faixas375], [320, 2]]) {
+    for (const w of [375, 320]) {
       const { ctx, page } = await abrirDash(w, { agora });
       const m = await medirHeader(page);
-      assert.equal(m.faixas, esperado, `${agora} ${w}: ${m.faixas} faixas (${m.altura}px, "${m.mes}")`);
+      if (w === 375) assert.equal(m.faixas, faixas375, `${agora} 375: ${m.faixas} faixas (${m.altura}px, "${m.mes}")`);
       assert.ok(m.altura <= 160 && m.fora === 0 && m.hbtns.length >= 5, `${agora} ${w}: ${JSON.stringify(m)}`);
       await ctx.close();
     }
