@@ -421,8 +421,15 @@ do push, não depois do apontamento — é a diferença entre revisar e terceiri
 E **nunca sugira pular a revisão**. Parece economia de tempo; o efeito real é parar de
 olhar para nada ser encontrado.
 
-**Merge só com autorização explícita do dono do repositório.** Aprovação do Codex e
-CI verde deixam o PR *pronto*; não autorizam o merge. Avise e pergunte.
+**Todo PR que você abrir, você acompanha até o fim — e pode mergear (autorização
+permanente do dono, desde 2026-10-01).** Ao abrir o PR: peça `@codex review` e fique de
+olho no Codex e no CI. Apontamento ou check vermelho: trate como acima (hipótese a
+verificar; corrija o que procede, responda na thread, peça `@codex review` de novo) e
+repita até o Codex liberar. **Pode mergear** quando, no head atual, o Codex liberou (👍
+ou "Didn't find any major issues") e todos os checks estão verdes, sem thread aberta.
+Se algo travar (Codex não responde, CI vermelho que não é seu, conflito que você não
+resolve), não force: avise o dono. Depois do merge, avise o dono e apague a branch pelas
+regras abaixo. Isto não autoriza pular a revisão (§4) nem mergear PR de outra pessoa.
 
 **Depois do merge, apague a branch — se estiver limpa e sem uso.** Antes de apagar,
 confira: o PR está `MERGED` (`gh pr view <n> --json state`); `git status --short` vazio;
