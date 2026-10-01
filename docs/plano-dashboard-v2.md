@@ -229,10 +229,13 @@ PR de cada etapa, não soluções prontas. Cada PR confere se ainda valem, decid
     investimentos; e um texto inválido (`"invalid"`) vira `Decimal("0")`, que é finito. Todo
     valor de dinheiro exige leitura estrita (o parse tem de dar certo, sem cair no zero) **e**
     `Decimal.is_finite()`; o que não passa torna a leitura incompleta;
-  - `type` de conta que não é `BANK` nem `CREDIT` é guardado como veio, mas o saldo
-    (`BANK_ACCOUNTS_SQL`) e os importadores só tratam esses dois: a conta some do produto
-    com o sync dando sucesso. Validar o tipo contra uma lista aceita; fora dela, a conta
-    fica como desconhecida e a leitura, incompleta;
+  - `type` fora da lista que o código trata faz o registro sumir do produto com o sync
+    dando sucesso, em conta e em investimento. Conta: só `BANK` e `CREDIT` são tratados
+    (`BANK_ACCOUNTS_SQL` e os importadores). Investimento: `normalize_pluggy_investment()`
+    grava `type` vazio, e os leitores de `db/rv.py` só pegam `EQUITY` e `FIXED_INCOME`,
+    enquanto a foto diária segue gravando o saldo. Validar o tipo contra uma lista aceita
+    nos dois; fora dela, o registro fica como desconhecido, a leitura daquele produto fica
+    incompleta e vale o reprocessamento do passado;
   - `normalize_pluggy_account()` põe `type` = `BANK` e `balance` = 0 quando faltam, e o
     nome vira o tipo (`"CREDIT"`): como a adoção de cartão manual é pelo nome exato, nasce
     um cartão genérico em duplicidade que o nome certo, quando chega, não renomeia nem junta;
