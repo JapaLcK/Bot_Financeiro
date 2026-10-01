@@ -394,8 +394,9 @@ PR de cada etapa, não soluções prontas. Cada PR confere se ainda valem, decid
     já existe, cujo restante vai para as faturas futuras) e todo movimento interno
     (`is_internal_movement`: transferência entre contas próprias e pagamento de fatura). A
     compra comum no cartão **fica** na amostra: ela é o comportamento futuro; o que não se
-    projeta de novo é o que já está na fatura aberta, então a parte do cartão só entra a
-    partir do período que essa fatura ainda não cobre. O protótipo já exclui os lançamentos
+    projeta de novo é a compra já lançada na fatura. A parte do cartão é projetada a partir
+    de amanhã, e cada compra estimada cai na fatura atual ou numa seguinte pelo calendário de
+    fechamento, inclusive o resto do ciclo atual até o fechamento. O protótipo já exclui os lançamentos
     de recorrente. O denominador é o período coberto de verdade,
     não 60 fixo: conta recém-conectada ou com histórico incompleto (dez dias divididos por
     60 dão um sexto do ritmo real) tem amostra mínima, e abaixo dela a estimativa sai como
