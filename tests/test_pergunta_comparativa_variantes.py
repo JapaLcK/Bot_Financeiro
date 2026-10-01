@@ -37,6 +37,9 @@ def _sem_banco_conectado(monkeypatch):
     # O "?" e o marcador valem só DEPOIS do verbo.
     ("e ai, tudo certo? gastei muito no bar ontem 80", False),
     ("o normal eh 1200. gastei muito no bar 80", False),
+    # "?" ANTES do verbo: só `is_comparative_question` o aceita (último recurso da `sem_perguntas`).
+    ("oi? gastei mais 30% esse mes", True),
+    ("eu? gastei mais 30% no uber", True),
     ("gastei 30 no uber. paguei 50 no mercado", False),
     ("gastei 30 no uber; paguei 50 no mercado", False),
     ("1200, obrigado", False),
@@ -70,6 +73,7 @@ def _alvo(uid, valor):
     "eu gastei mais em 2025 ou 2026?", "gastei mais em 2025",
     "Gastei 30 no Uber. Gastei mais em 2025 ou 2026?", "gastei mais 30% esse mês?",
     "gastei + em 2025 ou 2026?", "gastamos mais em 2025 ou 2026?", "gastei 30% a mais esse mes?",
+    "oi? gastei mais 30% esse mes", "? gastei mais 30% esse mes",
 ])
 def test_fila_recusa_e_o_valor_depois_vai_pro_aluguel(free_small_uid, pergunta):
     uid = free_small_uid
@@ -138,6 +142,14 @@ def test_audio_com_fila_de_pe_nao_grava_no_aluguel(pro_small_uid, monkeypatch):
     ("paguei 50 no mercado e 30 a mais que o normal na luz?",
      ("paguei 50 no mercado", ["paguei 30 a mais que o normal na luz?"])),
     ("paguei a luz", ("paguei a luz", [])),
+    ("oi? gastei mais 30% esse mes", ("", ["oi? gastei mais 30% esse mes"])),
+    # `_sem_conector_final`: "mas" e a pontuação que sobra antes do conector.
+    ("paguei a luz mas gastei mais em 2025 ou 2026?", ("paguei a luz", ["gastei mais em 2025 ou 2026?"])),
+    ("paguei a luz, e gastei mais em 2025 ou 2026?", ("paguei a luz", ["gastei mais em 2025 ou 2026?"])),
+    ("paguei a luz; tb gastei mais em 2025 ou 2026?", ("paguei a luz", ["gastei mais em 2025 ou 2026?"])),
+    # Verbo que o `_normalize` acha e o original não ("gastéi"): sem como cortar, tudo é pergunta.
+    ("gastéi 30 no uber e gastei mais em 2025 ou 2026? e paguei 50 no mercado",
+     ("", ["gastéi 30 no uber e gastei mais em 2025 ou 2026? e paguei 50 no mercado"])),
 ])
 def test_sem_perguntas_corta_na_pergunta(text, esperado):
     assert sem_perguntas_comparativas(text) == esperado

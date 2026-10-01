@@ -814,6 +814,10 @@ def sem_perguntas_comparativas(text: str) -> tuple[str, list[str]]:
     e o que vem DEPOIS sai junto. Pedaço do split sem verbo próprio ("... e mais
     que o normal no bar?") herda o do anterior e só o split o acha.
 
+    Limite (D4, #693/#699): o `add()` de um pedaço legítimo lê o valor do texto
+    INTEIRO, então "paguei hoje. gastei mais em 2025 ou 2026?" ainda grava R$ 2.025
+    como despesa; esta função só devolve o corte certo para quem a chama.
+
     É a ÚNICA detecção: `contains_comparative_question` é `bool(puladas)` (§0.7)."""
     from parsers import split_financial_transactions  # local: parsers importa daqui
     t = text or ""
@@ -827,7 +831,8 @@ def sem_perguntas_comparativas(text: str) -> tuple[str, list[str]]:
     puladas = [p for p in partes if is_comparative_question(p)]
     if puladas:
         return " e ".join(p for p in partes if p not in puladas), puladas
-    return text, []
+    # Último recurso: o "?" ANTES do verbo ("oi? gastei mais 30%") só `is_comparative_question` aceita.
+    return ("", [t]) if is_comparative_question(t) else (text, [])
 
 
 def contains_comparative_question(text: str) -> bool:

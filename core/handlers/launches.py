@@ -1357,7 +1357,8 @@ def _ask_value_question(item: dict) -> str:
 
 def aviso_pergunta_pulada(part: str, fila: list[dict] = ()) -> str:
     """Aviso do pedaço de multi-lançamento pulado por ser pergunta comparativa
-    (texto e áudio). Aspas, e não `wrap_wa_markup`: o bot não abre marcação aqui.
+    (texto e áudio). O que veio DEPOIS da pergunta na mesma mensagem também não
+    entrou. Aspas, e não `wrap_wa_markup`: o bot não abre marcação aqui.
     Limite conhecido: um `*` solto dentro do pedaço do usuário pode formar par
     com o `*` de `*gastei 50 no bar*` (total ímpar de `*` = #276).
     `fila`: itens da pergunta de valor de pé. O aviso vem DEPOIS da pergunta, e
