@@ -770,6 +770,9 @@ def test_reconectar_pelo_widget_limpa_motivo_e_saude(user_id, relogio_fixo):
     db.save_pluggy_open_finance_item(
         user_id, {"id": "item-refeito", "status": "UPDATING",
                   "connector": {"id": 612, "name": "Nubank"}})
+    # O `relogio_fixo` carimba a reconexão semanas atrás, além do teto do
+    # "Atualizando…". Este caso é a reconexão RECÉM-feita: âncora no `now()` do banco.
+    _envelhece_autorizacao(conexao["id"])
 
     linha = _linha("item-refeito")
     assert linha["status_reason"] is None
