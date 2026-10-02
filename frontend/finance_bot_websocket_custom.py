@@ -79,6 +79,7 @@ from db.connection import (
 from db.open_finance import (
     BANK_ACCOUNTS_SQL, MERGED_WALLET_DELTA_SQL, merged_wallet_delta_params,
 )
+from db.resumo_mes import TOTAIS_SQL, totais_params
 from db import (
     accrue_all_pockets,
     accrue_all_investments,
@@ -627,40 +628,11 @@ async def get_financial_data(
             """,
             (user_id, query_start, month_end, *launch_filter_params, *credit_union_params, limit, offset),
         ),
-        # 5) Monthly income/expense totals (sem internas).
-        # Compras no cartão entram como 'despesa' alocadas pelo mês em que a
-        # FATURA fecha (`credit_bills.period_end`), não pelo `purchased_at`.
-        # Assim parcelamento aparece distribuído (1/3 maio, 2/3 junho, 3/3 julho)
-        # em vez de tudo no mês da compra. Pagamento da fatura é launch interna,
-        # então não dobra.
-        _q(
-            f"""
-            -- `TIPO_CANON_SQL`: a linha legada 'saida' é despesa e 'entrada' é
-            -- receita. As barras de categoria (query 6) e o gráfico diário
-            -- (query 9) já contam as duas formas; se este total lesse só
-            -- 'despesa', a soma das barras PASSARIA do "Gastos do mês" e o
-            -- "sobrou este mês" sairia maior do que é.
-            SELECT {TIPO_CANON_SQL} AS tipo, SUM(valor) AS total FROM (
-                SELECT tipo, valor
-                FROM launches
-                WHERE user_id = %s
-                  AND criado_em >= %s AND criado_em < %s
-                  AND is_internal_movement = false
-                UNION ALL
-                SELECT 'despesa' AS tipo, ct.valor
-                FROM credit_transactions ct
-                JOIN credit_bills b ON b.id = ct.bill_id
-                WHERE ct.user_id = %s
-                  AND ct.is_refund = false
-                  AND b.period_end >= %s AND b.period_end < %s
-            ) merged
-            GROUP BY 1
-            """,
-            (
-                user_id, query_start, month_end,
-                user_id, query_start, month_end,
-            ),
-        ),
+        # 5) Entrou e Saiu do mês: a regra única do mês (`db/resumo_mes.TOTAIS_SQL`,
+        # Q18) — lançamentos não internos (forma legada canonizada) + cartão pela
+        # fatura que fecha no mês (`credit_bills.period_end`; parcelado, uma parcela
+        # por mês). Pagamento da fatura é launch interna, então não dobra.
+        _q(TOTAIS_SQL, totais_params(user_id, query_start, month_end)),
         # 6) Categories (despesas do mês — credit_transactions alocadas por
         # `bill.period_end`, igual query 5).
         _q(
@@ -688,7 +660,7 @@ async def get_financial_data(
                 SELECT ct.categoria, ct.valor, 1 AS cnt, b.period_end::timestamptz
                 FROM credit_transactions ct
                 JOIN credit_bills b ON b.id = ct.bill_id
-                WHERE ct.user_id = %s
+                WHERE ct.user_id = %s AND (b.user_id = %s OR b.user_id IS NULL)
                   AND ct.is_refund = false
                   AND b.period_end >= %s AND b.period_end < %s
             ) merged
@@ -698,7 +670,7 @@ async def get_financial_data(
             """,
             (
                 user_id, query_start, month_end,
-                user_id, query_start, month_end,
+                user_id, user_id, query_start, month_end,
             ),
         ),
         # 7) Allocations (aportes do mês)
@@ -860,7 +832,6 @@ async def get_financial_data(
         })
 
     # Build maps
-    monthly_map = {row["tipo"]: float(row["total"]) for row in monthly}
     budget_map  = {r["categoria"]: float(r["budget"]) for r in budget_rows}
     # Casa gasto×orçamento pela chave normalizada (case- e acento-insensível):
     # o orçamento pode ter sido criado em "cafe da manha" e o gasto gravado em
@@ -968,8 +939,8 @@ async def get_financial_data(
         # Tabela pode não existir ainda no init_db da primeira subida — silencia.
         pass
 
-    inc = monthly_map.get("receita", 0.0)
-    exp = monthly_map.get("despesa", 0.0)
+    inc = float(monthly[0]["entrou"])
+    exp = float(monthly[0]["saiu"])
 
     allocations = {"investments": {"total": 0.0, "count": 0, "by_target": []},
                    "pockets":     {"total": 0.0, "count": 0, "by_target": []}}

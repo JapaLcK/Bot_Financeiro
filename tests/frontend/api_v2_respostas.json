@@ -1,5 +1,5 @@
 {
-  "_comentario": "Respostas da /api/v2 que os testes de navegador servem. tests/test_api_v2_contrato.py valida cada uma pelos modelos Pydantic (Me, Perfil, Contas, ErroV2); a marcada fora_do_envelope tem de NÃO validar. Dinheiro é texto decimal.",
+  "_comentario": "Respostas da /api/v2 que os testes de navegador servem. tests/test_api_v2_contrato.py valida cada uma pelos modelos Pydantic (Me, Perfil, Contas, ResumoDoMes, ErroV2); a marcada fora_do_envelope tem de NÃO validar. Dinheiro é texto decimal.",
   "me": {
     "free": { "plan_tier": "free" },
     "essencial": { "plan_tier": "essencial" },
@@ -38,6 +38,11 @@
         { "id": 7, "instituicao": null, "nome": "Conta", "saldo": null, "moeda": "BRL", "no_total": false, "conexao": "updated", "sincronizado_em": "2026-10-01T12:00:00Z", "motivos": ["saldo_ausente"] }
       ]
     }
+  },
+  "resumo_do_mes": {
+    "exato": { "mes": "2026-10", "ate": "2026-10-31", "entrou": "1040.00", "saiu": "440.00", "anterior": { "mes": "2026-09", "entrou": "5200.00", "saiu": "3980.55" }, "motivos": [] },
+    "todos_os_motivos": { "mes": "2026-07", "ate": "2026-07-31", "entrou": "0", "saiu": "310.00", "anterior": null, "motivos": ["conciliacao_pendente", "movimentos_pendentes", "banco_desatualizado", "inicio_do_historico"] },
+    "sem_dados": { "mes": "2026-10", "ate": "2026-10-31", "entrou": "0", "saiu": "0", "anterior": { "mes": "2026-09", "entrou": "0", "saiu": "0" }, "motivos": [] }
   },
   "erros": {
     "401": {
