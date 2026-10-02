@@ -400,7 +400,7 @@ contagem não vive aqui de propósito, porque ela sobe a cada rodada (§2).
 
 Via **Pluggy**. Endpoints em `frontend/routes/open_finance.py`
 (`/open-finance/{user_id}` e `connect-token`, `connectors`, `sync`, `refresh`,
-`pluggy-item`, `caixinhas`, `caixinhas/bind`, `mock-connect`) mais o webhook
+`pluggy-item`, `caixinhas`, `caixinhas/bind`, `mock-connect` (só com `OF_MOCK_CONNECT_ENABLED`; sem ele, 404)) mais o webhook
 `/open-finance/pluggy/webhook`. Serviços em `core/services/pluggy*.py` e
 `open_finance*.py`; tabelas `open_finance_connections/accounts/transactions/investments`,
 `open_finance_investment_snapshots` (foto diária por posição, `db/of_snapshots.py`) e
