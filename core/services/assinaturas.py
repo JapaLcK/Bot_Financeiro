@@ -49,7 +49,12 @@ def _item(linhas: list, chave: str, categoria, marca, today: date) -> dict:
     dias = Counter(r["transaction_date"].day for r in linhas)
     maior = max(dias.values())
     dia = ultima.day if dias[ultima.day] == maior else next(d for d, n in dias.items() if n == maior)
+    ativa = (today - ultima).days <= DIAS_ATIVA
     y, m = add_months(ultima.year, ultima.month, 1)
+    proxima = date(y, m, clamp_day(y, m, dia))
+    while ativa and proxima < today:  # cobrada há 32–40 dias: a "próxima" já passou
+        y, m = add_months(y, m, 1)
+        proxima = date(y, m, clamp_day(y, m, dia))
 
     return {
         "chave": chave,
@@ -59,13 +64,13 @@ def _item(linhas: list, chave: str, categoria, marca, today: date) -> dict:
         "valor_anterior": None if valor_anterior is None else round(valor_anterior, 2),
         "reajuste_em": reajuste_em,
         "dia": dia,
-        "proxima": date(y, m, clamp_day(y, m, dia)).isoformat(),
+        "proxima": proxima.isoformat(),
         "ultima": ultima.isoformat(),
         "desde": linhas[0]["transaction_date"].isoformat(),
         "meses": len({(r["transaction_date"].year, r["transaction_date"].month) for r in linhas}),
         "meio": {"tipo": "cartao" if ult["account_type"] == "CREDIT" else "conta",
                  "nome": ult["account_name"], "final": _final(ult["account_number"])},
-        "status": "ativa" if (today - ultima).days <= DIAS_ATIVA else "possivelmente_cancelada",
+        "status": "ativa" if ativa else "possivelmente_cancelada",
         "marcada": marca == "assinatura",
     }
 
@@ -79,8 +84,8 @@ def listar_assinaturas(user_id: int, today: date) -> dict:
     for r in linhas_rp:
         por_rp[r["rp_id"]].append(r)
     fora = {k for k, linhas in por_rp.items()
-            if is_internal_category(categoria_pigbank(linhas[-1]["category"]))
-            or any(extract_installment_info({"creditCardMetadata": r["cc_meta"] if isinstance(r["cc_meta"], dict) else None})[1]
+            if any(is_internal_category(categoria_pigbank(r["category"]))
+                   or extract_installment_info({"creditCardMetadata": r["cc_meta"] if isinstance(r["cc_meta"], dict) else None})[1]
                    for r in linhas)}
     # Por chave, os sobreviventes viram cadeias (`por_rp` já está na ordem da 1ª
     # ocorrência): o grupo que começa depois do fim da cadeia anterior é reajuste
