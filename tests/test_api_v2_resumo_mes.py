@@ -35,6 +35,8 @@ SP = _tz()
 
 @pytest.fixture
 def libera(monkeypatch):
+    """Chame DEPOIS de semear: com a chave ligada, a trava Q36 (`fonte_unica`) recusa
+    `add_credit_purchase` e as outras escritas manuais que a semente usa."""
     monkeypatch.setenv("DASHBOARD_V2_BETA_EMAILS", "")
 
     def _libera(*uids):
@@ -62,9 +64,10 @@ def congela(monkeypatch, instante: datetime):
 # ── isolamento ───────────────────────────────────────────────────────────────
 
 def test_b_nao_soma_nada_de_a_nem_com_user_id_na_query(libera):
-    a, b = libera(usuario_pagante(), usuario_pagante())
+    a, b = usuario_pagante(), usuario_pagante()
     semeia_a(a)
     semeia_b(b)
+    libera(a, b)
     de_b = ok(b, mes=M, user_id=a, uid=a)
     assert (de_b["entrou"], de_b["saiu"]) == (D("5555"), D("8665"))
     de_a = ok(a, mes=M)  # controle positivo: A vê o dele
@@ -75,8 +78,9 @@ def test_compra_de_a_em_fatura_de_b_nao_entra(libera):
     """Linha corrompida (nenhum escritor grava): a compra é de A, a fatura é de B. O
     `b.user_id` de `TOTAIS_SQL` a deixa fora de A; o `ct.user_id`, fora de B. Sem um ou
     outro, os 4321 aparecem em A ou em B."""
-    a, b = libera(usuario_pagante(), usuario_pagante())
+    a, b = usuario_pagante(), usuario_pagante()
     semeia_a_em_fatura_de_b(a, b)
+    libera(a, b)
     assert ok(a, mes=M)["saiu"] == D("80")  # controle positivo: a compra dele entra
     assert ok(b, mes=M)["saiu"] == D("1")
 
@@ -84,8 +88,9 @@ def test_compra_de_a_em_fatura_de_b_nao_entra(libera):
 # ── formato e validação ─────────────────────────────────────────────────────
 
 def test_dinheiro_sai_como_texto_decimal(libera):
-    (a,) = libera(usuario_pagante())
+    a = usuario_pagante()
     semeia_a(a)
+    libera(a)
     r = pede(a, mes=M).json()
     assert isinstance(r["entrou"], str) and isinstance(r["saiu"], str)
     assert isinstance(r["anterior"]["saiu"], str)
@@ -141,8 +146,9 @@ def test_mes_sem_dados_da_zero(libera):
 # ── janela do plano (Q20) ───────────────────────────────────────────────────
 
 def test_janela_que_corta_o_mes_marca_e_bate_com_o_app(libera, monkeypatch):
-    (a,) = libera(usuario_pagante())
+    a = usuario_pagante()
     semeia_a(a)
+    libera(a)
     corte = INICIO.replace(day=5)
     monkeypatch.setattr(plan_service, "history_earliest_date", lambda uid, now=None: corte)
     r = ok(a, mes=M)
@@ -159,8 +165,9 @@ def test_janela_que_corta_o_mes_marca_e_bate_com_o_app(libera, monkeypatch):
 def test_corte_so_no_anterior_marca_e_tira_o_anterior(libera, monkeypatch, dias_apos_o_anterior, cortou):
     """O corte dentro do mês anterior não toca o pedido, mas tira o `anterior`: o motivo
     diz por quê (senão `null` lê como "sem dados"). Corte no dia 1 dele ou antes: nada."""
-    (a,) = libera(usuario_pagante())
+    a = usuario_pagante()
     semeia_a(a)
+    libera(a)
     ant_inicio = (INICIO - timedelta(days=1)).replace(day=1)
     corte = ant_inicio + timedelta(days=dias_apos_o_anterior)
     monkeypatch.setattr(plan_service, "history_earliest_date", lambda uid, now=None: corte)
@@ -170,8 +177,9 @@ def test_corte_so_no_anterior_marca_e_tira_o_anterior(libera, monkeypatch, dias_
 
 
 def test_sem_corte_nao_marca_e_traz_o_anterior(libera):
-    (a,) = libera(usuario_pagante())
+    a = usuario_pagante()
     semeia_a(a)
+    libera(a)
     r = ok(a, mes=M)
     assert "inicio_do_historico" not in r["motivos"] and r["anterior"] is not None
 
@@ -179,8 +187,9 @@ def test_sem_corte_nao_marca_e_traz_o_anterior(libera):
 # ── motivos (os do bloco de contas, reusados) ───────────────────────────────
 
 def test_motivos_do_bloco_de_contas(libera):
-    limpo, pendente, velho, movimento = libera(*(usuario_pagante() for _ in range(4)))
+    limpo, pendente, velho, movimento = (usuario_pagante() for _ in range(4))
     semeia_a(pendente)  # tem conciliação pendente
+    libera(limpo, pendente, velho, movimento)
     conta(conexao(velho, f"item-{velho}", sync=horas_atras(72)), "acc-1", "10")
     conta(conexao(movimento, f"item-{movimento}"), "acc-1", "10")
     q("""insert into bank_movement_declarations (launch_id, user_id, amount, declared_at)
@@ -194,9 +203,10 @@ def test_motivos_do_bloco_de_contas(libera):
 def test_mes_corrente_soma_a_fatura_que_fecha_depois_de_hoje(libera, monkeypatch):
     """Mês-calendário inteiro, como o /app: a compra de hoje numa fatura que fecha no fim
     do mês (dia 31 → último dia) entra no mês corrente."""
-    (a,) = libera(usuario_pagante())
+    a = usuario_pagante()
     hoje = date.today()
     cartao = db.create_card(a, "Nubank", closing_day=31, due_day=10)
     db.add_credit_purchase(a, cartao, 45, "mercado", "hoje", hoje)
+    libera(a)
     congela(monkeypatch, datetime.combine(hoje, datetime.min.time(), tzinfo=SP) + timedelta(hours=12))
     assert ok(a)["saiu"] == D("45")
