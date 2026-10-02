@@ -1,0 +1,16 @@
+/* /assinar: só o que é desta página. Campos, botões, erro e rodapé vêm do site-auth.css. */
+/* O `.auth-error.show` (display:block) venceria o [hidden] do navegador. */
+.assinar [hidden] { display:none !important; }
+.assinar { display:flex; justify-content:center; padding-block:42px 48px; min-height:calc(100vh - 175px); }
+.assinar .auth-card { max-width:456px; }
+/* O embutido do Stripe abre em duas colunas quando tem largura. */
+.assinar.largo .auth-card { max-width:960px; }
+.assinar-sub { font-size:16px; line-height:1.65; color:var(--lp-muted); margin-bottom:24px; overflow-wrap:anywhere; }
+.assinar-conta { font-size:14px; line-height:1.6; color:var(--lp-muted); margin-bottom:18px; overflow-wrap:anywhere; }
+.assinar-gap { margin-top:12px; }
+#stripe-checkout { width:100%; min-height:320px; }
+.assinar-b { margin-top:14px; text-align:center; }
+.lp-auth .assinar-b .lp-auth-text-button { color:var(--lp-muted); font-size:13px; font-weight:500; }
+.assinar-pix { width:100%; margin-top:14px; }
+.lp-auth #s1-pendente a { color:inherit; font-weight:600; text-decoration:underline; }
+@media (max-width:700px) { .assinar { padding-block:28px 36px; min-height:0; } }

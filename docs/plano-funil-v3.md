@@ -9,7 +9,7 @@ B para o Stripe embutido em WebView (teste real antecipado + queda automática p
 checkout hospedado); o terceiro chamador do bloco de sessão; e a citação correta da
 proteção de telefone disputado.
 
-**Estado em 2026-09-29 (leia antes do resto).** Este plano é a base, não a especificação.
+**Estado em 2026-10-01 (leia antes do resto).** Este plano é a base, não a especificação.
 O código da `main` vence o texto quando os dois divergem.
 - **PR 1 (conta na `/assinar`) = #658, mergeado.** A revisão do Codex mudou quatro coisas
   que o texto abaixo não diz:
@@ -18,17 +18,21 @@ O código da `main` vence o texto quando os dois divergem.
     senha e sem plano) e a rota responde 503;
   - a limpeza de sessões só roda quando nenhuma outra linha do `user_id` sobrou;
   - `/auth/register` e `/auth/verify-email` chamam o banco via `asyncio.to_thread`.
-- **Etapa 0 PARCIAL.** O embutido funciona no Instagram iOS (ver a última seção), mas os
-  itens 2, 4 e 5 e a lista de hosts da CSP do item 6 **nunca foram medidos**. Eles são
-  o portão do PR 2 (ver lá).
+- **Etapa 0 PARCIAL.** O embutido funciona no Instagram iOS (ver a última seção). O #708
+  mediu no Stripe de teste (2026-09-30) os kwargs da `/assinar` nos dois modos, o
+  `client_secret` no `Session.list(status="open")` e o e-book fora de
+  `subscription.items`. **Ainda não medidos:** a CSP sem violação no console, o BRL visto
+  de fora do Brasil, o 3DS dentro da nossa página e o promotion code digitado (o
+  `discount_amounts`); ficam para a etapa 0b-2.
 - **O texto do PR 1 e a D-c abaixo descrevem o desenho ANTIGO** (`create/confirm_email_verification`).
   O #658 entrou com `criar_conta_sem_codigo` + `inserir_conta_nova` + `trava_email`, sem
   `email_verification_codes`. O código da `main` e a nota "Ajustes do PR 1" (no fim)
   mandam.
-- **PR 2 = #679, aberto** (checkout embutido e hospedado, mais a CSP). Depois vêm os PRs 3 a 6,
-  na ordem da seção 5.
-- **PR 3 (webhook entrega o e-book) = #708.** O código da `main` e o `docs/CLAUDE.md`
+- **PR 2 = #679, mergeado** (checkout embutido e hospedado, mais a CSP).
+- **PR 3 (webhook entrega o e-book) = #708, mergeado.** O código da `main` e o `docs/CLAUDE.md`
   ("Pagamentos") mandam sobre o texto do PR 3 abaixo.
+- **PR 4 ("Crie sua senha") = #716 e PR 4b (e-mail trocado chega ao Stripe) = #738,
+  mergeados.** Faltam o PR 5 e o PR 6.
 - A etapa 0b-2 (túnel antes do merge do PR 5) continua pendente.
 - **Decisões do dono de 2026-09-29:**
   - o "Crie sua senha" do PR 4 bloqueia no SERVIDOR (403 nas rotas de dados), e não só
@@ -981,8 +985,8 @@ do e-book.
    ligados).
 6. Hospedar o PDF do e-book (por exemplo, no Drive, com "qualquer pessoa com o link") →
    a URL de download na env **`EBOOK_URL`**, com **até 500 caracteres** (acima disso o
-   e-book não é oferecido). As duas envs (`STRIPE_PRICE_ID_EBOOK` e `EBOOK_URL`) só
-   **depois do merge do PR 3**.
+   e-book não é oferecido). As duas envs (`STRIPE_PRICE_ID_EBOOK` e `EBOOK_URL`) já
+   podem entrar: o PR 3 (#708) está mergeado.
 7. Cupons: como eles ficam ligados na `/assinar`, na hora de criar cada cupom, em
    "Aplicar a produtos específicos", escolher só os planos, para o cupom não descontar
    o e-book (a não ser que seja essa a intenção).

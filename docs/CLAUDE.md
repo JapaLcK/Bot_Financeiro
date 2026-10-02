@@ -196,7 +196,8 @@ Caminhos de entrada, todos em `/auth/*`: `register` → `verify-email` (código 
 dígitos) → `login`; **quiz de venda**: o webhook `POST /xquiz/webhook` (fora de
 `/auth`, token `XQUIZ_WEBHOOK_TOKEN`) grava a verificação SEM senha e manda o código,
 e a `/q` chama o mesmo `verify-email` depois de o usuário confirmar o e-mail na tela
-(`quiz/resend` reenvia; `frontend/routes/quiz_signup.py`); `forgot-password`/`reset-password`; **Google OAuth**
+(`quiz/resend` reenvia; `frontend/routes/quiz_signup.py`); a `/q` com `plano` na query vai
+para a `/assinar` (nome, e-mail e WhatsApp no fragmento `n/e/w`); `forgot-password`/`reset-password`; **Google OAuth**
 (`google/start`, `google/callback`, `google/complete-signup`, `google/pending/{token}`,
 e `google/exchange`, que troca por Bearer o código que o callback devolve ao app nativo
 quando o login começa em `google/start?app=2`); **Apple**, só no app nativo iOS
@@ -218,6 +219,10 @@ não espera, para uma rajada não segurar o pool de conexões). Só `criada` esc
 sessão. É o único lugar do site que diz se um e-mail tem conta (aceito pelo dono), com
 10/h por IP (balde `quiz`) e 3/h por e-mail (balde `quiz-conta`, separado do
 `register` para o anônimo não gastar o teto do cadastro da vítima). A prova do e-mail vem depois, no "Crie sua senha".
+A página é `frontend/assinar.html` + `assinar.js`: o script limpa o fragmento antes do
+Pixel e do GA4 (sem Clarity), percorre os estados formulário → já tem conta →
+pagamento, e todo caminho para o Stripe hospedado (app, Stripe.js que falha, 10 s sem
+iframe, link manual) passa por um só `irParaHospedado`; testes em `tests/frontend/assinar_*`.
 
 **Conta sem credencial: 403 `password_required`.** Conta sem senha (`''` conta como sem)
 e sem identidade Google/Apple (`db.conta_sem_credencial`, a fonte única, a mesma que o
