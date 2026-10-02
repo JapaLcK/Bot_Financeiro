@@ -1455,6 +1455,8 @@ async def _adota_item_orfao(item_id: str, last_event: str | None = None) -> int 
         # e empurra o rótulo para além das 18h. Ou seja: para quem NÃO tem conta
         # nenhuma, agendar o sync continua sendo necessário e não suficiente
         # para o rótulo.
+        # Desde a Fase 4 (PR 2) o rótulo vira "Erro temporário" no teto de 2 h
+        # (`TETO_ATUALIZANDO_MIN`), sem esperar essa passada.
         #
         # Os outros status AGENDAM nos dois caminhos: `WAITING_USER_INPUT`,
         # `WAITING_USER_ACTION`, `LOGIN_ERROR`, `OUTDATED` e `ERROR` viram um
