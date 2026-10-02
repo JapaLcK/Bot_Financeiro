@@ -162,6 +162,9 @@
 .sub-acoes .btn, .sub-aviso .btn { min-height: 44px; }
 .sub-acoes .btn:disabled, .sub-aviso .btn:disabled { opacity: 0.4; cursor: default; }
 .sub-aviso p:focus { outline: none; }
+/* Sem flex: ele tira a setinha nativa do summary. 12 + 20 + 12 = 44 px de alvo. */
+.sub-ignoradas summary { padding: 12px 0; line-height: 20px; cursor: pointer; }
+.sub-ignoradas[open] .sub-mostrar, .sub-ignoradas:not([open]) .sub-esconder { display: none; }
 
 /* Piggy notou */
 .piggy-title { display: inline-flex; align-items: center; gap: 8px; }

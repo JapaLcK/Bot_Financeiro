@@ -42,6 +42,7 @@ class Assinatura(BaseModel):
 class Assinaturas(BaseModel):
     servicos: list[Assinatura]
     outras: list[Assinatura]
+    ignoradas: list[Assinatura]
     total_mensal: Decimal
     total_anual: Decimal
 

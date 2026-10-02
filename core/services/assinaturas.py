@@ -122,19 +122,23 @@ def listar_assinaturas(user_id: int, today: date) -> dict:
             cs.append(list(linhas))
     cadeias.pop("", None)  # descrição só de pontuação não identifica ninguém
 
-    servicos, outras, chaves = [], [], set()
+    # `ignoradas` só a tela lê: Detetive e chat usam servicos + outras. Em
+    # `ignoradas`, `marcada` é a marca guardada, que o Voltar a mostrar restaura.
+    servicos, outras, ignoradas, chaves = [], [], [], set()
     for chave, linhas in ((c, ls) for c, lista in cadeias.items() for ls in lista):
         ult = linhas[-1]
         categoria = categoria_pigbank(ult["category"])
         chaves.add(chave)
-        marca = marcados.get(chave)
+        marca, antes = marcados.get(chave, (None, False))
         if marca == "ignorar":
+            ignoradas.append(_item(linhas, chave, categoria, "assinatura" if antes else None, today))
             continue
         destino = servicos if _eh_servico(ult, categoria, marca) else outras
         destino.append(_item(linhas, chave, categoria, marca, today))
 
     servicos.sort(key=lambda x: -x["valor"])
     outras.sort(key=lambda x: -x["valor"])
+    ignoradas.sort(key=lambda x: -x["valor"])
     total = sum((x["valor"] for x in servicos if x["status"] == "ativa"), Decimal(0))
-    return {"servicos": servicos, "outras": outras, "total_mensal": total,
+    return {"servicos": servicos, "outras": outras, "ignoradas": ignoradas, "total_mensal": total,
             "total_anual": total * 12, "chaves": sorted(chaves)}
