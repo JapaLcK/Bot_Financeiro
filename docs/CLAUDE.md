@@ -176,14 +176,18 @@ Sub-app FastAPI (`api/v2/app.py`) montado pelo monólito com `app.mount("/api/v2
 - `GET /api/v2/assinaturas` e `POST /api/v2/assinaturas/marca` (`api/v2/assinaturas.py`):
   a lista do Recurring Payments da Pluggy (`core/services/assinaturas.py`) e a marcação
   do usuário por chave do comerciante (`assinatura`/`ignorar`/`nenhuma`; chave fora da
-  lista dá 404). Gate `subscriptions` em `FEATURE_MIN_TIER_V2` (Plus ou Pro).
+  lista dá 404). Gate `subscriptions` em `FEATURE_MIN_TIER_V2` (Plus ou Pro). O cliente é
+  `webapp/src/dashboard/widgets/Subscriptions.tsx` (o card do Resumo e a página
+  `/assinaturas`); o POST sai pelo `apiPost` de `lib/v2.ts`, com o header de
+  `window.pbCsrfHeaders` (auth-refresh.js), e o 403 `pro_required` vira o convite.
 - **Dinheiro na v2 é `Decimal` e sai como TEXTO decimal** (`"1234.56"`, sem arredondar e sem
   float), em toda rota: no TS é `string`. A escala é a da coluna (`"1000"` e `"1000.00"`
   valem). O contrato vale para toda rota futura.
 - **Contrato:** o envelope entra no OpenAPI como resposta `default` (`ErroV2`, em
   `api/v2/erros.py`; a resposta real continua saindo de `_envelope`). Os tipos TS saem de
   `python scripts/gerar_tipos_api_v2.py` para `webapp/src/dashboard/lib/api-v2.gen.ts`
-  (gerado e commitado; construção fora da lista aceita levanta `ValueError`), e
+  (gerado e commitado; construção fora da lista aceita levanta `ValueError`, e `number`
+  (float) está fora dela: dinheiro é `Decimal`), e
   `tests/test_api_v2_contrato.py` compara o arquivo com o `openapi()` de hoje e valida as
   fixtures dos testes de navegador (`tests/frontend/api_v2_respostas.json`). Mudou modelo:
   rode o gerador e depois o build do `webapp/`.

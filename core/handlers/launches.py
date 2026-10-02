@@ -1357,7 +1357,8 @@ def _ask_value_question(item: dict) -> str:
 
 def aviso_pergunta_pulada(part: str, fila: list[dict] = ()) -> str:
     """Aviso do pedaço de multi-lançamento pulado por ser pergunta comparativa
-    (texto e áudio). Aspas, e não `wrap_wa_markup`: o bot não abre marcação aqui.
+    (texto e áudio). O que veio DEPOIS da pergunta na mesma mensagem também não
+    entrou. Aspas, e não `wrap_wa_markup`: o bot não abre marcação aqui.
     Limite conhecido: um `*` solto dentro do pedaço do usuário pode formar par
     com o `*` de `*gastei 50 no bar*` (total ímpar de `*` = #276).
     `fila`: itens da pergunta de valor de pé. O aviso vem DEPOIS da pergunta, e
@@ -1749,9 +1750,17 @@ def add(user_id: int, text: str, entities: dict, platform: str = "whatsapp", *,
     if credit_response is not None:
         return credit_response
 
+    limpo, puladas = sem_perguntas_comparativas(text)
+    if limpo and puladas and len(split_financial_transactions(text)) == 1:
+        # UM pedaço legítimo e a pergunta que o split não cortou ("gastei no uber.
+        # gastei mais em 2025 ou 2026?"): o valor sai do pedaço, não do 2025 (#569).
+        # Sem o `valor` das entities: o do tier 3 (LLM) pode ser o ano da pergunta.
+        sem_valor = {k: v for k, v in entities.items() if k != "valor"}
+        resposta = add(user_id, limpo, sem_valor, platform, forma_pagamento=forma_pagamento)
+        return "\n\n".join([resposta, *avisos_depois_de(user_id, puladas)])
     # A forma sai do pedaço sem a pergunta: o "cartão" de "… e gastei mais no
     # cartão esse mês?" não declara nada (#568).
-    declarada = forma_pagamento or fp.detectar(sem_perguntas_comparativas(text)[0] or text)
+    declarada = forma_pagamento or fp.detectar(limpo or text)
     decisao = fp.decidir(user_id, declarada)
     if decisao == fp.MISTO:
         return fp.msg_misto()

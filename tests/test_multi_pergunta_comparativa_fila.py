@@ -25,8 +25,11 @@ _LUZ = {"tipo": "despesa", "desc": "luz"}
 _RECUSA_ALUGUEL = ("Isso parece uma pergunta, não o valor de *aluguel*.\n\n"
                    "🐷 Faltou o valor de *aluguel*. Quanto foi? (só o número)")
 
-# E5 (P2: sem número também recusa), E6, E6b, E9a-c, nas três portas. E9* só o
-# `any(...)` de `contains_comparative_question` pega: no texto inteiro dá False.
+# E5 (P2: sem número também recusa), E6, E6b, E9a-c, nas três portas. E9* dão
+# False no texto inteiro; `contains_comparative_question` pega pelo split ou pela
+# varredura por verbo. Pedaço sem verbo próprio ("... e mais que o normal no
+# bar?"), só o split pega, porque herda o verbo do anterior (ver a tabela do
+# `contains` em `test_pergunta_comparativa_variantes.py`).
 _PERGUNTAS = [
     "gastei mais esse mês que no passado?",
     "gastei mais em 2025 ou 2026?",
@@ -37,6 +40,9 @@ _PERGUNTAS = [
     "paguei a luz e gastei mais em 2025 ou 2026?",
     "gastei 30 no uber e gastei mais em 2025 ou 2026?",
     "1200 e gastei mais em 2025 ou 2026?",
+    "eu gastei mais em 2025 ou 2026?",                   # #569: prefixo
+    "gastei mais em 2025",                               # #569: ano sem "?"
+    "Gastei 30 no Uber. Gastei mais em 2025 ou 2026?",   # #569: o split não corta no "."
 ]
 
 

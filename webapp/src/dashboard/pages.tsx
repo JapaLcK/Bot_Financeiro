@@ -18,6 +18,7 @@ import { Hero } from "./widgets/Hero";
 import { Invoice } from "./widgets/Invoice";
 import { NetWorth } from "./widgets/NetWorth";
 import { Simulator } from "./widgets/Simulator";
+import { SubscriptionList } from "./widgets/Subscriptions";
 import { TrajectoryChart } from "./widgets/TrajectoryChart";
 import { Wealth } from "./widgets/Wealth";
 
@@ -65,6 +66,15 @@ function Spending({ s }: { s: DashState }) {
         <div className="panel"><Calendar s={s} /></div>
       </div>
       <Panel span={7}><CategoryDetail s={s} /></Panel>
+    </Page>
+  );
+}
+
+// Os blocos da lista entram direto na grade: cada `.w` precisa ser filho de um `.panel`.
+function SubscriptionsPage() {
+  return (
+    <Page path="/assinaturas" lede="Os serviços que cobram todo mês, achados no seu Open Finance.">
+      <SubscriptionList />
     </Page>
   );
 }
@@ -179,7 +189,7 @@ function Tools() {
 }
 
 export const PAGES: Record<Path, (p: { s: DashState }) => ReactNode> = {
-  "/": Home, "/previsao": Forecast, "/gastos": Spending, "/simulador": Simulate,
+  "/": Home, "/previsao": Forecast, "/gastos": Spending, "/assinaturas": SubscriptionsPage, "/simulador": Simulate,
   "/metas": GoalsPage, "/patrimonio": Wealthy, "/lancamentos": Launches,
   "/ferramentas": Tools, "/piggy": PiggyChat,
 };

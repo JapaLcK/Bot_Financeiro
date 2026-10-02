@@ -23,7 +23,7 @@ import { PAINEL, exigeArtefatoEmDia, servir } from "./_painel.mjs";
 const PERFIL = "pigbank.dashboard.profile.v1";
 const PADRAO = ["hero", "resumo", "categorias", "calendario", "simulador", "compromissos", "piggy", "metas", "patrimonio"];
 const INVESTIR = ["patrimonio", "rendimento", "wealth", "simulador", "metas", "resumo", "piggy"];
-const ECONOMIZAR = ["resumo", "metas", "piggy", "categorias", "simulador", "compromissos"];
+const ECONOMIZAR = ["resumo", "metas", "piggy", "categorias", "assinaturas", "simulador", "compromissos"];
 
 let browser;
 before(async () => {

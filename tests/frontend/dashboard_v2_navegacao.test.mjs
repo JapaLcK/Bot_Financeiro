@@ -48,7 +48,7 @@ test("desktop: menu com Simulador e Ferramentas, sem Piggy; o botão rosa abre F
   await page.locator(".tools li").first().waitFor();
   const cards = await page.locator(".tools li").evaluateAll((lis) => lis.map((li) => [li.querySelector("b").textContent, li.querySelector("a")?.getAttribute("href") ?? li.querySelector("[aria-disabled]")?.textContent.includes("Em breve")]));
   await ctx.close();
-  assert.deepEqual(menu, ["Resumo", "Previsão", "Para onde vai", "Simulador", "Metas", "Patrimônio", "Lançamentos", "Ferramentas"]);
+  assert.deepEqual(menu, ["Resumo", "Previsão", "Para onde vai", "Assinaturas", "Simulador", "Metas", "Patrimônio", "Lançamentos", "Ferramentas"]);
   assert.equal(botao.trim(), "Ferramentas");
   assert.deepEqual(cards[0], ["Simulador", "#/simulador"]);
   assert.deepEqual(cards[1], ["Painel antigo", "/app"]); // sai do v2 para o dashboard de sempre
