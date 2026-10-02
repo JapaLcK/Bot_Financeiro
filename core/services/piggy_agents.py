@@ -423,7 +423,7 @@ def _detetive_detect_for_user(agent: dict[str, Any], today: date) -> int:
                 "merchant": s["chave"],
                 "descricao": desc[:120],
                 "categoria": s["categoria"],
-                "valor": val,
+                "valor": float(val),
                 "meses": meses,
                 "titulo": f"Parece assinatura: {desc_curta}",
                 "mensagem": (

@@ -17,7 +17,8 @@ SAIDA = ROOT / "webapp" / "src" / "dashboard" / "lib" / "api-v2.gen.ts"
 CABECALHO = ("// GERADO — não edite; rode python scripts/gerar_tipos_api_v2.py; "
              "tests/test_api_v2_contrato.py compara.\n")
 _META = {"title", "description", "default"}
-_PRIMITIVO = {"string": "string", "integer": "number", "number": "number", "boolean": "boolean", "null": "null"}
+# float não entra na v2: dinheiro é Decimal (texto).
+_PRIMITIVO = {"string": "string", "integer": "number", "boolean": "boolean", "null": "null"}
 _REF = "#/components/schemas/"
 _IDENT = re.compile(r"[A-Za-z_$][\w$]*")
 _OPERACAO = {"summary", "description", "operationId", "tags", "responses"}

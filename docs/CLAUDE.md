@@ -208,8 +208,9 @@ Sub-app FastAPI (`api/v2/app.py`) montado pelo monólito com `app.mount("/api/v2
 - **Contrato:** o envelope entra no OpenAPI como resposta `default` (`ErroV2`, em
   `api/v2/erros.py`; a resposta real continua saindo de `_envelope`). Os tipos TS saem de
   `python scripts/gerar_tipos_api_v2.py` para `webapp/src/dashboard/lib/api-v2.gen.ts`
-  (gerado e commitado; construção fora da lista aceita levanta `ValueError`; a query de
-  GET sai em `QueryGet`, só parâmetro `in: query`), e
+  (gerado e commitado; construção fora da lista aceita levanta `ValueError`, e `number`
+  (float) está fora dela: dinheiro é `Decimal`; a query de GET sai em `QueryGet`, só
+  parâmetro `in: query`), e
   `tests/test_api_v2_contrato.py` compara o arquivo com o `openapi()` de hoje e valida as
   fixtures dos testes de navegador (`tests/frontend/api_v2_respostas.json`). Mudou modelo:
   rode o gerador e depois o build do `webapp/`.
