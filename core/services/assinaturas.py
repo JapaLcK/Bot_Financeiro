@@ -2,9 +2,11 @@
 
 Fonte: `db/of_recurring.py` (uma linha por ocorrência casada, só despesa, só
 conexão viva). Usada pela `/api/v2/assinaturas`, pelo Detetive e pelo chat dele.
+Dinheiro sai `Decimal`, na escala em que o sync gravou (sem arredondar).
 """
 from collections import Counter, defaultdict
 from datetime import date
+from decimal import Decimal
 from statistics import median
 
 from db.cards import extract_installment_info
@@ -49,7 +51,7 @@ def _eh_servico(ult, categoria, marca) -> bool:
 
 def _item(linhas: list, chave: str, categoria, marca, today: date) -> dict:
     ult = linhas[-1]
-    valores = [abs(float(r["amount"])) for r in linhas]
+    valores = [abs(r["amount"]) for r in linhas]
     valor = valores[-1]
     # Reajuste: de trás para frente até o primeiro valor diferente.
     i = len(valores) - 1
@@ -73,8 +75,8 @@ def _item(linhas: list, chave: str, categoria, marca, today: date) -> dict:
         "chave": chave,
         "nome": _merchant(ult).get("name") or ult["description"],
         "categoria": categoria,
-        "valor": round(valor, 2),
-        "valor_anterior": None if valor_anterior is None else round(valor_anterior, 2),
+        "valor": valor,
+        "valor_anterior": valor_anterior,
         "reajuste_em": reajuste_em,
         "dia": dia,
         "proxima": proxima.isoformat(),
@@ -133,6 +135,6 @@ def listar_assinaturas(user_id: int, today: date) -> dict:
 
     servicos.sort(key=lambda x: -x["valor"])
     outras.sort(key=lambda x: -x["valor"])
-    total = round(sum(x["valor"] for x in servicos if x["status"] == "ativa"), 2)
+    total = sum((x["valor"] for x in servicos if x["status"] == "ativa"), Decimal(0))
     return {"servicos": servicos, "outras": outras, "total_mensal": total,
-            "total_anual": round(total * 12, 2), "chaves": sorted(chaves)}
+            "total_anual": total * 12, "chaves": sorted(chaves)}

@@ -44,11 +44,10 @@ def test_gerador_traduz_cada_construcao():
     schemas = {
         "Tudo": {
             "title": "Tudo", "description": "meta ignorada", "type": "object",
-            "required": ["s", "i", "n", "b", "z", "e", "a", "r", "u"],
+            "required": ["s", "i", "b", "z", "e", "a", "r", "u"],
             "properties": {
                 "s": {"type": "string", "title": "S"},
                 "i": {"type": "integer"},
-                "n": {"type": "number"},
                 "b": {"type": "boolean"},
                 "z": {"type": "null"},
                 "e": {"type": "string", "enum": ["a", "b"]},
@@ -63,7 +62,7 @@ def test_gerador_traduz_cada_construcao():
     }
     esperado = CABECALHO + (
         "export type Aa = { x?: string };\n"
-        "export type Tudo = { s: string; i: number; n: number; b: boolean; z: null; "
+        "export type Tudo = { s: string; i: number; b: boolean; z: null; "
         'e: "a" | "b"; a: Array<string | number>; r: Aa; u: Aa | null; opcional?: string; '
         '"com-hifen"?: boolean };\n'
         'export type RotasGet = { "/a": Aa; "/b": Tudo };\n'
@@ -146,13 +145,14 @@ def test_gerador_traduz_rota_post():
     _spec({}, {"/s": _sse()}),
     _spec({"X": {"type": "string", "format": "date"}}),
     _spec({"X": {"type": "integer", "pattern": "1"}}),
+    _spec({"X": {"type": "number"}}),
     _spec({"Bb": {"type": "string"}}, {"/b": {"put": _put()}}),
     _spec({"Bb": {"type": "string"}}, {"/b": {"get": _get("#/components/schemas/Bb")["get"],
                                               "put": _put(required=False)}}),
     _spec({"Bb": {"type": "string"}}, {"/b": {"get": _get("#/components/schemas/Bb")["get"],
                                               "put": _get("#/components/schemas/Bb")["get"]}}),
 ], ids=["additionalProperties", "oneOf", "allOf", "const", "post", "post_corpo_opcional",
-        "sse_sem_ref", "sse_sem_contentSchema", "format_date", "pattern_fora_de_string",
+        "sse_sem_ref", "sse_sem_contentSchema", "format_date", "pattern_fora_de_string", "number_float",
         "put_sem_get", "put_corpo_opcional", "put_sem_corpo"])
 def test_gerador_recusa_o_que_nao_traduz(spec):
     with pytest.raises(ValueError, match="construção não suportada"):
@@ -192,7 +192,13 @@ def test_fixture_do_me_segue_o_modelo(plano):
 
 @pytest.mark.parametrize("nome", sorted(FIXTURES["assinaturas"]))
 def test_fixture_de_assinaturas_segue_o_modelo(nome):
-    Assinaturas.model_validate(FIXTURES["assinaturas"][nome])
+    from decimal import Decimal
+
+    f = FIXTURES["assinaturas"][nome]
+    a = Assinaturas.model_validate(f)
+    assert a.model_dump(mode="json") == f  # dinheiro é texto: um 39.9 numérico volta "39.9"
+    assert str(a.total_mensal) == str(sum((x.valor for x in a.servicos if x.status == "ativa"), Decimal(0)))
+    assert a.total_anual == a.total_mensal * 12
 
 
 @pytest.mark.parametrize("nome", sorted(FIXTURES["perfil"]))

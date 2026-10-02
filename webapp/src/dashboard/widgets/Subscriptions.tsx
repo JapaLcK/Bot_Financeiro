@@ -66,13 +66,13 @@ export function Subscriptions() {
     <Frame id="assinaturas" title="Assinaturas">
       {estado ?? (
         <>
-          <p className="w-lede"><span className="num">{money(data!.total_mensal)}</span> por mês · <span className="num">{money0(data!.total_anual)}</span> por ano</p>
+          <p className="w-lede"><span className="num">{money(Number(data!.total_mensal))}</span> por mês · <span className="num">{money0(Number(data!.total_anual))}</span> por ano</p>
           {ativas.length > 0 && (
             <div className="bills">
               {ativas.map((a, i) => (
                 <div key={`${a.chave}#${i}`} className="bill sub-bill">
                   <span className="bill-name">{a.nome}<span className="bill-status faint">todo dia {a.dia}</span></span>
-                  <span className="bill-amt num">{money(a.valor)}</span>
+                  <span className="bill-amt num">{money(Number(a.valor))}</span>
                 </div>
               ))}
             </div>
@@ -93,7 +93,7 @@ function Linha({ a, children }: { a: Assinatura; children: ReactNode }) {
   return (
     <li className="sub">
       <b className="sub-name">{a.nome}</b>
-      <span className="sub-amt num">{money(a.valor)}</span>
+      <span className="sub-amt num">{money(Number(a.valor))}</span>
       <p className="sub-meta">
         todo dia {a.dia} · {ativa
           ? `próxima ${dayMonth(isoDay(a.proxima))}`
@@ -104,7 +104,7 @@ function Linha({ a, children }: { a: Assinatura; children: ReactNode }) {
         {" · "}desde {monthYear(isoDay(a.desde))}
       </p>
       {a.valor_anterior != null && a.reajuste_em && (
-        <p className="sub-meta">{a.valor > a.valor_anterior ? "subiu de" : "baixou de"} <span className="num">{money(a.valor_anterior)}</span> em {dayMonth(isoDay(a.reajuste_em))}</p>
+        <p className="sub-meta">{Number(a.valor) > Number(a.valor_anterior) ? "subiu de" : "baixou de"} <span className="num">{money(Number(a.valor_anterior))}</span> em {dayMonth(isoDay(a.reajuste_em))}</p>
       )}
       <div className="sub-acoes">{children}</div>
     </li>
@@ -193,8 +193,8 @@ export function SubscriptionList() {
       <div className="panel span-12">
         <Frame id="assinaturas-servicos" title="Serviços">
           <dl className="detail-facts">
-            <div><dt>Por mês</dt><dd className="num">{money(total_mensal)}</dd></div>
-            <div><dt>Por ano</dt><dd className="num">{money0(total_anual)}</dd></div>
+            <div><dt>Por mês</dt><dd className="num">{money(Number(total_mensal))}</dd></div>
+            <div><dt>Por ano</dt><dd className="num">{money0(Number(total_anual))}</dd></div>
           </dl>
           <p className="w-lede">Só os serviços ativos entram no total.</p>
           {avisoBloco}

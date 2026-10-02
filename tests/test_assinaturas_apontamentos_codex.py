@@ -2,6 +2,7 @@
 uma data passada, e movimento interno em QUALQUER ocorrência tira o grupo (não
 só na última). Banco real."""
 from datetime import date, timedelta
+from decimal import Decimal
 
 from _apoio_assinaturas import HOJE, conta, mensais, rp, semeia
 from core.services.assinaturas import listar_assinaturas
@@ -46,8 +47,8 @@ def test_reajuste_cola_na_cadeia_dele_e_nao_vira_terceiro_item(user_id):
                          _ap("am", -21.9, 7, date(2026, 9, 12)),
                          _ap("ic2", -16.9, 3, date(2026, 9, 10))])
     lista = listar_assinaturas(user_id, HOJE)
-    assert [(x["valor"], x["valor_anterior"]) for x in lista["servicos"]] == [(21.9, None), (16.9, 14.9)]
-    assert lista["total_mensal"] == 38.8
+    assert [(x["valor"], x["valor_anterior"]) for x in lista["servicos"]] == [(Decimal("21.9"), None), (Decimal("16.9"), Decimal("14.9"))]
+    assert lista["total_mensal"] == Decimal("38.8")
 
 
 def test_reajuste_vai_para_a_cadeia_de_valor_mais_proximo(user_id):
@@ -57,8 +58,8 @@ def test_reajuste_vai_para_a_cadeia_de_valor_mais_proximo(user_id):
                          _ap("am", -21.9, 3, date(2026, 4, 12)),
                          _ap("ic2", -16.9, 5, date(2026, 9, 10))])
     itens = {x["valor"]: x for x in listar_assinaturas(user_id, HOJE)["servicos"]}
-    assert (itens[16.9]["valor_anterior"], itens[16.9]["meses"]) == (14.9, 8)
-    assert itens[21.9]["status"] == "possivelmente_cancelada"
+    assert (itens[Decimal("16.9")]["valor_anterior"], itens[Decimal("16.9")]["meses"]) == (Decimal("14.9"), 8)
+    assert itens[Decimal("21.9")]["status"] == "possivelmente_cancelada"
 
 
 def test_conta_em_moeda_estrangeira_fica_fora(user_id):
@@ -68,7 +69,7 @@ def test_conta_em_moeda_estrangeira_fica_fora(user_id):
            [rp("NETFLIX.COM", -20, usd), rp("Spotify", -39.9, brl)])
     lista = listar_assinaturas(user_id, HOJE)
     assert [x["chave"] for x in lista["servicos"]] == ["spotify"]
-    assert lista["total_mensal"] == 39.9
+    assert lista["total_mensal"] == Decimal("39.9")
 
 
 def test_grupo_que_nao_e_mensal_fica_fora(user_id):
@@ -82,4 +83,4 @@ def test_grupo_que_nao_e_mensal_fica_fora(user_id):
            [rp("Uber One", -15, semanal), rp("Amazon Prime", -199, anual), rp("Spotify", -21.9, mensal)])
     lista = listar_assinaturas(user_id, HOJE)
     assert [x["chave"] for x in lista["servicos"] + lista["outras"]] == ["spotify"]
-    assert lista["total_mensal"] == 21.9
+    assert lista["total_mensal"] == Decimal("21.9")
