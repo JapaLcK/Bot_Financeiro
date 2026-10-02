@@ -176,7 +176,10 @@ Sub-app FastAPI (`api/v2/app.py`) montado pelo monólito com `app.mount("/api/v2
 - `GET /api/v2/assinaturas` e `POST /api/v2/assinaturas/marca` (`api/v2/assinaturas.py`):
   a lista do Recurring Payments da Pluggy (`core/services/assinaturas.py`) e a marcação
   do usuário por chave do comerciante (`assinatura`/`ignorar`/`nenhuma`; chave fora da
-  lista dá 404). Gate `subscriptions` em `FEATURE_MIN_TIER_V2` (Plus ou Pro).
+  lista dá 404). Gate `subscriptions` em `FEATURE_MIN_TIER_V2` (Plus ou Pro). O cliente é
+  `webapp/src/dashboard/widgets/Subscriptions.tsx` (o card do Resumo e a página
+  `/assinaturas`); o POST sai pelo `apiPost` de `lib/v2.ts`, com o header de
+  `window.pbCsrfHeaders` (auth-refresh.js), e o 403 `pro_required` vira o convite.
 - **Dinheiro na v2 é `Decimal` e sai como TEXTO decimal** (`"1234.56"`, sem arredondar e sem
   float), em toda rota: no TS é `string`. A escala é a da coluna (`"1000"` e `"1000.00"`
   valem). O contrato vale para toda rota futura.

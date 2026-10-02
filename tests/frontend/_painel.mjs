@@ -39,7 +39,8 @@ export const RESPOSTAS = JSON.parse(readFileSync(join(RAIZ, "tests", "frontend",
 
 /**
  * Atende o contexto do disco: `raiz` = frontend/ (o /painel) ou RAIZ (o protótipo). O
- * `/api/v2/me` responde o `plano` pelas fixtures, e o `/api/v2/eventos` (SSE) fica
+ * `/api/v2/me` responde o `plano` pelas fixtures; o GET `/api/v2/assinaturas`, a lista
+ * `cheia` no Plus e no Pro e o 403 `pro_required` nos outros; o `/api/v2/eventos` (SSE) fica
  * pendente para sempre: stream aberto e mudo. Registrar de novo vale para as
  * próximas requisições: no Playwright a rota registrada por último vence.
  */
@@ -51,6 +52,11 @@ export async function servir(ctx, raiz = FRONTEND, { plano = "pro" } = {}) {
     if (url.origin !== ORIGIN) return r.abort();
     if (url.pathname === "/api/v2/me") return r.fulfill({ json: me });
     if (url.pathname === "/api/v2/eventos") return;
+    if (url.pathname === "/api/v2/assinaturas" && r.request().method() === "GET") {
+      const pago = plano === "plus" || plano === "pro";
+      const e = RESPOSTAS.erros["403_pro_required"];
+      return pago ? r.fulfill({ json: RESPOSTAS.assinaturas.cheia }) : r.fulfill({ status: e.status, json: e.body });
+    }
     const path = decodeURIComponent(url.pathname).replace(/\/$/, "/index.html");
     return r.fulfill({ path: join(raiz, path) }).catch(() => r.fulfill({ status: 404, body: "" }));
   });

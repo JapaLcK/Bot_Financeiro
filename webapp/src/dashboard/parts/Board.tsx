@@ -20,6 +20,7 @@ import { Wealth } from "../widgets/Wealth";
 import { Income } from "../widgets/Income";
 import { Yield } from "../widgets/Yield";
 import { Installments } from "../widgets/Installments";
+import { Subscriptions } from "../widgets/Subscriptions";
 import { Catalog, ProfileSelect } from "./BoardControls";
 import { ProfilePicker } from "./ProfilePicker";
 import { PiggyBand } from "./PiggyBand";
@@ -43,6 +44,7 @@ const EXTRA: WidgetItem[] = [
   { id: "renda", size: "tall", label: "Renda mês a mês" },
   { id: "rendimento", size: "wide", label: "Rendimento × CDI" },
   { id: "parcelas", size: "wide", label: "Parcelas futuras" },
+  { id: "assinaturas", size: "tall", label: "Assinaturas" },
 ];
 const ALL = [...DEFAULT, ...EXTRA];
 const KNOWN = ALL.map((w) => w.id);
@@ -54,6 +56,7 @@ const VIEWS: Record<string, (p: { s: DashState }) => ReactNode> = {
   compromissos: Bills, piggy: Piggy, metas: Goals, patrimonio: () => <NetWorth />,
   fatura: Invoice, wealth: () => <Wealth />,
   renda: () => <Income />, rendimento: () => <Yield />, parcelas: () => <Installments />,
+  assinaturas: () => <Subscriptions />,
 };
 
 // Página de cada bloco (o Piggy não tem página própria: as ações dele levam às outras).
@@ -61,7 +64,7 @@ const PAGE: Record<string, Path | null> = {
   hero: "/previsao", resumo: "/lancamentos", categorias: "/gastos", calendario: "/gastos",
   simulador: "/simulador", compromissos: "/previsao", piggy: null, metas: "/metas", patrimonio: "/patrimonio",
   fatura: "/previsao", wealth: "/patrimonio",
-  renda: "/lancamentos", rendimento: "/patrimonio", parcelas: "/previsao",
+  renda: "/lancamentos", rendimento: "/patrimonio", parcelas: "/previsao", assinaturas: "/assinaturas",
 };
 
 const presetOf = (p: string): string[] => PROFILES.find((x) => x.id === p)?.preset ?? DEFAULT.map((w) => w.id);
