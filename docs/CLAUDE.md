@@ -52,7 +52,8 @@ core/
 api/v2/                   — a /api/v2 do dashboard v2: sub-app FastAPI montado pelo
                             monólito em /api/v2, com envelope de erro próprio
                             (erros.py), a dependência única do usuário (sessao.py)
-                            e um router por assunto (me.py, eventos.py)
+                            e um router por assunto (me.py, eventos.py,
+                            perfil.py, contas.py)
 
 db/                       — PACOTE com ~30 módulos, um por domínio
   schema.py               — DDL de TODAS as tabelas (init_db) — fonte de verdade
@@ -153,6 +154,28 @@ Sub-app FastAPI (`api/v2/app.py`) montado pelo monólito com `app.mount("/api/v2
   (`-> AsyncIterable[Aviso]`), e a varredura aceita isso no lugar do `response_model`. O
   cliente (`webapp/src/dashboard/lib/eventos.ts`) invalida todas as consultas a cada
   aviso e a cada conexão aberta.
+- `GET /api/v2/perfil` e `PUT /api/v2/perfil` (`api/v2/perfil.py`): `{"perfil": ...}` com
+  os 5 perfis do quiz (`db/signup_quiz.PERFIS`), `"padrao"` (escolheu o painel padrão) ou
+  `null` (nunca escolheu); grava em `auth_accounts.dashboard_profile`. O PUT é a primeira
+  escrita da v2: exige o CSRF do pai (cookie `csrf_token` + header `x-csrf-token`, 403
+  `{"detail": ...}` fora do envelope), corpo fora da lista é 422 no envelope, e conta sem
+  linha é 404 `conta_nao_encontrada`. O quiz continua recusando `"padrao"`.
+- `GET /api/v2/contas` (`api/v2/contas.py`, regra em `db/contas_hoje.py`): o bloco de contas
+  do Resumo — `total`, `motivos`, `fora_do_total`, `carteira {saldo, motivos}` e `contas[]`
+  (`id`, `instituicao`, `nome`, `saldo`, `moeda`, `no_total`, `conexao` — um estado de
+  `connection_ui_state` —, `sincronizado_em`, `motivos`). Mesmo recorte e mesmos critérios da
+  foto do patrimônio (`db/patrimonio.py`), num snapshot só (repeatable read, só leitura):
+  `total` = `calcular().carteira + calcular().bancos`. Conta desatualizada (sync > 48 h,
+  pela metade ou nunca: `banco_desatualizado`) e conta fora do último sync
+  (`conta_fora_do_ultimo_sync`) seguem no total; outra moeda (`outra_moeda`, saldo na moeda
+  dela), conexão pausada/apagada (`conexao_pausada`, saldo `null`) e saldo
+  ausente/malformado/NaN/±Inf (`saldo_ausente`, saldo `null`) ficam fora (`no_total: false`,
+  contadas em `fora_do_total`). A carteira sai sempre com `carteira_nao_confirmada` até a
+  Q37. `motivos` vazio = número exato. Cartão, posições e caixinhas não entram; `raw` e
+  `provider_*_id` nunca saem.
+- **Dinheiro na v2 é `Decimal` e sai como TEXTO decimal** (`"1234.56"`, sem arredondar e sem
+  float), em toda rota: no TS é `string`. A escala é a da coluna (`"1000"` e `"1000.00"`
+  valem). O contrato vale para toda rota futura.
 - **Contrato:** o envelope entra no OpenAPI como resposta `default` (`ErroV2`, em
   `api/v2/erros.py`; a resposta real continua saindo de `_envelope`). Os tipos TS saem de
   `python scripts/gerar_tipos_api_v2.py` para `webapp/src/dashboard/lib/api-v2.gen.ts`

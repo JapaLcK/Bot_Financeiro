@@ -38,6 +38,10 @@ def _tipo(s: dict) -> str:
         return " | ".join(json.dumps(v, ensure_ascii=False) for v in s["enum"])
     if chaves == {"type"} and t in _PRIMITIVO:
         return _PRIMITIVO[t]
+    # Decimal (dinheiro, sai como texto) e datetime: o TS só vê a string.
+    if t == "string" and (chaves == {"type", "pattern"}
+                          or (chaves == {"type", "format"} and s["format"] == "date-time")):
+        return "string"
     if chaves == {"type", "items"} and t == "array":
         return f"Array<{_tipo(s['items'])}>"
     if t == "object" and chaves in ({"type", "properties"}, {"type", "properties", "required"}):
@@ -51,11 +55,11 @@ def _tipo(s: dict) -> str:
     raise _recusa(s)
 
 
-def _resposta_200(path: str, item: dict) -> tuple[str, str]:
+def _resposta_200(path: str, op: dict) -> tuple[str, str]:
     """(`"json"` ou `"sse"`, tipo): o do corpo JSON, ou o do `data` de cada evento SSE."""
-    if set(item) != {"get"} or set(item["get"]) - _OPERACAO:
-        raise _recusa({path: item})
-    content = item["get"]["responses"]["200"]["content"]
+    if set(op) - _OPERACAO:
+        raise _recusa({path: op})
+    content = op["responses"]["200"]["content"]
     if set(content) == {"application/json"}:
         schema = content["application/json"]["schema"]
         if set(schema) != {"$ref"}:
@@ -73,6 +77,20 @@ def _resposta_200(path: str, item: dict) -> tuple[str, str]:
     raise _recusa({path: content})
 
 
+def _put(path: str, op: dict) -> str:
+    """`{ corpo; resposta }` do PUT: corpo JSON obrigatório por `$ref`, resposta JSON."""
+    corpo = op.get("requestBody")
+    if (not isinstance(corpo, dict) or set(corpo) != {"content", "required"} or corpo["required"] is not True
+            or set(corpo["content"]) != {"application/json"}
+            or set(corpo["content"]["application/json"]) != {"schema"}
+            or set(corpo["content"]["application/json"]["schema"]) != {"$ref"}):
+        raise _recusa({path: op})
+    tipo_resposta, resposta = _resposta_200(path, {k: v for k, v in op.items() if k != "requestBody"})
+    if tipo_resposta != "json":
+        raise _recusa({path: op})
+    return f"{{ corpo: {_tipo(corpo['content']['application/json']['schema'])}; resposta: {resposta} }}"
+
+
 def gerar(spec: dict) -> str:
     schemas = spec.get("components", {}).get("schemas", {})
     linhas = [CABECALHO]
@@ -80,11 +98,18 @@ def gerar(spec: dict) -> str:
         if not _IDENT.fullmatch(nome):
             raise _recusa(nome)
         linhas.append(f"export type {nome} = {_tipo(schemas[nome])};\n")
-    rotas = {"json": [], "sse": []}
+    rotas = {"json": [], "sse": [], "put": []}
     for p in sorted(spec["paths"]):
-        tipo_resposta, tipo = _resposta_200(p, spec["paths"][p])
+        item = spec["paths"][p]
+        if set(item) not in ({"get"}, {"get", "put"}):
+            raise _recusa({p: item})
+        tipo_resposta, tipo = _resposta_200(p, item["get"])
         rotas[tipo_resposta].append(f"{json.dumps(p)}: {tipo}")
+        if "put" in item:
+            rotas["put"].append(f"{json.dumps(p)}: {_put(p, item['put'])}")
     linhas.append(f"export type RotasGet = {{ {'; '.join(rotas['json'])} }};\n")
+    if rotas["put"]:
+        linhas.append(f"export type RotasPut = {{ {'; '.join(rotas['put'])} }};\n")
     if rotas["sse"]:
         linhas.append(f"export type RotasSSE = {{ {'; '.join(rotas['sse'])} }};\n")
     return "".join(linhas)
