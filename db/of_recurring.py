@@ -54,6 +54,7 @@ join open_finance_transactions t on t.account_id = a.id
      and t.provider_transaction_id = any(rp.occurrences)
 where c.user_id = %s and upper(coalesce(c.status,'')) not in ('PAUSED','DELETED')
   and rp.average_amount < 0
+  and upper(a.currency) = 'BRL'   -- conta em dólar somaria US$ como R$
 order by t.transaction_date, t.provider_transaction_id
 """
 

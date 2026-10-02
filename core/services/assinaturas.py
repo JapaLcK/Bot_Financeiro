@@ -88,16 +88,21 @@ def listar_assinaturas(user_id: int, today: date) -> dict:
                    or extract_installment_info({"creditCardMetadata": r["cc_meta"] if isinstance(r["cc_meta"], dict) else None})[1]
                    for r in linhas)}
     # Por chave, os sobreviventes viram cadeias (`por_rp` já está na ordem da 1ª
-    # ocorrência): o grupo que começa depois do fim da cadeia anterior é reajuste
-    # que a Pluggy partiu em dois (um item, com valor_anterior); o que se sobrepõe
-    # é outro serviço do mesmo comerciante (iCloud e Apple Music) e sai separado.
+    # ocorrência): o grupo que começa depois do fim de uma cadeia é reajuste que a
+    # Pluggy partiu em dois (um item, com valor_anterior) e cola na cadeia já
+    # terminada de valor mais próximo — com dois serviços intercalados, a última
+    # cadeia pode ser a do outro. O que se sobrepõe a todas é outro serviço do
+    # mesmo comerciante (iCloud e Apple Music) e sai separado.
     cadeias: dict[str, list[list]] = defaultdict(list)
     for k, linhas in por_rp.items():
         if k in fora:
             continue
         cs = cadeias[merchant_key(linhas[0]["description"])]  # description é do grupo
-        if cs and cs[-1][-1]["transaction_date"] < linhas[0]["transaction_date"]:
-            cs[-1].extend(linhas)
+        ini, v = linhas[0]["transaction_date"], abs(linhas[0]["amount"])
+        antes = [c for c in cs if c[-1]["transaction_date"] < ini]
+        if antes:
+            min(antes, key=lambda c: (abs(abs(c[-1]["amount"]) - v),
+                                      -c[-1]["transaction_date"].toordinal())).extend(linhas)
         else:
             cs.append(list(linhas))
     cadeias.pop("", None)  # descrição só de pontuação não identifica ninguém
