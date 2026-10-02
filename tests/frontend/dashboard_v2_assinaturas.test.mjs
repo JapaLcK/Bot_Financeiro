@@ -5,11 +5,12 @@
  *
  *   · card: total, as 3 maiores ATIVAS, a seta leva à página;
  *   · página: as duas seções, dia, próxima, meio, reajuste, "parece cancelada", totais,
- *     e sem a etiqueta de demonstração (os dados são reais);
+ *     e a etiqueta de demonstração (a barra lateral e o Piggy seguem sintéticos);
  *   · Essencial: o 403 `pro_required` vira o convite, sem ação e sem POST;
  *   · POST com o CSRF do auth-refresh.js e Content-Type JSON (sem ele o FastAPI dá 422),
  *     Desfazer voltando ao estado anterior (também depois da última, de uma falha dele e de
- *     uma falha da ação seguinte), falha com texto fixo e recarga, botões travados enquanto
+ *     uma falha da ação seguinte), falha com texto fixo e recarga, resposta perdida com a
+ *     marca gravada vira sucesso pela recarga, botões travados enquanto
  *     o POST está no ar (também depois de sair e voltar), um POST por clique duplo, aviso
  *     que cobre o grupo da mesma chave (1 e 2 a mais), vazio "ignorou tudo" sem o link;
  *   · protótipo sem API; layout a 375 e a 1440; `isoDay` no fuso de São Paulo.
@@ -55,8 +56,8 @@ function backend() {
 
 const erro = (r, nome) => { const e = RESPOSTAS.erros[nome]; return r.fulfill({ status: e.status, json: e.body }); };
 
-// `falha`: nome do erro, ou (corpo, i) => nome|undefined por POST. `trava.p`: promessa que
-// segura o POST enquanto estiver posta.
+// `falha`: nome do erro, ou (corpo, i) => nome|undefined por POST; "perdida" grava a marca e
+// derruba a resposta. `trava.p`: promessa que segura o POST enquanto estiver posta.
 async function abrir({ width = 1440, plano = "plus", perfil = "economizar", hash = "#/", cookie = true, get, falha, trava, raiz, url = PAINEL } = {}) {
   const ctx = await browser.newContext({ viewport: { width, height: width > 760 ? 900 : 812 }, reducedMotion: "reduce", timezoneId: "America/Sao_Paulo" });
   await servir(ctx, raiz, { plano });
@@ -76,9 +77,9 @@ async function abrir({ width = 1440, plano = "plus", perfil = "economizar", hash
       if (headers["x-csrf-token"] !== CSRF) return erro(r, "403_csrf");
       if (!(headers["content-type"] ?? "").includes("application/json")) return r.fulfill({ status: 422, json: { detail: [{ type: "model_attributes_type" }] } });
       const f = typeof falha === "function" ? falha(corpo, posts.length - 1) : falha;
-      if (f) return erro(r, f);
+      if (f && f !== "perdida") return erro(r, f);
       srv.marca.set(req.postDataJSON().chave, req.postDataJSON().status);
-      return r.fulfill({ json: srv.lista() });
+      return f ? r.abort() : r.fulfill({ json: srv.lista() });
     });
   }
   const page = await ctx.newPage();
@@ -116,7 +117,7 @@ test("card (Plus, Economizar): total, as 3 maiores ativas em ordem, sem a cancel
   assert.equal(dia, "todo dia 10");
 });
 
-test("página: duas seções, dia, próxima, meio com e sem final, reajuste, cancelada, totais; sem etiqueta de demonstração", async () => {
+test("página: duas seções, dia, próxima, meio com e sem final, reajuste, cancelada, totais; com a etiqueta de demonstração", async () => {
   const { ctx, page } = await abrir({ hash: "#/assinaturas" });
   await pronta(page);
   const texto = async (sel, nome) => (await linha(page, sel, nome).textContent()).replace(/\s+/g, " ");
@@ -135,11 +136,9 @@ test("página: duas seções, dia, próxima, meio com e sem final, reajuste, can
     ignorarPorNome: await Promise.all([...CHEIA.servicos, ...CHEIA.outras].map((a) => page.getByRole("button", { name: rotulo("Ignorar", a.nome), exact: true }).count())),
     cartao: await linha(page, SERV, "Netflix").locator("i.ph-credit-card").count(),
     conta: await linha(page, SERV, "Smart Fit").locator("i.ph-bank").count(),
-    etiqueta: await page.evaluate(() => document.body.innerText.includes("Dados de demonstração") || !!document.querySelector(".foot")),
+    etiqueta: await page.evaluate(() => document.body.innerText.includes("Dados de demonstração")),
+    rodape: await page.locator(".foot").count(),
   };
-  await page.evaluate(() => { location.hash = "#/"; });
-  await page.locator(".board").waitFor();
-  r.etiquetaNoResumo = await page.evaluate(() => document.body.innerText.includes("Dados de demonstração"));
   await ctx.close();
   assert.deepEqual(r.titulos, ["Serviços", "Outras cobranças recorrentes"]);
   assert.deepEqual(r.totais, ["R$ 212,60", "R$ 2.551"]);
@@ -158,8 +157,8 @@ test("página: duas seções, dia, próxima, meio com e sem final, reajuste, can
   assert.match(r.porto, /baixou de R\$ 99,90 em 22 jun/);
   assert.equal(r.cartao, 1);
   assert.equal(r.conta, 1);
-  assert.equal(r.etiqueta, false);
-  assert.equal(r.etiquetaNoResumo, true);
+  assert.equal(r.etiqueta, true);
+  assert.equal(r.rodape, 1);
 });
 
 test("sem seletor de mês na página (NO_MONTH); no Resumo ele aparece", async () => {
@@ -442,6 +441,28 @@ test("falha numa ação depois de outra que deu certo: o Desfazer da anterior fi
   assert.deepEqual(r.servicos, ["Smart Fit", "Netflix", "Globoplay", "Apple Music", "iCloud"]);
 });
 
+test("resposta perdida com a marca gravada: a recarga mostra que pegou; aviso de sucesso e o Desfazer DESTA ação", async () => {
+  const { ctx, page, posts } = await abrir({ hash: "#/assinaturas", falha: (_, i) => (i === 1 ? "perdida" : undefined) });
+  await pronta(page);
+  await clicar(page, SERV, "Netflix", "Ignorar");
+  await sumir(page, SERV, "Netflix");
+  await clicar(page, SERV, "Globoplay", "Ignorar");
+  await sumir(page, SERV, "Globoplay");
+  await page.waitForFunction(() => document.querySelector(".sub-aviso p")?.textContent !== "Netflix ignorada.");
+  await page.locator(".sub-aviso button:enabled").waitFor();
+  const r = { aviso: await page.locator(".sub-aviso p").textContent() };
+  await page.getByRole("button", { name: "Desfazer" }).click();
+  while (posts.length < 3) await page.waitForTimeout(20);
+  await page.waitForLoadState("networkidle");
+  r.servicos = await nomes(page, SERV);
+  await ctx.close();
+  assert.equal(r.aviso, "Globoplay ignorada.");
+  assert.deepEqual(posts.map((p) => p.corpo), [
+    { chave: "netflix", status: "ignorar" }, { chave: "globoplay", status: "ignorar" }, { chave: "globoplay", status: "nenhuma" },
+  ]);
+  assert.deepEqual(r.servicos, ["Smart Fit", "Globoplay", "Apple Music", "iCloud"]);
+});
+
 test("sair e voltar com o POST no ar: os botões da página remontada nascem travados e voltam ao responder", async () => {
   let soltar;
   const trava = { p: new Promise((ok) => { soltar = ok; }) };
@@ -514,8 +535,8 @@ for (const width of [375, 1440]) {
     r.alturas = await page.locator(ACOES).evaluateAll((bs) => bs.map((b) => b.getBoundingClientRect().height));
     await ctx.close();
     assert.equal(r.resumo, 0);
-    // a etiqueta só aparece no celular (shell.css): lá ela tem de estar no Resumo e sumir aqui
-    assert.deepEqual([r.etiquetaResumo, r.etiquetaPagina], [width < 760 ? 1 : 0, 0]);
+    // a faixa só aparece no celular (shell.css): lá ela está no Resumo e aqui também
+    assert.deepEqual([r.etiquetaResumo, r.etiquetaPagina], width < 760 ? [1, 1] : [0, 0]);
     assert.ok(r.sobra <= 1, `o card transborda ${r.sobra}px`);
     assert.equal(r.pagina, 0);
     assert.ok(r.alturas.length >= 8 && r.alturas.every((h) => h >= 44), JSON.stringify(r.alturas));

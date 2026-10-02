@@ -118,6 +118,10 @@ export function SubscriptionList() {
   const [aviso, setAviso] = useState<{ texto: string; desfazer?: MarcaIn } | null>(null);
   const avisoRef = useRef<HTMLParagraphElement>(null);
   const desfazerRef = useRef<HTMLButtonElement>(null);
+  const feito = (d: Assinaturas, a: Acao) => {
+    setAviso({ texto: a.feito, desfazer: a.desfazer });
+    setIgnorouTudo(a.corpo.status === "ignorar" && !d.servicos.length && !d.outras.length);
+  };
   // Sem atualização otimista: a lista na tela é sempre a última resposta do servidor.
   const m = useMutation({
     mutationKey: ["assinaturas", "marca"],
@@ -125,15 +129,26 @@ export function SubscriptionList() {
     onMutate: () => qc.cancelQueries({ queryKey: assinaturasQuery.queryKey }),
     onSuccess: (d, a) => {
       qc.setQueryData(assinaturasQuery.queryKey, d);
-      setAviso({ texto: a.feito, desfazer: a.desfazer });
-      setIgnorouTudo(a.corpo.status === "ignorar" && !d.servicos.length && !d.outras.length);
+      feito(d, a);
     },
     // O GET de recarga também planta de novo o cookie de CSRF, se ele venceu.
     // O Desfazer (o que falhou, ou o da ação anterior) continua disponível: o item ignorado
     // não volta por outro caminho.
-    onError: (_, a) => {
-      setAviso((p) => a.desfazendo ? { texto: "Não deu para desfazer. Tente de novo.", desfazer: a.corpo } : { texto: "Não deu para salvar. Tente de novo.", desfazer: p?.desfazer });
-      qc.invalidateQueries({ queryKey: assinaturasQuery.queryKey });
+    onError: async (_, a) => {
+      if (a.desfazendo) {
+        setAviso({ texto: "Não deu para desfazer. Tente de novo.", desfazer: a.corpo });
+        qc.invalidateQueries({ queryKey: assinaturasQuery.queryKey });
+        return;
+      }
+      // A resposta pode ter se perdido com a marca já gravada: a recarga diz se ela pegou.
+      // Recarga que falha deixa a lista de antes do POST, onde a ação não aparece aplicada.
+      await qc.invalidateQueries({ queryKey: assinaturasQuery.queryKey });
+      const d = qc.getQueryData<Assinaturas>(assinaturasQuery.queryKey);
+      const { chave, status } = a.corpo;
+      const item = d && [...d.servicos, ...d.outras].find((x) => x.chave === chave);
+      const pegou = status === "ignorar" ? !item : status === "assinatura" ? d?.servicos.some((x) => x.chave === chave && x.marcada) : item && !item.marcada;
+      if (d && pegou) feito(d, a);
+      else setAviso((p) => ({ texto: "Não deu para salvar. Tente de novo.", desfazer: p?.desfazer }));
     },
   });
   // `m.isPending` só muda no re-render (o TanStack notifica num setTimeout): dois cliques no
