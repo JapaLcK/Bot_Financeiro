@@ -812,8 +812,9 @@ def list_history(
     credit_params: list[Any] = []
     if include_credit:
         # is_refund: true se refunds_only, false caso contrário (default).
-        clauses = ["ct.user_id = %s", f"ct.is_refund = {'true' if refunds_only else 'false'}"]
-        credit_params.append(user_id)
+        clauses = ["ct.user_id = %s AND (b.user_id = %s OR b.user_id IS NULL)",
+                   f"ct.is_refund = {'true' if refunds_only else 'false'}"]
+        credit_params += [user_id, user_id]
         if from_date:
             clauses.append("b.period_end >= %s")
             credit_params.append(from_date)

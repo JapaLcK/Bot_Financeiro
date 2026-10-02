@@ -35,7 +35,7 @@ import frontend.finance_bot_websocket_custom as dashboard
 from conftest import usuario_pagante
 from db.analytics import (
     compute_categories, compute_evolution, compute_history_quick_stats, compute_kpis,
-    compute_top_merchants,
+    compute_top_merchants, list_history,
 )
 from db.connection import TIPO_CANON_SQL, TIPO_DESPESA_SQL, TIPO_RECEITA_SQL, get_conn
 from db.resumo_mes import mes_de, totais, totais_do_mes
@@ -246,3 +246,44 @@ def test_cards_do_historico_contam_a_fatura_null_e_nao_o_b():
     a, _ = _par()
     st = compute_history_quick_stats(a, INICIO, FIM)
     assert (st["receitas_count"], st["despesas_count"], st["total_count"]) == (2, 8, 10)
+
+
+def _cartao_nas_listas(uid) -> dict:
+    """O cartão do mês nas três listas: a do /history (`list_history`), a do /app (consultas
+    3 e 4 de `get_financial_data`) e a exportação (`_fetch_export_items`)."""
+    h = list_history(uid, from_date=INICIO, to_date=FIM, limit=200)
+    app = asyncio.run(dashboard.get_financial_data(uid, year=INICIO.year, month=INICIO.month, limit=100))
+    exp = asyncio.run(dashboard._fetch_export_items(uid, INICIO, FIM - timedelta(days=1)))
+    return {
+        "historico": sorted(i["valor"] for i in h["items"] if i["tipo"] == "credito"),
+        "historico_total": (h["total"], len(h["items"])),
+        "app": sorted(float(r["valor"]) for r in app["recent_launches"] if r["tipo"] == "credito"),
+        "app_total": (app["launches_pagination"]["total"], len(app["recent_launches"])),
+        "export": sorted(i["valor"] for i in exp if i["label"] == "Cartão"),
+    }
+
+
+def test_listas_e_exportacao_nao_mostram_compra_de_a_em_fatura_de_b():
+    """A barreira `b.user_id` nas LISTAS (e nas contagens delas): /history, consultas 3 e 4
+    do /app e exportação. A lista do Histórico bate com os cards dele. Controle NEGATIVO
+    medido: sem a barreira em qualquer uma, A lista [80.0, 4321.0] e este fica vermelho."""
+    a, b = usuario_pagante(), usuario_pagante()
+    semeia_a_em_fatura_de_b(a, b)
+    for uid, valor in ((a, 80.0), (b, 1.0)):  # positivo: a compra legítima de cada um entra
+        x = _cartao_nas_listas(uid)
+        assert x["historico"] == x["app"] == x["export"] == [valor], (uid, x)
+        st = compute_history_quick_stats(uid, INICIO, FIM)
+        assert x["historico_total"] == x["app_total"] == (st["total_count"], st["total_count"]) == (1, 1), (uid, x)
+
+
+def test_listas_e_exportacao_contam_a_fatura_null_e_batem_com_os_cards():
+    """Positivo da barreira nas listas: a fatura com `user_id` NULL (50) aparece nas três, e
+    a lista do Histórico tem o mesmo número de itens, receitas e despesas que os cards."""
+    a, _ = _par()
+    x = _cartao_nas_listas(a)
+    assert x["historico"] == x["app"] == x["export"] == [50.0, 80.0, 100.0], x
+    h = list_history(a, from_date=INICIO, to_date=FIM, limit=200)
+    st = compute_history_quick_stats(a, INICIO, FIM)
+    receitas = sum(i["tipo"] == "receita" for i in h["items"])
+    assert (h["total"], len(h["items"]), receitas, len(h["items"]) - receitas) == (
+        st["total_count"], st["total_count"], st["receitas_count"], st["despesas_count"]) == (10, 10, 2, 8)

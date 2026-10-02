@@ -533,12 +533,12 @@ async def get_financial_data(
             FROM credit_transactions t
             JOIN credit_cards c ON c.id = t.card_id
             JOIN credit_bills b ON b.id = t.bill_id
-            WHERE t.user_id = %s
+            WHERE t.user_id = %s AND (b.user_id = %s OR b.user_id IS NULL)
               AND b.period_end >= %s::date
               AND b.period_end < %s::date
               AND t.is_refund = false
         """
-        credit_union_params = [user_id, query_start, month_end]
+        credit_union_params = [user_id, user_id, query_start, month_end]
 
     # ───── Paraleliza queries independentes via asyncio.gather ─────
     # Cada _q() pega uma conn do pool. Antes era sequencial dentro de UMA
@@ -1234,11 +1234,11 @@ async def _fetch_export_items(user_id: int, start_date: date | int, end_date: da
                 FROM credit_transactions ct
                 JOIN credit_bills b ON b.id = ct.bill_id
                 JOIN credit_cards c ON c.id = ct.card_id
-                WHERE ct.user_id = %s
+                WHERE ct.user_id = %s AND (b.user_id = %s OR b.user_id IS NULL)
                   AND ct.is_refund = false
                   AND b.period_end >= %s AND b.period_end < %s
                 """,
-                (user_id, period_start, exclusive_end),
+                (user_id, user_id, period_start, exclusive_end),
             )
             for r in await cur.fetchall():
                 desc = (r.get("nota") or "").strip()
