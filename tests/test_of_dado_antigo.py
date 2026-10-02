@@ -214,8 +214,9 @@ PRECEDENCIA = {
         lambda mp: _sql("update open_finance_connections set reconnected_at = now()"
                      " where provider_item_id=%s", ITEM),
         lambda s, d: (s, d) == ("updating", "Ainda não sincronizou")),
+    # 90 min: passou dos 30 da D1 e fica abaixo do teto de 120 do "Atualizando…" (#744).
     "reconexao_coleta_vencida": (
-        lambda mp: _sql("update open_finance_connections set reconnected_at = now() - interval '3 hours'"
+        lambda mp: _sql("update open_finance_connections set reconnected_at = now() - interval '90 minutes'"
                      " where provider_item_id=%s", ITEM),
         lambda s, d: (s, d) == ("updating", "Está demorando mais que o normal — atualize de novo")),
 }
