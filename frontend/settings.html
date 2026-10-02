@@ -3014,7 +3014,7 @@ function renderConnections(list) {
       <div class="conn-logo ${cls}">${esc(ini)}</div>
       <div class="conn-info">
         <div class="conn-name">${esc(c.institution_name)}</div>
-        <div class="conn-meta">Última sync: ${esc(fmtDate(c.last_sync_at))}</div>
+        <div class="conn-meta">Última sync: ${esc(fmtDate(c.last_sync_at))}${ui.dados_de ? " · dados de " + esc(ui.dados_de) : ""}</div>
         ${detalhe}
       </div>
       <span class="pill ${pc}">${esc(pl)}</span>

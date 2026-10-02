@@ -367,10 +367,14 @@ def test_o_tique_recupera_quem_ficou_para_tras(user_id, amb, monkeypatch, cenari
          "R6_webhook_perdido": lambda: _nova(user_id, health=_health(horas=1))}[cenario]()
     em_dia = _nova(user_id)
     antes = _ui_pela_rota(user_id, c["item"])
-    assert (antes["state"], antes["detail"]) == {
-        "R1_sync_de_fundo_morto": ("updating", VENCIDA),
-        "R5_read_failed": ("error_recoverable", "Tentaremos de novo automaticamente"),
-        "R6_webhook_perdido": ("updated", None)}[cenario]
+    if cenario == "R6_webhook_perdido":
+        # D2, PR-B3: antes do tique a tela dizia "Atualizado" com a Pluggy à frente
+        # (o verde falso que a D2 existe para tirar). A classe da retentativa não muda.
+        assert antes["state"] == "partial" and antes["detail"].endswith("— atualize para trazer")
+    else:
+        assert (antes["state"], antes["detail"]) == {
+            "R1_sync_de_fundo_morto": ("updating", VENCIDA),
+            "R5_read_failed": ("error_recoverable", "Tentaremos de novo automaticamente")}[cenario]
 
     _um_tique(monkeypatch)
 
