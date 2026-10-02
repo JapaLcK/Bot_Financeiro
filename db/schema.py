@@ -103,7 +103,7 @@ on conflict (source, external_ref) do nothing
 
 
 def init_db():
-    from .signup_quiz import PERFIS
+    from .signup_quiz import PERFIL_PADRAO, PERFIS
 
     ddl_statements = [
         # ─── Extensions ──────────────────────────────────────────────────────────
@@ -2158,7 +2158,8 @@ def init_db():
         """alter table auth_accounts add column if not exists signup_source text""",
         # Resultado do quiz de venda (db/signup_quiz.py), gravado na criação da
         # conta. NÃO confundir com `/auth/dashboard-profile` (monólito), que é
-        # outra coisa (gates de feature). NULL = painel padrão / não veio do quiz.
+        # outra coisa (gates de feature). NULL = nunca escolheu (nem pelo quiz nem
+        # no v2); 'padrao' = escolheu o painel padrão no v2 (`PUT /api/v2/perfil`).
         # `signup_quiz` = {"versao": 1, "respostas": {...} | null}; é DADO
         # FINANCEIRO PESSOAL — sai no export, no "Recomeçar do zero" e na exclusão.
         # O CHECK fica fora do `add column` pelo mesmo motivo do de `pix_charges`
@@ -2167,7 +2168,7 @@ def init_db():
         """alter table auth_accounts add column if not exists signup_quiz jsonb""",
         """alter table auth_accounts drop constraint if exists auth_accounts_dashboard_profile_valido""",
         f"""alter table auth_accounts add constraint auth_accounts_dashboard_profile_valido
-             check (dashboard_profile in ({", ".join(f"'{p}'" for p in PERFIS)})) not valid""",
+             check (dashboard_profile in ({", ".join(f"'{p}'" for p in PERFIS + (PERFIL_PADRAO,))})) not valid""",
         """
         create table if not exists plan_trials (
           phone_hash text primary key,
