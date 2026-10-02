@@ -9,6 +9,7 @@ from __future__ import annotations
 
 from typing import Any
 
+from core.services.fonte_unica import exigir
 from statement_import import import_statement_bytes, StatementParseError
 
 try:
@@ -91,6 +92,7 @@ def handle_statement_import(
 ) -> str:
     """Importa extrato CSV ('csv') ou PDF ('pdf'). Retorna a resposta do bot."""
     uid = int(user_id)
+    exigir(uid, "extrato")
     from core.services.plan_service import is_pro
     if not is_pro(uid):
         return _PRO_REQUIRED_STATEMENT_MSG

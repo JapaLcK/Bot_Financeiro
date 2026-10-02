@@ -312,6 +312,8 @@ PR de cada etapa, não soluções prontas. Cada PR confere se ainda valem, decid
   nele), onde dá para criar lançamento de banco e investimento manual — o que a Q36 tira do
   v2. Decidir se esses caminhos antigos são bloqueados ou adaptados durante a convivência,
   com teste cruzando as duas telas.
+  **Decidido pelo dono: bloquear para quem tem a chave, em todos os canais** — PR D
+  da etapa 1 (§8). Esconder os botões no `/app` fica para depois, se o dono pedir.
 
 **Etapa 7 (chat)**
 - A interface nova do chat sobre a regra da forma de pagamento (a regra em si vem antes,
@@ -424,10 +426,17 @@ PR de cada etapa, não soluções prontas. Cada PR confere se ainda valem, decid
     o mês e `inicio_do_historico` quando a janela do plano corta o mês). Decisões do dono:
     cartão pela fatura (N1); migram só as telas de mês-calendário — a rota, o "Gastos em
     <mês>" do WhatsApp, o relatório mensal, a consulta 5 do /app e `compute_kpis`
-    (+ `compute_evolution`, mesmo SQL) das Análises (N2); só Entrou e Saiu (N3); anterior
+    das Análises (N2; `compute_evolution` segue com a consulta própria e um teste a compara com a regra, mês a mês); só Entrou e Saiu (N3); anterior
     inteiro, sem porcentagem (N4). Ficam na regra antiga, sem cartão (divergência
     conhecida): relatório diário e semanal, ferramentas da IA de período livre, projeção
     de fechamento e o Repórter. O mês corta `criado_em` pela data ingênua, igual a antes,
     de propósito. `scripts/comparar_resumo_mes.py` mostra antigo × novo por usuário e mês,
     só lendo.
+  - PR D: bloqueio da Q36 fora do v2 para quem tem a chave `dashboard_v2_enabled`, em todos
+    os canais (`/app`, WhatsApp, IA): criar e aportar em investimento manual, importar
+    extrato (OFX/CSV/PDF) e fatura OFX, compra manual no cartão. Resgatar e apagar
+    investimento manual (e desfazer o apagar, que restaura o que já existia — decisão do
+    dono), caixinha e Carteira seguem livres. Trava, textos e tabela em
+    `core/services/fonte_unica.py` e `docs/CLAUDE.md` ("Q36 fora do v2"); a chave que falha
+    libera. Os botões do `/app` continuam à vista: o servidor recusa e a tela mostra o texto.
 - [ ] Etapa 0 · [ ] 1 · [ ] 2 · [ ] 3 · [ ] 4 · [ ] 5 · [ ] 6 · [ ] 7

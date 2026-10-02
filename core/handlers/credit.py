@@ -11,6 +11,7 @@ from core.intent_classifier import (classify, is_comparative_question, NEGATIVAS
                                     sem_perguntas_comparativas)
 from core.observability import _log_falha
 from core.services.category_service import infer_category, learn_from_inference
+from core.services.fonte_unica import FonteUnicaOF, recusa as recusa_q36
 from core.services.plan_limits import PlanLimitExceeded
 from db import (
     add_credit_purchase,
@@ -851,6 +852,9 @@ def add_credit_from_entities(
     Toda lógica compartilhada (resolução de cartão, validação de limite,
     categorização, learn, parcelamento, formato da resposta) vive aqui.
     """
+    # Q36: antes de cartão, sync e limite, que mandariam criar cartão à toa.
+    if (recusa := recusa_q36(user_id, "cartao")):
+        return recusa
     if valor is None or float(valor) <= 0:
         return "❌ Valor inválido."
 
@@ -941,6 +945,8 @@ def add_credit_from_entities(
                 user_id, tx_id, exc_info=True,
             )
         return _format_credit_purchase_success(card_label, float(valor), purchased_at, float(due), int(tx_id))
+    except FonteUnicaOF as e:
+        return str(e)
     except Exception as e:
         return f"❌ Erro registrando compra no crédito: {e}"
 
@@ -972,6 +978,8 @@ def _compra_no_credito(user_id: int, text: str) -> str:
     # fatura; o resto chega pelo Open Finance. Aqui, e não em cada chamador:
     # `add()`, a entrada rápida e o `credit.handle` passam todos por esta porta.
     from core.handlers import forma_pagamento as fp
+    if (recusa := recusa_q36(user_id, "cartao")):
+        return recusa
     if fp.regra_ativa(user_id) and compra_fica_com_o_of(user_id, text):
         return fp.msg_banco(user_id, "despesa", parse_money(text))
 
@@ -1063,6 +1071,8 @@ def _create_installments(
             f"⚙️ **Código:** {code}\n\n"
             f"Pra apagar: `apagar {code}`"
         )
+    except FonteUnicaOF as e:
+        return str(e)
     except Exception as e:
         return f"❌ Erro ao parcelar no cartão: {e}"
 
@@ -2257,6 +2267,8 @@ def handle(user_id: int, text: str) -> str | None:
     # Aceita "credito" e "Crédito" (com acento). `.lower()` preserva o acento,
     # então tem que checar ambas variações — ambas têm 7 chars.
     if t_low.startswith("credito") or t_low.startswith("crédito"):
+        if (recusa := recusa_q36(user_id, "cartao")):
+            return recusa
         rest = t[7:].strip()
         if not rest:
             return "Use: credito 120 mercado OU credito nubank 120 mercado"
@@ -2301,6 +2313,8 @@ def handle(user_id: int, text: str) -> str | None:
         t_low = "parcelar " + t_low[len("parcelei "):]
 
     if t_low.startswith("parcelar"):
+        if (recusa := recusa_q36(user_id, "cartao")):
+            return recusa  # antes de perguntar cartão ou nome da compra
         # ── número de parcelas ──────────────────────────────────────────────
         # Aceita variações: "em 3x", "em 3 vezes", "em 3", "3x" — usuário fala
         # de várias formas. Tenta "em N" primeiro (mais específico, evita
