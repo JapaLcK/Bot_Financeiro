@@ -22,16 +22,16 @@ CODIGO = "FONTE_UNICA_OF"
 MENSAGENS = {
     "investimento": (
         "Investimentos agora vêm do seu banco pelo Open Finance, então não dá mais para "
-        "criar investimento manual nem aportar nele. Conecte o banco em Configurações. "
+        "criar investimento manual nem aportar nele. Se ainda não conectou, conecte o banco em Configurações. "
         "Os investimentos manuais que você já tem ainda podem ser resgatados ou apagados."
     ),
     "extrato": (
         "Extratos agora vêm do seu banco pelo Open Finance, então não dá mais para importar "
-        "arquivo de extrato (OFX, CSV ou PDF). Conecte o banco em Configurações."
+        "arquivo de extrato (OFX, CSV ou PDF). Se ainda não conectou, conecte o banco em Configurações."
     ),
     "cartao": (
         "Compras no cartão agora vêm do seu banco pelo Open Finance, então não dá mais para "
-        "lançar compra no cartão à mão nem importar fatura. Conecte o banco em Configurações. "
+        "lançar compra no cartão à mão nem importar fatura. Se ainda não conectou, conecte o banco em Configurações. "
         "Gasto em dinheiro vivo continua indo para a Carteira Piggy."
     ),
 }

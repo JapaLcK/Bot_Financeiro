@@ -110,6 +110,11 @@ def _ia_sem_validate(uid, tool, args):
     return get_tool(tool).execute(uid, args)
 
 
+def _responde_o_nome(uid, resposta):
+    perguntou = (db.get_pending_action(uid) or {}).get("action_type") == "installment_pending"
+    return manda(uid, "Geladeira") if perguntou else resposta
+
+
 CAMINHOS = {
     # /app
     "app_criar_investimento": ("investimento", lambda u: _app(
@@ -139,9 +144,10 @@ CAMINHOS = {
     "wa_cartao": ("cartao", lambda u: manda(u, "gastei 80 no cartão nubank no açougue")),
     "wa_credito_compacto": ("cartao", lambda u: manda(u, "credito 120 mercado")),
     "wa_parcelar": ("cartao", lambda u: manda(u, "parcelar 300 em 3x tv no cartao nubank")),
-    # sem descrição o bot pergunta o nome antes; a recusa vem na resposta
-    "wa_parcelar_sem_nome": ("cartao", lambda u: manda(u, "parcelar 300 em 3x no cartao nubank")
-                             and manda(u, "Geladeira")),
+    # sem descrição o bot pergunta o nome; com a chave a recusa vem antes da
+    # pergunta (`test_fonte_unica_q36_cartao.py` prova que não pergunta)
+    "wa_parcelar_sem_nome": ("cartao", lambda u: _responde_o_nome(
+        u, manda(u, "parcelar 300 em 3x no cartao nubank"))),
     # IA (chat do painel e do WhatsApp usam o mesmo runner)
     "ia_criar_investimento": ("investimento", lambda u: _ia(
         u, "create_investment", {"name": "Tesouro IPCA", "rate": 6.5, "period": "yearly"})),

@@ -7467,6 +7467,11 @@ async def create_launch_route(request: Request, user_id: int, payload: LaunchCre
     # ── Crédito → add_credit_purchase (à vista) ou installments (parcelado) ─
     if tipo == "credito":
         from db import add_credit_purchase, add_credit_purchase_installments, get_card_by_id
+        from core.services.fonte_unica import recusa
+
+        # Q36: antes de "selecione um cartão" e do aviso de sync.
+        if (motivo := await asyncio.to_thread(recusa, int(user_id), "cartao")):
+            raise HTTPException(status_code=400, detail=motivo)
 
         card_id = payload.card_id
         if not card_id:
