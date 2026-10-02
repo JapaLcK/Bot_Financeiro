@@ -480,6 +480,9 @@ def test_reconexao_nao_devolve_o_verde_sozinha(user_id, monkeypatch, relogio_fix
     db.save_pluggy_open_finance_item(
         user_id, {"id": "item-reconecta", "status": "UPDATED",
                   "connector": {"id": 612, "name": "Nubank"}})
+    # O `relogio_fixo` carimba a reconexão semanas atrás, e aí o prazo da coleta
+    # (D1) já venceu. Este caso é a reconexão RECÉM-feita: âncora no `now()` do banco.
+    _envelhece_autorizacao(conexao["id"])
     monkeypatch.setattr(ps, "create_pluggy_api_key", lambda: "k")
     monkeypatch.setattr(ps, "get_pluggy_item",
                         lambda i, k=None: {**ITEM_SAUDAVEL, "id": i})
@@ -503,7 +506,7 @@ def test_reconexao_nao_devolve_o_verde_sozinha(user_id, monkeypatch, relogio_fix
 # `connection_ui_state` deixa o 1º teste vermelho.
 
 def test_reconexao_nao_reaproveita_o_sync_anterior(user_id, monkeypatch, relogio_fixo):
-    _conexao(user_id, "item-religa")                    # nasce com last_sync_at=ANTES
+    conexao = _conexao(user_id, "item-religa")          # nasce com last_sync_at=ANTES
     assert _linha("item-religa")["last_sync_at"] == ANTES
 
     db.save_pluggy_open_finance_item(
@@ -512,6 +515,7 @@ def test_reconexao_nao_reaproveita_o_sync_anterior(user_id, monkeypatch, relogio
     linha = _linha("item-religa")
     assert linha["last_sync_at"] == ANTES, "reconectar não pode MEXER no last_sync_at"
     assert linha["reconnected_at"] is not None, "mas tem que registrar a reconexão"
+    _envelhece_autorizacao(conexao["id"])  # recém-reconectada: dentro do prazo (D1)
 
     monkeypatch.setattr(ps, "create_pluggy_api_key", lambda: "k")
     monkeypatch.setattr(ps, "get_pluggy_item", lambda i, k=None: {**ITEM_SAUDAVEL, "id": i})
@@ -1338,6 +1342,7 @@ ITEM_CAIXA_QR = {
 # e é isso que o `pop` garante.
 CHAVES_DA_CONEXAO = {
     "id", "provider", "provider_item_id", "status", "institution_name",
+    "institution_id",   # #732: o gate de reconexão do front compara por id do conector
     "last_sync_at", "last_attempt_at", "status_reason", "health",
     "reconnected_at", "ui",
 }
@@ -2306,10 +2311,11 @@ def test_falha_ao_gravar_investimentos_nao_descarta_as_contas(user_id, monkeypat
     assert res["ok"] is True, "o que deu certo, deu certo — contas e transações"
     assert res["investments_ok"] is False, "leitura incompleta é o que sobra"
     # `read_failed` é o motivo do ESPELHO VAZIO (`has_data=False`, ver
-    # `resolve_connection_state`): com contas gravadas a conexão segue ACTIVE sem
-    # motivo, exatamente como no irmão do 429. O caso de espelho vazio está no
-    # teste abaixo.
+    # `resolve_connection_state`): com contas gravadas a conexão segue ACTIVE com
+    # `investments_read_failed` ("Parcial"), como no irmão do 429. O caso de
+    # espelho vazio está no teste abaixo.
     assert _linha()["status"] == "ACTIVE"
+    assert _linha()["status_reason"] == "investments_read_failed"
     assert _espelho_investimentos(conexao["id"]) == {"cx-a", "cx-b"}, (
         "o espelho de investimentos fica como estava — aqui a função nem chegou a "
         "rodar (o mock levanta na entrada), então o que isto prova é que a falha "
