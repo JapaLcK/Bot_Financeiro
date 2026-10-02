@@ -1505,9 +1505,13 @@ def _msg_sem_open_finance(user_id: int) -> str:
     return _MSG_OF_SO_NOS_PLANOS_PAGOS
 
 
-async def _enforce_bank_limit(user_id: int, new_item_id: str | None = None,
-                              provider: str = "pluggy") -> None:
-    """Teto de conexões OF por plano.
+async def _veredito_do_teto(user_id: int, new_item_id: str | None = None,
+                            provider: str = "pluggy") -> tuple[int | None, int | None, dict | None]:
+    """Teto de conexões OF por plano, como `(teto, em_uso, recusa)`.
+
+    `teto` None = sem trava; `em_uso` None = não contou; `recusa` é o `detail` do
+    402, ou None se cabe. Fonte única para `_enforce_bank_limit` (cobra) e
+    `GET /limite` (informa).
 
     v2 (PLANS_V2_ENABLED): teto vem do tier — of_banks_max da escada
     (trial 1 / Essencial 1 / Plus 2 / Pro 5 / None = ilimitado). Ativo sempre
@@ -1524,52 +1528,54 @@ async def _enforce_bank_limit(user_id: int, new_item_id: str | None = None,
     if plans_v2_enabled():
         limit = (await asyncio.to_thread(get_user_limits, user_id)).get("of_banks_max")
         if limit is None:
-            return  # ilimitado (Premium futuro)
+            return None, None, None  # ilimitado (Premium futuro)
         if new_item_id:
             existing = await asyncio.to_thread(get_open_finance_connection_by_item_id, str(new_item_id), provider)
             if existing and int(existing.get("user_id")) == int(user_id):
-                return  # upsert de item existente: reconexão, não é banco novo
+                # reconexão: sem trava para este item; só o enforce passa item
+                return None, None, None
         if limit <= 0:
-            raise HTTPException(
-                status_code=402,
-                detail={
-                    "code": "OF_BANK_LIMIT",
-                    "limit": 0,
-                    "message": await asyncio.to_thread(_msg_sem_open_finance, user_id),
-                },
-            )
+            return limit, None, {
+                "code": "OF_BANK_LIMIT",
+                "limit": 0,
+                "message": await asyncio.to_thread(_msg_sem_open_finance, user_id),
+            }
         count = await asyncio.to_thread(count_open_finance_connections, user_id)
         if count >= limit:
-            raise HTTPException(
-                status_code=402,
-                detail={
-                    "code": "OF_BANK_LIMIT",
-                    "limit": limit,
-                    "message": f"Seu plano conecta até {limit} banco{'s' if limit > 1 else ''}. "
-                               "Faça upgrade pra conectar mais: /precos",
-                },
-            )
-        return
+            return limit, count, {
+                "code": "OF_BANK_LIMIT",
+                "limit": limit,
+                "message": f"Seu plano conecta até {limit} banco{'s' if limit > 1 else ''}. "
+                           "Faça upgrade pra conectar mais: /precos",
+            }
+        return limit, count, None
 
     if not _bank_limit_enabled():
-        return
+        return None, None, None
     if await asyncio.to_thread(is_pro, user_id):
-        return
+        return None, None, None
     if new_item_id:
         existing = await asyncio.to_thread(get_open_finance_connection_by_item_id, str(new_item_id), provider)
         if existing and int(existing.get("user_id")) == int(user_id):
-            return  # upsert de item existente: reconexão, não é banco novo
+            # reconexão: sem trava para este item; só o enforce passa item
+            return None, None, None
     limit = int(os.getenv("OF_FREE_BANK_LIMIT", "1"))
     count = await asyncio.to_thread(count_open_finance_connections, user_id)
     if count >= limit:
-        raise HTTPException(
-            status_code=402,
-            detail={
-                "code": "OF_BANK_LIMIT",
-                "limit": limit,
-                "message": f"No plano grátis você conecta {limit} banco. Assine o Pro para conectar mais.",
-            },
-        )
+        return limit, count, {
+            "code": "OF_BANK_LIMIT",
+            "limit": limit,
+            "message": f"No plano grátis você conecta {limit} banco. Assine o Pro para conectar mais.",
+        }
+    return limit, count, None
+
+
+async def _enforce_bank_limit(user_id: int, new_item_id: str | None = None,
+                              provider: str = "pluggy") -> None:
+    """Cobra o teto decidido por `_veredito_do_teto` (402 se não cabe)."""
+    _, _, recusa = await _veredito_do_teto(user_id, new_item_id, provider)
+    if recusa:
+        raise HTTPException(status_code=402, detail=recusa)
 
 
 async def _ensure_of_access_allowed(user_id: int) -> None:
@@ -1801,6 +1807,28 @@ async def open_finance_connect_token_route(request: Request, user_id: int):
         "includeSandbox": PLUGGY_INCLUDE_SANDBOX,
         "provider": "pluggy",
     }
+
+
+@router.get("/open-finance/{user_id}/limite")
+async def open_finance_limite_route(request: Request, user_id: int):
+    """Diz ao app, ANTES do widget, se cabe um banco NOVO. Só leitura.
+
+    (a) Informativa: quem cobra é o `/pluggy-item` e o webhook; a corrida é a #747.
+    (b) `pode_adicionar=false` NÃO impede reconectar banco já conectado (P1).
+    (c) O teto nunca vira 402 aqui: vira `pode_adicionar=false` + `code`/`message`.
+        Antes dele roda o gate comum de dados (401/403, e 402
+        `subscription_required`/`plan_selection_required` para quem não tem plano
+        ativo): o app trata esses status como nas rotas irmãs.
+    (d) No v1, `of_banks_max` é o teto efetivo do gate legado e pode divergir do `/auth/me`.
+    """
+    shared.authorize_dashboard_access(request, user_id)
+    teto, em_uso, recusa = await _veredito_do_teto(user_id)
+    if em_uso is None:
+        em_uso = await asyncio.to_thread(count_open_finance_connections, user_id)
+    return {"ok": True, "of_banks_max": teto, "em_uso": em_uso,
+            "pode_adicionar": recusa is None,
+            "code": recusa["code"] if recusa else None,
+            "message": recusa["message"] if recusa else None}
 
 
 # Por quanto tempo, depois da adoção pelo webhook, o `POST /pluggy-item` ainda é
