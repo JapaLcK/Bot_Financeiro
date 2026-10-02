@@ -1,10 +1,29 @@
 {
-  "_comentario": "Respostas da /api/v2 que os testes de navegador servem. tests/test_api_v2_contrato.py valida cada uma pelos modelos Pydantic (Me, ErroV2); a marcada fora_do_envelope tem de NÃO validar.",
+  "_comentario": "Respostas da /api/v2 que os testes de navegador servem. tests/test_api_v2_contrato.py valida cada uma pelos modelos Pydantic (Me, Assinaturas, ErroV2); a marcada fora_do_envelope tem de NÃO validar.",
   "me": {
     "free": { "plan_tier": "free" },
     "essencial": { "plan_tier": "essencial" },
     "plus": { "plan_tier": "plus" },
     "pro": { "plan_tier": "pro" }
+  },
+  "assinaturas": {
+    "cheia": {
+      "servicos": [
+        { "chave": "smart fit", "nome": "Smart Fit", "categoria": "saude", "valor": 119.9, "valor_anterior": null, "reajuste_em": null, "dia": 10, "proxima": "2026-10-10", "ultima": "2026-09-10", "desde": "2025-11-10", "meses": 11, "meio": { "tipo": "conta", "nome": "Itaú", "final": null }, "status": "ativa", "marcada": true },
+        { "chave": "netflix", "nome": "Netflix", "categoria": "assinaturas", "valor": 55.9, "valor_anterior": 44.9, "reajuste_em": "2026-08-05", "dia": 5, "proxima": "2026-10-05", "ultima": "2026-09-05", "desde": "2025-03-05", "meses": 19, "meio": { "tipo": "cartao", "nome": "Nubank", "final": "1234" }, "status": "ativa", "marcada": false },
+        { "chave": "globoplay", "nome": "Globoplay", "categoria": "assinaturas", "valor": 22.9, "valor_anterior": null, "reajuste_em": null, "dia": 15, "proxima": "2026-08-15", "ultima": "2026-07-15", "desde": "2026-01-15", "meses": 7, "meio": { "tipo": "cartao", "nome": "Nubank", "final": "1234" }, "status": "possivelmente_cancelada", "marcada": false },
+        { "chave": "apple", "nome": "Apple Music", "categoria": "assinaturas", "valor": 21.9, "valor_anterior": null, "reajuste_em": null, "dia": 12, "proxima": "2026-10-12", "ultima": "2026-09-12", "desde": "2025-06-12", "meses": 16, "meio": { "tipo": "cartao", "nome": "Inter", "final": "9876" }, "status": "ativa", "marcada": false },
+        { "chave": "apple", "nome": "iCloud", "categoria": "assinaturas", "valor": 14.9, "valor_anterior": null, "reajuste_em": null, "dia": 20, "proxima": "2026-10-20", "ultima": "2026-09-20", "desde": "2024-02-20", "meses": 32, "meio": { "tipo": "cartao", "nome": "Inter", "final": "9876" }, "status": "ativa", "marcada": false }
+      ],
+      "outras": [
+        { "chave": "condominio aurora", "nome": "Condomínio Aurora", "categoria": "moradia", "valor": 480.0, "valor_anterior": 450.0, "reajuste_em": "2026-01-08", "dia": 8, "proxima": "2026-10-08", "ultima": "2026-09-08", "desde": "2025-01-08", "meses": 21, "meio": { "tipo": "conta", "nome": "Itaú", "final": null }, "status": "ativa", "marcada": false },
+        { "chave": "porto seguro", "nome": "Porto Seguro", "categoria": "seguros", "valor": 89.9, "valor_anterior": 99.9, "reajuste_em": "2026-06-22", "dia": 22, "proxima": "2026-10-22", "ultima": "2026-09-22", "desde": "2025-09-22", "meses": 13, "meio": { "tipo": "cartao", "nome": "Nubank", "final": "1234" }, "status": "ativa", "marcada": false },
+        { "chave": "porto seguro", "nome": "Porto Seguro Residencial", "categoria": "seguros", "valor": 39.9, "valor_anterior": null, "reajuste_em": null, "dia": 3, "proxima": "2026-10-03", "ultima": "2026-09-03", "desde": "2026-02-03", "meses": 8, "meio": { "tipo": "conta", "nome": "CooperativaDeCreditoDosServidoresPublicosSicoobCredicitrusAgencia", "final": null }, "status": "ativa", "marcada": false }
+      ],
+      "total_mensal": 212.6,
+      "total_anual": 2551.2
+    },
+    "vazia": { "servicos": [], "outras": [], "total_mensal": 0, "total_anual": 0 }
   },
   "erros": {
     "401": {
@@ -31,6 +50,14 @@
     "503": {
       "status": 503,
       "body": { "error": { "code": "service_unavailable", "message": "Serviço temporariamente indisponível. Tente novamente em instantes." } }
+    },
+    "403_pro_required": {
+      "status": 403,
+      "body": { "error": { "code": "pro_required", "message": "Forbidden" } }
+    },
+    "404_not_found": {
+      "status": 404,
+      "body": { "error": { "code": "not_found", "message": "Not Found" } }
     },
     "403_csrf": {
       "status": 403,

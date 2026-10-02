@@ -26,7 +26,7 @@ function Topbar({ s, path }: { s: DashState; path: Path }) {
         <p className="month-title" aria-live="polite">{monthTitle(s.month).replace(/ (\d{4})$/, "")}<span className="month-year"> {s.month.slice(0, 4)}</span></p>
         <button className="icon-btn" type="button" aria-label="Próximo mês" disabled={i === MONTHS.length - 1} onClick={() => set({ month: MONTHS[i + 1] })}><i className="ph ph-arrow-right" aria-hidden="true" /></button>
       </div>}
-      <span className="tag-demo">Dados de demonstração</span>
+      {path !== "/assinaturas" && <span className="tag-demo">Dados de demonstração</span>}
       <span className="topbar-spacer" />
       <button className="cmd-trigger" type="button" aria-label="Buscar ou ir para" aria-keyshortcuts="Meta+K Control+K /" onClick={() => window.dispatchEvent(new Event("dash:command"))}>
         <i className="ph ph-magnifying-glass" aria-hidden="true" />
@@ -74,12 +74,13 @@ export function App() {
           </div>
         </nav>
         <div className="main-col">
-          {/* no celular a barra de cima não tem lugar para a etiqueta: ela vem numa linha acima */}
-          <p className="demo-strip">Dados de demonstração</p>
+          {/* no celular a barra de cima não tem lugar para a etiqueta: ela vem numa linha acima.
+              Assinaturas mostra dados reais da /api/v2: lá a etiqueta e o rodapé não entram. */}
+          {path !== "/assinaturas" && <p className="demo-strip">Dados de demonstração</p>}
           <Topbar s={s} path={path} />
           <main id="main" className="page" data-page={path}>
             <Page s={s} />
-            <p className="foot">Protótipo com dados sintéticos. Nenhum valor aqui pertence a um usuário real.</p>
+            {path !== "/assinaturas" && <p className="foot">Protótipo com dados sintéticos. Nenhum valor aqui pertence a um usuário real.</p>}
           </main>
         </div>
       </div>

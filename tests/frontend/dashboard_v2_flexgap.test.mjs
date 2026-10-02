@@ -17,7 +17,7 @@ import assert from "node:assert/strict";
 import { chromium } from "playwright";
 import { PAINEL, exigeArtefatoEmDia, servir } from "./_painel.mjs";
 
-const PAGES = ["/", "/previsao", "/gastos", "/simulador", "/metas", "/patrimonio", "/lancamentos"];
+const PAGES = ["/", "/previsao", "/gastos", "/assinaturas", "/simulador", "/metas", "/patrimonio", "/lancamentos"];
 
 let browser;
 before(async () => {

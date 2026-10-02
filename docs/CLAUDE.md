@@ -156,7 +156,10 @@ Sub-app FastAPI (`api/v2/app.py`) montado pelo monólito com `app.mount("/api/v2
 - `GET /api/v2/assinaturas` e `POST /api/v2/assinaturas/marca` (`api/v2/assinaturas.py`):
   a lista do Recurring Payments da Pluggy (`core/services/assinaturas.py`) e a marcação
   do usuário por chave do comerciante (`assinatura`/`ignorar`/`nenhuma`; chave fora da
-  lista dá 404). Gate `subscriptions` em `FEATURE_MIN_TIER_V2` (Plus ou Pro).
+  lista dá 404). Gate `subscriptions` em `FEATURE_MIN_TIER_V2` (Plus ou Pro). O cliente é
+  `webapp/src/dashboard/widgets/Subscriptions.tsx` (o card do Resumo e a página
+  `/assinaturas`); o POST sai pelo `apiPost` de `lib/v2.ts`, com o header de
+  `window.pbCsrfHeaders` (auth-refresh.js), e o 403 `pro_required` vira o convite.
 - **Contrato:** o envelope entra no OpenAPI como resposta `default` (`ErroV2`, em
   `api/v2/erros.py`; a resposta real continua saindo de `_envelope`). Os tipos TS saem de
   `python scripts/gerar_tipos_api_v2.py` para `webapp/src/dashboard/lib/api-v2.gen.ts`
