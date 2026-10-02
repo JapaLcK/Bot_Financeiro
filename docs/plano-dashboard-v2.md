@@ -419,6 +419,19 @@ PR de cada etapa, não soluções prontas. Cada PR confere se ainda valem, decid
     tela decide o "expandir" das contas fora do total no PR C. Divergência declarada com o
     saldo consolidado: USD novo × BRL velho e saldo não finito na coluna
     (`tests/test_api_v2_contas.py`).
+  - PR B: a regra única do mês (`db/resumo_mes.TOTAIS_SQL`, a da consulta 5 do /app:
+    lançamentos não internos por `criado_em` + cartão pela fatura, com `user_id` em cada
+    perna, inclusive a fatura) e `GET /api/v2/resumo-do-mes?mes=AAAA-MM` (Entrou, Saiu, o
+    mês anterior inteiro ou `null`, `ate` = último dia do mês, o corrente também, `motivos`: os do bloco de contas que valem para
+    o mês e `inicio_do_historico` quando a janela do plano corta o mês). Decisões do dono:
+    cartão pela fatura (N1); migram só as telas de mês-calendário — a rota, o "Gastos em
+    <mês>" do WhatsApp, o relatório mensal, a consulta 5 do /app e `compute_kpis`
+    das Análises (N2; `compute_evolution` segue com a consulta própria e um teste a compara com a regra, mês a mês); só Entrou e Saiu (N3); anterior
+    inteiro, sem porcentagem (N4). Ficam na regra antiga, sem cartão (divergência
+    conhecida): relatório diário e semanal, ferramentas da IA de período livre, projeção
+    de fechamento e o Repórter. O mês corta `criado_em` pela data ingênua, igual a antes,
+    de propósito. `scripts/comparar_resumo_mes.py` mostra antigo × novo por usuário e mês,
+    só lendo.
   - PR D: bloqueio da Q36 fora do v2 para quem tem a chave `dashboard_v2_enabled`, em todos
     os canais (`/app`, WhatsApp, IA): criar e aportar em investimento manual, importar
     extrato (OFX/CSV/PDF) e fatura OFX, compra manual no cartão. Resgatar e apagar

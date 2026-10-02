@@ -5,6 +5,7 @@
 - o `ErroV2` descreve as respostas de erro REAIS do monólito, e as fixtures que os
   testes de navegador servem (`tests/frontend/api_v2_respostas.json`) seguem os modelos.
 """
+import calendar
 import json
 from pathlib import Path
 
@@ -19,6 +20,7 @@ from api.v2.contas import Contas
 from api.v2.erros import ErroV2
 from api.v2.me import Me
 from api.v2.perfil import Perfil
+from api.v2.resumo_mes import ResumoDoMes
 from scripts.gerar_tipos_api_v2 import CABECALHO, SAIDA, gerar
 from test_api_v2_erros import Login, _corpo_do_422, rota_temporaria  # noqa: F401 (fixture)
 
@@ -132,6 +134,46 @@ def test_gerador_traduz_rota_post():
     )
 
 
+def _com_query(*params):
+    op = dict(_get("#/components/schemas/Aa")["get"], parameters=list(params))
+    return {"get": op}
+
+
+_MES = {"name": "mes", "in": "query", "required": False,
+        "schema": {"anyOf": [{"type": "string", "pattern": "^x$"}, {"type": "null"}], "title": "Mes"}}
+
+
+def test_gerador_traduz_query_do_get():
+    schemas = {"Aa": {"type": "object", "properties": {"x": {"type": "string"}}}}
+    obrigatorio = {"name": "n", "in": "query", "required": True, "schema": {"type": "integer"}}
+    paths = {"/a": _get("#/components/schemas/Aa"), "/q": _com_query(_MES, obrigatorio)}
+    assert gerar(_spec(schemas, paths)) == CABECALHO + (
+        "export type Aa = { x?: string };\n"
+        'export type RotasGet = { "/a": Aa; "/q": Aa };\n'
+        'export type QueryGet = { "/q": { mes?: string | null; n: number } };\n'
+    )
+
+
+_AA = {"Aa": {"type": "object", "properties": {"x": {"type": "string"}}}}
+
+
+@pytest.mark.parametrize("param", [
+    dict(_MES, **{"in": "path"}), dict(_MES, **{"in": "header"}), dict(_MES, name="com-hifen"),
+    dict(_MES, required="nao"), dict(_MES, description="x"), {k: v for k, v in _MES.items() if k != "required"},
+    dict(_MES, schema={"type": "string", "format": "date"}), "mes",
+], ids=["path", "header", "nome_invalido", "required_nao_bool", "chave_a_mais", "sem_required",
+        "schema_fora_da_lista", "nao_e_objeto"])
+def test_gerador_recusa_query_fora_da_lista(param):
+    with pytest.raises(ValueError, match="construção não suportada"):
+        gerar(_spec(_AA, {"/q": _com_query(param)}))
+
+
+def test_gerador_recusa_parametro_em_escrita():
+    op = dict(_post("#/components/schemas/Aa")["post"], parameters=[_MES])
+    with pytest.raises(ValueError, match="construção não suportada"):
+        gerar(_spec(_AA, {"/p": {"post": op}}))
+
+
 @pytest.mark.parametrize("spec", [
     _spec({"X": {"type": "object", "properties": {}, "additionalProperties": True}}),
     _spec({"X": {"oneOf": [{"type": "string"}, {"type": "integer"}]}}),
@@ -214,6 +256,15 @@ def test_fixture_de_contas_segue_o_modelo_e_fecha_a_conta(nome):
     assert c.total == c.carteira.saldo + sum((x.saldo for x in c.contas if x.no_total), Decimal(0))
     assert c.fora_do_total == sum(not x.no_total for x in c.contas)
     assert set(c.motivos) == set(c.carteira.motivos).union(*(x.motivos for x in c.contas))
+
+
+@pytest.mark.parametrize("nome", sorted(FIXTURES["resumo_do_mes"]))
+def test_fixture_do_resumo_do_mes_segue_o_modelo(nome):
+    f = FIXTURES["resumo_do_mes"][nome]
+    ResumoDoMes.model_validate(f)
+    assert isinstance(f["entrou"], str) and isinstance(f["saiu"], str)  # dinheiro é texto
+    ano, mes = map(int, f["mes"].split("-"))  # `ate` = último dia do mês, o corrente também
+    assert f["ate"] == f"{f['mes']}-{calendar.monthrange(ano, mes)[1]:02d}"
 
 
 @pytest.mark.parametrize("nome", sorted(FIXTURES["erros"]))
