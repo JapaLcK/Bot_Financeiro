@@ -129,6 +129,68 @@ test("positivo: UA comum e montagem ok, 30 s depois → zero POST hospedado e In
   await ctx.close();
 });
 
+// ── plans-config: só serve ao link do Pix, e nunca segura o checkout ─────────
+const PENDURADO = { ...LOGADO, "GET /billing/plans-config": null };
+
+test("plans-config pendurado: o embutido monta, sem o link do Pix", async () => {
+  const { ctx, page } = await abrir(browser, { api: PENDURADO });
+  await page.locator("#stripe-checkout iframe").waitFor({ timeout: 5_000 });
+  assert.equal(await page.locator("#s4-pix").isVisible(), false);
+  await ctx.close();
+});
+
+test("plans-config pendurado e montagem sem iframe: o relógio de 10 s leva ao hospedado", async () => {
+  const { ctx, page, posts } = await abrir(browser, { api: PENDURADO, stripe: "vazio", relogio: true });
+  await page.locator("#s4").waitFor({ state: "visible", timeout: 5_000 });
+  await page.clock.runFor(10_000);
+  await foiAoHospedado(page, posts);
+  await ctx.close();
+});
+
+/** Um plans-config que só responde quando o teste chama `solta(resp)`. */
+function tardio() {
+  let solta;
+  const p = new Promise((ok) => { solta = ok; });
+  return { solta, resp: () => p };
+}
+
+for (const [nome, resp, visivel] of [["true", [200, { pix_annual_available: true }], true],
+                                     ["false", [200, { pix_annual_available: false }], false],
+                                     ["falha de rede", "aborta", false]]) {
+  test(`plans-config que volta depois do embutido montado (${nome}): link do Pix ${visivel ? "aparece" : "oculto"}`, async () => {
+    const t = tardio();
+    const { ctx, page } = await abrir(browser, { api: { ...LOGADO, "GET /billing/plans-config": t.resp } });
+    await page.locator("#stripe-checkout iframe").waitFor();
+    assert.equal(await page.locator("#s4-pix").isVisible(), false);
+    const fim = resp === "aborta" ? page.waitForEvent("requestfailed") : page.waitForResponse(/plans-config/);
+    t.solta(resp);
+    await fim;
+    if (visivel) await page.locator("#s4-pix").waitFor({ state: "visible" });
+    else await page.waitForTimeout(150);
+    assert.equal(await page.locator("#s4-pix").isVisible(), visivel);
+    await ctx.close();
+  });
+}
+
+test("plans-config velho que volta depois do Sair não mostra o Pix no S4 da conta nova (guarda de geração)", async () => {
+  const t = tardio();
+  let n = 0;
+  const { ctx, page } = await abrir(browser, { hash: FRAG, api: { ...LOGADO,
+    "GET /billing/plans-config": () => (n++ === 0 ? t.resp() : null),
+    "POST /auth/quiz/conta": [200, { estado: "logado" }] } });
+  await page.locator("#stripe-checkout iframe").waitFor();
+  await page.click("#sair");
+  await tela(page, "s1");
+  await continuar(page);
+  await page.locator("#stripe-checkout iframe").waitFor();
+  const fim = page.waitForResponse(/plans-config/);
+  t.solta([200, { pix_annual_available: true }]);
+  await fim;
+  await page.waitForTimeout(150);
+  assert.equal(await page.locator("#s4-pix").isVisible(), false);
+  await ctx.close();
+});
+
 // ── Layout, medido ──────────────────────────────────────────────────────────
 
 /** Mede a tela visível. `cta`: o id do CTA rosa do estado, ou null (S4 não tem). */

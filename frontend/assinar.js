@@ -1,10 +1,8 @@
 /**
- * /assinar (funil v3 do quiz): cria a conta e abre o checkout do Stripe, embutido
- * ou hospedado. A /q manda `plano`/`ciclo` na query e nome, e-mail e WhatsApp no
- * FRAGMENTO (`n`, `e`, `w`). Este é o 1º script síncrono do <head>, ANTES do ponto
- * onde o `inject_tracking` põe o Pixel e o GA4: o topo tira o fragmento (e
- * p/r/e/c/n/w da query) da URL antes de qualquer rastreio ler `location.href`.
- * Os estados são as <section> da assinar.html; testes em tests/frontend/assinar_*.
+ * /assinar (funil v3 do quiz): cria a conta e abre o checkout do Stripe, embutido ou hospedado. A /q manda
+ * `plano`/`ciclo` na query e nome, e-mail e WhatsApp no FRAGMENTO (`n`, `e`, `w`). Este é o 1º script síncrono
+ * do <head>, ANTES do ponto onde o `inject_tracking` põe o Pixel e o GA4: o topo tira o fragmento (e p/r/e/c/n/w
+ * da query) da URL antes de qualquer rastreio ler `location.href`. Os estados são as <section> da assinar.html; testes em tests/frontend/assinar_*.
  */
 (function () {
   "use strict";
@@ -36,17 +34,15 @@
     0: "Sem conexão. Confira sua internet e tente de novo.",
     403: "Recarregue a página e tente de novo.",
     429: "Muitas tentativas. Aguarde alguns minutos e tente de novo.",
+    sair: "Não deu para sair da conta atual. Tente de novo.",
+    abrir: "Não deu para abrir o pagamento agora.",
   };
   let estado = "c-carga";
   let gen = 0;          // muda a cada tela: a resposta de um pedido velho é descartada
   let voo = false;      // uma ação do usuário por vez (2º clique, Enter)
   let me = null;        // a sessão que JÁ estava no navegador, de outra conta (S1a)
   let contaEmail = "";  // a conta que vai pagar, para o "Assinando como"
-  let checkout = null;
-  let relogio = null;
-  let stripeJs = null;
-  let inicioSaiu = false;
-  let refazer = null;
+  let checkout = null, relogio = null, stripeJs = null, inicioSaiu = false, refazer = null;
   const $ = function (id) { return document.getElementById(id); };
 
   function mostra(id) {
@@ -80,8 +76,7 @@
     }
   }
 
-  // Quem navega devolve true e segura a trava até a página sair; o pageshow a
-  // solta na volta pelo bfcache.
+  // Quem navega devolve true e segura a trava até a página sair; o pageshow a solta na volta pelo bfcache.
   async function acao(fn) {
     if (voo) return;
     voo = true;
@@ -134,8 +129,8 @@
   }
 
   // ── S2: já tem conta ──────────────────────────────────────────────────────
-  /** Logout. A limpeza do auth-refresh roda com qualquer resposta, ou sem ela. */
-  async function saiDaConta() { await post("/auth/logout"); me = null; contaEmail = ""; }
+  /** Logout; true só se o servidor respondeu ok. A limpeza do auth-refresh roda com qualquer resposta. */
+  async function saiDaConta() { const r = await post("/auth/logout"); me = null; contaEmail = ""; return r.ok; }
 
   /** O e-mail logado AGORA (carga ou outra aba); "" só no 401; null se não deu para saber (rede,
    *  5xx, `ms`, JSON quebrado). O S2 desloga com e-mail ou null (o /login devolveria a conta logada);
@@ -149,14 +144,21 @@
     }).catch(function () { return null; }).finally(function () { clearTimeout(t); });
   }
 
+  /** Com sessão viva, só segue se o logout deu certo: o /login devolveria a conta velha, e o S3 a cobraria (D7). */
+  async function saiSeLogado() {
+    const ok = (!me && (await sessaoViva(ME_MS)) === "") || (await saiDaConta());
+    if (!ok) aviso("s2-erro", TXT.sair);
+    return ok;  // false solta a trava (acao) e a pessoa fica no S2
+  }
+
   async function entrarComSenha() {
-    if (me || (await sessaoViva(ME_MS)) !== "") await saiDaConta();
+    if (!(await saiSeLogado())) return false;
     location.href = "/login?next=" + encodeURIComponent(location.pathname + location.search);
     return true;
   }
 
   async function entrarComGoogle() {
-    if (me || (await sessaoViva(ME_MS)) !== "") await saiDaConta();
+    if (!(await saiSeLogado())) return false;
     // DEPOIS do logout: a limpeza dele apaga a sessionStorage, intenção inclusive.
     const PI = window.PBPurchaseIntent;
     PI.begin(plano, ciclo, "card");
@@ -176,23 +178,23 @@
     $("conta-email").textContent = mascara(contaEmail);
     $("s3-titulo").textContent = "Preparando o pagamento…";
     aviso("s3-erro", "");
-    $("s3-retry").hidden = true;
+    $("s3-retry").hidden = $("s4-pix").hidden = true;
     const g = mostra("s3");
     // No app o embutido não abre (D-p): nem POST embutido, nem Stripe.js.
     if (window.PB_IN_APP) return irParaHospedado();
-    const [r, cfg] = await Promise.all([
-      post("/billing/create-checkout", { plan: plano, interval: ciclo, embutido: true, origem: "assinar" }),
-      fetch("/billing/plans-config", { credentials: "same-origin" })
-        .then(function (x) { return x.json(); }).catch(function () { return null; }),
-    ]);
+    // Só o link do Pix depende do plans-config: ele não segura o checkout (pendurado, o S3 nunca sairia).
+    const cfg = fetch("/billing/plans-config", { credentials: "same-origin" })
+      .then(function (x) { return x.json(); }).catch(function () { return null; });
+    const r = await post("/billing/create-checkout", { plan: plano, interval: ciclo, embutido: true, origem: "assinar" });
     if (g !== gen) return;
     if (!(r.ok && r.d.client_secret && r.d.publishable_key)) return falhaCheckout(r, iniciaS3);
     const td = Number(r.d.trial_days) || 0;
     $("s4-trial").textContent = td > 0
       ? "Você tem " + td + " dias grátis. A cobrança do plano só começa depois, e dá para cancelar antes."
       : "Esta assinatura não tem período grátis: a cobrança começa hoje.";
-    $("s4-pix").hidden = !(cfg && cfg.pix_annual_available === true);
     montar(r.d.publishable_key, r.d.client_secret);
+    const g4 = gen;  // a geração do S4: se a pessoa já saiu dele, o plans-config tardio não mexe na tela
+    cfg.then(function (c) { if (g4 === gen) $("s4-pix").hidden = !(c && c.pix_annual_available === true); });
   }
 
   /** Desfecho de um create-checkout que não deu certo, embutido (S3) ou hospedado (H). */
@@ -209,7 +211,7 @@
       aviso("s1-erro", "Sua sessão expirou. Entre de novo para continuar.");
       return;
     }
-    $("s3-titulo").textContent = "Não deu para abrir o pagamento agora.";
+    $("s3-titulo").textContent = TXT.abrir;
     aviso("s3-erro", TXT[r.status] || "");
     refazer = deNovo;
     $("s3-retry").hidden = false;
@@ -222,8 +224,7 @@
       stripeJs = new Promise(function (ok, falha) {
         const s = document.createElement("script");
         s.src = STRIPE_JS;
-        s.onload = ok;
-        s.onerror = falha;
+        s.onload = ok; s.onerror = falha;
         document.head.appendChild(s);
       });
     }
@@ -233,16 +234,14 @@
   function montar(pk, cs) {
     const g = mostra("s4");
     $("stripe-checkout").textContent = "";
-    // Desde a INJEÇÃO, e não desde a montagem: um Stripe.js pendurado (sem load
-    // nem error) nunca chegaria a ela, e a página ficaria em "carregando".
+    // Desde a INJEÇÃO, e não da montagem: um Stripe.js pendurado nunca chegaria a ela (D12).
     relogio = setTimeout(function () {
-      if (!document.querySelector("#stripe-checkout iframe")) irParaHospedado();
+      if (g === gen && !document.querySelector("#stripe-checkout iframe")) irParaHospedado();
     }, RELOGIO_MS);
     carregaStripe()
       .then(function () {
         if (g !== gen) return;
-        // Sem `window.Stripe`, ou API que lança: o TypeError cai no catch → H.
-        // Promise.resolve: aceita a montagem que devolve o objeto direto ou uma Promise.
+        // Sem `window.Stripe` ou API que lança → catch → H. Promise.resolve: objeto direto ou Promise.
         return Promise.resolve(window.Stripe(pk)
           .createEmbeddedCheckoutPage({ fetchClientSecret: function () { return Promise.resolve(cs); } }))
           .then(function (c) {
@@ -252,7 +251,7 @@
             disparaInicio();
           });
       })
-      .catch(function () { irParaHospedado(); });
+      .catch(function () { if (g === gen) irParaHospedado(); });  // o onerror tardio, depois do Sair, não age
   }
 
   function destroiEmbutido() {
@@ -274,11 +273,8 @@
     else fim();
   }
 
-  /**
-   * O ÚNICO caminho para o hospedado (plano B). Gatilhos: o app, o Stripe.js que
-   * não carrega, a montagem que falha, o relógio sem iframe e o link manual.
-   * A guarda é o estado: só sai de S3 ou S4, e a tela H trava os outros gatilhos.
-   */
+  /** O ÚNICO caminho para o hospedado (plano B). Gatilhos: o app, o Stripe.js que não carrega, a montagem que
+   *  falha, o relógio sem iframe e o link manual. A guarda é o estado: só sai de S3 ou S4, e o H trava o resto. */
   async function irParaHospedado() {
     if (estado !== "s3" && estado !== "s4") return;
     destroiEmbutido();
@@ -301,10 +297,14 @@
   }
 
   async function sair() {
+    const c = contaEmail;
     destroiEmbutido();
     estado = "sair"; gen++;  // nenhum gatilho nem resposta velha age durante o logout
-    await saiDaConta();
-    mostra("s1");
+    if (await saiDaConta()) { mostra("s1"); return; }
+    // Falhou: a conta velha segue logada. S3 dela com o erro e o Sair; sem "Tentar de novo" (reabriria o checkout).
+    contaEmail = c; $("s3-retry").hidden = true;
+    $("s3-titulo").textContent = TXT.sair; aviso("s3-erro", "");
+    mostra("s3");
   }
 
   // ── Carga ─────────────────────────────────────────────────────────────────

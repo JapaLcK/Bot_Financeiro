@@ -57,7 +57,7 @@ const PADRAO = {
  * Abre a assinar.html. `api`: "MÉTODO /caminho" → [status, corpo], ou uma lista
  * (uma resposta por chamada, a última se repete), ou fn(req) → [status, corpo],
  * `null` (fica pendente para sempre) ou "aborta" (falha de rede). `stripe`: o modo do falso, ou "aborta"/"pendura"
- * para o próprio script. `html`: transforma o HTML antes de servir. `pagina`: outra
+ * para o próprio script, ou "segura" (a rota do script volta em `rotaStripe`: o teste decide quando abortar). `html`: transforma o HTML antes de servir. `pagina`: outra
  * página do frontend/ no mesmo contexto falso (o login.html, no teste do `next`).
  */
 export async function abrir(browser, {
@@ -74,6 +74,8 @@ export async function abrir(browser, {
   const reqs = [];
   const respostas = { ...PADRAO, ...api };
   const contagem = {};
+  let pegaRota;
+  const rotaStripe = new Promise((ok) => { pegaRota = ok; });
   await ctx.route("**/*", async (route) => {
     const req = route.request();
     const url = new URL(req.url());
@@ -86,6 +88,7 @@ export async function abrir(browser, {
     if (url.hostname === "js.stripe.com") {
       if (stripe === "aborta") return route.abort();
       if (stripe === "pendura") return;
+      if (stripe === "segura") return pegaRota(route);
       return route.fulfill({ contentType: "application/javascript", body: STRIPE_FALSO });
     }
     if (url.origin !== ORIGIN) return route.fulfill({ status: 200, contentType: "text/html", body: "fora" });
@@ -114,7 +117,7 @@ export async function abrir(browser, {
   }
   // domcontentloaded: o Stripe.js "pendurado" seguraria o `load` para sempre.
   await page.goto(`${ORIGIN}/${pagina}${query}${hash}`, { waitUntil: "domcontentloaded" });
-  return { ctx, page, reqs, posts: (path) => reqs.filter((x) => x.method === "POST" && x.path === path) };
+  return { ctx, page, reqs, rotaStripe, posts: (path) => reqs.filter((x) => x.method === "POST" && x.path === path) };
 }
 
 /** Espera a seção `id` ficar visível. */
