@@ -22,7 +22,7 @@ import os
 import threading
 import time
 from contextlib import contextmanager
-from datetime import datetime
+from datetime import datetime, timedelta
 from functools import lru_cache
 from typing import Any
 
@@ -130,6 +130,13 @@ SQL_EXECUTION_STATUS = (
 # webhook (`_SYNC_QUIET_MIN`, `pluggy_sync.py`); recalibrar com o p99 da Onda 8.
 PRAZO_COLETA_MIN = 30
 
+# Teto do "Atualizando…" (Fase 4 do app, PR 2): passado ele, o `updating` sai como
+# "Erro temporário" com detalhe próprio (`connection_ui_state`). 120 = a meta do
+# beta ("zero Atualizando… acima de 2 h"); acima de `JANELA_DEVICE_AUTH_MIN` + 5
+# (a janela do QR inteira cabe antes dele) e 4× `PRAZO_COLETA_MIN`, então a faixa
+# da D1 (30–120 min, "Está demorando…") continua existindo.
+TETO_ATUALIZANDO_MIN = 120
+
 # Vencida = sem sync desde a autorização atual E âncora fora do intervalo
 # `(now() - prazo, now() + 5 min]`. "Sem sync" é o MESMO predicado do `sem_sync`
 # de `connection_ui_state` (§0.7): só `reconnected_at`, nunca `created_at`, que
@@ -140,11 +147,59 @@ PRAZO_COLETA_MIN = 30
 # "Atualizando…" pelo tamanho do adiantamento. Sem `health is null`: o job de
 # saúde grava `health` sem sincronizar, e é exatamente o caso do sync morto.
 # `connection_ui_state` lê o booleano e continua sem relógio.
+_SQL_SEM_SYNC = ("(last_sync_at is null or (reconnected_at is not null "
+                 "and last_sync_at < reconnected_at))")
+_SQL_AUTORIZACAO = "coalesce(reconnected_at, created_at)"
+
+
+def _fora_do_prazo(ancora: str, minutos: int) -> str:
+    """`ancora` fora de `(now() - minutos, now() + 5 min]`: os dois derivados."""
+    return (f"({ancora} <= now() - interval '{minutos} minutes' "
+            f"or {ancora} > now() + interval '5 minutes')")
+
+
 SQL_COLETA_VENCIDA = (
-    "(last_sync_at is null or (reconnected_at is not null and last_sync_at < reconnected_at)) "
-    f"and (coalesce(reconnected_at, created_at) <= now() - interval '{PRAZO_COLETA_MIN} minutes' "
-    "or coalesce(reconnected_at, created_at) > now() + interval '5 minutes') as coleta_vencida"
-)
+    f"{_SQL_SEM_SYNC} and {_fora_do_prazo(_SQL_AUTORIZACAO, PRAZO_COLETA_MIN)} as coleta_vencida")
+
+# Estourada = "Atualizando…" há `TETO_ATUALIZANDO_MIN` ou mais. Sem sync: a mesma
+# âncora da autorização, decidida aqui. Com sync, o SQL devolve NULL e quem decide
+# é `aplica_teto_por_health`, em Python: a âncora mora no `health` (JSON).
+SQL_COLETA_ESTOURADA = (
+    f"case when {_SQL_SEM_SYNC} "
+    f"then coalesce({_fora_do_prazo(_SQL_AUTORIZACAO, TETO_ATUALIZANDO_MIN)}, false) "
+    "end as coleta_estourada")
+
+
+def aplica_teto_por_health(row: dict, agora: datetime | None = None) -> dict:
+    """Completa o `coleta_estourada` que o SQL deixou NULL (quem já sincronizou).
+
+    O "Atualizando…" é o item em coleta sem produto (`coletando_sem_info`), e a
+    âncora é `health.coletando_desde`, que `mesclar_health_em_coleta` herda entre
+    fotos — o `observed_at` sozinho é renovado a cada foto e nunca venceria. Foto
+    anterior a este campo cai no `observed_at` dela (o `coalesce` do SQL: só a
+    chave ausente ou JSON null cai). O parse é aqui, protegido, e não num
+    `::timestamptz`: texto ilegível numa linha derrubava a query inteira — e a da
+    retentativa é entre usuários. Ilegível, sem fuso (na âncora ou no `agora`) ou
+    sem `health` = sem âncora = False: o card gira como antes, nada levanta. Muta e
+    devolve `row`.
+    """
+    if row.get("coleta_estourada") is not None:
+        return row
+    health = row.get("health") if isinstance(row.get("health"), dict) else {}
+    ancora = health.get("coletando_desde")
+    if ancora is None:
+        ancora = health.get("observed_at")
+    try:
+        ancora = datetime.fromisoformat(ancora)
+    except (TypeError, ValueError):
+        ancora = None
+    agora = agora or datetime.now(_tz())
+    if ancora is None or ancora.tzinfo is None or agora.tzinfo is None:
+        row["coleta_estourada"] = False
+        return row
+    row["coleta_estourada"] = (ancora <= agora - timedelta(minutes=TETO_ATUALIZANDO_MIN)
+                               or ancora > agora + timedelta(minutes=5))
+    return row
 
 
 def janela_device_auth_min() -> int:
@@ -192,7 +247,8 @@ _COLUNAS_DA_CONEXAO = f"""id, user_id, provider, provider_item_id, status, insti
        last_sync_at, last_attempt_at, status_reason, health,
        next_refresh_at, last_refresh_origin, reconnected_at,
        {SQL_EXECUTION_STATUS},
-       {SQL_COLETA_VENCIDA}"""
+       {SQL_COLETA_VENCIDA},
+       {SQL_COLETA_ESTOURADA}"""
 
 
 def get_connections_by_item_id(item_id: str, provider: str = "pluggy", *,
@@ -231,7 +287,7 @@ def get_connections_by_item_id(item_id: str, provider: str = "pluggy", *,
                 """,
                 (janela_device_auth_min(), provider, item),
             )
-            return [dict(r) for r in (cur.fetchall() or [])]
+            return [aplica_teto_por_health(dict(r)) for r in (cur.fetchall() or [])]
 
 
 def mark_sync_attempt(connection_id: int, *, origin: str = "sync") -> int:
@@ -583,7 +639,7 @@ def list_connections_para_retentar(*, id: int | None = None) -> list[dict]:
                 """,
                 (janela_device_auth_min(), id, id),
             )
-            return [dict(r) for r in (cur.fetchall() or [])]
+            return [aplica_teto_por_health(dict(r)) for r in (cur.fetchall() or [])]
 
 
 # Item cuja linha de MAIOR `id` no registry (com ou sem dono) é `operator_delete`:

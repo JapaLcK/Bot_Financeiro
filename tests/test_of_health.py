@@ -1414,7 +1414,9 @@ def test_mescla_nao_ocorre_com_foto_anterior_doente(item_status):
     verde em cima de um item que nunca chegou a sincronizar de verdade."""
     anterior = _foto(item_status, {"CREDIT": _CREDIT_ATRASADO})
     novo = _foto("UPDATING", {"BANK": _ACCOUNTS_OK})
-    assert mesclar_health_em_coleta(anterior, novo) == novo, item_status
+    # Só o `coletando_desde` (teto do "Atualizando…") entra: a coleta recomeça.
+    assert mesclar_health_em_coleta(anterior, novo) == {
+        **novo, "coletando_desde": novo["observed_at"]}, item_status
 
 
 def test_mescla_ocorre_com_foto_anterior_updated():
@@ -1445,9 +1447,10 @@ def test_mescla_foto_nova_sem_products_nenhum_ainda_mescla():
 @pytest.mark.parametrize("anterior", [None, {}, {"products": None}, {"status": "x"}])
 def test_mescla_sem_foto_anterior_utilizavel_nao_mexe(anterior):
     """Sem anterior (None), anterior não-dict, ou anterior sem `products` dict:
-    nada para mesclar — devolve a foto nova como veio."""
+    nada para mesclar — devolve a foto nova só com o `coletando_desde` dela."""
     novo = _foto("UPDATING", {"BANK": _ACCOUNTS_OK})
-    assert mesclar_health_em_coleta(anterior, novo) == novo
+    assert mesclar_health_em_coleta(anterior, novo) == {
+        **novo, "coletando_desde": novo["observed_at"]}
 
 
 def test_mescla_recalcula_stale_products_na_ordem_dos_produtos():

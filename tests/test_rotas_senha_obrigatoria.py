@@ -107,6 +107,10 @@ TABELA = {
     ("PATCH", "/settings/{user_id}/notifications"): _DADOS,
     # ── /api/v2 e WS ──
     ("GET", "/api/v2/me"): (B, "usuario_atual"), ("GET", "/api/v2/eventos"): (B, "usuario_atual"),
+    ("GET", "/api/v2/assinaturas"): (B, "usuario_atual"),
+    ("POST", "/api/v2/assinaturas/marca"): (B, "usuario_atual"),
+    ("GET", "/api/v2/perfil"): (B, "usuario_atual"), ("PUT", "/api/v2/perfil"): (B, "usuario_atual"),
+    ("GET", "/api/v2/contas"): (B, "usuario_atual"),
     ("WS", "/ws/{user_id}"): (B, "close 4403"),
     # ── HTML autenticado ──
     ("GET", "/app"): (L, "casca; o overlay sobe"), ("GET", "/home"): (L, "casca; o overlay sobe"),
@@ -161,6 +165,7 @@ GET /investments/{user_id}/rates|POST /investments/{user_id}|POST /investments/{
 POST /investments/{user_id}/withdraw|DELETE /investments/{user_id}/{name:path}
 GET /open-finance/{user_id}|GET /open-finance/{user_id}/connectors|GET /open-finance/{user_id}/caixinhas
 POST /open-finance/{user_id}/caixinhas/bind|POST /open-finance/{user_id}/connect-token
+GET /open-finance/{user_id}/limite
 POST /open-finance/{user_id}/pluggy-item|POST /open-finance/{user_id}/sync|POST /open-finance/{user_id}/refresh
 POST /open-finance/{user_id}/mock-connect|DELETE /open-finance/{user_id}|GET /open-finance/{user_id}/movements
 POST /open-finance/{user_id}/movements/confirm|GET /open-finance/{user_id}/reconciliations

@@ -90,6 +90,12 @@ def _mock_open_finance_institution(key: str | None = None) -> dict:
     return MOCK_OPEN_FINANCE_INSTITUTIONS.get(normalized, MOCK_OPEN_FINANCE_INSTITUTIONS["nubank"])
 
 
+def mock_open_finance_item_id(user_id: int, institution_key: str | None = None) -> str:
+    # Fonte única do item falso: a rota passa este id ao teto de bancos para o reseed
+    # da mesma instituição contar como reconexão. Leva o user_id: isola entre usuários.
+    return f"mock-pluggy-{user_id}-{_mock_open_finance_institution(institution_key)['id']}"
+
+
 def create_mock_open_finance_connection(user_id: int, institution_key: str | None = None) -> dict:
     """
     Simula o fluxo Pluggy/Open Finance para desenvolvimento.
@@ -97,7 +103,7 @@ def create_mock_open_finance_connection(user_id: int, institution_key: str | Non
     """
     ensure_user(user_id)
     institution = _mock_open_finance_institution(institution_key)
-    provider_item_id = f"mock-pluggy-{user_id}-{institution['id']}"
+    provider_item_id = mock_open_finance_item_id(user_id, institution_key)
     now = datetime.now(_tz())
     today = now.date()
 
@@ -260,7 +266,8 @@ def get_open_finance_snapshot(user_id: int, limit: int = 8) -> dict:
     # Import LOCAL: `open_finance_state` importa `_CursorComTeto` daqui no topo,
     # então a mão única é esta (ver o comentário lá).
     from .open_finance_state import (
-        SQL_COLETA_VENCIDA, SQL_EXECUTION_STATUS, janela_device_auth_min)
+        SQL_COLETA_ESTOURADA, SQL_COLETA_VENCIDA, SQL_EXECUTION_STATUS, aplica_teto_por_health,
+        janela_device_auth_min)
 
     with get_conn() as conn:
         with conn.cursor() as cur:
@@ -293,14 +300,15 @@ def get_open_finance_snapshot(user_id: int, limit: int = 8) -> dict:
                 select id, provider, provider_item_id, status, institution_name, institution_id,
                        last_sync_at, last_attempt_at, status_reason, health, reconnected_at,
                        {SQL_EXECUTION_STATUS},
-                       {SQL_COLETA_VENCIDA}
+                       {SQL_COLETA_VENCIDA},
+                       {SQL_COLETA_ESTOURADA}
                 from open_finance_connections
                 where user_id=%s
                 order by updated_at desc, id desc
                 """,
                 (janela_device_auth_min(), user_id),
             )
-            connections = [dict(r) for r in (cur.fetchall() or [])]
+            connections = [aplica_teto_por_health(dict(r)) for r in (cur.fetchall() or [])]
             # `ui` é o estado exibível — decidido por `connection_ui_state`, a única
             # função que o decide. O front deixou de derivar rótulo do `status`:
             # ele não sabe de produto atrasado nem de item que sumiu.
@@ -314,6 +322,7 @@ def get_open_finance_snapshot(user_id: int, limit: int = 8) -> dict:
                 # sem ninguém ter decidido isso.
                 c.pop("execution_status", None)
                 c.pop("coleta_vencida", None)
+                c.pop("coleta_estourada", None)
 
             cur.execute(
                 """

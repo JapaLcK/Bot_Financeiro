@@ -130,8 +130,12 @@ que não se sabe aparece como "sem comparação", "a conferir", "desatualizado" 
   hoje** (medição de 2026-09-29, abaixo, §7). O que já se grava a cada sincronização é a
   foto diária por posição (`open_finance_investment_snapshots`): saldo, aplicado, data da
   posição, taxa de contrato e as três taxas do banco em colunas próprias, vazias até algum
-  banco mandar. A fonte do Rendimento × CDI volta ao dono na etapa de tela. Só compara com o
-  CDI quando se sabe o período exato e que a posição existiu nele o tempo todo.
+  banco mandar. **Decisão do dono (2026-10-01):** o bloco de rendimento mostra SÓ o
+  contratado ("100% do CDI contratado"), sem afirmar que rendeu; a fonte é `rate`/`rateType`
+  de `open_finance_investment_snapshots`, e entra na etapa de tela do bloco de rendimento. Se
+  algum banco passar a mandar `lastMonthRate` e as outras taxas, as colunas já as guardam.
+  Só compara com o CDI quando se sabe o período exato e que a posição existiu nele o tempo
+  todo.
 - **Reserva em meses**: a caixinha de reserva é designada pelo usuário (hoje só existe o
   palpite pelo nome, `_is_reserva`); a conta divide pelo custo mensal das contas fixas.
 - **Só reais**: o que estiver em outra moeda fica fora das somas, com aviso. Câmbio fica
@@ -254,9 +258,11 @@ PR de cada etapa, não soluções prontas. Cada PR confere se ainda valem, decid
   data da posição informada pelo banco, dias atrás da coleta e diferente entre posições da
   mesma conexão; posições resgatadas (`TOTAL_WITHDRAWAL`) continuam no espelho; e há
   conexão `PARTIAL_SUCCESS` com investimentos não confirmados. Resultado: não há hoje taxa
-  do banco para comparar. **Pendência com o dono na etapa de tela:** de onde sai o
-  Rendimento × CDI. A regra continua — a comparação usa a taxa que o banco calcula, nunca a
-  diferença entre fotos do rendimento acumulado.
+  do banco para comparar. **Decidido pelo dono (2026-10-01, §4):** o bloco de rendimento
+  mostra só o contratado ("100% do CDI contratado"), de `rate`/`rateType` das fotos por
+  posição, sem afirmar que rendeu; entra na etapa de tela do bloco de rendimento. A regra
+  continua — a comparação de rendimento usa a taxa que o banco calcula, nunca a diferença
+  entre fotos do rendimento acumulado.
 
 **Etapas de tela (1 a 6)**
 - Etapa 2: identidade das transações importadas por conta (conta e cartão); editar a data
@@ -396,4 +402,19 @@ PR de cada etapa, não soluções prontas. Cada PR confere se ainda valem, decid
     e na conciliação, que seguem o `BANK_ACCOUNTS_SQL`; (3) conexão velha ainda viva
     da mesma conta liga `banco_desatualizado` quando envelhece (sem teste); (4) conta de
     conexão pausada não é contada em `base.fora`, a posição é.
+- Etapa 1 (Resumo) em 4 PRs (divisão aprovada pelo dono em 2026-10-01), na ordem
+  A → (B ∥ D) → C: A perfil e bloco de contas (API) · B uma função só para o mês + rota
+  `resumo-do-mes` + o WhatsApp passa a usá-la · D bloqueio da Q36 no painel antigo pela chave
+  `dashboard_v2_enabled` · C a tela. Rendimento × CDI: decidido (§4), entra na etapa de tela
+  do bloco de rendimento.
+  - PR A: `GET`/`PUT /api/v2/perfil` (perfil do Resumo no servidor, `"padrao"` no CHECK de
+    `dashboard_profile`, NULL = nunca escolheu; o PUT é a primeira escrita da v2, com CSRF) e
+    `GET /api/v2/contas` (`db/contas_hoje.py`): Carteira e contas BANK pelo recorte e pelos
+    critérios da foto (`desatualizada`, `sem_saldo`, `fora_do_sync` viraram funções de
+    módulo em `db/patrimonio.py`), cada conta com `no_total` e `motivos`, `fora_do_total`
+    e o total igual a `carteira + bancos` da foto. Desatualizado = 48 h, como a foto, sem
+    timer na tela. Dinheiro sai como texto decimal (contrato da v2, `docs/CLAUDE.md`). A
+    tela decide o "expandir" das contas fora do total no PR C. Divergência declarada com o
+    saldo consolidado: USD novo × BRL velho e saldo não finito na coluna
+    (`tests/test_api_v2_contas.py`).
 - [ ] Etapa 0 · [ ] 1 · [ ] 2 · [ ] 3 · [ ] 4 · [ ] 5 · [ ] 6 · [ ] 7
