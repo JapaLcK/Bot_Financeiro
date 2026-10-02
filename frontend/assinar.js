@@ -309,23 +309,23 @@
 
   // ── Carga ─────────────────────────────────────────────────────────────────
   function liga() {
-    $("form-s1").addEventListener("submit", function (ev) {
-      ev.preventDefault();
-      acao(criaConta);
-    });
+    $("form-s1").addEventListener("submit", function (ev) { ev.preventDefault(); acao(criaConta); });
     $("s2-senha").addEventListener("click", function () { acao(entrarComSenha); });
     $("s2-google").addEventListener("click", function () { acao(entrarComGoogle); });
     $("s2-esqueci").addEventListener("click", function () { acao(esqueci); });
-    $("s2-outro").addEventListener("click", function () { mostra("s1"); $("email").focus(); });
-    $("s3-retry").addEventListener("click", function () { if (refazer) refazer(); });
+    // Fora do `acao`, mas respeitam a trava: com o logout/`/auth/me` do S2 ou o Sair em voo, o handler velho atropelaria.
+    $("s2-outro").addEventListener("click", function () { if (voo) return; mostra("s1"); $("email").focus(); });
+    $("s3-retry").addEventListener("click", function () { if (refazer && !voo) refazer(); });
     $("s4-b").addEventListener("click", function () { irParaHospedado(); });
     $("s4-pix").addEventListener("click", function () { acao(pix); });
     $("sair").addEventListener("click", function () { acao(sair); });
   }
 
-  // Volta pelo bfcache (do /login ou da /continuar-compra): a tela fica, a trava sai.
+  // Volta pelo bfcache: o S2 (do /login ou do Google) recarrega, porque a sessão pode ser outra e a carga a relê;
+  // nos outros (o pix, da /continuar-compra) a tela fica e a trava sai. O reload não é `persisted`: sem laço.
   window.addEventListener("pageshow", function (ev) {
     if (!ev.persisted) return;
+    if (estado === "s2") return location.reload();
     voo = false;
     if (estado === "pix") estado = "s4";  // o embutido continua montado
   });
