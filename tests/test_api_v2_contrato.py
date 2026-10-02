@@ -91,6 +91,22 @@ def test_gerador_traduz_rota_sse():
     )
 
 
+def _post(ref, required=True):
+    op = dict(_get(ref)["get"], requestBody={
+        "content": {"application/json": {"schema": {"$ref": ref}}}, "required": required})
+    return {"post": op}
+
+
+def test_gerador_traduz_rota_post():
+    schemas = {"Aa": {"type": "object", "properties": {"x": {"type": "string"}}}}
+    paths = {"/a": _get("#/components/schemas/Aa"), "/p": _post("#/components/schemas/Aa")}
+    assert gerar(_spec(schemas, paths)) == CABECALHO + (
+        "export type Aa = { x?: string };\n"
+        'export type RotasGet = { "/a": Aa };\n'
+        'export type RotasPost = { "/p": { corpo: Aa; resposta: Aa } };\n'
+    )
+
+
 @pytest.mark.parametrize("spec", [
     _spec({"X": {"type": "object", "properties": {}, "additionalProperties": True}}),
     _spec({"X": {"oneOf": [{"type": "string"}, {"type": "integer"}]}}),
@@ -98,9 +114,12 @@ def test_gerador_traduz_rota_sse():
     _spec({"X": {"const": "a"}}),
     _spec({"X": {"type": "object", "properties": {"a": {"type": "string"}}}},
           {"/x": {"post": _get("#/components/schemas/X")["get"]}}),
+    _spec({"X": {"type": "object", "properties": {"a": {"type": "string"}}}},
+          {"/x": _post("#/components/schemas/X", required=False)}),
     _spec({}, {"/s": _sse({"type": "string"})}),
     _spec({}, {"/s": _sse()}),
-], ids=["additionalProperties", "oneOf", "allOf", "const", "post", "sse_sem_ref", "sse_sem_contentSchema"])
+], ids=["additionalProperties", "oneOf", "allOf", "const", "post", "post_corpo_opcional",
+        "sse_sem_ref", "sse_sem_contentSchema"])
 def test_gerador_recusa_o_que_nao_traduz(spec):
     with pytest.raises(ValueError, match="construção não suportada"):
         gerar(spec)

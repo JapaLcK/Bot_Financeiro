@@ -51,11 +51,9 @@ def _tipo(s: dict) -> str:
     raise _recusa(s)
 
 
-def _resposta_200(path: str, item: dict) -> tuple[str, str]:
+def _resposta_200(path: str, op: dict) -> tuple[str, str]:
     """(`"json"` ou `"sse"`, tipo): o do corpo JSON, ou o do `data` de cada evento SSE."""
-    if set(item) != {"get"} or set(item["get"]) - _OPERACAO:
-        raise _recusa({path: item})
-    content = item["get"]["responses"]["200"]["content"]
+    content = op["responses"]["200"]["content"]
     if set(content) == {"application/json"}:
         schema = content["application/json"]["schema"]
         if set(schema) != {"$ref"}:
@@ -73,6 +71,21 @@ def _resposta_200(path: str, item: dict) -> tuple[str, str]:
     raise _recusa({path: content})
 
 
+def _post(path: str, op: dict) -> str:
+    """POST só com corpo JSON obrigatório por `$ref` e resposta 200 JSON por `$ref`."""
+    corpo = op.get("requestBody", {})
+    content = corpo.get("content", {})
+    schema = content.get("application/json", {}).get("schema", {})
+    if (set(op) - _OPERACAO != {"requestBody"} or set(corpo) != {"content", "required"}
+            or corpo["required"] is not True or set(content) != {"application/json"}
+            or set(schema) != {"$ref"}):
+        raise _recusa({path: op})
+    tipo_resposta, resposta = _resposta_200(path, op)
+    if tipo_resposta != "json":
+        raise _recusa({path: op})
+    return f"{{ corpo: {_tipo(schema)}; resposta: {resposta} }}"
+
+
 def gerar(spec: dict) -> str:
     schemas = spec.get("components", {}).get("schemas", {})
     linhas = [CABECALHO]
@@ -80,13 +93,21 @@ def gerar(spec: dict) -> str:
         if not _IDENT.fullmatch(nome):
             raise _recusa(nome)
         linhas.append(f"export type {nome} = {_tipo(schemas[nome])};\n")
-    rotas = {"json": [], "sse": []}
+    rotas = {"json": [], "sse": [], "post": []}
     for p in sorted(spec["paths"]):
-        tipo_resposta, tipo = _resposta_200(p, spec["paths"][p])
+        item = spec["paths"][p]
+        if set(item) == {"get"} and not set(item["get"]) - _OPERACAO:
+            tipo_resposta, tipo = _resposta_200(p, item["get"])
+        elif set(item) == {"post"}:
+            tipo_resposta, tipo = "post", _post(p, item["post"])
+        else:
+            raise _recusa({p: item})
         rotas[tipo_resposta].append(f"{json.dumps(p)}: {tipo}")
     linhas.append(f"export type RotasGet = {{ {'; '.join(rotas['json'])} }};\n")
     if rotas["sse"]:
         linhas.append(f"export type RotasSSE = {{ {'; '.join(rotas['sse'])} }};\n")
+    if rotas["post"]:
+        linhas.append(f"export type RotasPost = {{ {'; '.join(rotas['post'])} }};\n")
     return "".join(linhas)
 
 
