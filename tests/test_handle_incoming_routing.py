@@ -126,6 +126,25 @@ _COMPARATIVAS = [
     "gastei mais de 100 no mercado?", "gastei mais no cartão esse mês que no passado?",
     "gastei mais no credito que no debito?",
     "gastei mais que 5 mil esse mês", "gastei mais que devia no ifood 80",
+    # #569: prefixo, marcador sem "?", intensificador, "%", "+", "acima", "N a mais que ...?".
+    "eu gastei mais em 2025 ou 2026?", "oi gastei mais em 2025 ou 2026?",
+    "sera que gastei mais em 2025 ou 2026?", "gastei mais em 2025",
+    "gastei mais nos ultimos 3 meses", "gastei mais 30% esse mês?", "gastei mais 2025 ou 2026?",
+    "gastei bem mais em 2025?", "gastei mto mais em 2025?", "gastei + em 2025 ou 2026?",
+    "gastei acima de 2025?", "gastei mais em 2024 do que em 2025", "gastei mais em 2025 q em 2026",
+    "gastei mais em 2025 x 2026", "gastei mais comparado com 2025",
+    "gastei 200 a mais que no mes passado?", "gastei 30% a mais que no mes passado?",
+    "gastei 30% mais que no mes passado?", "gastei 30% a mais esse mes?",
+    "gastou mais em 2025 ou 2026?", "gastamos mais em 2025 ou 2026?",
+    "gastei mais q devia no ifood 80",  # "q" é o "que" abreviado: mesmo destino da linha do #570
+    "sera que eu gastei mais em 2025 ou 2026?", "gastei mt mais em 2025?", "gastei mais no 2025",
+    "gastei mais desde 2024", "gastei mais até 2025", "gastei mais 2025 x 2026?",
+    "gastei mais 2025 vs 2026?", "gastei mais 2025 e 2026?", "gastei mais 2025 q 2026?",
+    "gastei mais 2025 que 2026?", "gastei mais 2025 do que 2026?", "gastei mais 2025 ou em 2026?",
+    "gastei mais nos ultimos 15 dias", "gastei mais nas ultimas 2 semanas",
+    "gastei r$ 200 a mais que no mes passado?", "gastei 200 reais a mais que no mes passado?",
+    "gastei 200 a mais do que no mes passado?", "gastei 200 a mais q no mes passado?",
+    "gastei 200 a menos que no mes passado?", "gastei abaixo de 500 no mercado?",
 ]
 
 # Controle positivo: o desvio restringe, então lançamento legítimo com
@@ -166,6 +185,15 @@ _LANCAMENTOS = [
     ("gastei mais de 100 no mercado que abriu ali", 100),
     ("gastei mais uma vez no uber 30 que o motorista cobrou errado", 30),
     ("gastei demais no fds que passou 100 no bar e 50 no uber", 100),
+    # #569: ano como valor, "mais de 2000" (sem marcador de ano), "N a mais que" sem "?".
+    ("gastei 2025 no notebook", 2025), ("gastei 1200 no aluguel", 1200),
+    ("paguei mais 2024 de ipva", 2024), ("gastei mais 2000 no carro", 2000),
+    ("paguei acima de 100 no mercado", 100), ("gastei mais 20 no uber?", 20),
+    ("gastei mais de 2000 no carro", 2000), ("paguei 20 a mais que o normal na luz", 20),
+    # "acima", "vs", "+ ou -" e percentual sem "?" continuam informando o valor.
+    ("paguei acima do normal 200 na luz", 200), ("gastei mais no uber vs taxi 30", 30),
+    ("gastei + ou - 50 no mercado?", 50), ("gastei 30% a mais no uber", 30),
+    ("gastei acima 100 no mercado?", 100),  # número logo depois, como "gastei mais 30?"
 ]
 
 

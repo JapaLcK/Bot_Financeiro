@@ -198,7 +198,10 @@ Sub-app FastAPI (`api/v2/app.py`) montado pelo monólito com `app.mount("/api/v2
 - `GET /api/v2/assinaturas` e `POST /api/v2/assinaturas/marca` (`api/v2/assinaturas.py`):
   a lista do Recurring Payments da Pluggy (`core/services/assinaturas.py`) e a marcação
   do usuário por chave do comerciante (`assinatura`/`ignorar`/`nenhuma`; chave fora da
-  lista dá 404). Gate `subscriptions` em `FEATURE_MIN_TIER_V2` (Plus ou Pro).
+  lista dá 404). Gate `subscriptions` em `FEATURE_MIN_TIER_V2` (Plus ou Pro). O cliente é
+  `webapp/src/dashboard/widgets/Subscriptions.tsx` (o card do Resumo e a página
+  `/assinaturas`); o POST sai pelo `apiPost` de `lib/v2.ts`, com o header de
+  `window.pbCsrfHeaders` (auth-refresh.js), e o 403 `pro_required` vira o convite.
 - **Dinheiro na v2 é `Decimal` e sai como TEXTO decimal** (`"1234.56"`, sem arredondar e sem
   float), em toda rota: no TS é `string`. A escala é a da coluna (`"1000"` e `"1000.00"`
   valem). O contrato vale para toda rota futura.
@@ -446,7 +449,11 @@ contagem não vive aqui de propósito, porque ela sobe a cada rodada (§2).
 
 Via **Pluggy**. Endpoints em `frontend/routes/open_finance.py`
 (`/open-finance/{user_id}` e `connect-token`, `connectors`, `sync`, `refresh`,
-`pluggy-item`, `caixinhas`, `caixinhas/bind`, `mock-connect` (só com `OF_MOCK_CONNECT_ENABLED`; sem ele, 404)) mais o webhook
+`pluggy-item`, `caixinhas`, `caixinhas/bind`, `mock-connect` (só com `OF_MOCK_CONNECT_ENABLED`; sem ele, 404),
+`limite` (GET só leitura, `{ok, of_banks_max, em_uso, pode_adicionar, code, message}`: se cabe
+um banco NOVO, pela mesma decisão do `_enforce_bank_limit`; o teto nunca vira 402 aqui, mas o
+gate comum de dados sim (402 `subscription_required`/`plan_selection_required` sem plano ativo);
+não barra reconexão e o 402 do `/pluggy-item` continua valendo)) mais o webhook
 `/open-finance/pluggy/webhook`. Serviços em `core/services/pluggy*.py` e
 `open_finance*.py`; tabelas `open_finance_connections/accounts/transactions/investments`,
 `open_finance_investment_snapshots` (foto diária por posição, `db/of_snapshots.py`) e

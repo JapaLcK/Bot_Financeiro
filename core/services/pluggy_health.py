@@ -73,10 +73,10 @@ sem sentido (com ela, um `item_status: MISSING` de antes ainda pintava a tela).
 from __future__ import annotations
 
 import re
-from datetime import datetime
+from datetime import datetime, timedelta, timezone
 from typing import Any
 
-from utils_date import _tz
+from utils_date import _tz, day_tz
 
 # Produto (nosso nome) → chave do `statusDetail` da Pluggy.
 _PRODUCT_KEYS = {
@@ -647,37 +647,67 @@ def derive_item_health(item: dict, *, now: datetime | None = None) -> dict:
     return {
         "observed_at": (now or datetime.now(_tz())).isoformat(),
         "item_status": (str(item.get("status") or "").upper() or None),
+        # Data da última sincronização do ITEM (sempre presente na Pluggy, ao
+        # contrário de `products[*].last_updated_at`, que só vem com statusDetail).
+        "last_updated_at": _iso(item.get("lastUpdatedAt")),
         "execution_status": (str(item.get("executionStatus") or "").upper() or None),
         "products": products,
         "stale_products": stale,
     }
 
 
-def pluggy_tem_dado_depois_de(health: Any, instante: Any) -> bool:
-    """A Pluggy coletou algum produto DEPOIS de `instante`? (Onda 5, PR-B2)
+# Relógio da Pluggy adiantado em relação ao nosso: até aqui a data conta; além,
+# é lixo (relógio errado, `lastUpdatedAt` = fim previsto) e ficaria "à frente"
+# para sempre, porque o nosso sync nunca a alcança.
+_TOLERANCIA_RELOGIO = timedelta(minutes=5)
 
-    Lê `products[*].last_updated_at`, que `derive_item_health` grava CRU: o parse
+
+def data_da_pluggy(health: Any, agora: datetime | None = None) -> datetime | None:
+    """Data mais nova que a Pluggy declara ter coletado (Onda 5, PR-B3).
+
+    A maior data LEGÍVEL e COM FUSO entre `products[*].last_updated_at` e o
+    `last_updated_at` do item. `derive_item_health` grava as duas CRUAS: o parse
     é aqui, em Python, protegido. Um `::timestamptz` em SQL sobre string do
     provedor derrubaria a query inteira (a armadilha do `SQL_EXECUTION_STATUS`).
-    Data ilegível, sem fuso ou ausente é ignorada: sem prova, não há "à frente".
-    `instante` sem fuso também devolve False, em vez de estourar a comparação.
+    Data ilegível, sem fuso, ausente, FORA DO INTERVALO (zero-time "0001-01-01Z":
+    `astimezone` estoura `OverflowError`, e `connection_ui_state` não tem try) ou
+    no futuro além de `_TOLERANCIA_RELOGIO` é ignorada: sem prova, não há data.
+    `agora` é opcional (default: o relógio) para quem precisar de pureza.
+    """
+    if not isinstance(health, dict):
+        return None
+    produtos = health.get("products")
+    brutas = [health.get("last_updated_at")]
+    if isinstance(produtos, dict):
+        brutas += [d.get("last_updated_at") if isinstance(d, dict) else None
+                   for d in produtos.values()]
+    limite = (agora or datetime.now(timezone.utc)) + _TOLERANCIA_RELOGIO
+    datas = []
+    for bruta in brutas:
+        try:
+            data = datetime.fromisoformat(bruta)
+            if data.tzinfo is None:
+                continue
+            day_tz(data)  # a conversão que a tela fará (D2/D7): valida o intervalo aqui
+        except (TypeError, ValueError, OverflowError):
+            continue
+        if data <= limite:
+            datas.append(data)
+    return max(datas, default=None)
+
+
+def pluggy_tem_dado_depois_de(health: Any, instante: Any) -> bool:
+    """A Pluggy coletou algo DEPOIS de `instante`? (Onda 5, PR-B2/B3)
 
     Uma regra, a âncora como parâmetro: a retentativa pergunta contra
     `last_attempt_at` (a Pluggy coletou depois da nossa última leitura?); a tela
-    da D2 (PR-B3) perguntará contra `last_sync_at`.
+    (D2, `connection_ui_state`) chama esta mesma função com `last_sync_at`. Ajuste
+    de tolerância de relógio (`_TOLERANCIA_RELOGIO` só descarta o futuro) mora aqui.
+    `instante` sem fuso devolve False, em vez de estourar a comparação.
     """
-    produtos = health.get("products") if isinstance(health, dict) else None
-    if not isinstance(produtos, dict) or getattr(instante, "tzinfo", None) is None:
-        return False
-    datas = []
-    for detalhe in produtos.values():
-        try:
-            data = datetime.fromisoformat(detalhe["last_updated_at"])
-        except (TypeError, ValueError, KeyError):
-            continue
-        if data.tzinfo is not None:
-            datas.append(data)
-    return bool(datas) and max(datas) > instante
+    data = data_da_pluggy(health)
+    return (data is not None and getattr(instante, "tzinfo", None) is not None
+            and data > instante)
 
 
 def mesclar_health_em_coleta(anterior: Any, novo: Any) -> Any:
@@ -760,6 +790,10 @@ _DETALHE_COLETA_ESTOURADA = "O banco está demorando — atualize de novo mais t
 # "Erro temporário" com este detalhe; o `_FIXED_DETAIL` dele ("Tentaremos de novo
 # automaticamente") continua valendo para os outros, que a retentativa relê.
 _DETALHE_ITEM_EM_ERRO = "O banco teve um erro — atualize de novo mais tarde"
+
+# D2 (Onda 5, PR-B3): a Pluggy já tem dado mais novo que o nosso último sync.
+# Instrução, não promessa: a retentativa de fundo tem interruptores (doc §2.2).
+_DETALHE_PLUGGY_A_FRENTE = "O banco já tem dados de {} — atualize para trazer"
 
 # Falha de leitura NOSSA. Só um sync com leitura completa a limpa: o job de
 # saúde (`leitura_completa=None`) não leu nada, então não pode apagá-la.
@@ -941,6 +975,13 @@ def connection_ui_state(connection_row: dict) -> dict:
     # DECISÃO DO DONO (2026-09-16): durante a coleta, com foto anterior
     # UPDATED/UPDATING, o card mostra o último estado conhecido — inclusive
     # "Atualizado" quando a foto anterior estava toda em dia.
+    # Âncora da D2/D7: o último sync, só se valeu (depois da autorização atual) e
+    # tem fuso. Sem health ou sem âncora, `data_pluggy`/`ancora` None = sem D2/D7.
+    data_pluggy = data_da_pluggy(health)
+    ancora = ultimo if (not sem_sync and getattr(ultimo, "tzinfo", None)) else None
+    pluggy_a_frente = pluggy_tem_dado_depois_de(health, ancora)  # a única regra de "à frente"
+    dados_de = (day_tz(data_pluggy).strftime("%d/%m") if ancora and data_pluggy and not pluggy_a_frente
+                and ancora - data_pluggy > timedelta(days=1) else None)
     coletando_sem_info = (str((health or {}).get("item_status") or "").upper() in _UPDATING
                           and not (health or {}).get("products"))
 
@@ -977,6 +1018,12 @@ def connection_ui_state(connection_row: dict) -> dict:
         # seco da base, não o "Ainda não sincronizou" — aqui já se sincronizou.
         elif state == "updated" and coletando_sem_info:
             state, detail = "updating", None
+        # D2 (PR-B3): fica DEPOIS do `sem_sync` e do `coletando_sem_info` (reconexão
+        # sem sync continua "Atualizando…") e só contra o verde: os motivos de
+        # leitura, o erro e o `partial` da Pluggy já falam por si.
+        # `and data_pluggy`: o predicado e `data_da_pluggy` leem o relógio em separado.
+        elif state == "updated" and pluggy_a_frente and data_pluggy:
+            state, detail = "partial", _DETALHE_PLUGGY_A_FRENTE.format(day_tz(data_pluggy).strftime("%d/%m"))
         # Mesmo defeito do `partial`: item vivo, espelho vazio, e o porquê
         # (`ACCT_001` = ninguém liberou contas) preso no JSON. Sem health — o
         # ramo de baixo — a frase continua exatamente a de hoje.
@@ -1007,6 +1054,7 @@ def connection_ui_state(connection_row: dict) -> dict:
             "label": _LABELS[state],
             "detail": detail if detail is not None else _FIXED_DETAIL.get(state),
             "stale_products": stale,
+            "dados_de": dados_de,  # D7: sufixo da linha "Última sync" (settings.html)
         }
 
     if status == "DELETED":

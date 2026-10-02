@@ -15,6 +15,7 @@ from pydantic import ValidationError
 
 import frontend.finance_bot_websocket_custom as dashboard
 from api.v2 import app as app_v2
+from api.v2.assinaturas import Assinaturas
 from api.v2.contas import Contas
 from api.v2.erros import ErroV2
 from api.v2.me import Me
@@ -229,6 +230,11 @@ def test_erro_v2_recusa_o_detail_fora_do_envelope():
 @pytest.mark.parametrize("plano", sorted(FIXTURES["me"]))
 def test_fixture_do_me_segue_o_modelo(plano):
     assert Me.model_validate(FIXTURES["me"][plano]).plan_tier == plano
+
+
+@pytest.mark.parametrize("nome", sorted(FIXTURES["assinaturas"]))
+def test_fixture_de_assinaturas_segue_o_modelo(nome):
+    Assinaturas.model_validate(FIXTURES["assinaturas"][nome])
 
 
 @pytest.mark.parametrize("nome", sorted(FIXTURES["perfil"]))

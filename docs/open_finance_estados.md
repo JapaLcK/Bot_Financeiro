@@ -76,9 +76,21 @@ comando; não copie o resultado para cá (`CLAUDE.md` §2).
      `item_missing`). `item/updated` e `transactions/*` não gravam status nem
      motivo: só agendam sync. `item/created` e `item/error` sobre falha de leitura
      são buracos do contrato, corrigidos no PR-C (R8 e observação imediata).
-7. **Idade do dado**: o usuário vê o dado do banco, cuja data é
-   `products[*].last_updated_at` da Pluggy, limitada pelo nosso `last_sync_at`.
-   *Proposto:* D2 e D7.
+7. **Idade do dado**: o usuário vê o dado do banco, cuja data é a maior entre
+   `products[*].last_updated_at` e o `last_updated_at` do ITEM (`data_da_pluggy`,
+   `core/services/pluggy_health.py`; só data legível e com fuso). O item entra
+   porque o `statusDetail` só vem com `PARTIAL_SUCCESS` ou warning: um item
+   `SUCCESS` sem warning tem `products` vazio. **Vigente desde o PR-B3**, só com
+   sync depois da autorização atual (a âncora é o `last_sync_at`, com fuso):
+   - **D2**: a Pluggy à frente (`pluggy_tem_dado_depois_de(health, last_sync_at)`, `>` estrito, a mesma função da retentativa)
+     troca o "Atualizado" por **Parcial (âmbar) · "O banco já tem dados de dd/mm —
+     atualize para trazer"**. Só substitui o verde: motivo de leitura, ação
+     necessária, `ERROR`, `item_missing`, terminais, o Parcial da Pluggy (sem
+     sufixo) e "Atualizando…" mantêm o que já dizem.
+   - **D7**: `ui.dados_de` ("dd/mm" no fuso do app) quando a data do banco é mais
+     de 24 h mais velha que o `last_sync_at` (estrito, instantes com fuso); o
+     front só concatena " · dados de dd/mm" à linha "Última sync". Vale em
+     qualquer estado com health e sync; D2 e D7 se excluem.
 8. **"Atualizando…"** só vale enquanto a coleta da autorização atual pode estar
    legitimamente em curso. Passado o prazo (D1) ou registrada uma falha, a tela diz
    o que houve. **Vigente desde o PR-B1:**
@@ -172,7 +184,8 @@ observação exige, e nunca durante uma autorização de dispositivo ainda váli
 
 **Invariante do verde:** "Atualizado" exige a última leitura completa (contas e
 investimentos) depois da autorização atual, sem motivo pendente. O default seguro
-do `connection_ui_state` (motivo desconhecido nunca é verde) continua valendo.
+do `connection_ui_state` (motivo desconhecido nunca é verde) continua valendo. E
+sem a Pluggy à frente do `last_sync_at` (D2, PR-B3).
 
 ---
 
@@ -222,17 +235,19 @@ verificação externa pendente.
 | Autorize no app (device, `health` null, dentro de `JANELA_DEVICE_AUTH_MIN`) | E8 com GET ok e mesmo estado | "Autorize no app" para sempre | calado para sempre | ✗ R7 (D5, PR-D) |
 | Autorize no app | E9 | reinicia a janela | calado | ✓ |
 | Autorize no app | E5 | nada muda | – | ? H5 (depende do catálogo de eventos da Pluggy) |
-| Ação necessária (reautorize) | E2 | continua "Ação necessária"; "Última sync" avança | avisa | tela ✓; "Última sync" ✗ C1 (D7) |
+| Ação necessária (reautorize) | E2 | continua "Ação necessária"; "Última sync" avança | avisa | tela ✓; "Última sync" ✓ **PR-B3 (D7)**: "· dados de dd/mm" |
 | Ação necessária (reautorize) | E9 e sync | Atualizado | para | ✓ |
 | Atualizado | E2 com sync ok | Atualizado | não | ✓ |
+| Atualizado com a Pluggy à frente (D2) | E6 com sync ok | Atualizado (o `last_sync_at` novo passa a data da Pluggy) | não | ✓ **PR-B3** |
+| Atualizado com a Pluggy à frente (D2) | E6 com `sync_in_progress` (lock ocupado: nada carimbou) | Parcial; toast "Atualizei o que deu no X: o banco já tem dados de dd/mm — atualize para trazer." | não | ✓ **PR-B3** |
 | Atualizado | E3 transitório (item ok na Pluggy) | "Erro temporário · Tentaremos de novo automaticamente" até o próximo E8 | "reconecte" | ✗ R2, R3 (PR-C, PR-D) |
 | Atualizado | E3 com item em `LOGIN_ERROR` | "Erro temporário" (deveria ser "Ação necessária · Reautorize o banco") até o E8 | avisa | ✗ (PR-C) |
 | Atualizado | E4 | Removido (sem detalhe) | não | ? C7 (fora da Onda 5 salvo pedido) |
 | Atualizado | E6 com `/investments` 429 e contas lidas | **Parcial · Investimentos não vieram nesta atualização**; toast "Atualizei o que deu no {banco}: investimentos não vieram nesta atualização." | não | ✓ **corrigido no PR-A (R4)** |
 | Atualizado | E6 com `/accounts` 429 | Erro temporário (`read_failed`) | não | ✓ |
 | Atualizado | E6 com o item sumido (404) | Conexão perdida | avisa | ✓ |
-| Atualizado | E7 sem webhook de volta | Atualizado sobre espelho velho até o tique seguinte, que relê quando a Pluggy tem dado depois da última tentativa | não | ✓ D3 (**PR-B2**, classe `pluggy_a_frente`); a tela até lá (D2): ✗ PR-B3 |
-| Atualizado, espelho velho e Pluggy em dia | E8 | Atualizado; o mesmo tique relê (até K por tique) | não | ✓ D3 (**PR-B2**); a tela (D2): ✗ PR-B3 |
+| Atualizado | E7 sem webhook de volta | Atualizado sobre espelho velho até o tique seguinte, que relê quando a Pluggy tem dado depois da última tentativa | não | ✓ D3 (**PR-B2**, classe `pluggy_a_frente`); a tela (D2): ✓ **PR-B3**, Parcial · "O banco já tem dados de dd/mm — atualize para trazer" |
+| Atualizado, espelho velho e Pluggy em dia | E8 | Atualizado; o mesmo tique relê (até K por tique) | não | ✓ D3 (**PR-B2**); a tela (D2): ✓ **PR-B3** |
 | Atualizado | E11 no PTR | âmbar; o pedido segue e repinta quando assentar | n/a | ✓ |
 | Atualizado | E11 no botão | toast de erro; o servidor pode ter concluído | n/a | ? H1 |
 | Parcial (Pluggy) | E2 ou E6 com produto voltando | Atualizado | não | ✓ (#473) |
@@ -338,8 +353,9 @@ pelo ESTADO GRAVADO (`list_connections_para_retentar`), decide com
 próximo. Só GET: nenhum PATCH, nenhuma cota de coleta.
 
 - **Âncora:** "a Pluggy à frente" é `pluggy_tem_dado_depois_de(health,
-  last_attempt_at)` (algum `products[*].last_updated_at` legível, com fuso, depois
-  da nossa última tentativa). A D2 (PR-B3) usará a mesma função com `last_sync_at`.
+  last_attempt_at)` (algum `products[*].last_updated_at` ou o `last_updated_at` do item, legível, com
+  fuso, depois da nossa última tentativa). A D2 (PR-B3) usa a mesma função (`data_da_pluggy`, que olha também o
+  `last_updated_at` do item) com `last_sync_at`.
 - **Teto:** até `OF_RETRY_MAX_PER_TICK` itens por tique (default 20), a tentativa
   mais antiga primeiro (`last_attempt_at nulls first, id`), sem prioridade por
   classe. **Só `0` ou negativo desliga a etapa**: valor que não é inteiro (`""`,
@@ -512,8 +528,8 @@ no meio, flag e o texto do E13).
 | E13 | `health.item_status == 'ERROR'` | Erro temporário | não (DECISÃO 1 = B) | GET não tira o item de ERROR; só PATCH ou o auto-update da Pluggy |
 | E14 | `PAUSED` / `DELETED` | Pausado / Removido | não | SQL (terminal) |
 | E15 | em dia | Atualizado | não | nada atrás |
-| E16 | sem motivo, com a Pluggy à frente | Atualizado (verde falso até a D2) | sim | `pluggy_a_frente` |
-| E17 | Parcial da Pluggy, sem motivo nosso, sem a Pluggy à frente | Parcial | não | o atraso é da Pluggy (com a Pluggy à frente: `pluggy_a_frente`) |
+| E16 | sem motivo, com a Pluggy à frente | Parcial · "O banco já tem dados de dd/mm — atualize para trazer" (D2, PR-B3; antes: verde falso) | sim | `pluggy_a_frente` |
+| E17 | Parcial da Pluggy, sem motivo nosso, sem a Pluggy à frente | Parcial | não | o atraso é da Pluggy (com a Pluggy à frente: `pluggy_a_frente`; a tela mantém o detalhe do Parcial, sem o texto da D2) |
 | E18 | tentativa nos últimos 30 min (`PRAZO_COLETA_MIN`) | qualquer | não | SQL (cooldown) |
 | E19 | item com dois donos | qualquer | não | SQL (o sync levantaria `AmbiguousItemError`) |
 | E20 | linha readotada por outro usuário entre a listagem e o run | qualquer | agenda e o sync recusa | `expected_user_id` → `connection_not_found`; a marca de falha não grava em linha de outro dono |
@@ -572,13 +588,18 @@ a D3, que torna verdade "Tentaremos de novo automaticamente" (menos em E13, §2.
 | decisão | escolha | PR |
 |---|---|---|
 | D1: por quanto tempo "Atualizando…" é honesto sem sync | 30 min desde a autorização atual; depois pílula âmbar, mesma "Atualizando…", detalhe "Está demorando mais que o normal — atualize de novo" (texto trocado pelo dono em 2026-09-30: o app não tem botão Atualizar) | PR-B1 (**implementada**) |
-| D2: o que a tela diz com dado antigo | âmbar só com prova (Pluggy com dado mais novo que o nosso); sem limite de idade absoluta até medir o auto-update da Pluggy | PR-B3 (o predicado `pluggy_tem_dado_depois_de` já existe desde o PR-B2) |
+| D2: o que a tela diz com dado antigo | âmbar só com prova (Pluggy com dado mais novo que o nosso); sem limite de idade absoluta até medir o auto-update da Pluggy | PR-B3 (**implementada**; texto A1, regra única `data_da_pluggy`) |
 | D3: alguém tenta de novo sozinho quando nosso dado está atrás | sim: o tique de saúde agenda sync para conexões com dado atrás (motivo de leitura pendente, coleta vencida, Pluggy à frente), teto K por tique, só GET. "Tentaremos de novo automaticamente" passa a ser verdade | PR-B2 (**implementada**, §2.2) |
 | D4: quais estados geram o aviso "reconecte" | só `needs_user_action` sem instrução de dispositivo e `item_missing`; a mesma função da tela | PR-D |
 | D5: prazo da instrução de device/QR com `health` medido | a mesma `JANELA_DEVICE_AUTH_MIN` (`core/services/pluggy_health.py`), ancorada na autorização atual, nos dois ramos | PR-D |
 | D6: como os Ajustes acompanham a coleta | relê o snapshot em 5/10/20/40 s e depois a cada 60 s, para no estado final ou em 30 min, pausa com a aba oculta, relê no `visibilitychange` | PR-E |
 | Teto do "Atualizando…" (Fase 4 do app, 2026-10-01) | `TETO_ATUALIZANDO_MIN` = 120 min; depois, o estado `error_recoverable` existente (sem 10º estado) com o detalhe "O banco está demorando — atualize de novo mais tarde"; a retentativa continua relendo | Fase 4, PR 2 (**implementada**) |
-| D7: "Última sync" mostra a data de quê | mantém "Última sync" e acrescenta "· dados de dd/mm" quando a data do banco difere mais de 1 dia | sem PR atribuído no plano da Onda 5 (a atribuir) |
+| D7: "Última sync" mostra a data de quê | mantém "Última sync" e acrescenta "· dados de dd/mm" quando a data do banco difere mais de 1 dia | PR-B3 (**implementada**; `ui.dados_de`, limiar de 24 h estrito) |
+
+Texto novo do PR-B3, visível ao usuário: o detalhe "O banco já tem dados de dd/mm —
+atualize para trazer" (pílula "Parcial", âmbar) e o sufixo " · dados de dd/mm" na
+linha "Última sync". Instrução, não promessa: a retentativa de fundo tem
+interruptores (§2.2).
 
 Texto novo da Fase 4, PR 2, visível ao usuário: o detalhe "O banco está
 demorando — atualize de novo mais tarde" (pílula "Erro temporário"; no toast do
@@ -592,6 +613,29 @@ Texto novo do PR-A, visível ao usuário: o detalhe
 "Investimentos não vieram nesta atualização" (pílula "Parcial").
 
 ## 4. Achados registrados, fora do escopo da Onda 5
+
+- **Limites do PR-B3 (D2/D7).**
+  - `_dm` (`_stale_detail`) fatia a string ISO sem converter fuso: "2026-09-20T01:30:00Z"
+    vira "20/09", que em America/Sao_Paulo é 19/09. Pré-existente; as datas novas
+    (D2 e D7) usam `day_tz` (`utils_date`), com conversão. As duas convivem na tela.
+  - "Última sync" é formatada pelo navegador (`fmtDate`); o "dd/mm" da D2/D7 vem
+    em America/Sao_Paulo (`_tz()`). Fora desse fuso as duas datas podem divergir
+    de um dia; o limiar de 24 h absorve a maior parte.
+  - Relógio da Pluggy: `_TOLERANCIA_RELOGIO` (5 min) só DESCARTA data futura além
+    dela. Skew de 0 a 5 min ainda conta como "à frente": se o relógio dela estiver
+    adiantado nessa faixa, um sync recém-terminado pode ficar âmbar até o próximo.
+    Decisão pendente do dono (exigir `data > âncora + tolerância`?); o comportamento
+    atual está caracterizado em teste. A Onda 8 mede o skew real.
+  - Semântica do `lastUpdatedAt` do item numa execução que falhou, e a presença
+    real dele em item `SUCCESS` sem `statusDetail` em produção: documentadas no
+    OpenAPI da Pluggy, não medidas com a Pluggy real. Onda 8. No pior caso a D7
+    perde o sufixo (falso negativo); a D2 só atua sobre o verde.
+  - `data_da_pluggy` ignora data fora do intervalo do `datetime` (zero-time
+    "0001-01-01Z": `astimezone` estoura) e data no futuro além de
+    `_TOLERANCIA_RELOGIO` (5 min); sem isso o card ficava Parcial para sempre.
+    Item com `lastUpdatedAt` futuro legítimo (fim previsto) não gera D2 nem D7.
+  - O Patrimônio acende `banco_desatualizado` com a D2 (estado != `updated`):
+    decisão do dono, sem código novo.
 
 - **Concordância do detalhe da Pluggy.** `_stale_detail` escreve "Investimentos
   desatualizado desde dd/mm" (e "Transações desatualizado") para produto de nome

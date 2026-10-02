@@ -166,6 +166,7 @@ GET /investments/{user_id}/rates|POST /investments/{user_id}|POST /investments/{
 POST /investments/{user_id}/withdraw|DELETE /investments/{user_id}/{name:path}
 GET /open-finance/{user_id}|GET /open-finance/{user_id}/connectors|GET /open-finance/{user_id}/caixinhas
 POST /open-finance/{user_id}/caixinhas/bind|POST /open-finance/{user_id}/connect-token
+GET /open-finance/{user_id}/limite
 POST /open-finance/{user_id}/pluggy-item|POST /open-finance/{user_id}/sync|POST /open-finance/{user_id}/refresh
 POST /open-finance/{user_id}/mock-connect|DELETE /open-finance/{user_id}|GET /open-finance/{user_id}/movements
 POST /open-finance/{user_id}/movements/confirm|GET /open-finance/{user_id}/reconciliations
