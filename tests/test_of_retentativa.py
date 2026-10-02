@@ -23,6 +23,8 @@ mutação e o que ficou vermelho:
     não exigir a Pluggy à frente (`if True:`)          → E7, E9, E15, E17 e R1/R5/R6
     âncora `last_sync_at` no lugar de `last_attempt_at` → E8 (coleta vencida), E9
     tirar o `coleta_vencida` do ramo `updating`        → E6, E24
+    (2026-10-01) tirar o remapeamento do teto           → E5 (as duas, 3 h), E8 (3 h), E25
+    (2026-10-01) tirar o `coleta_estourada` do `updating` → E25
     tirar o cooldown do SQL                            → E18
     tirar o "dono único" do SQL                        → E19
     predicado aceitando data sem fuso / com `>=`       → os casos do predicado
@@ -68,6 +70,7 @@ from test_of_item_ownership import eventos, sem_indice_unico  # noqa: F401
 from test_of_leitura_incompleta import _ui_pela_rota
 
 VENCIDA = "Está demorando mais que o normal — atualize de novo"
+ESTOURADA = "O banco está demorando — atualize de novo mais tarde"
 
 
 def _iso(horas_atras: float) -> str:
@@ -83,6 +86,14 @@ def _health(item_status: str = "UPDATED", *, horas: float = 3.0, stale=()) -> di
     return {"observed_at": datetime.now(timezone.utc).isoformat(), "item_status": item_status,
             "execution_status": "SUCCESS", "products": produtos, "stale_products": list(stale)}
 
+
+def _coletando(horas: float) -> dict:
+    """Item em coleta sem produto, coletando há `horas` (o `coletando_desde`)."""
+    return {"observed_at": _iso(0), "coletando_desde": _iso(horas), "item_status": "UPDATING",
+            "execution_status": None, "products": {}, "stale_products": []}
+
+
+_UMA_HORA = "now() - interval '1 hour'"
 
 # Linha "velha e tentada": autorizada há 3 h, última tentativa e último sync há 2 h.
 _SQL_PADRAO = {"created_at": "now() - interval '3 hours'",
@@ -210,6 +221,27 @@ CELULAS = {
     "E24_reconectado_no_prazo": (
         lambda: dict(status="UPDATING", health=None,
                      reconnected_at="now() - interval '5 minutes'"), None),
+    # Teto do "Atualizando…" (Fase 4, PR 2). As E5/E7/E8 de cima são autorizadas
+    # há 3 h (o `_SQL_PADRAO`), já na tela "Erro temporário" do teto; estas, há
+    # 1 h, na faixa da D1. A classe é a mesma nas duas zonas.
+    "E5_coleta_vencida_sem_health_1h": (
+        lambda: dict(status="UPDATING", health=None, last_sync_at="null",
+                     last_attempt_at="null", created_at=_UMA_HORA), "coleta"),
+    "E5_coleta_vencida_com_health_1h": (
+        lambda: dict(status="UPDATING", health=_health("UPDATING"), last_sync_at="null",
+                     last_attempt_at="null", created_at=_UMA_HORA), "coleta"),
+    "E7_coleta_vencida_no_accounts_1h": (
+        lambda: dict(reason="no_accounts", health=_health("UPDATING"), last_sync_at="null",
+                     created_at=_UMA_HORA), None),
+    "E8_coleta_vencida_no_accounts_pluggy_a_frente_1h": (
+        lambda: dict(reason="no_accounts", health=_health("UPDATING", horas=1),
+                     last_sync_at="null", created_at=_UMA_HORA), "pluggy_a_frente"),
+    # Já sincronizou e o item segue em coleta sem produto (`coletando_sem_info`):
+    # passado o teto, relê (GET); dentro dele, é coleta legítima.
+    "E25_sincronizado_coleta_estourada": (
+        lambda: dict(health=_coletando(horas=3)), "coleta"),
+    "E25b_sincronizado_coleta_dentro_do_teto": (
+        lambda: dict(health=_coletando(horas=1)), None),
 }
 
 
@@ -358,17 +390,22 @@ def _um_tique(monkeypatch, tiques: int = 1) -> None:
     monkeypatch.setattr(asyncio, "sleep", real)
 
 
-@pytest.mark.parametrize("cenario", ["R1_sync_de_fundo_morto", "R5_read_failed",
+@pytest.mark.parametrize("cenario", ["R1_sync_de_fundo_morto", "R1_teto", "R5_read_failed",
                                      "R6_webhook_perdido"])
 def test_o_tique_recupera_quem_ficou_para_tras(user_id, amb, monkeypatch, cenario):
     c = {"R1_sync_de_fundo_morto": lambda: _nova(user_id, status="UPDATING", health=None,
-                                                 last_sync_at="null", last_attempt_at="null"),
+                                                 last_sync_at="null", last_attempt_at="null",
+                                                 created_at=_UMA_HORA),
+         # Autorizada há 3 h (o `_SQL_PADRAO`): passou do teto do "Atualizando…".
+         "R1_teto": lambda: _nova(user_id, status="UPDATING", health=None,
+                                  last_sync_at="null", last_attempt_at="null"),
          "R5_read_failed": lambda: _nova(user_id, reason="read_failed"),
          "R6_webhook_perdido": lambda: _nova(user_id, health=_health(horas=1))}[cenario]()
     em_dia = _nova(user_id)
     antes = _ui_pela_rota(user_id, c["item"])
     assert (antes["state"], antes["detail"]) == {
         "R1_sync_de_fundo_morto": ("updating", VENCIDA),
+        "R1_teto": ("error_recoverable", ESTOURADA),
         "R5_read_failed": ("error_recoverable", "Tentaremos de novo automaticamente"),
         "R6_webhook_perdido": ("updated", None)}[cenario]
 

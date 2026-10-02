@@ -158,19 +158,23 @@ def record_agent_event(
     payload: dict | None = None,
     channel: str = "dashboard",
     valor_impacto: float | None = None,
+    silencioso: bool = False,
 ) -> bool:
-    """Registra um disparo. Retorna False se a dedupe_key já existia."""
+    """Registra um disparo. Retorna False se a dedupe_key já existia.
+
+    `silencioso=True` grava já com `stale_at`: uma lápide. O evento não aparece
+    no feed nem vai por e-mail, e o `do nothing` não o ressuscita depois."""
     with get_conn() as conn:
         with conn.cursor() as cur:
             cur.execute(
                 """
                 insert into agent_events
-                  (agent_id, user_id, kind, dedupe_key, payload, channel, valor_impacto)
-                values (%s, %s, %s, %s, %s::jsonb, %s, %s)
+                  (agent_id, user_id, kind, dedupe_key, payload, channel, valor_impacto, stale_at)
+                values (%s, %s, %s, %s, %s::jsonb, %s, %s, case when %s then now() end)
                 on conflict (agent_id, dedupe_key) do nothing
                 """,
                 (agent_id, user_id, kind, dedupe_key,
-                 json.dumps(payload or {}), channel, valor_impacto),
+                 json.dumps(payload or {}), channel, valor_impacto, silencioso),
             )
             inserted = cur.rowcount > 0
         conn.commit()
@@ -308,6 +312,8 @@ def unclaim_agent_events(event_ids: list[int]) -> int:
 #     mark_agent_events_seen        → não pode marcar como visto o que o usuário
 #       não podia ver (senão ressuscita já lido, sem nunca contar como não lido)
 #     record_or_refresh_agent_event → limpa stale_at (ressuscita)
+#     record_agent_event(silencioso=True) → já nasce com stale_at (lápide do
+#       Detetive na 1ª busca de assinaturas; o `do nothing` não a ressuscita)
 #   ESCRITA que NÃO filtra, de propósito (marcar obsoleto ali é no-op inócuo):
 #     unclaim (as filas já excluem stale) · suppress · hold_agent_emails ·
 #     record_agent_event (kinds que não usam tombstone) · mark_events_emailed

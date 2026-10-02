@@ -23,6 +23,8 @@ from conftest import usuario_pagante
 from core.services.pluggy_sync import normalize_pluggy_account
 from tests._patrimonio_helpers import (AGORA, conexao, conta, foto, horas_atras, lancamento, q,
                                        tx_banco)
+from tests.test_patrimonio_foto_teto import ESPERADO as TETO
+from tests.test_patrimonio_foto_teto import _cria as _cria_teto
 
 D = Decimal
 CONTAS = "/api/v2/contas"
@@ -173,6 +175,17 @@ def test_conta_fresca_traz_instituicao_estado_e_data(uid):
 def test_conta_pausada_traz_o_estado_da_conexao(uid):
     conta(conexao(uid, f"item-{uid}", status="PAUSED"), "acc-1", "500")
     assert get(uid).json()["contas"][0]["conexao"] == "paused"
+
+
+@pytest.mark.parametrize("caso", list(TETO))
+def test_conexao_presa_em_atualizando_segue_o_teto_como_a_foto(uid, caso):
+    """Teto do #744 (> 2 h em "Atualizando…" vira `error_recoverable`), pelo `ler_conexoes`
+    que a foto também usa. Controle negativo (2026-10-01): `ler_conexoes` sem o teto
+    (select sem `SQL_COLETA_ESTOURADA`, sem `aplica_teto_por_health`) → os dois `_3h` caem."""
+    c = _cria_teto(uid, caso)
+    conta(c, "acc-1", "1000")
+    [x] = get(uid).json()["contas"]
+    assert x["conexao"] == foto(uid)["base"]["conexoes"][str(c)] == TETO[caso]
 
 
 def test_especie_incompleta_na_carteira_com_banco_e_o_saque_desligado(uid, monkeypatch):

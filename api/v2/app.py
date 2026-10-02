@@ -8,7 +8,7 @@ from fastapi import FastAPI
 from fastapi.exceptions import RequestValidationError
 from starlette.exceptions import HTTPException as StarletteHTTPException
 
-from api.v2 import contas, erros, eventos, me, perfil
+from api.v2 import assinaturas, contas, erros, eventos, me, perfil
 
 
 class _AppV2(FastAPI):
@@ -34,3 +34,4 @@ app.include_router(me.router)
 app.include_router(eventos.router)
 app.include_router(perfil.router)
 app.include_router(contas.router)
+app.include_router(assinaturas.router)

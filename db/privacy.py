@@ -370,6 +370,7 @@ def build_user_export_zip(user_id: int) -> bytes:
             ("faturas_cartao", "select * from credit_bills where user_id = %s", (user_id,)),
             ("transacoes_cartao", "select * from credit_transactions where user_id = %s", (user_id,)),
             ("preferencias_resumo_diario", "select * from daily_report_prefs where user_id = %s", (user_id,)),
+            ("marcacoes_assinaturas", "select * from subscription_marks where user_id = %s", (user_id,)),
             ("importacoes_ofx", "select * from ofx_imports where user_id = %s", (user_id,)),
             ("sessoes_dashboard", "select code, user_id, expires_at, created_at from dashboard_sessions where user_id = %s", (user_id,)),
             (
@@ -414,6 +415,16 @@ def build_user_export_zip(user_id: int) -> bytes:
                 select s.*
                 from open_finance_investment_snapshots s
                 join open_finance_connections c on c.id = s.connection_id
+                where c.user_id = %s
+                """,
+                (user_id,),
+            ),
+            (
+                "recorrencias_open_finance",
+                """
+                select rp.*
+                from of_recurring_payments rp
+                join open_finance_connections c on c.id = rp.connection_id
                 where c.user_id = %s
                 """,
                 (user_id,),
@@ -524,6 +535,7 @@ _RESET_TABLES = (
     "recurring_expenses",
     "recurring_incomes",
     "recurring_suggestion_dismissed",
+    "subscription_marks",
     # Investimentos / caixinhas / orçamentos
     "investment_lots",
     "investments",

@@ -77,8 +77,8 @@ def _resposta_200(path: str, op: dict) -> tuple[str, str]:
     raise _recusa({path: content})
 
 
-def _put(path: str, op: dict) -> str:
-    """`{ corpo; resposta }` do PUT: corpo JSON obrigatório por `$ref`, resposta JSON."""
+def _escrita(path: str, op: dict) -> str:
+    """`{ corpo; resposta }` do PUT/POST: corpo JSON obrigatório por `$ref`, resposta JSON."""
     corpo = op.get("requestBody")
     if (not isinstance(corpo, dict) or set(corpo) != {"content", "required"} or corpo["required"] is not True
             or set(corpo["content"]) != {"application/json"}
@@ -98,20 +98,25 @@ def gerar(spec: dict) -> str:
         if not _IDENT.fullmatch(nome):
             raise _recusa(nome)
         linhas.append(f"export type {nome} = {_tipo(schemas[nome])};\n")
-    rotas = {"json": [], "sse": [], "put": []}
+    rotas = {"json": [], "sse": [], "put": [], "post": []}
     for p in sorted(spec["paths"]):
         item = spec["paths"][p]
-        if set(item) not in ({"get"}, {"get", "put"}):
+        if set(item) in ({"get"}, {"get", "put"}):
+            tipo_resposta, tipo = _resposta_200(p, item["get"])
+        elif set(item) == {"post"}:
+            tipo_resposta, tipo = "post", _escrita(p, item["post"])
+        else:
             raise _recusa({p: item})
-        tipo_resposta, tipo = _resposta_200(p, item["get"])
         rotas[tipo_resposta].append(f"{json.dumps(p)}: {tipo}")
         if "put" in item:
-            rotas["put"].append(f"{json.dumps(p)}: {_put(p, item['put'])}")
+            rotas["put"].append(f"{json.dumps(p)}: {_escrita(p, item['put'])}")
     linhas.append(f"export type RotasGet = {{ {'; '.join(rotas['json'])} }};\n")
     if rotas["put"]:
         linhas.append(f"export type RotasPut = {{ {'; '.join(rotas['put'])} }};\n")
     if rotas["sse"]:
         linhas.append(f"export type RotasSSE = {{ {'; '.join(rotas['sse'])} }};\n")
+    if rotas["post"]:
+        linhas.append(f"export type RotasPost = {{ {'; '.join(rotas['post'])} }};\n")
     return "".join(linhas)
 
 

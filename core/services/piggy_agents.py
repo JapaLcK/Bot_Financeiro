@@ -383,94 +383,42 @@ def run_carteiro_once(today: date | None = None, user_id: int | None = None) -> 
 
 # ── Detetive: caça-assinaturas esquecidas ────────────────────────────────────
 
-DETETIVE_LOOKBACK_MONTHS = 6   # janela pra procurar recorrência
-DETETIVE_MIN_MESES = 3         # aparece em N meses distintos = parece assinatura
-DETETIVE_MIN_VALOR = 5.0       # ignora cobrança recorrente miúda (ruído)
-
-
-def _detetive_cutoff(today: date) -> date:
-    """1º dia do mês, DETETIVE_LOOKBACK_MONTHS atrás."""
-    m = today.month - DETETIVE_LOOKBACK_MONTHS
-    y = today.year
-    while m <= 0:
-        m += 12
-        y -= 1
-    return date(y, m, 1)
-
-
-def find_recurring_charges(user_id: int, today: date) -> list[dict[str, Any]]:
-    """Consulta os sinais do Detetive sem gravar eventos nem alterar lançamentos."""
-    cutoff = _detetive_cutoff(today)
-    with get_conn() as conn:
-        with conn.cursor() as cur:
-            # merchant = descrição normalizada (tira ids/datas longas e espaço extra)
-            # pra o mesmo serviço agrupar entre meses. Valor exato (tolerância = v2).
-            cur.execute(
-                r"""
-                with base as (
-                  select
-                    -- normaliza o comerciante: tira o prefixo de tipo do OF
-                    -- ("Compra no débito|", "Transferência enviada|"), ids/datas
-                    -- longas e espaço extra, pra o mesmo serviço agrupar entre meses.
-                    lower(btrim(regexp_replace(
-                      regexp_replace(
-                        regexp_replace(coalesce(alvo, nota, ''), '^.*\|', ''),
-                        '[0-9]{3,}', '', 'g'),
-                      '\s+', ' ', 'g'))) as merchant,
-                    coalesce(alvo, nota, '') as raw,
-                    round(valor::numeric, 2) as val,
-                    to_char(criado_em, 'YYYY-MM') as ym,
-                    categoria
-                  from launches
-                  where user_id = %s
-                    and tipo in ('despesa', 'saida')
-                    and is_internal_movement = false
-                    and coalesce(alvo, nota, '') <> ''
-                    and valor >= %s
-                    and criado_em >= %s
-                )
-                select merchant,
-                       val,
-                       count(distinct ym) as meses,
-                       max(ym) as ultimo,
-                       (array_agg(raw order by ym desc))[1] as descricao,
-                       (array_agg(categoria) filter (where categoria is not null))[1] as categoria
-                from base
-                where merchant <> ''
-                group by merchant, val
-                having count(distinct ym) >= %s
-                order by val desc
-                """,
-                (user_id, DETETIVE_MIN_VALOR, cutoff, DETETIVE_MIN_MESES),
-            )
-            achados = cur.fetchall() or []
-
-    return achados
-
-
 def _detetive_detect_for_user(agent: dict[str, Any], today: date) -> int:
-    """Fareja cobranças que repetem (mesmo comerciante + mesmo valor) em >=3 meses
-    distintos e ainda não foram flagradas. Um evento por assinatura (dedupe pela
-    assinatura), então rodar todo dia não vira spam. Fonte = launches (inclui OF,
-    cujo criado_em é a data real da transação)."""
+    """Um evento por assinatura ATIVA da lista do Recurring Payments da Pluggy
+    (`core/services/assinaturas.py`), dedupe pela chave do comerciante — então
+    rodar todo dia não vira spam, e reajuste de preço não vira alerta novo.
+
+    1ª busca de uma conexão que já existia no deploy (`recurring_seed_silent`):
+    TODA chave dela vira lápide (`silencioso=True`) antes dos alertas, sem rajada
+    — inclusive a que hoje não alerta (cancelada, ignorada, conexão pausada) e
+    pode alertar depois. A mesma chave numa conexão normal cai no `do nothing`."""
+    from core.services.assinaturas import listar_assinaturas
     from db import record_agent_event
+    from db.of_recurring import conexoes_a_silenciar, consumir_silencio, descricoes_das_conexoes
+    from utils_text import merchant_key
 
     user_id = agent["user_id"]
+    ids = conexoes_a_silenciar(user_id)
+    if ids:
+        for chave in {merchant_key(d) for d in descricoes_das_conexoes(user_id, ids)} - {""}:
+            record_agent_event(agent["agent_id"], user_id, "detetive", dedupe_key=f"rp:{chave}",
+                               payload={"tipo": "assinatura", "merchant": chave}, silencioso=True)
+        consumir_silencio(user_id, ids)
+    lista = listar_assinaturas(user_id, today)
+    itens = [x for x in lista["servicos"] + lista["outras"] if x["status"] == "ativa"]
+
     fired = 0
-
-    achados = find_recurring_charges(user_id, today)
-
-    for s in achados:
-        val = float(s["val"])
-        meses = int(s["meses"])
-        desc = (s["descricao"] or s["merchant"] or "").strip()
+    for s in itens:
+        val = s["valor"]
+        meses = s["meses"]
+        desc = (s["nome"] or s["chave"] or "").strip()
         desc_curta = desc[:48]
         ok = record_agent_event(
             agent["agent_id"], user_id, "detetive",
-            dedupe_key=f"sub:{s['merchant']}:{val:.2f}",
+            dedupe_key=f"rp:{s['chave']}",
             payload={
                 "tipo": "assinatura",
-                "merchant": s["merchant"],
+                "merchant": s["chave"],
                 "descricao": desc[:120],
                 "categoria": s["categoria"],
                 "valor": val,
