@@ -274,7 +274,11 @@ def test_desligado_corpo_hostil_404_de_rota_inexistente(user_id, monkeypatch, au
     {"content": b'{"institution": "itau"}', "headers": {"content-type": "text/plain"}},
     {"data": {"institution": "itau"}},
     {"content": b'{"institution": "itau"}', "headers": {"content-type": "application/x-www-form-urlencoded"}},
-], ids=range(9))
+    # P2 do Codex (#749): bytes que não são UTF-8 não podem virar 500 no handler de 422
+    {"content": b"\xff", "headers": _JSON},
+    {"content": b'{"institution": "\xff"}', "headers": _JSON},
+    {"content": b"\xff" * 2048, "headers": _JSON},
+], ids=range(12))
 def test_ligado_corpo_invalido_422_sem_gravar(user_id, monkeypatch, kw):
     promote_to_pro(user_id, "essencial")
     _switch(monkeypatch, "1")
