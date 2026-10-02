@@ -5,6 +5,7 @@ conexão viva). Usada pela `/api/v2/assinaturas`, pelo Detetive e pelo chat dele
 """
 from collections import Counter, defaultdict
 from datetime import date
+from statistics import median
 
 from db.cards import extract_installment_info
 from db.of_recurring import marcas, ocorrencias_do_usuario
@@ -13,6 +14,18 @@ from utils_date import add_months, clamp_day
 from utils_text import guess_category, is_internal_category, merchant_key
 
 DIAS_ATIVA = 40  # última cobrança há até 40 dias = ativa
+
+
+def _mensal(linhas) -> bool:
+    """O Recurring Payments só detecta ~mensal (30±5 dias, doc da Pluggy), e
+    status, `proxima` e `total_mensal` supõem isso. É resposta externa: grupo cujo
+    intervalo mediano é de outra ordem (semanal, anual) fica fora em vez de ser
+    somado como mensal. A faixa é larga de propósito: uma cobrança extra no meio do
+    mês derruba a mediana para ~15 dias e não faz da Netflix uma semanal. Com uma
+    ocorrência casada só, não há intervalo: vale a Pluggy."""
+    datas = [r["transaction_date"] for r in linhas]
+    gaps = [(b - a).days for a, b in zip(datas, datas[1:])]
+    return not gaps or 10 <= median(gaps) <= 45
 
 
 def _merchant(r) -> dict:
@@ -84,7 +97,7 @@ def listar_assinaturas(user_id: int, today: date) -> dict:
     for r in linhas_rp:
         por_rp[r["rp_id"]].append(r)
     fora = {k for k, linhas in por_rp.items()
-            if any(is_internal_category(categoria_pigbank(r["category"]))
+            if not _mensal(linhas) or any(is_internal_category(categoria_pigbank(r["category"]))
                    or extract_installment_info({"creditCardMetadata": r["cc_meta"] if isinstance(r["cc_meta"], dict) else None})[1]
                    for r in linhas)}
     # Por chave, os sobreviventes viram cadeias (`por_rp` já está na ordem da 1ª

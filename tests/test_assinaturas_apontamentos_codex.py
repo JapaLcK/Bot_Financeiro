@@ -69,3 +69,17 @@ def test_conta_em_moeda_estrangeira_fica_fora(user_id):
     lista = listar_assinaturas(user_id, HOJE)
     assert [x["chave"] for x in lista["servicos"]] == ["spotify"]
     assert lista["total_mensal"] == 39.9
+
+
+def test_grupo_que_nao_e_mensal_fica_fora(user_id):
+    # Codex P1: a Pluggy diz só detectar ~mensal; se vier semanal ou anual, não
+    # pode ser somado no total mensal nem virar "cancelada" em 40 dias.
+    from _apoio_assinaturas import tx
+    semanal = [tx(f"wk-{i}", -15, date(2026, 9, 1) + timedelta(days=7 * i)) for i in range(4)]
+    anual = [tx("an-0", -199, date(2025, 9, 20)), tx("an-1", -199, date(2026, 9, 20))]
+    mensal = mensais("sp", [-21.9] * 3, ultima=date(2026, 9, 12))
+    semeia(user_id, [conta("acc-1", semanal + anual + mensal)],
+           [rp("Uber One", -15, semanal), rp("Amazon Prime", -199, anual), rp("Spotify", -21.9, mensal)])
+    lista = listar_assinaturas(user_id, HOJE)
+    assert [x["chave"] for x in lista["servicos"] + lista["outras"]] == ["spotify"]
+    assert lista["total_mensal"] == 21.9
