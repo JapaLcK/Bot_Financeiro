@@ -212,6 +212,7 @@ from .cards import (
 # ── Open Finance ──────────────────────────────────────────────────────────────
 from .open_finance import (
     create_mock_open_finance_connection,
+    mock_open_finance_item_id,
     get_open_finance_snapshot,
     count_open_finance_connections,
     has_open_finance_connections,
@@ -522,7 +523,8 @@ __all__ = [
     "import_credit_ofx_bulk", "consolidate_duplicate_bills",
     "get_installment_group_summaries", "rebuild_bill_totals",
     # open finance
-    "create_mock_open_finance_connection", "get_open_finance_snapshot",
+    "create_mock_open_finance_connection", "mock_open_finance_item_id",
+    "get_open_finance_snapshot",
     "count_open_finance_connections", "has_open_finance_connections",
     "list_open_finance_user_ids",
     "list_pluggy_item_ids", "list_connections_needing_reconnect",

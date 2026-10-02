@@ -192,7 +192,8 @@ def test_com_health_updating_no_accounts_e_parcial_sem_sync_seguem_atualizando(u
 #   com health do job de saúde, item UPDATING (coleta longa) ou UPDATED.
 # Bordas: 29 min dentro; 30 min fora (o `<=` do SQL; o relógio só anda para
 # fora durante o teste); 1 min no futuro dentro (desvio normal de relógio);
-# 10 dias no futuro fora (o teto de +5 min, como no prazo do dispositivo).
+# 10 dias no futuro fora (o teto de +5 min, como no prazo do dispositivo) — e
+# fora também do teto do "Atualizando…" (Fase 4, PR 2): vira "Erro temporário".
 
 _ESTADOS = {
     "sem_health_updating": ("UPDATING", None),
@@ -201,18 +202,19 @@ _ESTADOS = {
     "health_updated": ("UPDATING", ITEM_SAUDAVEL),
 }
 _BORDAS = [
-    (PRAZO_COLETA_MIN - 1, False),
-    (PRAZO_COLETA_MIN, True),
-    (-1, False),
-    (-10 * 24 * 60, True),
+    (PRAZO_COLETA_MIN - 1, False, False),
+    (PRAZO_COLETA_MIN, True, False),
+    (-1, False, False),
+    (-10 * 24 * 60, True, True),
 ]
+ESTOURADA = "O banco está demorando — atualize de novo mais tarde"
 
 
 @pytest.mark.parametrize("estado", list(_ESTADOS))
-@pytest.mark.parametrize("minutos, vencida", _BORDAS,
+@pytest.mark.parametrize("minutos, vencida, estourada", _BORDAS,
                          ids=["dentro_29min", "fora_30min", "futuro_1min", "futuro_10dias"])
 def test_prazo_da_coleta_troca_o_detalhe_e_mantem_a_pilula(
-        user_id, monkeypatch, estado, minutos, vencida):
+        user_id, monkeypatch, estado, minutos, vencida, estourada):
     status, item_remoto = _ESTADOS[estado]
     conexao = _conecta(user_id, status)
     if item_remoto:
@@ -221,6 +223,9 @@ def test_prazo_da_coleta_troca_o_detalhe_e_mantem_a_pilula(
 
     ui = _ui_das_duas(user_id)
 
+    if estourada:
+        assert (ui["state"], ui["detail"]) == ("error_recoverable", ESTOURADA)
+        return
     assert (ui["state"], ui["label"]) == ("updating", "Atualizando…"), "mesma pílula"
     if vencida:
         assert ui["detail"] == VENCIDA

@@ -9,6 +9,7 @@ from uuid import NAMESPACE_OID, uuid5
 from psycopg.types.json import Jsonb
 
 from utils_date import _tz, add_months, billing_period_for_close_day
+from utils_text import is_internal_category
 
 from .accounts import delete_launch_and_rollback
 from .cards import (
@@ -89,6 +90,12 @@ def _mock_open_finance_institution(key: str | None = None) -> dict:
     return MOCK_OPEN_FINANCE_INSTITUTIONS.get(normalized, MOCK_OPEN_FINANCE_INSTITUTIONS["nubank"])
 
 
+def mock_open_finance_item_id(user_id: int, institution_key: str | None = None) -> str:
+    # Fonte única do item falso: a rota passa este id ao teto de bancos para o reseed
+    # da mesma instituição contar como reconexão. Leva o user_id: isola entre usuários.
+    return f"mock-pluggy-{user_id}-{_mock_open_finance_institution(institution_key)['id']}"
+
+
 def create_mock_open_finance_connection(user_id: int, institution_key: str | None = None) -> dict:
     """
     Simula o fluxo Pluggy/Open Finance para desenvolvimento.
@@ -96,7 +103,7 @@ def create_mock_open_finance_connection(user_id: int, institution_key: str | Non
     """
     ensure_user(user_id)
     institution = _mock_open_finance_institution(institution_key)
-    provider_item_id = f"mock-pluggy-{user_id}-{institution['id']}"
+    provider_item_id = mock_open_finance_item_id(user_id, institution_key)
     now = datetime.now(_tz())
     today = now.date()
 
@@ -259,7 +266,8 @@ def get_open_finance_snapshot(user_id: int, limit: int = 8) -> dict:
     # Import LOCAL: `open_finance_state` importa `_CursorComTeto` daqui no topo,
     # então a mão única é esta (ver o comentário lá).
     from .open_finance_state import (
-        SQL_COLETA_VENCIDA, SQL_EXECUTION_STATUS, janela_device_auth_min)
+        SQL_COLETA_ESTOURADA, SQL_COLETA_VENCIDA, SQL_EXECUTION_STATUS, aplica_teto_por_health,
+        janela_device_auth_min)
 
     with get_conn() as conn:
         with conn.cursor() as cur:
@@ -292,14 +300,15 @@ def get_open_finance_snapshot(user_id: int, limit: int = 8) -> dict:
                 select id, provider, provider_item_id, status, institution_name, institution_id,
                        last_sync_at, last_attempt_at, status_reason, health, reconnected_at,
                        {SQL_EXECUTION_STATUS},
-                       {SQL_COLETA_VENCIDA}
+                       {SQL_COLETA_VENCIDA},
+                       {SQL_COLETA_ESTOURADA}
                 from open_finance_connections
                 where user_id=%s
                 order by updated_at desc, id desc
                 """,
                 (janela_device_auth_min(), user_id),
             )
-            connections = [dict(r) for r in (cur.fetchall() or [])]
+            connections = [aplica_teto_por_health(dict(r)) for r in (cur.fetchall() or [])]
             # `ui` é o estado exibível — decidido por `connection_ui_state`, a única
             # função que o decide. O front deixou de derivar rótulo do `status`:
             # ele não sabe de produto atrasado nem de item que sumiu.
@@ -313,6 +322,7 @@ def get_open_finance_snapshot(user_id: int, limit: int = 8) -> dict:
                 # sem ninguém ter decidido isso.
                 c.pop("execution_status", None)
                 c.pop("coleta_vencida", None)
+                c.pop("coleta_estourada", None)
 
             cur.execute(
                 """
@@ -2243,7 +2253,8 @@ def import_open_finance_launches(user_id: int, connection_id: int | None = None)
                     if cat:
                         cur.execute(
                             "update launches set categoria=%s where id=%s and user_id=%s "
-                            "and (categoria is null or categoria in ('outros',''))",
+                            "and (categoria is null or categoria in ('outros','')) "
+                            "and not categoria_editada",  # 'outros' escolhido pelo cliente fica (#712)
                             (cat, match_id, user_id),
                         )
                         if cur.rowcount:
@@ -2537,7 +2548,7 @@ def _sync_imported_credit_updates(user_id: int, connection_id: int | None) -> in
                 select o.amount, o.transaction_date, o.category,
                        ct.id as ct_id, ct.valor as cur_valor, ct.is_refund as cur_refund,
                        ct.categoria as cur_cat, ct.purchased_at as cur_date, ct.bill_id,
-                       ct.card_id
+                       ct.card_id, ct.categoria_editada as editada
                 from open_finance_transactions o
                 join open_finance_accounts a on a.id = o.account_id
                 join open_finance_connections c on c.id = a.connection_id
@@ -2555,7 +2566,7 @@ def _sync_imported_credit_updates(user_id: int, connection_id: int | None) -> in
                 changed = (
                     Decimal(str(r["cur_valor"])) != new_valor
                     or bool(r["cur_refund"]) != new_refund
-                    or (r["cur_cat"] or None) != (new_cat or None)
+                    or (not r["editada"] and (r["cur_cat"] or None) != (new_cat or None))
                     or r["cur_date"] != r["transaction_date"]
                 )
                 if changed:
@@ -2571,13 +2582,16 @@ def _sync_imported_credit_updates(user_id: int, connection_id: int | None) -> in
                         )
                         if resolved is not None:
                             new_bill_id = resolved
+                    # a marca decide NO UPDATE: edição commitada depois do select vale (#712)
                     cur.execute(
-                        "update credit_transactions set valor=%s, is_refund=%s, categoria=%s, "
-                        "purchased_at=%s, bill_id=%s where id=%s and user_id=%s",
+                        "update credit_transactions set valor=%s, is_refund=%s, "
+                        "categoria = case when categoria_editada then categoria else %s end, "
+                        "purchased_at=%s, bill_id=%s where id=%s and user_id=%s returning categoria",
                         (new_valor, new_refund, new_cat, r["transaction_date"], new_bill_id,
                          r["ct_id"], user_id),
                     )
-                    if new_cat and new_cat != r["cur_cat"]:
+                    gravada = (cur.fetchone() or {}).get("categoria")
+                    if new_cat and new_cat != r["cur_cat"] and gravada == new_cat:
                         novas.add(new_cat)
                     if new_bill_id == old_bill_id:
                         # mesma fatura: ajusta só pela diferença de valor (fatura foi `total += valor`).
@@ -2608,6 +2622,9 @@ def sync_imported_open_finance_updates(user_id: int, connection_id: int | None =
     Sem isso, uma correção de valor/data/categoria atualizava só o espelho OF — o launch,
     a credit_transaction e o total da fatura ficavam com o valor velho. Mexe apenas em
     registros DO OF (source=open_finance); nunca sobrescreve lançamento manual auto-mesclado.
+    Categoria e interno editados pelo cliente (`categoria_editada`) ficam como ele deixou
+    (#712). O interno de linha editada = o da própria categoria, ou interno enquanto
+    o par da Carteira vale (depois do par, volta ao que a categoria diz).
     """
     ensure_user(user_id)
     launches_updated = 0
@@ -2626,6 +2643,7 @@ def sync_imported_open_finance_updates(user_id: int, connection_id: int | None =
                 select o.id as of_tx_id, o.amount, o.transaction_date, o.category, o.description,
                        l.id as launch_id, l.valor as cur_valor, l.categoria as cur_cat,
                        l.tipo as cur_tipo, l.is_internal_movement as cur_internal,
+                       l.categoria_editada as editada,
                        coalesce(l.posted_at, l.criado_em::date) as cur_date
                 from open_finance_transactions o
                 join open_finance_accounts a on a.id = o.account_id
@@ -2640,27 +2658,42 @@ def sync_imported_open_finance_updates(user_id: int, connection_id: int | None =
             rows, caixa = cur.fetchall(), cash_internal_tx_ids(cur, user_id)
             for r in rows:
                 cls = classify_open_finance_launch(r["amount"], r["category"], r["description"])
-                if r["of_tx_id"] in caixa:  # saque/depósito em espécie: par da Carteira
+                forcado = r["of_tx_id"] in caixa  # saque/depósito em espécie: par da Carteira
+                if forcado:
                     cls["is_internal_movement"] = True
                 new_cat = categoria_pigbank(r["category"]) or "outros"
+                editada = bool(r["editada"])
+                # editada: interno = o que a categoria dela diz (como a edição grava), ou forçado pelo
+                # par da Carteira; reavaliado quando o par acaba — senão o `true` forçado fica preso
+                alvo_editada = forcado or is_internal_category(r["cur_cat"])
+                alvo = alvo_editada if editada else cls["is_internal_movement"]
                 changed = (
                     Decimal(str(r["cur_valor"])) != cls["valor"]
                     or r["cur_tipo"] != cls["tipo"]
-                    or (r["cur_cat"] or "") != new_cat
-                    or bool(r["cur_internal"]) != cls["is_internal_movement"]
+                    or (not editada and (r["cur_cat"] or "") != new_cat)
+                    or bool(r["cur_internal"]) != alvo
                     or r["cur_date"] != r["transaction_date"]
                 )
                 if changed:
+                    # a marca decide NO UPDATE: edição commitada depois do select vale (#712);
+                    # o interno da editada só se reescreve se a categoria ainda é a que foi lida
                     cur.execute(
                         """
-                        update launches set valor=%s, tipo=%s, categoria=%s,
-                               is_internal_movement=%s, posted_at=%s
+                        update launches set valor=%s, tipo=%s,
+                               categoria = case when categoria_editada then categoria else %s end,
+                               is_internal_movement = case when not categoria_editada then %s
+                                   when categoria is not distinct from %s then %s
+                                   else is_internal_movement end,
+                               posted_at=%s
                         where id=%s and user_id=%s
+                        returning categoria
                         """,
                         (cls["valor"], cls["tipo"], new_cat, cls["is_internal_movement"],
+                         r["cur_cat"], alvo_editada,
                          r["transaction_date"], r["launch_id"], user_id),
                     )
-                    if new_cat != r["cur_cat"]:
+                    gravada = (cur.fetchone() or {}).get("categoria")
+                    if new_cat != r["cur_cat"] and gravada == new_cat:
                         novas.add(new_cat)
                     launches_updated += 1
 

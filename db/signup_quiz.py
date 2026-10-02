@@ -30,6 +30,9 @@ QUIZ_COOKIE = "quiz_result"
 # (`webapp/src/dashboard/lib/profiles.js`) repetem a lista; tests/test_signup_quiz.py
 # compara as três.
 PERFIS = ("economizar", "investir", "controlar", "dividas", "autonomo")
+# O painel padrão, escolhido no v2 (`PUT /api/v2/perfil`); o quiz nunca o grava.
+# NULL na coluna = nunca escolheu.
+PERFIL_PADRAO = "padrao"
 
 # Perguntas em ordem; a letra N da resposta é a opção N (a=0, b=1…).
 QUIZ_V1 = (
@@ -82,6 +85,23 @@ def record_signup_quiz(user_id: int, perfil: str, respostas: dict | None) -> boo
         )
         conn.commit()
         return cur.rowcount > 0
+
+
+def ler_perfil(user_id: int) -> str | None:
+    with get_conn() as conn, conn.cursor() as cur:
+        cur.execute("select dashboard_profile from auth_accounts where user_id = %s order by id limit 1",
+                    (int(user_id),))
+        linha = cur.fetchone()
+    return linha["dashboard_profile"] if linha else None
+
+
+def gravar_perfil(user_id: int, perfil: str) -> int:
+    """Grava o perfil escolhido no painel; devolve o rowcount (0 = sem conta)."""
+    with get_conn() as conn, conn.cursor() as cur:
+        cur.execute("update auth_accounts set dashboard_profile = %s where user_id = %s",
+                    (perfil, int(user_id)))
+        conn.commit()
+        return cur.rowcount
 
 
 def criar_conta_sem_codigo(email: str, telefone: str | None, nome: str | None, source: str) -> dict:

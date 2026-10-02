@@ -270,6 +270,8 @@ _COLISOES = [
     ("daily_report_prefs", {}, "hour", 7, 21, None),
     ("recurring_suggestion_dismissed", {"merchant_key": "netflix", "amount": 39.9}, None, None, None,
      {"merchant_key": "spotify", "amount": 21.9}),
+    ("subscription_marks", {"merchant_key": "netflix"}, "status", "ignorar", "assinatura",
+     {"merchant_key": "spotify"}),
 ]
 
 

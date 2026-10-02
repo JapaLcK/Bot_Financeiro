@@ -137,6 +137,11 @@ def _semeia(uid: int) -> None:
                 "values (%s, 'inv-1', %s, now(), true, 10)",
                 (con, hoje),
             )
+            cur.execute(
+                "insert into of_recurring_payments (connection_id, description, average_amount, occurrences) "
+                "values (%s, 'NETFLIX.COM', -39.9, array['tx-1'])",
+                (con,),
+            )
 
             # ── crédito (apagado) ───────────────────────────────────────────
             cur.execute(
@@ -189,6 +194,10 @@ def _semeia(uid: int) -> None:
             cur.execute(
                 "insert into recurring_suggestion_dismissed (user_id, merchant_key, amount) "
                 "values (%s, 'merc', 10)",
+                (uid,),
+            )
+            cur.execute(
+                "insert into subscription_marks (user_id, merchant_key, status) values (%s, 'netflix', 'ignorar')",
                 (uid,),
             )
 
@@ -305,12 +314,16 @@ _OF_JOINS = {
         "select count(*) as n from open_finance_investment_snapshots s "
         "join open_finance_connections c on c.id = s.connection_id where c.user_id = %s"
     ),
+    "of_recurring_payments": (
+        "select count(*) as n from of_recurring_payments rp "
+        "join open_finance_connections c on c.id = rp.connection_id where c.user_id = %s"
+    ),
 }
 _TABELAS_SIMPLES = (
     "open_finance_connections", "credit_transactions", "credit_bills", "credit_cards",
     "recurring_income_credits", "bill_instances", "recurring_charges",
     "recurring_expenses", "recurring_incomes", "recurring_suggestion_dismissed",
-    "investment_lots", "investments", "pocket_lots", "pockets",
+    "subscription_marks", "investment_lots", "investments", "pocket_lots", "pockets",
     "budget_alert_sent", "category_budgets",
     "user_category_rules", "user_categories", "agent_events", "agents",
     "ai_messages", "ai_pending_actions", "ai_fallback_log", "ai_proactive_cache",

@@ -106,10 +106,11 @@ def create_pluggy_api_key() -> str:
 # forense de terceiro, e perder a conta inteira é pior que gravar `U+FFFD` num
 # campo. Mesma política e mesma função do #320 (§0.1/§0.7).
 #
-# Aqui e não nos 8 `Jsonb(...)` de `db/open_finance.py`: `_pluggy_get` é a ÚNICA
-# porta de leitura da API (`/items/{id}`, `/accounts`, `/v2/transactions`,
-# `/investments`, `/connectors` — grep), então um ponto cobre também os campos
-# `text` que os `Jsonb` deixariam de fora. O `PATCH /items/{id}` não passa por
+# Aqui e não nos 8 `Jsonb(...)` de `db/open_finance.py`: as portas de leitura da
+# API são DUAS — `_pluggy_get` (`/items/{id}`, `/accounts`, `/v2/transactions`,
+# `/investments`, `/connectors` — grep) e `list_pluggy_recurring_payments` (o
+# POST do enrichment, logo abaixo) — e as duas sanam a resposta, então o ponto
+# cobre também os campos `text` que os `Jsonb` deixariam de fora. O `PATCH /items/{id}` não passa por
 # aqui e leva a sua própria chamada — os 2 chamadores descartam o retorno HOJE
 # (medido), e ela existe para a porta não ficar meio fechada quando alguém usar.
 # `create_pluggy_api_key` e `create_pluggy_connect_token` ficam de fora: o que
@@ -124,6 +125,24 @@ def _pluggy_get(path: str, api_key: str, params: dict[str, Any] | None = None) -
         )
     _raise_for_pluggy_response(resp, f"Falha ao consultar {path} na Pluggy")
     return limpa_para_pg(resp.json())
+
+
+# Recurring Payments (assinaturas): outro host, e POST com o item no corpo.
+_RECURRING_URL = "https://enrichment-api.pluggy.ai/recurring-payments"
+
+
+def list_pluggy_recurring_payments(item_id: str, api_key: str) -> list[dict]:
+    """As recorrências que a Pluggy enxerga no item. 200 sem a lista em
+    `recurringPayments` levanta: resposta malformada é falha, não "vazio"."""
+    with httpx.Client(timeout=_pluggy_timeout()) as client:
+        resp = client.post(_RECURRING_URL, headers={"X-API-KEY": api_key},
+                           json={"itemId": item_id})
+    _raise_for_pluggy_response(resp, "Falha ao consultar recurring-payments na Pluggy")
+    data = limpa_para_pg(resp.json())
+    itens = data.get("recurringPayments") if isinstance(data, dict) else None
+    if not isinstance(itens, list):
+        raise PluggyApiError("recurring-payments da Pluggy sem a lista recurringPayments.")
+    return itens
 
 
 # O que a Pluggy emite como id de item é um UUID; o que CHEGA aqui pode não ser.

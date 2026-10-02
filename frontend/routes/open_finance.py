@@ -24,8 +24,9 @@ from typing import Literal
 import psycopg
 from psycopg_pool import PoolClosed, PoolTimeout
 
-from fastapi import APIRouter, HTTPException, Request
-from pydantic import BaseModel
+from fastapi import APIRouter, Depends, HTTPException, Request
+from fastapi.exceptions import RequestValidationError
+from pydantic import BaseModel, ValidationError
 
 from core.admin_dashboard import log_system_event
 from core.audit import AuditEvent, list_audit_events, record_audit_event
@@ -62,6 +63,7 @@ from db import (
     is_account_scheduled_for_deletion,
     item_registry_origins,
     list_pluggy_item_ids,
+    mock_open_finance_item_id,
     pluggy_item_lock,
     register_item,
     save_pluggy_open_finance_item,
@@ -1455,6 +1457,8 @@ async def _adota_item_orfao(item_id: str, last_event: str | None = None) -> int 
         # e empurra o rótulo para além das 18h. Ou seja: para quem NÃO tem conta
         # nenhuma, agendar o sync continua sendo necessário e não suficiente
         # para o rótulo.
+        # Desde a Fase 4 (PR 2) o rótulo vira "Erro temporário" no teto de 2 h
+        # (`TETO_ATUALIZANDO_MIN`), sem esperar essa passada.
         #
         # Os outros status AGENDAM nos dois caminhos: `WAITING_USER_INPUT`,
         # `WAITING_USER_ACTION`, `LOGIN_ERROR`, `OUTDATED` e `ERROR` viram um
@@ -1501,8 +1505,13 @@ def _msg_sem_open_finance(user_id: int) -> str:
     return _MSG_OF_SO_NOS_PLANOS_PAGOS
 
 
-async def _enforce_bank_limit(user_id: int, new_item_id: str | None = None) -> None:
-    """Teto de conexões OF por plano.
+async def _veredito_do_teto(user_id: int, new_item_id: str | None = None,
+                            provider: str = "pluggy") -> tuple[int | None, int | None, dict | None]:
+    """Teto de conexões OF por plano, como `(teto, em_uso, recusa)`.
+
+    `teto` None = sem trava; `em_uso` None = não contou; `recusa` é o `detail` do
+    402, ou None se cabe. Fonte única para `_enforce_bank_limit` (cobra) e
+    `GET /limite` (informa).
 
     v2 (PLANS_V2_ENABLED): teto vem do tier — of_banks_max da escada
     (trial 1 / Essencial 1 / Plus 2 / Pro 5 / None = ilimitado). Ativo sempre
@@ -1511,59 +1520,62 @@ async def _enforce_bank_limit(user_id: int, new_item_id: str | None = None) -> N
 
     P1: reconectar/renovar um banco JÁ conectado (mesmo provider_item_id) NÃO conta como
     banco novo — senão o usuário no limite ficava travado de reautorizar o próprio
-    banco. Só bloqueia banco realmente novo.
+    banco. Só bloqueia banco realmente novo. `provider` é o da busca desse item: a
+    mock-connect passa 'mock_pluggy' (reseed da falsa), o resto fica no 'pluggy'.
     """
     from core.services.plan_service import plans_v2_enabled, get_user_limits
 
     if plans_v2_enabled():
         limit = (await asyncio.to_thread(get_user_limits, user_id)).get("of_banks_max")
         if limit is None:
-            return  # ilimitado (Premium futuro)
+            return None, None, None  # ilimitado (Premium futuro)
         if new_item_id:
-            existing = await asyncio.to_thread(get_open_finance_connection_by_item_id, str(new_item_id))
+            existing = await asyncio.to_thread(get_open_finance_connection_by_item_id, str(new_item_id), provider)
             if existing and int(existing.get("user_id")) == int(user_id):
-                return  # upsert de item existente: reconexão, não é banco novo
+                # reconexão: sem trava para este item; só o enforce passa item
+                return None, None, None
         if limit <= 0:
-            raise HTTPException(
-                status_code=402,
-                detail={
-                    "code": "OF_BANK_LIMIT",
-                    "limit": 0,
-                    "message": await asyncio.to_thread(_msg_sem_open_finance, user_id),
-                },
-            )
+            return limit, None, {
+                "code": "OF_BANK_LIMIT",
+                "limit": 0,
+                "message": await asyncio.to_thread(_msg_sem_open_finance, user_id),
+            }
         count = await asyncio.to_thread(count_open_finance_connections, user_id)
         if count >= limit:
-            raise HTTPException(
-                status_code=402,
-                detail={
-                    "code": "OF_BANK_LIMIT",
-                    "limit": limit,
-                    "message": f"Seu plano conecta até {limit} banco{'s' if limit > 1 else ''}. "
-                               "Faça upgrade pra conectar mais: /precos",
-                },
-            )
-        return
+            return limit, count, {
+                "code": "OF_BANK_LIMIT",
+                "limit": limit,
+                "message": f"Seu plano conecta até {limit} banco{'s' if limit > 1 else ''}. "
+                           "Faça upgrade pra conectar mais: /precos",
+            }
+        return limit, count, None
 
     if not _bank_limit_enabled():
-        return
+        return None, None, None
     if await asyncio.to_thread(is_pro, user_id):
-        return
+        return None, None, None
     if new_item_id:
-        existing = await asyncio.to_thread(get_open_finance_connection_by_item_id, str(new_item_id))
+        existing = await asyncio.to_thread(get_open_finance_connection_by_item_id, str(new_item_id), provider)
         if existing and int(existing.get("user_id")) == int(user_id):
-            return  # upsert de item existente: reconexão, não é banco novo
+            # reconexão: sem trava para este item; só o enforce passa item
+            return None, None, None
     limit = int(os.getenv("OF_FREE_BANK_LIMIT", "1"))
     count = await asyncio.to_thread(count_open_finance_connections, user_id)
     if count >= limit:
-        raise HTTPException(
-            status_code=402,
-            detail={
-                "code": "OF_BANK_LIMIT",
-                "limit": limit,
-                "message": f"No plano grátis você conecta {limit} banco. Assine o Pro para conectar mais.",
-            },
-        )
+        return limit, count, {
+            "code": "OF_BANK_LIMIT",
+            "limit": limit,
+            "message": f"No plano grátis você conecta {limit} banco. Assine o Pro para conectar mais.",
+        }
+    return limit, count, None
+
+
+async def _enforce_bank_limit(user_id: int, new_item_id: str | None = None,
+                              provider: str = "pluggy") -> None:
+    """Cobra o teto decidido por `_veredito_do_teto` (402 se não cabe)."""
+    _, _, recusa = await _veredito_do_teto(user_id, new_item_id, provider)
+    if recusa:
+        raise HTTPException(status_code=402, detail=recusa)
 
 
 async def _ensure_of_access_allowed(user_id: int) -> None:
@@ -1795,6 +1807,28 @@ async def open_finance_connect_token_route(request: Request, user_id: int):
         "includeSandbox": PLUGGY_INCLUDE_SANDBOX,
         "provider": "pluggy",
     }
+
+
+@router.get("/open-finance/{user_id}/limite")
+async def open_finance_limite_route(request: Request, user_id: int):
+    """Diz ao app, ANTES do widget, se cabe um banco NOVO. Só leitura.
+
+    (a) Informativa: quem cobra é o `/pluggy-item` e o webhook; a corrida é a #747.
+    (b) `pode_adicionar=false` NÃO impede reconectar banco já conectado (P1).
+    (c) O teto nunca vira 402 aqui: vira `pode_adicionar=false` + `code`/`message`.
+        Antes dele roda o gate comum de dados (401/403, e 402
+        `subscription_required`/`plan_selection_required` para quem não tem plano
+        ativo): o app trata esses status como nas rotas irmãs.
+    (d) No v1, `of_banks_max` é o teto efetivo do gate legado e pode divergir do `/auth/me`.
+    """
+    shared.authorize_dashboard_access(request, user_id)
+    teto, em_uso, recusa = await _veredito_do_teto(user_id)
+    if em_uso is None:
+        em_uso = await asyncio.to_thread(count_open_finance_connections, user_id)
+    return {"ok": True, "of_banks_max": teto, "em_uso": em_uso,
+            "pode_adicionar": recusa is None,
+            "code": recusa["code"] if recusa else None,
+            "message": recusa["message"] if recusa else None}
 
 
 # Por quanto tempo, depois da adoção pelo webhook, o `POST /pluggy-item` ainda é
@@ -2329,9 +2363,37 @@ async def open_finance_pluggy_webhook(request: Request):
     return {"received": True}
 
 
-@router.post("/open-finance/{user_id}/mock-connect")
-async def open_finance_mock_connect_route(request: Request, user_id: int, payload: OpenFinanceMockConnectPayload):
-    shared.authorize_dashboard_access(request, user_id)
+def _exige_mock_connect() -> None:
+    # Conexão FALSA só em dev/staging. Falha fechado: ausente ou valor fora da lista = 404,
+    # igual a rota inexistente. Sem log: roda antes da auth (anônimo = inundação) e antes
+    # de qualquer leitura do corpo — por isso a rota não declara parâmetro de corpo.
+    if (os.getenv("OF_MOCK_CONNECT_ENABLED") or "").strip().lower() not in ("1", "true", "yes", "on"):
+        raise HTTPException(status_code=404)
+
+
+@router.post("/open-finance/{user_id}/mock-connect", dependencies=[Depends(_exige_mock_connect)])
+async def open_finance_mock_connect_route(request: Request, user_id: int):
+    session_uid = shared.authorize_dashboard_access(request, user_id)
+    # Corpo lido à mão, só agora: parâmetro de corpo tipado faz o FastAPI decodificar o JSON
+    # ANTES do portão, e o 422 de JSON malformado revelava a rota desligada a qualquer anônimo.
+    # Depois da sessão (anônimo e outro uid nunca forçam a leitura) e ANTES do teto, que
+    # precisa da instituição: por isso corpo inválido dá 422 antes do 402 do limite.
+    # Mesmos status do parâmetro tipado (200/422, o texto do 422 mudou): só application/json
+    # e application/*+json são JSON; o resto é 422, como antes.
+    corpo = await request.body()
+    mime = (request.headers.get("content-type") or "").split(";")[0].strip().lower()
+    try:
+        if mime == "application/json" or (mime.startswith("application/") and mime.endswith("+json")):
+            payload = OpenFinanceMockConnectPayload.model_validate_json(corpo)
+        else:
+            payload = OpenFinanceMockConnectPayload.model_validate(corpo)
+    except ValidationError as exc:
+        raise RequestValidationError(
+            [{**e, "loc": ("body", *e["loc"])} for e in exc.errors(include_url=False)]
+        ) from None
+    # Reseed da mesma instituição é upsert da falsa já existente: não é banco novo.
+    await _enforce_bank_limit(
+        session_uid, mock_open_finance_item_id(session_uid, payload.institution), "mock_pluggy")
     result = await asyncio.to_thread(
         create_mock_open_finance_connection,
         user_id,

@@ -15,8 +15,8 @@ novo se a Pluggy coletou depois da nossa última tentativa.
 from __future__ import annotations
 
 from core.services.pluggy_health import (
-    _MOTIVOS_DE_LEITURA, INVESTMENTS_READ_FAILED, _REASONS_OK, connection_ui_state,
-    pluggy_tem_dado_depois_de)
+    _DETALHE_COLETA_ESTOURADA, _MOTIVOS_DE_LEITURA, INVESTMENTS_READ_FAILED, _REASONS_OK,
+    connection_ui_state, pluggy_tem_dado_depois_de)
 
 # Desfechos que não dizem nada sobre a saúde do provedor: não contam como falha
 # nem como sucesso no disjuntor. O coalescido (item já em voo) chega como `None`.
@@ -38,7 +38,12 @@ def classe_de_retentativa(row: dict) -> str | None:
     # ERROR; só uma coleta nova (PATCH) ou o auto-update dela.
     if str((health or {}).get("item_status") or "").upper() == "ERROR":
         return None
-    estado = connection_ui_state(row)["state"]
+    ui = connection_ui_state(row)
+    estado = ui["state"]
+    # O teto (Fase 4, PR 2) é a coleta vencida com outro rótulo: E5, E7 e E8
+    # mantêm a classe, e a coleta estourada de quem já sincronizou entra (E25).
+    if estado == "error_recoverable" and ui["detail"] == _DETALHE_COLETA_ESTOURADA:
+        estado = "updating"
     motivo = str(row.get("status_reason") or "").lower()
 
     if estado == "error_recoverable":
@@ -49,10 +54,10 @@ def classe_de_retentativa(row: dict) -> str | None:
     if estado == "partial" and motivo == INVESTMENTS_READ_FAILED:
         return "leitura"                          # E2
     if estado == "updating":
-        if not row.get("coleta_vencida"):
-            return None                           # E6, E24: coleta legítima
+        if not (row.get("coleta_vencida") or row.get("coleta_estourada")):
+            return None                           # E6, E24, E25b: coleta legítima
         if motivo != "no_accounts":
-            return "coleta"                       # E5
+            return "coleta"                       # E5, E25
         # E7: `no_accounts` é veredito; cai na Pluggy à frente, abaixo (E8)
     elif estado not in ("updated", "partial", "no_accounts"):
         return None                               # E3, E4, E10, E11, E14
