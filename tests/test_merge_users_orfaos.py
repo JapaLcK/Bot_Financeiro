@@ -175,6 +175,7 @@ def test_positivo_cada_tabela_movida_chega_ao_destino(user_id):
         "insert into household_budget_income(user_id, month, amount) values (%s, '2026-09', 10)",
         "insert into daily_report_prefs(user_id) values (%s) on conflict do nothing",
         "insert into recurring_suggestion_dismissed(user_id, merchant_key, amount) values (%s, 'm', 1)",
+        "insert into subscription_marks(user_id, merchant_key, status) values (%s, 'netflix', 'ignorar')",
     ):
         _sql(q.format(af=af), (origem,))
     # Do banco, não só das tuplas, mas só confere tabela que tem linha: tabela nova

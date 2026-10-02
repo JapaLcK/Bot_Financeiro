@@ -95,6 +95,7 @@ _DESTINO_VENCE = (
     ("recurring_suggestion_dismissed", ("merchant_key", "amount")),
     ("ai_pending_actions", ()),
     ("budget_alert_sent", ("categoria", "ym", "threshold")),
+    ("subscription_marks", ("merchant_key",)),
 )
 
 # Movidas sem regra de colisão (#635): conversa com a IA, logs, dinheiro, Open

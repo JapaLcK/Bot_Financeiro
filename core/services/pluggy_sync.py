@@ -23,6 +23,7 @@ from core.services.pluggy import (
     create_pluggy_api_key,
     get_pluggy_item,
     list_pluggy_accounts,
+    list_pluggy_recurring_payments,
     list_pluggy_transactions,
     update_pluggy_item,
 )
@@ -57,6 +58,7 @@ from db import (
 # "Conexão terminal" (PAUSED/DELETED) pela lista que o `claim_manual_refresh`
 # usa — é ela que decide quem cai em `rate_limited` sem ser cooldown (§0.7).
 from db.open_finance_state import _TERMINAL as CONEXAO_TERMINAL
+from db.of_recurring import salvar_recorrencias
 
 
 def _HEALTH_MISSING() -> dict:
@@ -319,6 +321,15 @@ def _sync_pluggy_item_confirmado(provider_item_id: str, connection: dict, api_ke
               f"erro={type(exc).__name__}: {exc}", flush=True)
     heartbeat()
 
+    # Assinaturas (Recurring Payments). Fail-soft: `None` = não consegui ler, e
+    # aí o resultado anterior fica gravado; lista vazia lida é "não tem nada".
+    recorrentes = None
+    try:
+        recorrentes = list_pluggy_recurring_payments(provider_item_id, api_key)
+    except Exception as exc:
+        print(f"[pluggy_sync] recorrências indisponíveis item={provider_item_id} "
+              f"erro={type(exc).__name__}: {exc}", flush=True)
+
     # RECONCILIAÇÃO do espelho de investimentos — posição que não veio saiu do
     # banco, e a caixinha dela vai junto. Só pode rodar com a leitura PROVADA
     # inteira:
@@ -475,6 +486,13 @@ def _sync_pluggy_item_confirmado(provider_item_id: str, connection: dict, api_ke
                     "accounts_synced": 0, "transactions_synced": 0, **inv_result}
 
         result = save_open_finance_sync(connection["id"], accounts)
+        # Dentro do lock: dois webhooks do mesmo item não trocam a lista juntos.
+        if recorrentes is not None:
+            try:
+                salvar_recorrencias(connection["id"], recorrentes)
+            except Exception as exc:
+                print(f"[pluggy_sync] recorrências não gravadas item={provider_item_id} "
+                      f"erro={type(exc).__name__}", flush=True)
 
         # Caixinhas do OF viram caixinhas do Pig automaticamente (auto-create + dedup) e o
         # saldo do banco é espelhado nas vinculadas — mas SÓ pra planos pagos (Essencial+).

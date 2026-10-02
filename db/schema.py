@@ -25,13 +25,27 @@ TABELAS_QUE_AVISAM: dict[str, str | None] = {
         "recurring_charges", "category_budgets", "household_budget_config",
         "household_budget_income", "user_categories", "user_category_rules",
         "bank_movement_declarations", "of_cash_coverage", "of_cash_links",
-        "open_finance_connections", "patrimonio_fotos",
+        "open_finance_connections", "patrimonio_fotos", "subscription_marks",
     )),
     "open_finance_accounts": "conexao",
     "open_finance_investments": "conexao",
     "open_finance_investment_snapshots": "conexao",
     "open_finance_transactions": "conta",
 }
+
+# `recurring_seed_silent`: a 1ª busca da conexão que já existia no deploy vira
+# lápide no Detetive, sem rajada de alerta. As conexões existentes nascem `true`
+# e as novas `false`, num passo atômico; o `if not exists` não refaz o ALTER a
+# cada boot (#691). Constante para o teste da migração rodar este mesmo SQL.
+RECURRING_SEED_SILENT_SQL = """
+do $$ begin
+  if not exists (select 1 from information_schema.columns where table_schema='public'
+                 and table_name='open_finance_connections' and column_name='recurring_seed_silent') then
+    alter table open_finance_connections add column recurring_seed_silent boolean not null default true;
+    alter table open_finance_connections alter column recurring_seed_silent set default false;
+  end if;
+end $$
+"""
 
 # BACKFILL INICIAL dos assinantes que já existiam quando plan_grants nasceu
 # (§5.1 do docs/plano_pix_anual_asaas.md). Roda no boot, dentro do init_db.
@@ -411,6 +425,18 @@ def init_db():
           amount numeric not null,
           dismissed_at timestamptz not null default now(),
           primary key (user_id, merchant_key, amount)
+        )
+        """,
+        # Marcação do usuário na lista de assinaturas (core/services/assinaturas.py):
+        # 'assinatura' põe em "serviços", 'ignorar' esconde. A chave é a
+        # `merchant_key` da descrição da Pluggy.
+        """
+        create table if not exists subscription_marks (
+          user_id bigint not null references users(id) on delete cascade,
+          merchant_key text not null,
+          status text not null check (status in ('assinatura','ignorar')),
+          updated_at timestamptz not null default now(),
+          primary key (user_id, merchant_key)
         )
         """,
         """
@@ -804,6 +830,28 @@ def init_db():
           primary key (connection_id, provider_investment_id, observed_on)
         )
         """,
+        # Recurring Payments da Pluggy (assinaturas): o resultado do último
+        # sync, por item, gravado por db/of_recurring.py. SEM user_id, pelo
+        # mesmo motivo da tabela de cima: o dono é a conexão.
+        """
+        create table if not exists of_recurring_payments (
+          id bigserial primary key,
+          connection_id bigint not null references open_finance_connections(id) on delete cascade,
+          description text not null,
+          average_amount numeric not null,
+          regularity_score numeric,
+          occurrences text[] not null,
+          fetched_at timestamptz not null default now()
+        )
+        """,
+        """
+        create index if not exists idx_of_recurring_payments_conn
+          on of_recurring_payments(connection_id)
+        """,
+        """
+        alter table open_finance_connections add column if not exists recurring_fetched_at timestamptz
+        """,
+        RECURRING_SEED_SILENT_SQL,
         # Foto diária do patrimônio (dashboard v2, etapa 0 PR 6): uma por usuário
         # por dia do app, gravada pelo job `core/services/patrimonio_foto.py` com a
         # conta de `db/patrimonio.calcular`. `base` diz o que entrou (o gráfico

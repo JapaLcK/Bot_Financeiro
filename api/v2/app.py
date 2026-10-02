@@ -8,7 +8,7 @@ from fastapi import FastAPI
 from fastapi.exceptions import RequestValidationError
 from starlette.exceptions import HTTPException as StarletteHTTPException
 
-from api.v2 import erros, eventos, me
+from api.v2 import assinaturas, erros, eventos, me
 
 
 class _AppV2(FastAPI):
@@ -32,3 +32,4 @@ app.add_exception_handler(Exception, erros.erro_interno)
 
 app.include_router(me.router)
 app.include_router(eventos.router)
+app.include_router(assinaturas.router)
