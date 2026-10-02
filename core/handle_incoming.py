@@ -31,6 +31,7 @@ from core.services.media_service import (
     analyze_image,
 )
 from core.observability import log_system_event_sync
+from core.services.fonte_unica import FonteUnicaOF
 from core.services.plan_limits import PlanLimitExceeded
 from core.services.ai_chat_commands import MANTEM, ENCERRA, aviso_de_cota, pergunta_no_turno
 from utils_text import fmt_brl
@@ -1108,6 +1109,10 @@ def handle_incoming(msg: IncomingMessage, *,
         # protegido (db.create_pocket, db.create_card, etc.) levanta isso.
         # Mensagem já vem amigável, com CTA pra upgrade.
         return [OutgoingMessage(text=format_for_platform(exc.message, msg.platform))]
+
+    except FonteUnicaOF as exc:
+        # Q36: importação de extrato/fatura recusada antes de gravar (core/services/fonte_unica.py).
+        return [OutgoingMessage(text=format_for_platform(str(exc), msg.platform))]
 
     except Exception as exc:
         pergunta_no_turno.set(MANTEM)

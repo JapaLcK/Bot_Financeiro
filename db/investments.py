@@ -1004,6 +1004,8 @@ def create_investment(user_id: int, name: str, rate: float, period: str, nota: s
     Cria investimento. Retorna (launch_id, inv_name_canon).
     Se já existir, retorna (None, inv_name_canon).
     """
+    from core.services.fonte_unica import exigir
+    exigir(user_id, "investimento")
     ensure_user(user_id)
     name = (name or "").strip()
     if not name:
@@ -1090,6 +1092,8 @@ def create_investment_db(
     Cria investimento (suporta period='cdi'). Retorna (launch_id, inv_id, canon_name).
     Se já existir, retorna (None, inv_id, canon_name).
     """
+    from core.services.fonte_unica import exigir
+    exigir(user_id, "investimento")
     ensure_user(user_id)
     name = (name or "").strip()
     if not name:
@@ -1420,6 +1424,8 @@ def investment_deposit_from_account(
     - period: indexador específico deste aporte. Se None, herda do investimento.
     - purchase_date: data da compra (opened_at do lote). Se None, usa hoje.
     """
+    from core.services.fonte_unica import exigir
+    exigir(user_id, "investimento")
     ensure_user(user_id)
     v = Decimal(str(amount))
     if v <= 0:

@@ -790,6 +790,9 @@ def add_credit_purchase(
     nota: str | None,
     purchased_at: date,
 ):
+    # Q36: cartão com sync do OF ativo já é recusado antes, nos dois chamadores.
+    from core.services.fonte_unica import exigir
+    exigir(user_id, "cartao")
     ensure_user(user_id)
     bill_id = get_or_create_open_bill(user_id, card_id, purchased_at)
     v = Decimal(str(valor))
@@ -831,6 +834,8 @@ def add_credit_purchase_installments(
     installments: int,
 ):
     """Registra compra parcelada: uma transação por fatura futura."""
+    from core.services.fonte_unica import exigir
+    exigir(user_id, "cartao")
     ensure_user(user_id)
 
     with get_conn() as conn:
