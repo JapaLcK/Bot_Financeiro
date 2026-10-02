@@ -271,8 +271,11 @@ Saem livres as rotas da própria conta (`authorize_account_access`), o `PATCH /s
 logout, refresh e o reset. Quem bloqueia e quem libera, rota a rota, está em
 `tests/test_rotas_senha_obrigatoria.py`, que reprova rota nova sem linha. Na tela, a
 `/home` e o `/app` carregam `frontend/criar-senha.js`: overlay que não fecha, também
-disparado por qualquer 403 `password_required`. A `/settings` não o carrega (é a saída),
-e o convite do MFA fica calado no servidor enquanto não há credencial.
+disparado por qualquer 403 `password_required`. A `/settings` não o carrega (é a saída):
+com `precisa_criar_senha`, ela mostra só a Segurança (o link da senha no topo), não chama
+os carregadores que dariam 403 e recarrega sozinha quando o `/auth/me` rebuscado no PTR ou
+na volta do foco diz que a senha passou a existir (#758). E o convite do MFA fica calado
+no servidor enquanto não há credencial.
 
 **Os três criadores de conta** (o `confirm` do register, o `complete-signup` do
 Google/Apple e a `/assinar`) gravam pelo mesmo `db_support.inserir_conta_nova`:
