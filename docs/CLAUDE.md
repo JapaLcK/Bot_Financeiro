@@ -189,6 +189,26 @@ Sub-app FastAPI (`api/v2/app.py`) montado pelo monólito com `app.mount("/api/v2
   rode o gerador e depois o build do `webapp/`.
 - Chave: `DASHBOARD_V2_BETA_EMAILS` (sem a env = os e-mails de teste do beta de
   Agentes; definida e vazia = ninguém) e `DASHBOARD_V2_BETA_USER_IDS`.
+- **Q36 fora do v2: Open Finance é a fonte única para quem tem a chave**
+  (`core/services/fonte_unica.py`). Vale em todos os canais (`/app`, WhatsApp, IA do chat
+  e do WhatsApp), porque a trava (`exigir`) está nas funções de escrita que todos chamam:
+
+  | | onde trava |
+  |---|---|
+  | **bloqueado**: criar investimento manual e aportar nele | `db.create_investment`, `db.create_investment_db`, `db.investment_deposit_from_account` |
+  | **bloqueado**: importar extrato (OFX no `/app` e no WhatsApp; CSV/PDF no WhatsApp) | `ofx_service.handle_ofx_import`, `statement_service.handle_statement_import` |
+  | **bloqueado**: importar fatura OFX; compra manual no cartão (à vista e parcelada) | `ofx_service.handle_credit_ofx_import`, `db.add_credit_purchase`, `db.add_credit_purchase_installments` |
+  | **liberado**: resgatar e apagar investimento manual, e desfazer o apagar (decisão do dono: restaura o que o usuário já tinha, sem dinheiro novo); caixinha manual; Carteira (lançamento em dinheiro, ajuste e saldo inicial; a Q40 continua em `core/handlers/forma_pagamento.py`); sync e importação do Open Finance | — |
+
+  A exceção é `FonteUnicaOF` (`ValueError`, `codigo = "FONTE_UNICA_OF"`, o texto do caso
+  em `str()`, como a `PlanLimitExceeded`); os textos (investimento, extrato, cartão) moram
+  só em `fonte_unica.MENSAGENS`. `/app` = 400 com `detail` em texto; WhatsApp = o texto
+  (`handle_incoming` traduz o que sobe, os handlers de cartão e de aporte devolvem); IA = o
+  texto, e o `validate` de `create_investment`/`investment_deposit` recusa antes de pedir
+  confirmação. A checagem da chave que falha **libera** (fail-open: é trava de produto num
+  beta, não segurança). O usuário é sempre o da sessão/remetente, nunca o corpo. Escritor
+  novo nessas tabelas ou dos importadores de arquivo reprova em
+  `tests/test_fonte_unica_q36.py` até ser classificado (trava ou motivo de ficar livre).
 - A página é `/painel` (`frontend/painel.html` + o artefato `frontend/dashboard-app.*`,
   de `webapp/src/dashboard`): sessão por `auth_token` ou `dashboard_token`
   (`_resolve_page_user_id`), senão `/login?next=/painel`; UA do app ou fora da chave

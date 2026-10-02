@@ -11,6 +11,7 @@ from core.intent_classifier import (classify, is_comparative_question, NEGATIVAS
                                     sem_perguntas_comparativas)
 from core.observability import _log_falha
 from core.services.category_service import infer_category, learn_from_inference
+from core.services.fonte_unica import FonteUnicaOF
 from core.services.plan_limits import PlanLimitExceeded
 from db import (
     add_credit_purchase,
@@ -941,6 +942,8 @@ def add_credit_from_entities(
                 user_id, tx_id, exc_info=True,
             )
         return _format_credit_purchase_success(card_label, float(valor), purchased_at, float(due), int(tx_id))
+    except FonteUnicaOF as e:
+        return str(e)
     except Exception as e:
         return f"❌ Erro registrando compra no crédito: {e}"
 
@@ -1063,6 +1066,8 @@ def _create_installments(
             f"⚙️ **Código:** {code}\n\n"
             f"Pra apagar: `apagar {code}`"
         )
+    except FonteUnicaOF as e:
+        return str(e)
     except Exception as e:
         return f"❌ Erro ao parcelar no cartão: {e}"
 

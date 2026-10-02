@@ -312,6 +312,8 @@ PR de cada etapa, não soluções prontas. Cada PR confere se ainda valem, decid
   nele), onde dá para criar lançamento de banco e investimento manual — o que a Q36 tira do
   v2. Decidir se esses caminhos antigos são bloqueados ou adaptados durante a convivência,
   com teste cruzando as duas telas.
+  **Decidido pelo dono: bloquear para quem tem a chave, em todos os canais** — PR D
+  da etapa 1 (§8). Esconder os botões no `/app` fica para depois, se o dono pedir.
 
 **Etapa 7 (chat)**
 - A interface nova do chat sobre a regra da forma de pagamento (a regra em si vem antes,
@@ -417,4 +419,11 @@ PR de cada etapa, não soluções prontas. Cada PR confere se ainda valem, decid
     tela decide o "expandir" das contas fora do total no PR C. Divergência declarada com o
     saldo consolidado: USD novo × BRL velho e saldo não finito na coluna
     (`tests/test_api_v2_contas.py`).
+  - PR D: bloqueio da Q36 fora do v2 para quem tem a chave `dashboard_v2_enabled`, em todos
+    os canais (`/app`, WhatsApp, IA): criar e aportar em investimento manual, importar
+    extrato (OFX/CSV/PDF) e fatura OFX, compra manual no cartão. Resgatar e apagar
+    investimento manual (e desfazer o apagar, que restaura o que já existia — decisão do
+    dono), caixinha e Carteira seguem livres. Trava, textos e tabela em
+    `core/services/fonte_unica.py` e `docs/CLAUDE.md` ("Q36 fora do v2"); a chave que falha
+    libera. Os botões do `/app` continuam à vista: o servidor recusa e a tela mostra o texto.
 - [ ] Etapa 0 · [ ] 1 · [ ] 2 · [ ] 3 · [ ] 4 · [ ] 5 · [ ] 6 · [ ] 7

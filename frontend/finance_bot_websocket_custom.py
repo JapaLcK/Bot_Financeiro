@@ -8083,17 +8083,21 @@ async def ofx_import_route(request: Request, user_id: int):
 
     from ofx_import import detect_ofx_type
     from core.services.ofx_service import handle_ofx_import, handle_credit_ofx_import
+    from core.services.fonte_unica import FonteUnicaOF
 
     ofx_type = detect_ofx_type(raw)
-    if ofx_type == "credit_card":
-        message = await asyncio.to_thread(handle_credit_ofx_import, str(user_id), raw, filename)
-    elif ofx_type == "bank":
-        message = await asyncio.to_thread(handle_ofx_import, str(user_id), raw, filename)
-    else:
-        raise HTTPException(
-            status_code=400,
-            detail="Nao consegui identificar o tipo de OFX (extrato bancario ou fatura de cartao).",
-        )
+    try:
+        if ofx_type == "credit_card":
+            message = await asyncio.to_thread(handle_credit_ofx_import, str(user_id), raw, filename)
+        elif ofx_type == "bank":
+            message = await asyncio.to_thread(handle_ofx_import, str(user_id), raw, filename)
+        else:
+            raise HTTPException(
+                status_code=400,
+                detail="Nao consegui identificar o tipo de OFX (extrato bancario ou fatura de cartao).",
+            )
+    except FonteUnicaOF as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
 
     _invalidate_dashboard_current_cache(user_id)
     return {"ok": True, "type": ofx_type, "message": message}
