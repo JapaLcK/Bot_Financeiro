@@ -700,12 +700,22 @@ def mesclar_health_em_coleta(anterior: Any, novo: Any) -> Any:
     (LOGIN_ERROR/ERROR/WAITING_USER_ACTION/MISSING) vazavam para a coleta nova
     e o card podia virar verde a partir de uma medição feita com o item em erro.
 
+    `coletando_desde` (a âncora do teto, `aplica_teto_por_health`): toda foto em
+    coleta sai com ele. Herdado da anterior também em coleta (ou o `observed_at`
+    dela, foto de antes deste campo); senão, o `observed_at` da nova. Foto final
+    não ganha a chave. Vale mesmo quando não há produto a mesclar.
+
     Pura: não muta `anterior` nem `novo`.
     """
     if not isinstance(novo, dict):
         return novo
     if str(novo.get("item_status") or "").upper() not in _UPDATING:
         return novo
+    em_coleta = (isinstance(anterior, dict)
+                 and str(anterior.get("item_status") or "").upper() in _UPDATING)
+    novo = {**novo, "coletando_desde": (
+        anterior.get("coletando_desde") or anterior.get("observed_at") if em_coleta
+        else novo.get("observed_at"))}
     if not isinstance(anterior, dict):
         return novo
     if str(anterior.get("item_status") or "").upper() not in _MESCLA_PERMITE_ANTERIOR:
@@ -740,6 +750,11 @@ _DETALHE_INVESTIMENTOS_FALTANDO = "Investimentos não vieram nesta atualização
 # Quem decide o prazo é o derivado `coleta_vencida` (`SQL_COLETA_VENCIDA`, em
 # `db/open_finance_state.py`), lido na linha; esta função não tem relógio.
 _DETALHE_COLETA_VENCIDA = "Está demorando mais que o normal — atualize de novo"
+# Passado o teto (`TETO_ATUALIZANDO_MIN`, derivado `coleta_estourada`), o
+# "Atualizando…" vira "Erro temporário" com este detalhe (Fase 4 do app, PR 2).
+# Só a leitura muda: o par status/motivo gravado é o mesmo. A retentativa lê este
+# detalhe como coleta vencida (`core/services/of_retentativa.py`).
+_DETALHE_COLETA_ESTOURADA = "O banco está demorando — atualize de novo mais tarde"
 
 # Item em `ERROR` na Pluggy (E13): a execução falhou do lado do banco. Só o
 # "Erro temporário" com este detalhe; o `_FIXED_DETAIL` dele ("Tentaremos de novo
@@ -978,9 +993,14 @@ def connection_ui_state(connection_row: dict) -> dict:
         if state == "no_accounts":
             detail = (detail or _FIXED_DETAIL[state]) + _motivo_do_warning(
                 health, ("BANK", "INVESTMENTS"))
-        # D1: todo "Atualizando…" sem sync desde a autorização atual, passado o
-        # prazo. Só troca o detalhe: estado, rótulo e pílula continuam os mesmos.
-        if state == "updating" and row.get("coleta_vencida"):
+        # Teto e D1, no FIM: depois de toda transformação que produz `updating`,
+        # e só sobre ele (instrução de dispositivo, erro e o resto não mudam).
+        # Teto: "Atualizando…" há `TETO_ATUALIZANDO_MIN` ou mais vira "Erro
+        # temporário". D1: sem sync desde a autorização atual, passado o prazo,
+        # só troca o detalhe — estado, rótulo e pílula continuam os mesmos.
+        if state == "updating" and row.get("coleta_estourada"):
+            state, detail = "error_recoverable", _DETALHE_COLETA_ESTOURADA
+        elif state == "updating" and row.get("coleta_vencida"):
             detail = _DETALHE_COLETA_VENCIDA
         return {
             "state": state,

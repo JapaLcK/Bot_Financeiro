@@ -22,7 +22,7 @@ from psycopg.types.json import Jsonb
 from .connection import get_conn
 from .open_finance import (PENDING_RECONCILIATION_SQL, actionable_pending_params,
                            merged_wallet_delta)
-from .open_finance_state import _TERMINAL
+from .open_finance_state import _TERMINAL, SQL_COLETA_ESTOURADA, aplica_teto_por_health
 
 # Posições do banco, uma por identidade do provedor (reconectar cria outra linha
 # para a mesma posição): fica a da conexão mais nova, como em `CONTAS_BANCO_SQL`.
@@ -124,8 +124,12 @@ def calcular(cur, user_id: int) -> dict:
                 " from investments where user_id=%s", (user_id,))
     manuais = cur.fetchone()
 
-    cur.execute("select * from open_finance_connections where user_id=%s order by id", (user_id,))
-    conexoes = cur.fetchall()
+    # O teto do "Atualizando…" muda o ESTADO (vira `error_recoverable`): sem as duas
+    # metades dele (o derivado do SQL e o do `health`), a foto gravaria `updating`
+    # onde a tela mostra erro. As mesmas que `get_open_finance_snapshot` aplica.
+    cur.execute(f"select *, {SQL_COLETA_ESTOURADA} from open_finance_connections"
+                " where user_id=%s order by id", (user_id,))
+    conexoes = [aplica_teto_por_health(dict(c)) for c in cur.fetchall()]
     estados = {str(c["id"]): connection_ui_state(c)["state"] for c in conexoes}
     vivas = [c for c in conexoes if (c["status"] or "").upper() not in _TERMINAL]
     limite = datetime.now(timezone.utc) - BANCO_VELHO
