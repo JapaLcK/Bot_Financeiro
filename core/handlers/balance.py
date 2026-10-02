@@ -2,6 +2,7 @@
 from __future__ import annotations
 import db
 from core.services.funding import aviso_conferir
+from db import resumo_mes
 from db.accounts import _TIPO_ALIASES
 from utils_text import fmt_brl
 from utils_date import today_tz
@@ -51,14 +52,14 @@ def check(user_id: int) -> str:
         lines.append("📋 *Hoje*: nenhum gasto registrado")
 
     # ── Gastos do mês ────────────────────────────────────────────────────
-    mes_inicio = today.replace(day=1)
-    summary = db.get_summary_by_period(user_id, mes_inicio, today)
-    total_mes = summary.get("despesa", 0.0)
+    # Regra única do mês (db/resumo_mes.py, Q18): o mês-calendário inteiro, com o
+    # cartão pela fatura que fecha nele — o mesmo número do painel.
+    total_mes = float(resumo_mes.totais_do_mes(user_id, today)["saiu"])
     _MESES = ["Janeiro","Fevereiro","Março","Abril","Maio","Junho",
               "Julho","Agosto","Setembro","Outubro","Novembro","Dezembro"]
     mes_nome = _MESES[today.month - 1]
     lines.append("")
-    lines.append(f"📊 *Gastos em {mes_nome}*: {fmt_brl(total_mes)}")
+    lines.append(f"📊 *Gastos em {mes_nome}* (com o cartão pela fatura do mês): {fmt_brl(total_mes)}")
 
     # ── Cartões ──────────────────────────────────────────────────────────
     cards = db.list_cards(user_id)

@@ -53,7 +53,7 @@ api/v2/                   — a /api/v2 do dashboard v2: sub-app FastAPI montado
                             monólito em /api/v2, com envelope de erro próprio
                             (erros.py), a dependência única do usuário (sessao.py)
                             e um router por assunto (me.py, eventos.py,
-                            perfil.py, contas.py, assinaturas.py)
+                            perfil.py, contas.py, assinaturas.py, resumo_mes.py)
 
 db/                       — PACOTE com ~30 módulos, um por domínio
   schema.py               — DDL de TODAS as tabelas (init_db) — fonte de verdade
@@ -173,6 +173,28 @@ Sub-app FastAPI (`api/v2/app.py`) montado pelo monólito com `app.mount("/api/v2
   contadas em `fora_do_total`). A carteira sai sempre com `carteira_nao_confirmada` até a
   Q37. `motivos` vazio = número exato. Cartão, posições e caixinhas não entram; `raw` e
   `provider_*_id` nunca saem.
+- `GET /api/v2/resumo-do-mes?mes=AAAA-MM` (`api/v2/resumo_mes.py`, regra em `db/resumo_mes.py`):
+  `mes`, `ate` (o último dia do mês, o corrente também: a soma cobre o mês inteiro), `entrou`, `saiu`, `anterior`
+  (`{mes, entrou, saiu}` do mês anterior inteiro, ou `null` quando a janela do plano corta
+  qualquer parte dele) e `motivos` (`conciliacao_pendente`, `movimentos_pendentes`,
+  `banco_desatualizado` — os do bloco de contas: refletem a situação atual das contas, não
+  a do mês pedido — e `inicio_do_historico`, quando a janela do plano corta o mês pedido ou
+  o `anterior`). Sem `mes` = o mês
+  corrente no fuso do app; formato fora de `AAAA-MM` ou mês futuro = 422 no envelope.
+  **Regra única do mês** (Q18): `TOTAIS_SQL` = lançamentos não internos por `criado_em`
+  (forma legada canonizada) + compras no cartão sem estorno pelo `period_end` da fatura,
+  no mês-calendário INTEIRO (a fatura que fecha depois de hoje, dentro do mês, entra). Leem
+  dela a rota, o "Gastos em <mês>" do WhatsApp (`core/handlers/balance.py`), o relatório
+  mensal (o pedido na hora também soma o mês inteiro: total, contagem e "Período"), a
+  consulta 5 do /app e `compute_kpis` das Análises. `compute_evolution` é cópia em consulta
+  única (um GROUP BY por mês); `tests/test_resumo_mes_regra.py` compara as duas por mês.
+  Fatura com `user_id` NULL (a coluna aceita, sem backfill) entra, como antes.
+  **Divergência conhecida:** relatório diário e semanal, ferramentas da IA de período
+  livre e projeção de fechamento (`get_summary_by_period`) e o Repórter
+  (`piggy_agents._month_stats`) seguem só em `launches`, sem o cartão. Limites mantidos de
+  propósito: o mês corta `criado_em` pela data ingênua (fuso da sessão do Postgres), a
+  conciliação pendente conta em dobro (sai com motivo), estorno não abate.
+  `scripts/comparar_resumo_mes.py` compara antigo × novo por usuário e mês, só lendo.
 - `GET /api/v2/assinaturas` e `POST /api/v2/assinaturas/marca` (`api/v2/assinaturas.py`):
   a lista do Recurring Payments da Pluggy (`core/services/assinaturas.py`) e a marcação
   do usuário por chave do comerciante (`assinatura`/`ignorar`/`nenhuma`; chave fora da
@@ -187,7 +209,8 @@ Sub-app FastAPI (`api/v2/app.py`) montado pelo monólito com `app.mount("/api/v2
   `api/v2/erros.py`; a resposta real continua saindo de `_envelope`). Os tipos TS saem de
   `python scripts/gerar_tipos_api_v2.py` para `webapp/src/dashboard/lib/api-v2.gen.ts`
   (gerado e commitado; construção fora da lista aceita levanta `ValueError`, e `number`
-  (float) está fora dela: dinheiro é `Decimal`), e
+  (float) está fora dela: dinheiro é `Decimal`; a query de GET sai em `QueryGet`, só
+  parâmetro `in: query`), e
   `tests/test_api_v2_contrato.py` compara o arquivo com o `openapi()` de hoje e valida as
   fixtures dos testes de navegador (`tests/frontend/api_v2_respostas.json`). Mudou modelo:
   rode o gerador e depois o build do `webapp/`.

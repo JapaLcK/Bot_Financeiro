@@ -192,6 +192,8 @@ def run_xerife_once(today: date | None = None, user_id: int | None = None) -> di
 # ── Repórter: a manchete do mês ──────────────────────────────────────────────
 
 def _month_stats(cur, user_id: int, first: date, nxt: date) -> dict[str, float]:
+    # Divergência conhecida (Q18): a manchete fica só em `launches`, SEM o cartão;
+    # o Resumo do mês e o /app usam `db/resumo_mes.TOTAIS_SQL` (cartão pela fatura).
     # f-string por causa de `TIPO_RECEITA_SQL`/`TIPO_DESPESA_SQL`: `entrou` lia
     # só `tipo = 'receita'` enquanto `saiu` já lia as duas formas, então uma linha
     # legada 'entrada' sumia da manchete e o "sobrou" saía MENOR do que é.
