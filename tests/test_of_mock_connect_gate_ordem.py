@@ -1,13 +1,19 @@
-"""G7 — mock-connect ligado: o corpo só é lido depois da sessão e do teto.
+"""G7 — mock-connect ligado: o corpo só é lido depois da sessão.
 
 Ler o corpo antes de `authorize_dashboard_access` deixa qualquer anônimo mandar
 corpo grande para a memória do servidor (DoS sem login). Aqui `Request.body`,
 `.json` e `.form` explodem: se a rota lê o corpo antes de recusar, o teste cai.
 
+O teto de bancos vem DEPOIS da leitura (P2 do Codex, #749): ele precisa da
+instituição do corpo para reconhecer o reseed da falsa. Por isso o dono da
+sessão em carência tem o corpo lido e leva 402, e com corpo inválido leva 422
+antes do 402 (decisão aceita: só o próprio dono autenticado chega aí).
+
 CONTROLES (§3), medidos por mutação na rota:
   * negativo — mover `request.body()` para antes do `authorize_dashboard_access`
-    deixa `test_anonimo_*` vermelho; para entre ele e o `_enforce_bank_limit`,
-    deixa `test_carencia_*` vermelho.
+    deixa `test_anonimo_*` e `test_outro_uid_*` vermelhos; voltar o
+    `_enforce_bank_limit` para antes da leitura deixa `test_carencia_*` vermelhos
+    (402 sem ler o corpo, e 402 no lugar do 422).
   * positivo — `test_valido_le_o_corpo` (sem a explosão): o corpo segue lido.
 """
 
@@ -51,12 +57,27 @@ def test_outro_uid_403_sem_ler_o_corpo(user_id, monkeypatch):
     assert _conexoes(outro) == 0
 
 
-def test_carencia_402_sem_ler_o_corpo(user_id, monkeypatch):
+def test_carencia_le_o_corpo_e_da_402(user_id, monkeypatch):
     em_carencia(user_id)
-    _ligado_sem_corpo(monkeypatch)
+    _switch(monkeypatch, "1")
+    lidos, original = [], Request.body
+
+    async def _espia(self):
+        lidos.append(1)
+        return await original(self)
+    monkeypatch.setattr(Request, "body", _espia)
     client = TestClient(dashboard.app)
     r = client.post(_url(user_id), content=_ITAU, headers={**_auth(client, user_id), **_JSON})
     assert r.status_code == 402, r.text
+    assert lidos and _conexoes(user_id) == 0
+
+
+def test_carencia_corpo_invalido_422_antes_do_402(user_id, monkeypatch):
+    em_carencia(user_id)
+    _switch(monkeypatch, "1")
+    client = TestClient(dashboard.app)
+    r = client.post(_url(user_id), content=b"{not json", headers={**_auth(client, user_id), **_JSON})
+    assert r.status_code == 422, r.text
     assert _conexoes(user_id) == 0
 
 

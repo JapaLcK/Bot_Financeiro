@@ -63,6 +63,7 @@ from db import (
     is_account_scheduled_for_deletion,
     item_registry_origins,
     list_pluggy_item_ids,
+    mock_open_finance_item_id,
     pluggy_item_lock,
     register_item,
     save_pluggy_open_finance_item,
@@ -1504,7 +1505,8 @@ def _msg_sem_open_finance(user_id: int) -> str:
     return _MSG_OF_SO_NOS_PLANOS_PAGOS
 
 
-async def _enforce_bank_limit(user_id: int, new_item_id: str | None = None) -> None:
+async def _enforce_bank_limit(user_id: int, new_item_id: str | None = None,
+                              provider: str = "pluggy") -> None:
     """Teto de conexões OF por plano.
 
     v2 (PLANS_V2_ENABLED): teto vem do tier — of_banks_max da escada
@@ -1514,7 +1516,8 @@ async def _enforce_bank_limit(user_id: int, new_item_id: str | None = None) -> N
 
     P1: reconectar/renovar um banco JÁ conectado (mesmo provider_item_id) NÃO conta como
     banco novo — senão o usuário no limite ficava travado de reautorizar o próprio
-    banco. Só bloqueia banco realmente novo.
+    banco. Só bloqueia banco realmente novo. `provider` é o da busca desse item: a
+    mock-connect passa 'mock_pluggy' (reseed da falsa), o resto fica no 'pluggy'.
     """
     from core.services.plan_service import plans_v2_enabled, get_user_limits
 
@@ -1523,7 +1526,7 @@ async def _enforce_bank_limit(user_id: int, new_item_id: str | None = None) -> N
         if limit is None:
             return  # ilimitado (Premium futuro)
         if new_item_id:
-            existing = await asyncio.to_thread(get_open_finance_connection_by_item_id, str(new_item_id))
+            existing = await asyncio.to_thread(get_open_finance_connection_by_item_id, str(new_item_id), provider)
             if existing and int(existing.get("user_id")) == int(user_id):
                 return  # upsert de item existente: reconexão, não é banco novo
         if limit <= 0:
@@ -1553,7 +1556,7 @@ async def _enforce_bank_limit(user_id: int, new_item_id: str | None = None) -> N
     if await asyncio.to_thread(is_pro, user_id):
         return
     if new_item_id:
-        existing = await asyncio.to_thread(get_open_finance_connection_by_item_id, str(new_item_id))
+        existing = await asyncio.to_thread(get_open_finance_connection_by_item_id, str(new_item_id), provider)
         if existing and int(existing.get("user_id")) == int(user_id):
             return  # upsert de item existente: reconexão, não é banco novo
     limit = int(os.getenv("OF_FREE_BANK_LIMIT", "1"))
@@ -2343,9 +2346,10 @@ def _exige_mock_connect() -> None:
 @router.post("/open-finance/{user_id}/mock-connect", dependencies=[Depends(_exige_mock_connect)])
 async def open_finance_mock_connect_route(request: Request, user_id: int):
     session_uid = shared.authorize_dashboard_access(request, user_id)
-    await _enforce_bank_limit(session_uid)
     # Corpo lido à mão, só agora: parâmetro de corpo tipado faz o FastAPI decodificar o JSON
     # ANTES do portão, e o 422 de JSON malformado revelava a rota desligada a qualquer anônimo.
+    # Depois da sessão (anônimo e outro uid nunca forçam a leitura) e ANTES do teto, que
+    # precisa da instituição: por isso corpo inválido dá 422 antes do 402 do limite.
     # Mesmos status do parâmetro tipado (200/422, o texto do 422 mudou): só application/json
     # e application/*+json são JSON; o resto é 422, como antes.
     corpo = await request.body()
@@ -2359,6 +2363,9 @@ async def open_finance_mock_connect_route(request: Request, user_id: int):
         raise RequestValidationError(
             [{**e, "loc": ("body", *e["loc"])} for e in exc.errors(include_url=False)]
         ) from None
+    # Reseed da mesma instituição é upsert da falsa já existente: não é banco novo.
+    await _enforce_bank_limit(
+        session_uid, mock_open_finance_item_id(session_uid, payload.institution), "mock_pluggy")
     result = await asyncio.to_thread(
         create_mock_open_finance_connection,
         user_id,

@@ -90,6 +90,12 @@ def _mock_open_finance_institution(key: str | None = None) -> dict:
     return MOCK_OPEN_FINANCE_INSTITUTIONS.get(normalized, MOCK_OPEN_FINANCE_INSTITUTIONS["nubank"])
 
 
+def mock_open_finance_item_id(user_id: int, institution_key: str | None = None) -> str:
+    # Fonte única do item falso: a rota passa este id ao teto de bancos para o reseed
+    # da mesma instituição contar como reconexão. Leva o user_id: isola entre usuários.
+    return f"mock-pluggy-{user_id}-{_mock_open_finance_institution(institution_key)['id']}"
+
+
 def create_mock_open_finance_connection(user_id: int, institution_key: str | None = None) -> dict:
     """
     Simula o fluxo Pluggy/Open Finance para desenvolvimento.
@@ -97,7 +103,7 @@ def create_mock_open_finance_connection(user_id: int, institution_key: str | Non
     """
     ensure_user(user_id)
     institution = _mock_open_finance_institution(institution_key)
-    provider_item_id = f"mock-pluggy-{user_id}-{institution['id']}"
+    provider_item_id = mock_open_finance_item_id(user_id, institution_key)
     now = datetime.now(_tz())
     today = now.date()
 
