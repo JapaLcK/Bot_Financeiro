@@ -1,5 +1,5 @@
 {
-  "_comentario": "Respostas da /api/v2 que os testes de navegador servem. tests/test_api_v2_contrato.py valida cada uma pelos modelos Pydantic (Me, Assinaturas, ErroV2); a marcada fora_do_envelope tem de NÃO validar.",
+  "_comentario": "Respostas da /api/v2 que os testes de navegador servem. tests/test_api_v2_contrato.py valida cada uma pelos modelos Pydantic (Me, Perfil, Contas, Assinaturas, ErroV2); a marcada fora_do_envelope tem de NÃO validar. Dinheiro é texto decimal.",
   "me": {
     "free": { "plan_tier": "free" },
     "essencial": { "plan_tier": "essencial" },
@@ -24,6 +24,39 @@
       "total_anual": 2551.2
     },
     "vazia": { "servicos": [], "outras": [], "total_mensal": 0, "total_anual": 0 }
+  },
+  "perfil": {
+    "economizar": { "perfil": "economizar" },
+    "investir": { "perfil": "investir" },
+    "controlar": { "perfil": "controlar" },
+    "dividas": { "perfil": "dividas" },
+    "autonomo": { "perfil": "autonomo" },
+    "padrao": { "perfil": "padrao" },
+    "nunca_escolheu": { "perfil": null }
+  },
+  "contas": {
+    "so_carteira": {
+      "total": "150.00",
+      "motivos": ["carteira_nao_confirmada"],
+      "fora_do_total": 0,
+      "carteira": { "saldo": "150.00", "motivos": ["carteira_nao_confirmada"] },
+      "contas": []
+    },
+    "todos_os_estados": {
+      "total": "1360.00",
+      "motivos": ["carteira_nao_confirmada", "conciliacao_pendente", "movimentos_pendentes", "especie_incompleta", "banco_desatualizado", "saldo_ausente", "moeda_presumida", "conta_fora_do_ultimo_sync", "outra_moeda", "conexao_pausada"],
+      "fora_do_total": 3,
+      "carteira": { "saldo": "100.00", "motivos": ["carteira_nao_confirmada", "conciliacao_pendente", "movimentos_pendentes", "especie_incompleta"] },
+      "contas": [
+        { "id": 1, "instituicao": "Nubank", "nome": "Conta", "saldo": "1000.00", "moeda": "BRL", "no_total": true, "conexao": "updated", "sincronizado_em": "2026-10-01T12:00:00Z", "motivos": [] },
+        { "id": 2, "instituicao": "Itaú", "nome": "Conta corrente", "saldo": "200.00", "moeda": "BRL", "no_total": true, "conexao": "error_recoverable", "sincronizado_em": "2026-09-28T09:30:00Z", "motivos": ["banco_desatualizado"] },
+        { "id": 3, "instituicao": "Nubank", "nome": "Conta antiga", "saldo": "50.00", "moeda": "BRL", "no_total": true, "conexao": "updated", "sincronizado_em": "2026-10-01T12:00:00Z", "motivos": ["conta_fora_do_ultimo_sync"] },
+        { "id": 4, "instituicao": "Inter", "nome": null, "saldo": "10.00", "moeda": "BRL", "no_total": true, "conexao": "updated", "sincronizado_em": "2026-10-01T12:00:00Z", "motivos": ["moeda_presumida"] },
+        { "id": 5, "instituicao": "Wise", "nome": "Conta em dólar", "saldo": "30.00", "moeda": "USD", "no_total": false, "conexao": "updated", "sincronizado_em": "2026-10-01T12:00:00Z", "motivos": ["outra_moeda"] },
+        { "id": 6, "instituicao": "Bradesco", "nome": "Conta", "saldo": null, "moeda": "BRL", "no_total": false, "conexao": "paused", "sincronizado_em": null, "motivos": ["conexao_pausada"] },
+        { "id": 7, "instituicao": null, "nome": "Conta", "saldo": null, "moeda": "BRL", "no_total": false, "conexao": "updated", "sincronizado_em": "2026-10-01T12:00:00Z", "motivos": ["saldo_ausente"] }
+      ]
+    }
   },
   "erros": {
     "401": {

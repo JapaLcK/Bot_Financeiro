@@ -15,8 +15,10 @@ from pydantic import ValidationError
 import frontend.finance_bot_websocket_custom as dashboard
 from api.v2 import app as app_v2
 from api.v2.assinaturas import Assinaturas
+from api.v2.contas import Contas
 from api.v2.erros import ErroV2
 from api.v2.me import Me
+from api.v2.perfil import Perfil
 from scripts.gerar_tipos_api_v2 import CABECALHO, SAIDA, gerar
 from test_api_v2_erros import Login, _corpo_do_422, rota_temporaria  # noqa: F401 (fixture)
 
@@ -92,6 +94,29 @@ def test_gerador_traduz_rota_sse():
     )
 
 
+def _put(ref_corpo="#/components/schemas/Aa", **corpo):
+    op = dict(_get("#/components/schemas/Bb")["get"])
+    op["requestBody"] = {"content": {"application/json": {"schema": {"$ref": ref_corpo}}},
+                         "required": True, **corpo}
+    return op
+
+
+_DINHEIRO = {"type": "string", "pattern": "^(?!^[-+.]*$)[+-]?0*\\d*\\.?\\d*$"}
+
+
+def test_gerador_traduz_dinheiro_data_e_put():
+    schemas = {"Aa": {"type": "object", "properties": {"x": {"type": "string"}}},
+               "Bb": {"type": "object", "required": ["v", "em"], "properties": {
+                   "v": _DINHEIRO, "em": {"type": "string", "format": "date-time"}}}}
+    paths = {"/b": {"get": _get("#/components/schemas/Bb")["get"], "put": _put()}}
+    assert gerar(_spec(schemas, paths)) == CABECALHO + (
+        "export type Aa = { x?: string };\n"
+        "export type Bb = { v: string; em: string };\n"
+        'export type RotasGet = { "/b": Bb };\n'
+        'export type RotasPut = { "/b": { corpo: Aa; resposta: Bb } };\n'
+    )
+
+
 def _post(ref, required=True):
     op = dict(_get(ref)["get"], requestBody={
         "content": {"application/json": {"schema": {"$ref": ref}}}, "required": required})
@@ -119,8 +144,16 @@ def test_gerador_traduz_rota_post():
           {"/x": _post("#/components/schemas/X", required=False)}),
     _spec({}, {"/s": _sse({"type": "string"})}),
     _spec({}, {"/s": _sse()}),
+    _spec({"X": {"type": "string", "format": "date"}}),
+    _spec({"X": {"type": "integer", "pattern": "1"}}),
+    _spec({"Bb": {"type": "string"}}, {"/b": {"put": _put()}}),
+    _spec({"Bb": {"type": "string"}}, {"/b": {"get": _get("#/components/schemas/Bb")["get"],
+                                              "put": _put(required=False)}}),
+    _spec({"Bb": {"type": "string"}}, {"/b": {"get": _get("#/components/schemas/Bb")["get"],
+                                              "put": _get("#/components/schemas/Bb")["get"]}}),
 ], ids=["additionalProperties", "oneOf", "allOf", "const", "post", "post_corpo_opcional",
-        "sse_sem_ref", "sse_sem_contentSchema"])
+        "sse_sem_ref", "sse_sem_contentSchema", "format_date", "pattern_fora_de_string",
+        "put_sem_get", "put_corpo_opcional", "put_sem_corpo"])
 def test_gerador_recusa_o_que_nao_traduz(spec):
     with pytest.raises(ValueError, match="construção não suportada"):
         gerar(spec)
@@ -160,6 +193,21 @@ def test_fixture_do_me_segue_o_modelo(plano):
 @pytest.mark.parametrize("nome", sorted(FIXTURES["assinaturas"]))
 def test_fixture_de_assinaturas_segue_o_modelo(nome):
     Assinaturas.model_validate(FIXTURES["assinaturas"][nome])
+
+
+@pytest.mark.parametrize("nome", sorted(FIXTURES["perfil"]))
+def test_fixture_do_perfil_segue_o_modelo(nome):
+    assert Perfil.model_validate(FIXTURES["perfil"][nome]).perfil == (None if nome == "nunca_escolheu" else nome)
+
+
+@pytest.mark.parametrize("nome", sorted(FIXTURES["contas"]))
+def test_fixture_de_contas_segue_o_modelo_e_fecha_a_conta(nome):
+    from decimal import Decimal
+
+    c = Contas.model_validate(FIXTURES["contas"][nome])
+    assert c.total == c.carteira.saldo + sum((x.saldo for x in c.contas if x.no_total), Decimal(0))
+    assert c.fora_do_total == sum(not x.no_total for x in c.contas)
+    assert set(c.motivos) == set(c.carteira.motivos).union(*(x.motivos for x in c.contas))
 
 
 @pytest.mark.parametrize("nome", sorted(FIXTURES["erros"]))
