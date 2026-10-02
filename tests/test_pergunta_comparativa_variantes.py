@@ -1,0 +1,256 @@
+"""#569: variantes da pergunta comparativa que escapavam da heurística e gravavam dinheiro.
+
+Com "Faltou o valor de *aluguel*" de pé, "eu gastei mais em 2025 ou 2026?" gravava
+R$ 2.025 no aluguel; numa conversa nova, "gastei mais nos ultimos 3 meses" gravava
+R$ 3. Conversa pelo `handle_incoming` com Postgres real.
+"""
+from __future__ import annotations
+
+import pytest
+
+import core.handle_incoming as hi
+import core.handlers.launches as L
+import db
+from core.handlers import forma_pagamento as fp
+from core.intent_classifier import contains_comparative_question, sem_perguntas_comparativas
+from core.types import IncomingMessage
+from tests._fusao_of_helpers import ia_fora, manda  # noqa: F401 (fixture)
+from tests.test_handle_incoming_routing import _Audio, _msg, _valores, free_small_uid  # noqa: F401 (fixture)
+from conftest import usuario_pagante
+from tests.test_manual_launches_carteira_piggy import _connect_fake_bank
+from tests.test_pergunta_comparativa_conta_cartao import (  # noqa: F401 (fixtures)
+    _AVISO, contas_pagas, despesas, luz, nubank, uid)
+from utils_date import today_tz
+
+
+_REGRA_REAL = fp.regra_ativa
+
+
+@pytest.fixture(autouse=True)
+def _sem_banco_conectado(monkeypatch):
+    monkeypatch.setattr("core.handlers.forma_pagamento.regra_ativa", lambda u: False)  # Q40
+
+
+@pytest.mark.parametrize("text,esperado", [
+    ("gastei 30 no uber. gastei mais em 2025 ou 2026?", True),
+    ("gastei 30 no uber; gastei mais em 2025 ou 2026?", True),
+    ("gastei 30 no uber tb gastei mais em 2025 ou 2026?", True),
+    ("gastei 30 no uber mas gastei mais em 2025 ou 2026?", True),
+    ("gastei 30 no uber gastei mais em 2025 ou 2026", True),
+    ("1200. gastei mais que o normal", True),
+    # Só o split pega: o pedaço sem verbo herda o do anterior ("gastei mais que o normal...").
+    ("gastei 10 no pao, 20 no uber e mais que o normal no bar?", True),
+    ("paguei 50 no mercado e 30 a mais que o normal na luz?", True),
+    # O "?" e o marcador valem só DEPOIS do verbo.
+    ("e ai, tudo certo? gastei muito no bar ontem 80", False),
+    ("o normal eh 1200. gastei muito no bar 80", False),
+    # "?" ANTES do verbo: só `is_comparative_question` o aceita (último recurso da `sem_perguntas`).
+    ("oi? gastei mais 30% esse mes", True),
+    ("eu? gastei mais 30% no uber", True),
+    ("gastei 30 no uber. paguei 50 no mercado", False),
+    ("gastei 30 no uber; paguei 50 no mercado", False),
+    ("1200, obrigado", False),
+])
+def test_contains_acha_pergunta_depois_de_qualquer_separador(text, esperado):
+    assert contains_comparative_question(text) is esperado
+
+
+@pytest.mark.parametrize("text", ["gastei " * 10000, "gastei " + "1" * 20000, "gastei " + "1" * 20000 + " x%"],
+                         ids=["verbos", "digitos", "digitos_com_pct"])
+def test_contains_e_linear_no_tamanho_do_texto(text):
+    # Quadrático travava o worker único do webhook: um `is_comparative_question`
+    # por verbo (5 s em 28 mil caracteres) e o "%" tentado de cada dígito (>15 s).
+    import time
+    t0 = time.perf_counter()
+    contains_comparative_question(text)
+    assert time.perf_counter() - t0 < 2
+
+
+def _pendencia(uid):
+    p = db.get_pending_action(uid)
+    return p and p["action_type"]
+
+
+def _alvo(uid, valor):
+    return next(r["alvo"].lower() for r in db.list_launches(uid, limit=5)
+                if float(r["valor"]) == valor)
+
+
+@pytest.mark.parametrize("pergunta", [
+    "eu gastei mais em 2025 ou 2026?", "gastei mais em 2025",
+    "Gastei 30 no Uber. Gastei mais em 2025 ou 2026?", "gastei mais 30% esse mês?",
+    "gastei + em 2025 ou 2026?", "gastamos mais em 2025 ou 2026?", "gastei 30% a mais esse mes?",
+    "oi? gastei mais 30% esse mes", "? gastei mais 30% esse mes",
+])
+def test_fila_recusa_e_o_valor_depois_vai_pro_aluguel(free_small_uid, pergunta):
+    uid = free_small_uid
+    hi.handle_incoming(_msg(uid, "gastei 10 no pao e paguei o aluguel"))
+    out = hi.handle_incoming(_msg(uid, pergunta))
+    assert _valores(uid) == [10]
+    assert "Isso parece uma pergunta" in out[0].text
+    assert _pendencia(uid) == "multi_launch_values"
+    hi.handle_incoming(_msg(uid, "1200"))
+    assert _valores(uid) == [10, 1200]
+    assert "aluguel" in _alvo(uid, 1200)
+
+
+def test_clarification_recusa_e_o_valor_depois_vai_pra_luz(free_small_uid):
+    uid = free_small_uid
+    hi.handle_incoming(_msg(uid, "paguei a luz"))
+    hi.handle_incoming(_msg(uid, "gastei mais em 2025"))
+    assert _valores(uid) == []
+    assert _pendencia(uid) == "clarification"
+    hi.handle_incoming(_msg(uid, "132"))
+    assert _valores(uid) == [132]
+    assert "luz" in _alvo(uid, 132)
+
+
+@pytest.mark.parametrize("pergunta", ["gastei mais em 2025", "gastei mais nos ultimos 3 meses"])
+def test_conversa_nova_nao_grava(free_small_uid, pergunta):
+    hi.handle_incoming(_msg(free_small_uid, pergunta))
+    assert _valores(free_small_uid) == []
+
+
+def test_conversa_nova_ano_como_valor_ainda_grava(free_small_uid):
+    hi.handle_incoming(_msg(free_small_uid, "gastei 2025 no notebook"))
+    assert _valores(free_small_uid) == [2025]
+
+
+def test_multi_com_acima_do_normal_grava_os_dois(free_small_uid):
+    hi.handle_incoming(_msg(free_small_uid, "gastei 30 no uber e paguei acima do normal 200 na luz"))
+    assert _valores(free_small_uid) == [30, 200]
+
+
+def test_audio_com_fila_de_pe_nao_grava_no_aluguel(pro_small_uid, monkeypatch):
+    uid = pro_small_uid
+    hi.handle_incoming(_msg(uid, "gastei 10 no pao e paguei o aluguel"))
+    assert _pendencia(uid) == "multi_launch_values"
+    monkeypatch.setattr(hi, "transcribe_audio",
+                        lambda data, fn: "gastei 30 no uber. gastei mais em 2025 ou 2026")
+    msg = IncomingMessage(platform="whatsapp", user_id=uid, text="", message_id="m",
+                          attachments=[_Audio()], external_id="e", raw={})
+    hi._handle_audio(msg, "whatsapp")
+    assert _valores(uid) == [10]
+    assert _pendencia(uid) == "multi_launch_values"
+
+
+# ── #569 B3: `sem_perguntas_comparativas` acha a pergunta pela mesma varredura ──
+
+@pytest.mark.parametrize("text,esperado", [
+    ("paguei a fatura do nubank. gastei mais em 2025 ou 2026?",
+     ("paguei a fatura do nubank", ["gastei mais em 2025 ou 2026?"])),
+    ("gastei 30 no uber; gastei mais em 2025 ou 2026?", ("gastei 30 no uber", ["gastei mais em 2025 ou 2026?"])),
+    ("gastei 30 no uber tb gastei mais em 2025 ou 2026?", ("gastei 30 no uber", ["gastei mais em 2025 ou 2026?"])),
+    ("oi gastei mais em 2025?", ("", ["oi gastei mais em 2025?"])),   # só prefixo antes: nada legítimo
+    # O que vem DEPOIS do verbo da pergunta sai junto (regra do corte, ratificada pelo dono).
+    ("gastei mais em 2025 ou 2026? e paguei 50 no mercado",
+     ("", ["gastei mais em 2025 ou 2026? e paguei 50 no mercado"])),
+    # Duas perguntas: o corte é na PRIMEIRA, senão o 2025 da 1ª voltaria como legítimo.
+    ("paguei a luz e gastei mais em 2025 ou 2026? e gastei mais que o normal?",
+     ("paguei a luz", ["gastei mais em 2025 ou 2026? e gastei mais que o normal?"])),
+    # Pedaço do split sem verbo próprio: só o split o acha.
+    ("paguei 50 no mercado e 30 a mais que o normal na luz?",
+     ("paguei 50 no mercado", ["paguei 30 a mais que o normal na luz?"])),
+    ("paguei a luz", ("paguei a luz", [])),
+    ("oi? gastei mais 30% esse mes", ("", ["oi? gastei mais 30% esse mes"])),
+    # `_sem_conector_final`: "mas" e a pontuação que sobra antes do conector.
+    ("paguei a luz mas gastei mais em 2025 ou 2026?", ("paguei a luz", ["gastei mais em 2025 ou 2026?"])),
+    ("paguei a luz, e gastei mais em 2025 ou 2026?", ("paguei a luz", ["gastei mais em 2025 ou 2026?"])),
+    ("paguei a luz; tb gastei mais em 2025 ou 2026?", ("paguei a luz", ["gastei mais em 2025 ou 2026?"])),
+    # Verbo que o `_normalize` acha e o original não ("gastéi"): sem como cortar, tudo é pergunta.
+    ("gastéi 30 no uber e gastei mais em 2025 ou 2026? e paguei 50 no mercado",
+     ("", ["gastéi 30 no uber e gastei mais em 2025 ou 2026? e paguei 50 no mercado"])),
+])
+def test_sem_perguntas_corta_na_pergunta(text, esperado):
+    assert sem_perguntas_comparativas(text) == esperado
+
+
+@pytest.mark.parametrize("fatura", [200, 3000])
+def test_fatura_com_ponto_paga_o_valor_em_aberto_e_avisa(uid, ia_fora, fatura):
+    db.add_launch_and_update_balance(uid, "receita", 5000, None, "seed")
+    cid = nubank(uid)
+    db.add_credit_purchase(uid, cid, fatura, "outros", "compra teste", today_tz())
+    r = manda(uid, "paguei a fatura do nubank. gastei mais em 2025 ou 2026?")
+    assert despesas(uid) == [float(fatura)] and r.count(_AVISO) == 1, r  # ia pagar R$ 2.025
+
+
+@pytest.mark.parametrize("separador", [". ", "; ", " tb "])
+def test_conta_com_separador_sem_conector_paga_a_luz_e_avisa(uid, ia_fora, separador):
+    luz(uid)
+    r = manda(uid, f"paguei a luz{separador}gastei mais em 2025 ou 2026?")
+    assert contas_pagas(uid) == [150.0] and despesas(uid) == [150.0], r
+    assert r.count(_AVISO) == 1, r
+
+
+def test_conta_com_duas_perguntas_paga_a_luz_pelo_valor_da_conta(uid, ia_fora):
+    luz(uid)
+    r = manda(uid, "paguei a luz e gastei mais em 2025 ou 2026? e gastei mais que o normal?")
+    assert contas_pagas(uid) == [150.0] and despesas(uid) == [150.0], r  # cortando na última: R$ 2.025
+    assert r.count(_AVISO) == 1, r
+
+
+# ── #569 D4 revista: o add() com UM pedaço legítimo lê o valor só dele ──────────
+
+@pytest.mark.parametrize("frase,desc", [
+    ("gastei no uber. gastei mais em 2025 ou 2026?", "uber"),
+    ("paguei hoje. gastei mais em 2025 ou 2026?", "hoje"),   # o que o add() já faz com "paguei hoje"
+])
+def test_add_pedaco_legitimo_sem_valor_pergunta_o_valor_e_nao_grava(free_small_uid, frase, desc):
+    uid = free_small_uid
+    out = hi.handle_incoming(_msg(uid, frase))
+    assert _valores(uid) == []                                  # gravava R$ 2.025
+    assert _pendencia(uid) == "clarification"
+    texto = "\n".join(o.text for o in out)
+    assert f"Quanto foi no *{desc}*?" in texto and texto.count(_AVISO) == 1, texto
+    assert "depois de responder a pergunta acima" in texto, texto
+
+
+def test_add_pedaco_legitimo_sem_valor_aceita_a_resposta(free_small_uid):  # positivo
+    uid = free_small_uid
+    hi.handle_incoming(_msg(uid, "gastei no uber. gastei mais em 2025 ou 2026?"))
+    hi.handle_incoming(_msg(uid, "30"))
+    assert _valores(uid) == [30] and "uber" in _alvo(uid, 30)
+
+
+@pytest.mark.parametrize("separador", [". ", "; ", " tb "])
+def test_add_pedaco_legitimo_com_valor_grava_so_ele_e_avisa(free_small_uid, separador):  # positivo
+    uid = free_small_uid
+    out = hi.handle_incoming(_msg(uid, f"gastei 30 no uber{separador}gastei mais em 2025 ou 2026?"))
+    assert _valores(uid) == [30]
+    assert "\n".join(o.text for o in out).count(_AVISO) == 1
+
+
+@pytest.mark.parametrize("pedaco", ["gastei.", "paguei.", "recebi.", "gastei no."])
+def test_add_direto_nao_usa_o_valor_das_entities_do_texto_inteiro(free_small_uid, pedaco):
+    # O tier 3 (LLM) pode devolver o ano da pergunta como `valor`: o pedaço legítimo não o tem.
+    uid = free_small_uid
+    L.add(uid, f"{pedaco} gastei mais em 2025 ou 2026?", {"tipo": "despesa", "valor": 2025.0})
+    assert _valores(uid) == []
+
+
+def test_add_com_banco_pergunta_a_forma_e_depois_o_valor_do_pedaco(monkeypatch, ia_fora):
+    monkeypatch.setattr(fp, "regra_ativa", _REGRA_REAL)
+    uid = usuario_pagante()
+    _connect_fake_bank(uid)
+    r = manda(uid, "gastei no uber. gastei mais em 2025 ou 2026?")
+    assert db.get_pending_action(uid)["action_type"] == "payment_method_choice" and r.count(_AVISO) == 1, r
+    assert "Quanto foi no *uber*?" in manda(uid, "dinheiro")
+    manda(uid, "30")
+    assert despesas(uid) == [30.0]
+
+
+def test_audio_pedaco_legitimo_sem_valor_pergunta_o_valor(uid, monkeypatch):
+    monkeypatch.setattr(hi, "transcribe_audio", lambda data, fn: "gastei no uber. gastei mais em 2025 ou 2026")
+    out = hi._handle_audio(IncomingMessage(platform="whatsapp", user_id=uid, text="", message_id="m",
+                                           attachments=[_Audio()], external_id="e", raw={}), "whatsapp")
+    assert "Quanto foi no *uber*?" in "\n".join(o.text for o in out)
+    assert despesas(uid) == []
+
+
+def test_receita_pedaco_legitimo_sem_valor_pergunta_o_valor(free_small_uid):
+    uid = free_small_uid
+    out = hi.handle_incoming(_msg(uid, "recebi no freela. recebi mais em 2025 ou 2026?"))
+    assert "Quanto foi de *freela*?" in "\n".join(o.text for o in out) and _valores(uid) == []
+    hi.handle_incoming(_msg(uid, "500"))
+    assert _valores(uid) == [500]
+
