@@ -24,8 +24,9 @@ from typing import Literal
 import psycopg
 from psycopg_pool import PoolClosed, PoolTimeout
 
-from fastapi import APIRouter, HTTPException, Request
-from pydantic import BaseModel
+from fastapi import APIRouter, Depends, HTTPException, Request
+from fastapi.exceptions import RequestValidationError
+from pydantic import BaseModel, ValidationError
 
 from core.admin_dashboard import log_system_event
 from core.audit import AuditEvent, list_audit_events, record_audit_event
@@ -2331,9 +2332,33 @@ async def open_finance_pluggy_webhook(request: Request):
     return {"received": True}
 
 
-@router.post("/open-finance/{user_id}/mock-connect")
-async def open_finance_mock_connect_route(request: Request, user_id: int, payload: OpenFinanceMockConnectPayload):
-    shared.authorize_dashboard_access(request, user_id)
+def _exige_mock_connect() -> None:
+    # Conexão FALSA só em dev/staging. Falha fechado: ausente ou valor fora da lista = 404,
+    # igual a rota inexistente. Sem log: roda antes da auth (anônimo = inundação) e antes
+    # de qualquer leitura do corpo — por isso a rota não declara parâmetro de corpo.
+    if (os.getenv("OF_MOCK_CONNECT_ENABLED") or "").strip().lower() not in ("1", "true", "yes", "on"):
+        raise HTTPException(status_code=404)
+
+
+@router.post("/open-finance/{user_id}/mock-connect", dependencies=[Depends(_exige_mock_connect)])
+async def open_finance_mock_connect_route(request: Request, user_id: int):
+    session_uid = shared.authorize_dashboard_access(request, user_id)
+    await _enforce_bank_limit(session_uid)
+    # Corpo lido à mão, só agora: parâmetro de corpo tipado faz o FastAPI decodificar o JSON
+    # ANTES do portão, e o 422 de JSON malformado revelava a rota desligada a qualquer anônimo.
+    # Mesmos status do parâmetro tipado (200/422, o texto do 422 mudou): só application/json
+    # e application/*+json são JSON; o resto é 422, como antes.
+    corpo = await request.body()
+    mime = (request.headers.get("content-type") or "").split(";")[0].strip().lower()
+    try:
+        if mime == "application/json" or (mime.startswith("application/") and mime.endswith("+json")):
+            payload = OpenFinanceMockConnectPayload.model_validate_json(corpo)
+        else:
+            payload = OpenFinanceMockConnectPayload.model_validate(corpo)
+    except ValidationError as exc:
+        raise RequestValidationError(
+            [{**e, "loc": ("body", *e["loc"])} for e in exc.errors(include_url=False)]
+        ) from None
     result = await asyncio.to_thread(
         create_mock_open_finance_connection,
         user_id,
