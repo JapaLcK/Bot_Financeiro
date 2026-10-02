@@ -10,7 +10,7 @@ import pytest
 from fastapi.testclient import TestClient
 
 import frontend.finance_bot_websocket_custom as dashboard
-from _apoio_assinaturas import conta, mensais, netflix_no_cartao, rp, semeia, tx
+from _apoio_assinaturas import conta, dez_e_vinte_centavos, mensais, netflix_no_cartao, rp, semeia, tx
 from _apoio_auth_app import csrf, sessao_de as sessao
 from conftest import promote_to_pro
 from db import ensure_user
@@ -58,11 +58,30 @@ def test_mesmo_id_de_transacao_em_b_nao_contamina_a(a_e_b):
     r = _get(a)
     assert r.status_code == 200, r.text
     (it,) = r.json()["servicos"]
-    assert (it["valor"], it["meses"]) == (39.9, 3)
+    assert (it["valor"], it["meses"]) == ("39.9", 3)
     assert it["meio"] == {"tipo": "cartao", "nome": "Nubank Mastercard", "final": "1234"}
     rb = _get(b)
     assert rb.status_code == 200, rb.text
-    assert rb.json() == {"servicos": [], "outras": [], "total_mensal": 0.0, "total_anual": 0.0}
+    assert rb.json() == {"servicos": [], "outras": [], "total_mensal": "0", "total_anual": "0"}
+
+
+def test_dinheiro_sai_como_texto_exato(a_e_b):
+    a, _ = a_e_b
+    dez_e_vinte_centavos(a)
+    j = _get(a).json()
+    assert (j["total_mensal"], j["total_anual"]) == ("0.30", "3.60")
+    assert [x["valor"] for x in j["servicos"]] == ["0.20", "0.10"]
+
+
+def test_reajuste_sai_com_a_escala_gravada(a_e_b):
+    # Escala de 1 casa: um round(…, 2) no caminho viraria "39.90"/"538.80".
+    a, _ = a_e_b
+    txs = mensais("nf", ["-39.9", "-39.9", "-44.9"], desc="NETFLIX.COM")
+    semeia(a, [conta("acc-1", txs)], [rp("NETFLIX.COM", -44.9, txs)])
+    j = _get(a).json()
+    (it,) = j["servicos"]
+    assert (it["valor"], it["valor_anterior"]) == ("44.9", "39.9")
+    assert (j["total_mensal"], j["total_anual"]) == ("44.9", "538.8")
 
 
 # ── 10. Marcação ─────────────────────────────────────────────────────────────
@@ -78,11 +97,11 @@ def test_ignorar_esconde_e_nenhuma_traz_de_volta(a_e_b):
     _com_netflix_e_claro(a)
     r = _post(a, "netflix", "ignorar")
     assert r.status_code == 200, r.text
-    assert (r.json()["servicos"], r.json()["total_mensal"]) == ([], 0.0)
+    assert (r.json()["servicos"], r.json()["total_mensal"]) == ([], "0")
     assert _get(a).json()["servicos"] == []
     r = _post(a, "netflix", "nenhuma")
     assert [x["chave"] for x in r.json()["servicos"]] == ["netflix"]
-    assert r.json()["total_mensal"] == 39.9
+    assert r.json()["total_mensal"] == "39.9"
 
 
 def test_assinatura_move_de_outras_para_servicos(a_e_b):
@@ -92,7 +111,7 @@ def test_assinatura_move_de_outras_para_servicos(a_e_b):
     j = _post(a, "claro flex", "assinatura").json()
     assert j["outras"] == []
     assert {x["chave"]: x["marcada"] for x in j["servicos"]} == {"claro flex": True, "netflix": False}
-    assert j["total_mensal"] == 89.8
+    assert j["total_mensal"] == "89.8"
 
 
 def test_chave_inexistente_404(a_e_b):

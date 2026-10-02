@@ -35,7 +35,8 @@ after(() => browser?.close());
 
 // O backend em miniatura: marca por chave; "ignorar" some, "assinatura" vai para
 // serviços, "nenhuma" volta ao lugar natural (a marcada da fixture só estava em
-// serviços pela marca). Ordem por valor e total só dos serviços ativos.
+// serviços pela marca). Ordem por valor e total só dos serviços ativos. Dinheiro é texto,
+// como na API: ordena por Number e soma em centavos inteiros.
 function backend() {
   const marca = new Map(CHEIA.servicos.filter((a) => a.marcada).map((a) => [a.chave, "assinatura"]));
   const itens = [...CHEIA.servicos.map((a) => [a, a.marcada ? "o" : "s"]), ...CHEIA.outras.map((a) => [a, "o"])];
@@ -46,10 +47,10 @@ function backend() {
       if (m === "ignorar") continue;
       ((m === "assinatura" ? "s" : natural) === "s" ? servicos : outras).push({ ...a, marcada: m === "assinatura" });
     }
-    servicos.sort((x, y) => y.valor - x.valor);
-    outras.sort((x, y) => y.valor - x.valor);
-    const total = Math.round(servicos.filter((a) => a.status === "ativa").reduce((t, a) => t + a.valor, 0) * 100) / 100;
-    return { servicos, outras, total_mensal: total, total_anual: Math.round(total * 1200) / 100 };
+    servicos.sort((x, y) => Number(y.valor) - Number(x.valor));
+    outras.sort((x, y) => Number(y.valor) - Number(x.valor));
+    const c = servicos.filter((a) => a.status === "ativa").reduce((t, a) => t + Math.round(Number(a.valor) * 100), 0);
+    return { servicos, outras, total_mensal: (c / 100).toFixed(2), total_anual: (c * 12 / 100).toFixed(2) };
   };
   return { marca, lista };
 }
@@ -129,6 +130,7 @@ test("página: duas seções, dia, próxima, meio com e sem final, reajuste, can
     netflix: await texto(SERV, "Netflix"),
     smart: await texto(SERV, "Smart Fit"),
     globo: await linha(page, SERV, "Globoplay").locator(".faint").textContent(),
+    icloud: await texto(SERV, "iCloud"),
     porto: await texto(OUTRAS, "Porto Seguro"),
     naoE: await page.locator(`${SERV} li.sub`).evaluateAll((ls) => ls.filter((l) => [...l.querySelectorAll("button")].some((b) => b.textContent === "Não é assinatura")).map((l) => l.querySelector(".sub-name").textContent)),
     naoEOutras: await page.getByRole("button", { name: "Não é assinatura" }).count(),
@@ -150,11 +152,14 @@ test("página: duas seções, dia, próxima, meio com e sem final, reajuste, can
   assert.deepEqual(r.ignorarPorNome, Array(8).fill(1)); // cada "Ignorar" tem nome acessível próprio
   assert.match(r.netflix, /todo dia 5 · próxima 5 out/);
   assert.match(r.netflix, /Nubank ••1234 · desde mar\/25/);
+  assert.match(r.netflix, /^NetflixR\$ 55,90todo/); // "55.9" da API: a escala é a que o sync gravou
   assert.match(r.netflix, /subiu de R\$ 44,90 em 5 ago/);
+  // "14.90" > "9.90" e "89.90" < "100.00" erram como texto: a comparação é numérica.
+  assert.match(r.icloud, /subiu de R\$ 9,90 em 20 mar/);
   assert.match(r.smart, / Itaú · desde nov\/25/);
   assert.doesNotMatch(r.smart, /••/);
   assert.equal(r.globo, "parece cancelada · última em 15 jul");
-  assert.match(r.porto, /baixou de R\$ 99,90 em 22 jun/);
+  assert.match(r.porto, /baixou de R\$ 100,00 em 22 jun/);
   assert.equal(r.cartao, 1);
   assert.equal(r.conta, 1);
   assert.equal(r.etiqueta, true);
@@ -484,7 +489,7 @@ test("sair e voltar com o POST no ar: os botões da página remontada nascem tra
 });
 
 test("chave com três linhas: \"e mais 2 cobranças\" no plural", async () => {
-  const terceira = { ...CHEIA.outras.find((a) => a.nome === "Porto Seguro Residencial"), nome: "Porto Seguro Auto", valor: 59.9 };
+  const terceira = { ...CHEIA.outras.find((a) => a.nome === "Porto Seguro Residencial"), nome: "Porto Seguro Auto", valor: "59.90" };
   const { ctx, page } = await abrir({ hash: "#/assinaturas", get: (r) => r.fulfill({ json: { ...CHEIA, outras: [...CHEIA.outras, terceira] } }) });
   await pronta(page);
   await clicar(page, OUTRAS, "Porto Seguro", "Ignorar");
@@ -495,7 +500,7 @@ test("chave com três linhas: \"e mais 2 cobranças\" no plural", async () => {
 });
 
 test("card só com outras: \"N cobranças recorrentes para revisar\"", async () => {
-  const { ctx, page } = await abrir({ get: (r) => r.fulfill({ json: { ...CHEIA, servicos: [], total_mensal: 0, total_anual: 0 } }) });
+  const { ctx, page } = await abrir({ get: (r) => r.fulfill({ json: { ...CHEIA, servicos: [], total_mensal: "0", total_anual: "0" } }) });
   const card = page.locator("#w-assinaturas");
   const lede = card.locator(".w-lede", { hasText: "revisar" });
   await lede.waitFor();
