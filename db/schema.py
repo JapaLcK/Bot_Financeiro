@@ -856,6 +856,11 @@ def init_db():
         alter table open_finance_connections add column if not exists recurring_fetched_at timestamptz
         """,
         RECURRING_SEED_SILENT_SQL,
+        # As descrições da 1ª busca da conexão silenciosa: a lápide do Detetive sai
+        # DELAS, não da foto atual — com o agente desligado a foto muda a cada sync.
+        """
+        alter table open_finance_connections add column if not exists recurring_seed_descricoes text[]
+        """,
         # Foto diária do patrimônio (dashboard v2, etapa 0 PR 6): uma por usuário
         # por dia do app, gravada pelo job `core/services/patrimonio_foto.py` com a
         # conta de `db/patrimonio.calcular`. `base` diz o que entrou (o gráfico

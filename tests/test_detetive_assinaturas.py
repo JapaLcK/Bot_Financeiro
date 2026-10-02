@@ -37,8 +37,12 @@ CONTA = [conta("acc-1", NF + SP + YT)]
 
 
 def _silenciar(cid, fetched=True):
-    _q("update open_finance_connections set recurring_seed_silent = true"
-       + ("" if fetched else ", recurring_fetched_at = null") + " where id = %s", cid)
+    """Conexão do deploy: `fetched` = a 1ª busca já rodou com o flag ligado (a foto
+    dela é o que está gravado agora); senão a próxima `salvar_recorrencias` tira a foto."""
+    _q("update open_finance_connections set recurring_seed_silent = true, recurring_seed_descricoes = "
+       + ("(select array_agg(description) from of_recurring_payments where connection_id = %s)"
+          if fetched else "null, recurring_fetched_at = null") + " where id = %s",
+       *((cid, cid) if fetched else (cid,)))
 
 
 def _flag(cid):
@@ -218,3 +222,18 @@ def test_o_descricao_sem_chave_nao_vira_lapide(uid):
     _roda(uid)
     n = _q("select count(*) n from agent_events where user_id=%s and dedupe_key like 'rp:%%'", uid)[0]["n"]
     assert (n, _flag(cid)) == (0, False)
+
+
+def test_p_assinatura_nova_com_o_detetive_desligado_nao_vira_lapide(user_id):
+    """Codex P1 no #746: conexão do deploy com o Detetive DESLIGADO. A foto muda a
+    cada sync; quando o agente liga, só o que existia na 1ª busca vira lápide."""
+    promote_to_pro(user_id)
+    cid = conexao(user_id)
+    _silenciar(cid, fetched=False)
+    db.save_open_finance_sync(cid, CONTA)
+    salvar_recorrencias(cid, DOIS)                                   # 1ª busca, agente desligado
+    salvar_recorrencias(cid, DOIS + [rp("YouTube Premium", -24.9, YT)])  # assinou depois do deploy
+    db.activate_agent(user_id, "detetive")
+    _roda(user_id)
+    assert _visiveis(user_id) == ["rp:youtube premium"]
+    assert (_lapides(user_id), _flag(cid)) == (2, False)

@@ -32,8 +32,11 @@ def salvar_recorrencias(connection_id: int, itens: list) -> None:
                 "insert into of_recurring_payments"
                 " (connection_id, description, average_amount, regularity_score, occurrences)"
                 " values (%s, %s, %s, %s, %s)", linhas)
-        cur.execute("update open_finance_connections set recurring_fetched_at = now() where id = %s",
-                    (connection_id,))
+        # A 1ª busca da conexão silenciosa fica guardada: é dela que sai a lápide.
+        cur.execute("update open_finance_connections set recurring_fetched_at = now(),"
+                    " recurring_seed_descricoes = case when recurring_seed_silent"
+                    " and recurring_seed_descricoes is null then %s else recurring_seed_descricoes end"
+                    " where id = %s", ([l[1] for l in linhas], connection_id))
         conn.commit()
 
 
@@ -91,13 +94,14 @@ def conexoes_a_silenciar(user_id: int) -> list[int]:
 
 
 def descricoes_das_conexoes(user_id: int, ids: list[int]) -> list[str]:
-    """Toda descrição gravada nessas conexões, sem filtro de status nem de marca:
-    a lápide do 1º deploy cobre o que hoje não alerta e pode alertar depois."""
+    """As descrições da 1ª busca dessas conexões, sem filtro de status nem de marca:
+    a lápide do 1º deploy cobre o que hoje não alerta e pode alertar depois. É a
+    foto da 1ª busca, não a atual: com o Detetive desligado a foto muda a cada
+    sync, e o que entrou depois do deploy não pode virar lápide."""
     with get_conn() as conn, conn.cursor() as cur:
-        cur.execute("select rp.description from of_recurring_payments rp"
-                    " join open_finance_connections c on c.id = rp.connection_id"
-                    " where c.user_id = %s and rp.connection_id = any(%s)", (user_id, list(ids)))
-        return [r["description"] for r in cur.fetchall()]
+        cur.execute("select unnest(recurring_seed_descricoes) d from open_finance_connections"
+                    " where user_id = %s and id = any(%s)", (user_id, list(ids)))
+        return [r["d"] for r in cur.fetchall()]
 
 
 def consumir_silencio(user_id: int, ids: list[int]) -> None:

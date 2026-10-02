@@ -415,8 +415,8 @@ Assinaturas vêm do **Recurring Payments** da Pluggy (`db/of_recurring.py`):
 sync — falha na Pluggy mantém o anterior; `subscription_marks` guarda a marcação do
 usuário por `merchant_key` (vale para todos os itens da chave).
 `open_finance_connections.recurring_fetched_at` e `recurring_seed_silent` controlam o
-silêncio da 1ª busca do Detetive numa conexão que já existia: as chaves dela viram
-lápide por `record_agent_event(silencioso=True)`, que grava o evento já com
+silêncio da 1ª busca do Detetive numa conexão que já existia: as chaves dela — a foto
+guardada em `recurring_seed_descricoes`, não a atual — viram lápide por `record_agent_event(silencioso=True)`, que grava o evento já com
 `stale_at` (não aparece no feed nem vai por e-mail).
 
 Boa parte do comportamento é regida por flags `OF_*` (beta por e-mail/user_id, limite
