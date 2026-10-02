@@ -22,7 +22,7 @@ from psycopg.types.json import Jsonb
 from .connection import get_conn
 from .open_finance import (PENDING_RECONCILIATION_SQL, actionable_pending_params,
                            merged_wallet_delta)
-from .open_finance_state import _TERMINAL
+from .open_finance_state import _TERMINAL, SQL_COLETA_ESTOURADA, aplica_teto_por_health
 
 # Posições do banco, uma por identidade do provedor (reconectar cria outra linha
 # para a mesma posição): fica a da conexão mais nova, como em `CONTAS_BANCO_SQL`.
@@ -43,7 +43,8 @@ POSICOES_BANCO_SQL = """
 """
 
 # Contas BANK, uma por identidade do provedor, a da conexão mais nova; a moeda e a
-# pausa são decididas DEPOIS do `distinct on`, em `calcular`, como nas posições.
+# pausa são decididas DEPOIS do `distinct on`, em `calcular`, como nas posições (e
+# em `db/contas_hoje.listar`, o bloco de contas, que lê o mesmo recorte).
 # O `BANK_ACCOUNTS_SQL` filtra a moeda antes: com a mesma conta em USD na conexão
 # nova e em BRL numa velha ainda viva, ele soma o BRL velho. Nesse caso (e só
 # nele) a foto diverge do saldo consolidado de propósito. Limite: a fusão
@@ -51,7 +52,7 @@ POSICOES_BANCO_SQL = """
 # contam a conta BRL velha.
 CONTAS_BANCO_SQL = """
     select distinct on (a.provider_account_id)
-        a.provider_account_id, a.balance,
+        a.id, a.name, a.provider_account_id, a.balance,
         upper(coalesce(a.currency, 'BRL')) as currency,
         a.raw->>'currencyCode' as currency_code,
         a.raw->>'balance' as raw_balance, a.connection_id, a.updated_at,
@@ -75,8 +76,64 @@ _ULTIMA_GERACAO_SQL = """
 """
 
 
-def calcular(cur, user_id: int) -> dict:
+# Os critérios abaixo são de `calcular` e do bloco de contas (`db/contas_hoje.py`):
+# uma regra só para a foto e a tela.
+
+def ler_conexoes(cur, user_id: int) -> tuple[list, dict]:
+    """As conexões do usuário e o estado de cada uma (`connection_ui_state`), por id em texto."""
     from core.services.pluggy_health import connection_ui_state
+
+    # O teto do "Atualizando…" muda o ESTADO (vira `error_recoverable`): sem as duas
+    # metades dele (o derivado do SQL e o do `health`), a foto gravaria `updating`
+    # onde a tela mostra erro. As mesmas que `get_open_finance_snapshot` aplica.
+    cur.execute(f"select *, {SQL_COLETA_ESTOURADA} from open_finance_connections"
+                " where user_id=%s order by id", (user_id,))
+    conexoes = [aplica_teto_por_health(dict(c)) for c in cur.fetchall()]
+    return conexoes, {str(c["id"]): connection_ui_state(c)["state"] for c in conexoes}
+
+
+def desatualizada(c, estado: str, limite: datetime) -> bool:
+    ultimo, tentativa = c["last_sync_at"], c["last_attempt_at"]
+    return (estado != "updated" or ultimo is None or ultimo < limite
+            or (tentativa is not None and tentativa > ultimo))
+
+
+# `_to_decimal` deixa "NaN"/"Infinity" passar e a coluna numeric aceita: um só
+# zeraria o total (a foto é permanente). Saldo não finito soma 0 e vira motivo.
+def finito(v) -> bool:
+    return v is not None and v.is_finite()
+
+
+# O sync grava 0 na coluna quando a Pluggy omite ou estraga o saldo
+# (`pluggy_sync._to_decimal`, e `save_open_finance_sync` no `or 0` das contas);
+# só o `raw` diz que o 0 não veio do banco. Vale para conta e posição.
+def sem_saldo(p) -> bool:
+    try:
+        return not finito(p["balance"]) or not Decimal(p["raw_balance"]).is_finite()
+    except (TypeError, ArithmeticError):  # None ou texto que não é número
+        return True
+
+
+# Conta ou posição que deixou de vir no /accounts ou /investments fica no
+# espelho com o saldo velho (`save_open_finance_sync` não poda conta; a posição
+# só é podada com `leitura_completa`), e a conexão continua fresca. Ela fica
+# com `updated_at` abaixo do máximo da sua conexão na mesma tabela (todas as
+# linhas, de qualquer tipo/moeda: o save grava todas). O saldo fica na soma; o
+# motivo marca a dúvida. Limites: cego quando o último sync omitiu TODAS as
+# linhas da conexão; um caminho que carimbe `updated_at` de só uma linha faz as
+# outras parecerem velhas (falso positivo: só o motivo, o total não muda).
+def ultima_geracao(cur, user_id: int, tabela: str) -> dict:
+    """{connection_id: maior updated_at} da tabela, para `fora_do_sync`."""
+    cur.execute(_ULTIMA_GERACAO_SQL.format(tabela), (user_id,))
+    return {r["connection_id"]: r["m"] for r in cur.fetchall()}
+
+
+def fora_do_sync(p, ultima: dict) -> bool:
+    m = ultima.get(p["connection_id"])
+    return m is not None and p["updated_at"] is not None and p["updated_at"] < m
+
+
+def calcular(cur, user_id: int) -> dict:
     from .bank_movements import _declarations
     from .open_finance_cash import enabled as especie_ligada
 
@@ -124,47 +181,11 @@ def calcular(cur, user_id: int) -> dict:
                 " from investments where user_id=%s", (user_id,))
     manuais = cur.fetchone()
 
-    cur.execute("select * from open_finance_connections where user_id=%s order by id", (user_id,))
-    conexoes = cur.fetchall()
-    estados = {str(c["id"]): connection_ui_state(c)["state"] for c in conexoes}
+    conexoes, estados = ler_conexoes(cur, user_id)
     vivas = [c for c in conexoes if (c["status"] or "").upper() not in _TERMINAL]
     limite = datetime.now(timezone.utc) - BANCO_VELHO
-
-    def desatualizada(c) -> bool:
-        ultimo, tentativa = c["last_sync_at"], c["last_attempt_at"]
-        return (estados[str(c["id"])] != "updated" or ultimo is None or ultimo < limite
-                or (tentativa is not None and tentativa > ultimo))
-
-    # `_to_decimal` deixa "NaN"/"Infinity" passar e a coluna numeric aceita: um só
-    # zeraria o total (a foto é permanente). Saldo não finito soma 0 e vira motivo.
-    def finito(v) -> bool:
-        return v is not None and v.is_finite()
-
-    # O sync grava 0 na coluna quando a Pluggy omite ou estraga o saldo
-    # (`pluggy_sync._to_decimal`, e `save_open_finance_sync` no `or 0` das contas);
-    # só o `raw` diz que o 0 não veio do banco. Vale para conta e posição.
-    def sem_saldo(p) -> bool:
-        try:
-            return not finito(p["balance"]) or not Decimal(p["raw_balance"]).is_finite()
-        except (TypeError, ArithmeticError):  # None ou texto que não é número
-            return True
-
-    # Conta ou posição que deixou de vir no /accounts ou /investments fica no
-    # espelho com o saldo velho (`save_open_finance_sync` não poda conta; a posição
-    # só é podada com `leitura_completa`), e a conexão continua fresca. Ela fica
-    # com `updated_at` abaixo do máximo da sua conexão na mesma tabela (todas as
-    # linhas, de qualquer tipo/moeda: o save grava todas). O saldo fica na soma; o
-    # motivo marca a dúvida. Limites: cego quando o último sync omitiu TODAS as
-    # linhas da conexão; um caminho que carimbe `updated_at` de só uma linha faz as
-    # outras parecerem velhas (falso positivo: só o motivo, o total não muda).
-    ultima = {}
-    for tabela in ("open_finance_accounts", "open_finance_investments"):
-        cur.execute(_ULTIMA_GERACAO_SQL.format(tabela), (user_id,))
-        ultima[tabela] = {r["connection_id"]: r["m"] for r in cur.fetchall()}
-
-    def fora_do_sync(p, tabela) -> bool:
-        m = ultima[tabela].get(p["connection_id"])
-        return m is not None and p["updated_at"] is not None and p["updated_at"] < m
+    ultima_contas = ultima_geracao(cur, user_id, "open_finance_accounts")
+    ultima_posicoes = ultima_geracao(cur, user_id, "open_finance_investments")
 
     cur.execute(PENDING_RECONCILIATION_SQL, actionable_pending_params(cur, user_id))
     conciliacao = cur.fetchone()["pending_count"]
@@ -172,7 +193,8 @@ def calcular(cur, user_id: int) -> dict:
     motivos = [m for m, sim in (
         ("carteira_nao_confirmada", True),  # até existir a confirmação da Q37
         ("especie_incompleta", not especie_ligada() and bool(vivas)),
-        ("banco_desatualizado", any(desatualizada(c) for c in vivas)),
+        ("banco_desatualizado",
+         any(desatualizada(c, estados[str(c["id"])], limite) for c in vivas)),
         ("movimentos_pendentes", any(not d["matched_transaction_id"]
                                      for d in _declarations(cur, user_id))),
         ("conciliacao_pendente", conciliacao > 0),
@@ -181,8 +203,8 @@ def calcular(cur, user_id: int) -> dict:
         ("moeda_presumida", any(not r["currency_code"] for r in [*contas, *posicoes])),
         ("saldo_ausente", any(sem_saldo(p) for p in [*contas, *posicoes])),
         ("conta_fora_do_ultimo_sync",
-         any(fora_do_sync(r, "open_finance_accounts") for r in contas)
-         or any(fora_do_sync(p, "open_finance_investments") for p in posicoes)),
+         any(fora_do_sync(r, ultima_contas) for r in contas)
+         or any(fora_do_sync(p, ultima_posicoes) for p in posicoes)),
     ) if sim]
 
     partes = {

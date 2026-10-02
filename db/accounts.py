@@ -24,8 +24,11 @@ logger = logging.getLogger(__name__)
 # Categoria decide o `is_internal_movement` — menos no par da Carteira de um
 # saque/depósito do banco (db/open_finance_cash.py), que segue interno com
 # qualquer categoria: senão vira receita/gasto novo. Todo escritor de categoria
-# de lançamento passa por aqui.
-_SET_CATEGORIA = f"categoria=%s, is_internal_movement = %s or {PAR_ATIVO_SQL}"
+# de lançamento por ação do usuário passa por aqui (update_launch_fields: PATCH
+# /launches, tool da IA, WhatsApp; update_launch_categories_bulk) e marca a
+# edição: o sync do Open Finance não desfaz categoria nem interno editados (#712).
+_SET_CATEGORIA = (f"categoria=%s, is_internal_movement = %s or {PAR_ATIVO_SQL}, "
+                  "categoria_editada = true")
 
 
 # ──────────────────────────────────────────────────────────────────────────────
@@ -424,7 +427,8 @@ def update_launch_fields(
                 # Medido: editar 10/03 → 15/04 devolvia 200 e a sync seguinte
                 # voltava pra 10/03. Aceitar seria fingir sucesso; recusar é o
                 # que a tela consegue explicar. (Nota/descrição continuam
-                # editáveis: a sync não toca em `nota`/`alvo`.)
+                # editáveis: a sync não toca em `nota`/`alvo`; a categoria
+                # editada também sobrevive, por `categoria_editada`.)
                 cur.execute(
                     "select coalesce(source,'') as source from launches where user_id=%s and id=%s",
                     (user_id, launch_id),

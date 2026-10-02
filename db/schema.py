@@ -25,13 +25,27 @@ TABELAS_QUE_AVISAM: dict[str, str | None] = {
         "recurring_charges", "category_budgets", "household_budget_config",
         "household_budget_income", "user_categories", "user_category_rules",
         "bank_movement_declarations", "of_cash_coverage", "of_cash_links",
-        "open_finance_connections", "patrimonio_fotos",
+        "open_finance_connections", "patrimonio_fotos", "subscription_marks",
     )),
     "open_finance_accounts": "conexao",
     "open_finance_investments": "conexao",
     "open_finance_investment_snapshots": "conexao",
     "open_finance_transactions": "conta",
 }
+
+# `recurring_seed_silent`: a 1ª busca da conexão que já existia no deploy vira
+# lápide no Detetive, sem rajada de alerta. As conexões existentes nascem `true`
+# e as novas `false`, num passo atômico; o `if not exists` não refaz o ALTER a
+# cada boot (#691). Constante para o teste da migração rodar este mesmo SQL.
+RECURRING_SEED_SILENT_SQL = """
+do $$ begin
+  if not exists (select 1 from information_schema.columns where table_schema='public'
+                 and table_name='open_finance_connections' and column_name='recurring_seed_silent') then
+    alter table open_finance_connections add column recurring_seed_silent boolean not null default true;
+    alter table open_finance_connections alter column recurring_seed_silent set default false;
+  end if;
+end $$
+"""
 
 # BACKFILL INICIAL dos assinantes que já existiam quando plan_grants nasceu
 # (§5.1 do docs/plano_pix_anual_asaas.md). Roda no boot, dentro do init_db.
@@ -89,7 +103,7 @@ on conflict (source, external_ref) do nothing
 
 
 def init_db():
-    from .signup_quiz import PERFIS
+    from .signup_quiz import PERFIL_PADRAO, PERFIS
 
     ddl_statements = [
         # ─── Extensions ──────────────────────────────────────────────────────────
@@ -320,6 +334,10 @@ def init_db():
           is_internal_movement boolean not null default false
         """,
         """
+        -- categoria/interno editados pelo cliente: o sync do OF não desfaz (#712)
+        alter table launches add column if not exists categoria_editada boolean not null default false
+        """,
+        """
         -- migration: marca retroativamente aportes, resgates e categorias de investimento como movimentações internas
         update launches set is_internal_movement = true
         where (
@@ -411,6 +429,18 @@ def init_db():
           amount numeric not null,
           dismissed_at timestamptz not null default now(),
           primary key (user_id, merchant_key, amount)
+        )
+        """,
+        # Marcação do usuário na lista de assinaturas (core/services/assinaturas.py):
+        # 'assinatura' põe em "serviços", 'ignorar' esconde. A chave é a
+        # `merchant_key` da descrição da Pluggy.
+        """
+        create table if not exists subscription_marks (
+          user_id bigint not null references users(id) on delete cascade,
+          merchant_key text not null,
+          status text not null check (status in ('assinatura','ignorar')),
+          updated_at timestamptz not null default now(),
+          primary key (user_id, merchant_key)
         )
         """,
         """
@@ -803,6 +833,33 @@ def init_db():
           annual_rate numeric,
           primary key (connection_id, provider_investment_id, observed_on)
         )
+        """,
+        # Recurring Payments da Pluggy (assinaturas): o resultado do último
+        # sync, por item, gravado por db/of_recurring.py. SEM user_id, pelo
+        # mesmo motivo da tabela de cima: o dono é a conexão.
+        """
+        create table if not exists of_recurring_payments (
+          id bigserial primary key,
+          connection_id bigint not null references open_finance_connections(id) on delete cascade,
+          description text not null,
+          average_amount numeric not null,
+          regularity_score numeric,
+          occurrences text[] not null,
+          fetched_at timestamptz not null default now()
+        )
+        """,
+        """
+        create index if not exists idx_of_recurring_payments_conn
+          on of_recurring_payments(connection_id)
+        """,
+        """
+        alter table open_finance_connections add column if not exists recurring_fetched_at timestamptz
+        """,
+        RECURRING_SEED_SILENT_SQL,
+        # As descrições da 1ª busca da conexão silenciosa: a lápide do Detetive sai
+        # DELAS, não da foto atual — com o agente desligado a foto muda a cada sync.
+        """
+        alter table open_finance_connections add column if not exists recurring_seed_descricoes text[]
         """,
         # Foto diária do patrimônio (dashboard v2, etapa 0 PR 6): uma por usuário
         # por dia do app, gravada pelo job `core/services/patrimonio_foto.py` com a
@@ -1346,6 +1403,9 @@ def init_db():
         """,
         """
         alter table credit_transactions add column if not exists external_id text
+        """,
+        """
+        alter table credit_transactions add column if not exists categoria_editada boolean not null default false
         """,
         """
         create unique index if not exists uq_credit_tx_ofx_external
@@ -2098,7 +2158,8 @@ def init_db():
         """alter table auth_accounts add column if not exists signup_source text""",
         # Resultado do quiz de venda (db/signup_quiz.py), gravado na criação da
         # conta. NÃO confundir com `/auth/dashboard-profile` (monólito), que é
-        # outra coisa (gates de feature). NULL = painel padrão / não veio do quiz.
+        # outra coisa (gates de feature). NULL = nunca escolheu (nem pelo quiz nem
+        # no v2); 'padrao' = escolheu o painel padrão no v2 (`PUT /api/v2/perfil`).
         # `signup_quiz` = {"versao": 1, "respostas": {...} | null}; é DADO
         # FINANCEIRO PESSOAL — sai no export, no "Recomeçar do zero" e na exclusão.
         # O CHECK fica fora do `add column` pelo mesmo motivo do de `pix_charges`
@@ -2107,7 +2168,7 @@ def init_db():
         """alter table auth_accounts add column if not exists signup_quiz jsonb""",
         """alter table auth_accounts drop constraint if exists auth_accounts_dashboard_profile_valido""",
         f"""alter table auth_accounts add constraint auth_accounts_dashboard_profile_valido
-             check (dashboard_profile in ({", ".join(f"'{p}'" for p in PERFIS)})) not valid""",
+             check (dashboard_profile in ({", ".join(f"'{p}'" for p in PERFIS + (PERFIL_PADRAO,))})) not valid""",
         """
         create table if not exists plan_trials (
           phone_hash text primary key,
@@ -2776,6 +2837,21 @@ def init_db():
         """
         create index if not exists idx_ebook_entregas_abertas
           on ebook_entregas (criada_em) where fechada_em is null
+        """,
+        # E-mail novo a levar ao cliente do Stripe (funil v3, PR 4b): a PATCH
+        # /settings/{uid}/security/contact grava na MESMA transação da troca, o
+        # job `core/services/stripe_email_sync.py` manda o e-mail ATUAL da conta
+        # (lido de `auth_accounts` na hora; aqui só a `versao`, sem PII) e apaga a
+        # linha. Fora do merge (conta com stripe_customer_id é recusada como
+        # origem) e do export LGPD (sem PII); sai com a conta (cascade).
+        """
+        create table if not exists stripe_email_pendente (
+          user_id bigint primary key references users(id) on delete cascade,
+          versao bigint not null default 1,
+          tentativas int not null default 0,
+          reivindicada_ate timestamptz,
+          criada_em timestamptz not null default now()
+        )
         """,
 
         # ── Aviso de escrita ao `/painel` (TABELAS_QUE_AVISAM, no topo) ──────

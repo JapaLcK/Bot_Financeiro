@@ -12,8 +12,7 @@ Controles negativos (CLAUDE.md §3), cada um vermelho quando o conserto sai:
 - tirar o guarda de `source` de QUALQUER um dos 3 leitores de aporte → T10 cai;
 - o undo sem `garantir_no_catalogo` → T12; `categoria_pigbank` sem o " - " → T1;
 
-A proteção da edição manual no sync fica para o PR da coluna "editado pelo
-cliente": aqui o sync segue o banco como na main, só que traduzido.
+A proteção da edição do cliente no sync (#712) está em tests/test_of_categoria_editada.py.
 """
 from __future__ import annotations
 

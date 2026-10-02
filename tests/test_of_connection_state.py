@@ -770,6 +770,9 @@ def test_reconectar_pelo_widget_limpa_motivo_e_saude(user_id, relogio_fixo):
     db.save_pluggy_open_finance_item(
         user_id, {"id": "item-refeito", "status": "UPDATING",
                   "connector": {"id": 612, "name": "Nubank"}})
+    # O `relogio_fixo` carimba a reconexão semanas atrás, além do teto do
+    # "Atualizando…". Este caso é a reconexão RECÉM-feita: âncora no `now()` do banco.
+    _envelhece_autorizacao(conexao["id"])
 
     linha = _linha("item-refeito")
     assert linha["status_reason"] is None
@@ -1342,6 +1345,7 @@ ITEM_CAIXA_QR = {
 # e é isso que o `pop` garante.
 CHAVES_DA_CONEXAO = {
     "id", "provider", "provider_item_id", "status", "institution_name",
+    "institution_id",   # #732: o gate de reconexão do front compara por id do conector
     "last_sync_at", "last_attempt_at", "status_reason", "health",
     "reconnected_at", "ui",
 }

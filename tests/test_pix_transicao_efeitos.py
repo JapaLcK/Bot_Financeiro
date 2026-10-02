@@ -45,7 +45,7 @@ def _nova(user_id: int, **kw) -> dict | None:
 
 def _estados_do_check() -> set[str]:
     ddl = (RAIZ / "db" / "schema.py").read_text(encoding="utf-8")
-    bloco = re.search(r"check \(status in \((.*?)\)\)", ddl, re.S)
+    bloco = re.search(r"pix_charges_status_valido check \(status in \((.*?)\)\)", ddl, re.S)
     assert bloco, "o `check pix_charges_status_valido` sumiu do DDL"
     return set(re.findall(r"'([a-z_]+)'", bloco.group(1)))
 

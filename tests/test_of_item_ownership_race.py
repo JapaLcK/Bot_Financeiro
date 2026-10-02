@@ -49,8 +49,9 @@ conveniência: o `pluggy_item_lock` é chaveado por `item_id`
 `save_pluggy_open_finance_item`, cujo INSERT é `db/open_finance.py:683` —, então
 a serialização que estes testes presumem é a que o lock garante. O único outro
 INSERT em `open_finance_connections` é `create_mock_open_finance_connection`
-(`db/open_finance.py:125`), alcançável em produção sem lock por
-`POST /open-finance/{user_id}/mock-connect` (`open_finance.py:1915`), mas ele
+(`db/open_finance.py:125`), alcançável sem lock por
+`POST /open-finance/{user_id}/mock-connect` (só com `OF_MOCK_CONNECT_ENABLED`: em
+produção responde 404), mas ele
 grava `provider='mock_pluggy'` (`db/open_finance.py:142`) e item id escopado por
 usuário (`:82`), e a leitura da guarda filtra `provider='pluggy'` — então ele
 nunca produz o estado guardado.

@@ -155,6 +155,16 @@ comando; não copie o resultado para cá (`CLAUDE.md` §2).
      atualize de novo"** (o app não tem botão Atualizar: lá se puxa a tela). Vale nos dois ramos (com e sem `health`), porque o job
      de saúde grava `health` sem sincronizar. A instrução de dispositivo dentro da
      janela continua vencendo (ela é `needs_user_action`, não "Atualizando…").
+   - **teto (Fase 4 do app, PR 2):** "Atualizando…" há `TETO_ATUALIZANDO_MIN`
+     (120 min) ou mais vira **Erro temporário · "O banco está demorando — atualize
+     de novo mais tarde"** (`coleta_estourada`; sem estado
+     novo, só leitura: o par status/motivo gravado não muda). Sem sync, a âncora é a
+     mesma da D1, no Postgres; com sync (item em coleta sem produto), é
+     `health.coletando_desde`, que `mesclar_health_em_coleta` herda entre fotos em
+     coleta (o `observed_at` é renovado a cada foto e nunca venceria), lido em Python
+     (`aplica_teto_por_health`): data ilegível ou sem fuso = sem teto, nunca erro.
+     Entre 30 e 120 min vale a D1. Só
+     age sobre `updating`: instrução de dispositivo, erro e o resto não mudam.
    - quem RELÊ sozinho depois do prazo ou da falha é a retentativa do tique
      (D3). **Vigente desde o PR-B2**; quem entra, célula por célula, na §2.2.
 9. **Aviso proativo = função do mesmo estado da tela** (`connection_ui_state`), não
@@ -216,9 +226,10 @@ verificação externa pendente.
 | Sem dados (`no_accounts`) | o sync vê o item em `LOGIN_ERROR` e falha depois | **Ação necessária · Reautorize o banco** (antes: Erro temporário, com a foto de ontem) | avisa | ✓ **PR-B1** (célula 22) |
 | qualquer sem motivo | E3 no meio de um sync que falha depois do `GET /items` | Erro temporário; a foto (mais velha que a pista do webhook) troca `status` `ERROR` por `ACTIVE`, e o aviso proativo, que ainda lê `status`, é afetado até o PR-D | não | ✓ tela **PR-B1** (célula 13b); aviso registrado em `decisoes.md` |
 | Atualizando, com o prazo vencido | E6 (Atualizar) com a Pluggy ainda coletando e sem conta | toast "{banco}: está demorando mais que o normal — atualize de novo. Toque em Atualizar de novo em instantes.", em tom de ERRO (o `reason` é `no_accounts`) | não | ✗ instrução repetida, "Toque em Atualizar" num app sem o botão e tom de erro: frontend (`refreshVerdict`), fica para o PR-E |
-| Atualizando, 1ª conexão sem sync | processo reinicia no meio do sync | Atualizando… até 30 min da autorização; depois **Atualizando… · Está demorando mais que o normal — atualize de novo** (âmbar) | não | ✓ **PR-B1 (D1)**; recuperar sozinho: ✓ **PR-B2** (classe `coleta`) |
+| Atualizando, 1ª conexão sem sync | processo reinicia no meio do sync | Atualizando… até 30 min da autorização; depois **Atualizando… · Está demorando mais que o normal — atualize de novo** (âmbar); a partir de 2 h, **Erro temporário · O banco está demorando — atualize de novo mais tarde** | não | ✓ **PR-B1 (D1)**; recuperar sozinho: ✓ **PR-B2** (classe `coleta`); teto: ✓ **Fase 4, PR 2** |
 | Atualizando, 1ª conexão sem sync | E8 | Atualizando… ("Ainda não sincronizou") dentro do prazo, depois o detalhe do prazo; com `read_failed`, Erro temporário | não | ✓ **PR-B1**; o tique relê depois do prazo: ✓ **PR-B2** |
-| Atualizando, 1ª conexão sem sync | E12 (horas) | depois de 30 min: **Atualizando… · Está demorando mais que o normal — atualize de novo** | não | ✓ **PR-B1 (D1)** |
+| Atualizando, 1ª conexão sem sync | E12 (horas) | de 30 min a 2 h: **Atualizando… · Está demorando mais que o normal — atualize de novo**; depois, **Erro temporário · O banco está demorando — atualize de novo mais tarde** | não | ✓ **PR-B1 (D1)**; teto: ✓ **Fase 4, PR 2** |
+| Atualizando, já sincronizada, item em coleta sem produto (`coletando_sem_info`) | E12 (horas), com E8 e syncs regravando a foto | até 2 h de `coletando_desde`, Atualizando…; depois, **Erro temporário · O banco está demorando — atualize de novo mais tarde** (antes: Atualizando… por 12–18 h) | não | ✓ **Fase 4, PR 2**; o tique relê (classe `coleta`, E25) |
 | Atualizando, 1ª conexão sem sync | E11 (Ajustes aberto) | card parado em Atualizando… | n/a | ✗ F1 (PR-E) |
 | Autorize no app (device, `health` null, dentro de `JANELA_DEVICE_AUTH_MIN`) | E8 com GET falhando | mantém; vencida a janela, "Reautorize" | calado, depois avisa | ✓ (#428) |
 | Autorize no app (device, `health` null, dentro de `JANELA_DEVICE_AUTH_MIN`) | E8 com GET ok e mesmo estado | "Autorize no app" para sempre | calado para sempre | ✗ R7 (D5, PR-D) |
@@ -506,10 +517,10 @@ no meio, flag e o texto do E13).
 | E2 | `investments_read_failed` | Parcial · Investimentos não vieram | sim | `leitura` |
 | E3 | `read_failed` com `health` em `_NEEDS_USER` | Ação necessária | não | só o usuário resolve |
 | E4 | device/QR dentro da janela | Autorize o acesso no app do banco | não | idem |
-| E5 | sem sync desde a autorização e `coleta_vencida`, sem motivo | Atualizando… · Está demorando… | sim | `coleta` |
+| E5 | sem sync desde a autorização e `coleta_vencida`, sem motivo | Atualizando… · Está demorando… (a partir de 2 h, Erro temporário do teto) | sim | `coleta` |
 | E6 | sem sync, dentro dos 30 min | Atualizando… | não | coleta legítima |
-| E7 | `coleta_vencida` com `no_accounts`, sem a Pluggy à frente | Atualizando… | não | veredito |
-| E8 | `no_accounts` com a Pluggy à frente (também com `coleta_vencida`) | Sem dados / Atualizando… | sim | `pluggy_a_frente` |
+| E7 | `coleta_vencida` com `no_accounts`, sem a Pluggy à frente | Atualizando… (a partir de 2 h, Erro temporário do teto) | não | veredito |
+| E8 | `no_accounts` com a Pluggy à frente (também com `coleta_vencida`) | Sem dados / Atualizando… / Erro temporário do teto | sim | `pluggy_a_frente` |
 | E9 | `no_accounts` sem a Pluggy à frente | Sem dados | não | reler traria o mesmo vazio |
 | E10 | `item_missing` | Conexão perdida | não | quem observa é o job de saúde |
 | E11 | `health.item_status` em `_NEEDS_USER` | Ação necessária | não | = E3 |
@@ -526,6 +537,13 @@ no meio, flag e o texto do E13).
 | E22 | usuário sem direito de uso hoje | Indisponível sem plano ativo | não (DECISÃO 3 = A) | `filtrar_por_acesso`, por item, sem tomar vaga do K |
 | E23 | motivo desconhecido | Erro temporário | não | fora da lista de permissão |
 | E24 | reconectado há menos de 30 min, sem sync | Atualizando… | não | = E6 |
+| E25 | sincronizada, item em coleta sem produto, `coleta_estourada` (`coletando_desde` há 2 h ou mais); antes dos 2 h, não entra | Erro temporário · O banco está demorando… | sim | `coleta` |
+
+**O teto (Fase 4, PR 2) e a retentativa.** O "Erro temporário" do teto é a coleta
+vencida com outro rótulo: o classificador o lê de volta como `updating` pelo detalhe
+(`_DETALHE_COLETA_ESTOURADA`), então E5, E7 e E8 mantêm a classe nas duas zonas
+(30–120 min e depois), e a coleta estourada de quem já sincronizou entra como
+`coleta` (E25).
 
 **E13 e a frase (DECISÃO 1 = B).** O item em ERROR na Pluggy
 (`health.item_status == 'ERROR'`, o mesmo predicado do classificador) não entra na
@@ -575,12 +593,18 @@ a D3, que torna verdade "Tentaremos de novo automaticamente" (menos em E13, §2.
 | D4: quais estados geram o aviso "reconecte" | só `needs_user_action` sem instrução de dispositivo e `item_missing`; a mesma função da tela | PR-D |
 | D5: prazo da instrução de device/QR com `health` medido | a mesma `JANELA_DEVICE_AUTH_MIN` (`core/services/pluggy_health.py`), ancorada na autorização atual, nos dois ramos | PR-D |
 | D6: como os Ajustes acompanham a coleta | relê o snapshot em 5/10/20/40 s e depois a cada 60 s, para no estado final ou em 30 min, pausa com a aba oculta, relê no `visibilitychange` | PR-E |
+| Teto do "Atualizando…" (Fase 4 do app, 2026-10-01) | `TETO_ATUALIZANDO_MIN` = 120 min; depois, o estado `error_recoverable` existente (sem 10º estado) com o detalhe "O banco está demorando — atualize de novo mais tarde"; a retentativa continua relendo | Fase 4, PR 2 (**implementada**) |
 | D7: "Última sync" mostra a data de quê | mantém "Última sync" e acrescenta "· dados de dd/mm" quando a data do banco difere mais de 1 dia | PR-B3 (**implementada**; `ui.dados_de`, limiar de 24 h estrito) |
 
 Texto novo do PR-B3, visível ao usuário: o detalhe "O banco já tem dados de dd/mm —
 atualize para trazer" (pílula "Parcial", âmbar) e o sufixo " · dados de dd/mm" na
 linha "Última sync". Instrução, não promessa: a retentativa de fundo tem
 interruptores (§2.2).
+
+Texto novo da Fase 4, PR 2, visível ao usuário: o detalhe "O banco está
+demorando — atualize de novo mais tarde" (pílula "Erro temporário"; no toast do
+Atualizar, "Não consegui atualizar o {banco}: o banco está demorando — atualize de
+novo mais tarde.").
 
 Texto novo do PR-B1, visível ao usuário: o detalhe "Está demorando mais que o
 normal — atualize de novo" (pílula "Atualizando…", âmbar).
