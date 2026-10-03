@@ -2893,6 +2893,19 @@ def init_db():
           criada_em timestamptz not null default now()
         )
         """,
+        # Guia do /painel (#728): `db/guia.py` grava, `GET/POST /api/v2/guia` lê.
+        # `feitos` = {passo_id: carimbo do 1º feito}. Tabela e não colunas em
+        # auth_accounts: sai com a conta (cascade) e não some no "Limpar" do admin.
+        # Fora do aviso ao /painel (o POST já devolve o estado) e do merge.
+        """
+        create table if not exists guia_painel (
+          user_id bigint primary key references users(id) on delete cascade,
+          oferecido_em timestamptz,
+          dispensado_em timestamptz,
+          concluido_em timestamptz,
+          feitos jsonb not null default '{}'
+        )
+        """,
 
         # ── Aviso de escrita ao `/painel` (TABELAS_QUE_AVISAM, no topo) ──────
         # O NOTIFY sai só no commit (rollback não avisa) e o Postgres funde os
