@@ -29,7 +29,7 @@ function aplicar(g, c) {
   n.estado = c.acao === "dispensar" ? "dispensado" : n.passos.every((p) => p.feito) ? "concluido" : "em_andamento";
   return n;
 }
-export async function abrir({ width = 1280, height = 800, guia = "oferecer", perfil = "padrao", motion = "reduce", post, rota = "/", perfilLento = 0, semDialog = false } = {}) {
+export async function abrir({ width = 1280, height = 800, guia = "oferecer", perfil = "padrao", motion = "reduce", post, rota = "/", perfilLento = 0, semDialog = false, antes } = {}) {
   const ctx = await browser.newContext({ viewport: { width, height }, reducedMotion: motion, timezoneId: "America/Sao_Paulo" });
   // A caixa do Piggy pelo left/top gravado, sem o transform: a inclinação e o voo aumentam o
   // retângulo pintado, e "encostar" é sobre onde ele pousa.
@@ -55,6 +55,7 @@ export async function abrir({ width = 1280, height = 800, guia = "oferecer", per
     return r.fulfill({ json: s.g });
   });
   await ctx.addCookies([{ name: "csrf_token", value: "tok-123", url: "http://127.0.0.1:1" }]);
+  await antes?.(ctx, s); // rotas a mais antes de a página abrir (o SSE da coreografia)
   const page = await ctx.newPage();
   await page.clock.setFixedTime(new Date("2026-10-02T15:00:00Z"));
   const erros = [];
@@ -69,12 +70,13 @@ export const esperaTitulo = (page, t) => page.locator("#guia-titulo", { hasText:
 export const bora = async (page) => { await page.getByRole("button", { name: "Bora", exact: true }).click(); await esperaTitulo(page, PASSOS[0].fala.titulo); };
 
 // O anel em volta do 1º visível de `sel`, com folga de 2 a 8 px (o voo já pousou).
-export const anelNoAlvo = (page, sel) => page.waitForFunction((sel) => {
+const temAnel = (sel) => {
   const a = document.querySelector(".guia-anel"), e = [...document.querySelectorAll(sel)].find((x) => x.getClientRects().length);
   if (!a || a.hidden || !e) return false;
   const r = a.getBoundingClientRect(), t = e.getBoundingClientRect();
   return [t.left - r.left, t.top - r.top, r.right - t.right, r.bottom - t.bottom].every((d) => d >= 2 && d <= 8);
-}, sel, { timeout: 10000 });
+};
+export const anelNoAlvo = (page, sel) => page.waitForFunction(temAnel, sel, { timeout: 10000 });
 // O "Entendi" do balão: o passo sai da apresentação do bloco e vai para o alvo.
 export const botaoEntendi = (page) => page.locator(".guia-balao").getByRole("button", { name: "Entendi", exact: true });
 export const entendi = (page) => botaoEntendi(page).click();
@@ -82,13 +84,16 @@ export const entendi = (page) => botaoEntendi(page).click();
 export const irAoAlvo = async (page, sel) => { await entendi(page); await anelNoAlvo(page, sel); };
 
 // A ação real de cada passo, por `acao` do roteiro, no alvo que o guia destaca (ele mesmo leva
-// até a tela do passo): passa pelo "Entendi" se o balão ainda apresenta o bloco e espera o anel
-// no alvo antes de tocar.
+// até a tela do passo): até o anel chegar ao alvo, toca o "Entendi" se o balão apresenta o bloco
+// (ele pode aparecer um quadro depois do título); aí toca o alvo.
 export const ALVO = { "mes.trocado": "mes.trocar", "categoria.aberta": "categorias.item", "piggy.perguntou": "piggy.chip" };
 export const FAZER = Object.fromEntries(Object.entries(ALVO).map(([acao, a]) => [acao, async (page) => {
-  if (await botaoEntendi(page).count()) await entendi(page);
-  await anelNoAlvo(page, `[data-guia="${a}"]`);
-  await page.locator(`[data-guia="${a}"]`).first().click();
+  const sel = `[data-guia="${a}"]`;
+  for (let i = 0; i < 100 && !(await page.evaluate(temAnel, sel)); i++) {
+    if (await botaoEntendi(page).count()) await entendi(page).catch(() => {});
+    await page.waitForTimeout(100);
+  }
+  await page.locator(sel).first().click();
 }]));
 export const naRota = (page, h) => page.waitForFunction((h) => location.hash === h, h, { timeout: 5000 });
 // Onde o Piggy encosta: [lado a lado, distância à quina de cima, à de baixo].
