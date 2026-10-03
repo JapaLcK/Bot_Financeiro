@@ -42,7 +42,7 @@ def phone_lookup_candidates(phone: str | None, default_country_code: str = "55")
 
 
 def mask_phone(phone: str | None) -> str:
-    digits = re.sub(r"\D+", "", phone or "")
+    digits = re.sub(r"\D+", "", str(phone or ""))
     if len(digits) < 8:
         return digits or "numero desconhecido"
     return f"{digits[:4]}******{digits[-4:]}"

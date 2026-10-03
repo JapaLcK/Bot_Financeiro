@@ -372,7 +372,7 @@ def handle_tutorial_button(wa_id: str, button_id: str) -> None:
     """
     fn = _ACTION_MAP.get(button_id)
     if fn:
-        logger.info("Tutorial step=%s wa_id=%s", button_id, wa_id)
+        logger.info("Tutorial step=%s wa_id=%s", button_id, mask_phone(wa_id))
         fn(wa_id)  # type: ignore[call-arg]
     else:
         logger.warning("Tutorial: botão desconhecido id=%s wa_id=%s", button_id, mask_phone(wa_id))
