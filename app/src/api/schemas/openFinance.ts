@@ -4,6 +4,8 @@ import { z } from "zod";
 export const connectTokenSchema = z.object({
   ok: z.literal(true),
   accessToken: z.string().min(1),
+  // Só dev/staging (`PLUGGY_INCLUDE_SANDBOX`): liga o conector Sandbox no widget, como o site.
+  includeSandbox: z.boolean().optional(),
 });
 
 /**

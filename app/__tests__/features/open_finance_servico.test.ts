@@ -32,6 +32,10 @@ describe("services/openFinance — connect-token", () => {
     expect(chamadas()).toEqual([{ caminho: "/open-finance/7/connect-token", auth: "Bearer access-s", corpo: { app_scheme: "pigbank-dev" } }]);
   });
 
+  it("preserva includeSandbox do servidor (o widget precisa dele para o banco de teste)", async () => {
+    await expect(pedirConnectToken(7)).resolves.toHaveProperty("includeSandbox", false);
+  });
+
   it("no Expo Go não manda o campo", async () => {
     constantes.executionEnvironment = "storeClient";
     await pedirConnectToken(7);
