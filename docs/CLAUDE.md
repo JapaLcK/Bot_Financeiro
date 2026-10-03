@@ -411,6 +411,30 @@ da sessão) para o e-mail ATUAL da conta e fecha `enviado` naquela linha. O clai
 outros — e não segura transação durante o Stripe/Resend; entrega é "pelo menos uma
 vez". A tabela fica fora do export LGPD e sai com a conta (cascade).
 
+**Estorno segura a entrega (PR 3 dos extras).** Antes de enviar, o job confere a
+cobrança da compra (`_compra_estornada` em `core/services/ebook_entrega.py`):
+`checkout.Session.retrieve(sid).invoice` → `InvoicePayment.list(invoice=…)` → em cada
+pagamento `status == "paid"`, `payment.payment_intent` →
+`PaymentIntent.retrieve(pi, expand=["latest_charge"])`. Qualquer estorno
+(`amount_refunded > 0`, parcial ou total — decisão D2 do dono) ou contestação
+(`disputed` — D3) fecha a linha `estornado` e loga `ebook_entrega_estornada`
+(warning, `session_id` + `ebook_price`, nunca a URL), sem enviar. A regra é por compra:
+todos os produtos ainda não entregues daquela sessão fecham `estornado`, cada um na sua
+passada. Sessão sem fatura ou fatura sem pagamento (cupom 100%) entrega normal.
+Pagamentos `open`/`canceled` são ignorados sem consulta; o estornado continua `paid`
+(medido no Stripe de teste: depois de estorno TOTAL o `InvoicePayment.status` e a fatura
+seguem `paid`, e a `latest_charge` expandida vem com `refunded` True). Falha do Stripe
+na consulta propaga, e forma inesperada num pagamento `paid` também levanta (falha
+FECHADO): `payment.type` diferente de `payment_intent`, `payment_intent` vazio, ou
+`latest_charge` não expandida (string, nulo, sem os campos). Nos dois casos não envia
+nem fecha, o claim expira com backoff e a próxima passada confere de novo. Depois de
+enviado não há o que desfazer: a linha `enviado` fica como está, e o link já saiu.
+`estornado` é final: não há botão para liberar a entrega, e liberar exige ajuste manual
+no banco; contestação GANHA continua com `disputed` True, então também segura para
+sempre. Limite conhecido: estorno por nota de crédito para o saldo do cliente (sem refund na
+charge) NÃO é detectado. Estorno "pending" real e contestação real chegando antes da
+entrega só se provam no Stripe; o modo teste sobe `amount_refunded` na hora.
+
 Rollback do código de N produtos: o código velho usa `on conflict (user_id,
 session_id)`, que exige a PK de 2 colunas. Antes de reverter, apagar as linhas extras
 de cada compra e recriar a PK:

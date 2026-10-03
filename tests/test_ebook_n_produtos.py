@@ -14,7 +14,6 @@ Controles (rodados — ver o relato do PR):
 from __future__ import annotations
 
 import sys
-from types import SimpleNamespace
 
 import pytest
 from stripe import StripeObject   # o real, antes de o `mundo` trocar `sys.modules["stripe"]`
@@ -25,7 +24,7 @@ from core.services.ebook_entrega import entregar_pendentes
 from core.services.extras_assinar import da_metadata
 from db.ebook_entregas import abertas, registrar
 from db.schema import init_db
-from test_ebook_entrega import _conta, _nome, _pagina, _senha, _sql, _url, mundo  # noqa: F401
+from test_ebook_entrega import _conta, _nome, _senha, _sql, _url, mundo  # noqa: F401
 
 _P = [f"price_x{n}" for n in range(1, 11)]
 
@@ -240,9 +239,8 @@ def test_z5_a_conversa_webhook_com_tres_extras_senha_job_reentrega(mundo, user_i
     from test_billing_webhook_lifecycle import _cleanup_trial, _fake_sub, _post, _setup
     from test_ebook_webhook import _espioes
     uid, client, fake = _setup(monkeypatch, f"eb-z5-{user_id}")
-    lista = ["price_plano", *_P[:3]]
-    fake.checkout = SimpleNamespace(Session=SimpleNamespace(
-        list_line_items=lambda sid, api_key=None, limit=10: _pagina(lista, limit)))
+    mundo.sessoes["cs_eb_1"] = ["price_plano", *_P[:3]]
+    mundo.no(fake)
     _espioes(monkeypatch)
     _sql("update auth_accounts set password_hash = null where user_id = %s", (uid,))
     email = f"wh-eb-z5-{user_id}@t.com"

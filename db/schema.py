@@ -2832,9 +2832,27 @@ def init_db():
           reivindicada_ate timestamptz,
           tentativas int not null default 0,
           fechada_em timestamptz,
-          resultado text check (resultado in ('enviado', 'nao_comprou')),
+          resultado text check (resultado in ('enviado', 'nao_comprou', 'estornado')),
           primary key (user_id, session_id, ebook_price)
         )
+        """,
+        # `estornado` (estorno ou contestação antes da entrega): a check de
+        # `resultado` ganha o valor. Idempotente: só age se a definição atual não
+        # o tem; acha a check pelo que ela menciona (o nome pode não ser o
+        # padrão), e troca num statement só.
+        """
+        do $$
+        declare r record;
+        begin
+          select conname, pg_get_constraintdef(oid) as def into r from pg_constraint
+            where conrelid = 'ebook_entregas'::regclass and contype = 'c'
+              and pg_get_constraintdef(oid) like '%resultado%';
+          if found and r.def not like '%estornado%' then
+            execute format('alter table ebook_entregas drop constraint %I,'
+              ' add constraint ebook_entregas_resultado_check'
+              ' check (resultado in (''enviado'', ''nao_comprou'', ''estornado''))', r.conname);
+          end if;
+        end $$;
         """,
         # Vários produtos por compra: a PK ganha `ebook_price` (uma linha por
         # produto). Idempotente: só age se a PK ainda tem 2 colunas, e num
