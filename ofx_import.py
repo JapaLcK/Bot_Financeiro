@@ -11,9 +11,9 @@ from db import list_user_category_rules, resolve_category_input, user_category_d
 from utils_text import normalize_text, contains_word, LOCAL_RULES, INTERNAL_MOVEMENT_CATEGORIES, keyword_blocked
 
 # Hard cap defensivo: parser OFX vira DoS se receber arquivo gigante (memória
-# + CPU do regex/SGML). Alinhado com o cap do endpoint HTTP (8 MB) — handlers
+# + CPU do regex/SGML). O mesmo teto do endpoint HTTP (fonte única) — handlers
 # do bot (Discord/WhatsApp) também chamam esta função; proteção em profundidade.
-MAX_OFX_BYTES = 8 * 1024 * 1024  # 8 MB
+from core.limite_corpo import MAX_OFX_BYTES
 
 
 def reject_dangerous_xml(ofx_bytes: bytes) -> None:

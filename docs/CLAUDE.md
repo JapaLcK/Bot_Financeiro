@@ -232,12 +232,44 @@ Sub-app FastAPI (`api/v2/app.py`) montado pelo monólito com `app.mount("/api/v2
   (`db/lancamentos.PODE_SQL`): antigo = `[]` (P2: só leitura no v2); banco e cartão do Open
   Finance = categoria e descrição (P5); carteira marcada = tudo, menos data e valor se fundida
   ou em par pendente com o banco (P3), só descrição e apagar se ligada ao dinheiro em espécie
-  (Q41), sem valor nem descrição se paga conta ou fatura. A coluna `launches.origem` (NULL =
-  antigo) nasceu vazia; quem a grava é a escrita do PR 2a da Etapa 2. `conta`/`cartao` de
+  (Q41), só categoria e data se paga conta ou fatura, e só categoria se além disso fundida
+  (sem apagar no v2: apagar o pagamento de
+  conta devolve o dinheiro e a conta segue paga; o de fatura do cartão manual cai no mesmo ramo,
+  `bill_id`, e sai junto; o `/app` e o WhatsApp seguem apagando). `launches.origem` (NULL =
+  antigo, sem backfill) vale `'carteira'` (`db.accounts.ORIGEM_CARTEIRA`) e quem grava é o
+  escritor da carteira, por padrão, em todo canal (`/app`, WhatsApp, quick_entry, IA, saldo
+  inicial e ajuste, pagamento de fatura pela carteira, a v2) e o saque/depósito automático da
+  Q41 (`open_finance_cash._credita`); o pagamento de conta pela carteira (`mark_bill_paid`)
+  nasce sem a marca e a ganha no mesmo statement que o liga à conta (antes disso o v2 o
+  apagaria como carteira pura); antecipar parcela e o estorno de fatura do
+  cartão manual gravam `origem=None` (o `efeitos` não guarda o que desfazer), e OFX, sombra do
+  Open Finance, caixinha e aporte não passam pelo escritor. `conta`/`cartao` de
   outro usuário dão a lista vazia, igual a id inexistente; `raw`, `provider_*_id`,
   `external_id` e o id da transação do banco nunca saem. **Divergência declarada:** a lista do
   `/app` (`list_history`) e as consultas 3 e 4 / "últimos N" do WhatsApp seguem com as
   regras delas (data de gravação no cartão, sem o interno).
+- `POST /api/v2/lancamentos/carteira`, `/lancamentos/editar` e `/lancamentos/apagar`
+  (`api/v2/lancamentos.py`, PR 2a): a escrita, `def` síncronas, id no corpo, CSRF do pai (403
+  `{"detail"}` fora do envelope), resposta `{id}`. **carteira**: `tipo` (`entrada`|`saida`),
+  `valor` (texto `^[0-9]{1,9}(\.[0-9]{1,2})?$` e > 0), `descricao` (1 a 200, vira `alvo` e a
+  nota), `categoria` (opcional; `null` ou ausente = inferida como no `/app`; `""` = 422, onde o
+  `/app` infere), `data` (`AAAA-MM-DD`, entre o
+  corte do plano e hoje; a hora é a de agora). Sempre dinheiro na Carteira (Q40: o v2 não
+  recebe forma de pagamento), teto do plano = 403 `plan_limit`; o miolo é
+  `core/services/carteira.lancar`, o mesmo do `POST /launches` do `/app`. **editar**: `id`
+  (`l<n>` ou `c<n>`) e ao menos um de `categoria`, `descricao`, `data`, `valor` (PR 2b-1: o
+  mesmo texto e > 0 da criação; só a carteira pura tem 'valor' no `pode`, e o saldo da Carteira
+  anda pela diferença na mesma transação, então apagar depois desfaz exato; `c<n>` = 409),
+  cada um contra o `pode` da linha. A data da linha fundida com o banco
+  (`db/lancamentos.FUNDIDO_SQL`) é travada em TODO canal por `update_launch_fields` (o PATCH
+  /launches do `/app` dá 409 com frase própria; o v2 dá 409 `nao_editavel`); **apagar**: só `l<n>` (cartão = 409). O `pode` é relido por
+  `db/lancamentos.pode_da_linha` dentro da transação da escrita, depois do lock do usuário
+  (`_lock_user`) e da linha (`exigir_pode=True` em `update_launch_fields`,
+  `delete_launch_and_rollback` e `update_credit_transaction_fields`, este pelo
+  `PODE_CARTAO_SQL`). Erros: 404 `lancamento_nao_encontrado` (o MESMO corpo para id de outro
+  usuário e inexistente), 409 `nao_editavel` (fora do `pode` e as recusas de domínio do apagar,
+  sem motivo no corpo), 422 `validation_error`. Sem chave de idempotência (dois POST iguais
+  gravam dois).
 - `GET /api/v2/categorias` (`api/v2/categorias.py`): `{categorias: [{chave, nome}]}`, o
   catálogo do usuário pelo `CAT_META_SQL` (chave = `cat_norm_sql(name)`, nome = a grafia que
   vence entre gêmeas), semeado como o `/categories` do /app.
@@ -441,7 +473,8 @@ de mensagem? Os dois lados mudam junto — o consumidor está no `dashboard.js`.
 
 ### Pagamentos
 
-Stripe: `/billing/create-checkout`, `webhook`, `portal`, `subscription`,
+Stripe: `/billing/create-checkout`, `/billing/checkout/bump` (página própria, abaixo),
+`webhook`, `portal`, `subscription`,
 `change-plan`, `cancel-change`, `plans-config` e `select-free` (esta só RECUSA
 com 410: a escolha do plano Grátis saiu da /precos em 2026-09-02; a rota
 sobrevive pra devolver `detail.message` a cliente antigo em cache).
@@ -454,7 +487,7 @@ sobrevive pra devolver `detail.message` a cliente antigo em cache).
 nunca vai no corpo. A sessão grava `origem` e `td` (dias de trial) no metadata e no
 da assinatura; uma sessão aberta só é reaproveitada pelo mesmo plano × intervalo ×
 origem × modo (sessão sem `origem` = `/precos`), e a embutida reaproveitada devolve o
-trial com que nasceu (`td`). Só a `/assinar` fixa BRL (`adaptive_pricing` off) e volta
+trial com que nasceu (`td`). Só a `/assinar` (e a página própria, abaixo) fixa BRL (`adaptive_pricing` off) e volta
 para `/assinar?plano=&ciclo=` no abandono. Os produtos extras (`optional_items`) vão nas
 **duas** origens (dono, Q3); fora eles e as chaves `ebook*` da foto, a `/precos` segue
 com os kwargs de antes. Toda sessão da `/assinar` (embutida **e**
@@ -487,6 +520,48 @@ eles, ou erro que não é `InvalidRequestError`, é o 502 de antes. Uma sessão 
 criada pelo fallback (sem extras) ou antes de mudar a lista é reaproveitada por até 1 h
 (`/assinar`) ou 24 h (`/precos`) e segue sem os extras novos, mesmo depois de a env ser
 corrigida: o reaproveitamento não compara os extras.
+
+**Página própria (`ui_mode="elements"`), atrás da flag `CHECKOUT_PAGINA_PROPRIA=1`.**
+O corpo ganha `pagina` (default `false`); vale só com a flag
+(`extras_assinar.pagina_propria_ligada`, lida a cada pedido). Com a flag desligada, ou
+sem `pagina`, o checkout é o de antes nas duas origens (a `/precos` com `pagina` segue
+no hospedado, nunca no embutido). Ligada, `pagina` vira sessão `elements` (é um
+embutido: `client_secret`, `return_url`, 1 h, `publishable_key`) **sem**
+`optional_items`: os extras entram como linha do carrinho pelo `POST /billing/checkout/bump`
+(abaixo). Até 3 extras (`extras_assinar.CAIXAS`): `da_env()` filtrado por
+`Price.retrieve(expand=["product"])` (preço ativo, BRL, avulso, produto ativo) ANTES
+de recortar; o que sai, ou uma falha do Stripe ao ler (aí nenhum entra), loga
+`ebook_oferta_recusada` só com os preços, e o plano vende assim mesmo. A foto dos 3 vai
+nos dois metadatas, como no embutido. Recusa do Stripe na criação é o 502 de antes
+(não há `optional_items` a tirar). A resposta é a do embutido + `pagina: true` +
+`extras: [{posicao, nome, descricao, imagem, valor_centavos, no_carrinho}]` (texto e
+`images[0]` do Product; capa só `https://`, senão `null`). A sessão `elements` só
+reaproveita pedido com `pagina` e flag ligada, e vice-versa (o matcher compara o
+`ui_mode`, que o `Session.list` devolve como `elements` ou `embedded_page`, medido em
+2026-10-03); a reaproveitada devolve as caixas da SUA foto e marca `no_carrinho` pelo
+`list_line_items` (falha = 503). A reaproveitada NÃO refiltra a foto (um preço
+arquivado depois do nascimento segue na caixa), e uma falha do Stripe ao ler qualquer
+extra na criação tira TODAS as caixas (o plano vende sem elas). A página própria fixa
+BRL (`adaptive_pricing` off) nas **duas** origens: medido no Stripe de teste em
+2026-10-03, sem o campo a sessão `elements` da `/precos` nasce com ele LIGADO (o
+default da conta), e as caixas mostram R$. O hospedado da `/precos` segue sem o campo.
+
+**`POST /billing/checkout/bump`** (`frontend/routes/billing_bump.py`): o order bump da
+página própria. Corpo `{sid, posicoes}` = o CONJUNTO desejado inteiro, em posições da
+foto (`[]` = nenhum); o preço sai sempre da foto da sessão, nunca do cliente. Campo a
+mais (ex.: `price`) é 422; `sid` fora de `cs_(test|live)_…`, posição repetida, fora de
+1..10 ou além da foto é 400. Sessão de outra conta (`finbot_user_id` exato **e**
+`customer` da conta), de outro `ui_mode` (só `elements`) ou de outra origem (só
+`assinar`/`precos`) é 404 indistinguível de "não existe", sem `modify`; o dono é
+checado ANTES do estado. Sessão paga, expirada ou `open` com `expires_at` vencido é 409
+`sessao_fechada`. O carrinho (`list_line_items`) vira `extras_assinar.linhas_do_bump`:
+o plano e o extra que fica vão pelo `id`, o que entra por `price`, o que sai é omitido;
+nada mudou = sem chamada ao Stripe. O `Session.modify` leva só `line_items` (a foto do
+metadata não muda). Recusa do Stripe no `modify` (`InvalidRequestError`) é 409
+`extra_recusado` + log `ebook_oferta_recusada` só com os preços; qualquer outro
+`StripeError` (retrieve, list, modify) é 502. Roda sob `_billing_user_lock` (o mesmo
+do checkout), limite de 120/h por IP, CSRF do middleware global, e **não olha a
+flag**: com ela desligada não nasce sessão `elements`, e a página já aberta segue pagável.
 
 **Entrega do e-book (#708) — N produtos por compra.** A metadata da sessão é a foto
 dos produtos oferecidos: o 1º em `ebook_price`/`ebook_url`, o n-ésimo (2..10) em
