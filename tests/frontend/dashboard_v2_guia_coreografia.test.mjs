@@ -54,37 +54,9 @@ for (const [width, height] of [[1280, 800], [375, 812]]) {
   });
 }
 
-// O voo é um arco: no meio do tempo, o Piggy está entre a partida e a chegada e acima da reta
-// entre elas; no fim, pousado. Pausa-se a animação de script no meio para medir.
-test("o Piggy viaja: sem `reduce`, do Saiu à seta em arco; com `reduce`, nenhuma animação de script do Bora à ida", async () => {
-  const { ctx, page } = await abrir({ motion: "no-preference" });
-  await bora(page);
-  await page.waitForTimeout(1200); // a entrada (CSS) e o voo do convite ao Saiu terminam
-  await page.evaluate(`window.deScript = ${deScript}`);
-  const voo = await page.evaluate(async (meio) => {
-    const pg = document.querySelector(".guia-piggy");
-    const centro = () => { const q = pg.getBoundingClientRect(); return [q.left + q.width / 2, q.top + q.height / 2]; };
-    const A = centro();
-    [...document.querySelectorAll(".guia-balao button")].find((b) => b.textContent === "Entendi").click();
-    let a;
-    for (let i = 0; i < 60 && !a; i++) { await new Promise((ok) => requestAnimationFrame(ok)); a = pg.getAnimations().find(window.deScript); }
-    if (!a) return null;
-    a.pause(); a.currentTime = meio;
-    const M = centro();
-    const B = [parseFloat(pg.style.left) + pg.offsetWidth / 2, parseFloat(pg.style.top) + pg.offsetHeight / 2];
-    a.finish();
-    return { A, M, B, F: centro() };
-  }, TEMPO.voo / 2);
-  await ctx.close();
-  console.log("# voo:", JSON.stringify(voo));
-  assert.ok(voo, "nenhuma animação de script no Piggy depois do Entendi");
-  const { A, M, B, F } = voo;
-  assert.ok(M[0] > Math.min(A[0], B[0]) && M[0] < Math.max(A[0], B[0]), `x do meio fora de A–B: ${M[0]}`);
-  const reta = A[1] + (M[0] - A[0]) * (B[1] - A[1]) / (B[0] - A[0]);
-  assert.ok(M[1] <= reta - 20, `arco: o meio está ${Math.round(reta - M[1])} px acima da reta`);
-  assert.ok(Math.hypot(F[0] - B[0], F[1] - B[1]) < 1, `pousou fora: ${F} × ${B}`);
-
-  // Com `reduce`: o 1 ms global do base.css não pega WAAPI; o portão é o calmo() do guia-voo.ts.
+// O voo é a mola (dashboard_v2_guia_mola.test.mjs). Pulo e aperto são WAAPI: com `reduce`, nenhum.
+test("com `reduce`, nenhuma animação de script do Bora à ida", async () => {
+  // O 1 ms global do base.css não pega WAAPI; o portão é o calmo() do guia-voo.ts.
   const r = await abrir();
   await r.page.evaluate(`window.deScript = ${deScript}`);
   await r.page.evaluate(() => {
@@ -129,14 +101,14 @@ test("navegação espera a pausa: do 200 do feito à troca de tela ≥ festa + p
 });
 
 // Esc a qualquer momento: o guia some inteiro, sem animação órfã, sem relógio que ainda navegue
-// e sem erro (a promise `finished` rejeitaria no cancel).
+// e sem erro (a promise `finished` do WAAPI rejeitaria no cancel).
 test("Esc no meio: em pleno voo some tudo, sem animação de script nem erro; na pausa da ida, nada navega depois", async () => {
   const voo = await abrir({ motion: "no-preference" });
   await bora(voo.page);
   await voo.page.waitForTimeout(1200);
   await entendi(voo.page);
   await voo.page.evaluate(`window.deScript = ${deScript}`);
-  await voo.page.waitForFunction(() => document.querySelector(".guia-piggy")?.getAnimations().some(window.deScript));
+  await voo.page.waitForFunction(() => document.querySelector(".guia-piggy")?.style.transform); // a mola no ar
   await voo.page.keyboard.press("Escape");
   await voo.page.waitForTimeout(300);
   const r1 = await voo.page.evaluate(() => [

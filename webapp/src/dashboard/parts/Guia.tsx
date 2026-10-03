@@ -7,10 +7,10 @@ import { mesDe } from "../lib/store.js";
 import type { DashState } from "../lib/types";
 import { DEMO, ErroApi, apiPost, guiaQuery, perfilQuery } from "../lib/v2";
 import { go, type Path } from "../router";
-import { ROTA, aba, achar, cobrir, guia, posicionar, trazer, type Tipo } from "./guia-posicao";
+import { ROTA, aba, achar, caixa, cobrir, corte, guia, posicionar, trazer, type Caixa, type Tipo } from "./guia-posicao";
 import { MOTIVO, OF, destino } from "./guia-falas";
 import { useTecladoDoVeu } from "./guia-teclado";
-import { TEMPO, apertar, dura, parar, pular, tiltDe, troca, voando, voar } from "./guia-voo";
+import { TEMPO, apertar, dura, parar, partir, pular, quadro, tiltDe, troca, type Voo } from "./guia-voo";
 
 // O guia do /painel (#728). O roteiro e o progresso vêm do servidor (GET/POST /api/v2/guia,
 // `PASSOS` em api/v2/guia.py); aqui fica só se o guia está aberto. O passo avança quando a
@@ -59,6 +59,8 @@ export function Guia({ s, path }: { s: DashState; path: Path }) {
   const [fase, setFase] = useState<{ id: string; etapa: Etapa }>({ id: "", etapa: "bloco" }); // presa ao passo atual
   const ofereceu = useRef(false);
   const miraAnt = useRef<HTMLElement | null>(null); // onde o Piggy estava mirando: mudou, ele voa
+  const voo = useRef<Voo | null>(null);
+  const ultimo = useRef<Caixa | null>(null); // o último recorte aceso pintado: o próximo parte dele
   const focar = useRef(false);
   const rolou = useRef("");
   const mexeu = useRef(false); // a pessoa rolou por conta própria desde a rolagem inicial do passo
@@ -103,7 +105,7 @@ export function Guia({ s, path }: { s: DashState; path: Path }) {
   const volta = (etapa === "bloco" || etapa === "alvo") && !naTela;
 
   const iniciar = (rever: boolean) => {
-    setRev(rever); setVistos([]); setFesta(null); setModo("ativo"); setFase({ id: "", etapa: "bloco" });
+    setRev(rever); setVistos([]); setFesta(null); setModo("ativo"); setFase({ id: "", etapa: "bloco" }); ultimo.current = null;
     focar.current = true;
   };
   const fechar = (dispensa: boolean) => {
@@ -214,7 +216,7 @@ export function Guia({ s, path }: { s: DashState; path: Path }) {
   //   motivo: a âncora, tudo escuro;
   //   bloco: a âncora, acesa sem toque e sem anel;
   //   alvo: o alvo, tocável e com anel.
-  // Mira nova: o Piggy voa até ela (e o balão vai junto); no voo o véu fica inteiro e sem anel.
+  // Mira nova: o Piggy, o balão e o recorte aceso vão até ela na mesma mola; no voo, sem anel.
   const tick = () => {
     const pg = piggy.current, b = balao.current;
     if (!pg || !b) return;
@@ -241,14 +243,18 @@ export function Guia({ s, path }: { s: DashState; path: Path }) {
     if (rolar) { if (primeira) mexeu.current = false; rolou.current = chave; }
     const de = pg.getBoundingClientRect(), deB = b.getBoundingClientRect(), tiltA = tiltDe(pg), tinha = !!pg.style.left;
     posicionar(mira, parado ? null : pg, b, rolar, p && t === "alvo" && !festa && !volta ? [alvo, guia(p.ancora)] : []);
+    const aceso = toque ?? claro, para = aceso && caixa(aceso);
     if (!parado && mira !== miraAnt.current) {
-      if (tinha && voar(pg, de, tiltA)) voar(b, deB);
+      if (tinha) voo.current = partir(pg, de, tiltA, b, deB, ultimo.current, para);
       miraAnt.current = mira;
     }
-    const voa = voando(pg);
-    furo.current = voa ? null : toque;
+    const [pinta, voa] = quadro(voo.current, pg, b, para);
+    if (!voa) voo.current = null;
+    if (pinta) ultimo.current = pinta;
+    const tocavel = toque && pinta && corte(pinta, caixa(toque));
+    furo.current = tocavel ? toque : null;
     if (veus.current && sombra.current && anel.current) {
-      cobrir(furo.current, voa ? null : claro, voa ? null : marca, [...veus.current.children] as HTMLElement[], sombra.current, anel.current);
+      cobrir(pinta, tocavel, voa ? null : marca, [...veus.current.children] as HTMLElement[], sombra.current, anel.current);
     }
   };
   useLayoutEffect(tick);
@@ -311,7 +317,7 @@ export function Guia({ s, path }: { s: DashState; path: Path }) {
   } else {
     const p = atual!;
     corpo = <>
-      <p className="guia-passo">Passo {n} de {passos.length}</p>
+      <p className="guia-passo"><span className="sr-only">Passo {n} de {passos.length}</span>{passos.map((x, i) => <i key={x.id} aria-hidden="true" data-atual={i === n - 1 || undefined} />)}</p>
       {/* O mesmo <h2> (key) em toda etapa e na festa: o foco que está nele não cai no body. */}
       <h2 key="titulo" id="guia-titulo" tabIndex={-1}>{leva ?? <>{p.fala.titulo}{p.dado === "exemplo" && <> <span className="selo">exemplo</span></>}</>}</h2>
       {!leva && <>

@@ -1,8 +1,18 @@
-// O movimento do guia (parts/Guia.tsx) e a fonte única dos seus tempos. Tudo em WAAPI, que o
-// 1 ms global do base.css (reduce) não alcança: o portão do reduce é `calmo()`. Safari 14:
-// sempre primeiro e último quadro, só `transform`, inclinação em número (var() em quadro de
-// WAAPI não é confiável lá) e nunca a promise `finished` (o cancel do Esc a rejeitaria).
-export const TEMPO = { voo: 1000, festa: 1600, pausa: 800, aperto: 220, troca: 500 };
+// O movimento do guia (parts/Guia.tsx) e a fonte única dos seus tempos. O voo é a mola do
+// product-tour que o dono trouxe (#728): o Piggy, o balão e o recorte aceso andam juntos nela,
+// num quadro só, no rAF do guia (o mesmo que segue a mira). Pulo e aperto são WAAPI e nunca
+// rodam com a mola no ar (a ida espera TEMPO.voo; a festa não troca a mira). Nada disso é CSS,
+// e o 1 ms global do base.css (reduce) não o alcança: o portão do reduce é `calmo()`. Safari
+// 14: a mola é só conta (o gerador do framer-motion, sem WAAPI); no WAAPI, sempre primeiro e
+// último quadro, só `transform`, inclinação em número e nunca a promise `finished` (o cancel do
+// Esc a rejeitaria).
+import { spring } from "framer-motion";
+import type { Caixa } from "./guia-posicao";
+
+// `voo`: quanto a mola leva para assentar (dashboard_v2_guia_mola.test.mjs mede).
+export const TEMPO = { voo: 550, festa: 1600, pausa: 800, aperto: 220, troca: 500 };
+// Sem quique: o amortecimento passa do crítico.
+const MOLA = spring({ keyframes: [0, 1], stiffness: 320, damping: 32, mass: 0.7 });
 
 export const calmo = () => !matchMedia("(prefers-reduced-motion: reduce)").matches;
 // Voo e aperto somem com reduce; a pausa e a troca de tela não (decisão do dono, D4).
@@ -16,33 +26,37 @@ function animar(el: Element, quadros: Keyframe[], duration: number, easing = "ea
   minhas.set(el, el.animate(quadros, { duration, easing }));
 }
 export const parar = (el: Element | null | undefined) => { if (el) { minhas.get(el)?.cancel(); minhas.delete(el); } };
-// Lido a cada quadro: com o voo no ar o véu fica inteiro e sem anel.
-export const voando = (el: Element | null) => {
-  const s = el && minhas.get(el)?.playState;
-  return s === "running" || s === "paused";
-};
 
-const centro = (r: DOMRect) => [r.left + r.width / 2, r.top + r.height / 2];
 export const tiltDe = (el: HTMLElement) => parseFloat(el.style.getPropertyValue("--tilt")) || 0;
 
-// FLIP: o elemento já está no destino (left/top); anima de onde estava (`de`, o retângulo de
-// antes) até lá. Com `tiltA` (o Piggy) em arco, inclinando; sem (o balão), em linha reta. O
-// left/top segue a mira a cada quadro: o transform é relativo a ela. Destino pelo left/top
-// gravado, não pelo retângulo, que traria o voo anterior e a inclinação junto. Até 24 px não
-// voa: devolve se voou.
-export function voar(el: HTMLElement, de: DOMRect, tiltA?: number) {
-  const [ax, ay] = centro(de);
-  const dx = ax - (parseFloat(el.style.left) + el.offsetWidth / 2), dy = ay - (parseFloat(el.style.top) + el.offsetHeight / 2);
-  if (Math.hypot(dx, dy) <= 24) return false;
-  const arco = tiltA == null ? 0 : Math.min(120, Math.hypot(dx, dy) / 3);
-  const rot = (a: number) => (tiltA == null ? "" : ` rotate(${a}deg)`);
-  const t = tiltDe(el);
-  animar(el, [
-    { transform: `translate(${dx}px, ${dy}px)${rot(tiltA ?? 0)}` },
-    { offset: 0.5, transform: `translate(${dx / 2}px, ${dy / 2 - arco}px)${rot(t)}` },
-    { transform: `translate(0px, 0px)${rot(t)}` },
-  ], TEMPO.voo, "cubic-bezier(.45,0,.2,1)");
-  return true;
+// Um voo (FLIP): de onde partem, relativo ao destino (o left/top gravado, que segue a mira a cada
+// quadro), o Piggy [dx, dy, inclinação], o balão [dx, dy] e as quatro bordas do recorte aceso.
+export interface Voo { t0: number; pg: number[]; arco: number; b: number[]; aceso: number[] | null }
+const desloca = (el: HTMLElement, de: DOMRect) => [
+  de.left + de.width / 2 - (parseFloat(el.style.left) + el.offsetWidth / 2),
+  de.top + de.height / 2 - (parseFloat(el.style.top) + el.offsetHeight / 2),
+];
+const bordas = (c: Caixa) => [c.left, c.top, c.right, c.bottom];
+
+// A mira mudou: grava de onde cada um parte. O recorte parte do último pintado (no 1º, nasce do
+// centro do novo). Com reduce não há voo: tudo já no destino.
+export function partir(pg: HTMLElement, de: DOMRect, tiltA: number, b: HTMLElement, deB: DOMRect, ultimo: Caixa | null, aceso: Caixa | null): Voo | null {
+  if (!calmo()) return null;
+  const [dx, dy] = desloca(pg, de), x = aceso && (aceso.left + aceso.right) / 2, y = aceso && (aceso.top + aceso.bottom) / 2;
+  const de4 = ultimo ? bordas(ultimo) : [x, y, x, y];
+  return { t0: performance.now(), pg: [dx, dy, tiltA], arco: Math.min(120, Math.hypot(dx, dy) / 3), b: desloca(b, deB), aceso: aceso && bordas(aceso).map((v, i) => de4[i]! - v) };
+}
+
+// Um quadro da mola: o Piggy (em arco, inclinando) e o balão (reto, surgindo: opacidade e escala
+// 0,96 → 1) no ponto dela, e o recorte aceso desse instante. Devolve também se ainda voa.
+export function quadro(v: Voo | null, pg: HTMLElement, b: HTMLElement, aceso: Caixa | null): [Caixa | null, boolean] {
+  const s = v && MOLA.next(performance.now() - v.t0);
+  const k = !v || s!.done ? 1 : s!.value, q = 1 - k;
+  pg.style.transform = v && q ? `translate(${v.pg[0] * q}px, ${v.pg[1] * q - v.arco * 4 * k * q}px) rotate(${v.pg[2] * q + tiltDe(pg) * k}deg)` : "";
+  b.style.transform = v && q ? `translate(${v.b[0] * q}px, ${v.b[1] * q}px) scale(${0.96 + 0.04 * k})` : "";
+  b.style.opacity = v && q ? `${k}` : "";
+  const d = q ? v?.aceso : null;
+  return [aceso && d ? { ...aceso, left: aceso.left + d[0] * q, top: aceso.top + d[1] * q, right: aceso.right + d[2] * q, bottom: aceso.bottom + d[3] * q } : aceso, !!q];
 }
 
 // A comemoração: o Piggy pula no lugar.

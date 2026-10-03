@@ -101,28 +101,33 @@ export function posicionar(el: HTMLElement | null, piggy: HTMLElement | null, ba
   piggy.style.setProperty("--tilt", `${tilt}deg`);
 }
 
-// O véu (decisão do dono): escurece a tela menos o `toque` (o que se toca agora) e o `claro`
-// (aceso, mas sem toque: o bloco que o guia apresenta, a aba antes da troca). O anel marca
-// `anelEm`. Quatro faixas transparentes em volta do toque bloqueiam o resto; o escuro é um path
-// `evenodd`, que comporta os dois furos. Sem toque, uma faixa cobre a tela inteira. O furo escuro
-// é o retângulo exato do elemento, o mesmo das faixas: o que está aceso é o que se toca (fora o
-// claro). O anel fica F px por fora.
+// O véu (decisão do dono): escurece a tela menos o recorte `aceso` (o que se toca agora, ou o
+// que o guia apresenta sem toque: o bloco, a aba antes da troca; a tabela do Guia.tsx nunca acende
+// dois) e bloqueia o toque fora do `toque`. Quatro faixas transparentes em volta do toque pegam o
+// resto; o escuro é um path `evenodd`. Sem toque, uma faixa cobre a tela inteira. No voo o recorte
+// desliza na mola (guia-voo.ts) e o toque é o pedaço do alvo que já está aceso (`corte`): nunca
+// maior que o aceso. Pousado, os dois são o retângulo exato do alvo. O anel fica F px por fora.
+export type Caixa = { left: number; top: number; right: number; bottom: number; raio: number };
 const F = 4; // folga do anel em volta do alvo
-const furo = (r: DOMRect, raio: number) => {
-  const { left: x, top: y, width: w, height: h } = r, k = Math.min(raio, w / 2, h / 2);
+const raioDe = (el: HTMLElement) => parseFloat(getComputedStyle(el).borderTopLeftRadius) || 0;
+export const caixa = (el: HTMLElement): Caixa => { const r = el.getBoundingClientRect(); return { left: r.left, top: r.top, right: r.right, bottom: r.bottom, raio: raioDe(el) }; };
+export const corte = (a: Caixa, b: Caixa): Caixa | null => {
+  const c = { left: Math.max(a.left, b.left), top: Math.max(a.top, b.top), right: Math.min(a.right, b.right), bottom: Math.min(a.bottom, b.bottom), raio: 0 };
+  return c.left < c.right && c.top < c.bottom ? c : null;
+};
+const furo = (c: Caixa) => {
+  const { left: x, top: y } = c, w = c.right - x, h = c.bottom - y, k = Math.max(0, Math.min(c.raio, w / 2, h / 2));
   return `M${x + k} ${y}h${w - 2 * k}a${k} ${k} 0 0 1 ${k} ${k}v${h - 2 * k}a${k} ${k} 0 0 1 ${-k} ${k}h${2 * k - w}a${k} ${k} 0 0 1 ${-k} ${-k}v${2 * k - h}a${k} ${k} 0 0 1 ${k} ${-k}Z`;
 };
-const raioDe = (el: HTMLElement) => parseFloat(getComputedStyle(el).borderTopLeftRadius) || 0;
-export function cobrir(toque: HTMLElement | null, claro: HTMLElement | null, anelEm: HTMLElement | null, faixas: HTMLElement[], sombra: SVGPathElement, anel: HTMLElement) {
+export function cobrir(aceso: Caixa | null, toque: Caixa | null, anelEm: HTMLElement | null, faixas: HTMLElement[], sombra: SVGPathElement, anel: HTMLElement) {
   const vw = document.documentElement.clientWidth, vh = innerHeight;
-  const a = toque?.getBoundingClientRect() ?? { left: 0, top: 0, right: 0, bottom: 0 };
+  const a = toque ?? { left: 0, top: 0, right: 0, bottom: 0 };
   const caixas = [[0, 0, vw, a.top], [0, a.bottom, vw, vh - a.bottom], [0, a.top, a.left, a.bottom - a.top], [a.right, a.top, vw - a.right, a.bottom - a.top]];
   faixas.forEach((f, i) => {
     const [x, y, w, h] = caixas[i];
     Object.assign(f.style, { left: `${x}px`, top: `${y}px`, width: `${Math.max(0, w)}px`, height: `${Math.max(0, h)}px` });
   });
-  const furos = [toque, claro].filter((e): e is HTMLElement => !!e).map((e) => furo(e.getBoundingClientRect(), raioDe(e)));
-  sombra.setAttribute("d", `M0 0H${vw}V${vh}H0Z${furos.join("")}`);
+  sombra.setAttribute("d", `M0 0H${vw}V${vh}H0Z${aceso ? furo(aceso) : ""}`);
   anel.hidden = !anelEm;
   if (!anelEm) return;
   const r = anelEm.getBoundingClientRect();
