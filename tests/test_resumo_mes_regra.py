@@ -3,8 +3,8 @@
 Matriz no mês anterior ao de hoje (dentro da janela do Plus, para a consulta 5 do /app
 não cortar nada): despesa e receita manuais, linha legada saida/entrada, movimento
 interno, criação e depósito de caixinha, lançamento do Open Finance, compra no cartão à
-vista e em 3x (faturas de meses diferentes), compra em fatura com `user_id` NULL (a coluna
-aceita NULL, sem backfill; o SQL antigo contava), compra de fatura do mês seguinte, estorno,
+vista e em 3x (faturas de meses diferentes), compra num 2º cartão (outra fatura), compra
+de fatura do mês seguinte, estorno,
 conciliação pendente (o par lançamento manual × importado), saque em espécie (Q41: os
 dois lados internos) e o usuário B com dados que NÃO podem entrar.
 
@@ -19,8 +19,7 @@ dois lados internos) e o usuário B com dados que NÃO podem entrar.
 
 Controle NEGATIVO (mutação em `db/resumo_mes.py`, medido): sem a perna do cartão, sem o
 filtro de movimento interno ou com o `user_id` de `launches` virando `(user_id = %s or
-true)`, todo caso daqui fica vermelho (no do movimento interno, todos menos o do B); com
-`b.user_id = %s` sem o `or b.user_id is null`, a fatura NULL some: todos menos o do B. Os
+true)`, todo caso daqui fica vermelho (no do movimento interno, todos menos o do B). Os
 `user_id` de `ct` e da fatura (`b`) são medidos em `test_api_v2_resumo_mes.py::test_compra_de_a_em_fatura_de_b_nao_entra`.
 Controle POSITIVO: a fatura do mês seguinte e o estorno ficam fora; mês sem dados dá zero.
 """
@@ -31,7 +30,6 @@ from datetime import date, datetime, time, timedelta
 from decimal import Decimal
 
 import db
-import pytest
 import frontend.finance_bot_websocket_custom as dashboard
 from conftest import usuario_pagante
 from db.analytics import (
@@ -45,7 +43,7 @@ from utils_date import _tz, today_tz
 
 D = Decimal
 INICIO, FIM = mes_de(today_tz().replace(day=1) - timedelta(days=1))  # o mês anterior
-CARTAO_NO_MES = D("230")  # 80 à vista + a 1ª de 3 parcelas de 100 + 50 na fatura NULL
+CARTAO_NO_MES = D("230")  # 80 à vista + a 1ª de 3 parcelas de 100 + 50 no 2º cartão
 ENTROU, SAIU = D("1040"), D("490")
 
 # ── os SQLs de antes deste PR, CONGELADOS (não importe; é a régua) ──────────
@@ -114,8 +112,7 @@ def semeia_a(uid: int) -> None:
     db.add_credit_purchase(uid, cartao, 999, "fora", "fatura seguinte", INICIO.replace(day=15))
     db.add_credit_refund(uid, cartao, 25, "mercado", "estorno", INICIO.replace(day=6))
     outro = db.create_card(uid, "Inter", closing_day=10, due_day=17)
-    fatura = db.add_credit_purchase(uid, outro, 50, "farmácia", "fatura NULL", INICIO.replace(day=5))[2]
-    q("update credit_bills set user_id = null where id = %s returning id", (fatura,))
+    db.add_credit_purchase(uid, outro, 50, "farmácia", "2º cartão", INICIO.replace(day=5))
 
 
 def semeia_b(uid: int) -> None:
@@ -125,22 +122,15 @@ def semeia_b(uid: int) -> None:
     db.add_credit_purchase(uid, cartao, 888, "mercado", "do B", INICIO.replace(day=5))
 
 
-def semeia_a_em_fatura_de_b(a: int, b: int, fatura_b_null: bool = False) -> None:
+def semeia_a_em_fatura_de_b(a: int, b: int) -> None:
     """Linha corrompida (nenhum escritor grava): compra de A de 4321 na fatura de B, mais 80
-    de A e 1 de B legítimos. Com a barreira da fatura, A soma 80 e B soma 1. `fatura_b_null`:
-    a fatura de B fica com `user_id` NULL — vale pelo dono do cartão (B), o mesmo resultado."""
+    de A e 1 de B legítimos. Com a barreira da fatura, A soma 80 e B soma 1."""
     cartao_a = db.create_card(a, "Nubank", closing_day=10, due_day=17)
     db.add_credit_purchase(a, cartao_a, 80, "mercado", "de A", INICIO.replace(day=5))
     cartao_b = db.create_card(b, "Nubank", closing_day=10, due_day=17)
     _, _, fatura_b = db.add_credit_purchase(b, cartao_b, 1, "x", "de B", INICIO.replace(day=5))
     q("""insert into credit_transactions (bill_id, user_id, card_id, valor, purchased_at)
          values (%s, %s, %s, 4321, %s)""", (fatura_b, a, cartao_a, INICIO.replace(day=5)))
-    if fatura_b_null:
-        q("update credit_bills set user_id = null where id = %s", (fatura_b,))
-
-
-# Os casos "A em fatura de B" rodam também com a fatura de B NULL: vale pelo cartão (de B).
-FATURA_B_NULL = pytest.mark.parametrize("fatura_b_null", [False, True], ids=["fatura_b", "fatura_b_null"])
 
 
 def _par():
@@ -198,24 +188,22 @@ def test_evolucao_bate_com_a_regra_unica_mes_a_mes():
             assert sum(x["income"] == x["expense"] == 0 for x in barras.values()) == 2
 
 
-@FATURA_B_NULL
-def test_evolucao_nao_soma_compra_de_a_em_fatura_de_b(fatura_b_null):
+def test_evolucao_nao_soma_compra_de_a_em_fatura_de_b():
     """A barreira `b.user_id` vale também na cópia (`compute_evolution`). Controle NEGATIVO
     medido: sem ela, A sai 4401 e este fica vermelho."""
     a, b = usuario_pagante(), usuario_pagante()
-    semeia_a_em_fatura_de_b(a, b, fatura_b_null)
+    semeia_a_em_fatura_de_b(a, b)
     for uid, saiu in ((a, 80.0), (b, 1.0)):  # positivo: a compra legítima de cada um entra
         barra = {x["month"]: x for x in compute_evolution(uid, months=3)}[f"{INICIO:%Y-%m}"]
         assert barra["expense"] == float(totais_do_mes(uid, INICIO)["saiu"]) == saiu, uid
 
 
-@FATURA_B_NULL
-def test_analises_e_historico_nao_contam_compra_de_a_em_fatura_de_b(fatura_b_null):
+def test_analises_e_historico_nao_contam_compra_de_a_em_fatura_de_b():
     """A barreira `b.user_id` nos outros agregados do cartão de `db/analytics.py`: cards do
     Histórico, dia de pico e maior gasto, categorias e estabelecimentos. Controle NEGATIVO
     medido: sem a barreira em qualquer um deles, A conta a compra de 4321 e fica vermelho."""
     a, b = usuario_pagante(), usuario_pagante()
-    semeia_a_em_fatura_de_b(a, b, fatura_b_null)
+    semeia_a_em_fatura_de_b(a, b)
     q("update credit_transactions set nota = 'mercado' where user_id = %s and valor = 4321 returning id", (a,))
     for uid, valor in ((a, 80.0), (b, 1.0)):  # positivo: a compra legítima de cada um entra
         st = compute_history_quick_stats(uid, INICIO, FIM)
@@ -231,29 +219,28 @@ def _donut(uid) -> list[float]:
     return [c["total"] for c in dados["expense_categories"]]
 
 
-@FATURA_B_NULL
-def test_donut_do_app_nao_soma_compra_de_a_em_fatura_de_b_e_bate_com_as_analises(fatura_b_null):
+def test_donut_do_app_nao_soma_compra_de_a_em_fatura_de_b_e_bate_com_as_analises():
     """A barreira `b.user_id` na consulta 6 do /app (donut), gêmea de `compute_categories`:
     as duas telas dão o mesmo número. Controle NEGATIVO medido: sem a barreira, A sai
     [4321.0, 80.0] e este fica vermelho."""
     a, b = usuario_pagante(), usuario_pagante()
-    semeia_a_em_fatura_de_b(a, b, fatura_b_null)
+    semeia_a_em_fatura_de_b(a, b)
     for uid, valor in ((a, 80.0), (b, 1.0)):  # positivo: a compra legítima de cada um entra
         assert _donut(uid) == [c["total"] for c in compute_categories(uid, INICIO, FIM)] == [valor], uid
 
 
-def test_donut_do_app_conta_a_fatura_null_e_bate_com_as_analises():
-    """Positivo da barreira na consulta 6: a fatura com `user_id` NULL (farmácia, 50) entra."""
+def test_donut_do_app_conta_o_segundo_cartao_e_bate_com_as_analises():
+    """Positivo da barreira na consulta 6: a fatura do 2º cartão de A (farmácia, 50) entra."""
     a, _ = _par()
     donut = _donut(a)
     assert donut == [c["total"] for c in compute_categories(a, INICIO, FIM)]
     assert 50.0 in donut and sum(donut) == float(SAIU)
 
 
-def test_cards_do_historico_contam_a_fatura_null_e_nao_o_b():
-    """Positivo da barreira em `compute_history_quick_stats`: na matriz, a fatura com `user_id`
-    NULL entra (2 receitas; 5 despesas de lançamento + 3 do cartão, uma delas a NULL) — o
-    mesmo que o SQL de antes dava; nada do B."""
+def test_cards_do_historico_contam_o_segundo_cartao_e_nao_o_b():
+    """Positivo da barreira em `compute_history_quick_stats`: na matriz, a fatura do 2º cartão
+    de A entra (2 receitas; 5 despesas de lançamento + 3 do cartão, uma delas no 2º cartão) —
+    o mesmo que o SQL de antes dava; nada do B."""
     a, _ = _par()
     st = compute_history_quick_stats(a, INICIO, FIM)
     assert (st["receitas_count"], st["despesas_count"], st["total_count"]) == (2, 8, 10)
@@ -274,13 +261,12 @@ def _cartao_nas_listas(uid) -> dict:
     }
 
 
-@FATURA_B_NULL
-def test_listas_e_exportacao_nao_mostram_compra_de_a_em_fatura_de_b(fatura_b_null):
+def test_listas_e_exportacao_nao_mostram_compra_de_a_em_fatura_de_b():
     """A barreira `b.user_id` nas LISTAS (e nas contagens delas): /history, consultas 3 e 4
     do /app e exportação. A lista do Histórico bate com os cards dele. Controle NEGATIVO
     medido: sem a barreira em qualquer uma, A lista [80.0, 4321.0] e este fica vermelho."""
     a, b = usuario_pagante(), usuario_pagante()
-    semeia_a_em_fatura_de_b(a, b, fatura_b_null)
+    semeia_a_em_fatura_de_b(a, b)
     for uid, valor in ((a, 80.0), (b, 1.0)):  # positivo: a compra legítima de cada um entra
         x = _cartao_nas_listas(uid)
         assert x["historico"] == x["app"] == x["export"] == [valor], (uid, x)
@@ -288,8 +274,8 @@ def test_listas_e_exportacao_nao_mostram_compra_de_a_em_fatura_de_b(fatura_b_nul
         assert x["historico_total"] == x["app_total"] == (st["total_count"], st["total_count"]) == (1, 1), (uid, x)
 
 
-def test_listas_e_exportacao_contam_a_fatura_null_e_batem_com_os_cards():
-    """Positivo da barreira nas listas: a fatura com `user_id` NULL (50) aparece nas três, e
+def test_listas_e_exportacao_contam_o_segundo_cartao_e_batem_com_os_cards():
+    """Positivo da barreira nas listas: a compra do 2º cartão de A (50) aparece nas três, e
     a lista do Histórico tem o mesmo número de itens, receitas e despesas que os cards."""
     a, _ = _par()
     x = _cartao_nas_listas(a)

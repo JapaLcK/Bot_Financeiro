@@ -190,9 +190,8 @@ Sub-app FastAPI (`api/v2/app.py`) montado pelo monólito com `app.mount("/api/v2
   mensal (o pedido na hora também soma o mês inteiro: total, contagem e "Período"), a
   consulta 5 do /app e `compute_kpis` das Análises. `compute_evolution` é cópia em consulta
   única (um GROUP BY por mês); `tests/test_resumo_mes_regra.py` compara as duas por mês.
-  Fatura com `user_id` NULL (a coluna aceita, sem backfill) só entra se o cartão dela for do
-  usuário (`coalesce(b.user_id, <dono do cartão>) = %s`, desde 1e7231dd/#759), em cada perna
-  do cartão.
+  `credit_bills.user_id` é NOT NULL (backfill pelo dono do cartão, #772): a fatura só entra
+  se for do usuário (`b.user_id = %s`), em cada perna do cartão.
   **Divergência conhecida:** relatório diário e semanal, ferramentas da IA de período
   livre e projeção de fechamento (`get_summary_by_period`) e o Repórter
   (`piggy_agents._month_stats`) seguem só em `launches`, sem o cartão. Limites mantidos de
