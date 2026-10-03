@@ -11,6 +11,7 @@ CONTROLES (CLAUDE.md §3):
     (é também o controle positivo: a rota não recusa tudo);
   • gravar a chave sempre, mesmo com None → `test_site_manda_o_mesmo_de_antes` vermelho;
   • `except ValueError` sem o RecursionError → caso do corpo aninhado vermelho (500);
+  • `await request.json()` sem teto, ou teto maior → `test_corpo_acima_do_teto_...` 4097 vermelho;
   • ler/validar o corpo antes dos portões → `..._nao_passa_na_frente_dos_portoes` vermelho.
 """
 from __future__ import annotations
@@ -107,6 +108,31 @@ def test_app_scheme_valido_vira_volta(user_id, pluggy_dublada, scheme):
     # A URI não vai para o banco: o rastro guarda só o hash do token.
     assert len(pluggy_dublada.registros) == 1
     assert "open-finance-volta" not in repr(pluggy_dublada.registros)
+
+
+def _valido_com_tamanho(n: int) -> bytes:
+    """JSON válido com app_scheme válido e exatamente `n` bytes."""
+    casca = b'{"app_scheme":"pigbank","pad":""}'
+    corpo = casca[:-2] + b"A" * (n - len(casca)) + b'"}'
+    assert len(corpo) == n and json.loads(corpo)["app_scheme"] == "pigbank"
+    return corpo
+
+
+@pytest.mark.parametrize("n,aplica", [
+    (4096, True), (4097, False), (1024 * 1024, False),
+])
+def test_corpo_acima_do_teto_vale_sem_o_campo(user_id, pluggy_dublada, n, aplica):
+    """Teto de leitura (_CORPO_MAX): até 4096 bytes o corpo vale; acima, a rota para de
+    ler e segue como se não houvesse corpo — 200 com o payload de hoje, nunca 400/500."""
+    promote_to_pro(user_id)
+    client = TestClient(dashboard.app)
+    r = _post(client, user_id, _auth(client, user_id), _valido_com_tamanho(n))
+    assert r.status_code == 200, r.text
+    assert len(pluggy_dublada.corpos) == 1
+    esperado = dict(_options_de_hoje(user_id))
+    if aplica:
+        esperado["oauthRedirectUri"] = "pigbank://open-finance-volta"
+    assert dict(_options(pluggy_dublada.corpos[0])) == esperado
 
 
 @pytest.mark.parametrize("valor", [

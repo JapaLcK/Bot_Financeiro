@@ -1753,6 +1753,7 @@ async def open_finance_caixinha_bind_route(request: Request, user_id: int, body:
 # cliente quiser. O site não manda o campo.
 _APP_SCHEMES = frozenset({"pigbank", "pigbank-staging", "pigbank-dev"})
 _APP_VOLTA_OF = "open-finance-volta"
+_CORPO_MAX = 4096  # corpo legítimo tem ~30 bytes; acima disso é ignorado, como se não houvesse corpo
 
 
 @router.post("/open-finance/{user_id}/connect-token")
@@ -1766,10 +1767,17 @@ async def open_finance_connect_token_route(request: Request, user_id: int):
     await _ensure_of_access_allowed(user_id)
 
     # Corpo lido à mão e só depois dos portões, pela mesma razão do mock-connect:
-    # parâmetro tipado decodificaria antes da sessão. Vazio/malformado = sem o campo;
-    # aninhamento fundo levanta RecursionError (não é ValueError) e cai no mesmo caso.
+    # parâmetro tipado decodificaria antes da sessão. Lido em streaming até _CORPO_MAX
+    # (o app não tem teto global de corpo): acima disso para de ler e vale "sem o campo",
+    # como vazio/malformado; aninhamento fundo levanta RecursionError (não é ValueError).
     try:
-        corpo = await request.json()
+        pedacos, total = [], 0
+        async for p in request.stream():
+            total += len(p)
+            if total > _CORPO_MAX:
+                raise ValueError("corpo grande demais")
+            pedacos.append(p)
+        corpo = json.loads(b"".join(pedacos))
     except (ValueError, RecursionError):
         corpo = None
     scheme = corpo.get("app_scheme") if isinstance(corpo, dict) else None
