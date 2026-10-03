@@ -290,6 +290,7 @@ def _semeia(uid: int) -> None:
                 (uid, uuid.uuid4().hex),
             )
             cur.execute("insert into daily_report_prefs (user_id) values (%s)", (uid,))
+            cur.execute("insert into guia_painel (user_id, concluido_em) values (%s, now())", (uid,))
         conn.commit()
 
 
@@ -328,7 +329,7 @@ _TABELAS_SIMPLES = (
     "user_category_rules", "user_categories", "agent_events", "agents",
     "ai_messages", "ai_pending_actions", "ai_fallback_log", "ai_proactive_cache",
     "pending_actions",
-    "ofx_imports", "daily_report_prefs", "launches", "financial_spaces",
+    "ofx_imports", "daily_report_prefs", "guia_painel", "launches", "financial_spaces",
     # `accounts` NÃO entra: desde o conserto do #246 a linha SOBREVIVE ao reset
     # com balance = 0 (é o lock dela que serializa o reset contra um lançamento
     # concorrente). A garantia real virou `balance == 0`, medida em _saldo().

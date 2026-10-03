@@ -37,6 +37,8 @@ def _tipo(s: dict) -> str:
         return " | ".join(_tipo(x) for x in s["anyOf"])
     if chaves == {"type", "enum"} and t == "string" and all(isinstance(v, str) for v in s["enum"]):
         return " | ".join(json.dumps(v, ensure_ascii=False) for v in s["enum"])
+    if chaves == {"type", "const"} and t == "string" and isinstance(s["const"], str):  # Literal de um valor só
+        return json.dumps(s["const"], ensure_ascii=False)
     if chaves == {"type"} and t in _PRIMITIVO:
         return _PRIMITIVO[t]
     # Decimal (dinheiro, sai como texto), datetime e o teto de tamanho da query: o TS só vê a string.
@@ -113,18 +115,17 @@ def gerar(spec: dict) -> str:
     rotas = {"json": [], "sse": [], "put": [], "post": [], "query": []}
     for p in sorted(spec["paths"]):
         item = spec["paths"][p]
-        if set(item) in ({"get"}, {"get", "put"}):
+        if set(item) in ({"get"}, {"get", "put"}, {"get", "post"}):
             get = dict(item["get"])
             if "parameters" in get:
                 rotas["query"].append(f"{json.dumps(p)}: {_query(p, get.pop('parameters'))}")
             tipo_resposta, tipo = _resposta_200(p, get)
-        elif set(item) == {"post"}:
-            tipo_resposta, tipo = "post", _escrita(p, item["post"])
-        else:
+            rotas[tipo_resposta].append(f"{json.dumps(p)}: {tipo}")
+        elif set(item) != {"post"}:
             raise _recusa({p: item})
-        rotas[tipo_resposta].append(f"{json.dumps(p)}: {tipo}")
-        if "put" in item:
-            rotas["put"].append(f"{json.dumps(p)}: {_escrita(p, item['put'])}")
+        for metodo in ("put", "post"):
+            if metodo in item:
+                rotas[metodo].append(f"{json.dumps(p)}: {_escrita(p, item[metodo])}")
     linhas.append(f"export type RotasGet = {{ {'; '.join(rotas['json'])} }};\n")
     if rotas["query"]:
         linhas.append(f"export type QueryGet = {{ {'; '.join(rotas['query'])} }};\n")

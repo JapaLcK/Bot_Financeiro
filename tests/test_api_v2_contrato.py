@@ -19,6 +19,7 @@ from api.v2.assinaturas import Assinaturas
 from api.v2.categorias import Categorias
 from api.v2.contas import Contas
 from api.v2.erros import ErroV2
+from api.v2.guia import PASSOS, Guia
 from api.v2.lancamentos import Lancamentos
 from api.v2.me import Me
 from api.v2.perfil import Perfil
@@ -292,6 +293,14 @@ def test_fixture_de_categorias_segue_o_modelo(nome):
     Categorias.model_validate(FIXTURES["categorias"][nome])
 
 
+@pytest.mark.parametrize("nome", sorted(FIXTURES["guia"]))
+def test_fixture_do_guia_segue_o_modelo_e_o_roteiro(nome):
+    """Fonte única: o roteiro servido ao navegador é o `PASSOS` do servidor, campo a campo."""
+    g = Guia.model_validate(FIXTURES["guia"][nome])
+    assert g.estado == nome
+    assert [{k: p[k] for k in PASSOS[0]} for p in FIXTURES["guia"][nome]["passos"]] == list(PASSOS)
+
+
 @pytest.mark.parametrize("nome", sorted(FIXTURES["erros"]))
 def test_fixture_de_erro_segue_o_envelope(nome):
     f = FIXTURES["erros"][nome]
@@ -300,3 +309,13 @@ def test_fixture_de_erro_segue_o_envelope(nome):
             ErroV2.model_validate(f["body"])
     else:
         assert ErroV2.model_validate(f["body"]).error.code
+
+
+def test_gerador_traduz_literal_de_um_valor_e_get_com_post():
+    schemas = {"Aa": {"type": "object", "required": ["k"], "properties": {"k": {"type": "string", "const": "x"}}}}
+    paths = {"/a": {"get": _get("#/components/schemas/Aa")["get"], **_post("#/components/schemas/Aa")}}
+    assert gerar(_spec(schemas, paths)) == CABECALHO + (
+        'export type Aa = { k: "x" };\n'
+        'export type RotasGet = { "/a": Aa };\n'
+        'export type RotasPost = { "/a": { corpo: Aa; resposta: Aa } };\n'
+    )
