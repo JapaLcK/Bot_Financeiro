@@ -102,7 +102,7 @@ test("carregando: só a tela de carregamento até o /me chegar; depois o painel 
   const { page, n } = await abrir(ctx);
   const status = page.getByRole("status");
   await status.waitFor();
-  const antes = [await status.textContent(), (await blocos(page)).length, await page.locator(".piggy-band, #board-profile, .tag-demo").count()];
+  const antes = [await status.textContent(), (await blocos(page)).length, await page.locator(".piggy-band, #board-profile, .selo").count()];
   libera();
   await montado(page);
   const depois = [await status.count(), (await blocos(page)).length > 0];

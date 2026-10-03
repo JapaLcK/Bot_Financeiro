@@ -5,7 +5,8 @@
  *
  *   · card: total, as 3 maiores ATIVAS, a seta leva à página;
  *   · página: as duas seções, dia, próxima, meio, reajuste, "parece cancelada", totais,
- *     e a etiqueta de demonstração (a barra lateral e o Piggy seguem sintéticos);
+ *     sem etiqueta de página nem selo "demonstração" (o dado é real; os blocos inventados
+ *     levam o selo cada um, dashboard_v2_resumo_real.test.mjs);
  *   · Essencial: o 403 `pro_required` vira o convite, sem ação e sem POST;
  *   · POST com o CSRF do auth-refresh.js e Content-Type JSON (sem ele o FastAPI dá 422),
  *     Desfazer voltando ao estado anterior (também depois da última, de uma falha dele e de
@@ -61,8 +62,8 @@ const erro = (r, nome) => { const e = RESPOSTAS.erros[nome]; return r.fulfill({ 
 // derruba a resposta. `trava.p`: promessa que segura o POST enquanto estiver posta.
 async function abrir({ width = 1440, plano = "plus", perfil = "economizar", hash = "#/", cookie = true, get, falha, trava, raiz, url = PAINEL } = {}) {
   const ctx = await browser.newContext({ viewport: { width, height: width > 760 ? 900 : 812 }, reducedMotion: "reduce", timezoneId: "America/Sao_Paulo" });
-  await servir(ctx, raiz, { plano });
-  await ctx.addInitScript((p) => localStorage.setItem("pigbank.dashboard.profile.v1", JSON.stringify(p)), perfil);
+  await servir(ctx, raiz, { plano, perfil });
+  await ctx.addInitScript((p) => localStorage.setItem("pigbank.dashboard.profile.v1", JSON.stringify(p)), perfil); // o protótipo lê daqui
   if (cookie) await ctx.addCookies([{ name: "csrf_token", value: encodeURIComponent(CSRF), url: ORIGIN }]);
   const srv = backend();
   const posts = [];
@@ -118,7 +119,7 @@ test("card (Plus, Economizar): total, as 3 maiores ativas em ordem, sem a cancel
   assert.equal(dia, "todo dia 10");
 });
 
-test("página: duas seções, dia, próxima, meio com e sem final, reajuste, cancelada, totais; com a etiqueta de demonstração", async () => {
+test("página: duas seções, dia, próxima, meio com e sem final, reajuste, cancelada, totais; sem etiqueta nem selo de demonstração", async () => {
   const { ctx, page } = await abrir({ hash: "#/assinaturas" });
   await pronta(page);
   const texto = async (sel, nome) => (await linha(page, sel, nome).textContent()).replace(/\s+/g, " ");
@@ -140,6 +141,7 @@ test("página: duas seções, dia, próxima, meio com e sem final, reajuste, can
     conta: await linha(page, SERV, "Smart Fit").locator("i.ph-bank").count(),
     etiqueta: await page.evaluate(() => document.body.innerText.includes("Dados de demonstração")),
     rodape: await page.locator(".foot").count(),
+    selos: await page.locator(".page .selo").count(),
   };
   await ctx.close();
   assert.deepEqual(r.titulos, ["Serviços", "Outras cobranças recorrentes"]);
@@ -162,8 +164,9 @@ test("página: duas seções, dia, próxima, meio com e sem final, reajuste, can
   assert.match(r.porto, /baixou de R\$ 100,00 em 22 jun/);
   assert.equal(r.cartao, 1);
   assert.equal(r.conta, 1);
-  assert.equal(r.etiqueta, true);
-  assert.equal(r.rodape, 1);
+  assert.equal(r.etiqueta, false);
+  assert.equal(r.rodape, 0);
+  assert.equal(r.selos, 0);
 });
 
 test("sem seletor de mês na página (NO_MONTH); no Resumo ele aparece", async () => {
@@ -525,23 +528,18 @@ for (const width of [375, 1440]) {
     const { ctx, page } = await abrir({ width });
     const lateral = () => page.evaluate(() => document.scrollingElement.scrollWidth - document.scrollingElement.clientWidth);
     await page.locator("#w-assinaturas .sub-bill").first().waitFor();
-    const etiqueta = () => page.locator(".demo-strip").evaluateAll((es) => es.filter((e) => e.offsetParent).length);
     const r = {
       resumo: await lateral(),
       sobra: await page.locator("#w-assinaturas").evaluate((w) => w.scrollHeight - w.clientHeight),
-      etiquetaResumo: await etiqueta(),
     };
     await page.evaluate(() => { location.hash = "#/assinaturas"; });
     await pronta(page);
-    r.etiquetaPagina = await etiqueta();
     await clicar(page, SERV, "Netflix", "Ignorar");
     await sumir(page, SERV, "Netflix");
     r.pagina = await lateral();
     r.alturas = await page.locator(ACOES).evaluateAll((bs) => bs.map((b) => b.getBoundingClientRect().height));
     await ctx.close();
     assert.equal(r.resumo, 0);
-    // a faixa só aparece no celular (shell.css): lá ela está no Resumo e aqui também
-    assert.deepEqual([r.etiquetaResumo, r.etiquetaPagina], width < 760 ? [1, 1] : [0, 0]);
     assert.ok(r.sobra <= 1, `o card transborda ${r.sobra}px`);
     assert.equal(r.pagina, 0);
     assert.ok(r.alturas.length >= 8 && r.alturas.every((h) => h >= 44), JSON.stringify(r.alturas));

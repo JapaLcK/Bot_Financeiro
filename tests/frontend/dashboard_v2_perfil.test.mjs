@@ -2,7 +2,8 @@
  * Protótipo dashboard-v2, perfis do Resumo (parts/Board.tsx, ProfilePicker, BoardControls e
  * o ✕ do components/ui/draggable-widget-grid.tsx):
  *
- *   · 1ª visita: o modal abre; a escolha (ou Pular, ou Esc) monta o preset e fica lembrada;
+ *   · 1ª visita (perfil `null` no servidor): o modal abre; a escolha (ou Pular, ou Esc) monta o
+ *     preset e fica lembrada pelo PUT /api/v2/perfil (o mock do _painel.mjs guarda o que veio);
  *   · o ajuste é por perfil e "Restaurar padrão" volta ao preset do perfil atual;
  *   · o ✕ esconde por clique e por Enter, com e sem `inert` (Safari < 15.5): sem inert ele
  *     segue alcançável pelo Tab; depois o foco fica num bloco, e o catálogo o devolve;
@@ -20,10 +21,9 @@ import assert from "node:assert/strict";
 import { chromium } from "playwright";
 import { PAINEL, exigeArtefatoEmDia, servir } from "./_painel.mjs";
 
-const PERFIL = "pigbank.dashboard.profile.v1";
-const PADRAO = ["hero", "resumo", "categorias", "calendario", "simulador", "compromissos", "piggy", "metas", "patrimonio"];
-const INVESTIR = ["patrimonio", "rendimento", "wealth", "simulador", "metas", "resumo", "piggy"];
-const ECONOMIZAR = ["resumo", "metas", "piggy", "categorias", "assinaturas", "simulador", "compromissos"];
+const PADRAO = ["contas", "hero", "resumo", "categorias", "calendario", "simulador", "compromissos", "piggy", "metas", "patrimonio"];
+const INVESTIR = ["contas", "patrimonio", "rendimento", "wealth", "simulador", "metas", "resumo", "piggy"];
+const ECONOMIZAR = ["contas", "resumo", "metas", "piggy", "categorias", "assinaturas", "simulador", "compromissos"];
 
 let browser;
 before(async () => {
@@ -34,9 +34,7 @@ after(() => browser?.close());
 
 async function abrir({ width = 1440, plano = "pro", perfil = null, semInert = false, semStorage = false } = {}) {
   const ctx = await browser.newContext({ viewport: { width, height: width > 500 ? 1000 : 844 }, reducedMotion: "reduce" });
-  await servir(ctx, undefined, { plano });
-  // só na primeira carga: o reload tem de ler o que a página salvou
-  if (perfil) await ctx.addInitScript(([k, v]) => { if (!localStorage.getItem(k)) localStorage.setItem(k, v); }, [PERFIL, JSON.stringify(perfil)]);
+  await servir(ctx, undefined, { plano, perfil });
   if (semStorage) await ctx.addInitScript(() => {
     Object.defineProperty(window, "localStorage", { configurable: true, get() { throw new DOMException("bloqueado", "SecurityError"); } });
   });
@@ -69,20 +67,28 @@ const catalogo = async (page) => {
   await page.locator("#board-catalog").waitFor();
 };
 const ordenado = (a) => [...a].sort();
+// A troca é otimista: o cache muda antes do PUT sair; espera o PUT e a pintura seguinte.
+async function escolher(page, acao) {
+  const put = page.waitForRequest((r) => r.method() === "PUT" && r.url().endsWith("/api/v2/perfil"));
+  await acao();
+  await put;
+  await page.waitForTimeout(100);
+}
+const trocar = (page, p) => escolher(page, () => page.selectOption("#board-profile", p));
 
 test("1ª visita: modal abre; Investir monta o preset na ordem, lembrado no reload", async () => {
   const { ctx, page, erros } = await abrir({ width: 390 });
   assert.equal(await modalAberto(page), 1);
-  await page.getByRole("button", { name: /^Investir/ }).click();
+  await escolher(page, () => page.getByRole("button", { name: /^Investir/ }).click());
   const escolhido = await painel(page);
   const foco = await page.evaluate(() => document.activeElement?.id);
   await page.reload();
   await page.locator("[data-widget-id]").first().waitFor();
-  const r = [await modalAberto(page), await painel(page), await salvo(page, PERFIL)];
+  const r = [await modalAberto(page), await painel(page), await page.locator("#board-profile").inputValue()];
   await ctx.close();
   assert.deepEqual(escolhido, INVESTIR);
   assert.equal(foco, "board-profile");
-  assert.deepEqual(r, [0, INVESTIR, '"investir"']);
+  assert.deepEqual(r, [0, INVESTIR, "investir"]);
   assert.deepEqual(erros, []);
 });
 
@@ -90,10 +96,10 @@ for (const [nome, sair] of [
   ["Pular", (page) => page.getByRole("button", { name: "Pular, ver painel padrão" }).click()],
   ["Esc", (page) => page.keyboard.press("Escape")], // sem gesto antes: o Chrome fecha sem `cancel`
 ]) {
-  test(`1ª visita: ${nome} dá os 9 blocos de sempre e o modal não volta`, async () => {
+  test(`1ª visita: ${nome} dá os 10 blocos de sempre e o modal não volta`, async () => {
     const { ctx, page } = await abrir({ width: 390 });
     assert.equal(await modalAberto(page), 1);
-    await sair(page);
+    await escolher(page, () => sair(page));
     await page.locator(".picker[open]").waitFor({ state: "detached" });
     const antes = await painel(page);
     await page.reload();
@@ -110,9 +116,9 @@ test("o ajuste é por perfil: esconder em Investir não mexe em Economizar e fic
   await organizar(page);
   await page.getByRole("button", { name: "Esconder Onde está o dinheiro" }).click();
   const investir = await painel(page);
-  await page.selectOption("#board-profile", "economizar");
+  await trocar(page, "economizar");
   const economizar = await painel(page);
-  await page.selectOption("#board-profile", "investir");
+  await trocar(page, "investir");
   const volta = await painel(page);
   await ctx.close();
   assert.deepEqual(ordenado(investir), ordenado(INVESTIR.filter((id) => id !== "wealth")));
@@ -120,7 +126,7 @@ test("o ajuste é por perfil: esconder em Investir não mexe em Economizar e fic
   assert.deepEqual(volta, investir);
 });
 
-test("Restaurar padrão volta ao preset do perfil atual, não aos 9", async () => {
+test("Restaurar padrão volta ao preset do perfil atual, não aos 10", async () => {
   const { ctx, page } = await abrir({ perfil: "investir" });
   await organizar(page);
   await page.getByRole("button", { name: "Esconder Metas e caixinhas" }).click();
@@ -188,7 +194,7 @@ test("plano essencial: previsão, Piggy e simulador fora do painel em todos os p
   const { ctx, page } = await abrir({ plano: "essencial", perfil: "padrao" });
   const vistos = {};
   for (const p of ["padrao", "economizar", "investir", "controlar", "dividas", "autonomo"]) {
-    await page.selectOption("#board-profile", p);
+    await trocar(page, p);
     vistos[p] = (await painel(page)).filter((id) => ["hero", "piggy", "simulador"].includes(id));
   }
   await ctx.close();
@@ -202,7 +208,7 @@ test("esvaziar no essencial salva [] e o upgrade não põe o travado de volta: e
   const x = page.locator("[data-slot=widget-remove]");
   while (await x.count()) await x.first().click();
   const vazio = await salvo(page, "pigbank.dashboard.layout.v1.investir");
-  await servir(ctx, undefined, { plano: "pro" }); // o upgrade: o /me passa a dizer Pro
+  await servir(ctx, undefined, { plano: "pro", perfil: "investir" }); // o upgrade: o /me passa a dizer Pro
   await page.reload(); // goto na mesma URL com # só troca o hash, sem recarregar
   await page.locator("#board-profile").waitFor();
   const depois = await painel(page);
@@ -226,7 +232,7 @@ test("positivo: plano pro mostra previsão, Piggy e simulador", async () => {
 test("storage que lança: monta, o modal abre e a escolha vale em memória", async () => {
   const { ctx, page, erros } = await abrir({ semStorage: true });
   assert.equal(await modalAberto(page), 1);
-  await page.getByRole("button", { name: /^Investir/ }).click();
+  await escolher(page, () => page.getByRole("button", { name: /^Investir/ }).click());
   const r = [await modalAberto(page), ordenado(await painel(page))];
   await ctx.close();
   assert.deepEqual(r, [0, ordenado(INVESTIR)]);
@@ -238,7 +244,7 @@ test("390: modal, seletor e catálogo sem rolagem horizontal; ✕ com 44 × 44",
   const larg = () => page.evaluate(() => document.scrollingElement.scrollWidth - document.scrollingElement.clientWidth);
   const dentro = (sel) => page.locator(sel).evaluate((el) => { const r = el.getBoundingClientRect(); return r.left >= 0 && r.right <= innerWidth; });
   const modal = [await larg(), await dentro(".picker")];
-  await page.getByRole("button", { name: /^Controlar gastos/ }).click();
+  await escolher(page, () => page.getByRole("button", { name: /^Controlar gastos/ }).click());
   const seletor = [await larg(), await dentro(".board-profile")];
   await organizar(page);
   await catalogo(page);
@@ -249,9 +255,11 @@ test("390: modal, seletor e catálogo sem rolagem horizontal; ✕ com 44 × 44",
   assert.ok(xs.length >= 5 && xs.every(([w, h]) => w >= 44 && h >= 44), JSON.stringify(xs));
 });
 
-// Os três blocos novos: cada um abre o painel do seu perfil (1º ou 2º na leitura), o
-// perfil ladrilha sem buraco fora da última linha, e o conteúdo cabe na célula.
-for (const [perfil, bloco] of [["investir", "rendimento"], ["dividas", "parcelas"], ["autonomo", "renda"]]) {
+// Os três blocos novos: cada um abre o painel do seu perfil logo depois das contas (na posição
+// medida de cada um), o perfil ladrilha sem buraco fora da última linha, e o conteúdo cabe na célula.
+// Dívidas em 4º é regressão aceita do bloco `contas` no topo (antes era 2º): o ladrilhador põe
+// Próximos 30 dias no buraco ao lado da fatura, antes das Parcelas.
+for (const [perfil, bloco, posicao] of [["investir", "rendimento", 3], ["dividas", "parcelas", 4], ["autonomo", "renda", 2]]) {
   test(`1440: ${bloco} abre o painel ${perfil}, sem buraco e sem estourar a célula`, async () => {
     const { ctx, page, erros } = await abrir({ perfil });
     const r = await page.evaluate((id) => {
@@ -271,7 +279,7 @@ for (const [perfil, bloco] of [["investir", "rendimento"], ["dividas", "parcelas
       return { pos: Number(el.getAttribute("aria-posinset")), holes, sobra: art.scrollHeight - art.clientHeight };
     }, bloco);
     await ctx.close();
-    assert.ok(r.pos <= 2, `posição ${r.pos}`);
+    assert.equal(r.pos, posicao);
     assert.deepEqual(r.holes, []);
     assert.ok(r.sobra <= 1, `conteúdo passa ${r.sobra}px da célula`);
     assert.deepEqual(erros, []);

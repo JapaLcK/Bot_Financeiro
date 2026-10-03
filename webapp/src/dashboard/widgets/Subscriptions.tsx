@@ -63,7 +63,7 @@ export function Subscriptions() {
   const ativas = data?.servicos.filter((a) => a.status === "ativa").slice(0, 3) ?? [];
   const n = data && !data.servicos.length ? data.outras.length : 0;
   return (
-    <Frame id="assinaturas" title="Assinaturas">
+    <Frame id="assinaturas" title="Assinaturas" real>
       {estado ?? (
         <>
           <p className="w-lede"><span className="num">{money(Number(data!.total_mensal))}</span> por mês · <span className="num">{money0(Number(data!.total_anual))}</span> por ano</p>
@@ -169,7 +169,7 @@ export function SubscriptionList() {
       )}
     </div>
   );
-  if (estado) return <div className="panel span-12"><Frame id="assinaturas" title="Assinaturas">{avisoBloco}{estado}</Frame></div>;
+  if (estado) return <div className="panel span-12"><Frame id="assinaturas" title="Assinaturas" real>{avisoBloco}{estado}</Frame></div>;
   const { servicos, outras, total_mensal, total_anual } = data!;
   // O item ignorado some da API: só dá para desfazer agora, voltando ao estado anterior.
   const marcar = (a: Assinatura, status: MarcaIn["status"]) => {
@@ -191,7 +191,7 @@ export function SubscriptionList() {
   return (
     <>
       <div className="panel span-12">
-        <Frame id="assinaturas-servicos" title="Serviços">
+        <Frame id="assinaturas-servicos" title="Serviços" real>
           <dl className="detail-facts">
             <div><dt>Por mês</dt><dd className="num">{money(Number(total_mensal))}</dd></div>
             <div><dt>Por ano</dt><dd className="num">{money0(Number(total_anual))}</dd></div>
@@ -212,7 +212,7 @@ export function SubscriptionList() {
       </div>
       {outras.length > 0 && (
         <div className="panel span-12">
-          <Frame id="assinaturas-outras" title="Outras cobranças recorrentes">
+          <Frame id="assinaturas-outras" title="Outras cobranças recorrentes" real>
             <ul className="subs">
               {outras.map((a, i) => (
                 <Linha key={`${a.chave}#${i}`} a={a}>

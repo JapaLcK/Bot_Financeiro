@@ -439,4 +439,26 @@ PR de cada etapa, não soluções prontas. Cada PR confere se ainda valem, decid
     dono), caixinha e Carteira seguem livres. Trava, textos e tabela em
     `core/services/fonte_unica.py` e `docs/CLAUDE.md` ("Q36 fora do v2"); a chave que falha
     libera. Os botões do `/app` continuam à vista: o servidor recusa e a tela mostra o texto.
+  - PR C: a tela do Resumo no `/painel` com dado real. O perfil vem do servidor
+    (`GET`/`PUT /api/v2/perfil`): o modal só abre com `null`, a escolha é otimista e desfaz
+    com aviso no erro, e o seletor fica `aria-disabled` enquanto o PUT está em voo (sem
+    dois PUT concorrentes). O bloco `contas` entra no topo do painel padrão e dos 5
+    presets: total com a nota "carteira a confirmar" e a contagem das contas fora do total
+    (a lista que a tela abre, e não o campo declarado), lista curta com a Carteira Piggy e
+    as contas que entram no total, as demais atrás de "ver contas fora do total", saldo
+    ausente ou ilegível = "—", nunca R$ 0,00, e moeda fora de três letras maiúsculas sai
+    só o número. Entrou e Saiu vêm de `resumo-do-mes`, com o mês anterior inteiro como
+    referência e os `motivos` como selos. O mês da página é o corrente de São Paulo, com
+    seletor dos últimos 6 meses reais (`s.mes`, separado de `s.month`, que os blocos de
+    exemplo ainda leem e fica em setembro). Continuam sintéticos, cada um com o selo
+    "demonstração" no próprio bloco: Fatura, Guardado, Rendimento e os demais blocos;
+    no modo real o selo também marca o título do Resumo, o extrato, a faixa do Piggy e o
+    chat. A etiqueta única da página saiu. O protótipo (`dashboard-v2/index.html`)
+    segue como antes. Limites conhecidos, para o dono: o seletor de mês também aparece
+    em `/lancamentos`, `/gastos` e `/previsao` e lá troca só o rótulo; o Cmd-K mostra
+    transações de exemplo sem selo; "Para onde vai" já transbordava e o selo que desce
+    para a 2ª linha piorou; Entrou e Saiu saem sem centavos, como Fatura e Guardado;
+    o seletor de perfil tem 32 px (o `.field` global); no preset Dívidas "Parcelas
+    futuras" caiu para a 4ª posição de leitura; a conta sem senha leva 403 também no PUT
+    e a tela só desfaz e avisa; "Recomeçar do zero" com o `/painel` aberto reabre o modal.
 - [ ] Etapa 0 · [ ] 1 · [ ] 2 · [ ] 3 · [ ] 4 · [ ] 5 · [ ] 6 · [ ] 7

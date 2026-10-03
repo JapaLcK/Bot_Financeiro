@@ -42,6 +42,7 @@ export interface Goal { id: string; label: string; icon: string; color: string; 
 export interface Sim { cuts: Record<string, number>; extra: number; goal: string }
 export interface DashState {
   month: string;
+  mes: string; // o mês real (com backend); ver mesDe em store.js
   horizon: "mes" | "30" | "90";
   sim: Sim;
   filter: { category: string | null; day: string | null; query: string; source: NonNullable<Launch["source"]> | "todos" };

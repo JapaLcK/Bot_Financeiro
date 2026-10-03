@@ -1,7 +1,8 @@
 import { useEffect, useMemo, useRef, useState, type KeyboardEvent } from "react";
 import { CATEGORIES, HORIZONS, MONTHS, summary } from "../lib/api";
 import { dayMonth, money, monthTitle } from "../lib/format.js";
-import { dayKey, get, set, setFilter, setSim } from "../lib/store.js";
+import { dayKey, escolherMes, get, set, setFilter, setSim } from "../lib/store.js";
+import { MESES } from "../lib/v2";
 import { PRESETS } from "../widgets/Simulator";
 import { NO_MONTH, ROUTES, go, useRoute, type Path } from "../router";
 import { NATIVE, hide, isOpen, show, untrap } from "./dialog";
@@ -18,7 +19,7 @@ function commands(q: string, here: Path): Cmd[] {
     { id: "edit", group: "Ações", label: s.editing ? "Terminar de organizar o painel" : "Organizar o painel", icon: "ph-pencil-simple", run: () => set({ editing: !s.editing }) },
     ...PRESETS.map((p) => ({ id: `sim-${p.label}`, group: "Ações", label: `Simular: ${p.label.toLowerCase()}`, icon: "ph-lightning", run: () => { setSim({ cuts: { ...get().sim.cuts, ...p.cuts } }); go("/simulador"); } })),
     ...(["mes", "30", "90"] as const).map((h) => ({ id: `h-${h}`, group: "Ações", label: `Previsão: ${HORIZONS[h].toLowerCase()}`, icon: "ph-clock", run: () => { set({ horizon: h, month: MONTHS[MONTHS.length - 1] }); go("/previsao"); } })),
-    ...MONTHS.map((m) => ({ id: `m-${m}`, group: "Meses", label: monthTitle(m), icon: "ph-calendar-dots", run: () => { set({ month: m }); if (NO_MONTH.includes(here)) go("/"); } })), // sem seletor na página, o mês trocado apareceria só depois, noutra tela
+    ...MESES.map((m) => ({ id: `m-${m}`, group: "Meses", label: monthTitle(m), icon: "ph-calendar-dots", run: () => { escolherMes(m); if (NO_MONTH.includes(here)) go("/"); } })), // sem seletor na página, o mês trocado apareceria só depois, noutra tela
     ...CATEGORIES.map((c) => ({ id: `c-${c.id}`, group: "Filtrar por categoria", label: c.label, icon: c.icon, run: () => { setFilter({ category: c.id, day: null, query: "", source: "todos" }); go("/lancamentos"); } })),
   ];
   const nq = norm(q.trim());
