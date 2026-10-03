@@ -1,13 +1,18 @@
 """core/services/extras_assinar.py — os produtos extras do checkout (funil v3).
 
-Slot 1 usa as chaves de hoje (`ebook_price`/`ebook_url`); o slot n (2..SLOTS)
-usa `ebook_{n}_price`/`ebook_{n}_url`. A metadata da sessão é a FOTO do que foi
+A env tem SLOTS (`da_env`); a foto tem POSIÇÕES na lista oferecida: a posição 1
+usa as chaves de hoje (`ebook_price`/`ebook_url`) e a posição n (2..SLOTS) usa
+`ebook_{n}_price`/`ebook_{n}_url`. A metadata da sessão é a FOTO do que foi
 oferecido: quem entrega lê dela, nunca da env.
 """
 
 from __future__ import annotations
 
+import logging
+import os
+
 SLOTS = 10   # teto do `optional_items` do Stripe
+_MAX_META = 500   # o Stripe recusa valor de metadata acima disso (medido)
 
 
 def _chave(n: int, campo: str) -> str:
@@ -34,8 +39,42 @@ def linhas_da_fatura(invoice) -> list:
     return _ler(linhas, "data") or []
 
 
+def da_env() -> list[tuple[str, str]]:
+    """[(preço, url)] oferecíveis agora, na ordem do slot. Slot 1 =
+    `STRIPE_PRICE_ID_EBOOK`/`EBOOK_URL`; slot n = `..._EBOOK_n`/`EBOOK_URL_n`.
+    Cada slot vale sozinho: preço sem URL venderia algo que não se entrega."""
+    log = logging.getLogger(__name__)
+    itens: list[tuple[str, str]] = []
+    for n in range(1, SLOTS + 1):
+        sufixo = "" if n == 1 else f"_{n}"
+        # strip: espaço ou quebra de linha colados no Railway iriam crus ao Stripe.
+        preco = os.getenv(f"STRIPE_PRICE_ID_EBOOK{sufixo}", "").strip()
+        url = os.getenv(f"EBOOK_URL{sufixo}", "").strip()
+        if not preco:
+            continue
+        if not url or len(url) > _MAX_META:
+            # Nunca logar a URL: é o acesso ao PDF pago.
+            log.warning("ebook_nao_oferecido: slot %d, EBOOK_URL vazia ou com %d caracteres (max 500)",
+                        n, len(url))
+        elif any(p == preco for p, _ in itens):
+            log.warning("ebook_nao_oferecido: slot %d repete o preço de um slot anterior", n)
+        else:
+            itens.append((preco, url))
+    return itens
+
+
+def para_metadata(itens) -> dict[str, str]:
+    """Numera pela POSIÇÃO na lista oferecida, não pelo slot da env: o 1º item
+    sempre grava `ebook_price`/`ebook_url` (com um produto, o metadata de hoje)."""
+    meta = {}
+    for n, (preco, url) in enumerate(itens, 1):
+        meta[_chave(n, "price")] = preco
+        meta[_chave(n, "url")] = url
+    return meta
+
+
 def da_metadata(meta) -> list[tuple[str, str | None]]:
-    """[(preço, url | None)] dos slots com preço, na ordem do slot."""
+    """[(preço, url | None)] das posições com preço, na ordem da posição."""
     itens = []
     for n in range(1, SLOTS + 1):
         preco = _ler(meta, _chave(n, "price"))

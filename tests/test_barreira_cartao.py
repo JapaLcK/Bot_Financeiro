@@ -4,8 +4,9 @@ Nenhum escritor grava essa linha; é defesa em profundidade. Cada junção compr
 `left join credit_cards c on c.id = t.card_id and c.user_id = t.user_id`: o VALOR da compra
 continua contando e o nome/final/cor/bandeira do cartão de B viram NULL ('Cartão' onde o
 texto é gravado ou impresso). O tile da consulta 8 do /app só lê fatura do dono do cartão:
-fatura de B nunca aparece e a de `user_id` NULL some (o tile diz 'Sem fatura'; o gasto segue
-em "Gastos do mês") — decisão do dono.
+fatura de B nunca aparece. O portão no fim cobre toda junção por `card_id`
+(compra, fatura, recorrente); a fatura apontando para o cartão de B (#770) é provada com
+banco em test_barreira_fatura_cartao.py.
 
 Cena (`_cena`): A tem cartão "Nubank" com compra legítima de 80; uma compra de 4321 na
 fatura de A com `card_id` trocado para o cartão de B ("Cartao do B", final 9999); e um 3x300
@@ -101,38 +102,27 @@ def test_antecipar_e_desfazer_nao_gravam_nem_devolvem_o_nome_do_cartao_de_b():
 
 # ── ponto 3: o tile da fatura (consulta 8 de get_financial_data) ────────────
 
-def _tile(outra_fatura_de=None, so_a_nula=False):
-    """A com cartão e compra de 80 (fatura fecha dia 10). `outra_fatura_de`: dono ('b' ou
-    None) de uma 2ª fatura de 999 no MESMO cartão, fechando dia 20 — o LIMIT 1 pega a mais
-    tarde. `so_a_nula`: a fatura de A vira `user_id` NULL e é a única do período."""
+def _tile():
+    """A com cartão e compra de 80 (fatura fecha dia 10); uma 2ª fatura de 999, de B, no MESMO
+    cartão, fechando dia 20 — o LIMIT 1 pegaria a mais tarde."""
     a, b = usuario_pagante(), usuario_pagante()
     cartao = db.create_card(a, "Nubank", closing_day=10, due_day=17)
     fatura = db.add_credit_purchase(a, cartao, 80, "mercado", "de A", DIA)[2]
-    if so_a_nula:
-        q("update credit_bills set user_id = null where id = %s", (fatura,))
-    else:
-        q("""insert into credit_bills (user_id, card_id, period_start, period_end, total)
-             values (%s, %s, %s, %s, 999)""",
-          (b if outra_fatura_de == "b" else None, cartao, INICIO.replace(day=11), INICIO.replace(day=20)))
+    q("""insert into credit_bills (user_id, card_id, period_start, period_end, total)
+         values (%s, %s, %s, %s, 999)""",
+      (b, cartao, INICIO.replace(day=11), INICIO.replace(day=20)))
     app = asyncio.run(dashboard.get_financial_data(a, year=INICIO.year, month=INICIO.month))
-    return [c for c in app["credit_cards"] if c["id"] == cartao][0], fatura, app
+    return [c for c in app["credit_cards"] if c["id"] == cartao][0], fatura
 
 
-def test_tile_mostra_a_fatura_de_a_e_nunca_a_de_b_nem_a_null():
-    for dono in ("b", None):
-        tile, fatura, _ = _tile(outra_fatura_de=dono)
-        assert (tile["bill_id"], tile["total"]) == (fatura, 80.0), dono
+def test_tile_mostra_a_fatura_de_a_e_nunca_a_de_b():
+    tile, fatura = _tile()
+    assert (tile["bill_id"], tile["total"]) == (fatura, 80.0)
 
 
-def test_tile_com_so_a_fatura_null_fica_sem_fatura_e_o_gasto_continua_no_mes():
-    tile, _, app = _tile(so_a_nula=True)
-    assert (tile["bill_id"], tile["total"], tile["period_end"]) == (None, 0.0, None)
-    assert app["monthly_expense"] == 80.0
+# ── portão de varredura: toda junção por card_id tem a guarda do dono ──────
 
-
-# ── portão de varredura: toda junção compra↔cartão tem a guarda do dono ─────
-
-_J = r"join\s+credit_cards\s+(?:as\s+)?(\w+)\s+on\s+\1\.id\s*=\s*(t|ct)\.card_id\b"
+_J = r"join\s+credit_cards\s+(?:as\s+)?(\w+)\s+on\s+\1\.id\s*=\s*(\w+)\.card_id\b"
 _G = _J + r"\s+and\s+\1\.user_id\s*=\s*\2\.user_id\b"
 
 
@@ -140,14 +130,16 @@ def _sem_guarda(texto: str) -> bool:
     return len(re.findall(_J, texto, re.I)) > len(re.findall(_G, texto, re.I))
 
 
-def test_toda_juncao_compra_cartao_tem_a_guarda_do_dono():
-    """Por unidade (`_unidades` do #759), nº de junções `c.id = t|ct.card_id` <= nº das que
-    trazem `and c.user_id = t|ct.user_id` logo em seguida. Prende a classe TEXTUAL; quem prova
-    comportamento são os testes com banco acima. O portão NÃO enxerga: alias de compra
-    diferente de `t`/`ct`; a busca do nome por `select ... from credit_cards where id = %s`
-    (undo_installment_group) e o LATERAL da consulta 8 — esses dois só os testes com banco
-    cobrem; e string solta da unidade com o texto da junção guardada mascara uma sem guarda
-    (o contador não pareia)."""
+def test_toda_juncao_por_card_id_tem_a_guarda_do_dono():
+    """Por unidade (`_unidades` do #759), nº de junções `c.id = X.card_id` (qualquer alias X:
+    compra, fatura, recorrente) <= nº das que trazem `and c.user_id = X.user_id` logo em
+    seguida, com o MESMO alias. Prende a classe TEXTUAL; quem prova comportamento são os
+    testes com banco (aqui e em test_barreira_fatura_cartao.py). O portão NÃO enxerga: junção
+    sem alias ou com `using`; `default_card_id = c.id` e outras junções pelo lado do cartão;
+    a busca do nome por `select ... from credit_cards where id = %s` (undo_installment_group)
+    e o LATERAL da consulta 8 — só os testes com banco cobrem; comparação de dono feita em
+    Python; escrita (INSERT/UPDATE) sem guarda; e string solta da unidade com o texto da
+    junção guardada mascara uma sem guarda (o contador não pareia)."""
     com_juncao, faltando = set(), []
     for unidade, texto in _unidades():
         if re.search(_J, texto, re.I):
@@ -155,13 +147,18 @@ def test_toda_juncao_compra_cartao_tem_a_guarda_do_dono():
             if _sem_guarda(texto):
                 faltando.append(unidade)
     assert {("db/analytics.py", "list_history"), ("db/cards.py", "list_installment_groups_detailed"),
-            ("frontend/finance_bot_websocket_custom.py", "get_financial_data")} <= com_juncao
-    assert not faltando, f"join credit_cards por t/ct.card_id sem c.user_id = t/ct.user_id: {faltando}"
+            ("frontend/finance_bot_websocket_custom.py", "get_financial_data"),
+            ("db/cards.py", "list_open_bills"), ("frontend/routes/cards.py", "pay_bill_route"),
+            ("db/recurring.py", "list_recurring_expenses")} <= com_juncao
+    assert not faltando, f"join credit_cards por X.card_id sem c.user_id = X.user_id: {faltando}"
 
 
 def test_o_contador_do_portao_da_juncao_de_cartao():
     j = "join credit_cards c on c.id = ct.card_id"
     assert _sem_guarda(j)
     assert not _sem_guarda("LEFT JOIN credit_cards c ON c.id = ct.card_id AND c.user_id = ct.user_id")
-    assert not _sem_guarda("join credit_cards c on c.id = b.card_id")
+    assert _sem_guarda("join credit_cards c on c.id = b.card_id")
+    assert not _sem_guarda("join credit_cards c on c.id = b.card_id and c.user_id = b.user_id")
+    assert _sem_guarda("left join credit_cards c on c.id = r.card_id")
+    assert _sem_guarda("join credit_cards c on c.id = b.card_id and c.user_id = t.user_id")
     assert _sem_guarda("join credit_cards c on c.id = t.card_id and c.user_id = b.user_id")

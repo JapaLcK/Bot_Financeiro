@@ -9,6 +9,8 @@
   display: inline-grid; grid-auto-flow: column; align-items: center; gap: 8px;
   font-size: 13px; color: var(--ink-2);
 }
+/* Alvo de toque de 44px só neste seletor (o .field global segue com 32px); a seta acompanha. */
+.board-profile .field { height: 44px; background-position: calc(100% - 15px) 20px, calc(100% - 10px) 20px; }
 /* PUT do perfil em voo: esmaece só depois de 300ms (o PUT rápido não pisca) e volta na hora. */
 .board-profile select[aria-busy="true"] { cursor: progress; opacity: 0.6; transition: opacity 0.15s 0.3s; }
 

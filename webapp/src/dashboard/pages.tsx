@@ -3,9 +3,7 @@ import { BANK_CDB, BANK_CDB_TOTAL, GOALS, MONTHS, caixinhasTotal, goalEta, goals
 import { money0, monthName, monthYear, signedBig, tone } from "./lib/format.js";
 import { mesDe, simActive } from "./lib/store.js";
 import type { DashState } from "./lib/types";
-import { DEMO } from "./lib/v2";
 import { Frame } from "./parts/Frame";
-import { Demonstracao } from "./parts/Selos";
 import { Board } from "./parts/Board";
 import { Ledger } from "./parts/Ledger";
 import { PiggyChat } from "./parts/PiggyChat";
@@ -42,7 +40,7 @@ function Home({ s }: { s: DashState }) {
   return (
     <>
       <header className="page-head">
-        <h1 id="page-title" tabIndex={-1}>Resumo de {monthName(keyDate(mesDe(s)))}{!DEMO && <Demonstracao />}</h1>
+        <h1 id="page-title" tabIndex={-1}>Resumo de {monthName(keyDate(mesDe(s)))}</h1>
         <p className="page-lede">O mês inteiro num lugar. A seta de cada bloco abre a página dele.</p>
       </header>
       <Board s={s} />

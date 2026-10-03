@@ -10,13 +10,12 @@ no dia 10, lançamentos dos dias 20 e 25 entram nos dois lados e sai "só cartã
 Controle NEGATIVO medido: a régua antiga até `hoje` deixa esse caso vermelho.
 
 A régua do cartão (`CARTAO_SQL`) tem a barreira da fatura (`b.user_id`) como `TOTAIS_SQL`:
-compra de A pendurada em fatura de B (com dono ou NULL no cartão de B) não entra na régua de A.
-Controle NEGATIVO medido: a guarda antiga (`or b.user_id is null`) deixa o caso NULL vermelho.
+compra de A pendurada em fatura de B não entra na régua de A.
 """
 import db
 from db.connection import get_conn
 from scripts.comparar_resumo_mes import comparar
-from tests.test_resumo_mes_regra import FATURA_B_NULL, INICIO, _lanc, semeia_a, semeia_a_em_fatura_de_b
+from tests.test_resumo_mes_regra import INICIO, _lanc, semeia_a, semeia_a_em_fatura_de_b
 from conftest import usuario_pagante
 from utils_date import today_tz
 
@@ -52,10 +51,9 @@ def test_data_futura_no_mes_mais_recente_entra_nos_dois_lados():
     assert "(dif 80" in linha and "cartão 80" in linha and linha.endswith("só cartão? sim"), linha
 
 
-@FATURA_B_NULL
-def test_regua_do_cartao_nao_soma_compra_de_a_em_fatura_de_b(fatura_b_null):
+def test_regua_do_cartao_nao_soma_compra_de_a_em_fatura_de_b():
     a, b = usuario_pagante(), usuario_pagante()
-    semeia_a_em_fatura_de_b(a, b, fatura_b_null)
+    semeia_a_em_fatura_de_b(a, b)
     with get_conn() as conn:
         conn.execute("set transaction read only")
         linha_a, linha_b = comparar(conn, [a, b], meses=1, hoje=INICIO)

@@ -560,7 +560,7 @@ async def list_bills_route(
                        b.period_start, b.period_end, b.status,
                        b.total, COALESCE(b.paid_amount, 0) AS paid_amount
                 FROM credit_bills b
-                JOIN credit_cards c ON c.id = b.card_id
+                JOIN credit_cards c ON c.id = b.card_id AND c.user_id = b.user_id
                 WHERE b.user_id = %s
                   {status_filter}
                   {card_filter}
@@ -600,7 +600,7 @@ async def get_bill_detail_route(request: Request, user_id: int, bill_id: int):
                        b.period_start, b.period_end, b.status,
                        b.total, COALESCE(b.paid_amount, 0) AS paid_amount
                 FROM credit_bills b
-                JOIN credit_cards c ON c.id = b.card_id
+                JOIN credit_cards c ON c.id = b.card_id AND c.user_id = b.user_id
                 WHERE b.user_id=%s AND b.id=%s
                 LIMIT 1
                 """,
@@ -666,7 +666,7 @@ async def pay_bill_route(
                        COALESCE(b.paid_amount, 0) AS paid_amount,
                        b.status
                 FROM credit_bills b
-                JOIN credit_cards c ON c.id = b.card_id
+                JOIN credit_cards c ON c.id = b.card_id AND c.user_id = b.user_id
                 WHERE b.user_id=%s AND b.id=%s
                 LIMIT 1
                 """,

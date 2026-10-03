@@ -10,6 +10,8 @@
  *   · qualquer erro é uma tela só, com texto fixo em português (nunca a `message` do
  *     servidor, que em 402/404 vem em inglês), sem trocar de URL; 4xx não repete, 5xx e
  *     rede tentam 3 vezes, mesmo com o navegador dizendo "offline"; "Recarregar" recarrega;
+ *   · a exceção é o 403 `password_required` (conta paga sem senha): o texto pede a senha e
+ *     o "Criar senha" leva à /home; nenhum outro erro tem esse botão;
  *   · o protótipo (dashboard-v2/index.html) não fala com a API e usa o ?plano= dele.
  *
  * Rodar:  npm run test:frontend   (abre o artefato commitado: mudou webapp/src, rode
@@ -58,6 +60,9 @@ const blocos = (page) => page.evaluate(() => [...document.querySelectorAll("[dat
 const pagosNaTela = async (page) => (await blocos(page)).filter((id) => PAGOS.includes(id)).sort();
 const telaDeErro = (page) => page.getByRole("heading", { name: ERRO }).waitFor({ timeout: 15000 });
 const textoDoAlerta = (page) => page.getByRole("alert").textContent();
+// A tela genérica: o texto de sempre e nenhum "Criar senha" (esse é só do password_required).
+const GENERICA = [ALERTA, 0];
+const generica = async (page) => [await textoDoAlerta(page), await page.getByRole("link", { name: "Criar senha" }).count()];
 
 /** Responde o /me com uma fixture de erro (ou qualquer `{ status, headers, body }`). */
 const erroDoMe = (f) => (r) => r.fulfill({ status: f.status, headers: f.headers, json: f.body });
@@ -132,12 +137,12 @@ test("401 → refresh 401: tela de erro, sem redirecionar; o auth-refresh apaga 
   const { page, n } = await abrir(ctx);
   await telaDeErro(page);
   await page.waitForTimeout(1500); // um retry viria em 1 s
-  const r = [page.url(), await textoDoAlerta(page), n.api, n.refresh, await page.evaluate(() => localStorage.getItem("pigbank.dashboard.profile.v1"))];
+  const r = [page.url(), await generica(page), n.api, n.refresh, await page.evaluate(() => localStorage.getItem("pigbank.dashboard.profile.v1"))];
   await ctx.close();
-  assert.deepEqual(r, [`${PAINEL}#/`, ALERTA, 1, 1, null]);
+  assert.deepEqual(r, [`${PAINEL}#/`, GENERICA, 1, 1, null]);
 });
 
-for (const nome of ["402", "403", "404"]) {
+for (const nome of ["402", "403", "403_pro_required", "404", "404_not_found"]) {
   test(`${nome} no envelope: tela de erro com texto fixo (sem a message do servidor), sem repetir nem trocar de URL; Recarregar recarrega`, async () => {
     const f = RESPOSTAS.erros[nome];
     const ctx = await contexto();
@@ -145,15 +150,15 @@ for (const nome of ["402", "403", "404"]) {
     const { page, n } = await abrir(ctx);
     await telaDeErro(page);
     await page.waitForTimeout(1500); // um retry viria em 1 s
-    const r = [page.url(), await textoDoAlerta(page), n.api, n.refresh,
+    const r = [page.url(), await generica(page), n.api, n.refresh,
       await page.getByRole("link", { name: "Painel antigo" }).getAttribute("href")];
     const navegacoes = n.navegacoes;
     await Promise.all([page.waitForEvent("framenavigated"), page.getByRole("button", { name: "Recarregar" }).click()]);
     await telaDeErro(page);
     const depois = [n.navegacoes - navegacoes, n.api];
     await ctx.close();
-    assert.deepEqual(r, [`${PAINEL}#/`, ALERTA, 1, 0, "/app"]);
-    assert.ok(!r[1].includes(f.body.error.message), `a message "${f.body.error.message}" não vai para a tela`);
+    assert.deepEqual(r, [`${PAINEL}#/`, GENERICA, 1, 0, "/app"]);
+    assert.ok(!r[1][0].includes(f.body.error.message), `a message "${f.body.error.message}" não vai para a tela`);
     assert.deepEqual(depois, [1, 2]);
     assert.deepEqual(n.erros, []);
   });
@@ -168,9 +173,43 @@ for (const [nome, responde] of [
     await ctx.route("**/api/v2/me", responde);
     const { page, n } = await abrir(ctx);
     await telaDeErro(page);
-    const texto = await textoDoAlerta(page);
+    const texto = await generica(page);
     await ctx.close();
-    assert.equal(texto, ALERTA);
+    assert.deepEqual(texto, GENERICA);
+    assert.deepEqual(n.erros, []);
+  });
+}
+
+// Conta paga sem senha: toda a /api/v2 dá 403 `password_required`, então ela para aqui.
+for (const width of [1440, 390, 320]) {
+  test(`${width}px: 403 password_required pede a senha, com "Criar senha" para a /home (44px, foco visível); o painel não monta`, async () => {
+    const f = RESPOSTAS.erros["403_password_required"];
+    const ctx = await contexto();
+    await ctx.route("**/api/v2/me", erroDoMe(f));
+    const { page, n } = await abrir(ctx);
+    await page.setViewportSize({ width, height: 844 });
+    await telaDeErro(page);
+    await page.waitForTimeout(1500); // um retry viria em 1 s
+    const link = page.getByRole("link", { name: "Criar senha" });
+    for (let i = 0; i < 6 && !(await link.evaluate((a) => a === document.activeElement)); i++) await page.keyboard.press("Tab");
+    const r = {
+      alerta: await textoDoAlerta(page),
+      link: await link.evaluate((a) => [a.getAttribute("href"), a === document.activeElement && a.matches(":focus-visible"), getComputedStyle(a).outlineStyle, Math.round(a.getBoundingClientRect().height)]),
+      saidas: [await page.getByRole("link", { name: "Painel antigo" }).getAttribute("href"), await page.getByRole("button", { name: "Recarregar" }).count()],
+      painel: [(await blocos(page)).length, await page.locator("#board-profile").count()],
+      rolagem: await page.evaluate(() => document.scrollingElement.scrollWidth - document.scrollingElement.clientWidth),
+      pedidos: n.api,
+    };
+    await ctx.close();
+    assert.deepEqual(r, {
+      alerta: `${ERRO}Para abrir o painel novo, crie a sua senha. Depois de criar, volte para o painel novo.`,
+      link: ["/home", true, "solid", 44],
+      saidas: ["/app", 1],
+      painel: [0, 0],
+      rolagem: 0,
+      pedidos: 1,
+    });
+    assert.ok(!r.alerta.includes(f.body.error.message));
     assert.deepEqual(n.erros, []);
   });
 }
@@ -186,9 +225,9 @@ for (const [nome, responde] of [
     const { page, n } = await abrir(ctx);
     await telaDeErro(page);
     await page.waitForTimeout(500);
-    const r = [n.api, (await blocos(page)).length];
+    const r = [n.api, (await blocos(page)).length, await generica(page)];
     await ctx.close();
-    assert.deepEqual(r, [3, 0]);
+    assert.deepEqual(r, [3, 0, GENERICA]);
     assert.deepEqual(n.erros, []);
   });
 }
@@ -223,9 +262,9 @@ test("rede cai com o /me em voo: depois das tentativas, a tela de erro (não car
   await page.evaluate(() => window.dispatchEvent(new Event("offline")));
   libera();
   await telaDeErro(page);
-  const r = [n.api, await textoDoAlerta(page), (await blocos(page)).length];
+  const r = [n.api, await generica(page), (await blocos(page)).length];
   await ctx.close();
-  assert.deepEqual(r, [3, ALERTA, 0]);
+  assert.deepEqual(r, [3, GENERICA, 0]);
   assert.deepEqual(n.erros, []);
 });
 
