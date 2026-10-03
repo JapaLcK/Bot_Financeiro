@@ -251,7 +251,22 @@ def test_robots_txt():
     assert resp.status_code == 200
     assert resp.headers["content-type"].startswith("text/plain")
     assert "Disallow: /app" in resp.text
+    assert "Disallow: /assinar\n" in resp.text
+    assert "Disallow: /q\n" in resp.text
     assert "Sitemap:" in resp.text
+
+
+def test_assinar_e_seus_assets():
+    resp = client.get("/assinar")
+    assert resp.status_code == 200
+    assert resp.headers["content-type"].startswith("text/html")
+    assert resp.headers["cache-control"] == "no-store"
+    assert "content-security-policy" in resp.headers
+    assert '<meta name="robots" content="noindex"/>' in resp.text
+    for path, tipo in (("/assinar.js", "application/javascript"), ("/assinar.css", "text/css")):
+        asset = client.get(path)
+        assert asset.status_code == 200, path
+        assert asset.headers["content-type"].startswith(tipo), path
 
 
 def test_sitemap_xml():

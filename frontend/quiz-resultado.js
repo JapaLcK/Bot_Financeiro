@@ -2,6 +2,8 @@
 // cookie e segue. Perfil e respostas são dado financeiro: chegam no FRAGMENTO (não vão
 // ao servidor nem ao Referer) e saem só no cookie — nunca em query, DOM ou analytics. O
 // servidor revalida o cookie (db/signup_quiz.py); tests/test_signup_quiz.py compara as listas.
+// Com `plano` na query (funil v3) segue para a /assinar, levando nome/e-mail/WhatsApp
+// (n/e/w) no fragmento de lá; quem valida plano e ciclo é a /assinar.
 // Com e/c (o código que o webhook do XQuiz mandou), a conta nasce aqui, sem senha, pelo
 // /auth/verify-email — mas só depois do clique em Continuar, com o e-mail na tela: quem
 // abre o link de outra pessoa vê um e-mail que não é o seu (login CSRF).
@@ -16,8 +18,9 @@
   // O URLSearchParams lê `+` como espaço, e `+` é legítimo em e-mail.
   const email = (frag.get("e") || "").replace(/ /g, "+").trim();
   const code = (frag.get("c") || "").replace(/\D/g, "");
-  // e/c saem ANTES do laço: senão e-mail e código iriam para a query (e para o log).
-  ["p", "r", "e", "c"].forEach(function (k) { frag.delete(k); query.delete(k); });
+  const nome = frag.get("n"), zap = frag.get("w");
+  // e/c/n/w saem ANTES do laço: senão a PII e o código iriam para a query (e para o log).
+  ["p", "r", "e", "c", "n", "w"].forEach(function (k) { frag.delete(k); query.delete(k); });
   frag.forEach(function (v, k) { if (!query.has(k)) query.append(k, v); });
   const qs = query.toString();
   history.replaceState(null, "", location.pathname + (qs ? "?" + qs : ""));
@@ -26,7 +29,13 @@
   document.cookie = PERFIS.indexOf(p) !== -1
     ? "quiz_result=v1." + p + (RESPOSTAS.test(r || "") ? "." + r : "") + "; Max-Age=86400" + attrs
     : "quiz_result=; Max-Age=0" + attrs;
-  if (email && code) confirmar(email, code, query);
+  if (query.has("plano")) {
+    // Só a chave com valor: `new URLSearchParams({n: null})` vira "n=null" no campo.
+    // URLSearchParams e não concatenação: `&`, `#` e `+` no nome ou no e-mail chegam inteiros.
+    const f = new URLSearchParams();
+    [["n", nome], ["e", email], ["w", zap]].forEach(function (kv) { if (kv[1]) f.append(kv[0], kv[1]); });
+    location.replace("/assinar" + (qs ? "?" + qs : "") + (f.toString() ? "#" + f : ""));
+  } else if (email && code) confirmar(email, code, query);
   else location.replace("/cadastro" + (qs ? "?" + qs : ""));
 
   function confirmar(email, code, query) {
