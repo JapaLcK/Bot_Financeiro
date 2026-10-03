@@ -38,7 +38,7 @@ from db import (
     list_users_with_monthly_report_enabled,
     mark_card_reminder_sent,
 )
-from utils_phone import phone_lookup_candidates
+from utils_phone import mask_phone, phone_lookup_candidates
 from utils_date import now_tz
 
 load_app_env()
@@ -307,7 +307,7 @@ async def wa_webhook(request: Request):
         )
         if not messages and not statuses:
             print(
-                f"[DEBUG] webhook payload without messages/statuses: keys={list(value.keys())} value={value}",
+                f"[DEBUG] webhook payload without messages/statuses: keys={list(value.keys())}",
                 flush=True,
             )
         for status in statuses:
@@ -456,7 +456,7 @@ def _daily_report_tick() -> None:
                     instance["hostname"],
                 )
             except Exception as exc:
-                logger.warning("WA daily report send error to=%s error=%s", to, exc)
+                logger.warning("WA daily report send error to=%s error=%s", mask_phone(to), exc)
                 log_system_event_sync(
                     "warning",
                     "whatsapp_daily_report_send_failed",
@@ -608,7 +608,7 @@ def _bill_reminder_tick() -> None:
                         details={"to": to, "bill_id": bill.get("id"), "template_name": cfg["name"]},
                     )
                 except Exception as exc:
-                    logger.warning("WA bill reminder send error uid=%s to=%s error=%s", uid, to, exc)
+                    logger.warning("WA bill reminder send error uid=%s to=%s error=%s", uid, mask_phone(to), exc)
             if sent_any:
                 try:
                     mark_bill_reminder_sent(int(bill["id"]), today)
@@ -686,7 +686,7 @@ def _send_periodic_template(uid, wa_targets, cfg, summary, kind, instance) -> No
                 },
             )
         except Exception as exc:
-            logger.warning("WA %s report send error to=%s error=%s", kind, to, exc)
+            logger.warning("WA %s report send error to=%s error=%s", kind, mask_phone(to), exc)
             log_system_event_sync(
                 "warning",
                 f"whatsapp_{kind}_report_send_failed",

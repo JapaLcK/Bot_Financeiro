@@ -162,7 +162,7 @@ def _send_reply(to_wa_id: str, body: str) -> None:
             except Exception:
                 logger.info("WA send_text accepted but unable to summarize response")
         except Exception as e:
-            logger.exception("WA send_text exception to=%s error=%s", to_wa_id, e)
+            logger.exception("WA send_text exception to=%s error=%s", mask_phone(to_wa_id), e)
             raise
 
 
@@ -606,7 +606,7 @@ def _autolink_warning_already_sent(wa_id: str, status: str) -> bool:
                 )
                 return cur.fetchone() is not None
     except Exception as exc:
-        logger.warning("WA autolink warning lookup failed wa_id=%s status=%s error=%s", wa_id, status, exc)
+        logger.warning("WA autolink warning lookup failed wa_id=%s status=%s error=%s", mask_phone(wa_id), status, exc)
         return False
 
 
@@ -670,7 +670,7 @@ def _tratar_opt_out(uid: int, reply_to: str, interactive_id: str | None,
                 texto = h_report.disable(u)
             _send_reply(reply_to, texto)
         except Exception as e:
-            logger.exception("WA daily_report_disable button error wa_id=%s: %s", reply_to, e)
+            logger.exception("WA daily_report_disable button error wa_id=%s: %s", mask_phone(reply_to), e)
             log_system_event_sync(
                 "warning",
                 "whatsapp_daily_report_disable_button_error",
@@ -686,7 +686,7 @@ def _tratar_opt_out(uid: int, reply_to: str, interactive_id: str | None,
                 texto = h_report.disable_weekly(u)
             _send_reply(reply_to, texto)
         except Exception as e:
-            logger.exception("WA weekly_report_disable button error wa_id=%s: %s", reply_to, e)
+            logger.exception("WA weekly_report_disable button error wa_id=%s: %s", mask_phone(reply_to), e)
             log_system_event_sync(
                 "warning",
                 "whatsapp_weekly_report_disable_button_error",
@@ -702,7 +702,7 @@ def _tratar_opt_out(uid: int, reply_to: str, interactive_id: str | None,
                 texto = h_report.disable_monthly(u)
             _send_reply(reply_to, texto)
         except Exception as e:
-            logger.exception("WA monthly_report_disable button error wa_id=%s: %s", reply_to, e)
+            logger.exception("WA monthly_report_disable button error wa_id=%s: %s", mask_phone(reply_to), e)
             log_system_event_sync(
                 "warning",
                 "whatsapp_monthly_report_disable_button_error",
@@ -721,7 +721,7 @@ def _tratar_opt_out(uid: int, reply_to: str, interactive_id: str | None,
                 "Pronto, parei as atualizações do Piggy por aqui. Você pode religar quando quiser em Configurações > Notificações.",
             )
         except Exception as e:
-            logger.exception("WA updates disable button error wa_id=%s: %s", reply_to, e)
+            logger.exception("WA updates disable button error wa_id=%s: %s", mask_phone(reply_to), e)
             log_system_event_sync(
                 "warning",
                 "whatsapp_updates_disable_button_error",
@@ -745,10 +745,10 @@ def process_message(message: InboundMessage) -> None:
     try:
         reply_to = message.wa_id
         logger.info(
-            "WA process_message from=%s reply_to=%s text=%r attachments=%s",
-            message.wa_id,
-            reply_to,
-            (message.text or "")[:120],
+            "WA process_message from=%s reply_to=%s chars=%s attachments=%s",
+            mask_phone(message.wa_id),
+            mask_phone(reply_to),
+            len(message.text or ""),
             len(message.attachments or []),
         )
         uid = get_or_create_canonical_user("whatsapp", message.wa_id)
@@ -1455,11 +1455,11 @@ def process_message(message: InboundMessage) -> None:
                 _send_reply_with_optional_buttons(reply_to, body, user_id=uid)
                 sent_response = True
         if not sent_response:
-            logger.warning("WA outgoing messages had no deliverable text from=%s", message.wa_id)
+            logger.warning("WA outgoing messages had no deliverable text from=%s", mask_phone(message.wa_id))
             _send_reply(reply_to, _DELIVERY_FAILURE_MESSAGE)
     except Exception as exc:
         mantem_pergunta = True
-        logger.error("WA message processing failed wa_id=%s error=%s", message.wa_id, exc)
+        logger.error("WA message processing failed wa_id=%s error=%s", mask_phone(message.wa_id), exc)
         try:
             log_system_event_sync(
                 "error",
@@ -1471,7 +1471,7 @@ def process_message(message: InboundMessage) -> None:
         except Exception as log_exc:
             logger.error(
                 "WA processing failure could not be recorded wa_id=%s error=%s",
-                message.wa_id,
+                mask_phone(message.wa_id),
                 log_exc,
             )
         traceback.print_exc()
@@ -1485,7 +1485,7 @@ def process_message(message: InboundMessage) -> None:
         except Exception as send_exc:
             logger.error(
                 "WA failure notice could not be sent wa_id=%s error=%s",
-                message.wa_id,
+                mask_phone(message.wa_id),
                 send_exc,
             )
     finally:
