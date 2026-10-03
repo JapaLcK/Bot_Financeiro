@@ -873,9 +873,10 @@ def send_password_reset_email(to: str, reset_url: str, has_password: bool = True
 
 
 def send_account_exists_notice(to: str, login_url: str = "", reset_url: str = "") -> bool:
-    """Aviso de segurança enviado quando alguém tenta se cadastrar com e-mail/
-    telefone que já pertence a esta conta. O visitante já vê o 409 na tela;
-    este e-mail é pro dono saber caso NÃO tenha sido ele quem tentou."""
+    """Aviso de segurança enviado quando alguém tenta se cadastrar com o e-mail
+    desta conta, pro dono saber caso NÃO tenha sido ele. No /auth/register o
+    visitante também vê o 409 na tela; no webhook do quiz a resposta não muda
+    (anti-enumeração) e este e-mail é o único sinal."""
     login_url = login_url or "https://pigbankai.com/login"
     reset_url = reset_url or login_url
     content = f"""

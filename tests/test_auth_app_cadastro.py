@@ -190,7 +190,7 @@ def test_b5_access_do_cadastro_abre_auth_me_e_origem_e_app(correio):
 # ── B8: e-mail já cadastrado ─────────────────────────────────────────────────
 
 @pytest.mark.parametrize("so_google", [False, True])
-def test_b8_email_existente_nao_enumera(correio, so_google):
+def test_b8_email_existente_409_e_dono_avisado(correio, so_google):
     email = _email()
     db.confirm_email_verification(
         email, db.create_email_verification(email, SENHA, _telefone())
@@ -210,8 +210,8 @@ def test_b8_email_existente_nao_enumera(correio, so_google):
         headers=_cabecalhos_app(),
         json={"email": email, "password": SENHA, "phone": _telefone()},
     )
-    assert r.status_code == 200, r.text
-    assert r.json() == {"status": "verification_sent", "email": email}
+    assert r.status_code == 409, r.text
+    assert r.json()["detail"] == db_support.EMAIL_JA_TEM_CONTA
     assert correio["avisos"] == [email]
     assert email not in correio["codigos"]
     with db.get_conn() as conn, conn.cursor() as cur:

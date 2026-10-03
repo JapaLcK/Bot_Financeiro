@@ -3405,15 +3405,8 @@ async def auth_register(request: Request, body: RegisterBody):
                 await asyncio.to_thread(send_account_exists_notice, owner_email, f"{DASHBOARD_URL}/login")
         except Exception as notice_exc:
             logging.getLogger(__name__).warning("account_exists_notice falhou: %s", notice_exc)
-        if exc.reason == "email_google":
-            raise HTTPException(
-                status_code=409,
-                detail="Esse e-mail já tem conta criada com o Google. Entre pelo botão 'Continuar com Google'.",
-            )
-        raise HTTPException(
-            status_code=409,
-            detail="Esse e-mail já tem conta. Entre nela ou recupere a senha.",
-        )
+        from db_support import EMAIL_JA_TEM_CONTA
+        raise HTTPException(status_code=409, detail=EMAIL_JA_TEM_CONTA)
     except ValueError as e:
         raise HTTPException(status_code=409, detail=detalhe_seguro(e))
 
