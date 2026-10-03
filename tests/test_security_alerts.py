@@ -125,11 +125,40 @@ def test_cooldown_nao_realerta(_capture):
     assert _run(_marker_count(ip)) == 1
 
 
+def _agendados(monkeypatch, *ips):
+    """Chama o schedule DENTRO de um loop e devolve os IPs que o detector viu.
+
+    Fora de loop o `create_task` levanta e a função engole — o no-op sairia
+    igual com a guarda apagada. O `sleep(0)` deixa a task rodar antes de o
+    `asyncio.run` fechar o loop; sem ele o positivo mede zero.
+    """
+    chamadas = []
+
+    async def _spy(ip):
+        chamadas.append(ip)
+
+    monkeypatch.setattr(security_alerts, "_detect_and_maybe_alert", _spy)
+
+    async def _corpo():
+        for ip in ips:
+            security_alerts.schedule_auth_failure_spike_check(ip)
+        await asyncio.sleep(0)
+
+    _run(_corpo())
+    return chamadas
+
+
 def test_schedule_desligado_por_env_e_noop(monkeypatch):
     # SECURITY_ALERTS_ENABLED=0 → schedule vira no-op (nem agenda a task).
     monkeypatch.setenv("SECURITY_ALERTS_ENABLED", "0")
-    security_alerts.schedule_auth_failure_spike_check("203.0.113.204")  # não levanta
+    assert _agendados(monkeypatch, "203.0.113.204") == []
 
 
-def test_schedule_sem_ip_e_noop():
-    security_alerts.schedule_auth_failure_spike_check(None)  # não levanta
+def test_schedule_sem_ip_e_noop(monkeypatch):
+    monkeypatch.delenv("SECURITY_ALERTS_ENABLED", raising=False)
+    assert _agendados(monkeypatch, None, "") == []
+
+
+def test_schedule_ligado_com_ip_agenda(monkeypatch):
+    monkeypatch.delenv("SECURITY_ALERTS_ENABLED", raising=False)
+    assert _agendados(monkeypatch, "203.0.113.204") == ["203.0.113.204"]

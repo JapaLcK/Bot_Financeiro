@@ -16,9 +16,19 @@ from .connection import (
     get_conn, cat_key_sql, LAUNCH_HAS_TIME_SQL,
     TIPO_CANON_SQL, TIPO_DESPESA_SQL, TIPO_RECEITA_SQL,
 )
+from .open_finance_cash import PAR_ATIVO_SQL, VINCULADO_SQL
 from .users import ensure_user
 
 logger = logging.getLogger(__name__)
+
+# Categoria decide o `is_internal_movement` — menos no par da Carteira de um
+# saque/depósito do banco (db/open_finance_cash.py), que segue interno com
+# qualquer categoria: senão vira receita/gasto novo. Todo escritor de categoria
+# de lançamento por ação do usuário passa por aqui (update_launch_fields: PATCH
+# /launches, tool da IA, WhatsApp; update_launch_categories_bulk) e marca a
+# edição: o sync do Open Finance não desfaz categoria nem interno editados (#712).
+_SET_CATEGORIA = (f"categoria=%s, is_internal_movement = %s or {PAR_ATIVO_SQL}, "
+                  "categoria_editada = true")
 
 
 # ──────────────────────────────────────────────────────────────────────────────
@@ -138,8 +148,10 @@ def list_launches(user_id: int, limit: int = 10):
                 -- `launches` (`add_credit_purchase`, db/cards.py), e esta query
                 -- lê só `launches`. A divergência é a que `launch_day`
                 -- (utils_date) fecha.
+                -- `is_internal_movement`: o rodapé de "últimos N" o descarta dos
+                -- totais e a linha ganha 🔁 (core/handlers/launches.py).
                 select id, user_seq, tipo, valor, alvo, nota, categoria, source, criado_em,
-                       posted_at, {LAUNCH_HAS_TIME_SQL} as has_time
+                       posted_at, {LAUNCH_HAS_TIME_SQL} as has_time, is_internal_movement
                 from launches
                 where user_id=%s
                 order by criado_em desc, id desc
@@ -188,7 +200,7 @@ def list_launches_by_tipo(user_id: int, tipo: str, limit: int = 200):
     literal — colapsar a forma legada na moderna no lado da coluna faz um
     `tipo='despesa'` casar também com 'saida' sem inventar regra por chamador, e
     deixa qualquer outro valor (aporte_investimento…) casando exato como antes.
-    Os DOIS chamadores vêm de `describe_valueless_launch` (parsers.py:273), que
+    Os DOIS chamadores vêm de `describe_valueless_launch` (parsers.py:280), que
     só devolve 'despesa'/'receita' — nenhum passa a forma legada.
 
     INVERSÃO, para quem for chamar isto de outro lugar: o colapso é da COLUNA,
@@ -257,20 +269,7 @@ def display_id_for(user_id: int, launch_id: int) -> int:
 
 
 def update_launch_category(user_id: int, launch_id: int, categoria: str | None) -> bool:
-    from utils_text import is_internal_category
-
-    ensure_user(user_id)
-    cat = (categoria or "").strip() or None
-    is_internal = is_internal_category(cat)
-    with get_conn() as conn:
-        with conn.cursor() as cur:
-            cur.execute(
-                "update launches set categoria=%s, is_internal_movement=%s where user_id=%s and id=%s",
-                (cat, is_internal, user_id, launch_id),
-            )
-            changed = (cur.rowcount or 0) == 1
-        conn.commit()
-    return changed
+    return update_launch_fields(user_id, launch_id, categoria=categoria or "")
 
 
 class LaunchDateLockedError(ValueError):
@@ -314,7 +313,7 @@ class LaunchUnsafeRollback(ValueError):
     `causa=LaunchUnsafeRollback` só, e a comum (`lote_ausente`, lote gravado
     antes de `79bd52f`, que dispara em todo depósito de caixinha antigo) ficava
     indistinguível da rara e grave (`chave_desconhecida`, escritor novo
-    gravando efeito que ninguém sabe reverter). Os cinco valores:
+    gravando efeito que ninguém sabe reverter). Os valores:
 
       - `sem_delta_conta`     — `efeitos` sem a chave (degenerado, ex.: `{}`)
       - `chave_desconhecida`  — chave fora de `_EFEITOS_REVERSIVEIS`
@@ -326,6 +325,11 @@ class LaunchUnsafeRollback(ValueError):
                                 usuário; o irmão do `lote_ausente`, que é a
                                 chave ausente
       - `fora_do_escopo`      — caixinha/investimento no "apagar tudo"
+      - `mudou_durante`       — o lançamento mudou entre a leitura e o lock
+      - `movimento_posterior` — movimento de investimento que não é o último
+                                (`InvestmentMovementNotLast`)
+      - `caixinha_com_movimento` — desfazer a criação de caixinha com saldo ou
+                                com depósito/saque depois dela (`PocketHasMovement`)
 
     Obrigatório no construtor de propósito: `raise` novo tem de escolher um
     código, em vez de herdar um genérico em silêncio."""
@@ -333,6 +337,28 @@ class LaunchUnsafeRollback(ValueError):
     def __init__(self, mensagem: str, motivo: str):
         super().__init__(mensagem)
         self.motivo = motivo
+
+
+class InvestmentMovementNotLast(LaunchUnsafeRollback):
+    """Movimento (aporte, resgate, criar, apagar) que não é o mais recente do
+    investimento (ou o investimento foi apagado depois). Ver `db/investment_undo.py`."""
+
+    def __init__(self, mensagem: str):
+        super().__init__(mensagem, "movimento_posterior")
+
+
+MENSAGEM_CAIXINHA_COM_MOVIMENTO = (
+    "Essa caixinha já teve depósito ou saque. Pra removê-la, tira o saldo e "
+    "apaga a caixinha."
+)
+
+
+class PocketHasMovement(LaunchUnsafeRollback):
+    """Desfazer a criação de caixinha que tem saldo ou já teve movimento: o
+    `delete from pockets` levaria saldo e lotes junto (#609)."""
+
+    def __init__(self, mensagem: str = MENSAGEM_CAIXINHA_COM_MOVIMENTO):
+        super().__init__(mensagem, "caixinha_com_movimento")
 
 
 def update_launch_fields(
@@ -357,10 +383,8 @@ def update_launch_fields(
     params: list = []
     if categoria is not None:
         cat_clean = categoria.strip() or None
-        sets.append("categoria=%s")
-        params.append(cat_clean)
-        sets.append("is_internal_movement=%s")
-        params.append(is_internal_category(cat_clean))
+        sets.append(_SET_CATEGORIA)
+        params.extend([cat_clean, is_internal_category(cat_clean)])
     if alvo is not None:
         sets.append("alvo=%s")
         params.append((alvo.strip() or None))
@@ -403,7 +427,8 @@ def update_launch_fields(
                 # Medido: editar 10/03 → 15/04 devolvia 200 e a sync seguinte
                 # voltava pra 10/03. Aceitar seria fingir sucesso; recusar é o
                 # que a tela consegue explicar. (Nota/descrição continuam
-                # editáveis: a sync não toca em `nota`/`alvo`.)
+                # editáveis: a sync não toca em `nota`/`alvo`; a categoria
+                # editada também sobrevive, por `categoria_editada`.)
                 cur.execute(
                     "select coalesce(source,'') as source from launches where user_id=%s and id=%s",
                     (user_id, launch_id),
@@ -429,7 +454,7 @@ def update_launch_categories_bulk(user_id: int, items: list[tuple[int, str]]) ->
     with get_conn() as conn:
         with conn.cursor() as cur:
             cur.executemany(
-                "update launches set categoria=%s, is_internal_movement=%s where user_id=%s and id=%s",
+                f"update launches set {_SET_CATEGORIA} where user_id=%s and id=%s",
                 [(cat, is_internal_category(cat), user_id, lid) for (lid, cat) in items],
             )
             n = cur.rowcount or 0
@@ -622,7 +647,7 @@ def get_largest_expenses(
     )
 
     if by_bill_month:
-        credit_from = "from credit_transactions ct join credit_bills b on b.id = ct.bill_id"
+        credit_from = "from credit_transactions ct join credit_bills b on b.id = ct.bill_id and coalesce(b.user_id, (select cb.user_id from credit_cards cb where cb.id = b.card_id)) = ct.user_id"
         credit_date = "and b.period_end >= %s and b.period_end < %s"
         credit_date_params = [start_date, end_date_excl]
     else:
@@ -810,7 +835,8 @@ def list_launches_by_category(
     - `nota` e `alvo` vêm CRUS, cada um na sua chave. `descricao` continua sendo
       o rótulo pronto (`coalesce(alvo, nota, '—')`) que o WhatsApp imprime, mas
       ele NÃO serve pra pré-preencher um formulário de edição: numa linha com os
-      dois preenchidos (recurring_charger.py, db/bills.py, db/cards.py) ele é o
+      dois preenchidos (linhas antigas do cobrador de recorrentes, db/bills.py,
+      db/cards.py) ele é o
       ALVO, e salvar o formulário gravava o alvo por cima da nota real.
     `after` (default None, aditivo) é o "carregar mais" do dashboard: a tupla
     `(dt, fonte, ord_id)` da ÚLTIMA linha da página anterior, e a próxima página
@@ -868,7 +894,7 @@ def list_launches_by_category(
 
     credit_sql = ""
     if aliases is None or "despesa" in aliases:
-        credit_from = "from credit_transactions ct join credit_bills b on b.id = ct.bill_id"
+        credit_from = "from credit_transactions ct join credit_bills b on b.id = ct.bill_id and coalesce(b.user_id, (select cb.user_id from credit_cards cb where cb.id = b.card_id)) = ct.user_id"
         credit_date_col = "b.period_end"
         credit_filters = ""
         params_credit: list = [user_id, categoria]
@@ -1062,7 +1088,7 @@ def get_top_expense_categories(
     end_date_excl = end_date + timedelta(days=1)  # janela meio-aberta em period_end
 
     if by_bill_month:
-        credit_from = "from credit_transactions ct join credit_bills b on b.id = ct.bill_id"
+        credit_from = "from credit_transactions ct join credit_bills b on b.id = ct.bill_id and coalesce(b.user_id, (select cb.user_id from credit_cards cb where cb.id = b.card_id)) = ct.user_id"
         credit_date = "and b.period_end >= %s and b.period_end < %s"
         credit_date_params = (start_date, end_date_excl)
     else:
@@ -1326,6 +1352,7 @@ _BEFORE_FORMA = {
     "principal_remaining": (_dinheiro, True),
     "status": (_texto, False),
     "closed_at": (_data, False),
+    "last_date": (_data, False),  # ausente em snapshot anterior a este campo
 }
 
 # chave -> (container, campos)
@@ -1542,13 +1569,9 @@ def delete_launch_and_rollback(user_id: int, launch_id: int, *,
     investimento é apagado), e a partir daí o lançamento cai em `kept_unsafe`
     em TODA tentativa, sem caminho de saída pro usuário. É a troca deliberada:
     recusar para sempre não perde dinheiro; seguir perde (R$300 em 5 toques de
-    produto, medido). Nas portas do Open Finance que chamam isto dentro de
-    `except Exception: pass` a recusa é SILÊNCIO — `reconcile_manual_launch`
-    segue e marca `auto_merged` mesmo com o delete recusado. (Os escritores do
-    lançamento manual — rota do dashboard, handler do bot, entrada rápida — não
-    chamam mais essa função desde a decisão "lançamentos manuais exclusivos
-    para dinheiro" de 2026-09; o caminho silencioso ficou inalcançável de
-    fato.) Consertar isso é o PR dos `except`, não este.
+    produto, medido). Em `_rollback_imported_of` (db/open_finance.py), que
+    chama isto dentro de `except Exception: pass`, a recusa é SILÊNCIO.
+    Consertar isso é o PR dos `except`, não este.
 
     `escopo_conta_corrente=True` — usado SÓ pelo "apagar tudo" — recusa também
     o que mexe em caixinha/investimento (`_EFEITOS_FORA_DO_APAGAR_TUDO`).
@@ -1559,12 +1582,12 @@ def delete_launch_and_rollback(user_id: int, launch_id: int, *,
       - `core/services/ai_chat/tools/launches.py:433` (/ai/chat);
       - `frontend/finance_bot_websocket_custom.py:5749` (DELETE /launches);
       - `delete_all_launches_and_rollback` (abaixo), que classifica em baldes;
-      - `db/open_finance.py`: `_rollback_imported_of` e `reconcile_manual_launch`,
-        dentro de `except Exception: pass` (o confirmar da reconciliação saiu
-        para `db/reconciliation.py`, que apaga a sombra direto e não passa por
-        aqui). Ali uma recusa não vira mensagem nem log: o
-        lançamento duplicado do Open Finance sobrevive à reconciliação e o saldo
-        conta duas vezes, calado. HOJE inalcançável (as chaves que o importador
+      - `db/open_finance.py`: `_rollback_imported_of`, dentro de
+        `except Exception: pass` (o confirmar da reconciliação saiu para
+        `db/reconciliation.py`, que apaga a sombra direto e não passa por aqui;
+        a ordem inversa, `propose_manual_reconciliation`, só cria pendência e
+        não apaga nada). Ali uma recusa não vira mensagem nem log: a sombra do
+        Open Finance sobrevive à limpeza, calada. HOJE inalcançável (as chaves que o importador
         do OF grava estão todas em `_EFEITOS_REVERSIVEIS`, e ele não grava delta
         de lote), mas qualquer chave nova de OF vira perda silenciosa antes de
         virar recusa visível. Os `except` de lá são o próximo conserto, não este.
@@ -1575,9 +1598,20 @@ def delete_launch_and_rollback(user_id: int, launch_id: int, *,
     with get_conn() as conn:
         with conn.cursor() as cur:
             from .bank_movements import _lock_user, uses_bank_movement_lock
-            cur.execute("select source,efeitos from launches where id=%s and user_id=%s", (launch_id, user_id))
+            from .investment_undo import guard_last_investment_movement, touches_investment
+
+            def _precisa_lock(r):
+                # Investimento também: a guarda "é o último" tem de rodar sob o
+                # MESMO lock de aporte/resgate/apagar investimento, até o commit.
+                # Saque/depósito em espécie também: o reconciliador trava conta →
+                # lançamento; apagar sem o lock seria lançamento → conta (deadlock).
+                return bool(r and (uses_bank_movement_lock(r["source"], r["efeitos"])
+                                   or touches_investment(r["efeitos"]) or r["caixa"]))
+
+            cur.execute(f"select source,efeitos,{VINCULADO_SQL} as caixa from launches "
+                        "where id=%s and user_id=%s", (launch_id, user_id))
             preview = cur.fetchone()
-            bank_lock = bool(preview and uses_bank_movement_lock(preview["source"], preview["efeitos"]))
+            bank_lock = _precisa_lock(preview)
             if bank_lock:
                 # Matcher: conta → transação OF → sombra. Cartões manuais
                 # mantêm sua ordem anterior de fatura → conta.
@@ -1593,16 +1627,17 @@ def delete_launch_and_rollback(user_id: int, launch_id: int, *,
             # lê "erro técnico, continua aí" sobre algo que já não existe. É o
             # comportamento da `main` também; o balde que falta é outro PR.
             cur.execute(
-                "select id, tipo, valor, alvo, efeitos, source from launches "
-                "where id=%s and user_id=%s for update",
+                f"select id, tipo, valor, alvo, efeitos, source, {VINCULADO_SQL} as caixa "
+                "from launches where id=%s and user_id=%s for update",
                 (launch_id, user_id),
             )
             row = cur.fetchone()
             if not row:
                 raise LookupError("NOT_FOUND")
 
-            if uses_bank_movement_lock(row["source"], row["efeitos"]) != bank_lock:
-                raise LaunchUnsafeRollback("Lançamento mudou durante a exclusão; tente novamente.")
+            if _precisa_lock(row) != bank_lock:
+                raise LaunchUnsafeRollback("Lançamento mudou durante a exclusão; tente novamente.",
+                                           "mudou_durante")
 
             efeitos = row.get("efeitos")
             if isinstance(efeitos, str):
@@ -1625,6 +1660,8 @@ def delete_launch_and_rollback(user_id: int, launch_id: int, *,
             # visível é o mesmo — `commit()` só no fim da função.
             delta_conta = _validar_efeitos(
                 efeitos, escopo_conta_corrente=escopo_conta_corrente)
+            if touches_investment(efeitos):
+                guard_last_investment_movement(cur, user_id, launch_id, efeitos)
 
             delta_pocket = efeitos.get("delta_pocket")
             delta_invest = efeitos.get("delta_invest")
@@ -1677,10 +1714,12 @@ def delete_launch_and_rollback(user_id: int, launch_id: int, *,
                 #         `core/handlers/credit.py`): o cascade de
                 #         `credit_bills.card_id` leva as faturas -> 900/1000,
                 #         nenhuma fatura de pé.
-                #       `merge_users` (`db/users.py:122`): o dedup apaga a
-                #         fatura JÁ PAGA da origem e move o lançamento com o
-                #         `bill_id` morto -> 900/1000, e a fatura que sobra é a
-                #         do destino, com `paid_amount` 0. Nada é criado.
+                #       `merge_users` anterior ao #607 (passo 6, dedup de
+                #         `credit_bills`): apagava a fatura JÁ PAGA da origem e
+                #         movia o lançamento com o `bill_id` morto -> 900/1000, e
+                #         a fatura que sobra é a do destino, com `paid_amount` 0.
+                #         Nada é criado. Desde o #607 cartão nos dois lados é
+                #         recusa, mas o lançamento migrado antes segue no banco.
                 #     Recusar aqui seria falso positivo, e `kept_unsafe` é
                 #     PERMANENTE.
                 #
@@ -1741,7 +1780,7 @@ def delete_launch_and_rollback(user_id: int, launch_id: int, *,
                             interest_payment_frequency, tax_profile
                         )
                         values (%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s)
-                        on conflict (user_id, name) do nothing
+                        on conflict do nothing
                         """,
                         (
                             user_id, nome, bal0, rate, period, ld,
@@ -1757,14 +1796,14 @@ def delete_launch_and_rollback(user_id: int, launch_id: int, *,
                 if nome:
                     cur.execute(
                         "insert into pockets(user_id, name, balance) values (%s,%s,%s) "
-                        "on conflict (user_id, name) do nothing",
+                        "on conflict do nothing",
                         (user_id, nome, bal0),
                     )
 
             # reverte conta. NÃO checar `cur.rowcount` aqui (proposta original
             # da issue #246) — mas não porque seja impossível casar 0: o
             # `ensure_user` do topo (:1521) commita em transação PRÓPRIA e solta
-            # a linha, então `merge_users` (db/users.py:88) apagando accounts
+            # a linha, então `merge_users` (passo 3) apagando accounts
             # entre ele e este update deixa rowcount 0, e o lançamento é apagado
             # sem reverter o saldo — o sintoma do #246 por outra porta. A
             # decisão de não guardar é de custo, não de impossibilidade: a
@@ -1837,7 +1876,7 @@ def delete_launch_and_rollback(user_id: int, launch_id: int, *,
                         # Invariante do banco quebrada, não caso de uso — sai
                         # CRU (balde `errors`, com log de ERROR), nunca como
                         # `LaunchUnsafeRollback`, que é recusa PREVISTA, vira
-                        # frase de produto e teria de mentir um dos cinco
+                        # frase de produto e teria de mentir um dos
                         # `motivo`. A transação reverte nos dois casos: o
                         # `conn.commit()` só vem no fim da função.
                         raise RuntimeError(
@@ -1901,7 +1940,8 @@ def delete_launch_and_rollback(user_id: int, launch_id: int, *,
                     cur.execute(
                         """
                         update investment_lots
-                        set balance=%s, principal_remaining=%s, status=%s, closed_at=%s
+                        set balance=%s, principal_remaining=%s, status=%s, closed_at=%s,
+                            last_date=coalesce(%s::date, last_date)
                         where id=%s and user_id=%s
                         returning investment_id
                         """,
@@ -1910,6 +1950,7 @@ def delete_launch_and_rollback(user_id: int, launch_id: int, *,
                             Decimal(str(before.get("principal_remaining", 0))),
                             before.get("status") or "open",
                             before.get("closed_at"),
+                            before.get("last_date"),
                             lot_id,
                             user_id,
                         ),
@@ -1985,6 +2026,24 @@ def delete_launch_and_rollback(user_id: int, launch_id: int, *,
             if create_pocket:
                 nome = create_pocket.get("nome")
                 if nome:
+                    from .pockets import TIPOS_HISTORICO_CAIXINHA
+                    # `for update` antes: depósito/saque travam a caixinha antes
+                    # de gravar lote e launch, então o desfazer serializa com eles.
+                    cur.execute(
+                        "select balance from pockets where user_id=%s and lower(name)=lower(%s) for update",
+                        (user_id, nome),
+                    )
+                    if any(Decimal(str(p["balance"])) != 0 for p in cur.fetchall()):
+                        raise PocketHasMovement()
+                    # Zerada que já teve movimento também recusa (decisão do dono).
+                    # `id > launch_id`: histórico de outra caixinha que teve o nome antes não conta.
+                    cur.execute(
+                        "select 1 from launches where user_id=%s and id>%s "
+                        "and lower(alvo)=lower(%s) and tipo = any(%s) limit 1",
+                        (user_id, launch_id, nome, list(TIPOS_HISTORICO_CAIXINHA)),
+                    )
+                    if cur.fetchone():
+                        raise PocketHasMovement()
                     cur.execute(
                         "delete from pockets where user_id=%s and lower(name)=lower(%s)",
                         (user_id, nome),
@@ -2137,10 +2196,10 @@ def delete_all_launches_and_rollback(user_id: int) -> dict:
             # mensagens destas exceções são texto nosso, mas nada prende essa
             # invariante — um `raise LaunchUnsafeRollback(f"... {row[...]}")`
             # amanhã persistiria dado do cliente em `system_event_logs`, e a
-            # guarda por `ast` só olha `com_traceback`. Qual das 5 recusas
+            # guarda por `ast` só olha `com_traceback`. Qual recusa
             # disparou vem no `motivo=`: CÓDIGO CURTO ENUMERADO que nasce no
             # `raise` (atributo da exceção), nunca inferido da mensagem. Sem
-            # ele as cinco colapsavam num `causa=LaunchUnsafeRollback` só e a
+            # ele elas colapsavam num `causa=LaunchUnsafeRollback` só e a
             # comum (`lote_ausente`) ficava igual à rara e grave
             # (`chave_desconhecida`). Os valores estão na docstring de
             # `LaunchUnsafeRollback`; `InvestmentLotHasWithdrawal` traz o dela

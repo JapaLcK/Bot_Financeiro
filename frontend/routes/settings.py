@@ -63,6 +63,8 @@ class NotificationSettingsPayload(BaseModel):
 
 
 async def _get_notification_settings(user_id: int) -> dict:
+    from core.services.plan_service import plan_gate_ok
+    weekly_available = await asyncio.to_thread(plan_gate_ok, user_id, "weekly_report")
     auth_user, daily_prefs = await asyncio.gather(
         asyncio.to_thread(get_auth_user, user_id),
         asyncio.to_thread(get_daily_report_prefs, user_id),
@@ -90,7 +92,9 @@ async def _get_notification_settings(user_id: int) -> dict:
         "daily_report_enabled": bool(daily_prefs.get("enabled", True)),
         "daily_report_hour": int(daily_prefs.get("hour", 9)),
         "daily_report_minute": int(daily_prefs.get("minute", 0)),
-        "weekly_report_enabled": bool(daily_prefs.get("weekly_enabled", True)),
+        "weekly_report_enabled": weekly_available and bool(daily_prefs.get("weekly_enabled", True)),
+        "weekly_report_stored_enabled": bool(daily_prefs.get("weekly_enabled", True)),
+        "weekly_report_available": weekly_available,
         "monthly_report_enabled": bool(daily_prefs.get("monthly_enabled", True)),
     }
 
@@ -165,8 +169,10 @@ async def account_reset_route(request: Request, payload: AccountResetPayload):
         except Exception as exc:  # noqa: BLE001
             log_system_event_sync(
                 "warning", "account_reset_pluggy_cleanup_failed",
-                f"Reset do user {user_id}: limpeza remota na Pluggy falhou: {exc}",
-                source="settings", user_id=user_id, details={"error": str(exc)[:200]},
+                "Reset: limpeza remota na Pluggy falhou",
+                source="settings", user_id=user_id,
+                details={"motivo": type(exc).__name__,
+                         "sqlstate": getattr(exc, "sqlstate", None)},
             )
 
     try:
@@ -230,9 +236,10 @@ async def account_reset_route(request: Request, payload: AccountResetPayload):
             await asyncio.to_thread(
                 log_system_event_sync,
                 "warning", "account_reset_pluggy_cleanup_failed",
-                f"Reset do user {user_id}: 2º passe remoto falhou: {exc}",
+                "Reset: 2º passe remoto falhou",
                 source="settings", user_id=user_id,
-                details={"items": tardios, "error": str(exc)[:200]},
+                details={"items": tardios, "motivo": type(exc).__name__,
+                         "sqlstate": getattr(exc, "sqlstate", None)},
             )
 
     # Mesmo padrão de toda rota de mutação (cards/pockets/launches): sem isto,
@@ -253,6 +260,8 @@ async def account_reset_route(request: Request, payload: AccountResetPayload):
         )
     except Exception:  # noqa: BLE001 — atualização ao vivo é conveniência, nunca bloqueia o reset
         pass
+    from api.v2 import eventos
+    eventos.avisar(user_id, "tudo")
 
     await asyncio.to_thread(
         record_audit_event, user_id, AuditEvent.ACCOUNT_RESET, request=request,
@@ -280,7 +289,10 @@ async def update_security_contact_route(
     # O teto tem caso: `test_conta_sem_email_sai_por_400_e_nao_por_500`
     # (`tests/test_settings_saida_guardas.py`) fixa que o /password-reset dessa
     # conta responde 400 com instrução, não 500.
-    shared.authorize_dashboard_access(request, user_id)
+    # `exige_credencial=False` pula SÓ a perna da senha (403 password_required):
+    # corrigir o e-mail é a saída de quem pagou sem senha (PR 4 do funil v3).
+    # Dono, exclusão agendada, DIREITO e CSRF continuam valendo.
+    shared.authorize_dashboard_access(request, user_id, exige_credencial=False)
     auth_user = await asyncio.to_thread(get_auth_user, user_id)
     if not auth_user:
         raise HTTPException(status_code=400, detail="Esta conta ainda não tem login por e-mail configurado.")
@@ -324,6 +336,23 @@ async def update_security_contact_route(
                 # claro deixa o hash apontando pro valor antigo e o bot nunca
                 # reconhece o número novo.
                 if email:
+                    # Pendência do e-mail no Stripe (PR 4b), na MESMA transação: o
+                    # 409 do e-mail repetido desfaz as duas. Compara no banco, não
+                    # no `old_email` do cache. O `on conflict` NÃO zera o claim de
+                    # propósito: com B em envio, C espera o `fechar` de B falhar
+                    # pela versão — senão outra rodada mandaria C com B ainda em
+                    # voo, e B podia chegar ao Stripe depois de C.
+                    await cur.execute(
+                        """
+                        INSERT INTO stripe_email_pendente (user_id)
+                        SELECT DISTINCT user_id FROM auth_accounts
+                         WHERE user_id = %s AND stripe_customer_id IS NOT NULL
+                           AND email_hash IS DISTINCT FROM %s
+                        ON CONFLICT (user_id) DO UPDATE
+                           SET versao = stripe_email_pendente.versao + 1, tentativas = 0
+                        """,
+                        (user_id, hash_pii_optional(email, kind="email")),
+                    )
                     await cur.execute(
                         """
                         UPDATE auth_accounts
@@ -486,6 +515,9 @@ async def update_notification_settings_route(
     payload: NotificationSettingsPayload,
 ):
     shared.authorize_dashboard_access(request, user_id)
+    # Verifica antes de qualquer escrita; desligar permanece disponível após downgrade.
+    if payload.weekly_report_enabled is True:
+        await asyncio.to_thread(shared.require_plan_feature, user_id, "weekly_report")
 
     touches_email_prefs = (
         payload.engagement_email_enabled is not None

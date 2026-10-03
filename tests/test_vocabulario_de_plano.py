@@ -68,11 +68,11 @@ def logado(monkeypatch, user_id):
     toda compra aqui é a PRIMEIRA, então `credit_cents` é 0 e `amount_cents` é o
     preço cheio, que é o que deixa a asserção de dinheiro ser direta.
 
-    `app` é lido AQUI, e não no topo do módulo, de propósito:
-    `tests/test_pix_rota_registrada.py` faz `importlib.reload` do monólito, e um
-    `TestClient(dashboard.app)` de import-time fica preso ao app ANTIGO enquanto
-    o override cai no novo. O sintoma era 401 só quando os dois arquivos rodavam
-    juntos — efeito de ORDEM, invisível no arquivo isolado.
+    `app` é lido AQUI, e não no topo do módulo: qualquer `importlib.reload` do
+    monólito deixa um `TestClient(dashboard.app)` de import-time preso ao app
+    ANTIGO enquanto o override cai no novo. Já aconteceu — o sintoma era 401 só
+    quando este arquivo rodava junto com `tests/test_pix_rota_registrada.py`,
+    que recarregava o monólito (hoje importa num subprocesso).
     """
     conta(user_id, "free", None)
     monkeypatch.setattr(rotas.shared, "resolve_dashboard_user_id",

@@ -1,0 +1,112 @@
+<!doctype html>
+<html lang="pt-BR">
+<head>
+<meta charset="utf-8"/>
+<meta content="width=device-width, initial-scale=1.0" name="viewport"/>
+<meta content="noindex" name="robots"/>
+<title>Recuperar acesso · PigBank</title>
+<meta content="Receba as instruções para definir sua senha do PigBank." name="description"/>
+<meta content="#111111" name="theme-color"/>
+<link href="/favicon.png?v=3" rel="icon"/>
+<link href="/brand/apple-touch-icon.png?v=3" rel="apple-touch-icon"/>
+<link href="/brand.css?v=4" rel="stylesheet"/>
+<link href="/phosphor.css?v=1" rel="stylesheet"/>
+<link href="/site.css?v=5" rel="stylesheet"/>
+<link href="/site-redesign.css?v=1" rel="stylesheet"/>
+<link href="/site-auth.css?v=1" rel="stylesheet"/>
+<script src="/safe-area.js?v=1">
+</script>
+</head>
+<body class="lp lp-auth lp-auth-page">
+<a class="lp-skip-link" href="#conteudo">Pular para o conteúdo</a>
+<nav class="nav" aria-label="Navegação principal">
+<a class="nav-logo" href="/" aria-label="PigBank, início">
+<img class="logo-full" src="/brand/landing-logo.webp?v=1" alt="PigBank" width="142" height="42">
+</a>
+<div class="nav-right">
+<a class="link-entrar" href="/">Voltar ao site</a>
+<a class="btn btn-primary" href="/login">Entrar</a>
+</div>
+</nav>
+<main class="lp-auth-layout lp-shell" id="conteudo">
+<aside aria-label="PigBank" class="lp-auth-story">
+<div class="lp-auth-story-copy">
+<p class="lp-eyebrow">Clareza pra suas contas</p>
+<h2>Sua grana.<br/>Seu ritmo.<br/>Tudo mais claro.</h2>
+<p>Retome seus planos.<br/>O Piggy cuida da organização com você.</p>
+</div>
+<div class="lp-auth-piggy-wrap">
+<img alt="Piggy, o porquinho rosa de óculos escuros e moletom preto, com um celular" class="lp-auth-piggy" height="1200" src="/brand/landing-piggy-four-digits.webp?v=1" width="800"/>
+<div class="lp-auth-story-stamp">
+<i aria-hidden="true" class="ph ph-chat-circle">
+</i>
+<span>Organização que<br/>começa na conversa.</span>
+</div>
+</div>
+</aside>
+<div class="lp-auth-form-column">
+<div class="auth-card">
+<form id="form-forgot" novalidate="" onsubmit="doForgot(event)">
+<h1>Vamos recuperar seu acesso.</h1>
+<p class="auth-sub">Informe o e-mail da sua conta para receber as instruções de redefinição de senha.</p>
+<div class="auth-error" id="login-error" role="alert">
+</div>
+<div class="field">
+<label for="email">E-mail da sua conta</label>
+<input autocomplete="email" id="email" placeholder="seu@email.com" required="" type="email"/>
+</div>
+<button class="btn btn-primary btn-block btn-lg" id="btn-forgot" type="submit">Enviar instruções</button>
+<p class="auth-alt">
+<a href="/login">Voltar para o login</a>
+</p>
+</form>
+<section aria-labelledby="forgot-title" id="forgot-sent" style="display:none">
+<h1 id="forgot-title" tabindex="-1">Confira seu e-mail.</h1>
+<p class="auth-sub">Se houver uma conta associada ao e-mail informado, você receberá um link para definir sua senha.</p>
+<a class="btn btn-primary btn-block btn-lg" href="/login">Voltar para o login</a>
+<p class="auth-alt">
+<button class="lp-auth-text-button" id="forgot-again" type="button">Usar outro e-mail</button>
+</p>
+</section>
+</div>
+</div>
+</main>
+<footer class="lp-auth-footer lp-shell">
+<p>© 2026 PigBank</p>
+<nav aria-label="Informações e ajuda">
+<a href="/suporte">Precisa de ajuda?</a>
+<a href="/privacy">Privacidade</a>
+<a href="/termos">Termos de uso</a>
+</nav>
+</footer>
+<script>
+  async function doForgot(ev) {
+    ev.preventDefault();
+    var input = document.getElementById('email'), box = document.getElementById('login-error');
+    var button = document.getElementById('btn-forgot'), email = input.value.trim();
+    box.classList.remove('show');
+    function error(text) { box.textContent = text; box.classList.add('show'); }
+    if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)) { error('Digite um e-mail válido.'); input.focus(); return; }
+    var cookie = (document.cookie.split('; ').find(function (r) { return r.startsWith('csrf_token='); }) || '').split('=')[1] || '';
+    var headers = { 'Content-Type': 'application/json' };
+    if (cookie) headers['X-CSRF-Token'] = decodeURIComponent(cookie);
+    button.disabled = true; button.textContent = 'Enviando…';
+    try {
+      var response = await fetch('/auth/forgot-password', { method: 'POST', credentials: 'same-origin', headers: headers, body: JSON.stringify({ email: email }) });
+      if (!response.ok) { error(response.status === 429 ? 'Muitas tentativas. Aguarde um pouco antes de tentar novamente.' : 'Não foi possível solicitar as instruções. Tente novamente.'); return; }
+      document.getElementById('form-forgot').style.display = 'none';
+      document.getElementById('forgot-sent').style.display = '';
+      document.getElementById('forgot-title').focus();
+    } catch (_) { error('Erro de conexão. Tente novamente.'); }
+    finally { button.disabled = false; button.textContent = 'Enviar instruções'; }
+  }
+  document.getElementById('forgot-again').addEventListener('click', function () {
+    document.getElementById('forgot-sent').style.display = 'none';
+    document.getElementById('form-forgot').style.display = '';
+    document.getElementById('email').focus();
+  });
+</script>
+<script src="/auth-presentation.js?v=1" defer>
+</script>
+</body>
+</html>

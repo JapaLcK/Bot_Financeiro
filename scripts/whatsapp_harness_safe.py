@@ -14,9 +14,20 @@ REPO = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(REPO))
 
 
+def _exit_code(layer: str, result: dict) -> int:
+    if result["blocked"]:
+        return 70
+    if layer == "core":
+        return 0 if result["answered"] else 2
+    if layer == "policy":
+        return 0
+    return 0 if result["delivered"] else 2
+
+
 def main() -> int:
     parser = argparse.ArgumentParser(description="Harness hermético do WhatsApp")
-    parser.add_argument("--text", default="qual é meu saldo?")
+    # Repetível só em core/policy: um processo roda N frases, uma linha JSON por frase.
+    parser.add_argument("--text", action="append", default=None)
     parser.add_argument("--layer", choices=("adapter", "core", "policy"), default="adapter")
     parser.add_argument("--probe", choices=("env", "network", "write"))
     parser.add_argument(
@@ -32,6 +43,9 @@ def main() -> int:
     parser.add_argument("--core-unsafe-env", action="store_true")
     parser.add_argument("--user-lookup-error", action="store_true")
     args = parser.parse_args()
+    texts = args.text or ["qual é meu saldo?"]
+    if len(texts) > 1 and (args.layer == "adapter" or args.probe):
+        parser.error("mais de um --text só vale com --layer core ou policy")
 
     try:
         with tempfile.TemporaryDirectory(prefix="pigbank-wa-harness-") as temp_dir:
@@ -70,45 +84,46 @@ def main() -> int:
                 finally:
                     guards.close()
             else:
-                if args.layer == "core":
-                    result = run_core_case(
-                        args.text,
-                        force_internal_error=args.core_error,
-                        force_safety_violation=args.core_unsafe_env,
+                exit_code = 0
+                for text in texts:
+                    if args.layer == "core":
+                        result = run_core_case(
+                            text,
+                            force_internal_error=args.core_error,
+                            force_safety_violation=args.core_unsafe_env,
+                        )
+                    elif args.layer == "policy":
+                        result = run_policy_case(text)
+                    else:
+                        result = run_adapter_case(
+                            text,
+                            attachment=args.attachment,
+                            handler_behavior=args.handler_behavior,
+                            event_log_error=args.event_log_error,
+                            send_behavior=(
+                                "error"
+                                if args.send_error
+                                else "error-once" if args.send_error_once else "reply"
+                            ),
+                            user_lookup_error=args.user_lookup_error,
+                        )
+                    result["cwd_is_temporary"] = Path.cwd() != REPO
+                    result["environment_sanitized"] = not any(
+                        name in os.environ
+                        for name in (
+                            "DATABASE_URL",
+                            "OPENAI_API_KEY",
+                            "RESEND_API_KEY",
+                            "WA_ACCESS_TOKEN",
+                        )
                     )
-                elif args.layer == "policy":
-                    result = run_policy_case(args.text)
-                else:
-                    result = run_adapter_case(
-                        args.text,
-                        attachment=args.attachment,
-                        handler_behavior=args.handler_behavior,
-                        event_log_error=args.event_log_error,
-                        send_behavior=(
-                            "error"
-                            if args.send_error
-                            else "error-once" if args.send_error_once else "reply"
-                        ),
-                        user_lookup_error=args.user_lookup_error,
-                    )
-                result["cwd_is_temporary"] = Path.cwd() != REPO
-                result["environment_sanitized"] = not any(
-                    name in os.environ
-                    for name in (
-                        "DATABASE_URL",
-                        "OPENAI_API_KEY",
-                        "RESEND_API_KEY",
-                        "WA_ACCESS_TOKEN",
-                    )
-                )
-                print(json.dumps(result, ensure_ascii=False, sort_keys=True))
-                if result["blocked"]:
-                    return 70
-                if args.layer == "core":
-                    return 0 if result["answered"] else 2
-                if args.layer == "policy":
-                    return 0
-                return 0 if result["delivered"] else 2
+                    result["text"] = text
+                    result["exit"] = _exit_code(args.layer, result)
+                    print(json.dumps(result, ensure_ascii=False, sort_keys=True))
+                    exit_code = max(exit_code, result["exit"])
+                    if result["blocked"]:
+                        break  # depois de uma guarda disparar, o estado do processo é desconhecido
+                return exit_code
     except SafetyViolation as exc:
         print(json.dumps({"error": "SAFETY_VIOLATION", "detail": str(exc)}))
         return 70

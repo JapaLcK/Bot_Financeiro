@@ -2,20 +2,20 @@ import * as React from "react";
 
 import { cn } from "@/lib/utils";
 
-export function Message({
-  className,
-  align = "start",
-  ...props
-}: React.ComponentProps<"div"> & { align?: "start" | "end" }) {
+export const Message = React.forwardRef<
+  HTMLDivElement,
+  React.ComponentProps<"div"> & { align?: "start" | "end" }
+>(function Message({ className, align = "start", ...props }, ref) {
   return (
     <div
+      ref={ref}
       data-slot="message"
       data-align={align}
       className={cn("pc-chat-message", className)}
       {...props}
     />
   );
-}
+});
 
 export function MessageContent({ className, ...props }: React.ComponentProps<"div">) {
   return (

@@ -202,10 +202,11 @@ test("o switch troca os preços e explica a cobrança com movimento", async () =
   assert.ok(anual.cobrancas.every((texto) =>
     texto.startsWith("Cobrado em um único pagamento anual")),
   `copy anual ausente: ${JSON.stringify(anual.cobrancas)}`);
+  // A identidade aprovada usa 42px; ciclo, quadros e valores continuam contratos funcionais.
   assert.deepEqual(anual.fluxos, [
-    { ciclo: "annual", direcao: "up", numberFlow: true, sufixo: "/ano", quadros: ["translateY(0px)", "translateY(-50%)"], fade: false, tamanho: "40px", peso: "850" },
-    { ciclo: "annual", direcao: "up", numberFlow: true, sufixo: "/ano", quadros: ["translateY(0px)", "translateY(-50%)"], fade: false, tamanho: "40px", peso: "850" },
-    { ciclo: "annual", direcao: "up", numberFlow: true, sufixo: "/ano", quadros: ["translateY(0px)", "translateY(-50%)"], fade: false, tamanho: "40px", peso: "850" },
+    { ciclo: "annual", direcao: "up", numberFlow: true, sufixo: "/ano", quadros: ["translateY(0px)", "translateY(-50%)"], fade: false, tamanho: "42px", peso: "850" },
+    { ciclo: "annual", direcao: "up", numberFlow: true, sufixo: "/ano", quadros: ["translateY(0px)", "translateY(-50%)"], fade: false, tamanho: "42px", peso: "850" },
+    { ciclo: "annual", direcao: "up", numberFlow: true, sufixo: "/ano", quadros: ["translateY(0px)", "translateY(-50%)"], fade: false, tamanho: "42px", peso: "850" },
   ]);
   assert.equal(anual.copiasEmMovimento, 3);
 
@@ -213,9 +214,9 @@ test("o switch troca os preços e explica a cobrança com movimento", async () =
   await page.click("#cycle-annual");
   await page.waitForTimeout(80);
   assert.deepEqual((await lerCards()).fluxos, [
-    { ciclo: "monthly", direcao: "down", numberFlow: true, sufixo: "/mês", quadros: ["translateY(-50%)", "translateY(0px)"], fade: false, tamanho: "40px", peso: "850" },
-    { ciclo: "monthly", direcao: "down", numberFlow: true, sufixo: "/mês", quadros: ["translateY(-50%)", "translateY(0px)"], fade: false, tamanho: "40px", peso: "850" },
-    { ciclo: "monthly", direcao: "down", numberFlow: true, sufixo: "/mês", quadros: ["translateY(-50%)", "translateY(0px)"], fade: false, tamanho: "40px", peso: "850" },
+    { ciclo: "monthly", direcao: "down", numberFlow: true, sufixo: "/mês", quadros: ["translateY(-50%)", "translateY(0px)"], fade: false, tamanho: "42px", peso: "850" },
+    { ciclo: "monthly", direcao: "down", numberFlow: true, sufixo: "/mês", quadros: ["translateY(-50%)", "translateY(0px)"], fade: false, tamanho: "42px", peso: "850" },
+    { ciclo: "monthly", direcao: "down", numberFlow: true, sufixo: "/mês", quadros: ["translateY(-50%)", "translateY(0px)"], fade: false, tamanho: "42px", peso: "850" },
   ]);
 
   await page.close();
@@ -281,10 +282,10 @@ test("a tabela comparativa tem só os três planos do bloco, e as 4 colunas fech
     `cabeçalhos: ${JSON.stringify(t.nomes)}`);
 
   // Consistência: a MESMA contagem no thead e em cada linha do tbody (1 de
-  // escada + 6 de recurso — só diferenciais, o que é igual nos três ficou no
+  // escada + 8 de recurso — só diferenciais, o que é igual nos três ficou no
   // bloco acima — + 3 de grupo + 1 de CTA). Cada linha entra, não só amostra.
   assert.deepEqual(t.thead, [COLUNAS], `thead: ${JSON.stringify(t.thead)}`);
-  assert.equal(t.tbody.length, 11, `tbody com ${t.tbody.length} linhas`);
+  assert.equal(t.tbody.length, 13, `tbody com ${t.tbody.length} linhas`);
   assert.deepEqual([...new Set(t.tbody)], [COLUNAS],
     `linhas do tbody fora das ${COLUNAS} colunas: ${JSON.stringify(t.tbody)}`);
   await page.close();
@@ -326,8 +327,11 @@ test("controle positivo: a ilha montou com as seções e os dados nas colunas ce
       secoes,
       escada: linha("No seu plano entra"),
       bancos: linha("Bancos conectados (Open Finance)"),
-      mensagens: linha("Mensagens com a Piggy"),
-      previsao: linha("Previsão de saldo 30/60/90 dias"),
+      mensagens: linha("Mensagens com o Piggy"),
+      previsao: linha("Previsão de saldo"),
+      semanal: linha("Resumo semanal automático"),
+      insights: linha("Insights e comparações"),
+      trajetoria: linha("Trajetória diária e pior dia do caixa"),
       agentes: linha("Agentes ligados ao mesmo tempo"),
       comuns: [...document.querySelectorAll("#cmp-v2 ul li")].map(txt),
     };
@@ -341,11 +345,16 @@ test("controle positivo: a ilha montou com as seções e os dados nas colunas ce
   assert.deepEqual(dados.bancos, ["1", "2", "5"]);
   // Onde o Pro só herda do Plus, a célula diz isso em vez de repetir o valor.
   assert.deepEqual(dados.mensagens, ["200/mês", "1.000/mês", "Igual ao Plus"]);
-  assert.deepEqual(dados.previsao, ["Não incluído", "Não incluído", "Incluído"]);
+  assert.deepEqual(dados.previsao, ["Não incluído", "30 dias", "30/60/90 dias"]);
+  assert.deepEqual(dados.semanal, ["Não incluído", "Incluído", "Incluído"]);
+  assert.deepEqual(dados.insights, ["Não incluído", "Incluído", "Incluído"]);
+  assert.deepEqual(dados.trajetoria, ["Não incluído", "Não incluído", "Incluído"]);
   assert.deepEqual(dados.agentes, ["Não incluído", "3 · você escolhe quais", "Os 7 · a equipe inteira"]);
   // O bloco "em todos os planos" abre com o trial — é a oferta que destrava a
   // primeira decisão e antes só existia nas notas pequenas.
-  assert.equal(dados.comuns.length, 9, `bloco comum com ${dados.comuns.length} itens`);
+  assert.equal(dados.comuns.length, 10, `bloco comum com ${dados.comuns.length} itens`);
+  assert.ok(dados.comuns.includes("Categorização automática com IA"));
+  assert.ok(dados.comuns.includes("Orçamento por categoria"));
   assert.ok(dados.comuns[0].includes("15 dias grátis"),
     `o trial não abre o bloco comum: "${dados.comuns[0]}"`);
   await page.close();

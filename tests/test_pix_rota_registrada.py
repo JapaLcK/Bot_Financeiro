@@ -60,15 +60,19 @@ quem distingue "a rota sumiu" de "a árvore quebrou" — sem ele, uma quebra do
 FastAPI viraria "alguém apagou o checkout".
 
 CEGUEIRA DECLARADA: rota DENTRO de um sub-app montado é encontrada; o prefixo do
-`Mount` é concatenado. O repositório não tem nenhum `Mount(` nem `app.mount(`
-hoje (medido).
+`Mount` é concatenado. O monólito tem um `app.mount` — o da `/api/v2`
+(`api/v2/app.py`) —, e é por essa descida que `tests/test_api_v2_rotas.py`
+enxerga as rotas dele.
 """
 
 import pytest
 
 
-def _andar_nas_rotas(rotas, prefixo: str = "", visto=None):
+def _andar_nas_rotas(rotas, prefixo: str = "", visto=None, com_rota: bool = False):
     """Desce a ÁRVORE de roteamento, montando o path completo.
+
+    `com_rota=True` devolve `(path, objeto_da_rota)` em vez do path: é o que
+    `tests/test_api_v2_rotas.py` usa para ler as dependências de cada rota.
 
     Uma introspecção só não basta, e nenhuma das duas óbvias basta. Medido nas
     duas versões que importam (`.venv` local **0.115.6**, `requirements.txt:58`
@@ -116,7 +120,7 @@ def _andar_nas_rotas(rotas, prefixo: str = "", visto=None):
         visto.add(chave)
         path = getattr(rota, "path", None)
         if isinstance(path, str):
-            yield prefixo + path
+            yield (prefixo + path, rota) if com_rota else prefixo + path
         filhas = None
         for fonte in (getattr(rota, "original_router", None), rota,
                       getattr(rota, "app", None)):
@@ -126,7 +130,7 @@ def _andar_nas_rotas(rotas, prefixo: str = "", visto=None):
         if filhas:
             ctx = getattr(rota, "include_context", None)
             passo = getattr(ctx, "prefix", "") or (path if isinstance(path, str) else "")
-            yield from _andar_nas_rotas(filhas, prefixo + passo, visto)
+            yield from _andar_nas_rotas(filhas, prefixo + passo, visto, com_rota)
 
 
 def paths_expostos(app) -> set[str]:
@@ -145,11 +149,11 @@ def paths_expostos(app) -> set[str]:
 def _app_sintetico():
     """App de mentira com as quatro classes de rota, para medir a TÉCNICA.
 
-    Sintético de propósito: o monólito não tem hoje nenhuma rota
-    `include_in_schema=False` nem `Mount` (`grep` por ambos: zero), então um
-    piso tirado dele provaria só o que ele já usa — e foi assim que os dois
-    pisos anteriores ficaram satisfeitos o tempo todo enquanto a rota escondida
-    passava.
+    Sintético de propósito: o monólito não tinha nenhuma rota
+    `include_in_schema=False` nem `Mount` quando este piso nasceu (hoje tem o
+    `Mount` da `/api/v2`), e um piso tirado dele provaria só o que ele já usa —
+    e foi assim que os dois pisos anteriores ficaram satisfeitos o tempo todo
+    enquanto a rota escondida passava.
     """
     from fastapi import APIRouter, FastAPI
     from starlette.routing import Mount, Route
@@ -277,7 +281,7 @@ def test_as_tres_rotas_do_pix_estao_registradas():
     )
 
 
-def test_a_rota_existe_sem_a_flag_no_ambiente(monkeypatch):
+def test_a_rota_existe_sem_a_flag_no_ambiente():
     """O caso que fecha a cegueira (a): registro atrás de env.
 
     O CI não tem `ASAAS_PIX_ANNUAL_ENABLED`, então o teste acima já roda nessa
@@ -285,17 +289,37 @@ def test_a_rota_existe_sem_a_flag_no_ambiente(monkeypatch):
     EXPLÍCITA: quem puser o `include_router` atrás de um `if os.getenv(...)`
     para "ligar só em produção" vê vermelho com o nome do problema.
 
-    A env some do processo, o módulo do app é **recarregado**, e as três rotas
-    têm de continuar lá. Sem o reload o módulo já importado esconderia o
-    registro condicional, e o teste passaria por vácuo.
+    A env some e o app é importado **num processo novo**, e as três rotas têm de
+    continuar lá. Sem import novo o módulo já carregado esconderia o registro
+    condicional, e o teste passaria por vácuo.
+
+    Processo novo, e não `importlib.reload`: o reload rodava os decoradores do
+    `limiter` de novo, e o slowapi faz `.extend()` nos limites da rota — dali em
+    diante cada requisição gastava dois slots no processo inteiro do pytest. O
+    `ROOT_DIR` vazio impede o `.env` do disco de devolver a env (mesmo preâmbulo
+    de `tests/_lifespan_probe.py`).
     """
-    import importlib
+    import json
+    import os
+    import subprocess
+    import sys
 
-    import frontend.finance_bot_websocket_custom as app_mod
-
-    monkeypatch.delenv("ASAAS_PIX_ANNUAL_ENABLED", raising=False)
-    recarregado = importlib.reload(app_mod)
-    assert ROTAS_DO_PIX <= paths_expostos(recarregado.app), (
+    fonte = (
+        "import pathlib, tempfile, config.env\n"
+        "config.env.ROOT_DIR = pathlib.Path(tempfile.mkdtemp())\n"
+        "import json, frontend.finance_bot_websocket_custom as m\n"
+        "from tests.test_pix_rota_registrada import paths_expostos\n"
+        "print(json.dumps(sorted(paths_expostos(m.app))))\n"
+    )
+    env = {k: v for k, v in os.environ.items() if k != "ASAAS_PIX_ANNUAL_ENABLED"}
+    raiz = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+    saida = subprocess.run(
+        [sys.executable, "-c", fonte], cwd=raiz, env=env,
+        capture_output=True, text=True, timeout=120,
+    )
+    assert saida.returncode == 0, saida.stderr[-2000:]
+    caminhos = set(json.loads(saida.stdout.strip().splitlines()[-1]))
+    assert ROTAS_DO_PIX <= caminhos, (
         "as rotas do Pix sumiram sem a env — o registro está condicionado a "
         "flag, e é exatamente o que este portão passou a proibir"
     )

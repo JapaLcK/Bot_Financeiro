@@ -382,7 +382,7 @@ def test_oferta_final_condicional_nao_sobrescreve_fila_restaurada(user_id, monke
     monkeypatch.setattr(launches, "infer_category", lambda *_a, **_k: CategoriaFake())
     monkeypatch.setattr(launches, "learn_from_inference", lambda *_a, **_k: None)
     monkeypatch.setattr(launches, "_maybe_recurring_offer", lambda *_a, **_k: None)
-    monkeypatch.setattr(launches.db, "reconcile_manual_launch", lambda *_a, **_k: None)
+    monkeypatch.setattr(launches.db, "propose_manual_reconciliation", lambda *_a, **_k: None)
 
     def registra_enquanto_recupera(*_a, **_k):
         launches._devolve_head(user_id, devolvido, "whatsapp")
@@ -515,7 +515,7 @@ def test_oferta_de_gasto_fixo_sai_quando_a_fila_e_restaurada(user_id, monkeypatc
     def registra_com_oferta_e_devolve(*a, **k):
         r = real(*a, **k)
         r += ("\n\n💡 Você já lançou *aluguel* de R$ 800,00 em outro mês. "
-              "Quer marcar como *gasto fixo* (a Piggy lança sozinha todo mês)? "
+              "Quer marcar como *gasto fixo* (o Piggy usa pra prever seu saldo todo mês)? "
               "Responda *sim* ou *não*.")
         launches._devolve_head(user_id, {"desc": "gas", "tipo": "despesa"}, "whatsapp")
         return r
@@ -534,8 +534,8 @@ def test_controle_oferta_de_gasto_fixo_sobrevive_sem_fila(user_id):
     Sem isto, o teste acima passaria num código que apagasse a oferta sempre.
     """
     texto = ("💸 Despesa registrada: R$ 800,00\n\n💡 Você já lançou *aluguel* de "
-             "R$ 800,00 em outro mês. Quer marcar como *gasto fixo* (a Piggy "
-             "lança sozinha todo mês)? Responda *sim* ou *não*.")
+             "R$ 800,00 em outro mês. Quer marcar como *gasto fixo* (o Piggy "
+             "usa pra prever seu saldo todo mês)? Responda *sim* ou *não*.")
     assert "sim* ou *não" in texto
     assert "sim* ou *não" not in launches._sem_oferta_de_gasto_fixo(texto)
     assert "Despesa registrada" in launches._sem_oferta_de_gasto_fixo(texto)

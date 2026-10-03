@@ -941,14 +941,17 @@ def test_todo_text_de_chamada_e_constante_literal():
 
     raiz = pathlib.Path(shared.__file__).resolve().parents[2]
     ignorar = {".venv", ".claude", "node_modules", ".git", "mobile"}
-    call_sites = 0
+    call_sites = set()
 
     for arquivo in raiz.rglob("*.py"):
         # relative_to(raiz): o próprio caminho da raiz contém ".claude" quando o
         # repo está num worktree — comparar os parts absolutos ignoraria TUDO.
-        if ignorar & set(arquivo.relative_to(raiz).parts) or arquivo.name.startswith("test_"):
+        relativo = arquivo.relative_to(raiz)
+        if (ignorar & set(relativo.parts) or arquivo.name.startswith("test_")
+                or relativo.parts[:2] == (".time-dev", "worktrees")):
             continue
         arvore = ast.parse(arquivo.read_text(encoding="utf-8"), filename=str(arquivo))
+        pais = {child: parent for parent in ast.walk(arvore) for child in ast.iter_child_nodes(parent)}
         for node in ast.walk(arvore):
             if not (isinstance(node, ast.Call)
                     and getattr(node.func, "id", getattr(node.func, "attr", None))
@@ -957,7 +960,10 @@ def test_todo_text_de_chamada_e_constante_literal():
             for kw in node.keywords:
                 if kw.arg != "text":
                     continue
-                call_sites += 1
+                funcao = node
+                while funcao is not None and not isinstance(funcao, (ast.FunctionDef, ast.AsyncFunctionDef)):
+                    funcao = pais.get(funcao)
+                call_sites.add((relativo.as_posix(), getattr(funcao, "name", None)))
                 onde = f"{arquivo}:{node.lineno}"
                 assert isinstance(kw.value, ast.Tuple), f"{onde}: text= não é tupla literal"
                 for elt in kw.value.elts:
@@ -966,7 +972,10 @@ def test_todo_text_de_chamada_e_constante_literal():
                     assert isinstance(elt, ast.Constant) and isinstance(elt.value, str), \
                         f"{onde}: text= carrega {ast.dump(elt)[:60]} — não é constante"
 
-    assert call_sites == 1, f"call sites com text=: {call_sites} (era 1: o /unsubscribe)"
+    assert call_sites == {
+        ("frontend/finance_bot_websocket_custom.py", "unsubscribe"),
+        ("frontend/finance_bot_websocket_custom.py", "conta_redirect"),
+    }, f"call sites com text=: {call_sites}"
 
 
 # ─── Escape e desempacotamento do `text=` (fechados por construção) ──────────

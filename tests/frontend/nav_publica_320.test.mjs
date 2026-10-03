@@ -181,11 +181,11 @@ test("3) 375 e 390 deslogado seguem em uma faixa (controle positivo)", async () 
   }
 });
 
-test("4) 1280 deslogado: o desktop continua intocado (controle positivo)", async () => {
+test("4) 1280 deslogado: header integral da landing cabe em uma linha", async () => {
   const { ctx, page } = await abrirNav(1280);
   const m = await medir(page);
   assert.equal(m.faixas, 1, `desktop em ${m.faixas} faixas`);
-  assert.equal(m.navH, 69.6, `a nav de desktop mudou de altura: ${m.navH}px`);
+  assert.equal(m.navH, 78, `a nav desktop deve ter 78px: ${m.navH}px`);
   assert.equal(m.alvos.burger.h, 0, "o burger apareceu no desktop");
   await ctx.close();
 });
@@ -327,9 +327,10 @@ test("11) o logo nunca é esmagado nem encolhido (aspecto E tamanho)", async () 
     const pct = (g.w / g.esperado) * 100;
     assert.ok(pct >= 99.5,
       `${w}px: logo ${g.w}×${g.h}, esperado ${g.esperado} de largura — ${pct.toFixed(1)}% do aspecto`);
-    assert.equal(g.h, 30, `${w}px: o logo renderizou com ${g.h}px de altura, não 30`);
-    assert.ok(Math.abs(g.w - 101.16) <= 0.5,
-      `${w}px: o logo renderizou com ${g.w}px de largura, esperado ~101,16`);
+    const largura = w <= 360 ? 99 : w <= 900 ? 111 : 120;
+    assert.ok(Math.abs(g.w - largura) <= 0.5,
+      `${w}px: o logo renderizou com ${g.w}px de largura, esperado ${largura}`);
+    assert.ok(g.h >= 29, `${w}px: logo pequeno demais (${g.h}px)`);
     await ctx.close();
   }
 });

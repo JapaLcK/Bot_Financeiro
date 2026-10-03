@@ -106,15 +106,6 @@ def get_password_changed_at(user_id: int):
     return _db_support.get_password_changed_at_impl(get_conn, user_id)
 
 
-def auto_link_auth_user(target_user_id: int, current_user_id: int) -> int:
-    if int(target_user_id) == int(current_user_id):
-        return int(target_user_id)
-    if get_auth_user(int(target_user_id)) is not None:
-        return int(target_user_id)
-    merge_users(int(current_user_id), int(target_user_id))
-    return int(target_user_id)
-
-
 # ──────────────────────────────────────────────────────────────────────────────
 # Dashboard short links
 # ──────────────────────────────────────────────────────────────────────────────
@@ -280,16 +271,34 @@ AccountAlreadyExistsError = _db_support.AccountAlreadyExistsError
 
 def create_email_verification(
     email: str,
-    password: str,
-    phone: str,
+    password: str | None,
+    phone: str | None,
     minutes_valid: int = 15,
     display_name: str | None = None,
 ) -> str:
-    phone_e164 = normalize_phone_e164(phone)
+    phone_e164 = normalize_phone_e164(phone) if phone else None
     return _db_support.create_email_verification_impl(
         get_conn, _hash_password, email, password, phone_e164, minutes_valid,
         display_name=display_name,
     )
+
+
+def quiz_signup_pendente(email: str) -> tuple[str | None, str | None] | None:
+    """(telefone, nome) do último cadastro do quiz (sem senha) deste e-mail nas
+    últimas 24h, para o reenvio do código. None quando não há."""
+    with get_conn() as conn:
+        with conn.cursor() as cur:
+            cur.execute(
+                """
+                select phone_e164, display_name from email_verification_codes
+                where email_hash = %s and password_hash is null
+                  and created_at > now() - interval '24 hours'
+                order by created_at desc limit 1
+                """,
+                (hash_pii_optional(email.strip().lower(), kind="email"),),
+            )
+            row = cur.fetchone()
+    return (row["phone_e164"], row["display_name"]) if row else None
 
 
 def confirm_email_verification(email: str, code: str, source: str = "web") -> dict:
@@ -359,30 +368,6 @@ def get_users_for_engagement() -> list[dict]:
                 WHERE engagement_opt_out = false
                 ORDER BY last_activity_at DESC NULLS LAST
                 """
-            )
-            return cur.fetchall()
-
-
-def get_free_users_for_upgrade_nudge(active_within_days: int = 30) -> list[dict]:
-    """Candidatos ao nudge de upgrade (B2): contas no plano Grátis, ativas
-    recentemente, com e-mail e sem opt-out de engajamento. A dedup de reenvio
-    fica a cargo de recent_event_exists no scheduler (sem coluna nova).
-    Nota: trialing tem plan setado pro tier escolhido → COALESCE(plan,'free')
-    já exclui quem está em trial; churned volta a plan='free' no webhook."""
-    with get_conn() as conn:
-        with conn.cursor() as cur:
-            cur.execute(
-                """
-                SELECT user_id, email
-                FROM auth_accounts
-                WHERE engagement_opt_out = false
-                  AND email IS NOT NULL
-                  AND COALESCE(plan, 'free') = 'free'
-                  AND last_activity_at IS NOT NULL
-                  AND last_activity_at >= now() - make_interval(days => %s)
-                ORDER BY last_activity_at DESC
-                """,
-                (int(active_within_days),),
             )
             return cur.fetchall()
 

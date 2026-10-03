@@ -11,6 +11,30 @@
 body.light .sidenav.is-scrolling { scrollbar-color: rgba(15, 23, 42, .32) transparent; }
 body.light .sidenav.is-scrolling::-webkit-scrollbar-thumb { background: rgba(15, 23, 42, .32); }
 
+/* Estrutura compartilhada dos grupos colapsáveis de /home e /app. */
+.sidenav-group-toggle .sn-caret {
+  margin-left: auto;
+  color: var(--text-3);
+  font-size: .78rem;
+  transition: transform .18s var(--ease);
+}
+.sidenav-group.open .sidenav-group-toggle .sn-caret { transform: rotate(90deg); }
+.sidenav-subitems { display: none; }
+.sidenav-group.open .sidenav-subitems { display: block; }
+.sidenav-subitems .sidenav-item { position: relative; padding-left: 22px; }
+.sidenav-subitems .sidenav-item::before {
+  content: "";
+  position: absolute;
+  top: 50%;
+  left: 9px;
+  width: 5px;
+  height: 5px;
+  border-radius: 50%;
+  background: var(--text-3);
+  opacity: .5;
+  transform: translateY(-50%);
+}
+
 @media (min-width: 901px) and (hover: hover) and (pointer: fine) {
   html:not(.pb-app) body { padding-left: 68px; }
 

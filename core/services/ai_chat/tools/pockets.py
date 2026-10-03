@@ -136,8 +136,10 @@ def _create_pocket_execute(user_id: int, args: dict[str, Any]) -> str:
     if not name:
         return "🐷 Faltou o nome da caixinha."
     try:
-        db.create_pocket(user_id, name, description=description)
-        return f'✅ Caixinha "{name}" criada.'
+        launch_id, _pocket_id, canon = db.create_pocket(user_id, name, description=description)
+        if launch_id is None:
+            return f'ℹ️ A caixinha "{canon}" já existe.'
+        return f'✅ Caixinha "{canon}" criada.'
     except Exception as e:
         from core.services.plan_limits import PlanLimitExceeded
         if isinstance(e, PlanLimitExceeded):

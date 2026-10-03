@@ -14,15 +14,16 @@ def _snapshot_coverage(rows: list) -> dict:
 def _snapshot(user_id: int, kind: str) -> dict:
     """Dados adicionais de cada especialista, sempre consultados sem disparar runners."""
     if kind == "detetive":
-        from core.services.piggy_agents import (find_duplicate_charges, find_recurring_charges,
-                                                DETETIVE_DUP_LOOKBACK_DAYS, DETETIVE_DUP_MIN_VALOR,
-                                                DETETIVE_MIN_VALOR, DETETIVE_MIN_MESES, _detetive_cutoff)
+        from core.services.assinaturas import listar_assinaturas
+        from core.services.piggy_agents import (find_duplicate_charges,
+                                                DETETIVE_DUP_LOOKBACK_DAYS, DETETIVE_DUP_MIN_VALOR)
         duplicates = find_duplicate_charges(user_id, date.today())
-        recurring = find_recurring_charges(user_id, date.today())
+        lista = listar_assinaturas(user_id, date.today())
+        recurring = lista["servicos"] + lista["outras"]
         return {"possiveis_duplicidades": duplicates[:50], "recorrencias": recurring[:50],
                 "total_duplicidades": len(duplicates), "total_recorrencias": len(recurring),
                 "cobertura_duplicidades": {"desde": date.today() - timedelta(days=DETETIVE_DUP_LOOKBACK_DAYS), "valor_minimo": DETETIVE_DUP_MIN_VALOR},
-                "cobertura_recorrencias": {"desde": _detetive_cutoff(date.today()), "valor_minimo": DETETIVE_MIN_VALOR, "minimo_meses": DETETIVE_MIN_MESES},
+                "cobertura_recorrencias": {"fonte": "open_finance", "criterio": "recorrência detectada pela Pluggy (Recurring Payments); só despesas de conexões ativas, sem parcelas nem movimento interno"},
                 "nota": "São indícios, não confirmação de erro. Nenhum lançamento foi alterado. Explicite a cobertura quando não houver achados; não exclua duplicidades fora desse período ou abaixo do valor mínimo."}
     if kind == "faria_limer":
         positions = db.list_rv_positions(user_id)

@@ -36,6 +36,9 @@ class PushUnregisterPayload(BaseModel):
 @shared.limiter.limit("30/minute")
 async def push_register_route(request: Request, payload: PushRegisterPayload):
     user_id = shared.resolve_dashboard_user_id(request)
+    # Sem gate de plano, mas com a perna da senha (decisão do dono, PR 4 do
+    # funil v3). O unregister continua liberado: é baixa, não vínculo.
+    await asyncio.to_thread(shared.exigir_credencial, user_id)
     token = (payload.token or "").strip()
     if not token or len(token) > 512:
         raise HTTPException(status_code=400, detail="Token inválido.")

@@ -21,6 +21,8 @@ FONTES_APP = RAIZ / "app" / "assets" / "fonts"
 FONTES_SITE = RAIZ / "frontend" / "fonts"
 STICKERS_APP = RAIZ / "app" / "assets" / "stickers"
 STICKERS_SITE = RAIZ / "frontend" / "brand" / "stickers"
+SIMBOLO_APP = RAIZ / "app" / "assets" / "brand" / "simbolo.png"
+SIMBOLO_SITE = RAIZ / "frontend" / "brand" / "email-logo.png"
 CONNECTION_STATUS_TS = RAIZ / "app" / "src" / "ui" / "componentes" / "ConnectionStatus.tsx"
 
 PESOS = ["Regular", "Medium", "SemiBold", "Bold"]
@@ -111,6 +113,12 @@ def test_stickers_do_app_sao_byte_a_byte_iguais_aos_do_site():
     assert arquivos_app == arquivos_site, (
         f"app tem sticker(s) a mais/a menos que o site: app={arquivos_app} × site={arquivos_site}"
     )
+
+
+def test_simbolo_da_boas_vindas_e_byte_a_byte_o_do_site():
+    """A Boas-vindas do app (`app/app/(auth)/boas-vindas.tsx`) usa o símbolo
+    rosa do porquinho copiado de `frontend/brand/email-logo.png`."""
+    assert _sha256(SIMBOLO_APP) == _sha256(SIMBOLO_SITE), "simbolo.png diverge de email-logo.png"
 
 
 def test_estados_do_connection_status_batem_com_pluggy_health():

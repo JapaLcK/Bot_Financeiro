@@ -45,5 +45,44 @@ export const desafioMfaSchema = z.object({
 /** O que `/auth/login` pode devolver com 200: credencial OU desafio. */
 export const respostaLoginSchema = z.union([desafioMfaSchema, loginSchema]);
 
+/** A conta nova da `/auth/apple/exchange`: o pré-cadastro vem na própria resposta, sem sessão. */
+export const cadastroPendenteSchema = z.object({
+  signup_required: z.literal(true),
+  signup_token: z.string().min(1),
+  email: z.string(),
+  name_hint: z.string(),
+});
+
+/** O que `/auth/apple/exchange` pode devolver com 200 (`auth_apple_exchange`). */
+export const respostaAppleSchema = z.union([desafioMfaSchema, cadastroPendenteSchema, loginSchema]);
+
+/** `GET /auth/google/pending/{token}`: o pré-cadastro de quem entrou pelo Google sem conta. */
+export const pendenteGoogleSchema = z.object({
+  email: z.string(),
+  name_hint: z.string(),
+});
+
 export type Credenciais = z.infer<typeof credenciaisSchema>;
 export type Perfil = z.infer<typeof perfilSchema>;
+
+/** `/auth/mfa/status` (`db/mfa.py`, `get_mfa_status`). */
+export const mfaStatusSchema = z.object({
+  enabled: z.boolean(),
+  has_pending_secret: z.boolean(),
+  backup_codes_remaining: z.number().int(),
+});
+
+/** `/auth/mfa/setup`: o QR vem pronto, como SVG em data URI. */
+export const mfaSetupSchema = z.object({
+  secret: z.string().min(1),
+  uri: z.string().startsWith("otpauth://"),
+  qr_code: z.string().startsWith("data:image/svg+xml;base64,"),
+});
+
+/** `/auth/mfa/enable` (que manda também `ok`) e `/auth/mfa/regenerate-backup-codes`. */
+export const codigosBackupSchema = z.object({
+  backup_codes: z.array(z.string()).min(1),
+});
+
+export type MfaStatus = z.infer<typeof mfaStatusSchema>;
+export type MfaSetup = z.infer<typeof mfaSetupSchema>;

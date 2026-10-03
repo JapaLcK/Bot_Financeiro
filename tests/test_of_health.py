@@ -1248,7 +1248,7 @@ def test_execution_status_no_status_local_ainda_e_lido(status_local, estado_espe
 def _detalhe_por_estado() -> dict[str, set]:
     """estado → conjunto dos `detail` que ele consegue produzir."""
     from core.services.pluggy_health import (
-        _LABELS, _NEEDS_USER, _UPDATING, READ_FAILED)
+        _LABELS, _NEEDS_USER, _UPDATING, INVESTMENTS_READ_FAILED, READ_FAILED)
 
     mapa: dict[str, set] = {}
 
@@ -1257,7 +1257,7 @@ def _detalhe_por_estado() -> dict[str, set]:
         mapa.setdefault(ui["state"], set()).add(ui["detail"])
 
     for item_status in sorted(_NEEDS_USER | _UPDATING | {"ERROR", "UPDATED"}):
-        for reason in sorted(set(_LABELS) | {"", READ_FAILED}):
+        for reason in sorted(set(_LABELS) | {"", READ_FAILED, INVESTMENTS_READ_FAILED}):
             for sync in (AGORA, None):
                 for status_local in ("ACTIVE", "ERROR", "DELETED", "PAUSED", item_status):
                     base = {"status": status_local, "status_reason": reason,
@@ -1414,7 +1414,9 @@ def test_mescla_nao_ocorre_com_foto_anterior_doente(item_status):
     verde em cima de um item que nunca chegou a sincronizar de verdade."""
     anterior = _foto(item_status, {"CREDIT": _CREDIT_ATRASADO})
     novo = _foto("UPDATING", {"BANK": _ACCOUNTS_OK})
-    assert mesclar_health_em_coleta(anterior, novo) == novo, item_status
+    # Só o `coletando_desde` (teto do "Atualizando…") entra: a coleta recomeça.
+    assert mesclar_health_em_coleta(anterior, novo) == {
+        **novo, "coletando_desde": novo["observed_at"]}, item_status
 
 
 def test_mescla_ocorre_com_foto_anterior_updated():
@@ -1445,9 +1447,10 @@ def test_mescla_foto_nova_sem_products_nenhum_ainda_mescla():
 @pytest.mark.parametrize("anterior", [None, {}, {"products": None}, {"status": "x"}])
 def test_mescla_sem_foto_anterior_utilizavel_nao_mexe(anterior):
     """Sem anterior (None), anterior não-dict, ou anterior sem `products` dict:
-    nada para mesclar — devolve a foto nova como veio."""
+    nada para mesclar — devolve a foto nova só com o `coletando_desde` dela."""
     novo = _foto("UPDATING", {"BANK": _ACCOUNTS_OK})
-    assert mesclar_health_em_coleta(anterior, novo) == novo
+    assert mesclar_health_em_coleta(anterior, novo) == {
+        **novo, "coletando_desde": novo["observed_at"]}
 
 
 def test_mescla_recalcula_stale_products_na_ordem_dos_produtos():

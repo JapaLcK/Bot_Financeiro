@@ -66,7 +66,7 @@ def synthetic_read(uid, kind, name, arguments):
     """Usa formatos reais de consulta com fontes vazias/sintéticas, sem banco."""
     import db
     import db.bills
-    from core.services import agent_chat as chat, piggy_agents, plan_service
+    from core.services import agent_chat as chat, assinaturas, piggy_agents, plan_service
     from core.services.agent_chat_data import _snapshot
     from core.services.ai_chat.tools import get_tool
     from core.services.ai_chat.tools.bills import _get_bills_to_pay
@@ -99,8 +99,9 @@ def synthetic_read(uid, kind, name, arguments):
             stack.enter_context(patch.object(db, attribute, return_value=value))
         stack.enter_context(patch.object(db.bills, 'list_bills', return_value=[]))
         stack.enter_context(patch.object(plan_service, 'consolidated_balance_enabled', return_value=False))
+        stack.enter_context(patch.object(plan_service, 'get_plan_tier', return_value='pro'))
         stack.enter_context(patch.object(piggy_agents, 'find_duplicate_charges', return_value=[]))
-        stack.enter_context(patch.object(piggy_agents, 'find_recurring_charges', return_value=[]))
+        stack.enter_context(patch.object(assinaturas, 'listar_assinaturas', return_value={'servicos': [], 'outras': []}))
         if snapshot:
             result = _snapshot(uid, kind)
         elif name == 'get_bills_to_pay':

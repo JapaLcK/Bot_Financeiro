@@ -13,18 +13,16 @@ core/handlers/recurring.py (payment_mode='manual'). Ver [[db/bills.py]].
 """
 from __future__ import annotations
 
+import logging
 import re
 
+from core.financial_targets import texto_da_quantidade
+from core.handlers.conta_por_nome import PAY_RE, escolher_conta
 from core.response_formatter import wrap_wa_markup
 from utils_text import (_ENCHIMENTO, _TRACOS, fmt_brl, limpa_pontuacao_final,
                         normalize_text, parse_money, valor_perigoso)
 
-_PAY_RE = re.compile(r"^(ja\s+)?(paguei|quitei)\b")
-_STOP_TOKENS = {
-    "o", "a", "os", "as", "de", "do", "da", "dos", "das", "meu", "minha",
-    "conta", "boleto", "boletos", "fatura", "reais", "real", "rs", "r",
-    "ja", "hoje", "ontem", "esse", "essa", "esta", "este",
-}
+logger = logging.getLogger(__name__)
 
 
 
@@ -69,71 +67,78 @@ def pergunta_de_valor_sem_contexto(user_id: int, nome: str) -> str:
     )
 
 
-def try_pay_from_text(user_id: int, text: str) -> str | None:
+def conta_paga(user_id: int, paid: dict, val) -> str:
+    """Resposta de "paguei a conta", única para as portas do bot (texto,
+    botão do WhatsApp, ferramenta da IA). Se o banco já tinha importado o
+    débito, `mark_bill_paid` deixou a pendência: sai o MESMO aviso do
+    lançamento avulso (`aviso_conferir`, core/handlers/launches.py) no lugar
+    do "Tá tudo em dia!", que aí seria falso. Só a contagem: sem linha de saldo
+    aqui, o "pode ser R$ X" pareceria o saldo. Pós-commit: falha na leitura do
+    aviso vira log, nunca exceção (a conta já está paga) — e sem "em dia", que
+    não dá para afirmar sem ler. Paga pelo BANCO (sem lançamento): o débito
+    chega pelo Open Finance, e não há o que conferir."""
+    if paid.get("status") == "paid" and not paid.get("launch_id"):
+        valor = f" — {fmt_brl(paid['paid_amount'])}" if paid.get("paid_amount") else ""
+        return (f"✅ Conta paga: {wrap_wa_markup(paid.get('name'))}{valor}, marcada como "
+                "paga pelo banco; o débito chega pelo Open Finance.")
+    try:
+        import db
+        from core.services.funding import aviso_conferir
+        cb = db.get_consolidated_balance(user_id)
+        aviso = aviso_conferir(None, cb.get("reconciliation"), so_contagem=True)
+        fim = f"\n{aviso}" if aviso else " Tá tudo em dia! 🐷"
+    except Exception:
+        logger.exception("aviso a conferir falhou depois de pagar conta (user %s)", user_id)
+        fim = ""
+    return (
+        f"✅ Conta paga: {wrap_wa_markup(paid.get('name'))} — {fmt_brl(val)} lançado e "
+        "categorizado." + fim
+    )
+
+
+def try_pay_from_text(user_id: int, text: str, forma_pagamento: str | None = None,
+                      exige_nome: bool = False) -> str | None:
     """Se o texto for 'paguei/quitei <conta>' E houver uma conta a pagar
-    pendente que casa, marca como paga e retorna a confirmação. Senão None."""
+    pendente que casa, marca como paga e retorna a confirmação. Senão None.
+    Com Open Finance, a forma vem ANTES do valor (Q7, `forma_pagamento`).
+    Qual conta: `conta_por_nome.escolher_conta` (e o que é `exige_nome`)."""
     norm = normalize_text(text or "")
-    if not _PAY_RE.match(norm):
+    if not PAY_RE.match(norm):
         return None
 
-    from db.bills import list_bills, mark_bill_paid
+    from core.handlers import forma_pagamento as fp
+    from db.bills import list_bills
 
     pend = [b for b in list_bills(user_id, include_paid=False) if b.get("status") == "pending"]
     if not pend:
         return None
 
-    # valor real do boleto, se o usuário disser ("paguei 152 de luz")
+    best = escolher_conta(pend, norm, exige_nome)
+    if not isinstance(best, dict):
+        return best  # a pergunta "qual delas" ou None (lançamento avulso)
+
+    # valor real do boleto, se o usuário disser ("paguei 152 de luz"). O número
+    # do nome da conta não é valor: "paguei IPVA 2025" paga o IPVA, não R$ 2.025 (#700).
     try:
-        amount = parse_money(text)
+        amount = parse_money(texto_da_quantidade(text, [best.get("name") or ""]))
     except Exception:
         amount = None
     if amount is not None and amount <= 0:
         amount = None
 
-    # alvo: tira o verbo, o valor e stopwords → sobra o "nome" da conta
-    target = _PAY_RE.sub("", norm).strip()
-    target = re.sub(r"\b\d[\d.,]*\b", " ", target)
-    target = " ".join(t for t in target.split() if t not in _STOP_TOKENS).strip()
-
-    def _score(b: dict) -> int:
-        bn = normalize_text(b.get("name") or "")
-        if not bn:
-            return 0
-        if bn in norm or (target and (bn in target or target in bn)):
-            return 3
-        toks = [t for t in bn.split() if len(t) > 2 and t not in _STOP_TOKENS]
-        if target and any(t in target.split() for t in toks):
-            return 2
-        if any(t in norm.split() for t in toks):
-            return 1
-        return 0
-
-    scored = sorted(((_score(b), b) for b in pend), key=lambda x: x[0], reverse=True)
-    best_score, best = scored[0]
-
-    if best_score == 0:
-        # Nenhuma conta casou pelo nome. Se o usuário NÃO deu um alvo específico
-        # (respondeu só "paguei" / "paguei essa conta" — como o lembrete pede) e
-        # só existe UMA conta pendente, paga ela. Se houver várias, pergunta qual.
-        # Se o alvo era específico e não casou, deixa virar lançamento avulso.
-        if target:
-            return None
-        if len(pend) == 1:
-            best = pend[0]
-        else:
-            nomes = ", ".join(b.get("name") or "?" for b in pend[:5])
-            return f"Você tem contas a pagar pendentes: {nomes}. Qual delas você pagou?"
-    else:
-        # empate real e usuário não deu pista suficiente → pergunta qual
-        ties = [b for s, b in scored if s == best_score]
-        if len(ties) > 1 and best_score < 3:
-            nomes = ", ".join(b.get("name") or "?" for b in ties[:5])
-            return f"Você tem contas a pagar pendentes: {nomes}. Qual delas você pagou?"
+    declarada = forma_pagamento or fp.detectar(text)
+    decisao = fp.decidir(user_id, declarada)
+    if decisao == fp.MISTO:
+        # Nem paga nem pergunta: a resposta seguinte reescreveria o misto e a
+        # conta inteira sairia de um lado só. Igual ao lançamento misto.
+        return fp.msg_misto()
+    if decisao == fp.PERGUNTA:
+        return fp.perguntar_conta(user_id, best, amount)
 
     # Conta de valor variável (água/luz) sem valor informado: guarda qual conta
     # originou a pergunta. Assim a resposta natural (só "132,50") não cai no
-    # classificador/na IA sem contexto.
-    if best.get("variable_amount") and amount is None:
+    # classificador/na IA sem contexto. Pelo banco não pede valor (Q7).
+    if decisao == fp.CARTEIRA and best.get("variable_amount") and amount is None:
         from db import claim_pending_action
 
         nome = (best.get("name") or "conta")
@@ -146,7 +151,7 @@ def try_pay_from_text(user_id: int, text: str) -> str | None:
         guardou = claim_pending_action(
             user_id,
             "bill_amount_expected",
-            {"bill_id": int(best["id"]), "bill_name": nome},
+            {"bill_id": int(best["id"]), "bill_name": nome, "forma_pagamento": declarada},
         )
         if not guardou:
             return pergunta_de_valor_sem_contexto(user_id, nome)
@@ -156,7 +161,7 @@ def try_pay_from_text(user_id: int, text: str) -> str | None:
         )
 
     try:
-        paid = mark_bill_paid(user_id, int(best["id"]), amount)
+        _, paid = fp.quitar(user_id, int(best["id"]), amount, declarada)
     except ValueError as exc:
         if str(exc) != "VALOR_INVALIDO":
             raise
@@ -171,11 +176,7 @@ def try_pay_from_text(user_id: int, text: str) -> str | None:
         )
     if paid is None:
         return None
-    val = paid.get("paid_amount") or paid.get("amount") or 0
-    return (
-        f"✅ Conta paga: {wrap_wa_markup(paid.get('name'))} — {fmt_brl(val)} lançado e "
-        f"categorizado. Tá tudo em dia! 🐷"
-    )
+    return conta_paga(user_id, paid, paid.get("paid_amount") or paid.get("amount") or 0)
 
 
 
@@ -270,8 +271,8 @@ def resolve_bill_amount(user_id: int, text: str, pending: dict) -> str | None:
     # Centavos: o `valor_perigoso` já recusou o que arredonda para zero.
     amount = round(amount, 2)
 
+    from core.handlers import forma_pagamento as fp
     from db import consume_pending_action, restore_pending_on_error
-    from db.bills import mark_bill_paid
 
     payload = pending.get("payload") or {}
 
@@ -289,14 +290,22 @@ def resolve_bill_amount(user_id: int, text: str, pending: dict) -> str | None:
     # pendência e o valor que digitou, e a conta continua em aberto sem ninguém
     # avisar. Prazo 10 min, o mesmo do `claim` que a armou (:144).
     with restore_pending_on_error(user_id, pending):
-        paid = mark_bill_paid(user_id, int(payload["bill_id"]), amount)
+        status, paid = fp.quitar(user_id, int(payload["bill_id"]), amount,
+                                 payload.get("forma_pagamento", fp.DESCONHECIDA))
+    if status == fp.PERGUNTA:
+        if payload.get("forma_pagamento") == fp.MISTO:
+            # Misto armado sem banco, e o banco conectou antes do valor.
+            return fp.msg_misto()
+        # Pendência de antes da Q40, de quem tem banco conectado: pergunta a
+        # forma com o valor que acabou de chegar.
+        from db.bills import get_bill
+        bill = get_bill(user_id, int(payload["bill_id"]))
+        if not bill or bill.get("status") == "paid":
+            return "Essa conta não está mais pendente."
+        return fp.perguntar_conta(user_id, bill, amount)
     if paid is None:
         return "Essa conta não está mais pendente."
-    val = paid.get("paid_amount") or paid.get("amount") or 0
-    return (
-        f"✅ Conta paga: {wrap_wa_markup(paid.get('name'))} — {fmt_brl(val)} lançado e "
-        f"categorizado. Tá tudo em dia! 🐷"
-    )
+    return conta_paga(user_id, paid, paid.get("paid_amount") or paid.get("amount") or 0)
 
 
 __all__ = ["resolve_bill_amount", "try_pay_from_text"]

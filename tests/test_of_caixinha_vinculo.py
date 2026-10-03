@@ -129,9 +129,24 @@ def test_desvincular_quem_nao_esta_vinculado_e_recusado(user_id):
     assert float(_pockets(user_id)["Viagem"]["balance"]) == 300.0
 
 
-def test_roubar_a_caixinha_de_um_pocket_do_sync_e_recusado(user_id):
-    """Trocar a meta de uma caixinha do sync deixaria o pocket automático órfão —
-    mesma recusa do desvincular."""
+def test_meta_manual_toma_a_posicao_de_um_espelho_puro(user_id):
+    """POLÍTICA NOVA (a escotilha). Antes este caso era recusado com
+    `OF_POCKET_READONLY`, com o argumento de que soltar deixaria o pocket do sync
+    órfão. Ele não fica órfão: é apagado na mesma transação, porque espelho PURO
+    (zero lote aberto) não é dinheiro de ninguém — é a cópia que o auto-import fez
+    da posição, e o dinheiro está no banco.
+
+    A recusa existia e passou a prender o usuário: a meta que perdeu o vínculo por
+    AUSÊNCIA da posição via ela voltar no nome de uma caixinha automática e não
+    conseguia religar de jeito nenhum. A religação automática pela lápide cobre o
+    caminho comum (`tests/test_of_investimento_reconciliacao.py`, B9); esta é a
+    saída manual para quando a lápide não existe — conta antiga, ou vínculo que o
+    usuário desfez na mão.
+
+    O que NÃO mudou, e tem teste próprio logo abaixo: pocket do sync como ORIGEM
+    do bind (desvincular, trocar de posição) continua recusando. E espelho COM
+    lote aberto também continua recusando — `test_of_investimento_reconciliacao.py`
+    B15 mede as duas metades juntas."""
     conn_id = _seed_connection(user_id)
     _save(conn_id, [{"id": "cx-auto", "name": "Caixinha Viagem", "type": "FIXED_INCOME",
                      "subtype": "CDB", "balance": 500.0}])
@@ -139,12 +154,17 @@ def test_roubar_a_caixinha_de_um_pocket_do_sync_e_recusado(user_id):
     auto = _pockets(user_id)["Caixinha Viagem"]
     outra = _meta_manual(user_id, "Outra meta")
 
-    with pytest.raises(ValueError, match="OF_POCKET_READONLY"):
-        db.bind_pocket_to_caixinha(user_id, outra, auto["of_investment_id"])
+    assert db.bind_pocket_to_caixinha(user_id, outra, auto["of_investment_id"]) is True
 
     pk = _pockets(user_id)
-    assert pk["Caixinha Viagem"]["of_investment_id"] == auto["of_investment_id"]
-    assert pk["Outra meta"]["of_investment_id"] is None
+    assert "Caixinha Viagem" not in pk, "o espelho puro é apagado, não fica órfão"
+    assert pk["Outra meta"]["of_investment_id"] == auto["of_investment_id"]
+    # o espelho do saldo é do passo 3 do sync, não do bind (vale para QUALQUER
+    # vínculo manual, é assim desde sempre). Depois dele, os 500 do banco aparecem
+    # UMA vez: na meta, e não também na renda fixa.
+    db.sync_open_finance_caixinhas(conn_id, user_id)
+    assert float(_pockets(user_id)["Outra meta"]["balance"]) == 500.0
+    assert _total(user_id) == 500.0
 
 
 def test_mudar_a_posicao_que_a_caixinha_do_sync_espelha_e_recusado(user_id):

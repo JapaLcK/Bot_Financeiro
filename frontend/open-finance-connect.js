@@ -160,9 +160,11 @@
     return resp.json();
   }
 
-  /** Conexões que contam no teto — espelha o backend: PAUSED não conta. */
+  /** Conexões que contam no teto — espelha o backend (`count_open_finance_connections`):
+   *  só provider "pluggy" (mock não conta) e PAUSED não conta. */
   function countsTowardLimit(conn) {
-    return String((conn && conn.status) || "").toUpperCase() !== "PAUSED";
+    return !!conn && conn.provider === "pluggy" &&
+      String(conn.status || "").toUpperCase() !== "PAUSED";
   }
 
   /**
@@ -191,8 +193,9 @@
     const counted = ((of && of.connections) || []).filter(countsTowardLimit);
     return {
       banksMax: (me && me.of_banks_max !== undefined) ? me.of_banks_max : null,
+      cobrancaEmAtraso: !!(me && me.cobranca_em_atraso),
       count: counted.length,
-      names: counted.map(function (c) { return stripAccent(c.institution_name || ""); }),
+      ids: counted.map(function (c) { return String(c.institution_id); }),
     };
   }
 
@@ -509,13 +512,17 @@
         conf("notify")("Não deu pra confirmar seu plano agora. Tente de novo em instantes.", "error");
         return;
       }
-      if (plano.banksMax === 0) { window.location.href = "/precos"; return; }
+      // Carência de cobrança: já é assinante, a /precos o recusaria — vai pro cartão.
+      if (plano.banksMax === 0) { window.location.href = plano.cobrancaEmAtraso ? "/conta" : "/precos"; return; }
 
       // Teto atingido: só segue se for RECONEXÃO de um banco já conectado (mesmo
       // nome). Banco novo abriria o widget da Pluggy só pra tomar 402 no
       // /pluggy-item — deixando item e consentimento órfãos. Bloqueia antes.
       if (plano.banksMax !== null && plano.banksMax > 0 && plano.count >= plano.banksMax) {
-        const isReconnect = plano.names.indexOf(stripAccent(selected.name || "")) !== -1;
+        // Por id do conector, não por nome: o nome gravado vem cru da Pluggy, e o
+        // gêmeo Open Finance de um direto tem nome igual mas id diferente — o widget
+        // abriria um item NOVO e o /pluggy-item daria 402 depois da autorização.
+        const isReconnect = plano.ids.indexOf(String(selected.id)) !== -1;
         if (!isReconnect) {
           const n = plano.banksMax;
           conf("notify")("Seu plano conecta até " + n + " banco" + (n > 1 ? "s" : "") +

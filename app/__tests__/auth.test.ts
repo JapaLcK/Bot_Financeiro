@@ -61,9 +61,9 @@ describe("sair", () => {
   });
 
   it("outra conta que entra com o logout ainda em voo continua no cofre", async () => {
-    // A revogação sai no `finally` sem `await`, então a garantia de não apagar
-    // a conta que entra depois não pode depender de a requisição terminar
-    // primeiro — precisa valer com ela ainda pendurada na rede.
+    // A limpeza do cofre vem antes da revogação, então a garantia de não
+    // apagar a conta que entra depois não pode depender de a requisição
+    // terminar primeiro — precisa valer com ela ainda pendurada na rede.
     await guardarCredenciais({ access: ACCESS_A, refresh: "rt_A" });
     let soltarChegou: () => void = () => {};
     const chegou = new Promise<void>((r) => (soltarChegou = r));
@@ -80,8 +80,6 @@ describe("sair", () => {
     await guardarCredenciais({ access: ACCESS_B, refresh: "rt_B" });
     soltarPortao();
     await saida;
-    // Drena a microtarefa do `.catch` da revogação antes de conferir.
-    await new Promise<void>((r) => setTimeout(r, 0));
 
     await expect(lerCredenciais()).resolves.toEqual({
       access: ACCESS_B,
@@ -147,27 +145,9 @@ describe("sair", () => {
     await expect(lerCredenciais()).resolves.toBeNull();
   });
 
-  // O caso "renovação real que termina DEPOIS da limpeza" mora em
-  // `auth_sair.test.ts`: este arquivo bateu no teto de linhas do eslint.
-
-  it("logout pendurado para sempre não atrasa a limpeza do cofre", async () => {
-    // A decisão de não esperar a rede: um `fetch` que nunca resolve (o caso do
-    // Android sem timeout) não pode manter a credencial no aparelho.
-    await guardarCredenciais({ access: ACCESS_A, refresh: "rt_A" });
-    let soltarChegou: () => void = () => {};
-    const chegou = new Promise<void>((r) => (soltarChegou = r));
-    fetchFalso.mockImplementation(() => {
-      soltarChegou();
-      return new Promise<Response>(() => {}); // nunca resolve
-    });
-
-    const s = sair();
-    await chegou;
-    // O cofre já está vazio com a requisição ainda no ar.
-    await expect(lerCredenciais()).resolves.toBeNull();
-    // E `sair()` resolve mesmo assim — não espera a rede.
-    await expect(s).resolves.toBeUndefined();
-  });
+  // O caso "renovação real que termina DEPOIS da limpeza" e a espera da
+  // revogação com tempo limite (#458) moram em `auth_sair.test.ts`: este
+  // arquivo bateu no teto de linhas do eslint.
 
   it("saída sem sessão capturada não manda requisição nenhuma", async () => {
     // Saída duplicada ou tardia. Tentar seria pior que não fazer: a requisição

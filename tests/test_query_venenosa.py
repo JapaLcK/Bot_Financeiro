@@ -137,6 +137,7 @@ def test_negativo_sem_a_guarda_o_admin_volta_a_500(monkeypatch):
 def test_negativo_sem_a_guarda_o_usuario_comum_volta_a_500(monkeypatch, user_id):
     """O par do de cima: admin e usuário comum são caminhos diferentes, e um
     negativo só não discriminaria o outro."""
+    promote_to_pro(user_id)  # atravessa o gate de acesso do v2
     monkeypatch.setattr(dashboard, "tem_veneno", lambda _valor: False)
     resp = _user_client(user_id).get(f"/history/{user_id}/list?q={NUL}", follow_redirects=False)
     assert resp.status_code == 500, f"sem a guarda deu {resp.status_code}, não 500"
@@ -160,6 +161,7 @@ def test_positivo_busca_do_historico_filtra_e_nao_vaza_de_outro_usuario(user_id)
     """O `?q=` legítimo continua achando o lançamento do dono — e só o dele.
     O outro usuário tem um lançamento com a MESMA marca de propósito: é o que
     separa "o filtro funciona" de "o filtro devolve a tabela inteira"."""
+    promote_to_pro(user_id)  # atravessa o gate de acesso do v2
     marca = f"marca{uuid.uuid4().hex[:8]}"
     outro = int(uuid.uuid4().int % 10_000_000_000)
     db.ensure_user(outro)

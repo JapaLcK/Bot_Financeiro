@@ -85,16 +85,6 @@ _ISENTOS_COM_RAZAO = {
         "grande demais para isso significar alguma coisa. É o espelho da "
         "cegueira 2c: lá o laço partido em duas funções escapa, aqui duas "
         "coisas na mesma função entram.",
-    "core/services/engagement_scheduler.py::_check_free_upgrade_nudge":
-        "WIN-BACK, mesma família do downsell: o funil é `plan = 'free'` ativo, "
-        "que DEPOIS DO CORTE é exatamente a população sem acesso — filtrar por "
-        "acesso o mataria inteiro. Dormente hoje "
-        "(`FREE_UPGRADE_NUDGE_ENABLED` default off), o que não dispensa a "
-        "decisão. RESSALVA REGISTRADA, e é de COPY e não de gate: "
-        "`send_free_upgrade_nudge_email` promete 'testar 15 dias grátis', e "
-        "para o ex-assinante cujo telefone já queimou o trial isso é a mesma "
-        "promessa falsa que este PR tirou da /precos e do downsell. Ligar o "
-        "flag sem reescrever a copy reabre aquele defeito.",
     "scripts/send_update_email.py::main":
         "Não é laço automático: é script de BROADCAST rodado à mão por um "
         "operador, com `--dry-run` e `--test`. Quem decide o público é a pessoa "
@@ -113,6 +103,13 @@ _ISENTOS_COM_RAZAO = {
         "lembrete, e tem gate próprio e mais estrito — "
         "`db.dunning.ciclo_de_atraso_aberto`, lido fresco imediatamente antes "
         "do envio (célula 31 de `docs/dunning_estados_eventos.md`).",
+    "core/services/ebook_entrega.py::_entregar":
+        "Entrega de um produto PAGO à parte (o e-book da /assinar, funil v3 PR 3), "
+        "não mensagem proativa: filtrar por acesso ao PLANO reteria o e-book de "
+        "quem pagou por ele e cancelou o trial. Roda POR pendência (uma compra), "
+        "com gate próprio — `conta_sem_credencial` (a prova do e-mail) e a "
+        "confirmação da compra no Stripe. O `list_` que o predicado casa é o "
+        "`list_line_items` de UMA sessão, não uma população.",
 }
 
 
@@ -223,6 +220,7 @@ _LACOS_ESPERADOS = {
     "core/services/piggy_agents.py::run_agent_emails_once",
     "core/services/engagement_scheduler.py::_check_and_send",
     "core/services/payment_reminder.py::check_payment_reminder",
+    "core/services/recurring_charger.py::notify_autopay_notices_whatsapp_once",
     *_ISENTOS_COM_RAZAO,
 }
 

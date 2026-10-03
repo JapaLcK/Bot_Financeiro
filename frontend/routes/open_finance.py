@@ -16,6 +16,7 @@ import logging
 import math
 import os
 import random
+import sys
 import time
 from datetime import datetime, timedelta, timezone
 from typing import Literal
@@ -23,8 +24,9 @@ from typing import Literal
 import psycopg
 from psycopg_pool import PoolClosed, PoolTimeout
 
-from fastapi import APIRouter, HTTPException, Request
-from pydantic import BaseModel
+from fastapi import APIRouter, Depends, HTTPException, Request
+from fastapi.exceptions import RequestValidationError
+from pydantic import BaseModel, ValidationError
 
 from core.admin_dashboard import log_system_event
 from core.audit import AuditEvent, list_audit_events, record_audit_event
@@ -39,15 +41,18 @@ from core.services.pluggy import (
     get_pluggy_item,
     list_pluggy_connectors,
 )
+from core.services import billing_copy
 from core.services.plan_service import is_pro
 from core.services.pluggy_sync import (
     ITEM_UPDATING,
     _env_int,
+    marcar_leitura_falhou,
     refresh_and_sync_pluggy_user,
     sync_pluggy_item,
     sync_pluggy_user,
 )
 from db import (
+    AmbiguousItemError,
     count_open_finance_connections,
     create_mock_open_finance_connection,
     delete_open_finance_transactions,
@@ -55,8 +60,10 @@ from db import (
     get_connections_by_item_id,
     get_open_finance_connection_by_item_id,
     get_open_finance_snapshot,
+    is_account_scheduled_for_deletion,
     item_registry_origins,
     list_pluggy_item_ids,
+    mock_open_finance_item_id,
     pluggy_item_lock,
     register_item,
     save_pluggy_open_finance_item,
@@ -66,6 +73,7 @@ from db import (
     user_exists,
 )
 from frontend.routes import shared
+from utils_text import normalize_text
 
 router = APIRouter()
 
@@ -237,10 +245,20 @@ async def _log_com_teto(segundos: float, *args, **kwargs) -> None:
     ilimitado por esses dois caminhos.
 
     Engolir o `TimeoutError` é deliberado: o log é DIAGNÓSTICO, e perder o
-    diagnóstico não pode virar um segundo modo de falha em cima do 503. A causa
-    NÃO se perde — os dois chamadores emitem o `logging.getLogger(...).warning`
-    local ANTES desta chamada, e esse canal não depende do banco (é o mesmo
-    motivo pelo qual ele existe: ver o `except` do `_grava_reconexao`).
+    diagnóstico não pode virar um segundo modo de falha em cima do 503. O que
+    sobra quando o teto estoura é o `print` em stderr do `except` abaixo —
+    `event_type` + `motivo`, sem uid, SEM banco (mesmo espírito do "[admin]
+    failed to record" de `log_system_event`). Vale para todo chamador, num lugar só.
+
+    NÃO use `logging.warning` como canal "local" antes desta chamada: o
+    `_DashboardHandler` (`core/observability.py`) o espelha com INSERT SÍNCRONO
+    dentro do event loop, e com `system_event_logs` travada isso DOBRA o prazo e
+    para o processo (issue #541; quem prende é
+    `tests/test_of_log_teto_e_status.py::test_teto_vale_com_o_espelho_do_logging_lento`).
+    Os avisos que já existem
+    (`of_reconnect_lock_retry`, `of_reconnect_lock_timeout` no
+    `_grava_reconexao` e `of_item_registry_failed` no `/pluggy-item`) pagam esse
+    custo hoje — registrado, fora do escopo da #541.
 
     Só `asyncio.TimeoutError` é engolido. `CancelledError` de fora (cliente
     desistiu, shutdown) continua subindo — o `wait_for` só converte em
@@ -258,7 +276,11 @@ async def _log_com_teto(segundos: float, *args, **kwargs) -> None:
         await asyncio.wait_for(log_system_event(*args, **kwargs),
                                max(0.001, segundos))
     except asyncio.TimeoutError:
-        pass
+        evento = args[1] if len(args) > 1 else kwargs.get("event_type")
+        detalhes = kwargs.get("details")
+        motivo = detalhes.get("motivo") if isinstance(detalhes, dict) else None
+        print(f"[open_finance] log com teto estourado: {evento} motivo={motivo}",
+              file=sys.stderr)
 
 
 # HTTP da Pluggy que some sozinho: cota estourada e erro do lado dela. 404 fica
@@ -466,8 +488,7 @@ def _salva_item_sob_lock(user_id: int, remote: dict, item_id: str,
         # PIOR (medido pelo Tester, 30/30): duas entregas concorrentes gravam o
         # rastro antes de qualquer uma pegar o lock, cada uma enxerga o rastro
         # da OUTRA, as duas abortam, e sobra rastro com dono e ZERO conexão —
-        # estado terminal, do qual nem a retentativa (1ª guarda) nem o script
-        # one-shot (o filtro dele exclui rastro com dono) tiram o usuário.
+        # estado terminal, do qual a retentativa (1ª guarda) não tira o usuário.
         # Apagando a linha AQUI, com o lock na mão, quem entrar depois não vê
         # mais reivindicação nenhuma e adota: com N entregas simultâneas, o
         # último a pegar o lock ganha e os outros saem sem deixar rastro. São
@@ -602,9 +623,8 @@ async def _grava_reconexao(
     # —, as leituras das revalidações) e do próprio `get_conn` da escrita,
     # e nessas a escrita PROVADAMENTE não aconteceu. Preservar a reivindicação
     # ali reconstruía o estado terminal que o P0 fechou: zero conexões + rastro
-    # com dono, a 1ª guarda de `_adota_item_orfao` recusando toda retentativa e
-    # o `scripts/adotar_items_of_orfaos.py` sem enxergar a linha — o usuário sem
-    # banco e sem saída pelo produto.
+    # com dono, a 1ª guarda de `_adota_item_orfao` recusando toda retentativa —
+    # o usuário sem banco e sem saída pelo produto.
     escrita_tentada: list = []
     for tentativa in range(1, _RECONNECT_LOCK_ATTEMPTS + 1):
         folga_ms = int((fim - time.monotonic()) * 1000)
@@ -703,6 +723,7 @@ async def _grava_reconexao(
             # é decidir não retentar quando `causa` é da família de conexão; o
             # gancho já existe (é a própria `causa`), a decisão é de outro PR.
             connection, sob_lock = None, False
+            # Texto cru com coluna NULL (#541): só `OperationalError` (infra) chega aqui, sem dado de linha.
             causa = f"{type(exc).__name__}: {exc}"
         if sob_lock:
             return connection
@@ -769,9 +790,9 @@ async def _grava_reconexao(
     # duas entregas concorrentes, a que pega o lock aborta e apaga a linha dela,
     # a que PERDE o lock deixava a dela para trás — 1 conexão saudável na `main`
     # virava 0 conexões + reivindicação abandonada, que é o estado terminal (a 1ª
-    # guarda de `_adota_item_orfao` recusa a retentativa e o script one-shot não
-    # lista rastro com dono). Com o desfazimento, ninguém escreveu e ninguém
-    # reivindicou: a próxima entrega do `item/created` adota.
+    # guarda de `_adota_item_orfao` recusa a retentativa). Com o desfazimento,
+    # ninguém escreveu e ninguém reivindicou: a próxima entrega do
+    # `item/created` adota.
     #
     # "Provadamente" é medido, não deduzido do tipo do erro: `escrita_tentada` só
     # tem item se a execução CHEGOU ao `save_pluggy_open_finance_item`, e a marca
@@ -787,7 +808,7 @@ async def _grava_reconexao(
     #
     # AQUI e não no `if not locked`: apagar entre as tentativas deixaria a
     # tentativa que enfim pega o lock gravar a conexão sem rastro com dono — item
-    # com banco conectado que o one-shot lista como órfão e a entrega seguinte
+    # com banco conectado e sem rastro com dono, que a entrega seguinte
     # readota. O desfazimento é do desfecho, não da tentativa.
     #
     # DEPOIS dos logs: o diagnóstico do 503 já está gravado se este delete
@@ -801,17 +822,43 @@ async def _grava_reconexao(
     )
 
 
-async def _run_pluggy_sync_bg(item_id: str) -> None:
+async def _run_pluggy_sync_bg(item_id: str, expected_user_id: int | None = None) -> dict:
     """Roda o sync fora do request (fire-and-forget), logando o resultado REAL.
 
     Antes isto logava `pluggy_sync_done` em nível info mesmo com `ok:false` —
     397 sucessos e 41 falhas na mesma prateleira, e ninguém procurando por elas.
+
+    Devolve o desfecho `{"ok", "reason", "status_code"}` (`reason="excecao"`
+    quando o sync levantou até o fim), que o disjuntor da retentativa lê
+    (`frontend/routes/of_retentativa.py`). `expected_user_id`: só a retentativa
+    passa; o sync recusa item de outro dono antes de ler, e a marca de falha não
+    grava na linha de outro dono. O webhook não passa (sincroniza o dono da linha).
     """
     result: dict | None = None
+    dono = {} if expected_user_id is None else {"expected_user_id": expected_user_id}
+    # A linha ANTES da 1ª tentativa: é contra ela que a falha final marca
+    # (`marcar_leitura_falhou`), para não desfazer um sync bom nem uma reconexão
+    # mais novos que este run. Sem linha, a falha não marca ninguém e o sync
+    # decide e loga o próprio desfecho.
+    try:
+        conexao = await asyncio.to_thread(get_open_finance_connection_by_item_id, item_id)
+    except AmbiguousItemError:
+        conexao = None
+        print(f"[open_finance] item {item_id} ligado a mais de uma conexão: "
+              "falha do sync não será marcada", flush=True)
+    except Exception as exc:  # banco fora: o sync ainda tenta
+        conexao = None
+        print(f"[open_finance] leitura da conexão falhou ({item_id}): "
+              f"{type(exc).__name__}", flush=True)
+    # A marca de falha só vai para a linha capturada se ela é do dono esperado (a
+    # retentativa passa `expected_user_id`; o webhook não): item readotado por OUTRO
+    # usuário não é marcado, em NENHUM dos dois ramos de falha final abaixo.
+    if conexao and expected_user_id is not None and int(conexao["user_id"]) != int(expected_user_id):
+        conexao = None
     try:
         for tentativa in range(1, _SYNC_MAX_ATTEMPTS + 1):
             try:
-                result = await asyncio.to_thread(sync_pluggy_item, item_id)
+                result = await asyncio.to_thread(sync_pluggy_item, item_id, **dono)
                 # `sync_in_progress` não é exceção: volta como dict, então o
                 # `break` abaixo encerrava a tarefa em silêncio e NINGUÉM mais
                 # sincronizava. Cenário medido (Codex #162): o run de geração
@@ -828,6 +875,16 @@ async def _run_pluggy_sync_bg(item_id: str) -> None:
                 if (result or {}).get("reason") != "sync_in_progress":
                     break
                 if tentativa == _SYNC_MAX_ATTEMPTS:
+                    # `sync_in_progress` FINAL é falha de leitura do run, como a
+                    # exceção final abaixo: o lock (ou o semáforo do processo,
+                    # esgotado por itens sem relação) pode não ter dono que
+                    # atualize ESTE item depois, e sem refresh periódico a 1ª
+                    # conexão ficava "Atualizando…" (Codex #718). A mesma F, com a
+                    # mesma `geracao_vista`: um sync que de fato rodou nesse meio
+                    # tempo mudou o par e a marca não grava. Sem exceção, então
+                    # sem o caso `AmbiguousItemError` (que só levanta).
+                    if conexao:
+                        await asyncio.to_thread(marcar_leitura_falhou, conexao)
                     break
                 espera = _backoff_sec(tentativa)
                 await log_system_event(
@@ -840,6 +897,11 @@ async def _run_pluggy_sync_bg(item_id: str) -> None:
                 await asyncio.sleep(espera)
             except Exception as exc:
                 if not _retryable(exc) or tentativa == _SYNC_MAX_ATTEMPTS:
+                    # Falha FINAL do sync, e só dela (não do aviso nem do log
+                    # abaixo, que rodam depois de um sync bom): sem a marca, a
+                    # tela ficava "Atualizando…" para sempre (Onda 5, R1).
+                    if conexao:
+                        await asyncio.to_thread(marcar_leitura_falhou, conexao, exc)
                     raise
                 espera = _backoff_sec(tentativa)
                 await log_system_event(
@@ -862,6 +924,8 @@ async def _run_pluggy_sync_bg(item_id: str) -> None:
                 )
             except Exception:
                 pass
+            from api.v2 import eventos
+            eventos.avisar(int(uid), "open_finance")
 
         ok = bool(result.get("ok"))
         reason = str(result.get("reason") or "")
@@ -871,7 +935,7 @@ async def _run_pluggy_sync_bg(item_id: str) -> None:
             await log_system_event(
                 "warning", "of_product_stale",
                 f"Sync concluído com produto atrasado: {item_id}",
-                source="open_finance",
+                source="open_finance", user_id=int(uid) if uid else None,
                 details={"item_id": item_id, "stale_products": result["stale_products"]},
             )
         if ok:
@@ -885,17 +949,28 @@ async def _run_pluggy_sync_bg(item_id: str) -> None:
             evento,
             f"Sync Pluggy {'concluído' if ok else 'sem sucesso'}: {item_id}"
             + (f" ({reason})" if reason else ""),
-            source="open_finance",
-            details={**result, "reason": reason or None},
+            source="open_finance", user_id=int(uid) if uid else None,
+            details={**{k: v for k, v in result.items() if k != "user_id"},
+                     "reason": reason or None},
         )
+        # `/investments` é fail-soft (o sync devolve `ok`), mas um 429 ali é rate
+        # limit do mesmo jeito: o status viaja no resultado, sem canal paralelo.
+        return {"ok": ok, "reason": reason, "status_code": result.get("investments_status")}
     except Exception as exc:  # noqa: BLE001 — background, não pode derrubar nada
+        # Coluna NULL (aqui só se sabe o item), logo nada de `str(exc)`: o texto de
+        # FK/CHECK do Postgres traz `Key (user_id)=(…)` e `Failing row contains (…)`,
+        # que sobreviveriam à exclusão da conta (issue #541).
         await log_system_event(
             "error",
             "pluggy_sync_failed",
-            f"Sync Pluggy falhou: {item_id}: {exc}",
+            f"Sync Pluggy falhou: {item_id}",
             source="open_finance",
-            details={"item_id": item_id, "error": str(exc)[:200]},
+            details={"item_id": item_id, "motivo": type(exc).__name__,
+                     "sqlstate": getattr(exc, "sqlstate", None),
+                     "status_code": getattr(exc, "status_code", None)},
         )
+        return {"ok": False, "reason": "excecao",
+                "status_code": getattr(exc, "status_code", None)}
 
 
 def _on_sync_done(item_id: str) -> None:
@@ -906,15 +981,26 @@ def _on_sync_done(item_id: str) -> None:
         _schedule_pluggy_sync(item_id)
 
 
-def _schedule_pluggy_sync(item_id: str) -> None:
+def _schedule_pluggy_sync(item_id: str, expected_user_id: int | None = None, *,
+                          marcar_sujo: bool = True) -> asyncio.Task | None:
+    """Agenda o sync de fundo do item e devolve a tarefa, ou None quando não criou
+    (item vazio, ou já em voo). Já em voo, `marcar_sujo` (o padrão: webhook, adoção,
+    reconexão) coalesce em `_DIRTY`, e a re-execução (`_on_sync_done`) roda sem
+    `expected_user_id` e sem corte por plano, como o webhook. A retentativa do tique
+    passa `marcar_sujo=False`: o `_DIRTY` não tem dono, e uma rodada extra dela
+    sincronizaria depois de o dono perder o acesso ou de uma readoção. Ela é melhor
+    esforço: o sync em voo já está lendo e o próximo tique reavalia o item."""
     if not item_id:
-        return
+        return None
     if item_id in _INFLIGHT:
-        _DIRTY.add(item_id)   # coalesce: uma re-execução no fim, não uma task por evento
-        return
-    task = asyncio.create_task(_run_pluggy_sync_bg(item_id), name=f"pluggy_sync_{item_id}")
+        if marcar_sujo:
+            _DIRTY.add(item_id)   # coalesce: uma re-execução no fim, não uma task por evento
+        return None
+    dono = {} if expected_user_id is None else {"expected_user_id": expected_user_id}
+    task = asyncio.create_task(_run_pluggy_sync_bg(item_id, **dono), name=f"pluggy_sync_{item_id}")
     _INFLIGHT[item_id] = task
     task.add_done_callback(lambda _t: _on_sync_done(item_id))
+    return task
 
 
 async def _adota_item_orfao(item_id: str, last_event: str | None = None) -> int | None:
@@ -958,15 +1044,27 @@ async def _adota_item_orfao(item_id: str, last_event: str | None = None) -> int 
         abandonada que fica para trás é o que torna o aborto terminal (ver o
         LIMITE CONHECIDO);
       • o usuário TEM de existir, e são DUAS defesas para o mesmo estrago.
-        `user_exists` recusa por IDENTIDADE (o log diz `usuario_inexistente`), e
-        é ele que responde quando a conta já não existia — mas é leitura em
+        `user_exists` recusa por IDENTIDADE (o log diz `usuario_inexistente`) e
+        APAGA o item na Pluggy ao recusar, pelo mesmo motivo da exclusão agendada
+        logo abaixo; é ele que responde quando a conta já não existia — mas é leitura em
         transação própria, então sozinho ele só cobre a foto do instante em que
         leu. Quem cobre a JANELA (exclusão da conta commitando entre a leitura e
         a escrita) é a FK, e só porque as duas escritas desta função passaram a
         ser incapazes de criar usuário: `register_item` nunca criou, e a conexão
         vai com `criar_usuario=False`. Antes, `ensure_user_tx` RESSUSCITAVA a
         conta apagada por LGPD (`db/privacy.py`) cujo item sobreviveu ao delete
-        best-effort — pelo evento da Pluggy, e depois pela corrida (Codex #313);
+        best-effort — pelo evento da Pluggy, e depois pela corrida (Codex #313).
+        EXISTIR não basta, e essa é a TERCEIRA defesa: `user_exists` responde True
+        durante a exclusão AGENDADA (db/users.py:34), e a conexão adotada nessa
+        janela sai pela cascata do `delete from users` sem passar pelo `RETURNING`
+        que alimenta o delete remoto — `is_account_scheduled_for_deletion` recusa
+        ali (log `exclusao_agendada`), alinhando esta porta com o 403 que o
+        `POST /pluggy-item` já dava, E apaga o item na Pluggy
+        (`delete_pluggy_items_best_effort`, item explícito): recusar sem apagar
+        deixava o item fora de TODA enumeração nossa e vivo lá depois da
+        exclusão, que é o desfecho que esta PR remove. Os DOIS deletes de recusa
+        só são seguros porque NÃO existe cancelamento de exclusão agendada — o
+        acoplamento está escrito ao lado deles, no ramo do `user_exists`;
       • o rastro (`register_item`) vai ANTES da conexão, e a ordem inversa é pior:
         ela deixava conexão commitada com registry VAZIO — item adotado sem
         nenhum rastro, e o rastro é a única enumeração que existe (`GET /items`
@@ -977,11 +1075,9 @@ async def _adota_item_orfao(item_id: str, last_event: str | None = None) -> int 
     efeito de banco removido pelo usuário. Já não é o mesmo ESTADO: a remoção
     deliberada grava `origin='removed'` (`db.mark_items_removed`) e esta sobra
     fica com `pluggy_item`/`webhook_adopt`, então a diferença está gravada — só
-    que nenhuma porta automática a lê (quem lê é a recuperação por operador, e a
-    regra de precedência está no docstring daquela função). Aqui NÃO há
-    recuperação automática: o script one-shot deixa de
-    listar o item (o filtro dele exclui rastro com dono, de propósito — a mesma
-    regra, `db/open_finance_state.item_registry_origins`) e a retentativa do
+    que nenhuma porta automática a lê (quem lê é o operador, pela
+    `db.open_finance_diagnostico.classifica_item`, onde está a regra). Aqui NÃO há
+    recuperação automática: a retentativa do
     `item/created` não readota (a 1ª guarda acima). É por isso que os TRÊS
     desfechos em que a escrita provadamente não aconteceu apagam o rastro que a
     adoção acabou de gravar, em vez de deixá-lo: os DOIS abortos sob o lock de
@@ -1010,13 +1106,16 @@ async def _adota_item_orfao(item_id: str, last_event: str | None = None) -> int 
     não é escolha: `open_finance_item_registry.user_id` é `on delete cascade`
     (`db/schema.py`), então o mesmo `delete from users` que faz a FK estourar já
     levou o rastro `webhook_adopt` junto — não sobra reivindicação nenhuma
-    (`test_conta_apagada_no_meio_da_adocao_nao_ressuscita`). Aí a saída é
-    OPERACIONAL:
-    `python -m scripts.adotar_items_of_orfaos --item ID --apply --delete` apaga o
-    item na Pluggy, o `avoidDuplicates` libera, e o usuário reconecta pelo
-    widget. Fechar isso sozinho exigiria o disconnect deixar rastro próprio
-    (`origin='disconnect'`) para separar "removido" de "adoção que falhou" —
-    escrita em outro fluxo, outro PR.
+    (`test_conta_apagada_no_meio_da_adocao_nao_ressuscita`). Na adoção que morreu
+    no meio, o `DELETE /open-finance/{uid}` não alcança o item na Pluggy: ele só
+    apaga lá os items que têm conexão aqui (`list_pluggy_item_ids`). Se reconectar
+    pelo widget recupera a conexão depende do `avoidDuplicates` da Pluggy neste
+    cenário — NÃO verificado. A saída é o operador: `scripts/of_itens_operador.py`
+    mostra o item como INTERROMPIDO, apaga na Pluggy (`--apagar`) e ele pede a
+    reconexão. Adotar por script NÃO existe: o one-shot antigo não tinha guarda
+    contra item duplicado da mesma conta (dobraria saldo e lançamentos). O
+    rastro que separa "removido" de "adoção que falhou" já existe: disconnect e
+    reset gravam `origin='removed'` (`db.mark_items_removed`).
 
     Nada escapa daqui: o chamador (webhook) tem de responder 200 mesmo em falha,
     senão a Pluggy retenta em laço. Sem dono resolvível, sem usuário, com o teto
@@ -1033,23 +1132,25 @@ async def _adota_item_orfao(item_id: str, last_event: str | None = None) -> int 
     comum uma entrega grava e fica com o rastro, e as outras abortam apagando o
     que gravaram; na intercalação em que a entrega que pega o
     lock é justamente a que aborta, ninguém grava e ninguém reivindica — o item
-    volta a ser órfão e a PRÓXIMA entrega (ou o script one-shot) adota. Sobra uma
+    volta a ser órfão e a PRÓXIMA entrega adota. Sobra uma
     janela de LEITURA, não de estado: enquanto a perdedora não chega ao lock, o
-    rastro dela existe e um leitor concorrente (o painel de saúde, o script
-    one-shot) vê uma linha a mais desse item. E sobra o desfecho DESCONHECIDO —
+    rastro dela existe e um leitor concorrente (o painel de saúde) vê uma linha
+    a mais desse item. E sobra o desfecho DESCONHECIDO —
     infra no meio da escrita mantém a reivindicação de propósito, e aí vale o
     parágrafo de cima. Três rodadas erraram este parágrafo — a 1ª chamou a janela
     de "só auditoria duplicada" (era ressurreição de banco desconectado, o P1 do
     Codex #313), a 2ª deu o rastro extra como permanente e não viu que ele
-    RECUSAVA toda retentativa e sumia do script, deixando o usuário com 0 bancos
+    RECUSAVA toda retentativa, deixando o usuário com 0 bancos
     e sem saída (o P0 do Tester, 30/30 rodadas), a 3ª consertou só o aborto sob o
     lock e criou esse MESMO estado terminal pela porta do 503. Também fica aberto:
     SÓ `item/created` adota (o gate é `event_name == "item/created"` no webhook, e
     `test_so_item_created_adota` prende), então item cujo `item/created` se perdeu
     ou nunca foi entregue não é adotado por evento NENHUM depois — nem pelo
-    `item/updated` —, e a única recuperação é o one-shot
-    (`scripts/adotar_items_of_orfaos.py`). Nenhum dos dois é regressão contra a
-    `main`.
+    `item/updated` —; se reconectar pelo widget o recupera NÃO foi verificado
+    (esse item fica no registry como NUNCA_ATRIBUIDO, e a saída é o operador:
+    `scripts/of_itens_operador.py`, que o apaga para o usuário reconectar). Nenhum dos
+    dois é regressão
+    contra a `main`.
 
     ponytail: custa uma chamada HTTP a mais dentro do webhook no ramo de item
     desconhecido — inclusive quando ele acaba recusado por já ter dono, que é o
@@ -1070,8 +1171,12 @@ async def _adota_item_orfao(item_id: str, last_event: str | None = None) -> int 
             "warning", "of_webhook_adopt_skipped",
             "Item órfão sem dono resolvível",
             source="open_finance",
+            # Coluna NULL: `str(exc)` do `ValueError` acima traz o `clientUserId`
+            # bruto, que sobreviveria à exclusão (issue #541). `status_code`
+            # separa o 404 dos outros erros da Pluggy.
             details={"item_id": item_id, "motivo": type(exc).__name__,
-                     "error": str(exc)[:200]},
+                     "sqlstate": getattr(exc, "sqlstate", None),
+                     "status_code": getattr(exc, "status_code", None)},
         )
         return None
 
@@ -1088,6 +1193,7 @@ async def _adota_item_orfao(item_id: str, last_event: str | None = None) -> int 
     try:
         origens = await asyncio.to_thread(item_registry_origins, item_id)
     except Exception as exc:  # noqa: BLE001 — nada escapa daqui (o webhook responde 200)
+        # `str(exc)` fica com coluna NULL (#541): é SELECT por item_id, e `Key (user_id)=`/`Failing row` só nascem em escrita.
         await log_system_event(
             "warning", "of_webhook_adopt_skipped",
             "Rastro do item ilegível: adoção não verificável",
@@ -1110,10 +1216,125 @@ async def _adota_item_orfao(item_id: str, last_event: str | None = None) -> int 
         if not await asyncio.to_thread(user_exists, dono):
             await log_system_event(
                 "warning", "of_webhook_adopt_skipped",
-                "Item órfão de usuário que não existe mais",
+                "Item órfão de usuário que não existe mais: apagando na Pluggy",
                 source="open_finance",
-                details={"item_id": item_id, "user_id": dono, "motivo": "usuario_inexistente"},
+                details={"item_id": item_id, "motivo": "usuario_inexistente"},
             )
+            # Recusar sem apagar deixava aqui o MESMO desfecho do ramo de baixo —
+            # item vivo e pago na Pluggy com os dados bancários do titular depois de
+            # uma exclusão LGPD —, e ainda mais terminal: a exclusão desta conta JÁ
+            # rodou, então o `RETURNING` não volta a passar por perto. Decisão do
+            # dono (24/09): quem recusa apaga. Guardas e trade-offs são os do ramo
+            # de baixo (gatilho estreito, `item_ids` EXPLÍCITO, best-effort que não
+            # derruba o webhook), com UMA diferença: `log_user_id=False`, porque a
+            # conta NÃO existe e `system_event_logs.user_id` é FK — uid na coluna
+            # derruba o INSERT e o ÚNICO rastro do item se PERDE
+            # (`core/system_event_log.log_system_event_sync`, o `except`). É o mesmo
+            # que a exclusão de conta faz (`db/privacy.process_due_account_deletions`).
+            # O uid saiu de `details` junto: a purga não alcança o JSON, e
+            # identificador de conta apagada não sobrevive ali (mesma regra de
+            # `tests/test_account_deletion_pii_logs.py`). Resta o `item_id`.
+            # EFEITO COLATERAL aceito pelo dono: `user_exists` não separa "conta
+            # apagada" de "id que nunca existiu", então item cujo `clientUserId`
+            # aponta para um uid inventado também passa a ser apagado na Pluggy.
+            # ACOPLAMENTO dos DOIS deletes de recusa desta função (este e o do ramo
+            # de exclusão agendada, logo abaixo): apagar na recusa só é seguro
+            # porque NÃO existe cancelamento de exclusão agendada — não há
+            # `cancel_account_deletion` no repositório, e o único caminho que sai de
+            # `processing` volta para `scheduled` (`_restore_account_deletion_schedule`,
+            # db/privacy.py:1255). No dia em que existir "cancelar exclusão", estas
+            # duas linhas viram PERDA DE DADO: o usuário cancela e o banco dele já
+            # foi apagado na Pluggy.
+            # REVALIDA na mesma thread do DELETE, coladinho nele: entre o
+            # `user_exists` acima e este ponto há um `await` e um salto de thread, e
+            # o `user_id` é DETERMINÍSTICO a partir do e-mail — quem foi excluído e
+            # se recadastra recebe o mesmo id e, pelo `avoidDuplicates`, a Pluggy
+            # devolve o MESMO item. Sem a releitura, esta linha apagaria uma conexão
+            # VÁLIDA e recém-criada, de forma irreversível (Codex, PR #539). A
+            # janela não fecha — o provedor é externo e não há transação que o
+            # inclua —, mas encolhe do salto de thread para uma ida ao banco, e o
+            # sinal lido é o mais forte que existe deste lado: se o item TEM conexão
+            # local agora, ele está em uso e não é órfão de ninguém.
+            def _apaga_se_ainda_orfao() -> None:
+                if user_exists(dono) or get_connections_by_item_id(item_id):
+                    return
+                delete_pluggy_items_best_effort(dono, [item_id], log_user_id=False)
+
+            await asyncio.to_thread(_apaga_se_ainda_orfao)
+            return None
+        # A conta pode EXISTIR e já estar a caminho do fim: `user_exists` responde
+        # True durante a exclusão agendada de propósito (db/users.py:34, "LIMITE
+        # CONHECIDO"), e adotar nessa janela pendura uma conexão nova que o
+        # `delete from users` leva pela CASCATA — sem ter passado pelo `RETURNING`
+        # da exclusão, que é o que alimenta o delete remoto. Desfecho medido:
+        # item vivo (e pago) na Pluggy, com os dados bancários do titular, depois
+        # de uma exclusão LGPD (P2 do Codex na PR #539, reproduzido pelo Tester).
+        # Esta é a porta que ALCANÇA em produção; o `POST /pluggy-item` já morre em
+        # 403 pelo `raise_if_account_scheduled_for_deletion`
+        # (frontend/routes/shared.py:971), que é o MESMO predicado — aqui não há
+        # 403 a levantar para a Pluggy, então o que se reusa é a fonte única
+        # (`is_account_scheduled_for_deletion`, db/privacy.py:243) e o desfecho é
+        # o skip. O `user_exists` fica: ele responde por conta JÁ apagada, que é
+        # outro estado (e apaga na Pluggy pelo mesmo motivo, sem uid em lugar
+        # nenhum — ver o ramo acima). Aqui a conta existe, então o dono
+        # vai na COLUNA `user_id` — a cascata de `system_event_logs` a leva no dia
+        # da exclusão, e `details` (que a cascata não alcança) não guarda uid.
+        # Se o PREDICADO levantar, o `except` genérico lá embaixo grava o dono na
+        # coluna, não em `details` (issue #541).
+        if await asyncio.to_thread(is_account_scheduled_for_deletion, dono):
+            await log_system_event(
+                "warning", "of_webhook_adopt_skipped",
+                "Item órfão de conta com exclusão agendada: apagando na Pluggy",
+                source="open_finance", user_id=dono,
+                details={"item_id": item_id, "motivo": "exclusao_agendada"},
+            )
+            # Recusar e ir embora deixava o item VIVO e pago na Pluggy, com os
+            # dados bancários do titular, depois da exclusão LGPD: sem conexão em
+            # `open_finance_connections`, ele não aparece em `list_pluggy_item_ids`
+            # nem no `RETURNING` da exclusão — e não há listagem de items na Pluggy
+            # para enumerar por fora (core/services/pluggy.py não tem essa função).
+            # É o MESMO desfecho que esta PR existe para remover, então quem recusa
+            # apaga. Ação IRREVERSÍVEL disparada por evento externo, logo:
+            # • gatilho estreito — só os DOIS ramos de conta que não pode adotar
+            #   (este predicado e o `user_exists` acima). O teto do plano
+            #   (`_enforce_bank_limit`, 402) e a posse recusam sem apagar nada, e
+            #   esta guarda vem ANTES deles de propósito: se viesse depois, o 402
+            #   roubaria o caminho e o item sumiria do ramo errado — o controle de
+            #   gatilho é
+            #   `test_t18c_recusa_por_outro_motivo_nao_apaga_o_item_na_pluggy`
+            #   (tests/test_account_deletion_adocao_corrida.py);
+            # • `item_ids` EXPLÍCITO — a enumeração (`item_ids=None`) apagaria os
+            #   outros items da conta, que não são deste evento e saem pelo
+            #   pipeline da exclusão, com rastro próprio;
+            # • best-effort — falha de provedor fica no log do helper
+            #   (`pluggy_item_delete_failed`/`pluggy_disconnect_auth_failed`) e o
+            #   webhook segue 200; a Pluggy fora do ar nesse instante devolve o
+            #   estado ANTERIOR a este commit (item órfão e pago lá), não um 5xx.
+            #   NÃO há retentativa: o log guarda o `item_id`, e o operador o vê
+            #   como "remoção remota falhou" em `scripts/of_itens_operador.py`,
+            #   que o apaga (`--apagar`) — não existe listagem de items no provedor;
+            # • `log_user_id` fica no default `True`: aqui a conta AINDA existe,
+            #   então o dono vai na COLUNA (o mesmo que o skip acima), e a cascata
+            #   de `system_event_logs` o leva no dia da exclusão.
+            # Depois da decisão e SEM gravar conexão nem rastro de adoção: o item
+            # não é nosso para adotar, é nosso para remover.
+            # REVALIDA colado no delete, igual ao ramo de conta inexistente — e
+            # pelo mesmo motivo, que aqui eu tinha deixado pela metade (§2 do
+            # CLAUDE.md: "achei um caso" ≠ "resolvi a categoria"; o Codex pegou o
+            # irmão). Entre a leitura de cima e este ponto há um `await` do log e
+            # um salto de thread; se a exclusão for cancelada ou a conta se
+            # recadastrar e reconectar o MESMO item nesse vão, apagar destrói
+            # conexão válida, de forma irreversível. Os dois sinais são os do
+            # irmão: a exclusão deixou de estar agendada, ou o item já tem conexão
+            # local — item em uso não é órfão de ninguém.
+            def _apaga_se_ainda_agendada() -> None:
+                if not is_account_scheduled_for_deletion(dono):
+                    return
+                if get_connections_by_item_id(item_id):
+                    return
+                delete_pluggy_items_best_effort(dono, [item_id])
+
+            await asyncio.to_thread(_apaga_se_ainda_agendada)
             return None
         await _enforce_bank_limit(dono, item_id)
         # O rastro DUPLICA de propósito quando o navegador volta depois (o POST
@@ -1136,8 +1357,9 @@ async def _adota_item_orfao(item_id: str, last_event: str | None = None) -> int 
         # abaixo registra e o webhook responde 200 sem adotar.
         # Registrado, não consertado: sem o `ensure_user_tx` a adoção também
         # deixa de REPOR a linha de `accounts`, e existe estado de produção com
-        # `users` sem `accounts` (`merge_users` apaga a do `from_user_id` e nunca
-        # apaga o `users` dele, db/users.py:109). Medido: a adoção grava, o
+        # `users` sem `accounts` (o `merge_users` anterior ao #635 apagava a do
+        # `from_user_id` e deixava o `users` dele; desde o #635 apaga os dois, mas
+        # as origens antigas seguem no banco). Medido: a adoção grava, o
         # snapshot responde e `get_consolidated_balance` devolve zeros sem
         # estourar; qualquer `ensure_user` posterior (o próximo login) repara.
         # `adocao_registro_id`: a 1ª guarda (rastro sem dono) é REFEITA dentro do
@@ -1157,12 +1379,24 @@ async def _adota_item_orfao(item_id: str, last_event: str | None = None) -> int 
         # três 409 se separam pelo texto do `detail`. O
         # `str()` do `HTTPException` já é `"{status_code}: {detail}"`
         # (starlette), então não precisa de formatação nossa.
+        # Issue #541: dono na COLUNA (sai na exportação LGPD e na cascata), logo
+        # `str(exc)` só do `HTTPException`, cujo `detail` é texto nosso — o de
+        # psycopg traz host e porta. `ForeignKeyViolation` = conta apagada no
+        # meio: com o dono na coluna a FK recusaria a linha, e ela é o único
+        # rastro do `item_id`; fica NULL e sem uid, como os ramos de conta inexistente.
+        # Teto aceito (A3 da revisão): conta apagada SEM agendamento e exceção que
+        # não seja FK → a FK do log recusa a linha e o motivo se perde; o
+        # `item_id` sobrevive nos logs de coluna NULL do webhook.
+        details = {"item_id": item_id, "motivo": type(exc).__name__,
+                   "sqlstate": getattr(exc, "sqlstate", None)}
+        if isinstance(exc, HTTPException):
+            details["error"] = str(exc)[:200]
         await log_system_event(
             "warning", "of_webhook_adopt_skipped",
             "Item órfão não adotado",
             source="open_finance",
-            details={"item_id": item_id, "user_id": dono, "motivo": type(exc).__name__,
-                     "error": str(exc)[:200]},
+            user_id=None if isinstance(exc, psycopg.errors.ForeignKeyViolation) else dono,
+            details=details,
         )
         return None
 
@@ -1187,7 +1421,7 @@ async def _adota_item_orfao(item_id: str, last_event: str | None = None) -> int 
         # máquina de estados do `pluggy_health`, que é outro PR.
         #
         # ADOÇÃO RETROATIVA NÃO TEM ESSE EVENTO (defeito de produção, relato do
-        # dono): o item do `scripts/adotar_items_of_orfaos` foi abandonado dias
+        # dono): o item adotado pelo one-shot (já removido) foi abandonado dias
         # atrás e está congelado no status daquela sessão. Sem sync agendado e sem
         # evento nenhum a caminho, NADA lê a Pluggy por essa conexão — e o que
         # falta é o EXTRATO: zero conta, zero transação, carteira vazia.
@@ -1223,6 +1457,8 @@ async def _adota_item_orfao(item_id: str, last_event: str | None = None) -> int 
         # e empurra o rótulo para além das 18h. Ou seja: para quem NÃO tem conta
         # nenhuma, agendar o sync continua sendo necessário e não suficiente
         # para o rótulo.
+        # Desde a Fase 4 (PR 2) o rótulo vira "Erro temporário" no teto de 2 h
+        # (`TETO_ATUALIZANDO_MIN`), sem esperar essa passada.
         #
         # Os outros status AGENDAM nos dois caminhos: `WAITING_USER_INPUT`,
         # `WAITING_USER_ACTION`, `LOGIN_ERROR`, `OUTDATED` e `ERROR` viram um
@@ -1237,9 +1473,9 @@ async def _adota_item_orfao(item_id: str, last_event: str | None = None) -> int 
         await log_system_event(
             "warning", "of_webhook_adopt_incompleto",
             "Item adotado, mas auditoria/sync falharam",
-            source="open_finance",
-            details={"item_id": item_id, "user_id": dono, "motivo": type(exc).__name__,
-                     "error": str(exc)[:200]},
+            source="open_finance", user_id=dono,
+            details={"item_id": item_id, "motivo": type(exc).__name__,
+                     "sqlstate": getattr(exc, "sqlstate", None)},
         )
     return dono
 
@@ -1249,8 +1485,33 @@ def _bank_limit_enabled() -> bool:
     return (os.getenv("OF_BANK_LIMIT_ENABLED") or "").strip().lower() in ("1", "true", "yes", "on")
 
 
-async def _enforce_bank_limit(user_id: int, new_item_id: str | None = None) -> None:
-    """Teto de conexões OF por plano.
+# Plano sem Open Finance (of_banks_max <= 0). Um texto só para as duas barreiras.
+_MSG_OF_SO_NOS_PLANOS_PAGOS = "Conectar banco faz parte dos planos pagos. Assine pra conectar: /precos"
+
+
+def _msg_sem_open_finance(user_id: int) -> str:
+    """Na carência a pessoa é assinante: mandá-la assinar é beco (a /precos a
+    recusa com 409). Síncrona, lê o banco — chame via `asyncio.to_thread`."""
+    try:
+        estado = billing_copy.estado_sem_plano_pago(user_id)
+    except Exception as exc:
+        # Sem isto o 402 vira 500. "Não sei" vira carência: a /conta leva à /precos sem Stripe; a /precos daria 409 ao assinante.
+        logging.getLogger(__name__).warning(
+            "of_msg_sem_open_finance_falhou user_id=%s causa=%s sqlstate=%s", user_id,
+            type(exc).__name__, getattr(exc, "sqlstate", None), extra={"user_id": user_id})
+        estado = "carencia"
+    if estado == "carencia":
+        return billing_copy.OPEN_FINANCE_EM_CARENCIA
+    return _MSG_OF_SO_NOS_PLANOS_PAGOS
+
+
+async def _veredito_do_teto(user_id: int, new_item_id: str | None = None,
+                            provider: str = "pluggy") -> tuple[int | None, int | None, dict | None]:
+    """Teto de conexões OF por plano, como `(teto, em_uso, recusa)`.
+
+    `teto` None = sem trava; `em_uso` None = não contou; `recusa` é o `detail` do
+    402, ou None se cabe. Fonte única para `_enforce_bank_limit` (cobra) e
+    `GET /limite` (informa).
 
     v2 (PLANS_V2_ENABLED): teto vem do tier — of_banks_max da escada
     (trial 1 / Essencial 1 / Plus 2 / Pro 5 / None = ilimitado). Ativo sempre
@@ -1259,60 +1520,62 @@ async def _enforce_bank_limit(user_id: int, new_item_id: str | None = None) -> N
 
     P1: reconectar/renovar um banco JÁ conectado (mesmo provider_item_id) NÃO conta como
     banco novo — senão o usuário no limite ficava travado de reautorizar o próprio
-    banco. Só bloqueia banco realmente novo.
+    banco. Só bloqueia banco realmente novo. `provider` é o da busca desse item: a
+    mock-connect passa 'mock_pluggy' (reseed da falsa), o resto fica no 'pluggy'.
     """
     from core.services.plan_service import plans_v2_enabled, get_user_limits
 
     if plans_v2_enabled():
         limit = (await asyncio.to_thread(get_user_limits, user_id)).get("of_banks_max")
         if limit is None:
-            return  # ilimitado (Premium futuro)
+            return None, None, None  # ilimitado (Premium futuro)
         if new_item_id:
-            existing = await asyncio.to_thread(get_open_finance_connection_by_item_id, str(new_item_id))
+            existing = await asyncio.to_thread(get_open_finance_connection_by_item_id, str(new_item_id), provider)
             if existing and int(existing.get("user_id")) == int(user_id):
-                return  # upsert de item existente: reconexão, não é banco novo
+                # reconexão: sem trava para este item; só o enforce passa item
+                return None, None, None
         if limit <= 0:
-            raise HTTPException(
-                status_code=402,
-                detail={
-                    "code": "OF_BANK_LIMIT",
-                    "limit": 0,
-                    "message": "Conectar banco faz parte dos planos pagos — no Grátis a conexão "
-                               "vale durante os 15 dias de teste. Assine pra reativar: /precos",
-                },
-            )
+            return limit, None, {
+                "code": "OF_BANK_LIMIT",
+                "limit": 0,
+                "message": await asyncio.to_thread(_msg_sem_open_finance, user_id),
+            }
         count = await asyncio.to_thread(count_open_finance_connections, user_id)
         if count >= limit:
-            raise HTTPException(
-                status_code=402,
-                detail={
-                    "code": "OF_BANK_LIMIT",
-                    "limit": limit,
-                    "message": f"Seu plano conecta até {limit} banco{'s' if limit > 1 else ''}. "
-                               "Faça upgrade pra conectar mais: /precos",
-                },
-            )
-        return
+            return limit, count, {
+                "code": "OF_BANK_LIMIT",
+                "limit": limit,
+                "message": f"Seu plano conecta até {limit} banco{'s' if limit > 1 else ''}. "
+                           "Faça upgrade pra conectar mais: /precos",
+            }
+        return limit, count, None
 
     if not _bank_limit_enabled():
-        return
+        return None, None, None
     if await asyncio.to_thread(is_pro, user_id):
-        return
+        return None, None, None
     if new_item_id:
-        existing = await asyncio.to_thread(get_open_finance_connection_by_item_id, str(new_item_id))
+        existing = await asyncio.to_thread(get_open_finance_connection_by_item_id, str(new_item_id), provider)
         if existing and int(existing.get("user_id")) == int(user_id):
-            return  # upsert de item existente: reconexão, não é banco novo
+            # reconexão: sem trava para este item; só o enforce passa item
+            return None, None, None
     limit = int(os.getenv("OF_FREE_BANK_LIMIT", "1"))
     count = await asyncio.to_thread(count_open_finance_connections, user_id)
     if count >= limit:
-        raise HTTPException(
-            status_code=402,
-            detail={
-                "code": "OF_BANK_LIMIT",
-                "limit": limit,
-                "message": f"No plano grátis você conecta {limit} banco. Assine o Pro para conectar mais.",
-            },
-        )
+        return limit, count, {
+            "code": "OF_BANK_LIMIT",
+            "limit": limit,
+            "message": f"No plano grátis você conecta {limit} banco. Assine o Pro para conectar mais.",
+        }
+    return limit, count, None
+
+
+async def _enforce_bank_limit(user_id: int, new_item_id: str | None = None,
+                              provider: str = "pluggy") -> None:
+    """Cobra o teto decidido por `_veredito_do_teto` (402 se não cabe)."""
+    _, _, recusa = await _veredito_do_teto(user_id, new_item_id, provider)
+    if recusa:
+        raise HTTPException(status_code=402, detail=recusa)
 
 
 async def _ensure_of_access_allowed(user_id: int) -> None:
@@ -1334,8 +1597,7 @@ async def _ensure_of_access_allowed(user_id: int) -> None:
                 detail={
                     "code": "OF_BANK_LIMIT",
                     "limit": 0,
-                    "message": "Conectar banco faz parte dos planos pagos — no Grátis a conexão "
-                               "vale durante os 15 dias de teste. Assine pra reativar: /precos",
+                    "message": await asyncio.to_thread(_msg_sem_open_finance, user_id),
                 },
             )
         return
@@ -1382,7 +1644,8 @@ async def open_finance_connectors_route(request: Request, user_id: int):
     """Catálogo completo de bancos da Pluggy pro modal "Conectar banco".
 
     Fluxo padrão: a escolha do banco acontece no site (modal com busca) e o widget da
-    Pluggy abre já no banco escolhido. Retorna dicts enxutos (id/name/type/color/inv)."""
+    Pluggy abre já no banco escolhido. Retorna dicts enxutos (id/name/type/color/inv).
+    Conector direto some quando a lista já tem o gêmeo Open Finance (mesmo nome e tipo)."""
     shared.authorize_dashboard_access(request, user_id)
     try:
         raw = await asyncio.to_thread(
@@ -1393,9 +1656,18 @@ async def open_finance_connectors_route(request: Request, user_id: int):
     except PluggyApiError as exc:
         raise HTTPException(status_code=502, detail=str(exc)) from exc
 
+    visiveis = [c for c in raw if str(c.get("type") or "") in _CONNECTABLE_TYPES]
+    # A Caixa direta (219) pede QR no próprio celular e o usuário trava; com o
+    # gêmeo Open Finance na lista (619), ele é a escolha certa e o direto sai.
+    of_keys = {
+        (normalize_text(c.get("name")), str(c.get("type") or ""))
+        for c in visiveis if c.get("isOpenFinance") is True
+    }
     banks = []
-    for c in raw:
-        if str(c.get("type") or "") not in _CONNECTABLE_TYPES:
+    for c in visiveis:
+        if c.get("isOpenFinance") is not True and (
+            normalize_text(c.get("name")), str(c.get("type") or "")
+        ) in of_keys:
             continue
         products = [str(p).upper() for p in (c.get("products") or [])]
         banks.append({
@@ -1519,9 +1791,14 @@ async def open_finance_connect_token_route(request: Request, user_id: int):
             token_hash=token_hash(token_data["accessToken"]), origin="connect_token",
         )
     except Exception as exc:  # noqa: BLE001 — rastro nunca derruba a emissão do token
-        await log_system_event(
+        await _log_com_teto(
+            _LOG_DIAG_TIMEOUT_S,
             "warning", "of_item_registry_failed", "Falha ao registrar connect token",
-            source="open_finance", details={"error": str(exc)[:200]},
+            source="open_finance", user_id=user_id,  # mesma razão do irmão no /pluggy-item
+            # Tipo + `sqlstate` e não `str(exc)[:200]`, também pela razão do irmão:
+            # com o dono na coluna, estes `details` passam a sair na exportação LGPD.
+            details={"motivo": type(exc).__name__,
+                     "sqlstate": getattr(exc, "sqlstate", None)},
         )
 
     return {
@@ -1530,6 +1807,28 @@ async def open_finance_connect_token_route(request: Request, user_id: int):
         "includeSandbox": PLUGGY_INCLUDE_SANDBOX,
         "provider": "pluggy",
     }
+
+
+@router.get("/open-finance/{user_id}/limite")
+async def open_finance_limite_route(request: Request, user_id: int):
+    """Diz ao app, ANTES do widget, se cabe um banco NOVO. Só leitura.
+
+    (a) Informativa: quem cobra é o `/pluggy-item` e o webhook; a corrida é a #747.
+    (b) `pode_adicionar=false` NÃO impede reconectar banco já conectado (P1).
+    (c) O teto nunca vira 402 aqui: vira `pode_adicionar=false` + `code`/`message`.
+        Antes dele roda o gate comum de dados (401/403, e 402
+        `subscription_required`/`plan_selection_required` para quem não tem plano
+        ativo): o app trata esses status como nas rotas irmãs.
+    (d) No v1, `of_banks_max` é o teto efetivo do gate legado e pode divergir do `/auth/me`.
+    """
+    shared.authorize_dashboard_access(request, user_id)
+    teto, em_uso, recusa = await _veredito_do_teto(user_id)
+    if em_uso is None:
+        em_uso = await asyncio.to_thread(count_open_finance_connections, user_id)
+    return {"ok": True, "of_banks_max": teto, "em_uso": em_uso,
+            "pode_adicionar": recusa is None,
+            "code": recusa["code"] if recusa else None,
+            "message": recusa["message"] if recusa else None}
 
 
 # Por quanto tempo, depois da adoção pelo webhook, o `POST /pluggy-item` ainda é
@@ -1578,7 +1877,7 @@ async def open_finance_pluggy_item_route(request: Request, user_id: int, payload
         await log_system_event(
             "error", "of_item_owner_conflict",
             "Item Pluggy não pertence ao usuário da sessão",
-            source="open_finance",
+            source="open_finance", user_id=session_uid,
             details={"item_id": new_item_id, "origin": "pluggy_item_route"},
         )
         raise HTTPException(status_code=403, detail="Este item não pertence a esta conta.")
@@ -1593,7 +1892,7 @@ async def open_finance_pluggy_item_route(request: Request, user_id: int, payload
         await log_system_event(
             "error", "of_item_owner_conflict",
             "Item Pluggy já vinculado a outra conta",
-            source="open_finance",
+            source="open_finance", user_id=session_uid,
             # `origin` nos TRÊS emissores de `of_item_owner_conflict`, não em
             # dois: os dois 409 têm `detail` IDÊNTICO de propósito (o pré-lock
             # daqui e o de `_salva_item_sob_lock`), então sem este campo eles
@@ -1661,11 +1960,68 @@ async def open_finance_pluggy_item_route(request: Request, user_id: int, payload
     except ValueError as exc:
         raise HTTPException(status_code=400, detail=detalhe_seguro(exc)) from exc
 
-    await asyncio.to_thread(
-        register_item, session_uid,
-        provider_item_id=new_item_id, origin="pluggy_item",
-        status=str(remote.get("status") or "") or None,
-    )
+    try:
+        await asyncio.to_thread(
+            register_item, session_uid,
+            provider_item_id=new_item_id, origin="pluggy_item",
+            status=str(remote.get("status") or "") or None,
+        )
+    except Exception as exc:  # noqa: BLE001 — rastro nunca derruba conexão já commitada
+        # Mesmo contrato dos outros dois `of_item_registry_failed` (connect token e
+        # webhook), e aqui era o pior dos três desfechos: 500 com a conexão JÁ
+        # commitada, sem `OPEN_FINANCE_CONNECTED` e sem sync inicial. Preço de
+        # seguir: o item fica sem rastro `pluggy_item` — igual ao que o 500 já
+        # deixava. O que ISSO custava (reentrega de `item/created` depois da
+        # remoção não ser reconhecida pela 1ª guarda de `_adota_item_orfao`) está
+        # fechado por DOIS mecanismos, não por um:
+        #   * banco REMOVIDO — disconnect e reset gravam `origin='removed'` na mesma
+        #     transação do delete (`db.mark_items_removed`) e a guarda recusa
+        #     qualquer origem COM DONO (regra em `db.item_registry_origins`,
+        #     CLAUDE.md §0.7). Quem prova é o `tests/test_of_marca_removido.py::
+        #     test_item_created_reentregue_nao_ressuscita_banco_removido_sem_rastro_pluggy_item`;
+        #   * conta EXCLUÍDA — lá não há marca nenhuma (o registry vai no cascade da
+        #     FK junto com o usuário); quem fecha é a guarda de `user_exists` de
+        #     `_adota_item_orfao`, que recusa por IDENTIDADE.
+        # ESCOPO: isto salva a falha ISOLADA do registry. Numa queda geral do
+        # Postgres o `get_open_finance_snapshot` abaixo (leitura sem `try`) derruba
+        # a resposta do mesmo jeito — e aí a conexão commitada já não é o caso raro.
+        # `_log_com_teto` e não `log_system_event` cru: este `except` dispara quando
+        # o Postgres ACABOU de falhar, e sem o `wait_for` o 200 que este bloco
+        # entrega pode virar 200 pendurado pelos dois furos fora do alcance do
+        # `statement_timeout` (COMMIT e servidor que aceita o socket e não responde,
+        # `core/system_event_log.py`). Mesmo teto dos irmãos do `_grava_reconexao`.
+        #
+        # ANTES do `_log_com_teto`, e não em vez dele — mesmo padrão dos dois irmãos
+        # da reconexão, pela mesma razão: quando o teto ESTOURA, o `wait_for` engole
+        # o `TimeoutError`, e quando o banco do log está fora o `log_system_event`
+        # engole o erro imprimindo mensagem GENÉRICA, sem `event_type` e sem
+        # `item_id` (`core/admin_dashboard.py`). Medido nas duas metades: o
+        # `new_item_id` não sobrava em canal nenhum. Como este caminho deixa de
+        # propósito uma conexão commitada SEM rastro `pluggy_item`, o id é a única
+        # chave operacional que resta — perdê-lo é perder o item (Codex, PR #542).
+        logging.getLogger(__name__).warning(
+            "of_item_registry_failed item_id=%s user_id=%s motivo=%s sqlstate=%s",
+            new_item_id, session_uid, type(exc).__name__,
+            getattr(exc, "sqlstate", None), extra={"user_id": session_uid})
+        await _log_com_teto(
+            _LOG_DIAG_TIMEOUT_S,
+            "warning", "of_item_registry_failed", "Falha ao registrar item conectado",
+            source="open_finance",
+            # `user_id` na COLUNA (padrão do repo, `tests/test_log_falha_user_id.py`):
+            # é por ela que o `delete_user_data` (`db/privacy.py`) apaga o evento e
+            # que a FK `system_event_logs.user_id` o leva no cascade; linha com a
+            # coluna NULL nenhuma das duas varreduras alcança.
+            user_id=session_uid,
+            # Tipo + `sqlstate`, e NÃO o `str(exc)[:200]` que os irmãos de coluna
+            # NULL gravam: com o dono na coluna estes `details` passam a sair
+            # INTEIROS na exportação LGPD do próprio titular (`build_user_export_zip`,
+            # `db/privacy.py`), e o texto cru do psycopg numa falha de conexão traz
+            # host e porta. Mesma lista branca que a PR #539 adotou para exceção; o
+            # que o diagnóstico perde, o `logging` do servidor ainda tem.
+            details={"item_id": new_item_id, "origin": "pluggy_item_route",
+                     "motivo": type(exc).__name__,
+                     "sqlstate": getattr(exc, "sqlstate", None)},
+        )
 
     # Pula SÓ a duplicata do webhook. `item/created` chega antes do `onSuccess`
     # do widget (que só dispara em status final), então em produção a ordem comum
@@ -1691,6 +2047,16 @@ async def open_finance_pluggy_item_route(request: Request, user_id: int, payload
     #      evidência ainda não → audita, e o webhook audita em seguida: 2
     #      `OPEN_FINANCE_CONNECTED` para 1 conexão. Escolha deliberada, mesma
     #      régua do bloco acima — duplicata é ruído, buraco é perda.
+    # Sync inicial ANTES da auditoria, e não depois: `record_audit_event` abre
+    # `get_conn()` com o default de 30s do pool e faz INSERT/commit SEM prazo por
+    # query (`core/audit.py`), então uma tabela de auditoria travada segura a
+    # requisição — medido: 6,02s de espera por um lock de 6s. Se o cliente
+    # desiste ou o servidor corta nesse vão, a conexão JÁ commitada ficava sem
+    # sync inicial, que é exatamente o desfecho que este bloco existe para
+    # eliminar (Codex, PR #542). `_schedule_pluggy_sync` só empilha a tarefa e
+    # não toca no banco, então antecipá-lo não rouba prazo de ninguém.
+    _schedule_pluggy_sync(str((connection or {}).get("provider_item_id") or ""))
+
     if not conexao_recem_adotada:
         await asyncio.to_thread(
             record_audit_event,
@@ -1699,9 +2065,6 @@ async def open_finance_pluggy_item_route(request: Request, user_id: int, payload
             request=request,
             details={"provider": "pluggy", "item_id": (connection or {}).get("provider_item_id")},
         )
-
-    # Sync inicial: puxa contas + transações do banco recém-conectado.
-    _schedule_pluggy_sync(str((connection or {}).get("provider_item_id") or ""))
 
     snapshot = await asyncio.to_thread(get_open_finance_snapshot, user_id)
     return json.loads(shared.jdump({"ok": True, "connection": connection, **snapshot}))
@@ -1741,16 +2104,15 @@ async def open_finance_refresh_route(request: Request, user_id: int, wait: int |
     except PluggyApiError as exc:
         raise HTTPException(status_code=502, detail=str(exc)) from exc
 
-    # Clique registrado com o usuário ANONIMIZADO (hash), sem token, credencial
+    # Clique registrado com o dono na COLUNA (issue #541), sem token, credencial
     # ou valor — só quem, quando, quanto demorou e como terminou.
     itens = result.get("items") or []
     await log_system_event(
         "info" if result.get("ok") else "warning",
         "of_manual_refresh",
         f"Refresh manual de Open Finance ({'ok' if result.get('ok') else 'com pendências'})",
-        source="open_finance",
+        source="open_finance", user_id=user_id,
         details={
-            "user_hash": hashlib.sha256(str(user_id).encode()).hexdigest()[:16],
             "ok": bool(result.get("ok")),
             "duration_ms": int((time.monotonic() - t0) * 1000),
             "items": [{"item_id": i.get("item_id"), "state": i.get("state"),
@@ -2001,9 +2363,37 @@ async def open_finance_pluggy_webhook(request: Request):
     return {"received": True}
 
 
-@router.post("/open-finance/{user_id}/mock-connect")
-async def open_finance_mock_connect_route(request: Request, user_id: int, payload: OpenFinanceMockConnectPayload):
-    shared.authorize_dashboard_access(request, user_id)
+def _exige_mock_connect() -> None:
+    # Conexão FALSA só em dev/staging. Falha fechado: ausente ou valor fora da lista = 404,
+    # igual a rota inexistente. Sem log: roda antes da auth (anônimo = inundação) e antes
+    # de qualquer leitura do corpo — por isso a rota não declara parâmetro de corpo.
+    if (os.getenv("OF_MOCK_CONNECT_ENABLED") or "").strip().lower() not in ("1", "true", "yes", "on"):
+        raise HTTPException(status_code=404)
+
+
+@router.post("/open-finance/{user_id}/mock-connect", dependencies=[Depends(_exige_mock_connect)])
+async def open_finance_mock_connect_route(request: Request, user_id: int):
+    session_uid = shared.authorize_dashboard_access(request, user_id)
+    # Corpo lido à mão, só agora: parâmetro de corpo tipado faz o FastAPI decodificar o JSON
+    # ANTES do portão, e o 422 de JSON malformado revelava a rota desligada a qualquer anônimo.
+    # Depois da sessão (anônimo e outro uid nunca forçam a leitura) e ANTES do teto, que
+    # precisa da instituição: por isso corpo inválido dá 422 antes do 402 do limite.
+    # Mesmos status do parâmetro tipado (200/422, o texto do 422 mudou): só application/json
+    # e application/*+json são JSON; o resto é 422, como antes.
+    corpo = await request.body()
+    mime = (request.headers.get("content-type") or "").split(";")[0].strip().lower()
+    try:
+        if mime == "application/json" or (mime.startswith("application/") and mime.endswith("+json")):
+            payload = OpenFinanceMockConnectPayload.model_validate_json(corpo)
+        else:
+            payload = OpenFinanceMockConnectPayload.model_validate(corpo)
+    except ValidationError as exc:
+        raise RequestValidationError(
+            [{**e, "loc": ("body", *e["loc"])} for e in exc.errors(include_url=False)]
+        ) from None
+    # Reseed da mesma instituição é upsert da falsa já existente: não é banco novo.
+    await _enforce_bank_limit(
+        session_uid, mock_open_finance_item_id(session_uid, payload.institution), "mock_pluggy")
     result = await asyncio.to_thread(
         create_mock_open_finance_connection,
         user_id,
@@ -2022,7 +2412,8 @@ async def open_finance_mock_connect_route(request: Request, user_id: int, payloa
     return json.loads(shared.jdump({"ok": True, "sync": result, **snapshot}))
 
 
-def delete_pluggy_items_best_effort(user_id: int, item_ids: list[str] | None = None) -> list[str]:
+def delete_pluggy_items_best_effort(user_id: int, item_ids: list[str] | None = None,
+                                    *, log_user_id: bool = True) -> list[str]:
     """Deleta os items do usuário na Pluggy (best-effort). Sem isso, remover
     a conexão apagava só o nosso registro e o item ficava órfão na Pluggy,
     bloqueando a reconexão ("já possui conexão com este acesso"). Falha por
@@ -2032,6 +2423,22 @@ def delete_pluggy_items_best_effort(user_id: int, item_ids: list[str] | None = N
     com o que o DELETE local varreu e faz um 2º passe no que ficou de fora
     (item salvo entre a enumeração e o DELETE — Codex PR #217, 11º).
     `item_ids` explícito é esse 2º passe: pula a enumeração e deleta os dados.
+
+    `log_user_id=False` tira o dono do log de apiKey falhada — e existe por um
+    único chamador, a EXCLUSÃO de conta (`db/privacy.process_due_account_deletions`):
+    lá a linha PRECISA sobreviver (é o único rastro do item que ficou órfão, e
+    pago, na Pluggy depois de a conta sumir), então ela não pode carregar o
+    identificador de uma conta apagada. Default `True`: no disconnect
+    (DELETE /open-finance/{user_id}) e no reset (POST /settings/reset) a conta
+    CONTINUA viva e o dono vai na COLUNA `user_id`, que a cascata leva junto no
+    dia da exclusão.
+
+    Os três chamadores têm regressão, uma para cada:
+    `tests/test_open_finance_disconnect_route.py::test_disconnect_com_falha_de_auth_loga_o_dono_na_coluna`,
+    `tests/test_account_reset.py::test_reset_com_falha_de_auth_loga_o_dono_na_coluna`
+    e `tests/test_account_deletion_pluggy.py::test_t12_sem_credenciais_pluggy_nao_sobra_user_id_em_log_nenhum`
+    (o único com `log_user_id=False`). `tests/test_log_falha_user_id.py` é o
+    mesmo PADRÃO noutro helper (`_log_falha`), não cobre este.
 
     SÍNCRONO de propósito: o reset de conta (POST /settings/reset) o roda como
     hook de `reset_user_data`, DENTRO dos locks de item e numa thread — rota
@@ -2048,10 +2455,21 @@ def delete_pluggy_items_best_effort(user_id: int, item_ids: list[str] | None = N
     try:
         api_key = create_pluggy_api_key()
     except Exception as exc:  # noqa: BLE001 — best-effort; segue pra limpeza local
+        # O dono vai na COLUNA `user_id` (nunca no texto nem em `details`): é o
+        # padrão do repositório, e é o que a cascata de `system_event_logs` leva.
+        # Sob `log_user_id=False` (só a exclusão de conta) a coluna fica NULL, a
+        # linha sobrevive à cascata e a chave operacional que resta é o item: é
+        # com ele que o operador acha a conexão na Pluggy, sem o dono. Quem
+        # consome esses ids é `scripts/of_itens_operador.py` ("remoção remota
+        # falhou"). Ramo alcançado sempre que faltar PLUGGY_CLIENT_ID/SECRET.
         log_system_event_sync(
             "warning", "pluggy_disconnect_auth_failed",
-            f"Sem apiKey pra deletar items no disconnect do user {user_id}: {exc}",
-            source="open_finance", details={"user_id": user_id, "error": str(exc)[:200]},
+            f"Sem apiKey pra deletar {len(pluggy_item_ids)} item(s) na Pluggy",
+            source="open_finance",
+            user_id=user_id if log_user_id else None,
+            details={"items": pluggy_item_ids, "motivo": type(exc).__name__,
+                     "sqlstate": getattr(exc, "sqlstate", None),
+                     "status_code": getattr(exc, "status_code", None)},
         )
     if api_key:
         for item_id in pluggy_item_ids:
@@ -2105,9 +2523,12 @@ def _disconnect_sob_lock(user_id: int) -> int:
 
                 log_system_event_sync(
                     "warning", "pluggy_item_delete_failed",
-                    f"2º passe do disconnect do user {user_id} falhou: {exc}",
+                    "2º passe do disconnect falhou",
                     source="open_finance",
-                    details={"items": tardios, "error": str(exc)[:200]},
+                    # Coluna NULL de propósito, como o 1º passe: o rastro do item
+                    # órfão sobrevive à exclusão; por isso sem uid e sem texto cru.
+                    details={"items": tardios, "motivo": type(exc).__name__,
+                             "sqlstate": getattr(exc, "sqlstate", None)},
                 )
         return deleted
 

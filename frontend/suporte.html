@@ -1,176 +1,183 @@
-<!DOCTYPE html>
+<!doctype html>
 <html lang="pt-BR">
 <head>
-<meta charset="UTF-8" />
+<meta charset="utf-8" />
 <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-<title>Contato & Suporte · PigBank</title>
+<title>Contato &amp; Suporte · PigBank</title>
 <meta name="description" content="Fale com o time do PigBank. Tire dúvidas, peça ajuda com acesso, WhatsApp ou dashboard." />
 <link rel="canonical" href="https://pigbankai.com/suporte" />
+<meta property="og:type" content="website" />
+<meta property="og:title" content="Contato &amp; Suporte · PigBank" />
+<meta property="og:description" content="Fale com o time do PigBank. Tire dúvidas, peça ajuda com acesso, WhatsApp ou dashboard." />
+<meta property="og:url" content="https://pigbankai.com/suporte" />
+<meta property="og:image" content="https://pigbankai.com/brand/landing-piggy-cta.webp?v=1" />
+<meta name="theme-color" content="#111111" />
 <link rel="icon" type="image/png" href="/favicon.png?v=3" />
 <link rel="apple-touch-icon" href="/brand/apple-touch-icon.png?v=3" />
-<meta name="theme-color" content="#0c0c0d" />
+<link rel="preload" href="/fonts/Inter-Variable.woff2?v=5059ef2a9db0" as="font" type="font/woff2" crossorigin />
 <link rel="stylesheet" href="/brand.css?v=4" />
 <link rel="stylesheet" href="/phosphor.css?v=1" />
-<link rel="stylesheet" href="/site.css?v=4" />
-<style>
-  /* Respostas do FAQ = corpo dos guias (.guide-prose) dentro do acordeão */
-  .faq-a .guide-prose { padding: 4px 20px 22px; font-size: .96rem; }
-  .faq-a .guide-prose p { padding: 0; }              /* neutraliza o padding do .faq-a p */
-  .faq-a .guide-prose > *:first-child { margin-top: 0; }
-  .faq-a .guide-prose > p:first-of-type { font-size: 1rem; color: var(--ink); }
-</style>
-<script src="/safe-area.js?v=1"></script>
+<link rel="stylesheet" href="/site.css?v=5" />
+<link rel="stylesheet" href="/site-redesign.css?v=1" />
+<link rel="stylesheet" href="/site-help.css?v=1" />
+<script src="/safe-area.js?v=1">
+</script>
 </head>
-<body>
-<div class="glow"></div>
-
-  <nav class="nav">
-    <a class="nav-logo" href="/"><img class="logo-full" src="/brand/logo.webp?v=1" alt="PigBank" /></a>
-    <div class="nav-links">
-      <a href="/funcionalidades">Funcionalidades</a>
-      <a href="/como-funciona">Como funciona</a>
-      <a href="/precos">Planos</a>
-      <a href="/whatsapp">WhatsApp</a>
-      <a href="/agents">Agentes</a>
-      
-    </div>
-    <div class="nav-right">
-      <a class="link-entrar" href="/login">Entrar</a>
-      <a class="btn btn-primary" href="/cadastro">Criar conta</a>
-    </div>
-  </nav>
-
-  <div class="wrap">
-
-    <!-- FAQ: guias e dicas evergreen (renderizados de core/blog_guides.py via {{FAQ}}) -->
-    <section class="section" id="faq">
-      <div class="section-head center">
-        <h1>Guias &amp; <span class="grad">dicas</span></h1>
-        <p>As dúvidas mais comuns sobre usar o PigBank. Toque numa pergunta pra abrir.</p>
-      </div>
-      <div class="faq">
-        {{FAQ}}
-      </div>
-    </section>
-
-    <section class="section">
-      <div class="section-head center">
-        <h2>Fale com o <span class="grad">nosso time</span></h2>
-        <p>Estamos aqui pra te ajudar a tirar o máximo do PigBank. Escolha o canal ou mande uma mensagem.</p>
-      </div>
-
-      <div class="contact-grid">
-        <div class="contact-info">
-          <div class="contact-item">
-            <div class="icon-box"><i class="ph ph-envelope" aria-hidden="true"></i></div>
-            <div><h4>E-mail</h4><a href="mailto:contato@pigbankai.com">contato@pigbankai.com</a></div>
-          </div>
-          <div class="contact-item">
-            <div class="icon-box neon"><i class="ph ph-chat-circle" aria-hidden="true"></i></div>
-            <div><h4>WhatsApp</h4><a href="/wa">Abrir conversa com a Piggy →</a></div>
-          </div>
-          <div class="contact-item">
-            <div class="icon-box"><i class="ph ph-lifebuoy" aria-hidden="true"></i></div>
-            <div><h4>Suporte</h4><a href="mailto:suporte@pigbankai.com">suporte@pigbankai.com</a></div>
-          </div>
-          <div class="contact-item">
-            <div class="icon-box neon">⏱️</div>
-            <div><h4>Horário</h4><p>Respondemos em até 1 dia útil.</p></div>
-          </div>
-        </div>
-
-        <form class="form-card" id="contact-form" novalidate>
-          <div id="contact-msg" class="contact-msg"></div>
-          <div class="field">
-            <label for="nome">Nome</label>
-            <input type="text" id="nome" placeholder="Seu nome" required />
-          </div>
-          <div class="field">
-            <label for="email">E-mail</label>
-            <input type="email" id="email" placeholder="seu@email.com" required />
-          </div>
-          <div class="field">
-            <label for="assunto">Assunto</label>
-            <input type="text" id="assunto" placeholder="Sobre o que é?" required />
-          </div>
-          <div class="field">
-            <label for="msg">Mensagem</label>
-            <textarea id="msg" placeholder="Como podemos ajudar?" required></textarea>
-          </div>
-          <input type="text" id="website" tabindex="-1" autocomplete="off" aria-hidden="true" style="position:absolute;left:-9999px;width:1px;height:1px;opacity:0" />
-          <button type="submit" id="contact-btn" class="btn btn-primary btn-block btn-lg">Enviar mensagem</button>
-        </form>
-      </div>
-    </section>
-
-  </div>
-
-  <footer class="footer">
-    <div class="wrap footer-inner">
-      <div class="footer-brand">
-        <a class="nav-logo" href="/"><img class="logo-icon" src="/brand/icon.png?v=2" alt="" /> <span>PigBank</span></a>
-        <p>Seu dinheiro, suas regras, direto no WhatsApp, com a IA da Piggy.</p>
-      </div>
-      <div class="footer-cols">
-        <div class="footer-col"><span class="footer-title">Navegue</span>
-          <a href="/funcionalidades">Funcionalidades</a>
-          <a href="/como-funciona">Como funciona</a>
-          <a href="/precos">Planos</a>
-          <a href="/agents">Agentes</a>
-          <a href="/blog">Blog</a>
-          
-        </div>
-        <div class="footer-col"><span class="footer-title">Produto</span>
-          <a href="/whatsapp">WhatsApp</a>
-          <a href="/comandos">O que pedir</a>
-          <a href="/suporte">Suporte</a>
-        </div>
-        <div class="footer-col"><span class="footer-title">Institucional</span>
-          <a href="/termos">Termos de Uso</a>
-          <a href="/privacy">Privacidade</a>
-          <a href="mailto:contato@pigbankai.com">Contato</a>
-        </div>
-      </div>
-    </div>
-    <p class="footer-copy">© 2026 PigBank · Feito com <i class="ph ph-piggy-bank" aria-hidden="true"></i></p>
-  </footer>
-
+<body id="topo" class="lp lp-help lp-help-page">
+<a class="lp-skip-link" href="#conteudo">Pular para o conteúdo</a>
+<nav aria-label="Navegação principal" class="nav">
+<a aria-label="PigBank, início" class="nav-logo" href="/">
+<img alt="PigBank" class="logo-full" height="42" src="/brand/landing-logo.webp?v=1" width="142"/>
+</a>
+<div class="nav-links">
+<a href="/como-funciona">Como funciona</a>
+<a href="/funcionalidades">Funcionalidades</a>
+<a href="/funcionalidades#open-finance">Open Finance</a>
+<a href="/whatsapp">WhatsApp</a>
+<a href="/agents">Agentes</a>
+<a href="/precos">Planos</a>
+</div>
+<div class="nav-right">
+<a class="link-entrar" href="/login">Entrar</a>
+<a class="btn btn-primary" href="/cadastro">Criar conta</a>
+</div>
+</nav>
+<main id="conteudo">
+<div class="lp-help-nav-wrap">
+<nav aria-label="Central de ajuda" class="lp-shell lp-help-nav">
+<a aria-current="page" href="/suporte">Suporte</a>
+<a href="/privacy">Privacidade</a>
+<a href="/termos">Termos de uso</a>
+</nav>
+</div>
+<section class="lp-help-heading">
+<div class="lp-shell">
+<p class="lp-eyebrow">Central de ajuda</p>
+<h1>Vamos resolver<br/>essa dúvida<span class="lp-pink-dot">.</span>
+</h1>
+<p class="lp-lead">Encontre o canal certo para falar com o PigBank.</p>
+</div>
+</section>
+<section aria-labelledby="channels-title" class="lp-help-channels">
+<div class="lp-shell">
+<h2 id="channels-title">Como podemos ajudar?</h2>
+<div class="lp-help-channel-grid">
+<article class="lp-help-channel">
+<i aria-hidden="true" class="ph ph-envelope">
+</i>
+<h3>Fale com o suporte</h3>
+<p>Precisa de ajuda com a conta, assinatura ou uso do produto? Envie sua dúvida por e-mail.</p>
+<a class="lp-contact-address" href="mailto:suporte@pigbankai.com">suporte@pigbankai.com</a>
+<a class="lp-btn lp-btn-dark" href="mailto:suporte@pigbankai.com">Enviar e-mail</a>
+</article>
+<article class="lp-help-channel">
+<i aria-hidden="true" class="ph ph-file-text">
+</i>
+<h3>Prefere um formulário?</h3>
+<p>Conte o que aconteceu e conheça o novo formulário de contato.</p>
+<span class="lp-contact-address lp-contact-note">Envie sua mensagem pelo formulário de contato.</span>
+<a class="lp-btn lp-btn-dark" href="/suporte/contato" id="contact-form">Abrir formulário</a>
+</article>
+<article class="lp-help-channel lp-help-channel-pink">
+<i aria-hidden="true" class="ph ph-chat-circle">
+</i>
+<h3>Converse com o Piggy</h3>
+<p>Abra o assistente no WhatsApp para registrar e consultar suas finanças.</p>
+<span class="lp-contact-address lp-contact-note">Conversa com o assistente financeiro.</span>
+<a class="lp-btn lp-btn-dark" href="/wa">Abrir WhatsApp</a>
+</article>
+</div>
+</div>
+</section>
+<section aria-labelledby="help-faq-title" class="lp-help-questions lp-section-light">
+<div class="lp-shell lp-help-questions-grid">
+<div>
+<p class="lp-eyebrow">Respostas rápidas</p>
+<h2 id="help-faq-title">Talvez sua resposta<br/>já esteja aqui.</h2>
+</div>
+<div class="lp-faq">
+<details open="">
+<summary>Como conecto meu WhatsApp à conta?</summary>
+<p>Use no cadastro o mesmo número do seu WhatsApp. Depois, abra a conversa com o Piggy. <a href="/whatsapp">Veja como começar no WhatsApp.</a>
+</p>
+</details>
+<details>
+<summary>Onde acesso minha conta?</summary>
+<p>O painel funciona no navegador. <a href="/login">Entre na sua conta</a> para acompanhar seus registros e configurações.</p>
+</details>
+<details>
+<summary>Como escolho os agentes?</summary>
+<p>Os agentes estão disponíveis nos planos Plus e Pro. Cada agente ocupa uma quantidade de energia do plano. <a href="/agents">Conheça os agentes e as combinações.</a>
+</p>
+</details>
+<details>
+<summary>Onde gerencio minha assinatura?</summary>
+<p>Acesse a <a href="/conta">área da sua conta</a> para consultar o plano e gerenciar sua assinatura.</p>
+</details>
+<details>
+<summary>Como faço uma solicitação sobre meus dados?</summary>
+<p>Escreva para <a href="mailto:dpo@pigbankai.com">dpo@pigbankai.com</a>. A <a href="/privacy">Política de Privacidade</a> explica o tratamento de dados e seus direitos.</p>
+</details>
+</div>
+</div>
+</section>
+<section class="lp-help-questions lp-shell" id="faq">
+<h2>Guias para usar o PigBank</h2>
+<p class="lp-lead">Explore os recursos e encontre os próximos passos.</p>
+<div class="faq">{{FAQ}}</div>
+</section>
+<section class="lp-help-more lp-section-blush">
+<div class="lp-shell lp-help-more-grid">
+<div>
+<p class="lp-eyebrow">Outros assuntos</p>
+<h2>O caminho certo<br/>para cada conversa.</h2>
+</div>
+<div class="lp-help-other-contacts">
+<div>
+<h3>Contato geral</h3>
+<p>Outros assuntos sobre o PigBank.</p>
+<a href="mailto:contato@pigbankai.com">contato@pigbankai.com</a>
+</div>
+<div>
+<h3>Privacidade e dados</h3>
+<p>Solicitações ao encarregado de dados.</p>
+<a href="mailto:dpo@pigbankai.com">dpo@pigbankai.com</a>
+</div>
+</div>
+</div>
+</section>
+</main>
+<footer class="lp-footer lp-section-dark">
+<div class="lp-shell">
+<div class="lp-footer-grid">
+<div class="lp-footer-brand">
+<a aria-label="PigBank, voltar ao início" class="lp-brand" href="#topo">
+<img alt="PigBank" height="42" loading="lazy" src="/brand/landing-logo.webp?v=1" width="142"/>
+</a>
+<p>Clareza pra suas contas.<br/>Espaço pra sua vida.</p>
+</div>
+<nav aria-label="Produto">
+<h3>Produto</h3>
+<a href="/whatsapp">WhatsApp</a>
+<a href="/funcionalidades">Funcionalidades</a>
+<a href="/agents">Agentes</a>
+<a href="/precos">Planos</a>
+</nav>
+<nav aria-label="Ajuda">
+<h3>Ajuda</h3>
+<a href="/suporte">Suporte</a>
+<a href="/privacy">Privacidade</a>
+<a href="/termos">Termos de uso</a>
+</nav>
+</div>
+<div class="lp-footer-bottom">
+<p>© 2026 PigBank</p>
+<a href="#topo">De volta ao topo</a>
+</div>
+</div>
+</footer>
 <script>
-  // Envia via endpoint real /contact (Resend no backend). Sem depender de
-  // cliente de e-mail no dispositivo (o mailto: antigo falhava sem handler).
-  document.getElementById('contact-form').addEventListener('submit', async function(e){
-    e.preventDefault();
-    var box = document.getElementById('contact-msg');
-    var btn = document.getElementById('contact-btn');
-    function show(t, ok){ box.textContent = t; box.className = 'contact-msg show ' + (ok ? 'ok' : 'err'); }
-    // O `detail` do 422 do FastAPI é uma LISTA de objetos ({loc,msg,type,input}):
-    // truthy, e na tela vira "[object Object]". Só string passa; o resto cai no
-    // fallback de cada chamada. Mesma regra do `_errDetail` (dashboard.js).
-    function strDetail(d) { return d && typeof d.detail === "string" ? d.detail : ""; }
-    var body = {
-      name:    document.getElementById('nome').value.trim(),
-      email:   document.getElementById('email').value.trim(),
-      subject: document.getElementById('assunto').value.trim(),
-      message: document.getElementById('msg').value.trim(),
-      website: document.getElementById('website').value
-    };
-    if (!body.name || !body.email || !body.subject || !body.message) { show('Preencha nome, e-mail, assunto e mensagem.', false); return; }
-    if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(body.email)) { show('Digite um e-mail válido (ex.: seu@email.com).', false); return; }
-    var csrf = decodeURIComponent((document.cookie.split('; ').find(function(r){ return r.indexOf('csrf_token=') === 0; }) || '').split('=')[1] || '');
-    var headers = { 'Content-Type': 'application/json' };
-    if (csrf) headers['x-csrf-token'] = csrf;
-    btn.disabled = true; var orig = btn.textContent; btn.textContent = 'Enviando…';
-    try {
-      var res = await fetch('/contact', { method: 'POST', credentials: 'same-origin', headers: headers, body: JSON.stringify(body) });
-      var data = await res.json().catch(function(){ return {}; });
-      if (res.ok) { show('Mensagem enviada! Respondemos no seu e-mail em breve.', true); e.target.reset(); }
-      else if (res.status === 429) { show('Muitas mensagens em pouco tempo. Tente mais tarde ou escreva pra contato@pigbankai.com.', false); }
-      else { show(strDetail(data) || 'Não foi possível enviar. Escreva pra contato@pigbankai.com.', false); }
-    } catch (err) { show('Erro de conexão. Tente de novo ou escreva pra contato@pigbankai.com.', false); }
-    finally { btn.disabled = false; btn.textContent = orig; }
-  });
-
-  // FAQ acordeão — perguntas = guias/dicas. Ao abrir o card, os blocos visuais
+// FAQ acordeão — perguntas = guias/dicas. Ao abrir o card, os blocos visuais
   // (gráficos, barras, metas) se animam — mesma mecânica do /blog (.g-anim + .in-view).
   (function () {
     var reduce = window.matchMedia && window.matchMedia("(prefers-reduced-motion: reduce)").matches;
@@ -222,8 +229,11 @@
       });
     });
   })();
+
 </script>
-  <script src="/nav-auth.js?v=7" defer></script>
-  <script src="/nav-burger.js?v=1" defer></script>
+<script src="/nav-auth.js?v=7" defer>
+</script>
+<script src="/nav-burger.js?v=1" defer>
+</script>
 </body>
 </html>

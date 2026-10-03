@@ -22,7 +22,7 @@ import os
 import threading
 import time
 from contextlib import contextmanager
-from datetime import datetime
+from datetime import datetime, timedelta
 from functools import lru_cache
 from typing import Any
 
@@ -122,6 +122,85 @@ SQL_EXECUTION_STATUS = (
     f"case when {SQL_RAW_AINDA_VALE} then upper(raw->>'executionStatus') end as execution_status"
 )
 
+# ── A coleta vencida (Onda 5, D1) ────────────────────────────────────────────
+# "Atualizando…" só é honesto enquanto a coleta da autorização atual pode estar
+# em curso. O sync de fundo morre sem deixar rastro quando o processo reinicia
+# (`_INFLIGHT` é memória), então sem prazo a tela girava para sempre.
+# 30 min = 3× os 10 min que o código já trata como anomalia entre o PATCH e o
+# webhook (`_SYNC_QUIET_MIN`, `pluggy_sync.py`); recalibrar com o p99 da Onda 8.
+PRAZO_COLETA_MIN = 30
+
+# Teto do "Atualizando…" (Fase 4 do app, PR 2): passado ele, o `updating` sai como
+# "Erro temporário" com detalhe próprio (`connection_ui_state`). 120 = a meta do
+# beta ("zero Atualizando… acima de 2 h"); acima de `JANELA_DEVICE_AUTH_MIN` + 5
+# (a janela do QR inteira cabe antes dele) e 4× `PRAZO_COLETA_MIN`, então a faixa
+# da D1 (30–120 min, "Está demorando…") continua existindo.
+TETO_ATUALIZANDO_MIN = 120
+
+# Vencida = sem sync desde a autorização atual E âncora fora do intervalo
+# `(now() - prazo, now() + 5 min]`. "Sem sync" é o MESMO predicado do `sem_sync`
+# de `connection_ui_state` (§0.7): só `reconnected_at`, nunca `created_at`, que
+# é relógio do Postgres contra o `last_sync_at` do Python — um app 1 s atrasado
+# no 1º sync daria "sem sync" aqui e "sincronizou" lá. Mesma âncora e mesmo teto do
+# `SQL_RAW_AINDA_VALE` (relógio do Python × `now()` do Postgres): um carimbo mais
+# de 5 min no futuro conta como vencido, senão um relógio adiantado seguraria o
+# "Atualizando…" pelo tamanho do adiantamento. Sem `health is null`: o job de
+# saúde grava `health` sem sincronizar, e é exatamente o caso do sync morto.
+# `connection_ui_state` lê o booleano e continua sem relógio.
+_SQL_SEM_SYNC = ("(last_sync_at is null or (reconnected_at is not null "
+                 "and last_sync_at < reconnected_at))")
+_SQL_AUTORIZACAO = "coalesce(reconnected_at, created_at)"
+
+
+def _fora_do_prazo(ancora: str, minutos: int) -> str:
+    """`ancora` fora de `(now() - minutos, now() + 5 min]`: os dois derivados."""
+    return (f"({ancora} <= now() - interval '{minutos} minutes' "
+            f"or {ancora} > now() + interval '5 minutes')")
+
+
+SQL_COLETA_VENCIDA = (
+    f"{_SQL_SEM_SYNC} and {_fora_do_prazo(_SQL_AUTORIZACAO, PRAZO_COLETA_MIN)} as coleta_vencida")
+
+# Estourada = "Atualizando…" há `TETO_ATUALIZANDO_MIN` ou mais. Sem sync: a mesma
+# âncora da autorização, decidida aqui. Com sync, o SQL devolve NULL e quem decide
+# é `aplica_teto_por_health`, em Python: a âncora mora no `health` (JSON).
+SQL_COLETA_ESTOURADA = (
+    f"case when {_SQL_SEM_SYNC} "
+    f"then coalesce({_fora_do_prazo(_SQL_AUTORIZACAO, TETO_ATUALIZANDO_MIN)}, false) "
+    "end as coleta_estourada")
+
+
+def aplica_teto_por_health(row: dict, agora: datetime | None = None) -> dict:
+    """Completa o `coleta_estourada` que o SQL deixou NULL (quem já sincronizou).
+
+    O "Atualizando…" é o item em coleta sem produto (`coletando_sem_info`), e a
+    âncora é `health.coletando_desde`, que `mesclar_health_em_coleta` herda entre
+    fotos — o `observed_at` sozinho é renovado a cada foto e nunca venceria. Foto
+    anterior a este campo cai no `observed_at` dela (o `coalesce` do SQL: só a
+    chave ausente ou JSON null cai). O parse é aqui, protegido, e não num
+    `::timestamptz`: texto ilegível numa linha derrubava a query inteira — e a da
+    retentativa é entre usuários. Ilegível, sem fuso (na âncora ou no `agora`) ou
+    sem `health` = sem âncora = False: o card gira como antes, nada levanta. Muta e
+    devolve `row`.
+    """
+    if row.get("coleta_estourada") is not None:
+        return row
+    health = row.get("health") if isinstance(row.get("health"), dict) else {}
+    ancora = health.get("coletando_desde")
+    if ancora is None:
+        ancora = health.get("observed_at")
+    try:
+        ancora = datetime.fromisoformat(ancora)
+    except (TypeError, ValueError):
+        ancora = None
+    agora = agora or datetime.now(_tz())
+    if ancora is None or ancora.tzinfo is None or agora.tzinfo is None:
+        row["coleta_estourada"] = False
+        return row
+    row["coleta_estourada"] = (ancora <= agora - timedelta(minutes=TETO_ATUALIZANDO_MIN)
+                               or ancora > agora + timedelta(minutes=5))
+    return row
+
 
 def janela_device_auth_min() -> int:
     """O único `%s` de `SQL_RAW_AINDA_VALE` / `SQL_EXECUTION_STATUS`.
@@ -156,6 +235,22 @@ class AmbiguousItemError(RuntimeError):
         self.connections = connections
 
 
+# As colunas da conexão lidas por quem decide com `connection_ui_state`: o sync
+# (`get_connections_by_item_id`) e a retentativa (`list_connections_para_retentar`).
+# Uma lista só (§0.7): o `%s` de `SQL_EXECUTION_STATUS` é `janela_device_auth_min()`.
+# `SQL_EXECUTION_STATUS`: sem ele, o toast do /refresh manda "Reautorize o banco"
+# na janela do QR (`_refresh_items_report` lê esta linha). `mark_sync_result`
+# recebe `health` como OPCIONAL, então um sync que falhe antes do `GET /items` não
+# grava saúde e cai aqui. Sem `pop` do lado de fora: estas linhas são internas
+# (nenhum consumidor as devolve cruas ao navegador).
+_COLUNAS_DA_CONEXAO = f"""id, user_id, provider, provider_item_id, status, institution_name,
+       last_sync_at, last_attempt_at, status_reason, health,
+       next_refresh_at, last_refresh_origin, reconnected_at,
+       {SQL_EXECUTION_STATUS},
+       {SQL_COLETA_VENCIDA},
+       {SQL_COLETA_ESTOURADA}"""
+
+
 def get_connections_by_item_id(item_id: str, provider: str = "pluggy", *,
                                budget_ms: int | None = None) -> list[dict]:
     """TODAS as conexões daquele item — sem `limit`, para que a ambiguidade apareça.
@@ -185,24 +280,14 @@ def get_connections_by_item_id(item_id: str, provider: str = "pluggy", *,
                 cur = _CursorComTeto(cur, budget_ms, t0)
             cur.execute(
                 f"""
-                select id, user_id, provider, provider_item_id, status, institution_name,
-                       last_sync_at, last_attempt_at, status_reason, health,
-                       next_refresh_at, last_refresh_origin, reconnected_at,
-                       -- Para o `connection_ui_state`: sem ele, o toast do
-                       -- /refresh manda "Reautorize o banco" na janela do QR
-                       -- (`_refresh_items_report` lê ESTA linha). `mark_sync_result`
-                       -- recebe `health` como OPCIONAL, então um sync que falhe
-                       -- antes do `GET /items` não grava saúde e cai aqui.
-                       -- Sem `pop` do lado de fora: estas linhas são internas
-                       -- (nenhum consumidor as devolve cruas ao navegador).
-                       {SQL_EXECUTION_STATUS}
+                select {_COLUNAS_DA_CONEXAO}
                 from open_finance_connections
                 where provider=%s and provider_item_id=%s
                 order by id
                 """,
                 (janela_device_auth_min(), provider, item),
             )
-            return [dict(r) for r in (cur.fetchall() or [])]
+            return [aplica_teto_por_health(dict(r)) for r in (cur.fetchall() or [])]
 
 
 def mark_sync_attempt(connection_id: int, *, origin: str = "sync") -> int:
@@ -239,6 +324,11 @@ def mark_sync_result(
     health: dict | None = None,
     at: datetime | None = None,
     reconnected_at_visto: Any = _SEM_CHECAGEM,
+    status_reason_visto: Any = _SEM_CHECAGEM,
+    geracao_vista: Any = _SEM_CHECAGEM,
+    motivos_substituiveis: Any = _SEM_CHECAGEM,
+    observacao_vista: Any = _SEM_CHECAGEM,
+    dono_unico: bool = False,
 ) -> int:
     """Resultado de um sync (ou do job de saúde, com ok=None).
 
@@ -265,6 +355,47 @@ def mark_sync_result(
     este carimbo. Nessa janela o espelho fica (o dado é real, só velho); o que se
     recusa é chamá-la de sucesso — e a própria rota de reconexão agenda um sync
     novo, então o âmbar é transitório.
+
+    `status_reason_visto`: o motivo que o JOB DE SAÚDE leu ao listar a linha. O
+    par que ele grava é decidido a partir desse motivo (manter/limpar, linha H de
+    `core/services/pluggy_health.py`), e o `GET /items` roda fora de qualquer lock:
+    um sync que gravou ou limpou o motivo nesse meio tempo seria desfeito por uma
+    decisão tomada sobre a leitura velha. Mesmo idioma: se o motivo mudou, a
+    linha inteira fica como está (0 linhas). Quem mudou o motivo tem informação
+    pelo menos tão nova: o sync grava a foto do item junto; quem não grava
+    (`_sync_item_contido`, webhook) deixa o `health` velho, e a reconexão o
+    zera — nos dois casos a linha continua elegível no próximo tique.
+
+    `geracao_vista`: o par `(reconnected_at, last_sync_at)` que a FALHA FINAL de
+    um sync leu quando o run começou (`marcar_leitura_falhou`). Mesmo idioma, na
+    linha inteira: se alguém sincronizou bem ou reconectou depois disso, a falha
+    é de um run velho e não grava nada (0 linhas) — sem isto um sync que falhou
+    tirava do verde um sync mais novo que deu certo (Onda 5, PR-B1). Não usa
+    `last_attempt_at`: o próprio run que falhou o empurra (`mark_sync_attempt`).
+    Também a usa a foto do run que falhou (`sync_pluggy_item`).
+
+    `motivos_substituiveis`: CAS por ESPÉCIE — só grava se o motivo ATUAL (vazio
+    conta como `""`) está na lista. A falha de um sync pergunta "o motivo atual é
+    algo que eu tenho autoridade para trocar?", e não "é o que eu li?": por valor,
+    o mesmo `no_accounts` observado de novo no meio passava, e o motivo limpo por
+    uma observação mais nova do item vivo era recusado (verde falso). As listas
+    moram em `core/services/pluggy_health.py` (`MOTIVOS_QUE_A_FALHA_SUBSTITUI`,
+    `MOTIVOS_QUE_A_FOTO_VIVA_SUBSTITUI`).
+
+    `observacao_vista`: o `health.observed_at` que o sync leu ao começar (None sem
+    `health`). Só para a foto do run que falhou depois do `GET /items`: se alguém
+    observou o item depois (job de saúde, 404, outro sync), a foto é mais velha e
+    não grava nada — senão um 404 do job seria desfeito pela foto do item vivo.
+
+    `dono_unico`: só grava se nenhuma OUTRA conexão tem o mesmo `(provider,
+    provider_item_id)` — o critério de `get_connections_by_item_id`, que decide a
+    ambiguidade (`AmbiguousItemError`). A falha do sync (F e O) grava pela linha
+    lida no começo do run; um segundo dono que aparece depois, sem exceção que o
+    prove (`sync_in_progress`, falha de leitura antes da releitura de posse), só é
+    visto pelo próprio `UPDATE`: atômico com a escrita, sem janela entre ler e
+    gravar (Codex #718). Custo: uma checagem pelo `uq_of_conn_provider_item`
+    (provider, provider_item_id), que num banco sem o índice é uma varredura da
+    tabela de conexões.
     """
     now = at or datetime.now(_tz())
     with get_conn() as conn:
@@ -303,6 +434,16 @@ def mark_sync_result(
                        updated_at = %s
                  where id=%s
                    and upper(coalesce(status,'')) not in {_TERMINAL}
+                   and (%s or status_reason is not distinct from %s)
+                   and (%s or (reconnected_at is not distinct from %s
+                               and last_sync_at is not distinct from %s))
+                   and (%s or coalesce(lower(status_reason),'') = any(%s::text[]))
+                   and (%s or health->>'observed_at' is not distinct from %s)
+                   and (not %s or not exists (
+                        select 1 from open_finance_connections o
+                         where o.provider = open_finance_connections.provider
+                           and o.provider_item_id = open_finance_connections.provider_item_id
+                           and o.id <> open_finance_connections.id))
                 """,
                 (
                     (str(status).upper() if status else None),
@@ -317,6 +458,15 @@ def mark_sync_result(
                     now,
                     now,
                     connection_id,
+                    status_reason_visto is _SEM_CHECAGEM,
+                    (None if status_reason_visto is _SEM_CHECAGEM else status_reason_visto),
+                    geracao_vista is _SEM_CHECAGEM,
+                    *((None, None) if geracao_vista is _SEM_CHECAGEM else geracao_vista),
+                    motivos_substituiveis is _SEM_CHECAGEM,
+                    ([] if motivos_substituiveis is _SEM_CHECAGEM else list(motivos_substituiveis)),
+                    observacao_vista is _SEM_CHECAGEM,
+                    (None if observacao_vista is _SEM_CHECAGEM else observacao_vista),
+                    dono_unico,
                 ),
             )
             updated = cur.rowcount
@@ -455,11 +605,56 @@ def list_connections_for_health_check(*, older_than_sec: int, limit: int) -> lis
             return [dict(r) for r in (cur.fetchall() or [])]
 
 
+def list_connections_para_retentar(*, id: int | None = None) -> list[dict]:
+    """Candidatas da retentativa do tique (Onda 5, PR-B2), da mais antiga tentativa
+    para a mais nova. Com `id`, só aquela linha: a rechecagem antes de agendar.
+
+    Só os filtros baratos ficam aqui; quem decide é `classe_de_retentativa`
+    (`core/services/of_retentativa.py`), em Python, porque "a Pluggy à frente" lê
+    datas cruas do provedor. Fora: terminal, cooldown (tentativa nos últimos
+    `PRAZO_COLETA_MIN`, que pode estar em curso) e item com dois donos (o sync
+    levanta `AmbiguousItemError` a cada tique, para sempre). Query de job, entre
+    usuários, como `list_connections_for_health_check`: nunca vai a uma rota.
+
+    ponytail: lê toda conexão fora do cooldown a cada tique (6 h); paginar se a
+    base passar de alguns milhares de conexões.
+    """
+    with get_conn() as conn:
+        with conn.cursor() as cur:
+            cur.execute(
+                f"""
+                select {_COLUNAS_DA_CONEXAO}
+                  from open_finance_connections c
+                 where provider='pluggy'
+                   and provider_item_id is not null
+                   and upper(coalesce(status,'')) not in {_TERMINAL}
+                   and (last_attempt_at is null
+                        or last_attempt_at <= now() - interval '{PRAZO_COLETA_MIN} minutes')
+                   and not exists (select 1 from open_finance_connections o
+                                    where o.provider = c.provider
+                                      and o.provider_item_id = c.provider_item_id
+                                      and o.id <> c.id)
+                   and (%s::bigint is null or id = %s)
+                 order by last_attempt_at nulls first, id
+                """,
+                (janela_device_auth_min(), id, id),
+            )
+            return [aplica_teto_por_health(dict(r)) for r in (cur.fetchall() or [])]
+
+
+# Item cuja linha de MAIOR `id` no registry (com ou sem dono) é `operator_delete`:
+# o operador já o apagou na Pluggy (`scripts/of_itens_operador.py`). Linha nova
+# depois (webhook, POST) tem `id` maior e o reabre. Predicado sobre o alias `r`.
+RESOLVIDO_PELO_OPERADOR = """
+   (select u.origin from open_finance_item_registry u
+     where u.provider = r.provider and u.provider_item_id = r.provider_item_id
+     order by u.id desc limit 1) = 'operator_delete'
+"""
+
 # Item visto no registry (o único rastro: o `GET /items` da Pluggy devolve 401)
-# que não tem NENHUMA conexão local. Uma fonte só, porque dois leitores precisam
-# enxergar exatamente o mesmo universo: o contador do painel de saúde abaixo e o
-# `scripts/adotar_items_of_orfaos.py`, que adota justamente esses items.
-ITEMS_SEM_CONEXAO = """
+# que não tem NENHUMA conexão local nem foi resolvido pelo operador. Quem lê é o
+# contador do painel de saúde abaixo e o diagnóstico do operador.
+ITEMS_SEM_CONEXAO = f"""
   from open_finance_item_registry r
  where r.provider_item_id is not null
    and not exists (
@@ -467,6 +662,7 @@ ITEMS_SEM_CONEXAO = """
         where c.provider = r.provider
           and c.provider_item_id = r.provider_item_id
    )
+   and not {RESOLVIDO_PELO_OPERADOR}
 """
 
 
@@ -492,9 +688,9 @@ def item_registry_origins(provider_item_id: str, *, provider: str = "pluggy",
         que era o buraco por onde a reentrega de `item/created` ressuscitava
         banco removido.
 
-    Quem precisa SEPARAR as três (nenhum leitor automático precisa; é a
-    recuperação por operador, fora desta PR) usa a regra de precedência escrita
-    no docstring de `mark_items_removed`. Os leitores daqui:
+    Quem precisa SEPARAR as três (nenhum leitor automático precisa; é o
+    operador) usa `db.open_finance_diagnostico.classifica_item`, onde a regra de
+    precedência está escrita. Os leitores daqui:
 
       • `_adota_item_orfao` — só adota item sem NENHUM dono no rastro (duplicata
         de `item/created`, entrega at-least-once, ressuscitava o removido), e a
@@ -502,8 +698,7 @@ def item_registry_origins(provider_item_id: str, *, provider: str = "pluggy",
         (`exceto_registro_id`, abaixo);
       • `POST /pluggy-item` — `'pluggy_item' in ...` = o NAVEGADOR já registrou
         este item, logo a conexão que existe não é a que o webhook acabou de
-        adotar (auditoria de reconexão);
-      • `scripts/adotar_items_of_orfaos.py` — o alvo do one-shot.
+        adotar (auditoria de reconexão).
 
     `exceto_registro_id` IGNORA uma linha do rastro pelo `id` — a que o próprio
     chamador acabou de gravar. É o que permite ao `_salva_item_sob_lock` refazer
@@ -559,9 +754,8 @@ def unregister_item(registro_id: int, user_id: int) -> int:
     continua sendo — o único caso que apaga é a linha que ESTA adoção gravou
     segundos atrás e não vai honrar, porque outra entrega ficou com o item. Sem
     isso o aborto era TERMINAL: rastro com dono e zero conexão recusa toda
-    retentativa (1ª guarda de `_adota_item_orfao`) e some do
-    `scripts/adotar_items_of_orfaos.py` (o filtro dele exclui rastro com dono),
-    e o usuário fica com 0 bancos sem saída pelo produto.
+    retentativa (1ª guarda de `_adota_item_orfao`), e o usuário fica com 0
+    bancos sem saída pelo produto.
 
     `user_id` no `where` não é decoração: é o isolamento por usuário do
     CLAUDE.md §0 aplicado a um DELETE que recebe um `id` cru.
@@ -615,6 +809,41 @@ def register_item(
     return new_id
 
 
+def pluggy_items_a_deletar(linhas) -> list[str]:
+    """Das linhas de `provider, provider_item_id, status`: quais items ainda
+    precisam de DELETE na Pluggy.
+
+    FONTE ÚNICA (CLAUDE.md §0.7) de um filtro que estava copiado palavra por
+    palavra em três lugares e ia para o quarto: o disconnect
+    (`db/open_finance.py`, `swept_out`), o reset e a exclusão de conta
+    (`db/privacy.py` — lá são DOIS: o `RETURNING` do delete e a reconsulta que
+    fecha a janela da cascata). Todos leem o MESMO formato de linha e alimentam o
+    MESMO `delete_pluggy_items_best_effort`.
+
+    `PAUSED` fica FORA: o item já foi deletado na Pluggy no vencimento do trial, e
+    é a mesma regra do `list_pluggy_item_ids`. É exatamente aqui que esta função
+    difere de `mark_items_removed`, que lê a mesma tupla e INCLUI `PAUSED` de
+    propósito — a marca é sobre a intenção do usuário, não sobre o item existir
+    lá (docstring dela, logo abaixo). Duas leituras da mesma tupla, uma regra
+    cada, cada uma num lugar só.
+
+    Ordenado e sem repetição: o chamador compara conjuntos (1º passe × 2º passe).
+
+    ASSIMETRIA DELIBERADA: `status` normaliza a caixa (`.upper()`) porque vem do
+    payload da Pluggy; `provider` compara IGUAL porque é literal nosso (os dois
+    únicos inserts, `db/open_finance.py:125` e `:770`, escrevem `'pluggy'`) e a
+    irmã SQL que alimenta o MESMO delete remoto compara do mesmo jeito
+    (`list_pluggy_item_ids`, `where provider='pluggy'`, :416). Normalizar só aqui
+    faria as duas leituras divergirem (§0.7). As regras estão presas caso a caso
+    em `tests/test_of_pluggy_items_a_deletar.py`.
+    """
+    return sorted({
+        r["provider_item_id"] for r in (linhas or [])
+        if r["provider"] == "pluggy" and r["provider_item_id"]
+        and str(r["status"] or "").upper() != "PAUSED"
+    })
+
+
 def mark_items_removed(cur, user_id: int, linhas, *, last_event: str) -> int:
     """Grava a marca da remoção DELIBERADA, no cursor de quem apagou a conexão.
 
@@ -638,37 +867,9 @@ def mark_items_removed(cur, user_id: int, linhas, *, last_event: str) -> int:
     na Pluggy — e o delete remoto do trial expiry é best-effort, então item pausado
     pode estar vivo lá e mandando evento.
 
-    PRECEDÊNCIA (a regra, escrita aqui porque é aqui que a linha nasce; nenhum
-    leitor de HOJE a usa — `item_registry_origins` trata as três origens com dono
-    igual, e é isso que recusa a adoção). O registry é log de APPEND: depois de
-    "conectou → removeu → reconectou" o item tem, em ordem de `id`,
-    `pluggy_item`, `removed`, `pluggy_item`. Para decidir o ESTADO de um item sem
-    conexão local, ordene as linhas com `user_id is not null` por `id` crescente
-    e olhe a ÚLTIMA:
-
-      • `origin='removed'`                                  → REMOVIDO pelo usuário;
-      • `pluggy_item`/`webhook_adopt` COM `removal_tracked`  → INTERROMPIDO (adoção
-        ou POST que não completou: a era já marca remoção, então a ausência de
-        `removed` é informação);
-      • `pluggy_item`/`webhook_adopt` SEM `removal_tracked`  → LEGADO AMBÍGUO (rastro
-        anterior à marca: não dá para saber);
-      • nenhuma linha com dono                              → NUNCA ATRIBUÍDO (adotável).
-
-    Por `id` e não por `created_at`: `now()` é o tempo de INÍCIO da transação,
-    empata entre duas escritas da mesma transação e pode inverter entre sessões
-    concorrentes; `id` é `bigserial`, alocado no INSERT.
-
-    LIMITE CONHECIDO da regra (declarado, não consertado): ordem de ALOCAÇÃO não
-    é ordem de COMMIT. O caso que importaria — disconnect × reconexão do mesmo
-    item — é serializado pelo `pluggy_items_lock`, porque o item está em
-    `list_pluggy_item_ids(user_id)` enquanto a conexão existe. SOBRA uma janela:
-    o `register_item` do `POST /pluggy-item` roda FORA do lock (em
-    `frontend/routes/open_finance.py`, logo DEPOIS de `_grava_reconexao`
-    devolver), então um `DELETE /open-finance/{uid}` que caia entre o commit da
-    conexão e esse insert deixa a última linha como `pluggy_item` com o banco
-    REMOVIDO — o item sai classificado "interrompido". Janela de ms e exige o
-    clique do usuário dentro dela; quem consumir a regra põe um humano item a
-    item, então o desfecho é revisável.
+    PRECEDÊNCIA: o registry é log de append, e o estado de um item sem conexão
+    sai da ÚLTIMA linha com dono em ordem de `id` — a regra inteira, e o limite
+    dela, estão no docstring de `db.open_finance_diagnostico.classifica_item`.
 
     Devolve quantas marcas gravou.
     """

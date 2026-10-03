@@ -110,7 +110,7 @@ const PAGINAS = [
   },
   {
     nome: "suporte",
-    url: "/suporte.html",
+    url: "/contato.html",
     rota: "**/contact",
     fallback: "Não foi possível enviar. Escreva pra contato@pigbankai.com.",
     frase: "Assunto muito longo.",

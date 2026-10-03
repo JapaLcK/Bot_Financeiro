@@ -70,6 +70,7 @@ export function SecaoControles() {
           onChangeText={(t) => setErroNome(t.length === 0)}
         />
         <Input rotulo="Desativado" desativado value="Não editável" />
+        <Input rotulo="Só leitura" icone="Envelope" somenteLeitura value="rsnmpf4yzj@privaterelay.appleid.com" />
       </View>
     </View>
   );

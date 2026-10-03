@@ -47,14 +47,18 @@ linha é **Leve**.
 | **Leve** | feature e tela comuns, correção de bug **que muda lógica**, refatoração, dependência, CI/ferramenta e configuração — tudo fora das áreas acima | `time-dev` com **uma** passada do Tester e Manager curto; o Arquiteto só é pulado quando a mudança já tem plano aprovado ou cabe num arquivo com um único comportamento possível |
 | **Direto** | texto, CSS pequeno, docs, código provisório, correção **sem mudança de lógica** (typo, nome, constante óbvia) | sem o time: teste do que mudou e `git diff` lido de ponta a ponta |
 
-**Experimento temporário (desde 2026-09-16).** Na faixa **Leve**, os PRs alternam
-com e sem o time, na ordem que `python scripts/medir_time_dev.py <PRs>` indicar em
-"próximo PR Leve" — passe **todos** os PRs marcados desde o início do experimento, não
-só os recentes: a alternância é contada só sobre a lista recebida. Sem o time: o próprio agente implementa,
-roda a suíte (skill `baseline-testes`) e lê o `git diff` inteiro, e grava
-`<!-- time-dev: grupo=sem faixa=Leve internos=0 bloqueantes=0 -->` no PR.
-**Completo continua sempre com o time.** O experimento termina com 10 PRs Leve em
-cada grupo; aí roda-se o script, o dono decide, e este bloco sai.
+**Medição do time.** Todo PR feito com o time, na Completo e na Leve, grava no corpo o
+marcador com os bugs provados de cada agente e quantos deles o Codex local não tinha
+apontado — formato e procedimento em `.claude/commands/time-dev.md`. Todo PR ou issue
+que conserta bug causado por um PR conhecido leva `Origem: #NNN` no corpo: é assim que
+o script conta o que escapou do time. Toda semana roda-se
+`python scripts/medir_time_dev.py --desde AAAA-MM-01`, com o 1º dia do mês corrente: é
+o acumulado do mês, que cresce a cada semana e atualiza os escapados das semanas
+anteriores. O relatório vai como comentário na issue "Medição do time-dev". A decisão
+do mês M roda no dia 15 de M+1, com `--desde` no 1º dia de M e `--ate` no último: aí a
+janela de escapados de todo PR de M já fechou, inclusive a dos mergeados no fim do mês.
+Se um agente fechar o mês sem nenhum bug exclusivo numa faixa, o dono decide se ele sai
+dessa faixa.
 
 O time existe para o §4 ("ataque antes de empurrar"): onde há dinheiro ou sessão ele
 pagou a conta várias vezes (PR #133, #384/#386, o logout no-op do #433). Onde o risco
@@ -251,8 +255,12 @@ Isso gerou dois apontamentos separados.
 
 ## 3. Testar e validar antes de empurrar
 
-**Nunca empurrar sem rodar a suíte.** Se ela morrer com `INTERNALERROR` no import,
-isso **não** é falha de teste — é ambiente, e não se lê como tal.
+**Nunca empurrar sem rodar os testes do que você mudou.** Na máquina, rode só os
+arquivos de teste da área tocada. **A suíte inteira roda no CI** de todo PR, e o CI
+verde é condição de merge (decisão do dono, 2026-09-30: várias sessões rodando a
+suíte inteira ao mesmo tempo levaram a carga da máquina a 280 e derrubaram o
+simulador de outra tarefa). Se o teste morrer com `INTERNALERROR` no import, isso
+**não** é falha de teste — é ambiente, e não se lê como tal.
 
 **Como rodar é assunto da skill `baseline-testes`, e só dela.** Invoque-a antes de
 qualquer `pytest` neste repositório: ela tem o interpretador certo, a única variável
@@ -265,7 +273,9 @@ Playwright). O `package.json` da raiz existe só para isso e segue **sem script
 ilhas React), que é projeto npm separado, tem artefatos commitados e gate próprio
 no CI — `docs/CLAUDE.md`, "Decisões tomadas". Rodar a suíte não o invoca.
 
-Não use o CI como primeiro teste — ele é a confirmação, não a descoberta.
+O CI não substitui rodar os testes da área: ele mede o resto (a suíte inteira, com o
+`requirements.txt` de verdade). **Leia o resultado dele** antes de dizer que está
+pronto ou de pedir revisão (§7).
 
 **Antes de afirmar que algo "não existe", confirme contra qual árvore.** Um branch
 atrasado em relação à `main` mente com toda a confiança do mundo: o `grep` não acha o
@@ -284,8 +294,9 @@ conferir `main` sem trocar de branch. Vale o mesmo para revisores automáticos: 
 lê a árvore **do branch**, então um achado de "isso não existe" num branch atrasado
 pode ser artefato do atraso, não um defeito. Cheque antes de aceitar.
 
-**Compare com a baseline, não com zero.** Rode a suíte **antes** de mexer e guarde a
-**lista de nomes** que falharam — nunca a contagem. Falha que já existia não é
+**Compare com a baseline, não com zero.** Rode os testes da área **antes** de mexer e
+guarde a **lista de nomes** que falharam — nunca a contagem. No CI, a baseline é o
+último run da `main`. Falha que já existia não é
 regressão sua; falha nova é. Contagem igual não prova ausência de regressão: um teste
 novo mascara um quebrado. Como ler o resultado, quando a baseline deixa de valer e
 como isolar uma falha: skill `baseline-testes`.
@@ -432,8 +443,15 @@ do push, não depois do apontamento — é a diferença entre revisar e terceiri
 E **nunca sugira pular a revisão**. Parece economia de tempo; o efeito real é parar de
 olhar para nada ser encontrado.
 
-**Merge só com autorização explícita do dono do repositório.** Aprovação do Codex e
-CI verde deixam o PR *pronto*; não autorizam o merge. Avise e pergunte.
+**Todo PR que você abrir, você acompanha até o fim — e pode mergear (autorização
+permanente do dono, desde 2026-10-01).** Ao abrir o PR: peça `@codex review` e fique de
+olho no Codex e no CI. Apontamento ou check vermelho: trate como acima (hipótese a
+verificar; corrija o que procede, responda na thread, peça `@codex review` de novo) e
+repita até o Codex liberar. **Pode mergear** quando, no head atual, o Codex liberou (👍
+ou "Didn't find any major issues") e todos os checks estão verdes, sem thread aberta.
+Se algo travar (Codex não responde, CI vermelho que não é seu, conflito que você não
+resolve), não force: avise o dono. Depois do merge, avise o dono e apague a branch pelas
+regras abaixo. Isto não autoriza pular a revisão (§4) nem mergear PR de outra pessoa.
 
 **Depois do merge, apague a branch — se estiver limpa e sem uso.** Antes de apagar,
 confira: o PR está `MERGED` (`gh pr view <n> --json state`); `git status --short` vazio;

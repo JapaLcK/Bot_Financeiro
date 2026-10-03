@@ -19,7 +19,7 @@ import { readFile } from "node:fs/promises";
 import { fileURLToPath } from "node:url";
 import { dirname, join } from "node:path";
 import {
-  abrirBrowser, fecharBrowser, DASHBOARD_JS, LABELS_JS, IDS,
+  abrirBrowser, fecharBrowser, DASHBOARD_JS, LABELS_JS, SIDENAV_GROUPS_JS, IDS,
 } from "./_dashboard_loader.mjs";
 
 const DASHBOARD_HTML = join(
@@ -53,6 +53,7 @@ async function paginaComSidenav(estado = null) {
     );
   }
   await page.addScriptTag({ path: LABELS_JS });
+  await page.addScriptTag({ path: SIDENAV_GROUPS_JS });
   await page.addScriptTag({ path: DASHBOARD_JS });
   assert.deepEqual(errs, [], "dashboard.js não executou até o fim");
   return page;

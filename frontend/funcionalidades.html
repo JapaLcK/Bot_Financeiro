@@ -1,140 +1,403 @@
-<!DOCTYPE html>
+<!doctype html>
 <html lang="pt-BR">
 <head>
-<meta charset="UTF-8" />
+<meta charset="utf-8" />
 <meta name="viewport" content="width=device-width, initial-scale=1.0" />
 <title>Funcionalidades · PigBank</title>
 <meta name="description" content="Conheça os recursos do PigBank: registro por conversa, categorização automática, caixinhas, cartões, alertas e segurança, tudo no WhatsApp." />
 <link rel="canonical" href="https://pigbankai.com/funcionalidades" />
+<meta property="og:type" content="website" />
+<meta property="og:title" content="Funcionalidades · PigBank" />
+<meta property="og:description" content="Conheça os recursos do PigBank: registro por conversa, categorização automática, caixinhas, cartões, alertas e segurança, tudo no WhatsApp." />
+<meta property="og:url" content="https://pigbankai.com/funcionalidades" />
+<meta property="og:image" content="https://pigbankai.com/brand/landing-piggy-cta.webp?v=1" />
+<meta name="theme-color" content="#111111" />
 <link rel="icon" type="image/png" href="/favicon.png?v=3" />
 <link rel="apple-touch-icon" href="/brand/apple-touch-icon.png?v=3" />
-<meta name="theme-color" content="#0c0c0d" />
+<link rel="preload" href="/fonts/Inter-Variable.woff2?v=5059ef2a9db0" as="font" type="font/woff2" crossorigin />
 <link rel="stylesheet" href="/brand.css?v=4" />
 <link rel="stylesheet" href="/phosphor.css?v=1" />
-<link rel="stylesheet" href="/site.css?v=4" />
-<script src="/safe-area.js?v=1"></script>
+<link rel="stylesheet" href="/site.css?v=5" />
+<link rel="stylesheet" href="/site-redesign.css?v=1" />
+<link rel="stylesheet" href="/site-marketing.css?v=1" />
+<script src="/safe-area.js?v=1">
+</script>
 </head>
-<body>
-<div class="glow"></div>
+<body id="topo" class="lp lp-marketing lp-features-page">
+<a class="lp-skip-link" href="#conteudo">Pular para o conteúdo</a>
+<nav aria-label="Navegação principal" class="nav">
+<a aria-label="PigBank, início" class="nav-logo" href="/">
+<img alt="PigBank" class="logo-full" height="42" src="/brand/landing-logo.webp?v=1" width="142"/>
+</a>
+<div class="nav-links">
+<a href="/como-funciona">Como funciona</a>
+<a href="/funcionalidades">Funcionalidades</a>
+<a href="/funcionalidades#open-finance">Open Finance</a>
+<a href="/whatsapp">WhatsApp</a>
+<a href="/agents">Agentes</a>
+<a href="/precos">Planos</a>
+</div>
+<div class="nav-right">
+<a class="link-entrar" href="/login">Entrar</a>
+<a class="btn btn-primary" href="/cadastro">Criar conta</a>
+</div>
+</nav>
+<main id="conteudo">
+<section class="lp-features-intro lp-section-light">
+<div class="lp-shell">
+<div class="lp-features-intro-grid">
+<div>
+<p class="lp-eyebrow">Funcionalidades</p>
+<h1>Sua rotina financeira.<br/>Com tudo no lugar<span class="lp-pink-dot">.</span>
+</h1>
+</div>
+<p class="lp-lead">Do gasto que você acabou de fazer à visão do mês inteiro. Conheça as ferramentas para organizar, acompanhar e entender sua grana.</p>
+</div>
+<nav aria-label="Explore as funcionalidades" class="lp-features-jumps">
+<a href="#registrar">Registrar</a>
+<a href="#organizar">Organizar</a>
+<a href="#open-finance">Conectar</a>
+<a href="#acompanhar">Acompanhar</a>
+</nav>
+</div>
+</section>
+<section aria-labelledby="register-title" class="lp-feature-conversation lp-section-blush" id="registrar">
+<div class="lp-shell lp-feature-split">
+<div class="lp-feature-copy">
+<p class="lp-eyebrow">01 · Registrar</p>
+<h2 id="register-title">Aconteceu no dia.<br/>Virou uma mensagem.</h2>
+<p class="lp-lead">Envie um texto, áudio ou foto de comprovante pelo WhatsApp. O Piggy interpreta as informações e transforma a conversa em registros financeiros.</p>
+<ul class="lp-feature-format-list">
+<li>
+<i aria-hidden="true" class="ph ph-chat-circle">
+</i>Texto</li>
+<li>
+<i aria-hidden="true" class="ph ph-microphone">
+</i>Áudio</li>
+<li>
+<i aria-hidden="true" class="ph ph-camera">
+</i>Foto</li>
+</ul>
+<a class="lp-text-link" href="/whatsapp">Veja como usar no WhatsApp</a>
+</div>
+<div class="lp-feature-chat-demo">
+<div class="lp-feature-chat-message">
+<span>gastei 32 no almoço</span>
+<small>12:04</small>
+</div>
+<div class="lp-feature-record">
+<div class="lp-feature-record-heading">
+<img alt="" height="55" src="/brand/landing-icon.webp?v=1" width="52"/>
+<strong>Registrado!</strong>
+<span aria-hidden="true" class="lp-check">✓</span>
+</div>
+<dl>
+<div>
+<dt>Descrição</dt>
+<dd>Almoço</dd>
+</div>
+<div>
+<dt>Categoria</dt>
+<dd>Alimentação</dd>
+</div>
+<div>
+<dt>Valor</dt>
+<dd>R$ 32,00</dd>
+</div>
+</dl>
+</div>
+<p class="lp-feature-demo-caption">Exemplo ilustrativo de registro.</p>
+</div>
+</div>
+</section>
+<section aria-labelledby="organize-title" class="lp-feature-organize lp-section-light" id="organizar">
+<div class="lp-shell">
+<div class="lp-feature-section-heading">
+<div>
+<p class="lp-eyebrow">02 · Organizar</p>
+<h2 id="organize-title">Cada parte da sua grana<br/>tem o seu lugar.</h2>
+</div>
+<p class="lp-lead">Categorias, cartões, metas e limites ajudam você a dar contexto a cada lançamento.</p>
+</div>
+<div class="lp-feature-card-grid">
+<article class="lp-capability-card">
+<div class="lp-capability-heading">
+<i aria-hidden="true" class="ph ph-chart-bar">
+</i>
+<h3>Categorização automática</h3>
+</div>
+<p>A IA identifica a categoria dos gastos para você acompanhar onde o dinheiro está sendo usado.</p>
+<div class="lp-capability-example">
+<span class="lp-example-label">Por exemplo</span>
+<p>“gastei 89 na farmácia”</p>
+<div class="lp-category-result">
+<span>Farmácia</span>
+<span>Saúde · R$ 89,00</span>
+</div>
+</div>
+</article>
+<article class="lp-capability-card">
+<div class="lp-capability-heading">
+<i aria-hidden="true" class="ph ph-credit-card">
+</i>
+<h3>Cartões e faturas</h3>
+</div>
+<p>Acompanhe limites, faturas abertas e compras parceladas dos seus cartões em uma visão organizada.</p>
+<div class="lp-capability-example">
+<span class="lp-example-label">Você pode pedir</span>
+<p>“minha fatura do Nubank”</p>
+<div class="lp-capability-tags">
+<span>Fatura</span>
+<span>Limite</span>
+<span>Parcelas</span>
+</div>
+</div>
+</article>
+<article class="lp-capability-card">
+<div class="lp-capability-heading">
+<i aria-hidden="true" class="ph ph-piggy-bank">
+</i>
+<h3>Caixinhas e metas</h3>
+</div>
+<p>Organize valores por objetivo e acompanhe o progresso de cada meta, como uma viagem ou sua reserva.</p>
+<div class="lp-capability-example">
+<span class="lp-example-label">Exemplo de acompanhamento</span>
+<div class="lp-feature-goal-label">
+<strong>Viagem</strong>
+<span>R$ 600 de R$ 2.000</span>
+</div>
+<div aria-label="Exemplo: meta Viagem com 30% registrados" class="lp-feature-meter" role="img">
+<span style="width:30%">
+</span>
+</div>
+<p class="lp-example-note">As caixinhas organizam registros. O PigBank não guarda nem movimenta seu dinheiro.</p>
+</div>
+</article>
+<article class="lp-capability-card">
+<div class="lp-capability-heading">
+<i aria-hidden="true" class="ph ph-target">
+</i>
+<h3>Orçamentos por categoria</h3>
+</div>
+<p>Defina quanto pretende gastar em cada categoria e acompanhe seu orçamento ao longo do mês.</p>
+<div class="lp-capability-example">
+<span class="lp-example-label">Você pode pedir</span>
+<p>“define orçamento de 500 em lazer”</p>
+<div class="lp-feature-budget">
+<span>Lazer</span>
+<strong>R$ 500 / mês</strong>
+</div>
+</div>
+</article>
+</div>
+</div>
+</section>
+<section aria-labelledby="connect-title" class="lp-feature-connect lp-section-dark" id="open-finance">
+<div class="lp-shell lp-feature-split">
+<div class="lp-feature-copy">
+<p class="lp-eyebrow">03 · Conectar</p>
+<h2 id="connect-title">Suas contas.<br/>Uma visão mais completa.</h2>
+<p class="lp-lead">Conecte seus bancos via Open Finance para acompanhar saldos e transações no PigBank, com sua autorização.</p>
+<ul class="lp-feature-connect-list">
+<li>
+<i aria-hidden="true" class="ph ph-lock">
+</i>Acesso somente para leitura</li>
+<li>
+<i aria-hidden="true" class="ph ph-user">
+</i>Você autoriza a conexão</li>
+<li>
+<i aria-hidden="true" class="ph ph-gear">
+</i>Você pode revogar o acesso</li>
+</ul>
+<a class="lp-text-link lp-pink-link" href="/precos">Ver conexões de cada plano</a>
+</div>
+<div class="lp-feature-connections">
+<div class="lp-connections-heading">
+<img alt="" height="55" src="/brand/landing-icon.webp?v=1" width="52"/>
+<div>
+<strong>Contas conectadas</strong>
+<span>Dados reunidos no seu painel</span>
+</div>
+</div>
+<div class="lp-connected-example">
+<i aria-hidden="true" class="ph ph-bank">
+</i>
+<div>
+<strong>Conta corrente</strong>
+<span>Saldo e transações</span>
+</div>
+<span class="lp-connection-type">Leitura</span>
+</div>
+<div class="lp-connected-example">
+<i aria-hidden="true" class="ph ph-credit-card">
+</i>
+<div>
+<strong>Cartão de crédito</strong>
+<span>Dados disponíveis na conexão</span>
+</div>
+<span class="lp-connection-type">Leitura</span>
+</div>
+<div class="lp-connections-consent">
+<i aria-hidden="true" class="ph ph-lock">
+</i>
+<p>O PigBank não faz pagamentos<br/>nem transferências por você.</p>
+</div>
+<p class="lp-feature-demo-caption">Representação ilustrativa. Disponibilidade dos dados conforme a instituição.</p>
+</div>
+</div>
+</section>
+<section aria-labelledby="follow-title" class="lp-feature-follow lp-section-light" id="acompanhar">
+<div class="lp-shell">
+<div class="lp-feature-section-heading">
+<div>
+<p class="lp-eyebrow">04 · Acompanhar</p>
+<h2 id="follow-title">Entenda o mês.<br/>Planeje os próximos passos.</h2>
+</div>
+<p class="lp-lead">Consulte resumos pelo WhatsApp e explore o painel no navegador para enxergar suas finanças por diferentes ângulos.</p>
+</div>
+<div class="lp-feature-insight-grid">
+<article class="lp-feature-summary">
+<i aria-hidden="true" class="ph ph-chart-bar">
+</i>
+<h3>Resumos e relatórios</h3>
+<p>Veja entradas, saídas, gastos por categoria e a comparação entre períodos.</p>
+<div class="lp-summary-request">
+<span>Experimente pedir</span>
+<strong>“resumo mensal”</strong>
+</div>
+<div class="lp-summary-fields">
+<span>Entradas</span>
+<span>Saídas</span>
+<span>Saldo</span>
+</div>
+</article>
+<article class="lp-feature-forecast">
+<span class="lp-feature-plan-label">No plano Pro</span>
+<h3>Previsão de saldo</h3>
+<p>Consulte projeções de saldo para os próximos 30, 60 e 90 dias e use essa visão no seu planejamento.</p>
+<div class="lp-forecast-horizons">
+<div>
+<strong>30</strong>
+<span>dias</span>
+</div>
+<div>
+<strong>60</strong>
+<span>dias</span>
+</div>
+<div>
+<strong>90</strong>
+<span>dias</span>
+</div>
+</div>
+<p class="lp-forecast-note">Projeções são estimativas a partir dos dados disponíveis.</p>
+</article>
+</div>
+<div class="lp-feature-extras">
+<article>
+<i aria-hidden="true" class="ph ph-file-text">
+</i>
+<div>
+<h3>Importação e exportação</h3>
+<p>Traga dados de extratos e exporte seus registros.</p>
+</div>
+</article>
+<article>
+<i aria-hidden="true" class="ph ph-receipt">
+</i>
+<div>
+<h3>Recorrências e boletos</h3>
+<p>Acompanhe gastos recorrentes e vencimentos.</p>
+</div>
+</article>
+<article>
+<i aria-hidden="true" class="ph ph-briefcase">
+</i>
+<div>
+<h3>Investimentos no painel</h3>
+<p>Acompanhe as informações da sua carteira.</p>
+</div>
+</article>
+</div>
+</div>
+</section>
+<section aria-labelledby="feature-agents-title" class="lp-feature-agents lp-section-dark">
+<div class="lp-shell lp-feature-agents-grid">
+<div>
+<p class="lp-eyebrow">Nos planos Plus e Pro</p>
+<h2 id="feature-agents-title">Um time de olhares<br/>para os detalhes.</h2>
+<p class="lp-lead">Os agentes acompanham gastos, boletos, recorrências e outros aspectos das suas finanças. Escolha quais ficam ativos de acordo com a energia do seu plano.</p>
+<a class="lp-text-link lp-pink-link" href="/agents">Conhecer os sete agentes</a>
+</div>
+<div class="lp-feature-agents-art">
+<img alt="Os agentes Xerife, Carteiro e Detetive, em estilo cartoon" height="600" loading="lazy" src="/brand/landing-agents-cartoon.webp?v=1" width="1800"/>
+<div class="lp-feature-agent-labels">
+<span>Xerife</span>
+<span>Carteiro</span>
+<span>Detetive</span>
+</div>
+<p>Alertas de gastos fora do padrão fazem parte dos agentes.</p>
+</div>
+</div>
+</section>
+<section aria-labelledby="privacy-title" class="lp-feature-privacy lp-section-light">
+<div class="lp-shell lp-feature-privacy-grid">
+<div class="lp-lock-tile">
+<i aria-hidden="true" class="ph ph-lock">
+</i>
+</div>
+<div>
+<h2 id="privacy-title">Seus dados, com cuidado.<br/>Seu dinheiro, sob seu controle.</h2>
+<p>Seus dados sensíveis são cifrados. O PigBank é uma ferramenta de organização financeira: não é banco nem corretora e não guarda, transfere ou movimenta seu dinheiro.</p>
+<a class="lp-text-link" href="/privacy">Leia a Política de Privacidade</a>
+</div>
+</div>
+</section>
+<section class="lp-feature-end lp-section-blush">
+<div class="lp-shell">
+<div>
+<h2>Escolha como começar.</h2>
+<p>Compare os planos para ver os limites de mensagens, histórico, conexões e agentes.</p>
+</div>
+<div class="lp-actions">
+<a class="lp-btn lp-btn-dark" href="/precos">Ver planos</a>
+<a class="lp-text-link" href="/cadastro">Criar minha conta</a>
+</div>
+</div>
+</section>
+</main>
+<footer class="lp-footer lp-section-dark">
+<div class="lp-shell">
+<div class="lp-footer-grid">
+<div class="lp-footer-brand">
+<a aria-label="PigBank, voltar ao início" class="lp-brand" href="#topo">
+<img alt="PigBank" height="42" loading="lazy" src="/brand/landing-logo.webp?v=1" width="142"/>
+</a>
+<p>Clareza pra suas contas.<br/>Espaço pra sua vida.</p>
+</div>
+<nav aria-label="Produto">
+<h3>Produto</h3>
+<a href="/whatsapp">WhatsApp</a>
+<a href="/funcionalidades">Funcionalidades</a>
+<a href="/agents">Agentes</a>
+<a href="/precos">Planos</a>
+</nav>
+<nav aria-label="Ajuda">
+<h3>Ajuda</h3>
+<a href="/suporte">Suporte</a>
+<a href="/privacy">Privacidade</a>
+<a href="/termos">Termos de uso</a>
+</nav>
+</div>
+<div class="lp-footer-bottom">
+<p>© 2026 PigBank</p>
+<a href="#topo">De volta ao topo</a>
+</div>
+</div>
+</footer>
 
-  <nav class="nav">
-    <a class="nav-logo" href="/"><img class="logo-full" src="/brand/logo.webp?v=1" alt="PigBank" /></a>
-    <div class="nav-links">
-      <a href="/funcionalidades" class="active">Funcionalidades</a>
-      <a href="/como-funciona">Como funciona</a>
-      <a href="/precos">Planos</a>
-      <a href="/whatsapp">WhatsApp</a>
-      <a href="/agents">Agentes</a>
-      
-    </div>
-    <div class="nav-right">
-      <a class="link-entrar" href="/login">Entrar</a>
-      <a class="btn btn-primary" href="/cadastro">Criar conta</a>
-    </div>
-  </nav>
-
-  <div class="wrap">
-
-    <section class="section">
-      <div class="section-head">
-        <h1>Tudo o que a Piggy faz</h1>
-        <p>A home mostra o que a Piggy faz. Aqui está como pedir cada uma — do jeito que a frase sairia numa conversa.</p>
-      </div>
-
-      <div class="section-head" style="margin-bottom:30px">
-        <h2>Cada recurso, e a frase<br>que faz ele acontecer</h2>
-      </div>
-
-      <div class="grid-3">
-        <div class="card feature-card">
-          <div class="icon-box"><i class="ph ph-chat-circle" aria-hidden="true"></i></div>
-          <h3>Registro por conversa</h3>
-          <p>Fale como você fala. A IA entende, categoriza e registra o gasto na hora, em segundos.</p>
-          <span class="phrase cmd">gastei 32 no almoço</span>
-        </div>
-        <div class="card feature-card">
-          <div class="icon-box neon"><i class="ph ph-tag" aria-hidden="true"></i></div>
-          <h3>Categorização automática</h3>
-          <p>Cada gasto cai na categoria certa sozinho. Você não precisa marcar nada manualmente.</p>
-          <span class="phrase cmd">gastei 89 na farmácia</span>
-        </div>
-        <div class="card feature-card">
-          <div class="icon-box"><i class="ph ph-piggy-bank" aria-hidden="true"></i></div>
-          <h3>Caixinhas & metas</h3>
-          <p>Separe dinheiro por objetivo e acompanhe o progresso de cada meta que você criar.</p>
-          <span class="phrase cmd">guarda 300 na caixinha Viagem</span>
-        </div>
-        <div class="card feature-card">
-          <div class="icon-box neon"><i class="ph ph-credit-card" aria-hidden="true"></i></div>
-          <h3>Cartões & faturas</h3>
-          <p>Limite, fatura aberta e parcelamentos de todos os seus cartões num lugar só.</p>
-          <span class="phrase cmd">minha fatura do Nubank</span>
-        </div>
-        <div class="card feature-card">
-          <div class="icon-box"><i class="ph ph-bell" aria-hidden="true"></i></div>
-          <h3>Orçamentos e alertas</h3>
-          <p>Você põe o limite da categoria; a Piggy avisa quando o gasto foge do padrão ou o orçamento aperta.</p>
-          <span class="phrase cmd">define orçamento de 500 em lazer</span>
-        </div>
-        <div class="card feature-card">
-          <div class="icon-box neon"><i class="ph ph-chart-bar" aria-hidden="true"></i></div>
-          <h3>Resumos e relatórios</h3>
-          <p>Onde o dinheiro foi, o fechamento do mês e a comparação com o anterior, sem abrir planilha.</p>
-          <span class="phrase cmd">resumo mensal</span>
-        </div>
-      </div>
-
-      <!-- Segurança em bloco próprio: era uma oração subordinada no subtítulo
-           do CTA, a única menção do assunto na página. Copy igual à do FAQ da
-           home, que é a fonte dessa resposta. -->
-      <div class="card sec-note">
-        <div class="icon-box"><i class="ph ph-lock-key" aria-hidden="true"></i></div>
-        <div>
-          <h3>Segurança &amp; privacidade</h3>
-          <p>Seus dados sensíveis são cifrados e o controle das informações continua sendo seu. A PigBank não é banco nem corretora: <strong>nunca movimenta, transfere ou guarda</strong> o seu dinheiro. Se você conectar um banco, é via Open Finance oficial, <strong>só de leitura</strong> e autorizado por você — e você revoga o acesso quando quiser.</p>
-        </div>
-      </div>
-
-      <div class="cta-band">
-        <h2>Crie a conta e mande a primeira frase</h2>
-        <p>São frases reais, do jeito que você digitaria. A conta leva alguns segundos; daí em diante é tudo pelo WhatsApp.</p>
-        <a class="btn btn-primary btn-lg" href="/cadastro">Começar agora <i class="ph ph-arrow-right" aria-hidden="true"></i></a>
-      </div>
-    </section>
-
-  </div>
-
-  <footer class="footer">
-    <div class="wrap footer-inner">
-      <div class="footer-brand">
-        <a class="nav-logo" href="/"><img class="logo-icon" src="/brand/icon.png?v=2" alt="" /> <span>PigBank</span></a>
-        <p>Seu dinheiro, suas regras, direto no WhatsApp, com a IA da Piggy.</p>
-      </div>
-      <div class="footer-cols">
-        <div class="footer-col"><span class="footer-title">Navegue</span>
-          <a href="/funcionalidades">Funcionalidades</a>
-          <a href="/como-funciona">Como funciona</a>
-          <a href="/precos">Planos</a>
-          <a href="/agents">Agentes</a>
-          <a href="/blog">Blog</a>
-          
-        </div>
-        <div class="footer-col"><span class="footer-title">Produto</span>
-          <a href="/whatsapp">WhatsApp</a>
-          <a href="/comandos">O que pedir</a>
-          <a href="/suporte">Suporte</a>
-        </div>
-        <div class="footer-col"><span class="footer-title">Institucional</span>
-          <a href="/termos">Termos de Uso</a>
-          <a href="/privacy">Privacidade</a>
-          <a href="mailto:contato@pigbankai.com">Contato</a>
-        </div>
-      </div>
-    </div>
-    <p class="footer-copy">© 2026 PigBank · Feito com <i class="ph ph-piggy-bank" aria-hidden="true"></i></p>
-  </footer>
-
-  <script src="/nav-auth.js?v=7" defer></script>
-  <script src="/nav-burger.js?v=1" defer></script>
+<script src="/nav-auth.js?v=7" defer>
+</script>
+<script src="/nav-burger.js?v=1" defer>
+</script>
 </body>
 </html>

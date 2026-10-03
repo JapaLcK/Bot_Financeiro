@@ -7,7 +7,7 @@ Bot de notícias financeiras (curadoria / link-out). Roda 1x a cada ~12h:
   2. Pra cada item novo (URL ainda não vista), manda título + snippet pro
      gpt-4o-mini, que atua como EDITOR: descarta o que não é financeiro
      (política, esporte, entretenimento) e gera um resumo ORIGINAL curto no
-     tom da Piggy + categoria + emoji.
+     tom do Piggy + categoria + emoji.
   3. Grava em `news_posts`. O card no /blog leva o usuário pra ler na fonte.
 
 IMPORTANTE (jurídico): nunca guardamos o corpo do artigo — só um resumo
@@ -173,7 +173,7 @@ def _fetch_feed(source: str, url: str) -> list[dict]:
 # ─── LLM: editor + resumidor ──────────────────────────────────────────────────
 
 _SYSTEM_PROMPT = (
-    "Você é a Piggy, editora de finanças do PigBank. Recebe o título e um trecho "
+    "Você é o Piggy, editor de finanças do PigBank. Recebe o título e um trecho "
     "de uma notícia e decide se ela interessa a quem cuida das próprias finanças e "
     "investimentos no Brasil.\n\n"
     "ACEITE (relevante=true): mercado, investimentos, economia, câmbio, juros, "

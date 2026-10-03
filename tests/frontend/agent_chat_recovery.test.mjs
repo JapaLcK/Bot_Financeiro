@@ -8,10 +8,18 @@ test('envio mostra bolha do agente em andamento e substitui pelo conteúdo da re
   try {
     await page.fill('#agent-chat-input', 'Há alguma cobrança duplicada?');
     await page.click('#agent-chat-send');
+    const liveStatus = page.locator('#agent-chat-panel > [data-slot="message-status"]');
+    const liveStatusNode = await liveStatus.elementHandle();
+    assert.equal(await liveStatus.count(), 1);
+    assert.equal(await liveStatus.textContent(), 'Detetive está preparando a resposta');
+    assert.ok(await page.locator('.agent-chat-assistant').evaluate(el => el.getAnimations().length > 0));
     await page.locator('#agent-chat-panel').screenshot({ path: join(screenshots, 'chat-pendente.png') });
     assert.equal(await page.locator('.agent-chat-assistant[data-state="pending"]').count(), 1);
     assert.equal(await page.locator('.agent-chat-user').count(), 1);
+    assert.equal(await page.locator('.agent-chat-assistant [data-slot="message-footer"] time').count(), 0);
     assert.equal(await page.isDisabled('#agent-chat-send'), true);
+    const questionTime = await page.locator('.agent-chat-user time').getAttribute('datetime');
+    await page.waitForTimeout(20);
     release();
     await page.waitForFunction(() => !document.getElementById('agent-chat-input').disabled);
     const bubble = page.locator('.agent-chat-assistant[data-state="complete"]');
@@ -20,6 +28,10 @@ test('envio mostra bolha do agente em andamento e substitui pelo conteúdo da re
     assert.equal(style.background, 'rgba(0, 0, 0, 0)');
     assert.equal(style.radius, '0px');
     assert.equal(await bubble.locator('[data-slot="message-footer"] time').count(), 1);
+    const replyTime = await bubble.locator('time').getAttribute('datetime');
+    assert.ok(Date.parse(replyTime) > Date.parse(questionTime), JSON.stringify({ questionTime, replyTime }));
+    assert.equal(await liveStatus.evaluate((node, original) => node === original, liveStatusNode), true);
+    assert.equal(await liveStatus.textContent(), 'Resposta pronta');
     assert.equal(await page.locator('.agent-chat-message').count(), 2);
   } finally { release(); await page.close(); }
 });

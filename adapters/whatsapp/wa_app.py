@@ -26,6 +26,7 @@ from core.reports.reports_daily import (
     filtrar_por_acesso,
 )
 from core.secure_compare import constant_time_eq
+from core.services.recurring_charger import bill_reminder_hour
 from db import (
     claim_daily_report_send,
     claim_weekly_report_send,
@@ -544,12 +545,14 @@ def _bill_reminder_tick() -> None:
         return  # dormente: template Meta ainda não configurado
 
     now = now_tz()
-    send_hour = int(os.getenv("WA_BILL_REMINDER_HOUR", "9") or 9)
-    if now.hour < send_hour:
+    if now.hour < bill_reminder_hour():
         return  # manda de manhã (>= hora configurada), 1x/dia por conta
 
     today = now.date()
-    days_before = int(os.getenv("WA_BILL_REMINDER_DAYS_BEFORE", "3") or 3)
+    try:
+        days_before = int(os.getenv("WA_BILL_REMINDER_DAYS_BEFORE", "3") or 3)
+    except ValueError:
+        days_before = 3  # env inválida vale o padrão, em vez de calar o lembrete
 
     from db.bills import (
         list_users_with_pending_bills,
@@ -734,7 +737,8 @@ def _periodic_report_tick() -> None:
 
         # claim atômico por período: o loop faz polling a cada 30s, o claim garante
         # que cada resumo saia uma única vez (mesmo com reinício / múltiplas instâncias)
-        if uid in weekly_users and claim_weekly_report_send(uid, today):
+        from core.services.plan_service import plan_gate_ok
+        if uid in weekly_users and plan_gate_ok(uid, "weekly_report") and claim_weekly_report_send(uid, today):
             summary = build_weekly_report_summary(uid, closed=True)
             _send_periodic_template(uid, wa_targets, weekly_cfg, summary, "weekly", instance)
 

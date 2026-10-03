@@ -2,11 +2,50 @@
 db/schema.py — DDL e inicialização do banco de dados.
 """
 from .connection import get_conn
-from .schema_repairs import ensure_plan_trials_user_fk, repair_user_fk_cascades
+from .schema_repairs import (
+    ensure_lower_name_unique, ensure_plan_trials_user_fk, repair_user_fk_cascades,
+)
 
 # Chave do advisory lock que serializa o init_db INTEIRO entre instâncias.
 # Valor arbitrário e estável; só precisa não colidir com outro lock do processo.
 SCHEMA_INIT_LOCK = 728_531_004
+
+# Tabelas cuja escrita avisa o `/painel` ao vivo: `pg_notify('pb_escrita', <uid>)`
+# pelo trigger `trg_pb_aviso_escrita`, que a tarefa `escutar_banco` de
+# `api/v2/eventos.py` repassa aos streams do dono. Valor = como achar o dono:
+# `None` lê `user_id` da própria linha; as filhas do Open Finance sem `user_id`
+# sobem pela conexão (`conexao`) ou pela conta (`conta`). `auth_accounts` avisa
+# só a troca de plano, num trigger à parte (`trg_pb_aviso_plano`).
+# `tests/test_api_v2_eventos_escrita.py` confere esta lista contra o banco.
+TABELAS_QUE_AVISAM: dict[str, str | None] = {
+    **dict.fromkeys((
+        "accounts", "launches", "pockets", "pocket_lots", "investments", "investment_lots",
+        "credit_cards", "credit_bills", "credit_transactions", "bill_instances",
+        "recurring_expenses", "recurring_incomes", "recurring_income_credits",
+        "recurring_charges", "category_budgets", "household_budget_config",
+        "household_budget_income", "user_categories", "user_category_rules",
+        "bank_movement_declarations", "of_cash_coverage", "of_cash_links",
+        "open_finance_connections", "patrimonio_fotos", "subscription_marks",
+    )),
+    "open_finance_accounts": "conexao",
+    "open_finance_investments": "conexao",
+    "open_finance_investment_snapshots": "conexao",
+    "open_finance_transactions": "conta",
+}
+
+# `recurring_seed_silent`: a 1ª busca da conexão que já existia no deploy vira
+# lápide no Detetive, sem rajada de alerta. As conexões existentes nascem `true`
+# e as novas `false`, num passo atômico; o `if not exists` não refaz o ALTER a
+# cada boot (#691). Constante para o teste da migração rodar este mesmo SQL.
+RECURRING_SEED_SILENT_SQL = """
+do $$ begin
+  if not exists (select 1 from information_schema.columns where table_schema='public'
+                 and table_name='open_finance_connections' and column_name='recurring_seed_silent') then
+    alter table open_finance_connections add column recurring_seed_silent boolean not null default true;
+    alter table open_finance_connections alter column recurring_seed_silent set default false;
+  end if;
+end $$
+"""
 
 # BACKFILL INICIAL dos assinantes que já existiam quando plan_grants nasceu
 # (§5.1 do docs/plano_pix_anual_asaas.md). Roda no boot, dentro do init_db.
@@ -64,6 +103,8 @@ on conflict (source, external_ref) do nothing
 
 
 def init_db():
+    from .signup_quiz import PERFIL_PADRAO, PERFIS
+
     ddl_statements = [
         # ─── Extensions ──────────────────────────────────────────────────────────
         # unaccent: normaliza acentos pra busca textual ("credito" casa "crédito").
@@ -112,7 +153,7 @@ def init_db():
           name text not null,
           balance numeric not null default 0,
           created_at timestamptz default now(),
-          unique(user_id, name)
+          unique(user_id, name)  -- sem caixa: uq_pockets_user_lower_name (schema_repairs, #596)
         )
         """,
 
@@ -142,7 +183,7 @@ def init_db():
           interest_payment_frequency text not null default 'maturity',
           tax_profile text not null default 'regressive_ir_iof',
           created_at timestamptz default now(),
-          unique(user_id, name)
+          unique(user_id, name)  -- sem caixa: uq_investments_user_lower_name (schema_repairs, #596)
         )
         """,
         """
@@ -223,6 +264,19 @@ def init_db():
         """
         alter table pockets add column if not exists last_interest_date date not null default current_date
         """,
+        # Q43 (docs/plano-dashboard-v2.md): caixinha e investimento manuais param de
+        # render. `interest_frozen_at` NULL = ainda não recebeu a acumulação final;
+        # não-nulo = congelado. Idioma do `plan_selected_at` invertido: o ADD sem
+        # default deixa as linhas que já existem NULL (a final roda uma vez em cada),
+        # e o SET DEFAULT faz toda linha nova nascer congelada. Os dois no MESMO
+        # statement: o init_db roda em autocommit, e separados um INSERT entre eles
+        # nasceria NULL. `add column ... default now()` não serve: preencheria as
+        # linhas antigas com o instante do ALTER e elas congelariam sem a final.
+        """alter table pockets add column if not exists interest_frozen_at timestamptz,
+             alter column interest_frozen_at set default now()""",
+        """alter table investments add column if not exists interest_frozen_at timestamptz,
+             alter column interest_frozen_at set default now()""",
+        """alter table pockets alter column interest_enabled set default false""",
         """
         create table if not exists pocket_lots (
           id bigserial primary key,
@@ -278,6 +332,10 @@ def init_db():
         -- migration: adiciona coluna is_internal_movement se ainda não existe
         alter table launches add column if not exists
           is_internal_movement boolean not null default false
+        """,
+        """
+        -- categoria/interno editados pelo cliente: o sync do OF não desfaz (#712)
+        alter table launches add column if not exists categoria_editada boolean not null default false
         """,
         """
         -- migration: marca retroativamente aportes, resgates e categorias de investimento como movimentações internas
@@ -360,7 +418,7 @@ def init_db():
         )
         """,
         # Sugestões de "gasto fixo" que o usuário recusou. Quando uma despesa se
-        # repete (mesma descrição + valor em meses distintos) a Piggy oferece
+        # repete (mesma descrição + valor em meses distintos) o Piggy oferece
         # marcar como recorrente; se o user diz "não", grava aqui pra não
         # re-perguntar a mesma combinação (merchant + valor). Ver
         # find_recurring_candidate em db/recurring.py.
@@ -373,6 +431,20 @@ def init_db():
           primary key (user_id, merchant_key, amount)
         )
         """,
+        # Marcação do usuário na lista de assinaturas (core/services/assinaturas.py):
+        # 'assinatura' põe em "serviços", 'ignorar' esconde; `assinatura_antes` guarda
+        # a marca que o ignorar substituiu, para o Voltar a mostrar. A chave é a
+        # `merchant_key` da descrição da Pluggy.
+        """
+        create table if not exists subscription_marks (
+          user_id bigint not null references users(id) on delete cascade,
+          merchant_key text not null,
+          status text not null check (status in ('assinatura','ignorar')),
+          updated_at timestamptz not null default now(),
+          primary key (user_id, merchant_key)
+        )
+        """,
+        "alter table subscription_marks add column if not exists assinatura_antes boolean not null default false",
         """
         create table if not exists market_rates (
           code text not null,
@@ -558,9 +630,9 @@ def init_db():
         # (`OPEN_FINANCE_DISCONNECTED` não guarda `item_id`). A distinção que ela
         # habilita: última linha com dono sem `removed` e COM `removal_tracked` =
         # adoção INTERROMPIDA; sem `removal_tracked` = legado AMBÍGUO. A regra
-        # inteira (ordem por `id`, os quatro desfechos e o limite dela) está no
-        # docstring de `db.open_finance_state.mark_items_removed`; quem a consome
-        # é a recuperação por operador, fora desta PR.
+        # inteira (ordem por `id`, os desfechos e o limite dela) está no
+        # docstring de `db.open_finance_diagnostico.classifica_item`, que é quem
+        # a consome (ferramenta de operador, `scripts/of_itens_operador.py`).
         """
         alter table open_finance_item_registry
           add column if not exists removal_tracked boolean not null default false
@@ -733,6 +805,85 @@ def init_db():
           unique(connection_id, provider_investment_id)
         )
         """,
+        # Foto diária por posição (dashboard v2, etapa 0): uma linha por posição
+        # por dia do app, gravada pelo sync (db/of_snapshots.py). Chave natural,
+        # SEM FK para open_finance_investments.id — a reconciliação apaga e
+        # recria a posição com id novo, e o histórico sobrevive. SEM user_id: o
+        # dono é open_finance_connections.user_id (o merge_users move a conexão);
+        # toda leitura filtra por `join open_finance_connections c on
+        # c.id = s.connection_id where c.user_id = %s`. A PK começa por
+        # connection_id e serve de índice ao FK/cascade.
+        # ponytail: sem poda; ~70 linhas/dia em 2026-09-29; revisitar a retenção
+        # quando a base crescer.
+        """
+        create table if not exists open_finance_investment_snapshots (
+          connection_id bigint not null references open_finance_connections(id) on delete cascade,
+          provider_investment_id text not null,
+          observed_on date not null,
+          observed_at timestamptz not null,
+          collection_confirmed boolean not null,
+          position_at timestamptz,
+          status text,
+          balance numeric,
+          amount numeric,
+          amount_original numeric,
+          quantity numeric,
+          contract_rate numeric,
+          contract_rate_type text,
+          last_month_rate numeric,
+          last_twelve_months_rate numeric,
+          annual_rate numeric,
+          primary key (connection_id, provider_investment_id, observed_on)
+        )
+        """,
+        # Recurring Payments da Pluggy (assinaturas): o resultado do último
+        # sync, por item, gravado por db/of_recurring.py. SEM user_id, pelo
+        # mesmo motivo da tabela de cima: o dono é a conexão.
+        """
+        create table if not exists of_recurring_payments (
+          id bigserial primary key,
+          connection_id bigint not null references open_finance_connections(id) on delete cascade,
+          description text not null,
+          average_amount numeric not null,
+          regularity_score numeric,
+          occurrences text[] not null,
+          fetched_at timestamptz not null default now()
+        )
+        """,
+        """
+        create index if not exists idx_of_recurring_payments_conn
+          on of_recurring_payments(connection_id)
+        """,
+        """
+        alter table open_finance_connections add column if not exists recurring_fetched_at timestamptz
+        """,
+        RECURRING_SEED_SILENT_SQL,
+        # As descrições da 1ª busca da conexão silenciosa: a lápide do Detetive sai
+        # DELAS, não da foto atual — com o agente desligado a foto muda a cada sync.
+        """
+        alter table open_finance_connections add column if not exists recurring_seed_descricoes text[]
+        """,
+        # Foto diária do patrimônio (dashboard v2, etapa 0 PR 6): uma por usuário
+        # por dia do app, gravada pelo job `core/services/patrimonio_foto.py` com a
+        # conta de `db/patrimonio.calcular`. `base` diz o que entrou (o gráfico
+        # quebra a linha quando muda) e `motivos` por que a foto não é exata.
+        # ponytail: sem poda; uma linha por usuário por dia.
+        """
+        create table if not exists patrimonio_fotos (
+          user_id bigint not null references users(id) on delete cascade,
+          dia date not null,
+          gravada_em timestamptz not null,
+          total numeric not null,
+          carteira numeric not null,
+          bancos numeric not null,
+          investimentos_banco numeric not null,
+          caixinhas numeric not null,
+          investimentos_manuais numeric not null,
+          base jsonb not null,
+          motivos text[] not null,
+          primary key (user_id, dia)
+        )
+        """,
 
         # -----------------------------
         # Banqueiro (agente cofre): vincula uma caixinha/meta do PigBank a um
@@ -784,6 +935,30 @@ def init_db():
         """
         alter table pockets add column if not exists of_last_seen_profit numeric
         """,
+        # LÁPIDE do vínculo perdido por AUSÊNCIA da posição. Quando a reconciliação
+        # remove uma posição que o banco deixou de mandar, a meta vinculada volta ao
+        # saldo próprio dela (sem espelho, sem fantasma) — e a posição, ao voltar,
+        # volta com id NOVO, porque a linha foi apagada. Guardar a CHAVE NATURAL
+        # (conexão + id do investimento no provedor) é o que permite religar a mesma
+        # meta em vez de o auto-import criar uma caixinha duplicada que o usuário não
+        # consegue desfazer. `null` é o estado de todo mundo hoje: sem backfill.
+        """
+        alter table pockets add column if not exists of_tombstone_connection_id bigint
+          references open_finance_connections(id) on delete set null
+        """,
+        """
+        alter table pockets add column if not exists of_tombstone_provider_id text
+        """,
+        # FK sem índice é defeito neste repositório (tests/test_privacy_deletion.py):
+        # sem ele, apagar uma conexão varre `pockets` inteira. PARCIAL porque a
+        # lápide é exceção — quase toda linha tem `null` aqui —, e NÃO ÚNICO
+        # porque várias lápides apontam para a mesma conexão (metas que perderam
+        # vínculo a posições diferentes dela).
+        """
+        create index if not exists idx_pockets_of_tombstone_conn
+          on pockets(of_tombstone_connection_id)
+          where of_tombstone_connection_id is not null
+        """,
         # source='open_finance' marca caixinhas AUTO-CRIADAS a partir do banco (via
         # sync do Open Finance): read-only, saldo espelhado, sem juros interno. As
         # criadas pelo usuário ficam 'manual' (mesmo quando vinculadas a uma caixinha OF).
@@ -819,6 +994,65 @@ def init_db():
         """
         create index if not exists idx_bank_movement_declarations_user
           on bank_movement_declarations(user_id, matched_transaction_id)
+        """,
+
+        # Saque/depósito em espécie do Open Finance → Carteira (db/open_finance_cash.py).
+        # `ativo` com `launch_id` nulo = desfeito: apagar o lançamento por qualquer
+        # porta zera o vínculo pelo `set null` e ele nunca é recriado.
+        """
+        create table if not exists of_cash_links (
+          id bigserial primary key,
+          user_id bigint not null references users(id) on delete cascade,
+          tx_key text not null,
+          key_durable boolean not null,
+          account_key text not null,
+          kind text not null check (kind in ('saque','deposito','fraco')),
+          origem text not null default 'auto' check (origem in ('auto','manual')),
+          -- `= any(array[...])` de propósito: tests/test_pix_transicao_efeitos.py lê
+          -- o primeiro check de status com lista `in` deste arquivo como o do pix_charges.
+          status text not null check (status = any (array['ativo','desfeito','estornado',
+            'historico','nao_dinheiro','perguntar_manual','perguntar_novo','perguntar_fraco'])),
+          launch_id bigint references launches(id) on delete set null,
+          manual_launch_id bigint references launches(id) on delete set null,
+          of_transaction_id bigint references open_finance_transactions(id) on delete set null,
+          amount numeric not null,
+          tx_date date not null,
+          tx_at timestamptz,  -- hora do banco (null = só data); com amount/tx_date, o último estado visto
+          notified_at timestamptz,
+          seen_at timestamptz,
+          created_at timestamptz not null default now(),
+          updated_at timestamptz not null default now(),
+          unique(user_id, tx_key)
+        )
+        """,
+        """create unique index if not exists uq_of_cash_links_launch
+             on of_cash_links(launch_id) where launch_id is not null""",
+        """create index if not exists idx_of_cash_links_manual
+             on of_cash_links(manual_launch_id) where manual_launch_id is not null""",
+        """create index if not exists idx_of_cash_links_tx
+             on of_cash_links(of_transaction_id) where of_transaction_id is not null""",
+        # Janela que uma conexão removida já cobriu, por conta (gravada no disconnect).
+        """
+        create table if not exists of_cash_coverage (
+          id bigserial primary key,
+          user_id bigint not null references users(id) on delete cascade,
+          account_key text not null,
+          -- banco; = account_key quando a conta não tem número (ver account_key)
+          institution_key text not null,
+          connected_at timestamptz not null,
+          covered_from date,
+          covered_until date
+        )
+        """,
+        """create index if not exists idx_of_cash_coverage_user
+             on of_cash_coverage(user_id, account_key)""",
+        # Uma linha só: quando o reconciliador rodou pela 1ª vez com OF_CASH_ENABLED.
+        # Saque/depósito anteriores viram 'historico' (não mexem na Carteira).
+        """
+        create table if not exists of_cash_activation (
+          id boolean primary key default true check (id),
+          activated_at timestamptz not null default now()
+        )
         """,
 
         # -----------------------------
@@ -969,6 +1203,10 @@ def init_db():
         """
         alter table email_verification_codes add column if not exists display_name text
         """,
+        # Cadastro pelo quiz (frontend/routes/quiz_signup.py) nasce sem senha.
+        """
+        alter table email_verification_codes alter column password_hash drop not null
+        """,
         """
         create table if not exists password_reset_tokens (
           token text primary key,
@@ -980,6 +1218,11 @@ def init_db():
         """,
         """
         create index if not exists idx_password_reset_tokens_expires on password_reset_tokens (expires_at)
+        """,
+        # O hash do e-mail da conta no instante da emissão: o reset só troca a
+        # senha se a conta ainda tiver esse e-mail (link no e-mail antigo morre).
+        """
+        alter table password_reset_tokens add column if not exists email_hash text
         """,
         """
         create table if not exists data_export_tokens (
@@ -1053,6 +1296,9 @@ def init_db():
         create index if not exists idx_mfa_login_challenges_expires
           on mfa_login_challenges (expires_at)
         """,
+        # Tentativas de codigo por challenge (teto em db/mfa.py). Errar um
+        # digito nao pode queimar o challenge, mas o chute tambem tem limite.
+        "alter table mfa_login_challenges add column if not exists attempts int not null default 0",
 
         # ─── Engagement tracking ──────────────────────────────────────────────────
         """
@@ -1159,6 +1405,9 @@ def init_db():
         """,
         """
         alter table credit_transactions add column if not exists external_id text
+        """,
+        """
+        alter table credit_transactions add column if not exists categoria_editada boolean not null default false
         """,
         """
         create unique index if not exists uq_credit_tx_ofx_external
@@ -1324,11 +1573,10 @@ def init_db():
         """,
 
         # ─── Gastos Fixos / Recorrentes (Sprint 4) ──────────────────────────────
-        # Pro-only. Cobrança automática via cron no dia `due_day` de cada mês.
-        # `last_charged_ym` = idempotência (não cobra 2x no mesmo mês).
+        # Pro-only. Só PREVÊ (Q42): autopay entra na Previsão, 'manual' vira conta a pagar.
+        # `last_charged_ym` = idempotência do cobrador removido; nada mais escreve.
         # `last_amount` + `last_amount_changed_at` = detector de reajuste quando user edita.
-        # `payment_type='credit_card'` → cria credit_transaction na bill open atual.
-        # `payment_type='account'`     → cria launch despesa.
+        # `payment_type`/`card_id` = por onde o usuário paga; não geram lançamento.
         """
         create table if not exists recurring_expenses (
           id          bigserial primary key,
@@ -1353,9 +1601,11 @@ def init_db():
           on recurring_expenses (user_id, is_active)
         """,
 
-        # Histórico de cobranças automáticas. Garante idempotência via unique
-        # (recurring_id, ym) + serve pra alertas no banner do dashboard até user
-        # marcar como visto (acknowledged=true).
+        # Histórico de cobranças automáticas (cobrador antigo, com launch_id ou
+        # credit_tx_id) e avisos de vencimento do autopay (Q42, os dois nulos:
+        # nada foi lançado). Idempotência via unique (recurring_id, ym) + serve
+        # pra alertas no banner do dashboard até user marcar como visto
+        # (acknowledged=true).
         """
         create table if not exists recurring_charges (
           id           bigserial primary key,
@@ -1374,13 +1624,20 @@ def init_db():
         create index if not exists idx_recurring_charges_user_ack
           on recurring_charges (user_id, acknowledged)
         """,
+        # Reserva do aviso de autopay no WhatsApp (#616): gravada ANTES do envio
+        # (`claim_autopay_notices_whatsapp`). Independente de `acknowledged`, que é do banner.
+        "alter table recurring_charges add column if not exists wa_notified_at timestamptz",
+        # Dia lógico do vencimento (#616): o WhatsApp filtra por ele, não por `charged_at`
+        # (a volta que cruza a meia-noite grava o aviso de D com horário de D+1).
+        # Sem backfill: linha antiga fica nula e fora do WhatsApp.
+        "alter table recurring_charges add column if not exists due_on date",
 
         # ─── Receitas Recorrentes ──────────────────────────────────────────────
         # Espelho de `recurring_expenses` do lado da entrada. Pro-only, mesma flag
-        # (recurring_expenses_enabled). Lança receita na conta no dia `pay_day`.
+        # (recurring_expenses_enabled). Só PREVÊ (Q42): entra na Previsão no dia `pay_day`.
         # Não tem payment_type/card_id: receita sempre cai na conta.
         # `is_primary` = renda principal (salário) vs extra (freela, aluguel).
-        # `last_credited_ym` = idempotência (não credita 2x no mesmo mês).
+        # `last_credited_ym` = idempotência do cobrador removido; nada mais escreve.
         """
         create table if not exists recurring_incomes (
           id          bigserial primary key,
@@ -1441,8 +1698,8 @@ def init_db():
         """alter table recurring_incomes add column if not exists pay_month int""",
 
         # migration: modo de pagamento do recorrente.
-        #   'autopay' (default, comportamento antigo) → o charger LANÇA sozinho no dia.
-        #   'manual'  (conta a pagar / boleto)        → NÃO lança; a Piggy lembra e
+        #   'autopay' (default) → gasto fixo: só entra na Previsão (Q42), não lança.
+        #   'manual'  (conta a pagar / boleto)        → NÃO lança; o Piggy lembra e
         #     só lança quando o user confirma o pagamento. Aparece na sub-aba
         #     "Contas a pagar". Cada ciclo vira uma linha em bill_instances.
         """alter table recurring_expenses add column if not exists payment_mode text not null default 'autopay'""",
@@ -1897,10 +2154,23 @@ def init_db():
         # iOS. Só TELEMETRIA — não concede nada: o gate de plano não isenta o
         # app (política em plan_service.needs_plan_selection).
         # Valores (os únicos que signup_source_from_request produz):
-        # 'web' | 'app' | 'google' | 'google_app'.
+        # 'web' | 'app' | 'google' | 'google_app' | 'apple' | 'apple_app'.
         # NULL = conta anterior a esta coluna (origem desconhecida);
         # sem backfill por data chutado — o painel mostra "—" pra elas.
         """alter table auth_accounts add column if not exists signup_source text""",
+        # Resultado do quiz de venda (db/signup_quiz.py), gravado na criação da
+        # conta. NÃO confundir com `/auth/dashboard-profile` (monólito), que é
+        # outra coisa (gates de feature). NULL = nunca escolheu (nem pelo quiz nem
+        # no v2); 'padrao' = escolheu o painel padrão no v2 (`PUT /api/v2/perfil`).
+        # `signup_quiz` = {"versao": 1, "respostas": {...} | null}; é DADO
+        # FINANCEIRO PESSOAL — sai no export, no "Recomeçar do zero" e na exclusão.
+        # O CHECK fica fora do `add column` pelo mesmo motivo do de `pix_charges`
+        # (abaixo): inline não chega à tabela que já existe; `not valid` não trava a subida.
+        """alter table auth_accounts add column if not exists dashboard_profile text""",
+        """alter table auth_accounts add column if not exists signup_quiz jsonb""",
+        """alter table auth_accounts drop constraint if exists auth_accounts_dashboard_profile_valido""",
+        f"""alter table auth_accounts add constraint auth_accounts_dashboard_profile_valido
+             check (dashboard_profile in ({", ".join(f"'{p}'" for p in PERFIS + (PERFIL_PADRAO,))})) not valid""",
         """
         create table if not exists plan_trials (
           phone_hash text primary key,
@@ -2073,7 +2343,7 @@ def init_db():
 
         # ─── Espaços financeiros (Fase 1) ───────────────────────────────────────
         # Segmentam a vida financeira em áreas (Pessoal, Casa, Fazenda). O
-        # espaço default por usuário é lazy (ver db/spaces.ensure_default_space);
+        # espaço default por usuário é lazy (nenhum código o cria hoje);
         # `space_id NULL` em launches/credit_transactions = espaço default. Apagar
         # um espaço NÃO apaga lançamentos (on delete set null → caem p/ default).
         #
@@ -2545,6 +2815,101 @@ def init_db():
         """alter table pix_unmatched_payments
              add constraint pix_unmatched_ref_formato
              check (external_reference ~ '^pix:[0-9]+$') not valid""",
+        # Pendência do e-book comprado na /assinar (funil v3, PR 3): o webhook do
+        # checkout grava, o job `core/services/ebook_entrega.py` entrega quando a
+        # conta já provou o e-mail. `ebook_price`/`ebook_url` são a FOTO da
+        # metadata da sessão; `ebook_url` nulo = sessão sem a foto (o job ignora).
+        # `reivindicada_ate` é o claim com expiração (nenhuma transação aberta
+        # durante o Stripe/Resend). Fica fora do merge (conta com
+        # stripe_customer_id é recusada como origem) e do export LGPD.
+        """
+        create table if not exists ebook_entregas (
+          user_id bigint not null references users(id) on delete cascade,
+          session_id text not null,
+          ebook_price text not null,
+          ebook_url text,
+          criada_em timestamptz not null default now(),
+          reivindicada_ate timestamptz,
+          tentativas int not null default 0,
+          fechada_em timestamptz,
+          resultado text check (resultado in ('enviado', 'nao_comprou')),
+          primary key (user_id, session_id)
+        )
+        """,
+        """
+        create index if not exists idx_ebook_entregas_abertas
+          on ebook_entregas (criada_em) where fechada_em is null
+        """,
+        # E-mail novo a levar ao cliente do Stripe (funil v3, PR 4b): a PATCH
+        # /settings/{uid}/security/contact grava na MESMA transação da troca, o
+        # job `core/services/stripe_email_sync.py` manda o e-mail ATUAL da conta
+        # (lido de `auth_accounts` na hora; aqui só a `versao`, sem PII) e apaga a
+        # linha. Fora do merge (conta com stripe_customer_id é recusada como
+        # origem) e do export LGPD (sem PII); sai com a conta (cascade).
+        """
+        create table if not exists stripe_email_pendente (
+          user_id bigint primary key references users(id) on delete cascade,
+          versao bigint not null default 1,
+          tentativas int not null default 0,
+          reivindicada_ate timestamptz,
+          criada_em timestamptz not null default now()
+        )
+        """,
+
+        # ── Aviso de escrita ao `/painel` (TABELAS_QUE_AVISAM, no topo) ──────
+        # O NOTIFY sai só no commit (rollback não avisa) e o Postgres funde os
+        # repetidos da mesma transação. UPDATE que troca o dono (`merge_users`)
+        # avisa os dois: o aviso não leva dado, só manda o cliente reconsultar.
+        # Não pode derrubar a escrita de dinheiro: sem bloco EXCEPTION (vira
+        # subtransação por linha) e sem comparar registro inteiro (`json` não
+        # tem igualdade). Filha cujo pai sumiu na cascata não acha dono e pula:
+        # o trigger do pai já avisou.
+        # ponytail: a fila de NOTIFY tem 8 GB e só enche com um LISTEN que não
+        # lê; cheia, o COMMIT de quem escreve falha. Monitorar
+        # `pg_notification_queue_usage()` se aparecer listener fora do app.
+        # ponytail: commit com NOTIFY serializa num lock global do Postgres;
+        # irrelevante com um worker e o volume de hoje, remedir se escalar.
+        """
+        create or replace function pb_aviso_escrita()
+        returns trigger as $$
+        begin
+          if tg_argv[0] is null then
+            perform pg_notify('pb_escrita', u::text)
+              from unnest(array[old.user_id, new.user_id]) u where u is not null;
+          elsif tg_argv[0] = 'conexao' then
+            perform pg_notify('pb_escrita', c.user_id::text)
+              from open_finance_connections c
+             where c.id in (old.connection_id, new.connection_id);
+          else
+            perform pg_notify('pb_escrita', c.user_id::text)
+              from open_finance_accounts a
+              join open_finance_connections c on c.id = a.connection_id
+             where a.id in (old.account_id, new.account_id);
+          end if;
+          return null;
+        end;
+        $$ language plpgsql
+        """,
+        *(stmt for tabela, dono in TABELAS_QUE_AVISAM.items() for stmt in (
+            f"drop trigger if exists trg_pb_aviso_escrita on {tabela}",
+            f"""
+            create trigger trg_pb_aviso_escrita
+              after insert or update or delete on {tabela}
+              for each row execute function pb_aviso_escrita({f"'{dono}'" if dono else ''})
+            """,
+        )),
+        # O tier do `get_plan_tier` (via `_tem_plano_pago_vigente`) sai de
+        # `plan` e `plan_expires_at`; login, senha e o resto não avisam. Plano
+        # que vence só pela data não grava nada, então não avisa.
+        """drop trigger if exists trg_pb_aviso_plano on auth_accounts""",
+        """
+        create trigger trg_pb_aviso_plano
+          after update on auth_accounts
+          for each row
+          when (old.plan is distinct from new.plan
+                or old.plan_expires_at is distinct from new.plan_expires_at)
+          execute function pb_aviso_escrita()
+        """,
     ]
 
     # autocommit: cada DDL roda em sua propria transacao e libera locks
@@ -2614,6 +2979,7 @@ def _run_ddl(conn, ddl_statements) -> None:
                 changes = repair_user_fk_cascades(cur)
                 if changes:
                     print(f"[init_db] schema_repairs ajustou {len(changes)} FK(s): {changes}")
+                ensure_lower_name_unique(cur)
             except Exception as e:
                 print(f"[init_db] schema_repairs falhou: {e}")
                 raise

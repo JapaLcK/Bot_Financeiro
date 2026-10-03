@@ -20,11 +20,13 @@ from fastapi.testclient import TestClient
 os.environ.setdefault("MFA_ENCRYPTION_KEY", Fernet.generate_key().decode())
 
 import db
+from conftest import promote_to_pro
 import frontend.finance_bot_websocket_custom as dashboard
 
 
 def _auth(client: TestClient, user_id: int, email: str = "pkt@t.com") -> None:
     """Injeta cookies para passar por _authorize_dashboard_access."""
+    promote_to_pro(user_id)  # atravessa o gate de acesso do v2
     client.cookies.set(dashboard.AUTH_COOKIE_NAME, dashboard._make_jwt(user_id, email))
     client.cookies.set(dashboard.DASHBOARD_COOKIE_NAME, dashboard.make_dashboard_token(user_id, hours=1))
 
@@ -168,11 +170,12 @@ def test_pocket_meta_endpoint_updates_cdi_percent(user_id):
 
     assert resp.status_code == 200, resp.text
     body = resp.json()
-    assert body["pocket"]["interest_enabled"] is True
+    # Q43: ligar o juro é ignorado; a taxa continua gravada.
+    assert body["pocket"]["interest_enabled"] is False
     assert body["pocket"]["interest_rate"] == 1.15
 
     row = db.list_pockets(user_id, accrue=False)[0]
-    assert row["interest_enabled"] is True
+    assert row["interest_enabled"] is False
     assert Decimal(str(row["interest_rate"])) == Decimal("1.15")
 
 
@@ -192,8 +195,11 @@ def test_pocket_accrues_at_default_100_percent_cdi(user_id):
                 """,
                 (start, start, user_id, pocket["id"]),
             )
+            # Q43: caixinha anterior ao congelamento (marcador NULL, juro ligado)
+            # recebe a acumulação final; a nova nasce congelada.
             cur.execute(
-                "update pockets set last_interest_date=%s where user_id=%s and id=%s",
+                "update pockets set last_interest_date=%s, interest_frozen_at=null, "
+                "interest_enabled=true where user_id=%s and id=%s",
                 (start, user_id, pocket["id"]),
             )
         conn.commit()
@@ -236,8 +242,11 @@ def test_pocket_accrues_using_configured_cdi_percent(user_id):
                 """,
                 (start, start, user_id, pocket["id"]),
             )
+            # Q43: caixinha anterior ao congelamento (marcador NULL, juro ligado)
+            # recebe a acumulação final; a nova nasce congelada.
             cur.execute(
-                "update pockets set last_interest_date=%s where user_id=%s and id=%s",
+                "update pockets set last_interest_date=%s, interest_frozen_at=null, "
+                "interest_enabled=true where user_id=%s and id=%s",
                 (start, user_id, pocket["id"]),
             )
         conn.commit()
@@ -316,3 +325,18 @@ def test_history_endpoint_marks_caixinha_do_banco(user_id):
     manual = client.get(f"/pockets/{user_id}/manual/history").json()["pocket"]
     assert manual["source"] != "open_finance"
     assert manual["of_investment_id"] is None
+
+
+def test_history_endpoint_says_if_bank_is_frozen(user_id, monkeypatch):
+    """O subtítulo do histórico decide "Saldo atualizado pelo banco" × "Reative seu
+    banco" por `of_plan_active` (`_isOfStale`, frontend/dashboard.js). Sem o campo,
+    a caixinha congelada no Grátis se dizia atualizada."""
+    from core.services import plan_service
+
+    db.create_pocket(user_id, "viagem")
+    client = TestClient(dashboard.app)
+    _auth(client, user_id)  # promove a Pro
+
+    assert client.get(f"/pockets/{user_id}/viagem/history").json()["pocket"]["of_plan_active"] is True
+    monkeypatch.setattr(plan_service, "require_min_tier", lambda uid, minimum: False)
+    assert client.get(f"/pockets/{user_id}/viagem/history").json()["pocket"]["of_plan_active"] is False

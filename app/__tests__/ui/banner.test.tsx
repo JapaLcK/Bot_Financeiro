@@ -1,5 +1,5 @@
 import { fireEvent } from "@testing-library/react-native";
-import { View } from "react-native";
+import { AccessibilityInfo, View } from "react-native";
 
 import { Banner } from "@/ui/componentes/Banner";
 import { Icone } from "@/ui/componentes/Icone";
@@ -8,6 +8,19 @@ import { claro, escuro } from "@/ui/tokens";
 import { renderInterativo, renderNosDoisTemas } from "./_render";
 
 describe("Banner", () => {
+  afterEach(() => jest.clearAllMocks());
+
+  it("M3 — danger anuncia para o leitor de tela; info/warning não interrompem a leitura", () => {
+    renderNosDoisTemas(<Banner mensagem="Sua fatura fecha em 3 dias." />);
+    expect(AccessibilityInfo.announceForAccessibility).not.toHaveBeenCalled();
+
+    renderNosDoisTemas(<Banner tom="warning" mensagem="Alguns lançamentos podem estar desatualizados." />);
+    expect(AccessibilityInfo.announceForAccessibility).not.toHaveBeenCalled();
+
+    renderNosDoisTemas(<Banner tom="danger" mensagem="Conexão perdida." />);
+    expect(AccessibilityInfo.announceForAccessibility).toHaveBeenCalledWith("Conexão perdida.");
+  });
+
   it("info (padrão): sem accessibilityRole alert, ícone Info em tom ink", () => {
     const { claro: c } = renderNosDoisTemas(<Banner mensagem="Sua fatura fecha em 3 dias." />);
     expect(c.UNSAFE_getAllByType(View)[0]!.props.accessibilityRole).toBeUndefined();

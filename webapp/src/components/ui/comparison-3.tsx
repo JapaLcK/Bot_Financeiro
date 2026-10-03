@@ -31,7 +31,7 @@ type FeatureGroup = {
 };
 
 // A MESMA fonte da tabela servida que este bloco substituiu: cada linha está
-// ancorada em core/services/plan_limits.py — mudou lá, muda aqui.
+// ancorada em core/services/plan_limits.py e plan_service.py — mudou lá, muda aqui.
 const plans = [
   {
     id: "essencial",
@@ -73,7 +73,8 @@ const commons = [
   "Investimentos no painel",
   "Caixinhas, metas e cartões ilimitados",
   "Boletos e gastos recorrentes com lembretes",
-  "Categorização automática",
+  "Categorização automática com IA",
+  "Orçamento por categoria",
   "Exportar seus dados",
 ];
 
@@ -89,7 +90,7 @@ const groups: FeatureGroup[] = [
       { label: "Bancos conectados (Open Finance)", values: ["1", "2", "5"] },
       // Plus/Pro: `ai_monthly_messages: None` cai no teto GLOBAL
       // AI_CHAT_MONTHLY_LIMIT, não em "ilimitado" (ver o card do Plus).
-      { label: "Mensagens com a Piggy", values: ["200/mês", "1.000/mês", "Igual ao Plus"] },
+      { label: "Mensagens com o Piggy", values: ["200/mês", "1.000/mês", "Igual ao Plus"] },
       { label: "Histórico que você enxerga", values: ["90 dias", "12 meses", "24 meses"] },
     ],
   },
@@ -102,8 +103,10 @@ const groups: FeatureGroup[] = [
   {
     section: "Planejamento e previsão",
     features: [
-      { label: "Previsão de saldo 30/60/90 dias", values: [false, false, true] },
-      { label: "Relatórios semanais", values: [false, false, true] },
+      { label: "Previsão de saldo", values: [false, "30 dias", "30/60/90 dias"] },
+      { label: "Resumo semanal automático", values: [false, true, true] },
+      { label: "Insights e comparações", values: [false, true, true] },
+      { label: "Trajetória diária e pior dia do caixa", values: [false, false, true] },
     ],
   },
 ];

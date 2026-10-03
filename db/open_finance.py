@@ -1,3 +1,4 @@
+import logging
 import re
 import unicodedata
 from decimal import Decimal
@@ -8,6 +9,7 @@ from uuid import NAMESPACE_OID, uuid5
 from psycopg.types.json import Jsonb
 
 from utils_date import _tz, add_months, billing_period_for_close_day
+from utils_text import is_internal_category
 
 from .accounts import delete_launch_and_rollback
 from .cards import (
@@ -17,7 +19,23 @@ from .cards import (
     remove_single_credit_transaction,
 )
 from .connection import TIPO_CANON_SQL, get_conn
+from .of_snapshots import grava_fotos_posicoes
+from .open_finance_categories import categoria_pigbank, garantir_no_catalogo
+from .open_finance_cash import RESERVA_SQL, RESERVADO_SQL
 from .users import ensure_user, ensure_user_tx
+
+# `logging` da stdlib, mesmo padrão (e mesmo motivo) de `db/open_finance_state.py`:
+# `_log_falha` exige uma `Exception` no 3º posicional (`core/observability.py:102`)
+# e aqui não há exceção — o que se loga é um VALOR recusado na fronteira.
+#
+# NÃO é por custo, e a justificativa anterior dizia isso errado: um `warning()` da
+# stdlib NÃO é barato aqui. O `_DashboardHandler` mora no ROOT logger
+# (`core/observability.py:29-46`) e espelha todo WARNING em `system_event_logs`
+# chamando o MESMO `log_system_event_sync`, que abre `psycopg.connect()` próprio
+# (sem pool nenhum) e faz o INSERT bloqueante. A conta é a mesma dos dois lados —
+# inclusive dentro de uma escrita com prazo (`budget_ms`) — e o que a limita são o
+# `connect_timeout=2` e o `statement_timeout` de `core/system_event_log.py`.
+logger = logging.getLogger(__name__)
 
 
 def _rollback_imported_of(rows: list[dict]) -> None:
@@ -72,6 +90,12 @@ def _mock_open_finance_institution(key: str | None = None) -> dict:
     return MOCK_OPEN_FINANCE_INSTITUTIONS.get(normalized, MOCK_OPEN_FINANCE_INSTITUTIONS["nubank"])
 
 
+def mock_open_finance_item_id(user_id: int, institution_key: str | None = None) -> str:
+    # Fonte única do item falso: a rota passa este id ao teto de bancos para o reseed
+    # da mesma instituição contar como reconexão. Leva o user_id: isola entre usuários.
+    return f"mock-pluggy-{user_id}-{_mock_open_finance_institution(institution_key)['id']}"
+
+
 def create_mock_open_finance_connection(user_id: int, institution_key: str | None = None) -> dict:
     """
     Simula o fluxo Pluggy/Open Finance para desenvolvimento.
@@ -79,7 +103,7 @@ def create_mock_open_finance_connection(user_id: int, institution_key: str | Non
     """
     ensure_user(user_id)
     institution = _mock_open_finance_institution(institution_key)
-    provider_item_id = f"mock-pluggy-{user_id}-{institution['id']}"
+    provider_item_id = mock_open_finance_item_id(user_id, institution_key)
     now = datetime.now(_tz())
     today = now.date()
 
@@ -241,7 +265,9 @@ def get_open_finance_snapshot(user_id: int, limit: int = 8) -> dict:
     ensure_user(user_id)
     # Import LOCAL: `open_finance_state` importa `_CursorComTeto` daqui no topo,
     # então a mão única é esta (ver o comentário lá).
-    from .open_finance_state import SQL_EXECUTION_STATUS, janela_device_auth_min
+    from .open_finance_state import (
+        SQL_COLETA_ESTOURADA, SQL_COLETA_VENCIDA, SQL_EXECUTION_STATUS, aplica_teto_por_health,
+        janela_device_auth_min)
 
     with get_conn() as conn:
         with conn.cursor() as cur:
@@ -271,16 +297,18 @@ def get_open_finance_snapshot(user_id: int, limit: int = 8) -> dict:
                 -- sair (logo abaixo, DENTRO do laço, por item, logo depois do
                 -- `connection_ui_state` que o consome): o corpo HTTP fica
                 -- idêntico em chaves ao de antes deste PR.
-                select id, provider, provider_item_id, status, institution_name, last_sync_at,
-                       last_attempt_at, status_reason, health, reconnected_at,
-                       {SQL_EXECUTION_STATUS}
+                select id, provider, provider_item_id, status, institution_name, institution_id,
+                       last_sync_at, last_attempt_at, status_reason, health, reconnected_at,
+                       {SQL_EXECUTION_STATUS},
+                       {SQL_COLETA_VENCIDA},
+                       {SQL_COLETA_ESTOURADA}
                 from open_finance_connections
                 where user_id=%s
                 order by updated_at desc, id desc
                 """,
                 (janela_device_auth_min(), user_id),
             )
-            connections = [dict(r) for r in (cur.fetchall() or [])]
+            connections = [aplica_teto_por_health(dict(r)) for r in (cur.fetchall() or [])]
             # `ui` é o estado exibível — decidido por `connection_ui_state`, a única
             # função que o decide. O front deixou de derivar rótulo do `status`:
             # ele não sabe de produto atrasado nem de item que sumiu.
@@ -293,6 +321,8 @@ def get_open_finance_snapshot(user_id: int, limit: int = 8) -> dict:
                 # é o que impede um campo derivado do `raw` de virar API pública
                 # sem ninguém ter decidido isso.
                 c.pop("execution_status", None)
+                c.pop("coleta_vencida", None)
+                c.pop("coleta_estourada", None)
 
             cur.execute(
                 """
@@ -321,10 +351,13 @@ def get_open_finance_snapshot(user_id: int, limit: int = 8) -> dict:
                 (user_id, limit),
             )
             transactions = cur.fetchall()
+            for t in transactions:
+                t["category"] = categoria_pigbank(t["category"])
 
             cur.execute(
                 """
-                select c.institution_name, i.id, i.name, i.type, i.subtype, i.balance
+                select c.institution_name, i.id, i.name, i.type, i.subtype, i.balance,
+                       i.currency, i.updated_at
                 from open_finance_investments i
                 join open_finance_connections c on c.id = i.connection_id
                 where c.user_id=%s
@@ -383,6 +416,56 @@ def has_open_finance_connections(user_id: int) -> bool:
             return cur.fetchone() is not None
 
 
+def buscar_no_extrato(user_id: int, tipo: str, valor, dias: int = 7,
+                      limite: int = 3) -> list[dict]:
+    """Transações do Open Finance deste usuário com o mesmo tipo e valor
+    (tolerância de `RECON_AMOUNT_TOL`) nos últimos `dias`. É o "já está no
+    extrato" da resposta a um lançamento que passou pelo banco (Q40,
+    `core/handlers/forma_pagamento.py`). Parte da transação OF, não da sombra:
+    a conciliada aponta para o lançamento manual e a sombra foi apagada
+    (`confirm_reconciliation`). A compra de cartão importada mora em
+    `credit_transactions`; só entra a ligada a uma transação OF. Só leitura."""
+    valor = Decimal(str(valor))
+    with get_conn() as conn:
+        with conn.cursor() as cur:
+            cur.execute(
+                f"""
+                select dia, alvo, valor from (
+                  -- `imported_launch_id` não é único (`_bind` de db/bank_movements.py)
+                  -- nem `imported_credit_tx_id` (reconexão: o importador deduplica pelo
+                  -- id do provedor): uma linha por lançamento e por compra.
+                  (select distinct on (l.id) o.transaction_date as dia,
+                         o.description as alvo, abs(o.amount) as valor, l.criado_em as ordem
+                    from open_finance_transactions o
+                    join open_finance_accounts a on a.id = o.account_id
+                    join open_finance_connections c on c.id = a.connection_id
+                    join launches l on l.id = o.imported_launch_id and l.user_id = c.user_id
+                   where c.user_id = %s
+                     and {TIPO_CANON_SQL} = %s
+                     and abs(abs(o.amount) - %s) <= %s
+                     and o.transaction_date >= current_date - %s::int
+                   order by l.id, o.id)
+                  union all
+                  (select distinct on (ct.id) ct.purchased_at, o.description, ct.valor,
+                         ct.created_at
+                    from credit_transactions ct
+                    join open_finance_transactions o on o.imported_credit_tx_id = ct.id
+                    join open_finance_accounts a on a.id = o.account_id
+                    join open_finance_connections c on c.id = a.connection_id
+                   where ct.user_id = %s and c.user_id = %s and %s = 'despesa'
+                     and abs(ct.valor - %s) <= %s
+                     and ct.purchased_at >= current_date - %s::int
+                   order by ct.id, o.id)
+                ) x
+                 order by ordem desc
+                 limit %s
+                """,
+                (user_id, tipo, valor, RECON_AMOUNT_TOL, int(dias),
+                 user_id, user_id, tipo, valor, RECON_AMOUNT_TOL, int(dias), int(limite)),
+            )
+            return cur.fetchall()
+
+
 def list_open_finance_user_ids() -> list[int]:
     """user_ids distintos com pelo menos 1 banco Pluggy conectado (pros ticks proativos)."""
     with get_conn() as conn:
@@ -391,22 +474,31 @@ def list_open_finance_user_ids() -> list[int]:
             return [r["user_id"] for r in cur.fetchall()]
 
 
-def list_pluggy_item_ids(user_id: int | None = None) -> list[str]:
-    """Item ids Pluggy ativos (todos, ou de um usuário). Usado no refresh periódico.
+def list_pluggy_item_ids(user_id: int) -> list[str]:
+    """Item ids Pluggy ativos de UM usuário. Usado no refresh periódico.
 
     Conexões PAUSED ficam de fora: o item já foi deletado na Pluggy (trial venceu),
     então não há o que refrescar/deletar de novo.
+
+    `user_id` é OBRIGATÓRIO, e o `None` que antes significava "de todos" foi
+    recusado: o filtro `user_id` é a garantia de isolamento (CLAUDE.md §0) desta
+    enumeração, e o chamador de maior consequência é a limpeza remota da exclusão
+    de conta (`delete_pluggy_items_best_effort`), que DELETA na Pluggy tudo o que
+    esta função devolver — num laço em lote (`process_due_account_deletions`).
+    Um `None` ali apagaria o item de TODOS os clientes. Ninguém usava o modo
+    "todos" (0 chamadas sem argumento em 23/09/2026,
+    `grep -rn "list_pluggy_item_ids()" --include="*.py"`).
     """
-    sql = (
-        "select provider_item_id from open_finance_connections "
-        "where provider='pluggy' and upper(coalesce(status,'')) <> 'PAUSED'"
-    )
+    if user_id is None:
+        raise ValueError("list_pluggy_item_ids exige user_id: sem ele o DELETE na Pluggy alcançaria todos os clientes")
     with get_conn() as conn:
         with conn.cursor() as cur:
-            if user_id is None:
-                cur.execute(sql)
-            else:
-                cur.execute(sql + " and user_id=%s", (user_id,))
+            cur.execute(
+                "select provider_item_id from open_finance_connections "
+                "where provider='pluggy' and upper(coalesce(status,'')) <> 'PAUSED' "
+                "and user_id=%s",
+                (user_id,),
+            )
             return [r["provider_item_id"] for r in cur.fetchall() if r["provider_item_id"]]
 
 
@@ -742,11 +834,40 @@ def save_pluggy_open_finance_item(user_id: int, item: dict, *,
         or item.get("name")
         or "Banco conectado"
     )
-    status = item.get("status") or item.get("executionStatus") or "UPDATING"
+    # FRONTEIRA (#539, A1): o `status` do payload é vocabulário do PROVEDOR e
+    # entrava CRU na coluna. `PAUSED` é sentinela LOCAL — "o item já foi deletado
+    # na Pluggy no fim do trial" — e é exatamente o valor que tira o item do
+    # DELETE remoto da exclusão de conta (`pluggy_items_a_deletar`) e da
+    # enumeração: `{"status": "PAUSED"}` vindo do provedor deixava o item vivo e
+    # pago na Pluggy depois de uma exclusão LGPD.
+    # Valor fora da lista vira o MESMO default de status AUSENTE (`UPDATING`), em
+    # vez de ser gravado cru: assim a coluna só recebe estado que os leitores dela
+    # sabem ler, e "desconhecido" tem um desfecho só. O valor original não se
+    # perde — ele fica no `raw` desta mesma linha (`Jsonb(item)`, abaixo), além do
+    # log.
+    # `t0` ANTES do aviso, e não depois dele: o `_DashboardHandler` do root logger
+    # espelha todo WARNING em `system_event_logs` com `psycopg.connect()` + INSERT
+    # SÍNCRONOS (`core/observability.py`), com teto próprio de segundos. Com o
+    # relógio começando depois, esse tempo saía de graça e a reconexão com cliente
+    # HTTP esperando podia estourar o `budget_ms` que esta função promete respeitar
+    # (Codex, PR #539). Agora o aviso gasta do MESMO orçamento que o resto: o
+    # `_CursorComTeto` desconta o que ele levou, e o pior caso vira escrita que
+    # falha por prazo — não uma que ignora o prazo.
+    t0 = monotonic()
+
+    from core.services.pluggy_health import STATUS_REMOTOS_ACEITOS
+    status = str(item.get("status") or item.get("executionStatus") or "UPDATING").upper()
+    if status not in STATUS_REMOTOS_ACEITOS:
+        logger.warning("of_status_remoto_recusado item=%s status=%r -> UPDATING",
+                       item_id, status)
+        status = "UPDATING"
     now = datetime.now(_tz())
 
-    espera = None if budget_ms is None else max(0.001, budget_ms / 1000.0)
-    t0 = monotonic()
+    # O que SOBRA do orçamento depois do aviso, não o orçamento inteiro: sem o
+    # desconto, o `t0` acima só faria o `_CursorComTeto` cobrar a diferença, e a
+    # espera pela conexão continuaria pagando o aviso por fora.
+    espera = (None if budget_ms is None
+              else max(0.001, (budget_ms - (monotonic() - t0) * 1000) / 1000.0))
     with get_conn(timeout=espera) as conn:
         with conn.cursor() as cur:
             if budget_ms is not None:
@@ -798,7 +919,7 @@ def save_pluggy_open_finance_item(user_id: int, item: dict, *,
                     user_id,
                     "pluggy",
                     item_id,
-                    str(status).upper(),
+                    status,
                     str(institution_id),
                     str(institution_name),
                     None,
@@ -873,12 +994,51 @@ def update_pluggy_open_finance_item_status(provider_item_id: str, status: str, r
     return updated
 
 
-def save_open_finance_investments(connection_id: int, investments: list[dict]) -> dict:
-    """Grava (upsert) os investimentos OF — inclui Caixinha (CDB). Espelho, não vira pocket ainda."""
+# FONTE ÚNICA do cast de `amountProfit` (o rendimento acumulado que a Pluggy manda
+# dentro do `raw`). Ele é campo de TERCEIRO, não nosso: já chegou como texto não
+# numérico, e `::numeric` cru levanta `invalid_input_syntax`, que aborta a
+# transação INTEIRA — pelo caminho do sync isso derrubava o item todo, a cada
+# sync, junto com as contas e transações já gravadas. O regex devolve NULL no
+# lugar do estouro, e NULL aqui é o que o Banqueiro já sabe tratar ("o banco não
+# reportou rendimento"): o `rendimento` só é calculado quando os dois lados
+# existem (core/services/piggy_agents.py). Espera o alias `i` da posição.
+_SQL_PROFIT = (r"case when i.raw->>'amountProfit' ~ '^-?[0-9]+(\.[0-9]+)?$' "
+               r"then (i.raw->>'amountProfit')::numeric end")
+
+
+def save_open_finance_investments(connection_id: int, investments: list[dict], *,
+                                  leitura_completa: bool = False) -> dict:
+    """Grava (upsert) os investimentos OF — inclui Caixinha (CDB). Espelho, não vira pocket ainda.
+
+    `leitura_completa=True` RECONCILIA: posição da conexão que não veio nesta
+    chamada saiu do banco, então some daqui e a caixinha dela vai ao destino do
+    `_desvincula_e_limpa_caixinhas` (volta ao saldo próprio; a do sync que ficar
+    em zero é apagada) — tudo no MESMO commit do upsert.
+
+    O default é `False` de propósito: só quem PROVOU que leu a carteira inteira
+    (`list_pluggy_investments` sem exceção E investimentos não-stale no item,
+    core/services/pluggy_sync.py) pode remover. A prova inclui a mesma geração
+    do item antes e depois da leitura. Quem chama sem o argumento
+    continua sendo upsert puro — leitura pela metade que apagasse posição levaria
+    caixinha com dinheiro dentro.
+    """
     now = datetime.now(_tz())
     count = 0
+    vistos: list[str] = []
+    removed = 0
+    caixinhas_removidas = 0
+    religadas = 0
     with get_conn() as conn:
         with conn.cursor() as cur:
+            cur.execute("select user_id from open_finance_connections where id=%s", (connection_id,))
+            owner = cur.fetchone()
+            if not owner:
+                return {"investments_synced": 0, "investments_removed": 0,
+                        "caixinhas_removidas": 0, "caixinhas_religadas": 0}
+            # Mesma ordem de aquisição do `save_open_finance_sync` e do disconnect:
+            # o lock do usuário ANTES de qualquer escrita.
+            from .bank_movements import _lock_user
+            _lock_user(cur, owner["user_id"])
             for inv in investments:
                 if not inv.get("provider_investment_id"):
                     continue
@@ -899,8 +1059,112 @@ def save_open_finance_investments(connection_id: int, investments: list[dict]) -
                      Jsonb(inv.get("raw") or {}), now),
                 )
                 count += 1
+                vistos.append(str(inv["provider_investment_id"]))
+
+            # Foto diária (histórico) no MESMO commit, mas sob SAVEPOINT: falha
+            # nela não pode congelar o espelho nem as caixinhas. Só o nome do
+            # tipo no log — `str(exc)` do psycopg traz valor da linha.
+            try:
+                with conn.transaction():
+                    grava_fotos_posicoes(cur, connection_id, investments, now, leitura_completa)
+            except Exception as exc:
+                logger.warning("foto das posições OF não gravada connection_id=%s erro=%s",
+                               connection_id, type(exc).__name__,
+                               extra={"user_id": owner["user_id"]})
+
+            # RELIGAÇÃO pela lápide: a posição que tinha sumido voltou, com id NOVO
+            # (a linha antiga foi apagada), e a meta que a perdeu a reconhece pela
+            # chave natural. Roda em TODO sync, com ou sem `leitura_completa`: ela
+            # restaura vínculo, não remove nada — e um sync de leitura parcial que
+            # traga a posição de volta já é prova suficiente de que ela existe.
+            #
+            # Um UPDATE só, sem laço em Python. As quatro guardas, nenhuma opcional:
+            #   `p.user_id` + `i.connection_id` — isolamento (o dono desta conexão);
+            #   `p.of_investment_id is null` — não rouba pocket que o usuário
+            #       revinculou na mão durante a ausência (a decisão dele ganha);
+            #   `not exists (... q.of_investment_id = i.id)` — não põe dois pockets
+            #       na mesma posição.
+            # `of_last_seen_*` recebem o estado ATUAL da posição, como o insert do
+            # auto-import faz: sem isso o Banqueiro leria a carteira inteira como
+            # aporte desta rodada e dispararia evento falso.
+            cur.execute(
+                f"""
+                update pockets p
+                   set of_investment_id = i.id,
+                       of_last_seen_balance = i.balance,
+                       of_last_seen_profit = {_SQL_PROFIT},
+                       of_tombstone_connection_id = null,
+                       of_tombstone_provider_id = null
+                  from open_finance_investments i
+                 where i.connection_id = p.of_tombstone_connection_id
+                   and i.provider_investment_id = p.of_tombstone_provider_id
+                   and p.user_id = %s
+                   and i.connection_id = %s
+                   and p.of_investment_id is null
+                   and not exists (
+                       select 1 from pockets q where q.of_investment_id = i.id
+                   )
+                   -- UMA por chave natural, a de menor id. Duas lápides iguais
+                   -- existem quando um par duplicado foi criado antes do
+                   -- `_lock_user` do bind (produção pode ter): religar as duas no
+                   -- mesmo UPDATE renovava o par a cada ciclo some→volta, porque
+                   -- o `not exists` acima lê o snapshot de ANTES do statement e
+                   -- não vê a irmã da mesma rodada. A excedente é limpa logo
+                   -- abaixo, o que CURA o par em vez de eternizá-lo.
+                   and p.id = (
+                       select min(q2.id) from pockets q2
+                        where q2.user_id = p.user_id
+                          and q2.of_investment_id is null
+                          and q2.of_tombstone_connection_id = p.of_tombstone_connection_id
+                          and q2.of_tombstone_provider_id = p.of_tombstone_provider_id
+                   )
+                """,
+                (owner["user_id"], connection_id),
+            )
+            religadas = cur.rowcount
+            # As excedentes da mesma chave perdem a lápide na MESMA transação: a
+            # posição já tem dona, e lápide que nunca religa é só um ponteiro
+            # velho para o id do investimento no provedor.
+            cur.execute(
+                """
+                update pockets p
+                   set of_tombstone_connection_id = null,
+                       of_tombstone_provider_id = null
+                  from open_finance_investments i
+                 where i.connection_id = p.of_tombstone_connection_id
+                   and i.provider_investment_id = p.of_tombstone_provider_id
+                   and p.user_id = %s
+                   and i.connection_id = %s
+                   and p.of_investment_id is null
+                """,
+                (owner["user_id"], connection_id),
+            )
+
+            if leitura_completa:
+                # `vistos` VAZIO com leitura completa casa com tudo — e é o
+                # comportamento desejado: leitura válida que devolveu zero posição
+                # significa carteira vazia, e a conexão inteira é reconciliada. O
+                # `::text[]` explícito existe porque o Postgres recusa array vazio
+                # sem tipo.
+                cur.execute(
+                    "select id from open_finance_investments "
+                    "where connection_id=%s and provider_investment_id <> all(%s::text[])",
+                    (connection_id, vistos),
+                )
+                ausentes = [r["id"] for r in cur.fetchall()]
+                if ausentes:
+                    caixinhas_removidas = _desvincula_e_limpa_caixinhas(
+                        cur, owner["user_id"], ausentes, grava_lapide=True)
+                    cur.execute(
+                        "delete from open_finance_investments "
+                        "where connection_id=%s and id = any(%s)",
+                        (connection_id, ausentes),
+                    )
+                    removed = cur.rowcount
         conn.commit()
-    return {"investments_synced": count}
+    return {"investments_synced": count, "investments_removed": removed,
+            "caixinhas_removidas": caixinhas_removidas,
+            "caixinhas_religadas": religadas}
 
 
 # ── Banqueiro (agente cofre): caixinha OF ↔ meta do PigBank ───────────────────
@@ -1021,10 +1285,18 @@ def _unbind_pocket(cur, user_id: int, pocket_id: int) -> int:
     (`_is_of_mirror`, db/pockets.py), então todo lote aberto aqui é aporte do
     usuário. Sem lote nenhum dá 0, que é o caso do espelho puro.
 
+    `of_last_seen_profit` sai junto com o `of_last_seen_balance`, e isso é evento
+    falso do Banqueiro: os dois são baseline da MESMA posição. Deixar o profit para
+    trás fazia o delta da posição SEGUINTE ser medido contra o rendimento da
+    anterior — medido: baseline 5, posição nova com `amountProfit` 1000, e o
+    Banqueiro anunciava "você tirou R$995,00 da Viagem", de uma meta onde o usuário
+    não tocou.
+
     Só mexe em quem ESTÁ vinculado (`is not null`), pra um pocket_id solto não virar
     apagador de saldo."""
     cur.execute(
-        "update pockets set of_investment_id=null, of_last_seen_balance=null "
+        "update pockets set of_investment_id=null, of_last_seen_balance=null, "
+        "of_last_seen_profit=null "
         "where id=%s and user_id=%s and of_investment_id is not null",
         (pocket_id, user_id),
     )
@@ -1035,11 +1307,80 @@ def _unbind_pocket(cur, user_id: int, pocket_id: int) -> int:
     return 1
 
 
+def _desvincula_e_limpa_caixinhas(cur, user_id: int, of_investment_ids: list[int], *,
+                                  grava_lapide: bool = False) -> int:
+    """Política de "a posição do banco saiu": devolve cada caixinha vinculada ao
+    saldo PRÓPRIO dela (`_unbind_pocket`) e apaga só a que o sync criou e ficou
+    em zero. Devolve quantas linhas o delete levou.
+
+    NÃO depende do `on delete set null` do FK (db/schema.py): rodar isto ANTES do
+    delete da posição, na MESMA transação, é o que impede a caixinha fantasma com
+    saldo bancário (ver o disconnect: 800 + 1000 do nada).
+
+    `grava_lapide=True` (só a RECONCILIAÇÃO usa; o disconnect fica byte a byte
+    como era) carimba nos pockets SOBREVIVENTES a chave natural da posição que
+    eles perderam. A posição some por AUSÊNCIA e pode voltar — com id novo, porque
+    a linha foi apagada —, e sem a lápide o auto-import criaria uma caixinha
+    duplicada que o usuário não consegue desfazer (`OF_POCKET_READONLY`). No
+    disconnect não há volta a esperar: a conexão foi embora por decisão do usuário.
+    """
+    if not of_investment_ids:
+        return 0
+    # `connection_id`/`provider_investment_id` entram para a lápide; o
+    # `p.user_id = %s` continua sendo o que impede alcançar pocket de outro dono.
+    cur.execute(
+        """
+        select p.id, p.source, i.connection_id, i.provider_investment_id
+          from pockets p
+          join open_finance_investments i on i.id = p.of_investment_id
+         where p.user_id = %s and p.of_investment_id = any(%s)
+        """,
+        (user_id, list(of_investment_ids)),
+    )
+    espelhos = cur.fetchall()
+    for p in espelhos:
+        _unbind_pocket(cur, user_id, p["id"])
+    do_sync = [p["id"] for p in espelhos if p["source"] == "open_finance"]
+    levou = 0
+    if do_sync:
+        cur.execute("delete from pockets where user_id=%s and id = any(%s) and balance <= 0",
+                    (user_id, do_sync))
+        levou = cur.rowcount
+    if grava_lapide:
+        # DEPOIS do `_unbind_pocket` (ele dá UPDATE na mesma linha) e depois do
+        # delete: só quem SOBREVIVEU tem para onde religar. O `of_investment_id is
+        # null` fecha a corrida com um bind manual que tenha entrado no meio.
+        for p in espelhos:
+            cur.execute(
+                """
+                update pockets set of_tombstone_connection_id = %s,
+                                   of_tombstone_provider_id = %s
+                 where id = %s and user_id = %s and of_investment_id is null
+                """,
+                (p["connection_id"], p["provider_investment_id"], p["id"], user_id),
+            )
+    return levou
+
+
+def _limpa_lapide(cur, user_id: int, pocket_id: int) -> None:
+    """Apaga a lápide do pocket. O usuário decidiu na mão (vinculou ou desvinculou),
+    e decisão explícita ganha de vínculo velho esperando a posição voltar."""
+    cur.execute(
+        "update pockets set of_tombstone_connection_id=null, of_tombstone_provider_id=null "
+        "where id=%s and user_id=%s",
+        (pocket_id, user_id),
+    )
+
+
 def bind_pocket_to_caixinha(user_id: int, pocket_id: int, of_investment_id: int | None) -> bool:
     """Vincula (ou desvincula, of_investment_id=None) uma meta a uma caixinha OF.
 
-    Inicializa of_last_seen_balance com o saldo ATUAL da caixinha, pra o Banqueiro
-    contar só os aportes daqui pra frente (não o saldo histórico já acumulado).
+    Inicializa os DOIS baselines do Banqueiro — `of_last_seen_balance` e
+    `of_last_seen_profit` — com o estado ATUAL da posição, pra ele contar só os
+    aportes daqui pra frente (não o saldo nem o rendimento já acumulados). Os dois
+    juntos, como o insert do auto-import e a religação: só o saldo deixava o
+    rendimento da posição ANTERIOR servindo de régua para a nova, e o Banqueiro
+    anunciava saque que não existiu.
 
     Caixinha CRIADA pelo sync (`source='open_finance'`) nunca solta o vínculo nem
     TROCA de posição — recusa com OF_POCKET_READONLY, o mesmo código que o guard de
@@ -1047,9 +1388,24 @@ def bind_pocket_to_caixinha(user_id: int, pocket_id: int, of_investment_id: int 
     está no banco e qualquer posição reconhecida é reimportada no sync seguinte, então
     "não vincular" só produziria um pocket órfão com saldo mentiroso + uma cópia nova
     no sync. Trocar A por B é o mesmo estrago por outro caminho: A fica sem vínculo e
-    volta no sync seguinte, e o pocket passa a espelhar B com o NOME de A."""
+    volta no sync seguinte, e o pocket passa a espelhar B com o NOME de A.
+
+    SERIALIZADO por usuário (`_lock_user`, o mesmo lock do
+    `save_open_finance_investments` e do disconnect), e isso é dinheiro: sem ele,
+    dois binds simultâneos — duas abas, duplo clique — liam `anterior=None` e
+    vinculavam DUAS metas à MESMA posição. Medido com dois threads e uma
+    `Barrier`: colidia na primeira tentativa, e o saldo do banco passava a
+    aparecer duas vezes no patrimônio. O lock cobre as três corridas do mesmo
+    par: bind × bind, escotilha × escotilha e bind × reconciliação (esta última
+    gravando `of_investment_id` numa linha que a reconciliação está apagando).
+
+    Uma trava só, e é a de baixo na ordem: esta função nunca pega o
+    `pluggy_item_lock`, então não há ciclo com o sync (que pega o do item antes e
+    o do usuário depois)."""
     with get_conn() as conn:
         with conn.cursor() as cur:
+            from .bank_movements import _lock_user
+            _lock_user(cur, user_id)
             cur.execute(
                 "select source, of_investment_id from pockets where id=%s and user_id=%s",
                 (pocket_id, user_id),
@@ -1063,12 +1419,14 @@ def bind_pocket_to_caixinha(user_id: int, pocket_id: int, of_investment_id: int 
                 raise ValueError("OF_POCKET_READONLY")
             if of_investment_id is None:
                 ok = _unbind_pocket(cur, user_id, pocket_id) > 0
+                _limpa_lapide(cur, user_id, pocket_id)
                 conn.commit()
                 return ok
             # valida que a caixinha é do usuário e pega o saldo atual
             cur.execute(
-                """
-                select i.balance from open_finance_investments i
+                f"""
+                select i.balance, {_SQL_PROFIT} as profit
+                from open_finance_investments i
                 join open_finance_connections c on c.id = i.connection_id
                 where i.id=%s and c.user_id=%s
                 """,
@@ -1078,6 +1436,7 @@ def bind_pocket_to_caixinha(user_id: int, pocket_id: int, of_investment_id: int 
             if not row:
                 return False
             bal = row["balance"] or 0
+            profit = row["profit"]
             # 1 caixinha OF por meta: solta o vínculo anterior DESSA caixinha. Se
             # quem o segura é um pocket do sync, soltar deixaria ele órfão — a
             # mesma coisa que o ramo de cima recusa, então recusa aqui também.
@@ -1089,14 +1448,38 @@ def bind_pocket_to_caixinha(user_id: int, pocket_id: int, of_investment_id: int 
             anterior = cur.fetchone()
             if anterior and anterior["id"] != pocket_id:
                 if anterior["source"] == "open_finance":
-                    raise ValueError("OF_POCKET_READONLY")
-                _unbind_pocket(cur, user_id, anterior["id"])
+                    # ESCOTILHA: espelho PURO (sem lote aberto) não é dinheiro de
+                    # ninguém — é a cópia que o auto-import fez da posição. Se uma
+                    # meta manual quer a posição de volta, o espelho é apagado
+                    # nesta mesma transação e a meta fica com ela. Sem isto, a meta
+                    # que perdeu o vínculo por ausência e não foi religada ficava
+                    # presa para sempre: a posição voltou no nome de uma caixinha
+                    # automática, e `OF_POCKET_READONLY` recusava tudo.
+                    #
+                    # Com lote aberto, NÃO: lote é saldo próprio, sacável, aporte
+                    # que saiu da carteira do usuário (a mesma régua do
+                    # `_unbind_pocket`). Aí continua `OF_POCKET_READONLY`, e o lote
+                    # fica onde está.
+                    cur.execute(
+                        "select 1 from pocket_lots where user_id=%s and pocket_id=%s "
+                        "and status='open' limit 1",
+                        (user_id, anterior["id"]),
+                    )
+                    if cur.fetchone():
+                        raise ValueError("OF_POCKET_READONLY")
+                    cur.execute("delete from pockets where id=%s and user_id=%s",
+                                (anterior["id"], user_id))
+                else:
+                    _unbind_pocket(cur, user_id, anterior["id"])
             cur.execute(
-                "update pockets set of_investment_id=%s, of_last_seen_balance=%s "
-                "where id=%s and user_id=%s",
-                (of_investment_id, bal, pocket_id, user_id),
+                "update pockets set of_investment_id=%s, of_last_seen_balance=%s, "
+                "of_last_seen_profit=%s where id=%s and user_id=%s",
+                (of_investment_id, bal, profit, pocket_id, user_id),
             )
             ok = cur.rowcount > 0
+            # A decisão explícita do usuário ganha da lápide: vinculou na mão, não
+            # há mais vínculo velho esperando volta.
+            _limpa_lapide(cur, user_id, pocket_id)
             conn.commit()
             return ok
 
@@ -1108,11 +1491,11 @@ def list_banqueiro_pockets(user_id: int) -> list[dict]:
     with get_conn() as conn:
         with conn.cursor() as cur:
             cur.execute(
-                """
+                f"""
                 select p.id as pocket_id, p.name, p.emoji, p.target_amount, p.target_date,
                        p.of_last_seen_balance, p.of_last_seen_profit, p.of_investment_id,
                        i.balance as of_balance,
-                       nullif(i.raw->>'amountProfit', '')::numeric as of_profit
+                       {_SQL_PROFIT} as of_profit
                 from pockets p
                 join open_finance_investments i on i.id = p.of_investment_id
                 where p.user_id = %s and p.of_investment_id is not null
@@ -1200,16 +1583,25 @@ def sync_open_finance_caixinhas(connection_id: int, user_id: int) -> dict:
     vagas = pockets_restantes(user_id)  # None = tier sem teto
     with get_conn() as conn:
         with conn.cursor() as cur:
+            # O mesmo lock do bind (ver `bind_pocket_to_caixinha`), antes do passo
+            # 1: sem ele, um bind manual que fizesse commit entre o "ninguém é dono"
+            # e o insert abaixo (cuja guarda só olha NOME) deixava dois pockets na
+            # posição, e o passo 3 espelhava o saldo nos dois — dinheiro em dobro.
+            # Ordem: quem chama (pluggy_sync) já segura o `pluggy_item_lock`
+            # (advisory, conexão dedicada) e pega este depois; o bind só pega
+            # este. Não há ciclo.
+            from .bank_movements import _lock_user
+            _lock_user(cur, user_id)
             # 1. posições desta conexão COM SALDO > 0; a regra de caixinha é
             # aplicada em Python (`_e_caixinha`). Saldo 0 = fundo/reserva vazia
             # (ex.: Nubank "Reserva Planejada") — não vira caixinha fantasma.
             # `order by i.id`: a numeração do nome não pode depender do saldo, que
             # muda a cada sync — ordem de chegada do banco é estável.
             cur.execute(
-                """
+                f"""
                 select i.id as of_id, i.name, i.type, i.subtype, i.raw,
                        coalesce(i.balance, 0) as balance,
-                       nullif(i.raw->>'amountProfit', '')::numeric as profit,
+                       {_SQL_PROFIT} as profit,
                        c.institution_name
                 from open_finance_investments i
                 join open_finance_connections c on c.id = i.connection_id
@@ -1259,15 +1651,15 @@ def sync_open_finance_caixinhas(connection_id: int, user_id: int) -> dict:
                 for tentativa in range(1, 51):
                     new_name = name if tentativa == 1 else f"{name} {tentativa}"
                     # Duas guardas, porque elas cobrem coisas diferentes:
-                    # `not exists` com lower() é a de NOME, porque o unique da
-                    # tabela é `unique(user_id, name)` — CASE-SENSITIVE
-                    # (db/schema.py:115) — enquanto o resto do código de caixinha
-                    # compara `lower(name)`. Sem ela, o usuário com "caixinha
-                    # nubank" ganhava uma "Caixinha Nubank" do banco: duas
-                    # caixinhas de mesmo nome na tela, e o `on conflict` nunca via
-                    # a colisão. `on conflict do nothing` é a de CORRIDA: fecha a
-                    # janela TOCTOU entre o `not exists` e o insert sem abortar a
-                    # transação (era a UniqueViolation que levava o import inteiro).
+                    # `not exists` com lower() é a de NOME: o índice
+                    # uq_pockets_user_lower_name (#596) já recusa "Caixinha
+                    # Nubank" ao lado de "caixinha nubank", mas o `init_db` o
+                    # PULA se houver duplicata antiga, e aí só esta guarda impede
+                    # a caixinha de mesmo nome na tela. `on conflict do nothing`
+                    # (sem alvo, para valer com e sem o índice) é a de CORRIDA:
+                    # fecha a janela TOCTOU entre o `not exists` e o insert sem
+                    # abortar a transação (era a UniqueViolation que levava o
+                    # import inteiro).
                     cur.execute(
                         """
                         insert into pockets(
@@ -1280,7 +1672,7 @@ def sync_open_finance_caixinhas(connection_id: int, user_id: int) -> dict:
                         where not exists (
                             select 1 from pockets where user_id=%s and lower(name)=lower(%s)
                         )
-                        on conflict (user_id, name) do nothing
+                        on conflict do nothing
                         """,
                         (user_id, new_name, bal, of_id, bal, profit, user_id, new_name),
                     )
@@ -1420,6 +1812,9 @@ def delete_open_finance_transactions(
             )
             for row in cur.fetchall():
                 delete_if_shadow(cur, row["user_id"], row["imported_launch_id"])
+            from .open_finance_cash import estorna_links
+            for owner in owners:
+                estorna_links(cur, owner, [r["id"] for r in rows if r["user_id"] == owner])
             cur.execute(
                 "delete from open_finance_transactions where id = any(%s)",
                 ([r["id"] for r in rows],),
@@ -1519,6 +1914,8 @@ def save_open_finance_sync(connection_id: int, accounts: list[dict]) -> dict:
             # ressuscitava conexão morta — DELETED/ERROR viravam ACTIVE com
             # "sincronizado agora". Quem afirma sucesso é `mark_sync_result`, no
             # sync, DEPOIS de o `GET /items/{id}` confirmar que o item existe.
+            from .open_finance_cash import reconcile_cash_transfers
+            reconcile_cash_transfers(cur, owner["user_id"])
             reconcile_bank_movements(cur, owner["user_id"])
         conn.commit()
 
@@ -1662,7 +2059,14 @@ def pick_reconciliation_match(valor, tx_date, description, candidates) -> dict:
     return {"launch_id": best["id"], "verdict": "ask"}
 
 
-def _find_manual_candidates(cur, user_id: int, tipo: str, valor, tx_date) -> list[dict]:
+# Débito recorrente em conta: o lançamento É o débito do banco, não dinheiro em
+# espécie. Fonte única de quem o reconhece (importador, ordem inversa e o saque
+# em espécie, db/open_finance_cash*.py). Sem alias: a coluna é de `launches`.
+OF_RECURRING_SQL = "coalesce(efeitos ? 'of_recurring', false)"
+
+
+def _find_manual_candidates(cur, user_id: int, tipo: str, valor, tx_date, proprio=None,
+                            internos=False) -> list[dict]:
     """Lançamentos não-OF elegíveis a casar com uma tx OF, ainda não vinculados.
 
     Inclui `source = 'manual'` DE PROPÓSITO, mas só como candidato a 'ask':
@@ -1681,25 +2085,39 @@ def _find_manual_candidates(cur, user_id: int, tipo: str, valor, tx_date) -> lis
     `list_launches_by_tipo`: 'saida'/'entrada' passadas como ARGUMENTO passam a
     não casar nada (antes casavam as linhas legadas). Inalcançável daqui — o
     único produtor do argumento é `classify_open_finance_launch` — mas quem
-    ligar outro chamador precisa saber."""
+    ligar outro chamador precisa saber.
+
+    `proprio`: id do vínculo de saque em espécie que revalida o PRÓPRIO manual
+    (db/open_finance_cash_revisao.py) — a reserva dele e o interno que o "é o
+    mesmo" pôs não contam; o resto do predicado é o da escolha. `internos=True`
+    devolve também os internos (`interno`), que o saque em espécie usa como
+    bloqueio do crédito automático — nunca como par."""
     cur.execute(
         f"""
+        select * from (
         select id, valor, coalesce(posted_at, criado_em::date) as ref_date, alvo, nota,
                coalesce(source, 'manual') as source,
-               (efeitos ? 'of_recurring') as of_recurring
+               {OF_RECURRING_SQL} as of_recurring,
+               case when jsonb_typeof(efeitos -> 'delta_conta') = 'number'
+                    then (efeitos ->> 'delta_conta')::numeric end as delta_conta,
+               is_internal_movement and not exists (
+                   select 1 from of_cash_links p where p.id = %s and p.user_id = launches.user_id
+                      and p.status = 'ativo' and p.launch_id = launches.id) as interno
         from launches
         where user_id = %s
           and {TIPO_CANON_SQL} = %s
           and coalesce(source, 'manual') <> 'open_finance'
-          and is_internal_movement = false
           and abs(valor - %s) <= %s
           and coalesce(posted_at, criado_em::date) between %s and %s
           and not exists (
               select 1 from open_finance_transactions o where o.imported_launch_id = launches.id
           )
+          and not {RESERVA_SQL.format(t="launches", proprio="%s")}
+        ) c where %s or not c.interno
         """,
-        (user_id, tipo, Decimal(str(valor)), RECON_AMOUNT_TOL,
-         tx_date - timedelta(days=RECON_DATE_WINDOW), tx_date + timedelta(days=RECON_DATE_WINDOW)),
+        (proprio, user_id, tipo, Decimal(str(valor)), RECON_AMOUNT_TOL,
+         tx_date - timedelta(days=RECON_DATE_WINDOW), tx_date + timedelta(days=RECON_DATE_WINDOW),
+         proprio, internos),
     )
     return cur.fetchall()
 
@@ -1736,7 +2154,7 @@ def _insert_of_shadow(cur, user_id: int, r, cls) -> tuple[int | None, bool]:
         returning id
         """,
         (
-            user_id, cls["tipo"], cls["valor"], (r["category"] or "outros"),
+            user_id, cls["tipo"], cls["valor"], (categoria_pigbank(r["category"]) or "outros"),
             r["description"], None, criado_em, Jsonb(efeitos),
             "open_finance", r["provider_transaction_id"], r["transaction_date"], "BRL",
             cls["is_internal_movement"],
@@ -1767,6 +2185,7 @@ def import_open_finance_launches(user_id: int, connection_id: int | None = None)
     auto_merged = 0
     pending = 0
     skipped_non_bank = 0
+    novas: set[str] = set()  # categorias gravadas, para o catálogo do cliente
 
     with get_conn() as conn:
         with conn.cursor() as cur:
@@ -1788,6 +2207,8 @@ def import_open_finance_launches(user_id: int, connection_id: int | None = None)
                 (user_id, connection_id, connection_id),
             )
             rows = cur.fetchall()
+            from .open_finance_cash import cash_internal_tx_ids
+            caixa = cash_internal_tx_ids(cur, user_id)
 
             for r in rows:
                 if (r["account_type"] or "").upper() != "BANK":
@@ -1795,6 +2216,8 @@ def import_open_finance_launches(user_id: int, connection_id: int | None = None)
                     continue
 
                 cls = classify_open_finance_launch(r["amount"], r["category"], r["description"])
+                if r["of_tx_id"] in caixa:  # saque/depósito em espécie: par da Carteira
+                    cls["is_internal_movement"] = True
 
                 # Reconciliação (Fase 2): gasto/receita não-interno tenta casar com manual.
                 verdict, match_id = "none", None
@@ -1826,12 +2249,16 @@ def import_open_finance_launches(user_id: int, connection_id: int | None = None)
 
                 if verdict == "auto":
                     # Alto-confiança: mescla no lançamento manual — NÃO cria OF launch (1 real = 1 linha).
-                    if r["category"]:
+                    cat = categoria_pigbank(r["category"])
+                    if cat:
                         cur.execute(
-                            "update launches set categoria=%s "
-                            "where id=%s and (categoria is null or categoria in ('outros',''))",
-                            (r["category"], match_id),
+                            "update launches set categoria=%s where id=%s and user_id=%s "
+                            "and (categoria is null or categoria in ('outros','')) "
+                            "and not categoria_editada",  # 'outros' escolhido pelo cliente fica (#712)
+                            (cat, match_id, user_id),
                         )
+                        if cur.rowcount:
+                            novas.add(cat)
                     cur.execute(
                         "update open_finance_transactions "
                         "set imported_launch_id=%s, match_launch_id=%s, reconciliation_status='auto_merged' "
@@ -1844,6 +2271,8 @@ def import_open_finance_launches(user_id: int, connection_id: int | None = None)
                 # Sem match ('none') ou ambíguo ('ask'): cria o OF launch.
                 launch_id, created = _insert_of_shadow(cur, user_id, r, cls)
                 inserted += created
+                if created and categoria_pigbank(r["category"]):
+                    novas.add(categoria_pigbank(r["category"]))
 
                 if launch_id is not None:
                     status = "pending" if verdict == "ask" else "imported"
@@ -1856,6 +2285,7 @@ def import_open_finance_launches(user_id: int, connection_id: int | None = None)
                         pending += 1
 
         conn.commit()
+    garantir_no_catalogo(user_id, novas)
 
     return {
         "inserted": inserted,
@@ -1865,85 +2295,123 @@ def import_open_finance_launches(user_id: int, connection_id: int | None = None)
     }
 
 
-def reconcile_manual_launch(user_id: int, launch_id: int) -> dict:
-    """Reconciliação REVERSA (P0 #3): usuário criou um lançamento manual; se já existe um OF
-    launch gêmeo (importado antes), funde — apaga o OF launch e revincula a OF tx no manual.
+def propose_manual_reconciliation(user_id: int, launch_id: int) -> dict:
+    """Ordem inversa da reconciliação: o banco importou antes e o usuário lançou
+    o mesmo gasto (ou receita) à mão depois. Cria a MESMA pendência que o
+    importador cria na ordem direta — `pending`, `match` = o manual,
+    `imported` = a sombra — e para aí. Nunca funde, nunca apaga a sombra, nunca
+    mexe em saldo: quem decide é o usuário (confirm/reject).
 
-    Chamar logo após criar um lançamento manual (bot/web). Best-effort e idempotente.
+    Chamada só na CRIAÇÃO do manual (texto do bot, entrada rápida, POST
+    /launches, `mark_bill_paid`). Nunca na edição nem em varredura: é isso que
+    garante que um par rejeitado não volta (o reject grava `imported`, sem memória).
+
+    Pós-commit do lançamento: qualquer falha vira log e `{"ok": False}`, nunca
+    exceção — o chamador não distingue "não gravou" de "gravou e falhou no
+    acessório", e a fila de multi-lançamento relançaria o gasto.
     """
-    ensure_user(user_id)
+    try:
+        return _propose_manual_reconciliation(user_id, launch_id)
+    except Exception as exc:
+        # Sem traceback (issue #541): com o dono na coluna, o `_DashboardHandler`
+        # levaria o texto cru à exportação LGPD. Tipo + sqlstate, padrão do repo.
+        logger.error("propose_manual_reconciliation falhou (user %s, lancamento %s) causa=%s sqlstate=%s",
+                     user_id, launch_id, type(exc).__name__, getattr(exc, "sqlstate", None),
+                     extra={"user_id": user_id})
+        return {"ok": False}
+
+
+def _propose_manual_reconciliation(user_id: int, launch_id: int) -> dict:
+    from .bank_movements import _lock_user
     with get_conn() as conn:
         with conn.cursor() as cur:
+            # Mesma primeira trava do importador, do sync e de `_locked_tx`.
+            _lock_user(cur, user_id)
+            # O tipo do manual é canonizado NA LEITURA: é o parâmetro do bind
+            # abaixo, e é ele que pode vir legado ('saida'/'entrada'). A coluna
+            # `l.tipo` da sombra é moderna por construção (`_insert_of_shadow`).
             cur.execute(
-                """
-                select id, tipo, valor, coalesce(posted_at, criado_em::date) as ref_date,
-                       alvo, nota, coalesce(source,'manual') as source, is_internal_movement
-                from launches where id=%s and user_id=%s
+                f"""
+                select valor, {TIPO_CANON_SQL} as tipo,
+                       coalesce(posted_at, criado_em::date) as ref_date, alvo, nota
+                  from launches m
+                 where id=%s and user_id=%s
+                   and coalesce(source, 'manual') = 'manual'
+                   and is_internal_movement = false
+                   and not {OF_RECURRING_SQL}
+                   and not exists (
+                       -- Só as transações do PRÓPRIO usuário (§0 e custo):
+                       -- `match_launch_id` não tem índice, e sem o join isto
+                       -- varreria a tabela de todos os usuários a cada lançamento.
+                       select 1 from open_finance_transactions o
+                         join open_finance_accounts a on a.id = o.account_id
+                         join open_finance_connections c on c.id = a.connection_id
+                        where c.user_id = %s
+                          and (o.imported_launch_id = m.id or o.match_launch_id = m.id))
+                   and not {RESERVADO_SQL.format(t="m")}
                 """,
-                (launch_id, user_id),
+                (launch_id, user_id, user_id),
             )
             m = cur.fetchone()
-            if not m or m["source"] == "open_finance" or m["is_internal_movement"]:
-                return {"ok": False, "reason": "not_manual"}
+            if not m or m["tipo"] not in ("despesa", "receita"):
+                conn.commit()
+                return {"ok": True, "of_tx_id": None}
 
-            # `l.tipo=%s` cru: canonizar a COLUNA aqui seria no-op, e essa é a
-            # armadilha do trecho. `l.tipo` é a coluna do lançamento OF, moderna por
-            # construção (prova em `detect_open_finance_salary`, :1948-1958); quem pode
-            # vir legado é o PARÂMETRO, `m["tipo"]`, do lançamento MANUAL, que não
-            # passa por filtro de `source` nenhum. Um manual 'saida' procuraria um OF
-            # 'saida', que não existe: o dedupe reverso falha calado e o gasto conta
-            # DUAS vezes. O conserto, se um dia precisar, é canonizar o PARÂMETRO em
-            # Python antes do bind — `{TIPO_CANON_SQL} = %s` na coluna é no-op aqui,
-            # porque a coluna já é moderna. Hoje é inalcançável só porque nenhum
-            # escritor atual grava a forma legada (o chamador reconcilia lançamento
-            # recém-criado), NÃO pelo filtro de `source`. Mesma inversão que
-            # `_find_manual_candidates` (:1363-1372) documenta, com os lados trocados:
-            # lá a coluna é suja e o parâmetro limpo. Registrado na issue 294.
+            # Candidatas só do MESMO recorte do aviso e do modal
+            # (`ACTIONABLE_PENDING_SQL`): transação de conexão PAUSED/DELETED ou de
+            # conta não-BRL viraria um par que ninguém vê — e tomaria o lugar de
+            # uma elegível. Os três primeiros %s: `merged_wallet_delta_params`.
+            # Nem a do saque em espécie (a sombra ainda não interna entre o sync e
+            # a correção dela): a pendência nasceria escondida e prenderia o manual.
+            from .open_finance_cash import cash_internal_tx_ids
             cur.execute(
-                """
-                select l.id, l.valor, coalesce(l.posted_at, l.criado_em::date) as ref_date,
-                       o.id as of_tx_id, o.description as of_desc
-                from launches l
-                join open_finance_transactions o on o.imported_launch_id = l.id
-                where l.user_id=%s and coalesce(l.source,'') = 'open_finance'
-                  and l.tipo=%s and l.is_internal_movement = false
-                  and abs(l.valor - %s) <= %s
-                  and coalesce(l.posted_at, l.criado_em::date) between %s and %s
-                  and o.reconciliation_status in ('imported','pending')
+                f"""
+                select t.id as of_tx_id, t.description, l.id, l.valor,
+                       coalesce(l.posted_at, l.criado_em::date) as ref_date{_RECORTE_TX_FROM_SQL}
+                  join launches l on l.id = t.imported_launch_id
+                 where l.user_id = %s
+                   and l.source = 'open_finance' and l.is_internal_movement = false
+                   and l.tipo = %s
+                   and t.match_launch_id is null
+                   and t.reconciliation_status in ('imported', 'pending')
+                   and abs(l.valor - %s) <= %s
+                   and coalesce(l.posted_at, l.criado_em::date) between %s and %s
+                   and not t.id = any(%s)
+                 order by t.transaction_date, t.id
+                 for update of t
                 """,
-                (user_id, m["tipo"], m["valor"], RECON_AMOUNT_TOL,
+                (*merged_wallet_delta_params(user_id), m["tipo"], m["valor"], RECON_AMOUNT_TOL,
                  m["ref_date"] - timedelta(days=RECON_DATE_WINDOW),
-                 m["ref_date"] + timedelta(days=RECON_DATE_WINDOW)),
+                 m["ref_date"] + timedelta(days=RECON_DATE_WINDOW), list(cash_internal_tx_ids(cur, user_id))),
             )
-            of_rows = cur.fetchall()
-
-    if not of_rows:
-        return {"ok": True, "matched": False}
-
-    manual_desc = f"{m['alvo'] or ''} {m['nota'] or ''}"
-    candidates = [
-        {"id": r["id"], "valor": r["valor"], "ref_date": r["ref_date"], "alvo": r["of_desc"], "nota": None}
-        for r in of_rows
-    ]
-    pick = pick_reconciliation_match(m["valor"], m["ref_date"], manual_desc, candidates)
-    if pick["verdict"] != "auto":
-        return {"ok": True, "matched": False, "verdict": pick["verdict"]}
-
-    of_launch_id = pick["launch_id"]
-    of_tx_id = next(r["of_tx_id"] for r in of_rows if r["id"] == of_launch_id)
-    try:
-        delete_launch_and_rollback(user_id, of_launch_id)
-    except Exception:
-        pass
-    with get_conn() as conn:
-        with conn.cursor() as cur:
-            cur.execute(
-                "update open_finance_transactions "
-                "set imported_launch_id=%s, match_launch_id=%s, reconciliation_status='auto_merged' where id=%s",
-                (launch_id, launch_id, of_tx_id),
+            rows = cur.fetchall()
+            pick = pick_reconciliation_match(
+                m["valor"], m["ref_date"], f"{m['alvo'] or ''} {m['nota'] or ''}",
+                [{"id": r["id"], "valor": r["valor"], "ref_date": r["ref_date"],
+                  "alvo": r["description"], "nota": None} for r in rows],
             )
+            # 'auto' e 'ask' viram pendência igual: lançamento manual nunca
+            # funde sozinho (decisão "lançamentos manuais exclusivos para dinheiro").
+            # Limitação aceita: o primeiro manual do mesmo valor leva o par ("mercado 50
+            # e padaria 50" × banco "PADARIA -50" → par com o mercado); rejeitado, a
+            # padaria não é reoferecida (só roda na criação). docs/validacao-planos-pl01.md.
+            of_tx_id = next((r["of_tx_id"] for r in rows if r["id"] == pick["launch_id"]), None)
+            if of_tx_id is not None:
+                cur.execute(
+                    """update open_finance_transactions
+                          set match_launch_id=%s, reconciliation_status='pending'
+                        where id=%s and match_launch_id is null
+                          and reconciliation_status in ('imported', 'pending')
+                          and account_id in (
+                              select a.id from open_finance_accounts a
+                                join open_finance_connections c on c.id = a.connection_id
+                               where c.user_id = %s)""",
+                    (launch_id, of_tx_id, user_id),
+                )
+                if cur.rowcount != 1:
+                    of_tx_id = None
         conn.commit()
-    return {"ok": True, "matched": True, "merged_of_launch": of_launch_id}
+    return {"ok": True, "of_tx_id": of_tx_id}
 
 
 def import_open_finance_credit(user_id: int, connection_id: int | None = None) -> dict:
@@ -1957,6 +2425,7 @@ def import_open_finance_credit(user_id: int, connection_id: int | None = None) -
     card_cache: dict[int, int] = {}
     links: list[tuple[int, int]] = []
     inserted = 0
+    novas: set[str] = set()
 
     with get_conn() as conn:
         with conn.cursor() as cur:
@@ -2015,13 +2484,16 @@ def import_open_finance_credit(user_id: int, connection_id: int | None = None) -
                 origin_ym,
             ])
             group_id = uuid5(NAMESPACE_OID, key)
+        cat = categoria_pigbank(r["category"])
         tx_id, created = add_imported_credit_purchase(
-            user_id, card_cache[of_acc_id], r["amount"], r["category"],
+            user_id, card_cache[of_acc_id], r["amount"], cat,
             r["transaction_date"], r["provider_transaction_id"],
             installment_no=inst_no, installments_total=inst_total, group_id=group_id,
         )
         if created:
             inserted += 1
+            if cat:
+                novas.add(cat)
         if tx_id is not None:
             links.append((r["of_tx_id"], tx_id))
 
@@ -2034,6 +2506,7 @@ def import_open_finance_credit(user_id: int, connection_id: int | None = None) -
                         (credit_tx_id, of_tx_id),
                     )
             conn.commit()
+    garantir_no_catalogo(user_id, novas)
 
     return {"inserted": inserted, "linked": len(links), "cards": len(card_cache)}
 
@@ -2066,6 +2539,7 @@ def _get_or_create_open_bill_cur(cur, user_id: int, card_id: int, ref_date) -> i
 def _sync_imported_credit_updates(user_id: int, connection_id: int | None) -> int:
     """Cartão e totais de faturas são uma transação, sem trava da Carteira."""
     credit_updated = 0
+    novas: set[str] = set()
     with get_conn() as conn:
         with conn.cursor() as cur:
             # 2) Transações de cartão (ajusta o total da fatura pela diferença)
@@ -2074,7 +2548,7 @@ def _sync_imported_credit_updates(user_id: int, connection_id: int | None) -> in
                 select o.amount, o.transaction_date, o.category,
                        ct.id as ct_id, ct.valor as cur_valor, ct.is_refund as cur_refund,
                        ct.categoria as cur_cat, ct.purchased_at as cur_date, ct.bill_id,
-                       ct.card_id
+                       ct.card_id, ct.categoria_editada as editada
                 from open_finance_transactions o
                 join open_finance_accounts a on a.id = o.account_id
                 join open_finance_connections c on c.id = a.connection_id
@@ -2088,11 +2562,11 @@ def _sync_imported_credit_updates(user_id: int, connection_id: int | None) -> in
                 amt = Decimal(str(r["amount"]))
                 new_valor = -amt  # convenção canônica assinada (compra +, estorno -)
                 new_refund = amt > 0
-                new_cat = r["category"]
+                new_cat = categoria_pigbank(r["category"])
                 changed = (
                     Decimal(str(r["cur_valor"])) != new_valor
                     or bool(r["cur_refund"]) != new_refund
-                    or (r["cur_cat"] or None) != (new_cat or None)
+                    or (not r["editada"] and (r["cur_cat"] or None) != (new_cat or None))
                     or r["cur_date"] != r["transaction_date"]
                 )
                 if changed:
@@ -2108,11 +2582,17 @@ def _sync_imported_credit_updates(user_id: int, connection_id: int | None) -> in
                         )
                         if resolved is not None:
                             new_bill_id = resolved
+                    # a marca decide NO UPDATE: edição commitada depois do select vale (#712)
                     cur.execute(
-                        "update credit_transactions set valor=%s, is_refund=%s, categoria=%s, "
-                        "purchased_at=%s, bill_id=%s where id=%s",
-                        (new_valor, new_refund, new_cat, r["transaction_date"], new_bill_id, r["ct_id"]),
+                        "update credit_transactions set valor=%s, is_refund=%s, "
+                        "categoria = case when categoria_editada then categoria else %s end, "
+                        "purchased_at=%s, bill_id=%s where id=%s and user_id=%s returning categoria",
+                        (new_valor, new_refund, new_cat, r["transaction_date"], new_bill_id,
+                         r["ct_id"], user_id),
                     )
+                    gravada = (cur.fetchone() or {}).get("categoria")
+                    if new_cat and new_cat != r["cur_cat"] and gravada == new_cat:
+                        novas.add(new_cat)
                     if new_bill_id == old_bill_id:
                         # mesma fatura: ajusta só pela diferença de valor (fatura foi `total += valor`).
                         cur.execute(
@@ -2132,6 +2612,7 @@ def _sync_imported_credit_updates(user_id: int, connection_id: int | None) -> in
                     credit_updated += 1
 
         conn.commit()
+    garantir_no_catalogo(user_id, novas)
     return credit_updated
 
 
@@ -2141,9 +2622,13 @@ def sync_imported_open_finance_updates(user_id: int, connection_id: int | None =
     Sem isso, uma correção de valor/data/categoria atualizava só o espelho OF — o launch,
     a credit_transaction e o total da fatura ficavam com o valor velho. Mexe apenas em
     registros DO OF (source=open_finance); nunca sobrescreve lançamento manual auto-mesclado.
+    Categoria e interno editados pelo cliente (`categoria_editada`) ficam como ele deixou
+    (#712). O interno de linha editada = o da própria categoria, ou interno enquanto
+    o par da Carteira vale (depois do par, volta ao que a categoria diz).
     """
     ensure_user(user_id)
     launches_updated = 0
+    novas: set[str] = set()
     # CREDIT commita antes de BANK: pagamento segura fatura enquanto seu
     # helper debita accounts em outra conexão. Não inverter essa ordem.
     credit_updated = _sync_imported_credit_updates(user_id, connection_id)
@@ -2155,9 +2640,10 @@ def sync_imported_open_finance_updates(user_id: int, connection_id: int | None =
             # 1) Launches próprios do OF (conta BANK)
             cur.execute(
                 """
-                select o.amount, o.transaction_date, o.category, o.description,
+                select o.id as of_tx_id, o.amount, o.transaction_date, o.category, o.description,
                        l.id as launch_id, l.valor as cur_valor, l.categoria as cur_cat,
                        l.tipo as cur_tipo, l.is_internal_movement as cur_internal,
+                       l.categoria_editada as editada,
                        coalesce(l.posted_at, l.criado_em::date) as cur_date
                 from open_finance_transactions o
                 join open_finance_accounts a on a.id = o.account_id
@@ -2168,30 +2654,52 @@ def sync_imported_open_finance_updates(user_id: int, connection_id: int | None =
                 """,
                 (user_id, connection_id, connection_id),
             )
-            for r in cur.fetchall():
+            from .open_finance_cash import cash_internal_tx_ids
+            rows, caixa = cur.fetchall(), cash_internal_tx_ids(cur, user_id)
+            for r in rows:
                 cls = classify_open_finance_launch(r["amount"], r["category"], r["description"])
-                new_cat = r["category"] or "outros"
+                forcado = r["of_tx_id"] in caixa  # saque/depósito em espécie: par da Carteira
+                if forcado:
+                    cls["is_internal_movement"] = True
+                new_cat = categoria_pigbank(r["category"]) or "outros"
+                editada = bool(r["editada"])
+                # editada: interno = o que a categoria dela diz (como a edição grava), ou forçado pelo
+                # par da Carteira; reavaliado quando o par acaba — senão o `true` forçado fica preso
+                alvo_editada = forcado or is_internal_category(r["cur_cat"])
+                alvo = alvo_editada if editada else cls["is_internal_movement"]
                 changed = (
                     Decimal(str(r["cur_valor"])) != cls["valor"]
                     or r["cur_tipo"] != cls["tipo"]
-                    or (r["cur_cat"] or "") != new_cat
-                    or bool(r["cur_internal"]) != cls["is_internal_movement"]
+                    or (not editada and (r["cur_cat"] or "") != new_cat)
+                    or bool(r["cur_internal"]) != alvo
                     or r["cur_date"] != r["transaction_date"]
                 )
                 if changed:
+                    # a marca decide NO UPDATE: edição commitada depois do select vale (#712);
+                    # o interno da editada só se reescreve se a categoria ainda é a que foi lida
                     cur.execute(
                         """
-                        update launches set valor=%s, tipo=%s, categoria=%s,
-                               is_internal_movement=%s, posted_at=%s
-                        where id=%s
+                        update launches set valor=%s, tipo=%s,
+                               categoria = case when categoria_editada then categoria else %s end,
+                               is_internal_movement = case when not categoria_editada then %s
+                                   when categoria is not distinct from %s then %s
+                                   else is_internal_movement end,
+                               posted_at=%s
+                        where id=%s and user_id=%s
+                        returning categoria
                         """,
                         (cls["valor"], cls["tipo"], new_cat, cls["is_internal_movement"],
-                         r["transaction_date"], r["launch_id"]),
+                         r["cur_cat"], alvo_editada,
+                         r["transaction_date"], r["launch_id"], user_id),
                     )
+                    gravada = (cur.fetchone() or {}).get("categoria")
+                    if new_cat != r["cur_cat"] and gravada == new_cat:
+                        novas.add(new_cat)
                     launches_updated += 1
 
 
         conn.commit()
+    garantir_no_catalogo(user_id, novas)
 
     return {"launches_updated": launches_updated, "credit_updated": credit_updated}
 
@@ -2386,17 +2894,25 @@ BANK_ACCOUNTS_SQL = """
 # grava `delta_conta` -1 e `accounts.balance = balance + delta`
 # (db/accounts.py:94); devolver o débito é somar +1, como já faz o rollback do
 # delete (`balance - delta_conta`, db/accounts.py:1766).
+#
+# Transações `t` das contas no recorte, casadas pela identidade da conta (ver
+# acima). Usado aqui e na ordem inversa (`_propose_manual_reconciliation`), para
+# que o par criado lá seja o mesmo que o aviso e o modal enxergam. Dois %s: o de
+# `BANK_ACCOUNTS_SQL` e o de `tc.user_id`.
+_RECORTE_TX_FROM_SQL = f"""
+        from ({BANK_ACCOUNTS_SQL}) a
+        join open_finance_accounts ra on ra.id = a.id
+        join open_finance_accounts ta on ta.provider_account_id = ra.provider_account_id
+        join open_finance_connections tc on tc.id = ta.connection_id and tc.user_id = %s
+        join open_finance_transactions t on t.account_id = ta.id"""
+
+
 def _fused_join_sql(link_col: str, extra_where: str,
                     cols: str = "distinct l.id, (l.efeitos ->> 'delta_conta')::numeric as d") -> str:
     """O miolo acima: lançamentos manuais ligados por `t.<link_col>` a transações
     das contas no recorte. Params: `merged_wallet_delta_params`."""
     return f"""
-      select {cols}
-        from ({BANK_ACCOUNTS_SQL}) a
-        join open_finance_accounts ra on ra.id = a.id
-        join open_finance_accounts ta on ta.provider_account_id = ra.provider_account_id
-        join open_finance_connections tc on tc.id = ta.connection_id and tc.user_id = %s
-        join open_finance_transactions t on t.account_id = ta.id
+      select {cols}{_RECORTE_TX_FROM_SQL}
         join launches l on l.id = t.{link_col}
        where l.user_id = %s
          and coalesce(l.source, 'manual') <> 'open_finance'
@@ -2410,11 +2926,16 @@ MERGED_WALLET_DELTA_SQL = f"""
 
 # Pendência ACIONÁVEL (`pending`: imported = sombra, match = X), uma linha por
 # transação: conta no recorte, X existente e X não ocupado por outra transação
+# nem pelo saque em espécie (`RESERVADO_SQL`), e transação que não é do saque
+# em espécie (`cash_internal_tx_ids`, o último %s)
 # (confirmar daria ALREADY_LINKED). Regra única da lista e do resumo (§0.7).
+# Params: `actionable_pending_params`.
 ACTIONABLE_PENDING_SQL = _fused_join_sql("match_launch_id", """
          and t.reconciliation_status = 'pending'
          and not exists (select 1 from open_finance_transactions o
-                          where o.imported_launch_id = l.id)""",
+                          where o.imported_launch_id = l.id)
+         and not t.id = any(%s)
+         and not """ + RESERVADO_SQL.format(t="l"),
                                          cols="t.id as of_tx_id, l.id, (l.efeitos ->> 'delta_conta')::numeric as d")
 
 # O que mudaria na Carteira exibida se o usuário confirmasse: mesmo sinal da
@@ -2438,6 +2959,13 @@ def merged_wallet_delta_params(user_id: int) -> tuple:
     `BANK_ACCOUNTS_SQL`, o de `tc.user_id` e o de `l.user_id`. Fonte única da
     contagem — os três chamadores leem daqui em vez de montar a tupla (§0.7)."""
     return (user_id, user_id, user_id)
+
+
+def actionable_pending_params(cur, user_id: int) -> tuple:
+    """Os de `ACTIONABLE_PENDING_SQL`/`PENDING_RECONCILIATION_SQL`: os de
+    `merged_wallet_delta_params` e as transações do saque em espécie."""
+    from .open_finance_cash import cash_internal_tx_ids
+    return (*merged_wallet_delta_params(user_id), list(cash_internal_tx_ids(cur, user_id)))
 
 
 def merged_wallet_delta(cur, user_id: int) -> Decimal:
@@ -2787,7 +3315,7 @@ def disconnect_open_finance_connection(
             from .bank_movements import _lock_user, delete_if_shadow, reconcile_bank_movements
             # Import LOCAL: `open_finance_state` importa este módulo no topo, e a
             # mão única do import está documentada lá (`:38-42`).
-            from .open_finance_state import mark_items_removed
+            from .open_finance_state import mark_items_removed, pluggy_items_a_deletar
             _lock_user(cur, user_id)
             # Caixinha vinculada é ESPELHO: o dinheiro está no banco. Indo embora a
             # conexão, o FK só zera o `of_investment_id` (`on delete set null`,
@@ -2802,23 +3330,30 @@ def disconnect_open_finance_connection(
             # recebido depósito (só dá pra isso sem vínculo) fica, com o que é dela.
             cur.execute(
                 """
-                select p.id, p.source from pockets p
-                 join open_finance_investments i on i.id = p.of_investment_id
+                select i.id from open_finance_investments i
                  join open_finance_connections c on c.id = i.connection_id
-                 where p.user_id = %s and c.user_id = %s
-                   and (%s::bigint is null or c.id = %s)
+                 where c.user_id = %s and (%s::bigint is null or c.id = %s)
+                """,
+                (user_id, connection_id, connection_id),
+            )
+            _desvincula_e_limpa_caixinhas(cur, user_id, [r["id"] for r in cur.fetchall()])
+            # A LÁPIDE morre com a conexão, e as DUAS colunas: o FK zera só o
+            # `of_tombstone_connection_id` (`on delete set null`) e deixava o
+            # `of_tombstone_provider_id` — o id da posição no PROVEDOR — para
+            # sempre numa linha que nunca mais vai religar. Aqui, na mesma
+            # transação e ANTES do delete da conexão, com `user_id`.
+            cur.execute(
+                """
+                update pockets set of_tombstone_connection_id = null,
+                                   of_tombstone_provider_id = null
+                 where user_id = %s
+                   and of_tombstone_connection_id in (
+                       select c.id from open_finance_connections c
+                        where c.user_id = %s and (%s::bigint is null or c.id = %s)
+                   )
                 """,
                 (user_id, user_id, connection_id, connection_id),
             )
-            espelhos = cur.fetchall()
-            for p in espelhos:
-                _unbind_pocket(cur, user_id, p["id"])
-            do_sync = [p["id"] for p in espelhos if p["source"] == "open_finance"]
-            if do_sync:
-                cur.execute(
-                    "delete from pockets where user_id=%s and id = any(%s) and balance <= 0",
-                    (user_id, do_sync),
-                )
             # Reler AGORA, sob o lock: entre a leitura do passo 1 e aqui, um undo
             # concorrente pode ter trocado o imported_launch_id por uma sombra
             # nova (`_insert_of_shadow`) — sem reler, ela sobra órfã do cascade.
@@ -2835,6 +3370,8 @@ def disconnect_open_finance_connection(
             )
             for row in cur.fetchall():
                 delete_if_shadow(cur, row["user_id"], row["imported_launch_id"])
+            from .open_finance_cash import record_coverage
+            record_coverage(cur, user_id, connection_id)
             if connection_id is None:
                 cur.execute(
                     "delete from open_finance_connections where user_id=%s "
@@ -2859,11 +3396,7 @@ def disconnect_open_finance_connection(
         conn.commit()
 
     if swept_out is not None:
-        swept_out.extend(sorted({
-            r["provider_item_id"] for r in varridas
-            if r["provider"] == "pluggy" and r["provider_item_id"]
-            and str(r["status"] or "").upper() != "PAUSED"
-        }))
+        swept_out.extend(pluggy_items_a_deletar(varridas))
 
     return deleted
 

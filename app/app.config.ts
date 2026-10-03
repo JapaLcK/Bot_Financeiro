@@ -56,6 +56,19 @@ const config: ExpoConfig = {
   ios: {
     bundleIdentifier: `${ID_BASE}${atual.sufixoId}`,
     supportsTablet: false,
+    appleTeamId: "S849YDA49P",
+    buildNumber: "13",
+    config: { usesNonExemptEncryption: false },
+    // Salvar senha e código no app Senhas: só produção, que é o único id em
+    // `/.well-known/apple-app-site-association` (frontend/routes/static_pages.py,
+    // `_APPLE_APP_IDS`). Dev e staging ficam fora para não misturar credenciais
+    // nem exigir a capability nos App IDs deles.
+    ...(AMBIENTE === "production" ? { associatedDomains: ["webcredentials:pigbankai.com"] } : {}),
+    // Entrar com a Apple: só o App ID de produção tem a capability, e o
+    // backend só aceita o `aud` dele (core/services/apple_signin.py). No dev
+    // client a Apple falha e cai no aviso genérico; o Expo Go (57.0.9) nem traz
+    // o módulo, e o botão não renderiza. O caminho real só no build de produção.
+    ...(AMBIENTE === "production" ? { usesAppleSignIn: true } : {}),
   },
   android: {
     package: `${ID_BASE}${atual.sufixoId}`,
@@ -64,7 +77,25 @@ const config: ExpoConfig = {
   // integração nativa e sobe os source maps. Sem ele, o empacotamento do Hermes
   // deixa a pilha de erro ilegível, e a camada de observabilidade relata sem
   // dizer ONDE — que é metade do valor dela.
-  plugins: ["expo-router", "expo-secure-store", "@sentry/react-native/expo"],
+  // `enableSceneSupport`: app compilado com o SDK do iOS 27 (Xcode 27) só abre
+  // com o ciclo de vida por scenes do UIKit; o SDK 57 o traz como opt-in
+  // (expo/fyi, "Staying on SDK 57 with Xcode 27"). No SDK 58 vira no-op: sai
+  // na atualização.
+  plugins: [
+    "expo-router",
+    "expo-secure-store",
+    "@sentry/react-native/expo",
+    ["expo-build-properties", { ios: { enableSceneSupport: true } }],
+    // Grava o `NSFaceIDUsageDescription`: sem ele o iOS derruba o app no
+    // primeiro prompt de Face ID. Em todos os ambientes — a trava existe em todos.
+    [
+      "expo-local-authentication",
+      { faceIDPermission: "O PigBank usa o Face ID para proteger seu app quando você volta para ele." },
+    ],
+    // Grava o entitlement da Apple e deixa o botão do sistema em português
+    // (`CFBundleAllowMixedLocalizations`). Só produção, como o `usesAppleSignIn`.
+    ...(AMBIENTE === "production" ? ["expo-apple-authentication"] : []),
+  ],
   experiments: { typedRoutes: true },
   extra: {
     ambiente: AMBIENTE,

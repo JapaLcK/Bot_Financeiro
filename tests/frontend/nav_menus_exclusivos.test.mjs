@@ -258,11 +258,11 @@ test("3) conta primeiro, burger depois: a direção que já funcionava (positivo
 test("4) Enter na âncora: o foco vai para o destino, e o Tab segue de lá", async () => {
   const { ctx, page } = await abrir({ reduced: true });
   await page.click(".pb-burger");
-  await page.focus('.nav-links a[href="#funcionalidades"]');
+  await page.focus('.nav-links a[href="#open-finance"]');
   await page.keyboard.press("Enter");
 
   const foco = await page.evaluate(() => {
-    const s = document.getElementById("funcionalidades"), a = document.activeElement;
+    const s = document.getElementById("open-finance"), a = document.activeElement;
     return { tag: a.tagName, id: a.id, no_alvo: a === s || s.contains(a),
              scrollY: Math.round(scrollY),
              navOpen: document.querySelector(".nav").classList.contains("pb-nav-open") };
@@ -279,7 +279,7 @@ test("4) Enter na âncora: o foco vai para o destino, e o Tab segue de lá", asy
   // não medido aqui. Quem a ler como cobertura vai se enganar; ver o cabeçalho.
   await page.keyboard.press("Tab");
   const seguinte = await page.evaluate(() => {
-    const s = document.getElementById("funcionalidades"), a = document.activeElement;
+    const s = document.getElementById("open-finance"), a = document.activeElement;
     return { tag: a.tagName, href: a.getAttribute("href"), dentro: s.contains(a),
              y: Math.round(a.getBoundingClientRect().top) };
   });
@@ -291,7 +291,7 @@ test("4) Enter na âncora: o foco vai para o destino, e o Tab segue de lá", asy
 test("5) Escape com o foco na âncora ainda devolve ao burger (positivo)", async () => {
   const { ctx, page } = await abrir({ reduced: true });
   await page.click(".pb-burger");
-  await page.focus('.nav-links a[href="#funcionalidades"]');
+  await page.focus('.nav-links a[href="#open-finance"]');
   await page.keyboard.press("Escape");
   const m = await page.evaluate(() => ({
     ae: document.activeElement.className,
@@ -311,10 +311,10 @@ test("6) 1280: o handler roda onde não há menu, e o foco vai ao destino igual"
   const { ctx, page } = await abrir({ reduced: true, w: 1280, h: 900 });
   assert.equal(await page.$eval(".pb-burger", (e) => e.getBoundingClientRect().height), 0,
     "o burger apareceu no desktop — o caso perde o sentido");
-  await page.focus('.nav-links a[href="#funcionalidades"]');
+  await page.focus('.nav-links a[href="#open-finance"]');
   await page.keyboard.press("Enter");
   const m = await page.evaluate(() => {
-    const s = document.getElementById("funcionalidades"), a = document.activeElement;
+    const s = document.getElementById("open-finance"), a = document.activeElement;
     return { no_alvo: a === s || s.contains(a), tag: a.tagName,
              tabindex: s.getAttribute("tabindex"), scrollY: Math.round(scrollY) };
   });

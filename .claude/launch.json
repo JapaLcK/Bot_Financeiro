@@ -12,6 +12,12 @@
       "runtimeExecutable": ".venv/bin/python",
       "runtimeArgs": ["dashboard_dev.py"],
       "port": 8000
+    },
+    {
+      "name": "dashboard-v2",
+      "runtimeExecutable": "python3",
+      "runtimeArgs": ["-m", "http.server", "8897", "--bind", "127.0.0.1"],
+      "port": 8897
     }
   ]
 }

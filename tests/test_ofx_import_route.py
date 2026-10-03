@@ -13,10 +13,14 @@ pytest lê o venv, não o arquivo. É desinstalar `python-multipart` do venv: os
 testes que chegam no `request.form()` ficam vermelhos com o mesmo AssertionError
 do traceback de produção.
 """
+from datetime import timedelta
+
 import pytest
 
 import db
+from _aviso_fim_do_gratis_helpers import agora, montar
 from conftest import promote_to_pro
+from core.services.plan_service import get_plan_tier, has_app_access
 from db.users import ensure_user
 
 # Reuso (CLAUDE.md §0.1): o extrato OFX de exemplo e o TestClient com os 3
@@ -121,7 +125,20 @@ def test_nao_importa_ofx_na_conta_de_outro(pro_user_id):
 
 # ─── o gate de plano continua fechado ────────────────────────────────────────
 
-def test_usuario_sem_pro_continua_barrado(user_id):
+def test_usuario_sem_plano_e_barrado_no_gate_de_acesso(user_id):
+    r = _upload(user_id)
+    assert r.status_code == 402, r.text
+    assert r.json()["detail"]["error"] == "subscription_required"
+    assert _launches(user_id) == []
+
+
+def test_carencia_passa_pelo_acesso_e_cai_no_pro_required(user_id):
+    """Único estado v2 que passa pelo gate de acesso e chega ao
+    `_require_pro(user_id, "ofx_import")` da rota (finance_bot_websocket_custom.py:7520):
+    plano pago vencido, relógio de cobrança na carência → acesso sim, tier free."""
+    montar(user_id, "pro", agora() - timedelta(days=1), "past_due", relogio_dias=2)
+    assert has_app_access(user_id) is True, "pré-condição: a carência dá acesso"
+    assert get_plan_tier(user_id) == "free", "pré-condição: sem tier pago"
     r = _upload(user_id)
     assert r.status_code == 403, r.text
     assert r.json()["detail"]["error"] == "pro_required"

@@ -38,18 +38,28 @@ observação nova, que é exatamente o bug.
 | D | sync: leitura remota incompleta (ex.: 429 em          | ACTIVE  | read_failed |
 |   | `/investments`) E espelho vazio                       |         |             |
 | E | sync: leitura COMPLETA e espelho vazio                | ACTIVE  | no_accounts |
-| F | item vivo com espelho cheio (sync ok ou só medido)    | ACTIVE  | ""          |
-| H | job de saúde: item vivo, espelho vazio                | ACTIVE  | mantém D/E, |
-|   | (não leu `/accounts`, então não INVENTA motivo)       |         | senão ""    |
+| P | sync: contas lidas, `/investments` falhou             | ACTIVE  | investments_|
+|   | (espelho cheio; a tela diz "Parcial")                 |         | read_failed |
+| F | sync com leitura COMPLETA e espelho cheio             | ACTIVE  | ""          |
+| H | job de saúde: item vivo (não leu `/accounts`, então   | ACTIVE  | mantém D/P  |
+|   | não INVENTA nem APAGA falha de leitura)               |         | sempre, E só|
+|   |                                                       |         | c/ espelho  |
+|   |                                                       |         | vazio; senão|
+|   |                                                       |         | ""          |
 | G | reconexão pelo widget (`save_pluggy_open_finance_item`)| remoto | "" + health |
 |   |                                                       |         | zerado      |
+| O | sync: `GET /items` ok e o run falhou DEPOIS (D com a  | ACTIVE  | read_failed |
+|   | foto 1; B/C se a foto diz). Grava a foto, e só se     | (ERROR) | ("")        |
+|   | ninguém observou o item desde o começo do run         |         |             |
 
 B e C devolvem motivo vazio de propósito: quem conta a história ali é o
 `health`, e o motivo velho (`item_missing` de ontem) só atrapalharia.
 
 E ≠ D: "li e veio vazio" não é "não consegui ler". Só o primeiro autoriza
 `no_accounts` — foi confundir os dois que fez um 429 em `/investments` descartar
-contas já lidas.
+contas já lidas. P é D com contas: antes caía em F e a tela dizia "Atualizado"
+sem os investimentos (Onda 5, R4). O job de saúde (H) não limpa D nem P
+(Onda 5, R5): quem limpa é uma leitura completa (E/F), ou B/C/G.
 
 H é o que tira o caráter pegajoso de `no_accounts`: `has_data` é OBSERVAÇÃO (o
 job pergunta ao espelho em `list_connections_for_health_check`, não à memória),
@@ -63,10 +73,10 @@ sem sentido (com ela, um `item_status: MISSING` de antes ainda pintava a tela).
 from __future__ import annotations
 
 import re
-from datetime import datetime
+from datetime import datetime, timedelta, timezone
 from typing import Any
 
-from utils_date import _tz
+from utils_date import _tz, day_tz
 
 # Produto (nosso nome) → chave do `statusDetail` da Pluggy.
 _PRODUCT_KEYS = {
@@ -180,6 +190,72 @@ _MESCLA_PERMITE_ANTERIOR = _UPDATING | {"UPDATED"}
 # autorizar o dispositivo / ler o QR — ver `_DETALHE_POR_STATUS` abaixo).
 _NEEDS_USER = {"LOGIN_ERROR", "WAITING_USER_INPUT", "INVALID_CREDENTIALS",
                "OUTDATED", ITEM_STATUS_AUTORIZA_DISPOSITIVO}
+
+# LISTA DE PERMISSÃO DA FRONTEIRA (#539, A1): o que um payload da Pluggy pode
+# virar na coluna `status` de `open_finance_connections`. Quem aplica é
+# `save_pluggy_open_finance_item` (`db/open_finance.py`), o ÚNICO ponto da árvore
+# que grava status REMOTO — os outros escritores da coluna gravam valor NOSSO:
+# `pause_open_finance_connection` (PAUSED), o mapa literal do webhook
+# (`update_pluggy_open_finance_item_status`: UPDATING/ERROR/DELETED), o
+# `resolve_connection_state` via `mark_sync_result` (ACTIVE/ERROR) e o mock
+# (ACTIVE, provider `mock_pluggy`).
+#
+# Existe porque `PAUSED` e `DELETED` são sentinelas LOCAIS e TERMINAIS
+# (`db/open_finance_state._TERMINAL`), e `PAUSED` quer dizer "o item já foi
+# deletado na Pluggy no vencimento do trial": é ele que TIRA o item do DELETE
+# remoto da exclusão de conta (`db/open_finance_state.pluggy_items_a_deletar`) e
+# da enumeração (`list_pluggy_item_ids`). Sem a lista, um `{"status": "PAUSED"}`
+# do provedor deixava o item VIVO e pago na Pluggy depois de uma exclusão LGPD —
+# e as duas guardas dessa exclusão são cegas juntas, porque leem o mesmo filtro.
+#
+# É lista de PERMISSÃO e não de bloqueio das duas sentinelas: `ACTIVE` e elas são
+# vocabulário NOSSO, e nenhum payload pode reivindicar nenhum dos três. O
+# conteúdo é a união dos conjuntos acima — os status que este módulo já trata por
+# nome —, mais `ERROR` (o que o webhook grava e o que `of_health_counters` conta)
+# e o `executionStatus` de dispositivo, que a fronteira também aceita pelo
+# `item['status'] or item['executionStatus']`. Não acrescente status "por
+# precaução": vale aqui o mesmo veto do bloco de `_NEEDS_USER`.
+#
+# POR QUE ESTA LEITURA DIVERGE DA DE `derive_item_health`, e a divergência é
+# DELIBERADA (#539, ressalva 6 do Manager). O upsert lê `item["status"] or
+# item["executionStatus"]`; `derive_item_health` lê `item["status"]` e SÓ ele, e
+# isso está preso em
+# `tests/test_of_health.py::test_execution_status_de_erro_nao_e_status_de_item`.
+# Não é a mesma pergunta respondida de dois jeitos:
+#   • `derive_item_health` tem DOIS campos de saída (`item_status` e
+#     `execution_status`) e consumidores que os leem separados — misturar LÁ
+#     corromperia um campo que tem casa própria;
+#   • a coluna `status` tem UM slot só. Sem o `or`, o `executionStatus` de um
+#     payload SEM `status` não vai a lugar nenhum.
+# E o `or` NÃO amplia o vocabulário da coluna: depois desta lista, dos
+# `executionStatus` documentados só entram os que ela já aceita — os que este
+# módulo sabe pintar (`CREATED` → "Atualizando…", `INVALID_CREDENTIALS` → "Ação
+# necessária", `USER_AUTHORIZATION_PENDING` → "Autorize o acesso no app do
+# banco"). `PARTIAL_SUCCESS`, `MERGE_ERROR`, `SITE_NOT_AVAILABLE`,
+# `INVALID_CREDENTIALS_MFA` e `USER_AUTHORIZATION_NOT_GRANTED` viram `UPDATING` —
+# exatamente o que virariam SEM o `or`, porque quem os deixa sem estado é o
+# `status` AUSENTE, não o fallback. O preço (a tela dizendo "Atualizando…" para um
+# item cuja última execução falhou) é o MESMO nas duas opções e só existe em
+# payload sem `status`; tirar o `or` só perderia os três de cima.
+#
+# `DELETED` fica de FORA de propósito, e a consequência é conhecida: um
+# `status: "DELETED"` REMOTO vira `UPDATING` e o agendador deixa de ver terminal
+# (`db/open_finance_state._TERMINAL`), continuando a pedir sync. Aceita-se porque:
+#   • item apagado na Pluggy não chega aqui como `"DELETED"` — o `GET /items/{id}`
+#     responde 404, que esta árvore já trata (linha A da tabela de estados:
+#     `item_missing` → ERROR). Quem grava DELETED de verdade é LOCAL e não passa
+#     por esta fronteira: o mapa do webhook `item/deleted`
+#     (`frontend/routes/open_finance.py:1959` →
+#     `update_pluggy_open_finance_item_status`);
+#   • o oposto custa mais: TERMINAL é irreversível para quem escreve depois
+#     (`mark_sync_result` tem `where ... not in _TERMINAL`), então um payload que
+#     pudesse gravar `DELETED` congelaria uma conexão VIVA;
+#   • o custo do nosso lado é um ciclo de sync a mais, que termina em 404 →
+#     `item_missing`. Nenhum item fica vivo e pago na Pluggy por isso: quem decide
+#     o DELETE remoto (`pluggy_items_a_deletar`) exclui `PAUSED`, não `DELETED`.
+STATUS_REMOTOS_ACEITOS = frozenset(
+    _MESCLA_PERMITE_ANTERIOR | _NEEDS_USER | {"ERROR", EXEC_STATUS_AUTORIZA_DISPOSITIVO}
+)
 
 _LABELS = {
     "updated": "Atualizado",
@@ -571,10 +647,67 @@ def derive_item_health(item: dict, *, now: datetime | None = None) -> dict:
     return {
         "observed_at": (now or datetime.now(_tz())).isoformat(),
         "item_status": (str(item.get("status") or "").upper() or None),
+        # Data da última sincronização do ITEM (sempre presente na Pluggy, ao
+        # contrário de `products[*].last_updated_at`, que só vem com statusDetail).
+        "last_updated_at": _iso(item.get("lastUpdatedAt")),
         "execution_status": (str(item.get("executionStatus") or "").upper() or None),
         "products": products,
         "stale_products": stale,
     }
+
+
+# Relógio da Pluggy adiantado em relação ao nosso: até aqui a data conta; além,
+# é lixo (relógio errado, `lastUpdatedAt` = fim previsto) e ficaria "à frente"
+# para sempre, porque o nosso sync nunca a alcança.
+_TOLERANCIA_RELOGIO = timedelta(minutes=5)
+
+
+def data_da_pluggy(health: Any, agora: datetime | None = None) -> datetime | None:
+    """Data mais nova que a Pluggy declara ter coletado (Onda 5, PR-B3).
+
+    A maior data LEGÍVEL e COM FUSO entre `products[*].last_updated_at` e o
+    `last_updated_at` do item. `derive_item_health` grava as duas CRUAS: o parse
+    é aqui, em Python, protegido. Um `::timestamptz` em SQL sobre string do
+    provedor derrubaria a query inteira (a armadilha do `SQL_EXECUTION_STATUS`).
+    Data ilegível, sem fuso, ausente, FORA DO INTERVALO (zero-time "0001-01-01Z":
+    `astimezone` estoura `OverflowError`, e `connection_ui_state` não tem try) ou
+    no futuro além de `_TOLERANCIA_RELOGIO` é ignorada: sem prova, não há data.
+    `agora` é opcional (default: o relógio) para quem precisar de pureza.
+    """
+    if not isinstance(health, dict):
+        return None
+    produtos = health.get("products")
+    brutas = [health.get("last_updated_at")]
+    if isinstance(produtos, dict):
+        brutas += [d.get("last_updated_at") if isinstance(d, dict) else None
+                   for d in produtos.values()]
+    limite = (agora or datetime.now(timezone.utc)) + _TOLERANCIA_RELOGIO
+    datas = []
+    for bruta in brutas:
+        try:
+            data = datetime.fromisoformat(bruta)
+            if data.tzinfo is None:
+                continue
+            day_tz(data)  # a conversão que a tela fará (D2/D7): valida o intervalo aqui
+        except (TypeError, ValueError, OverflowError):
+            continue
+        if data <= limite:
+            datas.append(data)
+    return max(datas, default=None)
+
+
+def pluggy_tem_dado_depois_de(health: Any, instante: Any) -> bool:
+    """A Pluggy coletou algo DEPOIS de `instante`? (Onda 5, PR-B2/B3)
+
+    Uma regra, a âncora como parâmetro: a retentativa pergunta contra
+    `last_attempt_at` (a Pluggy coletou depois da nossa última leitura?); a tela
+    (D2, `connection_ui_state`) chama esta mesma função com `last_sync_at`. Ajuste
+    de tolerância de relógio (`_TOLERANCIA_RELOGIO` só descarta o futuro) mora aqui.
+    `instante` sem fuso devolve False, em vez de estourar a comparação.
+    """
+    data = data_da_pluggy(health)
+    return (data is not None and getattr(instante, "tzinfo", None) is not None
+            and data > instante)
 
 
 def mesclar_health_em_coleta(anterior: Any, novo: Any) -> Any:
@@ -597,12 +730,22 @@ def mesclar_health_em_coleta(anterior: Any, novo: Any) -> Any:
     (LOGIN_ERROR/ERROR/WAITING_USER_ACTION/MISSING) vazavam para a coleta nova
     e o card podia virar verde a partir de uma medição feita com o item em erro.
 
+    `coletando_desde` (a âncora do teto, `aplica_teto_por_health`): toda foto em
+    coleta sai com ele. Herdado da anterior também em coleta (ou o `observed_at`
+    dela, foto de antes deste campo); senão, o `observed_at` da nova. Foto final
+    não ganha a chave. Vale mesmo quando não há produto a mesclar.
+
     Pura: não muta `anterior` nem `novo`.
     """
     if not isinstance(novo, dict):
         return novo
     if str(novo.get("item_status") or "").upper() not in _UPDATING:
         return novo
+    em_coleta = (isinstance(anterior, dict)
+                 and str(anterior.get("item_status") or "").upper() in _UPDATING)
+    novo = {**novo, "coletando_desde": (
+        anterior.get("coletando_desde") or anterior.get("observed_at") if em_coleta
+        else novo.get("observed_at"))}
     if not isinstance(anterior, dict):
         return novo
     if str(anterior.get("item_status") or "").upper() not in _MESCLA_PERMITE_ANTERIOR:
@@ -627,10 +770,45 @@ def mesclar_health_em_coleta(anterior: Any, novo: Any) -> Any:
 # ("Erro temporário / Tentaremos de novo automaticamente"), que é a verdade.
 READ_FAILED = "read_failed"
 
+# As contas vieram, `/investments` não (429, paginação incoerente, falha ao
+# gravar). Não é `READ_FAILED`: o espelho das contas É desta leitura. A tela diz
+# "Parcial" (`connection_ui_state`), nunca "Atualizado".
+INVESTMENTS_READ_FAILED = "investments_read_failed"
+_DETALHE_INVESTIMENTOS_FALTANDO = "Investimentos não vieram nesta atualização"
 
-# Motivos que só o espelho vazio explica — os únicos que uma observação SEM
-# leitura do provedor (o job de saúde) pode manter de pé.
-_MOTIVOS_DE_ESPELHO_VAZIO = ("no_accounts", READ_FAILED)
+# "Atualizando…" passado o prazo da coleta (Onda 5, D1): mesma pílula, âmbar.
+# Quem decide o prazo é o derivado `coleta_vencida` (`SQL_COLETA_VENCIDA`, em
+# `db/open_finance_state.py`), lido na linha; esta função não tem relógio.
+_DETALHE_COLETA_VENCIDA = "Está demorando mais que o normal — atualize de novo"
+# Passado o teto (`TETO_ATUALIZANDO_MIN`, derivado `coleta_estourada`), o
+# "Atualizando…" vira "Erro temporário" com este detalhe (Fase 4 do app, PR 2).
+# Só a leitura muda: o par status/motivo gravado é o mesmo. A retentativa lê este
+# detalhe como coleta vencida (`core/services/of_retentativa.py`).
+_DETALHE_COLETA_ESTOURADA = "O banco está demorando — atualize de novo mais tarde"
+
+# Item em `ERROR` na Pluggy (E13): a execução falhou do lado do banco. Só o
+# "Erro temporário" com este detalhe; o `_FIXED_DETAIL` dele ("Tentaremos de novo
+# automaticamente") continua valendo para os outros, que a retentativa relê.
+_DETALHE_ITEM_EM_ERRO = "O banco teve um erro — atualize de novo mais tarde"
+
+# D2 (Onda 5, PR-B3): a Pluggy já tem dado mais novo que o nosso último sync.
+# Instrução, não promessa: a retentativa de fundo tem interruptores (doc §2.2).
+_DETALHE_PLUGGY_A_FRENTE = "O banco já tem dados de {} — atualize para trazer"
+
+# Falha de leitura NOSSA. Só um sync com leitura completa a limpa: o job de
+# saúde (`leitura_completa=None`) não leu nada, então não pode apagá-la.
+_MOTIVOS_DE_LEITURA = (READ_FAILED, INVESTMENTS_READ_FAILED)
+
+# Motivos que uma falha de sync pode TROCAR por `read_failed` (Onda 5, PR-B1):
+# CAS por espécie no `mark_sync_result(motivos_substituiveis=...)`, lista de
+# permissão. Veredito de observação (`no_accounts`, `item_missing`) fica de fora:
+# a falha sem observação (`marcar_leitura_falhou`) nunca o troca, e motivo
+# desconhecido também não (o default seguro do `out()` já o pinta não-verde).
+MOTIVOS_QUE_A_FALHA_SUBSTITUI = _REASONS_OK + _MOTIVOS_DE_LEITURA
+# A foto do item VIVO tirada pelo próprio run que falhou depois dela prova que
+# o item existe e tira o `item_missing` (contrato §1 item 2). Não leu contas,
+# então não tem autoridade sobre `no_accounts`.
+MOTIVOS_QUE_A_FOTO_VIVA_SUBSTITUI = MOTIVOS_QUE_A_FALHA_SUBSTITUI + ("item_missing",)
 
 
 def resolve_connection_state(
@@ -651,8 +829,10 @@ def resolve_connection_state(
     `leitura_completa` — `True` lemos contas E investimentos; `False` a leitura
                          caiu no meio (429 em `/investments`); `None` esta
                          observação NÃO leu o provedor (job de saúde: só
-                         `GET /items`). Com `None` o motivo de espelho vazio não
-                         é INVENTADO — só mantido se já estava lá.
+                         `GET /items`). Com `None` nenhum motivo é INVENTADO:
+                         falha de leitura (`read_failed`,
+                         `investments_read_failed`) é mantida sempre, e
+                         `no_accounts` só com o espelho ainda vazio.
     `reason_atual`     — o motivo gravado hoje, para a decisão de manter/limpar.
     """
     if missing:
@@ -707,8 +887,17 @@ def resolve_connection_state(
     #     `reconnected_at`; o de insert nasce com `last_sync_at` NULL). É
     #     armadilha latente, não sangramento.
 
-    if has_data:
+    # H: sem leitura não se inventa motivo, e também não se apaga falha de
+    # leitura — era o `if has_data:` daqui que devolvia verde a um espelho velho
+    # (R5). `no_accounts` só se mantém com o espelho ainda vazio.
+    if leitura_completa is None:
+        motivo = str(reason_atual or "").lower()
+        if motivo in _MOTIVOS_DE_LEITURA or (motivo == "no_accounts" and not has_data):
+            return "ACTIVE", motivo
         return "ACTIVE", ""
+
+    if has_data:
+        return "ACTIVE", ("" if leitura_completa else INVESTMENTS_READ_FAILED)
 
     # Espelho vazio NÃO é erro do ITEM — ele respondeu, e respondeu saudável
     # (qualquer outra coisa já saiu acima). O `status` é a saúde do item; quem
@@ -717,9 +906,6 @@ def resolve_connection_state(
     # `OF_REFRESH_ENABLED` off (o default) não há PATCH → não há webhook → não há
     # sync completo, e ERROR virava TERMINAL na prática — medido, 404 no tick 0 e
     # item vivo nos 5 seguintes continuava "Erro temporário".
-    if leitura_completa is None:
-        motivo = str(reason_atual or "").lower()
-        return "ACTIVE", (motivo if motivo in _MOTIVOS_DE_ESPELHO_VAZIO else "")
     return "ACTIVE", ("no_accounts" if leitura_completa else READ_FAILED)
 
 
@@ -789,6 +975,13 @@ def connection_ui_state(connection_row: dict) -> dict:
     # DECISÃO DO DONO (2026-09-16): durante a coleta, com foto anterior
     # UPDATED/UPDATING, o card mostra o último estado conhecido — inclusive
     # "Atualizado" quando a foto anterior estava toda em dia.
+    # Âncora da D2/D7: o último sync, só se valeu (depois da autorização atual) e
+    # tem fuso. Sem health ou sem âncora, `data_pluggy`/`ancora` None = sem D2/D7.
+    data_pluggy = data_da_pluggy(health)
+    ancora = ultimo if (not sem_sync and getattr(ultimo, "tzinfo", None)) else None
+    pluggy_a_frente = pluggy_tem_dado_depois_de(health, ancora)  # a única regra de "à frente"
+    dados_de = (day_tz(data_pluggy).strftime("%d/%m") if ancora and data_pluggy and not pluggy_a_frente
+                and ancora - data_pluggy > timedelta(days=1) else None)
     coletando_sem_info = (str((health or {}).get("item_status") or "").upper() in _UPDATING
                           and not (health or {}).get("products"))
 
@@ -797,7 +990,13 @@ def connection_ui_state(connection_row: dict) -> dict:
         # pendente que este arquivo não conhece (gravado por um caminho novo)
         # não pode virar "Atualizado" — foi exatamente assim que `no_accounts`
         # (item vivo que não espelhou nada) chegou à tela como "Tudo em dia!".
-        if state == "updated" and reason not in _REASONS_OK:
+        # Leitura parcial nossa é "Parcial", não "Erro temporário": as contas vieram.
+        # Mas só se essa leitura é da autorização atual: com `sem_sync` o motivo
+        # veio de um sync cujo carimbo a reconexão recusou, e ele não vale.
+        if state == "updated" and reason == INVESTMENTS_READ_FAILED:
+            state, detail = (("updating", "Ainda não sincronizou") if sem_sync
+                             else ("partial", _DETALHE_INVESTIMENTOS_FALTANDO))
+        elif state == "updated" and reason not in _REASONS_OK:
             state = reason if reason in _LABELS else "error_recoverable"
             detail = _FIXED_DETAIL.get(state)
         # ONDA 2: "Atualizado" exige SYNC REAL, não só item saudável. O job de
@@ -819,6 +1018,12 @@ def connection_ui_state(connection_row: dict) -> dict:
         # seco da base, não o "Ainda não sincronizou" — aqui já se sincronizou.
         elif state == "updated" and coletando_sem_info:
             state, detail = "updating", None
+        # D2 (PR-B3): fica DEPOIS do `sem_sync` e do `coletando_sem_info` (reconexão
+        # sem sync continua "Atualizando…") e só contra o verde: os motivos de
+        # leitura, o erro e o `partial` da Pluggy já falam por si.
+        # `and data_pluggy`: o predicado e `data_da_pluggy` leem o relógio em separado.
+        elif state == "updated" and pluggy_a_frente and data_pluggy:
+            state, detail = "partial", _DETALHE_PLUGGY_A_FRENTE.format(day_tz(data_pluggy).strftime("%d/%m"))
         # Mesmo defeito do `partial`: item vivo, espelho vazio, e o porquê
         # (`ACCT_001` = ninguém liberou contas) preso no JSON. Sem health — o
         # ramo de baixo — a frase continua exatamente a de hoje.
@@ -835,11 +1040,21 @@ def connection_ui_state(connection_row: dict) -> dict:
         if state == "no_accounts":
             detail = (detail or _FIXED_DETAIL[state]) + _motivo_do_warning(
                 health, ("BANK", "INVESTMENTS"))
+        # Teto e D1, no FIM: depois de toda transformação que produz `updating`,
+        # e só sobre ele (instrução de dispositivo, erro e o resto não mudam).
+        # Teto: "Atualizando…" há `TETO_ATUALIZANDO_MIN` ou mais vira "Erro
+        # temporário". D1: sem sync desde a autorização atual, passado o prazo,
+        # só troca o detalhe — estado, rótulo e pílula continuam os mesmos.
+        if state == "updating" and row.get("coleta_estourada"):
+            state, detail = "error_recoverable", _DETALHE_COLETA_ESTOURADA
+        elif state == "updating" and row.get("coleta_vencida"):
+            detail = _DETALHE_COLETA_VENCIDA
         return {
             "state": state,
             "label": _LABELS[state],
             "detail": detail if detail is not None else _FIXED_DETAIL.get(state),
             "stale_products": stale,
+            "dados_de": dados_de,  # D7: sufixo da linha "Última sync" (settings.html)
         }
 
     if status == "DELETED":
@@ -862,25 +1077,58 @@ def connection_ui_state(connection_row: dict) -> dict:
         # dados"/"Erro temporário"). Sem sync — 1ª conexão ou reconexão ainda não
         # espelhada — "Atualizando…" é verdade e continua sendo a guarda que
         # impede o card de dizer "tudo em dia" com espelho vazio.
+        # Falha de LEITURA nossa registrada fala aqui também (Onda 5, contrato
+        # item 8): o `out("updated")` a entrega ao default seguro — `read_failed`
+        # vira "Erro temporário" e `investments_read_failed` sem sync continua
+        # "Atualizando…" (regra do PR-A). Só esses dois: `no_accounts` numa 1ª
+        # coleta em curso é a Pluggy ainda sem contas, e continua "Atualizando…".
         if item_status in _UPDATING and sem_sync:
-            return out("updating")
+            return out("updated" if reason in _MOTIVOS_DE_LEITURA else "updating")
         # ERROR vem ANTES de "parcial": item em erro COM produto atrasado é erro,
         # e rotulá-lo de "Parcial" ("atualizei o que deu") subestima o estado.
-        if status == "ERROR" or item_status == "ERROR":
-            # ...mas `status` local em ERROR com o ITEM vivo e o motivo dizendo
-            # por que o espelho está vazio: quem explica é o motivo. O override
-            # do `out()` só rodava no ramo verde, então ERROR/no_accounts nunca
-            # mostrava "Sem dados" — o estado desta onda ficava invisível.
+        if item_status == "ERROR":
             # Item em ERROR de verdade continua "Erro temporário": motivo velho
-            # não subestima erro, e este ramo nunca vira verde.
-            return out("no_accounts" if reason == "no_accounts" and item_status != "ERROR"
-                       else "error_recoverable")
+            # não subestima erro, e este ramo nunca vira verde. Com detalhe PRÓPRIO
+            # (Onda 5, PR-B2, E13): a execução falhou na Pluggy e reler (GET) não
+            # tira o item de ERROR, então a retentativa não promete "Tentaremos de
+            # novo automaticamente" aqui (`core/services/of_retentativa.py`).
+            return out("error_recoverable", _DETALHE_ITEM_EM_ERRO)
+        if status == "ERROR":
+            # `status` local em ERROR com o ITEM vivo e o motivo dizendo por que o
+            # espelho está vazio: quem explica é o motivo. O override do `out()` só
+            # rodava no ramo verde, então ERROR/no_accounts nunca mostrava "Sem
+            # dados" — o estado desta onda ficava invisível.
+            return out("no_accounts" if reason == "no_accounts" else "error_recoverable")
         if stale or str(health.get("execution_status") or "").upper() == "PARTIAL_SUCCESS":
-            return out("partial", _stale_detail(health))
+            # Motivo pendente fala antes do produto atrasado, pela MESMA regra do
+            # verde: o default seguro do `out("updated")` decide (`read_failed` e
+            # desconhecido → "Erro temporário", `no_accounts` → "Sem dados").
+            # "Atualizei o que deu" sobre nada lido/espelhado seria falso. Como no
+            # verde, sem olhar `sem_sync`: a reconexão zera o motivo — exceto um
+            # run velho de `_sync_item_contido` gravando depois dela, corrida que
+            # o PR-B1 da Onda 5 fecha (`geracao_vista`).
+            if reason not in _REASONS_OK and reason != INVESTMENTS_READ_FAILED:
+                return out("updated")
+            detalhe = _stale_detail(health)
+            # Parcial da Pluggy E leitura parcial nossa: as duas coisas faltam, e
+            # o detalhe da Pluggy sozinho escondia os investimentos (Codex, #692).
+            # Com `sem_sync` o motivo é de antes da autorização atual e não vale.
+            # Com INVESTMENTS já atrasado na Pluggy, o detalhe dela já os nomeia.
+            if (reason == INVESTMENTS_READ_FAILED and not sem_sync
+                    and "INVESTMENTS" not in stale):
+                detalhe += "; " + _DETALHE_INVESTIMENTOS_FALTANDO.lower()
+            return out("partial", detalhe)
         return out("updated")
 
     # Sem health medido: cai no status local (comportamento de hoje).
-    if status in _UPDATING:
+    # R1b (Onda 5): falha registrada fala ANTES do "Atualizando…" deste ramo. O
+    # `status` local `UPDATING` veio do webhook ou do upsert, não de uma
+    # observação; com `read_failed` do sync de fundo ele girava para sempre. Com
+    # motivo pendente os dois early-returns de "Atualizando…" abaixo (este e o
+    # `ultimo is None`) cedem ao `out("updated")` do fim, cujo default seguro
+    # decide. `_NEEDS_USER` (instrução de dispositivo) continua vindo antes dele.
+    pendente = reason not in _REASONS_OK
+    if status in _UPDATING and not pendente:
         return out("updating")
     if status in _NEEDS_USER:
         # O status LOCAL também pode trazer `WAITING_USER_ACTION` (o upsert grava
@@ -899,10 +1147,12 @@ def connection_ui_state(connection_row: dict) -> dict:
         # Mesma classe do ramo com health: o motivo explica melhor que "Erro
         # temporário" (linha legada gravada antes desta onda também cai aqui).
         return out("no_accounts" if reason == "no_accounts" else "error_recoverable")
-    if ultimo is None:
+    if ultimo is None and not pendente:
         # `ultimo is None`, NÃO `sem_sync`: este early-return pula o default
-        # seguro do `out()` — é assim na base, e por isso ele só pode valer no
-        # escopo EXATO que a base lhe dava ("nunca sincronizou"). Alargá-lo para
+        # seguro do `out()`, e por isso ele só pode valer no escopo EXATO que a
+        # base lhe dava ("nunca sincronizou") e sem motivo pendente (o
+        # `not pendente`, Onda 5 R1b: a 1ª conexão com `status` local `UPDATED`
+        # cujo sync falhou caía aqui e girava para sempre). Alargá-lo para
         # `sem_sync` fez o caso da reconexão descartar `no_accounts`,
         # `read_failed` e motivo desconhecido: medido, 60 combinações com perda,
         # e a pílula do `read_failed` caindo de vermelho para âmbar logo depois

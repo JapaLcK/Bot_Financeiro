@@ -50,6 +50,9 @@ def disable(user_id: int) -> str:
 # --- resumo semanal ---
 
 def enable_weekly(user_id: int) -> str:
+    from core.services.plan_service import plan_gate_ok
+    if not plan_gate_ok(user_id, "weekly_report"):
+        return "🐷 O resumo semanal automático está disponível nos planos Plus e Pro."
     db.set_weekly_report_enabled(user_id, True)
     return (
         "✅ Resumo semanal ligado. Você recebe toda segunda-feira, referente à semana anterior.\n"

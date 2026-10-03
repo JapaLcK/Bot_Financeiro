@@ -152,19 +152,19 @@ def test_disable_mfa_removes_all_state(user_id):
     assert status["backup_codes_remaining"] == 0
 
 
-def test_login_challenge_consume_returns_user_id(user_id):
+def test_login_challenge_consume_is_single_use(user_id):
+    secret = db.mfa_setup_secret(user_id, f"user{user_id}@test.com")["secret"]
+    db.mfa_verify_and_enable(user_id, pyotp.TOTP(secret).now())
     token = db.mfa_create_login_challenge(user_id)
-    assert isinstance(token, str)
-    assert len(token) > 20
-    consumed = db.mfa_consume_login_challenge(token)
-    assert consumed == user_id
-    # Single-use
-    assert db.mfa_consume_login_challenge(token) is None
+    assert isinstance(token, str) and len(token) > 20
+    code = pyotp.TOTP(secret).now()
+    assert db.mfa_consume_login_challenge_with_code(token, code, False) is True
+    assert db.mfa_consume_login_challenge_with_code(token, code, False) is None
 
 
 def test_login_challenge_with_invalid_token_returns_none():
-    assert db.mfa_consume_login_challenge("nonexistent") is None
-    assert db.mfa_consume_login_challenge("") is None
+    assert db.mfa_consume_login_challenge_with_code("nonexistent", "123456", False) is None
+    assert db.mfa_consume_login_challenge_with_code("", "123456", False) is None
 
 
 # ── Endpoint tests ──────────────────────────────────────────────────────

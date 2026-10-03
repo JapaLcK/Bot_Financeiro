@@ -31,8 +31,8 @@ tomadas". App iOS em Capacitor carregando o próprio site.
 ## Mapa do repositório
 
 ```
-launch.py                 — entrypoint do Railway: sobe uvicorn ($PORT) + bot.py em paralelo
-bot.py                    — bot do Discord (processo 2)
+launch.py                 — entrypoint do Railway: carrega o ambiente e vira o uvicorn ($PORT)
+bot.py                    — bot do Discord (fora do launch.py desde o PR 5a; não roda)
 ai_router.py              — chamada à OpenAI (modelo em OPENAI_MODEL, default gpt-4o-mini)
 parsers.py                — parse de linguagem natural ("gastei 50 mercado")
 statement_import.py       — importação de extrato (OFX/CSV/PDF)
@@ -48,6 +48,12 @@ core/
                             aqui dizia 35 e envelheceu no PR seguinte — §2)
   reports/                — relatório diário (reports_daily.py)
   crypto.py, audit.py     — PII cifrada e trilha de auditoria
+
+api/v2/                   — a /api/v2 do dashboard v2: sub-app FastAPI montado pelo
+                            monólito em /api/v2, com envelope de erro próprio
+                            (erros.py), a dependência única do usuário (sessao.py)
+                            e um router por assunto (me.py, eventos.py,
+                            perfil.py, contas.py, assinaturas.py, resumo_mes.py)
 
 db/                       — PACOTE com ~30 módulos, um por domínio
   schema.py               — DDL de TODAS as tabelas (init_db) — fonte de verdade
@@ -87,10 +93,22 @@ docs/open_finance_validacao_manual.md — o que do Open Finance só se valida em
 O `app` FastAPI vive em `frontend/finance_bot_websocket_custom.py`. Parte das rotas já
 saiu para routers em `frontend/routes/`, registrados com `include_router`:
 `static_pages`, `settings`, `pockets`, `cards`, `analytics`, `affiliates`, `agents`,
-`open_finance`, `push`.
+`open_finance`, `push`, `simulator`.
 
-**Rota nova vai para um router de `frontend/routes/`**, não para o monólito. Ao
-procurar uma rota existente, procure nos dois lugares:
+`POST /simulator/{user_id}` (`frontend/routes/simulator.py`) é o simulador de compra
+do Pro: 1 a 3 cenários (à vista, parcelado, financiado pela tabela Price) comparados
+com o atual sobre a mesma leitura da previsão de saldo, 90 dias + resumo do contrato.
+O pior dia e a reserva incluem hoje após a compra e os 90 dias seguintes (91 datas);
+o saldo final continua sendo o do dia 90. A tool avisa antes dos números se os
+bancos conectados estiverem excluídos ou o saldo consolidado não for confirmado.
+Preço, entrada, custos, despesa mensal nova e reserva aceitam no máximo duas casas
+decimais; frações de centavo são recusadas na validação comum da API e da tool.
+Taxas percentuais mantêm precisão livre, inclusive valores muito pequenos.
+Sem persistência e sem tela ainda; lógica em `core/services/decision_simulator.py`.
+
+**Rota nova vai para um router de `frontend/routes/`**, não para o monólito — exceto
+rota da `/api/v2`, que vai para `api/v2/` (ver "API v2" abaixo). Ao procurar uma rota
+existente, procure nos dois lugares:
 
 ```bash
 grep -rn '@\(app\|router\)\.\(get\|post\|put\|patch\|delete\)("/caminho' --include="*.py" frontend/ adapters/
@@ -100,6 +118,143 @@ São ~198 rotas. Os grupos maiores: `/auth` (27), `/open-finance` (11), `/settin
 (10), `/billing` (8), `/agents` (7), `/cards`, `/categories`, `/pockets`,
 `/recurring-bills` (6 cada), `/analytics` (6), `/investments`, `/installments`,
 `/recurring-incomes`, `/recurring-expenses` (5 cada), `/budgets` (4).
+
+### API v2 (`api/v2/`)
+
+Sub-app FastAPI (`api/v2/app.py`) montado pelo monólito com `app.mount("/api/v2", ...)`.
+É o backend do dashboard v2 (`docs/plano-dashboard-v2.md`, §3). Regras, presas por
+`tests/test_api_v2_rotas.py`:
+
+- **Nenhuma rota recebe `user_id`** — nem path, query, header, cookie ou corpo. O
+  usuário vem da dependência `usuario_atual` (`api/v2/sessao.py`): sessão (Bearer ou
+  cookie `dashboard_token`) → conta agendada para exclusão (403) → gate de plano
+  (`_enforce_subscription_gate`, 402) → chave `dashboard_v2_enabled` (404
+  `dashboard_v2_disabled`). O user agent não entra.
+- Toda rota tem `response_model` (a de SSE, o tipo do item do stream; ver `/eventos`).
+- **Erro** sai no envelope `{"error": {"code", "message", "details"?}}`
+  (`api/v2/erros.py`), com os headers da exceção preservados (`WWW-Authenticate` do
+  401, `Allow` do 405). A exceção não tratada sai 500 `internal_error` ou, se for
+  timeout/queda de conexão de banco, 503 `service_unavailable` — a regra é a
+  `status_do_erro` (`core/admin_dashboard.py`), a mesma do pai — e registra
+  `log_system_event` ali mesmo: o `admin_error_logging_middleware` do pai não enxerga
+  exceção que o sub-app já respondeu. `ClientDisconnect` é levantada de novo para o
+  pai, que responde 499 sem evento. O `ServerErrorMiddleware` do sub-app re-levanta a
+  exceção depois de responder; o `erros.sem_reraise`, por fora dele (`_AppV2` em
+  `api/v2/app.py`), a engole quando a resposta já começou, e o `TestClient` padrão não
+  a vê. Erro no meio de um stream SSE chega num `ExceptionGroup` e é desembrulhado
+  antes de classificar. Ficam **fora** do envelope o 403 do CSRF e o 422 do
+  `query_venenosa_middleware`, que nascem nos middlewares do pai e saem `{"detail": ...}`.
+- `GET /api/v2/me` devolve `{"plan_tier": "free"|"essencial"|"plus"|"pro"}`, sem PII.
+- `GET /api/v2/eventos` (`api/v2/eventos.py`): SSE, `data: {"recurso": "open_finance"|"tudo"}`
+  (sem dado financeiro, sem id, sem `id:`/replay) e `: ping` a cada 15 s. Quem avisa chama
+  `eventos.avisar(user_id, recurso)` na thread do loop, depois do commit; hoje são o fim
+  do sync do Open Finance e o "Recomeçar do zero". `usuario_atual` roda de novo antes de
+  cada envio e a cada 30 s: sessão ou plano caídos fecham o stream sem aviso. Teto de 5
+  streams por usuário (429 no envelope). Rota SSE tipa o item pela anotação de retorno
+  (`-> AsyncIterable[Aviso]`), e a varredura aceita isso no lugar do `response_model`. O
+  cliente (`webapp/src/dashboard/lib/eventos.ts`) invalida todas as consultas a cada
+  aviso e a cada conexão aberta.
+- `GET /api/v2/perfil` e `PUT /api/v2/perfil` (`api/v2/perfil.py`): `{"perfil": ...}` com
+  os 5 perfis do quiz (`db/signup_quiz.PERFIS`), `"padrao"` (escolheu o painel padrão) ou
+  `null` (nunca escolheu); grava em `auth_accounts.dashboard_profile`. O PUT é escrita:
+  exige o CSRF do pai (cookie `csrf_token` + header `x-csrf-token`, 403
+  `{"detail": ...}` fora do envelope), corpo fora da lista é 422 no envelope, e conta sem
+  linha é 404 `conta_nao_encontrada`. O quiz continua recusando `"padrao"`.
+- `GET /api/v2/contas` (`api/v2/contas.py`, regra em `db/contas_hoje.py`): o bloco de contas
+  do Resumo — `total`, `motivos`, `fora_do_total`, `carteira {saldo, motivos}` e `contas[]`
+  (`id`, `instituicao`, `nome`, `saldo`, `moeda`, `no_total`, `conexao` — um estado de
+  `connection_ui_state` —, `sincronizado_em`, `motivos`). Mesmo recorte e mesmos critérios da
+  foto do patrimônio (`db/patrimonio.py`), num snapshot só (repeatable read, só leitura):
+  `total` = `calcular().carteira + calcular().bancos`. Conta desatualizada (sync > 48 h,
+  pela metade ou nunca: `banco_desatualizado`) e conta fora do último sync
+  (`conta_fora_do_ultimo_sync`) seguem no total; outra moeda (`outra_moeda`, saldo na moeda
+  dela), conexão pausada/apagada (`conexao_pausada`, saldo `null`) e saldo
+  ausente/malformado/NaN/±Inf (`saldo_ausente`, saldo `null`) ficam fora (`no_total: false`,
+  contadas em `fora_do_total`). A carteira sai sempre com `carteira_nao_confirmada` até a
+  Q37. `motivos` vazio = número exato. Cartão, posições e caixinhas não entram; `raw` e
+  `provider_*_id` nunca saem.
+- `GET /api/v2/resumo-do-mes?mes=AAAA-MM` (`api/v2/resumo_mes.py`, regra em `db/resumo_mes.py`):
+  `mes`, `ate` (o último dia do mês, o corrente também: a soma cobre o mês inteiro), `entrou`, `saiu`, `anterior`
+  (`{mes, entrou, saiu}` do mês anterior inteiro, ou `null` quando a janela do plano corta
+  qualquer parte dele) e `motivos` (`conciliacao_pendente`, `movimentos_pendentes`,
+  `banco_desatualizado` — os do bloco de contas: refletem a situação atual das contas, não
+  a do mês pedido — e `inicio_do_historico`, quando a janela do plano corta o mês pedido ou
+  o `anterior`). Sem `mes` = o mês
+  corrente no fuso do app; formato fora de `AAAA-MM` ou mês futuro = 422 no envelope.
+  **Regra única do mês** (Q18): `TOTAIS_SQL` = lançamentos não internos por `criado_em`
+  (forma legada canonizada) + compras no cartão sem estorno pelo `period_end` da fatura,
+  no mês-calendário INTEIRO (a fatura que fecha depois de hoje, dentro do mês, entra). Leem
+  dela a rota, o "Gastos em <mês>" do WhatsApp (`core/handlers/balance.py`), o relatório
+  mensal (o pedido na hora também soma o mês inteiro: total, contagem e "Período"), a
+  consulta 5 do /app e `compute_kpis` das Análises. `compute_evolution` é cópia em consulta
+  única (um GROUP BY por mês); `tests/test_resumo_mes_regra.py` compara as duas por mês.
+  Fatura com `user_id` NULL (a coluna aceita, sem backfill) entra, como antes.
+  **Divergência conhecida:** relatório diário e semanal, ferramentas da IA de período
+  livre e projeção de fechamento (`get_summary_by_period`) e o Repórter
+  (`piggy_agents._month_stats`) seguem só em `launches`, sem o cartão. Limites mantidos de
+  propósito: o mês corta `criado_em` pela data ingênua (fuso da sessão do Postgres), a
+  conciliação pendente conta em dobro (sai com motivo), estorno não abate.
+  `scripts/comparar_resumo_mes.py` compara antigo × novo por usuário e mês, só lendo.
+- `GET /api/v2/assinaturas` e `POST /api/v2/assinaturas/marca` (`api/v2/assinaturas.py`):
+  a lista do Recurring Payments da Pluggy (`core/services/assinaturas.py`) e a marcação
+  do usuário por chave do comerciante (`assinatura`/`ignorar`/`nenhuma`; chave fora da
+  lista dá 404). As chaves ignoradas saem em `ignoradas`, fora do total e só para a tela
+  (Detetive e chat leem `servicos + outras`); nela, `marcada` é a marca guardada, que o
+  "Voltar a mostrar" restaura. Gate `subscriptions` em `FEATURE_MIN_TIER_V2` (Plus ou Pro). O cliente é
+  `webapp/src/dashboard/widgets/Subscriptions.tsx` (o card do Resumo e a página
+  `/assinaturas`); o POST sai pelo `apiPost` de `lib/v2.ts`, com o header de
+  `window.pbCsrfHeaders` (auth-refresh.js), e o 403 `pro_required` vira o convite.
+- **Dinheiro na v2 é `Decimal` e sai como TEXTO decimal** (`"1234.56"`, sem arredondar e sem
+  float), em toda rota: no TS é `string`. A escala é a da coluna (`"1000"` e `"1000.00"`
+  valem). O contrato vale para toda rota futura.
+- **Contrato:** o envelope entra no OpenAPI como resposta `default` (`ErroV2`, em
+  `api/v2/erros.py`; a resposta real continua saindo de `_envelope`). Os tipos TS saem de
+  `python scripts/gerar_tipos_api_v2.py` para `webapp/src/dashboard/lib/api-v2.gen.ts`
+  (gerado e commitado; construção fora da lista aceita levanta `ValueError`, e `number`
+  (float) está fora dela: dinheiro é `Decimal`; a query de GET sai em `QueryGet`, só
+  parâmetro `in: query`), e
+  `tests/test_api_v2_contrato.py` compara o arquivo com o `openapi()` de hoje e valida as
+  fixtures dos testes de navegador (`tests/frontend/api_v2_respostas.json`). Mudou modelo:
+  rode o gerador e depois o build do `webapp/`.
+- Chave: `DASHBOARD_V2_BETA_EMAILS` (sem a env = os e-mails de teste do beta de
+  Agentes; definida e vazia = ninguém) e `DASHBOARD_V2_BETA_USER_IDS`.
+- **Q36 fora do v2: Open Finance é a fonte única para quem tem a chave**
+  (`core/services/fonte_unica.py`). Vale em todos os canais (`/app`, WhatsApp, IA do chat
+  e do WhatsApp), porque a trava (`exigir`) está nas funções de escrita que todos chamam:
+
+  | | onde trava |
+  |---|---|
+  | **bloqueado**: criar investimento manual e aportar nele | `db.create_investment`, `db.create_investment_db`, `db.investment_deposit_from_account` |
+  | **bloqueado**: importar extrato (OFX no `/app` e no WhatsApp; CSV/PDF no WhatsApp) | `ofx_service.handle_ofx_import`, `statement_service.handle_statement_import` |
+  | **bloqueado**: importar fatura OFX; compra manual no cartão (à vista e parcelada) | `ofx_service.handle_credit_ofx_import`, `db.add_credit_purchase`, `db.add_credit_purchase_installments` |
+  | **liberado**: resgatar e apagar investimento manual, e desfazer o apagar (decisão do dono: restaura o que o usuário já tinha, sem dinheiro novo); caixinha manual; Carteira (lançamento em dinheiro, ajuste e saldo inicial; a Q40 continua em `core/handlers/forma_pagamento.py`); sync e importação do Open Finance | — |
+
+  A exceção é `FonteUnicaOF` (`ValueError`, `codigo = "FONTE_UNICA_OF"`, o texto do caso
+  em `str()`, como a `PlanLimitExceeded`); os textos (investimento, extrato, cartão) moram
+  só em `fonte_unica.MENSAGENS`. `/app` = 400 com `detail` em texto; WhatsApp = o texto
+  (`handle_incoming` traduz o que sobe, os handlers de cartão e de aporte devolvem); IA = o
+  texto, e o `validate` de `create_investment`/`investment_deposit` recusa antes de pedir
+  confirmação. A checagem da chave que falha **libera** (fail-open: é trava de produto num
+  beta, não segurança). O usuário é sempre o da sessão/remetente, nunca o corpo. Escritor
+  novo nessas tabelas ou dos importadores de arquivo reprova em
+  `tests/test_fonte_unica_q36.py` até ser classificado (trava ou motivo de ficar livre).
+- A página é `/painel` (`frontend/painel.html` + o artefato `frontend/dashboard-app.*`,
+  de `webapp/src/dashboard`): sessão por `auth_token` ou `dashboard_token`
+  (`_resolve_page_user_id`), senão `/login?next=/painel`; UA do app ou fora da chave
+  (ou a chave falhando) vai para `/app`; depois os gates de plano e onboarding do `/app`.
+  O `/auth/me` devolve `dashboard_v2_enabled`, que revela o link no menu do `/app`
+  (fora do app). O `/painel` carrega o `/static/auth-refresh.js` antes do bundle: o 401
+  de autenticação da `/api/v2` (só aceita `dashboard_token`/Bearer) é renovado e repetido
+  por ele.
+- **Erro no cliente** (`webapp/src/dashboard/parts/Entrada.tsx`): nada do painel monta
+  antes do `/me`; qualquer erro é uma tela só, com texto fixo em português (a `message`
+  do envelope não vai para a tela: em 402/404 ela sai em inglês), Recarregar e "Painel
+  antigo", **sem redirecionamento no cliente** — o Recarregar passa pelo `serve_painel`, que já manda cada
+  caso ao lugar certo. Rede e 5xx tentam 3 vezes (com `networkMode: "always"`, para o evento `offline`
+  não pausar o `/me` em "Carregando…"); 4xx (inclusive 429) nunca repete. Limite
+  conhecido: conta agendada para exclusão leva 403 da `/api/v2` e o Recarregar serve a
+  mesma tela, porque o `serve_painel` não barra exclusão (herdado do #659; o `/app`
+  também não) — a única saída visível é o "Painel antigo".
 
 ### Autenticação
 
@@ -114,10 +269,68 @@ chamador decidir. **Esse interceptor é global nas páginas autenticadas** — c
 antes de tratar 401 na mão em qualquer tela.
 
 Caminhos de entrada, todos em `/auth/*`: `register` → `verify-email` (código de 6
-dígitos) → `login`; `forgot-password`/`reset-password`; **Google OAuth**
-(`google/start`, `google/callback`, `google/complete-signup`, `google/pending/{token}`);
+dígitos) → `login`; **quiz de venda**: o webhook `POST /xquiz/webhook` (fora de
+`/auth`, token `XQUIZ_WEBHOOK_TOKEN`) grava a verificação SEM senha e manda o código,
+e a `/q` chama o mesmo `verify-email` depois de o usuário confirmar o e-mail na tela
+(`quiz/resend` reenvia; `frontend/routes/quiz_signup.py`); a `/q` com `plano` na query vai
+para a `/assinar` (nome, e-mail e WhatsApp no fragmento `n/e/w`); `forgot-password`/`reset-password`; **Google OAuth**
+(`google/start`, `google/callback`, `google/complete-signup`, `google/pending/{token}`,
+e `google/exchange`, que troca por Bearer o código que o callback devolve ao app nativo
+quando o login começa em `google/start?app=2`); **Apple**, só no app nativo iOS
+(`apple/exchange`, que verifica o identity token pelo JWKS da Apple e devolve sessão,
+desafio de MFA ou cadastro pendente, e `apple/complete-signup`; o pendente mora na
+mesma `pending_google_signups`, com `provider='apple'`);
 `dashboard-link`/`dashboard-token` (link mágico); `link-code` (vincula WhatsApp e
 Discord à conta); `logout`; `refresh`; `account` (exclusão) e `account/export`.
+
+**Conta pela `/assinar` (funil v3 do quiz): `POST /auth/quiz/conta`**
+(`frontend/routes/quiz_signup.py`, com CSRF). Recebe e-mail, nome, WhatsApp
+(obrigatório) e o aceite dos termos, e cria a conta **sem senha e sem código** na
+mesma requisição (`db/signup_quiz.criar_conta_sem_codigo`, que NÃO passa por
+`email_verification_codes`), já logada. Responde `criada`, `logado` (a sessão do
+pedido já é dessa conta), `tem_conta`, `cadastro_pendente` (há código de
+`/auth/register` vivo para o e-mail: alguém está no meio do cadastro, e o código dele
+não é tocado) ou `ocupado` (409: outro pedido do mesmo e-mail está com a trava; a rota
+não espera, para uma rajada não segurar o pool de conexões). Só `criada` escreve e dá
+sessão. É o único lugar do site que diz se um e-mail tem conta (aceito pelo dono), com
+10/h por IP (balde `quiz`) e 3/h por e-mail (balde `quiz-conta`, separado do
+`register` para o anônimo não gastar o teto do cadastro da vítima). A prova do e-mail vem depois, no "Crie sua senha".
+A página é `frontend/assinar.html` + `assinar.js`: o script limpa o fragmento antes do
+Pixel e do GA4 (sem Clarity), percorre os estados formulário → já tem conta →
+pagamento, e todo caminho para o Stripe hospedado (app, Stripe.js que falha, 10 s sem
+iframe, link manual) passa por um só `irParaHospedado`; testes em `tests/frontend/assinar_*`.
+
+**Conta sem credencial: 403 `password_required`.** Conta sem senha (`''` conta como sem)
+e sem identidade Google/Apple (`db.conta_sem_credencial`, a fonte única, a mesma que o
+job do e-book usa; sem linha em `auth_accounts`, o só-WhatsApp, é False) não lê nem grava dado, mesmo
+paga, até criar a senha pelo link do e-mail. Vale no servidor: a perna da credencial do
+`_enforce_subscription_gate` (depois das duas do 402; não lê `ACCESS_GATE_ENABLED` nem
+`PLANS_V2_ENABLED`, porque é segurança e não cobrança) e `shared.exigir_credencial` nos
+pontos fora dele; o `/ws` fecha com 4403, o `/conta` manda para a `/home`, e o bot não
+liga o número pelo telefone (responde com o texto fixo). O bot também barra toda
+mensagem de número já ligado a conta sem credencial; no auto-vínculo, remetente que já
+tem dados financeiros segue na própria conta, sem vínculo nem mescla
+(`remetente_com_dados`); o vazamento da mescla por telefone digitado está na #711.
+A exceção do bot são os botões de opt-out de `_WA_INTERACTIVE_ISENTOS` (relatórios diário,
+semanal e mensal, e atualizações): quem não pode usar tem de conseguir parar de receber
+mensagem, então eles funcionam no número já ligado, no `precisa_senha` (desligam a
+preferência da conta sem credencial) e no `remetente_com_dados` (a do remetente e a da
+conta que digitou o número), e nada além da preferência é gravado.
+Saem livres as rotas da própria conta (`authorize_account_access`), o `PATCH /settings/{id}/security/contact`
+(`exige_credencial=False`), o `/auth/me` (campo `precisa_criar_senha`), login,
+logout, refresh e o reset. Quem bloqueia e quem libera, rota a rota, está em
+`tests/test_rotas_senha_obrigatoria.py`, que reprova rota nova sem linha. Na tela, a
+`/home` e o `/app` carregam `frontend/criar-senha.js`: overlay que não fecha, também
+disparado por qualquer 403 `password_required`. A `/settings` não o carrega (é a saída),
+e o convite do MFA fica calado no servidor enquanto não há credencial.
+
+**Os três criadores de conta** (o `confirm` do register, o `complete-signup` do
+Google/Apple e a `/assinar`) gravam pelo mesmo `db_support.inserir_conta_nova`:
+trava por e-mail + `on conflict (email) do nothing`. O e-mail que ganhou conta no meio
+é **recusado**, nunca fundido; o `verify-email` responde "Este e-mail já tem conta" e a
+saída é o "Esqueci a senha". A sessão, as atribuições (afiliado, prospecção, quiz) e o
+CAPI CompleteRegistration de conta nova moram num helper só, `_sessao_de_conta_nova`
+no monólito, usado pelas três rotas.
 
 ### MFA
 
@@ -132,8 +345,12 @@ por cima deles perde os códigos do usuário — já quase aconteceu (registro n
 
 ### WebSocket
 
-`ConnectionManager` + endpoint `@app.websocket("/ws/{user_id}")` no monólito. É o que
-mantém o dashboard ao vivo quando o bot registra algo pelo WhatsApp. Mudou o formato
+`ConnectionManager` + endpoint `@app.websocket("/ws/{user_id}")` no monólito. O
+dashboard pede dados por ele (pergunta e resposta); empurrar algo sem o cliente pedir
+só acontece em `open_finance_synced`, do fim do sync do Open Finance e do "Recomeçar do
+zero" — confira com `grep -rn "broadcast_to_user(" --include="*.py" frontend/ core/`. Os
+mesmos 2 avisos também saem pelo `/api/v2/eventos` (`eventos.avisar`).
+**Lançamento feito pelo WhatsApp não avisa o dashboard.** Mudou o formato
 de mensagem? Os dois lados mudam junto — o consumidor está no `dashboard.js`.
 
 ### Pagamentos
@@ -142,6 +359,66 @@ Stripe: `/billing/create-checkout`, `webhook`, `portal`, `subscription`,
 `change-plan`, `cancel-change`, `plans-config` e `select-free` (esta só RECUSA
 com 410: a escolha do plano Grátis saiu da /precos em 2026-09-02; a rota
 sobrevive pra devolver `detail.message` a cliente antigo em cache).
+
+**`/billing/create-checkout` serve a `/precos` e a `/assinar`.** O corpo ganha
+`origem` (`"precos"` default | `"assinar"`; outro valor é 400) e `embutido` (default
+`false`). Hospedado responde `{checkout_url, interval, plan}`; embutido responde
+`{client_secret, publishable_key, trial_days, interval, plan}` (`ui_mode="embedded_page"`,
+`return_url` = a mesma URL de sucesso do hospedado). O `session_id`
+nunca vai no corpo. A sessão grava `origem` e `td` (dias de trial) no metadata e no
+da assinatura; uma sessão aberta só é reaproveitada pelo mesmo plano × intervalo ×
+origem × modo (sessão sem `origem` = `/precos`), e a embutida reaproveitada devolve o
+trial com que nasceu (`td`). Só a `/assinar` fixa BRL (`adaptive_pricing` off), volta
+para `/assinar?plano=&ciclo=` no abandono e oferece o e-book (`optional_items`); a
+`/precos` segue com os kwargs de antes. Toda sessão da `/assinar` (embutida **e**
+hospedada), e todo embutido, expira em 1 h (`expires_at`): o default de 24 h do Stripe
+deixaria aberta a janela de cobrança dupla (Pix numa aba, cartão na outra); o
+hospedado da `/precos` segue sem. Envs:
+`STRIPE_PUBLISHABLE_KEY` (sem ela o embutido é 503, antes de tocar no Stripe),
+`STRIPE_PRICE_ID_EBOOK` e `EBOOK_URL` — o e-book só é oferecido com **as duas**
+preenchidas (preço sem URL venderia o que o webhook não tem como entregar). Quando
+oferecido, a sessão grava `ebook_price` e `ebook_url` (o preço e a URL do e-book no
+nascimento) no metadata e no da assinatura; sem e-book as chaves não existem. O webhook
+identifica o e-book por essa foto, nunca pela env do momento. `EBOOK_URL` tem no máximo
+**500 caracteres** (limite de metadata do Stripe, medido): acima disso o e-book não é
+oferecido e sai o warning `ebook_nao_oferecido` (com o tamanho, **nunca a URL** — ela é
+o acesso ao PDF pago). As duas envs só entram em produção **depois do merge do #708**.
+
+**Entrega do e-book (#708).** O `checkout.session.completed` com `ebook_price` grava
+uma linha em `ebook_entregas` (`db/ebook_entregas.py`, PK `user_id + session_id`, com a
+foto) logo depois do grant e ANTES dos outros efeitos, sem try: falha → 5xx e a
+reentrega refaz tudo. Sessão sem a foto `ebook_url` grava assim mesmo e loga
+`ebook_sem_url`. Quem entrega é o job `_ebook_worker` (abaixo, "Tarefas de fundo"):
+só envia com `not conta_sem_credencial(uid)` (`db/google_auth.py`: senha não vazia ou
+identidade Google/Apple — a prova do e-mail; sem linha em `auth_accounts` a função dá
+False, e o job não envia porque não acha e-mail), confirma a compra pelo
+`checkout.Session.list_line_items` (senão fecha `nao_comprou`), manda
+`send_ebook_email` para o e-mail ATUAL da conta e fecha `enviado` na linha. O claim
+(`reivindicada_ate`, 10 min dobrando a cada tentativa até 1 dia, contadas em
+`tentativas`; a linha nunca fecha sozinha) não segura transação durante o Stripe/Resend; entrega é
+"pelo menos uma vez". A tabela fica fora do export LGPD e sai com a conta (cascade).
+
+**E-mail trocado chega ao Stripe (PR 4b).** A `PATCH /settings/{uid}/security/contact`
+que troca o e-mail de conta com `stripe_customer_id` grava, na MESMA transação, uma linha
+em `stripe_email_pendente` (`db/stripe_email_pendente.py`, PK `user_id`, só `versao` —
+sem PII; troca de novo sobe a versão). O job `_stripe_email_worker` manda
+`stripe.Customer.modify(email=<e-mail ATUAL da conta>)` e apaga a linha só se a versão
+não mudou durante o envio. A troca no app nunca é desfeita: falha transitória espera o
+claim (mesma régua do e-book); `InvalidRequestError` (cliente apagado, e-mail recusado)
+fecha e loga `stripe_email_sync_recusado`, sem o e-mail. Fora do export LGPD; cascade.
+
+**Fatura com e-book:** no `invoice.paid`/`payment_succeeded`, `amount_cents` é só o
+plano: `amount_paid` menos o líquido das linhas cujo `pricing.price_details.price` é
+o `ebook_price` da metadata da assinatura (`amount` da linha é BRUTO; o cupom vem em
+`discount_amounts`). É esse valor que vai para o e-mail de cobrança, a comissão de
+afiliado e o rastreio da fatura — a 1ª fatura de trial + e-book dá 0 e pula os três
+(a comissão, que só paga a 1ª fatura paga, fica para a do plano).
+
+**Rastreio do checkout:** o Meta `Purchase` sem trial leva o `amount_total` da sessão
+(com cupom e e-book — o mesmo número do GA4; sem o campo, cai no `unit_amount`). Com
+trial e `amount_total > 0` (o e-book), saem um Meta `Purchase` e um GA4 `purchase`
+server-only com id `ebook_<sid>` (`meta_capi.ebook_event_id`) e item `ebook`; o
+`StartTrial` não muda.
 
 A **escada de planos é `free < essencial < plus < pro`**, atrás do flag
 `PLANS_V2_ENABLED` (lido dinamicamente, sem redeploy; `0`/`false` é freio de
@@ -200,14 +477,29 @@ contagem não vive aqui de propósito, porque ela sobe a cada rodada (§2).
 
 Via **Pluggy**. Endpoints em `frontend/routes/open_finance.py`
 (`/open-finance/{user_id}` e `connect-token`, `connectors`, `sync`, `refresh`,
-`pluggy-item`, `caixinhas`, `caixinhas/bind`, `mock-connect`) mais o webhook
+`pluggy-item`, `caixinhas`, `caixinhas/bind`, `mock-connect` (só com `OF_MOCK_CONNECT_ENABLED`; sem ele, 404),
+`limite` (GET só leitura, `{ok, of_banks_max, em_uso, pode_adicionar, code, message}`: se cabe
+um banco NOVO, pela mesma decisão do `_enforce_bank_limit`; o teto nunca vira 402 aqui, mas o
+gate comum de dados sim (402 `subscription_required`/`plan_selection_required` sem plano ativo);
+não barra reconexão e o 402 do `/pluggy-item` continua valendo)) mais o webhook
 `/open-finance/pluggy/webhook`. Serviços em `core/services/pluggy*.py` e
-`open_finance*.py`; tabelas `open_finance_connections/accounts/transactions/investments` mais
+`open_finance*.py`; tabelas `open_finance_connections/accounts/transactions/investments`,
+`open_finance_investment_snapshots` (foto diária por posição, `db/of_snapshots.py`) e
 `open_finance_item_registry` — o rastro de todo item que passou por aqui, inclusive o
 que nunca virou conexão (token emitido e abandonado, webhook de item desconhecido); o
 `GET /items` da Pluggy devolve 401, então sem ela o universo remoto não é enumerável;
 ela guarda também a marca de remoção deliberada (`origin='removed'`), escrita na mesma
 transação do delete pelo disconnect e pelo reset.
+
+Assinaturas vêm do **Recurring Payments** da Pluggy (`db/of_recurring.py`):
+`of_recurring_payments` guarda o resultado por conexão, substituído inteiro a cada
+sync — falha na Pluggy mantém o anterior; `subscription_marks` guarda a marcação do
+usuário por `merchant_key` (vale para todos os itens da chave), e `assinatura_antes` a
+marca `assinatura` que o `ignorar` substituiu (linhas ignoradas antes da coluna nascem `false`).
+`open_finance_connections.recurring_fetched_at` e `recurring_seed_silent` controlam o
+silêncio da 1ª busca do Detetive numa conexão que já existia: as chaves dela — a foto
+guardada em `recurring_seed_descricoes`, não a atual — viram lápide por `record_agent_event(silencioso=True)`, que grava o evento já com
+`stale_at` (não aparece no feed nem vai por e-mail).
 
 Boa parte do comportamento é regida por flags `OF_*` (beta por e-mail/user_id, limite
 de bancos no free, refresh proativo). Antes de mexer, leia as flags — o
@@ -220,6 +512,8 @@ categorização determinística. Há rate limiting próprio (`core/ai_rate_limit
 limite mensal de chat (`AI_CHAT_MONTHLY_LIMIT`), chat "Piggy" no dashboard
 (`core/services/ai_chat/`) e agentes proativos (`core/services/piggy_agents.py`,
 atrás de `AGENTS_ENABLED` + listas de beta).
+A tool `simulate_purchase` (`core/services/ai_chat/tools/simulator.py`) usa o mesmo
+simulador e a mesma validação da rota `/simulator`, com gate soft de Pro.
 
 Categorização tem uma armadilha própria: **categoria e regra de categoria são tabelas
 diferentes** (`user_categories` × `user_category_rules`) e a regra ganha da categoria
@@ -229,7 +523,7 @@ na inferência.
 
 **Resend** (`RESEND_API_KEY`), em `core/services/email_service.py` — **não é mais
 SMTP/Gmail**. Além dos transacionais (verificação, boas-vindas, reset), há e-mails de
-ciclo de vida (reengajamento, nudge de upgrade, downsell de trial, relatório de
+ciclo de vida (reengajamento, downsell de trial, relatório de
 agente, mudança de plano), com link de descadastro (`make_unsub_url` + `unsub_headers`).
 
 Falha de e-mail é silenciosa por contrato: loga e não quebra o fluxo principal.
@@ -263,23 +557,40 @@ por isso recusa com 409 quando `last_payment_status` é `trialing|active|past_du
 ### Tarefas de fundo
 
 Sobem no startup do app quando `RUN_BACKGROUND_TASKS != "0"`: rendimento de
-investimento, Open Finance (abaixo), cobrança de recorrentes, agendadores de
+investimento, Open Finance (abaixo), contas a pagar dos recorrentes, agendadores de
 engajamento e de IA proativa, retenção de eventos de login, poda das tabelas de
 refresh token / challenge de MFA / cadastro Google pendente
-(`core/services/table_cleanup.py`). Ficam desligadas só onde
+(`core/services/table_cleanup.py`), e a entrega do e-book da `/assinar`
+(`_ebook_worker` → `core/services/ebook_entrega.entregar_pendentes`, a cada 5 min, a
+1ª volta sem delay; inerte sem `STRIPE_SECRET_KEY` no ambiente), o e-mail trocado em
+`/settings` levado ao cliente do Stripe (`_stripe_email_worker` →
+`core/services/stripe_email_sync.sincronizar_pendentes`, mesma cadência e mesma guarda da
+chave), e a foto diária do
+patrimônio (`_patrimonio_foto` → `core/services/patrimonio_foto.py`, a cada hora, a partir
+das 18h do fuso do app, uma por usuário com acesso por dia em `patrimonio_fotos`; atrás de
+`PATRIMONIO_FOTO_ENABLED`, desligada por padrão e lida a cada volta — desligada, não
+consulta nada). Ficam desligadas só onde
 `RUN_BACKGROUND_TASKS=0` é forçado: `dashboard_dev.py` e
 `scripts/whatsapp_qa_vault_harness.py`. O `tests/conftest.py` **não** força, então
 teste que sobe o `app` herda o default (`1`) — `tests/test_table_cleanup.py` passa
 `"1"` de propósito, para ver a tarefa subir.
 
-O Open Finance tem **três** trabalhos, não dois: expiração de trial
-(`_open_finance_trial_expiry`), refresh proativo e **job de saúde** — os dois últimos no
-mesmo tick de `_open_finance_refresh`. O refresh proativo depende de
-`OF_REFRESH_ENABLED` (off por padrão em produção); o job de saúde roda MESMO com ele
-desligado e ESCREVE `status`/`status_reason`/`health` na conexão do usuário. É de
-propósito: ele só faz `GET /items` (não consome cota de coleta) e é o que tira do
-"Atualizado" a conexão cujo item sumiu da Pluggy — sem refresh e sem webhook, nada mais
-faria essa verificação. Kill switch: `OF_HEALTH_CHECK_ENABLED=0` (default `1`).
+O Open Finance tem **quatro** trabalhos: expiração de trial
+(`_open_finance_trial_expiry`), **job de saúde**, **retentativa** e refresh proativo —
+os três últimos no mesmo tick de `_open_finance_refresh`, nessa ordem. O 1º tick
+roda 10 min depois do boot (`_PRIMEIRO_TIQUE_SEC`) só com saúde e retentativa (GET); o
+PATCH periódico não roda no boot e entra do 2º tick em diante, a cada
+`OF_REFRESH_INTERVAL_SEC` (6 h). O refresh
+proativo depende de `OF_REFRESH_ENABLED` (off por padrão em produção); o job de saúde
+roda MESMO com ele desligado e ESCREVE `status`/`status_reason`/`health` na conexão do
+usuário. É de propósito: ele só faz `GET /items` (não consome cota de coleta) e é o que
+tira do "Atualizado" a conexão cujo item sumiu da Pluggy — sem refresh e sem webhook,
+nada mais faria essa verificação. A retentativa (Onda 5, PR-B2,
+`frontend/routes/of_retentativa.py`) vem logo depois: relê a Pluggy, também só com GET,
+para até `OF_RETRY_MAX_PER_TICK` conexões com dado atrás (default 20; só `0` ou
+negativo desliga só ela, valor que não é inteiro cai no padrão), uma de cada vez, pelo mesmo caminho de sync do webhook. Quem entra e por quê:
+`docs/open_finance_estados.md` §2.2. Kill switch dos dois: `OF_HEALTH_CHECK_ENABLED=0`
+(default `1`).
 (Há ainda `_open_finance_proactive`, que retorna na hora sem `OF_PROACTIVE_ENABLED`.)
 
 ---
@@ -304,7 +615,9 @@ mora; não duplicar aqui). O essencial de domínio:
   nascer em arquivo próprio (§0.5 da raiz), com rota própria em `static_pages.py`.
 - **Segurança de borda** (medida em produção): CSP com allowlist explícita
   (`cdnjs`, `jsdelivr`, `cdn.pluggy.ai`, `connect.facebook.net`,
-  `static.cloudflareinsights.com`), HSTS, `X-Frame-Options: DENY`,
+  `static.cloudflareinsights.com`; o Stripe em `script-src` — `js.stripe.com`,
+  `*.js.stripe.com`, `checkout.stripe.com` — e em `frame-src` — os mesmos mais
+  `hooks.stripe.com` —, para o checkout embutido da `/assinar`), HSTS, `X-Frame-Options: DENY`,
   `Permissions-Policy` zerando câmera/microfone/geolocalização,
   `Referrer-Policy: strict-origin-when-cross-origin`, `X-Content-Type-Options: nosniff`.
   O `'unsafe-inline'` do `script-src` só sai quando os handlers inline saírem.
@@ -347,7 +660,7 @@ Os agrupamentos, para orientar a busca: **core** (`users`, `accounts`, `launches
 | Serviço | Para quê | Onde |
 |---|---|---|
 | WhatsApp **Cloud API oficial** (`graph.facebook.com`) | canal principal | `adapters/whatsapp/` |
-| Discord | canal secundário | `adapters/discord/`, `bot.py` |
+| Discord | fora do `launch.py` desde o PR 5a do dashboard v2: o código segue e não roda | `adapters/discord/`, `bot.py` |
 | OpenAI | categorização, chat, agentes | `ai_router.py`, `core/services/ai_chat/` |
 | Stripe | assinaturas | billing no monólito |
 | Pluggy | Open Finance | `core/services/pluggy*.py` |
@@ -425,6 +738,12 @@ de job que apaga linha; `TABLE_CLEANUP_INTERVAL_HOURS=0` desliga a poda).
   [ADR 0002](adr/0002-piloto-como-funciona-como-ilha-react.md).
   Ao alterar o build, preserve o alvo Safari 14 nos artefatos JS e CSS e
   `emptyOutDir: false`: o destino é o diretório do site.
+  A ilha do v2 (`/painel`) busca dados com **TanStack Query v5**. O alvo safari14 só
+  rebaixa sintaxe (os `this.#x` viram WeakMap), não faz polyfill de API: por isso
+  `tests/frontend/dashboard_v2_safari14.test.mjs` varre o `dashboard-app.js` commitado
+  atrás das APIs que o Safari 14 não tem (`.at(`, `structuredClone`, `Object.hasOwn(`,
+  `WeakRef`, `static{`, `this.#` e outras) e monta o `/painel` no Chromium com elas
+  apagadas.
   O gate do CI recompila `webapp/` e exige artefatos idênticos aos commitados.
   Dependências novas exigem rebuild e inclusão dos artefatos afetados no commit.
   **O que isto NÃO autoriza:** transformar a área logada em SPA, adicionar

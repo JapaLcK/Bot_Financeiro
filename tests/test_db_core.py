@@ -1,5 +1,9 @@
+import re
 from decimal import Decimal
 
+import pytest
+
+import db_support
 from db import (
     get_balance,
     add_launch_and_update_balance,
@@ -168,6 +172,7 @@ def test_attempt_whatsapp_phone_link_religa_quando_stale_uid_tem_auth_diferente(
                 insert_auth_account_pii(cur, stale_wa_uid, stale_email, phone="5511000000000")
                 # simula identidade WA stale apontando para stale_wa_uid
                 bind_identity_pii(cur, "whatsapp", wa_phone, stale_wa_uid)
+                bind_identity_pii(cur, "email", stale_email, stale_wa_uid)
             conn.commit()
 
         result = attempt_whatsapp_phone_link(wa_phone, current_user_id=stale_wa_uid)
@@ -193,6 +198,20 @@ def test_attempt_whatsapp_phone_link_religa_quando_stale_uid_tem_auth_diferente(
         assert row["user_id"] == user_id, (
             f"identidade WA deve apontar para {user_id}, aponta para {row['user_id']}"
         )
+
+        # #635 (D3): com login nos dois lados, o login da origem é apagado, e o
+        # e-mail dele não vira porta para o destino — cadastro novo = conta nova.
+        with get_conn() as conn:
+            with conn.cursor() as cur:
+                cur.execute("select count(*) as n from auth_accounts where user_id = %s", (stale_wa_uid,))
+                assert cur.fetchone()["n"] == 0, "o login antigo da origem sobrou"
+        novo = confirm_email_verification(stale_email, create_email_verification(
+            stale_email, "senha-forte-123", f"55119{uuid.uuid4().int % 100_000_000:08d}"))
+        assert novo["user_id"] not in (user_id, stale_wa_uid)
+        with get_conn() as conn:
+            with conn.cursor() as cur:
+                cur.execute("select count(*) as n from auth_accounts where user_id = %s", (user_id,))
+                assert cur.fetchone()["n"] == 1, "o e-mail antigo virou 2ª conta de login no destino"
     finally:
         # stale pode ter sido absorvido (merge) — tenta deletar mesmo assim
         with get_conn() as conn:
@@ -200,6 +219,9 @@ def test_attempt_whatsapp_phone_link_religa_quando_stale_uid_tem_auth_diferente(
                 cur.execute("delete from user_identities where provider='whatsapp' and external_id=%s", (wa_phone,))
                 cur.execute("delete from auth_accounts where user_id = %s", (stale_wa_uid,))
                 cur.execute("delete from users where id = %s", (stale_wa_uid,))
+                cur.execute("delete from user_identities where provider = 'email' and external_id = %s",
+                            (stale_email,))
+                cur.execute("delete from auth_accounts where email = %s", (stale_email,))
             conn.commit()
 
 
@@ -370,9 +392,10 @@ def test_confirm_email_verification_grava_signup_source():
     assert src == "app"
 
 
-def test_confirm_email_preserva_origem_no_re_registro():
-    # O insert usa `on conflict (email) do update ... coalesce(signup_source)`:
-    # se a conta já existe, a origem da 1ª criação é preservada. O guard
+def test_confirm_email_recusa_re_registro_e_preserva_a_conta():
+    # O insert é `on conflict (email) do nothing` (`db_support.inserir_conta_nova`):
+    # código de um e-mail que ganhou conta depois é RECUSADO, e a conta fica como
+    # estava — o antigo `do update` punha a senha deste código nela. O guard
     # anti-duplicata de create_email_verification bloqueia o 2º cadastro pela
     # API, então semeamos o 2º código direto na tabela (como o teste de
     # normalização de telefone faz) pra exercitar o caminho on-conflict.
@@ -397,11 +420,14 @@ def test_confirm_email_preserva_origem_no_re_registro():
             )
         conn.commit()
 
-    result = confirm_email_verification(email, code2, "web")
-    with get_conn() as conn:
-        with conn.cursor() as cur:
-            cur.execute("select signup_source from auth_accounts where user_id = %s",
-                        (result["user_id"],))
-            src2 = cur.fetchone()["signup_source"]
-    assert result["user_id"] == uid1
-    assert src2 == "app"  # coalesce preservou a 1ª origem
+    def _conta():
+        with get_conn() as conn:
+            with conn.cursor() as cur:
+                cur.execute("select signup_source, password_hash from auth_accounts where user_id = %s",
+                            (uid1,))
+                return cur.fetchone()
+
+    antes = _conta()
+    with pytest.raises(ValueError, match=re.escape(db_support.EMAIL_JA_TEM_CONTA)):
+        confirm_email_verification(email, code2, "web")
+    assert _conta() == antes and antes["signup_source"] == "app"

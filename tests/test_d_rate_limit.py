@@ -31,12 +31,13 @@ logando E o link continua sendo de uso único. Sem ele, um teto de "0/minute"
 (ou uma rota que só devolve 429) passaria no negativo e no do 429, e o magic
 link do bot estaria morto.
 
-ARMADILHA MEDIDA: `tests/test_pix_rota_registrada.py` faz `importlib.reload` do
-monólito, e o `@limiter...` roda de novo — o slowapi faz `.extend()` na lista de
-limites da rota, então a partir dali CADA requisição gasta DOIS slots e o teto
-efetivo vira 15/min na suíte. Este arquivo roda antes (`d` < `p`) e não é
-afetado; quem reordenar vai ver 429 no 16º. Artefato de teste, não de produção:
-o módulo é importado uma vez no servidor.
+ARMADILHA MEDIDA: um `importlib.reload` do monólito roda o `@limiter...` de
+novo, e o slowapi faz `.extend()` na lista de limites da rota — dali em diante
+CADA requisição gasta DOIS slots e o teto efetivo vira 15/min no processo. Por
+isso `tests/test_pix_rota_registrada.py` importa o app num subprocesso em vez de
+recarregá-lo; antes, este arquivo só passava porque `d` < `p` na ordem
+alfabética. Artefato de teste, não de produção: o módulo é importado uma vez no
+servidor.
 
 O storage do limiter é EM MEMÓRIA e compartilhado pela sessão inteira de pytest:
 a fixture zera antes e depois de cada teste daqui, senão as 31 requisições deste

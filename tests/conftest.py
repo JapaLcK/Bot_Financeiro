@@ -14,13 +14,29 @@ os.environ.setdefault("PII_ENCRYPTION_KEY", _Fernet.generate_key().decode())
 os.environ.setdefault("PII_HASH_PEPPER", "test-pepper-for-pytest-only-must-be-32-chars-long")
 # Não polui pii_access_log durante testes (cada decrypt registra uma row).
 os.environ.setdefault("PII_AUDIT_DISABLED", "1")
-# Escada de planos v2 lançada com default LIGADO (2026-08-06). A suíte foi
-# escrita no mundo v1 (gates binários Free×Pro, mocks de is_pro), então os
-# testes rodam com o freio puxado por padrão — os testes da escada
-# (test_plan_tiers, test_of_trial_expiry, etc.) ligam com setenv("...", "1").
-os.environ.setdefault("PLANS_V2_ENABLED", "0")
+# Escada de planos v2: a suíte roda o mundo de PRODUÇÃO (v2 e gate de acesso
+# ligados, que é o padrão do código sem env). Uma env do shell de quem roda não
+# decide o mundo; o teste que precisa do v1 (o freio) faz `monkeypatch.setenv`.
+os.environ.pop("PLANS_V2_ENABLED", None)
+os.environ.pop("ACCESS_GATE_ENABLED", None)
+
+# Bcrypt no custo mínimo — só nos testes. O custo padrão é calibrado para ser
+# lento de propósito, e a suíte hasheia senha/código de backup o tempo todo:
+# é o maior item do tempo de rodada. `checkpw` lê o custo de dentro do próprio
+# hash, então a verificação continua funcionando igual. Produção não muda —
+# `db/users.py` e `db/mfa.py` seguem chamando `bcrypt.gensalt()` sem argumento,
+# e `tests/test_bcrypt_custo.py` prova que os dois hasheiam no custo padrão.
+# O original fica no próprio módulo (e não numa global daqui) porque o conftest
+# é importado duas vezes — como `conftest` e como `tests.conftest`; o `hasattr`
+# impede a segunda passada de guardar a lambda da primeira como "padrão".
+import bcrypt as _bcrypt  # noqa: E402
+if not hasattr(_bcrypt, "gensalt_padrao"):
+    _bcrypt.gensalt_padrao = _bcrypt.gensalt
+    _bcrypt.gensalt = lambda rounds=12, prefix=b"2b": _bcrypt.gensalt_padrao(4, prefix)
 
 from db import init_db, ensure_user, get_conn
+import db_support  # noqa: E402
+from core.services.plan_service import has_app_access  # noqa: E402
 
 
 # ── Coleta: arquivos que dependem de `ofxparse` ──────────────────────────────
@@ -391,6 +407,19 @@ def _zera_rate_limit_em_memoria():
 
 
 @pytest.fixture(autouse=True)
+def _zera_rate_limit_persistente():
+    """O par do de cima para o teto que mora no BANCO (`auth_rate_limits`): o de
+    login é 5/60s por IP, e o TestClient é sempre `ip:testclient`. Sem isto, as
+    tentativas de um arquivo contam no seguinte dentro da mesma janela — com o
+    xdist os arquivos de login caem juntos no mesmo worker e o `test_mfa` levava
+    429 (`KeyError: 'mfa_challenge'`). Cada worker tem o próprio database, então
+    apagar a tabela inteira não alcança ninguém de fora."""
+    with get_conn() as conn:
+        conn.execute("delete from auth_rate_limits")
+        conn.commit()
+
+
+@pytest.fixture(autouse=True)
 def _auto_cleanup_orphan_users():
     """Salva quem ja existia em `users` antes do teste e apaga qualquer
     novo registro depois — pega ids secundarios criados manualmente
@@ -428,9 +457,17 @@ def user_id():
     _cleanup_user(uid)
 
 
-def promote_to_pro(user_id: int) -> int:
+def promote_to_pro(user_id: int, plan: str = "pro") -> int:
     """Mesma promoção da fixture `pro_user_id`, chamável no meio de um teste
-    (quando o user vem de outra fixture, ex.: id pequeno pro WhatsApp)."""
+    (quando o user vem de outra fixture, ex.: id pequeno pro WhatsApp).
+
+    `plan` é o valor gravado em `auth_accounts.plan`: o padrão `'pro'` é o Plus
+    no v2; quem precisa do tier mais alto pede `plan="pro_max"`.
+
+    O assert do fim existe porque, sem plano, o gate barra a mensagem antes do
+    `route()`, e um teste de ausência ("não pagou", "não gravou") fica verde sem
+    o código rodar. A invalidação vem antes dele porque a escrita é SQL cru e o
+    `get_auth_user` tem cache."""
     import uuid as _uuid
     from db.connection import get_conn
     fake_email = f"pro-{_uuid.uuid4().hex[:8]}@test.local"
@@ -440,15 +477,42 @@ def promote_to_pro(user_id: int) -> int:
             row = cur.fetchone()
             if row:
                 cur.execute(
-                    "update auth_accounts set plan='pro', plan_expires_at=null where user_id = %s",
-                    (user_id,),
+                    "update auth_accounts set plan=%s, plan_expires_at=null where user_id = %s",
+                    (plan, user_id),
                 )
             else:
                 cur.execute(
-                    "insert into auth_accounts(user_id, email, password_hash, plan) values (%s, %s, 'x', 'pro')",
-                    (user_id, fake_email),
+                    "insert into auth_accounts(user_id, email, password_hash, plan) values (%s, %s, 'x', %s)",
+                    (user_id, fake_email, plan),
                 )
         conn.commit()
+    db_support.invalidate_auth_user_cache(user_id)
+    assert has_app_access(user_id), f"promote_to_pro({user_id}, {plan!r}) não deu acesso"
+    return user_id
+
+
+def em_carencia(user_id: int, plan: str = "pro") -> int:
+    """Conta na carência de cobrança: plano pago VENCIDO com o relógio de
+    inadimplência aberto. É o único estado do v2 em que o tier `free` entra no
+    app (`tem_direito_hoje`, lado direito do OR) — o "Grátis" que sobrou."""
+    from datetime import datetime, timedelta, timezone
+    import db
+    from core.services.plan_service import get_plan_tier
+    promote_to_pro(user_id, plan=plan)
+    # Deltas absolutos, nunca `DUNNING_GRACE_DAYS ± n`.
+    agora = datetime.now(timezone.utc)
+    with get_conn() as conn:
+        with conn.cursor() as cur:
+            cur.execute(
+                "update auth_accounts set plan_expires_at=%s, past_due_since=%s,"
+                "       last_payment_status='past_due' where user_id=%s",
+                (agora - timedelta(days=1), agora - timedelta(days=2), user_id),
+            )
+        conn.commit()
+    # Sem `plan_selected_at` o `needs_plan_selection` barra antes do acesso (402).
+    db.mark_plan_selected(user_id)
+    db_support.invalidate_auth_user_cache(user_id)
+    assert get_plan_tier(user_id) == "free" and has_app_access(user_id), "carência não montou"
     return user_id
 
 
@@ -457,3 +521,67 @@ def pro_user_id(user_id: int):
     """user_id já promovido para plano Pro — use em testes que precisam criar
     múltiplas caixinhas/cartões ou exercem features Pro."""
     return promote_to_pro(user_id)
+
+
+@pytest.fixture()
+def pluggy_responde(monkeypatch):
+    """Faz o `httpx.Client.get` devolver o que o teste mandar — o caminho real
+    passa por `_pluggy_get`, que é onde o saneamento e a conferência de
+    paginação moram.
+
+    Chamada com um DICT, ele vale para todas as chamadas (o comportamento
+    original, usado por `test_pluggy_resposta_venenosa.py`). Chamada com uma
+    LISTA, cada entrada responde a um GET, na ordem — é o que permite testar
+    paginação. Entrada em forma de tupla `(status_code, payload)` simula HTTP de
+    erro, passando pelo `_raise_for_pluggy_response` REAL em vez de mockar a
+    exceção.
+
+    O objeto devolvido expõe `.chamadas` com os `params` recebidos por GET.
+    """
+    import core.services.pluggy as pluggy
+
+    estado: dict = {"respostas": None}
+    chamadas: list = []
+
+    class _Resp:
+        def __init__(self, entrada):
+            if isinstance(entrada, tuple):
+                self.status_code, self._payload = entrada
+            else:
+                self.status_code, self._payload = 200, entrada
+            self.is_success = 200 <= self.status_code < 300
+
+        def json(self):
+            return self._payload
+
+    def _fake_get(self, url, headers=None, params=None):
+        chamadas.append(params)
+        respostas = estado["respostas"]
+        if isinstance(respostas, list):
+            i = len(chamadas) - 1
+            assert i < len(respostas), f"GET nº {i + 1} sem resposta programada"
+            return _Resp(respostas[i])
+        return _Resp(respostas)
+
+    monkeypatch.setattr(pluggy.httpx.Client, "get", _fake_get)
+
+    def programa(respostas):
+        estado["respostas"] = respostas
+        chamadas.clear()
+
+    programa.chamadas = chamadas
+    return programa
+
+
+def usuario_pagante(plan: str = "pro") -> int:
+    """Usuário novo, com id PEQUENO, já com plano. Acima de ~2e9 o handler do
+    bot troca o id por hash (`_normalize_user_id`) e o lançamento cai noutro
+    usuário. A limpeza é a do `_auto_cleanup_orphan_users`."""
+    uid = int(uuid.uuid4().int % 900_000_000) + 1
+    ensure_user(uid)
+    return promote_to_pro(uid, plan)
+
+
+@pytest.fixture()
+def pro_small_uid() -> int:
+    return usuario_pagante()

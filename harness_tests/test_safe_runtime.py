@@ -7,6 +7,8 @@ import sys
 import unittest
 from pathlib import Path
 
+from _harness_lote import rodar_lote
+
 REPO = Path(__file__).resolve().parents[1]
 SCRIPT = REPO / "scripts" / "whatsapp_harness_safe.py"
 LIVE_SCRIPT = REPO / "scripts" / "whatsapp_qa_vault_harness.py"
@@ -69,15 +71,14 @@ class SafeRuntimeTests(unittest.TestCase):
         self.assertIn("não consegui", payload["replies"][0]["body"].lower())
 
     def test_fora_do_escopo_recebe_limite_claro(self) -> None:
-        for text in (
+        texts = (
             "qual é a previsão do tempo amanhã?",
             "conte uma piada",
             "banana radioativo do espaco",
-        ):
+        )
+        for text, payload in zip(texts, rodar_lote("core", texts)):
             with self.subTest(text=text):
-                result = _run("--layer", "core", "--text", text)
-                self.assertEqual(result.returncode, 0, result.stderr or result.stdout)
-                payload = json.loads(result.stdout)
+                self.assertEqual(payload["exit"], 0, payload)
                 self.assertEqual(payload["intent"], "out_of_scope")
                 self.assertEqual(payload["blocked"], [])
                 self.assertTrue(payload["answered"])
@@ -114,31 +115,28 @@ class SafeRuntimeTests(unittest.TestCase):
             "qual debênture você recomenda?",
             "compre dólares para mim",
         )
-        for text in cases:
+        for text, payload in zip(cases, rodar_lote("core", cases)):
             with self.subTest(text=text):
-                result = _run("--layer", "core", "--text", text)
-                self.assertEqual(result.returncode, 0, result.stderr or result.stdout)
-                payload = json.loads(result.stdout)
+                self.assertEqual(payload["exit"], 0, payload)
                 self.assertEqual(payload["intent"], "out_of_scope")
                 self.assertEqual(payload["blocked"], [])
                 self.assertIn("não posso comprar", payload["response"].lower())
                 self.assertIn("por você", payload["response"].lower())
 
     def test_receita_de_venda_de_ativo_nao_e_ordem_de_venda(self) -> None:
-        for text in (
+        texts = (
             "recebi 100 da venda de ações",
             "quanto eu receberia se vendesse PETR4?",
             "se eu vendesse PETR4 ontem, qual seria meu lucro?",
-        ):
+        )
+        for text, payload in zip(texts, rodar_lote("policy", texts)):
             with self.subTest(text=text):
-                result = _run("--layer", "policy", "--text", text)
-                self.assertEqual(result.returncode, 0, result.stderr or result.stdout)
-                payload = json.loads(result.stdout)
+                self.assertEqual(payload["exit"], 0, payload)
                 self.assertFalse(payload["refused"])
                 self.assertEqual(payload["blocked"], [])
 
     def test_ordem_explicita_de_venda_continua_recusada(self) -> None:
-        for text in (
+        texts = (
             "venda PETR4",
             "por favor venda minhas ações",
             "por gentileza, venda PETR4",
@@ -148,11 +146,10 @@ class SafeRuntimeTests(unittest.TestCase):
             "vende PETR4 para mim",
             "gostaria que você vendesse PETR4",
             "faça a venda das minhas ações",
-        ):
+        )
+        for text, payload in zip(texts, rodar_lote("policy", texts)):
             with self.subTest(text=text):
-                result = _run("--layer", "policy", "--text", text)
-                self.assertEqual(result.returncode, 0, result.stderr or result.stdout)
-                payload = json.loads(result.stdout)
+                self.assertEqual(payload["exit"], 0, payload)
                 self.assertTrue(payload["refused"])
 
     def test_recusa_de_investimento_antecede_fallback_de_ia(self) -> None:
@@ -165,7 +162,7 @@ class SafeRuntimeTests(unittest.TestCase):
         self.assertLess(refusal_position, ai_position)
 
     def test_consulta_da_carteira_nao_e_tratada_como_recomendacao(self) -> None:
-        for text in (
+        texts = (
             "qual foi meu melhor investimento?",
             "qual meu melhor investimento?",
             "qual dos meus fundos foi o melhor?",
@@ -184,11 +181,10 @@ class SafeRuntimeTests(unittest.TestCase):
             "como registrar no PigBank que comecei a investir em CDB?",
             "meu CDB é bom?",
             "minha LCI é boa?",
-        ):
+        )
+        for text, payload in zip(texts, rodar_lote("core", texts)):
             with self.subTest(text=text):
-                result = _run("--layer", "core", "--text", text)
-                self.assertEqual(result.returncode, 0, result.stderr or result.stdout)
-                payload = json.loads(result.stdout)
+                self.assertEqual(payload["exit"], 0, payload)
                 self.assertNotIn("não posso comprar", payload["response"].lower())
 
     def test_erro_interno_nao_e_contabilizado_como_resposta(self) -> None:
@@ -215,11 +211,9 @@ class SafeRuntimeTests(unittest.TestCase):
             "como faço para anexar um PDF?": "extratos também aceitam .csv ou .pdf",
             "como faço um lançamento": "para fazer um lançamento",
         }
-        for text, expected in cases.items():
+        for (text, expected), payload in zip(cases.items(), rodar_lote("core", list(cases))):
             with self.subTest(text=text):
-                result = _run("--layer", "core", "--text", text)
-                self.assertEqual(result.returncode, 0, result.stderr or result.stdout)
-                payload = json.loads(result.stdout)
+                self.assertEqual(payload["exit"], 0, payload)
                 self.assertEqual(payload["intent"], "out_of_scope")
                 self.assertEqual(payload["blocked"], [])
                 self.assertIn(expected, payload["response"].lower())
@@ -239,18 +233,16 @@ class SafeRuntimeTests(unittest.TestCase):
             "como funciona minha caixinha?": "caixinhas",
             "quero saber de investimentos": "investimentos",
         }
-        for text, expected in cases.items():
+        for (text, expected), payload in zip(cases.items(), rodar_lote("core", list(cases))):
             with self.subTest(text=text):
-                result = _run("--layer", "core", "--text", text)
-                self.assertEqual(result.returncode, 0, result.stderr or result.stdout)
-                payload = json.loads(result.stdout)
+                self.assertEqual(payload["exit"], 0, payload)
                 self.assertEqual(payload["intent"], "out_of_scope")
                 self.assertTrue(payload["answered"])
                 self.assertEqual(payload["outcome"], "answered")
                 self.assertIn(expected, payload["response"].lower())
 
     def test_palavra_ambigua_sem_contexto_financeiro_fica_fora_do_escopo(self) -> None:
-        for text in (
+        texts = (
             "qual é o limite de velocidade?",
             "quando vence minha habilitação?",
             "como importar uma biblioteca Python?",
@@ -270,11 +262,10 @@ class SafeRuntimeTests(unittest.TestCase):
             "PigBank, conte uma piada",
             "vale a pena comprar um carro?",
             "vale a pena investir em um curso?",
-        ):
+        )
+        for text, payload in zip(texts, rodar_lote("core", texts)):
             with self.subTest(text=text):
-                result = _run("--layer", "core", "--text", text)
-                self.assertEqual(result.returncode, 0, result.stderr or result.stdout)
-                payload = json.loads(result.stdout)
+                self.assertEqual(payload["exit"], 0, payload)
                 self.assertIn("só consigo ajudar com finanças", payload["response"].lower())
 
     def test_topicos_financeiros_secundarios_mantem_ajuda(self) -> None:
@@ -293,12 +284,9 @@ class SafeRuntimeTests(unittest.TestCase):
             "caxinha banana cosmica": "caixinhas",
             "categoria marciana aleatoria": "categorias",
         }
-        for text, expected in cases.items():
+        for (text, expected), payload in zip(cases.items(), rodar_lote("core", list(cases))):
             with self.subTest(text=text):
-                result = _run("--layer", "core", "--text", text)
-
-                self.assertEqual(result.returncode, 0, result.stderr or result.stdout)
-                payload = json.loads(result.stdout)
+                self.assertEqual(payload["exit"], 0, payload)
                 self.assertIn(expected, payload["response"].lower())
 
     def test_excecao_do_nucleo_recebe_fallback(self) -> None:

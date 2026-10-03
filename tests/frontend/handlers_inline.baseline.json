@@ -174,9 +174,7 @@
       "submitPayBill",
       "submitPocket",
       "submitPocketMove",
-      "syncGoalInterestConfig",
       "syncParcUI",
-      "syncPocketInterestConfig",
       "toggleAffiliateList",
       "toggleHideBalance",
       "toggleSidenav",
@@ -189,6 +187,7 @@
     ],
     "variaveis": [
       "BankMovements",
+      "CashTransfers",
       "Reconciliations",
       "USER_ID",
       "refreshDashboardAfterInvestment"
@@ -211,7 +210,6 @@
   "login.html": {
     "funcoes": [
       "cancelMfa",
-      "doForgot",
       "doLogin",
       "doMfa"
     ],
@@ -263,6 +261,12 @@
       "showSettingsSection",
       "toggleSecurityEdit",
       "updateNotificationSettings"
+    ],
+    "variaveis": []
+  },
+  "recuperar-senha.html": {
+    "funcoes": [
+      "doForgot"
     ],
     "variaveis": []
   }

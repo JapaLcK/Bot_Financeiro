@@ -45,24 +45,10 @@ def _envenena(dado: dict, campo: str) -> dict:
     return {**dado, campo: dado[campo] + NUL + "x"}
 
 
-@pytest.fixture()
-def pluggy_responde(monkeypatch):
-    """Fixture que faz o `httpx.Client.get` devolver o que o teste mandar —
-    o caminho real passa por `_pluggy_get`, que é onde o conserto mora."""
-    corpo: dict = {}
-
-    class _Resp:
-        status_code = 200
-        is_success = True
-
-        def json(self):
-            return corpo["payload"]
-
-    def _fake_get(self, url, headers=None, params=None):
-        return _Resp()
-
-    monkeypatch.setattr(pluggy.httpx.Client, "get", _fake_get)
-    return lambda payload: corpo.__setitem__("payload", payload)
+# A fixture `pluggy_responde` mora em tests/conftest.py — ela ganhou um segundo
+# usuário (tests/test_pluggy_investments_paginacao.py) e fixture só é
+# compartilhável por lá. Estes testes continuam usando o modo "um dict vale para
+# todas as chamadas" e são o controle de que a extensão não mudou nada.
 
 
 def _conexao_do_item(user_id: int, item_bruto: dict) -> dict:
