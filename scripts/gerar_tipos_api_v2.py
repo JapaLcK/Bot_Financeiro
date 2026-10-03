@@ -39,8 +39,8 @@ def _tipo(s: dict) -> str:
         return " | ".join(json.dumps(v, ensure_ascii=False) for v in s["enum"])
     if chaves == {"type"} and t in _PRIMITIVO:
         return _PRIMITIVO[t]
-    # Decimal (dinheiro, sai como texto) e datetime: o TS só vê a string.
-    if t == "string" and (chaves == {"type", "pattern"}
+    # Decimal (dinheiro, sai como texto), datetime e o teto de tamanho da query: o TS só vê a string.
+    if t == "string" and (chaves - {"pattern", "minLength", "maxLength"} == {"type"}
                           or (chaves == {"type", "format"} and s["format"] == "date-time")):
         return "string"
     if chaves == {"type", "items"} and t == "array":

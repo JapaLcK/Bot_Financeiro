@@ -16,6 +16,9 @@ from __future__ import annotations
 import sys
 
 import pytest
+import stripe._invoice  # noqa: F401 — `StripeObject.__getitem__` com chave ausente importa
+                        # `stripe._invoice` na hora; com o `mundo` trocando o módulo, viraria
+                        # ModuleNotFoundError em vez de KeyError (flake pela ordem dos testes)
 from stripe import StripeObject   # o real, antes de o `mundo` trocar `sys.modules["stripe"]`
 
 from _billing_grants_helpers import garantir_system_event_logs

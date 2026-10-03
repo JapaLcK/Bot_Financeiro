@@ -3373,6 +3373,11 @@ async def auth_register(request: Request, body: RegisterBody):
 
     if len(body.password) < 8:
         raise HTTPException(status_code=400, detail="Senha deve ter pelo menos 8 caracteres.")
+    if len(body.password.encode("utf-8")) > 72:  # teto do bcrypt: acima disso hashpw levanta ValueError
+        raise HTTPException(
+            status_code=400,
+            detail="Senha longa demais: use no máximo 72 caracteres (acentos e emojis contam como mais de um).",
+        )
 
     name = (body.name or "").strip() or None
     if name is not None:
@@ -3391,10 +3396,12 @@ async def auth_register(request: Request, body: RegisterBody):
             create_email_verification, body.email, body.password, body.phone, display_name=name,
         )
     except AccountAlreadyExistsError as exc:
-        # Anti-enumeração: e-mail/telefone já existe. NÃO revela isso — responde
-        # exatamente como no caminho normal e avisa o dono da conta por e-mail
-        # (out-of-band). O visitante não consegue distinguir "existe" de "novo".
-        # O rate-limit de cadastro (3/h por IP+e-mail) já limita spam do aviso.
+        # E-mail já cadastrado: avisa na TELA (409). A anti-enumeração aqui foi
+        # abandonada de propósito — ela jogava o dono legítimo numa tela de
+        # código de verificação que nunca chegava, e ele só descobria pelo
+        # e-mail de aviso. O aviso por e-mail continua: se NÃO foi o dono quem
+        # tentou, ele fica sabendo (rate-limit 3/h por IP+e-mail limita spam).
+        # Telefone duplicado segue SEM revelação — ver create_email_verification_impl.
         try:
             owner = await asyncio.to_thread(get_auth_user, exc.existing_user_id) if exc.existing_user_id else None
             owner_email = (owner or {}).get("email")
@@ -3403,7 +3410,8 @@ async def auth_register(request: Request, body: RegisterBody):
                 await asyncio.to_thread(send_account_exists_notice, owner_email, f"{DASHBOARD_URL}/login")
         except Exception as notice_exc:
             logging.getLogger(__name__).warning("account_exists_notice falhou: %s", notice_exc)
-        return {"status": "verification_sent", "email": body.email.strip().lower()}
+        from db_support import EMAIL_JA_TEM_CONTA
+        raise HTTPException(status_code=409, detail=EMAIL_JA_TEM_CONTA)
     except ValueError as e:
         raise HTTPException(status_code=409, detail=detalhe_seguro(e))
 
@@ -5876,17 +5884,18 @@ async def billing_webhook(request: Request, background_tasks: BackgroundTasks):
         value = (float(unit) / 100.0) if unit is not None else 0.0
         return (value, str(cur).upper())
 
-    def _ebook_liquido_cents(invoice, ebook_price) -> int:
-        """Centavos LÍQUIDOS das linhas do e-book na fatura. O e-book é
-        identificado pela foto `ebook_price` da metadata, não pela env do
-        momento. Medido: `amount` da linha é BRUTO; o cupom vem só em
-        `discount_amounts`. `price` vem string ou expandido (`.id`)."""
-        if not ebook_price:
+    def _extras_liquido_cents(linhas, precos: set[str]) -> int:
+        """Centavos LÍQUIDOS das `linhas` da fatura (`linhas_da_fatura`) dos
+        produtos extras. Os extras são os preços da foto da metadata da assinatura
+        (`da_metadata`), não os da env do momento. Medido: `amount` da linha é
+        BRUTO; o cupom vem só em `discount_amounts`. `price` vem string ou
+        expandido (`.id`)."""
+        if not precos:
             return 0
         total = 0
-        for line in _g(_g(invoice, "lines", {}), "data", []) or []:
+        for line in linhas:
             price = _g(_g(_g(line, "pricing", {}), "price_details", {}), "price")
-            if (price if isinstance(price, str) else _g(price, "id")) != ebook_price:
+            if (price if isinstance(price, str) else _g(price, "id")) not in precos:
                 continue
             desconto = sum(_g(d, "amount", 0) for d in _g(line, "discount_amounts", []) or [])
             total += (_g(line, "amount", 0) or 0) - desconto
@@ -6468,12 +6477,18 @@ async def billing_webhook(request: Request, background_tasks: BackgroundTasks):
             )
             # Email de confirmacao de cobranca (item 39) — so quando valor > 0
             # (invoices do trial vem com amount_paid=0 e nao precisam de notificacao).
-            # `amount_cents` é só o PLANO: o e-book comprado junto sai da conta,
-            # então e-mail, comissão e rastreio da fatura não o veem. A 1ª
-            # fatura de trial + e-book dá 0 e pula tudo (a comissão fica para a
-            # fatura do plano — `record_commission_for_invoice` só paga a 1ª).
-            amount_cents = max(0, (_g(invoice, "amount_paid") or 0) - _ebook_liquido_cents(
-                invoice, _g(_g(sub, "metadata", {}), "ebook_price")))
+            # `amount_cents` é só o PLANO: os extras comprados junto saem da
+            # conta, então e-mail, comissão e rastreio da fatura não os veem. A
+            # 1ª fatura de trial + extras dá 0 e pula tudo (a comissão fica para
+            # a fatura do plano — `record_commission_for_invoice` só paga a 1ª).
+            # Crédito de saldo do cliente (amount_paid menor que a soma) fica
+            # com o plano: o extra sai cheio.
+            # Sem try, como o retrieve acima: falha → 5xx e o Stripe reentrega.
+            from core.services.extras_assinar import da_metadata, linhas_da_fatura
+            _precos = {p for p, _ in da_metadata(_g(sub, "metadata", {}))}
+            _linhas = await asyncio.to_thread(linhas_da_fatura, invoice) if _precos else []
+            amount_cents = max(0, (_g(invoice, "amount_paid") or 0)
+                               - _extras_liquido_cents(_linhas, _precos))
             if amount_cents and amount_cents > 0:
                 amount_brl = float(amount_cents) / 100.0
                 from core.services.email_service import send_pro_charged_email

@@ -461,4 +461,35 @@ PR de cada etapa, não soluções prontas. Cada PR confere se ainda valem, decid
     o seletor de perfil tem 32 px (o `.field` global); no preset Dívidas "Parcelas
     futuras" caiu para a 4ª posição de leitura; a conta sem senha leva 403 também no PUT
     e a tela só desfaz e avisa; "Recomeçar do zero" com o `/painel` aberto reabre o modal.
+- Etapa 2 (Lançamentos) em 5 PRs: 1 leitura · 2a escrita da carteira (inclui gravar a marca
+  `launches.origem`; faixa Completo) · 2b regras novas de dinheiro (travar data e valor da
+  linha fundida em todo canal; apagar a fundida desfaz a junção na hora; editar valor só na
+  carteira pura) · 3 identidade por conta e cartão das importadas (começa por medição
+  só-leitura em produção, com autorização do dono) · 4 a tela (faixa Leve). A Q37 vira
+  etapa própria depois desta, antes da Previsão.
+  Decisões do dono (2026-10-03): **P1** Q37 fora da Etapa 2, etapa própria antes da
+  Previsão; **P2** lançamento anterior ao deploy do PR 2a é só leitura no v2 (marca na
+  coluna nova `launches.origem`; NULL = antigo, sem backfill); **P3** linha fundida com o
+  banco: o banco é o dono de data e valor; **P5** transação do banco e cartão do Open
+  Finance: só categoria e descrição; **P6** cartão entra pelo mês da fatura e mostra a data
+  da compra; **P7** busca varre a janela inteira do plano; **P8** interno (saque em
+  dinheiro, depósito em caixinha, pagamento de fatura) entra marcado, fora de todo total.
+  (P4 não foi passado ao PR 1.)
+  - PR 1: `GET /api/v2/lancamentos` (`db/lancamentos.py`) e `GET /api/v2/categorias`, só
+    leitura (contrato em `docs/CLAUDE.md`, "API v2"). O mês sai das pernas de `TOTAIS_SQL`
+    extraídas para `MES_LANCAMENTOS_SQL`/`MES_CARTAO_SQL` (o Resumo não mudou um número): a
+    soma dos itens não internos é o Entrou/Saiu, provada com a matriz do PR B e com
+    controle negativo (perna do cartão pela data da compra). Keyset com cursor opaco,
+    `conta` pela identidade do provedor, `pode`/`origem`/`motivos` por linha numa regra só
+    (`PODE_SQL`), coluna `launches.origem` criada vazia (ninguém grava ainda: toda carteira
+    sai `registro_antigo`, `pode: []`). A busca do `list_history` virou
+    `termos_busca`/`clausula_busca`, usadas pelas duas listas. Medido em 2026-10-03,
+    `EXPLAIN (ANALYZE, BUFFERS)` num `pytest_*` local (4 usuários × 6000 lançamentos + 1440
+    compras; remeça antes de reusar): mês 5,5 ms, busca na janela inteira 250 ms (o estado de
+    toda linha é calculado antes do filtro de texto). Em aberto para o dono: o depósito em
+    caixinha e o aporte gravados pelo PigBank têm `tipo` `deposito_caixinha`/
+    `aporte_investimento` e ficam FORA da lista neste PR, como na soma — a P8 os cita, mas
+    mostrá-los pede decidir se são entrada ou saída; o que entra marcado hoje é o interno
+    com tipo despesa/receita (saque em dinheiro, pagamento de fatura, transferência do
+    banco). A lista do `/app` e o "últimos N" do WhatsApp seguem as regras deles.
 - [ ] Etapa 0 · [ ] 1 · [ ] 2 · [ ] 3 · [ ] 4 · [ ] 5 · [ ] 6 · [ ] 7
