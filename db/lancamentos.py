@@ -55,6 +55,15 @@ _CTE_PENDENTES = f"""
                    where t.id in (select of_tx_id from pend) and t.imported_launch_id is not null)
 """
 
+# Linha que não é do banco e está junta com uma transação dele (P3: o banco é dono da data e do
+# valor). Sobre `launches` SEM alias; vale para manual, ofx e recorrente, sem olhar a marca. A
+# guarda de data de `db.accounts.update_launch_fields` (todo canal) lê daqui.
+FUNDIDO_SQL = f"""coalesce(source, 'manual') <> 'open_finance' and exists (
+        select 1 from open_finance_transactions o
+          join open_finance_accounts oa on oa.id = o.account_id
+          join open_finance_connections oc on oc.id = oa.connection_id and oc.user_id = launches.user_id
+         where o.imported_launch_id = launches.id and o.reconciliation_status in {_FUSED})"""
+
 # Estado de cada linha, sobre `launches` SEM alias (dentro do FROM dela; a CTE `pendentes`
 # precisa estar no ar). "Carteira" = manual com `delta_conta` ≠ 0; manual com delta 0 não é.
 _ESTADO_SQL = f"""
@@ -66,19 +75,17 @@ _ESTADO_SQL = f"""
       (efeitos -> 'bill_id') is not null or exists (
         select 1 from bill_instances bi where bi.launch_id = launches.id
            and bi.user_id = launches.user_id) as paga_conta,
-      coalesce(source, 'manual') <> 'open_finance' and exists (
-        select 1 from open_finance_transactions o
-          join open_finance_accounts oa on oa.id = o.account_id
-          join open_finance_connections oc on oc.id = oa.connection_id and oc.user_id = launches.user_id
-         where o.imported_launch_id = launches.id and o.reconciliation_status in {_FUSED}) as fundido,
+      {FUNDIDO_SQL} as fundido,
       coalesce(id in (select id from pendentes), false) as pendente"""
 
 # Tabela do dono (P2, P3, P5). A ordem dos `when` é a precedência: o vínculo do dinheiro
-# em espécie e o pagamento de conta vencem a fusão e o par pendente.
+# em espécie e o pagamento de conta vencem a fusão e o par pendente — menos na data, que a
+# fusão tira também do pagamento de conta (P3: o banco é dono da data em todo canal).
 PODE_SQL = """case
       when source = 'open_finance' then array['categoria','descricao']
       when not (carteira and marcada) then '{}'::text[]
       when especie then array['descricao','apagar']
+      when paga_conta and fundido then array['categoria']
       when paga_conta then array['categoria','data']
       when fundido or pendente then array['categoria','descricao','apagar']
       else array['categoria','descricao','data','valor','apagar'] end"""
