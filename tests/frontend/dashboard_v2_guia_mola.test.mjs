@@ -2,7 +2,8 @@
 // o balão e o Piggy vão de uma mira à outra na mesma mola; com `reduce`, saltam. O toque durante a
 // mola é só o pedaço do alvo que já está aceso. E as bolinhas de progresso do balão.
 // O relógio: a mola lê `performance.now()` no rAF do guia; o teste o congela e o avança à mão,
-// então "o meio da mola" é sempre o mesmo instante (100 ms) e "assentou" é TEMPO.voo depois.
+// então "o meio da mola" é sempre o mesmo instante (200 ms, metade do caminho) e "assentou" é
+// TEMPO.voo depois.
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
@@ -20,13 +21,15 @@ const avanca = (page, ms) => page.evaluate(async (ms) => {
   for (let i = 0; i < 3; i++) await new Promise((ok) => requestAnimationFrame(ok));
 }, ms);
 
-// Um quadro: centros do Piggy e do balão, opacidade e escala do balão, o recorte aceso (lido do
-// path do véu), o toque (o vão entre as quatro faixas), o alvo e quem recebe o clique em pontos
-// do toque, do aceso fora do toque e de fora do aceso ("véu": as faixas, ou o balão por cima).
+// Um quadro: o centro do Piggy; a quina do balão (left/top + o deslocamento da mola, sem a
+// escala: o conteúdo troca na partida e muda a altura, então o centro não serve), opacidade e
+// escala; o recorte aceso (lido do path do véu), o toque (o vão entre as quatro faixas), o alvo
+// e quem recebe o clique em pontos do toque, do aceso fora do toque e de fora do aceso ("véu":
+// as faixas, ou o balão por cima).
 const foto = (page) => page.evaluate(() => {
   const r = (e) => { const q = e.getBoundingClientRect(); return { left: q.left, top: q.top, right: q.right, bottom: q.bottom }; };
   const centro = (q) => [(q.left + q.right) / 2, (q.top + q.bottom) / 2];
-  const b = document.querySelector(".guia-balao"), cs = getComputedStyle(b);
+  const b = document.querySelector(".guia-balao"), cs = getComputedStyle(b), m = new DOMMatrix(cs.transform);
   const n = (document.querySelector(".guia-sombra path").getAttribute("d").split("Z")[1].match(/-?[\d.]+(e-?\d+)?/g) || []).map(Number);
   const aceso = n.length ? { left: n[0] - n[3], top: n[1], right: n[0] + n[2] + n[3], bottom: n[1] + n[10] + 2 * n[3] } : null;
   const [f0, f1, f2, f3] = [...document.querySelectorAll(".guia-veu")].map(r);
@@ -38,7 +41,7 @@ const foto = (page) => page.evaluate(() => {
   const c = aceso && centro(aceso), noVao = (p) => temToque && p[0] >= toque.left - 0.5 && p[0] <= toque.right + 0.5 && p[1] >= toque.top - 0.5 && p[1] <= toque.bottom + 0.5;
   const sobra = aceso && [c, [aceso.left + 1, c[1]], [aceso.right - 1, c[1]], [c[0], aceso.top + 1], [c[0], aceso.bottom - 1]].find((p) => !noVao(p));
   return {
-    pg: centro(r(document.querySelector(".guia-piggy"))), b: centro(r(b)), op: Number(cs.opacity), escala: new DOMMatrix(cs.transform).a,
+    pg: centro(r(document.querySelector(".guia-piggy"))), b: [parseFloat(b.style.left) + m.e, parseFloat(b.style.top) + m.f], op: Number(cs.opacity), escala: m.a,
     aceso, toque: temToque ? toque : null, alvo: r(seta), anel: !document.querySelector(".guia-anel").hidden,
     noToque: temToque ? quem(centro(toque)) : null, naSobra: sobra ? quem(sobra) : null, foraDoAceso: aceso ? quem([centro(aceso)[0], aceso.bottom + 3]) : null,
   };
@@ -49,7 +52,7 @@ const entre = (m, a, b) => m > Math.min(a, b) + 1 && m < Math.max(a, b) - 1;
 const contem = (q, d) => d.left >= q.left - 0.5 && d.top >= q.top - 0.5 && d.right <= q.right + 0.5 && d.bottom <= q.bottom + 0.5;
 
 // Do Saiu (bloco, aceso sem toque) à seta (alvo), pelo Entendi: o quadro de partida (A), o meio
-// da mola (100 ms), um quadro quase assentado (200 ms) e o pouso (TEMPO.voo).
+// da mola (200 ms), um quadro quase assentado (450 ms, ~90% do caminho) e o pouso (TEMPO.voo).
 async function voo(width, height, motion) {
   const { ctx, page } = await abrir({ width, height, motion });
   await bora(page);
@@ -59,11 +62,11 @@ async function voo(width, height, motion) {
   await entendi(page);
   await avanca(page, 0);
   const zero = await foto(page);
-  await avanca(page, 100);
+  await avanca(page, 200);
   const meio = await foto(page);
-  await avanca(page, 100);
+  await avanca(page, 250);
   const quase = await foto(page);
-  await avanca(page, VOO - 200);
+  await avanca(page, VOO - 450);
   const B = await foto(page);
   await ctx.close();
   return { A, zero, meio, quase, B };
@@ -76,6 +79,9 @@ for (const [width, height] of [[1280, 800], [375, 812]]) {
     assert.ok(A.aceso && !perto(cx(A.aceso), cx(B.aceso), 24), "Saiu e seta longe");
     assert.ok(entre(cx(meio.aceso)[0], cx(A.aceso)[0], cx(B.aceso)[0]) || entre(cx(meio.aceso)[1], cx(A.aceso)[1], cx(B.aceso)[1]), "o meio entre A e B");
     assert.ok(!perto(cx(meio.aceso), cx(A.aceso), 4) && !perto(cx(meio.aceso), cx(B.aceso), 4), "o meio é outro lugar");
+    // Calma (dono): aos 200 ms, perto da metade do caminho (a mola de 1 s faz 54%; a de 0,55 s, 90%).
+    const andou = Math.hypot(...[0, 1].map((i) => cx(meio.aceso)[i] - cx(A.aceso)[i])) / Math.hypot(...[0, 1].map((i) => cx(B.aceso)[i] - cx(A.aceso)[i]));
+    assert.ok(andou > 0.4 && andou < 0.7, `aos 200 ms andou ${andou}`);
     assert.ok(contem(B.alvo, B.aceso) && contem(B.aceso, B.alvo), "pousado: o aceso é a seta");
     const r = await voo(width, height, "reduce");
     assert.ok(contem(r.zero.alvo, r.zero.aceso) && contem(r.zero.aceso, r.zero.alvo), `reduce: já na seta ${JSON.stringify(r.zero.aceso)}`);
@@ -104,7 +110,7 @@ for (const [width, height] of [[1280, 800], [375, 812]]) {
       assert.equal(f.foraDoAceso, "véu");
       if (f.naSobra) assert.equal(f.naSobra, "véu");
     }
-    assert.ok(quase.toque, "a 200 ms o alvo já se toca");
+    assert.ok(quase.toque, "a 450 ms o alvo já se toca");
     assert.deepEqual([quase.noToque, B.noToque, B.anel, meio.anel], ["alvo", "alvo", true, false]);
   });
 }

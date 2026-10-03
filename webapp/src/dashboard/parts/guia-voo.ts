@@ -9,10 +9,13 @@
 import { spring } from "framer-motion";
 import type { Caixa } from "./guia-posicao";
 
-// `voo`: quanto a mola leva para assentar (dashboard_v2_guia_mola.test.mjs mede).
-export const TEMPO = { voo: 550, festa: 1600, pausa: 800, aperto: 220, troca: 500 };
-// Sem quique: o amortecimento passa do crítico.
-const MOLA = spring({ keyframes: [0, 1], stiffness: 320, damping: 32, mass: 0.7 });
+// `voo`: quanto a mola leva para assentar (dashboard_v2_guia_mola.test.mjs prova que assentou).
+export const TEMPO = { voo: 1000, festa: 1600, pausa: 800, aperto: 220, troca: 500 };
+// Calma (dono: "ritmo calmo, voo ~1 s") e sem quique: amortecimento crítico, 18 = 2·√(81·1).
+// Medido em 2026-10-03, remeça se mexer nos números: em webapp/,
+// `calcGeneratorDuration(spring({ keyframes: [0, 1], stiffness: 81, damping: 18, mass: 1 }), 1)`
+// (framer-motion) dá 1000 ms; o maior valor em 0..3000 ms, de 1 em 1, é 1 (nenhum excesso).
+const MOLA = spring({ keyframes: [0, 1], stiffness: 81, damping: 18, mass: 1 });
 
 export const calmo = () => !matchMedia("(prefers-reduced-motion: reduce)").matches;
 // Voo e aperto somem com reduce; a pausa e a troca de tela não (decisão do dono, D4).
