@@ -22,7 +22,6 @@ from __future__ import annotations
 import pytest
 
 import db
-import frontend.finance_bot_websocket_custom as dashboard
 from _billing_grants_helpers import garantir_system_event_logs
 from core.services import admin_notify
 from core.services import email_service as es
@@ -107,8 +106,8 @@ def test_b1_b3_checkout_grava_uma_pendencia_mesmo_reentregue(user_id, monkeypatc
 def test_b2_a_linha_guarda_a_foto_e_nao_a_env_do_momento(user_id, monkeypatch):
     uid, client, fake = _setup(monkeypatch, f"eb-b2-{user_id}")
     _espioes(monkeypatch)
-    monkeypatch.setattr(dashboard, "STRIPE_PRICE_ID_EBOOK", "price_novo")
-    monkeypatch.setattr(dashboard, "EBOOK_URL", "https://outra.test/novo.pdf")
+    monkeypatch.setenv("STRIPE_PRICE_ID_EBOOK", "price_novo")
+    monkeypatch.setenv("EBOOK_URL", "https://outra.test/novo.pdf")
     try:
         assert _post(client, fake, _checkout(uid), subs={_SUB: _fake_sub("trialing")}).status_code == 200
         (linha,) = _linhas(uid)
@@ -262,7 +261,7 @@ def test_c6_sem_ebook_na_metadata_renovacao_igual_a_hoje(indicado, tipo):
 @_TIPOS
 def test_c7_o_ebook_e_o_da_metadata_e_nao_o_da_env(indicado, tipo, monkeypatch):
     uid, client, fake, vistos, _ = indicado
-    monkeypatch.setattr(dashboard, "STRIPE_PRICE_ID_EBOOK", "price_outro")
+    monkeypatch.setenv("STRIPE_PRICE_ID_EBOOK", "price_outro")
     r = _post(client, fake, _fatura(tipo, uid, "in_c7", 2980, "subscription_create",
                                     [_linha(_PRECO, 990), _linha("price_plano", 1990)]),
               subs={_SUB: _sub()})
