@@ -65,7 +65,7 @@ export function Subscriptions() {
   const ativas = data?.servicos.filter((a) => a.status === "ativa").slice(0, 3) ?? [];
   const n = data && !data.servicos.length ? data.outras.length : 0;
   return (
-    <Frame id="assinaturas" title="Assinaturas">
+    <Frame id="assinaturas" title="Assinaturas" real>
       {estado ?? (
         <>
           <p className="w-lede"><span className="num">{money(Number(data!.total_mensal))}</span> por mês · <span className="num">{money0(Number(data!.total_anual))}</span> por ano</p>
@@ -195,7 +195,7 @@ export function SubscriptionList() {
   const n = data?.ignoradas.length ?? 0;
   const ignoradas = n > 0 && (
     <div key="ignoradas" className="panel span-12">
-      <Frame id="assinaturas-ignoradas" title="Ignoradas">
+      <Frame id="assinaturas-ignoradas" title="Ignoradas" real>
         <details className="sub-ignoradas" ref={(d) => { if (d && reabrir.current) { d.open = true; reabrir.current = false; } }}>
           <summary><span className="sub-mostrar">Mostrar {n} {n === 1 ? "cobrança" : "cobranças"}</span><span className="sub-esconder">Esconder</span></summary>
           <ul className="subs">
@@ -210,13 +210,13 @@ export function SubscriptionList() {
     </div>
   );
 
-  if (estado) return <><div className="panel span-12"><Frame id="assinaturas" title="Assinaturas">{avisoBloco}{estado}</Frame></div>{ignoradas}</>;
+  if (estado) return <><div className="panel span-12"><Frame id="assinaturas" title="Assinaturas" real>{avisoBloco}{estado}</Frame></div>{ignoradas}</>;
   const { servicos, outras, total_mensal, total_anual } = data!;
 
   return (
     <>
       <div className="panel span-12">
-        <Frame id="assinaturas-servicos" title="Serviços">
+        <Frame id="assinaturas-servicos" title="Serviços" real>
           <dl className="detail-facts">
             <div><dt>Por mês</dt><dd className="num">{money(Number(total_mensal))}</dd></div>
             <div><dt>Por ano</dt><dd className="num">{money0(Number(total_anual))}</dd></div>
@@ -237,7 +237,7 @@ export function SubscriptionList() {
       </div>
       {outras.length > 0 && (
         <div className="panel span-12">
-          <Frame id="assinaturas-outras" title="Outras cobranças recorrentes">
+          <Frame id="assinaturas-outras" title="Outras cobranças recorrentes" real>
             <ul className="subs">
               {outras.map((a, i) => (
                 <Linha key={`${a.chave}#${i}`} a={a}>

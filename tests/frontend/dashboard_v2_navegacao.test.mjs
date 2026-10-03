@@ -36,7 +36,7 @@ test("celular: o Piggy é o botão do meio e leva à página dele", async () => 
   const r = [await page.locator("#page-title").innerText(), await page.locator('.tabbar a[data-tab="piggy"]').getAttribute("aria-current")];
   await ctx.close();
   assert.deepEqual(abas, ["Resumo", "Gastos", "Piggy", "Metas", "Extrato"]);
-  assert.deepEqual(r, ["Converse com o Piggy", "page"]);
+  assert.deepEqual(r, ["Converse com o Piggy demonstração", "page"]); // no /painel a conversa ainda é de exemplo: o título leva o selo
 });
 
 test("desktop: menu com Simulador e Ferramentas, sem Piggy; o botão rosa abre Ferramentas", async () => {

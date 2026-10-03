@@ -3,9 +3,10 @@ import { PROFILES } from "../lib/profiles.js";
 import { NATIVE, hide, isOpen, show } from "./dialog";
 
 // Primeira visita ao Resumo: escolher o perfil que monta o painel. Esc, clique fora
-// e "Pular" dão o painel padrão, e a escolha fica lembrada do mesmo jeito.
+// e "Pular" dão o painel padrão, e a escolha fica lembrada do mesmo jeito. Se gravar a
+// escolha falhou, ele reabre com o `aviso`.
 // Mora dentro de #pigbank-dashboard (sem portal): o Tailwind do painel tem escopo lá.
-export function ProfilePicker({ onPick }: { onPick: (p: string) => void }) {
+export function ProfilePicker({ onPick, aviso }: { onPick: (p: string) => void; aviso?: string }) {
   const dlg = useRef<HTMLDialogElement>(null);
   const done = useRef(false);
   // Toda saída passa aqui uma vez. O Esc nativo sem gesto do usuário antes (Chrome) fecha
@@ -30,6 +31,7 @@ export function ProfilePicker({ onPick }: { onPick: (p: string) => void }) {
       onClick={(e) => { if (e.target === dlg.current) pick("padrao"); }}>
       <h2 id="picker-title">O que você quer ver primeiro?</h2>
       <p id="picker-lede" className="picker-lede">A gente monta o Resumo pro seu momento. Dá pra trocar e mexer nos blocos quando quiser.</p>
+      {aviso && <p className="picker-aviso" role="alert">{aviso}</p>}
       <ul className="picker-list">
         {PROFILES.map((p) => (
           <li key={p.id}>

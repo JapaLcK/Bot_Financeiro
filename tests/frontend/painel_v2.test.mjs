@@ -5,9 +5,9 @@
  *
  *  · nenhuma requisição falha: o bundle resolve o ícone do Piggy pelo endereço do próprio
  *    script, e um caminho relativo à página quebraria uma das duas;
- *  · a etiqueta "Dados de demonstração" aparece UMA vez, na tela, em toda rota de 320 a
- *    1440, sem rolagem lateral (no celular a barra de cima não tinha lugar para ela, e o
- *    Resumo a repetia na linha da data);
+ *  · em toda rota de 320 a 1440, sem rolagem lateral e sem a etiqueta de página "Dados de
+ *    demonstração": desde a Etapa 1 parte do Resumo é real, e o selo é de cada bloco
+ *    inventado (dashboard_v2_resumo_real.test.mjs);
  *  · "Painel antigo" em Ferramentas leva ao /app.
  *
  * Rodar:  npm run test:frontend   (abre o artefato commitado: mudou webapp/src, rode
@@ -45,8 +45,8 @@ const ir = async (page, rota) => {
 };
 
 // A etiqueta: todo nó de texto que CONTÉM "Dados de demonstração" e tem caixa não vazia e
-// visível em algum lugar da página (rolado ou não; `display: none` dá caixa vazia). Tem de
-// haver exatamente um, e ele inteiro no viewport: duas cópias na mesma tela é repetição.
+// visível em algum lugar da página (rolado ou não; `display: none` dá caixa vazia). Não pode
+// haver nenhum.
 const etiquetas = (page) => page.evaluate(() => {
   const achadas = [];
   const w = document.createTreeWalker(document.body, NodeFilter.SHOW_TEXT);
@@ -63,14 +63,14 @@ const etiquetas = (page) => page.evaluate(() => {
 });
 
 for (const [nome, url, raiz] of PAGINAS) {
-  test(`${nome}: etiqueta de demonstração em toda rota de 320 a 1440, sem rolagem lateral nem requisição com falha`, async () => {
+  test(`${nome}: sem etiqueta de página em toda rota de 320 a 1440, sem rolagem lateral nem requisição com falha`, async () => {
     const problemas = [];
     for (const width of [320, 390, 1440]) {
       const { ctx, page, falhas } = await abrir(url, raiz, width);
       for (const rota of ROTAS) {
         await ir(page, rota);
         const achadas = await etiquetas(page);
-        if (achadas.length !== 1 || !achadas[0].naTela) problemas.push(`${width} ${rota}: etiqueta ${JSON.stringify(achadas)} (esperada uma, na tela)`);
+        if (achadas.length) problemas.push(`${width} ${rota}: etiqueta ${JSON.stringify(achadas)}`);
         const lateral = await page.evaluate(() => document.scrollingElement.scrollWidth - document.scrollingElement.clientWidth);
         if (lateral > 0) problemas.push(`${width} ${rota}: rola ${lateral}px para o lado`);
       }

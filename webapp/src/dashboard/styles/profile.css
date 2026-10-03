@@ -9,6 +9,8 @@
   display: inline-grid; grid-auto-flow: column; align-items: center; gap: 8px;
   font-size: 13px; color: var(--ink-2);
 }
+/* PUT do perfil em voo: esmaece só depois de 300ms (o PUT rápido não pisca) e volta na hora. */
+.board-profile select[aria-busy="true"] { cursor: progress; opacity: 0.6; transition: opacity 0.15s 0.3s; }
 
 /* Espaço para o ✕ do Organizar (44 × 44 no canto do bloco, fora do conteúdo inerte). */
 .board[data-editing] .w-head { padding-right: 32px; }
@@ -19,6 +21,9 @@
 
 /* Fatura no Resumo: o nome do cartão tomava o título inteiro ("Fatu…") no bloco de uma coluna. */
 .board #w-fatura .w-aside { display: none; }
+
+.board-aviso:empty { display: none; }
+.board-aviso { margin-top: 10px; font-size: 13px; color: var(--warn); }
 
 .board-empty {
   margin-top: 14px; padding: 48px 16px;
@@ -67,6 +72,7 @@
 .picker[open] + .picker-scrim { display: block; position: fixed; top: 0; right: 0; bottom: 0; left: 0; z-index: 80; background: rgba(0, 0, 0, 0.6); }
 .picker h2 { font-size: 20px; letter-spacing: -0.02em; }
 .picker-lede { margin-top: 6px; font-size: 13.5px; color: var(--ink-2); }
+.picker-aviso { margin-top: 10px; font-size: 13px; color: var(--warn); }
 .picker-list { display: grid; gap: 8px; margin-top: 18px; }
 .picker-card {
   display: grid; grid-template-columns: 22px minmax(0, 1fr); column-gap: 12px; row-gap: 2px;

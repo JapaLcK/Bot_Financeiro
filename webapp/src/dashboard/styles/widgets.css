@@ -12,12 +12,16 @@
   box-shadow: var(--lift);
 }
 .w-head { display: flex; align-items: center; gap: 10px; min-height: 30px; }
+/* Sem lugar ao lado do título, o selo desce para a linha de baixo: nenhum dos dois é cortado.
+   Margem no título, não gap: Safari 14.0. */
 .w-title {
   flex: 1; min-width: 0;
+  display: flex; flex-wrap: wrap; align-items: center;
   font-size: 13px; font-weight: 500; letter-spacing: 0;
   color: var(--ink-2);
-  white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+  white-space: nowrap; overflow: hidden;
 }
+.w-title > span:first-child { flex: 0 1 auto; min-width: 0; margin-right: 8px; overflow: hidden; text-overflow: ellipsis; }
 .w-aside { display: flex; align-items: center; gap: 8px; }
 .w-aside-num { font-size: 12.5px; }
 .w-grip { display: none; fill: var(--ink-3); flex: none; }
@@ -145,16 +149,18 @@
 .stat-foot { margin-top: auto; display: grid; gap: 8px; }
 .stat-note { font-size: 12.5px; }
 .stat-note b { font-weight: 600; }
-.mini-rows { display: grid; gap: 6px; margin: 0; }
-.mini-rows div { display: flex; flex-wrap: wrap; justify-content: space-between; gap: 0 8px; font-size: 12.5px; }
-.mini-rows dt { color: var(--ink-3); }
-.mini-rows dd { margin: 0; }
 
-.pace { display: grid; gap: 5px; }
-.pace-bar { display: block; height: 6px; border-radius: 3px; background: var(--plane-3); overflow: hidden; }
-.pace-bar i { display: block; height: 100%; border-radius: 3px; background: var(--alert); transform-origin: left; transition: transform 600ms var(--ease-out); }
-.pace-bar.prev i { background: rgba(255, 255, 255, 0.3); }
-.pace-legend { display: flex; justify-content: space-between; font-size: 11px; }
+/* Contas: o total, a carteira e as contas; as de fora do total atrás do botão */
+.contas-total { display: grid; gap: 4px; }
+.contas { display: grid; overflow-y: auto; overscroll-behavior: contain; min-height: 0; flex: 0 1 auto; }
+.conta { display: grid; grid-template-columns: minmax(0, 1fr) auto; align-items: baseline; column-gap: 12px; padding: 8px 0; border-top: 1px solid var(--rule); }
+.conta-nome { font-size: 13px; font-weight: 500; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.conta-saldo { font-size: 13px; font-weight: 600; }
+.conta .selos { grid-column: 1 / -1; margin-top: 6px; }
+.retry { min-height: 44px; }
+.contas-mais { height: 44px; flex: none; align-self: flex-start; margin-left: -10px; }
+.contas-mais i { font-size: 13px; transition: transform var(--t-fast) ease; }
+.contas-mais[aria-expanded="true"] i { transform: rotate(90deg); }
 
 @container (max-height: 230px) {
   .stat-foot { display: none; }

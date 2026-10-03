@@ -23,8 +23,7 @@ after(() => browser?.close());
 
 async function abrir({ width = 1440, hash = "#/", perfil = "padrao", plano = "pro", sorte = null } = {}) {
   const ctx = await browser.newContext({ viewport: { width, height: 900 }, reducedMotion: "reduce" });
-  await servir(ctx, undefined, { plano });
-  await ctx.addInitScript((p) => localStorage.setItem("pigbank.dashboard.profile.v1", JSON.stringify(p)), perfil);
+  await servir(ctx, undefined, { plano, perfil }); // o perfil mora no servidor (/api/v2/perfil)
   if (sorte !== null) await ctx.addInitScript((v) => { Math.random = () => v; }, sorte);
   const page = await ctx.newPage();
   const erros = [];

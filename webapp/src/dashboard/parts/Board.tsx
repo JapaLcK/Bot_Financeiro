@@ -1,8 +1,11 @@
-import { useEffect, useState, type ReactNode } from "react";
+import { useEffect, useRef, useState, type ReactNode } from "react";
+import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import DraggableWidgetGrid, { type WidgetItem } from "@/components/ui/draggable-widget-grid";
-import { PROFILES, locked, readLayout, readProfile, saveLayout, saveProfile } from "../lib/profiles.js";
+import type { NovoPerfil, Perfil } from "../lib/api-v2.gen";
+import { TODAY } from "../lib/api";
+import { PROFILES, locked, readLayout, saveLayout, saveProfile } from "../lib/profiles.js";
 import { set } from "../lib/store.js";
-import { usePlan } from "../lib/v2";
+import { DEMO, FUSO, apiPut, perfilQuery, usePlan } from "../lib/v2";
 import type { Path } from "../router";
 import { FrameLink } from "./Frame";
 import type { DashState } from "../lib/types";
@@ -21,12 +24,14 @@ import { Income } from "../widgets/Income";
 import { Yield } from "../widgets/Yield";
 import { Installments } from "../widgets/Installments";
 import { Subscriptions } from "../widgets/Subscriptions";
+import { Contas } from "../widgets/Contas";
 import { Catalog, ProfileSelect } from "./BoardControls";
 import { ProfilePicker } from "./ProfilePicker";
 import { PiggyBand } from "./PiggyBand";
 
-// Ordem padrão (o perfil `padrao`): em 4 colunas ela ladrilha sem buraco (24 células, 6 linhas).
+// Ordem padrão (o perfil `padrao`): em 4 colunas ela ladrilha sem buraco (28 células, 7 linhas).
 const DEFAULT: WidgetItem[] = [
+  { id: "contas", size: "lg", label: "Contas" },
   { id: "hero", size: "lg", label: "Saldo previsto" },
   { id: "resumo", size: "lg", label: "Resumo do mês" },
   { id: "categorias", size: "tall", label: "Para onde vai" },
@@ -51,7 +56,7 @@ const KNOWN = ALL.map((w) => w.id);
 const ITEM = new Map(ALL.map((w) => [w.id, w]));
 
 const VIEWS: Record<string, (p: { s: DashState }) => ReactNode> = {
-  hero: Hero, resumo: MonthStats,
+  contas: () => <Contas />, hero: Hero, resumo: MonthStats,
   categorias: Categories, calendario: Calendar, simulador: Simulator,
   compromissos: Bills, piggy: Piggy, metas: Goals, patrimonio: () => <NetWorth />,
   fatura: Invoice, wealth: () => <Wealth />,
@@ -61,7 +66,7 @@ const VIEWS: Record<string, (p: { s: DashState }) => ReactNode> = {
 
 // Página de cada bloco (o Piggy não tem página própria: as ações dele levam às outras).
 const PAGE: Record<string, Path | null> = {
-  hero: "/previsao", resumo: "/lancamentos", categorias: "/gastos", calendario: "/gastos",
+  contas: null, hero: "/previsao", resumo: "/lancamentos", categorias: "/gastos", calendario: "/gastos",
   simulador: "/simulador", compromissos: "/previsao", piggy: null, metas: "/metas", patrimonio: "/patrimonio",
   fatura: "/previsao", wealth: "/patrimonio",
   renda: "/lancamentos", rendimento: "/patrimonio", parcelas: "/previsao", assinaturas: "/assinaturas",
@@ -83,23 +88,61 @@ function useColumns() {
   return narrow ? 1 : 4;
 }
 
+type Escolha = NovoPerfil["perfil"];
+// Com backend, o dia no fuso do app (o mesmo de mesAtual); no protótipo, o dia da demonstração.
+const hoje = () => new Intl.DateTimeFormat("pt-BR", { day: "numeric", month: "long", year: "numeric", timeZone: DEMO ? undefined : FUSO }).format(DEMO ? TODAY : new Date());
+
 export function Board({ s }: { s: DashState }) {
-  const [profile, setProfile] = useState<string | null>(readProfile); // null: o modal está aberto
+  const qc = useQueryClient();
+  const q = useQuery(perfilQuery);
+  const profile = q.data?.perfil; // null: nunca escolheu, o modal abre
   const shown = profile ?? "padrao";
   const plan = usePlan();
   const [ids, setIds] = useState(() => layoutOf(shown, plan));
   // ponytail: o grid só lê `items` ao montar; perfil, catálogo e restaurar o remontam (key),
   // o que reanima a entrada dos blocos. Sincronizar `items` dentro do grid evita isso.
   const [version, setVersion] = useState(0);
+  // O perfil muda por escolha, por erro que desfaz ou pelo servidor (outra aba, "Recomeçar
+  // do zero" pelo SSE): o layout passa a ser o dele.
+  const [de, setDe] = useState(shown);
+  if (de !== shown) {
+    setDe(shown);
+    setIds(layoutOf(shown, plan));
+    setVersion((v) => v + 1);
+  }
   const [said, setSaid] = useState("");
+  const [aviso, setAviso] = useState("");
   const columns = useColumns();
   const custom = ids.join() !== shownPreset(shown, plan).join();
 
+  // O PUT de perfil em voo, de forma síncrona: o `isPending` do TanStack só chega ao React
+  // depois, e duas trocas na mesma tarefa passariam as duas pela guarda.
+  const voando = useRef(false);
+  // Otimista: a tela troca na hora e desfaz se o PUT falhar (inclusive 403).
+  const m = useMutation({
+    mutationFn: async (p: Escolha) => { if (DEMO) saveProfile(p); else await apiPut("/perfil", { perfil: p }); },
+    onMutate: async (p) => {
+      setAviso("");
+      await qc.cancelQueries({ queryKey: perfilQuery.queryKey });
+      const antes = qc.getQueryData<Perfil>(perfilQuery.queryKey);
+      qc.setQueryData<Perfil>(perfilQuery.queryKey, { perfil: p });
+      return antes;
+    },
+    onError: (_e, p, antes) => {
+      // Outra escolha já escreveu por cima: a dela vale, e a recarga confirma.
+      if (qc.getQueryData<Perfil>(perfilQuery.queryKey)?.perfil === p) qc.setQueryData(perfilQuery.queryKey, antes);
+      setAviso("Não foi possível salvar agora");
+    },
+    // Sem devolver a promessa: a trava do seletor é só o PUT, não a recarga. O `onSettled`
+    // roda também se o `onMutate` falhar, então a trava nunca fica presa.
+    onSettled: () => { voando.current = false; qc.invalidateQueries({ queryKey: perfilQuery.queryKey }); },
+  });
+
+  // Um PUT por vez: com dois em voo o mais lento chegaria por último e gravaria o penúltimo.
   const choose = (p: string) => {
-    saveProfile(p);
-    setProfile(p);
-    setIds(layoutOf(p, plan));
-    setVersion((v) => v + 1);
+    if (voando.current || m.isPending) return;
+    voando.current = true;
+    m.mutate(p as Escolha);
     document.getElementById("board-profile")?.focus();
   };
   const add = (id: string) => {
@@ -111,14 +154,27 @@ export function Board({ s }: { s: DashState }) {
   };
   const restore = () => { saveLayout(shown, null); setIds(layoutOf(shown, plan)); setVersion((v) => v + 1); };
 
+  if (!q.data) {
+    return (
+      <section className="board" aria-label="Seu painel">
+        {q.isPending ? <p role="status" className="faint">Carregando…</p> : (
+          <div className="empty" role="alert">
+            <p>Não deu para carregar o seu painel.</p>
+            <button type="button" className="btn retry btn-ghost" onClick={() => q.refetch()}>Tentar de novo</button>
+          </div>
+        )}
+      </section>
+    );
+  }
+
   return (
     <section className="board" data-editing={s.editing || undefined} data-fit={columns === 1 || undefined} aria-label="Seu painel">
       <div className="board-head">
-        <ProfileSelect value={shown} onPick={choose} />
+        <ProfileSelect value={shown} busy={m.isPending} onPick={choose} />
         <p className="board-hint" aria-live="polite">
           {s.editing
             ? <>Arraste os blocos para organizar. No celular, segure antes de arrastar. No teclado: <kbd>Alt</kbd> + setas.</>
-            : <span className="faint">hoje é 23 de setembro de 2026</span>}
+            : <span className="faint">hoje é {hoje()}</span>}
         </p>
         <div className="board-actions">
           {s.editing && custom && <button type="button" className="btn btn-quiet" onClick={restore}>Restaurar padrão</button>}
@@ -128,6 +184,7 @@ export function Board({ s }: { s: DashState }) {
           </button>
         </div>
       </div>
+      <p className="board-aviso" aria-live="polite">{aviso}</p>
       <PiggyBand key={shown} s={s} profile={shown} />
       {s.editing && <Catalog missing={ALL.filter((w) => !ids.includes(w.id))} onAdd={add} />}
       <p className="sr-only" aria-live="polite">{said}</p>
@@ -153,7 +210,7 @@ export function Board({ s }: { s: DashState }) {
           return View ? <FrameLink.Provider value={PAGE[item.id] ?? null}><View s={s} /></FrameLink.Provider> : null;
         }}
       />
-      {profile === null && <ProfilePicker onPick={choose} />}
+      {profile === null && <ProfilePicker onPick={choose} aviso={aviso} />}
     </section>
   );
 }

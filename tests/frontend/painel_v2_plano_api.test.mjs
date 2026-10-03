@@ -102,10 +102,10 @@ test("carregando: só a tela de carregamento até o /me chegar; depois o painel 
   const { page, n } = await abrir(ctx);
   const status = page.getByRole("status");
   await status.waitFor();
-  const antes = [await status.textContent(), (await blocos(page)).length, await page.locator(".piggy-band, #board-profile, .tag-demo").count()];
+  const antes = [await status.textContent(), (await blocos(page)).length, await page.locator(".piggy-band, #board-profile, .selo").count()];
   libera();
   await montado(page);
-  const depois = [await status.count(), (await blocos(page)).length > 0];
+  const depois = [await page.getByText("Carregando o painel…").count(), (await blocos(page)).length > 0];
   await ctx.close();
   assert.deepEqual(antes, ["Carregando o painel…", 0, 0]);
   assert.deepEqual(depois, [0, true]);

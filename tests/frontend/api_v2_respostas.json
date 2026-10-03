@@ -94,6 +94,10 @@
       "status": 403,
       "body": { "error": { "code": "pro_required", "message": "Forbidden" } }
     },
+    "403_password_required": {
+      "status": 403,
+      "body": { "error": { "code": "password_required", "message": "Forbidden" } }
+    },
     "404_not_found": {
       "status": 404,
       "body": { "error": { "code": "not_found", "message": "Not Found" } }

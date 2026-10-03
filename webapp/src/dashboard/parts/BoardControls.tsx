@@ -4,11 +4,12 @@ import { PROFILES, locked, tierOf } from "../lib/profiles.js";
 import { usePlan } from "../lib/v2";
 
 // Qual perfil monta o Resumo. Sempre visível; trocar leva ao layout daquele perfil.
-export function ProfileSelect({ value, onPick }: { value: string; onPick: (p: string) => void }) {
+// `busy` (PUT em voo): aria-disabled e não `disabled`, que tiraria o foco do seletor.
+export function ProfileSelect({ value, busy, onPick }: { value: string; busy: boolean; onPick: (p: string) => void }) {
   return (
     <label className="board-profile">
       <span>Painel</span>
-      <select id="board-profile" className="field" value={value} onChange={(e) => onPick(e.target.value)}>
+      <select id="board-profile" className="field" value={value} aria-disabled={busy || undefined} aria-busy={busy || undefined} onChange={(e) => onPick(e.target.value)}>
         <option value="padrao">Padrão</option>
         {PROFILES.map((p) => <option key={p.id} value={p.id}>{p.label}</option>)}
       </select>
