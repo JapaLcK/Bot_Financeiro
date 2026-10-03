@@ -14,13 +14,17 @@ from .connection import get_conn
 # anterior ou igual a todo carimbo de `feitos`, e as medianas da medição não ficam negativas.
 # O `reabrir` (a Ajuda) carimba a oferta com a mesma guarda: quem abre pela Ajuda sem nunca
 # ter visto o convite não o recebe depois.
+# `clock_timestamp()`, não `now()`: `now()` é o início da transação, e um `feito` que começou
+# antes de um `visto` concorrente comitar gravaria um carimbo anterior a `oferecido_em`. O
+# UPDATE que esperou a trava reavalia o SET sobre a linha nova (READ COMMITTED), então o
+# relógio sai depois do commit do outro e a guarda `feitos = '{}'` vê o `feito` já gravado.
 _SET = {
-    "visto": "oferecido_em = coalesce(oferecido_em, case when feitos = '{}'::jsonb then now() end)",
-    "dispensar": "dispensado_em = coalesce(dispensado_em, now())",
+    "visto": "oferecido_em = coalesce(oferecido_em, case when feitos = '{}'::jsonb then clock_timestamp() end)",
+    "dispensar": "dispensado_em = coalesce(dispensado_em, clock_timestamp())",
     "reabrir": ("dispensado_em = null, oferecido_em = coalesce(oferecido_em,"
-                " case when feitos = '{}'::jsonb then now() end)"),
+                " case when feitos = '{}'::jsonb then clock_timestamp() end)"),
     "feito": ("feitos = case when feitos ? %(passo)s::text then feitos"
-              " else feitos || jsonb_build_object(%(passo)s::text, now()) end"),
+              " else feitos || jsonb_build_object(%(passo)s::text, clock_timestamp()) end"),
 }
 
 _ERRO = {"error_recoverable", "needs_user_action", "item_missing"}
@@ -42,7 +46,7 @@ def registrar(user_id: int, acao: str, passo: str | None, ids: list[str]) -> dic
     with get_conn() as conn, conn.cursor() as cur:
         cur.execute("insert into guia_painel (user_id) values (%(uid)s) on conflict do nothing", p)
         cur.execute(f"update guia_painel set {_SET[acao]} where user_id = %(uid)s", p)
-        cur.execute("update guia_painel set concluido_em = now() where user_id = %(uid)s"
+        cur.execute("update guia_painel set concluido_em = clock_timestamp() where user_id = %(uid)s"
                     " and concluido_em is null and feitos ?& %(ids)s::text[]", p)
         cur.execute(_LER, (user_id,))
         return dict(cur.fetchone())

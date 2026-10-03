@@ -193,6 +193,27 @@ def test_visto_antes_de_feito_fica_anterior_a_todo_feito(uid):
     assert l["oferecido_em"] <= datetime.fromisoformat(l["feitos"]["resumo.saiu"])
 
 
+def test_feito_que_comecou_antes_do_visto_concorrente_nao_fica_anterior(uid, monkeypatch):
+    """Codex P2 (#787): a transação A do `feito` começa antes de um `visto` concorrente
+    comitar; com `now()` (início da transação) o carimbo do feito saía anterior a
+    `oferecido_em`. Roda o próprio `registrar` dentro de A, já aberta."""
+    import time
+    from contextlib import contextmanager
+
+    from db import guia as dbguia
+    from db.connection import get_conn
+
+    with get_conn() as a:
+        a.execute("select 1")  # fixa o now() de A
+        time.sleep(0.01)
+        dbguia.registrar(uid, "visto", None, IDS)  # B, outra conexão, comita
+        monkeypatch.setattr(dbguia, "get_conn", contextmanager(lambda: (yield a)))
+        dbguia.registrar(uid, "feito", "gastos.categoria", IDS)
+        a.commit()
+    l = linha(uid)
+    assert l["oferecido_em"] <= datetime.fromisoformat(l["feitos"]["gastos.categoria"])
+
+
 def test_feito_do_passo_1_sem_dados_e_409_e_nao_grava(uid):
     """Sem Saiu o passo 1 não existe para o usuário: o carimbo dele é o numerador do
     "tempo até o 1º valor percebido" e não pode nascer sem valor na tela."""
