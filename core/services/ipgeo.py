@@ -65,7 +65,7 @@ def lookup_city(ip: str | None) -> str | None:
             return None
         data = resp.json()
     except Exception as exc:
-        print(f"[ipgeo] lookup failed for {ip}: {exc}", file=sys.stderr)
+        print(f"[ipgeo] lookup failed: {type(exc).__name__}", file=sys.stderr)
         return None
 
     if not isinstance(data, dict) or data.get("error"):
