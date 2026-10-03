@@ -16,11 +16,14 @@ from pydantic import ValidationError
 import frontend.finance_bot_websocket_custom as dashboard
 from api.v2 import app as app_v2
 from api.v2.assinaturas import Assinaturas
+from api.v2.categorias import Categorias
 from api.v2.contas import Contas
 from api.v2.erros import ErroV2
+from api.v2.lancamentos import Lancamentos
 from api.v2.me import Me
 from api.v2.perfil import Perfil
 from api.v2.resumo_mes import ResumoDoMes
+from db.lancamentos import ler_cursor
 from scripts.gerar_tipos_api_v2 import CABECALHO, SAIDA, gerar
 from test_api_v2_erros import Login, _corpo_do_422, rota_temporaria  # noqa: F401 (fixture)
 
@@ -146,11 +149,13 @@ _MES = {"name": "mes", "in": "query", "required": False,
 def test_gerador_traduz_query_do_get():
     schemas = {"Aa": {"type": "object", "properties": {"x": {"type": "string"}}}}
     obrigatorio = {"name": "n", "in": "query", "required": True, "schema": {"type": "integer"}}
-    paths = {"/a": _get("#/components/schemas/Aa"), "/q": _com_query(_MES, obrigatorio)}
+    teto = {"name": "q", "in": "query", "required": False,
+            "schema": {"anyOf": [{"type": "string", "maxLength": 200, "minLength": 2}, {"type": "null"}]}}
+    paths = {"/a": _get("#/components/schemas/Aa"), "/q": _com_query(_MES, obrigatorio, teto)}
     assert gerar(_spec(schemas, paths)) == CABECALHO + (
         "export type Aa = { x?: string };\n"
         'export type RotasGet = { "/a": Aa; "/q": Aa };\n'
-        'export type QueryGet = { "/q": { mes?: string | null; n: number } };\n'
+        'export type QueryGet = { "/q": { mes?: string | null; n: number; q?: string | null } };\n'
     )
 
 
@@ -187,6 +192,8 @@ def test_gerador_recusa_parametro_em_escrita():
     _spec({}, {"/s": _sse()}),
     _spec({"X": {"type": "string", "format": "date"}}),
     _spec({"X": {"type": "integer", "pattern": "1"}}),
+    _spec({"X": {"type": "integer", "maxLength": 1}}),
+    _spec({"X": {"type": "string", "maxLength": 1, "format": "date"}}),
     _spec({"X": {"type": "number"}}),
     _spec({"Bb": {"type": "string"}}, {"/b": {"put": _put()}}),
     _spec({"Bb": {"type": "string"}}, {"/b": {"get": _get("#/components/schemas/Bb")["get"],
@@ -194,7 +201,8 @@ def test_gerador_recusa_parametro_em_escrita():
     _spec({"Bb": {"type": "string"}}, {"/b": {"get": _get("#/components/schemas/Bb")["get"],
                                               "put": _get("#/components/schemas/Bb")["get"]}}),
 ], ids=["additionalProperties", "oneOf", "allOf", "const", "post", "post_corpo_opcional",
-        "sse_sem_ref", "sse_sem_contentSchema", "format_date", "pattern_fora_de_string", "number_float",
+        "sse_sem_ref", "sse_sem_contentSchema", "format_date", "pattern_fora_de_string",
+        "maxLength_fora_de_string", "maxLength_com_format", "number_float",
         "put_sem_get", "put_corpo_opcional", "put_sem_corpo"])
 def test_gerador_recusa_o_que_nao_traduz(spec):
     with pytest.raises(ValueError, match="construção não suportada"):
@@ -265,6 +273,23 @@ def test_fixture_do_resumo_do_mes_segue_o_modelo(nome):
     assert isinstance(f["entrou"], str) and isinstance(f["saiu"], str)  # dinheiro é texto
     ano, mes = map(int, f["mes"].split("-"))  # `ate` = último dia do mês, o corrente também
     assert f["ate"] == f"{f['mes']}-{calendar.monthrange(ano, mes)[1]:02d}"
+
+
+@pytest.mark.parametrize("nome", sorted(FIXTURES["lancamentos"]))
+def test_fixture_de_lancamentos_segue_o_modelo(nome):
+    f = FIXTURES["lancamentos"][nome]
+    Lancamentos.model_validate(f)
+    for i in f["itens"]:
+        assert isinstance(i["valor"], str)  # dinheiro é texto
+        assert i["id"][0] == ("c" if i["cartao_id"] else "l") and (i["fatura"] is None) == (i["id"][0] == "l")
+        assert i["origem"] != "registro_antigo" or i["pode"] == []  # antigo é só leitura (P2)
+    if f["proximo"]:  # o cursor é o da última linha, e o servidor o aceita
+        assert ler_cursor(f["proximo"])[2:] == (f["itens"][-1]["id"][0], int(f["itens"][-1]["id"][1:]))
+
+
+@pytest.mark.parametrize("nome", sorted(FIXTURES["categorias"]))
+def test_fixture_de_categorias_segue_o_modelo(nome):
+    Categorias.model_validate(FIXTURES["categorias"][nome])
 
 
 @pytest.mark.parametrize("nome", sorted(FIXTURES["erros"]))
