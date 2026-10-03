@@ -106,7 +106,7 @@ _ISENTOS_COM_RAZAO = {
     "core/services/ebook_entrega.py::_entregar":
         "Entrega de um produto PAGO à parte (o e-book da /assinar, funil v3 PR 3), "
         "não mensagem proativa: filtrar por acesso ao PLANO reteria o e-book de "
-        "quem pagou por ele e cancelou o trial. Roda POR pendência (uma compra), "
+        "quem pagou por ele e cancelou o trial. Roda POR pendência (um produto de uma compra), "
         "com gate próprio — `conta_sem_credencial` (a prova do e-mail) e a "
         "confirmação da compra no Stripe. O `list_` que o predicado casa é o "
         "`list_line_items` de UMA sessão, não uma população.",

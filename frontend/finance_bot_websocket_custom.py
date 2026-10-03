@@ -6206,19 +6206,19 @@ async def billing_webhook(request: Request, background_tasks: BackgroundTasks):
             # efeitos e sem try — falha → 5xx e a reentrega refaz tudo. Grava
             # mesmo com `_decidiu_acesso` False: a compra aconteceu igual. O
             # job (`core/services/ebook_entrega.py`) entrega depois.
-            _meta = _g(session, "metadata", {})
-            _ebook_price = _g(_meta, "ebook_price")
-            if _ebook_price:
+            from core.services.extras_assinar import da_metadata
+            _extras = da_metadata(_g(session, "metadata", {}))
+            if _extras:
                 from db.ebook_entregas import registrar as _registrar_ebook
                 await asyncio.to_thread(
-                    _registrar_ebook, int(user_id), _g(session, "id"),
-                    _ebook_price, _g(_meta, "ebook_url") or None)
-                if not _g(_meta, "ebook_url"):
-                    await log_system_event(
-                        "error", "ebook_sem_url",
-                        "Compra de e-book sem a foto ebook_url; o job não entrega.",
-                        source="billing", user_id=int(user_id),
-                        details={"session_id": _g(session, "id")})
+                    _registrar_ebook, int(user_id), _g(session, "id"), _extras)
+                for _preco, _url in _extras:
+                    if not _url:
+                        await log_system_event(
+                            "error", "ebook_sem_url",
+                            "Compra de e-book sem a foto ebook_url; o job não entrega.",
+                            source="billing", user_id=int(user_id),
+                            details={"session_id": _g(session, "id"), "ebook_price": _preco})
         # Funil: registra a CONCLUSÃO na tabela dedicada, com o session_id
         # (correlaciona com o record_checkout_started da mesma tentativa).
         # Vale pra trial e compra imediata — os dois disparam este evento.

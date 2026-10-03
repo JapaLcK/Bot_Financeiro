@@ -359,8 +359,15 @@ Saem livres as rotas da própria conta (`authorize_account_access`), o `PATCH /s
 logout, refresh e o reset. Quem bloqueia e quem libera, rota a rota, está em
 `tests/test_rotas_senha_obrigatoria.py`, que reprova rota nova sem linha. Na tela, a
 `/home` e o `/app` carregam `frontend/criar-senha.js`: overlay que não fecha, também
-disparado por qualquer 403 `password_required`. A `/settings` não o carrega (é a saída),
-e o convite do MFA fica calado no servidor enquanto não há credencial.
+disparado por qualquer 403 `password_required`. A `/settings` não o carrega (é a saída):
+com `precisa_criar_senha`, ela mostra só a Segurança (o link da senha no topo) e não chama
+os carregadores que dariam 403 (#758). O `/auth/me` é rebuscado no PTR e na volta do foco
+(`visibilitychange`/`pageshow`, que só escutam com a conta travada ou com o boot sem
+`/auth/me`), e a página recarrega nos dois sentidos quando ele discorda da tela: destrava
+quando a senha passou a existir, trava quando a tela estava livre (inclusive por boot com
+`/auth/me` falho) e a conta precisa de senha. Não recarrega com rascunho ou modal aberto
+(`RECARGA_PERDERIA` em `settings.html`); o próximo gesto refaz a decisão. E o convite do
+MFA fica calado no servidor enquanto não há credencial.
 
 **Os três criadores de conta** (o `confirm` do register, o `complete-signup` do
 Google/Apple e a `/assinar`) gravam pelo mesmo `db_support.inserir_conta_nova`:
@@ -423,19 +430,34 @@ identifica o e-book por essa foto, nunca pela env do momento. `EBOOK_URL` tem no
 oferecido e sai o warning `ebook_nao_oferecido` (com o tamanho, **nunca a URL** — ela é
 o acesso ao PDF pago). As duas envs só entram em produção **depois do merge do #708**.
 
-**Entrega do e-book (#708).** O `checkout.session.completed` com `ebook_price` grava
-uma linha em `ebook_entregas` (`db/ebook_entregas.py`, PK `user_id + session_id`, com a
-foto) logo depois do grant e ANTES dos outros efeitos, sem try: falha → 5xx e a
-reentrega refaz tudo. Sessão sem a foto `ebook_url` grava assim mesmo e loga
-`ebook_sem_url`. Quem entrega é o job `_ebook_worker` (abaixo, "Tarefas de fundo"):
-só envia com `not conta_sem_credencial(uid)` (`db/google_auth.py`: senha não vazia ou
-identidade Google/Apple — a prova do e-mail; sem linha em `auth_accounts` a função dá
-False, e o job não envia porque não acha e-mail), confirma a compra pelo
-`checkout.Session.list_line_items` (senão fecha `nao_comprou`), manda
-`send_ebook_email` para o e-mail ATUAL da conta e fecha `enviado` na linha. O claim
+**Entrega do e-book (#708) — N produtos por compra.** A metadata da sessão é a foto
+dos produtos oferecidos: slot 1 em `ebook_price`/`ebook_url`, slot n (2..10) em
+`ebook_n_price`/`ebook_n_url`, lidos por `core/services/extras_assinar.da_metadata`.
+O `checkout.session.completed` com pelo menos um slot grava uma linha POR produto em
+`ebook_entregas` (`db/ebook_entregas.py`, PK `user_id + session_id + ebook_price`, num
+insert só: todos ou nenhum) logo depois do grant e ANTES dos outros efeitos, sem try:
+falha → 5xx e a reentrega refaz tudo. Produto sem a foto da URL grava assim mesmo e
+loga `ebook_sem_url` (um por produto). Quem entrega é o job `_ebook_worker` (abaixo,
+"Tarefas de fundo"), uma linha por vez: só envia com `not conta_sem_credencial(uid)`
+(`db/google_auth.py`: senha não vazia ou identidade Google/Apple — a prova do e-mail;
+sem linha em `auth_accounts` a função dá False, e o job não envia porque não acha
+e-mail), confirma a compra daquele produto pelo `checkout.Session.list_line_items`
+com `limit=100` (o padrão do Stripe é 10; plano + 10 extras = 11 linhas) — senão fecha
+`nao_comprou` —, manda `send_ebook_email` com o nome do produto (`description` da linha
+da sessão) para o e-mail ATUAL da conta e fecha `enviado` naquela linha. O claim
 (`reivindicada_ate`, 10 min dobrando a cada tentativa até 1 dia, contadas em
-`tentativas`; a linha nunca fecha sozinha) não segura transação durante o Stripe/Resend; entrega é
-"pelo menos uma vez". A tabela fica fora do export LGPD e sai com a conta (cascade).
+`tentativas`; a linha nunca fecha sozinha) é por produto — a falha de um não segura os
+outros — e não segura transação durante o Stripe/Resend; entrega é "pelo menos uma
+vez". A tabela fica fora do export LGPD e sai com a conta (cascade).
+
+Rollback do código de N produtos: o código velho usa `on conflict (user_id,
+session_id)`, que exige a PK de 2 colunas. Antes de reverter, apagar as linhas extras
+de cada compra e recriar a PK:
+`delete from ebook_entregas e using ebook_entregas o where e.user_id = o.user_id and
+e.session_id = o.session_id and e.ebook_price > o.ebook_price;` e
+`alter table ebook_entregas drop constraint ebook_entregas_pkey, add primary key
+(user_id, session_id);` (confira o nome da PK em `pg_constraint` antes). O `delete`
+fica com UM produto por compra: as pendências dos outros se perdem.
 
 **E-mail trocado chega ao Stripe (PR 4b).** A `PATCH /settings/{uid}/security/contact`
 que troca o e-mail de conta com `stripe_customer_id` grava, na MESMA transação, uma linha
@@ -521,7 +543,10 @@ Via **Pluggy**. Endpoints em `frontend/routes/open_finance.py`
 um banco NOVO, pela mesma decisão do `_enforce_bank_limit`; o teto nunca vira 402 aqui, mas o
 gate comum de dados sim (402 `subscription_required`/`plan_selection_required` sem plano ativo);
 não barra reconexão e o 402 do `/pluggy-item` continua valendo)) mais o webhook
-`/open-finance/pluggy/webhook`. Serviços em `core/services/pluggy*.py` e
+`/open-finance/pluggy/webhook`. O `connect-token` aceita `app_scheme` opcional no corpo
+(`pigbank`, `pigbank-staging` ou `pigbank-dev`; fora da lista, 400), que vira o
+`oauthRedirectUri` `<scheme>://open-finance-volta` da Pluggy; o site não manda o campo.
+Serviços em `core/services/pluggy*.py` e
 `open_finance*.py`; tabelas `open_finance_connections/accounts/transactions/investments`,
 `open_finance_investment_snapshots` (foto diária por posição, `db/of_snapshots.py`) e
 `open_finance_item_registry` — o rastro de todo item que passou por aqui, inclusive o

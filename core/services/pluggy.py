@@ -299,7 +299,8 @@ def list_pluggy_transactions(
     return out
 
 
-def create_pluggy_connect_token(user_id: int, webhook_url: str | None = None) -> dict:
+def create_pluggy_connect_token(user_id: int, webhook_url: str | None = None,
+                                oauth_redirect_uri: str | None = None) -> dict:
     api_key = create_pluggy_api_key()
     options: dict[str, Any] = {
         "clientUserId": str(user_id),
@@ -307,6 +308,8 @@ def create_pluggy_connect_token(user_id: int, webhook_url: str | None = None) ->
     }
     if webhook_url:
         options["webhookUrl"] = webhook_url
+    if oauth_redirect_uri:
+        options["oauthRedirectUri"] = oauth_redirect_uri
 
     # INVESTMENTS é obrigatório: o sync lê /investments pra achar a Caixinha
     # (FIXED_INCOME/CDB). Se o item não coletar esse produto, /investments volta

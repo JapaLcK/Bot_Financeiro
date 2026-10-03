@@ -1748,6 +1748,32 @@ async def open_finance_caixinha_bind_route(request: Request, user_id: int, body:
     return {"ok": True}
 
 
+# Schemes do app (produção, staging, dev) a que a Pluggy devolve o usuário depois do
+# OAuth do banco. Lista fechada: valor fora dela é 400, nunca um redirect para onde o
+# cliente quiser. O site não manda o campo.
+_APP_SCHEMES = frozenset({"pigbank", "pigbank-staging", "pigbank-dev"})
+_APP_VOLTA_OF = "open-finance-volta"
+_CORPO_MAX = 4096  # corpo legítimo tem ~30 bytes; acima disso é ignorado, como se não houvesse corpo
+_CORPO_SEGUNDOS = 5  # corpo legítimo chega junto dos cabeçalhos; o que pinga devagar também é ignorado
+
+
+async def _corpo_json_limitado(request: Request) -> object | None:
+    """JSON do corpo, lido até _CORPO_MAX bytes e _CORPO_SEGUNDOS s (o código do app não
+    impõe teto de corpo; o do servidor não foi medido). Fora disso — e vazio/malformado — devolve None, "sem
+    o campo"; aninhamento fundo levanta RecursionError (não é ValueError)."""
+    try:
+        pedacos, total = [], 0
+        async with asyncio.timeout(_CORPO_SEGUNDOS):
+            async for p in request.stream():
+                total += len(p)
+                if total > _CORPO_MAX:
+                    raise ValueError("corpo grande demais")
+                pedacos.append(p)
+        return json.loads(b"".join(pedacos))
+    except (ValueError, RecursionError, TimeoutError):
+        return None
+
+
 @router.post("/open-finance/{user_id}/connect-token")
 async def open_finance_connect_token_route(request: Request, user_id: int):
     shared.authorize_dashboard_access(request, user_id)
@@ -1757,6 +1783,15 @@ async def open_finance_connect_token_route(request: Request, user_id: int):
     # widget também reconecta um banco existente, e a contagem é validada no /pluggy-item,
     # onde já se sabe se o item é novo ou um upsert de um banco já conectado.
     await _ensure_of_access_allowed(user_id)
+
+    # Corpo lido à mão e só depois dos portões, pela mesma razão do mock-connect:
+    # parâmetro tipado decodificaria antes da sessão. Teto de bytes e de tempo no helper.
+    corpo = await _corpo_json_limitado(request)
+    scheme = corpo.get("app_scheme") if isinstance(corpo, dict) else None
+    # isinstance antes do `in`: lista/dict não são hasháveis (TypeError → 500).
+    if scheme is not None and (not isinstance(scheme, str) or scheme not in _APP_SCHEMES):
+        raise HTTPException(status_code=400, detail="app_scheme inválido.")
+    volta = f"{scheme}://{_APP_VOLTA_OF}" if scheme else None
 
     webhook_url = (os.getenv("PLUGGY_WEBHOOK_URL") or "").strip()
     if not webhook_url and shared.DASHBOARD_URL.startswith("https://"):
@@ -1775,6 +1810,7 @@ async def open_finance_connect_token_route(request: Request, user_id: int):
             create_pluggy_connect_token,
             user_id,
             webhook_url or None,
+            oauth_redirect_uri=volta,
         )
     except PluggyConfigError as exc:
         raise HTTPException(status_code=503, detail=str(exc)) from exc
