@@ -41,6 +41,16 @@ npx expo start          # precisa de um backend acessível (ver .env.example)
 `pigbank-staging`, `pigbank`), e é o que permite dev, staging e produção
 conviverem no mesmo aparelho.
 
+**Android (sem build ainda, #604): o Google de dev e staging não volta ao app.**
+No iOS o `ASWebAuthenticationSession` casa o scheme da própria sessão, e foi
+provado no simulador que o `pigbank://auth` do Google volta num binário
+`pigbank-dev`. No Android o `expo-web-browser` abre uma Custom Tab e escuta o
+`Linking`, então o redirect precisa de um intent filter, e dev e staging não
+registram mais `pigbank`. Antes do primeiro build Android de dev ou staging:
+registrar `pigbank` também no Android desses ambientes, ou tornar o scheme do
+Google por ambiente (`RETORNO` em `features/auth/google.ts` e o
+`_google_app_scheme` do backend). A produção não é afetada.
+
 **Variável de ambiente só vem de arquivo em desenvolvimento.** O Expo escolhe o
 arquivo de `.env` pelo `NODE_ENV`, não pelo `APP_ENV`, então um `.env.staging`
 não seria lido e o app rotulado como staging apontaria para o backend de
