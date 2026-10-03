@@ -27,8 +27,19 @@ logger = logging.getLogger(__name__)
 # de lançamento por ação do usuário passa por aqui (update_launch_fields: PATCH
 # /launches, tool da IA, WhatsApp; update_launch_categories_bulk) e marca a
 # edição: o sync do Open Finance não desfaz categoria nem interno editados (#712).
-_SET_CATEGORIA = (f"categoria=%s, is_internal_movement = %s or {PAR_ATIVO_SQL}, "
+# O pagamento de fatura do cartão manual (`efeitos.bill_id`, db/cards.pay_bill_amount)
+# também segue interno com qualquer categoria: as compras do cartão já contam no gasto,
+# e a fatura contada junto vira gasto em dobro. Regravar a MESMA categoria não muda o
+# interno (saldo inicial e ajuste nascem internos à mão); o 3º %s repete a categoria nova,
+# e à direita do SET `categoria`/`is_internal_movement` são os valores antigos da linha.
+_SET_CATEGORIA = (f"categoria=%s, is_internal_movement = %s or {PAR_ATIVO_SQL} "
+                  "or (efeitos -> 'bill_id') is not null "
+                  "or (is_internal_movement and categoria is not distinct from %s), "
                   "categoria_editada = true")
+
+# `launches.origem`: "gravado pelo escritor da carteira depois do PR 2a" (NULL = antigo, só
+# leitura no /painel). Se a linha é carteira quem decide é `db/lancamentos.PODE_SQL`.
+ORIGEM_CARTEIRA = "carteira"
 
 
 # ──────────────────────────────────────────────────────────────────────────────
@@ -71,6 +82,8 @@ def add_launch_and_update_balance(
     is_internal_movement: bool = False,
     extra_efeitos: dict | None = None,
     apply_delta: bool = True,
+    *,
+    origem: str | None = ORIGEM_CARTEIRA,
 ):
     """
     Lança em launches e atualiza saldo em accounts na mesma transação.
@@ -85,6 +98,9 @@ def add_launch_and_update_balance(
     Open Finance: pagamento de fatura e débito de gasto fixo em conta já
     constam no extrato bancário; debitar a Carteira Piggy esvaziaria o
     dinheiro em espécie e contaria o gasto duas vezes).
+
+    `origem` grava a marca `launches.origem` (padrão: todo canal marca sem lembrar).
+    `None` = só leitura no v2: quem passa é quem grava efeito que o `efeitos` não desfaz.
     """
     ensure_user(user_id)
 
@@ -118,12 +134,13 @@ def add_launch_and_update_balance(
 
             cur.execute(
                 """
-                insert into launches(user_id, tipo, valor, alvo, nota, categoria, criado_em, efeitos, is_internal_movement)
-                values (%s,%s,%s,%s,%s,%s,%s,%s,%s)
+                insert into launches(user_id, tipo, valor, alvo, nota, categoria, criado_em, efeitos,
+                                     is_internal_movement, origem)
+                values (%s,%s,%s,%s,%s,%s,%s,%s,%s,%s)
                 returning id, user_seq
                 """,
                 (user_id, tipo, v, alvo, nota, cat, criado_em,
-                 Json(efeitos), is_internal_movement),
+                 Json(efeitos), is_internal_movement, origem),
             )
             row = cur.fetchone()
             launch_id = row["id"]
@@ -369,11 +386,17 @@ def update_launch_fields(
     alvo: str | None = None,
     nota: str | None = None,
     criado_em: datetime | None = None,
+    dia: date | None = None,
+    exigir_pode: bool = False,
 ) -> bool:
     """Atualiza campos editáveis (categoria, alvo, nota, criado_em) de um lançamento.
 
     Argumentos None são ignorados (mantém valor atual). Strings vazias viram
     NULL no banco. Retorna False se não encontrou lançamento do usuário.
+
+    `dia` troca só o dia de `criado_em`, mantendo a hora local. `exigir_pode` (a v2):
+    sob o lock do usuário e da linha, campo fora de `lancamentos.pode_da_linha` levanta
+    `NaoEditavel` (categoria → 'categoria', alvo/nota → 'descricao', data → 'data').
     """
     from utils_text import is_internal_category
 
@@ -384,39 +407,55 @@ def update_launch_fields(
     if categoria is not None:
         cat_clean = categoria.strip() or None
         sets.append(_SET_CATEGORIA)
-        params.extend([cat_clean, is_internal_category(cat_clean)])
+        params.extend([cat_clean, is_internal_category(cat_clean), cat_clean])
     if alvo is not None:
         sets.append("alvo=%s")
         params.append((alvo.strip() or None))
     if nota is not None:
         sets.append("nota=%s")
         params.append((nota.strip() or None))
-    if criado_em is not None:
-        sets.append("criado_em=%s")
-        params.append(criado_em)
-        # `posted_at` anda JUNTO com `criado_em`. Onde não há hora confiável é
-        # ELE quem manda no dia exibido — no back (`launch_day`, utils_date) e no
-        # front (`fmtLaunchWhen`: dashboard.js:485, home.html:776). Sem isto,
-        # editar a data de um extrato devolvia 200, mudava o banco e a tela
-        # seguia mostrando a data VELHA, sem caminho de conserto.
-        # Depois da recusa abaixo sobra só o extrato: `posted_at` não-nulo é
-        # gravado por dois escritores, `import_ofx_launches_bulk` (source='ofx',
-        # nesta mesma pasta) e o importador do Open Finance
-        # (db/open_finance.py:1247) — e a linha do OF nem chega aqui.
-        # Não é chave de idempotência de importador nenhum (OFX/extrato dedupam
-        # por `external_id`, montado a partir do ARQUIVO; o Open Finance por
-        # `provider_transaction_id`). NULL continua NULL: lançamento manual não
-        # tem data de postagem.
-        sets.append("posted_at = case when posted_at is null then null else %s end")
-        params.append(day_tz(criado_em))
-    if not sets:
+    if not sets and criado_em is None and dia is None:
         return False
 
-    params.extend([user_id, launch_id])
-    sql = f"update launches set {', '.join(sets)} where user_id=%s and id=%s"
     with get_conn() as conn:
         with conn.cursor() as cur:
+            if exigir_pode or dia is not None:
+                from .bank_movements import _lock_user
+                from .lancamentos import NaoEditavel, pode_da_linha
+                if exigir_pode:  # o lock antes: o `pode` lê o estado que o sync/conciliação mudam
+                    _lock_user(cur, user_id)
+                cur.execute("select criado_em from launches where user_id=%s and id=%s for update",
+                            (user_id, launch_id))
+                atual = cur.fetchone()
+                if not atual:
+                    return False
+                if exigir_pode:
+                    pode = pode_da_linha(cur, user_id, launch_id) or []
+                    pedidos = {"categoria": categoria, "descricao": alvo if alvo is not None else nota,
+                               "data": criado_em or dia}
+                    if any(v is not None and k not in pode for k, v in pedidos.items()):
+                        raise NaoEditavel("Campo fora do que esta linha permite editar.")
+                if dia is not None:
+                    criado_em = datetime.combine(dia, atual["criado_em"].astimezone(_tz()).time(),
+                                                 tzinfo=_tz())
             if criado_em is not None:
+                sets.append("criado_em=%s")
+                params.append(criado_em)
+                # `posted_at` anda JUNTO com `criado_em`. Onde não há hora confiável é
+                # ELE quem manda no dia exibido — no back (`launch_day`, utils_date) e no
+                # front (`fmtLaunchWhen`: dashboard.js:485, home.html:776). Sem isto,
+                # editar a data de um extrato devolvia 200, mudava o banco e a tela
+                # seguia mostrando a data VELHA, sem caminho de conserto.
+                # Depois da recusa abaixo sobra só o extrato: `posted_at` não-nulo é
+                # gravado por dois escritores, `import_ofx_launches_bulk` (source='ofx',
+                # nesta mesma pasta) e o importador do Open Finance
+                # (db/open_finance.py:1247) — e a linha do OF nem chega aqui.
+                # Não é chave de idempotência de importador nenhum (OFX/extrato dedupam
+                # por `external_id`, montado a partir do ARQUIVO; o Open Finance por
+                # `provider_transaction_id`). NULL continua NULL: lançamento manual não
+                # tem data de postagem.
+                sets.append("posted_at = case when posted_at is null then null else %s end")
+                params.append(day_tz(criado_em))
                 # DONO DA DATA numa linha do Open Finance é o PROVEDOR, não o
                 # usuário. `sync_imported_open_finance_updates`
                 # (db/open_finance.py:1559-1588) compara
@@ -439,7 +478,9 @@ def update_launch_fields(
                         "A data deste lançamento vem do banco conectado e é "
                         "atualizada por ele. Dá pra editar a descrição e a categoria."
                     )
-            cur.execute(sql, tuple(params))
+            params.extend([user_id, launch_id])
+            cur.execute(f"update launches set {', '.join(sets)} where user_id=%s and id=%s",
+                        tuple(params))
             changed = (cur.rowcount or 0) == 1
         conn.commit()
     return changed
@@ -455,7 +496,7 @@ def update_launch_categories_bulk(user_id: int, items: list[tuple[int, str]]) ->
         with conn.cursor() as cur:
             cur.executemany(
                 f"update launches set {_SET_CATEGORIA} where user_id=%s and id=%s",
-                [(cat, is_internal_category(cat), user_id, lid) for (lid, cat) in items],
+                [(cat, is_internal_category(cat), cat, user_id, lid) for (lid, cat) in items],
             )
             n = cur.rowcount or 0
         conn.commit()
@@ -1545,7 +1586,7 @@ def _validar_efeitos(efeitos: dict, *, escopo_conta_corrente: bool) -> Decimal:
 
 
 def delete_launch_and_rollback(user_id: int, launch_id: int, *,
-                              escopo_conta_corrente: bool = False):
+                              escopo_conta_corrente: bool = False, exigir_pode: bool = False):
     """
     Deleta um lançamento e reverte seus efeitos no banco atomicamente.
     Usa o campo efeitos (jsonb) para saber o que reverter.
@@ -1575,6 +1616,10 @@ def delete_launch_and_rollback(user_id: int, launch_id: int, *,
 
     `escopo_conta_corrente=True` — usado SÓ pelo "apagar tudo" — recusa também
     o que mexe em caixinha/investimento (`_EFEITOS_FORA_DO_APAGAR_TUDO`).
+
+    `exigir_pode=True` — a v2: trava o usuário sempre (o `pode` lê o estado que o
+    sync e a conciliação mudam sob esse lock) e, sob ele e o da linha, recusa com
+    `NaoEditavel` a linha sem 'apagar' em `lancamentos.pode_da_linha`, antes do pré-voo.
 
     QUEM CHAMA — mais pontos que as portas de usuário. A recusa chega ao usuário
     como frase de produto em uns e como SILÊNCIO em outros:
@@ -1611,7 +1656,7 @@ def delete_launch_and_rollback(user_id: int, launch_id: int, *,
             cur.execute(f"select source,efeitos,{VINCULADO_SQL} as caixa from launches "
                         "where id=%s and user_id=%s", (launch_id, user_id))
             preview = cur.fetchone()
-            bank_lock = _precisa_lock(preview)
+            bank_lock = exigir_pode or _precisa_lock(preview)
             if bank_lock:
                 # Matcher: conta → transação OF → sombra. Cartões manuais
                 # mantêm sua ordem anterior de fatura → conta.
@@ -1635,9 +1680,14 @@ def delete_launch_and_rollback(user_id: int, launch_id: int, *,
             if not row:
                 raise LookupError("NOT_FOUND")
 
-            if _precisa_lock(row) != bank_lock:
+            # Com `exigir_pode` o lock já está tomado: sobrar lock não é corrida.
+            if not exigir_pode and _precisa_lock(row) != bank_lock:
                 raise LaunchUnsafeRollback("Lançamento mudou durante a exclusão; tente novamente.",
                                            "mudou_durante")
+            if exigir_pode:
+                from .lancamentos import NaoEditavel, pode_da_linha
+                if "apagar" not in (pode_da_linha(cur, user_id, launch_id) or []):
+                    raise NaoEditavel("Esta linha não pode ser apagada por aqui.")
 
             efeitos = row.get("efeitos")
             if isinstance(efeitos, str):

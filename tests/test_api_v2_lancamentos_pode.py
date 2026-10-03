@@ -1,9 +1,9 @@
 """Tabela de estados × `pode`/`origem`/`motivos` da `GET /api/v2/lancamentos` (`db/lancamentos.PODE_SQL`).
 
 Um caso por linha da tabela do dono (P2, P3, P5): a linha antiga (sem a marca
-`launches.origem`) é só leitura, e a marcada à mão aqui faz o papel do que o PR 2a vai
-gravar. Controle POSITIVO: a carteira pura marcada pode tudo. NEGATIVO: a mesma linha
-sem a marca não pode nada.
+`launches.origem`) é só leitura; a marcada é a que o escritor da carteira grava (PR 2a), e a
+antiga é a mesma com a marca apagada aqui. Controle POSITIVO: a carteira pura marcada pode
+tudo. NEGATIVO: a mesma linha sem a marca não pode nada.
 """
 from __future__ import annotations
 
@@ -22,8 +22,8 @@ TUDO = ["categoria", "descricao", "data", "valor", "apagar"]
 
 def _carteira(uid, marcada=True, valor=30, **extra) -> int:
     lid = db.add_launch_and_update_balance(uid, "despesa", valor, "mercado", "msg", extra_efeitos=extra or None)[0]
-    if marcada:
-        q("update launches set origem = 'v2' where id = %s returning id", (lid,))
+    if not marcada:  # o escritor marca; a linha anterior ao PR 2a não tem a marca
+        q("update launches set origem = null where id = %s returning id", (lid,))
     return lid
 
 
@@ -52,8 +52,7 @@ def test_tabela_de_estados(libera):
                  launch_id, amount, tx_date) values (%s, %s, true, 'k', 'saque', 'ativo', %s, 1, %s)
              returning id""", (a, f"k{i}", lid, date.today()))
     paga = _carteira(a, valor=35, bill_id=1, paid_amount_added=35)
-    delta_zero = db.add_launch_and_update_balance(a, "despesa", 36, "x", None, apply_delta=False)[0]
-    q("update launches set origem = 'v2' where id = %s returning id", (delta_zero,))
+    delta_zero = db.add_launch_and_update_balance(a, "despesa", 36, "x", None, apply_delta=False)[0]  # marcada
     ofx = q("""insert into launches (user_id, tipo, valor, source, external_id, efeitos)
                values (%s, 'despesa', 37, 'ofx', 'ofx-1', %s) returning id""", (a, Jsonb({"delta_conta": -37})))["id"]
     sombra = _sombra(a, 38)
@@ -71,7 +70,7 @@ def test_tabela_de_estados(libera):
         f"l{fundida}": ("carteira", ["categoria", "descricao", "apagar"], [], True),  # P3
         f"l{especie}": ("carteira", ["descricao", "apagar"], [], False),
         f"l{especie_antiga}": ("registro_antigo", [], [], False),
-        f"l{paga}": ("carteira", ["categoria", "data", "apagar"], [], False),
+        f"l{paga}": ("carteira", ["categoria", "data"], [], False),  # sem apagar (dono, 2026-10-03)
         f"l{delta_zero}": ("registro_antigo", [], [], False),  # manual com delta 0 não é carteira
         f"l{ofx}": ("registro_antigo", [], [], False),
         f"l{sombra}": ("banco", ["categoria", "descricao"], [], False),  # P5
@@ -92,3 +91,14 @@ def test_transacao_pendente_e_moeda_pela_conta(libera):
     libera(a)
     i = _itens(a)[f"l{lid}"]
     assert (i["moeda"], i["motivos"]) == ("USD", ["transacao_pendente", "outra_moeda", "moeda_presumida"])
+
+
+def test_pode_da_linha_isolado_por_usuario(libera):
+    """`pode_da_linha` é API de `db/`: filtra pelo dono sozinha, sem contar com o `for update`
+    do chamador. Negativo: a linha de A lida por B é None. Positivo: lida por A, é o `pode`."""
+    from db.lancamentos import pode_da_linha
+    a, b = usuario_pagante(), usuario_pagante()
+    lid = _carteira(a)
+    with db.get_conn() as conn, conn.cursor() as cur:
+        assert pode_da_linha(cur, b, lid) is None
+        assert pode_da_linha(cur, a, lid) == TUDO
