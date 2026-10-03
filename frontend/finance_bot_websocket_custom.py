@@ -5876,17 +5876,18 @@ async def billing_webhook(request: Request, background_tasks: BackgroundTasks):
         value = (float(unit) / 100.0) if unit is not None else 0.0
         return (value, str(cur).upper())
 
-    def _ebook_liquido_cents(invoice, ebook_price) -> int:
-        """Centavos LÍQUIDOS das linhas do e-book na fatura. O e-book é
-        identificado pela foto `ebook_price` da metadata, não pela env do
-        momento. Medido: `amount` da linha é BRUTO; o cupom vem só em
-        `discount_amounts`. `price` vem string ou expandido (`.id`)."""
-        if not ebook_price:
+    def _extras_liquido_cents(linhas, precos: set[str]) -> int:
+        """Centavos LÍQUIDOS das `linhas` da fatura (`linhas_da_fatura`) dos
+        produtos extras. Os extras são os preços da foto da metadata da assinatura
+        (`da_metadata`), não os da env do momento. Medido: `amount` da linha é
+        BRUTO; o cupom vem só em `discount_amounts`. `price` vem string ou
+        expandido (`.id`)."""
+        if not precos:
             return 0
         total = 0
-        for line in _g(_g(invoice, "lines", {}), "data", []) or []:
+        for line in linhas:
             price = _g(_g(_g(line, "pricing", {}), "price_details", {}), "price")
-            if (price if isinstance(price, str) else _g(price, "id")) != ebook_price:
+            if (price if isinstance(price, str) else _g(price, "id")) not in precos:
                 continue
             desconto = sum(_g(d, "amount", 0) for d in _g(line, "discount_amounts", []) or [])
             total += (_g(line, "amount", 0) or 0) - desconto
@@ -6468,12 +6469,18 @@ async def billing_webhook(request: Request, background_tasks: BackgroundTasks):
             )
             # Email de confirmacao de cobranca (item 39) — so quando valor > 0
             # (invoices do trial vem com amount_paid=0 e nao precisam de notificacao).
-            # `amount_cents` é só o PLANO: o e-book comprado junto sai da conta,
-            # então e-mail, comissão e rastreio da fatura não o veem. A 1ª
-            # fatura de trial + e-book dá 0 e pula tudo (a comissão fica para a
-            # fatura do plano — `record_commission_for_invoice` só paga a 1ª).
-            amount_cents = max(0, (_g(invoice, "amount_paid") or 0) - _ebook_liquido_cents(
-                invoice, _g(_g(sub, "metadata", {}), "ebook_price")))
+            # `amount_cents` é só o PLANO: os extras comprados junto saem da
+            # conta, então e-mail, comissão e rastreio da fatura não os veem. A
+            # 1ª fatura de trial + extras dá 0 e pula tudo (a comissão fica para
+            # a fatura do plano — `record_commission_for_invoice` só paga a 1ª).
+            # Crédito de saldo do cliente (amount_paid menor que a soma) fica
+            # com o plano: o extra sai cheio.
+            # Sem try, como o retrieve acima: falha → 5xx e o Stripe reentrega.
+            from core.services.extras_assinar import da_metadata, linhas_da_fatura
+            _precos = {p for p, _ in da_metadata(_g(sub, "metadata", {}))}
+            _linhas = await asyncio.to_thread(linhas_da_fatura, invoice) if _precos else []
+            amount_cents = max(0, (_g(invoice, "amount_paid") or 0)
+                               - _extras_liquido_cents(_linhas, _precos))
             if amount_cents and amount_cents > 0:
                 amount_brl = float(amount_cents) / 100.0
                 from core.services.email_service import send_pro_charged_email

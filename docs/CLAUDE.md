@@ -429,18 +429,26 @@ não mudou durante o envio. A troca no app nunca é desfeita: falha transitória
 claim (mesma régua do e-book); `InvalidRequestError` (cliente apagado, e-mail recusado)
 fecha e loga `stripe_email_sync_recusado`, sem o e-mail. Fora do export LGPD; cascade.
 
-**Fatura com e-book:** no `invoice.paid`/`payment_succeeded`, `amount_cents` é só o
-plano: `amount_paid` menos o líquido das linhas cujo `pricing.price_details.price` é
-o `ebook_price` da metadata da assinatura (`amount` da linha é BRUTO; o cupom vem em
-`discount_amounts`). É esse valor que vai para o e-mail de cobrança, a comissão de
-afiliado e o rastreio da fatura — a 1ª fatura de trial + e-book dá 0 e pula os três
-(a comissão, que só paga a 1ª fatura paga, fica para a do plano).
+**Fatura com produtos extras:** no `invoice.paid`/`payment_succeeded`, `amount_cents`
+é só o plano: `amount_paid` menos o líquido (`_extras_liquido_cents`) de TODAS as
+linhas cujo `pricing.price_details.price` está entre os preços da foto da metadata da
+assinatura (`da_metadata`, slots 1..10 — nunca a env do momento; `amount` da linha é
+BRUTO; o cupom vem em `discount_amounts`). A fatura embute no máximo 10 linhas
+(plano + 10 extras = 11): com extras na foto, `extras_assinar.linhas_da_fatura` usa
+as embutidas ou, com `lines.has_more`, `stripe.Invoice.list_lines(id, limit=100)`, sem try (falha → 5xx, o Stripe reentrega).
+Crédito de saldo do cliente (`amount_paid` menor que a soma das linhas) fica com o
+plano: o extra é subtraído cheio. Vale igual para as duas origens (`assinar` e
+`precos`): a origem não entra na conta. É esse valor que vai para o e-mail de
+cobrança, a comissão de afiliado e o rastreio da fatura — a 1ª fatura de trial +
+extras dá 0 e pula os três (a comissão, que só paga a 1ª fatura paga, fica para a do
+plano).
 
-**Rastreio do checkout:** o Meta `Purchase` sem trial leva o `amount_total` da sessão
-(com cupom e e-book — o mesmo número do GA4; sem o campo, cai no `unit_amount`). Com
-trial e `amount_total > 0` (o e-book), saem um Meta `Purchase` e um GA4 `purchase`
-server-only com id `ebook_<sid>` (`meta_capi.ebook_event_id`) e item `ebook`; o
-`StartTrial` não muda.
+**Rastreio do checkout:** um evento por compra, com a soma; não olha a origem nem
+quantos extras. O Meta `Purchase` sem trial leva o `amount_total` da sessão (plano +
+todos os extras, com cupom — o mesmo número do GA4; sem o campo, cai no
+`unit_amount`). Com trial e `amount_total > 0` (a soma dos extras), saem UM Meta
+`Purchase` e UM GA4 `purchase` server-only com id `ebook_<sid>`
+(`meta_capi.ebook_event_id`) e item `ebook`; o `StartTrial` não muda.
 
 A **escada de planos é `free < essencial < plus < pro`**, atrás do flag
 `PLANS_V2_ENABLED` (lido dinamicamente, sem redeploy; `0`/`false` é freio de
