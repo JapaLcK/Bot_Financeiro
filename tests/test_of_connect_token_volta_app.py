@@ -12,11 +12,15 @@ CONTROLES (CLAUDE.md §3):
   • gravar a chave sempre, mesmo com None → `test_site_manda_o_mesmo_de_antes` vermelho;
   • `except ValueError` sem o RecursionError → caso do corpo aninhado vermelho (500);
   • `await request.json()` sem teto, ou teto maior → `test_corpo_acima_do_teto_...` 4097 vermelho;
+  • tirar o `asyncio.timeout` do helper → `test_corpo_lento_vale_sem_o_campo` vermelho (pelo prazo
+    externo, sem travar);
   • ler/validar o corpo antes dos portões → `..._nao_passa_na_frente_dos_portoes` vermelho.
 """
 from __future__ import annotations
 
+import asyncio
 import json
+import time
 from types import SimpleNamespace
 
 import httpx
@@ -133,6 +137,35 @@ def test_corpo_acima_do_teto_vale_sem_o_campo(user_id, pluggy_dublada, n, aplica
     if aplica:
         esperado["oauthRedirectUri"] = "pigbank://open-finance-volta"
     assert dict(_options(pluggy_dublada.corpos[0])) == esperado
+
+
+def _req(*pedacos, pausa=0.0):
+    """Request falso: entrega `pedacos` e, se `pausa`, fica parado antes de encerrar."""
+    async def stream():
+        for p in pedacos:
+            yield p
+        if pausa:
+            await asyncio.sleep(pausa)
+    return SimpleNamespace(stream=stream)
+
+
+def _le(req):
+    # Prazo externo: se o helper regredir (sem prazo próprio), o teste falha em 2 s, não trava.
+    return asyncio.run(asyncio.wait_for(of_routes._corpo_json_limitado(req), 2))
+
+
+def test_corpo_lento_vale_sem_o_campo(monkeypatch):
+    """Cliente autenticado manda poucos bytes e segura a conexão: o helper desiste no
+    prazo (_CORPO_SEGUNDOS) e devolve None, em vez de manter a requisição viva."""
+    monkeypatch.setattr(of_routes, "_CORPO_SEGUNDOS", 0.05)
+    t0 = time.monotonic()
+    assert _le(_req(b'{"app_scheme":', pausa=10)) is None
+    assert time.monotonic() - t0 < 1
+
+
+def test_corpo_rapido_valido_e_acima_do_teto():
+    assert _le(_req(b'{"app_scheme":', b'"pigbank"}')) == {"app_scheme": "pigbank"}
+    assert _le(_req(b"{", b" " * of_routes._CORPO_MAX, b"}")) is None
 
 
 @pytest.mark.parametrize("valor", [
