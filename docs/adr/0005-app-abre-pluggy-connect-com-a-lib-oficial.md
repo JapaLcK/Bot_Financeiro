@@ -61,7 +61,7 @@ Por quê: é a única que não exige página nova no backend, é mantida pela do
 
 ## O que o backend precisa (propostas, cada uma um PR na faixa Completo)
 
-1. **`oauthRedirectUri` no `connect-token`**, hoje ausente (`core/services/pluggy.py:302`). Para o app, `pigbank://open-finance-volta`; para o site, nada muda (parâmetro opcional). A API aceita o formato (medido acima).
+1. **`oauthRedirectUri` no `connect-token`**, hoje ausente (`core/services/pluggy.py:302`). Para o app, `pigbank://open-finance-volta`; para o site, nada muda (parâmetro opcional). A API aceita o formato (medido acima). **O scheme tem de ser por ambiente.** Dev, staging e produção convivem no mesmo iPhone (`app/app.config.ts:3-15`) e hoje todos registram o mesmo `pigbank` (`:52`); quando o redirect é resolvido pelo sistema (Safari → app), o iOS não define qual deles abre, e o errado não completa o fluxo. Derivar o scheme do ambiente (ex.: `pigbank-staging`) ou usar link universal por ambiente. Não afeta o modo in-app nem a C: ali o retorno não passa pelo sistema (o `openAuthSessionAsync` casa o scheme da própria sessão, como no Google).
 2. **`itemId` opcional no `connect-token`** para reconectar um banco existente, hoje impossível; pela doc o widget então recebe `updateItem`. Precisa validar que o item é do usuário.
 3. **(só se a C for escolhida)** uma página hospedada que embute o widget e redireciona para `pigbank://…`.
 4. **(só se um dia usar link universal em vez de scheme)** `applinks` no `apple-app-site-association` (hoje só `webcredentials`, `frontend/routes/static_pages.py:471`) e `associatedDomains` com `applinks:` em `app/app.config.ts:66`. O scheme `pigbank` já existe (`app/app.config.ts:52`). O link universal evitaria a pergunta "Abrir no app?" que o Safari faz para scheme customizado [medido com `exp://`; com `pigbank://` é **hipótese**, o Expo Go não registra esse scheme].
@@ -84,6 +84,7 @@ Com o backend de hoje só o modo in-app (`forceOauthInBrowser={false}`) pode ser
 - **`onSuccess` perdido** (descrito acima): sem o polling no servidor, quem fecha o app logo depois de autorizar fica sem conexão na tela.
 - **Volta do banco real** no modo in-app: ver "Decisão recomendada"; só o iPhone responde.
 - **A lib carrega `connect.pluggy.ai` ao vivo.** O site fixa a v2.7.0 do script com SRI (`frontend/settings.html:14`); no app ganhamos as correções sem republicar, mas perdemos o travamento de versão e o que a Pluggy mudar chega sem passar por nós.
+- **Scheme `pigbank` igual em todos os ambientes** (`app/app.config.ts:52`): só pesa no modo navegador com `oauthRedirectUri` (proposta 1), onde o sistema escolhe o app; resolvido com scheme por ambiente.
 - **Dependência nativa nova:** `react-native-webview` exige build nativo (não vai por OTA); a lib depende de `pluggy-connect-sdk@2.9.2` (só tipos e protocolo).
 
 ## Não verificado
