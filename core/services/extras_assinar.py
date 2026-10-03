@@ -157,3 +157,22 @@ def tela_da_sessao(stripe_mod, session) -> list[dict]:
     no_carrinho = {_ler(_ler(linha, "price"), "id") for linha in (_ler(linhas, "data") or [])}
     return para_tela([(p, u, _na_tela(stripe_mod.Price.retrieve(p, expand=["product"])))
                       for p, u in foto], no_carrinho)
+
+
+def linhas_do_bump(atuais, precos_da_foto, desejados) -> list[dict] | None:
+    """`line_items` do `Session.modify` que deixa no carrinho só os extras
+    `desejados` (preços da FOTO). `atuais` = o `data` do `list_line_items`. O
+    plano (não-extra) e o extra desejado já presente ficam pelo `id`; o desejado
+    ausente entra por preço; o extra não desejado sai. None = nada muda."""
+    desejados = list(dict.fromkeys(desejados))   # repetido entraria duas vezes
+    foto, quero = set(precos_da_foto), set(desejados)
+    ficam, presentes = [], set()
+    for linha in atuais:
+        preco = _ler(_ler(linha, "price"), "id")
+        if preco not in foto or preco in quero:
+            ficam.append({"id": _ler(linha, "id")})
+            presentes.add(preco)
+    entram = [{"price": p, "quantity": 1} for p in desejados if p not in presentes]
+    if not entram and len(ficam) == len(atuais):
+        return None
+    return ficam + entram

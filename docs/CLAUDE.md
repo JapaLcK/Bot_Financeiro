@@ -468,7 +468,8 @@ de mensagem? Os dois lados mudam junto — o consumidor está no `dashboard.js`.
 
 ### Pagamentos
 
-Stripe: `/billing/create-checkout`, `webhook`, `portal`, `subscription`,
+Stripe: `/billing/create-checkout`, `/billing/checkout/bump` (página própria, abaixo),
+`webhook`, `portal`, `subscription`,
 `change-plan`, `cancel-change`, `plans-config` e `select-free` (esta só RECUSA
 com 410: a escolha do plano Grátis saiu da /precos em 2026-09-02; a rota
 sobrevive pra devolver `detail.message` a cliente antigo em cache).
@@ -521,8 +522,8 @@ O corpo ganha `pagina` (default `false`); vale só com a flag
 sem `pagina`, o checkout é o de antes nas duas origens (a `/precos` com `pagina` segue
 no hospedado, nunca no embutido). Ligada, `pagina` vira sessão `elements` (é um
 embutido: `client_secret`, `return_url`, 1 h, `publishable_key`) **sem**
-`optional_items`: os extras vão entrar como linha do carrinho pela rota do bump (PR 2
-da página própria; ainda não existe). Até 3 extras (`extras_assinar.CAIXAS`): `da_env()` filtrado por
+`optional_items`: os extras entram como linha do carrinho pelo `POST /billing/checkout/bump`
+(abaixo). Até 3 extras (`extras_assinar.CAIXAS`): `da_env()` filtrado por
 `Price.retrieve(expand=["product"])` (preço ativo, BRL, avulso, produto ativo) ANTES
 de recortar; o que sai, ou uma falha do Stripe ao ler (aí nenhum entra), loga
 `ebook_oferta_recusada` só com os preços, e o plano vende assim mesmo. A foto dos 3 vai
@@ -539,6 +540,23 @@ extra na criação tira TODAS as caixas (o plano vende sem elas). A página pró
 BRL (`adaptive_pricing` off) nas **duas** origens: medido no Stripe de teste em
 2026-10-03, sem o campo a sessão `elements` da `/precos` nasce com ele LIGADO (o
 default da conta), e as caixas mostram R$. O hospedado da `/precos` segue sem o campo.
+
+**`POST /billing/checkout/bump`** (`frontend/routes/billing_bump.py`): o order bump da
+página própria. Corpo `{sid, posicoes}` = o CONJUNTO desejado inteiro, em posições da
+foto (`[]` = nenhum); o preço sai sempre da foto da sessão, nunca do cliente. Campo a
+mais (ex.: `price`) é 422; `sid` fora de `cs_(test|live)_…`, posição repetida, fora de
+1..10 ou além da foto é 400. Sessão de outra conta (`finbot_user_id` exato **e**
+`customer` da conta), de outro `ui_mode` (só `elements`) ou de outra origem (só
+`assinar`/`precos`) é 404 indistinguível de "não existe", sem `modify`; o dono é
+checado ANTES do estado. Sessão paga, expirada ou `open` com `expires_at` vencido é 409
+`sessao_fechada`. O carrinho (`list_line_items`) vira `extras_assinar.linhas_do_bump`:
+o plano e o extra que fica vão pelo `id`, o que entra por `price`, o que sai é omitido;
+nada mudou = sem chamada ao Stripe. O `Session.modify` leva só `line_items` (a foto do
+metadata não muda). Recusa do Stripe no `modify` (`InvalidRequestError`) é 409
+`extra_recusado` + log `ebook_oferta_recusada` só com os preços; qualquer outro
+`StripeError` (retrieve, list, modify) é 502. Roda sob `_billing_user_lock` (o mesmo
+do checkout), limite de 120/h por IP, CSRF do middleware global, e **não olha a
+flag**: com ela desligada não nasce sessão `elements`, e a página já aberta segue pagável.
 
 **Entrega do e-book (#708) — N produtos por compra.** A metadata da sessão é a foto
 dos produtos oferecidos: o 1º em `ebook_price`/`ebook_url`, o n-ésimo (2..10) em
