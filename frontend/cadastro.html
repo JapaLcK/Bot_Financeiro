@@ -178,7 +178,14 @@
     try{
       var res=await fetch('/auth/register',{method:'POST',credentials:'same-origin',headers:csrfHeaders({'Content-Type':'application/json'}),body:JSON.stringify({email:email,password:pass,phone:phone,name:name})});
       var d=await payload(res);
-      if(!res.ok){err('reg-error',d.detail||'Erro ao enviar código.');return}
+      if(!res.ok){
+        if(res.status===409){
+          // E-mail já cadastrado: além da frase, um link direto pro login.
+          err('reg-error',(d.detail||'Esse e-mail já tem conta.')+' ');
+          var a=document.createElement('a');a.href='/login';a.textContent='Entrar';a.style.cssText='color:inherit;text-decoration:underline;font-weight:600';
+          document.getElementById('reg-error').appendChild(a);return
+        }
+        err('reg-error',d.detail||'Erro ao enviar código.');return}
       _email=email;_phone=phone;
       document.getElementById('form-register').style.display='none';
       document.getElementById('verify-email-display').textContent=email;
@@ -218,7 +225,11 @@
   function backToRegister(ev){ev.preventDefault();document.getElementById('form-verify').style.display='none';document.getElementById('form-register').style.display='';clrErr()}
   async function resendCode(ev){ev.preventDefault();if(!_email)return;
     var pass=document.getElementById('reg-password').value;
-    try{await fetch('/auth/register',{method:'POST',credentials:'same-origin',headers:csrfHeaders({'Content-Type':'application/json'}),body:JSON.stringify({email:_email,password:pass,phone:_phone})})}catch(e){}
+    try{
+      var res=await fetch('/auth/register',{method:'POST',credentials:'same-origin',headers:csrfHeaders({'Content-Type':'application/json'}),body:JSON.stringify({email:_email,password:pass,phone:_phone})});
+      var d=await payload(res);
+    }catch(e){return err('verify-error','Erro de conexão. Tente novamente.')}
+    if(!res.ok)return err('verify-error',d.detail||'Não foi possível reenviar o código.');
     err('verify-error','Novo código enviado!',true);
   }
 </script>

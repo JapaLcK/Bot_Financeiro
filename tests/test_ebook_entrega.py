@@ -64,33 +64,78 @@ def _url(uid):
     return f"https://drive.test/uc?id={uid}&export=download"
 
 
+def _nome(preco):
+    return f"Produto {preco}"
+
+
+def _pagina(precos, limit):
+    return {"data": [{"price": {"id": p}, "description": _nome(p)} for p in precos[:limit]]}
+
+
 @pytest.fixture
 def mundo(monkeypatch):
-    """Stripe falso com `sessoes[sid] = [price ids]`, envios em `enviados`."""
+    """Stripe falso com `sessoes[sid] = [price ids]`, envios em `enviados`. Como o
+    Stripe, devolve só 10 linhas quando o `limit` não vem; o nome do produto é a
+    `description` da linha (`_nome`). A cobrança da compra (o caminho medido no
+    Stripe de teste: Session.invoice → InvoicePayment.list → PaymentIntent com
+    `latest_charge`) vem de `cobranca[sid]`; o padrão é um pagamento pago, sem
+    estorno nem contestação; `cobranca[sid]["latest_charge"]` troca a charge
+    inteira (forma inesperada). `explode_cobranca` = "retrieve", "list" ou "pi"
+    derruba aquela chamada. `m.no(fake)` liga tudo isso a outro Stripe falso."""
     import db_support
     monkeypatch.setenv("STRIPE_SECRET_KEY", "sk_test_job")
-    m = SimpleNamespace(sessoes={}, chamadas=[], enviados=[], envio_ok=True, explode=False)
+    m = SimpleNamespace(sessoes={}, chamadas=[], enviados=[], envio_ok=True, explode=False,
+                        cobranca={}, consultas=[], explode_cobranca="")
 
-    def _list_line_items(sid, api_key=None):
+    def _list_line_items(sid, api_key=None, limit=10):
         m.chamadas.append((sid, api_key))
         if m.explode:
             raise RuntimeError("stripe fora")
-        return {"data": [{"price": {"id": p}} for p in m.sessoes[sid]]}
+        return _pagina(m.sessoes[sid], limit)
+
+    def _cob(sid):
+        return {"invoice": f"in_{sid}", "refunded": 0, "disputed": False,
+                "pagamentos": [{"status": "paid", "payment": {"type": "payment_intent",
+                                                               "payment_intent": f"pi_{sid}"}}],
+                **m.cobranca.get(sid, {})}
+
+    def _retrieve(sid, api_key=None):
+        m.consultas.append(sid)
+        if m.explode_cobranca == "retrieve":
+            raise RuntimeError("stripe fora")
+        return {"id": sid, "invoice": _cob(sid)["invoice"]}
+
+    def _pagamentos(invoice, api_key=None, limit=10):      # o Stripe pagina em 10
+        if m.explode_cobranca == "list":
+            raise RuntimeError("stripe fora")
+        return {"data": _cob(invoice.removeprefix("in_"))["pagamentos"][:limit]}
+
+    def _payment_intent(pi, expand=None, api_key=None):
+        assert expand == ["latest_charge"]
+        if m.explode_cobranca == "pi":
+            raise RuntimeError("stripe fora")
+        c = _cob(pi.removeprefix("pi_"))
+        return {"id": pi, "latest_charge": c.get("latest_charge", {"amount_refunded": c["refunded"],
+                                                                 "disputed": c["disputed"]})}
 
     def _send_email(to, subject, html_body, text_body, **kw):
         m.enviados.append((to, subject, html_body, text_body))
         return m.envio_ok
 
-    monkeypatch.setitem(sys.modules, "stripe", SimpleNamespace(
-        checkout=SimpleNamespace(Session=SimpleNamespace(list_line_items=_list_line_items))))
+    m.stripe = SimpleNamespace(
+        checkout=SimpleNamespace(Session=SimpleNamespace(list_line_items=_list_line_items, retrieve=_retrieve)),
+        InvoicePayment=SimpleNamespace(list=_pagamentos),
+        PaymentIntent=SimpleNamespace(retrieve=_payment_intent))
+    m.no = lambda fake: vars(fake).update(vars(m.stripe))
+    monkeypatch.setitem(sys.modules, "stripe", m.stripe)
     monkeypatch.setattr(es, "send_email", _send_email)
     m.pendencia = lambda uid, sid, url="_": (m.sessoes.setdefault(sid, ["price_plano", _PRECO]),
-                                             registrar(uid, sid, _PRECO, _url(uid) if url == "_" else url))
+                                             registrar(uid, sid, [(_PRECO, _url(uid) if url == "_" else url)]))
     m.linha = lambda uid, sid: _sql("select resultado, fechada_em, tentativas, reivindicada_ate > now() as presa,"
                                     " extract(epoch from reivindicada_ate - now()) / 60 as janela"
                                     " from ebook_entregas where user_id = %s and session_id = %s",
                                     (uid, sid))[0]
-    m.para = lambda email: [e for e in m.enviados if e[0] == email and "e-book" in e[1]]
+    m.para = lambda email: [e for e in m.enviados if e[0] == email and e[1].startswith("📘 Chegou")]
     m.invalida = db_support.invalidate_auth_user_cache
     return m
 
@@ -111,7 +156,7 @@ def test_e1_e2_sem_credencial_espera_com_senha_envia_uma_vez(mundo):
     _senha(uid)
     assert entregar_pendentes() >= 1
     ((_, assunto, html, texto),) = mundo.para(email)
-    assert assunto == "📘 Seu e-book do PigBank chegou"
+    assert assunto == f"📘 Chegou: {_nome(_PRECO)}"
     assert _url(uid) in texto and _url(uid).replace("&", "&amp;") in html
     assert mundo.linha(uid, "cs_e1")["resultado"] == "enviado"
     entregar_pendentes()
@@ -189,17 +234,17 @@ def test_e7b_falha_permanente_espaca_o_claim_ate_um_dia_e_nao_fecha(mundo):
 def test_e8_claim_e_atomico_e_expira(mundo):
     uid, _ = _conta()
     mundo.pendencia(uid, "cs_e8")
-    assert reivindicar(uid, "cs_e8") == {"ebook_price": _PRECO, "ebook_url": _url(uid)}
-    assert reivindicar(uid, "cs_e8") is None
+    assert reivindicar(uid, "cs_e8", _PRECO) == {"ebook_price": _PRECO, "ebook_url": _url(uid)}
+    assert reivindicar(uid, "cs_e8", _PRECO) is None
     _sql("update ebook_entregas set reivindicada_ate = now() - interval '1 minute'"
          " where user_id = %s", (uid,))
-    assert reivindicar(uid, "cs_e8") is not None
+    assert reivindicar(uid, "cs_e8", _PRECO) is not None
 
 
 def test_e9_sem_url_fica_fora_da_varredura(mundo):
     uid, email = _conta(senha="hash")
     mundo.pendencia(uid, "cs_e9", url=None)
-    assert (uid, "cs_e9") not in abertas()
+    assert (uid, "cs_e9", _PRECO) not in abertas()
     entregar_pendentes()
     assert mundo.para(email) == []
 
@@ -214,7 +259,7 @@ def test_e10_isolamento_entre_usuarios(mundo):
     ((_, _, _, texto),) = mundo.para(email_b)
     assert _url(b) in texto and _url(a) not in texto
     _sql("update ebook_entregas set fechada_em = null where user_id = %s", (b,))
-    assert reivindicar(a, "cs_b") is None
+    assert reivindicar(a, "cs_b", _PRECO) is None
 
 
 def test_e11_sem_chave_do_stripe_nao_toca_em_nada(mundo, monkeypatch):
@@ -230,9 +275,8 @@ def test_e12_a_conversa_webhook_senha_job_reentrega(mundo, user_id, monkeypatch)
     from test_billing_webhook_lifecycle import _cleanup_trial, _fake_sub, _post, _setup
     from test_ebook_webhook import _checkout, _espioes
     uid, client, fake = _setup(monkeypatch, f"eb-e12-{user_id}")
-    lista = mundo.sessoes.setdefault("cs_eb_1", ["price_plano", _PRECO])
-    fake.checkout = SimpleNamespace(Session=SimpleNamespace(
-        list_line_items=lambda sid, api_key=None: {"data": [{"price": {"id": p}} for p in lista]}))
+    mundo.sessoes["cs_eb_1"] = ["price_plano", _PRECO]
+    mundo.no(fake)
     _espioes(monkeypatch)
     _sql("update auth_accounts set password_hash = null where user_id = %s", (uid,))
     email = f"wh-eb-e12-{user_id}@t.com"

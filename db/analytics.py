@@ -47,6 +47,27 @@ _CAT_EQ = f"{cat_key_sql('categoria')} = {cat_key_sql('%s')}"
 _CAT_CT_EQ = f"{cat_key_sql('ct.categoria')} = {cat_key_sql('%s')}"
 
 
+def termos_busca(q: str | None) -> list[str]:
+    """As palavras da busca textual: até 6 (limita o custo da query), de 2 letras ou
+    mais (tira "a", "e"), em minúsculas. Do `list_history` e da `GET /api/v2/lancamentos`."""
+    termos: list[str] = []
+    for raw in str(q or "").strip().split():
+        term = raw.strip().lower()
+        if len(term) >= 2:
+            termos.append(term)
+        if len(termos) >= 6:
+            break
+    return termos
+
+
+def clausula_busca(termos: list[str], colunas: tuple[str, ...]) -> tuple[str, list[Any]]:
+    """(fragmento SQL, params): todas as palavras AND, cada palavra OR entre `colunas`,
+    `unaccent(...) ILIKE unaccent(%palavra%)`. Sem palavra, `("", [])`."""
+    por_termo = " OR ".join(f"unaccent(COALESCE({c}, '')) ILIKE unaccent(%s)" for c in colunas)
+    return (" AND ".join(f"({por_termo})" for _ in termos),
+            [f"%{t}%" for t in termos for _ in colunas])
+
+
 # ─────────────────────────────────────────────────────────────────────────────
 # Helpers
 # ─────────────────────────────────────────────────────────────────────────────
@@ -694,34 +715,7 @@ def list_history(
     include_launches = tipo_norm in ("all", "despesa", "receita")
     include_credit = tipo_norm in ("all", "credito")
 
-    # Quebra a busca em palavras (até 6 — limita custo da query).
-    # Filtra tokens muito curtos pra evitar match excessivo (ex.: "a", "e").
-    search_terms: list[str] = []
-    if q:
-        for raw in str(q).strip().split():
-            term = raw.strip().lower()
-            if len(term) >= 2:
-                search_terms.append(term)
-            if len(search_terms) >= 6:
-                break
-
-    def _search_clause(prefix: str) -> tuple[str, list[Any]]:
-        """Retorna (SQL fragment, params) — todas as palavras AND'ed,
-        cada palavra OR entre campos. `prefix` deixa o caller decidir o
-        alias (ex.: '' pra launches, 'ct.' pra credit_transactions)."""
-        if not search_terms:
-            return ("", [])
-        per_term_sqls: list[str] = []
-        per_term_params: list[Any] = []
-        for term in search_terms:
-            pattern = f"%{term}%"
-            per_term_sqls.append(
-                f"(unaccent(COALESCE({prefix}alvo, '')) ILIKE unaccent(%s) "
-                f"OR unaccent(COALESCE({prefix}nota, '')) ILIKE unaccent(%s) "
-                f"OR unaccent(COALESCE({prefix}categoria, '')) ILIKE unaccent(%s))"
-            )
-            per_term_params.extend([pattern, pattern, pattern])
-        return (" AND ".join(per_term_sqls), per_term_params)
+    search_terms = termos_busca(q)
 
     # ── Sub-query de launches ────────────────────────────────────────────────
     launches_sql = ""
@@ -752,7 +746,7 @@ def list_history(
             # movimentação interna, criar_caixinha, etc.)
             clauses.append(f"({TIPO_DESPESA_SQL} OR {TIPO_RECEITA_SQL})")
         clauses.append("is_internal_movement = false")
-        search_sql, search_params = _search_clause("")
+        search_sql, search_params = clausula_busca(search_terms, ("alvo", "nota", "categoria"))
         if search_sql:
             clauses.append(search_sql)
             launches_params.extend(search_params)
@@ -830,16 +824,9 @@ def list_history(
         # mas a busca textual deve casar contra ct.nota e ct.categoria (e
         # opcionalmente nome do cartão também — útil pra "nubank").
         if search_terms:
-            per_term_sqls: list[str] = []
-            for term in search_terms:
-                pattern = f"%{term}%"
-                per_term_sqls.append(
-                    "(unaccent(COALESCE(c.name, '')) ILIKE unaccent(%s) "
-                    "OR unaccent(COALESCE(ct.nota, '')) ILIKE unaccent(%s) "
-                    "OR unaccent(COALESCE(ct.categoria, '')) ILIKE unaccent(%s))"
-                )
-                credit_params.extend([pattern, pattern, pattern])
-            clauses.append(" AND ".join(per_term_sqls))
+            search_sql, search_params = clausula_busca(search_terms, ("c.name", "ct.nota", "ct.categoria"))
+            clauses.append(search_sql)
+            credit_params.extend(search_params)
         credit_sql = f"""
           SELECT ct.id, 'credito' AS tipo, ct.valor,
                  c.name AS alvo, ct.nota, ct.categoria, ct.created_at AS criado_em,

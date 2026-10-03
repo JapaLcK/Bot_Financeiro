@@ -1,5 +1,5 @@
 {
-  "_comentario": "Respostas da /api/v2 que os testes de navegador servem. tests/test_api_v2_contrato.py valida cada uma pelos modelos Pydantic (Me, Perfil, Contas, Assinaturas, ResumoDoMes, ErroV2); a marcada fora_do_envelope tem de NÃO validar. Dinheiro é texto decimal.",
+  "_comentario": "Respostas da /api/v2 que os testes de navegador servem. tests/test_api_v2_contrato.py valida cada uma pelos modelos Pydantic (Me, Perfil, Contas, Assinaturas, ResumoDoMes, Lancamentos, Categorias, ErroV2); a marcada fora_do_envelope tem de NÃO validar. Dinheiro é texto decimal.",
   "me": {
     "free": { "plan_tier": "free" },
     "essencial": { "plan_tier": "essencial" },
@@ -63,6 +63,24 @@
     "exato": { "mes": "2026-10", "ate": "2026-10-31", "entrou": "1040.00", "saiu": "440.00", "anterior": { "mes": "2026-09", "entrou": "5200.00", "saiu": "3980.55" }, "motivos": [] },
     "todos_os_motivos": { "mes": "2026-07", "ate": "2026-07-31", "entrou": "0", "saiu": "310.00", "anterior": null, "motivos": ["conciliacao_pendente", "movimentos_pendentes", "banco_desatualizado", "inicio_do_historico"] },
     "sem_dados": { "mes": "2026-10", "ate": "2026-10-31", "entrou": "0", "saiu": "0", "anterior": { "mes": "2026-09", "entrou": "0", "saiu": "0" }, "motivos": [] }
+  },
+  "lancamentos": {
+    "estados": {
+      "mes": "2026-10",
+      "itens": [
+        { "id": "l901", "data": "2026-10-02", "hora": "19:40", "tipo": "saida", "interno": false, "valor": "42.90", "moeda": "BRL", "descricao": "mercado", "mensagem": "gastei 42,90 no mercado", "categoria": "mercado", "origem": "carteira", "fundido": false, "instituicao": null, "conta_id": null, "cartao_id": null, "parcela": null, "fatura": null, "pode": ["categoria", "descricao", "data", "valor", "apagar"], "motivos": [] },
+        { "id": "l900", "data": "2026-10-02", "hora": null, "tipo": "saida", "interno": false, "valor": "30.00", "moeda": "BRL", "descricao": "PADARIA DO ZE", "mensagem": null, "categoria": "alimentacao", "origem": "banco", "fundido": false, "instituicao": "Nubank", "conta_id": 7, "cartao_id": null, "parcela": null, "fatura": null, "pode": ["categoria", "descricao"], "motivos": ["conciliacao_pendente", "transacao_pendente"] },
+        { "id": "l899", "data": "2026-10-01", "hora": "08:00", "tipo": "saida", "interno": true, "valor": "500", "moeda": "BRL", "descricao": "fatura:Nubank", "mensagem": "Pagamento de fatura (Nubank)", "categoria": "pagamento_fatura", "origem": "registro_antigo", "fundido": false, "instituicao": null, "conta_id": null, "cartao_id": null, "parcela": null, "fatura": null, "pode": [], "motivos": [] },
+        { "id": "l898", "data": "2026-10-01", "hora": "07:10", "tipo": "entrada", "interno": false, "valor": "1040.00", "moeda": "BRL", "descricao": "salário", "mensagem": null, "categoria": null, "origem": "registro_antigo", "fundido": true, "instituicao": "Nubank", "conta_id": 7, "cartao_id": null, "parcela": null, "fatura": null, "pode": [], "motivos": [] },
+        { "id": "c55", "data": "2026-09-20", "hora": null, "tipo": "saida", "interno": false, "valor": "100.00", "moeda": "BRL", "descricao": "LOJA X", "mensagem": null, "categoria": "casa", "origem": "cartao", "fundido": false, "instituicao": "Nubank", "conta_id": null, "cartao_id": 3, "parcela": { "n": 1, "total": 3 }, "fatura": "2026-10", "pode": ["categoria", "descricao"], "motivos": [] }
+      ],
+      "proximo": "WyIyMDI2LTA5LTIwIiwgIjIwMjYtMTAtMDFUMTI6MDA6MDArMDA6MDAiLCAiYyIsIDU1XQ==",
+      "motivos": ["conciliacao_pendente"]
+    },
+    "vazia": { "mes": "2026-07", "itens": [], "proximo": null, "motivos": ["inicio_do_historico"] }
+  },
+  "categorias": {
+    "padrao": { "categorias": [{ "chave": "alimentacao", "nome": "alimentação" }, { "chave": "mercado", "nome": "mercado" }, { "chave": "casa", "nome": "Casa" }] }
   },
   "erros": {
     "401": {

@@ -6,6 +6,7 @@ envelope. Dinheiro é `Decimal` e sai como TEXTO; `ate` e `mes` são texto ISO
 inteiro, o corrente também (lançamento com data futura dentro do mês entra). `motivos`
 vazio = número exato.
 """
+from datetime import datetime
 from decimal import Decimal
 from typing import Literal
 
@@ -35,12 +36,21 @@ class ResumoDoMes(BaseModel):
     motivos: list[Literal[resumo_mes.MOTIVOS]]
 
 
-@router.get("/resumo-do-mes", response_model=ResumoDoMes)
-def resumo(mes: str | None = Query(None, pattern=r"^[1-9][0-9]{3}-(0[1-9]|1[0-2])$"),
-           uid: int = Depends(usuario_atual)) -> ResumoDoMes:
+PADRAO_MES = r"^[1-9][0-9]{3}-(0[1-9]|1[0-2])$"
+
+
+def mes_pedido(mes: str | None) -> tuple[int, int, datetime]:
+    """(ano, mês, agora) do `mes` já validado pelo `PADRAO_MES`: sem ele, o corrente no fuso
+    do app; no futuro, 422 no envelope. Também da `GET /api/v2/lancamentos`."""
     agora = now_tz()
     ano, m = (int(mes[:4]), int(mes[5:])) if mes else (agora.year, agora.month)
     if (ano, m) > (agora.year, agora.month):
         raise RequestValidationError([{"loc": ("query", "mes"), "msg": "Mês no futuro.",
                                        "type": "value_error"}])
-    return ResumoDoMes(**resumo_mes.resumo_do_mes(uid, ano, m, agora))
+    return ano, m, agora
+
+
+@router.get("/resumo-do-mes", response_model=ResumoDoMes)
+def resumo(mes: str | None = Query(None, pattern=PADRAO_MES),
+           uid: int = Depends(usuario_atual)) -> ResumoDoMes:
+    return ResumoDoMes(**resumo_mes.resumo_do_mes(uid, *mes_pedido(mes)))

@@ -112,6 +112,7 @@ TABELA = {
     ("GET", "/api/v2/perfil"): (B, "usuario_atual"), ("PUT", "/api/v2/perfil"): (B, "usuario_atual"),
     ("GET", "/api/v2/contas"): (B, "usuario_atual"),
     ("GET", "/api/v2/resumo-do-mes"): (B, "usuario_atual"),
+    ("GET", "/api/v2/lancamentos"): (B, "usuario_atual"), ("GET", "/api/v2/categorias"): (B, "usuario_atual"),
     ("WS", "/ws/{user_id}"): (B, "close 4403"),
     # ── HTML autenticado ──
     ("GET", "/app"): (L, "casca; o overlay sobe"), ("GET", "/home"): (L, "casca; o overlay sobe"),
