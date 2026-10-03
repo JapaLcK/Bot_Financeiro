@@ -159,3 +159,24 @@ for (const [agora, dia, mes] of [["2026-10-01T03:30:00Z", "1 de outubro de 2026"
     assert.deepEqual(r, [`hoje é ${dia}`, mes]);
   });
 }
+
+// --- 7. a etiqueta neutra que sobrou -------------------------------------------------
+
+test('a etiqueta .tag-demo ("Mês fechado" do Hero, categoria do Calendar) segue estilizada depois do selo ganhar classe própria', async () => {
+  const { ctx, page, erros, ir } = await abrir({});
+  await ir("/");
+  const estilo = await page.evaluate(() => {
+    const el = document.createElement("span");
+    el.className = "tag-demo";
+    el.textContent = "Mês fechado";
+    document.body.append(el);
+    const c = getComputedStyle(el);
+    return { altura: c.height, fundo: c.backgroundColor, fonte: c.fontSize, raio: c.borderRadius };
+  });
+  await ctx.close();
+  assert.equal(estilo.altura, "22px");
+  assert.equal(estilo.fonte, "11px");
+  assert.equal(estilo.raio, "6px");
+  assert.notEqual(estilo.fundo, "rgba(0, 0, 0, 0)", "sem fundo: a regra sumiu");
+  assert.deepEqual(erros, []);
+});
