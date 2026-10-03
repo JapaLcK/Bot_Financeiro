@@ -1133,6 +1133,24 @@ body.balance-hidden .account-balance {
   .pb-protect { flex-wrap: wrap; }
   .pb-protect button { width: 100%; }
 }
+
+/* Conta que pagou e ainda não criou a senha (#758): `pb-sem-senha` no <body>,
+   posto pelo initSettings a partir do `precisa_criar_senha` do /auth/me. Só a
+   Segurança fica, com o card do link da senha no topo (movido no DOM pelo
+   initSettings, não com `order`: o foco segue o DOM) (decisão do dono: o botão
+   e o e-mail na primeira tela do celular). Some o que depende de rota barrada
+   (atividade) ou de senha (MFA, dispositivos) e o banner que leva aonde ela já está.
+   `!important` e o `.sidebar` extra: no app, o app-mode.css (carregado depois)
+   tem `html.pb-app body.pb-page-settings .sidebar-item { display:flex !important }`,
+   especificidade (0,3,2), e `html.pb-app .pb-protect { display:flex }`. Sem isto o
+   menu inteiro voltava justamente no iPhone. (0,4,0) ganha dos dois. */
+.sidebar-lock { display: none; padding: 11px 14px; border-top: 1px solid var(--border); font-size: .78rem; color: var(--muted); }
+.pb-sem-senha .sidebar-lock { display: block; }
+.pb-sem-senha .sidebar .sidebar-item:not([data-section="security"]),
+.pb-sem-senha .pb-protect,
+.pb-sem-senha .activity-embed,
+.pb-sem-senha #mfa-card,
+.pb-sem-senha #sessions-card { display: none !important; }
 </style>
 
 <!-- DEPOIS do <style> de cima, e não antes: `.bankpick-go{width:auto}` e
@@ -1246,6 +1264,7 @@ body.balance-hidden .account-balance {
           <span class="sidebar-sub">Privacidade e termos</span>
         </span>
       </button>
+      <p class="sidebar-lock" id="sidebar-lock">Crie sua senha para liberar o resto.</p>
     </aside>
 
     <!-- Main content -->
@@ -1430,7 +1449,7 @@ body.balance-hidden .account-balance {
                   <button class="btn-sm" type="button" onclick="toggleSecurityEdit('name', false)">Cancelar</button>
                 </div>
               </div>
-              <div class="security-item">
+              <div class="security-item" id="security-email-item">
                 <div class="security-item-head">
                   <div class="security-label">E-mail</div>
                   <button class="btn-sm" type="button" id="security-email-edit-btn" onclick="toggleSecurityEdit('email')">Alterar</button>
@@ -1483,7 +1502,7 @@ body.balance-hidden .account-balance {
           </div>
         </div>
 
-        <div class="card">
+        <div class="card" id="mfa-card">
           <div class="card-head">
             <div>
               <div class="card-title">Autenticação em 2 etapas (MFA)</div>
@@ -1501,7 +1520,7 @@ body.balance-hidden .account-balance {
           </div>
         </div>
 
-        <div class="card">
+        <div class="card" id="sessions-card">
           <div class="card-head">
             <div>
               <div class="card-title">Dispositivos conectados</div>
@@ -1518,7 +1537,7 @@ body.balance-hidden .account-balance {
           </div>
         </div>
 
-        <div class="card">
+        <div class="card" id="security-reset-card">
           <div class="card-head">
             <div>
               <div class="card-title" id="security-reset-title">Resetar senha por e-mail</div>
@@ -1849,6 +1868,52 @@ function setHasPassword(me, myGen) {
        HAS_PASSWORD não vira false (teto): a autoridade discorda do advisory e o
        cliente não aprende. */
 
+/* Conta que pagou e não criou a senha (#758). Gate = `precisa_criar_senha === true`
+   do /auth/me, NUNCA `has_password` (a conta só-Google tem has_password:false e
+   não fica travada). Travada, a página mostra só a Segurança e não chama os
+   carregadores que dariam 403 password_required (loadData, loadActivityLog).
+     ORDEM: os dois escritores (boot e recarregarSeGateMudou) só valem para a
+       resposta MAIS NOVA que já chegou (respostaDoGateMaisNova: _gateGen guarda a
+       geração _hasPwGen da última resposta aplicada; falha não conta, então um
+       rebusque falho não apaga a resposta válida de um boot mais velho).
+     boot com /auth/me ok ........ escreve, ANTES do showSettingsSection/loadData,
+       se nenhum puxão mais novo já respondeu; senão o gate fica com o do puxão.
+     boot com /auth/me falho ...... fica false (tela livre, como antes): fechar no
+       erro mostraria "Crie sua senha" a quem tem senha. O servidor segue negando.
+       Mas é false por DESCONHECIDO: a volta do foco também rebusca.
+     PTR (abas security e data) / aba volta ao foco (visibilitychange, pageshow do
+       bfcache) .... rebusca pelo refreshHasPassword (resposta velha não decide).
+       Se o servidor discorda do gate, recarrega e o boot monta o
+       modo certo: senha criada → livre; gate livre que descobre a conta sem senha
+       (boot falho, ou PTR antes do /auth/me do boot) → travada. Com algo de
+       RECARGA_PERDERIA aberto NÃO recarrega, e nada fica agendado: o próximo foco
+       ou puxão depois de fechar refaz a decisão (teto aceito). Falha → nada muda.
+       Sem laço: toda recarga pede um gesto novo (puxão, foco, bfcache); o boot
+       não chama este caminho. Campo ausente = não precisa (não trava). */
+let PRECISA_SENHA = false;
+const precisaCriarSenha = (me) => !!(me && me.precisa_criar_senha === true);
+let _gateGen = 0;
+function respostaDoGateMaisNova(myGen) {
+  if (myGen <= _gateGen) return false;   // uma resposta mais nova já decidiu
+  _gateGen = myGen;
+  return true;
+}
+// O que a recarga fecharia levando estado do usuário que não volta: rascunho de
+// contato, senha digitada nos painéis de exportar/recomeçar/excluir, os três modais de
+// MFA (QR e segredo do TOTP, códigos de backup que aparecem UMA vez, senha e código),
+// diálogo do modals.js (só existe no DOM aberto) e o seletor de banco no meio da escolha.
+const RECARGA_PERDERIA = ".security-edit.show, .delete-confirm.show, .mfa-overlay.open, .pig-modal-overlay, .bankpick-overlay.open";
+function recarregarSeGateMudou(me) {
+  const precisa = precisaCriarSenha(me);
+  if (precisa === PRECISA_SENHA || document.querySelector(RECARGA_PERDERIA)) return;
+  PRECISA_SENHA = precisa;   // as guardas já valem para os carregadores deste mesmo puxão
+  location.reload();
+}
+function rebuscarAoVoltar(ev) {
+  if (document.visibilityState !== "visible" || (ev.type === "pageshow" && !ev.persisted)) return;
+  refreshHasPassword().catch(function () { /* fail-open: a tela fica como está */ });
+}
+
 /* ── Helpers ─────────────────────────────────── */
 function esc(v) {
   return String(v ?? "").replace(/[&<>"']/g, c => ({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;","'":"&#039;"}[c]));
@@ -1989,7 +2054,7 @@ const SECTION_COPY = {
 };
 
 function showSettingsSection(section) {
-  const target = SECTION_COPY[section] ? section : "open-finance";
+  const target = PRECISA_SENHA ? "security" : (SECTION_COPY[section] ? section : "open-finance");
   document.querySelectorAll(".settings-section").forEach(el => {
     el.hidden = el.id !== `section-${target}`;
   });
@@ -2305,6 +2370,7 @@ let _activityCache = [];
 // geração mais nova pinta.
 let _activityGen = 0;
 async function loadActivityLog({ propagate = false } = {}) {
+  if (PRECISA_SENHA) return;   // rota barrada (#758)
   const container = document.getElementById("activity-list");
   if (!USER_ID || !container) return;
   // No refresh (propagate) NÃO troca por "Carregando…": preserva o conteúdo
@@ -2675,7 +2741,9 @@ async function refreshHasPassword() {
   const myGen = ++_hasPwGen;
   const resp = await fetch(`${API}/auth/me`, { credentials: "same-origin" });
   if (!resp.ok) throw new Error("Não foi possível atualizar o estado da conta");
-  setHasPassword(await resp.json(), myGen);
+  const me = await resp.json();
+  setHasPassword(me, myGen);
+  if (respostaDoGateMaisNova(myGen)) recarregarSeGateMudou(me);   // superada não decide
 }
 
 /* Guarda dos 6 fluxos que re-autenticam por senha. Fica nos ABRIDORES pra o
@@ -3085,6 +3153,7 @@ function updateStats(connections, accounts, transactions) {
 // geração mais recente pinta; resposta superada vira no-op.
 let _dataGen = 0;
 async function loadData({ propagate = false } = {}) {
+  if (PRECISA_SENHA) return;   // rotas de Open Finance barradas (#758)
   if (!USER_ID) {
     if (propagate) throw new Error("Sessão inválida");
     renderConnections([]); renderAccounts([]); renderTransactions([]);
@@ -3767,6 +3836,27 @@ async function initSettings() {
       // não entra aqui.
     }
   } catch (e) { /* segue; as rotas de dados protegem com 402 */ }
+
+  // ANTES do showSettingsSection e do loadData lá embaixo (#758): eles leem a flag.
+  // Um puxão mais novo que já respondeu manda (ele já recarregou se discordava); o
+  // resto do boot segue com o gate que ficou, para a página nunca sair sem seção.
+  if (me && respostaDoGateMaisNova(meGen)) PRECISA_SENHA = precisaCriarSenha(me);
+  document.body.classList.toggle("pb-sem-senha", PRECISA_SENHA);
+  if (PRECISA_SENHA) {
+    // Card do link da senha no topo da seção e e-mail antes do nome (D1; no app a tab
+    // bar, top 778 em 390x844, cobria o valor do e-mail). No DOM, e não com `order`:
+    // Tab e leitor de tela seguem o DOM (WCAG 2.4.3). Liberar recarrega e desfaz.
+    for (const id of ["security-reset-card", "security-email-item"]) {
+      const el = document.getElementById(id);
+      if (el) el.parentElement.prepend(el);   // id sumido do HTML não derruba o boot
+    }
+  }
+  // Travada, ou livre por não saber (o /auth/me do boot falhou): a volta do foco rebusca.
+  // Na web não há puxão de tela, então este é o único caminho que corrige o boot falho.
+  if (PRECISA_SENHA || !me) {
+    document.addEventListener("visibilitychange", rebuscarAoVoltar);
+    window.addEventListener("pageshow", rebuscarAoVoltar);
+  }
 
   // Open Finance: entrada do menu fica desabilitada até a flag OF_UI_ENABLED (beta/rollout).
   const ofUiEnabled = !!(me && me.of_ui_enabled);

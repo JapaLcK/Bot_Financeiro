@@ -1650,54 +1650,6 @@ def pay_bill_amount(
             "new_balance": carteira_exibida(user_id, new_balance)}
 
 
-def close_bill(user_id: int, card_id: int):
-    with get_conn() as conn:
-        with conn.cursor() as cur:
-            cur.execute(
-                "update credit_bills set status='closed', closed_at=now() "
-                "where id = (select id from credit_bills where card_id=%s and status='open' "
-                "order by period_start desc limit 1) returning id",
-                (card_id,),
-            )
-            row = cur.fetchone()
-        conn.commit()
-    return row["id"] if row else None
-
-
-def get_next_bill_summary(user_id: int, card_id: int):
-    with get_conn() as conn:
-        with conn.cursor() as cur:
-            cur.execute(
-                "select closing_day from credit_cards where id=%s", (card_id,)
-            )
-            closing_day = cur.fetchone()["closing_day"]
-
-            cur.execute(
-                "select period_start from credit_bills where card_id=%s "
-                "order by period_start desc limit 1",
-                (card_id,),
-            )
-            last = cur.fetchone()
-            if last:
-                y, m = last["period_start"].year, last["period_start"].month
-                y2, m2 = add_months(y, m, 1)
-            else:
-                from datetime import date as _date
-                today = _date.today()
-                y2, m2 = today.year, today.month
-
-            ps, pe = bill_period_for_month(y2, m2, closing_day)
-            bill_id = get_or_create_bill_by_period(user_id, card_id, ps, pe)
-
-            cur.execute(
-                "select id, period_start, period_end, total, paid_amount, status "
-                "from credit_bills where id=%s",
-                (bill_id,),
-            )
-            bill = cur.fetchone()
-    return bill
-
-
 def rebuild_bill_totals(
     user_id: int,
     *,
