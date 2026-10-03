@@ -224,6 +224,12 @@ async def serve_assinar_js(request: Request):
                         headers={"Cache-Control": _cache_asset_versionado(request)})
 
 
+@router.get("/pagamento-pagina.js")
+async def serve_pagamento_pagina_js(request: Request):
+    return FileResponse(FRONTEND_DIR / "pagamento-pagina.js", media_type="application/javascript",
+                        headers={"Cache-Control": _cache_asset_versionado(request)})
+
+
 @router.get("/assinar.css")
 async def serve_assinar_css(request: Request):
     return FileResponse(FRONTEND_DIR / "assinar.css", media_type="text/css",

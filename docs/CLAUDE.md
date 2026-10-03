@@ -541,6 +541,22 @@ BRL (`adaptive_pricing` off) nas **duas** origens: medido no Stripe de teste em
 2026-10-03, sem o campo a sessão `elements` da `/precos` nasce com ele LIGADO (o
 default da conta), e as caixas mostram R$. O hospedado da `/precos` segue sem o campo.
 
+No frontend, a `/assinar` manda `pagina: true` (e `origem` da query: só `precos`, senão
+`assinar`) e, se a resposta trouxer `pagina`, monta `frontend/pagamento-pagina.js`
+(Payment Element só cartão, resumo pelo `change` do Stripe, as caixas e o cupom
+"Tem cupom?" → `applyPromotionCode`); sem `pagina`, o embutido de antes. O Stripe.js é o
+`endive` na página própria e o `dahlia` no embutido, carregado UMA vez pelo `assinar.js`
+(uma 2ª versão é recusada e cai no plano B; o embutido não depende do arquivo novo).
+Cada caixa marcada chama o `/billing/checkout/bump` dentro do `runServerUpdate`, com
+tudo travado; falha → as caixas voltam ao último conjunto aceito. **Pagar sincroniza o
+estado da tela ANTES do `confirm`** (o que a tela mostra é o que se cobra); falha → não
+confirma. Prazos: `loadActions` 10 s e `/bump` 15 s (plano B / caixas voltam); o relógio
+de 10 s olha `#pagamento iframe`. Sessão fechada (409 `sessao_fechada` ou confirm
+expirado) → S3 com "Tentar de novo". Limites aceitos: rede lenta que passa dos 10 s do
+`loadActions` vai ao plano B; um `/bump` que volta depois do prazo é corrigido pela
+sincronização do Pagar; o Pagar faz 1 `/bump` de sincronização quando há caixas (conta nos 120/h por IP). Testes:
+`tests/frontend/pagamento_pagina*.test.mjs`.
+
 **`POST /billing/checkout/bump`** (`frontend/routes/billing_bump.py`): o order bump da
 página própria. Corpo `{sid, posicoes}` = o CONJUNTO desejado inteiro, em posições da
 foto (`[]` = nenhum); o preço sai sempre da foto da sessão, nunca do cliente. Campo a
