@@ -13,24 +13,22 @@
  * teste do toast não mediria nada.
  *
  * CONTROLES DO GRUPO (§3 do CLAUDE.md). Cada mutação foi APLICADA na settings.html e
- * este arquivo rodado inteiro (2026-10-02; 15 pass na baseline). Vermelhos:
- *   flag sempre false ............................ 11: T1 ×2, T2, T3, T4, T5a, T5b ×3, T5c, T7
- *   sem o guard do showSettingsSection ............ 2: T2, T3
- *   sem o guard do loadData ....................... 7: T1 ×2, T2, T3, T4, T5a, T7
- *   sem o guard do loadActivityLog ................ 7: T1 ×2, T2, T3, T4, T5a, T7
- *   sem o reload no refreshHasPassword ............ 1: T5b PBRefresh
- *   flag posta DEPOIS do showSettingsSection/loadData 7: T1 ×2, T2, T3, T4, T5a, T7
- *   CSS sem `!important` .......................... 1: T1 no app (o app-mode.css devolvia o menu)
- *   sem mover o card da senha / o e-mail no DOM ... 2 cada: T1 ×2 (+ T9 sem credencial ×2)
- *   volta ao `order:-1` no CSS, sem mover no DOM .. 2: T9 sem credencial 390x844 e 1280x800
- *   sem o `if (el)` antes do prepend .............. 2: T10 ×2 (TypeError aborta o boot)
- *   MFA e dispositivos / banner visíveis .......... 2 cada: T1 ×2
- *   sem os listeners de foco ...................... 3: T5b visibilitychange, T5b pageshow, T5c
- *   sem o guard de rascunho ....................... 1: T5c
- *   falha do /auth/me tratada como liberada ....... 1: T5c
- *   reload sem olhar o `me` (loop) ................ 1: T5a
- * Positivo: os T6 (campo ausente, com senha, só-Google) e o T8 (/auth/me 500) ficaram
- * verdes em TODAS. Sem eles o grupo passaria numa versão que trava todo mundo.
+ * rodados este arquivo e o settings_precisa_criar_senha_refresh.test.mjs (R*). Sem
+ * contagem de propósito: ela envelhece; quem mexer, reaplica. Caem, entre outros:
+ *   flag sempre false / posta DEPOIS do boot ... T1, T2, T3, T4, T5a, T7, T9 sem cred., T10, R1, R2
+ *   sem o guard do showSettingsSection ......... T2, T3
+ *   sem o guard do loadData / loadActivityLog .. T1, T2, T3, T4, T5a, T7, T10, R1, R2
+ *   refreshHasPassword sem decidir o gate ...... T5b (os três), T5c, T10, R1, R2, R3 sem laço
+ *   CSS sem `!important` ....................... T1 no app (o app-mode.css devolvia o menu)
+ *   MFA e dispositivos / banner visíveis ....... T1 (os dois)
+ *   volta ao `order:-1`, sem mover no DOM ...... T9 sem credencial (os dois)
+ *   sem mover no DOM nem `order` ............... T1 (os dois), T9 sem credencial (os dois)
+ *   sem o `if (el)` antes do prepend ........... T10 (os dois): o TypeError aborta o boot
+ *   sem os listeners de foco ................... T5b visibilitychange e pageshow, T5c, T10, R1 foco
+ *   sem a guarda de rascunho / falha libera .... T5c (e, sem a guarda, os M* de _modais)
+ *   recarrega sem olhar o `me` (laço) .......... T5a e todos os R3 positivos
+ * Positivo: os T6 (campo ausente, com senha, só-Google), o T8 (/auth/me 500) e os R3
+ * ficaram verdes em todas, fora a de cima, que é o que eles medem.
  * Limite: no T1 o assert de "nenhum carregador barrado" vem antes do do toast, então
  * nenhuma mutação deixa o toast como ÚNICO vermelho; ele é redundante de propósito.
  *
