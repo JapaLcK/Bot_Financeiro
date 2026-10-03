@@ -95,7 +95,8 @@ export function Guia({ s, path }: { s: DashState; path: Path }) {
     if (balao.current?.contains(document.activeElement)) document.getElementById("page-title")?.focus({ preventScroll: true });
     setModo("fechado"); setFesta(null);
   };
-  const pular = (id: string) => setVistos((x) => [...x, id]);
+  // O botão some com o passo: o foco vai para o título do que vem (o próximo ou a tela final).
+  const pular = (id: string) => { setVistos((x) => [...x, id]); focar.current = true; };
 
   // Convite: só para quem nunca viu (`oferecer`), no Resumo, depois do perfil escolhido e sem
   // nenhum dialog aberto (perfil, Cmd-K). Uma vez por carga de página. Com dialog aberto,
@@ -154,7 +155,13 @@ export function Guia({ s, path }: { s: DashState; path: Path }) {
     const t = setTimeout(() => setFesta(null), 1600);
     return () => clearTimeout(t);
   }, [festa, acabou]);
-  useEffect(() => { if (modo === "ativo" && g && !atual && !festa) setModo("fechado"); });
+  // Acabaram os passos sem comemoração (Seguir no último; refetch que trouxe o resto feito por
+  // outra aba ou antes do 200): a mesma tela final, nunca fechar calado.
+  useEffect(() => {
+    if (modo !== "ativo" || !g || atual || festa) return;
+    const id = vistos[vistos.length - 1] ?? passos[passos.length - 1]?.id;
+    if (id) setFesta(id); else setModo("fechado");
+  });
 
   // Posição: segue a âncora a cada quadro (rolagem, grade arrastável, troca de página).
   const tick = () => {
@@ -194,7 +201,7 @@ export function Guia({ s, path }: { s: DashState; path: Path }) {
     return () => cancelAnimationFrame(raf);
   });
   useEffect(() => {
-    if (focar.current && modo === "ativo" && atual) { focar.current = false; document.getElementById("guia-titulo")?.focus({ preventScroll: true }); }
+    if (focar.current && modo === "ativo" && exibido) { focar.current = false; document.getElementById("guia-titulo")?.focus({ preventScroll: true }); }
   });
 
   const aberto = modo === "convite" || (modo === "ativo" && !!exibido);

@@ -58,7 +58,6 @@ async function abrir({ width = 1280, height = 800, guia = "oferecer", perfil = "
   return { ctx, page, s, erros };
 }
 const acoes = (s) => s.posts.map((c) => c.passo ? `${c.acao}:${c.passo}` : c.acao);
-const titulo = (page) => page.locator("#guia-titulo").innerText();
 const esperaTitulo = (page, t) => page.locator("#guia-titulo", { hasText: t }).waitFor({ timeout: 5000 });
 const bora = async (page) => { await page.getByRole("button", { name: "Bora", exact: true }).click(); await esperaTitulo(page, PASSOS[0].fala.titulo); };
 
@@ -238,6 +237,49 @@ test("passo 1 pulado, 2 e 3 feitos: sem \"Fechou!\" nem \"Guia concluído.\" (o 
   assert.ok(!status.some((t) => t.includes("concluído")), JSON.stringify(status));
   assert.equal(aberto, 0);
   assert.deepEqual(acoes(s), ["reabrir", "feito:gastos.categoria", "feito:piggy.pergunta"]);
+});
+
+// "Seguir" no último passo também acaba nesta tela, nunca fecha calado. Hoje o passo 3 do
+// servidor está sempre disponível e a barra de conversa sempre na #/piggy: o caso vem da
+// fixture, protegendo um roteiro em que o último passo possa ficar indisponível.
+const ultimoPulavel = (estado, feitos) => {
+  const g = structuredClone(RESPOSTAS.guia.oferecer);
+  g.estado = estado;
+  g.passos.forEach((p, i) => { p.feito = feitos[i]; if (i === 2 || estado === "concluido") Object.assign(p, { disponivel: false, motivo: "sem_dados" }); });
+  return g;
+};
+test("1 e 2 feitos, Seguir no 3: \"Por agora é isso\" (sem \"Fechou!\"); Fechar não dispensa", async () => {
+  const { ctx, page, s } = await abrir({ guia: "em_andamento" });
+  s.g = ultimoPulavel("em_andamento", [true, true, false]);
+  await page.locator(".rail").getByRole("button", { name: "Ajuda" }).click();
+  await esperaTitulo(page, PASSOS[2].fala.titulo);
+  await page.getByRole("button", { name: "Seguir" }).click();
+  await esperaTitulo(page, "Por agora é isso");
+  const r = [await page.getByText("Fechou!").count(), await page.evaluate(() => document.activeElement?.id)];
+  const status = await page.getByRole("status").allInnerTexts();
+  await page.getByRole("button", { name: "Fechar", exact: true }).click();
+  const aberto = await page.locator(".guia-balao").count();
+  await ctx.close();
+  assert.deepEqual(r, [0, "guia-titulo"]);
+  assert.ok(status.includes("Por agora é isso. O passo que ficou pra depois volta na Ajuda."), JSON.stringify(status));
+  assert.ok(!status.some((t) => t.includes("concluído")), JSON.stringify(status));
+  assert.equal(aberto, 0);
+  assert.deepEqual(acoes(s), ["reabrir"]);
+});
+
+test("revisão com o servidor concluído, Seguir até o fim: \"Fechou!\", não \"Por agora é isso\"", async () => {
+  const { ctx, page, s } = await abrir({ guia: "concluido" });
+  s.g = ultimoPulavel("concluido", [true, true, true]);
+  await page.locator(".rail").getByRole("button", { name: "Ajuda" }).click();
+  for (const p of PASSOS) {
+    await esperaTitulo(page, p.fala.titulo);
+    await page.getByRole("button", { name: "Seguir" }).click();
+  }
+  await esperaTitulo(page, "Fechou!");
+  const r = [await page.getByText("Por agora é isso").count(), await page.getByRole("status").allInnerTexts()];
+  await ctx.close();
+  assert.deepEqual(r, [0, ["Guia concluído."]]);
+  assert.deepEqual(acoes(s), ["reabrir"]);
 });
 
 test("Esc e Pular dispensam; Ajuda (menu, barra de baixo) e Cmd-K reabrem", async () => {
