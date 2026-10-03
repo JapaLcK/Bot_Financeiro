@@ -25,16 +25,18 @@
   history.replaceState(null, "", location.pathname + (qs ? "?" + qs : ""));
   const plano = query.get("plano");
   const ciclo = query.get("ciclo");
+  const origem = query.get("origem") === "precos" ? "precos" : "assinar";  // a /precos navega para cá (PR 4)
 
   // ── Estado ────────────────────────────────────────────────────────────────
   const TELAS = ["c-carga", "l0", "s1", "s2", "s3", "s4", "h", "f1"];
-  const STRIPE_JS = "https://js.stripe.com/dahlia/stripe.js";
+  // O embutido usa o dahlia; a página própria (`pagina` na resposta), o endive. Nunca os dois (pagamento-pagina.js).
+  const STRIPE_JS = "https://js.stripe.com/dahlia/stripe.js", STRIPE_PAGINA = "https://js.stripe.com/endive/stripe.js";
   const RELOGIO_MS = 10000, ME_MS = 5000;  // ME_MS: a espera pelo /auth/me no clique do S2
   const TXT = {
     0: "Sem conexão. Confira sua internet e tente de novo.",
     403: "Recarregue a página e tente de novo.",
     429: "Muitas tentativas. Aguarde alguns minutos e tente de novo.",
-    sair: "Não deu para sair da conta atual. Tente de novo.",
+    sair: "Não deu para sair da conta atual. Tente de novo.", expirou: "O tempo para pagar acabou. Toque em Tentar de novo.",
     abrir: "Não deu para abrir o pagamento agora.",
   };
   let estado = "c-carga";
@@ -185,14 +187,14 @@
     // Só o link do Pix depende do plans-config: ele não segura o checkout (pendurado, o S3 nunca sairia).
     const cfg = fetch("/billing/plans-config", { credentials: "same-origin" })
       .then(function (x) { return x.json(); }).catch(function () { return null; });
-    const r = await post("/billing/create-checkout", { plan: plano, interval: ciclo, embutido: true, origem: "assinar" });
+    const r = await post("/billing/create-checkout", { plan: plano, interval: ciclo, embutido: true, pagina: true, origem: origem });
     if (g !== gen) return;
     if (!(r.ok && r.d.client_secret && r.d.publishable_key)) return falhaCheckout(r, iniciaS3);
     const td = Number(r.d.trial_days) || 0;
     $("s4-trial").textContent = td > 0
       ? "Você tem " + td + " dias grátis. A cobrança do plano só começa depois, e dá para cancelar antes."
       : "Esta assinatura não tem período grátis: a cobrança começa hoje.";
-    montar(r.d.publishable_key, r.d.client_secret);
+    montar(r.d);
     const g4 = gen;  // a geração do S4: se a pessoa já saiu dele, o plans-config tardio não mexe na tela
     cfg.then(function (c) { if (g4 === gen) $("s4-pix").hidden = !(c && c.pix_annual_available === true); });
   }
@@ -218,36 +220,34 @@
     mostra("s3");
   }
 
-  // ── S4: o embutido ────────────────────────────────────────────────────────
-  function carregaStripe() {
-    if (!stripeJs) {
-      stripeJs = new Promise(function (ok, falha) {
-        const s = document.createElement("script");
-        s.src = STRIPE_JS;
-        s.onload = ok; s.onerror = falha;
-        document.head.appendChild(s);
-      });
-    }
-    return stripeJs;
+  // ── S4: o embutido, ou a página própria (`d.pagina`, frontend/pagamento-pagina.js) ─────────────────────
+  /** Stripe.js uma vez por página, AQUI: o embutido não depende do pagamento-pagina.js. 2ª versão → recusa (plano B). */
+  function carregaStripe(url) {
+    stripeJs = stripeJs || [url, new Promise(function (ok, falha) {
+      document.head.appendChild(Object.assign(document.createElement("script"), { src: url, onload: ok, onerror: falha }));
+    })];
+    return stripeJs[0] === url ? stripeJs[1] : Promise.reject(new Error("outro Stripe.js"));
   }
 
-  function montar(pk, cs) {
-    const g = mostra("s4");
-    $("stripe-checkout").textContent = "";
+  function montar(d) {
+    const g = mostra("s4"), pg = d.pagina === true;
+    $("stripe-checkout").textContent = ""; $("stripe-checkout").hidden = pg; $("pagina").hidden = !pg;
     // Desde a INJEÇÃO, e não da montagem: um Stripe.js pendurado nunca chegaria a ela (D12).
     relogio = setTimeout(function () {
-      if (g === gen && !document.querySelector("#stripe-checkout iframe")) irParaHospedado();
+      if (g === gen && !document.querySelector(pg ? "#pagamento iframe" : "#stripe-checkout iframe")) irParaHospedado();
     }, RELOGIO_MS);
-    carregaStripe()
+    const ctx = { post: post, falha: function () { if (g === gen) irParaHospedado(); },
+      expirou: function () { if (g === gen) { destroiEmbutido(); falhaCheckout({ status: "expirou", d: {} }, iniciaS3); } } };
+    carregaStripe(pg ? STRIPE_PAGINA : STRIPE_JS)
       .then(function () {
         if (g !== gen) return;
         // Sem `window.Stripe` ou API que lança → catch → H. Promise.resolve: objeto direto ou Promise.
-        return Promise.resolve(window.Stripe(pk)
-          .createEmbeddedCheckoutPage({ fetchClientSecret: function () { return Promise.resolve(cs); } }))
+        return Promise.resolve(pg ? window.PBPagamento.montar(d, ctx) : window.Stripe(d.publishable_key).createEmbeddedCheckoutPage(
+          { fetchClientSecret: function () { return Promise.resolve(d.client_secret); } }))
           .then(function (c) {
             if (g !== gen) { c.destroy(); return; }
             checkout = c;
-            c.mount("#stripe-checkout");
+            if (!pg) c.mount("#stripe-checkout");
             disparaInicio();
           });
       })
@@ -279,7 +279,7 @@
     if (estado !== "s3" && estado !== "s4") return;
     destroiEmbutido();
     const g = mostra("h");
-    const r = await post("/billing/create-checkout", { plan: plano, interval: ciclo, embutido: false, origem: "assinar" });
+    const r = await post("/billing/create-checkout", { plan: plano, interval: ciclo, embutido: false, origem: origem });
     if (g !== gen) return;
     if (!(r.ok && typeof r.d.checkout_url === "string")) return falhaCheckout(r, irParaHospedado);
     // `replace`: o Voltar do Stripe não cai de novo nesta tela, que dispararia outro H.
