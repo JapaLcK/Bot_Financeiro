@@ -481,7 +481,7 @@ sobrevive pra devolver `detail.message` a cliente antigo em cache).
 nunca vai no corpo. A sessão grava `origem` e `td` (dias de trial) no metadata e no
 da assinatura; uma sessão aberta só é reaproveitada pelo mesmo plano × intervalo ×
 origem × modo (sessão sem `origem` = `/precos`), e a embutida reaproveitada devolve o
-trial com que nasceu (`td`). Só a `/assinar` fixa BRL (`adaptive_pricing` off) e volta
+trial com que nasceu (`td`). Só a `/assinar` (e a página própria, abaixo) fixa BRL (`adaptive_pricing` off) e volta
 para `/assinar?plano=&ciclo=` no abandono. Os produtos extras (`optional_items`) vão nas
 **duas** origens (dono, Q3); fora eles e as chaves `ebook*` da foto, a `/precos` segue
 com os kwargs de antes. Toda sessão da `/assinar` (embutida **e**
@@ -514,6 +514,31 @@ eles, ou erro que não é `InvalidRequestError`, é o 502 de antes. Uma sessão 
 criada pelo fallback (sem extras) ou antes de mudar a lista é reaproveitada por até 1 h
 (`/assinar`) ou 24 h (`/precos`) e segue sem os extras novos, mesmo depois de a env ser
 corrigida: o reaproveitamento não compara os extras.
+
+**Página própria (`ui_mode="elements"`), atrás da flag `CHECKOUT_PAGINA_PROPRIA=1`.**
+O corpo ganha `pagina` (default `false`); vale só com a flag
+(`extras_assinar.pagina_propria_ligada`, lida a cada pedido). Com a flag desligada, ou
+sem `pagina`, o checkout é o de antes nas duas origens (a `/precos` com `pagina` segue
+no hospedado, nunca no embutido). Ligada, `pagina` vira sessão `elements` (é um
+embutido: `client_secret`, `return_url`, 1 h, `publishable_key`) **sem**
+`optional_items`: os extras vão entrar como linha do carrinho pela rota do bump (PR 2
+da página própria; ainda não existe). Até 3 extras (`extras_assinar.CAIXAS`): `da_env()` filtrado por
+`Price.retrieve(expand=["product"])` (preço ativo, BRL, avulso, produto ativo) ANTES
+de recortar; o que sai, ou uma falha do Stripe ao ler (aí nenhum entra), loga
+`ebook_oferta_recusada` só com os preços, e o plano vende assim mesmo. A foto dos 3 vai
+nos dois metadatas, como no embutido. Recusa do Stripe na criação é o 502 de antes
+(não há `optional_items` a tirar). A resposta é a do embutido + `pagina: true` +
+`extras: [{posicao, nome, descricao, imagem, valor_centavos, no_carrinho}]` (texto e
+`images[0]` do Product; capa só `https://`, senão `null`). A sessão `elements` só
+reaproveita pedido com `pagina` e flag ligada, e vice-versa (o matcher compara o
+`ui_mode`, que o `Session.list` devolve como `elements` ou `embedded_page`, medido em
+2026-10-03); a reaproveitada devolve as caixas da SUA foto e marca `no_carrinho` pelo
+`list_line_items` (falha = 503). A reaproveitada NÃO refiltra a foto (um preço
+arquivado depois do nascimento segue na caixa), e uma falha do Stripe ao ler qualquer
+extra na criação tira TODAS as caixas (o plano vende sem elas). A página própria fixa
+BRL (`adaptive_pricing` off) nas **duas** origens: medido no Stripe de teste em
+2026-10-03, sem o campo a sessão `elements` da `/precos` nasce com ele LIGADO (o
+default da conta), e as caixas mostram R$. O hospedado da `/precos` segue sem o campo.
 
 **Entrega do e-book (#708) — N produtos por compra.** A metadata da sessão é a foto
 dos produtos oferecidos: o 1º em `ebook_price`/`ebook_url`, o n-ésimo (2..10) em
