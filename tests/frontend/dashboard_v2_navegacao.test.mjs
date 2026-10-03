@@ -3,7 +3,8 @@
 //   · menu lateral sem o Piggy (no desktop o acesso é a barra de conversa), com Ferramentas e Ajuda;
 //   · "E se…" virou "Simulador" em todo lugar; o botão rosa virou "Ferramentas", com o
 //     nome escrito também no celular;
-//   · Ferramentas: o Simulador e o Painel antigo (/app) levam a algum lugar, o resto está "Em breve";
+//   · Ferramentas: o Simulador e o Painel antigo (/app) levam a algum lugar, o Guia do painel o abre,
+//     o resto está "Em breve";
 //   · 320 a 1440 sem nada saindo da barra de cima.
 import { test, before, after } from "node:test";
 import assert from "node:assert/strict";
@@ -46,14 +47,15 @@ test("desktop: menu com Simulador e Ferramentas, sem Piggy; o botão rosa abre F
   await page.locator(".topbar .btn-primary").click();
   await page.waitForFunction(() => location.hash === "#/ferramentas");
   await page.locator(".tools li").first().waitFor();
-  const cards = await page.locator(".tools li").evaluateAll((lis) => lis.map((li) => [li.querySelector("b").textContent, li.querySelector("a")?.getAttribute("href") ?? li.querySelector("[aria-disabled]")?.textContent.includes("Em breve")]));
+  const cards = await page.locator(".tools li").evaluateAll((lis) => lis.map((li) => [li.querySelector("b").textContent, li.querySelector("a")?.getAttribute("href") ?? (li.querySelector("button") ? "botão" : li.querySelector("[aria-disabled]")?.textContent.includes("Em breve"))]));
   await ctx.close();
   assert.deepEqual(menu, ["Resumo", "Previsão", "Para onde vai", "Assinaturas", "Simulador", "Metas", "Patrimônio", "Lançamentos", "Ferramentas", "Ajuda"]);
   assert.equal(botao.trim(), "Ferramentas");
   assert.deepEqual(cards[0], ["Simulador", "#/simulador"]);
   assert.deepEqual(cards[1], ["Painel antigo", "/app"]); // sai do v2 para o dashboard de sempre
-  assert.equal(cards.length, 7);
-  assert.ok(cards.slice(2).every(([, v]) => v === true), JSON.stringify(cards)); // o resto: "Em breve", sem link
+  assert.equal(cards.length, 8);
+  assert.deepEqual(cards[7], ["Guia do painel", "botão"]); // abre o guia (abaixo de 360px a Ajuda sai da barra de baixo)
+  assert.ok(cards.slice(2, 7).every(([, v]) => v === true), JSON.stringify(cards)); // o resto: "Em breve", sem link
 });
 
 test("o nome antigo \"E se…\" não aparece mais", async () => {

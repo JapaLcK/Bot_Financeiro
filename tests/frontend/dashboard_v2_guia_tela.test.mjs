@@ -1,6 +1,6 @@
 // Guia do /painel (#728, PR B): a tela de parts/Guia.tsx — o Piggy e o balão no lugar desde o
 // 1º quadro, o movimento só sem `reduce`, a posição longe dos alvos, a rolagem que não puxa a
-// página de quem rolou, o teclado e a barra de baixo com 6 itens (folga ≥ 12 px de 320 a 375).
+// página de quem rolou, o teclado e a barra de baixo (6 itens; 5 abaixo de 360, folga ≥ 12 px).
 // Com o véu (decisão do dono): só o alvo do passo e o balão recebem toque e Tab; o Saiu fica
 // claro no passo do mês sem receber toque; o convite e a comemoração escurecem tudo.
 // O fluxo e o servidor estão em dashboard_v2_guia.test.mjs.
@@ -61,22 +61,23 @@ test("movimento: com `reduce` o Piggy e o anel ficam parados; sem a preferência
   assert.deepEqual(nomes, [["none", "none"], ["guia-entra", "guia-pulso"]]);
 });
 
-test("barra de baixo: 6 itens; folga ≥ 12 px do maior rótulo em 320, 340, 360 e 375", async () => {
+test("barra de baixo: 6 itens a partir de 360; abaixo, a Ajuda sai e ficam 5; folga ≥ 12 px do maior rótulo de 320 a 375", async () => {
   const r = {};
   for (const width of [320, 340, 359, 360, 375]) {
     const { ctx, page } = await abrir({ width, height: 812, guia: "concluido" });
     r[width] = await page.evaluate(() => {
-      const itens = [...document.querySelectorAll(".tabbar a, .tabbar button")];
-      const folgas = itens.map((e) => { const s = e.querySelector("span"); if (!s?.getClientRects().length) return null; const g = document.createRange(); g.selectNodeContents(s); return e.getBoundingClientRect().width - g.getBoundingClientRect().width; }).filter((f) => f != null);
+      const itens = [...document.querySelectorAll(".tabbar a, .tabbar button")].filter((e) => e.getClientRects().length);
+      const folgas = itens.map((e) => { const s = e.querySelector("span"); const g = document.createRange(); g.selectNodeContents(s); return e.getBoundingClientRect().width - g.getBoundingClientRect().width; });
       const ajuda = document.querySelector(".tabbar button");
-      return { n: itens.length, folga: Math.round(Math.min(...folgas) * 10) / 10, rotuloAjuda: !!ajuda.querySelector("span").getClientRects().length, nome: ajuda.getAttribute("aria-label"), cabe: document.querySelector(".tabbar").scrollWidth <= innerWidth };
+      return { n: itens.length, folga: Math.round(Math.min(...folgas) * 10) / 10, ajuda: ajuda.getClientRects().length, nome: ajuda.getAttribute("aria-label"), cabe: document.querySelector(".tabbar").scrollWidth <= innerWidth };
     });
     await ctx.close();
   }
   console.log("# barra de baixo:", JSON.stringify(r));
   for (const [w, x] of Object.entries(r)) {
-    assert.equal(x.n, 6, w); assert.ok(x.folga >= 12, `${w}: folga ${x.folga}`); assert.equal(x.nome, "Ajuda"); assert.ok(x.cabe, w);
-    assert.equal(x.rotuloAjuda, Number(w) >= 360, w);
+    const larga = Number(w) >= 360;
+    assert.equal(x.n, larga ? 6 : 5, w); assert.ok(x.folga >= 12, `${w}: folga ${x.folga}`); assert.equal(x.nome, "Ajuda"); assert.ok(x.cabe, w);
+    assert.equal(x.ajuda > 0, larga, w);
   }
 });
 
@@ -177,7 +178,7 @@ test("teclado: do topo da página, o [Bora] do convite chega em poucos Tabs", as
   assert.ok(tabs <= 3, `${tabs} Tabs`);
 });
 
-test("barra de baixo do protótipo (sem Ajuda): 5 colunas e o Piggy no centro; no /painel, 6", async () => {
+test("barra de baixo do protótipo (sem Ajuda): 5 colunas e o Piggy no centro; no /painel, 5 em 320 (a Ajuda sai) e 6 em 375", async () => {
   const r = [];
   for (const [nome, url, raiz] of [["protótipo", PROTOTIPO, RAIZ], ["painel", PAINEL, undefined]]) {
     for (const width of [320, 375]) {
@@ -197,7 +198,7 @@ test("barra de baixo do protótipo (sem Ajuda): 5 colunas e o Piggy no centro; n
   }
   console.log("# barra de baixo [colunas, Piggy − centro px]:", JSON.stringify(r));
   assert.deepEqual(r.filter(([n]) => n === "protótipo").map(([, , [c, d]]) => [c, d]), [[5, 0], [5, 0]]);
-  assert.deepEqual(r.filter(([n]) => n === "painel").map(([, , [c]]) => c), [6, 6]);
+  assert.deepEqual(r.filter(([n]) => n === "painel").map(([, w, [c, d]]) => w === 320 ? [c, d] : c), [[5, 0], 6]);
 });
 
 // O que está no ponto central de cada seletor (o 1º visível): o próprio elemento, ou o véu.

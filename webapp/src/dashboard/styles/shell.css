@@ -164,11 +164,13 @@
   .tabbar.tabbar-ajuda { grid-template-columns: repeat(6, 1fr); } /* /painel: + Ajuda; o protótipo não tem guia */
 }
 @media (max-width: 400px) { .topbar .btn-primary i { display: none; } }
-/* Seis abas: abaixo de 360px a Ajuda fica só com o ícone (aria-label) numa coluna estreita,
-   e o rótulo das outras ganha a sobra. Folga medida em tests/frontend/dashboard_v2_guia.test.mjs. */
+/* Seis abas não deixam folga abaixo de 360px (o CI no Linux mede o texto mais largo que o
+   macOS): ali a Ajuda sai da barra e as cinco abas voltam à largura do protótipo. O guia
+   continua em Ferramentas ("Guia do painel", pages.tsx) e no Cmd-K. Folga medida em
+   tests/frontend/dashboard_v2_guia_tela.test.mjs. */
 @media (max-width: 359.98px) {
-  .tabbar.tabbar-ajuda { grid-template-columns: repeat(5, 1fr) 36px; }
-  .tabbar button span { display: none; }
+  .tabbar.tabbar-ajuda { grid-template-columns: repeat(5, 1fr); }
+  .tabbar button { display: none; }
 }
 /* Mês, busca e Ferramentas lado a lado não deixam folga: o CI no Linux mede o texto mais
    largo que o macOS e estourava em 320 e em 361px. Até 420px o ano sai do título; até
