@@ -31,6 +31,14 @@ function aplicar(g, c) {
 }
 export async function abrir({ width = 1280, height = 800, guia = "oferecer", perfil = "padrao", motion = "reduce", post, rota = "/", perfilLento = 0, semDialog = false } = {}) {
   const ctx = await browser.newContext({ viewport: { width, height }, reducedMotion: motion, timezoneId: "America/Sao_Paulo" });
+  // A caixa do Piggy pelo left/top gravado, sem o transform: a inclinação e o voo aumentam o
+  // retângulo pintado, e "encostar" é sobre onde ele pousa.
+  await ctx.addInitScript(() => {
+    window.caixaDoPiggy = () => {
+      const e = document.querySelector(".guia-piggy"), left = parseFloat(e.style.left), top = parseFloat(e.style.top);
+      return { left, top, right: left + e.offsetWidth, bottom: top + e.offsetHeight };
+    };
+  });
   // Safari 14 (sem <dialog>): o mesmo corte do dashboard_v2_cmdk.test.mjs.
   if (semDialog) await ctx.addInitScript(() => { delete HTMLDialogElement.prototype.showModal; delete HTMLDialogElement.prototype.close; });
   await servir(ctx, undefined, { perfil });
@@ -66,7 +74,7 @@ export const FAZER = Object.fromEntries(Object.entries(ALVO).map(([acao, a]) => 
 export const naRota = (page, h) => page.waitForFunction((h) => location.hash === h, h, { timeout: 5000 });
 // Onde o Piggy encosta: [lado a lado, distância à quina de cima, à de baixo].
 export const piggyEm = (page, sel) => page.evaluate((sel) => {
-  const p = document.querySelector(".guia-piggy").getBoundingClientRect();
+  const p = window.caixaDoPiggy();
   const a = [...document.querySelectorAll(sel)].find((e) => e.getClientRects().length).getBoundingClientRect();
   return [p.left < a.right && p.right > a.left, Math.round(p.bottom - a.top), Math.round(a.bottom - p.top)];
 }, sel);

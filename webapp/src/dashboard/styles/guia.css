@@ -1,10 +1,12 @@
 /* Guia do painel (parts/Guia.tsx): o Piggy encostado na âncora e o balão ao lado dela.
-   Posição em left/top pelo JS (parts/guia-posicao.ts); o transform fica livre para a
-   animação. Sem border-radius no Piggy: o recorte come as orelhas. */
+   Posição em left/top pelo JS (parts/guia-posicao.ts); a inclinação (--tilt) é o transform
+   de base, e o voo, o pulo e o aperto (parts/guia-voo.ts, WAAPI) o substituem enquanto
+   rodam. Sem border-radius no Piggy: o recorte come as orelhas. */
 .guia-piggy {
   position: fixed; top: 0; left: 0; z-index: 51;
   width: 44px; height: 44px;
   pointer-events: none;
+  transform: rotate(var(--tilt, 0deg));
   filter: drop-shadow(0 6px 10px rgba(0, 0, 0, 0.45));
 }
 .guia-balao {
@@ -28,10 +30,11 @@
    logo depois de medir virava transição a partir de 0 e um quadro saía no canto. */
 .guia-piggy, .guia-balao { transition-property: none; }
 
-/* Movimento só para quem não pediu menos: com `reduce`, o Piggy fica parado. */
+/* Movimento só para quem não pediu menos: com `reduce`, o Piggy fica parado. A entrada é
+   uma vez, na montagem; sem preencher depois (`backwards`), a inclinação volta a ser a de
+   base. O resto do movimento é WAAPI (parts/guia-voo.ts), com o portão do reduce no JS. */
 @media (prefers-reduced-motion: no-preference) {
-  .guia-piggy { animation: guia-entra 620ms var(--ease-out) both; }
-  .guia-piggy[data-festa] { animation: guia-festa 760ms var(--ease-out) both; }
+  .guia-piggy { animation: guia-entra 620ms var(--ease-out) backwards; }
   .guia-balao { animation: guia-surge 220ms var(--ease-out) both; }
 }
 @keyframes guia-entra {
@@ -41,13 +44,12 @@
   80% { transform: translateY(0); }
   100% { transform: rotate(var(--tilt, 0deg)); }
 }
-@keyframes guia-festa {
-  0%, 100% { transform: rotate(var(--tilt, 0deg)); }
-  30% { transform: translateY(-16px) rotate(-10deg) scale(1.12); }
-  55% { transform: translateY(0) rotate(10deg) scale(1); }
-  75% { transform: translateY(-6px) rotate(-4deg); }
-}
 @keyframes guia-surge { from { opacity: 0; transform: translateY(6px); } }
+/* A troca de tela que o guia faz (parts/guia-voo.ts, `troca`) é mais lenta que a da pessoa.
+   O conteúdo tem grupo próprio (`page`, styles/pages.css); o resto é o `root`. Com reduce o
+   router pula a View Transition; no Safari 14 ela não existe: troca seca, a espera vale igual. */
+html[data-guia-troca]::view-transition-old(root), html[data-guia-troca]::view-transition-new(root),
+html[data-guia-troca]::view-transition-old(page), html[data-guia-troca]::view-transition-new(page) { animation-duration: var(--guia-troca); }
 
 /* O véu: escurece a tela menos o alvo do passo (e o Saiu no passo do mês) e bloqueia o toque
    fora do alvo. O escuro é o path (dois furos); as quatro faixas transparentes em volta do

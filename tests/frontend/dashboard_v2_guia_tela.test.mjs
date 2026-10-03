@@ -105,7 +105,7 @@ for (const [width, height] of [[1280, 800], [1024, 768], [900, 600], [700, 600],
       await page.waitForTimeout(300);
       medidas.push([p.id, fase, await page.evaluate(([sels, ancora]) => {
         const b = document.querySelector(".guia-balao"), bb = b.getBoundingClientRect();
-        const pg = document.querySelector(".guia-piggy").getBoundingClientRect();
+        const pg = window.caixaDoPiggy();
         const a = [...document.querySelectorAll(ancora)].find((e) => e.getClientRects().length).getBoundingClientRect();
         const cobertos = [];
         let alvos = 0;
