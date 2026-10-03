@@ -31,8 +31,10 @@ function aplicar(g, c) {
   n.estado = c.acao === "dispensar" ? "dispensado" : n.passos.every((p) => p.feito) ? "concluido" : "em_andamento";
   return n;
 }
-async function abrir({ width = 1280, height = 800, guia = "oferecer", perfil = "padrao", motion = "reduce", post, rota = "/", perfilLento = 0 } = {}) {
+async function abrir({ width = 1280, height = 800, guia = "oferecer", perfil = "padrao", motion = "reduce", post, rota = "/", perfilLento = 0, semDialog = false } = {}) {
   const ctx = await browser.newContext({ viewport: { width, height }, reducedMotion: motion, timezoneId: "America/Sao_Paulo" });
+  // Safari 14 (sem <dialog>): o mesmo corte do dashboard_v2_cmdk.test.mjs.
+  if (semDialog) await ctx.addInitScript(() => { delete HTMLDialogElement.prototype.showModal; delete HTMLDialogElement.prototype.close; });
   await servir(ctx, undefined, { perfil });
   // Perfil chegando depois do guia: a corrida em que o convite brigaria com o modal de perfil.
   if (perfilLento) await ctx.route("**/api/v2/perfil", async (r) => { await new Promise((ok) => setTimeout(ok, perfilLento)); return r.fallback(); });
@@ -241,6 +243,25 @@ test("Esc e Pular dispensam; Ajuda (menu, barra de baixo) e Cmd-K reabrem", asyn
   await esperaTitulo(cel.page, PASSOS[1].fala.titulo); // o 1 já estava feito na fixture `dispensado`
   await cel.ctx.close();
   assert.deepEqual(acoes(cel.s), ["reabrir"]);
+});
+
+test("Esc do Cmd-K aberto por cima do guia fecha só o Cmd-K (nativo e Safari 14); o Esc seguinte dispensa", async () => {
+  const r = {};
+  for (const semDialog of [false, true]) {
+    const { ctx, page, s } = await abrir({ semDialog });
+    await page.getByRole("button", { name: "Bora", exact: true }).waitFor();
+    await page.keyboard.press("Meta+k");
+    await page.locator(".cmdk[open]").waitFor();
+    await page.keyboard.press("Escape");
+    await page.waitForTimeout(300);
+    const depois1 = [await page.locator(".cmdk[open]").count(), await page.locator(".guia-balao").count(), acoes(s)];
+    await page.keyboard.press("Escape");
+    await page.waitForTimeout(300);
+    r[semDialog ? "safari14" : "nativo"] = [depois1, [await page.locator(".guia-balao").count(), acoes(s)]];
+    await ctx.close();
+  }
+  const esperado = [[0, 1, ["visto"]], [0, ["visto", "dispensar"]]];
+  assert.deepEqual(r, { nativo: esperado, safari14: esperado });
 });
 
 test("movimento: com `reduce` o Piggy fica parado; sem a preferência, entra pulando", async () => {

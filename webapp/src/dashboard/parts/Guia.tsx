@@ -127,12 +127,13 @@ export function Guia({ s, path }: { s: DashState; path: Path }) {
     return () => window.removeEventListener("dash:guia", on);
   });
 
-  // Esc fecha (e dispensa), menos quando é o Esc de um dialog aberto por cima.
+  // Esc fecha (e dispensa), menos quando é o Esc de um dialog aberto por cima. Na captura:
+  // no Safari 14 (parts/dialog.ts) o Cmd-K e o perfil tiram o `open` no keydown deles, antes.
   useEffect(() => {
     if (modo === "fechado") return;
     const on = (e: KeyboardEvent) => { if (e.key === "Escape" && !document.querySelector("dialog[open]")) fechar(!fim); };
-    window.addEventListener("keydown", on);
-    return () => window.removeEventListener("keydown", on);
+    window.addEventListener("keydown", on, true);
+    return () => window.removeEventListener("keydown", on, true);
   });
 
   // Ação real: compara o retrato desta renderização com o anterior, só com o passo rodando.
