@@ -254,7 +254,9 @@ def test_filtros_e_limite(libera):
     itens = todos(a, mes=M)
     assert {i["tipo"] for i in ok(a, mes=M, tipo="entrada")["itens"]} == {"entrada"}
     assert sorted(D(i["valor"]) for i in todos(a, mes=M, origem="banco")) == [D(30), D(70), D(200)]
-    assert {i["origem"] for i in itens} == {"banco", "registro_antigo"}  # nada marcado ainda
+    assert {i["origem"] for i in itens} == {"banco", "registro_antigo", "carteira"}
+    # carteira = só a gravada pelo escritor (a marca); o insert cru da semente é antigo (P2)
+    assert [D(i["valor"]) for i in todos(a, mes=M, origem="carteira")] == [D(30)]
     assert len(ok(a, mes=M, limite=500)["itens"]) == min(len(itens), 100)
     casa = todos(a, mes=M, categoria="Casa")  # chave e nome casam pela chave
     assert [D(i["valor"]) for i in casa] == [D(100)] and casa[0]["categoria"] == "casa"

@@ -125,7 +125,7 @@ def _credita(cur, user_id, link) -> int:
     criado_em, known = _quando(link["tx_date"], row and row["transacted_at"])
     cur.execute("update accounts set balance = balance + %s where user_id=%s", (delta, user_id))
     cur.execute("""insert into launches(user_id, tipo, valor, alvo, categoria, criado_em, efeitos,
-                   is_internal_movement) values (%s,%s,%s,%s,'transferencia_interna',%s,%s,true)
+                   is_internal_movement, origem) values (%s,%s,%s,%s,'transferencia_interna',%s,%s,true,'carteira')
                    returning id""",
                 (user_id, "despesa" if deposito else "receita", v,
                  "Depósito em dinheiro" if deposito else "Saque em dinheiro", criado_em,

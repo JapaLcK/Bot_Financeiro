@@ -233,12 +233,39 @@ Sub-app FastAPI (`api/v2/app.py`) montado pelo monólito com `app.mount("/api/v2
   (`db/lancamentos.PODE_SQL`): antigo = `[]` (P2: só leitura no v2); banco e cartão do Open
   Finance = categoria e descrição (P5); carteira marcada = tudo, menos data e valor se fundida
   ou em par pendente com o banco (P3), só descrição e apagar se ligada ao dinheiro em espécie
-  (Q41), sem valor nem descrição se paga conta ou fatura. A coluna `launches.origem` (NULL =
-  antigo) nasceu vazia; quem a grava é a escrita do PR 2a da Etapa 2. `conta`/`cartao` de
+  (Q41), só categoria e data se paga conta ou fatura (sem apagar no v2: apagar o pagamento de
+  conta devolve o dinheiro e a conta segue paga; o de fatura do cartão manual cai no mesmo ramo,
+  `bill_id`, e sai junto; o `/app` e o WhatsApp seguem apagando). `launches.origem` (NULL =
+  antigo, sem backfill) vale `'carteira'` (`db.accounts.ORIGEM_CARTEIRA`) e quem grava é o
+  escritor da carteira, por padrão, em todo canal (`/app`, WhatsApp, quick_entry, IA, saldo
+  inicial e ajuste, pagamento de fatura pela carteira, a v2) e o saque/depósito automático da
+  Q41 (`open_finance_cash._credita`); o pagamento de conta pela carteira (`mark_bill_paid`)
+  nasce sem a marca e a ganha no mesmo statement que o liga à conta (antes disso o v2 o
+  apagaria como carteira pura); antecipar parcela e o estorno de fatura do
+  cartão manual gravam `origem=None` (o `efeitos` não guarda o que desfazer), e OFX, sombra do
+  Open Finance, caixinha e aporte não passam pelo escritor. `conta`/`cartao` de
   outro usuário dão a lista vazia, igual a id inexistente; `raw`, `provider_*_id`,
   `external_id` e o id da transação do banco nunca saem. **Divergência declarada:** a lista do
   `/app` (`list_history`) e as consultas 3 e 4 / "últimos N" do WhatsApp seguem com as
   regras delas (data de gravação no cartão, sem o interno).
+- `POST /api/v2/lancamentos/carteira`, `/lancamentos/editar` e `/lancamentos/apagar`
+  (`api/v2/lancamentos.py`, PR 2a): a escrita, `def` síncronas, id no corpo, CSRF do pai (403
+  `{"detail"}` fora do envelope), resposta `{id}`. **carteira**: `tipo` (`entrada`|`saida`),
+  `valor` (texto `^[0-9]{1,9}(\.[0-9]{1,2})?$` e > 0), `descricao` (1 a 200, vira `alvo` e a
+  nota), `categoria` (opcional; `null` ou ausente = inferida como no `/app`; `""` = 422, onde o
+  `/app` infere), `data` (`AAAA-MM-DD`, entre o
+  corte do plano e hoje; a hora é a de agora). Sempre dinheiro na Carteira (Q40: o v2 não
+  recebe forma de pagamento), teto do plano = 403 `plan_limit`; o miolo é
+  `core/services/carteira.lancar`, o mesmo do `POST /launches` do `/app`. **editar**: `id`
+  (`l<n>` ou `c<n>`) e ao menos um de `categoria`, `descricao`, `data`, cada um contra o
+  `pode` da linha; **apagar**: só `l<n>` (cartão = 409). O `pode` é relido por
+  `db/lancamentos.pode_da_linha` dentro da transação da escrita, depois do lock do usuário
+  (`_lock_user`) e da linha (`exigir_pode=True` em `update_launch_fields`,
+  `delete_launch_and_rollback` e `update_credit_transaction_fields`, este pelo
+  `PODE_CARTAO_SQL`). Erros: 404 `lancamento_nao_encontrado` (o MESMO corpo para id de outro
+  usuário e inexistente), 409 `nao_editavel` (fora do `pode` e as recusas de domínio do apagar,
+  sem motivo no corpo), 422 `validation_error`. Sem chave de idempotência (dois POST iguais
+  gravam dois).
 - `GET /api/v2/categorias` (`api/v2/categorias.py`): `{categorias: [{chave, nome}]}`, o
   catálogo do usuário pelo `CAT_META_SQL` (chave = `cat_norm_sql(name)`, nome = a grafia que
   vence entre gêmeas), semeado como o `/categories` do /app.

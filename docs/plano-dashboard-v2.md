@@ -520,4 +520,31 @@ PR de cada etapa, não soluções prontas. Cada PR confere se ainda valem, decid
     mostrá-los pede decidir se são entrada ou saída; o que entra marcado hoje é o interno
     com tipo despesa/receita (saque em dinheiro, pagamento de fatura, transferência do
     banco). A lista do `/app` e o "últimos N" do WhatsApp seguem as regras deles.
+  - PR 2a: a escrita da carteira (contrato em `docs/CLAUDE.md`, "API v2"):
+    `POST /api/v2/lancamentos/carteira`, `/editar` e `/apagar`, e a marca `launches.origem =
+    'carteira'` gravada pelo escritor da carteira em todo canal e pelo saque/depósito
+    automático da Q41 (decisão do dono, 2026-10-03). O `pode` vira a guarda da escrita, relido
+    sob o lock do usuário e da linha (`db/lancamentos.pode_da_linha`); o miolo do `POST
+    /launches` do `/app` saiu para `core/services/carteira.lancar`, usado pelas duas rotas.
+    Decisões do dono (2026-10-03): pagamento de conta pela Carteira não apaga pelo v2 (o `pode`
+    fica `[categoria, data]`; o de fatura do cartão manual cai no mesmo ramo e sai junto, por
+    conservadorismo); saldo inicial e ajuste ficam marcados e editáveis/apagáveis, como no
+    `/app`. Antecipar parcela e estorno de fatura do cartão manual gravam sem a marca (só
+    leitura: o `efeitos` não guarda o que desfazer). Ficou fora: editar valor, travar e
+    apagar a fundida (PR 2b), WhatsApp e quick_entry pelo serviço novo, backfill, chave de
+    idempotência, motivo no 409, a tela (PR 4) e o conserto do apagar pagamento de conta no
+    `/app`/WhatsApp (devolve o dinheiro e a conta segue paga). O pagamento de conta pela
+    carteira (`db/bills.mark_bill_paid`) nasce sem a marca e a ganha no mesmo statement que o
+    liga à conta: entre os dois commits a linha parecia carteira pura, o v2 a apagava e o
+    passo seguinte quebrava a FK, deixando a conta paga sem lançamento. A mesma janela por um
+    apagar do `/app`/WhatsApp já existia e fica para o conserto do apagar pagamento de conta.
+    Riscos aceitos: dois POST iguais gravam dois lançamentos (comentário `ponytail:` na rota);
+    o apagar antigo do `/app` (trava `launches` e depois `accounts`) e o do v2 (`accounts` e
+    depois `launches`) na mesma linha do mesmo usuário ao mesmo tempo dão deadlock, e o
+    Postgres aborta um dos dois sem perda. O que mudou no `/app`: o PATCH de cartão passou a
+    travar a linha (`update_credit_transaction_fields` usa `for update` sempre, a mesma linha
+    que o UPDATE já travaria); no `POST /launches`, `infer_category` entrou no `try` (um
+    `ValueError` dele vira 400 em vez de 500) e a falha do aprendizado depois do commit passou
+    de 500 (cuja retentativa duplicava o gasto) a só log. Diferença declarada: `categoria: ""`
+    na criação pelo v2 dá 422 (`null` = inferir), e o `/app` infere.
 - [ ] Etapa 0 · [ ] 1 · [ ] 2 · [ ] 3 · [ ] 4 · [ ] 5 · [ ] 6 · [ ] 7

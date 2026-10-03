@@ -7400,7 +7400,6 @@ async def create_launch_route(request: Request, user_id: int, payload: LaunchCre
     from core.services.category_service import infer_category, learn_from_inference
     from core.services.plan_limits import PlanLimitExceeded
     from core.services.plan_service import check_can_create_launch
-    from utils_text import is_internal_category
 
     # Teto mensal de lançamentos do tier (Grátis no v2; no-op com v2 off).
     try:
@@ -7585,42 +7584,17 @@ async def create_launch_route(request: Request, user_id: int, payload: LaunchCre
         }
 
     # ── Receita / Despesa → fluxo padrão de launches ──────────────────────
-    from db import add_launch_and_update_balance, propose_manual_reconciliation
+    from core.services.carteira import lancar
     from db.accounts import carteira_exibida
 
-    nota = nota_in or alvo or ("receita registrada pelo dashboard" if tipo == "receita" else "despesa registrada pelo dashboard")
-    inferred = await asyncio.to_thread(infer_category, int(user_id), nota, explicit)
-    categoria = inferred.category or "outros"
-    is_internal = is_internal_category(categoria)
-
     try:
-        launch_id, user_seq, new_balance = await asyncio.to_thread(
-            add_launch_and_update_balance,
-            int(user_id),
-            tipo,
-            valor,
-            alvo,
-            nota,
-            categoria,
-            None,  # criado_em → now()
-            is_internal,
-        )
-        await asyncio.to_thread(
-            learn_from_inference,
-            int(user_id),
-            nota,
-            categoria,
-            target_hint=alvo,
-            reason=inferred.reason,
-        )
+        feito = await asyncio.to_thread(lancar, int(user_id), tipo, valor, alvo, nota_in, explicit)
     except ValueError as exc:
         raise HTTPException(status_code=400, detail=detalhe_seguro(exc)) from exc
     except Exception as exc:
         raise HTTPException(status_code=500, detail=f"Erro ao registrar lançamento: {exc}") from exc
-
-    # Fora do `try`: o lançamento já está gravado; a pendência com a transação
-    # do banco (se houver) é acessória e não sobe exceção.
-    await asyncio.to_thread(propose_manual_reconciliation, int(user_id), int(launch_id))
+    launch_id, user_seq, new_balance = feito["launch_id"], feito["user_seq"], feito["new_balance"]
+    categoria, nota, is_internal = feito["categoria"], feito["nota"], feito["is_internal"]
 
     return {
         "ok": True,
