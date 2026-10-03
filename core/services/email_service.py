@@ -1150,27 +1150,30 @@ def send_pro_welcome_email(to: str, plan: str, trial_end_at, dashboard_url: str 
     )
 
 
-def send_ebook_email(to: str, url: str, dashboard_url: str = "") -> bool:
-    """E-book comprado na /assinar — o job `core/services/ebook_entrega.py`
-    chama depois que a conta provou o e-mail. Transacional (sem unsub). Copy
-    aprovada pelo dono (2026-09-30). A `url` é a foto da compra: escapada no
-    HTML (link do Drive tem `&`), crua no texto, e nunca em log."""
+def send_ebook_email(to: str, url: str, dashboard_url: str = "", nome: str | None = "") -> bool:
+    """Produto comprado na /assinar — o job `core/services/ebook_entrega.py`
+    chama depois que a conta provou o e-mail, um e-mail por produto.
+    Transacional (sem unsub). Copy aprovada pelo dono (D1, 2026-10-02). `nome` é
+    o nome do produto no Stripe (escapado no HTML); vazio vira "seu e-book". A
+    `url` é a foto da compra: escapada no HTML (link do Drive tem `&`), crua no
+    texto, e nunca em log."""
     import html as _htmlmod
     dash = (dashboard_url or _public_base_url()).rstrip("/")
     u = _htmlmod.escape(url, quote=True)
+    nome = (nome or "").strip() or "seu e-book"
+    n = _htmlmod.escape(nome)
     content = f"""
-      <p>🐷 Oi! Aqui é o Piggy.</p>
-      <p>Seu e-book tá liberado. É só tocar no botão pra baixar:</p>
-      <p style="text-align:center;margin:24px 0"><a class="btn" href="{u}">Baixar meu e-book</a></p>
+      <p>🐷 Oi! Aqui é o Piggy. Sua compra tá liberada: <b>{n}</b>. É só tocar no botão pra baixar:</p>
+      <p style="text-align:center;margin:24px 0"><a class="btn" href="{u}">Baixar agora</a></p>
       <p style="font-size:13px">Se o botão não abrir, copia e cola este link no navegador: <a href="{u}">{u}</a></p>
       <p>Dica: salva o arquivo no celular e lê quando quiser, até sem internet.</p>
       <p>Enquanto isso, o PigBank segue cuidando do resto: manda seus gastos no WhatsApp e acompanha tudo no painel.</p>
       <p style="text-align:center;margin:24px 0"><a class="btn" href="{dash}/app">Abrir meu painel</a></p>
     """
-    html = _base_html("Seu e-book do PigBank chegou", content)
+    html = _base_html(f"Chegou: {n}", content)
     text = (
-        "🐷 Oi! Aqui é o Piggy.\n\n"
-        "Seu e-book tá liberado. É só abrir o link pra baixar:\n"
+        f"🐷 Oi! Aqui é o Piggy. Sua compra tá liberada: {nome}. "
+        "É só abrir o link pra baixar:\n"
         f"{url}\n\n"
         "Dica: salva o arquivo no celular e lê quando quiser, até sem internet.\n\n"
         "Enquanto isso, o PigBank segue cuidando do resto: manda seus gastos no "
@@ -1178,7 +1181,7 @@ def send_ebook_email(to: str, url: str, dashboard_url: str = "") -> bool:
         f"Abrir meu painel: {dash}/app"
     )
     return send_email(
-        to=to, subject="📘 Seu e-book do PigBank chegou",
+        to=to, subject=f"📘 Chegou: {nome}",
         html_body=html, text_body=text,
     )
 
