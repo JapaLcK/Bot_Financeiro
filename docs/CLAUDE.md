@@ -249,7 +249,8 @@ Sub-app FastAPI (`api/v2/app.py`) montado pelo monólito com `app.mount("/api/v2
 - **Erro no cliente** (`webapp/src/dashboard/parts/Entrada.tsx`): nada do painel monta
   antes do `/me`; qualquer erro é uma tela só, com texto fixo em português (a `message`
   do envelope não vai para a tela: em 402/404 ela sai em inglês), Recarregar e "Painel
-  antigo", **sem redirecionamento no cliente** — o Recarregar passa pelo `serve_painel`, que já manda cada
+  antigo" (o 403 `password_required` troca o texto e ganha o "Criar senha", para a
+  `/home`, que não volta sozinha ao `/painel`: o texto manda voltar), **sem redirecionamento no cliente** — o Recarregar passa pelo `serve_painel`, que já manda cada
   caso ao lugar certo. Rede e 5xx tentam 3 vezes (com `networkMode: "always"`, para o evento `offline`
   não pausar o `/me` em "Carregando…"); 4xx (inclusive 429) nunca repete. Limite
   conhecido: conta agendada para exclusão leva 403 da `/api/v2` e o Recarregar serve a

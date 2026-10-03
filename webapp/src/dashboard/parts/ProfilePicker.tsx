@@ -1,4 +1,4 @@
-import { useEffect, useRef } from "react";
+import { useEffect, useRef, type ReactNode } from "react";
 import { PROFILES } from "../lib/profiles.js";
 import { NATIVE, hide, isOpen, show } from "./dialog";
 
@@ -6,7 +6,7 @@ import { NATIVE, hide, isOpen, show } from "./dialog";
 // e "Pular" dão o painel padrão, e a escolha fica lembrada do mesmo jeito. Se gravar a
 // escolha falhou, ele reabre com o `aviso`.
 // Mora dentro de #pigbank-dashboard (sem portal): o Tailwind do painel tem escopo lá.
-export function ProfilePicker({ onPick, aviso }: { onPick: (p: string) => void; aviso?: string }) {
+export function ProfilePicker({ onPick, aviso }: { onPick: (p: string) => void; aviso?: ReactNode }) {
   const dlg = useRef<HTMLDialogElement>(null);
   const done = useRef(false);
   // Toda saída passa aqui uma vez. O Esc nativo sem gesto do usuário antes (Chrome) fecha

@@ -36,6 +36,11 @@
 .cat-delta { grid-area: delta; display: inline-flex; align-items: center; justify-content: flex-end; gap: 2px; font-size: 11.5px; }
 .cat-delta i { font-size: 11px; }
 @container (min-height: 600px) { .cats { flex: 1; align-content: space-evenly; } }
+/* No Resumo a célula tem altura fixa: a lista rola por dentro, nenhuma categoria some (decisão
+   do dono). A /gastos e o celular têm altura livre e não rolam. O anel de foco do botão vai para
+   dentro, que a rolagem corta o de fora. */
+.board .cats { min-height: 0; overflow-y: auto; overscroll-behavior: contain; }
+.board .cats .cat:focus-visible { outline-offset: -2px; }
 .cat-track { grid-area: track; position: relative; height: 6px; border-radius: 3px; background: var(--plane-2); }
 .cat-fill { position: absolute; inset: 0; border-radius: 3px; transform-origin: left; transition: transform 500ms var(--ease-out); }
 .cat-ghost { position: absolute; top: -3px; bottom: -3px; width: 2px; margin-left: -1px; border-radius: 1px; background: rgba(255, 255, 255, 0.6); }
