@@ -1023,7 +1023,12 @@ async function startCheckout(interval, btn, plan, resuming) {
     vivo.classList.remove("loading");
     vivo.textContent = originalText;
   };
+  // `pagina`: com a flag CHECKOUT_PAGINA_PROPRIA o servidor cria a sessão da
+  // página própria e a compra segue na /assinar; desligada, o hospedado de antes.
+  // No app, não: a /assinar no app vai ao hospedado, e a sessão `elements` criada
+  // aqui seria expirada lá (2 sessões por compra).
   const payload = { interval };
+  if (!window.PB_IN_APP) payload.pagina = true;
   if (plan) payload.plan = plan;
 
   try {
@@ -1112,7 +1117,14 @@ async function startCheckout(interval, btn, plan, resuming) {
     }
 
     const data = await resp.json();
-    if (data && data.checkout_url) {
+    if (data && data.pagina) {
+      // Página própria: paga na /assinar, que reaproveita a sessão criada agora
+      // (origem precos) e dispara InitiateCheckout/begin_checkout ao montar —
+      // disparar aqui também contaria duas vezes. Só plano e ciclo na URL.
+      if (window.PBPurchaseIntent) window.PBPurchaseIntent.markCheckoutStarted();
+      window.location.href = "/assinar?plano=" + encodeURIComponent(plan)
+        + "&ciclo=" + encodeURIComponent(interval) + "&origem=precos";
+    } else if (data && data.checkout_url) {
       if (window.PBPurchaseIntent) window.PBPurchaseIntent.markCheckoutStarted();
       // Meta Ads: usuário iniciou o checkout (antes de ir pra Stripe).
       if (window.fbq) fbq("track", "InitiateCheckout", { content_category: plan || "", content_name: interval || "" });
