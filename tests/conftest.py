@@ -68,9 +68,10 @@ _OFXPARSE_DEPENDENTES = [
 # a mudança em revisão.
 #
 # Medido com o pacote bloqueado e a flag DESLIGADA (nenhuma lista em vigor):
-# são exatamente estes 8, todos `ModuleNotFoundError: ofxparse` — nenhum erro de
-# comportamento disfarçado. Os dois que saíram (`test_attachment_detection` e o
-# `test_handle_incoming_clarification_...`) chegavam ao parser por
+# são exatamente estes 10, todos `ModuleNotFoundError: ofxparse` — nenhum erro de
+# comportamento disfarçado (os dois que sobem a rota de OFX o veem como 500, com
+# o `ModuleNotFoundError` no log `[unhandled]`). Os dois que saíram
+# (`test_attachment_detection` e o `test_handle_incoming_clarification_...`) chegavam ao parser por
 # `core.handle_incoming`, caminho que deixou de existir.
 _OFXPARSE_IMPORT_TARDIO = [
     "tests/test_category_launches_query.py::test_has_time_e_posted_at_espelham_a_visao_geral",
@@ -78,6 +79,8 @@ _OFXPARSE_IMPORT_TARDIO = [
     "tests/test_category_normalization.py::test_import_extrato_nao_cria_gemea",
     "tests/test_category_normalization.py::test_import_ofx_conta_nao_cria_gemea",
     "tests/test_category_normalization.py::test_import_ofx_fatura_nao_cria_gemea",
+    "tests/test_limite_corpo.py::test_importadores_de_ofx_usam_o_teto_daqui",
+    "tests/test_limite_corpo.py::test_e2e_positivo_ofx_exatamente_max_ofx_bytes_chega_ao_handler",
     "tests/test_ofx_import_route.py::test_ofx_bancario_importa_pela_rota",
     "tests/test_statement_import.py::test_import_statement_bytes_csv_idempotente",
     "tests/test_statement_import.py::test_import_statement_bytes_vazio_ou_grande",
