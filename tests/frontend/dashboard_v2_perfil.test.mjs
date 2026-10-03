@@ -257,9 +257,10 @@ test("390: modal, seletor e catálogo sem rolagem horizontal; ✕ com 44 × 44",
 
 // Os três blocos novos: cada um abre o painel do seu perfil logo depois das contas (na posição
 // medida de cada um), o perfil ladrilha sem buraco fora da última linha, e o conteúdo cabe na célula.
-// Dívidas em 4º é regressão aceita do bloco `contas` no topo (antes era 2º): o ladrilhador põe
-// Próximos 30 dias no buraco ao lado da fatura, antes das Parcelas.
-for (const [perfil, bloco, posicao] of [["investir", "rendimento", 3], ["dividas", "parcelas", 4], ["autonomo", "renda", 2]]) {
+// Dívidas (PR C2): Parcelas futuras sobe de 4º para 2º; em troca a Fatura desce de 2º para 3º e
+// os Compromissos de 3º para 4º: decisão do dono, porque Parcelas pesam mais para quem está em
+// dívida e o `contas` grande no topo só deixa a casa (0,3) para um bloco de uma coluna.
+for (const [perfil, bloco, posicao] of [["investir", "rendimento", 3], ["dividas", "parcelas", 2], ["autonomo", "renda", 2]]) {
   test(`1440: ${bloco} abre o painel ${perfil}, sem buraco e sem estourar a célula`, async () => {
     const { ctx, page, erros } = await abrir({ perfil });
     const r = await page.evaluate((id) => {

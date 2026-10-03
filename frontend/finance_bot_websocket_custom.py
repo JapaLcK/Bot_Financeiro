@@ -211,13 +211,9 @@ STRIPE_PRICE_ID_ESSENCIAL_ANUAL  = os.getenv("STRIPE_PRICE_ID_ESSENCIAL_ANUAL", 
 STRIPE_PRICE_ID_PROMAX_MENSAL = os.getenv("STRIPE_PRICE_ID_PROMAX_MENSAL", "")
 STRIPE_PRICE_ID_PROMAX_ANUAL  = os.getenv("STRIPE_PRICE_ID_PROMAX_ANUAL", "")
 # Checkout embutido da /assinar: a chave publicável vai ao Stripe.js no navegador
-# (é pública por natureza). O e-book é item OPCIONAL da /assinar, não plano —
-# não entra em _plan_interval_for_price. NÃO setar em produção antes do PR 3
-# (entrega do e-book): sem ele a venda sai sem entrega. O e-book só é oferecido
-# com as DUAS envs: preço sem URL venderia algo que o webhook não tem como entregar.
+# (é pública por natureza). Os produtos extras (itens OPCIONAIS, não plano — não
+# entram em _plan_interval_for_price) moram em core/services/extras_assinar.da_env.
 STRIPE_PUBLISHABLE_KEY = os.getenv("STRIPE_PUBLISHABLE_KEY", "")
-STRIPE_PRICE_ID_EBOOK  = os.getenv("STRIPE_PRICE_ID_EBOOK", "")
-EBOOK_URL = os.getenv("EBOOK_URL", "")
 
 
 def _plan_interval_for_price(price_id: str | None) -> tuple[str | None, str | None]:
@@ -533,7 +529,7 @@ async def get_financial_data(
             FROM credit_transactions t
             LEFT JOIN credit_cards c ON c.id = t.card_id AND c.user_id = t.user_id
             JOIN credit_bills b ON b.id = t.bill_id
-            WHERE t.user_id = %s AND COALESCE(b.user_id, (SELECT cb.user_id FROM credit_cards cb WHERE cb.id = b.card_id)) = %s
+            WHERE t.user_id = %s AND b.user_id = %s
               AND b.period_end >= %s::date
               AND b.period_end < %s::date
               AND t.is_refund = false
@@ -660,7 +656,7 @@ async def get_financial_data(
                 SELECT ct.categoria, ct.valor, 1 AS cnt, b.period_end::timestamptz
                 FROM credit_transactions ct
                 JOIN credit_bills b ON b.id = ct.bill_id
-                WHERE ct.user_id = %s AND COALESCE(b.user_id, (SELECT cb.user_id FROM credit_cards cb WHERE cb.id = b.card_id)) = %s
+                WHERE ct.user_id = %s AND b.user_id = %s
                   AND ct.is_refund = false
                   AND b.period_end >= %s AND b.period_end < %s
             ) merged
@@ -1234,7 +1230,7 @@ async def _fetch_export_items(user_id: int, start_date: date | int, end_date: da
                 FROM credit_transactions ct
                 JOIN credit_bills b ON b.id = ct.bill_id
                 LEFT JOIN credit_cards c ON c.id = ct.card_id AND c.user_id = ct.user_id
-                WHERE ct.user_id = %s AND COALESCE(b.user_id, (SELECT cb.user_id FROM credit_cards cb WHERE cb.id = b.card_id)) = %s
+                WHERE ct.user_id = %s AND b.user_id = %s
                   AND ct.is_refund = false
                   AND b.period_end >= %s AND b.period_end < %s
                 """,
@@ -5233,23 +5229,11 @@ async def _billing_checkout_for_user(stripe_mod, user_id: int, plan: str, interv
             "td": str(trial_days),
         }
         metadata.update(rastreio or {})
-        # Foto do preço do e-book no nascimento da sessão: o webhook (PR 3)
-        # identifica o e-book por ela, não pela env do momento em que chega.
-        # A URL vai junto (o job entrega a da compra); o Stripe recusa metadata
-        # acima de 500 caracteres (medido), então acima disso não oferece.
-        oferece_ebook = (
-            origem == "assinar" and bool(STRIPE_PRICE_ID_EBOOK and EBOOK_URL)
-            and len(EBOOK_URL) <= 500
-        )
-        if oferece_ebook:
-            metadata["ebook_price"] = STRIPE_PRICE_ID_EBOOK
-            metadata["ebook_url"] = EBOOK_URL
-        elif origem == "assinar" and STRIPE_PRICE_ID_EBOOK:
-            # Nunca logar a URL: é o acesso ao PDF pago.
-            logging.getLogger(__name__).warning(
-                "ebook_nao_oferecido: EBOOK_URL vazia ou com %d caracteres (max 500)",
-                len(EBOOK_URL),
-            )
+        # Produtos extras nas DUAS origens. Foto (preço + URL) no nascimento da
+        # sessão: o webhook e o job leem dela, nunca da env do momento.
+        from core.services.extras_assinar import da_env, para_metadata
+        extras = da_env()
+        metadata.update(para_metadata(extras))
         subscription_data = {"metadata": metadata.copy()}
         if trial_days > 0:
             subscription_data["trial_period_days"] = trial_days
@@ -5277,12 +5261,11 @@ async def _billing_checkout_for_user(stripe_mod, user_id: int, plan: str, interv
             metadata=metadata,
             subscription_data=subscription_data,
         )
+        if extras:
+            kwargs["optional_items"] = [{"price": p, "quantity": 1} for p, _ in extras]
         if origem == "assinar":
-            # BRL fixo (sem Adaptive Pricing, que mostrou USD) e o e-book
-            # opcional — só na /assinar; a /precos segue com os kwargs de antes.
+            # BRL fixo (sem Adaptive Pricing, que mostrou USD) — só na /assinar.
             kwargs["adaptive_pricing"] = {"enabled": False}
-            if oferece_ebook:
-                kwargs["optional_items"] = [{"price": STRIPE_PRICE_ID_EBOOK, "quantity": 1}]
         if origem == "assinar" or embutido:
             # 1 h na /assinar (os dois modos) e em todo embutido: sem isso o
             # Stripe usa 24 h, e o hospedado deixaria aberta por 24 h a cobrança
@@ -5306,7 +5289,26 @@ async def _billing_checkout_for_user(stripe_mod, user_id: int, plan: str, interv
                 f"{DASHBOARD_URL}/assinar?plano={plan}&ciclo={interval}" if origem == "assinar"
                 else f"{DASHBOARD_URL}/precos?escolha=1"
             )
-        return stripe_mod.checkout.Session.create(**kwargs)
+        try:
+            return stripe_mod.checkout.Session.create(**kwargs)
+        except stripe_mod.error.InvalidRequestError as exc:
+            # Extra recusado (preço arquivado, inexistente) não pode derrubar a
+            # venda do plano: refaz UMA vez sem os extras, e a foto sai junto
+            # (nos dois metadatas) para o webhook não registrar o que não se
+            # ofereceu. Cliente apagado sobe para o retry de fora, com extras.
+            if not extras or _is_missing_stripe_customer(stripe_mod, exc):
+                raise
+            from core.system_event_log import log_system_event_sync
+            log_system_event_sync(
+                "error", "ebook_oferta_recusada",
+                "Stripe recusou os produtos extras; checkout refeito sem eles.",
+                source="billing", user_id=int(user_id),
+                details={"stripe": str(exc)[:500], "precos": [p for p, _ in extras]})
+            del kwargs["optional_items"]
+            for meta in (metadata, subscription_data["metadata"]):
+                for chave in para_metadata(extras):
+                    meta.pop(chave, None)
+            return stripe_mod.checkout.Session.create(**kwargs)
 
     try:
         session = await asyncio.to_thread(_new_session, customer_id)

@@ -16,7 +16,7 @@ export const PROFILES = [
     preset: ["contas", "categorias", "calendario", "resumo", "compromissos", "assinaturas", "fatura", "piggy"] },
   { id: "dividas", label: "Sair das dívidas", icon: "ph-credit-card",
     line: "Pra pagar o que deve e respirar. Mostra a fatura, as parcelas que ainda vêm e os próximos vencimentos.",
-    preset: ["contas", "fatura", "parcelas", "compromissos", "hero", "resumo", "categorias", "piggy"] },
+    preset: ["contas", "parcelas", "fatura", "compromissos", "hero", "resumo", "categorias", "piggy"] },
   { id: "autonomo", label: "Autônomo", icon: "ph-briefcase",
     line: "Pra quem tem renda que muda todo mês. Mostra sua renda mês a mês, quanto a reserva segura e as contas fixas.",
     preset: ["contas", "renda", "hero", "resumo", "compromissos", "metas", "categorias", "piggy"] },

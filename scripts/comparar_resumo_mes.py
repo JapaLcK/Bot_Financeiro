@@ -34,7 +34,7 @@ from db_support import get_summary_by_period_impl  # noqa: E402
 CARTAO_SQL = """
     select coalesce(sum(ct.valor), 0) as c
       from credit_transactions ct join credit_bills b on b.id = ct.bill_id
-     where ct.user_id = %s and coalesce(b.user_id, (select cb.user_id from credit_cards cb where cb.id = b.card_id)) = %s and ct.is_refund = false
+     where ct.user_id = %s and b.user_id = %s and ct.is_refund = false
        and b.period_end >= %s and b.period_end < %s
 """
 

@@ -452,15 +452,43 @@ PR de cada etapa, não soluções prontas. Cada PR confere se ainda valem, decid
     seletor dos últimos 6 meses reais (`s.mes`, separado de `s.month`, que os blocos de
     exemplo ainda leem e fica em setembro). Continuam sintéticos, cada um com o selo
     "demonstração" no próprio bloco: Fatura, Guardado, Rendimento e os demais blocos;
-    no modo real o selo também marca o título do Resumo, o extrato, a faixa do Piggy e o
-    chat. A etiqueta única da página saiu. O protótipo (`dashboard-v2/index.html`)
-    segue como antes. Limites conhecidos, para o dono: o seletor de mês também aparece
-    em `/lancamentos`, `/gastos` e `/previsao` e lá troca só o rótulo; o Cmd-K mostra
-    transações de exemplo sem selo; "Para onde vai" já transbordava e o selo que desce
-    para a 2ª linha piorou; Entrou e Saiu saem sem centavos, como Fatura e Guardado;
-    o seletor de perfil tem 32 px (o `.field` global); no preset Dívidas "Parcelas
-    futuras" caiu para a 4ª posição de leitura; a conta sem senha leva 403 também no PUT
-    e a tela só desfaz e avisa; "Recomeçar do zero" com o `/painel` aberto reabre o modal.
+    no modo real o selo também marca o extrato, a faixa do Piggy e o chat (o do título do
+    Resumo saiu no PR C2). A etiqueta única da página saiu. O protótipo
+    (`dashboard-v2/index.html`) segue como antes. Limites que seguem: o Cmd-K mostra
+    transações de exemplo sem selo; "Recomeçar do zero" com o `/painel` aberto reabre o
+    modal. Os outros limites que este PR deixou foram decididos ou corrigidos no PR C2.
+  - PR C2: as decisões do dono sobre a tela do PR C e três acabamentos. D1: o título
+    "Resumo de <mês>" não leva mais o selo "demonstração"; só os blocos inventados levam
+    (extrato, faixa do Piggy e chat não mudaram). D2: o seletor de mês fica como está,
+    também em `/lancamentos`, `/gastos` e `/previsao`. D3: Entrou e Saiu, e o mês anterior
+    de referência, saem com centavos, iguais ao texto decimal do servidor e ao bloco de
+    contas; Fatura e Guardado, sintéticos, seguem sem casas. O sinal negativo é o hífen
+    nos dois (o valor e o mês anterior); o resto do app segue com o menos tipográfico do
+    `money` (`lib/format.js`). D4: a conta paga sem senha
+    (nem Google/Apple) ganha o botão "Criar senha", que leva à `/home`, onde o overlay
+    "Crie sua senha" sobe sozinho (o `/painel` não carrega o `criar-senha.js`). Toda a
+    `/api/v2` dá a ela 403 `password_required`, inclusive o `/me`, então é no portão
+    (`Entrada.tsx`) que ela cai: lá o texto vira "Para abrir o painel novo, crie a sua
+    senha. Depois de criar, volte para o painel novo.", com o botão, Recarregar e "Painel antigo"; os outros erros do portão seguem
+    com a tela de antes, sem o botão. O mesmo 403 no PUT do perfil, se chegar, mostra "Crie sua senha para salvar o seu painel.
+    Depois de criar, volte para o painel novo." com o botão, no aviso do painel e no do modal da 1ª visita (o aviso do painel fica atrás
+    do modal); 500 e rede seguem com o aviso genérico. O destino e o texto do botão
+    moram numa constante só (`CRIAR_SENHA`, em `Entrada.tsx`). Limite: o "Criar senha" leva
+    à `/home` e não volta sozinho ao `/painel` (o overlay recarrega a `/home`, que não tem
+    link para o painel novo; retorno automático é outro fluxo), por isso os dois textos
+    mandam voltar. Acabamentos: "Para onde
+    vai" não vaza mais da célula — no Resumo a lista rola por dentro, nenhuma categoria
+    some (decisão do dono), e é alcançável por Tab com o rótulo "Categorias do mês"; sem
+    `@container` por altura e sem pista de "tem mais" além da barra de rolagem fina; na
+    `/gastos` e no celular nada rola nem sai do lugar (no celular a lista segue como
+    parada de Tab, sem rolar: o bloco é o mesmo do Resumo); a legenda diz o total gasto no mês, sem
+    contar categorias. No preset Dívidas, Parcelas futuras sobe de 4º para 2º; em troca a
+    Fatura desce de 2º para 3º e os Compromissos de 3º para 4º: decisão do dono, porque
+    Parcelas pesam mais para quem está em dívida e o `contas` grande no topo só deixa a
+    casa (0,3) para um bloco de uma coluna; o seletor de perfil tem 44 px (só
+    ele, o `.field` global segue igual) e a seta de abrir cada bloco tem alvo de 44 px sem
+    mudar o desenho. A busca da barra no celular segue menor que 44 px (a barra encolhe o
+    botão e não tem folga para um alvo maior sem invadir os vizinhos).
 - Etapa 2 (Lançamentos) em 5 PRs: 1 leitura · 2a escrita da carteira (inclui gravar a marca
   `launches.origem`; faixa Completo) · 2b regras novas de dinheiro (travar data e valor da
   linha fundida em todo canal; apagar a fundida desfaz a junção na hora; editar valor só na

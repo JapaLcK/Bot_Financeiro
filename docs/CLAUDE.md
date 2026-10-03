@@ -190,9 +190,8 @@ Sub-app FastAPI (`api/v2/app.py`) montado pelo monólito com `app.mount("/api/v2
   mensal (o pedido na hora também soma o mês inteiro: total, contagem e "Período"), a
   consulta 5 do /app e `compute_kpis` das Análises. `compute_evolution` é cópia em consulta
   única (um GROUP BY por mês); `tests/test_resumo_mes_regra.py` compara as duas por mês.
-  Fatura com `user_id` NULL (a coluna aceita, sem backfill) só entra se o cartão dela for do
-  usuário (`coalesce(b.user_id, <dono do cartão>) = %s`, desde 1e7231dd/#759), em cada perna
-  do cartão.
+  `credit_bills.user_id` é NOT NULL (backfill pelo dono do cartão, #772): a fatura só entra
+  se for do usuário (`b.user_id = %s`), em cada perna do cartão.
   **Divergência conhecida:** relatório diário e semanal, ferramentas da IA de período
   livre e projeção de fechamento (`get_summary_by_period`) e o Repórter
   (`piggy_agents._month_stats`) seguem só em `launches`, sem o cartão. Limites mantidos de
@@ -327,7 +326,8 @@ Sub-app FastAPI (`api/v2/app.py`) montado pelo monólito com `app.mount("/api/v2
 - **Erro no cliente** (`webapp/src/dashboard/parts/Entrada.tsx`): nada do painel monta
   antes do `/me`; qualquer erro é uma tela só, com texto fixo em português (a `message`
   do envelope não vai para a tela: em 402/404 ela sai em inglês), Recarregar e "Painel
-  antigo", **sem redirecionamento no cliente** — o Recarregar passa pelo `serve_painel`, que já manda cada
+  antigo" (o 403 `password_required` troca o texto e ganha o "Criar senha", para a
+  `/home`, que não volta sozinha ao `/painel`: o texto manda voltar), **sem redirecionamento no cliente** — o Recarregar passa pelo `serve_painel`, que já manda cada
   caso ao lugar certo. Rede e 5xx tentam 3 vezes (com `networkMode: "always"`, para o evento `offline`
   não pausar o `/me` em "Carregando…"); 4xx (inclusive 429) nunca repete. Limite
   conhecido: conta agendada para exclusão leva 403 da `/api/v2` e o Recarregar serve a
@@ -454,25 +454,43 @@ sobrevive pra devolver `detail.message` a cliente antigo em cache).
 nunca vai no corpo. A sessão grava `origem` e `td` (dias de trial) no metadata e no
 da assinatura; uma sessão aberta só é reaproveitada pelo mesmo plano × intervalo ×
 origem × modo (sessão sem `origem` = `/precos`), e a embutida reaproveitada devolve o
-trial com que nasceu (`td`). Só a `/assinar` fixa BRL (`adaptive_pricing` off), volta
-para `/assinar?plano=&ciclo=` no abandono e oferece o e-book (`optional_items`); a
-`/precos` segue com os kwargs de antes. Toda sessão da `/assinar` (embutida **e**
+trial com que nasceu (`td`). Só a `/assinar` fixa BRL (`adaptive_pricing` off) e volta
+para `/assinar?plano=&ciclo=` no abandono. Os produtos extras (`optional_items`) vão nas
+**duas** origens (dono, Q3); fora eles e as chaves `ebook*` da foto, a `/precos` segue
+com os kwargs de antes. Toda sessão da `/assinar` (embutida **e**
 hospedada), e todo embutido, expira em 1 h (`expires_at`): o default de 24 h do Stripe
 deixaria aberta a janela de cobrança dupla (Pix numa aba, cartão na outra); o
 hospedado da `/precos` segue sem. Envs:
 `STRIPE_PUBLISHABLE_KEY` (sem ela o embutido é 503, antes de tocar no Stripe),
-`STRIPE_PRICE_ID_EBOOK` e `EBOOK_URL` — o e-book só é oferecido com **as duas**
-preenchidas (preço sem URL venderia o que o webhook não tem como entregar). Quando
-oferecido, a sessão grava `ebook_price` e `ebook_url` (o preço e a URL do e-book no
-nascimento) no metadata e no da assinatura; sem e-book as chaves não existem. O webhook
-identifica o e-book por essa foto, nunca pela env do momento. `EBOOK_URL` tem no máximo
-**500 caracteres** (limite de metadata do Stripe, medido): acima disso o e-book não é
-oferecido e sai o warning `ebook_nao_oferecido` (com o tamanho, **nunca a URL** — ela é
-o acesso ao PDF pago). As duas envs só entram em produção **depois do merge do #708**.
+e os produtos extras em **variáveis numeradas** (`core/services/extras_assinar.da_env`,
+lidas a cada sessão): slot 1 = `STRIPE_PRICE_ID_EBOOK` + `EBOOK_URL`, slot n (2..10) =
+`STRIPE_PRICE_ID_EBOOK_n` + `EBOOK_URL_n`. Teto de 10 (limite do `optional_items` do
+Stripe); a ordem no checkout é a do número do slot, e um buraco (slots 1 e 3) mantém a
+ordem. Cada slot vale sozinho: só é oferecido com **as duas** preenchidas (preço sem URL
+venderia o que o webhook não tem como entregar) e a URL com no máximo **500
+caracteres** (limite de metadata do Stripe, medido); senão sai o warning
+`ebook_nao_oferecido` com o slot e o tamanho, **nunca a URL** (ela é o acesso ao PDF
+pago), e os outros slots seguem. Preço repetido entra uma vez (o primeiro) e avisa
+igual. Os oferecidos vão de foto no metadata da sessão e no da assinatura
+(`extras_assinar.para_metadata`), numerados pela **posição** na lista oferecida, não
+pelo slot da env: o 1º sempre em `ebook_price`/`ebook_url` (com um produto, o metadata
+de antes), o 2º em `ebook_2_*`, etc.; sem produto as chaves não existem. Com 10
+produtos e o rastreio são 29 chaves (o Stripe aceita 50). O webhook identifica os
+produtos por essa foto, nunca pela env do momento. A sessão hospedada da `/precos`
+dura 24 h (sem `expires_at`): para **tirar** um produto, apague as variáveis, espere o
+deploy e mais 24 h, e só então arquive o preço no Stripe. Se o Stripe recusar os extras
+(`InvalidRequestError`: preço arquivado, inexistente), o checkout é refeito UMA vez sem
+`optional_items` e sem a foto `ebook*` nos dois metadatas, e loga o erro
+`ebook_oferta_recusada` (mensagem do Stripe e preços, nunca as URLs): a página segue
+vendendo o plano e TODOS os extras somem daquela sessão (não só o recusado). Sem extras, ou recusado também sem
+eles, ou erro que não é `InvalidRequestError`, é o 502 de antes. Uma sessão aberta
+criada pelo fallback (sem extras) ou antes de mudar a lista é reaproveitada por até 1 h
+(`/assinar`) ou 24 h (`/precos`) e segue sem os extras novos, mesmo depois de a env ser
+corrigida: o reaproveitamento não compara os extras.
 
 **Entrega do e-book (#708) — N produtos por compra.** A metadata da sessão é a foto
-dos produtos oferecidos: slot 1 em `ebook_price`/`ebook_url`, slot n (2..10) em
-`ebook_n_price`/`ebook_n_url`, lidos por `core/services/extras_assinar.da_metadata`.
+dos produtos oferecidos: o 1º em `ebook_price`/`ebook_url`, o n-ésimo (2..10) em
+`ebook_n_price`/`ebook_n_url` (posição na oferta, não o slot da env), lidos por `core/services/extras_assinar.da_metadata`.
 O `checkout.session.completed` com pelo menos um slot grava uma linha POR produto em
 `ebook_entregas` (`db/ebook_entregas.py`, PK `user_id + session_id + ebook_price`, num
 insert só: todos ou nenhum) logo depois do grant e ANTES dos outros efeitos, sem try:

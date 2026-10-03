@@ -5,9 +5,10 @@ import type { NovoPerfil, Perfil } from "../lib/api-v2.gen";
 import { TODAY } from "../lib/api";
 import { PROFILES, locked, readLayout, saveLayout, saveProfile } from "../lib/profiles.js";
 import { set } from "../lib/store.js";
-import { DEMO, FUSO, apiPut, perfilQuery, usePlan } from "../lib/v2";
+import { DEMO, ErroApi, FUSO, apiPut, perfilQuery, usePlan } from "../lib/v2";
 import type { Path } from "../router";
 import { FrameLink } from "./Frame";
+import { CRIAR_SENHA } from "./Entrada";
 import type { DashState } from "../lib/types";
 import { Hero } from "../widgets/Hero";
 import { MonthStats } from "../widgets/Stats";
@@ -89,6 +90,9 @@ function useColumns() {
 }
 
 type Escolha = NovoPerfil["perfil"];
+// Conta paga sem senha (nem Google/Apple) leva 403 `password_required` no PUT: o mesmo
+// "Criar senha" do portão (Entrada).
+const SEM_SENHA = <>Crie sua senha para salvar o seu painel. Depois de criar, volte para o painel novo. <a className="btn btn-ghost retry" href={CRIAR_SENHA.href}>{CRIAR_SENHA.texto}</a></>;
 // Com backend, o dia no fuso do app (o mesmo de mesAtual); no protótipo, o dia da demonstração.
 const hoje = () => new Intl.DateTimeFormat("pt-BR", { day: "numeric", month: "long", year: "numeric", timeZone: DEMO ? undefined : FUSO }).format(DEMO ? TODAY : new Date());
 
@@ -111,7 +115,7 @@ export function Board({ s }: { s: DashState }) {
     setVersion((v) => v + 1);
   }
   const [said, setSaid] = useState("");
-  const [aviso, setAviso] = useState("");
+  const [aviso, setAviso] = useState<ReactNode>("");
   const columns = useColumns();
   const custom = ids.join() !== shownPreset(shown, plan).join();
 
@@ -128,10 +132,10 @@ export function Board({ s }: { s: DashState }) {
       qc.setQueryData<Perfil>(perfilQuery.queryKey, { perfil: p });
       return antes;
     },
-    onError: (_e, p, antes) => {
+    onError: (e, p, antes) => {
       // Outra escolha já escreveu por cima: a dela vale, e a recarga confirma.
       if (qc.getQueryData<Perfil>(perfilQuery.queryKey)?.perfil === p) qc.setQueryData(perfilQuery.queryKey, antes);
-      setAviso("Não foi possível salvar agora");
+      setAviso(e instanceof ErroApi && e.code === "password_required" ? SEM_SENHA : "Não foi possível salvar agora");
     },
     // Sem devolver a promessa: a trava do seletor é só o PUT, não a recarga. O `onSettled`
     // roda também se o `onMutate` falhar, então a trava nunca fica presa.
