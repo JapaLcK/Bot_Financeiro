@@ -40,6 +40,8 @@ export const locked = (id, plan) => {
 // localStorage. Sem storage (modo privado, cota, bloqueio) tudo segue em memória.
 const PROFILE_KEY = "pigbank.dashboard.profile.v1";
 const layoutKey = (p) => `pigbank.dashboard.layout.v1.${p}`;
+// Marca que o layout salvo deste perfil já conheceu o bloco `contas` (entrou uma vez, ou o usuário salvou depois dele).
+const contasKey = (p) => `pigbank.dashboard.layout.v1.${p}.contas`;
 const mem = new Map();
 function read(key) {
   if (mem.has(key)) return mem.get(key);
@@ -63,13 +65,23 @@ export const saveProfile = (p) => write(PROFILE_KEY, JSON.stringify(p));
 
 /**
  * Blocos visíveis do perfil, em ordem. Sem layout salvo (ou salvo ilegível) vale o
- * preset. Some o que o painel não conhece, o repetido e o que o plano não libera;
- * o salvo não é reescrito aqui.
+ * preset. Some o que o painel não conhece, o repetido e o que o plano não libera. O salvo
+ * só é reescrito uma vez, para o bloco `contas` entrar no topo de quem personalizou antes dele.
  */
 export function readLayout(profile, preset, known, plan) {
   const saved = parse(read(layoutKey(profile)));
-  const ids = Array.isArray(saved) ? saved : preset;
+  let ids = Array.isArray(saved) ? saved : preset;
+  // Layout salvo antes do bloco `contas` existir: ele entra uma vez, no topo. Depois disso o que o
+  // usuário tirar fica tirado (todo saveLayout grava o marcador).
+  if (Array.isArray(saved) && !saved.includes("contas") && known.includes("contas") && read(contasKey(profile)) === null) {
+    ids = ["contas", ...saved];
+    write(layoutKey(profile), JSON.stringify(ids));
+    write(contasKey(profile), "1");
+  }
   return [...new Set(ids)].filter((id) => known.includes(id) && !locked(id, plan));
 }
 /** `null` apaga o ajuste: o perfil volta ao preset. */
-export const saveLayout = (profile, ids) => write(layoutKey(profile), ids && JSON.stringify(ids));
+export function saveLayout(profile, ids) {
+  write(layoutKey(profile), ids && JSON.stringify(ids));
+  if (ids) write(contasKey(profile), "1");
+}

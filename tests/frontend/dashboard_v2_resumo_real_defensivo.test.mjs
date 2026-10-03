@@ -15,6 +15,7 @@ import assert from "node:assert/strict";
 import { chromium } from "playwright";
 import { RESPOSTAS, abrirPainel, exigeArtefatoEmDia } from "./_painel.mjs";
 import { BY_PROFILE, COMMON } from "../../webapp/src/dashboard/lib/prompts.js";
+import { readLayout, saveLayout } from "../../webapp/src/dashboard/lib/profiles.js";
 
 let browser;
 before(async () => { exigeArtefatoEmDia(); browser = await chromium.launch(); });
@@ -195,4 +196,69 @@ test('a etiqueta .tag-demo ("Mês fechado" do Hero, categoria do Calendar) segue
   assert.equal(estilo.raio, "6px");
   assert.notEqual(estilo.fundo, "rgba(0, 0, 0, 0)", "sem fundo: a regra sumiu");
   assert.deepEqual(erros, []);
+});
+
+// --- 8. layout salvo antes do bloco `contas` ------------------------------------------
+
+const ordem = (page) => page.evaluate(() => [...document.querySelectorAll("[data-widget-id]")].map((w) => w.dataset.widgetId));
+const LAYOUT = "pigbank.dashboard.layout.v1.investir";
+
+async function comLayoutSalvo(ids, { marcador = false } = {}) {
+  const { ctx, page, ir } = await abrir({ perfil: "investir" });
+  // Só na 1ª carga: o recarregar do teste vê o que o app mesmo gravou.
+  await ctx.addInitScript(([k, v, m]) => {
+    if (localStorage.getItem(k) === null) { localStorage.setItem(k, v); if (m) localStorage.setItem(`${k}.contas`, "1"); }
+  }, [LAYOUT, JSON.stringify(ids), marcador]);
+  await ir();
+  return { ctx, page };
+}
+
+test("layout salvo antes do bloco contas: ele entra uma vez no topo e fica gravado", async () => {
+  const { ctx, page } = await comLayoutSalvo(["patrimonio", "rendimento"]);
+  const primeira = await ordem(page);
+  const gravado = await page.evaluate((k) => [JSON.parse(localStorage.getItem(k)), localStorage.getItem(`${k}.contas`)], LAYOUT);
+  await page.reload();
+  await page.locator("#board-profile").waitFor();
+  const recarregada = await ordem(page);
+  await ctx.close();
+  assert.deepEqual(primeira.slice(0, 3), ["contas", "patrimonio", "rendimento"]);
+  assert.deepEqual(gravado, [["contas", "patrimonio", "rendimento"], "1"]);
+  assert.deepEqual(recarregada, primeira);
+});
+
+test("quem já viu o bloco contas e o tirou não o vê voltar", async () => {
+  const { ctx, page } = await comLayoutSalvo(["patrimonio", "rendimento"], { marcador: true });
+  const vistos = await ordem(page);
+  const gravado = await page.evaluate((k) => JSON.parse(localStorage.getItem(k)), LAYOUT);
+  await ctx.close();
+  assert.deepEqual(vistos.slice(0, 2), ["patrimonio", "rendimento"]);
+  assert.ok(!vistos.includes("contas"));
+  assert.deepEqual(gravado, ["patrimonio", "rendimento"]);
+});
+
+test("sem layout salvo vale o preset, que já traz o bloco contas no topo, e nada é gravado", async () => {
+  const { ctx, page, ir } = await abrir({ perfil: "investir" });
+  await ir();
+  const vistos = await ordem(page);
+  const guardado = await page.evaluate((k) => [localStorage.getItem(k), localStorage.getItem(`${k}.contas`)], LAYOUT);
+  await ctx.close();
+  assert.equal(vistos[0], "contas");
+  assert.deepEqual(guardado, [null, null]);
+});
+
+test("o que o usuário salva depois do bloco contas vale: tirar o bloco e salvar não o traz de volta (readLayout/saveLayout puros)", () => {
+  const guardado = new Map();
+  globalThis.localStorage = { getItem: (k) => guardado.get(k) ?? null, setItem: (k, v) => guardado.set(k, String(v)), removeItem: (k) => guardado.delete(k) };
+  try {
+    const preset = ["contas", "patrimonio", "rendimento"], known = ["contas", "patrimonio", "rendimento", "hero"];
+    saveLayout("investir", ["patrimonio", "rendimento"]);          // o usuário salva SEM contas
+    assert.deepEqual(readLayout("investir", preset, known, "pro"), ["patrimonio", "rendimento"]);
+    assert.deepEqual(readLayout("investir", preset, known, "pro"), ["patrimonio", "rendimento"]); // e segue assim
+    saveLayout("investir", null);                                  // restaurar: volta ao preset, com contas
+    assert.deepEqual(readLayout("investir", preset, known, "pro"), preset);
+    guardado.clear();                                              // layout antigo, sem marcador: contas entra uma vez
+    guardado.set("pigbank.dashboard.layout.v1.autonomo", JSON.stringify(["hero"]));
+    assert.deepEqual(readLayout("autonomo", preset, known, "pro"), ["contas", "hero"]);
+    assert.deepEqual(readLayout("autonomo", preset, known, "pro"), ["contas", "hero"]);
+  } finally { delete globalThis.localStorage; }
 });
