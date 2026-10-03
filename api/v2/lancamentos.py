@@ -127,6 +127,7 @@ class Edicao(IdLancamento):
     categoria: str | None = Field(None, max_length=CATEGORY_NAME_MAX_LEN)
     descricao: str | None = Field(None, max_length=200)
     data: str | None = Field(None, pattern=_DATA)
+    valor: str | None = Field(None, pattern=_VALOR)  # só a carteira pura (o `pode`)
 
 
 class LancamentoId(BaseModel):
@@ -138,6 +139,13 @@ def _id(texto: str) -> tuple[str, int]:
     if n > _MAX_ID:
         raise _recusa("id", "Id fora da faixa.", "body")
     return texto[0], n
+
+
+def _valor(texto: str) -> Decimal:
+    valor = Decimal(texto)
+    if valor <= 0:
+        raise _recusa("valor", "O valor deve ser maior que zero.", "body")
+    return valor
 
 
 def _texto(campo: str, valor: str | None) -> str | None:
@@ -173,9 +181,7 @@ def lancar_na_carteira(corpo: NovoLancamento, uid: int = Depends(usuario_atual))
     from core.services.plan_limits import PlanLimitExceeded
     from core.services.plan_service import check_can_create_launch
 
-    valor = Decimal(corpo.valor)
-    if valor <= 0:
-        raise _recusa("valor", "O valor deve ser maior que zero.", "body")
+    valor = _valor(corpo.valor)
     descricao, categoria = _texto("descricao", corpo.descricao), _texto("categoria", corpo.categoria)
     agora = now_tz()
     dia = _dia(uid, corpo.data, agora)
@@ -191,14 +197,15 @@ def lancar_na_carteira(corpo: NovoLancamento, uid: int = Depends(usuario_atual))
 @router.post("/lancamentos/editar", response_model=LancamentoId)
 def editar(corpo: Edicao, uid: int = Depends(usuario_atual)) -> LancamentoId:
     """Cada campo contra o `pode` da linha, sob lock (`db/lancamentos.pode_da_linha`)."""
-    from db.accounts import update_launch_fields
+    from db.accounts import LaunchDateLockedError, update_launch_fields
     from db.cards import update_credit_transaction_fields
     from db.categories import ensure_user_category, resolve_category_input
 
     tabela, n = _id(corpo.id)
-    if corpo.categoria is None and corpo.descricao is None and corpo.data is None:
+    if corpo.categoria is None and corpo.descricao is None and corpo.data is None and corpo.valor is None:
         raise RequestValidationError([{"loc": ("body",), "msg": "Nada para editar.",
                                        "type": "value_error"}])
+    valor = _valor(corpo.valor) if corpo.valor is not None else None
     descricao = _texto("descricao", corpo.descricao)
     dia = _dia(uid, corpo.data, now_tz())
     categoria = None
@@ -209,13 +216,13 @@ def editar(corpo: Edicao, uid: int = Depends(usuario_atual)) -> LancamentoId:
     try:
         if tabela == "l":
             mudou = update_launch_fields(uid, n, categoria=categoria, alvo=descricao, dia=dia,
-                                         exigir_pode=True)
-        elif dia is not None:  # compra no cartão não troca de data (P5)
+                                         valor=valor, exigir_pode=True)
+        elif dia is not None or valor is not None:  # compra no cartão não troca data nem valor (P5)
             raise lancamentos.NaoEditavel("data")
         else:
             mudou = update_credit_transaction_fields(uid, n, categoria=categoria, nota=descricao,
                                                      exigir_pode=True)
-    except lancamentos.NaoEditavel:
+    except (lancamentos.NaoEditavel, LaunchDateLockedError):  # data de fundida: o banco é dono (P3)
         raise _nao_editavel() from None
     if not mudou:
         raise _nao_achou()
