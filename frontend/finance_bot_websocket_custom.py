@@ -4986,6 +4986,7 @@ class CreateCheckoutBody(BaseModel):
     plan: str = ""             # "essencial" | "plus" | "pro"
     embutido: bool = False     # True = Checkout embutido (client_secret), só a /assinar usa
     origem: str = "precos"     # "precos" | "assinar"
+    pagina: bool = False       # True = página própria (`ui_mode="elements"`), só com a flag
 
 
 def _resolve_price_id(plan: str, interval: str) -> str:
@@ -5028,15 +5029,18 @@ async def _billing_user_lock(user_id: int):
 
 
 def _checkout_session_matches(session, user_id: int, plan: str, interval: str, price_id: str,
-                              origem: str = "precos", embutido: bool = False) -> bool:
+                              origem: str = "precos", embutido: bool = False,
+                              elementos: bool = False) -> bool:
     metadata = _sg(session, "metadata", {}) or {}
     # Sem `origem` no metadata = sessão anterior a este campo, e toda sessão
     # daquela época nasceu na /precos. O modo sai de `url` (hospedado) ou
     # `client_secret` (embutido): cada um só existe num ui_mode. O embutido
     # exige `td` numérico porque a resposta reaproveitada devolve o trial DA
-    # sessão, não o recalculado.
+    # sessão, não o recalculado. `elements` e `embedded_page` têm os dois
+    # `client_secret`: o `ui_mode` separa (medido no Session.list, 2026-10-03).
     if embutido:
-        modo_ok = bool(_sg(session, "client_secret")) and str(_sg(metadata, "td", "")).isdecimal()
+        modo_ok = (bool(_sg(session, "client_secret")) and str(_sg(metadata, "td", "")).isdecimal()
+                   and (_sg(session, "ui_mode") == "elements") == elementos)
     else:
         modo_ok = bool(_sg(session, "url"))
     return (
@@ -5051,7 +5055,8 @@ def _checkout_session_matches(session, user_id: int, plan: str, interval: str, p
 
 async def _billing_checkout_for_user(stripe_mod, user_id: int, plan: str, interval: str,
                                      price_id: str, rastreio: dict[str, str] | None = None,
-                                     origem: str = "precos", embutido: bool = False):
+                                     origem: str = "precos", embutido: bool = False,
+                                     elementos: bool = False):
     """Cria ou reutiliza um checkout. Deve rodar sob ``_billing_user_lock``.
 
     `rastreio` são os identificadores de anúncio já validados (`ga_client_id`,
@@ -5142,7 +5147,7 @@ async def _billing_checkout_for_user(stripe_mod, user_id: int, plan: str, interv
 
     reusable = next(
         (s for s in open_sessions if _checkout_session_matches(
-            s, user_id, plan, interval, price_id, origem, embutido)),
+            s, user_id, plan, interval, price_id, origem, embutido, elementos)),
         None,
     )
     for open_session in open_sessions:
@@ -5169,12 +5174,26 @@ async def _billing_checkout_for_user(stripe_mod, user_id: int, plan: str, interv
         if embutido:
             # trial_days da SESSÃO (o `td` com que ela nasceu), nunca o
             # recalculado: é o que ela vai cobrar, e o que a tela tem de dizer.
-            return {
+            resposta = {
                 "client_secret": _sg(reusable, "client_secret"),
                 "trial_days": int(_sg(_sg(reusable, "metadata"), "td")),
                 "interval": interval, "plan": plan,
                 "session_id": _sg(reusable, "id"),
             }
+            if elementos:
+                from core.services.extras_assinar import tela_da_sessao
+                try:
+                    extras = await asyncio.to_thread(tela_da_sessao, stripe_mod, reusable)
+                except Exception:
+                    logging.getLogger(__name__).warning(
+                        "billing_checkout_extras_lookup_failed session=%s",
+                        _sg(reusable, "id"), exc_info=True)
+                    raise HTTPException(
+                        status_code=503,
+                        detail="Não consegui retomar seu checkout agora. Tenta de novo em instantes.",
+                    )
+                resposta.update(pagina=True, extras=extras)
+            return resposta
         return {
             "checkout_url": _sg(reusable, "url"), "interval": interval, "plan": plan,
             "session_id": _sg(reusable, "id"),
@@ -5226,6 +5245,11 @@ async def _billing_checkout_for_user(stripe_mod, user_id: int, plan: str, interv
     # cima, não o comprado (get_user_limits → limits_for("pro")).
     ia_quota = ai_monthly_limit_for_tier(plan if plans_v2_enabled() else "pro")
 
+    # Página própria: até 3 extras que o Stripe vende agora, com o texto e a
+    # capa do Product. Viram linha do carrinho pelo /bump, não `optional_items`.
+    from core.services.extras_assinar import da_env, ofertas_da_pagina, para_metadata, para_tela
+    ofertas = await asyncio.to_thread(ofertas_da_pagina, stripe_mod, user_id) if elementos else []
+
     def _new_session(cust_id: str):
         metadata = {
             "finbot_user_id": str(user_id),
@@ -5238,8 +5262,7 @@ async def _billing_checkout_for_user(stripe_mod, user_id: int, plan: str, interv
         metadata.update(rastreio or {})
         # Produtos extras nas DUAS origens. Foto (preço + URL) no nascimento da
         # sessão: o webhook e o job leem dela, nunca da env do momento.
-        from core.services.extras_assinar import da_env, para_metadata
-        extras = da_env()
+        extras = [(p, u) for p, u, _ in ofertas] if elementos else da_env()
         metadata.update(para_metadata(extras))
         subscription_data = {"metadata": metadata.copy()}
         if trial_days > 0:
@@ -5268,10 +5291,12 @@ async def _billing_checkout_for_user(stripe_mod, user_id: int, plan: str, interv
             metadata=metadata,
             subscription_data=subscription_data,
         )
-        if extras:
+        if extras and not elementos:
             kwargs["optional_items"] = [{"price": p, "quantity": 1} for p, _ in extras]
-        if origem == "assinar":
-            # BRL fixo (sem Adaptive Pricing, que mostrou USD) — só na /assinar.
+        if origem == "assinar" or elementos:
+            # BRL fixo (sem Adaptive Pricing, que mostrou USD) na /assinar e na
+            # página própria (as caixas mostram R$; outra moeda desencontraria
+            # o total). O hospedado da /precos segue sem o campo.
             kwargs["adaptive_pricing"] = {"enabled": False}
         if origem == "assinar" or embutido:
             # 1 h na /assinar (os dois modos) e em todo embutido: sem isso o
@@ -5279,8 +5304,8 @@ async def _billing_checkout_for_user(stripe_mod, user_id: int, plan: str, interv
             # dupla (Pix numa aba, cartão na outra). A /precos segue sem.
             kwargs["expires_at"] = int(datetime.now(timezone.utc).timestamp()) + 3600
         if embutido:
-            # `embedded_page` recusa success_url/cancel_url: a volta é o return_url.
-            kwargs["ui_mode"] = "embedded_page"
+            # `embedded_page` e `elements` recusam success_url/cancel_url: a volta é o return_url.
+            kwargs["ui_mode"] = "elements" if elementos else "embedded_page"
             kwargs["return_url"] = success_url
         else:
             kwargs["success_url"] = success_url
@@ -5303,7 +5328,8 @@ async def _billing_checkout_for_user(stripe_mod, user_id: int, plan: str, interv
             # venda do plano: refaz UMA vez sem os extras, e a foto sai junto
             # (nos dois metadatas) para o webhook não registrar o que não se
             # ofereceu. Cliente apagado sobe para o retry de fora, com extras.
-            if not extras or _is_missing_stripe_customer(stripe_mod, exc):
+            # Na página própria não há `optional_items` a tirar: é o 502 de fora.
+            if not extras or elementos or _is_missing_stripe_customer(stripe_mod, exc):
                 raise
             from core.system_event_log import log_system_event_sync
             log_system_event_sync(
@@ -5331,11 +5357,14 @@ async def _billing_checkout_for_user(stripe_mod, user_id: int, plan: str, interv
         raise HTTPException(status_code=502, detail="Erro no Stripe ao iniciar o checkout.")
 
     if embutido:
-        return {
+        resposta = {
             "client_secret": session.client_secret, "trial_days": trial_days,
             "interval": interval, "plan": plan,
             "session_id": getattr(session, "id", None),
         }
+        if elementos:
+            resposta.update(pagina=True, extras=para_tela(ofertas))
+        return resposta
     return {
         "checkout_url": session.url, "interval": interval, "plan": plan,
         "session_id": getattr(session, "id", None),
@@ -5376,12 +5405,15 @@ async def billing_create_checkout(
     Body: {"plan": "essencial" | "plus" | "pro" (obrigatório),
            "interval": "monthly" | "annual" (default monthly),
            "origem": "precos" | "assinar" (default precos),
-           "embutido": bool (default false)}.
+           "embutido": bool (default false),
+           "pagina": bool (default false; só vale com CHECKOUT_PAGINA_PROPRIA)}.
     Requer: STRIPE_SECRET_KEY + price ID do interval escolhido; o embutido
     também STRIPE_PUBLISHABLE_KEY.
 
     Resposta hospedada: {checkout_url, interval, plan}. Embutida:
-    {client_secret, publishable_key, trial_days, interval, plan}.
+    {client_secret, publishable_key, trial_days, interval, plan}. Página
+    própria: a embutida + {pagina: true, extras: [{posicao, nome, descricao,
+    imagem, valor_centavos, no_carrinho}]}.
 
     `plan` é obrigatório NA ROTA e opcional no modelo. Corpo obrigatório
     (sem `| None`) fecharia no Pydantic e foi descartado por UM motivo: troca o
@@ -5422,10 +5454,16 @@ async def billing_create_checkout(
     if origem not in ("precos", "assinar"):
         raise HTTPException(status_code=400, detail="origem inválida (use 'precos' ou 'assinar').")
 
+    # Página própria só com a flag; desligada, `pagina` não muda nada: a /precos
+    # segue no hospedado e a /assinar no embutido de antes.
+    from core.services.extras_assinar import pagina_propria_ligada
+    elementos = payload.pagina and pagina_propria_ligada()
+    embutido = payload.embutido or elementos
+
     price_id = _resolve_price_id(plan, interval)
     # O embutido sem chave publicável é 503 AQUI, antes do lock e de qualquer
     # customer/sessão no Stripe: sessão criada sem como abri-la é lixo aberto.
-    if not STRIPE_SECRET_KEY or not price_id or (payload.embutido and not STRIPE_PUBLISHABLE_KEY):
+    if not STRIPE_SECRET_KEY or not price_id or (embutido and not STRIPE_PUBLISHABLE_KEY):
         raise HTTPException(status_code=503, detail="Pagamentos ainda não configurados.")
 
     # Identificadores de anúncio, todos lidos dos COOKIES que o navegador já
@@ -5451,8 +5489,8 @@ async def billing_create_checkout(
     try:
         async with _billing_user_lock(user_id):
             result = await _billing_checkout_for_user(
-                stripe, user_id, plan, interval, price_id, rastreio, origem, payload.embutido)
-        if payload.embutido:
+                stripe, user_id, plan, interval, price_id, rastreio, origem, embutido, elementos)
+        if embutido:
             result["publishable_key"] = STRIPE_PUBLISHABLE_KEY
         # Funil de checkout: registra a ABERTURA na tabela dedicada, com o
         # session_id do Stripe (par do record_checkout_completed no webhook —
