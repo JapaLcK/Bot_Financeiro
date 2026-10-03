@@ -117,6 +117,7 @@ from db.investment_undo import MENSAGEM_NAO_E_O_ULTIMO
 from core.observability import _log_falha, get_logger
 from core.pg_text import detalhe_seguro, limpa_para_pg, recusa_veneno, tem_veneno
 from core.secure_compare import constant_time_eq
+from core.limite_corpo import LimiteCorpoMiddleware, MAX_OFX_BYTES
 from api.v2 import app as api_v2_app, eventos as api_v2_eventos
 from frontend.routes.affiliates import router as affiliates_router
 from frontend.routes.billing_pix import router as billing_pix_router
@@ -2237,6 +2238,12 @@ app = FastAPI(
     openapi_url=None,
     lifespan=lifespan,
 )
+
+# Teto/prazo do corpo (core/limite_corpo.py). Registrado PRIMEIRO para ser o mais
+# interno: o 413/408 que ele mesmo responde passa pelos BaseHTTPMiddleware de fora
+# (cabeçalhos de segurança, CORS) como resposta comum. Levantar HTTPException no
+# receive não serve: o BaseHTTPMiddleware a devolve como ExceptionGroup e vira 500.
+app.add_middleware(LimiteCorpoMiddleware)
 
 # Middleware de log de erros HTTP (definido em core/admin_dashboard.py)
 app.middleware("http")(admin_error_logging_middleware)
@@ -8033,9 +8040,6 @@ async def history_quick_stats_route(
         fd = earliest
     result = await asyncio.to_thread(compute_history_quick_stats, user_id, fd, td)
     return {"ok": True, **result, "window": {"from": fd.isoformat(), "to": td.isoformat()}}
-
-
-MAX_OFX_BYTES = 8 * 1024 * 1024  # 8 MB — extratos OFX raramente passam disso
 
 
 @app.post("/ofx/import/{user_id}")
