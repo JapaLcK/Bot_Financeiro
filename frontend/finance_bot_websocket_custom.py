@@ -121,6 +121,7 @@ from core.limite_corpo import LimiteCorpoMiddleware, MAX_OFX_BYTES
 from api.v2 import app as api_v2_app, eventos as api_v2_eventos
 from frontend.routes.affiliates import router as affiliates_router
 from frontend.routes.billing_pix import router as billing_pix_router
+from frontend.routes.billing_bump import router as billing_bump_router
 from frontend.routes.agents import router as agents_router
 from frontend.routes.analytics import router as analytics_router
 from frontend.routes.cards import router as cards_router
@@ -9329,6 +9330,9 @@ app.include_router(onboarding_router)
 # O nome da env não aparece neste arquivo de propósito: `test_pix_destino_inerte`
 # é TEXTUAL e pega até comentário. É ele que mantém a flag com quem a obedece.
 app.include_router(billing_pix_router)
+# Order bump da página própria (frontend/routes/billing_bump.py); incondicional
+# como o do Pix: a flag mora na criação da sessão, não na rota.
+app.include_router(billing_bump_router)
 
 # ─── /api/v2 (dashboard v2) → api/v2/: sub-app com o envelope de erro próprio ──
 app.mount("/api/v2", api_v2_app)
