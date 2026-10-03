@@ -13,7 +13,7 @@
   }
   .ledger-head h2, .stat-title, .cmdk-foot, .rail-sync, .cat-name, .tl-name, .row-sub,
   .board-actions, .detail-facts .fact-sub, .hero-facts, .day-head,
-  .ramp, .brand, .rail-list a, .ledger-chips {
+  .ramp, .brand, .rail-list a, .rail-list button, .ledger-chips {
     display: grid; grid-auto-flow: column; grid-auto-columns: minmax(auto, max-content);
   }
   .more { display: grid; }

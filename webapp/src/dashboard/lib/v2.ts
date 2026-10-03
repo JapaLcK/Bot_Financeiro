@@ -107,6 +107,14 @@ export const contasQuery = {
   queryFn: ({ signal }: { signal: AbortSignal }) => apiGet("/contas", signal),
   ...vivo,
 };
+export const guiaQuery = {
+  queryKey: ["guia"],
+  queryFn: ({ signal }: { signal: AbortSignal }) => apiGet("/guia", signal),
+  ...vivo,
+};
+// A conversa com o Piggy ainda responde com dado de exemplo (lib/topics.tsx): decide o selo
+// do chat e o `data-dado` da barra de conversa. Vira true quando a conversa usar a API.
+export const CHAT_REAL = false;
 export const resumoMesQuery = (mes: string) => ({
   queryKey: ["resumo-do-mes", mes],
   queryFn: ({ signal }: { signal: AbortSignal }) => apiGet("/resumo-do-mes", signal, { mes }),

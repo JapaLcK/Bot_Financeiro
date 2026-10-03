@@ -6,7 +6,7 @@ import type { TopicId } from "../lib/topics";
 import { FrameScope } from "./Frame";
 import { LiveAnswer } from "./LiveAnswer";
 import { ICON } from "../lib/brand";
-import { DEMO, perfilQuery } from "../lib/v2";
+import { CHAT_REAL, DEMO, perfilQuery } from "../lib/v2";
 import { Demonstracao } from "./Selos";
 
 type Prompt = { key: string; ask: string | null; topic?: TopicId; cat?: string };
@@ -47,7 +47,7 @@ export function PiggyChat() {
 
   const head = (
     <header className="page-head">
-      <h1 id="page-title" tabIndex={-1}>Converse com o Piggy{!DEMO && <Demonstracao />}</h1>
+      <h1 id="page-title" tabIndex={-1}>Converse com o Piggy{!DEMO && !CHAT_REAL && <Demonstracao />}</h1>
       <p className="page-lede">Pergunte sobre gastos, fatura, metas e investimentos. A resposta vem com os seus números.</p>
     </header>
   );

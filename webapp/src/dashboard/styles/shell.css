@@ -24,19 +24,22 @@
 .brand img { border-radius: 8px; }
 
 .rail-list { display: grid; gap: 2px; }
-.rail-list a {
+.rail-list a, .rail-list button {
   display: flex; align-items: center; gap: 11px;
+  width: 100%;
   height: 36px; padding: 0 12px;
   border-radius: 9px;
   color: var(--ink-2);
   font-weight: 500;
   transition: color var(--t-fast) ease, background-color var(--t-fast) ease;
 }
+/* "Ajuda" (abre o guia, parts/Guia.tsx): botão com a cara dos links. */
+.rail-list button, .tabbar button { border: 0; background: none; font: inherit; cursor: pointer; }
 .rail-list i { font-size: 17px; }
 .rail-list a[aria-current="page"] { color: var(--ink); background: var(--pink-wash); }
 .rail-list a[aria-current="page"] i { color: var(--pink); }
 @media (hover: hover) and (pointer: fine) {
-  .rail-list a:hover { color: var(--ink); background: var(--plane-1); }
+  .rail-list a:hover, .rail-list button:hover { color: var(--ink); background: var(--plane-1); }
 }
 
 .rail-foot { margin-top: auto; padding: 0 12px; display: grid; gap: 4px; font-size: 12px; }
@@ -113,7 +116,7 @@
 @media (max-width: 1180px) {
   :root { --rail-w: 72px; --gutter: 28px; }
   .brand span, .rail-label { display: none; }
-  .rail-list a { justify-content: center; padding: 0; }
+  .rail-list a, .rail-list button { justify-content: center; padding: 0; }
   .rail-list i { font-size: 19px; }
   .brand { justify-content: center; padding: 4px 0; }
   .rail-foot { display: none; }
@@ -145,7 +148,7 @@
     -webkit-backdrop-filter: saturate(140%) blur(16px);
     border-top: 1px solid var(--rule);
   }
-  .tabbar a {
+  .tabbar a, .tabbar button {
     display: grid; justify-items: center; gap: 2px;
     padding: 6px 0;
     font-size: 11px; font-weight: 500;
@@ -158,8 +161,15 @@
      página ela fica cinza como os outros ícones, e só ganha a cor quando é a atual. */
   .tabbar img { margin-top: -3px; filter: grayscale(1) brightness(1.35); opacity: 0.7; }
   .tabbar a[aria-current="page"] img { filter: none; opacity: 1; }
+  .tabbar.tabbar-ajuda { grid-template-columns: repeat(6, 1fr); } /* /painel: + Ajuda; o protótipo não tem guia */
 }
 @media (max-width: 400px) { .topbar .btn-primary i { display: none; } }
+/* Seis abas: abaixo de 360px a Ajuda fica só com o ícone (aria-label) numa coluna estreita,
+   e o rótulo das outras ganha a sobra. Folga medida em tests/frontend/dashboard_v2_guia.test.mjs. */
+@media (max-width: 359.98px) {
+  .tabbar.tabbar-ajuda { grid-template-columns: repeat(5, 1fr) 36px; }
+  .tabbar button span { display: none; }
+}
 /* Mês, busca e Ferramentas lado a lado não deixam folga: o CI no Linux mede o texto mais
    largo que o macOS e estourava em 320 e em 361px. Até 420px o ano sai do título; até
    360px a busca sai também. */

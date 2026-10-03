@@ -167,6 +167,10 @@
       "status": 404,
       "body": { "error": { "code": "not_found", "message": "Not Found" } }
     },
+    "409_passo_indisponivel": {
+      "status": 409,
+      "body": { "error": { "code": "passo_indisponivel", "message": "Conflict" } }
+    },
     "403_csrf": {
       "status": 403,
       "fora_do_envelope": true,

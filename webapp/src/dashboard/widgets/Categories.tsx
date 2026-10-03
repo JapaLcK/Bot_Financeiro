@@ -31,7 +31,7 @@ export function Categories({ s }: { s: DashState }) {
     <Frame id="categorias" title="Para onde vai"
       aside={active && <button type="button" className="chip" aria-pressed="true" onClick={() => setFilter({ category: null })}>Limpar <i className="ph ph-x x" aria-hidden="true" /></button>}>
       <p className="w-lede"><span className="num">{money0(m.expense)}</span> gastos no mês{prev ? <span className="faint"> · traço = mês anterior no mesmo dia</span> : null}</p>
-      <ul className="cats" tabIndex={rola ? 0 : undefined} aria-label={rola ? "Categorias do mês" : undefined}>
+      <ul className="cats" data-guia="categorias.lista" tabIndex={rola ? 0 : undefined} aria-label={rola ? "Categorias do mês" : undefined}>
         {rows.map(({ c, value, before }) => {
           const d = before ? (value - before) / before : null;
           const on = active === c.id;

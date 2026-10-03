@@ -230,11 +230,12 @@ test("a resposta nova é anunciada para leitor de tela", async () => {
   await page.locator(".chat > .msg-piggy").first().waitFor();
   await perguntar(page, "oi");
   await page.waitForFunction(() => document.querySelectorAll(".chat > .msg-piggy").length === 2);
-  await page.waitForFunction(() => document.querySelector("[role=status]").textContent === [...document.querySelectorAll(".chat > .msg-piggy .msg-text")].pop().textContent, null, { timeout: 2000 }).catch(() => {});
-  const r = await page.evaluate(() => [document.querySelector("[role=status]").textContent, [...document.querySelectorAll(".chat > .msg-piggy .msg-text")].pop().textContent]);
+  // Em #main: o guia (parts/Guia.tsx) tem a própria região de anúncio, antes dele no DOM.
+  await page.waitForFunction(() => document.querySelector("#main [role=status]").textContent === [...document.querySelectorAll(".chat > .msg-piggy .msg-text")].pop().textContent, null, { timeout: 2000 }).catch(() => {});
+  const r = await page.evaluate(() => [document.querySelector("#main [role=status]").textContent, [...document.querySelectorAll(".chat > .msg-piggy .msg-text")].pop().textContent]);
   // Duas respostas iguais seguidas (texto livre): a região esvazia e enche de novo, então muda.
   const mudancas = await page.evaluate(async () => {
-    const st = document.querySelector("[role=status]");
+    const st = document.querySelector("#main [role=status]");
     let n = 0; new MutationObserver(() => n++).observe(st, { childList: true, subtree: true, characterData: true });
     const inp = document.querySelector("#askbar-input"); const set = Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, "value").set;
     set.call(inp, "oi de novo"); inp.dispatchEvent(new Event("input", { bubbles: true }));
