@@ -1550,6 +1550,8 @@ def pay_bill_amount(
     amount: float | None,
     bill_id: int | None = None,
 ):
+    # Não valida que o cartão é do dono da fatura: quem chama traz `card_id`/`bill_id` de uma
+    # consulta já guardada por `c.user_id = b.user_id` (#770).
     with get_conn() as conn:
         with conn.cursor() as cur:
             if bill_id is not None:
@@ -1711,10 +1713,10 @@ def rebuild_bill_totals(
             # estornar na conta corrente.
             cur.execute(
                 """
-                select b.id, b.card_id, c.name as card_name,
+                select b.id, b.card_id, coalesce(c.name, 'Cartão') as card_name,
                        coalesce(b.paid_amount, 0) - b.total as overpaid
                   from credit_bills b
-                  join credit_cards c on c.id = b.card_id
+                  left join credit_cards c on c.id = b.card_id and c.user_id = b.user_id
                  where b.user_id = %s
                    and coalesce(b.paid_amount, 0) > b.total
                 """,
@@ -1810,7 +1812,7 @@ def list_open_bills(user_id: int):
                 select b.id, b.card_id, c.name as card_name, b.period_start, b.period_end,
                        b.total, coalesce(b.paid_amount, 0) as paid_amount, b.status
                 from credit_bills b
-                join credit_cards c on c.id = b.card_id
+                join credit_cards c on c.id = b.card_id and c.user_id = b.user_id
                 where b.user_id=%s and b.status='open'
                 order by b.period_end asc, c.name asc
                 """,
@@ -1842,7 +1844,7 @@ def list_bills_with_debt(user_id: int):
                        b.status,
                        (b.status = 'closed') as is_overdue
                 from credit_bills b
-                join credit_cards c on c.id = b.card_id
+                join credit_cards c on c.id = b.card_id and c.user_id = b.user_id
                 where b.user_id=%s
                   and b.status in ('open', 'closed')
                   and b.total > coalesce(b.paid_amount, 0)
