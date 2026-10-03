@@ -1,9 +1,10 @@
+import { useContext } from "react";
 import { CATEGORIES, TODAY, isCurrentMonth, previousKey, summary } from "../lib/api";
 import { LAUNCHES } from "../lib/data.js";
 import { money0 } from "../lib/format.js";
 import { useActions } from "../lib/actions";
 import type { DashState, Launch } from "../lib/types";
-import { Frame } from "../parts/Frame";
+import { Frame, FrameLink } from "../parts/Frame";
 
 // Gasto de uma categoria num mês, até um dia do mês (para comparar no mesmo ponto).
 function catUntil(key: string, cat: string, day: number) {
@@ -23,12 +24,14 @@ export function Categories({ s }: { s: DashState }) {
   const max = Math.max(...rows.map((r) => Math.max(r.value, r.before ?? 0)), 1);
   const active = s.filter.category;
   const { setFilter } = useActions();
+  // No Resumo a lista rola por dentro (panels.css): o teclado tem de alcançá-la.
+  const rola = useContext(FrameLink) !== null;
 
   return (
     <Frame id="categorias" title="Para onde vai"
       aside={active && <button type="button" className="chip" aria-pressed="true" onClick={() => setFilter({ category: null })}>Limpar <i className="ph ph-x x" aria-hidden="true" /></button>}>
-      <p className="w-lede"><span className="num">{money0(m.expense)}</span> em {rows.length} categorias{prev ? <span className="faint"> · traço = mês anterior no mesmo dia</span> : null}</p>
-      <ul className="cats">
+      <p className="w-lede"><span className="num">{money0(m.expense)}</span> gastos no mês{prev ? <span className="faint"> · traço = mês anterior no mesmo dia</span> : null}</p>
+      <ul className="cats" tabIndex={rola ? 0 : undefined} aria-label={rola ? "Categorias do mês" : undefined}>
         {rows.map(({ c, value, before }) => {
           const d = before ? (value - before) / before : null;
           const on = active === c.id;

@@ -4,12 +4,13 @@
  *   · contas fora do total (outra moeda, pausada, saldo ausente) só atrás do botão; o total
  *     diz quantas; saldo ausente é "—", nunca "R$ 0,00"; sem conta fora, nem nota nem botão;
  *   · o modal de perfil só abre com o perfil `null` do servidor, nunca enquanto carrega;
- *   · escolher perfil faz PUT com x-csrf-token e o corpo certo; no 500 e no 403 desfaz e avisa;
+ *   · escolher perfil faz PUT com x-csrf-token e o corpo certo; no 500 e no 403 desfaz e avisa; no
+ *     403 `password_required` o aviso leva o "Criar senha" (para a /home), no modal e fora dele;
  *   · "Recomeçar do zero" (o servidor volta a `null` e o SSE avisa): o modal reabre;
- *   · Entrou e Saiu do fixture, o mês anterior só quando não é null, motivos como selos;
+ *   · Entrou e Saiu do fixture com centavos, o mês anterior só quando não é null, motivos como selos;
  *   · selo "demonstração" em todo bloco inventado, e nunca em Contas, Entrou e Saiu; com
- *     backend também no título do Resumo, na faixa do Piggy, no extrato e na conversa
- *     (no protótipo, onde tudo é de exemplo, não);
+ *     backend também na faixa do Piggy, no extrato e na conversa (no protótipo, onde tudo é de
+ *     exemplo, não); o título do Resumo nunca leva (decisão do dono, PR C2: só os blocos);
  *   · o mês da página é o corrente em America/Sao_Paulo (não o do aparelho nem o do UTC),
  *     o seletor tem os 6 últimos e cada um pede o seu `mes=`;
  *   · título e selo inteiros, sem rolagem lateral e setas do mês com 44px, no desktop e no celular.
@@ -116,16 +117,20 @@ test("escolher no modal: PUT com x-csrf-token e o corpo certo; o painel é o do 
   assert.deepEqual(r, [0, ["contas", "metas", "patrimonio", "piggy", "rendimento", "resumo", "simulador", "wealth"]]);
 });
 
-for (const [nome, erro] of [["500", RESPOSTAS.erros["500"]], ["403 password_required", RESPOSTAS.erros["403_password_required"]]]) {
+// O texto do aviso e o "Criar senha" (só no password_required), lidos do modal e do painel.
+const GENERICO = ["Não foi possível salvar agora", 0];
+const SENHA = ["Crie sua senha para salvar o seu painel. Depois de criar, volte para o painel novo. Criar senha", 1];
+const aviso = async (page, sel) => [await page.locator(sel).textContent(), await page.locator(`${sel} a[href="/home"]`).count()];
+for (const [nome, erro, esperado] of [["500", RESPOSTAS.erros["500"], GENERICO], ["403 password_required", RESPOSTAS.erros["403_password_required"], SENHA]]) {
   test(`PUT ${nome} no modal: desfaz (o modal volta) e avisa`, async () => {
     const { ctx, page, ir } = await abrir({ perfil: null });
     await ctx.route("**/api/v2/perfil", (r) => (r.request().method() === "PUT" ? r.fulfill({ status: erro.status, json: erro.body }) : r.fallback()));
     await ir();
     await page.getByRole("button", { name: /^Investir/ }).click();
     await page.locator(".picker[open] .picker-aviso").waitFor();
-    const r = [await page.locator(".picker-aviso").textContent(), await page.locator(".board-aviso").textContent(), await page.locator(".picker[open]").count()];
+    const r = [await aviso(page, ".picker-aviso"), await aviso(page, ".board-aviso"), await page.locator(".picker[open]").count()];
     await ctx.close();
-    assert.deepEqual(r, ["Não foi possível salvar agora", "Não foi possível salvar agora", 1]);
+    assert.deepEqual(r, [esperado, esperado, 1]);
   });
 
   test(`PUT ${nome} pelo seletor: volta ao perfil de antes e avisa`, async () => {
@@ -134,11 +139,11 @@ for (const [nome, erro] of [["500", RESPOSTAS.erros["500"]], ["403 password_requ
     await ir();
     const antes = await blocos(page);
     await page.selectOption("#board-profile", "investir");
-    await page.locator(".board-aviso", { hasText: "Não foi possível salvar agora" }).waitFor();
+    await page.locator(".board-aviso", { hasText: esperado[0].slice(0, 20) }).waitFor();
     await page.waitForFunction(() => document.querySelector("#board-profile").value === "padrao");
-    const r = [await blocos(page), await page.locator(".picker[open]").count()];
+    const r = [await blocos(page), await page.locator(".picker[open]").count(), await aviso(page, ".board-aviso")];
     await ctx.close();
-    assert.deepEqual(r, [antes, 0]);
+    assert.deepEqual(r, [antes, 0, esperado]);
     assert.ok(antes.includes("hero") && !antes.includes("rendimento"));
   });
 }
@@ -176,7 +181,7 @@ test("Recomeçar do zero: o servidor volta a null e o aviso do SSE reabre o moda
   assert.equal(antes, 0);
 });
 
-test("Entrou e Saiu do fixture, com o mês anterior inteiro; sem selo de demonstração", async () => {
+test("Entrou e Saiu do fixture com centavos, com o mês anterior inteiro; sem selo de demonstração", async () => {
   const { ctx, page, ir } = await abrir();
   const pedidos = [];
   page.on("request", (r) => { const u = new URL(r.url()); if (u.pathname === "/api/v2/resumo-do-mes") pedidos.push(u.search); });
@@ -186,7 +191,7 @@ test("Entrou e Saiu do fixture, com o mês anterior inteiro; sem selo de demonst
   const r = [];
   for (const i of [0, 1]) r.push([await numero(st.nth(i).locator(".stat-value")), await st.nth(i).locator(".stat-delta").textContent(), await st.nth(i).locator(".selo").count()]);
   await ctx.close();
-  assert.deepEqual(r, [["R$ 1.040", "em setembro: R$ 5.200", 0], ["R$ 440", "em setembro: R$ 3.981", 0]]);
+  assert.deepEqual(r, [["R$ 1.040,00", "em setembro: R$ 5.200,00", 0], ["R$ 440,00", "em setembro: R$ 3.980,55", 0]]);
   assert.deepEqual([...new Set(pedidos)], ["?mes=2026-10"]);
 });
 
@@ -197,7 +202,7 @@ test("mês anterior null: sem referência; os motivos viram selos em português"
   await st.locator(".stat-value").waitFor();
   const r = [await st.locator(".stat-delta").count(), await st.locator(".selos .selo").allTextContents(), await numero(st.locator(".stat-value"))];
   await ctx.close();
-  assert.deepEqual(r, [0, ["conciliação pendente", "movimentos pendentes", "banco desatualizado", "início do histórico"], "R$ 0"]);
+  assert.deepEqual(r, [0, ["conciliação pendente", "movimentos pendentes", "banco desatualizado", "início do histórico"], "R$ 0,00"]);
 });
 
 test("selo de demonstração: em todo bloco inventado do Resumo, e não em Contas, Entrou e Saiu", async () => {
@@ -318,19 +323,23 @@ test("seletor: 6 meses reais; voltar pede o mês escolhido e os blocos de exempl
 
 // --- Selo nas telas de exemplo -------------------------------------------------------
 
-const SELO = { "/": ["#page-title > .selo", ".piggy-band-by > .selo"], "/lancamentos": ["#ledger-h > .selo"], "/piggy": ["#page-title > .selo"] };
+const SELO = { "/": [".piggy-band-by > .selo"], "/lancamentos": ["#ledger-h > .selo"], "/piggy": ["#page-title > .selo"] };
 for (const demo of [false, true]) {
-  test(`selo "demonstração" no título do Resumo, na faixa do Piggy, no extrato e na conversa: ${demo ? "não no protótipo" : "com backend"}`, async () => {
+  test(`selo "demonstração" na faixa do Piggy, no extrato e na conversa: ${demo ? "não no protótipo" : "com backend"}; no título do Resumo, nunca`, async () => {
     const { ctx, page, ir } = await abrir({ demo, espera: "#page-title" });
     const r = {};
     for (const [rota, seletores] of Object.entries(SELO)) {
       await ir(rota);
-      if (rota === "/") await page.locator("#board-profile").waitFor();
+      if (rota === "/") {
+        await page.locator("#board-profile").waitFor();
+        r.titulo = [await page.locator("#page-title").textContent(), await page.locator("#page-title .selo").count()];
+      }
       for (const s of seletores) r[s + " " + rota] = await page.locator(s).allTextContents();
     }
     await ctx.close();
     const um = demo ? [] : ["demonstração"];
-    assert.deepEqual(r, Object.fromEntries(Object.entries(SELO).flatMap(([rota, ss]) => ss.map((s) => [s + " " + rota, um]))));
+    const titulo = [demo ? "Resumo de setembro" : "Resumo de outubro", 0];
+    assert.deepEqual(r, { titulo, ...Object.fromEntries(Object.entries(SELO).flatMap(([rota, ss]) => ss.map((s) => [s + " " + rota, um]))) });
   });
 }
 

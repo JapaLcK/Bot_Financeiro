@@ -128,7 +128,7 @@ test("PUT de perfil em voo: seletor aria-disabled com o foco nele; a 2ª escolha
   solta();
   await ctx.close();
   assert.deepEqual(preso, ["investir", "true", "true", true]);
-  assert.deepEqual(alvo, [32, 32]); // ocupado não muda o tamanho (o seletor tem 32px desde a main: .field)
+  assert.deepEqual(alvo, [44, 44]); // ocupado não muda o tamanho; 44px de alvo de toque (PR C2), só neste seletor
   assert.deepEqual(segunda, [["investir"], "investir"]);
   assert.deepEqual(depois, ["investir", null, null, true]);
   assert.deepEqual(terceira, ["investir", "economizar"]);

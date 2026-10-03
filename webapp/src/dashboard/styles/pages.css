@@ -44,6 +44,9 @@
   .w-open:hover i { transform: translateX(2px); }
 }
 .w-open i { transition: transform var(--t-fast) var(--ease-out); }
+/* Alvo de toque de 44px sem mexer na altura da cabeça do bloco (o desenho segue com 28px). */
+.w-open { position: relative; }
+.w-open::after { content: ""; position: absolute; top: -8px; right: -8px; bottom: -8px; left: -8px; }
 .board[data-editing] .w-open { display: none; }
 
 /* Detalhe da categoria */
