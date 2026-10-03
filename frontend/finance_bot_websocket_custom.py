@@ -3373,6 +3373,11 @@ async def auth_register(request: Request, body: RegisterBody):
 
     if len(body.password) < 8:
         raise HTTPException(status_code=400, detail="Senha deve ter pelo menos 8 caracteres.")
+    if len(body.password.encode("utf-8")) > 72:  # teto do bcrypt: acima disso hashpw levanta ValueError
+        raise HTTPException(
+            status_code=400,
+            detail="Senha longa demais: use no máximo 72 caracteres (acentos e emojis contam como mais de um).",
+        )
 
     name = (body.name or "").strip() or None
     if name is not None:
