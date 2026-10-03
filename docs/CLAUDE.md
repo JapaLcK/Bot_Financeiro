@@ -565,6 +565,16 @@ essa leitura, senão o `confirm` lança (docs.stripe.com/js/custom_checkout). Li
 sincronização do Pagar; o Pagar faz 1 `/bump` de sincronização quando há caixas (conta nos 120/h por IP). Testes:
 `tests/frontend/pagamento_pagina*.test.mjs`.
 
+A `/precos` (`startCheckout`) manda `pagina: true` só fora do app (`window.PB_IN_APP`: no
+app a `/assinar` vai ao hospedado, e uma sessão `elements` criada antes seria expirada e
+refeita) e, com a resposta `pagina`, navega para
+`/assinar?plano=…&ciclo=…&origem=precos`, que reaproveita a sessão; o
+InitiateCheckout/begin_checkout fica para a `/assinar` (perda conhecida: o begin_checkout
+de lá vai sem `value`). Sem `pagina` na resposta, o hospedado de antes, com o rastreio de
+antes. Limite aceito: cada compra pela `/precos` gasta 2 chamadas do limite de 20/h do
+create-checkout (a da `/precos` e a da `/assinar`). Testes:
+`tests/frontend/precos_pagina_propria.test.mjs`.
+
 **`POST /billing/checkout/bump`** (`frontend/routes/billing_bump.py`): o order bump da
 página própria. Corpo `{sid, posicoes}` = o CONJUNTO desejado inteiro, em posições da
 foto (`[]` = nenhum); o preço sai sempre da foto da sessão, nunca do cliente. Campo a

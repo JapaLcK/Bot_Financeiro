@@ -24,16 +24,22 @@ after(async () => {
 // /assinar e o hospedado aqui são stubs sem rastreio.
 const ESPIAO = () => {
   if (!/^\/(precos\.html|continuar-compra)$/.test(location.pathname)) return;
-  const anota = (ev) => sessionStorage.setItem("__rastro",
-    JSON.stringify([...JSON.parse(sessionStorage.getItem("__rastro") || "[]"), ev]));
-  window.fbq = (_tipo, nome) => anota(nome);
-  window.pbTrack = (nome, _p, depois) => { anota(nome); if (depois) depois(); };
+  const anota = (nome, params) => sessionStorage.setItem("__rastro",
+    JSON.stringify([...JSON.parse(sessionStorage.getItem("__rastro") || "[]"), { nome, params }]));
+  window.fbq = (_tipo, nome, params) => anota(nome, params);
+  window.pbTrack = (nome, params, depois) => { anota(nome, params); if (depois) depois(); };
 };
+
+// UA do WebView do app: o auth-refresh.js liga window.PB_IN_APP pela substring
+// PigBankApp (o mesmo mecanismo de precos_sem_plano_gratis.test.mjs).
+const APP_UA = "Mozilla/5.0 (iPhone; CPU iPhone OS 17_0 like Mac OS X) "
+  + "AppleWebKit/605.1.15 Safari/604.1 PigBankApp/1.0";
 
 // `subs`: respostas do /billing/subscription em ordem (a última se repete).
 async function abre({ resposta, status = 200, subs = [{ active: false }],
-                      intencao = null, caminho = "/precos.html" }) {
-  const page = await browser.newPage({ viewport: { width: 390, height: 844 } });
+                      intencao = null, caminho = "/precos.html", app = false }) {
+  const page = await browser.newPage({ viewport: { width: 390, height: 844 },
+                                       ...(app ? { userAgent: APP_UA } : {}) });
   const corpos = [];
   await page.addInitScript(ESPIAO);
   if (intencao) {
@@ -76,7 +82,13 @@ async function abre({ resposta, status = 200, subs = [{ active: false }],
 
 // Só os eventos de checkout (o ViewContent da abertura não conta).
 const rastro = (page) => page.evaluate(() => JSON.parse(sessionStorage.getItem("__rastro") || "[]")
-  .filter((e) => /checkout/i.test(e)));
+  .filter((e) => /checkout/i.test(e.nome)));
+// O rastreio do hospedado de hoje, com os parâmetros (Plus mensal = R$ 19,90).
+const RASTRO_HOSPEDADO_PLUS = [
+  { nome: "InitiateCheckout", params: { content_category: "plus", content_name: "monthly" } },
+  { nome: "begin_checkout", params: { currency: "BRL", value: 19.9,
+    items: [{ item_id: "plus", item_name: "Plus", item_category: "monthly" }] } },
+];
 const intencao = (page) => page.evaluate(() => JSON.parse(sessionStorage.getItem("pb_purchase_intent_v1")));
 
 test("pagina → /assinar?plano=plus&ciclo=monthly&origem=precos, sem InitiateCheckout na /precos", async () => {
@@ -105,7 +117,23 @@ test("controle positivo: checkout_url → hospedado de antes, com InitiateChecko
     page.click('#plans-v2 [data-plan-btn="plus"]'),
   ]);
   assert.deepEqual(corpos, [{ interval: "monthly", pagina: true, plan: "plus" }]);
-  assert.deepEqual(await rastro(page), ["InitiateCheckout", "begin_checkout"]);
+  assert.deepEqual(await rastro(page), RASTRO_HOSPEDADO_PLUS);
+  await page.close();
+});
+
+test("app: o corpo não leva `pagina` e o checkout_url vai direto ao hospedado", async () => {
+  // A /assinar no app vai ao hospedado: uma sessão `elements` criada aqui seria
+  // expirada lá e trocada por outra (2 sessões por compra).
+  const { page, corpos } = await abre({ resposta: { checkout_url: `${ORIGIN}/hospedado-ok` }, app: true });
+  await page.waitForSelector('#plans-v2 [data-plan-btn="plus"]');
+  assert.equal(await page.evaluate(() => window.PB_IN_APP === true), true,
+    "a UA do app não ligou window.PB_IN_APP — o teste não mediria o app");
+  await Promise.all([
+    page.waitForURL("**/hospedado-ok"),
+    page.click('#plans-v2 [data-plan-btn="plus"]'),
+  ]);
+  assert.deepEqual(corpos, [{ interval: "monthly", plan: "plus" }]);
+  assert.deepEqual(await rastro(page), RASTRO_HOSPEDADO_PLUS);
   await page.close();
 });
 

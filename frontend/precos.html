@@ -1025,7 +1025,10 @@ async function startCheckout(interval, btn, plan, resuming) {
   };
   // `pagina`: com a flag CHECKOUT_PAGINA_PROPRIA o servidor cria a sessão da
   // página própria e a compra segue na /assinar; desligada, o hospedado de antes.
-  const payload = { interval, pagina: true };
+  // No app, não: a /assinar no app vai ao hospedado, e a sessão `elements` criada
+  // aqui seria expirada lá (2 sessões por compra).
+  const payload = { interval };
+  if (!window.PB_IN_APP) payload.pagina = true;
   if (plan) payload.plan = plan;
 
   try {
