@@ -276,7 +276,8 @@ Sub-app FastAPI (`api/v2/app.py`) montado pelo monólito com `app.mount("/api/v2
 - `GET`/`POST /api/v2/guia` (`api/v2/guia.py`, estado em `db/guia.py`, tabela `guia_painel`,
   uma linha por usuário): o guia do `/painel` (#728). `PASSOS` em `api/v2/guia.py` é a fonte
   única do roteiro (`id`, `tela`, `ancora`, `acao`, `dado` `real`|`exemplo`, `fala {titulo,
-  texto}`, `avanca: "cliente"`); o cliente desenha o selo "exemplo" a partir de `dado`.
+  apresenta, texto}` — `apresenta` explica o bloco antes do "Entendi", `texto` diz o que
+  tocar depois dele —, `avanca: "cliente"`); o cliente desenha o selo "exemplo" a partir de `dado`.
   Resposta `{estado, motivo, passos: [{...roteiro, disponivel, motivo, feito}]}`. Passo 1
   (`resumo.saiu`) disponível quando o Saiu de `resumo_do_mes` (com a janela do plano) é > 0 no
   mês corrente OU no anterior; senão `motivo` = `sincronizando` (alguma conexão `updating`)

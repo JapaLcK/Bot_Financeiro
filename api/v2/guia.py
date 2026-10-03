@@ -27,17 +27,20 @@ PASSOS = (
     {"id": "resumo.saiu", "tela": "resumo", "ancora": "resumo.saiu", "acao": "mes.trocado",
      "dado": "real", "avanca": "cliente",
      "fala": {"titulo": "O que saiu este mês",
-              "texto": "Este é o que saiu este mês, do seu banco. Troca o mês na seta e compara."}},
+              "apresenta": "Esse é o que saiu da sua conta este mês, direto do seu banco.",
+              "texto": "Toca aqui pra comparar com o mês passado."}},
     {"id": "gastos.categoria", "tela": "gastos", "ancora": "categorias.lista", "acao": "categoria.aberta",
      "dado": "exemplo", "avanca": "cliente",
      "fala": {"titulo": "Pra onde foi o dinheiro",
-              "texto": "Toca numa categoria para ver de onde vem o total. "
-                       "Estes números ainda são de exemplo."}},
+              "apresenta": "Aqui ficam suas categorias: pra onde foi cada real do mês. "
+                           "Estes números ainda são de exemplo.",
+              "texto": "Toca numa categoria pra ver de onde vem o total."}},
     {"id": "piggy.pergunta", "tela": "piggy", "ancora": "piggy.pergunta", "acao": "piggy.perguntou",
      "dado": "exemplo", "avanca": "cliente",
      "fala": {"titulo": "Pergunta pro Piggy",
-              "texto": "Toca numa pergunta pronta e vê o Piggy responder. As respostas ainda são "
-                       "de exemplo; a conversa de verdade chega em breve."}},
+              "apresenta": "Aqui você conversa comigo. As respostas ainda são de exemplo; "
+                           "a conversa de verdade chega em breve.",
+              "texto": "Toca numa pergunta pronta e me vê responder."}},
 )
 IDS = [p["id"] for p in PASSOS]
 
@@ -46,7 +49,9 @@ Motivo = Literal["sem_dados", "sincronizando", "conexao_com_erro"]
 
 
 class Fala(BaseModel):
+    """`apresenta`: o bloco, antes do "Entendi"; `texto`: o que tocar, depois dele."""
     titulo: str
+    apresenta: str
     texto: str
 
 
