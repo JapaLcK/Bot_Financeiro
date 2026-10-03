@@ -531,7 +531,7 @@ async def get_financial_data(
                    NULL::date AS posted_at,
                    true AS has_time
             FROM credit_transactions t
-            JOIN credit_cards c ON c.id = t.card_id
+            LEFT JOIN credit_cards c ON c.id = t.card_id AND c.user_id = t.user_id
             JOIN credit_bills b ON b.id = t.bill_id
             WHERE t.user_id = %s AND COALESCE(b.user_id, (SELECT cb.user_id FROM credit_cards cb WHERE cb.id = b.card_id)) = %s
               AND b.period_end >= %s::date
@@ -723,7 +723,7 @@ async def get_financial_data(
                     period_start,
                     period_end
                 FROM credit_bills
-                WHERE card_id = c.id
+                WHERE card_id = c.id AND user_id = c.user_id
                   AND period_end >= %s
                   AND period_end < %s
                 ORDER BY period_end DESC
@@ -1233,7 +1233,7 @@ async def _fetch_export_items(user_id: int, start_date: date | int, end_date: da
                        b.period_end, c.name AS card_name
                 FROM credit_transactions ct
                 JOIN credit_bills b ON b.id = ct.bill_id
-                JOIN credit_cards c ON c.id = ct.card_id
+                LEFT JOIN credit_cards c ON c.id = ct.card_id AND c.user_id = ct.user_id
                 WHERE ct.user_id = %s AND COALESCE(b.user_id, (SELECT cb.user_id FROM credit_cards cb WHERE cb.id = b.card_id)) = %s
                   AND ct.is_refund = false
                   AND b.period_end >= %s AND b.period_end < %s

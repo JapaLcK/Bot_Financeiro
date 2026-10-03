@@ -12,6 +12,9 @@ from .connection import get_conn
 from .users import ensure_user
 from .accounts import add_launch_and_update_balance
 
+# Escrita em credit_bills: a fatura é do usuário, ou é legado sem user_id (schema.py:1170) num cartão dele.
+_BILL_DO_USUARIO = "coalesce(user_id, (select c.user_id from credit_cards c where c.id = credit_bills.card_id)) = %s"
+
 
 # ──────────────────────────────────────────────────────────────────────────────
 # Helpers de data/período
@@ -674,7 +677,7 @@ def remove_single_credit_transaction(user_id: int, ct_id: int):
             v = Decimal(str(tx["valor"]))
             cur.execute("delete from credit_transactions where user_id=%s and id=%s", (user_id, ct_id))
             cur.execute(
-                "update credit_bills set total = total - %s where id=%s and user_id=%s",
+                f"update credit_bills set total = total - %s where id=%s and {_BILL_DO_USUARIO}",
                 (v, tx["bill_id"], user_id),
             )
         conn.commit()
@@ -1033,7 +1036,7 @@ def undo_credit_transaction(user_id: int, ct_id: int):
             )
             cur.execute(
                 "update credit_bills set total = greatest(0, total - %s) "
-                "where id=%s and user_id=%s "
+                f"where id=%s and {_BILL_DO_USUARIO} "
                 "returning total, coalesce(paid_amount, 0) as paid_amount",
                 (float(v), bill_id, user_id),
             )
@@ -1049,7 +1052,7 @@ def undo_credit_transaction(user_id: int, ct_id: int):
                 if paid > 0 and paid >= total:
                     cur.execute(
                         "update credit_bills set status='paid', paid_at=now() "
-                        "where id=%s and user_id=%s",
+                        f"where id=%s and {_BILL_DO_USUARIO}",
                         (bill_id, user_id),
                     )
 
@@ -1105,8 +1108,8 @@ def undo_installment_group(user_id: int, group_id: str):
                     tx_to_orphan.append(r)
 
             cur.execute(
-                "select name from credit_cards where id = %s",
-                (rows[0]["card_id"],),
+                "select name from credit_cards where id = %s and user_id = %s",
+                (rows[0]["card_id"], user_id),
             )
             row_card = cur.fetchone()
             card_name = row_card["name"] if row_card else "cartão"
@@ -1139,7 +1142,7 @@ def undo_installment_group(user_id: int, group_id: str):
             for bill_id, bill_sum in by_bill_delete.items():
                 cur.execute(
                     "select total, coalesce(paid_amount, 0) as paid_amount "
-                    "from credit_bills where id = %s and user_id = %s for update",
+                    f"from credit_bills where id = %s and {_BILL_DO_USUARIO} for update",
                     (bill_id, user_id),
                 )
                 row = cur.fetchone()
@@ -1153,20 +1156,20 @@ def undo_installment_group(user_id: int, group_id: str):
                     cur.execute(
                         "update credit_bills set total = %s, paid_amount = %s, "
                         "status='paid', paid_at=now() "
-                        "where id = %s and user_id = %s",
+                        f"where id = %s and {_BILL_DO_USUARIO}",
                         (new_total, new_total, bill_id, user_id),
                     )
                 elif new_total > old_paid:
                     cur.execute(
                         "update credit_bills set total = %s "
-                        "where id = %s and user_id = %s",
+                        f"where id = %s and {_BILL_DO_USUARIO}",
                         (new_total, bill_id, user_id),
                     )
                 else:
                     new_paid = min(old_paid, new_total)
                     cur.execute(
                         "update credit_bills set total = %s, paid_amount = %s "
-                        "where id = %s and user_id = %s",
+                        f"where id = %s and {_BILL_DO_USUARIO}",
                         (new_total, new_paid, bill_id, user_id),
                     )
 
@@ -1206,7 +1209,7 @@ def get_installment_group_delete_impact(user_id: int, group_id: str):
                     max(c.name) as card_name
                 from credit_transactions t
                 join credit_bills b on b.id = t.bill_id and coalesce(b.user_id, (select cb.user_id from credit_cards cb where cb.id = b.card_id)) = t.user_id
-                join credit_cards c on c.id = t.card_id
+                left join credit_cards c on c.id = t.card_id and c.user_id = t.user_id
                 where t.user_id = %s and t.group_id = %s::uuid and t.is_refund = false
                 """,
                 (user_id, group_id),
@@ -1249,10 +1252,10 @@ def anticipate_installment(user_id: int, group_id: str):
                 """
                 select t.id, t.bill_id, t.valor, t.categoria, t.nota,
                        t.installment_no, t.installments_total, t.card_id,
-                       c.name as card_name
+                       coalesce(c.name, 'Cartão') as card_name
                 from credit_transactions t
                 join credit_bills b on b.id = t.bill_id and coalesce(b.user_id, (select cb.user_id from credit_cards cb where cb.id = b.card_id)) = t.user_id
-                join credit_cards c on c.id = t.card_id
+                left join credit_cards c on c.id = t.card_id and c.user_id = t.user_id
                 where t.user_id = %s and t.group_id = %s::uuid
                   and t.is_refund = false and b.status = 'open'
                 order by b.period_end asc, t.installment_no asc
@@ -1275,7 +1278,7 @@ def anticipate_installment(user_id: int, group_id: str):
 
             cur.execute(
                 "select total, coalesce(paid_amount, 0) as paid_amount "
-                "from credit_bills where id = %s and user_id = %s for update",
+                f"from credit_bills where id = %s and {_BILL_DO_USUARIO} for update",
                 (bill_id, user_id),
             )
             bill = cur.fetchone()
@@ -1286,12 +1289,12 @@ def anticipate_installment(user_id: int, group_id: str):
             if new_total > 0 and old_paid >= new_total:
                 cur.execute(
                     "update credit_bills set total = %s, paid_amount = %s, "
-                    "status='paid', paid_at=now() where id = %s and user_id = %s",
+                    f"status='paid', paid_at=now() where id = %s and {_BILL_DO_USUARIO}",
                     (new_total, new_total, bill_id, user_id),
                 )
             else:
                 cur.execute(
-                    "update credit_bills set total = %s where id = %s and user_id = %s",
+                    f"update credit_bills set total = %s where id = %s and {_BILL_DO_USUARIO}",
                     (new_total, bill_id, user_id),
                 )
 
@@ -1350,7 +1353,7 @@ def list_installment_groups_detailed(user_id: int, sort: str = "urgency"):
                     c.closing_day, c.due_day,
                     b.period_end, b.status as bill_status
                 from credit_transactions t
-                join credit_cards c on c.id = t.card_id
+                left join credit_cards c on c.id = t.card_id and c.user_id = t.user_id
                 join credit_bills b on b.id = t.bill_id and coalesce(b.user_id, (select cb.user_id from credit_cards cb where cb.id = b.card_id)) = t.user_id
                 where t.user_id = %s and t.group_id is not null and t.is_refund = false
                 order by t.group_id, t.installment_no asc nulls last, b.period_end asc
@@ -1377,7 +1380,9 @@ def list_installment_groups_detailed(user_id: int, sort: str = "urgency"):
                 "parcelas": [],
             }
         is_paid = r["bill_status"] != "open"
-        due = card_bill_due_date(r["period_end"], int(r["closing_day"]), int(r["due_day"]))
+        # cartão de outro usuário (left join vazio): sem dias do cartão, vence no fim do período
+        due = (card_bill_due_date(r["period_end"], int(r["closing_day"]), int(r["due_day"]))
+               if r["closing_day"] is not None else r["period_end"])
         groups[gid]["parcelas"].append({
             "tx_id": int(r["tx_id"]),
             "installment_no": int(r["installment_no"] or 0),
@@ -1929,7 +1934,7 @@ def list_installment_groups(user_id: int, limit: int = 15):
         with conn.cursor() as cur:
             cur.execute(
                 """
-                select t.group_id, c.name as card_name,
+                select t.group_id, coalesce(c.name, 'Cartão') as card_name,
                        c.closing_day, c.due_day,
                        max(t.installments_total) as n_total,
                        count(*) as n_registered,
@@ -1946,7 +1951,7 @@ def list_installment_groups(user_id: int, limit: int = 15):
                          null
                        ) as pending_period_ends
                 from credit_transactions t
-                join credit_cards c on c.id = t.card_id
+                left join credit_cards c on c.id = t.card_id and c.user_id = t.user_id
                 join credit_bills b on b.id = t.bill_id and coalesce(b.user_id, (select cb.user_id from credit_cards cb where cb.id = b.card_id)) = t.user_id
                 where t.user_id=%s and t.group_id is not null and t.is_refund=false
                 group by t.group_id, c.name, c.closing_day, c.due_day
@@ -1958,11 +1963,11 @@ def list_installment_groups(user_id: int, limit: int = 15):
             rows = cur.fetchall()
 
     for r in rows:
-        closing_day = int(r["closing_day"])
-        due_day = int(r["due_day"])
         period_ends = r.get("pending_period_ends") or []
+        # cartão de outro usuário (left join vazio): sem dias do cartão, a data é o fim do período
         r["upcoming_due_dates"] = [
-            card_bill_due_date(pe, closing_day, due_day) for pe in period_ends
+            card_bill_due_date(pe, r["closing_day"], r["due_day"]) if r["closing_day"] is not None else pe
+            for pe in period_ends
         ]
     return rows
 
