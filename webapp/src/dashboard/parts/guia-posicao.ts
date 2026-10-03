@@ -1,12 +1,12 @@
-// Onde o Piggy e o balão do guia (parts/Guia.tsx) ficam. Âncora = elemento com
-// `data-guia` que existe E está visível (a barra de conversa existe no celular fora da
-// #/piggy, mas escondida). Sem a âncora na tela, o Piggy aponta para a aba `nav.<tela>`.
+// Onde o Piggy e o balão do guia (parts/Guia.tsx) ficam. Âncora = o bloco do passo (elemento
+// com `data-guia` que existe E está visível); alvo = o que se toca dentro dele (a seta do mês, uma
+// linha de categoria, um chip de pergunta). Fora da tela do passo, o Piggy aponta para a aba.
 import type { Passo } from "../lib/api-v2.gen";
 import type { Path } from "../router";
 
-// "ancora": o próprio bloco; "nav": a aba que leva até ele; "ausente": a tela já desenhou
+// "alvo": o que se toca; "nav": a aba que leva de volta à tela; "ausente": a tela já desenhou
 // os blocos e o dele não está (tirado em Organizar); "espera": a tela ainda carrega.
-export type Tipo = "ancora" | "nav" | "ausente" | "espera";
+export type Tipo = "alvo" | "nav" | "ausente" | "espera";
 export const ROTA: Record<Passo["tela"], Path> = { resumo: "/", gastos: "/gastos", piggy: "/piggy" };
 
 const P = 44; // lado do Piggy
@@ -14,25 +14,30 @@ const M = 12; // margem da tela
 const clamp = (v: number, a: number, b: number) => Math.max(a, Math.min(b, v));
 const visivel = (sel: string) =>
   [...document.querySelectorAll<HTMLElement>(sel)].find((e) => e.getClientRects().length > 0) ?? null;
+const guia = (nome: string) => visivel(`[data-guia="${nome}"]`);
 
-// A âncora só vale na tela do passo; a barra de conversa (passo do Piggy) vale em qualquer
-// uma, onde estiver visível (no desktop ela flutua em todas as páginas).
-export function achar(p: Passo, path: Path): { el: HTMLElement | null; tipo: Tipo } {
-  const naTela = path === ROTA[p.tela];
-  const el = naTela || p.tela === "piggy" ? visivel(`[data-guia="${p.ancora}"]`) : null;
-  if (el) return { el, tipo: "ancora" };
-  if (naTela) return { el: null, tipo: document.querySelector("#main article.w") ? "ausente" : "espera" };
-  return { el: visivel(`[data-guia="nav.${p.tela}"]`), tipo: "nav" };
+// `alvos` em ordem de preferência. `mira` é onde o Piggy encosta: o alvo, ou a âncora quando o
+// alvo está na barra de cima (a seta do mês), onde não cabe Piggy nem balão. Fora da tela, no
+// desktop o Piggy não tem aba: perguntar na barra de conversa leva até a conversa.
+export function achar(p: Passo, path: Path, alvos: string[]): { el: HTMLElement | null; mira: HTMLElement | null; tipo: Tipo } {
+  if (path !== ROTA[p.tela]) {
+    const el = guia(`nav.${p.tela}`) ?? (p.tela === "piggy" ? guia(p.ancora) : null);
+    return { el, mira: el, tipo: "nav" };
+  }
+  const ancora = guia(p.ancora);
+  const el = ancora && (alvos.map(guia).find(Boolean) ?? null);
+  if (el) return { el, mira: el.closest(".topbar") ? ancora : el, tipo: "alvo" };
+  return { el: null, mira: null, tipo: document.querySelector("#main article.w") ? "ausente" : "espera" };
 }
 
-// Âncora fora da vista (no Resumo o bloco pode estar mais abaixo): rola até ela uma vez.
+// Mira fora da vista (no Resumo o bloco pode estar mais abaixo): rola até ela uma vez.
 export function trazer(el: HTMLElement) {
   const r = el.getBoundingClientRect();
   const topo = document.querySelector(".topbar")?.getBoundingClientRect().bottom ?? 0;
   if (r.top < topo || r.bottom > innerHeight) el.scrollIntoView({ block: "center" });
 }
 
-// O Piggy encosta na quina de cima da âncora (ou na de baixo, se a de cima ficou sob a
+// O Piggy encosta na quina de cima da mira (ou na de baixo, se a de cima ficou sob a
 // barra), inclinado para ela. O balão vai na área livre (entre as barras e fora do menu
 // lateral) sem encostar na âncora nem no Piggy: no desktop ao lado (direita, esquerda, em
 // cima, embaixo); até 640px (o corte do Board) na largura toda, embaixo ou acima. Nenhum

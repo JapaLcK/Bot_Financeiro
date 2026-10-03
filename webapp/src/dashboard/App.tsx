@@ -41,9 +41,9 @@ function Topbar({ s, path }: { s: DashState; path: Path }) {
   return (
     <header className="topbar" data-stuck={stuck}>
       {!NO_MONTH.includes(path) && <div className="month-switch" role="group" aria-label="Mês exibido" data-guia="mes.seletor">
-        <button className="icon-btn" type="button" aria-label="Mês anterior" disabled={i === 0} onClick={() => escolherMes(MESES[i - 1])}><i className="ph ph-arrow-left" aria-hidden="true" /></button>
+        <button className="icon-btn" type="button" aria-label="Mês anterior" disabled={i === 0} data-guia={i > 0 ? "mes.trocar" : undefined} onClick={() => escolherMes(MESES[i - 1])}><i className="ph ph-arrow-left" aria-hidden="true" /></button>
         <p className="month-title" aria-live="polite">{monthTitle(mes).replace(/ (\d{4})$/, "")}<span className="month-year"> {mes.slice(0, 4)}</span></p>
-        <button className="icon-btn" type="button" aria-label="Próximo mês" disabled={i === MESES.length - 1} onClick={() => escolherMes(MESES[i + 1])}><i className="ph ph-arrow-right" aria-hidden="true" /></button>
+        <button className="icon-btn" type="button" aria-label="Próximo mês" disabled={i === MESES.length - 1} data-guia={i === 0 ? "mes.trocar" : undefined} onClick={() => escolherMes(MESES[i + 1])}><i className="ph ph-arrow-right" aria-hidden="true" /></button>
       </div>}
       <span className="topbar-spacer" />
       <button className="cmd-trigger" type="button" aria-label="Buscar ou ir para" aria-keyshortcuts="Meta+K Control+K /" onClick={() => window.dispatchEvent(new Event("dash:command"))}>

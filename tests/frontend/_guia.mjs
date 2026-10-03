@@ -59,9 +59,7 @@ export const acoes = (s) => s.posts.map((c) => c.passo ? `${c.acao}:${c.passo}` 
 export const esperaTitulo = (page, t) => page.locator("#guia-titulo", { hasText: t }).waitFor({ timeout: 5000 });
 export const bora = async (page) => { await page.getByRole("button", { name: "Bora", exact: true }).click(); await esperaTitulo(page, PASSOS[0].fala.titulo); };
 
-// A ação real de cada passo, por `acao` do roteiro.
-export const FAZER = {
-  "mes.trocado": (page) => page.getByRole("button", { name: "Mês anterior", exact: true }).click(),
-  "categoria.aberta": async (page) => { await page.locator('.rail [data-guia="nav.gastos"]').click(); await page.locator('[data-guia="categorias.lista"] .cat').nth(1).click(); },
-  "piggy.perguntou": async (page) => { await page.locator("#askbar-input").fill("Quanto gastei este mês?"); await page.locator("#askbar-input").press("Enter"); },
-};
+// A ação real de cada passo, por `acao` do roteiro, no alvo que o guia destaca (ele mesmo leva
+// até a tela do passo).
+export const ALVO = { "mes.trocado": "mes.trocar", "categoria.aberta": "categorias.item", "piggy.perguntou": "piggy.chip" };
+export const FAZER = Object.fromEntries(Object.entries(ALVO).map(([acao, a]) => [acao, (page) => page.locator(`[data-guia="${a}"]`).first().click()]));

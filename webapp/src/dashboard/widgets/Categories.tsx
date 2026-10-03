@@ -26,6 +26,7 @@ export function Categories({ s }: { s: DashState }) {
   const { setFilter } = useActions();
   // No Resumo a lista rola por dentro (panels.css): o teclado tem de alcançá-la.
   const rola = useContext(FrameLink) !== null;
+  const alvo = rows.find((r) => r.c.id !== active)?.c.id; // a linha que o guia destaca (parts/Guia.tsx)
 
   return (
     <Frame id="categorias" title="Para onde vai"
@@ -37,7 +38,7 @@ export function Categories({ s }: { s: DashState }) {
           const on = active === c.id;
           return (
             <li key={c.id}>
-              <button type="button" className="cat" aria-pressed={on} data-dim={active && !on ? "true" : undefined}
+              <button type="button" className="cat" aria-pressed={on} data-guia={c.id === alvo ? "categorias.item" : undefined} data-dim={active && !on ? "true" : undefined}
                 onClick={() => setFilter({ category: on ? null : c.id })}
                 aria-label={`${c.label}: ${money0(value)}${d != null ? `, ${Math.round(Math.abs(d) * 100)}% ${d > 0 ? "a mais" : "a menos"} que no mês anterior` : ""}. Filtrar lançamentos.`}>
                 <span className="cat-name"><i className={`ph ${c.icon}`} style={{ color: c.color }} aria-hidden="true" />{c.label}</span>

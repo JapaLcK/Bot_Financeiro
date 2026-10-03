@@ -68,24 +68,25 @@ test("barra de baixo: 6 itens; folga ≥ 12 px do maior rótulo em 320, 340, 360
   }
 });
 
-// Posição, em cada passo (e na fase em que ele aponta para a aba), da tela larga à de 320:
+// Posição, em cada passo (o guia leva até a tela dele), da tela larga à de 320:
 //   (a) o balão inteiro na tela;
-//   (b) o balão não intercepta o toque em nenhum alvo da ação visível (o seletor de mês e o
-//       Saiu; cada linha de categoria; a barra de conversa) nem na navegação (menu, abas):
+//   (b) o balão não intercepta o toque no alvo do passo nem no que ele deixa à vista (a seta
+//       do mês e o Saiu; a linha de categoria; o chip) nem na navegação (menu, abas):
 //       `elementFromPoint` no centro e área de interseção, que pega a linha coberta só na
 //       ponta (o centro da linha larga fica livre e o nome dela, não);
-//   (c) o Piggy encosta 8 px na quina de cima ou de baixo da âncora (ou da aba).
+//   (c) o Piggy encosta 8 px na quina de cima ou de baixo da mira (o Saiu no passo do mês,
+//       que tem o alvo na barra de cima; o próprio alvo nos outros).
 const ALVOS = {
-  "mes.trocado": ['[data-guia="mes.seletor"] button', '[data-guia="resumo.saiu"]'],
-  "categoria.aberta": ['[data-guia="categorias.lista"] .cat'],
-  "piggy.perguntou": ['[data-guia="piggy.pergunta"] input', '[data-guia="piggy.pergunta"] button'],
+  "mes.trocado": ['[data-guia="mes.trocar"]', '[data-guia="resumo.saiu"]'],
+  "categoria.aberta": ['[data-guia="categorias.item"]'],
+  "piggy.perguntou": ['[data-guia="piggy.chip"]'],
 };
+const MIRA = { "mes.trocado": "resumo.saiu", "categoria.aberta": "categorias.item", "piggy.perguntou": "piggy.chip" };
 const NAV = [".rail a", ".rail button", ".tabbar a", ".tabbar button"];
 for (const [width, height] of [[1280, 800], [1024, 768], [900, 600], [700, 600], [375, 812], [320, 640]]) {
   test(`posição ${width}×${height}: balão na tela, fora dos alvos do passo e da navegação; Piggy na âncora`, async () => {
     const { ctx, page, s } = await abrir({ width, height });
     await bora(page);
-    const nav = width > 760 ? ".rail" : ".tabbar";
     const medidas = [];
     const medir = async (p, fase, ancora) => {
       await page.waitForTimeout(300);
@@ -111,14 +112,9 @@ for (const [width, height] of [[1280, 800], [1024, 768], [900, 600], [700, 600],
     };
     for (const [i, p] of PASSOS.entries()) {
       if (i) await esperaTitulo(page, p.fala.titulo);
-      const naTela = p.tela === "resumo" || (p.tela === "piggy" && width > 760);
-      if (!naTela) {
-        await medir(p, "aba", `${nav} [data-guia="nav.${p.tela}"]`);
-        await page.locator(`${nav} [data-guia="nav.${p.tela}"]`).click();
-        await page.locator(`[data-guia="${p.ancora}"]`).first().waitFor();
-      }
-      await medir(p, "âncora", `[data-guia="${p.ancora}"]`);
-      await (p.acao === "categoria.aberta" ? page.locator('[data-guia="categorias.lista"] .cat').nth(1).click() : FAZER[p.acao](page));
+      await page.locator(ALVOS[p.acao][0]).first().waitFor();
+      await medir(p, "alvo", `[data-guia="${MIRA[p.acao]}"]`);
+      await FAZER[p.acao](page);
     }
     await esperaTitulo(page, "Fechou!");
     await ctx.close();

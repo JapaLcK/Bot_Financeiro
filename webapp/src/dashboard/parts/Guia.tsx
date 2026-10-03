@@ -6,12 +6,12 @@ import { useConversation } from "../lib/conversation";
 import { mesDe } from "../lib/store.js";
 import type { DashState } from "../lib/types";
 import { DEMO, ErroApi, apiPost, guiaQuery, perfilQuery } from "../lib/v2";
-import { route, type Path } from "../router";
+import { go, route, type Path } from "../router";
 import { ROTA, achar, posicionar, trazer, type Tipo } from "./guia-posicao";
 
 // O guia do /painel (#728). O roteiro e o progresso vêm do servidor (GET/POST /api/v2/guia,
 // `PASSOS` em api/v2/guia.py); aqui fica só se o guia está aberto. O passo avança quando a
-// pessoa faz a ação de verdade, nunca por um "próximo". Balão não-modal: sem trava de foco.
+// pessoa faz a ação de verdade, nunca por um "próximo". O guia leva sozinho até a tela do passo.
 
 // A aba de cada tela do roteiro (App.tsx põe `data-guia` no menu lateral e na barra de baixo).
 export const navGuia = (p: Path) => {
@@ -22,13 +22,16 @@ export const navGuia = (p: Path) => {
 export const abrirGuia = () => window.dispatchEvent(new Event("dash:guia"));
 
 // Uma ação é a passagem de um retrato da tela para o seguinte; o retrato de quando o passo
-// começou é o primeiro, então o que já estava escolhido antes não conta.
+// começou é o primeiro, então o que já estava escolhido antes não conta. `alvo`: o `data-guia`
+// do que se toca, em ordem de preferência (parts/guia-posicao.ts, `achar`).
 interface Retrato { mes: string; cat: string | null; perguntas: number; path: Path }
-const ACOES: Record<string, (antes: Retrato, agora: Retrato) => boolean> = {
-  "mes.trocado": (a, b) => b.mes !== a.mes,
-  // Categoria escolhida no Resumo não conta: o passo é na página de Gastos.
-  "categoria.aberta": (a, b) => b.path === "/gastos" && b.cat != null && b.cat !== a.cat,
-  "piggy.perguntou": (a, b) => b.perguntas > a.perguntas,
+const ACOES: Record<string, { feito: (antes: Retrato, agora: Retrato) => boolean; alvo: string[] }> = {
+  // A seta Mês anterior (a Próximo mês, se não há anterior).
+  "mes.trocado": { feito: (a, b) => b.mes !== a.mes, alvo: ["mes.trocar"] },
+  // Categoria escolhida no Resumo não conta: o passo é na página de Gastos. Alvo: a 1ª linha não ativa.
+  "categoria.aberta": { feito: (a, b) => b.path === "/gastos" && b.cat != null && b.cat !== a.cat, alvo: ["categorias.item"] },
+  // Um chip de pergunta pronta; com a conversa já começada (sem chips), o campo da conversa.
+  "piggy.perguntou": { feito: (a, b) => b.perguntas > a.perguntas, alvo: ["piggy.chip", "piggy.pergunta"] },
 };
 
 const OF = "/settings?view=open-finance";
@@ -53,6 +56,8 @@ export function Guia({ s, path }: { s: DashState; path: Path }) {
   const [tipo, setTipo] = useState<Tipo>("espera");
   const [fechouDialog, reavaliar] = useState(0);
   const ofereceu = useRef(false);
+  const foi = useRef(""); // o passo para cuja tela o guia já levou
+  const chegou = useRef(""); // o passo cuja tela a pessoa já viu
   const focar = useRef(false);
   const rolou = useRef("");
   const mexeu = useRef(false); // a pessoa rolou por conta própria desde a rolagem inicial do passo
@@ -88,7 +93,7 @@ export function Guia({ s, path }: { s: DashState; path: Path }) {
 
   const iniciar = (rever: boolean) => {
     setRev(rever); setVistos([]); setFesta(null); setModo("ativo");
-    focar.current = true;
+    focar.current = true; foi.current = ""; chegou.current = "";
   };
   const fechar = (dispensa: boolean) => {
     if (dispensa) m.mutate({ acao: "dispensar" });
@@ -146,7 +151,16 @@ export function Guia({ s, path }: { s: DashState; path: Path }) {
     const rodando = modo === "ativo" && atual && atual.disponivel && !festa && !salvando && !falhou && !s.editing;
     const a = antes.current;
     antes.current = { id: rodando ? atual.id : "", r: agora };
-    if (rodando && a.id === atual.id && ACOES[atual.acao]?.(a.r, agora)) m.mutate({ acao: "feito", passo: atual.id });
+    if (rodando && a.id === atual.id && ACOES[atual.acao]?.feito(a.r, agora)) m.mutate({ acao: "feito", passo: atual.id });
+  });
+
+  // Leva até a tela do passo uma vez por passo (depois da comemoração, que é a pausa do "Vem
+  // comigo"). Quem volta pelo navegador lê "Volta pra X" e não é puxado de novo.
+  useEffect(() => {
+    if (modo !== "ativo" || festa || !atual) return;
+    if (path === ROTA[atual.tela]) chegou.current = atual.id;
+    else if (foi.current !== atual.id) go(ROTA[atual.tela]);
+    foi.current = atual.id;
   });
 
   // Comemoração: o passo seguinte entra depois dela; a última fica até fechar.
@@ -166,14 +180,14 @@ export function Guia({ s, path }: { s: DashState; path: Path }) {
   // Posição: segue a âncora a cada quadro (rolagem, grade arrastável, troca de página).
   const tick = () => {
     if (!piggy.current || !balao.current) return;
-    const { el, tipo: t } = exibido && modo === "ativo" ? achar(exibido, path) : { el: null, tipo: "espera" as Tipo };
+    const { mira: el, tipo: t } = exibido && modo === "ativo" ? achar(exibido, path, ACOES[exibido.acao]?.alvo ?? []) : { mira: null, tipo: "espera" as Tipo };
     setTipo(t);
     // Rola uma vez por passo, e de novo se a página mudou de altura (um bloco acima chegou
     // depois e empurrou a âncora), mas só enquanto a pessoa não rolou por conta própria: o
     // refetch do SSE muda a altura e não pode puxá-la de volta.
     const chave = `${exibido?.id}:${document.documentElement.scrollHeight}`;
     const primeira = !rolou.current.startsWith(`${exibido?.id}:`);
-    const rolar = !!el && t === "ancora" && rolou.current !== chave && (primeira || !mexeu.current);
+    const rolar = !!el && t === "alvo" && rolou.current !== chave && (primeira || !mexeu.current);
     if (rolar) { if (primeira) mexeu.current = false; rolou.current = chave; trazer(el); }
     posicionar(el, piggy.current, balao.current, rolar);
   };
@@ -205,9 +219,11 @@ export function Guia({ s, path }: { s: DashState; path: Path }) {
   });
 
   const aberto = modo === "convite" || (modo === "ativo" && !!exibido);
+  // A tela do passo seguinte, se é outra: a comemoração avisa antes de o guia levar até lá.
+  const vai = festa && atual && path !== ROTA[atual.tela] ? route(ROTA[atual.tela]).short : null;
   const status = !aberto || s.editing ? ""
     : modo === "convite" ? "O Piggy quer te mostrar o painel."
-    : festa ? (fim ? "Guia concluído." : acabou ? "Por agora é isso. O passo que ficou pra depois volta na Ajuda." : "Passo feito.")
+    : festa ? (fim ? "Guia concluído." : acabou ? "Por agora é isso. O passo que ficou pra depois volta na Ajuda." : `Passo feito.${vai ? ` Vem comigo pra ${vai}.` : ""}`)
     : `Guia, passo ${n} de ${passos.length}: ${atual!.fala.titulo}`;
   let corpo = null;
   if (!aberto || s.editing) {
@@ -224,7 +240,7 @@ export function Guia({ s, path }: { s: DashState; path: Path }) {
   } else if (festa) {
     corpo = <>
       <h2 id="guia-titulo" tabIndex={-1}>{fim ? "Fechou! O painel é seu." : acabou ? "Por agora é isso" : "Isso aí!"}</h2>
-      <p>{fim ? "Quando quiser rever, o guia mora em Ajuda." : acabou ? "O passo que ficou pra depois volta quando você abrir a Ajuda." : "Passo feito. Bora pro próximo."}</p>
+      <p>{fim ? "Quando quiser rever, o guia mora em Ajuda." : acabou ? "O passo que ficou pra depois volta quando você abrir a Ajuda." : vai ? `Passo feito. Vem comigo pra ${vai}.` : "Passo feito. Bora pro próximo."}</p>
       {acabou && <div className="guia-acoes"><button type="button" className="btn btn-primary" onClick={() => fechar(false)}>Fechar</button></div>}
     </>;
   } else {
@@ -236,7 +252,7 @@ export function Guia({ s, path }: { s: DashState; path: Path }) {
       <p>{mot ? mot.texto : p.fala.texto}</p>
       {mot?.link && <p><a href={OF}>{mot.link}</a></p>}
       {!mot && tipo === "ausente" && <p>Esse bloco não está no seu painel agora. Dá pra pôr de volta em Organizar.</p>}
-      {!mot && tipo === "nav" && <p className="guia-dica">Primeiro, abre {route(ROTA[p.tela]).short}.</p>}
+      {!mot && tipo === "nav" && chegou.current === p.id && <p className="guia-dica">Volta pra {route(ROTA[p.tela]).short}.</p>}
       {salvando && <p className="guia-dica">Salvando…</p>}
       {falhou && <p role="alert">Não consegui salvar seu progresso. <button type="button" className="btn btn-ghost" onClick={() => qc.isMutating({ mutationKey: ["guia"] }) || m.mutate(v!)}>Tentar de novo</button></p>}
       <div className="guia-acoes">
