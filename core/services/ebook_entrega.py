@@ -3,7 +3,8 @@
 O webhook do checkout grava a pendência (`db/ebook_entregas.py`); este job,
 chamado pelo `_ebook_worker` do lifespan a cada 5 min, só envia quando a conta
 já provou o e-mail (senha, Google ou Apple), confirma a compra pelas linhas da
-sessão no Stripe e manda o link para o e-mail ATUAL da conta. Cada produto é
+sessão no Stripe, segura a entrega se a cobrança foi estornada ou contestada
+(`_compra_estornada`) e manda o link para o e-mail ATUAL da conta. Cada produto é
 uma linha com claim, backoff e tentativas próprios: a falha de um não segura os
 outros.
 
@@ -24,6 +25,35 @@ from db.ebook_entregas import abertas, fechar, reivindicar
 from db.google_auth import conta_sem_credencial
 
 
+def _compra_estornada(sid: str, key: str) -> bool:
+    """Estorno (parcial ou total, D2) ou contestação (D3) na cobrança da compra.
+    Sem fatura ou sem pagamento (cupom 100%) → False. Erro do Stripe propaga:
+    quem chama não envia nem fecha, e o claim expira. Forma inesperada num
+    pagamento pago também levanta (falha FECHADO): por isso o acesso direto por
+    `[...]`, e não o `_ler`, que leria "sem estorno"."""
+    import stripe  # noqa: PLC0415
+
+    inv = _ler(stripe.checkout.Session.retrieve(sid, api_key=key), "invoice")
+    inv = _ler(inv, "id") or inv          # id ou objeto expandido
+    if not inv:
+        return False
+    # `limit=100`: tentativas antes da paga somam linhas; o padrão 10 deixaria
+    # o pagamento pago fora da página e o estorno passaria batido.
+    for pag in stripe.InvoicePayment.list(invoice=inv, api_key=key, limit=100)["data"]:
+        if pag["status"] != "paid":       # open/canceled; estornado continua "paid"
+            continue
+        pagamento = pag["payment"]
+        if pagamento["type"] != "payment_intent" or not pagamento["payment_intent"]:
+            raise RuntimeError(f"pagamento de forma inesperada: {pagamento['type']}")
+        ch = stripe.PaymentIntent.retrieve(
+            pagamento["payment_intent"], expand=["latest_charge"], api_key=key)["latest_charge"]
+        if isinstance(ch, str) or ch is None:
+            raise RuntimeError("latest_charge não veio expandida")
+        if ch["amount_refunded"] > 0 or ch["disputed"]:
+            return True
+    return False
+
+
 def _entregar(uid: int, sid: str, preco: str, key: str) -> bool:
     import stripe  # noqa: PLC0415
 
@@ -38,6 +68,16 @@ def _entregar(uid: int, sid: str, preco: str, key: str) -> bool:
     item = next((i for i in itens["data"] if i["price"]["id"] == preco), None)
     if item is None:
         fechar(uid, sid, preco, "nao_comprou")
+        return False
+    # ponytail: uma consulta por linha (a regra é por compra; as outras linhas
+    # abertas da sessão fecham nas suas passadas). Cachear por sid se pesar.
+    if _compra_estornada(sid, key):
+        fechar(uid, sid, preco, "estornado")
+        log_system_event_sync(
+            "warning", "ebook_entrega_estornada",
+            "Compra estornada ou contestada antes da entrega; o produto não foi enviado.",
+            source="billing", user_id=uid, details={"session_id": sid, "ebook_price": preco},
+        )
         return False
     email = ((get_auth_user(uid) or {}).get("email") or "").strip()
     if email and send_ebook_email(email, linha["ebook_url"], nome=_ler(item, "description")):
