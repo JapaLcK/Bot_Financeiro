@@ -3373,6 +3373,11 @@ async def auth_register(request: Request, body: RegisterBody):
 
     if len(body.password) < 8:
         raise HTTPException(status_code=400, detail="Senha deve ter pelo menos 8 caracteres.")
+    if len(body.password.encode("utf-8")) > 72:  # teto do bcrypt: acima disso hashpw levanta ValueError
+        raise HTTPException(
+            status_code=400,
+            detail="Senha longa demais: use no máximo 72 caracteres (acentos e emojis contam como mais de um).",
+        )
 
     name = (body.name or "").strip() or None
     if name is not None:
@@ -3391,10 +3396,12 @@ async def auth_register(request: Request, body: RegisterBody):
             create_email_verification, body.email, body.password, body.phone, display_name=name,
         )
     except AccountAlreadyExistsError as exc:
-        # Anti-enumeração: e-mail/telefone já existe. NÃO revela isso — responde
-        # exatamente como no caminho normal e avisa o dono da conta por e-mail
-        # (out-of-band). O visitante não consegue distinguir "existe" de "novo".
-        # O rate-limit de cadastro (3/h por IP+e-mail) já limita spam do aviso.
+        # E-mail já cadastrado: avisa na TELA (409). A anti-enumeração aqui foi
+        # abandonada de propósito — ela jogava o dono legítimo numa tela de
+        # código de verificação que nunca chegava, e ele só descobria pelo
+        # e-mail de aviso. O aviso por e-mail continua: se NÃO foi o dono quem
+        # tentou, ele fica sabendo (rate-limit 3/h por IP+e-mail limita spam).
+        # Telefone duplicado segue SEM revelação — ver create_email_verification_impl.
         try:
             owner = await asyncio.to_thread(get_auth_user, exc.existing_user_id) if exc.existing_user_id else None
             owner_email = (owner or {}).get("email")
@@ -3403,7 +3410,8 @@ async def auth_register(request: Request, body: RegisterBody):
                 await asyncio.to_thread(send_account_exists_notice, owner_email, f"{DASHBOARD_URL}/login")
         except Exception as notice_exc:
             logging.getLogger(__name__).warning("account_exists_notice falhou: %s", notice_exc)
-        return {"status": "verification_sent", "email": body.email.strip().lower()}
+        from db_support import EMAIL_JA_TEM_CONTA
+        raise HTTPException(status_code=409, detail=EMAIL_JA_TEM_CONTA)
     except ValueError as e:
         raise HTTPException(status_code=409, detail=detalhe_seguro(e))
 

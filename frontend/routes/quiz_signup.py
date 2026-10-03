@@ -97,8 +97,9 @@ async def _registra_falha(onde: str, exc: Exception | None = None) -> None:
 
 
 async def _avisa_dono(exc: AccountAlreadyExistsError) -> None:
-    """O mesmo aviso out-of-band do /auth/register: quem já tem conta recebe o
-    e-mail, e a resposta não muda (anti-enumeração)."""
+    """O mesmo aviso por e-mail do /auth/register: quem já tem conta recebe o
+    e-mail, e a resposta DESTA rota não muda (anti-enumeração); o
+    /auth/register diz na tela."""
     try:
         owner = await asyncio.to_thread(get_auth_user, exc.existing_user_id) if exc.existing_user_id else None
         owner_email = (owner or {}).get("email")
