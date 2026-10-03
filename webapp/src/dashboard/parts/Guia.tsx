@@ -7,11 +7,12 @@ import { mesDe } from "../lib/store.js";
 import type { DashState } from "../lib/types";
 import { DEMO, ErroApi, apiPost, guiaQuery, perfilQuery } from "../lib/v2";
 import { go, route, type Path } from "../router";
-import { ROTA, achar, posicionar, trazer, type Tipo } from "./guia-posicao";
+import { ROTA, achar, cobrir, posicionar, trazer, type Tipo } from "./guia-posicao";
 
 // O guia do /painel (#728). O roteiro e o progresso vêm do servidor (GET/POST /api/v2/guia,
 // `PASSOS` em api/v2/guia.py); aqui fica só se o guia está aberto. O passo avança quando a
-// pessoa faz a ação de verdade, nunca por um "próximo". O guia leva sozinho até a tela do passo.
+// pessoa faz a ação de verdade, nunca por um "próximo". O guia leva sozinho até a tela do passo
+// e escurece o resto: só o alvo do passo (e o balão) recebe toque e Tab.
 
 // A aba de cada tela do roteiro (App.tsx põe `data-guia` no menu lateral e na barra de baixo).
 export const navGuia = (p: Path) => {
@@ -43,6 +44,7 @@ const MOTIVO: Record<NonNullable<Passo["motivo"]>, { texto: string; link?: strin
 
 type Modo = "fechado" | "convite" | "ativo";
 const TECLAS = ["PageUp", "PageDown", "Home", "End", "ArrowUp", "ArrowDown", " "];
+const FOCAVEL = "a[href], button:not(:disabled), input:not(:disabled), [tabindex]:not([tabindex='-1'])";
 
 export function Guia({ s, path }: { s: DashState; path: Path }) {
   const qc = useQueryClient();
@@ -63,6 +65,11 @@ export function Guia({ s, path }: { s: DashState; path: Path }) {
   const mexeu = useRef(false); // a pessoa rolou por conta própria desde a rolagem inicial do passo
   const piggy = useRef<HTMLImageElement>(null);
   const balao = useRef<HTMLElement>(null);
+  const veus = useRef<HTMLDivElement>(null);
+  const sombra = useRef<SVGPathElement>(null);
+  const anel = useRef<HTMLDivElement>(null);
+  const furo = useRef<HTMLElement | null>(null); // o alvo que o véu deixa tocar agora
+  const prende = useRef(false); // o foco que cai fora do balão e do alvo volta ao balão
 
   const m = useMutation({
     mutationKey: ["guia"],
@@ -97,6 +104,7 @@ export function Guia({ s, path }: { s: DashState; path: Path }) {
   };
   const fechar = (dispensa: boolean) => {
     if (dispensa) m.mutate({ acao: "dispensar" });
+    prende.current = false; // antes do foco ir para a página, senão a guarda o devolve ao balão
     if (balao.current?.contains(document.activeElement)) document.getElementById("page-title")?.focus({ preventScroll: true });
     setModo("fechado"); setFesta(null);
   };
@@ -180,7 +188,7 @@ export function Guia({ s, path }: { s: DashState; path: Path }) {
   // Posição: segue a âncora a cada quadro (rolagem, grade arrastável, troca de página).
   const tick = () => {
     if (!piggy.current || !balao.current) return;
-    const { mira: el, tipo: t } = exibido && modo === "ativo" ? achar(exibido, path, ACOES[exibido.acao]?.alvo ?? []) : { mira: null, tipo: "espera" as Tipo };
+    const { el: alvo, mira: el, tipo: t } = exibido && modo === "ativo" ? achar(exibido, path, ACOES[exibido.acao]?.alvo ?? []) : { el: null, mira: null, tipo: "espera" as Tipo };
     setTipo(t);
     // Rola uma vez por passo, e de novo se a página mudou de altura (um bloco acima chegou
     // depois e empurrou a âncora), mas só enquanto a pessoa não rolou por conta própria: o
@@ -190,6 +198,12 @@ export function Guia({ s, path }: { s: DashState; path: Path }) {
     const rolar = !!el && t === "alvo" && rolou.current !== chave && (primeira || !mexeu.current);
     if (rolar) { if (primeira) mexeu.current = false; rolou.current = chave; trazer(el); }
     posicionar(el, piggy.current, balao.current, rolar);
+    // O furo só com o passo rodando: no convite, na comemoração, na espera, no motivo e no fim,
+    // o véu cobre tudo e só o balão responde.
+    furo.current = !festa && exibido?.disponivel && (t === "alvo" || t === "nav") ? alvo : null;
+    if (veus.current && sombra.current && anel.current) {
+      cobrir(furo.current, furo.current && el !== alvo ? el : null, [...veus.current.children] as HTMLElement[], sombra.current, anel.current);
+    }
   };
   useLayoutEffect(tick);
   // Rolagem da pessoa: só eventos de entrada (o `scroll` também vem do scrollBy do guia).
@@ -231,7 +245,7 @@ export function Guia({ s, path }: { s: DashState; path: Path }) {
   } else if (modo === "convite") {
     corpo = <>
       <h2 id="guia-titulo" tabIndex={-1}>Oi! Te mostro o painel?</h2>
-      <p>São {passos.length} passos rapidinhos: você faz, eu mostro onde fica cada coisa.</p>
+      <p id="guia-texto">São {passos.length} passos rapidinhos: você faz, eu mostro onde fica cada coisa.</p>
       <div className="guia-acoes">
         <button type="button" className="btn btn-primary" onClick={() => iniciar(false)}>Bora</button>
         <button type="button" className="btn btn-quiet" onClick={() => fechar(true)}>Agora não</button>
@@ -240,7 +254,7 @@ export function Guia({ s, path }: { s: DashState; path: Path }) {
   } else if (festa) {
     corpo = <>
       <h2 id="guia-titulo" tabIndex={-1}>{fim ? "Fechou! O painel é seu." : acabou ? "Por agora é isso" : "Isso aí!"}</h2>
-      <p>{fim ? "Quando quiser rever, o guia mora em Ajuda." : acabou ? "O passo que ficou pra depois volta quando você abrir a Ajuda." : vai ? `Passo feito. Vem comigo pra ${vai}.` : "Passo feito. Bora pro próximo."}</p>
+      <p id="guia-texto">{fim ? "Quando quiser rever, o guia mora em Ajuda." : acabou ? "O passo que ficou pra depois volta quando você abrir a Ajuda." : vai ? `Passo feito. Vem comigo pra ${vai}.` : "Passo feito. Bora pro próximo."}</p>
       {acabou && <div className="guia-acoes"><button type="button" className="btn btn-primary" onClick={() => fechar(false)}>Fechar</button></div>}
     </>;
   } else {
@@ -249,7 +263,7 @@ export function Guia({ s, path }: { s: DashState; path: Path }) {
     corpo = <>
       <p className="guia-passo">Passo {n} de {passos.length}</p>
       <h2 id="guia-titulo" tabIndex={-1}>{p.fala.titulo}{p.dado === "exemplo" && <> <span className="selo">exemplo</span></>}</h2>
-      <p>{mot ? mot.texto : p.fala.texto}</p>
+      <p id="guia-texto">{mot ? mot.texto : p.fala.texto}</p>
       {mot?.link && <p><a href={OF}>{mot.link}</a></p>}
       {!mot && tipo === "ausente" && <p>Esse bloco não está no seu painel agora. Dá pra pôr de volta em Organizar.</p>}
       {!mot && tipo === "nav" && chegou.current === p.id && <p className="guia-dica">Volta pra {route(ROTA[p.tela]).short}.</p>}
@@ -262,9 +276,36 @@ export function Guia({ s, path }: { s: DashState; path: Path }) {
     </>;
   }
 
+  // Teclado com o véu: o Tab circula entre o balão e o alvo; foco que cai fora (o #page-title
+  // da troca de página, um clique do leitor de tela) volta para o título do balão.
+  const veu = !!corpo;
+  useEffect(() => {
+    if (!veu) return;
+    prende.current = true;
+    const titulo = () => document.getElementById("guia-titulo")?.focus({ preventScroll: true });
+    const caixas = () => [balao.current, furo.current].filter((c): c is HTMLElement => !!c);
+    const onTab = (e: KeyboardEvent) => {
+      if (e.key !== "Tab") return;
+      e.preventDefault();
+      const l = caixas().flatMap((c) => [c, ...c.querySelectorAll<HTMLElement>(FOCAVEL)]).filter((x) => x.matches(FOCAVEL) && x.getClientRects().length > 0);
+      const i = l.indexOf(document.activeElement as HTMLElement);
+      const n = l[i < 0 ? (e.shiftKey ? l.length - 1 : 0) : (i + (e.shiftKey ? l.length - 1 : 1)) % l.length];
+      if (n) n.focus(); else titulo();
+    };
+    const onFoco = (e: FocusEvent) => { if (prende.current && !caixas().some((c) => c.contains(e.target as Node))) titulo(); };
+    window.addEventListener("keydown", onTab, true);
+    window.addEventListener("focusin", onFoco);
+    return () => { prende.current = false; window.removeEventListener("keydown", onTab, true); window.removeEventListener("focusin", onFoco); };
+  }, [veu]);
+
   return <>
     <p className="sr-only" role="status">{status}</p>
+    {corpo && <>
+      <svg className="guia-sombra" aria-hidden="true"><path ref={sombra} fillRule="evenodd" /></svg>
+      <div ref={veus} aria-hidden="true">{[0, 1, 2, 3].map((i) => <div key={i} className="guia-veu" />)}</div>
+      <div ref={anel} className="guia-anel" hidden />
+    </>}
     {corpo && <img ref={piggy} key={exibido?.id ?? "convite"} src={ICON} alt="" width={44} height={44} className="guia-piggy" data-festa={festa ? "" : undefined} />}
-    {corpo && <section ref={balao} className="guia-balao" aria-labelledby="guia-titulo">{corpo}</section>}
+    {corpo && <section ref={balao} className="guia-balao" role="dialog" aria-labelledby="guia-titulo" aria-describedby="guia-texto">{corpo}</section>}
   </>;
 }

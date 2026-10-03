@@ -63,3 +63,10 @@ export const bora = async (page) => { await page.getByRole("button", { name: "Bo
 // até a tela do passo).
 export const ALVO = { "mes.trocado": "mes.trocar", "categoria.aberta": "categorias.item", "piggy.perguntou": "piggy.chip" };
 export const FAZER = Object.fromEntries(Object.entries(ALVO).map(([acao, a]) => [acao, (page) => page.locator(`[data-guia="${a}"]`).first().click()]));
+export const naRota = (page, h) => page.waitForFunction((h) => location.hash === h, h, { timeout: 5000 });
+// Onde o Piggy encosta: [lado a lado, distância à quina de cima, à de baixo].
+export const piggyEm = (page, sel) => page.evaluate((sel) => {
+  const p = document.querySelector(".guia-piggy").getBoundingClientRect();
+  const a = [...document.querySelectorAll(sel)].find((e) => e.getClientRects().length).getBoundingClientRect();
+  return [p.left < a.right && p.right > a.left, Math.round(p.bottom - a.top), Math.round(a.bottom - p.top)];
+}, sel);

@@ -11,7 +11,7 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import { PAINEL, RESPOSTAS } from "./_painel.mjs";
-import { ALVO, FAZER, PASSOS, ROTA, abrir, acoes, bora, esperaTitulo, navegador } from "./_guia.mjs";
+import { ALVO, FAZER, PASSOS, ROTA, abrir, acoes, bora, esperaTitulo, naRota, navegador, piggyEm } from "./_guia.mjs";
 
 navegador();
 
@@ -53,14 +53,6 @@ test("convite: com `oferecer` e perfil no Resumo aparece e grava `visto`; sem pe
 });
 
 // O guia leva sozinho até a tela de cada passo, depois da comemoração ("Vem comigo pra X").
-const naRota = (page, h) => page.waitForFunction((h) => location.hash === h, h, { timeout: 5000 });
-// Onde o Piggy encosta: [lado a lado, distância à quina de cima, à de baixo].
-const piggyEm = (page, sel) => page.evaluate((sel) => {
-  const p = document.querySelector(".guia-piggy").getBoundingClientRect();
-  const a = [...document.querySelectorAll(sel)].find((e) => e.getClientRects().length).getBoundingClientRect();
-  return [p.left < a.right && p.right > a.left, Math.round(p.bottom - a.top), Math.round(a.bottom - p.top)];
-}, sel);
-
 test("os 3 passos pela ação real, o guia levando de tela em tela: nada sai sem ela; categoria já escolhida não conta", async () => {
   // Categoria escolhida em Gastos ANTES do guia; o convite aparece ao voltar ao Resumo.
   const { ctx, page, s, erros } = await abrir({ rota: "/gastos" });
@@ -285,22 +277,35 @@ test("Esc e Pular dispensam; Ajuda (menu, barra de baixo) e Cmd-K reabrem", asyn
   assert.deepEqual(acoes(cel.s), ["reabrir"]);
 });
 
-test("Esc do Cmd-K aberto por cima do guia fecha só o Cmd-K (nativo e Safari 14); o Esc seguinte dispensa", async () => {
+// Com o véu (convite e passo), só o balão e o alvo respondem: nem ⌘K nem "/" abrem o Cmd-K,
+// no <dialog> nativo e no fallback do Safari 14. Esc dispensa e tira o véu; aí o ⌘K volta.
+test("Cmd-K não abre com o véu do convite nem do passo (nativo e Safari 14); Esc e Pular tiram o véu", async () => {
   const r = {};
   for (const semDialog of [false, true]) {
     const { ctx, page, s } = await abrir({ semDialog });
+    const tenta = async () => {
+      for (const k of ["Meta+k", "/"]) await page.keyboard.press(k);
+      await page.waitForTimeout(300);
+      return page.locator(".cmdk[open]").count();
+    };
     await page.getByRole("button", { name: "Bora", exact: true }).waitFor();
+    const convite = await tenta();
+    await bora(page);
+    const passo = await tenta();
+    await page.keyboard.press("Escape");
+    await page.waitForTimeout(300);
+    const esc = [await page.locator(".guia-balao, .guia-veu, .guia-anel, .guia-sombra").count(), acoes(s)];
     await page.keyboard.press("Meta+k");
-    await page.locator(".cmdk[open]").waitFor();
+    await page.locator(".cmdk[open]").waitFor({ timeout: 5000 }); // sem o véu, o ⌘K volta
     await page.keyboard.press("Escape");
-    await page.waitForTimeout(300);
-    const depois1 = [await page.locator(".cmdk[open]").count(), await page.locator(".guia-balao").count(), acoes(s)];
-    await page.keyboard.press("Escape");
-    await page.waitForTimeout(300);
-    r[semDialog ? "safari14" : "nativo"] = [depois1, [await page.locator(".guia-balao").count(), acoes(s)]];
+    await page.locator(".rail").getByRole("button", { name: "Ajuda" }).click();
+    await esperaTitulo(page, PASSOS[0].fala.titulo);
+    await page.getByRole("button", { name: "Pular guia" }).click();
+    const pular = await page.locator(".guia-veu").count();
+    r[semDialog ? "safari14" : "nativo"] = [convite, passo, esc, pular];
     await ctx.close();
   }
-  const esperado = [[0, 1, ["visto"]], [0, ["visto", "dispensar"]]];
+  const esperado = [0, 0, [0, ["visto", "dispensar"]], 0];
   assert.deepEqual(r, { nativo: esperado, safari14: esperado });
 });
 

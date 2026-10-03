@@ -1,6 +1,8 @@
 // Guia do /painel (#728, PR B): a tela de parts/Guia.tsx — o Piggy e o balão no lugar desde o
 // 1º quadro, o movimento só sem `reduce`, a posição longe dos alvos, a rolagem que não puxa a
 // página de quem rolou, o teclado e a barra de baixo com 6 itens (folga ≥ 12 px de 320 a 375).
+// Com o véu (decisão do dono): só o alvo do passo e o balão recebem toque e Tab; o Saiu fica
+// claro no passo do mês sem receber toque; o convite e a comemoração escurecem tudo.
 // O fluxo e o servidor estão em dashboard_v2_guia.test.mjs.
 import { test } from "node:test";
 import assert from "node:assert/strict";
@@ -12,7 +14,7 @@ const browser = navegador();
 // Com `reduce`, o `*` do base.css ganha 1ms de transição em `all`: o left/top gravado pelo
 // JS virava transição a partir de 0 e o 1º quadro pintava o Piggy e o balão no canto
 // (0,0). Mede cada elemento no instante em que entra (o Piggy remonta a cada passo).
-test("Piggy e balão entram já no lugar: o left/top calculado é o gravado, sem quadro no canto", async () => {
+test("Piggy e balão entram já no lugar: o left/top calculado é o gravado, sem quadro no canto (o véu e o anel também)", async () => {
   for (const [width, height] of [[1280, 800], [375, 812]]) for (const motion of ["reduce", "no-preference"]) {
     const { ctx, page, s } = await abrir({ width, height, motion, guia: "em_andamento" });
     Object.assign(s.g.passos[0], { disponivel: true, motivo: null }); s.g.passos[1].feito = false;
@@ -24,29 +26,39 @@ test("Piggy e balão entram já no lugar: o left/top calculado é o gravado, sem
         const cs = getComputedStyle(e);
         window.__entrou.push({ el: e.className, gravado: [e.style.left, e.style.top].map(parseFloat), calculado: [cs.left, cs.top].map(parseFloat) });
       })).observe(document.body, { childList: true, subtree: true });
+      // O véu e o anel não remontam: valem as regravações de cada quadro (furo que muda de lugar).
+      window.__moveu = [];
+      new MutationObserver((ms) => ms.forEach(({ target: e }) => {
+        if (!e.matches?.(".guia-veu, .guia-anel")) return;
+        const cs = getComputedStyle(e), g = [e.style.left, e.style.top].map(parseFloat), c = [cs.left, cs.top].map(parseFloat);
+        if (g.some((v, i) => !(Math.abs(v - c[i]) <= 1))) window.__moveu.push({ el: e.className, g, c });
+      })).observe(document.body, { attributes: true, attributeFilter: ["style"], subtree: true });
     });
     await page.getByRole("button", { name: "Ajuda" }).click();
     await esperaTitulo(page, PASSOS[0].fala.titulo);
     await FAZER["mes.trocado"](page);
     await esperaTitulo(page, PASSOS[1].fala.titulo);
-    const entrou = await page.evaluate(() => window.__entrou);
+    const [entrou, moveu] = await page.evaluate(() => [window.__entrou, window.__moveu]);
     await ctx.close();
     const caso = `${width}x${height} ${motion}`;
     assert.ok(entrou.filter((x) => x.el === "guia-piggy").length >= 2, `${caso}: ${JSON.stringify(entrou)}`); // um Piggy por passo
     // Folga de 1px: o calculado vem em unidade de layout (318.683 → 318.682); o canto erra centenas.
     assert.deepEqual(entrou.filter((x) => x.gravado.some((v, i) => !(Math.abs(v - x.calculado[i]) <= 1))), [], caso);
+    assert.deepEqual(moveu.slice(0, 3), [], caso);
   }
 });
 
-test("movimento: com `reduce` o Piggy fica parado; sem a preferência, entra pulando", async () => {
+test("movimento: com `reduce` o Piggy e o anel ficam parados; sem a preferência, o Piggy entra pulando e o anel pulsa", async () => {
   const nomes = [];
   for (const motion of ["reduce", "no-preference"]) {
     const { ctx, page } = await abrir({ motion });
     await page.locator(".guia-piggy").waitFor();
-    nomes.push(await page.locator(".guia-piggy").evaluate((e) => getComputedStyle(e).animationName));
+    const piggy = await page.locator(".guia-piggy").evaluate((e) => getComputedStyle(e).animationName);
+    await bora(page);
+    nomes.push([piggy, await page.locator(".guia-anel").evaluate((e) => getComputedStyle(e).animationName)]);
     await ctx.close();
   }
-  assert.deepEqual(nomes, ["none", "guia-entra"]);
+  assert.deepEqual(nomes, [["none", "none"], ["guia-entra", "guia-pulso"]]);
 });
 
 test("barra de baixo: 6 itens; folga ≥ 12 px do maior rótulo em 320, 340, 360 e 375", async () => {
@@ -187,3 +199,137 @@ test("barra de baixo do protótipo (sem Ajuda): 5 colunas e o Piggy no centro; n
   assert.deepEqual(r.filter(([n]) => n === "protótipo").map(([, , [c, d]]) => [c, d]), [[5, 0], [5, 0]]);
   assert.deepEqual(r.filter(([n]) => n === "painel").map(([, , [c]]) => c), [6, 6]);
 });
+
+// O que está no ponto central de cada seletor (o 1º visível): o próprio elemento, ou o véu.
+const noCentro = (page, sels) => page.evaluate((sels) => sels.map((sel) => {
+  const e = [...document.querySelectorAll(sel)].find((x) => x.getClientRects().length);
+  if (!e) return `${sel}: ausente`;
+  const r = e.getBoundingClientRect(), x = (r.left + r.right) / 2, y = (r.top + r.bottom) / 2;
+  if (x < 0 || y < 0 || x > innerWidth || y > innerHeight) return `${sel}: fora da tela`;
+  const t = document.elementFromPoint(x, y);
+  return e.contains(t) ? "alvo" : t?.classList.contains("guia-veu") ? "véu" : `${sel}: ${t?.className || t?.tagName}`;
+}), sels);
+// O escuro (o path do véu) em cada centro: true = escuro, false = furo.
+const escuro = (page, sels) => page.evaluate((sels) => sels.map((sel) => {
+  const r = [...document.querySelectorAll(sel)].find((x) => x.getClientRects().length).getBoundingClientRect();
+  const x = (r.left + r.right) / 2, y = (r.top + r.bottom) / 2;
+  return x < 0 || y < 0 || x > innerWidth || y > innerHeight ? `${sel}: fora da tela` : document.querySelector(".guia-sombra path").isPointInFill(new DOMPoint(x, y));
+}), sels);
+const anelEm = (page, sel) => page.evaluate((sel) => {
+  const a = document.querySelector(".guia-anel"), r = a.getBoundingClientRect(), e = document.querySelector(sel).getBoundingClientRect();
+  return a.hidden ? null : [e.left - r.left, e.top - r.top, r.right - e.right, r.bottom - e.bottom].map(Math.round);
+}, sel);
+const SAIU = '[data-guia="resumo.saiu"]';
+
+for (const [width, height] of [[1280, 800], [375, 812]]) {
+  test(`véu ${width}×${height}: convite escuro e sem furo; no passo, furo e anel no alvo exato, o Saiu claro e sem toque; comemoração sem furo`, async () => {
+    const { ctx, page } = await abrir({ width, height });
+    const nav = width > 760 ? ".rail" : ".tabbar";
+    await page.getByRole("button", { name: "Bora", exact: true }).waitFor();
+    await page.waitForTimeout(200);
+    const convite = [await noCentro(page, [".topbar .month-title", `${nav} [data-guia="nav.gastos"]`]), await escuro(page, [".topbar .month-title", '[data-guia="mes.trocar"]'])];
+    await bora(page);
+    await page.waitForTimeout(300);
+    const alvo = '[data-guia="mes.trocar"]';
+    const passo = [await noCentro(page, [alvo, SAIU, `${nav} [data-guia="nav.gastos"]`, ".topbar .cmd-trigger, .topbar a.btn"]), await escuro(page, [alvo, SAIU, ".topbar .month-title"]), await anelEm(page, alvo)];
+    // O clique de verdade no ponto (o `locator.click` rola a página para achar a seta presa no
+    // topo, o que tiraria o Saiu da tela; a pessoa não rola ao clicar).
+    const c = await page.locator(alvo).evaluate((e) => { const r = e.getBoundingClientRect(); return [(r.left + r.right) / 2, (r.top + r.bottom) / 2]; });
+    await page.mouse.click(...c);
+    await page.locator(".guia-balao").getByText("Vem comigo").waitFor();
+    const festa = [await noCentro(page, [alvo]), await escuro(page, [alvo, SAIU]), await anelEm(page, alvo)];
+    await esperaTitulo(page, PASSOS[1].fala.titulo);
+    await page.locator('[data-guia="categorias.item"]').waitFor();
+    await page.waitForTimeout(300);
+    const passo2 = [await noCentro(page, ['[data-guia="categorias.item"]']), await anelEm(page, '[data-guia="categorias.item"]')];
+    await ctx.close();
+    console.log(`# véu ${width}×${height}:`, JSON.stringify({ convite, passo, festa, passo2 }));
+    assert.deepEqual(convite, [["véu", "véu"], [true, true]]);
+    assert.deepEqual(passo.slice(0, 2), [["alvo", "véu", "véu", "véu"], [false, false, true]]);
+    assert.ok(passo[2].every((d) => d >= 2 && d <= 8), `anel: ${passo[2]}`); // o anel envolve o alvo com folga de 2 a 8 px
+    assert.deepEqual(festa, [["véu"], [true, true], null]);
+    assert.equal(passo2[0][0], "alvo");
+    assert.ok(passo2[1].every((d) => d >= 2 && d <= 8), `anel: ${passo2[1]}`);
+  });
+}
+
+// O toque fora do alvo não faz nada: nem navega, nem grava, nem abre o Cmd-K ou o Organizar,
+// nem pergunta pelo chip que não é o do passo. `mouse.click` no ponto: o clique de verdade, que
+// o véu intercepta (o `locator.click` do Playwright recusaria clicar num elemento coberto).
+for (const semDialog of [false, true]) {
+  test(`clique fora do alvo bloqueado (${semDialog ? "Safari 14" : "nativo"}): menu, Organizar, busca e outro chip não respondem; o alvo responde`, async () => {
+    const { ctx, page, s } = await abrir({ semDialog });
+    await page.getByRole("button", { name: "Bora", exact: true }).waitFor();
+    await page.waitForTimeout(300);
+    const clicar = async (sels) => {
+      const feitos = [];
+      for (const sel of sels) {
+        const c = await page.evaluate((sel) => {
+          const e = [...document.querySelectorAll(sel)].find((x) => x.getClientRects().length);
+          const r = e?.getBoundingClientRect();
+          return r && r.top >= 0 && r.bottom <= innerHeight ? [(r.left + r.right) / 2, (r.top + r.bottom) / 2] : null;
+        }, sel);
+        if (!c) continue;
+        await page.mouse.click(...c);
+        feitos.push(sel);
+      }
+      await page.waitForTimeout(400);
+      return feitos;
+    };
+    const estado = async () => [await page.evaluate(() => location.hash), acoes(s), await page.locator(".cmdk[open]").count(), await page.locator(".board[data-editing]").count(), await page.locator(".msg-user").count()];
+    const fora = ['.rail [data-guia="nav.gastos"]', ".board button[aria-pressed]", ".topbar .cmd-trigger", ".topbar a.btn"];
+    const noConvite = [await clicar(fora), await estado()];
+    await bora(page);
+    await page.waitForTimeout(300);
+    const noPasso = [await clicar([...fora, SAIU]), await estado()];
+    await FAZER["mes.trocado"](page);
+    await esperaTitulo(page, PASSOS[1].fala.titulo);
+    await FAZER["categoria.aberta"](page);
+    await esperaTitulo(page, PASSOS[2].fala.titulo);
+    await page.locator('[data-guia="piggy.chip"]').waitFor();
+    await page.waitForTimeout(300);
+    const outroChip = await clicar(['.chat-empty .chip:not([data-guia])']);
+    const passo3 = await estado();
+    await FAZER["piggy.perguntou"](page);
+    await esperaTitulo(page, "Fechou!");
+    await ctx.close();
+    assert.deepEqual(noConvite, [fora, ["#/", ["visto"], 0, 0, 0]]);
+    // No passo a página rolou até o Saiu: o Organizar pode ter saído da tela.
+    assert.deepEqual(noPasso[0].filter((x) => x !== fora[1]), [fora[0], fora[2], fora[3], SAIU]);
+    assert.deepEqual(noPasso[1], ["#/", ["visto"], 0, 0, 0]);
+    assert.equal(outroChip.length, 1);
+    assert.deepEqual(passo3, ["#/piggy", ["visto", "feito:resumo.saiu", "feito:gastos.categoria"], 0, 0, 0]);
+    assert.deepEqual(acoes(s).at(-1), "feito:piggy.pergunta");
+  });
+}
+
+// Teclado com o véu: o Tab circula entre o balão e o alvo (12 Tabs não saem dali); depois da
+// ação o foco fica no controle usado; a troca de página que o guia faz devolve o foco ao
+// título do balão (o App.tsx foca o #page-title); fechar devolve à página.
+for (const semDialog of [false, true]) {
+  test(`foco com o véu (${semDialog ? "Safari 14" : "nativo"}): Tab preso no balão e no alvo; pós-ação no controle; pós-navegação no balão; ao fechar, a página`, async () => {
+    const { ctx, page } = await abrir({ semDialog });
+    await bora(page);
+    const onde = () => page.evaluate(() => {
+      const a = document.activeElement;
+      return a.closest(".guia-balao") ? `balão:${a.textContent.trim().slice(0, 12)}` : a.closest('[data-guia="mes.trocar"]') ? "alvo" : `fora:${a.id || a.className || a.tagName}`;
+    });
+    const tabs = [];
+    for (let i = 0; i < 12; i++) { await page.keyboard.press(i % 4 === 3 ? "Shift+Tab" : "Tab"); tabs.push(await onde()); }
+    await FAZER["mes.trocado"](page);
+    const posAcao = await page.evaluate(() => document.activeElement?.getAttribute("aria-label"));
+    await esperaTitulo(page, PASSOS[1].fala.titulo);
+    await page.locator('[data-guia="categorias.item"]').waitFor();
+    await page.waitForTimeout(300);
+    const posNavegacao = await page.evaluate(() => document.activeElement?.id);
+    await page.keyboard.press("Escape");
+    await page.waitForTimeout(300);
+    const fechado = await page.evaluate(() => document.activeElement?.id);
+    await ctx.close();
+    assert.deepEqual(tabs.filter((t) => t.startsWith("fora")), [], JSON.stringify(tabs));
+    assert.ok(tabs.includes("alvo") && tabs.some((t) => t.startsWith("balão")), JSON.stringify(tabs));
+    assert.equal(posAcao, "Mês anterior");
+    assert.equal(posNavegacao, "guia-titulo");
+    assert.equal(fechado, "page-title");
+  });
+}

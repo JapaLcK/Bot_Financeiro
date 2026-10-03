@@ -48,3 +48,23 @@
   75% { transform: translateY(-6px) rotate(-4deg); }
 }
 @keyframes guia-surge { from { opacity: 0; transform: translateY(6px); } }
+
+/* O véu: escurece a tela menos o alvo do passo (e o Saiu no passo do mês) e bloqueia o toque
+   fora do alvo. O escuro é o path (dois furos); as quatro faixas transparentes em volta do
+   alvo pegam o toque. Sem `inset` (Safari 14). O anel rosa marca o alvo, sem pegar toque. */
+.guia-sombra { position: fixed; top: 0; left: 0; width: 100%; height: 100%; z-index: 45; pointer-events: none; fill: rgba(0, 0, 0, 0.55); }
+.guia-veu { position: fixed; z-index: 45; }
+.guia-anel {
+  position: fixed; z-index: 46;
+  pointer-events: none;
+  box-shadow: 0 0 0 2px var(--pink);
+}
+/* O mesmo 1ms do base.css em `reduce`: o JS grava a posição a cada quadro. */
+.guia-veu, .guia-anel { transition-property: none; }
+@media (prefers-reduced-motion: no-preference) {
+  .guia-anel { animation: guia-pulso 1400ms var(--ease-out) infinite; }
+}
+@keyframes guia-pulso {
+  0% { box-shadow: 0 0 0 2px var(--pink), 0 0 0 0 rgba(255, 45, 142, 0.55); }
+  100% { box-shadow: 0 0 0 2px var(--pink), 0 0 0 10px rgba(255, 45, 142, 0); }
+}

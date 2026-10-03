@@ -72,7 +72,7 @@ export function App() {
   return (
     <>
       <a className="skip" href="#main" onClick={(e) => { e.preventDefault(); document.getElementById("page-title")?.focus(); }}>Pular para o conteúdo</a>
-      {/* Logo no começo do DOM: o balão do guia é não-modal e fica a poucos Tabs do topo. */}
+      {/* Logo no começo do DOM: o balão do guia fica no começo da ordem de leitura (o Tab, com o véu, é dele). */}
       <Guia s={s} path={path} />
       <div className="shell">
         <nav className="rail" aria-label="Páginas do painel">

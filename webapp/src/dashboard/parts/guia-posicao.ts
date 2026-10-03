@@ -92,3 +92,29 @@ export function posicionar(el: HTMLElement | null, piggy: HTMLElement, balao: HT
   piggy.style.top = `${py}px`;
   piggy.style.setProperty("--tilt", `${tilt}deg`);
 }
+
+// O véu (decisão do dono): escurece a tela menos o alvo, que ganha o anel rosa, e menos o
+// `claro` (o Saiu no passo do mês: à vista, mas não se toca). Quatro faixas transparentes em
+// volta do alvo bloqueiam o toque; o escuro é um path `evenodd`, que comporta os dois furos.
+// Sem alvo, uma faixa cobre a tela inteira e o anel some.
+const F = 4; // folga do anel e do furo escuro em volta do alvo
+const furo = (r: DOMRect, raio: number) => {
+  const x = r.left - F, y = r.top - F, w = r.width + 2 * F, h = r.height + 2 * F, k = Math.min(raio + F, w / 2, h / 2);
+  return `M${x + k} ${y}h${w - 2 * k}a${k} ${k} 0 0 1 ${k} ${k}v${h - 2 * k}a${k} ${k} 0 0 1 ${-k} ${k}h${2 * k - w}a${k} ${k} 0 0 1 ${-k} ${-k}v${2 * k - h}a${k} ${k} 0 0 1 ${k} ${-k}Z`;
+};
+const raioDe = (el: HTMLElement) => parseFloat(getComputedStyle(el).borderTopLeftRadius) || 0;
+export function cobrir(alvo: HTMLElement | null, claro: HTMLElement | null, faixas: HTMLElement[], sombra: SVGPathElement, anel: HTMLElement) {
+  const vw = document.documentElement.clientWidth, vh = innerHeight;
+  const a = alvo?.getBoundingClientRect() ?? { left: 0, top: 0, right: 0, bottom: 0 };
+  const caixas = [[0, 0, vw, a.top], [0, a.bottom, vw, vh - a.bottom], [0, a.top, a.left, a.bottom - a.top], [a.right, a.top, vw - a.right, a.bottom - a.top]];
+  faixas.forEach((f, i) => {
+    const [x, y, w, h] = caixas[i];
+    Object.assign(f.style, { left: `${x}px`, top: `${y}px`, width: `${Math.max(0, w)}px`, height: `${Math.max(0, h)}px` });
+  });
+  const furos = [alvo, claro].filter((e): e is HTMLElement => !!e).map((e) => furo(e.getBoundingClientRect(), raioDe(e)));
+  sombra.setAttribute("d", `M0 0H${vw}V${vh}H0Z${furos.join("")}`);
+  anel.hidden = !alvo;
+  if (!alvo) return;
+  const r = alvo.getBoundingClientRect();
+  Object.assign(anel.style, { left: `${r.left - F}px`, top: `${r.top - F}px`, width: `${r.width + 2 * F}px`, height: `${r.height + 2 * F}px`, borderRadius: `${raioDe(alvo) + F}px` });
+}
