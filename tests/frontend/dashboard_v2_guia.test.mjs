@@ -11,7 +11,7 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import { PAINEL, RESPOSTAS } from "./_painel.mjs";
-import { ALVO, FAZER, PASSOS, ROTA, abrir, acoes, bora, esperaTitulo, naRota, navegador, piggyEm } from "./_guia.mjs";
+import { ALVO, FAZER, PASSOS, ROTA, abrir, acoes, bora, esperaTitulo, irAoAlvo, naRota, navegador, piggyEm } from "./_guia.mjs";
 
 navegador();
 
@@ -92,7 +92,7 @@ test("celular: o guia leva à conversa e destaca o chip do gasto do mês, que co
   await page.getByRole("button", { name: "Ajuda" }).click();
   await esperaTitulo(page, PASSOS[2].fala.titulo);
   await naRota(page, "#/piggy");
-  await page.waitForTimeout(300);
+  await irAoAlvo(page, '[data-guia="piggy.chip"]');
   const chip = await page.locator('[data-guia="piggy.chip"]').textContent();
   const encosta = await piggyEm(page, '[data-guia="piggy.chip"]');
   await FAZER["piggy.perguntou"](page);
@@ -111,7 +111,7 @@ test("conversa já começada (sem chips): o alvo do passo do Piggy é o campo da
   await naRota(page, "#/piggy");
   await page.locator(".rail").getByRole("button", { name: "Ajuda" }).click();
   await esperaTitulo(page, PASSOS[2].fala.titulo);
-  await page.waitForTimeout(300);
+  await irAoAlvo(page, '[data-guia="piggy.pergunta"]');
   const r = [await page.locator('[data-guia="piggy.chip"]').count(), await piggyEm(page, '[data-guia="piggy.pergunta"]')];
   await page.locator("#askbar-input").fill("Quanto gastei este mês?");
   await page.locator("#askbar-input").press("Enter");
@@ -133,6 +133,7 @@ test("voltou pelo navegador: \"Volta pra Gastos\" com o Piggy na aba, sem ser pu
   await page.waitForTimeout(1200);
   const r = [await page.evaluate(() => location.hash), await piggyEm(page, '.rail [data-guia="nav.gastos"]')];
   await page.locator('.rail [data-guia="nav.gastos"]').click();
+  await esperaTitulo(page, PASSOS[1].fala.titulo); // a aba devolve: o balão volta ao bloco
   await FAZER["categoria.aberta"](page);
   await esperaTitulo(page, PASSOS[2].fala.titulo);
   await ctx.close();
@@ -158,9 +159,8 @@ test("POST 500: sem comemoração, \"Tentar de novo\"; o 200 depois comemora", a
 });
 
 test("POST 409 passo_indisponivel: relê o guia e mostra a orientação, sem \"Tentar de novo\"; Seguir vai ao passo 2", async () => {
-  const sem = RESPOSTAS.guia.indisponivel;
   const { ctx, page, s } = await abrir({
-    post: (c, n, st) => { if (c.acao !== "feito") return null; st.g = { ...sem, estado: "em_andamento" }; const e = RESPOSTAS.erros["409_passo_indisponivel"]; return { status: e.status, json: e.body }; },
+    post: (c, n, st) => { if (c.acao !== "feito") return null; st.g = { ...RESPOSTAS.guia.indisponivel, estado: "em_andamento" }; const e = RESPOSTAS.erros["409_passo_indisponivel"]; return { status: e.status, json: e.body }; },
   });
   await bora(page);
   await FAZER["mes.trocado"](page);

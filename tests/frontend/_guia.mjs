@@ -64,13 +64,32 @@ export async function abrir({ width = 1280, height = 800, guia = "oferecer", per
   return { ctx, page, s, erros };
 }
 export const acoes = (s) => s.posts.map((c) => c.passo ? `${c.acao}:${c.passo}` : c.acao);
-export const esperaTitulo = (page, t) => page.locator("#guia-titulo", { hasText: t }).waitFor({ timeout: 5000 });
+// 10 s: entre um passo e o seguinte, com `reduce`, vão a festa, a pausa e a troca (~3 s).
+export const esperaTitulo = (page, t) => page.locator("#guia-titulo", { hasText: t }).waitFor({ timeout: 10000 });
 export const bora = async (page) => { await page.getByRole("button", { name: "Bora", exact: true }).click(); await esperaTitulo(page, PASSOS[0].fala.titulo); };
 
+// O anel em volta do 1º visível de `sel`, com folga de 2 a 8 px (o voo já pousou).
+export const anelNoAlvo = (page, sel) => page.waitForFunction((sel) => {
+  const a = document.querySelector(".guia-anel"), e = [...document.querySelectorAll(sel)].find((x) => x.getClientRects().length);
+  if (!a || a.hidden || !e) return false;
+  const r = a.getBoundingClientRect(), t = e.getBoundingClientRect();
+  return [t.left - r.left, t.top - r.top, r.right - t.right, r.bottom - t.bottom].every((d) => d >= 2 && d <= 8);
+}, sel, { timeout: 10000 });
+// O "Entendi" do balão: o passo sai da apresentação do bloco e vai para o alvo.
+export const botaoEntendi = (page) => page.locator(".guia-balao").getByRole("button", { name: "Entendi", exact: true });
+export const entendi = (page) => botaoEntendi(page).click();
+// "Entendi" e espera o Piggy pousar: o anel em volta de `sel`.
+export const irAoAlvo = async (page, sel) => { await entendi(page); await anelNoAlvo(page, sel); };
+
 // A ação real de cada passo, por `acao` do roteiro, no alvo que o guia destaca (ele mesmo leva
-// até a tela do passo).
+// até a tela do passo): passa pelo "Entendi" se o balão ainda apresenta o bloco e espera o anel
+// no alvo antes de tocar.
 export const ALVO = { "mes.trocado": "mes.trocar", "categoria.aberta": "categorias.item", "piggy.perguntou": "piggy.chip" };
-export const FAZER = Object.fromEntries(Object.entries(ALVO).map(([acao, a]) => [acao, (page) => page.locator(`[data-guia="${a}"]`).first().click()]));
+export const FAZER = Object.fromEntries(Object.entries(ALVO).map(([acao, a]) => [acao, async (page) => {
+  if (await botaoEntendi(page).count()) await entendi(page);
+  await anelNoAlvo(page, `[data-guia="${a}"]`);
+  await page.locator(`[data-guia="${a}"]`).first().click();
+}]));
 export const naRota = (page, h) => page.waitForFunction((h) => location.hash === h, h, { timeout: 5000 });
 // Onde o Piggy encosta: [lado a lado, distância à quina de cima, à de baixo].
 export const piggyEm = (page, sel) => page.evaluate((sel) => {

@@ -28,10 +28,12 @@ export const tiltDe = (el: HTMLElement) => parseFloat(el.style.getPropertyValue(
 // FLIP: o elemento já está no destino (left/top); anima de onde estava (`de`, o retângulo de
 // antes) até lá. Com `tiltA` (o Piggy) em arco, inclinando; sem (o balão), em linha reta. O
 // left/top segue a mira a cada quadro: o transform é relativo a ela. Destino pelo left/top
-// gravado, não pelo retângulo, que traria o voo anterior e a inclinação junto.
+// gravado, não pelo retângulo, que traria o voo anterior e a inclinação junto. Até 24 px não
+// voa: devolve se voou.
 export function voar(el: HTMLElement, de: DOMRect, tiltA?: number) {
   const [ax, ay] = centro(de);
   const dx = ax - (parseFloat(el.style.left) + el.offsetWidth / 2), dy = ay - (parseFloat(el.style.top) + el.offsetHeight / 2);
+  if (Math.hypot(dx, dy) <= 24) return false;
   const arco = tiltA == null ? 0 : Math.min(120, Math.hypot(dx, dy) / 3);
   const rot = (a: number) => (tiltA == null ? "" : ` rotate(${a}deg)`);
   const t = tiltDe(el);
@@ -40,6 +42,7 @@ export function voar(el: HTMLElement, de: DOMRect, tiltA?: number) {
     { offset: 0.5, transform: `translate(${dx / 2}px, ${dy / 2 - arco}px)${rot(t)}` },
     { transform: `translate(0px, 0px)${rot(t)}` },
   ], TEMPO.voo, "cubic-bezier(.45,0,.2,1)");
+  return true;
 }
 
 // A comemoração: o Piggy pula no lugar.

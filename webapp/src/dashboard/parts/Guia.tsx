@@ -7,12 +7,17 @@ import { mesDe } from "../lib/store.js";
 import type { DashState } from "../lib/types";
 import { DEMO, ErroApi, apiPost, guiaQuery, perfilQuery } from "../lib/v2";
 import { go, route, type Path } from "../router";
-import { ROTA, achar, cobrir, posicionar, trazer, type Tipo } from "./guia-posicao";
+import { ROTA, aba, achar, cobrir, guia, posicionar, trazer, type Tipo } from "./guia-posicao";
+import { useTecladoDoVeu } from "./guia-teclado";
+import { TEMPO, apertar, dura, parar, pular, tiltDe, troca, voando, voar } from "./guia-voo";
 
 // O guia do /painel (#728). O roteiro e o progresso vêm do servidor (GET/POST /api/v2/guia,
 // `PASSOS` em api/v2/guia.py); aqui fica só se o guia está aberto. O passo avança quando a
 // pessoa faz a ação de verdade, nunca por um "próximo". O guia leva sozinho até a tela do passo
 // e escurece o resto: só o alvo do passo (e o balão) recebe toque e Tab.
+// Cada passo anda em etapas (`fase`): "ida" (o Piggy voa até a aba, a aperta, e a tela troca),
+// "bloco" (ele apresenta o bloco, aceso e sem toque, e espera o "Entendi") e "alvo" (ele voa
+// até o que se toca, que ganha o anel). A tabela de quem o Piggy mira em cada etapa está no `tick`.
 
 // A aba de cada tela do roteiro (App.tsx põe `data-guia` no menu lateral e na barra de baixo).
 export const navGuia = (p: Path) => {
@@ -43,8 +48,8 @@ const MOTIVO: Record<NonNullable<Passo["motivo"]>, { texto: string; link?: strin
 };
 
 type Modo = "fechado" | "convite" | "ativo";
+type Etapa = "ida" | "bloco" | "alvo";
 const TECLAS = ["PageUp", "PageDown", "Home", "End", "ArrowUp", "ArrowDown", " "];
-const FOCAVEL = "a[href], button:not(:disabled), input:not(:disabled), [tabindex]:not([tabindex='-1'])";
 
 export function Guia({ s, path }: { s: DashState; path: Path }) {
   const qc = useQueryClient();
@@ -57,9 +62,9 @@ export function Guia({ s, path }: { s: DashState; path: Path }) {
   const [festa, setFesta] = useState<string | null>(null);
   const [tipo, setTipo] = useState<Tipo>("espera");
   const [fechouDialog, reavaliar] = useState(0);
+  const [fase, setFase] = useState<{ id: string; etapa: Etapa }>({ id: "", etapa: "bloco" }); // presa ao passo atual
   const ofereceu = useRef(false);
-  const foi = useRef(""); // o passo para cuja tela o guia já levou
-  const chegou = useRef(""); // o passo cuja tela a pessoa já viu
+  const miraAnt = useRef<HTMLElement | null>(null); // onde o Piggy estava mirando: mudou, ele voa
   const focar = useRef(false);
   const rolou = useRef("");
   const mexeu = useRef(false); // a pessoa rolou por conta própria desde a rolagem inicial do passo
@@ -97,10 +102,15 @@ export function Guia({ s, path }: { s: DashState; path: Path }) {
   const salvando = m.isPending && v?.acao === "feito";
   const indisponivel = m.error instanceof ErroApi && m.error.code === "passo_indisponivel";
   const falhou = m.isError && v?.acao === "feito" && v.passo === atual?.id && !indisponivel;
+  // A etapa do passo: a gravada, ou (passo novo) "bloco" na tela dele e "ida" fora dela. "volta":
+  // a pessoa saiu da tela do passo depois de chegar (o voltar do navegador).
+  const naTela = !!atual && path === ROTA[atual.tela];
+  const etapa: Etapa | null = modo !== "ativo" || festa || !atual ? null : fase.id === atual.id ? fase.etapa : naTela ? "bloco" : "ida";
+  const volta = (etapa === "bloco" || etapa === "alvo") && !naTela;
 
   const iniciar = (rever: boolean) => {
-    setRev(rever); setVistos([]); setFesta(null); setModo("ativo");
-    focar.current = true; foi.current = ""; chegou.current = "";
+    setRev(rever); setVistos([]); setFesta(null); setModo("ativo"); setFase({ id: "", etapa: "bloco" });
+    focar.current = true;
   };
   const fechar = (dispensa: boolean) => {
     if (dispensa) m.mutate({ acao: "dispensar" });
@@ -109,7 +119,7 @@ export function Guia({ s, path }: { s: DashState; path: Path }) {
     setModo("fechado"); setFesta(null);
   };
   // O botão some com o passo: o foco vai para o título do que vem (o próximo ou a tela final).
-  const pular = (id: string) => { setVistos((x) => [...x, id]); focar.current = true; };
+  const seguir = (id: string) => { setVistos((x) => [...x, id]); focar.current = true; };
 
   // Convite: só para quem nunca viu (`oferecer`), no Resumo, depois do perfil escolhido e sem
   // nenhum dialog aberto (perfil, Cmd-K). Uma vez por carga de página. Com dialog aberto,
@@ -156,27 +166,42 @@ export function Guia({ s, path }: { s: DashState; path: Path }) {
   const agora: Retrato = { mes: mesDe(s), cat: s.filter.category, perguntas, path };
   const antes = useRef<{ id: string; r: Retrato }>({ id: "", r: agora });
   useEffect(() => {
-    const rodando = modo === "ativo" && atual && atual.disponivel && !festa && !salvando && !falhou && !s.editing;
+    const rodando = etapa === "alvo" && atual && atual.disponivel && !salvando && !falhou && !s.editing;
     const a = antes.current;
     antes.current = { id: rodando ? atual.id : "", r: agora };
     if (rodando && a.id === atual.id && ACOES[atual.acao]?.feito(a.r, agora)) m.mutate({ acao: "feito", passo: atual.id });
   });
 
-  // Leva até a tela do passo uma vez por passo (depois da comemoração, que é a pausa do "Vem
-  // comigo"). Quem volta pelo navegador lê "Volta pra X" e não é puxado de novo.
+  // Passo novo: grava a etapa de entrada. Refetch que não muda o passo não reinicia nada.
+  useEffect(() => { if (atual && etapa && fase.id !== atual.id) setFase({ id: atual.id, etapa }); });
+
+  // A ida: o Piggy voa até a aba (o tick), pausa, aperta a aba, a tela troca devagar e ele
+  // apresenta o bloco. As deps são estas e só estas: um refetch (g, passos) não pode reiniciar
+  // os relógios. Esc, Pular e o fim da ida limpam tudo (relógios, aperto, atributo da troca).
   useEffect(() => {
-    if (modo !== "ativo" || festa || !atual) return;
-    if (path === ROTA[atual.tela]) chegou.current = atual.id;
-    else if (foi.current !== atual.id) go(ROTA[atual.tela]);
-    foi.current = atual.id;
-  });
+    if (etapa !== "ida" || !atual) return;
+    const { id, tela } = atual;
+    const ts: ReturnType<typeof setTimeout>[] = [];
+    let a: HTMLElement | null = null;
+    ts.push(setTimeout(() => {
+      a = aba(atual);
+      if (piggy.current && a) apertar(piggy.current, a);
+      ts.push(setTimeout(() => {
+        troca(true);
+        go(ROTA[tela]);
+        ts.push(setTimeout(() => { troca(false); setFase({ id, etapa: "bloco" }); }, TEMPO.troca));
+      }, dura("aperto")));
+    }, dura("voo") + TEMPO.pausa));
+    return () => { ts.forEach(clearTimeout); parar(a); troca(false); };
+  }, [modo, atual?.id, etapa === "ida"]);
 
   // Comemoração: o passo seguinte entra depois dela; a última fica até fechar.
   useEffect(() => {
     if (!festa || acabou) return;
-    const t = setTimeout(() => setFesta(null), 1600);
+    const t = setTimeout(() => setFesta(null), TEMPO.festa);
     return () => clearTimeout(t);
   }, [festa, acabou]);
+  useEffect(() => { if (festa && piggy.current) pular(piggy.current); }, [festa]);
   // Acabaram os passos sem comemoração (Seguir no último; refetch que trouxe o resto feito por
   // outra aba ou antes do 200): a mesma tela final, nunca fechar calado.
   useEffect(() => {
@@ -185,24 +210,51 @@ export function Guia({ s, path }: { s: DashState; path: Path }) {
     if (id) setFesta(id); else setModo("fechado");
   });
 
-  // Posição: segue a âncora a cada quadro (rolagem, grade arrastável, troca de página).
+  // Posição: segue a mira a cada quadro (rolagem, grade arrastável, troca de página). A tabela
+  // do plano (#728): quem o Piggy mira; o que fica aceso sem toque (claro), o que se toca
+  // (toque) e onde vai o anel (marca), por etapa:
+  //   convite, ausente, espera: canto (na espera o Piggy fica onde está), tudo escuro;
+  //   festa: fica onde estava, tudo escuro;
+  //   ida: a aba, acesa e com anel, sem toque (na troca de tela, escura);
+  //   volta: a aba, tocável e com anel;
+  //   motivo: a âncora, tudo escuro;
+  //   bloco: a âncora, acesa sem toque e sem anel;
+  //   alvo: o alvo, tocável e com anel.
+  // Mira nova: o Piggy voa até ela (e o balão vai junto); no voo o véu fica inteiro e sem anel.
   const tick = () => {
-    if (!piggy.current || !balao.current) return;
-    const { el: alvo, mira: el, tipo: t } = exibido && modo === "ativo" ? achar(exibido, path, ACOES[exibido.acao]?.alvo ?? []) : { el: null, mira: null, tipo: "espera" as Tipo };
+    const pg = piggy.current, b = balao.current;
+    if (!pg || !b) return;
+    const p = modo === "ativo" ? exibido : undefined;
+    const { el: alvo, tipo: t } = p ? achar(p, path, ACOES[p.acao]?.alvo ?? []) : { el: null, tipo: "espera" as Tipo };
     setTipo(t);
-    // Rola uma vez por passo, e de novo se a página mudou de altura (um bloco acima chegou
+    let mira: HTMLElement | null = null, toque: HTMLElement | null = null, claro: HTMLElement | null = null, marca: HTMLElement | null = null;
+    if (p && festa) mira = miraAnt.current?.isConnected ? miraAnt.current : alvo;
+    else if (p && etapa === "ida") { mira = aba(p); if (!document.documentElement.hasAttribute("data-guia-troca")) claro = marca = mira; }
+    else if (p && volta) mira = toque = marca = aba(p);
+    else if (p && t === "alvo") {
+      if (!p.disponivel) mira = guia(p.ancora);
+      else if (etapa === "bloco") mira = claro = guia(p.ancora);
+      else mira = toque = marca = alvo;
+    }
+    const parado = !!p && !mira && t === "espera" && !!pg.style.left;
+    // Rola uma vez por etapa, e de novo se a página mudou de altura (um bloco acima chegou
     // depois e empurrou a âncora), mas só enquanto a pessoa não rolou por conta própria: o
     // refetch do SSE muda a altura e não pode puxá-la de volta.
-    const chave = `${exibido?.id}:${document.documentElement.scrollHeight}`;
-    const primeira = !rolou.current.startsWith(`${exibido?.id}:`);
-    const rolar = !!el && t === "alvo" && rolou.current !== chave && (primeira || !mexeu.current);
-    if (rolar) { if (primeira) mexeu.current = false; rolou.current = chave; trazer(el); }
-    posicionar(el, piggy.current, balao.current, rolar);
-    // O furo só com o passo rodando: no convite, na comemoração, na espera, no motivo e no fim,
-    // o véu cobre tudo e só o balão responde.
-    furo.current = !festa && exibido?.disponivel && (t === "alvo" || t === "nav") ? alvo : null;
+    const pre = `${p?.id}:${etapa}:`, chave = `${pre}${document.documentElement.scrollHeight}`;
+    const primeira = !rolou.current.startsWith(pre);
+    // A barra de cima (a seta do mês) não rola: rolar a página não a traz, só tira o Saiu da tela.
+    const rolar = !!mira && !mira.closest(".topbar") && !festa && (etapa === "bloco" || etapa === "alvo") && !volta && rolou.current !== chave && (primeira || !mexeu.current);
+    if (rolar) { if (primeira) mexeu.current = false; rolou.current = chave; trazer(mira!); }
+    const de = pg.getBoundingClientRect(), deB = b.getBoundingClientRect(), tiltA = tiltDe(pg), tinha = !!pg.style.left;
+    posicionar(mira, parado ? null : pg, b, rolar, p && t === "alvo" && !festa && !volta ? [alvo, guia(p.ancora)] : []);
+    if (!parado && mira !== miraAnt.current) {
+      if (tinha && voar(pg, de, tiltA)) voar(b, deB);
+      miraAnt.current = mira;
+    }
+    const voa = voando(pg);
+    furo.current = voa ? null : toque;
     if (veus.current && sombra.current && anel.current) {
-      cobrir(furo.current, furo.current && el !== alvo ? el : null, [...veus.current.children] as HTMLElement[], sombra.current, anel.current);
+      cobrir(furo.current, voa ? null : claro, voa ? null : marca, [...veus.current.children] as HTMLElement[], sombra.current, anel.current);
     }
   };
   useLayoutEffect(tick);
@@ -235,6 +287,8 @@ export function Guia({ s, path }: { s: DashState; path: Path }) {
   const aberto = modo === "convite" || (modo === "ativo" && !!exibido);
   // A tela do passo seguinte, se é outra: a comemoração avisa antes de o guia levar até lá.
   const vai = festa && atual && path !== ROTA[atual.tela] ? route(ROTA[atual.tela]).short : null;
+  const leva = etapa === "ida" ? "Vem comigo pra" : volta ? "Volta pra" : null; // fora da tela do passo
+  const entendi = (id: string) => { setFase({ id, etapa: "alvo" }); focar.current = true; };
   const status = !aberto || s.editing ? ""
     : modo === "convite" ? "O Piggy quer te mostrar o painel."
     : festa ? (fim ? "Guia concluído." : acabou ? "Por agora é isso. O passo que ficou pra depois volta na Ajuda." : `Passo feito.${vai ? ` Vem comigo pra ${vai}.` : ""}`)
@@ -244,7 +298,7 @@ export function Guia({ s, path }: { s: DashState; path: Path }) {
     // fechado, ou pausado enquanto organiza o painel: só a região de anúncio fica montada
   } else if (modo === "convite") {
     corpo = <>
-      <h2 id="guia-titulo" tabIndex={-1}>Oi! Te mostro o painel?</h2>
+      <h2 key="titulo" id="guia-titulo" tabIndex={-1}>Oi! Te mostro o painel?</h2>
       <p id="guia-texto">São {passos.length} passos rapidinhos: você faz, eu mostro onde fica cada coisa.</p>
       <div className="guia-acoes">
         <button type="button" className="btn btn-primary" onClick={() => iniciar(false)}>Bora</button>
@@ -253,7 +307,7 @@ export function Guia({ s, path }: { s: DashState; path: Path }) {
     </>;
   } else if (festa) {
     corpo = <>
-      <h2 id="guia-titulo" tabIndex={-1}>{fim ? "Fechou! O painel é seu." : acabou ? "Por agora é isso" : "Isso aí!"}</h2>
+      <h2 key="titulo" id="guia-titulo" tabIndex={-1}>{fim ? "Fechou! O painel é seu." : acabou ? "Por agora é isso" : "Isso aí!"}</h2>
       <p id="guia-texto">{fim ? "Quando quiser rever, o guia mora em Ajuda." : acabou ? "O passo que ficou pra depois volta quando você abrir a Ajuda." : vai ? `Passo feito. Vem comigo pra ${vai}.` : "Passo feito. Bora pro próximo."}</p>
       {acabou && <div className="guia-acoes"><button type="button" className="btn btn-primary" onClick={() => fechar(false)}>Fechar</button></div>}
     </>;
@@ -262,49 +316,24 @@ export function Guia({ s, path }: { s: DashState; path: Path }) {
     const mot = !p.disponivel && p.motivo ? MOTIVO[p.motivo] : null;
     corpo = <>
       <p className="guia-passo">Passo {n} de {passos.length}</p>
-      <h2 id="guia-titulo" tabIndex={-1}>{p.fala.titulo}{p.dado === "exemplo" && <> <span className="selo">exemplo</span></>}</h2>
-      <p id="guia-texto">{mot ? mot.texto : p.fala.texto}</p>
-      {mot?.link && <p><a href={OF}>{mot.link}</a></p>}
-      {!mot && tipo === "ausente" && <p>Esse bloco não está no seu painel agora. Toca em Seguir; depois dá pra pôr ele de volta em Organizar.</p>}
-      {!mot && tipo === "nav" && chegou.current === p.id && <p className="guia-dica">Volta pra {route(ROTA[p.tela]).short}.</p>}
+      {/* O mesmo <h2> (key) em toda etapa e na festa: o foco que está nele não cai no body. */}
+      <h2 key="titulo" id="guia-titulo" tabIndex={-1}>{leva ? `${leva} ${route(ROTA[p.tela]).short}.` : <>{p.fala.titulo}{p.dado === "exemplo" && <> <span className="selo">exemplo</span></>}</>}</h2>
+      {!leva && <>
+        <p id="guia-texto">{mot ? mot.texto : etapa === "bloco" ? p.fala.apresenta : p.fala.texto}</p>
+        {mot?.link && <p><a href={OF}>{mot.link}</a></p>}
+        {!mot && tipo === "ausente" && <p>Esse bloco não está no seu painel agora. Toca em Seguir; depois dá pra pôr ele de volta em Organizar.</p>}
+      </>}
       {salvando && <p className="guia-dica">Salvando…</p>}
       {falhou && <p role="alert">Não consegui salvar seu progresso. <button type="button" className="btn btn-ghost" onClick={() => qc.isMutating({ mutationKey: ["guia"] }) || m.mutate(v!)}>Tentar de novo</button></p>}
       <div className="guia-acoes">
-        {(mot || tipo === "ausente") && <button type="button" className="btn btn-ghost" onClick={() => pular(p.id)}>Seguir</button>}
+        {!leva && !mot && etapa === "bloco" && tipo !== "ausente" && <button type="button" className="btn btn-primary" onClick={() => entendi(p.id)}>Entendi</button>}
+        {!leva && (mot || tipo === "ausente") && <button type="button" className="btn btn-ghost" onClick={() => seguir(p.id)}>Seguir</button>}
         <button type="button" className="btn btn-quiet" onClick={() => fechar(true)}>Pular guia</button>
       </div>
     </>;
   }
 
-  // Teclado com o véu: o Tab circula entre o balão e o alvo; foco que cai fora (o #page-title
-  // da troca de página, um clique do leitor de tela) volta para o título do balão. O foco que
-  // ficou num controle que o véu cobriu depois (a seta já clicada, na comemoração; a linha de
-  // categoria de onde o alvo migrou) não recebe tecla (fora Tab e Esc): ela vai para o título.
-  const veu = !!corpo;
-  useEffect(() => {
-    if (!veu) return;
-    prende.current = true;
-    const titulo = () => document.getElementById("guia-titulo")?.focus({ preventScroll: true });
-    const caixas = () => [balao.current, furo.current].filter((c): c is HTMLElement => !!c);
-    const onTab = (e: KeyboardEvent) => {
-      const a = document.activeElement;
-      if (e.key !== "Tab" && e.key !== "Escape" && a && a !== document.body && !caixas().some((c) => c.contains(a))) {
-        e.preventDefault(); e.stopPropagation(); titulo();
-        return;
-      }
-      if (e.key !== "Tab" || e.type !== "keydown") return;
-      e.preventDefault();
-      const l = caixas().flatMap((c) => [c, ...c.querySelectorAll<HTMLElement>(FOCAVEL)]).filter((x) => x.matches(FOCAVEL) && x.getClientRects().length > 0);
-      const i = l.indexOf(document.activeElement as HTMLElement);
-      const n = l[i < 0 ? (e.shiftKey ? l.length - 1 : 0) : (i + (e.shiftKey ? l.length - 1 : 1)) % l.length];
-      if (n) n.focus(); else titulo();
-    };
-    const onFoco = (e: FocusEvent) => { if (prende.current && !caixas().some((c) => c.contains(e.target as Node))) titulo(); };
-    const teclas = ["keydown", "keyup"] as const;
-    teclas.forEach((t) => window.addEventListener(t, onTab, true));
-    window.addEventListener("focusin", onFoco);
-    return () => { prende.current = false; teclas.forEach((t) => window.removeEventListener(t, onTab, true)); window.removeEventListener("focusin", onFoco); };
-  }, [veu]);
+  useTecladoDoVeu(!!corpo, balao, furo, prende);
 
   return <>
     <p className="sr-only" role="status">{status}</p>
@@ -313,7 +342,7 @@ export function Guia({ s, path }: { s: DashState; path: Path }) {
       <div ref={veus} aria-hidden="true">{[0, 1, 2, 3].map((i) => <div key={i} className="guia-veu" />)}</div>
       <div ref={anel} className="guia-anel" hidden />
     </>}
-    {corpo && <img ref={piggy} key={exibido?.id ?? "convite"} src={ICON} alt="" width={44} height={44} className="guia-piggy" data-festa={festa ? "" : undefined} />}
+    {corpo && <img ref={piggy} src={ICON} alt="" width={44} height={44} className="guia-piggy" />}
     {corpo && <section ref={balao} className="guia-balao" role="dialog" aria-labelledby="guia-titulo" aria-describedby="guia-texto">{corpo}</section>}
   </>;
 }
