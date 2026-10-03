@@ -259,7 +259,7 @@ def _spent_by_bucket(user_id: int, year: int, mon: int) -> dict[str, float]:
                   union all
                   select {cat_ct} as cat, sum(ct.valor)::numeric as total
                   from credit_transactions ct
-                  join credit_bills b on b.id = ct.bill_id
+                  join credit_bills b on b.id = ct.bill_id and (b.user_id = ct.user_id or b.user_id is null)
                   where ct.user_id=%s
                     and ct.is_refund = false
                     and date_part('year',  b.period_end) = %s
