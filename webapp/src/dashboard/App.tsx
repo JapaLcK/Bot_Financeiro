@@ -12,15 +12,18 @@ import { NO_MONTH, RAIL, TABBAR, href, route, useRoute, type Path } from "./rout
 import { ICON } from "./lib/brand";
 import { DEMO, MESES, contasQuery } from "./lib/v2";
 
-// Quantos bancos o Open Finance trouxe, pelas contas da /api/v2/contas.
+// Quantos bancos têm conta não pausada na /api/v2/contas. Zero esconde a linha: a rota só
+// traz conta BANK, e quem conectou só cartão ou investimento chega com `contas: []`.
+// ponytail: contagem pelas contas; a exata é uma contagem de conexões vinda do servidor.
 function RailSync() {
   const { data } = useQuery(contasQuery);
-  if (!data) return null;
-  const n = new Set(data.contas.map((c) => c.instituicao ?? `#${c.id}`)).size;
+  const vivas = data?.contas.filter((c) => !c.motivos.includes("conexao_pausada")) ?? [];
+  const n = new Set(vivas.map((c) => c.instituicao ?? `#${c.id}`)).size;
+  if (!n) return null;
   return (
     <p className="rail-sync">
-      {n > 0 && <span className="dot-live" aria-hidden="true" />}
-      {n ? `${n} ${n === 1 ? "banco" : "bancos"} via Open Finance` : "Nenhum banco conectado"}
+      <span className="dot-live" aria-hidden="true" />
+      {`${n} ${n === 1 ? "banco" : "bancos"} via Open Finance`}
     </p>
   );
 }

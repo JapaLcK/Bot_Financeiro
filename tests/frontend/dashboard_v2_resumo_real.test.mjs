@@ -223,6 +223,42 @@ test("rendimento (preset Investir) leva o selo; a data é a de hoje, não a da d
   assert.deepEqual(r, ["demonstração", "hoje é 2 de outubro de 2026"]); // o relógio congelado, não os 23/09 da demonstração
 });
 
+// --- O rodapé do menu: bancos via Open Finance ---------------------------------------
+// A /api/v2/contas só traz conta BANK: conexão só de cartão ou investimento chega como
+// `contas: []`, então zero banco vivo esconde a linha em vez de dizer "nenhum".
+
+const TODOS = RESPOSTAS.contas.todos_os_estados;
+const ativa = (id, instituicao) => ({ ...TODOS.contas[0], id, instituicao });
+const pausada = (id, instituicao) => ({ ...TODOS.contas[5], id, instituicao });
+const rodape = async (contas) => {
+  const { ctx, page, ir } = await abrir();
+  await ctx.route("**/api/v2/contas", (r) => r.fulfill({ json: { ...TODOS, fora_do_total: contas.filter((c) => !c.no_total).length, contas } }));
+  await ir();
+  await page.locator("#w-contas .stat-value").waitFor();
+  const r = await page.locator(".rail-foot").innerText();
+  await ctx.close();
+  return r;
+};
+
+for (const [nome, contas, esperado] of [
+  ["2 instituições ativas", [ativa(1, "Nubank"), ativa(2, "Itaú"), ativa(3, "Nubank")], "2 bancos via Open Finance"],
+  ["1 ativa e 1 pausada: a pausada não conta", [ativa(1, "Nubank"), pausada(2, "Bradesco")], "1 banco via Open Finance"],
+  ["só pausadas: some, nunca \"Nenhum banco conectado\"", [pausada(1, "Bradesco"), pausada(2, "Itaú")], ""],
+  ["contas: [] (pode ser conexão só de cartão): some, nunca \"Nenhum banco conectado\"", [], ""],
+]) {
+  test(`rodapé do menu, ${nome}`, async () => {
+    assert.equal(await rodape(contas), esperado);
+  });
+}
+
+test("rodapé do menu no protótipo: 2 bancos via Open Finance", async () => {
+  const { ctx, page, ir } = await abrir({ demo: true, espera: "#page-title" });
+  await ir();
+  const r = await page.locator(".rail-foot").innerText();
+  await ctx.close();
+  assert.equal(r, "2 bancos via Open Finance");
+});
+
 // --- O mês da página ---------------------------------------------------------------
 
 const pedidosDoMes = (page) => {
