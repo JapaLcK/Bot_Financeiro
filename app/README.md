@@ -37,8 +37,9 @@ npx expo start          # precisa de um backend acessível (ver .env.example)
 
 ## Ambientes
 
-`APP_ENV` escolhe o id e o nome do binário, e é o que permite dev, staging e
-produção conviverem no mesmo aparelho.
+`APP_ENV` escolhe o id, o nome e o scheme do binário (`pigbank-dev`,
+`pigbank-staging`, `pigbank`), e é o que permite dev, staging e produção
+conviverem no mesmo aparelho.
 
 **Variável de ambiente só vem de arquivo em desenvolvimento.** O Expo escolhe o
 arquivo de `.env` pelo `NODE_ENV`, não pelo `APP_ENV`, então um `.env.staging`
