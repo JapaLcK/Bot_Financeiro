@@ -1001,7 +1001,10 @@ export function DraggableWidgetGrid({
 								? `${Math.round(metrics.unit)}px`
 								: `minmax(${cellSize * 0.75}px, auto)`,
 					}}>
-					{domOrder.current.map((id) => {
+					{/* Só monta depois da 1ª medida (síncrona, antes da pintura): montar já com `maxColumns` e
+					    reposicionar em seguida fazia o Motion deslizar cada bloco do lugar errado ao certo,
+					    e o deslize passava da borda (rolagem lateral por ~200 ms). */}
+					{metrics.columns > 0 && domOrder.current.map((id) => {
 						const item = byId.get(id)
 						const p = placementById.get(id)
 						if (!item || !p) return null
