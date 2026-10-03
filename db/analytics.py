@@ -203,7 +203,7 @@ def compute_kpis(user_id: int, from_date: date, to_date: date) -> dict:
                       SELECT ct.purchased_at AS day, ct.valor,
                              c.name AS alvo, ct.nota, ct.categoria
                       FROM credit_transactions ct
-                      JOIN credit_cards c ON c.id = ct.card_id
+                      LEFT JOIN credit_cards c ON c.id = ct.card_id AND c.user_id = ct.user_id
                       JOIN credit_bills b ON b.id = ct.bill_id
                       WHERE ct.user_id = %s AND (b.user_id = %s OR b.user_id IS NULL)
                         AND ct.is_refund = false
@@ -852,7 +852,7 @@ def list_history(
                  NULL AS reconciliation_status,
                  NULL::bigint AS reconciliation_of_tx_id
           FROM credit_transactions ct
-          JOIN credit_cards c ON c.id = ct.card_id
+          LEFT JOIN credit_cards c ON c.id = ct.card_id AND c.user_id = ct.user_id
           JOIN credit_bills b ON b.id = ct.bill_id
           WHERE {" AND ".join(clauses)}
         """

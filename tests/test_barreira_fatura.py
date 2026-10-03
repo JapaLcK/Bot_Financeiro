@@ -15,15 +15,22 @@ por cópia do arquivo):
   get_largest_expenses → A sai [4321.0, 80.0, 50.0]; sum_spent_in_category_this_month e
   _spent_by_bucket → 4451.0; _detect_category_spike → "R$ 4.451,00 contra..."; anticipate →
   TypeError (fatura None); undo → removed_count 3; list_installment_groups → (3, 300.0).
-- POSITIVO (`b.user_id = ct.user_id` sem o `or ... is null`): 14 dos 15 deixam vermelho o
+- POSITIVO (`b.user_id = ct.user_id` sem o `or ... is null`): os 15 deixam vermelho o
   teste com banco (a NULL some). Ex.: get_top_expense_categories e
   get_budgets_status_for_month → [80.0]; _spent_by_bucket → 80.0; _detect_salary_burn_fast
-  → []; get_installment_group_summaries → 100.0. O 15º, anticipate_installment, só o portão
-  pega: a parcela antecipada é a 2, que não está na fatura NULL.
+  → []; get_installment_group_summaries → 100.0. anticipate_installment: com a parcela 2 na
+  fatura NULL (`_parcelado(nula=2)`), a mutação antecipa a 3.
+
+As escritas que apagam compra de A (antecipar, desfazer avulsa/parcelado, remover avulsa)
+só ajustam fatura de A ou NULL num cartão de A (`db.cards._BILL_DO_USUARIO`): sem a NULL, ela
+não é achada (anticipate → TypeError; undo/remove → compra apagada e total da fatura intacto).
+A fatura de B segue recusada: o total dela fica em 1 (sem o filtro de usuário, `greatest` daria
+0) — e também quando ela é NULL, porque o cartão é de B (`or user_id is null` solto a alterava).
 """
 from __future__ import annotations
 
 import ast
+import contextlib
 import re
 import subprocess
 from datetime import date, timedelta
@@ -104,22 +111,27 @@ def test_alertas_de_categoria_e_de_mes_queimando_contam_a_null_e_nunca_a_de_b(mo
 
 # ── parcelamentos (db/cards.py, alias `t`), inclusive as duas escritas ──────
 
-def _parcelado():
+def _parcelado(nula: int = 3):
     """3x300 de A: parcela 1 na fatura aberta de B (período mais antigo que o da parcela 2),
-    parcela 2 na de A, a fatura da parcela 3 com `user_id` NULL. Todas abertas."""
+    a fatura da parcela `nula` com `user_id` NULL, a outra na de A. Todas abertas."""
     a, b = usuario_pagante(), usuario_pagante()
     semeia_a_em_fatura_de_b(a, b)
     cartao_a = q("select id from credit_cards where user_id = %s", (a,))["id"]
     fatura_b = q("select id from credit_bills where user_id = %s", (b,))["id"]
     r, _ = db.add_credit_purchase_installments(a, cartao_a, 300, "casa", "3x", INICIO.replace(day=5), 3)
-    p1, p2, p3 = r["tx_ids"]
+    p1, p2, _ = r["tx_ids"]
     q("update credit_transactions set bill_id = %s where id = %s", (fatura_b, p1))
-    q("update credit_bills set user_id = null where id = (select bill_id from credit_transactions where id = %s)", (p3,))
+    q("update credit_bills set user_id = null where id = (select bill_id from credit_transactions where id = %s)",
+      (r["tx_ids"][nula - 1],))
     return a, r["group_id"], fatura_b, p1, p2
 
 
 def _total(fatura: int) -> float:
     return float(q("select total from credit_bills where id = %s", (fatura,))["total"])
+
+
+def _fatura_de(tx: int) -> int:
+    return q("select bill_id from credit_transactions where id = %s", (tx,))["bill_id"]
 
 
 def test_listas_e_impacto_do_parcelamento_contam_a_null_e_nunca_a_de_b():
@@ -138,19 +150,78 @@ def test_antecipar_pega_a_parcela_dela_e_nao_toca_a_de_b():
     """Sem a barreira a parcela 1 (fatura de B, a mais antiga) é a escolhida e a busca da
     fatura com `user_id = A` volta None: TypeError."""
     a, gid, fatura_b, p1, p2 = _parcelado()
-    fatura_p2 = q("select bill_id from credit_transactions where id = %s", (p2,))["bill_id"]
+    fatura_p2 = _fatura_de(p2)
     antes = _total(fatura_p2)
     assert db.anticipate_installment(a, gid)["anticipated_installment_no"] == 2
     assert _total(fatura_p2) == antes - 100
     assert q("select bill_id from credit_transactions where id = %s", (p1,))["bill_id"] == fatura_b
 
 
+def _engorda(fatura: int, extra: int, pago: int) -> None:
+    """Muda o ramo da escrita: com sobra (`extra`) e/ou pagamento (`pago`) na fatura."""
+    q("update credit_bills set total = total + %s, paid_amount = %s where id = %s", (extra, pago, fatura))
+
+
+def test_antecipar_na_fatura_null_derruba_o_total_dela():
+    for pago in (0, 50):  # 50: ramo que fecha a fatura como paga
+        a, gid, fatura_b, p1, p2 = _parcelado(nula=2)
+        nula, antes_b = _fatura_de(p2), _total(fatura_b)
+        _engorda(nula, 50, pago)
+        antes = _total(nula)
+        assert db.anticipate_installment(a, gid)["anticipated_installment_no"] == 2
+        assert _total(nula) == antes - 100, pago
+        assert (_fatura_de(p1), _total(fatura_b)) == (fatura_b, antes_b)
+
+
 def test_desfazer_apaga_as_dela_e_deixa_a_da_fatura_de_b_intocada():
-    a, gid, fatura_b, p1, _ = _parcelado()
-    antes = _total(fatura_b)
-    assert db.undo_installment_group(a, gid)["removed_count"] == 2
-    assert q("select group_id::text as g from credit_transactions where id = %s", (p1,))["g"] == gid
-    assert _total(fatura_b) == antes
+    for extra, pago in ((0, 0), (50, 0), (50, 50)):  # um ramo da escrita da fatura cada
+        a, gid, fatura_b, p1, _ = _parcelado()
+        nula = q("select id from credit_bills where user_id is null and card_id in "
+                 "(select card_id from credit_transactions where group_id = %s::uuid)", (gid,))["id"]
+        _engorda(nula, extra, pago)
+        antes, antes_nula = _total(fatura_b), _total(nula)
+        assert db.undo_installment_group(a, gid)["removed_count"] == 2
+        assert q("select group_id::text as g from credit_transactions where id = %s", (p1,))["g"] == gid
+        assert (_total(fatura_b), _total(nula)) == (antes, antes_nula - 100), (extra, pago)
+        assert q("select status from credit_bills where id = %s", (nula,))["status"] == ("paid" if pago else "open")
+
+
+def test_apagar_compra_avulsa_derruba_a_null_e_nunca_a_de_b():
+    for apagar in (db.undo_credit_transaction, db.remove_single_credit_transaction):
+        a, b = _cena()
+        tx = {int(r["valor"]): r for r in q(
+            "select id, bill_id, valor from credit_transactions where user_id = %s", (a,), fetch=True)}
+        _engorda(tx[50]["bill_id"], 0, 50)  # paga: o desfazer a fecha; o remover não mexe no status
+        antes = _total(tx[50]["bill_id"])
+        apagar(a, tx[50]["id"])
+        assert _total(tx[50]["bill_id"]) == antes - 50, apagar
+        fecha = apagar is db.undo_credit_transaction
+        assert q("select status from credit_bills where id = %s", (tx[50]["bill_id"],))["status"] == (
+            "paid" if fecha else "open")
+        apagar(a, tx[4321]["id"])
+        assert _total(tx[4321]["bill_id"]) == 1.0, apagar
+
+
+def test_fatura_null_no_cartao_de_b_nao_muda_com_as_escritas_de_a():
+    """Legado: a fatura de B perdeu o `user_id` e tem compra de A pendurada. Nenhuma escrita
+    de A muda o registro dela. Ramos: (999, 950) fecha paga; (999, 0) só baixa; (50, 30) zera."""
+    for total, pago in ((999, 950), (999, 0), (50, 30)):
+        for acao in (db.undo_credit_transaction, db.remove_single_credit_transaction,
+                     db.undo_installment_group, db.anticipate_installment):
+            if acao in (db.undo_installment_group, db.anticipate_installment):
+                a, alvo, fatura_b, *_ = _parcelado()  # parcela 1 de A na fatura de B
+            else:
+                a, b = usuario_pagante(), usuario_pagante()
+                semeia_a_em_fatura_de_b(a, b)
+                fatura_b = q("select id from credit_bills where user_id = %s", (b,))["id"]
+                alvo = q("select id from credit_transactions where user_id = %s and bill_id = %s",
+                         (a, fatura_b))["id"]
+            q("update credit_bills set user_id = null, total = %s, paid_amount = %s where id = %s",
+              (total, pago, fatura_b))
+            antes = q("select * from credit_bills where id = %s", (fatura_b,))
+            with contextlib.suppress(TypeError):  # anticipate: a fatura não é achada (`bill` None)
+                acao(a, alvo)
+            assert q("select * from credit_bills where id = %s", (fatura_b,)) == antes, (acao, total, pago)
 
 
 # ── portão de varredura: todo join de fatura por bill_id tem a barreira ─────
