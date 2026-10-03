@@ -73,6 +73,7 @@ TABELA = {
     ("POST", "/auth/quiz/conta"): (L, "cria a conta do quiz"),
     # ── /billing e /conta ──
     ("GET", "/billing/plans-config"): (L, "compra"), ("POST", "/billing/create-checkout"): (L, "compra"),
+    ("POST", "/billing/checkout/bump"): (L, "compra"),
     ("POST", "/billing/select-free"): (L, "410"),
     ("GET", "/billing/subscription"): (B, "dado da assinatura"),
     ("POST", "/billing/change-plan"): (B, "mexe na assinatura"),
