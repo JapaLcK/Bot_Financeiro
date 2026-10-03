@@ -161,7 +161,7 @@ def _detect_category_spike(user_id: int) -> list[dict[str, Any]]:
                          date_part('month', b.period_end)::int as m,
                          sum(ct.valor)::float as total
                   from credit_transactions ct
-                  join credit_bills b on b.id = ct.bill_id and (b.user_id = ct.user_id or b.user_id is null)
+                  join credit_bills b on b.id = ct.bill_id and coalesce(b.user_id, (select cb.user_id from credit_cards cb where cb.id = b.card_id)) = ct.user_id
                   where ct.user_id=%s
                     and ct.is_refund = false
                     and ct.categoria is not null
@@ -350,7 +350,7 @@ def _detect_salary_burn_fast(user_id: int) -> list[dict[str, Any]]:
                   ), 0) +
                   coalesce((
                     select sum(ct.valor) from credit_transactions ct
-                    join credit_bills b on b.id = ct.bill_id and (b.user_id = ct.user_id or b.user_id is null)
+                    join credit_bills b on b.id = ct.bill_id and coalesce(b.user_id, (select cb.user_id from credit_cards cb where cb.id = b.card_id)) = ct.user_id
                     where ct.user_id=%s
                       and ct.is_refund = false
                       and date_part('year',  b.period_end) = %s
