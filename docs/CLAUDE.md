@@ -512,7 +512,10 @@ Via **Pluggy**. Endpoints em `frontend/routes/open_finance.py`
 um banco NOVO, pela mesma decisão do `_enforce_bank_limit`; o teto nunca vira 402 aqui, mas o
 gate comum de dados sim (402 `subscription_required`/`plan_selection_required` sem plano ativo);
 não barra reconexão e o 402 do `/pluggy-item` continua valendo)) mais o webhook
-`/open-finance/pluggy/webhook`. Serviços em `core/services/pluggy*.py` e
+`/open-finance/pluggy/webhook`. O `connect-token` aceita `app_scheme` opcional no corpo
+(`pigbank`, `pigbank-staging` ou `pigbank-dev`; fora da lista, 400), que vira o
+`oauthRedirectUri` `<scheme>://open-finance-volta` da Pluggy; o site não manda o campo.
+Serviços em `core/services/pluggy*.py` e
 `open_finance*.py`; tabelas `open_finance_connections/accounts/transactions/investments`,
 `open_finance_investment_snapshots` (foto diária por posição, `db/of_snapshots.py`) e
 `open_finance_item_registry` — o rastro de todo item que passou por aqui, inclusive o
