@@ -193,14 +193,15 @@ def test_transcricao_loga_so_o_tamanho(monkeypatch, caplog):
     assert f"Transcrição ok: {len(falado)} chars" in caplog.text, caplog.text
 
 
-def test_analise_de_imagem_loga_so_as_chaves(monkeypatch, caplog):
-    conteudo = json.dumps({"valor": 987.65, "descricao": "Farmácia Segredo"})
+def test_analise_de_imagem_loga_so_a_contagem(monkeypatch, caplog):
+    # A chave fora do esquema simula o modelo pondo texto da imagem na CHAVE.
+    conteudo = json.dumps({"valor": 987.65, "descricao": "Farmácia Segredo", "Dr. Chave Segredo": 1})
     monkeypatch.setenv("OPENAI_API_KEY", "x")
     monkeypatch.setattr(openai, "OpenAI", lambda **kw: _OpenAIFake(conteudo=conteudo))
     with caplog.at_level(logging.INFO):
         assert media_service.analyze_image(b"png", "a.png")["valor"] == 987.65
     assert "Segredo" not in caplog.text and "987" not in caplog.text, caplog.text
-    assert "['descricao', 'valor']" in caplog.text, caplog.text
+    assert "Análise de imagem: 3 campos" in caplog.text, caplog.text
 
 
 def test_ai_patterns_resposta_sem_items_loga_so_o_tamanho(monkeypatch, caplog):

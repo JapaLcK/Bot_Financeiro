@@ -208,8 +208,9 @@ def analyze_image(data: bytes, filename: str) -> dict[str, Any] | None:
 
         raw = response.choices[0].message.content or "{}"
         result = json.loads(raw)
-        logger.info("[media_service] Análise de imagem: chaves=%s",
-                    sorted(result.keys()) if isinstance(result, dict) else type(result).__name__)
+        # Só a contagem: as chaves também vêm do modelo e podem trazer texto da imagem.
+        logger.info("[media_service] Análise de imagem: %s campos",
+                    len(result) if isinstance(result, dict) else type(result).__name__)
         return result
 
     except Exception as e:
