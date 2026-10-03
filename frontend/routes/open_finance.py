@@ -1748,6 +1748,13 @@ async def open_finance_caixinha_bind_route(request: Request, user_id: int, body:
     return {"ok": True}
 
 
+# Schemes do app (produção, staging, dev) a que a Pluggy devolve o usuário depois do
+# OAuth do banco. Lista fechada: valor fora dela é 400, nunca um redirect para onde o
+# cliente quiser. O site não manda o campo.
+_APP_SCHEMES = frozenset({"pigbank", "pigbank-staging", "pigbank-dev"})
+_APP_VOLTA_OF = "open-finance-volta"
+
+
 @router.post("/open-finance/{user_id}/connect-token")
 async def open_finance_connect_token_route(request: Request, user_id: int):
     shared.authorize_dashboard_access(request, user_id)
@@ -1757,6 +1764,19 @@ async def open_finance_connect_token_route(request: Request, user_id: int):
     # widget também reconecta um banco existente, e a contagem é validada no /pluggy-item,
     # onde já se sabe se o item é novo ou um upsert de um banco já conectado.
     await _ensure_of_access_allowed(user_id)
+
+    # Corpo lido à mão e só depois dos portões, pela mesma razão do mock-connect:
+    # parâmetro tipado decodificaria antes da sessão. Vazio/malformado = sem o campo;
+    # aninhamento fundo levanta RecursionError (não é ValueError) e cai no mesmo caso.
+    try:
+        corpo = await request.json()
+    except (ValueError, RecursionError):
+        corpo = None
+    scheme = corpo.get("app_scheme") if isinstance(corpo, dict) else None
+    # isinstance antes do `in`: lista/dict não são hasháveis (TypeError → 500).
+    if scheme is not None and (not isinstance(scheme, str) or scheme not in _APP_SCHEMES):
+        raise HTTPException(status_code=400, detail="app_scheme inválido.")
+    volta = f"{scheme}://{_APP_VOLTA_OF}" if scheme else None
 
     webhook_url = (os.getenv("PLUGGY_WEBHOOK_URL") or "").strip()
     if not webhook_url and shared.DASHBOARD_URL.startswith("https://"):
@@ -1775,6 +1795,7 @@ async def open_finance_connect_token_route(request: Request, user_id: int):
             create_pluggy_connect_token,
             user_id,
             webhook_url or None,
+            oauth_redirect_uri=volta,
         )
     except PluggyConfigError as exc:
         raise HTTPException(status_code=503, detail=str(exc)) from exc
