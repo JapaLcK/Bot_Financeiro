@@ -4,7 +4,9 @@ Cobre as 3 read tools do Sprint 2 Bloco B (cartão):
 - list_installments: parcelamentos ativos
 - forecast_next_bill: projeção da próxima fatura
 
-São tools de leitura, sem efeito colateral.
+São tools de leitura, mas `get_total_debt` e `forecast_next_bill` chamam
+`db.list_open_bills`, que reabre fatura paga cujo total voltou a passar do pago
+(por isso `has_side_effects=True`). `forecast_next_bill` não cria faturas vazias.
 """
 from datetime import date
 
