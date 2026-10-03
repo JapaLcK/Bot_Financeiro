@@ -14,7 +14,11 @@
  *     marca gravada vira sucesso pela recarga, botões travados enquanto
  *     o POST está no ar (também depois de sair e voltar), um POST por clique duplo, aviso
  *     que cobre o grupo da mesma chave (1 e 2 a mais), vazio "ignorou tudo" sem o link;
- *   · protótipo sem API; layout a 375 e a 1440; `isoDay` no fuso de São Paulo.
+ *   · Ignoradas (#751): a seção recolhível depois de recarregar, "Voltar a mostrar" com a
+ *     marca guardada (Smart Fit volta marcada), o Desfazer dele, "ignorou tudo" também
+ *     depois de recarregar (página e card), o grupo da Apple, e a reconciliação do POST
+ *     ambíguo pelas `ignoradas`;
+ *   · protótipo sem API; layout a 375 e a 1440 (seção aberta); `isoDay` no fuso de São Paulo.
  *
  * Rodar:  npm run test:frontend   (abre o artefato commitado: mudou webapp/src, rode
  *         `npm --prefix webapp run build`)
@@ -28,32 +32,41 @@ const CHEIA = RESPOSTAS.assinaturas.cheia;
 const CSRF = "abc+def"; // no cookie vai "abc%2Bdef": prova o decodeURIComponent
 const SERV = "#w-assinaturas-servicos";
 const OUTRAS = "#w-assinaturas-outras";
+const IGN = "#w-assinaturas-ignoradas";
 const ACOES = ".sub-acoes button, .sub-aviso button";
 
 let browser;
 before(async () => { exigeArtefatoEmDia(); browser = await chromium.launch(); });
 after(() => browser?.close());
 
-// O backend em miniatura: marca por chave; "ignorar" some, "assinatura" vai para
-// serviços, "nenhuma" volta ao lugar natural (a marcada da fixture só estava em
-// serviços pela marca). Ordem por valor e total só dos serviços ativos. Dinheiro é texto,
-// como na API: ordena por Number e soma em centavos inteiros.
+// O backend em miniatura: marca por chave; "ignorar" vai para `ignoradas`, "assinatura" vai
+// para serviços, "nenhuma" apaga a marca e volta ao lugar natural (a marcada da fixture só
+// estava em serviços pela marca). `antes` é o `assinatura_antes` de db/of_recurring.py, com
+// a mesma regra do upsert: em `ignoradas`, `marcada` é a marca guardada. Ordem por valor e
+// total só dos serviços ativos. Dinheiro é texto, como na API: ordena por Number e soma em
+// centavos inteiros. O estado vive no contexto: sobrevive ao `page.reload()`.
 function backend() {
   const marca = new Map(CHEIA.servicos.filter((a) => a.marcada).map((a) => [a.chave, "assinatura"]));
+  const antes = new Map();
   const itens = [...CHEIA.servicos.map((a) => [a, a.marcada ? "o" : "s"]), ...CHEIA.outras.map((a) => [a, "o"])];
+  const marcar = (chave, status) => {
+    const m = marca.get(chave);
+    if (status === "nenhuma") { marca.delete(chave); antes.delete(chave); return; }
+    antes.set(chave, status === "ignorar" && (m === "assinatura" || (m === "ignorar" && antes.get(chave) === true)));
+    marca.set(chave, status);
+  };
   const lista = () => {
-    const servicos = [], outras = [];
+    const servicos = [], outras = [], ignoradas = [];
     for (const [a, natural] of itens) {
       const m = marca.get(a.chave);
-      if (m === "ignorar") continue;
+      if (m === "ignorar") { ignoradas.push({ ...a, marcada: antes.get(a.chave) === true }); continue; }
       ((m === "assinatura" ? "s" : natural) === "s" ? servicos : outras).push({ ...a, marcada: m === "assinatura" });
     }
-    servicos.sort((x, y) => Number(y.valor) - Number(x.valor));
-    outras.sort((x, y) => Number(y.valor) - Number(x.valor));
+    for (const l of [servicos, outras, ignoradas]) l.sort((x, y) => Number(y.valor) - Number(x.valor));
     const c = servicos.filter((a) => a.status === "ativa").reduce((t, a) => t + Math.round(Number(a.valor) * 100), 0);
-    return { servicos, outras, total_mensal: (c / 100).toFixed(2), total_anual: (c * 12 / 100).toFixed(2) };
+    return { servicos, outras, ignoradas, total_mensal: (c / 100).toFixed(2), total_anual: (c * 12 / 100).toFixed(2) };
   };
-  return { marca, lista };
+  return { marcar, lista };
 }
 
 const erro = (r, nome) => { const e = RESPOSTAS.erros[nome]; return r.fulfill({ status: e.status, json: e.body }); };
@@ -80,7 +93,7 @@ async function abrir({ width = 1440, plano = "plus", perfil = "economizar", hash
       if (!(headers["content-type"] ?? "").includes("application/json")) return r.fulfill({ status: 422, json: { detail: [{ type: "model_attributes_type" }] } });
       const f = typeof falha === "function" ? falha(corpo, posts.length - 1) : falha;
       if (f && f !== "perdida") return erro(r, f);
-      srv.marca.set(req.postDataJSON().chave, req.postDataJSON().status);
+      srv.marcar(corpo.chave, corpo.status);
       return f ? r.abort() : r.fulfill({ json: srv.lista() });
     });
   }
@@ -224,7 +237,9 @@ test("lista vazia: o texto e o link para conectar banco, no card e na página", 
   await page.evaluate(() => { location.hash = "#/assinaturas"; });
   r.pagina = await page.locator(".page .empty a").getAttribute("href");
   r.textoPagina = await page.locator(".page .empty p").textContent();
+  r.secao = await page.locator(IGN).count();
   await ctx.close();
+  assert.equal(r.secao, 0); // `ignoradas: []`: o vazio é de quem não conectou, não de quem ignorou
   assert.equal(r.textoPagina, r.texto);
   assert.equal(r.texto, "Nenhuma assinatura por aqui ainda. Elas aparecem sozinhas a partir das contas e cartões conectados pelo Open Finance.");
   assert.equal(r.link, "/settings?view=open-finance");
@@ -523,8 +538,300 @@ test("protótipo com Economizar: zero pedidos à /api/v2 (fora o /me, que ele ta
   assert.deepEqual(tudo, []);
 });
 
+// ── Ignoradas (#751) ─────────────────────────────────────────────────────────
+
+const abrirSecao = async (page) => {
+  await page.locator(`${IGN} summary`).click();
+  await page.waitForFunction((sel) => document.querySelector(`${sel} details`)?.open, IGN);
+};
+const ignorarTodas = async (page) => {
+  for (const [sel, nome] of [[SERV, "Smart Fit"], [SERV, "Netflix"], [SERV, "Globoplay"], [SERV, "Apple Music"], [OUTRAS, "Condomínio Aurora"], [OUTRAS, "Porto Seguro"]]) {
+    await clicar(page, sel, nome, "Ignorar");
+    await sumir(page, sel, nome);
+  }
+};
+
+test("recarregar: a ignorada fica na seção fechada; Voltar a mostrar a devolve ao lugar e o Desfazer a ignora de novo", async () => {
+  const { ctx, page, posts } = await abrir({ hash: "#/assinaturas" });
+  await pronta(page);
+  await clicar(page, SERV, "Netflix", "Ignorar");
+  await sumir(page, SERV, "Netflix");
+  await page.reload();
+  await pronta(page);
+  const det = page.locator(`${IGN} details`);
+  await det.waitFor({ state: "attached" });
+  const r = {
+    titulo: await page.locator(`${IGN} .w-title`).textContent(),
+    aberta: await det.evaluate((d) => d.open),
+    resumo: await det.locator("summary").innerText(),
+    ultima: await page.locator(".page .panel").last().evaluate((p) => !!p.querySelector("#w-assinaturas-ignoradas")),
+  };
+  await abrirSecao(page);
+  await clicar(page, IGN, "Netflix", "Voltar a mostrar");
+  await linha(page, SERV, "Netflix").waitFor();
+  r.servicos = await nomes(page, SERV);
+  r.aviso = await page.locator(".sub-aviso p").textContent();
+  r.secao = await page.locator(IGN).count();
+  await page.getByRole("button", { name: "Desfazer" }).click();
+  await linha(page, IGN, "Netflix").waitFor({ state: "attached" });
+  r.depois = await nomes(page, SERV);
+  await ctx.close();
+  assert.equal(r.titulo, "Ignoradas");
+  assert.equal(r.aberta, false);
+  assert.equal(r.resumo, "Mostrar 1 cobrança");
+  assert.equal(r.ultima, true);
+  assert.deepEqual(posts.map((p) => p.corpo), [
+    { chave: "netflix", status: "ignorar" }, { chave: "netflix", status: "nenhuma" }, { chave: "netflix", status: "ignorar" },
+  ]);
+  assert.deepEqual(r.servicos, ["Smart Fit", "Netflix", "Globoplay", "Apple Music", "iCloud"]);
+  assert.equal(r.aviso, "Netflix voltou para a lista.");
+  assert.equal(r.secao, 0);
+  assert.deepEqual(r.depois, ["Smart Fit", "Globoplay", "Apple Music", "iCloud"]);
+});
+
+test("marcada antes de ignorar: Voltar a mostrar manda \"assinatura\" e a Smart Fit volta marcada em Serviços", async () => {
+  const { ctx, page, posts } = await abrir({ hash: "#/assinaturas" });
+  await pronta(page);
+  await clicar(page, SERV, "Smart Fit", "Ignorar");
+  await sumir(page, SERV, "Smart Fit");
+  await page.reload();
+  await pronta(page);
+  await abrirSecao(page);
+  await clicar(page, IGN, "Smart Fit", "Voltar a mostrar");
+  await linha(page, SERV, "Smart Fit").waitFor();
+  const r = {
+    naoE: await linha(page, SERV, "Smart Fit").getByRole("button", { name: "Não é assinatura: Smart Fit" }).count(),
+    outras: await nomes(page, OUTRAS),
+  };
+  await ctx.close();
+  assert.deepEqual(posts.at(-1).corpo, { chave: "smart fit", status: "assinatura" });
+  assert.equal(r.naoE, 1);
+  assert.deepEqual(r.outras, ["Condomínio Aurora", "Porto Seguro", "Porto Seguro Residencial"]);
+});
+
+test("ignorou tudo e recarregou: o texto sem o link, a seção com as 8, o card igual; Voltar a mostrar traz a lista", async () => {
+  const { ctx, page } = await abrir({ hash: "#/assinaturas" });
+  await pronta(page);
+  await ignorarTodas(page);
+  await page.reload();
+  await page.locator(".page .empty").waitFor();
+  const r = {
+    vazio: await page.locator(".page .empty p").textContent(),
+    conectar: await page.locator(".page .empty a").count(),
+    linhas: await page.locator(`${IGN} li.sub`).count(),
+    resumo: await page.locator(`${IGN} summary`).innerText(),
+  };
+  await page.evaluate(() => { location.hash = "#/"; });
+  const card = page.locator("#w-assinaturas .empty");
+  await card.waitFor();
+  r.card = await card.locator("p").textContent();
+  r.cardLink = await card.locator("a").count();
+  await page.evaluate(() => { location.hash = "#/assinaturas"; });
+  await page.locator(`${IGN} summary`).waitFor();
+  await abrirSecao(page);
+  await clicar(page, IGN, "Netflix", "Voltar a mostrar");
+  await linha(page, SERV, "Netflix").waitFor();
+  r.servicos = await nomes(page, SERV);
+  r.vazioDepois = await page.locator(".page .empty").count();
+  r.aberta = await page.locator(`${IGN} details`).evaluate((d) => d.open);
+  await ctx.close();
+  assert.equal(r.vazio, "Você ignorou todas as cobranças detectadas.");
+  assert.equal(r.conectar, 0);
+  assert.equal(r.linhas, 8);
+  assert.equal(r.resumo, "Mostrar 8 cobranças");
+  assert.equal(r.card, "Você ignorou todas as cobranças detectadas.");
+  assert.equal(r.cardLink, 0);
+  assert.deepEqual(r.servicos, ["Netflix"]);
+  assert.equal(r.vazioDepois, 0);
+  assert.equal(r.aberta, true); // saiu do retorno do vazio para o outro: o `key` manteve a seção
+});
+
+test("grupo da Apple: Voltar a mostrar no iCloud traz as duas, em ordem; a Netflix fica e a seção segue aberta", async () => {
+  const { ctx, page } = await abrir({ hash: "#/assinaturas" });
+  await pronta(page);
+  for (const nome of ["Netflix", "Apple Music"]) {
+    await clicar(page, SERV, nome, "Ignorar");
+    await sumir(page, SERV, nome);
+  }
+  await page.reload();
+  await pronta(page);
+  const resumo = await page.locator(`${IGN} summary`).innerText(); // fechada: aberta diz "Esconder"
+  await abrirSecao(page);
+  const r = { secao: await nomes(page, IGN), resumo };
+  await clicar(page, IGN, "iCloud", "Voltar a mostrar");
+  await linha(page, SERV, "iCloud").waitFor();
+  r.aviso = await page.locator(".sub-aviso p").textContent();
+  r.servicos = await nomes(page, SERV);
+  r.depois = await nomes(page, IGN);
+  r.aberta = await page.locator(`${IGN} details`).evaluate((d) => d.open);
+  await ctx.close();
+  assert.deepEqual(r.secao, ["Netflix", "Apple Music", "iCloud"]);
+  assert.equal(r.resumo, "Mostrar 3 cobranças");
+  assert.equal(r.aviso, "iCloud e mais 1 cobrança do mesmo comerciante voltaram para a lista.");
+  assert.deepEqual(r.servicos, ["Smart Fit", "Globoplay", "Apple Music", "iCloud"]);
+  assert.deepEqual(r.depois, ["Netflix"]);
+  assert.equal(r.aberta, true);
+});
+
+test("resposta do Ignorar perdida e a recarga sem a chave em lista nenhuma: não conta como salvo", async () => {
+  let perdeu = false;
+  const semGlobo = { ...CHEIA, servicos: CHEIA.servicos.filter((a) => a.chave !== "globoplay") };
+  const { ctx, page } = await abrir({
+    hash: "#/assinaturas",
+    falha: () => { perdeu = true; return "perdida"; },
+    get: (r) => r.fulfill({ json: perdeu ? semGlobo : CHEIA }),
+  });
+  await pronta(page);
+  await clicar(page, SERV, "Globoplay", "Ignorar");
+  await page.locator(".sub-aviso p").waitFor();
+  const aviso = await page.locator(".sub-aviso p").textContent();
+  await ctx.close();
+  assert.equal(aviso, "Não deu para salvar. Tente de novo.");
+});
+
+test("resumo das ignoradas: fechado diz \"Mostrar…\", aberto diz \"Esconder\"; a setinha nativa fica e o alvo tem 44 px", async () => {
+  const { ctx, page } = await abrir({ hash: "#/assinaturas" });
+  await pronta(page);
+  await clicar(page, SERV, "Netflix", "Ignorar");
+  await sumir(page, SERV, "Netflix");
+  const sum = page.locator(`${IGN} summary`);
+  const ler = () => sum.evaluate((s) => {
+    const c = getComputedStyle(s);
+    return { texto: s.innerText, display: c.display, marcador: c.listStyleType, altura: s.getBoundingClientRect().height };
+  });
+  const fechado = await ler();
+  await abrirSecao(page);
+  const aberto = await ler();
+  await sum.click();
+  const fechouDeNovo = await page.locator(`${IGN} details`).evaluate((d) => d.open);
+  await ctx.close();
+  assert.equal(fechado.texto, "Mostrar 1 cobrança");
+  assert.equal(aberto.texto, "Esconder");
+  assert.equal(fechouDeNovo, false);
+  // `list-item` com list-style é o que desenha o ::marker (a setinha); `flex` o apaga
+  for (const e of [fechado, aberto]) {
+    assert.equal(e.display, "list-item");
+    assert.notEqual(e.marcador, "none");
+    assert.ok(e.altura >= 44, String(e.altura));
+  }
+});
+
+test("card com ignoradas na resposta: lista só serviços; \"para revisar\" conta só as outras", async () => {
+  const [smart, netflix] = CHEIA.servicos;
+  // as ignoradas valem mais e estão ativas: entrariam no top-3 se o card as lesse
+  const ign = CHEIA.outras.slice(0, 2).map((a) => ({ ...a, chave: `x-${a.chave}`, nome: `Ign ${a.nome}` }));
+  const json = { servicos: [smart, netflix], outras: [CHEIA.outras[2]], ignoradas: ign, total_mensal: "175.80", total_anual: "2109.60" };
+  let resp = json;
+  const { ctx, page } = await abrir({ get: (r) => r.fulfill({ json: resp }) });
+  const card = page.locator("#w-assinaturas");
+  await card.locator(".sub-bill").first().waitFor();
+  const r = {
+    lede: await card.locator(".w-lede").allTextContents(),
+    linhas: await card.locator(".sub-bill .bill-name").evaluateAll((els) => els.map((e) => e.firstChild.textContent)),
+  };
+  // sem serviços: o "para revisar" conta só as outras (1), não as 2 ignoradas
+  resp = { ...json, servicos: [], total_mensal: "0", total_anual: "0" };
+  await page.reload();
+  const revisar = card.locator(".w-lede", { hasText: "revisar" });
+  await revisar.waitFor();
+  r.revisar = await revisar.textContent();
+  await ctx.close();
+  assert.deepEqual(r.lede, ["R$ 175,80 por mês · R$ 2.110 por ano"]);
+  assert.deepEqual(r.linhas, ["Smart Fit", "Netflix"]);
+  assert.equal(r.revisar, "1 cobrança recorrente para revisar");
+});
+
+test("servidor sem `ignoradas` (deploy fora de ordem): página e card renderizam e o Ignorar funciona", async () => {
+  const antiga = { ...CHEIA };
+  delete antiga.ignoradas;
+  const { ctx, page } = await abrir({ hash: "#/assinaturas", get: (r) => r.fulfill({ json: antiga }) });
+  await pronta(page);
+  const r = { servicos: await nomes(page, SERV), secao: await page.locator(IGN).count() };
+  await clicar(page, SERV, "Netflix", "Ignorar");
+  await page.locator(".sub-aviso p").waitFor();
+  r.aviso = await page.locator(".sub-aviso p").textContent();
+  await page.evaluate(() => { location.hash = "#/"; });
+  await page.locator("#w-assinaturas .sub-bill").first().waitFor();
+  await ctx.close();
+  assert.deepEqual(r.servicos, ["Smart Fit", "Netflix", "Globoplay", "Apple Music", "iCloud"]);
+  assert.equal(r.secao, 0);
+  assert.equal(r.aviso, "Netflix ignorada.");
+});
+
+test("Desfazer de um Voltar a mostrar que esvaziou a seção: ela volta aberta, com o item, e ainda fecha", async () => {
+  const { ctx, page } = await abrir({ hash: "#/assinaturas" });
+  await pronta(page);
+  await clicar(page, SERV, "Netflix", "Ignorar");
+  await sumir(page, SERV, "Netflix");
+  await abrirSecao(page);
+  await clicar(page, IGN, "Netflix", "Voltar a mostrar");
+  await linha(page, SERV, "Netflix").waitFor();
+  const r = { secao: await page.locator(IGN).count() };
+  await page.getByRole("button", { name: "Desfazer" }).click();
+  await linha(page, IGN, "Netflix").waitFor({ state: "attached" });
+  const det = page.locator(`${IGN} details`);
+  r.aberta = await det.evaluate((d) => d.open);
+  r.visivel = await linha(page, IGN, "Netflix").isVisible();
+  await det.locator("summary").click();
+  r.fechou = await det.evaluate((d) => d.open);
+  await ctx.close();
+  assert.equal(r.secao, 0);
+  assert.equal(r.aberta, true);
+  assert.equal(r.visivel, true);
+  assert.equal(r.fechou, false);
+});
+
+// O ref da seção roda a cada render: o Ignorar seguinte re-renderiza já no `pendente`.
+test("a reabertura do Desfazer vale uma vez: fechada pelo usuário, a ação seguinte não a abre de novo", async () => {
+  const { ctx, page } = await abrir({ hash: "#/assinaturas" });
+  await pronta(page);
+  await clicar(page, SERV, "Netflix", "Ignorar");
+  await sumir(page, SERV, "Netflix");
+  await abrirSecao(page);
+  await clicar(page, IGN, "Netflix", "Voltar a mostrar");
+  await linha(page, SERV, "Netflix").waitFor();
+  await page.getByRole("button", { name: "Desfazer" }).click();
+  await linha(page, IGN, "Netflix").waitFor({ state: "attached" });
+  const det = page.locator(`${IGN} details`);
+  const r = { aberta: await det.evaluate((d) => d.open) };
+  await det.locator("summary").click();
+  r.fechou = await det.evaluate((d) => d.open);
+  await clicar(page, SERV, "Globoplay", "Ignorar");
+  await linha(page, IGN, "Globoplay").waitFor({ state: "attached" });
+  r.depois = await det.evaluate((d) => d.open);
+  await ctx.close();
+  assert.equal(r.aberta, true);
+  assert.equal(r.fechou, false);
+  assert.equal(r.depois, false);
+});
+
+test("Desfazer de um Ignorar (\"assinatura\" e \"nenhuma\") com a seção fechada: ela segue fechada", async () => {
+  const { ctx, page, posts } = await abrir({ hash: "#/assinaturas" });
+  await pronta(page);
+  for (const nome of ["Netflix", "Globoplay"]) {
+    await clicar(page, SERV, nome, "Ignorar");
+    await sumir(page, SERV, nome);
+  }
+  const det = page.locator(`${IGN} details`);
+  const r = { antes: await det.evaluate((d) => d.open), depois: [] };
+  for (const [sel, nome] of [[SERV, "Smart Fit"], [OUTRAS, "Condomínio Aurora"]]) {
+    await clicar(page, sel, nome, "Ignorar");
+    await sumir(page, sel, nome);
+    await page.getByRole("button", { name: "Desfazer" }).click();
+    await linha(page, sel, nome).waitFor();
+    r.depois.push(await det.evaluate((d) => d.open));
+  }
+  await ctx.close();
+  assert.deepEqual(posts.slice(2).map((p) => p.corpo), [
+    { chave: "smart fit", status: "ignorar" }, { chave: "smart fit", status: "assinatura" },
+    { chave: "condominio aurora", status: "ignorar" }, { chave: "condominio aurora", status: "nenhuma" },
+  ]);
+  assert.equal(r.antes, false);
+  assert.deepEqual(r.depois, [false, false]);
+});
+
 for (const width of [375, 1440]) {
-  test(`${width}px: sem rolagem lateral, botões de 44 px ou mais, o card cabe na célula`, async () => {
+  test(`${width}px: sem rolagem lateral, botões e o resumo das ignoradas de 44 px ou mais, o card cabe na célula`, async () => {
     const { ctx, page } = await abrir({ width });
     const lateral = () => page.evaluate(() => document.scrollingElement.scrollWidth - document.scrollingElement.clientWidth);
     await page.locator("#w-assinaturas .sub-bill").first().waitFor();
@@ -536,13 +843,17 @@ for (const width of [375, 1440]) {
     await pronta(page);
     await clicar(page, SERV, "Netflix", "Ignorar");
     await sumir(page, SERV, "Netflix");
+    await abrirSecao(page);
     r.pagina = await lateral();
     r.alturas = await page.locator(ACOES).evaluateAll((bs) => bs.map((b) => b.getBoundingClientRect().height));
+    r.voltar = await linha(page, IGN, "Netflix").getByRole("button", { name: "Voltar a mostrar: Netflix" }).evaluate((b) => b.getBoundingClientRect().height);
+    r.sumario = await page.locator(`${IGN} summary`).evaluate((b) => b.getBoundingClientRect().height);
     await ctx.close();
     assert.equal(r.resumo, 0);
     assert.ok(r.sobra <= 1, `o card transborda ${r.sobra}px`);
     assert.equal(r.pagina, 0);
     assert.ok(r.alturas.length >= 8 && r.alturas.every((h) => h >= 44), JSON.stringify(r.alturas));
+    assert.ok(r.voltar >= 44 && r.sumario >= 44, JSON.stringify([r.voltar, r.sumario]));
   });
 }
 

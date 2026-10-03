@@ -65,14 +65,18 @@ def ocorrencias_do_usuario(user_id: int) -> list[dict]:
         return cur.fetchall()
 
 
-def marcas(user_id: int) -> dict[str, str]:
+def marcas(user_id: int) -> dict[str, tuple[str, bool]]:
+    """`{chave: (status, assinatura_antes)}`."""
     with get_conn() as conn, conn.cursor() as cur:
-        cur.execute("select merchant_key, status from subscription_marks where user_id = %s", (user_id,))
-        return {r["merchant_key"]: r["status"] for r in cur.fetchall()}
+        cur.execute("select merchant_key, status, assinatura_antes from subscription_marks"
+                    " where user_id = %s", (user_id,))
+        return {r["merchant_key"]: (r["status"], r["assinatura_antes"]) for r in cur.fetchall()}
 
 
 def marcar(user_id: int, chave: str, status: str) -> None:
-    """`status='nenhuma'` apaga a marca (é o "desfazer")."""
+    """`status='nenhuma'` apaga a marca (é o "desfazer"). Ignorar guarda em
+    `assinatura_antes` se a chave estava marcada como assinatura (ignorar de novo
+    mantém o que já estava guardado); `assinatura` zera o guardado."""
     with get_conn() as conn, conn.cursor() as cur:
         if status == "nenhuma":
             cur.execute("delete from subscription_marks where user_id = %s and merchant_key = %s",
@@ -80,8 +84,10 @@ def marcar(user_id: int, chave: str, status: str) -> None:
         else:
             cur.execute(
                 "insert into subscription_marks (user_id, merchant_key, status) values (%s, %s, %s)"
-                " on conflict (user_id, merchant_key)"
-                " do update set status = excluded.status, updated_at = now()",
+                " on conflict (user_id, merchant_key) do update set"
+                " assinatura_antes = excluded.status = 'ignorar' and (subscription_marks.status = 'assinatura'"
+                " or (subscription_marks.status = 'ignorar' and subscription_marks.assinatura_antes)),"
+                " status = excluded.status, updated_at = now()",
                 (user_id, chave, status))
         conn.commit()
 

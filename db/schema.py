@@ -432,7 +432,8 @@ def init_db():
         )
         """,
         # Marcação do usuário na lista de assinaturas (core/services/assinaturas.py):
-        # 'assinatura' põe em "serviços", 'ignorar' esconde. A chave é a
+        # 'assinatura' põe em "serviços", 'ignorar' esconde; `assinatura_antes` guarda
+        # a marca que o ignorar substituiu, para o Voltar a mostrar. A chave é a
         # `merchant_key` da descrição da Pluggy.
         """
         create table if not exists subscription_marks (
@@ -443,6 +444,7 @@ def init_db():
           primary key (user_id, merchant_key)
         )
         """,
+        "alter table subscription_marks add column if not exists assinatura_antes boolean not null default false",
         """
         create table if not exists market_rates (
           code text not null,

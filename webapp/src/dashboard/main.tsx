@@ -6,6 +6,7 @@ import { Entrada } from "./parts/Entrada";
 import { BALANCE_TODAY, MONTHS, previousKey, summary } from "./lib/api";
 import { readProfile } from "./lib/profiles.js";
 import { DEMO, contasQuery, perfilQuery, resumoMesQuery } from "./lib/v2";
+import type { Assinaturas } from "./lib/api-v2.gen";
 import "./styles/index.css";
 
 declare global { interface Window { PIGBANK_DEMO_PLAN?: unknown } }
@@ -20,7 +21,7 @@ if (DEMO) {
     id, instituicao, nome: "Conta", saldo: txt(saldo), moeda: "BRL", no_total: true, conexao: "updated", sincronizado_em: null, motivos: [],
   });
   qc.setQueryData(["me"], { plan_tier: window.PIGBANK_DEMO_PLAN });
-  qc.setQueryData(["assinaturas"], { servicos: [], outras: [], total_mensal: "0", total_anual: "0" });
+  qc.setQueryData<Assinaturas>(["assinaturas"], { servicos: [], outras: [], ignoradas: [], total_mensal: "0", total_anual: "0" });
   qc.setQueryData(perfilQuery.queryKey, { perfil: readProfile() });
   qc.setQueryData(contasQuery.queryKey, {
     total: txt(BALANCE_TODAY + 60), motivos: ["carteira_nao_confirmada"], fora_do_total: 0,

@@ -198,7 +198,9 @@ Sub-app FastAPI (`api/v2/app.py`) montado pelo monólito com `app.mount("/api/v2
 - `GET /api/v2/assinaturas` e `POST /api/v2/assinaturas/marca` (`api/v2/assinaturas.py`):
   a lista do Recurring Payments da Pluggy (`core/services/assinaturas.py`) e a marcação
   do usuário por chave do comerciante (`assinatura`/`ignorar`/`nenhuma`; chave fora da
-  lista dá 404). Gate `subscriptions` em `FEATURE_MIN_TIER_V2` (Plus ou Pro). O cliente é
+  lista dá 404). As chaves ignoradas saem em `ignoradas`, fora do total e só para a tela
+  (Detetive e chat leem `servicos + outras`); nela, `marcada` é a marca guardada, que o
+  "Voltar a mostrar" restaura. Gate `subscriptions` em `FEATURE_MIN_TIER_V2` (Plus ou Pro). O cliente é
   `webapp/src/dashboard/widgets/Subscriptions.tsx` (o card do Resumo e a página
   `/assinaturas`); o POST sai pelo `apiPost` de `lib/v2.ts`, com o header de
   `window.pbCsrfHeaders` (auth-refresh.js), e o 403 `pro_required` vira o convite.
@@ -487,7 +489,8 @@ transação do delete pelo disconnect e pelo reset.
 Assinaturas vêm do **Recurring Payments** da Pluggy (`db/of_recurring.py`):
 `of_recurring_payments` guarda o resultado por conexão, substituído inteiro a cada
 sync — falha na Pluggy mantém o anterior; `subscription_marks` guarda a marcação do
-usuário por `merchant_key` (vale para todos os itens da chave).
+usuário por `merchant_key` (vale para todos os itens da chave), e `assinatura_antes` a
+marca `assinatura` que o `ignorar` substituiu (linhas ignoradas antes da coluna nascem `false`).
 `open_finance_connections.recurring_fetched_at` e `recurring_seed_silent` controlam o
 silêncio da 1ª busca do Detetive numa conexão que já existia: as chaves dela — a foto
 guardada em `recurring_seed_descricoes`, não a atual — viram lápide por `record_agent_event(silencioso=True)`, que grava o evento já com

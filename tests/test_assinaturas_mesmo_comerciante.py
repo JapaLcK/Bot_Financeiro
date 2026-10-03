@@ -30,3 +30,5 @@ def test_ignorar_a_chave_esconde_os_dois(user_id):
     lista = listar_assinaturas(user_id, HOJE)
     assert (lista["servicos"], lista["outras"], lista["total_mensal"]) == ([], [], 0)
     assert lista["chaves"] == ["apple com bill"]  # continua marcável (o "desfazer")
+    assert [(x["valor"], x["marcada"]) for x in lista["ignoradas"]] == [
+        (Decimal("21.9"), False), (Decimal("14.9"), False)]
