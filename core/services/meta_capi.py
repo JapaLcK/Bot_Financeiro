@@ -167,7 +167,9 @@ def send_event(
     if event_source_url:
         event["event_source_url"] = event_source_url
 
-    corpo: dict = {"data": [event]}
+    # Token no CORPO, não na query: na query ele entra no str() da exceção do
+    # requests, e o _DashboardHandler persiste isso em system_event_logs.
+    corpo: dict = {"data": [event], "access_token": token}
     # Com o código setado, o evento vai pra aba "Testar eventos" do Events
     # Manager em vez do relatório — é o único jeito de validar o server-side
     # sem esperar uma venda real (a aba de teste não enxerga o CAPI sozinha).
@@ -179,7 +181,6 @@ def send_event(
     try:
         resp = requests.post(
             url,
-            params={"access_token": token},
             json=corpo,
             timeout=_REQUEST_TIMEOUT_SECONDS,
         )
@@ -197,7 +198,7 @@ def send_event(
         )
         return False
     except Exception as exc:
-        logger.warning("[meta_capi] falha ao enviar %s: %s", event_name, exc, exc_info=True)
+        logger.warning("[meta_capi] falha ao enviar %s: %s", event_name, type(exc).__name__)
         return False
 
 

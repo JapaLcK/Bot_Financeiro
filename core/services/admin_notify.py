@@ -65,7 +65,7 @@ def _send(message: str) -> bool:
         )
         return False
     except Exception as exc:
-        logger.warning("[admin_notify] falha ao notificar: %s", exc, exc_info=True)
+        logger.warning("[admin_notify] falha ao notificar: %s", type(exc).__name__)
         return False
 
 
