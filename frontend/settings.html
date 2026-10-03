@@ -1872,13 +1872,18 @@ function setHasPassword(me, myGen) {
    do /auth/me, NUNCA `has_password` (a conta só-Google tem has_password:false e
    não fica travada). Travada, a página mostra só a Segurança e não chama os
    carregadores que dariam 403 password_required (loadData, loadActivityLog).
-     boot com /auth/me ok ........ escreve, ANTES do showSettingsSection/loadData.
+     ORDEM: os dois escritores (boot e recarregarSeGateMudou) só valem para a
+       resposta MAIS NOVA que já chegou (respostaDoGateMaisNova: _gateGen guarda a
+       geração _hasPwGen da última resposta aplicada; falha não conta, então um
+       rebusque falho não apaga a resposta válida de um boot mais velho).
+     boot com /auth/me ok ........ escreve, ANTES do showSettingsSection/loadData,
+       se nenhum puxão mais novo já respondeu; senão o gate fica com o do puxão.
      boot com /auth/me falho ...... fica false (tela livre, como antes): fechar no
        erro mostraria "Crie sua senha" a quem tem senha. O servidor segue negando.
        Mas é false por DESCONHECIDO: a volta do foco também rebusca.
      PTR (abas security e data) / aba volta ao foco (visibilitychange, pageshow do
-       bfcache) .... rebusca pelo refreshHasPassword (geração _hasPwGen: resposta
-       velha não decide). Se o servidor discorda do gate, recarrega e o boot monta o
+       bfcache) .... rebusca pelo refreshHasPassword (resposta velha não decide).
+       Se o servidor discorda do gate, recarrega e o boot monta o
        modo certo: senha criada → livre; gate livre que descobre a conta sem senha
        (boot falho, ou PTR antes do /auth/me do boot) → travada. Com algo de
        RECARGA_PERDERIA aberto NÃO recarrega, e nada fica agendado: o próximo foco
@@ -1887,6 +1892,12 @@ function setHasPassword(me, myGen) {
        não chama este caminho. Campo ausente = não precisa (não trava). */
 let PRECISA_SENHA = false;
 const precisaCriarSenha = (me) => !!(me && me.precisa_criar_senha === true);
+let _gateGen = 0;
+function respostaDoGateMaisNova(myGen) {
+  if (myGen <= _gateGen) return false;   // uma resposta mais nova já decidiu
+  _gateGen = myGen;
+  return true;
+}
 // O que a recarga fecharia levando estado do usuário que não volta: rascunho de
 // contato, senha digitada nos painéis de exportar/recomeçar/excluir, os três modais de
 // MFA (QR e segredo do TOTP, códigos de backup que aparecem UMA vez, senha e código),
@@ -2732,7 +2743,7 @@ async function refreshHasPassword() {
   if (!resp.ok) throw new Error("Não foi possível atualizar o estado da conta");
   const me = await resp.json();
   setHasPassword(me, myGen);
-  if (myGen === _hasPwGen) recarregarSeGateMudou(me);   // superada não decide (mesma regra)
+  if (respostaDoGateMaisNova(myGen)) recarregarSeGateMudou(me);   // superada não decide
 }
 
 /* Guarda dos 6 fluxos que re-autenticam por senha. Fica nos ABRIDORES pra o
@@ -3827,7 +3838,9 @@ async function initSettings() {
   } catch (e) { /* segue; as rotas de dados protegem com 402 */ }
 
   // ANTES do showSettingsSection e do loadData lá embaixo (#758): eles leem a flag.
-  PRECISA_SENHA = precisaCriarSenha(me);
+  // Um puxão mais novo que já respondeu manda (ele já recarregou se discordava); o
+  // resto do boot segue com o gate que ficou, para a página nunca sair sem seção.
+  if (me && respostaDoGateMaisNova(meGen)) PRECISA_SENHA = precisaCriarSenha(me);
   document.body.classList.toggle("pb-sem-senha", PRECISA_SENHA);
   if (PRECISA_SENHA) {
     // Card do link da senha no topo da seção e e-mail antes do nome (D1; no app a tab
