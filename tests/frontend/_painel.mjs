@@ -24,10 +24,11 @@ export const PROTOTIPO = `${ORIGIN}/dashboard-v2/index.html`;
 
 export function exigeArtefatoEmDia() {
   const bundle = statSync(join(FRONTEND, "dashboard-app.js")).mtimeMs;
-  const src = join(RAIZ, "webapp", "src", "dashboard");
-  const velho = readdirSync(src, { recursive: true })
-    .map((f) => join(src, f))
-    .find((f) => statSync(f).isFile() && statSync(f).mtimeMs > bundle);
+  // `components/` entra: a grade de widgets mora lá e o bundle do dashboard a embute.
+  const velho = ["dashboard", "components"].flatMap((d) => {
+    const src = join(RAIZ, "webapp", "src", d);
+    return readdirSync(src, { recursive: true }).map((f) => join(src, f));
+  }).find((f) => statSync(f).isFile() && statSync(f).mtimeMs > bundle);
   if (velho) {
     throw new Error(`frontend/dashboard-app.js é mais velho que ${velho}: rode \`npm --prefix webapp run build\` e commite o artefato.`);
   }
