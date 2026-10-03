@@ -754,6 +754,15 @@ _KWARGS_DA_PRECOS = {
 }
 
 
+def _extras_env(monkeypatch, slots: dict[int, tuple[str, str]]):
+    """Zera os 10 slots de produto extra da env e preenche só os pedidos."""
+    for n in range(1, 11):
+        sufixo = "" if n == 1 else f"_{n}"
+        preco, url = slots.get(n, ("", ""))
+        monkeypatch.setenv(f"STRIPE_PRICE_ID_EBOOK{sufixo}", preco)
+        monkeypatch.setenv(f"EBOOK_URL{sufixo}", url)
+
+
 def _assinar_pronto(monkeypatch, elegivel=True, ebook="price_ebook_abc", pk="pk_test_abc",
                     ebook_url="https://exemplo.test/ebook.pdf"):
     fake = _stripe_pronto(monkeypatch)
@@ -761,8 +770,7 @@ def _assinar_pronto(monkeypatch, elegivel=True, ebook="price_ebook_abc", pk="pk_
     monkeypatch.setenv("PLANS_TRIAL_DAYS", "15")
     monkeypatch.setattr("db.plans.is_trial_eligible_for_user", lambda uid: elegivel)
     monkeypatch.setattr(dashboard, "STRIPE_PUBLISHABLE_KEY", pk)
-    monkeypatch.setattr(dashboard, "STRIPE_PRICE_ID_EBOOK", ebook)
-    monkeypatch.setattr(dashboard, "EBOOK_URL", ebook_url)
+    _extras_env(monkeypatch, {1: (ebook, ebook_url)})
     return fake
 
 
@@ -770,25 +778,34 @@ def _post(client, corpo):
     return client.post("/billing/create-checkout", json=corpo, headers=_CSRF_HEADERS)
 
 
+@pytest.mark.parametrize("com_produtos", [False, True], ids=["sem-produtos", "com-produtos"])
 @pytest.mark.parametrize("corpo", [
     _PRECOS, {**_PRECOS, "origem": "precos", "embutido": False},
 ], ids=["sem-campos-novos", "campos-novos-explicitos"])
-def test_precos_manda_o_mesmo_checkout_de_antes(request, user_id, monkeypatch, corpo):
-    """POSITIVO do PR: a /precos não herda nada da /assinar. A igualdade de
-    CONJUNTO pega qualquer kwarg que vaze (ui_mode, adaptive_pricing,
-    optional_items, expires_at, return_url)."""
+def test_precos_manda_o_mesmo_checkout_de_antes(request, user_id, monkeypatch, corpo, com_produtos):
+    """P0. Sem produtos configurados (POSITIVO), a /precos manda exatamente o
+    checkout de antes. Com produtos (Q3 do dono: extras também na /precos), ela
+    ganha SÓ `optional_items` e as chaves `ebook*` da foto — nada mais da
+    /assinar vaza (ui_mode, adaptive_pricing, expires_at, return_url). A
+    igualdade de CONJUNTO é o que pega o vazamento."""
     uid, _, client = _auth_user_setup(f"precos-{request.node.callspec.id}-{user_id}")
-    fake = _assinar_pronto(monkeypatch)
+    fake = _assinar_pronto(monkeypatch, ebook="price_ebook_abc" if com_produtos else "",
+                           ebook_url="https://exemplo.test/ebook.pdf" if com_produtos else "")
 
     resp = _post(client, corpo)
     assert resp.status_code == 200, resp.text
     kw = fake.last_session_kwargs
-    assert set(kw) == _KWARGS_DA_PRECOS
+    extras_meta = ({"ebook_price": "price_ebook_abc", "ebook_url": "https://exemplo.test/ebook.pdf"}
+                   if com_produtos else {})
+    assert set(kw) == _KWARGS_DA_PRECOS | ({"optional_items"} if com_produtos else set())
+    if com_produtos:
+        assert kw["optional_items"] == [{"price": "price_ebook_abc", "quantity": 1}]
     assert kw["cancel_url"].endswith("/precos?escolha=1")
-    assert kw["metadata"] == {
+    base = {
         "finbot_user_id": str(uid), "interval": "monthly", "plan": "plus",
         "price_id": "price_mensal_abc", "origem": "precos", "td": "15",
     }
+    assert kw["metadata"] == kw["subscription_data"]["metadata"] == {**base, **extras_meta}
     assert set(resp.json()) == {"checkout_url", "interval", "plan"}
 
 
@@ -844,19 +861,24 @@ def test_assinar_ebook_so_com_as_duas_envs(request, user_id, monkeypatch, caplog
     """Preço sem URL venderia um e-book que o webhook não tem como entregar.
     Quando oferecido, o preço E a URL vão de foto nos DOIS metadatas (o PR 3 lê
     dali); quando não, as chaves nem existem. O Stripe recusa metadata acima de
-    500 caracteres (medido): acima disso não oferece, e o log não leva a URL."""
-    _, _, client = _auth_user_setup(f"ebook-{request.node.callspec.id}-{user_id}")
+    500 caracteres (medido): acima disso não oferece, e o log não leva a URL.
+
+    S1 (PR 4 dos extras): com só o slot 1 na env, o conjunto de kwargs e o
+    metadata são EXATAMENTE os de antes das variáveis numeradas."""
+    uid, _, client = _auth_user_setup(f"ebook-{request.node.callspec.id}-{user_id}")
     fake = _assinar_pronto(monkeypatch, ebook=ebook, ebook_url=ebook_url)
 
     with caplog.at_level("WARNING"):
         assert _post(client, corpo).status_code == 200
     kw = fake.last_session_kwargs
-    for meta in (kw["metadata"], kw["subscription_data"]["metadata"]):
-        if oferece:
-            assert meta["ebook_price"] == "price_ebook_abc"
-            assert meta["ebook_url"] == ebook_url
-        else:
-            assert "ebook_price" not in meta and "ebook_url" not in meta
+    modo = ({"ui_mode", "return_url"} if corpo.get("embutido") else {"success_url", "cancel_url"})
+    assert set(kw) == ((_KWARGS_DA_PRECOS - {"success_url", "cancel_url"}) | modo
+                       | {"adaptive_pricing", "expires_at"} | ({"optional_items"} if oferece else set()))
+    base = {"finbot_user_id": str(uid), "interval": "monthly", "plan": "plus",
+            "price_id": "price_mensal_abc", "origem": "assinar", "td": "15"}
+    if oferece:
+        base.update(ebook_price="price_ebook_abc", ebook_url=ebook_url)
+    assert kw["metadata"] == kw["subscription_data"]["metadata"] == base
     if oferece:
         assert kw["optional_items"] == [{"price": "price_ebook_abc", "quantity": 1}]
     else:

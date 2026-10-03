@@ -181,9 +181,9 @@ Entrada: `/assinar?plano=essencial|plus|pro&ciclo=monthly|annual[&utm…&fbclid�
 | S1 | 200 `cadastro_pendente` (há um `/auth/register` com senha em andamento para o e-mail; nada foi criado nem tocado) | S1 com o aviso "Já existe um cadastro em andamento com este e-mail. Termine pelo código que enviamos para ele, ou use outro e-mail", e um link para o `/cadastro`. Sem sessão e sem checkout |
 | S1 | 409 `ocupado` (outro pedido do mesmo e-mail está com a trava, por exemplo um duplo clique) | refaz 1 vez depois de ~1 s. Se falhar de novo, S1 com erro genérico |
 | S2 | "Entrar com sua senha" | **não faz login dentro da `/assinar`**: `location.href = "/login?next=" + encodeURIComponent(location.pathname + location.search)`, no padrão da `precos.html:587` e da `shared.py:1212`. O `/login` faz a senha e o MFA inteiros. Com MFA, o `/auth/login` devolve só o `mfa_challenge`, sem cookie, e um login feito aqui perderia o desafio: a pessoa digitaria tudo de novo. **Sem o `encodeURIComponent`, o `nextParam` do `login.html:144` (que lê com `URLSearchParams`) corta o `next` no primeiro `&`**, e a pessoa volta sem o `ciclo` e sem a UTM e cai em "link inválido". `/assinar` entra na allowlist do `nextParam`, que compara por prefixo e mantém a query. Na volta, a carga cai no S3 |
-| S2 | "Entrar com Google" | `PBPurchaseIntent.begin(plan,cycle,"card")` + `markAwaitingAuth()` → `/auth/google/start?next=/continuar-compra` (checkout hospedado, sem e-book: é o limite aceito) |
+| S2 | "Entrar com Google" | `PBPurchaseIntent.begin(plan,cycle,"card")` + `markAwaitingAuth()` → `/auth/google/start?next=/continuar-compra` (checkout hospedado; desde o PR 4 dos produtos extras, com os mesmos extras da `/assinar`) |
 | S2 | "Não tenho ou esqueci a senha" | `POST /auth/forgot-password`, com a mensagem de sempre (o link serve para conta sem senha: a copy muda para "definir", monólito :3686) |
-| S3 checkout | `POST /billing/create-checkout {plan, interval, embutido:true, origem:"assinar"}` 200 (sem `origem`, o padrão é `"precos"`: a sessão sai sem o e-book e sem o `metadata.origem` da entrega) | mostra o texto do teste grátis (`trial_days`), monta o Stripe (`client_secret` + `publishable_key`), dispara `InitiateCheckout`/`begin_checkout` e mostra o link do Pix se `plans-config.pix_annual_available` → **S4** |
+| S3 checkout | `POST /billing/create-checkout {plan, interval, embutido:true, origem:"assinar"}` 200 (sem `origem`, o padrão é `"precos"`: a sessão sai com `origem: "precos"`, sem `adaptive_pricing` off nem `expires_at`; os produtos extras vão nas duas origens desde o PR 4 dos extras) | mostra o texto do teste grátis (`trial_days`), monta o Stripe (`client_secret` + `publishable_key`), dispara `InitiateCheckout`/`begin_checkout` e mostra o link do Pix se `plans-config.pix_annual_available` → **S4** |
 | S3 | 409 `already_subscribed` / `lifetime` | "Você já é assinante" + botão `/home` (**F1**) |
 | S3 | 409 `pix_active` | a mensagem do 409 + botão `/home` (**F1**) |
 | S3 | 401 depois do auth-refresh (sessão morreu) | S1: "Sua sessão expirou, entre de novo" |
@@ -362,7 +362,9 @@ anotado no corpo do PR 2 antes de codar**:
      exige `client_secret` (embutido) ou `url` (hospedado). Assim uma sessão nunca é
      reaproveitada por outro modo ou por outra página; ela é expirada pelo laço que já
      existe;
-   - `_new_session`, se `origem == "assinar"`: `optional_items=[{"price":
+   - **(Atualizado pelo PR 4 dos produtos extras: os `optional_items` saem de
+     `extras_assinar.da_env` e vão nas DUAS origens; o texto abaixo é o do e-book único.)**
+     `_new_session`, se `origem == "assinar"`: `optional_items=[{"price":
      STRIPE_PRICE_ID_EBOOK, "quantity": 1}]` só se **as duas** envs estiverem preenchidas:
      `STRIPE_PRICE_ID_EBOOK` e `EBOOK_URL`. Com só o preço, a pessoa pagaria por um e-book
      que o webhook não tem como entregar. Um teste cobre a config pela metade (só o preço,
@@ -418,7 +420,8 @@ tentativa aberta por cliente).
   `allow_promotion_codes=True`, `cancel_url` = `/assinar?plano=…&ciclo=…`, sem
   `ui_mode` embutido, e o **mesmo** `trial_period_days` que o embutido daria para a
   mesma conta;
-- **`precos` idêntico ao de hoje** (sem `ui_mode`/`optional_items`,
+- **`precos` idêntico ao de hoje**, exceto os produtos extras (PR 4 dos extras:
+  `optional_items` e a foto `ebook*` quando há produto configurado) (sem `ui_mode`,
   `allow_promotion_codes=True`, `cancel_url=/precos?escolha=1`, `url` na resposta);
 - `origem` inválida → 400;
 - telefone que já usou → sem `trial_period_days` e `trial_days:0` na resposta;
@@ -446,7 +449,9 @@ tentativa aberta por cliente).
    mesmo teste de config pela metade do PR 2 ganha esse caso.
 1. `checkout.session.completed`: se a sessão tem `metadata.ebook_price` (a foto do
    preço oferecido, gravada pelo PR 2) **e** veio da `/assinar` (`metadata.origem ==
-   "assinar"`, embutida ou hospedada), **grava uma entrega pendente** do e-book: uma
+   "assinar"`, embutida ou hospedada) — **atualizado: desde o PR 1 dos produtos
+   extras o webhook não olha a origem; grava pela foto, venha da `/assinar` ou da
+   `/precos`** —, **grava uma entrega pendente** do e-book: uma
    linha por `user_id` + `session_id`, idempotente, para a reentrega do evento não
    criar outra. Ela guarda também a **URL do e-book oferecida**, copiada de
    `metadata.ebook_url` da sessão (a foto do PR 2, e nunca a env na hora do webhook).
@@ -942,7 +947,10 @@ do e-book.
   comportamento é o da `/precos` de hoje. Não se cria exceção, e a regra da Apple sobre
   venda dentro do app continua a mesma de hoje.
 - **Abandono e volta em outro navegador:** a pessoa cai em "já tem conta" sem ter senha.
-  O caminho é o link por e-mail → login → `/precos` (checkout hospedado, sem e-book).
+  O caminho é o link por e-mail → login → `/precos` (checkout hospedado). **Atualização
+  (PR 4 dos produtos extras, 2026-10-03):** a `/precos` passou a oferecer os mesmos
+  produtos extras da `/assinar` (decisão do dono, Q3); "e-book só na `/assinar`" não vale
+  mais.
   Um "entrar por código no e-mail" resolveria isso, e fica como follow-up se a métrica
   mostrar que dói.
 - **Recibo do Stripe para um e-mail não provado:** o checkout cria o cliente no Stripe
@@ -971,8 +979,8 @@ do e-book.
 ## 9. O que o dono configura
 
 **Stripe (fazer em modo teste primeiro, depois em produção):**
-1. Produtos → criar "E-book …" com **preço avulso** (pagamento único, BRL) → copiar o
-   `price_…` para a env **`STRIPE_PRICE_ID_EBOOK`** (Railway; a de teste vai no `.env` local da Etapa 0b-2).
+1. Produtos extras: ver o passo a passo "Produtos extras" logo abaixo (vale por cima
+   dos itens 1, 6 e 7 desta lista, que falam de um e-book só).
 2a. Configurações → E-mails para clientes: conferir se o Stripe manda recibo de pagamento
    e fatura. Se mandar, decidir se desliga (seção 8, "Recibo do Stripe para um e-mail
    não provado").
@@ -983,14 +991,37 @@ do e-book.
    adicionar `pigbankai.com`.
 5. Webhook: nada muda (os eventos `checkout.session.completed` e `invoice.paid` já estão
    ligados).
-6. Hospedar o PDF do e-book (por exemplo, no Drive, com "qualquer pessoa com o link") →
-   a URL de download na env **`EBOOK_URL`**, com **até 500 caracteres** (acima disso o
-   e-book não é oferecido). As duas envs (`STRIPE_PRICE_ID_EBOOK` e `EBOOK_URL`) já
-   podem entrar: o PR 3 (#708) está mergeado.
-7. Cupons: como eles ficam ligados na `/assinar`, na hora de criar cada cupom, em
-   "Aplicar a produtos específicos", escolher só os planos, para o cupom não descontar
-   o e-book (a não ser que seja essa a intenção).
+6. Hospedar o PDF de cada produto: ver "Produtos extras" logo abaixo (variáveis
+   numeradas, oferecidas na `/assinar` e na `/precos`).
+7. Cupons: como eles ficam ligados na `/assinar` e na `/precos` (as duas oferecem os
+   produtos extras), na hora de criar cada cupom, em "Aplicar a produtos específicos",
+   escolher só os planos, para o cupom não descontar os produtos (a não ser que seja
+   essa a intenção).
 8. Antes do PR 2: a Etapa 0b-1 (dez minutos no celular, seção 5).
+
+**Produtos extras (até 10), nas duas páginas (`/assinar` e `/precos`).** Preencher as
+variáveis no Railway **só depois do merge do PR 4 dos produtos extras**.
+1. No Stripe, Catálogo de produtos → **Adicionar produto**, um por produto. O **nome** e
+   a **imagem** que você puser aqui são o que a pessoa vê no checkout e o nome que vai no
+   e-mail de entrega. Preço: **avulso** (pagamento único), em **BRL**. Copie o código do
+   preço (começa com `price_`).
+2. Hospede o PDF de cada produto (por exemplo, no Drive, com "qualquer pessoa com o
+   link") e copie o link de download. Ele precisa ter **até 500 caracteres**; acima
+   disso aquele produto não é oferecido (os outros continuam).
+3. No Railway, uma dupla de variáveis por produto. O 1º usa os nomes de hoje:
+   `STRIPE_PRICE_ID_EBOOK` (o `price_…`) e `EBOOK_URL` (o link). Do 2º ao 10º, o mesmo
+   nome com o número no fim: `STRIPE_PRICE_ID_EBOOK_2` e `EBOOK_URL_2`, …,
+   `STRIPE_PRICE_ID_EBOOK_10` e `EBOOK_URL_10`. A ordem no checkout é a do número. Um
+   produto só aparece com **as duas** variáveis dele preenchidas.
+4. Cupons: ao criar cada cupom, em "Aplicar a produtos específicos", escolha só os
+   planos, para o cupom não descontar os produtos (a não ser que seja essa a intenção).
+5. Para **tirar** um produto: apague as duas variáveis dele, espere o deploy terminar e
+   mais **24 horas** (a sessão de pagamento da `/precos` fica aberta até 24 h). Só então
+   arquive o preço no Stripe. Se arquivar antes, enquanto a variável existir TODOS os
+   produtos somem do checkout (o plano continua sendo vendido) e cai o erro
+   `ebook_oferta_recusada` nos eventos do sistema a cada checkout.
+6. Teste real nas duas páginas (`/assinar` e `/precos`) com 2 produtos: compra, e-mail
+   de cada produto, e um estorno antes de criar a senha.
 
 **XQuiz (só depois da Etapa 0b-2 e do PR 5 no ar e testado em produção):**
 1. Em cada botão da página dos planos, um link neste formato (os nomes das variáveis
