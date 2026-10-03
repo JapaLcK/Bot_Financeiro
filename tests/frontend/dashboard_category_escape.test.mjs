@@ -732,6 +732,25 @@ test("C2 controle: a categoria ESCOLHIDA pelo usuário continua indo no PATCH", 
   await page.close();
 });
 
+/* C3. Categoria custom (fora da lista canônica) com aspas e tag: a opção do
+   topo do editor leva o texto CRU no value e no rótulo, e salvar sem mexer na
+   categoria não a reenvia. Antes, o `"` fechava o value no meio — o <select>
+   abria em "" e o PATCH podia levar uma categoria truncada.
+   Controle NEGATIVO: tire os `escapeHtmlSafe` da opção custom em
+   `_renderEditCategoriaOptions` — este teste fica vermelho.
+   Controle POSITIVO: "C2 controle" acima (categoria canônica escolhida). */
+test("C3: categoria custom com aspas e tag abre selecionada e não vira nó", async () => {
+  const page = await loadComEditor();
+  const cru = 'Bar "do Zé" & <img src=x onerror="window.__pwned=1">';
+  const r = await salvarPelaLista(page, linhaReal({ categoria: cru }));
+  assert.equal(r.erro, "", `o editor barrou o salvamento: "${r.erro}"`);
+  assert.equal(r.selecionado, cru, `o <select> abriu em "${r.selecionado}"`);
+  assert.equal(r.rotulos[0], cru, r.rotulos.join(" | "));
+  assert.equal("categoria" in r.corpo, false, JSON.stringify(r.corpo));
+  assert.equal(await page.evaluate(() => document.querySelectorAll('img[src="x"]').length), 0);
+  await page.close();
+});
+
 test("A8: depois de Editar, o ctx e o foco guardado da lista morrem", async () => {
   // `_catLaunchesCtx != null` significa "existe lista pra onde voltar". Depois
   // de Editar não existe: quem fecha o editor volta pro dashboard.
