@@ -27,7 +27,14 @@ logger = logging.getLogger(__name__)
 # de lançamento por ação do usuário passa por aqui (update_launch_fields: PATCH
 # /launches, tool da IA, WhatsApp; update_launch_categories_bulk) e marca a
 # edição: o sync do Open Finance não desfaz categoria nem interno editados (#712).
-_SET_CATEGORIA = (f"categoria=%s, is_internal_movement = %s or {PAR_ATIVO_SQL}, "
+# O pagamento de fatura do cartão manual (`efeitos.bill_id`, db/cards.pay_bill_amount)
+# também segue interno com qualquer categoria: as compras do cartão já contam no gasto,
+# e a fatura contada junto vira gasto em dobro. Regravar a MESMA categoria não muda o
+# interno (saldo inicial e ajuste nascem internos à mão); o 3º %s repete a categoria nova,
+# e à direita do SET `categoria`/`is_internal_movement` são os valores antigos da linha.
+_SET_CATEGORIA = (f"categoria=%s, is_internal_movement = %s or {PAR_ATIVO_SQL} "
+                  "or (efeitos -> 'bill_id') is not null "
+                  "or (is_internal_movement and categoria is not distinct from %s), "
                   "categoria_editada = true")
 
 # `launches.origem`: "gravado pelo escritor da carteira depois do PR 2a" (NULL = antigo, só
@@ -400,7 +407,7 @@ def update_launch_fields(
     if categoria is not None:
         cat_clean = categoria.strip() or None
         sets.append(_SET_CATEGORIA)
-        params.extend([cat_clean, is_internal_category(cat_clean)])
+        params.extend([cat_clean, is_internal_category(cat_clean), cat_clean])
     if alvo is not None:
         sets.append("alvo=%s")
         params.append((alvo.strip() or None))
@@ -489,7 +496,7 @@ def update_launch_categories_bulk(user_id: int, items: list[tuple[int, str]]) ->
         with conn.cursor() as cur:
             cur.executemany(
                 f"update launches set {_SET_CATEGORIA} where user_id=%s and id=%s",
-                [(cat, is_internal_category(cat), user_id, lid) for (lid, cat) in items],
+                [(cat, is_internal_category(cat), cat, user_id, lid) for (lid, cat) in items],
             )
             n = cur.rowcount or 0
         conn.commit()

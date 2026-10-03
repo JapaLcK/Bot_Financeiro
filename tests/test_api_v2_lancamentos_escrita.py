@@ -30,6 +30,7 @@ from tests._patrimonio_helpers import conexao, conta, q
 from tests.test_api_v2_lancamentos import ok
 from tests.test_api_v2_perfil import cliente
 from tests.test_api_v2_resumo_mes import libera  # noqa: F401 (fixture)
+from tests.test_api_v2_resumo_mes import ok as resumo
 from tests.test_manual_launches_carteira_piggy import _connect_fake_bank, _importa_of_tx
 from utils_date import _tz, today_tz
 
@@ -193,6 +194,61 @@ def test_pagamento_de_conta_pela_carteira_nao_apaga_e_edita_categoria(libera):
     assert codigo(post(a, "editar", {"id": f"l{lid}", "descricao": "x"})) == (409, "nao_editavel")
     assert post(a, "editar", {"id": f"l{lid}", "categoria": "lazer"}).status_code == 200
     assert (linha(lid)["categoria"], saldo(a)) == ("lazer", antes)
+
+
+# Pagamento de fatura do cartão manual: interno por estrutura (`_SET_CATEGORIA`), porque as
+# compras do cartão já contam. NEGATIVO: o predicado `efeitos -> 'bill_id'` fora → vermelho
+# nos dois primeiros. POSITIVO: a carteira comum segue a regra da categoria.
+
+def _paga_fatura(uid) -> int:
+    cartao = db.create_card(uid, "Nubank", closing_day=10, due_day=17)
+    bill_id = db.add_credit_purchase(uid, cartao, 200, "mercado", "compra", today_tz())[2]
+    return db.pay_bill_amount(uid, cartao, "Nubank", None, bill_id=bill_id)["launch_id"]
+
+
+def test_pagamento_de_fatura_recategorizado_segue_interno_e_nao_dobra_o_gasto(libera):
+    a = usuario_pagante()
+    lid = _paga_fatura(a)
+    libera(a)
+    assert item(a, lid)["pode"] == ["categoria", "data"]
+    antes = resumo(a)["saiu"]
+    assert post(a, "editar", {"id": f"l{lid}", "categoria": "lazer"}).status_code == 200
+    assert (linha(lid)["categoria"], linha(lid)["is_internal_movement"]) == ("lazer", True)
+    assert resumo(a)["saiu"] == antes
+
+
+def test_pagamento_de_fatura_segue_interno_no_app_e_no_lote():
+    a = usuario_pagante()
+    lid = _paga_fatura(a)
+    assert db.update_launch_fields(a, lid, categoria="lazer")
+    assert linha(lid)["is_internal_movement"] is True
+    assert db.update_launch_categories_bulk(a, [(lid, "mercado")]) == 1
+    assert (linha(lid)["categoria"], linha(lid)["is_internal_movement"]) == ("mercado", True)
+
+
+def test_carteira_comum_segue_a_regra_da_categoria(libera):
+    (a,) = libera(usuario_pagante())
+    lid = cria(a)
+    assert post(a, "editar", {"id": f"l{lid}", "categoria": "transferencia_interna"}).status_code == 200
+    assert linha(lid)["is_internal_movement"] is True
+    assert post(a, "editar", {"id": f"l{lid}", "categoria": "lazer"}).status_code == 200
+    assert linha(lid)["is_internal_movement"] is False
+
+
+def test_saldo_inicial_regravado_segue_interno_e_trocado_segue_a_categoria(libera):
+    """Saldo inicial nasce interno à mão (rota do /app). Regravar a MESMA categoria junto
+    com outro campo não o vira receita; trocar de categoria é reclassificação explícita.
+    NEGATIVO: sem o termo `categoria is not distinct from` no `_SET_CATEGORIA` → vermelho."""
+    a = usuario_pagante()
+    c, h = cliente(a)
+    lid = c.post(f"/account/{a}/initial-balance", headers=h, json={"amount": 300}).json()["launch_id"]
+    libera(a)
+    antes = resumo(a)["entrou"]
+    assert post(a, "editar", {"id": f"l{lid}", "categoria": "saldo_inicial", "descricao": "x"}).status_code == 200
+    assert (linha(lid)["alvo"], linha(lid)["is_internal_movement"]) == ("x", True)
+    assert resumo(a)["entrou"] == antes
+    assert post(a, "editar", {"id": f"l{lid}", "categoria": "salário"}).status_code == 200
+    assert linha(lid)["is_internal_movement"] is False
 
 
 def test_pagamento_de_conta_entre_os_dois_commits_nao_apaga(libera, monkeypatch):
