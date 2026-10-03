@@ -84,8 +84,8 @@ def run_core_case(
             ),
             patch("core.handlers.balance.db.get_launches_by_period", return_value=[]),
             patch(
-                "core.handlers.balance.db.get_summary_by_period",
-                return_value={"despesa": 0.0},
+                "core.handlers.balance.resumo_mes.totais_do_mes",
+                return_value={"entrou": 0, "saiu": 0, "n": 0, "n_cartao": 0},
             ),
             patch("core.handlers.balance.db.list_cards", return_value=[]),
             patch("core.handle_incoming.logger.error") as error_log,

@@ -53,7 +53,7 @@ api/v2/                   — a /api/v2 do dashboard v2: sub-app FastAPI montado
                             monólito em /api/v2, com envelope de erro próprio
                             (erros.py), a dependência única do usuário (sessao.py)
                             e um router por assunto (me.py, eventos.py,
-                            perfil.py, contas.py, assinaturas.py)
+                            perfil.py, contas.py, assinaturas.py, resumo_mes.py)
 
 db/                       — PACOTE com ~30 módulos, um por domínio
   schema.py               — DDL de TODAS as tabelas (init_db) — fonte de verdade
@@ -173,22 +173,71 @@ Sub-app FastAPI (`api/v2/app.py`) montado pelo monólito com `app.mount("/api/v2
   contadas em `fora_do_total`). A carteira sai sempre com `carteira_nao_confirmada` até a
   Q37. `motivos` vazio = número exato. Cartão, posições e caixinhas não entram; `raw` e
   `provider_*_id` nunca saem.
+- `GET /api/v2/resumo-do-mes?mes=AAAA-MM` (`api/v2/resumo_mes.py`, regra em `db/resumo_mes.py`):
+  `mes`, `ate` (o último dia do mês, o corrente também: a soma cobre o mês inteiro), `entrou`, `saiu`, `anterior`
+  (`{mes, entrou, saiu}` do mês anterior inteiro, ou `null` quando a janela do plano corta
+  qualquer parte dele) e `motivos` (`conciliacao_pendente`, `movimentos_pendentes`,
+  `banco_desatualizado` — os do bloco de contas: refletem a situação atual das contas, não
+  a do mês pedido — e `inicio_do_historico`, quando a janela do plano corta o mês pedido ou
+  o `anterior`). Sem `mes` = o mês
+  corrente no fuso do app; formato fora de `AAAA-MM` ou mês futuro = 422 no envelope.
+  **Regra única do mês** (Q18): `TOTAIS_SQL` = lançamentos não internos por `criado_em`
+  (forma legada canonizada) + compras no cartão sem estorno pelo `period_end` da fatura,
+  no mês-calendário INTEIRO (a fatura que fecha depois de hoje, dentro do mês, entra). Leem
+  dela a rota, o "Gastos em <mês>" do WhatsApp (`core/handlers/balance.py`), o relatório
+  mensal (o pedido na hora também soma o mês inteiro: total, contagem e "Período"), a
+  consulta 5 do /app e `compute_kpis` das Análises. `compute_evolution` é cópia em consulta
+  única (um GROUP BY por mês); `tests/test_resumo_mes_regra.py` compara as duas por mês.
+  Fatura com `user_id` NULL (a coluna aceita, sem backfill) entra, como antes.
+  **Divergência conhecida:** relatório diário e semanal, ferramentas da IA de período
+  livre e projeção de fechamento (`get_summary_by_period`) e o Repórter
+  (`piggy_agents._month_stats`) seguem só em `launches`, sem o cartão. Limites mantidos de
+  propósito: o mês corta `criado_em` pela data ingênua (fuso da sessão do Postgres), a
+  conciliação pendente conta em dobro (sai com motivo), estorno não abate.
+  `scripts/comparar_resumo_mes.py` compara antigo × novo por usuário e mês, só lendo.
 - `GET /api/v2/assinaturas` e `POST /api/v2/assinaturas/marca` (`api/v2/assinaturas.py`):
   a lista do Recurring Payments da Pluggy (`core/services/assinaturas.py`) e a marcação
   do usuário por chave do comerciante (`assinatura`/`ignorar`/`nenhuma`; chave fora da
-  lista dá 404). Gate `subscriptions` em `FEATURE_MIN_TIER_V2` (Plus ou Pro).
+  lista dá 404). As chaves ignoradas saem em `ignoradas`, fora do total e só para a tela
+  (Detetive e chat leem `servicos + outras`); nela, `marcada` é a marca guardada, que o
+  "Voltar a mostrar" restaura. Gate `subscriptions` em `FEATURE_MIN_TIER_V2` (Plus ou Pro). O cliente é
+  `webapp/src/dashboard/widgets/Subscriptions.tsx` (o card do Resumo e a página
+  `/assinaturas`); o POST sai pelo `apiPost` de `lib/v2.ts`, com o header de
+  `window.pbCsrfHeaders` (auth-refresh.js), e o 403 `pro_required` vira o convite.
 - **Dinheiro na v2 é `Decimal` e sai como TEXTO decimal** (`"1234.56"`, sem arredondar e sem
   float), em toda rota: no TS é `string`. A escala é a da coluna (`"1000"` e `"1000.00"`
   valem). O contrato vale para toda rota futura.
 - **Contrato:** o envelope entra no OpenAPI como resposta `default` (`ErroV2`, em
   `api/v2/erros.py`; a resposta real continua saindo de `_envelope`). Os tipos TS saem de
   `python scripts/gerar_tipos_api_v2.py` para `webapp/src/dashboard/lib/api-v2.gen.ts`
-  (gerado e commitado; construção fora da lista aceita levanta `ValueError`), e
+  (gerado e commitado; construção fora da lista aceita levanta `ValueError`, e `number`
+  (float) está fora dela: dinheiro é `Decimal`; a query de GET sai em `QueryGet`, só
+  parâmetro `in: query`), e
   `tests/test_api_v2_contrato.py` compara o arquivo com o `openapi()` de hoje e valida as
   fixtures dos testes de navegador (`tests/frontend/api_v2_respostas.json`). Mudou modelo:
   rode o gerador e depois o build do `webapp/`.
 - Chave: `DASHBOARD_V2_BETA_EMAILS` (sem a env = os e-mails de teste do beta de
   Agentes; definida e vazia = ninguém) e `DASHBOARD_V2_BETA_USER_IDS`.
+- **Q36 fora do v2: Open Finance é a fonte única para quem tem a chave**
+  (`core/services/fonte_unica.py`). Vale em todos os canais (`/app`, WhatsApp, IA do chat
+  e do WhatsApp), porque a trava (`exigir`) está nas funções de escrita que todos chamam:
+
+  | | onde trava |
+  |---|---|
+  | **bloqueado**: criar investimento manual e aportar nele | `db.create_investment`, `db.create_investment_db`, `db.investment_deposit_from_account` |
+  | **bloqueado**: importar extrato (OFX no `/app` e no WhatsApp; CSV/PDF no WhatsApp) | `ofx_service.handle_ofx_import`, `statement_service.handle_statement_import` |
+  | **bloqueado**: importar fatura OFX; compra manual no cartão (à vista e parcelada) | `ofx_service.handle_credit_ofx_import`, `db.add_credit_purchase`, `db.add_credit_purchase_installments` |
+  | **liberado**: resgatar e apagar investimento manual, e desfazer o apagar (decisão do dono: restaura o que o usuário já tinha, sem dinheiro novo); caixinha manual; Carteira (lançamento em dinheiro, ajuste e saldo inicial; a Q40 continua em `core/handlers/forma_pagamento.py`); sync e importação do Open Finance | — |
+
+  A exceção é `FonteUnicaOF` (`ValueError`, `codigo = "FONTE_UNICA_OF"`, o texto do caso
+  em `str()`, como a `PlanLimitExceeded`); os textos (investimento, extrato, cartão) moram
+  só em `fonte_unica.MENSAGENS`. `/app` = 400 com `detail` em texto; WhatsApp = o texto
+  (`handle_incoming` traduz o que sobe, os handlers de cartão e de aporte devolvem); IA = o
+  texto, e o `validate` de `create_investment`/`investment_deposit` recusa antes de pedir
+  confirmação. A checagem da chave que falha **libera** (fail-open: é trava de produto num
+  beta, não segurança). O usuário é sempre o da sessão/remetente, nunca o corpo. Escritor
+  novo nessas tabelas ou dos importadores de arquivo reprova em
+  `tests/test_fonte_unica_q36.py` até ser classificado (trava ou motivo de ficar livre).
 - A página é `/painel` (`frontend/painel.html` + o artefato `frontend/dashboard-app.*`,
   de `webapp/src/dashboard`): sessão por `auth_token` ou `dashboard_token`
   (`_resolve_page_user_id`), senão `/login?next=/painel`; UA do app ou fora da chave
@@ -428,7 +477,11 @@ contagem não vive aqui de propósito, porque ela sobe a cada rodada (§2).
 
 Via **Pluggy**. Endpoints em `frontend/routes/open_finance.py`
 (`/open-finance/{user_id}` e `connect-token`, `connectors`, `sync`, `refresh`,
-`pluggy-item`, `caixinhas`, `caixinhas/bind`, `mock-connect` (só com `OF_MOCK_CONNECT_ENABLED`; sem ele, 404)) mais o webhook
+`pluggy-item`, `caixinhas`, `caixinhas/bind`, `mock-connect` (só com `OF_MOCK_CONNECT_ENABLED`; sem ele, 404),
+`limite` (GET só leitura, `{ok, of_banks_max, em_uso, pode_adicionar, code, message}`: se cabe
+um banco NOVO, pela mesma decisão do `_enforce_bank_limit`; o teto nunca vira 402 aqui, mas o
+gate comum de dados sim (402 `subscription_required`/`plan_selection_required` sem plano ativo);
+não barra reconexão e o 402 do `/pluggy-item` continua valendo)) mais o webhook
 `/open-finance/pluggy/webhook`. Serviços em `core/services/pluggy*.py` e
 `open_finance*.py`; tabelas `open_finance_connections/accounts/transactions/investments`,
 `open_finance_investment_snapshots` (foto diária por posição, `db/of_snapshots.py`) e
@@ -441,7 +494,8 @@ transação do delete pelo disconnect e pelo reset.
 Assinaturas vêm do **Recurring Payments** da Pluggy (`db/of_recurring.py`):
 `of_recurring_payments` guarda o resultado por conexão, substituído inteiro a cada
 sync — falha na Pluggy mantém o anterior; `subscription_marks` guarda a marcação do
-usuário por `merchant_key` (vale para todos os itens da chave).
+usuário por `merchant_key` (vale para todos os itens da chave), e `assinatura_antes` a
+marca `assinatura` que o `ignorar` substituiu (linhas ignoradas antes da coluna nascem `false`).
 `open_finance_connections.recurring_fetched_at` e `recurring_seed_silent` controlam o
 silêncio da 1ª busca do Detetive numa conexão que já existia: as chaves dela — a foto
 guardada em `recurring_seed_descricoes`, não a atual — viram lápide por `record_agent_event(silencioso=True)`, que grava o evento já com

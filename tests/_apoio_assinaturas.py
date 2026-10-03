@@ -59,3 +59,10 @@ def netflix_no_cartao(uid, *, valor=-39.9, numero="1234") -> int:
     txs = mensais("nf", [valor] * 3, desc="NETFLIX.COM")
     return semeia(uid, [conta("acc-cc", txs, tipo="CREDIT", numero=numero, nome="Nubank Mastercard")],
                   [rp("NETFLIX.COM", valor, txs)])
+
+
+def dez_e_vinte_centavos(uid) -> None:
+    """Dois serviços ativos de R$ 0,10 e R$ 0,20: em float a soma dá 0.30000000000000004."""
+    nf = mensais("nf", ["-0.10"] * 3, desc="NETFLIX.COM")
+    sp = mensais("sp", ["-0.20"] * 3, ultima=date(2026, 9, 12), desc="Spotify")
+    semeia(uid, [conta("acc-1", nf + sp)], [rp("NETFLIX.COM", -0.1, nf), rp("Spotify", -0.2, sp)])

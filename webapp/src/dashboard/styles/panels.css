@@ -149,6 +149,23 @@
 .bill-status { display: inline-flex; align-items: center; gap: 4px; font-size: 11.5px; font-weight: 400; }
 .bill-amt { font-size: 13px; font-weight: 600; }
 
+/* Assinaturas (grid e não flex: o gap vale no Safari 14) */
+.sub-bill { grid-template-columns: minmax(0, 1fr) auto; }
+.subs { display: grid; }
+.sub { display: grid; grid-template-columns: minmax(0, 1fr) auto; gap: 2px 12px; padding: 12px 0; border-top: 1px solid var(--rule); }
+.sub:first-child { border-top: 0; padding-top: 0; }
+.sub-name { font-size: 14px; font-weight: 600; overflow-wrap: anywhere; }
+.sub-amt { font-size: 14px; font-weight: 600; }
+.sub-meta { grid-column: 1 / -1; font-size: 12.5px; color: var(--ink-2); overflow-wrap: anywhere; }
+.sub-acoes, .sub-aviso { display: grid; grid-auto-flow: column; justify-content: start; align-items: center; gap: 8px; }
+.sub-acoes { grid-column: 1 / -1; margin-top: 6px; }
+.sub-acoes .btn, .sub-aviso .btn { min-height: 44px; }
+.sub-acoes .btn:disabled, .sub-aviso .btn:disabled { opacity: 0.4; cursor: default; }
+.sub-aviso p:focus { outline: none; }
+/* Sem flex: ele tira a setinha nativa do summary. 12 + 20 + 12 = 44 px de alvo. */
+.sub-ignoradas summary { padding: 12px 0; line-height: 20px; cursor: pointer; }
+.sub-ignoradas[open] .sub-mostrar, .sub-ignoradas:not([open]) .sub-esconder { display: none; }
+
 /* Piggy notou */
 .piggy-title { display: inline-flex; align-items: center; gap: 8px; }
 .insights { display: grid; gap: 18px; }

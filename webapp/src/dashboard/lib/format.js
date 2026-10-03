@@ -36,6 +36,8 @@ export const dayMonth = (d) => `${d.getDate()} ${monthShort(d)}`;
 export const weekday = (d) => WEEK[d.getDay()];
 export const longDate = (d) => `${weekday(d)}, ${d.getDate()} de ${monthName(d)}`;
 export const monthYear = (d) => `${monthShort(d)}/${String(d.getFullYear()).slice(2)}`;
+// "YYYY-MM-DD" da API como dia local: `new Date("2026-10-05")` é meia-noite UTC, dia 4 em SP.
+export const isoDay = (s) => { const [y, m, d] = s.split("-").map(Number); return new Date(y, m - 1, d); };
 
 export function relativeDays(n) {
   if (n === 0) return "hoje";
