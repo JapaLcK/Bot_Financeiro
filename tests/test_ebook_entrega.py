@@ -76,10 +76,16 @@ def _pagina(precos, limit):
 def mundo(monkeypatch):
     """Stripe falso com `sessoes[sid] = [price ids]`, envios em `enviados`. Como o
     Stripe, devolve só 10 linhas quando o `limit` não vem; o nome do produto é a
-    `description` da linha (`_nome`)."""
+    `description` da linha (`_nome`). A cobrança da compra (o caminho medido no
+    Stripe de teste: Session.invoice → InvoicePayment.list → PaymentIntent com
+    `latest_charge`) vem de `cobranca[sid]`; o padrão é um pagamento pago, sem
+    estorno nem contestação; `cobranca[sid]["latest_charge"]` troca a charge
+    inteira (forma inesperada). `explode_cobranca` = "retrieve", "list" ou "pi"
+    derruba aquela chamada. `m.no(fake)` liga tudo isso a outro Stripe falso."""
     import db_support
     monkeypatch.setenv("STRIPE_SECRET_KEY", "sk_test_job")
-    m = SimpleNamespace(sessoes={}, chamadas=[], enviados=[], envio_ok=True, explode=False)
+    m = SimpleNamespace(sessoes={}, chamadas=[], enviados=[], envio_ok=True, explode=False,
+                        cobranca={}, consultas=[], explode_cobranca="")
 
     def _list_line_items(sid, api_key=None, limit=10):
         m.chamadas.append((sid, api_key))
@@ -87,12 +93,41 @@ def mundo(monkeypatch):
             raise RuntimeError("stripe fora")
         return _pagina(m.sessoes[sid], limit)
 
+    def _cob(sid):
+        return {"invoice": f"in_{sid}", "refunded": 0, "disputed": False,
+                "pagamentos": [{"status": "paid", "payment": {"type": "payment_intent",
+                                                               "payment_intent": f"pi_{sid}"}}],
+                **m.cobranca.get(sid, {})}
+
+    def _retrieve(sid, api_key=None):
+        m.consultas.append(sid)
+        if m.explode_cobranca == "retrieve":
+            raise RuntimeError("stripe fora")
+        return {"id": sid, "invoice": _cob(sid)["invoice"]}
+
+    def _pagamentos(invoice, api_key=None, limit=10):      # o Stripe pagina em 10
+        if m.explode_cobranca == "list":
+            raise RuntimeError("stripe fora")
+        return {"data": _cob(invoice.removeprefix("in_"))["pagamentos"][:limit]}
+
+    def _payment_intent(pi, expand=None, api_key=None):
+        assert expand == ["latest_charge"]
+        if m.explode_cobranca == "pi":
+            raise RuntimeError("stripe fora")
+        c = _cob(pi.removeprefix("pi_"))
+        return {"id": pi, "latest_charge": c.get("latest_charge", {"amount_refunded": c["refunded"],
+                                                                 "disputed": c["disputed"]})}
+
     def _send_email(to, subject, html_body, text_body, **kw):
         m.enviados.append((to, subject, html_body, text_body))
         return m.envio_ok
 
-    monkeypatch.setitem(sys.modules, "stripe", SimpleNamespace(
-        checkout=SimpleNamespace(Session=SimpleNamespace(list_line_items=_list_line_items))))
+    m.stripe = SimpleNamespace(
+        checkout=SimpleNamespace(Session=SimpleNamespace(list_line_items=_list_line_items, retrieve=_retrieve)),
+        InvoicePayment=SimpleNamespace(list=_pagamentos),
+        PaymentIntent=SimpleNamespace(retrieve=_payment_intent))
+    m.no = lambda fake: vars(fake).update(vars(m.stripe))
+    monkeypatch.setitem(sys.modules, "stripe", m.stripe)
     monkeypatch.setattr(es, "send_email", _send_email)
     m.pendencia = lambda uid, sid, url="_": (m.sessoes.setdefault(sid, ["price_plano", _PRECO]),
                                              registrar(uid, sid, [(_PRECO, _url(uid) if url == "_" else url)]))
@@ -240,9 +275,8 @@ def test_e12_a_conversa_webhook_senha_job_reentrega(mundo, user_id, monkeypatch)
     from test_billing_webhook_lifecycle import _cleanup_trial, _fake_sub, _post, _setup
     from test_ebook_webhook import _checkout, _espioes
     uid, client, fake = _setup(monkeypatch, f"eb-e12-{user_id}")
-    lista = mundo.sessoes.setdefault("cs_eb_1", ["price_plano", _PRECO])
-    fake.checkout = SimpleNamespace(Session=SimpleNamespace(
-        list_line_items=lambda sid, api_key=None, limit=10: _pagina(lista, limit)))
+    mundo.sessoes["cs_eb_1"] = ["price_plano", _PRECO]
+    mundo.no(fake)
     _espioes(monkeypatch)
     _sql("update auth_accounts set password_hash = null where user_id = %s", (uid,))
     email = f"wh-eb-e12-{user_id}@t.com"
