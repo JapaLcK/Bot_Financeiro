@@ -89,7 +89,7 @@
       "passos": [
         {"id": "resumo.saiu", "tela": "resumo", "ancora": "resumo.saiu", "acao": "mes.trocado", "dado": "real", "avanca": "cliente", "fala": {"titulo": "O que saiu este mês", "texto": "Este é o que saiu este mês, do seu banco. Troca o mês na seta e compara."}, "disponivel": true, "motivo": null, "feito": false},
         {"id": "gastos.categoria", "tela": "gastos", "ancora": "categorias.lista", "acao": "categoria.aberta", "dado": "exemplo", "avanca": "cliente", "fala": {"titulo": "Pra onde foi o dinheiro", "texto": "Toca numa categoria para ver de onde vem o total. Estes números ainda são de exemplo."}, "disponivel": true, "motivo": null, "feito": false},
-        {"id": "piggy.pergunta", "tela": "piggy", "ancora": "piggy.pergunta", "acao": "piggy.perguntou", "dado": "exemplo", "avanca": "cliente", "fala": {"titulo": "Pergunta pro Piggy", "texto": "Pergunta “Quanto gastei este mês?”. As respostas ainda são de exemplo; a conversa de verdade chega em breve."}, "disponivel": true, "motivo": null, "feito": false}
+        {"id": "piggy.pergunta", "tela": "piggy", "ancora": "piggy.pergunta", "acao": "piggy.perguntou", "dado": "exemplo", "avanca": "cliente", "fala": {"titulo": "Pergunta pro Piggy", "texto": "Toca numa pergunta pronta e vê o Piggy responder. As respostas ainda são de exemplo; a conversa de verdade chega em breve."}, "disponivel": true, "motivo": null, "feito": false}
       ]
     },
     "indisponivel": {
@@ -98,7 +98,7 @@
       "passos": [
         {"id": "resumo.saiu", "tela": "resumo", "ancora": "resumo.saiu", "acao": "mes.trocado", "dado": "real", "avanca": "cliente", "fala": {"titulo": "O que saiu este mês", "texto": "Este é o que saiu este mês, do seu banco. Troca o mês na seta e compara."}, "disponivel": false, "motivo": "sem_dados", "feito": false},
         {"id": "gastos.categoria", "tela": "gastos", "ancora": "categorias.lista", "acao": "categoria.aberta", "dado": "exemplo", "avanca": "cliente", "fala": {"titulo": "Pra onde foi o dinheiro", "texto": "Toca numa categoria para ver de onde vem o total. Estes números ainda são de exemplo."}, "disponivel": true, "motivo": null, "feito": false},
-        {"id": "piggy.pergunta", "tela": "piggy", "ancora": "piggy.pergunta", "acao": "piggy.perguntou", "dado": "exemplo", "avanca": "cliente", "fala": {"titulo": "Pergunta pro Piggy", "texto": "Pergunta “Quanto gastei este mês?”. As respostas ainda são de exemplo; a conversa de verdade chega em breve."}, "disponivel": true, "motivo": null, "feito": false}
+        {"id": "piggy.pergunta", "tela": "piggy", "ancora": "piggy.pergunta", "acao": "piggy.perguntou", "dado": "exemplo", "avanca": "cliente", "fala": {"titulo": "Pergunta pro Piggy", "texto": "Toca numa pergunta pronta e vê o Piggy responder. As respostas ainda são de exemplo; a conversa de verdade chega em breve."}, "disponivel": true, "motivo": null, "feito": false}
       ]
     },
     "em_andamento": {
@@ -107,7 +107,7 @@
       "passos": [
         {"id": "resumo.saiu", "tela": "resumo", "ancora": "resumo.saiu", "acao": "mes.trocado", "dado": "real", "avanca": "cliente", "fala": {"titulo": "O que saiu este mês", "texto": "Este é o que saiu este mês, do seu banco. Troca o mês na seta e compara."}, "disponivel": false, "motivo": "sincronizando", "feito": false},
         {"id": "gastos.categoria", "tela": "gastos", "ancora": "categorias.lista", "acao": "categoria.aberta", "dado": "exemplo", "avanca": "cliente", "fala": {"titulo": "Pra onde foi o dinheiro", "texto": "Toca numa categoria para ver de onde vem o total. Estes números ainda são de exemplo."}, "disponivel": true, "motivo": null, "feito": true},
-        {"id": "piggy.pergunta", "tela": "piggy", "ancora": "piggy.pergunta", "acao": "piggy.perguntou", "dado": "exemplo", "avanca": "cliente", "fala": {"titulo": "Pergunta pro Piggy", "texto": "Pergunta “Quanto gastei este mês?”. As respostas ainda são de exemplo; a conversa de verdade chega em breve."}, "disponivel": true, "motivo": null, "feito": true}
+        {"id": "piggy.pergunta", "tela": "piggy", "ancora": "piggy.pergunta", "acao": "piggy.perguntou", "dado": "exemplo", "avanca": "cliente", "fala": {"titulo": "Pergunta pro Piggy", "texto": "Toca numa pergunta pronta e vê o Piggy responder. As respostas ainda são de exemplo; a conversa de verdade chega em breve."}, "disponivel": true, "motivo": null, "feito": true}
       ]
     },
     "concluido": {
@@ -116,7 +116,7 @@
       "passos": [
         {"id": "resumo.saiu", "tela": "resumo", "ancora": "resumo.saiu", "acao": "mes.trocado", "dado": "real", "avanca": "cliente", "fala": {"titulo": "O que saiu este mês", "texto": "Este é o que saiu este mês, do seu banco. Troca o mês na seta e compara."}, "disponivel": true, "motivo": null, "feito": true},
         {"id": "gastos.categoria", "tela": "gastos", "ancora": "categorias.lista", "acao": "categoria.aberta", "dado": "exemplo", "avanca": "cliente", "fala": {"titulo": "Pra onde foi o dinheiro", "texto": "Toca numa categoria para ver de onde vem o total. Estes números ainda são de exemplo."}, "disponivel": true, "motivo": null, "feito": true},
-        {"id": "piggy.pergunta", "tela": "piggy", "ancora": "piggy.pergunta", "acao": "piggy.perguntou", "dado": "exemplo", "avanca": "cliente", "fala": {"titulo": "Pergunta pro Piggy", "texto": "Pergunta “Quanto gastei este mês?”. As respostas ainda são de exemplo; a conversa de verdade chega em breve."}, "disponivel": true, "motivo": null, "feito": true}
+        {"id": "piggy.pergunta", "tela": "piggy", "ancora": "piggy.pergunta", "acao": "piggy.perguntou", "dado": "exemplo", "avanca": "cliente", "fala": {"titulo": "Pergunta pro Piggy", "texto": "Toca numa pergunta pronta e vê o Piggy responder. As respostas ainda são de exemplo; a conversa de verdade chega em breve."}, "disponivel": true, "motivo": null, "feito": true}
       ]
     },
     "dispensado": {
@@ -125,7 +125,7 @@
       "passos": [
         {"id": "resumo.saiu", "tela": "resumo", "ancora": "resumo.saiu", "acao": "mes.trocado", "dado": "real", "avanca": "cliente", "fala": {"titulo": "O que saiu este mês", "texto": "Este é o que saiu este mês, do seu banco. Troca o mês na seta e compara."}, "disponivel": true, "motivo": null, "feito": true},
         {"id": "gastos.categoria", "tela": "gastos", "ancora": "categorias.lista", "acao": "categoria.aberta", "dado": "exemplo", "avanca": "cliente", "fala": {"titulo": "Pra onde foi o dinheiro", "texto": "Toca numa categoria para ver de onde vem o total. Estes números ainda são de exemplo."}, "disponivel": true, "motivo": null, "feito": false},
-        {"id": "piggy.pergunta", "tela": "piggy", "ancora": "piggy.pergunta", "acao": "piggy.perguntou", "dado": "exemplo", "avanca": "cliente", "fala": {"titulo": "Pergunta pro Piggy", "texto": "Pergunta “Quanto gastei este mês?”. As respostas ainda são de exemplo; a conversa de verdade chega em breve."}, "disponivel": true, "motivo": null, "feito": false}
+        {"id": "piggy.pergunta", "tela": "piggy", "ancora": "piggy.pergunta", "acao": "piggy.perguntou", "dado": "exemplo", "avanca": "cliente", "fala": {"titulo": "Pergunta pro Piggy", "texto": "Toca numa pergunta pronta e vê o Piggy responder. As respostas ainda são de exemplo; a conversa de verdade chega em breve."}, "disponivel": true, "motivo": null, "feito": false}
       ]
     }
   },

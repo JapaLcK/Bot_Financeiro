@@ -96,10 +96,11 @@ export function posicionar(el: HTMLElement | null, piggy: HTMLElement, balao: HT
 // O véu (decisão do dono): escurece a tela menos o alvo, que ganha o anel rosa, e menos o
 // `claro` (o Saiu no passo do mês: à vista, mas não se toca). Quatro faixas transparentes em
 // volta do alvo bloqueiam o toque; o escuro é um path `evenodd`, que comporta os dois furos.
-// Sem alvo, uma faixa cobre a tela inteira e o anel some.
-const F = 4; // folga do anel e do furo escuro em volta do alvo
+// Sem alvo, uma faixa cobre a tela inteira e o anel some. O furo escuro é o retângulo exato do
+// alvo, o mesmo das faixas: o que está aceso é o que se toca. O anel fica F px por fora.
+const F = 4; // folga do anel em volta do alvo
 const furo = (r: DOMRect, raio: number) => {
-  const x = r.left - F, y = r.top - F, w = r.width + 2 * F, h = r.height + 2 * F, k = Math.min(raio + F, w / 2, h / 2);
+  const { left: x, top: y, width: w, height: h } = r, k = Math.min(raio, w / 2, h / 2);
   return `M${x + k} ${y}h${w - 2 * k}a${k} ${k} 0 0 1 ${k} ${k}v${h - 2 * k}a${k} ${k} 0 0 1 ${-k} ${k}h${2 * k - w}a${k} ${k} 0 0 1 ${-k} ${-k}v${2 * k - h}a${k} ${k} 0 0 1 ${k} ${-k}Z`;
 };
 const raioDe = (el: HTMLElement) => parseFloat(getComputedStyle(el).borderTopLeftRadius) || 0;

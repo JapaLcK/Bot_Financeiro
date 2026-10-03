@@ -36,8 +36,8 @@ PASSOS = (
     {"id": "piggy.pergunta", "tela": "piggy", "ancora": "piggy.pergunta", "acao": "piggy.perguntou",
      "dado": "exemplo", "avanca": "cliente",
      "fala": {"titulo": "Pergunta pro Piggy",
-              "texto": "Pergunta “Quanto gastei este mês?”. As respostas ainda são de exemplo; "
-                       "a conversa de verdade chega em breve."}},
+              "texto": "Toca numa pergunta pronta e vê o Piggy responder. As respostas ainda são "
+                       "de exemplo; a conversa de verdade chega em breve."}},
 )
 IDS = [p["id"] for p in PASSOS]
 

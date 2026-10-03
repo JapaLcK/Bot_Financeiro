@@ -265,7 +265,7 @@ export function Guia({ s, path }: { s: DashState; path: Path }) {
       <h2 id="guia-titulo" tabIndex={-1}>{p.fala.titulo}{p.dado === "exemplo" && <> <span className="selo">exemplo</span></>}</h2>
       <p id="guia-texto">{mot ? mot.texto : p.fala.texto}</p>
       {mot?.link && <p><a href={OF}>{mot.link}</a></p>}
-      {!mot && tipo === "ausente" && <p>Esse bloco não está no seu painel agora. Dá pra pôr de volta em Organizar.</p>}
+      {!mot && tipo === "ausente" && <p>Esse bloco não está no seu painel agora. Toca em Seguir; depois dá pra pôr ele de volta em Organizar.</p>}
       {!mot && tipo === "nav" && chegou.current === p.id && <p className="guia-dica">Volta pra {route(ROTA[p.tela]).short}.</p>}
       {salvando && <p className="guia-dica">Salvando…</p>}
       {falhou && <p role="alert">Não consegui salvar seu progresso. <button type="button" className="btn btn-ghost" onClick={() => qc.isMutating({ mutationKey: ["guia"] }) || m.mutate(v!)}>Tentar de novo</button></p>}
@@ -277,7 +277,9 @@ export function Guia({ s, path }: { s: DashState; path: Path }) {
   }
 
   // Teclado com o véu: o Tab circula entre o balão e o alvo; foco que cai fora (o #page-title
-  // da troca de página, um clique do leitor de tela) volta para o título do balão.
+  // da troca de página, um clique do leitor de tela) volta para o título do balão. O foco que
+  // ficou num controle que o véu cobriu depois (a seta já clicada, na comemoração; a linha de
+  // categoria de onde o alvo migrou) não recebe tecla (fora Tab e Esc): ela vai para o título.
   const veu = !!corpo;
   useEffect(() => {
     if (!veu) return;
@@ -285,7 +287,12 @@ export function Guia({ s, path }: { s: DashState; path: Path }) {
     const titulo = () => document.getElementById("guia-titulo")?.focus({ preventScroll: true });
     const caixas = () => [balao.current, furo.current].filter((c): c is HTMLElement => !!c);
     const onTab = (e: KeyboardEvent) => {
-      if (e.key !== "Tab") return;
+      const a = document.activeElement;
+      if (e.key !== "Tab" && e.key !== "Escape" && a && a !== document.body && !caixas().some((c) => c.contains(a))) {
+        e.preventDefault(); e.stopPropagation(); titulo();
+        return;
+      }
+      if (e.key !== "Tab" || e.type !== "keydown") return;
       e.preventDefault();
       const l = caixas().flatMap((c) => [c, ...c.querySelectorAll<HTMLElement>(FOCAVEL)]).filter((x) => x.matches(FOCAVEL) && x.getClientRects().length > 0);
       const i = l.indexOf(document.activeElement as HTMLElement);
@@ -293,9 +300,10 @@ export function Guia({ s, path }: { s: DashState; path: Path }) {
       if (n) n.focus(); else titulo();
     };
     const onFoco = (e: FocusEvent) => { if (prende.current && !caixas().some((c) => c.contains(e.target as Node))) titulo(); };
-    window.addEventListener("keydown", onTab, true);
+    const teclas = ["keydown", "keyup"] as const;
+    teclas.forEach((t) => window.addEventListener(t, onTab, true));
     window.addEventListener("focusin", onFoco);
-    return () => { prende.current = false; window.removeEventListener("keydown", onTab, true); window.removeEventListener("focusin", onFoco); };
+    return () => { prende.current = false; teclas.forEach((t) => window.removeEventListener(t, onTab, true)); window.removeEventListener("focusin", onFoco); };
   }, [veu]);
 
   return <>
