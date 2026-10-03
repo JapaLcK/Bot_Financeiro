@@ -18,6 +18,7 @@ import pytest
 from psycopg.types.json import Jsonb
 
 import db
+from conftest import promote_to_pro
 from core.handlers import investments as h_investments
 from core.handlers import pockets as h_pockets
 from core.services import funding
@@ -579,6 +580,7 @@ def _assert_volta_para_a_origem(user_id: int, tipo_dep: str, tipo_saq: str, net:
 def _dashboard_client(user_id: int, email: str):
     """Cliente autenticado do dashboard — o preparo é compartilhado
     (`grep -c _dashboard_client tests/test_funding_source.py`)."""
+    promote_to_pro(user_id)  # atravessa o gate de acesso do v2
     from fastapi.testclient import TestClient
 
     import frontend.finance_bot_websocket_custom as dashboard
@@ -1070,7 +1072,7 @@ def test_conversa_com_outro_assunto_no_meio(user_id):
     assert "De onde sai" in _manda(user_id, "guardei 100 na caixinha viagem")
     _manda(user_id, "1")
     assert _saldo_pocket(user_id, "viagem") == 100.0
-    _manda(user_id, "gastei 50 no mercado")
+    _manda(user_id, "gastei 50 no mercado em dinheiro")
 
     s = _manda(user_id, "esvaziar caixinha viagem")
     assert _saldo_pocket(user_id, "viagem") == 0.0, s
@@ -1478,7 +1480,9 @@ def test_C1_o_accrual_muda_quais_lotes_o_saque_consome(user_id):
         with db.get_conn() as conn, conn.cursor() as cur:   # 60 dias sem accrual
             cur.execute("update pocket_lots set opened_at=%s, last_date=%s where user_id=%s",
                         (inicio, inicio, user_id))
-            cur.execute("update pockets set last_interest_date=%s where user_id=%s",
+            # Q43: caixinha anterior ao congelamento; o saque é a acumulação final.
+            cur.execute("update pockets set last_interest_date=%s, interest_frozen_at=null, "
+                        "interest_enabled=true where user_id=%s",
                         (inicio, user_id))
             conn.commit()
 

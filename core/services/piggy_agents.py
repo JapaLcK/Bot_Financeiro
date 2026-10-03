@@ -192,6 +192,8 @@ def run_xerife_once(today: date | None = None, user_id: int | None = None) -> di
 # ── Repórter: a manchete do mês ──────────────────────────────────────────────
 
 def _month_stats(cur, user_id: int, first: date, nxt: date) -> dict[str, float]:
+    # Divergência conhecida (Q18): a manchete fica só em `launches`, SEM o cartão;
+    # o Resumo do mês e o /app usam `db/resumo_mes.TOTAIS_SQL` (cartão pela fatura).
     # f-string por causa de `TIPO_RECEITA_SQL`/`TIPO_DESPESA_SQL`: `entrou` lia
     # só `tipo = 'receita'` enquanto `saiu` já lia as duas formas, então uma linha
     # legada 'entrada' sumia da manchete e o "sobrou" saía MENOR do que é.
@@ -224,6 +226,34 @@ def _month_stats(cur, user_id: int, first: date, nxt: date) -> dict[str, float]:
             "sobrou": entrou - saiu - aportes}
 
 
+def _resultado_frase(sobrou: float) -> str:
+    # float: 0.3-0.1-0.2 = -2.8e-17 viraria "déficit de R$ 0,00"; round dá -0.0, e +0.0 o normaliza
+    sobrou = round(sobrou, 2) + 0.0
+    if sobrou >= 0:
+        return f"uma sobra de {_fmt_brl(sobrou)}"
+    return f"um déficit de {_fmt_brl(-sobrou)}"
+
+
+def _aportes_frase(aportes: float) -> str:
+    # sobrou = entrou - saiu - aportes: a frase só fecha a conta se citar o aporte.
+    if aportes > 0.005:
+        return f", {_fmt_brl(aportes)} foram para as caixinhas"
+    if aportes < -0.005:
+        return f", {_fmt_brl(-aportes)} voltaram das caixinhas"
+    return ""
+
+
+def _manchete_texto(stats: dict, prev: dict, mes: str, mes_prev: str) -> str:
+    """Sem "%" de variação: com sobra negativa ou troca de sinal ela vira número
+    sem sentido (-181%). Cita o resultado do mês anterior em valor."""
+    texto = (f"Em {mes}, entraram {_fmt_brl(stats['entrou'])} e saíram "
+             f"{_fmt_brl(stats['saiu'])}{_aportes_frase(stats['aportes'])}, "
+             f"resultando em {_resultado_frase(stats['sobrou'])}.")
+    if prev["entrou"] or prev["saiu"] or prev["aportes"]:
+        texto += f" Em {mes_prev}, você havia encerrado com {_resultado_frase(prev['sobrou'])}."
+    return texto
+
+
 def _reporter_run_for_user(agent: dict[str, Any], today: date) -> bool:
     from db import record_agent_event
 
@@ -242,18 +272,9 @@ def _reporter_run_for_user(agent: dict[str, Any], today: date) -> bool:
     if stats["entrou"] == 0 and stats["saiu"] == 0:
         return False  # mês sem movimento não rende manchete
 
-    delta_pct = None
-    if prev["sobrou"] != 0:
-        delta_pct = round((stats["sobrou"] - prev["sobrou"]) / abs(prev["sobrou"]) * 100)
-
     mes_nome = MESES_PT[first_prev.month]
     titulo = f"A manchete de {mes_nome}"
-    resumo = (
-        f"Entrou {_fmt_brl(stats['entrou'])}, saiu {_fmt_brl(stats['saiu'])} — "
-        f"sobrou {_fmt_brl(stats['sobrou'])}"
-        + (f" ({'+' if delta_pct >= 0 else ''}{delta_pct}% vs mês anterior)."
-           if delta_pct is not None else ".")
-    )
+    resumo = _manchete_texto(stats, prev, mes_nome, MESES_PT[first_prev2.month])
 
     inserted = record_agent_event(
         agent["agent_id"], user_id, "reporter",
@@ -263,7 +284,6 @@ def _reporter_run_for_user(agent: dict[str, Any], today: date) -> bool:
             "titulo": titulo, "mensagem": resumo,
             "entrou": round(stats["entrou"], 2), "saiu": round(stats["saiu"], 2),
             "aportes": round(stats["aportes"], 2), "sobrou": round(stats["sobrou"], 2),
-            "delta_pct": delta_pct,
         },
         channel="email",
     )
@@ -365,97 +385,45 @@ def run_carteiro_once(today: date | None = None, user_id: int | None = None) -> 
 
 # ── Detetive: caça-assinaturas esquecidas ────────────────────────────────────
 
-DETETIVE_LOOKBACK_MONTHS = 6   # janela pra procurar recorrência
-DETETIVE_MIN_MESES = 3         # aparece em N meses distintos = parece assinatura
-DETETIVE_MIN_VALOR = 5.0       # ignora cobrança recorrente miúda (ruído)
-
-
-def _detetive_cutoff(today: date) -> date:
-    """1º dia do mês, DETETIVE_LOOKBACK_MONTHS atrás."""
-    m = today.month - DETETIVE_LOOKBACK_MONTHS
-    y = today.year
-    while m <= 0:
-        m += 12
-        y -= 1
-    return date(y, m, 1)
-
-
-def find_recurring_charges(user_id: int, today: date) -> list[dict[str, Any]]:
-    """Consulta os sinais do Detetive sem gravar eventos nem alterar lançamentos."""
-    cutoff = _detetive_cutoff(today)
-    with get_conn() as conn:
-        with conn.cursor() as cur:
-            # merchant = descrição normalizada (tira ids/datas longas e espaço extra)
-            # pra o mesmo serviço agrupar entre meses. Valor exato (tolerância = v2).
-            cur.execute(
-                r"""
-                with base as (
-                  select
-                    -- normaliza o comerciante: tira o prefixo de tipo do OF
-                    -- ("Compra no débito|", "Transferência enviada|"), ids/datas
-                    -- longas e espaço extra, pra o mesmo serviço agrupar entre meses.
-                    lower(btrim(regexp_replace(
-                      regexp_replace(
-                        regexp_replace(coalesce(alvo, nota, ''), '^.*\|', ''),
-                        '[0-9]{3,}', '', 'g'),
-                      '\s+', ' ', 'g'))) as merchant,
-                    coalesce(alvo, nota, '') as raw,
-                    round(valor::numeric, 2) as val,
-                    to_char(criado_em, 'YYYY-MM') as ym,
-                    categoria
-                  from launches
-                  where user_id = %s
-                    and tipo in ('despesa', 'saida')
-                    and is_internal_movement = false
-                    and coalesce(alvo, nota, '') <> ''
-                    and valor >= %s
-                    and criado_em >= %s
-                )
-                select merchant,
-                       val,
-                       count(distinct ym) as meses,
-                       max(ym) as ultimo,
-                       (array_agg(raw order by ym desc))[1] as descricao,
-                       (array_agg(categoria) filter (where categoria is not null))[1] as categoria
-                from base
-                where merchant <> ''
-                group by merchant, val
-                having count(distinct ym) >= %s
-                order by val desc
-                """,
-                (user_id, DETETIVE_MIN_VALOR, cutoff, DETETIVE_MIN_MESES),
-            )
-            achados = cur.fetchall() or []
-
-    return achados
-
-
 def _detetive_detect_for_user(agent: dict[str, Any], today: date) -> int:
-    """Fareja cobranças que repetem (mesmo comerciante + mesmo valor) em >=3 meses
-    distintos e ainda não foram flagradas. Um evento por assinatura (dedupe pela
-    assinatura), então rodar todo dia não vira spam. Fonte = launches (inclui OF,
-    cujo criado_em é a data real da transação)."""
+    """Um evento por assinatura ATIVA da lista do Recurring Payments da Pluggy
+    (`core/services/assinaturas.py`), dedupe pela chave do comerciante — então
+    rodar todo dia não vira spam, e reajuste de preço não vira alerta novo.
+
+    1ª busca de uma conexão que já existia no deploy (`recurring_seed_silent`):
+    TODA chave dela vira lápide (`silencioso=True`) antes dos alertas, sem rajada
+    — inclusive a que hoje não alerta (cancelada, ignorada, conexão pausada) e
+    pode alertar depois. A mesma chave numa conexão normal cai no `do nothing`."""
+    from core.services.assinaturas import listar_assinaturas
     from db import record_agent_event
+    from db.of_recurring import conexoes_a_silenciar, consumir_silencio, descricoes_das_conexoes
+    from utils_text import merchant_key
 
     user_id = agent["user_id"]
+    ids = conexoes_a_silenciar(user_id)
+    if ids:
+        for chave in {merchant_key(d) for d in descricoes_das_conexoes(user_id, ids)} - {""}:
+            record_agent_event(agent["agent_id"], user_id, "detetive", dedupe_key=f"rp:{chave}",
+                               payload={"tipo": "assinatura", "merchant": chave}, silencioso=True)
+        consumir_silencio(user_id, ids)
+    lista = listar_assinaturas(user_id, today)
+    itens = [x for x in lista["servicos"] + lista["outras"] if x["status"] == "ativa"]
+
     fired = 0
-
-    achados = find_recurring_charges(user_id, today)
-
-    for s in achados:
-        val = float(s["val"])
-        meses = int(s["meses"])
-        desc = (s["descricao"] or s["merchant"] or "").strip()
+    for s in itens:
+        val = s["valor"]
+        meses = s["meses"]
+        desc = (s["nome"] or s["chave"] or "").strip()
         desc_curta = desc[:48]
         ok = record_agent_event(
             agent["agent_id"], user_id, "detetive",
-            dedupe_key=f"sub:{s['merchant']}:{val:.2f}",
+            dedupe_key=f"rp:{s['chave']}",
             payload={
                 "tipo": "assinatura",
-                "merchant": s["merchant"],
+                "merchant": s["chave"],
                 "descricao": desc[:120],
                 "categoria": s["categoria"],
-                "valor": val,
+                "valor": float(val),
                 "meses": meses,
                 "titulo": f"Parece assinatura: {desc_curta}",
                 "mensagem": (

@@ -38,6 +38,7 @@ import db.open_finance_state as of_state
 import db.privacy as privacy
 import frontend.finance_bot_websocket_custom as dashboard
 import frontend.routes.open_finance as of_routes
+from conftest import promote_to_pro
 from db.connection import get_conn
 from test_account_reset import SENHA, _item_de, _semeia
 from test_account_reset import _auth as _auth_reset
@@ -97,6 +98,7 @@ def test_falha_no_meio_do_disconnect_nao_deixa_marca_sem_delete(
     roda na CONEXÃO (medido — a 1ª chamada do teste vinha do POST, e a rota ainda
     retentava o erro), então ele só entra em cena depois que o banco existe. O
     import é local, então o patch pega em `db.bank_movements`."""
+    promote_to_pro(user_id)
     item = "dr-atomico"
     _mock_item(monkeypatch, user_id)
     real = bank_movements.reconcile_bank_movements
@@ -180,6 +182,7 @@ def test_marca_que_estoura_derruba_o_delete_junto(
     `mark_items_removed` é importada LOCALMENTE nos dois chamadores
     (`db/open_finance.py`, `db/privacy.py`), então patchar o módulo pega.
     """
+    promote_to_pro(user_id)
     item = "dr-marca-estoura"
     _mock_item(monkeypatch, user_id)
     real = of_state.mark_items_removed
@@ -227,6 +230,7 @@ def test_adocao_que_espera_o_lock_ve_a_marca_e_aborta(
     `of_webhook_adopt_skipped`. Se B não chegar a bloquear no lock (item fora da
     enumeração de A), o desfecho que importa é o mesmo — o delete de A varre
     também a linha de B —, e o relato diz qual das duas ocorreu."""
+    promote_to_pro(user_id)
     item = "dr-barreira"
     _mock_item(monkeypatch, user_id)
 
@@ -300,6 +304,7 @@ def test_disconnect_de_dois_bancos_marca_os_dois(user_id, monkeypatch):
     pela reentrega de `item/created` — e o resto do grupo continua verde (todos
     os outros casos têm uma conexão só). É este caso que prende o lote.
     """
+    promote_to_pro(user_id)
     a, b = "d-lote-a", "d-lote-b"
     _pluggy_inerte(monkeypatch)
     try:

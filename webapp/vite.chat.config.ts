@@ -5,10 +5,12 @@ import autoprefixer from "autoprefixer";
 import base from "./vite.config.js";
 
 // Reutiliza os targets Safari14 e a entrega IIFE; a ilha de preços conserva
-// sua configuração e não recebe o processador de estilos do chat.
-export default mergeConfig(base, {
-  resolve: { alias: { "@": resolve(import.meta.dirname, "src") } },
-  css: { postcss: { plugins: [tailwindcss(), autoprefixer()] } },
+// sua configuração e não recebe o processador de estilos do chat — e o chat
+// não recebe o dela: o `css` é atribuído DEPOIS do merge porque o mergeConfig
+// CONCATENA arrays de plugins, e rodar o tailwind da /precos (sem prefixo,
+// escopo #cmp-v2) junto com o do chat (prefixo pc-, escopo #pigbank-chat-root)
+// na mesma folha emitiria as duas utility sets nos dois bundles.
+const config = mergeConfig(base, {
   build: {
     rollupOptions: {
       input: resolve(import.meta.dirname, "src/chat/main.tsx"),
@@ -16,3 +18,6 @@ export default mergeConfig(base, {
     },
   },
 });
+config.css = { postcss: { plugins: [tailwindcss(), autoprefixer()] } };
+
+export default config;

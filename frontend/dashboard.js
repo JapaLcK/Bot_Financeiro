@@ -108,6 +108,7 @@ function formatPlanLabel(plan) {
 }
 
 function applyUserMenuState(email, plan, displayName, gates) {
+  const previousGates = USER_GATES;
   USER_EMAIL = email || "";
   USER_PLAN = plan || "free";
   if (gates && typeof gates === "object") USER_GATES = gates;
@@ -117,6 +118,26 @@ function applyUserMenuState(email, plan, displayName, gates) {
   // Reaplicar gates Pro sempre que o plano for atualizado (login, refresh,
   // upgrade no meio da sessao). Idempotente.
   applyProGates();
+  if (gates && typeof gates === "object") {
+    loadPiggyInsight();
+    if (["financial_comparison", "insights"].some(key => !!previousGates[key] !== !!gates[key])) {
+      ++_analyticsPermissionsVersion;
+      _analyticsChannel.cancel();
+      if (_analyticsCache?.kpis && !featureAllowed("financial_comparison")) {
+        renderAnalyticsKPIs({ ..._analyticsCache.kpis, delta_pct: null }, _analyticsCache.months);
+      }
+      _analyticsCache = null;
+      if (document.getElementById("analytics-view")?.classList.contains("active")) loadAnalyticsView(true);
+    }
+    if (["forecast", "cashflow"].some(key => !!previousGates[key] !== !!gates[key])) {
+      ++_forecastPermissionsVersion;
+      _forecastChannel.cancel();
+      const result = document.getElementById("forecast-result");
+      if (result) result.innerHTML = featureAllowed("forecast") ? "" : _forecastLockedMsg;
+      document.getElementById("boleto-sim-result")?.replaceChildren();
+      if (document.getElementById("fixed-view")?.classList.contains("active") && _recurringTab === "bills") loadForecast();
+    }
+  }
 }
 
 /* ─── Cache do chrome do header (instant paint no cold start) ─────────────
@@ -295,6 +316,12 @@ const monthDataCache = new Map();
 function makeFetchChannel() {
   let inFlight = null, controller = null, gen = 0;
   return {
+    cancel() {
+      ++gen;
+      if (controller) controller.abort();
+      inFlight = null;
+      controller = null;
+    },
     run(fetcher, { force = false } = {}) {
       if (inFlight && !force) return inFlight;   // dedup (revalidate SWR)
       if (controller) controller.abort();         // cancela o anterior de verdade
@@ -700,9 +727,19 @@ function taxProfileForAsset(assetType) {
 
 // Mapa view-id → elemento. Inclui as novas seções acessíveis pelo sidebar.
 const DASH_VIEWS = [
-  "overview", "analytics", "history", "fixed", "budgets", "goals",
+  "overview", "analytics", "history", "fixed", "budgets", "orcamento-domestico", "goals",
   "categories", "installments", "cards", "investments", "affiliate", "agentes"
 ];
+
+// Abre (e persiste) o menu que contém o item da view, se houver e estiver
+// fechado. Chamado por setMainView — cobre clique, deep link e botão voltar.
+function _snOpenGroupForView(view) {
+  window.PigBankSidenavGroups?.openForView?.(view);
+}
+
+// Boot: aplica o estado persistido (default = tudo fechado). dashboard.js é
+// defer, então o DOM já está pronto aqui.
+window.PigBankSidenavGroups?.init?.();
 
 function setMainView(view) {
   // Free: bloqueia navegacao pra tela inteira de investimentos. Botao fica
@@ -711,8 +748,15 @@ function setMainView(view) {
     showUpgradeModal("investments");
     return;
   }
+  // Orçamento Doméstico segue o MESMO portão: tela inteira paga (Plus+),
+  // click no item visível abre o upgrade em vez de navegar.
+  if (view === "orcamento-domestico" && !featureAllowed("household_budget")) {
+    showUpgradeModal("household_budget");
+    return;
+  }
   document.querySelectorAll(".main-tab").forEach(b => b.classList.toggle("active", b.dataset.view === view));
   document.querySelectorAll(".sidenav-item[data-nav]").forEach(b => b.classList.toggle("active", b.dataset.nav === view));
+  _snOpenGroupForView(view);
 
   DASH_VIEWS.forEach(v => {
     const el = document.getElementById(`${v}-view`);
@@ -744,6 +788,7 @@ function navigateTo(view) {
   if (view === "installments") loadInstallmentsView();
   if (view === "categories") loadCategoriesView();
   if (view === "budgets") loadBudgetsView();
+  if (view === "orcamento-domestico") loadHouseholdBudgetView();
   // View Recorrentes: abre sempre na Visão geral (resumo das 3 áreas).
   if (view === "fixed") setRecurringTab("overview");
   if (view === "goals") loadGoalsView();
@@ -3118,6 +3163,392 @@ async function budgetDeleteFromModal() {
 }
 
 // ══════════════════════════════════════════════════════════════════════
+// Orçamento Doméstico (método dos potes — 6 potes fixos, % da renda; Pro)
+// ══════════════════════════════════════════════════════════════════════
+
+let _hbMonth = _mesCorrente();          // "YYYY-MM" — mês em exibição na view
+const _hbCache = new Map();             // mês → último payload do status
+const _hbChannel = makeFetchChannel();  // dedup + abort + geração
+let _hbChart = null;                    // donut Chart.js — destruir antes de recriar
+let _hbIncomeRendered = null;           // renda pintada no input (pula PUT sem mudança)
+
+function _mesCorrente() {
+  const d = new Date();
+  return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}`;
+}
+
+function _hbMonthLong(ym) {
+  const m = /^(\d{4})-(\d{2})$/.exec(String(ym || ""));
+  if (!m) return ym || "—";
+  return `${PT_MONTHS[parseInt(m[2], 10) - 1]}/${m[1]}`;
+}
+
+async function _fetchHouseholdBudget(month, { force = false } = {}) {
+  return _hbChannel.run(async (signal) => {
+    const q = month ? `?month=${encodeURIComponent(month)}` : "";
+    const resp = await fetch(`${API}/household-budget/${USER_ID}/status${q}`, {
+      credentials: "same-origin",
+      headers: csrfHeaders(),
+      signal,
+    });
+    if (!resp.ok) {
+      const txt = await resp.text();
+      let detail = txt, proRequired = false;
+      try {
+        const parsed = JSON.parse(txt);
+        // Free batendo na rota paga (perfil velho em cache): o erro já vem
+        // tipado — sobe a flag pro catch abrir o modal de upgrade em vez de
+        // pintar uma faixa vermelha de "Erro: pro_required".
+        if (parsed.detail && parsed.detail.error === "pro_required") proRequired = true;
+        detail = typeof parsed.detail === "string" ? parsed.detail
+          : (parsed.detail ? JSON.stringify(parsed.detail) : txt);
+      } catch(_) {}
+      const err = _erroHttp(resp.status, detail);
+      if (proRequired) err.proRequired = true;
+      throw err;
+    }
+    return await resp.json();
+  }, { force });
+}
+
+async function loadHouseholdBudgetView(forceFresh = false) {
+  const resumo = document.getElementById("hb-resumo-body");
+  if (!resumo) return;
+  if (!USER_ID) {
+    resumo.innerHTML = '<div class="empty" style="padding:20px">Conectando…</div>';
+    setTimeout(() => loadHouseholdBudgetView(forceFresh), 300);
+    return;
+  }
+
+  // O mês fica capturado: uma navegação no meio do voo aborta este pedido
+  // (data === undefined), mas a chave certa do cache não depende de timing.
+  const month = _hbMonth;
+
+  // Stale-while-revalidate: cache do mês pinta na hora e revalida atrás.
+  // O force na revalidação NÃO é descuido: o canal deduplica por promise, não
+  // por mês — sem ele, voltar pro mês A com o fetch do mês B em voo juntava
+  // os dois e gravava o payload de B na chave de A.
+  const cached = _hbCache.get(month);
+  if (cached && !forceFresh) {
+    renderHouseholdBudgetView(cached);
+    _fetchHouseholdBudget(month, { force: true }).then(fresh => {
+      if (fresh) { _hbCache.set(month, fresh); renderHouseholdBudgetView(fresh); }
+    }).catch(_revalidacaoExpirou(resumo));
+    return;
+  }
+
+  await _hbColdLoad(month, resumo);
+}
+
+async function _hbColdLoad(month, resumo) {
+  resumo.innerHTML = '<div class="empty" style="padding:20px">Carregando orçamento…</div>';
+  try {
+    const data = await _fetchHouseholdBudget(month, { force: true });
+    if (data === undefined) return;
+    _hbCache.set(month, data);
+    renderHouseholdBudgetView(data);
+  } catch (err) {
+    if (err && err.proRequired) { showUpgradeModal("household_budget"); return; }
+    if (!_sessaoExpirou(err, resumo)) {
+      resumo.innerHTML = `<div class="empty" style="padding:20px;color:var(--red)">Erro: ${escapeHtmlSafe(String(err.message || err))}</div>`;
+    }
+  }
+}
+
+function hbChangeMonth(delta) {
+  const [y, m] = _hbMonth.split("-").map(Number);
+  const d = new Date(y, m - 1 + delta, 1);
+  _hbMonth = `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}`;
+  loadHouseholdBudgetView();
+}
+
+function renderHouseholdBudgetView(payload) {
+  const buckets = payload.buckets || [];
+  const totals = payload.totals || {};
+  const income = payload.income || {};
+
+  const label = document.getElementById("hb-month-label");
+  if (label) label.textContent = _hbMonthLong(payload.month || _hbMonth);
+
+  // Renda: não sobrescreve o que o usuário está digitando — o render da
+  // revalidação SWR pode chegar no meio da edição.
+  const input = document.getElementById("hb-income-input");
+  if (input) {
+    const amt = Number(income.amount || 0);
+    _hbIncomeRendered = amt;
+    if (document.activeElement !== input) input.value = amt ? amt.toFixed(2) : "";
+  }
+  const hint = document.getElementById("hb-income-hint");
+  if (hint) {
+    hint.innerHTML = income.source === "override"
+      ? '<button type="button" class="hb-link" onclick="clearHouseholdIncome()">Usar renda automática</button>'
+      : '<span class="hb-badge-auto">calculada automaticamente</span>';
+  }
+
+  _renderHbDonut(buckets, totals);
+  _renderHbLegenda(buckets);
+  _renderHbResumo(buckets, totals);
+  _renderHbMetas(buckets);
+}
+
+// "Total" + valor no miolo do donut. Plugin inline e não registrado global:
+// só este gráfico tem centro de texto.
+function _hbPluginCentro(total, light) {
+  return {
+    id: "hb-centro-total",
+    afterDraw(chart) {
+      const area = chart.chartArea;
+      if (!area) return;
+      const x = (area.left + area.right) / 2;
+      const y = (area.top + area.bottom) / 2;
+      const ctx = chart.ctx;
+      ctx.save();
+      ctx.textAlign = "center";
+      ctx.textBaseline = "middle";
+      ctx.fillStyle = light ? "rgba(15,23,42,.55)" : "rgba(255,255,255,.5)";
+      ctx.font = "600 10px sans-serif";
+      ctx.fillText("Total", x, y - 9);
+      ctx.fillStyle = light ? "#0f172a" : "#ffffff";
+      ctx.font = "700 14px sans-serif";
+      ctx.fillText(_fmtBRLshort(total), x, y + 9);
+      ctx.restore();
+    },
+  };
+}
+
+function _renderHbDonut(buckets, totals) {
+  const el = document.getElementById("hb-donut");
+  if (!el) return;
+  if (_hbChart) { _hbChart.destroy(); _hbChart = null; }
+  // Donut de zeros se lê como "gastei zero em tudo" — a caixa vazia assume o
+  // lugar do canvas. A legenda dos 6 potes continua logo abaixo (como no print).
+  if (_chartVazio(el, _serieVazia(buckets.map(b => Number(b.spent || 0))),
+                  "Você não possui gastos cadastrados",
+                  "Lance seus gastos com o Piggy que cada um cai no pote certo aqui.")) return;
+  const light = _isLightMode();
+  _hbChart = new Chart(el, {
+    type: "doughnut",
+    data: {
+      labels: buckets.map(b => b.label),
+      datasets: [{
+        data: buckets.map(b => Number(b.spent || 0)),
+        backgroundColor: buckets.map(b => b.color + "bb"),
+        borderColor: buckets.map(b => b.color),
+        borderWidth: 1.5,
+        hoverOffset: 8,
+      }],
+    },
+    options: {
+      cutout: "68%",
+      plugins: {
+        legend: { display: false },   // legenda própria em #hb-legend, com valores
+        tooltip: {
+          backgroundColor: "rgba(10,12,24,.88)", borderColor: "rgba(255,255,255,.1)", borderWidth: 1,
+          titleColor: "rgba(255,255,255,.9)", bodyColor: "rgba(255,255,255,.6)",
+          callbacks: { label: ctx => " " + _fmtBRL(ctx.parsed) },
+        },
+      },
+      animation: { duration: 700, easing: "easeInOutQuart" },
+    },
+    plugins: [_hbPluginCentro(Number(totals.spent || 0), light)],
+  });
+}
+
+function _renderHbLegenda(buckets) {
+  const legend = document.getElementById("hb-legend");
+  if (!legend) return;
+  legend.innerHTML = buckets.map(b => `
+    <div class="hb-legend-item">
+      <span class="hb-dot" style="background:${escapeHtmlSafe(b.color)}"></span>
+      <span class="hb-legend-label">${escapeHtmlSafe(b.label)}</span>
+      <span class="hb-legend-val">${_fmtBRL(b.spent)}</span>
+    </div>`).join("");
+}
+
+function _renderHbResumo(buckets, totals) {
+  const el = document.getElementById("hb-resumo-body");
+  if (!el) return;
+  // used_pct vem null quando a renda do mês é 0 — "—", não "NaN%".
+  const fmtPct = p => p == null ? "—" : Number(p).toFixed(1).replace(".", ",") + "%";
+  const rows = buckets.map(b => `
+    <tr>
+      <td><span class="hb-dot" style="background:${escapeHtmlSafe(b.color)}"></span>${escapeHtmlSafe(b.label)}</td>
+      <td>${_fmtBRL(b.spent)}</td>
+      <td>${_fmtBRL(b.budget_amount)}</td>
+      <td>${fmtPct(b.used_pct)}</td>
+      <td style="color:${_toneMoney(b.remaining)}">${_fmtBRL(b.remaining)}</td>
+    </tr>`).join("");
+  el.innerHTML = `
+    <table class="hb-table">
+      <thead><tr><th>Pote</th><th>Valor gasto</th><th>Devo gastar</th><th>Utilizado</th><th>Restante</th></tr></thead>
+      <tbody>${rows}</tbody>
+      <tfoot><tr>
+        <td>Total</td>
+        <td>${_fmtBRL(totals.spent)}</td>
+        <td>${_fmtBRL(totals.budget_amount)}</td>
+        <td>${fmtPct(totals.used_pct)}</td>
+        <td style="color:${_toneMoney(totals.remaining)}">${_fmtBRL(totals.remaining)}</td>
+      </tr></tfoot>
+    </table>`;
+}
+
+function _renderHbMetas(buckets) {
+  const el = document.getElementById("hb-metas-list");
+  if (!el) return;
+  el.innerHTML = buckets.map(b => `
+    <div class="hb-meta-row">
+      <span class="hb-dot" style="background:${escapeHtmlSafe(b.color)}"></span>
+      <span class="hb-meta-label">${escapeHtmlSafe(b.label)}</span>
+      <span class="hb-meta-pct">${Number(b.pct).toFixed(1).replace(".", ",")}%</span>
+    </div>`).join("");
+}
+
+// ── Renda do mês (override manual × calculada) ────────────────────────
+
+async function saveHouseholdIncome() {
+  const input = document.getElementById("hb-income-input");
+  if (!input || !USER_ID) return;
+  const raw = String(input.value || "").trim().replace(",", ".");
+  // Campo esvaziado no blur = desistiu de editar, NÃO "limpa o override":
+  // repõe o valor que já estava. Limpar de verdade é pelo "Usar renda
+  // automática" — caminho explícito, sem acidente de foco.
+  if (raw === "") {
+    input.value = _hbIncomeRendered ? _hbIncomeRendered.toFixed(2) : "";
+    return;
+  }
+  const amount = Number(raw);
+  if (!Number.isFinite(amount) || amount < 0) {
+    await alertModal("Digite uma renda válida (maior ou igual a zero).", { title: "Valor inválido" });
+    return;
+  }
+  // Blur sem mudança (clicou e saiu): pula o PUT.
+  if (_hbIncomeRendered !== null && Math.abs(amount - _hbIncomeRendered) < 0.005) return;
+  await _putHouseholdIncome(amount);
+}
+
+async function clearHouseholdIncome() {
+  await _putHouseholdIncome(null);
+}
+
+// Detalhe de erro dos PUTs da view: o backend manda string ("A soma dos
+// percentuais...") e o FastAPI pode mandar objeto — nunca "[object Object]".
+async function _hbDetalheErro(resp) {
+  const txt = await resp.text();
+  try {
+    const parsed = JSON.parse(txt).detail;
+    return typeof parsed === "string" ? parsed : (parsed ? JSON.stringify(parsed) : txt);
+  } catch(_) { return txt; }
+}
+
+async function _putHouseholdIncome(amount) {
+  try {
+    const resp = await fetch(`${API}/household-budget/${USER_ID}/income`, {
+      method: "PUT",
+      credentials: "same-origin",
+      headers: csrfHeaders({ "Content-Type": "application/json" }),
+      body: JSON.stringify({ month: _hbMonth, amount }),
+    });
+    if (!resp.ok) throw new Error(await _hbDetalheErro(resp));
+    showToast(amount === null ? "✓ Renda automática restaurada" : "✓ Renda do mês salva");
+    // O sendRefresh atualiza o snapshot do overview, NÃO o cache local da
+    // view — sem este delete o mês seguia mostrando a renda velha.
+    _hbCache.delete(_hbMonth);
+    await loadHouseholdBudgetView(true);
+    sendRefresh();
+  } catch (err) { await alertModal(String(err.message || err), { title: "Erro" }); }
+}
+
+// ── Modal de metas (percentuais dos 6 potes — soma tem que fechar 100) ──
+// O markup do modal é ESTÁTICO no dashboard.html (como o `export-overlay`),
+// não `_ensure*` no JS: a trava dos 18 modais do `modal_claro_veu.test.mjs`
+// conta `<div class="modal"` gerado em JS, e modal novo lá exigiria editar o
+// teste. Aqui só os inputs são gerados — e caem dentro de um `.modal` real,
+// então o harness de véu mede os dois lados mesmo assim.
+
+async function openHouseholdBudgetModal() {
+  // Editar antes do primeiro fetch terminar: espera a carga em vez de abrir
+  // o modal com zero inputs (e a soma travada em 0%).
+  if (!_hbCache.get(_hbMonth)) await loadHouseholdBudgetView();
+  const payload = _hbCache.get(_hbMonth);
+  const buckets = (payload && payload.buckets) || [];
+  const wrap = document.getElementById("hb-metas-inputs");
+  wrap.innerHTML = buckets.map(b => `
+    <div class="field">
+      <label for="hb-meta-${escapeHtmlSafe(b.key)}">${escapeHtmlSafe(b.label)} (%)</label>
+      <input type="number" id="hb-meta-${escapeHtmlSafe(b.key)}" data-hb-key="${escapeHtmlSafe(b.key)}"
+             min="0" max="100" step="0.5" value="${Number(b.pct)}" required />
+    </div>`).join("");
+  // Listener, não oninput=: atributo gerado entra no levantamento do
+  // handlers_inline.test.mjs e a soma ao vivo não precisa de nome global.
+  wrap.querySelectorAll("input").forEach(inp => inp.addEventListener("input", _hbAtualizaSomaMetas));
+  document.getElementById("hb-metas-overlay").classList.add("open");
+  _hbAtualizaSomaMetas();
+}
+
+function closeHouseholdBudgetModal() {
+  const el = document.getElementById("hb-metas-overlay");
+  if (el) el.classList.remove("open");
+}
+
+function _hbAtualizaSomaMetas() {
+  let soma = 0;
+  document.querySelectorAll("#hb-metas-inputs input").forEach(inp => { soma += Number(inp.value) || 0; });
+  soma = Math.round(soma * 100) / 100;
+  const ok = Math.abs(soma - 100) < 0.001;
+  const el = document.getElementById("hb-metas-soma");
+  if (el) {
+    el.textContent = ok
+      ? "Total: 100% — certinho!"
+      : `Total: ${String(soma).replace(".", ",")}% — a soma precisa fechar em 100%`;
+    el.classList.toggle("ok", ok);
+  }
+  const btn = document.getElementById("hb-metas-save-btn");
+  if (btn) btn.disabled = !ok;
+}
+
+function _hbLerMetasDoModal() {
+  const buckets = {};
+  let soma = 0, invalido = false;
+  document.querySelectorAll("#hb-metas-inputs input").forEach(inp => {
+    const v = Number(inp.value);
+    if (!Number.isFinite(v) || v < 0) invalido = true;
+    buckets[inp.dataset.hbKey] = v;
+    soma += v;
+  });
+  return { buckets, soma: Math.round(soma * 100) / 100, invalido };
+}
+
+async function saveHouseholdBudgetMetas() {
+  const { buckets, soma, invalido } = _hbLerMetasDoModal();
+  if (invalido) {
+    await alertModal("Todos os percentuais precisam ser números maiores ou iguais a zero.", { title: "Percentual inválido" });
+    return;
+  }
+  // Cinto e suspensório: o botão já fica desabilitado fora de 100%, mas o
+  // Enter no form não passa pelo disabled — o backend devolveria 400 mesmo.
+  if (Math.abs(soma - 100) > 0.001) {
+    await alertModal(`A soma está em ${String(soma).replace(".", ",")}%. Ajuste para fechar em 100%.`, { title: "Soma diferente de 100%" });
+    return;
+  }
+  try {
+    const resp = await fetch(`${API}/household-budget/${USER_ID}/config`, {
+      method: "PUT",
+      credentials: "same-origin",
+      headers: csrfHeaders({ "Content-Type": "application/json" }),
+      body: JSON.stringify({ buckets }),
+    });
+    if (!resp.ok) throw new Error(await _hbDetalheErro(resp));
+    closeHouseholdBudgetModal();
+    showToast("✓ Metas salvas");
+    // Mesmo motivo do `_putHouseholdIncome`: o WebSocket não invalida o cache
+    // local — apaga e recarrega, senão a view segue com os % velhos.
+    _hbCache.delete(_hbMonth);
+    await loadHouseholdBudgetView(true);
+    sendRefresh();
+  } catch (err) { await alertModal(String(err.message || err), { title: "Erro" }); }
+}
+
+// ══════════════════════════════════════════════════════════════════════
 // Modal genérico de alerta/confirmação (substitui alert()/confirm() nativos)
 // ══════════════════════════════════════════════════════════════════════
 
@@ -3133,6 +3564,7 @@ function _ensureGenericConfirmModal() {
         <p class="msub" id="generic-confirm-body" style="white-space:pre-wrap"></p>
         <div class="modal-acts" style="margin-top:18px">
           <button type="button" class="btn-cancel" id="generic-confirm-cancel">Cancelar</button>
+          <button type="button" class="btn-save" id="generic-confirm-alt" style="display:none"></button>
           <button type="button" class="btn-save" id="generic-confirm-ok">OK</button>
         </div>
       </div>
@@ -3144,6 +3576,7 @@ function _ensureGenericConfirmModal() {
   });
   document.getElementById("generic-confirm-cancel").addEventListener("click", () => _genericModalClose(false));
   document.getElementById("generic-confirm-ok").addEventListener("click", () => _genericModalClose(true));
+  document.getElementById("generic-confirm-alt").addEventListener("click", () => _genericModalClose("alt"));
 
   /* Este arquivo REDECLARA confirmModal/alertModal, e a dashboard.html carrega
      dashboard.js depois de modals.js — então no dashboard quem roda é este
@@ -3202,6 +3635,11 @@ function confirmModal(message, opts = {}) {
   const okBtn = document.getElementById("generic-confirm-ok");
   cancelBtn.textContent = cancelText;
   cancelBtn.style.display = "";
+  // `opts.altText`: segunda opção que resolve "alt" (ex.: banco × dinheiro).
+  // Esc, overlay e Cancelar continuam resolvendo false.
+  const altBtn = document.getElementById("generic-confirm-alt");
+  altBtn.textContent = opts.altText || "";
+  altBtn.style.display = opts.altText ? "" : "none";
   okBtn.textContent = okText;
   okBtn.className = danger ? "inst-delete-btn" : "btn-save";
   _genericModalLastFocus = document.activeElement;
@@ -3219,6 +3657,7 @@ function alertModal(message, opts = {}) {
   const cancelBtn = document.getElementById("generic-confirm-cancel");
   const okBtn = document.getElementById("generic-confirm-ok");
   cancelBtn.style.display = "none";
+  document.getElementById("generic-confirm-alt").style.display = "none";
   okBtn.textContent = okText;
   okBtn.className = "btn-save";
   _genericModalLastFocus = document.activeElement;
@@ -3240,14 +3679,9 @@ const GOAL_COLOR_OPTIONS = [
   "#BE8200","#7E5FE6","#E85F2A","#22C3D6","#94A3B8",
 ];
 
-function _cdiPercentFromRate(rate) {
-  const pct = Number(rate == null ? 1 : rate) * 100;
-  return Number.isFinite(pct) && pct > 0 ? pct : 100;
-}
-
-function _formatCdiRate(rate) {
-  const pct = _cdiPercentFromRate(rate);
-  return `Rende ${pct.toLocaleString("pt-BR", { maximumFractionDigits: 2 })}% do CDI · simulado`;
+function _pocketYieldLabel(p) {
+  if (_isOfStale(p)) return "Reative seu banco (plano pago) pra o saldo voltar a atualizar";
+  return _isOfPocket(p) ? "Saldo atualizado pelo banco" : "Sem rendimento";
 }
 
 let _goalsCache = null;
@@ -3398,9 +3832,7 @@ function _renderPocketOnlyCard(p, idx = 0) {
   const line1 = ofStale ? "<i class='ph ph-lock' aria-hidden='true'></i> Banco desconectado. Reative pra atualizar"
               : ofPocket ? "Sincronizada com seu banco"
               : "Caixinha sem meta: depósitos livres";
-  const line2 = ofStale ? "Reative seu banco (plano pago) pra o saldo voltar a atualizar"
-              : ofPocket ? "Saldo atualizado pela corretora/banco"
-              : (p.interest_enabled === false ? "Sem rendimento" : _formatCdiRate(p.interest_rate));
+  const line2 = _pocketYieldLabel(p);
   return `
     <div class="goal-card${ofStale ? " of-stale" : ""}" style="animation-delay:${idx * 80}ms;cursor:pointer" onclick="openPocketHistory('${escapeJsString(p.name)}')">
       <div class="goal-ring">
@@ -3472,7 +3904,7 @@ function _renderGoalCard(g, idx = 0) {
         <div class="goal-amt">${_fmtBRL(g.balance || 0)} / ${_fmtBRL(g.target_amount || 0)}</div>
         <div class="bar-track" style="margin-top:6px"><div class="bar-fill" style="width:${pct}%;background:${color}"></div></div>
         <div class="goal-deadline" style="color:${deadlineColor}">${deadlineText}${g.days_left !== null ? " · " + (g.days_left >= 0 ? "em " + g.days_left + " dias" : "vencido há " + (-g.days_left) + " dias") : ""}</div>
-        <div class="goal-deadline" style="color:var(--text-3)">${g.interest_enabled === false ? "Sem rendimento" : _formatCdiRate(g.interest_rate)}</div>
+        <div class="goal-deadline" style="color:var(--text-3)">${_pocketYieldLabel(g)}</div>
         ${alertText}
       </div>
     </div>
@@ -3531,21 +3963,6 @@ function _ensureGoalModal() {
               <label for="goal-description">Descrição (opcional)</label>
               <input type="text" id="goal-description" maxlength="200" placeholder="Anotações..." />
             </div>
-            <div class="field">
-              <label for="goal-interest-enabled">Rendimento?</label>
-              <label style="display:flex;align-items:center;gap:10px;color:var(--text-2);font-size:.86rem">
-                <input type="checkbox" id="goal-interest-enabled" checked onchange="syncGoalInterestConfig()" />
-                <span>Rendimento atrelado ao CDI</span>
-              </label>
-              <div id="goal-interest-config" style="margin-top:10px">
-                <label for="goal-interest-rate">Percentual do CDI</label>
-                <div style="display:flex;align-items:center;gap:8px">
-                  <input type="number" id="goal-interest-rate" min="1" max="300" step="0.01" value="100" inputmode="decimal" style="width:112px;flex:0 0 112px" />
-                  <span style="color:var(--text-2);font-size:.86rem;white-space:nowrap">% do CDI</span>
-                </div>
-                <div style="color:var(--text-3);font-size:.78rem;margin-top:8px;line-height:1.35"><i class="ph ph-lightbulb" aria-hidden="true"></i> Valor simulado: o PigBank não custodia seu dinheiro. Use a taxa do banco onde o saldo realmente está aplicado.</div>
-              </div>
-            </div>
           </div>
           <div class="modal-acts" style="margin-top:18px;display:flex;gap:8px;align-items:center">
             <button type="button" class="inst-delete-btn" id="goal-delete-btn" style="display:none" onclick="deleteGoalFromModal()"><i class="ph ph-trash" aria-hidden="true"></i> Excluir</button>
@@ -3588,12 +4005,6 @@ function _setGoalColor(c) {
   _rerenderPicker("goal-color-picker", _renderGoalPickers);
 }
 
-function syncGoalInterestConfig() {
-  const enabled = document.getElementById("goal-interest-enabled")?.checked ?? true;
-  const config = document.getElementById("goal-interest-config");
-  if (config) config.style.display = enabled ? "" : "none";
-}
-
 function openGoalEditModal(goal) {
   _ensureGoalModal();
   const isEdit = !!(goal && goal.id);
@@ -3609,9 +4020,6 @@ function openGoalEditModal(goal) {
   document.getElementById("goal-target-date").value = isEdit && goal.target_date ? goal.target_date : "";
   document.getElementById("goal-status").value = isEdit ? (goal.status || "active") : "active";
   document.getElementById("goal-description").value = isEdit ? (goal.description || "") : "";
-  document.getElementById("goal-interest-enabled").checked = isEdit ? goal.interest_enabled !== false : true;
-  document.getElementById("goal-interest-rate").value = _cdiPercentFromRate(isEdit ? goal.interest_rate : 1).toFixed(2).replace(/\.00$/, "");
-  syncGoalInterestConfig();
   document.getElementById("goal-delete-btn").style.display = isEdit ? "" : "none";
   _renderGoalPickers();
   document.getElementById("goal-edit-overlay").classList.add("open");
@@ -3627,8 +4035,6 @@ async function saveGoal() {
   const targetRaw = document.getElementById("goal-target").value.trim();
   const hasTarget = targetRaw !== "";
   const targetVal = hasTarget ? parseFloat(targetRaw) : null;
-  const interestEnabled = document.getElementById("goal-interest-enabled").checked;
-  const cdiPct = parseFloat((document.getElementById("goal-interest-rate").value || "100").replace(",", "."));
   const payload = {
     name: document.getElementById("goal-name").value.trim(),
     description: document.getElementById("goal-description").value.trim() || null,
@@ -3637,17 +4043,11 @@ async function saveGoal() {
     emoji: _goalEditState.emoji,
     color: _goalEditState.color,
     status: document.getElementById("goal-status").value,
-    interest_enabled: interestEnabled,
-    interest_rate: interestEnabled ? cdiPct / 100 : 1.0,
     clear_target: !hasTarget,
   };
   if (!payload.name) { await alertModal("Digite um nome.", { title: "Nome obrigatório" }); return; }
   if (hasTarget && (!targetVal || targetVal <= 0)) {
     await alertModal("Valor alvo deve ser maior que zero ou deixe vazio pra criar só uma caixinha.", { title: "Valor inválido" });
-    return;
-  }
-  if (interestEnabled && (!Number.isFinite(cdiPct) || cdiPct <= 0)) {
-    await alertModal("Informe um percentual do CDI maior que zero.", { title: "Rendimento inválido" });
     return;
   }
   _goalSaving = true;
@@ -3664,8 +4064,6 @@ async function saveGoal() {
         body: JSON.stringify({
           name: payload.name,
           description: payload.description || null,
-          interest_enabled: payload.interest_enabled,
-          interest_rate: payload.interest_rate,
         }),
       });
       if (!r.ok) {
@@ -3748,8 +4146,8 @@ const RECURRING_CATEGORY_EMOJI = {
 };
 
 // 1ª ocorrência do dia `dayNum` (1-31) em/depois de hoje E de `startISO`
-// (YYYY-MM-DD, opcional). Espelha o guard do charger: recorrência com início
-// futuro só "vence" a partir do start_date.
+// (YYYY-MM-DD, opcional): recorrência com início futuro só "vence" a partir do
+// start_date.
 function _nextRecurringOccurrence(dayNum, startISO, frequency, monthNum) {
   const floor = new Date();
   floor.setHours(0, 0, 0, 0);
@@ -3881,7 +4279,7 @@ function _renderFixedProGate() {
       <div class="empty" style="padding:30px;text-align:center;color:var(--text-3)">
         <div style="font-size:2.5rem;margin-bottom:10px"><i class="ph ph-lock" aria-hidden="true"></i></div>
         <div style="font-size:1.05rem;font-weight:700;color:var(--text);margin-bottom:6px">Gastos Fixos é Pro</div>
-        <div style="margin-bottom:14px">Cadastre suas assinaturas e contas recorrentes pra o Piggy lançar automaticamente todo mês.</div>
+        <div style="margin-bottom:14px">Cadastre suas assinaturas e contas fixas pro Piggy incluir na previsão do seu saldo.</div>
         <button class="mock-cta" onclick="showUpgradeModal('recurring_expenses')"><i class="ph ph-star" aria-hidden="true"></i> Ver Pro</button>
       </div>`;
   }
@@ -3958,7 +4356,7 @@ function _renderFixedView(items) {
           <div class="tx-icon" style="color:${(x.date - today) / (1000 * 60 * 60 * 24) <= 2 ? 'var(--red)' : '#fbbf24'}">${phIcon(_recurringEmoji(x.rec))}</div>
           <div class="tx-main">
             <div class="tx-desc">${escapeHtmlSafe(x.rec.name)} · ${x.date.toLocaleDateString("pt-BR", { day: "2-digit", month: "short" })}</div>
-            <div class="tx-meta">${_formatDueIn(x.date)} · ${x.rec.payment_type === "credit_card" ? "Cartão " + escapeHtmlSafe(x.rec.card_name || "?") : "Débito automático"}</div>
+            <div class="tx-meta">${_formatDueIn(x.date)} · ${x.rec.payment_type === "credit_card" ? "Cartão " + escapeHtmlSafe(x.rec.card_name || "?") : "Débito no banco"}</div>
           </div>
           <div class="tx-amt ${_toneClass(-x.rec.amount, "green", "red")}">-${_fmtBRL(x.rec.amount)}</div>
         </div>
@@ -4079,7 +4477,7 @@ function _ensureRecurringModal() {
               <div class="field">
                 <label for="recurring-mode">Tipo *</label>
                 <select id="recurring-mode" onchange="_toggleRecurringModeHint()">
-                  <option value="autopay">Gasto fixo (débito automático)</option>
+                  <option value="autopay">Gasto fixo (débito no banco)</option>
                   <option value="manual">Conta a pagar (boleto/lembrete)</option>
                 </select>
               </div>
@@ -4124,7 +4522,7 @@ function _ensureRecurringModal() {
               <div class="field">
                 <label for="recurring-payment-type">Forma de pagamento *</label>
                 <select id="recurring-payment-type" onchange="_toggleRecurringCardField()">
-                  <option value="account">Débito automático na conta</option>
+                  <option value="account">Débito automático no banco</option>
                   <option value="credit_card">Cartão de crédito</option>
                 </select>
               </div>
@@ -4137,7 +4535,7 @@ function _ensureRecurringModal() {
               <div class="field">
                 <label for="recurring-start-date" id="recurring-start-label">Começa a partir de</label>
                 <input type="date" id="recurring-start-date" />
-                <span id="recurring-start-hint" style="font-size:.68rem;color:var(--text-3);margin-top:4px;display:block">A 1ª cobrança é no dia do vencimento em/após esta data. Deixe hoje pra começar já.</span>
+                <span id="recurring-start-hint" style="font-size:.68rem;color:var(--text-3);margin-top:4px;display:block">Entra na previsão a partir do 1º vencimento em/após esta data. Deixe hoje pra começar já.</span>
               </div>
             </div>
             <div class="field">
@@ -4217,7 +4615,7 @@ function _toggleRecurringFreqFields() {
     if (startInput) startInput.required = true;
   } else {
     if (startLabel) startLabel.textContent = "Começa a partir de";
-    if (startHint) startHint.textContent = "A 1ª cobrança é no dia do vencimento em/após esta data. Deixe hoje pra começar já.";
+    if (startHint) startHint.textContent = "Entra na previsão a partir do 1º vencimento em/após esta data. Deixe hoje pra começar já.";
     if (startInput) startInput.required = false;
   }
 }
@@ -4225,7 +4623,7 @@ function _toggleRecurringFreqFields() {
 // Ajusta ajuda + título + campos do modal conforme o modo (gasto fixo vs conta
 // a pagar). Numa CONTA A PAGAR o valor é SEMPRE uma estimativa (o valor real é
 // informado ao pagar), então o campo de valor vira opcional; num GASTO FIXO o
-// valor é obrigatório (o charger debita esse valor sozinho).
+// valor é obrigatório (é ele que entra na previsão).
 function _toggleRecurringModeHint() {
   const mode = (document.getElementById("recurring-mode") || {}).value || "autopay";
   const hint = document.getElementById("recurring-mode-hint");
@@ -4236,7 +4634,7 @@ function _toggleRecurringModeHint() {
   const amount = document.getElementById("recurring-amount");
   const name = document.getElementById("recurring-name");
   if (mode === "manual") {
-    if (hint) hint.innerHTML = "<i class='ph ph-receipt' aria-hidden='true'></i> <strong>Conta a pagar:</strong> a Piggy te <strong>lembra</strong> do vencimento e <strong>nada sai da conta</strong> até você confirmar. O valor é sempre uma <strong>estimativa</strong>. Você informa o valor real ao marcar como paga.";
+    if (hint) hint.innerHTML = "<i class='ph ph-receipt' aria-hidden='true'></i> <strong>Conta a pagar:</strong> o Piggy te <strong>lembra</strong> do vencimento e <strong>nada sai da conta</strong> até você confirmar. O valor é sempre uma <strong>estimativa</strong>. Você informa o valor real ao marcar como paga.";
     if (title && !isEdit) title.textContent = "Nova conta a pagar";
     // Conta a pagar nunca é débito automático — o user sempre confirma na mão.
     // A "forma de pagamento" (autopay/cartão) não se aplica: esconde e fixa account.
@@ -4249,7 +4647,7 @@ function _toggleRecurringModeHint() {
     if (amount) { amount.required = false; amount.placeholder = "estimativa, ex: 80,00"; }
     if (name) name.placeholder = "Ex: Água, Luz, Internet...";
   } else {
-    if (hint) hint.innerHTML = "<i class='ph ph-warning' aria-hidden='true'></i> <strong>Gasto fixo:</strong> é <strong>lançado automaticamente</strong> no dia escolhido (débito na conta). Pra contas que você paga na mão (boleto), use \"Conta a pagar\".";
+    if (hint) hint.innerHTML = "<i class='ph ph-warning' aria-hidden='true'></i> <strong>Gasto fixo:</strong> entra na <strong>previsão</strong> do seu saldo — o Piggy não lança sozinho. O pagamento de verdade vem do seu banco conectado, ou você registra se pagar em dinheiro. Pra ser lembrado antes do vencimento, use \"Conta a pagar\".";
     if (title && !isEdit) title.textContent = "Novo gasto fixo";
     if (paytypeRow) paytypeRow.style.display = "";
     if (label) label.textContent = "Valor (R$) *";
@@ -4383,7 +4781,7 @@ async function saveRecurring() {
 async function deleteRecurringFromModal() {
   if (!_recurringEditState.id) return;
   const ok = await confirmModal(
-    "Excluir este gasto fixo? Lançamentos passados ficam preservados. Só não vai mais cobrar automaticamente.",
+    "Excluir este gasto fixo? Os lançamentos que já existem ficam. Ele só sai da previsão.",
     { title: "Excluir gasto fixo", okText: "Excluir", danger: true },
   );
   if (!ok) return;
@@ -4667,6 +5065,8 @@ function openRecurringNewFromTab() {
 
 // ── Agenda de boletos (a pagar) ───────────────────────────────────────
 const _billsChannel = makeFetchChannel(); // dedup + abort + geração
+// Q40: com banco conectado o servidor exige a forma ao pagar (`metodo`).
+let _billsExigeForma = false;
 
 async function _fetchBills({ force = false } = {}) {
   return _billsChannel.run(async (signal) => {
@@ -4677,6 +5077,7 @@ async function _fetchBills({ force = false } = {}) {
     if (resp.status === 403) return { pro_required: true };
     if (!resp.ok) throw _erroHttp(resp.status, await resp.text());
     const data = await resp.json();
+    _billsExigeForma = !!data.exige_forma_pagamento;
     return data.bills || [];
   }, { force });
 }
@@ -4801,7 +5202,9 @@ function _renderBillRow(b) {
 }
 
 function _renderBillPaidRow(b) {
-  const paidVal = b.paid_amount != null ? b.paid_amount : b.amount;
+  // Q40: paga pelo banco sem valor informado → paid_amount null; o valor real
+  // está no extrato, e a estimativa (amount) não é o que foi pago.
+  const paidTxt = b.paid_amount != null ? `-${_fmtBRL(b.paid_amount)}` : "valor no extrato";
   const when = b.paid_at ? new Date(b.paid_at).toLocaleDateString("pt-BR", { day: "2-digit", month: "short" }) : "";
   return `
     <div class="tx-row">
@@ -4810,7 +5213,7 @@ function _renderBillPaidRow(b) {
         <div class="tx-desc">${escapeHtmlSafe(b.name || "Conta")}</div>
         <div class="tx-meta">paga ${when}</div>
       </div>
-      <div class="tx-amt" style="color:var(--text-2)">-${_fmtBRL(paidVal)}</div>
+      <div class="tx-amt" style="color:var(--text-2)">${paidTxt}</div>
     </div>`;
 }
 
@@ -4829,6 +5232,19 @@ async function _errDetail(resp) {
 }
 
 async function payBill(billId, estimate, name, variavel) {
+  // Q40: com banco conectado, a forma vem ANTES do valor. Pelo banco não pede
+  // valor (o débito chega pelo Open Finance). Esc/overlay/Cancelar = nada.
+  let metodo = null;
+  if (_billsExigeForma) {
+    const escolha = await confirmModal(
+      `Como você pagou "${name}"?\n\nPelo banco, o débito chega sozinho pelo Open Finance. ` +
+      "Em dinheiro vivo, sai da sua Carteira Piggy.",
+      { title: "Forma de pagamento", okText: "Pelo banco", altText: "Dinheiro vivo" });
+    if (escolha === true) metodo = "banco";
+    else if (escolha === "alt") metodo = "dinheiro";
+    else return;
+  }
+  if (metodo === "banco") return _postPayBill(billId, { metodo }, "✓ Marcada como paga (pelo banco)");
   // Valor da conta a pagar é sempre confirmado na hora (pode variar). Se tem
   // estimativa, pré-preenche pra ser só ajustar/confirmar; senão abre vazio.
   const pergunta = variavel
@@ -4842,18 +5258,22 @@ async function payBill(billId, estimate, name, variavel) {
     await alertModal("Digite um valor válido (maior que zero).", { title: "Valor inválido" });
     return;
   }
+  return _postPayBill(billId, metodo ? { metodo, amount } : { amount }, `✓ Boleto pago: ${_fmtBRL(amount)}`);
+}
+
+async function _postPayBill(billId, corpo, toast) {
   try {
     const resp = await fetch(`${API}/recurring-bills/${USER_ID}/${billId}/pay`, {
       method: "POST",
       credentials: "same-origin",
       headers: csrfHeaders({ "Content-Type": "application/json" }),
-      body: JSON.stringify({ amount }),
+      body: JSON.stringify(corpo),
     });
     if (resp.status === 403) return;   // pro_required: interceptor abre upgrade
     if (!resp.ok) {
       throw new Error(await _errDetail(resp));
     }
-    showToast(`✓ Boleto pago: ${_fmtBRL(amount)}`);
+    showToast(toast);
     loadBillsView();
     sendRefresh();
   } catch (err) {
@@ -4953,6 +5373,8 @@ async function deleteBoleto(id, name) {
 
 // Simulador "tô tranquilo nesse prazo?" — projeta o caixa até uma data.
 async function simularPrazo() {
+  const permissionsVersion = _forecastPermissionsVersion;
+  if (!featureAllowed("forecast")) { showUpgradeModal("forecast"); return; }
   const dateEl = document.getElementById("boleto-sim-date");
   const amtEl = document.getElementById("boleto-sim-amount");
   const resEl = document.getElementById("boleto-sim-result");
@@ -4971,10 +5393,18 @@ async function simularPrazo() {
   resEl.innerHTML = `<div class="empty" style="color:var(--text-3);padding:8px">Calculando…</div>`;
   try {
     const resp = await fetch(`${API}/recurring-bills/${USER_ID}/projection?${q.toString()}`, { credentials: "same-origin" });
+    if (resp.status === 403) {
+      const error = await resp.json();
+      if (permissionsVersion !== _forecastPermissionsVersion) return;
+      resEl.textContent = error.detail?.message || "Previsões estão disponíveis no Plus (30 dias) e Pro (até 90 dias).";
+      return;
+    }
     if (!resp.ok) throw _erroHttp(resp.status, "", await resp.text());
     const data = await resp.json();
+    if (permissionsVersion !== _forecastPermissionsVersion) return;
     _renderProjection(data.projection);
   } catch (err) {
+    if (permissionsVersion !== _forecastPermissionsVersion) return;
     if (_sessaoExpirou(err, resEl)) return;
     resEl.innerHTML = `<div class="empty" style="color:var(--text-3);padding:8px">Não consegui calcular agora.</div>`;
   }
@@ -5017,11 +5447,13 @@ function _renderProjection(p) {
     </div>`;
 }
 
-// Previsão de saldo 30/60/90 dias (feature Pro). Só busca se o gate liberar; pro
-// não-Pro o card fica com o teaser travado (applyProGates + click→upgrade modal).
-const _forecastLockedMsg = `<div class="empty" style="padding:8px;color:var(--text-3)">Assine o <b>Pro</b> pra ver a previsão do seu saldo a 30, 60 e 90 dias.</div>`;
+// Plus recebe 30 dias; Pro recebe 30/60/90. O backend controla os horizontes.
+const _forecastLockedMsg = `<div class="empty" style="padding:8px;color:var(--text-3)">Previsão de saldo: 30 dias no <b>Plus</b>; 60 e 90 dias no <b>Pro</b>.</div>`;
+const _forecastChannel = makeFetchChannel();
+let _forecastPermissionsVersion = 0;
 
 async function loadForecast() {
+  const permissionsVersion = _forecastPermissionsVersion;
   const resEl = document.getElementById("forecast-result");
   if (!resEl) return;
   if (!featureAllowed("forecast")) { resEl.innerHTML = _forecastLockedMsg; return; }
@@ -5033,12 +5465,17 @@ async function loadForecast() {
   // tem sessão, e a instrução é falsa.
   resEl.innerHTML = `<div class="empty" style="color:var(--text-3);padding:8px">Calculando…</div>`;
   try {
-    const resp = await fetch(`${API}/forecast/${USER_ID}`, { credentials: "same-origin" });
-    if (resp.status === 403) { resEl.innerHTML = _forecastLockedMsg; return; }
-    if (!resp.ok) throw _erroHttp(resp.status, "", await resp.text());
-    const data = await resp.json();
+    const data = await _forecastChannel.run(async signal => {
+      const resp = await fetch(`${API}/forecast/${USER_ID}`, { credentials: "same-origin", signal });
+      if (resp.status === 403) return { pro_required: true };
+      if (!resp.ok) throw _erroHttp(resp.status, "", await resp.text());
+      return resp.json();
+    }, { force: true });
+    if (data === undefined || permissionsVersion !== _forecastPermissionsVersion) return;
+    if (data.pro_required) { resEl.innerHTML = _forecastLockedMsg; return; }
     _renderForecast(data.forecast);
   } catch (err) {
+    if (permissionsVersion !== _forecastPermissionsVersion) return;
     if (_sessaoExpirou(err, resEl)) return;
     resEl.innerHTML = `<div class="empty" style="color:var(--text-3);padding:8px">Não consegui calcular agora.</div>`;
   }
@@ -5195,7 +5632,7 @@ function _renderRecurringIncomeProGate() {
       <div class="empty" style="padding:30px;text-align:center;color:var(--text-3)">
         <div style="font-size:2.5rem;margin-bottom:10px"><i class="ph ph-lock" aria-hidden="true"></i></div>
         <div style="font-size:1.05rem;font-weight:700;color:var(--text);margin-bottom:6px">Receitas fixas é Pro</div>
-        <div style="margin-bottom:14px">Cadastre salário, aluguel e freelas recorrentes pra o Piggy lançar automaticamente todo mês.</div>
+        <div style="margin-bottom:14px">Cadastre salário, aluguel e freelas recorrentes pro Piggy incluir na previsão do seu saldo.</div>
         <button class="mock-cta" onclick="showUpgradeModal('recurring_expenses')"><i class="ph ph-star" aria-hidden="true"></i> Ver Pro</button>
       </div>`;
   }
@@ -5348,7 +5785,7 @@ function _ensureRecurringIncomeModal() {
       <div class="modal wide">
         <h3 id="recurring-income-edit-title">Nova receita fixa</h3>
         <p class="msub" style="background:rgba(34,197,94,.1);border:1px solid rgba(34,197,94,.3);border-radius:8px;padding:10px 12px;margin-bottom:14px;font-size:.78rem">
-          <i class="ph ph-coins" aria-hidden="true"></i> <strong>Importante:</strong> essa receita será <strong>lançada automaticamente</strong> todo mês no dia escolhido. Se o valor variar, é só editar aqui: o Piggy registra o reajuste.
+          <i class="ph ph-coins" aria-hidden="true"></i> <strong>Importante:</strong> essa receita entra na <strong>previsão</strong> do seu saldo, mas não é lançada sozinha. Se o valor variar, é só editar aqui: o Piggy registra o reajuste.
         </p>
         <form id="recurring-income-edit-form" onsubmit="event.preventDefault(); saveRecurringIncome();">
           <div class="invest-form">
@@ -5400,7 +5837,7 @@ function _ensureRecurringIncomeModal() {
               <div class="field">
                 <label for="recurring-income-start-date">Começa a partir de</label>
                 <input type="date" id="recurring-income-start-date" />
-                <span style="font-size:.68rem;color:var(--text-3);margin-top:4px;display:block">O 1º crédito é no dia do recebimento em/após esta data. Deixe hoje pra começar já.</span>
+                <span style="font-size:.68rem;color:var(--text-3);margin-top:4px;display:block">Entra na previsão a partir do 1º recebimento em/após esta data. Deixe hoje pra começar já.</span>
               </div>
             </div>
             <div class="field">
@@ -5515,7 +5952,7 @@ async function saveRecurringIncome() {
 async function deleteRecurringIncomeFromModal() {
   if (!_recurringIncomeEditState.id) return;
   const ok = await confirmModal(
-    "Excluir esta receita fixa? Lançamentos passados ficam preservados. Só não vai mais lançar automaticamente.",
+    "Excluir esta receita fixa? Os lançamentos que já existem ficam. Ela só sai da previsão.",
     { title: "Excluir receita fixa", okText: "Excluir", danger: true },
   );
   if (!ok) return;
@@ -5541,6 +5978,7 @@ async function deleteRecurringIncomeFromModal() {
 let _analyticsCache = null;        // { kpis, evolution, categories, weekday, merchants, months }
 let _analyticsRetryTimer = null;
 const _analyticsChannel = makeFetchChannel(); // dedup + abort + geração (7 fetches, 1 signal)
+let _analyticsPermissionsVersion = 0;
 let _analyticsChartInstances = [];
 let _analyticsCurrentMonths = 6;
 
@@ -5561,6 +5999,7 @@ function _destroyAnalyticsCharts() {
 }
 
 async function loadAnalyticsView(forceFresh = false, months = null, { background = false } = {}) {
+  const permissionsVersion = _analyticsPermissionsVersion;
   if (months != null) _analyticsCurrentMonths = Math.max(1, Math.min(36, parseInt(months, 10) || 6));
 
   const statsEl = document.getElementById("analytics-stats");
@@ -5583,10 +6022,14 @@ async function loadAnalyticsView(forceFresh = false, months = null, { background
   // Puxão: sem skeleton (Análises nunca teve), fetch antes de render, falha
   // real rejeita sem tocar DOM (indicador âmbar). Superado sai neutro.
   if (background) {
-    const data = await _fetchAnalyticsAll(_analyticsCurrentMonths, { force: true });
-    if (data === undefined) return;
-    _analyticsCache = data;
-    renderAnalyticsView(data);
+    try {
+      const data = await _fetchAnalyticsAll(_analyticsCurrentMonths, { force: true });
+      if (data === undefined || permissionsVersion !== _analyticsPermissionsVersion) return;
+      _analyticsCache = data;
+      renderAnalyticsView(data);
+    } catch (err) {
+      if (permissionsVersion === _analyticsPermissionsVersion) throw err;
+    }
     return;
   }
 
@@ -5598,20 +6041,23 @@ async function loadAnalyticsView(forceFresh = false, months = null, { background
       // Só re-renderiza se algo mudou de verdade — senão reconstruía os
       // gráficos do Chart.js a cada visita, dando flicker de "recarregando".
       // fresh undefined (superado) é falsy → o if pula sozinho.
-      if (fresh && JSON.stringify(fresh) !== JSON.stringify(_analyticsCache)) {
+      if (permissionsVersion === _analyticsPermissionsVersion && fresh && JSON.stringify(fresh) !== JSON.stringify(_analyticsCache)) {
         _analyticsCache = fresh;
         renderAnalyticsView(fresh);
       }
-    }).catch(_revalidacaoExpirou(statsEl));
+    }).catch(err => {
+      if (permissionsVersion === _analyticsPermissionsVersion) _revalidacaoExpirou(statsEl)(err);
+    });
     return;
   }
 
   try {
     const data = await _fetchAnalyticsAll(_analyticsCurrentMonths, { force: true });
-    if (data === undefined) return;
+    if (data === undefined || permissionsVersion !== _analyticsPermissionsVersion) return;
     _analyticsCache = data;
     renderAnalyticsView(data);
   } catch (err) {
+    if (permissionsVersion !== _analyticsPermissionsVersion) return;
     if (_sessaoExpirou(err, statsEl)) return;
     statsEl.innerHTML = `<div class="empty" style="grid-column:1/-1;padding:30px;text-align:center;color:var(--red)">Erro ao carregar análises: ${escapeHtmlSafe(String(err.message || err))}</div>`;
   }
@@ -5640,12 +6086,12 @@ async function _fetchAnalyticsAll(months, { force = false } = {}) {
     };
     const [k, ev, cat, wk, tm, pat, ins] = await Promise.all([
       getJson(`${base}/kpis${qs}`),
-      getJson(`${base}/evolution${qs}`),
+      featureAllowed("financial_comparison") ? getJson(`${base}/evolution${qs}`) : {},
       getJson(`${base}/categories${qs}`),
-      getJson(`${base}/weekday-pattern${qs}`),
+      featureAllowed("financial_comparison") ? getJson(`${base}/weekday-pattern${qs}`) : {},
       getJson(`${base}/top-merchants${qs}&limit=8`),
-      optional(`${base}/patterns${qs}`),
-      optional(`/insights/${USER_ID}/current`),
+      featureAllowed("insights") ? optional(`${base}/patterns${qs}`) : {},
+      featureAllowed("insights") ? optional(`/insights/${USER_ID}/current`) : {},
     ]);
     return {
       kpis:       k.kpis       || null,
@@ -6834,15 +7280,19 @@ function isProUser() {
 
 const UPGRADE_MESSAGES = {
   investments: "Acompanhe sua carteira de investimentos com cálculo automático de rendimento, IR e IOF. Disponível nos planos pagos.",
+  household_budget: "O Orçamento Doméstico divide sua renda do mês em potes — custos fixos, conforto, metas, prazeres — e mostra quanto cabe em cada um, sem planilha. Disponível nos planos pagos.",
   export: "Exportar seus lançamentos (PDF, planilha) por email faz parte dos planos pagos.",
   pockets_unlimited: "No Grátis você cria 1 caixinha. Com um plano pago fica ilimitado: separe sua reserva, viagens, presentes…",
   cards_unlimited: "No Grátis você cadastra 1 cartão. Com um plano pago fica ilimitado: controle todos os seus cartões em um lugar.",
   ofx_import: "Importar extrato bancário e fatura de cartão por OFX faz parte dos planos pagos.",
   history_unlimited: "Histórico além de 30 dias faz parte dos planos pagos.",
-  changelog: "As notícias e resumos do mercado feitos pela Piggy fazem parte dos planos Plus e Pro. Assine pra desbloquear.",
+  changelog: "As notícias e resumos do mercado feitos pelo Piggy fazem parte dos planos Plus e Pro. Assine pra desbloquear.",
   recurring_expenses: "A agenda de boletos e os gastos fixos fazem parte dos planos pagos. Cadastre suas contas a pagar e nunca mais perca um vencimento.",
   agents: "Seu plano atual não ativa mais agentes. Fazendo upgrade, a equipe de porquinhos trabalha pra você: Xerife, Repórter, Carteiro e os próximos que chegarem.",
-  forecast: "A previsão de saldo a 30, 60 e 90 dias é do plano Pro. Veja pra onde seu caixa caminha e planeje com folga antes do aperto chegar.",
+  forecast: "O Plus prevê seu saldo em 30 dias. O Pro inclui 60 e 90 dias e a análise da trajetória do caixa.",
+  insights: "Insights e padrões personalizados estão disponíveis nos planos Plus e Pro.",
+  financial_comparison: "Compare períodos e acompanhe tendências nos planos Plus e Pro.",
+  weekly_report: "Receba o resumo semanal automático nos planos Plus e Pro.",
   generic: "Essa feature faz parte dos planos pagos do PigBank. Escolha o que faz mais sentido pra você."
 };
 
@@ -6893,6 +7343,9 @@ function closeUpgradeModal() {
 // Aplica estado visual disabled em todos os elementos com data-pro-feature
 // quando o user e Free. Idempotente — pode ser chamada varias vezes.
 function applyProGates() {
+  document.querySelectorAll("[data-plan-content]").forEach(el => {
+    el.style.display = featureAllowed(el.dataset.planContent) ? "" : "none";
+  });
   // Gate POR FEATURE: cada controle libera no seu tier mínimo (Essencial já
   // solta investimentos/OFX/export/etc; Novidades só do Plus pra cima). Antes
   // era um único booleano is_pro, que trancava tudo pra quem era Essencial.
@@ -7940,6 +8393,13 @@ function applyAccessVerdict(me) {
     }
     return false;
   }
+  // Conta paga sem senha nem Google/Apple: dados e WS respondem 403/4403.
+  if (me && me.precisa_criar_senha) {
+    clearSessionSnapshots();
+    stopWsRetries();
+    window.PBCriarSenha.mostrar(me);
+    return false;
+  }
   return true;
 }
 
@@ -8083,6 +8543,9 @@ let _lastAlerts = [];
 
 function renderAlerts(alerts) {
   const b = document.getElementById("alert-banner");
+  // Sem /cash-transfers.js (arquivo novo: 404 logo após deploy, rede caída) o
+  // "Conferir" não abriria nada — a linha sai, e a faixa não abre só com ela.
+  if (!window.CashTransfers) alerts = (alerts || []).filter(a => a.type !== "cash_transfers");
   _lastAlerts = alerts || [];
   if (!alerts || !alerts.length || alertsDismissed) {
     b.style.display = "none";
@@ -8093,10 +8556,18 @@ function renderAlerts(alerts) {
   let html = "";
   alerts.forEach(a => {
     if (a.type === "recurring_charged") {
-      const where = a.payment_type === "credit_card" ? "no cartão" : "da conta";
-      html += `<div class="alert-row"><i class="ph ph-piggy-bank" aria-hidden="true"></i> Piggy lançou <b>${escapeHtmlSafe(a.name)}</b> ${fmt(a.amount)} ${where} ${_alertWhenLabel(a.charged_at)}. <button onclick="ackRecurringCharge(${a.charge_id})" aria-label="Marcar como visto" title="Marcar como visto" style="background:none;border:none;color:var(--text-3);cursor:pointer;font-size:.85rem;line-height:1;padding:2px 6px;margin-left:6px;border-radius:6px;opacity:.7;transition:opacity .15s,background .15s" onmouseover="this.style.opacity=1;this.style.background='rgba(255,255,255,.08)'" onmouseout="this.style.opacity=.7;this.style.background='none'"><i class="ph ph-x" aria-hidden="true"></i></button></div>`;
+      // launched: linha antiga do cobrador que lançava; sem ele é o aviso de
+      // vencimento do autopay (Q42), que não lançou nada.
+      const cartao = a.payment_type === "credit_card";
+      const when = _alertWhenLabel(a.charged_at);
+      const msg = a.launched
+        ? `Piggy lançou <b>${escapeHtmlSafe(a.name)}</b> ${fmt(a.amount)} ${cartao ? "no cartão" : "da conta"} ${when}.`
+        : `<b>${escapeHtmlSafe(a.name)}</b> ${fmt(a.amount)}: dia de ${cartao ? "cobrança no cartão" : "débito no banco"} ${when}.`;
+      html += `<div class="alert-row"><i class="ph ph-piggy-bank" aria-hidden="true"></i> ${msg} <button onclick="ackRecurringCharge(${a.charge_id})" aria-label="Marcar como visto" title="Marcar como visto" style="background:none;border:none;color:var(--text-3);cursor:pointer;font-size:.85rem;line-height:1;padding:2px 6px;margin-left:6px;border-radius:6px;opacity:.7;transition:opacity .15s,background .15s" onmouseover="this.style.opacity=1;this.style.background='rgba(255,255,255,.08)'" onmouseout="this.style.opacity=.7;this.style.background='none'"><i class="ph ph-x" aria-hidden="true"></i></button></div>`;
     } else if (a.type === "recurring_credited") {
       html += `<div class="alert-row"><i class="ph ph-piggy-bank" aria-hidden="true"></i> Piggy recebeu <b>${escapeHtmlSafe(a.name)}</b> ${fmt(a.amount)} na conta ${_alertWhenLabel(a.credited_at)}. <button onclick="ackRecurringIncomeCredit(${a.credit_id})" aria-label="Marcar como visto" title="Marcar como visto" style="background:none;border:none;color:var(--text-3);cursor:pointer;font-size:.85rem;line-height:1;padding:2px 6px;margin-left:6px;border-radius:6px;opacity:.7;transition:opacity .15s,background .15s" onmouseover="this.style.opacity=1;this.style.background='rgba(255,255,255,.08)'" onmouseout="this.style.opacity=.7;this.style.background='none'"><i class="ph ph-x" aria-hidden="true"></i></button></div>`;
+    } else if (a.type === "cash_transfers") {
+      html += `<div class="alert-row"><i class="ph ph-hand-coins" aria-hidden="true"></i> Dinheiro vivo · <b>${Number(a.count) || 0}</b> para conferir · <button type="button" class="ov-adjust-lnk" onclick="CashTransfers.open(USER_ID, refreshDashboardAfterInvestment)">Conferir</button></div>`;
     } else {
       const icon = a.type === "budget_exceeded" ? '<i class="ph ph-warning-circle" aria-hidden="true"></i>' : '<i class="ph ph-warning" aria-hidden="true"></i>';
       html += `<div class="alert-row">${icon} <b>${escapeHtmlSafe(a.categoria)}</b>: ${fmt(a.spent)} de ${fmt(a.budget)} (${a.pct}%)</div>`;
@@ -8291,6 +8762,8 @@ function renderLaunchesPagination(totalItems, totalPages) {
 // `window`. Uma guarda só, no lugar onde o literal morava, para os dois
 // consumidores (renderLaunches e _renderLaunchDetail).
 const TYPE_LABELS = (typeof LAUNCH_TYPE_LABELS === "object" && LAUNCH_TYPE_LABELS) || {};
+// Receita/despesa de movimentação interna: "entrada"/"saída" (mesma guarda).
+const INTERNAL_LABELS = (typeof LAUNCH_INTERNAL_LABELS === "object" && LAUNCH_INTERNAL_LABELS) || {};
 
 // Guarda os lançamentos renderizados pra o clique na linha abrir o detalhe.
 let _renderedLaunches = [];
@@ -8327,13 +8800,14 @@ function renderLaunches() {
       const isInternal = l.is_internal_movement;
       const valClass   = isInternal ? '' : (l.tipo==='receita'||l.tipo==='entrada' ? 'g' : 'r');
       const valStyle   = isInternal ? 'color:var(--text-2)' : '';
-      const typeLabel  = TYPE_LABELS[l.tipo] || l.tipo.replaceAll("_", " ");
+      const internalLabel = isInternal && INTERNAL_LABELS[l.tipo];
+      const typeLabel  = internalLabel || TYPE_LABELS[l.tipo] || l.tipo.replaceAll("_", " ");
       // Editar/Excluir migraram pro modal de detalhe (clique na linha) — sem
       // ícones inline, que causavam toque errado no celular.
       return `
       <div class="row" style="cursor:pointer;${isInternal?'opacity:.75':''}" onclick="openLaunchDetail(${idx})">
         <span class="lbl">
-	          <span class="tag ${l.tipo}">${typeLabel}</span>
+	          <span class="tag ${internalLabel ? "x" : l.tipo}">${typeLabel}</span>
 	          ${isInternal ? '<span class="tag interno">mov. interna</span>' : ''}
 	          ${escapeHtmlSafe(describeLaunch(l))}
 	          ${l.categoria ? `<span class="tag x">${escapeHtmlSafe(l.categoria)}</span>` : ''}
@@ -8410,7 +8884,8 @@ function closeLaunchDetail() {
 
 function _renderLaunchDetail(l) {
   _ensureLaunchDetailModal();
-  const typeLabel = TYPE_LABELS[l.tipo] || String(l.tipo || "").replaceAll("_", " ");
+  const typeLabel = (l.is_internal_movement && INTERNAL_LABELS[l.tipo])
+    || TYPE_LABELS[l.tipo] || String(l.tipo || "").replaceAll("_", " ");
   const desc = describeLaunch(l).replace(/<[^>]+>/g, "").trim() || "—";
   document.getElementById("ld-desc").textContent = desc;
 
@@ -8807,8 +9282,16 @@ function populateLaunchCategories() {
   }
 }
 
+// Q40: com banco conectado o manual é só dinheiro vivo. Só a copy muda; quem
+// decide é o servidor.
+const _LAUNCH_MSUB = "Registre uma receita ou despesa. Vai aparecer aqui e no histórico do bot.";
+const _LAUNCH_MSUB_OF = "Registre o que foi em dinheiro vivo. Pix, cartão e débito entram sozinhos pelo Open Finance.";
+
 function openLaunchModal(opts) {
   opts = opts || {};
+  const soDinheiro = !!(lastData && lastData.exige_forma_pagamento);
+  document.getElementById("launch-msub").textContent = soDinheiro ? _LAUNCH_MSUB_OF : _LAUNCH_MSUB;
+  document.querySelectorAll("#launch-overlay .tipo-sub").forEach(el => { el.hidden = !soDinheiro; });
   setValorMode("parcela");           // reseta o toggle pro default a cada abertura
   setLaunchTipo(opts.tipo || "despesa");
   document.getElementById("launch-valor").value = opts.valor || "";
@@ -9244,6 +9727,9 @@ async function submitLaunch() {
         categoria: categoria || null,
         card_id: cardId ? Number(cardId) : null,
         parcelas: parcelas,
+        // Lançamento manual de receita/despesa é dinheiro vivo (Carteira
+        // Piggy); com banco conectado o servidor exige a declaração (Q40).
+        funding_source: launchTipo === "credito" ? null : "carteira",
       }),
     });
     const data = await readResponsePayload(res);
@@ -9279,18 +9765,9 @@ document.getElementById("invest-overlay")?.addEventListener("click", e => {
 // ─── Caixinha (criar) ────────────────────────────────────────────────────────
 let pocketSubmitting = false;
 
-function syncPocketInterestConfig() {
-  const enabled = document.getElementById("pocket-interest-enabled")?.checked ?? true;
-  const config = document.getElementById("pocket-interest-config");
-  if (config) config.style.display = enabled ? "" : "none";
-}
-
 function openPocketModal() {
   document.getElementById("pocket-name").value = "";
   document.getElementById("pocket-description").value = "";
-  document.getElementById("pocket-interest-enabled").checked = true;
-  document.getElementById("pocket-interest-rate").value = "100";
-  syncPocketInterestConfig();
   hidePocketError();
   document.getElementById("pocket-overlay").classList.add("open");
   setTimeout(() => document.getElementById("pocket-name").focus(), 50);
@@ -9318,14 +9795,8 @@ async function submitPocket() {
 
   const name = document.getElementById("pocket-name").value.trim();
   const description = document.getElementById("pocket-description").value.trim();
-  const interestEnabled = document.getElementById("pocket-interest-enabled").checked;
-  const cdiPct = parseFloat((document.getElementById("pocket-interest-rate").value || "100").replace(",", "."));
   if (!name) {
     showPocketError("Informe o nome da caixinha.");
-    return;
-  }
-  if (interestEnabled && (!Number.isFinite(cdiPct) || cdiPct <= 0)) {
-    showPocketError("Informe um percentual do CDI maior que zero.");
     return;
   }
 
@@ -9343,8 +9814,6 @@ async function submitPocket() {
       body: JSON.stringify({
         name,
         description: description || null,
-        interest_enabled: interestEnabled,
-        interest_rate: interestEnabled ? cdiPct / 100 : 1.0,
       }),
     });
     const data = await readResponsePayload(res);
@@ -9516,7 +9985,7 @@ async function openPocketHistory(pocketName) {
     const t = data.totals || {};
     _currentPocketForEdit = p;
     titleEl.textContent = `Histórico: ${p.name || pocketName}`;
-    const interestTxt = p.interest_enabled === false ? "Sem rendimento" : _formatCdiRate(p.interest_rate);
+    const interestTxt = _pocketYieldLabel(p);
     subEl.textContent = p.description ? `${p.description} · ${interestTxt}` : interestTxt;
 
     document.getElementById("pkt-hist-balance").textContent      = fmt(p.balance || 0);
@@ -9566,9 +10035,6 @@ function editCurrentPocketFromHistory() {
     name: p.name,
     balance: p.balance,
     description: p.description,
-    interest_enabled: p.interest_enabled,
-    interest_rate: p.interest_rate,
-    interest_period: p.interest_period,
     target_amount: p.target_amount,
     target_date: p.target_date,
     emoji: p.emoji,
@@ -10760,14 +11226,21 @@ async function fetchHistory() {
 // preenche pra não deixar vazio. Falha silenciosa: log no console, card escondido.
 let _piggyInsightLoaded = false;
 async function loadPiggyInsight() {
-  if (!USER_ID || _piggyInsightLoaded) return;
-  _piggyInsightLoaded = true;
   const card = document.getElementById("piggy-insight-card");
   if (!card) return;
+  if (!featureAllowed("insights")) {
+    _piggyInsightLoaded = false;
+    card.style.display = "none";
+    return;
+  }
+  if (!USER_ID || _piggyInsightLoaded) return;
+  _piggyInsightLoaded = true;
   try {
     const r = await fetch(`${API}/insights/${USER_ID}/current`, { credentials: "same-origin" });
     if (!r.ok) { card.style.display = "none"; return; }
     const data = await r.json();
+    // Um downgrade enquanto o request estava em voo não pode repintar o card.
+    if (!featureAllowed("insights")) { card.style.display = "none"; return; }
     const list = (data && data.insights) || [];
     if (!list.length) { card.style.display = "none"; return; }
 
@@ -11439,6 +11912,11 @@ function _showAccessError(title, msg) {
         // Beta dos Agentes: fora do allowlist, a nav some (a API também dá 404).
         if (me && me.agents_ui_enabled === false) {
           document.querySelectorAll('[data-nav="agentes"]').forEach(el => { el.style.display = "none"; });
+        }
+        // Painel novo (beta): só quem a chave libera, e nunca no app — o /painel
+        // manda o app de volta para cá.
+        if (me && me.dashboard_v2_enabled === true && !window.PB_IN_APP) {
+          document.querySelectorAll("[data-painel-v2]").forEach(el => { el.hidden = false; });
         }
         // Gate de escolha de plano: cadastro novo passa pela /precos e assina um
         // plano pago antes de acessar o app (o Grátis não é mais uma escolha

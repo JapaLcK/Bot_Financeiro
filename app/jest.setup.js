@@ -62,6 +62,13 @@ jest.mock("expo-haptics", () => ({
   NotificationFeedbackType: { Success: "success", Warning: "warning", Error: "error" },
 }));
 
+// expo-system-ui é nativo, e todo `TemaProvider` o chama (ver `ui/tema.tsx`):
+// o dublê fica aqui, e não num teste só, para que quem monta o `_layout.tsx`
+// real também não rode o módulo de verdade. `tema.test.tsx` espia esta espiã.
+jest.mock("expo-system-ui", () => ({
+  setBackgroundColorAsync: jest.fn(() => Promise.resolve()),
+}));
+
 // expo-font: controlável por teste. `layout.test.tsx` precisa dos três
 // estados do `_layout.tsx` (carregando, carregado, erro) sem depender de TTF
 // de verdade — o padrão default é "carregado", o caso comum.
@@ -98,4 +105,92 @@ jest.mock("react-native/Libraries/Components/AccessibilityInfo/AccessibilityInfo
     // lançaria "não é uma função" no Jest (o módulo real é nativo).
     announceForAccessibility: jest.fn(),
   },
+}));
+
+// expo-web-browser é nativo (`ASWebAuthenticationSession`). O "Continuar com
+// Google" (`features/auth/google.ts`) só lê o que `openAuthSessionAsync`
+// devolve: cada teste diz o retorno com `jest.mocked(...).mockResolvedValue`.
+jest.mock("expo-web-browser", () => ({ openAuthSessionAsync: jest.fn() }));
+
+// expo-apple-authentication é nativo (`ASAuthorizationController`). O
+// "Continuar com a Apple" (`features/auth/apple.ts`) só lê o que `signInAsync`
+// devolve: cada teste diz o retorno com `jest.mocked(...)`. O botão do sistema
+// vira um `Pressable` com o rótulo que o VoiceOver lê no nativo, e repassa as
+// props (estilo, tipo, raio) para o teste conferir. Fora da fábrica: o babel
+// do Nativewind reescreve o `createElement`, e a fábrica não pode citar o import dele.
+function mockBotaoApple(props) {
+  const { Pressable } = require("react-native");
+  return require("react").createElement(Pressable, {
+    ...props,
+    accessibilityRole: "button",
+    accessibilityLabel: "Continuar com a Apple",
+  });
+}
+jest.mock("expo-apple-authentication", () => {
+  return {
+    signInAsync: jest.fn(),
+    formatFullName: (n) => [n.givenName, n.familyName].filter(Boolean).join(" "),
+    AppleAuthenticationScope: { FULL_NAME: 0, EMAIL: 1 },
+    AppleAuthenticationButtonType: { SIGN_IN: 0, CONTINUE: 1, SIGN_UP: 2 },
+    AppleAuthenticationButtonStyle: { WHITE: 0, WHITE_OUTLINE: 1, BLACK: 2 },
+    AppleAuthenticationButton: mockBotaoApple,
+  };
+});
+
+// expo-crypto é nativo. O digest usa o `crypto` do Node DE VERDADE, pelo nome
+// do algoritmo pedido: o teste do nonce mede a relação hash × cru, e um
+// algoritmo trocado daria outro hex.
+jest.mock("expo-crypto", () => {
+  const nodeCrypto = require("crypto");
+  return {
+    CryptoDigestAlgorithm: { SHA1: "SHA-1", SHA256: "SHA-256", SHA384: "SHA-384", SHA512: "SHA-512" },
+    randomUUID: jest.fn(() => nodeCrypto.randomUUID()),
+    digestStringAsync: jest.fn(async (algoritmo, dado) =>
+      nodeCrypto.createHash(algoritmo.replace("-", "").toLowerCase()).update(dado).digest("hex"),
+    ),
+  };
+});
+
+// expo-local-authentication é nativo (LAContext). PADRÃO: aparelho sem código
+// (NONE) — a trava fica inerte e nenhum teste antigo vê prompt. Quem testa a
+// trava troca o retorno com `jest.mocked(...)`.
+jest.mock("expo-local-authentication", () => ({
+  SecurityLevel: { NONE: 0, SECRET: 1, BIOMETRIC: 2, BIOMETRIC_WEAK: 2, BIOMETRIC_STRONG: 3 },
+  AuthenticationType: { FINGERPRINT: 1, FACIAL_RECOGNITION: 2, IRIS: 3 },
+  getEnrolledLevelAsync: jest.fn(() => Promise.resolve(0)),
+  supportedAuthenticationTypesAsync: jest.fn(() => Promise.resolve([])),
+  authenticateAsync: jest.fn(() => Promise.resolve({ success: true })),
+}));
+
+// AppState: o dublê do RN não dispara eventos. Este guarda `currentState` num
+// objeto (mesmo padrão do AccessibilityInfo acima: só o CAMPO muda) e dispara
+// "change" para quem assinou. Outros eventos (memoryWarning, focus...) são
+// aceitos e nunca disparam.
+const mockAppState = { atual: "active", ouvintes: new Set() };
+global.__definirAppState = (v) => (mockAppState.atual = v);
+global.__dispararAppState = (v) => {
+  mockAppState.atual = v;
+  mockAppState.ouvintes.forEach((fn) => fn(v));
+};
+jest.mock("react-native/Libraries/AppState/AppState", () => ({
+  __esModule: true,
+  default: {
+    get currentState() {
+      return mockAppState.atual;
+    },
+    isAvailable: true,
+    addEventListener: (evento, fn) => {
+      if (evento !== "change") return { remove: () => undefined };
+      mockAppState.ouvintes.add(fn);
+      return { remove: () => mockAppState.ouvintes.delete(fn) };
+    },
+  },
+}));
+
+// A tampa nativa (`modules/tampa`) não existe no Jest: `requireNativeModule`
+// lançaria. Espiãs globais; `bloqueio_tampa.test.tsx` testa o `tampa.ts` real
+// com `jest.requireActual`.
+jest.mock("@/features/bloqueio/tampa", () => ({
+  descobrir: jest.fn(),
+  pular: jest.fn(() => Promise.resolve()),
 }));

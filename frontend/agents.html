@@ -1,254 +1,281 @@
-<!DOCTYPE html>
+<!doctype html>
 <html lang="pt-BR">
 <head>
-<meta charset="UTF-8" />
+<meta charset="utf-8" />
 <meta name="viewport" content="width=device-width, initial-scale=1.0" />
 <title>Agentes do Piggy · PigBank</title>
 <meta name="description" content="Conheça os Agentes do Piggy: pequenos assistentes que vigiam seus gastos, avisam sobre boletos, caçam assinaturas esquecidas e cuidam do seu dinheiro sozinhos." />
 <link rel="canonical" href="https://pigbankai.com/agents" />
+<meta property="og:type" content="website" />
+<meta property="og:title" content="Agentes do Piggy · PigBank" />
+<meta property="og:description" content="Conheça os Agentes do Piggy: pequenos assistentes que vigiam seus gastos, avisam sobre boletos, caçam assinaturas esquecidas e cuidam do seu dinheiro sozinhos." />
+<meta property="og:url" content="https://pigbankai.com/agents" />
+<meta property="og:image" content="https://pigbankai.com/brand/landing-piggy-cta.webp?v=1" />
+<meta name="theme-color" content="#111111" />
 <link rel="icon" type="image/png" href="/favicon.png?v=3" />
 <link rel="apple-touch-icon" href="/brand/apple-touch-icon.png?v=3" />
-<meta name="theme-color" content="#0c0c0d" />
+<link rel="preload" href="/fonts/Inter-Variable.woff2?v=5059ef2a9db0" as="font" type="font/woff2" crossorigin />
 <link rel="stylesheet" href="/brand.css?v=4" />
 <link rel="stylesheet" href="/phosphor.css?v=1" />
 <link rel="stylesheet" href="/site.css?v=5" />
-<style>
-  /* ─── Galeria de Agentes ──────────────────────────────────────── */
-  .agents-grid {
-    display: grid;
-    grid-template-columns: repeat(3, 1fr);
-    gap: 22px;
-  }
-  .agent-card {
-    position: relative;
-    background: var(--card);
-    border: 1px solid var(--line);
-    border-radius: var(--radius);
-    overflow: hidden;
-    display: flex;
-    flex-direction: column;
-    transition: transform .22s ease, border-color .22s ease, box-shadow .22s ease;
-  }
-  .agent-card:hover {
-    transform: translateY(-4px);
-    border-color: rgba(255,45,142,.42);
-    box-shadow: 0 22px 50px rgba(0,0,0,.4);
-  }
-  .agent-card.soon { opacity: .82; }
-  .agent-hero {
-    position: relative;
-    aspect-ratio: 2 / 1;
-    overflow: hidden;
-    background: #0e0e10;
-  }
-  .agent-hero img {
-    width: 100%; height: 100%;
-    object-fit: cover; object-position: center;
-    display: block;
-  }
-  .agent-hero::after {
-    content: "";
-    position: absolute; inset: 0;
-    background: linear-gradient(180deg, rgba(12,12,13,0) 45%, rgba(12,12,13,.85) 100%);
-    pointer-events: none;
-  }
-  .agent-name {
-    position: absolute; left: 16px; bottom: 12px; z-index: 2;
-    display: flex; align-items: center; gap: 9px;
-    font-size: 1.22rem; font-weight: 800; letter-spacing: -.01em;
-    color: #fff; text-shadow: 0 2px 12px rgba(0,0,0,.6);
-  }
-  .agent-body { padding: 18px 20px 22px; display: flex; flex-direction: column; flex: 1; }
-  .agent-desc { color: var(--ink-2); font-size: .93rem; line-height: 1.6; margin: 0; }
-  .agent-soon-tag {
-    position: absolute; top: 12px; right: 12px; z-index: 3;
-    background: rgba(0,0,0,.55); backdrop-filter: blur(4px);
-    border: 1px solid var(--line-2);
-    color: #fff; font-size: .62rem; font-weight: 800; letter-spacing: .06em; text-transform: uppercase;
-    padding: 5px 10px; border-radius: 999px;
-  }
-
-  /* Como funciona / rodapé de conversão */
-  .agents-note {
-    max-width: 760px; margin: 46px auto 0;
-    text-align: center; color: var(--ink-3);
-    font-size: .9rem; line-height: 1.6;
-  }
-  .agents-cta { text-align: center; margin-top: 30px; }
-
-  @media (max-width: 900px) {
-    .agents-grid { grid-template-columns: 1fr 1fr; }
-  }
-  @media (max-width: 600px) {
-    .agents-grid { grid-template-columns: 1fr; gap: 18px; }
-  }
-</style>
-<script src="/safe-area.js?v=1"></script>
+<link rel="stylesheet" href="/site-redesign.css?v=1" />
+<link rel="stylesheet" href="/site-marketing.css?v=1" />
+<script src="/safe-area.js?v=1">
+</script>
 </head>
-<body>
-<div class="glow"></div>
+<body id="topo" class="lp lp-marketing lp-team-page">
+<a class="lp-skip-link" href="#conteudo">Pular para o conteúdo</a>
+<nav aria-label="Navegação principal" class="nav">
+<a aria-label="PigBank, início" class="nav-logo" href="/">
+<img alt="PigBank" class="logo-full" height="42" src="/brand/landing-logo.webp?v=1" width="142"/>
+</a>
+<div class="nav-links">
+<a href="/como-funciona">Como funciona</a>
+<a href="/funcionalidades">Funcionalidades</a>
+<a href="/funcionalidades#open-finance">Open Finance</a>
+<a href="/whatsapp">WhatsApp</a>
+<a href="/agents">Agentes</a>
+<a href="/precos">Planos</a>
+</div>
+<div class="nav-right">
+<a class="link-entrar" href="/login">Entrar</a>
+<a class="btn btn-primary" href="/cadastro">Criar conta</a>
+</div>
+</nav>
+<main id="conteudo">
+<section class="lp-team-intro lp-section-light">
+<div class="lp-shell lp-team-intro-grid">
+<div>
+<p class="lp-eyebrow">Agentes PigBank</p>
+<h1>Um time atento.<br/>Uma vida mais leve<span class="lp-pink-dot">.</span>
+</h1>
+</div>
+<div>
+<p class="lp-lead">Cada agente tem um olhar para a sua grana. Você escolhe o time; eles trazem alertas, resumos e informações para o seu dia a dia.</p>
+<div class="lp-team-intro-meta">
+<span>7 agentes</span>
+<span>Disponíveis no Plus e Pro</span>
+</div>
+</div>
+</div>
+</section>
+<section aria-labelledby="team-title" class="lp-team-catalog lp-section-dark">
+<div class="lp-shell">
+<div class="lp-team-section-heading">
+<h2 id="team-title">Conheça quem está no time</h2>
+<p>O número em cada card indica o custo de energia.</p>
+</div>
+<div class="lp-team-grid">
+<article class="lp-team-card" data-agent-kind="xerife" data-energy="2" id="xerife">
+<div class="lp-team-portrait lp-trio lp-crop-x0">
+<img alt="Um porquinho Xerife de chapéu e colete, com uma estrela no peito." height="600" loading="lazy" src="/brand/landing-agents-cartoon.webp?v=1" width="1800"/>
+</div>
+<div class="lp-team-card-body">
+<div class="lp-team-card-label">
+<h3>Xerife</h3>
+<span aria-label="2 unidades de energia" class="lp-energy-tag">
+<i aria-hidden="true" class="ph ph-lightning">
+</i> 2</span>
+</div>
+<p class="lp-team-card-hook">De olho nos excessos.</p>
+<p>Avisa sobre gastos fora do padrão e categorias que ultrapassam os limites que você definiu.</p>
+</div>
+</article>
+<article class="lp-team-card" data-agent-kind="carteiro" data-energy="1" id="carteiro">
+<div class="lp-team-portrait lp-trio lp-crop-x1">
+<img alt="Um porquinho Carteiro de uniforme azul, segurando um envelope." height="600" loading="lazy" src="/brand/landing-agents-cartoon.webp?v=1" width="1800"/>
+</div>
+<div class="lp-team-card-body">
+<div class="lp-team-card-label">
+<h3>Carteiro</h3>
+<span aria-label="1 unidade de energia" class="lp-energy-tag">
+<i aria-hidden="true" class="ph ph-lightning">
+</i> 1</span>
+</div>
+<p class="lp-team-card-hook">Vencimentos no radar.</p>
+<p>Traz lembretes de vencimento dos seus boletos no feed para ajudar você a se organizar.</p>
+</div>
+</article>
+<article class="lp-team-card" data-agent-kind="detetive" data-energy="3" id="detetive">
+<div class="lp-team-portrait lp-trio lp-crop-x2">
+<img alt="Um porquinho Detetive de chapéu e sobretudo, segurando uma lupa." height="600" loading="lazy" src="/brand/landing-agents-cartoon.webp?v=1" width="1800"/>
+</div>
+<div class="lp-team-card-body">
+<div class="lp-team-card-label">
+<h3>Detetive</h3>
+<span aria-label="3 unidades de energia" class="lp-energy-tag">
+<i aria-hidden="true" class="ph ph-lightning">
+</i> 3</span>
+</div>
+<p class="lp-team-card-hook">Os detalhes importam.</p>
+<p>Identifica recorrências, assinaturas e cobranças que podem estar duplicadas.</p>
+</div>
+</article>
+<article class="lp-team-card" data-agent-kind="reporter" data-energy="1" id="reporter">
+<div class="lp-team-portrait lp-quartet lp-crop-x0 lp-crop-y0">
+<img alt="Um porquinho Repórter de boina e óculos escuros, com microfone e bloco de notas." height="1200" loading="lazy" src="/brand/landing-agents-quartet.webp?v=1" width="1200"/>
+</div>
+<div class="lp-team-card-body">
+<div class="lp-team-card-label">
+<h3>Repórter</h3>
+<span aria-label="1 unidade de energia" class="lp-energy-tag">
+<i aria-hidden="true" class="ph ph-lightning">
+</i> 1</span>
+</div>
+<p class="lp-team-card-hook">Seu mês, em pauta.</p>
+<p>Reúne entradas, saídas, aportes e quanto sobrou em um resumo mensal das suas finanças.</p>
+</div>
+</article>
+<article class="lp-team-card" data-agent-kind="cofre" data-energy="3" id="banqueiro">
+<div class="lp-team-portrait lp-quartet lp-crop-x1 lp-crop-y0">
+<img alt="Um porquinho Banqueiro de terno e gravata rosa, segurando um cofrinho." height="1200" loading="lazy" src="/brand/landing-agents-quartet.webp?v=1" width="1200"/>
+</div>
+<div class="lp-team-card-body">
+<div class="lp-team-card-label">
+<h3>Banqueiro</h3>
+<span aria-label="3 unidades de energia" class="lp-energy-tag">
+<i aria-hidden="true" class="ph ph-lightning">
+</i> 3</span>
+</div>
+<p class="lp-team-card-hook">Cada caixinha conta.</p>
+<p>Acompanha aportes, saídas e o progresso das caixinhas vinculadas ao Open Finance.</p>
+</div>
+</article>
+<article class="lp-team-card" data-agent-kind="barao" data-energy="2" id="barao">
+<div class="lp-team-portrait lp-quartet lp-crop-x0 lp-crop-y1">
+<img alt="Um porquinho Barão de cartola e monóculo dourado, com bengala e bigode." height="1200" loading="lazy" src="/brand/landing-agents-quartet.webp?v=1" width="1200"/>
+</div>
+<div class="lp-team-card-body">
+<div class="lp-team-card-label">
+<h3>Barão</h3>
+<span aria-label="2 unidades de energia" class="lp-energy-tag">
+<i aria-hidden="true" class="ph ph-lightning">
+</i> 2</span>
+</div>
+<p class="lp-team-card-hook">Saldo parado em foco.</p>
+<p>Observa o dinheiro em conta corrente e mostra uma estimativa de rendimento comparada ao CDI.</p>
+</div>
+</article>
+<article class="lp-team-card" data-agent-kind="faria_limer" data-energy="2" id="faria-limer">
+<div class="lp-team-portrait lp-quartet lp-crop-x1 lp-crop-y1">
+<img alt="Um porquinho Faria Limer de camisa azul e colete, segurando um celular." height="1200" loading="lazy" src="/brand/landing-agents-quartet.webp?v=1" width="1200"/>
+</div>
+<div class="lp-team-card-body">
+<div class="lp-team-card-label">
+<h3>Faria Limer</h3>
+<span aria-label="2 unidades de energia" class="lp-energy-tag">
+<i aria-hidden="true" class="ph ph-lightning">
+</i> 2</span>
+</div>
+<p class="lp-team-card-hook">Sua carteira à vista.</p>
+<p>Apresenta o valor, o resultado e a concentração da sua carteira de ações e fundos imobiliários.</p>
+</div>
+</article>
+<aside class="lp-team-invite">
+<div class="lp-team-invite-icon">
+<i aria-hidden="true" class="ph ph-piggy-bank">
+</i>
+</div>
+<p class="lp-eyebrow">Do seu jeito</p>
+<h3>Seu time.<br/>Suas prioridades.</h3>
+<p>Escolha no painel quais agentes fazem sentido para o seu momento.</p>
+<a class="lp-btn lp-btn-dark" data-app-href="/app?view=agentes" data-app-text="Ver meus agentes" href="/cadastro">Montar meu time</a>
+<a class="lp-text-link" href="#energia">Entender a energia</a>
+</aside>
+</div>
+</div>
+</section>
+<section aria-labelledby="energy-title" class="lp-team-energy lp-section-light" id="energia">
+<div class="lp-shell">
+<div class="lp-team-energy-heading">
+<div>
+<p class="lp-eyebrow">Como funciona a energia</p>
+<h2 id="energy-title">Combine talentos.<br/>Monte o seu time.</h2>
+</div>
+<p class="lp-lead">Cada agente ativo ocupa parte da energia do seu plano. A soma dos custos precisa caber na energia disponível.</p>
+</div>
+<div class="lp-energy-plans">
+<article class="lp-energy-plan" data-energy="4" data-plan="plus">
+<div class="lp-energy-plan-top">
+<h3>Plus</h3>
+<span>4 de energia</span>
+</div>
+<p>Escolha entre os sete agentes e combine até três, conforme o custo de cada um.</p>
+<div class="lp-energy-example">
+<span>Xerife <b>2</b>
+</span>
+<b aria-hidden="true">+</b>
+<span>Carteiro <b>1</b>
+</span>
+<b aria-hidden="true">+</b>
+<span>Repórter <b>1</b>
+</span>
+</div>
+<p class="lp-energy-caption">Uma combinação possível: 4 de energia no total.</p>
+</article>
+<article class="lp-energy-plan lp-energy-plan-pro" data-energy="14" data-plan="pro">
+<div class="lp-energy-plan-top">
+<h3>Pro</h3>
+<span>14 de energia</span>
+</div>
+<p>Energia para manter os sete agentes ativos ao mesmo tempo.</p>
+<div class="lp-energy-all">
+<strong>7</strong>
+<span>olhares diferentes.<br/>Um time completo.</span>
+</div>
+<p class="lp-energy-caption">Todos os agentes juntos usam 14 de energia.</p>
+</article>
+</div>
+<div class="lp-energy-bottom">
+<p>O plano Essencial não inclui agentes. Os recursos usam os dados disponíveis na sua conta e nas conexões do Open Finance.</p>
+<a class="lp-text-link" href="/precos">Comparar planos</a>
+</div>
+</div>
+</section>
+<section class="lp-team-outro lp-section-blush">
+<div class="lp-shell">
+<div>
+<p class="lp-eyebrow">O próximo passo é seu</p>
+<h2>Traga o time para a sua rotina.</h2>
+<p>Entre no painel para escolher seus agentes e acompanhar as informações.</p>
+</div>
+<a class="lp-btn lp-btn-dark" data-app-href="/app?view=agentes" data-app-text="Ver meus agentes" href="/cadastro">Montar meu time</a>
+</div>
+</section>
+</main>
+<footer class="lp-footer lp-section-dark">
+<div class="lp-shell">
+<div class="lp-footer-grid">
+<div class="lp-footer-brand">
+<a aria-label="PigBank, voltar ao início" class="lp-brand" href="#topo">
+<img alt="PigBank" height="42" loading="lazy" src="/brand/landing-logo.webp?v=1" width="142"/>
+</a>
+<p>Clareza pra suas contas.<br/>Espaço pra sua vida.</p>
+</div>
+<nav aria-label="Produto">
+<h3>Produto</h3>
+<a href="/whatsapp">WhatsApp</a>
+<a href="/funcionalidades">Funcionalidades</a>
+<a href="/agents">Agentes</a>
+<a href="/precos">Planos</a>
+</nav>
+<nav aria-label="Ajuda">
+<h3>Ajuda</h3>
+<a href="/suporte">Suporte</a>
+<a href="/privacy">Privacidade</a>
+<a href="/termos">Termos de uso</a>
+</nav>
+</div>
+<div class="lp-footer-bottom">
+<p>© 2026 PigBank</p>
+<a href="#topo">De volta ao topo</a>
+</div>
+</div>
+</footer>
 
-  <nav class="nav">
-    <a class="nav-logo" href="/"><img class="logo-full" src="/brand/logo.webp?v=1" alt="PigBank" /></a>
-    <div class="nav-links">
-      <a href="/funcionalidades">Funcionalidades</a>
-      <a href="/como-funciona">Como funciona</a>
-      <a href="/precos">Planos</a>
-      <a href="/whatsapp">WhatsApp</a>
-      <a href="/agents" class="active">Agentes</a>
-    </div>
-    <div class="nav-right">
-      <a class="link-entrar" href="/login">Entrar</a>
-      <a class="btn btn-primary" href="/cadastro">Criar conta</a>
-    </div>
-  </nav>
-
-  <div class="wrap">
-
-    <section class="section">
-      <div class="section-head center">
-        <div class="pill" style="margin:0 auto 18px"><span class="tag-novo">NOVO</span> Sua equipe financeira no automático</div>
-        <h1>Os <span class="grad">Agentes</span><br>do Piggy</h1>
-        <p>Pequenos assistentes que trabalham por você nos bastidores. Cada um cuida de uma parte do seu dinheiro, vigiando gastos, avisando de boletos e caçando desperdício, sem você precisar pedir.</p>
-      </div>
-
-      <div class="agents-grid">
-
-        <!-- Xerife -->
-        <article class="agent-card">
-          <div class="agent-hero">
-            <img src="/brand/agents/xerife_hero.webp?v=1" alt="Xerife" loading="lazy" />
-            <div class="agent-name">Xerife</div>
-          </div>
-          <div class="agent-body">
-            <p class="agent-desc">Fica de olho no seu padrão de gastos e dá o alerta quando algo foge da curva, ou quando uma categoria estoura o limite que você definiu.</p>
-          </div>
-        </article>
-
-        <!-- Repórter -->
-        <article class="agent-card">
-          <div class="agent-hero">
-            <img src="/brand/agents/reporter_hero.webp?v=1" alt="Repórter" loading="lazy" />
-            <div class="agent-name">Repórter</div>
-          </div>
-          <div class="agent-body">
-            <p class="agent-desc">Traz a manchete do seu mês: quanto entrou, quanto saiu e quanto sobrou: o resumo direto ao ponto, sem você abrir planilha nenhuma.</p>
-          </div>
-        </article>
-
-        <!-- Carteiro -->
-        <article class="agent-card">
-          <div class="agent-hero">
-            <img src="/brand/agents/carteiro_hero.webp?v=1" alt="Carteiro" loading="lazy" />
-            <div class="agent-name">Carteiro</div>
-          </div>
-          <div class="agent-body">
-            <p class="agent-desc">Não deixa boleto vencer. Avisa antes do vencimento, direto no seu feed, pra você nunca mais pagar juros por esquecimento.</p>
-          </div>
-        </article>
-
-        <!-- Detetive -->
-        <article class="agent-card">
-          <div class="agent-hero">
-            <img src="/brand/agents/detetive_hero.webp?v=1" alt="Detetive" loading="lazy" />
-            <div class="agent-name">Detetive</div>
-          </div>
-          <div class="agent-body">
-            <p class="agent-desc">Fareja cobranças repetidas que parecem aquela assinatura esquecida, a que você paga todo mês e nem lembra mais que existe.</p>
-          </div>
-        </article>
-
-        <!-- Banqueiro -->
-        <article class="agent-card">
-          <div class="agent-hero">
-            <img src="/brand/agents/cofre_hero.webp?v=1" alt="Banqueiro" loading="lazy" />
-            <div class="agent-name">Banqueiro</div>
-          </div>
-          <div class="agent-body">
-            <p class="agent-desc">Percebe cada aporte na sua caixinha e acompanha o quanto falta pra bater a meta. Vê seu objetivo chegando perto, real, a cada depósito.</p>
-          </div>
-        </article>
-
-        <!-- Barão -->
-        <article class="agent-card">
-          <div class="agent-hero">
-            <img src="/brand/agents/barao_hero.webp?v=1" alt="Barão" loading="lazy" />
-            <div class="agent-name">Barão</div>
-          </div>
-          <div class="agent-body">
-            <p class="agent-desc">Fareja dinheiro parado rendendo nada na conta corrente e mostra, em reais, quanto ele renderia se estivesse trabalhando no CDI.</p>
-          </div>
-        </article>
-
-        <!-- Faria Limer -->
-        <article class="agent-card">
-          <div class="agent-hero">
-            <img src="/brand/agents/faria_limer_hero.webp?v=1" alt="Faria Limer" loading="lazy" />
-            <div class="agent-name">Faria Limer</div>
-          </div>
-          <div class="agent-body">
-            <p class="agent-desc">Fica de olho na sua renda variável (ações e FIIs) pela sua corretora: todo mês te entrega o retrato da carteira: valor, resultado e concentração. Só fatos, nunca recomendação: a decisão é sempre sua.</p>
-          </div>
-        </article>
-
-        <!-- Aviador (em breve) -->
-        <article class="agent-card soon">
-          <span class="agent-soon-tag">Em breve</span>
-          <div class="agent-hero">
-            <img src="/brand/agents/aviador_hero.webp?v=1" alt="Aviador" loading="lazy" />
-            <div class="agent-name">Aviador</div>
-          </div>
-          <div class="agent-body">
-            <p class="agent-desc">Vai caçar passagem em promoção pros destinos que você marcar, e avisar na hora que o preço cair. Ainda tá aquecendo as turbinas.</p>
-          </div>
-        </article>
-
-      </div>
-
-      <p class="agents-note">
-        Os Agentes são ativados no seu painel, quando e como você quiser: cada um trabalha em silêncio e só te chama quando tem algo que vale a pena saber.
-      </p>
-
-      <div class="agents-cta">
-        <!-- Deslogado → /cadastro. Logado → nav-auth.js reescreve pra data-app-*
-             (aba de agentes do painel). -->
-        <a class="btn btn-primary btn-lg" href="/cadastro"
-           data-app-href="/app?view=agentes" data-app-text="Ver meus agentes →">Montar minha equipe →</a>
-      </div>
-    </section>
-
-  </div>
-
-  <footer class="footer">
-    <div class="wrap footer-inner">
-      <div class="footer-brand">
-        <a class="nav-logo" href="/"><img class="logo-icon" src="/brand/icon.png?v=2" alt="" /> <span>PigBank</span></a>
-        <p>Seu dinheiro, suas regras, direto no WhatsApp, com a IA da Piggy.</p>
-      </div>
-      <div class="footer-cols">
-        <div class="footer-col"><span class="footer-title">Navegue</span>
-          <a href="/funcionalidades">Funcionalidades</a>
-          <a href="/como-funciona">Como funciona</a>
-          <a href="/precos">Planos</a>
-          <a href="/agents">Agentes</a>
-          <a href="/blog">Blog</a>
-        </div>
-        <div class="footer-col"><span class="footer-title">Produto</span>
-          <a href="/whatsapp">WhatsApp</a>
-          <a href="/comandos">O que pedir</a>
-          <a href="/suporte">Suporte</a>
-        </div>
-        <div class="footer-col"><span class="footer-title">Institucional</span>
-          <a href="/termos">Termos de Uso</a>
-          <a href="/privacy">Privacidade</a>
-          <a href="mailto:contato@pigbankai.com">Contato</a>
-        </div>
-      </div>
-    </div>
-    <p class="footer-copy">© 2026 PigBank · Feito com <i class="ph ph-piggy-bank" aria-hidden="true"></i></p>
-  </footer>
-
-  <script src="/nav-auth.js?v=7" defer></script>
-  <script src="/nav-burger.js?v=1" defer></script>
+<script src="/nav-auth.js?v=7" defer>
+</script>
+<script src="/nav-burger.js?v=1" defer>
+</script>
 </body>
 </html>

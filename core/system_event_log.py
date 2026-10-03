@@ -249,33 +249,36 @@ def recent_event_exists(event_type: str, user_id: int, within_days: float = 7.0)
     disparados por múltiplas fontes (webhook + scheduler).
     Falha silenciosa retorna False — melhor mandar duplicado que perder.
 
-    E o que esse corte custa NÃO é "um duplicado". Em 10 call sites esta função
-    é a metade de LEITURA de um check-then-act (`grep -rn "recent_event_exists"`
-    fora de `tests/`, remedir antes de reusar o número). E este PR deixa os 10
-    em DOIS REGIMES, porque só a metade de leitura ganhou o teto:
+    E o que esse corte custa NÃO é "um duplicado". Em 12 call sites esta função
+    é a metade de LEITURA de um check-then-act (medido em 2026-09-29 com
+    `grep -rn "recent_event_exists" --include='*.py' . | grep -v tests/ | grep -v .venv`,
+    contando só as chamadas; remedir antes de reusar o número e as linhas). E
+    eles ficam em DOIS REGIMES, porque só a metade de leitura ganhou o teto:
 
-    (A) OITO em que a ESCRITA é o `log_system_event_sync` acima — as duas pontas
-    falham na MESMA direção. `pix_drain_effects.py:281`,
-    `engagement_scheduler.py:280` e `:333`, `payment_reminder.py:207`,
-    `billing_access.py:487` e `:514`, `launches.py:1261`,
+    (A) DEZ em que a ESCRITA é o `log_system_event_sync` acima — as duas pontas
+    falham na MESMA direção. `pix_drain_effects.py:286`,
+    `engagement_scheduler.py:267`, `payment_reminder.py:207`,
+    `billing_access.py:487` e `:514`, `launches.py:1304`,
+    `open_finance_proactive.py:77` e `:122`,
+    `email_service.py:1380` (`send_founder_email_once`, `founder_email_sent`),
     `scripts/aviso_fim_do_gratis.py:216`. Com a tabela travada a leitura devolve
     `False` e a escrita do marcador é CANCELADA sem gravar a linha. Então o
     e-mail sai a cada passada do scheduler enquanto o lock durar, e não uma vez
     a mais — reenvio recorrente, que é a "falha ABERTA nas duas pontas" que
     `scripts/aviso_fim_do_gratis.py:52` já nomeia (e o call site dele é um
-    destes oito). Antes do teto as duas bloqueavam e terminavam corretas; o teto
+    destes dez). Antes do teto as duas bloqueavam e terminavam corretas; o teto
     troca a espera por essa janela, que deixa de ser só "banco fora" e passa a
     incluir DDL ou `vacuum full` de 2s.
 
     (B) DOIS em que a ESCRITA é o `log_system_event` de
-    `core/admin_dashboard.py` — `frontend/finance_bot_websocket_custom.py:5399`
-    (dedup genérico de billing, `_fire_email`) e `:5798`
+    `core/admin_dashboard.py` — `frontend/finance_bot_websocket_custom.py:5957`
+    (dedup genérico de billing, `_fire_email`) e `:6369`
     (`trial_ending_email_sent`, webhook `trial_will_end`). O regime MISTO que
     este texto descrevia FOI FECHADO (issue #429): aquele gravador deixou de
     abrir por `db_connect` e passou a abrir conexão própria com
     `connect_timeout=DB_CONNECT_TIMEOUT` **e** `options=statement_timeout_options()`
     — o helper acima, uma fonte de verdade só. Com a tabela travada as duas
-    pontas agora desistem no mesmo teto e na mesma direção, igual aos oito de
+    pontas agora desistem no mesmo teto e na mesma direção, igual aos dez de
     (A): a leitura devolve `False` e a escrita do marcador é cancelada sem
     gravar, logo o e-mail sai a cada passada enquanto o lock durar. Era um
     reenvio só (a escrita esperava o lock e acabava gravando); passou a ser o

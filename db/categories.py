@@ -7,8 +7,8 @@ Duas tabelas distintas:
 - `user_categories`: nome + emoji + cor por usuário (metadata visual da
   Sprint 3). Não tem FK em launches — `launches.categoria` continua string
   livre. Rename emite UPDATE em cascata nas tabelas que referenciam o
-  texto da categoria — a lista vive no bloco `if rename:` de
-  `update_user_category`, e é lá que se conta (contar aqui envelhece).
+  texto da categoria — a lista vive em `cascata_nome_categoria`, e é lá
+  que se conta (contar aqui envelhece).
 """
 import logging
 import unicodedata
@@ -339,9 +339,11 @@ def ensure_user_categories_seeded(user_id: int) -> None:
                 from (
                     select distinct categoria from launches
                     where user_id=%s and categoria is not null
+                      and coalesce(source,'') <> 'open_finance'
                     union
                     select distinct categoria from credit_transactions
                     where user_id=%s and categoria is not null
+                      and coalesce(source,'') <> 'open_finance'
                 ) src
                 where trim(coalesce(categoria,'')) <> ''
                 on conflict (user_id, name) do nothing
@@ -505,6 +507,87 @@ def get_user_category(user_id: int, cat_id: int) -> dict | None:
             }
 
 
+def _nome_ocupado(cur, user_id: int, norm: str, excluir_id: int | None = None) -> bool:
+    """Outra linha do usuário já tem este nome, a menos de acento/caixa/pontuação?
+
+    O `or x` é obrigatório: `normalize_text` apaga emoji, e "☕"/"🍕" virariam a
+    mesma chave "". Issue #149 (gêmeas no catálogo).
+    ponytail: sem índice sobre a chave normalizada, duas criações simultâneas
+    ainda podem gerar gêmea; o índice único é o upgrade se isso aparecer."""
+    def chave(x):
+        return normalize_text(x) or x
+    cur.execute("select id, name from user_categories where user_id=%s", (user_id,))
+    return any(r["id"] != excluir_id and chave(r["name"]) == chave(norm) for r in cur.fetchall())
+
+
+def cascata_nome_categoria(cur, user_id: int, antigo: str, novo: str) -> dict[str, int]:
+    """Troca o texto `antigo` por `novo` em toda tabela que guarda a categoria.
+    Do rename e do `scripts/fundir_categorias.py`; devolve o rowcount por tabela."""
+    n: dict[str, int] = {}
+
+    def ex(sql, params):
+        cur.execute(sql, params)
+        n[sql.split()[1]] = cur.rowcount
+
+    ex(
+        "update launches set categoria=%s "
+        "where user_id=%s and lower(categoria)=lower(%s)",
+        (novo, user_id, antigo),
+    )
+    ex(
+        "update credit_transactions set categoria=%s "
+        "where user_id=%s and lower(categoria)=lower(%s)",
+        (novo, user_id, antigo),
+    )
+    ex(
+        "update category_budgets set categoria=%s "
+        "where user_id=%s and lower(categoria)=lower(%s) "
+        "and not exists ("
+        "  select 1 from category_budgets cb2 "
+        "  where cb2.user_id=%s and lower(cb2.categoria)=lower(%s) and cb2.id<>category_budgets.id"
+        ")",
+        (novo, user_id, antigo, user_id, novo),
+    )
+    ex(
+        "update budget_alert_sent set categoria=%s "
+        "where user_id=%s and lower(categoria)=lower(%s) "
+        "and not exists ("
+        "  select 1 from budget_alert_sent bs2 "
+        "  where bs2.user_id=%s and lower(bs2.categoria)=lower(%s) "
+        "    and bs2.ym=budget_alert_sent.ym and bs2.threshold=budget_alert_sent.threshold"
+        ")",
+        (novo, user_id, antigo, user_id, novo),
+    )
+    ex(
+        "update user_category_rules set category=%s "
+        "where user_id=%s and lower(category)=lower(%s)",
+        (novo, user_id, antigo),
+    )
+    # #147: os recorrentes guardam o TEXTO da categoria. Ficar de
+    # fora do cascade deixava o recorrente no nome velho com o
+    # histórico já renomeado acima — a categoria que sumiu do
+    # catálogo continuava viva nele. Medido em
+    # `test_rename_cascateia_para_o_recorrente`.
+    ex(
+        "update recurring_expenses set category=%s "
+        "where user_id=%s and lower(category)=lower(%s)",
+        (novo, user_id, antigo),
+    )
+    ex(
+        "update recurring_incomes set category=%s "
+        "where user_id=%s and lower(category)=lower(%s)",
+        (novo, user_id, antigo),
+    )
+    # #149: a conta avulsa guarda o texto e `mark_bill_paid` o copia para o
+    # lançamento — fora daqui, pagar a conta ressuscitava a categoria velha.
+    ex(
+        "update bill_instances set category=%s "
+        "where user_id=%s and lower(category)=lower(%s)",
+        (novo, user_id, antigo),
+    )
+    return n
+
+
 def create_user_category(
     user_id: int, name: str, emoji: str | None = None, color: str | None = None
 ) -> dict:
@@ -524,11 +607,7 @@ def create_user_category(
     color = (color or "#7c3aed").strip() or "#7c3aed"
     with get_conn() as conn:
         with conn.cursor() as cur:
-            cur.execute(
-                "select id from user_categories where user_id=%s and name=%s",
-                (user_id, norm),
-            )
-            if cur.fetchone():
+            if _nome_ocupado(cur, user_id, norm):
                 raise ValueError("CATEGORIA_DUPLICADA")
             cur.execute(
                 """
@@ -595,66 +674,9 @@ def update_user_category(
     with get_conn() as conn:
         with conn.cursor() as cur:
             if rename:
-                cur.execute(
-                    "select id from user_categories "
-                    "where user_id=%s and name=%s and id<>%s",
-                    (user_id, next_name, int(cat_id)),
-                )
-                if cur.fetchone():
+                if _nome_ocupado(cur, user_id, next_name, excluir_id=int(cat_id)):
                     raise ValueError("CATEGORIA_DUPLICADA")
-
-                old_name = current["name"]
-                # Cascata em todas as tabelas que armazenam o texto.
-                cur.execute(
-                    "update launches set categoria=%s "
-                    "where user_id=%s and lower(categoria)=lower(%s)",
-                    (next_name, user_id, old_name),
-                )
-                cur.execute(
-                    "update credit_transactions set categoria=%s "
-                    "where user_id=%s and lower(categoria)=lower(%s)",
-                    (next_name, user_id, old_name),
-                )
-                cur.execute(
-                    "update category_budgets set categoria=%s "
-                    "where user_id=%s and lower(categoria)=lower(%s) "
-                    "and not exists ("
-                    "  select 1 from category_budgets cb2 "
-                    "  where cb2.user_id=%s and lower(cb2.categoria)=lower(%s) and cb2.id<>category_budgets.id"
-                    ")",
-                    (next_name, user_id, old_name, user_id, next_name),
-                )
-                cur.execute(
-                    "update budget_alert_sent set categoria=%s "
-                    "where user_id=%s and lower(categoria)=lower(%s) "
-                    "and not exists ("
-                    "  select 1 from budget_alert_sent bs2 "
-                    "  where bs2.user_id=%s and lower(bs2.categoria)=lower(%s) "
-                    "    and bs2.ym=budget_alert_sent.ym and bs2.threshold=budget_alert_sent.threshold"
-                    ")",
-                    (next_name, user_id, old_name, user_id, next_name),
-                )
-                cur.execute(
-                    "update user_category_rules set category=%s "
-                    "where user_id=%s and lower(category)=lower(%s)",
-                    (next_name, user_id, old_name),
-                )
-                # #147: os recorrentes guardam o TEXTO da categoria e o cobrador
-                # o copia pra `launches.categoria` todo mês. Ficar de fora do
-                # cascade reabria a fatia gêmea que o #147 fechou: o histórico
-                # renomeado acima e o recorrente ainda no nome velho, que o
-                # cobrador (`create=False` + `or raw`) grava de novo no mês
-                # seguinte. Medido em `test_rename_cascateia_para_o_recorrente`.
-                cur.execute(
-                    "update recurring_expenses set category=%s "
-                    "where user_id=%s and lower(category)=lower(%s)",
-                    (next_name, user_id, old_name),
-                )
-                cur.execute(
-                    "update recurring_incomes set category=%s "
-                    "where user_id=%s and lower(category)=lower(%s)",
-                    (next_name, user_id, old_name),
-                )
+                cascata_nome_categoria(cur, user_id, current["name"], next_name)
 
             # `created_at` renovado QUANDO O NOME MUDA, e só aí. O campo responde
             # "desde quando esta categoria é dona deste termo", e num rename a
@@ -909,15 +931,11 @@ def resolve_category_for_write(user_id: int, raw: str) -> str:
     pode ter categoria custom: "Padaria do Zé" seria gravado "padaria do ze" com o
     histórico em "Padaria do Zé", e o donut — que agrupa pela string crua, sensível a
     caixa e acento (`db/accounts.py`) — abriria a fatia GÊMEA que o #147 existe pra
-    matar. É a mesma razão pela qual o cobrador usa `create=False`
-    (`recurring_charger._canonical_category`); a porta de escrita não pode fazer o que
-    o cobrador foi proibido de fazer.
+    matar.
 
     Quem não pode ter custom hoje é o PLANO INATIVO (assinatura vencida, cancelada ou
     com pagamento falhando): `get_plan_tier` colapsa em "free" quando `_paid_plan_active`
     é falso (`core/services/plan_service.py:117-122`) — não é mais um produto grátis.
-    E `list_due_recurring_expenses` não filtra por plano, então essa pessoa continua
-    gerando lançamento todo mês.
 
     Para quem PODE ter custom nada muda: `create=True`, grafia preservada, catálogo
     semeado depois pelo `ensure_user_category`, e a falha de leitura do catálogo
@@ -941,14 +959,15 @@ def _custom_categories_allowed(user_id: int) -> bool:
     return plan_gate_ok(user_id, "custom_categories")
 
 
-def ensure_user_category(user_id: int, name: str) -> None:
+def ensure_user_category(user_id: int, name: str, *, exigir_plano: bool = True) -> None:
     """Garante a linha em `user_categories` do nome que acabou de ser gravado.
 
     Idempotente e best-effort: roda DEPOIS do UPDATE (senão sobra categoria
     órfã quando o alvo não existe) e nunca derruba a resposta — a correção já
     está no banco. No-op pra rótulo do sistema, pra nome que já existe e pra
     quem não tem plano com categoria custom (aí o texto fica só no lançamento,
-    como era antes da normalização).
+    como era antes da normalização). `exigir_plano=False` é do import do Open
+    Finance: a categoria vem do mapa do sistema, não é custom do cliente.
     """
     from utils_text import CATEGORY_LABELS
 
@@ -961,7 +980,7 @@ def ensure_user_category(user_id: int, name: str) -> None:
         # ponytail: 2ª leitura de plano no mesmo PATCH (a 1ª é o
         # `resolve_category_input`). Fica porque esta função é pública e GRAVA;
         # se pesar, passa o veredito como argumento.
-        if not _custom_categories_allowed(user_id):
+        if exigir_plano and not _custom_categories_allowed(user_id):
             return
         create_user_category(user_id, name)
     except ValueError:

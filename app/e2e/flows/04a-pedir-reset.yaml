@@ -1,0 +1,14 @@
+appId: ${APP_ID}
+---
+- launchApp:
+    clearState: true
+    clearKeychain: true
+- tapOn: "Já tenho conta"
+- tapOn: "Esqueci a senha"
+- tapOn:
+    id: "esqueci-email"
+- inputText: ${EMAIL}
+- tapOn: "Enviar"
+- extendedWaitUntil:
+    visible: "Verifique seu e-mail"
+    timeout: 20000

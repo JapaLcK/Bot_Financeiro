@@ -1,13 +1,16 @@
 """Regressões dos Agentes do Piggy (achados de review do PR #3).
 
-Cobrem os dois fixes testáveis sem Postgres:
+Cobrem os dois fixes testáveis sem montar o agente no banco:
 - F1: a view de Agentes não pode morrer com ImportError quando o plans-v2
   (plans_v2_enabled/require_min_tier) não está no código.
 - F3: o Repórter não manda e-mail pra quem se descadastrou (engagement_opt_out).
+  O dono do agente é um pagante real (`usuario_pagante`, Postgres): o envio
+  filtra quem tem acesso ao app antes de chegar ao opt-out.
 
 F2 (aportes no _month_stats) e F5 (limite atômico no activate_agent) dependem de
 DB real — verificados por inspeção/SQL, não aqui.
 """
+from conftest import usuario_pagante
 
 
 # ── F1: _plan_allows_multiple sobrevive sem os helpers do plans-v2 ────────────
@@ -51,7 +54,7 @@ def _arm_reporter(monkeypatch, *, opted_out: bool):
 
     monkeypatch.setattr(
         db, "list_agents_pending_email",
-        lambda: [{"agent_id": 1, "user_id": 42, "kind": "reporter",
+        lambda: [{"agent_id": 1, "user_id": usuario_pagante(), "kind": "reporter",
                   "config": {}, "last_emailed_at": None}],
     )
     monkeypatch.setattr(
@@ -474,7 +477,7 @@ def test_email_do_faria_respeita_carencia_de_autocorrecao(monkeypatch):
             return ids
 
         monkeypatch.setattr(db, "list_agents_pending_email", lambda: [
-            {"agent_id": 9, "user_id": 42, "kind": "faria_limer",
+            {"agent_id": 9, "user_id": usuario_pagante(), "kind": "faria_limer",
              "config": {}, "last_emailed_at": None}])
         monkeypatch.setattr(db, "list_unemailed_events", lambda agent_id: [
             {"id": 7, "payload": {"titulo": "Sua renda variável",
@@ -511,7 +514,7 @@ def test_email_pula_evento_que_mudou_entre_leitura_e_claim(monkeypatch):
     now = datetime(2026, 8, 13, 12, 0, tzinfo=timezone.utc)
     sent, touched = [], []
     monkeypatch.setattr(db, "list_agents_pending_email", lambda: [
-        {"agent_id": 9, "user_id": 42, "kind": "faria_limer",
+        {"agent_id": 9, "user_id": usuario_pagante(), "kind": "faria_limer",
          "config": {}, "last_emailed_at": None}])
     monkeypatch.setattr(db, "list_unemailed_events", lambda agent_id: [
         {"id": 7, "payload": {"titulo": "T", "mensagem": "M"},
@@ -544,7 +547,7 @@ def test_optout_apenas_pula_sem_carimbar(monkeypatch):
     def _arm(*, email_enabled=True, optout=False):
         sent, claimed = [], []
         monkeypatch.setattr(db, "list_agents_pending_email", lambda: [
-            {"agent_id": 9, "user_id": 42, "kind": "faria_limer",
+            {"agent_id": 9, "user_id": usuario_pagante(), "kind": "faria_limer",
              "config": {"email_enabled": email_enabled}, "last_emailed_at": None}])
         monkeypatch.setattr(db, "list_unemailed_events", lambda agent_id: [
             {"id": 7, "payload": {"titulo": "T", "mensagem": "M"},
@@ -816,7 +819,7 @@ def test_email_do_barao_segura_evento_recem_mudado(monkeypatch):
     def _arm(fired_at):
         sent, claimed = [], []
         monkeypatch.setattr(db, "list_agents_pending_email", lambda: [
-            {"agent_id": 9, "user_id": 42, "kind": "barao", "config": {}, "last_emailed_at": None}])
+            {"agent_id": 9, "user_id": usuario_pagante(), "kind": "barao", "config": {}, "last_emailed_at": None}])
         monkeypatch.setattr(db, "list_unemailed_events", lambda aid: [
             {"id": 7, "payload": {"titulo": "T", "mensagem": "M"}, "fired_at": fired_at}])
         monkeypatch.setattr(db, "claim_agent_events_for_email",
@@ -845,7 +848,7 @@ def _arm_agg_email(monkeypatch, *, kind, fired_at, sync_recente, now):
     import core.services.plan_service as ps
     sent, claimed = [], []
     monkeypatch.setattr(db, "list_agents_pending_email", lambda: [
-        {"agent_id": 9, "user_id": 42, "kind": kind, "config": {}, "last_emailed_at": None}])
+        {"agent_id": 9, "user_id": usuario_pagante(), "kind": kind, "config": {}, "last_emailed_at": None}])
     monkeypatch.setattr(db, "list_unemailed_events", lambda aid: [
         {"id": 7, "payload": {"titulo": "T", "mensagem": "M"}, "fired_at": fired_at}])
     monkeypatch.setattr(db, "user_synced_within", lambda uid, mins: sync_recente)
@@ -1087,7 +1090,7 @@ def test_webhook_por_item_segura_email_antes_das_leituras(monkeypatch):
                         lambda item, key: ordem.append("le_contas") or [])
     monkeypatch.setattr(ps, "save_open_finance_sync", lambda cid, accs: {})
     monkeypatch.setattr(ps, "list_pluggy_investments", lambda item, key: [])
-    monkeypatch.setattr(ps, "save_open_finance_investments", lambda cid, invs: {})
+    monkeypatch.setattr(ps, "save_open_finance_investments", lambda cid, invs, **kw: {})
     monkeypatch.setattr(ps, "import_open_finance_launches", lambda uid, cid: {})
     monkeypatch.setattr(ps, "import_open_finance_credit", lambda uid, cid: {})
     monkeypatch.setattr(ps, "sync_imported_open_finance_updates", lambda uid, cid: {})
@@ -1138,7 +1141,7 @@ def test_ripe_respeita_o_hold_mesmo_com_evento_maduro(monkeypatch):
     def _arm(hold_until):
         sent = []
         monkeypatch.setattr(db, "list_agents_pending_email", lambda: [
-            {"agent_id": 9, "user_id": 42, "kind": "barao", "config": {}, "last_emailed_at": None}])
+            {"agent_id": 9, "user_id": usuario_pagante(), "kind": "barao", "config": {}, "last_emailed_at": None}])
         monkeypatch.setattr(db, "list_unemailed_events", lambda aid: [
             {"id": 7, "payload": {"titulo": "T", "mensagem": "M"},
              "fired_at": velho, "email_hold_until": hold_until}])
@@ -1557,7 +1560,7 @@ def test_sync_item_renova_hold_durante_o_sync(monkeypatch):
     monkeypatch.setattr(ps, "list_pluggy_transactions", _txs)
     monkeypatch.setattr(ps, "save_open_finance_sync", lambda cid, accs: {})
     monkeypatch.setattr(ps, "list_pluggy_investments", lambda item, key: [])
-    monkeypatch.setattr(ps, "save_open_finance_investments", lambda cid, invs: {})
+    monkeypatch.setattr(ps, "save_open_finance_investments", lambda cid, invs, **kw: {})
     monkeypatch.setattr(ps, "import_open_finance_launches", lambda uid, cid: {})
     monkeypatch.setattr(ps, "import_open_finance_credit", lambda uid, cid: {})
     monkeypatch.setattr(ps, "sync_imported_open_finance_updates", lambda uid, cid: {})
@@ -1744,3 +1747,54 @@ def test_detetive_duplicate_sem_achados_nao_emite(monkeypatch):
     fired = pa._detetive_duplicate_detect_for_user(
         {"agent_id": 1, "user_id": 42}, _date(2026, 8, 19))
     assert fired == 0
+
+
+# ── Manchete: sem % de variação, cita o mês anterior em valor ────────────────
+
+def _m(entrou, saiu, aportes=0.0):
+    return {"entrou": entrou, "saiu": saiu, "aportes": aportes,
+            "sobrou": entrou - saiu - aportes}
+
+
+def test_manchete_virada_de_sinal():
+    from core.services.piggy_agents import _manchete_texto
+    texto = _manchete_texto(_m(10163.02, 11507.05), _m(5000, 3341), "setembro", "agosto")
+    assert texto == (
+        "Em setembro, entraram R$ 10.163,02 e saíram R$ 11.507,05, resultando em "
+        "um déficit de R$ 1.344,03. Em agosto, você havia encerrado "
+        "com uma sobra de R$ 1.659,00."
+    )
+    assert "%" not in texto and "—" not in texto
+
+
+def test_manchete_sobra_nos_dois_meses():
+    from core.services.piggy_agents import _manchete_texto
+    texto = _manchete_texto(_m(3000, 1000), _m(2000, 1000), "setembro", "agosto")
+    assert "resultando em uma sobra de R$ 2.000,00." in texto
+    assert texto.endswith("com uma sobra de R$ 1.000,00.")
+
+
+def test_manchete_mes_anterior_sem_movimento_nao_cita():
+    from core.services.piggy_agents import _manchete_texto
+    texto = _manchete_texto(_m(100, 40), _m(0, 0), "setembro", "agosto")
+    assert texto.endswith("resultando em uma sobra de R$ 60,00.")
+
+
+def test_manchete_cita_aporte_para_a_conta_fechar():
+    from core.services.piggy_agents import _manchete_texto
+    texto = _manchete_texto(_m(3000, 1000, 500), _m(0, 0), "setembro", "agosto")
+    assert "saíram R$ 1.000,00, R$ 500,00 foram para as caixinhas, resultando em uma sobra de R$ 1.500,00." in texto
+    texto = _manchete_texto(_m(3000, 1000, -500), _m(0, 0), "setembro", "agosto")
+    assert "R$ 500,00 voltaram das caixinhas, resultando em uma sobra de R$ 2.500,00." in texto
+
+
+def test_manchete_mes_anterior_so_com_aporte_conta_como_movimento():
+    from core.services.piggy_agents import _manchete_texto
+    texto = _manchete_texto(_m(100, 40), _m(0, 0, 300), "setembro", "agosto")
+    assert texto.endswith("Em agosto, você havia encerrado com um déficit de R$ 300,00.")
+
+
+def test_manchete_mes_zerado_com_ruido_de_float_nao_vira_deficit():
+    from core.services.piggy_agents import _manchete_texto
+    texto = _manchete_texto(_m(0.3, 0.1, 0.2), _m(0, 0), "setembro", "agosto")
+    assert "uma sobra de R$ 0,00" in texto and "déficit" not in texto

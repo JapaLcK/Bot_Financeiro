@@ -120,7 +120,11 @@ def mundo_externo(monkeypatch) -> dict:
               # saem os dois por `return False`. O falso devolve o mesmo `bool`
               # que a produção, senão o efeito `email` seria medido contra uma
               # função que não existe. `email_ok=False` liga o caminho da falha.
-              "email_ok": True}
+              "email_ok": True,
+              # O e-mail do fundador sai do mesmo efeito `email`; conta-se o
+              # remetente de baixo, para as travas do `send_founder_email_once`
+              # rodarem de verdade. `fundador_erro` liga uma exceção nele.
+              "fundador": 0, "fundador_erro": None}
 
     import core.services.admin_notify as an
     import core.services.email_service as es
@@ -142,6 +146,14 @@ def mundo_externo(monkeypatch) -> dict:
     monkeypatch.setattr(capi, "send_event",
                         lambda **kw: contas.__setitem__("capi", contas["capi"] + 1))
     monkeypatch.setattr(es, "send_pix_paid_email", _email)
+
+    def _fundador(to):
+        if contas["fundador_erro"]:
+            raise contas["fundador_erro"]
+        contas["fundador"] += 1
+        return True
+
+    monkeypatch.setattr(es, "send_founder_email", _fundador)
     monkeypatch.setattr(an, "notify_pix_alerta",
                         lambda msg: contas["alerta"].append(msg) or True)
     return contas

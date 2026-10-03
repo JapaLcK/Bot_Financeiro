@@ -46,6 +46,7 @@ from cryptography.fernet import Fernet
 os.environ.setdefault("MFA_ENCRYPTION_KEY", Fernet.generate_key().decode())
 
 import db
+from conftest import promote_to_pro
 import core.observability as observability
 import core.system_event_log as system_event_log
 from _system_event_log_helpers import kwargs_com_valor
@@ -352,6 +353,7 @@ def test_rota_http_continua_persistindo_o_traceback(user_id, monkeypatch, caplog
 
     monkeypatch.setattr(cards_mod, "undo_installment_group", explode)
 
+    promote_to_pro(user_id)  # atravessa o gate de acesso do v2
     client = TestClient(dashboard.app)
     client.cookies.set(dashboard.AUTH_COOKIE_NAME, dashboard._make_jwt(user_id, "del@t.com"))
     client.cookies.set(dashboard.DASHBOARD_COOKIE_NAME,
@@ -519,6 +521,7 @@ def test_traceback_persistido_tem_o_mesmo_teto_da_main():
 
 
 def _client(user_id):
+    promote_to_pro(user_id)  # atravessa o gate de acesso do v2
     from fastapi.testclient import TestClient
     import frontend.finance_bot_websocket_custom as dashboard
 

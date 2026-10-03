@@ -23,11 +23,14 @@
 <link rel="stylesheet" href="/dashboard.css?v=8" />
 <link rel="stylesheet" href="/dashboard-mobile.css" media="(max-width: 900px)" />
 <link rel="stylesheet" href="/sidenav-rail.css?v=3" />
+<script defer src="/sidenav-groups.js?v=1"></script>
 <script defer src="/sidenav-scrollbar.js?v=1"></script>
 <!-- defer preserva a ordem: auth-refresh (patch do fetch) → modals → app-mode →
      dashboard.js. Nenhum script inline depende deles durante o parse. -->
 <script defer src="/static/auth-refresh.js?v=1"></script>
 <script defer src="/modals.js"></script>
+<link rel="stylesheet" href="/criar-senha.css?v=1" />
+<script defer src="/criar-senha.js?v=1"></script>
 <script defer src="/launch-type-labels.js?v=1"></script>
   <link rel="stylesheet" href="/app-mode.css?v=34" />
   <script defer src="/app-mode.js?v=34"></script>
@@ -57,44 +60,78 @@
   <button class="sidenav-item active" type="button" data-nav="overview" onclick="navigateTo('overview')">
     <span class="sn-icon" style="color:#3B82F6"><i class="ph ph-chart-bar" aria-hidden="true"></i></span><span class="sn-label">Visão Geral</span>
   </button>
-  <button class="sidenav-item" type="button" data-nav="analytics" onclick="navigateTo('analytics')">
-    <span class="sn-icon" style="color:#06B6D4"><i class="ph ph-chart-line-up" aria-hidden="true"></i></span><span class="sn-label">Análises</span>
-  </button>
-  <button class="sidenav-item" type="button" data-nav="history" onclick="navigateTo('history')">
-    <span class="sn-icon" style="color:#94A3B8"><i class="ph ph-clock-counter-clockwise" aria-hidden="true"></i></span><span class="sn-label">Histórico</span>
-  </button>
   <button class="sidenav-item" type="button" data-nav="agentes" onclick="navigateTo('agentes')">
     <span class="sn-icon" style="color:#FF2D8E"><i class="ph ph-piggy-bank" aria-hidden="true"></i></span><span class="sn-label">Agentes</span><span class="sn-tag new">novo</span>
   </button>
 
-  <div class="sidenav-section">Planejamento</div>
-  <button class="sidenav-item" type="button" data-nav="fixed" onclick="navigateTo('fixed')">
-    <span class="sn-icon" style="color:#14B8A6"><i class="ph ph-arrows-clockwise" aria-hidden="true"></i></span><span class="sn-label">Recorrentes</span>
-  </button>
-  <button class="sidenav-item" type="button" data-nav="budgets" onclick="navigateTo('budgets')">
-    <span class="sn-icon" style="color:#F59E0B"><i class="ph ph-note-pencil" aria-hidden="true"></i></span><span class="sn-label">Orçamentos</span><span class="sn-tag new">novo</span>
-  </button>
-  <button class="sidenav-item" type="button" data-nav="goals" onclick="navigateTo('goals')">
-    <span class="sn-icon" style="color:#10B981"><i class="ph ph-target" aria-hidden="true"></i></span><span class="sn-label">Caixinhas e metas</span><span class="sn-tag new">novo</span>
-  </button>
-  <button class="sidenav-item" type="button" data-nav="categories" onclick="navigateTo('categories')">
-    <span class="sn-icon" style="color:#A855F7"><i class="ph ph-tag" aria-hidden="true"></i></span><span class="sn-label">Categorias</span>
-  </button>
+  <!-- Menus colapsáveis: só Início/Visão Geral/Agentes ficam sempre visíveis.
+       Estado persiste em localStorage e o menu da view ativa abre sozinho
+       (toggleSidenavGroup/initSidenavGroups em dashboard.js). -->
+  <div class="sidenav-group" data-group="acompanhamento">
+    <button class="sidenav-item sidenav-group-toggle" type="button" aria-expanded="false" aria-controls="sn-sub-acompanhamento" onclick="toggleSidenavGroup('acompanhamento')">
+      <span class="sn-icon" style="color:#06B6D4"><i class="ph ph-chart-line-up" aria-hidden="true"></i></span><span class="sn-label">Acompanhamento</span><i class="ph ph-caret-right sn-caret" aria-hidden="true"></i>
+    </button>
+    <div class="sidenav-subitems" id="sn-sub-acompanhamento">
+      <button class="sidenav-item" type="button" data-nav="analytics" onclick="navigateTo('analytics')">
+        <span class="sn-icon" style="color:#06B6D4"><i class="ph ph-chart-line-up" aria-hidden="true"></i></span><span class="sn-label">Análises</span>
+      </button>
+      <button class="sidenav-item" type="button" data-nav="history" onclick="navigateTo('history')">
+        <span class="sn-icon" style="color:#94A3B8"><i class="ph ph-clock-counter-clockwise" aria-hidden="true"></i></span><span class="sn-label">Histórico</span>
+      </button>
+    </div>
+  </div>
 
-  <div class="sidenav-section">Crédito</div>
-  <button class="sidenav-item" type="button" data-nav="installments" onclick="navigateTo('installments')">
-    <span class="sn-icon" style="color:#FB923C"><i class="ph ph-credit-card" aria-hidden="true"></i></span><span class="sn-label">Parcelamentos</span>
-  </button>
-  <button class="sidenav-item" type="button" data-nav="cards" onclick="navigateTo('cards')">
-    <span class="sn-icon" style="color:#6366F1"><i class="ph ph-cards" aria-hidden="true"></i></span><span class="sn-label">Cartões</span><span class="sn-tag new">novo</span>
-  </button>
-  <button class="sidenav-item" type="button" data-nav="investments" data-pro-feature="investments" onclick="navigateTo('investments')">
-    <span class="sn-icon" style="color:#22C55E"><i class="ph ph-chart-line-up" aria-hidden="true"></i></span><span class="sn-label">Investimentos</span><span class="sn-tag">Pro</span>
-  </button>
-  <!-- Só aparece pra quem é afiliado (initAffiliateNav mostra se /api/affiliate/me responder 200) -->
-  <button class="sidenav-item" type="button" data-nav="affiliate" id="sidenav-affiliate" style="display:none" onclick="navigateTo('affiliate')">
-    <span class="sn-icon" style="color:#F43F5E"><i class="ph ph-handshake" aria-hidden="true"></i></span><span class="sn-label">Afiliados</span>
-  </button>
+  <div class="sidenav-group" data-group="planejamento">
+    <button class="sidenav-item sidenav-group-toggle" type="button" aria-expanded="false" aria-controls="sn-sub-planejamento" onclick="toggleSidenavGroup('planejamento')">
+      <span class="sn-icon" style="color:#14B8A6"><i class="ph ph-clipboard-text" aria-hidden="true"></i></span><span class="sn-label">Planejamento</span><i class="ph ph-caret-right sn-caret" aria-hidden="true"></i>
+    </button>
+    <div class="sidenav-subitems" id="sn-sub-planejamento">
+      <button class="sidenav-item" type="button" data-nav="fixed" onclick="navigateTo('fixed')">
+        <span class="sn-icon" style="color:#14B8A6"><i class="ph ph-arrows-clockwise" aria-hidden="true"></i></span><span class="sn-label">Recorrentes</span>
+      </button>
+      <button class="sidenav-item" type="button" data-nav="goals" onclick="navigateTo('goals')">
+        <span class="sn-icon" style="color:#10B981"><i class="ph ph-target" aria-hidden="true"></i></span><span class="sn-label">Caixinhas e metas</span><span class="sn-tag new">novo</span>
+      </button>
+      <button class="sidenav-item" type="button" data-nav="categories" onclick="navigateTo('categories')">
+        <span class="sn-icon" style="color:#A855F7"><i class="ph ph-tag" aria-hidden="true"></i></span><span class="sn-label">Categorias</span>
+      </button>
+    </div>
+  </div>
+
+  <div class="sidenav-group" data-group="ferramentas">
+    <button class="sidenav-item sidenav-group-toggle" type="button" aria-expanded="false" aria-controls="sn-sub-ferramentas" onclick="toggleSidenavGroup('ferramentas')">
+      <span class="sn-icon" style="color:#F59E0B"><i class="ph ph-wrench" aria-hidden="true"></i></span><span class="sn-label">Ferramentas</span><i class="ph ph-caret-right sn-caret" aria-hidden="true"></i>
+    </button>
+    <div class="sidenav-subitems" id="sn-sub-ferramentas">
+      <button class="sidenav-item" type="button" data-nav="budgets" onclick="navigateTo('budgets')">
+        <span class="sn-icon" style="color:#F59E0B"><i class="ph ph-note-pencil" aria-hidden="true"></i></span><span class="sn-label">Orçamentos</span><span class="sn-tag new">novo</span>
+      </button>
+      <button class="sidenav-item" type="button" data-nav="orcamento-domestico" data-pro-feature="household_budget" onclick="navigateTo('orcamento-domestico')">
+        <span class="sn-icon" style="color:#38BDF8"><i class="ph ph-bank" aria-hidden="true"></i></span><span class="sn-label">Orçamento Doméstico</span><span class="sn-tag">Pro</span>
+      </button>
+      <button class="sidenav-item" type="button" data-nav="investments" data-pro-feature="investments" onclick="navigateTo('investments')">
+        <span class="sn-icon" style="color:#22C55E"><i class="ph ph-chart-line-up" aria-hidden="true"></i></span><span class="sn-label">Investimentos</span><span class="sn-tag">Pro</span>
+      </button>
+      <!-- Só aparece pra quem é afiliado (initAffiliateNav mostra se /api/affiliate/me responder 200) -->
+      <button class="sidenav-item" type="button" data-nav="affiliate" id="sidenav-affiliate" style="display:none" onclick="navigateTo('affiliate')">
+        <span class="sn-icon" style="color:#F43F5E"><i class="ph ph-handshake" aria-hidden="true"></i></span><span class="sn-label">Afiliados</span>
+      </button>
+    </div>
+  </div>
+
+  <div class="sidenav-group" data-group="credito">
+    <button class="sidenav-item sidenav-group-toggle" type="button" aria-expanded="false" aria-controls="sn-sub-credito" onclick="toggleSidenavGroup('credito')">
+      <span class="sn-icon" style="color:#FB923C"><i class="ph ph-credit-card" aria-hidden="true"></i></span><span class="sn-label">Crédito</span><i class="ph ph-caret-right sn-caret" aria-hidden="true"></i>
+    </button>
+    <div class="sidenav-subitems" id="sn-sub-credito">
+      <button class="sidenav-item" type="button" data-nav="installments" onclick="navigateTo('installments')">
+        <span class="sn-icon" style="color:#FB923C"><i class="ph ph-credit-card" aria-hidden="true"></i></span><span class="sn-label">Parcelamentos</span>
+      </button>
+      <button class="sidenav-item" type="button" data-nav="cards" onclick="navigateTo('cards')">
+        <span class="sn-icon" style="color:#6366F1"><i class="ph ph-cards" aria-hidden="true"></i></span><span class="sn-label">Cartões</span><span class="sn-tag new">novo</span>
+      </button>
+    </div>
+  </div>
 
   <div class="sidenav-footer">
     <div class="sidenav-section" style="padding-top:0">Conta</div>
@@ -156,6 +193,7 @@
           </div>
           <a class="user-menu-link" href="/home" role="menuitem"><span class="user-menu-icon"><i class="ph ph-house" aria-hidden="true"></i></span>Início</a>
           <a class="user-menu-link" href="/app" role="menuitem"><span class="user-menu-icon"><i class="ph ph-chart-bar" aria-hidden="true"></i></span>Dashboard</a>
+          <a class="user-menu-link" href="/painel" role="menuitem" data-painel-v2 hidden><span class="user-menu-icon"><i class="ph ph-sparkle" aria-hidden="true"></i></span>Painel novo (beta)</a>
           <a class="user-menu-link" href="/comandos-app" role="menuitem"><span class="user-menu-icon"><i class="ph ph-lightbulb" aria-hidden="true"></i></span>O que pedir</a>
           <button class="user-menu-link" type="button" role="menuitem" onclick="connectWhatsAppFromDashboard(event)"><span class="user-menu-icon"><i class="ph ph-whatsapp-logo" aria-hidden="true"></i></span>Conectar WhatsApp</button>
           <a class="user-menu-link" href="/settings?view=security" role="menuitem"><span class="user-menu-icon"><i class="ph ph-gear" aria-hidden="true"></i></span>Configurações</a>
@@ -285,11 +323,11 @@
     </div>
 
     <div class="mock-grid cols-2" style="margin-bottom:14px">
-      <div class="mock-card">
+      <div class="mock-card" data-plan-content="financial_comparison">
         <h3>Evolução de gastos</h3>
         <div style="height:240px;position:relative"><canvas id="mock-evolution-chart"></canvas></div>
       </div>
-      <div class="mock-card">
+      <div class="mock-card" data-plan-content="financial_comparison">
         <h3>Receita vs Despesa</h3>
         <div style="height:240px;position:relative"><canvas id="mock-income-expense-chart"></canvas></div>
       </div>
@@ -297,21 +335,21 @@
         <h3>Distribuição por categoria</h3>
         <div style="height:240px;position:relative"><canvas id="mock-category-donut"></canvas></div>
       </div>
-      <div class="mock-card">
+      <div class="mock-card" data-plan-content="financial_comparison">
         <h3>Gasto por dia da semana</h3>
         <div style="height:240px;position:relative"><canvas id="mock-weekday-chart"></canvas></div>
       </div>
     </div>
 
     <div class="mock-grid cols-2">
-      <div class="mock-card">
+      <div class="mock-card" data-plan-content="insights">
         <h3>Insights do Piggy</h3>
         <div id="analytics-insights-list" class="tx-list">
           <div class="empty" style="padding:16px;text-align:center;color:var(--text-3);font-size:.85rem">Carregando…</div>
         </div>
       </div>
 
-      <div class="mock-card">
+      <div class="mock-card" data-plan-content="financial_comparison">
         <h3 id="analytics-comparative-title">Comparativo mês a mês</h3>
         <div id="analytics-comparative-list" class="tx-list">
           <div class="bar-row"><div class="bar-icon"><i class="ph ph-calendar-dots" aria-hidden="true"></i></div><div class="bar-body"><div class="bar-head"><span class="name sk sk-text" style="width:120px"></span></div><div class="bar-track"><div class="bar-fill blue" style="width:40%"></div></div></div></div>
@@ -327,7 +365,7 @@
         </div>
       </div>
 
-      <div class="mock-card">
+      <div class="mock-card" data-plan-content="insights">
         <h3>Padrões detectados pela IA</h3>
         <div id="analytics-patterns-list">
           <div class="empty" style="padding:16px;text-align:center;color:var(--text-3);font-size:.85rem">Carregando…</div>
@@ -503,15 +541,15 @@
             <label for="boleto-sim-amount">Boleto novo (opcional)</label>
             <input type="number" id="boleto-sim-amount" min="0" step="0.01" placeholder="R$ do novo" onkeydown="if(event.key==='Enter')simularPrazo()" />
           </div>
-          <button class="mock-cta" id="boleto-sim-btn" onclick="simularPrazo()">Simular</button>
+          <button class="mock-cta" id="boleto-sim-btn" data-pro-feature="forecast" onclick="simularPrazo()">Simular</button>
         </div>
         <div id="boleto-sim-result" style="margin-top:12px"></div>
       </div>
 
-      <!-- Previsão de saldo 30/60/90 (Pro): pra onde o caixa caminha nos próximos meses -->
+      <!-- Previsão: 30 dias Plus; 60/90 e trajetória Pro. -->
       <div class="mock-card" id="forecast-card" data-pro-feature="forecast" style="margin-bottom:14px">
         <h3 style="margin-bottom:6px"><i class="ph ph-chart-line-up" aria-hidden="true"></i> Previsão de saldo</h3>
-        <p style="font-size:.78rem;color:var(--text-3);margin:0 0 10px">Pra onde seu caixa caminha em 30, 60 e 90 dias, no ritmo atual de receitas fixas e boletos.</p>
+        <p style="font-size:.78rem;color:var(--text-3);margin:0 0 10px">Plus: previsão de 30 dias. Pro: também 60 e 90 dias. Estimativa com receitas fixas e boletos.</p>
         <div id="forecast-result"></div>
       </div>
 
@@ -543,6 +581,50 @@
         <div style="font-size:.72rem;color:var(--text-3)"><span style="display:inline-block;width:8px;height:8px;border-radius:50%;background:#22c55e;vertical-align:middle;margin-right:5px"></span>&lt; 80% &nbsp;•&nbsp; <span style="display:inline-block;width:8px;height:8px;border-radius:50%;background:#fbbf24;vertical-align:middle;margin-right:5px"></span>80–99% &nbsp;•&nbsp; <span style="display:inline-block;width:8px;height:8px;border-radius:50%;background:#ef4444;vertical-align:middle;margin-right:5px"></span>≥ 100%</div>
       </div>
       <div id="budgets-list" class="tx-list"></div>
+    </div>
+  </div>
+
+  <div id="orcamento-domestico-view" class="dash-view">
+    <div class="hb-header">
+      <div>
+        <p class="section-title" style="margin:0">Orçamento Doméstico</p>
+        <p class="hb-subtitle">Controle seu orçamento doméstico com base nas suas metas e rendimentos.</p>
+      </div>
+      <div class="hb-controls">
+        <div class="month-nav">
+          <button class="mbtn" id="hb-prev" onclick="hbChangeMonth(-1)" aria-label="Mês anterior">‹</button>
+          <span id="hb-month-label">—</span>
+          <button class="mbtn" id="hb-next" onclick="hbChangeMonth(1)" aria-label="Próximo mês">›</button>
+        </div>
+        <div class="hb-income">
+          <label for="hb-income-input">Renda do mês</label>
+          <div class="hb-income-row">
+            <input type="number" id="hb-income-input" min="0" step="0.01" placeholder="0,00"
+                   onkeydown="if(event.key==='Enter'){event.preventDefault();this.blur();}"
+                   onblur="saveHouseholdIncome()" />
+            <span id="hb-income-hint"></span>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <div class="hb-grid">
+      <div class="mock-card" id="hb-gastos">
+        <h3>Gastos</h3>
+        <div class="chart-wrap donut hb-donut-wrap"><canvas id="hb-donut"></canvas></div>
+        <div id="hb-legend" class="hb-legend"></div>
+      </div>
+      <div class="mock-card" id="hb-resumo">
+        <h3>Resumo</h3>
+        <div id="hb-resumo-body"></div>
+      </div>
+      <div class="mock-card" id="hb-metas">
+        <div class="hb-metas-head">
+          <h3 style="margin:0">Metas</h3>
+          <button class="mock-cta outline" id="hb-metas-edit-btn" onclick="openHouseholdBudgetModal()">Editar</button>
+        </div>
+        <div id="hb-metas-list"></div>
+      </div>
     </div>
   </div>
 
@@ -901,19 +983,36 @@
   </div>
 </div>
 
+<div class="overlay" id="hb-metas-overlay" onclick="if(event.target===this) closeHouseholdBudgetModal()">
+  <div class="modal" role="dialog" aria-labelledby="hb-metas-title" aria-modal="true">
+    <h3 id="hb-metas-title">Metas do orçamento</h3>
+    <p class="msub">Distribua 100% da sua renda entre os potes.</p>
+    <form id="hb-metas-form" onsubmit="event.preventDefault(); saveHouseholdBudgetMetas();">
+      <div class="invest-form" id="hb-metas-inputs"></div>
+      <div class="hb-soma" id="hb-metas-soma"></div>
+      <div class="modal-acts" style="margin-top:18px">
+        <button class="btn-cancel" type="button" onclick="closeHouseholdBudgetModal()">Cancelar</button>
+        <button class="btn-save" type="submit" id="hb-metas-save-btn">Salvar</button>
+      </div>
+    </form>
+  </div>
+</div>
+
 <div class="overlay" id="launch-overlay">
   <div class="modal">
     <h3>Novo lançamento</h3>
-    <p class="msub">Registre uma receita ou despesa. Vai aparecer aqui e no histórico do bot.</p>
+    <p class="msub" id="launch-msub">Registre uma receita ou despesa. Vai aparecer aqui e no histórico do bot.</p>
 
     <div class="tipo-toggle" role="radiogroup" aria-label="Tipo de lançamento">
       <button type="button" class="tipo-opt despesa active" data-tipo="despesa" onclick="setLaunchTipo('despesa')" role="radio" aria-checked="true">
         <span class="tipo-icon"><i class="ph ph-trend-down" aria-hidden="true"></i></span>
         <span>Despesa</span>
+        <span class="tipo-sub" hidden style="font-size:.66rem;font-weight:500;opacity:.8">em dinheiro vivo</span>
       </button>
       <button type="button" class="tipo-opt receita" data-tipo="receita" onclick="setLaunchTipo('receita')" role="radio" aria-checked="false">
         <span class="tipo-icon"><i class="ph ph-trend-up" aria-hidden="true"></i></span>
         <span>Receita</span>
+        <span class="tipo-sub" hidden style="font-size:.66rem;font-weight:500;opacity:.8">em dinheiro vivo</span>
       </button>
       <button type="button" class="tipo-opt credito" data-tipo="credito" onclick="setLaunchTipo('credito')" role="radio" aria-checked="false">
         <span class="tipo-icon"><i class="ph ph-credit-card" aria-hidden="true"></i></span>
@@ -1224,22 +1323,6 @@
     <div class="modal-row" style="margin-bottom:18px">
       <label class="modal-label" for="pocket-description">Descrição (opcional)</label>
       <textarea class="modal-inp" id="pocket-description" placeholder="Para que serve esta caixinha?" maxlength="200"></textarea>
-    </div>
-
-    <div class="modal-row" style="margin-bottom:18px">
-      <label class="modal-label" for="pocket-interest-enabled">Rendimento?</label>
-      <label style="display:flex;align-items:center;gap:10px;color:var(--text-2);font-size:.86rem">
-        <input type="checkbox" id="pocket-interest-enabled" checked onchange="syncPocketInterestConfig()" />
-        <span>Rendimento atrelado ao CDI</span>
-      </label>
-      <div id="pocket-interest-config" style="margin-top:10px">
-        <label class="modal-label" for="pocket-interest-rate">Percentual do CDI</label>
-        <div style="display:flex;align-items:center;gap:8px">
-          <input class="modal-inp" id="pocket-interest-rate" type="number" min="1" max="300" step="0.01" value="100" inputmode="decimal" style="width:112px;flex:0 0 112px" />
-          <span style="color:var(--text-2);font-size:.86rem;white-space:nowrap">% do CDI</span>
-        </div>
-        <div style="color:var(--text-3);font-size:.78rem;margin-top:8px;line-height:1.35"><i class="ph ph-lightbulb" aria-hidden="true"></i> Valor simulado: o PigBank não custodia seu dinheiro. Use a taxa do banco onde o saldo realmente está aplicado.</div>
-      </div>
     </div>
 
     <div class="modal-error" id="pocket-error"></div>
@@ -1589,6 +1672,7 @@
 
 <script defer src="/bank-movements.js"></script>
 <script defer src="/reconciliations.js"></script>
+<script defer src="/cash-transfers.js"></script>
 <script defer src="/dashboard.js?v=16"></script>
 
 <!-- ─── Chat IA widget (Piggy) — Item #49 ──────────────────────────────── -->

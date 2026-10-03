@@ -1,0 +1,91 @@
+/* Visual aprovado aplicado ao motor de preços, ilha React e checkout reais. */
+.lp-plans-intro-grid { display:grid;grid-template-columns:1.4fr 1fr;gap:35px;align-items:center;min-height:350px}
+
+.lp-plans-intro-copy { padding:48px 0 35px;position:relative;z-index:1}
+
+.lp-plans-intro h1 { font-size:clamp(38px,4.3vw,61px);font-weight:800;letter-spacing:-.055em;line-height:1.06}
+
+.lp-plans-intro .lp-lead { margin-top:29px;max-width:485px}
+
+.lp-trial-highlight { display:flex;align-items:center;gap:13px;font-size:14px;font-weight:650;margin-top:26px}
+
+.lp-trial-highlight .ph { font-size:22px;padding:4px;background:var(--lp-lime);border-radius:50%}
+
+.lp-plans-mascot { height:350px;align-self:end;position:relative;overflow:hidden}
+
+.lp-plans-mascot-bubble { position:absolute;inset:35px 2% 0 8%;border-radius:50% 50% 10% 45%;background:#fad2e4;transform:rotate(-8deg)}
+
+.lp-plans-mascot img { position:absolute;top:0;left:8%;width:84%;max-width:360px;height:auto}
+
+.lp-plans>.wrap { width:calc(100% - 112px); max-width:1240px; padding:0; --ink:#111; --ink-2:#5b5356; --ink-3:#6b6267; --line:#ded7da; }
+.lp-plans>.wrap>.section:first-child { padding-top:0; }
+.lp-plans .lp-plans-intro .lp-shell { width:100%; }
+.lp-plans-status { font-size:14px; line-height:1.65; color:var(--lp-muted); margin-top:22px; max-width:540px; }
+.lp-plans #plans-v2-wrap { width:100%!important; margin-left:0!important; transform:none!important; }
+.lp-plans .cycle-wrap { margin:18px 0 32px; }
+.lp-plans .cycle-toggle { background:#fff; border:1px solid var(--lp-line); border-radius:100px; padding:10px 22px; gap:18px; }
+.lp-plans .cycle-label { color:var(--lp-muted); font-size:15px; }
+.lp-plans .cycle-label.is-active { color:var(--lp-black); }
+.lp-plans .cycle-save { background:var(--lp-pink); color:var(--lp-black); border:0; }
+.lp-plans .cycle-switch-track { background:#ded7da; }
+.lp-plans .cycle-switch[aria-checked=true] .cycle-switch-track { background:var(--lp-pink); }
+.lp-plans #pix-cycle-note { color:var(--lp-pink-ink); }
+.lp-plans #plans-v2 { align-items:stretch; gap:24px; }
+.lp-plans #plans-v2 .plan { min-height:0; background:#fff; color:var(--lp-black); border:1px solid var(--lp-line); border-radius:24px; box-shadow:none; padding:32px; --ink:#111; --ink-2:#655b60; --ink-3:#655b60; }
+.lp-plans #plans-v2 .plan:nth-child(3) { background:var(--lp-blush); }
+.lp-plans #plans-v2 .plan.featured { background:#111; color:#fff; border-color:#111; --ink:#fff; --ink-2:#c9bfc4; --ink-3:#c9bfc4; }
+.lp-plans #plans-v2 h3 { font-size:30px; font-weight:750; letter-spacing:-.045em; margin-top:0; }
+.lp-plans #plans-v2 .plan-sub { font-size:14px; line-height:1.6; margin-top:12px; }
+.lp-plans #plans-v2 .price-block { margin-top:23px; }
+.lp-plans #plans-v2 .price { font-size:42px; letter-spacing:-.05em; }
+.lp-plans #plans-v2 .plan>ul { padding-top:22px; border-top:1px solid #9b7c872c; margin-top:24px; }
+.lp-plans #plans-v2 .plan li { font-size:14px; line-height:1.65; color:var(--ink-2); }
+.lp-plans #plans-v2 .tick { color:var(--lp-pink-ink); }
+.lp-plans #plans-v2 .featured .tick { color:var(--lp-pink); }
+.lp-plans #plans-v2 .btn { background:#111; color:#fff; border-radius:100px; min-height:50px; border:1px solid #111; box-shadow:none; }
+.lp-plans #plans-v2 .featured>.btn-primary { background:var(--lp-pink); color:#111; border-color:var(--lp-pink); }
+.lp-plans #plans-v2 .plan.featured .plan-badge { position:static; transform:none; display:block; width:max-content; margin:0 0 20px; background:var(--lp-pink); color:#111; animation:none; text-transform:none; font-size:12px; letter-spacing:0; }
+.lp-plans #plans-v2 .pix-cta { background:transparent; color:var(--ink); border-color:#967d874d; }
+.lp-plans #plans-v2 .pix-hint { color:var(--ink-2); }
+.lp-plans .plans-note { color:var(--lp-muted); font-size:14px; line-height:1.75; max-width:950px; margin:30px auto 0; }
+.lp-plans #comparar { background:#111; color:#fff; border-radius:28px; padding:36px 28px!important; margin-bottom:60px; --ink:#fff; --ink-2:#c9bfc4; --ink-3:#c9bfc4; }
+.lp-plans .cmp-note { color:#c9bfc4; line-height:1.8; }
+.lp-plans #cmp-v2 h2 { font-size:clamp(28px,3vw,42px); }
+.lp-plans #cmp-v2 [data-icon=inline-end] { display:none; }
+.lp-plans .pix-ov { background:#20171b99; backdrop-filter:blur(5px); }
+.lp-plans .pix-box { background:var(--lp-paper); color:#111; border-color:var(--lp-line); border-radius:24px; --ink:#111; --ink-2:#5c5358; --ink-3:#6b6067; --bg-elev:#fff; --line:#ded7da; --line-2:#ded7da; }
+.lp-plans .pix-box h3 { line-height:1.2; letter-spacing:-.035em; }
+.lp-plans .pix-box .btn { border-radius:100px; }
+.lp-plans .pix-box .btn-primary { background:#111; color:#fff; box-shadow:none; }
+.lp-plans .pix-box .btn-outline { color:#111; border-color:#b6a9af; }
+.lp-plans .pix-line { color:#5c5358; }
+.lp-plans .pig-modal { background:var(--lp-paper); color:#111; border-color:var(--lp-line); border-radius:24px; font-family:var(--font); }
+.lp-plans .pig-modal-title { color:#111; font-size:24px; }
+.lp-plans .pig-modal-body { color:#5c5358; }
+.lp-plans .pig-modal-btn { border-radius:100px; min-height:44px; }
+.lp-plans .pig-modal-btn-primary { background:#111; color:#fff; }
+.lp-plans .pig-modal-btn-cancel { border-color:#b6a9af; color:#111; background:transparent; }
+.lp-plans #purchase-continuation { max-width:1240px; margin:auto; width:calc(100% - 112px); padding:70px 0; min-height:100vh; grid-template-columns:1.4fr 1fr; gap:70px; align-items:center; }
+.lp-plans .purchase-continuation-card { width:100%; padding:0; background:transparent; border:0; box-shadow:none; text-align:left; color:#111; }
+.lp-plans .purchase-continuation-logo { background:#111; padding:12px 16px; box-sizing:content-box; border-radius:12px; margin:0 0 36px; }
+.lp-plans .purchase-continuation-mark { margin:0 0 24px; }
+.lp-plans .purchase-continuation-card h1 { font-size:clamp(32px,3vw,44px); }
+.lp-plans .purchase-continuation-card>p { color:var(--lp-muted); font-size:16px; }
+.lp-plans .purchase-continuation-summary { color:#111!important; padding:18px 0; border-top:1px solid var(--lp-line); border-bottom:1px solid var(--lp-line); }
+.lp-plans .purchase-continuation-actions .btn { background:#111; color:#fff; border-radius:100px; }
+.lp-purchase-side { background:#111; color:var(--lp-paper); border-radius:24px; padding:40px; }
+.lp-purchase-side .lp-eyebrow { color:var(--lp-pink); }
+.lp-purchase-side h2 { font-size:38px; }
+.lp-purchase-side>p:not(.lp-eyebrow),.lp-purchase-side li { font-size:15px; line-height:1.75; color:#c9bfc4; margin-top:24px; }
+.lp-purchase-side a { display:inline-block; color:var(--lp-paper); font-size:14px; text-decoration:underline; margin-top:28px; }
+@media(min-width:901px) { .lp-plans #plans-v2 { grid-template-columns:repeat(3,minmax(0,1fr)); } }
+@media(max-width:900px) { .lp-plans>.wrap { width:calc(100% - 56px); } .lp-plans .lp-plans-intro-grid { grid-template-columns:1.4fr 1fr; min-height:300px; } .lp-plans .lp-plans-mascot { height:300px; } .lp-plans .lp-plans-intro h1 { font-size:43px; } .lp-plans #plans-v2 { grid-template-columns:1fr; max-width:550px; margin:auto; } .lp-plans #plans-v2 .plan { min-height:0; } .lp-plans #purchase-continuation { width:calc(100% - 56px); gap:32px; } .lp-purchase-side { padding:28px; } }
+@media(max-width:640px) { .lp-plans>.wrap { width:calc(100% - 40px); } .lp-plans .lp-plans-intro-grid { grid-template-columns:1fr; gap:0; } .lp-plans .lp-plans-intro-copy { padding:40px 0 25px; } .lp-plans .lp-plans-intro h1 { font-size:40px; } .lp-plans .lp-plans-mascot { display:none; } .lp-plans .lp-plans-status { font-size:14px; } .lp-plans #plans-v2 .plan { padding:28px; } .lp-plans #comparar { padding:28px 16px!important; border-radius:20px; } .lp-plans #purchase-continuation { grid-template-columns:1fr; width:calc(100% - 40px); padding:40px 0; gap:36px; } .lp-purchase-side h2 { font-size:32px; } }
+
+/* A confirmação Stripe é criada pelo motor com id e fundo escuro inline. */
+.lp-plans #chg-overlay { color:#fff; }
+.lp-plans #chg-overlay .btn-primary { background:var(--lp-pink); color:#111; box-shadow:none; }
+.lp-plans #chg-overlay .btn-outline { color:#fff; border-color:#93858d; }
+
+.lp-plans .pix-erro { color:#a62145; }
+.lp-plans .pix-status.ok { color:#24613b; }

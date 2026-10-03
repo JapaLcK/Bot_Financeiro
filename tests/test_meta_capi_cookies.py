@@ -225,3 +225,84 @@ def test_formato_do_cookie_e_validado():
     for lixo in ["", "fb.1", "fb.1.abc.xyz", "xx.1.1596403881668.111",
                  "fb.1.1596403881668." + "x" * 500, None, 42, {"a": 1}]:
         assert meta_capi.sanitize_fb_cookie(lixo) is None, lixo
+
+
+# ── funil v3, PR 3: o e-book comprado junto do trial e o valor do Purchase ────
+
+def _eventos(captura) -> list[tuple[str, str, float | None]]:
+    return [(e["event_name"], e["event_id"], (e.get("custom_data") or {}).get("value"))
+            for c in captura.chamadas for e in c["json"]["data"]]
+
+
+def _checkout_com(uid, **campos) -> dict:
+    evento = _evento_checkout(uid)
+    obj = evento["data"]["object"]
+    for k in ("amount_total", "currency"):
+        obj.pop(k)
+    obj.update(campos)
+    return evento
+
+
+def _sub_trial() -> dict:
+    sub = _sub_pago()
+    sub["status"] = "trialing"
+    return sub
+
+
+def test_trial_com_ebook_manda_starttrial_e_o_purchase_do_ebook(user_id, monkeypatch):
+    """D1: com trial o `amount_total` da sessão é só o e-book (medido: 990). Ele
+    vira um Purchase com id próprio (`ebook_<sid>`), sem colidir com o
+    StartTrial, que continua com o valor comprometido do plano."""
+    uid, client, fake = _setup(monkeypatch, f"capi-eb-{user_id}")
+    captura = _ligar_capi(monkeypatch)
+    try:
+        r = _post(client, fake, _checkout_com(uid, amount_total=990, currency="brl"),
+                  subs={"sub_capi": _sub_trial()})
+        assert r.status_code == 200, r.text
+        assert _eventos(captura) == [("StartTrial", "trial_cs_capi_1", 19.9),
+                                     ("Purchase", "ebook_cs_capi_1", 9.9)]
+    finally:
+        _cleanup_trial(uid)
+
+
+def test_trial_sem_ebook_manda_so_o_starttrial(user_id, monkeypatch):
+    """D2 (positivo): trial sem e-book (0 ou campo ausente) segue como antes."""
+    for i, campos in enumerate(({"amount_total": 0, "currency": "brl"}, {})):
+        uid, client, fake = _setup(monkeypatch, f"capi-tr{i}-{user_id}")
+        captura = _ligar_capi(monkeypatch)
+        try:
+            _post(client, fake, _checkout_com(uid, **campos), subs={"sub_capi": _sub_trial()})
+            assert _eventos(captura) == [("StartTrial", "trial_cs_capi_1", 19.9)]
+        finally:
+            _cleanup_trial(uid)
+
+
+def test_purchase_sem_trial_leva_o_valor_cobrado(user_id, monkeypatch):
+    """D3: cupom → 14,90 cobrados com plano de 19,90. O Purchase leva o cobrado
+    (o mesmo número do GA4), e sai UM só (nada de Purchase do e-book aqui)."""
+    uid, client, fake = _setup(monkeypatch, f"capi-cp-{user_id}")
+    captura = _ligar_capi(monkeypatch)
+    try:
+        _post(client, fake, _checkout_com(uid, amount_total=1490, currency="brl"),
+              subs={"sub_capi": _sub_pago()})
+        assert _eventos(captura) == [("Purchase", "purchase_cs_capi_1", 14.9)]
+    finally:
+        _cleanup_trial(uid)
+
+
+def test_purchase_sem_amount_total_cai_no_valor_do_plano(user_id, monkeypatch):
+    """D4: sem o campo, o fallback é o `unit_amount` do plano (como no GA4)."""
+    uid, client, fake = _setup(monkeypatch, f"capi-fb-{user_id}")
+    captura = _ligar_capi(monkeypatch)
+    try:
+        _post(client, fake, _checkout_com(uid), subs={"sub_capi": _sub_pago()})
+        assert _eventos(captura) == [("Purchase", "purchase_cs_capi_1", 19.9)]
+    finally:
+        _cleanup_trial(uid)
+
+
+def test_ids_de_evento_nao_colidem():
+    """D5."""
+    ids = {meta_capi.ebook_event_id("cs_1"), meta_capi.trial_event_id("cs_1"),
+           meta_capi.purchase_event_id("cs_1")}
+    assert len(ids) == 3

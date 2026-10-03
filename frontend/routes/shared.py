@@ -517,6 +517,7 @@ _ERROR_TEXTS = {
 }
 _ERROR_DEFAULT_4XX = ("Não deu pra abrir", "Algo nesse pedido não está certo.")
 _ERROR_DEFAULT_5XX = ("Algo deu errado do nosso lado", "Já registramos o problema. Tente de novo em instantes.")
+_ERROR_DEFAULT_ACTIONS = (("← Página inicial", "/"),)
 
 _error_template: str | None = None
 # Já logamos a queda pro fallback? Sem isto o warning sai POR REQUISIÇÃO, e no
@@ -548,10 +549,11 @@ _ERROR_PASSTHROUGH_HEADERS = frozenset({"allow", "www-authenticate", "retry-afte
 _ERROR_FALLBACK_HTML = (
     '<!DOCTYPE html><html lang="pt-BR" style="background:#050506"><head><meta charset="UTF-8">'
     '<meta name="viewport" content="width=device-width,initial-scale=1">'
-    '<meta name="robots" content="noindex"><title>{{CODE}} — {{TITLE}} | PigBank</title></head>'
+    '<meta name="robots" content="noindex"><title>{{CODE}} — {{TITLE}} | PigBank</title>'
+    '<style>a{color:#FF2D8E;display:inline-block;margin:8px}a:focus-visible{outline:2px solid;outline-offset:4px}</style></head>'
     '<body style="background:#050506;color:#fff;font-family:sans-serif;text-align:center;padding:64px 24px">'
     "<h1>{{CODE}}</h1><h2>{{TITLE}}</h2><p>{{MESSAGE}}</p>"
-    '<p><a href="/" style="color:#FF2D8E">← Página inicial</a></p></body></html>'
+    '<p>{{ACTIONS}}</p></body></html>'
 )
 
 
@@ -590,7 +592,8 @@ def vary_accept(response: Response) -> Response:
 
 
 def error_page_response(status_code: int, headers: dict | None = None,
-                        text: tuple[str, str] | None = None) -> Response:
+                        text: tuple[str, str] | None = None, *,
+                        actions: tuple[tuple[str, str], ...] | None = None) -> Response:
     """Página de erro HTML preservando o status (nada de soft-404) e no-store.
 
     `{{CODE}}`/`{{TITLE}}`/`{{MESSAGE}}` do error.html saem do mapa fixo
@@ -600,9 +603,8 @@ def error_page_response(status_code: int, headers: dict | None = None,
     e a garantia deixa de depender de quem lê este parágrafo.
 
     `text=(titulo, mensagem)` sobrepõe o mapa para o caso em que o status já está
-    tomado por outra coisa e a tela ficaria sem instrução — hoje só o `/unsubscribe`
-    com token inválido, que é 400 como qualquer 422 de validação mas precisa dizer o
-    que fazer. Continua sendo para constante do servidor (é texto de produto, não
+    tomado por outra coisa e a tela ficaria sem instrução. Continua sendo para
+    constante do servidor (é texto de produto, não
     eco de entrada), só que agora um deslize ali sai escapado em vez de virar HTML.
 
     NÃO passa pelo `html_file`: aquele funil injeta o Meta Pixel, e a página de erro
@@ -624,13 +626,27 @@ def error_page_response(status_code: int, headers: dict | None = None,
             and all(isinstance(t, str) for t in text)):
         text = _ERROR_TEXTS.get(status_code, default)
     title, message = text
+    # Ações são pares (rótulo, caminho interno), nunca HTML fornecido pelo caller.
+    # Entrada malformada preserva a saída de último recurso e a navegação padrão.
+    if not (isinstance(actions, tuple) and actions and all(
+        isinstance(action, tuple) and len(action) == 2
+        and all(isinstance(value, str) for value in action)
+        and action[1].startswith("/") and not action[1].startswith("//")
+        and not re.search(r"[\\\s\x00-\x1f\x7f]", action[1])
+        for action in actions
+    )):
+        actions = _ERROR_DEFAULT_ACTIONS
+    action_links = "".join(
+        f'<a href="{escape(href, quote=True)}">{escape(label)}</a>'
+        for label, href in actions
+    )
     template = _error_template
     if template is None:
         try:
             # Contrato do error.html — esta função é o único consumidor dele, e a
             # nota mora aqui e não lá dentro porque comentário em HTML VIAJA no
             # corpo de toda resposta de erro (era o caso; saiu). Quem for editar o
-            # arquivo precisa saber de duas coisas: os três placeholders abaixo são
+            # arquivo precisa saber de duas coisas: os quatro placeholders abaixo são
             # obrigatórios (a validação seguinte rejeita o arquivo sem eles), e nada
             # de CDN — só CSS inline e o `/safe-area.js` do próprio domínio, porque
             # esta página roda justamente quando algo já quebrou.
@@ -640,11 +656,11 @@ def error_page_response(status_code: int, headers: dict | None = None,
             # Arquivo que ABRE mas veio pela metade (deploy interrompido, rsync
             # cortado, disco cheio) é o mesmo problema do arquivo ausente — e sem
             # esta checagem viraria cache envenenado até o restart. `</html>` é a
-            # última linha (pega truncamento no fim, e o vazio de graça) e os TRÊS
+            # última linha (pega truncamento no fim, e o vazio de graça) e os QUATRO
             # placeholders precisam estar lá: truncamento não é a única corrupção —
             # lixo no meio, ou um `{{MESSAGE}}</html>` de 50 bytes, passava sem
             # {{CODE}}/{{TITLE}} e ia ao usuário sem o código do erro na tela.
-            if not all(p in raw for p in ("{{CODE}}", "{{TITLE}}", "{{MESSAGE}}")) \
+            if not all(p in raw for p in ("{{CODE}}", "{{TITLE}}", "{{MESSAGE}}", "{{ACTIONS}}")) \
                     or not raw.rstrip().endswith("</html>"):
                 raise ValueError(f"error.html incompleto ({len(raw)} bytes)")
             # Stamp aqui, JUNTO do cache, e não na montagem do corpo: o
@@ -679,8 +695,9 @@ def error_page_response(status_code: int, headers: dict | None = None,
     # resolve o (2): `html.escape` não toca em chaves. A passagem única resolve os
     # dois. `re` e não `str.format`/`Template`: o template tem CSS cheia de chaves.
     valores = {"{{CODE}}": str(status_code),
-               "{{TITLE}}": escape(title), "{{MESSAGE}}": escape(message)}
-    body = re.sub(r"\{\{(?:CODE|TITLE|MESSAGE)\}\}", lambda m: valores[m.group()], template)
+               "{{TITLE}}": escape(title), "{{MESSAGE}}": escape(message),
+               "{{ACTIONS}}": action_links}
+    body = re.sub(r"\{\{(?:CODE|TITLE|MESSAGE|ACTIONS)\}\}", lambda m: valores[m.group()], template)
     response = Response(content=body, status_code=status_code, media_type="text/html; charset=utf-8")
     for key, value in (headers or {}).items():
         if key.lower() in _ERROR_PASSTHROUGH_HEADERS:
@@ -1031,9 +1048,11 @@ _GATE_EXEMPT_PREFIXES = ("/billing", "/auth", "/conta")
 
 
 def _is_pigbank_app(request: Request) -> bool:
-    """True se a requisição diz vir do WebView do app iOS (UA anexa "PigBankApp").
+    """True se a requisição diz vir do app: o WebView iOS anexa "PigBankApp/1.0"
+    ao UA, e o app nativo (iOS e Android) manda "PigBankApp/<versão> (...)".
 
-    Só para TELEMETRIA (signup_source_from_request). NÃO usar para conceder nada:
+    Só para TELEMETRIA (signup_source_from_request) e para ESCOLHER a tela (o
+    /painel manda o app para o /app, que ele conhece). NÃO usar para conceder nada:
     o User-Agent é escolhido pelo cliente, então isto é a alegação do chamador,
     não um fato verificado. Os gates isentavam o app com base nisto e qualquer
     conta web entrava sem plano mandando a substring — a isenção saiu por isso.
@@ -1042,20 +1061,34 @@ def _is_pigbank_app(request: Request) -> bool:
     return "PigBankApp" in (request.headers.get("user-agent") or "")
 
 
-def signup_source_from_request(request: Request, *, google: bool = False) -> str:
+def signup_source_from_request(request: Request, *, provedor: str | None = None) -> str:
     """Origem do cadastro, gravada em auth_accounts.signup_source. Distingue web
-    de app iOS pro painel de admin, e SÓ isso: nenhum gate isenta o app nem lê
-    esta coluna (política em plan_service.needs_plan_selection).
+    de app (WebView iOS e app nativo iOS/Android) pro painel de admin, e SÓ
+    isso: nenhum gate isenta o app nem lê esta coluna (política em
+    plan_service.needs_plan_selection). `provedor` é o do login social.
 
-      web | app | google | google_app"""
+      web | app | google | google_app | apple | apple_app"""
     in_app = _is_pigbank_app(request)
-    if google:
-        return "google_app" if in_app else "google"
+    if provedor:
+        return f"{provedor}_app" if in_app else provedor
     return "app" if in_app else "web"
 
 
+def exigir_credencial(user_id: int) -> None:
+    """403 `password_required` para conta sem senha e sem Google/Apple (a do
+    quiz, antes de clicar no link do e-mail). Sem isto, quem pagou com o
+    e-mail de outra pessoa usaria as APIs por baixo do overlay, e o dono do
+    e-mail depois leria os dados pelo "esqueci a senha" (docs/plano-funil-v3.md,
+    PR 4). Toda rota que bloqueia fora do gate central chama esta função; a
+    tabela rota a rota mora em `tests/test_rotas_senha_obrigatoria.py`."""
+    from db import conta_sem_credencial
+    if conta_sem_credencial(user_id):
+        raise HTTPException(status_code=403, detail={"error": "password_required"})
+
+
 def _enforce_subscription_gate(
-    request: Request, user_id: int, *, exige_direito: bool = True
+    request: Request, user_id: int, *, exige_direito: bool = True,
+    exige_credencial: bool = True,
 ) -> None:
     """Backstop server-side das rotas de dados do dashboard. Além do paywall
     (assinatura ativa/trial), fecha o gate de escolha de plano no cadastro: sem
@@ -1068,7 +1101,14 @@ def _enforce_subscription_gate(
     deixa a da ESCOLHA valendo. Mesmo nome e mesma semântica do
     `gate_plan_selection(request, exige_direito=False)` que serve o HTML de
     /settings — um conceito, um parâmetro, uma regra (§0.7). O único chamador
-    com `False` é `authorize_account_access`; leia a docstring dela."""
+    com `False` é `authorize_account_access`; leia a docstring dela.
+
+    A perna da CREDENCIAL (`exigir_credencial`, 403 `password_required`) vem
+    depois das duas do 402 e só com `exige_direito`: a saída de emergência
+    (`authorize_account_access`) também é a saída de quem precisa criar a
+    senha. Ela NÃO lê `ACCESS_GATE_ENABLED` nem `PLANS_V2_ENABLED`: é
+    segurança, não cobrança. `exige_credencial=False` tem um chamador só, o
+    `PATCH /settings/{id}/security/contact` (corrigir o e-mail é a saída)."""
     path = request.url.path or ""
     if any(path.startswith(p) for p in _GATE_EXEMPT_PREFIXES):
         return
@@ -1079,6 +1119,11 @@ def _enforce_subscription_gate(
         raise HTTPException(status_code=402, detail={"error": "plan_selection_required"})
     if exige_direito and not has_app_access(user_id):
         raise HTTPException(status_code=402, detail={"error": "subscription_required"})
+    # ponytail: +1 query por rota de dados. Se pesar, põe `password_hash is null
+    # as sem_senha` no SELECT cacheado do get_auth_user (db_support) — o reset já
+    # invalida esse cache.
+    if exige_direito and exige_credencial:
+        exigir_credencial(user_id)
 
 
 def authorize_account_access(request: Request, user_id: int) -> int:
@@ -1135,7 +1180,9 @@ def authorize_account_access(request: Request, user_id: int) -> int:
     mandar o link — e responde 400 com instrução, não 500
     (`test_conta_sem_email_sai_por_400_e_nao_por_500`,
     `tests/test_settings_saida_guardas.py`). Não "conserte" isso isentando o
-    `/contact` por conta própria.
+    `/contact` por conta própria. (O `/contact` pula só a perna da CREDENCIAL,
+    `authorize_dashboard_access(..., exige_credencial=False)`: corrigir o e-mail
+    é a saída de quem precisa criar a senha. A do DIREITO continua valendo.)
 
     Também seguem NÃO isentas, e é intencional: `/settings/{id}/activity`,
     `/settings/{id}/notifications` (GET e PATCH) e `/open-finance/*`. O 402
@@ -1144,7 +1191,9 @@ def authorize_account_access(request: Request, user_id: int) -> int:
 
     Ordem das exceções, idêntica à de `authorize_dashboard_access`: 401 (sessão
     inválida/revogada) -> 403 (não é o dono) -> 403 (conta agendada para
-    exclusão) -> 402 da ESCOLHA. Só o 402 do DIREITO cai."""
+    exclusão) -> 402 da ESCOLHA. Só o 402 do DIREITO cai, e com ele o 403
+    `password_required` (a perna da CREDENCIAL só vale com `exige_direito`):
+    estas cinco rotas também são a saída de quem ainda não criou a senha."""
     current_user_id = resolve_dashboard_user_id(request)
     if current_user_id != int(user_id):
         raise HTTPException(status_code=403, detail="Acesso negado para este usuário.")
@@ -1153,10 +1202,20 @@ def authorize_account_access(request: Request, user_id: int) -> int:
     return current_user_id
 
 
-def authorize_dashboard_access(request: Request, user_id: int) -> int:
+def require_plan_feature(user_id: int, feature: str) -> None:
+    """Gate por capacidade, depois da autorização de sessão e dono."""
+    from core.services.plan_service import plan_gate_ok
+    if not plan_gate_ok(user_id, feature):
+        raise HTTPException(status_code=403, detail={"error": "pro_required", "feature": feature})
+
+
+def authorize_dashboard_access(
+    request: Request, user_id: int, *, exige_credencial: bool = True
+) -> int:
     """Gate completo das rotas de DADOS: a conta (`authorize_account_access`)
-    MAIS a perna do DIREITO. É o DEFAULT — descer para
-    `authorize_account_access` exige decisão do dono; leia a docstring dela."""
+    MAIS a perna do DIREITO e a da CREDENCIAL. É o DEFAULT — descer para
+    `authorize_account_access` exige decisão do dono; leia a docstring dela.
+    `exige_credencial=False` só no `PATCH /settings/{id}/security/contact`."""
     current_user_id = authorize_account_access(request, user_id)
     # ponytail: a perna da ESCOLHA é avaliada duas vezes nas rotas de dados (uma
     # aqui, outra dentro de authorize_account_access). O preço é um
@@ -1164,7 +1223,7 @@ def authorize_dashboard_access(request: Request, user_id: int) -> int:
     # SECONDS) — uma deepcopy de dict, não um round-trip. Vale menos que manter
     # duas cópias da regra do 402; se algum dia pesar, o caminho é o gate
     # devolver o veredito em vez de levantar.
-    _enforce_subscription_gate(request, current_user_id)
+    _enforce_subscription_gate(request, current_user_id, exige_credencial=exige_credencial)
     return current_user_id
 
 
@@ -1185,16 +1244,9 @@ def gate_pro_page(request: Request):
     path = request.url.path or "/"
     login_redirect = RedirectResponse(url=f"/login?next={quote(path)}", status_code=302)
 
-    token = get_auth_token_from_request(request, None)
-    payload = decode_jwt(token) if token else None
-    if not payload or payload.get("type") != "auth":
+    user_id = _resolve_page_user_id(request)
+    if user_id is None:
         return login_redirect
-    user_id = int(payload["sub"])
-    jti = payload.get("jti")
-    if jti:
-        session = get_active_session(jti)
-        if not session or int(session.get("user_id") or 0) != user_id:
-            return login_redirect
     if not is_pro(user_id):
         return RedirectResponse(url="/precos", status_code=302)
     return None
@@ -1399,8 +1451,10 @@ def gate_onboarding(request: Request):
     if user_id is None:
         return None
     try:
-        from db import needs_onboarding
-        if needs_onboarding(user_id):
+        from db import conta_sem_credencial, needs_onboarding
+        # Conta sem credencial fica na /home, onde o overlay "Crie sua senha"
+        # sobe: no wizard, tudo daria 403 password_required.
+        if needs_onboarding(user_id) and not conta_sem_credencial(user_id):
             return RedirectResponse(url="/onboarding", status_code=302)
     except Exception:
         # Fail-open: onboarding é UX, não paywall. Erro aqui nunca pode trancar

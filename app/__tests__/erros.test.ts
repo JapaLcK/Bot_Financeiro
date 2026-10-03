@@ -6,7 +6,7 @@
  */
 import { z } from "zod";
 
-import { ContratoInvalido, chamar } from "@/api/client";
+import { ContratoInvalido, ErroDeApi, chamar } from "@/api/client";
 
 const schema = z.object({ ok: z.boolean() });
 
@@ -38,9 +38,35 @@ describe("erro não vira JSON na tela", () => {
 
   it("500 não expõe detalhe do servidor", async () => {
     fetchFalso.mockResolvedValue(resposta(500, { detail: "psycopg.OperationalError" }));
-    await expect(chamar("/x", schema)).rejects.toThrow(
-      "Tivemos um problema aqui. Tente de novo em instantes.",
-    );
+    const erro = await chamar("/x", schema).catch((e: unknown) => e);
+    expect(erro).toBeInstanceOf(ErroDeApi);
+    expect((erro as ErroDeApi).message).toBe("Tivemos um problema aqui. Tente de novo em instantes.");
+    expect((erro as ErroDeApi).corpo).toBeUndefined();
+  });
+});
+
+describe("corpo do erro chega a quem chamou", () => {
+  it("400 com `code`: o `ErroDeApi` carrega o corpo, e a mensagem continua vindo do `detail`", async () => {
+    fetchFalso.mockResolvedValue(resposta(400, { detail: "Código inválido.", code: "mfa_code_invalid" }));
+    const erro = (await chamar("/x", schema).catch((e: unknown) => e)) as ErroDeApi;
+    expect(erro.message).toBe("Código inválido.");
+    expect((erro.corpo as { code?: unknown }).code).toBe("mfa_code_invalid");
+  });
+
+  it("o corpo é lido UMA vez: num `Response` real a 2ª leitura rejeita, e o `code` sumiria", async () => {
+    let leituras = 0;
+    fetchFalso.mockResolvedValue({
+      ok: false,
+      status: 400,
+      json: async () => {
+        leituras += 1;
+        if (leituras > 1) throw new TypeError("Body has already been consumed.");
+        return { detail: "Código inválido.", code: "mfa_code_invalid" };
+      },
+    } as Response);
+    const erro = (await chamar("/x", schema).catch((e: unknown) => e)) as ErroDeApi;
+    expect(erro.message).toBe("Código inválido.");
+    expect((erro.corpo as { code?: unknown } | undefined)?.code).toBe("mfa_code_invalid");
   });
 });
 

@@ -1,0 +1,44 @@
+<!DOCTYPE html>
+<html lang="pt-BR">
+<head><meta charset="UTF-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Montando seu painel | PigBank</title>
+<meta name="robots" content="noindex">
+<style>
+*{box-sizing:border-box;margin:0;padding:0}
+html,body{background:#050506}
+body{font-family:-apple-system,BlinkMacSystemFont,"SF Pro Display","Segoe UI",sans-serif;
+display:flex;align-items:center;justify-content:center;min-height:100vh;color:rgba(255,255,255,.85)}
+.box{text-align:center;width:100%;max-width:400px;padding:48px 24px}
+h1{font-size:1.4rem;font-weight:600;margin-bottom:28px;line-height:1.35}
+h1 strong{display:block;color:#fff;overflow-wrap:anywhere}
+a,button{display:inline-block;padding:11px 28px;background:#FF2D8E;border:0;border-radius:14px;color:#111111;
+font:inherit;font-weight:600;text-decoration:none;font-size:.9rem;cursor:pointer}
+button:disabled{opacity:.6;cursor:default}
+.link{background:none;color:rgba(255,255,255,.7);padding:8px;text-decoration:underline}
+a:focus-visible,button:focus-visible,input:focus-visible{outline:2px solid #fff;outline-offset:4px}
+label{display:block;font-size:.9rem;margin-bottom:10px}
+input{display:block;width:100%;max-width:220px;margin:0 auto 16px;padding:12px;border-radius:12px;
+border:1px solid rgba(255,255,255,.25);background:#111;color:#fff;font:inherit;font-size:1.3rem;
+letter-spacing:.3em;text-align:center}
+#msg{min-height:1.4em;margin-top:14px;font-size:.85rem}
+.extras{margin-top:8px}
+[hidden]{display:none!important}
+</style></head>
+<body><div class="box">
+<h1 id="titulo">Montando seu painel…</h1>
+<form id="confirma" hidden novalidate>
+<div id="campo-codigo" hidden>
+<label for="codigo">Código incorreto, digite de novo</label>
+<input id="codigo" inputmode="numeric" autocomplete="one-time-code" maxlength="6">
+</div>
+<button type="submit" id="continuar">Continuar</button>
+<p id="msg" role="status" aria-live="polite"></p>
+<div class="extras" id="extras" hidden>
+<button type="button" class="link" id="reenviar">Reenviar código</button>
+<a class="link" href="/login">Já tem conta? Entrar</a>
+</div>
+</form>
+<a id="sem-js" href="/cadastro">Continuar</a>
+</div>
+<script src="/quiz-resultado.js?v=2"></script>
+</body></html>

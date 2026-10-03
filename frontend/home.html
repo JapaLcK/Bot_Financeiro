@@ -383,11 +383,13 @@ body.balance-hidden .bignum {
 .activity-tag.income { background:rgba(198,241,26,.15); color:var(--green); }
 .activity-tag.expense { background:rgba(248,113,113,.15); color:var(--red); }
 .activity-tag.credit { background:rgba(255,45,142,.15); color:var(--purple); }
+.activity-tag.internal { background:rgba(255,255,255,.06); color:var(--text-2); }
 .activity-name { font-size:.86rem; font-weight:600; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
 .activity-cat { font-size:.72rem; color:var(--text-3); margin-top:2px; }
 .activity-amount { font-size:.92rem; font-weight:700; font-variant-numeric:tabular-nums; white-space:nowrap; }
 .activity-amount.income { color:var(--green); }
 .activity-amount.expense { color:var(--red); }
+.activity-amount.internal { color:var(--text-2); }
 .see-all-link {
   display:block; padding:14px; text-align:center; text-decoration:none;
   color:var(--text-2); font-size:.78rem; font-weight:650;
@@ -454,12 +456,15 @@ footer a:hover { color:var(--text); }
 .checkout-confirm-overlay .cc-sub { color: rgba(255,255,255,.6); font-size: 13px; max-width: 320px; line-height: 1.4; }
 </style>
 <link rel="stylesheet" href="/sidenav-rail.css?v=3" />
+<script src="/sidenav-groups.js?v=1"></script>
 <script defer src="/sidenav-scrollbar.js?v=1"></script>
 <script src="/static/auth-refresh.js?v=1"></script>
 <script src="/modals.js"></script>
 <script defer src="/reconciliations.js"></script>
 <script defer src="/launch-type-labels.js?v=1"></script>
 <script src="/purchase-intent.js?v=1"></script>
+<link rel="stylesheet" href="/criar-senha.css?v=1" />
+<script src="/criar-senha.js?v=1"></script>
   <link rel="stylesheet" href="/app-mode.css?v=34" />
   <script src="/app-mode.js?v=34"></script>
   <script src="/pb-nav.js?v=6"></script>
@@ -499,23 +504,45 @@ footer a:hover { color:var(--text); }
     </div>
   </div>
 
-  <div class="sidenav-section">Geral</div>
   <a class="sidenav-item active" href="/home" aria-current="page"><span class="sn-icon" style="color:#FF80B8"><i class="ph ph-house" aria-hidden="true"></i></span><span class="sn-label">Início</span></a>
   <a class="sidenav-item" href="/app?view=overview"><span class="sn-icon" style="color:#3B82F6"><i class="ph ph-chart-bar" aria-hidden="true"></i></span><span class="sn-label">Visão Geral</span></a>
-  <a class="sidenav-item" href="/app?view=analytics"><span class="sn-icon" style="color:#06B6D4"><i class="ph ph-chart-line-up" aria-hidden="true"></i></span><span class="sn-label">Análises</span></a>
-  <a class="sidenav-item" href="/app?view=history"><span class="sn-icon" style="color:#94A3B8"><i class="ph ph-clock-counter-clockwise" aria-hidden="true"></i></span><span class="sn-label">Histórico</span></a>
   <a class="sidenav-item" data-nav="agentes" href="/app?view=agentes"><span class="sn-icon" style="color:#FF2D8E"><i class="ph ph-piggy-bank" aria-hidden="true"></i></span><span class="sn-label">Agentes</span><span class="sn-tag new">novo</span></a>
 
-  <div class="sidenav-section">Planejamento</div>
-  <a class="sidenav-item" href="/app?view=fixed"><span class="sn-icon" style="color:#14B8A6"><i class="ph ph-arrows-clockwise" aria-hidden="true"></i></span><span class="sn-label">Recorrentes</span></a>
-  <a class="sidenav-item" href="/app?view=budgets"><span class="sn-icon" style="color:#F59E0B"><i class="ph ph-note-pencil" aria-hidden="true"></i></span><span class="sn-label">Orçamentos</span><span class="sn-tag new">novo</span></a>
-  <a class="sidenav-item" href="/app?view=goals"><span class="sn-icon" style="color:#10B981"><i class="ph ph-target" aria-hidden="true"></i></span><span class="sn-label">Caixinhas e metas</span><span class="sn-tag new">novo</span></a>
-  <a class="sidenav-item" href="/app?view=categories"><span class="sn-icon" style="color:#A855F7"><i class="ph ph-tag" aria-hidden="true"></i></span><span class="sn-label">Categorias</span></a>
+  <!-- Menus colapsáveis: mesma estrutura da sidenav do dashboard (o estado
+       aberto/fechado é compartilhado via localStorage "pb_sidenav_groups"). -->
+  <div class="sidenav-group" data-group="acompanhamento">
+    <button class="sidenav-item sidenav-group-toggle" type="button" aria-expanded="false" aria-controls="sn-sub-acompanhamento" onclick="toggleSidenavGroup('acompanhamento')"><span class="sn-icon" style="color:#06B6D4"><i class="ph ph-chart-line-up" aria-hidden="true"></i></span><span class="sn-label">Acompanhamento</span><i class="ph ph-caret-right sn-caret" aria-hidden="true"></i></button>
+    <div class="sidenav-subitems" id="sn-sub-acompanhamento">
+      <a class="sidenav-item" href="/app?view=analytics"><span class="sn-icon" style="color:#06B6D4"><i class="ph ph-chart-line-up" aria-hidden="true"></i></span><span class="sn-label">Análises</span></a>
+      <a class="sidenav-item" href="/app?view=history"><span class="sn-icon" style="color:#94A3B8"><i class="ph ph-clock-counter-clockwise" aria-hidden="true"></i></span><span class="sn-label">Histórico</span></a>
+    </div>
+  </div>
 
-  <div class="sidenav-section">Crédito</div>
-  <a class="sidenav-item" href="/app?view=installments"><span class="sn-icon" style="color:#FB923C"><i class="ph ph-credit-card" aria-hidden="true"></i></span><span class="sn-label">Parcelamentos</span></a>
-  <a class="sidenav-item" href="/app?view=cards"><span class="sn-icon" style="color:#6366F1"><i class="ph ph-cards" aria-hidden="true"></i></span><span class="sn-label">Cartões</span><span class="sn-tag new">novo</span></a>
-  <a class="sidenav-item" href="/app?view=investments"><span class="sn-icon" style="color:#22C55E"><i class="ph ph-chart-line-up" aria-hidden="true"></i></span><span class="sn-label">Investimentos</span><span class="sn-tag">Pro</span></a>
+  <div class="sidenav-group" data-group="planejamento">
+    <button class="sidenav-item sidenav-group-toggle" type="button" aria-expanded="false" aria-controls="sn-sub-planejamento" onclick="toggleSidenavGroup('planejamento')"><span class="sn-icon" style="color:#14B8A6"><i class="ph ph-clipboard-text" aria-hidden="true"></i></span><span class="sn-label">Planejamento</span><i class="ph ph-caret-right sn-caret" aria-hidden="true"></i></button>
+    <div class="sidenav-subitems" id="sn-sub-planejamento">
+      <a class="sidenav-item" href="/app?view=fixed"><span class="sn-icon" style="color:#14B8A6"><i class="ph ph-arrows-clockwise" aria-hidden="true"></i></span><span class="sn-label">Recorrentes</span></a>
+      <a class="sidenav-item" href="/app?view=goals"><span class="sn-icon" style="color:#10B981"><i class="ph ph-target" aria-hidden="true"></i></span><span class="sn-label">Caixinhas e metas</span><span class="sn-tag new">novo</span></a>
+      <a class="sidenav-item" href="/app?view=categories"><span class="sn-icon" style="color:#A855F7"><i class="ph ph-tag" aria-hidden="true"></i></span><span class="sn-label">Categorias</span></a>
+    </div>
+  </div>
+
+  <div class="sidenav-group" data-group="ferramentas">
+    <button class="sidenav-item sidenav-group-toggle" type="button" aria-expanded="false" aria-controls="sn-sub-ferramentas" onclick="toggleSidenavGroup('ferramentas')"><span class="sn-icon" style="color:#F59E0B"><i class="ph ph-wrench" aria-hidden="true"></i></span><span class="sn-label">Ferramentas</span><i class="ph ph-caret-right sn-caret" aria-hidden="true"></i></button>
+    <div class="sidenav-subitems" id="sn-sub-ferramentas">
+      <a class="sidenav-item" href="/app?view=budgets"><span class="sn-icon" style="color:#F59E0B"><i class="ph ph-note-pencil" aria-hidden="true"></i></span><span class="sn-label">Orçamentos</span><span class="sn-tag new">novo</span></a>
+      <a class="sidenav-item" href="/app?view=orcamento-domestico"><span class="sn-icon" style="color:#38BDF8"><i class="ph ph-bank" aria-hidden="true"></i></span><span class="sn-label">Orçamento Doméstico</span><span class="sn-tag">Pro</span></a>
+      <a class="sidenav-item" href="/app?view=investments"><span class="sn-icon" style="color:#22C55E"><i class="ph ph-chart-line-up" aria-hidden="true"></i></span><span class="sn-label">Investimentos</span><span class="sn-tag">Pro</span></a>
+    </div>
+  </div>
+
+  <div class="sidenav-group" data-group="credito">
+    <button class="sidenav-item sidenav-group-toggle" type="button" aria-expanded="false" aria-controls="sn-sub-credito" onclick="toggleSidenavGroup('credito')"><span class="sn-icon" style="color:#FB923C"><i class="ph ph-credit-card" aria-hidden="true"></i></span><span class="sn-label">Crédito</span><i class="ph ph-caret-right sn-caret" aria-hidden="true"></i></button>
+    <div class="sidenav-subitems" id="sn-sub-credito">
+      <a class="sidenav-item" href="/app?view=installments"><span class="sn-icon" style="color:#FB923C"><i class="ph ph-credit-card" aria-hidden="true"></i></span><span class="sn-label">Parcelamentos</span></a>
+      <a class="sidenav-item" href="/app?view=cards"><span class="sn-icon" style="color:#6366F1"><i class="ph ph-cards" aria-hidden="true"></i></span><span class="sn-label">Cartões</span><span class="sn-tag new">novo</span></a>
+    </div>
+  </div>
 
   <div class="sidenav-footer">
     <div class="sidenav-section" style="padding-top:0">Conta</div>
@@ -893,6 +920,8 @@ function toggleSidenav(force) {
 }
 sidenavRailMedia.addEventListener("change", syncSidenavMode);
 syncSidenavMode();
+
+window.PigBankSidenavGroups?.init?.();
 document.addEventListener("keydown", e => {
   if (e.key === "Escape") {
     const nav = document.getElementById("sidenav");
@@ -1005,8 +1034,12 @@ function renderGreeting(snapshot, email, displayName) {
     //   `String()` — o PAR do `hasOwnProperty`: um guarda a CHAVE, o outro o
     //     VALOR. Um número ou array no mapa faria `bruto.charAt` voltar a ser o
     //     mesmo TypeError que mata a página.
+    //   Receita/despesa de movimentação interna diz a DIREÇÃO ("Entrada"/
+    //     "Saída"), pelo segundo mapa do mesmo arquivo, com as mesmas guardas.
     const mapa = (typeof LAUNCH_TYPE_LABELS === "object" && LAUNCH_TYPE_LABELS) || {};
-    const bruto = (Object.prototype.hasOwnProperty.call(mapa, last.tipo) && String(mapa[last.tipo])) || "lançamento";
+    const internos = (typeof LAUNCH_INTERNAL_LABELS === "object" && LAUNCH_INTERNAL_LABELS) || {};
+    const rotulo = (m) => Object.prototype.hasOwnProperty.call(m, last.tipo) && String(m[last.tipo]);
+    const bruto = (last.is_internal_movement && rotulo(internos)) || rotulo(mapa) || "lançamento";
     const tipoLbl = bruto.charAt(0).toUpperCase() + bruto.slice(1);
     const desc = last.nota || last.alvo || "—";
     sub.innerHTML = `<span class="live-dot">●</span> Última atividade: <strong>${tipoLbl}</strong> · ${escapeHtml(desc)} · ${ago}`;
@@ -1102,6 +1135,20 @@ function renderStats(snapshot, history) {
 function renderAlerts(snapshot) {
   const slot = document.getElementById("alert-banner-slot");
   slot.innerHTML = "";
+  // Saque/depósito em espécie (Q41): o mesmo item de `alerts` da faixa do /app.
+  // Antes da fatura de propósito — os `return` dela não podem esconder este.
+  const nCash = Number((snapshot.alerts || []).find(a => a.type === "cash_transfers")?.count) || 0;
+  if (nCash > 0) {
+    const aviso = document.createElement("div");
+    aviso.className = "alert-banner";
+    aviso.innerHTML = `
+      <div class="alert-body">
+        <div class="alert-icon"><i class="ph ph-hand-coins" aria-hidden="true"></i></div>
+        <div class="alert-text">Dinheiro vivo: <strong>${nCash}</strong> para conferir</div>
+      </div>
+      <div class="alert-actions"><a class="btn-pill primary" href="/app">Conferir</a></div>`;
+    slot.appendChild(aviso);
+  }
   const cards = (snapshot.credit_cards || []).filter(c => (c.due_amount || 0) > 0);
   if (cards.length === 0) return;
 
@@ -1222,8 +1269,11 @@ function renderActivity(snapshot) {
     const isReceita = r.tipo === "receita";
     const isDespesa = r.tipo === "despesa" || r.tipo === "saida";
     const isCredito = (r.alvo || "").toLowerCase().includes("cart") || (r.nota || "").toLowerCase().includes("cart");
-    const tagClass = isReceita ? "income" : (isCredito && isDespesa) ? "credit" : "expense";
-    const amtClass = isReceita ? "income" : "expense";
+    // Receita/despesa interna é dinheiro que mudou de lugar: cor neutra; o sinal
+    // continua dizendo a direção.
+    const isInterno = r.is_internal_movement && (isReceita || isDespesa);
+    const tagClass = isInterno ? "internal" : isReceita ? "income" : (isCredito && isDespesa) ? "credit" : "expense";
+    const amtClass = isInterno ? "internal" : isReceita ? "income" : "expense";
     const sign = isReceita ? "+" : "-";
     const desc = r.alvo || r.nota || "—";
     const cat  = r.categoria || (isReceita ? "outros" : "geral");
@@ -1473,6 +1523,9 @@ async function awaitCheckoutConfirmation() {
     // fechamento também ocorre no fail-open, portanto ele sozinho não prova
     // pagamento concluído.
     window._pbCheckoutConfirmed = _checkoutSettled(me);
+    // ANTES do close: ele dispara o `pb:checkout-confirmado`, e o `celebrar()`
+    // das boas-vindas lê esta flag para não abrir por baixo do "Crie sua senha".
+    window._pbPrecisaSenha = !!(me && me.precisa_criar_senha);
     _closeCheckoutOverlay();
   }
   return me;
@@ -1716,6 +1769,20 @@ let _homeMe = null;   // /auth/me da abertura, reusado pelas recargas
       return;
     }
     window.location.replace("/precos?ativar=1");
+    return;
+  }
+  // Conta paga sem senha nem Google/Apple: o "Crie sua senha" sobe e os dados
+  // não carregam (dariam 403 password_required). A ordem dos overlays desta
+  // página, na sequência em que podem subir:
+  //   1) checkout (_openCheckoutOverlay, síncrono no topo, só com ?upgrade=success);
+  //   2) onboarding do MFA pelo /auth/validate — o servidor já o cala sem senha;
+  //   3) awaitCheckoutConfirmation fecha o checkout e grava _pbPrecisaSenha
+  //      antes do `pb:checkout-confirmado`, e o celebrar() das boas-vindas desiste;
+  //   4) os vereditos de plano acima (402 vem antes do 403);
+  //   5) este, e só então o loadHomeData.
+  if (me && me.precisa_criar_senha) {
+    _limparSnapshots();
+    window.PBCriarSenha.mostrar(me);
     return;
   }
 
@@ -2352,7 +2419,7 @@ function wpInicioValido(s) {
   const ev = params.get("ev");    // "trial" | "purchase" (definido pelo success_url)
   const td = params.get("td");    // dias de trial concedidos (0 quando ev=purchase)
   const pl = params.get("pl");    // plano escolhido: essencial | plus | pro
-  const ia = params.get("ia");    // cota mensal de mensagens da Piggy nesse plano
+  const ia = params.get("ia");    // cota mensal de mensagens do Piggy nesse plano
   const gw = params.get("gw");    // "pix" quando veio do Pix anual (pix-poll.js)
   if (!status) return;
 
@@ -2493,8 +2560,9 @@ function wpInicioValido(s) {
       if (window._pbAccessDenied) return;
       const celebrar = () => {
         // relido AGORA, não na hora de agendar: entre os 450ms e o fim do poll
-        // a validação pode ter falhado, e aí não se celebra
-        if (window._pbAccessDenied) return;
+        // a validação pode ter falhado, e aí não se celebra. Nem com o "Crie
+        // sua senha" de pé: sem senha, o /app daria 403 em tudo.
+        if (window._pbAccessDenied || window._pbPrecisaSenha) return;
         // Compra iniciada pelo fluxo contínuo: depois da confirmação, /app usa
         // os gates existentes para mandar cadastro novo ao onboarding e usuário
         // já configurado ao dashboard. Retornos antigos, sem intenção na aba,

@@ -112,9 +112,14 @@ def test_cota_esgotada_nao_chama_modelo(monkeypatch, armed):
 def test_detetive_consulta_duplicidades_sem_emitir_alertas(monkeypatch):
     from core.services import piggy_agents as agents
     monkeypatch.setattr(agents, 'find_duplicate_charges', lambda uid, today: [{'descricao': 'Mercado', 'repeticoes': 2}])
-    monkeypatch.setattr(agents, 'find_recurring_charges', lambda uid, today: [])
+    from core.services import assinaturas
+    monkeypatch.setattr(assinaturas, 'listar_assinaturas', lambda uid, today: {
+        'servicos': [], 'outras': [], 'ignoradas': [{'chave': 'netflix', 'valor': 39.9}]})
     monkeypatch.setattr(db, 'record_agent_event', lambda *a, **k: pytest.fail('gravou evento'))
-    assert chat.execute_read(42, 'detetive', 'consultar_dados_do_agente', {})['possiveis_duplicidades'][0]['repeticoes'] == 2
+    dados = chat.execute_read(42, 'detetive', 'consultar_dados_do_agente', {})
+    assert dados['possiveis_duplicidades'][0]['repeticoes'] == 2
+    # Ignorada é decisão do usuário: o chat do Detetive não a vê.
+    assert (dados['recorrencias'], dados['total_recorrencias']) == ([], 0)
 
 
 def test_classificador_descarta_destinos_invalidos():

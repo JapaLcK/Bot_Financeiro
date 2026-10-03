@@ -242,7 +242,8 @@
   color: var(--ink-3);
   margin-top: 3px;
 }
-.onb-choice:hover { border-color: var(--ink-3); }
+.onb-choice:not(:disabled):hover { border-color: var(--ink-3); }
+.onb-choice:disabled { cursor: not-allowed; color: var(--ink-2); }
 .onb-choice[aria-checked="true"] {
   border-color: var(--neon);
   background: rgba(198, 241, 26, .08);

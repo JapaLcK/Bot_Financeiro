@@ -57,7 +57,15 @@ export default defineConfig([
     // para o escopo léxico global e NÃO vira propriedade de `window`.
     files: ["frontend/dashboard.js"],
     languageOptions: {
-      globals: { LAUNCH_TYPE_LABELS: "readonly" },
+      globals: { LAUNCH_TYPE_LABELS: "readonly", LAUNCH_INTERNAL_LABELS: "readonly" },
+    },
+  },
+  {
+    // `fmt` é `const` de topo do dashboard.js (escopo léxico global, não
+    // `window`): carregado depois deste arquivo, e lido só quando o modal abre.
+    files: ["frontend/cash-transfers.js"],
+    languageOptions: {
+      globals: { fmt: "readonly" },
     },
   },
   {
@@ -274,5 +282,7 @@ export default defineConfig([
     "frontend/precos-app.css",
     "frontend/chat-app.js",
     "frontend/chat-app.css",
+    "frontend/dashboard-app.js",
+    "frontend/dashboard-app.css",
   ]),
 ]);

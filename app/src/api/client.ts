@@ -1,12 +1,15 @@
 import Constants from "expo-constants";
 import { z } from "zod";
 
+import { USER_AGENT } from "./aparelho";
 import { credenciaisSchema } from "./schemas/auth";
 import { lerCredenciais, limparSe, trocarSe } from "../storage/secure";
 
 /** Header que faz o servidor entregar token no corpo e NENHUM cookie. */
 const HEADER_CLIENTE = "X-PigBank-Client";
 const CLIENTE = "app";
+/** Vão em TODA requisição — a comum (`enviar`) e a renovação (`renovar`). */
+const CABECALHOS_DO_APP = { [HEADER_CLIENTE]: CLIENTE, "User-Agent": USER_AGENT };
 
 export class ErroDeApi extends Error {
   constructor(
@@ -50,7 +53,7 @@ export class ContratoInvalido extends ErroDeApi {
   }
 }
 
-function baseUrl(): string {
+export function baseUrl(): string {
   const url = Constants.expoConfig?.extra?.apiUrl;
   if (typeof url !== "string" || !url) {
     throw new Error("apiUrl ausente em app.config.ts — confira o .env");
@@ -183,7 +186,7 @@ async function renovar(refreshDeOrigem: string): Promise<Renovacao> {
         method: "POST",
         headers: {
           Authorization: `Bearer ${refreshDeOrigem}`,
-          [HEADER_CLIENTE]: CLIENTE,
+          ...CABECALHOS_DO_APP,
           "Content-Type": "application/json",
         },
         credentials: "omit",
@@ -259,6 +262,35 @@ async function renovar(refreshDeOrigem: string): Promise<Renovacao> {
   }
 }
 
+/**
+ * Tempo máximo de uma chamada de auth. Sem ele, um `fetch` que nunca responde
+ * nem falha (Android sem timeout — mesmo caso real do `sair()` de
+ * services/auth.ts) trava para sempre a fila de "ação por vez" do login: a
+ * tentativa antiga nunca SE RESOLVE, então nenhuma nova consegue começar.
+ */
+export const TEMPO_LIMITE_AUTH_MS = 15_000;
+
+/**
+ * `AbortSignal` que aborta sozinho depois de `ms` — para passar em `sinal`.
+ *
+ * `controlador` é opcional: quem precisa abortar a requisição de FORA (uma
+ * tentativa de entrada abandonada por "Voltar" — `services/auth.ts`,
+ * `abandonarEntrada`) passa o próprio `AbortController` para guardar a
+ * referência; sem uso externo, um novo é criado por chamada, como antes.
+ */
+export function comLimite(
+  ms: number = TEMPO_LIMITE_AUTH_MS,
+  controlador: AbortController = new AbortController(),
+): AbortSignal {
+  // `unref` (Node/Jest) tira o cronômetro da contagem que mantém o processo
+  // vivo — a requisição normal resolve muito antes dos 15s, e sem isto cada
+  // teste deixava um timer pendurado até o fim do prazo. Não existe em
+  // Hermes (RN real); `?.()` não quebra lá, só não faz nada.
+  const cronometro = setTimeout(() => controlador.abort(), ms) as unknown as { unref?: () => void };
+  cronometro.unref?.();
+  return controlador.signal;
+}
+
 type Opcoes = {
   metodo?: "GET" | "POST" | "PATCH" | "PUT" | "DELETE";
   corpo?: unknown;
@@ -278,24 +310,28 @@ type Opcoes = {
    */
   credencial?: { access: string; refresh: string };
   /**
-   * Não renova em 401, e não trata o 401 como fim de sessão.
+   * A rota usa 401 também para uma credencial SECUNDÁRIA — a senha que o
+   * MFA pede de novo numa sessão já aberta. Ali o 401 pode querer dizer "essa
+   * senha está errada", e renovar não resolve nada: renovaria, repetiria, e o
+   * segundo 401 apagaria o cofre — logout por senha errada.
    *
-   * Existe para as rotas que usam 401 para uma credencial SECUNDÁRIA — a senha
-   * numa configuração de dois fatores, por exemplo. Ali o 401 quer dizer "esse
-   * dado está errado", não "sua sessão acabou", e renovar não resolve nada:
-   * mandaria o usuário para a tela de entrada por ter digitado a senha errada
-   * num formulário que já estava autenticado.
+   * O servidor separa os dois: só o 401 de SESSÃO leva `WWW-Authenticate`
+   * (`WWW_AUTHENTICATE_401`, frontend/routes/shared.py; é o mesmo critério do
+   * `auth-refresh.js` do site). Com esta opção: 401 com a marca renova como
+   * qualquer chamada; 401 sem a marca — antes ou depois de renovar — é um
+   * `ErroDeApi` comum, com a sessão intacta.
    *
-   * Nenhuma rota da Fase 1 é assim; o sinalizador existe para que a primeira
-   * que for tenha um caminho certo em vez de descobrir o problema em produção.
+   * Não é "nunca renova": o access token vive 15 minutos, e quem ficou esse
+   * tempo no campo de senha tomaria um 401 de sessão mostrado como "senha
+   * incorreta".
    */
-  semRenovar?: boolean;
+  credencialSecundaria?: boolean;
   sinal?: AbortSignal;
 };
 
 async function enviar(rota: string, opcoes: Opcoes, access: string | null) {
   const metodo = opcoes.metodo ?? "GET";
-  const cabecalhos: Record<string, string> = { [HEADER_CLIENTE]: CLIENTE };
+  const cabecalhos: Record<string, string> = { ...CABECALHOS_DO_APP };
   if (access) cabecalhos["Authorization"] = `Bearer ${access}`;
   // Toda ESCRITA declara JSON, inclusive a que não tem corpo (logout). É a 2ª
   // condição da isenção de CSRF do servidor: um `<form>` cross-site só emite
@@ -326,13 +362,12 @@ async function executar<T>(
   guardadas: { access: string; refresh: string } | null,
 ): Promise<T> {
   let resposta = await enviar(rota, opcoes, guardadas?.access ?? null);
+  // 401 que diz "sessão": todo 401, salvo nas rotas de credencial secundária,
+  // onde só o que traz a marca do servidor.
+  const deSessao = (r: Response) =>
+    r.status === 401 && (!opcoes.credencialSecundaria || !!r.headers?.get("WWW-Authenticate"));
 
-  if (
-    resposta.status === 401 &&
-    !opcoes.semAuth &&
-    !opcoes.credencial &&
-    !opcoes.semRenovar
-  ) {
+  if (deSessao(resposta) && !opcoes.semAuth && !opcoes.credencial) {
     // Sem credencial de origem não há o que renovar — e renovar com a de outro
     // dono é justamente o que a amarração impede.
     if (!guardadas) throw new SessaoExpirada();
@@ -347,7 +382,7 @@ async function executar<T>(
       throw new SessaoExpirada();
     }
     resposta = await enviar(rota, opcoes, renovada.access);
-    if (resposta.status === 401) {
+    if (deSessao(resposta)) {
       // Renovou e AINDA assim tomou 401: a sessão morreu entre as duas
       // requisições (revogada noutro aparelho, logout, troca de senha). É
       // terminal, e a credencial recém-guardada tem de sair do keychain junto —
@@ -364,7 +399,11 @@ async function executar<T>(
   }
 
   if (!resposta.ok) {
-    throw new ErroDeApi(resposta.status, await mensagemDeErro(resposta));
+    // O corpo é lido UMA vez: num `Response` real a segunda leitura rejeita, e
+    // o `code` do corpo (ex.: `mfa_code_invalid`) sumiria. 5xx não é lido
+    // (ver `mensagemDeErro`).
+    const corpo = resposta.status >= 500 ? undefined : await resposta.json().catch(() => undefined);
+    throw new ErroDeApi(resposta.status, mensagemDeErro(resposta.status, corpo), corpo);
   }
 
   const bruto = await resposta.json().catch(() => null);
@@ -449,15 +488,14 @@ async function superada(refresh: string, fimDeSessao: boolean): Promise<boolean>
  * `error`/`message`, lista de erros do Pydantic. Mostrar o JSON na tela é um
  * defeito que o produto já viveu no site (o modal que exibia `{"detail":...}`).
  */
-async function mensagemDeErro(resposta: Response): Promise<string> {
+function mensagemDeErro(status: number, corpo: unknown): string {
   // 5xx ANTES de olhar o corpo, e não depois: em erro de servidor o `detail`
   // carrega a exceção crua (`psycopg.OperationalError`, um traceback), e a
   // ordem inversa entregava isso à tela do usuário. Foi o teste de 500 que
   // pegou — a versão anterior confiava no `detail` primeiro.
-  if (resposta.status >= 500) {
+  if (status >= 500) {
     return "Tivemos um problema aqui. Tente de novo em instantes.";
   }
-  const corpo = await resposta.json().catch(() => null);
   const detalhe = (corpo as { detail?: unknown } | null)?.detail;
   if (typeof detalhe === "string") return detalhe;
   if (detalhe && typeof detalhe === "object") {

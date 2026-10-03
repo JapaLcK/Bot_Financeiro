@@ -1,4 +1,7 @@
-"""Resolução textual de alvos e quantidades de caixinhas/investimentos."""
+"""Resolução textual de alvos e quantidades de caixinhas/investimentos.
+
+`texto_da_quantidade` também é a fonte do valor em "paguei <conta>"
+(`core/handlers/bills.py`): o número do nome da conta não é valor (#568, #700)."""
 from __future__ import annotations
 
 import re
@@ -6,7 +9,8 @@ import unicodedata
 
 from utils_text import contains_word, marcador_de_tudo, normalize_text
 
-_PREP_RE = re.compile(r"^(?:d[aeo]|n[ao]|para|pra|em)\s+", re.I)
+PREPOSICAO = r"(?:d[ao]s?|de|n[ao]s?|para|pra|em)"
+_PREP_RE = re.compile(rf"^{PREPOSICAO}\s+", re.I)
 _SUBST_ALVO_RE = re.compile(r"(?:caixinha|investimento)\s+(.+)$", re.I)
 ALVO_AMBIGUO = "Você mencionou mais de um alvo. De qual caixinha ou investimento quer retirar?"
 QUANTIDADE_AMBIGUA = (

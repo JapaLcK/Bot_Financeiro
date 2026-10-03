@@ -132,11 +132,12 @@ def test_signup_source_app_pela_ua():
         _Req(ua="Mozilla/5.0 PigBankApp/1.2")) == "app"
 
 
-def test_signup_source_google_web_e_app():
-    assert shared.signup_source_from_request(
-        _Req(ua="Mozilla/5.0"), google=True) == "google"
-    assert shared.signup_source_from_request(
-        _Req(ua="PigBankApp/1.0"), google=True) == "google_app"
+def test_signup_source_social_web_e_app():
+    for provedor in ("google", "apple"):
+        assert shared.signup_source_from_request(
+            _Req(ua="Mozilla/5.0"), provedor=provedor) == provedor
+        assert shared.signup_source_from_request(
+            _Req(ua="PigBankApp/1.0"), provedor=provedor) == f"{provedor}_app"
 
 
 # ── A janela entre as escritas do webhook ────────────────────────────────────

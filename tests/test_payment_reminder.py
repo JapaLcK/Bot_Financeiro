@@ -2,7 +2,7 @@
 tests/test_payment_reminder.py — o lembrete de pagamento do 6º dia de atraso.
 
 `core.services.payment_reminder.check_payment_reminder`, no mesmo tick de 24 h
-que já hospeda `_check_trial_ending` e `_check_free_upgrade_nudge`.
+que já hospeda `_check_trial_ending`.
 
 Ele NÃO avisa de corte nenhum — este PR não corta acesso. O teste da copy
 abaixo existe justamente porque a versão anterior prometia "amanhã eu pauso"

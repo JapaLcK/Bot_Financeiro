@@ -188,6 +188,7 @@ from zoneinfo import ZoneInfo
 import pytest
 from fastapi.testclient import TestClient
 
+from conftest import em_carencia
 import db.budgets
 import frontend.finance_bot_websocket_custom as dashboard
 import frontend.routes.shared as shared
@@ -366,9 +367,10 @@ def test_donut_na_virada_fica_no_mes_do_usuario(user_id, monkeypatch):
 
     Segundo controle, do OUTRO relógio da mesma função: `get_financial_data`
     chama `history_earliest_date` (core/services/plan_service.py), que no tier
-    Grátis corta a janela no dia 1 do mês. Revertendo o `now` que ela passa —
-    `history_earliest_date(user_id)` sem argumento —, o corte volta a
-    2026-09-01 e o donut sai vazio. MEDIDO: 2 vermelhos, este e o caso 2."""
+    free (no v2, a carência) corta a janela no dia 1 do mês. Revertendo o `now`
+    que ela passa — `history_earliest_date(user_id)` sem argumento —, o corte
+    volta a 2026-09-01 e o donut sai vazio. MEDIDO: 2 vermelhos, este e o caso 2."""
+    em_carencia(user_id)
     _congela(monkeypatch, ANCORA_SP)
     _gasto(user_id, "cafe", 42.0, ANCORA_SP)
 
@@ -392,6 +394,7 @@ def test_websocket_abre_o_snapshot_no_mes_do_usuario(user_id, monkeypatch):
     `datetime.now(timezone.utc)` no `websocket_endpoint`
     (frontend/finance_bot_websocket_custom.py), o payload sai com
     `month == 9`."""
+    em_carencia(user_id)
     _congela(monkeypatch, ANCORA_SP)
     _gasto(user_id, "cafe", 42.0, ANCORA_SP)
 

@@ -1,4 +1,5 @@
-import { View } from "react-native";
+import { useEffect } from "react";
+import { AccessibilityInfo, View } from "react-native";
 
 import { useTema } from "@/ui/tema";
 import { espaco, raio, type Paleta } from "@/ui/tokens";
@@ -36,6 +37,15 @@ const VISUAL: Record<Tom, { tom: keyof Paleta; icone: NomeIcone }> = {
 export function Banner({ tom = "info", titulo, mensagem, acao }: Props) {
   const { cores } = useTema();
   const visual = VISUAL[tom];
+
+  // `accessibilityRole="alert"` (abaixo) não garante o anúncio sozinho em
+  // toda plataforma/leitor de tela; o anúncio explícito é o que o Toast já
+  // faz (`ui/componentes/Toast.tsx`) para o mesmo problema. Só `danger`: é o
+  // tom que carrega a role de alerta, e um banner `info`/`warning` que já
+  // nasce na tela (não é um evento novo) não deveria interromper a leitura.
+  useEffect(() => {
+    if (tom === "danger") AccessibilityInfo.announceForAccessibility(mensagem);
+  }, [tom, mensagem]);
 
   return (
     <View

@@ -1,6 +1,8 @@
 import { fireEvent, render } from "@testing-library/react-native";
 import * as Haptics from "expo-haptics";
+import { AccessibilityInfo, StyleSheet, TextInput } from "react-native";
 
+import { Icone } from "@/ui/componentes/Icone";
 import { Input } from "@/ui/componentes/Input";
 import { TemaProvider } from "@/ui/tema";
 import { claro, escuro } from "@/ui/tokens";
@@ -69,6 +71,31 @@ describe("Input", () => {
     expect(Haptics.notificationAsync).toHaveBeenCalledTimes(1);
   });
 
+  it("M3 — erro anuncia para o leitor de tela (AccessibilityInfo), não só o accessibilityLabel", () => {
+    const resultado = render(
+      <TemaProvider esquema="light">
+        <Input rotulo="Senha" />
+      </TemaProvider>,
+    );
+    expect(AccessibilityInfo.announceForAccessibility).not.toHaveBeenCalled();
+    resultado.rerender(
+      <TemaProvider esquema="light">
+        <Input rotulo="Senha" erro="E-mail ou senha incorretos." />
+      </TemaProvider>,
+    );
+    expect(AccessibilityInfo.announceForAccessibility).toHaveBeenCalledWith("E-mail ou senha incorretos.");
+
+    // Uma SEGUNDA falha (texto diferente) também precisa ser ouvida — não só
+    // a transição de "sem erro" para "com erro".
+    resultado.rerender(
+      <TemaProvider esquema="light">
+        <Input rotulo="Senha" erro="Muitas tentativas." />
+      </TemaProvider>,
+    );
+    expect(AccessibilityInfo.announceForAccessibility).toHaveBeenCalledWith("Muitas tentativas.");
+    expect(AccessibilityInfo.announceForAccessibility).toHaveBeenCalledTimes(2);
+  });
+
   it("aceita TextInputProps (ex.: onChangeText) e chama de verdade", () => {
     const onChangeText = jest.fn();
     const resultado = renderInterativo(<Input rotulo="Nome" onChangeText={onChangeText} />);
@@ -86,5 +113,73 @@ describe("Input", () => {
     const { claro: c, escuro: e } = renderNosDoisTemas(<Input rotulo="Nome" erro="Obrigatório" />);
     expect(c.toJSON()).toMatchSnapshot("claro");
     expect(e.toJSON()).toMatchSnapshot("escuro");
+  });
+
+  describe("somenteLeitura", () => {
+    const RELAY = "rsnmpf4yzj@privaterelay.appleid.com";
+
+    it.each([undefined, "Envelope" as const])(
+      "valor sai num Texto de UMA linha que encolhe (não TextInput), com e sem ícone (icone=%s)",
+      (icone) => {
+        const { claro: c } = renderNosDoisTemas(<Input rotulo="E-mail" icone={icone} value={RELAY} somenteLeitura />);
+        const campo = c.getByLabelText("E-mail");
+        expect(campo.type).toBe("Text");
+        expect(campo.props).toMatchObject({ numberOfLines: 1, adjustsFontSizeToFit: true, minimumFontScale: 0.6 });
+        expect(campo.props.maxFontSizeMultiplier).toBe(1.3);
+        expect(c.getByText(RELAY)).toBe(campo);
+        expect(c.UNSAFE_queryAllByType(TextInput)).toHaveLength(0);
+      },
+    );
+
+    it("acessibilidade: rótulo + erro, disabled, valor e dica lidos pelo leitor de tela", () => {
+      const { claro: c } = renderNosDoisTemas(
+        <Input rotulo="E-mail" value={RELAY} somenteLeitura erro="x" accessibilityHint="dica" />,
+      );
+      const campo = c.getByLabelText("E-mail, erro: x");
+      expect(campo.props).toMatchObject({
+        accessible: true,
+        accessibilityState: { disabled: true },
+        accessibilityValue: { text: RELAY },
+        accessibilityHint: "dica",
+      });
+    });
+
+    it("mesmas cores do desativado nos dois temas (inkMuted no texto, inkFaint no contorno)", () => {
+      const { claro: c, escuro: e } = renderNosDoisTemas(<Input rotulo="E-mail" value={RELAY} somenteLeitura />);
+      const estilo = (r: typeof c) => StyleSheet.flatten(r.getByLabelText("E-mail").props.style);
+      expect(estilo(c)).toMatchObject({ color: claro.inkMuted, borderColor: claro.inkFaint, minHeight: 44 });
+      expect(estilo(e)).toMatchObject({ color: escuro.inkMuted, borderColor: escuro.inkFaint });
+    });
+
+    it("senha nunca é só leitura (o Texto não mascara): barrado pelo tipo", () => {
+      // @ts-expect-error — `secureTextEntry` com `somenteLeitura` não compila.
+      const el = <Input rotulo="Senha" value="s3nha" somenteLeitura secureTextEntry />;
+      expect(el).toBeTruthy();
+    });
+  });
+
+  describe("icone", () => {
+    it("sem icone: o campo permanece com o MESMO estilo de antes (o snapshot acima não muda)", () => {
+      const { claro: c } = renderNosDoisTemas(<Input rotulo="Nome" />);
+      expect(c.UNSAFE_queryAllByType(Icone)).toHaveLength(0);
+    });
+
+    it("com icone: renderiza o ícone em tom inkMuted, dentro de um contorno próprio", () => {
+      const { claro: c } = renderNosDoisTemas(<Input rotulo="E-mail" icone="Envelope" />);
+      expect(c.UNSAFE_getByType(Icone).props).toMatchObject({ nome: "Envelope", tom: "inkMuted" });
+    });
+
+    it("com icone: o TextInput não tem mais o próprio contorno — quem borda é a linha ao redor do ícone", () => {
+      const { claro: c } = renderNosDoisTemas(<Input rotulo="E-mail" icone="Envelope" />);
+      const campo = c.getByLabelText("E-mail");
+      expect(campo.props.style[1].borderWidth).toBeUndefined();
+    });
+
+    it("aceita digitação normalmente com icone", () => {
+      const onChangeText = jest.fn();
+      const { getByLabelText } = renderInterativo(<Input rotulo="E-mail" icone="Envelope" onChangeText={onChangeText} />);
+      fireEvent.changeText(getByLabelText("E-mail"), "ana@x.com");
+      expect(onChangeText).toHaveBeenCalledWith("ana@x.com");
+    });
   });
 });

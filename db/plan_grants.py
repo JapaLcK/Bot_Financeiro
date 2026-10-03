@@ -338,6 +338,19 @@ def list_grants(user_id: int) -> list[dict]:
             return [dict(r) for r in cur.fetchall()]
 
 
+def e_primeira_assinatura(user_id: int, source: str, external_ref: str) -> bool:
+    """True se a conta não tem grant NENHUM além deste `(source, external_ref)`,
+    em qualquer status. Cortesia do admin (`source='admin'`) não conta como
+    assinatura (decisão do dono); `legacy` conta. É a trava do e-mail do
+    fundador (`email_service.send_founder_email_once`)."""
+    sql = ("select not exists (select 1 from plan_grants where user_id = %s"
+           " and source <> 'admin' and not (source = %s and external_ref = %s)) as ok")
+    with get_conn() as conn:
+        with conn.cursor() as cur:
+            cur.execute(sql, (int(user_id), source, external_ref))
+            return bool(cur.fetchone()["ok"])
+
+
 def users_com_grant_na_janela(desde) -> list[int]:
     """user_ids a reprojetar (§4.3).
 

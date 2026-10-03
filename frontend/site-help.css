@@ -1,0 +1,347 @@
+/* Central de ajuda, guias e documentos públicos. */
+.lp-help-nav-wrap { border-bottom:1px solid var(--lp-line)}
+.lp-help-nav { display:flex;gap:30px;min-height:65px;align-items:center}
+.lp-help-nav a { font-size:13px;font-weight:550;padding:22px 0;position:relative;white-space:nowrap}
+.lp-help-nav a:hover,.lp-help-nav a[aria-current="page"] { color:var(--lp-pink-ink)}
+.lp-help-nav a[aria-current="page"]:after { content:'';height:3px;background:var(--lp-pink);position:absolute;bottom:0;left:0;right:0}
+.lp-help-heading { padding:66px 0 53px}
+.lp-help-heading h1 { font-size:clamp(42px,4.5vw,64px);line-height:1.06;letter-spacing:-.055em;font-weight:800}
+.lp-help-heading .lp-lead { margin-top:24px;font-size:18px}
+.lp-help-channels { padding-bottom:66px}
+.lp-help-channels h2 { font-size:23px;letter-spacing:-.035em;margin-bottom:25px}
+.lp-help-channel-grid { display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:23px}
+.lp-help-channel { background:#fff;border:1px solid var(--lp-line);border-radius:24px;padding:30px;display:flex;flex-direction:column;align-items:flex-start}
+.lp-help-channel>.ph { height:56px;width:56px;border-radius:16px;background:var(--lp-blush);display:grid;place-items:center;font-size:29px;margin-bottom:29px}
+.lp-help-channel h3 { font-size:25px;line-height:1.12}
+.lp-help-channel>p { font-size:15px;line-height:1.65;color:var(--lp-muted);margin-top:17px;flex:1}
+.lp-help-channel .lp-contact-address { margin-top:24px;margin-bottom:26px;font-size:13px;font-weight:550;overflow-wrap:anywhere;max-width:100%}
+.lp-help-channel a.lp-contact-address { text-decoration:underline;text-underline-offset:4px}
+.lp-help-channel .lp-contact-note { font-size:12px;font-weight:400;color:var(--lp-muted)}
+.lp-help-channel .lp-btn { min-height:48px;font-size:13px}
+.lp-help-channel-pink { background:var(--lp-blush);border-color:var(--lp-blush)}
+.lp-help-channel-pink>.ph { background:var(--lp-pink)}
+.lp-help-channel-pink>p,.lp-help-channel-pink .lp-contact-note { color:#64565c}
+.lp-help-questions { padding:55px 0 70px;border-top:1px solid var(--lp-line)}
+.lp-help-questions-grid { display:grid;grid-template-columns:1fr 1.15fr;gap:65px}
+.lp-help-questions h2 { font-size:clamp(32px,3.4vw,44px)}
+.lp-help-questions .lp-faq { padding-left:38px}
+.lp-help-questions .lp-faq summary { font-size:15px;padding-block:20px}
+.lp-help-questions .lp-faq summary:after { top:16px}
+.lp-help-questions .lp-faq details p { font-size:14px;max-width:none;padding-bottom:23px}
+.lp-help-questions .lp-faq details p a { text-decoration:underline;text-underline-offset:3px;color:var(--lp-pink-ink)}
+.lp-help-more { padding:52px 0 58px}
+.lp-help-more-grid { display:grid;grid-template-columns:1fr 1.15fr;gap:65px}
+.lp-help-more h2 { font-size:34px}
+.lp-help-other-contacts { display:grid;grid-template-columns:1fr 1fr;gap:35px;align-items:center}
+.lp-help-other-contacts h3 { font-size:18px;letter-spacing:-.02em}
+.lp-help-other-contacts p { font-size:13px;color:#685860;margin:10px 0 12px}
+.lp-help-other-contacts a { font-size:13px;font-weight:550;text-decoration:underline;text-underline-offset:5px;overflow-wrap:anywhere}
+
+.lp-legal-heading { padding:62px 0 48px}
+.lp-legal-heading h1 { font-size:clamp(37px,4.7vw,63px)}
+.lp-legal-date { font-size:14px;color:var(--lp-muted);margin-top:24px}
+.lp-legal-layout { display:grid;grid-template-columns:265px minmax(0,1fr);gap:64px;align-items:start;padding-bottom:85px}
+.lp-legal-toc { position:sticky;top:110px;border-top:1px solid var(--lp-line);padding-top:23px}
+.lp-legal-toc>p { font-size:12px;font-weight:700;text-transform:uppercase;letter-spacing:.06em;margin-bottom:17px}
+.lp-legal-toc ol { margin:0;padding-left:23px;display:grid;gap:11px}
+.lp-legal-toc li { font-size:12px;color:#6c6467;line-height:1.5;padding-left:3px}
+.lp-legal-toc li::marker { color:var(--lp-pink-ink);font-weight:600}
+.lp-legal-toc a:hover { color:var(--lp-pink-ink);text-decoration:underline;text-underline-offset:4px}
+.lp-legal-toc .lp-legal-contact { display:inline-block;margin-top:25px;padding-top:20px;border-top:1px solid var(--lp-line);width:100%;font-size:12px;font-weight:650;color:var(--lp-pink-ink)}
+.lp-privacy-panel { background:#fff;border:1px solid var(--lp-line);border-radius:24px;padding:38px 42px;color:#4e4947;font-size:15px;line-height:1.85;min-width:0;overflow-wrap:anywhere}
+.lp-privacy-panel .lp-intro { font-size:16px;line-height:1.8;color:#4e4947;padding-bottom:29px}
+.lp-privacy-panel section { border-top:1px solid #e8e2df;padding-top:29px;margin-top:29px;scroll-margin-top:105px}
+.lp-privacy-panel .lp-intro+section { margin-top:0}
+.lp-privacy-panel h2 { font-size:24px;letter-spacing:-.025em;line-height:1.25;color:var(--lp-black);margin-bottom:18px}
+.lp-privacy-panel p+p { margin-top:15px}
+.lp-privacy-panel ul,.lp-privacy-panel ol { padding-left:22px;margin:15px 0;list-style:disc}
+.lp-privacy-panel ol { list-style:decimal}
+.lp-privacy-panel li+li { margin-top:10px}
+.lp-privacy-panel li::marker { color:var(--lp-pink-ink)}
+.lp-privacy-panel strong { font-weight:650;color:#262120}
+.lp-privacy-panel a { color:var(--lp-pink-ink);text-decoration:underline;text-underline-offset:4px;word-break:break-word}
+
+@media(max-width:1190px) { .lp-help-channel { padding:25px}
+.lp-help-channel-grid { gap:18px}
+.lp-help-channel h3 { font-size:23px}
+.lp-help-channel>p { font-size:14px}
+.lp-help-other-contacts { gap:20px}
+.lp-help-questions-grid,.lp-help-more-grid { gap:35px}
+.lp-legal-layout { grid-template-columns:230px minmax(0,1fr);gap:35px}
+.lp-privacy-panel { padding:32px}
+}
+
+@media(max-width:980px) { .lp-help-heading { padding:49px 0 40px}
+.lp-help-heading h1 { font-size:51px}
+.lp-help-channel-grid { grid-template-columns:1fr;gap:18px}
+.lp-help-channel { padding:29px}
+.lp-help-channel>p { max-width:560px;font-size:16px}
+.lp-help-channel h3 { font-size:27px}
+.lp-help-channel>.ph { margin-bottom:23px}
+.lp-help-channel .lp-contact-address { margin-top:20px;margin-bottom:22px;font-size:14px}
+.lp-help-questions-grid,.lp-help-more-grid { grid-template-columns:1fr;gap:32px}
+.lp-help-questions .lp-faq { padding-left:0;border-left:0}
+.lp-help-other-contacts { gap:35px}
+.lp-legal-layout { grid-template-columns:1fr;gap:30px}
+.lp-legal-toc { position:static;padding:23px 26px;background:var(--lp-blush);border-radius:20px;border:0}
+.lp-legal-toc ol { grid-template-columns:1fr 1fr;column-gap:40px;row-gap:13px}
+.lp-legal-toc li { font-size:13px}
+.lp-legal-toc .lp-legal-contact { border-top-color:#e2bccc}
+.lp-privacy-panel { padding:34px}
+.lp-legal-heading h1 { font-size:49px}
+}
+
+@media(max-width:640px) { .lp-help-nav { gap:24px;min-height:58px}
+.lp-help-nav a { font-size:12px;padding:18px 0}
+.lp-help-heading { padding:36px 0 32px}
+.lp-help-heading h1 { font-size:clamp(36px,9vw,48px)}
+.lp-help-heading .lp-lead { font-size:16px;margin-top:21px}
+.lp-help-heading .lp-eyebrow { font-size:12px}
+.lp-help-channels { padding-bottom:40px}
+.lp-help-channels h2 { font-size:21px;margin-bottom:20px}
+.lp-help-channel { padding:25px}
+.lp-help-channel h3 { font-size:26px}
+.lp-help-channel>p { font-size:15px}
+.lp-help-questions { padding:38px 0 42px}
+.lp-help-questions h2 { font-size:33px}
+.lp-help-questions .lp-faq summary { font-size:14px}
+.lp-help-questions .lp-faq details p { font-size:14px}
+.lp-help-more { padding:36px 0 42px}
+.lp-help-more h2 { font-size:31px}
+.lp-help-other-contacts { grid-template-columns:1fr;gap:30px}
+.lp-help-other-contacts h3 { font-size:20px}
+.lp-help-other-contacts p,.lp-help-other-contacts a { font-size:14px}
+.lp-legal-heading { padding-bottom:29px}
+.lp-legal-heading h1 { font-size:clamp(34px,8.8vw,46px)}
+.lp-legal-date { font-size:12px;margin-top:20px}
+.lp-legal-layout { gap:25px;padding-bottom:43px}
+.lp-legal-toc { padding:23px}
+.lp-legal-toc ol { grid-template-columns:1fr;gap:12px}
+.lp-legal-toc li { font-size:13px}
+.lp-privacy-panel { padding:27px 23px;border-radius:20px;font-size:14px;line-height:1.85}
+.lp-privacy-panel .lp-intro { font-size:15px;padding-bottom:25px}
+.lp-privacy-panel section { padding-top:26px;margin-top:26px}
+.lp-privacy-panel h2 { font-size:23px}
+.lp-privacy-panel ul,.lp-privacy-panel ol { padding-left:19px}
+}
+
+@media(max-width:360px) { .lp-help-nav { gap:19px}
+.lp-help-nav a { font-size:11px}
+.lp-privacy-panel { padding:23px 19px}
+}
+
+/* Shared public help journeys, using the landing page's type, color and icon system. */
+.ph-check-circle:before { content:'\e184'}
+
+.lp-journey-page [hidden] { display:none!important}
+.lp-journey-page button,.lp-journey-page input,.lp-journey-page textarea,.lp-journey-page select { font:inherit}
+.lp-journey-page button { cursor:pointer}
+.lp-journey-page button:disabled { cursor:default;opacity:.55}
+.lp-journey-page button:focus-visible,.lp-journey-page input:focus-visible,.lp-journey-page textarea:focus-visible,.lp-journey-page select:focus-visible { outline:3px solid var(--lp-pink);outline-offset:4px}
+.lp-journey-page h1:focus { outline:0}
+.lp-journey-page h1 { font-size:clamp(38px,4.5vw,60px);font-weight:800;line-height:1.05;letter-spacing:-.055em}
+.lp-journey-page .lp-pink-dot { color:var(--lp-pink)}
+.lp-journey-lead { font-size:17px;line-height:1.7;color:var(--lp-muted);margin:22px 0 30px;max-width:520px}
+.lp-journey-breadcrumb { display:flex;flex-wrap:wrap;gap:11px;font-size:13px;line-height:1.6;color:var(--lp-muted);margin-bottom:35px}
+.lp-journey-breadcrumb a { color:var(--lp-pink-ink);text-decoration:underline;text-underline-offset:4px}
+.lp-journey-page .lp-btn { border:0;font-size:15px;white-space:normal;text-align:center}
+.lp-journey-text-button,.lp-journey-text-link { display:inline-block;background:none;border:0;padding:8px 0;color:var(--lp-pink-ink);font-size:14px!important;font-weight:600;text-decoration:underline;text-underline-offset:4px}
+.lp-journey-icon { width:62px;height:62px;display:grid;place-items:center;border-radius:19px;background:var(--lp-blush);color:var(--lp-pink-ink);font-size:32px}
+
+
+.lp-contact-layout { max-width:1110px;display:grid;grid-template-columns:minmax(0,1fr) 360px;gap:80px;padding-block:34px 70px;align-items:start}
+.lp-contact-main { min-width:0}
+.lp-contact-main .lp-eyebrow { margin-bottom:17px}
+.lp-contact-main h1 { font-size:clamp(38px,4vw,51px)}
+.lp-contact-main .lp-journey-lead { margin-top:19px;margin-bottom:28px}
+.lp-contact-main fieldset { border:0;margin:0;padding:0;min-width:0}
+.lp-contact-required { font-size:12px;color:var(--lp-muted);margin-bottom:22px}
+.lp-contact-fields { display:grid;grid-template-columns:1fr 1fr;gap:18px}
+.lp-journey-field { margin-bottom:23px;min-width:0}
+.lp-journey-field label { display:block;font-size:14px;font-weight:600;margin-bottom:9px}
+.lp-journey-field input,.lp-journey-field textarea { width:100%;background:white;color:var(--lp-black);border:1px solid #d5cfca;border-radius:12px;padding:14px 15px;line-height:1.5;font-size:16px;min-width:0;box-shadow:0 2px 4px #11102}
+.lp-journey-field textarea { resize:vertical;min-height:150px}
+.lp-journey-field [aria-invalid="true"] { border-color:#b81c53;background:#fff8fa}
+.lp-field-hint { font-size:12px;line-height:1.6;color:var(--lp-muted);margin-top:9px}
+.lp-field-error { font-size:13px;color:#a31245;margin-top:8px;line-height:1.5}
+.lp-contact-privacy { font-size:13px;color:var(--lp-muted);line-height:1.7;margin-bottom:24px}
+.lp-contact-privacy a { color:var(--lp-pink-ink);text-decoration:underline;text-underline-offset:3px}
+.lp-contact-submit { width:100%;min-height:56px}
+.lp-contact-caption { font-size:12px;text-align:center;color:var(--lp-muted);margin-top:12px;line-height:1.5}
+.lp-contact-error { padding:15px 17px;border:1px solid #e9b3c6;background:#fff0f5;color:#a31245;border-radius:12px;font-size:14px;line-height:1.6;margin-bottom:20px}
+.lp-contact-error a { text-decoration:underline}
+.lp-contact-side { padding-top:57px;position:sticky;top:98px;min-width:0}
+.lp-contact-advice { padding:32px;background:var(--lp-black);color:var(--lp-paper);border-radius:25px}
+.lp-contact-advice .lp-journey-icon { background:var(--lp-pink);color:var(--lp-black);margin-bottom:30px}
+.lp-contact-advice h2 { font-size:29px;line-height:1.1;font-weight:700}
+.lp-contact-advice>p { font-size:15px;color:#c8c2c4;line-height:1.7;margin-top:19px}
+.lp-contact-advice ul { display:grid;gap:19px;margin-top:28px;font-size:14px;color:#eee4e9}
+.lp-contact-advice li { display:flex;gap:12px;align-items:flex-start;line-height:1.5}
+.lp-contact-advice li .ph { font-size:23px;color:var(--lp-pink);flex-shrink:0}
+.lp-contact-direct { border-top:1px solid #ffffff26;padding-top:25px;margin-top:30px}
+.lp-contact-direct>span { display:block;font-size:12px;color:#c8c2c4;margin-bottom:10px}
+.lp-contact-direct a { font-size:16px;font-weight:550;text-decoration:underline;text-underline-offset:4px;overflow-wrap:anywhere;color:var(--lp-lime)}
+.lp-contact-direct p { font-size:12px;color:#c8c2c4;line-height:1.7;margin-top:12px}
+.lp-contact-guide { display:flex;align-items:flex-start;gap:15px;background:var(--lp-blush);border:1px solid #eed2de;border-radius:18px;padding:23px;margin-top:20px}
+.lp-contact-guide>.ph { font-size:26px;color:var(--lp-pink-ink)}
+.lp-contact-guide strong { font-size:14px;line-height:1.4}
+.lp-contact-guide small { display:block;font-size:13px;line-height:1.6;color:#765465;margin-top:7px}
+.lp-contact-guide:hover strong { text-decoration:underline;text-underline-offset:4px}
+.lp-contact-success { padding-top:25px;scroll-margin-top:105px}
+.lp-success-icon { background:#e7f6b3;color:#526d0e;margin-bottom:29px}
+.lp-contact-receipt { background:white;border:1px solid var(--lp-line);border-radius:20px;padding:28px;margin:30px 0;overflow-wrap:anywhere}
+.lp-contact-receipt>span { font-size:13px;color:var(--lp-muted)}
+.lp-contact-receipt h2 { font-size:25px;margin-top:14px;line-height:1.25}
+.lp-contact-receipt p { font-size:13px;color:var(--lp-muted);margin-top:25px}
+.lp-contact-receipt strong { font-size:16px;font-weight:550;display:block;margin-top:5px}
+.lp-demo-result-note { font-size:14px;line-height:1.7;background:var(--lp-blush);border-radius:15px;padding:20px;margin-bottom:25px;color:#664756}
+.lp-contact-success>.lp-btn { width:100%}
+.lp-contact-success>.lp-journey-text-button { display:block;margin:18px auto 0}
+
+.lp-commands-intro { display:grid;grid-template-columns:minmax(0,1fr) 365px;gap:70px;align-items:center;padding-block:35px 40px}
+.lp-commands-intro .lp-journey-breadcrumb { margin-bottom:30px}
+.lp-commands-intro .lp-journey-lead { max-width:555px;margin-bottom:0}
+.lp-commands-tip { padding:29px;background:var(--lp-blush);border:1px solid #f1d2df;border-radius:25px}
+.lp-commands-tip img { width:42px;height:42px;object-fit:contain;margin-bottom:18px}
+.lp-commands-tip h2 { font-size:26px;line-height:1.2}
+.lp-commands-tip>p { font-size:15px;line-height:1.6;color:#6d5360;margin-top:12px}
+.lp-commands-tip-example { display:flex;align-items:center;gap:10px;font-size:14px;background:#fff9;border:1px solid #fff;border-radius:12px;padding:13px 15px;margin:20px 0}
+.lp-commands-tip-example .ph { font-size:22px;color:var(--lp-pink-ink)}
+.lp-commands-tip .lp-btn { width:100%;min-height:48px;font-size:14px}
+.lp-commands-tip small { display:block;font-size:12px;line-height:1.5;text-align:center;color:#705361;margin-top:11px}
+.lp-commands-body { padding-bottom:65px}
+.lp-command-categories { display:flex;flex-wrap:wrap;gap:10px;padding:22px 0;border-block:1px solid var(--lp-line)}
+.lp-command-categories a { font-size:14px;border:1px solid #d8d0cd;padding:11px 17px;border-radius:50px;background:#fff;font-weight:550}
+.lp-command-categories a:hover { background:var(--lp-blush);border-color:#e9a5c3}
+.lp-commands-instruction { font-size:13px;line-height:1.6;color:var(--lp-muted);margin-top:20px}
+.lp-command-section { padding-top:45px;scroll-margin-top:95px}
+.lp-command-section-heading { display:flex;align-items:center;gap:17px;margin-bottom:23px}
+.lp-command-section-heading>.ph { width:55px;height:55px;display:grid;place-items:center;background:var(--lp-blush);color:var(--lp-pink-ink);border-radius:16px;font-size:28px;flex-shrink:0}
+.lp-command-section-heading h2 { font-size:29px;line-height:1.15}
+.lp-command-section-heading p { font-size:15px;line-height:1.6;color:var(--lp-muted);margin-top:8px}
+.lp-commands-grid { display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:19px}
+.lp-command-card { border:1px solid var(--lp-line);background:white;border-radius:21px;padding:26px;display:flex;flex-direction:column;min-width:0}
+.lp-command-card h3 { font-size:16px;line-height:1.45;letter-spacing:-.02em;font-weight:650;color:#62565b}
+.lp-command-example { font-size:23px;font-weight:600;letter-spacing:-.035em;line-height:1.3;color:var(--lp-black);padding:23px 0 0;overflow-wrap:anywhere;user-select:text}
+.lp-command-hint { font-size:14px;line-height:1.6;color:var(--lp-muted);margin-top:17px;margin-bottom:23px;flex:1}
+.lp-copy-command { display:flex;align-items:center;justify-content:center;gap:10px;padding:11px 15px;border:1px solid #e7d0d9;border-radius:50px;background:#fceaf2;color:#8e1b4b;font-size:14px!important;font-weight:600!important;min-height:44px;width:fit-content}
+.lp-copy-command svg { width:20px;height:20px;flex-shrink:0}
+.lp-copy-command:hover { background:var(--lp-blush);border-color:#cc87a6}
+.lp-commands-bottom { display:grid;grid-template-columns:1fr auto;gap:45px;align-items:center;background:var(--lp-blush);border-radius:24px;padding:34px 38px;margin-top:47px}
+.lp-commands-bottom h2 { font-size:30px;line-height:1.15}
+.lp-commands-bottom .lp-eyebrow { font-size:12px;margin-bottom:13px}
+.lp-commands-bottom p:not(.lp-eyebrow) { font-size:16px;line-height:1.7;color:#69545f;margin-top:18px;max-width:650px}
+.lp-commands-bottom .lp-commands-limits { font-size:13px!important}
+.lp-commands-bottom-actions { display:flex;flex-direction:column;align-items:center;gap:17px}
+.lp-commands-bottom-actions .lp-btn { min-width:230px}
+.lp-copy-notice { position:fixed;z-index:40;bottom:calc(22px + env(safe-area-inset-bottom));left:50%;transform:translateX(-50%);padding:16px 23px;background:var(--lp-black);color:white;border:1px solid #ffffff35;box-shadow:0 8px 35px #0003;border-radius:15px;width:max-content;max-width:calc(100% - 40px);font-size:14px;line-height:1.5;pointer-events:none}
+
+@media(max-width:1100px) { .lp-contact-layout { grid-template-columns:minmax(0,1fr) 310px;gap:40px}
+.lp-contact-advice { padding:27px}
+.lp-contact-advice h2 { font-size:26px}
+.lp-contact-fields { grid-template-columns:1fr;gap:0}
+.lp-commands-intro { gap:38px;grid-template-columns:minmax(0,1fr) 320px}
+.lp-commands-grid { grid-template-columns:repeat(2,minmax(0,1fr))}
+.lp-commands-bottom { gap:30px;padding:30px}
+.lp-commands-bottom-actions .lp-btn { min-width:200px;font-size:14px}
+}
+
+@media(max-width:800px) { .lp-contact-layout { grid-template-columns:1fr;gap:32px;max-width:610px;padding-block:28px 45px}
+.lp-contact-side { position:static;padding:0}
+.lp-contact-fields { grid-template-columns:1fr 1fr;gap:18px}
+.lp-contact-advice h2 br { display:none}
+.lp-contact-advice .lp-journey-icon { margin-bottom:20px}
+.lp-commands-intro { grid-template-columns:1fr;gap:27px;padding-block:28px 30px}
+.lp-commands-tip { max-width:none;display:grid;grid-template-columns:46px 1fr;gap:0 16px;padding:25px}
+.lp-commands-tip img { grid-row:1/3;margin:0}
+.lp-commands-tip h2 { font-size:25px}
+.lp-commands-tip>p { margin-top:9px}
+.lp-commands-tip-example,.lp-commands-tip .lp-btn,.lp-commands-tip small { grid-column:2}
+.lp-commands-tip .lp-btn { width:fit-content;min-width:185px}
+.lp-commands-tip small { text-align:left}
+.lp-commands-bottom { grid-template-columns:1fr;gap:23px}
+.lp-commands-bottom-actions { align-items:flex-start;gap:10px}
+.lp-commands-bottom-actions .lp-btn { min-width:210px}
+.lp-command-categories { gap:9px}
+.lp-command-categories a { font-size:13px;padding:10px 14px}
+.lp-command-section-heading h2 { font-size:27px}
+.lp-command-card { padding:23px}
+.lp-command-example { font-size:22px}
+.lp-journey-breadcrumb { margin-bottom:29px}
+.lp-commands-intro .lp-journey-breadcrumb { margin-bottom:27px}
+}
+
+@media(max-width:540px) { .lp-journey-page h1,.lp-contact-main h1 { font-size:42px}
+.lp-journey-page .lp-eyebrow { font-size:12px}
+.lp-contact-fields { grid-template-columns:1fr;gap:0}
+.lp-journey-lead,.lp-contact-main .lp-journey-lead { font-size:16px;margin-top:20px}
+.lp-journey-breadcrumb { font-size:12px;gap:9px}
+.lp-journey-field { margin-bottom:21px}
+.lp-journey-field input,.lp-journey-field textarea { padding:13px 14px}
+.lp-contact-advice { padding:26px}
+.lp-contact-advice h2 { font-size:29px;max-width:330px}
+.lp-contact-advice>p { font-size:16px}
+.lp-contact-success { padding-top:8px}
+.lp-contact-receipt { padding:24px}
+.lp-commands-intro { gap:25px}
+.lp-commands-tip { padding:23px;grid-template-columns:34px 1fr;gap:0 13px}
+.lp-commands-tip img { width:34px;height:34px}
+.lp-commands-tip h2 { font-size:23px}
+.lp-commands-tip>p { font-size:14px}
+.lp-commands-tip-example { font-size:13px;padding:12px;margin-block:17px}
+.lp-commands-grid { grid-template-columns:1fr;gap:15px}
+.lp-command-section { padding-top:33px}
+.lp-command-section-heading { gap:13px;margin-bottom:19px}
+.lp-command-section-heading>.ph { width:48px;height:48px;font-size:25px;border-radius:14px}
+.lp-command-section-heading h2 { font-size:24px}
+.lp-command-section-heading p { font-size:14px;line-height:1.5;margin-top:7px}
+.lp-command-card { padding:24px}
+.lp-command-example { font-size:24px;padding-top:18px}
+.lp-command-hint { font-size:15px;margin-top:15px}
+.lp-copy-command { font-size:14px!important}
+.lp-commands-body { padding-bottom:38px}
+.lp-commands-bottom { padding:26px;margin-top:35px}
+.lp-commands-bottom h2 { font-size:29px}
+.lp-commands-bottom p:not(.lp-eyebrow) { font-size:15px}
+.lp-commands-bottom-actions { align-items:stretch;text-align:center}
+.lp-commands-bottom-actions .lp-btn { min-width:0}
+.lp-copy-notice { font-size:13px;bottom:calc(16px + env(safe-area-inset-bottom));padding:13px 17px}
+}
+
+@media(max-width:360px) { .lp-journey-page h1,.lp-contact-main h1 { font-size:37px}
+.lp-commands-tip { display:block}
+.lp-commands-tip img { margin-bottom:14px}
+.lp-commands-tip small { text-align:left}
+.lp-command-example { font-size:22px}
+}
+
+
+.lp-journey-page .lp-visually-hidden { position:absolute;width:1px;height:1px;padding:0;margin:-1px;overflow:hidden;clip:rect(0,0,0,0);white-space:nowrap;border:0}
+.lp-contact-main>section { scroll-margin-top:105px}
+
+/* Os guias e o contato mantêm os contratos do renderer/controlador oficiais. */
+.lp-help .faq { padding:0; border:0; max-width:900px; margin:30px 0 0; }
+.lp-help .faq-item { background:#fff; border:1px solid var(--lp-line); border-radius:16px; overflow:visible; }
+.lp-help .faq-q { color:var(--lp-black); padding:22px; font:600 16px/1.5 var(--font); }
+.lp-help .faq-a { color:var(--lp-muted); }
+.lp-help .faq-a .guide-prose { padding:4px 22px 22px; }
+.lp-help .faq-a .guide-prose p { padding:0; }
+.lp-help .guide-prose { --ink:#111; --ink-2:#5c5458; --ink-3:#686069; --card:#fff; --card-2:#f6f2f4; --bg-elev:#f6f2f4; --line:#ded7da; }
+.lp-help .guide-prose ul { padding-left:0; list-style:none; }
+.lp-help .contact-msg { display:none; margin-bottom:20px; padding:13px 15px; border:1px solid #edb3c3; background:#fdeaf0; color:#912448; border-radius:12px; font-size:14px; line-height:1.6; }
+.lp-help .contact-msg.show { display:block; }
+.lp-help .contact-msg.ok { color:#205339; background:#eaf7ed; border-color:#a5cdb2; }
+.lp-help #contact-form .lp-journey-field { margin-bottom:20px; }
+.lp-help .lp-copy-command { cursor:pointer; }
+.lp-help .lp-copy-notice { z-index:100; }
+.lp-help .lp-privacy-panel ul { list-style:disc; padding-left:24px; }
+.lp-help .lp-privacy-panel ol { list-style:decimal; padding-left:24px; }
+.lp-help .lp-command-card { min-width:0; }
+.lp-help .lp-command-example { overflow-wrap:anywhere; }
+
+.lp-help .guide-prose :is(.g-stat.win .n,.g-goal-pct,.g-vs-col.good .g-vs-h,.g-vs-col.good .m) { color:#38621c; }
+
+/* SVG dos guias oficiais também herda o tema claro do FAQ. */
+.lp-help .guide-prose .g-chart svg text { fill:#5c5458; }
+.lp-help .guide-prose .g-chart :is(.g-chart-endlabel,.g-chart-dot) { fill:#38621c; }
+.lp-help .guide-prose .g-chart svg>g[stroke] { stroke:#b9adb3; }

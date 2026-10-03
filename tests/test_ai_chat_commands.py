@@ -9,7 +9,7 @@ em handle_incoming.
 
 Estrutura dos cenários:
   - Free sem prefix → None (segue fluxo tradicional)
-  - Free com prefix → gate "PigBank+"
+  - Free com prefix → gate (a copy "PigBank+" é do v1; no v2 só o roteamento)
   - Free com pending → gate + limpa pending
   - Pro sem prefix → None (comando determinístico tem precedência)
   - Pro com prefix → IA é chamada com o prefix removido
@@ -17,8 +17,10 @@ Estrutura dos cenários:
   - Texto vazio → None
   - IA falha (exception) → mensagem de erro padrão
 
-Mocka `is_pro`, `db.ai_get_pending_action`/`ai_consume_pending_action` e o
-`ai_chat.chat` real pra isolar o gate. Não toca em DB nem em LLM.
+Mocka `ai_chat_allowed` (a chave `is_pro` do state),
+`db.ai_get_pending_action`/`ai_consume_pending_action` e o `ai_chat.chat` real
+pra isolar o gate. Não toca em LLM; só os testes de cota esgotada, no fim do
+arquivo, usam banco real.
 """
 from __future__ import annotations
 
@@ -99,7 +101,9 @@ def test_free_msg_vazia_retorna_none(patches):
 # ─── Free com prefix → gate Pro ─────────────────────────────────────────────
 
 
-def test_free_com_prefix_piggy_recebe_gate_pro(patches):
+def test_free_com_prefix_piggy_recebe_gate_pro(patches, monkeypatch):
+    # Copy "PigBank+" é do v1 (freio PLANS_V2_ENABLED=0). Apagar na Fase 2.
+    monkeypatch.setenv("PLANS_V2_ENABLED", "0")
     patches["is_pro"] = False
     out = mod.handle_ai_chat_command(1, "piggy quanto gastei?", platform="whatsapp")
     assert out is not None
@@ -111,20 +115,20 @@ def test_free_com_prefix_piggy_recebe_gate_pro(patches):
 def test_free_com_prefix_pergunta_recebe_gate_pro(patches):
     patches["is_pro"] = False
     out = mod.handle_ai_chat_command(1, "pergunta meu saldo", platform="whatsapp")
-    assert out is not None and "PigBank+" in out
+    assert out is not None and patches["ai_called_with"] is None
 
 
 def test_free_com_prefix_so_piggy_puro_tambem_recebe_gate(patches):
     patches["is_pro"] = False
     out = mod.handle_ai_chat_command(1, "piggy", platform="whatsapp")
-    assert out is not None and "PigBank+" in out
+    assert out is not None and patches["ai_called_with"] is None
 
 
 def test_free_com_pending_recebe_gate_e_limpa_pending(patches):
     patches["is_pro"] = False
     patches["pending"] = {"some": "pending"}
     out = mod.handle_ai_chat_command(1, "sim", platform="whatsapp")
-    assert "PigBank+" in out
+    assert out is not None
     assert patches["clear_pending_called"] is True
     assert patches["ai_called_with"] is None
 
@@ -147,7 +151,7 @@ def test_pro_msg_complexa_sem_prefix_tambem_retorna_none(patches):
     # pra IA acontece no fallback de baixa confiança em handle_incoming, não
     # neste gate.
     patches["is_pro"] = True
-    out = mod.handle_ai_chat_command(42, "quanto gastei em alimentação esse mês?", platform="discord")
+    out = mod.handle_ai_chat_command(42, "quanto gastei em alimentação esse mês?", platform="whatsapp")
     assert out is None
     assert patches["ai_called_with"] is None
 
@@ -282,3 +286,121 @@ def test_pending_frase_ambigua_nao_dispara_guard_vai_pra_ia(patches):
     out = mod.handle_ai_chat_command(42, "na verdade deixa quieto", platform="whatsapp")
     assert patches["clear_pending_called"] is False
     assert patches["ai_called_with"] is not None
+
+
+# ─── Cota esgotada no v2, por tier (banco real) ──────────────────────────────
+
+def _cota_esgotada(monkeypatch, uid, plan, uso=1000000, pago="pro"):
+    from datetime import date
+
+    import db
+    from conftest import em_carencia, promote_to_pro
+
+    # "free" no v2 com acesso ao Piggy = carência de cobrança (tier free).
+    em_carencia(uid, plan=pago) if plan == "free" else promote_to_pro(uid, plan=plan)
+    with db.get_conn() as conn, conn.cursor() as cur:
+        cur.execute(
+            "update auth_accounts set ai_messages_this_month = %s, ai_month_reset_at = %s "
+            "where user_id = %s",
+            (uso, date.today().replace(day=1), uid),
+        )
+        conn.commit()
+    return mod.handle_ai_chat_command(uid, "piggy oi", platform="whatsapp")
+
+
+def test_cota_esgotada_essencial_renova_dia_1_e_sugere_plus(user_id, monkeypatch):
+    out = _cota_esgotada(monkeypatch, user_id, "essencial")
+    assert "acabaram" in out
+    assert "dia 1º" in out
+    assert "Plus" in out and "https://pigbankai.com/precos" in out
+    assert "planos pagos" not in out
+
+
+@pytest.mark.parametrize("plan", ["pro", "pro_max"])  # 'pro' = Plus, 'pro_max' = Pro
+def test_cota_esgotada_plus_e_pro_so_renova_sem_upgrade(user_id, monkeypatch, plan):
+    out = _cota_esgotada(monkeypatch, user_id, plan)
+    assert "acabaram" in out
+    assert "dia 1º" in out
+    assert "precos" not in out
+    assert "Plus" not in out and "planos pagos" not in out
+
+
+def test_cota_esgotada_em_carencia_manda_atualizar_o_cartao(user_id, monkeypatch):
+    """Carência = assinante com a cobrança em retentativa. "Assine" é beco: o
+    checkout da /precos o recusa com 409 "Você já tem um plano ativo".
+    O uso estoura a cota da carência (tier free) e cabe na do Plus pago."""
+    from core.services.plan_service import ai_monthly_limit_for_tier
+
+    uso = ai_monthly_limit_for_tier("free")
+    assert uso < ai_monthly_limit_for_tier("plus")
+    out = _cota_esgotada(monkeypatch, user_id, "free", uso=uso)
+    assert out == (
+        "🐷 Suas mensagens com o Piggy deste mês acabaram!\n"
+        "A cobrança da sua assinatura não passou — assim que ela entrar, a conversa "
+        "volta na hora. Pra atualizar o cartão: pigbankai.com/conta"
+    )
+    assert "planos pagos" not in out and "/precos" not in out
+    assert "/conta" in out
+
+
+def test_cota_esgotada_em_carencia_sem_cota_do_plano_pago_nao_promete_a_volta(user_id, monkeypatch):
+    """Pagar não zera o contador do mês: quem já gastou a cota do Essencial antes
+    da cobrança falhar não recebe a IA de volta quando ela entrar."""
+    from core.services.plan_service import ai_monthly_limit_for_tier
+
+    uso = ai_monthly_limit_for_tier("essencial")  # a borda: igual ao limite
+    out = _cota_esgotada(monkeypatch, user_id, "free", uso=uso, pago="essencial")
+    assert out == (
+        "🐷 Suas mensagens com o Piggy deste mês acabaram!\n"
+        "A cobrança da sua assinatura não passou. Pra atualizar o cartão: "
+        "pigbankai.com/conta — as mensagens renovam no dia 1º."
+    )
+    assert "volta na hora" not in out
+
+
+def test_cota_esgotada_em_carencia_sem_ler_o_plano_nao_promete_a_volta(user_id, monkeypatch):
+    """O mesmo arranjo que dá a promessa, mas a leitura do plano falha: sem ela."""
+    import db
+    from core.services import billing_copy
+    from core.services.plan_service import ai_monthly_limit_for_tier
+
+    acabou = "🐷 Suas mensagens com o Piggy deste mês acabaram!\n"
+    out = _cota_esgotada(monkeypatch, user_id, "free", uso=ai_monthly_limit_for_tier("free"))
+    assert out == acabou + billing_copy.IA_COTA_EM_CARENCIA  # o arranjo promete
+
+    def _falha(*a, **k):
+        raise RuntimeError("banco fora")
+
+    monkeypatch.setattr(db, "get_auth_user", _falha)
+    out = mod.handle_ai_chat_command(user_id, "piggy oi", platform="whatsapp")
+    assert out == acabou + billing_copy.IA_COTA_EM_CARENCIA_SEM_COTA
+
+
+def test_cota_esgotada_cortado_mantem_texto_dos_planos_pagos(user_id, monkeypatch):
+    """POSITIVO: o tier `free` que NÃO é carência (cortado, com o freio do corte
+    puxado para ele alcançar o Piggy) continua ouvindo a copy antiga."""
+    from datetime import datetime, timedelta, timezone
+
+    import db
+    import db_support
+    from core.services import billing_copy
+
+    monkeypatch.setenv("ACCESS_GATE_ENABLED", "0")
+    out_pro = _cota_esgotada(monkeypatch, user_id, "pro")  # monta a conta e estoura a cota
+    assert "renovam no dia 1º" in out_pro
+    db.mark_plan_selected(user_id)
+    with db.get_conn() as conn, conn.cursor() as cur:
+        cur.execute(  # cortado: plano vencido, `canceled`, sem relógio de carência
+            "update auth_accounts set plan_expires_at=%s, past_due_since=null,"
+            "       last_payment_status='canceled' where user_id=%s",
+            (datetime.now(timezone.utc) - timedelta(days=1), user_id),
+        )
+        conn.commit()
+    db_support.invalidate_auth_user_cache(user_id)
+    assert billing_copy.estado_sem_plano_pago(user_id) == "sem_acesso"
+
+    out = mod.handle_ai_chat_command(user_id, "piggy oi", platform="whatsapp")
+    assert out == (
+        "🐷 Suas mensagens com o Piggy deste mês acabaram!\n"
+        "Nos planos pagos a conversa continua: https://pigbankai.com/precos"
+    )

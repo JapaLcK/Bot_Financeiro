@@ -99,6 +99,8 @@
 
   const cache = {};        // key → {nodes, styles, title, scrollY, refresh, bodyClass}
   const booted = new Set(); // keys cujos scripts inline já executaram (nunca 2x: let/const)
+  const loadingScripts = new Map(); // URL absoluta → Promise do <script> ainda em carga
+  const loadingStyles = new Map(); // URL absoluta → Promise do <link> ainda em carga
   let currentKey = null;
   let seq = 0;             // geração: só a navegação mais recente monta
 
@@ -256,19 +258,69 @@
   function ensureExternalScripts(doc) {
     const have = new Set(Array.prototype.map.call(document.scripts, s => s.src).filter(Boolean));
     const need = Array.prototype.slice.call(doc.querySelectorAll("script[src]"))
-      .map(s => new URL(s.getAttribute("src"), location.origin).href)
-      .filter(u => !have.has(u));
-    return Promise.all(need.map(u => new Promise((ok, bad) => {
+      .map(s => new URL(s.getAttribute("src"), location.origin).href);
+    return Promise.all(need.map(u => {
+      const pending = loadingScripts.get(u);
+      if (pending) return pending;
+      if (have.has(u)) return Promise.resolve();
+      have.add(u);
       const s = document.createElement("script");
-      s.src = u; s.onload = ok; s.onerror = () => bad(new Error("script " + u));
+      s.src = u;
+      const promise = new Promise((ok, bad) => {
+        s.onload = () => { loadingScripts.delete(u); ok(); };
+        s.onerror = () => {
+          loadingScripts.delete(u);
+          s.remove();
+          bad(new Error("script " + u));
+        };
+      });
+      loadingScripts.set(u, promise);
       document.head.appendChild(s);
-    })));
+      return promise;
+    }));
+  }
+
+  // Folhas externas da página nova que ainda não existem no documento. Assim
+  // como os scripts externos, ficam instaladas uma vez e são deduplicadas pela
+  // URL absoluta. O mount espera o load para nunca revelar a página sem CSS.
+  function ensureExternalStyles(doc) {
+    const have = new Set(Array.prototype.map.call(
+      document.querySelectorAll('link[rel~="stylesheet"][href]'), link => link.href));
+    const need = Array.prototype.slice.call(doc.querySelectorAll('link[rel~="stylesheet"][href]'))
+      .map(source => ({
+        source,
+        url: new URL(source.getAttribute("href"), location.origin).href,
+      }));
+    return Promise.all(need.map(({ source, url }) => {
+      const pending = loadingStyles.get(url);
+      if (pending) return pending;
+      if (have.has(url)) return Promise.resolve();
+      have.add(url);
+      const link = document.createElement("link");
+      Array.prototype.forEach.call(source.attributes, attr => {
+        if (attr.name !== "href") link.setAttribute(attr.name, attr.value);
+      });
+      link.href = url;
+      const promise = new Promise((ok, bad) => {
+        link.onload = () => { loadingStyles.delete(url); ok(); };
+        link.onerror = () => {
+          loadingStyles.delete(url);
+          link.remove();
+          bad(new Error("stylesheet " + url));
+        };
+      });
+      loadingStyles.set(url, promise);
+      document.head.appendChild(link);
+      return promise;
+    }));
   }
 
   async function mountNew(key, path, html, push, my, sw) {
     const doc = new DOMParser().parseFromString(html, "text/html");
     sw.mark("parse");
 
+    await ensureExternalStyles(doc);
+    sw.mark("styles");
     await ensureExternalScripts(doc);
     sw.mark("scripts");
     if (my !== seq) return;

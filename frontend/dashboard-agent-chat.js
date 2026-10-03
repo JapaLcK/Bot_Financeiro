@@ -198,11 +198,12 @@
     s.busy = true;
     s.error = '';
     if (!reply) {
-      s.messages.push({ id: `agent-${++messageSequence}`, role: 'user', content: text });
+      const createdAt = new Date().toISOString();
+      s.messages.push({ id: `agent-${++messageSequence}`, role: 'user', content: text, createdAt });
       reply = { id: `agent-${++messageSequence}`, role: 'assistant', question: text };
       s.messages.push(reply);
     }
-    Object.assign(reply, { state: 'pending', content: 'Preparando a resposta…', errorCode: '', redirects: [] });
+    Object.assign(reply, { state: 'pending', content: 'Preparando a resposta…', createdAt: undefined, errorCode: '', redirects: [] });
     render();
     try {
       const response = await fetch(`${API}/agents/${USER_ID}/${kind}/chat`, {
@@ -234,6 +235,7 @@
       if (['activate', 'upgrade', 'no_energy'].includes(error.code)) s.access = error.code;
       if (!s.draft) s.draft = text;
     } finally {
+      reply.createdAt = new Date().toISOString();
       s.busy = false;
       if (currentKind === kind) { render(); if (ui.isOpen('agent')) ui.focusInput('agent'); }
     }

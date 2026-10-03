@@ -55,6 +55,10 @@ def get_summary_by_period_impl(
     start_date: date,
     end_date: date,
 ):
+    # Divergência conhecida (Q18): só `launches`, SEM o cartão. Fica para o relatório
+    # diário e semanal, as ferramentas da IA de período livre e a projeção de
+    # fechamento. "Gastos em <mês>", relatório mensal, /app e Análises leem a regra
+    # única do mês, com o cartão pela fatura (`db/resumo_mes.TOTAIS_SQL`).
     ensure_user(user_id)
 
     start_dt = datetime.combine(start_date, datetime.min.time())
@@ -62,7 +66,7 @@ def get_summary_by_period_impl(
 
     # Import local, não no topo: `db/__init__` importa `db.reports`, que lê
     # atributos de `db_support` na carga — topo aqui fecha o ciclo (mesmo motivo
-    # do `from db_support import ...` local em db/users.py:167).
+    # do `from db_support import ...` local no `_merge_users` de db/users.py).
     from db.connection import TIPO_CANON_SQL
 
     # `TIPO_CANON_SQL` colapsa a forma legada na moderna AQUI, no SQL: com
@@ -442,6 +446,8 @@ def register_auth_user_impl(
     email: str,
     password: str,
 ) -> dict:
+    # Só semeia conta nos testes (nenhuma rota chama). Não tem a trava por e-mail
+    # dos criadores de conta: rota nova cria conta por `inserir_conta_nova`.
     email = email.strip().lower()
 
     with get_conn() as conn:
@@ -764,13 +770,15 @@ def set_stripe_customer_impl(get_conn, user_id: int, stripe_customer_id: str) ->
     invalidate_auth_user_cache(user_id)
 
 
+EMAIL_JA_TEM_CONTA = 'Este e-mail já tem conta. Entre com sua senha ou use "Esqueci a senha".'
+
+
 class AccountAlreadyExistsError(Exception):
     """Cadastro tentado com e-mail/telefone que já pertence a uma conta.
 
     Carrega o `existing_user_id` pra que o endpoint avise o dono da conta por
-    e-mail. O endpoint responde 409 com mensagem clara pro visitante (a
-    anti-enumeração de e-mail foi abandonada — ver auth_register); o de
-    TELEFONE segue sem revelação. `reason` ∈ {email, email_google, phone}.
+    e-mail (out-of-band) e responda de forma GENÉRICA — sem revelar ao visitante
+    que a conta existe (anti-enumeração). `reason` ∈ {email, email_google, phone}.
     """
     def __init__(self, reason: str, existing_user_id: int | None = None):
         super().__init__(reason)
@@ -778,47 +786,182 @@ class AccountAlreadyExistsError(Exception):
         self.existing_user_id = existing_user_id
 
 
+# Os DOIS índices únicos do telefone em `auth_accounts` (`db/schema.py`): o do
+# `phone_e164` e o do `phone_hash`. O INSERT grava os dois e o Postgres acusa o
+# que conferir primeiro. `tests/test_auth_google_app_cadastro.py` confere que
+# os nomes existem no banco.
+INDICES_TELEFONE_UNICO = ("idx_auth_accounts_phone_unique", "idx_auth_accounts_phone_hash_unique")
+
+
+def gravar_descartando_telefone_disputado(conn, gravar, telefone: str | None) -> None:
+    """Roda `gravar(telefone)`; se outra conta gravou o mesmo número entre a
+    busca por `phone_hash` e o INSERT, desfaz e grava de novo SEM telefone.
+
+    É o mesmo descarte silencioso da busca (`create_email_verification_impl`),
+    agora também na corrida: a conta nasce sem WhatsApp, nunca num 500.
+    Só a violação dos índices do telefone é engolida; qualquer outra sobe.
+
+    ponytail: variantes diferentes do mesmo número (com e sem o nono dígito)
+    gravadas ao mesmo tempo têm hashes diferentes e as duas entram — mesmo
+    limite do register.
+    """
+    try:
+        gravar(telefone)
+    except psycopg.errors.UniqueViolation as exc:
+        if telefone is None or exc.diag.constraint_name not in INDICES_TELEFONE_UNICO:
+            raise
+        conn.rollback()
+        gravar(None)
+
+
+def trava_email(cur, email_hash: str | None, *, esperar: bool = True) -> bool:
+    """Trava da TRANSAÇÃO de `cur` pelo e-mail: serializa quem cria conta e quem
+    grava código de cadastro para o mesmo e-mail (`inserir_conta_nova`,
+    `create_email_verification_impl`, `db/signup_quiz.criar_conta_sem_codigo`).
+
+    `esperar=False` é da rota anônima (/assinar): trava ocupada devolve False na
+    hora. Esperando, cada pedido parado segura uma conexão do pool síncrono (8), e
+    uma rajada no mesmo e-mail derrubava o app inteiro. Quem espera são os
+    criadores que exigem posse do e-mail (código ou token) e o register, que
+    chega aqui depois do teto de 3/h por e-mail — no máximo 3 parados por e-mail.
+    """
+    funcao = "pg_advisory_xact_lock" if esperar else "pg_try_advisory_xact_lock"
+    cur.execute(f"select {funcao}(hashtext(%s)) as ok", (f"auth_email:{email_hash}",))
+    return esperar or bool(cur.fetchone()["ok"])
+
+
+def telefone_livre(cur, telefone: str | None) -> str | None:
+    """O telefone, ou None se outra conta já o tem: descarte silencioso, sem dizer
+    "em uso" (enumeraria números de WhatsApp). O cadastro segue sem WhatsApp."""
+    if not telefone:
+        return None
+    hashes = [hash_pii_optional(c, kind="phone") for c in phone_lookup_candidates(telefone) if c]
+    cur.execute("select 1 from auth_accounts where phone_hash = any(%s)", (hashes,))
+    return None if cur.fetchone() else telefone
+
+
+def inserir_conta_nova(cur, *, user_id: int, email: str, password_hash: str | None,
+                       phone_e164: str | None, display_name: str | None, source: str) -> bool:
+    """INSERT da conta, só com o e-mail livre. False = o e-mail já tem conta, e
+    quem chama RECUSA, sem sessão.
+
+    Os três criadores de conta passam aqui: `confirm_email_verification_impl`
+    (register), `consume_pending_google_signup` (Google/Apple) e
+    `criar_conta_sem_codigo` (quiz). O user_id canônico é o mesmo para o mesmo
+    e-mail, então o antigo `on conflict (email) do update` fundia: a conta que
+    outro cadastro acabara de criar ganhava a senha (ou a identidade Google) deste,
+    e as duas requisições saíam com sessão nela.
+
+    A trava serializa os criadores: sem ela, dois INSERTs simultâneos podem
+    passar pelo árbitro `(email)` e o segundo estourar no índice único do
+    `email_hash`, que não é árbitro.
+    """
+    email_hash = hash_pii_optional(email, kind="email")
+    trava_email(cur, email_hash)
+    cur.execute(
+        """
+        insert into auth_accounts
+          (user_id, email, password_hash, phone_e164, display_name, phone_status,
+           email_hash, email_enc, phone_hash, phone_enc, display_name_enc, signup_source)
+        values (%s, %s, %s, %s, %s, 'pending', %s, %s, %s, %s, %s, %s)
+        on conflict (email) do nothing
+        returning user_id
+        """,
+        (user_id, email, password_hash, phone_e164, display_name,
+         email_hash,
+         encrypt_pii_optional(email),
+         hash_pii_optional(phone_e164, kind="phone"),
+         encrypt_pii_optional(phone_e164),
+         encrypt_pii_optional(display_name),
+         source),
+    )
+    return cur.fetchone() is not None
+
+
+def boas_vindas(create_link_code, email: str, user_id: int) -> str:
+    """Depois de a conta nascer: o `link_code` do WhatsApp e o e-mail de boas-vindas."""
+    link_code = create_link_code(user_id, minutes_valid=15)
+    try:
+        from core.services.email_service import send_welcome_email
+
+        send_welcome_email(email, link_code, os.getenv("DASHBOARD_URL", ""))
+    except Exception as exc:
+        logging.getLogger(__name__).warning("Falha ao enviar email de boas-vindas: %s", type(exc).__name__)
+    return link_code
+
+
+def _recusa_se_tem_conta(cur, email: str) -> None:
+    cur.execute(
+        "select user_id, password_hash from auth_accounts where email_hash = %s",
+        (hash_pii_optional(email, kind="email"),),
+    )
+    existing = cur.fetchone()
+    if existing:
+        # Anti-enumeração: não vaza "já existe" pro visitante. O endpoint
+        # trata AccountAlreadyExistsError respondendo genericamente e
+        # avisando o dono por e-mail.
+        reason = "email_google" if existing["password_hash"] is None else "email"
+        raise AccountAlreadyExistsError(reason, existing_user_id=existing["user_id"])
+
+
 def create_email_verification_impl(
     get_conn,
     hash_password,
     email: str,
-    password: str,
-    phone_e164: str,
+    password: str | None,
+    phone_e164: str | None,
     minutes_valid: int = 15,
     display_name: str | None = None,
 ) -> str:
+    """`password=None` é o cadastro pelo quiz (frontend/routes/quiz_signup.py):
+    a conta nasce sem senha e o reenvio do webhook devolve o código ainda vivo
+    em vez de invalidá-lo. Com senha (/auth/register), nada disso vale."""
     email = email.strip().lower()
-    normalized_phone = normalize_phone_e164(phone_e164)
-    phone_candidates = phone_lookup_candidates(normalized_phone)
+    normalized_phone = normalize_phone_e164(phone_e164) if phone_e164 else None
     display_name = (display_name or "").strip() or None
 
     with get_conn() as conn:
         with conn.cursor() as cur:
-            cur.execute(
-                "select user_id, password_hash from auth_accounts where email_hash = %s",
-                (hash_pii_optional(email, kind="email"),),
-            )
-            existing = cur.fetchone()
-            if existing:
-                # E-mail já cadastrado: o endpoint (auth_register) responde 409
-                # com mensagem clara e avisa o dono por e-mail.
-                reason = "email_google" if existing["password_hash"] is None else "email"
-                raise AccountAlreadyExistsError(reason, existing_user_id=existing["user_id"])
-            _phone_hashes = [hash_pii_optional(c, kind="phone") for c in phone_candidates if c]
-            cur.execute("select user_id from auth_accounts where phone_hash = any(%s)", (_phone_hashes,))
-            phone_row = cur.fetchone()
-            if phone_row:
-                # Telefone já em uso por outra conta. NÃO revela isso ao
-                # cadastrante: se a gente parasse aqui (ou não mandasse o código),
-                # a presença/ausência do e-mail de verificação enumeraria números
-                # de WhatsApp (o cadastrante controla o e-mail submetido). Em vez
-                # disso segue o fluxo normal — manda o código pro e-mail dele — e
-                # apenas DESCARTA o telefone disputado: a conta nasce sem WhatsApp
-                # vinculado (dá pra vincular outro número depois). A colisão de
-                # telefone fica indistinguível até o e-mail ser verificado.
-                normalized_phone = None
+            _recusa_se_tem_conta(cur, email)
+            # Telefone já em uso por outra conta: NÃO revela isso ao
+            # cadastrante: se a gente parasse aqui (ou não mandasse o código),
+            # a presença/ausência do e-mail de verificação enumeraria números
+            # de WhatsApp (o cadastrante controla o e-mail submetido). Em vez
+            # disso segue o fluxo normal — manda o código pro e-mail dele — e
+            # apenas DESCARTA o telefone disputado: a conta nasce sem WhatsApp
+            # vinculado (dá pra vincular outro número depois). A colisão de
+            # telefone fica indistinguível até o e-mail ser verificado.
+            normalized_phone = telefone_livre(cur, normalized_phone)
+            if password is None:
+                cur.execute(
+                    """
+                    select id, code from email_verification_codes
+                    where email_hash = %s and used_at is null and expires_at > now()
+                      and password_hash is null
+                    order by created_at desc limit 1
+                    """,
+                    (hash_pii_optional(email, kind="email"),),
+                )
+                vivo = cur.fetchone()
+                if vivo:
+                    # Mesmo código e validade; o telefone/nome corrigido no
+                    # reenvio vale. None (inválido ou disputado) não apaga o anterior.
+                    cur.execute(
+                        """
+                        update email_verification_codes set
+                          phone_e164 = coalesce(%s, phone_e164), phone_hash = coalesce(%s, phone_hash),
+                          phone_enc = coalesce(%s, phone_enc), display_name = coalesce(%s, display_name),
+                          display_name_enc = coalesce(%s, display_name_enc)
+                        where id = %s
+                        """,
+                        (normalized_phone, hash_pii_optional(normalized_phone, kind="phone"),
+                         encrypt_pii_optional(normalized_phone), display_name,
+                         encrypt_pii_optional(display_name), vivo["id"]),
+                    )
+                    conn.commit()
+                    return vivo["code"]
 
-    password_hash = hash_password(password)
+    password_hash = hash_password(password) if password is not None else None
     # Código de verificação precisa ser imprevisível (brute-force de 6 dígitos):
     # secrets (CSPRNG) em vez de random (Mersenne Twister, previsível).
     code = f"{secrets.randbelow(1_000_000):06d}"
@@ -826,6 +969,11 @@ def create_email_verification_impl(
 
     with get_conn() as conn:
         with conn.cursor() as cur:
+            # A busca de cima correu sem trava: a conta pode ter nascido no meio
+            # (a /assinar cria sem código). Sob a trava, o código só é gravado com
+            # o e-mail livre — e aí a /assinar o vê e não cria a conta por cima.
+            trava_email(cur, hash_pii_optional(email, kind="email"))
+            _recusa_se_tem_conta(cur, email)
             cur.execute(
                 "update email_verification_codes set used_at = now() where email_hash = %s and used_at is null",
                 (hash_pii_optional(email, kind="email"),),
@@ -889,56 +1037,27 @@ def confirm_email_verification_impl(
     verification_id = row["id"]
     user_id = get_or_create_canonical_user("email", email)
 
-    with get_conn() as conn:
+    # O telefone foi conferido no register, até 15 min antes: outra conta pode
+    # tê-lo gravado nesse meio-tempo. `conn` é o do `with` logo abaixo.
+    def _gravar(phone_e164):
         with conn.cursor() as cur:
-            cur.execute(
-                """
-                insert into auth_accounts
-                  (user_id, email, password_hash, phone_e164, display_name, phone_status,
-                   email_hash, email_enc, phone_hash, phone_enc, display_name_enc, signup_source)
-                values (%s, %s, %s, %s, %s, 'pending', %s, %s, %s, %s, %s, %s)
-                on conflict (email) do update
-                set user_id = excluded.user_id,
-                    password_hash = excluded.password_hash,
-                    phone_e164 = coalesce(auth_accounts.phone_e164, excluded.phone_e164),
-                    display_name = coalesce(auth_accounts.display_name, excluded.display_name),
-                    phone_status = case
-                        when auth_accounts.phone_e164 is null and excluded.phone_e164 is not null then 'pending'
-                        else auth_accounts.phone_status
-                    end,
-                    email_hash = coalesce(auth_accounts.email_hash, excluded.email_hash),
-                    email_enc = coalesce(auth_accounts.email_enc, excluded.email_enc),
-                    phone_hash = coalesce(auth_accounts.phone_hash, excluded.phone_hash),
-                    phone_enc = coalesce(auth_accounts.phone_enc, excluded.phone_enc),
-                    display_name_enc = coalesce(auth_accounts.display_name_enc, excluded.display_name_enc),
-                    -- Preserva a origem da 1ª criação em re-registro do mesmo e-mail
-                    signup_source = coalesce(auth_accounts.signup_source, excluded.signup_source)
-                """,
-                (user_id, email, password_hash, phone_e164, display_name,
-                 hash_pii_optional(email, kind="email"),
-                 encrypt_pii_optional(email),
-                 hash_pii_optional(phone_e164, kind="phone"),
-                 encrypt_pii_optional(phone_e164),
-                 encrypt_pii_optional(display_name),
-                 source),
-            )
+            # O e-mail ganhou conta depois do código (Google, Apple, /assinar):
+            # recusa em vez de pôr esta senha na conta de outro cadastro.
+            # Quem é dono do e-mail entra por "Esqueci a senha".
+            if not inserir_conta_nova(cur, user_id=user_id, email=email, password_hash=password_hash,
+                                      phone_e164=phone_e164, display_name=display_name, source=source):
+                raise ValueError(EMAIL_JA_TEM_CONTA)
             cur.execute(
                 "update email_verification_codes set used_at = now() where id = %s",
                 (verification_id,),
             )
+
+    with get_conn() as conn:
+        gravar_descartando_telefone_disputado(conn, _gravar, phone_e164)
         conn.commit()
     invalidate_auth_user_cache(user_id)
 
-    link_code = create_link_code(user_id, minutes_valid=15)
-
-    try:
-        from core.services.email_service import send_welcome_email
-
-        dashboard_url = os.getenv("DASHBOARD_URL", "")
-        send_welcome_email(email, link_code, dashboard_url)
-    except Exception as exc:
-        logging.getLogger(__name__).warning("Falha ao enviar email de boas-vindas para <%s>: %s", email, exc)
-
+    link_code = boas_vindas(create_link_code, email, user_id)
     return {"user_id": user_id, "link_code": link_code}
 
 
@@ -1025,7 +1144,32 @@ def attempt_whatsapp_phone_link_impl(
 
     final_user_id = target_user_id
     if int(current_user_id) != target_user_id:
-        merge_users(int(current_user_id), target_user_id)
+        from db.google_auth import conta_sem_credencial  # tardio: db/ importa este módulo
+        from db.users import MergeRefused, _tem_dados_financeiros
+
+        # Conta sem senha nem Google/Apple (a do quiz) não se liga pelo telefone:
+        # o número foi digitado por quem pagou, e o e-mail ainda não foi provado.
+        # Sem mesclar e sem gravar user_identities (PR 4 do funil v3). Número já
+        # ligado a ela (current == target) não passa aqui: o `process_message`
+        # barra antes de chamar o auto-vínculo.
+        if conta_sem_credencial(target_user_id):
+            # Remetente com dados é o dono do número usando o bot, não quem acabou
+            # de pagar: segue na conta dele, sem vínculo e sem aviso (status que o
+            # `process_message` não trata). O critério de dados é o do merge (#607).
+            with get_conn() as conn, conn.cursor() as cur:
+                if _tem_dados_financeiros(cur, int(current_user_id)):
+                    return {"status": "remetente_com_dados", "wa_phone": wa_phone,
+                            "target_user_id": target_user_id}
+            # `target_user_id`: os envios proativos vão ao `phone_e164` dela, e o
+            # clique de opt-out deste número tem de desligar a preferência dela.
+            return {"status": "precisa_senha", "wa_phone": wa_phone,
+                    "target_user_id": target_user_id}
+
+        try:
+            merge_users(int(current_user_id), target_user_id)
+        except MergeRefused:
+            # As duas contas têm dados (#607): o número segue na conta do WhatsApp.
+            return {"status": "merge_conflict", "wa_phone": wa_phone}
 
     with get_conn() as conn:
         with conn.cursor() as cur:
@@ -1065,82 +1209,70 @@ def attempt_whatsapp_phone_link_impl(
 
 def create_password_reset_token_impl(get_conn, email: str, minutes_valid: int = 30) -> str | None:
     email = email.strip().lower()
-
-    with get_conn() as conn:
-        with conn.cursor() as cur:
-            cur.execute(
-                "select user_id from auth_accounts where email_hash = %s",
-                (hash_pii_optional(email, kind="email"),),
-            )
-            row = cur.fetchone()
-
-    if not row:
-        return None
-
-    user_id = row["user_id"]
     token = secrets.token_urlsafe(32)
     expires_at = datetime.now(timezone.utc) + timedelta(minutes=minutes_valid)
 
+    # Um INSERT…SELECT: o token nasce com o email_hash que a conta tem AGORA.
     with get_conn() as conn:
         with conn.cursor() as cur:
             cur.execute(
                 """
-                insert into password_reset_tokens (token, user_id, expires_at)
-                values (%s, %s, %s)
+                insert into password_reset_tokens (token, user_id, expires_at, email_hash)
+                select %s, user_id, %s, email_hash from auth_accounts where email_hash = %s
+                returning user_id
                 """,
-                (token, user_id, expires_at),
+                (token, expires_at, hash_pii_optional(email, kind="email")),
             )
+            row = cur.fetchone()
         conn.commit()
 
-    return token
+    return token if row else None
 
 
 def consume_password_reset_token_impl(get_conn, hash_password, token: str, new_password: str) -> int | None:
     """
     Consome o token de reset e atualiza a senha. Retorna o user_id (truthy) em
-    sucesso ou None em falha (token invalido/expirado/ja usado).
+    sucesso ou None em falha (token invalido/expirado/ja usado, ou a conta nao
+    tem mais o e-mail para o qual o link foi emitido).
     Callers continuam podendo usar `if ok:` graças à truthiness de int positivo.
     """
     now = datetime.now(timezone.utc)
 
-    with get_conn() as conn:
-        with conn.cursor() as cur:
-            cur.execute(
-                """
-                select user_id, expires_at, used_at
-                from password_reset_tokens
-                where token = %s
-                """,
-                (token,),
-            )
-            row = cur.fetchone()
+    with get_conn() as conn, conn.cursor() as cur:
+        cur.execute(
+            """
+            update password_reset_tokens set used_at = %s
+            where token = %s and used_at is null and expires_at > %s
+            returning user_id, email_hash
+            """,
+            (now, token, now),
+        )
+        row = cur.fetchone()
+        if not row:
+            return None
+        new_hash = hash_password(new_password)  # bcrypt só para token válido
+        # A condição de e-mail fica no próprio UPDATE: ele pega a trava da linha e
+        # reavalia depois dela (READ COMMITTED), em série com a troca de e-mail.
+        # email_hash NULL (token de antes da coluna) nunca casa: recusado.
+        # O link vale enquanto a conta tiver o e-mail que o recebeu — e nesse
+        # estado quem lê essa caixa já pode pedir outro. Por isso a volta A→B→A
+        # reanimar o link não dá poder novo a ninguém.
+        cur.execute(
+            # password_changed_at: invalida tokens legados sem jti emitidos
+            # antes do reset (os com jti já são revogados via sessão).
+            """
+            update auth_accounts set password_hash = %s, password_changed_at = %s
+            where user_id = %s and email_hash = %s
+            """,
+            (new_hash, now, row["user_id"], row["email_hash"]),
+        )
+        ok = cur.rowcount > 0
+        conn.commit()  # a recusa também grava: o token fica queimado
 
-    if not row:
+    if not ok:
         return None
-    if row["used_at"] is not None:
-        return None
-    if row["expires_at"] < now:
-        return None
-
-    user_id = row["user_id"]
-    new_hash = hash_password(new_password)
-
-    with get_conn() as conn:
-        with conn.cursor() as cur:
-            cur.execute(
-                # password_changed_at: invalida tokens legados sem jti emitidos
-                # antes do reset (os com jti já são revogados via sessão).
-                "update auth_accounts set password_hash = %s, password_changed_at = %s where user_id = %s",
-                (new_hash, now, user_id),
-            )
-            cur.execute(
-                "update password_reset_tokens set used_at = %s where token = %s",
-                (now, token),
-            )
-        conn.commit()
-    invalidate_auth_user_cache(user_id)
-
-    return user_id
+    invalidate_auth_user_cache(row["user_id"])
+    return row["user_id"]
 
 
 def get_password_changed_at_impl(get_conn, user_id: int):

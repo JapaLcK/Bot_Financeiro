@@ -35,6 +35,7 @@ from adapters.whatsapp.wa_commands_menu import (
 )
 from core.handle_incoming import handle_incoming
 from core.help_text import HELP_TRIGGERS
+from core.intent_classifier import contains_comparative_question
 from core.intent_router import abandona_pergunta_de_valor
 from core.secure_compare import constant_time_eq
 from core.handlers import report as h_report
@@ -45,6 +46,7 @@ from db import (
     attempt_whatsapp_phone_link,
     claim_pending_action,
     consume_pending_action,
+    conta_sem_credencial,
     get_conn,
     get_or_create_canonical_user,
     get_pending_action,
@@ -505,6 +507,13 @@ def _is_greeting(text: str) -> bool:
     return normalized in {"oi", "ola", "olá", "hello", "hi", "hey", "bom dia", "boa tarde", "boa noite"}
 
 
+# Resposta ao número da conta paga que ainda não criou a senha (status
+# `precisa_senha` do auto-vínculo; texto do dono, PR 4 do funil v3).
+PRECISA_SENHA_WA = (
+    "Sua conta PigBank está quase pronta. Para ligar este WhatsApp, crie sua "
+    "senha pelo link que enviamos para o seu e-mail."
+)
+
 # Tentativa de vincular por código ("link 123456" / "vincular 123456"). Espelha
 # os padrões do intent_classifier (account.link / account.vincular). Um número
 # SEM conta usa exatamente esse fluxo pra se vincular, então não pode ser barrado
@@ -571,6 +580,12 @@ def _build_autolink_warning_message(status: str, auto_link_result: dict[str, Any
             "⚠️ Sua conta já tem outro WhatsApp vinculado. "
             f"Este número ({mask_phone(auto_link_result['wa_phone'])}) não foi conectado automaticamente."
         )
+    if status == "merge_conflict":
+        return (
+            "⚠️ Sua conta do site e este WhatsApp já têm dados cada um, então não dá pra juntar "
+            "os dois automaticamente. Por enquanto, o que você mandar aqui fica na conta do WhatsApp.\n"
+            "Pra ter tudo num lugar só, use este número numa conta só."
+        )
     return None
 
 
@@ -624,8 +639,109 @@ def _maybe_send_autolink_greeting_warning(
     return True
 
 
+def _pergunta_da_ia(uid: int):
+    """(pid, âncora) da pergunta aberta da IA no INÍCIO do turno, como o núcleo lê."""
+    try:
+        from core.handle_incoming import _normalize_user_id
+        from core.services.ai_chat_commands import pergunta_aberta_da_ia
+        pid = _normalize_user_id(IncomingMessage(platform="whatsapp", user_id=uid, text=""))
+        return pid, pergunta_aberta_da_ia(pid)
+    except Exception as exc:
+        logger.warning("WA pergunta_aberta_da_ia falhou: %s", exc)
+        return None, None
+
+
+def _tratar_opt_out(uid: int, reply_to: str, interactive_id: str | None,
+                    tambem: int | None = None) -> bool:
+    """Botões de opt-out (`_WA_INTERACTIVE_ISENTOS`): True se tratou o clique.
+
+    Chamado também pela guarda de conta sem credencial: quem não consegue usar
+    o bot tem de conseguir PARAR de receber mensagem nossa. `tambem`: outra conta
+    que recebe envios neste número (a sem credencial do auto-vínculo); só a
+    preferência dela muda, e a resposta é uma só.
+    """
+    if not interactive_id:
+        return False
+    uids = (uid,) if tambem is None else (uid, tambem)
+    if interactive_id == WA_DAILY_REPORT_DISABLE_ID:
+        logger.info("WA daily_report_disable button clicked wa_id=%s uid=%s", reply_to, uid)
+        try:
+            for u in uids:
+                texto = h_report.disable(u)
+            _send_reply(reply_to, texto)
+        except Exception as e:
+            logger.exception("WA daily_report_disable button error wa_id=%s: %s", reply_to, e)
+            log_system_event_sync(
+                "warning",
+                "whatsapp_daily_report_disable_button_error",
+                f"Erro ao processar botão de desligar report diário: {e}",
+                source="wa_runtime",
+                user_id=uid,
+            )
+        return True
+    elif interactive_id == WA_WEEKLY_REPORT_DISABLE_ID:
+        logger.info("WA weekly_report_disable button clicked wa_id=%s uid=%s", reply_to, uid)
+        try:
+            for u in uids:
+                texto = h_report.disable_weekly(u)
+            _send_reply(reply_to, texto)
+        except Exception as e:
+            logger.exception("WA weekly_report_disable button error wa_id=%s: %s", reply_to, e)
+            log_system_event_sync(
+                "warning",
+                "whatsapp_weekly_report_disable_button_error",
+                f"Erro ao processar botão de desligar resumo semanal: {e}",
+                source="wa_runtime",
+                user_id=uid,
+            )
+        return True
+    elif interactive_id == WA_MONTHLY_REPORT_DISABLE_ID:
+        logger.info("WA monthly_report_disable button clicked wa_id=%s uid=%s", reply_to, uid)
+        try:
+            for u in uids:
+                texto = h_report.disable_monthly(u)
+            _send_reply(reply_to, texto)
+        except Exception as e:
+            logger.exception("WA monthly_report_disable button error wa_id=%s: %s", reply_to, e)
+            log_system_event_sync(
+                "warning",
+                "whatsapp_monthly_report_disable_button_error",
+                f"Erro ao processar botão de desligar resumo mensal: {e}",
+                source="wa_runtime",
+                user_id=uid,
+            )
+        return True
+    elif interactive_id.strip().lower() in WA_UPDATES_DISABLE_IDS:
+        logger.info("WA updates disable button clicked wa_id=%s uid=%s", reply_to, uid)
+        try:
+            for u in uids:
+                set_whatsapp_updates_opt_out(u, True)
+            _send_reply(
+                reply_to,
+                "Pronto, parei as atualizações do Piggy por aqui. Você pode religar quando quiser em Configurações > Notificações.",
+            )
+        except Exception as e:
+            logger.exception("WA updates disable button error wa_id=%s: %s", reply_to, e)
+            log_system_event_sync(
+                "warning",
+                "whatsapp_updates_disable_button_error",
+                f"Erro ao processar botão de parar atualizações: {e}",
+                source="wa_runtime",
+                user_id=uid,
+            )
+        return True
+    return False
+
+
 def process_message(message: InboundMessage) -> None:
     core_started = False
+    # Turno atendido aqui, sem chegar ao `handle_incoming` (botão, `ajuda`,
+    # catálogo, `tutorial`, pendência de recategorizar/valor de conta): o
+    # `finally` encerra a pergunta aberta da IA, como o `finally` do núcleo faz.
+    # Mensagem descartada sem resposta e exceção a mantêm.
+    uid = None
+    pid = ancora = None
+    mantem_pergunta = False
     try:
         reply_to = message.wa_id
         logger.info(
@@ -637,6 +753,18 @@ def process_message(message: InboundMessage) -> None:
         )
         uid = get_or_create_canonical_user("whatsapp", message.wa_id)
         logger.info("WA canonical user resolved uid=%s from=%s", uid, message.wa_id)
+        # Número JÁ ligado à conta sem senha (vínculo anterior ao PR 4 ou por
+        # `vincular CODIGO`): não lê nem grava nada. O auto-vínculo abaixo barra
+        # o outro caminho, o de ligar o número agora (`precisa_senha`).
+        # ponytail: +1 query por mensagem; se pesar, `password_hash is null` no
+        # SELECT cacheado do get_auth_user (o reset já invalida esse cache).
+        if conta_sem_credencial(uid):
+            if not _tratar_opt_out(uid, reply_to, get_interactive_id(message.raw or {})):
+                _send_reply(reply_to, PRECISA_SENHA_WA)
+            return
+        # Âncora lida antes de qualquer tratamento pré-núcleo: pergunta que o app
+        # criar durante este turno não é deste turno e fica aberta.
+        pid, ancora = _pergunta_da_ia(uid)
 
         auto_link_result = attempt_whatsapp_phone_link(message.wa_id, current_user_id=uid)
         if auto_link_result["status"] in {"linked", "already_linked"}:
@@ -649,6 +777,7 @@ def process_message(message: InboundMessage) -> None:
                     message.wa_id,
                 )
                 uid = resolved_uid
+                pid, ancora = _pergunta_da_ia(uid)
             if auto_link_result["status"] == "linked":
                 logger.info(
                     "WA phone auto-link success wa_id=%s final_user_id=%s",
@@ -698,10 +827,21 @@ def process_message(message: InboundMessage) -> None:
             if not _is_link_code_attempt(message.text or ""):
                 _send_no_account_notice(reply_to, auto_link_result, user_id=uid)
                 return
+        elif auto_link_result["status"] == "precisa_senha":
+            # O número é da conta paga que ainda não criou a senha: não vincula
+            # e não processa (decisão do dono, PR 4 do funil v3). Sem exceção
+            # para o código de vínculo: seguindo, ele pararia no _paywall_gate
+            # do usuário do WhatsApp (sem plano) com a copy de "assine". O opt-out
+            # desliga a conta paga: é ela que recebe os envios por `phone_e164`.
+            if not _tratar_opt_out(auto_link_result["target_user_id"], reply_to,
+                                   get_interactive_id(message.raw or {})):
+                _send_reply(reply_to, PRECISA_SENHA_WA)
+            return
         elif auto_link_result["status"] in {
             "multiple_accounts",
             "wa_linked_other_account",
             "account_has_other_whatsapp",
+            "merge_conflict",
         }:
             if _maybe_send_autolink_greeting_warning(
                 reply_to,
@@ -933,7 +1073,8 @@ def process_message(message: InboundMessage) -> None:
                     return
                 # (o corte já foi aplicado no gate único lá em cima, junto com
                 # os outros cinco botões que escrevem)
-                from db.bills import get_bill, mark_bill_paid
+                from core.handlers import forma_pagamento as fp
+                from db.bills import get_bill
                 from utils_text import fmt_brl
                 try:
                     bill = get_bill(uid, bill_id)
@@ -943,6 +1084,17 @@ def process_message(message: InboundMessage) -> None:
                     return
                 if bill is None or bill.get("status") == "paid":
                     _send_reply(reply_to, "Essa conta já estava paga (ou não achei mais). 👍")
+                    return
+                # Q40/Q7: com banco conectado, a FORMA vem antes do valor. A
+                # resposta ("pix", "dinheiro") chega pelo `handle_incoming` e é
+                # resolvida no `route()`. Sem banco, o fluxo de sempre abaixo.
+                try:
+                    if fp.decidir(uid, fp.DESCONHECIDA) == fp.PERGUNTA:
+                        _send_reply(reply_to, fp.perguntar_conta(uid, bill, None))
+                        return
+                except Exception as exc:
+                    logger.exception("WA bill_paid pergunta de forma falhou bill=%s: %s", bill_id, exc)
+                    _send_reply(reply_to, "Não consegui registrar o pagamento agora. Tente em instantes.")
                     return
                 # Valor variável (água/luz): o estimado não serve — pergunta quanto
                 # veio e a próxima mensagem (número) fecha o pagamento.
@@ -1000,7 +1152,7 @@ def process_message(message: InboundMessage) -> None:
                     return
                 # Valor fixo: quita direto no valor cadastrado.
                 try:
-                    paid = mark_bill_paid(uid, bill_id)
+                    _, paid = fp.quitar(uid, bill_id, None, fp.DESCONHECIDA)
                 except Exception as exc:
                     logger.exception("WA bill_paid failed bill=%s: %s", bill_id, exc)
                     _send_reply(reply_to, "Não consegui registrar o pagamento agora. Tente em instantes.")
@@ -1008,12 +1160,9 @@ def process_message(message: InboundMessage) -> None:
                 if paid is None:
                     _send_reply(reply_to, "Essa conta já estava paga (ou não achei mais). 👍")
                 else:
-                    val = paid.get("paid_amount") or paid.get("amount") or 0
-                    _send_reply(
-                        reply_to,
-                        f"✅ Conta paga: {wrap_wa_markup(paid.get('name'))} — {fmt_brl(val)} lançado e "
-                        f"categorizado. Tá tudo em dia! 🐷",
-                    )
+                    from core.handlers.bills import conta_paga
+                    _send_reply(reply_to, conta_paga(
+                        uid, paid, paid.get("paid_amount") or paid.get("amount") or 0))
                 return
 
             # Botão de desfazer áudio (legado: undo do último lançamento)
@@ -1021,65 +1170,10 @@ def process_message(message: InboundMessage) -> None:
                 logger.info("WA undo_launch button clicked wa_id=%s", reply_to)
                 # Injeta "desfazer" para o classificador tratar normalmente
                 message.text = "desfazer"
-            elif interactive_id == WA_DAILY_REPORT_DISABLE_ID:
-                logger.info("WA daily_report_disable button clicked wa_id=%s uid=%s", reply_to, uid)
-                try:
-                    _send_reply(reply_to, h_report.disable(uid))
-                except Exception as e:
-                    logger.exception("WA daily_report_disable button error wa_id=%s: %s", reply_to, e)
-                    log_system_event_sync(
-                        "warning",
-                        "whatsapp_daily_report_disable_button_error",
-                        f"Erro ao processar botão de desligar report diário: {e}",
-                        source="wa_runtime",
-                        user_id=uid,
-                    )
-                return
-            elif interactive_id == WA_WEEKLY_REPORT_DISABLE_ID:
-                logger.info("WA weekly_report_disable button clicked wa_id=%s uid=%s", reply_to, uid)
-                try:
-                    _send_reply(reply_to, h_report.disable_weekly(uid))
-                except Exception as e:
-                    logger.exception("WA weekly_report_disable button error wa_id=%s: %s", reply_to, e)
-                    log_system_event_sync(
-                        "warning",
-                        "whatsapp_weekly_report_disable_button_error",
-                        f"Erro ao processar botão de desligar resumo semanal: {e}",
-                        source="wa_runtime",
-                        user_id=uid,
-                    )
-                return
-            elif interactive_id == WA_MONTHLY_REPORT_DISABLE_ID:
-                logger.info("WA monthly_report_disable button clicked wa_id=%s uid=%s", reply_to, uid)
-                try:
-                    _send_reply(reply_to, h_report.disable_monthly(uid))
-                except Exception as e:
-                    logger.exception("WA monthly_report_disable button error wa_id=%s: %s", reply_to, e)
-                    log_system_event_sync(
-                        "warning",
-                        "whatsapp_monthly_report_disable_button_error",
-                        f"Erro ao processar botão de desligar resumo mensal: {e}",
-                        source="wa_runtime",
-                        user_id=uid,
-                    )
-                return
-            elif interactive_id.strip().lower() in WA_UPDATES_DISABLE_IDS:
-                logger.info("WA updates disable button clicked wa_id=%s uid=%s", reply_to, uid)
-                try:
-                    set_whatsapp_updates_opt_out(uid, True)
-                    _send_reply(
-                        reply_to,
-                        "Pronto, parei as atualizações do Piggy por aqui. Você pode religar quando quiser em Configurações > Notificações.",
-                    )
-                except Exception as e:
-                    logger.exception("WA updates disable button error wa_id=%s: %s", reply_to, e)
-                    log_system_event_sync(
-                        "warning",
-                        "whatsapp_updates_disable_button_error",
-                        f"Erro ao processar botão de parar atualizações: {e}",
-                        source="wa_runtime",
-                        user_id=uid,
-                    )
+            # `target_user_id` só existe no `remetente_com_dados`: a conta sem
+            # credencial que digitou este número também recebe envios nele.
+            elif _tratar_opt_out(uid, reply_to, interactive_id,
+                                 auto_link_result.get("target_user_id")):
                 return
 
         ignora_pendencias = False  # ver o CAS da porta 4, mais abaixo
@@ -1174,7 +1268,7 @@ def process_message(message: InboundMessage) -> None:
                         pass
                     _send_reply(reply_to, f"Ok, deixei a conta de {wrap_wa_markup(name)} pendente. Quando pagar é só avisar. 🐷")
                     return
-                from utils_text import (fmt_brl, limpa_pontuacao_final,
+                from utils_text import (limpa_pontuacao_final,
                                         parse_money, valor_perigoso)
                 # Porta 4. A ACEITAÇÃO é o `parse_money` sobre o texto limpo —
                 # a mesma da `main`, que aqui nunca exigiu forma: "paguei 132",
@@ -1190,10 +1284,14 @@ def process_message(message: InboundMessage) -> None:
                     perigo = valor_perigoso(limpo, amount)
                 except Exception:
                     amount, perigo = None, "nao_entendi"
-                if perigo or amount is None:
+                # "gastei mais em 2025 ou 2026?" pagava R$ 2.025,00 e debitava o saldo.
+                pergunta = contains_comparative_question(txt)
+                if perigo or amount is None or pergunta:
                     # recusa → re-pergunta, mantém o pending de pé (descartá-lo
                     # jogaria o usuário no fallback genérico).
-                    if perigo == "nao_positivo":
+                    if pergunta:
+                        _send_reply(reply_to, f"Isso parece uma pergunta, não o valor da conta de {wrap_wa_markup(name)}. Manda só o número. Ex: *132,50* (ou *cancelar*)")
+                    elif perigo == "nao_positivo":
                         _send_reply(reply_to, f"O valor da conta de {wrap_wa_markup(name)} precisa ser maior que zero. Quanto veio? Ex: *132,50* (ou *cancelar*)")
                     else:
                         _send_reply(reply_to, f"Não peguei o valor. Manda só o número da conta de {wrap_wa_markup(name)}. Ex: *132,50* (ou *cancelar*)")
@@ -1211,9 +1309,10 @@ def process_message(message: InboundMessage) -> None:
                     logger.warning("WA clear bill_pay_amount pending failed: %s", exc)
                     reivindicou = False
                 if not reivindicou:
+                    mantem_pergunta = True  # o turno vencedor responde
                     return
                 if bill_id:
-                    from db.bills import mark_bill_paid
+                    from core.handlers import forma_pagamento as fp
                     try:
                         # Devolve a pergunta se o pagamento estourar: sem isso o
                         # "Tente em instantes" é mentira — a pendência já foi e o
@@ -1221,7 +1320,17 @@ def process_message(message: InboundMessage) -> None:
                         # que ela foi armada (:773). Mesmo desenho da outra porta
                         # desta pergunta (core/handlers/bills.py::resolve_bill_amount).
                         with restore_pending_on_error(uid, pending_recat, 30):
-                            paid = mark_bill_paid(uid, int(bill_id), amount)
+                            status, paid = fp.quitar(
+                                uid, int(bill_id), amount,
+                                payload_bp.get("forma_pagamento", fp.DESCONHECIDA))
+                        if status == fp.PERGUNTA:
+                            # Banco conectado entre as duas mensagens, ou
+                            # pendência de antes da Q40: a forma, com o valor.
+                            from db.bills import get_bill
+                            bill = get_bill(uid, int(bill_id))
+                            if bill and bill.get("status") != "paid":
+                                _send_reply(reply_to, fp.perguntar_conta(uid, bill, amount))
+                                return
                     except Exception as exc:
                         logger.exception("WA bill_pay_amount mark failed bill=%s: %s", bill_id, exc)
                         _send_reply(reply_to, "Não consegui registrar o pagamento agora. Tente em instantes.")
@@ -1229,12 +1338,9 @@ def process_message(message: InboundMessage) -> None:
                     if paid is None:
                         _send_reply(reply_to, "Essa conta já estava paga (ou não achei mais). 👍")
                     else:
-                        val = paid.get("paid_amount") or paid.get("amount") or amount
-                        _send_reply(
-                            reply_to,
-                            f"✅ Conta paga: {wrap_wa_markup(paid.get('name'))} — {fmt_brl(val)} lançado e "
-                            f"categorizado. Tá tudo em dia! 🐷",
-                        )
+                        from core.handlers.bills import conta_paga
+                        _send_reply(reply_to, conta_paga(
+                            uid, paid, paid.get("paid_amount") or paid.get("amount") or amount))
                     return
 
         # ---------------------------------------------------------------
@@ -1303,6 +1409,7 @@ def process_message(message: InboundMessage) -> None:
 
         if _seen_recent(msg_id):
             logger.info("WA duplicate ignored message_id=%s", msg_id)
+            mantem_pergunta = True
             return
 
         try:
@@ -1330,7 +1437,11 @@ def process_message(message: InboundMessage) -> None:
         )
 
         core_started = True
-        outs = handle_incoming(incoming, ignora_pendencias=ignora_pendencias) or []
+        # Todo botão/lista que não deu `return` acima chega aqui (o
+        # `undo_launch` como "desfazer", o `confirm_yes` como "Sim"): não
+        # é capturado pela pergunta aberta da IA.
+        outs = handle_incoming(incoming, ignora_pendencias=ignora_pendencias,
+                               de_botao=bool(interactive_id)) or []
         if not outs:
             logger.info("WA no outgoing messages for from=%s", message.wa_id)
             _send_reply(reply_to, "Nao entendi. Digite ajuda para ver os comandos.")
@@ -1347,6 +1458,7 @@ def process_message(message: InboundMessage) -> None:
             logger.warning("WA outgoing messages had no deliverable text from=%s", message.wa_id)
             _send_reply(reply_to, _DELIVERY_FAILURE_MESSAGE)
     except Exception as exc:
+        mantem_pergunta = True
         logger.error("WA message processing failed wa_id=%s error=%s", message.wa_id, exc)
         try:
             log_system_event_sync(
@@ -1376,6 +1488,13 @@ def process_message(message: InboundMessage) -> None:
                 message.wa_id,
                 send_exc,
             )
+    finally:
+        if ancora is not None and not core_started and not mantem_pergunta:
+            try:
+                from core.services.ai_chat_commands import encerra_pergunta_da_ia
+                encerra_pergunta_da_ia(pid, ancora)
+            except Exception as exc:
+                logger.warning("WA encerrar pergunta da IA fora do núcleo falhou: %s", exc)
 
 
 def process_payload(payload: dict[str, Any]) -> int:

@@ -26,6 +26,7 @@ import db
 import core.services.pluggy_sync as ps
 import frontend.finance_bot_websocket_custom as dashboard
 import frontend.routes.open_finance as of_routes
+from conftest import promote_to_pro
 from core.services.pluggy import PluggyApiError
 
 ITEM_OK = {
@@ -63,6 +64,7 @@ def _mundo_remoto(monkeypatch):
 
 
 def test_refresh_com_item_sumido_nao_diz_que_esta_tudo_em_dia(user_id, monkeypatch):
+    promote_to_pro(user_id)
     db.save_pluggy_open_finance_item(user_id, {"id": "item-vivo", "status": "UPDATED",
                                                "connector": {"id": 612, "name": "Nubank"}})
     db.save_pluggy_open_finance_item(user_id, {"id": "item-sumiu", "status": "UPDATED",
@@ -91,15 +93,16 @@ def test_refresh_com_item_sumido_nao_diz_que_esta_tudo_em_dia(user_id, monkeypat
     assert por_item["item-vivo"]["products"] == {"BANK": "updated"}
     assert isinstance(sync["duration_ms"], int)
 
-    # o clique fica registrado com o usuário ANONIMIZADO e sem segredo nenhum
+    # o clique fica registrado com o dono na COLUNA (issue #541, D1) e sem segredo nenhum
     clique = [e for e in eventos if e["event"] == "of_manual_refresh"]
     assert len(clique) == 1, eventos
     detalhes = clique[0]["details"]
     assert clique[0]["level"] == "warning"
     assert detalhes["ok"] is False
     assert isinstance(detalhes["duration_ms"], int)
-    assert str(user_id) not in str(detalhes), "o id do usuário não pode aparecer em claro"
-    assert len(detalhes["user_hash"]) == 16
+    assert clique[0]["user_id"] == user_id
+    assert str(user_id) not in str(detalhes), "o dono vai na coluna, não em details"
+    assert "user_hash" not in detalhes
     assert {i["item_id"] for i in detalhes["items"]} == {"item-vivo", "item-sumiu"}
     texto = str(detalhes).lower()
     for proibido in ("token", "apikey", "secret", "balance", "valor"):
@@ -139,6 +142,34 @@ def test_sync_com_item_perdido_e_logado_como_error(monkeypatch):
 
     assert eventos[0]["level"] == "error"
     assert eventos[0]["event"] == "of_item_missing"
+
+
+@pytest.mark.parametrize("resultado, avisos", [
+    ({"ok": True, "user_id": 42}, [(42, "open_finance")]),
+    ({"ok": False, "reason": "no_accounts", "user_id": 42}, [(42, "open_finance")]),
+    ({"ok": False, "reason": "item_missing"}, []),
+], ids=["sucesso", "sem_sucesso_avisa_igual", "sem_dono_nao_avisa"])
+def test_sync_avisa_o_sse_do_dono_depois_do_sync(monkeypatch, resultado, avisos):
+    """O `/api/v2/eventos` do dono (PR 4) recebe o mesmo aviso que o `/ws`: depois do
+    sync voltar (commit feito), e só com dono."""
+    from api.v2 import eventos
+
+    ordem: list = []
+
+    async def _log(*args, **kw):
+        return None
+
+    def _sync(item_id):
+        ordem.append("sync")
+        return {**resultado, "item_id": item_id}
+
+    monkeypatch.setattr(of_routes, "log_system_event", _log)
+    monkeypatch.setattr(of_routes, "sync_pluggy_item", _sync)
+    monkeypatch.setattr(eventos, "avisar", lambda uid, recurso: ordem.append((uid, recurso)))
+
+    asyncio.run(of_routes._run_pluggy_sync_bg("item-x"))
+
+    assert ordem == ["sync", *avisos]
 
 
 # ── RODADA 3: relatório coerente e refresh manual que ainda sincroniza ───────
@@ -242,6 +273,7 @@ def test_um_item_com_429_nao_derruba_o_refresh_dos_demais(user_id, monkeypatch):
     `sync_pluggy_item` direto no lote (`sync_pluggy_user`) deixa este teste
     vermelho já no `status_code == 200`.
     """
+    promote_to_pro(user_id)
     db.save_pluggy_open_finance_item(user_id, {"id": "i-ok", "status": "UPDATED",
                                                "connector": {"id": 612, "name": "Nubank"}})
     # o item do 429 JÁ tinha sincronizado com sucesso — é essa conexão que dizia

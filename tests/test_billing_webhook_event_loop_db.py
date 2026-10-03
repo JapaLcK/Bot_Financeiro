@@ -15,6 +15,7 @@ timeout do Postgres):
 | `_materializar_assinatura`, perna legada        | `update_user_plan` + `set_payment_status` (sub sem `current_period_end`) |
 | ramo `payment_failed`                           | `set_payment_status(past_due)` |
 | ramo `deleted`                                  | `update_user_plan(free)` + `set_payment_status(unpaid | canceled)` |
+| ramo `checkout`, pendência do e-book            | `db.ebook_entregas.registrar` |
 
 Os espiões entram em `db.<nome>` porque o handler faz `from db import ...` a
 cada request — o atributo do pacote é o que vale na hora da chamada.
@@ -88,11 +89,15 @@ def _event_logs():
 
 
 def _espiar(monkeypatch, nomes: tuple[str, ...]) -> dict[str, list[bool]]:
-    """Um `onde` por função espiada, em `db.<nome>`, chamando a original por baixo."""
+    """Um `onde` por função espiada, em `db.<nome>` (ou `db.<módulo>.<nome>`),
+    chamando a original por baixo."""
+    import importlib
     ondes: dict[str, list[bool]] = {}
     for nome in nomes:
+        mod, _, attr = nome.rpartition(".")
+        alvo = importlib.import_module(f"db.{mod}") if mod else db
         ondes[nome] = []
-        monkeypatch.setattr(db, nome, espiao_no_loop(ondes[nome], getattr(db, nome)))
+        monkeypatch.setattr(alvo, attr, espiao_no_loop(ondes[nome], getattr(alvo, attr)))
     return ondes
 
 
@@ -170,6 +175,12 @@ def _deleted(uid: int, motivo: str | None) -> dict:
     return evento
 
 
+def _com_ebook(evento: dict) -> dict:
+    evento["data"]["object"]["metadata"].update(
+        ebook_price="price_ebook_evl", ebook_url="https://exemplo.test/e.pdf")
+    return evento
+
+
 def _sub_sem_periodo() -> dict:
     """Sub sem `current_period_end` em lugar nenhum: `_materializar_assinatura`
     cai na perna legada (`update_user_plan` + `set_payment_status` diretos)."""
@@ -190,6 +201,9 @@ _SITIOS = {
     "checkout_legado": (
         lambda uid: _checkout(uid, "evt_evldb_w_co", _T_LIFE), _sub_sem_periodo(),
         ("update_user_plan", "set_payment_status")),
+    "checkout_ebook": (
+        lambda uid: _com_ebook(_checkout(uid, "evt_evldb_w_eb", _T_LIFE)), _fake_sub("trialing"),
+        ("ebook_entregas.registrar",)),
 }
 
 

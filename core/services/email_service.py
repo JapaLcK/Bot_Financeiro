@@ -6,6 +6,7 @@ Variáveis de ambiente necessárias:
   RESEND_API_KEY      — chave da API do Resend (re_xxxxxxxx)
   EMAIL_FROM          — remetente institucional (default: "PigBank <suporte@pigbankai.com>")
   EMAIL_FROM_PIGGY    — remetente Piggy/conversacional (default: "Piggy do PigBank <oi@pigbankai.com>")
+  EMAIL_FROM_FOUNDER  — remetente do e-mail pessoal do fundador (default: "Lucas do PigBank <lucas@pigbankai.com>")
   SUPPORT_EMAIL       — e-mail público de suporte (default: "suporte@pigbankai.com")
 """
 
@@ -13,12 +14,14 @@ from __future__ import annotations
 
 import logging
 import os
+from datetime import datetime, timedelta, timezone
 from typing import Optional
 
 logger = logging.getLogger(__name__)
 
 EMAIL_FROM          = os.getenv("EMAIL_FROM",          "PigBank <suporte@pigbankai.com>")
 EMAIL_FROM_PIGGY    = os.getenv("EMAIL_FROM_PIGGY",    "Piggy do PigBank <oi@pigbankai.com>")
+EMAIL_FROM_FOUNDER  = os.getenv("EMAIL_FROM_FOUNDER",  "Lucas do PigBank <lucas@pigbankai.com>")
 SUPPORT_EMAIL       = os.getenv("SUPPORT_EMAIL",       "suporte@pigbankai.com")
 
 
@@ -60,15 +63,31 @@ def send_email(
     from_addr: Optional[str] = None,
     headers: Optional[dict] = None,
     attachments: Optional[list] = None,
+    log_recipient: bool = True,
+    scheduled_at: Optional[str] = None,
 ) -> bool:
     """Envia e-mail via Resend API. Retorna True em sucesso, nunca lança exceção.
 
     attachments: lista no formato Resend, ex:
     [{"filename": "x.pdf", "content": <base64 str>, "content_type": "application/pdf"}].
+
+    `log_recipient=False` tira o ENDEREÇO de todo log desta função — o
+    `system_event_logs` (que não tem coluna `user_id`, logo não é levado por
+    cascata nenhuma) e o log de aplicação, que o `_DashboardHandler`
+    (`core/observability.py`) espelha na MESMA tabela a partir de WARNING.
+    Continuam indo o `event_type`, o assunto e o sucesso/falha — e, na falha, o
+    tipo da exceção + o `code` (status HTTP) e o `error_type` do provedor, o
+    bastante para o operador saber que o e-mail saiu e por que não saiu. Existe
+    por um único chamador:
+    `send_account_deletion_completed_email`, o e-mail que sai DEPOIS de a conta
+    ser apagada, cujo destinatário é PII de conta excluída. Default `True`:
+    nenhum outro chamador muda de comportamento nem precisa lembrar do
+    parâmetro.
     """
+    to_log = to if log_recipient else "<destinatário omitido>"
     api_key = os.getenv("RESEND_API_KEY", "")
     if not api_key:
-        logger.warning("Resend não configurado (RESEND_API_KEY ausente). E-mail para <%s> não enviado.", to)
+        logger.warning("Resend não configurado (RESEND_API_KEY ausente). E-mail para <%s> não enviado.", to_log)
         return False
     try:
         resend = _get_resend()
@@ -90,17 +109,42 @@ def send_email(
                 params["headers"] = hdrs
         if attachments:
             params["attachments"] = attachments
+        if scheduled_at:
+            params["scheduled_at"] = scheduled_at  # ISO 8601; o Resend segura e envia na hora
         resend.Emails.send(params)
-        logger.info("E-mail enviado para <%s>: %s", to, subject)
-        _log_email_event("info", "email_sent", f"E-mail enviado para {to}", to=to, subject=subject)
+        logger.info("E-mail enviado para <%s>: %s", to_log, subject)
+        _log_email_event("info", "email_sent", f"E-mail enviado para {to_log}", to=to_log, subject=subject)
         return True
     except Exception as exc:
-        logger.error("Falha ao enviar e-mail para <%s>: %s", to, exc)
-        _log_email_event("error", "email_failed", f"Falha ao enviar para {to}: {exc}", to=to, subject=subject, error=str(exc))
+        # LISTA BRANCA sob `log_recipient=False`: o texto do provedor NÃO é
+        # persistido. Ele ecoa o destinatário ("invalid `to` field: …") em formas
+        # que substituição literal não alcança — medido em 6 formas, 4 vazavam
+        # com `str(exc).replace(to, to_log)`: maiúsculas, domínio em maiúsculas,
+        # URL-encoded (`%40`) e JSON escapado (`\u0040`). Redigir por regex de
+        # e-mail seria a mesma lista negra (as duas últimas não têm `@` no
+        # texto). Fica o que NÃO vem de texto livre e já separa as causas: o tipo
+        # da exceção e os dois campos enum do `ResendError` — `code`, que é o
+        # status HTTP ("400", "422", "429"…), e `error_type`, o nome do erro na
+        # API ("validation_error", "missing_api_key", "rate_limit_exceeded"…;
+        # `resend/exceptions.py`, dicionário `ERRORS`). O status sozinho não
+        # separa `validation_error` de `missing_required_field` no mesmo 422.
+        if log_recipient:
+            erro = str(exc)
+        else:
+            enums = [f"{k}={v}" for k, v in (("code", getattr(exc, "code", None)),
+                                             ("type", getattr(exc, "error_type", None))) if v]
+            erro = " ".join([type(exc).__name__, *enums])
+        logger.error("Falha ao enviar e-mail para <%s>: %s", to_log, erro)
+        _log_email_event("error", "email_failed", f"Falha ao enviar para {to_log}: {erro}", to=to_log, subject=subject, error=erro)
         return False
 
 
-def _base_html(title: str, content: str) -> str:
+_RODAPE_PADRAO = ('Você recebeu este e-mail porque criou uma conta no PigBank.<br/>\n'
+                  '      Dúvidas? Use o comando <strong>ajuda</strong> no bot ou acesse '
+                  '<a href="https://pigbankai.com">pigbankai.com</a>')
+
+
+def _base_html(title: str, content: str, footer: str = _RODAPE_PADRAO) -> str:
     """Template transacional — dark premium com as cores da marca (preto #0C0C0D /
     rosa #FF2D8E / off-white #F6F4F1), pareado com _piggy_html. Logo do Piggy
     (PNG hospedado — Gmail não renderiza SVG) num medalhão off-white pro
@@ -146,8 +190,7 @@ def _base_html(title: str, content: str) -> str:
     </div>
     <div class="body">{content}</div>
     <div class="footer">
-      Você recebeu este e-mail porque criou uma conta no PigBank.<br/>
-      Dúvidas? Use o comando <strong>ajuda</strong> no bot ou acesse <a href="https://pigbankai.com">pigbankai.com</a>
+      {footer}
     </div>
   </div>
 </body>
@@ -224,7 +267,7 @@ def send_trial_downsell_email(to: str, dashboard_url: str = "") -> bool:
         <li><strong>Essencial — R$ 9,90/mês</strong>: banco reconectado, lançamentos
         ilimitados com áudio e foto, boletos com lembrete.</li>
         <li><strong>Plus — R$ 19,90/mês</strong>: tudo que você usou no teste —
-        2 bancos, os 3 agentes e a Piggy sem limites.</li>
+        2 bancos, os 3 agentes e o Piggy sem limites.</li>
       </ul>
       <p style="text-align:center;margin-top:24px">
         <a class="btn" href="{base}/precos">Escolher meu plano</a>
@@ -233,7 +276,7 @@ def send_trial_downsell_email(to: str, dashboard_url: str = "") -> bool:
     """
     return send_email(
         to,
-        "Seu teste acabou — continue com a Piggy por R$ 9,90 🐷",
+        "Seu teste acabou — continue com o Piggy por R$ 9,90 🐷",
         _base_html("Seu teste do PigBank acabou", content),
     )
 
@@ -518,12 +561,12 @@ _TIPS: list[tuple[str, str, str]] = [
         <p>Economize tempo e mantenha seus relatórios sempre organizados. ✨</p>""",
     ),
     (
-        "Acompanhe investimentos com rendimento automático",
-        "Cadastre seus investimentos e veja o saldo crescer com o CDI em tempo real.",
-        """<p>O PigBank calcula o rendimento dos seus investimentos automaticamente:</p>
-        <code class="cmd">investimento: Tesouro Selic, R$ 2000, 100% CDI</code>
-        <p>O saldo aparece atualizado no seu dashboard a cada acesso, com os juros já aplicados. 📈</p>
-        <p>Use o comando <strong>investimentos</strong> para ver um resumo rápido pelo bot.</p>""",
+        "Seus investimentos num lugar só",
+        "Registre aportes e resgates pelo WhatsApp e veja o total no dashboard.",
+        """<p>Cadastre suas aplicações na aba <strong>Investimentos</strong> do dashboard e registre as movimentações pelo bot:</p>
+        <code class="cmd">apliquei 200 no investimento CDB Nubank</code>
+        <code class="cmd">retirei 100 do investimento CDB Nubank</code>
+        <p>Mande <strong>investimentos</strong> pra ver o resumo da carteira. 📈</p>""",
     ),
     (
         "Relatório diário no horário que você escolher",
@@ -681,42 +724,6 @@ def send_reengagement_email(to: str, user_id: int | None = None) -> bool:
     )
 
 
-def send_free_upgrade_nudge_email(to: str, user_id: int | None = None, dashboard_url: str = "") -> bool:
-    """Nudge de conversão (B2) pro usuário Grátis ativo: mostra o que o Plus
-    destrava e convida pros 15 dias de teste. Piggy: entusiasmado, sem pressão."""
-    unsub = make_unsub_url(user_id, to) if user_id else ""
-    base = (dashboard_url or "https://pigbankai.com").rstrip("/")
-    content = f"""
-      <p>Oi! Piggy aqui. 🐷</p>
-      <p>Vi que você usa o PigBank no Grátis — e ainda tem bastante coisa boa pra
-         destravar. No <strong>Plus</strong> você ganha:</p>
-      <ul>
-        <li><strong>Open Finance</strong> — conecta seu banco e o saldo atualiza sozinho</li>
-        <li><strong>Agentes do Piggy</strong> — Xerife, Repórter e Carteiro trabalhando por você</li>
-        <li><strong>Histórico ilimitado</strong>, caixinhas e cartões sem limite</li>
-      </ul>
-      <p>Dá pra <strong>testar 15 dias grátis</strong> — se não curtir, é só cancelar antes do
-         fim e você não paga nada.</p>
-      <p style="text-align:center;margin:24px 0"><a class="btn" href="{base}/precos">Testar o Plus grátis</a></p>
-      <p class="sig">Te espero lá,<br/><strong>Piggy 🐷</strong></p>
-    """
-    html = _piggy_html("Destrave o Plus — 15 dias grátis", content, unsub)
-    text = (
-        "Oi! Piggy aqui.\n\n"
-        "No Plus você destrava Open Finance, os agentes do Piggy e histórico ilimitado. "
-        f"Dá pra testar 15 dias grátis: {base}/precos\n\nTe espero lá, Piggy"
-    )
-    headers = unsub_headers(unsub) if unsub else {}
-    return send_email(
-        to=to,
-        subject="🐷 Destrave o Plus — 15 dias grátis",
-        html_body=html,
-        text_body=text,
-        from_addr=EMAIL_FROM_PIGGY,
-        headers=headers or None,
-    )
-
-
 def send_tip_email(to: str, user_id: int | None = None) -> bool:
     """
     Envia email mensal com dica de uso do bot.
@@ -845,7 +852,7 @@ def send_password_reset_email(to: str, reset_url: str, has_password: bool = True
         subject = "🔑 Redefinir senha — PigBank"
     else:
         intro = (
-            "Sua conta no <strong>PigBank</strong> foi criada com o Google e ainda não tem senha. "
+            "Sua conta no <strong>PigBank</strong> ainda não tem senha. "
             "Use o link abaixo para definir uma."
         )
         button = "🔑 Definir minha senha"
@@ -1017,6 +1024,9 @@ def send_account_deletion_completed_email(to: str) -> bool:
         subject="Conta excluída — PigBank",
         html_body=html,
         text_body=text,
+        # Este e-mail sai DEPOIS do commit da exclusão: o endereço já não tem
+        # dono no banco e o log dele não é levado por cascata nenhuma.
+        log_recipient=False,
     )
 
 
@@ -1136,6 +1146,39 @@ def send_pro_welcome_email(to: str, plan: str, trial_end_at, dashboard_url: str 
     )
     return send_email(
         to=to, subject=f"🐷 Tá dentro do {nome}!",
+        html_body=html, text_body=text,
+    )
+
+
+def send_ebook_email(to: str, url: str, dashboard_url: str = "") -> bool:
+    """E-book comprado na /assinar — o job `core/services/ebook_entrega.py`
+    chama depois que a conta provou o e-mail. Transacional (sem unsub). Copy
+    aprovada pelo dono (2026-09-30). A `url` é a foto da compra: escapada no
+    HTML (link do Drive tem `&`), crua no texto, e nunca em log."""
+    import html as _htmlmod
+    dash = (dashboard_url or _public_base_url()).rstrip("/")
+    u = _htmlmod.escape(url, quote=True)
+    content = f"""
+      <p>🐷 Oi! Aqui é o Piggy.</p>
+      <p>Seu e-book tá liberado. É só tocar no botão pra baixar:</p>
+      <p style="text-align:center;margin:24px 0"><a class="btn" href="{u}">Baixar meu e-book</a></p>
+      <p style="font-size:13px">Se o botão não abrir, copia e cola este link no navegador: <a href="{u}">{u}</a></p>
+      <p>Dica: salva o arquivo no celular e lê quando quiser, até sem internet.</p>
+      <p>Enquanto isso, o PigBank segue cuidando do resto: manda seus gastos no WhatsApp e acompanha tudo no painel.</p>
+      <p style="text-align:center;margin:24px 0"><a class="btn" href="{dash}/app">Abrir meu painel</a></p>
+    """
+    html = _base_html("Seu e-book do PigBank chegou", content)
+    text = (
+        "🐷 Oi! Aqui é o Piggy.\n\n"
+        "Seu e-book tá liberado. É só abrir o link pra baixar:\n"
+        f"{url}\n\n"
+        "Dica: salva o arquivo no celular e lê quando quiser, até sem internet.\n\n"
+        "Enquanto isso, o PigBank segue cuidando do resto: manda seus gastos no "
+        "WhatsApp e acompanha tudo no painel.\n"
+        f"Abrir meu painel: {dash}/app"
+    )
+    return send_email(
+        to=to, subject="📘 Seu e-book do PigBank chegou",
         html_body=html, text_body=text,
     )
 
@@ -1268,6 +1311,119 @@ def send_pix_paid_email(to: str, plan: str, amount_brl: float, access_starts_at,
         to=to, subject=f"✓ Pagamento confirmado — {nome} anual ({valor})",
         html_body=html, text_body=text,
     )
+
+
+FOUNDER_EMAIL_DELAY = timedelta(hours=3)
+
+
+def send_founder_email(to: str) -> bool:
+    """E-mail pessoal do fundador, AGENDADO no Resend para 3h depois do envio
+    (`scheduled_at`) — sem job nem tabela. Quem decide se sai é o
+    `send_founder_email_once`; chame por ele, não direto.
+
+    A copy é a aprovada pelo dono, palavra por palavra. O CTA do banco passa pelo
+    /login com `next` (a lista do `nextParam()` do login.html aceita /settings):
+    logado, o login pula direto para a view de Open Finance.
+    """
+    base = _public_base_url()
+    banco = f"{base}/login?next=%2Fsettings%3Fview%3Dopen-finance"
+    wpp = _whatsapp_link("Oi, Piggy!")
+    app = f"{base}/app"
+    assunto = "oi, aqui é o Lucas do PigBank 🐷"
+    content = f"""
+      <p>Oi!</p>
+      <p>Valeu demais por assinar o PigBank.</p>
+      <p>Você chegou agora, e o produto ainda é bem novo. Deixa eu te contar onde a gente está.</p>
+      <p>Meu nome é Lucas. Eu criei o PigBank.</p>
+      <p><strong>Meu objetivo</strong></p>
+      <p>Todo mundo sabe que devia entender o próprio dinheiro. Quase ninguém entende.</p>
+      <p>E não é por preguiça. É porque as ferramentas são chatas: planilha que você abandona na segunda semana, app cheio de tela e botão, gasto pra anotar um por um.</p>
+      <p>Eu acho que isso é um problema de interface. Entender o seu dinheiro tinha que ser tão fácil quanto mandar mensagem pra um amigo.</p>
+      <p>Quero que qualquer pessoa, do estudante que recebeu o primeiro salário a quem está juntando pra sair de casa, saiba exatamente pra onde o dinheiro vai. E que isso aconteça sem esforço.</p>
+      <p>O PigBank é a nossa tentativa de fazer isso.</p>
+      <p><strong>O que dá pra fazer hoje</strong></p>
+      <ol>
+        <li>Conectar o seu banco. Pelo Open Finance, suas transações entram sozinhas, já organizadas. Você não precisa anotar nada.</li>
+        <li>Perguntar qualquer coisa pro Piggy. Esse é o coração do produto. O Piggy é o nosso assistente com IA, e fala com você pelo WhatsApp. Pergunta do jeito que você fala: "quanto eu gastei com delivery esse mês?", "pra onde foi meu dinheiro essa semana?", "dá pra eu guardar 300 por mês?". Ele responde olhando os seus números de verdade, não uma dica genérica.</li>
+        <li>Ver tudo no dashboard. Em <a href="{app}">{app}</a> você vê o mês inteiro: onde o dinheiro foi, as suas caixinhas, os cartões e os investimentos.</li>
+      </ol>
+      <p><strong>Por onde começar</strong></p>
+      <p>Se for fazer uma coisa só hoje, que seja esta: conecta o seu banco e depois manda uma pergunta pro Piggy no WhatsApp. Leva 2 minutos, e você vai entender o produto na hora.</p>
+      <p style="text-align:center;margin:24px 0 8px"><a class="btn" href="{banco}">Conectar meu banco</a></p>
+      <p style="text-align:center;margin:0 0 24px"><a href="{wpp}">Falar com o Piggy no WhatsApp</a></p>
+      <p><strong>Sobre privacidade</strong></p>
+      <p>Dinheiro é assunto sério, e eu trato como tal. Seus dados são só seus: a gente não vende seus dados pra ninguém. A conexão com o banco é só de leitura, a gente nunca movimenta o seu dinheiro. E se quiser, você apaga tudo pela sua conta. Se tiver qualquer dúvida sobre isso, me pergunta.</p>
+      <p><strong>Uma última coisa</strong></p>
+      <p>O PigBank ainda é novo. Tem coisa que vai quebrar, e tem coisa que você vai querer que exista e ainda não existe. Quero saber das duas.</p>
+      <p>É só responder este e-mail. Eu leio todos, e quem responde sou eu, não uma IA. 😅</p>
+      <p>Valeu!!<br/>Lucas</p>
+    """
+    text = (
+        "Oi!\n\n"
+        "Valeu demais por assinar o PigBank.\n\n"
+        "Você chegou agora, e o produto ainda é bem novo. Deixa eu te contar onde a gente está.\n\n"
+        "Meu nome é Lucas. Eu criei o PigBank.\n\n"
+        "MEU OBJETIVO\n"
+        "Todo mundo sabe que devia entender o próprio dinheiro. Quase ninguém entende.\n"
+        "E não é por preguiça. É porque as ferramentas são chatas: planilha que você abandona na segunda semana, app cheio de tela e botão, gasto pra anotar um por um.\n"
+        "Eu acho que isso é um problema de interface. Entender o seu dinheiro tinha que ser tão fácil quanto mandar mensagem pra um amigo.\n"
+        "Quero que qualquer pessoa, do estudante que recebeu o primeiro salário a quem está juntando pra sair de casa, saiba exatamente pra onde o dinheiro vai. E que isso aconteça sem esforço.\n"
+        "O PigBank é a nossa tentativa de fazer isso.\n\n"
+        "O QUE DÁ PRA FAZER HOJE\n"
+        "1. Conectar o seu banco. Pelo Open Finance, suas transações entram sozinhas, já organizadas. Você não precisa anotar nada.\n"
+        "2. Perguntar qualquer coisa pro Piggy. Esse é o coração do produto. O Piggy é o nosso assistente com IA, e fala com você pelo WhatsApp. Pergunta do jeito que você fala: \"quanto eu gastei com delivery esse mês?\", \"pra onde foi meu dinheiro essa semana?\", \"dá pra eu guardar 300 por mês?\". Ele responde olhando os seus números de verdade, não uma dica genérica.\n"
+        f"3. Ver tudo no dashboard. Em {app} você vê o mês inteiro: onde o dinheiro foi, as suas caixinhas, os cartões e os investimentos.\n\n"
+        "POR ONDE COMEÇAR\n"
+        "Se for fazer uma coisa só hoje, que seja esta: conecta o seu banco e depois manda uma pergunta pro Piggy no WhatsApp. Leva 2 minutos, e você vai entender o produto na hora.\n"
+        f"Conectar meu banco: {banco}\n"
+        f"Falar com o Piggy no WhatsApp: {wpp}\n\n"
+        "SOBRE PRIVACIDADE\n"
+        "Dinheiro é assunto sério, e eu trato como tal. Seus dados são só seus: a gente não vende seus dados pra ninguém. A conexão com o banco é só de leitura, a gente nunca movimenta o seu dinheiro. E se quiser, você apaga tudo pela sua conta. Se tiver qualquer dúvida sobre isso, me pergunta.\n\n"
+        "UMA ÚLTIMA COISA\n"
+        "O PigBank ainda é novo. Tem coisa que vai quebrar, e tem coisa que você vai querer que exista e ainda não existe. Quero saber das duas.\n"
+        "É só responder este e-mail. Eu leio todos, e quem responde sou eu, não uma IA. 😅\n\n"
+        "Valeu!!\nLucas\n"
+    )
+    quando = (datetime.now(timezone.utc) + FOUNDER_EMAIL_DELAY).isoformat(timespec="seconds")
+    return send_email(to=to, subject=assunto, html_body=_base_html(
+                          assunto, content,
+                          footer="Você recebeu este e-mail porque assinou o PigBank."),
+                      text_body=text, from_addr=EMAIL_FROM_FOUNDER, scheduled_at=quando)
+
+
+def send_founder_email_once(user_id: int, to: str, source: str, external_ref: str) -> bool:
+    """O e-mail do fundador, uma vez por conta — o único caminho de envio,
+    usado pelo checkout do Stripe e pelo efeito `email` do Pix (§0.7).
+
+    Duas travas, as duas precisam passar:
+      • `founder_email_sent` já registrado (reentrega do mesmo evento);
+      • `e_primeira_assinatura`: nenhum grant além deste, fora cortesia do admin
+        (renovação, volta depois de cancelar, upgrade e migração ficam de fora).
+    A marca só é gravada com envio confirmado: `False` do Resend deixa a
+    reentrega tentar de novo.
+
+    **Nunca levanta.** Roda dentro do webhook e do dreno do Pix, depois do
+    grant: e-mail de boas-vindas não pode derrubar nem atrasar a materialização
+    do pagamento. Falha vira log e `False`.
+    """
+    try:
+        from core.observability import log_system_event_sync, recent_event_exists
+        from db.plan_grants import e_primeira_assinatura
+
+        if recent_event_exists("founder_email_sent", int(user_id), 3650):
+            return False
+        if not e_primeira_assinatura(int(user_id), source, external_ref):
+            return False
+        if not send_founder_email(to):
+            return False
+        log_system_event_sync("info", "founder_email_sent",
+                              "E-mail do fundador agendado.",
+                              source="billing", user_id=int(user_id))
+        return True
+    except Exception as exc:  # noqa: BLE001 — ver docstring
+        logger.error("E-mail do fundador falhou user=%s: %s", user_id, exc)
+        return False
+
 
 def send_payment_failed_email(to: str, plan: str | None, dashboard_url: str = "") -> bool:
     """E-mail quando pagamento falha — Stripe vai retentar (item 40).

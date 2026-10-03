@@ -19,7 +19,11 @@ export type NomeIcone =
   | "LinkBreak"
   | "PauseCircle"
   | "Trash"
-  | "Question";
+  | "Question"
+  | "Envelope"
+  | "Lock"
+  | "ArrowLeft"
+  | "GoogleLogo";
 
 /** Forma mínima que todo ícone do Phosphor e o stub de teste têm em comum. */
 type ComponenteIcone = ComponentType<{ size?: number; color?: string; weight?: string }>;
@@ -59,6 +63,10 @@ const ICONES: Record<NomeIcone, ComponenteIcone> = {
   PauseCircle: resolver(require("phosphor-react-native/src/icons/PauseCircle"), "PauseCircleIcon"),
   Trash: resolver(require("phosphor-react-native/src/icons/Trash"), "TrashIcon"),
   Question: resolver(require("phosphor-react-native/src/icons/Question"), "QuestionIcon"),
+  Envelope: resolver(require("phosphor-react-native/src/icons/Envelope"), "EnvelopeIcon"),
+  Lock: resolver(require("phosphor-react-native/src/icons/Lock"), "LockIcon"),
+  ArrowLeft: resolver(require("phosphor-react-native/src/icons/ArrowLeft"), "ArrowLeftIcon"),
+  GoogleLogo: resolver(require("phosphor-react-native/src/icons/GoogleLogo"), "GoogleLogoIcon"),
 };
 
 interface Props {

@@ -228,10 +228,10 @@ test("PT1: nenhum CTA de Pix no mensal, 3 no anual, e some na volta", async () =
   assert.equal(await contarCtas(page), 3, "o ciclo anual devia ter 3 CTAs de Pix");
   const planos = await page.$$eval("[data-pix-cta]", (e) => e.map((b) => b.dataset.pixCta));
   assert.deepEqual(planos, ["essencial", "plus", "pro"]);
-  // Nos cards, nunca no tfoot: o precos_sem_plano_gratis.test.mjs assevera as 4
-  // células daquele rodapé, e uma célula nova o deixa vermelho.
+  // Nos cards, nunca na ilha da comparação: os CTAs de compra são só os do
+  // #plans-v2.
   assert.equal(await page.$$eval("#plans-v2 [data-pix-cta]", (e) => e.length), 3);
-  assert.equal(await page.$$eval(".cmp-table [data-pix-cta]", (e) => e.length), 0,
+  assert.equal(await page.$$eval("#cmp-v2 [data-pix-cta]", (e) => e.length), 0,
     "CTA de Pix vazou para a tabela comparativa");
   const ordem = await page.$$eval("#plans-v2 article.plan", (cards) => cards.map((card) => {
     const principal = card.querySelector("[data-plan-btn]");

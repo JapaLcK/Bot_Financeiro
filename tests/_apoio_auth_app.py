@@ -9,6 +9,7 @@ import pytest
 from fastapi.testclient import TestClient
 
 import db
+import db_support
 import frontend.finance_bot_websocket_custom as dashboard
 
 # Rota de escrita usada como alvo: POST, não é isenta de CSRF, e resolve
@@ -72,6 +73,28 @@ def req(path: str, *, host: str = "10.0.0.1", cookies: dict | None = None):
     )
 
 
+def libera(monkeypatch, uid):
+    """Põe `uid` na chave do dashboard v2 (`/painel` e `/api/v2`)."""
+    monkeypatch.setenv("DASHBOARD_V2_BETA_USER_IDS", str(uid))
+
+
+def sql(query, *args):
+    """SQL cru com commit, e o cache do `get_auth_user` invalidado."""
+    with db.get_conn() as conn:
+        conn.execute(query, args)
+        conn.commit()
+    db_support.invalidate_auth_user_cache()
+
+
+def sessao_de(uid):
+    """Sessão real de uma conta que já existe em `auth_accounts`: o access
+    (`auth_token`), o `jti`, o refresh e o `dashboard_token` do mesmo `jti`."""
+    email = db.get_auth_user(uid)["email"]
+    access, jti, refresh = dashboard._issue_session_token(uid, email, req("/auth/login"))
+    dash = dashboard.make_dashboard_token(uid, hours=dashboard.DASHBOARD_SESSION_HOURS, jti=jti)
+    return {"access": access, "jti": jti, "refresh": refresh, "dashboard": dash}
+
+
 @pytest.fixture
 def sessao():
     """Sessão real emitida direto, e um cliente com o cookie jar VAZIO.
@@ -97,7 +120,7 @@ def sessao():
     }
 
 
-def login_http(monkeypatch, *, como_app: bool):
+def login_http(monkeypatch, *, como_app: bool, ua: str | None = None):
     """Login de verdade pela rota, com a credencial mockada. Devolve o corpo."""
     db.ensure_user(UID)
     limpa_rate_limits("login", EMAIL)
@@ -118,6 +141,8 @@ def login_http(monkeypatch, *, como_app: bool):
         cabecalhos = {dashboard.APP_CLIENT_HEADER: "app"}
     else:
         cabecalhos = csrf(client)
+    if ua:
+        cabecalhos["User-Agent"] = ua
     r = client.post(
         "/auth/login",
         headers=cabecalhos,
@@ -126,3 +151,107 @@ def login_http(monkeypatch, *, como_app: bool):
     assert r.status_code == 200, r.text
     return r.json(), r
 
+
+
+# ── Login social: o Google é o ÚNICO dublê ───────────────────────────────────
+# Usado pelos `tests/test_auth_google_app_*.py`. Banco, rotas, state, cookie e
+# sessão são os de verdade; só o que sairia para a rede do Google é trocado.
+
+def google_de_mentira(monkeypatch, email: str, *, verificado: bool = True) -> None:
+    """`build_authorization_url` devolve o state na URL, e a troca do `code`
+    devolve este e-mail. O `sub` deriva do e-mail: cada teste tem o seu."""
+    import core.services.google_oauth as google_oauth
+
+    async def _troca(_code):
+        return {"id_token": "id-token-de-teste"}
+
+    monkeypatch.setattr(google_oauth, "is_configured", lambda: True)
+    monkeypatch.setattr(
+        google_oauth, "build_authorization_url",
+        lambda state: f"https://accounts.google.test/auth?state={state}",
+    )
+    monkeypatch.setattr(google_oauth, "exchange_code_for_tokens", _troca)
+    monkeypatch.setattr(google_oauth, "verify_id_token", lambda _t: {
+        "sub": f"sub-{email}", "email": email,
+        "email_verified": verificado, "name": "Fulana Google",
+    })
+
+
+def login_google(app: int, **query):
+    """`/auth/google/start?app=N` → `/auth/google/callback` com o state que o
+    start gravou no cookie. Devolve (cliente, 302 do callback). `query`
+    sobrescreve a URL do callback (`state=` errado, `error=`)."""
+    from urllib.parse import parse_qs, urlparse
+
+    client = TestClient(dashboard.app)
+    inicio = client.get(f"/auth/google/start?app={app}", follow_redirects=False)
+    assert inicio.status_code == 302, inicio.text
+    state = parse_qs(urlparse(inicio.headers["location"]).query)["state"][0]
+    params = {"code": "code-do-google", "state": state, **query}
+    return client, client.get("/auth/google/callback", params=params, follow_redirects=False)
+
+
+# ── Login social: a rede da Apple é o ÚNICO dublê ────────────────────────────
+# Usado pelos `tests/test_auth_apple_*.py`. A verificação de verdade roda
+# sempre (`verificar_identity_token` nunca é dublado): o que troca é só o
+# `urlopen` que o `PyJWKClient` usa para buscar o JWKS, então a conversão de
+# `URLError` em `PyJWKClientConnectionError` e o cache do conjunto são os reais.
+
+NONCE_CRU = "nonce-cru-de-teste-7f3a9c1e-0b2d"
+KID = "kid-de-teste"
+APAGA = object()  # valor de claim que a tira do token
+
+
+def apple_de_mentira(monkeypatch):
+    """Chave RSA gerada aqui, JWKS servido só com a pública dela, e um
+    `PyJWKClient` NOVO por teste: o cache do conjunto sobreviveria entre
+    testes e faria o caso "mesmo `kid`, outra chave" passar pelo motivo errado.
+
+    Devolve um objeto com `emitir(**claims)`, `buscas` (quantas vezes o JWKS
+    foi pedido à "rede") e `fora` (True derruba a rede)."""
+    import hashlib
+    import io
+    import json
+    import time
+    import types
+    import urllib.error
+
+    import jwt
+    from cryptography.hazmat.primitives.asymmetric import rsa
+
+    import core.services.apple_signin as apple_signin
+
+    chave = rsa.generate_private_key(public_exponent=65537, key_size=2048)
+    jwk = json.loads(jwt.algorithms.RSAAlgorithm.to_jwk(chave.public_key()))
+    jwk.update(kid=KID, alg="RS256", use="sig")
+    apple = types.SimpleNamespace(chave=chave, buscas=0, fora=False)
+
+    def _urlopen(pedido, timeout=None, context=None):
+        assert pedido.full_url == "https://appleid.apple.com/auth/keys"
+        apple.buscas += 1
+        if apple.fora:
+            raise urllib.error.URLError("a Apple está fora")
+        return io.BytesIO(json.dumps({"keys": [jwk]}).encode())
+
+    def emitir(*, chave_de=None, kid=KID, **claims):
+        agora = int(time.time())
+        corpo = {
+            "iss": apple_signin.APPLE_ISSUER,
+            "aud": apple_signin.APPLE_BUNDLE_ID,
+            "iat": agora,
+            "exp": agora + 600,
+            "sub": "000123.apple-de-teste.0456",
+            "nonce": hashlib.sha256(NONCE_CRU.encode()).hexdigest(),
+            "email": "apple@example.com",
+            "email_verified": True,
+        }
+        corpo.update(claims)
+        corpo = {k: v for k, v in corpo.items() if v is not APAGA}
+        return jwt.encode(corpo, chave_de or chave, algorithm="RS256", headers={"kid": kid})
+
+    apple.emitir = emitir
+    monkeypatch.setattr(jwt.jwks_client.urllib.request, "urlopen", _urlopen)
+    monkeypatch.setattr(
+        apple_signin, "_jwks", jwt.PyJWKClient(apple_signin._jwks.uri, timeout=5)
+    )
+    return apple

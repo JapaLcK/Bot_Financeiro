@@ -56,6 +56,7 @@
       "categoryLaunchesFromModal",
       "categoryUnarchiveFromModal",
       "changeMonth",
+      "clearHouseholdIncome",
       "closeAdjustWalletModal",
       "closeBillDetailModal",
       "closeBudget",
@@ -67,6 +68,7 @@
       "closeEditLaunchModal",
       "closeExportModal",
       "closeGoalEditModal",
+      "closeHouseholdBudgetModal",
       "closeInstAnticipateModal",
       "closeInstDeleteModal",
       "closeInstEditModal",
@@ -96,6 +98,7 @@
       "editCurrentPocketFromHistory",
       "exportToEmail",
       "handleOfxFileSelected",
+      "hbChangeMonth",
       "investmentWithdrawAll",
       "loadCategoriesView",
       "loadMoreCategoryLaunches",
@@ -117,6 +120,7 @@
       "openExportModal",
       "openGoalEditModal",
       "openHistoryDetail",
+      "openHouseholdBudgetModal",
       "openInstAnticipateModal",
       "openInstDeleteModal",
       "openInstEditModal",
@@ -145,6 +149,8 @@
       "saveCard",
       "saveCategoryFromModal",
       "saveGoal",
+      "saveHouseholdBudgetMetas",
+      "saveHouseholdIncome",
       "saveInstallmentEdit",
       "saveRecurring",
       "saveRecurringIncome",
@@ -168,12 +174,11 @@
       "submitPayBill",
       "submitPocket",
       "submitPocketMove",
-      "syncGoalInterestConfig",
       "syncParcUI",
-      "syncPocketInterestConfig",
       "toggleAffiliateList",
       "toggleHideBalance",
       "toggleSidenav",
+      "toggleSidenavGroup",
       "toggleTheme",
       "toggleUserMenu",
       "updateInvestmentRateHint",
@@ -182,6 +187,7 @@
     ],
     "variaveis": [
       "BankMovements",
+      "CashTransfers",
       "Reconciliations",
       "USER_ID",
       "refreshDashboardAfterInvestment"
@@ -196,14 +202,14 @@
       "mfaOnboardingActivate",
       "mfaOnboardingDismiss",
       "toggleHideBalance",
-      "toggleSidenav"
+      "toggleSidenav",
+      "toggleSidenavGroup"
     ],
     "variaveis": []
   },
   "login.html": {
     "funcoes": [
       "cancelMfa",
-      "doForgot",
       "doLogin",
       "doMfa"
     ],
@@ -255,6 +261,12 @@
       "showSettingsSection",
       "toggleSecurityEdit",
       "updateNotificationSettings"
+    ],
+    "variaveis": []
+  },
+  "recuperar-senha.html": {
+    "funcoes": [
+      "doForgot"
     ],
     "variaveis": []
   }

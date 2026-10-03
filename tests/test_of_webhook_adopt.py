@@ -24,6 +24,7 @@ from fastapi.testclient import TestClient
 import db
 import frontend.finance_bot_websocket_custom as dashboard
 import frontend.routes.open_finance as of_routes
+from conftest import promote_to_pro
 from db.connection import get_conn
 from test_of_item_ownership import _auth, _webhook, eventos  # noqa: F401
 # Helpers de _guards, como o `_dupe.py` já fazia: eram cópias byte a byte aqui
@@ -35,6 +36,7 @@ from test_of_webhook_adopt_guards import (  # noqa: F401
 
 def test_webhook_adota_item_orfao_e_a_tela_passa_a_mostrar_o_banco(
         user_id, monkeypatch, eventos, webhook_pluggy):
+    promote_to_pro(user_id)
     _mock_item(monkeypatch, user_id)
     client = TestClient(dashboard.app)
     try:
@@ -73,8 +75,10 @@ def test_adocao_desligada_volta_a_deixar_o_dono_sem_linha(
 def test_adocao_respeita_o_dono_remoto_e_nao_vaza_para_o_usuario_errado(
         user_id, monkeypatch, eventos, webhook_pluggy):
     """O dono vem do `clientUserId` REMOTO — o corpo do webhook não decide posse."""
+    promote_to_pro(user_id)
     dono = user_id + 1
     db.ensure_user(dono)
+    promote_to_pro(dono)
     _mock_item(monkeypatch, dono)
     client = TestClient(dashboard.app)
     try:
@@ -83,8 +87,9 @@ def test_adocao_respeita_o_dono_remoto_e_nao_vaza_para_o_usuario_errado(
         linhas = db.get_connections_by_item_id("item-do-outro")
         assert len(linhas) == 1 and int(linhas[0]["user_id"]) == dono, linhas
 
-        snap = client.get(f"/open-finance/{user_id}", headers=_auth(client, user_id)).json()
-        assert snap["connections"] == [], "item de outra conta não pode aparecer aqui"
+        r = client.get(f"/open-finance/{user_id}", headers=_auth(client, user_id))
+        assert r.status_code == 200, r.text
+        assert r.json()["connections"] == [], "item de outra conta não pode aparecer aqui"
     finally:
         db.disconnect_open_finance_connection(dono)
         with get_conn() as c:
@@ -129,6 +134,7 @@ def test_teto_de_bancos_estourado_nao_adota_e_o_webhook_responde_200(
         # de operador diferentes — 402 (teto do plano), 409 (o estado sumiu) e
         # 503 (lock ocupado). Sem o status/detail, o log não separa nenhum deles.
         assert pulado[0]["details"]["error"].startswith("402"), pulado[0]["details"]
+        assert pulado[0]["user_id"] == user_id, "issue #541: dono na coluna"
         assert "OF_BANK_LIMIT" in pulado[0]["details"]["error"], pulado[0]["details"]
         assert [r["origin"] for r in _registry("item-no-teto")] == ["webhook"]
     finally:
@@ -142,6 +148,7 @@ def test_adotado_o_delete_enumera_e_apaga_o_item_na_pluggy(
     Sem a linha local, `list_pluggy_item_ids` devolvia `[]`, o item continuava
     vivo na Pluggy e o `avoidDuplicates` do connect token recusava item novo.
     """
+    promote_to_pro(user_id)
     _mock_item(monkeypatch, user_id)
     apagados: list[str] = []
     monkeypatch.setattr(of_routes, "create_pluggy_api_key", lambda: "api-key-fake")
@@ -173,6 +180,7 @@ def test_pluggy_item_depois_da_adocao_nao_duplica_a_conexao(
     porque o POST sozinho também escreve uma linha. O assert do MEIO é o que
     discrimina: sem adoção, ali há zero linhas.
     """
+    promote_to_pro(user_id)
     _mock_item(monkeypatch, user_id)
     client = TestClient(dashboard.app)
     try:
@@ -201,6 +209,7 @@ def test_adocao_nao_agenda_sync_de_item_que_a_pluggy_ainda_esta_montando(
     conexão JÁ existe, então ele entra pelo caminho comum (`len(conexoes) == 1`),
     que é o assert final aqui.
     """
+    promote_to_pro(user_id)
     monkeypatch.setattr(of_routes, "get_pluggy_item",
                         lambda item_id, api_key=None: {"id": item_id, "status": "UPDATING",
                                                        "clientUserId": str(user_id),
@@ -218,7 +227,7 @@ def test_adocao_nao_agenda_sync_de_item_que_a_pluggy_ainda_esta_montando(
         _limpa_item("item-updating")
 
 
-def test_conta_apagada_no_meio_da_adocao_nao_ressuscita(monkeypatch, eventos, webhook_pluggy):
+def test_conta_apagada_no_meio_da_adocao_nao_ressuscita(monkeypatch, webhook_pluggy):
     """A JANELA entre o `user_exists` e a escrita da conexão (Codex #313, P1).
 
     `user_exists` lê em transação própria, e `register_item`/`save_pluggy_open_
@@ -231,9 +240,21 @@ def test_conta_apagada_no_meio_da_adocao_nao_ressuscita(monkeypatch, eventos, we
     `users` que a LGPD acabou de apagar e pendurava a conexão nela — a guarda de
     identidade não alcança, porque no instante em que ela leu a conta existia.
     Quem alcança é a FK, e só com `criar_usuario=False`.
+
+    O log é o REAL (issue #541): a linha de skip é o ÚNICO rastro do `item_id`, e
+    com o dono na coluna a FK de `system_event_logs` a recusaria em silêncio.
+    CONTROLE POSITIVO da coluna: tirar o `isinstance(..., ForeignKeyViolation)`
+    do `except` genérico de `_adota_item_orfao` deixa este caso vermelho.
     """
+    import asyncio
+
+    from core.admin_dashboard import ensure_admin_tables
+    from test_account_deletion_adocao_corrida import _skips
+
+    asyncio.run(ensure_admin_tables())  # `system_event_logs` não vem de db/schema.py
     fantasma = 987654321988
     db.ensure_user(fantasma)
+    promote_to_pro(fantasma)
     _mock_item(monkeypatch, fantasma)
 
     real_register = of_routes.register_item
@@ -254,12 +275,15 @@ def test_conta_apagada_no_meio_da_adocao_nao_ressuscita(monkeypatch, eventos, we
             "a escrita da conexão RECRIOU a conta que a exclusão apagou no meio")
         assert db.get_connections_by_item_id("item-lgpd-corrida") == [], \
             "conexão pendurada numa conta que não existe mais"
-        motivos = [e["details"].get("motivo") for e in eventos
-                   if e["event"] == "of_webhook_adopt_skipped"]
-        assert motivos == ["ForeignKeyViolation"], (
-            f"a FK tinha de ser quem recusa nesta janela: {motivos}")
+        skips = _skips("item-lgpd-corrida")
+        assert [x["details"].get("motivo") for x in skips] == ["ForeignKeyViolation"], (
+            f"a FK tinha de ser quem recusa nesta janela — ou a linha se perdeu: {skips}")
+        assert skips[0]["user_id"] is None, skips
+        assert str(fantasma) not in str(skips[0]["details"]), skips
     finally:
         _limpa_item("item-lgpd-corrida")
         with get_conn() as c:
+            c.execute("delete from system_event_logs where details::text like %s",
+                      ("%item-lgpd-corrida%",))
             c.execute("delete from users where id=%s", (fantasma,))
             c.commit()

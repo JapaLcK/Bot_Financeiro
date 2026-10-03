@@ -15,6 +15,9 @@ from utils_date import (
     launch_day, extract_date_from_text, today_tz, parse_period_from_text,
     month_range_today,
 )
+from core.intent_classifier import (contains_comparative_question, is_comparative_question,
+                                    sem_perguntas_comparativas)
+from core.observability import _log_falha
 from core.services.category_service import infer_category, learn_from_inference
 from parsers import (
     parse_receita_despesa_natural,
@@ -88,6 +91,21 @@ _INTERNAL_TIPOS = {
     "criar_caixinha", "delete_pocket",
     "create_investment", "delete_investment",
 }
+
+# Receita/despesa de movimentação interna (saque em espécie espelhado na
+# Carteira, transferência) é dinheiro que mudou de lugar: a listagem diz a
+# DIREÇÃO. Par de `LAUNCH_INTERNAL_LABELS` (frontend/launch-type-labels.js),
+# comparado por tests/test_launch_type_labels_fonte_unica.py (CLAUDE.md §0.7).
+_INTERNAL_LABELS = {"receita": "entrada", "despesa": "saída"}
+
+
+def _rotulo_interno(r: dict) -> str | None:
+    """"entrada"/"saída" para receita/despesa interna (forma legada junto); senão None."""
+    if r.get("is_internal_movement"):
+        for canon, rotulo in _INTERNAL_LABELS.items():
+            if r.get("tipo") in _TIPO_ALIASES[canon]:
+                return rotulo
+    return None
 
 
 # --- eixo TIPO: despesa / receita / os dois ---------------------------------
@@ -461,7 +479,7 @@ def _listar_categoria(
         # Linha de cartão não tem user_seq, e "#N" é o que o usuário digita em
         # "apagar #N" — mostrar um número que não existe seria pior que não mostrar.
         prefixo = f"#{r['user_seq']}" if r.get("user_seq") else "💳"
-        lines.append(f"{prefixo} • {r.get('tipo', '')} • {valor} • {desc} • {data_txt}")
+        lines.append(f"{prefixo} • {_rotulo_interno(r) or r.get('tipo', '')} • {valor} • {desc} • {data_txt}")
 
     # sumário do PERÍODO INTEIRO, não das linhas exibidas (ver docstring). Sem
     # período, o escopo vai escrito: número de total sem escopo é o que fazia a
@@ -565,7 +583,7 @@ def list_launches(user_id: int, limit: int = 10, entities: dict | None = None, o
 
         lines = []
         for r in rows:
-            tipo   = r.get("tipo", "")
+            tipo   = _rotulo_interno(r) or r.get("tipo", "")
             valor  = fmt_brl(float(r["valor"])) if r.get("valor") is not None else "-"
             nota   = r.get("nota") or r.get("alvo") or "-"
             cat    = r.get("categoria") or ""
@@ -629,8 +647,9 @@ def list_launches(user_id: int, limit: int = 10, entities: dict | None = None, o
 
         # descrição: prefere nota se informativa, senão usa alvo
         descricao = nota if nota and nota.lower() not in ("-", alvo.lower()) else alvo
+        rotulo = _rotulo_interno(r)
         if not descricao:
-            descricao = tipo
+            descricao = rotulo or tipo
 
         # formata data de forma amigável
         if criado is not None:
@@ -656,13 +675,15 @@ def list_launches(user_id: int, limit: int = 10, entities: dict | None = None, o
         else:
             data_str = "-"
 
-        emoji     = _TIPO_EMOJI.get(tipo, "•")
+        emoji     = "🔁" if rotulo else _TIPO_EMOJI.get(tipo, "•")
         valor_str = fmt_brl(float(valor)) if valor is not None else "-"
         # Mostra user_seq (numeração por usuário, começa em #1) em vez do
         # id global. Fallback pro id interno enquanto o backfill não rodou.
         display_id = r.get("user_seq") or r.get("id")
         id_str    = f" [#{display_id}]" if display_id else ""
-        lines.append(f"{emoji} {data_str} • {valor_str} • {descricao}{id_str}")
+        # interna: o 🔁 não diz a direção, o rótulo diz ("entrada"/"saída")
+        rotulo_str = f"{rotulo} • " if rotulo else ""
+        lines.append(f"{emoji} {data_str} • {rotulo_str}{valor_str} • {descricao}{id_str}")
 
     # mini resumo de despesas/receitas no período exibido
     total_despesas = sum(
@@ -794,7 +815,8 @@ def _total_despesa(
     investimento); `classify_open_finance_launch` decide por palavra da
     DESCRIÇÃO; e há `True`/`False` cravado em `pay_bill_amount`,
     `rebuild_bill_totals`, `set_initial_balance_route`, `adjust_balance_route`,
-    `_charge_one`, `_credit_one` e `mark_bill_paid`. Medido: o
+    o cobrador de recorrentes (removido na Q42; as linhas dele ficam) e
+    `mark_bill_paid`. Medido: o
     `adjust_balance_route` grava categoria='ajuste' com a flag True, e
     `is_internal_category("ajuste")` é False — o total negava e a lista mostrava
     R$ 700,00.
@@ -1057,8 +1079,14 @@ def add_from_entities(
     platform: str = "whatsapp",
     suppress_pending: bool = False,
     conditional_pending: bool = False,
+    forma_pagamento: str,
 ) -> str:
     """Registra um lançamento a partir de args já estruturados (sem regex).
+
+    `forma_pagamento` é a forma DECLARADA (`core/handlers/forma_pagamento.py`),
+    obrigatória: com banco conectado só "dinheiro" grava — Pix, cartão e débito
+    chegam pelo Open Finance (Q40). Nunca vem de `entities`: o classificador e
+    o LLM não conseguem injetá-la.
 
     Chamado por:
       - `add()` quando o parser regex já extraiu (ou caiu nos entities)
@@ -1080,6 +1108,10 @@ def add_from_entities(
     """
     if valor <= 0:
         return "Não consegui identificar o valor. Tente: *gastei 50 no mercado*"
+
+    from core.handlers import forma_pagamento as fp
+    if fp.decidir(user_id, forma_pagamento) != fp.CARTEIRA:
+        raise ValueError("FORMA_PAGAMENTO_NAO_GRAVA")
 
     # Teto mensal de lançamentos do tier (Grátis no v2; no-op com v2 off).
     # PlanLimitExceeded sobe pro handle_incoming, que responde com a mensagem
@@ -1152,11 +1184,10 @@ def add_from_entities(
             "learn_from_inference falhou depois do commit (user %s, lancamento %s)",
             user_id, launch_id)
 
-    # Lançamento manual é dinheiro em espécie (Carteira Piggy): a FUSÃO
-    # SILENCIOSA com transações do Open Finance foi removida (decisão
-    # "lançamentos manuais exclusivos para dinheiro"). A reconciliação que
-    # permanece é só a confirmável pelo usuário, criada no importador
-    # ('ask' → pending → confirm/reject) — nada roda aqui.
+    # Banco importou antes e o usuário lançou depois: vira a mesma pendência
+    # confirmável da ordem direta, nunca fusão. ANTES do saldo relido abaixo,
+    # para o aviso "a conferir" sair nesta resposta. Não sobe exceção.
+    db.propose_manual_reconciliation(user_id, launch_id)
 
     # Detecção "essa despesa se repete → sugere gasto fixo". Só para despesa
     # real (não movimentação interna). A oferta divide a linha de pending_actions
@@ -1218,9 +1249,9 @@ def add_from_entities(
             )
 
     emoji = "💸" if tipo == "despesa" else "💰"
-    # `new_balance` é a Carteira e foi lido ANTES da reconciliação acima — que
-    # funde o lançamento com o espelho do banco. Com banco conectado, a linha é o
-    # mesmo recorte do /saldo (core/handlers/balance.py:20), relido agora.
+    # `new_balance` é a Carteira lida na gravação. A linha reusa o recorte do
+    # /saldo (core/handlers/balance.py:20), relido agora — depois da pendência
+    # criada acima, que não muda a Carteira mas entra no aviso "a conferir".
     # Pós-commit: qualquer falha aqui cai na linha de hoje em vez de subir exceção
     # (a fila de multi-lançamento devolveria o item e lançaria o gasto de novo).
     linha_saldo = f"🏦 Saldo: {fmt_brl(float(new_balance))}"
@@ -1276,8 +1307,8 @@ def add_from_entities(
     if recurring_offer:
         resposta += (
             f"\n\n💡 Você já lançou *{recurring_offer['name']}* de {fmt_brl(valor)} "
-            f"em outro mês. Quer marcar como *gasto fixo* (o Piggy lança sozinho "
-            f"todo mês)? Responda *sim* ou *não*."
+            f"em outro mês. Quer marcar como *gasto fixo* (o Piggy usa pra prever "
+            f"seu saldo todo mês)? Responda *sim* ou *não*."
         )
 
     # Nudge de onboarding: no primeiríssimo lançamento do usuário no WhatsApp,
@@ -1312,12 +1343,60 @@ def add_from_entities(
     return resposta
 
 
+def _desc_do_item(item: dict) -> str:
+    return item.get("desc") or "esse lançamento"
+
+
 def _ask_value_question(item: dict) -> str:
     """Pergunta amigável pelo valor de um lançamento que veio sem número."""
-    desc = item.get("desc") or "esse lançamento"
+    desc = _desc_do_item(item)
     if item.get("tipo") == "receita":
         return f"🐷 Faltou o valor de *{desc}*. Quanto você recebeu? (só o número)"
     return f"🐷 Faltou o valor de *{desc}*. Quanto foi? (só o número)"
+
+
+def aviso_pergunta_pulada(part: str, fila: list[dict] = ()) -> str:
+    """Aviso do pedaço de multi-lançamento pulado por ser pergunta comparativa
+    (texto e áudio). O que veio DEPOIS da pergunta na mesma mensagem também não
+    entrou. Aspas, e não `wrap_wa_markup`: o bot não abre marcação aqui.
+    Limite conhecido: um `*` solto dentro do pedaço do usuário pode formar par
+    com o `*` de `*gastei 50 no bar*` (total ímpar de `*` = #276).
+    `fila`: itens da pergunta de valor de pé. O aviso vem DEPOIS da pergunta, e
+    mandar o gasto antes de responder TODOS gravaria no item da fila.
+    O pedaço é cortado em 80: citado inteiro, um trecho longo levava a resposta
+    (confirmações + aviso) acima dos 4096 do WhatsApp e a Meta recusava tudo."""
+    trecho = part.strip()
+    if len(trecho) > 80:
+        trecho = trecho[:79].rsplit(" ", 1)[0] + "…"
+    descs = [f"*{_desc_do_item(i)}*" for i in fila]
+    if len(descs) > 1:
+        depois = f"depois de me passar o valor de {', '.join(descs[:-1])} e {descs[-1]}, "
+    elif descs:
+        depois = "depois de responder a pergunta acima, "
+    else:
+        depois = ""
+    if normalize_text(trecho).startswith(RECEITA_START_VERBS):
+        dica = f"Se era receita, {depois}me manda só o valor e de onde veio, tipo *recebi 500 do freela*."
+    else:
+        dica = f"Se era gasto, {depois}me manda só o valor e o lugar, tipo *gastei 50 no bar*."
+    return f'ℹ️ Não registrei "{trecho}" porque parece uma pergunta. {dica}'
+
+
+def avisos_depois_de(user_id: int, puladas: list[str]) -> list[str]:
+    """Avisos dos pedaços pulados depois da resposta da conta, do cartão ou da
+    fatura (#568). Se ela armou uma pergunta, o aviso manda responder antes,
+    como o do multi: "gastei 50 no bar" derrubaria a pergunta."""
+    if not puladas:
+        return []
+    # Roda DEPOIS de a conta, a fatura ou a compra terem sido gravadas: se a leitura
+    # falhar, o erro faria o usuário repetir e duplicar. Falha aberta: aviso básico.
+    try:
+        pend = db.get_pending_action(user_id)
+        de_pe = [{}] if pend and not db.eh_oferta_de_conveniencia(pend["action_type"]) else ()
+    except Exception as e:
+        _log_falha("avisos_depois_de", user_id, e)
+        de_pe = ()
+    return [aviso_pergunta_pulada(p, de_pe) for p in puladas]
 
 
 # Quantas vezes o MESMO valor precisa ter aparecido antes (pro mesmo tipo/descrição)
@@ -1368,9 +1447,14 @@ def infer_recurring_value(user_id: int, tipo: str, desc: str) -> float | None:
 _RECURRING_NOTICE = "🔁 _Usei seu valor recorrente. Se mudou, é só corrigir._"
 
 
-def register_if_recurring(user_id: int, tipo: str, desc: str, platform: str) -> str | None:
+def register_if_recurring(user_id: int, tipo: str, desc: str, platform: str, *,
+                          forma_pagamento: str) -> str | None:
     """Se `desc` tem um valor recorrente conhecido, registra o lançamento na hora
-    (com aviso) e devolve a resposta. Senão, retorna None (o bot vai perguntar)."""
+    (com aviso) e devolve a resposta. Senão, retorna None (o bot vai perguntar).
+    Forma que não grava (Q40) também devolve None."""
+    from core.handlers import forma_pagamento as fp
+    if fp.decidir(user_id, forma_pagamento) != fp.CARTEIRA:
+        return None
     valor = infer_recurring_value(user_id, tipo, desc)
     if valor is None:
         return None
@@ -1381,6 +1465,7 @@ def register_if_recurring(user_id: int, tipo: str, desc: str, platform: str) -> 
         alvo=desc,
         nota=desc,
         platform=platform,
+        forma_pagamento=forma_pagamento,
     )
     return f"{resp}\n{_RECURRING_NOTICE}"
 
@@ -1398,6 +1483,8 @@ def resolve_multi_launch_value(user_id: int, text: str, pending: dict, platform:
     - resposta com valor → registra o item da frente da fila; se sobra fila,
       pergunta o próximo; senão encerra.
     - resposta de cancelamento → descarta o que faltava.
+    - pergunta comparativa ("gastei mais em 2025 ou 2026?"), no texto inteiro
+      ou num pedaço dele → recusa e mantém a fila, como o valor perigoso.
     - resposta sem valor (o user mudou de assunto) → abandona a pendência e
       retorna None pra que o roteador processe a mensagem normalmente.
     - `outro_comando` (passo 1, resolvido no `route()` por
@@ -1428,6 +1515,7 @@ def resolve_multi_launch_value(user_id: int, text: str, pending: dict, platform:
     limpo = limpa_pontuacao_final(text or "")
     valor = _extract_valor(limpo)
     perigo = valor_perigoso(limpo, valor)
+    pergunta = contains_comparative_question(text)
 
     if outro_comando:
         # Passo 1: o intent diz que isto nunca seria a resposta ("apagar 42",
@@ -1469,14 +1557,17 @@ def resolve_multi_launch_value(user_id: int, text: str, pending: dict, platform:
             restantes = ", ".join(i.get("desc", "?") for i in queue)
             return f"❌ Beleza, deixei de lado: {restantes}."
 
-        if perigo:
+        if perigo or pergunta:
             # Fala do valor, mas o valor não serve. Recusa MANTENDO a pergunta
             # viva e a fila intacta (nada de CAS aqui — não avançamos nada):
             # apagar a pendência jogaria o usuário no fallback genérico e o
             # resto da fila sumiria com ela.
-            recusa = ("O valor precisa ser maior que zero."
-                      if perigo == "nao_positivo"
-                      else "Não entendi o valor. Manda só o número, por exemplo: *132,50*")
+            if pergunta:
+                recusa = f"Isso parece uma pergunta, não o valor de *{_desc_do_item(queue[0])}*."
+            elif perigo == "nao_positivo":
+                recusa = "O valor precisa ser maior que zero."
+            else:
+                recusa = "Não entendi o valor. Manda só o número, por exemplo: *132,50*"
             return f"{recusa}\n\n{_ask_value_question(queue[0])}"
 
         if valor is None or valor <= 0:
@@ -1506,26 +1597,36 @@ def resolve_multi_launch_value(user_id: int, text: str, pending: dict, platform:
         # gravar. No último item, a oferta ainda pode aparecer, mas só com
         # criação condicional: se uma recuperação recriou a fila durante o
         # registro, a fila vence.
-        try:
-            resp = add_from_entities(
-                user_id,
-                tipo=head.get("tipo", "despesa"),
-                valor=float(valor),
-                alvo=head.get("desc"),
-                nota=head.get("desc"),
-                platform=platform,
-                suppress_pending=bool(resto),
-                conditional_pending=not bool(resto),
-            )
-        except Exception:
-            # O item já saiu da fila (é o que impede a duplicação), mas o
-            # trabalho não aconteceu — sem devolver, o lançamento some calado.
-            # Não é hipótese: `check_can_create_launch` levanta
-            # `PlanLimitExceeded` quando o usuário do Grátis bate o teto do mês
-            # (`core/services/plan_service.py`) e quem captura é o
-            # `core/handle_incoming.py`, que só responde o texto de upgrade.
-            _devolve_head(user_id, head, platform)
-            raise
+        #
+        # Item sem forma que grave (Q40: de antes do deploy, ou do áudio, de
+        # quem tem banco conectado) já saiu da fila pelo CAS e não é gravado.
+        from core.handlers import forma_pagamento as fp
+        forma = head.get("forma_pagamento", fp.DESCONHECIDA)
+        if fp.decidir(user_id, forma) != fp.CARTEIRA:
+            resp = (f"🐷 Não registrei *{head.get('desc') or 'esse lançamento'}*: me manda "
+                    "de novo dizendo se foi em dinheiro.")
+        else:
+            try:
+                resp = add_from_entities(
+                    user_id,
+                    tipo=head.get("tipo", "despesa"),
+                    valor=float(valor),
+                    alvo=head.get("desc"),
+                    nota=head.get("desc"),
+                    platform=platform,
+                    suppress_pending=bool(resto),
+                    conditional_pending=not bool(resto),
+                    forma_pagamento=forma,
+                )
+            except Exception:
+                # O item já saiu da fila (é o que impede a duplicação), mas o
+                # trabalho não aconteceu — sem devolver, o lançamento some calado.
+                # Não é hipótese: `check_can_create_launch` levanta
+                # `PlanLimitExceeded` quando o usuário do Grátis bate o teto do mês
+                # (`core/services/plan_service.py`) e quem captura é o
+                # `core/handle_incoming.py`, que só responde o texto de upgrade.
+                _devolve_head(user_id, head, platform)
+                raise
 
         # RELÊ antes de perguntar: `resto` é do momento da reivindicação. Se
         # outra tarefa registrou itens enquanto esta demorava, perguntar pelo
@@ -1616,7 +1717,8 @@ def _devolve_head(user_id: int, head: dict, platform: str) -> None:
             return
 
 
-def _register_parsed(user_id: int, parsed: dict, fallback_note: str, platform: str) -> str:
+def _register_parsed(user_id: int, parsed: dict, fallback_note: str, platform: str, *,
+                     forma_pagamento: str) -> str:
     """Registra um lançamento já parseado por `parse_receita_despesa_natural`."""
     return add_from_entities(
         user_id,
@@ -1629,71 +1731,128 @@ def _register_parsed(user_id: int, parsed: dict, fallback_note: str, platform: s
         criado_em=parsed.get("criado_em"),
         is_internal=parsed.get("is_internal_movement", False),
         platform=platform,
+        forma_pagamento=forma_pagamento,
     )
 
 
-def add(user_id: int, text: str, entities: dict, platform: str = "whatsapp") -> str:
+def add(user_id: int, text: str, entities: dict, platform: str = "whatsapp", *,
+        forma_pagamento: str | None = None) -> str:
+    """Receita/despesa por texto. `forma_pagamento` é a forma já DECLARADA
+    (resposta à pergunta de forma, ou a pendência que a carregou); sem ela, sai
+    do próprio texto. Com banco conectado, só dinheiro vivo grava (Q40): o que
+    passou pelo banco chega pelo Open Finance, e sem forma o Piggy pergunta
+    ANTES de qualquer outra pergunta (Q4)."""
     from core.handlers import credit as h_credit
+    from core.handlers import forma_pagamento as fp
 
+    # Compra no crédito (com banco conectado, só cartão manual — Q2b).
     credit_response = h_credit.try_handle_natural_credit_purchase(user_id, text)
     if credit_response is not None:
         return credit_response
+
+    limpo, puladas = sem_perguntas_comparativas(text)
+    if limpo and puladas and len(split_financial_transactions(text)) == 1:
+        # UM pedaço legítimo e a pergunta que o split não cortou ("gastei no uber.
+        # gastei mais em 2025 ou 2026?"): o valor sai do pedaço, não do 2025 (#569).
+        # Sem o `valor` das entities: o do tier 3 (LLM) pode ser o ano da pergunta.
+        sem_valor = {k: v for k, v in entities.items() if k != "valor"}
+        resposta = add(user_id, limpo, sem_valor, platform, forma_pagamento=forma_pagamento)
+        return "\n\n".join([resposta, *avisos_depois_de(user_id, puladas)])
+    # A forma sai do pedaço sem a pergunta: o "cartão" de "… e gastei mais no
+    # cartão esse mês?" não declara nada (#568).
+    declarada = forma_pagamento or fp.detectar(limpo or text)
+    decisao = fp.decidir(user_id, declarada)
+    if decisao == fp.MISTO:
+        return fp.msg_misto()
+    if declarada == fp.DINHEIRO:
+        text = fp.limpar(text)
+    parts = split_financial_transactions(text)
+    if decisao == fp.BANCO:
+        tipo_b = "receita" if normalize_text(text).startswith(RECEITA_START_VERBS) else "despesa"
+        # Com mais de um lançamento na frase, um valor só não acha nada certo.
+        return fp.msg_banco(user_id, tipo_b, _extract_valor(text) if len(parts) == 1 else None)
+    pergunta = decisao == fp.PERGUNTA
+
+    def _pergunta(tipo: str, valor: float | None) -> str:
+        # O texto e as entities do classificador (com o fallback do LLM) vão
+        # inteiros: a resposta refaz ESTE add() com a forma declarada.
+        return fp.perguntar(
+            user_id,
+            {"fluxo": "texto", "text": text, "entities": entities, "platform": platform},
+            fp.pergunta_lancamento(tipo, valor))
 
     # Múltiplos lançamentos na mesma mensagem ("gastei 500 no ifood e mais 800
     # no mercado") — separa e registra cada um. split_financial_transactions só
     # devolve >1 item quando detecta de fato mais de um lançamento. Pedaços com
     # verbo mas SEM valor ("... e paguei o aluguel") viram pergunta: o bot
     # registra o que deu, enfileira os que faltam valor e pergunta um a um.
-    parts = split_financial_transactions(text)
+    # Sem forma (com banco conectado), UMA pergunta de forma vale para todos.
     if len(parts) > 1:
         responses = []
         missing: list[dict] = []
+        puladas: list[str] = []
         for part in parts:
+            if is_comparative_question(part):
+                # "... e gastei mais em 2025 ou 2026?": pergunta, não grava R$ 2.025
+                puladas.append(part)
+                continue
             p = parse_receita_despesa_natural(user_id, part)
             if p:
-                responses.append(_register_parsed(user_id, p, part, platform))
+                if pergunta:
+                    return _pergunta(p["tipo"], None)
+                responses.append(_register_parsed(user_id, p, part, platform,
+                                                  forma_pagamento=declarada))
                 continue
             info = describe_valueless_launch(part)
             if info:
                 tipo, desc = info
+                if pergunta:
+                    return _pergunta(tipo, None)
                 # Valor recorrente conhecido ("aluguel" que sempre é o mesmo) →
                 # lança sozinho. Senão, enfileira pra perguntar.
-                auto = register_if_recurring(user_id, tipo, desc, platform)
+                auto = register_if_recurring(user_id, tipo, desc, platform,
+                                             forma_pagamento=declarada)
                 if auto is not None:
                     responses.append(auto)
                 else:
-                    missing.append({"tipo": tipo, "desc": desc})
+                    missing.append({"tipo": tipo, "desc": desc, "forma_pagamento": declarada})
         if missing:
             db.set_pending_action(
                 user_id, "multi_launch_values",
                 {"queue": missing, "platform": platform},
             )
             question = _ask_value_question(missing[0])
-            return "\n\n".join(responses + [question]) if responses else question
-        if responses:
-            return "\n\n".join(responses)
+            return "\n\n".join(responses + [question]
+                               + [aviso_pergunta_pulada(p, missing) for p in puladas])
+        if responses or puladas:
+            # só avisos: não cai no single, que gravaria o texto inteiro (R$ 2.025)
+            return "\n\n".join(responses + [aviso_pergunta_pulada(p) for p in puladas])
         # nenhum pedaço virou lançamento válido — cai no fluxo single abaixo
 
     parsed = parse_receita_despesa_natural(user_id, text)
 
     if parsed:
+        if pergunta:
+            return _pergunta(parsed["tipo"], float(parsed["valor"]))
         if not (parsed.get("alvo") or "").strip():
             # Valor reconhecido, mas sem descrição nenhuma ("gastei cinquenta",
             # "gastei 50") — pergunta em vez de lançar direto em "outros" sem
             # contexto. A resposta é resolvida em
             # intent_router._resolve_clarification (branch launches.add, ramo
-            # "já tínhamos o valor → resposta é a descrição").
+            # "já tínhamos o valor → resposta é a descrição"). A forma viaja no
+            # payload: a resposta à descrição não pergunta a forma de novo.
             tipo_p = parsed["tipo"]
             verbo_q = "recebeu" if tipo_p == "receita" else "gastou"
-            pergunta = f"🐷 Em que você {verbo_q} {fmt_brl(float(parsed['valor']))}?"
+            pergunta_desc = f"🐷 Em que você {verbo_q} {fmt_brl(float(parsed['valor']))}?"
             db.set_pending_action(user_id, "clarification", {
                 "intent": "launches.add",
                 "entities": {"tipo": tipo_p, "valor": parsed["valor"]},
-                "question": pergunta,
+                "question": pergunta_desc,
                 "orig_text": text,
+                "forma_pagamento": declarada,
             })
-            return pergunta
-        return _register_parsed(user_id, parsed, text, platform)
+            return pergunta_desc
+        return _register_parsed(user_id, parsed, text, platform, forma_pagamento=declarada)
 
     # Tem verbo + descrição mas falta o valor ("paguei o mercado", "gastei no
     # ifood") — describe_valueless_launch já detecta isso, mas até aqui só
@@ -1705,17 +1864,22 @@ def add(user_id: int, text: str, entities: dict, platform: str = "whatsapp") -> 
     info = describe_valueless_launch(text)
     if info:
         tipo_v, desc_v = info
-        pergunta = f"🐷 Quanto foi {'de' if tipo_v == 'receita' else 'no'} *{desc_v}*?"
+        if pergunta:
+            return _pergunta(tipo_v, None)
+        pergunta_valor = f"🐷 Quanto foi {'de' if tipo_v == 'receita' else 'no'} *{desc_v}*?"
         db.set_pending_action(user_id, "clarification", {
             "intent": "launches.add",
             "entities": {"tipo": tipo_v},
-            "question": pergunta,
+            "question": pergunta_valor,
             "orig_text": text,
+            "forma_pagamento": declarada,
         })
-        return pergunta
+        return pergunta_valor
 
     tipo = entities.get("tipo", "despesa")
     valor = float(entities.get("valor", 0))
+    if pergunta and valor > 0:
+        return _pergunta(tipo, valor)
     return add_from_entities(
         user_id,
         tipo=tipo,
@@ -1726,6 +1890,7 @@ def add(user_id: int, text: str, entities: dict, platform: str = "whatsapp") -> 
         category_reason="ai",
         criado_em=None,
         platform=platform,
+        forma_pagamento=declarada,
     )
 
 

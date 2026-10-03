@@ -714,6 +714,9 @@ def generate_ai_patterns(user_id: int, *, force: bool = False) -> list[dict]:
 
     `force=True` ignora cache e regenera. Use só pra debug ou refresh manual.
     """
+    from core.services.plan_service import plan_gate_ok
+    if not plan_gate_ok(user_id, "insights"):
+        return []
     kind = _cache_kind("patterns")
     if not force:
         cached = _get_cached(user_id, kind, PATTERNS_CACHE_TTL_SECONDS)
@@ -746,6 +749,9 @@ def generate_ai_insights(user_id: int, *, force: bool = False) -> list[dict]:
     Fallback: se LLM falha por qualquer motivo, usa heurística antiga
     (`db.insights.compute_active_insights`) pra não deixar o card vazio.
     """
+    from core.services.plan_service import plan_gate_ok
+    if not plan_gate_ok(user_id, "insights"):
+        return []
     kind = _cache_kind("insights")
     if not force:
         cached = _get_cached(user_id, kind, INSIGHTS_CACHE_TTL_SECONDS)

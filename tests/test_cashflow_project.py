@@ -4,6 +4,8 @@ sobre os eventos de um horizonte maior.
 """
 from datetime import date, timedelta
 
+import pytest
+
 from _cashflow_helpers import _mock_sources
 
 
@@ -80,6 +82,40 @@ def test_recurring_occurrence_dates_clampa_dia_inexistente():
     dates = cf._recurring_occurrence_dates(31, "monthly", None, None,
                                             date(2026, 1, 31), date(2026, 3, 1))
     assert dates == [date(2026, 2, 28)]
+
+
+@pytest.mark.parametrize("freq, start, after, until, esperado", [
+    ("daily", date(2027, 2, 20), date(2027, 2, 25), date(2027, 3, 3),
+     [date(2027, 2, d) for d in (26, 27, 28)] + [date(2027, 3, d) for d in (1, 2, 3)]),
+    ("weekly", date(2026, 1, 31), date(2026, 2, 1), date(2026, 3, 1),
+     [date(2026, 2, d) for d in (7, 14, 21, 28)]),
+    ("once", date(2026, 2, 28), date(2026, 2, 28), date(2026, 3, 31), []),  # (after, until] é aberto em after
+    ("once", date(2026, 3, 10), date(2026, 2, 28), date(2026, 3, 31), [date(2026, 3, 10)]),
+    ("weekly", date(2026, 4, 1), date(2026, 2, 1), date(2026, 3, 1), []),    # início depois da janela
+    ("weekly", None, date(2026, 2, 1), date(2026, 3, 1), []),
+    ("daily", None, date(2026, 2, 1), date(2026, 3, 1), []),
+    ("once", None, date(2026, 2, 1), date(2026, 3, 1), []),
+])
+def test_recurring_occurrence_dates_ancoradas_no_inicio(freq, start, after, until, esperado):
+    import core.services.cashflow as cf
+    assert cf._recurring_occurrence_dates(9, freq, None, start, after, until) == esperado
+
+
+@pytest.mark.parametrize("freq", ["daily", "weekly"])
+def test_previsao_e_contas_a_pagar_concordam_na_proxima_ocorrencia(freq):
+    """§0.7: a mesma regra de data mora em dois lugares — a previsão
+    (`_recurring_occurrence_dates`) e as contas a pagar (`_cycle_due_date`, que
+    importaria o agendador se fosse reusada). Os dois têm de apontar o mesmo
+    próximo vencimento, antes, no e depois do início."""
+    import core.services.cashflow as cf
+    from core.services.recurring_charger import _cycle_due_date
+
+    start = date(2026, 1, 31)
+    rec = {"frequency": freq, "start_date": start, "due_day": start.day}
+    for n in range(-10, 20):
+        t = start + timedelta(days=n)
+        prevista = cf._recurring_occurrence_dates(9, freq, None, start, t, t + timedelta(days=60))
+        assert prevista[0] == _cycle_due_date(rec, t + timedelta(days=1)), t
 
 
 def test_cashflow_events_recorrente_nao_positivo_nao_gera_evento_boleto_gera(monkeypatch):
@@ -167,7 +203,11 @@ def test_eventos_do_maior_horizonte_filtrados_sao_os_de_cada_alvo(monkeypatch):
                   {"is_active": True, "payment_mode": "manual", "frequency": "monthly", "due_day": 8,
                    "amount": 222.0, "name": "Gasto manual"},
                   {"is_active": True, "payment_mode": "autopay", "frequency": "weekly", "due_day": 9,
-                   "amount": 333.0, "name": "Gasto semanal"}],
+                   "start_date": d(3), "amount": 333.0, "name": "Gasto semanal"},
+                  {"is_active": True, "payment_mode": "autopay", "frequency": "daily", "due_day": 9,
+                   "start_date": d(80), "amount": 7.0, "name": "Gasto diário"},
+                  {"is_active": True, "payment_mode": "autopay", "frequency": "once", "due_day": 9,
+                   "start_date": d(45), "amount": 444.0, "name": "Gasto único"}],
         bills=[*({"status": "pending", "due_date": d(n), "amount": 10.0 + n, "name": f"B{n}"}
                  for n in (-4, 0, 15, 90, 91)),
                {"status": "paid", "due_date": d(5), "amount": 70.0, "name": "Pago"},
@@ -177,6 +217,7 @@ def test_eventos_do_maior_horizonte_filtrados_sao_os_de_cada_alvo(monkeypatch):
     events90 = cf._cashflow_events(1, today, d(90))
     # Controle positivo: sem os 4 tipos no conjunto maior, a igualdade abaixo passaria no vazio.
     assert {tipo for _d, tipo, _nome, _valor in events90} == {"receita", "gasto_fixo", "boleto", "fatura_cartao"}
+    assert {"Gasto semanal", "Gasto diário", "Gasto único"} <= {nome for _d, _t, nome, _v in events90}
 
     sb = cf._starting_balance(1)
     for n in range(-5, 91):

@@ -14,7 +14,7 @@ de 350 linhas do `tests/test_max_lines_python.py` (§0.5). Mesmo desenho do
 `trial_downsell.py`: a regra vive aqui, o tick de 24 h só a chama.
 
 Chamado por `engagement_scheduler.run_engagement_loop`, no mesmo molde
-isolado do `_check_trial_ending` e do `_check_free_upgrade_nudge` — falha aqui
+isolado do `_check_trial_ending` — falha aqui
 não afeta os outros e-mails.
 
 FREIO PRÓPRIO, `PAYMENT_REMINDER_ENABLED`, **default DESLIGADO**: ver

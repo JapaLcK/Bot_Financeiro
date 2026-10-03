@@ -25,6 +25,7 @@ import sys
 from pathlib import Path
 
 import db
+from conftest import promote_to_pro
 from core.handlers import pending as h_pending
 from core.services.ai_chat.tools import get_tool
 from core.services.ai_chat.tools import launches as tool_mod
@@ -134,7 +135,7 @@ def test_bulk_condicao_de_dominio_loga_warning_e_apaga_o_resto(user_id, caplog):
 
     assert _niveis(caplog, "delete_launch_bulk:") == ["WARNING"], \
         [(r.levelname, r.getMessage()) for r in caplog.records]
-    assert "⚠️ Falha: #2" in resp, resp
+    assert "#2" in resp and "é antigo" in resp and "Falha" not in resp, resp
     assert "**#5**" in resp, resp
     restantes = [int(r["id"]) for r in db.list_launches(user_id, limit=10)]
     assert restantes == [antigo], f"o bulk parou no lançamento de domínio: {restantes}"
@@ -211,6 +212,7 @@ def test_rota_destrutiva_que_da_certo_nao_grava_nada(user_id, monkeypatch, caplo
     monkeypatch.setattr(cards_mod, "undo_installment_group",
                         lambda uid, gid: {"deleted": 3})
 
+    promote_to_pro(user_id)  # atravessa o gate de acesso do v2
     client = TestClient(dashboard.app)
     client.cookies.set(dashboard.AUTH_COOKIE_NAME, dashboard._make_jwt(user_id, "del@t.com"))
     client.cookies.set(dashboard.DASHBOARD_COOKIE_NAME,
@@ -269,6 +271,7 @@ def test_falha_de_rota_destrutiva_aparece_no_recent_ops(user_id, monkeypatch):
     # de outro arquivo ter chamado antes e some do isolado (medido).
     asyncio.run(admin.ensure_admin_tables())
 
+    promote_to_pro(user_id)  # atravessa o gate de acesso do v2
     client = TestClient(dashboard.app)
     client.cookies.set(dashboard.AUTH_COOKIE_NAME, dashboard._make_jwt(user_id, "del@t.com"))
     client.cookies.set(dashboard.DASHBOARD_COOKIE_NAME,

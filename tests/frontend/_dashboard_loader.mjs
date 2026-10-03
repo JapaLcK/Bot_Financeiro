@@ -20,6 +20,7 @@ import assert from "node:assert/strict";
 export const DASHBOARD_JS = join(
   dirname(fileURLToPath(import.meta.url)), "..", "..", "frontend", "dashboard.js",
 );
+export const SIDENAV_GROUPS_JS = DASHBOARD_JS.replace("dashboard.js", "sidenav-groups.js");
 // A dashboard.html carrega /launch-type-labels.js ANTES do dashboard.js (é lá
 // que `LAUNCH_TYPE_LABELS` mora). Injetar aqui é FIDELIDADE à página real, não
 // necessidade: desde a guarda `typeof` do dashboard.js o arquivo ausente só
@@ -56,6 +57,7 @@ export async function loadDashboardJs({ semMapa = false } = {}) {
   await page.setContent(IDS.map((i) => `<div id="${i}"></div>`).join(""));
   await page.evaluate(() => { window.fetch = () => new Promise(() => {}); });
   if (!semMapa) await page.addScriptTag({ path: LABELS_JS });
+  await page.addScriptTag({ path: SIDENAV_GROUPS_JS });
   await page.addScriptTag({ path: DASHBOARD_JS });
   assert.deepEqual(errs, [], "dashboard.js não executou até o fim");
   return page;

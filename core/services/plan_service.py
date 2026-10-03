@@ -4,9 +4,9 @@ expõe checagens simples para o resto do app.
 
 Dois mundos atrás do flag PLANS_V2_ENABLED (lido dinâmico, sem redeploy):
 
-  • OFF (default, produção atual): binário Free × Pro + paywall obrigatório
-    (PAYWALL_ENABLED). Comportamento 100% preservado.
-  • ON (escada v2): 4 tiers free < essencial < plus < pro. O valor 'pro' no
+  • OFF (freio de emergência, `PLANS_V2_ENABLED=0`): binário Free × Pro +
+    paywall obrigatório (PAYWALL_ENABLED) — o mundo de antes da escada.
+  • ON (default desde 2026-08-06, produção; ver `plans_v2_enabled`): 4 tiers free < essencial < plus < pro. O valor 'pro' no
     banco é ALIAS LEGADO do tier plus (R$ 19,90 — antigo "Pro", hoje "Plus");
     o tier pro novo (R$ 39,90) usa o valor 'pro_max'. Desde o CORTE DO GRÁTIS
     (#274/#354) o tier free NÃO entra no app: has_app_access consulta
@@ -383,6 +383,33 @@ def consolidated_balance_enabled(user_id: int, email: str | None = None) -> bool
     return str(user_id) in beta_ids
 
 
+def _na_lista_beta(user_id: int, email: str | None, env_emails: str,
+                   env_ids: str, padrao: set[str]) -> bool:
+    """E-mail em `env_emails` (sem a env = `padrao`; definida e vazia = ninguém)
+    OU id em `env_ids`. Mesma regra dos três irmãos acima, que ainda têm cópia
+    própria — migrá-los para cá é PR separado (§0.3)."""
+    raw = os.getenv(env_emails)
+    emails = padrao if raw is None else {e.strip().lower() for e in raw.split(",") if e.strip()}
+    if email and str(email).strip().lower() in emails:
+        return True
+    ids = {i.strip() for i in (os.getenv(env_ids) or "").split(",") if i.strip()}
+    return str(user_id) in ids
+
+
+def dashboard_v2_enabled(user_id: int, email: str | None = None) -> bool:
+    """Chave do dashboard v2 (`/painel` e `/api/v2`), por usuário.
+
+    Liberados: e-mail em DASHBOARD_V2_BETA_EMAILS (sem a env = os mesmos e-mails
+    de teste do beta de Agentes; definida e vazia = ninguém) OU id em
+    DASHBOARD_V2_BETA_USER_IDS. Sem e-mail, busca o da conta pelo
+    `get_auth_user` (cache de 10 s), não pelo `get_user_email`, que decifra PII a
+    cada chamada."""
+    if email is None:
+        email = (get_auth_user(int(user_id)) or {}).get("email")
+    return _na_lista_beta(user_id, email, "DASHBOARD_V2_BETA_EMAILS",
+                          "DASHBOARD_V2_BETA_USER_IDS", _AGENTS_BETA_EMAILS_DEFAULT)
+
+
 # Sentinela do parâmetro `user` de `has_app_access`. Existe porque `None` já
 # TEM significado ali — "não há linha em `auth_accounts`", a população
 # só-WhatsApp, que o corte barra —, e `None` como "não busquei" faria o MESMO
@@ -595,7 +622,17 @@ FEATURE_MIN_TIER_V2 = {
     "investments": "essencial",
     "export": "essencial",
     "custom_categories": "essencial",
-    "forecast": "pro",
+    "ai_categorization": "essencial",
+    "forecast": "plus",
+    "cashflow": "pro",
+    "insights": "plus",
+    "financial_comparison": "plus",
+    "weekly_report": "plus",
+    "simulator": "pro",
+    # Orçamento Doméstico: pago apenas, mesmo nível funcional do Pro atual
+    # (is_pro = tier >= "plus"). Não usar "essencial": abriria no tier de entrada.
+    "household_budget": "plus",
+    "subscriptions": "plus",
     "generic": "essencial",
 }
 
@@ -604,10 +641,20 @@ def plan_gate_ok(user_id: int, feature: str) -> bool:
     """True se o usuário pode usar `feature`. v1: Pro binário. v2: tier mínimo
     da escada; 'ai_chat' é cota mensal, não tier."""
     if not plans_v2_enabled():
+        # Estas capacidades não tinham corte por tier no modo legado.
+        if feature in {"insights", "financial_comparison", "weekly_report"}:
+            return True
         return is_pro(user_id)
     if feature == "ai_chat":
         return ai_chat_allowed(user_id)
     return require_min_tier(user_id, FEATURE_MIN_TIER_V2.get(feature, "essencial"))
+
+
+def forecast_horizons_for(user_id: int) -> tuple[int, ...]:
+    """Horizontes entregues por API e IA: Plus 30 dias, Pro 30/60/90."""
+    if not plans_v2_enabled() or plan_gate_ok(user_id, "cashflow"):
+        return (30, 60, 90)
+    return (30,) if plan_gate_ok(user_id, "forecast") else ()
 
 
 def require_min_tier(user_id: int, minimum: str) -> bool:
@@ -642,7 +689,7 @@ def ai_monthly_limit_for_tier(tier: str) -> int:
 
 
 def ai_chat_allowed(user_id: int) -> bool:
-    """Pode falar com a Piggy agora? v1: só Pro. v2: todo tier tem IA — a cota
+    """Pode falar com o Piggy agora? v1: só Pro. v2: todo tier tem IA — a cota
     mensal é quem limita (checada dentro do chat via monthly_limit)."""
     if not plans_v2_enabled():
         return is_pro(user_id)

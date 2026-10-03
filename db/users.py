@@ -2,14 +2,18 @@
 db/users.py — Gerenciamento de usuários, identidades e link de contas.
 """
 import hashlib
+import logging
 import secrets
 from datetime import datetime, timedelta, timezone
 
 import bcrypt
+import psycopg
 
 from core.crypto import encrypt_pii_optional, hash_pii_optional
 
 from .connection import get_conn
+
+logger = logging.getLogger(__name__)
 
 
 # ──────────────────────────────────────────────────────────────────────────────
@@ -40,11 +44,17 @@ def user_exists(user_id: int) -> bool:
     (`db/privacy.py`) cujo item sobreviveu ao delete best-effort voltava a
     existir no banco por causa de um evento da Pluggy.
 
-    LIMITE CONHECIDO: responde True durante a janela da exclusão AGENDADA
-    (`auth_accounts.deletion_status in ('scheduled','processing')`) — a linha de
-    `users` só some no fim. Fechar isso é join com `auth_accounts`, outra tabela,
-    dentro do que hoje é um `select 1 from users`; não vale o custo aqui: nessa
-    janela a conta ainda EXISTE, e a exclusão, quando roda, leva a conexão junto.
+    LIMITE CONHECIDO, e ele NÃO é inofensivo: responde True durante a janela da
+    exclusão AGENDADA (`auth_accounts.deletion_status in ('scheduled','processing')`)
+    — a linha de `users` só some no fim. "A exclusão leva a conexão junto" é
+    verdade e não basta: ela leva pela CASCATA do `delete from users`, fora do
+    `RETURNING` que alimenta o delete remoto na Pluggy, então o item fica vivo (e
+    pago) depois da exclusão LGPD (P2 do Codex na PR #539). Continua não valendo o
+    join aqui — o predicado tem fonte única em `db.is_account_scheduled_for_deletion`
+    e QUEM CHAMA decide: a adoção por webhook o consulta logo depois deste
+    `user_exists` (`frontend/routes/open_finance.py`), e o
+    `scripts/cleanup_poisoned_category_rules.py` segue querendo só "a conta
+    existe?", que é o que esta função responde.
     """
     with get_conn() as conn:
         with conn.cursor() as cur:
@@ -56,13 +66,128 @@ def user_exists(user_id: int) -> bool:
 # Merge de usuários (vinculação Discord ↔ WhatsApp)
 # ──────────────────────────────────────────────────────────────────────────────
 
+class MergeRefused(Exception):
+    """`merge_users` não junta (#607): dado financeiro dos dois lados, origem
+    presa (Open Finance vivo, plano pago ou cliente Stripe), autoindicação de
+    afiliado ou colisão de unique/FK na junção."""
+
+
+# Onde mora "dado financeiro" para a recusa do `merge_users`. Com linha nestas
+# tabelas dos DOIS lados a junção colide (user_seq, nome de caixinha/investimento,
+# arquivo OFX...) — e o dono decidiu recusar em vez de escolher o que sobra.
+# Recorrentes e contas a pagar entram para não duplicar previsão e lembrete — desde
+# a Q42 o recorrente não lança mais (dono, 2026-09-26);
+# `recurring_charges`/`recurring_income_credits` só existem com o pai.
+_TABELAS_FINANCEIRAS = ("launches", "pockets", "investments", "credit_cards", "ofx_imports",
+                        "recurring_expenses", "recurring_incomes", "bill_instances")
+
+# Na colisão, o destino vence: a linha da origem que repete a chave única de uma
+# linha do destino é apagada antes do update. As colunas repetem a unique/PK real
+# SEM o `user_id`; vazio = a PK é o próprio `user_id` (uma linha por usuário).
+_DESTINO_VENCE = (
+    ("user_category_rules", ("keyword",)),
+    ("pending_actions", ()),
+    ("user_categories", ("name",)),
+    ("category_budgets", ("categoria",)),
+    ("household_budget_config", ("bucket",)),
+    ("household_budget_income", ("month",)),
+    ("daily_report_prefs", ()),
+    ("recurring_suggestion_dismissed", ("merchant_key", "amount")),
+    ("ai_pending_actions", ()),
+    ("budget_alert_sent", ("categoria", "ym", "threshold")),
+    ("subscription_marks", ("merchant_key",)),
+)
+
+# Movidas sem regra de colisão (#635): conversa com a IA, logs, dinheiro, Open
+# Finance terminal e afiliado. Unique que colidir (Pix aberto, `affiliates.user_id`)
+# vira `MergeRefused` no `merge_users`.
+_MOVIDAS = ("ai_messages", "ai_fallback_log", "audit_events", "auth_login_events", "plan_grants",
+            "pix_charges", "open_finance_connections", "open_finance_item_registry", "affiliates")
+
+# FKs em users(id) cuja coluna não se chama `user_id`.
+_OUTRAS_COLUNAS = (("pii_access_log", "subject_user_id"),
+                   ("affiliate_referrals", "referred_user_id"),
+                   ("affiliate_commissions", "referred_user_id"),
+                   ("prospect_referrals", "referred_user_id"))
+
+
+def _tem_dados_financeiros(cur, user_id: int) -> bool:
+    # `balance <> 0`, não "tem linha": o `ensure_user_tx` cria accounts zerada.
+    cur.execute(
+        "select "
+        + " or ".join(f"exists(select 1 from {t} where user_id = %(u)s)" for t in _TABELAS_FINANCEIRAS)
+        + " or exists(select 1 from accounts where user_id = %(u)s and balance <> 0) as tem",
+        {"u": user_id},
+    )
+    return bool(cur.fetchone()["tem"])
+
+
+def _origem_presa(cur, user_id: int) -> bool:
+    """A conta que some tem Open Finance vivo, plano pago vigente ou cliente Stripe?
+
+    "Vivo" é o que o código de OF considera vivo (`_TERMINAL`): PAUSED é trial
+    vencido (o item nem existe mais na Pluggy) e DELETED é removido. Plano pago
+    é a regra de `plan_service` — cobre também quem paga sem cliente Stripe
+    (Pix vigente, grandfathered); o trial por telefone (`trial_started_at`) não.
+
+    Qualquer `stripe_customer_id`, com qualquer status, prende (dono,
+    2026-09-27): todo cliente Stripe pode gerar evento futuro — assinatura,
+    checkout aberto, estorno, disputa — que o webhook resolveria para a conta
+    apagada."""
+    from core.services.plan_service import _tem_plano_pago_vigente  # tardio: importa `db`
+    from .open_finance_state import _TERMINAL
+
+    cur.execute(
+        "select exists(select 1 from open_finance_connections where user_id = %s"
+        f" and upper(coalesce(status, '')) not in {_TERMINAL}) as tem",
+        (user_id,),
+    )
+    if cur.fetchone()["tem"]:
+        return True
+    cur.execute("select plan, plan_expires_at, stripe_customer_id"
+                " from auth_accounts where user_id = %s", (user_id,))
+    return any(_tem_plano_pago_vigente(r) or (r["stripe_customer_id"] or "").strip()
+               for r in cur.fetchall())
+
+
+def _viraria_autoindicacao(cur, from_user_id: int, to_user_id: int) -> bool:
+    """Um lado é dono do afiliado que indicou o outro? Juntos, viram autoindicação
+    (`record_referral` recusa; `record_commission_for_invoice` não rechecaria)."""
+    cur.execute(
+        "select exists(select 1 from affiliate_referrals r join affiliates a on a.id = r.affiliate_id"
+        " where (a.user_id = %(f)s and r.referred_user_id = %(t)s)"
+        " or (a.user_id = %(t)s and r.referred_user_id = %(f)s)) as tem",
+        {"f": from_user_id, "t": to_user_id},
+    )
+    return cur.fetchone()["tem"]
+
+
 def merge_users(from_user_id: int, to_user_id: int) -> None:
     """
-    Move TODOS os dados de from_user_id → to_user_id.
+    Move os dados de from_user_id → to_user_id e APAGA a linha `users` da origem
+    no mesmo commit (#635): o que não foi movido some pelas FKs (sessões, tokens,
+    push, cache, agentes; com login nos dois lados, o login da origem).
 
-    Antes de mover launches, remove duplicatas que colidem na unique
-    uq_launches_user_source_external (user_id, source, external_id).
+    Recusa (`MergeRefused`, nada escrito) quando os dois lados têm dados
+    financeiros, quando a origem está presa (`_origem_presa`), quando viraria
+    autoindicação de afiliado (`_viraria_autoindicacao`) ou quando a junção
+    bate numa unique ou numa FK composta (ex.: `fk_launches_space`, lançamento da
+    origem num `financial_spaces` dela). Antes de mover launches, remove duplicatas que colidem na
+    unique uq_launches_user_source_external (user_id, source, external_id).
     """
+    try:
+        _merge_users(from_user_id, to_user_id)
+    except (psycopg.errors.UniqueViolation, psycopg.errors.ForeignKeyViolation) as exc:
+        # Sem str(exc): o texto do psycopg traz o valor da linha que violou.
+        logger.warning(
+            "merge_users: unique/FK na junção, recusado from=%s to=%s constraint=%s",
+            from_user_id, to_user_id, exc.diag.constraint_name,
+            extra={"user_id": to_user_id},
+        )
+        raise MergeRefused(f"{from_user_id} -> {to_user_id}") from exc
+
+
+def _merge_users(from_user_id: int, to_user_id: int) -> None:
     if from_user_id == to_user_id:
         return
 
@@ -70,6 +195,14 @@ def merge_users(from_user_id: int, to_user_id: int) -> None:
         with conn.cursor() as cur:
             ensure_user_tx(cur, to_user_id)
             ensure_user_tx(cur, from_user_id)
+            # ponytail: checagem sem lock — dado gravado por outra transação
+            # entre ela e os updates escapa dela: sem unique no caminho, junta;
+            # batendo numa unique (user_seq, nome de caixinha...), volta tudo e
+            # vira `MergeRefused` no `merge_users`. Lock por user_id se precisar.
+            if _origem_presa(cur, from_user_id) or _viraria_autoindicacao(cur, from_user_id, to_user_id) or (
+                _tem_dados_financeiros(cur, from_user_id) and _tem_dados_financeiros(cur, to_user_id)
+            ):
+                raise MergeRefused(f"{from_user_id} -> {to_user_id}")
 
             # 1) dedupe de launches
             cur.execute(
@@ -108,21 +241,44 @@ def merge_users(from_user_id: int, to_user_id: int) -> None:
             )
             cur.execute("delete from accounts where user_id=%s", (from_user_id,))
 
-            # 4) identidades / link_codes
+            cur.execute("select id from auth_accounts where user_id=%s limit 1", (to_user_id,))
+            to_has_auth = cur.fetchone() is not None
+
+            # 4) identidades / link_codes. Com login nos dois lados, o e-mail da
+            # origem fica e some com ela: movido, um cadastro novo com ele
+            # resolveria para o destino e daria uma 2ª auth_accounts lá (#635, D3).
             cur.execute(
-                "update user_identities set user_id=%s where user_id=%s",
-                (to_user_id, from_user_id),
+                "update user_identities set user_id=%s where user_id=%s"
+                " and (provider <> 'email' or not %s)",
+                (to_user_id, from_user_id, to_has_auth),
             )
             cur.execute(
                 "update link_codes set user_id=%s where user_id=%s",
                 (to_user_id, from_user_id),
             )
 
-            # 5) outras tabelas com user_id
-            for table in ("user_category_rules", "pending_actions", "pockets", "investments",
-                          "credit_transactions", "ofx_imports"):
+            # 5) outras tabelas com user_id — na colisão, o destino vence
+            for table, cols in _DESTINO_VENCE:
+                cur.execute(
+                    f"delete from {table} o where o.user_id = %s and exists("
+                    f"select 1 from {table} d where d.user_id = %s"
+                    + "".join(f" and d.{c} = o.{c}" for c in cols) + ")",
+                    (from_user_id, to_user_id),
+                )
+            for table in (*(t for t, _ in _DESTINO_VENCE), "pockets", "pocket_lots",
+                          "investments", "investment_lots", "credit_transactions", "ofx_imports",
+                          "recurring_expenses", "recurring_charges", "recurring_incomes",
+                          "recurring_income_credits", "bill_instances", "bank_movement_declarations"):
                 cur.execute(
                     f"update {table} set user_id=%s where user_id=%s",
+                    (to_user_id, from_user_id),
+                )
+            # system_event_logs nasce no startup (core/admin_dashboard.py), não no init_db.
+            cur.execute("select to_regclass('system_event_logs') is not null as existe")
+            logs = ("system_event_logs",) if cur.fetchone()["existe"] else ()
+            for table, col in (*((t, "user_id") for t in (*_MOVIDAS, *logs)), *_OUTRAS_COLUNAS):
+                cur.execute(
+                    f"update {table} set {col}=%s where {col}=%s",
                     (to_user_id, from_user_id),
                 )
 
@@ -172,15 +328,16 @@ def merge_users(from_user_id: int, to_user_id: int) -> None:
                 (to_user_id, from_user_id),
             )
 
-            # 8) auth_accounts: migra se to_user não tem
-            cur.execute("select id from auth_accounts where user_id=%s limit 1", (to_user_id,))
-            to_has_auth = cur.fetchone() is not None
-
+            # 8) login (conta, Google, MFA): migra se to_user não tem
             if not to_has_auth:
-                cur.execute(
-                    "update auth_accounts set user_id=%s where user_id=%s",
-                    (to_user_id, from_user_id),
-                )
+                for table in ("auth_accounts", "auth_identities", "user_mfa", "user_mfa_backup_codes"):
+                    cur.execute(
+                        f"update {table} set user_id=%s where user_id=%s",
+                        (to_user_id, from_user_id),
+                    )
+
+            # O resto segue a política das FKs de db/schema_repairs.py, a mesma do delete_user_data.
+            cur.execute("delete from users where id = %s", (from_user_id,))
 
         conn.commit()
 

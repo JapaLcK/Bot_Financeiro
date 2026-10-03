@@ -42,6 +42,7 @@ export function rastrear(evento: Evento): void {
   cliente?.capture(evento);
 }
 
+/** Sem chamador ainda. Quem ligar isto liga `esquecer()` no `sair()` junto. */
 export function identificar(userId: number): void {
   cliente?.identify(String(userId));
 }

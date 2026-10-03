@@ -1602,7 +1602,7 @@ body.balance-hidden .account-balance {
                 <div class="notification-row">
                   <div class="notification-copy">
                     <div class="notification-title">Resumo semanal</div>
-                    <div class="notification-sub">Receba um resumo dos seus gastos toda segunda-feira, referente à semana anterior.</div>
+                    <div class="notification-sub" id="notif-weekly-description">Receba um resumo dos seus gastos toda segunda-feira, referente à semana anterior.</div>
                   </div>
                   <label class="switch" aria-label="Ativar resumo semanal">
                     <input type="checkbox" id="notif-weekly-report" onchange="updateNotificationSettings({ weekly_report_enabled: this.checked })">
@@ -1907,6 +1907,7 @@ window.addEventListener("storage", (event) => {
 const ERRO_DE_GATE = new Map([
   ["subscription_required", "Sua conta está sem plano ativo."],
   ["plan_selection_required", "Escolha um plano para continuar."],
+  ["password_required", "Crie sua senha para liberar isto."],
 ]);
 async function readApiError(resp) {
   const raw = await resp.text();
@@ -2160,7 +2161,7 @@ function applySecuritySettings(data) {
     HAS_PASSWORD ? "Enviar e-mail de reset" : "Enviar e-mail";
   if (!HAS_PASSWORD && hasEmail) {
     document.getElementById("security-reset-copy").textContent =
-      `Sua conta foi criada com o Google e ainda não tem senha. O link vai para ${data.email} e expira em 30 minutos.`;
+      `Sua conta ainda não tem senha. O link vai para ${data.email} e expira em 30 minutos.`;
   }
 }
 
@@ -2493,14 +2494,18 @@ async function sendPasswordResetEmail() {
   }
 }
 
+let _weeklyReportAvailable = false;
+let _weeklyReportStoredEnabled = false;
 function setNotificationControlsDisabled(disabled) {
   ["notif-tip-email", "notif-insight-email", "notif-whatsapp-updates", "notif-daily-report", "notif-weekly-report", "notif-monthly-report", "notif-daily-hour"].forEach(id => {
     const el = document.getElementById(id);
-    if (el) el.disabled = disabled;
+    if (el) el.disabled = disabled || (id === "notif-weekly-report" && !_weeklyReportAvailable && !_weeklyReportStoredEnabled);
   });
 }
 
 function applyNotificationSettings(data) {
+  _weeklyReportAvailable = Boolean(data.weekly_report_available);
+  _weeklyReportStoredEnabled = Boolean(data.weekly_report_stored_enabled ?? data.weekly_report_enabled);
   const email = data.email || "E-mail não vinculado";
   const whatsappDestination = data.whatsapp_destination ? formatPhoneBR(data.whatsapp_destination) : "WhatsApp não vinculado";
   const tipEmail = Boolean(data.tip_email_enabled ?? data.engagement_email_enabled);
@@ -2523,7 +2528,13 @@ function applyNotificationSettings(data) {
   document.getElementById("notif-insight-email").disabled = !emailAvailable;
   document.getElementById("notif-whatsapp-updates").disabled = !whatsappAvailable;
   document.getElementById("notif-daily-report").checked = daily;
-  document.getElementById("notif-weekly-report").checked = weekly;
+  document.getElementById("notif-weekly-report").checked = _weeklyReportStoredEnabled;
+  document.getElementById("notif-weekly-report").disabled = !_weeklyReportAvailable && !_weeklyReportStoredEnabled;
+  document.getElementById("notif-weekly-description").textContent = _weeklyReportAvailable
+    ? "Receba um resumo toda segunda-feira, referente à semana anterior."
+    : _weeklyReportStoredEnabled
+      ? "Pausado no seu plano. Desmarque para não reativar o resumo ao voltar ao Plus ou Pro."
+      : "O resumo semanal automático está disponível nos planos Plus e Pro.";
   document.getElementById("notif-monthly-report").checked = monthly;
   document.getElementById("notif-daily-hour").value = String(hour);
   document.getElementById("notif-daily-hour").disabled = !anyScheduled;
@@ -2532,7 +2543,7 @@ function applyNotificationSettings(data) {
     emailAvailable ? (insightEmail ? "insights ativos" : "insights pausados") : "notificações por e-mail pausadas",
     whatsappAvailable ? (whatsappUpdates ? "atualizações ativas" : "atualizações pausadas") : "WhatsApp não vinculado",
     daily ? `resumo diário às ${String(hour).padStart(2, "0")}:00` : "resumo diário pausado",
-    weekly ? "semanal ativo" : "semanal pausado",
+    weekly ? "semanal ativo" : (_weeklyReportStoredEnabled && !_weeklyReportAvailable ? "semanal pausado pelo plano" : "semanal pausado"),
     monthly ? "mensal ativo" : "mensal pausado",
   ].join(" · ");
 }
@@ -2598,7 +2609,7 @@ async function loadNotificationSettings({ propagate = false } = {}) {
     if (myGen === _notifGen && !semPlano) {
       const daily = document.getElementById("notif-daily-report")?.checked;
       const anyScheduled = daily
-        || document.getElementById("notif-weekly-report")?.checked
+        || (_weeklyReportAvailable && document.getElementById("notif-weekly-report")?.checked)
         || document.getElementById("notif-monthly-report")?.checked;
       const destinationText = document.getElementById("notif-email-value")?.textContent || "";
       const hasEmail = !destinationText.startsWith("E-mail não vinculado");
@@ -2619,6 +2630,7 @@ async function loadNotificationSettings({ propagate = false } = {}) {
 // então há no máximo um em voo.
 let _notifSave = null;
 async function updateNotificationSettings(patch) {
+  if (_notifSave) return _notifSave;
   let _doneSave;
   _notifSave = new Promise(function (r) { _doneSave = r; });
   setNotificationControlsDisabled(true);
@@ -2635,11 +2647,12 @@ async function updateNotificationSettings(patch) {
     showToast("Preferências salvas", "ok");
   } catch (err) {
     showToast(err.message || "Erro ao salvar notificações", "error");
+    document.getElementById("notif-weekly-report").checked = _weeklyReportStoredEnabled;
     await loadNotificationSettings();
   } finally {
     const daily = document.getElementById("notif-daily-report")?.checked;
     const anyScheduled = daily
-      || document.getElementById("notif-weekly-report")?.checked
+      || (_weeklyReportAvailable && document.getElementById("notif-weekly-report")?.checked)
       || document.getElementById("notif-monthly-report")?.checked;
     const destinationText = document.getElementById("notif-email-value")?.textContent || "";
     const hasEmail = !destinationText.startsWith("E-mail não vinculado");
@@ -2649,6 +2662,7 @@ async function updateNotificationSettings(patch) {
     document.getElementById("notif-insight-email").disabled = !hasEmail;
     document.getElementById("notif-whatsapp-updates").disabled = !hasWhatsapp;
     document.getElementById("notif-daily-hour").disabled = !anyScheduled;
+    _notifSave = null;
     _doneSave();   // libera o PBRefresh enfileirado atrás do save
   }
 }
@@ -2671,7 +2685,7 @@ async function refreshHasPassword() {
 function requireSenhaDefinida() {
   if (HAS_PASSWORD) return true;
   confirmModal(
-    "Sua conta foi criada com o Google e ainda não tem senha, então nenhuma senha funciona aqui. "
+    "Sua conta ainda não tem senha, então nenhuma senha funciona aqui. "
     + "Defina uma senha por e-mail e volte para concluir.\n\n"
     // No app o gesto é puxar a tela (não há recarregar); na web é recarregar.
     // O PBRefresh rebusca o has_password nas duas abas que têm ponto barrado.
@@ -2847,6 +2861,7 @@ async function requestAccountDeletion() {
 // open-finance-connect.js, que rebusca o estado a cada abertura do modal.
 let OF_BANKS_MAX = null;
 let OF_HAS_CONNECTION = false; // há alguma conexão (mesmo pausada)? refina a copy do CTA
+let OF_COBRANCA_EM_ATRASO = false; // carência (vem do /auth/me): o CTA vai pro cartão, não pra /precos
 
 /* ── Modal de conectar banco → frontend/open-finance-connect.js ──────────
    O picker, o trap de foco e o widget da Pluggy saíram daqui pra serem
@@ -2895,11 +2910,17 @@ PBOpenFinance.init({
 
 // Reconfigura o botão "Conectar Open Finance" conforme o plano. No Free (limite 0),
 // não faz sentido abrir a Pluggy (o /pluggy-item recusaria com 402): troca por um
-// CTA de upgrade que leva pra /precos.
+// CTA de upgrade que leva pra /precos. Na carência de cobrança a pessoa já é
+// assinante (a /precos a recusaria com 409): o CTA é o cartão, no /conta.
 function applyOfConnectButton() {
   const btn = document.getElementById("connect-btn");
   if (!btn) return;
-  if (OF_BANKS_MAX === 0) {
+  if (OF_BANKS_MAX === 0 && OF_COBRANCA_EM_ATRASO) {
+    btn.textContent = "Atualizar cartão";
+    btn.onclick = () => { window.location.href = "/conta"; };
+    btn.disabled = false;
+    btn.classList.add("btn-connect--upgrade");
+  } else if (OF_BANKS_MAX === 0) {
     btn.textContent = OF_HAS_CONNECTION ? "Reative seu banco" : "Assine para conectar um banco";
     btn.onclick = () => { window.location.href = "/precos"; };
     btn.disabled = false;
@@ -2993,7 +3014,7 @@ function renderConnections(list) {
       <div class="conn-logo ${cls}">${esc(ini)}</div>
       <div class="conn-info">
         <div class="conn-name">${esc(c.institution_name)}</div>
-        <div class="conn-meta">Última sync: ${esc(fmtDate(c.last_sync_at))}</div>
+        <div class="conn-meta">Última sync: ${esc(fmtDate(c.last_sync_at))}${ui.dados_de ? " · dados de " + esc(ui.dados_de) : ""}</div>
         ${detalhe}
       </div>
       <span class="pill ${pc}">${esc(pl)}</span>
@@ -3336,7 +3357,8 @@ const OF_VERDICT_OK = ["updated", "rate_limited"];
    mensagem. Trocar a ordem muda o que o usuário vê quando tem dois bancos.
 
    QUEM MANDA NA INSTRUÇÃO É O BACKEND, não esta tabela. Estado cujo `detail`
-   VARIA entre itens (hoje `needs_user_action`, `updating` e `partial`) TEM de
+   VARIA entre itens (hoje `needs_user_action`, `updating`, `partial` e
+   `error_recoverable`) TEM de
    ler `i.detail` — a frase fixa aqui só vale para estado de detalhe constante.
    Terceira rodada do mesmo defeito: "Ação necessária" é um balde só, e um
    `WAITING_USER_ACTION` (autorizar o dispositivo / ler o QR antes do
@@ -3393,7 +3415,10 @@ const OF_VERDICT = [
   ["partial",           (i) => i.detail
       ? `Atualizei o que deu no ${ofNome(i)}: ${ofInstrucao(i.detail)}.`
       : `Atualizei o que deu no ${ofNome(i)} — parte dos dados não veio.`],
-  ["error_recoverable", (i) => `Não consegui atualizar o ${ofNome(i)} agora. Tente de novo em instantes.`],
+  // Detalhe VARIÁVEL desde o PR-B2: o item em ERROR na Pluggy (E13) diz que o banco
+  // errou e que só um novo Atualizar ajuda; o erro comum promete a retentativa.
+  // Sem ternário: o `_FIXED_DETAIL` do backend sempre preenche o detalhe.
+  ["error_recoverable", (i) => `Não consegui atualizar o ${ofNome(i)}: ${ofInstrucao(i.detail)}.`],
   ["updating",          (i) => i.detail
       ? `${ofNome(i)}: ${ofInstrucao(i.detail)}. Toque em Atualizar de novo em instantes.`
       : `O ${ofNome(i)} ainda está atualizando. Se faltar algo, toque em Atualizar de novo.`],
@@ -3760,6 +3785,7 @@ async function initSettings() {
 
   // Open Finance: teto de bancos do plano. 0 = Free/sem OF → botão vira CTA de upgrade.
   OF_BANKS_MAX = (me && me.of_banks_max !== undefined) ? me.of_banks_max : null;
+  OF_COBRANCA_EM_ATRASO = !!(me && me.cobranca_em_atraso);
   applyOfConnectButton();
 
   document.getElementById("dashboard-link").href = "/app";

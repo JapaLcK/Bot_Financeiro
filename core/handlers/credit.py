@@ -4,11 +4,14 @@ import logging
 import re
 from collections import defaultdict
 
+from core.handlers.forma_pagamento import NEGACAO_RE
 # Helper único das portas destrutivas (a docstring dele lista quais e explica o
 # critério de nível). Ele nunca põe `str(e)` no log.
-from core.intent_classifier import classify, NEGATIVAS_EXATAS
+from core.intent_classifier import (classify, is_comparative_question, NEGATIVAS_EXATAS,
+                                    sem_perguntas_comparativas)
 from core.observability import _log_falha
 from core.services.category_service import infer_category, learn_from_inference
+from core.services.fonte_unica import FonteUnicaOF, recusa as recusa_q36
 from core.services.plan_limits import PlanLimitExceeded
 from db import (
     add_credit_purchase,
@@ -638,6 +641,8 @@ def _so_numero(text: str) -> bool:
     if all(e_numero(t) or t in _UNIDADE_DE_RESPOSTA or t in _FILLER
            for t in tokens):
         return True
+    if is_comparative_question(text):
+        return False  # "gastei mais nos ultimos 3 meses?" não é "dia 3"
     return classify(text, allow_ai=False).intent == "out_of_scope"
 
 
@@ -744,13 +749,42 @@ def _infer_category(user_id: int, desc: str) -> str:
     return _infer_category_result(user_id, desc).category
 
 
+def e_compra_no_debito(text: str) -> bool:
+    """"gastei 50 no cartão de débito": sai da conta, não da fatura (Q2b). Com
+    negação ("no cartão, não foi no débito") o débito não vale: fica o crédito
+    pelo "cartão", como era antes da Q2b."""
+    norm = normalize_text(text)
+    return bool(re.match(r"^(gastei|paguei|comprei|debitei|gasto)\b", norm)
+                and re.search(r"\bdebito\b", norm) and not re.search(r"\bcredito\b", norm)
+                and not NEGACAO_RE.search(norm))
+
+
 def _is_natural_credit_purchase(text: str) -> bool:
     norm = normalize_text(text)
     if norm.startswith("paguei fatura"):
         return False
     if not re.match(r"^(gastei|paguei|comprei|debitei|gasto)\b", norm):
         return False
+    if e_compra_no_debito(text):
+        return False
     return any(token in norm for token in ("cartao", "credito"))
+
+
+def compra_fica_com_o_of(user_id: int, text: str) -> bool:
+    """Com banco conectado, a compra no crédito fica com o Open Finance (não
+    registra) quando o cartão que ela usaria é sincronizado, ou quando o usuário
+    não tem nenhum cartão manual. Cartão não resolvido (nome desconhecido, sem
+    padrão) com cartão manual existente cai na validação de sempre (Q2b). A
+    resolução é a do `add_credit_from_entities`: o nome citado, ou o padrão."""
+    _dt, sem_data = extract_date_from_text(text)
+    nome, _ = _extract_card_reference_for_purchase(user_id, (sem_data or text).strip())
+    card_id = get_card_id_by_name(user_id, nome) if nome else get_default_card_id(user_id)
+    card = get_card_by_id(user_id, card_id) if card_id else None
+    if card:
+        return bool(card.get("of_sync_active"))
+    # ponytail: uma consulta por cartão; o usuário tem poucos.
+    return all((get_card_by_id(user_id, c["id"]) or {}).get("of_sync_active")
+               for c in list_cards(user_id))
 
 
 def _extract_card_reference_for_purchase(user_id: int, text: str) -> tuple[str | None, str | None]:
@@ -818,6 +852,9 @@ def add_credit_from_entities(
     Toda lógica compartilhada (resolução de cartão, validação de limite,
     categorização, learn, parcelamento, formato da resposta) vive aqui.
     """
+    # Q36: antes de cartão, sync e limite, que mandariam criar cartão à toa.
+    if (recusa := recusa_q36(user_id, "cartao")):
+        return recusa
     if valor is None or float(valor) <= 0:
         return "❌ Valor inválido."
 
@@ -908,13 +945,43 @@ def add_credit_from_entities(
                 user_id, tx_id, exc_info=True,
             )
         return _format_credit_purchase_success(card_label, float(valor), purchased_at, float(due), int(tx_id))
+    except FonteUnicaOF as e:
+        return str(e)
     except Exception as e:
         return f"❌ Erro registrando compra no crédito: {e}"
 
 
+def negada_com_o_of(user_id: int, text: str) -> bool:
+    """"gastei 50, nem pix nem cartão, foi dinheiro vivo" com banco conectado:
+    a compra que ficaria com o OF ("não registrei") segue como despesa, e o
+    `add()` pergunta a forma (Q40: negação não decide). Cartão manual ou sem
+    banco: o "cartão" decide o crédito, como antes da Q40."""
+    from core.handlers import forma_pagamento as fp
+    return bool(_is_natural_credit_purchase(text) and NEGACAO_RE.search(normalize_text(text))
+                and fp.regra_ativa(user_id) and compra_fica_com_o_of(user_id, text))
+
+
 def try_handle_natural_credit_purchase(user_id: int, text: str) -> str | None:
-    if not _is_natural_credit_purchase(text):
+    # Tipo e valor saem do pedaço sem a pergunta (#568): em "gastei 50 no mercado e
+    # gastei mais no cartão esse mês?" o cartão é da pergunta. Tudo pergunta: o
+    # portão lê a mensagem inteira e responde só os avisos (nada grava 2025).
+    limpo, puladas = sem_perguntas_comparativas(text)
+    if not _is_natural_credit_purchase(limpo or text) or negada_com_o_of(user_id, text):
         return None
+    from core.handlers.launches import avisos_depois_de  # local: launches importa daqui
+    resp = [_compra_no_credito(user_id, limpo)] if limpo else []
+    return "\n\n".join(resp + avisos_depois_de(user_id, puladas))
+
+
+def _compra_no_credito(user_id: int, text: str) -> str:
+    # Q2b/Q40: com banco conectado, só cartão MANUAL (fora do OF) registra na
+    # fatura; o resto chega pelo Open Finance. Aqui, e não em cada chamador:
+    # `add()`, a entrada rápida e o `credit.handle` passam todos por esta porta.
+    from core.handlers import forma_pagamento as fp
+    if (recusa := recusa_q36(user_id, "cartao")):
+        return recusa
+    if fp.regra_ativa(user_id) and compra_fica_com_o_of(user_id, text):
+        return fp.msg_banco(user_id, "despesa", parse_money(text))
 
     dt_evento, text_without_date = extract_date_from_text(text)
     if dt_evento is None:
@@ -1004,6 +1071,8 @@ def _create_installments(
             f"⚙️ **Código:** {code}\n\n"
             f"Pra apagar: `apagar {code}`"
         )
+    except FonteUnicaOF as e:
+        return str(e)
     except Exception as e:
         return f"❌ Erro ao parcelar no cartão: {e}"
 
@@ -2198,6 +2267,8 @@ def handle(user_id: int, text: str) -> str | None:
     # Aceita "credito" e "Crédito" (com acento). `.lower()` preserva o acento,
     # então tem que checar ambas variações — ambas têm 7 chars.
     if t_low.startswith("credito") or t_low.startswith("crédito"):
+        if (recusa := recusa_q36(user_id, "cartao")):
+            return recusa
         rest = t[7:].strip()
         if not rest:
             return "Use: credito 120 mercado OU credito nubank 120 mercado"
@@ -2242,6 +2313,8 @@ def handle(user_id: int, text: str) -> str | None:
         t_low = "parcelar " + t_low[len("parcelei "):]
 
     if t_low.startswith("parcelar"):
+        if (recusa := recusa_q36(user_id, "cartao")):
+            return recusa  # antes de perguntar cartão ou nome da compra
         # ── número de parcelas ──────────────────────────────────────────────
         # Aceita variações: "em 3x", "em 3 vezes", "em 3", "3x" — usuário fala
         # de várias formas. Tenta "em N" primeiro (mais específico, evita
@@ -2431,9 +2504,16 @@ def handle(user_id: int, text: str) -> str | None:
         )
 
     if re.match(r"^(?:pagar|paguei)\b", t_low):
-        resp = _handle_pay_bill_command(user_id, t)
+        # O último número vira valor: o 2026 de "... e gastei mais em 2025 ou 2026?" (#568).
+        # Com pergunta, só paga com o cartão nomeado, como a conta: "paguei a
+        # fatura e gastei mais…?" pagaria a do padrão; responde só o aviso.
+        from core.handlers.launches import avisos_depois_de  # local: launches importa daqui
+        t_fatura, puladas = sem_perguntas_comparativas(t)
+        if puladas and not _find_card_name_in_text(user_id, t_fatura):
+            return "\n\n".join(avisos_depois_de(user_id, puladas))
+        resp = _handle_pay_bill_command(user_id, t_fatura)
         if resp is not None:
-            return resp
+            return "\n\n".join([resp, *avisos_depois_de(user_id, puladas)])
 
     if t_low in ("faturas", "listar faturas", "faturas abertas", "listar faturas abertas", "listar fatura", "listar faturas em aberto"):
         try:

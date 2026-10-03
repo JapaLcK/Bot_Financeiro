@@ -87,6 +87,10 @@ async function setup({ budget = 14, active = ['detetive', 'barao'], viewport, ho
       function csrfHeaders(h={}){return h;}
       function _agentName(k){return k;}
       function navigateTo(view){window.lastNavigation=view;document.querySelectorAll('.sidenav-item[data-nav]').forEach(item=>item.classList.toggle('active',item.dataset.nav===view));}
+      // O harness não carrega dashboard.js: abre todos os menus colapsáveis da
+      // sidenav pra reproduzir a visibilidade de antes da redução (os testes
+      // aqui medem o chat, não a mecânica de abrir/fechar menu).
+      document.querySelectorAll('.sidenav-group').forEach(g => g.classList.add('open'));
       document.getElementById('sidenav').inert = !window.matchMedia('(min-width: 901px) and (hover: hover) and (pointer: fine)').matches;
       navigateTo('agentes');
       function isProUser(){return ${pro};}

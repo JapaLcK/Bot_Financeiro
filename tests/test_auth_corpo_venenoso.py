@@ -23,7 +23,7 @@ São DOIS mecanismos, e um conserto só fecha metade:
    cinto para o que sobra no erro (`tests/test_422_nao_ecoa_corpo.py`).
 2. **validação na borda** (`_CorpoSemVeneno`): sem ela o veneno chega ao
    `INSERT` do `_check_persistent_rate_limit` (coluna `text`), ao `hash_pii` e
-   ao `consume_password_reset_token`/`mfa_consume_login_challenge`.
+   ao `consume_password_reset_token`/`mfa_reserve_login_challenge_attempt`.
 
 CONTROLES NEGATIVOS — os TRÊS, medidos em 2026-09-10 com
 `pytest tests/test_auth_corpo_venenoso.py tests/test_422_nao_ecoa_corpo.py`
@@ -99,6 +99,12 @@ CORPOS = {
                                "use_backup": False},
     "/auth/google/complete-signup": {"token": "tok-inexistente", "name": "Fulano",
                                      "phone": "+5511999990000", "accepted_terms": True},
+    "/auth/google/exchange": {"code": "codigo-inexistente"},
+    # Cadastro pelo quiz (frontend/routes/quiz_signup.py). O token do webhook vai
+    # no corpo, que é um dos lugares aceitos; o env é o do fixture abaixo.
+    "/xquiz/webhook": {"email": f"xq@{DOMINIO}", "nome": "Fulano",
+                       "whatsapp": "+5511999990000", "token": "tok-369"},
+    "/auth/quiz/resend": {"email": f"qr@{DOMINIO}"},
 }
 
 # Todo campo `str` de todas elas, derivado do corpo e não escrito à mão: rota
@@ -118,11 +124,14 @@ ACENTO_ESPERADO = {
     "/auth/reset-password": 400,    # "Link inválido ou expirado"
     "/auth/mfa/verify-login": 400,  # "Sessão MFA expirada"
     "/auth/google/complete-signup": 400,  # token pendente inexistente
+    "/auth/google/exchange": 400,         # google_code_invalid
+    "/xquiz/webhook": 200,                # {"ok": true} de sempre
+    "/auth/quiz/resend": 200,             # resposta genérica de sempre
 }
 # Campo de TEXTO LIVRE onde o acento/emoji entra (`token` e `challenge` são
 # nossos, nunca têm acento).
 ACENTO_CAMPO = {"/auth/register": "name", "/auth/google/complete-signup": "name",
-                "/auth/reset-password": "new_password"}
+                "/auth/reset-password": "new_password", "/xquiz/webhook": "nome"}
 
 
 def _post(url: str, corpo: dict):
@@ -165,7 +174,7 @@ def _tentativas(bucket: str, identifier: str) -> int:
 
 
 @pytest.fixture(autouse=True)
-def _limites_limpos():
+def _limites_limpos(monkeypatch):
     """Os tetos por IP (`@limiter.limit` em memória) e por e-mail (tabela) são
     compartilhados entre testes: sem reset, o 429 passaria por "não é 500" —
     por isso todo assert daqui é por status EXATO. Mesmo precedente de
@@ -174,6 +183,7 @@ def _limites_limpos():
         dashboard.limiter._storage.reset()
     except Exception:
         pass
+    monkeypatch.setenv("XQUIZ_WEBHOOK_TOKEN", CORPOS["/xquiz/webhook"]["token"])
     _zera = [f"email:{c['email']}" for c in CORPOS.values() if "email" in c]
     with db.get_conn() as conn:
         with conn.cursor() as cur:

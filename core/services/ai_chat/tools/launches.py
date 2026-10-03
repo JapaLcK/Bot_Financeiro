@@ -52,13 +52,17 @@ def _list_recent_launches(user_id: int, args: dict[str, Any]) -> dict[str, Any]:
     limit = int(args.get("limit") or 10)
     limit = max(1, min(limit, 50))
 
+    # Saque em espécie/transferência (receita/despesa interna) vai como
+    # "entrada"/"saída": como "receita", o modelo o leria como ganho.
+    from core.handlers.launches import _rotulo_interno
+
     rows = db.list_launches(user_id, limit=limit)
     return {
         "launches": [
             {
                 "id": r["id"],
                 "user_seq": r.get("user_seq"),
-                "tipo": r["tipo"],
+                "tipo": _rotulo_interno(r) or r["tipo"],
                 "valor": float(r["valor"] or 0),
                 "alvo": r.get("alvo"),
                 "nota": r.get("nota"),
@@ -125,6 +129,9 @@ def _get_largest_expenses(user_id: int, args: dict[str, Any]) -> dict[str, Any]:
 
 def _compare_periods(user_id: int, args: dict[str, Any]) -> dict[str, Any]:
     """Compara totais de receita/despesa entre 2 períodos."""
+    from core.services.plan_service import plan_gate_ok
+    if not plan_gate_ok(user_id, "financial_comparison"):
+        return {"error": "pro_required", "message": "Comparações entre períodos estão disponíveis nos planos Plus e Pro."}
     a_start = _parse_iso_date(args.get("period_a_start"))
     a_end = _parse_iso_date(args.get("period_a_end"))
     b_start = _parse_iso_date(args.get("period_b_start"))
@@ -159,6 +166,9 @@ def _compare_periods(user_id: int, args: dict[str, Any]) -> dict[str, Any]:
 
 
 def _get_spending_trend(user_id: int, args: dict[str, Any]) -> dict[str, Any]:
+    from core.services.plan_service import plan_gate_ok
+    if not plan_gate_ok(user_id, "financial_comparison"):
+        return {"error": "pro_required", "message": "Tendências e comparações estão disponíveis nos planos Plus e Pro."}
     try:
         months = int(args.get("months") or 6)
     except (TypeError, ValueError):
@@ -219,6 +229,9 @@ def _forecast_month_end(user_id: int, args: dict[str, Any]) -> dict[str, Any]:
     anteriores também).
     """
     from calendar import monthrange
+    from core.services.plan_service import plans_v2_enabled, plan_gate_ok
+    if plans_v2_enabled() and not plan_gate_ok(user_id, "forecast"):
+        return {"error": "pro_required", "message": "A projeção de fechamento está disponível nos planos Plus e Pro."}
 
     today = date.today()
     month_start = today.replace(day=1)
@@ -343,7 +356,18 @@ def _add_launch_execute(user_id: int, args: dict[str, Any]) -> str:
     if valor <= 0:
         return "🐷 O valor precisa ser maior que zero."
 
+    from core.handlers import forma_pagamento as fp
     from core.handlers.launches import add_from_entities
+
+    # Q40: a tool só DECLARA a forma; quem decide se grava é o servidor. Fora
+    # do enum vira "desconhecida" — o modelo não inventa uma terceira forma.
+    forma = args.get("forma_pagamento")
+    forma = forma if forma in (fp.DINHEIRO, fp.BANCO) else fp.DESCONHECIDA
+    decisao = fp.decidir(user_id, forma)
+    if decisao == fp.BANCO:
+        return fp.msg_banco(user_id, tipo, valor)
+    if decisao != fp.CARTEIRA:
+        return _PERGUNTE_A_FORMA
 
     return add_from_entities(
         user_id,
@@ -355,7 +379,16 @@ def _add_launch_execute(user_id: int, args: dict[str, Any]) -> str:
         category_reason="ai",
         criado_em=_parse_iso_datetime_for_launch(args.get("data")),
         platform=CURRENT_PLATFORM.get(),
+        forma_pagamento=forma,
     )
+
+
+# Instrução ao MODELO (volta como resultado da tool). Não arma pendência: a
+# pergunta aberta da IA (#598) leva a resposta do usuário de volta para ela.
+_PERGUNTE_A_FORMA = (
+    "🐷 Nada foi gravado. Pergunte ao usuário se foi em dinheiro vivo ou pelo "
+    "banco (Pix, cartão, débito) e chame de novo com `forma_pagamento`."
+)
 
 
 # ─── Write: delete_launch (PEDE confirmação — destrutivo) ───────────────────
@@ -446,6 +479,16 @@ def _delete_launch_execute(user_id: int, args: dict[str, Any]) -> str:
                     f"🐷 O lançamento #{lid} é antigo e não guarda o que precisaria "
                     f"ser revertido, então mantive ele intacto pra não bagunçar seu saldo."
                 )
+            except db.InvestmentMovementNotLast as e:
+                # Antes do `LaunchUnsafeRollback` (subclasse); mesma frase do WhatsApp.
+                _log_falha("delete_launch_movimento_posterior", user_id, e,
+                           nivel=logging.WARNING, launch_id=internal_id, user_seq=lid)
+                return f"🐷 Não apaguei o lançamento #{lid}. {e}"
+            except db.PocketHasMovement as e:
+                # Idem: subclasse, antes da mãe; mesma frase do WhatsApp.
+                _log_falha("delete_launch_caixinha_com_movimento", user_id, e,
+                           nivel=logging.WARNING, launch_id=internal_id, user_seq=lid)
+                return f"🐷 Não apaguei o lançamento #{lid}. {e}"
             except db.LaunchUnsafeRollback as e:
                 # `efeitos` existe mas não dá pra revertê-lo por inteiro —
                 # mesma condição PERMANENTE do WhatsApp (`core/handlers/
@@ -896,6 +939,16 @@ TOOLS: list[Tool] = [
                         "data": {
                             "type": "string",
                             "description": "Data do lançamento em ISO 8601 (YYYY-MM-DD). Omita pra usar hoje.",
+                        },
+                        "forma_pagamento": {
+                            "type": "string",
+                            "enum": ["dinheiro", "banco"],
+                            "description": (
+                                "Como o dinheiro saiu/entrou, SÓ se o usuário disse: "
+                                "'dinheiro' (dinheiro vivo, espécie) ou 'banco' (Pix, "
+                                "cartão, débito, transferência). 'Boleto' diz o que foi "
+                                "pago, não como. Nunca invente: omita se ele não disse."
+                            ),
                         },
                     },
                     "required": ["tipo", "valor"],

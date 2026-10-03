@@ -21,8 +21,8 @@ O app iOS (Capacitor, `mobile/`) carrega `https://pigbankai.com` num WKWebView c
   | quantas | o que carregam | quem |
   |---|---|---|
   | 6 | `app-mode.css`/`app-mode.js` | `login`, `cadastro`, `home`, `dashboard`, `comandos-app`, `settings` — mais a `changelog`, que carrega **os dois** (`changelog.html:15` shim, `:16-17` app-mode) e está contada na linha de baixo |
-  | 16 | o shim `frontend/safe-area.js` | as estáticas: `index`, `precos`, `termos`, `privacy`, `completar-cadastro`, `comecar`, `suporte`, `agents`, `changelog`, `comandos`, `como-funciona`, `funcionalidades`, `blog-article`, `reset-password`, `whatsapp` — mais a `error`, que **não é rota**: é template servido pelo `error_page_response` (`frontend/routes/shared.py`) em quase toda URL que dá erro. Quase: as **4** exceções são `/webhook` e `/wa/webhook` (403 `text/plain` "forbidden", `adapters/whatsapp/wa_app.py:224,241,255`) e `/fonts/{name}` e `/brand/{path}` (404 de corpo vazio, `static_pages.py:536,559,564,567`) — endpoints de máquina e de subrecurso, que de propósito não gastam 1,4 KB de HTML |
-  | 4 | nada, de propósito | `admin-login`, `admin-dashboard`, `preview_agentes`, e o `ddf99f17-…` — o `_dash_mockup` saiu no PR #209, e o `tests/test_frontend_assets_e_rotas.py` agora reprova página sem rota |
+  | 20 | o shim `frontend/safe-area.js` | as estáticas: `index`, `precos`, `termos`, `privacy`, `completar-cadastro`, `comecar`, `suporte`, `agents`, `changelog`, `comandos`, `como-funciona`, `funcionalidades`, `blog`, `blog-article`, `contato`, `recuperar-senha`, `reset-password`, `whatsapp`, `assinar` — mais a `error`, que **não é rota**: é template servido pelo `error_page_response` (`frontend/routes/shared.py`) em quase toda URL que dá erro. Quase: as **4** exceções são `/webhook` e `/wa/webhook` (403 `text/plain` "forbidden", `adapters/whatsapp/wa_app.py:224,241,255`) e `/fonts/{name}` e `/brand/{path}` (404 de corpo vazio, `static_pages.py:536,559,564,567`) — endpoints de máquina e de subrecurso, que de propósito não gastam 1,4 KB de HTML |
+  | 6 | nada, de propósito | `admin-login`, `admin-dashboard`, `preview_agentes`, `quiz-resultado` (a /q: redireciona na hora para o /cadastro, ou para a /assinar, e não é alcançável pelo app), `painel` (o /painel, dashboard v2: o servidor manda o UA `PigBankApp` para o /app e o /app esconde o link no app, então o WebView não chega lá; a PWA do Safari chega, sem tratamento de área segura) e o `ddf99f17-…` — o `_dash_mockup` saiu no PR #209, e o `tests/test_frontend_assets_e_rotas.py` agora reprova página sem rota |
 
   As duas páginas geradas em Python (bullet seguinte) também carregam o shim.
   `env(safe-area-inset-*)` aparece em **seis** arquivos de `frontend/`
@@ -157,16 +157,23 @@ Python por `tests/test_max_lines_python.py`, que roda no `pytest` e cuja lista d
 legado mora em `tests/_max_lines_baseline.py`.
 
 **Os dois NÃO isentam do mesmo jeito, e a diferença importa.** No **Python** a
-isenção é **só por caminho exato**: `LEGADOS` é um `frozenset` de strings e a
-varredura compara por igualdade, então glob e sufixo não são sequer
-representáveis, e **arquivo de teste não tem tratamento especial** — os ~45 de
-`tests/` estão na lista nominalmente, e teste novo acima de 350 **reprova**. No
-**JavaScript** sobram duas frouxidões: o baseline casa **caminho inteiro ou
-sufixo** (`eslint-rules/utils.cjs:53-55`), e arquivo de teste continua sendo
-reconhecido **por regex** (`isTestFile`, `/\.(test|spec)\.[cm]?[jt]sx?$/`,
-`utils.cjs:49-51`), com `tests/frontend/**/*.mjs` em **`warn`** — que não reprova,
-porque o `eslint` só sai != 0 com erro. **O portão de Python é o mais estrito dos
-dois, de propósito.**
+isenção de LEGADO é **só por caminho exato**: `LEGADOS` é um `frozenset` de
+strings e a varredura compara por igualdade, então glob e sufixo não são sequer
+representáveis. **Arquivo de teste (primeiro componente do caminho em `tests/`
+ou `harness_tests/`) acima do teto é AVISO, não reprovação** — `_varrer` separa
+`faltando` (produção) de `avisos` (teste), e o segundo só aparece no warnings
+summary do `pytest`; por isso `LEGADOS` não tem mais entrada de `tests/`. No
+**JavaScript** sobram duas frouxidões: o baseline casa **caminho
+inteiro ou sufixo** (`eslint-rules/utils.cjs:53-55`) — mais frouxo que o
+`LEGADOS` do Python, que só aceita igualdade exata —, e arquivo de teste
+continua sendo reconhecido **por regex** (`isTestFile`,
+`/\.(test|spec)\.[cm]?[jt]sx?$/`, `utils.cjs:49-51`), com
+`tests/frontend/**/*.mjs` em **`warn`** — que não reprova, porque o `eslint` só
+sai != 0 com erro. **Só o tratamento de teste como aviso ficou equivalente ao
+Python** (embora o Python reconheça teste por diretório de topo e o JS por
+regex/padrão de arquivo); **o casamento por sufixo não tem par no Python e
+continua mais frouxo. O que o Python mantém mais estrito é código de
+PRODUÇÃO**, onde a isenção continua exigindo caminho exato em `LEGADOS`.
 
 O que os dois têm em comum é o que foi REMOVIDO: as isenções por *basename* (`index`, `constants`, `types`,
 `*.config.*`) e por *diretório* (`generated/`, `fixtures/`, `mocks/`) vieram de um
@@ -178,13 +185,16 @@ um.** Basename e diretório, que são exatamente os do template. Devolver qualqu
 um deles deixa vermelho na hora.
 
 **O que elas NÃO prendem: predicado arbitrário.** Isto é medição, não hipótese —
-três pontos de inserção, com as 8 sondas do arquivo VERDES:
+três pontos de inserção, com todas as sondas do arquivo VERDES (registro da
+medição de 2026-09-07, com as sondas daquela época; o número de sondas muda com
+o arquivo, remeça com
+`.venv/bin/python -m pytest tests/test_max_lines_python.py -q` antes de reusar):
 
-| onde | predicado | resultado |
+| onde | predicado | resultado (2026-09-07) |
 |---|---|---|
-| `_lidos` | `rel.startswith("handlers/")` | 8 passed |
-| `_lidos` | `rel.startswith("adapters/discord/")` | 8 passed |
-| `_estoura` | `caminho.startswith("scripts/")` | 8 passed |
+| `_lidos` | `rel.startswith("handlers/")` | todas passam |
+| `_lidos` | `rel.startswith("adapters/discord/")` | todas passam |
+| `_estoura` | `caminho.startswith("scripts/")` | todas passam |
 
 Com a segunda, `adapters/discord/enorme_novo.py` com 400 linhas entra sem uma
 linha vermelha.
@@ -347,12 +357,19 @@ fixo de toda mudança de layout.
   para `frontend/routes/` (`static_pages`, `settings`, `pockets`, `cards`,
   `analytics`, `open_finance`, `push`, `agents`, `affiliates`, `shared`), registradas
   por `include_router`. **Rota nova vai para um router de `frontend/routes/`** — não
-  para o monólito. O plano completo está em `docs/refactor_plan.md`.
+  para o monólito. Rota da `/api/v2` vai para `api/v2/` (sub-app montado, com envelope
+  de erro próprio): no monólito ela escaparia do envelope e da varredura de
+  `tests/test_api_v2_rotas.py`, que reprova rota sob `/api/v2` fora do mount. O plano
+  completo está em `docs/refactor_plan.md`. Exceção:
+  `POST /auth/google/exchange` e as `/auth/apple/*` ficam no monólito, ao lado das
+  `/auth/google/*`, porque dependem de `_entrega_sessao`, `_issue_session_token` e `_concluir_login`,
+  que moram lá — importá-los de um router cria import circular.
 - **Isolamento por usuário é regra dura.** A formulação da regra mora no §0 do
   `CLAUDE.md`, que é auto-carregado — instrução de segurança não pode depender de
   alguém abrir este arquivo. Aqui fica só o lembrete de que ela vale em todo `db/`.
-- **`launch.py` sobe dois processos**: o uvicorn (que atende o `$PORT` do Railway) e o
-  `bot.py` do Discord. Um `web` no Procfile, dois processos filhos.
+- **`launch.py` vira o uvicorn** (`os.execv`, que atende o `$PORT` do Railway): um `web`
+  no Procfile, um processo, e o SIGTERM chega direto ao uvicorn. O `bot.py` do Discord
+  saiu dele no PR 5a do dashboard v2 e não roda mais.
 - **Tarefas de fundo sobem no startup do app** quando `RUN_BACKGROUND_TASKS != "0"`
   (agendadores de investimento, Open Finance, engajamento, cobrança recorrente, poda
   das tabelas de token/challenge…). Dois arquivos põem o `0`, e por `setdefault`

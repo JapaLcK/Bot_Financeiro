@@ -37,6 +37,7 @@ import pytest
 from fastapi.testclient import TestClient
 
 import db
+from conftest import promote_to_pro
 import frontend.finance_bot_websocket_custom as dashboard
 
 CODEC = "codec can't encode"
@@ -44,6 +45,7 @@ SURROGATE = "cofre\ud800x"
 
 
 def _client(user_id: int) -> TestClient:
+    promote_to_pro(user_id)  # atravessa o gate de acesso do v2
     client = TestClient(dashboard.app)
     client.cookies.set(dashboard.AUTH_COOKIE_NAME, dashboard._make_jwt(user_id, "pkt@t.com"))
     client.cookies.set(dashboard.DASHBOARD_COOKIE_NAME,

@@ -128,20 +128,27 @@ def test_rotas_institucionais_e_precos_fazem_opt_in():
 
 
 def test_suporte_nao_grava_formulario_nem_paginas_de_conta(monkeypatch):
-    from frontend.routes.static_pages import serve_suporte
+    from frontend.routes.static_pages import serve_suporte, serve_contato, serve_recuperar_senha
 
     monkeypatch.setattr(shared, "CLARITY_PROJECT_ID", _PROJECT_ID)
     corpo = asyncio.run(serve_suporte()).body.decode()
-    assert "<form" in corpo
+    assert 'href="/suporte/contato"' in corpo
+    assert 'class="faq-item"' in corpo
     assert "www.clarity.ms/tag/" not in corpo
     assert _PROJECT_ID not in corpo
+    for route in (serve_contato, serve_recuperar_senha):
+        form_page = asyncio.run(route()).body.decode()
+        assert "<form" in form_page  # controle positivo: são as telas reais com PII
+        assert "www.clarity.ms/tag/" not in form_page
+        assert _PROJECT_ID not in form_page
 
     source = STATIC_PAGES.read_text(encoding="utf-8")
     trecho_suporte = source[source.index("async def serve_suporte"):source.index("@router.get(\"/ddf")]
 
     assert "inject_tracking(template.replace(\"{{FAQ}}\", faq))" in trecho_suporte
     assert "clarity=True" not in trecho_suporte
-    for page in ("login.html", "cadastro.html", "completar-cadastro.html", "home.html", "comecar.html"):
+    for page in ("login.html", "cadastro.html", "completar-cadastro.html", "home.html", "comecar.html",
+                 "contato.html", "recuperar-senha.html", "reset-password.html"):
         assert page not in _paginas_com_clarity()
 
 

@@ -6,6 +6,7 @@ finance_bot_websocket_custom.py sem mudança de comportamento.
 
 import asyncio
 import html as _html
+import logging
 import os
 import re
 from urllib.parse import quote
@@ -17,6 +18,8 @@ from pydantic import BaseModel
 from core.secure_compare import constant_time_eq
 from frontend.routes.shared import (
     FRONTEND_DIR,
+    _is_pigbank_app,
+    _resolve_page_user_id,
     gate_onboarding,
     gate_plan_selection,
     gate_pro_page,
@@ -71,6 +74,44 @@ async def serve_dashboard(request: Request):
     return html_file(FRONTEND_DIR / "dashboard.html", pixel=False)
 
 
+@router.get("/painel")
+def serve_painel(request: Request):
+    """Dashboard v2, só para quem a chave libera. Fora dela, o painel é o /app.
+
+    `def` e não `async def`: sessão, chave e gates são banco síncrono, e o
+    FastAPI roda rota síncrona no threadpool em vez de travar o event loop
+    (mesma escolha de `api/v2/sessao.usuario_atual`).
+
+    `_resolve_page_user_id` aceita o `auth_token` (15 min) OU o
+    `dashboard_token` (12 h). O `/auth/validate` da /login aceita o segundo:
+    exigir só o primeiro faria a /login mandar para cá e daqui de volta ao
+    login (o loop da /conta no #644).
+
+    O user agent do app só ESCOLHE a tela (o app segue no /app): ele não
+    concede nada, quem libera é a chave, no servidor. Chave que falha = fechado.
+    """
+    from core.services.plan_service import dashboard_v2_enabled
+
+    uid = _resolve_page_user_id(request)
+    if uid is None:
+        return RedirectResponse(url="/login?next=/painel", status_code=302)
+    try:
+        liberado = not _is_pigbank_app(request) and dashboard_v2_enabled(uid)
+    except Exception:
+        logging.getLogger(__name__).warning("dashboard_v2_enabled falhou", exc_info=True)
+        liberado = False
+    if not liberado:
+        return RedirectResponse(url="/app", status_code=302)
+    # Mesma sequência do /app: plano primeiro, onboarding depois.
+    gate = gate_plan_selection(request)
+    if gate is not None:
+        return gate
+    gate = gate_onboarding(request)
+    if gate is not None:
+        return gate
+    return html_file(FRONTEND_DIR / "painel.html", pixel=False)
+
+
 @router.get("/home")
 async def serve_home(request: Request):
     gate = gate_plan_selection(request)
@@ -112,6 +153,7 @@ async def serve_settings(request: Request):
     return html_file(FRONTEND_DIR / "settings.html", pixel=False)
 
 
+@router.get("/redefinir-senha")
 @router.get("/reset-password")
 async def serve_reset_password():
     return html_file(FRONTEND_DIR / "reset-password.html")
@@ -161,6 +203,48 @@ async def serve_login():
 @router.get("/cadastro")
 async def serve_cadastro():
     return html_file(FRONTEND_DIR / "cadastro.html")
+
+
+@router.get("/q")
+async def serve_quiz_resultado():
+    # Perfil e respostas do quiz são dado financeiro: nada de Pixel/GA4/Clarity aqui.
+    return html_file(FRONTEND_DIR / "quiz-resultado.html", pixel=False)
+
+
+@router.get("/assinar")
+async def serve_assinar():
+    # Funil v3: conta + checkout. Pixel e GA4 sim (o assinar.js limpa o fragmento antes
+    # deles), Clarity não: a página tem nome, e-mail e WhatsApp nos campos.
+    return html_file(FRONTEND_DIR / "assinar.html", pixel=True, clarity=False)
+
+
+@router.get("/assinar.js")
+async def serve_assinar_js(request: Request):
+    return FileResponse(FRONTEND_DIR / "assinar.js", media_type="application/javascript",
+                        headers={"Cache-Control": _cache_asset_versionado(request)})
+
+
+@router.get("/assinar.css")
+async def serve_assinar_css(request: Request):
+    return FileResponse(FRONTEND_DIR / "assinar.css", media_type="text/css",
+                        headers={"Cache-Control": _cache_asset_versionado(request)})
+
+
+@router.get("/quiz-resultado.js")
+async def serve_quiz_resultado_js():
+    return FileResponse(FRONTEND_DIR / "quiz-resultado.js", media_type="application/javascript",
+                        headers={"Cache-Control": "no-cache"})
+
+
+@router.get("/recuperar-senha")
+async def serve_recuperar_senha():
+    return html_file(FRONTEND_DIR / "recuperar-senha.html")
+
+
+@router.get("/suporte/contato")
+async def serve_contato():
+    # Formulário com dados pessoais: mesmo funil de suporte, sem Clarity.
+    return html_file(FRONTEND_DIR / "contato.html")
 
 
 @router.get("/static/auth-refresh.js")
@@ -396,12 +480,23 @@ async def serve_domain_verification():
     )
 
 
+# Espelho de appleTeamId + ID_BASE do app/app.config.ts; tests/test_apple_app_site_association.py compara os dois.
+_APPLE_APP_IDS = ("S849YDA49P.com.pigbankai.mobile",)
+
+
+@router.get("/.well-known/apple-app-site-association")
+async def serve_apple_app_site_association():
+    """Associa o app iOS ao domínio para salvar senha e código no app Senhas."""
+    return JSONResponse({"webcredentials": {"apps": list(_APPLE_APP_IDS)}})
+
+
 @router.get("/robots.txt")
 async def serve_robots_txt():
     content = "\n".join([
         "User-agent: *",
         "Allow: /",
         "Disallow: /app",
+        "Disallow: /painel",
         "Disallow: /home",
         "Disallow: /settings",
         "Disallow: /onboarding",
@@ -409,6 +504,8 @@ async def serve_robots_txt():
         "Disallow: /reset-password",
         "Disallow: /auth/",
         "Disallow: /admin",
+        "Disallow: /assinar",
+        "Disallow: /q",
         f"Sitemap: {public_site_url('/sitemap.xml')}",
         "",
     ])
@@ -651,6 +748,25 @@ async def serve_chat_app_css():
     )
 
 
+@router.get("/dashboard-app.js")
+async def serve_dashboard_app_js():
+    """Ilha React do dashboard v2 (/painel); revalidação acompanha o HTML."""
+    return FileResponse(
+        FRONTEND_DIR / "dashboard-app.js",
+        media_type="application/javascript",
+        headers={"Cache-Control": "no-cache"},
+    )
+
+
+@router.get("/dashboard-app.css")
+async def serve_dashboard_app_css():
+    return FileResponse(
+        FRONTEND_DIR / "dashboard-app.css",
+        media_type="text/css",
+        headers={"Cache-Control": "no-cache"},
+    )
+
+
 @router.get("/dashboard.css")
 async def serve_dashboard_css():
     """CSS do dashboard, extraído do inline de dashboard.html.
@@ -680,6 +796,15 @@ async def serve_sidenav_scrollbar_js():
     )
 
 
+@router.get("/sidenav-groups.js")
+async def serve_sidenav_groups_js():
+    return FileResponse(
+        FRONTEND_DIR / "sidenav-groups.js",
+        media_type="application/javascript",
+        headers={"Cache-Control": "no-cache"},
+    )
+
+
 @router.get("/comecar.js")
 async def serve_comecar_js():
     """Comportamento do wizard de primeira configuração servido em /onboarding.
@@ -703,6 +828,26 @@ async def serve_purchase_intent_js():
     return FileResponse(
         FRONTEND_DIR / "purchase-intent.js",
         media_type="application/javascript",
+        headers={"Cache-Control": "no-cache"},
+    )
+
+
+@router.get("/criar-senha.js")
+async def serve_criar_senha_js():
+    """Overlay "Crie sua senha" da /home e do /app (conta sem credencial)."""
+    return FileResponse(
+        FRONTEND_DIR / "criar-senha.js",
+        media_type="application/javascript",
+        headers={"Cache-Control": "no-cache"},
+    )
+
+
+@router.get("/criar-senha.css")
+async def serve_criar_senha_css():
+    """CSS do overlay "Crie sua senha" (ver /criar-senha.js)."""
+    return FileResponse(
+        FRONTEND_DIR / "criar-senha.css",
+        media_type="text/css",
         headers={"Cache-Control": "no-cache"},
     )
 
@@ -791,6 +936,69 @@ async def serve_site_css(request: Request):
     return FileResponse(
         FRONTEND_DIR / "site.css",
         media_type="text/css",
+        headers={"Cache-Control": _cache_asset_versionado(request)},
+    )
+
+
+@router.get("/site-marketing.css")
+async def serve_site_marketing_css(request: Request):
+    return FileResponse(
+        FRONTEND_DIR / "site-marketing.css",
+        media_type="text/css",
+        headers={"Cache-Control": _cache_asset_versionado(request)},
+    )
+
+
+@router.get("/site-help.css")
+async def serve_site_help_css(request: Request):
+    return FileResponse(
+        FRONTEND_DIR / "site-help.css",
+        media_type="text/css",
+        headers={"Cache-Control": _cache_asset_versionado(request)},
+    )
+
+
+@router.get("/site-auth.css")
+async def serve_site_auth_css(request: Request):
+    return FileResponse(
+        FRONTEND_DIR / "site-auth.css",
+        media_type="text/css",
+        headers={"Cache-Control": _cache_asset_versionado(request)},
+    )
+
+
+@router.get("/site-plans.css")
+async def serve_site_plans_css(request: Request):
+    return FileResponse(
+        FRONTEND_DIR / "site-plans.css",
+        media_type="text/css",
+        headers={"Cache-Control": _cache_asset_versionado(request)},
+    )
+
+
+@router.get("/contact.js")
+async def serve_contact_js(request: Request):
+    return FileResponse(
+        FRONTEND_DIR / "contact.js",
+        media_type="application/javascript",
+        headers={"Cache-Control": _cache_asset_versionado(request)},
+    )
+
+
+@router.get("/commands-copy.js")
+async def serve_commands_copy_js(request: Request):
+    return FileResponse(
+        FRONTEND_DIR / "commands-copy.js",
+        media_type="application/javascript",
+        headers={"Cache-Control": _cache_asset_versionado(request)},
+    )
+
+
+@router.get("/auth-presentation.js")
+async def serve_auth_presentation_js(request: Request):
+    return FileResponse(
+        FRONTEND_DIR / "auth-presentation.js",
+        media_type="application/javascript",
         headers={"Cache-Control": _cache_asset_versionado(request)},
     )
 
@@ -891,7 +1099,7 @@ async def serve_brand_asset(path: str):
 
 @router.get("/wa")
 async def open_whatsapp_bot():
-    """Abre o chat DIRETO com a Piggy no WhatsApp (deep link), com saudação
+    """Abre o chat DIRETO com o Piggy no WhatsApp (deep link), com saudação
     pré-preenchida. Botões do site apontam pra cá — o número real fica no
     servidor (WHATSAPP_NUMBER), nada hardcoded no HTML. Serve pra reencontrar
     o bot rápido. Sem número configurado, cai no seletor genérico do WhatsApp."""
@@ -988,4 +1196,10 @@ async def serve_bank_movements_js():
 @router.get("/reconciliations.js")
 async def serve_reconciliations_js():
     return FileResponse(FRONTEND_DIR / "reconciliations.js", media_type="application/javascript",
+                        headers={"Cache-Control": "no-cache"})
+
+
+@router.get("/cash-transfers.js")
+async def serve_cash_transfers_js():
+    return FileResponse(FRONTEND_DIR / "cash-transfers.js", media_type="application/javascript",
                         headers={"Cache-Control": "no-cache"})

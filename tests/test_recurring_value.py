@@ -28,7 +28,8 @@ def _seed(uid, tipo, valor, desc, n=1):
     """Cria n lançamentos históricos de `desc` com `valor`."""
     for _ in range(n):
         launches.add_from_entities(uid, tipo=tipo, valor=float(valor),
-                                   alvo=desc, nota=desc, platform="whatsapp")
+                                   alvo=desc, nota=desc, platform="whatsapp",
+                                   forma_pagamento="desconhecida")
 
 
 class _Att:
@@ -40,17 +41,16 @@ class _Att:
 @pytest.fixture
 def small_uid():
     import uuid as _uuid
-    from conftest import _cleanup_user
+    from conftest import _cleanup_user, promote_to_pro
     uid = int(_uuid.uuid4().int % 1_000_000_000)
     db.ensure_user(uid)
+    promote_to_pro(uid)
     yield uid
     _cleanup_user(uid)
 
 
 @pytest.fixture
 def audio(monkeypatch):
-    monkeypatch.setattr("core.services.plan_service.is_pro", lambda uid: True)
-
     def _say(uid, phrase):
         monkeypatch.setattr(hi, "transcribe_audio", lambda data, fn: phrase)
         msg = IncomingMessage(platform="whatsapp", user_id=uid, text="",

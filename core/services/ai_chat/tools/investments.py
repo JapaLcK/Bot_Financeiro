@@ -22,6 +22,7 @@ from datetime import date
 from typing import Any
 
 import db
+from core.services import fonte_unica
 from utils_text import fmt_rate
 
 from ._base import Tool
@@ -124,6 +125,11 @@ def _get_investment_contributions(user_id: int, args: dict[str, Any]) -> dict[st
 
 # ─── Write: create_investment ───────────────────────────────────────────────
 
+def _recusa_q36(user_id: int, _args: dict[str, Any]) -> str | None:
+    """Recusa antes de pedir confirmação; a trava em `db` continua valendo."""
+    return fonte_unica.recusa(user_id, "investimento")
+
+
 def _create_investment_summary(args: dict[str, Any]) -> str:
     rate = args.get("rate")
     period = args.get("period")
@@ -151,10 +157,12 @@ def _create_investment_execute(user_id: int, args: dict[str, Any]) -> str:
     # sempre gravar decimal.
     rate_decimal = rate_pct / 100
     try:
-        db.create_investment(user_id, name, rate_decimal, period)
-        return f'✅ Investimento "{name}" criado.'
+        launch_id, canon = db.create_investment(user_id, name, rate_decimal, period)
+        if launch_id is None:
+            return f'ℹ️ O investimento "{canon}" já existe.'
+        return f'✅ Investimento "{canon}" criado.'
     except ValueError as e:
-        return f"🐷 Não consegui criar: {e}"
+        return f"🐷 {e}" if isinstance(e, fonte_unica.FonteUnicaOF) else f"🐷 Não consegui criar: {e}"
     except Exception as e:
         return f"🐷 Não consegui criar: {e}"
 
@@ -197,6 +205,8 @@ def _investment_deposit_execute(user_id: int, args: dict[str, Any]) -> str:
             "Cadastre ele no dashboard primeiro e depois manda o aporte."
         )
     except ValueError as e:
+        if isinstance(e, fonte_unica.FonteUnicaOF):
+            return "🐷 " + str(e)
         if "INSUFFICIENT_ACCOUNT" in str(e):
             from core.services import funding
             return "🐷 " + funding.msg_insuficiente(user_id, amount)
@@ -353,6 +363,7 @@ TOOLS: list[Tool] = [
         is_write=True,
         summary=_create_investment_summary,
         execute=_create_investment_execute,
+        validate=_recusa_q36,
     ),
     Tool(
         schema={
@@ -373,6 +384,7 @@ TOOLS: list[Tool] = [
         is_write=True,
         summary=_investment_deposit_summary,
         execute=_investment_deposit_execute,
+        validate=_recusa_q36,
     ),
     Tool(
         schema={

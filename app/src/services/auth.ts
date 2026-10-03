@@ -1,7 +1,11 @@
-import { ErroDeApi, _esquecerRotacoes, chamar } from "../api/client";
+import { z } from "zod";
+
+import { ErroDeApi, TEMPO_LIMITE_AUTH_MS, _esquecerRotacoes, chamar, comLimite } from "../api/client";
 import {
   loginSchema,
+  pendenteGoogleSchema,
   perfilSchema,
+  respostaAppleSchema,
   respostaLoginSchema,
   type Perfil,
 } from "../api/schemas/auth";
@@ -41,7 +45,18 @@ export class EntradaSuperada extends ErroDeApi {
 
 export type Entrada =
   | { fase: "pronta"; perfil: Perfil }
-  | { fase: "mfa"; desafio: string; email: string };
+  | { fase: "mfa"; desafio: string; email: string }
+  // Só a Apple: conta nova, sem sessão (`respostaAppleSchema`).
+  | { fase: "cadastro"; token: string; email: string; nome: string };
+
+export type ProvedorSocial = "google" | "apple";
+
+/**
+ * O `AbortController` da tentativa de entrada EM VOO agora, se houver.
+ * `abandonarEntrada` usa isto para não deixar a requisição pendurada até o
+ * tempo limite de 15s quando a pessoa desiste (Voltar) antes disso.
+ */
+let controladorEmVoo: AbortController | null = null;
 
 /**
  * Envolve uma tentativa de entrada INTEIRA — requisição, decisão e gravação.
@@ -56,11 +71,19 @@ export type Entrada =
  * conferência espalhada por cada ponto de saída foi exatamente como o ramo do
  * desafio ficou de fora antes, nesta mesma revisão — com um lugar só, não há
  * saída para esquecer.
+ *
+ * `executar` recebe o `sinal` desta tentativa (não chama `comLimite()`
+ * sozinho): é o mesmo `AbortSignal` que `controladorEmVoo` referencia, para
+ * que `abandonarEntrada()` consiga abortar a requisição de fora.
  */
-async function tentativa<T>(executar: (vez: number) => Promise<T>): Promise<T> {
+async function tentativa<T>(
+  executar: (vez: number, sinal: AbortSignal) => Promise<T>,
+): Promise<T> {
   const minhaVez = ++ultimaTentativa;
+  const controlador = new AbortController();
+  controladorEmVoo = controlador;
   try {
-    const r = await executar(minhaVez);
+    const r = await executar(minhaVez, comLimite(TEMPO_LIMITE_AUTH_MS, controlador));
     if (minhaVez !== ultimaTentativa) throw new EntradaSuperada();
     return r;
   } catch (e) {
@@ -72,33 +95,134 @@ async function tentativa<T>(executar: (vez: number) => Promise<T>): Promise<T> {
     if (e instanceof FalhaNoCofre) throw e;
     if (minhaVez !== ultimaTentativa) throw new EntradaSuperada();
     throw e;
+  } finally {
+    if (controladorEmVoo === controlador) controladorEmVoo = null;
   }
 }
 
-export async function entrar(email: string, senha: string): Promise<Entrada> {
-  return tentativa(async (minhaVez): Promise<Entrada> => {
-    const r = await chamar("/auth/login", respostaLoginSchema, {
-      metodo: "POST",
-      corpo: { email, password: senha },
-      semAuth: true,
-    });
+/**
+ * Abandona a tentativa de entrada em voo (chamada por "Voltar" na tela de
+ * MFA — `features/auth/entrar.ts`): avança `ultimaTentativa`, então a
+ * resposta atrasada dela (se chegar) vira `EntradaSuperada` — sem gravar
+ * credencial (o `guardarCredenciaisSe` de `entrar`/`verificarMfa` já cobre
+ * essa corrida) — e aborta a requisição em voo, para ela não ficar pendurada
+ * até os 15s de `comLimite`.
+ *
+ * Sem tentativa em voo, é inofensivo: só avança o contador (o que o próximo
+ * login/verify já faria sozinho) e não há controlador para abortar.
+ *
+ * ponytail: limite conhecido, documentado e SEM cobertura (#592). `ultimaTentativa`
+ * é um contador único para login, MFA, cadastro (`confirmarCadastro`), Google
+ * (`entrarComGoogle`) e Apple (`entrarComApple`), e o cadastro dos dois
+ * (`completarCadastroSocial`), então um abandono aqui supera a entrada em voo
+ * de QUALQUER um deles. Caso real: um verify de cadastro em voo
+ * em `/criar-conta`, `/entrar` empilhada por cima (hoje só por link `pigbank://`
+ * digitado de fora: nem a volta do Google nem a da Apple passam pelo
+ * expo-router — chegam pelo retorno do `openAuthSessionAsync` e do
+ * `signInAsync`), login de outra conta que para no MFA e
+ * Voltar — o 200 atrasado do cadastro vira `EntradaSuperada`, a conta já existe
+ * no servidor e a sessão dela é descartada sem aviso (recuperação: Entrar com
+ * e-mail e senha). O Voltar do cadastro social não chama isto, de propósito.
+ * Enumere a máquina (fluxos × eventos que avançam o contador) antes de mexer aqui.
+ */
+export function abandonarEntrada(): void {
+  ultimaTentativa += 1;
+  controladorEmVoo?.abort();
+}
+
+/**
+ * O primeiro passo de `/auth/login` e das trocas do Google e da Apple: o
+ * servidor responde igual (`_concluir_login`). Só a Apple pode devolver a
+ * conta nova, e só o esquema dela a aceita.
+ */
+async function entrarPor(
+  caminho: string,
+  corpo: unknown,
+  esquema: z.ZodType<z.infer<typeof respostaAppleSchema>> = respostaLoginSchema,
+): Promise<Entrada> {
+  return tentativa(async (minhaVez, sinal): Promise<Entrada> => {
+    const r = await chamar(caminho, esquema, { metodo: "POST", corpo, semAuth: true, sinal });
     if ("mfa_required" in r) {
       return { fase: "mfa", desafio: r.mfa_challenge, email: r.email };
     }
-    // A conferência acontece DENTRO da gravação, não antes: entre um passo e o
-    // outro caberia uma entrada mais nova, e o aparelho ficaria logado nesta
-    // enquanto a tela mostra a outra.
-    const gravou = await guardarCredenciaisSe(
-      () => minhaVez === ultimaTentativa,
-      { access: r.access_token, refresh: r.refresh_token },
-    );
-    if (!gravou) throw new EntradaSuperada();
-    _esquecerRotacoes();
-    return {
-      fase: "pronta",
-      perfil: { user_id: r.user_id, email: r.email, plan: r.plan },
-    };
+    if ("signup_required" in r) {
+      return { fase: "cadastro", token: r.signup_token, email: r.email, nome: r.name_hint };
+    }
+    return { fase: "pronta", perfil: await gravarSessao(minhaVez, r) };
   });
+}
+
+export async function entrar(email: string, senha: string): Promise<Entrada> {
+  return entrarPor("/auth/login", { email, password: senha });
+}
+
+/**
+ * Troca o código de uso único do Google (`pigbank://auth?code=`) pela sessão.
+ * O código vai no corpo; conta com dois fatores volta com o desafio, como o login.
+ */
+export async function entrarComGoogle(codigo: string): Promise<Entrada> {
+  return entrarPor("/auth/google/exchange", { code: codigo });
+}
+
+/**
+ * Troca o identity token da Apple pela sessão, pelo desafio ou pela conta nova.
+ * `nonceCru` é o que gerou o hash mandado à Apple: o servidor confere um contra
+ * o outro (`core/services/apple_signin.py`).
+ */
+export async function entrarComApple(identityToken: string, nonceCru: string, nome: string | null): Promise<Entrada> {
+  return entrarPor(
+    "/auth/apple/exchange",
+    { identity_token: identityToken, nonce: nonceCru, name: nome },
+    respostaAppleSchema,
+  );
+}
+
+/** O pré-cadastro do Google. Não grava credencial: fica FORA de `tentativa()`, como `cadastrar`. */
+export async function pendenteGoogle(token: string): Promise<{ email: string; name_hint: string }> {
+  return chamar(`/auth/google/pending/${encodeURIComponent(token)}`, pendenteGoogleSchema, {
+    semAuth: true,
+    sinal: comLimite(),
+  });
+}
+
+/**
+ * Cria a conta de quem entrou pelo Google ou pela Apple e recebe a sessão dela.
+ * Dentro de `tentativa()`, como `confirmarCadastro`. Chamar isto é o aceite dos
+ * Termos: a tela mostra o texto com os links logo acima do botão, sem caixa de
+ * seleção (decisão do dono).
+ */
+export async function completarCadastroSocial(
+  provedor: ProvedorSocial,
+  token: string,
+  nome: string,
+  telefone: string,
+): Promise<Perfil> {
+  return tentativa(async (minhaVez, sinal) => {
+    const r = await chamar(`/auth/${provedor}/complete-signup`, loginSchema, {
+      metodo: "POST",
+      corpo: { token, name: nome, phone: telefone, accepted_terms: true },
+      semAuth: true,
+      sinal,
+    });
+    return gravarSessao(minhaVez, r);
+  });
+}
+
+/**
+ * O final comum de quem recebe credencial (`entrarPor`, `verificarMfa`,
+ * `confirmarCadastro`, `completarCadastroSocial`), sempre DENTRO de
+ * `tentativa()`. A conferência acontece DENTRO da gravação, não antes: entre
+ * um passo e o outro caberia uma entrada mais nova, e o aparelho ficaria
+ * logado nesta enquanto a tela mostra a outra.
+ */
+async function gravarSessao(minhaVez: number, r: z.infer<typeof loginSchema>): Promise<Perfil> {
+  const gravou = await guardarCredenciaisSe(
+    () => minhaVez === ultimaTentativa,
+    { access: r.access_token, refresh: r.refresh_token },
+  );
+  if (!gravou) throw new EntradaSuperada();
+  _esquecerRotacoes();
+  return { user_id: r.user_id, email: r.email, plan: r.plan };
 }
 
 /** Completa a entrada de quem tem dois fatores. `backup` usa código de reserva. */
@@ -107,24 +231,50 @@ export async function verificarMfa(
   codigo: string,
   backup = false,
 ): Promise<Perfil> {
-  return tentativa(async (minhaVez) => {
+  return tentativa(async (minhaVez, sinal) => {
     const r = await chamar("/auth/mfa/verify-login", loginSchema, {
       metodo: "POST",
       corpo: { challenge: desafio, code: codigo, use_backup: backup },
       semAuth: true,
+      sinal,
     });
-    const gravou = await guardarCredenciaisSe(
-      () => minhaVez === ultimaTentativa,
-      { access: r.access_token, refresh: r.refresh_token },
-    );
-    if (!gravou) throw new EntradaSuperada();
-    _esquecerRotacoes();
-    return { user_id: r.user_id, email: r.email, plan: r.plan };
+    return gravarSessao(minhaVez, r);
+  });
+}
+
+/**
+ * Pede o código de confirmação do cadastro. Não grava credencial, então fica
+ * FORA de `tentativa()` — mesmo desenho do Esqueci a senha. Objeto e não
+ * posicional: são quatro strings, e trocar duas delas passaria no TS.
+ */
+export async function cadastrar(dados: { email: string; senha: string; nome: string; telefone: string }): Promise<void> {
+  await chamar("/auth/register", z.unknown(), {
+    metodo: "POST",
+    corpo: { email: dados.email, password: dados.senha, name: dados.nome, phone: dados.telefone },
+    semAuth: true,
+    sinal: comLimite(),
+  });
+}
+
+/**
+ * Confirma o código e recebe a sessão da conta nova. Passa por `tentativa()`
+ * como o login e o MFA: um `entrar()` de outra conta começado depois vence,
+ * e este resultado vira `EntradaSuperada` sem tocar no cofre.
+ */
+export async function confirmarCadastro(email: string, codigo: string): Promise<Perfil> {
+  return tentativa(async (minhaVez, sinal) => {
+    const r = await chamar("/auth/verify-email", loginSchema, {
+      metodo: "POST",
+      corpo: { email, code: codigo },
+      semAuth: true,
+      sinal,
+    });
+    return gravarSessao(minhaVez, r);
   });
 }
 
 export async function perfil(): Promise<Perfil> {
-  return chamar("/auth/me", perfilSchema);
+  return chamar("/auth/me", perfilSchema, { sinal: comLimite() });
 }
 
 export async function temSessao(): Promise<boolean> {
@@ -132,19 +282,30 @@ export async function temSessao(): Promise<boolean> {
 }
 
 /**
- * Sair: apaga o que está no aparelho e dispara o aviso ao servidor sem
- * esperar por ele.
+ * Sair: apaga o que está no aparelho e SÓ ENTÃO avisa o servidor, esperando a
+ * resposta dele por no máximo `TEMPO_LIMITE_AUTH_MS`.
  *
- * A limpeza vem PRIMEIRO e não depende da rede: um logout feito no metrô, com
- * o fetch do Android sem timeout, podia ficar pendurado para sempre — e com a
- * limpeza no `finally` de depois da resposta, a credencial continuava no
- * keychain enquanto isso, e o próximo a abrir o app entraria na conta de quem
- * achou que tinha saído.
+ * A limpeza vem PRIMEIRO e não depende da rede (#433): um logout feito no
+ * metrô, com o fetch do Android sem timeout, podia ficar pendurado para sempre
+ * — e com a limpeza depois da resposta, a credencial continuava no keychain
+ * enquanto isso, e o próximo a abrir o app entraria na conta de quem achou que
+ * tinha saído.
  *
- * A revogação é disparada e esquecida (`void ... .catch`): esperar a resposta
- * não dava durabilidade nenhuma (ela já era engolida antes) e tinha custo
- * concreto — a tela ficaria em "carregando" até a rede resolver, com o cofre
- * já vazio.
+ * A revogação é esperada (#458), com tempo limite: disparada e esquecida, a
+ * tela ia para Entrar na hora, e o app podia ir para o fundo ou ser fechado
+ * com a requisição ainda no ar — a sessão ficava viva no servidor sem ninguém
+ * saber. Esperar mantém a tela em
+ * "carregando" até a resposta ou o tempo limite, com o cofre já vazio. A falha
+ * da revogação (401/403, 5xx/429, rede fora, tempo limite) é engolida: não há
+ * nada que a pessoa possa fazer com ela, e o aparelho já saiu.
+ *
+ * Resíduo aceito (decisão do dono): se o app morre ou é suspenso durante a
+ * espera, ou se o servidor devolve 5xx/429 ou a rede está fora, a sessão pode
+ * continuar viva no servidor até o refresh expirar (14 dias). Não há
+ * retentativa. O inverso também: se o cofre recusa apagar, o `finally` pede a
+ * revogação mesmo assim, e a credencial, morta se ela vingar, fica no cofre.
+ * O provider segue autenticado, com o erro na tela; tocar Sair de novo refaz
+ * a saída.
  *
  * A requisição fala pela sessão que INICIOU a saída, e a limpeza identifica
  * essa sessão pelo `jti`, não pelo refresh token. Os dois detalhes vêm do mesmo
@@ -178,13 +339,12 @@ export async function sair(): Promise<void> {
       _esquecerRotacoes();
     }
   } finally {
-    // Sem `await`: a resposta não muda nada por aqui (a rejeição é engolida) e
-    // esperá-la só atrasaria a tela, com o cofre já limpo. O `.catch` evita a
-    // rejeição não tratada — o `fetch` em si já saiu de forma síncrona, dentro
-    // de `enviar`, então os testes que contam chamadas logo após `await
-    // sair()` continuam vendo o logout.
-    void chamar("/auth/logout", perfilSchema.partial(), {
+    // Esperada, mas com tempo limite: um `fetch` pendurado não prende a tela
+    // além de `TEMPO_LIMITE_AUTH_MS`. O `.catch` engole a falha da revogação —
+    // o cofre já está limpo, e `sair()` só rejeita por falha do cofre.
+    await chamar("/auth/logout", perfilSchema.partial(), {
       metodo: "POST",
+      sinal: comLimite(),
       // O REFRESH token como credencial, não o access. O servidor revoga a
       // sessão por qualquer um dos dois, mas o access pode estar expirado — e é
       // o caso mais comum de todos, um app parado por mais de quinze minutos.

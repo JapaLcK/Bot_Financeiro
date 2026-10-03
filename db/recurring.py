@@ -1,16 +1,16 @@
 """
 db/recurring.py — Gastos Fixos / Recorrentes (Sprint 4).
 
-Pro-only. Cobrança automática no dia `due_day` de cada mês via cron.
-- `payment_type='account'`     → cria launch despesa (não interno).
-- `payment_type='credit_card'` → cria credit_transaction na bill open atual.
+Pro-only. Gasto fixo só PREVÊ (docs/plano-dashboard-v2.md, Q42): o autopay entra
+na Previsão (`core/services/cashflow.py`) e o 'manual' vira conta a pagar com
+lembrete (`db/bills.py`). Nada é lançado sozinho — nem em conta, nem no cartão.
 
-Idempotência: `last_charged_ym` impede cobrar 2x no mesmo mês.
+`last_charged_ym` é resto do cobrador removido: nada mais o escreve.
 Reajuste: ao editar `amount`, guarda `last_amount` + timestamp pra UI mostrar a variação.
 """
 from __future__ import annotations
 
-from datetime import date
+from datetime import date, datetime
 from decimal import Decimal
 from typing import Any
 
@@ -174,7 +174,7 @@ def create_recurring_expense(
     """Cria gasto fixo. Levanta ValueError se input inválido.
 
     `start_date` = a partir de quando a recorrência vale (default: hoje). A
-    primeira cobrança é a primeira ocorrência de `due_day` em/depois dessa data.
+    primeira ocorrência é a primeira de `due_day` em/depois dessa data.
     `frequency` = 'monthly' (todo mês no due_day) ou 'annual' (1x/ano no
     `due_month`/due_day).
     """
@@ -212,9 +212,8 @@ def create_recurring_expense(
     if payment_type == "account":
         card_id = None  # ignora card_id quando não é cartão
 
-    # #147: o usuário DIGITA esta categoria e o cobrador a copia pra
-    # `launches.categoria` todo mês. Sem resolver, "McDonald's" nascia cru aqui e
-    # abria fatia gêmea no donut. A REGRA das 4 portas (o que pode ser gravado, e
+    # #147: o usuário DIGITA esta categoria. Sem resolver, "McDonald's" nascia cru
+    # aqui, fora da grafia do catálogo. A REGRA das 4 portas (o que pode ser gravado, e
     # por que o `create` segue o plano em vez de ser fixo em True) está escrita num
     # lugar só: `db/categories.resolve_category_for_write`.
     cat = (category or "").strip() or "outros"
@@ -385,51 +384,6 @@ def delete_recurring_expense(user_id: int, rec_id: int) -> None:
         conn.commit()
 
 
-def list_due_recurring_expenses(today: date | None = None) -> list[dict[str, Any]]:
-    """Lista globais — todos os user — gastos fixos que VENCEM hoje e ainda
-    não foram cobrados neste mês (`last_charged_ym != current_ym`).
-
-    Usado pelo cron diário pra processar cobranças automáticas.
-    """
-    today = today or date.today()
-    ym = today.strftime("%Y-%m")
-    with get_conn() as conn:
-        with conn.cursor() as cur:
-            cur.execute(
-                """
-                select r.id, r.user_id, r.name, r.amount, r.category,
-                       r.due_day, r.payment_type, r.card_id
-                from recurring_expenses r
-                where r.is_active = true
-                  and r.due_day <= %s
-                  and (r.last_charged_ym is null or r.last_charged_ym != %s)
-                  -- Não retroagir: recorrência começa em start_date (ver charger).
-                  and (
-                      to_char(coalesce(r.start_date, r.created_at::date), 'YYYY-MM') < %s
-                      or (
-                          to_char(coalesce(r.start_date, r.created_at::date), 'YYYY-MM') = %s
-                          and r.due_day >= extract(day from coalesce(r.start_date, r.created_at::date))
-                      )
-                  )
-                """,
-                (today.day, ym, ym, ym),
-            )
-            rows = cur.fetchall() or []
-    return [dict(r) for r in rows]
-
-
-def mark_recurring_charged(user_id: int, rec_id: int, ym: str) -> None:
-    """Marca como cobrado neste mês (idempotência)."""
-    with get_conn() as conn:
-        with conn.cursor() as cur:
-            cur.execute(
-                "update recurring_expenses set last_charged_ym=%s "
-                "where user_id=%s and id=%s",
-                (ym, user_id, int(rec_id)),
-            )
-        conn.commit()
-
-
 # ---------------------------------------------------------------------------
 # Detecção "essa despesa se repete → sugere virar gasto fixo"
 # ---------------------------------------------------------------------------
@@ -530,6 +484,105 @@ def dismiss_recurring_suggestion(user_id: int, key: str, amount: float) -> None:
         conn.commit()
 
 
+def list_active_autopay_recurrings() -> list[dict[str, Any]]:
+    """Gastos fixos autopay ativos de TODOS os usuários, pro aviso de vencimento
+    do loop global (`sync_autopay_notices_once`). Cada linha leva o próprio user_id."""
+    with get_conn() as conn:
+        with conn.cursor() as cur:
+            cur.execute(
+                """
+                select id, user_id, name, amount, due_day, due_month, frequency,
+                       payment_type, coalesce(start_date, created_at::date) as start_date
+                from recurring_expenses
+                where is_active = true and payment_mode = 'autopay' and amount > 0
+                """
+            )
+            return [dict(r) for r in (cur.fetchall() or [])]
+
+
+def ensure_autopay_notice(recurring_id: int, user_id: int, amount: float, period_key: str,
+                          due_on: date) -> bool:
+    """Grava o aviso de vencimento (linha em recurring_charges SEM lançamento:
+    launch_id e credit_tx_id nulos) com o dia lógico `due_on`. Idempotente pelo
+    UNIQUE (recurring_id, ym). Se o período já tem aviso com OUTRO `due_on` (o
+    vencimento mudou no meio do mês), reagenda: passa pra data nova e volta ao
+    banner — só enquanto não tem lançamento (linha do cobrador antigo fica
+    intocada) nem foi reservado pro WhatsApp (não reenvia no mesmo período).
+    Linha de antes da coluna (`due_on` nulo) também é reagendada. True se criou
+    ou reagendou agora."""
+    with get_conn() as conn:
+        with conn.cursor() as cur:
+            cur.execute(
+                """
+                insert into recurring_charges (recurring_id, user_id, amount, ym, due_on)
+                values (%s, %s, %s, %s, %s)
+                on conflict (recurring_id, ym) do update
+                   set due_on = excluded.due_on, amount = excluded.amount,
+                       charged_at = now(), acknowledged = false
+                 where recurring_charges.launch_id is null
+                   and recurring_charges.credit_tx_id is null
+                   and recurring_charges.wa_notified_at is null
+                   and recurring_charges.due_on is distinct from excluded.due_on
+                returning id
+                """,
+                (int(recurring_id), int(user_id), Decimal(str(amount)), period_key, due_on),
+            )
+            criou = cur.fetchone() is not None
+        conn.commit()
+    return criou
+
+
+def list_autopay_notices_for_whatsapp(today: date, janela_desde: datetime) -> list[dict[str, Any]]:
+    """Avisos de autopay ainda não reservados pro WhatsApp, de TODOS os usuários,
+    que vencem em `today` (`due_on`, o dia lógico da volta que gravou — não o
+    horário de inserção, que passa da meia-noite). Cada linha leva o próprio
+    user_id. Aviso de dia anterior não sai atrasado; linha antiga (do cobrador
+    ou de antes da coluna) tem `due_on` nulo e fica de fora. Tudo que a mensagem
+    afirma (nome, valor, meio, data) vem do recorrente ATUAL, não do retrato da
+    gravação: o notify reconfere a data com `_vence_hoje`.
+
+    Só entra quem falou com o Piggy desde `janela_desde` (`last_activity_at`,
+    escrito pelo `handle_incoming`): o aviso vai como texto livre, que a Meta só
+    aceita dentro da janela de 24h. `EXISTS` e não JOIN: `auth_accounts.user_id`
+    não é único."""
+    with get_conn() as conn:
+        with conn.cursor() as cur:
+            cur.execute(
+                """
+                select rc.id, rc.user_id, r.amount, r.name, r.payment_type,
+                       r.due_day, r.due_month, r.frequency,
+                       coalesce(r.start_date, r.created_at::date) as start_date
+                from recurring_charges rc
+                join recurring_expenses r on r.id = rc.recurring_id and r.user_id = rc.user_id
+                where rc.launch_id is null and rc.credit_tx_id is null
+                  and rc.wa_notified_at is null
+                  and rc.due_on = %s
+                  and r.is_active and r.payment_mode = 'autopay' and r.amount > 0
+                  and exists (select 1 from auth_accounts a
+                              where a.user_id = rc.user_id and a.last_activity_at >= %s)
+                order by rc.user_id, rc.id
+                """,
+                (today, janela_desde),
+            )
+            return [dict(r) for r in (cur.fetchall() or [])]
+
+
+def claim_autopay_notices_whatsapp(user_id: int, charge_ids: list[int]) -> list[int]:
+    """Reserva os avisos do usuário pro WhatsApp ANTES do envio, num UPDATE só:
+    devolve só os ids que ESTE processo reservou. Em lote para que dois processos
+    (deploy sobreposto) não dividam a mensagem agrupada nem mandem duas vezes."""
+    with get_conn() as conn:
+        with conn.cursor() as cur:
+            cur.execute(
+                "update recurring_charges set wa_notified_at = now() "
+                "where user_id = %s and id = any(%s) and wa_notified_at is null returning id",
+                (int(user_id), [int(i) for i in charge_ids]),
+            )
+            reservados = [int(r["id"]) for r in (cur.fetchall() or [])]
+        conn.commit()
+    return reservados
+
+
 __all__ = [
     "list_recurring_expenses",
     "get_recurring_expense",
@@ -537,8 +590,10 @@ __all__ = [
     "create_recurring_expense",
     "update_recurring_expense",
     "delete_recurring_expense",
-    "list_due_recurring_expenses",
-    "mark_recurring_charged",
     "find_recurring_candidate",
     "dismiss_recurring_suggestion",
+    "list_active_autopay_recurrings",
+    "ensure_autopay_notice",
+    "list_autopay_notices_for_whatsapp",
+    "claim_autopay_notices_whatsapp",
 ]

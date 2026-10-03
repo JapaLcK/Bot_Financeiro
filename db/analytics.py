@@ -33,6 +33,7 @@ from .connection import (
 # Fonte única do que conta como "fundido" (db/reconciliation.py) — o mesmo
 # filtro que o undo usa pra decidir se ainda há o que desfazer.
 from .reconciliation import FUSED_STATUSES
+from .resumo_mes import totais
 
 # Fragmento literal (constante fixa do módulo, não entrada do usuário) —
 # mesmo estilo de TIPO_DESPESA_SQL/TIPO_RECEITA_SQL acima.
@@ -117,52 +118,13 @@ def compute_kpis(user_id: int, from_date: date, to_date: date) -> dict:
     prev_to = from_date
 
     def _totals(start: date, end: date) -> dict:
-        with get_conn() as conn:
-            with conn.cursor() as cur:
-                cur.execute(
-                    f"""
-                    SELECT tipo, SUM(valor) AS total, SUM(cnt) AS count
-                    FROM (
-                      -- `TIPO_CANON_SQL` colapsa 'saida'/'entrada' na forma
-                      -- moderna já no SQL: o agregador Python abaixo passa a ver
-                      -- só 'despesa'/'receita' e não precisa repetir a lista de
-                      -- aliases. A versão anterior aceitava 'saida' e esquecia
-                      -- 'entrada' — a receita legada sumia do income.
-                      SELECT {TIPO_CANON_SQL} AS tipo, valor, 1 AS cnt
-                      FROM launches
-                      WHERE user_id = %s
-                        AND criado_em >= %s AND criado_em < %s
-                        AND is_internal_movement = false
-                        AND ({TIPO_DESPESA_SQL} OR {TIPO_RECEITA_SQL})
-                      UNION ALL
-                      SELECT 'despesa' AS tipo, ct.valor, 1 AS cnt
-                      FROM credit_transactions ct
-                      JOIN credit_bills b ON b.id = ct.bill_id
-                      WHERE ct.user_id = %s
-                        AND ct.is_refund = false
-                        AND b.period_end >= %s AND b.period_end < %s
-                    ) merged
-                    GROUP BY tipo
-                    """,
-                    (user_id, start, end, user_id, start, end),
-                )
-                rows = cur.fetchall()
-
-        income = 0.0
-        expense = 0.0
-        count = 0
-        for r in rows:
-            t = (r["tipo"] or "").strip().lower()
-            total = _to_float(r["total"])
-            cnt = int(r["count"] or 0)
-            count += cnt
-            # o SQL já canonizou o tipo (`TIPO_CANON_SQL`): aqui só existem as
-            # duas formas modernas, e repetir os aliases seria a terceira cópia
-            # da mesma regra.
-            if t == "receita":
-                income += total
-            elif t == "despesa":
-                expense += total
+        # Regra única (`db/resumo_mes.TOTAIS_SQL`, Q18): lançamentos não internos
+        # (forma legada canonizada) + cartão pela fatura.
+        with get_conn() as conn, conn.cursor() as cur:
+            t = totais(cur, user_id, start, end)
+        income = _to_float(t["entrou"])
+        expense = _to_float(t["saiu"])
+        count = int(t["n"])
 
         net = income - expense
         savings_rate = (net / income) if income > 0 else 0.0
@@ -206,7 +168,7 @@ def compute_kpis(user_id: int, from_date: date, to_date: date) -> dict:
                       SELECT ct.purchased_at AS day, ct.valor
                       FROM credit_transactions ct
                       JOIN credit_bills b ON b.id = ct.bill_id
-                      WHERE ct.user_id = %s
+                      WHERE ct.user_id = %s AND COALESCE(b.user_id, (SELECT cb.user_id FROM credit_cards cb WHERE cb.id = b.card_id)) = %s
                         AND ct.is_refund = false
                         AND b.period_end >= %s AND b.period_end < %s
                     ) merged
@@ -214,7 +176,7 @@ def compute_kpis(user_id: int, from_date: date, to_date: date) -> dict:
                     ORDER BY total DESC
                     LIMIT 1
                     """,
-                    (user_id, start, end, user_id, start, end),
+                    (user_id, start, end, user_id, user_id, start, end),
                 )
                 row = cur.fetchone()
                 peak = None
@@ -241,16 +203,16 @@ def compute_kpis(user_id: int, from_date: date, to_date: date) -> dict:
                       SELECT ct.purchased_at AS day, ct.valor,
                              c.name AS alvo, ct.nota, ct.categoria
                       FROM credit_transactions ct
-                      JOIN credit_cards c ON c.id = ct.card_id
+                      LEFT JOIN credit_cards c ON c.id = ct.card_id AND c.user_id = ct.user_id
                       JOIN credit_bills b ON b.id = ct.bill_id
-                      WHERE ct.user_id = %s
+                      WHERE ct.user_id = %s AND COALESCE(b.user_id, (SELECT cb.user_id FROM credit_cards cb WHERE cb.id = b.card_id)) = %s
                         AND ct.is_refund = false
                         AND b.period_end >= %s AND b.period_end < %s
                     ) merged
                     ORDER BY valor DESC
                     LIMIT 1
                     """,
-                    (user_id, start, end, user_id, start, end),
+                    (user_id, start, end, user_id, user_id, start, end),
                 )
                 row = cur.fetchone()
                 largest = None
@@ -302,6 +264,8 @@ def compute_evolution(user_id: int, months: int = 6) -> list[dict]:
     Sempre N meses cheios terminando no mês atual.
     Credit_transactions alocadas por bill.period_end (consistência Sprint 3).
     """
+    # Cópia em consulta única da regra do mês (`db/resumo_mes.TOTAIS_SQL`, Q18);
+    # `tests/test_resumo_mes_regra.py` compara as duas mês a mês (§0.7).
     from_date, to_date = resolve_window(months=months)
 
     with get_conn() as conn:
@@ -325,14 +289,14 @@ def compute_evolution(user_id: int, months: int = 6) -> list[dict]:
                          'despesa' AS tipo, ct.valor
                   FROM credit_transactions ct
                   JOIN credit_bills b ON b.id = ct.bill_id
-                  WHERE ct.user_id = %s
+                  WHERE ct.user_id = %s AND COALESCE(b.user_id, (SELECT cb.user_id FROM credit_cards cb WHERE cb.id = b.card_id)) = %s
                     AND ct.is_refund = false
                     AND b.period_end >= %s AND b.period_end < %s
                 ) merged
                 GROUP BY mes, tipo
                 ORDER BY mes
                 """,
-                (user_id, from_date, to_date, user_id, from_date, to_date),
+                (user_id, from_date, to_date, user_id, user_id, from_date, to_date),
             )
             rows = cur.fetchall()
 
@@ -401,7 +365,7 @@ def compute_categories(
                          ct.valor, b.period_end::timestamptz AS dt
                   FROM credit_transactions ct
                   JOIN credit_bills b ON b.id = ct.bill_id
-                  WHERE ct.user_id = %s
+                  WHERE ct.user_id = %s AND COALESCE(b.user_id, (SELECT cb.user_id FROM credit_cards cb WHERE cb.id = b.card_id)) = %s
                     AND ct.is_refund = false
                     AND b.period_end >= %s AND b.period_end < %s
                 ),
@@ -429,7 +393,7 @@ def compute_categories(
                 """,
                 (
                     user_id, from_date, to_date,
-                    user_id, from_date, to_date,
+                    user_id, user_id, from_date, to_date,
                     user_id, limit,
                 ),
             )
@@ -562,7 +526,7 @@ def compute_top_merchants(
                          'credito' AS source
                   FROM credit_transactions ct
                   JOIN credit_bills b ON b.id = ct.bill_id
-                  WHERE ct.user_id = %s
+                  WHERE ct.user_id = %s AND COALESCE(b.user_id, (SELECT cb.user_id FROM credit_cards cb WHERE cb.id = b.card_id)) = %s
                     AND ct.is_refund = false
                     AND b.period_end >= %s AND b.period_end < %s
                 )
@@ -579,7 +543,7 @@ def compute_top_merchants(
                 ORDER BY total DESC
                 LIMIT %s
                 """,
-                (user_id, from_date, to_date, user_id, from_date, to_date, limit),
+                (user_id, from_date, to_date, user_id, user_id, from_date, to_date, limit),
             )
             rows = cur.fetchall()
 
@@ -620,6 +584,10 @@ def compute_history_quick_stats(
 
     Despesas incluem credit_transactions (compras no cartão), alocadas por
     bill.period_end — mesma regra do total_expense (Sprint 3).
+
+    Fica fora de `db/resumo_mes.TOTAIS_SQL` (Q18) de propósito: é contagem por tipo
+    num período livre do Histórico, não Entrou/Saiu do mês. O filtro é o mesmo, copiado
+    (com a barreira `b.user_id` da fatura); quem mexer num dos dois confere o outro.
     """
     # Calcula número de meses cobertos pelo período [from, to)
     months_in_period = (
@@ -650,12 +618,12 @@ def compute_history_quick_stats(
                   SELECT 'credito' AS tipo
                   FROM credit_transactions ct
                   JOIN credit_bills b ON b.id = ct.bill_id
-                  WHERE ct.user_id = %s
+                  WHERE ct.user_id = %s AND COALESCE(b.user_id, (SELECT cb.user_id FROM credit_cards cb WHERE cb.id = b.card_id)) = %s
                     AND ct.is_refund = false
                     AND b.period_end >= %s AND b.period_end < %s
                 ) merged
                 """,
-                (user_id, from_date, to_date, user_id, from_date, to_date),
+                (user_id, from_date, to_date, user_id, user_id, from_date, to_date),
             )
             row = cur.fetchone() or {}
             receitas_count = int(row.get("receitas") or 0)
@@ -844,8 +812,9 @@ def list_history(
     credit_params: list[Any] = []
     if include_credit:
         # is_refund: true se refunds_only, false caso contrário (default).
-        clauses = ["ct.user_id = %s", f"ct.is_refund = {'true' if refunds_only else 'false'}"]
-        credit_params.append(user_id)
+        clauses = ["ct.user_id = %s AND COALESCE(b.user_id, (SELECT cb.user_id FROM credit_cards cb WHERE cb.id = b.card_id)) = %s",
+                   f"ct.is_refund = {'true' if refunds_only else 'false'}"]
+        credit_params += [user_id, user_id]
         if from_date:
             clauses.append("b.period_end >= %s")
             credit_params.append(from_date)
@@ -883,7 +852,7 @@ def list_history(
                  NULL AS reconciliation_status,
                  NULL::bigint AS reconciliation_of_tx_id
           FROM credit_transactions ct
-          JOIN credit_cards c ON c.id = ct.card_id
+          LEFT JOIN credit_cards c ON c.id = ct.card_id AND c.user_id = ct.user_id
           JOIN credit_bills b ON b.id = ct.bill_id
           WHERE {" AND ".join(clauses)}
         """

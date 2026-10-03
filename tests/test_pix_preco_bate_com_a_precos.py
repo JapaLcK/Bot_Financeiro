@@ -14,9 +14,8 @@ regra é que nenhum dos dois pode andar sozinho.
 
 A 3 é a que quase ficou de fora, e ela é a que importa para o cliente: o preço
 visível **não** sai do `PLAN_PRICES`. Ele está cravado no HTML, nos
-`data-price-annual` — um por card de plano, mais os da `<th>` da tabela
-comparativa (`.cmp-plan-price`) —, e o JS só faz `display:none` para alternar
-mensal ⇄ anual. Um comparador que olhasse só
+`data-price-annual` — um por card de plano —, e o JS só faz `display:none` para
+alternar mensal ⇄ anual. Um comparador que olhasse só
 a 1 × 2 ficaria verde com a página anunciando outro número.
 
 ## A ponte de nomes é obrigatória

@@ -95,13 +95,13 @@ def test_nome_ocupado_nao_derruba_o_import(user_id):
 
 
 def test_nome_ocupado_em_OUTRA_CAIXA_tambem_conta(user_id):
-    """A colisão de nome é case-INSENSITIVE, o unique da tabela não é.
+    """A colisão de nome é case-INSENSITIVE.
 
-    `unique(user_id, name)` (db/schema.py:115) é case-sensitive, mas todo o resto
-    do código de caixinha compara `lower(name)` — `db/pockets.py:344`,
-    `db/accounts.py:1754`. Com só o `on conflict (user_id, name)`, o usuário que
-    já tem "caixinha nubank" ganhava uma "Caixinha Nubank" do banco: duas
-    caixinhas com o mesmo nome na tela, e o laço de 50 nunca via a colisão.
+    Hoje o índice uq_pockets_user_lower_name (#596) já recusa a colisão; o `not
+    exists ... lower(name)` do import continua valendo quando o `init_db` pula o
+    índice por duplicata antiga. Sem nenhum dos dois, o usuário que já tem
+    "caixinha nubank" ganhava uma "Caixinha Nubank" do banco: duas caixinhas com o
+    mesmo nome na tela, e o laço de 50 nunca via a colisão.
     """
     db.create_pocket(user_id, "caixinha nubank")     # minúsculo, como o usuário digitou
     conn_id = _seed_connection(user_id, institution="Nubank")

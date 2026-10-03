@@ -131,6 +131,17 @@ def _semeia(uid: int) -> None:
                 "values (%s, 'inv-1', 'Caixinha')",
                 (con,),
             )
+            cur.execute(
+                "insert into open_finance_investment_snapshots (connection_id, provider_investment_id, "
+                "observed_on, observed_at, collection_confirmed, balance) "
+                "values (%s, 'inv-1', %s, now(), true, 10)",
+                (con, hoje),
+            )
+            cur.execute(
+                "insert into of_recurring_payments (connection_id, description, average_amount, occurrences) "
+                "values (%s, 'NETFLIX.COM', -39.9, array['tx-1'])",
+                (con,),
+            )
 
             # ── crédito (apagado) ───────────────────────────────────────────
             cur.execute(
@@ -183,6 +194,10 @@ def _semeia(uid: int) -> None:
             cur.execute(
                 "insert into recurring_suggestion_dismissed (user_id, merchant_key, amount) "
                 "values (%s, 'merc', 10)",
+                (uid,),
+            )
+            cur.execute(
+                "insert into subscription_marks (user_id, merchant_key, status) values (%s, 'netflix', 'ignorar')",
                 (uid,),
             )
 
@@ -295,12 +310,20 @@ _OF_JOINS = {
         "select count(*) as n from open_finance_investments i "
         "join open_finance_connections c on c.id = i.connection_id where c.user_id = %s"
     ),
+    "open_finance_investment_snapshots": (
+        "select count(*) as n from open_finance_investment_snapshots s "
+        "join open_finance_connections c on c.id = s.connection_id where c.user_id = %s"
+    ),
+    "of_recurring_payments": (
+        "select count(*) as n from of_recurring_payments rp "
+        "join open_finance_connections c on c.id = rp.connection_id where c.user_id = %s"
+    ),
 }
 _TABELAS_SIMPLES = (
     "open_finance_connections", "credit_transactions", "credit_bills", "credit_cards",
     "recurring_income_credits", "bill_instances", "recurring_charges",
     "recurring_expenses", "recurring_incomes", "recurring_suggestion_dismissed",
-    "investment_lots", "investments", "pocket_lots", "pockets",
+    "subscription_marks", "investment_lots", "investments", "pocket_lots", "pockets",
     "budget_alert_sent", "category_budgets",
     "user_category_rules", "user_categories", "agent_events", "agents",
     "ai_messages", "ai_pending_actions", "ai_fallback_log", "ai_proactive_cache",
@@ -499,6 +522,26 @@ def test_reset_reabre_o_onboarding(user_id):
     assert db.get_onboarding_state(user_id) == {"step": 0, "completed": False}
 
 
+def test_reset_zera_o_quiz_e_o_vizinho_mantem(user_id):
+    from db.signup_quiz import record_signup_quiz
+
+    vizinho = user_id + 1
+    db.ensure_user(vizinho)
+    _semeia(user_id)
+    _semeia(vizinho)
+    assert record_signup_quiz(user_id, "dividas", None) and record_signup_quiz(vizinho, "investir", None)
+
+    reset_user_data(user_id, SENHA)
+
+    with get_conn() as conn, conn.cursor() as cur:
+        cur.execute("select user_id, dashboard_profile, signup_quiz from auth_accounts "
+                    "where user_id in (%s, %s) order by user_id", (user_id, vizinho))
+        linhas = {r["user_id"]: (r["dashboard_profile"], r["signup_quiz"]) for r in cur.fetchall()}
+        conn.commit()
+    assert linhas[user_id] == (None, None)
+    assert linhas[vizinho] == ("investir", {"versao": 1, "respostas": None})
+
+
 # ── 4. tudo-ou-nada ──────────────────────────────────────────────────────────
 
 def test_falha_no_meio_da_transacao_nao_muda_nada(user_id, monkeypatch):
@@ -654,10 +697,9 @@ def test_reset_sem_corrida_zera_a_conta_e_o_caminho_normal_continua(user_id):
 def test_reset_de_conta_sem_linha_de_accounts_nao_deixa_divida_fantasma(user_id, monkeypatch):
     """NEGATIVO do `ensure_user_tx`: sem ele o `update` casa 0 e não trava NADA.
 
-    Estado real e alcançável: `merge_users` apaga accounts do usuário de origem
-    (db/users.py:88) e migra auth_accounts sem recriar a linha (:155-162) — a
-    conta fica com login válido e ZERO linhas em accounts. Todo reset rodado na
-    versão anterior deixava a conta assim também.
+    Estado real em conta antiga: o `merge_users` anterior ao #635 apagava accounts
+    da origem e a deixava com login válido e ZERO linhas em accounts. Todo reset
+    rodado na versão anterior deixava a conta assim também.
 
     O gatilho aqui é a PRIMEIRA tabela do laço, não a última: é a posição
     discriminante deste caso. Sem `ensure_user_tx` o lançamento entra livre (não
@@ -748,6 +790,14 @@ def test_rota_deleta_os_items_do_usuario_na_pluggy(user_id, monkeypatch):
 
     monkeypatch.setattr(dashboard.manager, "broadcast_to_user", _broadcast)
 
+    # O mesmo aviso sai pelo /api/v2/eventos, e só DEPOIS do commit: a contagem é
+    # lida por outra conexão no momento do aviso, e o cliente refaz a consulta na hora.
+    from api.v2 import eventos
+
+    sse: list = []
+    monkeypatch.setattr(eventos, "avisar", lambda uid, recurso: sse.append(
+        (uid, recurso, "apagado" if all(n == 0 for n in _contagens(uid).values()) else "ainda existe")))
+
     client = TestClient(dashboard.app)
     headers = _auth(client, user_id)
     resp = client.post("/settings/reset", json={"password": SENHA}, headers=headers)
@@ -759,6 +809,7 @@ def test_rota_deleta_os_items_do_usuario_na_pluggy(user_id, monkeypatch):
         "o snapshot cacheado do dashboard sobreviveu ao reset (Codex PR #217, rodada 2)"
     assert avisados == [user_id], \
         "o reset tinha que avisar os dashboards conectados via broadcast_to_user"
+    assert sse == [(user_id, "tudo", "apagado")]
 
     with get_conn() as conn:
         with conn.cursor() as cur:
@@ -786,6 +837,61 @@ def test_falha_da_pluggy_nao_impede_o_reset_local(user_id, monkeypatch):
     assert resp.status_code == 200, resp.text
     assert all(n == 0 for n in _contagens(user_id).values()), \
         "falha remota (best-effort) não podia impedir o reset local"
+
+
+def test_reset_com_falha_de_auth_loga_o_dono_na_coluna(user_id, monkeypatch):
+    """TERCEIRO chamador de `delete_pluggy_items_best_effort`. O reset preserva a
+    conta E `system_event_logs` (a lista de intactos no docstring de
+    `reset_user_data`), então o dono da falha de apiKey vai na COLUNA `user_id` —
+    é ela que a exportação LGPD lê e que a cascata leva no dia da exclusão.
+
+    Os irmãos da mesma classe, pelos outros dois chamadores:
+    `test_open_finance_disconnect_route.py::test_disconnect_com_falha_de_auth_
+    loga_o_dono_na_coluna` e, do único que pede `log_user_id=False`,
+    `test_account_deletion_pluggy.py::test_t12_sem_credenciais_pluggy_nao_sobra_
+    user_id_em_log_nenhum`.
+
+    MUTAÇÃO (verificada nesta sessão): passar `log_user_id=False` no chamador do
+    reset (`frontend/routes/settings.py`, dentro de `_limpeza_remota`) → vermelho.
+
+    O log é o REAL (`log_system_event_sync`, sem mock): mede-se a linha no banco.
+    """
+    import asyncio
+
+    from core.admin_dashboard import ensure_admin_tables
+
+    asyncio.run(ensure_admin_tables())  # `system_event_logs` não vem de db/schema.py
+    _semeia(user_id)
+
+    def _pluggy_fora():
+        raise RuntimeError("PLUGGY_CLIENT_ID/SECRET ausentes")
+
+    monkeypatch.setattr(of_routes, "create_pluggy_api_key", _pluggy_fora)
+
+    with get_conn() as conn, conn.cursor() as cur:
+        cur.execute("select coalesce(max(id), 0) as m from system_event_logs")
+        marca = int(cur.fetchone()["m"])
+        conn.commit()
+
+    client = TestClient(dashboard.app)
+    headers = _auth(client, user_id)
+    resp = client.post("/settings/reset", json={"password": SENHA}, headers=headers)
+
+    assert resp.status_code == 200, resp.text
+    with get_conn() as conn, conn.cursor() as cur:
+        cur.execute(
+            "select user_id, message, details::text as det from system_event_logs "
+            "where id > %s and event_type = 'pluggy_disconnect_auth_failed' order by id",
+            (marca,),
+        )
+        linhas = cur.fetchall()
+        conn.commit()
+
+    assert len(linhas) == 1, f"esperava 1 rastro do ramo de auth falhada, veio {linhas}"
+    assert linhas[0]["user_id"] == user_id, \
+        f"reset de conta VIVA virou log sem dono: {dict(linhas[0])}"
+    # A linha é limpa pela cascata no teardown da fixture `user_id` — o mesmo
+    # mecanismo que preencher a coluna compra.
 
 
 # ── 7b. contrato do lock: ocupado → nada local E nada remoto ────────────────
@@ -948,6 +1054,7 @@ def test_sync_de_item_varrido_pelo_reset_nao_recria_nada(user_id):
 
     assert resultado == {"ok": False, "reason": "connection_not_found", "item_id": item}
     assert _contagens(user_id)["open_finance_connections"] == 0
+    assert _contagens(user_id)["open_finance_investment_snapshots"] == 0
 
 
 # ── 7c-bis. item salvo entre a enumeração remota e o DELETE local ───────────

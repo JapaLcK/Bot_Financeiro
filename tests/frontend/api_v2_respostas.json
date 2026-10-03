@@ -1,0 +1,111 @@
+{
+  "_comentario": "Respostas da /api/v2 que os testes de navegador servem. tests/test_api_v2_contrato.py valida cada uma pelos modelos Pydantic (Me, Perfil, Contas, Assinaturas, ResumoDoMes, ErroV2); a marcada fora_do_envelope tem de NÃO validar. Dinheiro é texto decimal.",
+  "me": {
+    "free": { "plan_tier": "free" },
+    "essencial": { "plan_tier": "essencial" },
+    "plus": { "plan_tier": "plus" },
+    "pro": { "plan_tier": "pro" }
+  },
+  "assinaturas": {
+    "cheia": {
+      "servicos": [
+        { "chave": "smart fit", "nome": "Smart Fit", "categoria": "saude", "valor": "119.90", "valor_anterior": null, "reajuste_em": null, "dia": 10, "proxima": "2026-10-10", "ultima": "2026-09-10", "desde": "2025-11-10", "meses": 11, "meio": { "tipo": "conta", "nome": "Itaú", "final": null }, "status": "ativa", "marcada": true },
+        { "chave": "netflix", "nome": "Netflix", "categoria": "assinaturas", "valor": "55.9", "valor_anterior": "44.90", "reajuste_em": "2026-08-05", "dia": 5, "proxima": "2026-10-05", "ultima": "2026-09-05", "desde": "2025-03-05", "meses": 19, "meio": { "tipo": "cartao", "nome": "Nubank", "final": "1234" }, "status": "ativa", "marcada": false },
+        { "chave": "globoplay", "nome": "Globoplay", "categoria": "assinaturas", "valor": "22.90", "valor_anterior": null, "reajuste_em": null, "dia": 15, "proxima": "2026-08-15", "ultima": "2026-07-15", "desde": "2026-01-15", "meses": 7, "meio": { "tipo": "cartao", "nome": "Nubank", "final": "1234" }, "status": "possivelmente_cancelada", "marcada": false },
+        { "chave": "apple", "nome": "Apple Music", "categoria": "assinaturas", "valor": "21.90", "valor_anterior": null, "reajuste_em": null, "dia": 12, "proxima": "2026-10-12", "ultima": "2026-09-12", "desde": "2025-06-12", "meses": 16, "meio": { "tipo": "cartao", "nome": "Inter", "final": "9876" }, "status": "ativa", "marcada": false },
+        { "chave": "apple", "nome": "iCloud", "categoria": "assinaturas", "valor": "14.90", "valor_anterior": "9.90", "reajuste_em": "2026-03-20", "dia": 20, "proxima": "2026-10-20", "ultima": "2026-09-20", "desde": "2024-02-20", "meses": 32, "meio": { "tipo": "cartao", "nome": "Inter", "final": "9876" }, "status": "ativa", "marcada": false }
+      ],
+      "outras": [
+        { "chave": "condominio aurora", "nome": "Condomínio Aurora", "categoria": "moradia", "valor": "480.00", "valor_anterior": "450.00", "reajuste_em": "2026-01-08", "dia": 8, "proxima": "2026-10-08", "ultima": "2026-09-08", "desde": "2025-01-08", "meses": 21, "meio": { "tipo": "conta", "nome": "Itaú", "final": null }, "status": "ativa", "marcada": false },
+        { "chave": "porto seguro", "nome": "Porto Seguro", "categoria": "seguros", "valor": "89.90", "valor_anterior": "100.00", "reajuste_em": "2026-06-22", "dia": 22, "proxima": "2026-10-22", "ultima": "2026-09-22", "desde": "2025-09-22", "meses": 13, "meio": { "tipo": "cartao", "nome": "Nubank", "final": "1234" }, "status": "ativa", "marcada": false },
+        { "chave": "porto seguro", "nome": "Porto Seguro Residencial", "categoria": "seguros", "valor": "39.90", "valor_anterior": null, "reajuste_em": null, "dia": 3, "proxima": "2026-10-03", "ultima": "2026-09-03", "desde": "2026-02-03", "meses": 8, "meio": { "tipo": "conta", "nome": "CooperativaDeCreditoDosServidoresPublicosSicoobCredicitrusAgencia", "final": null }, "status": "ativa", "marcada": false }
+      ],
+      "ignoradas": [],
+      "total_mensal": "212.60",
+      "total_anual": "2551.20"
+    },
+    "vazia": { "servicos": [], "outras": [], "ignoradas": [], "total_mensal": "0", "total_anual": "0" }
+  },
+  "perfil": {
+    "economizar": { "perfil": "economizar" },
+    "investir": { "perfil": "investir" },
+    "controlar": { "perfil": "controlar" },
+    "dividas": { "perfil": "dividas" },
+    "autonomo": { "perfil": "autonomo" },
+    "padrao": { "perfil": "padrao" },
+    "nunca_escolheu": { "perfil": null }
+  },
+  "contas": {
+    "so_carteira": {
+      "total": "150.00",
+      "motivos": ["carteira_nao_confirmada"],
+      "fora_do_total": 0,
+      "carteira": { "saldo": "150.00", "motivos": ["carteira_nao_confirmada"] },
+      "contas": []
+    },
+    "todos_os_estados": {
+      "total": "1360.00",
+      "motivos": ["carteira_nao_confirmada", "conciliacao_pendente", "movimentos_pendentes", "especie_incompleta", "banco_desatualizado", "saldo_ausente", "moeda_presumida", "conta_fora_do_ultimo_sync", "outra_moeda", "conexao_pausada"],
+      "fora_do_total": 3,
+      "carteira": { "saldo": "100.00", "motivos": ["carteira_nao_confirmada", "conciliacao_pendente", "movimentos_pendentes", "especie_incompleta"] },
+      "contas": [
+        { "id": 1, "instituicao": "Nubank", "nome": "Conta", "saldo": "1000.00", "moeda": "BRL", "no_total": true, "conexao": "updated", "sincronizado_em": "2026-10-01T12:00:00Z", "motivos": [] },
+        { "id": 2, "instituicao": "Itaú", "nome": "Conta corrente", "saldo": "200.00", "moeda": "BRL", "no_total": true, "conexao": "error_recoverable", "sincronizado_em": "2026-09-28T09:30:00Z", "motivos": ["banco_desatualizado"] },
+        { "id": 3, "instituicao": "Nubank", "nome": "Conta antiga", "saldo": "50.00", "moeda": "BRL", "no_total": true, "conexao": "updated", "sincronizado_em": "2026-10-01T12:00:00Z", "motivos": ["conta_fora_do_ultimo_sync"] },
+        { "id": 4, "instituicao": "Inter", "nome": null, "saldo": "10.00", "moeda": "BRL", "no_total": true, "conexao": "updated", "sincronizado_em": "2026-10-01T12:00:00Z", "motivos": ["moeda_presumida"] },
+        { "id": 5, "instituicao": "Wise", "nome": "Conta em dólar", "saldo": "30.00", "moeda": "USD", "no_total": false, "conexao": "updated", "sincronizado_em": "2026-10-01T12:00:00Z", "motivos": ["outra_moeda"] },
+        { "id": 6, "instituicao": "Bradesco", "nome": "Conta", "saldo": null, "moeda": "BRL", "no_total": false, "conexao": "paused", "sincronizado_em": null, "motivos": ["conexao_pausada"] },
+        { "id": 7, "instituicao": null, "nome": "Conta", "saldo": null, "moeda": "BRL", "no_total": false, "conexao": "updated", "sincronizado_em": "2026-10-01T12:00:00Z", "motivos": ["saldo_ausente"] }
+      ]
+    }
+  },
+  "resumo_do_mes": {
+    "exato": { "mes": "2026-10", "ate": "2026-10-31", "entrou": "1040.00", "saiu": "440.00", "anterior": { "mes": "2026-09", "entrou": "5200.00", "saiu": "3980.55" }, "motivos": [] },
+    "todos_os_motivos": { "mes": "2026-07", "ate": "2026-07-31", "entrou": "0", "saiu": "310.00", "anterior": null, "motivos": ["conciliacao_pendente", "movimentos_pendentes", "banco_desatualizado", "inicio_do_historico"] },
+    "sem_dados": { "mes": "2026-10", "ate": "2026-10-31", "entrou": "0", "saiu": "0", "anterior": { "mes": "2026-09", "entrou": "0", "saiu": "0" }, "motivos": [] }
+  },
+  "erros": {
+    "401": {
+      "status": 401,
+      "headers": { "WWW-Authenticate": "Bearer realm=\"pigbank\", error=\"invalid_token\"" },
+      "body": { "error": { "code": "unauthenticated", "message": "Sessão encerrada. Faça login novamente." } }
+    },
+    "402": {
+      "status": 402,
+      "body": { "error": { "code": "subscription_required", "message": "Payment Required" } }
+    },
+    "403": {
+      "status": 403,
+      "body": { "error": { "code": "forbidden", "message": "Esta conta está agendada para exclusão em 12/10/2026." } }
+    },
+    "404": {
+      "status": 404,
+      "body": { "error": { "code": "dashboard_v2_disabled", "message": "Not Found" } }
+    },
+    "500": {
+      "status": 500,
+      "body": { "error": { "code": "internal_error", "message": "Erro interno do servidor." } }
+    },
+    "503": {
+      "status": 503,
+      "body": { "error": { "code": "service_unavailable", "message": "Serviço temporariamente indisponível. Tente novamente em instantes." } }
+    },
+    "403_pro_required": {
+      "status": 403,
+      "body": { "error": { "code": "pro_required", "message": "Forbidden" } }
+    },
+    "403_password_required": {
+      "status": 403,
+      "body": { "error": { "code": "password_required", "message": "Forbidden" } }
+    },
+    "404_not_found": {
+      "status": 404,
+      "body": { "error": { "code": "not_found", "message": "Not Found" } }
+    },
+    "403_csrf": {
+      "status": 403,
+      "fora_do_envelope": true,
+      "body": { "detail": "Token CSRF inválido ou ausente." }
+    }
+  }
+}

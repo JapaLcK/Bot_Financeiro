@@ -178,3 +178,60 @@ def test_fk_da_trava_esta_validada_e_indexada():
 
     assert fk is not None and fk["convalidated"], "a FK ficou NOT VALID"
     assert idx, "sem índice em plan_trials(user_id): cada exclusão varre a tabela inteira"
+
+
+def test_exclusao_apaga_pockets_e_com_eles_a_lapide_do_vinculo_of(user_id):
+    """LGPD: a lápide do vínculo OF (`of_tombstone_connection_id` /
+    `of_tombstone_provider_id`, db/schema.py) guarda o id do investimento do
+    usuário no PROVEDOR. Ela é COLUNA de `pockets`, então morre com a linha — mas
+    isso só vale enquanto `pockets` estiver na lista de exclusão
+    (`db/privacy.py`), e nenhum teste media essa linha da lista.
+
+    O caminho do `reset_user_data` já é medido por `tests/test_account_reset.py`
+    (`_TABELAS_SIMPLES` inclui `pockets`); este cobre o da exclusão de conta."""
+    _, pocket_id, _ = db.create_pocket(user_id, "Viagem", interest_enabled=False)
+    with get_conn() as conn:
+        with conn.cursor() as cur:
+            cur.execute(
+                "update pockets set of_tombstone_provider_id='inv-do-provedor' "
+                "where id=%s and user_id=%s",
+                (pocket_id, user_id),
+            )
+        conn.commit()
+
+    delete_user_data(user_id)
+
+    with get_conn() as conn:
+        with conn.cursor() as cur:
+            cur.execute("select count(*) as n from pockets where user_id=%s", (user_id,))
+            assert cur.fetchone()["n"] == 0, "a caixinha (e a lápide dentro dela) tinha que sumir"
+
+
+def _tetos(identifiers: list[str]) -> set[str]:
+    with get_conn() as conn, conn.cursor() as cur:
+        cur.execute(
+            "select identifier from auth_rate_limits where identifier = any(%s)", (identifiers,)
+        )
+        return {r["identifier"] for r in cur.fetchall()}
+
+
+def test_exclusao_apaga_o_teto_por_conta_e_so_o_dela(user_id):
+    """O `mfa-verify` grava `user:<id>` em auth_rate_limits, sem TTL: sobraria
+    para sempre. O vizinho `user:<id>0` prova casamento exato (nem LIKE, nem
+    outra conta)."""
+    minha, outra = f"user:{user_id}", f"user:{user_id}0"
+    with get_conn() as conn, conn.cursor() as cur:
+        for ident in (minha, outra):
+            cur.execute(
+                "insert into auth_rate_limits (bucket, identifier, window_started_at, attempts, updated_at) "
+                "values ('mfa-verify', %s, now(), 1, now())",
+                (ident,),
+            )
+        conn.commit()
+    try:
+        delete_user_data(user_id)
+        assert _tetos([minha, outra]) == {outra}
+    finally:
+        with get_conn() as conn, conn.cursor() as cur:
+            cur.execute("delete from auth_rate_limits where identifier = any(%s)", ([minha, outra],))
+            conn.commit()

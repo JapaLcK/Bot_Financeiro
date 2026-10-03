@@ -12,23 +12,41 @@ def _carteira(saldo):
     return {"of_bank_count": 0, "manual": saldo, "consolidated": saldo}
 
 
-def _mock_sources(monkeypatch, *, saldo=0.0, incomes=(), expenses=(), bills=(), card_bills=()):
+def _mock_sources(monkeypatch, *, saldo=0.0, incomes=(), expenses=(), bills=(), card_bills=(),
+                  uids=None):
     """Mocka as fontes de `project`/`forecast_with_trajectory` na camada de db.*, sem
-    tocar banco real — mesmo padrão de `test_project_marca_unavailable_...`."""
+    tocar banco real — mesmo padrão de `test_project_marca_unavailable_...`.
+
+    `uids`: dicionário opcional; quando passado, cada fonte ANOTA nele o `user_id`
+    que recebeu (`{"get_balance": [7], ...}`). Sem isso o mock descarta o `uid` e
+    um `_starting_balance(1)` cravado no meio do fluxo passaria verde — o
+    isolamento por usuário (§0 do CLAUDE.md) não pode depender de inspeção visual.
+    """
     import core.services.cashflow as cf
     import db, db.accounts, db.recurring, db.recurring_income, db.bills
 
-    monkeypatch.setattr(db.accounts, "get_balance", lambda uid: saldo)
-    monkeypatch.setattr(db.recurring, "list_recurring_expenses", lambda uid: list(expenses))
-    monkeypatch.setattr(db.recurring_income, "list_recurring_incomes", lambda uid: list(incomes))
+    def anota(fonte, uid):
+        if uids is not None:
+            uids.setdefault(fonte, []).append(uid)
+        return uid
+
+    monkeypatch.setattr(db.accounts, "get_balance",
+                        lambda uid: (anota("get_balance", uid), saldo)[1])
+    monkeypatch.setattr(db.recurring, "list_recurring_expenses",
+                        lambda uid: (anota("list_recurring_expenses", uid), list(expenses))[1])
+    monkeypatch.setattr(db.recurring_income, "list_recurring_incomes",
+                        lambda uid: (anota("list_recurring_incomes", uid), list(incomes))[1])
     monkeypatch.setattr(db.bills, "list_bills",
-                        lambda uid, include_paid=False, limit=1000: list(bills))
+                        lambda uid, include_paid=False, limit=1000: (
+                            anota("list_bills", uid), list(bills))[1])
     # Fiel ao SQL real: só faturas com vencimento até `until`.
     monkeypatch.setattr(cf, "_open_card_bills_detail",
-                        lambda uid, until: [dict(c) for c in card_bills if c["due_date"] <= until])
+                        lambda uid, until: (anota("_open_card_bills_detail", uid),
+                                            [dict(c) for c in card_bills if c["due_date"] <= until])[1])
     # Sem Open Finance conectado nestes cenários: saldo fica na carteira manual.
     monkeypatch.setattr(db, "get_consolidated_balance",
-                        lambda uid: _carteira(saldo), raising=False)
+                        lambda uid: (anota("get_consolidated_balance", uid), _carteira(saldo))[1],
+                        raising=False)
     return cf
 
 

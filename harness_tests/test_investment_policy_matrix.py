@@ -1,38 +1,13 @@
 from __future__ import annotations
 
-import json
-import os
-import subprocess
-import sys
 import unittest
-from pathlib import Path
 
-REPO = Path(__file__).resolve().parents[1]
-SCRIPT = REPO / "scripts" / "whatsapp_harness_safe.py"
-
-
-def _policy(text: str) -> dict[str, object]:
-    result = subprocess.run(
-        [sys.executable, str(SCRIPT), "--layer", "policy", "--text", text],
-        cwd=REPO,
-        env={
-            "PATH": os.environ.get("PATH", ""),
-            "PYTHONPATH": str(REPO),
-            "PYTHONDONTWRITEBYTECODE": "1",
-        },
-        text=True,
-        capture_output=True,
-        timeout=15,
-        check=False,
-    )
-    if result.returncode != 0:
-        raise AssertionError(result.stderr or result.stdout)
-    return json.loads(result.stdout)
+from _harness_lote import rodar_lote
 
 
 class InvestmentPolicyMatrixTests(unittest.TestCase):
     def test_recusa_recomendacoes_e_ordens_com_ativos_ambiguos(self) -> None:
-        for text in (
+        textos = [
             "me indique um fundo",
             "recomende um fundo para mim",
             "me indica um ativo?",
@@ -108,12 +83,14 @@ class InvestmentPolicyMatrixTests(unittest.TestCase):
             "venda 3 ativos amanhã",
             "venda os meus fundos",
             "venda 3 ativos",
-        ):
+        ]
+        for text, p in zip(textos, rodar_lote("policy", textos)):
             with self.subTest(text=text):
-                self.assertTrue(_policy(text)["refused"])
+                self.assertEqual(p["exit"], 0, p)
+                self.assertTrue(p["refused"])
 
     def test_preserva_usos_nao_financeiros(self) -> None:
-        for text in (
+        textos = [
             "qual fundo de tela devo comprar?",
             "compre um fundo azul para mim",
             "qual ativo do jogo devo comprar?",
@@ -152,36 +129,44 @@ class InvestmentPolicyMatrixTests(unittest.TestCase):
             "onde vejo meus investimentos?",
             "qual comando devo usar para investir?",
             "aplica um fundo azul para mim",
-        ):
+        ]
+        for text, p in zip(textos, rodar_lote("policy", textos)):
             with self.subTest(text=text):
-                self.assertFalse(_policy(text)["refused"])
+                self.assertEqual(p["exit"], 0, p)
+                self.assertFalse(p["refused"])
 
     def test_ajuda_sobre_investimentos_nao_e_recomendacao(self) -> None:
-        for text in (
+        textos = [
             "que comando devo usar para listar investimentos?",
             "qual comando devo usar para ver meu CDB?",
-        ):
+        ]
+        for text, p in zip(textos, rodar_lote("policy", textos)):
             with self.subTest(text=text):
-                self.assertFalse(_policy(text)["refused"])
+                self.assertEqual(p["exit"], 0, p)
+                self.assertFalse(p["refused"])
 
     def test_consulta_de_ticker_proprio_nao_e_recomendacao(self) -> None:
-        for text in (
+        textos = [
             "meu AAPL é bom?",
             "PETR4F da minha carteira é boa?",
             "meu BTC é bom?",
             "meu btc é bom?",
             "Ethereum da minha carteira é bom?",
-        ):
+        ]
+        for text, p in zip(textos, rodar_lote("policy", textos)):
             with self.subTest(text=text):
-                self.assertFalse(_policy(text)["refused"])
+                self.assertEqual(p["exit"], 0, p)
+                self.assertFalse(p["refused"])
 
     def test_investimento_ja_feito_e_consulta_de_carteira(self) -> None:
-        for text in (
+        textos = [
             "qual é o melhor investimento que eu fiz?",
             "qual foi o melhor fundo que eu comprei?",
-        ):
+        ]
+        for text, p in zip(textos, rodar_lote("policy", textos)):
             with self.subTest(text=text):
-                self.assertFalse(_policy(text)["refused"])
+                self.assertEqual(p["exit"], 0, p)
+                self.assertFalse(p["refused"])
 
 
 if __name__ == "__main__":

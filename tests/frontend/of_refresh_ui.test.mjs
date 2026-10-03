@@ -253,7 +253,15 @@ test("veredito do refresh: só estado conhecido-bom fica verde", async () => {
       // detalhe do caso comum é este, e é ele que sai.
       ["needs_user_action", "Reautorize o banco", null],
       ["updating",          "Ainda não sincronizou", null],
+      // Erro temporário (PR-B2): o E13 (item em ERROR na Pluggy) NÃO promete a
+      // retentativa; o erro comum promete. As duas frases são valores REAIS do
+      // backend (`_DETALHE_ITEM_EM_ERRO` e `_FIXED_DETAIL`).
+      ["error_recoverable", "O banco teve um erro — atualize de novo mais tarde",
+                            /automaticamente/i],
+      ["error_recoverable", "Tentaremos de novo automaticamente", /banco teve um erro/i],
       ["partial",           "Cartão desatualizado desde 12/08", null],
+      // D2 (PR-B3): o partial da Pluggy à frente; o texto sai de `i.detail`.
+      ["partial",           "O banco já tem dados de 26/09 — atualize para trazer", null],
       // Saída real do backend para `no_accounts` + `ACCT_001`. A frase fixa que o
       // `OF_VERDICT` tinha aqui apagava o motivo que o backend anexa.
       ["no_accounts",       "O banco não devolveu contas nem investimentos — você "
@@ -555,6 +563,36 @@ test("linha da conexão sem sync: pílula pendente e 'Última sync: pendente'", 
     assert.ok(!/\bactive\b/.test(linha.pill),
               `a pílula não pode ser verde ao lado de "pendente" (veio "${linha.pill}")`);
     assert.match(linha.pill, /pending/, linha.pill);
+  } finally { await page.__ctx.close(); }
+});
+
+/**
+ * D7 (PR-B3): `ui.dados_de` (calculado em Python) vira " · dados de dd/mm" na
+ * MESMA linha "Última sync", e é escapado. Sem a chave, nenhum "dados de".
+ * Discrimina: sem o acréscimo em `renderConnections`, o 1º caso fica vermelho.
+ */
+test("linha da conexão: 'dados de' só com ui.dados_de, na linha da Última sync, escapado", async () => {
+  const page = await newPage({ viewport: { width: 390, height: 844 } });
+  try {
+    await page.goto(`${ORIGIN}/settings.html?view=open-finance`);
+    await waitFor(() => page.evaluate(() => typeof window.renderConnections === "function"),
+                  "renderConnections existir");
+
+    const metas = await page.evaluate(() => {
+      const ui = (dados_de) => ({ state: "needs_user_action", label: "Ação necessária",
+                                  detail: "Reautorize o banco", dados_de });
+      const meta = (dados_de) => {
+        window.renderConnections([{ institution_name: "Santander", provider_item_id: "i1",
+          last_sync_at: "2026-09-27T17:00:00Z", ui: ui(dados_de) }]);
+        const m = document.querySelector("#connections-list .conn-meta");
+        return { texto: m.textContent, html: m.innerHTML };
+      };
+      return { com: meta("20/09"), sem: meta(null), xss: meta("<b>x</b>") };
+    });
+
+    assert.match(metas.com.texto, /^Última sync: .+ · dados de 20\/09$/, metas.com.texto);
+    assert.ok(!/dados de/.test(metas.sem.texto), metas.sem.texto);
+    assert.ok(!/<b>/.test(metas.xss.html), "dados_de tem de sair escapado");
   } finally { await page.__ctx.close(); }
 });
 

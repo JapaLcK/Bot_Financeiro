@@ -38,6 +38,48 @@ test('Piggy e agentes compartilham interface e alternam sem perder mensagens ou 
   } finally { await page.close(); }
 });
 
+test('Piggy e agentes usam o mesmo padrão de mensagem', async () => {
+  const { page } = await setup();
+  try {
+    await ask(page, 'Analisar cobranças');
+    const agentReply = page.locator('.agent-chat-assistant[data-state="complete"]');
+    assert.equal(await agentReply.locator('[data-slot="bubble"][data-variant="ghost"]').count(), 1);
+    assert.equal(await page.locator('.agent-chat-user [data-slot="bubble"][data-variant="muted"]').count(), 1);
+    assert.equal(await page.locator('.agent-chat-user [data-slot="message-footer"] .pc-message-author').textContent(), 'Você');
+    assert.equal(await agentReply.locator('[data-slot="message-footer"] time').count(), 1);
+
+    await openPiggy(page);
+    await askPiggy(page, 'Resumo do mês');
+    const piggyReply = page.locator('.piggy-msg.assistant[data-state="complete"]');
+    assert.equal(await piggyReply.locator('[data-slot="bubble"][data-variant="ghost"]').count(), 1);
+    assert.equal(await page.locator('.piggy-msg.user [data-slot="bubble"][data-variant="muted"]').count(), 1);
+    assert.equal(await page.locator('.piggy-msg.user [data-slot="message-footer"] .pc-message-author').textContent(), 'Você');
+    assert.equal(await piggyReply.locator('[data-slot="message-footer"] time').count(), 1);
+  } finally { await page.close(); }
+});
+
+test('Piggy mantém uma live region e registra o horário em que a resposta chega', async () => {
+  const { page, releasePiggy } = await setup({ openAgent: false, holdPiggy: true });
+  try {
+    await openPiggy(page);
+    const liveStatus = page.locator('#piggy-panel > [data-slot="message-status"]');
+    const liveStatusNode = await liveStatus.elementHandle();
+    await page.fill('#piggy-input', 'Resumo do mês');
+    await page.click('#piggy-send');
+    assert.equal(await liveStatus.count(), 1);
+    assert.equal(await liveStatus.textContent(), 'Piggy está preparando a resposta');
+    assert.equal(await page.locator('.piggy-msg.assistant time').count(), 0);
+    const questionTime = await page.locator('.piggy-msg.user time').getAttribute('datetime');
+    await page.waitForTimeout(20);
+    releasePiggy();
+    await page.waitForFunction(() => !document.getElementById('piggy-input').disabled);
+    const replyTime = await page.locator('.piggy-msg.assistant time').getAttribute('datetime');
+    assert.ok(Date.parse(replyTime) > Date.parse(questionTime), JSON.stringify({ questionTime, replyTime }));
+    assert.equal(await liveStatus.evaluate((node, original) => node === original, liveStatusNode), true);
+    assert.equal(await liveStatus.textContent(), 'Resposta pronta');
+  } finally { releasePiggy(); await page.close(); }
+});
+
 test('Piggy abre com cota sem misturar histórico externo e reload limpa apenas estado visual', async () => {
   const { page, usageRequests, piggyRequests } = await setup({ openAgent: false });
   try {

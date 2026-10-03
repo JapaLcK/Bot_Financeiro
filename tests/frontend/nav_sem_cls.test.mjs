@@ -24,16 +24,16 @@ test("ativar o menu mobile não desloca o conteúdo depois do primeiro paint", a
 
   const page = await ctx.newPage();
   const navegacao = page.goto(`${ORIGIN}/index.html`);
-  await page.waitForSelector("main.wrap");
+  await page.waitForSelector("main#conteudo");
   // Dois frames garantem que o estado anterior ao script chegou a ser pintado.
   await page.evaluate(() => new Promise((resolve) =>
     requestAnimationFrame(() => requestAnimationFrame(resolve))));
-  const topoAntes = await page.$eval("main.wrap", (el) => el.getBoundingClientRect().top);
+  const topoAntes = await page.$eval("main#conteudo", (el) => el.getBoundingClientRect().top);
 
   liberarScript();
   await navegacao;
   await page.waitForSelector(".nav.pb-nav-ready");
-  const topoDepois = await page.$eval("main.wrap", (el) => el.getBoundingClientRect().top);
+  const topoDepois = await page.$eval("main#conteudo", (el) => el.getBoundingClientRect().top);
 
   assert.equal(topoDepois, topoAntes,
     `o conteúdo pulou ${+(topoDepois - topoAntes).toFixed(1)}px quando o menu foi ativado`);

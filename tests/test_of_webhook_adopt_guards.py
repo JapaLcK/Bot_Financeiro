@@ -33,6 +33,7 @@ from fastapi.testclient import TestClient
 import db
 import frontend.finance_bot_websocket_custom as dashboard
 import frontend.routes.open_finance as of_routes
+from conftest import promote_to_pro
 from db.connection import get_conn
 from test_of_item_ownership import SEGREDO, _auth, _item_remoto, _webhook, eventos  # noqa: F401
 
@@ -84,6 +85,7 @@ def _existe_user(uid: int) -> bool:
 def test_item_created_continua_adotando_o_dono_legitimo(
         user_id, monkeypatch, eventos, webhook_pluggy):
     """Sem este caso, todo o resto do arquivo passaria com a adoção deletada."""
+    promote_to_pro(user_id)
     _mock_item(monkeypatch, user_id)
     try:
         assert _webhook(TestClient(dashboard.app), "item/created", "g-ok").status_code == 200
@@ -145,6 +147,7 @@ def test_evento_posterior_nao_ressuscita_o_banco_que_o_usuario_removeu(
     lançamento e compra de cartão na carteira que o usuário acabou de limpar.
     É o mesmo buraco que o `_disconnect_sob_lock` fecha pelo outro lado.
     """
+    promote_to_pro(user_id)
     _mock_item(monkeypatch, user_id)
     monkeypatch.setattr(of_routes, "create_pluggy_api_key", lambda: "k")
     monkeypatch.setattr(of_routes, "delete_pluggy_item",
@@ -176,6 +179,7 @@ def test_evento_posterior_nao_ressuscita_o_banco_que_o_usuario_removeu(
 def test_so_item_created_adota(user_id, monkeypatch, eventos, webhook_pluggy, evento):
     """A categoria inteira, não só o evento do repro: item sem conexão que recebe
     evento POSTERIOR é item que JÁ TEVE conexão e foi removida."""
+    promote_to_pro(user_id)
     _mock_item(monkeypatch, user_id)
     try:
         assert _webhook(TestClient(dashboard.app), evento, "g-evento").status_code == 200
@@ -193,6 +197,7 @@ def test_registry_fora_do_ar_nao_vaza_500_nem_grava_conexao_sem_rastro(
     """`register_item` levantando dava 500 — a Pluggy retenta em laço — e, na
     ordem antiga (conexão primeiro), deixava conexão commitada com registry
     VAZIO: item adotado sem nenhum rastro para o script achar."""
+    promote_to_pro(user_id)
     _mock_item(monkeypatch, user_id)
     monkeypatch.setattr(of_routes, "register_item",
                         lambda *a, **k: (_ for _ in ()).throw(RuntimeError("registry fora do ar")))
@@ -212,6 +217,7 @@ def test_sync_falhando_nao_vaza_500_e_a_adocao_fica_de_pe(
         user_id, monkeypatch, eventos):
     """`_schedule_pluggy_sync` estava FORA do try: exceção dele = 500. E, como a
     conexão já está gravada quando ele roda, a adoção não pode ser desfeita."""
+    promote_to_pro(user_id)
     monkeypatch.setenv("PLUGGY_WEBHOOK_SECRET", SEGREDO)
     _mock_item(monkeypatch, user_id)
     monkeypatch.setattr(of_routes, "_schedule_pluggy_sync",
@@ -233,6 +239,7 @@ def test_adocao_grava_a_mesma_auditoria_do_pluggy_item(
         user_id, monkeypatch, eventos, webhook_pluggy):
     """Conexão de Open Finance nascendo sem `OPEN_FINANCE_CONNECTED` é conexão
     que não aparece no histórico de segurança do usuário."""
+    promote_to_pro(user_id)
     from core.audit import AuditEvent
 
     auditados: list[tuple] = []
@@ -274,6 +281,7 @@ def test_as_duas_portas_decidem_igual_sobre_o_mesmo_client_user_id(
     `clientUserId` em `core/services/pluggy.py`), mas duas portas divergindo no
     MESMO valor é a definição de dupla fonte de verdade.
     """
+    promote_to_pro(user_id)
     valor = _FORJA[forja](user_id)
     assert valor != str(user_id) and int(valor) == user_id, (
         f"o caso {forja} não discrimina: {valor!r}")
@@ -313,6 +321,7 @@ def test_webhook_antes_do_navegador_audita_uma_vez_por_conexao(
     só anota numa lista deixava `audit_events` vazio, e a rota (com razão) auditava
     de novo. Com o stub mudo este caso ficaria verde num código sem dedup nenhuma.
     """
+    promote_to_pro(user_id)
     from core.audit import AuditEvent
 
     auditados: list[int] = []

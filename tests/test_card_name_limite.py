@@ -147,7 +147,6 @@ def test_nome_real_longo_e_criado_e_ainda_casa_na_resposta():
 # ─────────────────────────────────────────────────────────────────────────────
 
 from _pendencia_credito_helpers import diga  # noqa: E402
-from conftest import promote_to_pro  # noqa: E402
 
 _LONGO = "N" * 100
 _SETENTA = "B" * 70
@@ -183,7 +182,7 @@ def test_criar_cartao_inline_com_nome_longo_nao_devolve_erro_cru():
 def test_substituto_longo_no_duplicado_recusa_e_mantem_a_pendencia():
     """Step `duplicate_card_name`: o substituto é texto livre e ia direto pro
     `create_card` com os dias já no payload."""
-    uid = promote_to_pro(novo_uid())   # o Gratis para em 1 cartão, e o teste é do NOME
+    uid = novo_uid()
     db.create_card(uid, "Nubank", 10, 17)
     assert "Já existe" in diga(uid, "criar cartao Nubank fecha 10 vence 17")
 

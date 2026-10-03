@@ -1,332 +1,718 @@
-/* ==========================================================================
-   site-redesign.css — camada de refino "premium" da landing (index.html),
-   sobre site.css. TUDO escopado em `body.rd` para não afetar as outras
-   páginas que consomem site.css (só a index.html tem a classe rd).
-   Paleta/tokens reaproveitados do :root de site.css (--pink, --neon, etc.).
-   ========================================================================== */
+/* Landing aprovada. O prefixo lp- isola o conteúdo da navegação compartilhada. */
+body.lp { --lp-pink:var(--pig-pink);--lp-pink-ink:#c71966;--lp-blush:#f9dfe9;--lp-lime:var(--pig-neon);--lp-black:var(--pig-black);--lp-paper:var(--pig-offwhite);--lp-white:#fff;--lp-muted:#65625f;--lp-line:#ddd8d4;--lp-radius:20px;--lp-shadow:0 12px 32px #3821260b;--lp-shell:1240px}
 
-/* ─── 1. Textura: grão sutil sobre a página (quebra o flat digital) ────── */
-.rd .rd-grain {
-  position: fixed; inset: 0; z-index: 2; pointer-events: none; opacity: .05;
-  mix-blend-mode: overlay;
-  background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='140' height='140'%3E%3Cfilter id='n'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='0.85' numOctaves='2' stitchTiles='stitch'/%3E%3C/filter%3E%3Crect width='100%25' height='100%25' filter='url(%23n)'/%3E%3C/svg%3E");
+* { box-sizing:border-box}
+html { scroll-behavior:smooth;scroll-padding-top:100px}
+body.lp { margin:0;background:var(--lp-paper);color:var(--lp-black);font:400 16px/1.5 var(--font);-webkit-font-smoothing:antialiased}
+:where(body.lp) h1, :where(body.lp) h2, :where(body.lp) h3, :where(body.lp) h4, :where(body.lp) p { margin:0}
+:where(body.lp) h1, :where(body.lp) h2, :where(body.lp) h3 { font-weight:750;letter-spacing:-.045em;line-height:1.07}
+:where(body.lp) h2 { font-size:clamp(32px,3.5vw,49px)}
+:where(body.lp) h3 { font-size:22px}
+:where(body.lp) a { color:inherit;text-decoration:none}
+:where(body.lp) img { display:block;max-width:100%;height:auto}
+:where(body.lp) ul { padding:0;list-style:none;margin:0}
+:where(body.lp) button, :where(body.lp) summary, :where(body.lp) a { -webkit-tap-highlight-color:transparent}
+:where(body.lp) a:focus-visible, :where(body.lp) summary:focus-visible { outline:3px solid var(--lp-pink);outline-offset:6px;border-radius:5px}
+::selection { background:var(--lp-pink);color:#fff}
+.lp-shell { width:calc(100% - 112px);max-width:var(--lp-shell);margin-inline:auto}
+.lp-section-light { background:var(--lp-paper)}
+.lp-section-blush { background:#fae4ec}
+.lp-section-dark { background:var(--lp-black);color:var(--lp-paper)}
+.lp-eyebrow { color:var(--lp-pink-ink);text-transform:uppercase;font-size:13px;font-weight:700;letter-spacing:.045em;margin-bottom:18px}
+.lp-section-dark .lp-eyebrow { color:var(--lp-pink)}
+.lp-lead { font-size:18px;line-height:1.6;color:var(--lp-muted);letter-spacing:-.02em}
+.lp-section-dark .lp-lead { color:#bebcba}
+.lp-section-heading .lp-lead { margin-top:13px}
+.lp-btn { display:inline-flex;align-items:center;justify-content:center;gap:25px;min-height:54px;padding:15px 24px;border-radius:100px;font-size:14px;line-height:1.2;font-weight:600;white-space:nowrap;transition:background .2s,transform .2s,box-shadow .2s}
+.lp-btn:hover { transform:translateY(-3px);box-shadow:0 8px 24px #1112}
+.lp-btn-dark { background:var(--lp-black);color:var(--lp-paper)}
+.lp-btn-dark:hover { background:#292526}
+.lp-btn-pink { background:var(--lp-pink);color:var(--lp-black)}
+.lp-btn-pink:hover { background:#ff65ac}
+.lp-actions { display:flex;align-items:center;gap:28px}
+.lp-text-link { font-size:14px;font-weight:650;text-decoration:underline;text-underline-offset:6px;text-decoration-thickness:1px;display:inline-flex;align-items:center;gap:12px;transition:opacity .2s}
+.lp-text-link:hover { opacity:.68}
+.lp-pink-link { color:var(--lp-pink)}
+.lp-surface { background:#fff;border:1px solid #fff9;border-radius:var(--lp-radius);box-shadow:var(--lp-shadow)}
+.lp-caption { font-size:10px;color:#8a8684;line-height:1.4;letter-spacing:.005em}
+.lp-fine-print { font-size:11px;color:var(--lp-muted);margin-top:14px}
+.lp-check { display:inline-grid;place-items:center;flex:0 0 auto;width:25px;height:25px;background:#83d737;border-radius:50%;font-weight:800;font-size:16px;color:#fff}
+.lp-skip-link { position:fixed;top:8px;left:8px;transform:translateY(-180%);z-index:99;padding:12px 18px;background:white}
+.lp-skip-link:focus { transform:translateY(0)}
+
+.lp-hero { overflow:hidden}
+.lp-hero-grid { display:grid;grid-template-columns:1.13fr 1fr;min-height:665px;position:relative;align-items:center}
+.lp-hero-copy { position:relative;z-index:2;padding-block:65px 74px}
+.lp-hero h1 { font-size:clamp(46px,5.2vw,73px);letter-spacing:-.058em;line-height:1.02;font-weight:800;position:relative}
+.lp-underline { position:relative;white-space:nowrap}
+.lp-underline:after { content:'';position:absolute;left:-4px;right:0;bottom:-10px;height:7px;border-radius:100%;background:var(--lp-pink);transform:rotate(-1deg)}
+.lp-hero .lp-lead { max-width:445px;margin-top:31px;font-size:17px}
+.lp-hero .lp-actions { margin-top:31px}
+.lp-hero-perks { display:flex;align-items:center;gap:23px;margin-top:47px;font-size:10px;font-weight:500;white-space:nowrap}
+.lp-hero-perks li { display:flex;align-items:center;gap:8px}
+.lp-hero-perks .ph { font-size:22px;color:#39302f;text-shadow:2px 2px #f6bad5}
+.lp-hero-art { position:relative;align-self:stretch;min-height:605px;margin-left:-18px;margin-right:-32px}
+.lp-hero-bubble { position:absolute;inset:51px 1% 100px 11%;background:#fad2e4;border-radius:48% 48% 43% 45%;transform:rotate(-9deg)}
+.lp-hero-bubble:after { content:'';position:absolute;width:100px;height:140px;right:28%;bottom:-60px;background:inherit;clip-path:polygon(0 0,100% 0,12% 100%)}
+.lp-piggy { position:absolute;bottom:0;left:-11%;width:86%;height:100%;object-fit:contain;object-position:bottom;z-index:1}
+.lp-hero-chat { position:absolute;z-index:3;top:103px;right:-6px;width:260px;animation:chat-enter .7s .2s both}
+.lp-chat-sent { background:#ddf6c4;font-size:12px;line-height:1.6;min-height:57px;padding:17px 18px;border-radius:18px 18px 4px 18px;margin-left:20px;position:relative}
+.lp-chat-sent span { display:block;text-align:right;font-size:8px;color:#769667;line-height:1.2}
+.lp-chat-sent b { color:#65bad4;font-size:11px;font-weight:400;margin-left:5px}
+.lp-chat-response { display:flex;align-items:center;gap:11px;background:#fff;padding:20px 16px;box-shadow:var(--lp-shadow);border-radius:17px 17px 17px 4px;margin-top:14px}
+.lp-chat-response strong { font-size:13px}
+.lp-chat-response p { font-size:10px;margin-top:8px;white-space:nowrap}
+.lp-chat-response .lp-check { margin-left:auto;width:23px;height:23px;font-size:15px}
+.lp-hero-chat .lp-caption { text-align:center;margin:20px 0}
+.lp-spark { position:absolute;color:var(--lp-pink);font-size:35px;right:0;top:52px;transform:rotate(12deg)}
+@keyframes chat-enter { from { opacity:0;transform:translateY(12px)}
+to { opacity:1;transform:translateY(0)}
 }
 
-/* Glow ambiente um pouco mais rico: segunda fonte neon fria ao fundo */
-.rd .glow::after { opacity: .28; }
-.rd .glow { --_x: 0; }
+.lp-how { padding:67px 0 65px;position:relative;overflow:hidden}
+.lp-how:before { content:'';position:absolute;right:8%;top:-90px;width:230px;height:240px;border:2px solid var(--lp-pink);border-radius:0 0 100% 0;border-top:0;border-left:0;opacity:.75;transform:rotate(10deg)}
+.lp-how .lp-shell { position:relative}
+.lp-how h2 { font-size:clamp(30px,3.15vw,44px)}
+.lp-how .lp-eyebrow { margin-bottom:10px}
+.lp-steps { display:grid;grid-template-columns:1fr 40px 1fr 40px 1fr;align-items:center;gap:18px;margin-top:34px}
+.lp-step h3 { display:flex;align-items:center;gap:12px;font-size:16px;letter-spacing:-.03em;font-weight:650;margin-bottom:16px;white-space:nowrap}
+.lp-step-number { display:grid;place-items:center;background:var(--lp-pink);height:43px;width:43px;flex:0 0 auto;border-radius:50%;font-size:14px;font-weight:750}
+.lp-step-arrow { color:var(--lp-pink);font-size:40px;font-weight:300;align-self:end;padding-bottom:41px;text-align:center}
+.lp-step .lp-surface { height:138px}
+.lp-message-demo { padding:18px;background:#f9faf9;border-radius:28px}
+.lp-message-input { border-radius:25px;background:white;display:flex;align-items:center;gap:8px;padding:12px 10px;box-shadow:0 1px 8px #00000003;font-size:10px;color:#8b8986}
+.lp-message-input .ph { color:#555;font-size:16px}
+.lp-message-tools { display:flex;justify-content:flex-end;gap:19px;padding:16px 9px 0;font-size:21px}
+.lp-record-demo { padding:26px 24px}
+.lp-record-demo>div { display:flex;gap:12px;align-items:center;font-size:15px}
+.lp-record-demo .ph { font-size:31px;color:var(--lp-pink)}
+.lp-record-demo p { font-size:13px;display:flex;align-items:center;gap:11px;margin-top:16px}
+.lp-month-demo { padding:20px 24px}
+.lp-month-demo>strong { font-size:14px}
+.lp-mini-chart { display:flex;gap:22px;align-items:center;margin-top:15px}
+.lp-bars { display:flex;align-items:end;gap:7px;height:61px;flex:1}
+.lp-bars span { height:70%;width:18px;border-radius:3px 3px 0 0;background:var(--lp-pink)}
+.lp-bars span:nth-child(even) { background:var(--lp-lime)}
+.lp-bars span:nth-child(2) { height:30%}
+.lp-bars span:nth-child(3) { height:48%}
+.lp-bars span:nth-child(4) { height:35%}
+.lp-bars span:nth-child(5) { height:95%}
+.lp-bars span:nth-child(6) { height:78%}
+.lp-bars span:nth-child(7) { height:68%}
+.lp-bars span:nth-child(8) { height:54%}
+.lp-legend { font-size:10px;display:flex;flex-direction:column;gap:10px;white-space:nowrap}
+.lp-legend span { display:flex;gap:6px;align-items:center}
+.lp-legend span:before { content:'';width:8px;height:8px;border-radius:50%;background:var(--lp-pink);flex:0 0 auto}
+.lp-legend span:nth-child(2):before { background:var(--lp-lime)}
+.lp-legend span:nth-child(3):before { background:var(--lp-blush)}
 
-/* ─── 2. Tipografia: mais presença, sem trocar a fonte (Inter self-host) ─ */
-.rd .hero-title {
-  font-size: clamp(2.6rem, 5.6vw, 4.4rem);
-  letter-spacing: -.035em;
-  line-height: .98;
-  text-wrap: balance;
-}
-.rd .hero-sub { font-size: 1.12rem; line-height: 1.6; max-width: 500px; text-wrap: pretty; }
-.rd .section-head h2,
-.rd .tech-copy h2,
-.rd .cta-band h2 { letter-spacing: -.03em; text-wrap: balance; }
-.rd .section-head { max-width: 680px; margin-bottom: 60px; }
-.rd .section-head p { font-size: 1.06rem; text-wrap: pretty; }
+.lp-open-finance { padding:80px 0 78px}
+.lp-finance-grid { display:grid;grid-template-columns:1fr 1.12fr;gap:55px;align-items:center}
+.lp-finance-copy h2 { font-size:clamp(30px,3.1vw,44px)}
+.lp-finance-copy .lp-eyebrow { margin-bottom:14px}
+.lp-finance-copy .lp-lead { margin-top:15px;max-width:400px;font-size:17px}
+.lp-finance-perks { display:flex;gap:29px;margin:34px 0 27px}
+.lp-finance-perks li { display:flex;align-items:center;gap:12px;font-size:11px;font-weight:650;line-height:1.35}
+.lp-finance-perks .ph { font-size:37px;color:var(--lp-pink)}
+.lp-connection-demo { display:grid;grid-template-columns:1fr 1fr 1.25fr;align-items:center;gap:20px;position:relative;padding:15px 0 35px;min-width:0}
+.lp-bank-accounts { display:grid;gap:71px;position:relative}
+.lp-bank-accounts:after { content:'';position:absolute;top:42px;bottom:42px;left:100%;width:27px;border:2px solid var(--lp-pink);border-left:none;border-radius:0 23px 23px 0;z-index:0}
+.lp-bank-card { display:flex;gap:10px;align-items:center;padding:19px 12px;border-radius:15px;z-index:1}
+.lp-bank-card .ph { font-size:28px;color:var(--lp-pink)}
+.lp-bank-card>div { flex:1}
+.lp-bank-card strong { font-size:10px;white-space:nowrap;letter-spacing:-.035em;display:block;margin-bottom:6px}
+.lp-skeleton { display:block;height:7px;background:#e3e2e0;border-radius:10px;width:100%;min-width:0}
+.lp-bank-card .lp-skeleton { margin-top:6px}
+.lp-skeleton.lp-short { width:58%}
+.lp-connection-hub { position:relative;display:flex;flex-direction:column;align-items:center;padding-top:55px;z-index:2}
+.lp-connection-hub:before { content:'';height:2px;background:var(--lp-pink);position:absolute;left:-20px;right:-23px;top:107px;z-index:-1}
+.lp-connection-hub:after { content:'›';color:var(--lp-pink);position:absolute;right:-25px;font-size:33px;top:81px}
+.lp-hub-icon { width:107px;height:107px;display:grid;place-items:center;background:var(--lp-pink);border:6px solid #fac7dd;outline:3px solid #fff;border-radius:50%;box-shadow:0 8px 35px #ff2d8e16}
+.lp-hub-icon img { width:55px;filter:brightness(0) invert(1)}
+.lp-consent { display:flex;flex-direction:column;gap:7px;align-items:center;text-align:center;padding:12px 12px;white-space:nowrap;border-radius:13px;margin-top:23px;font-size:9px;font-weight:600;line-height:1.5}
+.lp-consent .ph { font-size:22px}
+.lp-connected-card { padding:24px 18px;min-height:309px;border-radius:19px}
+.lp-connected-card h3 { font-size:12px;letter-spacing:-.04em}
+.lp-sync { color:#608b14;font-size:10px;display:flex;align-items:center;gap:7px;margin-top:10px}
+.lp-sync>span { height:8px;width:8px;border-radius:50%;background:var(--lp-lime);box-shadow:0 0 0 3px #c6f11a20}
+.lp-connected-card h4 { font-size:11px;margin:22px 0 13px}
+.lp-account-row { display:flex;gap:8px;align-items:center;margin:12px 0}
+.lp-account-row b { height:9px;width:9px;border-radius:50%;background:#9acc15;flex:0 0 auto}
+.lp-account-row.lp-pink b { background:var(--lp-pink)}
+.lp-account-row.lp-gray b { background:#aaa}
+.lp-account-row .lp-skeleton { height:7px;flex:1}
+.lp-connection-demo>.lp-caption { position:absolute;bottom:0;right:0}
 
-/* Gradiente estático: o título da hero é o LCP no Lighthouse mobile. Animar
-   background-position nele mantinha uma repintura não composta ativa durante
-   a janela de medição, sem acrescentar informação ou resposta à interação. */
-.rd .grad {
-  background: linear-gradient(100deg, var(--pink) 0%, #FF7AB8 40%, var(--pink) 80%);
-  -webkit-background-clip: text; background-clip: text;
-  -webkit-text-fill-color: transparent;
+.lp-overview { padding:77px 0 66px;border-bottom:1px solid #ffffff14}
+.lp-overview-grid { display:grid;grid-template-columns:.85fr 1.25fr;gap:63px;align-items:center}
+.lp-overview-copy h2 { font-size:clamp(31px,3vw,43px)}
+.lp-overview-copy .lp-lead { font-size:17px;margin-top:20px;max-width:370px}
+.lp-feature-list { display:grid;gap:23px;margin:34px 0 33px;font-size:15px}
+.lp-feature-list li { display:flex;align-items:center;gap:14px}
+.lp-feature-list .ph { color:var(--lp-pink);font-size:26px;width:47px;height:47px;border:1px solid var(--lp-pink);border-radius:50%;display:grid;place-items:center}
+.lp-dashboard { display:grid;grid-template-columns:118px 1fr;min-height:376px;border:1px solid #ffffff24;border-radius:18px;background:linear-gradient(115deg,#191919,#232323);box-shadow:0 16px 80px #0003;overflow:hidden;transform:rotate(-.6deg);transition:transform .35s}
+.lp-dashboard:hover { transform:rotate(0)}
+.lp-dashboard-sidebar { border-right:1px solid #ffffff0e;padding:19px 9px 18px;font-size:8px}
+.lp-dashboard-sidebar>img { width:85px;margin:0 5px 23px}
+.lp-dashboard-sidebar>div { display:flex;align-items:center;gap:7px;white-space:nowrap;border-radius:6px;padding:10px 8px;margin-bottom:3px;color:#ccc}
+.lp-dashboard-sidebar .ph { font-size:15px}
+.lp-dashboard-sidebar .lp-sidebar-current { background:var(--lp-pink);color:var(--pig-black);font-weight:650}
+.lp-dashboard-main { padding:29px 19px 22px;min-width:0}
+.lp-dashboard-heading { display:flex;justify-content:space-between;align-items:center}
+.lp-dashboard-heading strong { font-size:23px;letter-spacing:-.05em}
+.lp-dashboard-heading .ph { font-size:18px;color:#aaa}
+.lp-dashboard-tabs { display:flex;justify-content:space-between;font-size:8px;color:#aeadab;margin-top:24px;border-bottom:1px solid #ffffff10}
+.lp-dashboard-tabs span { padding:0 8px 13px}
+.lp-dashboard-tabs .lp-selected { border-bottom:2px solid var(--lp-pink);color:var(--lp-pink)}
+.lp-dashboard-panels { display:grid;grid-template-columns:1.08fr 1fr;gap:11px;margin-top:15px}
+.lp-dashboard-panel { border:1px solid #ffffff12;border-radius:11px;padding:16px 13px;min-width:0}
+.lp-dashboard-panel h3 { font-size:10px;font-weight:500;letter-spacing:-.02em}
+.lp-category-chart { display:flex;align-items:center;gap:14px;margin-top:24px}
+.lp-donut { width:89px;height:89px;border-radius:50%;flex-shrink:0;background:conic-gradient(var(--lp-pink) 0 47%,var(--lp-lime) 47% 73%,#efdfd4 73% 100%);position:relative;transform:rotate(-65deg)}
+.lp-donut:after { content:'';position:absolute;inset:19px;border-radius:50%;background:#222}
+.lp-category-legend { font-size:7px;gap:12px}
+.lp-category-legend span:before { width:6px;height:6px}
+.lp-dashboard-bars { height:88px;gap:7px;margin:22px 5px 14px}
+.lp-dashboard-bars span { flex:1;max-width:17px}
+.lp-legend.lp-horizontal { flex-direction:row;font-size:7px;gap:10px}
+.lp-horizontal span:before { width:6px;height:6px}
+.lp-transaction { display:flex;gap:8px;align-items:center;margin-top:19px}
+.lp-transaction .ph { font-size:28px;color:var(--lp-pink)}
+.lp-transaction strong { font-size:9px;font-weight:500}
+.lp-transaction small { display:block;color:#999;font-size:7px}
+.lp-transaction b { margin-left:auto;font-size:9px;white-space:nowrap;font-weight:500}
+.lp-dashboard-goal { display:flex;align-items:center;gap:13px;margin-top:23px}
+.lp-dashboard-goal .ph { color:var(--lp-blush);font-size:25px}
+.lp-progress { height:9px;display:block;width:100%;border-radius:12px;background:#dedcda;position:relative;overflow:hidden}
+.lp-progress:after { content:'';position:absolute;inset:0 auto 0 0;width:70%;border-radius:inherit}
+.lp-pink-progress:after { background:var(--lp-pink)}
+.lp-lime-progress:after { background:var(--lp-lime);width:78%}
+.lp-dashboard-goal .lp-progress { height:7px;background:#62605e}
+.lp-dashboard-wrap>.lp-caption { text-align:right;margin:17px 3px 0}
+
+.lp-agents { padding:66px 0 48px;overflow:hidden}
+.lp-agents-heading { display:flex;align-items:end;justify-content:space-between;gap:45px;margin-bottom:34px}
+.lp-agents-heading .lp-eyebrow { margin-bottom:13px}
+.lp-agents-heading h2 { font-size:clamp(33px,3.9vw,54px);letter-spacing:-.05em}
+.lp-agents-heading>div:last-child { padding-bottom:5px;font-size:15px;line-height:1.6;color:#cecbc9}
+.lp-agents-heading .lp-text-link { margin-top:18px}
+.lp-pink-dot { color:var(--lp-pink)}
+.lp-agents-panorama { width:calc(100% + 28px);max-width:none;margin-left:-14px}
+.lp-agents-grid { display:grid;grid-template-columns:repeat(3,1fr);gap:42px;margin-top:15px}
+.lp-agent-name { display:inline-flex;gap:10px;align-items:center;border:1px solid var(--lp-pink);border-radius:100px;padding:5px 14px;font-size:12px;font-weight:500}
+.lp-agent-name .ph { color:var(--lp-pink);font-size:18px}
+.lp-agent h3 { font-size:25px;font-weight:650;margin-top:15px;letter-spacing:-.04em;line-height:1.2}
+.lp-agent p { font-size:15px;line-height:1.65;color:#c4c1bf;margin-top:10px;max-width:310px}
+.lp-agent-mobile-art { display:none}
+.lp-agents-caption { display:flex;align-items:center;gap:27px;text-align:center;margin-top:34px}
+.lp-agents-caption:before,.lp-agents-caption:after { content:'';height:1px;background:#ffffff20;flex:1}
+
+.lp-goals { padding:51px 0 49px}
+.lp-goals-grid { display:grid;grid-template-columns:1fr 1fr;gap:65px;align-items:center}
+.lp-goals h2 { font-size:36px}
+.lp-goals .lp-lead { margin-top:13px;font-size:16px}
+.lp-goals-demo { padding-top:12px;position:relative}
+.lp-goal-question { font-size:11px;display:block;font-weight:650;width:max-content;padding:14px 20px;position:relative;margin:0 auto 25px;border-radius:13px}
+.lp-goal-question:after { content:'';position:absolute;bottom:-10px;left:23px;width:15px;height:14px;background:#fff;clip-path:polygon(0 0,100% 0,0 100%)}
+.lp-goal-cards { display:flex;gap:20px}
+.lp-goal-card { flex:1;display:flex;align-items:center;gap:15px;padding:24px 19px;border-radius:17px}
+.lp-goal-card>.ph { font-size:36px;color:var(--lp-pink)}
+.lp-goal-card:last-child>.ph { color:#161b06;text-shadow:2px 2px var(--lp-lime)}
+.lp-goal-card>div { flex:1}
+.lp-goal-card strong { font-size:12px}
+.lp-goal-card .lp-progress { margin-top:11px;height:8px}
+
+.lp-trust { padding:61px 0 60px}
+.lp-trust-grid { display:grid;grid-template-columns:1.1fr 1fr;gap:70px;align-items:center}
+.lp-trust-copy { display:flex;align-items:start;gap:24px}
+.lp-lock-tile { background:#fbd8e7;border-radius:19px;width:89px;height:91px;display:grid;place-items:center;flex:0 0 auto}
+.lp-lock-tile .ph { font-size:49px}
+.lp-trust h2 { font-size:34px}
+.lp-trust-copy p { font-size:14px;color:var(--lp-muted);line-height:1.7;margin-top:14px}
+.lp-faq { border-left:1px solid #ddd8d4;padding-left:32px}
+.lp-faq>h3 { font-size:20px;margin-bottom:14px;letter-spacing:-.04em}
+.lp-faq details { border-top:1px solid #d8d4d0}
+.lp-faq summary { padding:15px 24px 15px 0;position:relative;font-size:12px;cursor:pointer;font-weight:600;list-style:none}
+.lp-faq summary::-webkit-details-marker { display:none}
+.lp-faq summary:after { content:'+';position:absolute;right:0;top:12px;font-size:20px;font-weight:400}
+.lp-faq details[open] summary:after { content:'−'}
+.lp-faq details p { color:var(--lp-muted);font-size:12px;line-height:1.7;padding:0 25px 17px 0;max-width:375px}
+.lp-faq summary:hover { color:var(--lp-pink-ink)}
+
+.lp-final-cta { background:var(--lp-pink);overflow:hidden}
+.lp-cta-grid { display:grid;grid-template-columns:1.25fr 1fr;gap:55px;align-items:center;min-height:300px}
+.lp-cta-copy { padding:43px 0 46px;z-index:2}
+.lp-cta-copy h2 { font-size:45px;letter-spacing:-.045em}
+.lp-cta-copy p { font-size:15px;margin-top:13px}
+.lp-cta-copy .lp-actions { margin-top:26px}
+.lp-cta-art { align-self:stretch;position:relative;overflow:hidden}
+.lp-cta-art img { position:absolute;width:100%;max-width:100%;height:100%;bottom:0;left:0;object-fit:contain;object-position:center bottom;mix-blend-mode:normal}
+.lp-footer { padding:47px 0 24px}
+.lp-footer-grid { display:grid;grid-template-columns:3fr 1fr 1fr;gap:55px}
+.lp-footer-brand { display:flex;align-items:start;gap:40px}
+.lp-footer-brand p { font-size:13px;line-height:1.8;color:#c4c1bf;padding-top:7px}
+.lp-footer nav { display:flex;flex-direction:column;align-items:start;gap:7px;font-size:12px;color:#c2bfbd}
+.lp-footer nav h3 { font-weight:550;color:var(--pig-offwhite);font-size:12px;letter-spacing:0;margin-bottom:4px}
+.lp-footer nav a:hover { color:var(--lp-pink)}
+.lp-footer-bottom { display:flex;justify-content:space-between;align-items:center;margin-top:42px;font-size:10px;color:#99948f}
+.lp-footer-bottom a { font-size:11px}
+.lp-footer-bottom a:hover { color:#fff}
+.lp-footer-bottom span { margin-left:9px}
+
+@media(min-width:1550px) {
+  .lp-hero-grid { min-height:704px}
+.lp-hero h1 { font-size:77px}
+.lp-hero-art { margin-left:0}
+.lp-piggy { width:92%;left:-15%}
+.lp-hero-chat { right:0;top:100px}
+.lp-how { padding-block:76px}
+.lp-open-finance { padding-block:92px}
 }
 
-/* ─── 3. Nav: vidro mais refinado + borda superior de luz ──────────────── */
-.rd .nav {
-  background: rgba(18,18,20,.66);
-  border: 1px solid rgba(255,255,255,.10);
-  box-shadow: 0 10px 40px rgba(0,0,0,.45), inset 0 1px 0 rgba(255,255,255,.06);
-}
-.rd .nav-links a { position: relative; }
-.rd .nav-links a::after {
-  content: ""; position: absolute; left: 0; right: 100%; bottom: -6px; height: 2px;
-  background: linear-gradient(90deg, var(--pink), var(--neon));
-  border-radius: 2px; transition: right .25s ease;
-}
-.rd .nav-links a:hover::after { right: 0; }
-
-/* ─── 4. Botão primário: brilho que atravessa no hover ─────────────────── */
-.rd .btn-primary { position: relative; overflow: hidden; }
-.rd .btn-primary::before {
-  content: ""; position: absolute; inset: 0; transform: translateX(-120%);
-  background: linear-gradient(105deg, transparent 30%, rgba(255,255,255,.35) 50%, transparent 70%);
-  transition: transform .6s ease;
-}
-.rd .btn-primary:hover::before { transform: translateX(120%); }
-.rd .btn-lg { padding: 15px 30px; }
-
-/* ─── 5. Cards com profundidade + borda-holofote sob o cursor ──────────── */
-.rd .card,
-.rd .plan-solo {
-  position: relative;
-  transition: transform .22s ease, border-color .22s ease, box-shadow .22s ease;
-}
-/* halo radial que segue o mouse (--mx/--my vêm do JS) */
-.rd .card::before,
-.rd .plan-solo::before {
-  content: ""; position: absolute; inset: 0; border-radius: inherit; pointer-events: none;
-  opacity: 0; transition: opacity .25s ease;
-  background: radial-gradient(220px circle at var(--mx, 50%) var(--my, 0),
-              rgba(255,45,142,.16), transparent 60%);
-}
-.rd .card:hover::before,
-.rd .plan-solo:hover::before { opacity: 1; }
-
-.rd .feature-card {
-  background: linear-gradient(180deg, rgba(255,255,255,.03), transparent), var(--card);
-  padding: 28px 26px 30px;
-}
-.rd .feature-card:hover {
-  transform: translateY(-4px);
-  border-color: rgba(255,45,142,.35);
-  box-shadow: 0 24px 50px rgba(255,45,142,.12), 0 8px 20px rgba(0,0,0,.4);
-}
-.rd .feature-card h3 { font-size: 1.12rem; letter-spacing: -.01em; }
-
-/* (não há bloco de ícone: o quadrado colorido em gradiente foi removido junto
-   com o do site.css. O ícone agora é só o glifo, herdado de .icon-box.) */
-
-/* ─── 6. Faixa de valor: chips com vidro e brilho no marcador ──────────── */
-.rd .value-strip { gap: 12px; margin: 8px 0 12px; }
-.rd .value-chip {
-  background: rgba(255,255,255,.04);
-  border: 1px solid rgba(255,255,255,.10);
-  box-shadow: inset 0 1px 0 rgba(255,255,255,.05);
-  transition: border-color .2s ease, transform .2s ease;
-}
-.rd .value-chip:hover { border-color: rgba(198,241,26,.4); transform: translateY(-2px); }
-
-/* ─── 8. Chat / summary: elevação com sombra tingida ───────────────────── */
-/* (não há seção 7: era a dos .rd .step, removida junto com o markup) */
-.rd .chat-card,
-.rd .summary-card {
-  box-shadow: 0 30px 70px rgba(0,0,0,.55), 0 0 0 1px rgba(255,45,142,.06),
-              0 12px 40px rgba(255,45,142,.08);
+@media(max-width:1190px) {
+  .lp-shell { width:calc(100% - 80px)}
+.lp-brand img { width:120px}
+.lp-hero-grid { min-height:610px}
+.lp-hero h1 { font-size:60px}
+.lp-hero .lp-lead { max-width:370px;font-size:16px}
+.lp-hero-art { margin-right:-20px;min-height:565px}
+.lp-hero-chat { width:225px;top:92px;right:0}
+.lp-chat-response { padding:17px 12px;gap:8px}
+.lp-chat-response p { font-size:9px}
+.lp-hero-perks { gap:15px;font-size:9px}
+.lp-hero-perks .ph { font-size:20px}
+.lp-hero .lp-actions { gap:23px}
+.lp-steps { gap:10px;grid-template-columns:1fr 25px 1fr 25px 1fr}
+.lp-step h3 { font-size:14px;gap:8px}
+.lp-step-number { width:36px;height:36px}
+.lp-finance-grid { gap:35px}
+.lp-finance-perks { gap:20px}
+.lp-finance-perks .ph { font-size:32px}
+.lp-connection-demo { gap:14px}
+.lp-bank-card { padding:16px 9px;gap:6px}
+.lp-bank-card .ph { font-size:24px}
+.lp-connected-card { padding:23px 13px}
+.lp-hub-icon { width:92px;height:92px}
+.lp-connection-hub:before { top:101px}
+.lp-connection-hub:after { top:75px;right:-19px}
+.lp-overview-grid { gap:37px;grid-template-columns:.8fr 1.2fr}
+.lp-dashboard { grid-template-columns:99px 1fr}
+.lp-dashboard-sidebar { padding-inline:7px}
+.lp-dashboard-sidebar>img { width:75px;margin-left:2px}
+.lp-dashboard-sidebar>div { font-size:7px;padding-inline:5px}
+.lp-dashboard-main { padding:25px 13px 20px}
+.lp-dashboard-panel { padding:13px 10px}
+.lp-category-chart { gap:9px}
+.lp-donut { width:70px;height:70px}
+.lp-donut:after { inset:15px}
+.lp-dashboard-heading strong { font-size:21px}
+.lp-dashboard-bars { gap:4px;height:76px}
+.lp-dashboard-panels { gap:8px}
+.lp-dashboard-tabs span { padding-inline:4px}
+.lp-agent h3 { font-size:22px}
+.lp-agent p { font-size:14px}
+.lp-agents-grid { gap:29px}
+.lp-goals-grid { gap:35px}
+.lp-goals h2 { font-size:32px}
+.lp-goal-card { padding:21px 15px}
+.lp-goal-card>.ph { font-size:30px}
+.lp-trust-grid { gap:35px}
+.lp-trust h2 { font-size:29px}
+.lp-lock-tile { width:72px;height:78px}
+.lp-lock-tile .ph { font-size:43px}
+.lp-trust-copy { gap:19px}
+.lp-footer-brand { gap:26px}
+.lp-cta-copy h2 { font-size:39px}
+.lp-cta-copy p { font-size:13px}
 }
 
-/* ─── 9. Plano: card com mais respiro e destaque de preço ──────────────── */
-.rd .plan-solo {
-  box-shadow: 0 30px 80px rgba(255,45,142,.18), inset 0 1px 0 rgba(255,255,255,.06);
+@media(max-width:980px) {
+  .lp-shell { width:calc(100% - 56px)}
+.lp-hero-grid { min-height:620px;grid-template-columns:1.15fr 1fr}
+.lp-hero h1 { font-size:clamp(43px,5.9vw,57px)}
+.lp-hero .lp-lead { font-size:15px;max-width:338px}
+.lp-hero-art { margin-right:-25px;min-height:620px;margin-left:-50px}
+.lp-piggy { width:115%;left:-24%;bottom:0;height:87%}
+.lp-hero-bubble { inset:80px -10px 110px 0}
+.lp-hero-chat { width:202px;right:0;top:55px}
+.lp-chat-sent { font-size:10px;padding:12px 14px;min-height:47px}
+.lp-chat-response { padding:15px 10px}
+.lp-chat-response>img { width:23px}
+.lp-chat-response strong { font-size:11px}
+.lp-chat-response p { font-size:8px}
+.lp-chat-response .lp-check { width:18px;height:18px;font-size:12px}
+.lp-hero-chat .lp-caption { font-size:8px;margin-top:11px}
+.lp-spark { display:none}
+.lp-hero-perks { flex-wrap:wrap;gap:17px;margin-top:34px;max-width:325px}
+.lp-hero .lp-actions { align-items:start;flex-direction:column;gap:22px}
+.lp-how { padding-block:55px}
+.lp-steps { gap:12px;grid-template-columns:repeat(3,1fr)}
+.lp-step-arrow { display:none}
+.lp-step h3 { font-size:12px}
+.lp-step-number { width:32px;height:32px;font-size:12px}
+.lp-step .lp-surface { height:125px}
+.lp-message-demo { padding:12px}
+.lp-message-input { font-size:8px;white-space:nowrap}
+.lp-record-demo { padding:22px 15px}
+.lp-record-demo>div { font-size:12px}
+.lp-record-demo p { font-size:11px}
+.lp-month-demo { padding:17px 14px}
+.lp-mini-chart { gap:10px}
+.lp-mini-chart .lp-bars { gap:4px;height:51px}
+.lp-mini-chart .lp-bars span { width:11px}
+.lp-legend { font-size:8px}
+.lp-open-finance { padding-block:60px}
+.lp-finance-grid { grid-template-columns:1fr 1.05fr;gap:22px}
+.lp-finance-copy h2 { font-size:31px}
+.lp-finance-copy .lp-lead { font-size:15px}
+.lp-finance-perks { gap:17px;flex-wrap:wrap}
+.lp-finance-perks li { font-size:9px;gap:6px}
+.lp-finance-perks .ph { font-size:26px}
+.lp-connection-demo { gap:9px}
+.lp-bank-card { flex-direction:column;align-items:start;padding:12px;gap:5px}
+.lp-bank-card>div { width:100%}
+.lp-bank-card strong { font-size:8px}
+.lp-hub-icon { width:73px;height:73px;border-width:4px}
+.lp-hub-icon img { width:38px}
+.lp-connection-hub { padding-top:48px}
+.lp-connection-hub:before { top:84px;right:-13px}
+.lp-connection-hub:after { font-size:28px;top:63px;right:-17px}
+.lp-consent { font-size:7px;padding:9px 7px;white-space:normal}
+.lp-consent .ph { font-size:19px}
+.lp-connected-card { padding:18px 10px;min-height:285px}
+.lp-connected-card h3 { font-size:10px}
+.lp-connected-card h4 { font-size:9px}
+.lp-sync { font-size:8px;gap:4px}
+.lp-account-row { gap:5px}
+.lp-account-row .lp-skeleton { height:5px}
+.lp-overview-grid { grid-template-columns:1fr;gap:37px}
+.lp-overview-copy { display:grid;grid-template-columns:1fr 1fr;column-gap:35px}
+.lp-overview-copy .lp-eyebrow { grid-column:1/-1}
+.lp-overview-copy h2 { grid-column:1;font-size:38px}
+.lp-overview-copy .lp-lead { grid-column:1;font-size:16px}
+.lp-overview-copy .lp-feature-list { grid-column:2;grid-row:2/4;margin:0;gap:21px;align-self:center}
+.lp-overview-copy .lp-text-link { margin-top:27px;grid-column:1/-1}
+.lp-dashboard { grid-template-columns:140px 1fr;min-height:390px;max-width:720px;margin:auto}
+.lp-dashboard-main { padding:27px 23px}
+.lp-dashboard-sidebar { padding:23px 10px}
+.lp-dashboard-sidebar>img { width:98px;margin-bottom:22px}
+.lp-dashboard-sidebar>div { font-size:9px;padding:12px 10px}
+.lp-dashboard-panel { padding:17px}
+.lp-dashboard-panel h3 { font-size:11px}
+.lp-dashboard-tabs { font-size:9px}
+.lp-category-chart { justify-content:space-around}
+.lp-donut { width:90px;height:90px}
+.lp-donut:after { inset:20px}
+.lp-category-legend { font-size:9px}
+.lp-dashboard-bars { height:95px;gap:8px}
+.lp-legend.lp-horizontal { font-size:8px}
+.lp-transaction strong,.lp-transaction b { font-size:11px}
+.lp-transaction small { font-size:9px}
+.lp-agents-heading { gap:25px}
+.lp-agents-heading>div:last-child { font-size:12px}
+.lp-agents-heading .lp-text-link { font-size:12px}
+.lp-agents-heading h2 { font-size:38px}
+.lp-agents-grid { gap:23px}
+.lp-agent h3 { font-size:21px}
+.lp-agent p { font-size:12px}
+.lp-agent-name { font-size:10px;padding:4px 10px;gap:7px}
+.lp-goals-grid { gap:25px}
+.lp-goals h2 { font-size:28px}
+.lp-goals .lp-lead { font-size:14px}
+.lp-goal-cards { gap:12px}
+.lp-goal-card { padding:19px 12px;gap:10px}
+.lp-goal-card>.ph { font-size:26px}
+.lp-goal-card strong { font-size:10px}
+.lp-trust-grid { gap:30px}
+.lp-trust-copy { gap:14px;flex-direction:column}
+.lp-trust-copy br { display:none}
+.lp-lock-tile { width:58px;height:58px;border-radius:13px}
+.lp-lock-tile .ph { font-size:34px}
+.lp-trust h2 { font-size:30px}
+.lp-trust-copy p { font-size:13px}
+.lp-faq { padding-left:25px}
+.lp-cta-grid { gap:20px;min-height:315px}
+.lp-cta-copy h2 { font-size:36px}
+.lp-cta-copy p { max-width:315px;line-height:1.6}
+.lp-cta-copy .lp-actions { gap:20px}
+.lp-footer-brand { flex-direction:column;gap:15px}
+.lp-footer-grid { grid-template-columns:2.2fr 1fr 1fr;gap:40px}
 }
-.rd .plan-solo-amount { font-size: 3.6rem; letter-spacing: -.04em; }
 
-/* ─── 10. Ritmo vertical: seções respiram mais ─────────────────────────── */
-.rd .section { padding: 108px 0; }
-.rd .sec-sep {
-  height: 1px; margin: 0 auto; max-width: 1200px;
-  background: linear-gradient(90deg, transparent, rgba(255,255,255,.12), transparent);
+@media(max-width:640px) {
+  html { scroll-padding-top:86px}
+.lp-shell { width:calc(100% - 40px)}
+.lp-brand img { width:111px}
+.lp-hero-grid { display:flex;flex-direction:column;min-height:0}
+.lp-hero-copy { padding:48px 0 0;width:100%}
+.lp-eyebrow { font-size:10px;letter-spacing:.04em;margin-bottom:17px}
+.lp-hero h1 { font-size:clamp(39px,10.3vw,62px);line-height:1.02;letter-spacing:-.055em}
+.lp-underline:after { height:5px;bottom:-7px}
+.lp-hero .lp-lead { font-size:15px;max-width:440px;margin-top:25px;line-height:1.65}
+.lp-hero .lp-actions { flex-direction:row;align-items:center;gap:23px;margin-top:24px}
+.lp-btn { min-height:49px;font-size:12px;padding:14px 20px;gap:16px}
+.lp-text-link { font-size:11px;gap:8px}
+.lp-hero-perks { max-width:none;gap:18px;margin-top:28px;font-size:8px;flex-wrap:nowrap;justify-content:space-between}
+.lp-hero-perks li { gap:6px}
+.lp-hero-perks .ph { font-size:18px}
+.lp-hero-art { align-self:stretch;min-height:410px;margin:14px -4px 0}
+.lp-hero-bubble { inset:19px 0 75px 9%;border-radius:48% 48% 43% 45%}
+.lp-hero-bubble:after { height:75px;bottom:-38px;width:90px}
+.lp-piggy { left:-6%;height:100%;width:85%}
+.lp-hero-chat { right:0;top:45px;width:184px}
+.lp-chat-sent { font-size:9px;padding:12px;min-height:49px}
+.lp-chat-response { gap:8px;padding:15px 10px}
+.lp-chat-response p { font-size:7px;margin-top:6px}
+.lp-chat-response>img { width:21px}
+.lp-chat-response strong { font-size:11px}
+.lp-hero-chat .lp-caption { font-size:8px}
+.lp-how { padding:46px 0}
+.lp-how:before { right:-45px;opacity:.3;width:130px;height:180px}
+.lp-how h2 { font-size:31px;max-width:310px}
+.lp-section-heading .lp-lead { font-size:14px;max-width:300px}
+.lp-steps { grid-template-columns:1fr;margin-top:30px;gap:25px}
+.lp-step { display:grid;grid-template-columns:1fr 1.3fr;gap:16px;align-items:center}
+.lp-step h3 { display:flex;align-items:start;flex-direction:column;font-size:14px;white-space:normal;margin-bottom:0;line-height:1.35;gap:11px}
+.lp-step-number { height:34px;width:34px;font-size:11px}
+.lp-step .lp-surface { height:128px}
+.lp-month-demo { padding:17px 13px}
+.lp-month-demo>strong { font-size:11px}
+.lp-message-input { padding:10px 6px}
+.lp-message-input .ph { font-size:13px}
+.lp-message-tools { padding-top:20px;gap:17px;font-size:20px}
+.lp-record-demo { padding:23px 14px}
+.lp-record-demo>div { gap:7px;font-size:11px}
+.lp-record-demo .ph { font-size:27px}
+.lp-record-demo p { gap:6px;font-size:10px}
+.lp-record-demo .lp-check { width:20px;height:20px;font-size:13px}
+.lp-mini-chart { gap:12px;justify-content:space-between}
+.lp-mini-chart .lp-bars { gap:4px;flex:0 1 84px}
+.lp-mini-chart .lp-bars span { width:9px}
+.lp-legend { font-size:7px;gap:9px}
+.lp-legend span { gap:5px}
+.lp-legend span:before { width:6px;height:6px}
+.lp-open-finance { padding:47px 0 40px}
+.lp-finance-grid { grid-template-columns:1fr;gap:32px}
+.lp-finance-copy h2 { font-size:34px;max-width:340px}
+.lp-finance-copy .lp-lead { font-size:15px;max-width:350px}
+.lp-finance-perks { gap:26px;margin:25px 0}
+.lp-finance-perks li { gap:9px;font-size:10px}
+.lp-finance-perks .ph { font-size:32px}
+.lp-fine-print { font-size:10px}
+.lp-connection-demo { max-width:420px;width:100%;margin:auto;gap:16px;padding-bottom:29px}
+.lp-bank-card { flex-direction:row;gap:8px;padding:15px 9px}
+.lp-bank-card strong { font-size:8px}
+.lp-bank-card .ph { font-size:25px}
+.lp-bank-card .lp-skeleton { height:5px}
+.lp-bank-accounts { gap:60px}
+.lp-bank-accounts:after { width:27px}
+.lp-hub-icon { width:76px;height:76px}
+.lp-consent { font-size:8px;white-space:nowrap;padding:10px 9px}
+.lp-connection-hub:before { top:87px;left:-16px;right:-19px}
+.lp-connection-hub:after { top:66px;right:-23px}
+.lp-connected-card { min-height:282px;padding:21px 11px}
+.lp-connected-card h3 { font-size:10px}
+.lp-connected-card h4 { font-size:10px}
+.lp-sync { font-size:8px}
+.lp-connection-demo .lp-caption { font-size:9px}
+.lp-overview { padding:49px 0 39px}
+.lp-overview-grid { gap:34px}
+.lp-overview-copy { display:block}
+.lp-overview-copy h2 { font-size:34px}
+.lp-overview-copy .lp-lead { font-size:15px;margin-top:17px;max-width:350px}
+.lp-overview-copy .lp-feature-list { margin:27px 0 26px;gap:17px;font-size:13px}
+.lp-feature-list .ph { height:40px;width:40px;font-size:23px}
+.lp-overview-copy .lp-text-link { margin:0;font-size:12px}
+.lp-dashboard { grid-template-columns:61px 1fr;min-height:303px;border-radius:12px}
+.lp-dashboard-sidebar { padding:18px 4px}
+.lp-dashboard-sidebar>img { width:47px;margin:0 2px 20px}
+.lp-dashboard-sidebar>div { padding:10px 6px;font-size:5px;gap:4px;flex-direction:column;align-items:start}
+.lp-dashboard-sidebar .ph { font-size:13px}
+.lp-dashboard-sidebar>div span { font-size:5px;letter-spacing:-.01em}
+.lp-dashboard-main { padding:20px 10px 17px}
+.lp-dashboard-heading strong { font-size:18px}
+.lp-dashboard-heading .ph { font-size:15px}
+.lp-dashboard-tabs { font-size:6px;margin-top:17px}
+.lp-dashboard-tabs span { padding:0 4px 10px}
+.lp-dashboard-panels { gap:7px;margin-top:11px}
+.lp-dashboard-panel { padding:12px 8px}
+.lp-dashboard-panel h3 { font-size:7px}
+.lp-category-chart { flex-direction:column;gap:10px;margin-top:16px}
+.lp-donut { height:59px;width:59px}
+.lp-donut:after { inset:13px}
+.lp-category-legend { font-size:6px;gap:6px;align-self:start;margin-left:3px}
+.lp-category-legend span:before { height:4px;width:4px}
+.lp-dashboard-bars { height:92px;gap:4px;margin:17px 0 12px}
+.lp-legend.lp-horizontal { font-size:5px;gap:6px;flex-wrap:wrap}
+.lp-horizontal span:before { width:4px;height:4px}
+.lp-transaction { gap:5px;margin-top:14px;flex-wrap:wrap}
+.lp-transaction .ph { font-size:20px}
+.lp-transaction strong,.lp-transaction b { font-size:7px}
+.lp-transaction small { font-size:5px}
+.lp-transaction b { margin-left:25px;margin-top:-4px}
+.lp-dashboard-goal { margin-top:18px;gap:6px}
+.lp-dashboard-goal .ph { font-size:22px}
+.lp-dashboard-goal .lp-progress { height:5px}
+.lp-dashboard-wrap>.lp-caption { font-size:8px;margin-top:10px}
+.lp-agents { padding:43px 0 37px}
+.lp-agents-heading { display:block;margin-bottom:26px}
+.lp-agents-heading h2 { font-size:37px}
+.lp-agents-heading>div:last-child { font-size:13px;margin-top:18px;line-height:1.65}
+.lp-agents-heading>div:last-child br { display:none}
+.lp-agents-heading .lp-text-link { font-size:12px;margin-top:13px}
+.lp-agents-panorama { display:none}
+.lp-agents-grid { grid-template-columns:1fr;gap:29px;margin-top:0}
+.lp-agent { border-radius:20px;background:#191919;overflow:hidden;border:1px solid #ffffff0c}
+.lp-agent-mobile-art { display:block;width:100%;height:auto;aspect-ratio:1;object-fit:cover;object-position:center;max-height:none}
+.lp-agent:first-child .lp-agent-mobile-art { object-position:left center}
+.lp-agent:last-child .lp-agent-mobile-art { object-position:right center}
+.lp-agent-body { padding:22px 22px 25px}
+.lp-agent-name { font-size:11px;gap:8px;padding:5px 13px}
+.lp-agent h3 { font-size:26px;margin-top:13px}
+.lp-agent p { font-size:14px;max-width:none;margin-top:10px}
+.lp-agents-caption { font-size:8px;gap:15px;margin-top:28px}
+.lp-goals { padding:40px 0 43px}
+.lp-goals-grid { grid-template-columns:1fr;gap:27px}
+.lp-goals h2 { font-size:33px}
+.lp-goals .lp-lead { font-size:15px}
+.lp-goals-demo { padding:0}
+.lp-goal-question { font-size:10px;margin-bottom:24px;padding:12px 16px}
+.lp-goal-card { padding:20px 14px;gap:12px}
+.lp-goal-card strong { font-size:12px}
+.lp-goal-card>.ph { font-size:30px}
+.lp-goal-card .lp-progress { height:7px}
+.lp-trust { padding:42px 0}
+.lp-trust-grid { grid-template-columns:1fr;gap:35px}
+.lp-trust-copy { flex-direction:row;gap:20px}
+.lp-trust h2 { font-size:29px}
+.lp-trust-copy br { display:block}
+.lp-trust-copy p { font-size:12px;line-height:1.7}
+.lp-lock-tile { width:58px;height:66px}
+.lp-lock-tile .ph { font-size:34px}
+.lp-faq { padding:0;border-left:0}
+.lp-faq>h3 { font-size:21px;margin-bottom:18px}
+.lp-faq summary { font-size:13px;padding-block:17px}
+.lp-faq summary:after { top:14px}
+.lp-faq details p { font-size:13px;line-height:1.7}
+.lp-final-cta .lp-shell { width:100%}
+.lp-cta-grid { grid-template-columns:1fr;gap:0;min-height:0}
+.lp-cta-copy { padding:38px 20px 0}
+.lp-cta-copy h2 { font-size:39px}
+.lp-cta-copy p { font-size:14px;max-width:320px}
+.lp-cta-copy .lp-actions { gap:29px;margin-top:23px}
+.lp-cta-copy .lp-text-link { font-size:12px}
+.lp-cta-art { height:205px;width:100%;max-width:445px;margin:14px auto 0}
+.lp-footer { padding:35px 0 23px}
+.lp-footer-grid { grid-template-columns:1fr 1fr;gap:30px 35px}
+.lp-footer-brand { grid-column:1/-1;display:flex;flex-direction:row;gap:32px;align-items:center}
+.lp-footer-brand p { font-size:11px;padding:0}
+.lp-footer .lp-brand img { width:115px}
+.lp-footer nav { gap:9px;font-size:12px}
+.lp-footer nav h3 { font-size:12px;margin-bottom:4px}
+.lp-footer-bottom { margin-top:32px;padding-top:20px;border-top:1px solid #ffffff13;font-size:9px}
+.lp-footer-bottom a { font-size:10px}
 }
-.rd .cta-band {
-  padding: 68px 30px;
-  background:
-    radial-gradient(600px circle at 50% 0, rgba(255,45,142,.18), transparent 70%),
-    linear-gradient(180deg, rgba(255,45,142,.08), rgba(255,255,255,.02));
-  box-shadow: 0 30px 80px rgba(255,45,142,.12);
+
+@media(max-width:360px) {
+  .lp-shell { width:calc(100% - 32px)}
+.lp-brand img { width:99px}
+.lp-hero h1 { font-size:37px}
+.lp-hero .lp-actions { gap:17px}
+.lp-hero-perks { gap:9px;font-size:7px}
+.lp-hero-perks .ph { font-size:16px}
+.lp-hero-art { min-height:367px}
+.lp-hero-chat { width:164px}
+.lp-chat-response { gap:6px;padding:13px 8px}
+.lp-chat-response p { font-size:6.5px}
+.lp-chat-response .lp-check { height:15px;width:15px;font-size:10px}
+.lp-finance-perks { gap:19px}
+.lp-finance-perks .ph { font-size:28px}
+.lp-finance-perks li { font-size:9px}
+.lp-connection-demo { gap:10px}
+.lp-bank-card { gap:5px;padding:13px 7px}
+.lp-bank-card strong { font-size:7px}
+.lp-bank-card .ph { font-size:20px}
+.lp-hub-icon { height:68px;width:68px}
+.lp-consent { font-size:7px;padding:9px 6px}
+.lp-connection-hub:before { top:82px}
+.lp-connection-hub:after { right:-18px;top:62px}
+.lp-connected-card { padding:19px 9px}
+.lp-connected-card h3 { font-size:9px}
+.lp-dashboard { grid-template-columns:54px 1fr}
+.lp-dashboard-main { padding:20px 8px}
+.lp-dashboard-panel { padding:11px 6px}
+.lp-goals h2 { font-size:30px}
+.lp-goal-card { gap:8px;padding:19px 10px}
+.lp-trust-copy { gap:13px}
+.lp-trust h2 { font-size:26px}
+.lp-trust-copy p { font-size:11px}
+.lp-cta-copy h2 { font-size:36px}
+.lp-footer-brand { gap:23px}
 }
 
-/* ─── 11. FAQ: item com hover mais claro e chevron animado ─────────────── */
-.rd .faq-item { transition: border-color .2s ease, background .2s ease; }
-.rd .faq-item:hover { border-color: rgba(255,255,255,.18); }
-.rd .faq-q .chev { transition: transform .2s ease; }
-.rd .faq-item.open .chev { transform: rotate(45deg); }
+.lp-section-light .lp-caption { color:var(--lp-muted)}
 
-/* ─── 12. Mobile: mantém o respiro sem estourar ────────────────────────── */
+.lp-final-cta a:focus-visible { outline-color:var(--lp-black)}
+
+@media(prefers-reduced-motion:reduce) {
+  html { scroll-behavior:auto}
+*,*:before,*:after { animation:none!important;transition:none!important}
+.lp-dashboard { transform:none}
+}
+
+
+
+/* Vídeo opcional, entre o hero e os três passos. */
+.lp-home-vsl { padding:58px 0 49px}
+.lp-home-vsl .lp-shell { max-width:1050px}
+.lp-vsl-heading { text-align:center;margin:0 auto 30px}
+.lp-vsl-heading .lp-eyebrow { margin-bottom:15px}
+.lp-vsl-heading h2 { font-size:clamp(30px,3.5vw,44px);line-height:1.13}
+.lp-vsl-heading>p:not(.lp-eyebrow) { font-size:16px;color:#c4bfbe;margin-top:16px}
+.lp-vsl-player { max-width:920px;margin-inline:auto;border:1px solid #ffffff29;border-radius:22px;overflow:hidden;background:#000;box-shadow:0 18px 55px #0003}
+.lp-vsl-player video { width:100%;height:auto;aspect-ratio:16/9;display:block;object-fit:contain}
+.lp-vsl-player video:focus-visible { outline:3px solid var(--lp-pink);outline-offset:-4px}
+.lp-vsl-player video a { text-decoration:underline}
+.lp-vsl-actions { display:flex;justify-content:center;margin-top:28px}
+.lp-vsl-actions .lp-btn { font-size:14px;min-width:185px}
+
+@media(max-width:640px) {
+  .lp-home-vsl { padding:36px 0}
+.lp-vsl-heading { margin-bottom:24px}
+.lp-vsl-heading h2 { font-size:32px}
+.lp-vsl-heading>p:not(.lp-eyebrow) { font-size:16px;max-width:290px;margin:15px auto 0}
+.lp-vsl-player { border-radius:13px}
+.lp-vsl-actions { margin-top:24px}
+}
+
+/* Navegação oficial de sessão/menu com o header integral da landing. */
+body.lp .nav { top: 0; max-width: none; margin: 0; border-radius: 0; background: var(--pig-black); color: var(--pig-offwhite); box-shadow: none; backdrop-filter: none; padding-inline: max(56px, calc((100% - 1240px) / 2)); min-height: 78px; }
+body.lp .nav .btn-primary { background: var(--pig-pink); color: var(--pig-black); border-radius: 100px; box-shadow: none; }
+@media (min-width: 901px) {
+  body.lp .nav-links { gap: 25px; margin-left: auto; }
+  body.lp .nav-right { margin-left: 0; }
+  body.lp .nav-links a { font-size: 12px; }
+}
+body.lp .nav-logo { flex-shrink: 0; }
+body.lp .nav-logo .logo-full { width: 142px; height: auto; }
+html.pb-safe body.lp .nav { top: env(safe-area-inset-top); }
+body.lp .nav a:focus-visible { outline: 3px solid var(--pig-pink); outline-offset: 4px; }
+@media (min-width: 901px) and (max-width: 1190px) {
+  body.lp .nav { padding-inline: 28px; gap: 20px; }
+  body.lp .nav-logo .logo-full { width: 120px; }
+  body.lp .nav-links { gap: 17px; }
+  body.lp .nav-links a { font-size: 10px; }
+}
 @media (max-width: 900px) {
-  .rd .section { padding: 72px 0; }
+  body.lp .nav { padding-inline: 18px; min-height: 70px; }
+  body.lp .nav-logo .logo-full { width: 111px; }
 }
-/* No mobile, o título da hero é o LCP. As seções mais distantes têm cards,
-   SVGs e animações que não estão visíveis na primeira tela; deixar o navegador
-   pular layout e pintura delas tira esse trabalho do caminho crítico. A seção
-   de funcionalidades continua no layout normal para que a âncora seguinte não
-   mude de posição quando o navegador materializa o conteúdo adiado. */
-@media (max-width: 760px) {
-  .rd main > section:not(.hero-grid):not(#funcionalidades),
-  .rd > .footer {
-    content-visibility: auto;
-  }
-  .rd #vsl { contain-intrinsic-size: auto 600px; }
-  .rd #como-funciona { contain-intrinsic-size: auto 1450px; }
-  .rd main > .tech-split { contain-intrinsic-size: auto 850px; }
-  .rd #agentes { contain-intrinsic-size: auto 1650px; }
-  .rd #precos { contain-intrinsic-size: auto 950px; }
-  .rd #faq { contain-intrinsic-size: auto 900px; }
-  .rd > .footer { contain-intrinsic-size: auto 550px; }
+@media (max-width: 480px) {
+  body.lp .nav { padding-inline: 12px; min-height: 66px; }
 }
-@media (max-width: 560px) {
-  .rd .hero-title { font-size: clamp(2.2rem, 9vw, 3rem); }
-  .rd .plan-solo-amount { font-size: 3rem; }
+@media (max-width: 360px) {
+  body.lp .nav-logo .logo-full { width: 99px; }
 }
-
-/* ─── 13. Como funciona: trilho de 3 cards que abre no hover ───────────── */
-/* Um card aberto por vez: os anteriores ficam com check (is-done), os
-   seguintes com anel tracejado (is-idle). Estados vêm do IIFE da index. */
-.rd .hiw-rail {
-  --hiw-ease: cubic-bezier(.45,0,0,1);   /* NÃO usar --ease: brand.css tem outra curva */
-  --hiw-wa: #25D366;
-  display: flex; flex-direction: column; gap: 14px; margin-top: 44px;
-}
-/* altura em rem, não px: com fonte-raiz grande (ajuste de acessibilidade do
-   navegador, que não é zoom) a caixa precisa crescer junto com o texto. */
-@media (min-width: 900px) { .rd .hiw-rail { flex-direction: row; height: 41.25rem; } }
-
-.rd .hiw-card {
-  position: relative; display: flex; flex-direction: column; justify-content: space-between;
-  min-width: 0; overflow: hidden; border: 1px solid var(--line); border-radius: var(--radius-lg);
-  background: var(--card); padding: 28px 26px 30px; flex: 1 1 0;
-  /* ponytail: redimensionar cruzando 899→900px pisca os 3 cards em 54px por
-     ~150ms (abaixo é flex:none/basis auto, acima é basis 0 com transition de
-     flex-grow saindo do zero). Basis não-zero muda a razão aberto/fechado e
-     derruba a asserção "aberto ≥ 2× fechado"; sair disso pede transicionar
-     outra propriedade que não flex-grow. Só quem redimensiona/gira vê. */
-  transition: flex-grow .6s var(--hiw-ease), background-color .6s var(--hiw-ease),
-              border-color .6s var(--hiw-ease), box-shadow .6s var(--hiw-ease);
-  cursor: pointer;
-}
-.rd .hiw-card:focus-visible { outline: 2px solid var(--pink); outline-offset: 3px; }
-@media (min-width: 900px) { .rd .hiw-card.is-open { flex-grow: 2.7; } }
-@media (max-width: 899px) {
-  .rd .hiw-rail { gap: 12px; }
-  /* flex-basis:0 do desktop faria o card ignorar o conteúdo e travar na
-     min-height: aberto, a demo transbordava por cima do rodapé. */
-  .rd .hiw-card { flex: none; min-height: 7.375rem; transition: none; }
-  .rd .hiw-card.is-open { min-height: 35rem; }
-}
-.rd .hiw-card.is-open { background: var(--card-2); border-color: var(--line-2); box-shadow: var(--shadow); }
-.rd .hiw-head { display: flex; flex-wrap: wrap; align-items: baseline; gap: 14px; }
-.rd .hiw-num { font-size: .95rem; font-weight: 700; color: var(--ink-3); letter-spacing: -.04em; font-variant-numeric: tabular-nums; }
-.rd .hiw-card.is-open .hiw-num { color: var(--pink); }
-.rd .hiw-card.is-done .hiw-num { color: var(--neon); }
-.rd .hiw-head h3 { font-size: 1.55rem; font-weight: 700; letter-spacing: -.03em; }
-
-.rd .hiw-foot { margin-top: auto; padding-top: 22px; }
-.rd .hiw-foot h4 { font-size: 1.12rem; font-weight: 700; letter-spacing: -.02em; text-wrap: balance; }
-
-/* miolo: os três estados empilhados na mesma célula */
-.rd .hiw-stage { flex: 1 1 auto; display: grid; place-items: center; margin: 22px 0 0; min-height: 0; }
-.rd .hiw-state { grid-area: 1/1; width: 100%; opacity: 0; visibility: hidden; transition: opacity .35s ease; }
-.rd .hiw-card.is-open .hiw-demo { opacity: 1; visibility: visible; transition-delay: .18s; }
-.rd .hiw-card.is-done .hiw-done { opacity: 1; visibility: visible; transition-delay: .1s; }
-.rd .hiw-card.is-idle .hiw-idle { opacity: 1; visibility: visible; }
-/* O JS põe .is-esperando enquanto o trilho não apareceu na tela: sem isso o chat
-   do card 1 termina de animar ~1290px antes da dobra. Sem JS a classe não existe
-   e as animações rodam no parse, como antes. */
-.rd .hiw-rail.is-esperando .hiw-card.is-open * { animation: none; }
-/* done/idle saem do fluxo e ancoram pelo CÍRCULO no meio do CARD (altura igual
-   nos três): 37px = metade dos 74px do .hiw-tick/.hiw-ring. Centrar o BLOCO
-   desalinharia — o done tem duas linhas de texto e o idle uma. */
-.rd .hiw-done, .rd .hiw-idle {
-  position: absolute; top: calc(50% - 37px);
-  left: 26px; right: 26px; width: auto;   /* = padding lateral do .hiw-card */
-}
-@media (max-width: 899px) {
-  .rd .hiw-card:not(.is-open) .hiw-stage { display: none; }
-  .rd .hiw-card:not(.is-open) { justify-content: center; }
-  .rd .hiw-card:not(.is-open) .hiw-foot { display: none; }
-}
-
-/* estado concluído */
-.rd .hiw-done { text-align: center; }
-.rd .hiw-tick {
-  width: 74px; height: 74px; margin: 0 auto 18px; border-radius: 50%; background: var(--neon);
-  display: grid; place-items: center;
-  box-shadow: 0 0 0 12px rgba(198,241,26,.10), 0 0 46px rgba(198,241,26,.30);
-}
-.rd .hiw-tick svg { width: 34px; height: 34px; fill: none; stroke: var(--neon-ink); stroke-width: 3.4; stroke-linecap: round; stroke-linejoin: round; }
-.rd .hiw-done b { display: block; font-size: 1rem; font-weight: 700; }
-.rd .hiw-done span { display: block; margin-top: 6px; color: var(--ink-3); font-size: .85rem; }
-
-/* estado ocioso */
-.rd .hiw-idle { text-align: center; color: var(--ink-3); }
-.rd .hiw-ring { width: 74px; height: 74px; margin: 0 auto 18px; border-radius: 50%; border: 1px dashed var(--line-2); display: grid; place-items: center; }
-.rd .hiw-ring svg { width: 28px; height: 28px; fill: none; stroke: currentColor; stroke-width: 1.5; }
-.rd .hiw-idle span { font-size: .85rem; }
-
-/* painéis de demo */
-.rd .hiw-panel { background: var(--bg); border: 1px solid var(--line); border-radius: 18px; padding: 16px; }
-.rd .hiw-panel-top {
-  display: flex; align-items: center; justify-content: space-between; color: var(--ink-3);
-  font-size: .74rem; font-weight: 600; letter-spacing: .08em; text-transform: uppercase; margin-bottom: 14px;
-}
-.rd .hiw-dot { width: 7px; height: 7px; border-radius: 50%; background: var(--hiw-wa); display: inline-block; margin-right: 7px; vertical-align: 1px; }
-
-/* chat */
-.rd .hiw-chat { display: flex; flex-direction: column; gap: 10px; }
-.rd .hiw-msg { max-width: 82%; padding: 10px 13px; border-radius: 14px; font-size: .92rem; line-height: 1.42; opacity: 0; }
-.rd .hiw-card.is-open .hiw-msg { animation: hiw-pop .45s var(--hiw-ease) forwards; }
-.rd .hiw-msg.out { align-self: flex-end; background: #134D3C; border-bottom-right-radius: 5px; }
-.rd .hiw-msg.in { align-self: flex-start; background: #1E1E22; border-bottom-left-radius: 5px; }
-.rd .hiw-msg time { display: block; margin-top: 4px; font-size: .66rem; color: rgba(255,255,255,.35); text-align: right; }
-@keyframes hiw-pop { from { opacity: 0; transform: translateY(10px); } to { opacity: 1; transform: none; } }
-.rd .hiw-d1 { animation-delay: .35s; } .rd .hiw-d2 { animation-delay: .95s; }
-.rd .hiw-d3 { animation-delay: 1.55s; } .rd .hiw-d4 { animation-delay: 2.15s; }
-
-.rd .hiw-qr {
-  display: flex; align-items: center; gap: 14px; margin-bottom: 14px; padding: 12px; border-radius: 14px;
-  background: color-mix(in srgb, var(--hiw-wa) 8%, transparent);
-  border: 1px solid color-mix(in srgb, var(--hiw-wa) 22%, transparent);
-}
-.rd .hiw-qr svg { width: 38px; height: 38px; flex: none; fill: var(--hiw-wa); }
-.rd .hiw-qr b { display: block; font-size: .92rem; }
-.rd .hiw-qr span { color: var(--ink-2); font-size: .8rem; }
-
-/* recibo do Piggy */
-.rd .hiw-receipt { margin-top: 12px; border-radius: 14px; border: 1px solid rgba(255,45,142,.28); background: var(--pink-soft); padding: 13px 14px; opacity: 0; }
-.rd .hiw-card.is-open .hiw-receipt { animation: hiw-pop .5s var(--hiw-ease) .8s forwards; }
-.rd .hiw-row { display: flex; justify-content: space-between; align-items: center; font-size: .86rem; }
-.rd .hiw-row + .hiw-row { margin-top: 8px; padding-top: 8px; border-top: 1px solid rgba(255,255,255,.08); }
-.rd .hiw-k { color: var(--ink-2); }
-.rd .hiw-v { font-weight: 700; font-variant-numeric: tabular-nums; }
-.rd .hiw-tag { font-size: .7rem; font-weight: 700; padding: 3px 9px; border-radius: 999px; background: rgba(255,45,142,.22); color: #FFA9D0; }
-
-/* gráficos */
-.rd .hiw-charts { display: grid; gap: 12px; }
-.rd .hiw-kpis { display: grid; grid-template-columns: 1fr 1fr; gap: 12px; }
-.rd .hiw-kpi { background: var(--bg); border: 1px solid var(--line); border-radius: 16px; padding: 13px 15px; }
-.rd .hiw-kpi span { display: block; color: var(--ink-3); font-size: .72rem; font-weight: 600; letter-spacing: .07em; text-transform: uppercase; }
-.rd .hiw-kpi b { display: block; margin-top: 5px; font-size: 1.32rem; font-weight: 800; letter-spacing: -.02em; font-variant-numeric: tabular-nums; }
-.rd .hiw-kpi b.neg { color: var(--neg); } .rd .hiw-kpi b.pos { color: var(--neon); }
-.rd .hiw-donut { display: flex; align-items: center; gap: 18px; }
-.rd .hiw-donut svg { width: 118px; height: 118px; flex: none; transform: rotate(-90deg); }
-/* nada de stroke-dashoffset aqui: os offsets vêm dos atributos do SVG (que a
-   CSS venceria), e é o que põe cada fatia depois da anterior. */
-.rd .hiw-donut circle { fill: none; stroke-width: 11; }
-.rd .hiw-card.is-open .hiw-donut circle { animation: hiw-draw .9s var(--hiw-ease) .25s backwards; }
-@keyframes hiw-draw { from { stroke-dasharray: 0 264; } }
-.rd .hiw-legend { list-style: none; display: grid; gap: 9px; font-size: .86rem; flex: 1; }
-.rd .hiw-legend li { display: flex; align-items: center; gap: 9px; color: var(--ink-2); }
-.rd .hiw-legend i { width: 9px; height: 9px; border-radius: 3px; flex: none; }
-.rd .hiw-legend b { margin-left: auto; color: var(--ink); font-variant-numeric: tabular-nums; }
-.rd .hiw-spark { position: relative; }
-.rd .hiw-spark svg { width: 100%; height: 78px; display: block; overflow: visible; }
-.rd .hiw-line {
-  fill: none; stroke: var(--pink); stroke-width: 2.5; stroke-linecap: round; stroke-linejoin: round;
-  stroke-dasharray: 340; stroke-dashoffset: 340;
-}
-.rd .hiw-card.is-open .hiw-line { animation: hiw-trace 1.1s var(--hiw-ease) .35s forwards; }
-@keyframes hiw-trace { to { stroke-dashoffset: 0; } }
-.rd .hiw-grid { stroke: rgba(255,255,255,.06); stroke-width: 1; }
-.rd .hiw-cap { fill: var(--pink); }
-.rd .hiw-months { display: flex; justify-content: space-between; color: var(--ink-3); font-size: .68rem; margin-top: 6px; letter-spacing: .04em; }
-
-/* CTA logo abaixo do trilho */
-.rd .hiw-cta,
-.rd .sec-more { display: flex; flex-wrap: wrap; align-items: center; justify-content: center; gap: 16px; margin-top: 32px; }
-.rd .hiw-cta p,
-.rd .sec-more p { color: var(--ink-2); }
-
-/* Escopado no trilho de propósito: um `*` global mataria as transições da
-   página inteira (nav, botões, FAQ, reveal). */
-@media (prefers-reduced-motion: reduce) {
-  .rd .hiw-rail, .rd .hiw-rail * {
-    animation-duration: .001ms !important; animation-delay: 0s !important; transition-duration: .001ms !important;
-  }
-  .rd .hiw-msg, .rd .hiw-receipt { opacity: 1; }
+@media (max-width: 340px) {
+  body.lp .nav { padding-inline: 8px; }
 }

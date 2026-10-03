@@ -55,7 +55,8 @@ after(async () => { await browser?.close(); server?.kill(); });
  * Abre o Settings já na aba de Open Finance, com o backend simulado.
  * `banksMax` é o teto do plano; `conexoes` são as conexões existentes.
  */
-async function abrirSettings({ banksMax = 2, conexoes = [], conectores = BANCOS } = {}) {
+async function abrirSettings({ banksMax = 2, conexoes = [], conectores = BANCOS,
+                               cobrancaEmAtraso = false } = {}) {
   const ctx = await browser.newContext();
   const page = await ctx.newPage();
 
@@ -71,7 +72,8 @@ async function abrirSettings({ banksMax = 2, conexoes = [], conectores = BANCOS 
                     body: readFileSync(join(FRONTEND, "static", "auth-refresh.js"), "utf8") }));
   await page.route("**/auth/validate", (route) => route.fulfill(json({ user_id: 1 })));
   await page.route("**/auth/me", (route) =>
-    route.fulfill(json({ app_access: true, of_ui_enabled: true, of_banks_max: banksMax })));
+    route.fulfill(json({ app_access: true, of_ui_enabled: true, of_banks_max: banksMax,
+                         cobranca_em_atraso: cobrancaEmAtraso })));
   await page.route("**/open-finance/1/connectors", (route) =>
     route.fulfill(json({ connectors: conectores })));
   await page.route("**/open-finance/1", (route) =>
@@ -80,6 +82,8 @@ async function abrirSettings({ banksMax = 2, conexoes = [], conectores = BANCOS 
   // pra a navegação acontecer sem sair do servidor de teste.
   await page.route("**/precos**", (route) =>
     route.fulfill({ status: 200, contentType: "text/html", body: "<title>precos</title>" }));
+  await page.route("**/conta", (route) =>
+    route.fulfill({ status: 200, contentType: "text/html", body: "<title>conta</title>" }));
 
   await page.goto(`${ORIGIN}/settings.html?view=open-finance`);
 
@@ -203,12 +207,24 @@ test("plano sem Open Finance não abre o picker: vira CTA de upgrade", async () 
   await page.__ctx.close();
 });
 
+test("carência de cobrança sem Open Finance: o CTA atualiza o cartão no /conta", async () => {
+  // Já é assinante: mandar pra /precos seria beco (o checkout recusa com 409).
+  // O caso acima, sem o campo, é o controle positivo: continua indo pra /precos.
+  const page = await abrirSettings({ banksMax: 0, cobrancaEmAtraso: true });
+
+  assert.equal((await page.textContent("#connect-btn")).trim(), "Atualizar cartão");
+  await page.click("#connect-btn");
+  await page.waitForURL(/\/conta$/);
+  assert.equal(await pickerAberto(page).catch(() => false), false);
+  await page.__ctx.close();
+});
+
 test("teto do plano atingido bloqueia banco NOVO antes de abrir a Pluggy", async () => {
   // Bloquear aqui é o que evita item e consentimento órfãos: o /pluggy-item
   // recusaria com 402 depois de o banco já ter autorizado.
   const page = await abrirSettings({
     banksMax: 1,
-    conexoes: [{ id: 9, institution_name: "Nubank", status: "UPDATED" }],
+    conexoes: [{ id: 9, provider: "pluggy", institution_name: "Nubank", institution_id: "612", status: "UPDATED" }],
   });
   await abrirPicker(page);
   await page.click('#bankpick-list .bank-row[data-name="Itaú"]');
@@ -223,7 +239,7 @@ test("teto atingido AINDA permite reconectar o mesmo banco", async () => {
   // Controle positivo do par: sem ele, um bloqueio que recusasse tudo passaria.
   const page = await abrirSettings({
     banksMax: 1,
-    conexoes: [{ id: 9, institution_name: "Nubank", status: "UPDATED" }],
+    conexoes: [{ id: 9, provider: "pluggy", institution_name: "Nubank", institution_id: "612", status: "UPDATED" }],
   });
   await abrirPicker(page);
   await page.click('#bankpick-list .bank-row[data-name="Nubank"]');
@@ -233,6 +249,59 @@ test("teto atingido AINDA permite reconectar o mesmo banco", async () => {
     !document.getElementById("bankpick-overlay").classList.contains("open"));
   assert.equal(await pickerAberto(page), false,
     "reconexão do mesmo banco tem de passar pelo bloqueio");
+  await page.__ctx.close();
+});
+
+test("teto atingido reconecta pelo ID do conector, mesmo com nome gravado cru", async () => {
+  // Issue #732: institution_name vem cru da Pluggy (espaço, caixa). Controle
+  // negativo: comparar por nome de novo deixa este caso vermelho.
+  const page = await abrirSettings({
+    banksMax: 1,
+    conexoes: [{ id: 9, provider: "pluggy", institution_name: "  NUBANK  ", institution_id: "612", status: "UPDATED" }],
+  });
+  await abrirPicker(page);
+  await page.click('#bankpick-list .bank-row[data-name="Nubank"]');
+  await page.click("#bankpick-go");
+
+  await page.waitForFunction(() =>
+    !document.getElementById("bankpick-overlay").classList.contains("open"));
+  assert.equal(await pickerAberto(page), false,
+    "mesmo conector, nome gravado diferente: é reconexão");
+  await page.__ctx.close();
+});
+
+test("teto atingido NÃO trata o gêmeo Open Finance como reconexão do direto", async () => {
+  // Codex no #734: o gêmeo tem nome igual e id diferente; o widget abriria um
+  // item novo e o /pluggy-item recusaria (402) depois da autorização.
+  const page = await abrirSettings({
+    banksMax: 1,
+    conectores: [{ id: 619, name: "Caixa Econômica Federal", color: "005ca9", logo: "", inv: false }],
+    conexoes: [{ id: 9, provider: "pluggy", institution_name: "Caixa Econômica Federal ", institution_id: "219", status: "UPDATED" }],
+  });
+  await abrirPicker(page);
+  await page.click('#bankpick-list .bank-row[data-name="Caixa Econômica Federal"]');
+  await page.click("#bankpick-go");
+
+  await sleep(500);
+  assert.equal(await pickerAberto(page), true,
+    "gêmeo com id diferente tem de bater no teto antes de abrir a Pluggy");
+  await page.__ctx.close();
+});
+
+test("conexão mock não consome o teto do plano (backend só conta provider pluggy)", async () => {
+  // Codex no #734: o front contava a conexão mock e mandava o Nubank real pro upgrade.
+  // Controle negativo: tirar o filtro de provider deixa este caso vermelho.
+  const page = await abrirSettings({
+    banksMax: 1,
+    conexoes: [{ id: 9, provider: "mock", institution_name: "Nubank", institution_id: "mock-nubank", status: "UPDATED" }],
+  });
+  await abrirPicker(page);
+  await page.click('#bankpick-list .bank-row[data-name="Nubank"]');
+  await page.click("#bankpick-go");
+
+  await page.waitForFunction(() =>
+    !document.getElementById("bankpick-overlay").classList.contains("open"));
+  assert.equal(await pickerAberto(page), false, "mock não conta no teto: o banco real passa");
   await page.__ctx.close();
 });
 
@@ -397,7 +466,7 @@ test("conexão PAUSED não consome o teto do plano", async () => {
   // Espelha a contagem do backend (_ofCountsTowardBankLimit).
   const page = await abrirSettings({
     banksMax: 1,
-    conexoes: [{ id: 9, institution_name: "Nubank", status: "PAUSED" }],
+    conexoes: [{ id: 9, provider: "pluggy", institution_name: "Nubank", institution_id: "612", status: "PAUSED" }],
   });
   await abrirPicker(page);
   await page.click('#bankpick-list .bank-row[data-name="Itaú"]');
