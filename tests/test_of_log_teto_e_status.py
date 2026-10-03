@@ -38,7 +38,7 @@ from test_open_finance_disconnect_route import _semeia_conexao_pluggy
 def test_teto_vale_com_o_espelho_do_logging_lento(user_id, monkeypatch):
     promote_to_pro(user_id)
     monkeypatch.setattr(of_routes, "create_pluggy_connect_token",
-                        lambda uid, webhook_url=None: {"accessToken": "tok"})
+                        lambda uid, webhook_url=None, oauth_redirect_uri=None: {"accessToken": "tok"})
     monkeypatch.setattr(of_routes, "register_item", _levanta(psycopg.OperationalError(HOST)))
     monkeypatch.setattr(of_routes, "_LOG_DIAG_TIMEOUT_S", 0.05)
 
