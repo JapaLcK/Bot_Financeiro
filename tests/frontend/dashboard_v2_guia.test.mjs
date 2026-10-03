@@ -219,6 +219,27 @@ test("sem dados, pela Ajuda: orientação com o link do Open Finance e segue par
   assert.deepEqual(acoes(s), ["reabrir"]);
 });
 
+test("passo 1 pulado, 2 e 3 feitos: sem \"Fechou!\" nem \"Guia concluído.\" (o servidor segue em_andamento); Fechar não dispensa", async () => {
+  const { ctx, page, s } = await abrir({ guia: "indisponivel" });
+  await page.locator(".rail").getByRole("button", { name: "Ajuda" }).click();
+  await page.getByRole("button", { name: "Seguir" }).click();
+  await esperaTitulo(page, PASSOS[1].fala.titulo);
+  await FAZER["categoria.aberta"](page);
+  await esperaTitulo(page, PASSOS[2].fala.titulo);
+  await FAZER["piggy.perguntou"](page);
+  await esperaTitulo(page, "Por agora é isso");
+  const r = [await page.getByText("Fechou!").count(), s.g.estado];
+  const status = await page.getByRole("status").allInnerTexts();
+  await page.getByRole("button", { name: "Fechar", exact: true }).click();
+  const aberto = await page.locator(".guia-balao").count();
+  await ctx.close();
+  assert.deepEqual(r, [0, "em_andamento"]);
+  assert.ok(status.includes("Por agora é isso. O passo que ficou pra depois volta na Ajuda."), JSON.stringify(status));
+  assert.ok(!status.some((t) => t.includes("concluído")), JSON.stringify(status));
+  assert.equal(aberto, 0);
+  assert.deepEqual(acoes(s), ["reabrir", "feito:gastos.categoria", "feito:piggy.pergunta"]);
+});
+
 test("Esc e Pular dispensam; Ajuda (menu, barra de baixo) e Cmd-K reabrem", async () => {
   const esc = await abrir();
   await esc.page.getByRole("button", { name: "Bora", exact: true }).waitFor();

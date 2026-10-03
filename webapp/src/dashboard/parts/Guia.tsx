@@ -77,7 +77,9 @@ export function Guia({ s, path }: { s: DashState; path: Path }) {
   const passos = g?.passos ?? [];
   const atual = passos.find((p) => !vistos.includes(p.id) && (rev || !p.feito));
   const exibido = festa ? passos.find((p) => p.id === festa) : atual;
-  const fim = !!festa && !atual;
+  // Acabaram os passos desta abertura; concluído só quando o servidor diz (um pulado não foi feito).
+  const acabou = !!festa && !atual;
+  const fim = acabou && g?.estado === "concluido";
   const n = atual ? passos.indexOf(atual) + 1 : 0;
   const v = m.variables;
   const salvando = m.isPending && v?.acao === "feito";
@@ -131,7 +133,7 @@ export function Guia({ s, path }: { s: DashState; path: Path }) {
   // no Safari 14 (parts/dialog.ts) o Cmd-K e o perfil tiram o `open` no keydown deles, antes.
   useEffect(() => {
     if (modo === "fechado") return;
-    const on = (e: KeyboardEvent) => { if (e.key === "Escape" && !document.querySelector("dialog[open]")) fechar(!fim); };
+    const on = (e: KeyboardEvent) => { if (e.key === "Escape" && !document.querySelector("dialog[open]")) fechar(!acabou); };
     window.addEventListener("keydown", on, true);
     return () => window.removeEventListener("keydown", on, true);
   });
@@ -148,10 +150,10 @@ export function Guia({ s, path }: { s: DashState; path: Path }) {
 
   // Comemoração: o passo seguinte entra depois dela; a última fica até fechar.
   useEffect(() => {
-    if (!festa || fim) return;
+    if (!festa || acabou) return;
     const t = setTimeout(() => setFesta(null), 1600);
     return () => clearTimeout(t);
-  }, [festa, fim]);
+  }, [festa, acabou]);
   useEffect(() => { if (modo === "ativo" && g && !atual && !festa) setModo("fechado"); });
 
   // Posição: segue a âncora a cada quadro (rolagem, grade arrastável, troca de página).
@@ -198,7 +200,7 @@ export function Guia({ s, path }: { s: DashState; path: Path }) {
   const aberto = modo === "convite" || (modo === "ativo" && !!exibido);
   const status = !aberto || s.editing ? ""
     : modo === "convite" ? "O Piggy quer te mostrar o painel."
-    : festa ? (fim ? "Guia concluído." : "Passo feito.")
+    : festa ? (fim ? "Guia concluído." : acabou ? "Por agora é isso. O passo que ficou pra depois volta na Ajuda." : "Passo feito.")
     : `Guia, passo ${n} de ${passos.length}: ${atual!.fala.titulo}`;
   let corpo = null;
   if (!aberto || s.editing) {
@@ -214,9 +216,9 @@ export function Guia({ s, path }: { s: DashState; path: Path }) {
     </>;
   } else if (festa) {
     corpo = <>
-      <h2 id="guia-titulo" tabIndex={-1}>{fim ? "Fechou! O painel é seu." : "Isso aí!"}</h2>
-      <p>{fim ? "Quando quiser rever, o guia mora em Ajuda." : "Passo feito. Bora pro próximo."}</p>
-      {fim && <div className="guia-acoes"><button type="button" className="btn btn-primary" onClick={() => fechar(false)}>Fechar</button></div>}
+      <h2 id="guia-titulo" tabIndex={-1}>{fim ? "Fechou! O painel é seu." : acabou ? "Por agora é isso" : "Isso aí!"}</h2>
+      <p>{fim ? "Quando quiser rever, o guia mora em Ajuda." : acabou ? "O passo que ficou pra depois volta quando você abrir a Ajuda." : "Passo feito. Bora pro próximo."}</p>
+      {acabou && <div className="guia-acoes"><button type="button" className="btn btn-primary" onClick={() => fechar(false)}>Fechar</button></div>}
     </>;
   } else {
     const p = atual!;
