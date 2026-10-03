@@ -4,8 +4,7 @@ Nenhum escritor grava essa linha; é defesa em profundidade. Cada junção compr
 `left join credit_cards c on c.id = t.card_id and c.user_id = t.user_id`: o VALOR da compra
 continua contando e o nome/final/cor/bandeira do cartão de B viram NULL ('Cartão' onde o
 texto é gravado ou impresso). O tile da consulta 8 do /app só lê fatura do dono do cartão:
-fatura de B nunca aparece e a de `user_id` NULL some (o tile diz 'Sem fatura'; o gasto segue
-em "Gastos do mês") — decisão do dono. O portão no fim cobre toda junção por `card_id`
+fatura de B nunca aparece. O portão no fim cobre toda junção por `card_id`
 (compra, fatura, recorrente); a fatura apontando para o cartão de B (#770) é provada com
 banco em test_barreira_fatura_cartao.py.
 
@@ -103,33 +102,22 @@ def test_antecipar_e_desfazer_nao_gravam_nem_devolvem_o_nome_do_cartao_de_b():
 
 # ── ponto 3: o tile da fatura (consulta 8 de get_financial_data) ────────────
 
-def _tile(outra_fatura_de=None, so_a_nula=False):
-    """A com cartão e compra de 80 (fatura fecha dia 10). `outra_fatura_de`: dono ('b' ou
-    None) de uma 2ª fatura de 999 no MESMO cartão, fechando dia 20 — o LIMIT 1 pega a mais
-    tarde. `so_a_nula`: a fatura de A vira `user_id` NULL e é a única do período."""
+def _tile():
+    """A com cartão e compra de 80 (fatura fecha dia 10); uma 2ª fatura de 999, de B, no MESMO
+    cartão, fechando dia 20 — o LIMIT 1 pegaria a mais tarde."""
     a, b = usuario_pagante(), usuario_pagante()
     cartao = db.create_card(a, "Nubank", closing_day=10, due_day=17)
     fatura = db.add_credit_purchase(a, cartao, 80, "mercado", "de A", DIA)[2]
-    if so_a_nula:
-        q("update credit_bills set user_id = null where id = %s", (fatura,))
-    else:
-        q("""insert into credit_bills (user_id, card_id, period_start, period_end, total)
-             values (%s, %s, %s, %s, 999)""",
-          (b if outra_fatura_de == "b" else None, cartao, INICIO.replace(day=11), INICIO.replace(day=20)))
+    q("""insert into credit_bills (user_id, card_id, period_start, period_end, total)
+         values (%s, %s, %s, %s, 999)""",
+      (b, cartao, INICIO.replace(day=11), INICIO.replace(day=20)))
     app = asyncio.run(dashboard.get_financial_data(a, year=INICIO.year, month=INICIO.month))
-    return [c for c in app["credit_cards"] if c["id"] == cartao][0], fatura, app
+    return [c for c in app["credit_cards"] if c["id"] == cartao][0], fatura
 
 
-def test_tile_mostra_a_fatura_de_a_e_nunca_a_de_b_nem_a_null():
-    for dono in ("b", None):
-        tile, fatura, _ = _tile(outra_fatura_de=dono)
-        assert (tile["bill_id"], tile["total"]) == (fatura, 80.0), dono
-
-
-def test_tile_com_so_a_fatura_null_fica_sem_fatura_e_o_gasto_continua_no_mes():
-    tile, _, app = _tile(so_a_nula=True)
-    assert (tile["bill_id"], tile["total"], tile["period_end"]) == (None, 0.0, None)
-    assert app["monthly_expense"] == 80.0
+def test_tile_mostra_a_fatura_de_a_e_nunca_a_de_b():
+    tile, fatura = _tile()
+    assert (tile["bill_id"], tile["total"]) == (fatura, 80.0)
 
 
 # ── portão de varredura: toda junção por card_id tem a guarda do dono ──────

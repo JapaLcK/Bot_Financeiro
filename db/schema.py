@@ -47,6 +47,20 @@ do $$ begin
 end $$
 """
 
+# Faturas de antes da coluna `user_id` (o `add column` sem backfill) ficaram NULL; o dono
+# é o do cartão (card_id e credit_cards.user_id são NOT NULL: não sobra NULL). Só roda
+# enquanto a coluna aceitar NULL — o ALTER não se repete a cada boot (#691).
+CREDIT_BILLS_USER_ID_NOT_NULL_SQL = """
+do $$ begin
+  if exists (select 1 from information_schema.columns where table_schema='public'
+             and table_name='credit_bills' and column_name='user_id' and is_nullable='YES') then
+    update credit_bills b set user_id = c.user_id
+      from credit_cards c where c.id = b.card_id and b.user_id is null;
+    alter table credit_bills alter column user_id set not null;
+  end if;
+end $$
+"""
+
 # BACKFILL INICIAL dos assinantes que já existiam quando plan_grants nasceu
 # (§5.1 do docs/plano_pix_anual_asaas.md). Roda no boot, dentro do init_db.
 #
@@ -728,7 +742,7 @@ def init_db():
         """
         create table if not exists credit_bills (
           id bigserial primary key,
-          user_id bigint references users(id) on delete cascade,
+          user_id bigint not null references users(id) on delete cascade,
           card_id bigint not null references credit_cards(id) on delete cascade,
           period_start date not null,
           period_end date not null,
@@ -1176,6 +1190,7 @@ def init_db():
         """
         alter table credit_bills add column if not exists user_id bigint references users(id) on delete cascade
         """,
+        CREDIT_BILLS_USER_ID_NOT_NULL_SQL,
         """
         create table if not exists dashboard_sessions (
           code text primary key,
@@ -2891,6 +2906,19 @@ def init_db():
           tentativas int not null default 0,
           reivindicada_ate timestamptz,
           criada_em timestamptz not null default now()
+        )
+        """,
+        # Guia do /painel (#728): `db/guia.py` grava, `GET/POST /api/v2/guia` lê.
+        # `feitos` = {passo_id: carimbo do 1º feito}. Tabela e não colunas em
+        # auth_accounts: sai com a conta (cascade) e não some no "Limpar" do admin.
+        # Fora do aviso ao /painel (o POST já devolve o estado) e do merge.
+        """
+        create table if not exists guia_painel (
+          user_id bigint primary key references users(id) on delete cascade,
+          oferecido_em timestamptz,
+          dispensado_em timestamptz,
+          concluido_em timestamptz,
+          feitos jsonb not null default '{}'
         )
         """,
 

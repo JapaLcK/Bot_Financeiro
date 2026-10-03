@@ -24,6 +24,8 @@ STICKERS_SITE = RAIZ / "frontend" / "brand" / "stickers"
 SIMBOLO_APP = RAIZ / "app" / "assets" / "brand" / "simbolo.png"
 SIMBOLO_SITE = RAIZ / "frontend" / "brand" / "email-logo.png"
 CONNECTION_STATUS_TS = RAIZ / "app" / "src" / "ui" / "componentes" / "ConnectionStatus.tsx"
+APP_CONFIG_TS = RAIZ / "app" / "app.config.ts"
+VOLTA_OF_TS = RAIZ / "app" / "src" / "features" / "openFinance" / "volta.ts"
 
 PESOS = ["Regular", "Medium", "SemiBold", "Bold"]
 
@@ -135,3 +137,49 @@ def test_estados_do_connection_status_batem_com_pluggy_health():
     assert bloco, f"bloco `const VISUAL = {{...}}` não encontrado em {CONNECTION_STATUS_TS}"
     estados_ts = set(re.findall(r"^\s*(\w+):\s*\{", bloco.group(1), re.MULTILINE))
     assert estados_ts == set(_LABELS), f"TS: {sorted(estados_ts)} × Python: {sorted(_LABELS)}"
+
+
+def _ambientes_e_schemes(texto: str) -> tuple[list[str], list[str]]:
+    # Ancorado no bloco `POR_AMBIENTE`, como o teste do `VISUAL` acima; sem os
+    # comentários, para um `// scheme: "x"` dentro dele não contar como scheme.
+    bloco = re.search(r"const POR_AMBIENTE[^=]*=\s*\{(.*?)\n\};", texto, re.S)
+    assert bloco, f"bloco `const POR_AMBIENTE = {{...}}` não encontrado em {APP_CONFIG_TS}"
+    corpo = re.sub(r"/\*.*?\*/|//[^\n]*", "", bloco.group(1), flags=re.S)
+    return re.findall(r"^\s*(\w+):\s*\{", corpo, re.MULTILINE), re.findall(r'scheme:\s*"([^"]*)"', corpo)
+
+
+def test_extrator_de_schemes_ignora_comentarios():
+    texto = (
+        "const POR_AMBIENTE: Record<string, X> = {\n"
+        '  // antes era scheme: "fake"\n'
+        '  dev: { scheme: "a" }, /* scheme: "fake2" */\n'
+        '  /*\n  prod: { scheme: "fake3" },\n  */\n'
+        '  prod: { scheme: "b" },\n'
+        "};\n"
+    )
+    assert _ambientes_e_schemes(texto) == (["dev", "prod"], ["a", "b"])
+
+
+def test_schemes_do_app_batem_com_a_lista_do_connect_token():
+    """`app.config.ts` registra um scheme por ambiente e o `connect-token`
+    só aceita os de `_APP_SCHEMES` (400 no resto). Um scheme trocado de um
+    lado só faz o binário pedir um `app_scheme` que o servidor recusa — o
+    Open Finance do app inteiro quebra, sem erro de build (CLAUDE.md §0.7)."""
+    from frontend.routes.open_finance import _APP_SCHEMES
+
+    ambientes, schemes = _ambientes_e_schemes(APP_CONFIG_TS.read_text())
+    assert len(schemes) == len(ambientes), f"ambientes {ambientes} × schemes {schemes}"
+    assert set(schemes) == set(_APP_SCHEMES), f"TS: {sorted(schemes)} × Python: {sorted(_APP_SCHEMES)}"
+
+
+def test_regex_do_item_da_volta_e_a_do_servidor():
+    """O app recusa o `itemId` do link com a MESMA regra que o servidor usa
+    para montar `/items/{id}` (`_ITEM_ID_OK`): lá o id inválido vira 502, que
+    o app trataria como instabilidade e repetiria por 2 minutos."""
+    from core.services.pluggy import _ITEM_ID_OK
+
+    m = re.search(r"const ID_DO_ITEM = /\^(.*?)\$/;", VOLTA_OF_TS.read_text())
+    assert m, f"`const ID_DO_ITEM = /^...$/;` não encontrado em {VOLTA_OF_TS}"
+    assert m.group(1) == _ITEM_ID_OK.pattern.removesuffix(r"\Z"), (
+        f"TS: {m.group(1)} × Python: {_ITEM_ID_OK.pattern}"
+    )

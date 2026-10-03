@@ -520,4 +520,5 @@ PR de cada etapa, não soluções prontas. Cada PR confere se ainda valem, decid
     mostrá-los pede decidir se são entrada ou saída; o que entra marcado hoje é o interno
     com tipo despesa/receita (saque em dinheiro, pagamento de fatura, transferência do
     banco). A lista do `/app` e o "últimos N" do WhatsApp seguem as regras deles.
+- Guia do `/painel` (#728) em 2 PRs: A `GET`/`POST /api/v2/guia` + tabela `guia_painel` (contrato e consulta de medição em `docs/CLAUDE.md`, "API v2") · B a tela (Piggy, balão, Ajuda).
 - [ ] Etapa 0 · [ ] 1 · [ ] 2 · [ ] 3 · [ ] 4 · [ ] 5 · [ ] 6 · [ ] 7
