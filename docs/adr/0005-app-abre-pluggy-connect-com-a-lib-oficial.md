@@ -78,7 +78,10 @@ Build 14 enviada ao TestFlight a partir de um branch descartável (a tela de tes
 4. **Adoção pelo webhook.** O dono nunca tocou em "Registrar item" e a tela de teste não chama `POST /pluggy-item` sozinha, então a conexão chegou ao servidor **pelo webhook**, com o app em segundo plano (não finalizado).
 5. **Rede cai ao retomar do segundo plano.** Um `GET` do polling falhou com "A conexão de rede foi perdida" em +103,0 s, ao voltar ao app: falha de rede no polling é "tente de novo", nunca erro final.
 
-**Se o usuário sai da tela no meio:** antes de autorizar no banco, não há conexão e o item da Pluggy expira (`USER_INPUT_TIMEOUT`, ~20 min); precisa tocar em conectar de novo. Depois de autorizar, a coleta continua na Pluggy e o PigBank adota o item pelo webhook (item 4); o app mostra "Estamos organizando seus dados", não erro.
+**Se o usuário sai da tela no meio** (ordem do fluxo; o ponto de corte é a **criação do item**, não a autorização no banco):
+- **Antes de o item existir** (ainda escolhendo banco/CPF no widget): nada foi criado; basta conectar de novo.
+- **Item criado, banco ainda não autorizado:** o `item/created` já dispara e o webhook adota na hora a conexão ainda `UPDATING`, incompleta (`tests/test_of_webhook_adopt.py:202-220`; a ordem "webhook antes do `onSuccess`" está documentada em `frontend/routes/open_finance.py:2026-2029`; **[lido]**, não medido no iPhone). Ela fica esperando o usuário e expira por tempo (`USER_INPUT_TIMEOUT`, ~20 min). **Tocar em "conectar de novo" bate em `avoidDuplicates` → "already exists"** [medido no iPhone, item 1]. A tela tem de mostrar a conexão incompleta e oferecer **continuar/reautorizar** (o `updateItem` da proposta 2), nunca um "conectar de novo" cego.
+- **Depois de autorizar:** a coleta continua na Pluggy e o PigBank já tem a conexão; o app mostra "Estamos organizando seus dados", não erro.
 
 **Só no iPhone ainda:** que `oauthRedirectUri=pigbank://…` devolve o usuário ao app sozinho (precisa da proposta 1 e de uma build nova) e o app fechado de vez (finalizado) logo depois de autorizar, que o webhook deveria cobrir igual mas não foi medido.
 
@@ -86,6 +89,7 @@ Build 14 enviada ao TestFlight a partir de um branch descartável (a tela de tes
 
 - **`onSuccess` perdido** (descrito acima): sem o polling no servidor, quem fecha o app logo depois de autorizar fica sem conexão na tela.
 - **Volta ao app depende do `oauthRedirectUri`.** Sem ele o usuário fica no Safari [medido no iPhone]; com o scheme igual em todos os ambientes, o sistema pode abrir o app errado (abaixo).
+- **Conexão incompleta que o webhook já adotou** (item criado, banco não autorizado): sem a proposta 2, o usuário que sai no meio do fluxo não consegue retomar, porque o novo token recusa por `avoidDuplicates`.
 - **`item/created` perdido:** nenhum evento depois adota o item (`frontend/routes/open_finance.py:1146`); a rede de proteção é o `POST /pluggy-item` com o `id` do item.
 - **A lib carrega `connect.pluggy.ai` ao vivo.** O site fixa a v2.7.0 do script com SRI (`frontend/settings.html:14`); no app ganhamos as correções sem republicar, mas perdemos o travamento de versão e o que a Pluggy mudar chega sem passar por nós.
 - **Scheme `pigbank` igual em todos os ambientes** (`app/app.config.ts:52`): só pesa no modo navegador com `oauthRedirectUri` (proposta 1), onde o sistema escolhe o app; resolvido com scheme por ambiente.
@@ -106,6 +110,6 @@ Os itens criados no sandbox da Pluggy durante o spike (`clientUserId=spike-desca
 
 1. Aprovar a recomendação revista: lib oficial com OAuth no navegador do sistema e `oauthRedirectUri` (o in-app sai como ponto de partida).
 2. Abrir **já** o PR do backend da proposta 1 (faixa Completo; scheme por ambiente) e uma build 15 para provar a volta automática no iPhone, antes das telas 5 a 7.
-3. A proposta 2 (`itemId`, reconectar) junto com a tela de reconexão, não antes.
+3. A proposta 2 (`itemId`, continuar/reconectar) **junto com as telas 5 a 7**, não depois: sem ela, quem sai no meio do fluxo não consegue retomar a conexão que o webhook já adotou.
 4. Android na Fase 4 ou depois (hoje fica sem prova).
 5. Se vale repetir o teste com o app fechado de vez (exige outro banco, ou desconectar o Nubank de novo).
