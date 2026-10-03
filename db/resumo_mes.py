@@ -37,7 +37,7 @@ MES_LANCAMENTOS_SQL = f"""user_id = %s
 # FATURA (`b.user_id`; a NULL, a coluna aceita sem backfill, vale pelo dono do cartão dela).
 MES_CARTAO_SQL = """credit_transactions ct
               join credit_bills b on b.id = ct.bill_id
-               and ct.user_id = %s and coalesce(b.user_id, (select cb.user_id from credit_cards cb where cb.id = b.card_id)) = %s
+               and ct.user_id = %s and b.user_id = %s
                and ct.is_refund = false
                and b.period_end >= %s and b.period_end < %s"""
 

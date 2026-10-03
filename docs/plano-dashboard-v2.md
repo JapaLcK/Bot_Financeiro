@@ -547,4 +547,5 @@ PR de cada etapa, não soluções prontas. Cada PR confere se ainda valem, decid
     `ValueError` dele vira 400 em vez de 500) e a falha do aprendizado depois do commit passou
     de 500 (cuja retentativa duplicava o gasto) a só log. Diferença declarada: `categoria: ""`
     na criação pelo v2 dá 422 (`null` = inferir), e o `/app` infere.
+- Guia do `/painel` (#728) em 2 PRs: A `GET`/`POST /api/v2/guia` + tabela `guia_painel` (contrato e consulta de medição em `docs/CLAUDE.md`, "API v2") · B a tela (Piggy, balão, Ajuda).
 - [ ] Etapa 0 · [ ] 1 · [ ] 2 · [ ] 3 · [ ] 4 · [ ] 5 · [ ] 6 · [ ] 7

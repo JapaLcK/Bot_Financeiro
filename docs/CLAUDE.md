@@ -190,9 +190,8 @@ Sub-app FastAPI (`api/v2/app.py`) montado pelo monólito com `app.mount("/api/v2
   mensal (o pedido na hora também soma o mês inteiro: total, contagem e "Período"), a
   consulta 5 do /app e `compute_kpis` das Análises. `compute_evolution` é cópia em consulta
   única (um GROUP BY por mês); `tests/test_resumo_mes_regra.py` compara as duas por mês.
-  Fatura com `user_id` NULL (a coluna aceita, sem backfill) só entra se o cartão dela for do
-  usuário (`coalesce(b.user_id, <dono do cartão>) = %s`, desde 1e7231dd/#759), em cada perna
-  do cartão.
+  `credit_bills.user_id` é NOT NULL (backfill pelo dono do cartão, #772): a fatura só entra
+  se for do usuário (`b.user_id = %s`), em cada perna do cartão.
   **Divergência conhecida:** relatório diário e semanal, ferramentas da IA de período
   livre e projeção de fechamento (`get_summary_by_period`) e o Repórter
   (`piggy_agents._month_stats`) seguem só em `launches`, sem o cartão. Limites mantidos de
@@ -269,6 +268,46 @@ Sub-app FastAPI (`api/v2/app.py`) montado pelo monólito com `app.mount("/api/v2
 - `GET /api/v2/categorias` (`api/v2/categorias.py`): `{categorias: [{chave, nome}]}`, o
   catálogo do usuário pelo `CAT_META_SQL` (chave = `cat_norm_sql(name)`, nome = a grafia que
   vence entre gêmeas), semeado como o `/categories` do /app.
+- `GET`/`POST /api/v2/guia` (`api/v2/guia.py`, estado em `db/guia.py`, tabela `guia_painel`,
+  uma linha por usuário): o guia do `/painel` (#728). `PASSOS` em `api/v2/guia.py` é a fonte
+  única do roteiro (`id`, `tela`, `ancora`, `acao`, `dado` `real`|`exemplo`, `fala {titulo,
+  texto}`, `avanca: "cliente"`); o cliente desenha o selo "exemplo" a partir de `dado`.
+  Resposta `{estado, motivo, passos: [{...roteiro, disponivel, motivo, feito}]}`. Passo 1
+  (`resumo.saiu`) disponível quando o Saiu de `resumo_do_mes` (com a janela do plano) é > 0 no
+  mês corrente OU no anterior; senão `motivo` = `sincronizando` (alguma conexão `updating`)
+  > `conexao_com_erro` (`error_recoverable`/`needs_user_action`/`item_missing`) > `sem_dados`.
+  Passos 2 e 3 (exemplo) sempre disponíveis. `estado`, nesta ordem: `concluido` (todos os
+  ids em `feitos`, `?&`) > `dispensado` > `em_andamento` (o guia já foi oferecido ou
+  começado: o cliente não mostra o convite sozinho, só retoma pela Ajuda) > `oferecer` (nada
+  feito, nunca oferecido, passo 1 disponível) > `indisponivel`. Quem fez 2 e 3 sem dados segue `em_andamento` quando os dados chegam, com
+  o passo 1 agora disponível e não feito. O `motivo` do topo é o do passo 1 quando ele está
+  indisponível (só em `em_andamento` e `indisponivel`); senão `null`. O POST recebe `{acao: "visto"|"feito"|"dispensar"|"reabrir", passo?}`
+  e devolve o mesmo `Guia`; `feito` sem `passo` ou `passo` fora do roteiro = 422 no envelope;
+  `feito` de passo com `disponivel: false` = 409 `passo_indisponivel` no envelope, sem gravar
+  (sem dados o cliente mostra a orientação e segue para 2 e 3); nas outras ações `passo` é ignorado. Exige o CSRF do pai. Carimbos só gravam uma vez
+  (`oferecido_em` no `visto` e no `reabrir`, `dispensado_em`, `concluido_em`, e o 1º de cada
+  passo em `feitos`); `reabrir` zera `dispensado_em`. A oferta conta o convite **e** a Ajuda:
+  quem abre pela Ajuda sem nunca ter visto o convite fica `em_andamento` e não o recebe depois,
+  e entra em `oferecidos` na medição abaixo (conclusão/oferecidos mistura as duas portas; quem
+  abre pela Ajuda antes de ter dado põe a espera pela sincronização dentro de
+  `mediana_oferta_ate_1o_valor`, então ela não mede só o guia).
+  `visto` e `reabrir` só carimbam enquanto `feitos` está vazio: **`oferecido_em`, quando existe, é anterior ou igual a todo carimbo de `feitos`**
+  (as medianas abaixo nunca saem negativas). O servidor confia no cliente para o `feito`
+  (não confere a ação; confere só a disponibilidade). Fora do aviso SSE e do merge; o "Recomeçar do
+  zero" apaga a linha (`_RESET_TABLES`); entra na exportação LGPD (`guia_do_painel`) e sai com a conta (cascade). Medição, só leitura:
+
+  ```sql
+  select count(*) filter (where g.oferecido_em is not null) as oferecidos,
+         count(*) filter (where g.concluido_em is not null and g.oferecido_em is not null) as concluidos,
+         percentile_cont(0.5) within group (order by (select min(v::timestamptz)
+             from jsonb_each_text(g.feitos) e(k, v)) - g.oferecido_em) as mediana_ate_1a_acao,
+         percentile_cont(0.5) within group (order by (g.feitos->>'resumo.saiu')::timestamptz
+             - g.oferecido_em) as mediana_oferta_ate_1o_valor,
+         percentile_cont(0.5) within group (order by (g.feitos->>'resumo.saiu')::timestamptz
+             - u.created_at) as mediana_cadastro_ate_1o_valor
+    from guia_painel g join users u on u.id = g.user_id;
+  ```
+
 - **Dinheiro na v2 é `Decimal` e sai como TEXTO decimal** (`"1234.56"`, sem arredondar e sem
   float), em toda rota: no TS é `string`. A escala é a da coluna (`"1000"` e `"1000.00"`
   valem). O contrato vale para toda rota futura.

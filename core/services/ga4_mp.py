@@ -155,7 +155,8 @@ def send_event(
         logger.warning("[ga4_mp] %s rejeitado (%s): %s", name, resp.status_code, resp.text[:300])
         return False
     except Exception as exc:
-        logger.warning("[ga4_mp] falha ao enviar %s: %s", name, exc, exc_info=True)
+        # Só o tipo: o api_secret vai na query (exigência do MP) e aparece no str(exc).
+        logger.warning("[ga4_mp] falha ao enviar %s: %s", name, type(exc).__name__)
         return False
 
 

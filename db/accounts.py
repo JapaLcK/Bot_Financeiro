@@ -681,7 +681,7 @@ def get_largest_expenses(
     )
 
     if by_bill_month:
-        credit_from = "from credit_transactions ct join credit_bills b on b.id = ct.bill_id and coalesce(b.user_id, (select cb.user_id from credit_cards cb where cb.id = b.card_id)) = ct.user_id"
+        credit_from = "from credit_transactions ct join credit_bills b on b.id = ct.bill_id and b.user_id = ct.user_id"
         credit_date = "and b.period_end >= %s and b.period_end < %s"
         credit_date_params = [start_date, end_date_excl]
     else:
@@ -928,7 +928,7 @@ def list_launches_by_category(
 
     credit_sql = ""
     if aliases is None or "despesa" in aliases:
-        credit_from = "from credit_transactions ct join credit_bills b on b.id = ct.bill_id and coalesce(b.user_id, (select cb.user_id from credit_cards cb where cb.id = b.card_id)) = ct.user_id"
+        credit_from = "from credit_transactions ct join credit_bills b on b.id = ct.bill_id and b.user_id = ct.user_id"
         credit_date_col = "b.period_end"
         credit_filters = ""
         params_credit: list = [user_id, categoria]
@@ -1122,7 +1122,7 @@ def get_top_expense_categories(
     end_date_excl = end_date + timedelta(days=1)  # janela meio-aberta em period_end
 
     if by_bill_month:
-        credit_from = "from credit_transactions ct join credit_bills b on b.id = ct.bill_id and coalesce(b.user_id, (select cb.user_id from credit_cards cb where cb.id = b.card_id)) = ct.user_id"
+        credit_from = "from credit_transactions ct join credit_bills b on b.id = ct.bill_id and b.user_id = ct.user_id"
         credit_date = "and b.period_end >= %s and b.period_end < %s"
         credit_date_params = (start_date, end_date_excl)
     else:

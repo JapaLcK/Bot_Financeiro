@@ -20,8 +20,6 @@ before(async () => { exigeArtefatoEmDia(); browser = await chromium.launch(); })
 after(() => browser?.close());
 
 const abrir = (opts) => abrirPainel(browser, opts);
-// Espera as animações: a 760px o grid passa ~200ms (sem "reduzir movimento"; mais num CI lento, com
-// 1ms de transição) com 108px de rolagem lateral enquanto os blocos assentam. O transiente já existia no PR C.
 const rolagem = async (page) => (await assentar(page), page.evaluate(() => document.scrollingElement.scrollWidth - document.scrollingElement.clientWidth));
 
 // --- "Para onde vai" -----------------------------------------------------------------
@@ -223,5 +221,29 @@ for (const width of [1440, 390]) {
     r.push(await rolagem(page));
     await ctx.close();
     assert.deepEqual(r, [true, "solid", 44, "/home", 0]);
+  });
+}
+
+// --- Sem flash de rolagem lateral (#783) ----------------------------------------------
+
+// A grade montava os blocos com `maxColumns` e os reposicionava na 1ª medida: o Motion deslizava cada
+// um do lugar errado ao certo e o deslize passava da borda (108px a 760px, por ~200ms). Aqui NÃO se
+// espera `assentar`: o que conta é a rolagem lateral de cada quadro desde a montagem.
+for (const width of [1440, 1100, 900, 808, 760, 712, 390]) {
+  test(`${width}px: nenhum quadro com rolagem lateral desde a montagem do painel`, async () => {
+    const { ctx, page, ir } = await abrir({ width });
+    await page.addInitScript(() => {
+      window.__pior = 0;
+      const tick = () => {
+        const se = document.scrollingElement;
+        if (se) window.__pior = Math.max(window.__pior, se.scrollWidth - se.clientWidth);
+        requestAnimationFrame(tick);
+      };
+      requestAnimationFrame(tick);
+    });
+    await ir();
+    await page.waitForTimeout(1000);
+    assert.equal(await page.evaluate(() => window.__pior), 0);
+    await ctx.close();
   });
 }

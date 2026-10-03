@@ -1,0 +1,110 @@
+"""`GET`/`POST /api/v2/guia`: o guia do /painel (#728), estado em `db/guia.py`.
+
+`PASSOS` é a fonte única do roteiro (falas, âncoras, ações, `dado`): o cliente desenha
+o selo "exemplo" a partir de `dado`. Passo 1 depende do Saiu real (`motivo_resumo`); 2 e
+3 são sobre blocos de exemplo e estão sempre disponíveis. Estado, na ordem:
+`concluido` (todos os passos feitos) > `dispensado` > `em_andamento` (já oferecido, pelo
+convite ou pela Ajuda, ou já fez algum: o cliente não mostra o convite sozinho, só retoma
+pela Ajuda) > `oferecer` (nada feito, nunca oferecido, passo 1 disponível) > `indisponivel`. `motivo` do topo = o do passo 1 quando ele está indisponível, só nos dois
+que podem tê-lo (`em_andamento` e `indisponivel`).
+
+O POST é escrita: o CSRF do monólito vale antes. `feito` sem `passo` = 422 no
+envelope; `passo` fora do roteiro = 422 pelo Literal; `feito` de passo indisponível = 409
+`passo_indisponivel`, sem gravar. Nas outras ações `passo` é ignorado.
+"""
+from typing import Literal
+
+from fastapi import APIRouter, Depends, HTTPException
+from fastapi.exceptions import RequestValidationError
+from pydantic import BaseModel
+
+from api.v2.sessao import usuario_atual
+from db import guia
+
+router = APIRouter()
+
+PASSOS = (
+    {"id": "resumo.saiu", "tela": "resumo", "ancora": "resumo.saiu", "acao": "mes.trocado",
+     "dado": "real", "avanca": "cliente",
+     "fala": {"titulo": "O que saiu este mês",
+              "texto": "Este é o que saiu este mês, do seu banco. Troca o mês na seta e compara."}},
+    {"id": "gastos.categoria", "tela": "gastos", "ancora": "categorias.lista", "acao": "categoria.aberta",
+     "dado": "exemplo", "avanca": "cliente",
+     "fala": {"titulo": "Pra onde foi o dinheiro",
+              "texto": "Toca numa categoria para ver de onde vem o total. "
+                       "Estes números ainda são de exemplo."}},
+    {"id": "piggy.pergunta", "tela": "piggy", "ancora": "piggy.pergunta", "acao": "piggy.perguntou",
+     "dado": "exemplo", "avanca": "cliente",
+     "fala": {"titulo": "Pergunta pro Piggy",
+              "texto": "Pergunta “Quanto gastei este mês?”. As respostas ainda são de exemplo; "
+                       "a conversa de verdade chega em breve."}},
+)
+IDS = [p["id"] for p in PASSOS]
+
+PassoId = Literal[tuple(IDS)]
+Motivo = Literal["sem_dados", "sincronizando", "conexao_com_erro"]
+
+
+class Fala(BaseModel):
+    titulo: str
+    texto: str
+
+
+class Passo(BaseModel):
+    id: PassoId
+    tela: Literal["resumo", "gastos", "piggy"]
+    ancora: str
+    acao: str
+    dado: Literal["real", "exemplo"]
+    fala: Fala
+    avanca: Literal["cliente"]
+    disponivel: bool
+    motivo: Motivo | None
+    feito: bool
+
+
+class Guia(BaseModel):
+    estado: Literal["oferecer", "em_andamento", "concluido", "dispensado", "indisponivel"]
+    motivo: Motivo | None
+    passos: list[Passo]
+
+
+class AcaoGuia(BaseModel):
+    acao: Literal["visto", "feito", "dispensar", "reabrir"]
+    passo: PassoId | None = None
+
+
+def _disponivel(passo: str, motivo1: str | None) -> bool:
+    return passo != IDS[0] or motivo1 is None
+
+
+def _guia(linha: dict | None, motivo1: str | None) -> Guia:
+    feitos = (linha or {}).get("feitos") or {}
+    if linha and linha["concluido_em"]:
+        estado = "concluido"
+    elif linha and linha["dispensado_em"]:
+        estado = "dispensado"
+    elif feitos or (linha and linha["oferecido_em"]):
+        estado = "em_andamento"
+    else:
+        estado = "oferecer" if motivo1 is None else "indisponivel"
+    passos = [Passo(**p, disponivel=_disponivel(p["id"], motivo1), motivo=None if i else motivo1,
+                    feito=p["id"] in feitos) for i, p in enumerate(PASSOS)]
+    return Guia(estado=estado, motivo=motivo1 if estado in ("em_andamento", "indisponivel") else None,
+                passos=passos)
+
+
+@router.get("/guia", response_model=Guia)
+def ler(uid: int = Depends(usuario_atual)) -> Guia:
+    return _guia(guia.ler(uid), guia.motivo_resumo(uid))
+
+
+@router.post("/guia", response_model=Guia)
+def registrar(corpo: AcaoGuia, uid: int = Depends(usuario_atual)) -> Guia:
+    if corpo.acao == "feito" and corpo.passo is None:
+        raise RequestValidationError([{"loc": ("body", "passo"), "msg": "Falta o passo.",
+                                       "type": "value_error"}])
+    motivo1 = guia.motivo_resumo(uid)
+    if corpo.acao == "feito" and not _disponivel(corpo.passo, motivo1):
+        raise HTTPException(status_code=409, detail={"error": "passo_indisponivel"})
+    return _guia(guia.registrar(uid, corpo.acao, corpo.passo, IDS), motivo1)
