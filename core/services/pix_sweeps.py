@@ -85,7 +85,7 @@ def purgar_retencao() -> dict:
     (não tem coluna `user_id`), e `pix_charges` filtra `user_id is null and
     purged_at is null` (não tem prazo). Fundi-los quebra na primeira execução.
     """
-    from db.pix_charges import rezerar_rastreio_de_orfas
+    from db.pix_charges_saga import rezerar_rastreio_de_orfas
     from db.webhook_outbox import purgar_payloads_antigos
 
     return {"outbox": purgar_payloads_antigos(),

@@ -167,7 +167,7 @@ def test_varredura_rezera_o_rastreio_da_cobranca_orfa(user_id):
     este caso vermelho** — ele chama a folha direto; quem mede o elo é
     `test_purgar_retencao_roda_as_DUAS_purgas`, em `tests/test_pix_outbox_purga.py`.*
     """
-    from db.pix_charges import rezerar_rastreio_de_orfas
+    from db.pix_charges_saga import rezerar_rastreio_de_orfas
 
     linha = _nova(user_id)
     _sujar(linha["id"])
@@ -188,7 +188,7 @@ def test_varredura_nao_toca_em_cobranca_COM_DONO(user_id):
 
     `user_id is null` no `where` é o que separa os dois casos.
     """
-    from db.pix_charges import rezerar_rastreio_de_orfas
+    from db.pix_charges_saga import rezerar_rastreio_de_orfas
 
     linha = _nova(user_id)
     _sujar(linha["id"])
@@ -204,7 +204,7 @@ def test_varredura_nao_toca_em_cobranca_COM_DONO(user_id):
 def test_varredura_repetida_nao_reescreve_o_carimbo(user_id):
     """`purged_at is null` no `where`: sem ela a varredura DIÁRIA reescreveria o
     carimbo todo dia e `purged_at` deixaria de datar a purga."""
-    from db.pix_charges import rezerar_rastreio_de_orfas
+    from db.pix_charges_saga import rezerar_rastreio_de_orfas
 
     linha = _nova(user_id)
     _sujar(linha["id"])

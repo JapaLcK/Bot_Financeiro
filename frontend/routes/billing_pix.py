@@ -181,6 +181,7 @@ async def billing_pix_status(request: Request, public_token: str):
     usuário. Estourar aqui apagaria o QR da tela de quem só esperou.
     """
     from core.services.pix_checkout_resposta import agendada  # noqa: PLC0415
+    from core.services.pix_extras import total_cents  # noqa: PLC0415
     from db.pix_charges import buscar_por_public_token  # noqa: PLC0415
 
     user_id = shared.resolve_dashboard_user_id(request)
@@ -194,6 +195,8 @@ async def billing_pix_status(request: Request, public_token: str):
         "plan": tier_publico(linha["plan"]),
         "amount_cents": int(linha["amount_cents"]),
         "credit_cents": int(linha["credit_cents"]),
+        # Plano + cadernos extras: o que o QR cobra (`amount_cents` é só o plano).
+        "total_cents": total_cents(linha),
         "expires_at": (linha["qr_expires_at"].isoformat()
                        if linha["qr_expires_at"] else None),
         "starts_at": (linha["access_starts_at"].isoformat()

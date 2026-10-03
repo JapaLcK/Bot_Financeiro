@@ -1255,7 +1255,8 @@ def send_pro_charged_email(to: str, plan: str, amount_brl: float, next_charge_at
 
 
 def send_pix_paid_email(to: str, plan: str, amount_brl: float, access_starts_at,
-                        access_expires_at, dashboard_url: str = "") -> bool:
+                        access_expires_at, dashboard_url: str = "",
+                        extras: list[tuple[str, int]] | None = None) -> bool:
     """Confirmação da compra Pix ANUAL (§8.2, efeito `email`).
 
     Não reusa `send_pro_charged_email` por causa de duas frases que ficariam
@@ -1271,7 +1272,11 @@ def send_pix_paid_email(to: str, plan: str, amount_brl: float, access_starts_at,
     `access_starts_at` no futuro é a compra AGENDADA (quem já tinha plano
     vigente): o ano só começa quando o período atual terminar, e prometer acesso
     imediato ali é a mesma mentira de outro jeito.
+    `extras` = [(nome, valor_cents)] dos cadernos comprados junto (dono, Q4):
+    com eles o e-mail discrimina o plano (`amount_brl`), cada caderno e o total
+    pago. Sem eles o e-mail é o de antes.
     """
+    import html as _htmlmod
     from datetime import datetime as _dt, timezone as _tz
 
     nome = plan_display_name(plan)
@@ -1284,7 +1289,14 @@ def send_pix_paid_email(to: str, plan: str, amount_brl: float, access_starts_at,
     if getattr(_inicio, "tzinfo", "") is None:
         _inicio = _inicio.replace(tzinfo=_tz.utc)
     agendado = _inicio is not None and _inicio > _dt.now(_tz.utc)
-    valor = f"R$ {amount_brl:,.2f}".replace(",", "X").replace(".", ",").replace("X", ".")
+
+    def _brl(v):
+        return f"R$ {v:,.2f}".replace(",", "X").replace(".", ",").replace("X", ".")
+    itens = [(f"Plano {nome}", amount_brl)] + [(n, c / 100) for n, c in extras or []]
+    valor = _brl(sum(v for _, v in itens))
+    rotulo = "Total pago" if extras else "Valor pago"
+    detalhe = "".join(f"<li><strong>{_htmlmod.escape(n)}:</strong> {_brl(v)}</li>\n        "
+                      for n, v in itens) if extras else ""
     ate = _fmt_brl_date(access_expires_at)
     de = _fmt_brl_date(access_starts_at)
     dash = (dashboard_url or "https://pigbankai.com").rstrip("/")
@@ -1294,7 +1306,7 @@ def send_pix_paid_email(to: str, plan: str, amount_brl: float, access_starts_at,
     content = f"""
       <p>🐷✨ <strong>Pagamento confirmado!</strong> {abertura}</p>
       <ul>
-        <li><strong>Valor pago:</strong> {valor}</li>
+        {detalhe}<li><strong>{rotulo}:</strong> {valor}</li>
         {inicio_li}
         <li><strong>Acesso até:</strong> {ate}</li>
       </ul>
@@ -1306,7 +1318,8 @@ def send_pix_paid_email(to: str, plan: str, amount_brl: float, access_starts_at,
     html = _base_html(f"Pagamento confirmado — {nome}", content)
     text = (
         f"{abertura}\n\n"
-        f"Valor pago: {valor}\n"
+        + ("".join(f"{n}: {_brl(v)}\n" for n, v in itens) if extras else "")
+        + f"{rotulo}: {valor}\n"
         + (f"Acesso a partir de: {de}\n" if agendado else "")
         + f"Acesso até: {ate}\n\n"
         f"Plano anual por Pix, sem renovação automática.\n{dash}/app"
