@@ -1,4 +1,4 @@
-import { useEffect, useState, type ReactNode } from "react";
+import { useEffect, useRef, useState, type ReactNode } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import DraggableWidgetGrid, { type WidgetItem } from "@/components/ui/draggable-widget-grid";
 import type { NovoPerfil, Perfil } from "../lib/api-v2.gen";
@@ -115,6 +115,9 @@ export function Board({ s }: { s: DashState }) {
   const columns = useColumns();
   const custom = ids.join() !== shownPreset(shown, plan).join();
 
+  // O PUT de perfil em voo, de forma síncrona: o `isPending` do TanStack só chega ao React
+  // depois, e duas trocas na mesma tarefa passariam as duas pela guarda.
+  const voando = useRef(false);
   // Otimista: a tela troca na hora e desfaz se o PUT falhar (inclusive 403).
   const m = useMutation({
     mutationFn: async (p: Escolha) => { if (DEMO) saveProfile(p); else await apiPut("/perfil", { perfil: p }); },
@@ -130,13 +133,15 @@ export function Board({ s }: { s: DashState }) {
       if (qc.getQueryData<Perfil>(perfilQuery.queryKey)?.perfil === p) qc.setQueryData(perfilQuery.queryKey, antes);
       setAviso("Não foi possível salvar agora");
     },
-    // Sem devolver a promessa: a trava do seletor (isPending) é só o PUT, não a recarga.
-    onSettled: () => { qc.invalidateQueries({ queryKey: perfilQuery.queryKey }); },
+    // Sem devolver a promessa: a trava do seletor é só o PUT, não a recarga. O `onSettled`
+    // roda também se o `onMutate` falhar, então a trava nunca fica presa.
+    onSettled: () => { voando.current = false; qc.invalidateQueries({ queryKey: perfilQuery.queryKey }); },
   });
 
   // Um PUT por vez: com dois em voo o mais lento chegaria por último e gravaria o penúltimo.
   const choose = (p: string) => {
-    if (m.isPending) return;
+    if (voando.current || m.isPending) return;
+    voando.current = true;
     m.mutate(p as Escolha);
     document.getElementById("board-profile")?.focus();
   };

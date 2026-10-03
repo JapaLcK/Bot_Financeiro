@@ -133,6 +133,22 @@ test("PUT de perfil em voo: seletor aria-disabled com o foco nele; a 2ª escolha
   assert.deepEqual(terceira, ["investir", "economizar"]);
 });
 
+test("duas trocas de perfil no MESMO tick: só um PUT sai (a trava não pode esperar o React)", async () => {
+  const { ctx, page, ir } = await abrir();
+  const { puts, solta } = await putPreso(ctx);
+  await ir();
+  // As duas trocas saem dentro da mesma tarefa: o `isPending` do TanStack só chega ao React depois.
+  await page.locator("#board-profile").evaluate((s) => {
+    for (const v of ["investir", "economizar"]) { s.value = v; s.dispatchEvent(new Event("change", { bubbles: true })); }
+  });
+  await page.waitForTimeout(300);
+  const emVoo = [...puts];
+  solta();
+  await page.waitForFunction(() => !document.querySelector("#board-profile").hasAttribute("aria-disabled"));
+  await ctx.close();
+  assert.deepEqual(emVoo, ["investir"]);
+});
+
 test("PUT de perfil em voo que falha: desfaz, avisa e o seletor volta a aceitar", async () => {
   const { ctx, page, ir } = await abrir();
   const { solta } = await putPreso(ctx);
