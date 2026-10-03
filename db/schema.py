@@ -2833,8 +2833,23 @@ def init_db():
           tentativas int not null default 0,
           fechada_em timestamptz,
           resultado text check (resultado in ('enviado', 'nao_comprou')),
-          primary key (user_id, session_id)
+          primary key (user_id, session_id, ebook_price)
         )
+        """,
+        # Vários produtos por compra: a PK ganha `ebook_price` (uma linha por
+        # produto). Idempotente: só age se a PK ainda tem 2 colunas, e num
+        # statement só (drop + add), para nunca deixar a tabela sem PK.
+        """
+        do $$
+        declare r record;
+        begin
+          select conname, array_length(conkey, 1) as n into r from pg_constraint
+            where conrelid = 'ebook_entregas'::regclass and contype = 'p';
+          if r.n = 2 then
+            execute format('alter table ebook_entregas drop constraint %I,'
+              ' add primary key (user_id, session_id, ebook_price)', r.conname);
+          end if;
+        end $$;
         """,
         """
         create index if not exists idx_ebook_entregas_abertas

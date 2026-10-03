@@ -391,19 +391,34 @@ identifica o e-book por essa foto, nunca pela env do momento. `EBOOK_URL` tem no
 oferecido e sai o warning `ebook_nao_oferecido` (com o tamanho, **nunca a URL** — ela é
 o acesso ao PDF pago). As duas envs só entram em produção **depois do merge do #708**.
 
-**Entrega do e-book (#708).** O `checkout.session.completed` com `ebook_price` grava
-uma linha em `ebook_entregas` (`db/ebook_entregas.py`, PK `user_id + session_id`, com a
-foto) logo depois do grant e ANTES dos outros efeitos, sem try: falha → 5xx e a
-reentrega refaz tudo. Sessão sem a foto `ebook_url` grava assim mesmo e loga
-`ebook_sem_url`. Quem entrega é o job `_ebook_worker` (abaixo, "Tarefas de fundo"):
-só envia com `not conta_sem_credencial(uid)` (`db/google_auth.py`: senha não vazia ou
-identidade Google/Apple — a prova do e-mail; sem linha em `auth_accounts` a função dá
-False, e o job não envia porque não acha e-mail), confirma a compra pelo
-`checkout.Session.list_line_items` (senão fecha `nao_comprou`), manda
-`send_ebook_email` para o e-mail ATUAL da conta e fecha `enviado` na linha. O claim
+**Entrega do e-book (#708) — N produtos por compra.** A metadata da sessão é a foto
+dos produtos oferecidos: slot 1 em `ebook_price`/`ebook_url`, slot n (2..10) em
+`ebook_n_price`/`ebook_n_url`, lidos por `core/services/extras_assinar.da_metadata`.
+O `checkout.session.completed` com pelo menos um slot grava uma linha POR produto em
+`ebook_entregas` (`db/ebook_entregas.py`, PK `user_id + session_id + ebook_price`, num
+insert só: todos ou nenhum) logo depois do grant e ANTES dos outros efeitos, sem try:
+falha → 5xx e a reentrega refaz tudo. Produto sem a foto da URL grava assim mesmo e
+loga `ebook_sem_url` (um por produto). Quem entrega é o job `_ebook_worker` (abaixo,
+"Tarefas de fundo"), uma linha por vez: só envia com `not conta_sem_credencial(uid)`
+(`db/google_auth.py`: senha não vazia ou identidade Google/Apple — a prova do e-mail;
+sem linha em `auth_accounts` a função dá False, e o job não envia porque não acha
+e-mail), confirma a compra daquele produto pelo `checkout.Session.list_line_items`
+com `limit=100` (o padrão do Stripe é 10; plano + 10 extras = 11 linhas) — senão fecha
+`nao_comprou` —, manda `send_ebook_email` com o nome do produto (`description` da linha
+da sessão) para o e-mail ATUAL da conta e fecha `enviado` naquela linha. O claim
 (`reivindicada_ate`, 10 min dobrando a cada tentativa até 1 dia, contadas em
-`tentativas`; a linha nunca fecha sozinha) não segura transação durante o Stripe/Resend; entrega é
-"pelo menos uma vez". A tabela fica fora do export LGPD e sai com a conta (cascade).
+`tentativas`; a linha nunca fecha sozinha) é por produto — a falha de um não segura os
+outros — e não segura transação durante o Stripe/Resend; entrega é "pelo menos uma
+vez". A tabela fica fora do export LGPD e sai com a conta (cascade).
+
+Rollback do código de N produtos: o código velho usa `on conflict (user_id,
+session_id)`, que exige a PK de 2 colunas. Antes de reverter, apagar as linhas extras
+de cada compra e recriar a PK:
+`delete from ebook_entregas e using ebook_entregas o where e.user_id = o.user_id and
+e.session_id = o.session_id and e.ebook_price > o.ebook_price;` e
+`alter table ebook_entregas drop constraint ebook_entregas_pkey, add primary key
+(user_id, session_id);` (confira o nome da PK em `pg_constraint` antes). O `delete`
+fica com UM produto por compra: as pendências dos outros se perdem.
 
 **E-mail trocado chega ao Stripe (PR 4b).** A `PATCH /settings/{uid}/security/contact`
 que troca o e-mail de conta com `stripe_customer_id` grava, na MESMA transação, uma linha
