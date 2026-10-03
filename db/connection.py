@@ -230,7 +230,8 @@ LAUNCH_HAS_TIME_SQL = """
         END"""
 
 
-# Catálogo deduplicado por nome normalizado, pronto pra virar CTE de join.
+# Catálogo deduplicado por nome normalizado, pronto pra virar CTE de join. `name` é a
+# grafia que vence (o `nome` de `GET /api/v2/categorias`; `cat` é a `chave`).
 # `user_categories` é única só no par EXATO (user_id, name), então 'cafe' e
 # 'café' coexistem: um join por valor normalizado contra a tabela crua devolve
 # a mesma linha de orçamento/gasto duas vezes e dobra dinheiro na tela.
@@ -239,7 +240,7 @@ LAUNCH_HAS_TIME_SQL = """
 # pode depender de `id`, que muda com quem foi criado/apagado antes.
 CAT_META_SQL = (
     f"select distinct on ({cat_norm_sql('name')}) "
-    f"       {cat_norm_sql('name')} as cat, emoji, color "
+    f"       {cat_norm_sql('name')} as cat, emoji, color, name "
     "  from user_categories where user_id = %s "
     f" order by {cat_norm_sql('name')}, is_system desc, name asc"
 )

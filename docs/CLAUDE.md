@@ -147,8 +147,10 @@ Sub-app FastAPI (`api/v2/app.py`) montado pelo monólito com `app.mount("/api/v2
 - `GET /api/v2/me` devolve `{"plan_tier": "free"|"essencial"|"plus"|"pro"}`, sem PII.
 - `GET /api/v2/eventos` (`api/v2/eventos.py`): SSE, `data: {"recurso": "open_finance"|"tudo"}`
   (sem dado financeiro, sem id, sem `id:`/replay) e `: ping` a cada 15 s. Quem avisa chama
-  `eventos.avisar(user_id, recurso)` na thread do loop, depois do commit; hoje são o fim
-  do sync do Open Finance e o "Recomeçar do zero". `usuario_atual` roda de novo antes de
+  `eventos.avisar(user_id, recurso)` na thread do loop, depois do commit: o fim do sync do
+  Open Finance, o "Recomeçar do zero" e, desde o #691, toda escrita nas tabelas de
+  `db/schema.py::TABELAS_QUE_AVISAM` (trigger `pg_notify('pb_escrita', dono)` →
+  `escutar_banco()` → `"tudo"`), de qualquer canal, o WhatsApp também. `usuario_atual` roda de novo antes de
   cada envio e a cada 30 s: sessão ou plano caídos fecham o stream sem aviso. Teto de 5
   streams por usuário (429 no envelope). Rota SSE tipa o item pela anotação de retorno
   (`-> AsyncIterable[Aviso]`), e a varredura aceita isso no lugar do `response_model`. O
@@ -188,7 +190,9 @@ Sub-app FastAPI (`api/v2/app.py`) montado pelo monólito com `app.mount("/api/v2
   mensal (o pedido na hora também soma o mês inteiro: total, contagem e "Período"), a
   consulta 5 do /app e `compute_kpis` das Análises. `compute_evolution` é cópia em consulta
   única (um GROUP BY por mês); `tests/test_resumo_mes_regra.py` compara as duas por mês.
-  Fatura com `user_id` NULL (a coluna aceita, sem backfill) entra, como antes.
+  Fatura com `user_id` NULL (a coluna aceita, sem backfill) só entra se o cartão dela for do
+  usuário (`coalesce(b.user_id, <dono do cartão>) = %s`, desde 1e7231dd/#759), em cada perna
+  do cartão.
   **Divergência conhecida:** relatório diário e semanal, ferramentas da IA de período
   livre e projeção de fechamento (`get_summary_by_period`) e o Repórter
   (`piggy_agents._month_stats`) seguem só em `launches`, sem o cartão. Limites mantidos de
@@ -204,6 +208,40 @@ Sub-app FastAPI (`api/v2/app.py`) montado pelo monólito com `app.mount("/api/v2
   `webapp/src/dashboard/widgets/Subscriptions.tsx` (o card do Resumo e a página
   `/assinaturas`); o POST sai pelo `apiPost` de `lib/v2.ts`, com o header de
   `window.pbCsrfHeaders` (auth-refresh.js), e o 403 `pro_required` vira o convite.
+- `GET /api/v2/lancamentos` (`api/v2/lancamentos.py`, regra em `db/lancamentos.py`): só
+  leitura. Query `mes` (como em `resumo-do-mes`), `origem`, `conta` (o `id` de `/contas`),
+  `cartao`, `categoria` (a chave), `tipo` (`entrada`|`saida`), `q`, `cursor`, `limite`
+  (padrão 50, acima de 100 corta, abaixo de 1 é 422). Resposta `{mes, itens, proximo, motivos}`.
+  **O mês é o de `TOTAIS_SQL`**, pelas mesmas pernas (`db/resumo_mes.MES_LANCAMENTOS_SQL` e
+  `MES_CARTAO_SQL`): a soma dos itens não internos é o Entrou/Saiu do Resumo; o cartão
+  entra pelo mês da fatura com a data da COMPRA; o interno entra com `interno: true`, fora
+  de qualquer soma; tipos que não são despesa/receita (caixinha, aporte) ficam fora, como
+  na soma. Com `q` (até 6 palavras de 2+ letras, `unaccent`; `db/analytics.termos_busca`/
+  `clausula_busca`, as mesmas do `list_history`) a lista varre a janela inteira do plano em
+  vez do mês. Janela do plano cortando = `inicio_do_historico`. Página por KEYSET (cursor
+  opaco: base64 de `[dia, instante, tabela, id]`, adulterado = 422), sem contagem total.
+  Item: `id` (`l<n>` lançamento, `c<n>` compra no cartão: as tabelas compartilham o espaço de
+  ids), `data` (`launch_day`) e `hora` (ou `null`), `tipo`, `interno`, `valor` (texto),
+  `moeda` (a da conta do banco ligada), `descricao`, `mensagem` (a nota do usuário),
+  `categoria` (a chave `cat_norm_sql`, a mesma de `GET /api/v2/categorias`), `origem`,
+  `fundido` + `instituicao`, `conta_id`, `cartao_id`, `parcela {n, total}`, `fatura`
+  (`AAAA-MM`), `pode` e `motivos` (`conciliacao_pendente`, `transacao_pendente` = o banco
+  diz PENDING, `outra_moeda`, `moeda_presumida`). **`origem`**: `carteira` (manual com
+  `delta_conta` ≠ 0 e com a marca `launches.origem`), `banco` (sombra do Open Finance),
+  `cartao` (compra do cartão do Open Finance) e `registro_antigo` (o resto: manual sem a
+  marca, manual com delta 0, OFX, compra manual no cartão). **`pode`** é uma regra só
+  (`db/lancamentos.PODE_SQL`): antigo = `[]` (P2: só leitura no v2); banco e cartão do Open
+  Finance = categoria e descrição (P5); carteira marcada = tudo, menos data e valor se fundida
+  ou em par pendente com o banco (P3), só descrição e apagar se ligada ao dinheiro em espécie
+  (Q41), sem valor nem descrição se paga conta ou fatura. A coluna `launches.origem` (NULL =
+  antigo) nasceu vazia; quem a grava é a escrita do PR 2a da Etapa 2. `conta`/`cartao` de
+  outro usuário dão a lista vazia, igual a id inexistente; `raw`, `provider_*_id`,
+  `external_id` e o id da transação do banco nunca saem. **Divergência declarada:** a lista do
+  `/app` (`list_history`) e as consultas 3 e 4 / "últimos N" do WhatsApp seguem com as
+  regras delas (data de gravação no cartão, sem o interno).
+- `GET /api/v2/categorias` (`api/v2/categorias.py`): `{categorias: [{chave, nome}]}`, o
+  catálogo do usuário pelo `CAT_META_SQL` (chave = `cat_norm_sql(name)`, nome = a grafia que
+  vence entre gêmeas), semeado como o `/categories` do /app.
 - **Dinheiro na v2 é `Decimal` e sai como TEXTO decimal** (`"1234.56"`, sem arredondar e sem
   float), em toda rota: no TS é `string`. A escala é a da coluna (`"1000"` e `"1000.00"`
   valem). O contrato vale para toda rota futura.
@@ -350,7 +388,8 @@ dashboard pede dados por ele (pergunta e resposta); empurrar algo sem o cliente 
 só acontece em `open_finance_synced`, do fim do sync do Open Finance e do "Recomeçar do
 zero" — confira com `grep -rn "broadcast_to_user(" --include="*.py" frontend/ core/`. Os
 mesmos 2 avisos também saem pelo `/api/v2/eventos` (`eventos.avisar`).
-**Lançamento feito pelo WhatsApp não avisa o dashboard.** Mudou o formato
+**Lançamento feito pelo WhatsApp não avisa o `/app` pelo `/ws`** (o `/painel` é avisado pelo
+trigger de escrita, ver `/api/v2/eventos` em "API v2"). Mudou o formato
 de mensagem? Os dois lados mudam junto — o consumidor está no `dashboard.js`.
 
 ### Pagamentos

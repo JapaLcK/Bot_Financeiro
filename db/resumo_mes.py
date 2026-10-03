@@ -5,7 +5,8 @@ db/resumo_mes.py — Entrou e Saiu do mês: a regra única do mês-calendário (
 `criado_em` (a forma legada canonizada por `TIPO_CANON_SQL`) + compras no cartão sem
 estorno pelo `period_end` da fatura (parcelado: uma parcela por mês). Leem daqui
 `GET /api/v2/resumo-do-mes`, o "Gastos em <mês>" do WhatsApp, o relatório mensal, a
-consulta 5 do /app e `compute_kpis` das Análises. `compute_evolution` é cópia em consulta
+consulta 5 do /app e `compute_kpis` das Análises; as pernas dela (`MES_*_SQL`), a lista de
+`GET /api/v2/lancamentos` (`db/lancamentos.py`). `compute_evolution` é cópia em consulta
 única, comparada mês a mês em `tests/test_resumo_mes_regra.py`.
 
 Ficam na regra antiga (só `launches`, sem cartão: `get_summary_by_period`) de propósito,
@@ -25,27 +26,34 @@ from datetime import date, datetime, timedelta
 
 from .connection import TIPO_CANON_SQL, TIPO_DESPESA_SQL, TIPO_RECEITA_SQL, get_conn
 
+# As duas pernas do mês, também lidas pela lista de `db/lancamentos.py` (§0.7). Params:
+# (user_id, início, fim) e (user_id, user_id, início, fim). A de `launches` é sem alias e
+# SEM o filtro de interno: a lista mostra o interno marcado; a soma o tira abaixo.
+MES_LANCAMENTOS_SQL = f"""user_id = %s
+               and criado_em >= %s and criado_em < %s
+               and ({TIPO_DESPESA_SQL} or {TIPO_RECEITA_SQL})"""
+# O FROM da perna do cartão, com o join da fatura e a barreira no MESMO texto (o portão de
+# `tests/test_barreira_fatura.py` lê o literal). Cada perna filtra pelo usuário, inclusive a
+# FATURA (`b.user_id`; a NULL, a coluna aceita sem backfill, vale pelo dono do cartão dela).
+MES_CARTAO_SQL = """credit_transactions ct
+              join credit_bills b on b.id = ct.bill_id
+               and ct.user_id = %s and coalesce(b.user_id, (select cb.user_id from credit_cards cb where cb.id = b.card_id)) = %s
+               and ct.is_refund = false
+               and b.period_end >= %s and b.period_end < %s"""
+
 # `n` é a contagem de linhas somadas (o `transactions_count` das Análises); `n_cartao`, só
-# as do cartão (o relatório mensal as soma às suas linhas de `launches`). Cada perna
-# filtra pelo usuário, inclusive a FATURA (`b.user_id`; a NULL, a coluna aceita sem
-# backfill, vale pelo dono do cartão dela). Params: `totais_params`.
+# as do cartão (o relatório mensal as soma às suas linhas de `launches`). Params: `totais_params`.
 TOTAIS_SQL = f"""
     select coalesce(sum(valor) filter (where tipo = 'receita'), 0) as entrou,
            coalesce(sum(valor) filter (where tipo = 'despesa'), 0) as saiu,
            count(*) as n, count(*) filter (where cartao) as n_cartao
       from (select {TIPO_CANON_SQL} as tipo, valor, false as cartao
               from launches
-             where user_id = %s
-               and criado_em >= %s and criado_em < %s
+             where {MES_LANCAMENTOS_SQL}
                and is_internal_movement = false
-               and ({TIPO_DESPESA_SQL} or {TIPO_RECEITA_SQL})
             union all
             select 'despesa', ct.valor, true
-              from credit_transactions ct
-              join credit_bills b on b.id = ct.bill_id
-             where ct.user_id = %s and coalesce(b.user_id, (select cb.user_id from credit_cards cb where cb.id = b.card_id)) = %s
-               and ct.is_refund = false
-               and b.period_end >= %s and b.period_end < %s) x
+              from {MES_CARTAO_SQL}) x
 """
 
 # Do bloco de contas (`db/contas_hoje.py`), a mesma regra e o mesmo limite de 48 h, mais
