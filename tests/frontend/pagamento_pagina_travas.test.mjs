@@ -287,3 +287,39 @@ test("cupom só no plano durante o trial (desconto 0 hoje): o código aparece, s
     "Depois do teste: R$\u00a017,91/mês"]);
   await ctx.close();
 });
+
+// ── O que o SDK real exige e como ele sinaliza a expiração (docs.stripe.com/js/custom_checkout) ────────
+const PLUS = { name: "PigBank Plus", total: { minorUnitsAmount: 0 } };
+
+test("confirm só depois de ler total, currency e minorUnitsAmountDivisor (senão o SDK real lança)", async () => {
+  const { ctx, page, posts } = await abrirPagina({ extras: [] });
+  await page.click("#pp-pagar");
+  await ate(() => posts("/__stripe/confirm").length > 0);
+  assert.deepEqual(await page.evaluate(() => window.__stripe.lido), { total: true, currency: true, minorUnitsAmountDivisor: true });
+  await ctx.close();
+});
+
+test("a moeda e o divisor vêm da sessão: currency usd → 'US$'", async () => {
+  const sessao = { currency: "usd", lineItems: [], total: { total: { minorUnitsAmount: 1990 } } };
+  const { ctx, page } = await abrirPagina({ sdk: { sessao } });
+  assert.equal(await page.textContent("#pp-resumo .pp-r-hoje span:last-child"), "US$\u00a019,90");
+  await ctx.close();
+});
+
+test("change com a sessão expirada (status.type): tela de pagamento expirado", async () => {
+  const depoisBump = { lineItems: [PLUS], total: { total: { minorUnitsAmount: 0 } }, status: { type: "expired" } };
+  const { ctx, page } = await abrirPagina({ sdk: { depoisBump } });
+  await caixas(page).nth(0).click();
+  await tela(page, "s3");
+  assert.match(await page.textContent("#s3-erro"), /tempo para pagar acabou/);
+  await ctx.close();
+});
+
+test("sessão já expirada ao carregar as ações (sem change): tela de pagamento expirado", async () => {
+  const sessao = { lineItems: [PLUS], total: { total: { minorUnitsAmount: 0 } }, status: { type: "expired" } };
+  const { ctx, page } = await abrir(browser, { api: comPagina(), sdk: { sessao, semChange: true } });
+  // O S3 já aparece no "Preparando o pagamento…": espera o AVISO, não a tela.
+  await page.waitForFunction(() => /tempo para pagar acabou/.test(document.getElementById("s3-erro").textContent));
+  assert.equal(await page.locator("#s3-retry").isVisible(), true);
+  await ctx.close();
+});

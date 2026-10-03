@@ -19,6 +19,17 @@
   const brl = function (c) { return typeof c === "number" && isFinite(c) ? BRL.format(c / 100) : ""; };
   /** A mensagem do Stripe num `{type:"error", error}`, ou a padrão. */
   const msg = function (r, padrao) { const e = (r && r.error) || {}; return typeof e.message === "string" && e.message ? e.message : padrao; };
+  const expirada = function (s) { return !!(s && s.status && s.status.type === "expired"); };
+  /** Formatador do dinheiro DA SESSÃO: moeda e divisor lidos dela. O SDK exige essa leitura junto com a do
+   *  total.total.minorUnitsAmount: sem ela o `confirm` LANÇA (docs.stripe.com/js/custom_checkout). */
+  function formatador(s) {
+    const div = typeof s.minorUnitsAmountDivisor === "number" && s.minorUnitsAmountDivisor > 0 ? s.minorUnitsAmountDivisor : 100;
+    let f = BRL;
+    try {
+      if (typeof s.currency === "string") f = new Intl.NumberFormat("pt-BR", { style: "currency", currency: s.currency.toUpperCase() });
+    } catch (_) { /* moeda desconhecida: fica BRL */ }
+    return function (c) { return typeof c === "number" && isFinite(c) ? f.format(c / div) : ""; };
+  }
   const centavos = function (v) { return v && typeof v.minorUnitsAmount === "number" ? v.minorUnitsAmount : null; };
   const espera = function (ms) { return new Promise(function (ok) { setTimeout(function () { ok(null); }, ms); }); };
 
@@ -98,39 +109,40 @@
       l.append(el("span", "", a), el("span", "", b));
       r.appendChild(l);
     };
+    const fmt = formatador(s);
     r.textContent = "";
     // `total` da linha já vem com o cupom (medido no Stripe de teste): a linha mostra o valor de antes, e o
     // desconto sai numa linha só dele.
     itens.forEach(function (li) {
       const t = centavos(li.total);
-      linha(li.name || "", brl(t === null ? null : t + (centavos(li.discount) || 0)));
+      linha(li.name || "", fmt(t === null ? null : t + (centavos(li.discount) || 0)));
     });
     // O código aparece sempre que houver um; o valor, só se descontar algo hoje (no trial, o cupom só no plano
     // desconta 0 hoje e aparece no "Depois do teste").
     const desc = centavos(s.total && s.total.discount);
     const cod = (Array.isArray(s.discountAmounts) ? s.discountAmounts : [])
       .map(function (d) { return d && d.promotionCode; }).filter(function (c) { return typeof c === "string" && c; })[0];
-    if (cod || desc > 0) linha(cod ? "Cupom " + cod + " aplicado" : "Desconto", desc > 0 ? "−" + brl(desc) : "", "pp-r-desc");
+    if (cod || desc > 0) linha(cod ? "Cupom " + cod + " aplicado" : "Desconto", desc > 0 ? "−" + fmt(desc) : "", "pp-r-desc");
     const hoje = centavos(s.total && s.total.total);
-    linha("Total hoje", brl(hoje), "pp-r-hoje");
+    linha("Total hoje", fmt(hoje), "pp-r-hoje");
     const prox = s.recurring && s.recurring.dueNext && centavos(s.recurring.dueNext.total);
     if (prox !== null && prox !== undefined) {
-      r.appendChild(el("div", "pp-r-depois", (td > 0 ? "Depois do teste: " : "Depois: ") + brl(prox) + por));
+      r.appendChild(el("div", "pp-r-depois", (td > 0 ? "Depois do teste: " : "Depois: ") + fmt(prox) + por));
     }
     // Com trial, o que se paga hoje são os cadernos: as linhas com valor só escolhem o singular/plural.
-    rotulo(td, hoje, itens.filter(function (li) { return centavos(li.total) > 0; }).length);
+    rotulo(td, hoje, itens.filter(function (li) { return centavos(li.total) > 0; }).length, fmt);
     return hoje;
   }
 
   /** O texto do botão. Sem total (antes do 1º `change`), nada de "Hoje você não paga nada". */
-  function rotulo(td, hoje, n) {
+  function rotulo(td, hoje, n, fmt) {
     $("pp-cta").textContent = td > 0 ? "Começar meus " + td + " dias grátis"
-      : hoje === null ? "Assinar" : "Assinar · " + brl(hoje) + " hoje";
+      : hoje === null ? "Assinar" : "Assinar · " + fmt(hoje) + " hoje";
     let sub = "";
     if (td > 0 && hoje !== null) {
       // Guiado pelo TOTAL de hoje, nunca pela contagem de linhas.
       const o = n === 1 ? "só o caderno, " : n > 1 ? "só os cadernos, " : "";
-      sub = hoje > 0 ? "Hoje: " + o + brl(hoje) : "Hoje você não paga nada";
+      sub = hoje > 0 ? "Hoje: " + o + fmt(hoje) : "Hoje você não paga nada";
     }
     $("pp-cta-sub").textContent = sub;
   }
@@ -234,8 +246,10 @@
         try { r = await actions.confirm(); } catch (_) { r = { type: "error" }; }  // exceção não vira texto
         if (!vivo) return;
         if (r && r.type === "error") {
-          // ponytail: o código exato da sessão expirada no confirm é a confirmar no Stripe de teste.
-          if (/expired/i.test(String((r.error && r.error.code) || ""))) return ctx.expirou();
+          // Expirada se reconhece pelo status da sessão (open|expired|complete), não por um código de erro.
+          let st = null;
+          try { st = actions.getSession(); } catch (_) { /* sem sessão: segue o erro */ }
+          if (expirada(st)) return ctx.expirou();
           aviso("pp-erro", msg(r, "O pagamento não foi concluído."));
           trava(false);
         }
@@ -260,11 +274,12 @@
       $("pp-pagar").onclick = pagar;
       $("pp-cupom").onsubmit = cupom;
       $("pp-cupom-abre").onclick = function () { $("pp-cupom-abre").hidden = true; $("pp-cupom").hidden = false; $("pp-cupom-cod").focus(); };
-      rotulo(td, null, 0);
+      rotulo(td, null, 0, brl);
       pinta();
 
       checkout.on("change", function (s) {
         if (!vivo || !s) return;
+        if (expirada(s)) return ctx.expirou();
         temTotal = resumo(s, td, por) !== null;
         pinta();
       });
@@ -284,6 +299,7 @@
         // O total da sessão já agora, sem depender de um `change` inicial.
         let s0 = null;
         try { s0 = actions.getSession(); } catch (_) { /* fica para o `change` */ }
+        if (expirada(s0)) return ctx.expirou();
         if (s0) temTotal = resumo(s0, td, por) !== null;
         pinta();
       }, function () { clearTimeout(prazo); if (vivo) ctx.falha(); });

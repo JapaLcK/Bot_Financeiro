@@ -129,7 +129,7 @@ test("confirm com erro do cartão: a mensagem do Stripe e o botão destrava", as
 
 for (const [nome, opts] of [
   ["409 sessao_fechada no /bump", { api: { [`POST ${BUMP}`]: [409, { detail: { error: "sessao_fechada" } }] } }],
-  ["confirm com sessão expirada", { extras: [], sdk: { confirma: { type: "error", error: { code: "checkout_session_expired", message: "x" } } } }],
+  ["confirm com erro e a sessão expirada (status.type)", { extras: [], sdk: { expiraNoConfirm: true, confirma: { type: "error", error: { message: "x" } } } }],
 ]) {
   test(`${nome}: aviso no S3 e o "Tentar de novo" refaz o checkout`, async () => {
     const { ctx, page, posts } = await abrirPagina(opts);
