@@ -20,7 +20,9 @@ before(async () => { exigeArtefatoEmDia(); browser = await chromium.launch(); })
 after(() => browser?.close());
 
 const abrir = (opts) => abrirPainel(browser, opts);
-const rolagem = (page) => page.evaluate(() => document.scrollingElement.scrollWidth - document.scrollingElement.clientWidth);
+// Espera as animações: a 760px o grid passa ~200ms (sem "reduzir movimento"; mais num CI lento, com
+// 1ms de transição) com 108px de rolagem lateral enquanto os blocos assentam. O transiente já existia no PR C.
+const rolagem = async (page) => (await assentar(page), page.evaluate(() => document.scrollingElement.scrollWidth - document.scrollingElement.clientWidth));
 
 // --- "Para onde vai" -----------------------------------------------------------------
 
