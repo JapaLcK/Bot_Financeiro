@@ -52,6 +52,8 @@ def test_tabela_de_estados(libera):
                  launch_id, amount, tx_date) values (%s, %s, true, 'k', 'saque', 'ativo', %s, 1, %s)
              returning id""", (a, f"k{i}", lid, date.today()))
     paga = _carteira(a, valor=35, bill_id=1, paid_amount_added=35)
+    paga_fund = _carteira(a, valor=41, bill_id=2, paid_amount_added=41)
+    tx_banco(acc, "tx-paga-fund", "-41", imported_launch_id=paga_fund, reconciliation_status="auto_merged")
     delta_zero = db.add_launch_and_update_balance(a, "despesa", 36, "x", None, apply_delta=False)[0]  # marcada
     ofx = q("""insert into launches (user_id, tipo, valor, source, external_id, efeitos)
                values (%s, 'despesa', 37, 'ofx', 'ofx-1', %s) returning id""", (a, Jsonb({"delta_conta": -37})))["id"]
@@ -71,6 +73,7 @@ def test_tabela_de_estados(libera):
         f"l{especie}": ("carteira", ["descricao", "apagar"], [], False),
         f"l{especie_antiga}": ("registro_antigo", [], [], False),
         f"l{paga}": ("carteira", ["categoria", "data"], [], False),  # sem apagar (dono, 2026-10-03)
+        f"l{paga_fund}": ("carteira", ["categoria"], [], True),  # a fusão tira a data (P3)
         f"l{delta_zero}": ("registro_antigo", [], [], False),  # manual com delta 0 não é carteira
         f"l{ofx}": ("registro_antigo", [], [], False),
         f"l{sombra}": ("banco", ["categoria", "descricao"], [], False),  # P5

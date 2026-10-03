@@ -232,7 +232,8 @@ Sub-app FastAPI (`api/v2/app.py`) montado pelo monólito com `app.mount("/api/v2
   (`db/lancamentos.PODE_SQL`): antigo = `[]` (P2: só leitura no v2); banco e cartão do Open
   Finance = categoria e descrição (P5); carteira marcada = tudo, menos data e valor se fundida
   ou em par pendente com o banco (P3), só descrição e apagar se ligada ao dinheiro em espécie
-  (Q41), só categoria e data se paga conta ou fatura (sem apagar no v2: apagar o pagamento de
+  (Q41), só categoria e data se paga conta ou fatura, e só categoria se além disso fundida
+  (sem apagar no v2: apagar o pagamento de
   conta devolve o dinheiro e a conta segue paga; o de fatura do cartão manual cai no mesmo ramo,
   `bill_id`, e sai junto; o `/app` e o WhatsApp seguem apagando). `launches.origem` (NULL =
   antigo, sem backfill) vale `'carteira'` (`db.accounts.ORIGEM_CARTEIRA`) e quem grava é o
@@ -256,8 +257,12 @@ Sub-app FastAPI (`api/v2/app.py`) montado pelo monólito com `app.mount("/api/v2
   corte do plano e hoje; a hora é a de agora). Sempre dinheiro na Carteira (Q40: o v2 não
   recebe forma de pagamento), teto do plano = 403 `plan_limit`; o miolo é
   `core/services/carteira.lancar`, o mesmo do `POST /launches` do `/app`. **editar**: `id`
-  (`l<n>` ou `c<n>`) e ao menos um de `categoria`, `descricao`, `data`, cada um contra o
-  `pode` da linha; **apagar**: só `l<n>` (cartão = 409). O `pode` é relido por
+  (`l<n>` ou `c<n>`) e ao menos um de `categoria`, `descricao`, `data`, `valor` (PR 2b-1: o
+  mesmo texto e > 0 da criação; só a carteira pura tem 'valor' no `pode`, e o saldo da Carteira
+  anda pela diferença na mesma transação, então apagar depois desfaz exato; `c<n>` = 409),
+  cada um contra o `pode` da linha. A data da linha fundida com o banco
+  (`db/lancamentos.FUNDIDO_SQL`) é travada em TODO canal por `update_launch_fields` (o PATCH
+  /launches do `/app` dá 409 com frase própria; o v2 dá 409 `nao_editavel`); **apagar**: só `l<n>` (cartão = 409). O `pode` é relido por
   `db/lancamentos.pode_da_linha` dentro da transação da escrita, depois do lock do usuário
   (`_lock_user`) e da linha (`exigir_pode=True` em `update_launch_fields`,
   `delete_launch_and_rollback` e `update_credit_transaction_fields`, este pelo

@@ -429,7 +429,7 @@ def _daily_report_tick() -> None:
                 logger.info(
                     "WA daily report proactive template sent uid=%s to=%s reminders=%s pid=%s hostname=%s",
                     uid,
-                    to,
+                    mask_phone(to),
                     len(reminders),
                     instance["pid"],
                     instance["hostname"],
@@ -441,7 +441,7 @@ def _daily_report_tick() -> None:
                     source="wa_app",
                     user_id=uid,
                     details={
-                        "to": to,
+                        "to": mask_phone(to),
                         "template_name": proactive_template["name"],
                         "language_code": proactive_template["language_code"],
                         "included_report_param": bool(template_body_params),
@@ -450,7 +450,7 @@ def _daily_report_tick() -> None:
                 logger.info(
                     "WA daily report sent uid=%s to=%s reminders=%s pid=%s hostname=%s",
                     uid,
-                    to,
+                    mask_phone(to),
                     len(reminders),
                     instance["pid"],
                     instance["hostname"],
@@ -463,7 +463,7 @@ def _daily_report_tick() -> None:
                     f"Falha ao enviar relatorio diario via WhatsApp: {exc}",
                     source="wa_app",
                     user_id=uid,
-                    details={"to": to},
+                    details={"to": mask_phone(to)},
                 )
 
         if reminders:
@@ -605,7 +605,7 @@ def _bill_reminder_tick() -> None:
                         "Lembrete de conta a pagar enviado via template WhatsApp.",
                         source="wa_app",
                         user_id=uid,
-                        details={"to": to, "bill_id": bill.get("id"), "template_name": cfg["name"]},
+                        details={"to": mask_phone(to), "bill_id": bill.get("id"), "template_name": cfg["name"]},
                     )
                 except Exception as exc:
                     logger.warning("WA bill reminder send error uid=%s to=%s error=%s", uid, mask_phone(to), exc)
@@ -670,7 +670,7 @@ def _send_periodic_template(uid, wa_targets, cfg, summary, kind, instance) -> No
             )
             logger.info(
                 "WA %s report template sent uid=%s to=%s pid=%s hostname=%s",
-                kind, uid, to, instance["pid"], instance["hostname"],
+                kind, uid, mask_phone(to), instance["pid"], instance["hostname"],
             )
             log_system_event_sync(
                 "info",
@@ -679,7 +679,7 @@ def _send_periodic_template(uid, wa_targets, cfg, summary, kind, instance) -> No
                 source="wa_app",
                 user_id=uid,
                 details={
-                    "to": to,
+                    "to": mask_phone(to),
                     "template_name": cfg["name"],
                     "language_code": cfg["language_code"],
                     "periodo": named_params["periodo"],
@@ -693,7 +693,7 @@ def _send_periodic_template(uid, wa_targets, cfg, summary, kind, instance) -> No
                 f"Falha ao enviar relatorio {label} via WhatsApp: {exc}",
                 source="wa_app",
                 user_id=uid,
-                details={"to": to},
+                details={"to": mask_phone(to)},
             )
 
 

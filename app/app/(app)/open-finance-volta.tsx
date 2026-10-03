@@ -18,6 +18,8 @@ import { espaco } from "@/ui/tokens";
  * depois do OAuth do banco. Dentro de `(app)`, então sem sessão nem monta
  * (`Stack.Protected`). A lógica é `features/openFinance/volta.ts`; aqui só a
  * trava, o cancelamento e o desenho. Os textos são PROVISÓRIOS até as telas 6–7.
+ * Em `updating` o laço segue consultando: o spinner do `ConnectionStatus` some
+ * quando o estado muda ou, no fim da janela, vira `organizando`.
  *
  * ponytail: abertura fria com a trava ligada mostra a `TelaDeBloqueio` no lugar
  * da pilha, e depois de liberar o roteador pode não reabrir esta rota (perde o
@@ -81,6 +83,16 @@ export default function OpenFinanceVolta() {
               O banco ainda não confirmou. Pode levar alguns minutos: ele aparece sozinho quando terminar.
             </Texto>
             <Button rotulo="Conferir de novo" onPress={() => setRodada((n) => n + 1)} />
+            {continuar}
+          </>
+        )}
+
+        {estado.fase === "organizando" && (
+          <>
+            <Texto variante="corpo" tom="inkMuted">
+              Seu banco foi conectado. Estamos organizando seus dados; eles aparecem sozinhos quando terminar.
+            </Texto>
+            <Button rotulo="Conferir de novo" variante="secondary" onPress={() => setRodada((n) => n + 1)} />
             {continuar}
           </>
         )}

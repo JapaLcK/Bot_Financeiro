@@ -9,10 +9,10 @@ O root logger está em INFO e o `_DashboardHandler` grava WARNING+ em
 - o `details` do `message_processing_failed` (`core/handle_incoming.py`) não
   leva o texto — só `chars`.
 
-O que ele NÃO prova: o telefone cru continua de propósito no `details`
-estruturado — `details.wa_id` em `wa_runtime.py:1469` (e a consulta do
-`:599/:601`, que o lê) e `details.to` em `wa_app.py:466,608,696` — até o PR 2
-do N4 (decisão do dono).
+O `details` estruturado (`wa_id`, `to`) e as linhas INFO com telefone são do
+PR 2 do N4, em `tests/test_pii_telefone_no_details.py`: o número vai mascarado
+e o dedup do aviso de vinculação é por `user_id`. As linhas antigas da tabela
+continuam com o número cru — não foram reescritas.
 
 Os casos passam pela função pública e, onde a linha é WARNING+, olham o que
 chegaria à tabela pelo handler real (`_system_event_logs`).
@@ -37,8 +37,6 @@ import frontend.finance_bot_websocket_custom as dashboard
 from adapters.whatsapp.wa_parse import InboundMessage
 from core.services import ipgeo, media_service
 from core.types import IncomingMessage
-from db import get_conn
-from tests._billing_grants_helpers import garantir_system_event_logs
 from tests.test_api_v2_erros import rota_temporaria  # noqa: F401 (fixture)
 from tests.test_category_normalization import _wa
 from tests.test_error_pages import boom_route  # noqa: F401 (fixture)
@@ -96,19 +94,12 @@ def _send_reply_falha(monkeypatch):
         wa_runtime._send_reply(FONE, "oi")
 
 
-def _lookup_falha(monkeypatch):
-    def explode():
-        raise RuntimeError("db fora")
-    monkeypatch.setattr(wa_runtime, "get_conn", explode)
-    assert wa_runtime._autolink_warning_already_sent(FONE, "no_match_notice") is False
-
-
 def _tutorial_desconhecido(monkeypatch):
     wa_tutorial.handle_tutorial_button(FONE, "botao_que_nao_existe")
 
 
-@pytest.mark.parametrize("disparo", [_send_reply_falha, _lookup_falha, _tutorial_desconhecido],
-                         ids=["send_text:165", "autolink_lookup:609", "tutorial:377"])
+@pytest.mark.parametrize("disparo", [_send_reply_falha, _tutorial_desconhecido],
+                         ids=["send_text:165", "tutorial:377"])
 def test_warning_sem_telefone_cru(disparo, monkeypatch, caplog):
     with caplog.at_level(logging.WARNING):
         disparo(monkeypatch)
@@ -134,21 +125,6 @@ def test_botao_de_opt_out_com_falha_sem_telefone_cru(botao, user_id, monkeypatch
     assert len(linhas) == 1, [r.getMessage() for r in caplog.records]
     gravados = json.dumps(_system_event_logs(monkeypatch, linhas), ensure_ascii=False)
     assert FONE not in gravados and MASCARA in gravados, gravados
-
-
-def test_aviso_de_vinculacao_ainda_acha_pelo_wa_id_cru(monkeypatch):
-    """Positivo: a consulta do :601 continua no wa_id cru (é o que `details` grava)."""
-    garantir_system_event_logs()
-    real = wa_runtime.log_system_event_sync
-    real("info", "whatsapp_autolink_greeting_warning_sent", "x",
-         source="test_pii", details={"wa_id": FONE, "status": "no_match_notice"})
-    try:
-        assert wa_runtime._autolink_warning_already_sent(FONE, "no_match_notice") is True
-        assert wa_runtime._autolink_warning_already_sent("5511900000000", "no_match_notice") is False
-    finally:
-        with get_conn() as conn, conn.cursor() as cur:
-            cur.execute("DELETE FROM system_event_logs WHERE source = 'test_pii'")
-            conn.commit()
 
 
 def test_handle_incoming_failed_nao_leva_o_texto(user_id, monkeypatch, caplog):

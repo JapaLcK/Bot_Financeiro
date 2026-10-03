@@ -290,7 +290,8 @@ def update_launch_category(user_id: int, launch_id: int, categoria: str | None) 
 
 
 class LaunchDateLockedError(ValueError):
-    """Tentou editar a data de um lançamento cuja data é do provedor (Open Finance)."""
+    """Tentou editar a data de um lançamento cuja data é do provedor (Open Finance), seja a
+    linha dele ou uma fundida com a transação dele."""
 
 
 # As condições PERMANENTES de `delete_launch_and_rollback` que o usuário precisa
@@ -387,19 +388,35 @@ def update_launch_fields(
     nota: str | None = None,
     criado_em: datetime | None = None,
     dia: date | None = None,
+    valor: Decimal | None = None,
     exigir_pode: bool = False,
 ) -> bool:
-    """Atualiza campos editáveis (categoria, alvo, nota, criado_em) de um lançamento.
+    """Atualiza campos editáveis (categoria, alvo, nota, criado_em, valor) de um lançamento.
 
     Argumentos None são ignorados (mantém valor atual). Strings vazias viram
     NULL no banco. Retorna False se não encontrou lançamento do usuário.
 
     `dia` troca só o dia de `criado_em`, mantendo a hora local. `exigir_pode` (a v2):
     sob o lock do usuário e da linha, campo fora de `lancamentos.pode_da_linha` levanta
-    `NaoEditavel` (categoria → 'categoria', alvo/nota → 'descricao', data → 'data').
+    `NaoEditavel` (categoria → 'categoria', alvo/nota → 'descricao', data → 'data',
+    valor → 'valor').
+
+    Data (`criado_em`/`dia`), em TODO chamador: sob o lock do usuário e da linha, a linha do
+    Open Finance e a fundida com o banco (`lancamentos.FUNDIDO_SQL`, P3) levantam
+    `LaunchDateLockedError` — a data é do banco.
+
+    `valor` (> 0) só com `exigir_pode`: o `PODE_SQL` só o dá à carteira pura (P4). Troca
+    `valor`, o `efeitos.delta_conta` (mesmo sinal) e o saldo da Carteira pela diferença, na
+    mesma transação: apagar depois desfaz exato. Não procura par novo no banco (dono,
+    2026-10-03); a fundida não acompanha correção do banco (PR 3).
     """
     from utils_text import is_internal_category
 
+    if valor is not None and not exigir_pode:
+        raise ValueError("valor só com exigir_pode: a regra de quem edita valor é o PODE_SQL.")
+    if valor is not None and not (isinstance(valor, Decimal) and valor.is_finite() and valor > 0
+                                  and valor.as_tuple().exponent >= -2):
+        raise ValueError("valor: Decimal finito > 0 com até 2 casas; a rota valida antes.")
     ensure_user(user_id)
 
     sets: list[str] = []
@@ -414,17 +431,18 @@ def update_launch_fields(
     if nota is not None:
         sets.append("nota=%s")
         params.append((nota.strip() or None))
-    if not sets and criado_em is None and dia is None:
+    if not sets and criado_em is None and dia is None and valor is None:
         return False
 
     with get_conn() as conn:
         with conn.cursor() as cur:
-            if exigir_pode or dia is not None:
+            delta_novo = None
+            if exigir_pode or criado_em is not None or dia is not None:
                 from .bank_movements import _lock_user
                 from .lancamentos import NaoEditavel, pode_da_linha
-                if exigir_pode:  # o lock antes: o `pode` lê o estado que o sync/conciliação mudam
-                    _lock_user(cur, user_id)
-                cur.execute("select criado_em from launches where user_id=%s and id=%s for update",
+                # O lock antes: o `pode` e a fusão leem o estado que o sync/conciliação mudam.
+                _lock_user(cur, user_id)
+                cur.execute("select criado_em, efeitos from launches where user_id=%s and id=%s for update",
                             (user_id, launch_id))
                 atual = cur.fetchone()
                 if not atual:
@@ -432,12 +450,18 @@ def update_launch_fields(
                 if exigir_pode:
                     pode = pode_da_linha(cur, user_id, launch_id) or []
                     pedidos = {"categoria": categoria, "descricao": alvo if alvo is not None else nota,
-                               "data": criado_em or dia}
+                               "data": criado_em or dia, "valor": valor}
                     if any(v is not None and k not in pode for k, v in pedidos.items()):
                         raise NaoEditavel("Campo fora do que esta linha permite editar.")
                 if dia is not None:
                     criado_em = datetime.combine(dia, atual["criado_em"].astimezone(_tz()).time(),
                                                  tzinfo=_tz())
+                if valor is not None:  # carteira pura (o `pode`): `delta_conta` ≠ 0
+                    delta_velho = Decimal(str(atual["efeitos"]["delta_conta"]))
+                    delta_novo = valor if delta_velho > 0 else -valor
+                    # Número JSON, como o escritor grava (`float(delta)`): o apagar lê de volta.
+                    sets.append("valor=%s, efeitos = jsonb_set(efeitos, '{delta_conta}', to_jsonb(%s::numeric))")
+                    params.extend([valor, delta_novo])
             if criado_em is not None:
                 sets.append("criado_em=%s")
                 params.append(criado_em)
@@ -468,8 +492,11 @@ def update_launch_fields(
                 # que a tela consegue explicar. (Nota/descrição continuam
                 # editáveis: a sync não toca em `nota`/`alvo`; a categoria
                 # editada também sobrevive, por `categoria_editada`.)
+                # A fundida (P3, dono): o banco é dono da data em todo canal.
+                from .lancamentos import FUNDIDO_SQL
                 cur.execute(
-                    "select coalesce(source,'') as source from launches where user_id=%s and id=%s",
+                    f"select coalesce(source,'') as source, {FUNDIDO_SQL} as fundido "
+                    "from launches where user_id=%s and id=%s",
                     (user_id, launch_id),
                 )
                 row = cur.fetchone()
@@ -478,6 +505,14 @@ def update_launch_fields(
                         "A data deste lançamento vem do banco conectado e é "
                         "atualizada por ele. Dá pra editar a descrição e a categoria."
                     )
+                if row and row["fundido"]:
+                    raise LaunchDateLockedError(
+                        "Esse lançamento está junto com uma transação do banco, e a data é a "
+                        "do banco. Dá pra editar a descrição e a categoria."
+                    )
+            if delta_novo is not None:
+                cur.execute("update accounts set balance = balance + %s where user_id=%s",
+                            (delta_novo - delta_velho, user_id))
             params.extend([user_id, launch_id])
             cur.execute(f"update launches set {', '.join(sets)} where user_id=%s and id=%s",
                         tuple(params))
