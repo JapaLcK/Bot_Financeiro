@@ -1676,7 +1676,7 @@ async def admin_error_logging_middleware(request: Request, call_next):
             err_str,
             source=f"{request.method} {request.url.path}",
             details={
-                "query": dict(request.query_params),
+                "query_keys": sorted(request.query_params.keys()),
                 "status_code": status_code,
                 "exc_type": exc.__class__.__name__,
                 "traceback": tb_str[-2000:],
