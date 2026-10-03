@@ -386,8 +386,11 @@ consertou. `git diff` antes do commit, lido de ponta a ponta.
 **Toda feature começa em branch NOVA, da `main` atualizada, numa worktree
 separada.** Nunca continue na branch que a sessão encontrou checked out, nunca
 reaproveite branch de outra feature e nunca "caroneie" em branch alheia:
-`git fetch origin && git worktree add .worktrees/<nome> -b feat/<nome> origin/main`
-(ou `git switch -c feat/<nome> origin/main`, se não houver worktree). Se no meio
+`git fetch origin && git worktree add .claude/worktrees/<nome> -b feat/<nome> origin/main`
+(ou `git switch -c feat/<nome> origin/main`, se não houver worktree). O caminho é
+`.claude/worktrees/` porque é o que o `.gitignore` já ignora — fora dele a worktree
+aparece como `??` e um `git add .` a empacota. A worktree que o app cria para a
+sessão já mora lá, numa branch nova: ela cumpre a regra. Se no meio
 do trabalho aparecer commit que não é seu na branch, **pare e pergunte antes de
 empurrar** — a branch está sendo compartilhada e o seu PR vai arrastar o
 trabalho dos outros.
