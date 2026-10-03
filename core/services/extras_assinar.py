@@ -22,6 +22,18 @@ def _ler(meta, chave: str):
         return None
 
 
+def linhas_da_fatura(invoice) -> list:
+    """Todas as linhas da fatura. O objeto embute no máximo 10 (plano + 10
+    extras = 11); com `has_more`, busca pela API. Sem try: no webhook, falha
+    vira 5xx e o Stripe reentrega. Usa o `stripe.api_key` global que o webhook
+    seta, por isso só serve dentro dele."""
+    linhas = _ler(invoice, "lines")
+    if _ler(linhas, "has_more"):
+        import stripe
+        linhas = stripe.Invoice.list_lines(_ler(invoice, "id"), limit=100)
+    return _ler(linhas, "data") or []
+
+
 def da_metadata(meta) -> list[tuple[str, str | None]]:
     """[(preço, url | None)] dos slots com preço, na ordem do slot."""
     itens = []
