@@ -37,24 +37,50 @@ const STRIPE_FALSO = `(function () {
   var cfg = window.__STRIPE || {}, modo = cfg.modo || "ok";
   var reg = window.__stripe = { pk: null, cs: null, mount: 0, destroy: 0, run: 0 };
   if (modo === "sem-global") return;
-  var sessao = cfg.sessao || { lineItems: [{ name: "PigBank Plus", total: { minorUnitsAmount: 0 } }],
-    total: { total: { minorUnitsAmount: 0 } }, recurring: { interval: "month", dueNext: { total: { minorUnitsAmount: 1990 } } } };
+  var inicial = function () { return cfg.sessao || { lineItems: [{ name: "PigBank Plus", total: { minorUnitsAmount: 0 } }],
+    total: { total: { minorUnitsAmount: 0 } }, recurring: { interval: "month", dueNext: { total: { minorUnitsAmount: 1990 } } } }; };
+  var sessao = inicial();
   var ouvinte = null;
+  // O SDK real LANÇA no confirm se a tela não leu total.total.minorUnitsAmount, currency e minorUnitsAmountDivisor
+  // (docs.stripe.com/js/custom_checkout, "Confirm the Checkout Session"). Cada sessão entregue à página é uma
+  // cópia com getters que marcam a leitura em \`reg.lido\`; o confirm falso lança sem as três.
+  reg.lido = {};
+  var vigia = function (alvo, k, v, marca) {
+    Object.defineProperty(alvo, k, { enumerable: true, get: function () { reg.lido[marca] = true; return v; } });
+  };
+  var entrega = function () {
+    var o = Object.assign({ id: "cs_test_abc", currency: "brl", minorUnitsAmountDivisor: 100, status: { type: "open" } }, sessao);
+    var out = {};
+    Object.keys(o).forEach(function (k) {
+      if (k === "currency" || k === "minorUnitsAmountDivisor") vigia(out, k, o[k], k); else out[k] = o[k];
+    });
+    if (o.total && o.total.total && typeof o.total.total.minorUnitsAmount === "number") {
+      out.total = Object.assign({}, o.total, { total: Object.assign({}, o.total.total) });
+      vigia(out.total.total, "minorUnitsAmount", o.total.total.minorUnitsAmount, "total");
+    }
+    return out;
+  };
   // \`depoisBump\`/\`depoisCupom\`: a sessão NOVA que o Stripe manda num 2º \`change\` depois de um runServerUpdate
   // ou de um applyPromotionCode que deram certo (como o SDK real faz).
-  var muda = function (nova) { if (nova && ouvinte) { sessao = nova; ouvinte(sessao); } };
+  var muda = function (nova) { if (nova && ouvinte) { sessao = nova; ouvinte(entrega()); } };
   var depois = function (url, corpo, res) {
     return fetch(url, { method: "POST", body: JSON.stringify(corpo || {}) }).then(function () { return res || { type: "success" }; });
   };
   var acoes = {
-    getSession: function () { return Object.assign({ id: "cs_test_abc" }, sessao); },
+    getSession: entrega,
     runServerUpdate: function (fn) {
       reg.run++;
       return Promise.resolve().then(fn).then(function () { muda(cfg.depoisBump); return { type: "success" }; },
         function (e) { return { type: "error", error: { message: String(e) } }; });
     },
     confirm: function () {
-      return cfg.confirma === "lanca" ? Promise.reject(new Error("rede")) : depois("/__stripe/confirm", {}, cfg.confirma);
+      if (!(reg.lido.total && reg.lido.currency && reg.lido.minorUnitsAmountDivisor)) {
+        return Promise.reject(new Error("IntegrationError: o total não foi exibido"));
+      }
+      if (cfg.confirma === "lanca") return Promise.reject(new Error("rede"));
+      // \`expiraNoConfirm\`: a sessão expira e o confirm volta com erro; a página só sabe pelo status da sessão.
+      if (cfg.expiraNoConfirm) sessao = Object.assign({}, sessao, { status: { type: "expired" } });
+      return depois("/__stripe/confirm", {}, cfg.confirma);
     },
     applyPromotionCode: function (c) {
       return depois("/__stripe/cupom", { code: c }, cfg.cupom).then(function (r) { if (r.type === "success") muda(cfg.depoisCupom); return r; });
@@ -64,9 +90,10 @@ const STRIPE_FALSO = `(function () {
     reg.pk = pk; reg.op = op;
     return { initCheckoutElementsSdk: function (o) {
       reg.init = (reg.init || 0) + 1;
+      sessao = inicial(); reg.lido = {};  // cada initCheckoutElementsSdk é uma sessão nova
       return { on: function (ev, fn) {
           if (ev === "change") ouvinte = fn;
-          if (ev === "change" && !cfg.semChange) Promise.resolve(o.clientSecret).then(function (cs) { reg.cs = cs; fn(sessao); });
+          if (ev === "change" && !cfg.semChange) Promise.resolve(o.clientSecret).then(function (cs) { reg.cs = cs; fn(entrega()); });
         },
         createPaymentElement: function (peop) {
           reg.pe = peop;

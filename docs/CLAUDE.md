@@ -556,8 +556,11 @@ Cada caixa marcada chama o `/billing/checkout/bump` dentro do `runServerUpdate`,
 tudo travado; falha → as caixas voltam ao último conjunto aceito. **Pagar sincroniza o
 estado da tela ANTES do `confirm`** (o que a tela mostra é o que se cobra); falha → não
 confirma. Prazos: `loadActions` 10 s e `/bump` 15 s (plano B / caixas voltam); o relógio
-de 10 s olha `#pagamento iframe`. Sessão fechada (409 `sessao_fechada` ou confirm
-expirado) → S3 com "Tentar de novo". Limites aceitos: rede lenta que passa dos 10 s do
+de 10 s olha `#pagamento iframe`. Sessão fechada (409 `sessao_fechada`, ou
+`session.status.type === "expired"` no `change`, no `loadActions` ou depois de um confirm com erro)
+→ S3 com "Tentar de novo". O dinheiro da sessão é formatado com `currency` e
+`minorUnitsAmountDivisor` lidos dela, junto com o `total.total.minorUnitsAmount`: o SDK exige
+essa leitura, senão o `confirm` lança (docs.stripe.com/js/custom_checkout). Limites aceitos: rede lenta que passa dos 10 s do
 `loadActions` vai ao plano B; um `/bump` que volta depois do prazo é corrigido pela
 sincronização do Pagar; o Pagar faz 1 `/bump` de sincronização quando há caixas (conta nos 120/h por IP). Testes:
 `tests/frontend/pagamento_pagina*.test.mjs`.
