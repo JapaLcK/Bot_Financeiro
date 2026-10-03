@@ -32,10 +32,14 @@ export const PAGINA = (extras = EXTRAS) => [200, { ...EMBUTIDO[1], pagina: true,
 // {on("change"), createPaymentElement().mount, loadActions() → {actions}}. O confirm e o applyPromotionCode
 // falsos fazem um POST a /__stripe/* para entrarem em `reqs` NA ORDEM, junto com o /billing/checkout/bump.
 // Modos da página própria: "acoes-erro", "acoes-pendura" e "acoes-rejeita" (loadActions); `sdk.semChange` suprime o `change`.
+// Express Checkout: o mount põe um botão #ex-btn cujo clique entrega um evento a on("confirm") (a folha da carteira
+// fica de fora); `sdk.carteiras` = o `paymentMethods` do availablepaymentmethodschange (padrão {applePay: true};
+// null = nenhum botão; "nunca" = o evento não chega). `reg.folha` conta os cliques que chegaram ao botão (a folha
+// abrindo); `window.__exConfirma()` entrega o confirm sem clique (folha aberta antes). O confirm grava em /__stripe/confirm se recebeu ESSE evento (`ev`).
 // O modo vem de window.__STRIPE (addInitScript); o registro fica em window.__stripe.
 const STRIPE_FALSO = `(function () {
   var cfg = window.__STRIPE || {}, modo = cfg.modo || "ok";
-  var reg = window.__stripe = { pk: null, cs: null, mount: 0, destroy: 0, run: 0 };
+  var reg = window.__stripe = { pk: null, cs: null, mount: 0, destroy: 0, run: 0, exMount: 0, exDestroy: 0 };
   if (modo === "sem-global") return;
   var inicial = function () { return cfg.sessao || { lineItems: [{ name: "PigBank Plus", total: { minorUnitsAmount: 0 } }],
     total: { total: { minorUnitsAmount: 0 } }, recurring: { interval: "month", dueNext: { total: { minorUnitsAmount: 1990 } } } }; };
@@ -73,14 +77,14 @@ const STRIPE_FALSO = `(function () {
       return Promise.resolve().then(fn).then(function () { muda(cfg.depoisBump); return { type: "success" }; },
         function (e) { return { type: "error", error: { message: String(e) } }; });
     },
-    confirm: function () {
+    confirm: function (op) {
       if (!(reg.lido.total && reg.lido.currency && reg.lido.minorUnitsAmountDivisor)) {
         return Promise.reject(new Error("IntegrationError: o total não foi exibido"));
       }
       if (cfg.confirma === "lanca") return Promise.reject(new Error("rede"));
       // \`expiraNoConfirm\`: a sessão expira e o confirm volta com erro; a página só sabe pelo status da sessão.
       if (cfg.expiraNoConfirm) sessao = Object.assign({}, sessao, { status: { type: "expired" } });
-      return depois("/__stripe/confirm", {}, cfg.confirma);
+      return depois("/__stripe/confirm", { ev: !!(op && reg.exEvento && op.expressCheckoutConfirmEvent === reg.exEvento) }, cfg.confirma);
     },
     applyPromotionCode: function (c) {
       return depois("/__stripe/cupom", { code: c }, cfg.cupom).then(function (r) { if (r.type === "success") muda(cfg.depoisCupom); return r; });
@@ -94,6 +98,24 @@ const STRIPE_FALSO = `(function () {
       return { on: function (ev, fn) {
           if (ev === "change") ouvinte = fn;
           if (ev === "change" && !cfg.semChange) Promise.resolve(o.clientSecret).then(function (cs) { reg.cs = cs; fn(entrega()); });
+        },
+        createExpressCheckoutElement: function (exop) {
+          reg.ex = exop;
+          var h = {};
+          return { on: function (ev, fn) { h[ev] = fn; },
+            mount: function (sel) {
+              reg.exMount++;
+              var b = document.createElement("button");
+              b.id = "ex-btn"; b.type = "button"; b.textContent = "Apple Pay";
+              b.style.cssText = "display:block;width:100%;height:48px";
+              // O clique que chega ao botão é a folha abrindo (reg.folha); o confirm é a folha autorizada.
+              window.__exConfirma = function () { reg.exEvento = { expressPaymentType: "apple_pay" }; if (h.confirm) h.confirm(reg.exEvento); };
+              b.onclick = function () { reg.folha = (reg.folha || 0) + 1; window.__exConfirma(); };
+              document.querySelector(sel).appendChild(b);
+              var pm = cfg.carteiras === undefined ? { applePay: true } : cfg.carteiras;
+              if (pm === "nunca") return;  // o evento não chega
+              setTimeout(function () { reg.pmc = true; if (h.availablepaymentmethodschange) h.availablepaymentmethodschange({ paymentMethods: pm || undefined }); }, 50);
+            }, destroy: function () { reg.exDestroy++; } };
         },
         createPaymentElement: function (peop) {
           reg.pe = peop;

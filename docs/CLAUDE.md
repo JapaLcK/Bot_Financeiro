@@ -563,7 +563,13 @@ de 10 s olha `#pagamento iframe`. Sessão fechada (409 `sessao_fechada`, ou
 essa leitura, senão o `confirm` lança (docs.stripe.com/js/custom_checkout). Limites aceitos: rede lenta que passa dos 10 s do
 `loadActions` vai ao plano B; um `/bump` que volta depois do prazo é corrigido pela
 sincronização do Pagar; o Pagar faz 1 `/bump` de sincronização quando há caixas (conta nos 120/h por IP). Testes:
-`tests/frontend/pagamento_pagina*.test.mjs`.
+`tests/frontend/pagamento_pagina*.test.mjs`. As carteiras (Apple Pay/Google Pay) são o Express Checkout em
+`#pp-express`, acima do Payment Element (que fica com `wallets` "never", sem botão em dobro): sem altura até o
+`availablepaymentmethodschange` trazer botão, `inert` com `/bump`, cupom ou pagamento em voo (a folha nunca abre
+com o carrinho mudando; ela mostra o total da sessão, que é o que se cobra) e `confirm` →
+`actions.confirm({expressCheckoutConfirmEvent})`. Pré-requisito: o domínio registrado em "Domínios de métodos de
+pagamento" do Stripe no modo TESTE (staging) e no LIVE (produção) — sem isso os botões não aparecem. O desenho das
+caixas e do resumo mora em `frontend/pagamento-caixas.js`. Testes: `tests/frontend/pagamento_express.test.mjs`.
 
 A `/precos` (`startCheckout`) manda `pagina: true` só fora do app (`window.PB_IN_APP`: no
 app a `/assinar` vai ao hospedado, e uma sessão `elements` criada antes seria expirada e

@@ -59,5 +59,10 @@
 .lp-auth .auth-card .pp-cta { margin-top:16px; display:flex; flex-direction:column; align-items:center; justify-content:center; gap:0; white-space:normal; }
 .pp-cta small { display:block; font-weight:500; font-size:13px; opacity:.85; }
 #pagamento { min-height:200px; }
+/* Apple Pay/Google Pay (Express Checkout): sem altura até o Stripe dizer que há botão — o iframe segue montado e
+   mede (display:none poderia não medir) — e inert, apagado, com /bump, cupom ou pagamento em voo. */
+#pp-express { margin-bottom:14px; }
+#pp-express.pp-espera { height:0; margin:0; overflow:hidden; visibility:hidden; }
+#pp-express[inert] { opacity:.5; pointer-events:none; }
 @media (prefers-reduced-motion:reduce) { .pp-seta { animation:none; } }
 .pp-r-desc span:last-child { color:var(--lp-pink-ink); }
