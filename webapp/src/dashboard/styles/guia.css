@@ -24,6 +24,9 @@
 .guia-passo, .guia-dica { font-size: 12px !important; color: var(--ink-3) !important; }
 .guia-acoes { display: grid; grid-auto-flow: column; justify-content: start; gap: 8px; margin-top: 4px; }
 @media (max-width: 640px) { .guia-balao { width: calc(100vw - 24px); } }
+/* Com `reduce`, o base.css dá 1ms de transição a tudo (`all`): o left/top que o JS grava
+   logo depois de medir virava transição a partir de 0 e um quadro saía no canto. */
+.guia-piggy, .guia-balao { transition-property: none; }
 
 /* Movimento só para quem não pediu menos: com `reduce`, o Piggy fica parado. */
 @media (prefers-reduced-motion: no-preference) {

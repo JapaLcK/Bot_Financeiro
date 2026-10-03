@@ -142,6 +142,35 @@ test("celular: o chip da conversa conta como pergunta; o passo do Piggy aponta p
   assert.deepEqual(acoes(s), ["reabrir", "feito:piggy.pergunta"]);
 });
 
+// Com `reduce`, o `*` do base.css ganha 1ms de transição em `all`: o left/top gravado pelo
+// JS virava transição a partir de 0 e o 1º quadro pintava o Piggy e o balão no canto
+// (0,0). Mede cada elemento no instante em que entra (o Piggy remonta a cada passo).
+test("Piggy e balão entram já no lugar: o left/top calculado é o gravado, sem quadro no canto", async () => {
+  for (const [width, height] of [[1280, 800], [375, 812]]) for (const motion of ["reduce", "no-preference"]) {
+    const { ctx, page, s } = await abrir({ width, height, motion, guia: "em_andamento" });
+    Object.assign(s.g.passos[0], { disponivel: true, motivo: null }); s.g.passos[1].feito = false;
+    await page.evaluate(() => {
+      window.__entrou = [];
+      new MutationObserver(() => document.querySelectorAll(".guia-piggy, .guia-balao").forEach((e) => {
+        if (e.__medido) return;
+        e.__medido = 1;
+        const cs = getComputedStyle(e);
+        window.__entrou.push({ el: e.className, gravado: [e.style.left, e.style.top].map(parseFloat), calculado: [cs.left, cs.top].map(parseFloat) });
+      })).observe(document.body, { childList: true, subtree: true });
+    });
+    await page.getByRole("button", { name: "Ajuda" }).click();
+    await esperaTitulo(page, PASSOS[0].fala.titulo);
+    await FAZER["mes.trocado"](page);
+    await esperaTitulo(page, PASSOS[1].fala.titulo);
+    const entrou = await page.evaluate(() => window.__entrou);
+    await ctx.close();
+    const caso = `${width}x${height} ${motion}`;
+    assert.ok(entrou.filter((x) => x.el === "guia-piggy").length >= 2, `${caso}: ${JSON.stringify(entrou)}`); // um Piggy por passo
+    // Folga de 1px: o calculado vem em unidade de layout (318.683 → 318.682); o canto erra centenas.
+    assert.deepEqual(entrou.filter((x) => x.gravado.some((v, i) => !(Math.abs(v - x.calculado[i]) <= 1))), [], caso);
+  }
+});
+
 test("POST 500: sem comemoração, \"Tentar de novo\"; o 200 depois comemora", async () => {
   const { ctx, page, s } = await abrir({ post: (c, n, st) => (c.acao === "feito" && st.posts.filter((x) => x.acao === "feito").length === 1 ? { status: 500, json: RESPOSTAS.erros["500"].body } : null) });
   await bora(page);
