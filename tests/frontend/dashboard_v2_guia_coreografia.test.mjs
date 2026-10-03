@@ -227,3 +227,69 @@ test("plano B em 320: o cartão \"Guia do painel\" em Ferramentas e o Cmd-K abre
   }
   assert.deepEqual(r, [["cartão", ["reabrir"], 0], ["Cmd-K", ["reabrir"], 0]]);
 });
+
+// A região de anúncio do guia (a da conversa é outra) fala o que o balão diz em cada etapa, e
+// cada etapa muda o texto (texto igual, o leitor de tela cala). Na ida ela não adianta o passo
+// seguinte: o título dele só chega com o bloco, junto com o foco no título do balão.
+test("anúncio por etapa: convite, bloco (apresenta), alvo (instrução), festa, ida, bloco do passo 2; o título do passo 2 só no bloco", async () => {
+  const { ctx, page } = await abrir();
+  await page.evaluate(() => {
+    window.__falas = [];
+    const r = document.querySelector(".guia-status");
+    const f = () => { const t = r.textContent; if (t && t !== window.__falas.at(-1)) window.__falas.push(t); };
+    f();
+    new MutationObserver(f).observe(r, { childList: true, characterData: true, subtree: true });
+  });
+  await bora(page);
+  await FAZER["mes.trocado"](page);
+  await esperaTitulo(page, PASSOS[1].fala.titulo);
+  await page.waitForTimeout(300);
+  const [falas, foco] = await page.evaluate(() => [window.__falas, [document.activeElement?.id, document.activeElement?.textContent]]);
+  await ctx.close();
+  console.log("# anúncios:", JSON.stringify(falas));
+  const [p1, p2] = PASSOS;
+  assert.deepEqual(falas, [
+    "O Piggy quer te mostrar o painel.",
+    `Passo 1 de 3: ${p1.fala.titulo}. ${p1.fala.apresenta}`,
+    p1.fala.texto,
+    "Passo feito. Vem comigo pra Gastos.",
+    "Vem comigo pra Gastos.",
+    `Passo 2 de 3: ${p2.fala.titulo}. ${p2.fala.apresenta}`,
+  ]);
+  assert.ok(foco[0] === "guia-titulo" && foco[1].startsWith(p2.fala.titulo), `foco: ${foco}`);
+});
+
+// "pro Piggy" (ele é masculino), e "pra Gastos": a preposição concorda com a tela. No celular a
+// ida é a aba Piggy; no desktop, a barra de conversa (D9).
+for (const [width, height] of [[375, 812], [1280, 800]]) {
+  test(`passo 3 ${width}×${height}: "Vem comigo pro Piggy." no título e no anúncio, e leva à conversa`, async () => {
+    const { ctx, page } = await abrir({ width, height, guia: "em_andamento", antes: (_, s) => { s.g.passos.forEach((p, i) => { p.feito = i < 2; }); } });
+    await page.evaluate(() => dispatchEvent(new Event("dash:guia")));
+    await esperaTitulo(page, "Vem comigo pro Piggy.");
+    const fala = await page.locator(".guia-status").textContent();
+    await esperaTitulo(page, PASSOS[2].fala.titulo);
+    const hash = await page.evaluate(() => location.hash);
+    await ctx.close();
+    assert.deepEqual([fala, hash], ["Vem comigo pro Piggy.", "#/piggy"]);
+  });
+}
+
+// A ação só conta na etapa alvo: no bloco a seta está sob o véu, mas um clique por script (ou
+// um leitor de tela que ative o controle direto) passa por baixo dele. O guarda é o `etapa ===
+// "alvo"` do efeito da ação real (Guia.tsx), não o véu.
+test("no bloco a ação não conta: a seta clicada por script, por baixo do véu, não grava `feito`; depois do Entendi, conta", async () => {
+  const { ctx, page, s } = await abrir();
+  await bora(page);
+  const clicar = () => page.evaluate((sel) => [...document.querySelectorAll(sel)].find((e) => e.getClientRects().length).click(), SETA);
+  const mes = () => page.evaluate(() => document.querySelector(".topbar")?.textContent);
+  const antes = await mes();
+  await clicar();
+  await page.waitForTimeout(500);
+  const noBloco = [acoes(s), (await mes()) !== antes];
+  await entendi(page);
+  await anelNoAlvo(page, SETA);
+  await clicar();
+  await esperaTitulo(page, "Isso aí!");
+  await ctx.close();
+  assert.deepEqual([noBloco, acoes(s)], [[["visto"], true], ["visto", "feito:resumo.saiu"]]);
+});

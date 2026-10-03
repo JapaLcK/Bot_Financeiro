@@ -27,11 +27,15 @@ export function achar(p: Passo, path: Path, alvos: string[]): { el: HTMLElement 
   return { el: null, tipo: document.querySelector("#main article.w") ? "ausente" : "espera" };
 }
 
-// Mira fora da vista (no Resumo o bloco pode estar mais abaixo): rola até ela uma vez.
+// Mira fora da vista (no Resumo o bloco pode estar mais abaixo): rola até ela uma vez. Devolve
+// se a mira rola: a da barra de cima (a seta do mês) não, rolar a página não a traz, só tira o
+// Saiu da tela.
 export function trazer(el: HTMLElement) {
+  if (el.closest(".topbar")) return false;
   const r = el.getBoundingClientRect();
   const topo = document.querySelector(".topbar")?.getBoundingClientRect().bottom ?? 0;
   if (r.top < topo || r.bottom > innerHeight) el.scrollIntoView({ block: "center" });
+  return true;
 }
 
 // O Piggy encosta na quina de cima da mira (ou na de baixo, se a de cima ficou sob a

@@ -6,8 +6,9 @@ import { useConversation } from "../lib/conversation";
 import { mesDe } from "../lib/store.js";
 import type { DashState } from "../lib/types";
 import { DEMO, ErroApi, apiPost, guiaQuery, perfilQuery } from "../lib/v2";
-import { go, route, type Path } from "../router";
+import { go, type Path } from "../router";
 import { ROTA, aba, achar, cobrir, guia, posicionar, trazer, type Tipo } from "./guia-posicao";
+import { MOTIVO, OF, destino } from "./guia-falas";
 import { useTecladoDoVeu } from "./guia-teclado";
 import { TEMPO, apertar, dura, parar, pular, tiltDe, troca, voando, voar } from "./guia-voo";
 
@@ -38,13 +39,6 @@ const ACOES: Record<string, { feito: (antes: Retrato, agora: Retrato) => boolean
   "categoria.aberta": { feito: (a, b) => b.path === "/gastos" && b.cat != null && b.cat !== a.cat, alvo: ["categorias.item"] },
   // Um chip de pergunta pronta; com a conversa já começada (sem chips), o campo da conversa.
   "piggy.perguntou": { feito: (a, b) => b.perguntas > a.perguntas, alvo: ["piggy.chip", "piggy.pergunta"] },
-};
-
-const OF = "/settings?view=open-finance";
-const MOTIVO: Record<NonNullable<Passo["motivo"]>, { texto: string; link?: string }> = {
-  sem_dados: { texto: "Ainda não chegou gasto do seu banco neste mês nem no anterior. Conecta um banco e esse número aparece aqui.", link: "Conectar banco" },
-  sincronizando: { texto: "Seu banco está sincronizando agora. Daqui a pouco esse número aparece aqui." },
-  conexao_com_erro: { texto: "A conexão com o seu banco deu erro, e esse número não chega. Dá uma olhada nela.", link: "Ver conexão" },
 };
 
 type Modo = "fechado" | "convite" | "ativo";
@@ -242,9 +236,9 @@ export function Guia({ s, path }: { s: DashState; path: Path }) {
     // refetch do SSE muda a altura e não pode puxá-la de volta.
     const pre = `${p?.id}:${etapa}:`, chave = `${pre}${document.documentElement.scrollHeight}`;
     const primeira = !rolou.current.startsWith(pre);
-    // A barra de cima (a seta do mês) não rola: rolar a página não a traz, só tira o Saiu da tela.
-    const rolar = !!mira && !mira.closest(".topbar") && !festa && (etapa === "bloco" || etapa === "alvo") && !volta && rolou.current !== chave && (primeira || !mexeu.current);
-    if (rolar) { if (primeira) mexeu.current = false; rolou.current = chave; trazer(mira!); }
+    // `trazer` rola agora; a mira da barra de cima (a seta do mês) não rola, e aí nada conta como rolado.
+    const rolar = !!mira && !festa && (etapa === "bloco" || etapa === "alvo") && !volta && rolou.current !== chave && (primeira || !mexeu.current) && trazer(mira);
+    if (rolar) { if (primeira) mexeu.current = false; rolou.current = chave; }
     const de = pg.getBoundingClientRect(), deB = b.getBoundingClientRect(), tiltA = tiltDe(pg), tinha = !!pg.style.left;
     posicionar(mira, parado ? null : pg, b, rolar, p && t === "alvo" && !festa && !volta ? [alvo, guia(p.ancora)] : []);
     if (!parado && mira !== miraAnt.current) {
@@ -286,13 +280,16 @@ export function Guia({ s, path }: { s: DashState; path: Path }) {
 
   const aberto = modo === "convite" || (modo === "ativo" && !!exibido);
   // A tela do passo seguinte, se é outra: a comemoração avisa antes de o guia levar até lá.
-  const vai = festa && atual && path !== ROTA[atual.tela] ? route(ROTA[atual.tela]).short : null;
-  const leva = etapa === "ida" ? "Vem comigo pra" : volta ? "Volta pra" : null; // fora da tela do passo
+  const vai = festa && atual && path !== ROTA[atual.tela] ? destino(atual.tela) : null;
+  const leva = !atual ? null : etapa === "ida" ? `Vem comigo ${destino(atual.tela)}.` : volta ? `Volta ${destino(atual.tela)}.` : null; // fora da tela do passo
+  const mot = atual && !atual.disponivel && atual.motivo ? MOTIVO[atual.motivo] : null;
   const entendi = (id: string) => { setFase({ id, etapa: "alvo" }); focar.current = true; };
   const status = !aberto || s.editing ? ""
     : modo === "convite" ? "O Piggy quer te mostrar o painel."
-    : festa ? (fim ? "Guia concluído." : acabou ? "Por agora é isso. O passo que ficou pra depois volta na Ajuda." : `Passo feito.${vai ? ` Vem comigo pra ${vai}.` : ""}`)
-    : `Guia, passo ${n} de ${passos.length}: ${atual!.fala.titulo}`;
+    : festa ? (fim ? "Guia concluído." : acabou ? "Por agora é isso. O passo que ficou pra depois volta na Ajuda." : `Passo feito.${vai ? ` Vem comigo ${vai}.` : ""}`)
+    // Cada etapa muda o texto (senão a região não fala): o que o balão diz, sem adiantar o passo.
+    : leva ?? (mot || tipo === "ausente" ? `Guia, passo ${n} de ${passos.length}: ${atual!.fala.titulo}`
+      : etapa === "bloco" ? `Passo ${n} de ${passos.length}: ${atual!.fala.titulo}. ${atual!.fala.apresenta}` : atual!.fala.texto);
   let corpo = null;
   if (!aberto || s.editing) {
     // fechado, ou pausado enquanto organiza o painel: só a região de anúncio fica montada
@@ -308,16 +305,15 @@ export function Guia({ s, path }: { s: DashState; path: Path }) {
   } else if (festa) {
     corpo = <>
       <h2 key="titulo" id="guia-titulo" tabIndex={-1}>{fim ? "Fechou! O painel é seu." : acabou ? "Por agora é isso" : "Isso aí!"}</h2>
-      <p id="guia-texto">{fim ? "Quando quiser rever, o guia mora em Ajuda." : acabou ? "O passo que ficou pra depois volta quando você abrir a Ajuda." : vai ? `Passo feito. Vem comigo pra ${vai}.` : "Passo feito. Bora pro próximo."}</p>
+      <p id="guia-texto">{fim ? "Quando quiser rever, o guia mora em Ajuda." : acabou ? "O passo que ficou pra depois volta quando você abrir a Ajuda." : vai ? `Passo feito. Vem comigo ${vai}.` : "Passo feito. Bora pro próximo."}</p>
       {acabou && <div className="guia-acoes"><button type="button" className="btn btn-primary" onClick={() => fechar(false)}>Fechar</button></div>}
     </>;
   } else {
     const p = atual!;
-    const mot = !p.disponivel && p.motivo ? MOTIVO[p.motivo] : null;
     corpo = <>
       <p className="guia-passo">Passo {n} de {passos.length}</p>
       {/* O mesmo <h2> (key) em toda etapa e na festa: o foco que está nele não cai no body. */}
-      <h2 key="titulo" id="guia-titulo" tabIndex={-1}>{leva ? `${leva} ${route(ROTA[p.tela]).short}.` : <>{p.fala.titulo}{p.dado === "exemplo" && <> <span className="selo">exemplo</span></>}</>}</h2>
+      <h2 key="titulo" id="guia-titulo" tabIndex={-1}>{leva ?? <>{p.fala.titulo}{p.dado === "exemplo" && <> <span className="selo">exemplo</span></>}</>}</h2>
       {!leva && <>
         <p id="guia-texto">{mot ? mot.texto : etapa === "bloco" ? p.fala.apresenta : p.fala.texto}</p>
         {mot?.link && <p><a href={OF}>{mot.link}</a></p>}
@@ -336,7 +332,7 @@ export function Guia({ s, path }: { s: DashState; path: Path }) {
   useTecladoDoVeu(!!corpo, balao, furo, prende);
 
   return <>
-    <p className="sr-only" role="status">{status}</p>
+    <p className="sr-only guia-status" role="status">{status}</p>
     {corpo && <>
       <svg className="guia-sombra" aria-hidden="true"><path ref={sombra} fillRule="evenodd" /></svg>
       <div ref={veus} aria-hidden="true">{[0, 1, 2, 3].map((i) => <div key={i} className="guia-veu" />)}</div>

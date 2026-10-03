@@ -71,7 +71,7 @@ test("os 3 passos pela ação real, o guia levando de tela em tela: nada sai sem
   await page.waitForTimeout(800);
   const antes = acoes(s);
   await FAZER["categoria.aberta"](page);
-  await page.locator(".guia-balao").getByText("Passo feito. Vem comigo pra Piggy.").waitFor({ timeout: 5000 });
+  await page.locator(".guia-balao").getByText("Passo feito. Vem comigo pro Piggy.").waitFor({ timeout: 5000 });
   await esperaTitulo(page, PASSOS[2].fala.titulo);
   await naRota(page, "#/piggy"); // no desktop também: o chip mora na conversa
   await FAZER["piggy.perguntou"](page);
@@ -129,7 +129,7 @@ test("voltou pelo navegador: \"Volta pra Gastos\" com o Piggy na aba, sem ser pu
   await naRota(page, "#/gastos");
   await page.locator('[data-guia="categorias.item"]').waitFor();
   await page.goBack();
-  await page.getByText("Volta pra Gastos.").waitFor({ timeout: 5000 });
+  await page.locator(".guia-balao").getByText("Volta pra Gastos.").waitFor({ timeout: 5000 });
   await page.waitForTimeout(1200);
   const r = [await page.evaluate(() => location.hash), await piggyEm(page, '.rail [data-guia="nav.gastos"]')];
   await page.locator('.rail [data-guia="nav.gastos"]').click();
