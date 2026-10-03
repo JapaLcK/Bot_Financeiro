@@ -27,8 +27,8 @@ from .connection import TIPO_CANON_SQL, TIPO_DESPESA_SQL, TIPO_RECEITA_SQL, get_
 
 # `n` é a contagem de linhas somadas (o `transactions_count` das Análises); `n_cartao`, só
 # as do cartão (o relatório mensal as soma às suas linhas de `launches`). Cada perna
-# filtra pelo usuário, inclusive a FATURA (`b.user_id`; NULL entra, porque a coluna
-# aceita NULL sem backfill e o SQL antigo contava). Params: `totais_params`.
+# filtra pelo usuário, inclusive a FATURA (`b.user_id`; a NULL, a coluna aceita sem
+# backfill, vale pelo dono do cartão dela). Params: `totais_params`.
 TOTAIS_SQL = f"""
     select coalesce(sum(valor) filter (where tipo = 'receita'), 0) as entrou,
            coalesce(sum(valor) filter (where tipo = 'despesa'), 0) as saiu,
@@ -43,7 +43,7 @@ TOTAIS_SQL = f"""
             select 'despesa', ct.valor, true
               from credit_transactions ct
               join credit_bills b on b.id = ct.bill_id
-             where ct.user_id = %s and (b.user_id = %s or b.user_id is null)
+             where ct.user_id = %s and coalesce(b.user_id, (select cb.user_id from credit_cards cb where cb.id = b.card_id)) = %s
                and ct.is_refund = false
                and b.period_end >= %s and b.period_end < %s) x
 """

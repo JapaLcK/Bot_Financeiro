@@ -533,7 +533,7 @@ async def get_financial_data(
             FROM credit_transactions t
             JOIN credit_cards c ON c.id = t.card_id
             JOIN credit_bills b ON b.id = t.bill_id
-            WHERE t.user_id = %s AND (b.user_id = %s OR b.user_id IS NULL)
+            WHERE t.user_id = %s AND COALESCE(b.user_id, (SELECT cb.user_id FROM credit_cards cb WHERE cb.id = b.card_id)) = %s
               AND b.period_end >= %s::date
               AND b.period_end < %s::date
               AND t.is_refund = false
@@ -660,7 +660,7 @@ async def get_financial_data(
                 SELECT ct.categoria, ct.valor, 1 AS cnt, b.period_end::timestamptz
                 FROM credit_transactions ct
                 JOIN credit_bills b ON b.id = ct.bill_id
-                WHERE ct.user_id = %s AND (b.user_id = %s OR b.user_id IS NULL)
+                WHERE ct.user_id = %s AND COALESCE(b.user_id, (SELECT cb.user_id FROM credit_cards cb WHERE cb.id = b.card_id)) = %s
                   AND ct.is_refund = false
                   AND b.period_end >= %s AND b.period_end < %s
             ) merged
@@ -1234,7 +1234,7 @@ async def _fetch_export_items(user_id: int, start_date: date | int, end_date: da
                 FROM credit_transactions ct
                 JOIN credit_bills b ON b.id = ct.bill_id
                 JOIN credit_cards c ON c.id = ct.card_id
-                WHERE ct.user_id = %s AND (b.user_id = %s OR b.user_id IS NULL)
+                WHERE ct.user_id = %s AND COALESCE(b.user_id, (SELECT cb.user_id FROM credit_cards cb WHERE cb.id = b.card_id)) = %s
                   AND ct.is_refund = false
                   AND b.period_end >= %s AND b.period_end < %s
                 """,

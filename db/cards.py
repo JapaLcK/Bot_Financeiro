@@ -1087,7 +1087,7 @@ def undo_installment_group(user_id: int, group_id: str):
                 select t.id, t.bill_id, t.valor, t.card_id, t.nota,
                        b.status as bill_status
                 from credit_transactions t
-                join credit_bills b on b.id = t.bill_id
+                join credit_bills b on b.id = t.bill_id and coalesce(b.user_id, (select cb.user_id from credit_cards cb where cb.id = b.card_id)) = t.user_id
                 where t.user_id = %s and t.group_id = %s::uuid and t.is_refund = false
                 """,
                 (user_id, group_id),
@@ -1205,7 +1205,7 @@ def get_installment_group_delete_impact(user_id: int, group_id: str):
                     min(t.nota) as nota,
                     max(c.name) as card_name
                 from credit_transactions t
-                join credit_bills b on b.id = t.bill_id
+                join credit_bills b on b.id = t.bill_id and coalesce(b.user_id, (select cb.user_id from credit_cards cb where cb.id = b.card_id)) = t.user_id
                 join credit_cards c on c.id = t.card_id
                 where t.user_id = %s and t.group_id = %s::uuid and t.is_refund = false
                 """,
@@ -1251,7 +1251,7 @@ def anticipate_installment(user_id: int, group_id: str):
                        t.installment_no, t.installments_total, t.card_id,
                        c.name as card_name
                 from credit_transactions t
-                join credit_bills b on b.id = t.bill_id
+                join credit_bills b on b.id = t.bill_id and coalesce(b.user_id, (select cb.user_id from credit_cards cb where cb.id = b.card_id)) = t.user_id
                 join credit_cards c on c.id = t.card_id
                 where t.user_id = %s and t.group_id = %s::uuid
                   and t.is_refund = false and b.status = 'open'
@@ -1351,7 +1351,7 @@ def list_installment_groups_detailed(user_id: int, sort: str = "urgency"):
                     b.period_end, b.status as bill_status
                 from credit_transactions t
                 join credit_cards c on c.id = t.card_id
-                join credit_bills b on b.id = t.bill_id
+                join credit_bills b on b.id = t.bill_id and coalesce(b.user_id, (select cb.user_id from credit_cards cb where cb.id = b.card_id)) = t.user_id
                 where t.user_id = %s and t.group_id is not null and t.is_refund = false
                 order by t.group_id, t.installment_no asc nulls last, b.period_end asc
                 """,
@@ -1947,7 +1947,7 @@ def list_installment_groups(user_id: int, limit: int = 15):
                        ) as pending_period_ends
                 from credit_transactions t
                 join credit_cards c on c.id = t.card_id
-                join credit_bills b on b.id = t.bill_id
+                join credit_bills b on b.id = t.bill_id and coalesce(b.user_id, (select cb.user_id from credit_cards cb where cb.id = b.card_id)) = t.user_id
                 where t.user_id=%s and t.group_id is not null and t.is_refund=false
                 group by t.group_id, c.name, c.closing_day, c.due_day
                 order by max(t.purchased_at) desc
@@ -2324,7 +2324,7 @@ def get_installment_group_summaries(user_id: int, group_ids: list) -> dict:
                         sum(t.valor) filter (where b.status = 'open'), 0
                     ) as valor_restante
                 from credit_transactions t
-                join credit_bills b on b.id = t.bill_id
+                join credit_bills b on b.id = t.bill_id and coalesce(b.user_id, (select cb.user_id from credit_cards cb where cb.id = b.card_id)) = t.user_id
                 where t.user_id = %s
                   and t.group_id::text = any(%s)
                   and t.is_refund = false

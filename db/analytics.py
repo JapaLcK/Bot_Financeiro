@@ -168,7 +168,7 @@ def compute_kpis(user_id: int, from_date: date, to_date: date) -> dict:
                       SELECT ct.purchased_at AS day, ct.valor
                       FROM credit_transactions ct
                       JOIN credit_bills b ON b.id = ct.bill_id
-                      WHERE ct.user_id = %s AND (b.user_id = %s OR b.user_id IS NULL)
+                      WHERE ct.user_id = %s AND COALESCE(b.user_id, (SELECT cb.user_id FROM credit_cards cb WHERE cb.id = b.card_id)) = %s
                         AND ct.is_refund = false
                         AND b.period_end >= %s AND b.period_end < %s
                     ) merged
@@ -205,7 +205,7 @@ def compute_kpis(user_id: int, from_date: date, to_date: date) -> dict:
                       FROM credit_transactions ct
                       JOIN credit_cards c ON c.id = ct.card_id
                       JOIN credit_bills b ON b.id = ct.bill_id
-                      WHERE ct.user_id = %s AND (b.user_id = %s OR b.user_id IS NULL)
+                      WHERE ct.user_id = %s AND COALESCE(b.user_id, (SELECT cb.user_id FROM credit_cards cb WHERE cb.id = b.card_id)) = %s
                         AND ct.is_refund = false
                         AND b.period_end >= %s AND b.period_end < %s
                     ) merged
@@ -289,7 +289,7 @@ def compute_evolution(user_id: int, months: int = 6) -> list[dict]:
                          'despesa' AS tipo, ct.valor
                   FROM credit_transactions ct
                   JOIN credit_bills b ON b.id = ct.bill_id
-                  WHERE ct.user_id = %s AND (b.user_id = %s OR b.user_id IS NULL)
+                  WHERE ct.user_id = %s AND COALESCE(b.user_id, (SELECT cb.user_id FROM credit_cards cb WHERE cb.id = b.card_id)) = %s
                     AND ct.is_refund = false
                     AND b.period_end >= %s AND b.period_end < %s
                 ) merged
@@ -365,7 +365,7 @@ def compute_categories(
                          ct.valor, b.period_end::timestamptz AS dt
                   FROM credit_transactions ct
                   JOIN credit_bills b ON b.id = ct.bill_id
-                  WHERE ct.user_id = %s AND (b.user_id = %s OR b.user_id IS NULL)
+                  WHERE ct.user_id = %s AND COALESCE(b.user_id, (SELECT cb.user_id FROM credit_cards cb WHERE cb.id = b.card_id)) = %s
                     AND ct.is_refund = false
                     AND b.period_end >= %s AND b.period_end < %s
                 ),
@@ -526,7 +526,7 @@ def compute_top_merchants(
                          'credito' AS source
                   FROM credit_transactions ct
                   JOIN credit_bills b ON b.id = ct.bill_id
-                  WHERE ct.user_id = %s AND (b.user_id = %s OR b.user_id IS NULL)
+                  WHERE ct.user_id = %s AND COALESCE(b.user_id, (SELECT cb.user_id FROM credit_cards cb WHERE cb.id = b.card_id)) = %s
                     AND ct.is_refund = false
                     AND b.period_end >= %s AND b.period_end < %s
                 )
@@ -618,7 +618,7 @@ def compute_history_quick_stats(
                   SELECT 'credito' AS tipo
                   FROM credit_transactions ct
                   JOIN credit_bills b ON b.id = ct.bill_id
-                  WHERE ct.user_id = %s AND (b.user_id = %s OR b.user_id IS NULL)
+                  WHERE ct.user_id = %s AND COALESCE(b.user_id, (SELECT cb.user_id FROM credit_cards cb WHERE cb.id = b.card_id)) = %s
                     AND ct.is_refund = false
                     AND b.period_end >= %s AND b.period_end < %s
                 ) merged
@@ -812,7 +812,7 @@ def list_history(
     credit_params: list[Any] = []
     if include_credit:
         # is_refund: true se refunds_only, false caso contrário (default).
-        clauses = ["ct.user_id = %s AND (b.user_id = %s OR b.user_id IS NULL)",
+        clauses = ["ct.user_id = %s AND COALESCE(b.user_id, (SELECT cb.user_id FROM credit_cards cb WHERE cb.id = b.card_id)) = %s",
                    f"ct.is_refund = {'true' if refunds_only else 'false'}"]
         credit_params += [user_id, user_id]
         if from_date:
