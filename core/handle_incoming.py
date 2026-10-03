@@ -1118,10 +1118,10 @@ def handle_incoming(msg: IncomingMessage, *,
         pergunta_no_turno.set(MANTEM)
         tb = traceback.format_exc()
         logger.error(
-            "handle_incoming FAILED platform=%s user_id=%s text=%r error=%s",
+            "handle_incoming FAILED platform=%s user_id=%s chars=%s error=%s",
             msg.platform,
             getattr(msg, "user_id", "?"),
-            (msg.text or "")[:120],
+            len(msg.text or ""),
             exc,
         )
         # Registra no banco para aparecer no dashboard de monitoramento
@@ -1138,7 +1138,7 @@ def handle_incoming(msg: IncomingMessage, *,
                 source=f"handle_incoming/{msg.platform}",
                 user_id=uid_for_log,
                 details={
-                    "text": (msg.text or "")[:200],
+                    "chars": len(msg.text or ""),
                     "platform": msg.platform,
                     "traceback": tb[-1500:],
                 },

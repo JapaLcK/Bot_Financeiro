@@ -102,8 +102,9 @@ class _FakeStripe:
                         "No such customer", param="customer", code="resource_missing")
                 outer.last_session_kwargs = kwargs
                 session_id = f"cs_test_{outer.session_create_calls}"
-                # Como na API: `url` só no hospedado, `client_secret` só no embutido.
-                embutido = kwargs.get("ui_mode") == "embedded_page"
+                # Como na API: `url` só no hospedado, `client_secret` só no
+                # embutido e no `elements` (medido no Stripe de teste, 2026-10-03).
+                embutido = kwargs.get("ui_mode") in ("embedded_page", "elements")
                 session = {
                     "id": session_id,
                     "url": None if embutido else f"https://checkout.stripe.com/c/pay/{session_id}",
