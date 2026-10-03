@@ -8,9 +8,8 @@ import { ErroApi, apiPost, assinaturasQuery } from "../lib/v2";
 import { Frame } from "../parts/Frame";
 
 // Estados comuns ao card e à página, com texto fixo: a `message` do servidor não vai à tela.
-// `ignorouTudo`: a lista esvaziou por um Ignorar nesta tela. A API não diz se o vazio veio
-// de marcas, então recarregar (ou sair da página) volta ao texto genérico.
-function useAssinaturas(ignorouTudo = false): { data?: Assinaturas; estado: ReactNode } {
+// Tudo ignorado devolve também o `data`: a página ainda mostra a seção das ignoradas.
+function useAssinaturas(): { data?: Assinaturas; estado: ReactNode } {
   const q = useQuery(assinaturasQuery);
   if (q.isPending) return { estado: <p role="status" className="faint">Carregando…</p> };
   if (q.isError && q.error instanceof ErroApi && q.error.code === "pro_required") {
@@ -34,9 +33,12 @@ function useAssinaturas(ignorouTudo = false): { data?: Assinaturas; estado: Reac
       ),
     };
   }
-  if (!q.data.servicos.length && !q.data.outras.length) {
-    if (ignorouTudo) {
+  // Servidor anterior ao #751 (deploy fora de ordem) não manda `ignoradas`.
+  const data = q.data.ignoradas ? q.data : { ...q.data, ignoradas: [] };
+  if (!data.servicos.length && !data.outras.length) {
+    if (data.ignoradas.length) {
       return {
+        data,
         estado: (
           <div className="empty">
             <i className="ph ph-eye-slash" aria-hidden="true" />
@@ -55,7 +57,7 @@ function useAssinaturas(ignorouTudo = false): { data?: Assinaturas; estado: Reac
       ),
     };
   }
-  return { data: q.data, estado: null };
+  return { data, estado: null };
 }
 
 export function Subscriptions() {
@@ -112,28 +114,28 @@ function Linha({ a, children }: { a: Assinatura; children: ReactNode }) {
 }
 
 export function SubscriptionList() {
-  const [ignorouTudo, setIgnorouTudo] = useState(false);
-  const { data, estado } = useAssinaturas(ignorouTudo);
+  const { data, estado } = useAssinaturas();
   const qc = useQueryClient();
   const [aviso, setAviso] = useState<{ texto: string; desfazer?: MarcaIn } | null>(null);
   const avisoRef = useRef<HTMLParagraphElement>(null);
   const desfazerRef = useRef<HTMLButtonElement>(null);
-  const feito = (d: Assinaturas, a: Acao) => {
-    setAviso({ texto: a.feito, desfazer: a.desfazer });
-    setIgnorouTudo(a.corpo.status === "ignorar" && !d.servicos.length && !d.outras.length);
-  };
+  // O Desfazer de um Voltar a mostrar devolve o item às ignoradas: a seção (que pode ter
+  // sumido e voltar fechada) abre uma vez, na próxima montagem; o usuário fecha depois.
+  const reabrir = useRef(false);
+  const feito = (a: Acao) => setAviso({ texto: a.feito, desfazer: a.desfazer });
   // Sem atualização otimista: a lista na tela é sempre a última resposta do servidor.
   const m = useMutation({
     mutationKey: ["assinaturas", "marca"],
     mutationFn: (a: Acao) => apiPost("/assinaturas/marca", a.corpo),
     onMutate: () => qc.cancelQueries({ queryKey: assinaturasQuery.queryKey }),
     onSuccess: (d, a) => {
+      reabrir.current = !!a.desfazendo && a.corpo.status === "ignorar";
       qc.setQueryData(assinaturasQuery.queryKey, d);
-      feito(d, a);
+      feito(a);
     },
     // O GET de recarga também planta de novo o cookie de CSRF, se ele venceu.
-    // O Desfazer (o que falhou, ou o da ação anterior) continua disponível: o item ignorado
-    // não volta por outro caminho.
+    // O Desfazer (o que falhou, ou o da ação anterior) continua disponível: é o caminho
+    // mais curto de volta, além da seção das ignoradas.
     onError: async (_, a) => {
       if (a.desfazendo) {
         setAviso({ texto: "Não deu para desfazer. Tente de novo.", desfazer: a.corpo });
@@ -146,8 +148,8 @@ export function SubscriptionList() {
       const d = qc.getQueryData<Assinaturas>(assinaturasQuery.queryKey);
       const { chave, status } = a.corpo;
       const item = d && [...d.servicos, ...d.outras].find((x) => x.chave === chave);
-      const pegou = status === "ignorar" ? !item : status === "assinatura" ? d?.servicos.some((x) => x.chave === chave && x.marcada) : item && !item.marcada;
-      if (d && pegou) feito(d, a);
+      const pegou = status === "ignorar" ? d?.ignoradas?.some((x) => x.chave === chave) : status === "assinatura" ? d?.servicos.some((x) => x.chave === chave && x.marcada) : item && !item.marcada;
+      if (d && pegou) feito(a);
       else setAviso((p) => ({ texto: "Não deu para salvar. Tente de novo.", desfazer: p?.desfazer }));
     },
   });
@@ -169,24 +171,47 @@ export function SubscriptionList() {
       )}
     </div>
   );
-  if (estado) return <div className="panel span-12"><Frame id="assinaturas" title="Assinaturas">{avisoBloco}{estado}</Frame></div>;
-  const { servicos, outras, total_mensal, total_anual } = data!;
-  // O item ignorado some da API: só dá para desfazer agora, voltando ao estado anterior.
+  // O Desfazer volta ao estado anterior: o de quem sai da seção das ignoradas é ignorar de novo.
   const marcar = (a: Assinatura, status: MarcaIn["status"]) => {
-    if (ocupado()) return;
-    const k = [...servicos, ...outras].filter((x) => x.chave === a.chave).length - 1;
+    if (ocupado() || !data) return;
+    const ignorada = data.ignoradas.some((x) => x.chave === a.chave);
+    const k = [...data.servicos, ...data.outras, ...data.ignoradas].filter((x) => x.chave === a.chave).length - 1;
     const quem = k ? `${a.nome} e mais ${k} ${k === 1 ? "cobrança" : "cobranças"} do mesmo comerciante` : a.nome;
     m.mutate({
       corpo: { chave: a.chave, status },
       // "nenhuma" não diz para onde foi: o item pode seguir em serviços pela categoria.
-      feito: status === "nenhuma" ? `Marca removida de ${quem}.` : `${quem} ${FEITO[status][k ? 1 : 0]}.`,
-      desfazer: { chave: a.chave, status: a.marcada ? "assinatura" : "nenhuma" },
+      feito: ignorada ? `${quem} ${k ? "voltaram" : "voltou"} para a lista.`
+        : status === "nenhuma" ? `Marca removida de ${quem}.` : `${quem} ${FEITO[status][k ? 1 : 0]}.`,
+      desfazer: { chave: a.chave, status: ignorada ? "ignorar" : a.marcada ? "assinatura" : "nenhuma" },
     });
   };
   const botao = (a: Assinatura, status: MarcaIn["status"], rotulo: string, cls = "btn-quiet") => (
     <button type="button" className={`btn ${cls}`} disabled={pendente} onClick={() => marcar(a, status)}
       aria-label={status === "ignorar" ? `${rotulo} ${a.nome}` : `${rotulo}: ${a.nome}`}>{rotulo}</button>
   );
+  // Por último e com `key` fixo: a seção está nos dois retornos abaixo, em posições diferentes,
+  // e o `key` a mantém montada (e o `<details>` aberto) quando a página passa de um ao outro.
+  // Em `ignoradas`, `marcada` é a marca guardada, que o Voltar a mostrar restaura.
+  const n = data?.ignoradas.length ?? 0;
+  const ignoradas = n > 0 && (
+    <div key="ignoradas" className="panel span-12">
+      <Frame id="assinaturas-ignoradas" title="Ignoradas">
+        <details className="sub-ignoradas" ref={(d) => { if (d && reabrir.current) { d.open = true; reabrir.current = false; } }}>
+          <summary><span className="sub-mostrar">Mostrar {n} {n === 1 ? "cobrança" : "cobranças"}</span><span className="sub-esconder">Esconder</span></summary>
+          <ul className="subs">
+            {data!.ignoradas.map((a, i) => (
+              <Linha key={`${a.chave}#${i}`} a={a}>
+                {botao(a, a.marcada ? "assinatura" : "nenhuma", "Voltar a mostrar", "btn-ghost")}
+              </Linha>
+            ))}
+          </ul>
+        </details>
+      </Frame>
+    </div>
+  );
+
+  if (estado) return <><div className="panel span-12"><Frame id="assinaturas" title="Assinaturas">{avisoBloco}{estado}</Frame></div>{ignoradas}</>;
+  const { servicos, outras, total_mensal, total_anual } = data!;
 
   return (
     <>
@@ -224,6 +249,7 @@ export function SubscriptionList() {
           </Frame>
         </div>
       )}
+      {ignoradas}
     </>
   );
 }

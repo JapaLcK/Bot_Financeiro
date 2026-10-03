@@ -20,10 +20,11 @@
         { "chave": "porto seguro", "nome": "Porto Seguro", "categoria": "seguros", "valor": "89.90", "valor_anterior": "100.00", "reajuste_em": "2026-06-22", "dia": 22, "proxima": "2026-10-22", "ultima": "2026-09-22", "desde": "2025-09-22", "meses": 13, "meio": { "tipo": "cartao", "nome": "Nubank", "final": "1234" }, "status": "ativa", "marcada": false },
         { "chave": "porto seguro", "nome": "Porto Seguro Residencial", "categoria": "seguros", "valor": "39.90", "valor_anterior": null, "reajuste_em": null, "dia": 3, "proxima": "2026-10-03", "ultima": "2026-09-03", "desde": "2026-02-03", "meses": 8, "meio": { "tipo": "conta", "nome": "CooperativaDeCreditoDosServidoresPublicosSicoobCredicitrusAgencia", "final": null }, "status": "ativa", "marcada": false }
       ],
+      "ignoradas": [],
       "total_mensal": "212.60",
       "total_anual": "2551.20"
     },
-    "vazia": { "servicos": [], "outras": [], "total_mensal": "0", "total_anual": "0" }
+    "vazia": { "servicos": [], "outras": [], "ignoradas": [], "total_mensal": "0", "total_anual": "0" }
   },
   "perfil": {
     "economizar": { "perfil": "economizar" },
