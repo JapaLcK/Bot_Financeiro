@@ -114,7 +114,7 @@ def test_m2_linha_da_pk_velha_e_entregue_depois_de_migrar(mundo):
         mundo.sessoes["cs_m2"] = ["price_plano", _P[0]]
         entregar_pendentes()
         ((_, assunto, _, texto),) = mundo.para(email)
-        assert assunto == f"📘 Chegou: {_nome(_P[0])}" and _url(uid) in texto
+        assert assunto == f"Seu caderno: {_nome(_P[0])}" and _url(uid) in texto
         assert _linhas(uid)[_P[0]]["resultado"] == "enviado"
     finally:
         init_db()
@@ -183,9 +183,9 @@ def test_z1_n_emails_cada_um_com_o_seu_nome(mundo):
     registrar(uid, "cs_z1", itens)
     assert entregar_pendentes() >= 3
     vistos = {assunto: (html, texto) for _, assunto, html, texto in mundo.para(email)}
-    assert set(vistos) == {f"📘 Chegou: {_nome(p)}" for p in _P[:3]}
+    assert set(vistos) == {f"Seu caderno: {_nome(p)}" for p in _P[:3]}
     for p, u in itens:
-        html, texto = vistos[f"📘 Chegou: {_nome(p)}"]
+        html, texto = vistos[f"Seu caderno: {_nome(p)}"]
         assert u in texto and f"<b>{_nome(p)}</b>" in html
     assert {r["resultado"] for r in _linhas(uid).values()} == {"enviado"}
 
@@ -223,7 +223,7 @@ def test_z3_falha_de_envio_de_um_item_nao_segura_os_outros(mundo, monkeypatch):
     antes = len(mundo.para(email))
     entregar_pendentes()
     novos = mundo.para(email)[antes:]
-    assert [a for _, a, _, _ in novos] == [f"📘 Chegou: {_nome(_P[1])}"]
+    assert [a for _, a, _, _ in novos] == [f"Seu caderno: {_nome(_P[1])}"]
     assert _linhas(uid)[_P[1]]["resultado"] == "enviado"
 
 
@@ -234,7 +234,7 @@ def test_z4_item_sem_url_fica_fora_e_os_outros_entregam(mundo):
     assert (uid, "cs_z4", _P[1]) not in abertas()
     entregar_pendentes()
     assert sorted(a for _, a, _, _ in mundo.para(email)) == sorted(
-        f"📘 Chegou: {_nome(p)}" for p in (_P[0], _P[2]))
+        f"Seu caderno: {_nome(p)}" for p in (_P[0], _P[2]))
     assert _linhas(uid)[_P[1]]["fechada_em"] is None
 
 
@@ -300,25 +300,25 @@ def test_z8_sem_nome_do_produto_vira_seu_ebook(mundo, monkeypatch, linha):
     registrar(uid, "cs_z8", [(_P[0], _url(uid))])
     entregar_pendentes()
     ((_, assunto, html, texto),) = mundo.para(email)
-    assert assunto == "📘 Chegou: seu e-book"
-    assert "<b>seu e-book</b>" in html and "liberada: seu e-book." in texto
+    assert assunto == "Seu caderno chegou"
+    assert "<b>seu caderno</b>" in html and "liberada: seu caderno." in texto
 
 
 # ── H. o nome no e-mail ──────────────────────────────────────────────────────
 
-def test_h_nome_vazio_vira_seu_ebook_e_nome_do_stripe_e_escapado(monkeypatch):
+def test_h_nome_vazio_vira_seu_caderno_e_nome_do_stripe_e_escapado(monkeypatch):
     vistos = []
     monkeypatch.setattr(es, "send_email", lambda **kw: vistos.append(kw) or True)
     for vazio in ("", "   "):
         vistos.clear()
         es.send_ebook_email("a@b.com", "https://x.test/a.pdf", nome=vazio)
-        assert vistos[0]["subject"] == "📘 Chegou: seu e-book", repr(vazio)
-        assert "<b>seu e-book</b>" in vistos[0]["html_body"]
+        assert vistos[0]["subject"] == "Seu caderno chegou", repr(vazio)
+        assert "<b>seu caderno</b>" in vistos[0]["html_body"]
     vistos.clear()
 
     es.send_ebook_email("a@b.com", "https://x.test/a.pdf", nome='Livro <b>&"x')
     html = vistos[0]["html_body"]
     esc = "Livro &lt;b&gt;&amp;&quot;x"
-    assert f"<title>Chegou: {esc}</title>" in html and f"<b>{esc}</b>" in html
+    assert f"<title>Seu caderno: {esc}</title>" in html and f"<b>{esc}</b>" in html
     assert '<b>&"x' not in html
-    assert vistos[0]["subject"] == '📘 Chegou: Livro <b>&"x'
+    assert vistos[0]["subject"] == 'Seu caderno: Livro <b>&"x'
