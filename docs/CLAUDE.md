@@ -375,7 +375,7 @@ Sub-app FastAPI (`api/v2/app.py`) montado pelo monólito com `app.mount("/api/v2
 
 Sessão por **JWT em cookie `HttpOnly`** + **refresh token** (tabela
 `auth_refresh_tokens`), com **CSRF por cookie `csrf_token`** (`SameSite=strict`) e
-rate limiting via `slowapi` nos endpoints sensíveis.
+rate limiting via `slowapi` nos endpoints sensíveis (chave `rate_limit_key`, ver abaixo).
 
 No cliente, `frontend/auth-refresh.js` faz *monkey-patch* de `window.fetch`: em 401
 que não seja o próprio `/auth/refresh`, dispara o refresh, deduplica chamadas
@@ -404,6 +404,12 @@ Cloudflare → Railway, o `request.client.host` é o proxy do Railway (100.64/10
 Cloudflare manda o mesmo valor em `x-pigbank-cf-secret`; sem ela, o comportamento antigo
 (conexão da Cloudflare). Configuração em `.env.example`; a regra inteira e os riscos
 residuais, no docstring do módulo. A sonda `client_ip_sonda` (`system_event_logs`) mede.
+Todo IP gravado ou exibido (auditoria, `auth_login_events`, sessão, admin, export) usa
+`client_ip`; todo teto por IP (slowapi, `_check_auth_rate_limits`, quiz) usa `rate_limit_key`.
+Nunca ler o peer nem cabeçalho de IP direto: `tests/test_client_ip_fonte_unica.py` reprova.
+Limite conhecido: o detector de pico de falha de login (`core/services/security_alerts.py`)
+agrupa por `auth_login_events.ip_address`, o IP completo — IPv6 não vira /64 ali, então quem
+tem um bloco troca de endereço dentro do próprio /64 sem somar no balde. Só o limitador agrupa /64.
 
 **Conta pela `/assinar` (funil v3 do quiz): `POST /auth/quiz/conta`**
 (`frontend/routes/quiz_signup.py`, com CSRF). Recebe e-mail, nome, WhatsApp
@@ -415,7 +421,7 @@ pedido já é dessa conta), `tem_conta`, `cadastro_pendente` (há código de
 não é tocado) ou `ocupado` (409: outro pedido do mesmo e-mail está com a trava; a rota
 não espera, para uma rajada não segurar o pool de conexões). Só `criada` escreve e dá
 sessão. É o único lugar do site que diz se um e-mail tem conta (aceito pelo dono), com
-10/h por IP (balde `quiz`) e 3/h por e-mail (balde `quiz-conta`, separado do
+10/h por IP (balde `quiz`, chave `rate_limit_key`) e 3/h por e-mail (balde `quiz-conta`, separado do
 `register` para o anônimo não gastar o teto do cadastro da vítima). A prova do e-mail vem depois, no "Crie sua senha".
 A página é `frontend/assinar.html` + `assinar.js`: o script limpa o fragmento antes do
 Pixel e do GA4 (sem Clarity), percorre os estados formulário → já tem conta →

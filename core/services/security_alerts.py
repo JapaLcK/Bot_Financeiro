@@ -3,7 +3,8 @@ core/services/security_alerts.py — Detecção de eventos de segurança → ale
 
 Hoje: spike de falha de login por IP (A09 detector 1). Quando um IP acumula
 muitas falhas de login numa janela curta, dispara um alerta administrativo via
-`core.services.admin_notify` (Slack/Discord).
+`core.services.admin_notify` (Slack/Discord). Limite conhecido: agrupa pelo IP
+completo, IPv6 NÃO por /64 como o `rate_limit_key` (#766, docs/CLAUDE.md).
 
 Arquitetura (importante — evita 3 armadilhas):
   - A detecção roda em uma **task de fundo** (`asyncio.create_task`), DEPOIS de

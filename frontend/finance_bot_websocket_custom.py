@@ -42,9 +42,9 @@ from fastapi.utils import is_body_allowed_for_status_code
 from starlette.exceptions import HTTPException as StarletteHTTPException
 import uvicorn
 from pydantic import BaseModel, Field, model_validator
-from slowapi.util import get_remote_address
 from slowapi.errors import RateLimitExceeded
 from config.env import load_app_env
+from core.client_ip import client_ip as ip_cliente, rate_limit_key
 from token_utils import decode_dashboard_token_full, make_dashboard_token
 from utils_date import now_tz, today_tz, tz_name
 from utils_phone import normalize_phone_e164
@@ -2596,7 +2596,7 @@ async def _check_auth_rate_limits(action: str, request: Request, email: str) -> 
         return
 
     max_attempts, window_seconds = limit
-    client_ip = get_remote_address(request)
+    client_ip = rate_limit_key(request)
     await _check_persistent_rate_limit(
         action,
         f"ip:{client_ip}",
@@ -2796,7 +2796,7 @@ def _issue_session_token(user_id: int, email: str, request: Request) -> tuple[st
     """
     from core.refresh_tokens import create_refresh_token
 
-    ip = get_remote_address(request) or None
+    ip = ip_cliente(request) or None
     ua = request.headers.get("user-agent") or None
     jti = create_session(user_id, ip=ip, user_agent=ua)
     access = _make_jwt(user_id, email, jti=jti)
@@ -3487,7 +3487,7 @@ async def auth_login(request: Request, response: Response, body: LoginBody):
         await log_auth_login_event(
             body.email,
             False,
-            ip_address=get_remote_address(request),
+            ip_address=ip_cliente(request),
             user_agent=request.headers.get("user-agent"),
             failure_reason="google_only_account",
         )
@@ -3498,7 +3498,7 @@ async def auth_login(request: Request, response: Response, body: LoginBody):
         await log_auth_login_event(
             body.email,
             False,
-            ip_address=get_remote_address(request),
+            ip_address=ip_cliente(request),
             user_agent=request.headers.get("user-agent"),
             failure_reason="invalid_credentials",
         )
@@ -3529,7 +3529,7 @@ async def _concluir_login(
             email,
             True,
             user_id=user_id,
-            ip_address=get_remote_address(request),
+            ip_address=ip_cliente(request),
             user_agent=request.headers.get("user-agent"),
             failure_reason="mfa_pending",
         )
@@ -3552,7 +3552,7 @@ async def _concluir_login(
         email,
         True,
         user_id=user_id,
-        ip_address=get_remote_address(request),
+        ip_address=ip_cliente(request),
         user_agent=request.headers.get("user-agent"),
     )
 
@@ -3733,7 +3733,7 @@ async def auth_refresh(request: Request, response: Response):
         return _no_store(resp)
 
     from core.refresh_tokens import consume_refresh_token
-    ip = get_remote_address(request) or None
+    ip = ip_cliente(request) or None
     ua = request.headers.get("user-agent") or None
     result = await asyncio.to_thread(
         consume_refresh_token, refresh_apresentado, ip=ip, user_agent=ua,
@@ -4215,7 +4215,7 @@ async def auth_mfa_verify_login(request: Request, response: Response, body: MFAV
         user["email"],
         True,
         user_id=user_id,
-        ip_address=get_remote_address(request),
+        ip_address=ip_cliente(request),
         user_agent=request.headers.get("user-agent"),
     )
 
@@ -4254,7 +4254,7 @@ async def auth_account_export_request(request: Request, body: DataExportBody):
     user_id = _resolve_dashboard_user_id(request)
     _raise_if_account_scheduled_for_deletion(user_id)
 
-    client_ip = get_remote_address(request)
+    client_ip = ip_cliente(request)
     user_agent = (request.headers.get("user-agent") or "").strip() or None
 
     # 1) Re-auth por senha
@@ -4355,7 +4355,7 @@ async def auth_account_export_download(request: Request, token: str):
             "data_export_token_invalid",
             "Tentativa de download com token inválido, expirado ou já usado.",
             source="auth_account_export_download",
-            details={"ip": get_remote_address(request)},
+            details={"ip": ip_cliente(request)},
         )
         raise HTTPException(
             status_code=410,
@@ -4364,7 +4364,7 @@ async def auth_account_export_download(request: Request, token: str):
 
     _raise_if_account_scheduled_for_deletion(user_id)
 
-    client_ip = get_remote_address(request)
+    client_ip = ip_cliente(request)
     user_agent = (request.headers.get("user-agent") or "").strip() or None
 
     content = await asyncio.to_thread(build_user_export_zip, user_id)
@@ -4715,7 +4715,7 @@ async def auth_google_callback(
                 await asyncio.to_thread(maybe_record_login_from_new_ip, user_id, request=request)
                 await log_auth_login_event(
                     email, True, user_id=user_id,
-                    ip_address=get_remote_address(request),
+                    ip_address=ip_cliente(request),
                     user_agent=request.headers.get("user-agent"),
                 )
             app_response = RedirectResponse(url=f"{scheme}://auth?code={code}", status_code=302)
@@ -4739,7 +4739,7 @@ async def auth_google_callback(
             email,
             True,
             user_id=user_id,
-            ip_address=get_remote_address(request),
+            ip_address=ip_cliente(request),
             user_agent=request.headers.get("user-agent"),
         )
 
@@ -4855,7 +4855,7 @@ async def _completar_cadastro_social(
         email,
         True,
         user_id=user_id,
-        ip_address=get_remote_address(request),
+        ip_address=ip_cliente(request),
         user_agent=request.headers.get("user-agent"),
     )
 
@@ -7223,7 +7223,7 @@ Os links expiram em __MAGIC_LINK_MINUTES__ minutos e funcionam uma única vez.</
     response = RedirectResponse(url=redirect_url, status_code=302)
     # Magic-link tambem cria auth_session — aparece em "Dispositivos conectados"
     # e pode ser revogado individualmente como qualquer outra sessao.
-    ip = get_remote_address(request) or None
+    ip = ip_cliente(request) or None
     ua = request.headers.get("user-agent") or None
     jti = await asyncio.to_thread(create_session, int(user_id), ip=ip, user_agent=ua)
     _set_dashboard_cookie(response, int(user_id), jti=jti)

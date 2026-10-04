@@ -11,6 +11,7 @@ com a rota registrada via router.
 import asyncio
 import hashlib
 import hmac
+import ipaddress
 import json
 import logging
 import math
@@ -30,6 +31,7 @@ from pydantic import BaseModel, ValidationError
 
 from core.admin_dashboard import log_system_event
 from core.audit import AuditEvent, list_audit_events, record_audit_event
+from core.client_ip import client_ip
 from core.secure_compare import constant_time_eq
 from core.pg_text import detalhe_seguro, limpa_para_pg
 from core.services.pluggy import (
@@ -2167,9 +2169,12 @@ async def open_finance_refresh_route(request: Request, user_id: int, wait: int |
 def _ip_prefix(request: Request) -> str:
     """IP do chamador truncado (/24 em v4, /48 em v6) — o suficiente pra ver um
     padrão de abuso, insuficiente pra identificar alguém."""
-    ip = (request.client.host if request.client else "") or ""
+    ip = client_ip(request) or ""
     if ":" in ip:
-        return ":".join(ip.split(":")[:3]) + "::/48"
+        try:
+            return str(ipaddress.ip_network(f"{ip}/48", strict=False))
+        except ValueError:   # peer que não é IP (client_ip o devolve cru)
+            return "desconhecido"
     partes = ip.split(".")
     return ".".join(partes[:3]) + ".0/24" if len(partes) == 4 else "desconhecido"
 
