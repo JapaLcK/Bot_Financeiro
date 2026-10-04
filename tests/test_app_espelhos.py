@@ -175,7 +175,7 @@ def test_schemes_do_app_batem_com_a_lista_do_connect_token():
 def test_regex_do_item_da_volta_e_a_do_servidor():
     """O app recusa o `itemId` do link com a MESMA regra que o servidor usa
     para montar `/items/{id}` (`_ITEM_ID_OK`): lá o id inválido vira 502, que
-    o app trataria como instabilidade e repetiria por 2 minutos."""
+    o app trataria como instabilidade e repetiria pela janela inteira (`JANELA_MS`)."""
     from core.services.pluggy import _ITEM_ID_OK
 
     m = re.search(r"const ID_DO_ITEM = /\^(.*?)\$/;", VOLTA_OF_TS.read_text())

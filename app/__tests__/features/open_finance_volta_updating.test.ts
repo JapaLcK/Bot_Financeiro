@@ -58,6 +58,14 @@ describe("volta do OAuth — item em updating segue consultando", () => {
     expect(estados).toEqual([conferindo(false), conectado(ATUALIZANDO), { fase: "organizando" }]);
   });
 
+  it("N13 — updating por 4 min (medido no iPhone: ≥ ~89 s), depois updated: termina em conectado/updated, não em organizando", async () => {
+    const { d, ultimo, relogio } = dependencias();
+    servidor({ get: () => (relogio.t < 240_000 ? atualizando() : lista(VIVO)) });
+    await conferirVolta(ITEM, d);
+    expect(ultimo()).toEqual(conectado(VIVO));
+    expect(relogio.t).toBe(240_000);
+  });
+
   it.each(["removed", "item_missing"])("N5 (A5) — visto em updating, depois %s: mostra e para, SEM POST", async (state) => {
     servidor({ get: emSequencia(atualizando, () => lista(comEstado(state))) });
     const { d, estados } = dependencias();
