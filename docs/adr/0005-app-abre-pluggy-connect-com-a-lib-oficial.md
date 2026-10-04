@@ -1,8 +1,8 @@
 # ADR 0005 — Como o app nativo abre o Pluggy Connect
 
-Status: **proposto**, aguarda a decisão do dono. Spike da Fase 4 ("Open Finance e onboarding"), feito em 2026-10-02. Nada aqui muda código de produção: as mudanças de backend são propostas, cada uma vira PR próprio. **Atualizado depois do teste no iPhone (build 14, Nubank real): a recomendação mudou** — ver "Medido no iPhone" e "Decisão recomendada".
+Status: **proposto**, aguarda a decisão do dono. Spike da Fase 4 ("Open Finance e onboarding"), feito em 2026-10-02. Nada aqui muda código de produção: as mudanças de backend são propostas, cada uma vira PR próprio. **Atualizado depois do teste no iPhone (build 14, Nubank real): a recomendação mudou** — ver "Medido no iPhone" e "Decisão recomendada". **Atualizado em 2026-10-04 com as builds 15 a 17:** a proposta 1 está no ar (backend #774; app #790, #802 e #818) e a volta ao app foi provada no iPhone — ver "Medido no iPhone (builds 15 a 17)".
 
-Convenção de prova: **[medido]** = rodei no simulador (iPhone 18 Pro, iOS 27, Expo Go 57.0.9) e vi o resultado; **[lido]** = li na documentação oficial da Pluggy ou no código da lib; **[hipótese]** = não provado; **[só no iPhone]** = o simulador não prova. **[medido no iPhone]** = o dono rodou a build 14 (TestFlight, produção, conta real, Nubank real) e o log do app mostrou o resultado.
+Convenção de prova: **[medido]** = rodei no simulador (iPhone 18 Pro, iOS 27, Expo Go 57.0.9) e vi o resultado; **[lido]** = li na documentação oficial da Pluggy ou no código da lib; **[hipótese]** = não provado; **[só no iPhone]** = o simulador não prova. **[medido no iPhone]** = o dono rodou a build 14 (e, na seção das builds 15 a 17, essas) no TestFlight, em produção, conta real, Nubank real, e o log do app ou o que ele viu na tela mostrou o resultado; **[informado pelo dono]** = o dono descreveu ou mostrou a tela, sem log.
 
 ## Contexto
 
@@ -58,15 +58,15 @@ Por quê: é a única que funcionou de ponta a ponta com o Nubank real no iPhone
 
 1. Ao voltar do widget por qualquer caminho (`onSuccess`, `onError`, `onClose`, deep link com `itemId`), o app consulta o servidor: `GET /open-finance/{uid}` (`frontend/routes/open_finance.py:1630`, devolve as conexões com `provider_item_id`, `status` e o estado exibível `ui`).
 2. Se tiver o `id` do item, faz `POST /open-finance/{uid}/pluggy-item` (`:1841`). A rota só aproveita o `id` e confere o dono na Pluggy (`clientUserId` bate com a sessão), então um id vindo do app não dá poder a ninguém.
-3. Sem `id` (usuário saiu do app, `onSuccess` perdido), a conexão aparece quando o webhook adota o item **[medido no iPhone, com o app em segundo plano]**; só o evento `item/created` adota (`frontend/routes/open_finance.py:1146`), então, se ele se perder, nenhum evento depois recupera o item e o usuário fica com 0 bancos sem erro visível — por isso o passo 2 existe. O app consulta o `GET` em intervalo curto por uma janela limitada e mostra "Estamos conferindo com o banco" em vez de erro. **[hipótese]** 3 s por até 5 min (medido no iPhone: `updating` até ≥ ~89 s); não medi o tempo do webhook, e o valor entra no PR das telas com medição em staging.
+3. Sem `id` (usuário saiu do app, `onSuccess` perdido), a conexão aparece quando o webhook adota o item **[medido no iPhone, com o app em segundo plano]**; só o evento `item/created` adota (`frontend/routes/open_finance.py:1146`), então, se ele se perder, nenhum evento depois recupera o item e o usuário fica com 0 bancos sem erro visível — por isso o passo 2 existe. O app consulta o `GET` em intervalo curto por uma janela limitada e mostra "Estamos conferindo com o banco" em vez de erro. Implementado no #790/#802/#818 como 3 s por até 5 min (medido no iPhone: `updating` em ~16 s, ~42 s e ≥ ~89 s; a janela tinha 2 min e subiu para 5). **[hipótese]** o valor de 5 min ainda não foi confrontado com o tempo do webhook, que não foi medido; entra no PR das telas com medição em staging.
 4. Antes de abrir o widget, `GET /open-finance/{uid}/limite` (`:1812`) diz se cabe um banco novo.
 
 ## O que o backend precisa (propostas, cada uma um PR na faixa Completo)
 
-1. **(necessária) `oauthRedirectUri` no `connect-token`**, hoje ausente (`core/services/pluggy.py:302`). Para o app, `pigbank://open-finance-volta`; para o site, nada muda (parâmetro opcional). A API aceita o formato (medido acima). **O scheme tem de ser por ambiente.** Dev, staging e produção convivem no mesmo iPhone (`app/app.config.ts:3-15`) e hoje todos registram o mesmo `pigbank` (`:52`); quando o redirect é resolvido pelo sistema (Safari → app), o iOS não define qual deles abre, e o errado não completa o fluxo. Derivar o scheme do ambiente (ex.: `pigbank-staging`) ou usar link universal por ambiente. Não afeta o modo in-app nem a C: ali o retorno não passa pelo sistema (o `openAuthSessionAsync` casa o scheme da própria sessão, como no Google).
+1. **(necessária; feita: backend #774, app #790 — scheme por ambiente em `app/app.config.ts`) `oauthRedirectUri` no `connect-token`**, que na escrita deste ADR estava ausente (`core/services/pluggy.py:302`). Para o app, `pigbank://open-finance-volta`; para o site, nada muda (parâmetro opcional). A API aceita o formato (medido acima). **O scheme tem de ser por ambiente.** Dev, staging e produção convivem no mesmo iPhone (`app/app.config.ts:3-15`) e na escrita deste ADR todos registravam o mesmo `pigbank` (`:52`); quando o redirect é resolvido pelo sistema (Safari → app), o iOS não define qual deles abre, e o errado não completa o fluxo. Derivar o scheme do ambiente (ex.: `pigbank-staging`) ou usar link universal por ambiente. Não afeta o modo in-app nem a C: ali o retorno não passa pelo sistema (o `openAuthSessionAsync` casa o scheme da própria sessão, como no Google).
 2. **`itemId` opcional no `connect-token`** para reconectar um banco existente, hoje impossível: com o Nubank já conectado, o widget recusa com `onError` "already exists" (o token vai com `avoidDuplicates: true`, `core/services/pluggy.py:306`) [medido no iPhone]; pela doc o widget então recebe `updateItem`. Precisa validar que o item é do usuário.
 3. **(só se a C for escolhida)** uma página hospedada que embute o widget e redireciona para `pigbank://…`.
-4. **(só se um dia usar link universal em vez de scheme)** `applinks` no `apple-app-site-association` (hoje só `webcredentials`, `frontend/routes/static_pages.py:471`) e `associatedDomains` com `applinks:` em `app/app.config.ts:66`. O scheme `pigbank` já existe (`app/app.config.ts:52`). O link universal evitaria a pergunta "Abrir no app?" que o Safari faz para scheme customizado [medido com `exp://`; com `pigbank://` é **hipótese**, o Expo Go não registra esse scheme].
+4. **(só se um dia usar link universal em vez de scheme)** `applinks` no `apple-app-site-association` (hoje só `webcredentials`, `frontend/routes/static_pages.py:471`) e `associatedDomains` com `applinks:` em `app/app.config.ts:66`. O scheme `pigbank` já existe (`app/app.config.ts:52`). O link universal evitaria a pergunta "Abrir no app?" que o Safari faz para scheme customizado. A pergunta existe com `pigbank://`: "Abrir esta página no 'pigbank'?" [medido no iPhone, build 15 e 16]. Que o link universal a elimine num redirect automático é **hipótese** (a Apple pode exigir gesto do usuário); decisão do dono, não pedida.
 
 ## Medido no iPhone (build 14, Nubank real)
 
@@ -83,7 +83,19 @@ Build 14 enviada ao TestFlight a partir de um branch descartável (a tela de tes
 - **Item criado, banco ainda não autorizado:** o `item/created` já dispara e o webhook adota na hora a conexão ainda `UPDATING`, incompleta (`tests/test_of_webhook_adopt.py:202-220`; a ordem "webhook antes do `onSuccess`" está documentada em `frontend/routes/open_finance.py:2026-2029`; **[lido]**, não medido no iPhone). Ela fica esperando o usuário e expira por tempo (`USER_INPUT_TIMEOUT`, ~20 min). **Tocar em "conectar de novo" bate em `avoidDuplicates` → "already exists"** [medido no iPhone, item 1]. A tela tem de mostrar a conexão incompleta e oferecer **continuar/reautorizar** (o `updateItem` da proposta 2), nunca um "conectar de novo" cego.
 - **Depois de autorizar:** a coleta continua na Pluggy e o PigBank já tem a conexão; o app mostra "Estamos organizando seus dados", não erro.
 
-**Só no iPhone ainda:** que `oauthRedirectUri=pigbank://…` devolve o usuário ao app sozinho (precisa da proposta 1 e de uma build nova) e o app fechado de vez (finalizado) logo depois de autorizar, que o webhook deveria cobrir igual mas não foi medido.
+**Só no iPhone ainda (resolvido nas builds 15 a 17, abaixo):** que `oauthRedirectUri=pigbank://…` devolve o usuário ao app e o app fechado de vez logo depois de autorizar.
+
+## Medido no iPhone (builds 15 a 17)
+
+Mesmo método da build 14: TestFlight, produção, conta do dono, Nubank real, branch descartável com a tela de teste (nada disso está na main). Build 15 = main com o #790 + tela de teste; 16 = a main com o #802; 17 = diagnóstico com servidor simulado (descrito abaixo). Para repetir a conexão o dono precisou desconectar o Nubank (ver o aviso do item 2 da build 14).
+
+1. **A volta ao app funciona com `oauthRedirectUri=pigbank://open-finance-volta`**, mas **não é 100% automática**: o iOS leva ao Safari e mostra "Abrir esta página no 'pigbank'?"; o dono toca e o app abre na rota `open-finance-volta` [medido no iPhone, build 15 rodada 1 e build 16; o texto exato foi lido na build 16]. É um toque a mais que o link universal talvez evitasse (proposta 4, hipótese).
+2. **Tempos.** Build 15: `onSuccess` em +106,7 s (`UPDATED`/`SUCCESS`); o `GET` mostrou `updating` de +107,1 s a +146,0 s (~42 s) e `updated` em +149,0 s. Somando as outras rodadas, `updating` durou ~16 s, ~42 s e ≥ ~89 s (limite inferior): **a duração varia mais de 5× entre rodadas**, e é por isso que a janela de conferência subiu de 2 para 5 min no #818.
+3. **App fechado de vez logo depois de autorizar** (build 15, rodada 2): o servidor ficou com a conexão adotada (id novo, `[updated]`), o que indica adoção pelo webhook com o app finalizado. **Não se sabe se o iOS reabriu o app**; o tempo de adoção segue sem medida.
+4. **Tela travada em "Atualizando…".** Build 15: a tela de volta ficou carregando para sempre; a causa estava no código e o #802 a consertou (a rota parava de repollar no primeiro `conectado`, com o item ainda `updating`). Build 16 (já com o #802): o dono voltou a ver "Atualizando…" sem sair dele. A causa **não foi encontrada** e o travamento **não se reproduziu** nas tentativas seguintes: fica como resíduo sem explicação. A build 17 trocou o servidor por um simulado (item `updating` por 40 s e depois `updated`), abriu a rota como o link da Pluggy a abre e repetiu o caso em segundo plano (~80 s); a tela chegou a "Atualizado" nos dois testes [informado pelo dono]. Isso prova a rota contra o servidor simulado, não contra o Nubank real.
+5. **`Continuar` da tela de volta leva ao Início**, não à tela de onde o usuário partiu: a rota abre com o Início embaixo da pilha. O link com o widget aberto é descartado pelo `app/app/+native-intent.ts` quando `widgetAberto()` está ligado; nenhuma tela liga essa flag ainda, então **o descarte com o widget real não foi provado** (entra com as telas 5 a 7).
+6. **Texto da tela de volta.** A tela "Conectando seu banco / Atualizando…" não mostrava progresso nem avisava da demora, e oferecia "Continuar" enquanto ainda atualizava; o #818 a trocou por "Organizando seus dados" (barra sem porcentagem, porque o servidor não expõe estágio nem progresso, contador de tempo, "Sair" só quando seguro). Textos provisórios até as telas 6 e 7.
+7. **Processo, para quem repetir.** `xcodebuild archive` não envia nada: o envio é o `-exportArchive` com `destination upload`. Com `manageAppVersionAndBuildNumber` ligado (o padrão do plist de exportação), enviar o mesmo build duas vezes faz o Xcode renumerar a segunda: a build 17 enviada duas vezes virou 18 no TestFlight (conferido nos logs do `IDEDistribution`). Desligar essa chave no `ExportOptions.plist` deveria evitar a renumeração (**[hipótese]**, não testado).
 
 ## Riscos
 
@@ -99,17 +111,19 @@ Build 14 enviada ao TestFlight a partir de um branch descartável (a tela de tes
 
 - Android: a lib e a WebView prometem suporte (peer `react-native-webview` ≥ 11.6; tratamento do botão voltar nos dois modos), mas não há build de Android e o primeiro build depende da #604. Nenhuma afirmação aqui vale para Android.
 - Outro banco além do Nubank, e o OAuth em iPhone físico com `oauthRedirectUri`.
-- App fechado de vez logo depois de autorizar (só medi em segundo plano).
+- App fechado de vez logo depois de autorizar: medido na build 15 (o servidor adotou a conexão), mas não se sabe se o iOS reabriu o app.
+- O descarte do link `open-finance-volta` com o widget real aberto (`+native-intent.ts`): coberto só por teste; a flag `widgetAberto` não tem chamador na main.
+- A causa do travamento da build 16 em "Atualizando…" (sem reprodução).
 - O caminho B até o `onSuccess` (cancelei o consentimento sem querer na única passada); ele também roda numa WebView, então herda a limitação do modo in-app com bancos que abrem o app.
 - O tempo de adoção pelo webhook (medi que acontece, não quando).
-- O `pigbank://` real (só `exp://` entrou em execução: o Expo Go não registra `pigbank://`).
+- ~~O `pigbank://` real~~ medido no iPhone nas builds 15 e 16 (com o toque extra do Safari, acima). Em Android nada foi medido.
 
 Os itens criados no sandbox da Pluggy durante o spike (`clientUserId=spike-descartavel`) não foram apagados; a doc da Pluggy diz que itens de sandbox sem atualização por 30 dias são removidos.
 
 ## Decisões que ficam com o dono
 
 1. Aprovar a recomendação revista: lib oficial com OAuth no navegador do sistema e `oauthRedirectUri` (o in-app sai como ponto de partida).
-2. Abrir **já** o PR do backend da proposta 1 (faixa Completo; scheme por ambiente) e uma build 15 para provar a volta automática no iPhone, antes das telas 5 a 7.
+2. ~~Abrir **já** o PR do backend da proposta 1 e uma build 15~~ **Feito**: #774, #790, #802, #818 e as builds 15 a 17. Fica a decisão sobre o toque extra do Safari: aceitar, ou investigar o link universal (proposta 4, hipótese).
 3. A proposta 2 (`itemId`, continuar/reconectar) **junto com as telas 5 a 7**, não depois: sem ela, quem sai no meio do fluxo não consegue retomar a conexão que o webhook já adotou.
 4. Android na Fase 4 ou depois (hoje fica sem prova).
 5. Se vale repetir o teste com o app fechado de vez (exige outro banco, ou desconectar o Nubank de novo).
