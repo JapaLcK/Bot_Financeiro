@@ -312,11 +312,7 @@
     let ok;
     try {
       ok = await saved;
-      // A conversão sai AQUI, quando a conclusão grava, e não no botão final:
-      // qualquer saída depois disso (Finish, "Pular tudo") já a encontra
-      // enviada. Só com `stamped` — revisita ao passo 5 não reconta.
-      if (ok) state.completed = true;
-      if (ok && ok.stamped) fireConversion();
+      if (ok) concluiu(ok);
     } finally { busyEnd(); }
     if (state.step !== TOTAL_STEPS) return;
     show(el("done-saving"), false);
@@ -326,6 +322,18 @@
       showError(SAVE_FAIL_TEXT);
       show(el("done-fail"), true);
     }
+  }
+
+  /**
+   * Um POST de conclusão voltou 200. Fonte única da conversão (completeOnEnter,
+   * retry e skipAll passam aqui): ela sai quando a conclusão grava, e não no
+   * botão final — qualquer saída depois já a encontra enviada. Só com
+   * `stamped` (revisita não reconta) e só no passo 5: "Pular tudo" dos passos
+   * 1–4 não é ativação.
+   */
+  function concluiu(ok) {
+    state.completed = true;
+    if (ok.stamped && state.step === TOTAL_STEPS) fireConversion();
   }
 
   function retryComplete(button) {
@@ -373,9 +381,10 @@
       button.removeAttribute("aria-busy");
     }
     return withBusy(button, async function () {
-      if (!state.completed && !(await persist({ step: state.step, completed: true }))) {
-        showError(SAVE_FAIL_TEXT);
-        return;
+      if (!state.completed) {
+        const ok = await persist({ step: state.step, completed: true });
+        if (!ok) { showError(SAVE_FAIL_TEXT); return; }
+        concluiu(ok);
       }
       await goHome();
     });

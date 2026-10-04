@@ -5,14 +5,9 @@
  *  2. Passo 2: o estado real da conexão (snapshot GET /open-finance/{id}) troca
  *     de "Atualizando…" para "Atualizado" pelo repoll — e o repoll PARA quando
  *     não há mais `updating`, quando o usuário sai do passo e no teto.
- *  3. Passo 5: "Tudo pronto!" só com o 200 do POST /onboarding/state; com 500
- *     mostra erro + "Tentar de novo", e nem o Finish nem o "Pular tudo" saem
- *     para o /home sem a conclusão gravada.
- *
- * Desktop (1280) e celular (390). O relógio é o do Playwright (`page.clock`):
- * o repoll é de 5 s e o teste não espera tempo de verdade.
- *
- * Rodar: node --test tests/frontend/onboarding_guia.test.mjs
+ *  3. Passo 5: "Tudo pronto!" só com o 200; sem a conclusão gravada nada sai
+ *     para o /home; a conversão sai uma vez, quando a conclusão grava.
+ * Desktop (1280) e celular (390); relógio do Playwright (`page.clock`).
  */
 import { test, before, after } from "node:test";
 import assert from "node:assert/strict";
@@ -37,11 +32,9 @@ const UPDATING = { institution_name: "Nubank",
 const UPDATED = { institution_name: "Nubank", ui: { state: "updated", label: "Atualizado", detail: null } };
 
 /**
- * Abre o wizard no `step` salvo. `snapshot(n)` responde o n-ésimo GET do
- * Open Finance; `saveStatus(body)` o status do POST /onboarding/state (pode
- * ser Promise, para segurar o pedido em voo). `concluido`: a conta já tem o
- * carimbo (revisita), então nenhum POST devolve `stamped: true` — como a rota.
- * `calls.conv`: cada evento de conversão (Pixel e GA4), mesmo após ir ao /home.
+ * Abre o wizard no `step` salvo. `snapshot(n)`: n-ésimo GET do OF; `saveStatus`:
+ * status do POST (Promise segura em voo). `concluido`: já carimbado, nenhum POST
+ * devolve `stamped: true`. `calls.conv`: Pixel e GA4, mesmo após ir ao /home.
  */
 async function abrir(viewport, { step, snapshot = () => json({ ok: true, connections: [] }),
                                 saveStatus = () => 200, concluido = false } = {}) {
@@ -84,11 +77,7 @@ async function abrir(viewport, { step, snapshot = () => json({ ok: true, connect
   return { page, calls };
 }
 
-/**
- * O `runFor` dispara os tiques na hora, mas o pedido de cada um chega à rota
- * depois (rede assíncrona). Contar logo em seguida mede zero; espera o contador
- * ficar parado por 300 ms de relógio real.
- */
+/** O pedido de cada tique chega à rota depois: espera o contador parar 300 ms. */
 async function assentado(calls) {
   for (;;) {
     const antes = calls.of;
@@ -291,10 +280,8 @@ for (const vp of VIEWPORTS) {
     await p2.dblclick('[data-action="retry-complete"]');
     await new Promise((r) => setTimeout(r, 800));
     assert.equal(c2.posts.filter((b) => b.completed).length - antes, 1, JSON.stringify(c2.posts));
-    // Em 1280 o 2º clique cai no "Pular tudo", que espera a conclusão em voo e
-    // leva ao app sem passar pelo Finish. Qualquer que seja a tela final, a
-    // conversão saiu UMA vez quando a conclusão gravou. Controle negativo:
-    // conversão só no finish() → 0 aqui, nos dois tamanhos.
+    // Em 1280 o 2º clique cai no "Pular tudo" e vai ao app sem o Finish. Seja qual
+    // for a tela final, UMA conversão. Negativo: conversão só no finish() → 0.
     assert.deepEqual(c2.conv, CONVERSAO, `tela final: ${p2.url()}`);
     if (!/\/home$/.test(p2.url())) {
       await Promise.all([p2.waitForURL("**/home"), p2.click('[data-action="finish"]')]);
@@ -336,15 +323,28 @@ for (const vp of VIEWPORTS) {
     await page.close();
   });
 
-  test(`${tag} "Pular tudo" com 500 fica e avisa; com 200 vai ao /home`, async () => {
+  test(`${tag} "Pular tudo" com 500 fica e avisa; com 200 vai ao /home — no passo 2 sem conversão`, async () => {
     let falha = true;
-    const { page } = await abrir(vp, { step: 2, saveStatus: (b) => (b.completed && falha ? 500 : 200) });
+    const { page, calls } = await abrir(vp, { step: 2, saveStatus: (b) => (b.completed && falha ? 500 : 200) });
     await page.click('[data-action="skip-all"]');
     await page.waitForFunction(() => document.querySelector('[data-role="error"]').textContent.includes("Não consegui salvar"));
     assert.match(page.url(), /comecar\.html$/);
 
     falha = false;
     await Promise.all([page.waitForURL("**/home"), page.click('[data-action="skip-all"]')]);
+    assert.deepEqual(calls.conv, [], "pular dos passos 1–4 não é ativação");
+    await page.close();
+  });
+
+  test(`${tag} 500 na conclusão do passo 5 → "Pular tudo" grava, converte UMA vez e vai ao /home`, async () => {
+    // Controle negativo: sem o concluiu() no skipAll, a conversão fica vazia.
+    let falha = true;
+    const { page, calls } = await abrir(vp, { step: 4, saveStatus: (b) => (b.completed && falha ? 500 : 200) });
+    await page.click('.onb-step[data-step="4"] [data-action="skip"]');
+    await page.waitForSelector('[data-role="done-fail"]:not([hidden])');
+    falha = false;
+    await Promise.all([page.waitForURL("**/home"), page.click('[data-action="skip-all"]')]);
+    assert.deepEqual(calls.conv, CONVERSAO);
     await page.close();
   });
 }
