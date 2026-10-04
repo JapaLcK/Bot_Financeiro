@@ -1,8 +1,11 @@
 // Estado único da página. Imutável: cada `set` troca o objeto, e o React relê
 // pelo useSyncExternalStore (hook em ../useDash.ts).
+import { DEMO, MESES } from "./v2";
+
 /** @type {import("./types").DashState} */
 let state = {
   month: "2026-09",
+  mes: MESES[MESES.length - 1],
   horizon: "mes",
   sim: { cuts: {}, extra: 0, goal: "intercambio" },
   filter: { category: null, day: null, query: "", source: "todos" },
@@ -33,6 +36,13 @@ export function set(patch) {
   state = apply(state, patch);
   for (const fn of listeners) fn();
 }
+
+// O mês do seletor e do título. No protótipo é o próprio `month` sintético; com backend é o
+// real (`mes`), e os blocos de exemplo seguem no último mês sintético, com o selo.
+/** @param {import("./types").DashState} s */
+export const mesDe = (s) => (DEMO ? s.month : s.mes);
+/** @param {string} k */
+export const escolherMes = (k) => set(DEMO ? { month: k } : { mes: k });
 
 export const setFilter = (patch) => set({ filter: { ...state.filter, ...patch } });
 export const setSim = (patch) => set({ sim: { ...state.sim, ...patch } });

@@ -129,7 +129,7 @@ def test_dois_eventos_do_mesmo_pagamento_executam_uma_vez(user_id, contadores):
         "efeito externo executado duas vezes sobre o mesmo dinheiro"
     )
     assert efeitos(cobranca["asaas_payment_id"]) == {
-        "stripe_cancel", "grant", "ga4", "capi", "email"}
+        "stripe_cancel", "grant", "ebook", "ga4", "capi", "email"}
 
 
 def test_pagamentos_diferentes_nao_serializam(user_id, contadores, monkeypatch):

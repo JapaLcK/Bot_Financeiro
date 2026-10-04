@@ -101,7 +101,9 @@ _PERMITIDOS = {
     "add_launch_and_update_balance": {
         "core/handlers/launches.py": 1,          # add_from_entities (com a guarda)
         "core/services/quick_entry.py": 1,       # entrada rápida (com a regra)
-        "frontend/finance_bot_websocket_custom.py": 3,  # POST /launches + saldo inicial/ajuste
+        "frontend/finance_bot_websocket_custom.py": 2,  # saldo inicial/ajuste
+        # `lancar`: o POST /launches do /app (Q40 na rota) e a v2 (sempre dinheiro, Q40 do dono)
+        "core/services/carteira.py": 1,
         "db/bills.py": 1,                        # mark_bill_paid(metodo="carteira")
         "db/cards.py": 3,                        # fatura, antecipação, estorno
         "scripts/whatsapp_qa_vault_harness.py": 1,

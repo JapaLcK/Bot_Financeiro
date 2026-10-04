@@ -4,7 +4,7 @@ from db import (
     get_consolidated_balance, get_launches_by_period, get_summary_by_period,
     list_users_with_daily_report_enabled, list_identities_by_user,
     list_users_with_weekly_report_enabled, list_users_with_monthly_report_enabled,
-    list_credit_card_due_reminders, mark_card_reminder_sent,
+    list_credit_card_due_reminders, mark_card_reminder_sent, resumo_mes,
 )
 from datetime import time, timedelta, date
 from discord.ext import tasks
@@ -174,11 +174,15 @@ def build_daily_report_text(user_id: int) -> str:
 
 # --- resumos por período (semanal / mensal) ---
 
-def _build_period_report_summary(user_id: int, start_date: date, end_date: date) -> dict[str, str]:
+def _build_period_report_summary(user_id: int, start_date: date, end_date: date,
+                                 mensal: bool = False) -> dict[str, str]:
     saldo = _saldo_atual(user_id)
 
     launches = get_launches_by_period(user_id, start_date, end_date) or []
-    summary  = get_summary_by_period(user_id, start_date, end_date)
+    # Mensal: a regra única do mês (db/resumo_mes.py, Q18); o semanal fica na antiga, sem cartão.
+    t = mensal and resumo_mes.totais_do_mes(user_id, start_date)
+    summary = ({"despesa": t["saiu"], "receita": t["entrou"]} if t
+               else get_summary_by_period(user_id, start_date, end_date))
 
     return {
         "start": start_date.strftime("%d/%m/%Y"),
@@ -186,7 +190,7 @@ def _build_period_report_summary(user_id: int, start_date: date, end_date: date)
         "saldo": _fmt_brl(saldo),
         "gastos": _fmt_brl(summary.get("despesa", 0.0)),
         "receita": _fmt_brl(summary.get("receita", 0.0)),
-        "lancamentos": str(len(launches)),
+        "lancamentos": str(len(launches) + (t["n_cartao"] if t else 0)),  # + compras do cartão no total
     }
 
 
@@ -210,17 +214,12 @@ def build_weekly_report_summary(user_id: int, closed: bool = False) -> dict[str,
 def build_monthly_report_summary(user_id: int, closed: bool = False) -> dict[str, str]:
     """Resumo mensal.
 
-    closed=False (sob demanda): mês atual, do dia 1 até hoje.
+    closed=False (sob demanda): mês atual INTEIRO, como o painel (Q18).
     closed=True  (agendado no dia 1): mês anterior completo.
     """
     today = now_tz().date()
-    if closed:
-        end   = today.replace(day=1) - timedelta(days=1)  # último dia do mês anterior
-        start = end.replace(day=1)                         # dia 1 do mês anterior
-    else:
-        start = today.replace(day=1)
-        end   = today
-    return _build_period_report_summary(user_id, start, end)
+    start, fim = resumo_mes.mes_de(today.replace(day=1) - timedelta(days=1) if closed else today)
+    return _build_period_report_summary(user_id, start, fim - timedelta(days=1), mensal=True)
 
 
 def build_weekly_report_text(user_id: int, closed: bool = False) -> str:

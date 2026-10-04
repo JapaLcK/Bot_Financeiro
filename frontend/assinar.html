@@ -1,0 +1,147 @@
+<!doctype html>
+<html lang="pt-BR">
+<head>
+<meta charset="utf-8"/>
+<!-- Só a origem no Referer: um link malmontado com PII na query não a repassa aos
+     assets pedidos antes de o assinar.js limpar a URL. -->
+<meta name="referrer" content="strict-origin"/>
+<meta name="robots" content="noindex"/>
+<meta content="width=device-width, initial-scale=1.0" name="viewport"/>
+<title>Assinar · PigBank</title>
+<link href="/favicon.png?v=3" rel="icon" type="image/png"/>
+<meta content="#111111" name="theme-color"/>
+<link href="/brand.css?v=4" rel="stylesheet"/>
+<link href="/site.css?v=4" rel="stylesheet"/>
+<link href="/site-redesign.css?v=1" rel="stylesheet"/>
+<link href="/site-auth.css?v=1" rel="stylesheet"/>
+<link href="/assinar.css?v=1" rel="stylesheet"/>
+<script src="/static/auth-refresh.js?v=1"></script>
+<!-- Síncrono, sem defer, e antes do ponto onde o Pixel e o GA4 são injetados (o fim
+     deste bloco): a 1ª coisa que ele faz é tirar o fragmento com a PII da URL. -->
+<script src="/assinar.js?v=1"></script>
+<script defer src="/purchase-intent.js?v=1"></script>
+<script defer src="/pagamento-pagina.js?v=1"></script>
+<script defer src="/safe-area.js?v=1"></script>
+</head>
+<body class="lp lp-auth">
+<nav class="nav" aria-label="Navegação principal">
+<a class="nav-logo" href="/" aria-label="PigBank, início">
+<img class="logo-full" src="/brand/landing-logo.webp?v=1" alt="PigBank" width="142" height="42">
+</a>
+</nav>
+<main class="assinar lp-shell" id="conteudo">
+<div class="auth-card">
+
+<p class="assinar-conta" id="conta" hidden>Assinando como <strong id="conta-email"></strong>. Não é você? <button class="lp-auth-text-button" id="sair" type="button">Sair</button></p>
+
+<section id="c-carga">
+<p class="assinar-sub" aria-live="polite">Preparando sua assinatura…</p>
+</section>
+
+<section id="l0" hidden>
+<h1>Este link não está completo</h1>
+<p class="assinar-sub">Não encontramos o plano escolhido. Veja os planos e escolha o seu.</p>
+<a class="btn btn-primary btn-block btn-lg" href="/precos">Ver os planos</a>
+</section>
+
+<section id="s1" hidden>
+<form id="form-s1">
+<h1 id="s1-titulo">Falta pouco para assinar</h1>
+<p class="assinar-sub">Confira seus dados. É com este e-mail que você vai entrar no PigBank.</p>
+<div class="auth-error" id="s1-erro" role="alert"></div>
+<div class="auth-error show" id="s1-pendente" role="alert" hidden>Já existe um cadastro em andamento com este e-mail. Termine pelo código que enviamos para ele, ou use outro e-mail. <a href="/cadastro">Ir para o cadastro</a></div>
+<div class="field">
+<label for="nome">Nome</label>
+<input autocomplete="name" id="nome" maxlength="50" type="text"/>
+</div>
+<div class="field">
+<label for="email">E-mail</label>
+<input autocomplete="email" id="email" required="" type="email"/>
+</div>
+<div class="field">
+<label for="whatsapp">WhatsApp com DDD</label>
+<input autocomplete="tel" id="whatsapp" inputmode="tel" required="" type="tel"/>
+<div class="hint">É por ele que você fala com o Piggy.</div>
+</div>
+<label class="checkbox-row">
+<input id="termos" required="" type="checkbox"/>
+<span>Li e aceito os <a href="/termos" rel="noopener" target="_blank">Termos de uso</a> e a <a href="/privacy" rel="noopener" target="_blank">Política de Privacidade</a></span>
+</label>
+<button class="btn btn-primary btn-block btn-lg" id="s1-continuar" type="submit">Continuar</button>
+</form>
+</section>
+
+<section id="s2" hidden>
+<h1>Você já tem conta no PigBank</h1>
+<p class="assinar-sub">Entre com a conta de <strong id="s2-email"></strong> para continuar a assinatura.</p>
+<div class="auth-error" id="s2-erro" role="alert"></div>
+<button class="btn btn-primary btn-block btn-lg" id="s2-senha" type="button">Entrar com sua senha</button>
+<div class="social-btns assinar-gap">
+<button class="social-btn" id="s2-google" type="button">
+<svg aria-hidden="true" height="18" viewBox="0 0 24 24" width="18">
+<path d="M22.56 12.25c0-.78-.07-1.53-.2-2.25H12v4.26h5.92a5.06 5.06 0 0 1-2.2 3.32v2.77h3.57c2.08-1.92 3.28-4.74 3.28-8.1z" fill="#4285F4"></path>
+<path d="M12 23c2.97 0 5.46-.98 7.28-2.66l-3.57-2.77c-.98.66-2.23 1.06-3.71 1.06-2.86 0-5.29-1.93-6.16-4.53H2.18v2.84A11 11 0 0 0 12 23z" fill="#34A853"></path>
+<path d="M5.84 14.1a6.6 6.6 0 0 1 0-4.2V7.06H2.18a11 11 0 0 0 0 9.88l3.66-2.84z" fill="#FBBC05"></path>
+<path d="M12 5.38c1.62 0 3.06.56 4.21 1.64l3.15-3.15C17.45 2.09 14.97 1 12 1A11 11 0 0 0 2.18 7.06l3.66 2.84C6.71 7.3 9.14 5.38 12 5.38z" fill="#EA4335"></path>
+</svg>
+Entrar com Google
+</button>
+</div>
+<p class="auth-alt"><button class="lp-auth-text-button" id="s2-esqueci" type="button">Não tenho ou esqueci a senha</button></p>
+<p class="auth-alt"><button class="lp-auth-text-button" id="s2-outro" type="button">Usar outro e-mail</button></p>
+</section>
+
+<section id="s3" hidden>
+<h1 id="s3-titulo" aria-live="polite">Preparando o pagamento…</h1>
+<div class="auth-error" id="s3-erro" role="alert"></div>
+<button class="btn btn-primary btn-block btn-lg" id="s3-retry" type="button" hidden>Tentar de novo</button>
+</section>
+
+<section id="s4" hidden>
+<p class="assinar-sub" id="s4-trial"></p>
+<div id="stripe-checkout"></div>
+<!-- Página própria (pagamento-pagina.js): celular = resumo, caixas, pagamento, botão; ≥880 px, duas colunas. -->
+<div class="pp" id="pagina" hidden>
+<div class="pp-pedido">
+<div class="pp-resumo" id="pp-resumo" aria-live="polite"></div>
+<div class="pp-bump" id="pp-bump" hidden></div>
+</div>
+<div class="pp-pag">
+<div id="pp-express"></div>
+<div id="pagamento"></div>
+<p class="pp-cupom-link"><button class="lp-auth-text-button" id="pp-cupom-abre" type="button">Tem cupom?</button></p>
+<form class="pp-cupom" id="pp-cupom" hidden>
+<input aria-label="Código do cupom" autocapitalize="characters" autocomplete="off" id="pp-cupom-cod" maxlength="60" placeholder="Código do cupom" type="text"/>
+<button class="social-btn" id="pp-cupom-ok" type="submit">Aplicar</button>
+<div class="auth-error" id="pp-cupom-erro" role="alert"></div>
+</form>
+<div class="auth-error" id="pp-erro" role="alert"></div>
+<button class="btn btn-primary btn-block btn-lg pp-cta" disabled id="pp-pagar" type="button"><span id="pp-cta">Assinar</span><small id="pp-cta-sub"></small></button>
+</div>
+</div>
+<p class="assinar-b"><button class="lp-auth-text-button" id="s4-b" type="button">Problemas com o pagamento? Abrir a página segura do Stripe</button></p>
+<button class="social-btn assinar-pix" id="s4-pix" type="button" hidden>Prefere Pix? Pague o plano anual à vista</button>
+</section>
+
+<section id="h" hidden>
+<p class="assinar-sub" aria-live="polite">Abrindo a página segura de pagamento do Stripe…</p>
+</section>
+
+<section id="f1" hidden>
+<h1>Você já é assinante</h1>
+<p class="assinar-sub" id="f1-msg">Seu plano já está ativo nesta conta.</p>
+<a class="btn btn-primary btn-block btn-lg" href="/home" id="f1-cta">Ir para o painel</a>
+</section>
+
+</div>
+</main>
+<footer class="lp-auth-footer lp-shell">
+<p>© 2026 PigBank</p>
+<nav aria-label="Informações e ajuda">
+<a href="/suporte">Precisa de ajuda?</a>
+<a href="/privacy">Privacidade</a>
+<a href="/termos">Termos de uso</a>
+</nav>
+</footer>
+</body>
+</html>

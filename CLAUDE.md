@@ -383,6 +383,24 @@ consertou. `git diff` antes do commit, lido de ponta a ponta.
 
 **Toda mudança vai por PR.** Nunca empurre direto na `main`.
 
+**Toda feature começa em branch NOVA, da `main` atualizada, numa worktree
+separada.** Nunca continue na branch que a sessão encontrou checked out, nunca
+reaproveite branch de outra feature e nunca "caroneie" em branch alheia:
+`git fetch origin && git worktree add .claude/worktrees/<nome> -b feat/<nome> origin/main`
+(ou `git switch -c feat/<nome> origin/main`, se não houver worktree). O caminho é
+`.claude/worktrees/` porque é o que o `.gitignore` já ignora — fora dele a worktree
+aparece como `??` e um `git add .` a empacota. A worktree que o app cria para a
+sessão já mora lá, numa branch nova: ela cumpre a regra. Se no meio
+do trabalho aparecer commit que não é seu na branch, **pare e pergunte antes de
+empurrar** — a branch está sendo compartilhada e o seu PR vai arrastar o
+trabalho dos outros.
+
+> Custou o PR #515: a correção da sidenav da home saiu numa branch que já
+> carregava dois commits de chat em andamento de outra sessão, e o merge levou
+> os dois para a `main` sem revisão do dono. O certo era `git switch -c` da
+> `main` + cherry-pick do commit da correção — 30 segundos a mais, zero
+> trabalho alheio no PR.
+
 **Espere o Codex.** Ele revisa automaticamente ao abrir o PR e responde a
 `@codex review` num comentário. Não merje antes do parecer dele — mesmo com o CI
 verde, mesmo parecendo trivial.

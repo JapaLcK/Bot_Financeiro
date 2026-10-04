@@ -24,10 +24,11 @@ export const PROTOTIPO = `${ORIGIN}/dashboard-v2/index.html`;
 
 export function exigeArtefatoEmDia() {
   const bundle = statSync(join(FRONTEND, "dashboard-app.js")).mtimeMs;
-  const src = join(RAIZ, "webapp", "src", "dashboard");
-  const velho = readdirSync(src, { recursive: true })
-    .map((f) => join(src, f))
-    .find((f) => statSync(f).isFile() && statSync(f).mtimeMs > bundle);
+  // `components/` entra: a grade de widgets mora lá e o bundle do dashboard a embute.
+  const velho = ["dashboard", "components"].flatMap((d) => {
+    const src = join(RAIZ, "webapp", "src", d);
+    return readdirSync(src, { recursive: true }).map((f) => join(src, f));
+  }).find((f) => statSync(f).isFile() && statSync(f).mtimeMs > bundle);
   if (velho) {
     throw new Error(`frontend/dashboard-app.js é mais velho que ${velho}: rode \`npm --prefix webapp run build\` e commite o artefato.`);
   }
@@ -39,19 +40,51 @@ export const RESPOSTAS = JSON.parse(readFileSync(join(RAIZ, "tests", "frontend",
 
 /**
  * Atende o contexto do disco: `raiz` = frontend/ (o /painel) ou RAIZ (o protótipo). O
- * `/api/v2/me` responde o `plano` pelas fixtures, e o `/api/v2/eventos` (SSE) fica
- * pendente para sempre: stream aberto e mudo. Registrar de novo vale para as
+ * `/api/v2/me` responde o `plano` pelas fixtures; o GET `/api/v2/assinaturas`, a lista
+ * `cheia` no Plus e no Pro e o 403 `pro_required` nos outros; o `/api/v2/eventos` (SSE) fica
+ * pendente para sempre: stream aberto e mudo. O `/api/v2/perfil` guarda o que o PUT gravou
+ * (começa em `perfil`; `null` = nunca escolheu, o modal abre); `/contas` e `/resumo-do-mes`
+ * respondem as fixtures de nome `contas` e `resumo`. Registrar de novo vale para as
  * próximas requisições: no Playwright a rota registrada por último vence.
  */
-export async function servir(ctx, raiz = FRONTEND, { plano = "pro" } = {}) {
+export async function servir(ctx, raiz = FRONTEND, { plano = "pro", perfil = "padrao", contas = "todos_os_estados", resumo = "exato" } = {}) {
   const me = RESPOSTAS.me[plano];
   if (!me) throw new Error(`plano sem fixture: ${plano}`);
+  let atual = perfil;
   await ctx.route("**/*", (r) => {
     const url = new URL(r.request().url());
     if (url.origin !== ORIGIN) return r.abort();
     if (url.pathname === "/api/v2/me") return r.fulfill({ json: me });
     if (url.pathname === "/api/v2/eventos") return;
+    if (url.pathname === "/api/v2/perfil") {
+      if (r.request().method() === "PUT") atual = r.request().postDataJSON().perfil;
+      return r.fulfill({ json: { perfil: atual } });
+    }
+    if (url.pathname === "/api/v2/contas") return r.fulfill({ json: RESPOSTAS.contas[contas] });
+    if (url.pathname === "/api/v2/resumo-do-mes") return r.fulfill({ json: RESPOSTAS.resumo_do_mes[resumo] });
+    if (url.pathname === "/api/v2/assinaturas" && r.request().method() === "GET") {
+      const pago = plano === "plus" || plano === "pro";
+      const e = RESPOSTAS.erros["403_pro_required"];
+      return pago ? r.fulfill({ json: RESPOSTAS.assinaturas.cheia }) : r.fulfill({ status: e.status, json: e.body });
+    }
     const path = decodeURIComponent(url.pathname).replace(/\/$/, "/index.html");
     return r.fulfill({ path: join(raiz, path) }).catch(() => r.fulfill({ status: 404, body: "" }));
   });
+}
+
+/**
+ * Contexto do /painel (ou do protótipo, com `demo`) para os testes `dashboard_v2_resumo_real*`:
+ * o relógio congela em `agora` (padrão: 2 de outubro de 2026, 12h em SP) e `tz` é o fuso do
+ * aparelho; o resto das opções vai para o `servir`. `ir(rota)` navega e espera `espera`.
+ */
+export async function abrirPainel(browser, { width = 1440, espera = "#board-profile", agora = "2026-10-02T15:00:00Z", tz = "America/Sao_Paulo", demo = false, ...opts } = {}) {
+  const ctx = await browser.newContext({ viewport: { width, height: width > 500 ? 900 : 844 }, reducedMotion: "reduce", timezoneId: tz });
+  await servir(ctx, demo ? RAIZ : undefined, opts);
+  await ctx.addCookies([{ name: "csrf_token", value: "tok-123", url: ORIGIN }]);
+  const page = await ctx.newPage();
+  await page.clock.setFixedTime(new Date(agora));
+  const erros = [];
+  page.on("pageerror", (e) => erros.push(e.message));
+  const ir = async (rota = "/") => { await page.goto(`${demo ? PROTOTIPO : PAINEL}#${rota}`); if (espera) await page.locator(espera).waitFor(); };
+  return { ctx, page, erros, ir };
 }

@@ -8,7 +8,7 @@ a moderna DESCARTA ou SUBCONTA a linha antiga, sem erro e sem log:
 
 | número na tela                  | quem lia                                  |
 |---------------------------------|-------------------------------------------|
-| "Gastos em <mês>" do saldo      | `get_summary_by_period_impl` (db_support) |
+| resumo do período (diário, IA)  | `get_summary_by_period_impl` (db_support) |
 | manchete do Repórter            | `_month_stats` (core/services/piggy_agents)|
 | "quanto gastei" / top categorias| `get_top_expense_categories` (db/accounts)|
 | rodapé da lista de UM DIA       | `core/handlers/launches.py` (list_launches)|
@@ -150,7 +150,7 @@ def _linhas_do_hoje(resposta: str) -> list[str]:
 
 def test_resumo_do_periodo_nao_descarta_a_linha_legada(uid_wa):
     """`group by tipo` cru devolve 'saida' como CHAVE PRÓPRIA, e o `if tipo in
-    out` a joga fora sem exceção e sem log: o "Gastos em <mês>" sai menor."""
+    out` a joga fora sem exceção e sem log: o resumo do período sai menor."""
     _base(uid_wa, legado=True)
     r = _resumo(uid_wa)
     assert r["despesa"] == 150.0, r
@@ -187,7 +187,7 @@ def test_hoje_do_saldo_mostra_a_linha_legada(uid_wa):
     _base(uid_wa, legado=True)
     resposta = _diga(uid_wa, "saldo")
     assert len(_linhas_do_hoje(resposta)) == 2, resposta
-    assert "R$ 150,00" in resposta, resposta  # "Gastos em <mês>", via db_support
+    assert "R$ 150,00" in resposta, resposta  # "Gastos em <mês>", via db/resumo_mes
 
 
 # ── controle POSITIVO ───────────────────────────────────────────────────────

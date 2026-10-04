@@ -40,9 +40,15 @@ jest.mock("expo-secure-store", () => ({
 // chega vazio. O cliente de API lê `extra.apiUrl` de lá, então sem este dublê
 // TODO teste do cliente falha na primeira linha — e por um motivo que não tem
 // nada a ver com o que ele mede.
+// `executionEnvironment`/`scheme`: o binário de dev (não o Expo Go), que é o
+// caso em que `services/openFinance.ts` manda o `app_scheme`.
 jest.mock("expo-constants", () => ({
   __esModule: true,
-  default: { expoConfig: { extra: { apiUrl: "http://backend.teste" }, version: "0.1.0" } },
+  ExecutionEnvironment: { Bare: "bare", Standalone: "standalone", StoreClient: "storeClient" },
+  default: {
+    executionEnvironment: "bare",
+    expoConfig: { extra: { apiUrl: "http://backend.teste" }, version: "0.1.0", scheme: "pigbank-dev" },
+  },
 }));
 
 // Sentry e PostHog não inicializam sem chave (é o desenho), mas o import

@@ -53,7 +53,7 @@ api/v2/                   — a /api/v2 do dashboard v2: sub-app FastAPI montado
                             monólito em /api/v2, com envelope de erro próprio
                             (erros.py), a dependência única do usuário (sessao.py)
                             e um router por assunto (me.py, eventos.py,
-                            perfil.py, contas.py, assinaturas.py)
+                            perfil.py, contas.py, assinaturas.py, resumo_mes.py)
 
 db/                       — PACOTE com ~30 módulos, um por domínio
   schema.py               — DDL de TODAS as tabelas (init_db) — fonte de verdade
@@ -147,8 +147,10 @@ Sub-app FastAPI (`api/v2/app.py`) montado pelo monólito com `app.mount("/api/v2
 - `GET /api/v2/me` devolve `{"plan_tier": "free"|"essencial"|"plus"|"pro"}`, sem PII.
 - `GET /api/v2/eventos` (`api/v2/eventos.py`): SSE, `data: {"recurso": "open_finance"|"tudo"}`
   (sem dado financeiro, sem id, sem `id:`/replay) e `: ping` a cada 15 s. Quem avisa chama
-  `eventos.avisar(user_id, recurso)` na thread do loop, depois do commit; hoje são o fim
-  do sync do Open Finance e o "Recomeçar do zero". `usuario_atual` roda de novo antes de
+  `eventos.avisar(user_id, recurso)` na thread do loop, depois do commit: o fim do sync do
+  Open Finance, o "Recomeçar do zero" e, desde o #691, toda escrita nas tabelas de
+  `db/schema.py::TABELAS_QUE_AVISAM` (trigger `pg_notify('pb_escrita', dono)` →
+  `escutar_banco()` → `"tudo"`), de qualquer canal, o WhatsApp também. `usuario_atual` roda de novo antes de
   cada envio e a cada 30 s: sessão ou plano caídos fecham o stream sem aviso. Teto de 5
   streams por usuário (429 no envelope). Rota SSE tipa o item pela anotação de retorno
   (`-> AsyncIterable[Aviso]`), e a varredura aceita isso no lugar do `response_model`. O
@@ -173,22 +175,178 @@ Sub-app FastAPI (`api/v2/app.py`) montado pelo monólito com `app.mount("/api/v2
   contadas em `fora_do_total`). A carteira sai sempre com `carteira_nao_confirmada` até a
   Q37. `motivos` vazio = número exato. Cartão, posições e caixinhas não entram; `raw` e
   `provider_*_id` nunca saem.
+- `GET /api/v2/resumo-do-mes?mes=AAAA-MM` (`api/v2/resumo_mes.py`, regra em `db/resumo_mes.py`):
+  `mes`, `ate` (o último dia do mês, o corrente também: a soma cobre o mês inteiro), `entrou`, `saiu`, `anterior`
+  (`{mes, entrou, saiu}` do mês anterior inteiro, ou `null` quando a janela do plano corta
+  qualquer parte dele) e `motivos` (`conciliacao_pendente`, `movimentos_pendentes`,
+  `banco_desatualizado` — os do bloco de contas: refletem a situação atual das contas, não
+  a do mês pedido — e `inicio_do_historico`, quando a janela do plano corta o mês pedido ou
+  o `anterior`). Sem `mes` = o mês
+  corrente no fuso do app; formato fora de `AAAA-MM` ou mês futuro = 422 no envelope.
+  **Regra única do mês** (Q18): `TOTAIS_SQL` = lançamentos não internos por `criado_em`
+  (forma legada canonizada) + compras no cartão sem estorno pelo `period_end` da fatura,
+  no mês-calendário INTEIRO (a fatura que fecha depois de hoje, dentro do mês, entra). Leem
+  dela a rota, o "Gastos em <mês>" do WhatsApp (`core/handlers/balance.py`), o relatório
+  mensal (o pedido na hora também soma o mês inteiro: total, contagem e "Período"), a
+  consulta 5 do /app e `compute_kpis` das Análises. `compute_evolution` é cópia em consulta
+  única (um GROUP BY por mês); `tests/test_resumo_mes_regra.py` compara as duas por mês.
+  `credit_bills.user_id` é NOT NULL (backfill pelo dono do cartão, #772): a fatura só entra
+  se for do usuário (`b.user_id = %s`), em cada perna do cartão.
+  **Divergência conhecida:** relatório diário e semanal, ferramentas da IA de período
+  livre e projeção de fechamento (`get_summary_by_period`) e o Repórter
+  (`piggy_agents._month_stats`) seguem só em `launches`, sem o cartão. Limites mantidos de
+  propósito: o mês corta `criado_em` pela data ingênua (fuso da sessão do Postgres), a
+  conciliação pendente conta em dobro (sai com motivo), estorno não abate.
+  `scripts/comparar_resumo_mes.py` compara antigo × novo por usuário e mês, só lendo.
 - `GET /api/v2/assinaturas` e `POST /api/v2/assinaturas/marca` (`api/v2/assinaturas.py`):
   a lista do Recurring Payments da Pluggy (`core/services/assinaturas.py`) e a marcação
   do usuário por chave do comerciante (`assinatura`/`ignorar`/`nenhuma`; chave fora da
-  lista dá 404). Gate `subscriptions` em `FEATURE_MIN_TIER_V2` (Plus ou Pro).
+  lista dá 404). As chaves ignoradas saem em `ignoradas`, fora do total e só para a tela
+  (Detetive e chat leem `servicos + outras`); nela, `marcada` é a marca guardada, que o
+  "Voltar a mostrar" restaura. Gate `subscriptions` em `FEATURE_MIN_TIER_V2` (Plus ou Pro). O cliente é
+  `webapp/src/dashboard/widgets/Subscriptions.tsx` (o card do Resumo e a página
+  `/assinaturas`); o POST sai pelo `apiPost` de `lib/v2.ts`, com o header de
+  `window.pbCsrfHeaders` (auth-refresh.js), e o 403 `pro_required` vira o convite.
+- `GET /api/v2/lancamentos` (`api/v2/lancamentos.py`, regra em `db/lancamentos.py`): só
+  leitura. Query `mes` (como em `resumo-do-mes`), `origem`, `conta` (o `id` de `/contas`),
+  `cartao`, `categoria` (a chave), `tipo` (`entrada`|`saida`), `q`, `cursor`, `limite`
+  (padrão 50, acima de 100 corta, abaixo de 1 é 422). Resposta `{mes, itens, proximo, motivos}`.
+  **O mês é o de `TOTAIS_SQL`**, pelas mesmas pernas (`db/resumo_mes.MES_LANCAMENTOS_SQL` e
+  `MES_CARTAO_SQL`): a soma dos itens não internos é o Entrou/Saiu do Resumo; o cartão
+  entra pelo mês da fatura com a data da COMPRA; o interno entra com `interno: true`, fora
+  de qualquer soma; tipos que não são despesa/receita (caixinha, aporte) ficam fora, como
+  na soma. Com `q` (até 6 palavras de 2+ letras, `unaccent`; `db/analytics.termos_busca`/
+  `clausula_busca`, as mesmas do `list_history`) a lista varre a janela inteira do plano em
+  vez do mês. Janela do plano cortando = `inicio_do_historico`. Página por KEYSET (cursor
+  opaco: base64 de `[dia, instante, tabela, id]`, adulterado = 422), sem contagem total.
+  Item: `id` (`l<n>` lançamento, `c<n>` compra no cartão: as tabelas compartilham o espaço de
+  ids), `data` (`launch_day`) e `hora` (ou `null`), `tipo`, `interno`, `valor` (texto),
+  `moeda` (a da conta do banco ligada), `descricao`, `mensagem` (a nota do usuário),
+  `categoria` (a chave `cat_norm_sql`, a mesma de `GET /api/v2/categorias`), `origem`,
+  `fundido` + `instituicao`, `conta_id`, `cartao_id`, `parcela {n, total}`, `fatura`
+  (`AAAA-MM`), `pode` e `motivos` (`conciliacao_pendente`, `transacao_pendente` = o banco
+  diz PENDING, `outra_moeda`, `moeda_presumida`). **`origem`**: `carteira` (manual com
+  `delta_conta` ≠ 0 e com a marca `launches.origem`), `banco` (sombra do Open Finance),
+  `cartao` (compra do cartão do Open Finance) e `registro_antigo` (o resto: manual sem a
+  marca, manual com delta 0, OFX, compra manual no cartão). **`pode`** é uma regra só
+  (`db/lancamentos.PODE_SQL`): antigo = `[]` (P2: só leitura no v2); banco e cartão do Open
+  Finance = categoria e descrição (P5); carteira marcada = tudo, menos data e valor se fundida
+  ou em par pendente com o banco (P3), só descrição e apagar se ligada ao dinheiro em espécie
+  (Q41), só categoria e data se paga conta ou fatura, e só categoria se além disso fundida
+  (sem apagar no v2: apagar o pagamento de
+  conta devolve o dinheiro e a conta segue paga; o de fatura do cartão manual cai no mesmo ramo,
+  `bill_id`, e sai junto; o `/app` e o WhatsApp seguem apagando). `launches.origem` (NULL =
+  antigo, sem backfill) vale `'carteira'` (`db.accounts.ORIGEM_CARTEIRA`) e quem grava é o
+  escritor da carteira, por padrão, em todo canal (`/app`, WhatsApp, quick_entry, IA, saldo
+  inicial e ajuste, pagamento de fatura pela carteira, a v2) e o saque/depósito automático da
+  Q41 (`open_finance_cash._credita`); o pagamento de conta pela carteira (`mark_bill_paid`)
+  nasce sem a marca e a ganha no mesmo statement que o liga à conta (antes disso o v2 o
+  apagaria como carteira pura); antecipar parcela e o estorno de fatura do
+  cartão manual gravam `origem=None` (o `efeitos` não guarda o que desfazer), e OFX, sombra do
+  Open Finance, caixinha e aporte não passam pelo escritor. `conta`/`cartao` de
+  outro usuário dão a lista vazia, igual a id inexistente; `raw`, `provider_*_id`,
+  `external_id` e o id da transação do banco nunca saem. **Divergência declarada:** a lista do
+  `/app` (`list_history`) e as consultas 3 e 4 / "últimos N" do WhatsApp seguem com as
+  regras delas (data de gravação no cartão, sem o interno).
+- `POST /api/v2/lancamentos/carteira`, `/lancamentos/editar` e `/lancamentos/apagar`
+  (`api/v2/lancamentos.py`, PR 2a): a escrita, `def` síncronas, id no corpo, CSRF do pai (403
+  `{"detail"}` fora do envelope), resposta `{id}`. **carteira**: `tipo` (`entrada`|`saida`),
+  `valor` (texto `^[0-9]{1,9}(\.[0-9]{1,2})?$` e > 0), `descricao` (1 a 200, vira `alvo` e a
+  nota), `categoria` (opcional; `null` ou ausente = inferida como no `/app`; `""` = 422, onde o
+  `/app` infere), `data` (`AAAA-MM-DD`, entre o
+  corte do plano e hoje; a hora é a de agora). Sempre dinheiro na Carteira (Q40: o v2 não
+  recebe forma de pagamento), teto do plano = 403 `plan_limit`; o miolo é
+  `core/services/carteira.lancar`, o mesmo do `POST /launches` do `/app`. **editar**: `id`
+  (`l<n>` ou `c<n>`) e ao menos um de `categoria`, `descricao`, `data`, `valor` (PR 2b-1: o
+  mesmo texto e > 0 da criação; só a carteira pura tem 'valor' no `pode`, e o saldo da Carteira
+  anda pela diferença na mesma transação, então apagar depois desfaz exato; `c<n>` = 409),
+  cada um contra o `pode` da linha. A data da linha fundida com o banco
+  (`db/lancamentos.FUNDIDO_SQL`) é travada em TODO canal por `update_launch_fields` (o PATCH
+  /launches do `/app` dá 409 com frase própria; o v2 dá 409 `nao_editavel`); **apagar**: só `l<n>` (cartão = 409). O `pode` é relido por
+  `db/lancamentos.pode_da_linha` dentro da transação da escrita, depois do lock do usuário
+  (`_lock_user`) e da linha (`exigir_pode=True` em `update_launch_fields`,
+  `delete_launch_and_rollback` e `update_credit_transaction_fields`, este pelo
+  `PODE_CARTAO_SQL`). Erros: 404 `lancamento_nao_encontrado` (o MESMO corpo para id de outro
+  usuário e inexistente), 409 `nao_editavel` (fora do `pode` e as recusas de domínio do apagar,
+  sem motivo no corpo), 422 `validation_error`. Sem chave de idempotência (dois POST iguais
+  gravam dois).
+- `GET /api/v2/categorias` (`api/v2/categorias.py`): `{categorias: [{chave, nome}]}`, o
+  catálogo do usuário pelo `CAT_META_SQL` (chave = `cat_norm_sql(name)`, nome = a grafia que
+  vence entre gêmeas), semeado como o `/categories` do /app.
+- `GET`/`POST /api/v2/guia` (`api/v2/guia.py`, estado em `db/guia.py`, tabela `guia_painel`,
+  uma linha por usuário): o guia do `/painel` (#728). `PASSOS` em `api/v2/guia.py` é a fonte
+  única do roteiro (`id`, `tela`, `ancora`, `acao`, `dado` `real`|`exemplo`, `fala {titulo,
+  texto}`, `avanca: "cliente"`); o cliente desenha o selo "exemplo" a partir de `dado`.
+  Resposta `{estado, motivo, passos: [{...roteiro, disponivel, motivo, feito}]}`. Passo 1
+  (`resumo.saiu`) disponível quando o Saiu de `resumo_do_mes` (com a janela do plano) é > 0 no
+  mês corrente OU no anterior; senão `motivo` = `sincronizando` (alguma conexão `updating`)
+  > `conexao_com_erro` (`error_recoverable`/`needs_user_action`/`item_missing`) > `sem_dados`.
+  Passos 2 e 3 (exemplo) sempre disponíveis. `estado`, nesta ordem: `concluido` (todos os
+  ids em `feitos`, `?&`) > `dispensado` > `em_andamento` (o guia já foi oferecido ou
+  começado: o cliente não mostra o convite sozinho, só retoma pela Ajuda) > `oferecer` (nada
+  feito, nunca oferecido, passo 1 disponível) > `indisponivel`. Quem fez 2 e 3 sem dados segue `em_andamento` quando os dados chegam, com
+  o passo 1 agora disponível e não feito. O `motivo` do topo é o do passo 1 quando ele está
+  indisponível (só em `em_andamento` e `indisponivel`); senão `null`. O POST recebe `{acao: "visto"|"feito"|"dispensar"|"reabrir", passo?}`
+  e devolve o mesmo `Guia`; `feito` sem `passo` ou `passo` fora do roteiro = 422 no envelope;
+  `feito` de passo com `disponivel: false` = 409 `passo_indisponivel` no envelope, sem gravar
+  (sem dados o cliente mostra a orientação e segue para 2 e 3); nas outras ações `passo` é ignorado. Exige o CSRF do pai. Carimbos só gravam uma vez
+  (`oferecido_em` no `visto` e no `reabrir`, `dispensado_em`, `concluido_em`, e o 1º de cada
+  passo em `feitos`); `reabrir` zera `dispensado_em`. A oferta conta o convite **e** a Ajuda:
+  quem abre pela Ajuda sem nunca ter visto o convite fica `em_andamento` e não o recebe depois,
+  e entra em `oferecidos` na medição abaixo (conclusão/oferecidos mistura as duas portas; quem
+  abre pela Ajuda antes de ter dado põe a espera pela sincronização dentro de
+  `mediana_oferta_ate_1o_valor`, então ela não mede só o guia).
+  `visto` e `reabrir` só carimbam enquanto `feitos` está vazio: **`oferecido_em`, quando existe, é anterior ou igual a todo carimbo de `feitos`**
+  (as medianas abaixo nunca saem negativas). O servidor confia no cliente para o `feito`
+  (não confere a ação; confere só a disponibilidade). Fora do aviso SSE e do merge; o "Recomeçar do
+  zero" apaga a linha (`_RESET_TABLES`); entra na exportação LGPD (`guia_do_painel`) e sai com a conta (cascade). Medição, só leitura:
+
+  ```sql
+  select count(*) filter (where g.oferecido_em is not null) as oferecidos,
+         count(*) filter (where g.concluido_em is not null and g.oferecido_em is not null) as concluidos,
+         percentile_cont(0.5) within group (order by (select min(v::timestamptz)
+             from jsonb_each_text(g.feitos) e(k, v)) - g.oferecido_em) as mediana_ate_1a_acao,
+         percentile_cont(0.5) within group (order by (g.feitos->>'resumo.saiu')::timestamptz
+             - g.oferecido_em) as mediana_oferta_ate_1o_valor,
+         percentile_cont(0.5) within group (order by (g.feitos->>'resumo.saiu')::timestamptz
+             - u.created_at) as mediana_cadastro_ate_1o_valor
+    from guia_painel g join users u on u.id = g.user_id;
+  ```
+
 - **Dinheiro na v2 é `Decimal` e sai como TEXTO decimal** (`"1234.56"`, sem arredondar e sem
   float), em toda rota: no TS é `string`. A escala é a da coluna (`"1000"` e `"1000.00"`
   valem). O contrato vale para toda rota futura.
 - **Contrato:** o envelope entra no OpenAPI como resposta `default` (`ErroV2`, em
   `api/v2/erros.py`; a resposta real continua saindo de `_envelope`). Os tipos TS saem de
   `python scripts/gerar_tipos_api_v2.py` para `webapp/src/dashboard/lib/api-v2.gen.ts`
-  (gerado e commitado; construção fora da lista aceita levanta `ValueError`), e
+  (gerado e commitado; construção fora da lista aceita levanta `ValueError`, e `number`
+  (float) está fora dela: dinheiro é `Decimal`; a query de GET sai em `QueryGet`, só
+  parâmetro `in: query`), e
   `tests/test_api_v2_contrato.py` compara o arquivo com o `openapi()` de hoje e valida as
   fixtures dos testes de navegador (`tests/frontend/api_v2_respostas.json`). Mudou modelo:
   rode o gerador e depois o build do `webapp/`.
 - Chave: `DASHBOARD_V2_BETA_EMAILS` (sem a env = os e-mails de teste do beta de
   Agentes; definida e vazia = ninguém) e `DASHBOARD_V2_BETA_USER_IDS`.
+- **Q36 fora do v2: Open Finance é a fonte única para quem tem a chave**
+  (`core/services/fonte_unica.py`). Vale em todos os canais (`/app`, WhatsApp, IA do chat
+  e do WhatsApp), porque a trava (`exigir`) está nas funções de escrita que todos chamam:
+
+  | | onde trava |
+  |---|---|
+  | **bloqueado**: criar investimento manual e aportar nele | `db.create_investment`, `db.create_investment_db`, `db.investment_deposit_from_account` |
+  | **bloqueado**: importar extrato (OFX no `/app` e no WhatsApp; CSV/PDF no WhatsApp) | `ofx_service.handle_ofx_import`, `statement_service.handle_statement_import` |
+  | **bloqueado**: importar fatura OFX; compra manual no cartão (à vista e parcelada) | `ofx_service.handle_credit_ofx_import`, `db.add_credit_purchase`, `db.add_credit_purchase_installments` |
+  | **liberado**: resgatar e apagar investimento manual, e desfazer o apagar (decisão do dono: restaura o que o usuário já tinha, sem dinheiro novo); caixinha manual; Carteira (lançamento em dinheiro, ajuste e saldo inicial; a Q40 continua em `core/handlers/forma_pagamento.py`); sync e importação do Open Finance | — |
+
+  A exceção é `FonteUnicaOF` (`ValueError`, `codigo = "FONTE_UNICA_OF"`, o texto do caso
+  em `str()`, como a `PlanLimitExceeded`); os textos (investimento, extrato, cartão) moram
+  só em `fonte_unica.MENSAGENS`. `/app` = 400 com `detail` em texto; WhatsApp = o texto
+  (`handle_incoming` traduz o que sobe, os handlers de cartão e de aporte devolvem); IA = o
+  texto, e o `validate` de `create_investment`/`investment_deposit` recusa antes de pedir
+  confirmação. A checagem da chave que falha **libera** (fail-open: é trava de produto num
+  beta, não segurança). O usuário é sempre o da sessão/remetente, nunca o corpo. Escritor
+  novo nessas tabelas ou dos importadores de arquivo reprova em
+  `tests/test_fonte_unica_q36.py` até ser classificado (trava ou motivo de ficar livre).
 - A página é `/painel` (`frontend/painel.html` + o artefato `frontend/dashboard-app.*`,
   de `webapp/src/dashboard`): sessão por `auth_token` ou `dashboard_token`
   (`_resolve_page_user_id`), senão `/login?next=/painel`; UA do app ou fora da chave
@@ -200,7 +358,8 @@ Sub-app FastAPI (`api/v2/app.py`) montado pelo monólito com `app.mount("/api/v2
 - **Erro no cliente** (`webapp/src/dashboard/parts/Entrada.tsx`): nada do painel monta
   antes do `/me`; qualquer erro é uma tela só, com texto fixo em português (a `message`
   do envelope não vai para a tela: em 402/404 ela sai em inglês), Recarregar e "Painel
-  antigo", **sem redirecionamento no cliente** — o Recarregar passa pelo `serve_painel`, que já manda cada
+  antigo" (o 403 `password_required` troca o texto e ganha o "Criar senha", para a
+  `/home`, que não volta sozinha ao `/painel`: o texto manda voltar), **sem redirecionamento no cliente** — o Recarregar passa pelo `serve_painel`, que já manda cada
   caso ao lugar certo. Rede e 5xx tentam 3 vezes (com `networkMode: "always"`, para o evento `offline`
   não pausar o `/me` em "Carregando…"); 4xx (inclusive 429) nunca repete. Limite
   conhecido: conta agendada para exclusão leva 403 da `/api/v2` e o Recarregar serve a
@@ -223,7 +382,8 @@ Caminhos de entrada, todos em `/auth/*`: `register` → `verify-email` (código 
 dígitos) → `login`; **quiz de venda**: o webhook `POST /xquiz/webhook` (fora de
 `/auth`, token `XQUIZ_WEBHOOK_TOKEN`) grava a verificação SEM senha e manda o código,
 e a `/q` chama o mesmo `verify-email` depois de o usuário confirmar o e-mail na tela
-(`quiz/resend` reenvia; `frontend/routes/quiz_signup.py`); `forgot-password`/`reset-password`; **Google OAuth**
+(`quiz/resend` reenvia; `frontend/routes/quiz_signup.py`); a `/q` com `plano` na query vai
+para a `/assinar` (nome, e-mail e WhatsApp no fragmento `n/e/w`); `forgot-password`/`reset-password`; **Google OAuth**
 (`google/start`, `google/callback`, `google/complete-signup`, `google/pending/{token}`,
 e `google/exchange`, que troca por Bearer o código que o callback devolve ao app nativo
 quando o login começa em `google/start?app=2`); **Apple**, só no app nativo iOS
@@ -245,6 +405,10 @@ não espera, para uma rajada não segurar o pool de conexões). Só `criada` esc
 sessão. É o único lugar do site que diz se um e-mail tem conta (aceito pelo dono), com
 10/h por IP (balde `quiz`) e 3/h por e-mail (balde `quiz-conta`, separado do
 `register` para o anônimo não gastar o teto do cadastro da vítima). A prova do e-mail vem depois, no "Crie sua senha".
+A página é `frontend/assinar.html` + `assinar.js`: o script limpa o fragmento antes do
+Pixel e do GA4 (sem Clarity), percorre os estados formulário → já tem conta →
+pagamento, e todo caminho para o Stripe hospedado (app, Stripe.js que falha, 10 s sem
+iframe, link manual) passa por um só `irParaHospedado`; testes em `tests/frontend/assinar_*`.
 
 **Conta sem credencial: 403 `password_required`.** Conta sem senha (`''` conta como sem)
 e sem identidade Google/Apple (`db.conta_sem_credencial`, a fonte única, a mesma que o
@@ -267,8 +431,15 @@ Saem livres as rotas da própria conta (`authorize_account_access`), o `PATCH /s
 logout, refresh e o reset. Quem bloqueia e quem libera, rota a rota, está em
 `tests/test_rotas_senha_obrigatoria.py`, que reprova rota nova sem linha. Na tela, a
 `/home` e o `/app` carregam `frontend/criar-senha.js`: overlay que não fecha, também
-disparado por qualquer 403 `password_required`. A `/settings` não o carrega (é a saída),
-e o convite do MFA fica calado no servidor enquanto não há credencial.
+disparado por qualquer 403 `password_required`. A `/settings` não o carrega (é a saída):
+com `precisa_criar_senha`, ela mostra só a Segurança (o link da senha no topo) e não chama
+os carregadores que dariam 403 (#758). O `/auth/me` é rebuscado no PTR e na volta do foco
+(`visibilitychange`/`pageshow`, que só escutam com a conta travada ou com o boot sem
+`/auth/me`), e a página recarrega nos dois sentidos quando ele discorda da tela: destrava
+quando a senha passou a existir, trava quando a tela estava livre (inclusive por boot com
+`/auth/me` falho) e a conta precisa de senha. Não recarrega com rascunho ou modal aberto
+(`RECARGA_PERDERIA` em `settings.html`); o próximo gesto refaz a decisão. E o convite do
+MFA fica calado no servidor enquanto não há credencial.
 
 **Os três criadores de conta** (o `confirm` do register, o `complete-signup` do
 Google/Apple e a `/assinar`) gravam pelo mesmo `db_support.inserir_conta_nova`:
@@ -296,12 +467,14 @@ dashboard pede dados por ele (pergunta e resposta); empurrar algo sem o cliente 
 só acontece em `open_finance_synced`, do fim do sync do Open Finance e do "Recomeçar do
 zero" — confira com `grep -rn "broadcast_to_user(" --include="*.py" frontend/ core/`. Os
 mesmos 2 avisos também saem pelo `/api/v2/eventos` (`eventos.avisar`).
-**Lançamento feito pelo WhatsApp não avisa o dashboard.** Mudou o formato
+**Lançamento feito pelo WhatsApp não avisa o `/app` pelo `/ws`** (o `/painel` é avisado pelo
+trigger de escrita, ver `/api/v2/eventos` em "API v2"). Mudou o formato
 de mensagem? Os dois lados mudam junto — o consumidor está no `dashboard.js`.
 
 ### Pagamentos
 
-Stripe: `/billing/create-checkout`, `webhook`, `portal`, `subscription`,
+Stripe: `/billing/create-checkout`, `/billing/checkout/bump` (página própria, abaixo),
+`webhook`, `portal`, `subscription`,
 `change-plan`, `cancel-change`, `plans-config` e `select-free` (esta só RECUSA
 com 410: a escolha do plano Grátis saiu da /precos em 2026-09-02; a rota
 sobrevive pra devolver `detail.message` a cliente antigo em cache).
@@ -314,35 +487,200 @@ sobrevive pra devolver `detail.message` a cliente antigo em cache).
 nunca vai no corpo. A sessão grava `origem` e `td` (dias de trial) no metadata e no
 da assinatura; uma sessão aberta só é reaproveitada pelo mesmo plano × intervalo ×
 origem × modo (sessão sem `origem` = `/precos`), e a embutida reaproveitada devolve o
-trial com que nasceu (`td`). Só a `/assinar` fixa BRL (`adaptive_pricing` off), volta
-para `/assinar?plano=&ciclo=` no abandono e oferece o e-book (`optional_items`); a
-`/precos` segue com os kwargs de antes. Toda sessão da `/assinar` (embutida **e**
+trial com que nasceu (`td`). Só a `/assinar` (e a página própria, abaixo) fixa BRL (`adaptive_pricing` off) e volta
+para `/assinar?plano=&ciclo=` no abandono. Os produtos extras (`optional_items`) vão nas
+**duas** origens (dono, Q3); fora eles e as chaves `ebook*` da foto, a `/precos` segue
+com os kwargs de antes. Toda sessão da `/assinar` (embutida **e**
 hospedada), e todo embutido, expira em 1 h (`expires_at`): o default de 24 h do Stripe
 deixaria aberta a janela de cobrança dupla (Pix numa aba, cartão na outra); o
 hospedado da `/precos` segue sem. Envs:
 `STRIPE_PUBLISHABLE_KEY` (sem ela o embutido é 503, antes de tocar no Stripe),
-`STRIPE_PRICE_ID_EBOOK` e `EBOOK_URL` — o e-book só é oferecido com **as duas**
-preenchidas (preço sem URL venderia o que o webhook não tem como entregar). Quando
-oferecido, a sessão grava `ebook_price` e `ebook_url` (o preço e a URL do e-book no
-nascimento) no metadata e no da assinatura; sem e-book as chaves não existem. O webhook
-identifica o e-book por essa foto, nunca pela env do momento. `EBOOK_URL` tem no máximo
-**500 caracteres** (limite de metadata do Stripe, medido): acima disso o e-book não é
-oferecido e sai o warning `ebook_nao_oferecido` (com o tamanho, **nunca a URL** — ela é
-o acesso ao PDF pago). As duas envs só entram em produção **depois do merge do #708**.
+e os produtos extras em **variáveis numeradas** (`core/services/extras_assinar.da_env`,
+lidas a cada sessão): slot 1 = `STRIPE_PRICE_ID_EBOOK` + `EBOOK_URL`, slot n (2..10) =
+`STRIPE_PRICE_ID_EBOOK_n` + `EBOOK_URL_n`. Teto de 10 (limite do `optional_items` do
+Stripe); a ordem no checkout é a do número do slot, e um buraco (slots 1 e 3) mantém a
+ordem. Cada slot vale sozinho: só é oferecido com **as duas** preenchidas (preço sem URL
+venderia o que o webhook não tem como entregar) e a URL com no máximo **500
+caracteres** (limite de metadata do Stripe, medido); senão sai o warning
+`ebook_nao_oferecido` com o slot e o tamanho, **nunca a URL** (ela é o acesso ao PDF
+pago), e os outros slots seguem. Preço repetido entra uma vez (o primeiro) e avisa
+igual. Os oferecidos vão de foto no metadata da sessão e no da assinatura
+(`extras_assinar.para_metadata`), numerados pela **posição** na lista oferecida, não
+pelo slot da env: o 1º sempre em `ebook_price`/`ebook_url` (com um produto, o metadata
+de antes), o 2º em `ebook_2_*`, etc.; sem produto as chaves não existem. Com 10
+produtos e o rastreio são 29 chaves (o Stripe aceita 50). O webhook identifica os
+produtos por essa foto, nunca pela env do momento. A sessão hospedada da `/precos`
+dura 24 h (sem `expires_at`): para **tirar** um produto, apague as variáveis, espere o
+deploy e mais 24 h, e só então arquive o preço no Stripe. Se o Stripe recusar os extras
+(`InvalidRequestError`: preço arquivado, inexistente), o checkout é refeito UMA vez sem
+`optional_items` e sem a foto `ebook*` nos dois metadatas, e loga o erro
+`ebook_oferta_recusada` (mensagem do Stripe e preços, nunca as URLs): a página segue
+vendendo o plano e TODOS os extras somem daquela sessão (não só o recusado). Sem extras, ou recusado também sem
+eles, ou erro que não é `InvalidRequestError`, é o 502 de antes. Uma sessão aberta
+criada pelo fallback (sem extras) ou antes de mudar a lista é reaproveitada por até 1 h
+(`/assinar`) ou 24 h (`/precos`) e segue sem os extras novos, mesmo depois de a env ser
+corrigida: o reaproveitamento não compara os extras.
 
-**Entrega do e-book (#708).** O `checkout.session.completed` com `ebook_price` grava
-uma linha em `ebook_entregas` (`db/ebook_entregas.py`, PK `user_id + session_id`, com a
-foto) logo depois do grant e ANTES dos outros efeitos, sem try: falha → 5xx e a
-reentrega refaz tudo. Sessão sem a foto `ebook_url` grava assim mesmo e loga
-`ebook_sem_url`. Quem entrega é o job `_ebook_worker` (abaixo, "Tarefas de fundo"):
-só envia com `not conta_sem_credencial(uid)` (`db/google_auth.py`: senha não vazia ou
-identidade Google/Apple — a prova do e-mail; sem linha em `auth_accounts` a função dá
-False, e o job não envia porque não acha e-mail), confirma a compra pelo
-`checkout.Session.list_line_items` (senão fecha `nao_comprou`), manda
-`send_ebook_email` para o e-mail ATUAL da conta e fecha `enviado` na linha. O claim
+**Página própria (`ui_mode="elements"`), atrás da flag `CHECKOUT_PAGINA_PROPRIA=1`.**
+O corpo ganha `pagina` (default `false`); vale só com a flag
+(`extras_assinar.pagina_propria_ligada`, lida a cada pedido). Com a flag desligada, ou
+sem `pagina`, o checkout é o de antes nas duas origens (a `/precos` com `pagina` segue
+no hospedado, nunca no embutido). Ligada, `pagina` vira sessão `elements` (é um
+embutido: `client_secret`, `return_url`, 1 h, `publishable_key`) **sem**
+`optional_items`: os extras entram como linha do carrinho pelo `POST /billing/checkout/bump`
+(abaixo). Até 3 extras (`extras_assinar.CAIXAS`): `da_env()` filtrado por
+`Price.retrieve(expand=["product"])` (preço ativo, BRL, avulso, produto ativo) ANTES
+de recortar; o que sai, ou uma falha do Stripe ao ler (aí nenhum entra), loga
+`ebook_oferta_recusada` só com os preços, e o plano vende assim mesmo. A foto dos 3 vai
+nos dois metadatas, como no embutido. Recusa do Stripe na criação é o 502 de antes
+(não há `optional_items` a tirar). A resposta é a do embutido + `pagina: true` +
+`extras: [{posicao, nome, descricao, imagem, valor_centavos, no_carrinho}]` (texto e
+`images[0]` do Product; capa só `https://`, senão `null`). A sessão `elements` só
+reaproveita pedido com `pagina` e flag ligada, e vice-versa (o matcher compara o
+`ui_mode`, que o `Session.list` devolve como `elements` ou `embedded_page`, medido em
+2026-10-03); a reaproveitada devolve as caixas da SUA foto e marca `no_carrinho` pelo
+`list_line_items` (falha = 503). A reaproveitada NÃO refiltra a foto (um preço
+arquivado depois do nascimento segue na caixa), e uma falha do Stripe ao ler qualquer
+extra na criação tira TODAS as caixas (o plano vende sem elas). A página própria fixa
+BRL (`adaptive_pricing` off) nas **duas** origens: medido no Stripe de teste em
+2026-10-03, sem o campo a sessão `elements` da `/precos` nasce com ele LIGADO (o
+default da conta), e as caixas mostram R$. O hospedado da `/precos` segue sem o campo.
+
+No frontend, a `/assinar` manda `pagina: true` (e `origem` da query: só `precos`, senão
+`assinar`) e, se a resposta trouxer `pagina`, monta `frontend/pagamento-pagina.js`
+(Payment Element só cartão, resumo pelo `change` do Stripe, as caixas e o cupom
+"Tem cupom?" → `applyPromotionCode`); sem `pagina`, o embutido de antes. O Stripe.js é o
+`endive` na página própria e o `dahlia` no embutido, carregado UMA vez pelo `assinar.js`
+(uma 2ª versão é recusada e cai no plano B; o embutido não depende do arquivo novo).
+Cada caixa marcada chama o `/billing/checkout/bump` dentro do `runServerUpdate`, com
+tudo travado; falha → as caixas voltam ao último conjunto aceito. **Pagar sincroniza o
+estado da tela ANTES do `confirm`** (o que a tela mostra é o que se cobra); falha → não
+confirma. Prazos: `loadActions` 10 s e `/bump` 15 s (plano B / caixas voltam); o relógio
+de 10 s olha `#pagamento iframe`. Sessão fechada (409 `sessao_fechada`, ou
+`session.status.type === "expired"` no `change`, no `loadActions` ou depois de um confirm com erro)
+→ S3 com "Tentar de novo". O dinheiro da sessão é formatado com `currency` e
+`minorUnitsAmountDivisor` lidos dela, junto com o `total.total.minorUnitsAmount`: o SDK exige
+essa leitura, senão o `confirm` lança (docs.stripe.com/js/custom_checkout). Limites aceitos: rede lenta que passa dos 10 s do
+`loadActions` vai ao plano B; um `/bump` que volta depois do prazo é corrigido pela
+sincronização do Pagar; o Pagar faz 1 `/bump` de sincronização quando há caixas (conta nos 120/h por IP). Testes:
+`tests/frontend/pagamento_pagina*.test.mjs`.
+
+A `/precos` (`startCheckout`) manda `pagina: true` só fora do app (`window.PB_IN_APP`: no
+app a `/assinar` vai ao hospedado, e uma sessão `elements` criada antes seria expirada e
+refeita) e, com a resposta `pagina`, navega para
+`/assinar?plano=…&ciclo=…&origem=precos`, que reaproveita a sessão; o
+InitiateCheckout/begin_checkout fica para a `/assinar` (perda conhecida: o begin_checkout
+de lá vai sem `value`). Sem `pagina` na resposta, o hospedado de antes, com o rastreio de
+antes. Limite aceito: cada compra pela `/precos` gasta 2 chamadas do limite de 20/h do
+create-checkout (a da `/precos` e a da `/assinar`). Testes:
+`tests/frontend/precos_pagina_propria.test.mjs`.
+
+**`POST /billing/checkout/bump`** (`frontend/routes/billing_bump.py`): o order bump da
+página própria. Corpo `{sid, posicoes}` = o CONJUNTO desejado inteiro, em posições da
+foto (`[]` = nenhum); o preço sai sempre da foto da sessão, nunca do cliente. Campo a
+mais (ex.: `price`) é 422; `sid` fora de `cs_(test|live)_…`, posição repetida, fora de
+1..10 ou além da foto é 400. Sessão de outra conta (`finbot_user_id` exato **e**
+`customer` da conta), de outro `ui_mode` (só `elements`) ou de outra origem (só
+`assinar`/`precos`) é 404 indistinguível de "não existe", sem `modify`; o dono é
+checado ANTES do estado. Sessão paga, expirada ou `open` com `expires_at` vencido é 409
+`sessao_fechada`. O carrinho (`list_line_items`) vira `extras_assinar.linhas_do_bump`:
+o plano e o extra que fica vão pelo `id`, o que entra por `price`, o que sai é omitido;
+nada mudou = sem chamada ao Stripe. O `Session.modify` leva só `line_items` (a foto do
+metadata não muda). Recusa do Stripe no `modify` (`InvalidRequestError`) é 409
+`extra_recusado` + log `ebook_oferta_recusada` só com os preços; qualquer outro
+`StripeError` (retrieve, list, modify) é 502. Roda sob `_billing_user_lock` (o mesmo
+do checkout), limite de 120/h por IP, CSRF do middleware global, e **não olha a
+flag**: com ela desligada não nasce sessão `elements`, e a página já aberta segue pagável.
+
+**Entrega do e-book (#708) — N produtos por compra.** A metadata da sessão é a foto
+dos produtos oferecidos: o 1º em `ebook_price`/`ebook_url`, o n-ésimo (2..10) em
+`ebook_n_price`/`ebook_n_url` (posição na oferta, não o slot da env), lidos por `core/services/extras_assinar.da_metadata`.
+O `checkout.session.completed` com pelo menos um slot grava uma linha POR produto em
+`ebook_entregas` (`db/ebook_entregas.py`, PK `user_id + session_id + ebook_price`, num
+insert só: todos ou nenhum) logo depois do grant e ANTES dos outros efeitos, sem try:
+falha → 5xx e a reentrega refaz tudo. Produto sem a foto da URL grava assim mesmo e
+loga `ebook_sem_url` (um por produto). Quem entrega é o job `_ebook_worker` (abaixo,
+"Tarefas de fundo"), uma linha por vez: só envia com `not conta_sem_credencial(uid)`
+(`db/google_auth.py`: senha não vazia ou identidade Google/Apple — a prova do e-mail;
+sem linha em `auth_accounts` a função dá False, e o job não envia porque não acha
+e-mail), confirma a compra daquele produto pelo `checkout.Session.list_line_items`
+com `limit=100` (o padrão do Stripe é 10; plano + 10 extras = 11 linhas) — senão fecha
+`nao_comprou` —, manda `send_ebook_email` com o nome do produto (`description` da linha
+da sessão) para o e-mail ATUAL da conta e fecha `enviado` naquela linha. O claim
 (`reivindicada_ate`, 10 min dobrando a cada tentativa até 1 dia, contadas em
-`tentativas`; a linha nunca fecha sozinha) não segura transação durante o Stripe/Resend; entrega é
-"pelo menos uma vez". A tabela fica fora do export LGPD e sai com a conta (cascade).
+`tentativas`; a linha nunca fecha sozinha) é por produto — a falha de um não segura os
+outros — e não segura transação durante o Stripe/Resend; entrega é "pelo menos uma
+vez". A tabela fica fora do export LGPD e sai com a conta (cascade).
+
+**Estorno segura a entrega (PR 3 dos extras).** Antes de enviar, o job confere a
+cobrança da compra (`_compra_estornada` em `core/services/ebook_entrega.py`):
+`checkout.Session.retrieve(sid).invoice` → `InvoicePayment.list(invoice=…)` → em cada
+pagamento `status == "paid"`, `payment.payment_intent` →
+`PaymentIntent.retrieve(pi, expand=["latest_charge"])`. Qualquer estorno
+(`amount_refunded > 0`, parcial ou total — decisão D2 do dono) ou contestação
+(`disputed` — D3) fecha a linha `estornado` e loga `ebook_entrega_estornada`
+(warning, `session_id` + `ebook_price`, nunca a URL), sem enviar. A regra é por compra:
+todos os produtos ainda não entregues daquela sessão fecham `estornado`, cada um na sua
+passada. Sessão sem fatura ou fatura sem pagamento (cupom 100%) entrega normal.
+Pagamentos `open`/`canceled` são ignorados sem consulta; o estornado continua `paid`
+(medido no Stripe de teste: depois de estorno TOTAL o `InvoicePayment.status` e a fatura
+seguem `paid`, e a `latest_charge` expandida vem com `refunded` True). Falha do Stripe
+na consulta propaga, e forma inesperada num pagamento `paid` também levanta (falha
+FECHADO): `payment.type` diferente de `payment_intent`, `payment_intent` vazio, ou
+`latest_charge` não expandida (string, nulo, sem os campos). Nos dois casos não envia
+nem fecha, o claim expira com backoff e a próxima passada confere de novo. Depois de
+enviado não há o que desfazer: a linha `enviado` fica como está, e o link já saiu.
+`estornado` é final: não há botão para liberar a entrega, e liberar exige ajuste manual
+no banco; contestação GANHA continua com `disputed` True, então também segura para
+sempre. Limite conhecido: estorno por nota de crédito para o saldo do cliente (sem refund na
+charge) NÃO é detectado. Estorno "pending" real e contestação real chegando antes da
+entrega só se provam no Stripe; o modo teste sobe `amount_refunded` na hora.
+
+**Cadernos extras no Pix anual (PR A: receber e entregar; inerte até o checkout
+gravar a foto).** `pix_charges.extras` (`jsonb`, default `[]`, check de array) guarda a
+FOTO dos cadernos escolhidos, `[{price, url, nome, valor_cents}]`, gravada só por
+`criar_cobranca`. `amount_cents` continua sendo SÓ o plano (crédito de upgrade,
+`pix_charges_amount_fecha` e `plan_grants` não mudam); o que o cliente paga é
+`core/services/pix_extras.total_cents` (plano + Σ cadernos), usado no `alertar_valor`,
+no alerta do estorno parcial, no GA4/CAPI e no `total_cents` do poll. O dreno ganhou o
+efeito `ebook` logo depois do `grant`: uma linha em `ebook_entregas` por caderno, com
+`session_id` = `external_reference` (`pix:<id>`) e `ebook_price` = o Price do Stripe;
+sem cadernos é no-op registrado, e ele herda D3 (estorno antes do `RECEIVED` não grava)
+e o órfão (nada). O e-mail de confirmação discrimina plano, cada caderno e o total
+(dono, Q4); sem cadernos é o de antes. O job entrega a linha `pix:` ANTES de qualquer
+chamada ao Stripe (`pix_extras.conferir_entrega`): cobrança do dono por `user_id` +
+referência (senão `nao_comprou`); status local `refunded`/`refunded_partial`/`chargeback`
+fecha `estornado` sem consultar o Asaas; senão `GET /v3/payments/{id}`: `RECEIVED`/
+`CONFIRMED` sem `refunds` entrega (nome do caderno vem da foto), status de estorno ou
+contestação, ou `refunds` não vazia, fecha `estornado`; falha ou forma inesperada não
+envia nem fecha (claim expira). Sem `STRIPE_SECRET_KEY` o job não roda, inclusive para
+as linhas Pix. Na junção de contas, caderno ainda não entregue cai com a origem
+(cascade), como no Stripe — no Pix a origem com plano vigente já fica presa. Nomes reais
+dos status de estorno/contestação e a forma de `refunds` só se provam no sandbox do
+Asaas.
+
+**PR B: emitir com os cadernos (backend; invisível até o modal mandar `extras`).** O
+`POST /billing/pix/checkout` aceita `extras: list[str]` (ids de Price, até 3, sem
+repetir, senão 400). O cliente nunca manda preço: `pix_extras.escolher` relê a oferta
+ATUAL (`extras_assinar.ofertas_da_pagina`, a mesma do cartão) depois das recusas que já
+existiam e antes de qualquer escrita; id fora dela dá 409 `extras_indisponiveis` com a
+oferta atual, sem gravar e sem chamar o Asaas. Sem `extras` o Stripe nem é consultado
+(o plano vende com ele fora). O Asaas cobra `total_cents` e a descrição ganha " + N
+caderno(s)". A cobrança pendente só é reaproveitada com o MESMO conjunto de ids (a ordem
+não importa); outro conjunto cancela a remota e cria nova (DELETE que falha dá 503). O
+`GET /billing/pix-extras` (logado) devolve as caixas (texto e preço do cartão + id, sem
+a URL) e a seleção da cobrança `pending` com QR vivo (Q6). A oferta é vazia, e o POST com
+cadernos dá 409, quando a venda Pix ou a `CHECKOUT_PAGINA_PROPRIA` estão desligadas
+(Q2), ou sem `STRIPE_SECRET_KEY`.
+
+Rollback do código de N produtos: o código velho usa `on conflict (user_id,
+session_id)`, que exige a PK de 2 colunas. Antes de reverter, apagar as linhas extras
+de cada compra e recriar a PK:
+`delete from ebook_entregas e using ebook_entregas o where e.user_id = o.user_id and
+e.session_id = o.session_id and e.ebook_price > o.ebook_price;` e
+`alter table ebook_entregas drop constraint ebook_entregas_pkey, add primary key
+(user_id, session_id);` (confira o nome da PK em `pg_constraint` antes). O `delete`
+fica com UM produto por compra: as pendências dos outros se perdem.
 
 **E-mail trocado chega ao Stripe (PR 4b).** A `PATCH /settings/{uid}/security/contact`
 que troca o e-mail de conta com `stripe_customer_id` grava, na MESMA transação, uma linha
@@ -353,18 +691,26 @@ não mudou durante o envio. A troca no app nunca é desfeita: falha transitória
 claim (mesma régua do e-book); `InvalidRequestError` (cliente apagado, e-mail recusado)
 fecha e loga `stripe_email_sync_recusado`, sem o e-mail. Fora do export LGPD; cascade.
 
-**Fatura com e-book:** no `invoice.paid`/`payment_succeeded`, `amount_cents` é só o
-plano: `amount_paid` menos o líquido das linhas cujo `pricing.price_details.price` é
-o `ebook_price` da metadata da assinatura (`amount` da linha é BRUTO; o cupom vem em
-`discount_amounts`). É esse valor que vai para o e-mail de cobrança, a comissão de
-afiliado e o rastreio da fatura — a 1ª fatura de trial + e-book dá 0 e pula os três
-(a comissão, que só paga a 1ª fatura paga, fica para a do plano).
+**Fatura com produtos extras:** no `invoice.paid`/`payment_succeeded`, `amount_cents`
+é só o plano: `amount_paid` menos o líquido (`_extras_liquido_cents`) de TODAS as
+linhas cujo `pricing.price_details.price` está entre os preços da foto da metadata da
+assinatura (`da_metadata`, slots 1..10 — nunca a env do momento; `amount` da linha é
+BRUTO; o cupom vem em `discount_amounts`). A fatura embute no máximo 10 linhas
+(plano + 10 extras = 11): com extras na foto, `extras_assinar.linhas_da_fatura` usa
+as embutidas ou, com `lines.has_more`, `stripe.Invoice.list_lines(id, limit=100)`, sem try (falha → 5xx, o Stripe reentrega).
+Crédito de saldo do cliente (`amount_paid` menor que a soma das linhas) fica com o
+plano: o extra é subtraído cheio. Vale igual para as duas origens (`assinar` e
+`precos`): a origem não entra na conta. É esse valor que vai para o e-mail de
+cobrança, a comissão de afiliado e o rastreio da fatura — a 1ª fatura de trial +
+extras dá 0 e pula os três (a comissão, que só paga a 1ª fatura paga, fica para a do
+plano).
 
-**Rastreio do checkout:** o Meta `Purchase` sem trial leva o `amount_total` da sessão
-(com cupom e e-book — o mesmo número do GA4; sem o campo, cai no `unit_amount`). Com
-trial e `amount_total > 0` (o e-book), saem um Meta `Purchase` e um GA4 `purchase`
-server-only com id `ebook_<sid>` (`meta_capi.ebook_event_id`) e item `ebook`; o
-`StartTrial` não muda.
+**Rastreio do checkout:** um evento por compra, com a soma; não olha a origem nem
+quantos extras. O Meta `Purchase` sem trial leva o `amount_total` da sessão (plano +
+todos os extras, com cupom — o mesmo número do GA4; sem o campo, cai no
+`unit_amount`). Com trial e `amount_total > 0` (a soma dos extras), saem UM Meta
+`Purchase` e UM GA4 `purchase` server-only com id `ebook_<sid>`
+(`meta_capi.ebook_event_id`) e item `ebook`; o `StartTrial` não muda.
 
 A **escada de planos é `free < essencial < plus < pro`**, atrás do flag
 `PLANS_V2_ENABLED` (lido dinamicamente, sem redeploy; `0`/`false` é freio de
@@ -428,7 +774,10 @@ Via **Pluggy**. Endpoints em `frontend/routes/open_finance.py`
 um banco NOVO, pela mesma decisão do `_enforce_bank_limit`; o teto nunca vira 402 aqui, mas o
 gate comum de dados sim (402 `subscription_required`/`plan_selection_required` sem plano ativo);
 não barra reconexão e o 402 do `/pluggy-item` continua valendo)) mais o webhook
-`/open-finance/pluggy/webhook`. Serviços em `core/services/pluggy*.py` e
+`/open-finance/pluggy/webhook`. O `connect-token` aceita `app_scheme` opcional no corpo
+(`pigbank`, `pigbank-staging` ou `pigbank-dev`; fora da lista, 400), que vira o
+`oauthRedirectUri` `<scheme>://open-finance-volta` da Pluggy; o site não manda o campo.
+Serviços em `core/services/pluggy*.py` e
 `open_finance*.py`; tabelas `open_finance_connections/accounts/transactions/investments`,
 `open_finance_investment_snapshots` (foto diária por posição, `db/of_snapshots.py`) e
 `open_finance_item_registry` — o rastro de todo item que passou por aqui, inclusive o
@@ -440,7 +789,8 @@ transação do delete pelo disconnect e pelo reset.
 Assinaturas vêm do **Recurring Payments** da Pluggy (`db/of_recurring.py`):
 `of_recurring_payments` guarda o resultado por conexão, substituído inteiro a cada
 sync — falha na Pluggy mantém o anterior; `subscription_marks` guarda a marcação do
-usuário por `merchant_key` (vale para todos os itens da chave).
+usuário por `merchant_key` (vale para todos os itens da chave), e `assinatura_antes` a
+marca `assinatura` que o `ignorar` substituiu (linhas ignoradas antes da coluna nascem `false`).
 `open_finance_connections.recurring_fetched_at` e `recurring_seed_silent` controlam o
 silêncio da 1ª busca do Detetive numa conexão que já existia: as chaves dela — a foto
 guardada em `recurring_seed_descricoes`, não a atual — viram lápide por `record_agent_event(silencioso=True)`, que grava o evento já com

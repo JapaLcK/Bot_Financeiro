@@ -171,7 +171,7 @@ def _wa_lembrete(user_id: int) -> bool:
                 if send_template(to, nome, language_code=idioma) is not None:
                     aceitos += 1
             except Exception as exc:
-                # Sem o número no log: o `wa_client` já grava `to` nos
+                # Sem o número no log: o `wa_client` já grava `to` mascarado nos
                 # `details` de `system_event_logs` em todos os caminhos de
                 # falha, e repetir aqui só espalharia PII (§0.1 — se um dia
                 # precisar, `utils_phone.mask_phone` já existe).

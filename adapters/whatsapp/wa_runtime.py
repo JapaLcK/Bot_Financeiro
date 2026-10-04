@@ -147,7 +147,7 @@ def safe_text(obj: Any) -> str:
 def _send_reply(to_wa_id: str, body: str) -> None:
     body = (body or "").strip()
     if body:
-        logger.info("WA sending reply to=%s chars=%s", to_wa_id, len(body))
+        logger.info("WA sending reply to=%s chars=%s", mask_phone(to_wa_id), len(body))
         try:
             result = send_text(to=to_wa_id, body=body)
             try:
@@ -155,14 +155,14 @@ def _send_reply(to_wa_id: str, body: str) -> None:
                 contacts = [c.get("wa_id") for c in (result or {}).get("contacts", []) if c.get("wa_id")]
                 logger.info(
                     "WA send_text accepted: to=%s canonical_contacts=%s message_ids=%s",
-                    to_wa_id,
-                    contacts,
+                    mask_phone(to_wa_id),
+                    [mask_phone(c) for c in contacts],
                     message_ids,
                 )
             except Exception:
                 logger.info("WA send_text accepted but unable to summarize response")
         except Exception as e:
-            logger.exception("WA send_text exception to=%s error=%s", to_wa_id, e)
+            logger.exception("WA send_text exception to=%s error=%s", mask_phone(to_wa_id), e)
             raise
 
 
@@ -321,7 +321,7 @@ def _send_reply_with_optional_buttons(to_wa_id: str, body: str, user_id: int | N
                 consume_pending_action(int(user_id), pending)
             except Exception as exc:
                 logger.warning("WA clear undo_audio pending failed: %s", exc)
-        logger.info("WA sending undo button to=%s", to_wa_id)
+        logger.info("WA sending undo button to=%s", mask_phone(to_wa_id))
         try:
             send_interactive_buttons(
                 to=to_wa_id,
@@ -344,7 +344,7 @@ def _send_reply_with_optional_buttons(to_wa_id: str, body: str, user_id: int | N
                 logger.warning("WA clear recategorize_offer pending failed: %s", exc)
         if launch_id:
             lid = int(launch_id)
-            logger.info("WA sending launch action buttons to=%s launch_id=%s", to_wa_id, lid)
+            logger.info("WA sending launch action buttons to=%s launch_id=%s", mask_phone(to_wa_id), lid)
             try:
                 send_interactive_buttons(
                     to=to_wa_id,
@@ -375,7 +375,7 @@ def _send_reply_with_optional_buttons(to_wa_id: str, body: str, user_id: int | N
                 logger.warning("WA clear delete_credit_purchase pending failed: %s", exc)
         if tx_id:
             cid = int(tx_id)
-            logger.info("WA sending credit delete button to=%s tx_id=%s", to_wa_id, cid)
+            logger.info("WA sending credit delete button to=%s tx_id=%s", mask_phone(to_wa_id), cid)
             try:
                 send_interactive_buttons(
                     to=to_wa_id,
@@ -388,7 +388,7 @@ def _send_reply_with_optional_buttons(to_wa_id: str, body: str, user_id: int | N
                 logger.warning("WA send credit delete button failed, fallback texto: %s", exc)
 
     elif _pending_supports_confirmation_buttons(pending):
-        logger.info("WA sending interactive confirmation buttons to=%s", to_wa_id)
+        logger.info("WA sending interactive confirmation buttons to=%s", mask_phone(to_wa_id))
         try:
             send_interactive_buttons(
                 to=to_wa_id,
@@ -536,7 +536,7 @@ def _signup_url() -> str:
     return f"{base}/cadastro"
 
 
-def _send_no_account_notice(reply_to: str, auto_link_result: dict[str, Any], user_id: int | None = None) -> None:
+def _send_no_account_notice(reply_to: str, auto_link_result: dict[str, Any], user_id: int) -> None:
     """Número de WhatsApp sem NENHUMA conta vinculada por telefone. Sem esse
     aviso, um comando ("gastei 50") cairia numa conta fantasma invisível (paywall
     off / plans-v2 on) ou na mensagem de assinatura que assume conta existente
@@ -554,14 +554,14 @@ def _send_no_account_notice(reply_to: str, auto_link_result: dict[str, Any], use
             "Já tem conta? Gere um código de vínculo no site e me manda: *link 123456*"
         ),
     )
-    if not _autolink_warning_already_sent(reply_to, "no_match_notice"):
+    if not _autolink_warning_already_sent(user_id, "no_match_notice"):
         log_system_event_sync(
             "info",
             "whatsapp_autolink_greeting_warning_sent",
             "Convite de cadastro enviado a número de WhatsApp sem conta.",
             source="wa_runtime",
             user_id=user_id,
-            details={"wa_id": reply_to, "status": "no_match_notice"},
+            details={"wa_id": mask_phone(reply_to), "status": "no_match_notice"},
         )
 
 
@@ -589,7 +589,7 @@ def _build_autolink_warning_message(status: str, auto_link_result: dict[str, Any
     return None
 
 
-def _autolink_warning_already_sent(wa_id: str, status: str) -> bool:
+def _autolink_warning_already_sent(user_id: int, status: str) -> bool:
     try:
         with get_conn() as conn:
             with conn.cursor() as cur:
@@ -598,15 +598,15 @@ def _autolink_warning_already_sent(wa_id: str, status: str) -> bool:
                     SELECT 1
                     FROM system_event_logs
                     WHERE event_type = 'whatsapp_autolink_greeting_warning_sent'
-                      AND details->>'wa_id' = %s
+                      AND user_id = %s
                       AND details->>'status' = %s
                     LIMIT 1
                     """,
-                    (wa_id, status),
+                    (user_id, status),
                 )
                 return cur.fetchone() is not None
     except Exception as exc:
-        logger.warning("WA autolink warning lookup failed wa_id=%s status=%s error=%s", wa_id, status, exc)
+        logger.warning("WA autolink warning lookup failed uid=%s status=%s error=%s", user_id, status, exc)
         return False
 
 
@@ -615,7 +615,7 @@ def _maybe_send_autolink_greeting_warning(
     message_text: str,
     status: str,
     auto_link_result: dict[str, Any],
-    user_id: int | None = None,
+    user_id: int,
 ) -> bool:
     if not _is_greeting(message_text):
         return False
@@ -624,7 +624,7 @@ def _maybe_send_autolink_greeting_warning(
     if not body:
         return False
 
-    if _autolink_warning_already_sent(reply_to, status):
+    if _autolink_warning_already_sent(user_id, status):
         return False
 
     _send_reply(reply_to, body)
@@ -634,7 +634,7 @@ def _maybe_send_autolink_greeting_warning(
         "Aviso de vinculação automática enviado no primeiro greeting do WhatsApp.",
         source="wa_runtime",
         user_id=user_id,
-        details={"wa_id": reply_to, "status": status},
+        details={"wa_id": mask_phone(reply_to), "status": status},
     )
     return True
 
@@ -664,13 +664,13 @@ def _tratar_opt_out(uid: int, reply_to: str, interactive_id: str | None,
         return False
     uids = (uid,) if tambem is None else (uid, tambem)
     if interactive_id == WA_DAILY_REPORT_DISABLE_ID:
-        logger.info("WA daily_report_disable button clicked wa_id=%s uid=%s", reply_to, uid)
+        logger.info("WA daily_report_disable button clicked wa_id=%s uid=%s", mask_phone(reply_to), uid)
         try:
             for u in uids:
                 texto = h_report.disable(u)
             _send_reply(reply_to, texto)
         except Exception as e:
-            logger.exception("WA daily_report_disable button error wa_id=%s: %s", reply_to, e)
+            logger.exception("WA daily_report_disable button error wa_id=%s: %s", mask_phone(reply_to), e)
             log_system_event_sync(
                 "warning",
                 "whatsapp_daily_report_disable_button_error",
@@ -680,13 +680,13 @@ def _tratar_opt_out(uid: int, reply_to: str, interactive_id: str | None,
             )
         return True
     elif interactive_id == WA_WEEKLY_REPORT_DISABLE_ID:
-        logger.info("WA weekly_report_disable button clicked wa_id=%s uid=%s", reply_to, uid)
+        logger.info("WA weekly_report_disable button clicked wa_id=%s uid=%s", mask_phone(reply_to), uid)
         try:
             for u in uids:
                 texto = h_report.disable_weekly(u)
             _send_reply(reply_to, texto)
         except Exception as e:
-            logger.exception("WA weekly_report_disable button error wa_id=%s: %s", reply_to, e)
+            logger.exception("WA weekly_report_disable button error wa_id=%s: %s", mask_phone(reply_to), e)
             log_system_event_sync(
                 "warning",
                 "whatsapp_weekly_report_disable_button_error",
@@ -696,13 +696,13 @@ def _tratar_opt_out(uid: int, reply_to: str, interactive_id: str | None,
             )
         return True
     elif interactive_id == WA_MONTHLY_REPORT_DISABLE_ID:
-        logger.info("WA monthly_report_disable button clicked wa_id=%s uid=%s", reply_to, uid)
+        logger.info("WA monthly_report_disable button clicked wa_id=%s uid=%s", mask_phone(reply_to), uid)
         try:
             for u in uids:
                 texto = h_report.disable_monthly(u)
             _send_reply(reply_to, texto)
         except Exception as e:
-            logger.exception("WA monthly_report_disable button error wa_id=%s: %s", reply_to, e)
+            logger.exception("WA monthly_report_disable button error wa_id=%s: %s", mask_phone(reply_to), e)
             log_system_event_sync(
                 "warning",
                 "whatsapp_monthly_report_disable_button_error",
@@ -712,7 +712,7 @@ def _tratar_opt_out(uid: int, reply_to: str, interactive_id: str | None,
             )
         return True
     elif interactive_id.strip().lower() in WA_UPDATES_DISABLE_IDS:
-        logger.info("WA updates disable button clicked wa_id=%s uid=%s", reply_to, uid)
+        logger.info("WA updates disable button clicked wa_id=%s uid=%s", mask_phone(reply_to), uid)
         try:
             for u in uids:
                 set_whatsapp_updates_opt_out(u, True)
@@ -721,7 +721,7 @@ def _tratar_opt_out(uid: int, reply_to: str, interactive_id: str | None,
                 "Pronto, parei as atualizações do Piggy por aqui. Você pode religar quando quiser em Configurações > Notificações.",
             )
         except Exception as e:
-            logger.exception("WA updates disable button error wa_id=%s: %s", reply_to, e)
+            logger.exception("WA updates disable button error wa_id=%s: %s", mask_phone(reply_to), e)
             log_system_event_sync(
                 "warning",
                 "whatsapp_updates_disable_button_error",
@@ -745,14 +745,14 @@ def process_message(message: InboundMessage) -> None:
     try:
         reply_to = message.wa_id
         logger.info(
-            "WA process_message from=%s reply_to=%s text=%r attachments=%s",
-            message.wa_id,
-            reply_to,
-            (message.text or "")[:120],
+            "WA process_message from=%s reply_to=%s chars=%s attachments=%s",
+            mask_phone(message.wa_id),
+            mask_phone(reply_to),
+            len(message.text or ""),
             len(message.attachments or []),
         )
         uid = get_or_create_canonical_user("whatsapp", message.wa_id)
-        logger.info("WA canonical user resolved uid=%s from=%s", uid, message.wa_id)
+        logger.info("WA canonical user resolved uid=%s from=%s", uid, mask_phone(message.wa_id))
         # Número JÁ ligado à conta sem senha (vínculo anterior ao PR 4 ou por
         # `vincular CODIGO`): não lê nem grava nada. O auto-vínculo abaixo barra
         # o outro caminho, o de ligar o número agora (`precisa_senha`).
@@ -774,14 +774,14 @@ def process_message(message: InboundMessage) -> None:
                     "WA canonical user updated after auto-link old_uid=%s new_uid=%s from=%s",
                     uid,
                     resolved_uid,
-                    message.wa_id,
+                    mask_phone(message.wa_id),
                 )
                 uid = resolved_uid
                 pid, ancora = _pergunta_da_ia(uid)
             if auto_link_result["status"] == "linked":
                 logger.info(
                     "WA phone auto-link success wa_id=%s final_user_id=%s",
-                    message.wa_id,
+                    mask_phone(message.wa_id),
                     auto_link_result["user_id"],
                 )
                 log_system_event_sync(
@@ -790,7 +790,7 @@ def process_message(message: InboundMessage) -> None:
                     "Conta vinculada automaticamente ao WhatsApp.",
                     source="wa_runtime",
                     user_id=uid,
-                    details={"wa_id": message.wa_id},
+                    details={"wa_id": mask_phone(message.wa_id)},
                 )
                 # Onboarding: tutorial só pra cliente NOVO. status == "linked"
                 # significa que ele acabou de vincular NESTA primeira mensagem
@@ -889,7 +889,7 @@ def process_message(message: InboundMessage) -> None:
                 # grep dá 5. Hoje os dois menus passam por `_ajuda_do_cortado`.
                 if _bloqueado_pelo_corte(uid, reply_to):
                     return
-                logger.info("WA tutorial button id=%s wa_id=%s", tut_bid, reply_to)
+                logger.info("WA tutorial button id=%s wa_id=%s", tut_bid, mask_phone(reply_to))
                 try:
                     handle_tutorial_button(reply_to, tut_bid)
                 except Exception as e:
@@ -910,7 +910,7 @@ def process_message(message: InboundMessage) -> None:
                 # manda tentar comando, e a lista cresce sem ninguém revisar.
                 if _ajuda_do_cortado(uid, reply_to):
                     return
-                logger.info("WA help menu id=%s wa_id=%s", help_id, reply_to)
+                logger.info("WA help menu id=%s wa_id=%s", help_id, mask_phone(reply_to))
                 try:
                     send_help_section(reply_to, help_id)
                 except Exception as e:
@@ -935,7 +935,7 @@ def process_message(message: InboundMessage) -> None:
                 # foi o que manteve esta porta aberta.
                 if _ajuda_do_cortado(uid, reply_to):
                     return
-                logger.info("WA commands menu id=%s wa_id=%s", cmds_id, reply_to)
+                logger.info("WA commands menu id=%s wa_id=%s", cmds_id, mask_phone(reply_to))
                 try:
                     send_commands_section(reply_to, cmds_id)
                 except Exception as e:
@@ -980,7 +980,7 @@ def process_message(message: InboundMessage) -> None:
                     launch_id = int(interactive_id.split(":", 1)[1])
                 except (ValueError, IndexError):
                     launch_id = 0
-                logger.info("WA recategorize button clicked wa_id=%s launch=%s", reply_to, launch_id)
+                logger.info("WA recategorize button clicked wa_id=%s launch=%s", mask_phone(reply_to), launch_id)
                 if launch_id:
                     from db import display_id_for as _disp
                     try:
@@ -1002,7 +1002,7 @@ def process_message(message: InboundMessage) -> None:
                     launch_id = int(lid_str)
                 except ValueError:
                     launch_id = 0
-                logger.info("WA recategorize pick wa_id=%s launch=%s cat=%s", reply_to, launch_id, cat)
+                logger.info("WA recategorize pick wa_id=%s launch=%s cat=%s", mask_phone(reply_to), launch_id, cat)
                 if launch_id and cat:
                     _send_reply(reply_to, _apply_recategorize(uid, launch_id, cat))
                 return
@@ -1013,7 +1013,7 @@ def process_message(message: InboundMessage) -> None:
                     launch_id = int(interactive_id[len(WA_RECAT_OTHER_PREFIX):])
                 except ValueError:
                     launch_id = 0
-                logger.info("WA recategorize other clicked wa_id=%s launch=%s", reply_to, launch_id)
+                logger.info("WA recategorize other clicked wa_id=%s launch=%s", mask_phone(reply_to), launch_id)
                 if launch_id:
                     try:
                         set_pending_action(uid, "recategorize_launch_text", {"launch_id": launch_id}, minutes=5)
@@ -1028,7 +1028,7 @@ def process_message(message: InboundMessage) -> None:
                     launch_id = int(interactive_id[len(WA_UNDO_LAUNCH_PREFIX):])
                 except ValueError:
                     launch_id = 0
-                logger.info("WA undo_launch (specific) clicked wa_id=%s launch=%s", reply_to, launch_id)
+                logger.info("WA undo_launch (specific) clicked wa_id=%s launch=%s", mask_phone(reply_to), launch_id)
                 if launch_id:
                     from core.handlers import launches as h_launches
                     try:
@@ -1047,7 +1047,7 @@ def process_message(message: InboundMessage) -> None:
                     tx_id = int(interactive_id[len(WA_DELETE_CC_PREFIX):])
                 except ValueError:
                     tx_id = 0
-                logger.info("WA credit delete button clicked wa_id=%s tx=%s", reply_to, tx_id)
+                logger.info("WA credit delete button clicked wa_id=%s tx=%s", mask_phone(reply_to), tx_id)
                 if tx_id:
                     from core.handlers import credit as h_credit
                     try:
@@ -1067,7 +1067,7 @@ def process_message(message: InboundMessage) -> None:
                     bill_id = int(interactive_id[len(WA_BILL_PAID_PREFIX):])
                 except ValueError:
                     bill_id = 0
-                logger.info("WA bill_paid button clicked wa_id=%s uid=%s bill=%s", reply_to, uid, bill_id)
+                logger.info("WA bill_paid button clicked wa_id=%s uid=%s bill=%s", mask_phone(reply_to), uid, bill_id)
                 if not (bill_id and uid):
                     _send_reply(reply_to, "Não consegui identificar a conta desse lembrete.")
                     return
@@ -1167,7 +1167,7 @@ def process_message(message: InboundMessage) -> None:
 
             # Botão de desfazer áudio (legado: undo do último lançamento)
             if interactive_id == WA_UNDO_LAUNCH_ID:
-                logger.info("WA undo_launch button clicked wa_id=%s", reply_to)
+                logger.info("WA undo_launch button clicked wa_id=%s", mask_phone(reply_to))
                 # Injeta "desfazer" para o classificador tratar normalmente
                 message.text = "desfazer"
             # `target_user_id` só existe no `remetente_com_dados`: a conta sem
@@ -1357,7 +1357,7 @@ def process_message(message: InboundMessage) -> None:
             # outra coisa. Os dois canais dizem a mesma coisa agora.
             if _ajuda_do_cortado(uid, reply_to):
                 return
-            logger.info("WA help menu via texto wa_id=%s", reply_to)
+            logger.info("WA help menu via texto wa_id=%s", mask_phone(reply_to))
             try:
                 send_help_menu(reply_to)
             except Exception as e:
@@ -1377,7 +1377,7 @@ def process_message(message: InboundMessage) -> None:
             # falsa justamente por este ramo.
             if _ajuda_do_cortado(uid, reply_to):
                 return
-            logger.info("WA commands menu via intent wa_id=%s", reply_to)
+            logger.info("WA commands menu via intent wa_id=%s", mask_phone(reply_to))
             try:
                 send_commands_menu(reply_to)
             except Exception as e:
@@ -1391,7 +1391,7 @@ def process_message(message: InboundMessage) -> None:
             # por uma palavra (§2: a categoria, não a instância).
             if _bloqueado_pelo_corte(uid, reply_to, message.text or ""):
                 return
-            logger.info("WA tutorial welcome via texto wa_id=%s", reply_to)
+            logger.info("WA tutorial welcome via texto wa_id=%s", mask_phone(reply_to))
             try:
                 send_welcome(reply_to)
             except Exception as e:
@@ -1443,11 +1443,11 @@ def process_message(message: InboundMessage) -> None:
         outs = handle_incoming(incoming, ignora_pendencias=ignora_pendencias,
                                de_botao=bool(interactive_id)) or []
         if not outs:
-            logger.info("WA no outgoing messages for from=%s", message.wa_id)
+            logger.info("WA no outgoing messages for from=%s", mask_phone(message.wa_id))
             _send_reply(reply_to, "Nao entendi. Digite ajuda para ver os comandos.")
             return
 
-        logger.info("WA generated outgoing messages count=%s for from=%s", len(outs), message.wa_id)
+        logger.info("WA generated outgoing messages count=%s for from=%s", len(outs), mask_phone(message.wa_id))
         sent_response = False
         for out in outs:
             body = safe_text(out)
@@ -1455,23 +1455,23 @@ def process_message(message: InboundMessage) -> None:
                 _send_reply_with_optional_buttons(reply_to, body, user_id=uid)
                 sent_response = True
         if not sent_response:
-            logger.warning("WA outgoing messages had no deliverable text from=%s", message.wa_id)
+            logger.warning("WA outgoing messages had no deliverable text from=%s", mask_phone(message.wa_id))
             _send_reply(reply_to, _DELIVERY_FAILURE_MESSAGE)
     except Exception as exc:
         mantem_pergunta = True
-        logger.error("WA message processing failed wa_id=%s error=%s", message.wa_id, exc)
+        logger.error("WA message processing failed wa_id=%s error=%s", mask_phone(message.wa_id), exc)
         try:
             log_system_event_sync(
                 "error",
                 "whatsapp_message_processing_failed",
                 f"Falha no processamento da mensagem do WhatsApp: {exc}",
                 source="wa_runtime",
-                details={"wa_id": message.wa_id},
+                details={"wa_id": mask_phone(message.wa_id)},
             )
         except Exception as log_exc:
             logger.error(
                 "WA processing failure could not be recorded wa_id=%s error=%s",
-                message.wa_id,
+                mask_phone(message.wa_id),
                 log_exc,
             )
         traceback.print_exc()
@@ -1485,7 +1485,7 @@ def process_message(message: InboundMessage) -> None:
         except Exception as send_exc:
             logger.error(
                 "WA failure notice could not be sent wa_id=%s error=%s",
-                message.wa_id,
+                mask_phone(message.wa_id),
                 send_exc,
             )
     finally:

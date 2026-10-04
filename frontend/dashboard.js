@@ -1469,11 +1469,11 @@ function renderInstallmentsView(groups) {
       <div class="stat-tile" style="animation-delay:120ms">
         <div class="stat-label">Maior compra</div>
         <div class="stat-value">${maior ? _fmtBRL(maior.total) : "—"}</div>
-        <div class="stat-delta" style="color:var(--text-3)">${maior ? (maior.name || "—").slice(0, 26) : "sem histórico"}</div>
+        <div class="stat-delta" style="color:var(--text-3)">${maior ? escapeHtmlSafe((maior.name || "—").slice(0, 26)) : "sem histórico"}</div>
       </div>
       <div class="stat-tile" style="animation-delay:180ms">
         <div class="stat-label">Categoria mais comum</div>
-        <div class="stat-value" style="font-size:1.15rem">${_instMostCommonCategory(filtered) || "—"}</div>
+        <div class="stat-value" style="font-size:1.15rem">${escapeHtmlSafe(_instMostCommonCategory(filtered) || "—")}</div>
         <div class="stat-delta" style="color:var(--text-3)">no histórico</div>
       </div>
     `;
@@ -9263,7 +9263,7 @@ function populateLaunchCards() {
     return;
   }
   sel.innerHTML = '<option value="">— Selecione um cartão —</option>' +
-    cards.map(c => `<option value="${c.id}">${c.name}</option>`).join("");
+    cards.map(c => `<option value="${c.id}">${escapeHtmlSafe(c.name)}</option>`).join("");
   if (previous && [...sel.options].some(o => o.value === previous)) {
     sel.value = previous;
   } else if (cards.length === 1) {
@@ -9339,7 +9339,7 @@ function _renderEditCategoriaOptions(currentCategoria) {
   const isCustomCurrent = currentCategoria
     && !EDIT_LAUNCH_CATEGORIES.includes(currentCategoria);
   if (isCustomCurrent) {
-    opts.push(`<option value="${currentCategoria}">${currentCategoria}</option>`);
+    opts.push(`<option value="${escapeHtmlSafe(currentCategoria)}">${escapeHtmlSafe(currentCategoria)}</option>`);
   }
   for (const c of EDIT_LAUNCH_CATEGORIES) {
     opts.push(`<option value="${c}">${c}</option>`);

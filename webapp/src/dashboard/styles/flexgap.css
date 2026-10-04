@@ -57,12 +57,9 @@
   .legend { margin-top: -6px; margin-left: -16px; }
   .legend > * { margin-top: 6px; margin-left: 16px; }
   .ledger-head > .ledger-tools { margin-top: 2px; margin-left: 2px; } /* 12 de filho − 10 de contêiner */
-  .mini-rows div { margin-left: -8px; }
-  .mini-rows div > * { margin-left: 8px; }
 
   @media (max-width: 760px) {
     .topbar > * + * { margin-left: 6px; }
-    .topbar .tag-demo + .topbar-spacer { margin-left: 0; } /* sem o seletor, a etiqueta oculta vem antes: gap não conta display: none */
     .ledger-tools { width: calc(100% - 2px); }
     .search { width: calc(100% - 10px); }
   }

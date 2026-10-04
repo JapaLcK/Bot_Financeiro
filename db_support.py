@@ -55,6 +55,10 @@ def get_summary_by_period_impl(
     start_date: date,
     end_date: date,
 ):
+    # Divergência conhecida (Q18): só `launches`, SEM o cartão. Fica para o relatório
+    # diário e semanal, as ferramentas da IA de período livre e a projeção de
+    # fechamento. "Gastos em <mês>", relatório mensal, /app e Análises leem a regra
+    # única do mês, com o cartão pela fatura (`db/resumo_mes.TOTAIS_SQL`).
     ensure_user(user_id)
 
     start_dt = datetime.combine(start_date, datetime.min.time())
@@ -770,11 +774,14 @@ EMAIL_JA_TEM_CONTA = 'Este e-mail já tem conta. Entre com sua senha ou use "Esq
 
 
 class AccountAlreadyExistsError(Exception):
-    """Cadastro tentado com e-mail/telefone que já pertence a uma conta.
+    """Cadastro tentado com e-mail que já pertence a uma conta.
 
-    Carrega o `existing_user_id` pra que o endpoint avise o dono da conta por
-    e-mail (out-of-band) e responda de forma GENÉRICA — sem revelar ao visitante
-    que a conta existe (anti-enumeração). `reason` ∈ {email, email_google, phone}.
+    Carrega o `existing_user_id` pra que o endpoint avise o dono por e-mail. O
+    /auth/register também diz na tela (409); o webhook e o reenvio do quiz
+    (`frontend/routes/quiz_signup.py`) respondem igual nos dois casos
+    (anti-enumeração). `reason` ∈ {email, email_google}: `email_google` é
+    qualquer conta sem senha (Google, Apple ou quiz) — o nome é histórico.
+    Telefone repetido não lança: é descartado (`telefone_livre`).
     """
     def __init__(self, reason: str, existing_user_id: int | None = None):
         super().__init__(reason)
@@ -893,9 +900,9 @@ def _recusa_se_tem_conta(cur, email: str) -> None:
     )
     existing = cur.fetchone()
     if existing:
-        # Anti-enumeração: não vaza "já existe" pro visitante. O endpoint
-        # trata AccountAlreadyExistsError respondendo genericamente e
-        # avisando o dono por e-mail.
+        # Quem chama decide o que o visitante vê (o /auth/register diz 409; o
+        # quiz responde igual) e se avisa o dono por e-mail. Sem senha = Google,
+        # Apple ou quiz, não só Google.
         reason = "email_google" if existing["password_hash"] is None else "email"
         raise AccountAlreadyExistsError(reason, existing_user_id=existing["user_id"])
 

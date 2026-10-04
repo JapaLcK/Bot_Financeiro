@@ -181,7 +181,7 @@ def mark_bill_paid(user_id: int, bill_id: int, amount: float | None = None, *,
     débito chega pelo Open Finance, e `paid_amount` é o valor informado ou NULL
     (a estimativa não é o valor pago). `amount` sobrescreve o valor (boleto
     variável). Retorna a conta atualizada, ou None se não achar / já paga."""
-    from db.accounts import add_launch_and_update_balance
+    from db.accounts import ORIGEM_CARTEIRA, add_launch_and_update_balance
     from db.open_finance import propose_manual_reconciliation
     if metodo not in ("carteira", "banco"):
         raise ValueError("METODO_INVALIDO")
@@ -235,8 +235,7 @@ def mark_bill_paid(user_id: int, bill_id: int, amount: float | None = None, *,
     try:
         launch_id, _seq, _bal = add_launch_and_update_balance(
             user_id, "despesa", valor, alvo=f"conta:{name}", nota=f"Pagamento · {name}",
-            categoria=categoria, is_internal_movement=False,
-        )
+            categoria=categoria, is_internal_movement=False, origem=None)
     except Exception:
         # Devolve a conta para 'pending' para a retentativa funcionar.
         # Condicionado à assinatura exata que a reserva deixou (paid + sem
@@ -260,11 +259,12 @@ def mark_bill_paid(user_id: int, bill_id: int, amount: float | None = None, *,
                 "falha ao devolver a conta %s do usuario %s para pending — "
                 "ela ficou paga sem lançamento", bill_id, user_id)
         raise
-    with get_conn() as conn:
-        with conn.cursor() as cur:
-            cur.execute("update bill_instances set launch_id=%s where id=%s and user_id=%s",
-                        (launch_id, int(bill_id), int(user_id)))
-        conn.commit()
+    # Sem marca (a /api/v2 a apagaria na janela) até a ligação gravar; o pool commita.
+    with get_conn() as conn, conn.cursor() as cur:
+        cur.execute("with b as (update bill_instances set launch_id=%(l)s where id=%(b)s"
+                    " and user_id=%(u)s returning 1) update launches set origem=%(o)s"
+                    " where id=%(l)s and user_id=%(u)s and exists (select 1 from b)",
+                    {"o": ORIGEM_CARTEIRA, "l": launch_id, "u": int(user_id), "b": int(bill_id)})
     propose_manual_reconciliation(user_id, launch_id)  # débito já importado vira pendência; não sobe
     return get_bill(user_id, bill_id)
 

@@ -1,17 +1,23 @@
 import type { ExpoConfig } from "expo/config";
 
 /**
- * Um binário por ambiente, com id e nome próprios — dá para ter dev, staging e
- * produção instalados no MESMO aparelho sem um sobrescrever o outro. Sem isso,
- * testar staging significa desinstalar a produção, e alguém acaba testando no
- * binário errado.
+ * Um binário por ambiente, com id, nome e scheme próprios — dá para ter dev,
+ * staging e produção instalados no MESMO aparelho sem um sobrescrever o outro.
+ * Sem isso, testar staging significa desinstalar a produção, e alguém acaba
+ * testando no binário errado.
+ *
+ * O scheme também é por ambiente: a volta do OAuth do banco
+ * (`<scheme>://open-finance-volta`) é resolvida pelo iOS, e com o mesmo scheme
+ * nos três o sistema não define qual binário abre. A lista fechada do servidor
+ * (`_APP_SCHEMES`, frontend/routes/open_finance.py) é comparada com esta por
+ * `tests/test_app_espelhos.py`.
  */
 const AMBIENTE = process.env.APP_ENV ?? "development";
 
-const POR_AMBIENTE: Record<string, { sufixoId: string; nome: string }> = {
-  development: { sufixoId: ".dev", nome: "PigBank Dev" },
-  staging: { sufixoId: ".staging", nome: "PigBank Staging" },
-  production: { sufixoId: "", nome: "PigBank" },
+const POR_AMBIENTE: Record<string, { sufixoId: string; nome: string; scheme: string }> = {
+  development: { sufixoId: ".dev", nome: "PigBank Dev", scheme: "pigbank-dev" },
+  staging: { sufixoId: ".staging", nome: "PigBank Staging", scheme: "pigbank-staging" },
+  production: { sufixoId: "", nome: "PigBank", scheme: "pigbank" },
 };
 
 const atual = POR_AMBIENTE[AMBIENTE] ?? POR_AMBIENTE.development!;
@@ -49,7 +55,7 @@ function apiUrl(): string {
 const config: ExpoConfig = {
   name: atual.nome,
   slug: "pigbank-mobile",
-  scheme: "pigbank",
+  scheme: atual.scheme,
   version: "0.1.0",
   orientation: "portrait",
   userInterfaceStyle: "automatic",
@@ -57,7 +63,7 @@ const config: ExpoConfig = {
     bundleIdentifier: `${ID_BASE}${atual.sufixoId}`,
     supportsTablet: false,
     appleTeamId: "S849YDA49P",
-    buildNumber: "13",
+    buildNumber: "15",
     config: { usesNonExemptEncryption: false },
     // Salvar senha e código no app Senhas: só produção, que é o único id em
     // `/.well-known/apple-app-site-association` (frontend/routes/static_pages.py,

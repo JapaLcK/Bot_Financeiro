@@ -312,6 +312,8 @@ PR de cada etapa, não soluções prontas. Cada PR confere se ainda valem, decid
   nele), onde dá para criar lançamento de banco e investimento manual — o que a Q36 tira do
   v2. Decidir se esses caminhos antigos são bloqueados ou adaptados durante a convivência,
   com teste cruzando as duas telas.
+  **Decidido pelo dono: bloquear para quem tem a chave, em todos os canais** — PR D
+  da etapa 1 (§8). Esconder os botões no `/app` fica para depois, se o dono pedir.
 
 **Etapa 7 (chat)**
 - A interface nova do chat sobre a regra da forma de pagamento (a regra em si vem antes,
@@ -417,4 +419,146 @@ PR de cada etapa, não soluções prontas. Cada PR confere se ainda valem, decid
     tela decide o "expandir" das contas fora do total no PR C. Divergência declarada com o
     saldo consolidado: USD novo × BRL velho e saldo não finito na coluna
     (`tests/test_api_v2_contas.py`).
+  - PR B: a regra única do mês (`db/resumo_mes.TOTAIS_SQL`, a da consulta 5 do /app:
+    lançamentos não internos por `criado_em` + cartão pela fatura, com `user_id` em cada
+    perna, inclusive a fatura) e `GET /api/v2/resumo-do-mes?mes=AAAA-MM` (Entrou, Saiu, o
+    mês anterior inteiro ou `null`, `ate` = último dia do mês, o corrente também, `motivos`: os do bloco de contas que valem para
+    o mês e `inicio_do_historico` quando a janela do plano corta o mês). Decisões do dono:
+    cartão pela fatura (N1); migram só as telas de mês-calendário — a rota, o "Gastos em
+    <mês>" do WhatsApp, o relatório mensal, a consulta 5 do /app e `compute_kpis`
+    das Análises (N2; `compute_evolution` segue com a consulta própria e um teste a compara com a regra, mês a mês); só Entrou e Saiu (N3); anterior
+    inteiro, sem porcentagem (N4). Ficam na regra antiga, sem cartão (divergência
+    conhecida): relatório diário e semanal, ferramentas da IA de período livre, projeção
+    de fechamento e o Repórter. O mês corta `criado_em` pela data ingênua, igual a antes,
+    de propósito. `scripts/comparar_resumo_mes.py` mostra antigo × novo por usuário e mês,
+    só lendo.
+  - PR D: bloqueio da Q36 fora do v2 para quem tem a chave `dashboard_v2_enabled`, em todos
+    os canais (`/app`, WhatsApp, IA): criar e aportar em investimento manual, importar
+    extrato (OFX/CSV/PDF) e fatura OFX, compra manual no cartão. Resgatar e apagar
+    investimento manual (e desfazer o apagar, que restaura o que já existia — decisão do
+    dono), caixinha e Carteira seguem livres. Trava, textos e tabela em
+    `core/services/fonte_unica.py` e `docs/CLAUDE.md` ("Q36 fora do v2"); a chave que falha
+    libera. Os botões do `/app` continuam à vista: o servidor recusa e a tela mostra o texto.
+  - PR C: a tela do Resumo no `/painel` com dado real. O perfil vem do servidor
+    (`GET`/`PUT /api/v2/perfil`): o modal só abre com `null`, a escolha é otimista e desfaz
+    com aviso no erro, e o seletor fica `aria-disabled` enquanto o PUT está em voo (sem
+    dois PUT concorrentes). O bloco `contas` entra no topo do painel padrão e dos 5
+    presets: total com a nota "carteira a confirmar" e a contagem das contas fora do total
+    (a lista que a tela abre, e não o campo declarado), lista curta com a Carteira Piggy e
+    as contas que entram no total, as demais atrás de "ver contas fora do total", saldo
+    ausente ou ilegível = "—", nunca R$ 0,00, e moeda fora de três letras maiúsculas sai
+    só o número. Entrou e Saiu vêm de `resumo-do-mes`, com o mês anterior inteiro como
+    referência e os `motivos` como selos. O mês da página é o corrente de São Paulo, com
+    seletor dos últimos 6 meses reais (`s.mes`, separado de `s.month`, que os blocos de
+    exemplo ainda leem e fica em setembro). Continuam sintéticos, cada um com o selo
+    "demonstração" no próprio bloco: Fatura, Guardado, Rendimento e os demais blocos;
+    no modo real o selo também marca o extrato, a faixa do Piggy e o chat (o do título do
+    Resumo saiu no PR C2). A etiqueta única da página saiu. O protótipo
+    (`dashboard-v2/index.html`) segue como antes. Limites que seguem: o Cmd-K mostra
+    transações de exemplo sem selo; "Recomeçar do zero" com o `/painel` aberto reabre o
+    modal. Os outros limites que este PR deixou foram decididos ou corrigidos no PR C2.
+  - PR C2: as decisões do dono sobre a tela do PR C e três acabamentos. D1: o título
+    "Resumo de <mês>" não leva mais o selo "demonstração"; só os blocos inventados levam
+    (extrato, faixa do Piggy e chat não mudaram). D2: o seletor de mês fica como está,
+    também em `/lancamentos`, `/gastos` e `/previsao`. D3: Entrou e Saiu, e o mês anterior
+    de referência, saem com centavos, iguais ao texto decimal do servidor e ao bloco de
+    contas; Fatura e Guardado, sintéticos, seguem sem casas. O sinal negativo é o hífen
+    nos dois (o valor e o mês anterior); o resto do app segue com o menos tipográfico do
+    `money` (`lib/format.js`). D4: a conta paga sem senha
+    (nem Google/Apple) ganha o botão "Criar senha", que leva à `/home`, onde o overlay
+    "Crie sua senha" sobe sozinho (o `/painel` não carrega o `criar-senha.js`). Toda a
+    `/api/v2` dá a ela 403 `password_required`, inclusive o `/me`, então é no portão
+    (`Entrada.tsx`) que ela cai: lá o texto vira "Para abrir o painel novo, crie a sua
+    senha. Depois de criar, volte para o painel novo.", com o botão, Recarregar e "Painel antigo"; os outros erros do portão seguem
+    com a tela de antes, sem o botão. O mesmo 403 no PUT do perfil, se chegar, mostra "Crie sua senha para salvar o seu painel.
+    Depois de criar, volte para o painel novo." com o botão, no aviso do painel e no do modal da 1ª visita (o aviso do painel fica atrás
+    do modal); 500 e rede seguem com o aviso genérico. O destino e o texto do botão
+    moram numa constante só (`CRIAR_SENHA`, em `Entrada.tsx`). Limite: o "Criar senha" leva
+    à `/home` e não volta sozinho ao `/painel` (o overlay recarrega a `/home`, que não tem
+    link para o painel novo; retorno automático é outro fluxo), por isso os dois textos
+    mandam voltar. Acabamentos: "Para onde
+    vai" não vaza mais da célula — no Resumo a lista rola por dentro, nenhuma categoria
+    some (decisão do dono), e é alcançável por Tab com o rótulo "Categorias do mês"; sem
+    `@container` por altura e sem pista de "tem mais" além da barra de rolagem fina; na
+    `/gastos` e no celular nada rola nem sai do lugar (no celular a lista segue como
+    parada de Tab, sem rolar: o bloco é o mesmo do Resumo); a legenda diz o total gasto no mês, sem
+    contar categorias. No preset Dívidas, Parcelas futuras sobe de 4º para 2º; em troca a
+    Fatura desce de 2º para 3º e os Compromissos de 3º para 4º: decisão do dono, porque
+    Parcelas pesam mais para quem está em dívida e o `contas` grande no topo só deixa a
+    casa (0,3) para um bloco de uma coluna; o seletor de perfil tem 44 px (só
+    ele, o `.field` global segue igual) e a seta de abrir cada bloco tem alvo de 44 px sem
+    mudar o desenho. A busca da barra no celular segue menor que 44 px (a barra encolhe o
+    botão e não tem folga para um alvo maior sem invadir os vizinhos).
+- Etapa 2 (Lançamentos) em 5 PRs: 1 leitura · 2a escrita da carteira (inclui gravar a marca
+  `launches.origem`; faixa Completo) · 2b regras novas de dinheiro (travar data e valor da
+  linha fundida em todo canal; apagar a fundida desfaz a junção na hora; editar valor só na
+  carteira pura) · 3 identidade por conta e cartão das importadas (começa por medição
+  só-leitura em produção, com autorização do dono) · 4 a tela (faixa Leve). A Q37 vira
+  etapa própria depois desta, antes da Previsão.
+  Decisões do dono (2026-10-03): **P1** Q37 fora da Etapa 2, etapa própria antes da
+  Previsão; **P2** lançamento anterior ao deploy do PR 2a é só leitura no v2 (marca na
+  coluna nova `launches.origem`; NULL = antigo, sem backfill); **P3** linha fundida com o
+  banco: o banco é o dono de data e valor; **P5** transação do banco e cartão do Open
+  Finance: só categoria e descrição; **P6** cartão entra pelo mês da fatura e mostra a data
+  da compra; **P7** busca varre a janela inteira do plano; **P8** interno (saque em
+  dinheiro, depósito em caixinha, pagamento de fatura) entra marcado, fora de todo total.
+  (P4 não foi passado ao PR 1.)
+  - PR 1: `GET /api/v2/lancamentos` (`db/lancamentos.py`) e `GET /api/v2/categorias`, só
+    leitura (contrato em `docs/CLAUDE.md`, "API v2"). O mês sai das pernas de `TOTAIS_SQL`
+    extraídas para `MES_LANCAMENTOS_SQL`/`MES_CARTAO_SQL` (o Resumo não mudou um número): a
+    soma dos itens não internos é o Entrou/Saiu, provada com a matriz do PR B e com
+    controle negativo (perna do cartão pela data da compra). Keyset com cursor opaco,
+    `conta` pela identidade do provedor, `pode`/`origem`/`motivos` por linha numa regra só
+    (`PODE_SQL`), coluna `launches.origem` criada vazia (ninguém grava ainda: toda carteira
+    sai `registro_antigo`, `pode: []`). A busca do `list_history` virou
+    `termos_busca`/`clausula_busca`, usadas pelas duas listas. Medido em 2026-10-03,
+    `EXPLAIN (ANALYZE, BUFFERS)` num `pytest_*` local (4 usuários × 6000 lançamentos + 1440
+    compras; remeça antes de reusar): mês 5,5 ms, busca na janela inteira 250 ms (o estado de
+    toda linha é calculado antes do filtro de texto). Em aberto para o dono: o depósito em
+    caixinha e o aporte gravados pelo PigBank têm `tipo` `deposito_caixinha`/
+    `aporte_investimento` e ficam FORA da lista neste PR, como na soma — a P8 os cita, mas
+    mostrá-los pede decidir se são entrada ou saída; o que entra marcado hoje é o interno
+    com tipo despesa/receita (saque em dinheiro, pagamento de fatura, transferência do
+    banco). A lista do `/app` e o "últimos N" do WhatsApp seguem as regras deles.
+  - PR 2a: a escrita da carteira (contrato em `docs/CLAUDE.md`, "API v2"):
+    `POST /api/v2/lancamentos/carteira`, `/editar` e `/apagar`, e a marca `launches.origem =
+    'carteira'` gravada pelo escritor da carteira em todo canal e pelo saque/depósito
+    automático da Q41 (decisão do dono, 2026-10-03). O `pode` vira a guarda da escrita, relido
+    sob o lock do usuário e da linha (`db/lancamentos.pode_da_linha`); o miolo do `POST
+    /launches` do `/app` saiu para `core/services/carteira.lancar`, usado pelas duas rotas.
+    Decisões do dono (2026-10-03): pagamento de conta pela Carteira não apaga pelo v2 (o `pode`
+    fica `[categoria, data]`; o de fatura do cartão manual cai no mesmo ramo e sai junto, por
+    conservadorismo); saldo inicial e ajuste ficam marcados e editáveis/apagáveis, como no
+    `/app`. Antecipar parcela e estorno de fatura do cartão manual gravam sem a marca (só
+    leitura: o `efeitos` não guarda o que desfazer). Ficou fora: editar valor, travar e
+    apagar a fundida (PR 2b), WhatsApp e quick_entry pelo serviço novo, backfill, chave de
+    idempotência, motivo no 409, a tela (PR 4) e o conserto do apagar pagamento de conta no
+    `/app`/WhatsApp (devolve o dinheiro e a conta segue paga). O pagamento de conta pela
+    carteira (`db/bills.mark_bill_paid`) nasce sem a marca e a ganha no mesmo statement que o
+    liga à conta: entre os dois commits a linha parecia carteira pura, o v2 a apagava e o
+    passo seguinte quebrava a FK, deixando a conta paga sem lançamento. A mesma janela por um
+    apagar do `/app`/WhatsApp já existia e fica para o conserto do apagar pagamento de conta.
+    Riscos aceitos: dois POST iguais gravam dois lançamentos (comentário `ponytail:` na rota);
+    o apagar antigo do `/app` (trava `launches` e depois `accounts`) e o do v2 (`accounts` e
+    depois `launches`) na mesma linha do mesmo usuário ao mesmo tempo dão deadlock, e o
+    Postgres aborta um dos dois sem perda. O que mudou no `/app`: o PATCH de cartão passou a
+    travar a linha (`update_credit_transaction_fields` usa `for update` sempre, a mesma linha
+    que o UPDATE já travaria); no `POST /launches`, `infer_category` entrou no `try` (um
+    `ValueError` dele vira 400 em vez de 500) e a falha do aprendizado depois do commit passou
+    de 500 (cuja retentativa duplicava o gasto) a só log. Diferença declarada: `categoria: ""`
+    na criação pelo v2 dá 422 (`null` = inferir), e o `/app` infere.
+  - PR 2b-1: `valor` no `/editar` (só a carteira pura, P4: troca `valor`, `efeitos.delta_conta`
+    e o saldo da Carteira pela diferença, na mesma transação) e a data da linha fundida travada
+    em todo canal (P3): a guarda de `db.accounts.update_launch_fields` lê
+    `db/lancamentos.FUNDIDO_SQL` (o predicado `fundido` da lista, agora fonte única) sob o lock
+    do usuário e da linha, que o PATCH do `/app` com data passou a tomar também. O `pode` só
+    mudou no pagamento de conta fundido, que perde 'data' (fica `[categoria]`). Um
+    teste-portão classifica toda função de produção que faz `update launches` com
+    `valor =`/`criado_em =` (`tests/test_api_v2_lancamentos_valor_data.py`). Decisões do dono
+    (2026-10-03): a fundida não acompanha correção do banco neste PR (PR 3); corrigir o valor
+    da carteira não procura par novo no banco; o aviso ao apagar a fundida e o apagar que
+    desfaz a junção na hora são do PR 2b-2, que vem depois. Limite declarado: linha com par
+    pendente NÃO acionável (conexão pausada, outra moeda) conta como carteira pura, aceita
+    valor novo, e o par volta depois com o valor velho.
+- Guia do `/painel` (#728) em 2 PRs: A `GET`/`POST /api/v2/guia` + tabela `guia_painel` (contrato e consulta de medição em `docs/CLAUDE.md`, "API v2") · B a tela (Piggy, balão, Ajuda).
 - [ ] Etapa 0 · [ ] 1 · [ ] 2 · [ ] 3 · [ ] 4 · [ ] 5 · [ ] 6 · [ ] 7

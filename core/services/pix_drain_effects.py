@@ -3,7 +3,7 @@ core/services/pix_drain_effects.py — o que o dreno do Pix faz no MUNDO LÁ FOR
 
 Saiu de `core/services/pix_drain.py` por assunto, não por tamanho: lá mora a
 máquina — reserva, roteamento, guardas, transição, laço —, e aqui mora o que
-cada efeito executa (Stripe, `plan_grants`, GA4, Meta CAPI, e-mail), mais a
+cada efeito executa (Stripe, `plan_grants`, cadernos, GA4, Meta CAPI, e-mail), mais a
 janela de acesso que o `grant` grava e o alerta do que NÃO tem efeito
 automático.
 
@@ -27,6 +27,7 @@ from datetime import datetime, timedelta, timezone
 from core.crypto import PiiAccessContext, decrypt_pii_optional
 from core.observability import log_system_event_sync, recent_event_exists
 from core.services import admin_notify
+from core.services.pix_extras import total_cents
 
 def janela_de_acesso(cobranca) -> tuple[datetime, datetime]:
     """Quando o acesso comprado começa e termina (§7), decidido NO PAGAMENTO.
@@ -74,7 +75,7 @@ def alertar(tipo: str, cobranca, payment_id: str) -> None:
         extra = f" · devolvido: {_acumulado_estornado(payment_id)}"
     admin_notify.notify_pix_alerta(
         f"⚠️ **Pix: {tipo}** cobrança `{cobranca['id']}` · "
-        f"valor R$ {int(cobranca['amount_cents']) / 100:.2f}{extra} · "
+        f"valor R$ {total_cents(cobranca) / 100:.2f}{extra} · "
         "o acesso NÃO foi alterado."
     )
 
@@ -98,7 +99,8 @@ def alertar_stripe_desistido(cobranca) -> None:
 
 
 def alertar_valor(cobranca, valor) -> None:
-    """Valor liquidado ≠ `amount_cents` do snapshot — **alerta, e NÃO barra**.
+    """Valor liquidado ≠ total do snapshot (plano + cadernos, `total_cents`) —
+    **alerta, e NÃO barra**.
 
     Barrar era a outra saída possível, e ela é pior aqui: o QR dinâmico carrega
     o valor, então o pagador não escolhe quanto paga. Divergência só nasce de
@@ -112,7 +114,7 @@ def alertar_valor(cobranca, valor) -> None:
         recebido = int(round(float(valor) * 100))
     except (TypeError, ValueError):
         return
-    combinado = int(cobranca["amount_cents"])
+    combinado = total_cents(cobranca)
     if recebido != combinado:
         admin_notify.notify_pix_alerta(
             f"⚠️ **Pix: valor diferente do combinado** cobrança `{cobranca['id']}`"
@@ -216,6 +218,20 @@ def _grant(cobranca, evt) -> None:
     record_checkout_completed(cobranca["user_id"], cobranca["public_token"])
 
 
+def _ebook(cobranca, evt) -> None:
+    """Os cadernos da foto viram pendência em `ebook_entregas` — uma linha por
+    caderno, `session_id` = `external_reference` (`pix:<id>`); quem entrega é o job
+    `core/services/ebook_entrega.py`. Sem cadernos é no-op REGISTRADO (padrão do
+    `stripe_cancel`). O `on conflict do nothing` do `registrar` é a 2ª barreira
+    contra reentrega, depois do par `(payment_id, 'ebook')`."""
+    from db.ebook_entregas import registrar
+
+    extras = cobranca.get("extras") or []
+    if extras:
+        registrar(cobranca["user_id"], cobranca["external_reference"],
+                  [(e["price"], e["url"]) for e in extras])
+
+
 def _ga4(cobranca, evt) -> None:
     """`purchase` com `transaction_id = public_token` — a chave de dedupe do
     GA4, e o único identificador da cobrança que sai do servidor (§13.6)."""
@@ -226,7 +242,7 @@ def _ga4(cobranca, evt) -> None:
         return
     send_purchase(
         transaction_id=cobranca["public_token"],
-        value=int(cobranca["amount_cents"]) / 100,
+        value=total_cents(cobranca) / 100,
         currency=cobranca["currency"] or "BRL",
         # PÚBLICO, e esta é a linha de RECEITA: `send_purchase` usa este valor
         # como `item_id` E `item_name` do evento `purchase`. O Stripe já manda o
@@ -251,7 +267,7 @@ def _capi(cobranca, evt) -> None:
         event_name="Purchase",
         event_id=purchase_event_id(cobranca["public_token"]),
         event_time=int(datetime.now(timezone.utc).timestamp()),
-        value=int(cobranca["amount_cents"]) / 100,
+        value=total_cents(cobranca) / 100,
         currency=cobranca["currency"] or "BRL",
         email=_email_do_titular(cobranca["user_id"]),
         fbp=cobranca["fbp"], fbc=cobranca["fbc"],
@@ -287,7 +303,9 @@ def _email(cobranca, evt) -> None:
         if not send_pix_paid_email(destino, cobranca["plan"],
                                    int(cobranca["amount_cents"]) / 100,
                                    cobranca["access_starts_at"],
-                                   cobranca["access_expires_at"]):
+                                   cobranca["access_expires_at"],
+                                   extras=[(e["nome"], int(e["valor_cents"]))
+                                           for e in cobranca.get("extras") or []]):
             raise RuntimeError("send_pix_paid_email devolveu False")
         log_system_event_sync("info", "pix_paid_email_sent",
                               "E-mail de confirmacao da compra Pix enviado.",
@@ -320,5 +338,5 @@ def _email_do_titular(user_id: int) -> str | None:
     return conta.get("email")
 
 
-EXECUTORES = {"stripe_cancel": _stripe_cancel, "grant": _grant, "ga4": _ga4,
+EXECUTORES = {"stripe_cancel": _stripe_cancel, "grant": _grant, "ebook": _ebook, "ga4": _ga4,
                "capi": _capi, "email": _email, "revoke": _revoke}

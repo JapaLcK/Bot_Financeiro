@@ -69,7 +69,7 @@ def list_recurring_expenses(user_id: int, include_inactive: bool = False) -> lis
                        r.last_charged_ym, r.notes, r.created_at, r.start_date,
                        r.frequency, r.due_month, r.payment_mode, r.variable_amount
                 from recurring_expenses r
-                left join credit_cards c on c.id = r.card_id
+                left join credit_cards c on c.id = r.card_id and c.user_id = r.user_id
                 where r.user_id = %s
                   and (%s::boolean = true or r.is_active = true)
                 order by r.is_essential desc, r.due_day asc, lower(r.name) asc
@@ -117,7 +117,7 @@ def get_recurring_expense(user_id: int, rec_id: int) -> dict[str, Any] | None:
                        r.last_charged_ym, r.notes, r.created_at, r.start_date,
                        r.frequency, r.due_month, r.payment_mode, r.variable_amount
                 from recurring_expenses r
-                left join credit_cards c on c.id = r.card_id
+                left join credit_cards c on c.id = r.card_id and c.user_id = r.user_id
                 where r.user_id = %s and r.id = %s
                 """,
                 (user_id, int(rec_id)),
@@ -360,6 +360,10 @@ def update_recurring_expense(
     params.append(int(rec_id))
     with get_conn() as conn:
         with conn.cursor() as cur:
+            if "card_id = %s" in sets:  # mesma checagem do create: só cartão do próprio usuário
+                cur.execute("select id from credit_cards where id=%s and user_id=%s", (int(card_id), user_id))
+                if not cur.fetchone():
+                    raise ValueError("CARTAO_NAO_ENCONTRADO")
             cur.execute(
                 f"update recurring_expenses set {', '.join(sets)} where user_id=%s and id=%s",
                 params,

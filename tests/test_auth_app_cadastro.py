@@ -190,7 +190,7 @@ def test_b5_access_do_cadastro_abre_auth_me_e_origem_e_app(correio):
 # ── B8: e-mail já cadastrado ─────────────────────────────────────────────────
 
 @pytest.mark.parametrize("so_google", [False, True])
-def test_b8_email_existente_nao_enumera(correio, so_google):
+def test_b8_email_existente_409_e_dono_avisado(correio, so_google):
     email = _email()
     db.confirm_email_verification(
         email, db.create_email_verification(email, SENHA, _telefone())
@@ -210,8 +210,8 @@ def test_b8_email_existente_nao_enumera(correio, so_google):
         headers=_cabecalhos_app(),
         json={"email": email, "password": SENHA, "phone": _telefone()},
     )
-    assert r.status_code == 200, r.text
-    assert r.json() == {"status": "verification_sent", "email": email}
+    assert r.status_code == 409, r.text
+    assert r.json()["detail"] == db_support.EMAIL_JA_TEM_CONTA
     assert correio["avisos"] == [email]
     assert email not in correio["codigos"]
     with db.get_conn() as conn, conn.cursor() as cur:
@@ -221,6 +221,44 @@ def test_b8_email_existente_nao_enumera(correio, so_google):
             (hash_pii_optional(email, kind="email"),),
         )
         assert cur.fetchone()["n"] == 0
+
+
+# ── B12: senha acima do teto de 72 bytes do bcrypt ───────────────────────────
+
+@pytest.mark.parametrize("senha, status", [
+    ("a" * 73, 400),
+    ("\U0001F437" * 19, 400),  # 19 caracteres, 76 bytes
+    ("a" * 72, 200),
+    ("é" * 36, 200),  # 36 caracteres, 72 bytes
+])
+def test_b12_senha_acima_de_72_bytes_e_400_sem_codigo(correio, senha, status):
+    """O bcrypt levanta ValueError acima de 72 bytes, e o `except ValueError`
+    do register devolvia 409 — que a tela lê como "e-mail já tem conta". Sem a
+    checagem em bytes os dois primeiros casos voltam a 409; os de 72 bytes
+    exatos provam que o teto não recusa senha válida."""
+    email = _email()
+    r = TestClient(dashboard.app).post(
+        "/auth/register",
+        headers=_cabecalhos_app(),
+        json={"email": email, "password": senha, "phone": _telefone()},
+    )
+    assert r.status_code == status, r.text
+    with db.get_conn() as conn, conn.cursor() as cur:
+        cur.execute(
+            "select count(*) as n from email_verification_codes"
+            " where email_hash = %s and used_at is null",
+            (hash_pii_optional(email, kind="email"),),
+        )
+        gravados = cur.fetchone()["n"]
+    assert correio["avisos"] == []
+    if status == 400:
+        assert "longa demais" in r.json()["detail"]
+        assert email not in correio["codigos"]
+        assert gravados == 0
+    else:
+        assert r.json() == {"status": "verification_sent", "email": email}
+        assert email in correio["codigos"]
+        assert gravados == 1
 
 
 # ── B9: telefone de outra conta ──────────────────────────────────────────────

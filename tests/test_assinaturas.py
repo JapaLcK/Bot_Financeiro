@@ -3,6 +3,7 @@ montagem da lista (`core/services/assinaturas.py`) e a migração do flag de
 silêncio. Banco real; a Pluggy é mockada no cliente (`httpx.MockTransport`) ou
 no sync (`list_pluggy_recurring_payments`)."""
 from datetime import date, timedelta
+from decimal import Decimal
 from types import SimpleNamespace
 
 import httpx
@@ -11,7 +12,7 @@ import pytest
 import core.services.pluggy as pluggy
 import core.services.pluggy_sync as ps
 import db
-from _apoio_assinaturas import HOJE, conta, mensais, netflix_no_cartao, rp, semeia, tx
+from _apoio_assinaturas import HOJE, conta, dez_e_vinte_centavos, mensais, netflix_no_cartao, rp, semeia, tx
 from api.v2.assinaturas import Assinatura, Assinaturas
 from core.services.assinaturas import listar_assinaturas
 from core.services.pluggy import PluggyApiError
@@ -141,10 +142,10 @@ def test_netflix_no_cartao_sai_em_servicos_com_o_meio(user_id):
     assert lista["outras"] == []
     (it,) = lista["servicos"]
     assert it["meio"] == {"tipo": "cartao", "nome": "Nubank Mastercard", "final": "1234"}
-    assert (it["valor"], it["dia"], it["meses"]) == (39.9, 5, 3)
+    assert (it["valor"], it["dia"], it["meses"]) == (Decimal("39.9"), 5, 3)
     assert (it["ultima"], it["desde"], it["proxima"]) == ("2026-09-05", "2026-07-05", "2026-10-05")
     assert (it["status"], it["valor_anterior"], it["marcada"]) == ("ativa", None, False)
-    assert (lista["total_mensal"], lista["total_anual"]) == (39.9, 478.8)
+    assert (lista["total_mensal"], lista["total_anual"]) == (Decimal("39.9"), Decimal("478.8"))
     # Campo interno não vaza (o chat do Detetive manda o item inteiro ao modelo).
     assert set(it) == set(Assinatura.model_fields)
 
@@ -158,11 +159,18 @@ def test_conta_bank_sai_como_conta(user_id):
 
 # ── 5. Reajuste ──────────────────────────────────────────────────────────────
 
+def test_total_soma_exata_na_escala_gravada(user_id):
+    # `str`, não `Decimal`: Decimal("0.3") == Decimal("0.30").
+    dez_e_vinte_centavos(user_id)
+    lista = listar_assinaturas(user_id, HOJE)
+    assert (str(lista["total_mensal"]), str(lista["total_anual"])) == ("0.30", "3.60")
+
+
 def test_reajuste_vira_um_item_com_valor_anterior(user_id):
     txs = mensais("nf", [-39.9, -39.9, -44.9], desc="NETFLIX.COM")
     semeia(user_id, [conta("acc-1", txs)], [rp("NETFLIX.COM", -41.57, txs)])
     (it,) = listar_assinaturas(user_id, HOJE)["servicos"]
-    assert (it["valor"], it["valor_anterior"], it["reajuste_em"]) == (44.9, 39.9, "2026-09-05")
+    assert (it["valor"], it["valor_anterior"], it["reajuste_em"]) == (Decimal("44.9"), Decimal("39.9"), "2026-09-05")
 
 
 def test_reajuste_partido_em_dois_grupos_vira_um_item(user_id):
@@ -172,7 +180,7 @@ def test_reajuste_partido_em_dois_grupos_vira_um_item(user_id):
            [rp("NETFLIX.COM", -39.9, velho), rp("NETFLIX.COM", -59.9, novo)])
     lista = listar_assinaturas(user_id, HOJE)
     (it,) = lista["servicos"]
-    assert (it["valor"], it["valor_anterior"], it["meses"], lista["total_mensal"]) == (59.9, 39.9, 6, 59.9)
+    assert (it["valor"], it["valor_anterior"], it["meses"], lista["total_mensal"]) == (Decimal("59.9"), Decimal("39.9"), 6, Decimal("59.9"))
 
 
 def test_meses_conta_meses_distintos(user_id):
@@ -217,7 +225,7 @@ def test_parcela_com_o_mesmo_descritor_nao_derruba_a_assinatura(user_id):
            [rp("APPLE.COM/BILL", -14.9, icloud), rp("APPLE.COM/BILL", -499, parc)])
     lista = listar_assinaturas(user_id, HOJE)
     assert [(x["chave"], x["valor"], x["valor_anterior"]) for x in lista["servicos"]] == [
-        ("apple com bill", 14.9, None)]
+        ("apple com bill", Decimal("14.9"), None)]
     assert lista["outras"] == []
 
 
@@ -226,7 +234,7 @@ def test_movimento_interno_com_a_mesma_chave_nao_derruba_o_legitimo(user_id):
     fatura = mensais("ft", [-800] * 3, ultima=date(2026, 9, 20), category="Credit card payment")
     semeia(user_id, [conta("acc-1", ok + fatura)], [rp("NUBANK", -29.9, ok), rp("NUBANK", -800, fatura)])
     lista = listar_assinaturas(user_id, HOJE)
-    assert [(x["chave"], x["valor"]) for x in lista["servicos"] + lista["outras"]] == [("nubank", 29.9)]
+    assert [(x["chave"], x["valor"]) for x in lista["servicos"] + lista["outras"]] == [("nubank", Decimal("29.9"))]
 
 
 @pytest.mark.parametrize("status", ["PAUSED", "DELETED"])
