@@ -45,10 +45,11 @@ test("Express montado no #pp-express, acima do Payment Element, com os botões d
   await ctx.close();
 });
 
-for (const [nome, carteiras] of [["antes do availablepaymentmethodschange", "nunca"], ["sem nenhum botão (paymentMethods vazio)", null]]) {
+for (const [nome, carteiras] of [["antes do availablepaymentmethodschange", "nunca"], ["sem nenhum botão (paymentMethods vazio)", null],
+  ["com todas as carteiras indisponíveis", { applePay: { available: false }, googlePay: { available: false } }]]) {
   test(`${nome}: o Express fica sem altura e o Payment Element encosta no lugar dele (sem buraco)`, async () => {
     const { ctx, page } = await abrirPagina({ sdk: { carteiras } });
-    if (carteiras === null) await page.waitForFunction(() => window.__stripe.pmc === true);
+    if (carteiras !== "nunca") await page.waitForFunction(() => window.__stripe.pmc === true);
     await pausa(100);
     const ex = await caixa(page, "#pp-express"), pe = await caixa(page, "#pagamento");
     assert.equal(ex.h, 0);

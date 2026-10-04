@@ -198,7 +198,11 @@
       });
       $("pagamento").textContent = "";
       const ex = checkout.createExpressCheckoutElement({ buttonType: { applePay: "check-out", googlePay: "checkout" }, buttonHeight: 48 });
-      ex.on("availablepaymentmethodschange", function (e) { $("pp-express").classList.toggle("pp-espera", !(e && e.paymentMethods)); });
+      // O mapa vem com {available: false} quando nenhuma carteira aparece: só revela com ao menos uma disponível.
+      ex.on("availablepaymentmethodschange", function (e) {
+        const pm = (e && e.paymentMethods) || {};
+        $("pp-express").classList.toggle("pp-espera", !Object.keys(pm).some(function (k) { return pm[k] && pm[k].available; }));
+      });
       // A folha só abre com o carrinho parado (sem `resolve`, o Stripe não a abre) e, aberta, trava caixas, cupom e
       // Pagar até o `cancel` ou o `confirm`: no Google Pay do desktop ela é um popup e a página segue clicável.
       // ponytail: se o Stripe nunca mandar o `cancel`, a tela só destrava ao reabrir e fechar a folha (ou recarregar).

@@ -33,7 +33,7 @@ export const PAGINA = (extras = EXTRAS) => [200, { ...EMBUTIDO[1], pagina: true,
 // falsos fazem um POST a /__stripe/* para entrarem em `reqs` NA ORDEM, junto com o /billing/checkout/bump.
 // Modos da página própria: "acoes-erro", "acoes-pendura" e "acoes-rejeita" (loadActions); `sdk.semChange` suprime o `change`.
 // Express Checkout: o mount põe um botão #ex-btn cujo clique entrega um evento a on("confirm") (a folha da carteira
-// fica de fora); `sdk.carteiras` = o `paymentMethods` do availablepaymentmethodschange (padrão {applePay: true};
+// fica de fora); `sdk.carteiras` = o `paymentMethods` do availablepaymentmethodschange (padrão {applePay: {available: true}};
 // null = nenhum botão; "nunca" = o evento não chega). `reg.folha` conta as folhas que abriram (o `click` resolvido);
 // `sdk.folhaParada` = a folha abre e espera (sem confirm automático). `window.__exClica()` entrega o `click` sem passar
 // pelo DOM (o `inert`), `__exConfirma()` o confirm e `__exCancela()` o cancel. O confirm grava em /__stripe/confirm se recebeu ESSE evento (`ev`).
@@ -119,7 +119,7 @@ const STRIPE_FALSO = `(function () {
               window.__exCancela = function () { if (h.cancel) h.cancel({ expressPaymentType: "apple_pay" }); };
               b.onclick = window.__exClica;
               document.querySelector(sel).appendChild(b);
-              var pm = cfg.carteiras === undefined ? { applePay: true } : cfg.carteiras;
+              var pm = cfg.carteiras === undefined ? { applePay: { available: true } } : cfg.carteiras;
               if (pm === "nunca") return;  // o evento não chega
               setTimeout(function () { reg.pmc = true; if (h.availablepaymentmethodschange) h.availablepaymentmethodschange({ paymentMethods: pm || undefined }); }, 50);
             }, destroy: function () { reg.exDestroy++; } };
