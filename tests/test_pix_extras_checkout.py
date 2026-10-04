@@ -270,6 +270,18 @@ def test_flag_desligada_oferta_vazia(user_id, vendavel, asaas_falso, loja, monke
     assert loja["retrieves"] == []
 
 
+def test_sem_stripe_configurado_oferta_vazia_sem_consultar(user_id, vendavel, asaas_falso, loja,
+                                                          monkeypatch):
+    """Positivo antes: a mesma loja COM a chave tem as 3 caixas — o vazio é da chave, não da fixture."""
+    conta(user_id, "free", None)
+    monkeypatch.setattr(rotas.shared, "resolve_dashboard_user_id", lambda req: user_id)
+    assert len(client.get("/billing/pix-extras").json()["extras"]) == 3
+    loja["retrieves"].clear()
+    monkeypatch.setattr(dashboard, "STRIPE_SECRET_KEY", "")
+    assert client.get("/billing/pix-extras").json()["extras"] == []
+    assert loja["retrieves"] == []
+
+
 def test_pagina_propria_desligada_post_com_cadernos_e_409(user_id, vendavel, asaas_falso,
                                                           loja, monkeypatch):
     conta(user_id, "free", None)

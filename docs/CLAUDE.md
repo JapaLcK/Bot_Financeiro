@@ -573,7 +573,7 @@ no Google Pay do desktop a folha é um popup e a página segue clicável por bai
 (tardio, depois de um `cancel`) é ignorado; com ela, `confirm` →
 `actions.confirm({expressCheckoutConfirmEvent})`. Pré-requisito: o domínio registrado em "Domínios de métodos de
 pagamento" do Stripe no modo TESTE (staging) e no LIVE (produção) — sem isso os botões não aparecem. O desenho das
-caixas e do resumo mora em `frontend/pagamento-caixas.js`. Testes: `tests/frontend/pagamento_express.test.mjs`.
+caixas mora em `frontend/bump-caixas.js` (PR C, abaixo); o do resumo e do botão, em `frontend/pagamento-caixas.js`. Testes: `tests/frontend/pagamento_express.test.mjs`.
 
 A `/precos` (`startCheckout`) manda `pagina: true` só fora do app (`window.PB_IN_APP`: no
 app a `/assinar` vai ao hospedado, e uma sessão `elements` criada antes seria expirada e
@@ -682,6 +682,19 @@ não importa); outro conjunto cancela a remota e cria nova (DELETE que falha dá
 a URL) e a seleção da cobrança `pending` com QR vivo (Q6). A oferta é vazia, e o POST com
 cadernos dá 409, quando a venda Pix ou a `CHECKOUT_PAGINA_PROPRIA` estão desligadas
 (Q2), ou sem `STRIPE_SECRET_KEY`.
+
+**PR C: as caixas no modal do Pix.** As caixas (desenho e pintura) têm uma fonte só, o
+`frontend/bump-caixas.js` + `bump-caixas.css` (`window.PBBumpCaixas.montar/pintar`), e a
+/assinar (`pagamento-pagina.js`; o `pagamento-caixas.js` ficou só com resumo e botão) e o
+modal do Pix desenham com elas. O `frontend/pix-extras.js` busca o
+`GET /billing/pix-extras` ao abrir o formulário do documento, desenha as caixas com a
+seleção pendente marcada e guarda os ids marcados, que o `pixEnviar` manda em `extras`
+(também no reenvio da migração, quando o formulário já saiu da tela). Com o POST em voo
+as caixas ficam travadas, como o botão, e destravam quando ele volta. O 409
+`extras_indisponiveis` redesenha com a oferta nova, mantendo marcados só os ids que ainda
+valem; na caixa da migração vai para o toast. GET falhando ou sem `bump-caixas.js` = sem
+caixas, e o Pix do plano segue. O QR e o Purchase do pixel (home.html) usam `total_cents`.
+Testes: `tests/frontend/precos_pix_extras.test.mjs`.
 
 Rollback do código de N produtos: o código velho usa `on conflict (user_id,
 session_id)`, que exige a PK de 2 colunas. Antes de reverter, apagar as linhas extras

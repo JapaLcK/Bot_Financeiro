@@ -80,7 +80,7 @@ export default defineConfig([
     // O resto é o que um destes TRÊS arquivos publica e os outros consomem. O
     // pix-ui.js é divisão por assunto (as peças de UI que os dois usam); a
     // divisão entre checkout e poll é do teto de 350 linhas.
-    files: ["frontend/pix-ui.js", "frontend/pix-checkout.js", "frontend/pix-poll.js"],
+    files: ["frontend/pix-ui.js", "frontend/pix-checkout.js", "frontend/pix-poll.js", "frontend/pix-extras.js"],
     languageOptions: {
       globals: {
         currentCycle: "readonly",
@@ -109,6 +109,12 @@ export default defineConfig([
         // (o `let` do topo dele é ESTE nome, não outro). O pix-checkout.js só
         // LÊ, para não abrir um segundo QR por cima do primeiro.
         pixPoll: "writable",
+        // Declaradas no pix-extras.js (os cadernos extras, fora pelo teto de 350)
+        // e chamadas pelo pix-checkout.js, sempre por `typeof` ou depois de um POST com extras.
+        pixExtrasMontar: "readonly",
+        pixExtrasIds: "readonly",
+        pixExtrasRecusa: "readonly",
+        pixExtrasTravar: "readonly",
       },
     },
   },
