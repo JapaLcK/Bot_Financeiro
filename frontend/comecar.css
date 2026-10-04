@@ -175,6 +175,12 @@
   font-size: .88rem;
 }
 .onb-list li span { color: var(--ink-3); font-size: .74rem; margin-left: auto; }
+/* Estado da conexão do Open Finance: banco + rótulo na 1ª linha, detalhe e ação abaixo. */
+.onb-of-row { flex-wrap: wrap; }
+.onb-of-row small,
+.onb-of-row a { flex-basis: 100%; font-size: .78rem; line-height: 1.45; }
+.onb-of-row small { color: var(--ink-2); }
+.onb-of-row a { color: var(--pink); font-weight: 600; display: flex; align-items: center; min-height: 44px; }
 
 .onb-limit {
   font-size: .8rem;
@@ -325,8 +331,13 @@
 }
 
 /* Botão em requisição: o JS marca [aria-busy] enquanto a chamada está em voo,
-   pra clique duplo não criar cartão nem saldo em dobro. */
-[aria-busy="true"] { opacity: .6; pointer-events: none; }
+   pra clique duplo não criar cartão nem saldo em dobro. Com qualquer escrita em
+   voo o cartão inteiro fica [aria-busy] e os outros CTAs se apagam também, em
+   vez de engolir o clique calados — menos o "Pular tudo", que espera a escrita
+   terminar (comecar.js, skipAll). */
+button[aria-busy="true"],
+.onb-card[aria-busy="true"] [data-action]:not([data-action="skip-all"]) { opacity: .6; pointer-events: none; }
+.onb-card[aria-busy="true"] { cursor: progress; }
 
 @media (max-width: 480px) {
   .onb-card { border: 0; border-radius: 0; padding: 24px 18px 20px; box-shadow: none; }
