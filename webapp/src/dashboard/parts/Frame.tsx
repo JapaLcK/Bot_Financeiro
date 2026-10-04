@@ -21,7 +21,7 @@ export function Frame({ id, title, aside, children, className = "", real = false
   const to = useContext(FrameLink);
   const key = `${useContext(FrameScope)}w-${id}`;
   return (
-    <article className={`w ${className}`} id={key} aria-labelledby={`${key}-h`}>
+    <article className={`w ${className}`} id={key} aria-labelledby={`${key}-h`} data-dado={real && !DEMO ? "real" : "exemplo"}>
       <header className="w-head">
         <h2 id={`${key}-h`} className="w-title">
           <span>{title}</span>

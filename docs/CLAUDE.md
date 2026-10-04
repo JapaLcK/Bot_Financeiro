@@ -262,7 +262,11 @@ Sub-app FastAPI (`api/v2/app.py`) montado pelo monólito com `app.mount("/api/v2
   anda pela diferença na mesma transação, então apagar depois desfaz exato; `c<n>` = 409),
   cada um contra o `pode` da linha. A data da linha fundida com o banco
   (`db/lancamentos.FUNDIDO_SQL`) é travada em TODO canal por `update_launch_fields` (o PATCH
-  /launches do `/app` dá 409 com frase própria; o v2 dá 409 `nao_editavel`); **apagar**: só `l<n>` (cartão = 409). O `pode` é relido por
+  /launches do `/app` dá 409 com frase própria; o v2 dá 409 `nao_editavel`); **apagar**: só `l<n>` (cartão = 409). Apagar a linha fundida desfaz a junção na hora, em
+  todo canal (PR 2b-2): a transação do banco volta como linha `banco` (`reconciliation._desfaz`,
+  chamado por `delete_launch_and_rollback`). O v2 responde `{id}` sem aviso; WhatsApp, IA e
+  `/app` (chave `aviso` do DELETE /launches) mostram a frase "A transação do banco (R$ X, DESC)
+  continua na sua lista…"; o "apagar tudo" não desfaz. O `pode` é relido por
   `db/lancamentos.pode_da_linha` dentro da transação da escrita, depois do lock do usuário
   (`_lock_user`) e da linha (`exigir_pode=True` em `update_launch_fields`,
   `delete_launch_and_rollback` e `update_credit_transaction_fields`, este pelo
@@ -276,7 +280,8 @@ Sub-app FastAPI (`api/v2/app.py`) montado pelo monólito com `app.mount("/api/v2
 - `GET`/`POST /api/v2/guia` (`api/v2/guia.py`, estado em `db/guia.py`, tabela `guia_painel`,
   uma linha por usuário): o guia do `/painel` (#728). `PASSOS` em `api/v2/guia.py` é a fonte
   única do roteiro (`id`, `tela`, `ancora`, `acao`, `dado` `real`|`exemplo`, `fala {titulo,
-  texto}`, `avanca: "cliente"`); o cliente desenha o selo "exemplo" a partir de `dado`.
+  apresenta, texto}` — `apresenta` explica o bloco antes do "Entendi", `texto` diz o que
+  tocar depois dele —, `avanca: "cliente"`); o cliente desenha o selo "exemplo" a partir de `dado`.
   Resposta `{estado, motivo, passos: [{...roteiro, disponivel, motivo, feito}]}`. Passo 1
   (`resumo.saiu`) disponível quando o Saiu de `resumo_do_mes` (com a janela do plano) é > 0 no
   mês corrente OU no anterior; senão `motivo` = `sincronizando` (alguma conexão `updating`)
@@ -392,6 +397,13 @@ desafio de MFA ou cadastro pendente, e `apple/complete-signup`; o pendente mora 
 mesma `pending_google_signups`, com `provider='apple'`);
 `dashboard-link`/`dashboard-token` (link mágico); `link-code` (vincula WhatsApp e
 Discord à conta); `logout`; `refresh`; `account` (exclusão) e `account/export`.
+
+**IP do cliente: `core/client_ip.py`** (`client_ip`, `rate_limit_key`; #766). Atrás de
+Cloudflare → Railway, o `request.client.host` é o proxy do Railway (100.64/10). Com
+`CLOUDFLARE_ORIGIN_SECRET` (≥ 32 chars), o `CF-Connecting-IP` só vale quando a regra da
+Cloudflare manda o mesmo valor em `x-pigbank-cf-secret`; sem ela, o comportamento antigo
+(conexão da Cloudflare). Configuração em `.env.example`; a regra inteira e os riscos
+residuais, no docstring do módulo. A sonda `client_ip_sonda` (`system_event_logs`) mede.
 
 **Conta pela `/assinar` (funil v3 do quiz): `POST /auth/quiz/conta`**
 (`frontend/routes/quiz_signup.py`, com CSRF). Recebe e-mail, nome, WhatsApp
@@ -563,7 +575,16 @@ de 10 s olha `#pagamento iframe`. Sessão fechada (409 `sessao_fechada`, ou
 essa leitura, senão o `confirm` lança (docs.stripe.com/js/custom_checkout). Limites aceitos: rede lenta que passa dos 10 s do
 `loadActions` vai ao plano B; um `/bump` que volta depois do prazo é corrigido pela
 sincronização do Pagar; o Pagar faz 1 `/bump` de sincronização quando há caixas (conta nos 120/h por IP). Testes:
-`tests/frontend/pagamento_pagina*.test.mjs`.
+`tests/frontend/pagamento_pagina*.test.mjs`. As carteiras (Apple Pay/Google Pay) são o Express Checkout em
+`#pp-express`, acima do Payment Element (que fica com `wallets` "never", sem botão em dobro): sem altura até o
+`availablepaymentmethodschange` trazer botão, `inert` com `/bump`, cupom ou pagamento em voo (a folha nunca abre
+com o carrinho mudando; ela mostra o total da sessão, que é o que se cobra). O `click` do Express só chama o
+`resolve` (que abre a folha) com nada em voo, e então trava caixas, cupom e Pagar até o `cancel` ou o `confirm` —
+no Google Pay do desktop a folha é um popup e a página segue clicável por baixo. `confirm` sem folha aberta
+(tardio, depois de um `cancel`) é ignorado; com ela, `confirm` →
+`actions.confirm({expressCheckoutConfirmEvent})`. Pré-requisito: o domínio registrado em "Domínios de métodos de
+pagamento" do Stripe no modo TESTE (staging) e no LIVE (produção) — sem isso os botões não aparecem. O desenho das
+caixas mora em `frontend/bump-caixas.js` (PR C, abaixo); o do resumo e do botão, em `frontend/pagamento-caixas.js`. Testes: `tests/frontend/pagamento_express.test.mjs`.
 
 A `/precos` (`startCheckout`) manda `pagina: true` só fora do app (`window.PB_IN_APP`: no
 app a `/assinar` vai ao hospedado, e uma sessão `elements` criada antes seria expirada e
@@ -672,6 +693,19 @@ não importa); outro conjunto cancela a remota e cria nova (DELETE que falha dá
 a URL) e a seleção da cobrança `pending` com QR vivo (Q6). A oferta é vazia, e o POST com
 cadernos dá 409, quando a venda Pix ou a `CHECKOUT_PAGINA_PROPRIA` estão desligadas
 (Q2), ou sem `STRIPE_SECRET_KEY`.
+
+**PR C: as caixas no modal do Pix.** As caixas (desenho e pintura) têm uma fonte só, o
+`frontend/bump-caixas.js` + `bump-caixas.css` (`window.PBBumpCaixas.montar/pintar`), e a
+/assinar (`pagamento-pagina.js`; o `pagamento-caixas.js` ficou só com resumo e botão) e o
+modal do Pix desenham com elas. O `frontend/pix-extras.js` busca o
+`GET /billing/pix-extras` ao abrir o formulário do documento, desenha as caixas com a
+seleção pendente marcada e guarda os ids marcados, que o `pixEnviar` manda em `extras`
+(também no reenvio da migração, quando o formulário já saiu da tela). Com o POST em voo
+as caixas ficam travadas, como o botão, e destravam quando ele volta. O 409
+`extras_indisponiveis` redesenha com a oferta nova, mantendo marcados só os ids que ainda
+valem; na caixa da migração vai para o toast. GET falhando ou sem `bump-caixas.js` = sem
+caixas, e o Pix do plano segue. O QR e o Purchase do pixel (home.html) usam `total_cents`.
+Testes: `tests/frontend/precos_pix_extras.test.mjs`.
 
 Rollback do código de N produtos: o código velho usa `on conflict (user_id,
 session_id)`, que exige a PK de 2 colunas. Antes de reverter, apagar as linhas extras

@@ -31,9 +31,11 @@ test("sem Array.prototype.at: resumo, trajetória e patrimônio calculam", () =>
   assert.equal(rows[rows.length - 1].total, 19806.97);
 });
 
-// API ausente no Safari 14 (e sintaxe que o esbuild não rebaixa) → como aparece no bundle.
+// API ausente no Safari 14 (e sintaxe que o esbuild não rebaixa) → como aparece no bundle. O
+// `.at(` não conta depois de outro ponto: `...at(` é spread de uma função que o minificador
+// chamou de `at`.
 const TOKENS = {
-  "Array.prototype.at": /\.at\(/, structuredClone: /\bstructuredClone\b/, findLast: /\bfindLast/,
+  "Array.prototype.at": /(?<!\.)\.at\(/, structuredClone: /\bstructuredClone\b/, findLast: /\bfindLast/,
   "Object.hasOwn": /\bObject\.hasOwn\(/, toSorted: /\btoSorted\b/, toReversed: /\btoReversed\b/,
   toSpliced: /\btoSpliced\b/, "Object.groupBy": /\bObject\.groupBy\b/, withResolvers: /\bwithResolvers\b/,
   "AbortSignal.timeout": /\bAbortSignal\.timeout\b/, "AbortSignal.any": /\bAbortSignal\.any\b/,
@@ -42,12 +44,12 @@ const TOKENS = {
 };
 const achados = (js) => Object.keys(TOKENS).filter((k) => TOKENS[k].test(js));
 
-test("o matcher acha cada token numa amostra e não confunde hasOwnProperty com hasOwn", () => {
+test("o matcher acha cada token numa amostra e não confunde hasOwnProperty com hasOwn nem spread com .at", () => {
   const amostra = "a.at(-1);structuredClone(x);b.findLast(f);Object.hasOwn(o,k);c.toSorted();c.toReversed();"
     + "c.toSpliced(1);Object.groupBy(a,f);Promise.withResolvers();AbortSignal.timeout(1);AbortSignal.any([]);"
     + "requestIdleCallback(f);crypto.randomUUID();new WeakRef(o);class A{static{}};class B{#x;m(){return this.#x}}";
   assert.deepEqual(achados(amostra), Object.keys(TOKENS));
-  assert.deepEqual(achados("Object.hasOwnProperty.call(Element.prototype,`animate`);Math.atan(1)"), []);
+  assert.deepEqual(achados("Object.hasOwnProperty.call(Element.prototype,`animate`);Math.atan(1);f({...at(x)})"), []);
 });
 
 test("frontend/dashboard-app.js não usa API que o Safari 14 não tem", () => {

@@ -244,7 +244,7 @@ def test_pix_e_stripe_aceitam_a_MESMA_lista_de_planos(logado, vendavel,
 # porque só ele aceita POST sem body nenhum (`payload: ... | None = None`) —
 # a razão inteira está na docstring de `billing_create_checkout`. Não entra na
 # tabela: a asserção dela é de IGUALDADE entre as colunas, e aqui a diferença é
-# intencional. Fica ANOTADO porque `frontend/pix-checkout.js:269` tem a mesma
+# intencional. Fica ANOTADO porque `frontend/pix-checkout.js:271` tem a mesma
 # forma de `JSON.stringify` que apagou a chave e gerou a #352: se um dia ela
 # apagar `plan`, o Pix responde 422 e a /precos mostra o fallback genérico.
 
