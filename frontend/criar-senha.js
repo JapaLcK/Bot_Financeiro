@@ -61,8 +61,9 @@
     card.appendChild(el("img", {
       class: "pb-cs-piggy", src: "/brand/landing-mascot-150.webp", alt: "", width: "72", height: "72",
     }));
-    // Só sobe para conta com plano (os vereditos de plano vêm antes): quem acabou de pagar vê que deu certo.
-    card.appendChild(el("p", { class: "pb-cs-ok" }, "✅ Assinatura confirmada!"));
+    // Só sobe para conta com direito ao plano (os vereditos de plano vêm antes): quem acabou de pagar vê que deu
+    // certo. "Acesso", não "assinatura": cortesia do admin também chega aqui sem ter pago.
+    card.appendChild(el("p", { class: "pb-cs-ok" }, "✅ Acesso liberado!"));
     card.appendChild(el("h2", { id: "pb-cs-titulo" }, "Crie sua senha para proteger sua conta"));
     card.appendChild(el("p", { class: "pb-cs-sub" },
       "Se você levou algum caderno, ele chega no seu e-mail logo depois."));
