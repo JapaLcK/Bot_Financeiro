@@ -65,8 +65,29 @@ export async function abrir({ width = 1280, height = 800, guia = "oferecer", per
   return { ctx, page, s, erros };
 }
 export const acoes = (s) => s.posts.map((c) => c.passo ? `${c.acao}:${c.passo}` : c.acao);
-// 10 s: entre um passo e o seguinte, com `reduce`, vão a festa, a pausa e a troca (~3 s).
-export const esperaTitulo = (page, t) => page.locator("#guia-titulo", { hasText: t }).waitFor({ timeout: 10000 });
+// Entre passos (ou com o passo noutra tela) o guia espera o toque na aba: "Agora toca em X.",
+// com o anel nela (pousado) e o vão do véu sobre ela. Toca no meio do vão, o clique de verdade.
+const ABA = "Agora toca";
+export const vaoDoVeu = () => {
+  const [f0, f1, f2, f3] = [...document.querySelectorAll(".guia-veu")].map((e) => e.getBoundingClientRect());
+  return { left: f2.right, top: f0.bottom, right: f3.left, bottom: f1.top };
+};
+export const tocarAba = async (page) => {
+  await page.locator("#guia-titulo", { hasText: ABA }).waitFor({ timeout: 10000 });
+  await page.waitForFunction(() => !document.querySelector(".guia-anel").hidden, null, { timeout: 10000 }); // pousou
+  const v = await page.evaluate(vaoDoVeu);
+  await page.mouse.click((v.left + v.right) / 2, (v.top + v.bottom) / 2);
+};
+// Espera o título `t`; no caminho, como a pessoa, toca a aba que o guia pede (o FAZER faz o
+// mesmo com o "Entendi"). 10 s: festa (1,6 s), o voo até a aba e o da tela nova.
+export const esperaTitulo = async (page, t) => {
+  const alvo = page.locator("#guia-titulo", { hasText: t }), aba = page.locator("#guia-titulo", { hasText: ABA });
+  for (let i = 0; i < 100 && !(await alvo.count()); i++) {
+    if (!String(t).startsWith(ABA) && (await aba.count())) await tocarAba(page).catch(() => {});
+    else await page.waitForTimeout(100);
+  }
+  await alvo.waitFor({ timeout: 10000 });
+};
 export const bora = async (page) => { await page.getByRole("button", { name: "Bora", exact: true }).click(); await esperaTitulo(page, PASSOS[0].fala.titulo); };
 
 // O anel em volta do 1º visível de `sel`, com folga de 2 a 8 px (o voo já pousou).
@@ -83,8 +104,8 @@ export const entendi = (page) => botaoEntendi(page).click();
 // "Entendi" e espera o Piggy pousar: o anel em volta de `sel`.
 export const irAoAlvo = async (page, sel) => { await entendi(page); await anelNoAlvo(page, sel); };
 
-// A ação real de cada passo, por `acao` do roteiro, no alvo que o guia destaca (ele mesmo leva
-// até a tela do passo): até o anel chegar ao alvo, toca o "Entendi" se o balão apresenta o bloco
+// A ação real de cada passo, por `acao` do roteiro, no alvo que o guia destaca (já na tela do
+// passo: o esperaTitulo toca a aba): até o anel chegar ao alvo, toca o "Entendi" se o balão apresenta o bloco
 // (ele pode aparecer um quadro depois do título); aí toca o alvo.
 export const ALVO = { "mes.trocado": "mes.trocar", "categoria.aberta": "categorias.item", "piggy.perguntou": "piggy.chip" };
 export const FAZER = Object.fromEntries(Object.entries(ALVO).map(([acao, a]) => [acao, async (page) => {

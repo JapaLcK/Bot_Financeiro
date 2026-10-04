@@ -130,3 +130,66 @@ test("bolinhas: a atual é a larga e rosa, uma por passo; o \"Passo N de 3\" fic
   assert.deepEqual(p1, [[[18, true], [6, false], [6, false]], "Passo 1 de 3", 1]);
   assert.deepEqual(p2, [[[6, false], [18, true], [6, false]], "Passo 2 de 3", 1]);
 });
+
+// O que guarda a mola e o recorte (voo, mira, último recorte, furo) é do Piggy montado: fechar em
+// pleno voo e reabrir antes de a mola assentar não pode dar ao Piggy e ao balão novos o transform
+// da mola órfã. Relógio de verdade: o defeito só aparece com o tempo correndo.
+test("fechar em pleno voo (Pular e Esc) e reabrir pela Ajuda em < 1 s: o Piggy e o balão nascem sem a mola anterior", async () => {
+  const r = [];
+  for (const como of ["Pular", "Esc"]) {
+    const { ctx, page, erros } = await abrir({ motion: "no-preference" });
+    await bora(page);
+    await page.waitForTimeout(1200);
+    await entendi(page);
+    await page.waitForTimeout(80); // a mola no ar
+    if (como === "Esc") await page.keyboard.press("Escape");
+    else await page.getByRole("button", { name: "Pular guia" }).click();
+    await page.waitForTimeout(50);
+    await page.getByRole("button", { name: "Ajuda" }).click();
+    await esperaTitulo(page, PASSOS[0].fala.titulo);
+    await page.waitForTimeout(50);
+    r.push([como, await page.evaluate(() => [".guia-piggy", ".guia-balao"].map((s) => document.querySelector(s).style.transform)), erros]);
+    await ctx.close();
+  }
+  assert.deepEqual(r, [["Pular", ["", ""], []], ["Esc", ["", ""], []]]);
+});
+
+// A entrada do Piggy (CSS `guia-entra`, 620 ms) por cima da mola: Bora tocado durante ela fazia o
+// Piggy saltar ao destino e voltar quando ela acabava. Mede o Piggy a cada quadro: nenhum passo
+// de quadro chega à metade do caminho todo.
+test("Bora durante a entrada do Piggy: a mola sem salto (nenhum quadro anda metade do caminho)", async () => {
+  const { ctx, page } = await abrir({ motion: "no-preference" });
+  await page.getByRole("button", { name: "Bora", exact: true }).waitFor();
+  const entrando = await page.evaluate(() => {
+    const pg = document.querySelector(".guia-piggy");
+    window.__q = [];
+    const f = () => { const r = pg.getBoundingClientRect(); window.__q.push([r.left + r.width / 2, r.top + r.height / 2]); if (window.__q.length < 120) requestAnimationFrame(f); };
+    f();
+    return pg.getAnimations().some((a) => a instanceof CSSAnimation && a.playState === "running");
+  });
+  await page.getByRole("button", { name: "Bora", exact: true }).click();
+  await page.waitForTimeout(2200);
+  const q = await page.evaluate(() => window.__q);
+  await ctx.close();
+  const d = (a, b) => Math.hypot(a[0] - b[0], a[1] - b[1]);
+  const passo = Math.max(...q.slice(1).map((p, i) => d(p, q[i]))), todo = d(q[0], q.at(-1));
+  console.log(`# entrada × mola: maior passo ${Math.round(passo)} px de ${Math.round(todo)} px`);
+  assert.ok(entrando, "o Bora não caiu dentro da entrada: o teste não mede nada");
+  assert.ok(todo > 100 && passo < todo / 2, `salto de ${Math.round(passo)} px em ${Math.round(todo)} px`);
+});
+
+// Parado (reduce, nada mudando), o rAF do guia não reescreve o DOM: nem o path do véu, nem o
+// `hidden` do anel (setAttribute com o mesmo valor também é escrita), nem estilo.
+test("guia parado 2 s: zero escritas no path do véu, no hidden do anel e no estilo do Piggy, do balão, das faixas e do anel", async () => {
+  const { ctx, page } = await abrir();
+  await bora(page);
+  await page.waitForTimeout(400);
+  const n = await page.evaluate(() => new Promise((ok) => {
+    const c = { d: 0, hidden: 0, style: 0 };
+    const o = new MutationObserver((ms) => ms.forEach((m) => { if (m.target.matches(".guia-sombra path, .guia-piggy, .guia-balao, .guia-veu, .guia-anel")) c[m.attributeName]++; }));
+    o.observe(document.body, { attributes: true, attributeFilter: ["d", "hidden", "style"], subtree: true });
+    setTimeout(() => { o.disconnect(); ok(c); }, 2000);
+  }));
+  await ctx.close();
+  assert.deepEqual(n, { d: 0, hidden: 0, style: 0 });
+});

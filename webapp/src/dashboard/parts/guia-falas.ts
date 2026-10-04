@@ -11,6 +11,8 @@ export const MOTIVO: Record<NonNullable<Passo["motivo"]>, { texto: string; link?
   conexao_com_erro: { texto: "A conexão com o seu banco deu erro, e esse número não chega. Dá uma olhada nela.", link: "Ver conexão" },
 };
 
-// "pro Piggy", "pra Gastos": a preposição concorda com o nome da tela (route().short).
+// "pro Piggy", "pra Gastos"; com `em`, "no Piggy", "em Gastos": a preposição concorda com o
+// nome da tela (route().short; o Piggy é masculino).
 const PRA: Record<Passo["tela"], string> = { resumo: "pro", gastos: "pra", piggy: "pro" };
-export const destino = (t: Passo["tela"]) => `${PRA[t]} ${route(ROTA[t]).short}`;
+const EM: Record<Passo["tela"], string> = { resumo: "no", gastos: "em", piggy: "no" };
+export const destino = (t: Passo["tela"], em = false) => `${(em ? EM : PRA)[t]} ${route(ROTA[t]).short}`;

@@ -1,8 +1,8 @@
 // O movimento do guia (parts/Guia.tsx) e a fonte única dos seus tempos. O voo é a mola do
 // product-tour que o dono trouxe (#728): o Piggy, o balão e o recorte aceso andam juntos nela,
-// num quadro só, no rAF do guia (o mesmo que segue a mira). Pulo e aperto são WAAPI e nunca
-// rodam com a mola no ar (a ida espera TEMPO.voo; a festa não troca a mira). Nada disso é CSS,
-// e o 1 ms global do base.css (reduce) não o alcança: o portão do reduce é `calmo()`. Safari
+// num quadro só, no rAF do guia (o mesmo que segue a mira). O pulo é WAAPI e nunca roda com a
+// mola no ar (a festa não troca a mira). Nada disso é CSS, e o 1 ms global do base.css
+// (reduce) não o alcança: o portão do reduce é `calmo()`. Safari
 // 14: a mola é só conta (o gerador do framer-motion, sem WAAPI); no WAAPI, sempre primeiro e
 // último quadro, só `transform`, inclinação em número e nunca a promise `finished` (o cancel do
 // Esc a rejeitaria).
@@ -10,7 +10,7 @@ import { spring } from "framer-motion";
 import type { Caixa } from "./guia-posicao";
 
 // `voo`: quanto a mola leva para assentar (dashboard_v2_guia_mola.test.mjs prova que assentou).
-export const TEMPO = { voo: 1000, festa: 1600, pausa: 800, aperto: 220, troca: 500 };
+export const TEMPO = { voo: 1000, festa: 1600 };
 // Calma (dono: "ritmo calmo, voo ~1 s") e sem quique: amortecimento crítico, 18 = 2·√(81·1).
 // Medido em 2026-10-03, remeça se mexer nos números: em webapp/,
 // `calcGeneratorDuration(spring({ keyframes: [0, 1], stiffness: 81, damping: 18, mass: 1 }), 1)`
@@ -18,8 +18,6 @@ export const TEMPO = { voo: 1000, festa: 1600, pausa: 800, aperto: 220, troca: 5
 const MOLA = spring({ keyframes: [0, 1], stiffness: 81, damping: 18, mass: 1 });
 
 export const calmo = () => !matchMedia("(prefers-reduced-motion: reduce)").matches;
-// Voo e aperto somem com reduce; a pausa e a troca de tela não (decisão do dono, D4).
-export const dura = (k: "voo" | "aperto") => (calmo() ? TEMPO[k] : 0);
 
 const minhas = new WeakMap<Element, Animation>();
 function animar(el: Element, quadros: Keyframe[], duration: number, easing = "ease-out") {
@@ -28,7 +26,6 @@ function animar(el: Element, quadros: Keyframe[], duration: number, easing = "ea
   if (!calmo()) return;
   minhas.set(el, el.animate(quadros, { duration, easing }));
 }
-export const parar = (el: Element | null | undefined) => { if (el) { minhas.get(el)?.cancel(); minhas.delete(el); } };
 
 export const tiltDe = (el: HTMLElement) => parseFloat(el.style.getPropertyValue("--tilt")) || 0;
 
@@ -42,9 +39,12 @@ const desloca = (el: HTMLElement, de: DOMRect) => [
 const bordas = (c: Caixa) => [c.left, c.top, c.right, c.bottom];
 
 // A mira mudou: grava de onde cada um parte. O recorte parte do último pintado (no 1º, nasce do
-// centro do novo). Com reduce não há voo: tudo já no destino.
+// centro do novo). Com reduce não há voo: tudo já no destino. A entrada do Piggy (CSS
+// `guia-entra`, 620 ms) acaba aqui: no ar, ela taparia o transform da mola, e o Piggy
+// saltaria para o destino e de volta ao fim dela.
 export function partir(pg: HTMLElement, de: DOMRect, tiltA: number, b: HTMLElement, deB: DOMRect, ultimo: Caixa | null, aceso: Caixa | null): Voo | null {
   if (!calmo()) return null;
+  pg.getAnimations().forEach((a) => { if (a instanceof CSSAnimation) a.finish(); });
   const [dx, dy] = desloca(pg, de), x = aceso && (aceso.left + aceso.right) / 2, y = aceso && (aceso.top + aceso.bottom) / 2;
   const de4 = ultimo ? bordas(ultimo) : [x, y, x, y];
   return { t0: performance.now(), pg: [dx, dy, tiltA], arco: Math.min(120, Math.hypot(dx, dy) / 3), b: desloca(b, deB), aceso: aceso && bordas(aceso).map((v, i) => de4[i]! - v) };
@@ -72,19 +72,4 @@ export function pular(el: HTMLElement) {
     { offset: 0.75, transform: "translateY(-6px) rotate(-4deg) scale(1)" },
     { transform: t },
   ], 760);
-}
-
-// O Piggy aperta a aba: ele desce um pouco e a aba afunda.
-export function apertar(piggy: HTMLElement, aba: HTMLElement) {
-  const t = tiltDe(piggy);
-  animar(piggy, [{ transform: `rotate(${t}deg)` }, { offset: 0.5, transform: `translateY(6px) rotate(${t}deg)` }, { transform: `rotate(${t}deg)` }], TEMPO.aperto);
-  animar(aba, [{ transform: "scale(1)" }, { offset: 0.5, transform: "scale(0.9)" }, { transform: "scale(1)" }], TEMPO.aperto);
-}
-
-// A troca de tela que o guia faz dura TEMPO.troca (styles/guia.css); a da pessoa, não.
-export function troca(liga: boolean) {
-  const h = document.documentElement;
-  if (!liga) { h.removeAttribute("data-guia-troca"); return; }
-  h.style.setProperty("--guia-troca", `${TEMPO.troca}ms`);
-  h.setAttribute("data-guia-troca", "");
 }

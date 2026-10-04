@@ -102,8 +102,8 @@ export function posicionar(el: HTMLElement | null, piggy: HTMLElement | null, ba
 }
 
 // O véu (decisão do dono): escurece a tela menos o recorte `aceso` (o que se toca agora, ou o
-// que o guia apresenta sem toque: o bloco, a aba antes da troca; a tabela do Guia.tsx nunca acende
-// dois) e bloqueia o toque fora do `toque`. Quatro faixas transparentes em volta do toque pegam o
+// que o guia apresenta sem toque: o bloco; a tabela do Guia.tsx nunca acende dois) e bloqueia
+// o toque fora do `toque`. Quatro faixas transparentes em volta do toque pegam o
 // resto; o escuro é um path `evenodd`. Sem toque, uma faixa cobre a tela inteira. No voo o recorte
 // desliza na mola (guia-voo.ts) e o toque é o pedaço do alvo que já está aceso (`corte`): nunca
 // maior que o aceso. Pousado, os dois são o retângulo exato do alvo. O anel fica F px por fora.
@@ -127,8 +127,11 @@ export function cobrir(aceso: Caixa | null, toque: Caixa | null, anelEm: HTMLEle
     const [x, y, w, h] = caixas[i];
     Object.assign(f.style, { left: `${x}px`, top: `${y}px`, width: `${Math.max(0, w)}px`, height: `${Math.max(0, h)}px` });
   });
-  sombra.setAttribute("d", `M0 0H${vw}V${vh}H0Z${aceso ? furo(aceso) : ""}`);
-  anel.hidden = !anelEm;
+  // O rAF do guia roda a cada quadro, também parado: atributo só se mudou (o estilo igual o
+  // navegador já não reescreve; setAttribute, sim).
+  const d = `M0 0H${vw}V${vh}H0Z${aceso ? furo(aceso) : ""}`;
+  if (sombra.getAttribute("d") !== d) sombra.setAttribute("d", d);
+  if (anel.hidden !== !anelEm) anel.hidden = !anelEm;
   if (!anelEm) return;
   const r = anelEm.getBoundingClientRect();
   Object.assign(anel.style, { left: `${r.left - F}px`, top: `${r.top - F}px`, width: `${r.width + 2 * F}px`, height: `${r.height + 2 * F}px`, borderRadius: `${raioDe(anelEm) + F}px` });

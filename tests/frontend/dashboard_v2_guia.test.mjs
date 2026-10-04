@@ -2,7 +2,7 @@
 // servidor. A tela (véu, anel, foco, posição, movimento) está em dashboard_v2_guia_tela.test.mjs.
 //   · convite só com `oferecer`, perfil escolhido e no Resumo; `em_andamento` nunca convida;
 //   · cada passo avança pela ação real (seta do mês, categoria em Gastos, pergunta ao Piggy),
-//     só depois de o passo começar, e comemora só com o 200 do POST; o guia leva até a tela;
+//     só depois de o passo começar, e comemora só com o 200 do POST; entre telas, a aba espera o toque;
 //   · 500 → "Tentar de novo"; 409 passo_indisponivel → orientação do motivo, sem "Tentar";
 //   · Esc/Pular dispensam; Ajuda (menu, barra de baixo) e Cmd-K reabrem;
 //   · âncora no bloco certo (data-dado = dado do roteiro).
@@ -52,8 +52,8 @@ test("convite: com `oferecer` e perfil no Resumo aparece e grava `visto`; sem pe
   }
 });
 
-// O guia leva sozinho até a tela de cada passo, depois da comemoração ("Vem comigo pra X").
-test("os 3 passos pela ação real, o guia levando de tela em tela: nada sai sem ela; categoria já escolhida não conta", async () => {
+// Depois da comemoração ("Vem comigo pra X") o guia pede a aba da tela seguinte; a pessoa toca.
+test("os 3 passos pela ação real, de tela em tela pela aba: nada sai sem ela; categoria já escolhida não conta", async () => {
   // Categoria escolhida em Gastos ANTES do guia; o convite aparece ao voltar ao Resumo.
   const { ctx, page, s, erros } = await abrir({ rota: "/gastos" });
   await page.locator('[data-guia="categorias.lista"] .cat').first().click();
@@ -65,7 +65,7 @@ test("os 3 passos pela ação real, o guia levando de tela em tela: nada sai sem
   await FAZER["mes.trocado"](page);
   const focoAcao = await page.evaluate(() => document.activeElement?.getAttribute("aria-label"));
   await page.locator(".guia-balao").getByText("Passo feito. Vem comigo pra Gastos.").waitFor({ timeout: 5000 });
-  const naFesta = await page.evaluate(() => location.hash); // a comemoração é a pausa antes de ir
+  const naFesta = await page.evaluate(() => location.hash); // na comemoração ninguém navega
   await esperaTitulo(page, PASSOS[1].fala.titulo);
   await naRota(page, "#/gastos");
   await page.waitForTimeout(800);
@@ -122,14 +122,14 @@ test("conversa já começada (sem chips): o alvo do passo do Piggy é o campo da
   assert.deepEqual(acoes(s), ["reabrir", "feito:piggy.pergunta"]);
 });
 
-test("voltou pelo navegador: \"Volta pra Gastos\" com o Piggy na aba, sem ser puxado de novo; a aba leva de volta", async () => {
+test("voltou pelo navegador: \"Agora toca em Gastos.\" com o Piggy na aba, sem ser puxado de novo; a aba leva de volta", async () => {
   const { ctx, page, s } = await abrir({ guia: "dispensado" }); // o 1 feito: abre no passo 2
   await page.locator(".rail").getByRole("button", { name: "Ajuda" }).click();
   await esperaTitulo(page, PASSOS[1].fala.titulo);
   await naRota(page, "#/gastos");
   await page.locator('[data-guia="categorias.item"]').waitFor();
   await page.goBack();
-  await page.locator(".guia-balao").getByText("Volta pra Gastos.").waitFor({ timeout: 5000 });
+  await page.locator(".guia-balao").getByText("Agora toca em Gastos.").waitFor({ timeout: 5000 });
   await page.waitForTimeout(1200);
   const r = [await page.evaluate(() => location.hash), await piggyEm(page, '.rail [data-guia="nav.gastos"]')];
   await page.locator('.rail [data-guia="nav.gastos"]').click();
