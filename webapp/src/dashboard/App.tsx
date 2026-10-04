@@ -6,6 +6,7 @@ import type { DashState } from "./lib/types";
 import { useDash } from "./useDash";
 import { AskBar } from "./parts/AskBar";
 import { Command } from "./parts/Command";
+import { Guia, abrirGuia, navGuia } from "./parts/Guia";
 import { Tip } from "./parts/Tip";
 import { PAGES } from "./pages";
 import { NO_MONTH, RAIL, TABBAR, href, route, useRoute, type Path } from "./router";
@@ -39,10 +40,10 @@ function Topbar({ s, path }: { s: DashState; path: Path }) {
   const i = MESES.indexOf(mes);
   return (
     <header className="topbar" data-stuck={stuck}>
-      {!NO_MONTH.includes(path) && <div className="month-switch" role="group" aria-label="Mês exibido">
-        <button className="icon-btn" type="button" aria-label="Mês anterior" disabled={i === 0} onClick={() => escolherMes(MESES[i - 1])}><i className="ph ph-arrow-left" aria-hidden="true" /></button>
+      {!NO_MONTH.includes(path) && <div className="month-switch" role="group" aria-label="Mês exibido" data-guia="mes.seletor">
+        <button className="icon-btn" type="button" aria-label="Mês anterior" disabled={i === 0} data-guia={i > 0 ? "mes.trocar" : undefined} onClick={() => escolherMes(MESES[i - 1])}><i className="ph ph-arrow-left" aria-hidden="true" /></button>
         <p className="month-title" aria-live="polite">{monthTitle(mes).replace(/ (\d{4})$/, "")}<span className="month-year"> {mes.slice(0, 4)}</span></p>
-        <button className="icon-btn" type="button" aria-label="Próximo mês" disabled={i === MESES.length - 1} onClick={() => escolherMes(MESES[i + 1])}><i className="ph ph-arrow-right" aria-hidden="true" /></button>
+        <button className="icon-btn" type="button" aria-label="Próximo mês" disabled={i === MESES.length - 1} data-guia={i === 0 ? "mes.trocar" : undefined} onClick={() => escolherMes(MESES[i + 1])}><i className="ph ph-arrow-right" aria-hidden="true" /></button>
       </div>}
       <span className="topbar-spacer" />
       <button className="cmd-trigger" type="button" aria-label="Buscar ou ir para" aria-keyshortcuts="Meta+K Control+K /" onClick={() => window.dispatchEvent(new Event("dash:command"))}>
@@ -71,6 +72,8 @@ export function App() {
   return (
     <>
       <a className="skip" href="#main" onClick={(e) => { e.preventDefault(); document.getElementById("page-title")?.focus(); }}>Pular para o conteúdo</a>
+      {/* Logo no começo do DOM: o balão do guia fica no começo da ordem de leitura (o Tab, com o véu, é dele). */}
+      <Guia s={s} path={path} />
       <div className="shell">
         <nav className="rail" aria-label="Páginas do painel">
           <a className="brand" href={href("/")}>
@@ -80,11 +83,12 @@ export function App() {
           <ul className="rail-list">
             {RAIL.map(route).map((r) => (
               <li key={r.path}>
-                <a href={href(r.path)} aria-current={path === r.path ? "page" : undefined} title={r.label}>
+                <a href={href(r.path)} aria-current={path === r.path ? "page" : undefined} title={r.label} data-guia={navGuia(r.path)}>
                   <i className={`ph ${r.icon}`} aria-hidden="true" /><span className="rail-label">{r.label}</span>
                 </a>
               </li>
             ))}
+            {!DEMO && <li><button type="button" aria-label="Ajuda" title="Ajuda" onClick={abrirGuia}><i className="ph ph-question" aria-hidden="true" /><span className="rail-label">Ajuda</span></button></li>}
           </ul>
           <div className="rail-foot">
             <RailSync />
@@ -98,11 +102,11 @@ export function App() {
           </main>
         </div>
       </div>
-      <nav className="tabbar" aria-label="Páginas do painel">
+      <nav className={DEMO ? "tabbar" : "tabbar tabbar-ajuda"} aria-label="Páginas do painel">
         {TABBAR.map((p) => {
           const r = route(p);
           return (
-            <a key={p} href={href(p)} aria-current={path === p ? "page" : undefined} data-tab={p === "/piggy" ? "piggy" : undefined}>
+            <a key={p} href={href(p)} aria-current={path === p ? "page" : undefined} data-tab={p === "/piggy" ? "piggy" : undefined} data-guia={navGuia(p)}>
               {p === "/piggy"
                 ? <img src={ICON} alt="" width={26} height={26} />
                 : <i className={`ph ${r.icon}`} aria-hidden="true" />}
@@ -110,6 +114,7 @@ export function App() {
             </a>
           );
         })}
+        {!DEMO && <button type="button" aria-label="Ajuda" onClick={abrirGuia}><i className="ph ph-question" aria-hidden="true" /><span>Ajuda</span></button>}
       </nav>
       <AskBar path={path} />
       <Tip />
