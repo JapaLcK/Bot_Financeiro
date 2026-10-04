@@ -44,10 +44,11 @@ export const RESPOSTAS = JSON.parse(readFileSync(join(RAIZ, "tests", "frontend",
  * `cheia` no Plus e no Pro e o 403 `pro_required` nos outros; o `/api/v2/eventos` (SSE) fica
  * pendente para sempre: stream aberto e mudo. O `/api/v2/perfil` guarda o que o PUT gravou
  * (começa em `perfil`; `null` = nunca escolheu, o modal abre); `/contas` e `/resumo-do-mes`
- * respondem as fixtures de nome `contas` e `resumo`. Registrar de novo vale para as
+ * respondem as fixtures de nome `contas` e `resumo`; o GET `/guia`, a de nome `guia` (padrão
+ * `concluido`: o convite do guia não aparece nos testes que não são dele). Registrar de novo vale para as
  * próximas requisições: no Playwright a rota registrada por último vence.
  */
-export async function servir(ctx, raiz = FRONTEND, { plano = "pro", perfil = "padrao", contas = "todos_os_estados", resumo = "exato" } = {}) {
+export async function servir(ctx, raiz = FRONTEND, { plano = "pro", perfil = "padrao", contas = "todos_os_estados", resumo = "exato", guia = "concluido" } = {}) {
   const me = RESPOSTAS.me[plano];
   if (!me) throw new Error(`plano sem fixture: ${plano}`);
   let atual = perfil;
@@ -62,6 +63,7 @@ export async function servir(ctx, raiz = FRONTEND, { plano = "pro", perfil = "pa
     }
     if (url.pathname === "/api/v2/contas") return r.fulfill({ json: RESPOSTAS.contas[contas] });
     if (url.pathname === "/api/v2/resumo-do-mes") return r.fulfill({ json: RESPOSTAS.resumo_do_mes[resumo] });
+    if (url.pathname === "/api/v2/guia" && r.request().method() === "GET") return r.fulfill({ json: RESPOSTAS.guia[guia] });
     if (url.pathname === "/api/v2/assinaturas" && r.request().method() === "GET") {
       const pago = plano === "plus" || plano === "pro";
       const e = RESPOSTAS.erros["403_pro_required"];

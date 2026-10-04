@@ -2,6 +2,7 @@ import { useState } from "react";
 import { ask } from "../lib/conversation";
 import type { Path } from "../router";
 import { ICON } from "../lib/brand";
+import { CHAT_REAL } from "../lib/v2";
 
 // A barra de conversa com o Piggy. No desktop flutua em todas as páginas; no celular só
 // aparece na página da conversa (lá o acesso é o botão do meio). Na #/piggy ela é a
@@ -13,6 +14,7 @@ export function AskBar({ path }: { path: Path }) {
 
   return (
     <form className="askbar" data-here={here || undefined} role="search" aria-label="Conversa com o Piggy"
+      data-guia="piggy.pergunta" data-dado={CHAT_REAL ? "real" : "exemplo"}
       onSubmit={(e) => {
         e.preventDefault();
         const t = text.trim();

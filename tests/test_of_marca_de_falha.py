@@ -22,7 +22,7 @@ a O nunca roda). Sem `relogio_fixo`: ele congela o `datetime` de `pluggy_sync`, 
 dois 404 sairiam com o mesmo `observed_at`.
 
 CONTROLES (medidos em 2026-09-30; remeça se mexer no código):
-  negativo, lista da F trocada pelo CAS por valor (`status_reason_visto`): c9,
+  negativo, lista da F trocada por um CAS por valor do motivo (a ideia que o job usava antes do PR-C1): c9,
       c9b e c9c vermelhos;
   negativo, `no_accounts` na lista: c6 e c18/c19 vermelhos;
   negativo, sem a O: c8 e c22 vermelhos;

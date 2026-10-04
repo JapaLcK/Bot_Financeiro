@@ -280,7 +280,8 @@ Sub-app FastAPI (`api/v2/app.py`) montado pelo monólito com `app.mount("/api/v2
 - `GET`/`POST /api/v2/guia` (`api/v2/guia.py`, estado em `db/guia.py`, tabela `guia_painel`,
   uma linha por usuário): o guia do `/painel` (#728). `PASSOS` em `api/v2/guia.py` é a fonte
   única do roteiro (`id`, `tela`, `ancora`, `acao`, `dado` `real`|`exemplo`, `fala {titulo,
-  texto}`, `avanca: "cliente"`); o cliente desenha o selo "exemplo" a partir de `dado`.
+  apresenta, texto}` — `apresenta` explica o bloco antes do "Entendi", `texto` diz o que
+  tocar depois dele —, `avanca: "cliente"`); o cliente desenha o selo "exemplo" a partir de `dado`.
   Resposta `{estado, motivo, passos: [{...roteiro, disponivel, motivo, feito}]}`. Passo 1
   (`resumo.saiu`) disponível quando o Saiu de `resumo_do_mes` (com a janela do plano) é > 0 no
   mês corrente OU no anterior; senão `motivo` = `sincronizando` (alguma conexão `updating`)
@@ -567,7 +568,16 @@ de 10 s olha `#pagamento iframe`. Sessão fechada (409 `sessao_fechada`, ou
 essa leitura, senão o `confirm` lança (docs.stripe.com/js/custom_checkout). Limites aceitos: rede lenta que passa dos 10 s do
 `loadActions` vai ao plano B; um `/bump` que volta depois do prazo é corrigido pela
 sincronização do Pagar; o Pagar faz 1 `/bump` de sincronização quando há caixas (conta nos 120/h por IP). Testes:
-`tests/frontend/pagamento_pagina*.test.mjs`.
+`tests/frontend/pagamento_pagina*.test.mjs`. As carteiras (Apple Pay/Google Pay) são o Express Checkout em
+`#pp-express`, acima do Payment Element (que fica com `wallets` "never", sem botão em dobro): sem altura até o
+`availablepaymentmethodschange` trazer botão, `inert` com `/bump`, cupom ou pagamento em voo (a folha nunca abre
+com o carrinho mudando; ela mostra o total da sessão, que é o que se cobra). O `click` do Express só chama o
+`resolve` (que abre a folha) com nada em voo, e então trava caixas, cupom e Pagar até o `cancel` ou o `confirm` —
+no Google Pay do desktop a folha é um popup e a página segue clicável por baixo. `confirm` sem folha aberta
+(tardio, depois de um `cancel`) é ignorado; com ela, `confirm` →
+`actions.confirm({expressCheckoutConfirmEvent})`. Pré-requisito: o domínio registrado em "Domínios de métodos de
+pagamento" do Stripe no modo TESTE (staging) e no LIVE (produção) — sem isso os botões não aparecem. O desenho das
+caixas e do resumo mora em `frontend/pagamento-caixas.js`. Testes: `tests/frontend/pagamento_express.test.mjs`.
 
 A `/precos` (`startCheckout`) manda `pagina: true` só fora do app (`window.PB_IN_APP`: no
 app a `/assinar` vai ao hospedado, e uma sessão `elements` criada antes seria expirada e
