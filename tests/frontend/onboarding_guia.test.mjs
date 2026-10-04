@@ -243,8 +243,43 @@ for (const vp of VIEWPORTS) {
     await p2.dblclick('[data-action="retry-complete"]');
     await new Promise((r) => setTimeout(r, 800));
     assert.equal(c2.posts.filter((b) => b.completed).length - antes, 1, JSON.stringify(c2.posts));
-    assert.ok(await p2.isVisible('[data-role="done-ok"]'), "Tudo pronto não apareceu");
+    // Em 1280 o 2º clique cai no "Pular tudo", que agora espera a conclusão em
+    // voo e leva ao app (sem novo completed) em vez de ser engolido.
+    assert.ok(/\/home$/.test(p2.url()) || await p2.isVisible('[data-role="done-ok"]'), "nem Tudo pronto nem o app");
     await p2.close();
+  });
+
+  test(`${tag} "Pular tudo" durante o "Salvando…" do passo 5 espera a conclusão e vai ao /home com UM completed`, async () => {
+    // Controle negativo: tirar o busyBegin/busyEnd do completeOnEnter deixa o
+    // skipAll mandar o próprio completed por cima do auto-save → 2.
+    const lento = (status) => new Promise((r) => setTimeout(() => r(status), 600));
+    const { page, calls } = await abrir(vp, { step: 4, saveStatus: (b) => (b.completed ? lento(200) : 200) });
+    await page.click('.onb-step[data-step="4"] [data-action="skip"]');
+    await page.waitForSelector('[data-role="done-saving"]:not([hidden])');
+    await Promise.all([page.waitForURL("**/home"), page.click('[data-action="skip-all"]')]);
+    assert.equal(calls.posts.filter((b) => b.completed).length, 1, JSON.stringify(calls.posts));
+    await page.close();
+  });
+
+  test(`${tag} com escrita em voo o wizard fica ocupado e os CTAs apagados; depois voltam`, async () => {
+    // Controle negativo: sem o aria-busy no .onb-card (busyBegin) o "Continuar"
+    // segue com opacidade 1 e clicável enquanto o clique seria engolido.
+    let solta;
+    const { page } = await abrir(vp, { step: 2,
+      saveStatus: (b) => (b.completed ? new Promise((r) => { solta = () => r(500); }) : 200) });
+    const cta = '.onb-step[data-step="2"] [data-action="next"]';
+    const estilo = () => page.$eval(cta, (e) => {
+      const s = getComputedStyle(e);
+      return { op: s.opacity, pe: s.pointerEvents, busy: document.querySelector(".onb-card").getAttribute("aria-busy") };
+    });
+    assert.deepEqual(await estilo(), { op: "1", pe: "auto", busy: null });
+    await page.click('[data-action="skip-all"]');
+    while (!solta) await new Promise((r) => setTimeout(r, 20)); // o POST chegou à rota e está segurado
+    assert.deepEqual(await estilo(), { op: "0.6", pe: "none", busy: "true" });
+    solta();
+    await page.waitForFunction(() => document.querySelector('[data-role="error"]').textContent.includes("Não consegui salvar"));
+    assert.deepEqual(await estilo(), { op: "1", pe: "auto", busy: null }, "falha tem de desfazer o ocupado");
+    await page.close();
   });
 
   test(`${tag} "Pular tudo" com 500 fica e avisa; com 200 vai ao /home`, async () => {

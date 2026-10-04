@@ -77,7 +77,8 @@
     step: STEP_WELCOME,
     completed: false,
     viewed: {},            // passos que já emitiram telemetria de view
-    inFlight: false,       // uma requisição de escrita por vez
+    inFlight: 0,           // escritas em voo; a do passo 5 pode começar dentro de outra (saveReport → next)
+    idle: Promise.resolve(), // resolve quando inFlight volta a 0
     cards: [],
     cardsMax: null,
     balance: 0,
@@ -222,14 +223,32 @@
    */
   async function withBusy(button, fn) {
     if (state.inFlight) return;
-    state.inFlight = true;
+    busyBegin();
     if (button) { button.disabled = true; button.setAttribute("aria-busy", "true"); }
     try {
       return await fn();
     } finally {
-      state.inFlight = false;
+      busyEnd();
       if (button) { button.disabled = false; button.removeAttribute("aria-busy"); }
     }
+  }
+
+  /**
+   * Contador, não booleano: a conclusão do passo 5 começa dentro do saveReport
+   * (next → goTo) e tem de continuar ocupando depois que ele termina. O
+   * `aria-busy` no cartão é o feedback: o CSS apaga os CTAs enquanto há escrita.
+   */
+  let idleResolve = null;
+  function busyBegin() {
+    if (!state.inFlight++) state.idle = new Promise(function (r) { idleResolve = r; });
+    const card = document.querySelector(".onb-card");
+    if (card) card.setAttribute("aria-busy", "true");
+  }
+  function busyEnd() {
+    if (--state.inFlight) return;
+    const card = document.querySelector(".onb-card");
+    if (card) card.removeAttribute("aria-busy");
+    idleResolve();
   }
 
   /* ─── Persistência do progresso ───────────────────────────────────────── */
@@ -284,7 +303,9 @@
     show(el("done-ok"), false);
     show(el("done-fail"), false);
     show(el("done-saving"), true);
-    const ok = await saved;
+    busyBegin(); // a conclusão em voo é escrita como as outras: "Pular tudo" espera ela
+    let ok;
+    try { ok = await saved; } finally { busyEnd(); }
     if (state.step !== TOTAL_STEPS) return;
     show(el("done-saving"), false);
     if (ok) {
@@ -332,11 +353,19 @@
     }
   }
 
-  function skipAll(button) {
+  async function skipAll(button) {
     // Pular é uma decisão do usuário: marca concluído pra o wizard não voltar
     // a aparecer no próximo login. Sem o 200 não sai daqui: ir para o /home
     // sem a conclusão gravada só devolveria a pessoa ao wizard pelo gate.
     // withBusy: duplo clique não manda dois `completed`.
+    // Com escrita em voo (ex.: a conclusão do passo 5 gravando), espera ela em
+    // vez de engolir o clique; se ela gravou a conclusão, sai sem novo POST.
+    if (button.getAttribute("aria-busy") === "true") return;
+    if (state.inFlight) {
+      button.setAttribute("aria-busy", "true");
+      await state.idle;
+      button.removeAttribute("aria-busy");
+    }
     return withBusy(button, async function () {
       if (!state.completed && !(await persist({ step: state.step, completed: true }))) {
         showError(SAVE_FAIL_TEXT);
