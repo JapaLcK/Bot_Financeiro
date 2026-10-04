@@ -236,8 +236,10 @@ test("anúncio por etapa: convite, bloco (apresenta), alvo (instrução), festa,
 });
 
 // No celular a aba é a do Piggy ("no Piggy": ele é masculino); no desktop, a barra de conversa
-// (D9), que não é link: tocar nela leva à conversa. O nome é o que está escrito em cada uma.
-for (const [width, height, pede] of [[375, 812, "Agora toca no Piggy."], [1280, 800, "Agora toca em “Converse com o Piggy…”."]]) {
+// (D9), que não é link: tocar nela leva à conversa. Ela se chama pelo que é: o placeholder já
+// é uma instrução, e "toca em “Converse com o Piggy…”" soava artificial.
+const BARRA = "Agora toca na barra de conversa.";
+for (const [width, height, pede] of [[375, 812, "Agora toca no Piggy."], [1280, 800, BARRA]]) {
   test(`passo 3 ${width}×${height}: "${pede}" no título e no anúncio; parado, fica; tocar leva à conversa`, async () => {
     const { ctx, page } = await abrir({ width, height, guia: "em_andamento", antes: (_, s) => { s.g.passos.forEach((p, i) => { p.feito = i < 2; }); } });
     await page.evaluate(() => dispatchEvent(new Event("dash:guia")));
@@ -253,7 +255,7 @@ for (const [width, height, pede] of [[375, 812, "Agora toca no Piggy."], [1280, 
 }
 
 // O balão e o anúncio nomeiam o que está ESCRITO no elemento com o anel naquela largura: o menu
-// lateral diz "Para onde vai", a barra de baixo "Gastos", a barra de conversa o placeholder.
+// lateral diz "Para onde vai", a barra de baixo "Gastos"; a barra de conversa é "barra de conversa".
 for (const [width, height] of [[1280, 800], [375, 812]]) {
   test(`${width}×${height}: o balão e o anúncio da etapa da aba citam o texto visível do elemento com o anel`, async () => {
     const { ctx, page } = await abrir({ width, height });
@@ -269,7 +271,7 @@ for (const [width, height] of [[1280, 800], [375, 812]]) {
           const r = x.getBoundingClientRect();
           return x.getClientRects().length && Math.abs(r.left - a.left - 4) < 1.5 && Math.abs(r.top - a.top - 4) < 1.5;
         });
-        return [e?.querySelector("input")?.placeholder || e?.innerText.trim(), document.getElementById("guia-titulo").textContent, document.querySelector(".guia-status").textContent];
+        return [e?.matches('[data-guia="piggy.pergunta"]') ? "barra de conversa" : e?.innerText.trim(), document.getElementById("guia-titulo").textContent, document.querySelector(".guia-status").textContent];
       }));
       await tocarAba(page);
       await esperaTitulo(page, prox.fala.titulo);
@@ -280,6 +282,43 @@ for (const [width, height] of [[1280, 800], [375, 812]]) {
       assert.ok(visivel, "nenhum elemento sob o anel");
       assert.ok(titulo.includes(visivel) && status.includes(visivel), `${visivel} × ${titulo} / ${status}`);
     }
+  });
+}
+
+// Entre 761 e 1180 px o menu lateral mostra só o ícone (shell.css): o balão não cita um texto
+// que não está na tela; nomeia o ícone pelo `title` dele.
+test("1000×700: o rótulo do menu escondido não vira fala; \"Agora toca no ícone “Para onde vai”.\"", async () => {
+  const { ctx, page } = await abrir({ width: 1000, height: 700 });
+  await bora(page);
+  await FAZER["mes.trocado"](page);
+  await esperaTitulo(page, "Agora toca");
+  const r = [await page.locator("#guia-titulo").textContent(), await page.locator(".guia-status").textContent(),
+    await page.locator('.rail [data-guia="nav.gastos"]').evaluate((e) => [e.innerText.trim(), e.title])];
+  await tocarAba(page);
+  await esperaTitulo(page, PASSOS[1].fala.titulo);
+  await ctx.close();
+  const pede = "Agora toca no ícone “Para onde vai”.";
+  assert.deepEqual(r, [pede, pede, ["", "Para onde vai"]]);
+});
+
+// A janela que cruza 760 px com a etapa da aba do passo 3 aberta troca o destacado (barra de
+// conversa ⇄ aba do Piggy embaixo): o toque no destacado de agora leva à conversa; fora dele, não.
+for (const [de, para, pede] of [[[375, 812], [1280, 800], BARRA], [[1280, 800], [375, 812], "Agora toca no Piggy."]]) {
+  test(`passo 3, ${de[0]} → ${para[0]}: o toque no destacado depois da troca leva à conversa; fora dele, nada`, async () => {
+    const { ctx, page } = await abrir({ width: de[0], height: de[1], guia: "em_andamento", antes: (_, s) => { s.g.passos.forEach((p, i) => { p.feito = i < 2; }); } });
+    await page.evaluate(() => dispatchEvent(new Event("dash:guia")));
+    await esperaTitulo(page, "Agora toca");
+    await page.setViewportSize({ width: para[0], height: para[1] });
+    await esperaTitulo(page, pede);
+    await page.waitForTimeout(400); // o anel pousa no destacado novo
+    await page.mouse.click(5, para[1] / 2); // no véu, fora do destacado
+    await page.waitForTimeout(400);
+    const fora = await page.evaluate(() => location.hash);
+    await tocarAba(page);
+    await esperaTitulo(page, PASSOS[2].fala.titulo);
+    const depois = await page.evaluate(() => location.hash);
+    await ctx.close();
+    assert.deepEqual([fora, depois], ["#/", "#/piggy"]);
   });
 }
 

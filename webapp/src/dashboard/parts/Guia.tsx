@@ -8,7 +8,7 @@ import type { DashState } from "../lib/types";
 import { DEMO, ErroApi, apiPost, guiaQuery, perfilQuery } from "../lib/v2";
 import { go, type Path } from "../router";
 import { ROTA, aba, achar, caixa, cobrir, corte, guia, posicionar, trazer, type Caixa, type Tipo } from "./guia-posicao";
-import { MOTIVO, OF, destino, rotulo } from "./guia-falas";
+import { MOTIVO, OF, destino } from "./guia-falas";
 import { useTecladoDoVeu } from "./guia-teclado";
 import { TEMPO, partir, pular, quadro, tiltDe, type Voo } from "./guia-voo";
 
@@ -56,7 +56,7 @@ export function Guia({ s, path }: { s: DashState; path: Path }) {
   const [vistos, setVistos] = useState<string[]>([]); // feitos ou pulados nesta abertura
   const [festa, setFesta] = useState<string | null>(null);
   const [tipo, setTipo] = useState<Tipo>("espera");
-  const [nomeAba, setNomeAba] = useState(""); // o que está escrito na aba do passo, se é noutra tela (o tick lê)
+  const [paraAba, setParaAba] = useState(""); // "em Gastos": a aba do passo, se é noutra tela (o tick lê)
   const [fechouDialog, reavaliar] = useState(0);
   const [fase, setFase] = useState<{ id: string; etapa: Etapa }>({ id: "", etapa: "bloco" }); // presa ao passo atual
   const ofereceu = useRef(false);
@@ -175,16 +175,20 @@ export function Guia({ s, path }: { s: DashState; path: Path }) {
   });
 
   // No desktop a aba do Piggy é a barra de conversa (D9), que não é link: tocar nela (ou Enter
-  // no campo) só focaria o campo. Aí o toque da pessoa leva à conversa; nunca sem ele.
+  // no campo) só focaria o campo. Aí o toque da pessoa leva à conversa; nunca sem ele. A aba
+  // se acha na hora do toque: a janela que cruza 760 px troca a barra pela aba de baixo.
   const tela = fora ? atual!.tela : null;
   useEffect(() => {
-    const a = tela && aba(atual!);
-    if (!tela || !a || a.matches("a[href]")) return;
-    const ir = (e: Event) => { if (!(e instanceof KeyboardEvent) || e.key === "Enter") go(ROTA[tela]); };
-    a.addEventListener("click", ir);
-    a.addEventListener("keydown", ir);
-    return () => { a.removeEventListener("click", ir); a.removeEventListener("keydown", ir); };
-  }, [tela, path]);
+    if (!tela) return;
+    const ir = (e: Event) => {
+      const a = aba(atual!);
+      if (!a || a.matches("a[href]") || !a.contains(e.target as Node)) return;
+      if (!(e instanceof KeyboardEvent) || e.key === "Enter") go(ROTA[tela]);
+    };
+    document.addEventListener("click", ir);
+    document.addEventListener("keydown", ir);
+    return () => { document.removeEventListener("click", ir); document.removeEventListener("keydown", ir); };
+  }, [tela]);
 
   // Comemoração: o passo seguinte entra depois dela; a última fica até fechar.
   useEffect(() => {
@@ -218,7 +222,7 @@ export function Guia({ s, path }: { s: DashState; path: Path }) {
     const { el: alvo, tipo: t } = p ? achar(p, path, ACOES[p.acao]?.alvo ?? []) : { el: null, tipo: "espera" as Tipo };
     setTipo(t);
     const prox = modo === "ativo" && atual && path !== ROTA[atual.tela] ? aba(atual) : null;
-    setNomeAba(prox ? rotulo(prox) : "");
+    setParaAba(prox ? destino(prox) : "");
     let mira: HTMLElement | null = null, toque: HTMLElement | null = null, claro: HTMLElement | null = null, marca: HTMLElement | null = null;
     if (p && festa) mira = miraAnt.current?.isConnected ? miraAnt.current : alvo;
     else if (p && fora) mira = toque = marca = aba(p);
@@ -280,7 +284,7 @@ export function Guia({ s, path }: { s: DashState; path: Path }) {
   });
 
   const aberto = modo === "convite" || (modo === "ativo" && !!exibido);
-  const leva = fora ? `Agora toca ${destino(nomeAba)}.` : null;
+  const leva = fora ? `Agora toca ${paraAba}.` : null;
   const mot = atual && !atual.disponivel && atual.motivo ? MOTIVO[atual.motivo] : null;
   const entendi = (id: string) => { setFase({ id, etapa: "alvo" }); focar.current = true; };
   const status = !aberto || s.editing ? ""
