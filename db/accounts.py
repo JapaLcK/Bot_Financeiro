@@ -11,6 +11,7 @@ from psycopg.types.json import Json
 
 import db_support as _db_support
 from utils_date import _tz, day_tz, launch_day, tz_name
+from utils_text import fmt_brl
 
 from .connection import (
     get_conn, cat_key_sql, LAUNCH_HAS_TIME_SQL,
@@ -369,6 +370,18 @@ MENSAGEM_CAIXINHA_COM_MOVIMENTO = (
     "Essa caixinha já teve depósito ou saque. Pra removê-la, tira o saldo e "
     "apaga a caixinha."
 )
+
+
+def aviso_banco_voltou(itens) -> str | None:
+    """Frase de quem apagou a linha fundida (P3, texto do dono): a transação do
+    banco volta para a lista. `itens` são as linhas `o` de `reconciliation._locked_tx`."""
+    frases = []
+    for o in itens:
+        desc = (o["description"] or "").strip()
+        dados = fmt_brl(abs(o["amount"])) + (f", {desc}" if desc else "")
+        frases.append(f"A transação do banco ({dados}) continua na sua lista, "
+                      "porque ela aconteceu de verdade.")
+    return " ".join(frases) or None
 
 
 class PocketHasMovement(LaunchUnsafeRollback):
@@ -1620,8 +1633,17 @@ def _validar_efeitos(efeitos: dict, *, escopo_conta_corrente: bool) -> Decimal:
     return delta_conta
 
 
+# Linha ligada a uma transação do banco, fundida (`imported`) ou com par pendente
+# (`match`). Sobre `launches` SEM alias, como o `FUNDIDO_SQL`. Decide o lock do apagar.
+_LIGADO_SQL = """exists (select 1 from open_finance_transactions o
+          join open_finance_accounts oa on oa.id = o.account_id
+          join open_finance_connections oc on oc.id = oa.connection_id and oc.user_id = launches.user_id
+         where launches.id in (o.imported_launch_id, o.match_launch_id))"""
+
+
 def delete_launch_and_rollback(user_id: int, launch_id: int, *,
-                              escopo_conta_corrente: bool = False, exigir_pode: bool = False):
+                              escopo_conta_corrente: bool = False,
+                              exigir_pode: bool = False) -> str | None:
     """
     Deleta um lançamento e reverte seus efeitos no banco atomicamente.
     Usa o campo efeitos (jsonb) para saber o que reverter.
@@ -1656,13 +1678,23 @@ def delete_launch_and_rollback(user_id: int, launch_id: int, *,
     sync e a conciliação mudam sob esse lock) e, sob ele e o da linha, recusa com
     `NaoEditavel` a linha sem 'apagar' em `lancamentos.pode_da_linha`, antes do pré-voo.
 
+    Apagar a linha FUNDIDA (`FUNDIDO_SQL`: manual/ofx/recorrente junta com uma
+    transação do banco) desfaz a junção na mesma transação (P3, dono): a transação
+    volta como sombra `banco` (`reconciliation._desfaz`), exceto no "apagar tudo"
+    (`escopo_conta_corrente`), que não recria nada. Devolve a frase do aviso
+    (`aviso_banco_voltou`) quando desfez, ou None. Ordem de locks: `accounts` →
+    X (`for update`) → transação OF (`_locked_tx`).
+
     QUEM CHAMA — mais pontos que as portas de usuário. A recusa chega ao usuário
     como frase de produto em uns e como SILÊNCIO em outros:
-      - `core/handlers/pending.py:170` (WhatsApp, singular) e `:230` (bulk);
-      - `core/services/ai_chat/tools/launches.py:433` (/ai/chat);
-      - `frontend/finance_bot_websocket_custom.py:5749` (DELETE /launches);
+      - `core/handlers/pending.py` (WhatsApp, singular e bulk), que mostram o aviso;
+      - `core/services/ai_chat/tools/launches.py` (/ai/chat), que mostra o aviso;
+      - `frontend/finance_bot_websocket_custom.py` (DELETE /launches), que devolve
+        o aviso em `"aviso"`;
+      - `api/v2/lancamentos.py` (apagar da v2), que responde `{id}` sem o aviso;
       - `delete_all_launches_and_rollback` (abaixo), que classifica em baldes;
-      - `db/open_finance.py`: `_rollback_imported_of`, dentro de
+      - `db/open_finance.py`: `_rollback_imported_of` (sombras: nunca fundidas,
+        então nunca desfazem), dentro de
         `except Exception: pass` (o confirmar da reconciliação saiu para
         `db/reconciliation.py`, que apaga a sombra direto e não passa por aqui;
         a ordem inversa, `propose_manual_reconciliation`, só cria pendência e
@@ -1674,22 +1706,29 @@ def delete_launch_and_rollback(user_id: int, launch_id: int, *,
     (`adapters/discord/` também chama; o adaptador está morto e fora do escopo.)
     """
     ensure_user(user_id)
+    novas: list = []      # categorias das sombras recriadas (catálogo depois do commit)
+    desfeitas: list = []  # transações do banco que voltaram (o aviso)
 
     with get_conn() as conn:
         with conn.cursor() as cur:
             from .bank_movements import _lock_user, uses_bank_movement_lock
             from .investment_undo import guard_last_investment_movement, touches_investment
+            from .lancamentos import FUNDIDO_SQL
 
             def _precisa_lock(r):
                 # Investimento também: a guarda "é o último" tem de rodar sob o
                 # MESMO lock de aporte/resgate/apagar investimento, até o commit.
                 # Saque/depósito em espécie também: o reconciliador trava conta →
                 # lançamento; apagar sem o lock seria lançamento → conta (deadlock).
+                # Ligada ao banco também (fundida OU par pendente): o desfazer
+                # trava a transação OF, que todo escritor trava depois de `accounts`;
+                # e sem o lock um confirmar concorrente fundiria X no meio do apagar.
                 return bool(r and (uses_bank_movement_lock(r["source"], r["efeitos"])
-                                   or touches_investment(r["efeitos"]) or r["caixa"]))
+                                   or touches_investment(r["efeitos"]) or r["caixa"]
+                                   or r["ligado"]))
 
-            cur.execute(f"select source,efeitos,{VINCULADO_SQL} as caixa from launches "
-                        "where id=%s and user_id=%s", (launch_id, user_id))
+            cur.execute(f"select source,efeitos,{VINCULADO_SQL} as caixa,{_LIGADO_SQL} as ligado "
+                        "from launches where id=%s and user_id=%s", (launch_id, user_id))
             preview = cur.fetchone()
             bank_lock = exigir_pode or _precisa_lock(preview)
             if bank_lock:
@@ -1714,6 +1753,12 @@ def delete_launch_and_rollback(user_id: int, launch_id: int, *,
             row = cur.fetchone()
             if not row:
                 raise LookupError("NOT_FOUND")
+            # Statement SEPARADO, com snapshot novo depois do lock da linha: dentro
+            # do `for update`, sob READ COMMITTED, as subqueries seriam avaliadas
+            # com o snapshot de antes da espera e não veriam a ligação recém-commitada.
+            cur.execute(f"select {_LIGADO_SQL} as ligado, {FUNDIDO_SQL} as fundido "
+                        "from launches where id=%s and user_id=%s", (launch_id, user_id))
+            row.update(cur.fetchone())
 
             # Com `exigir_pode` o lock já está tomado: sobrar lock não é corrida.
             if not exigir_pode and _precisa_lock(row) != bank_lock:
@@ -2134,10 +2179,37 @@ def delete_launch_and_rollback(user_id: int, launch_id: int, *,
                         (user_id, nome),
                     )
 
+            # Apagar a fundida desfaz a junção (P3): a transação do banco volta como
+            # sombra. `fundido` implica `ligado`, então `accounts` já está travado.
+            if row["fundido"] and not escopo_conta_corrente:
+                # local: reconciliation → open_finance → accounts (ciclo de import)
+                from .reconciliation import FUSED_STATUSES, ReconciliationConflict, _desfaz, _locked_tx
+                cur.execute(
+                    """select o.id from open_finance_transactions o
+                         join open_finance_accounts a on a.id = o.account_id
+                         join open_finance_connections c on c.id = a.connection_id
+                        where o.imported_launch_id = %s and o.reconciliation_status = any(%s)
+                          and c.user_id = %s""",
+                    (launch_id, list(FUSED_STATUSES), user_id),
+                )
+                try:
+                    for of_tx_id in [r["id"] for r in cur.fetchall()]:
+                        o = _locked_tx(cur, user_id, of_tx_id)
+                        if _desfaz(cur, user_id, o, novas)["changed"]:
+                            desfeitas.append(o)
+                except (ReconciliationConflict, LookupError) as exc:
+                    # `LookupError` cru seria lido pelos canais como "já foi apagado".
+                    raise LaunchUnsafeRollback("Lançamento mudou durante a exclusão; tente novamente.",
+                                               "mudou_durante") from exc
+
             # apaga o lançamento
             cur.execute("delete from launches where id=%s and user_id=%s", (launch_id, user_id))
 
         conn.commit()
+
+    from .open_finance_categories import garantir_no_catalogo
+    garantir_no_catalogo(user_id, novas)  # depois do commit, fora da trava (best-effort)
+    return aviso_banco_voltou(desfeitas)
 
 
 # Lançamentos "da conta corrente" no sentido do produto: SÓ `despesa` e `receita`.

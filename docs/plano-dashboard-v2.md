@@ -560,5 +560,22 @@ PR de cada etapa, não soluções prontas. Cada PR confere se ainda valem, decid
     desfaz a junção na hora são do PR 2b-2, que vem depois. Limite declarado: linha com par
     pendente NÃO acionável (conexão pausada, outra moeda) conta como carteira pura, aceita
     valor novo, e o par volta depois com o valor velho.
+  - PR 2b-2: apagar a linha fundida desfaz a junção na hora, em todo canal (P3). Todos apagam
+    por `db.accounts.delete_launch_and_rollback`, que agora, antes do `delete`, devolve a
+    transação do banco à lista como linha `banco` pelo mesmo miolo do desfazer
+    (`db/reconciliation._desfaz`, extraído de `undo_reconciliation`). Antes, o `on delete set
+    null` soltava o vínculo, o status ficava `confirmed`/`auto_merged` e o gasto sumia do
+    Resumo até o próximo sync. A linha ligada ao banco (fundida OU com par pendente,
+    `_LIGADO_SQL`) passa a travar `accounts` antes da linha, relida num statement separado
+    depois do `for update`; se ligou no meio, o apagar recusa com `mudou_durante`. Ordem:
+    `accounts` → lançamento → transação do banco. A função devolve a frase do aviso
+    (`aviso_banco_voltou`) ou None: WhatsApp (singular e lote) e IA a acrescentam à resposta,
+    o DELETE /launches do `/app` a devolve em `aviso` e o `dashboard.js` abre um alerta
+    (decisão do dono, 2026-10-03), e o v2 segue respondendo `{id}`. O "apagar tudo" não
+    desfaz (decisão do dono: as linhas do banco voltam no próximo sync). Ficou fora: a
+    fundida acompanhar correção do banco (PR 3), limpar `pending` com `match` NULL, o
+    deadlock antigo apagar × sync em linha ainda não ligada (segue o xfail estrito) e a #793.
+    Limite declarado: duas transações do banco fundidas no mesmo lançamento (só com dado
+    corrompido; o confirmar recusa `ALREADY_LINKED`) voltam as duas.
 - Guia do `/painel` (#728) em 2 PRs: A `GET`/`POST /api/v2/guia` + tabela `guia_painel` (contrato e consulta de medição em `docs/CLAUDE.md`, "API v2") · B a tela (Piggy, balão, Ajuda).
 - [ ] Etapa 0 · [ ] 1 · [ ] 2 · [ ] 3 · [ ] 4 · [ ] 5 · [ ] 6 · [ ] 7
