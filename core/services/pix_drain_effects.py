@@ -146,44 +146,45 @@ def _acumulado_estornado(payment_id: str) -> str:
 def _stripe_cancel(cobranca, evt) -> None:
     """Migração Stripe→Pix: reconfirma o período pago e agenda o cancelamento.
 
-    Sem `stripe_subscription_id`, pergunta ao Stripe (`_stripe_vivo`) se nasceu
-    um cartão DEPOIS da emissão do Pix: sem assinatura viva (ou conta sem
-    customer, que nem consulta) é no-op REGISTRADO; com ela, segue a migração e
-    a assinatura achada vai para a coluna. Cartão que conclui DEPOIS desta
-    consulta é recusado pelo webhook (`cartao_recusado_por_pix.pix_cobre_agora`).
+    Sem `stripe_subscription_id`, ou com a gravada MORTA, pergunta ao Stripe
+    (`_stripe_vivo`): achou viva, migra com ela — vai para a coluna, e o começo
+    que esperava a morta é desfeito antes de adiar até a viva; nada vivo nem
+    gravado = no-op REGISTRADO. Cartão que conclui depois disto o webhook recusa.
 
-    Os dois passos do §9 item 4, **nesta ordem**: (1) lê o `current_period_end`
-    de verdade e grava, com a janela ADIADA (`_janela_adiada`) no MESMO update,
-    antes de o efeito contar como feito — a retentativa do `grant` relê a linha;
-    (2) `cancel_at_period_end=True`, nunca `delete`, que cortaria hoje o acesso
-    já pago até o fim do mês. Assinatura MORTA (o webhook a recusou depois da
-    consulta) fica sem `modify`, e a janela que esperava o fim dela volta para
-    agora. **Levanta se o Stripe recusar** (consulta ou `modify`): é o PRIMEIRO
-    efeito porque, sem `attempts` + retentativa, ficaria dinheiro dentro com o
-    cartão ainda cobrando, calado. Na 6ª falha sai o alerta do §8.2.
+    §9 item 4, **nesta ordem**: (1) grava o `current_period_end` com a janela
+    ADIADA (`_janela_adiada`) no MESMO update, antes de o efeito contar como
+    feito — a retentativa do `grant` relê a linha; (2) `cancel_at_period_end`,
+    nunca `delete`, que cortaria hoje o acesso já pago. Gravada morta e nada
+    vivo: sem `modify`, e a janela que esperava a morta volta para agora.
+    **Levanta se o Stripe recusar**: é o PRIMEIRO efeito porque, sem retentativa,
+    ficaria dinheiro dentro com o cartão cobrando, calado. 6ª falha: alerta §8.2.
     """
     import stripe as _stripe
     from core.services.cartao_recusado_por_pix import _JA_MORTA
+    from core.services.pix_checkout import _stripe_vivo
     from db.pix_charges_saga import gravar_stripe_period_end
     from frontend.finance_bot_websocket_custom import (  # noqa: PLC0415
         STRIPE_SECRET_KEY, _sg, _sub_period_end_ts,
     )
     # Só handlers HTTP atribuíam a chave; o dreno num processo novo ia sem ela.
     _stripe.api_key = STRIPE_SECRET_KEY
+    agora, desfeita = datetime.now(timezone.utc), {}
     sub_id = cobranca["stripe_subscription_id"]
-    if not sub_id:
-        from core.services.pix_checkout import _stripe_vivo
+    sub = _stripe.Subscription.retrieve(sub_id) if sub_id else None
+    if sub is None or _sg(sub, "status") in _JA_MORTA:
         vivo = _stripe_vivo(cobranca["user_id"])
-        if vivo is None:
+        if vivo:  # a viva pode acabar ANTES do fim estimado da morta
+            desfeita = _janela_adiada(cobranca, agora, True) if sub is not None else {}
+            sub_id = vivo[0]
+            sub = _stripe.Subscription.retrieve(sub_id)
+        elif sub is None:
             return
-        sub_id = vivo[0]
-    sub = _stripe.Subscription.retrieve(sub_id)
     ts = _sub_period_end_ts(sub)
     morta = _sg(sub, "status") in _JA_MORTA
-    if ts or morta:
-        fim = (datetime.now(timezone.utc) if morta
+    if ts or morta or desfeita:
+        fim = (agora if morta or not ts
                else datetime.fromtimestamp(int(ts), tz=timezone.utc))
-        janela = _janela_adiada(cobranca, fim, morta)
+        janela = desfeita | _janela_adiada(cobranca | desfeita, fim, morta)
         gravar_stripe_period_end(cobranca["id"], sub_id, fim, **janela)
         cobranca.update(janela, stripe_subscription_id=sub_id)
     if not morta:
@@ -198,11 +199,10 @@ def _stripe_cancel(cobranca, evt) -> None:
 def _janela_adiada(cobranca, fim, morta=False) -> dict:
     """A janela recalculada quando o período do cartão renovou DEPOIS do checkout.
 
-    Só ADIA: `fim` igual ou anterior ao `access_starts_at` já gravado devolve
-    `{}` e nada é reescrito — antecipar o começo é que sobreporia grant com
-    período de cartão pago. Linha sem janela (não deveria existir em `paid`, o
-    `CHECK` a proíbe) também sai por `{}`, porque quem a escreve é a transição.
-    Assinatura `morta` (`fim` = agora): só o começo que esperava ela volta.
+    Só ADIA: `fim` igual ou anterior ao `access_starts_at` gravado devolve `{}`
+    — antecipar sobreporia grant com período de cartão pago. Linha sem janela
+    (o `CHECK` a proíbe em `paid`) também sai por `{}`: quem a escreve é a
+    transição. `morta` (`fim` = agora): só o começo que esperava ela volta.
     """
     inicio = cobranca["access_starts_at"]
     if not inicio or (inicio <= fim or inicio != cobranca["stripe_period_end_at"]

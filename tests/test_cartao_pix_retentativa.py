@@ -11,10 +11,18 @@ Controles negativos (rodados, ver o relato do PR):
   · alerta da 6ª falha com o texto de antes                  → R3 vermelho;
   · `paga_cobrindo_agora` sem o `not exists` do grant revogado → RA vermelho;
   · `_stripe_cancel` sem tratar assinatura morta, ou tratando sem voltar a
-    janela, ou sem o `coalesce` que grava a assinatura achada → RB vermelho.
+    janela, ou sem gravar a assinatura achada → RB vermelho;
+  · gravada morta sem cair no `_stripe_vivo` (limite 1 da #827) → os dois RD
+    vermelhos; `coalesce(stripe_subscription_id, …)` de volta no
+    `gravar_stripe_period_end` → os dois RD vermelhos SÓ na coluna (o `modify`
+    e a janela saem certos: a retentativa relê a morta e cai no `_stripe_vivo`);
+  · sem desfazer o começo que esperava a morta → os dois RD `b_antes_de_a`
+    vermelhos (o Pix começava no fim estimado de A, com B já acabado).
 Positivos: R2 — janela FUTURA (migração) não recusa o cartão que a sustenta;
 RA — grant Pix revogado não recusa nem o checkout nem o webhook; RC (2º) —
-a migração com janela futura abre o checkout.
+a migração com janela futura abre o checkout; RB — gravada morta e nenhuma viva
+segue sem `modify`, com a janela agora; RD `b_depois_de_a` — B acabando depois
+da estimativa de A segue adiando até o fim de B.
 """
 from __future__ import annotations
 
@@ -22,6 +30,7 @@ import asyncio
 from datetime import datetime, timedelta, timezone
 from unittest.mock import MagicMock
 
+import pytest
 from fastapi import HTTPException
 
 import db
@@ -191,3 +200,56 @@ def test_rb_assinatura_cancelada_entre_a_consulta_e_o_modify(cena):
     (pix,) = _grants(c.uid, "pix")
     assert dashboard._grant_pix_vigente(c.uid) is not None, pix
     assert pix["ends_at"] - pix["starts_at"] == timedelta(days=365)
+
+
+# (dias de A, dias de B): B acabando DEPOIS da estimativa de A, e ANTES — aí o
+# começo que esperava A tem de ser desfeito, senão sobra um buraco sem acesso.
+_DIAS_RD = pytest.mark.parametrize("dias_a,dias_b", [(10, 30), (25, 7)],
+                                   ids=["b_depois_de_a", "b_antes_de_a"])
+
+
+def _gravada_morta_e_outra_viva(c, dias_a, dias_b):
+    """A cobrança guarda `sub_rd_a`, viva na emissão do Pix; o cliente a cancela,
+    assina `sub_rd_b` no cartão e só DEPOIS paga o Pix (limite 1 da #827)."""
+    db.set_stripe_customer(c.uid, "cus_rd")
+    a = _sub(c.fake, "sub_rd_a", "active", customer="cus_rd", days=dias_a)
+    cob = nova_cobranca(c.uid, stripe_subscription_id="sub_rd_a",
+                        stripe_period_end_at=_fim(a))
+    a["status"] = "canceled"
+    return cob, _sub(c.fake, "sub_rd_b", "trialing", customer="cus_rd", days=dias_b)
+
+
+def _rd_confere(c, cob, b):
+    assert c.fake.modificados == [("sub_rd_b", {"cancel_at_period_end": True})]
+    (pix,) = _grants(c.uid, "pix")
+    assert abs(pix["starts_at"] - _fim(b)) <= timedelta(minutes=1), (pix, _fim(b))
+    assert pix["ends_at"] - pix["starts_at"] == timedelta(days=365)
+    assert ler(cob["id"])["stripe_subscription_id"] == "sub_rd_b"
+
+
+@_DIAS_RD
+def test_rd_assinatura_gravada_morta_e_outra_viva_agenda_a_viva(cena, dias_a, dias_b):
+    c = cena
+    cob, b = _gravada_morta_e_outra_viva(c, dias_a, dias_b)
+    entregar("PAYMENT_RECEIVED", cob)
+    _rd_confere(c, cob, b)
+
+
+@_DIAS_RD
+def test_rd_modify_da_viva_falha_e_a_retentativa_completa(cena, dias_a, dias_b):
+    c = cena
+    cob, b = _gravada_morta_e_outra_viva(c, dias_a, dias_b)
+    modify, vezes = c.fake.Subscription.modify, []
+
+    def _modify_falha_uma_vez(sub_id, **kw):
+        vezes.append(sub_id)
+        if len(vezes) == 1:
+            raise RuntimeError("stripe 500")
+        return modify(sub_id, **kw)
+    c.fake.Subscription.modify = staticmethod(_modify_falha_uma_vez)
+    eid = entregar("PAYMENT_RECEIVED", cob)
+    assert evento(eid)["processed_at"] is None and _grants(c.uid, "pix") == []
+
+    pix_drain.drenar_evento(eid)
+    assert evento(eid)["processed_at"] is not None
+    _rd_confere(c, cob, b)

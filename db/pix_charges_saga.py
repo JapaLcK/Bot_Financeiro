@@ -169,9 +169,11 @@ def gravar_stripe_period_end(charge_id: int, sub_id: str, quando, *,
 
     A criação grava a ESTIMATIVA que o checkout leu (§8.2); o efeito
     `stripe_cancel` lê o `current_period_end` de verdade no pagamento e chama
-    isto. `sub_id` entra na coluna quando ela estava nula (assinatura que o
-    `stripe_cancel` DESCOBRIU no Stripe, caminho B): sem isso a janela adiada
-    vivia só na memória e a retentativa do `grant` relia a velha.
+    isto. `sub_id` SEMPRE entra na coluna: é a assinatura cujo cancelamento o
+    efeito agendou — a gravada, ou a que ele DESCOBRIU no Stripe (coluna nula,
+    ou a gravada morta e outra viva). Sem isso a janela adiada vivia só na
+    memória, e a coluna apontava para uma assinatura morta: o admin do alerta
+    da 6ª falha (§8.2) concluiria "já cancelada" com a viva renovando.
 
     **A janela vem junto, e no MESMO update.** Quem decide se ela muda é
     `_janela_adiada` (só adia, nunca antecipa); passá-la aqui em vez de num
@@ -183,7 +185,7 @@ def gravar_stripe_period_end(charge_id: int, sub_id: str, quando, *,
         with conn.cursor() as cur:
             cur.execute(
                 "update pix_charges"
-                "   set stripe_subscription_id = coalesce(stripe_subscription_id, %s),"
+                "   set stripe_subscription_id = %s,"
                 "       stripe_period_end_at = %s,"
                 "       stripe_cancel_scheduled_at = now(),"
                 "       access_starts_at = coalesce(%s, access_starts_at),"

@@ -674,17 +674,18 @@ ou cobrança paga com a janela em curso, ainda sem grant; grant Pix revogado nã
 materializa nada; plano cobrado vira alerta de estorno manual, e o `deleted` com a marca
 não manda e-mail de cancelamento. Na ordem inversa (cartão primeiro, Pix pago depois), o
 efeito `stripe_cancel` do dreno pergunta ao Stripe (`_stripe_vivo`) e agenda
-`cancel_at_period_end` mesmo sem `stripe_subscription_id` na cobrança, gravando a
-assinatura achada e a janela adiada na linha antes de o efeito contar como feito; se a
-assinatura já estiver morta (`canceled`/`incomplete_expired`), não há `modify` e a janela
-que esperava o fim dela volta para agora. Com
+`cancel_at_period_end` quando a cobrança não tem `stripe_subscription_id` ou quando a
+gravada já está morta (`canceled`/`incomplete_expired`; o cliente a cancelou e assinou
+outra antes de pagar um QR antigo), gravando a assinatura achada (sempre a que foi
+agendada) e a janela adiada na linha antes de o efeito contar como feito; com a gravada
+morta, o começo que esperava o fim dela é desfeito antes de adiar até o fim da viva (que
+pode acabar antes, e o Pix não fica esperando a morta); gravada morta e
+nenhuma viva: não há `modify` e a janela que esperava o fim dela volta para agora. Com
 cadernos, o alerta manda estornar o plano só depois de `ebook_entregas` marcar `enviado`.
-Limites conhecidos: (1) se a assinatura gravada na cobrança estiver morta e o mesmo
-customer tiver OUTRA viva (assinou de novo antes de pagar um QR antigo), o efeito vira
-no-op sem alerta e a viva renova sobre o Pix; (2) assinatura que morre depois de o
-`stripe_cancel` registrar deixa a janela adiada; (3) cobrança paga com grant ainda por
+Limites conhecidos: (1) assinatura que morre depois de o
+`stripe_cancel` registrar deixa a janela adiada; (2) cobrança paga com grant ainda por
 nascer: o `create-checkout` recusa, mas a tela de status mostra sem plano até o grant sair;
-(4) a reentrega do checkout repete o alerta de estorno.
+(3) a reentrega do checkout repete o alerta de estorno.
 
 **Cadernos extras no Pix anual (PR A: receber e entregar; inerte até o checkout
 gravar a foto).** `pix_charges.extras` (`jsonb`, default `[]`, check de array) guarda a
