@@ -252,3 +252,51 @@ test("carregar o arquivo sem a marcação não faz nenhuma chamada", () => {
   const { fetchCalls } = load();
   assert.deepEqual(fetchCalls, []);
 });
+
+// ── Passo 2: estado do Open Finance (syncView) ──────────────────────────────
+
+test("os 9 estados de connection_ui_state × a ação que o wizard oferece", () => {
+  // Os 9 de `_LABELS` (core/services/pluggy_health.py). Rótulo e detalhe vêm
+  // do servidor e passam intactos; o JS só escolhe a ação. Só `updating` faz
+  // repoll — os outros já são o veredito.
+  const { api } = load();
+  const esperado = {
+    updating: "wait",
+    needs_user_action: "resolve",
+    item_missing: "resolve",
+    error_recoverable: null,
+    no_accounts: null,
+    partial: null,
+    updated: null,
+    paused: null,
+    removed: null,
+  };
+  for (const [estado, acao] of Object.entries(esperado)) {
+    const ui = { state: estado, label: `rótulo ${estado}`, detail: `detalhe ${estado}` };
+    const view = api.syncView([{ institution_name: "Nubank", ui }]);
+    const row = view.rows[0];
+    assert.equal(row.action, acao, `ação de ${estado}`);
+    assert.equal(row.label, ui.label, `${estado}: rótulo tem de vir do servidor`);
+    assert.equal(row.detail, ui.detail, `${estado}: detalhe tem de vir do servidor`);
+    assert.equal(row.bank, "Nubank");
+    assert.equal(view.poll, acao === "wait", `${estado}: repoll`);
+  }
+});
+
+test("syncView: estado desconhecido não ganha ação e snapshot vazio não desenha nada", () => {
+  const { api } = load();
+  const view = api.syncView([{ institution_name: "Inter", ui: { state: "novo_estado", label: "X" } }]);
+  assert.equal(view.rows[0].action, null);
+  assert.equal(view.poll, false);
+  assert.equal(api.syncView([]).rows.length, 0);
+  assert.equal(api.syncView(undefined).rows.length, 0, "snapshot sem connections = bloco como antes");
+});
+
+test("syncView: uma conexão em updating entre outras já mantém o repoll", () => {
+  const { api } = load();
+  const view = api.syncView([
+    { institution_name: "Inter", ui: { state: "updated", label: "Atualizado" } },
+    { institution_name: "Nubank", ui: { state: "updating", label: "Atualizando…" } },
+  ]);
+  assert.equal(view.poll, true);
+});

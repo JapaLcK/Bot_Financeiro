@@ -1,0 +1,213 @@
+/**
+ * Orientação durante a configuração (#728): o wizard /onboarding no navegador.
+ *
+ *  1. Passo 2: "Conectar seu banco" vem ANTES do campo de dinheiro.
+ *  2. Passo 2: o estado real da conexão (snapshot GET /open-finance/{id}) troca
+ *     de "Atualizando…" para "Atualizado" pelo repoll — e o repoll PARA quando
+ *     não há mais `updating`, quando o usuário sai do passo e no teto.
+ *  3. Passo 5: "Tudo pronto!" só com o 200 do POST /onboarding/state; com 500
+ *     mostra erro + "Tentar de novo", e nem o Finish nem o "Pular tudo" saem
+ *     para o /home sem a conclusão gravada.
+ *
+ * Desktop (1280) e celular (390). O relógio é o do Playwright (`page.clock`):
+ * o repoll é de 5 s e o teste não espera tempo de verdade.
+ *
+ * Rodar: node --test tests/frontend/onboarding_guia.test.mjs
+ */
+import { test, before, after } from "node:test";
+import assert from "node:assert/strict";
+import { startServer } from "./_server.mjs";
+import { readFileSync } from "node:fs";
+import { fileURLToPath } from "node:url";
+import { dirname, join } from "node:path";
+import { chromium } from "playwright";
+
+const FRONTEND = join(dirname(fileURLToPath(import.meta.url)), "..", "..", "frontend");
+const VIEWPORTS = [{ width: 1280, height: 800 }, { width: 390, height: 844 }];
+let ORIGIN, server, browser;
+
+before(async () => { ({ proc: server, origin: ORIGIN } = await startServer());
+                     browser = await chromium.launch(); });
+after(async () => { await browser?.close(); server?.kill(); });
+
+const json = (body, status = 200) => ({ status, contentType: "application/json", body: JSON.stringify(body) });
+
+const UPDATING = { institution_name: "Nubank",
+  ui: { state: "updating", label: "Atualizando…", detail: "Ainda não sincronizou" } };
+const UPDATED = { institution_name: "Nubank", ui: { state: "updated", label: "Atualizado", detail: null } };
+
+/**
+ * Abre o wizard no `step` salvo. `snapshot(n)` responde o n-ésimo GET do
+ * Open Finance; `saveStatus(body)` o status do POST /onboarding/state.
+ */
+async function abrir(viewport, { step, snapshot = () => json({ ok: true, connections: [] }),
+                                saveStatus = () => 200 } = {}) {
+  const page = await browser.newPage({ viewport });
+  await page.clock.install();
+  const calls = { of: 0, posts: [] };
+
+  await page.route("**/*", (route) => {
+    const url = new URL(route.request().url());
+    if (url.origin !== ORIGIN) return route.abort();
+    if (/\.[a-z0-9]+$/i.test(url.pathname)) return route.continue();
+    return route.fulfill(json({}));
+  });
+  await page.route("**/static/auth-refresh.js", (route) =>
+    route.fulfill({ status: 200, contentType: "application/javascript",
+                    body: readFileSync(join(FRONTEND, "static", "auth-refresh.js"), "utf8") }));
+  await page.route("**/auth/dashboard-profile", (route) =>
+    route.fulfill(json({ user_id: 1, display_name: "Lucas", plan: "free" })));
+  await page.route("**/onboarding/state", (route) => {
+    if (route.request().method() === "GET") return route.fulfill(json({ step, completed: false, total_steps: 5 }));
+    const body = route.request().postDataJSON();
+    calls.posts.push(body);
+    const status = saveStatus(body);
+    return route.fulfill(json(status === 200 ? { step: body.step, completed: !!body.completed } : { detail: "x" }, status));
+  });
+  await page.route("**/open-finance/1", async (route) => { calls.of += 1; return route.fulfill(await snapshot(calls.of)); });
+  await page.route("**/home", (route) => route.fulfill({ status: 200, contentType: "text/html", body: "<p>home</p>" }));
+
+  await page.goto(`${ORIGIN}/comecar.html`);
+  await page.waitForSelector(`.onb-step[data-step="${step}"]:not([hidden])`);
+  return { page, calls };
+}
+
+/**
+ * O `runFor` dispara os tiques na hora, mas o pedido de cada um chega à rota
+ * depois (rede assíncrona). Contar logo em seguida mede zero; espera o contador
+ * ficar parado por 300 ms de relógio real.
+ */
+async function assentado(calls) {
+  for (;;) {
+    const antes = calls.of;
+    await new Promise((r) => setTimeout(r, 300));
+    if (calls.of === antes) return antes;
+  }
+}
+
+const syncText = (page) => page.$eval('[data-role="of-sync"]', (e) => e.innerText);
+
+for (const vp of VIEWPORTS) {
+  const tag = `[${vp.width}]`;
+
+  test(`${tag} passo 2: "Conectar seu banco" vem antes do campo de dinheiro`, async () => {
+    const { page } = await abrir(vp, { step: 2 });
+    const banco = await page.locator(".onb-step[data-step='2'] .onb-block-title", { hasText: "Conectar seu banco" }).boundingBox();
+    const saldo = await page.locator("#onb-balance").boundingBox();
+    assert.ok(banco && saldo, "os dois têm de estar visíveis");
+    assert.ok(banco.y < saldo.y, `banco em y=${banco.y}, saldo em y=${saldo.y}`);
+    await page.close();
+  });
+
+  test(`${tag} passo 2: updating → updated troca o texto e para o repoll`, async () => {
+    const { page, calls } = await abrir(vp, {
+      step: 2,
+      snapshot: (n) => json({ ok: true, connections: [n === 1 ? UPDATING : UPDATED] }),
+    });
+    await page.waitForFunction(() => document.querySelector('[data-role="of-sync"]').innerText.includes("Atualizando"));
+    let txt = await syncText(page);
+    assert.match(txt, /Nubank/);
+    assert.match(txt, /Ainda não sincronizou/, "detalhe do servidor como veio");
+    assert.match(txt, /Pode continuar/);
+    assert.equal(await page.$eval('[data-role="of-sync"]', (e) => e.getAttribute("aria-live")), "polite");
+
+    await page.clock.runFor(5000);
+    await page.waitForFunction(() => document.querySelector('[data-role="of-sync"]').innerText.includes("Atualizado"));
+    txt = await syncText(page);
+    assert.doesNotMatch(txt, /Pode continuar|Atualizando/);
+
+    const depois = await assentado(calls);
+    await page.clock.runFor(60000);
+    assert.equal(await assentado(calls), depois, `o repoll continuou: ${depois} → ${calls.of} pedidos`);
+    await page.close();
+  });
+
+  test(`${tag} passo 2: sair do passo para o repoll; e ele tem teto`, async () => {
+    const { page, calls } = await abrir(vp, { step: 2, snapshot: () => json({ ok: true, connections: [UPDATING] }) });
+    await page.waitForFunction(() => document.querySelector('[data-role="of-sync"]').innerText.includes("Atualizando"));
+    await page.clock.runFor(10000);
+    assert.ok(await assentado(calls) >= 2, `deveria repollar em updating (pedidos: ${calls.of})`);
+
+    await page.click('.onb-step[data-step="2"] [data-action="next"]');
+    await page.waitForSelector('.onb-step[data-step="3"]:not([hidden])');
+    const saiu = await assentado(calls);
+    await page.clock.runFor(60000);
+    assert.equal(await assentado(calls), saiu, `o repoll seguiu fora do passo 2: ${saiu} → ${calls.of}`);
+    await page.close();
+
+    const { page: p2, calls: c2 } = await abrir(vp, { step: 2, snapshot: () => json({ ok: true, connections: [UPDATING] }) });
+    await p2.waitForFunction(() => document.querySelector('[data-role="of-sync"]').innerText.includes("Atualizando"));
+    await p2.clock.runFor(10 * 60 * 1000);
+    const total = await assentado(c2);
+    assert.ok(total >= 10 && total <= 1 + 24, `teto: ${total} pedidos em 10 min`);
+    await p2.close();
+  });
+
+  test(`${tag} passo 2: resposta velha que chega depois da nova não repinta "Atualizando…"`, async () => {
+    // 2º pedido lento (volta em 1 s de relógio real, "updating"); o 3º volta
+    // na hora com "updated". Sem a guarda de sequência o 2º repinta por cima.
+    const { page, calls } = await abrir(vp, { step: 2, snapshot: (n) => {
+      if (n === 2) return new Promise((r) => setTimeout(() => r(json({ ok: true, connections: [UPDATING] })), 1000));
+      return json({ ok: true, connections: [n === 1 ? UPDATING : UPDATED] });
+    } });
+    await page.waitForFunction(() => document.querySelector('[data-role="of-sync"]').innerText.includes("Atualizando"));
+    await page.clock.runFor(10000);
+    await assentado(calls);
+    await new Promise((r) => setTimeout(r, 1300));
+    assert.match(await syncText(page), /Atualizado/);
+    assert.doesNotMatch(await syncText(page), /Atualizando/);
+    await page.close();
+  });
+
+  test(`${tag} passo 2: needs_user_action mostra o detalhe do servidor e "Resolver em Ajustes"`, async () => {
+    const { page } = await abrir(vp, { step: 2, snapshot: () => json({ ok: true, connections: [{
+      institution_name: "Caixa", ui: { state: "needs_user_action", label: "Ação necessária", detail: "Autorize o acesso no app do banco" } }] }) });
+    await page.waitForFunction(() => document.querySelector('[data-role="of-sync"]').innerText.includes("Caixa"));
+    assert.match(await syncText(page), /Ação necessária[\s\S]*Autorize o acesso no app do banco/);
+    const href = await page.$eval('[data-role="of-sync"] a', (a) => a.getAttribute("href"));
+    assert.equal(href, "/settings?view=open-finance&onb=1");
+    await page.close();
+  });
+
+  test(`${tag} passo 2: snapshot com 402 deixa o bloco como antes`, async () => {
+    const { page, calls } = await abrir(vp, { step: 2, snapshot: () => json({ detail: "x" }, 402) });
+    await page.waitForFunction(() => document.querySelector("#onb-balance"));
+    await page.clock.runFor(30000);
+    assert.equal(await page.$eval('[data-role="of-sync"]', (e) => e.children.length), 0);
+    assert.equal(await assentado(calls), 1, "falha no snapshot não repolla");
+    assert.ok(await page.isVisible('a[href="/settings?view=open-finance&onb=1"]'), "o convite continua");
+    await page.close();
+  });
+
+  test(`${tag} passo 5: 500 ao gravar não mostra "Tudo pronto!"; Tentar de novo com 200 mostra e o Finish vai ao /home`, async () => {
+    let falha = true;
+    const { page, calls } = await abrir(vp, { step: 4, saveStatus: (b) => (b.completed && falha ? 500 : 200) });
+    await page.click('.onb-step[data-step="4"] [data-action="skip"]');
+    await page.waitForSelector('[data-role="done-fail"]:not([hidden])');
+    assert.equal(await page.isVisible('[data-role="done-ok"]'), false, "Tudo pronto apareceu sem o 200");
+    assert.equal(await page.isVisible("text=Tudo pronto"), false);
+    assert.match(await page.$eval('[data-role="error"]', (e) => e.textContent), /Não consegui salvar/);
+    assert.ok(calls.posts.some((b) => b.step === 5 && b.completed === true), "entrar no passo 5 tem de gravar a conclusão");
+
+    falha = false;
+    await page.click('[data-action="retry-complete"]');
+    await page.waitForSelector('[data-role="done-ok"]:not([hidden])');
+    assert.ok(await page.isVisible("text=Tudo pronto"));
+    assert.equal(await page.$eval('[data-role="error"]', (e) => e.textContent), "");
+
+    await Promise.all([page.waitForURL("**/home"), page.click('[data-action="finish"]')]);
+    await page.close();
+  });
+
+  test(`${tag} "Pular tudo" com 500 fica e avisa; com 200 vai ao /home`, async () => {
+    let falha = true;
+    const { page } = await abrir(vp, { step: 2, saveStatus: (b) => (b.completed && falha ? 500 : 200) });
+    await page.click('[data-action="skip-all"]');
+    await page.waitForFunction(() => document.querySelector('[data-role="error"]').textContent.includes("Não consegui salvar"));
+    assert.match(page.url(), /comecar\.html$/);
+
+    falha = false;
+    await Promise.all([page.waitForURL("**/home"), page.click('[data-action="skip-all"]')]);
+    await page.close();
+  });
+}

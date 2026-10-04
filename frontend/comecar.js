@@ -52,6 +52,23 @@
   const WA_POLL_MS = 3000;
   const WA_POLL_LIMIT = 30; // 30 × 3s = 90s
 
+  // Repoll do estado do Open Finance no passo 2, só enquanto alguma conexão
+  // está em `updating`. ponytail: teto fixo de 2 min; depois o texto fica no
+  // último estado lido e o painel mostra o resto.
+  const OF_POLL_MS = 5000;
+  const OF_POLL_LIMIT = 24; // 24 × 5s = 2 min
+
+  /**
+   * Estado da conexão (`ui.state`, decidido só por connection_ui_state em
+   * core/services/pluggy_health.py) → a ação que o wizard oferece. Rótulo e
+   * detalhe NÃO moram aqui: vêm prontos do servidor (_LABELS/_FIXED_DETAIL) e
+   * são mostrados como vieram. Estado fora da tabela = sem ação, só o texto do
+   * servidor (é o que os Ajustes também fazem com paused/removed).
+   */
+  const OF_ACTION = { updating: "wait", needs_user_action: "resolve", item_missing: "resolve" };
+  const OF_WAIT_TEXT = "Pode continuar: os dados aparecem no painel quando chegarem.";
+  const SAVE_FAIL_TEXT = "Não consegui salvar agora. Confere sua internet e tenta de novo.";
+
   /* ─── Estado único do wizard ──────────────────────────────────────────── */
 
   const state = {
@@ -69,6 +86,9 @@
     waLink: "",
     waPollTimer: null,
     waPollCount: 0,
+    ofPollTimer: null,
+    ofPollCount: 0,
+    ofSeq: 0,              // só a resposta do pedido mais novo desenha
     reportChoice: null,
     reportCurrent: null,
     weeklyReportAvailable: false,
@@ -122,6 +142,20 @@
       if (String(cards[i].name || "").trim().toLowerCase() === wanted) return true;
     }
     return false;
+  }
+
+  /** Conexões do snapshot GET /open-finance/{id} → o que o passo 2 mostra. */
+  function syncView(connections) {
+    const rows = (Array.isArray(connections) ? connections : []).map(function (c) {
+      const ui = (c && c.ui) || {};
+      return {
+        bank: (c && c.institution_name) || "Seu banco",
+        label: ui.label || "",
+        detail: ui.detail || "",
+        action: OF_ACTION[ui.state] || null,
+      };
+    });
+    return { rows: rows, poll: rows.some(function (r) { return r.action === "wait"; }) };
   }
 
   /* ─── DOM helpers ─────────────────────────────────────────────────────── */
@@ -199,13 +233,16 @@
 
   /* ─── Persistência do progresso ───────────────────────────────────────── */
 
-  /** Grava passo/conclusão/telemetria. Nunca derruba a navegação. */
+  /**
+   * Grava passo/conclusão/telemetria; devolve null se falhar. Passo é
+   * conveniência (no pior caso recomeça de um passo anterior), mas a CONCLUSÃO
+   * não: quem chama com `completed` confere o retorno antes de dizer "pronto"
+   * ou de sair para o /home.
+   */
   async function persist(payload) {
     try {
       return await apiSend("POST", "/onboarding/state", payload);
     } catch (_err) {
-      // Progresso é conveniência: se falhar, o usuário continua o fluxo e no
-      // pior caso recomeça de um passo anterior na próxima visita.
       return null;
     }
   }
@@ -223,6 +260,7 @@
     state.step = Math.min(Math.max(step, STEP_WELCOME), TOTAL_STEPS);
     clearError();
     stopWaPoll();
+    stopOfPoll();
 
     for (let n = 1; n <= TOTAL_STEPS; n++) show(stepEl(n), n === state.step);
     renderProgress();
@@ -232,8 +270,34 @@
     // novo não pode inflar a contagem do funil.
     const firstView = !state.viewed[state.step];
     state.viewed[state.step] = true;
-    persist({ step: state.step, event: firstView ? "view" : null });
-    loadStep(state.step);
+    const payload = { step: state.step, event: firstView ? "view" : null };
+    // Entrar no passo final GRAVA a conclusão (decisão do dono, #728): o
+    // "Tudo pronto!" só aparece com o 200, nunca antes.
+    if (state.step === TOTAL_STEPS) payload.completed = true;
+    const saved = persist(payload);
+    if (state.step === TOTAL_STEPS) completeOnEnter(saved);
+    else loadStep(state.step);
+  }
+
+  async function completeOnEnter(saved) {
+    show(el("done-ok"), false);
+    show(el("done-fail"), false);
+    show(el("done-saving"), true);
+    const ok = await saved;
+    if (state.step !== TOTAL_STEPS) return;
+    show(el("done-saving"), false);
+    if (ok) {
+      state.completed = true;
+      show(el("done-ok"), true);
+    } else {
+      showError(SAVE_FAIL_TEXT);
+      show(el("done-fail"), true);
+    }
+  }
+
+  function retryComplete() {
+    clearError();
+    completeOnEnter(persist({ step: TOTAL_STEPS, completed: true }));
   }
 
   function next() { goTo(state.step + 1); }
@@ -246,13 +310,14 @@
     goTo(state.step + 1);
   }
 
-  async function finish() {
+  function finish() {
+    // A conclusão já foi gravada ao entrar no passo (completeOnEnter); o botão
+    // só aparece depois do 200, e esta guarda cobre o resto.
+    if (!state.completed) return;
     firePixel();
-    await persist({ step: TOTAL_STEPS, completed: true });
     // O evento do GA4 sai daqui, e não do firePixel, porque quem navega é esta
     // função: `pbTrack` espera o envio antes do replace (ver o snippet em
-    // frontend/routes/shared.py). O `await` acima dá alguma folga, mas não é
-    // garantia — gtag.js ainda carregando perde o evento do mesmo jeito.
+    // frontend/routes/shared.py).
     const irPraHome = function () {
       if (window.PBPurchaseIntent) window.PBPurchaseIntent.clearCompleted();
       window.location.replace("/home");
@@ -266,8 +331,12 @@
 
   async function skipAll() {
     // Pular é uma decisão do usuário: marca concluído pra o wizard não voltar
-    // a aparecer no próximo login.
-    await persist({ step: state.step, completed: true });
+    // a aparecer no próximo login. Sem o 200 não sai daqui: ir para o /home
+    // sem a conclusão gravada só devolveria a pessoa ao wizard pelo gate.
+    if (!state.completed && !(await persist({ step: state.step, completed: true }))) {
+      showError(SAVE_FAIL_TEXT);
+      return;
+    }
     if (window.PBPurchaseIntent) window.PBPurchaseIntent.clearCompleted();
     window.location.replace("/home");
   }
@@ -290,6 +359,7 @@
   /* ─── Passo 2: dinheiro ───────────────────────────────────────────────── */
 
   async function loadMoney() {
+    loadOfSync();
     try {
       const setup = await apiGet("/account/" + state.userId + "/setup-status");
       state.balance = Number(setup.balance || 0);
@@ -439,6 +509,79 @@
     box.appendChild(document.createTextNode(" pra cadastrar mais."));
     show(box, true);
     show(el("add-card-btn"), false);
+  }
+
+  /* ─── Passo 2: estado do Open Finance ─────────────────────────────────── */
+
+  /** Lê o snapshot e redesenha; null se falhou (402/rede) ou se já saiu do passo. */
+  async function refreshOfSync() {
+    const seq = ++state.ofSeq;
+    let data;
+    try {
+      data = await apiGet("/open-finance/" + state.userId);
+    } catch (_) {
+      return null; // sem snapshot o bloco fica como era: só o convite
+    }
+    // Pedido lento (> 5 s) que volta depois de um mais novo não repinta
+    // "Atualizando…" por cima de "Atualizado"; nem desenha fora do passo.
+    if (seq !== state.ofSeq || state.step !== STEP_MONEY) return null;
+    const view = syncView(data && data.connections);
+    renderOfSync(view);
+    return view;
+  }
+
+  async function loadOfSync() {
+    const view = await refreshOfSync();
+    if (view && view.poll) startOfPoll();
+  }
+
+  function renderOfSync(view) {
+    const list = el("of-sync");
+    if (!list) return;
+    list.innerHTML = "";
+    view.rows.forEach(function (row) {
+      const li = document.createElement("li");
+      li.className = "onb-of-row";
+      const bank = document.createElement("strong");
+      bank.textContent = row.bank;
+      const label = document.createElement("span");
+      label.textContent = row.label;
+      li.appendChild(bank);
+      li.appendChild(label);
+      const lines = [row.detail, row.action === "wait" ? OF_WAIT_TEXT : ""];
+      lines.forEach(function (line) {
+        if (!line) return;
+        const p = document.createElement("small");
+        p.textContent = line;
+        li.appendChild(p);
+      });
+      if (row.action === "resolve") {
+        const link = document.createElement("a");
+        link.href = "/settings?view=open-finance&onb=1";
+        link.textContent = "Resolver em Ajustes";
+        li.appendChild(link);
+      }
+      list.appendChild(li);
+    });
+  }
+
+  // Molde do startWaPoll: um intervalo, teto, e o goTo para tudo.
+  function startOfPoll() {
+    stopOfPoll();
+    state.ofPollCount = 0;
+    state.ofPollTimer = window.setInterval(async function () {
+      state.ofPollCount += 1;
+      if (state.ofPollCount > OF_POLL_LIMIT) { stopOfPoll(); return; }
+      const view = await refreshOfSync();
+      if (view && !view.poll) stopOfPoll();
+    }, OF_POLL_MS);
+  }
+
+  function stopOfPoll() {
+    if (state.ofPollTimer) {
+      window.clearInterval(state.ofPollTimer);
+      state.ofPollTimer = null;
+    }
   }
 
   /* ─── Passo 3: WhatsApp ───────────────────────────────────────────────── */
@@ -656,6 +799,7 @@
     skip: function () { skip(); },
     "skip-all": function () { skipAll(); },
     finish: function () { finish(); },
+    "retry-complete": function () { retryComplete(); },
     "save-balance": function (button) { saveBalance(button); },
     "add-card": function () { openCardForm(true); },
     "cancel-card": function () { openCardForm(false); },
@@ -731,6 +875,7 @@
     isWhatsAppLinked: isWhatsAppLinked,
     resumeStep: resumeStep,
     hasCardNamed: hasCardNamed,
+    syncView: syncView,
   };
 
   if (document.readyState === "loading") {

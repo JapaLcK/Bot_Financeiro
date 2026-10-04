@@ -55,6 +55,32 @@
       </p>
 
       <div class="onb-block">
+        <h2 class="onb-block-title">Conectar seu banco</h2>
+        <p class="onb-hint">
+          Pelo Open Finance eu leio seus lançamentos sozinho, sem você digitar nada.
+          O que eu leio do seu banco:
+        </p>
+        <!-- Espelha PLUGGY_PRODUCTS (core/services/pluggy.py); tests/test_onboarding_of_produtos.py compara. -->
+        <ul class="onb-next" data-role="of-products">
+          <li>Contas e saldos</li>
+          <li>Transações</li>
+          <li>Cartões de crédito</li>
+          <li>Investimentos</li>
+        </ul>
+        <p class="onb-hint">
+          É só leitura: eu não movo seu dinheiro e nunca vejo sua senha. Você
+          autoriza direto no seu banco, pela Pluggy, e pode cancelar quando
+          quiser em Ajustes › Open Finance.
+        </p>
+        <p class="onb-hint">
+          Próximo passo: autoriza no banco e volta pra cá. Aqui aparece quando
+          os dados chegarem.
+        </p>
+        <ul class="onb-list" data-role="of-sync" aria-live="polite"></ul>
+        <a class="btn btn-outline btn-block" href="/settings?view=open-finance&amp;onb=1">Conectar meu banco</a>
+      </div>
+
+      <div class="onb-block">
         <h2 class="onb-block-title">Saldo de hoje</h2>
         <div data-role="balance-form">
           <div class="field">
@@ -103,14 +129,6 @@
           </div>
         </div>
         <button type="button" class="btn btn-outline btn-block" data-action="add-card" data-role="add-card-btn">+ Adicionar cartão</button>
-      </div>
-
-      <div class="onb-block">
-        <h2 class="onb-block-title">Conectar seu banco</h2>
-        <p class="onb-hint">
-          Pelo Open Finance eu leio seus lançamentos sozinho, sem você digitar nada.
-        </p>
-        <a class="btn btn-outline btn-block" href="/settings?view=open-finance&amp;onb=1">Conectar meu banco</a>
       </div>
 
       <div class="onb-acts">
@@ -169,16 +187,23 @@
 
     <!-- 5 · Pronto ---------------------------------------------------------- -->
     <section class="onb-step" data-step="5" hidden>
-      <div class="onb-check"><i class="ph ph-check" aria-hidden="true"></i></div>
-      <h1>Tudo pronto<span data-role="greet-name-end"></span>!</h1>
-      <p class="onb-sub">Daqui em diante é só falar comigo no WhatsApp ou usar o app.</p>
-      <ul class="onb-next">
-        <li>Lance sua primeira receita ou despesa</li>
-        <li>Confira seus cartões e faturas</li>
-        <li>Peça <code>resumo</code> a qualquer momento</li>
-      </ul>
-      <div class="onb-acts">
-        <button type="button" class="btn btn-primary btn-block btn-lg" data-action="finish">Ir para o app →</button>
+      <!-- "Tudo pronto" só depois que o servidor gravou a conclusão (comecar.js, completeOnEnter). -->
+      <p class="onb-sub" data-role="done-saving">Salvando sua configuração…</p>
+      <div class="onb-acts" data-role="done-fail" hidden>
+        <button type="button" class="btn btn-primary btn-block btn-lg" data-action="retry-complete">Tentar de novo</button>
+      </div>
+      <div data-role="done-ok" hidden>
+        <div class="onb-check"><i class="ph ph-check" aria-hidden="true"></i></div>
+        <h1>Tudo pronto<span data-role="greet-name-end"></span>!</h1>
+        <p class="onb-sub">Daqui em diante é só falar comigo no WhatsApp ou usar o app.</p>
+        <ul class="onb-next">
+          <li>Lance sua primeira receita ou despesa</li>
+          <li>Confira seus cartões e faturas</li>
+          <li>Peça <code>resumo</code> a qualquer momento</li>
+        </ul>
+        <div class="onb-acts">
+          <button type="button" class="btn btn-primary btn-block btn-lg" data-action="finish">Ir para o app →</button>
+        </div>
       </div>
     </section>
 
