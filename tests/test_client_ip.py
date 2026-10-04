@@ -182,7 +182,11 @@ def test_faixas_da_cloudflare():
 # ---- B. sonda --------------------------------------------------------------
 
 CHAVES = {"xff_entradas", "conexao_cf", "cf_presente", "cf_valido", "cf_global",
-          "cf_igual_conexao", "xri_igual_conexao", "fonte"}
+          "cf_igual_conexao", "xri_igual_conexao", "fonte",
+          "xff_cabecalhos", "xff_primeira_tipo", "xff_ultima_tipo", "xri_tipo",
+          "xri_igual_primeira", "cf_igual_primeira"}
+TIPOS = {"ausente", "cf", "railway", "privado", "publico", "outro"}
+XRI, R, PRIV, OUTRO = "x-real-ip", "100.64.0.9", "10.0.0.1", "224.0.0.1"
 
 
 def _details(gravadas):
@@ -201,7 +205,9 @@ def test_sonda_grava_uma_vez_por_combinacao(gravadas):
     assert _details(gravadas)[0] == {
         "xff_entradas": 1, "conexao_cf": True, "cf_presente": True, "cf_valido": True,
         "cf_global": True, "cf_igual_conexao": False, "xri_igual_conexao": True,
-        "fonte": "cf"}
+        "fonte": "cf", "xff_cabecalhos": 1, "xff_primeira_tipo": "cf",
+        "xff_ultima_tipo": "cf", "xri_tipo": "cf",
+        "xri_igual_primeira": True, "cf_igual_primeira": False}
 
     client_ip(_req(P, (XFF, A), (CF, V)))  # alarme: CF forjado direto no Railway
     assert len(gravadas) == 2
@@ -221,10 +227,11 @@ def test_sonda_nao_leva_ip_nem_cabecalho(gravadas):
         _req(P, (XFF, f"{C}, {X}, {W}"), (CF, V6), ("user-agent", ua)),
         _req(P, (XFF, A), (CF, V)),
         _req(P),
+        _req(P, (XFF, X), (XFF, W), (CF, V), (XRI, A)),
     ]
     for r in casos:
         client_ip(r)
-    assert len(gravadas) == 4
+    assert len(gravadas) == 5
     proibidos = [P, C, V, W, X, A, V6, V6.lower(), "2804:14c", ua, "PigTeste"]
     for d in _details(gravadas):
         assert set(d) == CHAVES
@@ -232,7 +239,80 @@ def test_sonda_nao_leva_ip_nem_cabecalho(gravadas):
         for p in proibidos:
             assert p not in texto, (p, texto)
         assert d["xff_entradas"] in (0, 1, 2, "3+")
+        assert d["xff_cabecalhos"] in (0, 1, 2, "3+")
         assert d["fonte"] in ("cf", "conexao", "peer")
+        for k in ("xff_primeira_tipo", "xff_ultima_tipo", "xri_tipo"):
+            assert d[k] in TIPOS, (k, d[k])
+        for k in ("xri_igual_primeira", "cf_igual_primeira"):
+            assert d[k] in (True, False, None), (k, d[k])
+
+
+def _d(gravadas, *headers):
+    """details de UMA requisição do peer P (dedupe zerado antes)."""
+    cip._SONDA_VISTAS.clear()
+    client_ip(_req(P, *headers))
+    return _details(gravadas)[-1]
+
+
+def test_sonda_caso_de_producao_e_primeira_x_ultima(gravadas):
+    """O que a produção gravou (XFF de 2 entradas, última fora da Cloudflare):
+    os novos campos dizem o tipo de cada ponta. A ordem importa."""
+    d = _d(gravadas, (XFF, f"{C}, {PRIV}"), (CF, V), (XRI, C))
+    assert (d["xff_primeira_tipo"], d["xff_ultima_tipo"], d["fonte"]) == ("cf", "privado", "conexao")
+    assert (d["xri_tipo"], d["xri_igual_primeira"], d["xri_igual_conexao"]) == ("cf", True, False)
+    assert d["cf_igual_primeira"] is False
+    d = _d(gravadas, (XFF, f"{V}, {R}"))
+    assert (d["xff_primeira_tipo"], d["xff_ultima_tipo"]) == ("publico", "railway")
+    d = _d(gravadas, (XFF, OUTRO))  # 1 entrada: primeira e última são a mesma
+    assert (d["xff_primeira_tipo"], d["xff_ultima_tipo"]) == ("outro", "outro")
+    d = _d(gravadas, (CF, V))
+    assert (d["xff_primeira_tipo"], d["xff_ultima_tipo"], d["xri_igual_primeira"],
+            d["cf_igual_primeira"]) == ("ausente", "ausente", None, None)
+
+
+def test_sonda_xff_cabecalhos_separa_lista_de_cabecalhos_repetidos(gravadas):
+    d = _d(gravadas, (XFF, f"{C}, {V}"))
+    assert (d["xff_cabecalhos"], d["xff_entradas"]) == (1, 2)
+    d = _d(gravadas, (XFF, C), (XFF, V))
+    assert (d["xff_cabecalhos"], d["xff_entradas"]) == (2, 2)
+    assert _d(gravadas, (XFF, C), (XFF, V), (XFF, W))["xff_cabecalhos"] == "3+"
+    assert _d(gravadas, (CF, V))["xff_cabecalhos"] == 0
+
+
+@pytest.mark.parametrize("xri,tipo", [
+    (None, "ausente"), ("lixo", "ausente"), ("dup", "ausente"), (C, "cf"),
+    ("2606:4700::1", "cf"), (R, "railway"), (PRIV, "privado"), ("127.0.0.1", "privado"),
+    ("240.0.0.1", "privado"), (V, "publico"), (V6, "publico"), (OUTRO, "outro"),
+    ("64:ff9b::808:808", "outro"),
+])
+def test_sonda_xri_tipo(xri, tipo, gravadas):
+    """`_tipo` pelo X-Real-IP: cada categoria do conjunto fechado."""
+    extra = [] if xri is None else [(XRI, V), (XRI, W)] if xri == "dup" else [(XRI, xri)]
+    assert _d(gravadas, (XFF, C), *extra)["xri_tipo"] == tipo
+
+
+def test_sonda_igual_primeira(gravadas):
+    xff = (XFF, f"{V}, {C}")
+    assert _d(gravadas, xff, (XRI, V))["xri_igual_primeira"] is True
+    assert _d(gravadas, xff, (XRI, C))["xri_igual_primeira"] is False
+    assert _d(gravadas, xff)["xri_igual_primeira"] is None
+    assert _d(gravadas, xff, (CF, V))["cf_igual_primeira"] is True
+    assert _d(gravadas, xff, (CF, W))["cf_igual_primeira"] is False
+    assert _d(gravadas, xff, (CF, "lixo"))["cf_igual_primeira"] is None
+
+
+def test_sonda_para_no_teto_sem_mudar_o_ip(gravadas, monkeypatch):
+    """Atacante direto no Railway escolhe os cabeçalhos: o teto limita as linhas
+    e threads por processo. Combinação nova depois do teto não cria Thread."""
+    criadas = []
+    monkeypatch.setattr(cip, "_SONDA_TETO", 2)
+    monkeypatch.setattr(cip, "Thread", lambda **kw: criadas.append(kw) or _ThreadFalsa(gravadas, **kw))
+    client_ip(_req(P, (XFF, C), (CF, V)))
+    client_ip(_req(P, (XFF, A)))
+    assert len(gravadas) == len(criadas) == 2  # abaixo do teto grava
+    assert client_ip(_req(P, (XFF, C), (CF, W), (XRI, V))) == W  # nova: IP certo, não grava
+    assert client_ip(_req(P, (XFF, A))) == A  # já vista: continua sem gravar
+    assert len(gravadas) == len(criadas) == 2 and len(cip._SONDA_VISTAS) == 2
 
 
 def test_sonda_so_dispara_com_peer_do_railway(gravadas):
@@ -246,3 +326,19 @@ def test_falha_da_sonda_nao_quebra_client_ip(monkeypatch):
         raise RuntimeError("can't start new thread")
     monkeypatch.setattr(cip, "Thread", _explode)
     assert client_ip(_req(P, (XFF, C), (CF, V))) == V
+
+
+def test_falha_ao_montar_a_sonda_nao_muda_o_ip(gravadas, monkeypatch):
+    """A montagem dos details também é sonda: exceção nela não chega ao login
+    nem ao limitador, e nada é gravado."""
+    casos = [((XFF, C), (CF, V)), ((XFF, C), (CF, V6)), ((XFF, A),)]
+    antes = [(client_ip(_req(P, *h)), rate_limit_key(_req(P, *h))) for h in casos]
+    gravadas.clear()
+    cip._SONDA_VISTAS.clear()
+
+    def _explode(ip):
+        raise RuntimeError("boom")
+    monkeypatch.setattr(cip, "_tipo", _explode)
+    depois = [(client_ip(_req(P, *h)), rate_limit_key(_req(P, *h))) for h in casos]
+    assert depois == antes == [(V, V), ("2804:14c:1a2:3b4::8", "2804:14c:1a2:3b4::/64"), (A, A)]
+    assert gravadas == [] and cip._SONDA_VISTAS == set()
