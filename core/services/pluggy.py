@@ -299,6 +299,17 @@ def list_pluggy_transactions(
     return out
 
 
+def pluggy_products() -> list[str]:
+    """Produtos que o connect token pede à Pluggy. Fonte única: o wizard
+    (/onboarding, GET /onboarding/state → `of_produtos`) mostra esta lista ao
+    usuário como o que o PigBank lê do banco dele."""
+    # INVESTMENTS é obrigatório: o sync lê /investments pra achar a Caixinha
+    # (FIXED_INCOME/CDB). Se o item não coletar esse produto, /investments volta
+    # vazio e a detecção de caixinha (base do Banqueiro OF-native) quebra.
+    products_env = (os.getenv("PLUGGY_PRODUCTS") or "ACCOUNTS,TRANSACTIONS,CREDIT_CARDS,INVESTMENTS").strip()
+    return [p.strip().upper() for p in products_env.split(",") if p.strip()]
+
+
 def create_pluggy_connect_token(user_id: int, webhook_url: str | None = None,
                                 oauth_redirect_uri: str | None = None) -> dict:
     api_key = create_pluggy_api_key()
@@ -311,11 +322,7 @@ def create_pluggy_connect_token(user_id: int, webhook_url: str | None = None,
     if oauth_redirect_uri:
         options["oauthRedirectUri"] = oauth_redirect_uri
 
-    # INVESTMENTS é obrigatório: o sync lê /investments pra achar a Caixinha
-    # (FIXED_INCOME/CDB). Se o item não coletar esse produto, /investments volta
-    # vazio e a detecção de caixinha (base do Banqueiro OF-native) quebra.
-    products_env = (os.getenv("PLUGGY_PRODUCTS") or "ACCOUNTS,TRANSACTIONS,CREDIT_CARDS,INVESTMENTS").strip()
-    products = [p.strip().upper() for p in products_env.split(",") if p.strip()]
+    products = pluggy_products()
     if products:
         options["products"] = products
 
