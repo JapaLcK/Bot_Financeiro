@@ -63,9 +63,13 @@
    * core/services/pluggy_health.py) → a ação que o wizard oferece. Rótulo e
    * detalhe NÃO moram aqui: vêm prontos do servidor (_LABELS/_FIXED_DETAIL) e
    * são mostrados como vieram. Estado fora da tabela = sem ação, só o texto do
-   * servidor (é o que os Ajustes também fazem com paused/removed).
+   * servidor. paused/removed levam a Ajustes (decisão do dono, 2026-10-04).
+   * O teste "os 9 estados" compara com o _LABELS: estado novo lá quebra ele.
    */
-  const OF_ACTION = { updating: "wait", needs_user_action: "resolve", item_missing: "resolve" };
+  const OF_ACTION = {
+    updating: "wait",
+    needs_user_action: "resolve", item_missing: "resolve", paused: "resolve", removed: "resolve",
+  };
   const OF_WAIT_TEXT = "Pode continuar: os dados aparecem no painel quando chegarem.";
   const SAVE_FAIL_TEXT = "Não consegui salvar agora. Confere sua internet e tenta de novo.";
 
@@ -91,6 +95,7 @@
     ofPollCount: 0,
     ofSeq: 0,              // só a resposta do pedido mais novo desenha
     ofRendered: null,      // última lista desenhada (JSON) — poll igual não toca o DOM
+    conversion: null,      // envio da conversão desta visita (Promise), se ela carimbou
     reportChoice: null,
     reportCurrent: null,
     weeklyReportAvailable: false,
@@ -305,11 +310,17 @@
     show(el("done-saving"), true);
     busyBegin(); // a conclusão em voo é escrita como as outras: "Pular tudo" espera ela
     let ok;
-    try { ok = await saved; } finally { busyEnd(); }
+    try {
+      ok = await saved;
+      // A conversão sai AQUI, quando a conclusão grava, e não no botão final:
+      // qualquer saída depois disso (Finish, "Pular tudo") já a encontra
+      // enviada. Só com `stamped` — revisita ao passo 5 não reconta.
+      if (ok) state.completed = true;
+      if (ok && ok.stamped) fireConversion();
+    } finally { busyEnd(); }
     if (state.step !== TOTAL_STEPS) return;
     show(el("done-saving"), false);
     if (ok) {
-      state.completed = true;
       show(el("done-ok"), true);
     } else {
       showError(SAVE_FAIL_TEXT);
@@ -338,19 +349,14 @@
     // A conclusão já foi gravada ao entrar no passo (completeOnEnter); o botão
     // só aparece depois do 200, e esta guarda cobre o resto.
     if (!state.completed) return;
-    firePixel();
-    // O evento do GA4 sai daqui, e não do firePixel, porque quem navega é esta
-    // função: `pbTrack` espera o envio antes do replace (ver o snippet em
-    // frontend/routes/shared.py).
-    const irPraHome = function () {
-      if (window.PBPurchaseIntent) window.PBPurchaseIntent.clearCompleted();
-      window.location.replace("/home");
-    };
-    if (window.pbTrack && state.userId) {
-      window.pbTrack("onboarding_complete", { step: state.step }, irPraHome);
-    } else {
-      irPraHome();
-    }
+    goHome();
+  }
+
+  /** Única saída para o app: espera o envio da conversão, se houve, antes do replace. */
+  async function goHome() {
+    if (state.conversion) await state.conversion;
+    if (window.PBPurchaseIntent) window.PBPurchaseIntent.clearCompleted();
+    window.location.replace("/home");
   }
 
   async function skipAll(button) {
@@ -371,24 +377,27 @@
         showError(SAVE_FAIL_TEXT);
         return;
       }
-      if (window.PBPurchaseIntent) window.PBPurchaseIntent.clearCompleted();
-      window.location.replace("/home");
+      await goHome();
     });
   }
 
   /**
-   * Conversão de ativação. Evento PRÓPRIO: `CompleteRegistration` já é
-   * disparado no cadastro (cadastro.html e a CAPI server-side), e reusá-lo aqui
-   * contaria a mesma pessoa duas vezes, corrompendo o sinal das campanhas.
+   * Conversão de ativação (Pixel + GA4). Eventos PRÓPRIOS: `CompleteRegistration`
+   * já é disparado no cadastro (cadastro.html e a CAPI server-side), e reusá-lo
+   * aqui contaria a mesma pessoa duas vezes, corrompendo o sinal das campanhas.
+   * `state.conversion` resolve quando o `pbTrack` confirma (teto de 1 s no
+   * snippet de frontend/routes/shared.py); o goHome espera por ela.
+   * ponytail: se o 200 que carimbou se perder na rede, a retentativa recebe
+   * stamped=false e a conversão não sai — o funil do servidor ainda conta.
    */
-  function firePixel() {
-    try {
-      if (window.fbq && state.userId) {
-        window.fbq("trackCustom", "OnboardingComplete", {}, { eventID: "onb_" + state.userId });
-      }
-      // O par no GA4 (`onboarding_complete`, evento próprio pelo mesmo motivo do
-      // parágrafo acima) sai no `finish`, que é quem navega logo depois.
-    } catch (_) { /* rastreio nunca pode quebrar o fluxo */ }
+  function fireConversion() {
+    state.conversion = new Promise(function (done) {
+      try {
+        if (window.fbq && state.userId) window.fbq("trackCustom", "OnboardingComplete", {}, { eventID: "onb_" + state.userId });
+        if (window.pbTrack && state.userId) window.pbTrack("onboarding_complete", { step: TOTAL_STEPS }, done);
+        else done();
+      } catch (_) { done(); /* rastreio nunca pode quebrar o fluxo */ }
+    });
   }
 
   /* ─── Passo 2: dinheiro ───────────────────────────────────────────────── */
@@ -851,9 +860,13 @@
   function onClick(event) {
     const target = event.target.closest ? event.target.closest("[data-action]") : null;
     if (!target) return;
-    const handler = ACTIONS[target.getAttribute("data-action")];
+    const action = target.getAttribute("data-action");
+    const handler = ACTIONS[action];
     if (!handler) return;
     event.preventDefault();
+    // Com escrita em voo só o "Pular tudo" passa (ele espera a escrita). O CSS
+    // apaga os CTAs para o mouse; esta guarda vale também para Enter/Espaço.
+    if (state.inFlight && action !== "skip-all") return;
     handler(target);
   }
 

@@ -107,4 +107,6 @@ async def update_onboarding_state_route(request: Request, payload: OnboardingSta
         pass
 
     state = await asyncio.to_thread(get_onboarding_state, user_id)
-    return {**state, "total_steps": TOTAL_STEPS}
+    # `stamped`: o cliente dispara a conversão (Pixel/GA4) só com o True, uma
+    # vez por conta — revisita e retentativa recebem False.
+    return {**state, "total_steps": TOTAL_STEPS, "stamped": stamped}

@@ -39,13 +39,21 @@ const UPDATED = { institution_name: "Nubank", ui: { state: "updated", label: "At
 /**
  * Abre o wizard no `step` salvo. `snapshot(n)` responde o n-ésimo GET do
  * Open Finance; `saveStatus(body)` o status do POST /onboarding/state (pode
- * ser Promise, para segurar o pedido em voo).
+ * ser Promise, para segurar o pedido em voo). `concluido`: a conta já tem o
+ * carimbo (revisita), então nenhum POST devolve `stamped: true` — como a rota.
+ * `calls.conv`: cada evento de conversão (Pixel e GA4), mesmo após ir ao /home.
  */
 async function abrir(viewport, { step, snapshot = () => json({ ok: true, connections: [] }),
-                                saveStatus = () => 200 } = {}) {
+                                saveStatus = () => 200, concluido = false } = {}) {
   const page = await browser.newPage({ viewport });
   await page.clock.install();
-  const calls = { of: 0, posts: [] };
+  const calls = { of: 0, posts: [], conv: [] };
+  let carimbado = concluido;
+  await page.exposeFunction("__conv", (nome) => { calls.conv.push(nome); });
+  await page.addInitScript(() => {
+    window.fbq = (_tipo, nome) => window.__conv(nome);
+    window.pbTrack = (nome, _p, depois) => { window.__conv(nome); if (depois) depois(); };
+  });
 
   await page.route("**/*", (route) => {
     const url = new URL(route.request().url());
@@ -59,11 +67,14 @@ async function abrir(viewport, { step, snapshot = () => json({ ok: true, connect
   await page.route("**/auth/dashboard-profile", (route) =>
     route.fulfill(json({ user_id: 1, display_name: "Lucas", plan: "free" })));
   await page.route("**/onboarding/state", async (route) => {
-    if (route.request().method() === "GET") return route.fulfill(json({ step, completed: false, total_steps: 5 }));
+    if (route.request().method() === "GET") return route.fulfill(json({ step, completed: concluido, total_steps: 5 }));
     const body = route.request().postDataJSON();
     calls.posts.push(body);
     const status = await saveStatus(body);
-    return route.fulfill(json(status === 200 ? { step: body.step, completed: !!body.completed } : { detail: "x" }, status));
+    if (status !== 200) return route.fulfill(json({ detail: "x" }, status));
+    const stamped = !!body.completed && !carimbado;
+    if (stamped) carimbado = true;
+    return route.fulfill(json({ step: body.step, completed: carimbado, stamped }));
   });
   await page.route("**/open-finance/1", async (route) => { calls.of += 1; return route.fulfill(await snapshot(calls.of)); });
   await page.route("**/home", (route) => route.fulfill({ status: 200, contentType: "text/html", body: "<p>home</p>" }));
@@ -85,6 +96,9 @@ async function assentado(calls) {
     if (calls.of === antes) return antes;
   }
 }
+
+/** A conversão de ativação, uma vez: o Pixel e o par no GA4. */
+const CONVERSAO = ["OnboardingComplete", "onboarding_complete"];
 
 const syncText = (page) => page.$eval('[data-role="of-sync"]', (e) => e.innerText);
 
@@ -197,6 +211,40 @@ for (const vp of VIEWPORTS) {
     assert.equal(await page.$eval('[data-role="error"]', (e) => e.textContent), "");
 
     await Promise.all([page.waitForURL("**/home"), page.click('[data-action="finish"]')]);
+    assert.deepEqual(calls.conv, CONVERSAO, "o Finish não pode repetir a conversão");
+    await page.close();
+  });
+
+  test(`${tag} revisita ao passo 5 com a conclusão já gravada não dispara a conversão de novo`, async () => {
+    // Controle negativo: `ok` em vez de `ok.stamped` no completeOnEnter dispara aqui.
+    const { page, calls } = await abrir(vp, { step: 5, concluido: true });
+    await page.waitForSelector('[data-role="done-ok"]:not([hidden])');
+    await Promise.all([page.waitForURL("**/home"), page.click('[data-action="finish"]')]);
+    assert.deepEqual(calls.conv, []);
+    await page.close();
+  });
+
+  test(`${tag} Enter num CTA focado com escrita em voo não avança nem manda POST`, async () => {
+    // O CSS só segura o mouse. Negativo: sem a guarda de inFlight no onClick, avança.
+    let solta;
+    const { page, calls } = await abrir(vp, { step: 2,
+      saveStatus: (b) => (b.completed ? new Promise((r) => { solta = () => r(500); }) : 200) });
+    await page.click('[data-action="skip-all"]');
+    while (!solta) await new Promise((r) => setTimeout(r, 20));
+    const antes = calls.posts.length;
+    for (const sel of ['.onb-step[data-step="2"] [data-action="next"]', '.onb-step[data-step="2"] [data-action="skip"]']) {
+      await page.focus(sel);
+      await page.keyboard.press("Enter");
+      await page.keyboard.press("Space");
+    }
+    await new Promise((r) => setTimeout(r, 300));
+    assert.ok(await page.isVisible('.onb-step[data-step="2"]'), "o passo avançou com a escrita em voo");
+    assert.equal(calls.posts.length, antes, JSON.stringify(calls.posts));
+    solta();
+    await page.waitForFunction(() => document.querySelector('[data-role="error"]').textContent.includes("Não consegui salvar"));
+    await page.focus('.onb-step[data-step="2"] [data-action="next"]');
+    await page.keyboard.press("Enter");
+    await page.waitForSelector('.onb-step[data-step="3"]:not([hidden])'); // positivo: sem voo, o teclado vale
     await page.close();
   });
 
@@ -243,9 +291,15 @@ for (const vp of VIEWPORTS) {
     await p2.dblclick('[data-action="retry-complete"]');
     await new Promise((r) => setTimeout(r, 800));
     assert.equal(c2.posts.filter((b) => b.completed).length - antes, 1, JSON.stringify(c2.posts));
-    // Em 1280 o 2º clique cai no "Pular tudo", que agora espera a conclusão em
-    // voo e leva ao app (sem novo completed) em vez de ser engolido.
-    assert.ok(/\/home$/.test(p2.url()) || await p2.isVisible('[data-role="done-ok"]'), "nem Tudo pronto nem o app");
+    // Em 1280 o 2º clique cai no "Pular tudo", que espera a conclusão em voo e
+    // leva ao app sem passar pelo Finish. Qualquer que seja a tela final, a
+    // conversão saiu UMA vez quando a conclusão gravou. Controle negativo:
+    // conversão só no finish() → 0 aqui, nos dois tamanhos.
+    assert.deepEqual(c2.conv, CONVERSAO, `tela final: ${p2.url()}`);
+    if (!/\/home$/.test(p2.url())) {
+      await Promise.all([p2.waitForURL("**/home"), p2.click('[data-action="finish"]')]);
+      assert.deepEqual(c2.conv, CONVERSAO, "o Finish repetiu a conversão");
+    }
     await p2.close();
   });
 

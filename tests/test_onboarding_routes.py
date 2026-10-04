@@ -262,12 +262,13 @@ def test_conclusao_conta_uma_vez_no_funil_pelo_servidor_real(user_id):
 
     r = c.post("/onboarding/state", json={"step": 5, "completed": True}, headers=_csrf(c))
     assert r.status_code == 200 and r.json()["completed"] is True
+    assert r.json()["stamped"] is True, "o cliente dispara a conversão por este campo"
     carimbo = _um("select onboarding_completed_at as c from auth_accounts where user_id=%s")["c"]
     assert carimbo is not None
     assert _um(eventos)["n"] == 1
 
     r = c.post("/onboarding/state", json={"step": 5, "completed": True}, headers=_csrf(c))
-    assert r.status_code == 200
+    assert r.status_code == 200 and r.json()["stamped"] is False, "revisita reconta a conversão no cliente"
     assert _um(eventos)["n"] == 1, "a 2ª conclusão inflou o funil"
     assert _um("select onboarding_completed_at as c from auth_accounts where user_id=%s")["c"] == carimbo
 

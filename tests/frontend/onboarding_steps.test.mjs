@@ -33,6 +33,7 @@ import vm from "node:vm";
 const FRONTEND = join(dirname(fileURLToPath(import.meta.url)), "..", "..", "frontend");
 const JS = join(FRONTEND, "comecar.js");
 const HTML = join(FRONTEND, "comecar.html");
+const PLUGGY_HEALTH = join(FRONTEND, "..", "core", "services", "pluggy_health.py");
 
 /** Carrega comecar.js sem DOM e devolve os helpers puros. */
 function load() {
@@ -255,22 +256,32 @@ test("carregar o arquivo sem a marcação não faz nenhuma chamada", () => {
 
 // ── Passo 2: estado do Open Finance (syncView) ──────────────────────────────
 
+/** As chaves do `_LABELS` de pluggy_health.py — a fonte dos estados (§0.7). */
+function estadosDoBackend() {
+  const bloco = readFileSync(PLUGGY_HEALTH, "utf8").match(/^_LABELS = \{([\s\S]*?)^\}/m);
+  assert.ok(bloco, "_LABELS sumiu de pluggy_health.py");
+  return [...bloco[1].matchAll(/^\s*"(\w+)":/gm)].map((m) => m[1]).sort();
+}
+
 test("os 9 estados de connection_ui_state × a ação que o wizard oferece", () => {
-  // Os 9 de `_LABELS` (core/services/pluggy_health.py). Rótulo e detalhe vêm
-  // do servidor e passam intactos; o JS só escolhe a ação. Só `updating` faz
-  // repoll — os outros já são o veredito.
+  // Rótulo e detalhe vêm do servidor e passam intactos; o JS só escolhe a
+  // ação. Só `updating` faz repoll — os outros já são o veredito. paused e
+  // removed levam a Ajustes (decisão do dono, 2026-10-04).
   const { api } = load();
   const esperado = {
     updating: "wait",
     needs_user_action: "resolve",
     item_missing: "resolve",
+    paused: "resolve",
+    removed: "resolve",
     error_recoverable: null,
     no_accounts: null,
     partial: null,
     updated: null,
-    paused: null,
-    removed: null,
   };
+  // Estado novo no backend sem linha aqui = decisão de ação que ninguém tomou.
+  assert.deepEqual(Object.keys(esperado).sort(), estadosDoBackend(),
+    "os estados do wizard divergiram do _LABELS de core/services/pluggy_health.py");
   for (const [estado, acao] of Object.entries(esperado)) {
     const ui = { state: estado, label: `rótulo ${estado}`, detail: `detalhe ${estado}` };
     const view = api.syncView([{ institution_name: "Nubank", ui }]);
