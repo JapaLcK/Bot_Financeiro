@@ -9,6 +9,7 @@
  *   pix-checkout.js  este: o CTA nos cards, a etiqueta do toggle e o POST.
  *   pix-poll.js      o QR, a cópia, o poll e as duas caixas de recusa do 409.
  *                    Divisão pelo teto de 350 linhas do `quality/max-lines`.
+ *   (e o pix-extras.js, os cadernos extras no formulário daqui, pelo mesmo teto)
  *
  * Script CLÁSSICO (sem módulo ES) de propósito: a precos.html chama
  * `pbPixInit`/`pbPixRefresh` do escopo global e este arquivo lê de lá o que ela já
@@ -233,6 +234,7 @@ function pixFormulario(plano, ctx) {
   const enviar = pixBotao("btn-primary", "Gerar código Pix");
   enviar.type = "submit";
   f.append(rot, campo, erro, enviar);
+  if (typeof pixExtrasMontar === "function") pixExtrasMontar(f, enviar);   // pix-extras.js: os cadernos
   const sair = pixBotao("pix-ghost", "Cancelar");
   sair.addEventListener("click", () => ctx.fechar());
   ctx.box.append(pixLinha("O Pix pede o CPF ou CNPJ de quem paga. A gente não"
@@ -261,12 +263,13 @@ function pixFormulario(plano, ctx) {
 async function pixEnviar(plano, documento, confirmarCancelamentoStripe, ctx, botao) {
   if (botao.disabled) return;   // Enter repetido não vira duas cobranças
   botao.disabled = true;
-  // Clicou em enviar: a mensagem anterior deixou de valer, DÊ NO QUE DER — QR,
-  // migração, "já pago", inline do 400 ou toast novo. Um ponto só, em vez de um por desfecho.
+  if (typeof pixExtrasTravar === "function") pixExtrasTravar(true);   // e as caixas, até o botão voltar
+  // Clicou em enviar: a mensagem anterior deixou de valer, DÊ NO QUE DER (QR, migração, "já pago", 400 ou toast).
   showToast("");
   const rotulo = botao.textContent;
   pixRotular(botao, "ph-clock", "Gerando o código…");
-  const corpo = { plan: plano, interval: "annual", cpf_cnpj: documento };
+  const corpo = { plan: plano, interval: "annual", cpf_cnpj: documento,
+    extras: typeof pixExtrasIds === "function" ? pixExtrasIds() : [] };
   if (confirmarCancelamentoStripe) corpo.confirm_cancel_stripe = true;
   try {
     const r = await fetch("/billing/pix/checkout", {
@@ -276,11 +279,10 @@ async function pixEnviar(plano, documento, confirmarCancelamentoStripe, ctx, bot
       body: JSON.stringify(corpo),
     });
     const d = await r.json().catch(() => ({}));
-    // Fechou no meio — e a conferência vem DEPOIS do corpo, não antes: dá para
-    // fechar entre a chegada dos cabeçalhos e o fim do download do JSON, e aí o
-    // QR ia para uma caixa já destacada, com o poll rodando por trás dela e o
-    // `pixPoll` invisível bloqueando o próximo checkout até vencer. A cobrança
-    // criada lá expira sozinha; o que não pode é sobrar aqui.
+    // Fechou no meio — e a conferência vem DEPOIS do corpo, não antes: dá para fechar entre a chegada dos
+    // cabeçalhos e o fim do download do JSON, e aí o QR ia para uma caixa já destacada, com o poll rodando por
+    // trás dela e o `pixPoll` invisível bloqueando o próximo checkout até vencer. A cobrança criada lá expira
+    // sozinha; o que não pode é sobrar aqui.
     if (!ctx.box.isConnected) return;
     if (r.status === 401) {
       preservePurchaseForAuth(plano, "annual", "pix");
@@ -300,17 +302,14 @@ async function pixEnviar(plano, documento, confirmarCancelamentoStripe, ctx, bot
       }, 500);
       return;
     }
-    // `detail` STRING é a metade que faltava: o FastAPI manda `{"detail": "<frase>"}`
-    // em todo `HTTPException(detail="…")`, e aqui isso caía num `det.message`
-    // undefined — a frase que o servidor escreveu era descartada e o cliente lia o
-    // genérico. São seis: os três 400 (plano, documento e o titular recusado pelo
-    // Asaas), o 429 do limitador (por IP — routes/shared.py:98, então não é só quem
-    // digitou que o toma), o 503 da indisponibilidade e o 403 do CSRF, sem isenção.
-    // Mesma forma do `apiError` do comecar.js:175 — o 500 real não tem `detail`
-    // nenhum (`{"error": …}`, finance_bot_websocket_custom.py:2415), então segue
-    // no genérico. O #355 consertou o mesmo defeito só no toast; normalizar aqui
-    // em cima cobre o toast E as duas caixas do 409 de uma vez — por isso o
-    // rebase deixou UMA das duas versões, não as duas.
+    // `detail` STRING é a metade que faltava: o FastAPI manda `{"detail": "<frase>"}` em todo
+    // `HTTPException(detail="…")`, e aqui isso caía num `det.message` undefined — a frase que o servidor escreveu
+    // era descartada e o cliente lia o genérico. São seis: os três 400 (plano, documento e o titular recusado pelo
+    // Asaas), o 429 do limitador (por IP — routes/shared.py:98, então não é só quem digitou que o toma), o 503 da
+    // indisponibilidade e o 403 do CSRF, sem isenção. Mesma forma do `apiError` do comecar.js:175 — o 500 real não
+    // tem `detail` nenhum (`{"error": …}`, finance_bot_websocket_custom.py:2415), então segue no genérico. O #355
+    // consertou o mesmo defeito só no toast; normalizar aqui em cima cobre o toast E as duas caixas do 409 de uma
+    // vez — por isso o rebase deixou UMA das duas versões, não as duas.
     const det = (d && (typeof d.detail === "string" ? { message: d.detail } : d.detail)) || {};
     if (r.status === 409 && det.error === "stripe_active") {
       return pixModalMigracao(plano, det, documento, ctx);
@@ -327,18 +326,19 @@ async function pixEnviar(plano, documento, confirmarCancelamentoStripe, ctx, bot
     const pago = det.error === "pix_future_purchase_conflict"
       && /^\d{4}-\d{2}-\d{2}/.exec(det.covered_until || "");
     if (r.status === 409 && pago) return pixModalJaPago(pago[0], ctx);
+    if (r.status === 409 && det.error === "extras_indisponiveis") return pixExtrasRecusa(det.extras);
     // 400 é erro DO CAMPO: vai para o `#pix-doc-erro` (alvo do `aria-describedby`), DENTRO do modal, e não para o toast. O `disabled` largou o foco no <body>: volta pro campo.
     const alvo = r.status === 400 && det.message && document.getElementById("pix-doc-erro");
     if (alvo) { alvo.textContent = det.message; pixDoc?.focus(); return; }
     if (!r.ok) return showToast(det.message || "Não consegui gerar o código Pix agora.", "err");
     pixApagarDoc();          // o QR vai entrar: o documento sai da tela antes
-    pixModalQr(d, plano, ctx);
+    pixModalQr(d, plano, ctx, corpo.extras.length);
   } catch {
     showToast("Erro de conexão. Tente novamente.", "err");
   } finally {
-    // `isConnected`: deu certo, este botão já saiu do modal junto com o
-    // formulário e reanimá-lo seria escrever num nó que ninguém vê.
+    // `isConnected`: deu certo, o botão saiu do modal com o formulário; reanimá-lo escreveria num nó que ninguém vê.
     if (botao.isConnected) { botao.disabled = false; botao.textContent = rotulo; }
+    if (botao.isConnected && typeof pixExtrasTravar === "function") pixExtrasTravar(false);
   }
 }
 

@@ -29,6 +29,7 @@
      DEPOIS do site.css de propósito: ela refina `.plan`/`.plan-badge`, que
      nascem lá, e a mesma especificidade tem de ganhar pela ordem. -->
 <link href="/precos-app.css?v=1" rel="stylesheet"/>
+<link href="/bump-caixas.css?v=1" rel="stylesheet"/>
 <style>
   #toast { position: fixed; bottom: 26px; left: 50%; transform: translateX(-50%) translateY(20px); background: rgba(23,23,26,.96); border: 1px solid rgba(255,45,142,.3); color: #fff; padding: 12px 20px; border-radius: 12px; font-size: .88rem; font-weight: 600; opacity: 0; pointer-events: none; transition: all .25s; z-index: 1000; backdrop-filter: blur(12px); }
   #toast.show { opacity: 1; transform: translateX(-50%) translateY(0); }
@@ -1187,7 +1188,10 @@ enviarViewItemList();
        chegar por último lê o `window.pbPixState` que o outro deixou.
        O pix-ui.js vem PRIMEIRO (ele declara o `const pixBrl` que os dois leem) e
        o pix-poll.js antes do pix-checkout.js (ele declara o `pixPoll` que o outro
-       lê): `const`/`let` de topo de script clássico tem TDZ até o script rodar. -->
+       lê): `const`/`let` de topo de script clássico tem TDZ até o script rodar.
+       O bump-caixas.js e o pix-extras.js (os cadernos extras no formulário do
+       documento) vêm antes do pix-checkout.js, que os chama por `typeof`: sem
+       eles, o Pix do plano segue sem caixas. -->
 <!-- Ilha React do #plans-v2 (build de webapp/, artefato commitado). ANTES dos
        scripts do Pix e SEM `type="module"`: módulo é deferido, e o defer faria o
        `document.querySelector('#plans-v2 [data-plan-btn=…]')` do pix-checkout.js
@@ -1198,6 +1202,8 @@ enviarViewItemList();
 <script src="/precos-app.js?v=2"></script>
 <script src="/pix-ui.js?v=1"></script>
 <script src="/pix-poll.js?v=1"></script>
+<script src="/bump-caixas.js?v=1"></script>
+<script src="/pix-extras.js?v=1"></script>
 <script src="/pix-checkout.js?v=1"></script>
 <script defer="" src="/nav-auth.js?v=7"></script>
 <script defer="" src="/nav-burger.js?v=1"></script>

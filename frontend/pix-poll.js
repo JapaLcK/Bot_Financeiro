@@ -31,9 +31,11 @@ const PIX_TETO_MS = 15 * 60 * 1000;
 
 let pixPoll = null;   // estado do modal aberto; null = não há QR na tela
 
-function pixModalQr(d, plano, ctx) {
+/** `cadernos` = quantos extras foram no POST que gerou ESTE QR (o servidor cobra exatamente esses, ou recusa). */
+function pixModalQr(d, plano, ctx, cadernos) {
   const nome = (PLAN_NAMES && PLAN_NAMES[plano]) || plano;
-  const valor = pixBrl(d.amount_cents);
+  // O que o QR cobra: plano + cadernos (`amount_cents` é só o plano). O `??` cobre servidor sem o campo.
+  const valor = pixBrl(d.total_cents ?? d.amount_cents);
   // `ctx` é o modal que o pixCheckout já abriu para pedir o CPF/CNPJ: o QR é o
   // SEGUNDO ESTADO dele, não uma segunda caixa. Reescreve o cabeçalho e troca o
   // corpo. O `aoFechar` daquele overlay já chama o `pixEncerrar` — não há
@@ -45,6 +47,7 @@ function pixModalQr(d, plano, ctx) {
   // Tudo que morre junto com o código num container só: expirar é trocar o
   // conteúdo dele, não caçar cinco elementos soltos na caixa.
   const vivo = document.createElement("div");
+  if (cadernos > 0) vivo.appendChild(pixLinha("Inclui " + cadernos + (cadernos === 1 ? " caderno." : " cadernos.")));
   const credito = pixBrl(d.credit_cents);
   if (credito && d.credit_cents > 0) {
     vivo.appendChild(pixLinha("Já com " + credito + " de crédito do seu plano atual."));

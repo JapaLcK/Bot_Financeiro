@@ -241,9 +241,9 @@ def sync_pluggy_item(provider_item_id: str, *, expected_user_id: int | None = No
             raise
         # NÃO apaga espelho, NÃO apaga item local nem remoto, NÃO reconecta:
         # a decisão de refazer a conexão é do usuário. Aqui só se conta a verdade.
-        status, reason = resolve_connection_state(missing=True)
-        mark_sync_result(connection["id"], ok=False, status=status, status_reason=reason,
-                         health=_HEALTH_MISSING())
+        # Perdeu a corrida (reconexão ou sync no meio do GET): o par fica com quem
+        # ganhou; o retorno é o mesmo e o próximo evento/tique reobserva.
+        observar_item(connection, None)
         return {"ok": False, "reason": "item_missing", "item_id": provider_item_id,
                 "connection_id": connection["id"], "user_id": connection["user_id"]}
 
@@ -704,6 +704,32 @@ def of_health_check_ligado() -> bool:
         "0", "false", "no", "off")
 
 
+def observar_item(linha: dict, item: dict | None) -> int:
+    """Ponto de escrita da OBSERVAÇÃO do item (Onda 5, PR-C1): `item` é o que o
+    `GET /items` devolveu, ou `None` se deu 404. Sem HTTP: quem lê decide quando.
+
+    `linha` vem de `list_connections_for_health_check` / `get_linha_para_observar`
+    (ou do sync, com `updated_at`). O CAS é pela VERSÃO da linha (`updated_at`
+    lido): se qualquer escritor mexeu nela depois da leitura, não grava nada.
+    Devolve o rowcount; 0 = perdeu a corrida, terminal ou linha apagada.
+
+    Vivo: `ok=None`, saúde medida NÃO é sucesso de sync (não carimba
+    `last_sync_at`). `status` E `status_reason` saem JUNTOS do resolvedor, e
+    `no_accounts` é decidido pelo espelho (`has_data`), não pela memória. 404:
+    `ok=False` (conta a tentativa), como sempre foi.
+    """
+    if item is None:
+        status, reason = resolve_connection_state(missing=True)
+        return mark_sync_result(linha["id"], ok=False, status=status, status_reason=reason,
+                                health=_HEALTH_MISSING(), versao_vista=linha["updated_at"])
+    health = derive_item_health(item)
+    status, reason = resolve_connection_state(
+        health=health, has_data=bool(linha.get("has_data")),
+        reason_atual=str(linha.get("status_reason") or ""))
+    return mark_sync_result(linha["id"], ok=None, status=status, status_reason=reason,
+                            health=health, versao_vista=linha["updated_at"])
+
+
 def run_of_health_check(*, limit: int = 200) -> dict:
     """Mede a saúde das conexões ativas com um `GET /items/{id}` por item.
 
@@ -743,6 +769,7 @@ def run_of_health_check(*, limit: int = 200) -> dict:
 
     api_key = create_pluggy_api_key()
     checked = 0
+    perdeu = 0   # linhas que mudaram durante o GET (CAS por versão): descartadas
     ausentes: list[dict] = []
     for row in rows:
         try:
@@ -753,21 +780,7 @@ def run_of_health_check(*, limit: int = 200) -> dict:
                 continue
             ausentes.append(row)   # só grava depois, se o disjuntor não abrir
             continue
-        # ok=None: saúde medida NÃO é sucesso de sync — não pode carimbar last_sync_at.
-        # `status` E `status_reason` saem JUNTOS do resolvedor: limpar só o motivo
-        # deixava o `status='ERROR'` que este mesmo job escreveu, e a tela trocava
-        # "Refaça a conexão" por "Erro temporário" — para sempre (medido). Igual
-        # para `no_accounts`: quem responde se ele ainda vale é o espelho
-        # (`has_data`, lido na mesma query), não a memória da última passada.
-        # `status_reason_visto`: o par é decidido sobre o motivo LIDO na
-        # listagem, e um sync pode tê-lo gravado ou limpado durante o GET. Se
-        # mudou, não grava nada (ver `mark_sync_result`).
-        health = derive_item_health(item)
-        status, reason = resolve_connection_state(
-            health=health, has_data=bool(row.get("has_data")),
-            reason_atual=str(row.get("status_reason") or ""))
-        mark_sync_result(row["id"], ok=None, status=status, status_reason=reason,
-                         health=health, status_reason_visto=row.get("status_reason"))
+        perdeu += 0 if observar_item(row, item) else 1
         checked += 1
 
     limite = _env_int("OF_HEALTH_MISSING_ABORT_PCT", 50) / 100.0
@@ -777,13 +790,10 @@ def run_of_health_check(*, limit: int = 200) -> dict:
         print(f"[pluggy_sync] of_health_circuit_open ausentes={len(ausentes)}/{len(rows)} "
               f"limite={limite:.0%} — nada gravado", flush=True)
         return {"checked": checked, "missing": 0, "aborted": "too_many_missing",
-                "missing_seen": len(ausentes), "sample": len(rows)}
+                "missing_seen": len(ausentes), "sample": len(rows), "perdeu": perdeu}
 
-    status, reason = resolve_connection_state(missing=True)
-    for row in ausentes:
-        mark_sync_result(row["id"], ok=False, status=status, status_reason=reason,
-                         health=_HEALTH_MISSING())
-    return {"checked": checked, "missing": len(ausentes)}
+    perdeu += sum(1 for row in ausentes if not observar_item(row, None))
+    return {"checked": checked, "missing": len(ausentes), "perdeu": perdeu}
 
 
 def _hold_aggregate_emails(user_id: int, origem: str) -> None:

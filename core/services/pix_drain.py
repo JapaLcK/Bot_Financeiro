@@ -77,7 +77,9 @@ from db.webhook_outbox import marcar_processado, registrar_falha, reservar_event
 # conta do NEGÓCIO também recebe (§11, correção 5).
 REFERENCIA_NOSSA = re.compile(r"^pix:[0-9]+$")
 
-EFEITOS_DE_COMPRA = ("stripe_cancel", "grant", "ga4", "capi", "email")
+# `ebook` logo depois do `grant`: grava a pendência dos cadernos da foto
+# (`pix_drain_effects._ebook`); sem cadernos é no-op registrado.
+EFEITOS_DE_COMPRA = ("stripe_cancel", "grant", "ebook", "ga4", "capi", "email")
 _ORIGENS_DE_PAGAMENTO = ("pending", "canceling", "canceled", "expired")
 _APAGAM_O_QR = ("paid", "paid_orphan", "canceled", "expired")
 

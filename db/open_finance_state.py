@@ -245,10 +245,34 @@ class AmbiguousItemError(RuntimeError):
 # (nenhum consumidor as devolve cruas ao navegador).
 _COLUNAS_DA_CONEXAO = f"""id, user_id, provider, provider_item_id, status, institution_name,
        last_sync_at, last_attempt_at, status_reason, health,
-       next_refresh_at, last_refresh_origin, reconnected_at,
+       next_refresh_at, last_refresh_origin, reconnected_at, updated_at,
        {SQL_EXECUTION_STATUS},
        {SQL_COLETA_VENCIDA},
        {SQL_COLETA_ESTOURADA}"""
+
+
+# O que `observar_item` lê de uma linha: a listagem do job de saúde e
+# `get_linha_para_observar` (uma definição só, §0.7). `updated_at` é a versão do CAS.
+# `has_data` é do ESPELHO (decide `no_accounts` por observação, não por memória).
+_COLUNAS_DA_OBSERVACAO = """c.id, c.user_id, c.provider_item_id, c.status, c.status_reason,
+       c.health, c.updated_at,
+       (exists (select 1 from open_finance_accounts a where a.connection_id = c.id)
+        or exists (select 1 from open_finance_investments i
+                    where i.connection_id = c.id)) as has_data"""
+
+
+def get_linha_para_observar(connection_id: int, user_id: int) -> dict | None:
+    """A linha, no formato da listagem do job de saúde, ou None (apagada ou de
+    outro usuário: filtra `user_id`, a posse do item é de `get_connections_by_item_id`)."""
+    with get_conn() as conn:
+        with conn.cursor() as cur:
+            cur.execute(
+                f"select {_COLUNAS_DA_OBSERVACAO} from open_finance_connections c "
+                "where c.id=%s and c.user_id=%s",
+                (connection_id, user_id),
+            )
+            row = cur.fetchone()
+            return dict(row) if row else None
 
 
 def get_connections_by_item_id(item_id: str, provider: str = "pluggy", *,
@@ -324,7 +348,7 @@ def mark_sync_result(
     health: dict | None = None,
     at: datetime | None = None,
     reconnected_at_visto: Any = _SEM_CHECAGEM,
-    status_reason_visto: Any = _SEM_CHECAGEM,
+    versao_vista: Any = _SEM_CHECAGEM,
     geracao_vista: Any = _SEM_CHECAGEM,
     motivos_substituiveis: Any = _SEM_CHECAGEM,
     observacao_vista: Any = _SEM_CHECAGEM,
@@ -356,15 +380,14 @@ def mark_sync_result(
     recusa é chamá-la de sucesso — e a própria rota de reconexão agenda um sync
     novo, então o âmbar é transitório.
 
-    `status_reason_visto`: o motivo que o JOB DE SAÚDE leu ao listar a linha. O
-    par que ele grava é decidido a partir desse motivo (manter/limpar, linha H de
-    `core/services/pluggy_health.py`), e o `GET /items` roda fora de qualquer lock:
-    um sync que gravou ou limpou o motivo nesse meio tempo seria desfeito por uma
-    decisão tomada sobre a leitura velha. Mesmo idioma: se o motivo mudou, a
-    linha inteira fica como está (0 linhas). Quem mudou o motivo tem informação
-    pelo menos tão nova: o sync grava a foto do item junto; quem não grava
-    (`_sync_item_contido`, webhook) deixa o `health` velho, e a reconexão o
-    zera — nos dois casos a linha continua elegível no próximo tique.
+    `versao_vista`: o `updated_at` que o JOB DE SAÚDE (ou a observação) leu ao
+    listar a linha (Onda 5, PR-C1). O `GET /items` roda fora de qualquer lock e
+    leva minutos no lote: o par e o `health` que ele grava foram decididos sobre
+    aquela leitura. Todo escritor de estado bumpa `updated_at` (guarda estrutural
+    em `tests/test_of_versao_da_linha.py`), então se a versão mudou — sync ok com
+    o motivo IGUAL, reconexão, 404 — alguém tem informação pelo menos tão nova e
+    a linha fica como está (0 linhas); a próxima observação reavalia. Substitui o
+    CAS pelo VALOR do motivo, que não via o que mantinha o valor.
 
     `geracao_vista`: o par `(reconnected_at, last_sync_at)` que a FALHA FINAL de
     um sync leu quando o run começou (`marcar_leitura_falhou`). Mesmo idioma, na
@@ -434,7 +457,7 @@ def mark_sync_result(
                        updated_at = %s
                  where id=%s
                    and upper(coalesce(status,'')) not in {_TERMINAL}
-                   and (%s or status_reason is not distinct from %s)
+                   and (%s or updated_at is not distinct from %s)
                    and (%s or (reconnected_at is not distinct from %s
                                and last_sync_at is not distinct from %s))
                    and (%s or coalesce(lower(status_reason),'') = any(%s::text[]))
@@ -458,8 +481,8 @@ def mark_sync_result(
                     now,
                     now,
                     connection_id,
-                    status_reason_visto is _SEM_CHECAGEM,
-                    (None if status_reason_visto is _SEM_CHECAGEM else status_reason_visto),
+                    versao_vista is _SEM_CHECAGEM,
+                    (None if versao_vista is _SEM_CHECAGEM else versao_vista),
                     geracao_vista is _SEM_CHECAGEM,
                     *((None, None) if geracao_vista is _SEM_CHECAGEM else geracao_vista),
                     motivos_substituiveis is _SEM_CHECAGEM,
@@ -582,12 +605,7 @@ def list_connections_for_health_check(*, older_than_sec: int, limit: int) -> lis
         with conn.cursor() as cur:
             cur.execute(
                 f"""
-                select c.id, c.user_id, c.provider_item_id, c.status, c.status_reason,
-                       c.health,
-                       (exists (select 1 from open_finance_accounts a
-                                 where a.connection_id = c.id)
-                        or exists (select 1 from open_finance_investments i
-                                    where i.connection_id = c.id)) as has_data
+                select {_COLUNAS_DA_OBSERVACAO}
                   from open_finance_connections c
                  where provider='pluggy'
                    and upper(coalesce(status,'')) not in {_TERMINAL}

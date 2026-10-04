@@ -16,7 +16,7 @@ import { BRL } from "./Hero";
 // do dono); Fatura e Guardado ainda são inventados e seguem sem casas. O mês anterior sai com
 // o hífen do Intl, como o NumberFlow, e não com o menos tipográfico do `money` (decisão do dono).
 const CENTAVOS = { style: "currency", currency: "BRL" } as const;
-function Stat({ title, tone, value, format = BRL, delta, demo, note, children }: {
+function Stat({ title, tone, value, format = BRL, delta, demo, note, children, guia }: {
   title: string;
   tone: string;
   value?: number;
@@ -25,9 +25,10 @@ function Stat({ title, tone, value, format = BRL, delta, demo, note, children }:
   demo?: boolean;
   note?: ReactNode;
   children?: ReactNode;
+  guia?: string;
 }) {
   return (
-    <section className="stat">
+    <section className="stat" data-guia={guia}>
       <h3 className="stat-title"><span className="stat-key" style={{ background: tone }} aria-hidden="true" />{title}</h3>
       {demo && <span className="selo">demonstração</span>}
       {value !== undefined && <NumberFlow className="stat-value" value={value} locales="pt-BR" format={format} />}
@@ -41,16 +42,17 @@ function Stat({ title, tone, value, format = BRL, delta, demo, note, children }:
 // O mês anterior inteiro como referência, sem porcentagem (decisão N4).
 function Real({ title, tone, k, q }: { title: string; tone: string; k: "entrou" | "saiu"; q: ReturnType<typeof useResumo> }) {
   const d = q.data;
+  const guia = k === "saiu" ? "resumo.saiu" : undefined; // âncora do 1º passo do guia (parts/Guia.tsx)
   if (!d) {
     return (
-      <Stat title={title} tone={tone} note={q.isPending ? <p role="status" className="faint stat-note">Carregando…</p> : (
+      <Stat title={title} tone={tone} guia={guia} note={q.isPending ? <p role="status" className="faint stat-note">Carregando…</p> : (
         <p className="stat-note" role="alert">Não deu para carregar. <button type="button" className="btn retry btn-quiet" onClick={() => q.refetch()}>Tentar de novo</button></p>
       )} />
     );
   }
   const a = d.anterior;
   return (
-    <Stat title={title} tone={tone} value={Number(d[k])} format={CENTAVOS} demo={DEMO}
+    <Stat title={title} tone={tone} guia={guia} value={Number(d[k])} format={CENTAVOS} demo={DEMO}
       delta={a ? { text: `em ${monthName(keyDate(a.mes))}: ${money(Number(a[k])).replace("−", "-")}`, good: null } : undefined}
       note={<Selos motivos={d.motivos} />} />
   );

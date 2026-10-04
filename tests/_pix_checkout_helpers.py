@@ -56,7 +56,7 @@ def asaas_falso(monkeypatch):
     # status é justamente o que se quer variar.
     estado = {"ordem": [], "delete_falha": False, "n": 0, "marca": marca,
               "remotas": [], "qr_falha": False, "descricoes": [],
-              "cliente_falha": None}
+              "cliente_falha": None, "valores": []}
     real_cliente = ac.criar_cliente
 
     def _request_falso(*a, **kw):
@@ -81,6 +81,7 @@ def asaas_falso(monkeypatch):
         estado["n"] += 1
         estado["ordem"].append("create")
         estado["descricoes"].append(kw.get("descricao"))
+        estado["valores"].append(kw["valor_cents"])   # o que o QR cobra
         estado["vence"] = kw["due_date"]
         return {"id": f"pay_{marca}_{estado['n']}"}
 

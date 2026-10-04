@@ -2600,6 +2600,14 @@ def init_db():
         """alter table pix_charges add column if not exists ga_client_id text""",
         """alter table pix_charges add column if not exists fbp text""",
         """alter table pix_charges add column if not exists fbc text""",
+        # A FOTO dos cadernos extras escolhidos no Pix (`[{price, url, nome,
+        # valor_cents}]`). Fica FORA de `amount_cents`, que segue só o plano —
+        # `pix_charges_amount_fecha` e o crédito de upgrade não mudam. O check é o
+        # par drop/add `not valid` das invariantes logo abaixo.
+        """alter table pix_charges add column if not exists extras jsonb not null default '[]'""",
+        """alter table pix_charges drop constraint if exists pix_charges_extras_array""",
+        """alter table pix_charges add constraint pix_charges_extras_array
+             check (jsonb_typeof(extras) = 'array') not valid""",
 
         # ── as CINCO invariantes de `pix_charges`, no BANCO e não em Python ──
         #

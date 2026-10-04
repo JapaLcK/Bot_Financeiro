@@ -121,6 +121,28 @@ def valores_por_cobranca(user_id: int) -> dict[str, int]:
             return {str(r["id"]): int(r["amount_cents"]) for r in cur.fetchall()}
 
 
+def grants_para_precificar(user_id: int) -> list[dict]:
+    """Os grants ativos do usuário **com `amount_cents`** — o "join" que
+    `plano_da_cobranca` exige do chamador, e sem o qual todo crédito vira 0. Em
+    Python porque as duas metades filtram por `user_id` cada uma (§0).
+
+    Veio de `core/services/pix_checkout.py` (era `_grants_para_precificar`) para
+    abrir espaço no teto de 350 linhas, sem mudar a lógica.
+    """
+    from .plan_grants import list_grants
+
+    valores = valores_por_cobranca(user_id)
+    ativos = []
+    for g in list_grants(user_id):
+        if g["status"] != "active":
+            continue
+        item = dict(g)
+        item["amount_cents"] = (valores.get(str(g["external_ref"]))
+                                if g["source"] == "pix" else None)
+        ativos.append(item)
+    return ativos
+
+
 def gravar_stripe_period_end(charge_id: int, quando, *, access_starts_at=None,
                              access_expires_at=None) -> bool:
     """Grava o `stripe_period_end_at` RECONFIRMADO no Stripe. True se aplicou.
@@ -217,3 +239,27 @@ def apagar_cobranca(charge_id: int) -> bool:
             aplicou = cur.fetchone() is not None
         conn.commit()
     return aplicou
+
+
+def rezerar_rastreio_de_orfas() -> int:
+    """A varredura diária do §13.2, e o outro lado do UPDATE de `db/privacy.py`.
+
+    Aquele UPDATE (`:936`) não é a garantia: quem desfaz o vínculo é a FK
+    `on delete set null`, e entre ele e o `delete from users` cabe um webhook que
+    commite depois — a linha fica com `user_id` nulo e `purged_at` NUNCA escrito.
+    Esta passada é quem alcança essas. `purged_at is null` a torna datável: sem
+    ele o carimbo seria reescrito todo dia. Predicado DIFERENTE do da outbox de
+    propósito — `pix_webhook_events` não tem `user_id` (§13.3).
+    """
+    with get_conn() as conn:
+        with conn.cursor() as cur:
+            cur.execute(
+                "update pix_charges"
+                "   set ga_client_id = null, fbp = null, fbc = null,"
+                "       qr_payload_enc = null, asaas_customer_id = null,"
+                "       purged_at = now()"
+                " where user_id is null and purged_at is null"
+            )
+            rezeradas = cur.rowcount
+        conn.commit()
+    return rezeradas
