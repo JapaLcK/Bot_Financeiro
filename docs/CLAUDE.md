@@ -659,6 +659,20 @@ as linhas Pix. Na junção de contas, caderno ainda não entregue cai com a orig
 dos status de estorno/contestação e a forma de `refunds` só se provam no sandbox do
 Asaas.
 
+**PR B: emitir com os cadernos (backend; invisível até o modal mandar `extras`).** O
+`POST /billing/pix/checkout` aceita `extras: list[str]` (ids de Price, até 3, sem
+repetir, senão 400). O cliente nunca manda preço: `pix_extras.escolher` relê a oferta
+ATUAL (`extras_assinar.ofertas_da_pagina`, a mesma do cartão) depois das recusas que já
+existiam e antes de qualquer escrita; id fora dela dá 409 `extras_indisponiveis` com a
+oferta atual, sem gravar e sem chamar o Asaas. Sem `extras` o Stripe nem é consultado
+(o plano vende com ele fora). O Asaas cobra `total_cents` e a descrição ganha " + N
+caderno(s)". A cobrança pendente só é reaproveitada com o MESMO conjunto de ids (a ordem
+não importa); outro conjunto cancela a remota e cria nova (DELETE que falha dá 503). O
+`GET /billing/pix-extras` (logado) devolve as caixas (texto e preço do cartão + id, sem
+a URL) e a seleção da cobrança `pending` com QR vivo (Q6). A oferta é vazia, e o POST com
+cadernos dá 409, quando a venda Pix ou a `CHECKOUT_PAGINA_PROPRIA` estão desligadas
+(Q2), ou sem `STRIPE_SECRET_KEY`.
+
 Rollback do código de N produtos: o código velho usa `on conflict (user_id,
 session_id)`, que exige a PK de 2 colunas. Antes de reverter, apagar as linhas extras
 de cada compra e recriar a PK:

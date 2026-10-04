@@ -114,8 +114,9 @@ CHAMADORES_PERMITIDOS: frozenset[str] = frozenset({
     # O caminho que EMITE a cobrança — entrou no MESMO PR, que é o corte do dono.
     "core/services/pix_checkout.py",       # a saga, a flag, o preço, o 409/503
     "core/services/pix_sweeps.py",         # reconciliação da saga (§10.1)
-    "frontend/routes/billing_pix.py",      # as três rotas, finas
-    # Os cadernos extras: lê a cobrança do dono e o Asaas para o job de entrega.
+    "frontend/routes/billing_pix.py",      # as rotas, finas
+    # Os cadernos extras: lê a cobrança do dono e o Asaas para o job de entrega, e a
+    # cobrança ativa do dono (`buscar_ativa`) para a seleção do GET /billing/pix-extras.
     "core/services/pix_extras.py",
     # Módulos do Pix importando módulos do Pix (ver o parágrafo acima).
     "core/services/asaas_customers.py",
