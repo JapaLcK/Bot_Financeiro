@@ -23,7 +23,7 @@ for (const [semDialog, naSeta, naLinha] of [[false, "Enter", "Space"], [true, "S
     const inicio = await mes(page);
     for (let i = 0; i < 8 && !(await page.evaluate(() => document.activeElement?.matches('[data-guia="mes.trocar"]'))); i++) await page.keyboard.press("Tab");
     await page.keyboard.press("Enter");
-    await page.locator(".guia-balao").getByText("Vem comigo").waitFor();
+    await page.locator(".guia-balao").getByText("Bora pro próximo").waitFor();
     const depois = await mes(page);
     // Comemoração: o véu fechou o furo, o foco ainda está na seta.
     const focoFesta = await page.evaluate(() => document.activeElement?.getAttribute("aria-label"));
@@ -128,7 +128,7 @@ for (const [width, height] of [[1280, 800], [375, 812]]) {
     // O clique de verdade no ponto (o `locator.click` rola a página para achar a seta presa no
     // topo, o que tiraria o Saiu da tela; a pessoa não rola ao clicar).
     await page.mouse.click(...await noPonto(page, alvo));
-    await page.locator(".guia-balao").getByText("Vem comigo").waitFor();
+    await page.locator(".guia-balao").getByText("Bora pro próximo").waitFor();
     const festa = [await noCentro(page, [alvo]), await escuro(page, [alvo, SAIU]), await anelEm(page, alvo)];
     await esperaTitulo(page, PASSOS[1].fala.titulo);
     await page.locator('[data-guia="categorias.item"]').waitFor();

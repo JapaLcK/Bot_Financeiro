@@ -8,7 +8,7 @@ import type { DashState } from "../lib/types";
 import { DEMO, ErroApi, apiPost, guiaQuery, perfilQuery } from "../lib/v2";
 import { go, type Path } from "../router";
 import { ROTA, aba, achar, caixa, cobrir, corte, guia, posicionar, trazer, type Caixa, type Tipo } from "./guia-posicao";
-import { MOTIVO, OF, destino } from "./guia-falas";
+import { MOTIVO, OF, destino, rotulo } from "./guia-falas";
 import { useTecladoDoVeu } from "./guia-teclado";
 import { TEMPO, partir, pular, quadro, tiltDe, type Voo } from "./guia-voo";
 
@@ -56,6 +56,7 @@ export function Guia({ s, path }: { s: DashState; path: Path }) {
   const [vistos, setVistos] = useState<string[]>([]); // feitos ou pulados nesta abertura
   const [festa, setFesta] = useState<string | null>(null);
   const [tipo, setTipo] = useState<Tipo>("espera");
+  const [nomeAba, setNomeAba] = useState(""); // o que está escrito na aba do passo, se é noutra tela (o tick lê)
   const [fechouDialog, reavaliar] = useState(0);
   const [fase, setFase] = useState<{ id: string; etapa: Etapa }>({ id: "", etapa: "bloco" }); // presa ao passo atual
   const ofereceu = useRef(false);
@@ -216,6 +217,8 @@ export function Guia({ s, path }: { s: DashState; path: Path }) {
     const p = modo === "ativo" ? exibido : undefined;
     const { el: alvo, tipo: t } = p ? achar(p, path, ACOES[p.acao]?.alvo ?? []) : { el: null, tipo: "espera" as Tipo };
     setTipo(t);
+    const prox = modo === "ativo" && atual && path !== ROTA[atual.tela] ? aba(atual) : null;
+    setNomeAba(prox ? rotulo(prox) : "");
     let mira: HTMLElement | null = null, toque: HTMLElement | null = null, claro: HTMLElement | null = null, marca: HTMLElement | null = null;
     if (p && festa) mira = miraAnt.current?.isConnected ? miraAnt.current : alvo;
     else if (p && fora) mira = toque = marca = aba(p);
@@ -277,14 +280,12 @@ export function Guia({ s, path }: { s: DashState; path: Path }) {
   });
 
   const aberto = modo === "convite" || (modo === "ativo" && !!exibido);
-  // A tela do passo seguinte, se é outra: a comemoração avisa antes de o Piggy ir até a aba dela.
-  const vai = festa && atual && path !== ROTA[atual.tela] ? destino(atual.tela) : null;
-  const leva = fora ? `Agora toca ${destino(atual!.tela, true)}.` : null;
+  const leva = fora ? `Agora toca ${destino(nomeAba)}.` : null;
   const mot = atual && !atual.disponivel && atual.motivo ? MOTIVO[atual.motivo] : null;
   const entendi = (id: string) => { setFase({ id, etapa: "alvo" }); focar.current = true; };
   const status = !aberto || s.editing ? ""
     : modo === "convite" ? "O Piggy quer te mostrar o painel."
-    : festa ? (fim ? "Guia concluído." : acabou ? "Por agora é isso. O passo que ficou pra depois volta na Ajuda." : `Passo feito.${vai ? ` Vem comigo ${vai}.` : ""}`)
+    : festa ? (fim ? "Guia concluído." : acabou ? "Por agora é isso. O passo que ficou pra depois volta na Ajuda." : "Passo feito.")
     // Cada etapa muda o texto (senão a região não fala): o que o balão diz, sem adiantar o passo.
     : leva ?? (mot || tipo === "ausente" ? `Guia, passo ${n} de ${passos.length}: ${atual!.fala.titulo}`
       : etapa === "bloco" ? `Passo ${n} de ${passos.length}: ${atual!.fala.titulo}. ${atual!.fala.apresenta}` : atual!.fala.texto);
@@ -303,7 +304,7 @@ export function Guia({ s, path }: { s: DashState; path: Path }) {
   } else if (festa) {
     corpo = <>
       <h2 key="titulo" id="guia-titulo" tabIndex={-1}>{fim ? "Fechou! O painel é seu." : acabou ? "Por agora é isso" : "Isso aí!"}</h2>
-      <p id="guia-texto">{fim ? "Quando quiser rever, o guia mora em Ajuda." : acabou ? "O passo que ficou pra depois volta quando você abrir a Ajuda." : vai ? `Passo feito. Vem comigo ${vai}.` : "Passo feito. Bora pro próximo."}</p>
+      <p id="guia-texto">{fim ? "Quando quiser rever, o guia mora em Ajuda." : acabou ? "O passo que ficou pra depois volta quando você abrir a Ajuda." : "Passo feito. Bora pro próximo."}</p>
       {acabou && <div className="guia-acoes"><button type="button" className="btn btn-primary" onClick={() => fechar(false)}>Fechar</button></div>}
     </>;
   } else {

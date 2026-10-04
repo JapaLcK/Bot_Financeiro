@@ -82,7 +82,7 @@ test("entre passos nada troca de tela sem toque: a aba com anel é o único toc�
   const hashes = await relogioDeHash(page);
   await bora(page);
   await FAZER["mes.trocado"](page);
-  await esperaTitulo(page, "Agora toca em Gastos.");
+  await esperaTitulo(page, "Agora toca em “Para onde vai”.");
   await page.waitForTimeout(3500);
   const v = await page.evaluate(vaoDoVeu);
   const parado = await page.evaluate(([aba, v]) => {
@@ -127,7 +127,7 @@ test("Esc no meio: em pleno voo some tudo, sem animação de script nem erro; na
   const ida = await abrir({ motion: "no-preference" });
   await bora(ida.page);
   await FAZER["mes.trocado"](ida.page);
-  await esperaTitulo(ida.page, "Agora toca em Gastos.");
+  await esperaTitulo(ida.page, "Agora toca em “Para onde vai”.");
   await ida.page.waitForTimeout(TEMPO.voo / 2); // a mola até a aba no ar
   await ida.page.keyboard.press("Escape");
   await ida.page.waitForTimeout(TEMPO.voo + 500);
@@ -177,7 +177,7 @@ test("refetch no meio: no alvo o Entendi não volta e o anel fica; na etapa da a
   const hashes = await relogioDeHash(ida.page);
   await bora(ida.page);
   await FAZER["mes.trocado"](ida.page);
-  await esperaTitulo(ida.page, "Agora toca em Gastos.");
+  await esperaTitulo(ida.page, "Agora toca em “Para onde vai”.");
   b.soltar();
   for (let i = 0; i < 50 && m.gets === 0; i++) await ida.page.waitForTimeout(100);
   await ida.page.waitForTimeout(800);
@@ -185,7 +185,7 @@ test("refetch no meio: no alvo o Entendi não volta e o anel fica; na etapa da a
   await tocarAba(ida.page);
   await esperaTitulo(ida.page, PASSOS[1].fala.titulo);
   await ida.ctx.close();
-  assert.deepEqual(r, [true, "Agora toca em Gastos.", 0]);
+  assert.deepEqual(r, [true, "Agora toca em “Para onde vai”.", 0]);
   assert.equal(hashes.length, 1);
 });
 
@@ -228,27 +228,58 @@ test("anúncio por etapa: convite, bloco (apresenta), alvo (instrução), festa,
     "O Piggy quer te mostrar o painel.",
     `Passo 1 de 3: ${p1.fala.titulo}. ${p1.fala.apresenta}`,
     p1.fala.texto,
-    "Passo feito. Vem comigo pra Gastos.",
-    "Agora toca em Gastos.",
+    "Passo feito.",
+    "Agora toca em “Para onde vai”.",
     `Passo 2 de 3: ${p2.fala.titulo}. ${p2.fala.apresenta}`,
   ]);
   assert.ok(foco[0] === "guia-titulo" && foco[1].startsWith(p2.fala.titulo), `foco: ${foco}`);
 });
 
-// "no Piggy" (ele é masculino), "em Gastos": a preposição concorda com a tela. No celular a aba
-// é a do Piggy; no desktop, a barra de conversa (D9), que não é link: tocar nela leva à conversa.
-for (const [width, height] of [[375, 812], [1280, 800]]) {
-  test(`passo 3 ${width}×${height}: "Agora toca no Piggy." no título e no anúncio; parado, fica; tocar leva à conversa`, async () => {
+// No celular a aba é a do Piggy ("no Piggy": ele é masculino); no desktop, a barra de conversa
+// (D9), que não é link: tocar nela leva à conversa. O nome é o que está escrito em cada uma.
+for (const [width, height, pede] of [[375, 812, "Agora toca no Piggy."], [1280, 800, "Agora toca em “Converse com o Piggy…”."]]) {
+  test(`passo 3 ${width}×${height}: "${pede}" no título e no anúncio; parado, fica; tocar leva à conversa`, async () => {
     const { ctx, page } = await abrir({ width, height, guia: "em_andamento", antes: (_, s) => { s.g.passos.forEach((p, i) => { p.feito = i < 2; }); } });
     await page.evaluate(() => dispatchEvent(new Event("dash:guia")));
-    await esperaTitulo(page, "Agora toca no Piggy.");
+    await esperaTitulo(page, pede);
     await page.waitForTimeout(3500);
     const antes = [await page.locator(".guia-status").textContent(), await page.evaluate(() => location.hash)];
     await tocarAba(page);
     await esperaTitulo(page, PASSOS[2].fala.titulo);
     const depois = [await page.evaluate(() => location.hash), await botaoEntendi(page).count()];
     await ctx.close();
-    assert.deepEqual([antes, depois], [["Agora toca no Piggy.", "#/"], ["#/piggy", 1]]);
+    assert.deepEqual([antes, depois], [[pede, "#/"], ["#/piggy", 1]]);
+  });
+}
+
+// O balão e o anúncio nomeiam o que está ESCRITO no elemento com o anel naquela largura: o menu
+// lateral diz "Para onde vai", a barra de baixo "Gastos", a barra de conversa o placeholder.
+for (const [width, height] of [[1280, 800], [375, 812]]) {
+  test(`${width}×${height}: o balão e o anúncio da etapa da aba citam o texto visível do elemento com o anel`, async () => {
+    const { ctx, page } = await abrir({ width, height });
+    await bora(page);
+    const lidos = [];
+    for (const [acao, prox] of [["mes.trocado", PASSOS[1]], ["categoria.aberta", PASSOS[2]]]) {
+      await FAZER[acao](page);
+      await esperaTitulo(page, "Agora toca");
+      await page.waitForFunction(() => !document.querySelector(".guia-anel").hidden);
+      lidos.push(await page.evaluate(() => {
+        const a = document.querySelector(".guia-anel").getBoundingClientRect();
+        const e = [...document.querySelectorAll('[data-guia^="nav."], [data-guia="piggy.pergunta"]')].find((x) => {
+          const r = x.getBoundingClientRect();
+          return x.getClientRects().length && Math.abs(r.left - a.left - 4) < 1.5 && Math.abs(r.top - a.top - 4) < 1.5;
+        });
+        return [e?.querySelector("input")?.placeholder || e?.innerText.trim(), document.getElementById("guia-titulo").textContent, document.querySelector(".guia-status").textContent];
+      }));
+      await tocarAba(page);
+      await esperaTitulo(page, prox.fala.titulo);
+    }
+    await ctx.close();
+    console.log(`# rótulo ${width}:`, JSON.stringify(lidos));
+    for (const [visivel, titulo, status] of lidos) {
+      assert.ok(visivel, "nenhum elemento sob o anel");
+      assert.ok(titulo.includes(visivel) && status.includes(visivel), `${visivel} × ${titulo} / ${status}`);
+    }
   });
 }
 

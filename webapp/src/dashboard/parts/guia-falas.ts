@@ -1,8 +1,6 @@
 // Os textos do guia (parts/Guia.tsx) que moram no cliente: o roteiro e as falas de cada passo
-// vêm do servidor (api/v2/guia.py); aqui, a orientação de cada motivo e o nome da tela de destino.
+// vêm do servidor (api/v2/guia.py); aqui, a orientação de cada motivo e o nome da aba de destino.
 import type { Passo } from "../lib/api-v2.gen";
-import { route } from "../router";
-import { ROTA } from "./guia-posicao";
 
 export const OF = "/settings?view=open-finance";
 export const MOTIVO: Record<NonNullable<Passo["motivo"]>, { texto: string; link?: string }> = {
@@ -11,8 +9,11 @@ export const MOTIVO: Record<NonNullable<Passo["motivo"]>, { texto: string; link?
   conexao_com_erro: { texto: "A conexão com o seu banco deu erro, e esse número não chega. Dá uma olhada nela.", link: "Ver conexão" },
 };
 
-// "pro Piggy", "pra Gastos"; com `em`, "no Piggy", "em Gastos": a preposição concorda com o
-// nome da tela (route().short; o Piggy é masculino).
-const PRA: Record<Passo["tela"], string> = { resumo: "pro", gastos: "pra", piggy: "pro" };
-const EM: Record<Passo["tela"], string> = { resumo: "no", gastos: "em", piggy: "no" };
-export const destino = (t: Passo["tela"], em = false) => `${(em ? EM : PRA)[t]} ${route(ROTA[t]).short}`;
+// O nome que a pessoa lê na aba destacada: o texto dela (o rótulo do menu lateral, "Para onde
+// vai", ou o da barra de baixo, "Gastos"; router.ts, `label` × `short`) ou, na barra de conversa
+// do desktop, o placeholder ("Converse com o Piggy…").
+export const rotulo = (el: HTMLElement) => el.textContent?.trim() || el.querySelector("input")?.placeholder || "";
+// "Agora toca em Gastos", "no Piggy" (o Piggy é masculino), "no Resumo". O rótulo de mais de uma
+// palavra vai entre aspas, sem artigo: "em “Para onde vai”", "em “Converse com o Piggy…”".
+const EM: Record<string, string> = { Resumo: "no", Gastos: "em", Piggy: "no" };
+export const destino = (nome: string) => (EM[nome] ? `${EM[nome]} ${nome}` : `em “${nome}”`);
