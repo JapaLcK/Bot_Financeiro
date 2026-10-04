@@ -14,6 +14,10 @@ Código de referência:
   `mark_sync_result`) e `connection_ui_state` (única que decide
   o estado exibido, um dos de `_LABELS`). A máquina de estados por escrito está no
   topo desse módulo.
+- `observar_item` (`core/services/pluggy_sync.py`, PR-C1) é o ponto de escrita da
+  observação do job de saúde (item vivo e lote de 404) e do 404 do sync: decide com
+  `resolve_connection_state` e grava por `mark_sync_result` com o CAS pela versão da
+  linha (`updated_at`, §1 item 6).
 - Também GRAVAM `status` e/ou `status_reason` sem passar pelo resolvedor: o
   webhook (`update_pluggy_open_finance_item_status`), a reconexão
   (`save_pluggy_open_finance_item`, linha G), `marcar_leitura_falhou`
@@ -62,10 +66,14 @@ comando; não copie o resultado para cá (`CLAUDE.md` §2).
    - **só um sync com leitura completa limpa esses dois motivos.** O job de saúde,
      que não lê contas, os mantém. `no_accounts` continua caindo no job assim que
      existe dado no espelho.
-   - O job decide manter ou limpar sobre o motivo que leu ao listar a linha, e o
-     `GET /items` dele roda sem lock. Por isso ele só grava se o motivo ainda for o
-     que leu (`status_reason_visto` no `mark_sync_result`); se um sync o mudou no
-     meio, o job não grava nada naquela linha. *Vigente desde o PR-A.*
+   - O job decide manter ou limpar sobre a linha que leu ao listar, e o `GET /items`
+     dele roda sem lock. Por isso `observar_item` só grava se a VERSÃO da linha
+     (`updated_at`) ainda for a que leu (`versao_vista` no `mark_sync_result`); se
+     qualquer escritor mexeu nela no meio (sync, reconexão, webhook, 404), nada é
+     gravado naquela linha e o próximo tique reavalia. Toda escrita de estado bumpa
+     `updated_at` (guarda estrutural em `tests/test_of_versao_da_linha.py`). A
+     versão substitui o CAS por valor do motivo (`status_reason_visto`, PR-A), que
+     não via quem mudava a linha mantendo o motivo. *Vigente desde o PR-C1.*
    - Leitura parcial de um sync cujo carimbo a reconexão recusou
      (`last_sync_at` anterior ao `reconnected_at`) não vale: a tela diz
      "Atualizando… · Ainda não sincronizou", como no item 3.
@@ -263,11 +271,11 @@ verificação externa pendente.
 | Parcial (`investments_read_failed`) | E2 ou E6 com leitura completa | Atualizado | não | ✓ **PR-A** |
 | Parcial (`investments_read_failed`) | E3 | "Erro temporário" com o motivo apagado; o E8 seguinte, com o item vivo, pinta Atualizado sem os investimentos terem sido lidos | avisa (classifica por `status`) | ✗ (PR-C) |
 | Parcial (`investments_read_failed`) | E1 atrasado | motivo apagado: Atualizando… (sem health) ou Atualizado | não | ✗ família R8 (PR-C) |
-| qualquer, com o motivo MUDANDO no meio | E8 com um sync terminando durante o `GET /items` do job | o que o sync gravou: o job não grava nada, porque o CAS (`status_reason_visto`) compara só o motivo | não | ✓ **PR-A**, só neste escopo |
-| qualquer | E8 com um sync ok terminando no meio e o motivo IGUAL antes e depois | o job regrava `health` e `status` por cima da foto mais nova do sync | não | ✗ (PR-C) |
-| qualquer | E9 para uma autorização de dispositivo no meio do `GET /items` do job (motivo `NULL` antes e depois) | o job grava o `health` e o `status` da autorização antiga por cima dos zerados: some "Autorize o acesso no app do banco" e a tela diz "Atualizando… · Ainda não sincronizou" | não (o `status` volta a `ACTIVE`) | ✗ (PR-C; B3 do Tester) |
-| Atualizado | E8 com 404 transitório no `GET /items`, e um sync ok da mesma linha terminando no meio | "Conexão perdida" com o item vivo (o caminho do 404 não tem CAS) | avisa | ✗ (PR-C; B2 do Tester) |
-| qualquer | E3 (webhook `item/error`) no meio do `GET /items` do job, com o motivo igual | o job grava `ACTIVE` por cima do `ERROR` do webhook | – | ✗ (PR-C) |
+| qualquer, com o motivo MUDANDO no meio | E8 com um sync terminando durante o `GET /items` do job | o que o sync gravou: o job não grava nada, porque o CAS compara a versão da linha | não | ✓ **PR-A** (por valor do motivo), generalizado no **PR-C1** (por versão) |
+| qualquer | E8 com um sync ok terminando no meio e o motivo IGUAL antes e depois | o job não grava: o sync bumpou a versão da linha | não | ✓ **PR-C1** |
+| qualquer | E9 para uma autorização de dispositivo no meio do `GET /items` do job (motivo `NULL` antes e depois) | o job grava o `health` e o `status` da autorização antiga por cima dos zerados: some "Autorize o acesso no app do banco" e a tela diz "Atualizando… · Ainda não sincronizou" | não (o `status` volta a `ACTIVE`) | ✓ **PR-C1** (o upsert da reconexão bumpa a versão; B3 do Tester) |
+| Atualizado | E8 com 404 transitório no `GET /items`, e um sync ok da mesma linha terminando no meio | "Conexão perdida" com o item vivo (o caminho do 404 não tinha CAS) | avisa | ✓ **PR-C1** (`observar_item(None)` com a versão lida; B2 do Tester; vale também para o 404 do sync) |
+| qualquer | E3 (webhook `item/error`) no meio do `GET /items` do job, com o motivo igual | o job não grava: o webhook bumpou a versão da linha | – | ✓ **PR-C1** (o veredito do webhook em si segue até o PR-C2) |
 | Parcial (`investments_read_failed`) com `last_sync_at` anterior ao `reconnected_at` | leitura da tela | Atualizando… · Ainda não sincronizou | não | ✓ **PR-A** |
 | Erro temporário (`read_failed`) | E8 com espelho cheio | **mantém Erro temporário** | não | ✓ **corrigido no PR-A (R5)** |
 | Erro temporário (`read_failed`) | E8 com espelho vazio | mantém | não | ✓ |
@@ -278,7 +286,7 @@ verificação externa pendente.
 | Conexão perdida | E3 atrasado | mantém | avisa | ✓ |
 | Conexão perdida | E8 com item vivo | sai | para | ✓ |
 | Pausado / Removido | qualquer webhook, E6, E7, E8 | mantém (terminal) | não | ✓ |
-| qualquer | E9 | zera `health` e motivo: Atualizando… ou instrução de device | calado conforme o prazo | ✓ fora de corrida; ✗ com o job de saúde em voo (linha "E9 no meio do `GET /items`" acima, PR-C) |
+| qualquer | E9 | zera `health` e motivo: Atualizando… ou instrução de device | calado conforme o prazo | ✓ fora de corrida; ✓ com o job de saúde em voo (linha "E9 para uma autorização de dispositivo no meio" acima, PR-C1) |
 | qualquer | E10 | linha apagada, marca `removed`; webhook tardio não ressuscita | – | ✓ (Onda 4) |
 
 Testes das células do PR-A: `tests/test_of_leitura_incompleta.py`. Do PR-B1:
@@ -336,12 +344,18 @@ nome (`test_c9b_…`).
 | 31b | nenhum | falha final comum (500) do sync de fundo e um segundo dono aparece antes da marca | G (só a F), L (a O e a F) | nada gravado em nenhuma linha | `c31b_…[G, L]`; positivos `[…-um_dono]` |
 | 31c | nenhum | a foto do run (O) e um segundo dono que aparece durante a leitura, antes da releitura de posse | L | nada gravado em nenhuma linha | `c31c_…`; positivo `c31c_…[um_dono]` |
 
-**Conserto de classe previsto para as corridas do job (PR-C):** o CAS do PR-A
-compara só `status_reason`, que é o dado de que a decisão do job depende, e
-por isso só cobre o caso em que o motivo muda. As células ✗ de corrida acima
-são escritas concorrentes que não mudam o motivo. O conserto previsto é um CAS
-pela versão da linha (`updated_at` lido na listagem) no `observar_item` que o
-PR-C extrai de `run_of_health_check`, usado também pelo caminho do 404.
+**Conserto de classe das corridas do job (PR-C1, vigente):** o CAS do PR-A
+comparava só `status_reason`, o dado de que a decisão do job depende, e por isso só
+cobria o caso em que o motivo muda; as escritas concorrentes que mantinham o motivo
+(sync ok, reconexão, 404 do lote) passavam. Agora o CAS é pela versão da linha
+(`updated_at` lido na listagem), em `observar_item` (`core/services/pluggy_sync.py`),
+usado pelo job (vivo e lote de 404) e pelo 404 do `sync_pluggy_item`. Quem perde
+(0 linhas) é descartado e contado (`perdeu`, no retorno do job), sem log por linha.
+Continuam com CAS próprio, porque respondem a perguntas de autoridade que a versão
+não responde: a foto O, a marca de falha F (`geracao_vista`, `motivos_substituiveis`,
+`observacao_vista`, `dono_unico`) e o carimbo do sucesso (`reconnected_at_visto`).
+`mark_sync_attempt` também bumpa a versão: uma tentativa de sync no meio do `GET`
+derruba a observação (conservador, o sync em voo observa por conta própria).
 
 ### 2.2 A retentativa do PR-B2, célula por célula
 
@@ -596,6 +610,17 @@ a D3, que torna verdade "Tentaremos de novo automaticamente" (menos em E13, §2.
 | Teto do "Atualizando…" (Fase 4 do app, 2026-10-01) | `TETO_ATUALIZANDO_MIN` = 120 min; depois, o estado `error_recoverable` existente (sem 10º estado) com o detalhe "O banco está demorando — atualize de novo mais tarde"; a retentativa continua relendo | Fase 4, PR 2 (**implementada**) |
 | D7: "Última sync" mostra a data de quê | mantém "Última sync" e acrescenta "· dados de dd/mm" quando a data do banco difere mais de 1 dia | PR-B3 (**implementada**; `ui.dados_de`, limiar de 24 h estrito) |
 
+**PR-C (decisões do dono, 2026-10-03; fatiado em C1 e C2).** (a) o webhook relê o
+item e só grava a pista `ERROR`, sem apagar motivo e sem tocar `raw`, quando a
+releitura não confirma; (b) a observação vence o evento e registra
+`of_observacao_diverge` para a Onda 8; (c) a versão da linha é `updated_at`, sem
+migration (**C1, implementada**); (d) só `item/error` dispara observação, coalescida
+por item com semáforo de 4, a rodada suja (`_DIRTY`) mantida, e o `raw` deixa de ser
+sobrescrito pelo envelope; (e) a observação do webhook sobrescrita pela foto de um
+sync de OUTRA réplica fica como limite conhecido (§4). C1 = versão da linha +
+`observar_item` + job + 404 do sync; C2 = webhook (R3, R8), ainda **não
+implementada**: as células de R3 e R8 seguem ✗.
+
 Texto novo do PR-B3, visível ao usuário: o detalhe "O banco já tem dados de dd/mm —
 atualize para trazer" (pílula "Parcial", âmbar) e o sufixo " · dados de dd/mm" na
 linha "Última sync". Instrução, não promessa: a retentativa de fundo tem
@@ -613,6 +638,17 @@ Texto novo do PR-A, visível ao usuário: o detalhe
 "Investimentos não vieram nesta atualização" (pílula "Parcial").
 
 ## 4. Achados registrados, fora do escopo da Onda 5
+
+- **Limites do PR-C1.**
+  - X7: um sync em OUTRA réplica que começou antes da observação do webhook grava a
+    foto 1 (mais velha) depois dela, porque o sucesso do sync (`reconnected_at_visto`)
+    não tem CAS de versão sobre `health` e o par. Em um processo só, `_INFLIGHT` e
+    `_DIRTY` fecham (C2). Limite conhecido, não coberto.
+  - O "~18 h" que a documentação do R3 cita vale só antes do B2: hoje o erro grudado
+    dura até um tique da retentativa (com a flag ligada), e para sempre com ela
+    desligada. O C2 o fecha.
+  - V6 (o que o `GET /items` devolve logo depois de um `item/error` real) e o volume
+    real de `item/error` em produção só se medem na Onda 8; nada na C1 os exercita.
 
 - **Limites do PR-B3 (D2/D7).**
   - `_dm` (`_stale_detail`) fatia a string ISO sem converter fuso: "2026-09-20T01:30:00Z"
