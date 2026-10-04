@@ -90,7 +90,7 @@ test("com /bump em voo o Express fica inert e o clique não abre a folha; ao vol
   await ctx.close();
 });
 
-test("confirm que chega com /bump em voo (folha aberta antes do clique na caixa): ignorado, sem cobrar", async () => {
+test("confirm sem click, com /bump em voo: ignorado, sem cobrar", async () => {
   const { ctx, page, posts } = await abrirPagina({ api: { [`POST ${BUMP}`]: null } });
   await pronta(page);
   await caixas(page).nth(0).click();
@@ -98,6 +98,97 @@ test("confirm que chega com /bump em voo (folha aberta antes do clique na caixa)
   await page.evaluate(() => window.__exConfirma());
   await pausa(150);
   assert.equal(posts(CONFIRM).length, 0);
+  await ctx.close();
+});
+
+// A folha aberta (do `click` ao `cancel`/`confirm`): no Google Pay do desktop é um popup e a página segue clicável.
+// Mexer no carrinho por baixo dela cobraria um total diferente do que ela mostra.
+const travada = (page) => page.evaluate(() => ({
+  caixas: [...document.querySelectorAll("#pp-bump input")].every((c) => c.disabled),
+  cupom: document.getElementById("pp-cupom-ok").disabled, pagar: document.getElementById("pp-pagar").disabled }));
+const CUPOM = "/__stripe/cupom";
+
+test("folha aberta: resolve chamado, caixas/cupom/Pagar travados, e nem caixa, cupom nem Pagar chegam ao Stripe", async () => {
+  const { ctx, page, posts } = await abrirPagina({ sdk: { folhaParada: true } });
+  await pronta(page);
+  await clicaCarteira(page);
+  assert.equal(await page.evaluate(() => window.__stripe.folha || 0), 1, "a folha não abriu");
+  assert.deepEqual(await travada(page), { caixas: true, cupom: true, pagar: true });
+  // A guarda é do handler, não só do `disabled`: o `change`, o submit e o Pagar forçados não saem.
+  await page.evaluate(() => {
+    const c = document.querySelector("#pp-bump input"); c.checked = true; c.dispatchEvent(new Event("change"));
+    document.getElementById("pp-cupom-cod").value = "PIG10"; document.getElementById("pp-cupom").requestSubmit();
+    document.getElementById("pp-pagar").onclick();
+  });
+  await pausa(150);
+  assert.equal(posts(BUMP).length, 0);
+  assert.equal(posts(CUPOM).length, 0);
+  assert.equal(posts(CONFIRM).length, 0);
+  await ctx.close();
+});
+
+test("confirm tardio depois do cancel e de um /bump: ignorado, não cobra o carrinho que a folha não mostrou", async () => {
+  const { ctx, page, posts } = await abrirPagina({ sdk: { folhaParada: true } });
+  await pronta(page);
+  await clicaCarteira(page);
+  await page.evaluate(() => window.__exCancela());
+  await caixas(page).nth(0).click();
+  await ate(() => posts(BUMP).length > 0);
+  await pronta(page);
+  await page.evaluate(() => window.__exConfirma());
+  await pausa(150);
+  assert.equal(posts(CONFIRM).length, 0, "o confirm tardio da folha cancelada cobrou o carrinho novo");
+  // Controle positivo: uma folha nova, aberta pelo click, cobra.
+  await clicaCarteira(page);
+  await page.evaluate(() => window.__exConfirma());
+  await ate(() => posts(CONFIRM).length > 0);
+  await ctx.close();
+});
+
+test("cancel da folha: destrava, e a caixa volta a fazer /bump", async () => {
+  const { ctx, page, posts } = await abrirPagina({ sdk: { folhaParada: true } });
+  await pronta(page);
+  await clicaCarteira(page);
+  assert.deepEqual(await travada(page), { caixas: true, cupom: true, pagar: true });
+  await page.evaluate(() => window.__exCancela());
+  assert.deepEqual(await travada(page), { caixas: false, cupom: false, pagar: false });
+  await caixas(page).nth(0).click();
+  await ate(() => posts(BUMP).length > 0);
+  await ctx.close();
+});
+
+test("click com /bump em voo (vindo do SDK, sem passar pelo inert): resolve não é chamado, a folha não abre", async () => {
+  const { ctx, page, posts } = await abrirPagina({ api: { [`POST ${BUMP}`]: null } });
+  await pronta(page);
+  await caixas(page).nth(0).click();
+  await ate(() => posts(BUMP).length > 0);
+  await page.evaluate(() => window.__exClica());
+  await pausa(150);
+  assert.equal(await page.evaluate(() => window.__stripe.folha || 0), 0, "a folha abriu com o /bump em voo");
+  assert.equal(posts(CONFIRM).length, 0);
+  await ctx.close();
+});
+
+test("confirm depois do click: cobra com o evento da carteira, sem /bump, e a tela segue travada", async () => {
+  const { ctx, page, posts } = await abrirPagina({ sdk: { folhaParada: true }, api: { [`POST ${CONFIRM}`]: null } });
+  await pronta(page);
+  await clicaCarteira(page);
+  await page.evaluate(() => window.__exConfirma());
+  await ate(() => posts(CONFIRM).length > 0);
+  assert.deepEqual(posts(CONFIRM).map((r) => r.body), [{ ev: true }]);
+  assert.equal(posts(BUMP).length, 0);
+  assert.deepEqual(await travada(page), { caixas: true, cupom: true, pagar: true });
+  await ctx.close();
+});
+
+test("confirm com erro depois do click: mensagem, e caixas, cupom e Pagar destravam (a folha fechou)", async () => {
+  const { ctx, page } = await abrirPagina({ sdk: { folhaParada: true, confirma: { type: "error", error: { message: "Recusado." } } } });
+  await pronta(page);
+  await clicaCarteira(page);
+  await page.evaluate(() => window.__exConfirma());
+  await page.locator("#pp-erro.show").waitFor();
+  await page.waitForFunction(() => !document.getElementById("pp-pagar").disabled);
+  assert.deepEqual(await travada(page), { caixas: false, cupom: false, pagar: false });
   await ctx.close();
 });
 

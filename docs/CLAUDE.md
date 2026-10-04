@@ -566,7 +566,10 @@ sincronização do Pagar; o Pagar faz 1 `/bump` de sincronização quando há ca
 `tests/frontend/pagamento_pagina*.test.mjs`. As carteiras (Apple Pay/Google Pay) são o Express Checkout em
 `#pp-express`, acima do Payment Element (que fica com `wallets` "never", sem botão em dobro): sem altura até o
 `availablepaymentmethodschange` trazer botão, `inert` com `/bump`, cupom ou pagamento em voo (a folha nunca abre
-com o carrinho mudando; ela mostra o total da sessão, que é o que se cobra) e `confirm` →
+com o carrinho mudando; ela mostra o total da sessão, que é o que se cobra). O `click` do Express só chama o
+`resolve` (que abre a folha) com nada em voo, e então trava caixas, cupom e Pagar até o `cancel` ou o `confirm` —
+no Google Pay do desktop a folha é um popup e a página segue clicável por baixo. `confirm` sem folha aberta
+(tardio, depois de um `cancel`) é ignorado; com ela, `confirm` →
 `actions.confirm({expressCheckoutConfirmEvent})`. Pré-requisito: o domínio registrado em "Domínios de métodos de
 pagamento" do Stripe no modo TESTE (staging) e no LIVE (produção) — sem isso os botões não aparecem. O desenho das
 caixas e do resumo mora em `frontend/pagamento-caixas.js`. Testes: `tests/frontend/pagamento_express.test.mjs`.

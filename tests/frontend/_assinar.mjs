@@ -34,8 +34,9 @@ export const PAGINA = (extras = EXTRAS) => [200, { ...EMBUTIDO[1], pagina: true,
 // Modos da página própria: "acoes-erro", "acoes-pendura" e "acoes-rejeita" (loadActions); `sdk.semChange` suprime o `change`.
 // Express Checkout: o mount põe um botão #ex-btn cujo clique entrega um evento a on("confirm") (a folha da carteira
 // fica de fora); `sdk.carteiras` = o `paymentMethods` do availablepaymentmethodschange (padrão {applePay: true};
-// null = nenhum botão; "nunca" = o evento não chega). `reg.folha` conta os cliques que chegaram ao botão (a folha
-// abrindo); `window.__exConfirma()` entrega o confirm sem clique (folha aberta antes). O confirm grava em /__stripe/confirm se recebeu ESSE evento (`ev`).
+// null = nenhum botão; "nunca" = o evento não chega). `reg.folha` conta as folhas que abriram (o `click` resolvido);
+// `sdk.folhaParada` = a folha abre e espera (sem confirm automático). `window.__exClica()` entrega o `click` sem passar
+// pelo DOM (o `inert`), `__exConfirma()` o confirm e `__exCancela()` o cancel. O confirm grava em /__stripe/confirm se recebeu ESSE evento (`ev`).
 // O modo vem de window.__STRIPE (addInitScript); o registro fica em window.__stripe.
 const STRIPE_FALSO = `(function () {
   var cfg = window.__STRIPE || {}, modo = cfg.modo || "ok";
@@ -108,9 +109,15 @@ const STRIPE_FALSO = `(function () {
               var b = document.createElement("button");
               b.id = "ex-btn"; b.type = "button"; b.textContent = "Apple Pay";
               b.style.cssText = "display:block;width:100%;height:48px";
-              // O clique que chega ao botão é a folha abrindo (reg.folha); o confirm é a folha autorizada.
+              // A folha abrindo é reg.folha; o confirm é a folha autorizada. Como o Stripe: com on("click"), a folha só
+              // abre se a página chamar o resolve do evento; sem ouvinte, abre direto.
               window.__exConfirma = function () { reg.exEvento = { expressPaymentType: "apple_pay" }; if (h.confirm) h.confirm(reg.exEvento); };
-              b.onclick = function () { reg.folha = (reg.folha || 0) + 1; window.__exConfirma(); };
+              window.__exClica = function () {
+                var abre = function () { reg.folha = (reg.folha || 0) + 1; if (!cfg.folhaParada) window.__exConfirma(); };
+                if (h.click) h.click({ expressPaymentType: "apple_pay", resolve: abre }); else abre();
+              };
+              window.__exCancela = function () { if (h.cancel) h.cancel({ expressPaymentType: "apple_pay" }); };
+              b.onclick = window.__exClica;
               document.querySelector(sel).appendChild(b);
               var pm = cfg.carteiras === undefined ? { applePay: true } : cfg.carteiras;
               if (pm === "nunca") return;  // o evento não chega

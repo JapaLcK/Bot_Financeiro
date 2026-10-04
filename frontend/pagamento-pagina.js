@@ -57,18 +57,20 @@
       if (eu !== atual) return { destroy: function () {} };
       limpa();
       const cbs = T.caixas(Array.isArray(d.extras) ? d.extras : []);
-      // voo: um /bump, cupom ou pagamento em andamento. temTotal: já chegou um `change` com o total.
-      let actions = null, voo = false, vivo = true, temTotal = false, foco = null, prazo = null;
+      // voo: um /bump, cupom ou pagamento em andamento. temTotal: já chegou um `change` com o total. folha: a da
+      // carteira aberta (do `click` ao `cancel`/`confirm`), mostrando o total da sessão: o carrinho não muda por baixo.
+      let actions = null, voo = false, vivo = true, temTotal = false, foco = null, prazo = null, folha = false;
       // O conjunto que o servidor JÁ tem: é para ele que as caixas voltam quando um /bump falha.
       let confirmado = cbs.filter(function (c) { return c.checked; });
       const marcadas = function () { return cbs.filter(function (c) { return c.checked; }); };
 
       function pinta() {
-        const morto = voo || !actions || !vivo;
-        cbs.forEach(function (c) { c.disabled = morto; c.closest("label").classList.toggle("on", c.checked); });
-        $("pp-pagar").disabled = morto || !temTotal;
-        $("pp-cupom-ok").disabled = morto;
-        // Apple Pay/Google Pay: nem clique nem teclado abrem a folha com /bump, cupom ou pagamento em voo.
+        const morto = voo || !actions || !vivo, parado = morto || folha;
+        cbs.forEach(function (c) { c.disabled = parado; c.closest("label").classList.toggle("on", c.checked); });
+        $("pp-pagar").disabled = parado || !temTotal;
+        $("pp-cupom-ok").disabled = parado;
+        // Apple Pay/Google Pay: nem clique nem teclado abrem a folha com /bump, cupom ou pagamento em voo. A folha
+        // aberta NÃO deixa o botão inert: se um `cancel` se perder, reabrir e fechar a folha destrava a tela.
         $("pp-express").inert = morto || !temTotal;
         // ≥1 marcada: borda sólida e seta parada (como o `.marcado` do protótipo).
         $("pp-bump").classList.toggle("marcado", marcadas().length > 0);
@@ -114,7 +116,7 @@
       }
 
       async function marcou() {
-        if (voo || !actions) return;
+        if (voo || folha || !actions) return;
         aviso("pp-erro", "");
         trava(true);
         const ok = await sincroniza();
@@ -125,7 +127,7 @@
       }
 
       async function pagar() {
-        if (voo || !actions || !temTotal) return;
+        if (voo || folha || !actions || !temTotal) return;
         aviso("pp-erro", "");
         trava(true);
         // O que a tela mostra é o que se cobra: a sincronização vem ANTES do confirm, sempre que há caixa.
@@ -139,11 +141,13 @@
         return confirma();
       }
 
-      /** Apple Pay/Google Pay: a folha mostra o total da SESSÃO, que é o que se cobra (sem sincronizar antes).
-       *  ponytail: confirm que chega com pedido em voo (folha aberta antes; só onde a página segue clicável por
-       *  baixo dela) é ignorado e a folha vence o prazo dela sem cobrar. */
+      /** Apple Pay/Google Pay: a folha mostra o total da SESSÃO, que é o que se cobra (sem sincronizar antes); do
+       *  `click` até aqui o carrinho ficou parado (`folha`). Confirm sem folha aberta (tardio, depois de um `cancel`
+       *  que destravou o carrinho) ou com pedido em voo é ignorado (a folha vence o prazo dela sem cobrar). */
       function carteira(ev) {
-        if (voo || !actions || !temTotal) return;
+        const aberta = folha;
+        folha = false;
+        if (!aberta || voo || !actions || !temTotal) return pinta();
         aviso("pp-erro", "");
         trava(true);
         confirma({ expressCheckoutConfirmEvent: ev });
@@ -168,7 +172,7 @@
       async function cupom(ev) {
         ev.preventDefault();
         const cod = $("pp-cupom-cod").value.trim();
-        if (!cod || voo || !actions) return;
+        if (!cod || voo || folha || !actions) return;
         aviso("pp-cupom-erro", "");
         trava(true);  // nem /bump nem Pagar com o cupom em voo
         let r;
@@ -195,6 +199,16 @@
       $("pagamento").textContent = "";
       const ex = checkout.createExpressCheckoutElement({ buttonType: { applePay: "check-out", googlePay: "checkout" }, buttonHeight: 48 });
       ex.on("availablepaymentmethodschange", function (e) { $("pp-express").classList.toggle("pp-espera", !(e && e.paymentMethods)); });
+      // A folha só abre com o carrinho parado (sem `resolve`, o Stripe não a abre) e, aberta, trava caixas, cupom e
+      // Pagar até o `cancel` ou o `confirm`: no Google Pay do desktop ela é um popup e a página segue clicável.
+      // ponytail: se o Stripe nunca mandar o `cancel`, a tela só destrava ao reabrir e fechar a folha (ou recarregar).
+      ex.on("click", function (ev) {
+        if (voo || !actions || !temTotal || !vivo) return;
+        folha = true;
+        pinta();
+        if (ev && typeof ev.resolve === "function") ev.resolve();
+      });
+      ex.on("cancel", function () { if (vivo) { folha = false; pinta(); } });
       ex.on("confirm", carteira);
       ex.mount("#pp-express");
       const pe = checkout.createPaymentElement({ wallets: { applePay: "never", googlePay: "never" } });
