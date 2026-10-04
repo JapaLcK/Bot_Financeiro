@@ -89,6 +89,7 @@
     ofPollTimer: null,
     ofPollCount: 0,
     ofSeq: 0,              // só a resposta do pedido mais novo desenha
+    ofRendered: null,      // última lista desenhada (JSON) — poll igual não toca o DOM
     reportChoice: null,
     reportCurrent: null,
     weeklyReportAvailable: false,
@@ -295,9 +296,11 @@
     }
   }
 
-  function retryComplete() {
+  function retryComplete(button) {
     clearError();
-    completeOnEnter(persist({ step: TOTAL_STEPS, completed: true }));
+    return withBusy(button, function () {
+      return completeOnEnter(persist({ step: TOTAL_STEPS, completed: true }));
+    });
   }
 
   function next() { goTo(state.step + 1); }
@@ -329,16 +332,19 @@
     }
   }
 
-  async function skipAll() {
+  function skipAll(button) {
     // Pular é uma decisão do usuário: marca concluído pra o wizard não voltar
     // a aparecer no próximo login. Sem o 200 não sai daqui: ir para o /home
     // sem a conclusão gravada só devolveria a pessoa ao wizard pelo gate.
-    if (!state.completed && !(await persist({ step: state.step, completed: true }))) {
-      showError(SAVE_FAIL_TEXT);
-      return;
-    }
-    if (window.PBPurchaseIntent) window.PBPurchaseIntent.clearCompleted();
-    window.location.replace("/home");
+    // withBusy: duplo clique não manda dois `completed`.
+    return withBusy(button, async function () {
+      if (!state.completed && !(await persist({ step: state.step, completed: true }))) {
+        showError(SAVE_FAIL_TEXT);
+        return;
+      }
+      if (window.PBPurchaseIntent) window.PBPurchaseIntent.clearCompleted();
+      window.location.replace("/home");
+    });
   }
 
   /**
@@ -538,6 +544,11 @@
   function renderOfSync(view) {
     const list = el("of-sync");
     if (!list) return;
+    // A lista é aria-live: recriar os <li> com o mesmo conteúdo faria o leitor
+    // de tela reanunciar "Atualizando…" a cada poll.
+    const key = JSON.stringify(view.rows);
+    if (key === state.ofRendered) return;
+    state.ofRendered = key;
     list.innerHTML = "";
     view.rows.forEach(function (row) {
       const li = document.createElement("li");
@@ -797,9 +808,9 @@
   const ACTIONS = {
     next: function () { next(); },
     skip: function () { skip(); },
-    "skip-all": function () { skipAll(); },
+    "skip-all": function (button) { skipAll(button); },
     finish: function () { finish(); },
-    "retry-complete": function () { retryComplete(); },
+    "retry-complete": function (button) { retryComplete(button); },
     "save-balance": function (button) { saveBalance(button); },
     "add-card": function () { openCardForm(true); },
     "cancel-card": function () { openCardForm(false); },

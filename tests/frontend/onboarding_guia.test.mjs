@@ -38,7 +38,8 @@ const UPDATED = { institution_name: "Nubank", ui: { state: "updated", label: "At
 
 /**
  * Abre o wizard no `step` salvo. `snapshot(n)` responde o n-ésimo GET do
- * Open Finance; `saveStatus(body)` o status do POST /onboarding/state.
+ * Open Finance; `saveStatus(body)` o status do POST /onboarding/state (pode
+ * ser Promise, para segurar o pedido em voo).
  */
 async function abrir(viewport, { step, snapshot = () => json({ ok: true, connections: [] }),
                                 saveStatus = () => 200 } = {}) {
@@ -57,11 +58,11 @@ async function abrir(viewport, { step, snapshot = () => json({ ok: true, connect
                     body: readFileSync(join(FRONTEND, "static", "auth-refresh.js"), "utf8") }));
   await page.route("**/auth/dashboard-profile", (route) =>
     route.fulfill(json({ user_id: 1, display_name: "Lucas", plan: "free" })));
-  await page.route("**/onboarding/state", (route) => {
+  await page.route("**/onboarding/state", async (route) => {
     if (route.request().method() === "GET") return route.fulfill(json({ step, completed: false, total_steps: 5 }));
     const body = route.request().postDataJSON();
     calls.posts.push(body);
-    const status = saveStatus(body);
+    const status = await saveStatus(body);
     return route.fulfill(json(status === 200 ? { step: body.step, completed: !!body.completed } : { detail: "x" }, status));
   });
   await page.route("**/open-finance/1", async (route) => { calls.of += 1; return route.fulfill(await snapshot(calls.of)); });
@@ -197,6 +198,53 @@ for (const vp of VIEWPORTS) {
 
     await Promise.all([page.waitForURL("**/home"), page.click('[data-action="finish"]')]);
     await page.close();
+  });
+
+  test(`${tag} passo 2: poll com o mesmo estado não toca a lista aria-live; mudança toca`, async () => {
+    // Recriar os <li> iguais faz o leitor de tela reanunciar "Atualizando…" a
+    // cada 5 s. Controle negativo: tirar a comparação com `state.ofRendered`
+    // no renderOfSync faz as mutações dos 3 polls iguais passarem de 0.
+    let conexao = UPDATING;
+    const { page, calls } = await abrir(vp, { step: 2, snapshot: () => json({ ok: true, connections: [conexao] }) });
+    await page.waitForFunction(() => document.querySelector('[data-role="of-sync"]').innerText.includes("Atualizando"));
+    await page.evaluate(() => {
+      window.__mut = 0;
+      new MutationObserver((ms) => { window.__mut += ms.length; })
+        .observe(document.querySelector('[data-role="of-sync"]'), { childList: true, subtree: true, characterData: true });
+    });
+    await page.clock.runFor(15000);
+    assert.ok(await assentado(calls) >= 3, `deveria repollar 3 vezes (pedidos: ${calls.of})`);
+    assert.equal(await page.evaluate(() => window.__mut), 0, "poll com o mesmo estado mexeu na região aria-live");
+
+    conexao = UPDATED;
+    await page.clock.runFor(5000);
+    await page.waitForFunction(() => document.querySelector('[data-role="of-sync"]').innerText.includes("Atualizado"));
+    assert.ok(await page.evaluate(() => window.__mut) > 0, "a mudança de estado tem de redesenhar");
+    await page.close();
+  });
+
+  test(`${tag} duplo clique em "Pular tudo" e em "Tentar de novo" manda UM completed cada`, async () => {
+    // Pedido segurado 300 ms: o 2º clique cai com o 1º em voo. No "Tentar de
+    // novo" o botão some no 1º clique e o 2º cai no que o layout pôs sob o
+    // cursor; em 1280 isso ainda manda um 2º completed sem o withBusy do retry.
+    // Controle negativo: tirar o withBusy do skipAll (ou do retryComplete) dá 2.
+    const lento = (status) => new Promise((r) => setTimeout(() => r(status), 300));
+    const { page, calls } = await abrir(vp, { step: 2, saveStatus: () => lento(200) });
+    await Promise.all([page.waitForURL("**/home"), page.dblclick('[data-action="skip-all"]')]);
+    assert.equal(calls.posts.filter((b) => b.completed).length, 1, JSON.stringify(calls.posts));
+    await page.close();
+
+    let falha = true;
+    const { page: p2, calls: c2 } = await abrir(vp, { step: 4, saveStatus: (b) => lento(b.completed && falha ? 500 : 200) });
+    await p2.click('.onb-step[data-step="4"] [data-action="skip"]');
+    await p2.waitForSelector('[data-role="done-fail"]:not([hidden])');
+    falha = false;
+    const antes = c2.posts.filter((b) => b.completed).length;
+    await p2.dblclick('[data-action="retry-complete"]');
+    await new Promise((r) => setTimeout(r, 800));
+    assert.equal(c2.posts.filter((b) => b.completed).length - antes, 1, JSON.stringify(c2.posts));
+    assert.ok(await p2.isVisible('[data-role="done-ok"]'), "Tudo pronto não apareceu");
+    await p2.close();
   });
 
   test(`${tag} "Pular tudo" com 500 fica e avisa; com 200 vai ao /home`, async () => {

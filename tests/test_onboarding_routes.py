@@ -231,6 +231,47 @@ def test_telemetria_nao_derruba_a_escrita(monkeypatch):
     assert store[7]["step"] == 2
 
 
+def test_conclusao_conta_uma_vez_no_funil_pelo_servidor_real(user_id):
+    """Duplo clique em "Pular tudo", "Tentar de novo" duplo ou revisitar o passo
+    5 mandam `completed:true` mais de uma vez. O carimbo já era idempotente; o
+    `onboarding_completed` em system_event_logs não era.
+
+    Banco, sessão e rota reais. Positivo: a 1ª chamada carimba e registra 1.
+    Controle negativo: trocar `if stamped:` por `if payload.completed:` em
+    frontend/routes/onboarding.py faz a contagem dar 2.
+    """
+    from _apoio_auth_app import sessao_de
+    from _billing_grants_helpers import garantir_system_event_logs
+    from conftest import promote_to_pro
+    from db.connection import get_conn
+
+    garantir_system_event_logs()
+    promote_to_pro(user_id)  # cria a linha em auth_accounts, que a sessão exige
+
+    def _um(q):
+        with get_conn() as conn, conn.cursor() as cur:
+            cur.execute(q, (user_id,))
+            return cur.fetchone()
+
+    assert _um("select onboarding_completed_at as c from auth_accounts where user_id=%s")["c"] is None
+
+    c = TestClient(dashboard.app)
+    c.cookies.set(dashboard.DASHBOARD_COOKIE_NAME, sessao_de(user_id)["dashboard"])
+    eventos = ("select count(*) as n from system_event_logs "
+               "where user_id=%s and event_type='onboarding_completed'")
+
+    r = c.post("/onboarding/state", json={"step": 5, "completed": True}, headers=_csrf(c))
+    assert r.status_code == 200 and r.json()["completed"] is True
+    carimbo = _um("select onboarding_completed_at as c from auth_accounts where user_id=%s")["c"]
+    assert carimbo is not None
+    assert _um(eventos)["n"] == 1
+
+    r = c.post("/onboarding/state", json={"step": 5, "completed": True}, headers=_csrf(c))
+    assert r.status_code == 200
+    assert _um(eventos)["n"] == 1, "a 2ª conclusão inflou o funil"
+    assert _um("select onboarding_completed_at as c from auth_accounts where user_id=%s")["c"] == carimbo
+
+
 # ── O wizard antigo do dashboard.js foi absorvido ───────────────────────────
 
 def test_wizard_antigo_do_dashboard_foi_removido():

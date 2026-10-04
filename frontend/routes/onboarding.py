@@ -72,8 +72,12 @@ async def update_onboarding_state_route(request: Request, payload: OnboardingSta
     if payload.step is not None:
         await asyncio.to_thread(set_onboarding_step, user_id, int(payload.step))
 
+    # Só a chamada que CARIMBOU conta como conclusão no funil: duplo clique,
+    # retentativa ou revisita ao passo 5 regravam `completed` e não podem
+    # inflar o `onboarding_completed` (o UPDATE já é idempotente; o log não era).
+    stamped = False
     if payload.completed:
-        await asyncio.to_thread(mark_onboarding_completed, user_id)
+        stamped = await asyncio.to_thread(mark_onboarding_completed, user_id)
 
     # Telemetria por último e sem poder derrubar a escrita acima: perder um
     # evento de funil é barato, perder o progresso do usuário não é.
@@ -90,7 +94,7 @@ async def update_onboarding_state_route(request: Request, payload: OnboardingSta
                 user_id=user_id,
                 details={"step": int(payload.step)},
             )
-        if payload.completed:
+        if stamped:
             await log_system_event(
                 "info",
                 "onboarding_completed",
