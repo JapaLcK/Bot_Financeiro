@@ -37,7 +37,7 @@ from __future__ import annotations
 import ipaddress
 import sys
 from threading import Thread
-from typing import Any
+from typing import Any, Callable
 
 from core.system_event_log import log_system_event_sync
 
@@ -64,7 +64,13 @@ _EMBUTEM_IPV4 = tuple(ipaddress.ip_network(f) for f in ("64:ff9b::/96", "64:ff9b
 
 # ponytail: registra só a PRESENÇA de cada combinação de sinais, uma vez por
 # processo (não conta volume nem guarda IP). Se precisar de proporção, contar em
-# memória e despejar periodicamente.
+# memória e despejar periodicamente. Teto: quem bate direto no Railway escolhe
+# os cabeçalhos e alcança milhares de combinações, então o processo grava no
+# máximo `_SONDA_TETO` (= linhas em system_event_logs e threads por processo);
+# depois disso a sonda fica cega até o próximo deploy/restart, que zera o set.
+# Cegar não muda nenhum IP: a sonda só mede. Se o teto encher em produção,
+# trocar por contador em memória.
+_SONDA_TETO = 256
 _SONDA_VISTAS: set[tuple] = set()
 
 
@@ -87,6 +93,23 @@ def _publico(ip: ipaddress.IPv4Address | ipaddress.IPv6Address) -> bool:
     return ip.is_global and not ip.is_multicast and not any(ip in r for r in _EMBUTEM_IPV4)
 
 
+def _tipo(ip: ipaddress.IPv4Address | ipaddress.IPv6Address | None) -> str:
+    """Categoria do IP para a sonda — o conjunto de valores é fechado."""
+    if ip is None:
+        return "ausente"
+    if any(ip in faixa for faixa in CLOUDFLARE_FAIXAS):
+        return "cf"
+    if ip in PROXY_RAILWAY:
+        return "railway"
+    if ip.is_private:
+        return "privado"
+    return "publico" if _publico(ip) else "outro"
+
+
+def _ate_3(n: int) -> int | str:
+    return n if n < 3 else "3+"
+
+
 def _cabecalhos(headers: Any, nome: str) -> list[str]:
     """Todos os valores do cabeçalho; `getlist` (Starlette) só se existir —
     há chamador que passa objeto sem `.headers` ou com um dict simples."""
@@ -98,18 +121,20 @@ def _cabecalhos(headers: Any, nome: str) -> list[str]:
     return [] if valor is None else [valor]
 
 
-def _sonda(details: dict) -> None:
+def _sonda(montar: Callable[[], dict]) -> None:
     """Grava em `system_event_logs` cada combinação NOVA de sinais. Só booleanos
     e contagens: nunca IP, user agent ou path."""
-    chave = tuple(details.values())
-    if chave in _SONDA_VISTAS:
-        return
-    _SONDA_VISTAS.add(chave)
     try:
         # Thread daemon e `log_system_event_sync` (que já engole a falha do
         # banco), nunca `logging`: um warning aqui reentraria no
-        # `_DashboardHandler`. O except amplo cobre o que sobra — a thread não
-        # subir —, porque a sonda é medição e não pode derrubar o login.
+        # `_DashboardHandler`. O except amplo cobre o que sobra — montar os
+        # details ou a thread não subir —, porque a sonda é medição e não pode
+        # derrubar o login.
+        details = montar()
+        chave = tuple(details.values())
+        if chave in _SONDA_VISTAS or len(_SONDA_VISTAS) >= _SONDA_TETO:
+            return
+        _SONDA_VISTAS.add(chave)
         Thread(
             target=log_system_event_sync,
             args=("info", "client_ip_sonda", "sonda do IP real (#766)"),
@@ -137,7 +162,8 @@ def client_ip(conn: Any) -> str | None:
         return str(peer_ip)
 
     headers = getattr(conn, "headers", None)
-    xff = [e.strip() for v in _cabecalhos(headers, "x-forwarded-for") for e in v.split(",")]
+    xff_valores = _cabecalhos(headers, "x-forwarded-for")
+    xff = [e.strip() for v in xff_valores for e in v.split(",")]
     ultima = _ip(xff[-1]) if xff else None
     conexao = ultima or peer_ip
     conexao_cf = any(conexao in faixa for faixa in CLOUDFLARE_FAIXAS)
@@ -150,19 +176,27 @@ def client_ip(conn: Any) -> str | None:
     cliente = cf_ip if usa_cf else conexao
 
     xri = _cabecalhos(headers, "x-real-ip")
+    xri_ip = _ip(xri[0]) if len(xri) == 1 else None  # duplicado conta como ausente
+    primeira = _ip(xff[0]) if xff else None
     # cf_valido: um único CF e IP válido (sem zona), global ou não.
     # cf_global: esse IP passa em `_publico` (false = Pseudo-IPv4 240/4,
     # privado, multicast...); com conexao_cf=true, cf_global=false significa
-    # fonte="conexao".
-    _sonda({
-        "xff_entradas": len(xff) if len(xff) < 3 else "3+",
+    # fonte="conexao". *_tipo: categoria de `_tipo`.
+    _sonda(lambda: {
+        "xff_entradas": _ate_3(len(xff)),
         "conexao_cf": conexao_cf,
         "cf_presente": bool(cf),
         "cf_valido": cf_ip is not None,
         "cf_global": _publico(cf_ip) if cf_ip else None,
         "cf_igual_conexao": (cf_ip == conexao) if cf_ip else None,
-        "xri_igual_conexao": ultima is not None and len(xri) == 1 and _ip(xri[0]) == ultima,
+        "xri_igual_conexao": ultima is not None and xri_ip == ultima,
         "fonte": "cf" if usa_cf else ("conexao" if ultima else "peer"),
+        "xff_cabecalhos": _ate_3(len(xff_valores)),
+        "xff_primeira_tipo": _tipo(primeira),
+        "xff_ultima_tipo": _tipo(ultima),
+        "xri_tipo": _tipo(xri_ip),
+        "xri_igual_primeira": (xri_ip == primeira) if xri_ip and primeira else None,
+        "cf_igual_primeira": (cf_ip == primeira) if cf_ip and primeira else None,
     })
     return str(cliente)
 
