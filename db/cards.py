@@ -937,6 +937,7 @@ def update_credit_transaction_fields(
     *,
     categoria: str | None = None,
     nota: str | None = None,
+    exigir_pode: bool = False,
 ) -> bool:
     """Atualiza categoria e/ou nota de uma compra no crédito.
 
@@ -950,7 +951,12 @@ def update_credit_transaction_fields(
     por categoria viram errados).
 
     Retorna True se algo foi alterado, False se não encontrou.
+
+    `exigir_pode` (a v2): campo fora de `lancamentos.PODE_CARTAO_SQL` levanta
+    `NaoEditavel` (categoria → 'categoria', nota → 'descricao').
     """
+    from .lancamentos import PODE_CARTAO_SQL, NaoEditavel
+
     sets: list[str] = []
     params: list = []
     if categoria is not None:
@@ -966,12 +972,16 @@ def update_credit_transaction_fields(
     with get_conn() as conn:
         with conn.cursor() as cur:
             cur.execute(
-                "select group_id from credit_transactions where user_id = %s and id = %s",
+                f"select group_id, {PODE_CARTAO_SQL} as pode from credit_transactions ct "
+                "where ct.user_id = %s and ct.id = %s for update",
                 (user_id, ct_id),
             )
             row = cur.fetchone()
             if not row:
                 return False
+            if exigir_pode and any(v is not None and k not in row["pode"]
+                                   for k, v in (("categoria", categoria), ("descricao", nota))):
+                raise NaoEditavel("Campo fora do que esta compra permite editar.")
             group_id = row.get("group_id")
 
             if group_id:
@@ -1312,6 +1322,7 @@ def anticipate_installment(user_id: int, group_id: str):
         alvo=f"antecipacao:{tx['card_name']}",
         nota=nota_str,
         categoria=tx.get("categoria") or "outros",
+        origem=None,  # só leitura no v2: o `efeitos` não guarda a parcela a desfazer
     )
 
     return {
@@ -1771,6 +1782,7 @@ def rebuild_bill_totals(
                 nota=f"Estorno de pagamento ({card_name}) — reconciliação retroativa",
                 categoria="estorno_pagamento_fatura",
                 is_internal_movement=True,
+                origem=None,  # só leitura no v2: o `efeitos` não guarda a fatura a desfazer
             )
             refunded_total += amount
 

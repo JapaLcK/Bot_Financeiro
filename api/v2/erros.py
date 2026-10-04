@@ -123,7 +123,7 @@ async def erro_interno(request: Request, exc: Exception) -> JSONResponse:
     await log_system_event(
         "error", "http_unhandled_exception", err,
         source=f"{request.method} {request.url.path}",
-        details={"query": dict(request.query_params), "status_code": status,
+        details={"query_keys": sorted(request.query_params.keys()), "status_code": status,
                  "exc_type": exc.__class__.__name__, "traceback": tb[-2000:]},
     )
     return _envelope(status, _CODIGOS.get(status, "internal_error"), message)

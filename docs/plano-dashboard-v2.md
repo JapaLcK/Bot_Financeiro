@@ -520,5 +520,45 @@ PR de cada etapa, não soluções prontas. Cada PR confere se ainda valem, decid
     mostrá-los pede decidir se são entrada ou saída; o que entra marcado hoje é o interno
     com tipo despesa/receita (saque em dinheiro, pagamento de fatura, transferência do
     banco). A lista do `/app` e o "últimos N" do WhatsApp seguem as regras deles.
+  - PR 2a: a escrita da carteira (contrato em `docs/CLAUDE.md`, "API v2"):
+    `POST /api/v2/lancamentos/carteira`, `/editar` e `/apagar`, e a marca `launches.origem =
+    'carteira'` gravada pelo escritor da carteira em todo canal e pelo saque/depósito
+    automático da Q41 (decisão do dono, 2026-10-03). O `pode` vira a guarda da escrita, relido
+    sob o lock do usuário e da linha (`db/lancamentos.pode_da_linha`); o miolo do `POST
+    /launches` do `/app` saiu para `core/services/carteira.lancar`, usado pelas duas rotas.
+    Decisões do dono (2026-10-03): pagamento de conta pela Carteira não apaga pelo v2 (o `pode`
+    fica `[categoria, data]`; o de fatura do cartão manual cai no mesmo ramo e sai junto, por
+    conservadorismo); saldo inicial e ajuste ficam marcados e editáveis/apagáveis, como no
+    `/app`. Antecipar parcela e estorno de fatura do cartão manual gravam sem a marca (só
+    leitura: o `efeitos` não guarda o que desfazer). Ficou fora: editar valor, travar e
+    apagar a fundida (PR 2b), WhatsApp e quick_entry pelo serviço novo, backfill, chave de
+    idempotência, motivo no 409, a tela (PR 4) e o conserto do apagar pagamento de conta no
+    `/app`/WhatsApp (devolve o dinheiro e a conta segue paga). O pagamento de conta pela
+    carteira (`db/bills.mark_bill_paid`) nasce sem a marca e a ganha no mesmo statement que o
+    liga à conta: entre os dois commits a linha parecia carteira pura, o v2 a apagava e o
+    passo seguinte quebrava a FK, deixando a conta paga sem lançamento. A mesma janela por um
+    apagar do `/app`/WhatsApp já existia e fica para o conserto do apagar pagamento de conta.
+    Riscos aceitos: dois POST iguais gravam dois lançamentos (comentário `ponytail:` na rota);
+    o apagar antigo do `/app` (trava `launches` e depois `accounts`) e o do v2 (`accounts` e
+    depois `launches`) na mesma linha do mesmo usuário ao mesmo tempo dão deadlock, e o
+    Postgres aborta um dos dois sem perda. O que mudou no `/app`: o PATCH de cartão passou a
+    travar a linha (`update_credit_transaction_fields` usa `for update` sempre, a mesma linha
+    que o UPDATE já travaria); no `POST /launches`, `infer_category` entrou no `try` (um
+    `ValueError` dele vira 400 em vez de 500) e a falha do aprendizado depois do commit passou
+    de 500 (cuja retentativa duplicava o gasto) a só log. Diferença declarada: `categoria: ""`
+    na criação pelo v2 dá 422 (`null` = inferir), e o `/app` infere.
+  - PR 2b-1: `valor` no `/editar` (só a carteira pura, P4: troca `valor`, `efeitos.delta_conta`
+    e o saldo da Carteira pela diferença, na mesma transação) e a data da linha fundida travada
+    em todo canal (P3): a guarda de `db.accounts.update_launch_fields` lê
+    `db/lancamentos.FUNDIDO_SQL` (o predicado `fundido` da lista, agora fonte única) sob o lock
+    do usuário e da linha, que o PATCH do `/app` com data passou a tomar também. O `pode` só
+    mudou no pagamento de conta fundido, que perde 'data' (fica `[categoria]`). Um
+    teste-portão classifica toda função de produção que faz `update launches` com
+    `valor =`/`criado_em =` (`tests/test_api_v2_lancamentos_valor_data.py`). Decisões do dono
+    (2026-10-03): a fundida não acompanha correção do banco neste PR (PR 3); corrigir o valor
+    da carteira não procura par novo no banco; o aviso ao apagar a fundida e o apagar que
+    desfaz a junção na hora são do PR 2b-2, que vem depois. Limite declarado: linha com par
+    pendente NÃO acionável (conexão pausada, outra moeda) conta como carteira pura, aceita
+    valor novo, e o par volta depois com o valor velho.
 - Guia do `/painel` (#728) em 2 PRs: A `GET`/`POST /api/v2/guia` + tabela `guia_painel` (contrato e consulta de medição em `docs/CLAUDE.md`, "API v2") · B a tela (Piggy, balão, Ajuda).
 - [ ] Etapa 0 · [ ] 1 · [ ] 2 · [ ] 3 · [ ] 4 · [ ] 5 · [ ] 6 · [ ] 7

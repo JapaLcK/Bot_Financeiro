@@ -12,9 +12,11 @@ do plano (P7).
 Ordem e página: KEYSET em (dia desc, instante desc, tabela desc, id desc); o cursor leva
 só essas chaves e a query refiltra pelo usuário, então cursor alheio não revela nada.
 
-`pode` é uma regra só (`PODE_SQL`, sobre `_ESTADO_SQL`); a escrita do PR 2a relê a perna
-de `launches` deste módulo para a linha, sob lock, e decide pelo mesmo predicado. Linha
-sem a marca `launches.origem` é antiga e só leitura (P2): neste PR nada grava a marca.
+`pode` é uma regra só (`PODE_SQL`, sobre `_ESTADO_SQL`; `PODE_CARTAO_SQL` no cartão); a
+escrita da v2 (`api/v2/lancamentos.py`) relê a linha por `pode_da_linha`, sob lock,
+e decide pelo mesmo predicado. Linha sem a marca `launches.origem` é antiga e só leitura
+(P2). Quem grava a marca: o escritor da carteira (`db.accounts.add_launch_and_update_balance`,
+por padrão, em todo canal) e o saque/depósito automático da Q41 (`open_finance_cash._credita`).
 
 Limites declarados: o mês corta `criado_em` pela data ingênua, como `TOTAIS_SQL`, e o dia
 mostrado é o de `launch_day` — numa linha antiga do Open Finance (meia-noite UTC) o dia
@@ -53,6 +55,15 @@ _CTE_PENDENTES = f"""
                    where t.id in (select of_tx_id from pend) and t.imported_launch_id is not null)
 """
 
+# Linha que não é do banco e está junta com uma transação dele (P3: o banco é dono da data e do
+# valor). Sobre `launches` SEM alias; vale para manual, ofx e recorrente, sem olhar a marca. A
+# guarda de data de `db.accounts.update_launch_fields` (todo canal) lê daqui.
+FUNDIDO_SQL = f"""coalesce(source, 'manual') <> 'open_finance' and exists (
+        select 1 from open_finance_transactions o
+          join open_finance_accounts oa on oa.id = o.account_id
+          join open_finance_connections oc on oc.id = oa.connection_id and oc.user_id = launches.user_id
+         where o.imported_launch_id = launches.id and o.reconciliation_status in {_FUSED})"""
+
 # Estado de cada linha, sobre `launches` SEM alias (dentro do FROM dela; a CTE `pendentes`
 # precisa estar no ar). "Carteira" = manual com `delta_conta` ≠ 0; manual com delta 0 não é.
 _ESTADO_SQL = f"""
@@ -64,22 +75,31 @@ _ESTADO_SQL = f"""
       (efeitos -> 'bill_id') is not null or exists (
         select 1 from bill_instances bi where bi.launch_id = launches.id
            and bi.user_id = launches.user_id) as paga_conta,
-      coalesce(source, 'manual') <> 'open_finance' and exists (
-        select 1 from open_finance_transactions o
-          join open_finance_accounts oa on oa.id = o.account_id
-          join open_finance_connections oc on oc.id = oa.connection_id and oc.user_id = launches.user_id
-         where o.imported_launch_id = launches.id and o.reconciliation_status in {_FUSED}) as fundido,
+      {FUNDIDO_SQL} as fundido,
       coalesce(id in (select id from pendentes), false) as pendente"""
 
 # Tabela do dono (P2, P3, P5). A ordem dos `when` é a precedência: o vínculo do dinheiro
-# em espécie e o pagamento de conta vencem a fusão e o par pendente.
+# em espécie e o pagamento de conta vencem a fusão e o par pendente — menos na data, que a
+# fusão tira também do pagamento de conta (P3: o banco é dono da data em todo canal).
 PODE_SQL = """case
       when source = 'open_finance' then array['categoria','descricao']
       when not (carteira and marcada) then '{}'::text[]
       when especie then array['descricao','apagar']
-      when paga_conta then array['categoria','data','apagar']
+      when paga_conta and fundido then array['categoria']
+      when paga_conta then array['categoria','data']
       when fundido or pendente then array['categoria','descricao','apagar']
       else array['categoria','descricao','data','valor','apagar'] end"""
+# `paga_conta` sem apagar (dono, 2026-10-03): apagar o pagamento de conta devolve o dinheiro e
+# a conta segue paga. O de fatura do cartão manual (`bill_id`) cai no mesmo ramo e sai junto,
+# por conservadorismo. O /app e o WhatsApp seguem apagando os dois.
+
+# O `pode` da compra no cartão (alias `ct`): só a do Open Finance edita, e só P5.
+PODE_CARTAO_SQL = """case when ct.source = 'open_finance' then array['categoria','descricao']
+      else '{}'::text[] end"""
+
+
+class NaoEditavel(ValueError):
+    """O campo pedido está fora do `pode` da linha (a escrita da v2 responde 409)."""
 
 
 def _motivos(*pares: tuple[str, str]) -> str:
@@ -145,8 +165,7 @@ _PERNA_CARTAO = f"""
            false as fundido, oc.institution_name as instituicao, null::bigint as conta_id,
            cc.id as cartao_id, ct.installment_no as parcela_n,
            ct.installments_total as parcela_total, to_char(b.period_end, 'YYYY-MM') as fatura,
-           case when ct.source = 'open_finance' then array['categoria','descricao']
-                else '{{}}'::text[] end as pode,
+           {PODE_CARTAO_SQL} as pode,
            {_motivos(("transacao_pendente", "o.status_banco = 'PENDING'"), *_moeda("oa"))} as motivos
       from {MES_CARTAO_SQL}
       left join credit_cards cc on cc.id = ct.card_id and cc.user_id = ct.user_id
@@ -172,6 +191,18 @@ _DA_CONTA_SQL = """ and l.id in (
           join open_finance_connections tc on tc.id = ta.connection_id and tc.user_id = %s
           join open_finance_transactions t on t.account_id = ta.id
          where ra.id = %s and upper(ra.type) = 'BANK')"""
+
+
+def pode_da_linha(cur, user_id: int, launch_id: int) -> list | None:
+    """O `pode` de UMA linha de `launches` do usuário (None = não achou), pela regra da lista.
+    Sem `for update` (a CTE não deixa): quem escreve trava antes (`_lock_user` e a linha) e
+    chama na MESMA transação."""
+    cur.execute(f"""{_CTE_PENDENTES}
+        select {PODE_SQL} as pode from (select launches.*, {_ESTADO_SQL}
+          from launches where user_id = %s and id = %s) l0""",
+                (*actionable_pending_params(cur, user_id), user_id, launch_id))
+    row = cur.fetchone()
+    return row["pode"] if row else None
 
 
 class CursorInvalido(ValueError):

@@ -73,6 +73,7 @@ TABELA = {
     ("POST", "/auth/quiz/conta"): (L, "cria a conta do quiz"),
     # ── /billing e /conta ──
     ("GET", "/billing/plans-config"): (L, "compra"), ("POST", "/billing/create-checkout"): (L, "compra"),
+    ("POST", "/billing/checkout/bump"): (L, "compra"),
     ("POST", "/billing/select-free"): (L, "410"),
     ("GET", "/billing/subscription"): (B, "dado da assinatura"),
     ("POST", "/billing/change-plan"): (B, "mexe na assinatura"),
@@ -113,6 +114,9 @@ TABELA = {
     ("GET", "/api/v2/contas"): (B, "usuario_atual"),
     ("GET", "/api/v2/resumo-do-mes"): (B, "usuario_atual"),
     ("GET", "/api/v2/lancamentos"): (B, "usuario_atual"), ("GET", "/api/v2/categorias"): (B, "usuario_atual"),
+    ("POST", "/api/v2/lancamentos/carteira"): (B, "usuario_atual"),
+    ("POST", "/api/v2/lancamentos/editar"): (B, "usuario_atual"),
+    ("POST", "/api/v2/lancamentos/apagar"): (B, "usuario_atual"),
     ("GET", "/api/v2/guia"): (B, "usuario_atual"), ("POST", "/api/v2/guia"): (B, "usuario_atual"),
     ("WS", "/ws/{user_id}"): (B, "close 4403"),
     # ── HTML autenticado ──

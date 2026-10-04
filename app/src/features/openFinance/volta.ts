@@ -38,6 +38,7 @@ export type EstadoVolta =
   | { fase: "conferindo"; instavel: boolean }
   | { fase: "conectado"; ui: Conexao["ui"] }
   | { fase: "ainda-conferindo" }
+  | { fase: "organizando" }
   | { fase: "sem-item" }
   | { fase: "erro"; texto: string };
 
@@ -77,6 +78,12 @@ function textoDoErro(e: unknown): string {
  * espera: quem volta do segundo plano já fora do prazo ganha uma última
  * tentativa. Uma tentativa = GET; sem o item vivo, POST (no máximo
  * `MAX_POSTS` por chamada; POST com resposta perdida aparece no GET seguinte).
+ * Item em `updating` segue consultando, sem POST, até sair de `updating`; se a
+ * janela fechar antes, `organizando`.
+ *
+ * ponytail: visto o item, uma lista sem ele não faz POST (ressuscitaria um banco
+ * desconectado em outro aparelho); no fim da janela mostra `organizando`, e a
+ * tela de Conexões mostra a verdade (a linha só some da lista por DELETE).
  */
 export async function conferirVolta(link: unknown, d: Dependencias): Promise<void> {
   const itemId = itemDoLink(link);
@@ -86,7 +93,17 @@ export async function conferirVolta(link: unknown, d: Dependencias): Promise<voi
   let uid: number | null = null;
   let posts = 0;
   let instavel = false;
+  let visto = false; // o item já apareceu em `updating` nesta chamada
   d.aoMudar({ fase: "conferindo", instavel });
+
+  /** Mostra a conexão; `true` = parar. Em `updating` continua consultando. */
+  const parou = (ui: Conexao["ui"]) => {
+    d.aoMudar({ fase: "conectado", ui });
+    if (ui.state !== "updating") return true;
+    visto = true;
+    instavel = false;
+    return false;
+  };
 
   for (;;) {
     try {
@@ -94,12 +111,12 @@ export async function conferirVolta(link: unknown, d: Dependencias): Promise<voi
       if (d.cancelado()) return;
       const atual = achar(await conexoes(uid), itemId);
       if (d.cancelado()) return;
-      if (atual && !MORTOS.has(atual.ui.state)) return d.aoMudar({ fase: "conectado", ui: atual.ui });
-      if (posts < MAX_POSTS) {
+      if (atual && (visto || !MORTOS.has(atual.ui.state)) && parou(atual.ui)) return;
+      if (posts < MAX_POSTS && !visto) {
         posts += 1;
         const registrado = achar(await registrarItem(uid, itemId), itemId);
         if (d.cancelado()) return;
-        if (registrado) return d.aoMudar({ fase: "conectado", ui: registrado.ui });
+        if (registrado && parou(registrado.ui)) return;
       }
       if (instavel) {
         instavel = false;
@@ -110,14 +127,20 @@ export async function conferirVolta(link: unknown, d: Dependencias): Promise<voi
       // Antes do resto: `RequisicaoSuperada` é um 409 (a conta trocou), não o 409 "outra conta" do servidor.
       if (e instanceof RequisicaoSuperada) return;
       if (e instanceof SessaoExpirada) return d.expirou(e.detalhe);
+      // Visto o item, o banco já conectou: falha definitiva vira `organizando`, e a
+      // transitória não muda a tela (segue em "Atualizando…"). "Definitiva" inclui
+      // `ContratoInvalido` (status 200: `transitoria()` o dá como não transitório), e
+      // por isso este ramo vem antes do dele: depois de visto, `organizando`; antes,
+      // `erro`. Coberto pelo "contrato quebrado" do N8.
+      if (visto && !transitoria(e)) return d.aoMudar({ fase: "organizando" });
       if (e instanceof ContratoInvalido) return d.aoMudar({ fase: "erro", texto: GENERICO });
       if (!transitoria(e)) return d.aoMudar({ fase: "erro", texto: textoDoErro(e) });
-      if (!instavel) {
+      if (!visto && !instavel) {
         instavel = true;
         d.aoMudar({ fase: "conferindo", instavel });
       }
     }
-    if (d.agora() >= prazo) return d.aoMudar({ fase: "ainda-conferindo" });
+    if (d.agora() >= prazo) return d.aoMudar(visto ? { fase: "organizando" } : { fase: "ainda-conferindo" });
     await d.esperar(INTERVALO_MS);
     if (d.cancelado()) return;
   }

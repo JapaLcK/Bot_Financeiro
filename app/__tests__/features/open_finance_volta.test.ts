@@ -1,42 +1,15 @@
 /**
  * `features/openFinance/volta.ts` com os serviços reais e o `fetch` dublado
- * (`rotear`). Sem fake timers: o relógio e a espera são injetados — `esperar`
- * avança o relógio e devolve na hora. Numeração = linhas da tabela
- * estados × eventos do plano.
+ * (`rotear`), relógio injetado (ver `open_finance_volta_apoio.ts`). Numeração =
+ * linhas da tabela estados × eventos do plano. `VIVO` é `updated` (a coleta já
+ * terminou); o item em `updating` tem os casos dele em
+ * `open_finance_volta_updating.test.ts`.
  */
-import { conferirVolta, INTERVALO_MS, JANELA_MS, MAX_POSTS, SEM_SENHA, type Dependencias, type EstadoVolta } from "@/features/openFinance/volta";
+import { conferirVolta, INTERVALO_MS, JANELA_MS, MAX_POSTS, SEM_SENHA } from "@/features/openFinance/volta";
 import { guardarCredenciais } from "@/storage/secure";
 
-import { chamadas, fetchFalso, GENERICO, prepararCaso, resposta, rotear, S, segurar, type Rota } from "./auth_apoio";
-
-const ITEM = "c13cb883-item_1";
-const VIVO = { provider_item_id: ITEM, institution_name: "Nubank", ui: { state: "updating", label: "Atualizando…", detail: null } };
-const lista = (...connections: unknown[]) => resposta(200, { ok: true, connections });
-
-function dependencias(extra: Partial<Dependencias> = {}) {
-  const relogio = { t: 0 };
-  const estados: EstadoVolta[] = [];
-  const expirou = jest.fn();
-  const d: Dependencias = {
-    agora: () => relogio.t,
-    esperar: async (ms) => void (relogio.t += ms),
-    cancelado: () => false,
-    aoMudar: (e) => void estados.push(e),
-    expirou,
-    ...extra,
-  };
-  return { d, relogio, estados, expirou, ultimo: () => estados[estados.length - 1] };
-}
-
-function servidor(rotas: { get?: Rota; post?: Rota }) {
-  rotear({
-    "/open-finance/1": rotas.get ?? (() => lista()),
-    "/open-finance/1/pluggy-item": rotas.post ?? (() => lista(VIVO)),
-  });
-}
-
-const caminhos = () => chamadas().map((c) => c.caminho);
-const posts = () => caminhos().filter((c) => c.endsWith("/pluggy-item"));
+import { chamadas, fetchFalso, GENERICO, prepararCaso, resposta, rotear, S, segurar } from "./auth_apoio";
+import { caminhos, dependencias, falhas, ITEM, lista, posts, servidor, VIVO } from "./open_finance_volta_apoio";
 
 beforeEach(async () => {
   prepararCaso();
@@ -158,14 +131,6 @@ describe("volta do OAuth — falha final", () => {
 });
 
 describe("volta do OAuth — instabilidade e prazo", () => {
-  const falhas: [string, Rota][] = [
-    ["rede (TypeError)", () => Promise.reject(new TypeError("Network request failed"))],
-    ["tempo limite (abort)", () => Promise.reject(Object.assign(new Error("aborted"), { name: "AbortError" }))],
-    ["500", () => resposta(500, {})],
-    ["503", () => resposta(503, {})],
-    ["429", () => resposta(429, { detail: "Muitas tentativas." })],
-  ];
-
   it.each(falhas)("11 — GET com %s: conferindo instável, tenta de novo em 3 s, nunca erro", async (_nome, falha) => {
     let vez = 0;
     servidor({ get: (o) => (++vez === 1 ? falha(o) : lista(VIVO)) });

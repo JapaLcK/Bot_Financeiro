@@ -525,7 +525,7 @@ test("controle positivo: 'Assinar Plus' dispara exatamente 1 POST /billing/creat
     page.click('#plans-v2 [data-plan-btn="plus"]'),
   ]);
   assert.equal(chamadas.checkout, 1, `foram ${chamadas.checkout} POSTs de checkout`);
-  assert.deepEqual(corposCheckout[0], { interval: "monthly", plan: "plus" });
+  assert.deepEqual(corposCheckout[0], { interval: "monthly", pagina: true, plan: "plus" });
   await page.close();
 });
 

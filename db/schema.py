@@ -352,8 +352,8 @@ def init_db():
         alter table launches add column if not exists categoria_editada boolean not null default false
         """,
         """
-        -- marca de quem gravou pela regra nova (PR 2a da Etapa 2 do v2); NULL = antigo,
-        -- só leitura no /painel (P2). Sem default e sem backfill de propósito.
+        -- marca de quem gravou pela regra nova (PR 2a da Etapa 2 do v2): 'carteira'; NULL =
+        -- antigo, só leitura no /painel (P2). Sem default e sem backfill de propósito.
         alter table launches add column if not exists origem text
         """,
         """
