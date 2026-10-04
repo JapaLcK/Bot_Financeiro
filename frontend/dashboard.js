@@ -9614,8 +9614,8 @@ async function confirmDeleteLaunch(launchId, descricao, valor, isCredit = false,
       throw new Error(detail.detail || `HTTP ${r.status}`);
     }
     let msg = "Lançamento apagado";
+    const data = await r.json().catch(() => ({}));
     if (isCredit) {
-      const data = await r.json().catch(() => ({}));
       msg = data.mode === "group" && data.removed_count > 1
         ? `Parcelamento apagado (${data.removed_count} parcelas)`
         : "Compra apagada";
@@ -9642,6 +9642,9 @@ async function confirmDeleteLaunch(launchId, descricao, valor, isCredit = false,
     sendRefreshSilent();
     // Veio do Histórico → recarrega resetando a paginação (ver edição acima).
     if (_returnToHistory) _historyResetAndReload();
+    // Apagou a fundida: a transação do banco volta (P3). Frase longa demais para
+    // o toast de 2,6 s; o `alertModal` põe o texto por `textContent`.
+    if (!isCredit && data.aviso) await alertModal(data.aviso, { title: "Lançamento apagado" });
   } catch (err) {
     await alertModal(err.message, { title: "Erro ao apagar" });
   } finally {

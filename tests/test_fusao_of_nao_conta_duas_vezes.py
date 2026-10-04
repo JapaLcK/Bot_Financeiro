@@ -164,10 +164,10 @@ def test_receita_fundida_nao_derruba_o_consolidado(uid_pro, ia_fora):
 # ── delete depois da fusão: não devolve dinheiro que já voltou ──────────────
 
 def test_apagar_o_lancamento_fundido_nao_cria_dinheiro(uid_pro, ia_fora):
-    """`imported_launch_id` é `on delete set null` (db/schema.py): apagar o
-    lançamento desfaz o vínculo sem uma linha de código, a correção deixa de se
-    aplicar e o rollback devolve o débito ao cru. O consolidado não se mexe —
-    o espelho do banco continua contando o real uma vez."""
+    """Apagar o lançamento fundido desfaz a junção (`delete_launch_and_rollback`
+    recria a sombra do banco, P3), a correção deixa de se aplicar e o rollback
+    devolve o débito ao cru. O consolidado não se mexe — o espelho do banco
+    continua contando o real uma vez."""
     hoje = today_tz()
     conexao = conecta_banco(uid_pro, "114.88")
     manda(uid_pro, "Gastei 1 real com a barbara em dinheiro")

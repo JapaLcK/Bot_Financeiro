@@ -463,7 +463,9 @@ def _delete_launch_execute(user_id: int, args: dict[str, Any]) -> str:
         internal_id = db.resolve_user_seq_to_id(user_id, lid)
         if internal_id:
             try:
-                db.delete_launch_and_rollback(user_id, internal_id)
+                aviso = db.delete_launch_and_rollback(user_id, internal_id)
+                if aviso:  # apagou a fundida: o banco volta para a lista (P3)
+                    return f"🗑️ Lançamento #{lid} apagado. {aviso}"
                 return f"🗑️ Lançamento #{lid} apagado. Saldo revertido."
             except LookupError:
                 return f"🐷 Não achei o lançamento #{lid}."
