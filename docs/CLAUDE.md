@@ -563,7 +563,16 @@ de 10 s olha `#pagamento iframe`. Sessão fechada (409 `sessao_fechada`, ou
 essa leitura, senão o `confirm` lança (docs.stripe.com/js/custom_checkout). Limites aceitos: rede lenta que passa dos 10 s do
 `loadActions` vai ao plano B; um `/bump` que volta depois do prazo é corrigido pela
 sincronização do Pagar; o Pagar faz 1 `/bump` de sincronização quando há caixas (conta nos 120/h por IP). Testes:
-`tests/frontend/pagamento_pagina*.test.mjs`.
+`tests/frontend/pagamento_pagina*.test.mjs`. As carteiras (Apple Pay/Google Pay) são o Express Checkout em
+`#pp-express`, acima do Payment Element (que fica com `wallets` "never", sem botão em dobro): sem altura até o
+`availablepaymentmethodschange` trazer botão, `inert` com `/bump`, cupom ou pagamento em voo (a folha nunca abre
+com o carrinho mudando; ela mostra o total da sessão, que é o que se cobra). O `click` do Express só chama o
+`resolve` (que abre a folha) com nada em voo, e então trava caixas, cupom e Pagar até o `cancel` ou o `confirm` —
+no Google Pay do desktop a folha é um popup e a página segue clicável por baixo. `confirm` sem folha aberta
+(tardio, depois de um `cancel`) é ignorado; com ela, `confirm` →
+`actions.confirm({expressCheckoutConfirmEvent})`. Pré-requisito: o domínio registrado em "Domínios de métodos de
+pagamento" do Stripe no modo TESTE (staging) e no LIVE (produção) — sem isso os botões não aparecem. O desenho das
+caixas mora em `frontend/bump-caixas.js` (PR C, abaixo); o do resumo e do botão, em `frontend/pagamento-caixas.js`. Testes: `tests/frontend/pagamento_express.test.mjs`.
 
 A `/precos` (`startCheckout`) manda `pagina: true` só fora do app (`window.PB_IN_APP`: no
 app a `/assinar` vai ao hospedado, e uma sessão `elements` criada antes seria expirada e
@@ -673,9 +682,10 @@ a URL) e a seleção da cobrança `pending` com QR vivo (Q6). A oferta é vazia,
 cadernos dá 409, quando a venda Pix ou a `CHECKOUT_PAGINA_PROPRIA` estão desligadas
 (Q2), ou sem `STRIPE_SECRET_KEY`.
 
-**PR C: as caixas no modal do Pix.** As caixas saíram do `pagamento-pagina.js` para o
+**PR C: as caixas no modal do Pix.** As caixas (desenho e pintura) têm uma fonte só, o
 `frontend/bump-caixas.js` + `bump-caixas.css` (`window.PBBumpCaixas.montar/pintar`), e a
-/assinar e o modal do Pix desenham com elas. O `frontend/pix-extras.js` busca o
+/assinar (`pagamento-pagina.js`; o `pagamento-caixas.js` ficou só com resumo e botão) e o
+modal do Pix desenham com elas. O `frontend/pix-extras.js` busca o
 `GET /billing/pix-extras` ao abrir o formulário do documento, desenha as caixas com a
 seleção pendente marcada e guarda os ids marcados, que o `pixEnviar` manda em `extras`
 (também no reenvio da migração, quando o formulário já saiu da tela). Com o POST em voo

@@ -266,7 +266,7 @@ def test_assinar_e_seus_assets():
     # bump-caixas.* também servem o modal do Pix da /precos, com o pix-extras.js.
     for path, tipo in (("/assinar.js", "application/javascript"), ("/assinar.css", "text/css"),
                        ("/bump-caixas.js", "application/javascript"), ("/bump-caixas.css", "text/css"),
-                       ("/pix-extras.js", "application/javascript")):
+                       ("/pix-extras.js", "application/javascript"), ("/pagamento-caixas.js", "application/javascript")):
         asset = client.get(path)
         assert asset.status_code == 200, path
         assert asset.headers["content-type"].startswith(tipo), path
