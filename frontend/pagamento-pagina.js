@@ -56,51 +56,6 @@
     $("pp-pagar").onclick = $("pp-cupom").onsubmit = null;
   }
 
-  function capa(url, cls) {
-    if (typeof url !== "string" || url.indexOf("https://") !== 0) return null;
-    const i = el("img", cls);
-    i.src = url; i.alt = ""; i.loading = "lazy";
-    return i;
-  }
-
-  /** As linhas do bump. Uma oferta = a versão A do protótipo; duas ou três = uma caixa com uma linha cada. */
-  function caixas(extras) {
-    const box = $("pp-bump"), unica = extras.length === 1;
-    box.hidden = !extras.length;
-    box.classList.toggle("unica", unica);
-    if (!extras.length) return [];
-    const topo = el("div", "pp-bump-topo", "Leva junto? Só nesta compra");
-    const seta = el("span", "pp-seta", unica ? "➜" : "↓");
-    seta.setAttribute("aria-hidden", "true");
-    box.appendChild(topo);
-    if (!unica) topo.appendChild(seta);  // a seta aparece UMA vez: na faixa, ou na linha da oferta única
-    return extras.map(function (x) {
-      const l = el("label", "pp-linha"), cb = el("input");
-      cb.type = "checkbox";
-      cb.checked = x.no_carrinho === true;
-      cb.dataset.pos = String(x.posicao);
-      const tit = el("span", "pp-tit");
-      tit.append(unica ? "Sim! Quero o caderno " : "Quero o caderno ", el("b", "", x.nome),
-                 (unica ? " por " : " · ") + brl(x.valor_centavos));
-      const desc = el("span", "pp-desc", x.descricao);
-      const img = capa(x.imagem, unica ? "pp-capa-g" : "pp-capa");
-      if (unica) {
-        l.append(seta, cb, tit);
-        const info = el("div", "pp-info");
-        if (img) info.appendChild(img);
-        info.appendChild(desc);
-        box.append(l, info);
-      } else {
-        const txt = el("span", "pp-txt");
-        txt.append(tit, desc);
-        // Sem capa, o lugar dela: o texto fica alinhado com o das linhas que têm.
-        l.append(cb, img || el("span", "pp-capa"), txt);
-        box.appendChild(l);
-      }
-      return cb;
-    });
-  }
-
   /** O resumo e o texto do botão, a partir da sessão do `change`. Devolve o total de hoje (null = sem total). */
   function resumo(s, td, por) {
     const r = $("pp-resumo"), itens = Array.isArray(s.lineItems) ? s.lineItems : [];
@@ -164,7 +119,8 @@
     })).then(function (checkout) {
       if (eu !== atual) return { destroy: function () {} };
       limpa();
-      const cbs = caixas(Array.isArray(d.extras) ? d.extras : []);
+      // As caixas são do bump-caixas.js (as mesmas do modal do Pix); sem ele, o throw cai no plano B do assinar.js.
+      const cbs = window.PBBumpCaixas.montar($("pp-bump"), Array.isArray(d.extras) ? d.extras : []);
       // voo: um /bump, cupom ou pagamento em andamento. temTotal: já chegou um `change` com o total.
       let actions = null, voo = false, vivo = true, temTotal = false, foco = null, prazo = null;
       // O conjunto que o servidor JÁ tem: é para ele que as caixas voltam quando um /bump falha.
@@ -173,11 +129,9 @@
 
       function pinta() {
         const morto = voo || !actions || !vivo;
-        cbs.forEach(function (c) { c.disabled = morto; c.closest("label").classList.toggle("on", c.checked); });
+        window.PBBumpCaixas.pintar($("pp-bump"), cbs, morto);
         $("pp-pagar").disabled = morto || !temTotal;
         $("pp-cupom-ok").disabled = morto;
-        // ≥1 marcada: borda sólida e seta parada (como o `.marcado` do protótipo).
-        $("pp-bump").classList.toggle("marcado", marcadas().length > 0);
       }
 
       /** Trava tudo durante um pedido; ao soltar, devolve o foco a quem o tinha (a caixa desabilitada o perde). */

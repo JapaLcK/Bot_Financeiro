@@ -2503,7 +2503,8 @@ function wpInicioValido(s) {
        Quem não pagou não pode ler promessa de data — e não abrir modal nenhum
        seria tela nova para um caso que ninguém alcança PAGANDO. */
     const pago = !!cobranca && cobranca.status === "paid";
-    const cents = pago && cobranca.amount_cents;
+    // `total_cents` = plano + cadernos extras, o que o Pix cobrou; sem o campo, o `amount_cents` (só o plano).
+    const cents = pago && (cobranca.total_cents ?? cobranca.amount_cents);
     // O teto (R$ 1.000.000 em centavos) sobreviveu à troca de fonte: a coluna é
     // nossa, mas o plano mais caro custa R$ 499 — acima disso é dado corrompido,
     // não receita, e receita inventada é o que este commit inteiro existe para
@@ -2528,7 +2529,7 @@ function wpInicioValido(s) {
       if (ev === "trial") {
         fbq("track", "StartTrial", { currency: "BRL" }, { eventID: "trial_" + sid });
       } else {
-        // A receita vem do `amount_cents` da cobrança do PRÓPRIO dono, lido do
+        // A receita vem do `total_cents` da cobrança do PRÓPRIO dono, lido do
         // servidor logo acima — não de query string. Não há valor a validar
         // aqui: URL forjada não chega neste ponto, e sem cobrança lida o objeto
         // fica IGUAL ao da Stripe (`{ currency: "BRL" }`), cujo valor continua
