@@ -1,0 +1,226 @@
+<!doctype html>
+<html lang="pt-BR">
+<head>
+<meta charset="utf-8"/>
+<meta name="viewport" content="width=device-width, initial-scale=1"/>
+<title>PigBank — Você sabe pra onde foi seu dinheiro esse mês?</title>
+<meta name="robots" content="noindex"/>
+<meta name="theme-color" content="#111111"/>
+<link href="/favicon.png?v=3" rel="icon" type="image/png"/>
+<!-- Landing de anúncio (/lp). O botão só aparece depois da VSL com som; a trava
+     é posta AQUI, antes da primeira pintura, e só por JS: sem JavaScript o botão
+     fica visível (falha aberta). A chave se repete no script do fim da página. -->
+<script>
+  try { if (localStorage.getItem("pb_lp_vsl_visto") !== "1") document.documentElement.classList.add("lp-travado"); }
+  catch (e) { document.documentElement.classList.add("lp-travado"); }
+</script>
+<link rel="stylesheet" href="/brand.css?v=4" />
+<style>
+  *, *::before, *::after { box-sizing: border-box; }
+  html { background: var(--bg-page); color-scheme: dark; }
+  body {
+    margin: 0; min-height: 100vh; min-height: 100dvh;
+    display: flex; flex-direction: column;
+    background: var(--bg-page); color: var(--text);
+    font-family: var(--font-brand, "Inter", system-ui, sans-serif);
+    -webkit-font-smoothing: antialiased;
+  }
+  ::selection { background: rgba(255, 45, 142, .35); color: #fff; }
+  :focus-visible { outline: 2px solid var(--text); outline-offset: 3px; }
+
+  .lp {
+    flex: 1; width: 100%; max-width: 920px; margin: 0 auto;
+    padding: 20px 20px 28px;
+    display: flex; flex-direction: column; align-items: center; justify-content: center;
+    text-align: center;
+  }
+  .lp-logo { display: block; width: auto; height: 28px; }
+  .lp h1 {
+    margin: 28px 0 24px; max-width: 20ch;
+    font-size: clamp(1.75rem, 1.2rem + 2.6vw, 3rem); line-height: 1.08;
+    font-weight: 800; letter-spacing: -.025em; text-wrap: balance;
+  }
+
+  .lp-player {
+    position: relative; width: 100%;
+    border-radius: 16px; overflow: hidden; background: #000;
+    box-shadow: 0 24px 60px -20px rgba(0, 0, 0, .8);
+  }
+  .lp-player video { display: block; width: 100%; height: auto; aspect-ratio: 16 / 9; background: #000; }
+  .lp-som {
+    position: absolute; left: 50%; top: 50%; transform: translate(-50%, -50%);
+    display: inline-flex; align-items: center; gap: 10px;
+    padding: 14px 22px; border: 0; border-radius: 999px;
+    background: rgba(17, 17, 17, .82); color: #fff;
+    font: inherit; font-size: 1rem; font-weight: 600; line-height: 1; white-space: nowrap; cursor: pointer;
+    box-shadow: 0 8px 24px -8px rgba(0, 0, 0, .7);
+    transition: transform 160ms cubic-bezier(.23, 1, .32, 1), background-color 160ms ease;
+  }
+  .lp-som svg { width: 20px; height: 20px; flex: none; }
+  .lp-som:active { transform: translate(-50%, -50%) scale(.97); }
+  @media (hover: hover) and (pointer: fine) { .lp-som:hover { background: rgba(17, 17, 17, .94); } }
+  .lp-som[hidden] { display: none; }
+
+  .lp-cta {
+    display: block; width: 100%; max-width: 420px; margin-top: 24px;
+    padding: 18px 28px; border-radius: 14px;
+    background: var(--pig-pink); color: #fff;
+    font-size: 1.2rem; font-weight: 700; letter-spacing: -.01em; text-decoration: none;
+    box-shadow: 0 12px 32px -12px rgba(255, 45, 142, .7);
+    transition: opacity 520ms cubic-bezier(.23, 1, .32, 1), transform 520ms cubic-bezier(.23, 1, .32, 1),
+                background-color 160ms ease, visibility 0s;
+  }
+  @media (hover: hover) and (pointer: fine) { .lp-cta:hover { background: var(--pig-pink-600); } }
+  .lp-cta:active { transform: scale(.97); transition-duration: 120ms; }
+  /* Trancado: fora da tela, do teclado e do leitor de tela, mas com o espaço
+     reservado — quando ele aparece, nada embaixo pula. */
+  .lp-travado .lp-cta {
+    visibility: hidden; opacity: 0; transform: translateY(10px) scale(.98);
+    transition: none;
+  }
+  @media (prefers-reduced-motion: reduce) {
+    .lp-cta, .lp-som { transition-property: opacity, background-color, visibility; }
+    .lp-travado .lp-cta { transform: none; }
+  }
+
+  .lp-rodape {
+    display: flex; flex-wrap: wrap; justify-content: center; gap: 6px 18px;
+    padding: 18px 20px;
+    font-size: .75rem; color: var(--text-subtle);
+  }
+  .lp-rodape a { color: var(--text-muted); text-underline-offset: 3px; }
+  .lp-rodape a:hover { color: var(--text); }
+  .lp-rodape p { margin: 0; }
+
+  @media (min-width: 720px) {
+    .lp { padding-top: 40px; }
+    .lp-logo { height: 32px; }
+    .lp h1 { margin: 36px 0 32px; }
+    /* Vídeo e botão cabem juntos na primeira dobra (1280×800 incluso). */
+    .lp-player { max-width: max(480px, min(880px, calc((100vh - 380px) * 16 / 9))); }
+    .lp-cta { margin-top: 32px; }
+  }
+</style>
+</head>
+<body>
+  <main class="lp">
+    <img class="lp-logo" src="/brand/landing-logo.webp?v=1" alt="PigBank" width="142" height="42">
+    <h1>Você sabe pra onde foi seu dinheiro esse mês?</h1>
+    <div class="lp-player">
+      <!-- `controls` é para quem está sem JavaScript; o script tira (não se pula o vídeo). -->
+      <video id="vsl" controls playsinline preload="none" width="1280" height="720"
+             poster="/brand/vsl-poster-860.webp?v=1" src="/brand/vsl.mp4?v=1" tabindex="0"
+             aria-label="Vídeo de apresentação do PigBank, com legendas incorporadas. Toque para pausar ou continuar."></video>
+      <button id="vsl-som" class="lp-som" type="button" hidden>
+        <svg viewBox="0 0 256 256" aria-hidden="true" fill="currentColor"><path d="M155.5 24.8a8 8 0 0 0-8.4.9L77.3 80H32a16 16 0 0 0-16 16v64a16 16 0 0 0 16 16h45.3l69.8 54.3A8 8 0 0 0 160 224V32a8 8 0 0 0-4.5-7.2ZM144 207.6l-61.1-47.5A8 8 0 0 0 78 158.4H32V96h46a8 8 0 0 0 4.9-1.7L144 48.4ZM208 128a39.9 39.9 0 0 1-10 26.5 8 8 0 1 1-12-10.6 24 24 0 0 0 0-31.8 8 8 0 1 1 12-10.6A39.9 39.9 0 0 1 208 128Zm40 0a79.9 79.9 0 0 1-20.4 53.4 8 8 0 0 1-11.9-10.7 64 64 0 0 0 0-85.4 8 8 0 1 1 11.9-10.7A79.9 79.9 0 0 1 248 128Z"/></svg>
+        <span>Toque para ouvir</span>
+      </button>
+    </div>
+    <a id="lp-cta" class="lp-cta" href="/precos">Quero o PigBank</a>
+  </main>
+  <footer class="lp-rodape">
+    <a href="/termos">Termos de uso</a>
+    <a href="/privacy">Privacidade</a>
+    <p>© 2026 PigBank</p>
+  </footer>
+  <script>
+  /* ── portão da VSL ──────────────────────────────────────────────────────
+     Abre mudo e em loop; "Toque para ouvir" recomeça do zero COM som, e só o
+     `ended` dessa execução libera o botão (o fim mudo não conta). Avançar não
+     vale: busca além do ponto mais longe já ouvido volta para ele. Erro no
+     vídeo libera na hora, sem gravar a marca — tropeço de rede não é "assistiu".
+     Exceção aqui dentro também libera: a falha é sempre aberta.
+     Portão de persuasão, não de segurança: a /precos segue aberta por URL. */
+  try { (function () {
+    var CHAVE = "pb_lp_vsl_visto";
+    var raiz = document.documentElement;
+    var video = document.getElementById("vsl");
+    var som = document.getElementById("vsl-som");
+    var rotulo = som.querySelector("span");
+    var cta = document.getElementById("lp-cta");
+    var calmo = window.matchMedia && matchMedia("(prefers-reduced-motion: reduce)").matches;
+    var comSom = false, maxOuvido = 0, marcos = {};
+    // Com som e parado no meio (pausa, play() recusado): volta o botão sobre o vídeo.
+    function continuar() {
+      if (!comSom || !video.paused || video.ended) return;
+      rotulo.textContent = "Toque para continuar";
+      som.hidden = false;
+    }
+
+    // utm_* e fbclid do anúncio seguem para a /precos.
+    var params = new URLSearchParams();
+    new URLSearchParams(location.search).forEach(function (valor, nome) {
+      if (/^utm_/i.test(nome) || nome === "fbclid") params.append(nome, valor);
+    });
+    if (params.toString()) cta.href = "/precos?" + params.toString();
+
+    function liberar(gravar) {
+      if (!raiz.classList.contains("lp-travado")) return;
+      raiz.classList.remove("lp-travado");
+      if (gravar) { try { localStorage.setItem(CHAVE, "1"); } catch (e) {} }
+      if (cta.getBoundingClientRect().bottom > window.innerHeight) {
+        cta.scrollIntoView({ block: "nearest", behavior: calmo ? "auto" : "smooth" });
+      }
+    }
+
+    function ouvir() {
+      comSom = true;
+      video.loop = false;
+      video.muted = false;
+      video.currentTime = 0;
+      som.hidden = true;
+      video.play().catch(continuar);
+      if (window.gtag) gtag("event", "vsl_play", {});
+    }
+
+    function alternar() {
+      if (!comSom) return ouvir();
+      if (video.paused) video.play().catch(continuar); else video.pause();
+    }
+
+    som.addEventListener("click", alternar);
+    video.addEventListener("click", alternar);
+    video.addEventListener("keydown", function (ev) {
+      if (ev.key !== " " && ev.key !== "Enter") return;
+      ev.preventDefault();
+      alternar();
+    });
+
+    video.addEventListener("error", function () { liberar(false); });
+    video.addEventListener("pause", continuar);
+    video.addEventListener("play", function () { if (comSom) som.hidden = true; });
+
+    video.addEventListener("seeking", function () {
+      if (comSom && video.currentTime > maxOuvido + 0.5) video.currentTime = maxOuvido;
+    });
+
+    video.addEventListener("timeupdate", function () {
+      if (!comSom) return;
+      var t = video.currentTime, d = video.duration;
+      if (!video.seeking && t > maxOuvido) maxOuvido = t;
+      if (!d || !isFinite(d)) return;
+      var pct = Math.floor((maxOuvido / d) * 100);
+      [25, 50, 75].forEach(function (m) {
+        if (pct >= m && !marcos[m]) {
+          marcos[m] = 1;
+          if (window.gtag) gtag("event", "vsl_progress", { percent: m });
+        }
+      });
+    });
+
+    video.addEventListener("ended", function () { if (comSom) liberar(true); });
+
+    // Só agora, com tudo ligado: uma exceção antes disto deixa o vídeo como sem JS.
+    video.removeAttribute("controls");
+    som.hidden = false;
+    if (calmo) {
+      rotulo.textContent = "Toque para assistir";
+    } else {
+      video.muted = true;
+      video.loop = true;
+      video.play().catch(function () {});
+    }
+  })(); } catch (e) { document.documentElement.classList.remove("lp-travado"); }
+  </script>
+</body>
+</html>

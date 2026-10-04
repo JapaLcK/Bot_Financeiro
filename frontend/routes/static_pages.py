@@ -462,6 +462,12 @@ async def serve_precos():
     return html_file(FRONTEND_DIR / "precos.html", clarity=True)
 
 
+@router.get("/lp")
+async def serve_lp():
+    # Landing de anúncio: VSL obrigatória e um único botão para a /precos.
+    return html_file(FRONTEND_DIR / "lp.html", clarity=True, inline_css=("brand.css",))
+
+
 @router.get("/continuar-compra")
 async def serve_continuar_compra():
     """Retoma no checkout a escolha feita antes da autenticação.
