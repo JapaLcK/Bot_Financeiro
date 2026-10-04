@@ -11,6 +11,7 @@
 html.pb-cs-aberto, html.pb-cs-aberto body { overflow: hidden; }
 .pb-cs-card {
   width: min(420px, 100%); box-sizing: border-box;
+  max-height: 100%; overflow-y: auto;  /* tela baixa (celular deitado): rola dentro do card, nada corta */
   padding: 28px 24px 20px;
   background: #111; color: #fff;
   border: 1px solid rgba(255, 255, 255, .1); border-radius: 18px;
