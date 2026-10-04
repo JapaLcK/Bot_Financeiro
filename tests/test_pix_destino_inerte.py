@@ -111,7 +111,8 @@ MARCAS_PERMITIDAS: dict[str, tuple[str, ...]] = {
                              "pix_payment_effects"),
     "db/pix_effects.py": ("pix_webhook_events", "pix_payment_effects"),
     # Os cadernos extras do Pix: a leitura por dono para o job de entrega e o
-    # serviço (total, conferência no Asaas). Só o nome da tabela.
+    # serviço (total, conferência no Asaas, oferta e seleção do checkout). Só o nome
+    # da tabela — no serviço, dentro de `db.pix_charges_saga` (`buscar_ativa`).
     "db/pix_extras.py": ("pix_charges",),
     "core/services/pix_extras.py": ("pix_charges",),
     # O DRENO (1b-B) — entrada MÍNIMA desde sempre, e agora ela é a regra e não

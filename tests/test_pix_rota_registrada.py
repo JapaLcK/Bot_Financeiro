@@ -246,13 +246,15 @@ def _paths_do_app() -> set[str]:
     return paths_expostos(app_mod.app)
 
 
-# As três, e SÓ estas três. Conjunto exato: rota a mais reprova junto com rota a
-# menos. Uma quarta rota de Pix aparecendo sem passar por aqui é exatamente o
+# Estas, e SÓ estas. Conjunto exato: rota a mais reprova junto com rota a
+# menos. Uma rota nova de Pix aparecendo sem passar por aqui é exatamente o
 # que este portão existe para não deixar acontecer em silêncio.
 ROTAS_DO_PIX = {
     "/billing/pix/checkout",
     "/billing/pix/{public_token}",
     "/billing/asaas/webhook",
+    # A quarta (cadernos extras, PR B): só LÊ a oferta e a seleção pendente, logada.
+    "/billing/pix-extras",
 }
 
 

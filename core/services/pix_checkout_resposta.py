@@ -9,7 +9,8 @@ que sai do banco, a validade que veio do provedor, e o dicionário montado.
 
 Nenhuma função daqui decide venda, e é por isso que elas puderam sair juntas: o
 checkout chama as três **no fim** de cada caminho, depois de tudo estar
-resolvido.
+resolvido. A exceção é `qr_vivo` (a validade do QR): o checkout a lê no meio, para
+decidir se reaproveita, e o `GET /billing/pix-extras` para marcar a seleção.
 
 Plano: docs/plano_pix_anual_asaas.md §10 e §13.6.
 """
@@ -62,6 +63,7 @@ def resposta(linha: dict, qr_payload: str) -> dict:
     antes.
     """
     from core.services.pix_brcode import qr_svg_data_url
+    from core.services.pix_extras import total_cents
     from core.services.plan_service import tier_publico
 
     starts_at = linha["access_starts_at"]
@@ -72,6 +74,8 @@ def resposta(linha: dict, qr_payload: str) -> dict:
         "expires_at": linha["qr_expires_at"],
         "amount_cents": int(linha["amount_cents"]),
         "credit_cents": int(linha["credit_cents"]),
+        # Plano + cadernos extras: o que o QR cobra (`amount_cents` é só o plano).
+        "total_cents": total_cents(linha),
         "starts_at": starts_at,
         # Mesma conta do `agendada` que `plano_da_cobranca` devolve em TODOS os
         # ramos (`inicio > agora`) — e não o campo dele, porque o
@@ -83,6 +87,15 @@ def resposta(linha: dict, qr_payload: str) -> dict:
         # que é quem a tela compara (`pixSub.plan === plano`).
         "plan": tier_publico(linha["plan"]),
     }
+
+
+def qr_vivo(linha: dict) -> bool:
+    """`pending` com QR não vencido: o que o checkout reaproveita e a seleção que o
+    modal marca (Q6). QR VENCIDO não conta: o `OVERDUE` do Asaas pode atrasar ou se
+    perder, e devolver o código expirado prendia o cliente sem cobrança pagável."""
+    vence = linha["qr_expires_at"]
+    return linha["status"] == "pending" and not (
+        vence is not None and vence <= datetime.now(timezone.utc))
 
 
 def expira(qr: dict):

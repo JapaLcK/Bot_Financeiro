@@ -121,6 +121,28 @@ def valores_por_cobranca(user_id: int) -> dict[str, int]:
             return {str(r["id"]): int(r["amount_cents"]) for r in cur.fetchall()}
 
 
+def grants_para_precificar(user_id: int) -> list[dict]:
+    """Os grants ativos do usuário **com `amount_cents`** — o "join" que
+    `plano_da_cobranca` exige do chamador, e sem o qual todo crédito vira 0. Em
+    Python porque as duas metades filtram por `user_id` cada uma (§0).
+
+    Veio de `core/services/pix_checkout.py` (era `_grants_para_precificar`) para
+    abrir espaço no teto de 350 linhas, sem mudar a lógica.
+    """
+    from .plan_grants import list_grants
+
+    valores = valores_por_cobranca(user_id)
+    ativos = []
+    for g in list_grants(user_id):
+        if g["status"] != "active":
+            continue
+        item = dict(g)
+        item["amount_cents"] = (valores.get(str(g["external_ref"]))
+                                if g["source"] == "pix" else None)
+        ativos.append(item)
+    return ativos
+
+
 def gravar_stripe_period_end(charge_id: int, quando, *, access_starts_at=None,
                              access_expires_at=None) -> bool:
     """Grava o `stripe_period_end_at` RECONFIRMADO no Stripe. True se aplicou.
