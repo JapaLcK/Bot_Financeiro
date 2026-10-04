@@ -4,7 +4,8 @@ O webhook do checkout grava a pendência (`db/ebook_entregas.py`); este job,
 chamado pelo `_ebook_worker` do lifespan a cada 5 min, só envia quando a conta
 já provou o e-mail (senha, Google ou Apple), confirma a compra pelas linhas da
 sessão no Stripe, segura a entrega se a cobrança foi estornada ou contestada
-(`_compra_estornada`) e manda o link para o e-mail ATUAL da conta. Cada produto é
+(`_compra_estornada`) e manda o link para o e-mail ATUAL da conta. Os cadernos do
+Pix (`session_id` = `pix:<id>`) são conferidos por `pix_extras.conferir_entrega`. Cada produto é
 uma linha com claim, backoff e tentativas próprios: a falha de um não segura os
 outros.
 
@@ -20,6 +21,7 @@ import os
 from core.observability import log_system_event_sync
 from core.services.email_service import send_ebook_email
 from core.services.extras_assinar import _ler
+from core.services.pix_extras import conferir_entrega
 from db import get_auth_user
 from db.ebook_entregas import abertas, fechar, reivindicar
 from db.google_auth import conta_sem_credencial
@@ -54,24 +56,38 @@ def _compra_estornada(sid: str, key: str) -> bool:
     return False
 
 
-def _entregar(uid: int, sid: str, preco: str, key: str) -> bool:
+def _conferir_stripe(sid: str, preco: str, key: str) -> tuple[str, str | None]:
     import stripe  # noqa: PLC0415
 
-    if conta_sem_credencial(uid):
-        return False                      # espera a prova do e-mail
-    linha = reivindicar(uid, sid, preco)
-    if linha is None:
-        return False                      # outra rodada pegou
     # `limit=100`: o padrão do Stripe é 10, e plano + 10 extras são 11 linhas —
     # a que ficasse fora da página fecharia `nao_comprou` para sempre.
     itens = stripe.checkout.Session.list_line_items(sid, api_key=key, limit=100)
     item = next((i for i in itens["data"] if i["price"]["id"] == preco), None)
     if item is None:
-        fechar(uid, sid, preco, "nao_comprou")
-        return False
+        return "nao_comprou", None
     # ponytail: uma consulta por linha (a regra é por compra; as outras linhas
     # abertas da sessão fecham nas suas passadas). Cachear por sid se pesar.
     if _compra_estornada(sid, key):
+        return "estornado", None
+    return "pago", _ler(item, "description")
+
+
+def _entregar(uid: int, sid: str, preco: str, key: str) -> bool:
+    if conta_sem_credencial(uid):
+        return False                      # espera a prova do e-mail
+    linha = reivindicar(uid, sid, preco)
+    if linha is None:
+        return False                      # outra rodada pegou
+    # Compra Pix (`pix:<id>`, a referência da cobrança): conferida no banco e no
+    # Asaas, ANTES de qualquer chamada ao Stripe; o nome vem da foto da cobrança.
+    if sid.startswith("pix:"):
+        situacao, nome = conferir_entrega(uid, sid, preco)
+    else:
+        situacao, nome = _conferir_stripe(sid, preco, key)
+    if situacao == "nao_comprou":
+        fechar(uid, sid, preco, "nao_comprou")
+        return False
+    if situacao == "estornado":
         fechar(uid, sid, preco, "estornado")
         log_system_event_sync(
             "warning", "ebook_entrega_estornada",
@@ -80,7 +96,7 @@ def _entregar(uid: int, sid: str, preco: str, key: str) -> bool:
         )
         return False
     email = ((get_auth_user(uid) or {}).get("email") or "").strip()
-    if email and send_ebook_email(email, linha["ebook_url"], nome=_ler(item, "description")):
+    if email and send_ebook_email(email, linha["ebook_url"], nome=nome):
         return fechar(uid, sid, preco, "enviado")
     return False                          # claim expira; próximo ciclo tenta
 

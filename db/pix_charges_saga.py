@@ -217,3 +217,27 @@ def apagar_cobranca(charge_id: int) -> bool:
             aplicou = cur.fetchone() is not None
         conn.commit()
     return aplicou
+
+
+def rezerar_rastreio_de_orfas() -> int:
+    """A varredura diária do §13.2, e o outro lado do UPDATE de `db/privacy.py`.
+
+    Aquele UPDATE (`:936`) não é a garantia: quem desfaz o vínculo é a FK
+    `on delete set null`, e entre ele e o `delete from users` cabe um webhook que
+    commite depois — a linha fica com `user_id` nulo e `purged_at` NUNCA escrito.
+    Esta passada é quem alcança essas. `purged_at is null` a torna datável: sem
+    ele o carimbo seria reescrito todo dia. Predicado DIFERENTE do da outbox de
+    propósito — `pix_webhook_events` não tem `user_id` (§13.3).
+    """
+    with get_conn() as conn:
+        with conn.cursor() as cur:
+            cur.execute(
+                "update pix_charges"
+                "   set ga_client_id = null, fbp = null, fbc = null,"
+                "       qr_payload_enc = null, asaas_customer_id = null,"
+                "       purged_at = now()"
+                " where user_id is null and purged_at is null"
+            )
+            rezeradas = cur.rowcount
+        conn.commit()
+    return rezeradas

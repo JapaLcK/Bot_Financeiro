@@ -636,6 +636,29 @@ sempre. Limite conhecido: estorno por nota de crédito para o saldo do cliente (
 charge) NÃO é detectado. Estorno "pending" real e contestação real chegando antes da
 entrega só se provam no Stripe; o modo teste sobe `amount_refunded` na hora.
 
+**Cadernos extras no Pix anual (PR A: receber e entregar; inerte até o checkout
+gravar a foto).** `pix_charges.extras` (`jsonb`, default `[]`, check de array) guarda a
+FOTO dos cadernos escolhidos, `[{price, url, nome, valor_cents}]`, gravada só por
+`criar_cobranca`. `amount_cents` continua sendo SÓ o plano (crédito de upgrade,
+`pix_charges_amount_fecha` e `plan_grants` não mudam); o que o cliente paga é
+`core/services/pix_extras.total_cents` (plano + Σ cadernos), usado no `alertar_valor`,
+no alerta do estorno parcial, no GA4/CAPI e no `total_cents` do poll. O dreno ganhou o
+efeito `ebook` logo depois do `grant`: uma linha em `ebook_entregas` por caderno, com
+`session_id` = `external_reference` (`pix:<id>`) e `ebook_price` = o Price do Stripe;
+sem cadernos é no-op registrado, e ele herda D3 (estorno antes do `RECEIVED` não grava)
+e o órfão (nada). O e-mail de confirmação discrimina plano, cada caderno e o total
+(dono, Q4); sem cadernos é o de antes. O job entrega a linha `pix:` ANTES de qualquer
+chamada ao Stripe (`pix_extras.conferir_entrega`): cobrança do dono por `user_id` +
+referência (senão `nao_comprou`); status local `refunded`/`refunded_partial`/`chargeback`
+fecha `estornado` sem consultar o Asaas; senão `GET /v3/payments/{id}`: `RECEIVED`/
+`CONFIRMED` sem `refunds` entrega (nome do caderno vem da foto), status de estorno ou
+contestação, ou `refunds` não vazia, fecha `estornado`; falha ou forma inesperada não
+envia nem fecha (claim expira). Sem `STRIPE_SECRET_KEY` o job não roda, inclusive para
+as linhas Pix. Na junção de contas, caderno ainda não entregue cai com a origem
+(cascade), como no Stripe — no Pix a origem com plano vigente já fica presa. Nomes reais
+dos status de estorno/contestação e a forma de `refunds` só se provam no sandbox do
+Asaas.
+
 Rollback do código de N produtos: o código velho usa `on conflict (user_id,
 session_id)`, que exige a PK de 2 colunas. Antes de reverter, apagar as linhas extras
 de cada compra e recriar a PK:

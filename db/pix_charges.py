@@ -48,9 +48,12 @@ Três regras que valem para TODA escrita daqui:
 
 `attach_pagamento` e `gravar_stripe_period_end` moram em `db/pix_charges_saga.py`
 desde o 1b-B, e a ressalva do `charge_id` enumerável vale igual para as duas.
+`rezerar_rastreio_de_orfas` (a varredura do §13.2) foi para lá também.
 """
 
 from __future__ import annotations
+
+from psycopg.types.json import Jsonb
 
 from .connection import get_conn
 
@@ -74,7 +77,7 @@ _COLUNAS = (
     "access_starts_at, access_expires_at, created_at, paid_at, canceled_at, "
     # As três de rastreio: sem elas o dreno manda a venda ao GA4 sem origem e o
     # Purchase da Meta sem `fbp`/`fbc` (§3.2). `qr_payload_enc` fica FORA (§13.6).
-    "refunded_at, purged_at, ga_client_id, fbp, fbc"
+    "refunded_at, purged_at, ga_client_id, fbp, fbc, extras"
 )
 
 
@@ -91,6 +94,7 @@ def criar_cobranca(
     stripe_subscription_id: str | None = None,
     stripe_period_end_at=None,
     rastreio: dict[str, str] | None = None,
+    extras: list[dict] | None = None,
 ) -> dict | None:
     """Cria a cobrança em `draft`. Devolve a linha, ou **`None`** quando o
     usuário JÁ tem uma cobrança ativa.
@@ -131,6 +135,10 @@ def criar_cobranca(
     (`ga_client_id`, `fbp`, `fbc`), mesma forma que `_billing_checkout_for_user`.
     Chave ausente vira `NULL` e é o normal (cookie bloqueado, visita orgânica).
     O dreno as lê em `ga4`/`capi`; a exclusão de conta as zera (§13.2).
+
+    `extras` é a FOTO dos cadernos escolhidos (`[{price, url, nome, valor_cents}]`),
+    FORA de `amount_cents` (que segue só o plano); o total é
+    `core/services/pix_extras.total_cents`. Este é o único escritor da coluna.
     """
     rastreio = rastreio or {}
     with get_conn() as conn:
@@ -145,9 +153,9 @@ def criar_cobranca(
                 " (id, user_id, external_reference, public_token, plan, plan_stored,"
                 "  price_cents, credit_cents, amount_cents, duration_days,"
                 "  stripe_subscription_id, stripe_period_end_at,"
-                "  ga_client_id, fbp, fbc, status)"
+                "  ga_client_id, fbp, fbc, extras, status)"
                 " values (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s,"
-                "         %s, %s, %s, 'draft')"
+                "         %s, %s, %s, %s, 'draft')"
                 # Inferência pelo índice PARCIAL: `uniq_pix_charge_ativa` é
                 # `create unique index … where`, não uma constraint, então
                 # `on conflict on constraint` não o alcança — o Postgres só casa
@@ -159,7 +167,7 @@ def criar_cobranca(
                  int(price_cents), int(credit_cents), int(amount_cents),
                  int(duration_days), stripe_subscription_id,
                  stripe_period_end_at, rastreio.get("ga_client_id"),
-                 rastreio.get("fbp"), rastreio.get("fbc")),
+                 rastreio.get("fbp"), rastreio.get("fbc"), Jsonb(extras or [])),
             )
             row = cur.fetchone()
         conn.commit()
@@ -291,30 +299,6 @@ def buscar_por_public_token(user_id: int, public_token: str) -> dict | None:
             )
             row = cur.fetchone()
     return dict(row) if row else None
-
-
-def rezerar_rastreio_de_orfas() -> int:
-    """A varredura diária do §13.2, e o outro lado do UPDATE de `db/privacy.py`.
-
-    Aquele UPDATE (`:936`) não é a garantia: quem desfaz o vínculo é a FK
-    `on delete set null`, e entre ele e o `delete from users` cabe um webhook que
-    commite depois — a linha fica com `user_id` nulo e `purged_at` NUNCA escrito.
-    Esta passada é quem alcança essas. `purged_at is null` a torna datável: sem
-    ele o carimbo seria reescrito todo dia. Predicado DIFERENTE do da outbox de
-    propósito — `pix_webhook_events` não tem `user_id` (§13.3).
-    """
-    with get_conn() as conn:
-        with conn.cursor() as cur:
-            cur.execute(
-                "update pix_charges"
-                "   set ga_client_id = null, fbp = null, fbc = null,"
-                "       qr_payload_enc = null, asaas_customer_id = null,"
-                "       purged_at = now()"
-                " where user_id is null and purged_at is null"
-            )
-            rezeradas = cur.rowcount
-        conn.commit()
-    return rezeradas
 
 
 def buscar_por_external_reference(external_reference: str) -> dict | None:

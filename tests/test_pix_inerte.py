@@ -88,7 +88,7 @@ import pytest
 # nasceram das divisões de tamanho do C6/C7 — o segundo é por onde o CPF passa.
 MODULOS_INERTES = ("core.services.asaas", "core.services.asaas_customers",
                    "db.pix_charges", "db.pix_charges_saga",
-                   "db.webhook_outbox", "db.pix_effects")
+                   "db.webhook_outbox", "db.pix_effects", "db.pix_extras")
 
 # Allowlist do portão de IMPORT: caminhos (POSIX) que PODEM importar os módulos
 # acima. É um conjunto de caminhos, não um mapa — quem importa o quê fica no
@@ -115,6 +115,8 @@ CHAMADORES_PERMITIDOS: frozenset[str] = frozenset({
     "core/services/pix_checkout.py",       # a saga, a flag, o preço, o 409/503
     "core/services/pix_sweeps.py",         # reconciliação da saga (§10.1)
     "frontend/routes/billing_pix.py",      # as três rotas, finas
+    # Os cadernos extras: lê a cobrança do dono e o Asaas para o job de entrega.
+    "core/services/pix_extras.py",
     # Módulos do Pix importando módulos do Pix (ver o parágrafo acima).
     "core/services/asaas_customers.py",
     "db/pix_charges_saga.py",
