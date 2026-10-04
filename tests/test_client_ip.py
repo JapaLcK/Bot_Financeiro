@@ -47,8 +47,10 @@ class _ThreadFalsa:
 
 @pytest.fixture(autouse=True)
 def gravadas(monkeypatch):
-    """Sonda zerada e thread substituída: cada `start()` vira um item da lista."""
+    """Sonda zerada e thread substituída: cada `start()` vira um item da lista.
+    Sem `CLOUDFLARE_ORIGIN_SECRET` (E0): este arquivo é o comportamento sem a env."""
     lista: list[dict] = []
+    monkeypatch.delenv(cip.SEGREDO_ENV, raising=False)
     monkeypatch.setattr(cip, "_SONDA_VISTAS", set())
     monkeypatch.setattr(cip, "Thread", lambda **kw: _ThreadFalsa(lista, **kw))
     return lista
@@ -184,7 +186,8 @@ def test_faixas_da_cloudflare():
 CHAVES = {"xff_entradas", "conexao_cf", "cf_presente", "cf_valido", "cf_global",
           "cf_igual_conexao", "xri_igual_conexao", "fonte",
           "xff_cabecalhos", "xff_primeira_tipo", "xff_ultima_tipo", "xri_tipo",
-          "xri_igual_primeira", "cf_igual_primeira"}
+          "xri_igual_primeira", "cf_igual_primeira",
+          "segredo_configurado", "segredo_presente", "segredo_ok"}
 TIPOS = {"ausente", "cf", "railway", "privado", "publico", "outro"}
 XRI, R, PRIV, OUTRO = "x-real-ip", "100.64.0.9", "10.0.0.1", "224.0.0.1"
 
@@ -207,7 +210,8 @@ def test_sonda_grava_uma_vez_por_combinacao(gravadas):
         "cf_global": True, "cf_igual_conexao": False, "xri_igual_conexao": True,
         "fonte": "cf", "xff_cabecalhos": 1, "xff_primeira_tipo": "cf",
         "xff_ultima_tipo": "cf", "xri_tipo": "cf",
-        "xri_igual_primeira": True, "cf_igual_primeira": False}
+        "xri_igual_primeira": True, "cf_igual_primeira": False,
+        "segredo_configurado": False, "segredo_presente": False, "segredo_ok": False}
 
     client_ip(_req(P, (XFF, A), (CF, V)))  # alarme: CF forjado direto no Railway
     assert len(gravadas) == 2

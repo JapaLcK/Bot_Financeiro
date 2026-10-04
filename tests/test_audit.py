@@ -71,6 +71,7 @@ class _FakeRequest:
 def _sem_sonda(monkeypatch):
     """O peer 100.64 dispara a sonda do `core.client_ip`; aqui ela não grava."""
     import core.client_ip as cip
+    monkeypatch.delenv(cip.SEGREDO_ENV, raising=False)
     monkeypatch.setattr(cip, "Thread", Mock())
 
 
