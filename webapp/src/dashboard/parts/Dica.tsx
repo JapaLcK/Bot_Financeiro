@@ -9,7 +9,7 @@ import type { Path } from "../router";
 // em api/v2/guia.py, só a da tela que o plano dá). Aparece sozinha uma vez; depois, só pela
 // Ajuda ou pelo Cmd-K ("Como funciona esta tela").
 export const TELA: Record<Dica["tela"], Path> = { assinaturas: "/assinaturas" };
-export const dicaDe = (g: Guia | undefined, path: Path) => g?.dicas.find((d) => TELA[d.tela] === path);
+export const dicaDe = (g: Guia | undefined, path: Path) => g?.dicas?.find((d) => TELA[d.tela] === path);
 export const abrirDica = () => window.dispatchEvent(new Event("dash:dica"));
 
 // O guia aberto (parts/Guia.tsx avisa): a dica não briga com o balão e espera ele fechar.

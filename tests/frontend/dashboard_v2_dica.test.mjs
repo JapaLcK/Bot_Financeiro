@@ -163,6 +163,19 @@ test("Essencial (sem a dica): nem card nem menu; a Ajuda abre o guia", async () 
   assert.deepEqual(r, [0, null]);
 });
 
+// Rollback: o navegador guarda o dashboard-app.js novo (nome fixo) e o servidor volta a responder
+// o guia sem `dicas`. A tela abre como antes do #728, sem quebrar o render.
+test("guia sem a chave dicas (servidor antigo): Assinaturas abre, a Ajuda é o botão de sempre, sem card nem POST", async () => {
+  const { ctx, page, s, erros } = await abrir({ guia: "concluido", dica: "ausente", rota: "/assinaturas" });
+  await page.locator(".panel").first().waitFor();
+  await page.waitForTimeout(400);
+  const r = [await page.locator("#page-title").isVisible(), await menu(page, ".rail").getAttribute("aria-expanded"), await page.locator(CARD).count()];
+  await ctx.close();
+  assert.deepEqual(r, [true, null, 0]);
+  assert.deepEqual(s.dicas, []);
+  assert.deepEqual(erros, []);
+});
+
 test("Cmd-K: \"Como funciona esta tela\" só na tela com dica; escolhido, mostra o card com o foco no título", async () => {
   const { ctx, page } = await abrir({ guia: "concluido" });
   const lista = async () => {

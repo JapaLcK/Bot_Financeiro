@@ -29,8 +29,9 @@ function aplicar(g, c) {
   n.estado = c.acao === "dispensar" ? "dispensado" : n.passos.every((p) => p.feito) ? "concluido" : "em_andamento";
   return n;
 }
-// `dica`: a de Assinaturas "vista" (a da fixture), "nova" (ainda não vista) ou "sem" (o plano não
-// dá); `dicaLenta`: o POST /guia/dica responde depois de N ms. `s.dicas`: os ids postados.
+// `dica`: a de Assinaturas "vista" (a da fixture), "nova" (ainda não vista), "sem" (o plano não
+// dá) ou "ausente" (servidor anterior ao #728, sem a chave `dicas`); `dicaLenta`: o POST
+// /guia/dica responde depois de N ms. `s.dicas`: os ids postados.
 export async function abrir({ width = 1280, height = 800, guia = "oferecer", perfil = "padrao", plano = "pro", motion = "reduce", post, rota = "/", perfilLento = 0, semDialog = false, antes, dica = "vista", dicaLenta = 0 } = {}) {
   const ctx = await browser.newContext({ viewport: { width, height }, reducedMotion: motion, timezoneId: "America/Sao_Paulo" });
   // A caixa do Piggy pelo left/top gravado, sem o transform: a inclinação e o voo aumentam o
@@ -48,6 +49,7 @@ export async function abrir({ width = 1280, height = 800, guia = "oferecer", per
   if (perfilLento) await ctx.route("**/api/v2/perfil", async (r) => { await new Promise((ok) => setTimeout(ok, perfilLento)); return r.fallback(); });
   const s = { g: structuredClone(RESPOSTAS.guia[guia]), posts: [], dicas: [] };
   if (dica === "sem") s.g.dicas = [];
+  if (dica === "ausente") delete s.g.dicas;
   if (dica === "nova") s.g.dicas.forEach((d) => { d.vista = false; });
   await ctx.route("**/api/v2/guia/dica", async (r) => {
     const { dica: id } = r.request().postDataJSON();
