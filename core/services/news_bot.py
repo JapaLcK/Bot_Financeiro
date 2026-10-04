@@ -148,6 +148,8 @@ def _fetch_feed(source: str, url: str) -> list[dict]:
         return []
 
     try:
+        # ET sem defusedxml, risco aceito (auditoria Etapa 4): os feeds são HTTPS fixos e o ET não busca entidade externa.
+        # A proteção contra amplificação depende do expat ≥ 2.4, cuja versão no Railway não é pinada pelo repo.
         root = ET.fromstring(resp.text)
     except Exception as exc:
         logger.warning("[news] feed %s não é XML válido: %s", source, exc)
