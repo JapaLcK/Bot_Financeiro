@@ -1,7 +1,7 @@
 /**
- * Página de pagamento própria: o que se desenha a partir dos dados (as caixas do order bump, o resumo do pedido e
- * o texto do botão). Quem monta, trava e paga é o pagamento-pagina.js, que usa `window.PBPagamentoCaixas`. Texto
- * vindo do Stripe (nome, descrição) entra SÓ por `textContent`; capa só https://.
+ * Página de pagamento própria: o resumo do pedido e o texto do botão, a partir da sessão do Stripe (as caixas do
+ * order bump são do bump-caixas.js, as mesmas do modal do Pix). Quem monta, trava e paga é o pagamento-pagina.js,
+ * que usa `window.PBPagamentoCaixas`. Texto vindo do Stripe (nome do item, cupom) entra SÓ por `textContent`.
  */
 (function () {
   "use strict";
@@ -26,51 +26,6 @@
     if (cls) e.className = cls;
     if (texto) e.textContent = texto;
     return e;
-  }
-
-  function capa(url, cls) {
-    if (typeof url !== "string" || url.indexOf("https://") !== 0) return null;
-    const i = el("img", cls);
-    i.src = url; i.alt = ""; i.loading = "lazy";
-    return i;
-  }
-
-  /** As linhas do bump. Uma oferta = a versão A do protótipo; duas ou três = uma caixa com uma linha cada. */
-  function caixas(extras) {
-    const box = $("pp-bump"), unica = extras.length === 1;
-    box.hidden = !extras.length;
-    box.classList.toggle("unica", unica);
-    if (!extras.length) return [];
-    const topo = el("div", "pp-bump-topo", "Leva junto? Só nesta compra");
-    const seta = el("span", "pp-seta", unica ? "➜" : "↓");
-    seta.setAttribute("aria-hidden", "true");
-    box.appendChild(topo);
-    if (!unica) topo.appendChild(seta);  // a seta aparece UMA vez: na faixa, ou na linha da oferta única
-    return extras.map(function (x) {
-      const l = el("label", "pp-linha"), cb = el("input");
-      cb.type = "checkbox";
-      cb.checked = x.no_carrinho === true;
-      cb.dataset.pos = String(x.posicao);
-      const tit = el("span", "pp-tit");
-      tit.append(unica ? "Sim! Quero o caderno " : "Quero o caderno ", el("b", "", x.nome),
-                 (unica ? " por " : " · ") + brl(x.valor_centavos));
-      const desc = el("span", "pp-desc", x.descricao);
-      const img = capa(x.imagem, unica ? "pp-capa-g" : "pp-capa");
-      if (unica) {
-        l.append(seta, cb, tit);
-        const info = el("div", "pp-info");
-        if (img) info.appendChild(img);
-        info.appendChild(desc);
-        box.append(l, info);
-      } else {
-        const txt = el("span", "pp-txt");
-        txt.append(tit, desc);
-        // Sem capa, o lugar dela: o texto fica alinhado com o das linhas que têm.
-        l.append(cb, img || el("span", "pp-capa"), txt);
-        box.appendChild(l);
-      }
-      return cb;
-    });
   }
 
   /** O resumo e o texto do botão, a partir da sessão do `change`. Devolve o total de hoje (null = sem total). */
@@ -119,5 +74,5 @@
     $("pp-cta-sub").textContent = sub;
   }
 
-  window.PBPagamentoCaixas = { caixas: caixas, resumo: resumo, rotulo: rotulo, brl: brl };
+  window.PBPagamentoCaixas = { resumo: resumo, rotulo: rotulo, brl: brl };
 })();

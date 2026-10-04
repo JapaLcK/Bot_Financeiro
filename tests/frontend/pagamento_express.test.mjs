@@ -230,8 +230,10 @@ test("Sair desmonta o Express: destroy chamado e o #pp-express vazio", async () 
   await ctx.close();
 });
 
-test("sem o pagamento-caixas.js (desenho das caixas e do resumo): a página própria cai no plano B", async () => {
-  const { ctx, page } = await abrir(browser, { api: { ...comPagina(), "GET /pagamento-caixas.js": [404, {}] } });
-  await page.waitForURL(HOSPEDADO);
-  await ctx.close();
-});
+for (const [arq, papel] of [["pagamento-caixas.js", "desenho das caixas e do resumo"], ["bump-caixas.js", "caixas dos cadernos extras"]]) {
+  test(`sem o ${arq} (${papel}): a página própria cai no plano B`, async () => {
+    const { ctx, page } = await abrir(browser, { api: { ...comPagina(), [`GET /${arq}`]: [404, {}] } });
+    await page.waitForURL(HOSPEDADO);
+    await ctx.close();
+  });
+}

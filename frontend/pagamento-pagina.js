@@ -1,9 +1,9 @@
 /**
  * Página de pagamento própria (sessão `ui_mode="elements"`, flag CHECKOUT_PAGINA_PROPRIA): o Express Checkout
  * (Apple Pay/Google Pay), o Payment Element (só cartão), as caixas do order bump, o resumo e o cupom (o desenho
- * das caixas e do resumo mora no pagamento-caixas.js). Quem decide o modo, carrega o Stripe.js (endive), tem o
- * relógio de 10 s e o plano B é o assinar.js; este arquivo só monta a tela dentro de `#pagina` e devolve
- * `{destroy}`. Publica `window.PBPagamento`. Texto vindo do Stripe (nome, descrição, cupom) entra SÓ por
+ * das caixas mora no bump-caixas.js; o do resumo, no pagamento-caixas.js). Quem decide o modo, carrega o Stripe.js
+ * (endive), tem o relógio de 10 s e o plano B é o assinar.js; este arquivo só monta a tela dentro de `#pagina` e
+ * devolve `{destroy}`. Publica `window.PBPagamento`. Texto vindo do Stripe (nome, descrição, cupom) entra SÓ por
  * `textContent`; o preço do caderno sai do servidor (`valor_centavos`), e o total, da sessão no `change` do
  * Stripe: a tela não guarda tabela de preços. Testes: tests/frontend/pagamento_pagina.test.mjs.
  */
@@ -56,7 +56,8 @@
     })).then(function (checkout) {
       if (eu !== atual) return { destroy: function () {} };
       limpa();
-      const cbs = T.caixas(Array.isArray(d.extras) ? d.extras : []);
+      // As caixas são do bump-caixas.js (as mesmas do modal do Pix); sem ele, o throw cai no plano B do assinar.js.
+      const cbs = window.PBBumpCaixas.montar($("pp-bump"), Array.isArray(d.extras) ? d.extras : []);
       // voo: um /bump, cupom ou pagamento em andamento. temTotal: já chegou um `change` com o total. folha: a da
       // carteira aberta (do `click` ao `cancel`/`confirm`), mostrando o total da sessão: o carrinho não muda por baixo.
       let actions = null, voo = false, vivo = true, temTotal = false, foco = null, prazo = null, folha = false;
@@ -66,14 +67,12 @@
 
       function pinta() {
         const morto = voo || !actions || !vivo, parado = morto || folha;
-        cbs.forEach(function (c) { c.disabled = parado; c.closest("label").classList.toggle("on", c.checked); });
+        window.PBBumpCaixas.pintar($("pp-bump"), cbs, parado);  // caixas, `.on` e o `.marcado` do protótipo
         $("pp-pagar").disabled = parado || !temTotal;
         $("pp-cupom-ok").disabled = parado;
         // Apple Pay/Google Pay: nem clique nem teclado abrem a folha com /bump, cupom ou pagamento em voo. A folha
         // aberta NÃO deixa o botão inert: se um `cancel` se perder, reabrir e fechar a folha destrava a tela.
         $("pp-express").inert = morto || !temTotal;
-        // ≥1 marcada: borda sólida e seta parada (como o `.marcado` do protótipo).
-        $("pp-bump").classList.toggle("marcado", marcadas().length > 0);
       }
 
       /** Trava tudo durante um pedido; ao soltar, devolve o foco a quem o tinha (a caixa desabilitada o perde). */
