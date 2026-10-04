@@ -262,7 +262,11 @@ Sub-app FastAPI (`api/v2/app.py`) montado pelo monólito com `app.mount("/api/v2
   anda pela diferença na mesma transação, então apagar depois desfaz exato; `c<n>` = 409),
   cada um contra o `pode` da linha. A data da linha fundida com o banco
   (`db/lancamentos.FUNDIDO_SQL`) é travada em TODO canal por `update_launch_fields` (o PATCH
-  /launches do `/app` dá 409 com frase própria; o v2 dá 409 `nao_editavel`); **apagar**: só `l<n>` (cartão = 409). O `pode` é relido por
+  /launches do `/app` dá 409 com frase própria; o v2 dá 409 `nao_editavel`); **apagar**: só `l<n>` (cartão = 409). Apagar a linha fundida desfaz a junção na hora, em
+  todo canal (PR 2b-2): a transação do banco volta como linha `banco` (`reconciliation._desfaz`,
+  chamado por `delete_launch_and_rollback`). O v2 responde `{id}` sem aviso; WhatsApp, IA e
+  `/app` (chave `aviso` do DELETE /launches) mostram a frase "A transação do banco (R$ X, DESC)
+  continua na sua lista…"; o "apagar tudo" não desfaz. O `pode` é relido por
   `db/lancamentos.pode_da_linha` dentro da transação da escrita, depois do lock do usuário
   (`_lock_user`) e da linha (`exigir_pode=True` em `update_launch_fields`,
   `delete_launch_and_rollback` e `update_credit_transaction_fields`, este pelo

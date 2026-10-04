@@ -10,7 +10,9 @@ Estados de `open_finance_transactions` que importam aqui:
 
 Toda escrita é uma transação só, na ordem do resto do módulo de Open Finance
 (`accounts` → transação OF → vínculo): a mesma do sync, então as duas se
-serializam em vez de se cruzarem. Nenhuma função trava o lançamento X.
+serializam em vez de se cruzarem. Nenhuma função daqui trava o lançamento X; quem
+trava é `db.accounts.delete_launch_and_rollback`, que ao apagar a fundida toma
+`accounts` → X → transação OF e chama `_desfaz` (apagar desfaz a junção, P3).
 """
 from __future__ import annotations
 
@@ -117,31 +119,34 @@ def reject_reconciliation(user_id: int, of_tx_id: int) -> dict:
     return _write(user_id, of_tx_id, fn)
 
 
+def _desfaz(cur, user_id, o, novas: list) -> dict:
+    """Miolo do desfazer, sob a trava de `_locked_tx`. Categoria nova vai para
+    `novas` (o catálogo é garantido depois do commit, fora da trava)."""
+    x = o["imported_launch_id"]
+    if (o["reconciliation_status"] not in FUSED_STATUSES or not x
+            or o["match_launch_id"] not in (None, x)):
+        return {"ok": True, "changed": False}
+    cls = classify_open_finance_launch(o["amount"], o["category"], o["description"])
+    if o["id"] in cash_internal_tx_ids(cur, user_id):  # par da Carteira (saque/depósito)
+        cls["is_internal_movement"] = True
+    shadow_id, _ = _insert_of_shadow(cur, user_id, o, cls)
+    if shadow_id is None:
+        raise ReconciliationConflict("SHADOW_NOT_CREATED")
+    novas.extend(filter(None, [categoria_pigbank(o["category"])]))
+    cur.execute(
+        """update open_finance_transactions
+              set imported_launch_id=%s, match_launch_id=null, reconciliation_status='imported'
+            where id=%s""",
+        (shadow_id, o["id"]))
+    return {"ok": True, "changed": True, "launch_id": shadow_id}
+
+
 def undo_reconciliation(user_id: int, of_tx_id: int) -> dict:
     """Desfaz uma fusão (automática ou confirmada): recria a sombra do banco e
     solta X, que volta a contar na Carteira. Vale nos dois sentidos — no reverso
     a sombra foi apagada e renasce com o mesmo `external_id` do provedor."""
     novas = []
-
-    def fn(cur, o):
-        x = o["imported_launch_id"]
-        if (o["reconciliation_status"] not in FUSED_STATUSES or not x
-                or o["match_launch_id"] not in (None, x)):
-            return {"ok": True, "changed": False}
-        cls = classify_open_finance_launch(o["amount"], o["category"], o["description"])
-        if o["id"] in cash_internal_tx_ids(cur, user_id):  # par da Carteira (saque/depósito)
-            cls["is_internal_movement"] = True
-        shadow_id, _ = _insert_of_shadow(cur, user_id, o, cls)
-        if shadow_id is None:
-            raise ReconciliationConflict("SHADOW_NOT_CREATED")
-        novas.extend(filter(None, [categoria_pigbank(o["category"])]))
-        cur.execute(
-            """update open_finance_transactions
-                  set imported_launch_id=%s, match_launch_id=null, reconciliation_status='imported'
-                where id=%s""",
-            (shadow_id, o["id"]))
-        return {"ok": True, "changed": True, "launch_id": shadow_id}
-    result = _write(user_id, of_tx_id, fn)
+    result = _write(user_id, of_tx_id, lambda cur, o: _desfaz(cur, user_id, o, novas))
     garantir_no_catalogo(user_id, novas)  # depois do commit, fora da trava
     return result
 

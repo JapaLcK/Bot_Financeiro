@@ -208,7 +208,9 @@ def resolve_delete(user_id: int, confirmed: bool) -> str | None:
             f"erro do meu lado. Tenta de novo em alguns minutos."
         )
         try:
-            db.delete_launch_and_rollback(user_id, launch_id)
+            aviso = db.delete_launch_and_rollback(user_id, launch_id)
+            if aviso:  # apagou a fundida: a Carteira exibida não muda, o banco volta (P3)
+                return f"✅ Lançamento **#{display_id}** apagado. {aviso}"
             return f"✅ Lançamento **#{display_id}** apagado e saldo revertido."
         except LookupError:
             # NOT_FOUND (`db/accounts.py`): o lançamento sumiu entre a pergunta
@@ -242,10 +244,11 @@ def resolve_delete(user_id: int, confirmed: bool) -> str | None:
         # recusas de domínio levam a MESMA frase do singular (`_RECUSAS_APAGAR`),
         # não contam como incidente (WARNING) e não viram "⚠️ Falha" — que fica
         # para o erro técnico, o único em que tentar de novo pode resolver.
-        recusas, failed = {}, []
+        recusas, failed, avisos = {}, [], {}
         for lid in sorted(set(ids), reverse=True):
             try:
-                db.delete_launch_and_rollback(user_id, lid)
+                if aviso := db.delete_launch_and_rollback(user_id, lid):
+                    avisos[lid] = aviso
             except _RECUSA_TIPOS as e:
                 recusas[lid] = _recusa_apagar(e, _disp(lid))[1]
                 _log_falha("delete_launch_bulk", user_id, e, nivel=logging.WARNING,
@@ -260,6 +263,7 @@ def resolve_delete(user_id: int, confirmed: bool) -> str | None:
         parts = []
         if ok_ids:
             parts.append("✅ Apagados: " + ", ".join(f"**#{_disp(i)}**" for i in ok_ids))
+            parts += [f"**#{_disp(i)}**: {avisos[i]}" for i in ok_ids if i in avisos]
         parts += [recusas[i] for i in ordem if i in recusas]
         if failed:
             parts.append("⚠️ Falha: " + ", ".join(f"#{_disp(i)}" for i in ordem if i in failed))

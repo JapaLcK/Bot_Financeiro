@@ -7787,7 +7787,7 @@ async def delete_launch_route(
     _authorize_dashboard_access(request, user_id)
 
     try:
-        await asyncio.to_thread(delete_launch_and_rollback, user_id, int(launch_id))
+        aviso = await asyncio.to_thread(delete_launch_and_rollback, user_id, int(launch_id))
     except LookupError:
         raise HTTPException(status_code=404, detail="Lançamento não encontrado.")
     except tuple(_MSG_DELETE_LAUNCH) as exc:
@@ -7821,7 +7821,8 @@ async def delete_launch_route(
         raise HTTPException(status_code=500, detail=_ERRO_APAGAR_HTTP) from exc
 
     _invalidate_dashboard_current_cache(user_id)
-    return {"ok": True, "launch_id": int(launch_id)}
+    # `aviso`: a frase de quando apagar a fundida devolveu a transação do banco (P3)
+    return {"ok": True, "launch_id": int(launch_id), "aviso": aviso}
 
 
 @app.patch("/credit-transactions/{user_id}/{tx_id}")
