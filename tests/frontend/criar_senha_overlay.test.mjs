@@ -90,6 +90,7 @@ for (const [nome, viewport] of [["desktop", DESKTOP], ["mobile", MOBILE]]) {
       await overlayVisivel(page);
       assert.equal(await cobreOPainel(page), true);
       assert.equal(await page.textContent("#pb-cs-titulo"), "Crie sua senha para proteger sua conta");
+      assert.equal(await page.textContent(".pb-cs-ok"), "✅ Assinatura confirmada!");
       assert.equal((await page.textContent(".pb-cs-primario")).trim(), "Enviar link para fulana@exemplo.com");
       const caixa = await page.evaluate(() => {
         const r = document.querySelector(".pb-cs-card").getBoundingClientRect();
