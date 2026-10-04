@@ -16,9 +16,10 @@ asserção; medidos em 2026-09-27, remeça se mexer no código):
       (o comportamento de antes do PR-A).
   (c), (d) positivos: o caminho legítimo continua "Atualizado".
   (e) NÃO discrimina nada deste PR — ver o comentário do caso.
-  (f), (g), (i) negativo: `run_of_health_check` deixar de passar
-      `status_reason_visto` ao `mark_sync_result` (sem o CAS). Estreitar o CAS
-      para só `read_failed`/`investments_read_failed` deixa (g) e (i) vermelhos.
+  (f), (g), (i) negativo: `observar_item` deixar de passar `versao_vista` ao
+      `mark_sync_result` (sem o CAS; PR-C1 trocou o CAS por valor do motivo pelo
+      da versão da linha, `tests/test_of_versao_da_linha.py`). (g) e (i) são o
+      motivo que MUDOU no meio; (f) é o que o sync limpou no meio.
   positivo do CAS: `test_job_sem_corrida_limpa_no_accounts_com_espelho_cheio`.
   (h) negativo: tirar o `if sem_sync` do ramo `INVESTMENTS_READ_FAILED` do `out()`.
   (j) negativo: tirar o acréscimo de `_DETALHE_INVESTIMENTOS_FALTANDO` ao
