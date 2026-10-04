@@ -21,9 +21,9 @@ import re
 from fastapi import APIRouter, BackgroundTasks, HTTPException, Request, Response
 from fastapi.responses import JSONResponse
 from pydantic import BaseModel, model_validator
-from slowapi.util import get_remote_address
 
 from core.admin_dashboard import log_system_event
+from core.client_ip import rate_limit_key
 from core.pg_text import recusa_veneno
 from core.secure_compare import constant_time_eq
 from core.services.email_service import send_account_exists_notice, send_verification_email
@@ -198,7 +198,7 @@ async def quiz_conta(request: Request, response: Response, body: QuizContaBody,
     except ValueError:
         raise HTTPException(status_code=400, detail="Informe um número de WhatsApp válido com DDD.")
     # Sem teto global: numa rota pública ele deixaria qualquer um derrubar o funil.
-    await _check_persistent_rate_limit("quiz", f"ip:{get_remote_address(request)}", *LIMITE_IP_QUIZ)
+    await _check_persistent_rate_limit("quiz", f"ip:{rate_limit_key(request)}", *LIMITE_IP_QUIZ)
     # Balde próprio: no "register" o anônimo gastava o teto do /auth/register da vítima.
     await _check_persistent_rate_limit("quiz-conta", f"email:{email}", *EMAIL_RATE_LIMITS["register"])
 

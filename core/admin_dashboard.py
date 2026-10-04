@@ -18,10 +18,10 @@ from fastapi.security import HTTPAuthorizationCredentials, HTTPBearer
 from psycopg.rows import dict_row
 from psycopg.types.json import Jsonb
 from pydantic import BaseModel
-from slowapi.util import get_remote_address
 from starlette.requests import ClientDisconnect
 
 from config.env import load_app_env
+from core.client_ip import client_ip
 
 from core.crypto import (
     PiiAccessContext,
@@ -1733,7 +1733,7 @@ def register_admin_routes(app: FastAPI, frontend_dir: Path, jwt_secret: str, lim
                 "admin_login_failed",
                 "Tentativa de login admin com usuário inválido.",
                 source="admin_auth",
-                details={"username": username, "ip": get_remote_address(request)},
+                details={"username": username, "ip": client_ip(request)},
             )
             raise HTTPException(status_code=401, detail="Credenciais inválidas.")
 
@@ -1743,7 +1743,7 @@ def register_admin_routes(app: FastAPI, frontend_dir: Path, jwt_secret: str, lim
                 "admin_login_failed",
                 "Tentativa de login admin com senha inválida.",
                 source="admin_auth",
-                details={"username": username, "ip": get_remote_address(request)},
+                details={"username": username, "ip": client_ip(request)},
             )
             raise HTTPException(status_code=401, detail="Credenciais inválidas.")
 
@@ -1754,7 +1754,7 @@ def register_admin_routes(app: FastAPI, frontend_dir: Path, jwt_secret: str, lim
             "admin_login_success",
             "Login admin realizado com sucesso.",
             source="admin_auth",
-            details={"username": ADMIN_DASHBOARD_USERNAME, "ip": get_remote_address(request)},
+            details={"username": ADMIN_DASHBOARD_USERNAME, "ip": client_ip(request)},
         )
         return {
             "token": token,
