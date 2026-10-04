@@ -271,8 +271,9 @@ test("/continuar-compra com 401 + pagina_propria → fica em 'Entrar novamente',
 
 test("app deslogado + pagina_propria → /assinar, e o corpo não leva `pagina`", async () => {
   const { page, corpos } = await abre({ logado: false, cfg: { pagina_propria: true }, app: true });
-  await clicaDeslogado(page, "plus");
+  // Antes do clique: depois dele a navegação pode destruir o contexto da página.
   assert.equal(await page.evaluate(() => window.PB_IN_APP === true), true);
+  await clicaDeslogado(page, "plus");
   await page.waitForURL("**/assinar?*");
   const url = new URL(page.url());
   assert.equal(url.pathname + url.search, "/assinar?plano=plus&ciclo=monthly");
