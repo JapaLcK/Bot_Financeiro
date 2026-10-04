@@ -564,7 +564,9 @@ BRL (`adaptive_pricing` off) nas **duas** origens: medido no Stripe de teste em
 2026-10-03, sem o campo a sessão `elements` da `/precos` nasce com ele LIGADO (o
 default da conta), e as caixas mostram R$. O hospedado da `/precos` segue sem o campo.
 
-No frontend, a `/assinar` manda `pagina: true` (e `origem` da query: só `precos`, senão
+O `GET /billing/plans-config` expõe a flag como `pagina_propria`; com ela, o deslogado
+que escolhe um plano no cartão na `/precos` vai direto à `/assinar?plano=…&ciclo=…` (sem
+`/cadastro`). No frontend, a `/assinar` manda `pagina: true` (e `origem` da query: só `precos`, senão
 `assinar`) e, se a resposta trouxer `pagina`, monta `frontend/pagamento-pagina.js`
 (Payment Element só cartão, resumo pelo `change` do Stripe, as caixas e o cupom
 "Tem cupom?" → `applyPromotionCode`); sem `pagina`, o embutido de antes. O Stripe.js é o
