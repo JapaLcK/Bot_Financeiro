@@ -37,7 +37,7 @@ const UPDATED = { institution_name: "Nubank", ui: { state: "updated", label: "At
  * devolve `stamped: true`. `calls.conv`: Pixel e GA4, mesmo após ir ao /home.
  */
 async function abrir(viewport, { step, snapshot = () => json({ ok: true, connections: [] }),
-                                saveStatus = () => 200, concluido = false } = {}) {
+                                saveStatus = () => 200, concluido = false, estado = {} } = {}) {
   const page = await browser.newPage({ viewport });
   await page.clock.install();
   const calls = { of: 0, posts: [], conv: [] };
@@ -60,7 +60,7 @@ async function abrir(viewport, { step, snapshot = () => json({ ok: true, connect
   await page.route("**/auth/dashboard-profile", (route) =>
     route.fulfill(json({ user_id: 1, display_name: "Lucas", plan: "free" })));
   await page.route("**/onboarding/state", async (route) => {
-    if (route.request().method() === "GET") return route.fulfill(json({ step, completed: concluido, total_steps: 5 }));
+    if (route.request().method() === "GET") return route.fulfill(json({ step, completed: concluido, total_steps: 5, ...estado }));
     const body = route.request().postDataJSON();
     calls.posts.push(body);
     const status = await saveStatus(body);
@@ -100,6 +100,32 @@ for (const vp of VIEWPORTS) {
     const saldo = await page.locator("#onb-balance").boundingBox();
     assert.ok(banco && saldo, "os dois têm de estar visíveis");
     assert.ok(banco.y < saldo.y, `banco em y=${banco.y}, saldo em y=${saldo.y}`);
+    await page.close();
+  });
+
+  // `of_produtos` é o que o connect token pede (pluggy_products); a tela lista
+  // isso e nada além. Controle negativo: a lista fixa antiga mostrava 4 itens
+  // para 2 produtos e nenhum para o produto sem rótulo.
+  const produtos = (page) => page.$$eval('[data-role="of-products"] li', (lis) => lis.map((li) => li.textContent));
+  const produtosVisiveis = (page) => page.isVisible('[data-role="of-products"]');
+
+  test(`${tag} passo 2: lista só os produtos que o servidor manda`, async () => {
+    const { page } = await abrir(vp, { step: 2, estado: { of_produtos: ["ACCOUNTS", "TRANSACTIONS"] } });
+    assert.deepEqual(await produtos(page), ["Contas e saldos", "Transações"]);
+    assert.ok(await produtosVisiveis(page));
+    await page.close();
+  });
+
+  test(`${tag} passo 2: produto sem rótulo aparece com o nome cru`, async () => {
+    const { page } = await abrir(vp, { step: 2, estado: { of_produtos: ["ACCOUNTS", "PRODUTO_NOVO"] } });
+    assert.deepEqual(await produtos(page), ["Contas e saldos", "PRODUTO_NOVO"]);
+    await page.close();
+  });
+
+  test(`${tag} passo 2: sem of_produtos, nenhuma lista`, async () => {
+    const { page } = await abrir(vp, { step: 2 });
+    assert.deepEqual(await produtos(page), []);
+    assert.equal(await produtosVisiveis(page), false, "a frase 'O que eu leio' some junto");
     await page.close();
   });
 

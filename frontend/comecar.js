@@ -70,6 +70,22 @@
     updating: "wait",
     needs_user_action: "resolve", item_missing: "resolve", paused: "resolve", removed: "resolve",
   };
+  /**
+   * Produto da Pluggy → como o passo 2 o nomeia. A lista vem do servidor
+   * (`of_produtos`, o que o connect token pede); produto sem rótulo aparece com
+   * o nome cru — o que é lido nunca é omitido da tela.
+   */
+  const OF_PRODUCT_LABELS = {
+    ACCOUNTS: "Contas e saldos",
+    TRANSACTIONS: "Transações",
+    CREDIT_CARDS: "Cartões de crédito",
+    INVESTMENTS: "Investimentos",
+    INVESTMENTS_TRANSACTIONS: "Movimentações dos investimentos",
+    IDENTITY: "Seus dados cadastrais",
+    PAYMENT_DATA: "Dados de pagamento",
+    LOANS: "Empréstimos",
+    BROKERAGE_NOTE: "Notas de corretagem",
+  };
   const OF_WAIT_TEXT = "Pode continuar: os dados aparecem no painel quando chegarem.";
   const SAVE_FAIL_TEXT = "Não consegui salvar agora. Confere sua internet e tenta de novo.";
 
@@ -879,6 +895,20 @@
     handler(target);
   }
 
+  /** Passo 2: o que o Open Finance lê. Sem lista do servidor, não inventa uma. */
+  function renderOfProducts(products) {
+    const box = el("of-products");
+    if (!box) return;
+    const list = box.querySelector("ul");
+    list.textContent = "";
+    (Array.isArray(products) ? products : []).forEach(function (p) {
+      const li = document.createElement("li");
+      li.textContent = Object.prototype.hasOwnProperty.call(OF_PRODUCT_LABELS, p) ? OF_PRODUCT_LABELS[p] : String(p);
+      list.appendChild(li);
+    });
+    show(box, list.children.length > 0);
+  }
+
   /* ─── Boot ────────────────────────────────────────────────────────────── */
 
   async function boot() {
@@ -917,6 +947,7 @@
     try {
       server = await apiGet("/onboarding/state");
     } catch (_) { /* começa do zero */ }
+    renderOfProducts(server && server.of_produtos);
 
     // Retomada: volta no passo salvo em vez de recomeçar. `?step=` só é aceito
     // pra voltar do /settings (conectar banco) — e nunca além do que já foi

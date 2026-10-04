@@ -19,6 +19,7 @@ import asyncio
 from fastapi import APIRouter, HTTPException, Request
 from pydantic import BaseModel
 
+from core.services.pluggy import pluggy_products
 from db import (
     get_onboarding_state,
     mark_onboarding_completed,
@@ -50,7 +51,9 @@ class OnboardingStatePayload(BaseModel):
 async def onboarding_state_route(request: Request):
     user_id = shared.resolve_dashboard_user_id(request)
     state = await asyncio.to_thread(get_onboarding_state, user_id)
-    return {**state, "total_steps": TOTAL_STEPS}
+    # `of_produtos`: o que o connect token pede à Pluggy; o passo 2 lista isso
+    # como o que o PigBank lê do banco (texto de consentimento, não pode divergir).
+    return {**state, "total_steps": TOTAL_STEPS, "of_produtos": pluggy_products()}
 
 
 @router.post("/onboarding/state")

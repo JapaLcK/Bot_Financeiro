@@ -1,29 +1,42 @@
-"""O wizard (/onboarding, passo 2) promete o que o Open Finance lê; a promessa
-tem de bater com os produtos que o connect token pede à Pluggy (§0.7).
+"""O wizard (/onboarding, passo 2) diz o que o Open Finance lê; isso é texto de
+consentimento e tem de ser o que o connect token pede à Pluggy (§0.7).
 
-A fonte é o default de PLUGGY_PRODUCTS em `create_pluggy_connect_token`
-(core/services/pluggy.py), medido pela própria função com o HTTP simulado —
-não pelo texto do arquivo. O HTML estático não importa Python, então a
-duplicação é inevitável e este teste é o que a amarra.
+A lista sai do servidor (`of_produtos` em GET /onboarding/state) pela mesma
+`pluggy_products()` que `create_pluggy_connect_token` usa — então vale também
+quando `PLUGGY_PRODUCTS` foge do default. O cliente (comecar.js) só a desenha;
+tests/frontend/onboarding_guia.test.mjs cobre o desenho.
 """
-import re
-from pathlib import Path
+import pytest
+from fastapi.testclient import TestClient
 
 import core.services.pluggy as pl
+import frontend.finance_bot_websocket_custom as dashboard
+import frontend.routes.onboarding as onboarding_routes
 
-HTML = Path(__file__).resolve().parent.parent / "frontend" / "comecar.html"
+client = TestClient(dashboard.app)
 
-# Produto da Pluggy → como o wizard o nomeia. Produto novo no default sem frase
-# aqui (e no HTML) reprova: o usuário autorizaria algo que a tela não contou.
-FRASE = {
-    "ACCOUNTS": "Contas e saldos",
-    "TRANSACTIONS": "Transações",
-    "CREDIT_CARDS": "Cartões de crédito",
-    "INVESTMENTS": "Investimentos",
-}
+DEFAULT = ["ACCOUNTS", "TRANSACTIONS", "CREDIT_CARDS", "INVESTMENTS"]
+CONFIGS = [(None, DEFAULT), ("ACCOUNTS,TRANSACTIONS", ["ACCOUNTS", "TRANSACTIONS"])]
 
 
-def _produtos_default(monkeypatch):
+def _set_env(monkeypatch, env):
+    if env is None:
+        monkeypatch.delenv("PLUGGY_PRODUCTS", raising=False)
+    else:
+        monkeypatch.setenv("PLUGGY_PRODUCTS", env)
+
+
+def _produtos_da_rota(monkeypatch):
+    monkeypatch.setattr(onboarding_routes.shared, "resolve_dashboard_user_id", lambda req: 7)
+    monkeypatch.setattr(onboarding_routes, "get_onboarding_state",
+                        lambda uid: {"step": 2, "completed": False})
+    resp = client.get("/onboarding/state")
+    assert resp.status_code == 200
+    return resp.json()["of_produtos"]
+
+
+def _produtos_do_connect_token(monkeypatch):
+    """O que `create_pluggy_connect_token` manda à Pluggy, com o HTTP simulado na borda."""
     captured = {}
 
     def fake_post(self, url, headers=None, json=None):  # noqa: A002
@@ -37,7 +50,6 @@ def _produtos_default(monkeypatch):
 
         return _R()
 
-    monkeypatch.delenv("PLUGGY_PRODUCTS", raising=False)
     monkeypatch.setattr(pl, "create_pluggy_api_key", lambda: "k")
     monkeypatch.setattr(pl, "_raise_for_pluggy_response", lambda resp, msg: None)
     monkeypatch.setattr(pl.httpx.Client, "post", fake_post)
@@ -45,14 +57,13 @@ def _produtos_default(monkeypatch):
     return captured["products"]
 
 
-def _itens_do_wizard():
-    html = HTML.read_text(encoding="utf-8")
-    bloco = re.search(r'<ul[^>]*data-role="of-products"[^>]*>(.*?)</ul>', html, re.S)
-    assert bloco, "lista data-role=of-products sumiu do comecar.html"
-    return [re.sub(r"\s+", " ", li).strip() for li in re.findall(r"<li>(.*?)</li>", bloco.group(1), re.S)]
+@pytest.mark.parametrize("env,esperado", CONFIGS)
+def test_rota_entrega_os_produtos_efetivos(monkeypatch, env, esperado):
+    _set_env(monkeypatch, env)
+    assert _produtos_da_rota(monkeypatch) == esperado
 
 
-def test_lista_do_wizard_bate_com_os_produtos_pedidos_a_pluggy(monkeypatch):
-    produtos = _produtos_default(monkeypatch)
-    assert set(produtos) == set(FRASE), f"produto sem frase no wizard: {set(produtos) ^ set(FRASE)}"
-    assert _itens_do_wizard() == [FRASE[p] for p in produtos]
+@pytest.mark.parametrize("env,_esperado", CONFIGS)
+def test_rota_e_connect_token_leem_a_mesma_fonte(monkeypatch, env, _esperado):
+    _set_env(monkeypatch, env)
+    assert _produtos_da_rota(monkeypatch) == _produtos_do_connect_token(monkeypatch)

@@ -58,15 +58,13 @@
         <h2 class="onb-block-title">Conectar seu banco</h2>
         <p class="onb-hint">
           Pelo Open Finance eu leio seus lançamentos sozinho, sem você digitar nada.
-          O que eu leio do seu banco:
         </p>
-        <!-- Espelha PLUGGY_PRODUCTS (core/services/pluggy.py); tests/test_onboarding_of_produtos.py compara. -->
-        <ul class="onb-next" data-role="of-products">
-          <li>Contas e saldos</li>
-          <li>Transações</li>
-          <li>Cartões de crédito</li>
-          <li>Investimentos</li>
-        </ul>
+        <!-- comecar.js preenche com `of_produtos` do GET /onboarding/state
+             (pluggy_products, o mesmo que o connect token pede). Sem ela, fica oculto. -->
+        <div data-role="of-products" hidden>
+          <p class="onb-hint">O que eu leio do seu banco:</p>
+          <ul class="onb-next"></ul>
+        </div>
         <p class="onb-hint">
           É só leitura: eu não movo seu dinheiro e nunca vejo sua senha. Você
           autoriza direto no seu banco, pela Pluggy, e pode cancelar quando
