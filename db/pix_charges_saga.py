@@ -121,6 +121,26 @@ def valores_por_cobranca(user_id: int) -> dict[str, int]:
             return {str(r["id"]): int(r["amount_cents"]) for r in cur.fetchall()}
 
 
+def paga_cobrindo_agora(user_id: int) -> bool:
+    """Cobrança Pix paga DESTE usuário cuja janela contém agora — inclusive a
+    que o dreno ainda não transformou em grant (falha entre `stripe_cancel` e
+    `grant`, retentando). `refunded_partial` conta: o parcial não revoga.
+    Grant `pix` REVOGADO tira a cobrança (admin e chargeback revogam sem mexer
+    no `status` dela); grant ainda inexistente não tira."""
+    with get_conn() as conn:
+        with conn.cursor() as cur:
+            cur.execute(
+                "select 1 from pix_charges c where c.user_id = %s"
+                " and c.status in ('paid', 'refunded_partial')"
+                " and c.access_starts_at <= now() and now() < c.access_expires_at"
+                " and not exists (select 1 from plan_grants g where g.user_id = c.user_id"
+                "   and g.source = 'pix' and g.external_ref = c.id::text"
+                "   and g.status = 'revoked') limit 1",
+                (int(user_id),),
+            )
+            return cur.fetchone() is not None
+
+
 def grants_para_precificar(user_id: int) -> list[dict]:
     """Os grants ativos do usuário **com `amount_cents`** — o "join" que
     `plano_da_cobranca` exige do chamador, e sem o qual todo crédito vira 0. Em
@@ -143,14 +163,15 @@ def grants_para_precificar(user_id: int) -> list[dict]:
     return ativos
 
 
-def gravar_stripe_period_end(charge_id: int, quando, *, access_starts_at=None,
-                             access_expires_at=None) -> bool:
+def gravar_stripe_period_end(charge_id: int, sub_id: str, quando, *,
+                             access_starts_at=None, access_expires_at=None) -> bool:
     """Grava o `stripe_period_end_at` RECONFIRMADO no Stripe. True se aplicou.
 
     A criação grava a ESTIMATIVA que o checkout leu (§8.2); o efeito
     `stripe_cancel` lê o `current_period_end` de verdade no pagamento e chama
-    isto. `where stripe_subscription_id is not null` porque só a migração tem
-    período a reconfirmar.
+    isto. `sub_id` entra na coluna quando ela estava nula (assinatura que o
+    `stripe_cancel` DESCOBRIU no Stripe, caminho B): sem isso a janela adiada
+    vivia só na memória e a retentativa do `grant` relia a velha.
 
     **A janela vem junto, e no MESMO update.** Quem decide se ela muda é
     `_janela_adiada` (só adia, nunca antecipa); passá-la aqui em vez de num
@@ -162,13 +183,14 @@ def gravar_stripe_period_end(charge_id: int, quando, *, access_starts_at=None,
         with conn.cursor() as cur:
             cur.execute(
                 "update pix_charges"
-                "   set stripe_period_end_at = %s,"
+                "   set stripe_subscription_id = coalesce(stripe_subscription_id, %s),"
+                "       stripe_period_end_at = %s,"
                 "       stripe_cancel_scheduled_at = now(),"
                 "       access_starts_at = coalesce(%s, access_starts_at),"
                 "       access_expires_at = coalesce(%s, access_expires_at)"
-                " where id = %s and stripe_subscription_id is not null"
+                " where id = %s"
                 " returning id",
-                (quando, access_starts_at, access_expires_at, int(charge_id)),
+                (sub_id, quando, access_starts_at, access_expires_at, int(charge_id)),
             )
             aplicou = cur.fetchone() is not None
         conn.commit()

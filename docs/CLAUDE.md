@@ -665,6 +665,27 @@ sempre. Limite conhecido: estorno por nota de crédito para o saldo do cliente (
 charge) NÃO é detectado. Estorno "pending" real e contestação real chegando antes da
 entrega só se provam no Stripe; o modo teste sobe `amount_refunded` na hora.
 
+**Cartão nunca cobra período que um Pix pago cobre.** Checkout de cartão concluído (ou
+1ª fatura, `subscription_create`) com Pix cobrindo hoje (`pix_cobre_agora`: grant vigente
+ou cobrança paga com a janela em curso, ainda sem grant; grant Pix revogado não conta; o
+`create-checkout` recusa com `409 pix_active` pela mesma função) cancela a assinatura na hora
+(`core/services/cartao_recusado_por_pix.py`, `Subscription.cancel` com
+`cancellation_details.comment = "pigbank:pix_vigente"`), registra os cadernos e não
+materializa nada; plano cobrado vira alerta de estorno manual, e o `deleted` com a marca
+não manda e-mail de cancelamento. Na ordem inversa (cartão primeiro, Pix pago depois), o
+efeito `stripe_cancel` do dreno pergunta ao Stripe (`_stripe_vivo`) e agenda
+`cancel_at_period_end` mesmo sem `stripe_subscription_id` na cobrança, gravando a
+assinatura achada e a janela adiada na linha antes de o efeito contar como feito; se a
+assinatura já estiver morta (`canceled`/`incomplete_expired`), não há `modify` e a janela
+que esperava o fim dela volta para agora. Com
+cadernos, o alerta manda estornar o plano só depois de `ebook_entregas` marcar `enviado`.
+Limites conhecidos: (1) se a assinatura gravada na cobrança estiver morta e o mesmo
+customer tiver OUTRA viva (assinou de novo antes de pagar um QR antigo), o efeito vira
+no-op sem alerta e a viva renova sobre o Pix; (2) assinatura que morre depois de o
+`stripe_cancel` registrar deixa a janela adiada; (3) cobrança paga com grant ainda por
+nascer: o `create-checkout` recusa, mas a tela de status mostra sem plano até o grant sair;
+(4) a reentrega do checkout repete o alerta de estorno.
+
 **Cadernos extras no Pix anual (PR A: receber e entregar; inerte até o checkout
 gravar a foto).** `pix_charges.extras` (`jsonb`, default `[]`, check de array) guarda a
 FOTO dos cadernos escolhidos, `[{price, url, nome, valor_cents}]`, gravada só por

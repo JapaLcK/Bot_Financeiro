@@ -5085,8 +5085,10 @@ async def _billing_checkout_for_user(stripe_mod, user_id: int, plan: str, interv
     # Pix → Stripe NÃO tem fluxo (§9): quem já pagou o ano à vista assinando no
     # cartão pagaria o mesmo período duas vezes, e não há como "creditar" para
     # dentro do Stripe. A recusa é a resposta, e ela vem ANTES de qualquer
-    # criação de customer — o caminho de volta é esperar o anual acabar.
-    if await asyncio.to_thread(_grant_pix_vigente, user_id) is not None:
+    # criação de customer — o caminho de volta é esperar o anual acabar. A mesma
+    # pergunta das guardas do webhook (§0.7), com o Pix pago ainda sem grant.
+    from core.services.cartao_recusado_por_pix import pix_cobre_agora
+    if await asyncio.to_thread(pix_cobre_agora, user_id):
         raise HTTPException(
             status_code=409,
             detail={"error": "pix_active",
@@ -6210,6 +6212,26 @@ async def billing_webhook(request: Request, background_tasks: BackgroundTasks):
             print(f"[billing] email {fn.__name__} falhou user={uid}: {exc}")
             return False
 
+    async def _registrar_cadernos(uid: int, session) -> list:
+        """Pendência do e-book: a prova da compra, gravada ANTES dos outros
+        efeitos e sem try — falha → 5xx e a reentrega refaz tudo. O job
+        (`core/services/ebook_entrega.py`) entrega depois. Devolve os extras
+        da foto da sessão."""
+        from core.services.extras_assinar import da_metadata
+        _extras = da_metadata(_g(session, "metadata", {}))
+        if _extras:
+            from db.ebook_entregas import registrar as _registrar_ebook
+            await asyncio.to_thread(
+                _registrar_ebook, int(uid), _g(session, "id"), _extras)
+            for _preco, _url in _extras:
+                if not _url:
+                    await log_system_event(
+                        "error", "ebook_sem_url",
+                        "Compra de e-book sem a foto ebook_url; o job não entrega.",
+                        source="billing", user_id=int(uid),
+                        details={"session_id": _g(session, "id"), "ebook_price": _preco})
+        return _extras
+
     if event["type"] == "checkout.session.completed":
         session = event["data"]["object"]
         user_id = await _resolve_user(session)
@@ -6223,6 +6245,40 @@ async def billing_webhook(request: Request, background_tasks: BackgroundTasks):
         # abaixo rodou — nem funil, nem e-mail, nem gate. A reentrega executa
         # tudo uma vez só, em vez de repetir a metade que já tinha passado.
         if user_id and sub_id:
+            # Sessão de cartão aberta antes de um Pix entrar e concluída depois:
+            # o Pix já cobre o período. Cancela a assinatura, entrega os
+            # cadernos (outro produto, já pagos) e para aqui — sem grant, funil,
+            # trial, e-mails nem rastreio. Plano cobrado hoje vira alerta de
+            # estorno manual (`core/services/cartao_recusado_por_pix.py`).
+            # ponytail: Pix FUTURO não barra — é a migração, cujo cartão
+            # precisa materializar até o fim do período. Um 2º cartão nesse
+            # intervalo passaria; o `create-checkout` o recusa (`already_subscribed`).
+            from core.services.cartao_recusado_por_pix import pix_cobre_agora
+            if await asyncio.to_thread(pix_cobre_agora, user_id):
+                _extras = await _registrar_cadernos(user_id, session)
+                # Plano × cadernos pela mesma conta do `invoice.paid`: a fatura
+                # da sessão, menos o líquido dos extras. Sem extras, o
+                # `amount_total` é só o plano. `None` = não deu para separar.
+                _plano_cents = _g(session, "amount_total") or 0
+                _cadernos_cents = 0
+                if _extras:
+                    from core.services.extras_assinar import linhas_da_fatura
+                    _inv = _g(session, "invoice")
+                    if isinstance(_inv, str):
+                        _inv = await asyncio.to_thread(stripe.Invoice.retrieve, _inv)
+                    if _inv:
+                        _cadernos_cents = _extras_liquido_cents(
+                            await asyncio.to_thread(linhas_da_fatura, _inv),
+                            {p for p, _ in _extras})
+                        _plano_cents = max(0, (_g(_inv, "amount_paid") or 0) - _cadernos_cents)
+                    else:
+                        _cadernos_cents = None
+                from core.services.cartao_recusado_por_pix import recusar_assinatura
+                await asyncio.to_thread(
+                    recusar_assinatura, stripe, int(user_id), sub_id,
+                    cobrado_cents=_plano_cents, session_id=_g(session, "id"),
+                    cadernos_cents=_cadernos_cents)
+                return {"received": True}
             # `to_thread`: ver a explicação no ramo `invoice.payment_failed`.
             # As TRÊS chamadas de `Subscription.retrieve` deste handler são a
             # mesma classe (I/O síncrono no event loop único) e foram
@@ -6262,23 +6318,8 @@ async def billing_webhook(request: Request, background_tasks: BackgroundTasks):
                 await asyncio.to_thread(
                     clear_past_due_since, int(user_id),
                     nao_mais_novo_que=_event_version(event))
-            # Pendência do e-book: a prova da compra, gravada ANTES dos outros
-            # efeitos e sem try — falha → 5xx e a reentrega refaz tudo. Grava
-            # mesmo com `_decidiu_acesso` False: a compra aconteceu igual. O
-            # job (`core/services/ebook_entrega.py`) entrega depois.
-            from core.services.extras_assinar import da_metadata
-            _extras = da_metadata(_g(session, "metadata", {}))
-            if _extras:
-                from db.ebook_entregas import registrar as _registrar_ebook
-                await asyncio.to_thread(
-                    _registrar_ebook, int(user_id), _g(session, "id"), _extras)
-                for _preco, _url in _extras:
-                    if not _url:
-                        await log_system_event(
-                            "error", "ebook_sem_url",
-                            "Compra de e-book sem a foto ebook_url; o job não entrega.",
-                            source="billing", user_id=int(user_id),
-                            details={"session_id": _g(session, "id"), "ebook_price": _preco})
+            # Grava mesmo com `_decidiu_acesso` False: a compra aconteceu igual.
+            await _registrar_cadernos(user_id, session)
         # Funil: registra a CONCLUSÃO na tabela dedicada, com o session_id
         # (correlaciona com o record_checkout_started da mesma tentativa).
         # Vale pra trial e compra imediata — os dois disparam este evento.
@@ -6469,6 +6510,17 @@ async def billing_webhook(request: Request, background_tasks: BackgroundTasks):
         user_id  = await _resolve_user(invoice)
         sub_id   = _invoice_subscription_id(invoice)
         if user_id and sub_id:
+            # A 1ª fatura de uma assinatura que o Pix vigente recusa (o par do
+            # ramo `checkout`, que pode chegar depois desta): cancela e para.
+            # O alerta de estorno é do checkout, que conhece a sessão.
+            # Renovações seguem como sempre.
+            from core.services.cartao_recusado_por_pix import (
+                pix_cobre_agora, recusar_assinatura)
+            if (_g(invoice, "billing_reason") == "subscription_create"
+                    and await asyncio.to_thread(pix_cobre_agora, user_id)):
+                await asyncio.to_thread(recusar_assinatura, stripe, int(user_id), sub_id,
+                                        cobrado_cents=0, session_id=None)
+                return {"received": True}
             # `to_thread`: ver a explicação no ramo `invoice.payment_failed`.
             sub = await asyncio.to_thread(stripe.Subscription.retrieve, sub_id)
             expires_dt = _subscription_period_end(sub)
@@ -6932,6 +6984,12 @@ async def billing_webhook(request: Request, background_tasks: BackgroundTasks):
                 source="billing",
                 user_id=user_id,
             )
+            # Cancelamento NOSSO (cartão recusado por Pix vigente): a conta
+            # continua paga, então nada de "assinatura cancelada" ao cliente
+            # nem ao admin. Revogação e recompute acima já rodaram.
+            from core.services.cartao_recusado_por_pix import MARCA
+            if _g(_g(obj, "cancellation_details"), "comment") == MARCA:
+                return {"received": True}
             # Email de confirmacao de cancelamento (item 41)
             # O plano sai do PRICE do `obj`, que é a própria Subscription do
             # evento (#351) — e não da conta, porque o `update_user_plan(...,
