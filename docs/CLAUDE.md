@@ -393,6 +393,13 @@ mesma `pending_google_signups`, com `provider='apple'`);
 `dashboard-link`/`dashboard-token` (link mágico); `link-code` (vincula WhatsApp e
 Discord à conta); `logout`; `refresh`; `account` (exclusão) e `account/export`.
 
+**IP do cliente: `core/client_ip.py`** (`client_ip`, `rate_limit_key`; #766). Atrás de
+Cloudflare → Railway, o `request.client.host` é o proxy do Railway (100.64/10). Com
+`CLOUDFLARE_ORIGIN_SECRET` (≥ 32 chars), o `CF-Connecting-IP` só vale quando a regra da
+Cloudflare manda o mesmo valor em `x-pigbank-cf-secret`; sem ela, o comportamento antigo
+(conexão da Cloudflare). Configuração em `.env.example`; a regra inteira e os riscos
+residuais, no docstring do módulo. A sonda `client_ip_sonda` (`system_event_logs`) mede.
+
 **Conta pela `/assinar` (funil v3 do quiz): `POST /auth/quiz/conta`**
 (`frontend/routes/quiz_signup.py`, com CSRF). Recebe e-mail, nome, WhatsApp
 (obrigatório) e o aceite dos termos, e cria a conta **sem senha e sem código** na
