@@ -1,5 +1,5 @@
 """
-frontend/routes/billing_pix.py — as três rotas do Pix anual. FINAS de propósito.
+frontend/routes/billing_pix.py — as rotas do Pix anual. FINAS de propósito.
 
 Validação de entrada, autenticação e tradução de exceção em status HTTP. **Nada
 de saga**: quem decide dinheiro é `core/services/pix_checkout.py`, quem decide
@@ -43,12 +43,14 @@ from pydantic import BaseModel
 from core.observability import log_system_event_sync
 from core.secure_compare import constant_time_eq
 from core.services.asaas_customers import TitularRecusado
+from core.services.extras_assinar import CAIXAS
 from core.services.pix_checkout import (
     CheckoutIndisponivel,
     StripeAtivo,
     Vitalicio,
     criar_checkout,
 )
+from core.services.pix_extras import ExtrasIndisponiveis
 from core.services.pix_pricing import CoberturaJaPaga
 from core.services.plan_service import TIER_TO_STORED_PLAN, tier_publico
 from frontend.routes import shared
@@ -76,6 +78,7 @@ class PixCheckoutBody(BaseModel):
     plan: str
     cpf_cnpj: str
     confirm_cancel_stripe: bool = False
+    extras: list[str] = []   # SÓ ids de Price: o valor dos cadernos sai do Stripe aqui
 
 
 @router.post("/billing/pix/checkout")
@@ -103,6 +106,10 @@ async def billing_pix_checkout(request: Request, payload: PixCheckoutBody):
     if not _documento_valido(doc):
         raise HTTPException(status_code=400,
                             detail="Informe um CPF ou CNPJ válido.")
+    extras = payload.extras
+    if len(extras) > CAIXAS or len(set(extras)) != len(extras):
+        raise HTTPException(status_code=400,
+                            detail=f"Escolha até {CAIXAS} cadernos, sem repetir.")
 
     from frontend.finance_bot_websocket_custom import _billing_user_lock  # noqa: PLC0415
 
@@ -112,7 +119,10 @@ async def billing_pix_checkout(request: Request, payload: PixCheckoutBody):
             return await asyncio.to_thread(
                 criar_checkout, user_id, plan_stored=plan_stored, cpf_cnpj=doc,
                 nome=nome, email=email, rastreio=_rastreio(request),
-                confirm_cancel_stripe=bool(payload.confirm_cancel_stripe))
+                confirm_cancel_stripe=bool(payload.confirm_cancel_stripe), extras=extras)
+    except ExtrasIndisponiveis as exc:   # a oferta relida no POST, sem consulta nova
+        raise HTTPException(status_code=409, detail={
+            "error": exc.ERRO, "extras": exc.oferta}) from exc
     except CoberturaJaPaga as exc:
         # `plano` e `cobertura_ate` vêm da PRÓPRIA exceção: reconsultar o banco
         # aqui poderia devolver um estado diferente do que motivou a recusa.
@@ -170,6 +180,18 @@ async def billing_pix_checkout(request: Request, payload: PixCheckoutBody):
         ) from exc
 
 
+@router.get("/billing/pix-extras")
+@shared.limiter.limit("120/hour")   # o teto do bump: no Instagram muita gente sai do mesmo IP
+async def billing_pix_extras(request: Request):
+    """Caixas de cadernos do modal do Pix + seleção da cobrança pendente (Q6). Não é
+    `/billing/pix/extras`: o poll `/billing/pix/{public_token}` engoliria o path."""
+    from core.services.pix_extras import oferta, selecao  # noqa: PLC0415
+
+    user_id = shared.resolve_dashboard_user_id(request)
+    return {"extras": await asyncio.to_thread(oferta, user_id),
+            "selecao": await asyncio.to_thread(selecao, user_id)}
+
+
 @router.get("/billing/pix/{public_token}")
 @shared.limiter.limit("120/minute")
 async def billing_pix_status(request: Request, public_token: str):
@@ -181,6 +203,7 @@ async def billing_pix_status(request: Request, public_token: str):
     usuário. Estourar aqui apagaria o QR da tela de quem só esperou.
     """
     from core.services.pix_checkout_resposta import agendada  # noqa: PLC0415
+    from core.services.pix_extras import total_cents  # noqa: PLC0415
     from db.pix_charges import buscar_por_public_token  # noqa: PLC0415
 
     user_id = shared.resolve_dashboard_user_id(request)
@@ -194,6 +217,8 @@ async def billing_pix_status(request: Request, public_token: str):
         "plan": tier_publico(linha["plan"]),
         "amount_cents": int(linha["amount_cents"]),
         "credit_cents": int(linha["credit_cents"]),
+        # Plano + cadernos extras: o que o QR cobra (`amount_cents` é só o plano).
+        "total_cents": total_cents(linha),
         "expires_at": (linha["qr_expires_at"].isoformat()
                        if linha["qr_expires_at"] else None),
         "starts_at": (linha["access_starts_at"].isoformat()

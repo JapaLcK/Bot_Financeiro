@@ -103,13 +103,6 @@ _ISENTOS_COM_RAZAO = {
         "lembrete, e tem gate próprio e mais estrito — "
         "`db.dunning.ciclo_de_atraso_aberto`, lido fresco imediatamente antes "
         "do envio (célula 31 de `docs/dunning_estados_eventos.md`).",
-    "core/services/ebook_entrega.py::_entregar":
-        "Entrega de um produto PAGO à parte (o e-book da /assinar, funil v3 PR 3), "
-        "não mensagem proativa: filtrar por acesso ao PLANO reteria o e-book de "
-        "quem pagou por ele e cancelou o trial. Roda POR pendência (um produto de uma compra), "
-        "com gate próprio — `conta_sem_credencial` (a prova do e-mail) e a "
-        "confirmação da compra no Stripe. O `list_` que o predicado casa é o "
-        "`list_line_items` de UMA sessão, não uma população.",
 }
 
 

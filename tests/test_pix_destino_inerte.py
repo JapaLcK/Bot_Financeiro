@@ -103,12 +103,18 @@ MARCAS_PERMITIDAS: dict[str, tuple[str, ...]] = {
     # esta linha mude junto.
     "core/services/asaas_customers.py": ("pix_charges",),
     "core/services/pix_sweeps.py": ("pix_charges",),
-    "db/pix_charges.py": ("pix_charges", "pix_webhook_events",
-                          "pix_payment_effects"),
-    "db/pix_charges_saga.py": ("pix_charges",),
+    "db/pix_charges.py": ("pix_charges", "pix_payment_effects"),
+    # `pix_webhook_events`: a prosa da `rezerar_rastreio_de_orfas`, que veio de
+    # `db/pix_charges.py` para abrir espaço no teto de 350.
+    "db/pix_charges_saga.py": ("pix_charges", "pix_webhook_events"),
     "db/webhook_outbox.py": ("pix_charges", "pix_webhook_events",
                              "pix_payment_effects"),
     "db/pix_effects.py": ("pix_webhook_events", "pix_payment_effects"),
+    # Os cadernos extras do Pix: a leitura por dono para o job de entrega e o
+    # serviço (total, conferência no Asaas, oferta e seleção do checkout). Só o nome
+    # da tabela — no serviço, dentro de `db.pix_charges_saga` (`buscar_ativa`).
+    "db/pix_extras.py": ("pix_charges",),
+    "core/services/pix_extras.py": ("pix_charges",),
     # O DRENO (1b-B) — entrada MÍNIMA desde sempre, e agora ela é a regra e não
     # a exceção. Sem `MARCAS_DO_ASAAS`: ler `ASAAS_PIX_ANNUAL_ENABLED` aqui
     # derrubaria o portão, e é isso que mantém a flag dentro do checkout.

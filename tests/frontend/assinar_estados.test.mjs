@@ -49,7 +49,7 @@ test("criada: corpo e CSRF do POST, CompleteRegistration com o user_id, e S3 emb
   assert.deepEqual(conta.body, { nome: "Ana", email: "ana@x.com", whatsapp: "11987654321", aceitou_termos: true });
   assert.equal(conta.csrf, CSRF);
   assert.deepEqual(posts(CHECKOUT).map((r) => r.body),
-    [{ plan: "plus", interval: "monthly", embutido: true, origem: "assinar" }]);
+    [{ plan: "plus", interval: "monthly", embutido: true, pagina: true, origem: "assinar" }]);
   const fbq = await page.evaluate(() => window.__fbq);
   assert.deepEqual(fbq[0], ["track", "CompleteRegistration", {}, { eventID: "signup_42" }]);
   assert.deepEqual((await page.evaluate(() => window.__ga))[0], ["sign_up", { method: "quiz" }]);

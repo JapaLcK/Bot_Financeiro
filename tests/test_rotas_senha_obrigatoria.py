@@ -82,6 +82,7 @@ TABELA = {
     ("GET", "/conta"): (B, "atalho do portal → 302 /home"),
     ("POST", "/billing/pix/checkout"): (L, "compra"),
     ("GET", "/billing/pix/{public_token}"): (L, "compra"),
+    ("GET", "/billing/pix-extras"): (L, "compra"),
     # ── IA ──
     ("POST", "/ai/chat"): (B, "require_pro_feature"), ("GET", "/ai/messages"): (B, "require_pro_feature"),
     # ── links e utilidades públicas ──

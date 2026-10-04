@@ -82,7 +82,7 @@ def test_venda_nova_emite_pending_com_o_qr_cifrado(user_id, vendavel, asaas_fals
     assert r["public_token"] == linha["public_token"]
     assert set(r) == {"public_token", "qr_payload", "qr_image", "expires_at",
                       "amount_cents", "credit_cents", "starts_at", "agendada",
-                      "plan"}, (
+                      "plan", "total_cents"}, (
         "o contrato que a tela do PR 2 consome mudou de forma"
     )
     # O PAR que prova por que `agendada` teve de existir: nesta compra — conta

@@ -20,6 +20,7 @@
      deste bloco): a 1ª coisa que ele faz é tirar o fragmento com a PII da URL. -->
 <script src="/assinar.js?v=1"></script>
 <script defer src="/purchase-intent.js?v=1"></script>
+<script defer src="/pagamento-pagina.js?v=1"></script>
 <script defer src="/safe-area.js?v=1"></script>
 </head>
 <body class="lp lp-auth">
@@ -99,6 +100,25 @@ Entrar com Google
 <section id="s4" hidden>
 <p class="assinar-sub" id="s4-trial"></p>
 <div id="stripe-checkout"></div>
+<!-- Página própria (pagamento-pagina.js): celular = resumo, caixas, pagamento, botão; ≥880 px, duas colunas. -->
+<div class="pp" id="pagina" hidden>
+<div class="pp-pedido">
+<div class="pp-resumo" id="pp-resumo" aria-live="polite"></div>
+<div class="pp-bump" id="pp-bump" hidden></div>
+</div>
+<div class="pp-pag">
+<div id="pp-express"></div>
+<div id="pagamento"></div>
+<p class="pp-cupom-link"><button class="lp-auth-text-button" id="pp-cupom-abre" type="button">Tem cupom?</button></p>
+<form class="pp-cupom" id="pp-cupom" hidden>
+<input aria-label="Código do cupom" autocapitalize="characters" autocomplete="off" id="pp-cupom-cod" maxlength="60" placeholder="Código do cupom" type="text"/>
+<button class="social-btn" id="pp-cupom-ok" type="submit">Aplicar</button>
+<div class="auth-error" id="pp-cupom-erro" role="alert"></div>
+</form>
+<div class="auth-error" id="pp-erro" role="alert"></div>
+<button class="btn btn-primary btn-block btn-lg pp-cta" disabled id="pp-pagar" type="button"><span id="pp-cta">Assinar</span><small id="pp-cta-sub"></small></button>
+</div>
+</div>
 <p class="assinar-b"><button class="lp-auth-text-button" id="s4-b" type="button">Problemas com o pagamento? Abrir a página segura do Stripe</button></p>
 <button class="social-btn assinar-pix" id="s4-pix" type="button" hidden>Prefere Pix? Pague o plano anual à vista</button>
 </section>

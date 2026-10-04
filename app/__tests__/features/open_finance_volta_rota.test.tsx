@@ -1,65 +1,37 @@
 /**
  * A rota `open-finance-volta` pelo roteador de verdade (`renderRouter("./app")`):
  * a guarda de sessão, a trava, o desmonte e a pilha. A lógica do laço tem os
- * casos dela em `open_finance_volta.test.ts`; aqui, o que só a rota decide.
- *
- * Sem `setTimeout(0)` dentro de `act` (ver `layout.test.tsx`): microtarefas à mão.
+ * casos dela em `open_finance_volta.test.ts`; aqui, o que só a rota decide. O
+ * item em `updating` tem os casos dele em `open_finance_volta_rota_updating.test.tsx`.
  */
-import * as LA from "expo-local-authentication";
 import { router } from "expo-router";
 import { act, fireEvent, renderRouter, screen, waitFor } from "expo-router/testing-library";
 
 import { INTERVALO_MS, JANELA_MS } from "@/features/openFinance/volta";
 import { guardarCredenciais } from "@/storage/secure";
 
-import { chamadas, prepararCaso, resposta, rotear, S, segurar, type Rota } from "./auth_apoio";
+import { chamadas, prepararCaso, rotear, S, segurar } from "./auth_apoio";
+import {
+  A,
+  appVai,
+  B,
+  deOpenFinance,
+  desligarTrava,
+  drenar,
+  ligarTrava,
+  liberar,
+  lista,
+  pendentes,
+  postsDe,
+  prompts,
+  servidor,
+} from "./open_finance_volta_rota_apoio";
 
-declare const global: typeof globalThis & { __dispararAppState: (v: string) => void; __definirAppState: (v: string) => void };
-
-const A = "item_a";
-const B = "item_b";
-const conexao = (id: string) => ({ provider_item_id: id, institution_name: "Nubank", ui: { state: "updated", label: "Atualizado", detail: null } });
-const lista = (...ids: string[]) => resposta(200, { ok: true, connections: ids.map(conexao) });
-
-const drenar = async () => {
-  for (let i = 0; i < 20; i++) await Promise.resolve();
-};
-
-const deOpenFinance = () => chamadas().filter((c) => c.caminho.startsWith("/open-finance"));
-const postsDe = (id: string) =>
-  chamadas().filter((c) => c.caminho.endsWith("/pluggy-item") && (c.corpo as { item: { id: string } }).item.id === id);
-
-/** O servidor de OF: o GET devolve o que já foi registrado; o POST registra. */
-function servidor(get?: Rota) {
-  const registrados: string[] = [];
-  rotear({
-    "/open-finance/1": get ?? (() => lista(...registrados)),
-    "/open-finance/1/pluggy-item": (o) => {
-      registrados.push((JSON.parse(String(o.body)) as { item: { id: string } }).item.id);
-      return lista(...registrados);
-    },
-  });
-}
-
-let pendentes: ((r: LA.LocalAuthenticationResult) => void)[] = [];
-async function liberar() {
-  await act(async () => {
-    pendentes.shift()!({ success: true });
-    await drenar();
-  });
-}
-const prompts = () => jest.mocked(LA.authenticateAsync).mock.calls.length;
-
-async function appVai(valor: "active" | "inactive" | "background") {
-  await act(async () => {
-    global.__dispararAppState(valor);
-    await drenar();
-  });
-}
+declare const global: typeof globalThis & { __definirAppState: (v: string) => void };
 
 beforeEach(() => {
   prepararCaso();
-  pendentes = [];
+  pendentes.length = 0;
   global.__definirAppState("active");
 });
 
@@ -203,15 +175,8 @@ describe("open-finance-volta — com sessão, trava desligada", () => {
 });
 
 describe("open-finance-volta — trava ligada", () => {
-  beforeEach(() => {
-    jest.mocked(LA.getEnrolledLevelAsync).mockResolvedValue(LA.SecurityLevel.BIOMETRIC);
-    jest.mocked(LA.authenticateAsync).mockClear().mockImplementation(() => new Promise((r) => pendentes.push(r)));
-  });
-
-  afterEach(() => {
-    jest.mocked(LA.getEnrolledLevelAsync).mockResolvedValue(LA.SecurityLevel.NONE);
-    jest.mocked(LA.authenticateAsync).mockResolvedValue({ success: true });
-  });
+  beforeEach(ligarTrava);
+  afterEach(desligarTrava);
 
   it("2 — link frio com sessão salva: a trava no lugar da pilha, ZERO pedidos até liberar", async () => {
     await guardarCredenciais(S);

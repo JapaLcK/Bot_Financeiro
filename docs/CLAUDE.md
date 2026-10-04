@@ -547,6 +547,35 @@ BRL (`adaptive_pricing` off) nas **duas** origens: medido no Stripe de teste em
 2026-10-03, sem o campo a sessão `elements` da `/precos` nasce com ele LIGADO (o
 default da conta), e as caixas mostram R$. O hospedado da `/precos` segue sem o campo.
 
+No frontend, a `/assinar` manda `pagina: true` (e `origem` da query: só `precos`, senão
+`assinar`) e, se a resposta trouxer `pagina`, monta `frontend/pagamento-pagina.js`
+(Payment Element só cartão, resumo pelo `change` do Stripe, as caixas e o cupom
+"Tem cupom?" → `applyPromotionCode`); sem `pagina`, o embutido de antes. O Stripe.js é o
+`endive` na página própria e o `dahlia` no embutido, carregado UMA vez pelo `assinar.js`
+(uma 2ª versão é recusada e cai no plano B; o embutido não depende do arquivo novo).
+Cada caixa marcada chama o `/billing/checkout/bump` dentro do `runServerUpdate`, com
+tudo travado; falha → as caixas voltam ao último conjunto aceito. **Pagar sincroniza o
+estado da tela ANTES do `confirm`** (o que a tela mostra é o que se cobra); falha → não
+confirma. Prazos: `loadActions` 10 s e `/bump` 15 s (plano B / caixas voltam); o relógio
+de 10 s olha `#pagamento iframe`. Sessão fechada (409 `sessao_fechada`, ou
+`session.status.type === "expired"` no `change`, no `loadActions` ou depois de um confirm com erro)
+→ S3 com "Tentar de novo". O dinheiro da sessão é formatado com `currency` e
+`minorUnitsAmountDivisor` lidos dela, junto com o `total.total.minorUnitsAmount`: o SDK exige
+essa leitura, senão o `confirm` lança (docs.stripe.com/js/custom_checkout). Limites aceitos: rede lenta que passa dos 10 s do
+`loadActions` vai ao plano B; um `/bump` que volta depois do prazo é corrigido pela
+sincronização do Pagar; o Pagar faz 1 `/bump` de sincronização quando há caixas (conta nos 120/h por IP). Testes:
+`tests/frontend/pagamento_pagina*.test.mjs`.
+
+A `/precos` (`startCheckout`) manda `pagina: true` só fora do app (`window.PB_IN_APP`: no
+app a `/assinar` vai ao hospedado, e uma sessão `elements` criada antes seria expirada e
+refeita) e, com a resposta `pagina`, navega para
+`/assinar?plano=…&ciclo=…&origem=precos`, que reaproveita a sessão; o
+InitiateCheckout/begin_checkout fica para a `/assinar` (perda conhecida: o begin_checkout
+de lá vai sem `value`). Sem `pagina` na resposta, o hospedado de antes, com o rastreio de
+antes. Limite aceito: cada compra pela `/precos` gasta 2 chamadas do limite de 20/h do
+create-checkout (a da `/precos` e a da `/assinar`). Testes:
+`tests/frontend/precos_pagina_propria.test.mjs`.
+
 **`POST /billing/checkout/bump`** (`frontend/routes/billing_bump.py`): o order bump da
 página própria. Corpo `{sid, posicoes}` = o CONJUNTO desejado inteiro, em posições da
 foto (`[]` = nenhum); o preço sai sempre da foto da sessão, nunca do cliente. Campo a
@@ -607,6 +636,43 @@ no banco; contestação GANHA continua com `disputed` True, então também segur
 sempre. Limite conhecido: estorno por nota de crédito para o saldo do cliente (sem refund na
 charge) NÃO é detectado. Estorno "pending" real e contestação real chegando antes da
 entrega só se provam no Stripe; o modo teste sobe `amount_refunded` na hora.
+
+**Cadernos extras no Pix anual (PR A: receber e entregar; inerte até o checkout
+gravar a foto).** `pix_charges.extras` (`jsonb`, default `[]`, check de array) guarda a
+FOTO dos cadernos escolhidos, `[{price, url, nome, valor_cents}]`, gravada só por
+`criar_cobranca`. `amount_cents` continua sendo SÓ o plano (crédito de upgrade,
+`pix_charges_amount_fecha` e `plan_grants` não mudam); o que o cliente paga é
+`core/services/pix_extras.total_cents` (plano + Σ cadernos), usado no `alertar_valor`,
+no alerta do estorno parcial, no GA4/CAPI e no `total_cents` do poll. O dreno ganhou o
+efeito `ebook` logo depois do `grant`: uma linha em `ebook_entregas` por caderno, com
+`session_id` = `external_reference` (`pix:<id>`) e `ebook_price` = o Price do Stripe;
+sem cadernos é no-op registrado, e ele herda D3 (estorno antes do `RECEIVED` não grava)
+e o órfão (nada). O e-mail de confirmação discrimina plano, cada caderno e o total
+(dono, Q4); sem cadernos é o de antes. O job entrega a linha `pix:` ANTES de qualquer
+chamada ao Stripe (`pix_extras.conferir_entrega`): cobrança do dono por `user_id` +
+referência (senão `nao_comprou`); status local `refunded`/`refunded_partial`/`chargeback`
+fecha `estornado` sem consultar o Asaas; senão `GET /v3/payments/{id}`: `RECEIVED`/
+`CONFIRMED` sem `refunds` entrega (nome do caderno vem da foto), status de estorno ou
+contestação, ou `refunds` não vazia, fecha `estornado`; falha ou forma inesperada não
+envia nem fecha (claim expira). Sem `STRIPE_SECRET_KEY` o job não roda, inclusive para
+as linhas Pix. Na junção de contas, caderno ainda não entregue cai com a origem
+(cascade), como no Stripe — no Pix a origem com plano vigente já fica presa. Nomes reais
+dos status de estorno/contestação e a forma de `refunds` só se provam no sandbox do
+Asaas.
+
+**PR B: emitir com os cadernos (backend; invisível até o modal mandar `extras`).** O
+`POST /billing/pix/checkout` aceita `extras: list[str]` (ids de Price, até 3, sem
+repetir, senão 400). O cliente nunca manda preço: `pix_extras.escolher` relê a oferta
+ATUAL (`extras_assinar.ofertas_da_pagina`, a mesma do cartão) depois das recusas que já
+existiam e antes de qualquer escrita; id fora dela dá 409 `extras_indisponiveis` com a
+oferta atual, sem gravar e sem chamar o Asaas. Sem `extras` o Stripe nem é consultado
+(o plano vende com ele fora). O Asaas cobra `total_cents` e a descrição ganha " + N
+caderno(s)". A cobrança pendente só é reaproveitada com o MESMO conjunto de ids (a ordem
+não importa); outro conjunto cancela a remota e cria nova (DELETE que falha dá 503). O
+`GET /billing/pix-extras` (logado) devolve as caixas (texto e preço do cartão + id, sem
+a URL) e a seleção da cobrança `pending` com QR vivo (Q6). A oferta é vazia, e o POST com
+cadernos dá 409, quando a venda Pix ou a `CHECKOUT_PAGINA_PROPRIA` estão desligadas
+(Q2), ou sem `STRIPE_SECRET_KEY`.
 
 Rollback do código de N produtos: o código velho usa `on conflict (user_id,
 session_id)`, que exige a PK de 2 colunas. Antes de reverter, apagar as linhas extras

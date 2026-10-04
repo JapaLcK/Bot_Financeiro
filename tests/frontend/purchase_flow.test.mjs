@@ -116,8 +116,8 @@ test("plano escolhido atravessa cadastro e segue ao checkout sem voltar aos plan
   assert.ok(navigations.includes("/continuar-compra"), navigations);
   assert.equal(navigations.includes("/precos"), false, navigations);
   assert.deepEqual(checkoutBodies, [
-    { interval: "monthly", plan: "plus" },
-    { interval: "monthly", plan: "plus" },
+    { interval: "monthly", pagina: true, plan: "plus" },
+    { interval: "monthly", pagina: true, plan: "plus" },
   ]);
   const resumed = await page.evaluate(() => JSON.parse(sessionStorage.getItem("pb_purchase_intent_v1")));
   assert.equal(resumed.status, "checkout_started");

@@ -40,7 +40,8 @@ from core.crypto import encrypt_pii_optional
 from core.observability import log_system_event_sync
 from core.services import asaas
 from core.services.pix_checkout_resposta import (
-    VENCIMENTO_DIAS, expira, qr_da_linha, resposta)
+    VENCIMENTO_DIAS, expira, qr_da_linha, qr_vivo, resposta)
+from core.services.pix_extras import escolher, total_cents
 from core.services.pix_pricing import (  # noqa: I001
     DURACAO_DIAS, PRECOS_ANUAIS_CENTS, CoberturaJaPaga, plano_da_cobranca)
 
@@ -101,26 +102,6 @@ def pix_annual_available() -> bool:
     paga e concedida com a flag desligada — caso 56 do §16.
     """
     return (os.getenv("ASAAS_PIX_ANNUAL_ENABLED") or "").strip() in ("1", "true", "True")
-
-
-def _grants_para_precificar(user_id: int) -> list[dict]:
-    """Os grants ativos do usuário **com `amount_cents`** — o "join" que
-    `plano_da_cobranca` exige do chamador, e sem o qual todo crédito vira 0. Em
-    Python porque as duas metades filtram por `user_id` cada uma (§0).
-    """
-    from db.pix_charges_saga import valores_por_cobranca
-    from db.plan_grants import list_grants
-
-    valores = valores_por_cobranca(user_id)
-    ativos = []
-    for g in list_grants(user_id):
-        if g["status"] != "active":
-            continue
-        item = dict(g)
-        item["amount_cents"] = (valores.get(str(g["external_ref"]))
-                                if g["source"] == "pix" else None)
-        ativos.append(item)
-    return ativos
 
 
 def _stripe_vivo(user_id: int) -> tuple[str, datetime] | None:
@@ -190,11 +171,11 @@ def _cancelar_remota(linha: dict) -> None:
 
 def criar_checkout(user_id: int, *, plan_stored: str, cpf_cnpj: str, nome: str,
                    email: str | None = None, rastreio: dict[str, str] | None = None,
-                   confirm_cancel_stripe: bool = False) -> dict:
+                   confirm_cancel_stripe: bool = False, extras=()) -> dict:
     """Emite (ou reaproveita) a cobrança Pix anual. **Roda sob lock do usuário.**
 
-    Levanta `CheckoutIndisponivel` (503), `Vitalicio`, `StripeAtivo` e `CoberturaJaPaga`
-    (409); a quinta é `TitularRecusado` (400, de `asaas_customers`). **Nem todo 503 sai
+    Levanta `CheckoutIndisponivel` (503), `Vitalicio`, `StripeAtivo`, `CoberturaJaPaga` e
+    `ExtrasIndisponiveis` (409); e `TitularRecusado` (400, de `asaas_customers`). **Nem todo 503 sai
     antes da primeira escrita**: dos nove do módulo, três levantam com a linha JÁ gravada
     — `asaas_cancelamento_falhou` (em `canceling`), `cobranca_ativa_persistiu` (a antiga
     em `canceled`, e a cobrança que houvesse no Asaas já apagada) e `asaas_emissao_falhou`
@@ -229,10 +210,14 @@ def criar_checkout(user_id: int, *, plan_stored: str, cpf_cnpj: str, nome: str,
 
     # A recusa do §7 (`CoberturaJaPaga`) sai daqui, de uma função PURA, antes de
     # qualquer escrita e antes de qualquer chamada ao Asaas.
-    venda = plano_da_cobranca(_grants_para_precificar(user_id), plan_stored,
+    from db.pix_charges_saga import grants_para_precificar  # noqa: PLC0415
+    venda = plano_da_cobranca(grants_para_precificar(user_id), plan_stored,
                                 preco, min_cents)
+    # Os cadernos (ids de Price), relidos da oferta ATUAL: o valor vem do Stripe, nunca
+    # do corpo. Depois das recusas e antes de qualquer escrita; sem ids, sem Stripe.
+    foto = escolher(user_id, list(extras))
 
-    linha = _criar_ou_substituir(user_id, plan_stored, venda, stripe_sub, rastreio)
+    linha = _criar_ou_substituir(user_id, plan_stored, venda, stripe_sub, rastreio, foto)
     # `access_starts_at` da LINHA só é escrito no pagamento (§7), então ela o traz
     # nulo aqui — quem já o calculou é `plano_da_cobranca`, e é esse valor que a
     # tela mostra. Sem passá-lo, `starts_at` saía nulo em todo checkout.
@@ -242,10 +227,10 @@ def criar_checkout(user_id: int, *, plan_stored: str, cpf_cnpj: str, nome: str,
                    cpf_cnpj, nome, email)
 
 
-def _criar_ou_substituir(user_id, plan_stored, venda, stripe_sub, rastreio):
-    """Insere o `draft`, substituindo a ativa quando o plano MUDA. Devolve a
-    linha nova, ou **`None`** quando a que já existe é do mesmo plano — aí quem
-    chama devolve o mesmo QR (decisão do dono)."""
+def _criar_ou_substituir(user_id, plan_stored, venda, stripe_sub, rastreio, foto):
+    """Insere o `draft`, substituindo a ativa quando o plano (ou o conjunto de
+    cadernos) MUDA. Devolve a linha nova, ou **`None`** quando a que já existe é
+    do mesmo plano e conjunto — aí quem chama devolve o mesmo QR (decisão do dono)."""
     from db.pix_charges import criar_cobranca
     from db.pix_charges_saga import buscar_ativa
 
@@ -257,7 +242,7 @@ def _criar_ou_substituir(user_id, plan_stored, venda, stripe_sub, rastreio):
             duration_days=DURACAO_DIAS,
             stripe_subscription_id=stripe_sub[0] if stripe_sub else None,
             stripe_period_end_at=stripe_sub[1] if stripe_sub else None,
-            rastreio=rastreio)
+            rastreio=rastreio, extras=foto)
 
     linha = _inserir()
     if linha is not None:
@@ -271,10 +256,10 @@ def _criar_ou_substituir(user_id, plan_stored, venda, stripe_sub, rastreio):
         raise CheckoutIndisponivel("cobranca_ativa_sumiu")
     # QR VENCIDO não se reaproveita: o `OVERDUE` do Asaas pode atrasar ou se
     # perder, e `pending` não volta para a reconciliação — devolver o mesmo
-    # código expirado prendia o cliente sem cobrança pagável para sempre.
-    vencido = (ativa["qr_expires_at"] is not None
-               and ativa["qr_expires_at"] <= datetime.now(timezone.utc))
-    if ativa["plan"] == plan_stored and ativa["status"] == "pending" and not vencido:
+    # código expirado prendia o cliente sem cobrança pagável para sempre. Cadernos:
+    # só o MESMO conjunto de ids (a ordem não importa); outro conjunto substitui.
+    if (qr_vivo(ativa) and ativa["plan"] == plan_stored
+            and {e["price"] for e in ativa["extras"]} == {e["price"] for e in foto}):
         return None
     _cancelar_remota(ativa)
     nova = _inserir()
@@ -315,10 +300,12 @@ def _emitir(linha: dict, cpf_cnpj: str, nome: str, email: str | None) -> dict:
 
     transicionar(linha["id"], de=("draft",), para="creating")
     vence = date.today() + timedelta(days=VENCIMENTO_DIAS)
+    n = len(linha["extras"])
+    cadernos = f" + {n} caderno{'s' if n > 1 else ''}" if n else ""
     try:
         cliente = criar_cliente(nome=nome, cpf_cnpj=cpf_cnpj, email=email)
         pagamento = asaas.criar_pagamento_pix(
-            customer_id=cliente, valor_cents=int(linha["amount_cents"]),
+            customer_id=cliente, valor_cents=total_cents(linha),
             due_date=vence.isoformat(),
             external_reference=linha["external_reference"],
             # NOME COMERCIAL, não o slug: esta linha é a descrição da FATURA que
@@ -331,7 +318,7 @@ def _emitir(linha: dict, cpf_cnpj: str, nome: str, email: str | None) -> dict:
             # Separador ASCII de propósito: como cada app de banco renderiza um
             # travessão (U+2014) na descrição do Pix não dá para verificar aqui,
             # e o hífen não perde nada. O texto era ASCII puro antes do #350.
-            descricao=f"{plan_display_name(linha['plan'])} - plano anual")
+            descricao=f"{plan_display_name(linha['plan'])} - plano anual" + cadernos)
         qr = asaas.obter_qr_pix(str(pagamento.get("id") or ""))
     except TitularRecusado:
         # ANTES do `except Exception`, que engoliria esta e a devolveria como o 503 de "tenta de novo".
