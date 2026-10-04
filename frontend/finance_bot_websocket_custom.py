@@ -5376,7 +5376,9 @@ async def _billing_checkout_for_user(stripe_mod, user_id: int, plan: str, interv
 async def billing_plans_config():
     """Config pública da página de planos (sem auth): a /precos usa isto pra
     decidir se mostra a escada v2 (Grátis/Essencial/Plus/Pro/Premium) ou o
-    layout legado de plano único. Flag off = página atual intacta."""
+    layout legado de plano único. Flag off = página atual intacta.
+    `pagina_propria`: com ela, o deslogado (cartão) da /precos vai à /assinar."""
+    from core.services.extras_assinar import pagina_propria_ligada
     from core.services.pix_checkout import pix_annual_available
     from core.services.plan_service import plans_v2_enabled, trial_days_total
     return {
@@ -5391,6 +5393,7 @@ async def billing_plans_config():
         # fora dos módulos do Pix. Ele está fazendo trabalho real — a flag mora
         # com quem a obedece.
         "pix_annual_available": pix_annual_available(),
+        "pagina_propria": pagina_propria_ligada(),
     }
 
 
