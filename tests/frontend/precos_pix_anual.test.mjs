@@ -523,8 +523,9 @@ test("PT6: pago -> /home?upgrade=success com sid = public_token", async () => {
   // `gw=pix` é o MARCADOR de gateway e viaja sempre; dinheiro e data NÃO
   // viajam (ver PT6c): a /home busca os dois em `/billing/pix/<sid>`.
   assert.equal(url.searchParams.get("gw"), "pix");
+  // `extras` vazio: aqui o `GET /billing/pix-extras` dá 404 e não nasce caixa (precos_pix_extras.test.mjs).
   assert.deepEqual(corposPix[0],
-    { plan: "plus", interval: "annual", cpf_cnpj: CPF });
+    { plan: "plus", interval: "annual", cpf_cnpj: CPF, extras: [] });
   await page.close();
 });
 

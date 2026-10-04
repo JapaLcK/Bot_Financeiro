@@ -9,24 +9,38 @@ do usuário. Regra em dois passos:
    `X-Forwarded-For` (a que o Railway escreve; as anteriores o cliente controla).
    Entrada inválida ou cabeçalho ausente → o peer. Peer fora da faixa → o peer, e
    os cabeçalhos são IGNORADOS.
-2. **Cliente.** Se a conexão é um IP da Cloudflare (`CLOUDFLARE_FAIXAS`) e há
-   exatamente um `CF-Connecting-IP` que é IP válido, público (`_publico`) e sem
-   zona IPv6, ele é o cliente. Senão, a conexão.
+2. **Cliente.** Se a borda é confiável e há exatamente um `CF-Connecting-IP`
+   que é IP válido, público (`_publico`) e sem zona IPv6, ele é o cliente.
+   Senão, a conexão. Borda confiável:
+   - **com `CLOUDFLARE_ORIGIN_SECRET`** (≥ 32 chars, lida a cada chamada): só
+     quando chega exatamente um `x-pigbank-cf-secret` igual a ela (tempo
+     constante, sem `strip`; duplicado, vazio ou diferente não confere). A
+     faixa da conexão deixa de importar: em produção a última entrada do XFF é
+     um IP de infra, não da Cloudflare (sondas #791/#808), e o segredo é o que
+     prova que a requisição passou pela regra da Cloudflare (`SEGREDO_CABECALHO`).
+     Com o segredo certo, a conexão só sai no resultado se o `CF-Connecting-IP`
+     vier ausente ou inválido; com ele errado ou ausente, sai sempre a conexão.
+   - **sem a env, ou curta:** a conexão é um IP da Cloudflare
+     (`CLOUDFLARE_FAIXAS`) — o comportamento anterior, inalterado.
 
 `PROXY_RAILWAY` é SUPOSIÇÃO apoiada na medição do dono em produção (todas as chaves
-`ip:` de `auth_rate_limits` em 100.64.x.x); o Railway não documenta a faixa. A
-única suposição de segurança da regra é que o Railway ESCREVE a última entrada do
-XFF; se ele passasse a repassar o XFF do cliente sem acrescentar, o IP ficaria
-falsificável — a sonda abaixo vigia isso (`xff_entradas`, `xri_igual_conexao`).
+`ip:` de `auth_rate_limits` em 100.64.x.x); o Railway não documenta a faixa. Com ou
+sem segredo, peer fora dela ignora todos os cabeçalhos. Sem a env, a única
+suposição de segurança é que o Railway ESCREVE a última entrada do XFF; se ele
+passasse a repassar o XFF do cliente sem acrescentar, o IP ficaria falsificável —
+a sonda abaixo vigia isso (`xff_entradas`, `xri_igual_conexao`).
 
-Ressalva de segurança: a borda do Railway é alcançável sem passar pela Cloudflare,
-por isso o `CF-Connecting-IP` só vale quando a conexão É da Cloudflare — sem essa
-checagem qualquer um forja o IP. Quem passa pela Cloudflare não forja o IP de
-outra pessoa (a Cloudflare sobrescreve o `CF-Connecting-IP`, pela documentação
-dela; não verificado aqui). Risco residual aceito: Worker/zona do atacante sai de
-IPs da Cloudflare e escreve o cabeçalho que quiser (pior caso: divide balde de
-rate limit com outro tráfego de Worker). O fechamento completo (Transform Rule
-com cabeçalho secreto) está fora do plano da #766.
+Ressalva de segurança: a borda do Railway é alcançável sem passar pela Cloudflare.
+Sem a env, o `CF-Connecting-IP` só vale quando a conexão É da Cloudflare, e o risco
+residual é o Worker/zona do atacante, que sai de IPs da Cloudflare e escreve o
+cabeçalho que quiser. Com a env, esse caminho fica desligado e o risco residual
+passa a ser o VAZAMENTO do segredo (quem o tem forja qualquer IP batendo direto
+no Railway); o remédio é a rotação (trocar a env e a regra). Quem passa pela
+Cloudflare não forja o IP de outra pessoa, nem o segredo, se a regra da
+Cloudflare DEFINE o cabeçalho (sobrescreve o do cliente) — pela documentação
+dela; não verificado aqui. Regra em "Adicionar" faz chegar dois valores, e
+duplicado não confere (falha fechado). O valor do segredo nunca vai para a
+sonda, log, print ou exceção.
 
 Lista desatualizada falha para o lado SEGURO: um IP novo da Cloudflare fora da
 lista cai no IP da borda (a granularidade de antes desta mudança), nunca abre
@@ -35,14 +49,23 @@ falsificação. Atualizar = PR que muda a constante.
 from __future__ import annotations
 
 import ipaddress
+import os
 import sys
 from threading import Thread
 from typing import Any, Callable
 
+from core.secure_compare import constant_time_eq
 from core.system_event_log import log_system_event_sync
 
 
 PROXY_RAILWAY = ipaddress.ip_network("100.64.0.0/10")
+
+# Cabeçalho que a regra da Cloudflare DEFINE com o segredo. Sem prefixo `cf-`,
+# que a Cloudflare reserva (SUPOSIÇÃO). Configuração: `.env.example`.
+SEGREDO_CABECALHO = "x-pigbank-cf-secret"
+SEGREDO_ENV = "CLOUDFLARE_ORIGIN_SECRET"
+_SEGREDO_MINIMO = 32
+_AVISOU_SEGREDO_CURTO = False
 
 # Fonte: https://www.cloudflare.com/ips-v4 e https://www.cloudflare.com/ips-v6,
 # baixadas em 2026-10-03. Para conferir:
@@ -121,6 +144,21 @@ def _cabecalhos(headers: Any, nome: str) -> list[str]:
     return [] if valor is None else [valor]
 
 
+def _segredo_esperado() -> str | None:
+    """O segredo da env, ou None (ausente ou curto = comportamento anterior).
+    Curto avisa UMA vez por processo em stderr, sem o valor nem o comprimento."""
+    global _AVISOU_SEGREDO_CURTO
+    valor = (os.getenv(SEGREDO_ENV) or "").strip()
+    if not valor:
+        return None
+    if len(valor) < _SEGREDO_MINIMO:
+        if not _AVISOU_SEGREDO_CURTO:
+            _AVISOU_SEGREDO_CURTO = True
+            print(f"[client_ip] {SEGREDO_ENV} curto demais: ignorado", file=sys.stderr)
+        return None
+    return valor
+
+
 def _sonda(montar: Callable[[], dict]) -> None:
     """Grava em `system_event_logs` cada combinação NOVA de sinais. Só booleanos
     e contagens: nunca IP, user agent ou path."""
@@ -168,11 +206,17 @@ def client_ip(conn: Any) -> str | None:
     conexao = ultima or peer_ip
     conexao_cf = any(conexao in faixa for faixa in CLOUDFLARE_FAIXAS)
 
+    esperado = _segredo_esperado()
+    seg = _cabecalhos(headers, SEGREDO_CABECALHO)
+    segredo_ok = (esperado is not None and len(seg) == 1 and isinstance(seg[0], str)
+                  and constant_time_eq(seg[0], esperado))
+    borda_confiavel = segredo_ok if esperado is not None else conexao_cf
+
     cf = _cabecalhos(headers, "cf-connecting-ip")
     cf_ip = _ip(cf[0]) if len(cf) == 1 else None
     # Só IP público: loopback/privado/CGNAT/doc colidiriam com o fallback
     # "127.0.0.1" ou com chaves gravadas antes (100.64.x.x) — tabela, linha 5.
-    usa_cf = conexao_cf and cf_ip is not None and _publico(cf_ip)
+    usa_cf = borda_confiavel and cf_ip is not None and _publico(cf_ip)
     cliente = cf_ip if usa_cf else conexao
 
     xri = _cabecalhos(headers, "x-real-ip")
@@ -181,7 +225,9 @@ def client_ip(conn: Any) -> str | None:
     # cf_valido: um único CF e IP válido (sem zona), global ou não.
     # cf_global: esse IP passa em `_publico` (false = Pseudo-IPv4 240/4,
     # privado, multicast...); com conexao_cf=true, cf_global=false significa
-    # fonte="conexao". *_tipo: categoria de `_tipo`.
+    # fonte="conexao". *_tipo: categoria de `_tipo`. segredo_*: só booleanos
+    # (alarmes: presente e não ok = segredo errado ou regra em "Adicionar";
+    # presente e não configurado = regra criada e env ausente/curta).
     _sonda(lambda: {
         "xff_entradas": _ate_3(len(xff)),
         "conexao_cf": conexao_cf,
@@ -197,6 +243,9 @@ def client_ip(conn: Any) -> str | None:
         "xri_tipo": _tipo(xri_ip),
         "xri_igual_primeira": (xri_ip == primeira) if xri_ip and primeira else None,
         "cf_igual_primeira": (cf_ip == primeira) if cf_ip and primeira else None,
+        "segredo_configurado": esperado is not None,
+        "segredo_presente": bool(seg),
+        "segredo_ok": segredo_ok,
     })
     return str(cliente)
 

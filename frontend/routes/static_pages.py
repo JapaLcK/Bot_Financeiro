@@ -230,6 +230,26 @@ async def serve_pagamento_pagina_js(request: Request):
                         headers={"Cache-Control": _cache_asset_versionado(request)})
 
 
+@router.get("/bump-caixas.js")
+async def serve_bump_caixas_js(request: Request):
+    """As caixas do order bump: /assinar (pagamento-pagina.js) e modal do Pix da /precos (pix-extras.js)."""
+    return FileResponse(FRONTEND_DIR / "bump-caixas.js", media_type="application/javascript",
+                        headers={"Cache-Control": _cache_asset_versionado(request)})
+
+
+@router.get("/bump-caixas.css")
+async def serve_bump_caixas_css(request: Request):
+    return FileResponse(FRONTEND_DIR / "bump-caixas.css", media_type="text/css",
+                        headers={"Cache-Control": _cache_asset_versionado(request)})
+
+
+@router.get("/pix-extras.js")
+async def serve_pix_extras_js(request: Request):
+    """Os cadernos extras no modal do Pix anual (/precos e /continuar-compra)."""
+    return FileResponse(FRONTEND_DIR / "pix-extras.js", media_type="application/javascript",
+                        headers={"Cache-Control": _cache_asset_versionado(request)})
+
+
 @router.get("/pagamento-caixas.js")
 async def serve_pagamento_caixas_js(request: Request):
     return FileResponse(FRONTEND_DIR / "pagamento-caixas.js", media_type="application/javascript",
@@ -440,6 +460,12 @@ async def serve_como_funciona():
 @router.get("/precos")
 async def serve_precos():
     return html_file(FRONTEND_DIR / "precos.html", clarity=True)
+
+
+@router.get("/lp")
+async def serve_lp():
+    # Landing de anúncio: VSL obrigatória e um único botão para a /precos.
+    return html_file(FRONTEND_DIR / "lp.html", clarity=True, inline_css=("brand.css",))
 
 
 @router.get("/continuar-compra")

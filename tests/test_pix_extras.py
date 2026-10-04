@@ -218,7 +218,7 @@ def asaas_falso(monkeypatch):
 
 
 def _emails(mundo, uid):
-    return [e for e in mundo.enviados if e[0] == f"gr-{uid}@t.local" and e[1].startswith("📘 Chegou")]
+    return [e for e in mundo.enviados if e[0] == f"gr-{uid}@t.local" and e[1].startswith("Seu caderno")]
 
 
 def test_j1_received_entrega_os_dois_sem_tocar_no_stripe(user_id, externo, mundo, asaas_falso):

@@ -83,13 +83,14 @@ async function cobreOPainel(page) {
   });
 }
 
-for (const [nome, viewport] of [["desktop", DESKTOP], ["mobile", MOBILE]]) {
+for (const [nome, viewport] of [["desktop", DESKTOP], ["mobile", MOBILE], ["celular deitado", { width: 568, height: 320 }]]) {
   for (const pagina of ["/home.html", "/dashboard.html"]) {
     test(`${pagina} ${nome}: sem senha, o overlay cobre o painel e não fecha`, async () => {
       const { page, ctx } = await abrir(pagina, { me: SEM_SENHA, viewport });
       await overlayVisivel(page);
       assert.equal(await cobreOPainel(page), true);
       assert.equal(await page.textContent("#pb-cs-titulo"), "Crie sua senha para proteger sua conta");
+      assert.equal(await page.textContent(".pb-cs-ok"), "✅ Acesso liberado!");
       assert.equal((await page.textContent(".pb-cs-primario")).trim(), "Enviar link para fulana@exemplo.com");
       const caixa = await page.evaluate(() => {
         const r = document.querySelector(".pb-cs-card").getBoundingClientRect();

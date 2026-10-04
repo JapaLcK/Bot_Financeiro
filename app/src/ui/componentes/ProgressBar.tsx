@@ -1,5 +1,7 @@
-import { View } from "react-native";
+import { useEffect, useRef, useState } from "react";
+import { Animated, View } from "react-native";
 
+import { facilitador, useReduzirMovimento } from "@/ui/motion";
 import { useTema } from "@/ui/tema";
 import { raio, type Paleta } from "@/ui/tokens";
 
@@ -45,6 +47,46 @@ export function ProgressBar({ valor, tom = "brand" }: Props) {
           transformOrigin: "left",
         }}
       />
+    </View>
+  );
+}
+
+/**
+ * Sem porcentagem: algo roda, sem saber quanto falta. Mesma trilha e mesmo
+ * preenchimento da `ProgressBar`; um segmento de 30% corre da esquerda para a
+ * direita sem parar (`translateX`, `useNativeDriver`). Com "reduzir movimento"
+ * nada se desloca: a trilha fica cheia e PULSA (opacidade) — parada e cheia ela
+ * leria como "terminou". Sem `accessibilityValue.now`: não há número a dizer.
+ */
+export function ProgressBarIndeterminada({ rotulo }: { rotulo: string }) {
+  const { cores } = useTema();
+  const reduzir = useReduzirMovimento();
+  const [largura, setLargura] = useState(0);
+  const anima = useRef(new Animated.Value(0)).current;
+  const segmento = largura * 0.3;
+
+  useEffect(() => {
+    anima.setValue(0);
+    const passo = (toValue: number) => Animated.timing(anima, { toValue, duration: 1400, easing: facilitador, useNativeDriver: true });
+    const loop = Animated.loop(reduzir ? Animated.sequence([passo(1), passo(0)]) : passo(1));
+    loop.start();
+    return () => loop.stop();
+  }, [reduzir, anima]);
+
+  const estilo = reduzir
+    ? { flex: 1, opacity: anima.interpolate({ inputRange: [0, 1], outputRange: [1, 0.4] }) }
+    : { width: segmento, flex: 1, transform: [{ translateX: anima.interpolate({ inputRange: [0, 1], outputRange: [-segmento, largura] }) }] };
+
+  return (
+    <View
+      accessible
+      accessibilityRole="progressbar"
+      accessibilityLabel={rotulo}
+      accessibilityState={{ busy: true }}
+      onLayout={(e) => setLargura(e.nativeEvent.layout.width)}
+      style={{ height: 8, borderRadius: raio.sm, backgroundColor: cores.surface, overflow: "hidden" }}
+    >
+      <Animated.View style={[{ backgroundColor: cores.brand }, estilo]} />
     </View>
   );
 }

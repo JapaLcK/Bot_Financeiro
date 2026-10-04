@@ -25,8 +25,31 @@ import { conexoes, registrarItem } from "@/services/openFinance";
 const ID_DO_ITEM = /^[A-Za-z0-9_-]{1,64}$/;
 
 export const INTERVALO_MS = 3_000;
-export const JANELA_MS = 120_000;
+/** Medido no iPhone: o item fica em `updating` por 16 s, 42 s e ≥ ~89 s depois do `onSuccess`. */
+export const JANELA_MS = 300_000;
 export const MAX_POSTS = 3;
+
+let widget = false;
+
+/**
+ * O widget da Pluggy está em foco. O link da volta chega ANTES do `onSuccess`
+ * do widget e, com esta flag ligada, o `app/+native-intent.ts` o descarta: a
+ * rota não tampa o widget. A tela do widget (telas 5–7, PR futuro) liga por
+ * foco — `useFocusEffect(() => { definirWidgetAberto(true); return () => definirWidgetAberto(false); })`
+ * — e no `onSuccess` chama `definirWidgetAberto(false)` ANTES do
+ * `router.replace({ pathname: "/open-finance-volta", params: { itemId } })`.
+ * Sem chamador na main ainda: a flag fica `false` e nada muda.
+ *
+ * ponytail: o link descartado levava o `itemId`. Se o widget fechar sem
+ * `onSuccess` e o `item/created` do webhook se perder, ninguém faz o POST; o PR
+ * das telas 5–7 fecha isso.
+ */
+export function definirWidgetAberto(v: boolean): void {
+  widget = v;
+}
+export function widgetAberto(): boolean {
+  return widget;
+}
 
 /** Conexão nesses estados não conta como "já está lá": o POST a reescreve. */
 const MORTOS = new Set(["removed", "item_missing"]);
@@ -128,7 +151,7 @@ export async function conferirVolta(link: unknown, d: Dependencias): Promise<voi
       if (e instanceof RequisicaoSuperada) return;
       if (e instanceof SessaoExpirada) return d.expirou(e.detalhe);
       // Visto o item, o banco já conectou: falha definitiva vira `organizando`, e a
-      // transitória não muda a tela (segue em "Atualizando…"). "Definitiva" inclui
+      // transitória não muda a tela (segue em `updating`). "Definitiva" inclui
       // `ContratoInvalido` (status 200: `transitoria()` o dá como não transitório), e
       // por isso este ramo vem antes do dele: depois de visto, `organizando`; antes,
       // `erro`. Coberto pelo "contrato quebrado" do N8.
