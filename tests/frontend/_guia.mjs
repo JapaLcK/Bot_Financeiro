@@ -29,7 +29,9 @@ function aplicar(g, c) {
   n.estado = c.acao === "dispensar" ? "dispensado" : n.passos.every((p) => p.feito) ? "concluido" : "em_andamento";
   return n;
 }
-export async function abrir({ width = 1280, height = 800, guia = "oferecer", perfil = "padrao", motion = "reduce", post, rota = "/", perfilLento = 0, semDialog = false, antes } = {}) {
+// `dica`: a de Assinaturas "vista" (a da fixture), "nova" (ainda não vista) ou "sem" (o plano não
+// dá); `dicaLenta`: o POST /guia/dica responde depois de N ms. `s.dicas`: os ids postados.
+export async function abrir({ width = 1280, height = 800, guia = "oferecer", perfil = "padrao", plano = "pro", motion = "reduce", post, rota = "/", perfilLento = 0, semDialog = false, antes, dica = "vista", dicaLenta = 0 } = {}) {
   const ctx = await browser.newContext({ viewport: { width, height }, reducedMotion: motion, timezoneId: "America/Sao_Paulo" });
   // A caixa do Piggy pelo left/top gravado, sem o transform: a inclinação e o voo aumentam o
   // retângulo pintado, e "encostar" é sobre onde ele pousa.
@@ -41,10 +43,19 @@ export async function abrir({ width = 1280, height = 800, guia = "oferecer", per
   });
   // Safari 14 (sem <dialog>): o mesmo corte do dashboard_v2_cmdk.test.mjs.
   if (semDialog) await ctx.addInitScript(() => { delete HTMLDialogElement.prototype.showModal; delete HTMLDialogElement.prototype.close; });
-  await servir(ctx, undefined, { perfil });
+  await servir(ctx, undefined, { perfil, plano });
   // Perfil chegando depois do guia: a corrida em que o convite brigaria com o modal de perfil.
   if (perfilLento) await ctx.route("**/api/v2/perfil", async (r) => { await new Promise((ok) => setTimeout(ok, perfilLento)); return r.fallback(); });
-  const s = { g: structuredClone(RESPOSTAS.guia[guia]), posts: [] };
+  const s = { g: structuredClone(RESPOSTAS.guia[guia]), posts: [], dicas: [] };
+  if (dica === "sem") s.g.dicas = [];
+  if (dica === "nova") s.g.dicas.forEach((d) => { d.vista = false; });
+  await ctx.route("**/api/v2/guia/dica", async (r) => {
+    const { dica: id } = r.request().postDataJSON();
+    s.dicas.push(id);
+    if (dicaLenta) await new Promise((ok) => setTimeout(ok, dicaLenta));
+    s.g.dicas.forEach((d) => { if (d.id === id) d.vista = true; });
+    return r.fulfill({ json: s.g });
+  });
   await ctx.route("**/api/v2/guia", async (r) => {
     if (r.request().method() === "GET") return r.fulfill({ json: s.g });
     const c = r.request().postDataJSON();

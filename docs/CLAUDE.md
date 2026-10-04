@@ -318,6 +318,16 @@ Sub-app FastAPI (`api/v2/app.py`) montado pelo monólito com `app.mount("/api/v2
     from guia_painel g join users u on u.id = g.user_id;
   ```
 
+  **Dicas de tela.** O `Guia` também traz `dicas: [{id, tela, titulo, texto, vista}]`, do
+  catálogo `DICAS` em `api/v2/guia.py` (hoje só `assinaturas.marcas`), filtradas pelo plano
+  (`plan_gate_ok` do recurso da tela: `subscriptions` para Assinaturas; o Essencial recebe
+  `[]`). `POST /api/v2/guia/dica {dica}` carimba a 1ª vez em `guia_painel.dicas`
+  (`{dica_id: carimbo}`, coluna por `alter … if not exists`) e devolve o `Guia`; id fora do
+  catálogo = 422; não toca `oferecido_em` nem `feitos` (o guia segue em `oferecer`). Dica que
+  o plano não dá grava e é inofensiva: o GET não a devolve. O cliente (`parts/Dica.tsx`) mostra
+  a dica uma vez, sem mover o foco e nunca com o guia aberto; a Ajuda vira menu só na tela com
+  dica (`parts/Ajuda.tsx`), e o Cmd-K ganha "Como funciona esta tela" lá.
+
 - **Dinheiro na v2 é `Decimal` e sai como TEXTO decimal** (`"1234.56"`, sem arredondar e sem
   float), em toda rota: no TS é `string`. A escala é a da coluna (`"1000"` e `"1000.00"`
   valem). O contrato vale para toda rota futura.
