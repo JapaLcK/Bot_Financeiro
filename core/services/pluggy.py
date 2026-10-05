@@ -311,7 +311,7 @@ def pluggy_products() -> list[str]:
 
 
 def create_pluggy_connect_token(user_id: int, webhook_url: str | None = None,
-                                oauth_redirect_uri: str | None = None) -> dict:
+                                oauth_redirect_uri: str | None = None, item_id: str | None = None) -> dict:
     api_key = create_pluggy_api_key()
     options: dict[str, Any] = {
         "clientUserId": str(user_id),
@@ -326,7 +326,9 @@ def create_pluggy_connect_token(user_id: int, webhook_url: str | None = None,
     if products:
         options["products"] = products
 
-    payload = {"options": options}
+    payload: dict[str, Any] = {"options": options}
+    if item_id:  # reconexão: nível de cima, ao lado de `options` (doc do connect_token)
+        payload["itemId"] = item_id
     with httpx.Client(timeout=_pluggy_timeout()) as client:
         resp = client.post(
             f"{_pluggy_base_url()}/connect_token",
