@@ -30,7 +30,7 @@ for (const [status, body, texto] of [
   await page.getByText(texto, { exact: false }).waitFor();
   assert.equal(await page.locator('.lanc-form input[name="descricao"]').inputValue(), "Rascunho preservado");
   assert.equal(posts, 1);
-  if (status === 422) assert.equal(await page.evaluate(() => document.activeElement?.getAttribute("name")), "data");
+  if (status === 422) { await page.waitForFunction(() => document.activeElement?.getAttribute("name") === "data"); assert.equal(await page.evaluate(() => document.activeElement?.getAttribute("name")), "data"); }
   if (body.error?.code === "plan_limit") assert.equal(await page.locator('.lanc-form a[href="/precos"]').count(), 1);
   await ctx.close();
 });
@@ -54,8 +54,10 @@ for (const rede of [true, false]) test(`${rede ? "POST grava/perde resposta" : "
   assert.equal(await salvar(page).isDisabled(), true);
   getFalha = false;
   await page.getByRole("button", { name: "Atualizar para conferir" }).click();
-  await page.getByText("Lista atualizada. Feche este formulário e confira a lista antes de repetir a gravação.").waitFor();
-  assert.equal(await salvar(page).isDisabled(), true); // conferir em tela antes de nova tentativa
+  await page.locator(".lanc-form").waitFor({ state: "detached" });
+  assert.equal(await page.getByRole("button", { name: "Conferi os lançamentos", exact: true }).isEnabled(), true);
+  await page.getByRole("button", { name: "Lançar na Carteira", exact: true }).click();
+  assert.equal(await salvar(page).isDisabled(), true); // GET não libera a guarda persistente
   await page.getByRole("button", { name: "Fechar detalhes" }).click();
   await page.locator('[data-id="l999"]').waitFor();
   assert.equal(posts, 1);

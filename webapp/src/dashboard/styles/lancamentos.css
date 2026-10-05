@@ -1,5 +1,8 @@
 /* Extrato real: metadados continuam visíveis no celular. */
 .lancamentos { min-width: 0; container-type: inline-size; height: auto; }
+.topbar[data-historico="true"] { flex-wrap: wrap; height: auto; padding-top: 6px; padding-bottom: 6px; }
+.topbar[data-historico="true"] .month-year { display: inline; }
+.lanc-conferencia { min-width: 0; overflow-wrap: anywhere; }
 .lanc-content { display: grid; gap: 12px; }
 .lancamentos .btn, .lanc-form .btn { min-height: 44px; height: auto; white-space: normal; }
 .lanc-toolbar { display: flex; flex-wrap: wrap; margin: -8px 0 0 -8px; }

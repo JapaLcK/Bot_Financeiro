@@ -616,16 +616,20 @@ PR de cada etapa, não soluções prontas. Cada PR confere se ainda valem, decid
     Testes locais: `tests/test_of_identidade_e_campos_bancarios.py`, além das famílias de
     reconciliação, Open Finance, dinheiro em espécie, cartão e lançamentos v2. Não provam
     callback real da Pluggy, WhatsApp nem comportamento no aparelho após deploy.
-  - PR 4 (implementado, revisão local aprovada): a página de
+  - PR 4 (#836): a página de
     Lançamentos do `/painel` consome `/api/v2/lancamentos`, categorias e contas reais,
     com mês da barra, busca no histórico do plano, filtros do contrato e cursor opaco
     por “Carregar mais”, sem somar páginas. Criação só na Carteira (espécie), detalhes,
     edição e confirmação de apagar seguem `pode`; o POST leva somente campos tocados
     desde a abertura e valores decimais em texto. Escritas não repetem automaticamente;
-    resposta perdida exige atualizar/conferir antes de nova tentativa. Sucesso e
-    conferência explícita reiniciam na primeira página; erro de escrita relê as páginas
+    resposta perdida conserva contexto e rascunho nesta aba. A recuperação abre GET fresco
+    sem filtros no mês da data enviada ou no mês retornado pelo servidor quando a data
+    foi omitida; editar data permite conferir origem e destino, e cartão usa a fatura.
+    A guarda só libera após confirmação manual na lista, com paginação disponível.
+    Busca histórica efetiva exibe anos nos grupos e linhas. Sucesso reinicia na primeira
+    página; a conferência reinicia somente a consulta alvo. Erro de escrita relê as páginas
     carregadas, preservando o rascunho e atualizando `pode`, sem confundir página descartada
-    com item removido. Ambos invalidam categorias, contas e todos os resumos em cache.
+    com item removido. Sucesso e erro invalidam categorias, contas e todos os resumos em cache.
     Modal reutiliza dialog/fallback Safari 14 e coordena Cmd-K. Os exemplos do chat e do
     protótipo seguem demonstrativos; no painel real os CTAs abrem o extrato sem filtros
     do exemplo, e Cmd-K omite lançamentos/categorias fictícios. Mantidos fora P8 (depósitos

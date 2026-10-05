@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState, type FormEvent } from "react";
-import type { Categoria, Conta, Edicao, Lancamento } from "../lib/api-v2.gen";
+import type { Categoria, Conta, Edicao, Lancamento, NovoLancamento } from "../lib/api-v2.gen";
 import { ErroApi } from "../lib/v2";
 import { moneyIn } from "../lib/format.js";
 import { LancamentoContexto } from "./LancamentoLinha";
@@ -10,19 +10,19 @@ type Campos = "descricao" | "valor" | "data" | "categoria";
 const ERROS = { descricao: "Informe uma descrição com até 200 caracteres.", valor: "Use um valor maior que zero, até 9 dígitos e 2 casas decimais, sem separador de milhares.", data: "Confira a data e a janela do seu plano.", categoria: "Escolha uma categoria disponível." };
 const FOCUS = 'input:not(:disabled), select:not(:disabled), button:not(:disabled), [tabindex="-1"]';
 
-export function LancamentoForm({ item, indisponivel, categorias, contas, escrita, fechar }: {
+export function LancamentoForm({ item, indisponivel, categorias, contas, escrita, fechar, conferir, rascunho, mes, historico }: {
   item?: Lancamento; indisponivel: boolean; categorias: Categoria[]; contas: Conta[];
-  escrita: ReturnType<typeof useLancamentoMutation>; fechar: () => void;
+  escrita: ReturnType<typeof useLancamentoMutation>; fechar: () => void; conferir: () => Promise<void>;
+  rascunho?: NovoLancamento; mes: string; historico: boolean;
 }) {
   const dlg = useRef<HTMLDialogElement>(null);
-  const [campos, setCampos] = useState({ descricao: item?.descricao ?? "", valor: item?.valor ?? "", data: item?.data ?? "", categoria: item?.categoria ?? "" });
+  const [campos, setCampos] = useState({ descricao: item?.descricao ?? rascunho?.descricao ?? "", valor: item?.valor ?? rascunho?.valor ?? "", data: item?.data ?? rascunho?.data ?? "", categoria: item?.categoria ?? rascunho?.categoria ?? "" });
   const inicial = useRef({ ...campos }).current;
-  const [tipo, setTipo] = useState<"entrada" | "saida">("saida");
+  const [tipo, setTipo] = useState<"entrada" | "saida">(rascunho?.tipo ?? "saida");
   const [apagar, setApagar] = useState(false);
   const [erro, setErro] = useState("");
   const [errors, setErrors] = useState<Partial<Record<Campos, string>>>({});
   const [limite, setLimite] = useState(false);
-  const [conferida, setConferida] = useState(false);
   const novo = !item;
   const pode = (campo: Campos | "apagar") => !indisponivel && (novo || item.pode.includes(campo));
   const travado = escrita.pendente || escrita.bloqueado || indisponivel;
@@ -66,7 +66,7 @@ export function LancamentoForm({ item, indisponivel, categorias, contas, escrita
       if (Object.keys(corpo).length === 1) { setErro("Nenhum campo foi alterado."); return; }
       acao = { acao: "editar", corpo };
     }
-    try { if (await escrita.salvar(acao) && dlg.current?.isConnected) fecharDialog(); }
+    try { if (await escrita.salvar(acao, item, mes, historico) && dlg.current?.isConnected) fecharDialog(); }
     catch (err) {
       if (!(err instanceof ErroApi) || err.status === 0 || err.status >= 500 || (err.status >= 200 && err.status < 300)) setErro("A gravação pode ter sido concluída. Atualize e confira a lista antes de repetir.");
       else if (err.status === 422) {
@@ -108,13 +108,12 @@ export function LancamentoForm({ item, indisponivel, categorias, contas, escrita
         </div>}
         {(erro || indisponivel) && <p role="alert">{indisponivel ? "Este lançamento não está mais disponível." : erro}</p>}
         {limite && <a className="btn btn-ghost" href="/precos">Ver planos</a>}
-        {escrita.bloqueado && <div className="lanc-conferir"><p>A resposta se perdeu. Atualize a lista e confira os itens antes de salvar novamente.</p><button type="button" className="btn btn-ghost" disabled={escrita.pendente} onClick={async () => { if (await escrita.atualizar()) setConferida(true); }}>Atualizar para conferir</button></div>}
-        {conferida && <p role="status">Lista atualizada. Feche este formulário e confira a lista antes de repetir a gravação.</p>}
+        {escrita.bloqueado && <div className="lanc-conferir"><p>A resposta se perdeu. Atualize a lista e confira os itens antes de salvar novamente.</p><button type="button" className="btn btn-ghost" disabled={escrita.pendente} onClick={conferir}>Atualizar para conferir</button></div>}
         <footer>
           {!novo && pode("apagar") && !apagar && <button className="btn btn-quiet" type="button" disabled={travado} onClick={() => setApagar(true)}>Apagar</button>}
           {apagar && <button className="btn btn-ghost" type="button" onClick={() => setApagar(false)}>Voltar aos detalhes</button>}
           <button className="btn btn-ghost" type="button" onClick={fecharDialog}>{novo ? "Cancelar" : "Fechar"}</button>
-          {(novo || item.pode.some((p) => p !== "apagar") || apagar) && <button className="btn btn-primary" type="submit" disabled={travado || conferida}>{escrita.pendente ? "Salvando…" : apagar ? "Confirmar apagar" : "Salvar"}</button>}
+          {(novo || item.pode.some((p) => p !== "apagar") || apagar) && <button className="btn btn-primary" type="submit" disabled={travado}>{escrita.pendente ? "Salvando…" : apagar ? "Confirmar apagar" : "Salvar"}</button>}
         </footer>
       </form>
     </dialog>

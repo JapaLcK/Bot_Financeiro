@@ -15,13 +15,13 @@ export function LancamentoContexto({ item, contas = [] }: { item: Lancamento; co
     <Selos motivos={item.motivos} />
   </>;
 }
-export function LancamentoLinha({ item, categorias, contas, abrir }: { item: Lancamento; categorias: Categoria[]; contas: Conta[]; abrir: () => void }) {
+export function LancamentoLinha({ item, categorias, contas, abrir, historico = false }: { item: Lancamento; historico?: boolean; categorias: Categoria[]; contas: Conta[]; abrir: () => void }) {
   const nome = categorias.find((c) => c.chave === item.categoria)?.nome ?? item.categoria ?? "Sem categoria";
   return <li className="lanc-linha" data-id={item.id}>
     <div className="lanc-principal">
       <button type="button" className="lanc-abrir" onClick={abrir} aria-label={`Detalhes: ${item.descricao ?? "Sem descrição"}`}>
         <b>{item.descricao ?? "Sem descrição"}</b>
-        <span className="faint">{dayMonth(isoDay(item.data))}{item.hora && ` · ${item.hora}`} · {nome}</span>
+        <span className="faint">{dayMonth(isoDay(item.data))}{historico && ` ${item.data.slice(0, 4)}`}{item.hora && ` · ${item.hora}`} · {nome}</span>
       </button>
       <span className={`lanc-valor num ${!item.interno && item.tipo === "entrada" ? "gain" : ""}`}>
         <span>{item.interno ? "Movimento" : item.tipo === "entrada" ? "Entrada" : "Saída"}</span>{moneyIn(Number(item.valor), item.moeda)}
