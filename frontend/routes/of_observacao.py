@@ -81,6 +81,29 @@ async def _observa(item_id: str, connection_id: int, user_id: int) -> None:
     await _pista(connection_id, user_id)
 
 
+async def _tarefa(item_id: str, connection_id: int, user_id: int) -> None:
+    """Tratamento de topo da tarefa de fundo (o webhook já respondeu 200): falha
+    inesperada vira log estruturado e, se der, a pista. Nunca texto da exceção
+    (#541: mensagem de erro de banco leva host/porta); só o tipo. Se o banco é
+    justamente o que caiu, a pista e o log falham e são engolidos: o slot de
+    `_INFLIGHT` solta pelo callback de qualquer jeito."""
+    try:
+        await _observa(item_id, connection_id, user_id)
+    except Exception as exc:  # noqa: BLE001
+        try:
+            await log_system_event(
+                "warning", "of_observacao_falhou",
+                "Observação do webhook falhou por erro inesperado",
+                source="open_finance", user_id=user_id,
+                details={"item_id": item_id, "tipo_do_erro": type(exc).__name__})
+        except Exception:  # noqa: BLE001
+            pass
+        try:
+            await _pista(connection_id, user_id)
+        except Exception:  # noqa: BLE001
+            pass
+
+
 def agenda_observacao(item_id: str, conexao: dict) -> None:
     """Chamada pelo webhook com a linha que `get_connections_by_item_id` resolveu
     (a posse do item). Em voo: coalesce em `_DIRTY` (a rodada suja é um sync, que
@@ -89,7 +112,7 @@ def agenda_observacao(item_id: str, conexao: dict) -> None:
         _of._DIRTY.add(item_id)
         return
     task = asyncio.create_task(
-        _observa(item_id, conexao["id"], conexao["user_id"]),
+        _tarefa(item_id, conexao["id"], conexao["user_id"]),
         name=f"pluggy_observa_{item_id}")
     _of._INFLIGHT[item_id] = task
     task.add_done_callback(lambda _t: _of._on_sync_done(item_id))

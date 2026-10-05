@@ -678,6 +678,9 @@ Texto novo do PR-A, visível ao usuário: o detalhe
     retentativa (`_open_finance_refresh`) mais o cooldown de 30 min, ou
     indefinidamente com `OF_HEALTH_CHECK_ENABLED=0`, só quando o GET da Pluggy falha;
     igual ou melhor que antes do PR-C2.
+  - Falha inesperada da tarefa de observação (banco/pool, bug): log
+    `of_observacao_falhou` (dono na coluna, só item_id e o tipo da exceção em
+    `details`) e a pista `ERROR`, quando o banco ainda responde.
   - A pista bumpa `updated_at`: um job de saúde com o lote em andamento perde o CAS
     naquele item e o reavalia no próximo tique.
   - A rodada suja (`_DIRTY`) é um SYNC completo, sem corte por plano, disparado por

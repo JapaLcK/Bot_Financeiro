@@ -31,6 +31,9 @@ com `cmp`; remeça se mexer no código):
       "1ª derrota relê" vermelho;
   negativo (rodada 3), sem `user_id=` nos dois logs de `of_observacao.py`: o
       diverge e o perdeu_corrida ficam vermelhos (dono na coluna, padrão do #541);
+  negativo (rodada 4), sem o `_tarefa` (try/except de topo): os 2 casos de exceção
+      ficam vermelhos (sem log nem pista); `str(exc)` em `details`: o assert da
+      MARCA fica vermelho; positivo: o caminho feliz não loga `of_observacao_falhou`;
   negativo (rodada 2), sem a checagem de `_TERMINAL` em `_observa`: os 2 casos
       PAUSED/DELETED vermelhos (2 GET e log falso); sem o `add_done_callback` que
       solta o slot: os 2 casos de exceção reprovam por asserção em `_drena`
@@ -630,22 +633,65 @@ def test_item_error_em_conexao_terminal_nao_le_nem_escreve(user_id, monkeypatch,
     assert not [e for e in logs if e["event"] == "of_observacao_perdeu_corrida"]
 
 
+MARCA = "SENHA-no-erro"
+
+
 @pytest.mark.parametrize("onde", ["observar_item", "get_linha"])
-def test_excecao_na_tarefa_solta_o_slot_de_inflight(user_id, monkeypatch, onde):
-    _ativa(user_id, monkeypatch)
+def test_excecao_na_tarefa_solta_o_slot_loga_e_tenta_a_pista(user_id, monkeypatch, logs, onde):
+    antes = _ativa(user_id, monkeypatch, "read_failed")
     _Remoto(monkeypatch, ITEM_SAUDAVEL)
+    real = obs.get_linha_para_observar
+    chamadas = {"n": 0}
 
     def _boom(*a, **k):
-        raise RuntimeError("banco caiu")
+        raise RuntimeError(f"connection to server at db.interno failed {MARCA}")
 
     if onde == "observar_item":
         monkeypatch.setattr(obs, "observar_item", _boom)
     else:
-        monkeypatch.setattr(obs, "get_linha_para_observar", _boom)
+        def _linha_que_cai_so_na_1a(*a, **k):
+            chamadas["n"] += 1
+            if chamadas["n"] == 1:
+                _boom()
+            return real(*a, **k)
+        monkeypatch.setattr(obs, "get_linha_para_observar", _linha_que_cai_so_na_1a)
 
     assert _posta([_erro()]) == [200]    # `_posta` reprova se o slot não soltar
 
     assert of_routes._INFLIGHT == {} and of_routes._DIRTY == set()
+    falhou = [e for e in logs if e["event"] == "of_observacao_falhou"]
+    assert len(falhou) == 1
+    assert falhou[0]["user_id"] == user_id                       # dono na coluna (#541)
+    assert falhou[0]["details"] == {"item_id": ITEM, "tipo_do_erro": "RuntimeError"}
+    assert MARCA not in json.dumps(falhou[0], default=str)        # nunca o texto da exceção
+    depois = _estado()                                            # a pista, com o motivo intacto
+    assert (depois["status"], depois["status_reason"]) == ("ERROR", "read_failed")
+    assert depois["health"] == antes["health"] and depois["raw"] == antes["raw"]
+
+
+def test_excecao_na_tarefa_com_log_e_banco_fora_nao_propaga_e_solta_o_slot(user_id, monkeypatch):
+    _ativa(user_id, monkeypatch)
+    _Remoto(monkeypatch, ITEM_SAUDAVEL)
+
+    def _boom(*a, **k):
+        raise RuntimeError("banco fora")
+
+    async def _log_boom(*a, **k):
+        raise RuntimeError("log fora")
+
+    monkeypatch.setattr(obs, "get_linha_para_observar", _boom)   # a pista também cai
+    monkeypatch.setattr(obs, "log_system_event", _log_boom)
+
+    assert _posta([_erro()]) == [200]
+
+    assert of_routes._INFLIGHT == {}
+
+
+def test_caminho_feliz_nao_loga_falha(user_id, monkeypatch, logs):
+    _ativa(user_id, monkeypatch)
+    _Remoto(monkeypatch, ITEM_SAUDAVEL)
+    _posta([_erro()])
+    assert not [e for e in logs if e["event"] == "of_observacao_falhou"]
 
 
 def test_limite_da_decisao_a_pista_grava_error_sobre_no_accounts(user_id, monkeypatch):
