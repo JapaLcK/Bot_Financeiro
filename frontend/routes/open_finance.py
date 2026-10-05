@@ -2277,7 +2277,8 @@ async def open_finance_pluggy_webhook(request: Request):
         # A metade de STRING da mesma via — NUL (`\u0000`) e surrogate solitário,
         # no valor OU na chave — é o que o `limpa_para_pg` fecha (#317). Nenhum
         # dos dois existe em `text`/`jsonb`, então eles davam 500 no `Jsonb(raw)`
-        # de update_pluggy_open_finance_item_status, no param `text` do item_id,
+        # de update_pluggy_open_finance_item_status (desde o PR-C2 só `item/deleted`
+        # chega lá; `item/created`/`item/error` não gravam `raw`), no param `text` do item_id,
         # no get_connections_by_item_id e na lista de transactionIds do `any(%s)`
         # de delete_open_finance_transactions (psycopg a adapta como text[]) — e
         # ainda faziam o `Jsonb(details)` do log_system_event perder a linha de
@@ -2314,14 +2315,12 @@ async def open_finance_pluggy_webhook(request: Request):
     item = event.get("item")
     item_id = str(event.get("itemId") or event.get("item_id")
                   or (item.get("id") if isinstance(item, dict) else None) or "")
-    # `item/updated` NÃO escreve mais ACTIVE: quem afirma que sincronizou é o sync,
-    # depois de consultar o item e puxar as contas. O webhook só diz o que a Pluggy
-    # disse.
-    status_by_event = {
-        "item/created": "UPDATING",
-        "item/error": "ERROR",
-        "item/deleted": "DELETED",
-    }
+    # O webhook só grava o que é TERMINAL e certo: `item/deleted`. `item/created` e
+    # `item/error` NÃO gravam status, motivo nem `raw` (PR-C2): o sync (created/updated)
+    # e a observação (`of_observacao.py`, error) relêem o item e quem escreve é o
+    # `observar_item`. `item/updated` também não escreve ACTIVE: quem afirma que
+    # sincronizou é o sync.
+    status_by_event = {"item/deleted": "DELETED"}
     status = status_by_event.get(event_name)
     if item_id and status:
         await asyncio.to_thread(update_pluggy_open_finance_item_status, item_id, status, event)
@@ -2336,10 +2335,14 @@ async def open_finance_pluggy_webhook(request: Request):
         deleted_ids = event.get("transactionIds") or event.get("transactionsIds") or []
         if isinstance(deleted_ids, list) and deleted_ids:
             await asyncio.to_thread(delete_open_finance_transactions, item_id, deleted_ids)
-    elif item_id and event_name in PLUGGY_SYNC_EVENTS:
+    elif item_id and (event_name in PLUGGY_SYNC_EVENTS or event_name == "item/error"):
         if len(conexoes) == 1:
-            _schedule_pluggy_sync(item_id)
-        elif not conexoes:
+            if event_name == "item/error":
+                from frontend.routes.of_observacao import agenda_observacao  # circular: lazy
+                agenda_observacao(item_id, conexoes[0])
+            else:
+                _schedule_pluggy_sync(item_id)
+        elif not conexoes and event_name != "item/error":
             # Item que não conhecemos. Em `item/created` — e SÓ nele — pergunta à
             # Pluggy de quem ele é e adota. QUEM ele destrava está na docstring de
             # `_adota_item_orfao` ("Por que existe"), fonte única (CLAUDE.md §0.7);
@@ -2384,7 +2387,7 @@ async def open_finance_pluggy_webhook(request: Request):
                         source="open_finance",
                         details={"item_id": item_id, "error": str(exc)[:200]},
                     )
-        else:
+        elif conexoes:
             # Dois donos possíveis: sincronizar um deles é sincronizar a carteira
             # do usuário errado. Recusa.
             await log_system_event(

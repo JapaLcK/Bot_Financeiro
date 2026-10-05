@@ -607,7 +607,8 @@ def list_connections_needing_reconnect(user_id: int | None = None, within_days: 
           -- a coluna `status` a partir do MESMO item — `WAITING_USER_ACTION`
           -- vira `status='WAITING_USER_ACTION'`, que NÃO está na cláusula de
           -- erro abaixo, então a linha nem chega ao filtro; (2) o outro escritor
-          -- de `raw` é o webhook (`update_pluggy_open_finance_item_status`), e
+          -- de `raw` é o webhook (`update_pluggy_open_finance_item_status`,
+          -- desde o PR-C2 só em `item/deleted`, terminal e fora desta lista), e
           -- lá `raw` é o ENVELOPE do evento, não o item — `raw->>'status'` não
           -- seria um `item_status`. O `executionStatus` abaixo não tem nenhum
           -- dos dois problemas: o `OUTDATED` da Caixa casa com a cláusula de
@@ -951,27 +952,14 @@ def update_pluggy_open_finance_item_status(provider_item_id: str, status: str, r
                 """
                 update open_finance_connections
                 set status=%s,
-                    -- O par (status, status_reason) é UM estado só. Este caminho
-                    -- (webhook) não passa pelo `resolve_connection_state` porque
-                    -- ele não observa o item — só repete o que a Pluggy disse —,
-                    -- mas grava o MESMO par que o resolvedor daria: linhas B/C da
-                    -- tabela (item em erro) são ERROR + motivo VAZIO, porque quem
-                    -- conta a história ali é o status/health, não o motivo de
-                    -- ontem. Sem isto, `item/error` sobre ACTIVE/no_accounts
-                    -- produzia ERROR/no_accounts — par incoerente (medido).
-                    -- EXCEÇÃO, `item_missing`: WEBHOOK NÃO É EVIDÊNCIA DE ITEM VIVO.
-                    -- Apagá-lo REBAIXA a mensagem — um `item/error` entregue com
-                    -- atraso (replay) sobre o par que o job de saúde acabou de
-                    -- gravar virava ERROR/None → "Erro temporário / Tentaremos de
-                    -- novo automaticamente" (medido), e o usuário parava de ser
-                    -- mandado refazer a conexão. Aceitar isso seria aceitar até
-                    -- ~12h (OF_HEALTH_MAX_AGE_SEC) mostrando estado saudável numa
-                    -- conexão que exige ação — a mentira que esta onda existe para
-                    -- matar. Quem PODE limpar `item_missing` é só quem OBSERVA o
-                    -- item: o job de saúde (GET /items) e o sync bem-sucedido, os
-                    -- dois pelo `resolve_connection_state`. E o par continua
-                    -- coerente: ERROR/item_missing é exatamente a linha A da tabela,
-                    -- o mesmo par que o job de saúde grava.
+                    -- PR-C2: o webhook só chama isto com `item/deleted` (terminal).
+                    -- `item/created`/`item/error` não passam mais por aqui: quem
+                    -- escreve o par de uma observação é `observar_item`, e a pista de
+                    -- erro vai por `mark_sync_result`, sem apagar o motivo.
+                    -- O `case` abaixo (ERROR vindo de fora apaga o motivo, MENOS
+                    -- `item_missing`) vale para os demais chamadores e para testes:
+                    -- evento atrasado não é evidência de item vivo, só quem OBSERVA
+                    -- o item (job de saúde, sync) limpa `item_missing`.
                     status_reason=case
                         when lower(coalesce(status_reason,'')) = 'item_missing' then status_reason
                         else null end,
