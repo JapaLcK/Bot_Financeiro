@@ -116,7 +116,8 @@ def test_migracao_agenda_e_nao_deleta(user_id, externo, stripe_falso):
 
 
 def test_venda_comum_nao_fala_com_o_stripe(user_id, externo, stripe_falso):
-    """POSITIVO do grupo, e é a esmagadora maioria das vendas.
+    """POSITIVO do grupo, e é a esmagadora maioria das vendas. Vale para conta SEM
+    `stripe_customer_id` (a deste teste); com customer, o efeito consulta o Stripe.
 
     `stripe_subscription_id is null` → no-op REGISTRADO: o par entra em
     `pix_payment_effects` e o laço segue para o `grant`. Sem este caso, a versão

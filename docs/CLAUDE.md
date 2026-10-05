@@ -665,6 +665,28 @@ sempre. Limite conhecido: estorno por nota de crédito para o saldo do cliente (
 charge) NÃO é detectado. Estorno "pending" real e contestação real chegando antes da
 entrega só se provam no Stripe; o modo teste sobe `amount_refunded` na hora.
 
+**Cartão nunca cobra período que um Pix pago cobre.** Checkout de cartão concluído (ou
+1ª fatura, `subscription_create`) com Pix cobrindo hoje (`pix_cobre_agora`: grant vigente
+ou cobrança paga com a janela em curso, ainda sem grant; grant Pix revogado não conta; o
+`create-checkout` recusa com `409 pix_active` pela mesma função) cancela a assinatura na hora
+(`core/services/cartao_recusado_por_pix.py`, `Subscription.cancel` com
+`cancellation_details.comment = "pigbank:pix_vigente"`), registra os cadernos e não
+materializa nada; plano cobrado vira alerta de estorno manual, e o `deleted` com a marca
+não manda e-mail de cancelamento. Na ordem inversa (cartão primeiro, Pix pago depois), o
+efeito `stripe_cancel` do dreno pergunta ao Stripe (`_stripe_vivo`) e agenda
+`cancel_at_period_end` quando a cobrança não tem `stripe_subscription_id` ou quando a
+gravada já está morta (`canceled`/`incomplete_expired`; o cliente a cancelou e assinou
+outra antes de pagar um QR antigo), gravando a assinatura achada (sempre a que foi
+agendada) e a janela adiada na linha antes de o efeito contar como feito; com a gravada
+morta, o começo que esperava o fim dela é desfeito antes de adiar até o fim da viva (que
+pode acabar antes, e o Pix não fica esperando a morta); gravada morta e
+nenhuma viva: não há `modify` e a janela que esperava o fim dela volta para agora. Com
+cadernos, o alerta manda estornar o plano só depois de `ebook_entregas` marcar `enviado`.
+Limites conhecidos: (1) assinatura que morre depois de o
+`stripe_cancel` registrar deixa a janela adiada; (2) cobrança paga com grant ainda por
+nascer: o `create-checkout` recusa, mas a tela de status mostra sem plano até o grant sair;
+(3) a reentrega do checkout repete o alerta de estorno.
+
 **Cadernos extras no Pix anual (PR A: receber e entregar; inerte até o checkout
 gravar a foto).** `pix_charges.extras` (`jsonb`, default `[]`, check de array) guarda a
 FOTO dos cadernos escolhidos, `[{price, url, nome, valor_cents}]`, gravada só por
