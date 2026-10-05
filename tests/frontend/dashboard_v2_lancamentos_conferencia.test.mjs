@@ -1,10 +1,20 @@
 import { test, before, after } from "node:test";
 import assert from "node:assert/strict";
+import { mkdtemp, rm } from "node:fs/promises";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
 import { chromium } from "playwright";
 import { abrirPainel, exigeArtefatoEmDia, RESPOSTAS } from "./_painel.mjs";
-let browser;
-before(async () => { exigeArtefatoEmDia(); browser = await chromium.launch(); });
-after(() => browser?.close());
+let browser, screenshots;
+before(async () => {
+  exigeArtefatoEmDia();
+  screenshots = await mkdtemp(join(tmpdir(), "pigbank-pr4-conferencia-"));
+  browser = await chromium.launch();
+});
+after(async () => {
+  await browser?.close();
+  if (screenshots) await rm(screenshots, { recursive: true, force: true });
+});
 const base = RESPOSTAS.lancamentos.estados;
 const save = (page) => page.locator(".lanc-form").getByRole("button", { name: "Salvar", exact: true });
 async function novo(page, data = "") {
@@ -193,14 +203,14 @@ for (const width of [1440, 390, 320]) test(`conferência visível / ${width}: fo
     await page.keyboard.press("Shift+Tab"); await page.keyboard.press("Tab");
     assert.equal(await page.locator('.lanc-form').evaluate((d) => d.contains(document.activeElement)), true);
     await save(page).click(); await page.locator('.lanc-conferir').waitFor();
-    await page.screenshot({ path: `/private/tmp/pr4-codex-modal-${width}.png` });
+    await page.screenshot({ path: join(screenshots, `pr4-codex-modal-${width}.png`) });
     await recuperar(page);
     assert.equal(await page.evaluate(() => document.activeElement?.classList.contains("lanc-aviso")), true);
     assert.equal(await page.locator(".month-year").isVisible(), true, "recuperação histórica mantém ano visível no celular");
     const geometry = await page.evaluate(() => ({ overflow: document.documentElement.scrollWidth - innerWidth,
       controles: [...document.querySelectorAll('.lanc-conferencia .btn')].map((b) => b.getBoundingClientRect().height) }));
     assert.ok(geometry.overflow <= 0, JSON.stringify(geometry)); assert.ok(geometry.controles.every((h) => h >= 44));
-    await page.screenshot({ path: `/private/tmp/pr4-codex-conferencia-${width}.png`, fullPage: true });
+    await page.screenshot({ path: join(screenshots, `pr4-codex-conferencia-${width}.png`), fullPage: true });
     await page.getByRole("button", { name: "Conferi os lançamentos", exact: true }).click();
     await page.getByRole("button", { name: "Voltar ao rascunho" }).click(); await page.keyboard.press("Escape");
     assert.equal(await page.locator('.lanc-form').count(), 0);

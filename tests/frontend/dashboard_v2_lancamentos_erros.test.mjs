@@ -1,10 +1,20 @@
 import { test, before, after } from "node:test";
 import assert from "node:assert/strict";
+import { mkdtemp, rm } from "node:fs/promises";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
 import { chromium } from "playwright";
 import { abrirPainel, exigeArtefatoEmDia, RESPOSTAS } from "./_painel.mjs";
-let browser;
-before(async () => { exigeArtefatoEmDia(); browser = await chromium.launch(); });
-after(() => browser?.close());
+let browser, screenshots;
+before(async () => {
+  exigeArtefatoEmDia();
+  screenshots = await mkdtemp(join(tmpdir(), "pigbank-pr4-erros-"));
+  browser = await chromium.launch();
+});
+after(async () => {
+  await browser?.close();
+  if (screenshots) await rm(screenshots, { recursive: true, force: true });
+});
 async function abrir() {
   const p = await abrirPainel(browser, { espera: '[data-id="l901"]' });
   await p.ir("/lancamentos");
@@ -214,7 +224,7 @@ for (const [status, width] of [[409, 1440], [422, 390], [404, 320]]) test(`recup
     assert.equal(bodies.length, 1);
     assert.equal(leituras.some((l) => l.depois === 1 && l.cursor === RESPOSTAS.lancamentos.estados.proximo), true);
     assert.deepEqual(erros, []);
-    await page.screenshot({ path: `/private/tmp/pigbank-pr4-recuperacao-${status}-${width}.png` });
+    await page.screenshot({ path: join(screenshots, `pigbank-pr4-recuperacao-${status}-${width}.png`) });
     if (status === 404) {
       assert.equal(await salvar(page).isDisabled(), true);
       assert.equal(await page.locator(`[data-id="${item.id}"]`).count(), 0);
