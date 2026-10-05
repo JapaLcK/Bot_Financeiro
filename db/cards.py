@@ -383,6 +383,8 @@ def reorder_cards(user_id: int, ordered_ids: list[int]) -> int:
 
 
 def get_card_by_id(user_id: int, card_id: int):
+    # A FK é única, mas cartões legados separados podem ter compras na mesma reconexão.
+    # O estado mais novo prevalece: uma conexão antiga ativa não anula uma pausa nova.
     with get_conn() as conn:
         with conn.cursor() as cur:
             cur.execute(
@@ -392,13 +394,25 @@ def get_card_by_id(user_id: int, card_id: int):
                        c.credit_limit, c.color, c.flag, c.last4,
                        c.open_finance_account_id,
                        (u.default_card_id = c.id) as is_default,
-                       (c.open_finance_account_id is not null
-                        and exists (
-                            select 1 from open_finance_accounts oa
-                            join open_finance_connections oc on oc.id = oa.connection_id
-                            where oa.id = c.open_finance_account_id
-                              and upper(coalesce(oc.status, '')) not in ('PAUSED', 'DELETED')
-                        )) as of_sync_active
+                       coalesce((
+                           select upper(coalesce(link.status, '')) not in ('PAUSED', 'DELETED')
+                           from (
+                               select oc.id, oc.status
+                               from open_finance_accounts oa
+                               join open_finance_connections oc on oc.id = oa.connection_id
+                               where oa.id = c.open_finance_account_id
+                                 and oc.user_id = c.user_id
+                               union all
+                               select oc.id, oc.status
+                               from credit_transactions ct
+                               join open_finance_transactions ot on ot.imported_credit_tx_id = ct.id
+                               join open_finance_accounts oa on oa.id = ot.account_id
+                               join open_finance_connections oc on oc.id = oa.connection_id
+                               where ct.card_id = c.id and ct.user_id = c.user_id
+                                 and oc.user_id = c.user_id
+                           ) link
+                           order by link.id desc limit 1
+                       ), false) as of_sync_active
                 from credit_cards c
                 left join users u on u.id = c.user_id
                 where c.user_id = %s and c.id = %s
@@ -595,13 +609,81 @@ def get_or_create_open_finance_card(user_id: int, of_account_id: int, name: str 
 
     with get_conn() as conn:
         with conn.cursor() as cur:
+            # A main antiga podia deixar mais de um cartão para a mesma identidade.
+            # O dono exato precede quem tem compras e o mais antigo; sem consolidar
+            # cartões nem mover faturas/compras que já pertencem a outro cartão legado.
             cur.execute(
-                "select id from credit_cards where user_id=%s and open_finance_account_id=%s",
-                (user_id, of_account_id),
-            )
-            row = cur.fetchone()
-            if row:
-                return row["id"]
+                """select cc.id from credit_cards cc
+                     join open_finance_accounts old on old.id=cc.open_finance_account_id
+                     join open_finance_connections oc on oc.id=old.connection_id
+                     join open_finance_accounts new on new.id=%s
+                     join open_finance_connections nc on nc.id=new.connection_id
+                    where cc.user_id=%s and oc.user_id=%s and nc.user_id=%s
+                      and oc.provider=nc.provider
+                      and old.provider_account_id=new.provider_account_id
+                    order by (cc.open_finance_account_id=new.id) desc,
+                             exists (select 1 from credit_transactions ct
+                                      where ct.user_id=cc.user_id and ct.card_id=cc.id) desc,
+                             cc.id
+                    limit 1""", (of_account_id, user_id, user_id, user_id))
+            previous = cur.fetchone()
+            if previous:
+                # Uma compra histórica pode vir só na conexão antiga. A FK do cartão
+                # avança, mas não volta: a condição usa a associação ATUAL sob o UPDATE.
+                cur.execute(
+                    """update credit_cards cc set open_finance_account_id=new.id
+                         from open_finance_accounts old
+                         join open_finance_connections oc on oc.id=old.connection_id,
+                              open_finance_accounts new
+                         join open_finance_connections nc on nc.id=new.connection_id
+                        where cc.user_id=%s and cc.id=%s and cc.open_finance_account_id=old.id
+                          and new.id=%s and oc.user_id=cc.user_id and nc.user_id=cc.user_id
+                          and oc.provider=nc.provider
+                          and old.provider_account_id=new.provider_account_id
+                          and nc.id>oc.id
+                          and not exists (select 1 from credit_cards owner
+                                           where owner.user_id=cc.user_id
+                                             and owner.open_finance_account_id=new.id
+                                             and owner.id<>cc.id)""", (user_id, previous["id"], of_account_id))
+                # A conta pode ter adquirido dono depois do SELECT. O cartão
+                # selecionado continua intacto; a compra nova vai ao dono atual.
+                cur.execute("select id from credit_cards where user_id=%s and open_finance_account_id=%s",
+                            (user_id, of_account_id))
+                exact = cur.fetchone()
+                conn.commit()
+                return exact["id"] if exact else previous["id"]
+
+            # A desconexão do espelho novo zera a FK, mas as compras podem ter
+            # voltado ao alias antigo. O nome editado não participa da identidade.
+            cur.execute(
+                """select cc.id from credit_cards cc
+                     join credit_transactions ct on ct.card_id=cc.id and ct.user_id=cc.user_id
+                     join open_finance_transactions t on t.imported_credit_tx_id=ct.id
+                     join open_finance_accounts a on a.id=t.account_id
+                     join open_finance_connections c on c.id=a.connection_id
+                     join open_finance_accounts n on n.id=%s
+                     join open_finance_connections nc on nc.id=n.connection_id
+                    where cc.user_id=%s and cc.open_finance_account_id is null
+                      and c.user_id=cc.user_id and nc.user_id=cc.user_id
+                      and c.provider=nc.provider and a.provider_account_id=n.provider_account_id
+                    order by cc.id limit 1""", (of_account_id, user_id))
+            previous = cur.fetchone()
+            if previous:
+                cur.execute(
+                    """update credit_cards cc set open_finance_account_id=a.id
+                         from open_finance_accounts a
+                         join open_finance_connections c on c.id=a.connection_id
+                        where cc.id=%s and cc.user_id=%s and c.user_id=cc.user_id
+                          and a.id=%s and cc.open_finance_account_id is null
+                          and not exists (select 1 from credit_cards other
+                                          where other.user_id=cc.user_id
+                                            and other.open_finance_account_id=a.id)""",
+                    (previous["id"], user_id, of_account_id))
+                cur.execute("select id from credit_cards where user_id=%s and open_finance_account_id=%s",
+                            (user_id, of_account_id))
+                exact = cur.fetchone()
+                conn.commit()
+                return exact["id"] if exact else previous["id"]
 
             # Reconcilia com um cartão MANUAL de mesmo nome (case/trim-insensível) que ainda
             # não tem conta OF vinculada, e ADOTA ele (vincula esta conta OF). Evita o
@@ -652,7 +734,7 @@ def get_or_create_open_finance_card(user_id: int, of_account_id: int, name: str 
     return card_id
 
 
-def remove_single_credit_transaction(user_id: int, ct_id: int):
+def remove_single_credit_transaction(user_id: int, ct_id: int, *, of_tx_ids=None, disconnect=False):
     """Remove UMA transação de cartão (nunca cascateia o parcelamento), ajustando a fatura.
 
     Ao contrário de `undo_credit_transaction`, ignora `group_id`: usado no rollback do OF
@@ -669,6 +751,19 @@ def remove_single_credit_transaction(user_id: int, ct_id: int):
             tx = cur.fetchone()
             if not tx:
                 return None
+            if of_tx_ids is not None:
+                if disconnect:
+                    from .of_identity import preserve_disconnect_alias
+                    preserve_disconnect_alias(cur, user_id, of_tx_ids, ct_id, credit=True)
+                cur.execute(
+                    """select t.id from open_finance_transactions t
+                         join open_finance_accounts a on a.id=t.account_id
+                         join open_finance_connections c on c.id=a.connection_id
+                        where c.user_id=%s and t.imported_credit_tx_id=%s""", (user_id, ct_id))
+                references = {r["id"] for r in cur.fetchall()}
+                if not references or not references.issubset(of_tx_ids):
+                    conn.commit()
+                    return None  # já transferida; esta conexão não é mais dona da compra
             # valor é assinado (compra +, estorno -) e a fatura foi `total += valor` no insert.
             # Reverter = `total -= valor`, uniforme pros dois casos.
             v = Decimal(str(tx["valor"]))
@@ -706,6 +801,7 @@ def add_imported_credit_purchase(
     installment_no: int | None = None,
     installments_total: int | None = None,
     group_id=None,
+    of_identity=None,
 ):
     """Importa uma transação de cartão do Open Finance, idempotente por (user, source, external_id).
 
@@ -725,6 +821,11 @@ def add_imported_credit_purchase(
 
     with get_conn() as conn:
         with conn.cursor() as cur:
+            if of_identity is not None:
+                from .of_identity import existing_import
+                legacy = existing_import(cur, user_id, of_identity, credit=True)
+                if legacy:
+                    return legacy, False
             cur.execute(
                 "select id from credit_transactions where user_id=%s and source=%s and external_id=%s",
                 (user_id, source, external_id),

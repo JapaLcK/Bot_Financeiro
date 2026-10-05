@@ -1241,7 +1241,7 @@ _EFEITOS_REVERSIVEIS = frozenset({
     "investment_lot_create", "investment_lot_withdrawals",
     # informativas: ficam só no histórico, não há efeito a desfazer
     "funding_source", "tax_summary", "investment_meta",
-    "ofx", "open_finance", "time_known",
+    "ofx", "open_finance", "time_known", "of_original",
 })
 
 # Classificadas e DE FORA da allowlist de propósito: são gravadas
@@ -1667,9 +1667,8 @@ def delete_launch_and_rollback(user_id: int, launch_id: int, *,
     investimento é apagado), e a partir daí o lançamento cai em `kept_unsafe`
     em TODA tentativa, sem caminho de saída pro usuário. É a troca deliberada:
     recusar para sempre não perde dinheiro; seguir perde (R$300 em 5 toques de
-    produto, medido). Em `_rollback_imported_of` (db/open_finance.py), que
-    chama isto dentro de `except Exception: pass`, a recusa é SILÊNCIO.
-    Consertar isso é o PR dos `except`, não este.
+    produto, medido). A limpeza do Open Finance usa `delete_if_shadow` sob lock,
+    sem passar por esta reversão de efeitos manuais.
 
     `escopo_conta_corrente=True` — usado SÓ pelo "apagar tudo" — recusa também
     o que mexe em caixinha/investimento (`_EFEITOS_FORA_DO_APAGAR_TUDO`).
@@ -1693,16 +1692,6 @@ def delete_launch_and_rollback(user_id: int, launch_id: int, *,
         o aviso em `"aviso"`;
       - `api/v2/lancamentos.py` (apagar da v2), que responde `{id}` sem o aviso;
       - `delete_all_launches_and_rollback` (abaixo), que classifica em baldes;
-      - `db/open_finance.py`: `_rollback_imported_of` (sombras: nunca fundidas,
-        então nunca desfazem), dentro de
-        `except Exception: pass` (o confirmar da reconciliação saiu para
-        `db/reconciliation.py`, que apaga a sombra direto e não passa por aqui;
-        a ordem inversa, `propose_manual_reconciliation`, só cria pendência e
-        não apaga nada). Ali uma recusa não vira mensagem nem log: a sombra do
-        Open Finance sobrevive à limpeza, calada. HOJE inalcançável (as chaves que o importador
-        do OF grava estão todas em `_EFEITOS_REVERSIVEIS`, e ele não grava delta
-        de lote), mas qualquer chave nova de OF vira perda silenciosa antes de
-        virar recusa visível. Os `except` de lá são o próximo conserto, não este.
     (`adapters/discord/` também chama; o adaptador está morto e fora do escopo.)
     """
     ensure_user(user_id)

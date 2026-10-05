@@ -223,6 +223,8 @@ TIPO_CANON_SQL = (
 # ele só continuaria respondendo a pergunta errada.
 LAUNCH_HAS_TIME_SQL = """
         CASE
+          WHEN efeitos ? 'of_original'
+            THEN COALESCE((efeitos->>'time_known')::boolean, false)
           WHEN source = 'ofx' THEN false
           WHEN source = 'open_finance'
             THEN COALESCE((efeitos->>'time_known')::boolean, false)
