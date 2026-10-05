@@ -610,7 +610,7 @@ def get_or_create_open_finance_card(user_id: int, of_account_id: int, name: str 
     with get_conn() as conn:
         with conn.cursor() as cur:
             # A main antiga podia deixar mais de um cartão para a mesma identidade.
-            # Reutiliza primeiro quem tem compras, depois o mais antigo; sem consolidar
+            # O dono exato precede quem tem compras e o mais antigo; sem consolidar
             # cartões nem mover faturas/compras que já pertencem a outro cartão legado.
             cur.execute(
                 """select cc.id from credit_cards cc
@@ -621,7 +621,8 @@ def get_or_create_open_finance_card(user_id: int, of_account_id: int, name: str 
                     where cc.user_id=%s and oc.user_id=%s and nc.user_id=%s
                       and oc.provider=nc.provider
                       and old.provider_account_id=new.provider_account_id
-                    order by exists (select 1 from credit_transactions ct
+                    order by (cc.open_finance_account_id=new.id) desc,
+                             exists (select 1 from credit_transactions ct
                                       where ct.user_id=cc.user_id and ct.card_id=cc.id) desc,
                              cc.id
                     limit 1""", (of_account_id, user_id, user_id, user_id))
@@ -639,9 +640,18 @@ def get_or_create_open_finance_card(user_id: int, of_account_id: int, name: str 
                           and new.id=%s and oc.user_id=cc.user_id and nc.user_id=cc.user_id
                           and oc.provider=nc.provider
                           and old.provider_account_id=new.provider_account_id
-                          and nc.id>oc.id""", (user_id, previous["id"], of_account_id))
+                          and nc.id>oc.id
+                          and not exists (select 1 from credit_cards owner
+                                           where owner.user_id=cc.user_id
+                                             and owner.open_finance_account_id=new.id
+                                             and owner.id<>cc.id)""", (user_id, previous["id"], of_account_id))
+                # A conta pode ter adquirido dono depois do SELECT. O cartão
+                # selecionado continua intacto; a compra nova vai ao dono atual.
+                cur.execute("select id from credit_cards where user_id=%s and open_finance_account_id=%s",
+                            (user_id, of_account_id))
+                exact = cur.fetchone()
                 conn.commit()
-                return previous["id"]
+                return exact["id"] if exact else previous["id"]
 
             # A desconexão do espelho novo zera a FK, mas as compras podem ter
             # voltado ao alias antigo. O nome editado não participa da identidade.
