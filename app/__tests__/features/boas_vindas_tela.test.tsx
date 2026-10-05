@@ -5,8 +5,22 @@ jest.mock("react-native/Libraries/Utilities/useColorScheme", () => ({
   default: () => "light",
 }));
 
+// Replica a ordem do Android: o último ouvinte recebe Voltar primeiro.
+const mockVoltarDoSistema = new Set<() => boolean | null | undefined>();
+jest.mock("react-native/Libraries/Utilities/BackHandler", () => ({
+  __esModule: true,
+  default: {
+    exitApp: jest.fn(),
+    addEventListener: (_evento: string, ouvir: () => boolean | null | undefined) => {
+      mockVoltarDoSistema.add(ouvir);
+      return { remove: () => mockVoltarDoSistema.delete(ouvir) };
+    },
+  },
+}));
+
 import { act, fireEvent, renderRouter, screen, waitFor } from "expo-router/testing-library";
 import { router } from "expo-router";
+import { BackHandler } from "react-native";
 
 import { guardarCredenciais } from "@/storage/secure";
 
@@ -35,6 +49,14 @@ async function voltar() {
   });
 }
 
+async function voltarPeloSistema() {
+  await act(async () => {
+    const tratado = [...mockVoltarDoSistema].reverse().some((ouvir) => ouvir());
+    if (!tratado) BackHandler.exitApp();
+    await respirar();
+  });
+}
+
 /** A troca do Google fica presa até `portao.soltar()`; depois responde 400. */
 function trocaPresa() {
   voltaDoGoogle("pigbank://auth?code=code-ana");
@@ -49,6 +71,7 @@ function trocaPresa() {
 }
 
 beforeEach(() => {
+  jest.mocked(BackHandler.exitApp).mockClear();
   prepararCaso();
   rotasGoogle();
 });
@@ -69,6 +92,34 @@ describe("(auth)/boas-vindas — navegação", () => {
     await tocar("Voltar");
     expect(botao("Começar")).toBeTruthy();
     expect(screen.getByRole("header", { name: "PigBank" })).toBeTruthy();
+  });
+
+  it("Voltar do Android retorna à apresentação; outro Voltar libera a saída do app", async () => {
+    renderRouter("./app", { initialUrl: "/" });
+    await waitFor(() => expect(screen).toHavePathname("/boas-vindas"));
+    await tocar("Começar");
+
+    await voltarPeloSistema();
+    expect(screen).toHavePathname("/boas-vindas");
+    expect(botao("Começar")).toBeTruthy();
+    expect(BackHandler.exitApp).not.toHaveBeenCalled();
+
+    await voltarPeloSistema();
+    expect(BackHandler.exitApp).toHaveBeenCalledTimes(1);
+  });
+
+  it("Voltar do Android no login respeita a pilha e mantém a etapa da boas-vindas", async () => {
+    renderRouter("./app", { initialUrl: "/" });
+    await waitFor(() => expect(screen).toHavePathname("/boas-vindas"));
+    await tocar("Começar");
+    await tocar("Já tenho conta");
+    await waitFor(() => expect(screen).toHavePathname("/entrar"));
+
+    await voltarPeloSistema();
+    await waitFor(() => expect(screen).toHavePathname("/boas-vindas"));
+    expect(botao("Criar conta")).toBeTruthy();
+    expect(screen.queryByRole("button", { name: "Começar" })).toBeNull();
+    expect(BackHandler.exitApp).not.toHaveBeenCalled();
   });
 
   it("'Já tenho conta' abre /entrar sem o link de Criar conta, e voltar volta para cá", async () => {
@@ -95,6 +146,9 @@ describe("(auth)/boas-vindas — navegação", () => {
     expect(botao("Continuar com Google").props.accessibilityState).toMatchObject({ busy: true });
     expect(desativado("Criar conta")).toBe(true);
     expect(desativado("Já tenho conta")).toBe(true);
+    await voltarPeloSistema();
+    expect(BackHandler.exitApp).not.toHaveBeenCalled();
+    expect(botao("Continuar com Google").props.accessibilityState).toMatchObject({ busy: true });
     await tocar("Já tenho conta");
     await tocar("Criar conta");
     expect(screen).toHavePathname("/boas-vindas");

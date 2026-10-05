@@ -1,6 +1,6 @@
-import { router } from "expo-router";
-import { useEffect, useState } from "react";
-import { Image, KeyboardAvoidingView, Platform, View } from "react-native";
+import { router, useFocusEffect } from "expo-router";
+import { useCallback, useEffect, useState } from "react";
+import { BackHandler, Image, KeyboardAvoidingView, Platform, View } from "react-native";
 
 import { Apresentacao } from "@/features/auth/Apresentacao";
 import { BotoesSociais, Ou } from "@/features/auth/BotoesSociais";
@@ -39,6 +39,21 @@ export default function BoasVindas() {
   useEffect(() => {
     if (sessao.estado.fase === "anonimo" && sessao.estado.aviso) router.push("/entrar");
   }, []);
+
+  // Começar muda uma etapa local, sem acrescentar uma rota à pilha. No
+  // Android, Voltar retorna à apresentação como o botão da tela; durante
+  // Google/Apple, fica bloqueado. Perder o foco remove o ouvinte para que
+  // Entrar e Criar conta continuem usando o histórico de navegação.
+  useFocusEffect(
+    useCallback(() => {
+      if (!iniciou || !repouso) return;
+      const inscricao = BackHandler.addEventListener("hardwareBackPress", () => {
+        if (!ocupado) setIniciou(false);
+        return true;
+      });
+      return () => inscricao.remove();
+    }, [iniciou, repouso, ocupado]),
+  );
 
   // O aviso de um Google/Apple que falhou sai no próximo toque.
   const ir = (rota: "/criar-conta" | "/entrar") => {
