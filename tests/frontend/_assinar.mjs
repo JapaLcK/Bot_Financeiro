@@ -37,6 +37,8 @@ export const PAGINA = (extras = EXTRAS) => [200, { ...EMBUTIDO[1], pagina: true,
 // null = nenhum botão; "nunca" = o evento não chega). `reg.folha` conta as folhas que abriram (o `click` resolvido);
 // `sdk.folhaParada` = a folha abre e espera (sem confirm automático). `window.__exClica()` entrega o `click` sem passar
 // pelo DOM (o `inert`), `__exConfirma()` o confirm e `__exCancela()` o cancel. O confirm grava em /__stripe/confirm se recebeu ESSE evento (`ev`).
+// `sdk.semClick` = o Express nunca manda o `click` (Apple Pay do Safari): a folha abre direto mesmo com ouvinte.
+// `reg.falhou` conta os `paymentFailed()` chamados no evento de confirm.
 // O modo vem de window.__STRIPE (addInitScript); o registro fica em window.__stripe.
 const STRIPE_FALSO = `(function () {
   var cfg = window.__STRIPE || {}, modo = cfg.modo || "ok";
@@ -111,10 +113,13 @@ const STRIPE_FALSO = `(function () {
               b.style.cssText = "display:block;width:100%;height:48px";
               // A folha abrindo é reg.folha; o confirm é a folha autorizada. Como o Stripe: com on("click"), a folha só
               // abre se a página chamar o resolve do evento; sem ouvinte, abre direto.
-              window.__exConfirma = function () { reg.exEvento = { expressPaymentType: "apple_pay" }; if (h.confirm) h.confirm(reg.exEvento); };
+              window.__exConfirma = function () {
+                reg.exEvento = { expressPaymentType: "apple_pay", paymentFailed: function () { reg.falhou = (reg.falhou || 0) + 1; } };
+                if (h.confirm) h.confirm(reg.exEvento);
+              };
               window.__exClica = function () {
                 var abre = function () { reg.folha = (reg.folha || 0) + 1; if (!cfg.folhaParada) window.__exConfirma(); };
-                if (h.click) h.click({ expressPaymentType: "apple_pay", resolve: abre }); else abre();
+                if (h.click && !cfg.semClick) h.click({ expressPaymentType: "apple_pay", resolve: abre }); else abre();
               };
               window.__exCancela = function () { if (h.cancel) h.cancel({ expressPaymentType: "apple_pay" }); };
               b.onclick = window.__exClica;
