@@ -24,13 +24,37 @@ for (const [status, body, texto] of [
   [404, { error: { code: "lancamento_nao_encontrado", message: "Not Found" } }, "Este lançamento não está mais disponível"],
 ]) test(`erro ${status}/${body.error?.code ?? "CSRF fora envelope"}: mantém rascunho e mensagem local`, async () => {
   const { ctx, page } = await abrir();
-  let posts = 0;
-  await ctx.route("**/api/v2/lancamentos/carteira", (r) => { posts++; return r.fulfill({ status, json: body }); });
+  let posts = 0, enviado, responder;
+  const resposta = new Promise((resolve) => { responder = resolve; });
+  if (status === 422) await page.evaluate(() => {
+    window.adiarNotificacoes = false; window.focosData = [];
+    const timer = window.setTimeout, focus = HTMLElement.prototype.focus;
+    window.setTimeout = (cb, delay, ...args) => timer(cb, window.adiarNotificacoes && delay === 0 ? 200 : delay, ...args);
+    HTMLElement.prototype.focus = function (...args) {
+      if (this.getAttribute("name") === "data") window.focosData.push({ disabled: this.disabled });
+      return focus.apply(this, args);
+    };
+  });
+  await ctx.route("**/api/v2/lancamentos/carteira", async (r) => {
+    posts++; enviado = r.request().postDataJSON();
+    if (status === 422) await resposta;
+    return r.fulfill({ status, json: body });
+  });
   await novo(page); await salvar(page).click();
+  if (status === 422) {
+    await page.waitForFunction(() => document.querySelector('.lanc-form input[name="data"]')?.disabled);
+    await page.evaluate(() => { window.adiarNotificacoes = true; });
+    responder();
+  }
   await page.getByText(texto, { exact: false }).waitFor();
   assert.equal(await page.locator('.lanc-form input[name="descricao"]').inputValue(), "Rascunho preservado");
   assert.equal(posts, 1);
-  if (status === 422) { await page.waitForFunction(() => document.activeElement?.getAttribute("name") === "data"); assert.equal(await page.evaluate(() => document.activeElement?.getAttribute("name")), "data"); }
+  if (status === 422) {
+    await page.waitForFunction(() => !document.querySelector('.lanc-form input[name="data"]')?.disabled && window.focosData.length > 0);
+    assert.deepEqual(enviado, { tipo: "saida", valor: "9.99", descricao: "Rascunho preservado", categoria: null });
+    assert.equal(await page.evaluate(() => window.focosData.every((f) => !f.disabled)), true);
+    assert.equal(await page.evaluate(() => document.activeElement?.getAttribute("name")), "data");
+  }
   if (body.error?.code === "plan_limit") assert.equal(await page.locator('.lanc-form a[href="/precos"]').count(), 1);
   await ctx.close();
 });

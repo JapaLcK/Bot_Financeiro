@@ -38,8 +38,8 @@ export function LancamentoForm({ item, indisponivel, categorias, contas, escrita
   }, []);
   useEffect(() => {
     const campo = Object.keys(errors)[0];
-    if (campo) dlg.current?.querySelector<HTMLElement>(`[name="${campo}"]`)?.focus();
-  }, [errors]);
+    if (campo && !escrita.pendente) dlg.current?.querySelector<HTMLElement>(`[name="${campo}"]`)?.focus();
+  }, [errors, escrita.pendente]);
   const fecharDialog = () => { hide(dlg.current); fechar(); };
   const mudar = (k: Campos, v: string) => setCampos((c) => ({ ...c, [k]: v }));
   const enviar = async (e: FormEvent) => {

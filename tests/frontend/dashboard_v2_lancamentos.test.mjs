@@ -30,6 +30,10 @@ test("mês real, quatro origens, nota, fatura de outro mês, selos e cursor opac
 test("filtros e busca histórica só no servidor; trocar combinação reinicia cursor", async () => {
   const { ctx, page, ir } = await abrir();
   const urls = [];
+  const respostaLista = (quando) => page.waitForResponse((r) => {
+    const u = new URL(r.url());
+    return r.request().method() === "GET" && u.pathname === "/api/v2/lancamentos" && quando(u.searchParams);
+  });
   await ctx.route("**/api/v2/lancamentos?*", (r) => {
     const u = new URL(r.request().url()); urls.push(u);
     return r.fulfill({ json: { ...fixture, itens: u.searchParams.has("q") ? [fixture.itens[4]] : fixture.itens, proximo: null } });
@@ -38,19 +42,27 @@ test("filtros e busca histórica só no servidor; trocar combinação reinicia c
   await page.getByRole("combobox", { name: /^Origem/ }).selectOption("banco");
   await page.getByRole("combobox", { name: /^Tipo/ }).selectOption("saida");
   await page.getByRole("combobox", { name: /^Categoria/ }).selectOption("alimentacao");
+  const conta = respostaLista((p) => p.has("conta"));
   await page.getByRole("combobox", { name: /^Conta/ }).selectOption("7");
+  await (await conta).finished();
+  const historica = respostaLista((p) => p.has("q"));
   await page.getByLabel("Buscar", { exact: true }).fill("loja ação");
+  await (await historica).finished();
   await page.waitForFunction(() => document.querySelector('.lancamentos .w-lede')?.textContent.includes("loja ação"));
+  await page.locator(".lanc-linha").nth(1).waitFor({ state: "detached" });
   const u = urls.at(-1);
   assert.deepEqual(Object.fromEntries(u.searchParams), { mes: "2026-10", origem: "banco", tipo: "saida", categoria: "alimentacao", conta: "7", q: "loja ação" });
   assert.equal(await page.locator('[data-id="c55"]').count(), 1); // backend pode responder data de outro mês
+  const mensal = respostaLista((p) => !p.has("q"));
   await page.getByLabel("Buscar", { exact: true }).fill("a x");
+  await (await mensal).finished();
   await page.getByText("Use pelo menos uma palavra de 2 ou mais caracteres para buscar.").waitFor();
   assert.equal(urls.at(-1).searchParams.has("q"), false);
   await page.getByLabel("Buscar", { exact: true }).fill("");
+  const anterior = respostaLista((p) => p.get("mes") !== "2026-10");
   await page.getByRole("button", { name: "Mês anterior", exact: true }).click();
+  await (await anterior).finished();
   await page.waitForFunction(() => document.querySelector('.month-title')?.textContent === "Setembro 2026");
-  await page.waitForTimeout(50);
   assert.equal(urls.at(-1).searchParams.get("mes"), "2026-09");
   assert.equal(urls.at(-1).searchParams.has("cursor"), false);
   await ctx.close();
