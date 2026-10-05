@@ -577,5 +577,32 @@ PR de cada etapa, não soluções prontas. Cada PR confere se ainda valem, decid
     deadlock antigo apagar × sync em linha ainda não ligada (segue o xfail estrito) e a #793.
     Limite declarado: duas transações do banco fundidas no mesmo lançamento (só com dado
     corrompido; o confirmar recusa `ALREADY_LINKED`) voltam as duas.
+  - PR 3: identidade de importação por `(user_id, provedor, conta no provedor, transação)`;
+    `external_id` novo usa a tupla JSON, sem depender da conexão local. Legado inequívoco
+    conserva lançamento/compra, categoria, descrição e fatura; vínculo entre identidades
+    diferentes recusa com `OF_IDENTITY_AMBIGUOUS`, sem reparação automática nem DDL.
+    Reconectar a mesma identidade transfere o vínculo para a transação na conexão mais nova,
+    preservando pendência/fusão e snapshot; o sync antigo não o retoma. Só há transferência
+    quando a transação está no espelho novo: resposta parcial não descarta histórico antigo.
+    Cartão é reutilizado pela identidade da conta; a associação só avança para conexão mais
+    nova, mesmo ao importar histórico exclusivo da antiga. Havendo cartões duplicados do
+    legado, prioriza quem já tem compras, depois o menor id, sem mover/consolidar compras ou
+    faturas existentes. O estado ativo de cada cartão considera a conexão mais nova
+    entre sua FK e os vínculos das compras/estornos; pausa/exclusão nova prevalece sobre
+    conexão antiga ainda ativa. Assim os cartões legados separados mantêm a proteção
+    contra compra manual após desconectar as conexões antigas. Sem FK nem vínculo,
+    o cartão continua manual. Limpar a conexão velha relê os vínculos e
+    não apaga a representação transferida, inclusive na janela concorrente do cleanup.
+    Confirmar, fusão automática e sync aplicam valor/sinal/data/hora do banco à fundida.
+    `posted_at`, `criado_em` e presença de hora mudam juntos, então lista e Resumo trocam de
+    mês juntos; cartão segue o ciclo da fatura. `efeitos.of_original` guarda uma única vez
+    os campos anteriores; `delta_conta`, categoria e descrição editadas são preservados.
+    Desfazer restaura valor/data/tipo originais e cria a sombra atual do banco. Apagar a
+    fundida continua devolvendo só o delta original à Carteira. Decisão do dono (2026-10-04):
+    desconectar e `transactions/deleted` também restauram o original; pausa conserva vínculo
+    e snapshot, sem desfazer. Sem escrita/reparo de dados em produção, deploy ou tela PR 4.
+    Testes locais: `tests/test_of_identidade_e_campos_bancarios.py`, além das famílias de
+    reconciliação, Open Finance, dinheiro em espécie, cartão e lançamentos v2. Não provam
+    callback real da Pluggy, WhatsApp nem comportamento no aparelho após deploy.
 - Guia do `/painel` (#728) em 2 PRs: A `GET`/`POST /api/v2/guia` + tabela `guia_painel` (contrato e consulta de medição em `docs/CLAUDE.md`, "API v2") · B a tela (Piggy, balão, Ajuda).
 - [ ] Etapa 0 · [ ] 1 · [ ] 2 · [ ] 3 · [ ] 4 · [ ] 5 · [ ] 6 · [ ] 7

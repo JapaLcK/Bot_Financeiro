@@ -9,19 +9,17 @@ Estados de `open_finance_transactions` que importam aqui:
   imported    imported = sombra, match null (sem par, ou par rejeitado/desfeito)
 
 Toda escrita é uma transação só, na ordem do resto do módulo de Open Finance
-(`accounts` → transação OF → vínculo): a mesma do sync, então as duas se
-serializam em vez de se cruzarem. Nenhuma função daqui trava o lançamento X; quem
-trava é `db.accounts.delete_launch_and_rollback`, que ao apagar a fundida toma
-`accounts` → X → transação OF e chama `_desfaz` (apagar desfaz a junção, P3).
+(`accounts` → lançamento → transação OF). O apagar da fundida usa a mesma
+ordem e chama `_desfaz` (apagar desfaz a junção, P3).
 """
 from __future__ import annotations
 
-from datetime import timedelta
+from datetime import datetime, time, timedelta
 from decimal import Decimal
 
 from psycopg import errors as pg_errors
 
-from utils_date import today_tz
+from utils_date import _tz, today_tz
 
 from .bank_movements import _lock_user, delete_if_shadow
 from .connection import TIPO_CANON_SQL, get_conn
@@ -40,11 +38,63 @@ class ReconciliationConflict(Exception):
     """Corrida com outra escrita (sync, delete do lançamento): tente de novo."""
 
 
+def _apply_bank_fields(cur, user_id, launch_id, row, cls):
+    """Banco manda na representação; delta_conta e o original não mudam no sync."""
+    instant = row["transacted_at"] or datetime.combine(row["transaction_date"], time(12), _tz())
+    cur.execute(
+        """update launches set valor=%s, tipo=%s, posted_at=%s, criado_em=%s,
+               efeitos = coalesce(efeitos, '{}'::jsonb)
+                 || case when coalesce(source,'manual') <> 'open_finance'
+                              and not coalesce(efeitos ? 'of_original', false)
+                         then jsonb_build_object('of_original', jsonb_build_object(
+                              'valor', valor, 'tipo', tipo, 'posted_at', posted_at,
+                              'criado_em', criado_em, 'time_known', efeitos->'time_known'))
+                         else '{}'::jsonb end
+                 || jsonb_build_object('time_known', %s::boolean)
+             where user_id=%s and id=%s and (
+                   (valor,tipo,posted_at,criado_em) is distinct from (%s,%s,%s,%s)
+                   or efeitos->'time_known' is distinct from to_jsonb(%s::boolean)
+                   or (coalesce(source,'manual') <> 'open_finance'
+                       and not coalesce(efeitos ? 'of_original', false)))
+             returning id""",
+        (cls["valor"], cls["tipo"], row["transaction_date"], instant,
+         row["transacted_at"] is not None, user_id, launch_id,
+         cls["valor"], cls["tipo"], row["transaction_date"], instant,
+         row["transacted_at"] is not None))
+    return cur.fetchone() is not None
+
+
+def _restore_original(cur, user_id, launch_id):
+    """Saída da fusão restaura só campos bancários; edições e efeitos permanecem."""
+    cur.execute(
+        """update launches set valor=(efeitos->'of_original'->>'valor')::numeric,
+               tipo=efeitos->'of_original'->>'tipo',
+               posted_at=(efeitos->'of_original'->>'posted_at')::date,
+               criado_em=(efeitos->'of_original'->>'criado_em')::timestamptz,
+               efeitos=(efeitos - 'of_original' - 'time_known')
+                 || case when efeitos->'of_original'->>'time_known' is not null
+                         then jsonb_build_object('time_known', efeitos->'of_original'->'time_known')
+                         else '{}'::jsonb end
+             where user_id=%s and id=%s and efeitos ? 'of_original'
+               and coalesce(source,'manual') <> 'open_finance'""", (user_id, launch_id))
+
+
 def _locked_tx(cur, user_id, of_tx_id):
     _lock_user(cur, user_id)
+    # Mesma ordem do apagar: accounts → lançamentos → espelho; relê depois da trava.
+    cur.execute(
+        """select l.id from launches l
+             join open_finance_transactions o
+               on l.id in (o.imported_launch_id, o.match_launch_id)
+             join open_finance_accounts a on a.id=o.account_id
+             join open_finance_connections c on c.id=a.connection_id
+            where l.user_id=%s and c.user_id=%s and o.id=%s
+            order by l.id for update of l""", (user_id, user_id, of_tx_id))
+    cur.fetchall()
     cur.execute(
         """select o.id, o.provider_transaction_id, o.description, o.amount,
                   o.transaction_date, o.transacted_at, o.category,
+                  a.provider_account_id, c.provider,
                   o.imported_launch_id, o.match_launch_id, o.reconciliation_status
              from open_finance_transactions o
              join open_finance_accounts a on a.id = o.account_id
@@ -95,6 +145,8 @@ def confirm_reconciliation(user_id: int, of_tx_id: int) -> dict:
                   set imported_launch_id=%s, reconciliation_status='confirmed'
                 where id=%s""",
             (x, o["id"]))
+        _apply_bank_fields(cur, user_id, x, o,
+                           classify_open_finance_launch(o["amount"], o["category"], o["description"]))
         # As outras pendências em X NÃO são tocadas: enquanto X está ocupado elas
         # saem da lista sozinhas (`ACTIONABLE_PENDING_SQL`) e voltam se o usuário
         # desfizer esta — gravar nelas tiraria a reversibilidade.
@@ -132,6 +184,7 @@ def _desfaz(cur, user_id, o, novas: list) -> dict:
     shadow_id, _ = _insert_of_shadow(cur, user_id, o, cls)
     if shadow_id is None:
         raise ReconciliationConflict("SHADOW_NOT_CREATED")
+    _restore_original(cur, user_id, x)
     novas.extend(filter(None, [categoria_pigbank(o["category"])]))
     cur.execute(
         """update open_finance_transactions
