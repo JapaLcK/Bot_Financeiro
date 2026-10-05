@@ -681,6 +681,10 @@ Texto novo do PR-A, visível ao usuário: o detalhe
   - Falha inesperada da tarefa de observação (banco/pool, bug): log
     `of_observacao_falhou` (dono na coluna, só item_id e o tipo da exceção em
     `details`) e a pista `ERROR`, quando o banco ainda responde.
+  - A pista usa a versão da linha lida ANTES do GET, sem reler: se um sync, o job
+    ou uma reconexão escreveu a linha no meio, a pista grava 0 linhas e o escritor
+    concorrente vence (inclusive após duas derrotas de versão e numa falha
+    inesperada da tarefa; sem versão lida, só o log `of_observacao_falhou`).
   - A pista bumpa `updated_at`: um job de saúde com o lote em andamento perde o CAS
     naquele item e o reavalia no próximo tique.
   - A rodada suja (`_DIRTY`) é um SYNC completo, sem corte por plano, disparado por

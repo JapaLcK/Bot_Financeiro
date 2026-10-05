@@ -31,6 +31,9 @@ com `cmp`; remeça se mexer no código):
       "1ª derrota relê" vermelho;
   negativo (rodada 3), sem `user_id=` nos dois logs de `of_observacao.py`: o
       diverge e o perdeu_corrida ficam vermelhos (dono na coluna, padrão do #541);
+  negativo (rodada 5, Codex P2 #2), `_pista` relendo a linha (versão nova em vez da
+      lida antes do GET): o "sync escreve no meio", a derrota dupla e a exceção com
+      linha alterada ficam vermelhos;
   negativo (rodada 4), sem o `_tarefa` (try/except de topo): os 2 casos de exceção
       ficam vermelhos (sem log nem pista); `str(exc)` em `details`: o assert da
       MARCA fica vermelho; positivo: o caminho feliz não loga `of_observacao_falhou`;
@@ -469,7 +472,9 @@ def test_derrota_de_versao_no_primeiro_get_rele_e_grava_a_verdade(user_id, monke
     assert not [e for e in logs if e["event"] == "of_observacao_perdeu_corrida"]
 
 
-def test_duas_derrotas_de_versao_caem_na_pista_e_logam(user_id, monkeypatch, logs):
+def test_duas_derrotas_de_versao_logam_e_a_pista_nao_regrava(user_id, monkeypatch, logs):
+    """Codex P2 #2: a pista usa a versão lida ANTES do GET; depois de duas derrotas ela
+    está velha, então grava 0 linhas e o escritor que ganhou fica (só o log registra)."""
     antes = _ativa(user_id, monkeypatch, "read_failed")
     cid = _linha()["id"]
 
@@ -482,7 +487,7 @@ def test_duas_derrotas_de_versao_caem_na_pista_e_logam(user_id, monkeypatch, log
     _posta([_erro()])
 
     assert remoto.chamadas == 2
-    assert _par() == ("ERROR", "read_failed")
+    assert _par() == ("ACTIVE", "read_failed")      # Codex P2 #2: era ERROR (pista relia a versão)
     assert _estado()["health"] == antes["health"]
     perdeu = [e for e in logs if e["event"] == "of_observacao_perdeu_corrida"]
     assert len(perdeu) == 1 and perdeu[0]["details"] == {"item_id": ITEM}
@@ -664,9 +669,49 @@ def test_excecao_na_tarefa_solta_o_slot_loga_e_tenta_a_pista(user_id, monkeypatc
     assert falhou[0]["user_id"] == user_id                       # dono na coluna (#541)
     assert falhou[0]["details"] == {"item_id": ITEM, "tipo_do_erro": "RuntimeError"}
     assert MARCA not in json.dumps(falhou[0], default=str)        # nunca o texto da exceção
-    depois = _estado()                                            # a pista, com o motivo intacto
-    assert (depois["status"], depois["status_reason"]) == ("ERROR", "read_failed")
+    depois = _estado()
+    if onde == "get_linha":
+        # Codex P2 #2: sem versão lida não há CAS: não grava pista, fica só o log.
+        assert (depois["status"], depois["status_reason"]) == ("ACTIVE", "read_failed")
+    else:   # versão conhecida e linha inalterada: a pista, com o motivo intacto
+        assert (depois["status"], depois["status_reason"]) == ("ERROR", "read_failed")
     assert depois["health"] == antes["health"] and depois["raw"] == antes["raw"]
+
+
+def test_excecao_inesperada_com_linha_alterada_no_meio_nao_grava_pista(user_id, monkeypatch):
+    _ativa(user_id, monkeypatch, "read_failed")
+    _Remoto(monkeypatch, ITEM_SAUDAVEL)
+    cid = _linha()["id"]
+
+    def _bump_e_boom(*a, **k):
+        db.mark_sync_attempt(cid)      # outro escritor mexe na linha no meio
+        raise RuntimeError("boom")
+
+    monkeypatch.setattr(obs, "observar_item", _bump_e_boom)
+
+    _posta([_erro()])
+
+    assert _par() == ("ACTIVE", "read_failed")
+
+
+def test_get_falha_e_sync_saudavel_escreve_no_meio_a_pista_nao_sobrescreve(user_id, monkeypatch):
+    """Codex P2 #2: o GET falha, mas durante ele um sync saudável termina e escreve a
+    linha. A pista (versão lida antes do GET) perde o CAS: a linha fica como o sync
+    deixou, e nunca ERROR por cima de um ACTIVE confirmado."""
+    _ativa(user_id, monkeypatch)
+    cid = _linha()["id"]
+    deixado = {}
+
+    def _item(n):
+        db.mark_sync_result(cid, ok=True, status="ACTIVE", status_reason="")
+        deixado.update(_estado())
+        return PluggyApiError("boom", status_code=503)
+
+    _Remoto(monkeypatch, _item)
+
+    _posta([_erro()])
+
+    assert _estado() == deixado and _par()[0] == "ACTIVE"
 
 
 def test_excecao_na_tarefa_com_log_e_banco_fora_nao_propaga_e_solta_o_slot(user_id, monkeypatch):

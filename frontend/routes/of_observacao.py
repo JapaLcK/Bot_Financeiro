@@ -41,26 +41,29 @@ def _le_item(item_id: str) -> dict:
     return get_pluggy_item(item_id, create_pluggy_api_key())
 
 
-async def _pista(connection_id: int, user_id: int) -> None:
-    """`ERROR` com o motivo e o `health` intactos. Relê a linha para pegar a versão
-    atual: a pista não pode derrubar o que outro escritor gravou depois."""
-    linha = await asyncio.to_thread(get_linha_para_observar, connection_id, user_id)
-    if linha is not None:
-        await asyncio.to_thread(
-            mark_sync_result, connection_id, ok=None, status="ERROR",
-            status_reason=None, versao_vista=linha["updated_at"])
+async def _pista(connection_id: int, versao: object) -> None:
+    """`ERROR` com o motivo e o `health` intactos, pela versão lida ANTES do GET (sem
+    reler: reler anularia o CAS). Se qualquer escritor mexeu na linha desde então
+    (sync, job, reconexão), grava 0 linhas: o escritor mais novo tem informação mais
+    fresca que a de um GET que falhou."""
+    await asyncio.to_thread(
+        mark_sync_result, connection_id, ok=None, status="ERROR",
+        status_reason=None, versao_vista=versao)
 
 
-async def _observa(item_id: str, connection_id: int, user_id: int) -> None:
+async def _observa(item_id: str, connection_id: int, user_id: int, visto: dict) -> None:
+    """`visto["versao"]`: o `updated_at` da última leitura da linha, para a `_tarefa`
+    poder gravar a pista se algo inesperado levantar (sem versão lida, não grava)."""
     for tentativa in (1, 2):
         linha = await asyncio.to_thread(get_linha_para_observar, connection_id, user_id)
         if linha is None or str(linha["status"] or "").upper() in _TERMINAL:
             return   # apagada, PAUSED ou DELETED: nada a observar (sem GET, sem log)
+        visto["versao"] = linha["updated_at"]
         try:
             async with _semaforo:
                 item = await asyncio.to_thread(_le_item, item_id)
         except Exception:  # noqa: BLE001 — 429/5xx/timeout/404: não confirmou, pista
-            return await _pista(connection_id, user_id)
+            return await _pista(connection_id, linha["updated_at"])
         if await asyncio.to_thread(observar_item, linha, item):
             status_item = str(item.get("status") or "").upper()
             if status_item not in _STATUS_DE_ERRO:
@@ -78,7 +81,10 @@ async def _observa(item_id: str, connection_id: int, user_id: int) -> None:
         "warning", "of_observacao_perdeu_corrida",
         "Observação do webhook perdeu a versão da linha duas vezes",
         source="open_finance", user_id=user_id, details={"item_id": item_id})
-    await _pista(connection_id, user_id)
+    # `linha` é a leitura da 2ª tentativa, que `observar_item` acabou de perder: a
+    # versão está velha, então a pista grava 0 linhas (no-op de propósito) e o
+    # escritor que ganhou fica. Só o log registra.
+    await _pista(connection_id, linha["updated_at"])
 
 
 async def _tarefa(item_id: str, connection_id: int, user_id: int) -> None:
@@ -87,8 +93,9 @@ async def _tarefa(item_id: str, connection_id: int, user_id: int) -> None:
     (#541: mensagem de erro de banco leva host/porta); só o tipo. Se o banco é
     justamente o que caiu, a pista e o log falham e são engolidos: o slot de
     `_INFLIGHT` solta pelo callback de qualquer jeito."""
+    visto: dict = {}
     try:
-        await _observa(item_id, connection_id, user_id)
+        await _observa(item_id, connection_id, user_id, visto)
     except Exception as exc:  # noqa: BLE001
         try:
             await log_system_event(
@@ -98,10 +105,11 @@ async def _tarefa(item_id: str, connection_id: int, user_id: int) -> None:
                 details={"item_id": item_id, "tipo_do_erro": type(exc).__name__})
         except Exception:  # noqa: BLE001
             pass
-        try:
-            await _pista(connection_id, user_id)
-        except Exception:  # noqa: BLE001
-            pass
+        if "versao" in visto:   # sem versão lida não há CAS: fica só o log
+            try:
+                await _pista(connection_id, visto["versao"])
+            except Exception:  # noqa: BLE001
+                pass
 
 
 def agenda_observacao(item_id: str, conexao: dict) -> None:
