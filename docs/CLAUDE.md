@@ -851,6 +851,11 @@ não barra reconexão e o 402 do `/pluggy-item` continua valendo)) mais o webhoo
 `/open-finance/pluggy/webhook`. O `connect-token` aceita `app_scheme` opcional no corpo
 (`pigbank`, `pigbank-staging` ou `pigbank-dev`; fora da lista, 400), que vira o
 `oauthRedirectUri` `<scheme>://open-finance-volta` da Pluggy; o site não manda o campo.
+Aceita também `item_id` opcional (reconectar banco já conectado; vai como `itemId` ao lado de
+`options`): só item não pausado do próprio usuário no nosso banco e com o `clientUserId` dele
+na Pluggy; não-string ou vazio é 400, todo o resto é o mesmo 404 `OF_ITEM_NAO_ENCONTRADO`.
+`item_id: null` conta como ausente (token de banco novo), e corpo acima do teto de bytes é
+ignorado inteiro (mesmo efeito).
 Serviços em `core/services/pluggy*.py` e
 `open_finance*.py`; tabelas `open_finance_connections/accounts/transactions/investments`,
 `open_finance_investment_snapshots` (foto diária por posição, `db/of_snapshots.py`) e

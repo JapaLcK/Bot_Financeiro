@@ -1755,7 +1755,7 @@ async def open_finance_caixinha_bind_route(request: Request, user_id: int, body:
 # cliente quiser. O site não manda o campo.
 _APP_SCHEMES = frozenset({"pigbank", "pigbank-staging", "pigbank-dev"})
 _APP_VOLTA_OF = "open-finance-volta"
-_CORPO_MAX = 4096  # corpo legítimo tem ~30 bytes; acima disso é ignorado, como se não houvesse corpo
+_CORPO_MAX = 4096  # corpo legítimo tem até ~85 bytes (app_scheme + item_id); acima disso é ignorado, como se não houvesse corpo
 _CORPO_SEGUNDOS = 5  # corpo legítimo chega junto dos cabeçalhos; o que pinga devagar também é ignorado
 
 
@@ -1778,7 +1778,7 @@ async def _corpo_json_limitado(request: Request) -> object | None:
 
 @router.post("/open-finance/{user_id}/connect-token")
 async def open_finance_connect_token_route(request: Request, user_id: int):
-    shared.authorize_dashboard_access(request, user_id)
+    session_uid = shared.authorize_dashboard_access(request, user_id)
     # Barra só o caso inequívoco (plano sem OF): não emite token pra quem não pode
     # conectar nada, fechando o abuso direto do endpoint e evitando item órfão na Pluggy.
     # O TETO POR CONTAGEM (planos pagos no limite) NÃO é cobrado aqui de propósito — o
@@ -1794,6 +1794,35 @@ async def open_finance_connect_token_route(request: Request, user_id: int):
     if scheme is not None and (not isinstance(scheme, str) or scheme not in _APP_SCHEMES):
         raise HTTPException(status_code=400, detail="app_scheme inválido.")
     volta = f"{scheme}://{_APP_VOLTA_OF}" if scheme else None
+
+    # Reconexão de um banco já conectado: sem o `itemId` a Pluggy recusa com
+    # "already exists" (`avoidDuplicates`). Dono pelo NOSSO banco antes de tocar a
+    # Pluggy; alheio, inexistente, PAUSED e removido respondem o mesmo 404.
+    item_id = corpo.get("item_id") if isinstance(corpo, dict) else None
+    if item_id is not None and (not isinstance(item_id, str) or not item_id):
+        raise HTTPException(status_code=400, detail="item_id inválido.")
+    nao_achou = HTTPException(status_code=404, detail={
+        "code": "OF_ITEM_NAO_ENCONTRADO", "message": "Não achamos esse banco nas suas conexões."})
+    if item_id:
+        if item_id not in await asyncio.to_thread(list_pluggy_item_ids, user_id):
+            raise nao_achou
+        try:
+            remote = await asyncio.to_thread(get_pluggy_item, item_id)
+        except PluggyConfigError as exc:
+            raise HTTPException(status_code=503, detail=str(exc)) from exc
+        except PluggyApiError as exc:
+            if getattr(exc, "status_code", None) == 404:
+                raise nao_achou from exc
+            raise HTTPException(status_code=502, detail=str(exc)) from exc
+        # clientUserId tem de ser a sessão; session_uid == user_id aqui (authorize_dashboard_access dá 403 se não)
+        if str(remote.get("clientUserId") or "") != str(session_uid):
+            await log_system_event(
+                "error", "of_item_owner_conflict",
+                "Item Pluggy não pertence ao usuário da sessão",
+                source="open_finance", user_id=session_uid,
+                details={"item_id": item_id, "origin": "connect_token"},
+            )
+            raise nao_achou
 
     webhook_url = (os.getenv("PLUGGY_WEBHOOK_URL") or "").strip()
     if not webhook_url and shared.DASHBOARD_URL.startswith("https://"):
@@ -1813,10 +1842,14 @@ async def open_finance_connect_token_route(request: Request, user_id: int):
             user_id,
             webhook_url or None,
             oauth_redirect_uri=volta,
+            item_id=item_id,
         )
     except PluggyConfigError as exc:
         raise HTTPException(status_code=503, detail=str(exc)) from exc
     except PluggyApiError as exc:
+        # Item que sumiu entre o GET acima e o POST: o mesmo 404 dos demais "não é seu / não existe".
+        if item_id and getattr(exc, "status_code", None) == 404:
+            raise nao_achou from exc
         raise HTTPException(status_code=502, detail=str(exc)) from exc
 
     # Registra que ESTE usuário pediu um token. O `GET /items` da Pluggy devolve
