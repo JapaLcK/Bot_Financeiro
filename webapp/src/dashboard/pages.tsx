@@ -1,12 +1,15 @@
 import { useMemo, type ReactNode } from "react";
 import { BANK_CDB, BANK_CDB_TOTAL, GOALS, MONTHS, caixinhasTotal, goalEta, goalsTotal, isCurrentMonth, keyDate, monthlySaving, trajectory } from "./lib/api";
 import { money0, monthName, monthYear, signedBig, tone } from "./lib/format.js";
-import { simActive } from "./lib/store.js";
+import { mesDe, simActive } from "./lib/store.js";
 import type { DashState } from "./lib/types";
 import { Frame } from "./parts/Frame";
 import { Board } from "./parts/Board";
+import { DicaDaTela } from "./parts/Dica";
 import { Ledger } from "./parts/Ledger";
+import { abrirGuia } from "./parts/Guia";
 import { PiggyChat } from "./parts/PiggyChat";
+import { DEMO } from "./lib/v2";
 import { go, href, route, type Path } from "./router";
 import { Bills } from "./widgets/Bills";
 import { Calendar } from "./widgets/Calendar";
@@ -18,6 +21,7 @@ import { Hero } from "./widgets/Hero";
 import { Invoice } from "./widgets/Invoice";
 import { NetWorth } from "./widgets/NetWorth";
 import { Simulator } from "./widgets/Simulator";
+import { SubscriptionList } from "./widgets/Subscriptions";
 import { TrajectoryChart } from "./widgets/TrajectoryChart";
 import { Wealth } from "./widgets/Wealth";
 
@@ -29,6 +33,7 @@ function Page({ path, lede, children }: { path: Path; lede: ReactNode; children:
         <h1 id="page-title" tabIndex={-1}>{route(path).title}</h1>
         <p className="page-lede">{lede}</p>
       </header>
+      <DicaDaTela path={path} />
       <div className="page-grid">{children}</div>
     </>
   );
@@ -39,7 +44,7 @@ function Home({ s }: { s: DashState }) {
   return (
     <>
       <header className="page-head">
-        <h1 id="page-title" tabIndex={-1}>Resumo de {monthName(keyDate(s.month))}</h1>
+        <h1 id="page-title" tabIndex={-1}>Resumo de {monthName(keyDate(mesDe(s)))}</h1>
         <p className="page-lede">O mês inteiro num lugar. A seta de cada bloco abre a página dele.</p>
       </header>
       <Board s={s} />
@@ -65,6 +70,15 @@ function Spending({ s }: { s: DashState }) {
         <div className="panel"><Calendar s={s} /></div>
       </div>
       <Panel span={7}><CategoryDetail s={s} /></Panel>
+    </Page>
+  );
+}
+
+// Os blocos da lista entram direto na grade: cada `.w` precisa ser filho de um `.panel`.
+function SubscriptionsPage() {
+  return (
+    <Page path="/assinaturas" lede="Os serviços que cobram todo mês, achados no seu Open Finance.">
+      <SubscriptionList />
     </Page>
   );
 }
@@ -148,8 +162,9 @@ function Launches({ s }: { s: DashState }) {
 }
 
 // Ferramentas: só o Simulador já existe no protótipo; as outras vêm do dashboard atual
-// (ou são novas) e entram uma de cada vez. O Painel antigo sai do v2 para o /app.
-const TOOLS: { label: string; line: string; icon: string; to?: Path; url?: string }[] = [
+// (ou são novas) e entram uma de cada vez. O Painel antigo sai do v2 para o /app. O guia mora
+// aqui também (e no Cmd-K): abaixo de 360px a Ajuda sai da barra de baixo (styles/shell.css).
+const TOOLS: { label: string; line: string; icon: string; to?: Path; url?: string; run?: () => void }[] = [
   { label: "Simulador", line: "E se você cortasse o delivery pela metade? Veja o saldo e as metas mudarem na hora.", icon: "ph-lightning", to: "/simulador" },
   { label: "Painel antigo", line: "O dashboard de sempre, com os seus dados de verdade.", icon: "ph-chart-bar", url: "/app" },
   { label: "Orçamento doméstico", line: "Divida as contas da casa com quem mora com você.", icon: "ph-house" },
@@ -157,6 +172,7 @@ const TOOLS: { label: string; line: string; icon: string; to?: Path; url?: strin
   { label: "Vale a pena comprar?", line: "Veja o que uma compra grande faz com o seu mês e as suas metas.", icon: "ph-shopping-cart" },
   { label: "Progresso ao milhão", line: "Quanto falta e em quanto tempo você chega ao primeiro milhão.", icon: "ph-trophy" },
   { label: "Agentes", line: "Piggys que cuidam de uma parte do seu dinheiro por você.", icon: "ph-robot" },
+  ...(DEMO ? [] : [{ label: "Guia do painel", line: "O Piggy te mostra o painel em 3 passos.", icon: "ph-question", run: abrirGuia }]),
 ];
 
 function Tools() {
@@ -169,6 +185,7 @@ function Tools() {
           return (
             <li key={t.label}>
               {link ? <a className="tool" href={link}>{body}</a>
+                : t.run ? <button type="button" className="tool" onClick={t.run}>{body}</button>
                 : <div className="tool" aria-disabled="true">{body}<em>Em breve</em></div>}
             </li>
           );
@@ -179,7 +196,7 @@ function Tools() {
 }
 
 export const PAGES: Record<Path, (p: { s: DashState }) => ReactNode> = {
-  "/": Home, "/previsao": Forecast, "/gastos": Spending, "/simulador": Simulate,
+  "/": Home, "/previsao": Forecast, "/gastos": Spending, "/assinaturas": SubscriptionsPage, "/simulador": Simulate,
   "/metas": GoalsPage, "/patrimonio": Wealthy, "/lancamentos": Launches,
   "/ferramentas": Tools, "/piggy": PiggyChat,
 };

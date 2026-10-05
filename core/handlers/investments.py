@@ -4,6 +4,7 @@ import db
 from utils_text import fmt_brl, fmt_rate
 from core.dashboard_links import build_dashboard_link
 from core.handlers import pending as h_pending
+from core.services import fonte_unica
 from core.services.plan_limits import PlanLimitExceeded
 import logging
 
@@ -316,6 +317,8 @@ def _investment_not_found(user_id: int, investment_name: str, *, action: str) ->
 
 
 def create(user_id: int, raw_name: str, original_text: str) -> str:
+    if (recusa := fonte_unica.recusa(user_id, "investimento")):
+        return recusa
     return list_investments(
         user_id,
         "📈 A criação de investimentos agora é feita pelo dashboard.",
@@ -331,6 +334,9 @@ def propose_delete(user_id: int, investment_name: str) -> str:
 
 
 def deposit(user_id: int, text: str, entities: dict) -> str:
+    # Q36: antes das perguntas de valor, nome e origem, que não levariam a nada.
+    if (recusa := fonte_unica.recusa(user_id, "investimento")):
+        return recusa
     investment_name = entities.get("investment_name")
     amount = entities.get("amount")
 
@@ -398,6 +404,8 @@ def _aporta(user_id: int, investment_name: str, amount: float, text: str, source
     except LookupError:
         return _investment_not_found(user_id, investment_name, action="aportar em")
     except ValueError as e:
+        if isinstance(e, fonte_unica.FonteUnicaOF):
+            return str(e)  # retomada de pergunta armada antes da chave ligar
         code = str(e)
         if code == "INSUFFICIENT_ACCOUNT":
             return (funding.msg_insuficiente(user_id, float(amount))

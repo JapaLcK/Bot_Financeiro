@@ -267,6 +267,16 @@ test("WP6: vl=999999 na URL é ignorado; value sai dos 49900 centavos do servido
   await page.close();
 });
 
+// ── WP6b: com cadernos extras, a receita é o total da cobrança ──────────────
+// `amount_cents` é só o plano; o Pix cobrou plano + cadernos (`total_cents`). Negativo: volte o home.html para
+// `cobranca.amount_cents` e este fica vermelho (o WP6, sem `total_cents`, segue verde pelo fallback).
+test("WP6b: value sai do total_cents (plano + cadernos), não do amount_cents", async () => {
+  const { page } = await abrirHome(`${BASE}&pl=essencial&gw=pix`, { ...AGENDADA, total_cents: 52280 });
+  const [, , dados] = await purchase(page);
+  assert.equal(dados.value, 522.8, `value: ${JSON.stringify(dados)}`);
+  await page.close();
+});
+
 // ── WP7: CONTROLE POSITIVO — Stripe segue byte a byte ───────────────────────
 test("WP7: compra no cartão manda só currency, sem a chave value", async () => {
   const { page, pix } = await abrirHome(`${BASE}&pl=plus`, AGENDADA);

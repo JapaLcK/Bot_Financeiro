@@ -1,0 +1,42 @@
+/* /assinar: só o que é desta página. Campos, botões, erro e rodapé vêm do site-auth.css. */
+/* O `.auth-error.show` (display:block) venceria o [hidden] do navegador. */
+.assinar [hidden] { display:none !important; }
+.assinar { display:flex; justify-content:center; padding-block:42px 48px; min-height:calc(100vh - 175px); }
+.assinar .auth-card { max-width:456px; }
+/* O embutido do Stripe abre em duas colunas quando tem largura. */
+.assinar.largo .auth-card { max-width:960px; }
+.assinar-sub { font-size:16px; line-height:1.65; color:var(--lp-muted); margin-bottom:24px; overflow-wrap:anywhere; }
+.assinar-conta { font-size:14px; line-height:1.6; color:var(--lp-muted); margin-bottom:18px; overflow-wrap:anywhere; }
+.assinar-gap { margin-top:12px; }
+#stripe-checkout { width:100%; min-height:320px; }
+.assinar-b { margin-top:14px; text-align:center; }
+.lp-auth .assinar-b .lp-auth-text-button { color:var(--lp-muted); font-size:13px; font-weight:500; }
+.assinar-pix { width:100%; margin-top:14px; }
+.lp-auth #s1-pendente a { color:inherit; font-weight:600; text-decoration:underline; }
+@media (max-width:700px) { .assinar { padding-block:28px 36px; min-height:0; } }
+
+/* Página própria (pagamento-pagina.js): celular empilha resumo → caixas → pagamento → botão; ≥880 px, duas colunas. */
+.pp { display:grid; gap:20px; }
+.pp-pedido, .pp-pag { min-width:0; }
+@media (min-width:880px) { .pp { grid-template-columns:1.05fr .95fr; align-items:start; gap:28px; } }
+.pp-resumo { background:#fff; border:1px solid var(--lp-line); border-radius:16px; padding:16px; font-size:14px; display:grid; gap:8px; }
+.pp-r-linha { display:flex; justify-content:space-between; gap:12px; }
+.pp-r-linha span:first-child { min-width:0; overflow-wrap:anywhere; }
+.pp-r-linha span:last-child { white-space:nowrap; }
+.pp-r-hoje { font-size:17px; font-weight:700; padding-top:10px; border-top:1px solid var(--lp-line); }
+.pp-r-depois { font-size:13px; color:var(--lp-muted); }
+.pp-cupom-link { margin-top:12px; }
+.pp-cupom { display:flex; flex-wrap:wrap; gap:8px; margin-top:12px; }
+.pp-cupom input { flex:1 1 160px; min-width:0; height:48px; border:1px solid #CFC7C3; border-radius:12px; padding:0 14px; font-size:16px; }
+.lp-auth .pp-cupom .social-btn { min-height:48px; padding:0 18px; }
+.lp-auth .pp-cupom .auth-error { flex-basis:100%; margin:0; }
+.lp-auth #pp-erro { margin:14px 0 0; }
+.lp-auth .auth-card .pp-cta { margin-top:16px; display:flex; flex-direction:column; align-items:center; justify-content:center; gap:0; white-space:normal; }
+.pp-cta small { display:block; font-weight:500; font-size:13px; opacity:.85; }
+#pagamento { min-height:200px; }
+/* Apple Pay/Google Pay (Express Checkout): sem altura até o Stripe dizer que há botão — o iframe segue montado e
+   mede (display:none poderia não medir) — e inert, apagado, com /bump, cupom ou pagamento em voo. */
+#pp-express { margin-bottom:14px; }
+#pp-express.pp-espera { height:0; margin:0; overflow:hidden; visibility:hidden; }
+#pp-express[inert] { opacity:.5; pointer-events:none; }
+.pp-r-desc span:last-child { color:var(--lp-pink-ink); }

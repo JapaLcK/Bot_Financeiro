@@ -10,7 +10,7 @@ import pytest
 from fastapi.testclient import TestClient
 
 import frontend.finance_bot_websocket_custom as dashboard
-from _apoio_assinaturas import conta, mensais, netflix_no_cartao, rp, semeia, tx
+from _apoio_assinaturas import conta, dez_e_vinte_centavos, mensais, netflix_no_cartao, rp, semeia, tx
 from _apoio_auth_app import csrf, sessao_de as sessao
 from conftest import promote_to_pro
 from db import ensure_user
@@ -58,11 +58,30 @@ def test_mesmo_id_de_transacao_em_b_nao_contamina_a(a_e_b):
     r = _get(a)
     assert r.status_code == 200, r.text
     (it,) = r.json()["servicos"]
-    assert (it["valor"], it["meses"]) == (39.9, 3)
+    assert (it["valor"], it["meses"]) == ("39.9", 3)
     assert it["meio"] == {"tipo": "cartao", "nome": "Nubank Mastercard", "final": "1234"}
     rb = _get(b)
     assert rb.status_code == 200, rb.text
-    assert rb.json() == {"servicos": [], "outras": [], "total_mensal": 0.0, "total_anual": 0.0}
+    assert rb.json() == {"servicos": [], "outras": [], "ignoradas": [], "total_mensal": "0", "total_anual": "0"}
+
+
+def test_dinheiro_sai_como_texto_exato(a_e_b):
+    a, _ = a_e_b
+    dez_e_vinte_centavos(a)
+    j = _get(a).json()
+    assert (j["total_mensal"], j["total_anual"]) == ("0.30", "3.60")
+    assert [x["valor"] for x in j["servicos"]] == ["0.20", "0.10"]
+
+
+def test_reajuste_sai_com_a_escala_gravada(a_e_b):
+    # Escala de 1 casa: um round(…, 2) no caminho viraria "39.90"/"538.80".
+    a, _ = a_e_b
+    txs = mensais("nf", ["-39.9", "-39.9", "-44.9"], desc="NETFLIX.COM")
+    semeia(a, [conta("acc-1", txs)], [rp("NETFLIX.COM", -44.9, txs)])
+    j = _get(a).json()
+    (it,) = j["servicos"]
+    assert (it["valor"], it["valor_anterior"]) == ("44.9", "39.9")
+    assert (j["total_mensal"], j["total_anual"]) == ("44.9", "538.8")
 
 
 # ── 10. Marcação ─────────────────────────────────────────────────────────────
@@ -78,11 +97,66 @@ def test_ignorar_esconde_e_nenhuma_traz_de_volta(a_e_b):
     _com_netflix_e_claro(a)
     r = _post(a, "netflix", "ignorar")
     assert r.status_code == 200, r.text
-    assert (r.json()["servicos"], r.json()["total_mensal"]) == ([], 0.0)
-    assert _get(a).json()["servicos"] == []
+    for j in (r.json(), _get(a).json()):
+        assert (j["servicos"], j["total_mensal"]) == ([], "0")
+        assert [(x["chave"], x["valor"], x["marcada"]) for x in j["ignoradas"]] == [("netflix", "39.9", False)]
     r = _post(a, "netflix", "nenhuma")
-    assert [x["chave"] for x in r.json()["servicos"]] == ["netflix"]
-    assert r.json()["total_mensal"] == 39.9
+    assert [(x["chave"], x["marcada"]) for x in r.json()["servicos"]] == [("netflix", False)]
+    assert r.json()["ignoradas"] == []
+    assert r.json()["total_mensal"] == "39.9"
+
+
+def test_marcada_ignorada_volta_marcada(a_e_b):
+    a, _ = a_e_b
+    _com_netflix_e_claro(a)
+    _post(a, "claro flex", "assinatura")
+    _post(a, "claro flex", "ignorar")
+    assert {x["chave"]: x["marcada"] for x in _get(a).json()["ignoradas"]} == {"claro flex": True}
+    assert marcas(a) == {"claro flex": ("ignorar", True)}
+    j = _post(a, "claro flex", "assinatura").json()
+    assert {x["chave"]: x["marcada"] for x in j["servicos"]} == {"claro flex": True, "netflix": False}
+    assert (j["outras"], j["ignoradas"], j["total_mensal"]) == ([], [], "89.8")
+
+
+def test_nao_marcada_ignorada_volta_ao_natural(a_e_b):
+    a, _ = a_e_b
+    _com_netflix_e_claro(a)
+    _post(a, "claro flex", "ignorar")
+    # O 2º ignorar (POST repetido) passa pelo on conflict: não pode inventar a marca.
+    j = _post(a, "claro flex", "ignorar").json()
+    assert [(x["chave"], x["marcada"]) for x in j["ignoradas"]] == [("claro flex", False)]
+    assert marcas(a) == {"claro flex": ("ignorar", False)}
+    j = _post(a, "claro flex", "nenhuma").json()
+    assert [x["chave"] for x in j["outras"]] == ["claro flex"]
+    assert j["ignoradas"] == []
+
+
+def test_ignorar_duas_vezes_mantem_a_marca_guardada(a_e_b):
+    a, _ = a_e_b
+    _com_netflix_e_claro(a)
+    for status in ("assinatura", "ignorar", "ignorar"):
+        assert _post(a, "claro flex", status).status_code == 200
+    assert marcas(a) == {"claro flex": ("ignorar", True)}
+
+
+def test_ignoradas_de_a_nao_vazam_para_b(a_e_b):
+    a, b = a_e_b
+    _com_netflix_e_claro(a)
+    _com_netflix_e_claro(b)
+    _post(a, "netflix", "ignorar")
+    _post(a, "claro flex", "assinatura")
+    _post(a, "claro flex", "ignorar")
+    jb = _get(b).json()
+    assert [x["chave"] for x in jb["servicos"]] == ["netflix"]
+    assert [x["chave"] for x in jb["outras"]] == ["claro flex"]
+    assert (jb["ignoradas"], marcas(b)) == ([], {})
+    ja = _get(a).json()  # positivo: a lista de A sai inteira
+    assert {x["chave"]: x["marcada"] for x in ja["ignoradas"]} == {"netflix": False, "claro flex": True}
+    assert (ja["servicos"], ja["outras"]) == ([], [])
+    _post(b, "claro flex", "assinatura")
+    _post(b, "claro flex", "ignorar")
+    _post(b, "claro flex", "nenhuma")
+    assert marcas(a) == {"netflix": ("ignorar", False), "claro flex": ("ignorar", True)}
 
 
 def test_assinatura_move_de_outras_para_servicos(a_e_b):
@@ -92,7 +166,7 @@ def test_assinatura_move_de_outras_para_servicos(a_e_b):
     j = _post(a, "claro flex", "assinatura").json()
     assert j["outras"] == []
     assert {x["chave"]: x["marcada"] for x in j["servicos"]} == {"claro flex": True, "netflix": False}
-    assert j["total_mensal"] == 89.8
+    assert j["total_mensal"] == "89.8"
 
 
 def test_chave_inexistente_404(a_e_b):
@@ -109,7 +183,7 @@ def test_b_nao_marca_a_chave_de_a(a_e_b):
     for status in ("ignorar", "nenhuma"):
         r = _post(b, "netflix", status)
         assert (r.status_code, r.json()["error"]["code"]) == (404, "not_found")
-    assert marcas(a) == {"netflix": "assinatura"}
+    assert marcas(a) == {"netflix": ("assinatura", False)}
     assert marcas(b) == {}
 
 
@@ -120,7 +194,7 @@ def test_nenhuma_de_b_nao_apaga_a_marca_de_a_com_a_mesma_chave(a_e_b):
     assert _post(a, "netflix", "assinatura").status_code == 200
     assert _post(b, "netflix", "assinatura").status_code == 200
     assert _post(b, "netflix", "nenhuma").status_code == 200
-    assert (marcas(a), marcas(b)) == ({"netflix": "assinatura"}, {})
+    assert (marcas(a), marcas(b)) == ({"netflix": ("assinatura", False)}, {})
 
 
 def test_export_lgpd_de_a_nao_leva_dado_de_b(a_e_b):
@@ -138,8 +212,10 @@ def test_assinatura_depois_ignorar_troca_o_status(a_e_b):
     _com_netflix_e_claro(a)
     _post(a, "netflix", "assinatura")
     j = _post(a, "netflix", "ignorar").json()
-    assert marcas(a) == {"netflix": "ignorar"}
+    assert marcas(a) == {"netflix": ("ignorar", True)}
     assert [x["chave"] for x in j["servicos"]] == []
+    _post(a, "netflix", "assinatura")
+    assert marcas(a) == {"netflix": ("assinatura", False)}
 
 
 def test_chave_de_parcela_nao_e_marcavel(a_e_b):
@@ -180,4 +256,4 @@ def test_post_sem_token_csrf_403_e_com_token_200(a_e_b):
     r = client.post(POST, json={"chave": "netflix", "status": "ignorar"},
                     headers={dashboard.CSRF_HEADER_NAME: "tok"})
     assert r.status_code == 200, r.text
-    assert marcas(a) == {"netflix": "ignorar"}
+    assert marcas(a) == {"netflix": ("ignorar", False)}

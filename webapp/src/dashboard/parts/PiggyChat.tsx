@@ -1,11 +1,13 @@
 import { useEffect, useRef, useState, type ReactNode } from "react";
+import { useQuery } from "@tanstack/react-query";
 import { ask, useConversation, type Msg } from "../lib/conversation";
-import { readProfile } from "../lib/profiles.js";
 import { BY_PROFILE, COMMON } from "../lib/prompts.js";
 import type { TopicId } from "../lib/topics";
 import { FrameScope } from "./Frame";
 import { LiveAnswer } from "./LiveAnswer";
 import { ICON } from "../lib/brand";
+import { CHAT_REAL, DEMO, perfilQuery } from "../lib/v2";
+import { Demonstracao } from "./Selos";
 
 type Prompt = { key: string; ask: string | null; topic?: TopicId; cat?: string };
 
@@ -28,6 +30,8 @@ function PiggySays({ m, live = true }: { m: Msg; live?: boolean }) {
 
 export function PiggyChat() {
   const msgs = useConversation();
+  // O perfil é o do Board: com backend, o do servidor; no protótipo, o que main.tsx semeou do navegador.
+  const perfil = useQuery(perfilQuery);
   const end = useRef<HTMLLIElement>(null);
   // A pergunta nova aparece no topo da tela (a resposta dela vem logo abaixo).
   useEffect(() => { end.current?.scrollIntoView({ block: "start" }); }, [msgs.length]);
@@ -43,15 +47,17 @@ export function PiggyChat() {
 
   const head = (
     <header className="page-head">
-      <h1 id="page-title" tabIndex={-1}>Converse com o Piggy</h1>
+      <h1 id="page-title" tabIndex={-1}>Converse com o Piggy{!DEMO && !CHAT_REAL && <Demonstracao />}</h1>
       <p className="page-lede">Pergunte sobre gastos, fatura, metas e investimentos. A resposta vem com os seus números.</p>
     </header>
   );
 
   if (!msgs.length) {
-    const profile = readProfile() ?? "padrao";
-    const mine = ((BY_PROFILE as Record<string, Prompt[]>)[profile] ?? []);
-    const ideas = [...mine, ...(COMMON as Prompt[])].filter((p) => p.ask && p.topic).slice(0, 5);
+    const mine = ((BY_PROFILE as Record<string, Prompt[]>)[perfil.data?.perfil ?? "padrao"] ?? []);
+    // Enquanto o perfil carrega, sem sugestões: os chips não trocam embaixo do dedo.
+    const ideas = perfil.isPending ? [] : [...mine, ...(COMMON as Prompt[])].filter((p) => p.ask && p.topic).slice(0, 5);
+    // O chip que o guia destaca (parts/Guia.tsx): o do gasto do mês, se estiver entre as sugestões.
+    const guia = Math.max(0, ideas.findIndex((p) => p.key === "normal"));
     return (
       <>
         {head}
@@ -59,7 +65,7 @@ export function PiggyChat() {
           <img src={ICON} alt="" width={56} height={56} />
           <p className="chat-hello">Oi, eu sou o Piggy. Pergunta o que quiser sobre o seu dinheiro, ou começa por uma destas:</p>
           <ul className="chat-follow">
-            {ideas.map((p) => <li key={p.key}><button type="button" className="chip" onClick={() => ask({ text: p.ask!, topic: p.topic, cat: p.cat, key: p.key })}>{p.ask}</button></li>)}
+            {ideas.map((p, i) => <li key={p.key}><button type="button" className="chip" data-guia={i === guia ? "piggy.chip" : undefined} onClick={() => ask({ text: p.ask!, topic: p.topic, cat: p.cat, key: p.key })}>{p.ask}</button></li>)}
           </ul>
         </section>
       </>

@@ -47,6 +47,20 @@ do $$ begin
 end $$
 """
 
+# Faturas de antes da coluna `user_id` (o `add column` sem backfill) ficaram NULL; o dono
+# é o do cartão (card_id e credit_cards.user_id são NOT NULL: não sobra NULL). Só roda
+# enquanto a coluna aceitar NULL — o ALTER não se repete a cada boot (#691).
+CREDIT_BILLS_USER_ID_NOT_NULL_SQL = """
+do $$ begin
+  if exists (select 1 from information_schema.columns where table_schema='public'
+             and table_name='credit_bills' and column_name='user_id' and is_nullable='YES') then
+    update credit_bills b set user_id = c.user_id
+      from credit_cards c where c.id = b.card_id and b.user_id is null;
+    alter table credit_bills alter column user_id set not null;
+  end if;
+end $$
+"""
+
 # BACKFILL INICIAL dos assinantes que já existiam quando plan_grants nasceu
 # (§5.1 do docs/plano_pix_anual_asaas.md). Roda no boot, dentro do init_db.
 #
@@ -338,6 +352,11 @@ def init_db():
         alter table launches add column if not exists categoria_editada boolean not null default false
         """,
         """
+        -- marca de quem gravou pela regra nova (PR 2a da Etapa 2 do v2): 'carteira'; NULL =
+        -- antigo, só leitura no /painel (P2). Sem default e sem backfill de propósito.
+        alter table launches add column if not exists origem text
+        """,
+        """
         -- migration: marca retroativamente aportes, resgates e categorias de investimento como movimentações internas
         update launches set is_internal_movement = true
         where (
@@ -432,7 +451,8 @@ def init_db():
         )
         """,
         # Marcação do usuário na lista de assinaturas (core/services/assinaturas.py):
-        # 'assinatura' põe em "serviços", 'ignorar' esconde. A chave é a
+        # 'assinatura' põe em "serviços", 'ignorar' esconde; `assinatura_antes` guarda
+        # a marca que o ignorar substituiu, para o Voltar a mostrar. A chave é a
         # `merchant_key` da descrição da Pluggy.
         """
         create table if not exists subscription_marks (
@@ -443,6 +463,7 @@ def init_db():
           primary key (user_id, merchant_key)
         )
         """,
+        "alter table subscription_marks add column if not exists assinatura_antes boolean not null default false",
         """
         create table if not exists market_rates (
           code text not null,
@@ -721,7 +742,7 @@ def init_db():
         """
         create table if not exists credit_bills (
           id bigserial primary key,
-          user_id bigint references users(id) on delete cascade,
+          user_id bigint not null references users(id) on delete cascade,
           card_id bigint not null references credit_cards(id) on delete cascade,
           period_start date not null,
           period_end date not null,
@@ -1169,6 +1190,7 @@ def init_db():
         """
         alter table credit_bills add column if not exists user_id bigint references users(id) on delete cascade
         """,
+        CREDIT_BILLS_USER_ID_NOT_NULL_SQL,
         """
         create table if not exists dashboard_sessions (
           code text primary key,
@@ -2578,6 +2600,14 @@ def init_db():
         """alter table pix_charges add column if not exists ga_client_id text""",
         """alter table pix_charges add column if not exists fbp text""",
         """alter table pix_charges add column if not exists fbc text""",
+        # A FOTO dos cadernos extras escolhidos no Pix (`[{price, url, nome,
+        # valor_cents}]`). Fica FORA de `amount_cents`, que segue só o plano —
+        # `pix_charges_amount_fecha` e o crédito de upgrade não mudam. O check é o
+        # par drop/add `not valid` das invariantes logo abaixo.
+        """alter table pix_charges add column if not exists extras jsonb not null default '[]'""",
+        """alter table pix_charges drop constraint if exists pix_charges_extras_array""",
+        """alter table pix_charges add constraint pix_charges_extras_array
+             check (jsonb_typeof(extras) = 'array') not valid""",
 
         # ── as CINCO invariantes de `pix_charges`, no BANCO e não em Python ──
         #
@@ -2830,9 +2860,42 @@ def init_db():
           reivindicada_ate timestamptz,
           tentativas int not null default 0,
           fechada_em timestamptz,
-          resultado text check (resultado in ('enviado', 'nao_comprou')),
-          primary key (user_id, session_id)
+          resultado text check (resultado in ('enviado', 'nao_comprou', 'estornado')),
+          primary key (user_id, session_id, ebook_price)
         )
+        """,
+        # `estornado` (estorno ou contestação antes da entrega): a check de
+        # `resultado` ganha o valor. Idempotente: só age se a definição atual não
+        # o tem; acha a check pelo que ela menciona (o nome pode não ser o
+        # padrão), e troca num statement só.
+        """
+        do $$
+        declare r record;
+        begin
+          select conname, pg_get_constraintdef(oid) as def into r from pg_constraint
+            where conrelid = 'ebook_entregas'::regclass and contype = 'c'
+              and pg_get_constraintdef(oid) like '%resultado%';
+          if found and r.def not like '%estornado%' then
+            execute format('alter table ebook_entregas drop constraint %I,'
+              ' add constraint ebook_entregas_resultado_check'
+              ' check (resultado in (''enviado'', ''nao_comprou'', ''estornado''))', r.conname);
+          end if;
+        end $$;
+        """,
+        # Vários produtos por compra: a PK ganha `ebook_price` (uma linha por
+        # produto). Idempotente: só age se a PK ainda tem 2 colunas, e num
+        # statement só (drop + add), para nunca deixar a tabela sem PK.
+        """
+        do $$
+        declare r record;
+        begin
+          select conname, array_length(conkey, 1) as n into r from pg_constraint
+            where conrelid = 'ebook_entregas'::regclass and contype = 'p';
+          if r.n = 2 then
+            execute format('alter table ebook_entregas drop constraint %I,'
+              ' add primary key (user_id, session_id, ebook_price)', r.conname);
+          end if;
+        end $$;
         """,
         """
         create index if not exists idx_ebook_entregas_abertas
@@ -2853,6 +2916,24 @@ def init_db():
           criada_em timestamptz not null default now()
         )
         """,
+        # Guia do /painel (#728): `db/guia.py` grava, `GET/POST /api/v2/guia` lê.
+        # `feitos` = {passo_id: carimbo do 1º feito}. Tabela e não colunas em
+        # auth_accounts: sai com a conta (cascade) e não some no "Limpar" do admin.
+        # Fora do aviso ao /painel (o POST já devolve o estado) e do merge.
+        """
+        create table if not exists guia_painel (
+          user_id bigint primary key references users(id) on delete cascade,
+          oferecido_em timestamptz,
+          dispensado_em timestamptz,
+          concluido_em timestamptz,
+          feitos jsonb not null default '{}'
+        )
+        """,
+        # `dicas` = {dica_id: carimbo da 1ª vez que a dica de tela apareceu} (`POST
+        # /api/v2/guia/dica`). Fora de `feitos` de propósito: a dica não oferece o guia
+        # (ele segue em `oferecer`) nem conta para a conclusão. Fora do `create table`
+        # pelo mesmo motivo das colunas de `pix_charges`: a tabela já existe.
+        """alter table guia_painel add column if not exists dicas jsonb not null default '{}'""",
 
         # ── Aviso de escrita ao `/painel` (TABELAS_QUE_AVISAM, no topo) ──────
         # O NOTIFY sai só no commit (rollback não avisa) e o Postgres funde os

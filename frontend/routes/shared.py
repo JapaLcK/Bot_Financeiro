@@ -28,9 +28,9 @@ from fastapi.security import HTTPAuthorizationCredentials
 from psycopg.rows import dict_row
 from psycopg_pool import AsyncConnectionPool
 from slowapi import Limiter
-from slowapi.util import get_remote_address
 
 from config.env import load_app_env
+from core.client_ip import rate_limit_key
 from core.sessions import get_active_session
 from token_utils import decode_dashboard_token_full
 
@@ -107,7 +107,7 @@ GA4_PARAMS_FORA_DA_URL = ("token", "sid")
 
 # default_limits exige SlowAPIMiddleware (nunca registrado) — hoje é inerte;
 # só os @limiter.limit() explícitos valem. Ligar o middleware é decisão aberta.
-# O teto continua por IP, como sempre foi.
+# O teto continua por IP, como sempre foi (o IP vem de core/client_ip.py).
 #
 # A chave por USUÁRIO saiu deste PR depois de quatro rodadas de revisão, e o
 # motivo é a forma da solução, não o objetivo. O problema é real: num CGNAT de
@@ -131,7 +131,11 @@ GA4_PARAMS_FORA_DA_URL = ("token", "sid")
 #
 # default_limits exige SlowAPIMiddleware (nunca registrado) — hoje é inerte;
 # só os @limiter.limit() explícitos valem. Ligar o middleware é decisão aberta.
-limiter = Limiter(key_func=get_remote_address, default_limits=["200/minute"])
+#
+# O IP da chave é o do cliente, não o do proxy do Railway: `rate_limit_key` de
+# core/client_ip.py, a fonte única (#766). O lambda existe porque o slowapi só
+# passa a requisição a um key_func cujo parâmetro se chame `request`.
+limiter = Limiter(key_func=lambda request: rate_limit_key(request), default_limits=["200/minute"])
 
 
 def meta_pixel_snippet(defer_external: bool = False) -> str:

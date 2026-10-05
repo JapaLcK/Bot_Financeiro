@@ -46,7 +46,7 @@ NAO_AVISAM = {
     "mfa_login_challenges", "password_reset_tokens", "platform_onboarding_tokens",
     "user_identities", "user_mfa", "user_mfa_backup_codes", "plan_grants", "plan_trials",
     "push_tokens", "daily_report_prefs", "checkout_funnel_events", "ebook_entregas", "affiliates",
-    "stripe_email_pendente", "agents", "agent_events", "ai_fallback_log", "ai_messages", "ai_pending_actions",
+    "stripe_email_pendente", "guia_painel", "agents", "agent_events", "ai_fallback_log", "ai_messages", "ai_pending_actions",
     "ai_proactive_cache", "audit_events", "system_event_logs",
 }
 

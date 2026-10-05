@@ -54,9 +54,9 @@ def _na_janela_do_rollback(monkeypatch, escrita):
     `disconnect_open_finance_connection` e a transação final com `_lock_user`."""
     original = of_mod._rollback_imported_of
 
-    def _wrapper(rows):
+    def _wrapper(rows, **kwargs):
         escrita()
-        return original(rows)
+        return original(rows, **kwargs)
 
     monkeypatch.setattr(of_mod, "_rollback_imported_of", _wrapper)
 

@@ -45,8 +45,28 @@ describe("app.config — iOS", () => {
   it.each(["production", "development"])("%s: time, build e criptografia isenta", (ambiente) => {
     expect(configEm(ambiente).ios).toMatchObject({
       appleTeamId: "S849YDA49P",
-      buildNumber: "13",
+      buildNumber: "15",
       config: { usesNonExemptEncryption: false },
     });
+  });
+});
+
+describe("app.config — scheme por ambiente", () => {
+  // A volta do OAuth do banco é `<scheme>://open-finance-volta`, resolvida pelo
+  // iOS: com o mesmo scheme nos três binários, o sistema não define qual abre.
+  it.each([
+    ["production", "pigbank"],
+    ["staging", "pigbank-staging"],
+    ["development", "pigbank-dev"],
+  ])("%s usa o scheme %s", (ambiente, scheme) => {
+    expect(configEm(ambiente).scheme).toBe(scheme);
+  });
+
+  it.each(["development", "staging"])("%s não usa o scheme da produção", (ambiente) => {
+    expect(configEm(ambiente).scheme).not.toBe("pigbank");
+  });
+
+  it("APP_ENV desconhecido cai no scheme de desenvolvimento", () => {
+    expect(configEm("qualquer-coisa").scheme).toBe("pigbank-dev");
   });
 });

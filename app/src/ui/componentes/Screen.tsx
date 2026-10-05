@@ -38,14 +38,14 @@ type Props = {
  * conteúdo sob a área segura).
  */
 export function Screen(props: Props) {
-  const { cores } = useTema();
+  const { cores, acesso } = useTema();
   const insets = useSafeAreaInsets();
   const topo = props.sobCabecalho ? 0 : insets.top;
   const preenchimento = {
     paddingTop: topo,
     paddingBottom: insets.bottom,
-    paddingLeft: espaco.lg + insets.left,
-    paddingRight: espaco.lg + insets.right,
+    paddingLeft: (acesso ? espaco.xl : espaco.lg) + insets.left,
+    paddingRight: (acesso ? espaco.xl : espaco.lg) + insets.right,
     flexGrow: 1,
   };
 

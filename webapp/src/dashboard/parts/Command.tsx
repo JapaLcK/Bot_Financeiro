@@ -1,7 +1,11 @@
 import { useEffect, useMemo, useRef, useState, type KeyboardEvent } from "react";
+import { useQuery } from "@tanstack/react-query";
 import { CATEGORIES, HORIZONS, MONTHS, summary } from "../lib/api";
 import { dayMonth, money, monthTitle } from "../lib/format.js";
-import { dayKey, get, set, setFilter, setSim } from "../lib/store.js";
+import { dayKey, escolherMes, get, set, setFilter, setSim } from "../lib/store.js";
+import { DEMO, MESES, guiaQuery } from "../lib/v2";
+import { abrirDica, dicaDe } from "./Dica";
+import { abrirGuia } from "./Guia";
 import { PRESETS } from "../widgets/Simulator";
 import { NO_MONTH, ROUTES, go, useRoute, type Path } from "../router";
 import { NATIVE, hide, isOpen, show, untrap } from "./dialog";
@@ -11,14 +15,16 @@ interface Cmd { id: string; group: string; label: string; hint?: string; icon: s
 
 const norm = (t: string) => t.normalize("NFD").replace(/[\u0300-\u036f]/g, "").toLowerCase();
 
-function commands(q: string, here: Path): Cmd[] {
+function commands(q: string, here: Path, dica: boolean): Cmd[] {
   const s = get();
   const list: Cmd[] = [
     ...ROUTES.map((r) => ({ id: `nav-${r.path}`, group: "Ir para", label: r.label, icon: r.icon, run: () => go(r.path) })),
+    ...(DEMO ? [] : [{ id: "guia", group: "Ações", label: "Mostrar o guia do painel", icon: "ph-question", run: abrirGuia }]),
+    ...(dica ? [{ id: "dica", group: "Ações", label: "Como funciona esta tela", icon: "ph-info", run: abrirDica }] : []),
     { id: "edit", group: "Ações", label: s.editing ? "Terminar de organizar o painel" : "Organizar o painel", icon: "ph-pencil-simple", run: () => set({ editing: !s.editing }) },
     ...PRESETS.map((p) => ({ id: `sim-${p.label}`, group: "Ações", label: `Simular: ${p.label.toLowerCase()}`, icon: "ph-lightning", run: () => { setSim({ cuts: { ...get().sim.cuts, ...p.cuts } }); go("/simulador"); } })),
     ...(["mes", "30", "90"] as const).map((h) => ({ id: `h-${h}`, group: "Ações", label: `Previsão: ${HORIZONS[h].toLowerCase()}`, icon: "ph-clock", run: () => { set({ horizon: h, month: MONTHS[MONTHS.length - 1] }); go("/previsao"); } })),
-    ...MONTHS.map((m) => ({ id: `m-${m}`, group: "Meses", label: monthTitle(m), icon: "ph-calendar-dots", run: () => { set({ month: m }); if (NO_MONTH.includes(here)) go("/"); } })), // sem seletor na página, o mês trocado apareceria só depois, noutra tela
+    ...MESES.map((m) => ({ id: `m-${m}`, group: "Meses", label: monthTitle(m), icon: "ph-calendar-dots", run: () => { escolherMes(m); if (NO_MONTH.includes(here)) go("/"); } })), // sem seletor na página, o mês trocado apareceria só depois, noutra tela
     ...CATEGORIES.map((c) => ({ id: `c-${c.id}`, group: "Filtrar por categoria", label: c.label, icon: c.icon, run: () => { setFilter({ category: c.id, day: null, query: "", source: "todos" }); go("/lancamentos"); } })),
   ];
   const nq = norm(q.trim());
@@ -42,10 +48,12 @@ export function Command() {
   const [active, setActive] = useState(0);
   const [opened, setOpened] = useState(0); // relê o estado a cada abertura
   const here = useRoute();
-  const items = useMemo(() => commands(q, here), [q, opened, here]);
+  const dica = !!dicaDe(useQuery(guiaQuery).data, here);
+  const items = useMemo(() => commands(q, here, dica), [q, opened, here, dica]);
 
   useEffect(() => {
-    const open = () => { setQ(""); setActive(0); setOpened((n) => n + 1); show(dlg.current, "input"); input.current?.focus(); };
+    // Com o véu do guia (parts/Guia.tsx), só o balão e o alvo do passo respondem.
+    const open = () => { if (document.querySelector(".guia-veu")) return; setQ(""); setActive(0); setOpened((n) => n + 1); show(dlg.current, "input"); input.current?.focus(); };
     const onKey = (e: globalThis.KeyboardEvent) => {
       if ((e.metaKey || e.ctrlKey) && e.key.toLowerCase() === "k") { e.preventDefault(); if (isOpen(dlg.current)) hide(dlg.current); else open(); }
       else if (e.key === "/" && !(e.target as HTMLElement).closest("input, textarea, select") && !isOpen(dlg.current)) { e.preventDefault(); open(); }

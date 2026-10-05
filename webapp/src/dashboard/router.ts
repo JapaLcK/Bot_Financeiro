@@ -7,6 +7,7 @@ export const ROUTES = [
   { path: "/", label: "Resumo", short: "Resumo", icon: "ph-house", title: "Resumo" },
   { path: "/previsao", label: "Previsão", short: "Previsão", icon: "ph-chart-line-up", title: "Quanto vai sobrar" },
   { path: "/gastos", label: "Para onde vai", short: "Gastos", icon: "ph-chart-bar", title: "Para onde vai o dinheiro" },
+  { path: "/assinaturas", label: "Assinaturas", short: "Assinaturas", icon: "ph-arrows-clockwise", title: "Assinaturas" },
   { path: "/simulador", label: "Simulador", short: "Simulador", icon: "ph-lightning", title: "Simulador" },
   { path: "/metas", label: "Metas", short: "Metas", icon: "ph-target", title: "Metas e caixinhas" },
   { path: "/patrimonio", label: "Patrimônio", short: "Patrimônio", icon: "ph-wallet", title: "Patrimônio" },
@@ -21,7 +22,7 @@ export const TABBAR: Path[] = ["/", "/gastos", "/piggy", "/metas", "/lancamentos
 // O Piggy não entra no menu lateral: no desktop o acesso é a barra de conversa.
 export const RAIL: Path[] = ROUTES.map((r) => r.path).filter((p) => p !== "/piggy");
 // Páginas que mostram só o presente (ignoram o mês escolhido): o topbar esconde o seletor.
-export const NO_MONTH: Path[] = ["/simulador", "/metas", "/patrimonio", "/ferramentas", "/piggy"];
+export const NO_MONTH: Path[] = ["/assinaturas", "/simulador", "/metas", "/patrimonio", "/ferramentas", "/piggy"];
 
 // Hash desconhecido (#/xyz) abre o Resumo e troca o endereço para "#/" sem criar entrada
 // no histórico; hash vazio continua valendo como Resumo.

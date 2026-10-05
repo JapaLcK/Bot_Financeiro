@@ -211,6 +211,57 @@ async def serve_quiz_resultado():
     return html_file(FRONTEND_DIR / "quiz-resultado.html", pixel=False)
 
 
+@router.get("/assinar")
+async def serve_assinar():
+    # Funil v3: conta + checkout. Pixel e GA4 sim (o assinar.js limpa o fragmento antes
+    # deles), Clarity não: a página tem nome, e-mail e WhatsApp nos campos.
+    return html_file(FRONTEND_DIR / "assinar.html", pixel=True, clarity=False)
+
+
+@router.get("/assinar.js")
+async def serve_assinar_js(request: Request):
+    return FileResponse(FRONTEND_DIR / "assinar.js", media_type="application/javascript",
+                        headers={"Cache-Control": _cache_asset_versionado(request)})
+
+
+@router.get("/pagamento-pagina.js")
+async def serve_pagamento_pagina_js(request: Request):
+    return FileResponse(FRONTEND_DIR / "pagamento-pagina.js", media_type="application/javascript",
+                        headers={"Cache-Control": _cache_asset_versionado(request)})
+
+
+@router.get("/bump-caixas.js")
+async def serve_bump_caixas_js(request: Request):
+    """As caixas do order bump: /assinar (pagamento-pagina.js) e modal do Pix da /precos (pix-extras.js)."""
+    return FileResponse(FRONTEND_DIR / "bump-caixas.js", media_type="application/javascript",
+                        headers={"Cache-Control": _cache_asset_versionado(request)})
+
+
+@router.get("/bump-caixas.css")
+async def serve_bump_caixas_css(request: Request):
+    return FileResponse(FRONTEND_DIR / "bump-caixas.css", media_type="text/css",
+                        headers={"Cache-Control": _cache_asset_versionado(request)})
+
+
+@router.get("/pix-extras.js")
+async def serve_pix_extras_js(request: Request):
+    """Os cadernos extras no modal do Pix anual (/precos e /continuar-compra)."""
+    return FileResponse(FRONTEND_DIR / "pix-extras.js", media_type="application/javascript",
+                        headers={"Cache-Control": _cache_asset_versionado(request)})
+
+
+@router.get("/pagamento-caixas.js")
+async def serve_pagamento_caixas_js(request: Request):
+    return FileResponse(FRONTEND_DIR / "pagamento-caixas.js", media_type="application/javascript",
+                        headers={"Cache-Control": _cache_asset_versionado(request)})
+
+
+@router.get("/assinar.css")
+async def serve_assinar_css(request: Request):
+    return FileResponse(FRONTEND_DIR / "assinar.css", media_type="text/css",
+                        headers={"Cache-Control": _cache_asset_versionado(request)})
+
+
 @router.get("/quiz-resultado.js")
 async def serve_quiz_resultado_js():
     return FileResponse(FRONTEND_DIR / "quiz-resultado.js", media_type="application/javascript",
@@ -411,6 +462,12 @@ async def serve_precos():
     return html_file(FRONTEND_DIR / "precos.html", clarity=True)
 
 
+@router.get("/lp")
+async def serve_lp():
+    # Landing de anúncio: VSL obrigatória e um único botão para a /precos.
+    return html_file(FRONTEND_DIR / "lp.html", clarity=True, inline_css=("brand.css",))
+
+
 @router.get("/continuar-compra")
 async def serve_continuar_compra():
     """Retoma no checkout a escolha feita antes da autenticação.
@@ -485,6 +542,8 @@ async def serve_robots_txt():
         "Disallow: /reset-password",
         "Disallow: /auth/",
         "Disallow: /admin",
+        "Disallow: /assinar",
+        "Disallow: /q",
         f"Sitemap: {public_site_url('/sitemap.xml')}",
         "",
     ])

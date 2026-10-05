@@ -2,6 +2,7 @@
 do usuário. Plus ou Pro (`subscriptions` em `FEATURE_MIN_TIER_V2`). O CSRF do
 POST é o `csrf_middleware` do monólito, que cobre `/api/v2/*`."""
 from datetime import date
+from decimal import Decimal
 from typing import Literal
 
 from fastapi import APIRouter, Depends, HTTPException
@@ -25,8 +26,8 @@ class Assinatura(BaseModel):
     chave: str
     nome: str
     categoria: str | None
-    valor: float
-    valor_anterior: float | None
+    valor: Decimal
+    valor_anterior: Decimal | None
     reajuste_em: str | None
     dia: int
     proxima: str
@@ -41,8 +42,9 @@ class Assinatura(BaseModel):
 class Assinaturas(BaseModel):
     servicos: list[Assinatura]
     outras: list[Assinatura]
-    total_mensal: float
-    total_anual: float
+    ignoradas: list[Assinatura]
+    total_mensal: Decimal
+    total_anual: Decimal
 
 
 class MarcaIn(BaseModel):

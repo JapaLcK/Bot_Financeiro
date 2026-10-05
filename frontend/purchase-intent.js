@@ -173,6 +173,8 @@
     authUrl: authUrl,
     afterAuth: afterAuth,
     summary: summary,
+    // A /assinar valida plano e ciclo da query contra a MESMA lista da intenção.
+    isValidChoice: function (plan, cycle) { return PLANS.includes(plan) && CYCLES.includes(cycle); },
     mountAuth: mountAuth,
     mountOnboarding: mountOnboarding,
   };

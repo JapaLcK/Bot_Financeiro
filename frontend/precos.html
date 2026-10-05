@@ -29,6 +29,7 @@
      DEPOIS do site.css de propósito: ela refina `.plan`/`.plan-badge`, que
      nascem lá, e a mesma especificidade tem de ganhar pela ordem. -->
 <link href="/precos-app.css?v=1" rel="stylesheet"/>
+<link href="/bump-caixas.css?v=1" rel="stylesheet"/>
 <style>
   #toast { position: fixed; bottom: 26px; left: 50%; transform: translateX(-50%) translateY(20px); background: rgba(23,23,26,.96); border: 1px solid rgba(255,45,142,.3); color: #fff; padding: 12px 20px; border-radius: 12px; font-size: .88rem; font-weight: 600; opacity: 0; pointer-events: none; transition: all .25s; z-index: 1000; backdrop-filter: blur(12px); }
   #toast.show { opacity: 1; transform: translateX(-50%) translateY(0); }
@@ -458,6 +459,9 @@ function getCsrfToken() {
 // carrega o estado da assinatura (troca de plano). Sem flash de conteúdo.
 let currentCycle = "monthly";
 window.pbBillingCycle = currentCycle;
+// O corpo do /billing/plans-config (o loadPlansState preenche): alimenta os CTAs
+// de cartão e o de Pix. `null` até chegar, ou se falhar.
+let cfgPlanos = null;
 const purchaseContinuationPage = window.location.pathname === "/continuar-compra";
 
 function setCycle(cycle) {
@@ -935,7 +939,6 @@ async function cancelChange() {
 })();
 
 (async function loadPlansState(){
-  let cfgPlanos = null;   // o mesmo corpo alimenta os CTAs de cartão e o de Pix
   // Pix anual: reusa o `plans-config` e o `subscription` que esta página já
   // buscou — nenhum fetch novo. Sem `pix_annual_available` no cfg, o pbPixInit
   // não cria botão nenhum e a página fica igual à de hoje.
@@ -993,6 +996,18 @@ async function cancelChange() {
   } catch {}
 })();
 
+const urlAssinar = (plan, interval) => "/assinar?plano=" + encodeURIComponent(plan)
+  + "&ciclo=" + encodeURIComponent(interval);
+
+// Com CHECKOUT_PAGINA_PROPRIA (o `pagina_propria` do plans-config), o deslogado
+// faz conta e pagamento na /assinar em vez de passar pela /cadastro. Sem o
+// config (ainda não chegou, ou falhou) = caminho de antes.
+function assinarDeslogado(plan, interval) {
+  if (!cfgPlanos || cfgPlanos.pagina_propria !== true) return false;
+  window.location.href = urlAssinar(plan, interval);
+  return true;
+}
+
 async function startCheckout(interval, btn, plan, resuming) {
   if (btn.classList.contains("loading")) return;
   if (!resuming && window.PBPurchaseIntent) {
@@ -1023,7 +1038,14 @@ async function startCheckout(interval, btn, plan, resuming) {
     vivo.classList.remove("loading");
     vivo.textContent = originalText;
   };
+  // `pagina`: com a flag CHECKOUT_PAGINA_PROPRIA o servidor cria a sessão da
+  // página própria e a compra segue na /assinar; desligada, o hospedado de antes.
+  // No app, não: a /assinar no app vai ao hospedado, e a sessão `elements` criada
+  // aqui seria expirada lá (2 sessões por compra). O DESLOGADO com a flag também
+  // vai à /assinar, inclusive no app (assinarDeslogado, no 401): nada é criado
+  // antes do 401, então lá nasce a única sessão.
   const payload = { interval };
+  if (!window.PB_IN_APP) payload.pagina = true;
   if (plan) payload.plan = plan;
 
   try {
@@ -1048,6 +1070,9 @@ async function startCheckout(interval, btn, plan, resuming) {
 
     // Vale para a primeira resposta e para o retry depois de renovar o CSRF.
     if (resp.status === 401) {
+      // Sem `preservePurchaseForAuth`: a intenção em `awaiting_auth` faria um
+      // /login posterior abrir um 2º checkout pela /continuar-compra.
+      if (!resuming && assinarDeslogado(plan, interval)) return;
       preservePurchaseForAuth(plan, interval, "card");
       if (resuming && purchaseContinuationPage) {
         restaurar();
@@ -1112,7 +1137,13 @@ async function startCheckout(interval, btn, plan, resuming) {
     }
 
     const data = await resp.json();
-    if (data && data.checkout_url) {
+    if (data && data.pagina) {
+      // Página própria: paga na /assinar, que reaproveita a sessão criada agora
+      // (origem precos) e dispara InitiateCheckout/begin_checkout ao montar —
+      // disparar aqui também contaria duas vezes. Só plano e ciclo na URL.
+      if (window.PBPurchaseIntent) window.PBPurchaseIntent.markCheckoutStarted();
+      window.location.href = urlAssinar(plan, interval) + "&origem=precos";
+    } else if (data && data.checkout_url) {
       if (window.PBPurchaseIntent) window.PBPurchaseIntent.markCheckoutStarted();
       // Meta Ads: usuário iniciou o checkout (antes de ir pra Stripe).
       if (window.fbq) fbq("track", "InitiateCheckout", { content_category: plan || "", content_name: interval || "" });
@@ -1175,7 +1206,10 @@ enviarViewItemList();
        chegar por último lê o `window.pbPixState` que o outro deixou.
        O pix-ui.js vem PRIMEIRO (ele declara o `const pixBrl` que os dois leem) e
        o pix-poll.js antes do pix-checkout.js (ele declara o `pixPoll` que o outro
-       lê): `const`/`let` de topo de script clássico tem TDZ até o script rodar. -->
+       lê): `const`/`let` de topo de script clássico tem TDZ até o script rodar.
+       O bump-caixas.js e o pix-extras.js (os cadernos extras no formulário do
+       documento) vêm antes do pix-checkout.js, que os chama por `typeof`: sem
+       eles, o Pix do plano segue sem caixas. -->
 <!-- Ilha React do #plans-v2 (build de webapp/, artefato commitado). ANTES dos
        scripts do Pix e SEM `type="module"`: módulo é deferido, e o defer faria o
        `document.querySelector('#plans-v2 [data-plan-btn=…]')` do pix-checkout.js
@@ -1186,6 +1220,8 @@ enviarViewItemList();
 <script src="/precos-app.js?v=2"></script>
 <script src="/pix-ui.js?v=1"></script>
 <script src="/pix-poll.js?v=1"></script>
+<script src="/bump-caixas.js?v=1"></script>
+<script src="/pix-extras.js?v=1"></script>
 <script src="/pix-checkout.js?v=1"></script>
 <script defer="" src="/nav-auth.js?v=7"></script>
 <script defer="" src="/nav-burger.js?v=1"></script>

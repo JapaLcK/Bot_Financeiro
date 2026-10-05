@@ -5,6 +5,7 @@ import httpx
 import requests
 
 from core.observability import log_system_event_sync
+from utils_phone import mask_phone
 
 WA_TOKEN = (os.getenv("WA_TOKEN") or "").strip()
 WA_PHONE_NUMBER_ID = (os.getenv("WA_PHONE_NUMBER_ID") or "").strip()
@@ -74,7 +75,7 @@ def send_text(
             "whatsapp_send_exception",
             f"Excecao ao enviar mensagem WhatsApp: {exc}",
             source="wa_client",
-            details={"to": to, "kind": "text"},
+            details={"to": mask_phone(to), "kind": "text"},
         )
         raise
 
@@ -86,7 +87,7 @@ def send_text(
             "whatsapp_token_invalid",
             "Token do WhatsApp invalido ou expirado durante envio de texto.",
             source="wa_client",
-            details={"to": to, "kind": "text", "response": r.text[:500]},
+            details={"to": mask_phone(to), "kind": "text", "response": r.text[:500]},
         )
         return None
 
@@ -96,7 +97,7 @@ def send_text(
             "whatsapp_send_failed",
             f"Falha ao enviar mensagem WhatsApp ({r.status_code}).",
             source="wa_client",
-            details={"to": to, "kind": "text", "status_code": r.status_code, "response": r.text[:500]},
+            details={"to": mask_phone(to), "kind": "text", "status_code": r.status_code, "response": r.text[:500]},
         )
         raise RuntimeError(f"WA send_text failed {r.status_code}: {r.text}")
 
@@ -107,7 +108,6 @@ def send_text(
         "Mensagem de texto enviada para o WhatsApp.",
         source="wa_client",
         details={
-            "to": to,
             "kind": "text",
             "message_ids": [m.get("id") for m in response.get("messages", []) if m.get("id")],
         },
@@ -193,7 +193,7 @@ def send_template(
             f"Excecao ao enviar template WhatsApp: {exc}",
             source="wa_client",
             details={
-                "to": to,
+                "to": mask_phone(to),
                 "kind": "template",
                 "template_name": template_name,
                 "language_code": language_code,
@@ -210,7 +210,7 @@ def send_template(
             "Token do WhatsApp invalido ou expirado durante envio de template.",
             source="wa_client",
             details={
-                "to": to,
+                "to": mask_phone(to),
                 "kind": "template",
                 "template_name": template_name,
                 "language_code": language_code,
@@ -226,7 +226,7 @@ def send_template(
             f"Falha ao enviar template WhatsApp ({r.status_code}).",
             source="wa_client",
             details={
-                "to": to,
+                "to": mask_phone(to),
                 "kind": "template",
                 "template_name": template_name,
                 "language_code": language_code,
@@ -243,7 +243,6 @@ def send_template(
         "Template enviado para o WhatsApp.",
         source="wa_client",
         details={
-            "to": to,
             "kind": "template",
             "template_name": template_name,
             "language_code": language_code,
@@ -377,7 +376,7 @@ def send_interactive_buttons(
             "whatsapp_send_exception",
             f"Excecao ao enviar botoes do WhatsApp: {exc}",
             source="wa_client",
-            details={"to": to, "kind": "interactive_buttons"},
+            details={"to": mask_phone(to), "kind": "interactive_buttons"},
         )
         raise
     if r.status_code == 401:
@@ -388,7 +387,7 @@ def send_interactive_buttons(
             "whatsapp_token_invalid",
             "Token do WhatsApp invalido ou expirado durante envio de botoes.",
             source="wa_client",
-            details={"to": to, "kind": "interactive_buttons", "response": r.text[:500]},
+            details={"to": mask_phone(to), "kind": "interactive_buttons", "response": r.text[:500]},
         )
         return None
     if r.status_code >= 400:
@@ -397,7 +396,7 @@ def send_interactive_buttons(
             "whatsapp_send_failed",
             f"Falha ao enviar botoes do WhatsApp ({r.status_code}).",
             source="wa_client",
-            details={"to": to, "kind": "interactive_buttons", "status_code": r.status_code, "response": r.text[:500]},
+            details={"to": mask_phone(to), "kind": "interactive_buttons", "status_code": r.status_code, "response": r.text[:500]},
         )
         raise RuntimeError(f"WA send_interactive_buttons failed {r.status_code}: {r.text}")
     response = r.json()
@@ -406,7 +405,7 @@ def send_interactive_buttons(
         "whatsapp_send_success",
         "Mensagem interativa com botoes enviada para o WhatsApp.",
         source="wa_client",
-        details={"to": to, "kind": "interactive_buttons"},
+        details={"kind": "interactive_buttons"},
     )
     return response
 
@@ -467,7 +466,7 @@ def send_interactive_list(
             "whatsapp_send_exception",
             f"Excecao ao enviar lista do WhatsApp: {exc}",
             source="wa_client",
-            details={"to": to, "kind": "interactive_list"},
+            details={"to": mask_phone(to), "kind": "interactive_list"},
         )
         raise
     if r.status_code == 401:
@@ -478,7 +477,7 @@ def send_interactive_list(
             "whatsapp_token_invalid",
             "Token do WhatsApp invalido ou expirado durante envio de lista.",
             source="wa_client",
-            details={"to": to, "kind": "interactive_list", "response": r.text[:500]},
+            details={"to": mask_phone(to), "kind": "interactive_list", "response": r.text[:500]},
         )
         return None
     if r.status_code >= 400:
@@ -487,7 +486,7 @@ def send_interactive_list(
             "whatsapp_send_failed",
             f"Falha ao enviar lista do WhatsApp ({r.status_code}).",
             source="wa_client",
-            details={"to": to, "kind": "interactive_list", "status_code": r.status_code, "response": r.text[:500]},
+            details={"to": mask_phone(to), "kind": "interactive_list", "status_code": r.status_code, "response": r.text[:500]},
         )
         raise RuntimeError(f"WA send_interactive_list failed {r.status_code}: {r.text}")
     response = r.json()
@@ -496,7 +495,7 @@ def send_interactive_list(
         "whatsapp_send_success",
         "Mensagem interativa com lista enviada para o WhatsApp.",
         source="wa_client",
-        details={"to": to, "kind": "interactive_list"},
+        details={"kind": "interactive_list"},
     )
     return response
 

@@ -121,14 +121,59 @@ def valores_por_cobranca(user_id: int) -> dict[str, int]:
             return {str(r["id"]): int(r["amount_cents"]) for r in cur.fetchall()}
 
 
-def gravar_stripe_period_end(charge_id: int, quando, *, access_starts_at=None,
-                             access_expires_at=None) -> bool:
+def paga_cobrindo_agora(user_id: int) -> bool:
+    """Cobrança Pix paga DESTE usuário cuja janela contém agora — inclusive a
+    que o dreno ainda não transformou em grant (falha entre `stripe_cancel` e
+    `grant`, retentando). `refunded_partial` conta: o parcial não revoga.
+    Grant `pix` REVOGADO tira a cobrança (admin e chargeback revogam sem mexer
+    no `status` dela); grant ainda inexistente não tira."""
+    with get_conn() as conn:
+        with conn.cursor() as cur:
+            cur.execute(
+                "select 1 from pix_charges c where c.user_id = %s"
+                " and c.status in ('paid', 'refunded_partial')"
+                " and c.access_starts_at <= now() and now() < c.access_expires_at"
+                " and not exists (select 1 from plan_grants g where g.user_id = c.user_id"
+                "   and g.source = 'pix' and g.external_ref = c.id::text"
+                "   and g.status = 'revoked') limit 1",
+                (int(user_id),),
+            )
+            return cur.fetchone() is not None
+
+
+def grants_para_precificar(user_id: int) -> list[dict]:
+    """Os grants ativos do usuário **com `amount_cents`** — o "join" que
+    `plano_da_cobranca` exige do chamador, e sem o qual todo crédito vira 0. Em
+    Python porque as duas metades filtram por `user_id` cada uma (§0).
+
+    Veio de `core/services/pix_checkout.py` (era `_grants_para_precificar`) para
+    abrir espaço no teto de 350 linhas, sem mudar a lógica.
+    """
+    from .plan_grants import list_grants
+
+    valores = valores_por_cobranca(user_id)
+    ativos = []
+    for g in list_grants(user_id):
+        if g["status"] != "active":
+            continue
+        item = dict(g)
+        item["amount_cents"] = (valores.get(str(g["external_ref"]))
+                                if g["source"] == "pix" else None)
+        ativos.append(item)
+    return ativos
+
+
+def gravar_stripe_period_end(charge_id: int, sub_id: str, quando, *,
+                             access_starts_at=None, access_expires_at=None) -> bool:
     """Grava o `stripe_period_end_at` RECONFIRMADO no Stripe. True se aplicou.
 
     A criação grava a ESTIMATIVA que o checkout leu (§8.2); o efeito
     `stripe_cancel` lê o `current_period_end` de verdade no pagamento e chama
-    isto. `where stripe_subscription_id is not null` porque só a migração tem
-    período a reconfirmar.
+    isto. `sub_id` SEMPRE entra na coluna: é a assinatura cujo cancelamento o
+    efeito agendou — a gravada, ou a que ele DESCOBRIU no Stripe (coluna nula,
+    ou a gravada morta e outra viva). Sem isso a janela adiada vivia só na
+    memória, e a coluna apontava para uma assinatura morta: o admin do alerta
+    da 6ª falha (§8.2) concluiria "já cancelada" com a viva renovando.
 
     **A janela vem junto, e no MESMO update.** Quem decide se ela muda é
     `_janela_adiada` (só adia, nunca antecipa); passá-la aqui em vez de num
@@ -140,13 +185,14 @@ def gravar_stripe_period_end(charge_id: int, quando, *, access_starts_at=None,
         with conn.cursor() as cur:
             cur.execute(
                 "update pix_charges"
-                "   set stripe_period_end_at = %s,"
+                "   set stripe_subscription_id = %s,"
+                "       stripe_period_end_at = %s,"
                 "       stripe_cancel_scheduled_at = now(),"
                 "       access_starts_at = coalesce(%s, access_starts_at),"
                 "       access_expires_at = coalesce(%s, access_expires_at)"
-                " where id = %s and stripe_subscription_id is not null"
+                " where id = %s"
                 " returning id",
-                (quando, access_starts_at, access_expires_at, int(charge_id)),
+                (sub_id, quando, access_starts_at, access_expires_at, int(charge_id)),
             )
             aplicou = cur.fetchone() is not None
         conn.commit()
@@ -217,3 +263,27 @@ def apagar_cobranca(charge_id: int) -> bool:
             aplicou = cur.fetchone() is not None
         conn.commit()
     return aplicou
+
+
+def rezerar_rastreio_de_orfas() -> int:
+    """A varredura diária do §13.2, e o outro lado do UPDATE de `db/privacy.py`.
+
+    Aquele UPDATE (`:936`) não é a garantia: quem desfaz o vínculo é a FK
+    `on delete set null`, e entre ele e o `delete from users` cabe um webhook que
+    commite depois — a linha fica com `user_id` nulo e `purged_at` NUNCA escrito.
+    Esta passada é quem alcança essas. `purged_at is null` a torna datável: sem
+    ele o carimbo seria reescrito todo dia. Predicado DIFERENTE do da outbox de
+    propósito — `pix_webhook_events` não tem `user_id` (§13.3).
+    """
+    with get_conn() as conn:
+        with conn.cursor() as cur:
+            cur.execute(
+                "update pix_charges"
+                "   set ga_client_id = null, fbp = null, fbc = null,"
+                "       qr_payload_enc = null, asaas_customer_id = null,"
+                "       purged_at = now()"
+                " where user_id is null and purged_at is null"
+            )
+            rezeradas = cur.rowcount
+        conn.commit()
+    return rezeradas

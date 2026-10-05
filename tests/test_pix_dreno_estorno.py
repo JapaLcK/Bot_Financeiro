@@ -187,7 +187,7 @@ def test_received_sem_estorno_anterior_concede(user_id, externo):
     entregar("PAYMENT_RECEIVED", cobranca)
     assert len(_grants_ativos(user_id)) == 1
     assert efeitos(cobranca["asaas_payment_id"]) == {
-        "stripe_cancel", "grant", "ga4", "capi", "email"}
+        "stripe_cancel", "grant", "ebook", "ga4", "capi", "email"}
     assert externo["ga4"] == 1 and externo["capi"] == 1 and externo["email"] == 1
 
 

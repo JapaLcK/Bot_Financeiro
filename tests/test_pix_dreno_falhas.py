@@ -295,7 +295,7 @@ def test_venda_normal_continua_fechando_o_evento(user_id, externo):
     event_id = entregar("PAYMENT_RECEIVED", cobranca)
 
     assert efeitos(cobranca["asaas_payment_id"]) == {
-        "stripe_cancel", "grant", "ga4", "capi", "email"}
+        "stripe_cancel", "grant", "ebook", "ga4", "capi", "email"}
     assert evento(event_id)["processed_at"] is not None
     assert externo["alerta"] == []
     assert _pix(user_id)

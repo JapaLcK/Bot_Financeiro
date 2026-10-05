@@ -208,3 +208,61 @@ for (const [nome, viewport] of [["desktop", { width: 1280, height: 800 }], ["mob
     await ctx.close();
   });
 }
+
+// ── plano na query: a /q segue para a /assinar com n/e/w no FRAGMENTO de lá ─────
+
+/**
+ * Abre a /q com `plano` e devolve as URLs que a aba teve (a da /q depois da limpeza,
+ * a da /assinar ao chegar), os campos do S1 e os requests. A /assinar vem do disco.
+ */
+async function paraAssinar(resto) {
+  const ctx = await browser.newContext();
+  const reqs = [];
+  ctx.on("request", (req) => reqs.push(req.url()));
+  // Antes de qualquer script da página: grava a URL de chegada e a de cada replaceState.
+  await ctx.addInitScript(() => {
+    const anota = () => sessionStorage.setItem("__urls", (sessionStorage.getItem("__urls") || "") + location.href + "\n");
+    anota();
+    const orig = history.replaceState;
+    history.replaceState = function () { const r = orig.apply(this, arguments); anota(); return r; };
+  });
+  await ctx.route((url) => url.pathname === "/assinar",
+    (route) => route.fulfill({ path: new URL("assinar.html", FRONTEND).pathname }));
+  const page = await ctx.newPage();
+  await page.goto(q(resto), { waitUntil: "commit" });
+  await page.waitForURL(/\/assinar/);
+  await page.locator("#s1").waitFor();
+  const [qInicial, qLimpa, assinar] = (await page.evaluate(() => sessionStorage.getItem("__urls"))).trim().split("\n");
+  const campos = { nome: await page.inputValue("#nome"), email: await page.inputValue("#email"),
+                   whatsapp: await page.inputValue("#whatsapp") };
+  const cookie = (await ctx.cookies()).find((c) => c.name === "quiz_result");
+  await ctx.close();
+  assert.ok(qInicial.includes("/quiz-resultado.html"), qInicial);
+  return { qLimpa: new URL(qLimpa), assinar: new URL(assinar), campos, cookie, reqs };
+}
+
+test("T-Q1: plano → /assinar com a query, n/e/w no fragmento (nome com & e #, e-mail com +), /q limpa", async () => {
+  const { qLimpa, assinar, campos, cookie, reqs } = await paraAssinar(
+    "?plano=plus&ciclo=monthly&utm_source=ig#p=dividas&r=acdbd&e=a%2Bb@x.com&n=Ana%20%26%20%23Cia&w=11987654321");
+  assert.equal(cookie.value, "v1.dividas.acdbd");
+  assert.equal(qLimpa.search, "?plano=plus&ciclo=monthly&utm_source=ig");
+  assert.equal(qLimpa.hash, "");
+  assert.equal(assinar.pathname, "/assinar");
+  assert.equal(assinar.search, "?plano=plus&ciclo=monthly&utm_source=ig");
+  assert.deepEqual(campos, { nome: "Ana & #Cia", email: "a+b@x.com", whatsapp: "11987654321" });
+  assert.deepEqual(reqs.filter((u) => RASTREIO.test(u)), []);
+  for (const u of reqs) assert.ok(!/987654321|dividas|acdbd|a%2Bb|a\+b/.test(u), u);
+});
+
+test("T-Q2: plano com e/c vai para a /assinar, e o código não aparece em URL nenhuma", async () => {
+  const { qLimpa, assinar, campos, reqs } = await paraAssinar("?plano=pro&ciclo=annual#p=dividas&e=a@b.com&c=123456");
+  for (const u of [qLimpa.href, assinar.href, ...reqs]) assert.ok(!u.includes("123456") && !/[?&#]c=/.test(u), u);
+  assert.equal(assinar.hash, "#e=a%40b.com");
+  assert.equal(campos.email, "a@b.com");
+});
+
+test("T-Q3: plano sem n deixa o Nome vazio, e não \"null\"", async () => {
+  const { assinar, campos } = await paraAssinar("?plano=plus&ciclo=monthly#p=dividas&e=a@b.com");
+  assert.equal(campos.nome, "");
+  assert.ok(!assinar.hash.includes("null"), assinar.hash);
+});

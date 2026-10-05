@@ -2,6 +2,7 @@
 from __future__ import annotations
 from typing import Any
 from ofx_import import import_ofx_bytes
+from core.services.fonte_unica import exigir
 try:
     from utils_text import fmt_brl
 except Exception:
@@ -70,6 +71,7 @@ _PRO_REQUIRED_OFX_MSG = (
 
 def handle_ofx_import(user_id: str, attachment_bytes: bytes, filename: str) -> str:
     uid = int(user_id)
+    exigir(uid, "extrato")
     from core.services.plan_service import is_pro
     if not is_pro(uid):
         return _PRO_REQUIRED_OFX_MSG
@@ -149,6 +151,7 @@ def handle_credit_ofx_import(user_id: str, attachment_bytes: bytes, filename: st
     from core.services.plan_service import is_pro
 
     uid = int(user_id)
+    exigir(uid, "cartao")
     if not is_pro(uid):
         return _PRO_REQUIRED_OFX_MSG
     cards = list_cards(uid)

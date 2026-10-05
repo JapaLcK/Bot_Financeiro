@@ -14,6 +14,7 @@ import os
 from unittest.mock import Mock, patch
 
 import pyotp
+import pytest
 from cryptography.fernet import Fernet
 from fastapi.testclient import TestClient
 
@@ -55,13 +56,23 @@ def _login_event(user_id: int, success: bool, ip: str, failure_reason: str | Non
 
 
 class _FakeRequest:
+    """Peer do proxy do Railway: o `core.client_ip` lê a última entrada do XFF,
+    que aqui não é da Cloudflare e por isso é o IP devolvido."""
     def __init__(self, ip: str = "203.0.113.10", ua: str = "pytest/1.0"):
         self.headers = {"x-forwarded-for": ip, "user-agent": ua}
 
         class _C:
-            host = "127.0.0.1"
+            host = "100.64.0.1"
 
         self.client = _C()
+
+
+@pytest.fixture(autouse=True)
+def _sem_sonda(monkeypatch):
+    """O peer 100.64 dispara a sonda do `core.client_ip`; aqui ela não grava."""
+    import core.client_ip as cip
+    monkeypatch.delenv(cip.SEGREDO_ENV, raising=False)
+    monkeypatch.setattr(cip, "Thread", Mock())
 
 
 def test_record_audit_event_persists_full_payload(user_id):

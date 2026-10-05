@@ -44,6 +44,9 @@
   .w-open:hover i { transform: translateX(2px); }
 }
 .w-open i { transition: transform var(--t-fast) var(--ease-out); }
+/* Alvo de toque de 44px sem mexer na altura da cabeça do bloco (o desenho segue com 28px). */
+.w-open { position: relative; }
+.w-open::after { content: ""; position: absolute; top: -8px; right: -8px; bottom: -8px; left: -8px; }
 .board[data-editing] .w-open { display: none; }
 
 /* Detalhe da categoria */
@@ -74,12 +77,13 @@
   color: var(--ink); text-decoration: none;
 }
 .tool i { font-size: 22px; color: var(--ink-3); }
-a.tool i { color: var(--pink); }
+button.tool { border: 0; width: 100%; text-align: start; }
+a.tool i, button.tool i { color: var(--pink); }
 .tool b { font-size: 15px; font-weight: 600; }
 .tool span { font-size: 13px; line-height: 1.45; color: var(--ink-2); }
 .tool em { margin-top: 4px; padding: 2px 8px; border-radius: 6px; background: var(--plane-2); font-size: 11.5px; font-style: normal; color: var(--ink-3); }
-a.tool:focus-visible { outline: none; box-shadow: var(--lift), inset 0 0 0 2px var(--pink); }
-@media (hover: hover) and (pointer: fine) { a.tool:hover { box-shadow: var(--lift), inset 0 0 0 1px var(--pink-line); } }
+a.tool:focus-visible, button.tool:focus-visible { outline: none; box-shadow: var(--lift), inset 0 0 0 2px var(--pink); }
+@media (hover: hover) and (pointer: fine) { a.tool:hover, button.tool:hover { box-shadow: var(--lift), inset 0 0 0 1px var(--pink-line); } }
 /* Seis meses (renda, parcelas) e o rendimento × CDI */
 .months.m6 { grid-template-columns: repeat(6, minmax(0, 1fr)); gap: 8px; }
 .months.m6 .months-bar { width: 100%; max-width: 28px; height: 110px; }

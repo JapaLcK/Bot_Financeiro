@@ -1,10 +1,30 @@
 {
-  "_comentario": "Respostas da /api/v2 que os testes de navegador servem. tests/test_api_v2_contrato.py valida cada uma pelos modelos Pydantic (Me, Perfil, Contas, ErroV2); a marcada fora_do_envelope tem de NÃO validar. Dinheiro é texto decimal.",
+  "_comentario": "Respostas da /api/v2 que os testes de navegador servem. tests/test_api_v2_contrato.py valida cada uma pelos modelos Pydantic (Me, Perfil, Contas, Assinaturas, ResumoDoMes, Lancamentos, Categorias, Guia, ErroV2); a marcada fora_do_envelope tem de NÃO validar. As dicas do guia vêm todas com vista: true (a dica não aparece nem faz POST nos testes que não são dela; os dela trocam em tests/frontend/_guia.mjs). Dinheiro é texto decimal.",
   "me": {
     "free": { "plan_tier": "free" },
     "essencial": { "plan_tier": "essencial" },
     "plus": { "plan_tier": "plus" },
     "pro": { "plan_tier": "pro" }
+  },
+  "assinaturas": {
+    "cheia": {
+      "servicos": [
+        { "chave": "smart fit", "nome": "Smart Fit", "categoria": "saude", "valor": "119.90", "valor_anterior": null, "reajuste_em": null, "dia": 10, "proxima": "2026-10-10", "ultima": "2026-09-10", "desde": "2025-11-10", "meses": 11, "meio": { "tipo": "conta", "nome": "Itaú", "final": null }, "status": "ativa", "marcada": true },
+        { "chave": "netflix", "nome": "Netflix", "categoria": "assinaturas", "valor": "55.9", "valor_anterior": "44.90", "reajuste_em": "2026-08-05", "dia": 5, "proxima": "2026-10-05", "ultima": "2026-09-05", "desde": "2025-03-05", "meses": 19, "meio": { "tipo": "cartao", "nome": "Nubank", "final": "1234" }, "status": "ativa", "marcada": false },
+        { "chave": "globoplay", "nome": "Globoplay", "categoria": "assinaturas", "valor": "22.90", "valor_anterior": null, "reajuste_em": null, "dia": 15, "proxima": "2026-08-15", "ultima": "2026-07-15", "desde": "2026-01-15", "meses": 7, "meio": { "tipo": "cartao", "nome": "Nubank", "final": "1234" }, "status": "possivelmente_cancelada", "marcada": false },
+        { "chave": "apple", "nome": "Apple Music", "categoria": "assinaturas", "valor": "21.90", "valor_anterior": null, "reajuste_em": null, "dia": 12, "proxima": "2026-10-12", "ultima": "2026-09-12", "desde": "2025-06-12", "meses": 16, "meio": { "tipo": "cartao", "nome": "Inter", "final": "9876" }, "status": "ativa", "marcada": false },
+        { "chave": "apple", "nome": "iCloud", "categoria": "assinaturas", "valor": "14.90", "valor_anterior": "9.90", "reajuste_em": "2026-03-20", "dia": 20, "proxima": "2026-10-20", "ultima": "2026-09-20", "desde": "2024-02-20", "meses": 32, "meio": { "tipo": "cartao", "nome": "Inter", "final": "9876" }, "status": "ativa", "marcada": false }
+      ],
+      "outras": [
+        { "chave": "condominio aurora", "nome": "Condomínio Aurora", "categoria": "moradia", "valor": "480.00", "valor_anterior": "450.00", "reajuste_em": "2026-01-08", "dia": 8, "proxima": "2026-10-08", "ultima": "2026-09-08", "desde": "2025-01-08", "meses": 21, "meio": { "tipo": "conta", "nome": "Itaú", "final": null }, "status": "ativa", "marcada": false },
+        { "chave": "porto seguro", "nome": "Porto Seguro", "categoria": "seguros", "valor": "89.90", "valor_anterior": "100.00", "reajuste_em": "2026-06-22", "dia": 22, "proxima": "2026-10-22", "ultima": "2026-09-22", "desde": "2025-09-22", "meses": 13, "meio": { "tipo": "cartao", "nome": "Nubank", "final": "1234" }, "status": "ativa", "marcada": false },
+        { "chave": "porto seguro", "nome": "Porto Seguro Residencial", "categoria": "seguros", "valor": "39.90", "valor_anterior": null, "reajuste_em": null, "dia": 3, "proxima": "2026-10-03", "ultima": "2026-09-03", "desde": "2026-02-03", "meses": 8, "meio": { "tipo": "conta", "nome": "CooperativaDeCreditoDosServidoresPublicosSicoobCredicitrusAgencia", "final": null }, "status": "ativa", "marcada": false }
+      ],
+      "ignoradas": [],
+      "total_mensal": "212.60",
+      "total_anual": "2551.20"
+    },
+    "vazia": { "servicos": [], "outras": [], "ignoradas": [], "total_mensal": "0", "total_anual": "0" }
   },
   "perfil": {
     "economizar": { "perfil": "economizar" },
@@ -39,6 +59,81 @@
       ]
     }
   },
+  "resumo_do_mes": {
+    "exato": { "mes": "2026-10", "ate": "2026-10-31", "entrou": "1040.00", "saiu": "440.00", "anterior": { "mes": "2026-09", "entrou": "5200.00", "saiu": "3980.55" }, "motivos": [] },
+    "todos_os_motivos": { "mes": "2026-07", "ate": "2026-07-31", "entrou": "0", "saiu": "310.00", "anterior": null, "motivos": ["conciliacao_pendente", "movimentos_pendentes", "banco_desatualizado", "inicio_do_historico"] },
+    "sem_dados": { "mes": "2026-10", "ate": "2026-10-31", "entrou": "0", "saiu": "0", "anterior": { "mes": "2026-09", "entrou": "0", "saiu": "0" }, "motivos": [] }
+  },
+  "lancamentos": {
+    "estados": {
+      "mes": "2026-10",
+      "itens": [
+        { "id": "l901", "data": "2026-10-02", "hora": "19:40", "tipo": "saida", "interno": false, "valor": "42.90", "moeda": "BRL", "descricao": "mercado", "mensagem": "gastei 42,90 no mercado", "categoria": "mercado", "origem": "carteira", "fundido": false, "instituicao": null, "conta_id": null, "cartao_id": null, "parcela": null, "fatura": null, "pode": ["categoria", "descricao", "data", "valor", "apagar"], "motivos": [] },
+        { "id": "l900", "data": "2026-10-02", "hora": null, "tipo": "saida", "interno": false, "valor": "30.00", "moeda": "BRL", "descricao": "PADARIA DO ZE", "mensagem": null, "categoria": "alimentacao", "origem": "banco", "fundido": false, "instituicao": "Nubank", "conta_id": 7, "cartao_id": null, "parcela": null, "fatura": null, "pode": ["categoria", "descricao"], "motivos": ["conciliacao_pendente", "transacao_pendente"] },
+        { "id": "l899", "data": "2026-10-01", "hora": "08:00", "tipo": "saida", "interno": true, "valor": "500", "moeda": "BRL", "descricao": "fatura:Nubank", "mensagem": "Pagamento de fatura (Nubank)", "categoria": "pagamento_fatura", "origem": "registro_antigo", "fundido": false, "instituicao": null, "conta_id": null, "cartao_id": null, "parcela": null, "fatura": null, "pode": [], "motivos": [] },
+        { "id": "l898", "data": "2026-10-01", "hora": "07:10", "tipo": "entrada", "interno": false, "valor": "1040.00", "moeda": "BRL", "descricao": "salário", "mensagem": null, "categoria": null, "origem": "registro_antigo", "fundido": true, "instituicao": "Nubank", "conta_id": 7, "cartao_id": null, "parcela": null, "fatura": null, "pode": [], "motivos": [] },
+        { "id": "c55", "data": "2026-09-20", "hora": null, "tipo": "saida", "interno": false, "valor": "100.00", "moeda": "BRL", "descricao": "LOJA X", "mensagem": null, "categoria": "casa", "origem": "cartao", "fundido": false, "instituicao": "Nubank", "conta_id": null, "cartao_id": 3, "parcela": { "n": 1, "total": 3 }, "fatura": "2026-10", "pode": ["categoria", "descricao"], "motivos": [] }
+      ],
+      "proximo": "WyIyMDI2LTA5LTIwIiwgIjIwMjYtMTAtMDFUMTI6MDA6MDArMDA6MDAiLCAiYyIsIDU1XQ==",
+      "motivos": ["conciliacao_pendente"]
+    },
+    "vazia": { "mes": "2026-07", "itens": [], "proximo": null, "motivos": ["inicio_do_historico"] }
+  },
+  "categorias": {
+    "padrao": { "categorias": [{ "chave": "alimentacao", "nome": "alimentação" }, { "chave": "mercado", "nome": "mercado" }, { "chave": "casa", "nome": "Casa" }] }
+  },
+  "guia": {
+    "oferecer": {
+      "estado": "oferecer",
+      "motivo": null,
+      "passos": [
+        {"id": "resumo.saiu", "tela": "resumo", "ancora": "resumo.saiu", "acao": "mes.trocado", "dado": "real", "avanca": "cliente", "fala": {"titulo": "O que saiu este mês", "apresenta": "Esse é o que saiu da sua conta este mês, direto do seu banco.", "texto": "Toca aqui pra comparar com o mês passado."}, "disponivel": true, "motivo": null, "feito": false},
+        {"id": "gastos.categoria", "tela": "gastos", "ancora": "categorias.lista", "acao": "categoria.aberta", "dado": "exemplo", "avanca": "cliente", "fala": {"titulo": "Pra onde foi o dinheiro", "apresenta": "Aqui ficam suas categorias: pra onde foi cada real do mês. Estes números ainda são de exemplo.", "texto": "Toca numa categoria pra ver de onde vem o total."}, "disponivel": true, "motivo": null, "feito": false},
+        {"id": "piggy.pergunta", "tela": "piggy", "ancora": "piggy.pergunta", "acao": "piggy.perguntou", "dado": "exemplo", "avanca": "cliente", "fala": {"titulo": "Pergunta pro Piggy", "apresenta": "Aqui você conversa comigo. As respostas ainda são de exemplo; a conversa de verdade chega em breve.", "texto": "Toca numa pergunta pronta e me vê responder."}, "disponivel": true, "motivo": null, "feito": false}
+      ],
+      "dicas": [{"id": "assinaturas.marcas", "tela": "assinaturas", "titulo": "Como eu acho suas assinaturas", "texto": "Eu acho essas cobranças no extrato que chega do seu banco pelo Open Finance. “Ignorar” e “É assinatura” só me ensinam o que é o quê: nada é cancelado aqui.", "vista": true}]
+    },
+    "indisponivel": {
+      "estado": "indisponivel",
+      "motivo": "sem_dados",
+      "passos": [
+        {"id": "resumo.saiu", "tela": "resumo", "ancora": "resumo.saiu", "acao": "mes.trocado", "dado": "real", "avanca": "cliente", "fala": {"titulo": "O que saiu este mês", "apresenta": "Esse é o que saiu da sua conta este mês, direto do seu banco.", "texto": "Toca aqui pra comparar com o mês passado."}, "disponivel": false, "motivo": "sem_dados", "feito": false},
+        {"id": "gastos.categoria", "tela": "gastos", "ancora": "categorias.lista", "acao": "categoria.aberta", "dado": "exemplo", "avanca": "cliente", "fala": {"titulo": "Pra onde foi o dinheiro", "apresenta": "Aqui ficam suas categorias: pra onde foi cada real do mês. Estes números ainda são de exemplo.", "texto": "Toca numa categoria pra ver de onde vem o total."}, "disponivel": true, "motivo": null, "feito": false},
+        {"id": "piggy.pergunta", "tela": "piggy", "ancora": "piggy.pergunta", "acao": "piggy.perguntou", "dado": "exemplo", "avanca": "cliente", "fala": {"titulo": "Pergunta pro Piggy", "apresenta": "Aqui você conversa comigo. As respostas ainda são de exemplo; a conversa de verdade chega em breve.", "texto": "Toca numa pergunta pronta e me vê responder."}, "disponivel": true, "motivo": null, "feito": false}
+      ],
+      "dicas": [{"id": "assinaturas.marcas", "tela": "assinaturas", "titulo": "Como eu acho suas assinaturas", "texto": "Eu acho essas cobranças no extrato que chega do seu banco pelo Open Finance. “Ignorar” e “É assinatura” só me ensinam o que é o quê: nada é cancelado aqui.", "vista": true}]
+    },
+    "em_andamento": {
+      "estado": "em_andamento",
+      "motivo": "sincronizando",
+      "passos": [
+        {"id": "resumo.saiu", "tela": "resumo", "ancora": "resumo.saiu", "acao": "mes.trocado", "dado": "real", "avanca": "cliente", "fala": {"titulo": "O que saiu este mês", "apresenta": "Esse é o que saiu da sua conta este mês, direto do seu banco.", "texto": "Toca aqui pra comparar com o mês passado."}, "disponivel": false, "motivo": "sincronizando", "feito": false},
+        {"id": "gastos.categoria", "tela": "gastos", "ancora": "categorias.lista", "acao": "categoria.aberta", "dado": "exemplo", "avanca": "cliente", "fala": {"titulo": "Pra onde foi o dinheiro", "apresenta": "Aqui ficam suas categorias: pra onde foi cada real do mês. Estes números ainda são de exemplo.", "texto": "Toca numa categoria pra ver de onde vem o total."}, "disponivel": true, "motivo": null, "feito": true},
+        {"id": "piggy.pergunta", "tela": "piggy", "ancora": "piggy.pergunta", "acao": "piggy.perguntou", "dado": "exemplo", "avanca": "cliente", "fala": {"titulo": "Pergunta pro Piggy", "apresenta": "Aqui você conversa comigo. As respostas ainda são de exemplo; a conversa de verdade chega em breve.", "texto": "Toca numa pergunta pronta e me vê responder."}, "disponivel": true, "motivo": null, "feito": true}
+      ],
+      "dicas": [{"id": "assinaturas.marcas", "tela": "assinaturas", "titulo": "Como eu acho suas assinaturas", "texto": "Eu acho essas cobranças no extrato que chega do seu banco pelo Open Finance. “Ignorar” e “É assinatura” só me ensinam o que é o quê: nada é cancelado aqui.", "vista": true}]
+    },
+    "concluido": {
+      "estado": "concluido",
+      "motivo": null,
+      "passos": [
+        {"id": "resumo.saiu", "tela": "resumo", "ancora": "resumo.saiu", "acao": "mes.trocado", "dado": "real", "avanca": "cliente", "fala": {"titulo": "O que saiu este mês", "apresenta": "Esse é o que saiu da sua conta este mês, direto do seu banco.", "texto": "Toca aqui pra comparar com o mês passado."}, "disponivel": true, "motivo": null, "feito": true},
+        {"id": "gastos.categoria", "tela": "gastos", "ancora": "categorias.lista", "acao": "categoria.aberta", "dado": "exemplo", "avanca": "cliente", "fala": {"titulo": "Pra onde foi o dinheiro", "apresenta": "Aqui ficam suas categorias: pra onde foi cada real do mês. Estes números ainda são de exemplo.", "texto": "Toca numa categoria pra ver de onde vem o total."}, "disponivel": true, "motivo": null, "feito": true},
+        {"id": "piggy.pergunta", "tela": "piggy", "ancora": "piggy.pergunta", "acao": "piggy.perguntou", "dado": "exemplo", "avanca": "cliente", "fala": {"titulo": "Pergunta pro Piggy", "apresenta": "Aqui você conversa comigo. As respostas ainda são de exemplo; a conversa de verdade chega em breve.", "texto": "Toca numa pergunta pronta e me vê responder."}, "disponivel": true, "motivo": null, "feito": true}
+      ],
+      "dicas": [{"id": "assinaturas.marcas", "tela": "assinaturas", "titulo": "Como eu acho suas assinaturas", "texto": "Eu acho essas cobranças no extrato que chega do seu banco pelo Open Finance. “Ignorar” e “É assinatura” só me ensinam o que é o quê: nada é cancelado aqui.", "vista": true}]
+    },
+    "dispensado": {
+      "estado": "dispensado",
+      "motivo": null,
+      "passos": [
+        {"id": "resumo.saiu", "tela": "resumo", "ancora": "resumo.saiu", "acao": "mes.trocado", "dado": "real", "avanca": "cliente", "fala": {"titulo": "O que saiu este mês", "apresenta": "Esse é o que saiu da sua conta este mês, direto do seu banco.", "texto": "Toca aqui pra comparar com o mês passado."}, "disponivel": true, "motivo": null, "feito": true},
+        {"id": "gastos.categoria", "tela": "gastos", "ancora": "categorias.lista", "acao": "categoria.aberta", "dado": "exemplo", "avanca": "cliente", "fala": {"titulo": "Pra onde foi o dinheiro", "apresenta": "Aqui ficam suas categorias: pra onde foi cada real do mês. Estes números ainda são de exemplo.", "texto": "Toca numa categoria pra ver de onde vem o total."}, "disponivel": true, "motivo": null, "feito": false},
+        {"id": "piggy.pergunta", "tela": "piggy", "ancora": "piggy.pergunta", "acao": "piggy.perguntou", "dado": "exemplo", "avanca": "cliente", "fala": {"titulo": "Pergunta pro Piggy", "apresenta": "Aqui você conversa comigo. As respostas ainda são de exemplo; a conversa de verdade chega em breve.", "texto": "Toca numa pergunta pronta e me vê responder."}, "disponivel": true, "motivo": null, "feito": false}
+      ],
+      "dicas": [{"id": "assinaturas.marcas", "tela": "assinaturas", "titulo": "Como eu acho suas assinaturas", "texto": "Eu acho essas cobranças no extrato que chega do seu banco pelo Open Finance. “Ignorar” e “É assinatura” só me ensinam o que é o quê: nada é cancelado aqui.", "vista": true}]
+    }
+  },
   "erros": {
     "401": {
       "status": 401,
@@ -64,6 +159,22 @@
     "503": {
       "status": 503,
       "body": { "error": { "code": "service_unavailable", "message": "Serviço temporariamente indisponível. Tente novamente em instantes." } }
+    },
+    "403_pro_required": {
+      "status": 403,
+      "body": { "error": { "code": "pro_required", "message": "Forbidden" } }
+    },
+    "403_password_required": {
+      "status": 403,
+      "body": { "error": { "code": "password_required", "message": "Forbidden" } }
+    },
+    "404_not_found": {
+      "status": 404,
+      "body": { "error": { "code": "not_found", "message": "Not Found" } }
+    },
+    "409_passo_indisponivel": {
+      "status": 409,
+      "body": { "error": { "code": "passo_indisponivel", "message": "Conflict" } }
     },
     "403_csrf": {
       "status": 403,

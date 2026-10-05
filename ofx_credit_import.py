@@ -25,7 +25,7 @@ from db import resolve_category_input, user_category_display_map
 logger = logging.getLogger(__name__)
 
 # Hard cap defensivo: ver nota em ofx_import.py.
-MAX_OFX_BYTES = 8 * 1024 * 1024  # 8 MB
+from core.limite_corpo import MAX_OFX_BYTES
 
 
 def _dec_or_none(raw: str, field: str) -> Decimal | None:

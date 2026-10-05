@@ -11,6 +11,7 @@ com a rota registrada via router.
 import asyncio
 import hashlib
 import hmac
+import ipaddress
 import json
 import logging
 import math
@@ -30,6 +31,7 @@ from pydantic import BaseModel, ValidationError
 
 from core.admin_dashboard import log_system_event
 from core.audit import AuditEvent, list_audit_events, record_audit_event
+from core.client_ip import client_ip
 from core.secure_compare import constant_time_eq
 from core.pg_text import detalhe_seguro, limpa_para_pg
 from core.services.pluggy import (
@@ -1748,15 +1750,79 @@ async def open_finance_caixinha_bind_route(request: Request, user_id: int, body:
     return {"ok": True}
 
 
+# Schemes do app (produção, staging, dev) a que a Pluggy devolve o usuário depois do
+# OAuth do banco. Lista fechada: valor fora dela é 400, nunca um redirect para onde o
+# cliente quiser. O site não manda o campo.
+_APP_SCHEMES = frozenset({"pigbank", "pigbank-staging", "pigbank-dev"})
+_APP_VOLTA_OF = "open-finance-volta"
+_CORPO_MAX = 4096  # corpo legítimo tem até ~85 bytes (app_scheme + item_id); acima disso é ignorado, como se não houvesse corpo
+_CORPO_SEGUNDOS = 5  # corpo legítimo chega junto dos cabeçalhos; o que pinga devagar também é ignorado
+
+
+async def _corpo_json_limitado(request: Request) -> object | None:
+    """JSON do corpo, lido até _CORPO_MAX bytes e _CORPO_SEGUNDOS s (o código do app não
+    impõe teto de corpo; o do servidor não foi medido). Fora disso — e vazio/malformado — devolve None, "sem
+    o campo"; aninhamento fundo levanta RecursionError (não é ValueError)."""
+    try:
+        pedacos, total = [], 0
+        async with asyncio.timeout(_CORPO_SEGUNDOS):
+            async for p in request.stream():
+                total += len(p)
+                if total > _CORPO_MAX:
+                    raise ValueError("corpo grande demais")
+                pedacos.append(p)
+        return json.loads(b"".join(pedacos))
+    except (ValueError, RecursionError, TimeoutError):
+        return None
+
+
 @router.post("/open-finance/{user_id}/connect-token")
 async def open_finance_connect_token_route(request: Request, user_id: int):
-    shared.authorize_dashboard_access(request, user_id)
+    session_uid = shared.authorize_dashboard_access(request, user_id)
     # Barra só o caso inequívoco (plano sem OF): não emite token pra quem não pode
     # conectar nada, fechando o abuso direto do endpoint e evitando item órfão na Pluggy.
     # O TETO POR CONTAGEM (planos pagos no limite) NÃO é cobrado aqui de propósito — o
     # widget também reconecta um banco existente, e a contagem é validada no /pluggy-item,
     # onde já se sabe se o item é novo ou um upsert de um banco já conectado.
     await _ensure_of_access_allowed(user_id)
+
+    # Corpo lido à mão e só depois dos portões, pela mesma razão do mock-connect:
+    # parâmetro tipado decodificaria antes da sessão. Teto de bytes e de tempo no helper.
+    corpo = await _corpo_json_limitado(request)
+    scheme = corpo.get("app_scheme") if isinstance(corpo, dict) else None
+    # isinstance antes do `in`: lista/dict não são hasháveis (TypeError → 500).
+    if scheme is not None and (not isinstance(scheme, str) or scheme not in _APP_SCHEMES):
+        raise HTTPException(status_code=400, detail="app_scheme inválido.")
+    volta = f"{scheme}://{_APP_VOLTA_OF}" if scheme else None
+
+    # Reconexão de um banco já conectado: sem o `itemId` a Pluggy recusa com
+    # "already exists" (`avoidDuplicates`). Dono pelo NOSSO banco antes de tocar a
+    # Pluggy; alheio, inexistente, PAUSED e removido respondem o mesmo 404.
+    item_id = corpo.get("item_id") if isinstance(corpo, dict) else None
+    if item_id is not None and (not isinstance(item_id, str) or not item_id):
+        raise HTTPException(status_code=400, detail="item_id inválido.")
+    nao_achou = HTTPException(status_code=404, detail={
+        "code": "OF_ITEM_NAO_ENCONTRADO", "message": "Não achamos esse banco nas suas conexões."})
+    if item_id:
+        if item_id not in await asyncio.to_thread(list_pluggy_item_ids, user_id):
+            raise nao_achou
+        try:
+            remote = await asyncio.to_thread(get_pluggy_item, item_id)
+        except PluggyConfigError as exc:
+            raise HTTPException(status_code=503, detail=str(exc)) from exc
+        except PluggyApiError as exc:
+            if getattr(exc, "status_code", None) == 404:
+                raise nao_achou from exc
+            raise HTTPException(status_code=502, detail=str(exc)) from exc
+        # clientUserId tem de ser a sessão; session_uid == user_id aqui (authorize_dashboard_access dá 403 se não)
+        if str(remote.get("clientUserId") or "") != str(session_uid):
+            await log_system_event(
+                "error", "of_item_owner_conflict",
+                "Item Pluggy não pertence ao usuário da sessão",
+                source="open_finance", user_id=session_uid,
+                details={"item_id": item_id, "origin": "connect_token"},
+            )
+            raise nao_achou
 
     webhook_url = (os.getenv("PLUGGY_WEBHOOK_URL") or "").strip()
     if not webhook_url and shared.DASHBOARD_URL.startswith("https://"):
@@ -1775,10 +1841,15 @@ async def open_finance_connect_token_route(request: Request, user_id: int):
             create_pluggy_connect_token,
             user_id,
             webhook_url or None,
+            oauth_redirect_uri=volta,
+            item_id=item_id,
         )
     except PluggyConfigError as exc:
         raise HTTPException(status_code=503, detail=str(exc)) from exc
     except PluggyApiError as exc:
+        # Item que sumiu entre o GET acima e o POST: o mesmo 404 dos demais "não é seu / não existe".
+        if item_id and getattr(exc, "status_code", None) == 404:
+            raise nao_achou from exc
         raise HTTPException(status_code=502, detail=str(exc)) from exc
 
     # Registra que ESTE usuário pediu um token. O `GET /items` da Pluggy devolve
@@ -2131,9 +2202,12 @@ async def open_finance_refresh_route(request: Request, user_id: int, wait: int |
 def _ip_prefix(request: Request) -> str:
     """IP do chamador truncado (/24 em v4, /48 em v6) — o suficiente pra ver um
     padrão de abuso, insuficiente pra identificar alguém."""
-    ip = (request.client.host if request.client else "") or ""
+    ip = client_ip(request) or ""
     if ":" in ip:
-        return ":".join(ip.split(":")[:3]) + "::/48"
+        try:
+            return str(ipaddress.ip_network(f"{ip}/48", strict=False))
+        except ValueError:   # peer que não é IP (client_ip o devolve cru)
+            return "desconhecido"
     partes = ip.split(".")
     return ".".join(partes[:3]) + ".0/24" if len(partes) == 4 else "desconhecido"
 

@@ -11,6 +11,7 @@ from psycopg.types.json import Json
 
 import db_support as _db_support
 from utils_date import _tz, day_tz, launch_day, tz_name
+from utils_text import fmt_brl
 
 from .connection import (
     get_conn, cat_key_sql, LAUNCH_HAS_TIME_SQL,
@@ -27,8 +28,19 @@ logger = logging.getLogger(__name__)
 # de lançamento por ação do usuário passa por aqui (update_launch_fields: PATCH
 # /launches, tool da IA, WhatsApp; update_launch_categories_bulk) e marca a
 # edição: o sync do Open Finance não desfaz categoria nem interno editados (#712).
-_SET_CATEGORIA = (f"categoria=%s, is_internal_movement = %s or {PAR_ATIVO_SQL}, "
+# O pagamento de fatura do cartão manual (`efeitos.bill_id`, db/cards.pay_bill_amount)
+# também segue interno com qualquer categoria: as compras do cartão já contam no gasto,
+# e a fatura contada junto vira gasto em dobro. Regravar a MESMA categoria não muda o
+# interno (saldo inicial e ajuste nascem internos à mão); o 3º %s repete a categoria nova,
+# e à direita do SET `categoria`/`is_internal_movement` são os valores antigos da linha.
+_SET_CATEGORIA = (f"categoria=%s, is_internal_movement = %s or {PAR_ATIVO_SQL} "
+                  "or (efeitos -> 'bill_id') is not null "
+                  "or (is_internal_movement and categoria is not distinct from %s), "
                   "categoria_editada = true")
+
+# `launches.origem`: "gravado pelo escritor da carteira depois do PR 2a" (NULL = antigo, só
+# leitura no /painel). Se a linha é carteira quem decide é `db/lancamentos.PODE_SQL`.
+ORIGEM_CARTEIRA = "carteira"
 
 
 # ──────────────────────────────────────────────────────────────────────────────
@@ -71,6 +83,8 @@ def add_launch_and_update_balance(
     is_internal_movement: bool = False,
     extra_efeitos: dict | None = None,
     apply_delta: bool = True,
+    *,
+    origem: str | None = ORIGEM_CARTEIRA,
 ):
     """
     Lança em launches e atualiza saldo em accounts na mesma transação.
@@ -85,6 +99,9 @@ def add_launch_and_update_balance(
     Open Finance: pagamento de fatura e débito de gasto fixo em conta já
     constam no extrato bancário; debitar a Carteira Piggy esvaziaria o
     dinheiro em espécie e contaria o gasto duas vezes).
+
+    `origem` grava a marca `launches.origem` (padrão: todo canal marca sem lembrar).
+    `None` = só leitura no v2: quem passa é quem grava efeito que o `efeitos` não desfaz.
     """
     ensure_user(user_id)
 
@@ -118,12 +135,13 @@ def add_launch_and_update_balance(
 
             cur.execute(
                 """
-                insert into launches(user_id, tipo, valor, alvo, nota, categoria, criado_em, efeitos, is_internal_movement)
-                values (%s,%s,%s,%s,%s,%s,%s,%s,%s)
+                insert into launches(user_id, tipo, valor, alvo, nota, categoria, criado_em, efeitos,
+                                     is_internal_movement, origem)
+                values (%s,%s,%s,%s,%s,%s,%s,%s,%s,%s)
                 returning id, user_seq
                 """,
                 (user_id, tipo, v, alvo, nota, cat, criado_em,
-                 Json(efeitos), is_internal_movement),
+                 Json(efeitos), is_internal_movement, origem),
             )
             row = cur.fetchone()
             launch_id = row["id"]
@@ -273,7 +291,8 @@ def update_launch_category(user_id: int, launch_id: int, categoria: str | None) 
 
 
 class LaunchDateLockedError(ValueError):
-    """Tentou editar a data de um lançamento cuja data é do provedor (Open Finance)."""
+    """Tentou editar a data de um lançamento cuja data é do provedor (Open Finance), seja a
+    linha dele ou uma fundida com a transação dele."""
 
 
 # As condições PERMANENTES de `delete_launch_and_rollback` que o usuário precisa
@@ -353,6 +372,18 @@ MENSAGEM_CAIXINHA_COM_MOVIMENTO = (
 )
 
 
+def aviso_banco_voltou(itens) -> str | None:
+    """Frase de quem apagou a linha fundida (P3, texto do dono): a transação do
+    banco volta para a lista. `itens` são as linhas `o` de `reconciliation._locked_tx`."""
+    frases = []
+    for o in itens:
+        desc = (o["description"] or "").strip()
+        dados = fmt_brl(abs(o["amount"])) + (f", {desc}" if desc else "")
+        frases.append(f"A transação do banco ({dados}) continua na sua lista, "
+                      "porque ela aconteceu de verdade.")
+    return " ".join(frases) or None
+
+
 class PocketHasMovement(LaunchUnsafeRollback):
     """Desfazer a criação de caixinha que tem saldo ou já teve movimento: o
     `delete from pockets` levaria saldo e lotes junto (#609)."""
@@ -369,14 +400,36 @@ def update_launch_fields(
     alvo: str | None = None,
     nota: str | None = None,
     criado_em: datetime | None = None,
+    dia: date | None = None,
+    valor: Decimal | None = None,
+    exigir_pode: bool = False,
 ) -> bool:
-    """Atualiza campos editáveis (categoria, alvo, nota, criado_em) de um lançamento.
+    """Atualiza campos editáveis (categoria, alvo, nota, criado_em, valor) de um lançamento.
 
     Argumentos None são ignorados (mantém valor atual). Strings vazias viram
     NULL no banco. Retorna False se não encontrou lançamento do usuário.
+
+    `dia` troca só o dia de `criado_em`, mantendo a hora local. `exigir_pode` (a v2):
+    sob o lock do usuário e da linha, campo fora de `lancamentos.pode_da_linha` levanta
+    `NaoEditavel` (categoria → 'categoria', alvo/nota → 'descricao', data → 'data',
+    valor → 'valor').
+
+    Data (`criado_em`/`dia`), em TODO chamador: sob o lock do usuário e da linha, a linha do
+    Open Finance e a fundida com o banco (`lancamentos.FUNDIDO_SQL`, P3) levantam
+    `LaunchDateLockedError` — a data é do banco.
+
+    `valor` (> 0) só com `exigir_pode`: o `PODE_SQL` só o dá à carteira pura (P4). Troca
+    `valor`, o `efeitos.delta_conta` (mesmo sinal) e o saldo da Carteira pela diferença, na
+    mesma transação: apagar depois desfaz exato. Não procura par novo no banco (dono,
+    2026-10-03); a fundida não acompanha correção do banco (PR 3).
     """
     from utils_text import is_internal_category
 
+    if valor is not None and not exigir_pode:
+        raise ValueError("valor só com exigir_pode: a regra de quem edita valor é o PODE_SQL.")
+    if valor is not None and not (isinstance(valor, Decimal) and valor.is_finite() and valor > 0
+                                  and valor.as_tuple().exponent >= -2):
+        raise ValueError("valor: Decimal finito > 0 com até 2 casas; a rota valida antes.")
     ensure_user(user_id)
 
     sets: list[str] = []
@@ -384,39 +437,62 @@ def update_launch_fields(
     if categoria is not None:
         cat_clean = categoria.strip() or None
         sets.append(_SET_CATEGORIA)
-        params.extend([cat_clean, is_internal_category(cat_clean)])
+        params.extend([cat_clean, is_internal_category(cat_clean), cat_clean])
     if alvo is not None:
         sets.append("alvo=%s")
         params.append((alvo.strip() or None))
     if nota is not None:
         sets.append("nota=%s")
         params.append((nota.strip() or None))
-    if criado_em is not None:
-        sets.append("criado_em=%s")
-        params.append(criado_em)
-        # `posted_at` anda JUNTO com `criado_em`. Onde não há hora confiável é
-        # ELE quem manda no dia exibido — no back (`launch_day`, utils_date) e no
-        # front (`fmtLaunchWhen`: dashboard.js:485, home.html:776). Sem isto,
-        # editar a data de um extrato devolvia 200, mudava o banco e a tela
-        # seguia mostrando a data VELHA, sem caminho de conserto.
-        # Depois da recusa abaixo sobra só o extrato: `posted_at` não-nulo é
-        # gravado por dois escritores, `import_ofx_launches_bulk` (source='ofx',
-        # nesta mesma pasta) e o importador do Open Finance
-        # (db/open_finance.py:1247) — e a linha do OF nem chega aqui.
-        # Não é chave de idempotência de importador nenhum (OFX/extrato dedupam
-        # por `external_id`, montado a partir do ARQUIVO; o Open Finance por
-        # `provider_transaction_id`). NULL continua NULL: lançamento manual não
-        # tem data de postagem.
-        sets.append("posted_at = case when posted_at is null then null else %s end")
-        params.append(day_tz(criado_em))
-    if not sets:
+    if not sets and criado_em is None and dia is None and valor is None:
         return False
 
-    params.extend([user_id, launch_id])
-    sql = f"update launches set {', '.join(sets)} where user_id=%s and id=%s"
     with get_conn() as conn:
         with conn.cursor() as cur:
+            delta_novo = None
+            if exigir_pode or criado_em is not None or dia is not None:
+                from .bank_movements import _lock_user
+                from .lancamentos import NaoEditavel, pode_da_linha
+                # O lock antes: o `pode` e a fusão leem o estado que o sync/conciliação mudam.
+                _lock_user(cur, user_id)
+                cur.execute("select criado_em, efeitos from launches where user_id=%s and id=%s for update",
+                            (user_id, launch_id))
+                atual = cur.fetchone()
+                if not atual:
+                    return False
+                if exigir_pode:
+                    pode = pode_da_linha(cur, user_id, launch_id) or []
+                    pedidos = {"categoria": categoria, "descricao": alvo if alvo is not None else nota,
+                               "data": criado_em or dia, "valor": valor}
+                    if any(v is not None and k not in pode for k, v in pedidos.items()):
+                        raise NaoEditavel("Campo fora do que esta linha permite editar.")
+                if dia is not None:
+                    criado_em = datetime.combine(dia, atual["criado_em"].astimezone(_tz()).time(),
+                                                 tzinfo=_tz())
+                if valor is not None:  # carteira pura (o `pode`): `delta_conta` ≠ 0
+                    delta_velho = Decimal(str(atual["efeitos"]["delta_conta"]))
+                    delta_novo = valor if delta_velho > 0 else -valor
+                    # Número JSON, como o escritor grava (`float(delta)`): o apagar lê de volta.
+                    sets.append("valor=%s, efeitos = jsonb_set(efeitos, '{delta_conta}', to_jsonb(%s::numeric))")
+                    params.extend([valor, delta_novo])
             if criado_em is not None:
+                sets.append("criado_em=%s")
+                params.append(criado_em)
+                # `posted_at` anda JUNTO com `criado_em`. Onde não há hora confiável é
+                # ELE quem manda no dia exibido — no back (`launch_day`, utils_date) e no
+                # front (`fmtLaunchWhen`: dashboard.js:485, home.html:776). Sem isto,
+                # editar a data de um extrato devolvia 200, mudava o banco e a tela
+                # seguia mostrando a data VELHA, sem caminho de conserto.
+                # Depois da recusa abaixo sobra só o extrato: `posted_at` não-nulo é
+                # gravado por dois escritores, `import_ofx_launches_bulk` (source='ofx',
+                # nesta mesma pasta) e o importador do Open Finance
+                # (db/open_finance.py:1247) — e a linha do OF nem chega aqui.
+                # Não é chave de idempotência de importador nenhum (OFX/extrato dedupam
+                # por `external_id`, montado a partir do ARQUIVO; o Open Finance por
+                # `provider_transaction_id`). NULL continua NULL: lançamento manual não
+                # tem data de postagem.
+                sets.append("posted_at = case when posted_at is null then null else %s end")
+                params.append(day_tz(criado_em))
                 # DONO DA DATA numa linha do Open Finance é o PROVEDOR, não o
                 # usuário. `sync_imported_open_finance_updates`
                 # (db/open_finance.py:1559-1588) compara
@@ -429,8 +505,11 @@ def update_launch_fields(
                 # que a tela consegue explicar. (Nota/descrição continuam
                 # editáveis: a sync não toca em `nota`/`alvo`; a categoria
                 # editada também sobrevive, por `categoria_editada`.)
+                # A fundida (P3, dono): o banco é dono da data em todo canal.
+                from .lancamentos import FUNDIDO_SQL
                 cur.execute(
-                    "select coalesce(source,'') as source from launches where user_id=%s and id=%s",
+                    f"select coalesce(source,'') as source, {FUNDIDO_SQL} as fundido "
+                    "from launches where user_id=%s and id=%s",
                     (user_id, launch_id),
                 )
                 row = cur.fetchone()
@@ -439,7 +518,17 @@ def update_launch_fields(
                         "A data deste lançamento vem do banco conectado e é "
                         "atualizada por ele. Dá pra editar a descrição e a categoria."
                     )
-            cur.execute(sql, tuple(params))
+                if row and row["fundido"]:
+                    raise LaunchDateLockedError(
+                        "Esse lançamento está junto com uma transação do banco, e a data é a "
+                        "do banco. Dá pra editar a descrição e a categoria."
+                    )
+            if delta_novo is not None:
+                cur.execute("update accounts set balance = balance + %s where user_id=%s",
+                            (delta_novo - delta_velho, user_id))
+            params.extend([user_id, launch_id])
+            cur.execute(f"update launches set {', '.join(sets)} where user_id=%s and id=%s",
+                        tuple(params))
             changed = (cur.rowcount or 0) == 1
         conn.commit()
     return changed
@@ -455,7 +544,7 @@ def update_launch_categories_bulk(user_id: int, items: list[tuple[int, str]]) ->
         with conn.cursor() as cur:
             cur.executemany(
                 f"update launches set {_SET_CATEGORIA} where user_id=%s and id=%s",
-                [(cat, is_internal_category(cat), user_id, lid) for (lid, cat) in items],
+                [(cat, is_internal_category(cat), cat, user_id, lid) for (lid, cat) in items],
             )
             n = cur.rowcount or 0
         conn.commit()
@@ -647,7 +736,7 @@ def get_largest_expenses(
     )
 
     if by_bill_month:
-        credit_from = "from credit_transactions ct join credit_bills b on b.id = ct.bill_id"
+        credit_from = "from credit_transactions ct join credit_bills b on b.id = ct.bill_id and b.user_id = ct.user_id"
         credit_date = "and b.period_end >= %s and b.period_end < %s"
         credit_date_params = [start_date, end_date_excl]
     else:
@@ -894,7 +983,7 @@ def list_launches_by_category(
 
     credit_sql = ""
     if aliases is None or "despesa" in aliases:
-        credit_from = "from credit_transactions ct join credit_bills b on b.id = ct.bill_id"
+        credit_from = "from credit_transactions ct join credit_bills b on b.id = ct.bill_id and b.user_id = ct.user_id"
         credit_date_col = "b.period_end"
         credit_filters = ""
         params_credit: list = [user_id, categoria]
@@ -1088,7 +1177,7 @@ def get_top_expense_categories(
     end_date_excl = end_date + timedelta(days=1)  # janela meio-aberta em period_end
 
     if by_bill_month:
-        credit_from = "from credit_transactions ct join credit_bills b on b.id = ct.bill_id"
+        credit_from = "from credit_transactions ct join credit_bills b on b.id = ct.bill_id and b.user_id = ct.user_id"
         credit_date = "and b.period_end >= %s and b.period_end < %s"
         credit_date_params = (start_date, end_date_excl)
     else:
@@ -1152,7 +1241,7 @@ _EFEITOS_REVERSIVEIS = frozenset({
     "investment_lot_create", "investment_lot_withdrawals",
     # informativas: ficam só no histórico, não há efeito a desfazer
     "funding_source", "tax_summary", "investment_meta",
-    "ofx", "open_finance", "time_known",
+    "ofx", "open_finance", "time_known", "of_original",
 })
 
 # Classificadas e DE FORA da allowlist de propósito: são gravadas
@@ -1544,8 +1633,17 @@ def _validar_efeitos(efeitos: dict, *, escopo_conta_corrente: bool) -> Decimal:
     return delta_conta
 
 
+# Linha ligada a uma transação do banco, fundida (`imported`) ou com par pendente
+# (`match`). Sobre `launches` SEM alias, como o `FUNDIDO_SQL`. Decide o lock do apagar.
+_LIGADO_SQL = """exists (select 1 from open_finance_transactions o
+          join open_finance_accounts oa on oa.id = o.account_id
+          join open_finance_connections oc on oc.id = oa.connection_id and oc.user_id = launches.user_id
+         where launches.id in (o.imported_launch_id, o.match_launch_id))"""
+
+
 def delete_launch_and_rollback(user_id: int, launch_id: int, *,
-                              escopo_conta_corrente: bool = False):
+                              escopo_conta_corrente: bool = False,
+                              exigir_pode: bool = False) -> str | None:
     """
     Deleta um lançamento e reverte seus efeitos no banco atomicamente.
     Usa o campo efeitos (jsonb) para saber o que reverter.
@@ -1569,42 +1667,51 @@ def delete_launch_and_rollback(user_id: int, launch_id: int, *,
     investimento é apagado), e a partir daí o lançamento cai em `kept_unsafe`
     em TODA tentativa, sem caminho de saída pro usuário. É a troca deliberada:
     recusar para sempre não perde dinheiro; seguir perde (R$300 em 5 toques de
-    produto, medido). Em `_rollback_imported_of` (db/open_finance.py), que
-    chama isto dentro de `except Exception: pass`, a recusa é SILÊNCIO.
-    Consertar isso é o PR dos `except`, não este.
+    produto, medido). A limpeza do Open Finance usa `delete_if_shadow` sob lock,
+    sem passar por esta reversão de efeitos manuais.
 
     `escopo_conta_corrente=True` — usado SÓ pelo "apagar tudo" — recusa também
     o que mexe em caixinha/investimento (`_EFEITOS_FORA_DO_APAGAR_TUDO`).
 
+    `exigir_pode=True` — a v2: trava o usuário sempre (o `pode` lê o estado que o
+    sync e a conciliação mudam sob esse lock) e, sob ele e o da linha, recusa com
+    `NaoEditavel` a linha sem 'apagar' em `lancamentos.pode_da_linha`, antes do pré-voo.
+
+    Apagar a linha FUNDIDA (`FUNDIDO_SQL`: manual/ofx/recorrente junta com uma
+    transação do banco) desfaz a junção na mesma transação (P3, dono): a transação
+    volta como sombra `banco` (`reconciliation._desfaz`), exceto no "apagar tudo"
+    (`escopo_conta_corrente`), que não recria nada. Devolve a frase do aviso
+    (`aviso_banco_voltou`) quando desfez, ou None. Ordem de locks: `accounts` →
+    X (`for update`) → transação OF (`_locked_tx`).
+
     QUEM CHAMA — mais pontos que as portas de usuário. A recusa chega ao usuário
     como frase de produto em uns e como SILÊNCIO em outros:
-      - `core/handlers/pending.py:170` (WhatsApp, singular) e `:230` (bulk);
-      - `core/services/ai_chat/tools/launches.py:433` (/ai/chat);
-      - `frontend/finance_bot_websocket_custom.py:5749` (DELETE /launches);
+      - `core/handlers/pending.py` (WhatsApp, singular e bulk), que mostram o aviso;
+      - `core/services/ai_chat/tools/launches.py` (/ai/chat), que mostra o aviso;
+      - `frontend/finance_bot_websocket_custom.py` (DELETE /launches), que devolve
+        o aviso em `"aviso"`;
+      - `api/v2/lancamentos.py` (apagar da v2), que responde `{id}` sem o aviso;
       - `delete_all_launches_and_rollback` (abaixo), que classifica em baldes;
-      - `db/open_finance.py`: `_rollback_imported_of`, dentro de
-        `except Exception: pass` (o confirmar da reconciliação saiu para
-        `db/reconciliation.py`, que apaga a sombra direto e não passa por aqui;
-        a ordem inversa, `propose_manual_reconciliation`, só cria pendência e
-        não apaga nada). Ali uma recusa não vira mensagem nem log: a sombra do
-        Open Finance sobrevive à limpeza, calada. HOJE inalcançável (as chaves que o importador
-        do OF grava estão todas em `_EFEITOS_REVERSIVEIS`, e ele não grava delta
-        de lote), mas qualquer chave nova de OF vira perda silenciosa antes de
-        virar recusa visível. Os `except` de lá são o próximo conserto, não este.
     (`adapters/discord/` também chama; o adaptador está morto e fora do escopo.)
     """
     ensure_user(user_id)
+    novas: list = []      # categorias das sombras recriadas (catálogo depois do commit)
+    desfeitas: list = []  # transações do banco que voltaram (o aviso)
 
     with get_conn() as conn:
         with conn.cursor() as cur:
             from .bank_movements import _lock_user, uses_bank_movement_lock
             from .investment_undo import guard_last_investment_movement, touches_investment
+            from .lancamentos import FUNDIDO_SQL
 
             def _precisa_lock(r):
                 # Investimento também: a guarda "é o último" tem de rodar sob o
                 # MESMO lock de aporte/resgate/apagar investimento, até o commit.
                 # Saque/depósito em espécie também: o reconciliador trava conta →
                 # lançamento; apagar sem o lock seria lançamento → conta (deadlock).
+                # Ligada ao banco também (fundida OU par pendente): o desfazer
+                # trava a transação OF, que todo escritor trava depois de `accounts`;
+                # e sem o lock um confirmar concorrente fundiria X no meio do apagar.
                 # Criar/apagar caixinha: o desfazer trava launches → pockets, e
                 # renome/delete_pocket fazem o inverso (#622). `efeitos` string (jsonb
                 # legado) é normalizado como mais abaixo, para os TRÊS predicados:
@@ -1616,14 +1723,14 @@ def delete_launch_and_rollback(user_id: int, launch_id: int, *,
                     except ValueError:
                         ef = None
                 return bool(r and (uses_bank_movement_lock(r["source"], ef)
-                                   or touches_investment(ef) or r["caixa"]
+                                   or touches_investment(ef) or r["caixa"] or r["ligado"]
                                    or (isinstance(ef, dict)
                                        and any(ef.get(k) for k in ("create_pocket", "delete_pocket")))))
 
-            cur.execute(f"select source,efeitos,{VINCULADO_SQL} as caixa from launches "
-                        "where id=%s and user_id=%s", (launch_id, user_id))
+            cur.execute(f"select source,efeitos,{VINCULADO_SQL} as caixa,{_LIGADO_SQL} as ligado "
+                        "from launches where id=%s and user_id=%s", (launch_id, user_id))
             preview = cur.fetchone()
-            bank_lock = _precisa_lock(preview)
+            bank_lock = exigir_pode or _precisa_lock(preview)
             if bank_lock:
                 # Matcher: conta → transação OF → sombra. Cartões manuais
                 # mantêm sua ordem anterior de fatura → conta.
@@ -1646,10 +1753,21 @@ def delete_launch_and_rollback(user_id: int, launch_id: int, *,
             row = cur.fetchone()
             if not row:
                 raise LookupError("NOT_FOUND")
+            # Statement SEPARADO, com snapshot novo depois do lock da linha: dentro
+            # do `for update`, sob READ COMMITTED, as subqueries seriam avaliadas
+            # com o snapshot de antes da espera e não veriam a ligação recém-commitada.
+            cur.execute(f"select {_LIGADO_SQL} as ligado, {FUNDIDO_SQL} as fundido "
+                        "from launches where id=%s and user_id=%s", (launch_id, user_id))
+            row.update(cur.fetchone())
 
-            if _precisa_lock(row) != bank_lock:
+            # Com `exigir_pode` o lock já está tomado: sobrar lock não é corrida.
+            if not exigir_pode and _precisa_lock(row) != bank_lock:
                 raise LaunchUnsafeRollback("Lançamento mudou durante a exclusão; tente novamente.",
                                            "mudou_durante")
+            if exigir_pode:
+                from .lancamentos import NaoEditavel, pode_da_linha
+                if "apagar" not in (pode_da_linha(cur, user_id, launch_id) or []):
+                    raise NaoEditavel("Esta linha não pode ser apagada por aqui.")
 
             efeitos = row.get("efeitos")
             if isinstance(efeitos, str):
@@ -2061,10 +2179,37 @@ def delete_launch_and_rollback(user_id: int, launch_id: int, *,
                         (user_id, nome),
                     )
 
+            # Apagar a fundida desfaz a junção (P3): a transação do banco volta como
+            # sombra. `fundido` implica `ligado`, então `accounts` já está travado.
+            if row["fundido"] and not escopo_conta_corrente:
+                # local: reconciliation → open_finance → accounts (ciclo de import)
+                from .reconciliation import FUSED_STATUSES, ReconciliationConflict, _desfaz, _locked_tx
+                cur.execute(
+                    """select o.id from open_finance_transactions o
+                         join open_finance_accounts a on a.id = o.account_id
+                         join open_finance_connections c on c.id = a.connection_id
+                        where o.imported_launch_id = %s and o.reconciliation_status = any(%s)
+                          and c.user_id = %s""",
+                    (launch_id, list(FUSED_STATUSES), user_id),
+                )
+                try:
+                    for of_tx_id in [r["id"] for r in cur.fetchall()]:
+                        o = _locked_tx(cur, user_id, of_tx_id)
+                        if _desfaz(cur, user_id, o, novas)["changed"]:
+                            desfeitas.append(o)
+                except (ReconciliationConflict, LookupError) as exc:
+                    # `LookupError` cru seria lido pelos canais como "já foi apagado".
+                    raise LaunchUnsafeRollback("Lançamento mudou durante a exclusão; tente novamente.",
+                                               "mudou_durante") from exc
+
             # apaga o lançamento
             cur.execute("delete from launches where id=%s and user_id=%s", (launch_id, user_id))
 
         conn.commit()
+
+    from .open_finance_categories import garantir_no_catalogo
+    garantir_no_catalogo(user_id, novas)  # depois do commit, fora da trava (best-effort)
+    return aviso_banco_voltou(desfeitas)
 
 
 # Lançamentos "da conta corrente" no sentido do produto: SÓ `despesa` e `receita`.

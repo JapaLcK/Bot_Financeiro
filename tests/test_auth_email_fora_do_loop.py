@@ -24,6 +24,7 @@ from fastapi.testclient import TestClient
 import db
 import frontend.finance_bot_websocket_custom as dashboard
 from core.services import email_service
+from db_support import EMAIL_JA_TEM_CONTA
 from _apoio_auth_app import csrf, limpa_rate_limits
 
 SENHA = "senha-forte-123"
@@ -108,10 +109,11 @@ def test_register_envia_o_codigo_fora_do_event_loop(monkeypatch, conta):
         "/auth/register", {"email": email, "password": SENHA, "phone": _telefone()}
     )
 
-    assert (status, corpo) == (200, {"status": "verification_sent", "email": email})
     if conta == "existente":
+        assert (status, corpo) == (409, {"detail": EMAIL_JA_TEM_CONTA})
         assert (len(avisos), verificacoes) == (1, [])
         return
+    assert (status, corpo) == (200, {"status": "verification_sent", "email": email})
     assert avisos == [] and [to for to, _ in verificacoes] == [email]
     limpa_rate_limits("verify-email", email)
     client = TestClient(dashboard.app)

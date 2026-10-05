@@ -13,7 +13,7 @@
   }
   .ledger-head h2, .stat-title, .cmdk-foot, .rail-sync, .cat-name, .tl-name, .row-sub,
   .board-actions, .detail-facts .fact-sub, .hero-facts, .day-head,
-  .ramp, .brand, .rail-list a, .ledger-chips {
+  .ramp, .brand, .rail-list a, .rail-list button, .ledger-chips {
     display: grid; grid-auto-flow: column; grid-auto-columns: minmax(auto, max-content);
   }
   .more { display: grid; }
@@ -57,12 +57,9 @@
   .legend { margin-top: -6px; margin-left: -16px; }
   .legend > * { margin-top: 6px; margin-left: 16px; }
   .ledger-head > .ledger-tools { margin-top: 2px; margin-left: 2px; } /* 12 de filho − 10 de contêiner */
-  .mini-rows div { margin-left: -8px; }
-  .mini-rows div > * { margin-left: 8px; }
 
   @media (max-width: 760px) {
     .topbar > * + * { margin-left: 6px; }
-    .topbar .tag-demo + .topbar-spacer { margin-left: 0; } /* sem o seletor, a etiqueta oculta vem antes: gap não conta display: none */
     .ledger-tools { width: calc(100% - 2px); }
     .search { width: calc(100% - 10px); }
   }

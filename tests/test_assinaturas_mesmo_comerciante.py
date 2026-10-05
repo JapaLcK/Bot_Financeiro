@@ -2,6 +2,7 @@
 Music, ambos "APPLE.COM/BILL") saem separados; grupos sequenciais continuam um
 item só (`test_reajuste_partido_em_dois_grupos_vira_um_item`). Banco real."""
 from datetime import date
+from decimal import Decimal
 
 from _apoio_assinaturas import HOJE, conta, mensais, rp, semeia
 from core.services.assinaturas import listar_assinaturas
@@ -19,8 +20,8 @@ def test_dois_servicos_simultaneos_saem_separados(user_id):
     _apple(user_id)
     lista = listar_assinaturas(user_id, HOJE)
     assert [(x["chave"], x["valor"], x["valor_anterior"], x["meses"]) for x in lista["servicos"]] == [
-        ("apple com bill", 21.9, None, 3), ("apple com bill", 14.9, None, 3)]
-    assert (lista["total_mensal"], lista["chaves"]) == (36.8, ["apple com bill"])
+        ("apple com bill", Decimal("21.9"), None, 3), ("apple com bill", Decimal("14.9"), None, 3)]
+    assert (lista["total_mensal"], lista["chaves"]) == (Decimal("36.8"), ["apple com bill"])
 
 
 def test_ignorar_a_chave_esconde_os_dois(user_id):
@@ -29,3 +30,5 @@ def test_ignorar_a_chave_esconde_os_dois(user_id):
     lista = listar_assinaturas(user_id, HOJE)
     assert (lista["servicos"], lista["outras"], lista["total_mensal"]) == ([], [], 0)
     assert lista["chaves"] == ["apple com bill"]  # continua marcável (o "desfazer")
+    assert [(x["valor"], x["marcada"]) for x in lista["ignoradas"]] == [
+        (Decimal("21.9"), False), (Decimal("14.9"), False)]

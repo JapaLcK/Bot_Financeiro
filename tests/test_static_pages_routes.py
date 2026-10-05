@@ -31,6 +31,7 @@ HTML_PAGES = [
     "/comandos-app",
     "/como-funciona",
     "/precos",
+    "/lp",
     "/continuar-compra",
     "/suporte",
 ]
@@ -251,7 +252,36 @@ def test_robots_txt():
     assert resp.status_code == 200
     assert resp.headers["content-type"].startswith("text/plain")
     assert "Disallow: /app" in resp.text
+    assert "Disallow: /assinar\n" in resp.text
+    assert "Disallow: /q\n" in resp.text
     assert "Sitemap:" in resp.text
+
+
+def test_lp_landing_de_anuncio():
+    resp = client.get("/lp")
+    assert resp.status_code == 200
+    assert resp.headers["content-type"].startswith("text/html")
+    assert resp.headers["cache-control"] == "no-store"
+    assert '<meta name="robots" content="noindex"/>' in resp.text
+    # brand.css vem embutido: sem a viagem de rede bloqueante e sem o <link>.
+    assert 'data-pb-inline="brand.css"' in resp.text
+    assert 'href="/brand.css' not in resp.text
+
+
+def test_assinar_e_seus_assets():
+    resp = client.get("/assinar")
+    assert resp.status_code == 200
+    assert resp.headers["content-type"].startswith("text/html")
+    assert resp.headers["cache-control"] == "no-store"
+    assert "content-security-policy" in resp.headers
+    assert '<meta name="robots" content="noindex"/>' in resp.text
+    # bump-caixas.* também servem o modal do Pix da /precos, com o pix-extras.js.
+    for path, tipo in (("/assinar.js", "application/javascript"), ("/assinar.css", "text/css"),
+                       ("/bump-caixas.js", "application/javascript"), ("/bump-caixas.css", "text/css"),
+                       ("/pix-extras.js", "application/javascript"), ("/pagamento-caixas.js", "application/javascript")):
+        asset = client.get(path)
+        assert asset.status_code == 200, path
+        assert asset.headers["content-type"].startswith(tipo), path
 
 
 def test_sitemap_xml():
@@ -756,7 +786,7 @@ def test_par_pix_sai_versionado_por_hash_do_conteudo():
     `_ASSET_VER_RE` não casa) — aí o cache-buster morre e a divergência volta.
     """
     html = client.get("/precos").text
-    for nome in ["pix-poll.js", "pix-checkout.js"]:
+    for nome in ["pix-poll.js", "pix-checkout.js", "pix-extras.js", "bump-caixas.js"]:
         esperado = _asset_hash(nome, (FRONTEND_DIR / nome).stat().st_mtime_ns)
         m = re.search(rf"/{re.escape(nome)}\?v=([0-9a-f]{{12}})\b", html)
         assert m, f"/{nome} sai sem hash na /precos — o cache velho continua valendo"

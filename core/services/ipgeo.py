@@ -30,11 +30,13 @@ def _is_disabled() -> bool:
 def _is_private_ip(ip: str) -> bool:
     """True se o IP não é um endereço público geolocalizável.
 
-    Valida o formato com `ipaddress` (o valor vem de X-Forwarded-For, controlado
-    pelo cliente) e bloqueia tudo que não seja global: privado, loopback,
-    link-local (169.254/fe80), reservado, multicast, etc. Um valor que não é um
-    IP literal válido também é bloqueado — assim nada de estranho chega ao path
-    da URL do ipapi.co.
+    Valida o formato com `ipaddress` (o valor vem de `core.client_ip`, que lê
+    cabeçalhos da requisição: trate como não confiável) e bloqueia tudo que não
+    seja `is_global`: privado, loopback, link-local (169.254/fe80), etc.
+    Multicast e NAT64 (64:ff9b::/96) o `is_global` aceita e passam aqui; no
+    IP que a Cloudflare repassa quem os recusa é o `_publico` do `core.client_ip`. Um
+    valor que não é um IP literal válido é bloqueado — assim nada de estranho
+    chega ao path da URL do ipapi.co.
     """
     if not ip:
         return True
@@ -63,7 +65,7 @@ def lookup_city(ip: str | None) -> str | None:
             return None
         data = resp.json()
     except Exception as exc:
-        print(f"[ipgeo] lookup failed for {ip}: {exc}", file=sys.stderr)
+        print(f"[ipgeo] lookup failed: {type(exc).__name__}", file=sys.stderr)
         return None
 
     if not isinstance(data, dict) or data.get("error"):
