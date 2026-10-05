@@ -243,3 +243,42 @@ def test_reset_e_desfazer_despesa_com_origem_banco_nao_dao_deadlock(user_id, mon
     assert not isinstance(res["reset"], Exception), res
     assert res["undo"] is None or isinstance(res["undo"], LookupError), res
     assert not _launch_existe(user_id, lid)
+
+
+@pytest.mark.parametrize("tipo", ["caixinha", "investimento"])
+def test_reset_conta_lote_que_um_accrue_concorrente_ainda_nao_commitou(user_id, monkeypatch, tipo):
+    """Saldo legado sem lote: o accrue o materializa (insert do lote) segurando o pai, sem commitar.
+    O reset tem de esperar o pai ANTES de contar os lotes, senão conta 0 e o CASCADE leva 1."""
+    monkeypatch.setattr(privacy, "verify_user_password", lambda *a, **k: True)
+    modulo, nome, tabela, lotes, accrue_db, accrue_all = (
+        (pockets, "viagem", "pockets", "pocket_lots", "accrue_pocket_db", pockets.accrue_all_pockets)
+        if tipo == "caixinha" else
+        (investments, "cdb", "investments", "investment_lots", "accrue_investment_db",
+         investments.accrue_all_investments))
+    if tipo == "caixinha":
+        db.create_pocket(user_id, nome)
+    else:
+        db.create_investment(user_id, nome, 0.12, "yearly")
+    with db.get_conn() as conn, conn.cursor() as cur:  # saldo sem lote, como o legado
+        cur.execute(f"update {tabela} set balance = 300 where user_id=%s", (user_id,))
+        cur.execute(f"delete from {lotes} where user_id=%s", (user_id,))
+        conn.commit()
+    original, materializou = getattr(modulo, accrue_db), threading.Event()
+
+    def materializa_e_segura(cur, uid, pid, *a, **k):
+        r = original(cur, uid, pid, *a, **k)  # lote inserido, nada commitado, pai travado
+        materializou.set()
+        assert _esperar_backend_travado(), "o reset nunca chegou a esperar lock"  # teto padrão: 15 s
+        return r
+    monkeypatch.setattr(modulo, accrue_db, materializa_e_segura)
+
+    def reset():
+        assert materializou.wait(5)
+        return privacy.reset_user_data(user_id, "x")
+    with ThreadPoolExecutor(2) as pool:
+        a = pool.submit(accrue_all, user_id)
+        r = pool.submit(reset)
+        a.result(30)
+        deleted = r.result(30)["deleted"]
+    assert deleted[lotes] == 1, deleted
+    assert _n(user_id, tabela) == 0 and _n(user_id, lotes) == 0

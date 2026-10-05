@@ -524,7 +524,9 @@ class ResetLockUnavailableError(RuntimeError):
 
 
 # Pai -> filho de lotes, apagado pai primeiro: o CASCADE leva os lotes e o delete
-# explícito deles contaria 0, então `reset_user_data` conta os lotes ANTES do pai.
+# explícito deles contaria 0, então `reset_user_data` trava o pai (`for update`, a
+# ordem do accrue) e conta os lotes ANTES de apagá-lo; sem o lock, perde o lote que
+# um accrue concorrente ainda não commitou.
 _LOTES_DO_PAI = {"investments": "investment_lots", "pockets": "pocket_lots"}
 
 # Tabelas apagadas pelo reset "Recomeçar do zero", na ordem. Child-first, EXCETO
@@ -810,6 +812,11 @@ def reset_user_data(
                 for table in _RESET_TABLES:
                     lote = _LOTES_DO_PAI.get(table)
                     if lote and _table_exists(cur, lote) and _column_exists(cur, lote, "user_id"):
+                        # Pai travado ANTES de contar (a ordem pai → lote do accrue): espera um
+                        # accrue que está materializando lote ainda não commitado. O `delete`
+                        # do pai logo abaixo trava as mesmas linhas de qualquer jeito: o lock
+                        # não amplia a janela.
+                        cur.execute(f"select id from {table} where user_id = %s for update", (user_id,))
                         cur.execute(f"select count(*) as n from {lote} where user_id = %s", (user_id,))
                         lotes[lote] = cur.fetchone()["n"]
                     _delete(cur, table)
