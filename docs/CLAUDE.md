@@ -598,9 +598,14 @@ sincronização do Pagar; o Pagar faz 1 `/bump` de sincronização quando há ca
 `availablepaymentmethodschange` trazer botão, `inert` com `/bump`, cupom ou pagamento em voo (a folha nunca abre
 com o carrinho mudando; ela mostra o total da sessão, que é o que se cobra). O `click` do Express só chama o
 `resolve` (que abre a folha) com nada em voo, e então trava caixas, cupom e Pagar até o `cancel` ou o `confirm` —
-no Google Pay do desktop a folha é um popup e a página segue clicável por baixo. `confirm` sem folha aberta
-(tardio, depois de um `cancel`) é ignorado; com ela, `confirm` →
-`actions.confirm({expressCheckoutConfirmEvent})`. Pré-requisito: o domínio registrado em "Domínios de métodos de
+no Google Pay do desktop a folha é um popup e a página segue clicável por baixo. `confirm` com pedido em voo, ou
+sem folha aberta numa montagem que já viu um `click` (tardio, depois de um `cancel`), é recusado: `paymentFailed()`
+no evento e o aviso "Pagamento não iniciado. Tente de novo." (nunca em silêncio); senão, `confirm` →
+`actions.confirm({expressCheckoutConfirmEvent})`. O Apple Pay do Safari parece não mandar o `click` (staging,
+2026-10-05: a folha abria, girava e fechava sem nenhum PaymentIntent; causa provável, a confirmar no reteste — a
+alternativa é o `confirm` nem chegar à página); sem `click` a trava do carrinho
+fica por conta da folha ser modal (iPhone). Risco aceito: numa folha não modal sem `click`, um `/bump` que termina
+antes do `confirm` cobra o total novo, que a folha não mostrou. Pré-requisito: o domínio registrado em "Domínios de métodos de
 pagamento" do Stripe no modo TESTE (staging) e no LIVE (produção) — sem isso os botões não aparecem. O desenho das
 caixas mora em `frontend/bump-caixas.js` (PR C, abaixo); o do resumo e do botão, em `frontend/pagamento-caixas.js`. Testes: `tests/frontend/pagamento_express.test.mjs`.
 

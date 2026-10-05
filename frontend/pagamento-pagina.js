@@ -60,7 +60,8 @@
       const cbs = window.PBBumpCaixas.montar($("pp-bump"), Array.isArray(d.extras) ? d.extras : []);
       // voo: um /bump, cupom ou pagamento em andamento. temTotal: já chegou um `change` com o total. folha: a da
       // carteira aberta (do `click` ao `cancel`/`confirm`), mostrando o total da sessão: o carrinho não muda por baixo.
-      let actions = null, voo = false, vivo = true, temTotal = false, foco = null, prazo = null, folha = false;
+      // viuClick: o Stripe já mandou um `click` nesta montagem (o Apple Pay do Safari pode nunca mandar).
+      let actions = null, voo = false, vivo = true, temTotal = false, foco = null, prazo = null, folha = false, viuClick = false;
       // O conjunto que o servidor JÁ tem: é para ele que as caixas voltam quando um /bump falha.
       let confirmado = cbs.filter(function (c) { return c.checked; });
       const marcadas = function () { return cbs.filter(function (c) { return c.checked; }); };
@@ -141,12 +142,19 @@
       }
 
       /** Apple Pay/Google Pay: a folha mostra o total da SESSÃO, que é o que se cobra (sem sincronizar antes); do
-       *  `click` até aqui o carrinho ficou parado (`folha`). Confirm sem folha aberta (tardio, depois de um `cancel`
-       *  que destravou o carrinho) ou com pedido em voo é ignorado (a folha vence o prazo dela sem cobrar). */
+       *  `click` até aqui o carrinho ficou parado (`folha`). Recusa (paymentFailed + aviso, nunca em silêncio) o
+       *  confirm com pedido em voo e, se esta montagem já viu um `click`, o sem folha aberta (tardio, depois de um
+       *  `cancel` que destravou o carrinho). Sem `click` nenhum (Apple Pay do Safari) a trava do carrinho é a folha
+       *  ser modal no iPhone; numa folha não modal sem `click`, um /bump que termina antes do confirm cobraria o
+       *  total novo, que a folha não mostrou. */
       function carteira(ev) {
         const aberta = folha;
         folha = false;
-        if (!aberta || voo || !actions || !temTotal) return pinta();
+        if ((viuClick && !aberta) || voo || !actions || !temTotal) {
+          if (ev && typeof ev.paymentFailed === "function") ev.paymentFailed();
+          aviso("pp-erro", "Pagamento não iniciado. Tente de novo.");
+          return pinta();
+        }
         aviso("pp-erro", "");
         trava(true);
         confirma({ expressCheckoutConfirmEvent: ev });
@@ -207,7 +215,7 @@
       // ponytail: se o Stripe nunca mandar o `cancel`, a tela só destrava ao reabrir e fechar a folha (ou recarregar).
       ex.on("click", function (ev) {
         if (voo || !actions || !temTotal || !vivo) return;
-        folha = true;
+        folha = viuClick = true;
         pinta();
         if (ev && typeof ev.resolve === "function") ev.resolve();
       });
