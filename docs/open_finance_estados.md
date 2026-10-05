@@ -681,6 +681,9 @@ Texto novo do PR-A, visível ao usuário: o detalhe
   - Falha inesperada da tarefa de observação (banco/pool, bug): log
     `of_observacao_falhou` (dono na coluna, só item_id e o tipo da exceção em
     `details`) e a pista `ERROR`, quando o banco ainda responde.
+  - O teto de 4 observações simultâneas cobre a observação inteira (leitura da linha,
+    GET e escrita), pego uma vez no topo da tarefa; o resto espera como tarefa asyncio,
+    sem ocupar thread do executor compartilhado.
   - A pista usa a versão da linha lida ANTES do GET, sem reler: se um sync, o job
     ou uma reconexão escreveu a linha no meio, a pista grava 0 linhas e o escritor
     concorrente vence (inclusive após duas derrotas de versão e numa falha

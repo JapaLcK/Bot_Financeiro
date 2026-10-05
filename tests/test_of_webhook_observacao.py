@@ -31,6 +31,9 @@ com `cmp`; remeça se mexer no código):
       "1ª derrota relê" vermelho;
   negativo (rodada 3), sem `user_id=` nos dois logs de `of_observacao.py`: o
       diverge e o perdeu_corrida ficam vermelhos (dono na coluna, padrão do #541);
+  negativo (rodada 6, Codex P1), permit só em volta do GET (como antes): o teste de
+      leituras da linha simultâneas (> 4) e o do lookup durante a rajada ficam
+      vermelhos;
   negativo (rodada 5, Codex P2 #2), `_pista` relendo a linha (versão nova em vez da
       lida antes do GET): o "sync escreve no meio", a derrota dupla e a exceção com
       linha alterada ficam vermelhos;
@@ -592,16 +595,76 @@ def test_sem_secret_da_503_e_nao_le_a_pluggy(user_id, monkeypatch):
 
 # ── volume ───────────────────────────────────────────────────────────────────
 
-def test_rajada_de_itens_diferentes_nunca_passa_do_semaforo(user_id, monkeypatch):
-    itens = [f"item-rajada-{i}" for i in range(10)]
+class _LeituraDaLinha:
+    """`get_linha_para_observar` instrumentada: lenta e com pico de leituras de banco
+    simultâneas (cada uma ocupa uma thread do executor padrão)."""
+
+    def __init__(self, monkeypatch, atraso: float):
+        self.real, self.atraso = obs.get_linha_para_observar, atraso
+        self.pico, self._agora, self._lock = 0, 0, threading.Lock()
+        monkeypatch.setattr(obs, "get_linha_para_observar", self)
+
+    def __call__(self, *a, **k):
+        with self._lock:
+            self._agora += 1
+            self.pico = max(self.pico, self._agora)
+        try:
+            time.sleep(self.atraso)
+            return self.real(*a, **k)
+        finally:
+            with self._lock:
+                self._agora -= 1
+
+
+def _cria_itens(uid: int, n: int) -> list[str]:
+    itens = [f"item-rajada-{i}" for i in range(n)]
     for it in itens:
-        _ativa(user_id, monkeypatch, item=it)
-    remoto = _Remoto(monkeypatch, ITEM_SAUDAVEL, atraso=0.15)
+        _conecta(uid, "UPDATED", {"id": it, "status": "UPDATED",
+                                  "connector": {"id": 612, "name": "Nubank"}})
+    return itens
+
+
+def test_rajada_de_itens_diferentes_nunca_passa_do_semaforo(user_id, monkeypatch):
+    """Codex P1: o teto de 4 cobre a observação INTEIRA, não só o GET: leituras da
+    linha (banco, no executor) também nunca passam de 4 simultâneas."""
+    itens = _cria_itens(user_id, 40)
+    remoto = _Remoto(monkeypatch, ITEM_SAUDAVEL, atraso=0.02)
+    leituras = _LeituraDaLinha(monkeypatch, atraso=0.02)
 
     _posta([_erro(it) for it in itens], simultaneos=True)
 
     assert sorted(remoto.ids) == sorted(itens)     # todos observados
     assert remoto.pico == obs._MAX_SIMULTANEAS     # usou o teto e não passou dele
+    assert leituras.pico <= obs._MAX_SIMULTANEAS, leituras.pico
+
+
+def test_rajada_nao_enfileira_o_outro_trabalho_do_executor(user_id, monkeypatch):
+    """Codex P1: durante a rajada, o lookup de posse do webhook (um `to_thread` de
+    OUTRO trabalho no mesmo executor) responde sem esperar a fila das 40 leituras."""
+    itens = _cria_itens(user_id, 40)
+    _Remoto(monkeypatch, ITEM_SAUDAVEL, atraso=0.02)
+    _LeituraDaLinha(monkeypatch, atraso=0.25)
+    medido = {}
+
+    async def _go():
+        transport = httpx.ASGITransport(app=dashboard.app)
+        url = f"/open-finance/pluggy/webhook?token={SEGREDO}"
+        async with httpx.AsyncClient(transport=transport, base_url="http://t") as c:
+            rajada = asyncio.ensure_future(
+                asyncio.gather(*[_envia(c, url, _erro(it)) for it in itens]))
+            while len(of_routes._INFLIGHT) < len(itens):     # as 40 tarefas já existem
+                await asyncio.sleep(0.01)
+            t0 = time.monotonic()
+            await asyncio.to_thread(db.get_connections_by_item_id, itens[0])   # o lookup
+            medido["lookup"] = time.monotonic() - t0
+            medido["pendentes"] = len(of_routes._INFLIGHT)
+            await rajada
+            await _drena()
+
+    asyncio.run(_go())
+
+    assert medido["pendentes"] > 20                  # o lookup rodou NO MEIO da rajada
+    assert medido["lookup"] < 0.2, medido
 
 
 # ── a conversa (CLAUDE.md §3): item/error, tela, e um sync depois ────────────

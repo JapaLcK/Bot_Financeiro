@@ -27,9 +27,11 @@ from db import get_linha_para_observar, mark_sync_result
 from db.open_finance_state import _TERMINAL
 from frontend.routes import open_finance as _of
 
-# Observações simultâneas no trecho bloqueante (2 requisições HTTP em thread): uma
-# rajada de `item/error` (queda da Pluggy) não pode encher o executor padrão e
-# atrasar o banco do resto do app. Quem passa do teto espera aqui, sem thread.
+# Observações simultâneas, a observação INTEIRA (leitura da linha, GET, escrita, logs;
+# tudo em thread), não só o GET: uma rajada de `item/error` (queda da Pluggy) não pode
+# encher o executor padrão, compartilhado com o resto do app (o próprio webhook faz o
+# lookup de posse nele). Quem passa do teto espera no semáforo como tarefa asyncio,
+# sem thread. O permit é pego UMA vez, em `_tarefa` (nada abaixo o pega de novo).
 _MAX_SIMULTANEAS = 4
 _semaforo = asyncio.Semaphore(_MAX_SIMULTANEAS)
 
@@ -60,8 +62,7 @@ async def _observa(item_id: str, connection_id: int, user_id: int, visto: dict) 
             return   # apagada, PAUSED ou DELETED: nada a observar (sem GET, sem log)
         visto["versao"] = linha["updated_at"]
         try:
-            async with _semaforo:
-                item = await asyncio.to_thread(_le_item, item_id)
+            item = await asyncio.to_thread(_le_item, item_id)
         except Exception:  # noqa: BLE001 — 429/5xx/timeout/404: não confirmou, pista
             return await _pista(connection_id, linha["updated_at"])
         if await asyncio.to_thread(observar_item, linha, item):
@@ -93,29 +94,32 @@ async def _tarefa(item_id: str, connection_id: int, user_id: int) -> None:
     (#541: mensagem de erro de banco leva host/porta); só o tipo. Se o banco é
     justamente o que caiu, a pista e o log falham e são engolidos: o slot de
     `_INFLIGHT` solta pelo callback de qualquer jeito."""
-    visto: dict = {}
-    try:
-        await _observa(item_id, connection_id, user_id, visto)
-    except Exception as exc:  # noqa: BLE001
+    async with _semaforo:   # o permit cobre a tarefa toda, inclusive o log e a pista
+        visto: dict = {}
         try:
-            await log_system_event(
-                "warning", "of_observacao_falhou",
-                "Observação do webhook falhou por erro inesperado",
-                source="open_finance", user_id=user_id,
-                details={"item_id": item_id, "tipo_do_erro": type(exc).__name__})
-        except Exception:  # noqa: BLE001
-            pass
-        if "versao" in visto:   # sem versão lida não há CAS: fica só o log
+            await _observa(item_id, connection_id, user_id, visto)
+        except Exception as exc:  # noqa: BLE001
             try:
-                await _pista(connection_id, visto["versao"])
+                await log_system_event(
+                    "warning", "of_observacao_falhou",
+                    "Observação do webhook falhou por erro inesperado",
+                    source="open_finance", user_id=user_id,
+                    details={"item_id": item_id, "tipo_do_erro": type(exc).__name__})
             except Exception:  # noqa: BLE001
                 pass
+            if "versao" in visto:   # sem versão lida não há CAS: fica só o log
+                try:
+                    await _pista(connection_id, visto["versao"])
+                except Exception:  # noqa: BLE001
+                    pass
 
 
 def agenda_observacao(item_id: str, conexao: dict) -> None:
     """Chamada pelo webhook com a linha que `get_connections_by_item_id` resolveu
     (a posse do item). Em voo: coalesce em `_DIRTY` (a rodada suja é um sync, que
-    relê). Senão ocupa o slot de `_INFLIGHT`."""
+    relê). Senão ocupa o slot de `_INFLIGHT`, inclusive enquanto a tarefa espera o
+    permit do semáforo (é o coalescer: evento no meio vira `_DIRTY`); o callback
+    solta o slot também se a tarefa for cancelada nessa espera."""
     if item_id in _of._INFLIGHT:
         _of._DIRTY.add(item_id)
         return
