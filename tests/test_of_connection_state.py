@@ -785,62 +785,55 @@ def _ui(item_id: str) -> dict:
     return connection_ui_state(_linha(item_id))
 
 
-# ── 13. RODADA 4: o webhook grava o PAR, não só o `status` ──────────────────
-# `update_pluggy_open_finance_item_status` escrevia o `status` sozinho: medido,
-# `item/error` sobre ACTIVE/no_accounts produzia ERROR/no_accounts — par
-# incoerente que a UI ainda mascarava de "Erro temporário". Ele não passa pelo
-# `resolve_connection_state` (não observa o item, só repete a Pluggy), mas grava
-# o MESMO par que as linhas B/C dariam: ERROR + motivo vazio.
-# CONTROLE NEGATIVO (medido): tirar o `status_reason=null` do UPDATE deixa este
-# teste vermelho no par.
+# ── 13. RODADA 4 (reescrito no PR-C2): o webhook não grava veredito ─────────
+# Antes, `update_pluggy_open_finance_item_status` escrevia o par (ERROR + motivo
+# vazio) a partir de `item/error`. No PR-C2 o webhook NÃO grava status nem motivo
+# em `item/error` (agenda a observação, `of_observacao.py`): o par que o job/sync
+# gravaram fica como está. A observação em si é medida em
+# `tests/test_of_webhook_observacao.py`; aqui a observação é neutralizada para
+# provar que o próprio handler não escreve.
+# CONTROLE NEGATIVO (medido): devolver `item/error` ao `status_by_event` deixa os
+# dois testes vermelhos.
 
-def test_webhook_item_error_nao_deixa_par_incoerente(user_id, monkeypatch):
+def _item_error_sem_observacao(item_id, monkeypatch):
     import json
 
     from fastapi.testclient import TestClient
 
     import frontend.finance_bot_websocket_custom as dashboard
 
+    monkeypatch.setenv("PLUGGY_WEBHOOK_SECRET", "test-webhook-secret")
+    monkeypatch.setattr("frontend.routes.open_finance._schedule_pluggy_sync", lambda i: None)
+    monkeypatch.setattr("frontend.routes.of_observacao.agenda_observacao", lambda i, c: None)
+    return TestClient(dashboard.app).post(
+        "/open-finance/pluggy/webhook?token=test-webhook-secret",
+        content=json.dumps({"event": "item/error", "itemId": item_id}).encode(),
+        headers={"Content-Type": "application/json"},
+    )
+
+
+def test_webhook_item_error_nao_grava_veredito(user_id, monkeypatch):
     conexao = _conexao(user_id, "item-webhook-erro")
     db.mark_sync_result(conexao["id"], ok=False, status="ACTIVE",
                         status_reason="no_accounts", at=None)
-    monkeypatch.setenv("PLUGGY_WEBHOOK_SECRET", "test-webhook-secret")
-    monkeypatch.setattr("frontend.routes.open_finance._schedule_pluggy_sync", lambda i: None)
 
-    resp = TestClient(dashboard.app).post(
-        "/open-finance/pluggy/webhook?token=test-webhook-secret",
-        content=json.dumps({"event": "item/error", "itemId": "item-webhook-erro"}).encode(),
-        headers={"Content-Type": "application/json"},
-    )
+    resp = _item_error_sem_observacao("item-webhook-erro", monkeypatch)
 
     assert resp.status_code == 200, resp.text
     linha = _linha("item-webhook-erro")
-    assert (linha["status"], linha["status_reason"]) == ("ERROR", None), linha
-    assert _ui("item-webhook-erro")["state"] == "error_recoverable"
+    assert (linha["status"], linha["status_reason"]) == ("ACTIVE", "no_accounts"), linha
+    assert _ui("item-webhook-erro")["state"] == "no_accounts"
 
 
 def test_webhook_item_error_atrasado_nao_apaga_item_missing(user_id, monkeypatch):
-    """A exceção do par: `item/error` entregue com atraso (replay) NÃO pode rebaixar
-    "Conexão perdida / Refaça a conexão" para "Erro temporário / Tentaremos de novo".
-    CONTROLE NEGATIVO (medido): com `status_reason=null` cru no UPDATE, o par vira
-    ('ERROR', None) e a UI vira `error_recoverable` — as duas asserções vermelhas."""
-    import json
-
-    from fastapi.testclient import TestClient
-
-    import frontend.finance_bot_websocket_custom as dashboard
-
+    """`item/error` entregue com atraso (replay) NÃO pode rebaixar "Conexão perdida /
+    Refaça a conexão" para "Erro temporário". No PR-C2 isso vale porque o handler não
+    escreve; a pista da observação também preserva o motivo (G2)."""
     conexao = _conexao(user_id, "item-webhook-sumido")
     db.mark_sync_result(conexao["id"], ok=False, status="ERROR",
                         status_reason="item_missing", at=None)
-    monkeypatch.setenv("PLUGGY_WEBHOOK_SECRET", "test-webhook-secret")
-    monkeypatch.setattr("frontend.routes.open_finance._schedule_pluggy_sync", lambda i: None)
 
-    resp = TestClient(dashboard.app).post(
-        "/open-finance/pluggy/webhook?token=test-webhook-secret",
-        content=json.dumps({"event": "item/error", "itemId": "item-webhook-sumido"}).encode(),
-        headers={"Content-Type": "application/json"},
-    )
+    resp = _item_error_sem_observacao("item-webhook-sumido", monkeypatch)
 
     assert resp.status_code == 200, resp.text
     linha = _linha("item-webhook-sumido")
