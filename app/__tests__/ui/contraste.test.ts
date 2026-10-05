@@ -1,5 +1,5 @@
 import { contraste, PARES } from "@/ui/contraste";
-import { claro, escuro } from "@/ui/tokens";
+import { claro, escuro, acessoClaro, acessoEscuro } from "@/ui/tokens";
 
 describe("contraste", () => {
   // Referência do plano: prova a fórmula contra dois valores medidos à mão,
@@ -22,6 +22,8 @@ describe("contraste", () => {
   it.each([
     ["claro", claro],
     ["escuro", escuro],
+    ["acesso claro", acessoClaro],
+    ["acesso escuro", acessoEscuro],
   ])("todo par da tabela PARES alcança o mínimo no tema %s", (_nome, paleta) => {
     for (const par of PARES) {
       const razao = contraste(paleta[par.primeiro], paleta[par.segundo]);
@@ -43,6 +45,8 @@ describe("contraste", () => {
   it.each([
     ["claro", claro],
     ["escuro", escuro],
+    ["acesso claro", acessoClaro],
+    ["acesso escuro", acessoEscuro],
   ])("todo valor da paleta %s é hex de 6 dígitos", (_nome, paleta) => {
     for (const valor of Object.values(paleta)) {
       expect(valor).toMatch(/^#[0-9A-F]{6}$/i);

@@ -1,7 +1,7 @@
 import { Stack } from "expo-router";
 
 import { OPCOES_SHEET } from "@/ui/componentes/Sheet";
-import { useTema } from "@/ui/tema";
+import { TemaProvider, useTema } from "@/ui/tema";
 
 /**
  * Existe por causa da sheet: "Esqueci a senha" precisa de
@@ -26,6 +26,10 @@ import { useTema } from "@/ui/tema";
 export const unstable_settings = { initialRouteName: "boas-vindas" };
 
 export default function LayoutAuth() {
+  return <TemaProvider acesso><PilhaAuth /></TemaProvider>;
+}
+
+function PilhaAuth() {
   // Sem `contentStyle`, a tela fica com o fundo padrão do react-navigation
   // (cinza claro) — e ele aparece no espaço que o `KeyboardAvoidingView` abre
   // para o teclado, até no tema escuro.

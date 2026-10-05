@@ -36,6 +36,7 @@ async function tocar(nome: string) {
 async function abrirBV() {
   renderRouter("./app", { initialUrl: "/" });
   await waitFor(() => expect(screen).toHavePathname("/boas-vindas"));
+  await tocar("Começar");
   await waitFor(() => botao(GOOGLE));
 }
 

@@ -33,7 +33,7 @@ const SOMBRA_RAISED_CLARO = {
 } as const;
 
 export function Card({ children, elevacao = "surface" }: Props) {
-  const { esquema, cores } = useTema();
+  const { esquema, cores, acesso } = useTema();
   const raised = elevacao === "raised";
   const comSombra = raised && esquema === "light";
 
@@ -42,8 +42,8 @@ export function Card({ children, elevacao = "surface" }: Props) {
       style={[
         {
           borderRadius: raio.md,
-          padding: espaco.lg,
-          backgroundColor: raised ? cores.surfaceRaised : cores.surface,
+          padding: acesso ? 0 : espaco.lg,
+          backgroundColor: acesso ? cores.bg : raised ? cores.surfaceRaised : cores.surface,
         },
         // `shadowColor` vem de `cores.shadow` (tokens.ts), não do literal
         // "black": o gate de hex só barra `#...` fora de `tokens.ts`, mas uma

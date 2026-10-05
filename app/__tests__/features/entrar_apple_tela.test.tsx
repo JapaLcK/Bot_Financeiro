@@ -58,7 +58,7 @@ async function tocar(nome: string) {
 describe("(auth)/entrar — Continuar com a Apple", () => {
   it("iOS: botão do sistema CONTINUE, contorno branco no claro, raio e altura do Google; sem 'em breve'", async () => {
     await abrirEntrar();
-    expect(botao(APPLE).props).toMatchObject({ buttonType: 1, buttonStyle: 1, cornerRadius: 12, style: { height: 44 } });
+    expect(botao(APPLE).props).toMatchObject({ buttonType: 1, buttonStyle: 1, cornerRadius: 12, style: { height: 48 } });
     expect(screen.queryByText("Entrar com Apple chega em breve.")).toBeNull();
     expect(involucro()).toEqual({ pointerEvents: "auto", opacity: 1 });
   });

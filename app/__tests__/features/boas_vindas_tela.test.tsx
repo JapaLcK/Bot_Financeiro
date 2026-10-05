@@ -56,14 +56,19 @@ beforeEach(() => {
 describe("(auth)/boas-vindas — navegação", () => {
   // Controle negativo (medido): `entrar` declarado antes de `boas-vindas` no
   // `(auth)/_layout.tsx` deixa este vermelho (a rota padrão vira /entrar).
-  it("N1 — sem sessão abre /boas-vindas com o nome, a frase e os quatro caminhos", async () => {
+  it("N1 — sem sessão abre /boas-vindas com o nome, a frase e os caminhos após Começar", async () => {
     renderRouter("./app", { initialUrl: "/" });
     await waitFor(() => expect(screen).toHavePathname("/boas-vindas"));
     expect(screen.getByRole("header", { name: "PigBank" })).toBeTruthy();
     expect(screen.getByText(FRASE)).toBeTruthy();
+    expect(screen.queryByRole("button", { name: "Continuar com Google" })).toBeNull();
+    await tocar("Começar");
     expect(botao("Continuar com a Apple")).toBeTruthy(); // o botão do sistema não tem `accessibilityState`
     for (const nome of ["Continuar com Google", "Criar conta", "Já tenho conta"]) expect(desativado(nome)).toBe(false);
     expect(router.canGoBack()).toBe(false);
+    await tocar("Voltar");
+    expect(botao("Começar")).toBeTruthy();
+    expect(screen.getByRole("header", { name: "PigBank" })).toBeTruthy();
   });
 
   it("'Já tenho conta' abre /entrar sem o link de Criar conta, e voltar volta para cá", async () => {
@@ -85,6 +90,7 @@ describe("(auth)/boas-vindas — navegação", () => {
     renderRouter("./app", { initialUrl: "/" });
     await waitFor(() => expect(screen).toHavePathname("/boas-vindas"));
 
+    await tocar("Começar");
     await tocar("Continuar com Google");
     expect(botao("Continuar com Google").props.accessibilityState).toMatchObject({ busy: true });
     expect(desativado("Criar conta")).toBe(true);
@@ -126,6 +132,7 @@ describe("(auth)/boas-vindas — navegação", () => {
     // A fila de `entrar.ts` é do módulo: se o Entrar a tivesse deixado presa,
     // a BV ficaria em carregando para sempre.
     rotasGoogle();
+    await tocar("Começar");
     await tocar("Continuar com Google");
     await waitFor(() => expect(screen.getByText(/Olá, Ana/)).toBeTruthy());
     expect(screen).toHavePathname("/");
