@@ -25,6 +25,7 @@ from core.services.pluggy import create_pluggy_api_key, get_pluggy_item
 from core.services.pluggy_sync import observar_item
 from db import get_linha_para_observar, mark_sync_result
 from db.open_finance_state import _TERMINAL
+from core.services.pluggy_health import _NEEDS_USER
 from frontend.routes import open_finance as _of
 
 # Observações simultâneas, a observação INTEIRA (leitura da linha, GET, escrita, logs;
@@ -34,9 +35,6 @@ from frontend.routes import open_finance as _of
 # sem thread. O permit é pego UMA vez, em `_tarefa` (nada abaixo o pega de novo).
 _MAX_SIMULTANEAS = 4
 _semaforo = asyncio.Semaphore(_MAX_SIMULTANEAS)
-
-# Status da releitura que CONFIRMA o `item/error` (o resto é item vivo: diverge).
-_STATUS_DE_ERRO = {"ERROR", "LOGIN_ERROR"}
 
 
 def _le_item(item_id: str) -> dict:
@@ -67,7 +65,10 @@ async def _observa(item_id: str, connection_id: int, user_id: int, visto: dict) 
             return await _pista(connection_id, linha["updated_at"])
         if await asyncio.to_thread(observar_item, linha, item):
             status_item = str(item.get("status") or "").upper()
-            if status_item not in _STATUS_DE_ERRO:
+            # Mesma pergunta do `resolve_connection_state` ("o item está em erro?"):
+            # `_NEEDS_USER` ou `ERROR`; item que o resolvedor grava como erro confirma o
+            # evento e NÃO diverge.
+            if status_item not in _NEEDS_USER and status_item != "ERROR":
                 # V6 (plano da C2): o webhook diz erro e o item volta vivo. A
                 # observação vence; o evento deixa a Onda 8 medir a frequência.
                 await log_system_event(

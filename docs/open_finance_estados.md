@@ -64,7 +64,7 @@ comando; não copie o resultado para cá (`CLAUDE.md` §2).
    confirma (429, 5xx, timeout, 404, ou duas derrotas de versão) grava a pista
    `ERROR`, sem apagar `status_reason`, sem tocar `raw` e sem tocar `health`; o 404
    NÃO grava `item_missing` pelo webhook (quem o decide é o job de saúde). Quando o
-   webhook diz erro e a releitura devolve item vivo, a observação vence e o evento
+   webhook diz erro e a releitura devolve item vivo (fora da regra de erro do resolvedor: `ERROR` ou `_NEEDS_USER`), a observação vence e o evento
    `of_observacao_diverge` (item_id e os dois status em `details`; o dono vai na coluna `user_id`, como manda o padrão do #541) registra a
    divergência. `item/created` sobre conexão já conhecida não grava nada (nem
    `UPDATING`, nem motivo, nem `raw`) e segue agendando o sync; item desconhecido

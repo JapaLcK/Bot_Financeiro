@@ -31,6 +31,9 @@ com `cmp`; remeça se mexer no código):
       "1ª derrota relê" vermelho;
   negativo (rodada 3), sem `user_id=` nos dois logs de `of_observacao.py`: o
       diverge e o perdeu_corrida ficam vermelhos (dono na coluna, padrão do #541);
+  negativo (rodada 7, Codex P2), lista de 2 valores (`ERROR`/`LOGIN_ERROR`) no lugar
+      da regra do resolvedor: `OUTDATED`, `WAITING_USER_INPUT`, `INVALID_CREDENTIALS`
+      e `WAITING_USER_ACTION` em `CONFIRMAM` ficam vermelhos (diverge falso);
   negativo (rodada 6, Codex P1), permit só em volta do GET (como antes): o teste de
       leituras da linha simultâneas (> 4) e o do lookup durante a rajada ficam
       vermelhos;
@@ -74,6 +77,7 @@ import frontend.routes.of_observacao as obs
 import frontend.routes.open_finance as of_routes
 from core.services.of_retentativa import classe_de_retentativa
 from core.services.pluggy import PluggyApiError
+from core.services.pluggy_health import resolve_connection_state
 from db.connection import get_conn
 from test_of_coleta_sem_fim import ITEM, _conecta, _sql, _sync_de_fundo, _ui_das_duas
 from test_of_connection_state import (
@@ -514,13 +518,39 @@ def test_webhook_diz_erro_e_releitura_vive_grava_e_loga_diverge(user_id, monkeyp
     assert diverge[0]["user_id"] == user_id and "user_id" not in diverge[0]["details"]
 
 
-def test_releitura_que_confirma_o_erro_nao_loga_diverge(user_id, monkeypatch, logs):
+# Codex P2: "item em erro" é a regra do `resolve_connection_state` (`_NEEDS_USER` ou
+# `ERROR`; `WAITING_USER_ACTION` é o `ITEM_STATUS_AUTORIZA_DISPOSITIVO`, que está em
+# `_NEEDS_USER`). Lista literal de propósito: um teste que importasse a regra
+# concordaria com qualquer mudança nela.
+CONFIRMAM = ["ERROR", "LOGIN_ERROR", "WAITING_USER_INPUT", "INVALID_CREDENTIALS",
+             "OUTDATED", "WAITING_USER_ACTION"]
+VIVOS = ["UPDATED", "UPDATING", "CREATED"]
+
+
+@pytest.mark.parametrize("status", CONFIRMAM)
+def test_releitura_que_confirma_o_erro_nao_loga_diverge(user_id, monkeypatch, logs, status):
     _ativa(user_id, monkeypatch)
-    _Remoto(monkeypatch, ERRO_REAL)
+    _Remoto(monkeypatch, {**ITEM_SAUDAVEL, "status": status})
 
     _posta([_erro()])
 
     assert not [e for e in logs if e["event"] == "of_observacao_diverge"]
+    e = _estado()   # o par gravado é o que o resolvedor produz para esse status
+    assert (e["status"], e["status_reason"] or "") == resolve_connection_state(
+        health=e["health"], has_data=True, reason_atual="")
+    assert e["status"] == "ERROR"
+
+
+@pytest.mark.parametrize("status", VIVOS)
+def test_releitura_viva_loga_diverge_com_o_status_lido(user_id, monkeypatch, logs, status):
+    _ativa(user_id, monkeypatch)
+    _Remoto(monkeypatch, {**ITEM_SAUDAVEL, "status": status})
+
+    _posta([_erro()])
+
+    diverge = [e for e in logs if e["event"] == "of_observacao_diverge"]
+    assert [d["details"]["status_releitura"] for d in diverge] == [status]
+    assert _estado()["status"] == "ACTIVE"
 
 
 # ── isolamento por usuário e posse ───────────────────────────────────────────
