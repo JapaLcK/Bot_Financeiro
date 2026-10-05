@@ -523,6 +523,10 @@ class ResetLockUnavailableError(RuntimeError):
     entra."""
 
 
+# Pai -> filho de lotes, apagado pai primeiro: o CASCADE leva os lotes e o delete
+# explícito deles contaria 0, então `reset_user_data` conta os lotes ANTES do pai.
+_LOTES_DO_PAI = {"investments": "investment_lots", "pockets": "pocket_lots"}
+
 # Tabelas apagadas pelo reset "Recomeçar do zero", na ordem. Child-first, EXCETO
 # investments/pockets, que vão antes dos próprios lotes (pai antes de filho: a ordem
 # de lock de `accrue_all_*`, ver `_lock_user`). As FKs reais são cascade/set null —
@@ -802,8 +806,14 @@ def reset_user_data(
                         counts["credit_bills"] = counts.get("credit_bills", 0) + cur.rowcount
                 _delete(cur, "credit_cards")
 
+                lotes: dict[str, int] = {}
                 for table in _RESET_TABLES:
+                    lote = _LOTES_DO_PAI.get(table)
+                    if lote and _table_exists(cur, lote) and _column_exists(cur, lote, "user_id"):
+                        cur.execute(f"select count(*) as n from {lote} where user_id = %s", (user_id,))
+                        lotes[lote] = cur.fetchone()["n"]
                     _delete(cur, table)
+                counts.update(lotes)  # os que existiam, sem contar o CASCADE duas vezes
 
                 # Mesma transação: zera as preferências que apontavam para o que
                 # sumiu e reabre o onboarding (needs_onboarding volta a True).
