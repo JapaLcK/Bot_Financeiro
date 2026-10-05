@@ -8,7 +8,7 @@
 import { test, before, after } from "node:test";
 import assert from "node:assert/strict";
 import { chromium } from "playwright";
-import { PAINEL, exigeArtefatoEmDia, servir } from "./_painel.mjs";
+import { PAINEL, PROTOTIPO, RAIZ, exigeArtefatoEmDia, servir } from "./_painel.mjs";
 
 let browser;
 before(async () => {
@@ -17,13 +17,14 @@ before(async () => {
 });
 after(() => browser?.close());
 
-async function abrir({ width = 1440, hash = "#/", perfil = "padrao" } = {}) {
+async function abrir({ width = 1440, hash = "#/", perfil = "padrao", demo = false } = {}) {
   const ctx = await browser.newContext({ viewport: { width, height: 900 }, reducedMotion: "reduce" });
-  await servir(ctx, undefined, { perfil }); // o perfil mora no servidor (/api/v2/perfil)
+  await servir(ctx, demo ? RAIZ : undefined, { perfil }); // o perfil mora no servidor (/api/v2/perfil)
+  if (demo) await ctx.addInitScript((p) => localStorage.setItem("pigbank.dashboard.profile.v1", JSON.stringify(p)), perfil);
   const page = await ctx.newPage();
   const erros = [];
   page.on("pageerror", (e) => erros.push(e.message));
-  await page.goto(`${PAINEL}${hash}`);
+  await page.goto(`${demo ? PROTOTIPO : PAINEL}${hash}`);
   await page.locator("#page-title").waitFor();
   return { ctx, page, erros };
 }
@@ -129,7 +130,7 @@ test("\"Ver N lançamentos\" abre o extrato da categoria na própria resposta, s
 });
 
 test("\"Abrir no painel\" leva a categoria, inclusive com outro mês escolhido no painel", async () => {
-  const { ctx, page } = await abrir({ hash: "#/gastos" });
+  const { ctx, page } = await abrir({ hash: "#/gastos", demo: true });
   await page.locator("[aria-label='Mês anterior']").click(); // o painel em agosto
   const r = await atalho(page, "Pra onde vai meu dinheiro?");
   await r.locator(".cat", { hasText: "Delivery" }).click();
@@ -145,7 +146,7 @@ test("\"Abrir no painel\" leva a categoria, inclusive com outro mês escolhido n
 });
 
 test("\"Abrir no painel\" do dia da semana leva o dia escolhido, mesmo com outro mês no painel", async () => {
-  const { ctx, page } = await abrir({ hash: "#/lancamentos", perfil: "controlar" });
+  const { ctx, page } = await abrir({ hash: "#/lancamentos", perfil: "controlar", demo: true });
   await page.locator("[aria-label='Mês anterior']").click();
   await irPara(page, "#/piggy", "Converse com o Piggy");
   await page.locator(".chat-follow button", { hasText: "Em que dia da semana eu mais gasto?" }).click();
@@ -352,7 +353,7 @@ test("visão compacta: \"Ver tudo\" só em bloco alto, abre no lugar, e o foco n
 });
 
 test("no painel os blocos seguem escrevendo no estado global", async () => {
-  const { ctx, page } = await abrir({ hash: "#/gastos" });
+  const { ctx, page } = await abrir({ hash: "#/gastos", demo: true });
   await page.locator(".cats .cat", { hasText: "Delivery" }).click();
   const marcada = await page.locator(".cats [aria-pressed='true']").count();
   await page.locator("button.link", { hasText: /^Ver \d+ lançamentos/ }).click();

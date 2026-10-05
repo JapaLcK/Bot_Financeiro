@@ -10,7 +10,7 @@
 import { test, before, after } from "node:test";
 import assert from "node:assert/strict";
 import { chromium } from "playwright";
-import { PAINEL, exigeArtefatoEmDia, servir } from "./_painel.mjs";
+import { PROTOTIPO, RAIZ, exigeArtefatoEmDia, servir } from "./_painel.mjs";
 
 let browser;
 before(async () => {
@@ -21,11 +21,11 @@ after(() => browser?.close());
 
 async function abrir() {
   const ctx = await browser.newContext({ viewport: { width: 1440, height: 1000 }, reducedMotion: "reduce" });
-  await servir(ctx);
+  await servir(ctx, RAIZ);
   // já escolheu o perfil (Pular): sem isso o modal da 1ª visita cobre o Resumo
   await ctx.addInitScript(() => localStorage.setItem("pigbank.dashboard.profile.v1", '"padrao"'));
   const page = await ctx.newPage();
-  await page.goto(`${PAINEL}#/lancamentos`);
+  await page.goto(`${PROTOTIPO}#/lancamentos`);
   await page.locator(".ledger").waitFor();
   return { ctx, page };
 }

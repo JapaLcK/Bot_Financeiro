@@ -12,7 +12,7 @@
 import { test, before, after } from "node:test";
 import assert from "node:assert/strict";
 import { chromium } from "playwright";
-import { PAINEL, exigeArtefatoEmDia, servir } from "./_painel.mjs";
+import { PAINEL, PROTOTIPO, RAIZ, exigeArtefatoEmDia, servir } from "./_painel.mjs";
 
 let browser;
 before(async () => {
@@ -21,13 +21,13 @@ before(async () => {
 });
 after(() => browser?.close());
 
-async function abrir(hash, width = 1440) {
+async function abrir(hash, width = 1440, demo = false) {
   const ctx = await browser.newContext({ viewport: { width, height: 1000 }, reducedMotion: "reduce" });
-  await servir(ctx);
+  await servir(ctx, demo ? RAIZ : undefined);
   // já escolheu o perfil (Pular): sem isso o modal da 1ª visita cobre o Resumo
   await ctx.addInitScript(() => localStorage.setItem("pigbank.dashboard.profile.v1", '"padrao"'));
   const page = await ctx.newPage();
-  await page.goto(`${PAINEL}#${hash}`);
+  await page.goto(`${demo ? PROTOTIPO : PAINEL}#${hash}`);
   await page.locator("#page-title").waitFor();
   return { ctx, page };
 }
@@ -75,7 +75,7 @@ test("#559: sem o seletor, o topbar mantém a altura e os botões à direita (14
 });
 
 test("#560: o iFood de 23/09 escolhido na paleta abre só aquele dia no extrato", async () => {
-  const { ctx, page } = await abrir("/lancamentos");
+  const { ctx, page } = await abrir("/lancamentos", 1440, true);
   await page.keyboard.press("Control+k");
   await page.locator(".cmdk input").fill("ifood");
   const opcoes = await page.locator(".cmdk [role=option]").allTextContents();

@@ -1,6 +1,6 @@
 // Cliente da /api/v2. Os tipos saem do contrato (api-v2.gen.ts); o fetch é o global,
 // que o auth-refresh.js do /painel envolve (renova no 401 e repete).
-import { useQuery } from "@tanstack/react-query";
+import { infiniteQueryOptions, useQuery } from "@tanstack/react-query";
 import type { ErroV2, QueryGet, RotasGet, RotasPost, RotasPut } from "./api-v2.gen";
 import { MONTHS } from "./api";
 
@@ -123,3 +123,16 @@ export const resumoMesQuery = (mes: string) => ({
 
 // Só dentro da árvore que o portão (parts/Entrada.tsx) libera: lá o /me já chegou.
 export const usePlan = () => useQuery(meQuery).data!.plan_tier;
+
+export const categoriasQuery = {
+  queryKey: ["categorias"],
+  queryFn: ({ signal }: { signal: AbortSignal }) => apiGet("/categorias", signal),
+  ...vivo,
+};
+export const lancamentosQuery = (filtros: Omit<QueryGet["/lancamentos"], "cursor">) => infiniteQueryOptions({
+  queryKey: ["lancamentos", filtros],
+  initialPageParam: null as string | null,
+  queryFn: ({ signal, pageParam }) => apiGet("/lancamentos", signal, { ...filtros, cursor: pageParam }),
+  getNextPageParam: (pagina) => pagina.proximo ?? undefined,
+  ...vivo,
+});

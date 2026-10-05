@@ -15,7 +15,7 @@
 import { test, before, after } from "node:test";
 import assert from "node:assert/strict";
 import { chromium } from "playwright";
-import { PAINEL, exigeArtefatoEmDia, servir } from "./_painel.mjs";
+import { PAINEL, PROTOTIPO, RAIZ, exigeArtefatoEmDia, servir } from "./_painel.mjs";
 
 const PAGES = ["/", "/previsao", "/gastos", "/assinaturas", "/simulador", "/metas", "/patrimonio", "/lancamentos"];
 
@@ -72,9 +72,11 @@ const simulate = (page, withFallback) => page.evaluate((withFallback) => {
 async function measure(width, hash, withFallback, setup, semente = true) {
   const ctx = await browser.newContext({ viewport: { width, height: 900 }, reducedMotion: "reduce" });
   // já escolheu o perfil (Pular): sem isso o modal da 1ª visita cobre o Resumo
-  await servir(ctx, undefined, { perfil: semente ? "padrao" : null });
+  const demo = setup === filtros || setup === textoLongo; // provas de filtros/notas do Ledger demonstrativo
+  await servir(ctx, demo ? RAIZ : undefined, { perfil: semente ? "padrao" : null });
+  if (demo && semente) await ctx.addInitScript(() => localStorage.setItem("pigbank.dashboard.profile.v1", '"padrao"'));
   const page = await ctx.newPage();
-  await page.goto(`${PAINEL}#${hash}`);
+  await page.goto(`${demo ? PROTOTIPO : PAINEL}#${hash}`);
   await page.locator("#page-title").waitFor({ state: "attached" });
   if (setup) await setup(page);
   await page.waitForTimeout(700);
