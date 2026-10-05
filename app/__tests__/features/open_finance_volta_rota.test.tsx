@@ -9,10 +9,11 @@ import { router } from "expo-router";
 import { act, fireEvent, renderRouter, screen, waitFor } from "expo-router/testing-library";
 
 import { definirWidgetAberto, INTERVALO_MS, JANELA_MS } from "@/features/openFinance/volta";
-import { guardarCredenciais } from "@/storage/secure";
+import { iniciarTentativaBancaria } from "@/storage/secure";
+import { SESSAO_OF, guardarSessaoOf as guardarCredenciais } from "./open_finance_volta_apoio";
 
 import { redirectSystemPath } from "../../app/+native-intent";
-import { chamadas, prepararCaso, rotear, S, segurar } from "./auth_apoio";
+import { chamadas, cofre, prepararCaso, rotear, S, segurar } from "./auth_apoio";
 import {
   A,
   appVai,
@@ -73,7 +74,8 @@ describe("open-finance-volta — com sessão, trava desligada", () => {
     expect(screen.getByText("Olá, S")).toBeTruthy();
   });
 
-  it("4 — link sem itemId: texto neutro, nenhum pedido de OF", async () => {
+  it("4 — link sem itemId e sem tentativa: texto neutro, nenhum pedido de OF", async () => {
+    cofre.delete("pb.of.tentativa");
     servidor();
     renderRouter("./app", { initialUrl: "/open-finance-volta" });
     await waitFor(() => expect(screen.getByText("Se você conectou um banco, ele aparece em instantes.")).toBeTruthy());
@@ -170,6 +172,7 @@ describe("open-finance-volta — com sessão, trava desligada", () => {
     await waitFor(() => expect(deOpenFinance()).toHaveLength(1));
 
     await act(async () => {
+      await iniciarTentativaBancaria(1, SESSAO_OF, []);
       router.navigate(`/open-finance-volta?itemId=${B}`);
       await drenar();
     });

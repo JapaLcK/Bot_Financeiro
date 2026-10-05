@@ -1,10 +1,11 @@
+import { guardarCredenciais, iniciarTentativaBancaria, type Credenciais } from "@/storage/secure";
 /** Apoio dos dois arquivos da lógica de `features/openFinance/volta.ts`. */
 import { INTERVALO_MS, JANELA_MS, type Dependencias, type EstadoVolta } from "@/features/openFinance/volta";
 
 import { chamadas, resposta, rotear, type Rota } from "./auth_apoio";
 
 export const ITEM = "c13cb883-item_1";
-const conexao = (state: string, label: string) => ({ provider_item_id: ITEM, institution_name: "Nubank", ui: { state, label, detail: null } });
+const conexao = (state: string, label: string) => ({ id: 1, status: "ACTIVE", status_reason: null, last_sync_at: "2026-10-05T12:00:00Z", reconnected_at: null, provider_item_id: ITEM, institution_name: "Nubank", ui: { state, label, detail: null } });
 /** O item virou conexão e a coleta terminou. */
 export const VIVO = conexao("updated", "Atualizado");
 /** O item virou conexão e a coleta ainda roda (medido no iPhone: ~42 s depois do `onSuccess`). */
@@ -72,3 +73,10 @@ export const falhas: [string, Rota][] = [
   ["503", () => resposta(503, {})],
   ["429", () => resposta(429, { detail: "Muitas tentativas." })],
 ];
+
+export const SESSAO_OF = "sessao-of";
+export const JWT_OF = "eyJhbGciOiJIUzI1NiJ9.eyJqdGkiOiJzZXNzYW8tb2YiLCJuYW1lIjoicyJ9.assinatura";
+export async function guardarSessaoOf(c: Credenciais) {
+  await guardarCredenciais(c.access === "access-s" ? { ...c, access: JWT_OF } : c);
+  if (c.access === "access-s") await iniciarTentativaBancaria(1, SESSAO_OF, []);
+}

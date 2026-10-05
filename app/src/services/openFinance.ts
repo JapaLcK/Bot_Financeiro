@@ -1,7 +1,7 @@
 import Constants, { ExecutionEnvironment } from "expo-constants";
 
 import { chamar, comLimite } from "@/api/client";
-import { conexoesSchema, connectTokenSchema } from "@/api/schemas/openFinance";
+import { conexoesSchema, connectTokenSchema, onboardingBancarioSchema, limiteBancarioSchema, desconectadoSchema } from "@/api/schemas/openFinance";
 
 /**
  * As rotas de Open Finance de `frontend/routes/open_finance.py`. O `uid` vem
@@ -22,22 +22,36 @@ function schemeDoApp(): string | null {
   return typeof scheme === "string" && scheme ? scheme : null;
 }
 
-export function pedirConnectToken(uid: number) {
+export function pedirConnectToken(uid: number, itemId?: string) {
   const scheme = schemeDoApp();
   return chamar(`/open-finance/${uid}/connect-token`, connectTokenSchema, {
     metodo: "POST",
-    corpo: scheme ? { app_scheme: scheme } : {},
+    corpo: { ...(scheme ? { app_scheme: scheme } : {}), ...(itemId ? { item_id: itemId } : {}) },
     sinal: comLimite(),
   });
 }
 
-export const conexoes = (uid: number) =>
-  chamar(`/open-finance/${uid}`, conexoesSchema, { sinal: comLimite() });
+/** Timeout pertence à chamada, não à janela inteira de polling. */
+async function comCancelamento<T>(pai: AbortController | undefined, operacao: (sinal: AbortSignal) => Promise<T>): Promise<T> {
+  const filho = new AbortController();
+  const abortar = () => filho.abort();
+  if (pai?.signal.aborted) filho.abort();
+  pai?.signal.addEventListener("abort", abortar, { once: true });
+  try { return await operacao(comLimite(undefined, filho)); }
+  finally { pai?.signal.removeEventListener("abort", abortar); }
+}
+
+export const conexoes = (uid: number, controlador?: AbortController) =>
+  comCancelamento(controlador, (sinal) => chamar(`/open-finance/${uid}`, conexoesSchema, { sinal }));
 
 /** O servidor só aproveita o `id`, e confere o dono na Pluggy (`clientUserId`). */
-export const registrarItem = (uid: number, itemId: string) =>
-  chamar(`/open-finance/${uid}/pluggy-item`, conexoesSchema, {
+export const registrarItem = (uid: number, itemId: string, controlador?: AbortController) =>
+  comCancelamento(controlador, (sinal) => chamar(`/open-finance/${uid}/pluggy-item`, conexoesSchema, {
     metodo: "POST",
     corpo: { item: { id: itemId } },
-    sinal: comLimite(),
-  });
+    sinal,
+  }));
+
+export const onboardingBancario = () => chamar("/onboarding/open-finance", onboardingBancarioSchema, { sinal: comLimite() });
+export const limiteBancario = (uid: number) => chamar(`/open-finance/${uid}/limite`, limiteBancarioSchema, { sinal: comLimite() });
+export const desconectarBanco = (uid: number, id: number) => chamar(`/open-finance/${uid}/connections/${id}`, desconectadoSchema, { metodo: "DELETE", sinal: comLimite() });

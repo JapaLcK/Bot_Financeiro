@@ -6,7 +6,7 @@
  * do plano (N12 veio do Tester); A1–A13 = linhas da tabela estados × eventos.
  */
 import { conferirVolta, INTERVALO_MS, JANELA_MS } from "@/features/openFinance/volta";
-import { guardarCredenciais } from "@/storage/secure";
+import { guardarSessaoOf as guardarCredenciais } from "./open_finance_volta_apoio";
 
 import { prepararCaso, resposta, rotear, S, segurar } from "./auth_apoio";
 import { ATUALIZANDO, comEstado, dependencias, emSequencia, falhas, gets, ITEM, lista, posts, servidor, VIVO } from "./open_finance_volta_apoio";
@@ -70,7 +70,7 @@ describe("volta do OAuth — item em updating segue consultando", () => {
     servidor({ get: emSequencia(atualizando, () => lista(comEstado(state))) });
     const { d, estados } = dependencias();
     await conferirVolta(ITEM, d);
-    expect(estados).toEqual([conferindo(false), conectado(ATUALIZANDO), conectado(comEstado(state))]);
+    expect(estados).toEqual([conferindo(false), conectado(ATUALIZANDO), { fase: "erro", texto: "Esse banco foi desconectado. Inicie uma nova conexão." }]);
     expect(gets()).toHaveLength(2);
     expect(posts()).toHaveLength(0);
   });

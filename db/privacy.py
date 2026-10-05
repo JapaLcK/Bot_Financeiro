@@ -839,6 +839,7 @@ def reset_user_data(
                     update auth_accounts
                     set onboarding_step = 0,
                         onboarding_completed_at = null,
+                        open_finance_onboarding_completed_at = null,
                         dashboard_profile = null,
                         signup_quiz = null
                     where user_id = %s

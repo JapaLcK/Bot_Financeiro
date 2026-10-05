@@ -323,9 +323,16 @@ def _folga_ms(budget_ms: int | None, t0: float) -> int | None:
 class _ConflitoReconexao(HTTPException):
     """Transporta o diagnóstico para ser gravado após liberar o lock."""
 
-    def __init__(self, detail: str, level: str, event: str, message: str, **context):
+    def __init__(self, detail: str | dict, level: str, event: str, message: str, **context):
         super().__init__(status_code=409, detail=detail)
         self.diagnostico = ((level, event, message), context)
+
+
+def _item_removed_error() -> HTTPException:
+    return HTTPException(status_code=409, detail={
+        "code": "OF_ITEM_REMOVED",
+        "message": "Esse banco foi desconectado. Inicie uma nova conexão.",
+    })
 
 
 def _salva_item_sob_lock(user_id: int, remote: dict, item_id: str,
@@ -370,6 +377,15 @@ def _salva_item_sob_lock(user_id: int, remote: dict, item_id: str,
     with pluggy_item_lock(item_id, budget_ms=budget_ms) as locked:
         if not locked:
             return None, False
+        # Callback atrasado nunca revoga a lápide; releitura dentro do lock
+        # cobre remoção durante GET remoto ou enquanto o callback esperava.
+        if adocao_registro_id is None and "removed" in item_registry_origins(
+                item_id, budget_ms=_folga_ms(budget_ms, t0)):
+            raise _ConflitoReconexao(
+                _item_removed_error().detail, "warning", "of_reconnect_aborted_state_gone",
+                "Callback recusado: banco desconectado antes da gravação",
+                source="open_finance", user_id=user_id, details={"item_id": item_id},
+            )
         # UMA leitura, incondicional, alimentando as DUAS revalidações de estado
         # abaixo (a de dono alheio e a de conexão própria que sumiu). Roda ANTES
         # do cálculo do `resto`: o tempo gasto aqui sai do orçamento da escrita
@@ -390,18 +406,8 @@ def _salva_item_sob_lock(user_id: int, remote: dict, item_id: str,
         #      por TENTATIVA, e é a conta que o `ponytail:` do `except` de
         #      `_grava_reconexao` (`:668`) usa para adiar a política de retry.
         #
-        # Leituras de pool DENTRO do lock, por caminho, MEDIDAS (0,93–1,49 ms
-        # cada; no caminho da rota o `resto` ficou em 9994 de 10000 ms) — fato
-        # medido e útil para a razão 2, não argumento de prazo:
-        #   • adoção: 1 → 2. Ela JÁ pagava uma antes disto — o
-        #     `item_registry_origins` da revalidação da adoção, mais abaixo
-        #     nesta mesma função, que abre `get_conn()`
-        #     (`db/open_finance_state.py`).
-        #   • rota com item NOVO (`tinha_conexao_propria=False`,
-        #     `adocao_registro_id=None` — o primeiro banco conectado, o fluxo
-        #     comum): 0 → 1. É o caminho que não pagava NENHUMA.
-        #   • rota reconectando: 1 → 1; a leitura só saiu de dentro do `if
-        #     tinha_conexao_propria`.
+        # A leitura das conexões e a do registry usam o que SOBROU do
+        # mesmo orçamento; a guarda de remoção acima é exclusiva do callback.
         linhas = get_connections_by_item_id(item_id, budget_ms=_folga_ms(budget_ms, t0))
         # DONO ALHEIO. Revalidação num caminho, 1ª CHECAGEM no outro — e os dois
         # chegam aqui:
@@ -709,21 +715,9 @@ async def _grava_reconexao(
             # no `of_reconnect_lock_retry`. Testado em
             # `test_causa_e_a_da_ultima_tentativa`.
             #
-            # ponytail: o teto é a política de retry sob infra — sob
-            # `TooManyConnections` este POST ainda tenta até 8 conexões num
-            # servidor que acabou de recusar uma. RECONTADO: 2 tentativas × 4
-            # aquisições por tentativa — a DEDICADA do `pluggy_item_lock`
-            # (`psycopg.connect`, `db/open_finance_state.py:701`), o pool da
-            # leitura das revalidações (`get_connections_by_item_id`), o pool da
-            # escrita (`get_conn` do `save_pluggy_open_finance_item`) e a
-            # conexão NOVA do log de diagnóstico (um por tentativa: o
-            # `of_reconnect_lock_retry` da 1ª e o `of_reconnect_lock_timeout`
-            # final). Eram 6 enquanto a leitura vivia dentro do `if
-            # tinha_conexao_propria`; ela é incondicional agora. Pela ADOÇÃO o
-            # teto é 11: +1 por tentativa (`item_registry_origins` sob o lock)
-            # = 10, mais o `unregister_item` do desfazimento no 503. Mudar isso
-            # é decidir não retentar quando `causa` é da família de conexão; o
-            # gancho já existe (é a própria `causa`), a decisão é de outro PR.
+            # ponytail: erro de infra ainda retenta aquisições de conexão e
+            # diagnóstico. Não retentar por família de conexão exige decisão
+            # separada; o gancho já existe na própria `causa`.
             connection, sob_lock = None, False
             # Texto cru com coluna NULL (#541): só `OperationalError` (infra) chega aqui, sem dado de linha.
             causa = f"{type(exc).__name__}: {exc}"
@@ -1934,6 +1928,9 @@ async def open_finance_pluggy_item_route(request: Request, user_id: int, payload
     if not new_item_id:
         raise HTTPException(status_code=400, detail="Item Pluggy sem id.")
 
+    if "removed" in await asyncio.to_thread(item_registry_origins, new_item_id):
+        raise _item_removed_error()
+
     try:
         remote = await asyncio.to_thread(get_pluggy_item, new_item_id)
     except PluggyConfigError as exc:
@@ -2562,7 +2559,7 @@ def delete_pluggy_items_best_effort(user_id: int, item_ids: list[str] | None = N
     return pluggy_item_ids
 
 
-def _disconnect_sob_lock(user_id: int) -> int:
+def _disconnect_sob_lock(user_id: int, connection_id: int | None = None) -> int:
     """Disconnect segurando os locks dos items, na MESMA ordem do reset
     (locks → remoto → local; trade-off da rede dentro do lock documentado em
     db/privacy.reset_user_data — operação rara, disparada pelo usuário).
@@ -2576,16 +2573,44 @@ def _disconnect_sob_lock(user_id: int) -> int:
     """
     from db.open_finance_state import pluggy_items_lock
 
-    with pluggy_items_lock(list_pluggy_item_ids(user_id)) as locked:
+    def target_items(*, for_lock=False):
+        if connection_id is None:
+            return list_pluggy_item_ids(user_id)
+        from db.connection import get_conn
+        from db.open_finance_state import pluggy_items_a_deletar
+        with get_conn() as conn, conn.cursor() as cur:
+            cur.execute(
+                "select provider, provider_item_id, status from open_finance_connections "
+                "where user_id=%s and id=%s", (user_id, connection_id),
+            )
+            rows = cur.fetchall()
+        if not rows:
+            raise HTTPException(status_code=404, detail={
+                "code": "OF_CONNECTION_NOT_FOUND",
+                "message": "Não achamos esse banco nas suas conexões.",
+            })
+        if for_lock:
+            # PAUSED pode ser reconectado após recuperar direito: também
+            # serializar esse item, embora ele não precise de DELETE remoto.
+            return [r["provider_item_id"] for r in rows if r["provider"] == "pluggy"]
+        return pluggy_items_a_deletar(rows)
+
+    items = target_items(for_lock=True)
+    with pluggy_items_lock(items) as locked:
         if not locked:
             raise HTTPException(
                 status_code=503,
                 detail="Não foi possível desconectar agora: uma sincronização "
                        "bancária está em andamento. Tente de novo em alguns segundos.",
             )
-        enumerados = delete_pluggy_items_best_effort(user_id)
+        if connection_id is None:
+            enumerados = delete_pluggy_items_best_effort(user_id)
+        else:
+            # Revalidar posse/id sob os locks, enumerando apenas o alvo.
+            enumerados = delete_pluggy_items_best_effort(user_id, target_items())
         varridos: list[str] = []
-        deleted = disconnect_open_finance_connection(user_id, swept_out=varridos)
+        deleted = disconnect_open_finance_connection(
+            user_id, connection_id, swept_out=varridos)
         # 2º passe (Codex PR #217, 12º — irmão do 11º no reset): item salvo
         # ENTRE a enumeração acima e o delete local ficou órfão na Pluggy
         # ("já possui conexão com este acesso"). `varridos` só existe se o
@@ -2624,6 +2649,16 @@ async def open_finance_disconnect_route(request: Request, user_id: int):
             request=request,
         )
 
+    return {"ok": True, "deleted": deleted}
+
+
+@router.delete("/open-finance/{user_id}/connections/{connection_id}")
+async def open_finance_disconnect_connection_route(request: Request, user_id: int, connection_id: int):
+    shared.authorize_dashboard_access(request, user_id)
+    deleted = await asyncio.to_thread(_disconnect_sob_lock, user_id, connection_id)
+    if deleted:
+        await asyncio.to_thread(record_audit_event, user_id,
+                               AuditEvent.OPEN_FINANCE_DISCONNECTED, request=request)
     return {"ok": True, "deleted": deleted}
 
 

@@ -9,7 +9,7 @@ import { act, fireEvent, renderRouter, screen, waitFor } from "expo-router/testi
 import { AccessibilityInfo } from "react-native";
 
 import { JANELA_MS, INTERVALO_MS } from "@/features/openFinance/volta";
-import { guardarCredenciais } from "@/storage/secure";
+import { guardarSessaoOf as guardarCredenciais } from "./open_finance_volta_apoio";
 
 import { prepararCaso, resposta, S, segurar } from "./auth_apoio";
 import { emSequencia } from "./open_finance_volta_apoio";

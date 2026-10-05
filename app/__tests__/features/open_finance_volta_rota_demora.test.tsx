@@ -7,7 +7,7 @@ import { router } from "expo-router";
 import { act, fireEvent, renderRouter, screen, waitFor } from "expo-router/testing-library";
 
 import { JANELA_MS } from "@/features/openFinance/volta";
-import { guardarCredenciais } from "@/storage/secure";
+import { guardarSessaoOf as guardarCredenciais } from "./open_finance_volta_apoio";
 
 import { prepararCaso, resposta, S } from "./auth_apoio";
 import {

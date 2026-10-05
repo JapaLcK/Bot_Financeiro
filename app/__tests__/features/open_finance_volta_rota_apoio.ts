@@ -8,7 +8,7 @@ import { chamadas, resposta, rotear, type Rota } from "./auth_apoio";
 
 export const A = "item_a";
 export const B = "item_b";
-const conexao = (id: string) => ({ provider_item_id: id, institution_name: "Nubank", ui: { state: "updated", label: "Atualizado", detail: null } });
+const conexao = (id: string) => ({ id: 1, status: "ACTIVE", status_reason: null, last_sync_at: "2026-10-05T12:00:00Z", reconnected_at: null, provider_item_id: id, institution_name: "Nubank", ui: { state: "updated", label: "Atualizado", detail: null } });
 export const lista = (...ids: string[]) => resposta(200, { ok: true, connections: ids.map(conexao) });
 export const atualizando = (id: string) =>
   resposta(200, { ok: true, connections: [{ ...conexao(id), ui: { state: "updating", label: "Atualizando…", detail: null } }] });

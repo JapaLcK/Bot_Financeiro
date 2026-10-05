@@ -1,4 +1,5 @@
-import { widgetAberto } from "@/features/openFinance/volta";
+import { capturarItemBancario } from "@/storage/secure";
+import { itemDoLink, widgetAberto } from "@/features/openFinance/volta";
 
 /**
  * A rota da volta, e só ela. No iOS o expo-router entrega a URL completa:
@@ -20,5 +21,13 @@ const VOLTA = [
  * foco (ver `definirWidgetAberto`); qualquer outro link segue sem mudança.
  */
 export function redirectSystemPath({ path, initial }: { path: string; initial: boolean }): string | null {
+  if (VOLTA.some((r) => r.test(path))) {
+    const encontrados = [...path.matchAll(/[?&]itemId=([^&#]*)/g)];
+    const valor = encontrados.length === 1 ? encontrados[0]?.[1] : undefined;
+    try {
+      const item = itemDoLink(valor ? decodeURIComponent(valor) : undefined);
+      if (item) void capturarItemBancario(item).catch(() => {});
+    } catch { /* Link inválido não impede abrir o app. */ }
+  }
   return !initial && widgetAberto() && VOLTA.some((r) => r.test(path)) ? null : path;
 }

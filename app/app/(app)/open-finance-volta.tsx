@@ -2,6 +2,7 @@ import { router, useLocalSearchParams } from "expo-router";
 import { useEffect, useMemo, useState } from "react";
 import { AccessibilityInfo, View } from "react-native";
 
+import { useForeground } from "@/features/openFinance/useForeground";
 import { useSessao } from "@/features/auth/sessao";
 import { useBloqueio } from "@/features/bloqueio/bloqueio";
 import { conferirVolta, itemDoLink, type EstadoVolta } from "@/features/openFinance/volta";
@@ -58,15 +59,15 @@ function Contador({ ms }: { ms: number }) {
  * estados finais. O gesto de voltar
  * nunca é bloqueado.
  *
- * ponytail: abertura fria com a trava ligada mostra a `TelaDeBloqueio` no lugar
- * da pilha, e depois de liberar o roteador pode não reabrir esta rota (perde o
- * `itemId`); aí só o webhook adota o item. Teto conhecido, fecha com as telas 5–7.
  */
 export default function OpenFinanceVolta() {
   const { expirou } = useSessao();
+  const ativo = useForeground();
   const travado = useBloqueio().estado.fase === "travado";
   // Só o `itemId` do link é lido; `uid`/`user_id` nele são ignorados (o uid vem de `perfil()`).
-  const item = itemDoLink(useLocalSearchParams().itemId);
+  const recebido = useLocalSearchParams().itemId;
+  const item = itemDoLink(recebido);
+  const link = item ?? (recebido === undefined ? undefined : "");
   const [estado, setEstado] = useState<EstadoVolta>({ fase: "esperando-trava" });
   const [rodada, setRodada] = useState(0);
 
@@ -74,10 +75,12 @@ export default function OpenFinanceVolta() {
   // liberar recomeça com janela nova (o GET vem primeiro: não repete POST à toa).
   // `expirou` de fora das dependências, como o Início: muda a cada troca de sessão.
   useEffect(() => {
-    if (travado) return setEstado({ fase: "esperando-trava" });
+    if (travado || !ativo) return setEstado({ fase: "esperando-trava" });
     let cancelado = false;
-    void conferirVolta(item, {
+    const controlador = new AbortController();
+    void conferirVolta(link, {
       agora: Date.now,
+      controlador,
       esperar: (ms) => new Promise((r) => setTimeout(r, ms)),
       cancelado: () => cancelado,
       aoMudar: setEstado,
@@ -85,8 +88,9 @@ export default function OpenFinanceVolta() {
     });
     return () => {
       cancelado = true;
+      controlador.abort();
     };
-  }, [item, travado, rodada]);
+  }, [link, travado, ativo, rodada]);
 
   const atualizando = estado.fase === "conectado" && estado.ui.state === "updating";
   const conferindo = estado.fase === "conferindo";
@@ -104,8 +108,8 @@ export default function OpenFinanceVolta() {
     if (estado.fase === "conectado" && estado.ui.state !== "updating") AccessibilityInfo.announceForAccessibility(estado.ui.label);
   }, [estado]);
 
-  const sair = <Button rotulo="Sair" onPress={() => router.back()} />;
-  const continuar = <Button rotulo="Continuar" variante={estado.fase === "ainda-conferindo" ? "secondary" : "primary"} onPress={() => router.back()} />;
+  const sair = <Button rotulo="Sair" onPress={() => router.replace("/")} />;
+  const continuar = <Button rotulo="Continuar" variante={estado.fase === "ainda-conferindo" ? "secondary" : "primary"} onPress={() => router.replace("/")} />;
 
   return (
     <Screen rolar={false}>
@@ -169,6 +173,14 @@ export default function OpenFinanceVolta() {
               Seu banco foi conectado. Estamos organizando seus dados; eles aparecem sozinhos quando terminar.
             </Texto>
             <Button rotulo="Conferir de novo" variante="secondary" onPress={() => setRodada((n) => n + 1)} />
+            {continuar}
+          </>
+        )}
+
+        {estado.fase === "escolher-conexao" && (
+          <>
+            <Texto tom="inkMuted">Encontramos mais de uma conexão nova. Confira seus bancos para acompanhar a autorização e a sincronização de cada um.</Texto>
+            <Button rotulo="Ver bancos conectados" onPress={() => router.replace("/conexoes")} />
             {continuar}
           </>
         )}

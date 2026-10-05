@@ -253,7 +253,10 @@ def test_estado_proprio_que_sumiu_na_espera_do_lock_continua_409(
         r = _post(client, user_id, item)
 
         assert r.status_code == 409, f"{r.status_code}: {r.text[:200]}"
-        assert "reiniciada ou o banco foi desconectado" in r.json()["detail"], r.text
+        assert r.json()["detail"] == {
+            "code": "OF_ITEM_REMOVED",
+            "message": "Esse banco foi desconectado. Inicie uma nova conexão.",
+        }, r.text
         assert db.get_connections_by_item_id(item) == [], \
             "a conexão que o usuário mandou apagar ressuscitou"
         assert any(e["event"] == "of_reconnect_aborted_state_gone" for e in logs), logs

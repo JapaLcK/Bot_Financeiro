@@ -10,7 +10,7 @@ de ataque do Tester). Atomicidade e a barreira do lock moram no irmão
 `tests/test_of_marca_removido_escrita.py`.
 
 CONTROLES POSITIVOS do grupo (sem eles tudo aqui passaria num código que recusa
-tudo): `test_reconexao_do_mesmo_dono_depois_da_marca_continua_funcionando` aqui,
+tudo): `test_novo_consentimento_do_mesmo_dono_depois_da_marca_continua_funcionando` aqui,
 e `test_of_webhook_adopt_guards.py::test_item_created_continua_adotando_o_dono_legitimo`
 lá — RODAR OS DOIS ARQUIVOS JUNTOS em toda mutação.
 """
@@ -225,17 +225,14 @@ def test_reset_tambem_bloqueia_a_reentrega(user_id, monkeypatch, eventos, webhoo
 
 # ── grupo 3: controles positivos ─────────────────────────────────────────────
 
-def test_reconexao_do_mesmo_dono_depois_da_marca_continua_funcionando(
+def test_novo_consentimento_do_mesmo_dono_depois_da_marca_continua_funcionando(
         user_id, monkeypatch, eventos, webhook_pluggy):
-    """CONTROLE POSITIVO: a marca recusa a REENTREGA, não o usuário. Ele reconecta pelo
-    widget e leva conexão, auditoria e sync — as QUATRO primeiras asserções (POST 200,
-    1 conexão do dono, sync, auditoria), verdes mesmo num código que nunca grava marca.
-    Só a última, a ordem `['pluggy_item','removed','pluggy_item']`, depende da marca por
-    desenho: é a evidência da regra R, a ORDEM que a recuperação por operador (PR-E) usa."""
+    """Um consentimento novo cria item novo; callback do removido fica vetado."""
     promote_to_pro(user_id)
     from core.audit import AuditEvent, list_audit_events
 
     item = "d-reconecta"
+    novo = "d-reconecta-novo"
     _mock_item(monkeypatch, user_id)
     try:
         client = TestClient(dashboard.app)
@@ -246,20 +243,22 @@ def test_reconexao_do_mesmo_dono_depois_da_marca_continua_funcionando(
         webhook_pluggy.clear()
 
         c3 = TestClient(dashboard.app)
-        assert _conecta_pelo_widget(c3, user_id, item).status_code == 200, "a marca travou o dono"
+        assert _conecta_pelo_widget(c3, user_id, item).status_code == 409
+        assert _conecta_pelo_widget(c3, user_id, novo).status_code == 200
 
-        linhas = db.get_connections_by_item_id(item)
+        linhas = db.get_connections_by_item_id(novo)
         assert len(linhas) == 1 and int(linhas[0]["user_id"]) == user_id, linhas
-        assert webhook_pluggy == [item], "reconexão sem sync não traz nada de volta"
-        assert [r["origin"] for r in _registry(item)] == \
-            ["pluggy_item", "removed", "pluggy_item"], _registry(item)
+        assert webhook_pluggy == [novo], "novo consentimento precisa sincronizar"
+        assert [r["origin"] for r in _registry(item)] == ["pluggy_item", "removed"]
+        assert [r["origin"] for r in _registry(novo)] == ["pluggy_item"]
         conectados = [e for e in list_audit_events(user_id, limit=50)
                       if e["event"] == AuditEvent.OPEN_FINANCE_CONNECTED
-                      and (e.get("details") or {}).get("item_id") == item]
+                      and (e.get("details") or {}).get("item_id") in {item, novo}]
         assert len(conectados) == 2, f"a reconexão sumiu de 'Atividade da conta': {conectados}"
     finally:
         db.disconnect_open_finance_connection(user_id)
         _limpa_item(item)
+        _limpa_item(novo)
 
 
 def test_item_removido_por_um_dono_nao_e_adotado_por_outro(

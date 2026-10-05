@@ -6,9 +6,9 @@
  * `open_finance_volta_updating.test.ts`.
  */
 import { conferirVolta, INTERVALO_MS, JANELA_MS, MAX_POSTS, SEM_SENHA } from "@/features/openFinance/volta";
-import { guardarCredenciais } from "@/storage/secure";
+import { guardarSessaoOf as guardarCredenciais } from "./open_finance_volta_apoio";
 
-import { chamadas, fetchFalso, GENERICO, prepararCaso, resposta, rotear, S, segurar } from "./auth_apoio";
+import { chamadas, cofre, fetchFalso, GENERICO, prepararCaso, resposta, rotear, S, segurar } from "./auth_apoio";
 import { caminhos, dependencias, falhas, ITEM, lista, posts, servidor, VIVO } from "./open_finance_volta_apoio";
 
 beforeEach(async () => {
@@ -25,6 +25,7 @@ describe("volta do OAuth — link", () => {
     ["com barra", "a/../b"],
     ["longo demais", "a".repeat(65)],
   ])("4 — itemId %s: sem-item, zero pedidos (nem perfil)", async (_nome, valor) => {
+    cofre.delete("pb.of.tentativa");
     servidor({});
     const { d, estados } = dependencias();
     await conferirVolta(valor, d);
@@ -48,12 +49,12 @@ describe("volta do OAuth — sucesso", () => {
     expect(caminhos()).toEqual(["/auth/me", "/open-finance/1"]);
   });
 
-  it.each(["removed", "item_missing"])("7 — item na lista como %s: faz o POST", async (state) => {
+  it.each(["removed", "item_missing"])("7 — item na lista como %s: não readota item removido", async (state) => {
     servidor({ get: () => lista({ ...VIVO, ui: { ...VIVO.ui, state } }) });
     const { d, ultimo } = dependencias();
     await conferirVolta(ITEM, d);
-    expect(posts()).toHaveLength(1);
-    expect(ultimo()).toEqual({ fase: "conectado", ui: VIVO.ui });
+    expect(posts()).toHaveLength(0);
+    expect(ultimo()).toEqual({ fase: "erro", texto: "Esse banco foi desconectado. Inicie uma nova conexão." });
   });
 
   it("7/8 — sem o item: POST com o id; conectado pela lista da resposta", async () => {

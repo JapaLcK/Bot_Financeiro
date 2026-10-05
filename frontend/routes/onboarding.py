@@ -25,6 +25,7 @@ from db import (
     mark_onboarding_completed,
     set_onboarding_step,
 )
+from db.open_finance_onboarding import get_open_finance_onboarding
 from frontend.routes import shared
 
 router = APIRouter()
@@ -113,3 +114,10 @@ async def update_onboarding_state_route(request: Request, payload: OnboardingSta
     # `stamped`: o cliente dispara a conversão (Pixel/GA4) só com o True, uma
     # vez por conta — revisita e retentativa recebem False.
     return {**state, "total_steps": TOTAL_STEPS, "stamped": stamped}
+
+
+@router.get("/onboarding/open-finance")
+async def open_finance_onboarding_route(request: Request):
+    """Reconcilia prova do servidor; não concede conclusão alegada pelo app."""
+    user_id = shared.resolve_dashboard_user_id(request)
+    return await asyncio.to_thread(get_open_finance_onboarding, user_id)

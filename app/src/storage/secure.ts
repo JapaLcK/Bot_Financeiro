@@ -1,3 +1,4 @@
+import { z } from "zod";
 import * as SecureStore from "expo-secure-store";
 
 /**
@@ -95,7 +96,7 @@ export function guardarCredenciais(c: Credenciais): Promise<void> {
 }
 
 export function limparCredenciais(): Promise<void> {
-  return naFila(() => SecureStore.deleteItemAsync(PAR));
+  return naFila(() => apagarSessaoNoCofre());
 }
 
 /**
@@ -146,7 +147,7 @@ export function limparSe(esperado: string): Promise<boolean> {
   return naFila(async () => {
     const atual = decodifica(await SecureStore.getItemAsync(PAR));
     if (atual?.refresh !== esperado) return false;
-    await SecureStore.deleteItemAsync(PAR);
+    await apagarSessaoNoCofre();
     return true;
   });
 }
@@ -227,7 +228,7 @@ export function limparSessaoDe(access: string, refresh: string): Promise<boolean
       ? jtiDe(atual.access) === alvo
       : atual.refresh === refresh;
     if (!mesma) return false;
-    await SecureStore.deleteItemAsync(PAR);
+    await apagarSessaoNoCofre();
     return true;
   });
 }
@@ -278,11 +279,85 @@ export function guardarCredenciaisSe(
     // traduz `false` em "outra entrada assumiu", que é uma mentira tranquila
     // sobre um aparelho que ficou com a sessão errada guardada.
     try {
-      if (anterior === null) await SecureStore.deleteItemAsync(PAR);
+      if (anterior === null) await apagarSessaoNoCofre();
       else await SecureStore.setItemAsync(PAR, anterior);
     } catch (causa) {
       throw new FalhaNoCofre(causa);
     }
     return false;
+  });
+}
+
+// Marcador de retorno bancário: sem token Pluggy, saldos ou dados bancários.
+const TENTATIVA_OF = "pb.of.tentativa";
+const tentativaSchema = z.object({
+  user_id: z.number().int().positive(), sessao: z.string().min(1), tentativa_id: z.string(),
+  iniciada_em: z.number(), modo: z.enum(["nova", "reconectar"]),
+  item_id: z.string().optional(), visto_no_servidor: z.boolean().optional(), ids_antes: z.array(z.string()),
+  autorizacao_recebida: z.boolean().optional(), reconnected_antes: z.string().nullable().optional(),
+});
+export type TentativaBancaria = z.infer<typeof tentativaSchema>;
+
+async function apagarSessaoNoCofre(): Promise<void> {
+  if (await SecureStore.getItemAsync(TENTATIVA_OF)) await SecureStore.deleteItemAsync(TENTATIVA_OF);
+  await SecureStore.deleteItemAsync(PAR);
+}
+
+async function tentativaNoCofre(): Promise<TentativaBancaria | null> {
+  const bruto = await SecureStore.getItemAsync(TENTATIVA_OF);
+  if (!bruto) return null;
+  try { return tentativaSchema.parse(JSON.parse(bruto)); } catch { return null; }
+}
+
+async function sessaoNoCofre(): Promise<string | null> {
+  const c = decodifica(await SecureStore.getItemAsync(PAR));
+  return c ? jtiDe(c.access) : null;
+}
+
+export function iniciarTentativaBancaria(
+  user_id: number, sessao: string, ids_antes: string[], item_id?: string, reconnected_antes?: string | null,
+): Promise<TentativaBancaria | null> {
+  return naFila(async () => {
+    if (await sessaoNoCofre() !== sessao) return null;
+    const t: TentativaBancaria = { user_id, sessao, ids_antes, item_id, reconnected_antes, modo: item_id ? "reconectar" : "nova",
+      iniciada_em: Date.now(), tentativa_id: `${Date.now()}-${Math.random()}` };
+    await SecureStore.setItemAsync(TENTATIVA_OF, JSON.stringify(t));
+    return t;
+  });
+}
+
+export function lerTentativaBancaria(user_id?: number): Promise<TentativaBancaria | null> {
+  return naFila(async () => {
+    const t = await tentativaNoCofre();
+    if (!t || (user_id !== undefined && t.user_id !== user_id) || await sessaoNoCofre() !== t.sessao) return null;
+    return t;
+  });
+}
+
+/** Captura inclusive no cold start, antes da biometria liberar as rotas. */
+export function capturarItemBancario(item_id: string, tentativa_id?: string): Promise<void> {
+  return naFila(async () => {
+    const t = await tentativaNoCofre();
+    if (!t || (tentativa_id && t.tentativa_id !== tentativa_id) || await sessaoNoCofre() !== t.sessao || (t.modo === "reconectar" && t.item_id !== item_id)) return;
+    if (t.modo === "nova" && t.ids_antes.includes(item_id)) return;
+    // Um callback velho não toma o lugar do item já associado à tentativa.
+    if (t.item_id && t.item_id !== item_id) return;
+    await SecureStore.setItemAsync(TENTATIVA_OF, JSON.stringify({ ...t, item_id, autorizacao_recebida: true }));
+  });
+}
+
+export function concluirTentativaBancaria(tentativa_id: string): Promise<void> {
+  return naFila(async () => {
+    const t = await tentativaNoCofre();
+    if (t?.tentativa_id === tentativa_id && await sessaoNoCofre() === t.sessao) await SecureStore.deleteItemAsync(TENTATIVA_OF);
+  });
+}
+
+export function marcarTentativaBancariaVista(tentativa_id: string): Promise<void> {
+  return naFila(async () => {
+    const t = await tentativaNoCofre();
+    if (t?.tentativa_id === tentativa_id && await sessaoNoCofre() === t.sessao) {
+      await SecureStore.setItemAsync(TENTATIVA_OF, JSON.stringify({ ...t, visto_no_servidor: true }));
+    }
   });
 }
