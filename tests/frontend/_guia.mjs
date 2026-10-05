@@ -31,7 +31,7 @@ function aplicar(g, c) {
 }
 // `dica`: a de Assinaturas "vista" (a da fixture), "nova" (ainda não vista), "sem" (o plano não
 // dá) ou "ausente" (servidor anterior ao #728, sem a chave `dicas`); `dicaLenta`: o POST
-// /guia/dica responde depois de N ms. `s.dicas`: os ids postados.
+// /guia/dica responde depois de N ms ou quando a promise dada resolve. `s.dicas`: os ids postados.
 export async function abrir({ width = 1280, height = 800, guia = "oferecer", perfil = "padrao", plano = "pro", motion = "reduce", post, rota = "/", perfilLento = 0, semDialog = false, antes, dica = "vista", dicaLenta = 0 } = {}) {
   const ctx = await browser.newContext({ viewport: { width, height }, reducedMotion: motion, timezoneId: "America/Sao_Paulo" });
   // A caixa do Piggy pelo left/top gravado, sem o transform: a inclinação e o voo aumentam o
@@ -57,7 +57,7 @@ export async function abrir({ width = 1280, height = 800, guia = "oferecer", per
     s.g.dicas.forEach((d) => { if (d.id === id) d.vista = true; });
     // A resposta é o guia de quando o POST chegou; a lentidão é a da volta.
     const json = structuredClone(s.g);
-    if (dicaLenta) await new Promise((ok) => setTimeout(ok, dicaLenta));
+    if (dicaLenta) await (typeof dicaLenta === "number" ? new Promise((ok) => setTimeout(ok, dicaLenta)) : dicaLenta);
     return r.fulfill({ json });
   });
   await ctx.route("**/api/v2/guia", async (r) => {

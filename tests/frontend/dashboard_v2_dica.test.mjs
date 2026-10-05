@@ -37,8 +37,11 @@ test("1280, dica nova: o card entra entre o título da página e os blocos, sem 
 
 // A resposta lenta do POST da dica é o guia de quando ele chegou ao servidor: ela não pode
 // desfazer no cache o que o guia gravou depois (reabrir e o último passo feito).
-test("POST da dica lento: a resposta não volta o guia ao estado de antes (o \"Fechou!\" fica)", async () => {
-  const { ctx, page, s, erros } = await abrir({ guia: "em_andamento", dica: "nova", dicaLenta: 6000, rota: "/assinaturas",
+test("POST da dica lento: a resposta não volta o guia ao estado de antes (o \"Fechou!\" fica)", async (t) => {
+  let soltar;
+  const portao = new Promise((ok) => { soltar = ok; });
+  t.after(() => soltar());
+  const { ctx, page, s, erros } = await abrir({ guia: "em_andamento", dica: "nova", dicaLenta: portao, rota: "/assinaturas",
     antes: (_, s) => { Object.assign(s.g.passos[0], { disponivel: true, motivo: null }); } }); // só o 1º passo falta
   await page.locator(CARD).waitFor();
   const volta = page.waitForResponse("**/api/v2/guia/dica", { timeout: 15000 });
@@ -50,6 +53,7 @@ test("POST da dica lento: a resposta não volta o guia ao estado de antes (o \"F
   await FAZER["mes.trocado"](page);
   await page.locator("#guia-titulo", { hasText: "Fechou!" }).waitFor({ timeout: 5000 });
   const antesDaVolta = !voltou;
+  soltar();
   await volta;
   await page.waitForTimeout(300);
   const titulo = await page.locator("#guia-titulo").textContent();
