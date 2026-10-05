@@ -41,6 +41,29 @@
 @media (hover: hover) and (pointer: fine) {
   .rail-list a:hover, .rail-list button:hover { color: var(--ink); background: var(--plane-1); }
 }
+/* A Ajuda que vira menu (parts/Ajuda.tsx, nas telas com dica). O botão ocupa a célula inteira
+   (a folga da barra de baixo é medida nele). O trilho sobe acima do conteúdo da página, que
+   tem `position: relative` com z-index: senão o menu, que abre para a direita, fica embaixo. */
+.rail { z-index: 21; }
+.ajuda { position: relative; display: grid; }
+.ajuda-menu {
+  position: absolute; z-index: 1;
+  display: grid; gap: 2px;
+  width: max-content; padding: 6px;
+  border-radius: var(--r-ctrl);
+  background: var(--plane-2);
+  box-shadow: 0 12px 32px rgba(0, 0, 0, 0.5), inset 0 0 0 1px var(--rule);
+}
+.rail .ajuda-menu { left: calc(100% + 8px); bottom: 0; }
+.rail-list .ajuda-menu button, .tabbar .ajuda-menu button {
+  display: flex; justify-content: flex-start; align-items: center;
+  width: 100%; height: 40px; padding: 0 12px;
+  border-radius: 8px;
+  font-size: 14px; font-weight: 500; color: var(--ink);
+}
+@media (hover: hover) and (pointer: fine) {
+  .rail-list .ajuda-menu button:hover, .tabbar .ajuda-menu button:hover { background: var(--plane-3); }
+}
 
 .rail-foot { margin-top: auto; padding: 0 12px; display: grid; gap: 4px; font-size: 12px; }
 .rail-sync { display: flex; align-items: center; gap: 8px; color: var(--ink-2); }
@@ -162,6 +185,7 @@
   .tabbar img { margin-top: -3px; filter: grayscale(1) brightness(1.35); opacity: 0.7; }
   .tabbar a[aria-current="page"] img { filter: none; opacity: 1; }
   .tabbar.tabbar-ajuda { grid-template-columns: repeat(6, 1fr); } /* /painel: + Ajuda; o protótipo não tem guia */
+  .tabbar .ajuda-menu { bottom: calc(100% + 8px); right: 0; }
 }
 @media (max-width: 400px) { .topbar .btn-primary i { display: none; } }
 /* Seis abas não deixam folga abaixo de 360px (o CI no Linux mede o texto mais largo que o
@@ -170,7 +194,7 @@
    tests/frontend/dashboard_v2_guia_tela.test.mjs. */
 @media (max-width: 359.98px) {
   .tabbar.tabbar-ajuda { grid-template-columns: repeat(5, 1fr); }
-  .tabbar button { display: none; }
+  .tabbar .ajuda { display: none; }
 }
 /* Mês, busca e Ferramentas lado a lado não deixam folga: o CI no Linux mede o texto mais
    largo que o macOS e estourava em 320 e em 361px. Até 420px o ano sai do título; até

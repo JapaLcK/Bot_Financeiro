@@ -119,6 +119,7 @@ TABELA = {
     ("POST", "/api/v2/lancamentos/editar"): (B, "usuario_atual"),
     ("POST", "/api/v2/lancamentos/apagar"): (B, "usuario_atual"),
     ("GET", "/api/v2/guia"): (B, "usuario_atual"), ("POST", "/api/v2/guia"): (B, "usuario_atual"),
+    ("POST", "/api/v2/guia/dica"): (B, "usuario_atual"),
     ("WS", "/ws/{user_id}"): (B, "close 4403"),
     # ── HTML autenticado ──
     ("GET", "/app"): (L, "casca; o overlay sobe"), ("GET", "/home"): (L, "casca; o overlay sobe"),

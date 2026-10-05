@@ -6,7 +6,8 @@ import type { DashState } from "./lib/types";
 import { useDash } from "./useDash";
 import { AskBar } from "./parts/AskBar";
 import { Command } from "./parts/Command";
-import { Guia, abrirGuia, navGuia } from "./parts/Guia";
+import { Ajuda } from "./parts/Ajuda";
+import { Guia, navGuia } from "./parts/Guia";
 import { Tip } from "./parts/Tip";
 import { PAGES } from "./pages";
 import { NO_MONTH, RAIL, TABBAR, href, route, useRoute, type Path } from "./router";
@@ -88,7 +89,7 @@ export function App() {
                 </a>
               </li>
             ))}
-            {!DEMO && <li><button type="button" aria-label="Ajuda" title="Ajuda" onClick={abrirGuia}><i className="ph ph-question" aria-hidden="true" /><span className="rail-label">Ajuda</span></button></li>}
+            {!DEMO && <li className="ajuda"><Ajuda path={path} title="Ajuda"><i className="ph ph-question" aria-hidden="true" /><span className="rail-label">Ajuda</span></Ajuda></li>}
           </ul>
           <div className="rail-foot">
             <RailSync />
@@ -114,7 +115,7 @@ export function App() {
             </a>
           );
         })}
-        {!DEMO && <button type="button" aria-label="Ajuda" onClick={abrirGuia}><i className="ph ph-question" aria-hidden="true" /><span>Ajuda</span></button>}
+        {!DEMO && <div className="ajuda"><Ajuda path={path}><i className="ph ph-question" aria-hidden="true" /><span>Ajuda</span></Ajuda></div>}
       </nav>
       <AskBar path={path} />
       <Tip />
