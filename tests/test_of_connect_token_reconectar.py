@@ -10,12 +10,15 @@ CONTROLES (CLAUDE.md §3):
   • tirar o `payload["itemId"]` do serviço (ou pô-lo dentro de `options`) →
     `test_item_proprio_vai_no_nivel_de_cima` vermelho (é também o controle positivo);
   • tirar a comparação do `clientUserId` → caso `client_user_id_diferente` vermelho;
-  • corpos diferentes entre alheio e inexistente → `test_item_de_outro_usuario_...` vermelho.
+  • corpos diferentes entre alheio e inexistente → `test_item_de_outro_usuario_...` vermelho;
+  • tirar o 404 do `/connect_token` → `test_item_some_antes_do_connect_token[True-404-404]` vermelho.
 """
 from __future__ import annotations
 
 import json
+from types import SimpleNamespace
 
+import httpx
 import pytest
 from fastapi.testclient import TestClient
 
@@ -23,7 +26,7 @@ import db
 import frontend.finance_bot_websocket_custom as dashboard
 import frontend.routes.open_finance as of_routes
 from conftest import _cleanup_user, promote_to_pro
-from core.services import plan_service
+from core.services import plan_service, pluggy
 from core.services.pluggy import PluggyApiError
 from db.connection import get_conn
 from test_of_connect_token_volta_app import _options_de_hoje, _post, pluggy_dublada  # noqa: F401
@@ -127,6 +130,24 @@ def test_demais_casos_dao_o_mesmo_404(user_id, pluggy_dublada, remoto, eventos, 
     assert conflitos == ([{"item_id": item, "origin": "connect_token"}]
                          if caso == "client_user_id_diferente" else [])
     _nada_foi_a_pluggy(pluggy_dublada)
+
+
+@pytest.mark.parametrize("com_item,status,esperado", [(True, 404, 404), (True, 500, 502), (False, 404, 502)])
+def test_item_some_antes_do_connect_token(user_id, pluggy_dublada, remoto, monkeypatch,
+                                          com_item, status, esperado):
+    """Passa no GET e some antes do POST `/connect_token`: o mesmo 404. Sem `item_id`, ou 5xx, segue 502."""
+    promote_to_pro(user_id)
+    item = _semeia(user_id, f"rc-{user_id}")
+    remoto["dono"] = user_id
+    client = TestClient(dashboard.app)
+    headers = _auth(client, user_id)
+    nada = _post(client, user_id, headers, _corpo("rc-nao-existe")).content
+    monkeypatch.setattr(pluggy, "httpx", SimpleNamespace(Response=httpx.Response, Client=lambda *a, **kw: httpx.Client(
+        transport=httpx.MockTransport(lambda req: httpx.Response(status, json={})), **kw)))
+    r = _post(client, user_id, headers, _corpo(item) if com_item else b"{}")
+    assert r.status_code == esperado, r.text
+    assert (r.content == nada) is (esperado == 404)
+    assert pluggy_dublada.registros == []
 
 
 @pytest.mark.parametrize("valor", [123, [], {}, ""])

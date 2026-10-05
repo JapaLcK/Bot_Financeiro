@@ -1801,9 +1801,9 @@ async def open_finance_connect_token_route(request: Request, user_id: int):
     item_id = corpo.get("item_id") if isinstance(corpo, dict) else None
     if item_id is not None and (not isinstance(item_id, str) or not item_id):
         raise HTTPException(status_code=400, detail="item_id inválido.")
+    nao_achou = HTTPException(status_code=404, detail={
+        "code": "OF_ITEM_NAO_ENCONTRADO", "message": "Não achamos esse banco nas suas conexões."})
     if item_id:
-        nao_achou = HTTPException(status_code=404, detail={
-            "code": "OF_ITEM_NAO_ENCONTRADO", "message": "Não achamos esse banco nas suas conexões."})
         if item_id not in await asyncio.to_thread(list_pluggy_item_ids, user_id):
             raise nao_achou
         try:
@@ -1847,6 +1847,9 @@ async def open_finance_connect_token_route(request: Request, user_id: int):
     except PluggyConfigError as exc:
         raise HTTPException(status_code=503, detail=str(exc)) from exc
     except PluggyApiError as exc:
+        # Item que sumiu entre o GET acima e o POST: o mesmo 404 dos demais "não é seu / não existe".
+        if item_id and getattr(exc, "status_code", None) == 404:
+            raise nao_achou from exc
         raise HTTPException(status_code=502, detail=str(exc)) from exc
 
     # Registra que ESTE usuário pediu um token. O `GET /items` da Pluggy devolve
