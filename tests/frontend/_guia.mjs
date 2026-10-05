@@ -54,9 +54,11 @@ export async function abrir({ width = 1280, height = 800, guia = "oferecer", per
   await ctx.route("**/api/v2/guia/dica", async (r) => {
     const { dica: id } = r.request().postDataJSON();
     s.dicas.push(id);
-    if (dicaLenta) await new Promise((ok) => setTimeout(ok, dicaLenta));
     s.g.dicas.forEach((d) => { if (d.id === id) d.vista = true; });
-    return r.fulfill({ json: s.g });
+    // A resposta é o guia de quando o POST chegou; a lentidão é a da volta.
+    const json = structuredClone(s.g);
+    if (dicaLenta) await new Promise((ok) => setTimeout(ok, dicaLenta));
+    return r.fulfill({ json });
   });
   await ctx.route("**/api/v2/guia", async (r) => {
     if (r.request().method() === "GET") return r.fulfill({ json: s.g });

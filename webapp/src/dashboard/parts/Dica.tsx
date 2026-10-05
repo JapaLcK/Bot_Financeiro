@@ -38,7 +38,8 @@ export function DicaDaTela({ path }: { path: Path }) {
     if (!d || d.vista || aberto || MARCADAS.has(d.id)) return;
     MARCADAS.add(d.id);
     setMostrar(true);
-    apiPost("/guia/dica", { dica: d.id }).then((g) => qc.setQueryData(guiaQuery.queryKey, g)).catch(() => {});
+    // Só as dicas: o resto do guia pode ter mudado enquanto o POST ia (reabrir, passo feito).
+    apiPost("/guia/dica", { dica: d.id }).then((g) => qc.setQueryData(guiaQuery.queryKey, (old) => (old ? { ...old, dicas: g.dicas } : g))).catch(() => {});
   }, [d?.id, d?.vista, aberto]);
 
   // Pela Ajuda ou pelo Cmd-K: a pessoa pediu, o foco vai para o título.

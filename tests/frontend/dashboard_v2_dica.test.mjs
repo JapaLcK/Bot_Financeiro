@@ -3,7 +3,7 @@
 // _guia.mjs; o carimbo e o portão de plano de verdade, em tests/test_api_v2_guia_dica.py.
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { abrir, acoes, naRota, navegador } from "./_guia.mjs";
+import { FAZER, PASSOS, abrir, acoes, esperaTitulo, naRota, navegador } from "./_guia.mjs";
 
 navegador();
 
@@ -31,6 +31,32 @@ test("1280, dica nova: o card entra entre o título da página e os blocos, sem 
   await page.waitForTimeout(800);
   await ctx.close();
   assert.deepEqual(r, { antes: true, img: true, entre: true, foco: true, titulo: TITULO });
+  assert.deepEqual(s.dicas, ["assinaturas.marcas"]);
+  assert.deepEqual(erros, []);
+});
+
+// A resposta lenta do POST da dica é o guia de quando ele chegou ao servidor: ela não pode
+// desfazer no cache o que o guia gravou depois (reabrir e o último passo feito).
+test("POST da dica lento: a resposta não volta o guia ao estado de antes (o \"Fechou!\" fica)", async () => {
+  const { ctx, page, s, erros } = await abrir({ guia: "em_andamento", dica: "nova", dicaLenta: 6000, rota: "/assinaturas",
+    antes: (_, s) => { Object.assign(s.g.passos[0], { disponivel: true, motivo: null }); } }); // só o 1º passo falta
+  await page.locator(CARD).waitFor();
+  const volta = page.waitForResponse("**/api/v2/guia/dica", { timeout: 15000 });
+  let voltou = false;
+  volta.then(() => { voltou = true; });
+  await menu(page, ".rail").click();
+  await page.getByRole("button", { name: "Guia do painel" }).click();
+  await esperaTitulo(page, PASSOS[0].fala.titulo);
+  await FAZER["mes.trocado"](page);
+  await page.locator("#guia-titulo", { hasText: "Fechou!" }).waitFor({ timeout: 5000 });
+  const antesDaVolta = !voltou;
+  await volta;
+  await page.waitForTimeout(300);
+  const titulo = await page.locator("#guia-titulo").textContent();
+  await ctx.close();
+  assert.ok(antesDaVolta, "o guia terminou depois da resposta da dica: o teste não mede a corrida");
+  assert.equal(titulo, "Fechou! O painel é seu.");
+  assert.deepEqual(acoes(s), ["reabrir", `feito:${PASSOS[0].id}`]);
   assert.deepEqual(s.dicas, ["assinaturas.marcas"]);
   assert.deepEqual(erros, []);
 });
