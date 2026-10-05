@@ -53,8 +53,18 @@ def _money(value):
 
 
 def _lock_user(cur, user_id):
-    # Os writers já travam esta linha. Sync/conferência usam a mesma ordem,
-    # antes de conta OF/transação/vínculo; não travam nem reescrevem lotes.
+    """Mutex por usuário: a linha de `accounts` (sem FK entrante, só serve de trava).
+
+    ORDEM DE LOCK — fonte única. O que protege é ESTE mutex, tomado PRIMEIRO por
+    transação que trava mais de uma família entre launches, pockets, investments e
+    lotes; os DOIS lados de um par precisam dele. A ordem interna só vale contra quem
+    NÃO o toma: `accrue_all_*` (de propósito: o mutex serializaria a leitura do
+    dashboard) vai pai → filho, e o reset, que segura accounts, apaga pai antes de
+    filho (`_RESET_TABLES`). Seguir "launches → pai → lotes" SEM o mutex reabre o ciclo
+    com o reset, que apaga launches por último. Fora: cartão (fatura → conta).
+    Sync/conferência OF usam a mesma ordem, antes de conta OF/transação/vínculo.
+    Exceções conhecidas que o mutex não cobre: undo de lançamento comum, import em
+    lote de OFX, delete_user_data, merge_users; acompanhamento em issue separada."""
     cur.execute("select user_id from accounts where user_id=%s for update", (user_id,))
 
 

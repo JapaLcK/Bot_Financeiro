@@ -69,7 +69,7 @@ A janela que SOBRA entre a reconsulta e o `delete from users` é medida por T20,
 o mecanismo tem DUAS metades (o comentário de `db/privacy.py`, imediatamente antes
 da reconsulta, traz a versão longa): o laço de `user_owned_tables` já apagou a
 linha de `accounts`, então o `_lock_user` do escritor (`select ... from accounts
-... for update`, `db/bank_movements.py:58`) BLOQUEIA no lock da tupla apagada até
+... for update`, `_lock_user` em `db/bank_movements.py`) BLOQUEIA no lock da tupla apagada até
 o commit — ele não levanta nada, e depois do commit só devolve zero linhas — e
 quem MATA a escrita é o INSERT da conexão, na FK `open_finance_connections.user_id
 references users(id)` (`db/schema.py:414`). Segura `accounts`, mata `users`.
