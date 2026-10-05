@@ -112,7 +112,7 @@ def test_pluggy_webhook_numero_nao_finito_da_400(token):
     que não é JSON" —, que é exatamente o que `NaN`/`Infinity` são pela RFC.
     """
     r = _pluggy_post_texto(
-        '{"event":"item/error","itemId":"item-310-nf","extra":%s}' % token
+        '{"event":"item/deleted","itemId":"item-310-nf","extra":%s}' % token
     )
     assert r.status_code == 400, r.text
 
@@ -134,14 +134,14 @@ def test_controle_positivo_pluggy_float_normal_chega_intacto(monkeypatch):
         open_finance_routes, "get_connections_by_item_id", lambda item_id: [],
     )
     r = _pluggy_post_texto(
-        '{"event":"item/error","itemId":"item-310-ok",'
+        '{"event":"item/deleted","itemId":"item-310-ok",'
         '"valor":123.45,"negativo":-0.5,"zero":0.0,"underflow":1e-400,"inteiro":7}'
     )
     assert r.status_code == 200, r.text
     assert r.json() == {"received": True}
     assert len(vistos) == 1, vistos
     item_id, status, raw = vistos[0]
-    assert (item_id, status) == ("item-310-ok", "ERROR")
+    assert (item_id, status) == ("item-310-ok", "DELETED")
     assert raw["valor"] == 123.45 and isinstance(raw["valor"], float)
     assert raw["negativo"] == -0.5
     assert raw["zero"] == 0.0

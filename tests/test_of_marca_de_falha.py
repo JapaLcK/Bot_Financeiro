@@ -585,14 +585,21 @@ def test_c12_c17_falha_de_leitura_anterior_vira_read_failed(user_id, monkeypatch
 
 
 @pytest.mark.parametrize("onde, status", [("G", "ERROR"), ("L", "ACTIVE")], ids=["c13_G", "c13b_L"])
-def test_c13_webhook_item_error_no_meio(user_id, monkeypatch, eventos, onde, status):
+def test_c13_pista_de_erro_no_meio_da_falha(user_id, monkeypatch, eventos, onde, status):
     """c13b (registrado em `decisoes.md`): em L a foto, mais velha que a pista do
-    webhook, troca `ERROR` por `ACTIVE`. A tela é a mesma."""
+    webhook, troca `ERROR` por `ACTIVE`. A tela é a mesma.
+
+    PR-C2: o webhook deixou de gravar `ERROR` pelo `update_pluggy_open_finance_item_status`
+    (que apagava o motivo). O que ele grava agora, quando a releitura não confirma, é
+    a PISTA (`mark_sync_result(ERROR, status_reason=None)`): é ela que cai no meio.
+    Prova a MECÂNICA da pista no meio da falha, chamando-a direto; o caminho
+    `item/error` pela rota real até a pista está em `test_of_webhook_observacao.py`."""
     _conecta(user_id, "UPDATED")
     _mock_pluggy(monkeypatch, item=ITEM_SAUDAVEL)
 
     _run_que_falha(monkeypatch, user_id, onde,
-                   lambda: db.update_pluggy_open_finance_item_status(ITEM, "ERROR"))
+                   lambda: db.mark_sync_result(_linha()["id"], ok=None, status="ERROR",
+                                               status_reason=None))
 
     assert (_linha()["status"], _linha()["status_reason"]) == (status, "read_failed")
     assert _tela(user_id) == ERRO
@@ -600,11 +607,27 @@ def test_c13_webhook_item_error_no_meio(user_id, monkeypatch, eventos, onde, sta
 
 @pytest.mark.parametrize("onde", ["G", "L"])
 def test_c16_webhook_item_created_no_meio(user_id, monkeypatch, eventos, onde):
+    """PR-C2: `item/created` não grava nada na linha, então o webhook REAL no meio da
+    falha deixa o par como a falha o pôs (antes gravava `UPDATING`/motivo apagado)."""
+    import json
+
+    from fastapi.testclient import TestClient
+
+    import frontend.finance_bot_websocket_custom as dashboard
+
     _conecta(user_id, "UPDATED")
     _mock_pluggy(monkeypatch, item=ITEM_SAUDAVEL)
+    monkeypatch.setenv("PLUGGY_WEBHOOK_SECRET", "test-webhook-secret")
+    monkeypatch.setattr(of_routes, "_schedule_pluggy_sync", lambda *a, **k: None)
 
-    _run_que_falha(monkeypatch, user_id, onde,
-                   lambda: db.update_pluggy_open_finance_item_status(ITEM, "UPDATING"))
+    def _webhook_created():
+        r = TestClient(dashboard.app).post(
+            "/open-finance/pluggy/webhook?token=test-webhook-secret",
+            content=json.dumps({"event": "item/created", "itemId": ITEM}).encode(),
+            headers={"Content-Type": "application/json"})
+        assert r.status_code == 200, r.text
+
+    _run_que_falha(monkeypatch, user_id, onde, _webhook_created)
 
     assert _linha()["status_reason"] == "read_failed"
     assert _tela(user_id) == ERRO

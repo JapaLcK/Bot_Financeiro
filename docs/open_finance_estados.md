@@ -18,8 +18,14 @@ Código de referência:
   observação do job de saúde (item vivo e lote de 404) e do 404 do sync: decide com
   `resolve_connection_state` e grava por `mark_sync_result` com o CAS pela versão da
   linha (`updated_at`, §1 item 6).
+- O webhook da Pluggy também é gatilho de observação (PR-C2,
+  `frontend/routes/of_observacao.py`): `item/error` com uma conexão relê o item e
+  entrega a `observar_item`. Só a pista `ERROR` (releitura que não confirma) e o
+  `item/deleted` gravam sem passar pelo resolvedor.
 - Também GRAVAM `status` e/ou `status_reason` sem passar pelo resolvedor: o
-  webhook (`update_pluggy_open_finance_item_status`), a reconexão
+  webhook, só em `item/deleted` (`update_pluggy_open_finance_item_status`; PR-C2),
+  a pista de erro da observação (`mark_sync_result`, `ERROR` sem apagar o motivo e
+  sem tocar `health` nem `raw`), a reconexão
   (`save_pluggy_open_finance_item`, linha G), `marcar_leitura_falhou`
   (só `read_failed`, com `status` intocado, e só sobre motivo substituível,
   `MOTIVOS_QUE_A_FALHA_SUBSTITUI`; chamada pelo lote, `_sync_item_contido`, e
@@ -52,10 +58,17 @@ comando; não copie o resultado para cá (`CLAUDE.md` §2).
    detalhe (device/QR, `PARTIAL_SUCCESS`). *Vigente.* A observação vale até a
    próxima. *Proposto (D5, PR-D):* a instrução de device/QR ganha prazo também
    quando há `health`.
-5. **Status vindo do webhook** é pista, não observação. *Proposto (PR-C):*
-   continua gravando `ERROR` na hora e dispara uma observação imediata
-   (`GET /items` e `resolve_connection_state`), que decide o par. `item/created`
-   sobre conexão existente deixa de reescrever `status` e `status_reason`.
+5. **Status vindo do webhook** é pista, não observação. *Vigente desde o PR-C2:*
+   `item/error` com uma conexão NÃO grava veredito: agenda uma observação
+   (`GET /items` e `observar_item`), que decide o par. Só se a releitura não
+   confirma (429, 5xx, timeout, 404, ou duas derrotas de versão) grava a pista
+   `ERROR`, sem apagar `status_reason`, sem tocar `raw` e sem tocar `health`; o 404
+   NÃO grava `item_missing` pelo webhook (quem o decide é o job de saúde). Quando o
+   webhook diz erro e a releitura devolve item vivo (fora da regra de erro do resolvedor: `ERROR` ou `_NEEDS_USER`), a observação vence e o evento
+   `of_observacao_diverge` (item_id e os dois status em `details`; o dono vai na coluna `user_id`, como manda o padrão do #541) registra a
+   divergência. `item/created` sobre conexão já conhecida não grava nada (nem
+   `UPDATING`, nem motivo, nem `raw`) e segue agendando o sync; item desconhecido
+   segue a adoção; com 2+ donos, só o log de recusa.
 6. **Nossa leitura** (`last_attempt_at`, `last_sync_at` e os motivos de falha de
    leitura). **Vigente desde o PR-A:**
    - contas lidas e `/investments` falhando (429, paginação incoerente, falha ao
@@ -72,18 +85,19 @@ comando; não copie o resultado para cá (`CLAUDE.md` §2).
      qualquer escritor mexeu nela no meio (sync, reconexão, webhook, 404), nada é
      gravado naquela linha e o próximo tique reavalia. Toda escrita de estado bumpa
      `updated_at` (guarda estrutural em `tests/test_of_versao_da_linha.py`). A
-     versão substitui o CAS por valor do motivo (`status_reason_visto`, PR-A), que
-     não via quem mudava a linha mantendo o motivo. *Vigente desde o PR-C1.*
+     versão substitui o CAS por valor do motivo do PR-A, que não via quem mudava a
+     linha mantendo o motivo. *Vigente desde o PR-C1.*
    - Leitura parcial de um sync cujo carimbo a reconexão recusou
      (`last_sync_at` anterior ao `reconnected_at`) não vale: a tela diz
      "Atualizando… · Ainda não sincronizou", como no item 3.
    - Também limpam, como antes: reconexão pelo widget (autorização nova), item
      observado doente (`ERROR`/`_NEEDS_USER`, quando o `health` conta a história)
-     e o webhook nos três eventos que gravam status — `item/created`, `item/error`
-     e `item/deleted` (`update_pluggy_open_finance_item_status` zera o motivo, menos
-     `item_missing`). `item/updated` e `transactions/*` não gravam status nem
-     motivo: só agendam sync. `item/created` e `item/error` sobre falha de leitura
-     são buracos do contrato, corrigidos no PR-C (R8 e observação imediata).
+     e o webhook `item/deleted` (`update_pluggy_open_finance_item_status` zera o
+     motivo, menos `item_missing`). `item/created`, `item/updated` e
+     `transactions/*` não gravam status nem motivo: só agendam sync; `item/error`
+     agenda a observação (item 5). Os buracos de `item/created` e `item/error`
+     sobre falha de leitura (R8 e a observação imediata) fecharam no PR-C2: o
+     envelope do webhook também deixou de sobrescrever o `raw`.
 7. **Idade do dado**: o usuário vê o dado do banco, cuja data é a maior entre
    `products[*].last_updated_at` e o `last_updated_at` do ITEM (`data_da_pluggy`,
    `core/services/pluggy_health.py`; só data legível e com fuso). O item entra
@@ -248,8 +262,8 @@ verificação externa pendente.
 | Atualizado | E2 com sync ok | Atualizado | não | ✓ |
 | Atualizado com a Pluggy à frente (D2) | E6 com sync ok | Atualizado (o `last_sync_at` novo passa a data da Pluggy) | não | ✓ **PR-B3** |
 | Atualizado com a Pluggy à frente (D2) | E6 com `sync_in_progress` (lock ocupado: nada carimbou) | Parcial; toast "Atualizei o que deu no X: o banco já tem dados de dd/mm — atualize para trazer." | não | ✓ **PR-B3** |
-| Atualizado | E3 transitório (item ok na Pluggy) | "Erro temporário · Tentaremos de novo automaticamente" até o próximo E8 | "reconecte" | ✗ R2, R3 (PR-C, PR-D) |
-| Atualizado | E3 com item em `LOGIN_ERROR` | "Erro temporário" (deveria ser "Ação necessária · Reautorize o banco") até o E8 | avisa | ✗ (PR-C) |
+| Atualizado | E3 transitório (item ok na Pluggy) | segue Atualizado: a releitura do webhook confirma o item vivo (antes: "Erro temporário · Tentaremos de novo automaticamente" até o próximo E8) | "reconecte" | ✓ **PR-C2** (R3: a observação relê o item; o `item/error` não grava mais veredito); ✗ R2 (PR-D) |
+| Atualizado | E3 com item em `LOGIN_ERROR` | **Ação necessária · Reautorize o banco**, na hora (a releitura do webhook; antes: "Erro temporário" até o E8) | avisa | ✓ **PR-C2** |
 | Atualizado | E4 | Removido (sem detalhe) | não | ? C7 (fora da Onda 5 salvo pedido) |
 | Atualizado | E6 com `/investments` 429 e contas lidas | **Parcial · Investimentos não vieram nesta atualização**; toast "Atualizei o que deu no {banco}: investimentos não vieram nesta atualização." | não | ✓ **corrigido no PR-A (R4)** |
 | Atualizado | E6 com `/accounts` 429 | Erro temporário (`read_failed`) | não | ✓ |
@@ -269,8 +283,8 @@ verificação externa pendente.
 | Erro temporário (`read_failed`) depois de reconectar | um sync VELHO (de antes da reconexão) falhando depois dela | a falha velha não grava (`geracao_vista`): a tela é a da autorização nova | não | ✓ **PR-B1** (`tests/test_of_marca_de_falha.py::test_c2_c3_lote_com_linha_velha_nao_desfaz_o_que_veio_depois[reconexao]`) |
 | Parcial (`investments_read_failed`) | E8 | mantém Parcial | não | ✓ **PR-A (R5)** |
 | Parcial (`investments_read_failed`) | E2 ou E6 com leitura completa | Atualizado | não | ✓ **PR-A** |
-| Parcial (`investments_read_failed`) | E3 | "Erro temporário" com o motivo apagado; o E8 seguinte, com o item vivo, pinta Atualizado sem os investimentos terem sido lidos | avisa (classifica por `status`) | ✗ (PR-C) |
-| Parcial (`investments_read_failed`) | E1 atrasado | motivo apagado: Atualizando… (sem health) ou Atualizado | não | ✗ família R8 (PR-C) |
+| Parcial (`investments_read_failed`) | E3 | mantém Parcial quando a releitura confirma o item (preserva o motivo); com o GET falhando vale a pista do §4 (`ERROR` mantém o motivo, mas a tela vira "Erro temporário") (antes: motivo apagado e o E8 seguinte pintava Atualizado sem os investimentos terem sido lidos) | não | ✓ **PR-C2** |
+| Parcial (`investments_read_failed`) | E1 atrasado | nada gravado: par e `raw` intocados (antes: motivo apagado, verde falso COM `health`) | não | ✓ **PR-C2** |
 | qualquer, com o motivo MUDANDO no meio | E8 com um sync terminando durante o `GET /items` do job | o que o sync gravou: o job não grava nada, porque o CAS compara a versão da linha | não | ✓ **PR-A** (por valor do motivo), generalizado no **PR-C1** (por versão) |
 | qualquer | E8 com um sync ok terminando no meio e o motivo IGUAL antes e depois | o job não grava: o sync bumpou a versão da linha | não | ✓ **PR-C1** |
 | qualquer | E9 para uma autorização de dispositivo no meio do `GET /items` do job (motivo `NULL` antes e depois) | o job grava o `health` e o `status` da autorização antiga por cima dos zerados: some "Autorize o acesso no app do banco" e a tela diz "Atualizando… · Ainda não sincronizou" | não (o `status` volta a `ACTIVE`) | ✓ **PR-C1** (o upsert da reconexão bumpa a versão; B3 do Tester) |
@@ -280,8 +294,8 @@ verificação externa pendente.
 | Erro temporário (`read_failed`) | E8 com espelho cheio | **mantém Erro temporário** | não | ✓ **corrigido no PR-A (R5)** |
 | Erro temporário (`read_failed`) | E8 com espelho vazio | mantém | não | ✓ |
 | Erro temporário (`read_failed`) ou Parcial (`investments_read_failed`) | E12 sem ninguém tocar | mantém até o próximo tique, que relê (classe `leitura`) | não | ✓ **PR-B2** |
-| Erro temporário (`status=ERROR` do webhook) | E8 depois do `health` envelhecer | observa: ACTIVE ou "Ação necessária" | avisa até lá | ✓ tardio (R3, PR-C) |
-| Sem dados (`no_accounts`) | E1 atrasado | Atualizando… (sem health), motivo apagado | – | ✗ R8 (PR-C) |
+| Erro temporário (`status=ERROR` do webhook) | E8 depois do `health` envelhecer | observa: ACTIVE ou "Ação necessária" | avisa até lá | ✓ (R3) quando a releitura confirma o item: o `item/error` não grava mais `ERROR` com motivo vazio, então o "tardio" cai; com o GET falhando vale a pista do §4 (ainda grava `ERROR`, e a retentativa E12 a resolve) |
+| Sem dados (`no_accounts`) | E1 atrasado | mantém Sem dados: nada gravado (R8: o verde falso era COM `health`; "Atualizando…" só sem `health`) | – | ✓ **PR-C2** |
 | Sem dados (`no_accounts`) | E8 com espelho cheio | Atualizado | não | ✓ |
 | Conexão perdida | E3 atrasado | mantém | avisa | ✓ |
 | Conexão perdida | E8 com item vivo | sai | para | ✓ |
@@ -538,7 +552,7 @@ no meio, flag e o texto do E13).
 | E9 | `no_accounts` sem a Pluggy à frente | Sem dados | não | reler traria o mesmo vazio |
 | E10 | `item_missing` | Conexão perdida | não | quem observa é o job de saúde |
 | E11 | `health.item_status` em `_NEEDS_USER` | Ação necessária | não | = E3 |
-| E12 | `status='ERROR'` do webhook, `health` saudável ou nulo, sem motivo | Erro temporário | sim | `pista_de_erro` |
+| E12 | `status='ERROR'` do webhook, `health` saudável ou nulo, sem motivo | Erro temporário | sim | `pista_de_erro`; desde o PR-C2 é a rede de segurança de quando a releitura do webhook falha (a pista) |
 | E13 | `health.item_status == 'ERROR'` | Erro temporário | não (DECISÃO 1 = B) | GET não tira o item de ERROR; só PATCH ou o auto-update da Pluggy |
 | E14 | `PAUSED` / `DELETED` | Pausado / Removido | não | SQL (terminal) |
 | E15 | em dia | Atualizado | não | nada atrás |
@@ -588,9 +602,11 @@ comportamental em `tests/frontend/of_refresh_ui.test.mjs`.
 | C8 | remoção durante R | `connection_not_found`; as marcas pelo `id` gravam 0 linhas | `where id=` |
 | C9–C10 | pausa ou `item/deleted` durante R | terminal: nada grava | `_TERMINAL` |
 | C11 | readoção por outro usuário | `expected_user_id` recusa antes de ler | E20 |
-| C12 | `item/error` durante R | células 13 e 13b da §2.1 | PR-B1 |
+| C12 | `item/error` durante R | a observação do webhook pode se sobrepor ao sync da R: a tarefa ocupa o slot de `_INFLIGHT`, então `item/error` com R em voo só marca `_DIRTY` e não lê; a pista que sobra cai nas células 13 e 13b da §2.1 | PR-B1, PR-C2 |
 | C13 | processo cai no meio de R | a tarefa se perde; o tique seguinte recalcula do banco | elegibilidade por estado |
 | C14 | o mesmo usuário com dois itens elegíveis | dois syncs sequenciais | como o webhook |
+| C15 | observação do webhook × R | R não cria tarefa (`marcar_sujo=False`) nem lê com a observação em voo; a observação em voo termina e solta o slot | `_INFLIGHT` |
+| C16 | observação do webhook × sync em voo | o `item/error` marca `_DIRTY` e NÃO lê; a rodada suja roda um sync, que relê o item. Rajada de itens diferentes: no máximo 4 observações no trecho bloqueante (semáforo constante) | `_INFLIGHT`/`_DIRTY` + semáforo |
 
 ---
 
@@ -618,8 +634,8 @@ migration (**C1, implementada**); (d) só `item/error` dispara observação, coa
 por item com semáforo de 4, a rodada suja (`_DIRTY`) mantida, e o `raw` deixa de ser
 sobrescrito pelo envelope; (e) a observação do webhook sobrescrita pela foto de um
 sync de OUTRA réplica fica como limite conhecido (§4). C1 = versão da linha +
-`observar_item` + job + 404 do sync; C2 = webhook (R3, R8), ainda **não
-implementada**: as células de R3 e R8 seguem ✗.
+`observar_item` + job + 404 do sync (**implementada**); C2 = webhook (R3, R8)
+(**implementada**: as células de R3 e R8 são ✓ PR-C2; `frontend/routes/of_observacao.py`).
 
 Texto novo do PR-B3, visível ao usuário: o detalhe "O banco já tem dados de dd/mm —
 atualize para trazer" (pílula "Parcial", âmbar) e o sufixo " · dados de dd/mm" na
@@ -639,16 +655,47 @@ Texto novo do PR-A, visível ao usuário: o detalhe
 
 ## 4. Achados registrados, fora do escopo da Onda 5
 
-- **Limites do PR-C1.**
+- **Limites do PR-C (C1 e C2).**
   - X7: um sync em OUTRA réplica que começou antes da observação do webhook grava a
     foto 1 (mais velha) depois dela, porque o sucesso do sync (`reconnected_at_visto`)
     não tem CAS de versão sobre `health` e o par. Em um processo só, `_INFLIGHT` e
-    `_DIRTY` fecham (C2). Limite conhecido, não coberto.
-  - O "~18 h" que a documentação do R3 cita vale só antes do B2: hoje o erro grudado
-    dura até um tique da retentativa (com a flag ligada), e para sempre com ela
-    desligada. O C2 o fecha.
+    `_DIRTY` fecham (C2). Limite conhecido, não coberto (decisão e1 do dono).
+  - O "~18 h" que a documentação do R3 citava valia só antes do B2; com o PR-C2 o
+    `item/error` nem grava mais o erro grudado: a releitura leva segundos.
+  - O `raw` deixou de ser sobrescrito pelo envelope do webhook (`item/created` e
+    `item/error`): o `executionStatus` que a janela de 60 min da instrução de
+    dispositivo lê agora sobrevive a esses eventos.
   - V6 (o que o `GET /items` devolve logo depois de um `item/error` real) e o volume
-    real de `item/error` em produção só se medem na Onda 8; nada na C1 os exercita.
+    real de `item/error` em produção só se medem na Onda 8; nada na C1 nem na C2 os
+    exercita (os testes mockam `get_pluggy_item`). O evento `of_observacao_diverge`
+    é o que mede: quantas vezes o webhook disse erro e a releitura voltou viva.
+  - Pior caso da pista (decisão (a)): ela grava `ERROR` sobre qualquer motivo, só
+    quando o GET da Pluggy falha. `ACTIVE/no_accounts` vira `ERROR/no_accounts` (a
+    tela segue "Sem dados", a retentativa não pega) e `ACTIVE/investments_read_failed`
+    vira `ERROR/investments_read_failed` ("Parcial" passa a "Erro temporário"; classe
+    `leitura`). Caracterizado em `tests/test_of_webhook_observacao.py`.
+  - Pior caso da pista: item vivo exibido como Erro temporário por até um tique da
+    retentativa (`_open_finance_refresh`) mais o cooldown de 30 min, ou
+    indefinidamente com `OF_HEALTH_CHECK_ENABLED=0`, só quando o GET da Pluggy falha;
+    igual ou melhor que antes do PR-C2.
+  - Falha inesperada da tarefa de observação (banco/pool, bug): log
+    `of_observacao_falhou` (dono na coluna, só item_id e o tipo da exceção em
+    `details`) e a pista `ERROR`, quando o banco ainda responde.
+  - O teto de 4 observações simultâneas cobre a observação inteira (leitura da linha,
+    GET e escrita), pego uma vez no topo da tarefa; o resto espera como tarefa asyncio,
+    sem ocupar thread do executor compartilhado.
+  - A pista usa a versão da linha lida ANTES do GET, sem reler: se um sync, o job
+    ou uma reconexão escreveu a linha no meio, a pista grava 0 linhas e o escritor
+    concorrente vence (inclusive após duas derrotas de versão e numa falha
+    inesperada da tarefa; sem versão lida, só o log `of_observacao_falhou`).
+  - A pista bumpa `updated_at`: um job de saúde com o lote em andamento perde o CAS
+    naquele item e o reavalia no próximo tique.
+  - A rodada suja (`_DIRTY`) é um SYNC completo, sem corte por plano, disparado por
+    qualquer `item/error` coalescido.
+  - `item/waiting_user_input`, `item/login_succeeded` e `connector/status_updated`
+    seguem sem tratamento (decisão d1: só `item/error` observa).
+  - A observação do webhook não passa pelo corte por plano; a rodada suja
+    (`_DIRTY`) continua sem ele (decisão pendente do B2, não alargada).
 
 - **Limites do PR-B3 (D2/D7).**
   - `_dm` (`_stale_detail`) fatia a string ISO sem converter fuso: "2026-09-20T01:30:00Z"

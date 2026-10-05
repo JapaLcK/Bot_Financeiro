@@ -196,7 +196,7 @@ _NEEDS_USER = {"LOGIN_ERROR", "WAITING_USER_INPUT", "INVALID_CREDENTIALS",
 # `save_pluggy_open_finance_item` (`db/open_finance.py`), o ÚNICO ponto da árvore
 # que grava status REMOTO — os outros escritores da coluna gravam valor NOSSO:
 # `pause_open_finance_connection` (PAUSED), o mapa literal do webhook
-# (`update_pluggy_open_finance_item_status`: UPDATING/ERROR/DELETED), o
+# (`update_pluggy_open_finance_item_status`: só DELETED desde o PR-C2), o
 # `resolve_connection_state` via `mark_sync_result` (ACTIVE/ERROR) e o mock
 # (ACTIVE, provider `mock_pluggy`).
 #
@@ -211,7 +211,7 @@ _NEEDS_USER = {"LOGIN_ERROR", "WAITING_USER_INPUT", "INVALID_CREDENTIALS",
 # É lista de PERMISSÃO e não de bloqueio das duas sentinelas: `ACTIVE` e elas são
 # vocabulário NOSSO, e nenhum payload pode reivindicar nenhum dos três. O
 # conteúdo é a união dos conjuntos acima — os status que este módulo já trata por
-# nome —, mais `ERROR` (o que o webhook grava e o que `of_health_counters` conta)
+# nome —, mais `ERROR` (o que o resolvedor e a pista do webhook gravam, e o que `of_health_counters` conta)
 # e o `executionStatus` de dispositivo, que a fronteira também aceita pelo
 # `item['status'] or item['executionStatus']`. Não acrescente status "por
 # precaução": vale aqui o mesmo veto do bloco de `_NEEDS_USER`.
