@@ -1824,6 +1824,24 @@ async def _open_finance_refresh():
             print(f"[open_finance_refresh] erro: {exc}", file=sys.stderr)
 
 
+async def _tarefa_fk_indexes():
+    # Índices das FKs (#253), CONCURRENTLY: espera as transações em voo, o que
+    # não cabe no wait_for (STARTUP_STEP_TIMEOUT) do init_db. Tarefa de fundo,
+    # uma vez por boot. Logger e não print: o `_DashboardHandler` do root grava
+    # WARNING em `system_event_logs`.
+    log = logging.getLogger(__name__)
+    try:
+        from db.schema_repairs import ensure_fk_indexes_once  # noqa: PLC0415
+        falhou = await asyncio.to_thread(ensure_fk_indexes_once)
+        if falhou is None:
+            log.info("[fk_indexes] outro processo está construindo; nada a fazer aqui")
+        else:
+            log.info("[fk_indexes] terminou; índices não criados: %s", falhou or "nenhum")
+    except Exception as exc:  # nunca derruba o app; só tipo e sqlstate (o texto pode trazer dado)
+        log.warning("[fk_indexes] erro: %s sqlstate=%s", type(exc).__name__,
+                    getattr(exc, "sqlstate", None))
+
+
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     _t0 = _startup_time.monotonic()
@@ -2247,6 +2265,7 @@ async def lifespan(app: FastAPI):
                 asyncio.create_task(_pix_worker(), name="pix_worker"),
                 asyncio.create_task(_ebook_worker(), name="ebook_worker"),
                 asyncio.create_task(_stripe_email_worker(), name="stripe_email_worker"),
+                asyncio.create_task(_tarefa_fk_indexes(), name="fk_indexes"),
             ]
         )
     else:
