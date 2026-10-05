@@ -589,7 +589,8 @@ PR de cada etapa, não soluções prontas. Cada PR confere se ainda valem, decid
     Cartão é reutilizado pela identidade da conta; a associação só avança para conexão mais
     nova, mesmo ao importar histórico exclusivo da antiga. Havendo cartões duplicados do
     legado, prioriza o dono da conta exata, depois quem já tem compras e o menor id;
-    revalida a ocupação antes de reassociar, sem mover/consolidar compras ou
+    revalida a ocupação antes de reassociar e relê o dono depois da tentativa, tanto
+    no vínculo existente quanto na adoção do cartão órfão, sem mover/consolidar compras ou
     faturas existentes. O estado ativo de cada cartão considera a conexão mais nova
     entre sua FK e os vínculos das compras/estornos; pausa/exclusão nova prevalece sobre
     conexão antiga ainda ativa. Assim os cartões legados separados mantêm a proteção

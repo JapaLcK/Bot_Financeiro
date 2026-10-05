@@ -679,8 +679,11 @@ def get_or_create_open_finance_card(user_id: int, of_account_id: int, name: str 
                                           where other.user_id=cc.user_id
                                             and other.open_finance_account_id=a.id)""",
                     (previous["id"], user_id, of_account_id))
+                cur.execute("select id from credit_cards where user_id=%s and open_finance_account_id=%s",
+                            (user_id, of_account_id))
+                exact = cur.fetchone()
                 conn.commit()
-                return previous["id"]
+                return exact["id"] if exact else previous["id"]
 
             # Reconcilia com um cartão MANUAL de mesmo nome (case/trim-insensível) que ainda
             # não tem conta OF vinculada, e ADOTA ele (vincula esta conta OF). Evita o

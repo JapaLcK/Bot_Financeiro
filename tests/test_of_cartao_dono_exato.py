@@ -52,3 +52,34 @@ def test_dono_criado_entre_select_e_update_e_respeitado(user_id, monkeypatch):
     assert result == created[0]
     assert snapshot(user_id) == before
     assert cards.get_card_by_id(user_id, old_card)['open_finance_account_id'] == account(user_id, first)
+
+
+@pytest.mark.parametrize('occupied', [False, True])
+def test_orfao_rele_dono_criado_antes_da_reassociacao(user_id, monkeypatch, occupied):
+    first, new, _, old_card, _ = legado(user_id, current_owner=False)
+    ciclo(user_id, new, [conta('estavel', 'CREDIT')])
+    db.disconnect_open_finance_connection(user_id, new)
+    aid = account(user_id, first)
+    assert cards.get_card_by_id(user_id, old_card)['open_finance_account_id'] is None
+    before = snapshot(user_id)
+    created = []
+    def intercept(cur, query, params):
+        if occupied and 'update credit_cards cc set open_finance_account_id=a.id' in query and not created:
+            created.append(q("insert into credit_cards(user_id,name,closing_day,due_day,open_finance_account_id) values (%s,'Dono concorrente',1,10,%s) returning id", (user_id, aid), True)[0]['id'])
+        return cur.execute(query, params)
+    with interception(monkeypatch, intercept):
+        result = cards.get_or_create_open_finance_card(user_id, aid, 'estavel', {})
+    expected = created[0] if occupied else old_card
+    assert result == expected
+    assert snapshot(user_id) == before
+    assert cards.get_card_by_id(user_id, expected)['open_finance_account_id'] == aid
+    tx = transacao(-25)
+    tx['provider_transaction_id'] = 'compra-apos-reassociacao'
+    ciclo(user_id, first, [conta('estavel', 'CREDIT', tx)])
+    after = snapshot(user_id)
+    assert [r for r in after[0] if r['id'] in {x['id'] for x in before[0]}] == before[0]
+    assert q('select card_id from credit_transactions where user_id=%s and valor=25', (user_id,), True) == [{'card_id': expected}]
+    old_bills = {r['id']: r['card_id'] for r in before[1]}
+    assert {r['id']: r['card_id'] for r in after[1] if r['id'] in old_bills} == old_bills
+    assert sum(r['total'] for r in after[1]) == sum(r['total'] for r in before[1]) + 25
+    assert len(q('select id from credit_cards where user_id=%s', (user_id,), True)) == (2 if occupied else 1)
