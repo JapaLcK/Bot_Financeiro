@@ -581,6 +581,8 @@ PR de cada etapa, não soluções prontas. Cada PR confere se ainda valem, decid
     `external_id` novo usa a tupla JSON, sem depender da conexão local. Legado inequívoco
     conserva lançamento/compra, categoria, descrição e fatura; vínculo entre identidades
     diferentes recusa com `OF_IDENTITY_AMBIGUOUS`, sem reparação automática nem DDL.
+    Vínculos manuais `bank_movement_confirmed` podem compartilhar lançamento; transferir
+    uma identidade não remove vínculos irmãos nem aplica campos de fusão ao movimento.
     Reconectar a mesma identidade transfere o vínculo para a transação na conexão mais nova,
     preservando pendência/fusão e snapshot; o sync antigo não o retoma. Só há transferência
     quando a transação está no espelho novo: resposta parcial não descarta histórico antigo.
@@ -593,6 +595,14 @@ PR de cada etapa, não soluções prontas. Cada PR confere se ainda valem, decid
     contra compra manual após desconectar as conexões antigas. Sem FK nem vínculo,
     o cartão continua manual. Limpar a conexão velha relê os vínculos e
     não apaga a representação transferida, inclusive na janela concorrente do cleanup.
+    Desconectar a conexão dona preserva a representação no alias da mesma identidade
+    que sobreviver (ativo ou pausado, nunca DELETED), inclusive edição, fatura e snapshot.
+    Transferência e decisão de limpeza usam o lock da compra/usuário; se houver prova
+    bancária ainda ligada, suas referências acompanham a troca. O reconciliador de
+    movimentos mantém sua regra prévia de invalidar prova fora do recorte e exigir
+    reconfirmação na reconexão. `transactions/deleted` não transfere para alias sem
+    vínculo: exclusão pelo provedor não deve ressuscitar a transação. Cartão renomeado
+    sem FK é reutilizado pelos backlinks e reassociado quando a conta está livre.
     Confirmar, fusão automática e sync aplicam valor/sinal/data/hora do banco à fundida.
     `posted_at`, `criado_em` e presença de hora mudam juntos, então lista e Resumo trocam de
     mês juntos; cartão segue o ciclo da fatura. `efeitos.of_original` guarda uma única vez

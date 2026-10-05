@@ -41,7 +41,7 @@ from .users import ensure_user, ensure_user_tx
 logger = logging.getLogger(__name__)
 
 
-def _rollback_imported_of(rows: list[dict]) -> None:
+def _rollback_imported_of(rows: list[dict], *, disconnect=False) -> None:
     """Limpa CREDIT antes de accounts; BANK é relido e limpo sob o lock no chamador.
 
     O vínculo pode ter sido transferido a uma reconexão depois desta foto.
@@ -52,7 +52,8 @@ def _rollback_imported_of(rows: list[dict]) -> None:
         if ctx:
             try:
                 remove_single_credit_transaction(
-                    uid, ctx, of_tx_ids=[t["id"] for t in rows if t["user_id"] == uid])
+                    uid, ctx, of_tx_ids=[t["id"] for t in rows if t["user_id"] == uid],
+                    disconnect=disconnect)
             except Exception:
                 pass
 
@@ -3333,7 +3334,7 @@ def disconnect_open_finance_connection(
             card_ids = [r["card_id"] for r in cur.fetchall()]
 
     # 2. reverte launches/fatura importados.
-    _rollback_imported_of(rows)
+    _rollback_imported_of(rows, disconnect=True)
 
     # 3. CREDIT: apagar cartão pode cascatear faturas. Commit antes de accounts,
     # pois pagamento mantém a fatura enquanto outro helper adquire a conta.
@@ -3409,6 +3410,9 @@ def disconnect_open_finance_connection(
             removing = cur.fetchall()
             for row in removing:
                 current = _locked_tx(cur, row["user_id"], row["id"])
+                from .of_identity import preserve_disconnect_alias
+                preserve_disconnect_alias(cur, user_id, [r["id"] for r in removing],
+                                          current["imported_launch_id"])
                 cur.execute(
                     """select 1 from open_finance_transactions t
                          join open_finance_accounts a on a.id=t.account_id

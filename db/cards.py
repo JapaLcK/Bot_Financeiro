@@ -643,6 +643,35 @@ def get_or_create_open_finance_card(user_id: int, of_account_id: int, name: str 
                 conn.commit()
                 return previous["id"]
 
+            # A desconexão do espelho novo zera a FK, mas as compras podem ter
+            # voltado ao alias antigo. O nome editado não participa da identidade.
+            cur.execute(
+                """select cc.id from credit_cards cc
+                     join credit_transactions ct on ct.card_id=cc.id and ct.user_id=cc.user_id
+                     join open_finance_transactions t on t.imported_credit_tx_id=ct.id
+                     join open_finance_accounts a on a.id=t.account_id
+                     join open_finance_connections c on c.id=a.connection_id
+                     join open_finance_accounts n on n.id=%s
+                     join open_finance_connections nc on nc.id=n.connection_id
+                    where cc.user_id=%s and cc.open_finance_account_id is null
+                      and c.user_id=cc.user_id and nc.user_id=cc.user_id
+                      and c.provider=nc.provider and a.provider_account_id=n.provider_account_id
+                    order by cc.id limit 1""", (of_account_id, user_id))
+            previous = cur.fetchone()
+            if previous:
+                cur.execute(
+                    """update credit_cards cc set open_finance_account_id=a.id
+                         from open_finance_accounts a
+                         join open_finance_connections c on c.id=a.connection_id
+                        where cc.id=%s and cc.user_id=%s and c.user_id=cc.user_id
+                          and a.id=%s and cc.open_finance_account_id is null
+                          and not exists (select 1 from credit_cards other
+                                          where other.user_id=cc.user_id
+                                            and other.open_finance_account_id=a.id)""",
+                    (previous["id"], user_id, of_account_id))
+                conn.commit()
+                return previous["id"]
+
             # Reconcilia com um cartão MANUAL de mesmo nome (case/trim-insensível) que ainda
             # não tem conta OF vinculada, e ADOTA ele (vincula esta conta OF). Evita o
             # duplicado "ultraviolet-black" + "ultraviolet-black · Open Finance".
@@ -692,7 +721,7 @@ def get_or_create_open_finance_card(user_id: int, of_account_id: int, name: str 
     return card_id
 
 
-def remove_single_credit_transaction(user_id: int, ct_id: int, *, of_tx_ids=None):
+def remove_single_credit_transaction(user_id: int, ct_id: int, *, of_tx_ids=None, disconnect=False):
     """Remove UMA transação de cartão (nunca cascateia o parcelamento), ajustando a fatura.
 
     Ao contrário de `undo_credit_transaction`, ignora `group_id`: usado no rollback do OF
@@ -710,6 +739,9 @@ def remove_single_credit_transaction(user_id: int, ct_id: int, *, of_tx_ids=None
             if not tx:
                 return None
             if of_tx_ids is not None:
+                if disconnect:
+                    from .of_identity import preserve_disconnect_alias
+                    preserve_disconnect_alias(cur, user_id, of_tx_ids, ct_id, credit=True)
                 cur.execute(
                     """select t.id from open_finance_transactions t
                          join open_finance_accounts a on a.id=t.account_id
@@ -717,6 +749,7 @@ def remove_single_credit_transaction(user_id: int, ct_id: int, *, of_tx_ids=None
                         where c.user_id=%s and t.imported_credit_tx_id=%s""", (user_id, ct_id))
                 references = {r["id"] for r in cur.fetchall()}
                 if not references or not references.issubset(of_tx_ids):
+                    conn.commit()
                     return None  # já transferida; esta conexão não é mais dona da compra
             # valor é assinado (compra +, estorno -) e a fatura foi `total += valor` no insert.
             # Reverter = `total -= valor`, uniforme pros dois casos.
