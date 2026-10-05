@@ -48,7 +48,7 @@ export const RESPOSTAS = JSON.parse(readFileSync(join(RAIZ, "tests", "frontend",
  * `concluido`: o convite do guia não aparece nos testes que não são dele). Registrar de novo vale para as
  * próximas requisições: no Playwright a rota registrada por último vence.
  */
-export async function servir(ctx, raiz = FRONTEND, { plano = "pro", perfil = "padrao", contas = "todos_os_estados", resumo = "exato", guia = "concluido" } = {}) {
+export async function servir(ctx, raiz = FRONTEND, { plano = "pro", perfil = "padrao", contas = "todos_os_estados", resumo = "exato", guia = "concluido", lancamentos = "estados", categorias = "padrao" } = {}) {
   const me = RESPOSTAS.me[plano];
   if (!me) throw new Error(`plano sem fixture: ${plano}`);
   let atual = perfil;
@@ -60,6 +60,12 @@ export async function servir(ctx, raiz = FRONTEND, { plano = "pro", perfil = "pa
     if (url.pathname === "/api/v2/perfil") {
       if (r.request().method() === "PUT") atual = r.request().postDataJSON().perfil;
       return r.fulfill({ json: { perfil: atual } });
+    }
+    if (url.pathname === "/api/v2/categorias") return r.fulfill({ json: RESPOSTAS.categorias[categorias] });
+    if (url.pathname === "/api/v2/lancamentos" && r.request().method() === "GET") {
+      const primeira = RESPOSTAS.lancamentos[lancamentos];
+      const pagina = url.searchParams.has("cursor") ? RESPOSTAS.lancamentos.segunda : primeira;
+      return r.fulfill({ json: { ...pagina, mes: url.searchParams.get("mes") ?? pagina.mes } });
     }
     if (url.pathname === "/api/v2/contas") return r.fulfill({ json: RESPOSTAS.contas[contas] });
     if (url.pathname === "/api/v2/resumo-do-mes") return r.fulfill({ json: RESPOSTAS.resumo_do_mes[resumo] });

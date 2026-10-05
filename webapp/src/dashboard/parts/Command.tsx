@@ -25,12 +25,12 @@ function commands(q: string, here: Path, dica: boolean): Cmd[] {
     ...PRESETS.map((p) => ({ id: `sim-${p.label}`, group: "Ações", label: `Simular: ${p.label.toLowerCase()}`, icon: "ph-lightning", run: () => { setSim({ cuts: { ...get().sim.cuts, ...p.cuts } }); go("/simulador"); } })),
     ...(["mes", "30", "90"] as const).map((h) => ({ id: `h-${h}`, group: "Ações", label: `Previsão: ${HORIZONS[h].toLowerCase()}`, icon: "ph-clock", run: () => { set({ horizon: h, month: MONTHS[MONTHS.length - 1] }); go("/previsao"); } })),
     ...MESES.map((m) => ({ id: `m-${m}`, group: "Meses", label: monthTitle(m), icon: "ph-calendar-dots", run: () => { escolherMes(m); if (NO_MONTH.includes(here)) go("/"); } })), // sem seletor na página, o mês trocado apareceria só depois, noutra tela
-    ...CATEGORIES.map((c) => ({ id: `c-${c.id}`, group: "Filtrar por categoria", label: c.label, icon: c.icon, run: () => { setFilter({ category: c.id, day: null, query: "", source: "todos" }); go("/lancamentos"); } })),
+    ...(DEMO ? CATEGORIES : []).map((c) => ({ id: `c-${c.id}`, group: "Filtrar por categoria", label: c.label, icon: c.icon, run: () => { setFilter({ category: c.id, day: null, query: "", source: "todos" }); go("/lancamentos"); } })),
   ];
   const nq = norm(q.trim());
   if (!nq) return list.filter((c) => c.group !== "Filtrar por categoria");
   const found = list.filter((c) => norm(c.label).includes(nq));
-  const launches = summary(s.month).launches
+  const launches = (DEMO ? summary(s.month).launches : [])
     .filter((l) => norm(`${l.label} ${l.msg ?? ""}`).includes(nq))
     .slice(0, 6)
     .map((l, i) => ({
@@ -53,7 +53,7 @@ export function Command() {
 
   useEffect(() => {
     // Com o véu do guia (parts/Guia.tsx), só o balão e o alvo do passo respondem.
-    const open = () => { if (document.querySelector(".guia-veu")) return; setQ(""); setActive(0); setOpened((n) => n + 1); show(dlg.current, "input"); input.current?.focus(); };
+    const open = () => { if (document.querySelector(".guia-veu, .lanc-form[open]")) return; setQ(""); setActive(0); setOpened((n) => n + 1); show(dlg.current, "input"); input.current?.focus(); };
     const onKey = (e: globalThis.KeyboardEvent) => {
       if ((e.metaKey || e.ctrlKey) && e.key.toLowerCase() === "k") { e.preventDefault(); if (isOpen(dlg.current)) hide(dlg.current); else open(); }
       else if (e.key === "/" && !(e.target as HTMLElement).closest("input, textarea, select") && !isOpen(dlg.current)) { e.preventDefault(); open(); }
@@ -81,7 +81,7 @@ export function Command() {
       <div className="cmdk-field">
         <i className="ph ph-magnifying-glass" aria-hidden="true" />
         <input ref={input} value={q} onChange={(e) => { setQ(e.target.value); setActive(0); }} onKeyDown={onKey}
-          placeholder="Buscar lançamento, categoria ou ação…" autoComplete="off" spellCheck={false}
+          placeholder={DEMO ? "Buscar lançamento, categoria ou ação…" : "Buscar página ou ação…"} autoComplete="off" spellCheck={false}
           role="combobox" aria-expanded="true" aria-controls="cmdk-list" aria-activedescendant={items[active] ? `cmd-${active}` : undefined} />
         <kbd>esc</kbd>
       </div>
