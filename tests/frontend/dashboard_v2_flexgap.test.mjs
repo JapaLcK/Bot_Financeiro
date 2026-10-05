@@ -17,7 +17,7 @@ import assert from "node:assert/strict";
 import { chromium } from "playwright";
 import { PAINEL, exigeArtefatoEmDia, servir } from "./_painel.mjs";
 
-const PAGES = ["/", "/previsao", "/gastos", "/simulador", "/metas", "/patrimonio", "/lancamentos"];
+const PAGES = ["/", "/previsao", "/gastos", "/assinaturas", "/simulador", "/metas", "/patrimonio", "/lancamentos"];
 
 let browser;
 before(async () => {
@@ -71,9 +71,8 @@ const simulate = (page, withFallback) => page.evaluate((withFallback) => {
 
 async function measure(width, hash, withFallback, setup, semente = true) {
   const ctx = await browser.newContext({ viewport: { width, height: 900 }, reducedMotion: "reduce" });
-  await servir(ctx);
   // já escolheu o perfil (Pular): sem isso o modal da 1ª visita cobre o Resumo
-  if (semente) await ctx.addInitScript(() => localStorage.setItem("pigbank.dashboard.profile.v1", '"padrao"'));
+  await servir(ctx, undefined, { perfil: semente ? "padrao" : null });
   const page = await ctx.newPage();
   await page.goto(`${PAINEL}#${hash}`);
   await page.locator("#page-title").waitFor({ state: "attached" });
@@ -107,6 +106,7 @@ const filtros = async (page) => {
 // 1ª visita (sem a semente do perfil): o modal de perfis aberto por cima do Resumo
 const modal = (page) => page.locator(".picker[open]").waitFor();
 const catalogo = async (page) => { await organizar(page); await page.getByRole("button", { name: "Adicionar bloco" }).click(); await page.locator("#board-catalog").waitFor(); };
+const contasFora = async (page) => { await page.locator(".contas-mais").click(); await page.locator(".contas-mais[aria-expanded=true]").waitFor(); };
 const simular = async (page) => { await page.locator(".presets .chip").first().click(); await page.locator(".sim-facts").waitFor(); };
 // mensagem que precisa de reticência em qualquer largura
 const textoLongo = (page) => page.locator(".row-msg").evaluateAll((qs) => qs.forEach((q) => { q.textContent = "pagamento da viagem de formatura dividido com a galera toda do terceirão"; }));
@@ -115,7 +115,7 @@ const CASES = [
   ...[1440, 1100, 1024, 390, 320].flatMap((w) => PAGES.map((p) => [w, p])),
   ...[1440, 390, 320].flatMap((w) => [paleta, organizar, filtros].map((f) => [w, "/", f])),
   ...[1440, 390, 320].map((w) => [w, "/simulador", simular]),
-  ...[1440, 390, 320].flatMap((w) => [[w, "/", modal, false], [w, "/", catalogo]]),
+  ...[1440, 390, 320].flatMap((w) => [[w, "/", modal, false], [w, "/", catalogo], [w, "/", contasFora]]),
   [390, "/lancamentos", textoLongo],
   [1440, "/", dica],
 ];

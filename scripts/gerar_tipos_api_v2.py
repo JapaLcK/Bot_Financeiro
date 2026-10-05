@@ -17,7 +17,8 @@ SAIDA = ROOT / "webapp" / "src" / "dashboard" / "lib" / "api-v2.gen.ts"
 CABECALHO = ("// GERADO — não edite; rode python scripts/gerar_tipos_api_v2.py; "
              "tests/test_api_v2_contrato.py compara.\n")
 _META = {"title", "description", "default"}
-_PRIMITIVO = {"string": "string", "integer": "number", "number": "number", "boolean": "boolean", "null": "null"}
+# float não entra na v2: dinheiro é Decimal (texto).
+_PRIMITIVO = {"string": "string", "integer": "number", "boolean": "boolean", "null": "null"}
 _REF = "#/components/schemas/"
 _IDENT = re.compile(r"[A-Za-z_$][\w$]*")
 _OPERACAO = {"summary", "description", "operationId", "tags", "responses"}
@@ -36,10 +37,12 @@ def _tipo(s: dict) -> str:
         return " | ".join(_tipo(x) for x in s["anyOf"])
     if chaves == {"type", "enum"} and t == "string" and all(isinstance(v, str) for v in s["enum"]):
         return " | ".join(json.dumps(v, ensure_ascii=False) for v in s["enum"])
+    if chaves == {"type", "const"} and t == "string" and isinstance(s["const"], str):  # Literal de um valor só
+        return json.dumps(s["const"], ensure_ascii=False)
     if chaves == {"type"} and t in _PRIMITIVO:
         return _PRIMITIVO[t]
-    # Decimal (dinheiro, sai como texto) e datetime: o TS só vê a string.
-    if t == "string" and (chaves == {"type", "pattern"}
+    # Decimal (dinheiro, sai como texto), datetime e o teto de tamanho da query: o TS só vê a string.
+    if t == "string" and (chaves - {"pattern", "minLength", "maxLength"} == {"type"}
                           or (chaves == {"type", "format"} and s["format"] == "date-time")):
         return "string"
     if chaves == {"type", "items"} and t == "array":
@@ -91,6 +94,17 @@ def _escrita(path: str, op: dict) -> str:
     return f"{{ corpo: {_tipo(corpo['content']['application/json']['schema'])}; resposta: {resposta} }}"
 
 
+def _query(path: str, params: list) -> str:
+    """`{ nome?: tipo }` da query do GET: só parâmetro `in: query` com nome, `required` e schema."""
+    campos = []
+    for p in params:
+        if (not isinstance(p, dict) or set(p) != {"name", "in", "required", "schema"} or p["in"] != "query"
+                or not _IDENT.fullmatch(p["name"]) or not isinstance(p["required"], bool)):
+            raise _recusa({path: p})
+        campos.append(f"{p['name']}{'' if p['required'] else '?'}: {_tipo(p['schema'])}")
+    return "{ " + "; ".join(campos) + " }"
+
+
 def gerar(spec: dict) -> str:
     schemas = spec.get("components", {}).get("schemas", {})
     linhas = [CABECALHO]
@@ -98,19 +112,23 @@ def gerar(spec: dict) -> str:
         if not _IDENT.fullmatch(nome):
             raise _recusa(nome)
         linhas.append(f"export type {nome} = {_tipo(schemas[nome])};\n")
-    rotas = {"json": [], "sse": [], "put": [], "post": []}
+    rotas = {"json": [], "sse": [], "put": [], "post": [], "query": []}
     for p in sorted(spec["paths"]):
         item = spec["paths"][p]
-        if set(item) in ({"get"}, {"get", "put"}):
-            tipo_resposta, tipo = _resposta_200(p, item["get"])
-        elif set(item) == {"post"}:
-            tipo_resposta, tipo = "post", _escrita(p, item["post"])
-        else:
+        if set(item) in ({"get"}, {"get", "put"}, {"get", "post"}):
+            get = dict(item["get"])
+            if "parameters" in get:
+                rotas["query"].append(f"{json.dumps(p)}: {_query(p, get.pop('parameters'))}")
+            tipo_resposta, tipo = _resposta_200(p, get)
+            rotas[tipo_resposta].append(f"{json.dumps(p)}: {tipo}")
+        elif set(item) != {"post"}:
             raise _recusa({p: item})
-        rotas[tipo_resposta].append(f"{json.dumps(p)}: {tipo}")
-        if "put" in item:
-            rotas["put"].append(f"{json.dumps(p)}: {_escrita(p, item['put'])}")
+        for metodo in ("put", "post"):
+            if metodo in item:
+                rotas[metodo].append(f"{json.dumps(p)}: {_escrita(p, item[metodo])}")
     linhas.append(f"export type RotasGet = {{ {'; '.join(rotas['json'])} }};\n")
+    if rotas["query"]:
+        linhas.append(f"export type QueryGet = {{ {'; '.join(rotas['query'])} }};\n")
     if rotas["put"]:
         linhas.append(f"export type RotasPut = {{ {'; '.join(rotas['put'])} }};\n")
     if rotas["sse"]:

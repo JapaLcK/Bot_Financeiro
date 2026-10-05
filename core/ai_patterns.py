@@ -697,7 +697,7 @@ def _call_llm(system_prompt: str, user_data: dict[str, Any]) -> list[dict] | Non
         parsed = json.loads(content)
         items = parsed.get("items")
         if not isinstance(items, list):
-            logger.warning("ai_patterns: resposta sem 'items': %s", content[:200])
+            logger.warning("ai_patterns: resposta sem 'items': %d chars", len(content))
             return None
         return items
     except Exception as e:

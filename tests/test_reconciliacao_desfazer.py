@@ -30,7 +30,8 @@ def _of_tx(uid):
 
 def _sombras(uid):
     return _q("select count(*) as n from launches where user_id=%s and source='open_finance' "
-              "and external_id=%s", (uid, f"of-tx-{uid}-1"))[0]["n"]
+              "and (external_id=%s or efeitos->'open_finance'->>'provider_transaction_id'=%s)",
+              (uid, f"of-tx-{uid}-1", f"of-tx-{uid}-1"))[0]["n"]
 
 
 def funde_a(uid):

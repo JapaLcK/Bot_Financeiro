@@ -73,6 +73,7 @@ TABELA = {
     ("POST", "/auth/quiz/conta"): (L, "cria a conta do quiz"),
     # ── /billing e /conta ──
     ("GET", "/billing/plans-config"): (L, "compra"), ("POST", "/billing/create-checkout"): (L, "compra"),
+    ("POST", "/billing/checkout/bump"): (L, "compra"),
     ("POST", "/billing/select-free"): (L, "410"),
     ("GET", "/billing/subscription"): (B, "dado da assinatura"),
     ("POST", "/billing/change-plan"): (B, "mexe na assinatura"),
@@ -81,6 +82,7 @@ TABELA = {
     ("GET", "/conta"): (B, "atalho do portal → 302 /home"),
     ("POST", "/billing/pix/checkout"): (L, "compra"),
     ("GET", "/billing/pix/{public_token}"): (L, "compra"),
+    ("GET", "/billing/pix-extras"): (L, "compra"),
     # ── IA ──
     ("POST", "/ai/chat"): (B, "require_pro_feature"), ("GET", "/ai/messages"): (B, "require_pro_feature"),
     # ── links e utilidades públicas ──
@@ -111,6 +113,13 @@ TABELA = {
     ("POST", "/api/v2/assinaturas/marca"): (B, "usuario_atual"),
     ("GET", "/api/v2/perfil"): (B, "usuario_atual"), ("PUT", "/api/v2/perfil"): (B, "usuario_atual"),
     ("GET", "/api/v2/contas"): (B, "usuario_atual"),
+    ("GET", "/api/v2/resumo-do-mes"): (B, "usuario_atual"),
+    ("GET", "/api/v2/lancamentos"): (B, "usuario_atual"), ("GET", "/api/v2/categorias"): (B, "usuario_atual"),
+    ("POST", "/api/v2/lancamentos/carteira"): (B, "usuario_atual"),
+    ("POST", "/api/v2/lancamentos/editar"): (B, "usuario_atual"),
+    ("POST", "/api/v2/lancamentos/apagar"): (B, "usuario_atual"),
+    ("GET", "/api/v2/guia"): (B, "usuario_atual"), ("POST", "/api/v2/guia"): (B, "usuario_atual"),
+    ("POST", "/api/v2/guia/dica"): (B, "usuario_atual"),
     ("WS", "/ws/{user_id}"): (B, "close 4403"),
     # ── HTML autenticado ──
     ("GET", "/app"): (L, "casca; o overlay sobe"), ("GET", "/home"): (L, "casca; o overlay sobe"),
@@ -122,7 +131,7 @@ TABELA = {
 _HTML_PUBLICO = (
     "/", "/login", "/cadastro", "/q", "/recuperar-senha", "/suporte/contato", "/privacy",
     "/termos", "/blog", "/whatsapp", "/funcionalidades", "/comandos", "/comandos-app",
-    "/agents", "/como-funciona", "/precos", "/continuar-compra", "/suporte",
+    "/agents", "/como-funciona", "/precos", "/lp", "/continuar-compra", "/assinar", "/suporte",
     "/reset-password", "/redefinir-senha", "/completar-cadastro",
     "/.well-known/apple-app-site-association",
 )
@@ -165,6 +174,7 @@ GET /investments/{user_id}/rates|POST /investments/{user_id}|POST /investments/{
 POST /investments/{user_id}/withdraw|DELETE /investments/{user_id}/{name:path}
 GET /open-finance/{user_id}|GET /open-finance/{user_id}/connectors|GET /open-finance/{user_id}/caixinhas
 POST /open-finance/{user_id}/caixinhas/bind|POST /open-finance/{user_id}/connect-token
+GET /open-finance/{user_id}/limite
 POST /open-finance/{user_id}/pluggy-item|POST /open-finance/{user_id}/sync|POST /open-finance/{user_id}/refresh
 POST /open-finance/{user_id}/mock-connect|DELETE /open-finance/{user_id}|GET /open-finance/{user_id}/movements
 POST /open-finance/{user_id}/movements/confirm|GET /open-finance/{user_id}/reconciliations

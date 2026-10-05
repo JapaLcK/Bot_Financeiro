@@ -24,19 +24,45 @@
 .brand img { border-radius: 8px; }
 
 .rail-list { display: grid; gap: 2px; }
-.rail-list a {
+.rail-list a, .rail-list button {
   display: flex; align-items: center; gap: 11px;
+  width: 100%;
   height: 36px; padding: 0 12px;
   border-radius: 9px;
   color: var(--ink-2);
   font-weight: 500;
   transition: color var(--t-fast) ease, background-color var(--t-fast) ease;
 }
+/* "Ajuda" (abre o guia, parts/Guia.tsx): botão com a cara dos links. */
+.rail-list button, .tabbar button { border: 0; background: none; font: inherit; cursor: pointer; }
 .rail-list i { font-size: 17px; }
 .rail-list a[aria-current="page"] { color: var(--ink); background: var(--pink-wash); }
 .rail-list a[aria-current="page"] i { color: var(--pink); }
 @media (hover: hover) and (pointer: fine) {
-  .rail-list a:hover { color: var(--ink); background: var(--plane-1); }
+  .rail-list a:hover, .rail-list button:hover { color: var(--ink); background: var(--plane-1); }
+}
+/* A Ajuda que vira menu (parts/Ajuda.tsx, nas telas com dica). O botão ocupa a célula inteira
+   (a folga da barra de baixo é medida nele). O trilho sobe acima do conteúdo da página, que
+   tem `position: relative` com z-index: senão o menu, que abre para a direita, fica embaixo. */
+.rail { z-index: 21; }
+.ajuda { position: relative; display: grid; }
+.ajuda-menu {
+  position: absolute; z-index: 1;
+  display: grid; gap: 2px;
+  width: max-content; padding: 6px;
+  border-radius: var(--r-ctrl);
+  background: var(--plane-2);
+  box-shadow: 0 12px 32px rgba(0, 0, 0, 0.5), inset 0 0 0 1px var(--rule);
+}
+.rail .ajuda-menu { left: calc(100% + 8px); bottom: 0; }
+.rail-list .ajuda-menu button, .tabbar .ajuda-menu button {
+  display: flex; justify-content: flex-start; align-items: center;
+  width: 100%; height: 40px; padding: 0 12px;
+  border-radius: 8px;
+  font-size: 14px; font-weight: 500; color: var(--ink);
+}
+@media (hover: hover) and (pointer: fine) {
+  .rail-list .ajuda-menu button:hover, .tabbar .ajuda-menu button:hover { background: var(--plane-3); }
 }
 
 .rail-foot { margin-top: auto; padding: 0 12px; display: grid; gap: 4px; font-size: 12px; }
@@ -85,6 +111,7 @@
 .topbar-spacer { flex: 1; }
 
 .month-switch { display: flex; align-items: center; gap: 2px; }
+.month-switch .icon-btn { width: 44px; height: 44px; } /* alvo de toque */
 .month-title {
   min-width: 150px;
   text-align: center;
@@ -107,12 +134,12 @@
 .board-hint { font-size: 13px; color: var(--ink-2); }
 .foot { font-size: 12px; text-align: center; color: var(--ink-3); padding-top: 24px; }
 
-.tabbar, .demo-strip { display: none; }
+.tabbar { display: none; }
 
 @media (max-width: 1180px) {
   :root { --rail-w: 72px; --gutter: 28px; }
   .brand span, .rail-label { display: none; }
-  .rail-list a { justify-content: center; padding: 0; }
+  .rail-list a, .rail-list button { justify-content: center; padding: 0; }
   .rail-list i { font-size: 19px; }
   .brand { justify-content: center; padding: 4px 0; }
   .rail-foot { display: none; }
@@ -124,8 +151,7 @@
   .shell { grid-template-columns: minmax(0, 1fr); }
   .rail { display: none; }
   .topbar { height: 56px; gap: 6px; }
-  .topbar .tag-demo, .cmd-trigger span, .cmd-trigger kbd { display: none; }
-  .demo-strip { display: block; padding: 6px var(--gutter) 0; font-size: 11px; font-weight: 500; color: var(--ink-3); text-align: center; }
+  .cmd-trigger span, .cmd-trigger kbd { display: none; }
   .topbar .btn-primary { padding: 0 12px; } /* com o nome escrito: só o ícone não dizia o que era */
   .cmd-trigger { width: 40px; padding: 0; justify-content: center; }
   .month-switch, .topbar-spacer { flex: 1; }
@@ -145,7 +171,7 @@
     -webkit-backdrop-filter: saturate(140%) blur(16px);
     border-top: 1px solid var(--rule);
   }
-  .tabbar a {
+  .tabbar a, .tabbar button {
     display: grid; justify-items: center; gap: 2px;
     padding: 6px 0;
     font-size: 11px; font-weight: 500;
@@ -158,8 +184,18 @@
      página ela fica cinza como os outros ícones, e só ganha a cor quando é a atual. */
   .tabbar img { margin-top: -3px; filter: grayscale(1) brightness(1.35); opacity: 0.7; }
   .tabbar a[aria-current="page"] img { filter: none; opacity: 1; }
+  .tabbar.tabbar-ajuda { grid-template-columns: repeat(6, 1fr); } /* /painel: + Ajuda; o protótipo não tem guia */
+  .tabbar .ajuda-menu { bottom: calc(100% + 8px); right: 0; }
 }
 @media (max-width: 400px) { .topbar .btn-primary i { display: none; } }
+/* Seis abas não deixam folga abaixo de 360px (o CI no Linux mede o texto mais largo que o
+   macOS): ali a Ajuda sai da barra e as cinco abas voltam à largura do protótipo. O guia
+   continua em Ferramentas ("Guia do painel", pages.tsx) e no Cmd-K. Folga medida em
+   tests/frontend/dashboard_v2_guia_tela.test.mjs. */
+@media (max-width: 359.98px) {
+  .tabbar.tabbar-ajuda { grid-template-columns: repeat(5, 1fr); }
+  .tabbar .ajuda { display: none; }
+}
 /* Mês, busca e Ferramentas lado a lado não deixam folga: o CI no Linux mede o texto mais
    largo que o macOS e estourava em 320 e em 361px. Até 420px o ano sai do título; até
    360px a busca sai também. */
@@ -172,3 +208,5 @@
 .entrada h1 { margin: 4px 0 6px; font-size: 20px; font-weight: 600; letter-spacing: -0.01em; }
 .entrada p { margin: 0 auto; max-width: 36ch; color: var(--ink-2); }
 .entrada-acoes { display: grid; grid-auto-flow: column; gap: 8px; margin-top: 8px; }
+/* Com o "Criar senha" são três botões: abaixo de 360px não cabem lado a lado. */
+@media (max-width: 360px) { .entrada-acoes { grid-auto-flow: row; } }

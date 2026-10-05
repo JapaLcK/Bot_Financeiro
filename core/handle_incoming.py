@@ -31,6 +31,7 @@ from core.services.media_service import (
     analyze_image,
 )
 from core.observability import log_system_event_sync
+from core.services.fonte_unica import FonteUnicaOF
 from core.services.plan_limits import PlanLimitExceeded
 from core.services.ai_chat_commands import MANTEM, ENCERRA, aviso_de_cota, pergunta_no_turno
 from utils_text import fmt_brl
@@ -1109,14 +1110,18 @@ def handle_incoming(msg: IncomingMessage, *,
         # Mensagem já vem amigável, com CTA pra upgrade.
         return [OutgoingMessage(text=format_for_platform(exc.message, msg.platform))]
 
+    except FonteUnicaOF as exc:
+        # Q36: importação de extrato/fatura recusada antes de gravar (core/services/fonte_unica.py).
+        return [OutgoingMessage(text=format_for_platform(str(exc), msg.platform))]
+
     except Exception as exc:
         pergunta_no_turno.set(MANTEM)
         tb = traceback.format_exc()
         logger.error(
-            "handle_incoming FAILED platform=%s user_id=%s text=%r error=%s",
+            "handle_incoming FAILED platform=%s user_id=%s chars=%s error=%s",
             msg.platform,
             getattr(msg, "user_id", "?"),
-            (msg.text or "")[:120],
+            len(msg.text or ""),
             exc,
         )
         # Registra no banco para aparecer no dashboard de monitoramento
@@ -1133,7 +1138,7 @@ def handle_incoming(msg: IncomingMessage, *,
                 source=f"handle_incoming/{msg.platform}",
                 user_id=uid_for_log,
                 details={
-                    "text": (msg.text or "")[:200],
+                    "chars": len(msg.text or ""),
                     "platform": msg.platform,
                     "traceback": tb[-1500:],
                 },

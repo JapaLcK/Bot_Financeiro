@@ -10,6 +10,13 @@ const sign = (n) => (n > 0 ? "+" : n < 0 ? "−" : "");
 const out = (f, n) => f.format(n).replace(/\u00a0/g, " ").replace(/^-/, "−");
 export const money = (n) => out(brl, zero(n, 2));
 export const money0 = (n) => out(brl0, zero(n, 0));
+// Saldo na moeda da conta (código da API). Código fora do ISO (vazio, null, minúsculo) sai só
+// o número, sem símbolo inventado; com a validação o Intl não lança RangeError.
+export function moneyIn(n, moeda) {
+  if (moeda === "BRL") return money(n);
+  const f = /^[A-Z]{3}$/.test(moeda) ? { style: "currency", currency: moeda } : { minimumFractionDigits: 2, maximumFractionDigits: 2 };
+  return out(new Intl.NumberFormat("pt-BR", f), zero(n, 2));
+}
 export const signed = (n) => { const v = zero(n, 2); return `${sign(v)}${money(Math.abs(v))}`; };
 export const signed0 = (n) => { const v = zero(n, 0); return `${sign(v)}${money0(Math.abs(v))}`; };
 // A partir de R$ 1 milhão, "R$ 1,2 mi": o valor digitado no simulador não tem teto e não pode estourar o layout.
@@ -36,6 +43,8 @@ export const dayMonth = (d) => `${d.getDate()} ${monthShort(d)}`;
 export const weekday = (d) => WEEK[d.getDay()];
 export const longDate = (d) => `${weekday(d)}, ${d.getDate()} de ${monthName(d)}`;
 export const monthYear = (d) => `${monthShort(d)}/${String(d.getFullYear()).slice(2)}`;
+// "YYYY-MM-DD" da API como dia local: `new Date("2026-10-05")` é meia-noite UTC, dia 4 em SP.
+export const isoDay = (s) => { const [y, m, d] = s.split("-").map(Number); return new Date(y, m - 1, d); };
 
 export function relativeDays(n) {
   if (n === 0) return "hoje";

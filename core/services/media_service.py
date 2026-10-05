@@ -106,7 +106,7 @@ def transcribe_audio(data: bytes, filename: str) -> str | None:
         )
 
         transcription = (response or "").strip()
-        logger.info("[media_service] Transcrição: %r", transcription[:120])
+        logger.info("[media_service] Transcrição ok: %d chars", len(transcription))
         return transcription if transcription else None
 
     except Exception as e:
@@ -208,7 +208,9 @@ def analyze_image(data: bytes, filename: str) -> dict[str, Any] | None:
 
         raw = response.choices[0].message.content or "{}"
         result = json.loads(raw)
-        logger.info("[media_service] Análise de imagem: %r", result)
+        # Só a contagem: as chaves também vêm do modelo e podem trazer texto da imagem.
+        logger.info("[media_service] Análise de imagem: %s campos",
+                    len(result) if isinstance(result, dict) else type(result).__name__)
         return result
 
     except Exception as e:

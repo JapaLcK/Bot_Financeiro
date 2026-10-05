@@ -1,9 +1,10 @@
 // Protótipo dashboard-v2: a navegação com o Piggy no meio e a página de Ferramentas.
-//   · celular: barra de baixo Resumo, Gastos, Piggy (meio), Metas, Extrato;
-//   · menu lateral sem o Piggy (no desktop o acesso é a barra de conversa) e com Ferramentas;
+//   · celular: barra de baixo Resumo, Gastos, Piggy (meio), Metas, Extrato e Ajuda (abre o guia);
+//   · menu lateral sem o Piggy (no desktop o acesso é a barra de conversa), com Ferramentas e Ajuda;
 //   · "E se…" virou "Simulador" em todo lugar; o botão rosa virou "Ferramentas", com o
 //     nome escrito também no celular;
-//   · Ferramentas: o Simulador e o Painel antigo (/app) levam a algum lugar, o resto está "Em breve";
+//   · Ferramentas: o Simulador e o Painel antigo (/app) levam a algum lugar, o Guia do painel o abre,
+//     o resto está "Em breve";
 //   · 320 a 1440 sem nada saindo da barra de cima.
 import { test, before, after } from "node:test";
 import assert from "node:assert/strict";
@@ -30,30 +31,31 @@ const textos = (page, sel) => page.locator(sel).evaluateAll((els) => els.map((e)
 
 test("celular: o Piggy é o botão do meio e leva à página dele", async () => {
   const { ctx, page } = await abrir(390);
-  const abas = await textos(page, ".tabbar a");
+  const abas = await textos(page, ".tabbar a, .tabbar button");
   await page.locator('.tabbar a[data-tab="piggy"]').click();
   await page.locator("#page-title", { hasText: "Converse com o Piggy" }).waitFor({ timeout: 3000 }).catch(() => {});
   const r = [await page.locator("#page-title").innerText(), await page.locator('.tabbar a[data-tab="piggy"]').getAttribute("aria-current")];
   await ctx.close();
-  assert.deepEqual(abas, ["Resumo", "Gastos", "Piggy", "Metas", "Extrato"]);
-  assert.deepEqual(r, ["Converse com o Piggy", "page"]);
+  assert.deepEqual(abas, ["Resumo", "Gastos", "Piggy", "Metas", "Extrato", "Ajuda"]);
+  assert.deepEqual(r, ["Converse com o Piggy demonstração", "page"]); // no /painel a conversa ainda é de exemplo: o título leva o selo
 });
 
 test("desktop: menu com Simulador e Ferramentas, sem Piggy; o botão rosa abre Ferramentas", async () => {
   const { ctx, page } = await abrir(1440);
-  const menu = await textos(page, ".rail-list a");
+  const menu = await textos(page, ".rail-list a, .rail-list button");
   const botao = await page.locator(".topbar .btn-primary").innerText();
   await page.locator(".topbar .btn-primary").click();
   await page.waitForFunction(() => location.hash === "#/ferramentas");
   await page.locator(".tools li").first().waitFor();
-  const cards = await page.locator(".tools li").evaluateAll((lis) => lis.map((li) => [li.querySelector("b").textContent, li.querySelector("a")?.getAttribute("href") ?? li.querySelector("[aria-disabled]")?.textContent.includes("Em breve")]));
+  const cards = await page.locator(".tools li").evaluateAll((lis) => lis.map((li) => [li.querySelector("b").textContent, li.querySelector("a")?.getAttribute("href") ?? (li.querySelector("button") ? "botão" : li.querySelector("[aria-disabled]")?.textContent.includes("Em breve"))]));
   await ctx.close();
-  assert.deepEqual(menu, ["Resumo", "Previsão", "Para onde vai", "Simulador", "Metas", "Patrimônio", "Lançamentos", "Ferramentas"]);
+  assert.deepEqual(menu, ["Resumo", "Previsão", "Para onde vai", "Assinaturas", "Simulador", "Metas", "Patrimônio", "Lançamentos", "Ferramentas", "Ajuda"]);
   assert.equal(botao.trim(), "Ferramentas");
   assert.deepEqual(cards[0], ["Simulador", "#/simulador"]);
   assert.deepEqual(cards[1], ["Painel antigo", "/app"]); // sai do v2 para o dashboard de sempre
-  assert.equal(cards.length, 7);
-  assert.ok(cards.slice(2).every(([, v]) => v === true), JSON.stringify(cards)); // o resto: "Em breve", sem link
+  assert.equal(cards.length, 8);
+  assert.deepEqual(cards[7], ["Guia do painel", "botão"]); // abre o guia (abaixo de 360px a Ajuda sai da barra de baixo)
+  assert.ok(cards.slice(2, 7).every(([, v]) => v === true), JSON.stringify(cards)); // o resto: "Em breve", sem link
 });
 
 test("o nome antigo \"E se…\" não aparece mais", async () => {

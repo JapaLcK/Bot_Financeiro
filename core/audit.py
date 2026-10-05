@@ -19,6 +19,7 @@ from typing import Any
 
 from psycopg.types.json import Jsonb
 
+from core.client_ip import client_ip
 from core.crypto import PiiAccessContext, decrypt_pii_optional
 from core.pg_text import limpa_para_pg
 from db.connection import get_conn
@@ -102,18 +103,6 @@ def list_audit_events(
     return rows
 
 
-def _client_ip(request: Any) -> str | None:
-    if request is None:
-        return None
-    headers = getattr(request, "headers", None)
-    if headers is not None:
-        fwd = (headers.get("x-forwarded-for") or "").split(",")[0].strip()
-        if fwd:
-            return fwd
-    client = getattr(request, "client", None)
-    return getattr(client, "host", None) if client else None
-
-
 def _user_agent(request: Any) -> str | None:
     if request is None:
         return None
@@ -139,7 +128,7 @@ def record_audit_event(
     Nunca passe segredos em `details` (senha, TOTP, codigos).
     """
     if ip is None:
-        ip = _client_ip(request)
+        ip = client_ip(request)
     if user_agent is None:
         user_agent = _user_agent(request)
 
@@ -213,7 +202,7 @@ def maybe_record_login_from_new_ip(
     senao o IP da request corrente passa a ser "conhecido" e o evento nunca
     dispara.
     """
-    ip = _client_ip(request)
+    ip = client_ip(request)
     ua = _user_agent(request)
     if is_known_login_ip(user_id, ip):
         return

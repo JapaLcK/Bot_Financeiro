@@ -11,7 +11,6 @@ from psycopg.types.json import Jsonb
 from utils_date import _tz, add_months, billing_period_for_close_day
 from utils_text import is_internal_category
 
-from .accounts import delete_launch_and_rollback
 from .cards import (
     add_imported_credit_purchase,
     extract_installment_info,
@@ -20,6 +19,10 @@ from .cards import (
 )
 from .connection import TIPO_CANON_SQL, get_conn
 from .of_snapshots import grava_fotos_posicoes
+from .of_identity import (
+    LATEST_TRANSACTION_SQL, assert_unambiguous_links, bind_import,
+    external_id as of_external_id, existing_import,
+)
 from .open_finance_categories import categoria_pigbank, garantir_no_catalogo
 from .open_finance_cash import RESERVA_SQL, RESERVADO_SQL
 from .users import ensure_user, ensure_user_tx
@@ -38,28 +41,19 @@ from .users import ensure_user, ensure_user_tx
 logger = logging.getLogger(__name__)
 
 
-def _rollback_imported_of(rows: list[dict]) -> None:
-    """Reverte os artefatos importados de um conjunto de transações OF (launches + fatura).
+def _rollback_imported_of(rows: list[dict], *, disconnect=False) -> None:
+    """Limpa CREDIT antes de accounts; BANK é relido e limpo sob o lock no chamador.
 
-    Cada `row` traz: user_id, imported_launch_id, imported_credit_tx_id, launch_source.
-    - Cartão: `undo_credit_transaction` (ajusta o total da fatura).
-    - Launch: só apaga se for do OF (`source='open_finance'`); se foi auto-merge num lançamento
-      MANUAL, preserva o manual (só desvincula — a OF tx some depois de qualquer jeito).
-    Cada função gerencia própria conexão; falhas são engolidas pra não travar a limpeza.
+    O vínculo pode ter sido transferido a uma reconexão depois desta foto.
+    A remoção relê a referência sob o lock da compra antes de ajustar a fatura.
     """
     for r in rows:
-        uid = r.get("user_id")
-        ctx = r.get("imported_credit_tx_id")
+        uid, ctx = r.get("user_id"), r.get("imported_credit_tx_id")
         if ctx:
             try:
-                # remoção ÚNICA: apagar 1 parcela não pode cascatear o parcelamento inteiro.
-                remove_single_credit_transaction(uid, ctx)
-            except Exception:
-                pass
-        lid = r.get("imported_launch_id")
-        if lid and (r.get("launch_source") == "open_finance"):
-            try:
-                delete_launch_and_rollback(uid, lid)
+                remove_single_credit_transaction(
+                    uid, ctx, of_tx_ids=[t["id"] for t in rows if t["user_id"] == uid],
+                    disconnect=disconnect)
             except Exception:
                 pass
 
@@ -1806,12 +1800,24 @@ def delete_open_finance_transactions(
                 join open_finance_accounts a on a.id = t.account_id
                 join open_finance_connections c on c.id = a.connection_id
                 where t.id = any(%s)
-                for update of t
                 """,
                 ([r["id"] for r in rows],),
             )
-            for row in cur.fetchall():
-                delete_if_shadow(cur, row["user_id"], row["imported_launch_id"])
+            from .reconciliation import _locked_tx, _restore_original
+            removing = cur.fetchall()
+            for row in removing:
+                current = _locked_tx(cur, row["user_id"], row["id"])
+                cur.execute(
+                    """select 1 from open_finance_transactions t
+                         join open_finance_accounts a on a.id=t.account_id
+                         join open_finance_connections c on c.id=a.connection_id
+                        where c.user_id=%s and t.imported_launch_id=%s and not t.id=any(%s)
+                        limit 1""",
+                    (row["user_id"], current["imported_launch_id"], [r["id"] for r in removing]))
+                if cur.fetchone():
+                    continue  # outro espelho ainda sustenta o vínculo legado
+                _restore_original(cur, row["user_id"], current["imported_launch_id"])
+                delete_if_shadow(cur, row["user_id"], current["imported_launch_id"])
             from .open_finance_cash import estorna_links
             for owner in owners:
                 estorna_links(cur, owner, [r["id"] for r in rows if r["user_id"] == owner])
@@ -2133,6 +2139,9 @@ def _insert_of_shadow(cur, user_id: int, r, cls) -> tuple[int | None, bool]:
         que acontecia gravando `date` cru como meia-noite UTC).
     `time_known` sinaliza pro front mostrar HH:MM só quando é real.
     """
+    existing = existing_import(cur, user_id, r)
+    if existing:
+        return existing, False
     has_real_time = r["transacted_at"] is not None
     criado_em = (
         r["transacted_at"] if has_real_time
@@ -2156,7 +2165,7 @@ def _insert_of_shadow(cur, user_id: int, r, cls) -> tuple[int | None, bool]:
         (
             user_id, cls["tipo"], cls["valor"], (categoria_pigbank(r["category"]) or "outros"),
             r["description"], None, criado_em, Jsonb(efeitos),
-            "open_finance", r["provider_transaction_id"], r["transaction_date"], "BRL",
+            "open_finance", of_external_id(r), r["transaction_date"], "BRL",
             cls["is_internal_movement"],
         ),
     )
@@ -2165,7 +2174,7 @@ def _insert_of_shadow(cur, user_id: int, r, cls) -> tuple[int | None, bool]:
         return got["id"], True
     cur.execute(
         "select id from launches where user_id=%s and source='open_finance' and external_id=%s",
-        (user_id, r["provider_transaction_id"]),
+        (user_id, of_external_id(r)),
     )
     ex = cur.fetchone()
     return (ex["id"] if ex else None), False
@@ -2189,17 +2198,18 @@ def import_open_finance_launches(user_id: int, connection_id: int | None = None)
 
     with get_conn() as conn:
         with conn.cursor() as cur:
+            assert_unambiguous_links(cur, user_id, credit=False)
             from .bank_movements import reconcile_bank_movements
             reconcile_bank_movements(cur, user_id)
             cur.execute(
-                """
+                f"""
                 select t.id as of_tx_id, t.provider_transaction_id, t.description,
                        t.amount, t.transaction_date, t.transacted_at, t.category,
-                       a.type as account_type
+                       a.type as account_type, a.provider_account_id, c.provider
                 from open_finance_transactions t
                 join open_finance_accounts a on a.id = t.account_id
                 join open_finance_connections c on c.id = a.connection_id
-                where c.user_id = %s
+                where {LATEST_TRANSACTION_SQL.format(tx='t')} and c.user_id = %s
                   and t.imported_launch_id is null
                   and (%s::bigint is null or c.id = %s)
                 order by t.transaction_date, t.id
@@ -2218,6 +2228,11 @@ def import_open_finance_launches(user_id: int, connection_id: int | None = None)
                 cls = classify_open_finance_launch(r["amount"], r["category"], r["description"])
                 if r["of_tx_id"] in caixa:  # saque/depósito em espécie: par da Carteira
                     cls["is_internal_movement"] = True
+
+                previous = existing_import(cur, user_id, r, include_fused=True)
+                if previous:
+                    bind_import(cur, user_id, r, previous)
+                    continue
 
                 # Reconciliação (Fase 2): gasto/receita não-interno tenta casar com manual.
                 verdict, match_id = "none", None
@@ -2265,6 +2280,8 @@ def import_open_finance_launches(user_id: int, connection_id: int | None = None)
                         "where id=%s",
                         (match_id, match_id, r["of_tx_id"]),
                     )
+                    from .reconciliation import _apply_bank_fields
+                    _apply_bank_fields(cur, user_id, match_id, r, cls)
                     auto_merged += 1
                     continue
 
@@ -2429,15 +2446,17 @@ def import_open_finance_credit(user_id: int, connection_id: int | None = None) -
 
     with get_conn() as conn:
         with conn.cursor() as cur:
+            assert_unambiguous_links(cur, user_id, credit=True)
             cur.execute(
-                """
+                f"""
                 select t.id as of_tx_id, t.provider_transaction_id, t.description,
                        t.amount, t.transaction_date, t.category, t.raw as tx_raw,
-                       a.id as of_account_id, a.name as account_name, a.raw as account_raw
+                       a.id as of_account_id, a.name as account_name, a.raw as account_raw,
+                       a.provider_account_id, c.provider
                 from open_finance_transactions t
                 join open_finance_accounts a on a.id = t.account_id
                 join open_finance_connections c on c.id = a.connection_id
-                where c.user_id = %s
+                where {LATEST_TRANSACTION_SQL.format(tx='t')} and c.user_id = %s
                   and t.imported_credit_tx_id is null
                   and upper(a.type) = 'CREDIT'
                   and (%s::bigint is null or c.id = %s)
@@ -2487,7 +2506,7 @@ def import_open_finance_credit(user_id: int, connection_id: int | None = None) -
         cat = categoria_pigbank(r["category"])
         tx_id, created = add_imported_credit_purchase(
             user_id, card_cache[of_acc_id], r["amount"], cat,
-            r["transaction_date"], r["provider_transaction_id"],
+            r["transaction_date"], of_external_id(r), of_identity=r,
             installment_no=inst_no, installments_total=inst_total, group_id=group_id,
         )
         if created:
@@ -2495,16 +2514,22 @@ def import_open_finance_credit(user_id: int, connection_id: int | None = None) -
             if cat:
                 novas.add(cat)
         if tx_id is not None:
-            links.append((r["of_tx_id"], tx_id))
+            links.append((r, tx_id))
 
     if links:
         with get_conn() as conn:
             with conn.cursor() as cur:
-                for of_tx_id, credit_tx_id in links:
-                    cur.execute(
-                        "update open_finance_transactions set imported_credit_tx_id=%s where id=%s",
-                        (credit_tx_id, of_tx_id),
-                    )
+                # CREDIT antes de accounts, como o cleanup; serializa a transferência
+                # com a remoção da compra sem inverter a ordem do pagamento de fatura.
+                cur.execute("select id from credit_transactions where user_id=%s and id=any(%s) "
+                            "order by id for update", (user_id, sorted({tx for _, tx in links})))
+                present = {r["id"] for r in cur.fetchall()}
+                from .bank_movements import _lock_user
+                _lock_user(cur, user_id)
+                for row, credit_tx_id in links:
+                    if credit_tx_id not in present:
+                        continue
+                    bind_import(cur, user_id, row, credit_tx_id, credit=True)
             conn.commit()
     garantir_no_catalogo(user_id, novas)
 
@@ -2542,10 +2567,12 @@ def _sync_imported_credit_updates(user_id: int, connection_id: int | None) -> in
     novas: set[str] = set()
     with get_conn() as conn:
         with conn.cursor() as cur:
+            assert_unambiguous_links(cur, user_id, credit=True)
             # 2) Transações de cartão (ajusta o total da fatura pela diferença)
             cur.execute(
-                """
-                select o.amount, o.transaction_date, o.category,
+                f"""
+                select distinct on (ct.id) o.amount, o.transaction_date, o.category,
+                       o.provider_transaction_id, a.provider_account_id, c.provider,
                        ct.id as ct_id, ct.valor as cur_valor, ct.is_refund as cur_refund,
                        ct.categoria as cur_cat, ct.purchased_at as cur_date, ct.bill_id,
                        ct.card_id, ct.categoria_editada as editada
@@ -2553,8 +2580,9 @@ def _sync_imported_credit_updates(user_id: int, connection_id: int | None) -> in
                 join open_finance_accounts a on a.id = o.account_id
                 join open_finance_connections c on c.id = a.connection_id
                 join credit_transactions ct on ct.id = o.imported_credit_tx_id
-                where c.user_id=%s and (%s::bigint is null or c.id=%s)
-                  and upper(a.type)='CREDIT'
+                where {LATEST_TRANSACTION_SQL.format(tx='o')} and c.user_id=%s and (%s::bigint is null or c.id=%s)
+                  and ct.user_id=c.user_id and upper(a.type)='CREDIT'
+                order by ct.id, c.id desc, o.id desc
                 """,
                 (user_id, connection_id, connection_id),
             )
@@ -2621,7 +2649,7 @@ def sync_imported_open_finance_updates(user_id: int, connection_id: int | None =
 
     Sem isso, uma correção de valor/data/categoria atualizava só o espelho OF — o launch,
     a credit_transaction e o total da fatura ficavam com o valor velho. Mexe apenas em
-    registros DO OF (source=open_finance); nunca sobrescreve lançamento manual auto-mesclado.
+    registros OF e a representação bancária da fundida, preservando o original manual.
     Categoria e interno editados pelo cliente (`categoria_editada`) ficam como ele deixou
     (#712). O interno de linha editada = o da própria categoria, ou interno enquanto
     o par da Carteira vale (depois do par, volta ao que a categoria diz).
@@ -2635,13 +2663,15 @@ def sync_imported_open_finance_updates(user_id: int, connection_id: int | None =
 
     with get_conn() as conn:
         with conn.cursor() as cur:
+            assert_unambiguous_links(cur, user_id, credit=False)
             from .bank_movements import reconcile_bank_movements
             reconcile_bank_movements(cur, user_id)
             # 1) Launches próprios do OF (conta BANK)
             cur.execute(
-                """
-                select o.id as of_tx_id, o.amount, o.transaction_date, o.category, o.description,
-                       l.id as launch_id, l.valor as cur_valor, l.categoria as cur_cat,
+                f"""
+                select o.id as of_tx_id, o.amount, o.transaction_date, o.transacted_at, o.category, o.description,
+                       o.provider_transaction_id, a.provider_account_id, c.provider,
+                       l.source as launch_source, l.id as launch_id, l.valor as cur_valor, l.categoria as cur_cat,
                        l.tipo as cur_tipo, l.is_internal_movement as cur_internal,
                        l.categoria_editada as editada,
                        coalesce(l.posted_at, l.criado_em::date) as cur_date
@@ -2649,15 +2679,22 @@ def sync_imported_open_finance_updates(user_id: int, connection_id: int | None =
                 join open_finance_accounts a on a.id = o.account_id
                 join open_finance_connections c on c.id = a.connection_id
                 join launches l on l.id = o.imported_launch_id
-                where c.user_id=%s and (%s::bigint is null or c.id=%s)
-                  and upper(a.type)='BANK' and coalesce(l.source,'')='open_finance'
+                where {LATEST_TRANSACTION_SQL.format(tx='o')} and c.user_id=%s and (%s::bigint is null or c.id=%s)
+                  and l.user_id=%s and upper(a.type)='BANK'
+                  and (l.source='open_finance' or
+                       (o.reconciliation_status in ('auto_merged','confirmed')
+                        and (o.match_launch_id is null or o.match_launch_id=l.id)))
                 """,
-                (user_id, connection_id, connection_id),
+                (user_id, connection_id, connection_id, user_id),
             )
             from .open_finance_cash import cash_internal_tx_ids
             rows, caixa = cur.fetchall(), cash_internal_tx_ids(cur, user_id)
             for r in rows:
                 cls = classify_open_finance_launch(r["amount"], r["category"], r["description"])
+                if r["launch_source"] != "open_finance":
+                    from .reconciliation import _apply_bank_fields
+                    launches_updated += _apply_bank_fields(cur, user_id, r["launch_id"], r, cls)
+                    continue
                 forcado = r["of_tx_id"] in caixa  # saque/depósito em espécie: par da Carteira
                 if forcado:
                     cls["is_internal_movement"] = True
@@ -2695,7 +2732,9 @@ def sync_imported_open_finance_updates(user_id: int, connection_id: int | None =
                     gravada = (cur.fetchone() or {}).get("categoria")
                     if new_cat != r["cur_cat"] and gravada == new_cat:
                         novas.add(new_cat)
-                    launches_updated += 1
+                from .reconciliation import _apply_bank_fields
+                fields_changed = _apply_bank_fields(cur, user_id, r["launch_id"], r, cls)
+                launches_updated += bool(changed or fields_changed)
 
 
         conn.commit()
@@ -3295,7 +3334,7 @@ def disconnect_open_finance_connection(
             card_ids = [r["card_id"] for r in cur.fetchall()]
 
     # 2. reverte launches/fatura importados.
-    _rollback_imported_of(rows)
+    _rollback_imported_of(rows, disconnect=True)
 
     # 3. CREDIT: apagar cartão pode cascatear faturas. Commit antes de accounts,
     # pois pagamento mantém a fatura enquanto outro helper adquire a conta.
@@ -3364,12 +3403,27 @@ def disconnect_open_finance_connection(
                 join open_finance_accounts a on a.id = t.account_id
                 join open_finance_connections c on c.id = a.connection_id
                 where c.user_id = %s and (%s::bigint is null or c.id = %s)
-                for update of t
                 """,
                 (user_id, connection_id, connection_id),
             )
-            for row in cur.fetchall():
-                delete_if_shadow(cur, row["user_id"], row["imported_launch_id"])
+            from .reconciliation import _locked_tx, _restore_original
+            removing = cur.fetchall()
+            for row in removing:
+                current = _locked_tx(cur, row["user_id"], row["id"])
+                from .of_identity import preserve_disconnect_alias
+                preserve_disconnect_alias(cur, user_id, [r["id"] for r in removing],
+                                          current["imported_launch_id"])
+                cur.execute(
+                    """select 1 from open_finance_transactions t
+                         join open_finance_accounts a on a.id=t.account_id
+                         join open_finance_connections c on c.id=a.connection_id
+                        where c.user_id=%s and t.imported_launch_id=%s and not t.id=any(%s)
+                        limit 1""",
+                    (row["user_id"], current["imported_launch_id"], [r["id"] for r in removing]))
+                if cur.fetchone():
+                    continue  # outro espelho ainda sustenta o vínculo legado
+                _restore_original(cur, row["user_id"], current["imported_launch_id"])
+                delete_if_shadow(cur, row["user_id"], current["imported_launch_id"])
             from .open_finance_cash import record_coverage
             record_coverage(cur, user_id, connection_id)
             if connection_id is None:

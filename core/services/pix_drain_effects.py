@@ -3,7 +3,7 @@ core/services/pix_drain_effects.py — o que o dreno do Pix faz no MUNDO LÁ FOR
 
 Saiu de `core/services/pix_drain.py` por assunto, não por tamanho: lá mora a
 máquina — reserva, roteamento, guardas, transição, laço —, e aqui mora o que
-cada efeito executa (Stripe, `plan_grants`, GA4, Meta CAPI, e-mail), mais a
+cada efeito executa (Stripe, `plan_grants`, cadernos, GA4, Meta CAPI, e-mail), mais a
 janela de acesso que o `grant` grava e o alerta do que NÃO tem efeito
 automático.
 
@@ -27,6 +27,7 @@ from datetime import datetime, timedelta, timezone
 from core.crypto import PiiAccessContext, decrypt_pii_optional
 from core.observability import log_system_event_sync, recent_event_exists
 from core.services import admin_notify
+from core.services.pix_extras import total_cents
 
 def janela_de_acesso(cobranca) -> tuple[datetime, datetime]:
     """Quando o acesso comprado começa e termina (§7), decidido NO PAGAMENTO.
@@ -74,7 +75,7 @@ def alertar(tipo: str, cobranca, payment_id: str) -> None:
         extra = f" · devolvido: {_acumulado_estornado(payment_id)}"
     admin_notify.notify_pix_alerta(
         f"⚠️ **Pix: {tipo}** cobrança `{cobranca['id']}` · "
-        f"valor R$ {int(cobranca['amount_cents']) / 100:.2f}{extra} · "
+        f"valor R$ {total_cents(cobranca) / 100:.2f}{extra} · "
         "o acesso NÃO foi alterado."
     )
 
@@ -88,17 +89,23 @@ def alertar_stripe_desistido(cobranca) -> None:
     inclusive com a coluna nula, que é o caso da própria indisponibilidade.
 
     Sobreposição de período é ESTORNÁVEL; acesso negado a quem pagou não é. O
-    cartão fica com o cancelamento pendente e o caminho é manual (§9).
+    cartão fica com o cancelamento pendente e o caminho é manual (§9). Sem
+    `stripe_subscription_id` a falha foi na CONSULTA: não se sabe se há cartão.
     """
+    titulo, acao = "cancelamento no Stripe não entrou", "Cancele a assinatura à mão"
+    if not cobranca["stripe_subscription_id"]:
+        titulo = "não consegui consultar o Stripe"
+        acao = (f"Confira se a conta `{cobranca['user_id']}` tem assinatura viva; "
+                "se tiver, cancele à mão")
     admin_notify.notify_pix_alerta(
-        f"🚨 **Pix: cancelamento no Stripe não entrou** cobrança `{cobranca['id']}`"
-        " — 6ª falha, o acesso Pix FOI concedido assim mesmo. Cancele a "
-        "assinatura à mão e estorne a fatura que renovar."
+        f"🚨 **Pix: {titulo}** cobrança `{cobranca['id']}` — 6ª falha, o acesso "
+        f"Pix FOI concedido assim mesmo. {acao} e estorne a fatura que renovar."
     )
 
 
 def alertar_valor(cobranca, valor) -> None:
-    """Valor liquidado ≠ `amount_cents` do snapshot — **alerta, e NÃO barra**.
+    """Valor liquidado ≠ total do snapshot (plano + cadernos, `total_cents`) —
+    **alerta, e NÃO barra**.
 
     Barrar era a outra saída possível, e ela é pior aqui: o QR dinâmico carrega
     o valor, então o pagador não escolhe quanto paga. Divergência só nasce de
@@ -112,7 +119,7 @@ def alertar_valor(cobranca, valor) -> None:
         recebido = int(round(float(valor) * 100))
     except (TypeError, ValueError):
         return
-    combinado = int(cobranca["amount_cents"])
+    combinado = total_cents(cobranca)
     if recebido != combinado:
         admin_notify.notify_pix_alerta(
             f"⚠️ **Pix: valor diferente do combinado** cobrança `{cobranca['id']}`"
@@ -139,64 +146,67 @@ def _acumulado_estornado(payment_id: str) -> str:
 def _stripe_cancel(cobranca, evt) -> None:
     """Migração Stripe→Pix: reconfirma o período pago e agenda o cancelamento.
 
-    Compra Pix comum (`stripe_subscription_id is null`) é **no-op REGISTRADO**:
-    não chama o Stripe, não conta `attempts`, não alerta — registra o par e o
-    laço segue para o `grant`. É a esmagadora maioria das vendas.
+    Sem `stripe_subscription_id`, ou com a gravada MORTA, pergunta ao Stripe
+    (`_stripe_vivo`): achou viva, migra com ela — vai para a coluna, e o começo
+    que esperava a morta é desfeito antes de adiar até a viva; nada vivo nem
+    gravado = no-op REGISTRADO. Cartão que conclui depois disto o webhook recusa.
 
-    Na migração, os dois passos do §9 item 4, **nesta ordem**:
-
-      1. lê o `current_period_end` de verdade e grava em `stripe_period_end_at`;
-      2. `cancel_at_period_end=True` — nunca `Subscription.delete`, que cortaria
-         hoje o acesso que o cliente já pagou até o fim do mês.
-
-    **A janela de acesso só é ADIADA, e só quando o período reconfirmado passar
-    do começo já gravado** (`_janela_adiada`). A transição para `paid` a decidiu
-    a partir da ESTIMATIVA do checkout; se a assinatura renovou durante a vida
-    do QR, aquela estimativa ficou no passado e o ano Pix comeria dias de um mês
-    que o cartão já cobrou. Não é "evento mexendo em grant": o grant nasce no
-    efeito SEGUINTE, e é por isso que a correção cabe aqui e em nenhum outro
-    lugar — o dicionário atualizado é o que ele lê.
-
-    **Levanta se o Stripe recusar**, e é por isso que este é o PRIMEIRO efeito da
-    lista: sem `attempts` + retentativa, ficaria dinheiro dentro com o cartão
-    ainda cobrando, calado. A promessa do §9 é condicional — se o agendamento
-    nunca entrar, o alerta sai e o caminho é estorno manual daquela fatura; o
-    cliente não fica sem acesso porque o grant Pix começa depois do período pago.
+    §9 item 4, **nesta ordem**: (1) grava o `current_period_end` com a janela
+    ADIADA (`_janela_adiada`) no MESMO update, antes de o efeito contar como
+    feito — a retentativa do `grant` relê a linha; (2) `cancel_at_period_end`,
+    nunca `delete`, que cortaria hoje o acesso já pago. Gravada morta e nada
+    vivo: sem `modify`, e a janela que esperava a morta volta para agora.
+    **Levanta se o Stripe recusar**: é o PRIMEIRO efeito porque, sem retentativa,
+    ficaria dinheiro dentro com o cartão cobrando, calado. 6ª falha: alerta §8.2.
     """
-    from db.pix_charges_saga import gravar_stripe_period_end
-
-    sub_id = cobranca["stripe_subscription_id"]
-    if not sub_id:
-        return
     import stripe as _stripe
+    from core.services.cartao_recusado_por_pix import _JA_MORTA
+    from core.services.pix_checkout import _stripe_vivo
+    from db.pix_charges_saga import gravar_stripe_period_end
     from frontend.finance_bot_websocket_custom import (  # noqa: PLC0415
-        _sub_period_end_ts,
+        STRIPE_SECRET_KEY, _sg, _sub_period_end_ts,
     )
-    sub = _stripe.Subscription.retrieve(sub_id)
+    # Só handlers HTTP atribuíam a chave; o dreno num processo novo ia sem ela.
+    _stripe.api_key = STRIPE_SECRET_KEY
+    agora, desfeita = datetime.now(timezone.utc), {}
+    sub_id = cobranca["stripe_subscription_id"]
+    sub = _stripe.Subscription.retrieve(sub_id) if sub_id else None
+    if sub is None or _sg(sub, "status") in _JA_MORTA:
+        vivo = _stripe_vivo(cobranca["user_id"])
+        if vivo:  # a viva pode acabar ANTES do fim estimado da morta
+            desfeita = _janela_adiada(cobranca, agora, True) if sub is not None else {}
+            sub_id = vivo[0]
+            sub = _stripe.Subscription.retrieve(sub_id)
+        elif sub is None:
+            return
     ts = _sub_period_end_ts(sub)
-    if ts:
-        fim = datetime.fromtimestamp(int(ts), tz=timezone.utc)
-        janela = _janela_adiada(cobranca, fim)
-        gravar_stripe_period_end(cobranca["id"], fim, **janela)
-        cobranca.update(janela)
-    _stripe.Subscription.modify(sub_id, cancel_at_period_end=True)
+    morta = _sg(sub, "status") in _JA_MORTA
+    if ts or morta or desfeita:
+        fim = (agora if morta or not ts
+               else datetime.fromtimestamp(int(ts), tz=timezone.utc))
+        janela = desfeita | _janela_adiada(cobranca | desfeita, fim, morta)
+        gravar_stripe_period_end(cobranca["id"], sub_id, fim, **janela)
+        cobranca.update(janela, stripe_subscription_id=sub_id)
+    if not morta:
+        _stripe.Subscription.modify(sub_id, cancel_at_period_end=True)
     log_system_event_sync(
         "info", "pix_stripe_cancel_agendado",
         "Assinatura do Stripe agendada para cancelar no fim do periodo pago.",
         source="pix", user_id=cobranca["user_id"],
-        details={"charge_id": cobranca["id"]})
+        details={"charge_id": cobranca["id"], "sub_status": _sg(sub, "status")})
 
 
-def _janela_adiada(cobranca, fim) -> dict:
+def _janela_adiada(cobranca, fim, morta=False) -> dict:
     """A janela recalculada quando o período do cartão renovou DEPOIS do checkout.
 
-    Só ADIA: `fim` igual ou anterior ao `access_starts_at` já gravado devolve
-    `{}` e nada é reescrito — antecipar o começo é que sobreporia grant com
-    período de cartão pago. Linha sem janela (não deveria existir em `paid`, o
-    `CHECK` a proíbe) também sai por `{}`, porque quem a escreve é a transição.
+    Só ADIA: `fim` igual ou anterior ao `access_starts_at` gravado devolve `{}`
+    — antecipar sobreporia grant com período de cartão pago. Linha sem janela
+    (o `CHECK` a proíbe em `paid`) também sai por `{}`: quem a escreve é a
+    transição. `morta` (`fim` = agora): só o começo que esperava ela volta.
     """
     inicio = cobranca["access_starts_at"]
-    if not inicio or fim <= inicio:
+    if not inicio or (inicio <= fim or inicio != cobranca["stripe_period_end_at"]
+                      if morta else fim <= inicio):
         return {}
     return {"access_starts_at": fim,
             "access_expires_at": fim + timedelta(days=int(cobranca["duration_days"]))}
@@ -216,6 +226,20 @@ def _grant(cobranca, evt) -> None:
     record_checkout_completed(cobranca["user_id"], cobranca["public_token"])
 
 
+def _ebook(cobranca, evt) -> None:
+    """Os cadernos da foto viram pendência em `ebook_entregas` — uma linha por
+    caderno, `session_id` = `external_reference` (`pix:<id>`); quem entrega é o job
+    `core/services/ebook_entrega.py`. Sem cadernos é no-op REGISTRADO (padrão do
+    `stripe_cancel`). O `on conflict do nothing` do `registrar` é a 2ª barreira
+    contra reentrega, depois do par `(payment_id, 'ebook')`."""
+    from db.ebook_entregas import registrar
+
+    extras = cobranca.get("extras") or []
+    if extras:
+        registrar(cobranca["user_id"], cobranca["external_reference"],
+                  [(e["price"], e["url"]) for e in extras])
+
+
 def _ga4(cobranca, evt) -> None:
     """`purchase` com `transaction_id = public_token` — a chave de dedupe do
     GA4, e o único identificador da cobrança que sai do servidor (§13.6)."""
@@ -226,7 +250,7 @@ def _ga4(cobranca, evt) -> None:
         return
     send_purchase(
         transaction_id=cobranca["public_token"],
-        value=int(cobranca["amount_cents"]) / 100,
+        value=total_cents(cobranca) / 100,
         currency=cobranca["currency"] or "BRL",
         # PÚBLICO, e esta é a linha de RECEITA: `send_purchase` usa este valor
         # como `item_id` E `item_name` do evento `purchase`. O Stripe já manda o
@@ -251,7 +275,7 @@ def _capi(cobranca, evt) -> None:
         event_name="Purchase",
         event_id=purchase_event_id(cobranca["public_token"]),
         event_time=int(datetime.now(timezone.utc).timestamp()),
-        value=int(cobranca["amount_cents"]) / 100,
+        value=total_cents(cobranca) / 100,
         currency=cobranca["currency"] or "BRL",
         email=_email_do_titular(cobranca["user_id"]),
         fbp=cobranca["fbp"], fbc=cobranca["fbc"],
@@ -287,7 +311,9 @@ def _email(cobranca, evt) -> None:
         if not send_pix_paid_email(destino, cobranca["plan"],
                                    int(cobranca["amount_cents"]) / 100,
                                    cobranca["access_starts_at"],
-                                   cobranca["access_expires_at"]):
+                                   cobranca["access_expires_at"],
+                                   extras=[(e["nome"], int(e["valor_cents"]))
+                                           for e in cobranca.get("extras") or []]):
             raise RuntimeError("send_pix_paid_email devolveu False")
         log_system_event_sync("info", "pix_paid_email_sent",
                               "E-mail de confirmacao da compra Pix enviado.",
@@ -320,5 +346,5 @@ def _email_do_titular(user_id: int) -> str | None:
     return conta.get("email")
 
 
-EXECUTORES = {"stripe_cancel": _stripe_cancel, "grant": _grant, "ga4": _ga4,
+EXECUTORES = {"stripe_cancel": _stripe_cancel, "grant": _grant, "ebook": _ebook, "ga4": _ga4,
                "capi": _capi, "email": _email, "revoke": _revoke}

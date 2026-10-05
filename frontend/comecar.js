@@ -52,6 +52,43 @@
   const WA_POLL_MS = 3000;
   const WA_POLL_LIMIT = 30; // 30 × 3s = 90s
 
+  // Repoll do estado do Open Finance no passo 2, só enquanto alguma conexão
+  // está em `updating`. ponytail: teto fixo de 2 min; depois o texto fica no
+  // último estado lido e o painel mostra o resto.
+  const OF_POLL_MS = 5000;
+  const OF_POLL_LIMIT = 24; // 24 × 5s = 2 min
+
+  /**
+   * Estado da conexão (`ui.state`, decidido só por connection_ui_state em
+   * core/services/pluggy_health.py) → a ação que o wizard oferece. Rótulo e
+   * detalhe NÃO moram aqui: vêm prontos do servidor (_LABELS/_FIXED_DETAIL) e
+   * são mostrados como vieram. Estado fora da tabela = sem ação, só o texto do
+   * servidor. paused/removed levam a Ajustes (decisão do dono, 2026-10-04).
+   * O teste "os 9 estados" compara com o _LABELS: estado novo lá quebra ele.
+   */
+  const OF_ACTION = {
+    updating: "wait",
+    needs_user_action: "resolve", item_missing: "resolve", paused: "resolve", removed: "resolve",
+  };
+  /**
+   * Produto da Pluggy → como o passo 2 o nomeia. A lista vem do servidor
+   * (`of_produtos`, o que o connect token pede); produto sem rótulo aparece com
+   * o nome cru — o que é lido nunca é omitido da tela.
+   */
+  const OF_PRODUCT_LABELS = {
+    ACCOUNTS: "Contas e saldos",
+    TRANSACTIONS: "Transações",
+    CREDIT_CARDS: "Cartões de crédito",
+    INVESTMENTS: "Investimentos",
+    INVESTMENTS_TRANSACTIONS: "Movimentações dos investimentos",
+    IDENTITY: "Seus dados cadastrais",
+    PAYMENT_DATA: "Dados de pagamento",
+    LOANS: "Empréstimos",
+    BROKERAGE_NOTE: "Notas de corretagem",
+  };
+  const OF_WAIT_TEXT = "Pode continuar: os dados aparecem no painel quando chegarem.";
+  const SAVE_FAIL_TEXT = "Não consegui salvar agora. Confere sua internet e tenta de novo.";
+
   /* ─── Estado único do wizard ──────────────────────────────────────────── */
 
   const state = {
@@ -60,7 +97,8 @@
     step: STEP_WELCOME,
     completed: false,
     viewed: {},            // passos que já emitiram telemetria de view
-    inFlight: false,       // uma requisição de escrita por vez
+    inFlight: 0,           // escritas em voo; a do passo 5 pode começar dentro de outra (saveReport → next)
+    idle: Promise.resolve(), // resolve quando inFlight volta a 0
     cards: [],
     cardsMax: null,
     balance: 0,
@@ -69,6 +107,11 @@
     waLink: "",
     waPollTimer: null,
     waPollCount: 0,
+    ofPollTimer: null,
+    ofPollCount: 0,
+    ofSeq: 0,              // só a resposta do pedido mais novo desenha
+    ofRendered: null,      // última lista desenhada (JSON) — poll igual não toca o DOM
+    conversion: null,      // envio da conversão desta visita (Promise), se ela carimbou
     reportChoice: null,
     reportCurrent: null,
     weeklyReportAvailable: false,
@@ -122,6 +165,20 @@
       if (String(cards[i].name || "").trim().toLowerCase() === wanted) return true;
     }
     return false;
+  }
+
+  /** Conexões do snapshot GET /open-finance/{id} → o que o passo 2 mostra. */
+  function syncView(connections) {
+    const rows = (Array.isArray(connections) ? connections : []).map(function (c) {
+      const ui = (c && c.ui) || {};
+      return {
+        bank: (c && c.institution_name) || "Seu banco",
+        label: ui.label || "",
+        detail: ui.detail || "",
+        action: OF_ACTION[ui.state] || null,
+      };
+    });
+    return { rows: rows, poll: rows.some(function (r) { return r.action === "wait"; }) };
   }
 
   /* ─── DOM helpers ─────────────────────────────────────────────────────── */
@@ -187,25 +244,46 @@
    */
   async function withBusy(button, fn) {
     if (state.inFlight) return;
-    state.inFlight = true;
+    busyBegin();
     if (button) { button.disabled = true; button.setAttribute("aria-busy", "true"); }
     try {
       return await fn();
     } finally {
-      state.inFlight = false;
+      busyEnd();
       if (button) { button.disabled = false; button.removeAttribute("aria-busy"); }
     }
   }
 
+  /**
+   * Contador, não booleano: a conclusão do passo 5 começa dentro do saveReport
+   * (next → goTo) e tem de continuar ocupando depois que ele termina. O
+   * `aria-busy` no cartão é o feedback: o CSS apaga os CTAs enquanto há escrita.
+   */
+  let idleResolve = null;
+  function busyBegin() {
+    if (!state.inFlight++) state.idle = new Promise(function (r) { idleResolve = r; });
+    const card = document.querySelector(".onb-card");
+    if (card) card.setAttribute("aria-busy", "true");
+  }
+  function busyEnd() {
+    if (--state.inFlight) return;
+    const card = document.querySelector(".onb-card");
+    if (card) card.removeAttribute("aria-busy");
+    idleResolve();
+  }
+
   /* ─── Persistência do progresso ───────────────────────────────────────── */
 
-  /** Grava passo/conclusão/telemetria. Nunca derruba a navegação. */
+  /**
+   * Grava passo/conclusão/telemetria; devolve null se falhar. Passo é
+   * conveniência (no pior caso recomeça de um passo anterior), mas a CONCLUSÃO
+   * não: quem chama com `completed` confere o retorno antes de dizer "pronto"
+   * ou de sair para o /home.
+   */
   async function persist(payload) {
     try {
       return await apiSend("POST", "/onboarding/state", payload);
     } catch (_err) {
-      // Progresso é conveniência: se falhar, o usuário continua o fluxo e no
-      // pior caso recomeça de um passo anterior na próxima visita.
       return null;
     }
   }
@@ -223,6 +301,7 @@
     state.step = Math.min(Math.max(step, STEP_WELCOME), TOTAL_STEPS);
     clearError();
     stopWaPoll();
+    stopOfPoll();
 
     for (let n = 1; n <= TOTAL_STEPS; n++) show(stepEl(n), n === state.step);
     renderProgress();
@@ -232,8 +311,52 @@
     // novo não pode inflar a contagem do funil.
     const firstView = !state.viewed[state.step];
     state.viewed[state.step] = true;
-    persist({ step: state.step, event: firstView ? "view" : null });
-    loadStep(state.step);
+    const payload = { step: state.step, event: firstView ? "view" : null };
+    // Entrar no passo final GRAVA a conclusão (decisão do dono, #728): o
+    // "Tudo pronto!" só aparece com o 200, nunca antes.
+    if (state.step === TOTAL_STEPS) payload.completed = true;
+    const saved = persist(payload);
+    if (state.step === TOTAL_STEPS) completeOnEnter(saved);
+    else loadStep(state.step);
+  }
+
+  async function completeOnEnter(saved) {
+    show(el("done-ok"), false);
+    show(el("done-fail"), false);
+    show(el("done-saving"), true);
+    busyBegin(); // a conclusão em voo é escrita como as outras: "Pular tudo" espera ela
+    let ok;
+    try {
+      ok = await saved;
+      if (ok) concluiu(ok);
+    } finally { busyEnd(); }
+    if (state.step !== TOTAL_STEPS) return;
+    show(el("done-saving"), false);
+    if (ok) {
+      show(el("done-ok"), true);
+    } else {
+      showError(SAVE_FAIL_TEXT);
+      show(el("done-fail"), true);
+    }
+  }
+
+  /**
+   * Um POST de conclusão voltou 200. Fonte única da conversão (completeOnEnter,
+   * retry e skipAll passam aqui): ela sai quando a conclusão grava, e não no
+   * botão final — qualquer saída depois já a encontra enviada. Só com
+   * `stamped` (revisita não reconta) e só no passo 5: "Pular tudo" dos passos
+   * 1–4 não é ativação.
+   */
+  function concluiu(ok) {
+    state.completed = true;
+    if (ok.stamped && state.step === TOTAL_STEPS) fireConversion();
+  }
+
+  function retryComplete(button) {
+    clearError();
+    return withBusy(button, function () {
+      return completeOnEnter(persist({ step: TOTAL_STEPS, completed: true }));
+    });
   }
 
   function next() { goTo(state.step + 1); }
@@ -246,50 +369,66 @@
     goTo(state.step + 1);
   }
 
-  async function finish() {
-    firePixel();
-    await persist({ step: TOTAL_STEPS, completed: true });
-    // O evento do GA4 sai daqui, e não do firePixel, porque quem navega é esta
-    // função: `pbTrack` espera o envio antes do replace (ver o snippet em
-    // frontend/routes/shared.py). O `await` acima dá alguma folga, mas não é
-    // garantia — gtag.js ainda carregando perde o evento do mesmo jeito.
-    const irPraHome = function () {
-      if (window.PBPurchaseIntent) window.PBPurchaseIntent.clearCompleted();
-      window.location.replace("/home");
-    };
-    if (window.pbTrack && state.userId) {
-      window.pbTrack("onboarding_complete", { step: state.step }, irPraHome);
-    } else {
-      irPraHome();
-    }
+  function finish() {
+    // A conclusão já foi gravada ao entrar no passo (completeOnEnter); o botão
+    // só aparece depois do 200, e esta guarda cobre o resto.
+    if (!state.completed) return;
+    goHome();
   }
 
-  async function skipAll() {
-    // Pular é uma decisão do usuário: marca concluído pra o wizard não voltar
-    // a aparecer no próximo login.
-    await persist({ step: state.step, completed: true });
+  /** Única saída para o app: espera o envio da conversão, se houve, antes do replace. */
+  async function goHome() {
+    if (state.conversion) await state.conversion;
     if (window.PBPurchaseIntent) window.PBPurchaseIntent.clearCompleted();
     window.location.replace("/home");
   }
 
-  /**
-   * Conversão de ativação. Evento PRÓPRIO: `CompleteRegistration` já é
-   * disparado no cadastro (cadastro.html e a CAPI server-side), e reusá-lo aqui
-   * contaria a mesma pessoa duas vezes, corrompendo o sinal das campanhas.
-   */
-  function firePixel() {
-    try {
-      if (window.fbq && state.userId) {
-        window.fbq("trackCustom", "OnboardingComplete", {}, { eventID: "onb_" + state.userId });
+  async function skipAll(button) {
+    // Pular é uma decisão do usuário: marca concluído pra o wizard não voltar
+    // a aparecer no próximo login. Sem o 200 não sai daqui: ir para o /home
+    // sem a conclusão gravada só devolveria a pessoa ao wizard pelo gate.
+    // withBusy: duplo clique não manda dois `completed`.
+    // Com escrita em voo (ex.: a conclusão do passo 5 gravando), espera ela em
+    // vez de engolir o clique; se ela gravou a conclusão, sai sem novo POST.
+    if (button.getAttribute("aria-busy") === "true") return;
+    if (state.inFlight) {
+      button.setAttribute("aria-busy", "true");
+      await state.idle;
+      button.removeAttribute("aria-busy");
+    }
+    return withBusy(button, async function () {
+      if (!state.completed) {
+        const ok = await persist({ step: state.step, completed: true });
+        if (!ok) { showError(SAVE_FAIL_TEXT); return; }
+        concluiu(ok);
       }
-      // O par no GA4 (`onboarding_complete`, evento próprio pelo mesmo motivo do
-      // parágrafo acima) sai no `finish`, que é quem navega logo depois.
-    } catch (_) { /* rastreio nunca pode quebrar o fluxo */ }
+      await goHome();
+    });
+  }
+
+  /**
+   * Conversão de ativação (Pixel + GA4). Eventos PRÓPRIOS: `CompleteRegistration`
+   * já é disparado no cadastro (cadastro.html e a CAPI server-side), e reusá-lo
+   * aqui contaria a mesma pessoa duas vezes, corrompendo o sinal das campanhas.
+   * `state.conversion` resolve quando o `pbTrack` confirma (teto de 1 s no
+   * snippet de frontend/routes/shared.py); o goHome espera por ela.
+   * ponytail: se o 200 que carimbou se perder na rede, a retentativa recebe
+   * stamped=false e a conversão não sai — o funil do servidor ainda conta.
+   */
+  function fireConversion() {
+    state.conversion = new Promise(function (done) {
+      try {
+        if (window.fbq && state.userId) window.fbq("trackCustom", "OnboardingComplete", {}, { eventID: "onb_" + state.userId });
+        if (window.pbTrack && state.userId) window.pbTrack("onboarding_complete", { step: TOTAL_STEPS }, done);
+        else done();
+      } catch (_) { done(); /* rastreio nunca pode quebrar o fluxo */ }
+    });
   }
 
   /* ─── Passo 2: dinheiro ───────────────────────────────────────────────── */
 
   async function loadMoney() {
+    loadOfSync();
     try {
       const setup = await apiGet("/account/" + state.userId + "/setup-status");
       state.balance = Number(setup.balance || 0);
@@ -439,6 +578,84 @@
     box.appendChild(document.createTextNode(" pra cadastrar mais."));
     show(box, true);
     show(el("add-card-btn"), false);
+  }
+
+  /* ─── Passo 2: estado do Open Finance ─────────────────────────────────── */
+
+  /** Lê o snapshot e redesenha; null se falhou (402/rede) ou se já saiu do passo. */
+  async function refreshOfSync() {
+    const seq = ++state.ofSeq;
+    let data;
+    try {
+      data = await apiGet("/open-finance/" + state.userId);
+    } catch (_) {
+      return null; // sem snapshot o bloco fica como era: só o convite
+    }
+    // Pedido lento (> 5 s) que volta depois de um mais novo não repinta
+    // "Atualizando…" por cima de "Atualizado"; nem desenha fora do passo.
+    if (seq !== state.ofSeq || state.step !== STEP_MONEY) return null;
+    const view = syncView(data && data.connections);
+    renderOfSync(view);
+    return view;
+  }
+
+  async function loadOfSync() {
+    const view = await refreshOfSync();
+    if (view && view.poll) startOfPoll();
+  }
+
+  function renderOfSync(view) {
+    const list = el("of-sync");
+    if (!list) return;
+    // A lista é aria-live: recriar os <li> com o mesmo conteúdo faria o leitor
+    // de tela reanunciar "Atualizando…" a cada poll.
+    const key = JSON.stringify(view.rows);
+    if (key === state.ofRendered) return;
+    state.ofRendered = key;
+    list.innerHTML = "";
+    view.rows.forEach(function (row) {
+      const li = document.createElement("li");
+      li.className = "onb-of-row";
+      const bank = document.createElement("strong");
+      bank.textContent = row.bank;
+      const label = document.createElement("span");
+      label.textContent = row.label;
+      li.appendChild(bank);
+      li.appendChild(label);
+      const lines = [row.detail, row.action === "wait" ? OF_WAIT_TEXT : ""];
+      lines.forEach(function (line) {
+        if (!line) return;
+        const p = document.createElement("small");
+        p.textContent = line;
+        li.appendChild(p);
+      });
+      if (row.action === "resolve") {
+        const link = document.createElement("a");
+        link.href = "/settings?view=open-finance&onb=1";
+        link.textContent = "Resolver em Ajustes";
+        li.appendChild(link);
+      }
+      list.appendChild(li);
+    });
+  }
+
+  // Molde do startWaPoll: um intervalo, teto, e o goTo para tudo.
+  function startOfPoll() {
+    stopOfPoll();
+    state.ofPollCount = 0;
+    state.ofPollTimer = window.setInterval(async function () {
+      state.ofPollCount += 1;
+      if (state.ofPollCount > OF_POLL_LIMIT) { stopOfPoll(); return; }
+      const view = await refreshOfSync();
+      if (view && !view.poll) stopOfPoll();
+    }, OF_POLL_MS);
+  }
+
+  function stopOfPoll() {
+    if (state.ofPollTimer) {
+      window.clearInterval(state.ofPollTimer);
+      state.ofPollTimer = null;
+    }
   }
 
   /* ─── Passo 3: WhatsApp ───────────────────────────────────────────────── */
@@ -654,8 +871,9 @@
   const ACTIONS = {
     next: function () { next(); },
     skip: function () { skip(); },
-    "skip-all": function () { skipAll(); },
+    "skip-all": function (button) { skipAll(button); },
     finish: function () { finish(); },
+    "retry-complete": function (button) { retryComplete(button); },
     "save-balance": function (button) { saveBalance(button); },
     "add-card": function () { openCardForm(true); },
     "cancel-card": function () { openCardForm(false); },
@@ -667,10 +885,28 @@
   function onClick(event) {
     const target = event.target.closest ? event.target.closest("[data-action]") : null;
     if (!target) return;
-    const handler = ACTIONS[target.getAttribute("data-action")];
+    const action = target.getAttribute("data-action");
+    const handler = ACTIONS[action];
     if (!handler) return;
     event.preventDefault();
+    // Com escrita em voo só o "Pular tudo" passa (ele espera a escrita). O CSS
+    // apaga os CTAs para o mouse; esta guarda vale também para Enter/Espaço.
+    if (state.inFlight && action !== "skip-all") return;
     handler(target);
+  }
+
+  /** Passo 2: o que o Open Finance lê. Sem lista do servidor, não inventa uma. */
+  function renderOfProducts(products) {
+    const box = el("of-products");
+    if (!box) return;
+    const list = box.querySelector("ul");
+    list.textContent = "";
+    (Array.isArray(products) ? products : []).forEach(function (p) {
+      const li = document.createElement("li");
+      li.textContent = Object.prototype.hasOwnProperty.call(OF_PRODUCT_LABELS, p) ? OF_PRODUCT_LABELS[p] : String(p);
+      list.appendChild(li);
+    });
+    show(box, list.children.length > 0);
   }
 
   /* ─── Boot ────────────────────────────────────────────────────────────── */
@@ -711,6 +947,7 @@
     try {
       server = await apiGet("/onboarding/state");
     } catch (_) { /* começa do zero */ }
+    renderOfProducts(server && server.of_produtos);
 
     // Retomada: volta no passo salvo em vez de recomeçar. `?step=` só é aceito
     // pra voltar do /settings (conectar banco) — e nunca além do que já foi
@@ -731,6 +968,7 @@
     isWhatsAppLinked: isWhatsAppLinked,
     resumeStep: resumeStep,
     hasCardNamed: hasCardNamed,
+    syncView: syncView,
   };
 
   if (document.readyState === "loading") {

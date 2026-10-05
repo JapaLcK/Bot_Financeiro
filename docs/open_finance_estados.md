@@ -14,6 +14,10 @@ Código de referência:
   `mark_sync_result`) e `connection_ui_state` (única que decide
   o estado exibido, um dos de `_LABELS`). A máquina de estados por escrito está no
   topo desse módulo.
+- `observar_item` (`core/services/pluggy_sync.py`, PR-C1) é o ponto de escrita da
+  observação do job de saúde (item vivo e lote de 404) e do 404 do sync: decide com
+  `resolve_connection_state` e grava por `mark_sync_result` com o CAS pela versão da
+  linha (`updated_at`, §1 item 6).
 - Também GRAVAM `status` e/ou `status_reason` sem passar pelo resolvedor: o
   webhook (`update_pluggy_open_finance_item_status`), a reconexão
   (`save_pluggy_open_finance_item`, linha G), `marcar_leitura_falhou`
@@ -62,10 +66,14 @@ comando; não copie o resultado para cá (`CLAUDE.md` §2).
    - **só um sync com leitura completa limpa esses dois motivos.** O job de saúde,
      que não lê contas, os mantém. `no_accounts` continua caindo no job assim que
      existe dado no espelho.
-   - O job decide manter ou limpar sobre o motivo que leu ao listar a linha, e o
-     `GET /items` dele roda sem lock. Por isso ele só grava se o motivo ainda for o
-     que leu (`status_reason_visto` no `mark_sync_result`); se um sync o mudou no
-     meio, o job não grava nada naquela linha. *Vigente desde o PR-A.*
+   - O job decide manter ou limpar sobre a linha que leu ao listar, e o `GET /items`
+     dele roda sem lock. Por isso `observar_item` só grava se a VERSÃO da linha
+     (`updated_at`) ainda for a que leu (`versao_vista` no `mark_sync_result`); se
+     qualquer escritor mexeu nela no meio (sync, reconexão, webhook, 404), nada é
+     gravado naquela linha e o próximo tique reavalia. Toda escrita de estado bumpa
+     `updated_at` (guarda estrutural em `tests/test_of_versao_da_linha.py`). A
+     versão substitui o CAS por valor do motivo (`status_reason_visto`, PR-A), que
+     não via quem mudava a linha mantendo o motivo. *Vigente desde o PR-C1.*
    - Leitura parcial de um sync cujo carimbo a reconexão recusou
      (`last_sync_at` anterior ao `reconnected_at`) não vale: a tela diz
      "Atualizando… · Ainda não sincronizou", como no item 3.
@@ -76,9 +84,21 @@ comando; não copie o resultado para cá (`CLAUDE.md` §2).
      `item_missing`). `item/updated` e `transactions/*` não gravam status nem
      motivo: só agendam sync. `item/created` e `item/error` sobre falha de leitura
      são buracos do contrato, corrigidos no PR-C (R8 e observação imediata).
-7. **Idade do dado**: o usuário vê o dado do banco, cuja data é
-   `products[*].last_updated_at` da Pluggy, limitada pelo nosso `last_sync_at`.
-   *Proposto:* D2 e D7.
+7. **Idade do dado**: o usuário vê o dado do banco, cuja data é a maior entre
+   `products[*].last_updated_at` e o `last_updated_at` do ITEM (`data_da_pluggy`,
+   `core/services/pluggy_health.py`; só data legível e com fuso). O item entra
+   porque o `statusDetail` só vem com `PARTIAL_SUCCESS` ou warning: um item
+   `SUCCESS` sem warning tem `products` vazio. **Vigente desde o PR-B3**, só com
+   sync depois da autorização atual (a âncora é o `last_sync_at`, com fuso):
+   - **D2**: a Pluggy à frente (`pluggy_tem_dado_depois_de(health, last_sync_at)`, `>` estrito, a mesma função da retentativa)
+     troca o "Atualizado" por **Parcial (âmbar) · "O banco já tem dados de dd/mm —
+     atualize para trazer"**. Só substitui o verde: motivo de leitura, ação
+     necessária, `ERROR`, `item_missing`, terminais, o Parcial da Pluggy (sem
+     sufixo) e "Atualizando…" mantêm o que já dizem.
+   - **D7**: `ui.dados_de` ("dd/mm" no fuso do app) quando a data do banco é mais
+     de 24 h mais velha que o `last_sync_at` (estrito, instantes com fuso); o
+     front só concatena " · dados de dd/mm" à linha "Última sync". Vale em
+     qualquer estado com health e sync; D2 e D7 se excluem.
 8. **"Atualizando…"** só vale enquanto a coleta da autorização atual pode estar
    legitimamente em curso. Passado o prazo (D1) ou registrada uma falha, a tela diz
    o que houve. **Vigente desde o PR-B1:**
@@ -172,7 +192,8 @@ observação exige, e nunca durante uma autorização de dispositivo ainda váli
 
 **Invariante do verde:** "Atualizado" exige a última leitura completa (contas e
 investimentos) depois da autorização atual, sem motivo pendente. O default seguro
-do `connection_ui_state` (motivo desconhecido nunca é verde) continua valendo.
+do `connection_ui_state` (motivo desconhecido nunca é verde) continua valendo. E
+sem a Pluggy à frente do `last_sync_at` (D2, PR-B3).
 
 ---
 
@@ -222,17 +243,19 @@ verificação externa pendente.
 | Autorize no app (device, `health` null, dentro de `JANELA_DEVICE_AUTH_MIN`) | E8 com GET ok e mesmo estado | "Autorize no app" para sempre | calado para sempre | ✗ R7 (D5, PR-D) |
 | Autorize no app | E9 | reinicia a janela | calado | ✓ |
 | Autorize no app | E5 | nada muda | – | ? H5 (depende do catálogo de eventos da Pluggy) |
-| Ação necessária (reautorize) | E2 | continua "Ação necessária"; "Última sync" avança | avisa | tela ✓; "Última sync" ✗ C1 (D7) |
+| Ação necessária (reautorize) | E2 | continua "Ação necessária"; "Última sync" avança | avisa | tela ✓; "Última sync" ✓ **PR-B3 (D7)**: "· dados de dd/mm" |
 | Ação necessária (reautorize) | E9 e sync | Atualizado | para | ✓ |
 | Atualizado | E2 com sync ok | Atualizado | não | ✓ |
+| Atualizado com a Pluggy à frente (D2) | E6 com sync ok | Atualizado (o `last_sync_at` novo passa a data da Pluggy) | não | ✓ **PR-B3** |
+| Atualizado com a Pluggy à frente (D2) | E6 com `sync_in_progress` (lock ocupado: nada carimbou) | Parcial; toast "Atualizei o que deu no X: o banco já tem dados de dd/mm — atualize para trazer." | não | ✓ **PR-B3** |
 | Atualizado | E3 transitório (item ok na Pluggy) | "Erro temporário · Tentaremos de novo automaticamente" até o próximo E8 | "reconecte" | ✗ R2, R3 (PR-C, PR-D) |
 | Atualizado | E3 com item em `LOGIN_ERROR` | "Erro temporário" (deveria ser "Ação necessária · Reautorize o banco") até o E8 | avisa | ✗ (PR-C) |
 | Atualizado | E4 | Removido (sem detalhe) | não | ? C7 (fora da Onda 5 salvo pedido) |
 | Atualizado | E6 com `/investments` 429 e contas lidas | **Parcial · Investimentos não vieram nesta atualização**; toast "Atualizei o que deu no {banco}: investimentos não vieram nesta atualização." | não | ✓ **corrigido no PR-A (R4)** |
 | Atualizado | E6 com `/accounts` 429 | Erro temporário (`read_failed`) | não | ✓ |
 | Atualizado | E6 com o item sumido (404) | Conexão perdida | avisa | ✓ |
-| Atualizado | E7 sem webhook de volta | Atualizado sobre espelho velho até o tique seguinte, que relê quando a Pluggy tem dado depois da última tentativa | não | ✓ D3 (**PR-B2**, classe `pluggy_a_frente`); a tela até lá (D2): ✗ PR-B3 |
-| Atualizado, espelho velho e Pluggy em dia | E8 | Atualizado; o mesmo tique relê (até K por tique) | não | ✓ D3 (**PR-B2**); a tela (D2): ✗ PR-B3 |
+| Atualizado | E7 sem webhook de volta | Atualizado sobre espelho velho até o tique seguinte, que relê quando a Pluggy tem dado depois da última tentativa | não | ✓ D3 (**PR-B2**, classe `pluggy_a_frente`); a tela (D2): ✓ **PR-B3**, Parcial · "O banco já tem dados de dd/mm — atualize para trazer" |
+| Atualizado, espelho velho e Pluggy em dia | E8 | Atualizado; o mesmo tique relê (até K por tique) | não | ✓ D3 (**PR-B2**); a tela (D2): ✓ **PR-B3** |
 | Atualizado | E11 no PTR | âmbar; o pedido segue e repinta quando assentar | n/a | ✓ |
 | Atualizado | E11 no botão | toast de erro; o servidor pode ter concluído | n/a | ? H1 |
 | Parcial (Pluggy) | E2 ou E6 com produto voltando | Atualizado | não | ✓ (#473) |
@@ -248,11 +271,11 @@ verificação externa pendente.
 | Parcial (`investments_read_failed`) | E2 ou E6 com leitura completa | Atualizado | não | ✓ **PR-A** |
 | Parcial (`investments_read_failed`) | E3 | "Erro temporário" com o motivo apagado; o E8 seguinte, com o item vivo, pinta Atualizado sem os investimentos terem sido lidos | avisa (classifica por `status`) | ✗ (PR-C) |
 | Parcial (`investments_read_failed`) | E1 atrasado | motivo apagado: Atualizando… (sem health) ou Atualizado | não | ✗ família R8 (PR-C) |
-| qualquer, com o motivo MUDANDO no meio | E8 com um sync terminando durante o `GET /items` do job | o que o sync gravou: o job não grava nada, porque o CAS (`status_reason_visto`) compara só o motivo | não | ✓ **PR-A**, só neste escopo |
-| qualquer | E8 com um sync ok terminando no meio e o motivo IGUAL antes e depois | o job regrava `health` e `status` por cima da foto mais nova do sync | não | ✗ (PR-C) |
-| qualquer | E9 para uma autorização de dispositivo no meio do `GET /items` do job (motivo `NULL` antes e depois) | o job grava o `health` e o `status` da autorização antiga por cima dos zerados: some "Autorize o acesso no app do banco" e a tela diz "Atualizando… · Ainda não sincronizou" | não (o `status` volta a `ACTIVE`) | ✗ (PR-C; B3 do Tester) |
-| Atualizado | E8 com 404 transitório no `GET /items`, e um sync ok da mesma linha terminando no meio | "Conexão perdida" com o item vivo (o caminho do 404 não tem CAS) | avisa | ✗ (PR-C; B2 do Tester) |
-| qualquer | E3 (webhook `item/error`) no meio do `GET /items` do job, com o motivo igual | o job grava `ACTIVE` por cima do `ERROR` do webhook | – | ✗ (PR-C) |
+| qualquer, com o motivo MUDANDO no meio | E8 com um sync terminando durante o `GET /items` do job | o que o sync gravou: o job não grava nada, porque o CAS compara a versão da linha | não | ✓ **PR-A** (por valor do motivo), generalizado no **PR-C1** (por versão) |
+| qualquer | E8 com um sync ok terminando no meio e o motivo IGUAL antes e depois | o job não grava: o sync bumpou a versão da linha | não | ✓ **PR-C1** |
+| qualquer | E9 para uma autorização de dispositivo no meio do `GET /items` do job (motivo `NULL` antes e depois) | o job grava o `health` e o `status` da autorização antiga por cima dos zerados: some "Autorize o acesso no app do banco" e a tela diz "Atualizando… · Ainda não sincronizou" | não (o `status` volta a `ACTIVE`) | ✓ **PR-C1** (o upsert da reconexão bumpa a versão; B3 do Tester) |
+| Atualizado | E8 com 404 transitório no `GET /items`, e um sync ok da mesma linha terminando no meio | "Conexão perdida" com o item vivo (o caminho do 404 não tinha CAS) | avisa | ✓ **PR-C1** (`observar_item(None)` com a versão lida; B2 do Tester; vale também para o 404 do sync) |
+| qualquer | E3 (webhook `item/error`) no meio do `GET /items` do job, com o motivo igual | o job não grava: o webhook bumpou a versão da linha | – | ✓ **PR-C1** (o veredito do webhook em si segue até o PR-C2) |
 | Parcial (`investments_read_failed`) com `last_sync_at` anterior ao `reconnected_at` | leitura da tela | Atualizando… · Ainda não sincronizou | não | ✓ **PR-A** |
 | Erro temporário (`read_failed`) | E8 com espelho cheio | **mantém Erro temporário** | não | ✓ **corrigido no PR-A (R5)** |
 | Erro temporário (`read_failed`) | E8 com espelho vazio | mantém | não | ✓ |
@@ -263,7 +286,7 @@ verificação externa pendente.
 | Conexão perdida | E3 atrasado | mantém | avisa | ✓ |
 | Conexão perdida | E8 com item vivo | sai | para | ✓ |
 | Pausado / Removido | qualquer webhook, E6, E7, E8 | mantém (terminal) | não | ✓ |
-| qualquer | E9 | zera `health` e motivo: Atualizando… ou instrução de device | calado conforme o prazo | ✓ fora de corrida; ✗ com o job de saúde em voo (linha "E9 no meio do `GET /items`" acima, PR-C) |
+| qualquer | E9 | zera `health` e motivo: Atualizando… ou instrução de device | calado conforme o prazo | ✓ fora de corrida; ✓ com o job de saúde em voo (linha "E9 para uma autorização de dispositivo no meio" acima, PR-C1) |
 | qualquer | E10 | linha apagada, marca `removed`; webhook tardio não ressuscita | – | ✓ (Onda 4) |
 
 Testes das células do PR-A: `tests/test_of_leitura_incompleta.py`. Do PR-B1:
@@ -321,12 +344,18 @@ nome (`test_c9b_…`).
 | 31b | nenhum | falha final comum (500) do sync de fundo e um segundo dono aparece antes da marca | G (só a F), L (a O e a F) | nada gravado em nenhuma linha | `c31b_…[G, L]`; positivos `[…-um_dono]` |
 | 31c | nenhum | a foto do run (O) e um segundo dono que aparece durante a leitura, antes da releitura de posse | L | nada gravado em nenhuma linha | `c31c_…`; positivo `c31c_…[um_dono]` |
 
-**Conserto de classe previsto para as corridas do job (PR-C):** o CAS do PR-A
-compara só `status_reason`, que é o dado de que a decisão do job depende, e
-por isso só cobre o caso em que o motivo muda. As células ✗ de corrida acima
-são escritas concorrentes que não mudam o motivo. O conserto previsto é um CAS
-pela versão da linha (`updated_at` lido na listagem) no `observar_item` que o
-PR-C extrai de `run_of_health_check`, usado também pelo caminho do 404.
+**Conserto de classe das corridas do job (PR-C1, vigente):** o CAS do PR-A
+comparava só `status_reason`, o dado de que a decisão do job depende, e por isso só
+cobria o caso em que o motivo muda; as escritas concorrentes que mantinham o motivo
+(sync ok, reconexão, 404 do lote) passavam. Agora o CAS é pela versão da linha
+(`updated_at` lido na listagem), em `observar_item` (`core/services/pluggy_sync.py`),
+usado pelo job (vivo e lote de 404) e pelo 404 do `sync_pluggy_item`. Quem perde
+(0 linhas) é descartado e contado (`perdeu`, no retorno do job), sem log por linha.
+Continuam com CAS próprio, porque respondem a perguntas de autoridade que a versão
+não responde: a foto O, a marca de falha F (`geracao_vista`, `motivos_substituiveis`,
+`observacao_vista`, `dono_unico`) e o carimbo do sucesso (`reconnected_at_visto`).
+`mark_sync_attempt` também bumpa a versão: uma tentativa de sync no meio do `GET`
+derruba a observação (conservador, o sync em voo observa por conta própria).
 
 ### 2.2 A retentativa do PR-B2, célula por célula
 
@@ -338,8 +367,9 @@ pelo ESTADO GRAVADO (`list_connections_para_retentar`), decide com
 próximo. Só GET: nenhum PATCH, nenhuma cota de coleta.
 
 - **Âncora:** "a Pluggy à frente" é `pluggy_tem_dado_depois_de(health,
-  last_attempt_at)` (algum `products[*].last_updated_at` legível, com fuso, depois
-  da nossa última tentativa). A D2 (PR-B3) usará a mesma função com `last_sync_at`.
+  last_attempt_at)` (algum `products[*].last_updated_at` ou o `last_updated_at` do item, legível, com
+  fuso, depois da nossa última tentativa). A D2 (PR-B3) usa a mesma função (`data_da_pluggy`, que olha também o
+  `last_updated_at` do item) com `last_sync_at`.
 - **Teto:** até `OF_RETRY_MAX_PER_TICK` itens por tique (default 20), a tentativa
   mais antiga primeiro (`last_attempt_at nulls first, id`), sem prioridade por
   classe. **Só `0` ou negativo desliga a etapa**: valor que não é inteiro (`""`,
@@ -512,8 +542,8 @@ no meio, flag e o texto do E13).
 | E13 | `health.item_status == 'ERROR'` | Erro temporário | não (DECISÃO 1 = B) | GET não tira o item de ERROR; só PATCH ou o auto-update da Pluggy |
 | E14 | `PAUSED` / `DELETED` | Pausado / Removido | não | SQL (terminal) |
 | E15 | em dia | Atualizado | não | nada atrás |
-| E16 | sem motivo, com a Pluggy à frente | Atualizado (verde falso até a D2) | sim | `pluggy_a_frente` |
-| E17 | Parcial da Pluggy, sem motivo nosso, sem a Pluggy à frente | Parcial | não | o atraso é da Pluggy (com a Pluggy à frente: `pluggy_a_frente`) |
+| E16 | sem motivo, com a Pluggy à frente | Parcial · "O banco já tem dados de dd/mm — atualize para trazer" (D2, PR-B3; antes: verde falso) | sim | `pluggy_a_frente` |
+| E17 | Parcial da Pluggy, sem motivo nosso, sem a Pluggy à frente | Parcial | não | o atraso é da Pluggy (com a Pluggy à frente: `pluggy_a_frente`; a tela mantém o detalhe do Parcial, sem o texto da D2) |
 | E18 | tentativa nos últimos 30 min (`PRAZO_COLETA_MIN`) | qualquer | não | SQL (cooldown) |
 | E19 | item com dois donos | qualquer | não | SQL (o sync levantaria `AmbiguousItemError`) |
 | E20 | linha readotada por outro usuário entre a listagem e o run | qualquer | agenda e o sync recusa | `expected_user_id` → `connection_not_found`; a marca de falha não grava em linha de outro dono |
@@ -572,13 +602,29 @@ a D3, que torna verdade "Tentaremos de novo automaticamente" (menos em E13, §2.
 | decisão | escolha | PR |
 |---|---|---|
 | D1: por quanto tempo "Atualizando…" é honesto sem sync | 30 min desde a autorização atual; depois pílula âmbar, mesma "Atualizando…", detalhe "Está demorando mais que o normal — atualize de novo" (texto trocado pelo dono em 2026-09-30: o app não tem botão Atualizar) | PR-B1 (**implementada**) |
-| D2: o que a tela diz com dado antigo | âmbar só com prova (Pluggy com dado mais novo que o nosso); sem limite de idade absoluta até medir o auto-update da Pluggy | PR-B3 (o predicado `pluggy_tem_dado_depois_de` já existe desde o PR-B2) |
+| D2: o que a tela diz com dado antigo | âmbar só com prova (Pluggy com dado mais novo que o nosso); sem limite de idade absoluta até medir o auto-update da Pluggy | PR-B3 (**implementada**; texto A1, regra única `data_da_pluggy`) |
 | D3: alguém tenta de novo sozinho quando nosso dado está atrás | sim: o tique de saúde agenda sync para conexões com dado atrás (motivo de leitura pendente, coleta vencida, Pluggy à frente), teto K por tique, só GET. "Tentaremos de novo automaticamente" passa a ser verdade | PR-B2 (**implementada**, §2.2) |
 | D4: quais estados geram o aviso "reconecte" | só `needs_user_action` sem instrução de dispositivo e `item_missing`; a mesma função da tela | PR-D |
 | D5: prazo da instrução de device/QR com `health` medido | a mesma `JANELA_DEVICE_AUTH_MIN` (`core/services/pluggy_health.py`), ancorada na autorização atual, nos dois ramos | PR-D |
 | D6: como os Ajustes acompanham a coleta | relê o snapshot em 5/10/20/40 s e depois a cada 60 s, para no estado final ou em 30 min, pausa com a aba oculta, relê no `visibilitychange` | PR-E |
 | Teto do "Atualizando…" (Fase 4 do app, 2026-10-01) | `TETO_ATUALIZANDO_MIN` = 120 min; depois, o estado `error_recoverable` existente (sem 10º estado) com o detalhe "O banco está demorando — atualize de novo mais tarde"; a retentativa continua relendo | Fase 4, PR 2 (**implementada**) |
-| D7: "Última sync" mostra a data de quê | mantém "Última sync" e acrescenta "· dados de dd/mm" quando a data do banco difere mais de 1 dia | sem PR atribuído no plano da Onda 5 (a atribuir) |
+| D7: "Última sync" mostra a data de quê | mantém "Última sync" e acrescenta "· dados de dd/mm" quando a data do banco difere mais de 1 dia | PR-B3 (**implementada**; `ui.dados_de`, limiar de 24 h estrito) |
+
+**PR-C (decisões do dono, 2026-10-03; fatiado em C1 e C2).** (a) o webhook relê o
+item e só grava a pista `ERROR`, sem apagar motivo e sem tocar `raw`, quando a
+releitura não confirma; (b) a observação vence o evento e registra
+`of_observacao_diverge` para a Onda 8; (c) a versão da linha é `updated_at`, sem
+migration (**C1, implementada**); (d) só `item/error` dispara observação, coalescida
+por item com semáforo de 4, a rodada suja (`_DIRTY`) mantida, e o `raw` deixa de ser
+sobrescrito pelo envelope; (e) a observação do webhook sobrescrita pela foto de um
+sync de OUTRA réplica fica como limite conhecido (§4). C1 = versão da linha +
+`observar_item` + job + 404 do sync; C2 = webhook (R3, R8), ainda **não
+implementada**: as células de R3 e R8 seguem ✗.
+
+Texto novo do PR-B3, visível ao usuário: o detalhe "O banco já tem dados de dd/mm —
+atualize para trazer" (pílula "Parcial", âmbar) e o sufixo " · dados de dd/mm" na
+linha "Última sync". Instrução, não promessa: a retentativa de fundo tem
+interruptores (§2.2).
 
 Texto novo da Fase 4, PR 2, visível ao usuário: o detalhe "O banco está
 demorando — atualize de novo mais tarde" (pílula "Erro temporário"; no toast do
@@ -592,6 +638,40 @@ Texto novo do PR-A, visível ao usuário: o detalhe
 "Investimentos não vieram nesta atualização" (pílula "Parcial").
 
 ## 4. Achados registrados, fora do escopo da Onda 5
+
+- **Limites do PR-C1.**
+  - X7: um sync em OUTRA réplica que começou antes da observação do webhook grava a
+    foto 1 (mais velha) depois dela, porque o sucesso do sync (`reconnected_at_visto`)
+    não tem CAS de versão sobre `health` e o par. Em um processo só, `_INFLIGHT` e
+    `_DIRTY` fecham (C2). Limite conhecido, não coberto.
+  - O "~18 h" que a documentação do R3 cita vale só antes do B2: hoje o erro grudado
+    dura até um tique da retentativa (com a flag ligada), e para sempre com ela
+    desligada. O C2 o fecha.
+  - V6 (o que o `GET /items` devolve logo depois de um `item/error` real) e o volume
+    real de `item/error` em produção só se medem na Onda 8; nada na C1 os exercita.
+
+- **Limites do PR-B3 (D2/D7).**
+  - `_dm` (`_stale_detail`) fatia a string ISO sem converter fuso: "2026-09-20T01:30:00Z"
+    vira "20/09", que em America/Sao_Paulo é 19/09. Pré-existente; as datas novas
+    (D2 e D7) usam `day_tz` (`utils_date`), com conversão. As duas convivem na tela.
+  - "Última sync" é formatada pelo navegador (`fmtDate`); o "dd/mm" da D2/D7 vem
+    em America/Sao_Paulo (`_tz()`). Fora desse fuso as duas datas podem divergir
+    de um dia; o limiar de 24 h absorve a maior parte.
+  - Relógio da Pluggy: `_TOLERANCIA_RELOGIO` (5 min) só DESCARTA data futura além
+    dela. Skew de 0 a 5 min ainda conta como "à frente": se o relógio dela estiver
+    adiantado nessa faixa, um sync recém-terminado pode ficar âmbar até o próximo.
+    Decisão pendente do dono (exigir `data > âncora + tolerância`?); o comportamento
+    atual está caracterizado em teste. A Onda 8 mede o skew real.
+  - Semântica do `lastUpdatedAt` do item numa execução que falhou, e a presença
+    real dele em item `SUCCESS` sem `statusDetail` em produção: documentadas no
+    OpenAPI da Pluggy, não medidas com a Pluggy real. Onda 8. No pior caso a D7
+    perde o sufixo (falso negativo); a D2 só atua sobre o verde.
+  - `data_da_pluggy` ignora data fora do intervalo do `datetime` (zero-time
+    "0001-01-01Z": `astimezone` estoura) e data no futuro além de
+    `_TOLERANCIA_RELOGIO` (5 min); sem isso o card ficava Parcial para sempre.
+    Item com `lastUpdatedAt` futuro legítimo (fim previsto) não gera D2 nem D7.
+  - O Patrimônio acende `banco_desatualizado` com a D2 (estado != `updated`):
+    decisão do dono, sem código novo.
 
 - **Concordância do detalhe da Pluggy.** `_stale_detail` escreve "Investimentos
   desatualizado desde dd/mm" (e "Transações desatualizado") para produto de nome

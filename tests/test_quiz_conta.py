@@ -501,7 +501,7 @@ def test_teto_da_assinar_nao_gasta_o_do_register_da_vitima(env, monkeypatch):
     assert [_conta_quiz(_navegador(), email).status_code for _ in range(3)] == [200, 200, 200]
     r = _navegador().post("/auth/register", headers={dashboard.CSRF_HEADER_NAME: CSRF},
                           json={"email": email, "password": "senha-da-vitima-1", "phone": _telefone()})
-    assert r.status_code == 200, r.text
+    assert r.status_code == 409, r.text
     assert _conta_quiz(_navegador(), email).status_code == 429
 
 

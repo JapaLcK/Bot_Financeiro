@@ -873,9 +873,10 @@ def send_password_reset_email(to: str, reset_url: str, has_password: bool = True
 
 
 def send_account_exists_notice(to: str, login_url: str = "", reset_url: str = "") -> bool:
-    """Aviso out-of-band enviado quando alguém tenta se cadastrar com e-mail/
-    telefone que já pertence a esta conta. Enviado NO LUGAR de revelar "já
-    existe" na resposta do cadastro (anti-enumeração)."""
+    """Aviso de segurança enviado quando alguém tenta se cadastrar com o e-mail
+    desta conta, pro dono saber caso NÃO tenha sido ele. No /auth/register o
+    visitante também vê o 409 na tela; no webhook do quiz a resposta não muda
+    (anti-enumeração) e este e-mail é o único sinal."""
     login_url = login_url or "https://pigbankai.com/login"
     reset_url = reset_url or login_url
     content = f"""
@@ -1150,37 +1151,35 @@ def send_pro_welcome_email(to: str, plan: str, trial_end_at, dashboard_url: str 
     )
 
 
-def send_ebook_email(to: str, url: str, dashboard_url: str = "") -> bool:
-    """E-book comprado na /assinar — o job `core/services/ebook_entrega.py`
-    chama depois que a conta provou o e-mail. Transacional (sem unsub). Copy
-    aprovada pelo dono (2026-09-30). A `url` é a foto da compra: escapada no
-    HTML (link do Drive tem `&`), crua no texto, e nunca em log."""
+def send_ebook_email(to: str, url: str, dashboard_url: str = "", nome: str | None = "") -> bool:
+    """Produto comprado na /assinar — o job `core/services/ebook_entrega.py`
+    chama depois que a conta provou o e-mail, um e-mail por produto.
+    Transacional (sem unsub), com cara de recibo: um botão, sem divulgação e
+    assunto sem emoji — a versão anterior caía na aba Promoções do Gmail (copy
+    aprovada pelo dono em 2026-10-04). `nome` é o nome do produto no Stripe
+    (escapado no HTML); vazio vira "Seu caderno chegou". A `url` é a foto da
+    compra: escapada no HTML (link do Drive tem `&`), crua no texto, e nunca em
+    log. `dashboard_url` ficou sem uso; mantido pela assinatura dos chamadores."""
     import html as _htmlmod
-    dash = (dashboard_url or _public_base_url()).rstrip("/")
     u = _htmlmod.escape(url, quote=True)
+    nome = (nome or "").strip()
+    titulo = f"Seu caderno: {nome}" if nome else "Seu caderno chegou"
+    n = _htmlmod.escape(nome or "seu caderno")
     content = f"""
-      <p>🐷 Oi! Aqui é o Piggy.</p>
-      <p>Seu e-book tá liberado. É só tocar no botão pra baixar:</p>
-      <p style="text-align:center;margin:24px 0"><a class="btn" href="{u}">Baixar meu e-book</a></p>
-      <p style="font-size:13px">Se o botão não abrir, copia e cola este link no navegador: <a href="{u}">{u}</a></p>
-      <p>Dica: salva o arquivo no celular e lê quando quiser, até sem internet.</p>
-      <p>Enquanto isso, o PigBank segue cuidando do resto: manda seus gastos no WhatsApp e acompanha tudo no painel.</p>
-      <p style="text-align:center;margin:24px 0"><a class="btn" href="{dash}/app">Abrir meu painel</a></p>
+      <p>Oi! Sua compra está liberada: <b>{n}</b>.</p>
+      <p style="text-align:center;margin:24px 0"><a class="btn" href="{u}">Baixar o PDF</a></p>
+      <p style="font-size:13px">Se o botão não abrir, copie e cole este link no navegador: <a href="{u}">{u}</a></p>
+      <p>Dica: salve o arquivo no celular para ler quando quiser, até sem internet.</p>
+      <p style="font-size:13px">Este e-mail é o comprovante da sua compra no PigBank.</p>
     """
-    html = _base_html("Seu e-book do PigBank chegou", content)
+    html = _base_html(_htmlmod.escape(titulo), content)
     text = (
-        "🐷 Oi! Aqui é o Piggy.\n\n"
-        "Seu e-book tá liberado. É só abrir o link pra baixar:\n"
-        f"{url}\n\n"
-        "Dica: salva o arquivo no celular e lê quando quiser, até sem internet.\n\n"
-        "Enquanto isso, o PigBank segue cuidando do resto: manda seus gastos no "
-        "WhatsApp e acompanha tudo no painel.\n"
-        f"Abrir meu painel: {dash}/app"
+        f"Oi! Sua compra está liberada: {nome or 'seu caderno'}.\n\n"
+        f"Baixar o PDF: {url}\n\n"
+        "Dica: salve o arquivo no celular para ler quando quiser, até sem internet.\n\n"
+        "Este e-mail é o comprovante da sua compra no PigBank."
     )
-    return send_email(
-        to=to, subject="📘 Seu e-book do PigBank chegou",
-        html_body=html, text_body=text,
-    )
+    return send_email(to=to, subject=titulo, html_body=html, text_body=text)
 
 
 def send_trial_ending_email(to: str, plan: str, trial_end_at, dashboard_url: str = "") -> bool:
@@ -1251,7 +1250,8 @@ def send_pro_charged_email(to: str, plan: str, amount_brl: float, next_charge_at
 
 
 def send_pix_paid_email(to: str, plan: str, amount_brl: float, access_starts_at,
-                        access_expires_at, dashboard_url: str = "") -> bool:
+                        access_expires_at, dashboard_url: str = "",
+                        extras: list[tuple[str, int]] | None = None) -> bool:
     """Confirmação da compra Pix ANUAL (§8.2, efeito `email`).
 
     Não reusa `send_pro_charged_email` por causa de duas frases que ficariam
@@ -1267,7 +1267,11 @@ def send_pix_paid_email(to: str, plan: str, amount_brl: float, access_starts_at,
     `access_starts_at` no futuro é a compra AGENDADA (quem já tinha plano
     vigente): o ano só começa quando o período atual terminar, e prometer acesso
     imediato ali é a mesma mentira de outro jeito.
+    `extras` = [(nome, valor_cents)] dos cadernos comprados junto (dono, Q4):
+    com eles o e-mail discrimina o plano (`amount_brl`), cada caderno e o total
+    pago. Sem eles o e-mail é o de antes.
     """
+    import html as _htmlmod
     from datetime import datetime as _dt, timezone as _tz
 
     nome = plan_display_name(plan)
@@ -1280,7 +1284,14 @@ def send_pix_paid_email(to: str, plan: str, amount_brl: float, access_starts_at,
     if getattr(_inicio, "tzinfo", "") is None:
         _inicio = _inicio.replace(tzinfo=_tz.utc)
     agendado = _inicio is not None and _inicio > _dt.now(_tz.utc)
-    valor = f"R$ {amount_brl:,.2f}".replace(",", "X").replace(".", ",").replace("X", ".")
+
+    def _brl(v):
+        return f"R$ {v:,.2f}".replace(",", "X").replace(".", ",").replace("X", ".")
+    itens = [(f"Plano {nome}", amount_brl)] + [(n, c / 100) for n, c in extras or []]
+    valor = _brl(sum(v for _, v in itens))
+    rotulo = "Total pago" if extras else "Valor pago"
+    detalhe = "".join(f"<li><strong>{_htmlmod.escape(n)}:</strong> {_brl(v)}</li>\n        "
+                      for n, v in itens) if extras else ""
     ate = _fmt_brl_date(access_expires_at)
     de = _fmt_brl_date(access_starts_at)
     dash = (dashboard_url or "https://pigbankai.com").rstrip("/")
@@ -1290,7 +1301,7 @@ def send_pix_paid_email(to: str, plan: str, amount_brl: float, access_starts_at,
     content = f"""
       <p>🐷✨ <strong>Pagamento confirmado!</strong> {abertura}</p>
       <ul>
-        <li><strong>Valor pago:</strong> {valor}</li>
+        {detalhe}<li><strong>{rotulo}:</strong> {valor}</li>
         {inicio_li}
         <li><strong>Acesso até:</strong> {ate}</li>
       </ul>
@@ -1302,7 +1313,8 @@ def send_pix_paid_email(to: str, plan: str, amount_brl: float, access_starts_at,
     html = _base_html(f"Pagamento confirmado — {nome}", content)
     text = (
         f"{abertura}\n\n"
-        f"Valor pago: {valor}\n"
+        + ("".join(f"{n}: {_brl(v)}\n" for n, v in itens) if extras else "")
+        + f"{rotulo}: {valor}\n"
         + (f"Acesso a partir de: {de}\n" if agendado else "")
         + f"Acesso até: {ate}\n\n"
         f"Plano anual por Pix, sem renovação automática.\n{dash}/app"

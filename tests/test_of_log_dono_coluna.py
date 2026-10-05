@@ -229,7 +229,7 @@ def test_aviso_local_do_rastro_espelha_com_dono(user_id, monkeypatch, coletor, e
 def test_rastro_do_connect_token_nao_pendura_a_resposta(user_id, monkeypatch, capsys):
     promote_to_pro(user_id)
     monkeypatch.setattr(of_routes, "create_pluggy_connect_token",
-                        lambda uid, webhook_url=None: {"accessToken": "tok"})
+                        lambda uid, webhook_url=None, oauth_redirect_uri=None, item_id=None: {"accessToken": "tok"})
     monkeypatch.setattr(of_routes, "register_item", _levanta(psycopg.OperationalError(HOST)))
     monkeypatch.setattr(of_routes, "_LOG_DIAG_TIMEOUT_S", 0.05)
 

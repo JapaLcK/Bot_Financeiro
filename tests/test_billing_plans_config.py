@@ -62,3 +62,10 @@ def test_plus_available_com_so_o_anual_configurado(monkeypatch):
     # False. Sem ele o grupo passaria numa implementação que devolve True sempre.
     monkeypatch.setattr(dashboard, "STRIPE_PRICE_ID_PRO_ANUAL", "")
     assert client.get("/billing/plans-config").json()["plus_available"] is False
+
+
+@pytest.mark.parametrize("valor, esperado", [("1", True), ("", False)])
+def test_pagina_propria_segue_a_flag(monkeypatch, valor, esperado):
+    """A /precos manda o deslogado à /assinar só com CHECKOUT_PAGINA_PROPRIA."""
+    monkeypatch.setenv("CHECKOUT_PAGINA_PROPRIA", valor)
+    assert client.get("/billing/plans-config").json()["pagina_propria"] is esperado

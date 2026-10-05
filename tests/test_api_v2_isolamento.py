@@ -74,3 +74,37 @@ def test_aviso_de_a_nao_chega_ao_stream_de_b(a_e_b):
         return pa.status, pb.status, de_a, de_b
 
     assert asyncio.run(cena()) == (200, 200, b'data: {"recurso":"open_finance"}\n\n', None)
+
+
+def test_guia_de_a_b_nao_ve_nem_altera(a_e_b):
+    """A grava o guia; B (com `?user_id=A`) lê o dele, vazio, e o POST de B não toca a
+    linha de A. Controle positivo: A lê o que gravou."""
+    from test_api_v2_guia import feito, ler, linha, post
+
+    a, b = a_e_b
+    feito(a, "gastos.categoria")
+    assert post(a, "dispensar").status_code == 200
+    de_b = ler(b, user_id=a, uid=a)
+    assert (de_b["estado"], [p["feito"] for p in de_b["passos"]]) == ("indisponivel", [False] * 3)
+    antes = linha(a)
+    assert post(b, "feito", "piggy.pergunta", user_id=a, uid=a).status_code == 200
+    assert post(b, "reabrir", user_id=a, uid=a).status_code == 200
+    assert linha(a) == antes
+    assert list(linha(b)["feitos"]) == ["piggy.pergunta"]
+    de_a = ler(a)
+    assert (de_a["estado"], [p["feito"] for p in de_a["passos"]]) == ("dispensado", [False, True, False])
+
+
+def test_dica_de_a_b_nao_ve_nem_altera(a_e_b):
+    """A marca a dica de Assinaturas como vista; o POST de B (com `?user_id=A`) grava só na
+    linha de B. Controle positivo: A lê a dica vista."""
+    from test_api_v2_guia import ler, linha
+    from test_api_v2_guia_dica import ID, dica
+
+    a, b = a_e_b
+    assert dica(a).status_code == 200
+    antes = linha(a)
+    assert dica(b, user_id=a, uid=a).status_code == 200
+    assert linha(a) == antes
+    assert list(linha(b)["dicas"]) == [ID]
+    assert [(d["id"], d["vista"]) for d in ler(a)["dicas"]] == [(ID, True)]

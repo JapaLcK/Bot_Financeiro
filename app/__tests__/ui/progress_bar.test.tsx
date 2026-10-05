@@ -1,9 +1,12 @@
-import { View } from "react-native";
+import { act } from "@testing-library/react-native";
+import { Animated, StyleSheet, View } from "react-native";
 
-import { ProgressBar } from "@/ui/componentes/ProgressBar";
+import { ProgressBar, ProgressBarIndeterminada } from "@/ui/componentes/ProgressBar";
 import { claro, escuro } from "@/ui/tokens";
 
-import { renderNosDoisTemas } from "./_render";
+import { renderInterativo, renderNosDoisTemas } from "./_render";
+
+declare const global: typeof globalThis & { __definirReduzirMovimento: (v: boolean) => void };
 
 function escalaX(resultado: ReturnType<typeof renderNosDoisTemas>["claro"]) {
   const preenchimento = resultado.UNSAFE_getAllByType(View)[1]!;
@@ -67,5 +70,44 @@ describe("ProgressBar", () => {
     const { claro: c, escuro: e } = renderNosDoisTemas(<ProgressBar valor={0.7} tom="positive" />);
     expect(c.toJSON()).toMatchSnapshot("claro");
     expect(e.toJSON()).toMatchSnapshot("escuro");
+  });
+});
+
+describe("ProgressBarIndeterminada", () => {
+  let loop: jest.SpyInstance;
+  const preenchimento = (r: ReturnType<typeof renderInterativo>) => StyleSheet.flatten(r.UNSAFE_getByType(Animated.View).props.style);
+
+  beforeEach(() => {
+    global.__definirReduzirMovimento(false);
+    loop = jest.spyOn(Animated, "loop").mockReturnValue({ start: jest.fn(), stop: jest.fn(), reset: jest.fn() } as unknown as Animated.CompositeAnimation);
+  });
+  afterEach(() => loop.mockRestore());
+
+  it("progressbar com rótulo e busy, SEM accessibilityValue.now (não há porcentagem)", () => {
+    const r = renderInterativo(<ProgressBarIndeterminada rotulo="Organizando seus dados" />);
+    const barra = r.getByRole("progressbar", { name: "Organizando seus dados" });
+    expect(barra.props.accessibilityState).toEqual({ busy: true });
+    expect(barra.props.accessibilityValue?.now).toBeUndefined();
+  });
+
+  it("o loop inicia no mount e PARA no desmonte; o segmento anda por translateX", async () => {
+    const r = renderInterativo(<ProgressBarIndeterminada rotulo="x" />);
+    await act(async () => {});
+    const instancia = loop.mock.results[0]!.value as { start: jest.Mock; stop: jest.Mock };
+    expect(instancia.start).toHaveBeenCalledTimes(1);
+    expect(instancia.stop).not.toHaveBeenCalled();
+    expect(preenchimento(r).transform).toBeDefined();
+    r.unmount();
+    expect(instancia.stop).toHaveBeenCalledTimes(1);
+  });
+
+  it("com reduzir movimento nada se desloca (sem translateX): a trilha pulsa por opacidade", async () => {
+    global.__definirReduzirMovimento(true);
+    const r = renderInterativo(<ProgressBarIndeterminada rotulo="x" />);
+    await act(async () => {});
+    const estilo = preenchimento(r);
+    expect(estilo.transform).toBeUndefined();
+    expect(estilo.opacity).toBeDefined();
+    expect(estilo.flex).toBe(1);
   });
 });

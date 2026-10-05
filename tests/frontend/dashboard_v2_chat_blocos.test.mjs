@@ -19,8 +19,7 @@ after(() => browser?.close());
 
 async function abrir({ width = 1440, hash = "#/", perfil = "padrao" } = {}) {
   const ctx = await browser.newContext({ viewport: { width, height: 900 }, reducedMotion: "reduce" });
-  await servir(ctx);
-  await ctx.addInitScript((p) => localStorage.setItem("pigbank.dashboard.profile.v1", JSON.stringify(p)), perfil);
+  await servir(ctx, undefined, { perfil }); // o perfil mora no servidor (/api/v2/perfil)
   const page = await ctx.newPage();
   const erros = [];
   page.on("pageerror", (e) => erros.push(e.message));
@@ -54,7 +53,7 @@ test("escolher a categoria na resposta abre o detalhe nela, e o painel fica sem 
   const depois = await r.evaluate((m) => [
     [...m.querySelectorAll(".cat[aria-pressed='true']")].map((b) => b.textContent.replace(/R\$.*/, "")),
     [...m.querySelectorAll(".msg-block article")].map((a) => a.id.replace(/^m\d+-/, "")),
-    m.querySelectorAll(".msg-block article")[1]?.querySelector(".w-title").textContent,
+    m.querySelectorAll(".msg-block article")[1]?.querySelector(".w-title > span").textContent, // sem o selo "demonstração"
   ]);
   await irPara(page, "#/gastos", "Para onde vai");
   const painel = await page.locator(".cats [aria-pressed='true']").count();

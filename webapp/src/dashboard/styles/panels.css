@@ -36,6 +36,11 @@
 .cat-delta { grid-area: delta; display: inline-flex; align-items: center; justify-content: flex-end; gap: 2px; font-size: 11.5px; }
 .cat-delta i { font-size: 11px; }
 @container (min-height: 600px) { .cats { flex: 1; align-content: space-evenly; } }
+/* No Resumo a célula tem altura fixa: a lista rola por dentro, nenhuma categoria some (decisão
+   do dono). A /gastos e o celular têm altura livre e não rolam. O anel de foco do botão vai para
+   dentro, que a rolagem corta o de fora. */
+.board .cats { min-height: 0; overflow-y: auto; overscroll-behavior: contain; }
+.board .cats .cat:focus-visible { outline-offset: -2px; }
 .cat-track { grid-area: track; position: relative; height: 6px; border-radius: 3px; background: var(--plane-2); }
 .cat-fill { position: absolute; inset: 0; border-radius: 3px; transform-origin: left; transition: transform 500ms var(--ease-out); }
 .cat-ghost { position: absolute; top: -3px; bottom: -3px; width: 2px; margin-left: -1px; border-radius: 1px; background: rgba(255, 255, 255, 0.6); }
@@ -148,6 +153,23 @@
 .bill-name { display: grid; font-size: 13px; font-weight: 500; min-width: 0; }
 .bill-status { display: inline-flex; align-items: center; gap: 4px; font-size: 11.5px; font-weight: 400; }
 .bill-amt { font-size: 13px; font-weight: 600; }
+
+/* Assinaturas (grid e não flex: o gap vale no Safari 14) */
+.sub-bill { grid-template-columns: minmax(0, 1fr) auto; }
+.subs { display: grid; }
+.sub { display: grid; grid-template-columns: minmax(0, 1fr) auto; gap: 2px 12px; padding: 12px 0; border-top: 1px solid var(--rule); }
+.sub:first-child { border-top: 0; padding-top: 0; }
+.sub-name { font-size: 14px; font-weight: 600; overflow-wrap: anywhere; }
+.sub-amt { font-size: 14px; font-weight: 600; }
+.sub-meta { grid-column: 1 / -1; font-size: 12.5px; color: var(--ink-2); overflow-wrap: anywhere; }
+.sub-acoes, .sub-aviso { display: grid; grid-auto-flow: column; justify-content: start; align-items: center; gap: 8px; }
+.sub-acoes { grid-column: 1 / -1; margin-top: 6px; }
+.sub-acoes .btn, .sub-aviso .btn { min-height: 44px; }
+.sub-acoes .btn:disabled, .sub-aviso .btn:disabled { opacity: 0.4; cursor: default; }
+.sub-aviso p:focus { outline: none; }
+/* Sem flex: ele tira a setinha nativa do summary. 12 + 20 + 12 = 44 px de alvo. */
+.sub-ignoradas summary { padding: 12px 0; line-height: 20px; cursor: pointer; }
+.sub-ignoradas[open] .sub-mostrar, .sub-ignoradas:not([open]) .sub-esconder { display: none; }
 
 /* Piggy notou */
 .piggy-title { display: inline-flex; align-items: center; gap: 8px; }

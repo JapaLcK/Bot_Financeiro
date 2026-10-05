@@ -215,7 +215,7 @@ def sum_spent_in_category_this_month(user_id: int, categoria: str) -> float:
                   coalesce((
                     select sum(ct.valor)
                     from credit_transactions ct
-                    join credit_bills b on b.id = ct.bill_id
+                    join credit_bills b on b.id = ct.bill_id and b.user_id = ct.user_id
                     where ct.user_id=%s
                       and {_CAT_CT_EQ}
                       and ct.is_refund = false
@@ -278,7 +278,7 @@ def sum_spent_in_category_period(
                   coalesce((
                     select sum(ct.valor)
                     from credit_transactions ct
-                    join credit_bills b on b.id = ct.bill_id
+                    join credit_bills b on b.id = ct.bill_id and b.user_id = ct.user_id
                     where ct.user_id=%s
                       and {_cat_ct} = {_arg}
                       and ct.is_refund = false
@@ -357,7 +357,7 @@ def get_budgets_status_for_month(
                 spent_cards as (
                   select {cat_key_sql('ct.categoria')} as cat, sum(ct.valor)::numeric as total
                   from credit_transactions ct
-                  join credit_bills b on b.id = ct.bill_id
+                  join credit_bills b on b.id = ct.bill_id and b.user_id = ct.user_id
                   where ct.user_id=%s
                     and ct.is_refund = false
                     and date_part('year',  b.period_end) = %s
