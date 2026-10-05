@@ -28,6 +28,7 @@ describe("(auth)/criar-conta — tela real", () => {
     renderRouter("./app", { initialUrl: "/" });
     await waitFor(() => expect(screen).toHavePathname("/boas-vindas"));
 
+    fireEvent.press(botao("Começar"));
     fireEvent.press(botao("Criar conta"));
     await waitFor(() => expect(screen).toHavePathname("/criar-conta"));
     await act(async () => {

@@ -44,7 +44,7 @@ type Props = Base & ({ somenteLeitura?: false } | { somenteLeitura: true; value:
  * quebraria justamente essa concordância sem avisar ninguém.
  */
 export function Input({ rotulo, erro, desativado = false, icone, somenteLeitura = false, ...resto }: Props) {
-  const { cores } = useTema();
+  const { cores, acesso } = useTema();
   useAvisoAoErrar(!!erro);
   // Quem não está com o dedo neste campo (ou usa leitor de tela sem foco
   // nele) não veria o erro sem isto — o texto some/aparece na árvore sem
@@ -68,10 +68,11 @@ export function Input({ rotulo, erro, desativado = false, icone, somenteLeitura 
     ? { color: inativo ? cores.inkMuted : cores.ink, flex: 1, minHeight: 44 }
     : {
         color: inativo ? cores.inkMuted : cores.ink,
-        borderWidth: 1,
+        borderWidth: acesso ? 0 : 1,
+        ...(acesso ? { borderBottomWidth: 1 } : {}),
         borderColor: corBorda,
-        borderRadius: raio.md,
-        paddingHorizontal: espaco.lg,
+        borderRadius: acesso ? 0 : raio.md,
+        paddingHorizontal: acesso ? 0 : espaco.lg,
         paddingVertical: espaco.md,
         minHeight: 44,
       };
@@ -116,10 +117,11 @@ export function Input({ rotulo, erro, desativado = false, icone, somenteLeitura 
             flexDirection: "row",
             alignItems: "center",
             gap: espaco.sm,
-            borderWidth: 1,
+            borderWidth: acesso ? 0 : 1,
+            ...(acesso ? { borderBottomWidth: 1 } : {}),
             borderColor: corBorda,
-            borderRadius: raio.md,
-            paddingHorizontal: espaco.lg,
+            borderRadius: acesso ? 0 : raio.md,
+            paddingHorizontal: acesso ? 0 : espaco.lg,
           }}
         >
           <Icone nome={icone} tom="inkMuted" tamanho={20} />

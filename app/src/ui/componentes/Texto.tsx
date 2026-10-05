@@ -25,7 +25,7 @@ interface Props extends Omit<TextProps, "maxFontSizeMultiplier"> {
  * decisão de tela por tela.
  */
 export function Texto({ variante = "corpo", tom = "ink", numerico = false, style, ...resto }: Props) {
-  const { cores } = useTema();
+  const { cores, acesso } = useTema();
   // `fontWeight` do chamador nunca passa adiante: peso + família custom cai
   // de volta no sistema no Android (mesmo motivo do comentário em
   // `tokens.ts`) — o peso vem da família de `texto[variante]`, não de um
@@ -38,6 +38,8 @@ export function Texto({ variante = "corpo", tom = "ink", numerico = false, style
       style={[
         texto[variante],
         { color: cores[tom] },
+        ...(acesso && variante === "titulo" ? [{ fontSize: 34, lineHeight: 40, letterSpacing: -1 }] : []),
+        ...(acesso && variante === "secao" ? [{ fontSize: 24, lineHeight: 30, letterSpacing: -0.5 }] : []),
         estiloDoChamador,
         // Depois de `estiloDoChamador`, não antes: um `style={{ fontVariant:
         // [...] }}` do chamador não pode apagar o `tabular-nums` de um Texto

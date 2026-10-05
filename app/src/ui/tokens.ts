@@ -95,3 +95,13 @@ export const texto = {
   rotulo: { fontSize: 14, lineHeight: 18, fontFamily: "Inter-Medium" },
   legenda: { fontSize: 12, lineHeight: 16, fontFamily: "Inter-Regular" },
 } as const;
+
+/** Paleta das telas de acesso: mantém o fundo da tampa biométrica nativa. */
+export const acessoClaro: Paleta = {
+  ...claro, surface: "#F0F0F5", surfaceRaised: "#F6F6FA",
+  ink: "#191921", inkMuted: "#686875", acao: "#C7186B", onAcao: "#FFFFFF",
+};
+export const acessoEscuro: Paleta = {
+  ...escuro, surface: "#24242F", surfaceRaised: "#24242F",
+  ink: "#F8F8FC", inkMuted: "#A0A0AF", acao: "#CE2572", onAcao: "#FFFAFD",
+};
