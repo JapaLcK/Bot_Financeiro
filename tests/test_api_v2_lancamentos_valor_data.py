@@ -286,8 +286,10 @@ def test_app_patch_data_sob_lock_fundida_na_espera(libera):
 _UPDATE = re.compile(r"\bupdate\s+launches\b", re.I)
 _COLUNA = re.compile(r'(?<![\w.])(?:"?\w+"?\.)?"?(valor|criado_em)"?\s*=(?!=)', re.I)
 ESCRITORES = {
+    ("db/reconciliation.py", "_apply_bank_fields"): "P3: banco na representação, original e delta preservados",
+    ("db/reconciliation.py", "_restore_original"): "saída da fusão restaura original, não move saldo",
     ("db/accounts.py", "update_launch_fields"): "v2 (pode) e /app; data da fundida e do OF travada",
-    ("db/open_finance.py", "sync_imported_open_finance_updates"): "sync do OF, só source='open_finance'",
+    ("db/open_finance.py", "sync_imported_open_finance_updates"): "sync do OF, preservando delta original da fundida",
     ("db/open_finance_cash_revisao.py", "_corrige"): "Q41: o banco corrigiu o saque/depósito automático",
 }
 

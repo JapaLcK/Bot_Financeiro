@@ -7,6 +7,7 @@ import { Banner } from "@/ui/componentes/Banner";
 import { Button } from "@/ui/componentes/Button";
 import { Screen } from "@/ui/componentes/Screen";
 import { Texto } from "@/ui/componentes/Texto";
+import { TemaProvider } from "@/ui/tema";
 import { espaco } from "@/ui/tokens";
 
 import { useBloqueio } from "./bloqueio";
@@ -23,6 +24,10 @@ const MENSAGEM_ERRO_SAIR = "Não conseguimos sair. Tente de novo.";
  * símbolo no MESMO ponto — o centro da área segura — para a troca não pular.
  */
 export function TelaDeBloqueio() {
+  return <TemaProvider acesso><ConteudoDoBloqueio /></TemaProvider>;
+}
+
+function ConteudoDoBloqueio() {
   const { estado, desbloquear } = useBloqueio();
   const sessao = useSessao();
   const [saindo, setSaindo] = useState(false);

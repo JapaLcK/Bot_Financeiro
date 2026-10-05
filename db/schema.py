@@ -2929,6 +2929,11 @@ def init_db():
           feitos jsonb not null default '{}'
         )
         """,
+        # `dicas` = {dica_id: carimbo da 1ª vez que a dica de tela apareceu} (`POST
+        # /api/v2/guia/dica`). Fora de `feitos` de propósito: a dica não oferece o guia
+        # (ele segue em `oferecer`) nem conta para a conclusão. Fora do `create table`
+        # pelo mesmo motivo das colunas de `pix_charges`: a tabela já existe.
+        """alter table guia_painel add column if not exists dicas jsonb not null default '{}'""",
 
         # ── Aviso de escrita ao `/painel` (TABELAS_QUE_AVISAM, no topo) ──────
         # O NOTIFY sai só no commit (rollback não avisa) e o Postgres funde os

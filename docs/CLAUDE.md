@@ -318,6 +318,16 @@ Sub-app FastAPI (`api/v2/app.py`) montado pelo monólito com `app.mount("/api/v2
     from guia_painel g join users u on u.id = g.user_id;
   ```
 
+  **Dicas de tela.** O `Guia` também traz `dicas: [{id, tela, titulo, texto, vista}]`, do
+  catálogo `DICAS` em `api/v2/guia.py` (hoje só `assinaturas.marcas`), filtradas pelo plano
+  (`plan_gate_ok` do recurso da tela: `subscriptions` para Assinaturas; o Essencial recebe
+  `[]`). `POST /api/v2/guia/dica {dica}` carimba a 1ª vez em `guia_painel.dicas`
+  (`{dica_id: carimbo}`, coluna por `alter … if not exists`) e devolve o `Guia`; id fora do
+  catálogo = 422; não toca `oferecido_em` nem `feitos` (o guia segue em `oferecer`). Dica que
+  o plano não dá grava e é inofensiva: o GET não a devolve. O cliente (`parts/Dica.tsx`) mostra
+  a dica uma vez, sem mover o foco e nunca com o guia aberto; a Ajuda vira menu só na tela com
+  dica (`parts/Ajuda.tsx`), e o Cmd-K ganha "Como funciona esta tela" lá.
+
 - **Dinheiro na v2 é `Decimal` e sai como TEXTO decimal** (`"1234.56"`, sem arredondar e sem
   float), em toda rota: no TS é `string`. A escala é a da coluna (`"1000"` e `"1000.00"`
   valem). O contrato vale para toda rota futura.
@@ -665,6 +675,28 @@ sempre. Limite conhecido: estorno por nota de crédito para o saldo do cliente (
 charge) NÃO é detectado. Estorno "pending" real e contestação real chegando antes da
 entrega só se provam no Stripe; o modo teste sobe `amount_refunded` na hora.
 
+**Cartão nunca cobra período que um Pix pago cobre.** Checkout de cartão concluído (ou
+1ª fatura, `subscription_create`) com Pix cobrindo hoje (`pix_cobre_agora`: grant vigente
+ou cobrança paga com a janela em curso, ainda sem grant; grant Pix revogado não conta; o
+`create-checkout` recusa com `409 pix_active` pela mesma função) cancela a assinatura na hora
+(`core/services/cartao_recusado_por_pix.py`, `Subscription.cancel` com
+`cancellation_details.comment = "pigbank:pix_vigente"`), registra os cadernos e não
+materializa nada; plano cobrado vira alerta de estorno manual, e o `deleted` com a marca
+não manda e-mail de cancelamento. Na ordem inversa (cartão primeiro, Pix pago depois), o
+efeito `stripe_cancel` do dreno pergunta ao Stripe (`_stripe_vivo`) e agenda
+`cancel_at_period_end` quando a cobrança não tem `stripe_subscription_id` ou quando a
+gravada já está morta (`canceled`/`incomplete_expired`; o cliente a cancelou e assinou
+outra antes de pagar um QR antigo), gravando a assinatura achada (sempre a que foi
+agendada) e a janela adiada na linha antes de o efeito contar como feito; com a gravada
+morta, o começo que esperava o fim dela é desfeito antes de adiar até o fim da viva (que
+pode acabar antes, e o Pix não fica esperando a morta); gravada morta e
+nenhuma viva: não há `modify` e a janela que esperava o fim dela volta para agora. Com
+cadernos, o alerta manda estornar o plano só depois de `ebook_entregas` marcar `enviado`.
+Limites conhecidos: (1) assinatura que morre depois de o
+`stripe_cancel` registrar deixa a janela adiada; (2) cobrança paga com grant ainda por
+nascer: o `create-checkout` recusa, mas a tela de status mostra sem plano até o grant sair;
+(3) a reentrega do checkout repete o alerta de estorno.
+
 **Cadernos extras no Pix anual (PR A: receber e entregar; inerte até o checkout
 gravar a foto).** `pix_charges.extras` (`jsonb`, default `[]`, check de array) guarda a
 FOTO dos cadernos escolhidos, `[{price, url, nome, valor_cents}]`, gravada só por
@@ -819,6 +851,11 @@ não barra reconexão e o 402 do `/pluggy-item` continua valendo)) mais o webhoo
 `/open-finance/pluggy/webhook`. O `connect-token` aceita `app_scheme` opcional no corpo
 (`pigbank`, `pigbank-staging` ou `pigbank-dev`; fora da lista, 400), que vira o
 `oauthRedirectUri` `<scheme>://open-finance-volta` da Pluggy; o site não manda o campo.
+Aceita também `item_id` opcional (reconectar banco já conectado; vai como `itemId` ao lado de
+`options`): só item não pausado do próprio usuário no nosso banco e com o `clientUserId` dele
+na Pluggy; não-string ou vazio é 400, todo o resto é o mesmo 404 `OF_ITEM_NAO_ENCONTRADO`.
+`item_id: null` conta como ausente (token de banco novo), e corpo acima do teto de bytes é
+ignorado inteiro (mesmo efeito).
 Serviços em `core/services/pluggy*.py` e
 `open_finance*.py`; tabelas `open_finance_connections/accounts/transactions/investments`,
 `open_finance_investment_snapshots` (foto diária por posição, `db/of_snapshots.py`) e

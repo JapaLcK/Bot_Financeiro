@@ -115,6 +115,9 @@ MARCAS_PERMITIDAS: dict[str, tuple[str, ...]] = {
     # da tabela — no serviço, dentro de `db.pix_charges_saga` (`buscar_ativa`).
     "db/pix_extras.py": ("pix_charges",),
     "core/services/pix_extras.py": ("pix_charges",),
+    # A guarda da cobrança dupla Pix × cartão: só o import de `db.pix_charges_saga`
+    # (`paga_cobrindo_agora`, leitura por dono). Sem host, sem env do Asaas.
+    "core/services/cartao_recusado_por_pix.py": ("pix_charges",),
     # O DRENO (1b-B) — entrada MÍNIMA desde sempre, e agora ela é a regra e não
     # a exceção. Sem `MARCAS_DO_ASAAS`: ler `ASAAS_PIX_ANNUAL_ENABLED` aqui
     # derrubaria o portão, e é isso que mantém a flag dentro do checkout.

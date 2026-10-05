@@ -5,6 +5,7 @@ import { mesDe, simActive } from "./lib/store.js";
 import type { DashState } from "./lib/types";
 import { Frame } from "./parts/Frame";
 import { Board } from "./parts/Board";
+import { DicaDaTela } from "./parts/Dica";
 import { Ledger } from "./parts/Ledger";
 import { abrirGuia } from "./parts/Guia";
 import { PiggyChat } from "./parts/PiggyChat";
@@ -32,6 +33,7 @@ function Page({ path, lede, children }: { path: Path; lede: ReactNode; children:
         <h1 id="page-title" tabIndex={-1}>{route(path).title}</h1>
         <p className="page-lede">{lede}</p>
       </header>
+      <DicaDaTela path={path} />
       <div className="page-grid">{children}</div>
     </>
   );

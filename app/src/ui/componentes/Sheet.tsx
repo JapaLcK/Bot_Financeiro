@@ -64,7 +64,7 @@ interface Props {
  * inferior e respiro lateral. Usada DENTRO da rota aberta com `OPCOES_SHEET`.
  */
 export function SheetConteudo({ children, rolar = false }: Props) {
-  const { cores } = useTema();
+  const { cores, acesso } = useTema();
   const insets = useSafeAreaInsets();
   const rolagem = useRef<ScrollView>(null);
   const conteudo = useRef<View>(null);
@@ -81,7 +81,7 @@ export function SheetConteudo({ children, rolar = false }: Props) {
   }, [rolar]);
 
   const preenchimento = {
-    paddingHorizontal: espaco.lg,
+    paddingHorizontal: acesso ? espaco.xl : espaco.lg,
     paddingBottom: insets.bottom + espaco.lg,
   };
   const alca = (

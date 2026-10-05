@@ -118,6 +118,10 @@ CHAMADORES_PERMITIDOS: frozenset[str] = frozenset({
     # Os cadernos extras: lê a cobrança do dono e o Asaas para o job de entrega, e a
     # cobrança ativa do dono (`buscar_ativa`) para a seleção do GET /billing/pix-extras.
     "core/services/pix_extras.py",
+    # A guarda da cobrança dupla Pix × cartão: só LÊ se uma cobrança paga do dono
+    # cobre hoje (`paga_cobrindo_agora`), para o webhook e o create-checkout do
+    # cartão recusarem. Não emite cobrança nem concede acesso.
+    "core/services/cartao_recusado_por_pix.py",
     # Módulos do Pix importando módulos do Pix (ver o parágrafo acima).
     "core/services/asaas_customers.py",
     "db/pix_charges_saga.py",

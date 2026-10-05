@@ -235,9 +235,11 @@ def set_onboarding_step(user_id: int, step: int) -> None:
     _db_support.invalidate_auth_user_cache(user_id)
 
 
-def mark_onboarding_completed(user_id: int) -> None:
+def mark_onboarding_completed(user_id: int) -> bool:
     """Carimba a conclusão. Idempotente pelo `is null` — chamar de novo não
-    reescreve o timestamp original (mesmo padrão de mark_mfa_onboarding_shown)."""
+    reescreve o timestamp original (mesmo padrão de mark_mfa_onboarding_shown).
+    Devolve True só quando ESTA chamada carimbou: é o que deixa a telemetria
+    contar a conclusão uma vez por conta, e não uma vez por pedido."""
     with get_conn() as conn:
         with conn.cursor() as cur:
             cur.execute(
@@ -245,8 +247,10 @@ def mark_onboarding_completed(user_id: int) -> None:
                 "where user_id=%s and onboarding_completed_at is null",
                 (int(user_id),),
             )
+            stamped = cur.rowcount > 0
         conn.commit()
     _db_support.invalidate_auth_user_cache(user_id)
+    return stamped
 
 
 def get_user_by_stripe_customer(stripe_customer_id: str) -> int | None:

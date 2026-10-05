@@ -179,8 +179,7 @@ def _compra_na_conexao(uid, item):
 
 
 def test_reconexao_lista_a_compra_do_cartao_uma_vez(uid_pro, ia_fora):
-    """`imported_credit_tx_id` não é único: na reconexão o importador deduplica
-    pelo id do provedor e liga a tx nova à MESMA compra. Uma linha por compra."""
+    """Reconexão transfere a compra; leitura também tolera dois vínculos legados."""
     _compra_na_conexao(uid_pro, f"item-a-{uid_pro}")
     _compra_na_conexao(uid_pro, f"item-b-{uid_pro}")
     assert compras_credito(uid_pro) == 1  # o cenário existe: uma compra,
@@ -188,5 +187,13 @@ def test_reconexao_lista_a_compra_do_cartao_uma_vez(uid_pro, ia_fora):
               "join open_finance_accounts a on a.id = o.account_id "
               "join open_finance_connections c on c.id = a.connection_id "
               "where c.user_id=%s and o.imported_credit_tx_id is not null",
-              (uid_pro,))["n"] == 2  # duas tx ligadas a ela
+              (uid_pro,))["n"] == 1  # só a conexão nova é dona da compra
+    assert _linhas(uid_pro) == [(today_tz(), "MERCADO LIVRE", 50.0)]
+    # Legado anterior ao PR 3: duas transações apontavam para a mesma compra.
+    with db.connection.get_conn() as conn, conn.cursor() as cur:
+        cur.execute("""update open_finance_transactions t set imported_credit_tx_id=(
+                         select id from credit_transactions where user_id=%s limit 1)
+                       from open_finance_accounts a join open_finance_connections c on c.id=a.connection_id
+                      where t.account_id=a.id and c.user_id=%s""", (uid_pro, uid_pro))
+        conn.commit()
     assert _linhas(uid_pro) == [(today_tz(), "MERCADO LIVRE", 50.0)]

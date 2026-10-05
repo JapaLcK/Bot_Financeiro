@@ -1,7 +1,8 @@
-import { router } from "expo-router";
-import { useEffect, useState } from "react";
-import { Image, KeyboardAvoidingView, Platform, View } from "react-native";
+import { router, useFocusEffect } from "expo-router";
+import { useCallback, useEffect, useState } from "react";
+import { BackHandler, Image, KeyboardAvoidingView, Platform, View } from "react-native";
 
+import { Apresentacao } from "@/features/auth/Apresentacao";
 import { BotoesSociais, Ou } from "@/features/auth/BotoesSociais";
 import type { EstadoEntrar } from "@/features/auth/entrar";
 import { FasesDaEntrada } from "@/features/auth/FasesDaEntrada";
@@ -25,6 +26,7 @@ const SIMBOLO = require("../../assets/brand/simbolo.png");
  */
 export default function BoasVindas() {
   const sessao = useSessao();
+  const [iniciou, setIniciou] = useState(false);
   const [estado, setEstado] = useState<EstadoEntrar>({ fase: "formulario" });
   const ocupado = estado.fase === "google" || estado.fase === "apple";
   const repouso = estado.fase === "formulario" || ocupado;
@@ -38,6 +40,21 @@ export default function BoasVindas() {
     if (sessao.estado.fase === "anonimo" && sessao.estado.aviso) router.push("/entrar");
   }, []);
 
+  // Começar muda uma etapa local, sem acrescentar uma rota à pilha. No
+  // Android, Voltar retorna à apresentação como o botão da tela; durante
+  // Google/Apple, fica bloqueado. Perder o foco remove o ouvinte para que
+  // Entrar e Criar conta continuem usando o histórico de navegação.
+  useFocusEffect(
+    useCallback(() => {
+      if (!iniciou || !repouso) return;
+      const inscricao = BackHandler.addEventListener("hardwareBackPress", () => {
+        if (!ocupado) setIniciou(false);
+        return true;
+      });
+      return () => inscricao.remove();
+    }, [iniciou, repouso, ocupado]),
+  );
+
   // O aviso de um Google/Apple que falhou sai no próximo toque.
   const ir = (rota: "/criar-conta" | "/entrar") => {
     if (aviso) setEstado({ fase: "formulario" });
@@ -47,19 +64,21 @@ export default function BoasVindas() {
   return (
     <KeyboardAvoidingView behavior={Platform.OS === "ios" ? "padding" : undefined} style={{ flex: 1 }}>
       <Screen>
-        <View
+        {!iniciou && repouso ? (
+          <Apresentacao comecar={() => setIniciou(true)} entrar={() => ir("/entrar")} />
+        ) : <View
           style={
             repouso
-              ? { flex: 1, justifyContent: "space-between", gap: espaco.huge, paddingVertical: espaco.xxl }
+              ? { flex: 1, gap: espaco.xl, paddingVertical: espaco.lg }
               : { gap: espaco.xl, paddingTop: espaco.xxl }
           }
         >
-          {repouso ? null : <Texto variante="titulo">{cadastro ? "Criar conta" : "Entrar"}</Texto>}
+          {repouso ? <Button rotulo="Voltar" variante="ghost" desativado={ocupado} onPress={() => setIniciou(false)} /> : <Texto variante="titulo">{cadastro ? "Criar conta" : "Entrar"}</Texto>}
           <FasesDaEntrada estado={estado} aplicar={setEstado} autenticar={sessao.autenticar}>
-            <View style={{ gap: espaco.md, paddingTop: espaco.huge }}>
-              <Image source={SIMBOLO} accessible={false} resizeMode="contain" style={{ width: 60, height: 64 }} />
+            <View style={{ gap: espaco.md }}>
+              <Image source={SIMBOLO} accessible={false} resizeMode="contain" style={{ width: 34, height: 37 }} />
               <Texto variante="titulo" accessibilityRole="header">
-                PigBank
+                Crie sua conta
               </Texto>
               <Texto variante="corpo" tom="inkMuted">
                 Sua grana. Tudo mais claro.
@@ -76,7 +95,7 @@ export default function BoasVindas() {
               </View>
             </View>
           </FasesDaEntrada>
-        </View>
+        </View>}
       </Screen>
     </KeyboardAvoidingView>
   );

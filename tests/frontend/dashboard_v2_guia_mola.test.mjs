@@ -158,18 +158,37 @@ test("fechar em pleno voo (Pular e Esc) e reabrir pela Ajuda em < 1 s: o Piggy e
 // Piggy saltar ao destino e voltar quando ela acabava. Mede o Piggy a cada quadro: nenhum passo
 // de quadro chega à metade do caminho todo.
 test("Bora durante a entrada do Piggy: a mola sem salto (nenhum quadro anda metade do caminho)", async () => {
-  const { ctx, page } = await abrir({ motion: "no-preference" });
+  const { ctx, page } = await abrir({ motion: "no-preference", antes: async (ctx) => {
+    // Mantém a entrada disponível mesmo quando o runner demora para abrir a página.
+    // A âncora chega ao lugar sem uma rolagem CSS concorrente: aqui medimos a mola.
+    await ctx.addInitScript(() => document.addEventListener("DOMContentLoaded", () => {
+      const estilo = document.createElement("style");
+      estilo.textContent = "html { scroll-behavior: auto !important; } .guia-piggy { animation-duration: 60s !important; }";
+      document.head.appendChild(estilo);
+    }, { once: true }));
+  } });
   await page.getByRole("button", { name: "Bora", exact: true }).waitFor();
+  await relogio(page);
   const entrando = await page.evaluate(() => {
     const pg = document.querySelector(".guia-piggy");
-    window.__q = [];
-    const f = () => { const r = pg.getBoundingClientRect(); window.__q.push([r.left + r.width / 2, r.top + r.height / 2]); if (window.__q.length < 120) requestAnimationFrame(f); };
-    f();
-    return pg.getAnimations().some((a) => a instanceof CSSAnimation && a.playState === "running");
+    const entrada = pg.getAnimations().find((a) => a instanceof CSSAnimation && a.playState === "running");
+    if (!entrada) return false;
+    entrada.pause();
+    entrada.currentTime = 20000; // 1/3 da entrada; partir() deve finalizá-la antes da mola.
+    return true;
   });
+  const centro = () => page.evaluate(() => {
+    const r = document.querySelector(".guia-piggy").getBoundingClientRect();
+    return [r.left + r.width / 2, r.top + r.height / 2];
+  });
+  const q = [await centro()];
   await page.getByRole("button", { name: "Bora", exact: true }).click();
-  await page.waitForTimeout(2200);
-  const q = await page.evaluate(() => window.__q);
+  // Mede também o quadro zero: cancelar a entrada não pode teleportar o Piggy.
+  // Cada amostra avança 16 ms da mola, independentemente da velocidade do runner.
+  for (let ms = 0; ms <= VOO + 16; ms += 16) {
+    await avanca(page, ms === 0 ? 0 : 16);
+    q.push(await centro());
+  }
   await ctx.close();
   const d = (a, b) => Math.hypot(a[0] - b[0], a[1] - b[1]);
   const passo = Math.max(...q.slice(1).map((p, i) => d(p, q[i]))), todo = d(q[0], q.at(-1));

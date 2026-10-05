@@ -19,7 +19,7 @@ from api.v2.assinaturas import Assinaturas
 from api.v2.categorias import Categorias
 from api.v2.contas import Contas
 from api.v2.erros import ErroV2
-from api.v2.guia import PASSOS, Guia
+from api.v2.guia import DICAS, PASSOS, Guia
 from api.v2.lancamentos import Lancamentos
 from api.v2.me import Me
 from api.v2.perfil import Perfil
@@ -299,6 +299,7 @@ def test_fixture_do_guia_segue_o_modelo_e_o_roteiro(nome):
     g = Guia.model_validate(FIXTURES["guia"][nome])
     assert g.estado == nome
     assert [{k: p[k] for k in PASSOS[0]} for p in FIXTURES["guia"][nome]["passos"]] == list(PASSOS)
+    assert [{k: d[k] for k in DICAS[0]} for d in FIXTURES["guia"][nome]["dicas"]] == list(DICAS)
 
 
 @pytest.mark.parametrize("nome", sorted(FIXTURES["erros"]))
