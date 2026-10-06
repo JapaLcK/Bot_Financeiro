@@ -66,16 +66,30 @@ VALIDAS = [
     ('dá pra aceitar um boleto de 800 para dia 20?', {'date': '20', 'amount': 800}),
     ('qual meu saldo daqui 30 dias e o que é bitcoin?', {'days': 30}),
     ('PREVISÃO de SALDO de\n30\nDIAS', {'days': 30}),
+    ('previsão de saldo nos próximos 30 dias', {'days': 30}),
+    ('piggy previsão de saldo nos próximos 30 dias', {'days': 30}),
+    ('previsão de saldo próximos 30 dias', {'days': 30}),
+    ('PREVISAO de SALDO nos PROXIMOS\n30\nDIAS', {'days': 30}),
+    ('previsão de saldo no próximo 1 dia', {'days': 1}),
+    ('previsão de saldo próximo 1 dia', {'days': 1}),
+    ('previsão de saldo para os próximos 30 dias', {'days': 30}),
+    ('previsão de saldo pelos próximos 30 dias', {'days': 30}),
+    ('tô tranquilo nos próximos 30 dias?', {'days': 30}),
+    ('previsão de saldo nos próximos 30 dias com meus boletos?', {'days': 30}),
+    ('previsão de saldo nos próximos 30 dias considerando uma saída de 800?', {'days': 30, 'amount': 800}),
+    ('previsão de saldo nos próximos 30 dias considerando uma entrada de 800?', {'days': 30, 'amount': -800}),
 ]
 
 
 @pytest.mark.parametrize('texto,args', VALIDAS)
-def test_contrato_consulta_tool_real_sem_recontar_existing(pro_small_uid, ia_fora, chamadas, texto, args):
+def test_contrato_consulta_tool_real_sem_recontar_existing(pro_small_uid, ia_fora, chamadas, monkeypatch, texto, args):
     uid = pro_small_uid
     assert 'registrada' in manda(uid, 'recebi 1500 de salário em dinheiro').lower()
     from db.bills import create_boleto
     create_boleto(uid, 'Existente', 100, date.today()+timedelta(days=1))
     antes = estado(uid)
+    monkeypatch.setattr('core.handle_incoming.classify', lambda *_a, **_k: pytest.fail('consulta chegou ao classificador'))
+    monkeypatch.setattr('core.handle_incoming.route', lambda *_a, **_k: pytest.fail('consulta chegou ao resolver'))
     resposta = manda(uid, texto)
     esperado = _check_cashflow(uid, args)
     assert chamadas == [('_check_cashflow', args)], (resposta, chamadas)
@@ -113,6 +127,17 @@ RECUSAS = [
     'previsão de saldo em 30 dias considerando uma entrada de 800 e saída de 900?',
     'previsão de saldo em 30 dias se comprar um carro de 180 mil?',
     'dá pra pegar dois boletos de 800 pra dia 20?',
+    'previsão de saldo nos próximos -30 dias?',
+    'previsão de saldo nos próximos +30 dias?',
+    'previsão de saldo nos próximos 3.0 dias?',
+    'previsão de saldo nos próximos 30,5 dias?',
+    'previsão de saldo nos próximos 99999999999999999999999999999999999999999999 dias?',
+    'previsão de saldo nos próximos dias?',
+    'previsão de saldo nos próximos 30 ou 60 dias?',
+    'previsão de saldo nos próximos 30 dias ou em 60 dias?',
+    'previsão de saldo nos próximos 30 dias ou próximos 30 dias?',
+    'previsão de saldo nos próximos 30 dias ou para 2026-10-17?',
+    'previsão de saldo nos próximos 30 dias ou 60?',
 ]
 
 
@@ -176,6 +201,7 @@ def abre_recategorizacao(uid, monkeypatch, launch_id):
     'tô tranquilo até 17/10 com meus boletos?', 'previsão de saldo de 30 dias',
     'tô tranquilo até dia 17?', 'qual meu saldo daqui 30 dias?',
     'aguento esse prazo?', 'previsão de saldo dia 32?',
+    'previsão de saldo nos próximos 30 dias',
 ])
 @pytest.mark.parametrize('porta', ['bill_pay_amount', 'recategorize_launch_text'])
 def test_contrato_adapter_consulta_nao_paga_nem_consume(porta, texto, pro_small_uid, monkeypatch, ia_fora, chamadas):
@@ -196,6 +222,10 @@ def test_contrato_adapter_consulta_nao_paga_nem_consume(porta, texto, pro_small_
     assert depois == antes, {'texto': texto, 'antes': antes, 'depois': depois, 'respostas': respostas}
     assert respostas and ('Saldo previsto condicional' in respostas[-1] or 'não consegui interpretar' in respostas[-1].lower()), respostas
     assert len(chamadas) == (0 if 'aguento' in texto or '32' in texto else 1) and not ia_fora
+    if 'próximos' in texto:
+        assert chamadas == [('_check_cashflow', {'days': 30})]
+        esperado = _check_cashflow(uid, {'days': 30})
+        assert esperado['target'] in respostas[-1] and fmt_brl(esperado['projetado']) in respostas[-1]
 
 
 @pytest.mark.parametrize('texto', ['132,50', 'cancelar'])
@@ -267,3 +297,52 @@ def test_contrato_demais_pendencias_integras(pro_small_uid, monkeypatch, ia_fora
     resposta = manda(uid, 'tô tranquilo até dia 17 com meus boletos?')
     assert chamadas == [('_check_cashflow', {'date': '17'})] and 'Saldo previsto condicional' in resposta
     assert estado(uid) == antes and not ia_fora
+
+
+@pytest.mark.parametrize('tipo', ['bill_amount_expected', 'payment_method_choice', 'confirm_media_launch'])
+def test_contrato_proximos_preserva_estado_completo(tipo, monkeypatch, ia_fora, chamadas):
+    import core.handle_incoming as hi
+    original = hi.handle_incoming
+    estados = []
+    def observar(msg, **kwargs):
+        antes = estado(msg.user_id)
+        saida = original(msg, **kwargs)
+        estados.append((antes, estado(msg.user_id)))
+        return saida
+    monkeypatch.setattr(hi, 'handle_incoming', observar)
+    _conversa_previsao_preserva_pendencia('piggy ' if tipo == 'bill_amount_expected' else '', tipo,
+        'previsão de saldo nos próximos 30 dias', monkeypatch, ia_fora)
+    assert len(estados) == 2 and estados[1][0] == estados[1][1]
+    assert chamadas == [('_check_cashflow', {'days': 30})] and not ia_fora
+
+
+@pytest.mark.parametrize('plan,days,liberado', [('essencial', 30, False), ('plus', 30, True), ('plus', 31, False), ('pro_max', 90, True), ('pro_max', 91, False)])
+def test_contrato_proximos_gate_antes_de_snapshot(monkeypatch, ia_fora, chamadas, plan, days, liberado):
+    import core.services.cashflow as cashflow
+    uid = usuario_pagante(plan)
+    original = cashflow.carregar
+    leituras = []
+    def carregar(*args, **kwargs):
+        leituras.append(args)
+        return original(*args, **kwargs)
+    monkeypatch.setattr(cashflow, 'carregar', carregar)
+    resposta = manda(uid, f'previsão de saldo nos próximos {days} dias')
+    assert chamadas == [('_check_cashflow', {'days': days})]
+    assert bool(leituras) == liberado
+    assert ('Saldo previsto condicional' in resposta) == liberado and not ia_fora
+
+
+def test_contrato_proximos_politica_antes_de_tool(pro_small_uid, ia_fora, chamadas):
+    from core.intent_router import INVESTMENT_ACTION_REFUSAL_MSG
+    from core.response_formatter import format_for_platform
+    uid = pro_small_uid
+    manda(uid, 'recebi 1500 de salário em dinheiro')
+    antes = estado(uid)
+    resposta = manda(uid, 'previsão de saldo nos próximos 30 dias se eu comprar bitcoin?')
+    assert resposta == format_for_platform(INVESTMENT_ACTION_REFUSAL_MSG, 'whatsapp')
+    assert estado(uid) == antes and not chamadas and not ia_fora
+
+
+def test_contrato_proximos_sem_previsao_nao_amplia_detector():
+    from core.handle_incoming import _consulta_de_previsao
+    assert not _consulta_de_previsao('qual meu saldo nos próximos 30 dias?')

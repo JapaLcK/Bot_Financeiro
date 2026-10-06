@@ -95,7 +95,7 @@ def _previsao_somente_leitura(uid: int, text: str) -> str | None:
     # Uma coleta não sobreposta governa contagem, argumentos e remoção do alvo.
     alvo_re = re.compile(
         r'(?<![\w/.-])(?:'
-        r'(?:daqui(?:\s+a)?|em|de)\s+(?P<days>[+-]?\d[\d.,]*)\s+dias?\b'
+        r'(?:daqui(?:\s+a)?|em|de|pr[oó]ximos?)\s+(?P<days>[+-]?\d[\d.,]*)\s+dias?\b'
         r'|(?:(?:at[eé]|para|pra|no)\s+)?(?:dia\s+)?'
         r'(?P<date>\d{4}-\d{2}-\d{2}|\d{1,2}[/\-]\d{1,2}(?:[/\-](?:\d{4}|\d{2}))?)(?![\w/\-]|[.,]\w)'
         r'|(?:(?:at[eé]|para|pra|no)\s+)?dia\s+(?P<dom>[+-]?\d+)(?![\w/\-]|[.,]\w)'

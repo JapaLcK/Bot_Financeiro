@@ -715,6 +715,16 @@ PR de cada etapa, não soluções prontas. Cada PR confere se ainda valem, decid
     correspondem à versão de ordem revalidada; sem terceira passada Tester.
     CI do head anterior 52e6120f aprovado em todos os jobs. Novo head ainda
     requer CI e Codex remotos. Merge exige nova autorização explícita do dono.
+  - Quinta revisão do #842: horizonte finito próximo(s) N dia(s) adicionado à
+    mesma extração/remoção/contagem; predicado/datas/tools/gates preservados.
+    Harness passou a exportar a dependência do core simulado, sem importar
+    bordas reais ou relaxar guardas. Reproduções antes da fonte e controles
+    separados: 22 falhas de prazo e 11 falhas de import; restaurado164passed.
+    Manager fresh aprovou fonte2+teste1. Área: **2042 passed/2 xfailed**,
+    50 arquivos e 103 subtests; os1981 nomes/status anteriores preservados.
+    CIe3be teve11falhas próprias de import corrigidas localmente; frontend
+    falhou no tooltip com mesma asserção da main93 e fontes sem diff.
+    Novo head requer CI e Codex remotos; merge só autorização humana.
   - CI completo e Codex remoto no head publicável seguem pendentes. Codex local
     foi tentado, mas a CLI recusou o modelo configurado e não produziu parecer.
     Produção, WhatsApp real e aparelho não verificados; sem deploy/TestFlight/reset.
