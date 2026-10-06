@@ -255,68 +255,75 @@ def create_mock_open_finance_connection(user_id: int, institution_key: str | Non
     }
 
 
-def get_open_finance_snapshot(user_id: int, limit: int = 8) -> dict:
-    ensure_user(user_id)
+def _read_open_finance_connections(cur, user_id: int, *, lock: bool = False) -> list[dict]:
+    """Mesma seleção do snapshot, dentro da transação do chamador."""
     # Import LOCAL: `open_finance_state` importa `_CursorComTeto` daqui no topo,
     # então a mão única é esta (ver o comentário lá).
     from .open_finance_state import (
         SQL_COLETA_ESTOURADA, SQL_COLETA_VENCIDA, SQL_EXECUTION_STATUS, aplica_teto_por_health,
         janela_device_auth_min)
 
+    cur.execute(
+        f"""
+        -- `raw` NÃO entra aqui, e continua não entrando: ele carrega
+        -- `clientUserId` e `statusDetail`, e esta linha vai para o
+        -- navegador. O que entra é o DERIVADO — um escalar calculado no
+        -- Postgres (`SQL_EXECUTION_STATUS`, fonte única em
+        -- `db/open_finance_state.py`), que o `connection_ui_state` lê
+        -- para não mandar "Reautorize o banco" a quem devia estar lendo
+        -- o QR. Era a metade da TELA do achado do Codex #166; a do aviso
+        -- proativo já estava fechada em `list_connections_needing_reconnect`.
+        --
+        -- Ele vale enquanto `health is null` E a autorização atual couber
+        -- em `JANELA_DEVICE_AUTH_MIN` (60 min). Vencido o prazo, o
+        -- derivado é NULL e o detalhe volta a "Reautorize o banco", que é
+        -- a ação certa depois que a janela fechou — o `raw` é congelado
+        -- (`mark_sync_result` não o toca), então sem prazo a instrução
+        -- duraria para sempre.
+        --
+        -- Gravar `health` no upsert continua VETADO (decisão da Onda 2:
+        -- reconectar ZERA a saúde até um sync real provar o contrário),
+        -- e é por isso que a saída é o derivado e não a coluna.
+        --
+        -- O `execution_status` é REMOVIDO do dict antes de a resposta
+        -- sair (logo abaixo, DENTRO do laço, por item, logo depois do
+        -- `connection_ui_state` que o consome): o corpo HTTP fica
+        -- idêntico em chaves ao de antes deste PR.
+        select id, provider, provider_item_id, status, institution_name, institution_id,
+               last_sync_at, last_attempt_at, status_reason, health, reconnected_at,
+               {SQL_EXECUTION_STATUS},
+               {SQL_COLETA_VENCIDA},
+               {SQL_COLETA_ESTOURADA}
+        from open_finance_connections
+        where user_id=%s
+        order by updated_at desc, id desc
+        {"for update" if lock else ""}
+        """,
+        (janela_device_auth_min(), user_id),
+    )
+    connections = [aplica_teto_por_health(dict(r)) for r in (cur.fetchall() or [])]
+    # `ui` é o estado exibível — decidido por `connection_ui_state`, a única
+    # função que o decide. O front deixou de derivar rótulo do `status`:
+    # ele não sabe de produto atrasado nem de item que sumiu.
+    from core.services.pluggy_health import connection_ui_state
+    for c in connections:
+        c["ui"] = connection_ui_state(c)
+        # Campo de TRABALHO, não de contrato: entrou no select só para o
+        # `connection_ui_state` acima e sai antes da serialização, para o
+        # corpo HTTP ficar byte-idêntico em chaves ao de antes. O `pop`
+        # é o que impede um campo derivado do `raw` de virar API pública
+        # sem ninguém ter decidido isso.
+        c.pop("execution_status", None)
+        c.pop("coleta_vencida", None)
+        c.pop("coleta_estourada", None)
+    return connections
+
+
+def get_open_finance_snapshot(user_id: int, limit: int = 8) -> dict:
+    ensure_user(user_id)
     with get_conn() as conn:
         with conn.cursor() as cur:
-            cur.execute(
-                f"""
-                -- `raw` NÃO entra aqui, e continua não entrando: ele carrega
-                -- `clientUserId` e `statusDetail`, e esta linha vai para o
-                -- navegador. O que entra é o DERIVADO — um escalar calculado no
-                -- Postgres (`SQL_EXECUTION_STATUS`, fonte única em
-                -- `db/open_finance_state.py`), que o `connection_ui_state` lê
-                -- para não mandar "Reautorize o banco" a quem devia estar lendo
-                -- o QR. Era a metade da TELA do achado do Codex #166; a do aviso
-                -- proativo já estava fechada em `list_connections_needing_reconnect`.
-                --
-                -- Ele vale enquanto `health is null` E a autorização atual couber
-                -- em `JANELA_DEVICE_AUTH_MIN` (60 min). Vencido o prazo, o
-                -- derivado é NULL e o detalhe volta a "Reautorize o banco", que é
-                -- a ação certa depois que a janela fechou — o `raw` é congelado
-                -- (`mark_sync_result` não o toca), então sem prazo a instrução
-                -- duraria para sempre.
-                --
-                -- Gravar `health` no upsert continua VETADO (decisão da Onda 2:
-                -- reconectar ZERA a saúde até um sync real provar o contrário),
-                -- e é por isso que a saída é o derivado e não a coluna.
-                --
-                -- O `execution_status` é REMOVIDO do dict antes de a resposta
-                -- sair (logo abaixo, DENTRO do laço, por item, logo depois do
-                -- `connection_ui_state` que o consome): o corpo HTTP fica
-                -- idêntico em chaves ao de antes deste PR.
-                select id, provider, provider_item_id, status, institution_name, institution_id,
-                       last_sync_at, last_attempt_at, status_reason, health, reconnected_at,
-                       {SQL_EXECUTION_STATUS},
-                       {SQL_COLETA_VENCIDA},
-                       {SQL_COLETA_ESTOURADA}
-                from open_finance_connections
-                where user_id=%s
-                order by updated_at desc, id desc
-                """,
-                (janela_device_auth_min(), user_id),
-            )
-            connections = [aplica_teto_por_health(dict(r)) for r in (cur.fetchall() or [])]
-            # `ui` é o estado exibível — decidido por `connection_ui_state`, a única
-            # função que o decide. O front deixou de derivar rótulo do `status`:
-            # ele não sabe de produto atrasado nem de item que sumiu.
-            from core.services.pluggy_health import connection_ui_state
-            for c in connections:
-                c["ui"] = connection_ui_state(c)
-                # Campo de TRABALHO, não de contrato: entrou no select só para o
-                # `connection_ui_state` acima e sai antes da serialização, para o
-                # corpo HTTP ficar byte-idêntico em chaves ao de antes. O `pop`
-                # é o que impede um campo derivado do `raw` de virar API pública
-                # sem ninguém ter decidido isso.
-                c.pop("execution_status", None)
-                c.pop("coleta_vencida", None)
-                c.pop("coleta_estourada", None)
+            connections = _read_open_finance_connections(cur, user_id)
 
             cur.execute(
                 """

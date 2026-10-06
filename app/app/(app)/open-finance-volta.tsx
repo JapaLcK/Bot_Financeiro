@@ -1,7 +1,8 @@
-import { router, useLocalSearchParams } from "expo-router";
-import { useEffect, useMemo, useState } from "react";
+import { router, useFocusEffect, useLocalSearchParams } from "expo-router";
+import { useCallback, useEffect, useMemo, useState } from "react";
 import { AccessibilityInfo, View } from "react-native";
 
+import { useForeground } from "@/features/openFinance/useForeground";
 import { useSessao } from "@/features/auth/sessao";
 import { useBloqueio } from "@/features/bloqueio/bloqueio";
 import { conferirVolta, itemDoLink, type EstadoVolta } from "@/features/openFinance/volta";
@@ -58,35 +59,41 @@ function Contador({ ms }: { ms: number }) {
  * estados finais. O gesto de voltar
  * nunca é bloqueado.
  *
- * ponytail: abertura fria com a trava ligada mostra a `TelaDeBloqueio` no lugar
- * da pilha, e depois de liberar o roteador pode não reabrir esta rota (perde o
- * `itemId`); aí só o webhook adota o item. Teto conhecido, fecha com as telas 5–7.
  */
 export default function OpenFinanceVolta() {
   const { expirou } = useSessao();
+  const ativo = useForeground();
   const travado = useBloqueio().estado.fase === "travado";
-  // Só o `itemId` do link é lido; `uid`/`user_id` nele são ignorados (o uid vem de `perfil()`).
-  const item = itemDoLink(useLocalSearchParams().itemId);
+  // Parâmetros são entrada não confiável; modo só permite observar a lista própria.
+  // `uid`/`user_id` são ignorados: a conta vem de `perfil()`.
+  const recebido = useLocalSearchParams().itemId;
+  const origem = useLocalSearchParams().tentativaId;
+  const modo = useLocalSearchParams().modo;
+  const item = itemDoLink(recebido);
+  const link = item ?? (recebido === undefined ? undefined : "");
   const [estado, setEstado] = useState<EstadoVolta>({ fase: "esperando-trava" });
   const [rodada, setRodada] = useState(0);
 
-  // Nada de pedido com a trava na frente; se ela subir no meio, cancela, e ao
+  // Nada de pedido fora de foco ou com a trava na frente; ao pausar, cancela, e ao
   // liberar recomeça com janela nova (o GET vem primeiro: não repete POST à toa).
   // `expirou` de fora das dependências, como o Início: muda a cada troca de sessão.
-  useEffect(() => {
-    if (travado) return setEstado({ fase: "esperando-trava" });
+  useFocusEffect(useCallback(() => {
+    if (travado || !ativo) return setEstado({ fase: "esperando-trava" });
     let cancelado = false;
-    void conferirVolta(item, {
+    const controlador = new AbortController();
+    void conferirVolta(link, {
       agora: Date.now,
+      controlador,
       esperar: (ms) => new Promise((r) => setTimeout(r, ms)),
       cancelado: () => cancelado,
       aoMudar: setEstado,
       expirou,
-    });
+    }, origem, modo);
     return () => {
       cancelado = true;
+      controlador.abort();
     };
-  }, [item, travado, rodada]);
+  }, [link, origem, modo, travado, ativo, rodada]));
 
   const atualizando = estado.fase === "conectado" && estado.ui.state === "updating";
   const conferindo = estado.fase === "conferindo";
@@ -104,8 +111,8 @@ export default function OpenFinanceVolta() {
     if (estado.fase === "conectado" && estado.ui.state !== "updating") AccessibilityInfo.announceForAccessibility(estado.ui.label);
   }, [estado]);
 
-  const sair = <Button rotulo="Sair" onPress={() => router.back()} />;
-  const continuar = <Button rotulo="Continuar" variante={estado.fase === "ainda-conferindo" ? "secondary" : "primary"} onPress={() => router.back()} />;
+  const sair = <Button rotulo="Sair" onPress={() => router.dismissTo("/")} />;
+  const continuar = <Button rotulo="Continuar" variante={estado.fase === "ainda-conferindo" ? "secondary" : "primary"} onPress={() => router.dismissTo("/")} />;
 
   return (
     <Screen rolar={false}>
@@ -168,6 +175,15 @@ export default function OpenFinanceVolta() {
             <Texto variante="corpo" tom="inkMuted">
               Seu banco foi conectado. Estamos organizando seus dados; eles aparecem sozinhos quando terminar.
             </Texto>
+            <Button rotulo="Conferir de novo" variante="secondary" onPress={() => setRodada((n) => n + 1)} />
+            {continuar}
+          </>
+        )}
+
+        {estado.fase === "escolher-conexao" && (
+          <>
+            <Texto tom="inkMuted">Não conseguimos identificar o retorno desta tentativa. Confira os bancos conectados para acompanhar o estado de cada um.</Texto>
+            <Button rotulo="Ver bancos conectados" onPress={() => { router.dismissTo("/"); router.push("/conexoes"); }} />
             <Button rotulo="Conferir de novo" variante="secondary" onPress={() => setRodada((n) => n + 1)} />
             {continuar}
           </>

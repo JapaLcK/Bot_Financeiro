@@ -6894,7 +6894,7 @@ async def billing_webhook(request: Request, background_tasks: BackgroundTasks):
                 STRIPE_CANCEL_REASON_INADIMPLENCIA,
             )
             encerramento_por_inadimplencia = (
-                (_g(obj, "cancellation_details") or {}).get("reason")
+                _g(_g(obj, "cancellation_details"), "reason")
                 == STRIPE_CANCEL_REASON_INADIMPLENCIA
             )
             if encerramento_por_inadimplencia:

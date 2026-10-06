@@ -96,6 +96,7 @@ TABELA = {
     ("POST", "/api/push/register"): (B, "decisão do dono"),
     ("POST", "/api/push/unregister"): (L, "baixa, não vínculo"),
     ("GET", "/onboarding/state"): (L, "estado do wizard"), ("POST", "/onboarding/state"): (L, "estado do wizard"),
+    ("GET", "/onboarding/open-finance"): (L, "marco mínimo por identidade, sem credencial ou assinatura"),
     # ── /settings ──
     ("POST", "/settings/reset"): (L, "exige senha (reset_user_data)"),
     ("GET", "/settings/{user_id}/security"): _SAIDA,
@@ -177,6 +178,7 @@ POST /open-finance/{user_id}/caixinhas/bind|POST /open-finance/{user_id}/connect
 GET /open-finance/{user_id}/limite
 POST /open-finance/{user_id}/pluggy-item|POST /open-finance/{user_id}/sync|POST /open-finance/{user_id}/refresh
 POST /open-finance/{user_id}/mock-connect|DELETE /open-finance/{user_id}|GET /open-finance/{user_id}/movements
+DELETE /open-finance/{user_id}/connections/{connection_id}
 POST /open-finance/{user_id}/movements/confirm|GET /open-finance/{user_id}/reconciliations
 POST /open-finance/{user_id}/reconciliations/{of_tx_id}/{action}
 GET /open-finance/{user_id}/cash-transfers|POST /open-finance/{user_id}/cash-transfers/{link_id}/{action}
@@ -326,6 +328,8 @@ def test_toda_leitura_e_exclusao_que_bloqueia_responde_password_required(monkeyp
     uid, _, client = conta_paga_sem_credencial()
     monkeypatch.setattr("core.services.plan_service.dashboard_v2_enabled", lambda *a, **k: True)
     monkeypatch.setenv("DEBUG_AI_ROUTES", "1")  # desligada, a rota de debug dá 404 antes do gate
+    monkeypatch.setattr("frontend.routes.open_finance._disconnect_sob_lock",
+                        lambda *a, **k: pytest.fail("remoção bancária chamada antes da perna da senha"))
     alvos = sorted(((m, p, r) for m, p, r in _rotas()
                     if m in ("GET", "DELETE") and (_classe(m, p) or (None,))[0] == B
                     and p != "/conta" and _sem_corpo_obrigatorio(r)), key=lambda t: t[:2])
@@ -342,6 +346,7 @@ def test_toda_leitura_e_exclusao_que_bloqueia_responde_password_required(monkeyp
     ("GET", "/auth/me"), ("GET", "/auth/validate"), ("GET", "/settings/{user_id}/security"),
     ("GET", "/settings/{user_id}/sessions"), ("POST", "/auth/dashboard-token"),
     ("POST", "/auth/refresh"), ("POST", "/auth/logout"),
+    ("GET", "/onboarding/open-finance"),
 ])
 def test_as_saidas_nao_respondem_password_required(metodo, path):
     uid, _, client = conta_paga_sem_credencial()

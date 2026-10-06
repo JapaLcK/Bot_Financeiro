@@ -1,3 +1,6 @@
+import { lerTentativaBancaria } from "@/storage/secure";
+import { conferirRetornoOficial } from "./open_finance_volta_apoio";
+import type { Dependencias } from "@/features/openFinance/volta";
 /**
  * `features/openFinance/volta.ts` com o item em `updating` ("Atualizando…"): o
  * servidor devolve esse estado enquanto a coleta termina (medido no iPhone,
@@ -5,8 +8,8 @@
  * consultando; visto o item nesta chamada, nunca mais POST. Numeração = N1–N11
  * do plano (N12 veio do Tester); A1–A13 = linhas da tabela estados × eventos.
  */
-import { conferirVolta, INTERVALO_MS, JANELA_MS } from "@/features/openFinance/volta";
-import { guardarCredenciais } from "@/storage/secure";
+import { INTERVALO_MS, JANELA_MS } from "@/features/openFinance/volta";
+import { guardarSessaoOf as guardarCredenciais } from "./open_finance_volta_apoio";
 
 import { prepararCaso, resposta, rotear, S, segurar } from "./auth_apoio";
 import { ATUALIZANDO, comEstado, dependencias, emSequencia, falhas, gets, ITEM, lista, posts, servidor, VIVO } from "./open_finance_volta_apoio";
@@ -15,9 +18,12 @@ const conferindo = (instavel: boolean) => ({ fase: "conferindo", instavel });
 const conectado = (c: { ui: unknown }) => ({ fase: "conectado", ui: c.ui });
 const atualizando = () => lista(ATUALIZANDO);
 
+let origem: string;
+const conferirVolta = (link: unknown, d: Dependencias) => conferirRetornoOficial(link, d, origem);
 beforeEach(async () => {
   prepararCaso();
   await guardarCredenciais(S);
+  origem = (await lerTentativaBancaria(1))!.tentativa_id;
 });
 
 describe("volta do OAuth — item em updating segue consultando", () => {
@@ -70,7 +76,7 @@ describe("volta do OAuth — item em updating segue consultando", () => {
     servidor({ get: emSequencia(atualizando, () => lista(comEstado(state))) });
     const { d, estados } = dependencias();
     await conferirVolta(ITEM, d);
-    expect(estados).toEqual([conferindo(false), conectado(ATUALIZANDO), conectado(comEstado(state))]);
+    expect(estados).toEqual([conferindo(false), conectado(ATUALIZANDO), { fase: "erro", texto: "Esse banco foi desconectado. Inicie uma nova conexão." }]);
     expect(gets()).toHaveLength(2);
     expect(posts()).toHaveLength(0);
   });

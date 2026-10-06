@@ -2165,6 +2165,8 @@ def init_db():
         # configuração.
         """alter table auth_accounts add column if not exists onboarding_completed_at timestamptz default now()""",
         """alter table auth_accounts alter column onboarding_completed_at drop default""",
+        # Marco bancário: só prova de sync real promove; sem backfill do wizard.
+        """alter table auth_accounts add column if not exists open_finance_onboarding_completed_at timestamptz""",
         # Passo em que o usuário parou, pra retomar de onde fechou em vez de
         # recomeçar. Não precisa do truque acima: 0 serve pra todo mundo, porque
         # quem já está carimbado em onboarding_completed_at nunca lê esta coluna.

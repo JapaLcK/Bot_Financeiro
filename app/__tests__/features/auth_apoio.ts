@@ -7,6 +7,7 @@
  * mesmos, só o `_resetTela` de `inicio.ts` virou `_resetEntrar` de
  * `entrar.ts`.
  */
+import { deBase64Url } from "@/storage/secure";
 import { _resetRenovacao } from "@/api/client";
 import { _resetEntrar } from "@/features/auth/entrar";
 
@@ -80,10 +81,13 @@ export type Rota = (o: RequestInit) => Response | Promise<Response>;
 /** O `/auth/me` responde pelo `Authorization`: `access-ana` é a conta "Ana". */
 export function me(o: RequestInit): Response {
   const auth = (o.headers as Record<string, string>)["Authorization"] ?? "";
-  const nome = auth.match(/^Bearer access-(.+)$/)?.[1];
+  let nome = auth.match(/^Bearer access-(.+)$/)?.[1];
+  if (!nome) {
+    try { nome = JSON.parse(deBase64Url(auth.replace("Bearer ", "").split(".")[1] ?? "")).name; } catch { /* Token de fixture sem payload: preserva o caso sem identidade. */ }
+  }
   if (!nome) return resposta(401, { detail: "expirado" });
   const exibido = nome.charAt(0).toUpperCase() + nome.slice(1);
-  return resposta(200, { user_id: 1, email: `${nome}@x.com`, display_name: exibido });
+  return resposta(200, { user_id: 1, email: `${nome}@x.com`, display_name: exibido, app_access: true, of_banks_max: 2, cobranca_em_atraso: false });
 }
 
 export function credencialDe(email: string) {
@@ -103,6 +107,7 @@ export function rotear(extra: Record<string, Rota> = {}) {
     "/auth/login": (o) =>
       resposta(200, credencialDe((JSON.parse(String(o.body)) as { email: string }).email)),
     "/auth/me": me,
+    "/onboarding/open-finance": () => resposta(200, { ok: true, completed: true, completed_at: "2026-10-05T12:00:00Z" }),
     "/auth/logout": () => resposta(200, {}),
     ...extra,
   };
