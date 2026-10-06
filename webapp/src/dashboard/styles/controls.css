@@ -188,6 +188,10 @@ select.field { padding-right: 28px; appearance: none; background-image: linear-g
   box-shadow: 0 0 0 1px var(--rule-strong), 0 12px 32px -8px rgba(0, 0, 0, 0.7);
   font-size: 12px;
   pointer-events: none;
+  /* Com `reduce`, o `*` do base.css dá 1ms de transição em `all`: o transform que o JS
+     grava logo depois de medir (parts/Tip.tsx) virava transição a partir do default
+     (identidade) e um quadro saía com o tooltip no canto. O mesmo do guia (guia.css). */
+  transition-property: none;
 }
 .tip-title { color: var(--ink-2); margin-bottom: 6px; }
 .tip-value { font-size: 15px; font-weight: 600; letter-spacing: -0.01em; font-variant-numeric: tabular-nums; }
