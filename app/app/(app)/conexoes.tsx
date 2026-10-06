@@ -1,4 +1,4 @@
-import { router, useFocusEffect } from "expo-router";
+import { router, useFocusEffect, type Href } from "expo-router";
 import { useCallback, useEffect, useRef, useState } from "react";
 import { Alert, View } from "react-native";
 import { RequisicaoSuperada, SessaoExpirada } from "@/api/client";
@@ -28,6 +28,22 @@ export default function Conexoes() {
   const [carregando, setCarregando] = useState(false);
   const [removendo, setRemovendo] = useState<number | null>(null);
   const remocaoEmVoo = useRef(false);
+  const entradaEmVoo = useRef(false);
+  const [entrando, setEntrando] = useState(false);
+  useFocusEffect(useCallback(() => {
+    entradaEmVoo.current = false;
+    setEntrando(false);
+  }, []));
+  const navegar = (destino: Href, substituir = false) => {
+    if (entradaEmVoo.current) return;
+    if (substituir) router.replace(destino); else router.push(destino);
+  };
+  const abrirAutorizacao = (itemId?: string) => {
+    if (entradaEmVoo.current || remocaoEmVoo.current) return;
+    entradaEmVoo.current = true; setEntrando(true);
+    try { router.push(itemId ? { pathname: "/autorizando", params: { itemId } } : "/autorizando"); }
+    catch { entradaEmVoo.current = false; setEntrando(false); setErro("Não conseguimos abrir a autorização. Tente de novo."); }
+  };
   const montado = useRef(true);
   useEffect(() => { montado.current = true; return () => { montado.current = false; }; }, []);
   useFocusEffect(useCallback(() => {
@@ -77,15 +93,15 @@ export default function Conexoes() {
       <Texto variante="secao">{c.institution_name ?? "Seu banco"}</Texto>
       <ConnectionStatus estado={c.ui.state} label={c.ui.label} detalhe={c.ui.detail ?? undefined} />
       <Texto variante="legenda" tom="inkMuted">{c.last_sync_at ? `Última sincronização: ${new Date(c.last_sync_at).toLocaleString("pt-BR")}` : "A primeira sincronização ainda não terminou."}</Texto>
-      {c.ui.state === "updating" && c.provider_item_id && <Button rotulo="Acompanhar sincronização" variante="secondary" onPress={() => router.push({ pathname: "/open-finance-volta", params: { itemId: c.provider_item_id! } })} />}
-      {c.provider_item_id && dados.permiteReconectar && !["removed", "item_missing", "paused"].includes(c.ui.state) && <Button rotulo={`Reconectar ${c.institution_name ?? "banco"}`} variante="secondary" desativado={removendo !== null} onPress={() => router.push({ pathname: "/autorizando", params: { itemId: c.provider_item_id! } })} />}
+      {c.ui.state === "updating" && c.provider_item_id && <Button rotulo="Acompanhar sincronização" variante="secondary" desativado={entrando} onPress={() => navegar({ pathname: "/open-finance-volta", params: { itemId: c.provider_item_id! } })} />}
+      {c.provider_item_id && dados.permiteReconectar && !["removed", "item_missing", "paused"].includes(c.ui.state) && <Button rotulo={`Reconectar ${c.institution_name ?? "banco"}`} variante="secondary" desativado={entrando || removendo !== null} onPress={() => abrirAutorizacao(c.provider_item_id!)} />}
       <Button rotulo={`Desconectar ${c.institution_name ?? "banco"}`} variante="ghost" carregando={removendo === c.id} desativado={removendo !== null && removendo !== c.id} onPress={() => Alert.alert("Desconectar este banco?",
         "Os dados importados deste banco serão removidos. Seus outros bancos e lançamentos manuais serão preservados.",
         [{ text: "Manter banco", style: "cancel" }, { text: "Desconectar", style: "destructive", onPress: () => { void remover(c); } }])} />
     </View></Card>)}
     {dados?.mensagem && <Banner tom="info" mensagem={dados.mensagem} />}
-    <Button rotulo="Conectar outro banco" desativado={!dados?.podeAdicionar || removendo !== null} onPress={() => router.push("/autorizando")} />
+    <Button rotulo="Conectar outro banco" desativado={entrando || !dados?.podeAdicionar || removendo !== null} onPress={() => abrirAutorizacao()} />
     <Button rotulo="Conferir de novo" variante="secondary" onPress={() => setRodada((v) => v + 1)} />
-    <Button rotulo="Voltar ao Início" variante="ghost" onPress={() => router.replace("/")} />
+    <Button rotulo="Voltar ao Início" variante="ghost" desativado={entrando} onPress={() => navegar("/", true)} />
   </View></Screen>;
 }

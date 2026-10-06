@@ -1,5 +1,5 @@
-import { router, useFocusEffect } from "expo-router";
-import { useCallback, useState } from "react";
+import { router, useFocusEffect, type Href } from "expo-router";
+import { useCallback, useRef, useState } from "react";
 import { Image, View } from "react-native";
 import { SessaoExpirada, RequisicaoSuperada } from "@/api/client";
 import { carregarAcessoBancario, type AcessoBancario } from "@/features/openFinance/acesso";
@@ -17,6 +17,22 @@ export default function ConectarBanco() {
   const [acesso, setAcesso] = useState<AcessoBancario | null>(null);
   const [erro, setErro] = useState<string | null>(null);
   const [rodada, setRodada] = useState(0);
+  const entradaEmVoo = useRef(false);
+  const [entrando, setEntrando] = useState(false);
+  useFocusEffect(useCallback(() => {
+    entradaEmVoo.current = false;
+    setEntrando(false);
+  }, []));
+  const navegar = (destino: Href, substituir = false) => {
+    if (entradaEmVoo.current) return;
+    if (substituir) router.replace(destino); else router.push(destino);
+  };
+  const abrirAutorizacao = () => {
+    if (entradaEmVoo.current) return;
+    entradaEmVoo.current = true; setEntrando(true);
+    try { router.push("/autorizando"); }
+    catch { entradaEmVoo.current = false; setEntrando(false); setErro("Não conseguimos abrir a autorização. Tente de novo."); }
+  };
   useFocusEffect(useCallback(() => {
     let ativo = true;
     setErro(null);
@@ -46,12 +62,12 @@ export default function ConectarBanco() {
         <Texto tom="inkMuted">O Open Finance compartilha os dados que você autorizar. Sua senha bancária não é guardada pelo PigBank. Você pode desconectar quando quiser.</Texto>
         <Texto variante="legenda" tom="inkMuted">Contas, movimentações, cartões e investimentos, conforme o consentimento disponível no seu banco.</Texto>
       </View>
-      <Button rotulo="Conectar meu banco" tamanho="L" onPress={() => router.push("/autorizando")} />
-      <Button rotulo="Ver meus bancos" variante="secondary" onPress={() => router.push("/conexoes")} />
-      {acesso?.fase === "inicio" && <Button rotulo="Continuar para o Início" variante="ghost" onPress={() => router.replace("/")} />}
+      <Button rotulo="Conectar meu banco" tamanho="L" desativado={entrando} onPress={abrirAutorizacao} />
+      <Button rotulo="Ver meus bancos" variante="secondary" desativado={entrando} onPress={() => navegar("/conexoes")} />
+      {acesso?.fase === "inicio" && <Button rotulo="Continuar para o Início" variante="ghost" desativado={entrando} onPress={() => navegar("/", true)} />}
     </>}
     <Button rotulo="Conferir de novo" variante="ghost" onPress={() => setRodada((v) => v + 1)} />
-    <Button rotulo="Configurações" variante="ghost" onPress={() => router.push("/configuracoes")} />
+    <Button rotulo="Configurações" variante="ghost" desativado={entrando} onPress={() => navegar("/configuracoes")} />
     <Button rotulo="Sair da conta" variante="ghost" onPress={() => void sessao.sair().then((ok) => { if (!ok) setErro("Não conseguimos sair. Tente de novo."); })} />
   </View></Screen></TemaProvider>;
 }
