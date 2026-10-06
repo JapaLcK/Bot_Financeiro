@@ -78,6 +78,10 @@ VALIDAS = [
     ('previsão de saldo nos próximos 30 dias com meus boletos?', {'days': 30}),
     ('previsão de saldo nos próximos 30 dias considerando uma saída de 800?', {'days': 30, 'amount': 800}),
     ('previsão de saldo nos próximos 30 dias considerando uma entrada de 800?', {'days': 30, 'amount': -800}),
+    ('tô tranquilo até 17/10 com boletos?', {'date': '17/10'}),
+    ('previsão de saldo em 30 dias com contas a pagar?', {'days': 30}),
+    ('previsão de saldo em 30 dias com boletos considerando uma saída de 800?', {'days': 30, 'amount': 800}),
+    ('previsão de saldo em 30 dias com contas a pagar considerando uma entrada de 800?', {'days': 30, 'amount': -800}),
 ]
 
 
@@ -115,6 +119,10 @@ RECUSAS = [
     'previsão de saldo para 2026-10-17-20?', 'previsão de saldo para 17/10 ou 17/10?',
     'previsão de saldo em 30 dias com um boleto de 800?',
     'previsão de saldo em 30 dias sem meus boletos?',
+    'previsão de saldo em 30 dias sem boletos?',
+    'previsão de saldo em 30 dias com boletos novos?',
+    'previsão de saldo em 30 dias com boletos de800?',
+    'previsão de saldo em 30 dias com contas a pagar de800?',
     'previsão de saldo em 30 dias ignorando minhas contas a pagar?',
     'previsão de saldo em 30 dias com um novo boleto?',
     'previsão de saldo com uma saída de 800?',
@@ -202,6 +210,8 @@ def abre_recategorizacao(uid, monkeypatch, launch_id):
     'tô tranquilo até dia 17?', 'qual meu saldo daqui 30 dias?',
     'aguento esse prazo?', 'previsão de saldo dia 32?',
     'previsão de saldo nos próximos 30 dias',
+    'tô tranquilo até 17/10 com boletos?',
+    'previsão de saldo em 30 dias com contas a pagar?',
 ])
 @pytest.mark.parametrize('porta', ['bill_pay_amount', 'recategorize_launch_text'])
 def test_contrato_adapter_consulta_nao_paga_nem_consume(porta, texto, pro_small_uid, monkeypatch, ia_fora, chamadas):
@@ -222,9 +232,10 @@ def test_contrato_adapter_consulta_nao_paga_nem_consume(porta, texto, pro_small_
     assert depois == antes, {'texto': texto, 'antes': antes, 'depois': depois, 'respostas': respostas}
     assert respostas and ('Saldo previsto condicional' in respostas[-1] or 'não consegui interpretar' in respostas[-1].lower()), respostas
     assert len(chamadas) == (0 if 'aguento' in texto or '32' in texto else 1) and not ia_fora
-    if 'próximos' in texto:
-        assert chamadas == [('_check_cashflow', {'days': 30})]
-        esperado = _check_cashflow(uid, {'days': 30})
+    if 'próximos' in texto or 'com boletos' in texto or 'com contas a pagar' in texto:
+        args = {'date': '17/10'} if '17/10' in texto else {'days': 30}
+        assert chamadas == [('_check_cashflow', args)]
+        esperado = _check_cashflow(uid, args)
         assert esperado['target'] in respostas[-1] and fmt_brl(esperado['projetado']) in respostas[-1]
 
 
@@ -314,6 +325,25 @@ def test_contrato_proximos_preserva_estado_completo(tipo, monkeypatch, ia_fora, 
         'previsão de saldo nos próximos 30 dias', monkeypatch, ia_fora)
     assert len(estados) == 2 and estados[1][0] == estados[1][1]
     assert chamadas == [('_check_cashflow', {'days': 30})] and not ia_fora
+
+
+@pytest.mark.parametrize('texto,args', [
+    ('tô tranquilo até 17/10 com boletos?', {'date': '17/10'}),
+    ('previsão de saldo em 30 dias com contas a pagar?', {'days': 30}),
+])
+def test_contrato_plural_sem_artigo_preserva_estado_completo(texto, args, monkeypatch, ia_fora, chamadas):
+    import core.handle_incoming as hi
+    original = hi.handle_incoming
+    estados = []
+    def observar(msg, **kwargs):
+        antes = estado(msg.user_id)
+        saida = original(msg, **kwargs)
+        estados.append((antes, estado(msg.user_id)))
+        return saida
+    monkeypatch.setattr(hi, 'handle_incoming', observar)
+    _conversa_previsao_preserva_pendencia('', 'bill_amount_expected', texto, monkeypatch, ia_fora)
+    assert len(estados) == 2 and estados[1][0] == estados[1][1]
+    assert chamadas == [('_check_cashflow', args)] and not ia_fora
 
 
 @pytest.mark.parametrize('plan,days,liberado', [('essencial', 30, False), ('plus', 30, True), ('plus', 31, False), ('pro_max', 90, True), ('pro_max', 91, False)])

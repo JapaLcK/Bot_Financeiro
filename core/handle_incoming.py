@@ -130,7 +130,9 @@ def _previsao_somente_leitura(uid: int, text: str) -> str | None:
                    re.sub(r'\bdaqui\s+pra\s+frente\b', '', normalize_text(text))):
         return recusa
     # Obrigações existentes já pertencem à snapshot; só consome contexto explícito.
-    restante = re.sub(r'\b(?:com\s+)?(?:(?:meus|os)\s+boletos|(?:minhas|as)\s+contas\s+a\s+pagar)\b',
+    restante = re.sub(r'\b(?:(?:com\s+)?(?:(?:meus|os)\s+boletos|(?:minhas|as)\s+contas\s+a\s+pagar)\b'
+                       r'|com\s+(?:boletos|contas\s+a\s+pagar)\b(?=\s*(?:[.;:?!]*\s*$'
+                       r'|(?:considerando|com)\s+(?:uma?\s+)?(?:sa[ií]da|entrada|despesa|receita|gasto)\b)))',
                        '', restante, flags=re.I)
     restante = re.sub(r'\bcomo\s+(?:t[oô]|estou)\s+de\s+(?:boletos?|contas?\s+a\s+pagar)\b'
                        r'|\b(?:aguento|consigo)\s+pagar\b', '', restante, flags=re.I)

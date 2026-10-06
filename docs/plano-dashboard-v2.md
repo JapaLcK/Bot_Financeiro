@@ -747,6 +747,18 @@ PR de cada etapa, não soluções prontas. Cada PR confere se ainda valem, decid
     **2046 passed/2 xfailed**, 103 subtests em 50 arquivos; todos os 2044
     nomes/status anteriores preservados + 4 novos. JS/12 renders intactos.
     Novo head exige CI/Codex remotos; merge só autorização humana.
+  - Oitava revisão do #842: consultas com boletos ou contas a pagar sem
+    artigo usam as obrigações existentes, sem valor extra. Ajuste limitado
+    ao contexto plural completo; qualificadores, exclusões e cenários
+    ambíguos continuam recusados. Reconhecimento e adapter inalterados.
+    Baseline pertinente 136 verdes; reprodução e negativo com cleanup
+    anterior geram 10 falhas discriminantes/140 positivos; restauração
+    por SHA e repetição 150 verdes. Área financeira: **2060 passed/2 xfailed**,
+    103 subtests em 50 arquivos, todas as 2048 identidades anteriores
+    preservadas + 14 novas. Manager independente conferiu o reparo.
+    CI do head 417b2791: backend/audit aprovados, frontend 1666/1 falha de tooltip também
+    presente na main 93db7c2a, sem diff nas fontes. Novo head exige CI/Codex
+    remotos; merge somente com nova autorização humana.
   - CI completo e Codex remoto no head publicável seguem pendentes. Codex local
     foi tentado, mas a CLI recusou o modelo configurado e não produziu parecer.
     Produção, WhatsApp real e aparelho não verificados; sem deploy/TestFlight/reset.
