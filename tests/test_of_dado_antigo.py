@@ -62,6 +62,10 @@ from test_of_connection_state import (
 from test_of_leitura_incompleta import _refresh, _tique_de_saude, _ui_pela_rota
 from utils_date import _tz
 
+CONTEXTO_PARCIAL = (
+    "Banco conectado. Fechar o app ou bloquear a tela não cancela a autorização. "
+)
+
 ITEM = "item-g1"
 FRENTE = "— atualize para trazer"
 
@@ -146,8 +150,8 @@ def test_R6_pluggy_a_frente_do_sync_e_parcial_ambar(user_id, monkeypatch, sabor)
 
     ui = _ui_pela_rota(user_id)
 
-    assert (ui["state"], ui["label"]) == ("partial", "Parcial")
-    assert ui["detail"] == f"O banco já tem dados de {_dd_mm(data)} {FRENTE}"
+    assert (ui["state"], ui["label"]) == ("partial", "Dados parciais")
+    assert ui["detail"] == CONTEXTO_PARCIAL + f"O banco já tem dados de {_dd_mm(data)} {FRENTE}"
     assert ui["dados_de"] is None, "à frente é a D2; a D7 é o outro lado"
 
 
@@ -199,7 +203,7 @@ PRECEDENCIA = {
     "investments_read_failed": (
         lambda mp: _sql("update open_finance_connections set status_reason='investments_read_failed'"
                      " where provider_item_id=%s", ITEM),
-        lambda s, d: (s, d) == ("partial", "Investimentos não vieram nesta atualização")),
+        lambda s, d: (s, d) == ("partial", CONTEXTO_PARCIAL + "Investimentos não vieram nesta atualização")),
     "no_accounts": (lambda mp: _sql("update open_finance_connections set status_reason='no_accounts'"
                                  " where provider_item_id=%s", ITEM),
                     lambda s, d: s == "no_accounts"),
@@ -275,7 +279,7 @@ def test_toast_da_d2_quando_o_sync_do_atualizar_nao_carimbou(user_id, monkeypatc
 
     item = sync["items"][0]
     assert (item["state"], item["detail"]) == (
-        "partial", f"O banco já tem dados de {_dd_mm(data)} {FRENTE}")
+        "partial", CONTEXTO_PARCIAL + f"O banco já tem dados de {_dd_mm(data)} {FRENTE}")
     assert sync["ok"] is False
 
 
@@ -454,7 +458,7 @@ def test_caracteriza_skew_de_0_a_5_min_ainda_e_a_frente(user_id, monkeypatch):
     ui = _ui_pela_rota(user_id)
 
     assert (ui["state"], ui["detail"]) == (
-        "partial", f"O banco já tem dados de {_dd_mm(data)} {FRENTE}")
+        "partial", CONTEXTO_PARCIAL + f"O banco já tem dados de {_dd_mm(data)} {FRENTE}")
     assert classe_de_retentativa(_linha()) == "pluggy_a_frente"
 
 

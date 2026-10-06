@@ -31,6 +31,8 @@ from core.services.pluggy_health import (
     MOTIVOS_QUE_A_FALHA_SUBSTITUI,
     MOTIVOS_QUE_A_FOTO_VIVA_SUBSTITUI,
     READ_FAILED,
+    _CONTEXTO_DADOS_PARCIAIS,
+    _LABELS,
     # "ainda buscando no banco": esperamos sair disto antes de sincronizar, senão
     # lemos o snapshot velho. Vem do `pluggy_health` porque lá é a fonte do
     # significado dos status de item — aqui era o MESMO conjunto declarado de novo.
@@ -1106,7 +1108,7 @@ def _reasons_do_sync(result: dict) -> dict[str, str]:
 # arquivo sobrepõe: um "partial" vindo do `connection_ui_state` mantém o detalhe
 # dele ("Cartão desatualizado desde 12/08"), que diz muito mais.
 _OVERRIDE_LABEL = {
-    "partial": ("Parcial", "Parte dos dados ainda não veio"),
+    "partial": (_LABELS["partial"], _CONTEXTO_DADOS_PARCIAIS + " Parte dos dados ainda não veio"),
     "rate_limited": ("Atualizado", "Atualizado há pouco"),
 }
 

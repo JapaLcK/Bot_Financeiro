@@ -851,7 +851,7 @@ def test_limite_da_decisao_a_pista_grava_error_sobre_investments_read_failed(use
     `ERROR/investments_read_failed`: a tela passa de "Parcial" a "Erro temporário"
     e a retentativa pega (classe `leitura`). Pior caso: só quando o GET falha."""
     _ativa(user_id, monkeypatch, "investments_read_failed")
-    assert _tela(user_id)[1] == "Parcial"
+    assert _tela(user_id)[1] == "Dados parciais"
     _Remoto(monkeypatch, PluggyApiError("boom", status_code=503))
 
     _posta([_erro()])

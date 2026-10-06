@@ -47,7 +47,10 @@ from db.connection import get_conn
 from test_of_connection_state import (
     ITEM_SAUDAVEL, _auth, _conexao, _conta_pluggy, _linha, _mock_pluggy, _tx_pluggy)
 
-DETALHE = "Investimentos não vieram nesta atualização"
+CONTEXTO_PARCIAL = (
+    "Banco conectado. Fechar o app ou bloquear a tela não cancela a autorização. "
+)
+DETALHE = CONTEXTO_PARCIAL + "Investimentos não vieram nesta atualização"
 
 
 def _429(*_a, **_kw):
@@ -119,10 +122,10 @@ def test_429_em_investimentos_com_contas_e_parcial_na_tela_e_no_refresh(user_id,
     sync = _refresh(user_id, monkeypatch)
 
     item = next(i for i in sync["items"] if i["item_id"] == "item-g1")
-    assert (item["state"], item["label"], item["detail"]) == ("partial", "Parcial", DETALHE)
+    assert (item["state"], item["label"], item["detail"]) == ("partial", "Dados parciais", DETALHE)
     assert sync["ok"] is False, "o toast não pode dizer 'Tudo em dia!'"
     ui = _ui_pela_rota(user_id)
-    assert (ui["state"], ui["label"], ui["detail"]) == ("partial", "Parcial", DETALHE)
+    assert (ui["state"], ui["label"], ui["detail"]) == ("partial", "Dados parciais", DETALHE)
     assert _linha()["last_sync_at"] is not None, "as contas vieram: é sync, só não completo"
 
 
@@ -316,7 +319,7 @@ ITEM_CARTAO_ATRASADO = {
     "statusDetail": {**ITEM_SAUDAVEL["statusDetail"], "creditCards": {
         "isUpdated": False, "lastUpdatedAt": "2026-09-20T11:00:00.000Z", "warnings": []}},
 }
-CARTAO = "Cartão desatualizado desde 20/09"
+CARTAO = CONTEXTO_PARCIAL + "Cartão desatualizado desde 20/09"
 
 
 # (j) as duas faltas aparecem, na tela e no que o toast lê
@@ -329,7 +332,7 @@ def test_parcial_da_pluggy_com_investimentos_falhando_nomeia_os_dois(user_id, mo
 
     sync = _refresh(user_id, monkeypatch)
 
-    esperado = ("partial", "Parcial", f"{CARTAO}; investimentos não vieram nesta atualização")
+    esperado = ("partial", "Dados parciais", f"{CARTAO}; investimentos não vieram nesta atualização")
     item = next(i for i in sync["items"] if i["item_id"] == "item-g1")
     assert (item["state"], item["label"], item["detail"]) == esperado
     assert sync["ok"] is False
@@ -450,4 +453,4 @@ def test_investimentos_atrasados_na_pluggy_e_falhando_nao_repete(user_id, monkey
 
     assert _linha()["status_reason"] == "investments_read_failed"
     ui = _ui_pela_rota(user_id)
-    assert (ui["state"], ui["detail"]) == ("partial", "Investimentos desatualizado desde 20/09")
+    assert (ui["state"], ui["detail"]) == ("partial", CONTEXTO_PARCIAL + "Investimentos desatualizado desde 20/09")
