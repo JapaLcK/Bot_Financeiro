@@ -1,3 +1,13 @@
+// Estes casos exercitam sessão sem montar NavigationContainer. O foco equivale
+// à montagem aqui; as transições reais de rota são cobertas nos testes do roteador.
+jest.mock("expo-router", () => ({
+  ...jest.requireActual("expo-router"),
+  useFocusEffect: (efeito: () => void | (() => void)) => {
+    // eslint-disable-next-line @typescript-eslint/no-require-imports
+    require("react").useEffect(efeito, [efeito]);
+  },
+}));
+
 /**
  * `SessaoProvider`: boot, `autenticar`/`expirou`/`sair`/`tentarDeNovo`, e o
  * invariante (cofre tem credencial ⇔ provider autenticado). Com os serviços
@@ -11,6 +21,7 @@ import { act, fireEvent, render } from "@testing-library/react-native";
 import { Pressable } from "react-native";
 import { SafeAreaProvider } from "react-native-safe-area-context";
 
+import { BloqueioProvider } from "@/features/bloqueio/bloqueio";
 import { SessaoProvider, useSessao, type EstadoSessao } from "@/features/auth/sessao";
 import { guardarCredenciais, lerCredenciais } from "@/storage/secure";
 import { TemaProvider } from "@/ui/tema";
@@ -38,7 +49,7 @@ function montar(comTelaAutenticada = false) {
       <TemaProvider esquema="light">
         <SessaoProvider>
           <Harness onEstado={aplicar} />
-          {comTelaAutenticada ? <Inicio /> : null}
+          {comTelaAutenticada ? <BloqueioProvider><Inicio /></BloqueioProvider> : null}
         </SessaoProvider>
       </TemaProvider>
     </SafeAreaProvider>,

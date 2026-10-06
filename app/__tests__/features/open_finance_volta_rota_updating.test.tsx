@@ -1,3 +1,5 @@
+import { redirectSystemPath } from "../../app/+native-intent";
+import { origemDaTentativa } from "./open_finance_volta_apoio";
 /**
  * A rota `open-finance-volta` com o item em `updating` ("Atualizando…"), pelo
  * roteador de verdade. O `renderRouter` liga o relógio falso: cada
@@ -9,7 +11,7 @@ import { act, fireEvent, renderRouter, screen, waitFor } from "expo-router/testi
 import { AccessibilityInfo } from "react-native";
 
 import { JANELA_MS, INTERVALO_MS } from "@/features/openFinance/volta";
-import { guardarCredenciais } from "@/storage/secure";
+import { guardarSessaoOf as guardarCredenciais } from "./open_finance_volta_apoio";
 
 import { prepararCaso, resposta, S, segurar } from "./auth_apoio";
 import { emSequencia } from "./open_finance_volta_apoio";
@@ -47,7 +49,7 @@ beforeEach(async () => {
 describe("open-finance-volta — item em updating", () => {
   it("R1 — GET updating, updating, updated: Sair (sem Continuar), um GET por intervalo, depois 'Atualizado'", async () => {
     servidor(emSequencia(() => atualizando(A), () => atualizando(A), () => lista(A)));
-    renderRouter("./app", { initialUrl: `/open-finance-volta?itemId=${A}` });
+    renderRouter("./app", { initialUrl: `/open-finance-volta/${origemDaTentativa()}?itemId=${A}` });
     await waitFor(() => expect(sair()).toBeTruthy());
     expect(screen.queryByRole("button", { name: "Continuar" })).toBeNull();
 
@@ -67,7 +69,7 @@ describe("open-finance-volta — item em updating", () => {
       jest.setSystemTime(Date.now() + JANELA_MS);
       return atualizando(A);
     });
-    renderRouter("./app", { initialUrl: `/open-finance-volta?itemId=${A}` });
+    renderRouter("./app", { initialUrl: `/open-finance-volta/${origemDaTentativa()}?itemId=${A}` });
     await waitFor(() => expect(screen.getByText(ORGANIZANDO)).toBeTruthy());
     expect(screen.getByRole("button", { name: "Conferir de novo" })).toBeTruthy();
     expect(screen.getByRole("button", { name: "Continuar" })).toBeTruthy();
@@ -80,7 +82,7 @@ describe("open-finance-volta — item em updating", () => {
 
   it("R3 — updating, 503, updated: o aviso de instável nunca aparece e Sair segue na tela depois do 503", async () => {
     servidor(emSequencia(() => atualizando(A), () => resposta(503, {}), () => lista(A)));
-    renderRouter("./app", { initialUrl: `/open-finance-volta?itemId=${A}` });
+    renderRouter("./app", { initialUrl: `/open-finance-volta/${origemDaTentativa()}?itemId=${A}` });
     await waitFor(() => expect(sair()).toBeTruthy());
 
     await umIntervalo();
@@ -96,7 +98,7 @@ describe("open-finance-volta — item em updating", () => {
 
   it("R4 — sempre updating, desmonte por router.back(): nenhum GET novo em 3 intervalos", async () => {
     servidor(() => atualizando(A));
-    renderRouter("./app", { initialUrl: `/open-finance-volta?itemId=${A}` });
+    renderRouter("./app", { initialUrl: `/open-finance-volta/${origemDaTentativa()}?itemId=${A}` });
     await waitFor(() => expect(sair()).toBeTruthy());
     await act(async () => {
       router.back();
@@ -112,7 +114,7 @@ describe("open-finance-volta — item em updating", () => {
     // Sem salto de relógio: a 1ª rodada gasta a janela inteira em intervalos.
     const porJanela = JANELA_MS / INTERVALO_MS;
     servidor(() => atualizando(A));
-    renderRouter("./app", { initialUrl: `/open-finance-volta?itemId=${A}` });
+    renderRouter("./app", { initialUrl: `/open-finance-volta/${origemDaTentativa()}?itemId=${A}` });
     await waitFor(() => expect(contarGets()).toBe(1));
     for (let i = 1; i <= porJanela; i++) {
       await umIntervalo();
@@ -152,7 +154,7 @@ describe("open-finance-volta — item em updating", () => {
         },
       ),
     );
-    renderRouter("./app", { initialUrl: `/open-finance-volta?itemId=${A}` });
+    renderRouter("./app", { initialUrl: `/open-finance-volta/${origemDaTentativa()}?itemId=${A}` });
     await waitFor(() => expect(contarGets()).toBe(1));
     await umIntervalo();
     // Espera o laço terminar, em qualquer dos dois estados finais, antes de olhar
@@ -176,7 +178,7 @@ describe("open-finance-volta — tela de espera (Organizando seus dados)", () =>
 
   it("R8 — updating: barra sem porcentagem, 'há 0 s', aviso e Sair; sem Continuar", async () => {
     servidor(() => atualizando(A));
-    renderRouter("./app", { initialUrl: `/open-finance-volta?itemId=${A}` });
+    renderRouter("./app", { initialUrl: `/open-finance-volta/${origemDaTentativa()}?itemId=${A}` });
     await waitFor(() => expect(sair()).toBeTruthy());
     const barra = screen.getByRole("progressbar", { name: "Organizando seus dados" });
     expect(barra.props.accessibilityValue?.now).toBeUndefined();
@@ -194,7 +196,7 @@ describe("open-finance-volta — tela de espera (Organizando seus dados)", () =>
       await portao.promessa;
       return lista();
     });
-    renderRouter("./app", { initialUrl: `/open-finance-volta?itemId=${A}` });
+    renderRouter("./app", { initialUrl: `/open-finance-volta/${origemDaTentativa()}?itemId=${A}` });
     await waitFor(() => expect(contarGets()).toBe(1));
     expect(screen.getByText("Estamos conferindo com o banco.")).toBeTruthy();
     expect(screen.getByRole("progressbar")).toBeTruthy();
@@ -220,7 +222,7 @@ describe("open-finance-volta — tela de espera (Organizando seus dados)", () =>
       jest.setSystemTime(Date.now() + JANELA_MS);
       return atualizando(A);
     });
-    renderRouter("./app", { initialUrl: `/open-finance-volta?itemId=${A}` });
+    renderRouter("./app", { initialUrl: `/open-finance-volta/${origemDaTentativa()}?itemId=${A}` });
     const conferirDeNovo = await screen.findByRole("button", { name: "Conferir de novo" });
     pendurar = true;
     await act(async () => {
@@ -237,7 +239,7 @@ describe("open-finance-volta — tela de espera (Organizando seus dados)", () =>
 
   it("R10 — tocar em Sair volta ao Início e o laço para: nenhum GET em 3 intervalos", async () => {
     servidor(() => atualizando(A));
-    renderRouter("./app", { initialUrl: `/open-finance-volta?itemId=${A}` });
+    renderRouter("./app", { initialUrl: `/open-finance-volta/${origemDaTentativa()}?itemId=${A}` });
     await waitFor(() => expect(sair()).toBeTruthy());
     await act(async () => {
       fireEvent.press(sair());
@@ -251,7 +253,7 @@ describe("open-finance-volta — tela de espera (Organizando seus dados)", () =>
 
   it("R11 — o contador é relógio de parede: +90 s sem disparar timers, um tick depois mostra 'há 1 min 31 s'", async () => {
     servidor(() => atualizando(A));
-    renderRouter("./app", { initialUrl: `/open-finance-volta?itemId=${A}` });
+    renderRouter("./app", { initialUrl: `/open-finance-volta/${origemDaTentativa()}?itemId=${A}` });
     await waitFor(() => expect(sair()).toBeTruthy());
     jest.setSystemTime(Date.now() + 90_000);
     await segundos(1_000);
@@ -262,7 +264,7 @@ describe("open-finance-volta — tela de espera (Organizando seus dados)", () =>
     const anunciar = jest.mocked(AccessibilityInfo.announceForAccessibility);
     anunciar.mockClear();
     servidor(emSequencia(() => atualizando(A), () => lista(A)));
-    renderRouter("./app", { initialUrl: `/open-finance-volta?itemId=${A}` });
+    renderRouter("./app", { initialUrl: `/open-finance-volta/${origemDaTentativa()}?itemId=${A}` });
     await waitFor(() => expect(sair()).toBeTruthy());
     expect(anunciar).not.toHaveBeenCalled();
 
@@ -278,10 +280,10 @@ describe("open-finance-volta — tela de espera (Organizando seus dados)", () =>
 
   it("R13 — o mesmo itemId navegado de novo durante updating: segue um GET por intervalo (sem 2º laço)", async () => {
     servidor(() => atualizando(A));
-    renderRouter("./app", { initialUrl: `/open-finance-volta?itemId=${A}` });
+    renderRouter("./app", { initialUrl: `/open-finance-volta/${origemDaTentativa()}?itemId=${A}` });
     await waitFor(() => expect(sair()).toBeTruthy());
     await act(async () => {
-      router.navigate(`/open-finance-volta?itemId=${A}`);
+      router.navigate(redirectSystemPath({ path: `/open-finance-volta/${origemDaTentativa()}?itemId=${A}`, initial: false })!);
       await drenar();
     });
     const antes = contarGets();
@@ -303,7 +305,7 @@ describe("open-finance-volta — item em updating, trava ligada", () => {
 
   it("R7 — a trava sobe no meio do repoll: nenhum GET enquanto travado; ao liberar, recomeça (GET novo, sem POST) e termina em updated", async () => {
     servidor(emSequencia(() => atualizando(A), () => atualizando(A), () => atualizando(A), () => lista(A)));
-    renderRouter("./app", { initialUrl: `/open-finance-volta?itemId=${A}` });
+    renderRouter("./app", { initialUrl: `/open-finance-volta/${origemDaTentativa()}?itemId=${A}` });
     await waitFor(() => expect(prompts()).toBe(1));
     await liberar();
     await waitFor(() => expect(sair()).toBeTruthy());

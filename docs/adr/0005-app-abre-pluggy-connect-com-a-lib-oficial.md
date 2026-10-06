@@ -1,6 +1,6 @@
 # ADR 0005 — Como o app nativo abre o Pluggy Connect
 
-Status: **proposto**, aguarda a decisão do dono. Spike da Fase 4 ("Open Finance e onboarding"), feito em 2026-10-02. Este documento não muda código de produção: cada mudança de backend proposta vira PR próprio (a proposta 1 já virou; as outras seguem propostas). **Atualizado depois do teste no iPhone (build 14, Nubank real): a recomendação mudou** — ver "Medido no iPhone" e "Decisão recomendada". **Atualizado em 2026-10-04 com as builds 15 a 17:** a proposta 1 está no ar (backend #774; app #790, #802 e #818) e a volta ao app foi provada no iPhone — ver "Medido no iPhone (builds 15 a 17)". **Atualizado em 2026-10-04 com a build 19:** o descarte do link de volta com o widget real aberto foi medido no iPhone — ver "Medido no iPhone (build 19, widget real)".
+Status: **aceito para implementação iOS**, decisão do dono em 2026-10-05 na aprovação da Fase 4. Spike da Fase 4 ("Open Finance e onboarding"), feito em 2026-10-02. Este documento não muda código de produção: cada mudança de backend proposta vira PR próprio (a proposta 1 já virou; as outras seguem propostas). **Atualizado depois do teste no iPhone (build 14, Nubank real): a recomendação mudou** — ver "Medido no iPhone" e "Decisão recomendada". **Atualizado em 2026-10-04 com as builds 15 a 17:** a proposta 1 está no ar (backend #774; app #790, #802 e #818) e a volta ao app foi provada no iPhone — ver "Medido no iPhone (builds 15 a 17)". **Atualizado em 2026-10-04 com a build 19:** o descarte do link de volta com o widget real aberto foi medido no iPhone — ver "Medido no iPhone (build 19, widget real)".
 
 Convenção de prova: **[medido]** = rodei no simulador (iPhone 18 Pro, iOS 27, Expo Go 57.0.9) e vi o resultado; **[lido]** = li na documentação oficial da Pluggy ou no código da lib; **[hipótese]** = não provado; **[só no iPhone]** = o simulador não prova. **[medido no iPhone]** = o dono rodou o app (builds 14, 15, 16 e 19) no TestFlight, em produção, conta real, Nubank real, e o resultado ficou num **log do app ou numa resposta do servidor**; **[informado pelo dono]** = o resultado vem só do que o dono viu ou mostrou na tela (screenshot), **sem log**. Os dois são exclusivos: o que só se viu na tela é sempre `[informado pelo dono]`. A build 17 usou servidor simulado e não entra em nenhuma das duas como prova contra o Nubank real.
 
@@ -142,3 +142,51 @@ Os itens criados no sandbox da Pluggy durante o spike (`clientUserId=spike-desca
 3. A proposta 2 (`itemId`, continuar/reconectar) **junto com as telas 5 a 7**, não depois: sem ela, quem sai no meio do fluxo não consegue retomar a conexão que o webhook já adotou.
 4. Android na Fase 4 ou depois (hoje fica sem prova).
 5. Se vale repetir o teste com o app fechado de vez (exige outro banco, ou desconectar o Nubank de novo).
+
+
+## Implementação da Fase 4 (2026-10-05)
+
+O app incorpora a biblioteca oficial com OAuth no navegador. `autorizando` prepara
+a tentativa persistida antes de emitir o token; `native-intent` captura o item
+sem cobrir o widget. A volta, fechamento e sucesso usam o mesmo controlador e
+consultam o snapshot. Só tentativa da mesma sessão pode registrar item; item
+removido é recusado pelo servidor também sob lock. Sem item conhecido, snapshot
+observa bancos da conta sem atribuir origem à tentativa: ids_antes, quantidade ou
+ordem não provam correlação. A rodada aguarda pista própria do SDK/deep link;
+no fim da janela oferece a lista se observou bancos, sem declarar conclusão.
+
+Cada widget vincula os callbacks à identidade da tentativa que o abriu. Fechar
+deduplica a navegação sem descartar um item entregue depois por sucesso ou erro.
+Em reconexões, o marcador guarda o `reconnected_at` anterior: o estado antigo do
+banco não encerra a tentativa. A confirmação atual exige carimbo novo no servidor;
+`updated`/`partial` ainda exigem `last_sync_at >= reconnected_at`. Sem retorno nem
+carimbo novo, o app oferece conferência posterior, sem declarar reconexão concluída.
+POSTs sobrepostos da mesma tentativa compartilham a chamada em voo; GETs continuam
+independentes para permitir cancelamento e retomada.
+
+O connect-token nativo envia `attempt_id` UUID canônico junto ao `app_scheme`.
+O servidor constrói `scheme://open-finance-volta/<attempt_id>` como
+`oauthRedirectUri`; a origem no path acompanha o retorno frio, sem depender de
+timing de eventos do widget. O app só associa a pista ao nonce originário; URL
+legada sem vínculo consulta o servidor, sem atribuir o banco à tentativa ativa.
+Falha/cancelamento da preparação descarta somente aquele nonce antes do widget;
+token entregue e pistas de possível autorização continuam recuperáveis.
+
+O diagnóstico `Teste Open Finance` continua em Configurações até a validação das
+telas definitivas no iPhone. Isso não adiciona modo OAuth dentro do app nem
+contorna limites/direito. Jest cobre as transições com SDK e rede simulados;
+exportação Metro não prova consentimento bancário real. A validação real das
+builds anteriores não substitui o roteiro das novas telas no aparelho.
+
+
+Acompanhar a sincronização de um banco na lista usa modo `acompanhar` somente
+leitura. O item é validado novamente no snapshot da conta autenticada; a query
+não fornece vínculo de autorização nem confiança. Observação não lê nem altera
+marcadores de conexão, não cria token e não registra item, mesmo quando acompanha
+o mesmo banco da tentativa pendente. Item ausente/removido encerra observação;
+modo inválido ou repetido é fechado, inclusive em URI fria. Chaves e valores de
+query são decodificados uma vez por par, preservando duplicidade após decode,
+'=' dentro do valor e delimitadores codificados; fragmentos não são query.
+OAuth/SDK sem esse
+modo conservam o contrato UUID original. Assim, acompanhar B não muda A, e um
+callback próprio de A continua recuperável depois de observar B.

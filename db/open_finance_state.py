@@ -706,9 +706,9 @@ def item_registry_origins(provider_item_id: str, *, provider: str = "pluggy",
         que era o buraco por onde a reentrega de `item/created` ressuscitava
         banco removido.
 
-    Quem precisa SEPARAR as três (nenhum leitor automático precisa; é o
-    operador) usa `db.open_finance_diagnostico.classifica_item`, onde a regra de
-    precedência está escrita. Os leitores daqui:
+    O diagnóstico por precedência usa `db.open_finance_diagnostico.classifica_item`.
+    O callback separa `removed` das demais origens: uma remoção deliberada com
+    dono veta o item antigo, mesmo com outros rastros. Os leitores daqui:
 
       • `_adota_item_orfao` — só adota item sem NENHUM dono no rastro (duplicata
         de `item/created`, entrega at-least-once, ressuscitava o removido), e a
@@ -716,7 +716,8 @@ def item_registry_origins(provider_item_id: str, *, provider: str = "pluggy",
         (`exceto_registro_id`, abaixo);
       • `POST /pluggy-item` — `'pluggy_item' in ...` = o NAVEGADOR já registrou
         este item, logo a conexão que existe não é a que o webhook acabou de
-        adotar (auditoria de reconexão).
+        adotar (auditoria de reconexão). `'removed' in ...` veta o callback antes
+        do GET remoto e novamente sob lock; novo consentimento requer item novo.
 
     `exceto_registro_id` IGNORA uma linha do rastro pelo `id` — a que o próprio
     chamador acabou de gravar. É o que permite ao `_salva_item_sob_lock` refazer

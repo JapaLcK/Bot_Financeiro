@@ -20,6 +20,12 @@ export default function LayoutApp() {
   return (
     <Stack screenOptions={{ headerShown: false, contentStyle: { backgroundColor: cores.bg } }}>
       <Stack.Screen name="index" />
+      <Stack.Screen name="conectar-banco" />
+      <Stack.Screen name="autorizando" />
+      <Stack.Screen name="open-finance-volta" />
+      <Stack.Screen name="configuracoes" options={{ headerShown: true, title: "Configurações", headerBackButtonDisplayMode: "minimal" }} />
+      <Stack.Screen name="conexoes" options={{ headerShown: true, title: "Bancos conectados", headerBackButtonDisplayMode: "minimal" }} />
+      <Stack.Screen name="teste-pluggy" options={{ headerShown: true, title: "Teste Open Finance", headerBackButtonDisplayMode: "minimal" }} />
       <Stack.Screen
         name="seguranca"
         options={{
