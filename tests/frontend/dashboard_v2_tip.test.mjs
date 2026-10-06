@@ -55,33 +55,17 @@ test("tooltip entra já no lugar: o transform calculado é o gravado, sem quadro
     await page.goto(`${PAINEL}#/`);
     await page.locator(".cal-day").first().waitFor();
     // O onPointerMove do dia chama o showTip (widgets/Calendar.tsx); o 2º dia exercita a
-    // regravação. O calendário fica abaixo da dobra no viewport estreito: o hover rola até
-    // o dia e move o mouse ao centro dele.
+    // regravação. Antes dos dois hovers, traz o alvo para a área visível e aguarda a
+    // animação de entrada do widget: scrollY parado não garante que o dia parou de mover.
     const dias = page.locator(".cal-day:not([disabled])");
+    await dias.nth(1).evaluate((e) => e.scrollIntoView({ behavior: "instant", block: "center" }));
+    await page.waitForFunction(() => {
+      const s = getComputedStyle(document.querySelector('[data-widget-id="calendario"] > div'));
+      return s.transform === "none" && s.opacity === "1";
+    });
     await dias.first().hover();
     await dias.nth(1).hover();
-    // Em `no-preference` o html tem scroll-behavior: smooth (base.css): a rolagem do hover
-    // segue animada no compositor depois de o hover() retornar e, ao terminar, o Chromium
-    // re-faz hit-test do ponteiro parado e pode disparar um pointerleave tardio no dia
-    // (Calendar.tsx chama hideTip), que escondia o .tip antes da medição — a falha flaky
-    // do CI, só no 375x812 no-preference. Espera a rolagem assentar (scrollY exato estável
-    // por 2 amostras) e repõe o hover com mouse.move direto ao centro do dia: o
-    // locator.hover() chamaria scrollIntoView de novo e reiniciaria a rolagem suave. Em
-    // laço (máx. 5x): se um hit-test tardio do fim da animação esconder o tooltip já
-    // depois do re-hover, repete. Em `reduce` o scroll é auto e uma passada basta.
-    await page.waitForFunction(() => {
-      const w = window;
-      if (w.__y === w.scrollY) return true;
-      w.__y = w.scrollY;
-      return false;
-    }, null, { polling: 50 });
-    let b2;
-    for (let i = 0; i < 5; i++) {
-      b2 = await dias.nth(1).boundingBox();
-      await page.mouse.move(b2.x + b2.width / 2, b2.y + b2.height / 2);
-      await page.waitForTimeout(120);
-      if (await page.evaluate(() => !document.querySelector(".tip").hidden)) break;
-    }
+    const b2 = await dias.nth(1).boundingBox();
     const [mx, my] = [b2.x + b2.width / 2, b2.y + b2.height / 2];
     await page.waitForTimeout(100);
     const [entrou, moveu, depois] = await page.evaluate(() => {
