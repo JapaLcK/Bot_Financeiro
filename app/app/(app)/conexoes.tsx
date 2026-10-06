@@ -66,7 +66,7 @@ export default function Conexoes() {
     return () => { cancelado = true; controlador.abort(); };
   }, [ativo, travado, rodada]));
   const remover = async (c: Conexao) => {
-    if (!dados || remocaoEmVoo.current) return;
+    if (!montado.current || !dados || entradaEmVoo.current || remocaoEmVoo.current) return;
     remocaoEmVoo.current = true; setRemovendo(c.id); setErro(null);
     try {
       try { await desconectarBanco(dados.uid, c.id); }
@@ -83,6 +83,12 @@ export default function Conexoes() {
       else setErro(textoDaFalha(e));
     } finally { remocaoEmVoo.current = false; if (montado.current) setRemovendo(null); }
   };
+  const pedirRemocao = (c: Conexao) => {
+    if (!montado.current || entradaEmVoo.current || remocaoEmVoo.current) return;
+    Alert.alert("Desconectar este banco?",
+      "Os dados importados deste banco serão removidos. Seus outros bancos e lançamentos manuais serão preservados.",
+      [{ text: "Manter banco", style: "cancel" }, { text: "Desconectar", style: "destructive", onPress: () => { void remover(c); } }]);
+  };
   return <Screen sobCabecalho onAtualizar={() => setRodada((v) => v + 1)} atualizando={carregando}><View style={{ gap: espaco.lg, paddingVertical: espaco.xl }}>
     <Texto variante="secao">Sua grana, conectada</Texto>
     <Texto tom="inkMuted">Confira a autorização e a última sincronização de cada banco.</Texto>
@@ -95,9 +101,7 @@ export default function Conexoes() {
       <Texto variante="legenda" tom="inkMuted">{c.last_sync_at ? `Última sincronização: ${new Date(c.last_sync_at).toLocaleString("pt-BR")}` : "A primeira sincronização ainda não terminou."}</Texto>
       {c.ui.state === "updating" && c.provider_item_id && <Button rotulo="Acompanhar sincronização" variante="secondary" desativado={entrando} onPress={() => navegar({ pathname: "/open-finance-volta", params: { itemId: c.provider_item_id! } })} />}
       {c.provider_item_id && dados.permiteReconectar && !["removed", "item_missing", "paused"].includes(c.ui.state) && <Button rotulo={`Reconectar ${c.institution_name ?? "banco"}`} variante="secondary" desativado={entrando || removendo !== null} onPress={() => abrirAutorizacao(c.provider_item_id!)} />}
-      <Button rotulo={`Desconectar ${c.institution_name ?? "banco"}`} variante="ghost" carregando={removendo === c.id} desativado={removendo !== null && removendo !== c.id} onPress={() => Alert.alert("Desconectar este banco?",
-        "Os dados importados deste banco serão removidos. Seus outros bancos e lançamentos manuais serão preservados.",
-        [{ text: "Manter banco", style: "cancel" }, { text: "Desconectar", style: "destructive", onPress: () => { void remover(c); } }])} />
+      <Button rotulo={`Desconectar ${c.institution_name ?? "banco"}`} variante="ghost" carregando={removendo === c.id} desativado={entrando || (removendo !== null && removendo !== c.id)} onPress={() => pedirRemocao(c)} />
     </View></Card>)}
     {dados?.mensagem && <Banner tom="info" mensagem={dados.mensagem} />}
     <Button rotulo="Conectar outro banco" desativado={entrando || !dados?.podeAdicionar || removendo !== null} onPress={() => abrirAutorizacao()} />
