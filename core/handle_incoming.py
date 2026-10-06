@@ -70,26 +70,28 @@ def _previsao_somente_leitura(uid: int, text: str) -> str | None:
             or re.search(r'\b(tranquilo|prazo)\b.*\b(ate|dia|daqui)\b', norm)):
         return None
     from core.services.ai_chat.tools.bills import _forecast_balance, _check_cashflow
-    days = re.search(r'\b(?:daqui|em)\s+(\d+)\s+dias?\b', text, re.I)
-    target = re.search(r'\b(\d{4}-\d{2}-\d{2}|\d{1,2}/\d{1,2}(?:/\d{4})?)\b', text)
+    days_re = re.compile(r'\b(?:daqui(?:\s+a)?|em)\s+(\d+)\s+dias?\b', re.I)
+    target_re = re.compile(r'\b(\d{4}-\d{2}-\d{2}|\d{1,2}/\d{1,2}(?:/\d{4})?)\b')
+    days, target = days_re.search(text), target_re.search(text)
+    alvos = len(days_re.findall(text)) + len(target_re.findall(text))
     if 'boleto' in norm or 'compr' in norm:
         return 'Para analisar um boleto ou compra, informe os dados em uma consulta própria. Sua pergunta pendente foi preservada.'
     args = {'days': int(days.group(1))} if days else {'date': target.group(1)} if target else {}
     # Prazo/data não são dinheiro; só a cláusula explícita fornece o extra da tool.
-    restante = re.sub(r'\b(?:daqui|em)\s+\d+\s+dias?\b', '', text, flags=re.I)
-    restante = re.sub(r'\b(\d{4}-\d{2}-\d{2}|\d{1,2}/\d{1,2}(?:/\d{4})?)\b', '', restante)
+    restante = days_re.sub('', text)
+    restante = target_re.sub('', restante)
     sinal_cenario = r'\b(considerando|com|sem|se|cenario|hipotese|entrada|saida|despesa|receita|gasto|gastar|pagar|receber)\b'
     cenario = re.search(r'\b(?:considerando|com)\s+(?:uma?\s+)?(sa[ií]da|entrada|despesa|receita|gasto)\b\s*(.*)',
                         restante, re.I | re.S)
     resumo_cenario = ''
-    if re.search(sinal_cenario, normalize_text(restante)) or re.search(r'\d|r\$|\breais?\b', restante, re.I):
+    if alvos > 1 or re.search(sinal_cenario, normalize_text(restante)) or re.search(r'\d|r\$|\breais?\b', restante, re.I):
         from core.handlers.bills import _VALOR_RE
         bruto = limpa_pontuacao_final(cenario.group(2).strip().rstrip(';:?')) if cenario else ''
         amount = parse_money(bruto) if _VALOR_RE.fullmatch(bruto) else None
         antes = restante[:cenario.start()] if cenario else restante
         if (not args or amount is None or valor_perigoso(bruto, amount)
                 or re.search(sinal_cenario, normalize_text(antes)) or re.search(r'\d|r\$', antes, re.I)
-                or sum(len(m.re.findall(text)) if m else 0 for m in (days, target)) != 1):
+                or alvos != 1):
             return (f'Não consegui interpretar o cenário informado: “{text}”. '
                     'Informe uma única entrada ou saída com valor e data ou prazo. '
                     'Sua pergunta pendente foi preservada.')

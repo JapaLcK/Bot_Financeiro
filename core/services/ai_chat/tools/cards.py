@@ -266,7 +266,7 @@ def _forecast_next_bill(user_id: int, args: dict[str, Any]) -> dict[str, Any]:
         conn.rollback()
     items, seen, motivos, totais = [], set(), [], []
     for b in bills:
-        if target is not None and b['card_id'] != target or b['card_id'] in seen:
+        if b['status'] == 'closed' or target is not None and b['card_id'] != target or b['card_id'] in seen:
             continue
         total, paid, debt, invalid_value = valores_fatura(b)
         if b['status'] == 'paid' and not invalid_value and debt == 0:

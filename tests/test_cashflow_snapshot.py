@@ -178,7 +178,7 @@ def test_handle_incoming_cenario_preserva_pendencia_financeira_outro_assunto(pre
     _conversa_previsao_preserva_pendencia(prefixo,tipo,consulta,monkeypatch,ia_fora)
 
 
-def _conversa_previsao_preserva_pendencia(prefixo,tipo,consulta,monkeypatch,ia_fora):
+def _conversa_previsao_preserva_pendencia(prefixo,tipo,consulta,monkeypatch,ia_fora,recusada=False):
     from core.handle_incoming import handle_incoming
     from core.types import IncomingMessage
     uid=usuario_pagante()
@@ -208,7 +208,7 @@ def _conversa_previsao_preserva_pendencia(prefixo,tipo,consulta,monkeypatch,ia_f
     result=diga(prefixo+consulta)
     after=db.get_pending_action(uid)
     assert result
-    if 'desconhecido' in consulta:
+    if recusada or 'desconhecido' in consulta:
         assert 'cenário' in result[0].text.lower() and 'saldo previsto' not in result[0].text.lower()
     else:
         assert 'condicional' in result[0].text.lower()

@@ -684,6 +684,16 @@ PR de cada etapa, não soluções prontas. Cada PR confere se ainda valem, decid
     53 falhas/6 consultas puras verdes sem fix; restaurado e aprovado no conjunto final.
     Primeiro CI tinha também falhas de Pix e tooltip presentes na main; comparação
     não equivale a CI verde. O head corrigido ainda requer CI e revisão remota.
+  - Segunda revisão do #842 em 06/10: prazo aceita “daqui a N dias” e usa a
+    mesma expressão para extração, remoção e contagem; múltiplos alvos são
+    explicitamente recusados sem consumir pendências. Próxima fatura exclui
+    ciclos closed antes da seleção, preservando a dívida e valores incoerentes.
+    Manager fresh aprovou os quatro arquivos congelados e os controles causais;
+    combinado local: **1789 passed/2 xfailed** em 46 arquivos, todas as
+    identidades anteriores preservadas. Comandos/XML em scratch; remedir antes
+    de reutilizar os números. Sem terceira passada Tester.
+    CI do head anterior: backend/audit aprovados; frontend falha no tooltip
+    também vermelho na main. Novo head requer nova revisão remota e CI.
   - CI completo e Codex remoto no head publicável seguem pendentes. Codex local
     foi tentado, mas a CLI recusou o modelo configurado e não produziu parecer.
     Produção, WhatsApp real e aparelho não verificados; sem deploy/TestFlight/reset.
