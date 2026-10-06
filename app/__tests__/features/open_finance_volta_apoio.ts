@@ -8,7 +8,7 @@ import { chamadas, cofre, resposta, rotear, type Rota } from "./auth_apoio";
 export function origemDaTentativa(): string | undefined {
   try { return JSON.parse(cofre.get("pb.of.tentativa") ?? "null")?.tentativa_id; } catch { return undefined; }
 }
-export const conferirRetornoOficial = (link: unknown, d: Dependencias) => conferirVolta(link, d, origemDaTentativa());
+export const conferirRetornoOficial = (link: unknown, d: Dependencias, origem: string | undefined) => conferirVolta(link, d, origem);
 
 export const ITEM = "c13cb883-item_1";
 const conexao = (state: string, label: string) => ({ id: 1, status: "ACTIVE", status_reason: null, last_sync_at: "2026-10-05T12:00:00Z", reconnected_at: null, provider_item_id: ITEM, institution_name: "Nubank", ui: { state, label, detail: null } });

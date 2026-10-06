@@ -151,6 +151,7 @@ export async function conferirVolta(link: unknown, d: Dependencias, origem?: unk
   let uid: number | null = null;
   let posts = 0;
   let instavel = false;
+  let bancosObservados = false;
   let visto = inicial?.item_id === itemId && inicial?.visto_no_servidor === true;
   d.aoMudar({ fase: "conferindo", instavel });
 
@@ -168,26 +169,16 @@ export async function conferirVolta(link: unknown, d: Dependencias, origem?: unk
       uid ??= (await perfil()).user_id;
       if (d.cancelado()) return;
       const lida = await lerTentativaBancaria(uid);
-      let tentativa = daRodada(lida) ? lida : null;
+      const tentativa = daRodada(lida) ? lida : null;
       if (d.cancelado()) return;
       if (inicial && !tentativa) return d.aoMudar({ fase: "sem-item" });
       // onSuccess/native-intent pode entregar a pista depois do primeiro GET.
       // Só a tentativa original desta rodada pode preencher o item ainda ausente.
       itemId ??= itemDoLink(tentativa?.item_id);
       const snapshot = await conexoes(uid, d.controlador);
-      const candidatos = snapshot.connections.filter((c) => c.provider_item_id &&
-        !tentativa?.ids_antes.includes(c.provider_item_id) && !MORTOS.has(c.ui.state));
-      if (!legado && !itemId && candidatos.length > 1 && tentativa) return d.aoMudar({ fase: "escolher-conexao" });
-      if (!legado && !itemId && candidatos.length === 1 && tentativa) {
-        itemId = candidatos[0]!.provider_item_id;
-        if (itemId) {
-          await capturarItemBancario(itemId, tentativa.tentativa_id);
-          const capturada = await lerTentativaBancaria(uid);
-          tentativa = daRodada(capturada) ? capturada : null;
-          if (d.cancelado()) return;
-          if (!tentativa) return d.aoMudar({ fase: "sem-item" });
-        }
-      }
+      // O snapshot não informa qual tentativa criou cada item. Observar
+      // bancos não associa nenhum deles ao widget desta rodada.
+      bancosObservados = snapshot.connections.some((c) => c.provider_item_id && !MORTOS.has(c.ui.state));
       const atual = itemId ? achar(snapshot, itemId) : null;
       const daTentativa = tentativa?.item_id === itemId ? tentativa : null;
       const reconectando = daTentativa?.modo === "reconectar" ? daTentativa : null;
@@ -262,7 +253,7 @@ export async function conferirVolta(link: unknown, d: Dependencias, origem?: unk
         d.aoMudar({ fase: "conferindo", instavel });
       }
     }
-    if (d.agora() >= prazo) return d.aoMudar(visto ? { fase: "organizando" } : { fase: "ainda-conferindo" });
+    if (d.agora() >= prazo) return d.aoMudar(visto ? { fase: "organizando" } : !itemId && bancosObservados ? { fase: "escolher-conexao" } : { fase: "ainda-conferindo" });
     await d.esperar(INTERVALO_MS);
     if (d.cancelado()) return;
   }

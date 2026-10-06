@@ -1,10 +1,13 @@
-import { conferirRetornoOficial as conferirVolta } from "./open_finance_volta_apoio";
+import { conferirRetornoOficial } from "./open_finance_volta_apoio";
+import type { Dependencias } from "@/features/openFinance/volta";
 import { capturarItemBancario, iniciarTentativaBancaria, lerTentativaBancaria, marcarTentativaBancariaVista } from "@/storage/secure";
 import { cofre, falharApagar, falharLeitura, prepararCaso, resposta } from "./auth_apoio";
 import { dependencias, guardarSessaoOf, ITEM, lista, posts, servidor, SESSAO_OF, VIVO } from "./open_finance_volta_apoio";
 import { S } from "./auth_apoio";
 
-beforeEach(async () => { prepararCaso(); await guardarSessaoOf(S); });
+let origem: string;
+const conferirVolta = (link: unknown, d: Dependencias) => conferirRetornoOficial(link, d, origem);
+beforeEach(async () => { prepararCaso(); await guardarSessaoOf(S); origem = (await lerTentativaBancaria(1))!.tentativa_id; });
 it("callback antigo sem tentativa apenas consulta, nunca registra", async () => {
   cofre.delete("pb.of.tentativa");
   servidor({});
@@ -13,22 +16,23 @@ it("callback antigo sem tentativa apenas consulta, nunca registra", async () => 
   expect(posts()).toEqual([]);
   expect(ultimo()).toEqual({ fase: "ainda-conferindo" });
 });
-it("sem link e sem onSuccess reconhece novo item adotado pelo webhook", async () => {
+it("sem link nem onSuccess observa bancos do webhook sem afirmar a origem da tentativa", async () => {
+  const original = await lerTentativaBancaria(1);
   servidor({ get: () => lista(VIVO) });
   const { d, ultimo } = dependencias();
   await conferirVolta(undefined, d);
-  expect(ultimo()).toEqual({ fase: "conectado", ui: VIVO.ui });
+  expect(ultimo()).toEqual({ fase: "escolher-conexao" });
   expect(posts()).toEqual([]);
-  expect(await lerTentativaBancaria(1)).toBeNull();
+  expect(await lerTentativaBancaria(1)).toEqual(original);
 });
 it("retorno capturado no widget permite registrar depois do cold start sem URL", async () => {
-  await capturarItemBancario(ITEM);
+  await capturarItemBancario(ITEM, origem);
   servidor({});
   await conferirVolta(undefined, dependencias().d);
   expect(posts()).toHaveLength(1);
 });
 it("item visto antes de fechar app não é readotado se sumir depois", async () => {
-  await capturarItemBancario(ITEM);
+  await capturarItemBancario(ITEM, origem);
   const t = (await lerTentativaBancaria(1))!;
   await marcarTentativaBancariaVista(t.tentativa_id);
   servidor({});
@@ -83,8 +87,8 @@ it.each(["updated", "partial", "error"])("reconexão não encerra com snapshot %
   expect(posts()).toEqual([]);
 });
 it("reconexão com callback espera carimbo atual e sync após esse carimbo", async () => {
-  await iniciarTentativaBancaria(1, SESSAO_OF, [ITEM], ITEM);
-  await capturarItemBancario(ITEM);
+  const tentativa = await iniciarTentativaBancaria(1, SESSAO_OF, [ITEM], ITEM);
+  await capturarItemBancario(ITEM, tentativa!.tentativa_id);
   let registrado = false;
   let consultas = 0;
   const marco = "2026-10-05T13:00:00Z";

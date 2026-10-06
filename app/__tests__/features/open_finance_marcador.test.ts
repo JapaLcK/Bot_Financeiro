@@ -26,7 +26,7 @@ it("outra conta/sessão não lê nem sobrescreve marcador antigo", async () => {
   await guardarCredenciais({ access: "eyJhbGciOiJIUzI1NiJ9.eyJqdGkiOiJzZXNzYW8tYiJ9.assinatura", refresh: "r-b" });
   expect(await lerTentativaBancaria(1)).toBeNull();
   expect(await iniciarTentativaBancaria(1, SESSAO_OF, [])).toBeNull();
-  await capturarItemBancario("item_alheio");
+  await capturarItemBancario("item_alheio", a!.tentativa_id);
   expect(JSON.parse(cofre.get("pb.of.tentativa")!)).toEqual(a);
 });
 it("sair limpa marcador junto da sessão; conclusão velha não limpa tentativa nova", async () => {
@@ -38,8 +38,8 @@ it("sair limpa marcador junto da sessão; conclusão velha não limpa tentativa 
   expect(cofre.has("pb.of.tentativa")).toBe(false);
 });
 it("callback não substitui alvo de reconexão ou item já capturado", async () => {
-  await iniciarTentativaBancaria(1, SESSAO_OF, ["item_a"], "item_a");
-  await capturarItemBancario("item_b");
+  const tentativa = await iniciarTentativaBancaria(1, SESSAO_OF, ["item_a"], "item_a");
+  await capturarItemBancario("item_b", tentativa!.tentativa_id);
   expect(await lerTentativaBancaria(1)).toMatchObject({ item_id: "item_a" });
 });
 

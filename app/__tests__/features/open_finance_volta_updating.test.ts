@@ -1,4 +1,6 @@
-import { conferirRetornoOficial as conferirVolta } from "./open_finance_volta_apoio";
+import { lerTentativaBancaria } from "@/storage/secure";
+import { conferirRetornoOficial } from "./open_finance_volta_apoio";
+import type { Dependencias } from "@/features/openFinance/volta";
 /**
  * `features/openFinance/volta.ts` com o item em `updating` ("Atualizando…"): o
  * servidor devolve esse estado enquanto a coleta termina (medido no iPhone,
@@ -16,9 +18,12 @@ const conferindo = (instavel: boolean) => ({ fase: "conferindo", instavel });
 const conectado = (c: { ui: unknown }) => ({ fase: "conectado", ui: c.ui });
 const atualizando = () => lista(ATUALIZANDO);
 
+let origem: string;
+const conferirVolta = (link: unknown, d: Dependencias) => conferirRetornoOficial(link, d, origem);
 beforeEach(async () => {
   prepararCaso();
   await guardarCredenciais(S);
+  origem = (await lerTentativaBancaria(1))!.tentativa_id;
 });
 
 describe("volta do OAuth — item em updating segue consultando", () => {

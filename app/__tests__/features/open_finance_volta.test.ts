@@ -1,4 +1,6 @@
-import { conferirRetornoOficial as conferirVolta } from "./open_finance_volta_apoio";
+import { lerTentativaBancaria } from "@/storage/secure";
+import { conferirRetornoOficial } from "./open_finance_volta_apoio";
+import type { Dependencias } from "@/features/openFinance/volta";
 /**
  * `features/openFinance/volta.ts` com os serviços reais e o `fetch` dublado
  * (`rotear`), relógio injetado (ver `open_finance_volta_apoio.ts`). Numeração =
@@ -12,9 +14,12 @@ import { guardarSessaoOf as guardarCredenciais } from "./open_finance_volta_apoi
 import { chamadas, cofre, fetchFalso, GENERICO, prepararCaso, resposta, rotear, S, segurar } from "./auth_apoio";
 import { caminhos, dependencias, falhas, ITEM, lista, posts, servidor, VIVO } from "./open_finance_volta_apoio";
 
+let origem: string;
+const conferirVolta = (link: unknown, d: Dependencias) => conferirRetornoOficial(link, d, origem);
 beforeEach(async () => {
   prepararCaso();
   await guardarCredenciais(S);
+  origem = (await lerTentativaBancaria(1))!.tentativa_id;
 });
 
 describe("volta do OAuth — link", () => {

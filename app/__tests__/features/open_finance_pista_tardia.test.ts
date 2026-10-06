@@ -1,11 +1,14 @@
-import { conferirRetornoOficial as conferirVolta } from "./open_finance_volta_apoio";
+import { conferirRetornoOficial } from "./open_finance_volta_apoio";
+import type { Dependencias } from "@/features/openFinance/volta";
 import { capturarItemBancario, guardarCredenciais, iniciarTentativaBancaria, lerTentativaBancaria } from "@/storage/secure";
 import { chamadas, prepararCaso, S } from "./auth_apoio";
 import { comEstado, dependencias, guardarSessaoOf, ITEM, lista, posts, servidor, SESSAO_OF } from "./open_finance_volta_apoio";
 
-beforeEach(async () => { prepararCaso(); await guardarSessaoOf(S); });
+let origem: string;
+const conferirVolta = (link: unknown, d: Dependencias) => conferirRetornoOficial(link, d, origem);
+beforeEach(async () => { prepararCaso(); await guardarSessaoOf(S); origem = (await lerTentativaBancaria(1))!.tentativa_id; });
 it("pista tardia de outro banco não substitui item corrente nem libera POST para ele", async () => {
-  await capturarItemBancario(ITEM);
+  await capturarItemBancario(ITEM, origem);
   const original = await lerTentativaBancaria(1);
   servidor({ get: () => lista(), post: () => lista() });
   let recebeu = false;
@@ -33,7 +36,7 @@ it("callback tardio após troca de sessão não é adotado pela rodada anterior"
   servidor({ get: () => lista() });
   let mudou = false;
   const { d, relogio } = dependencias({ esperar: async () => {
-    if (!mudou) { mudou = true; await guardarCredenciais({ access: "sessao-nova", refresh: "r_novo" }); await capturarItemBancario(ITEM); }
+    if (!mudou) { mudou = true; await guardarCredenciais({ access: "sessao-nova", refresh: "r_novo" }); await capturarItemBancario(ITEM, origem); }
     relogio.t += 3_000;
   } });
   await conferirVolta(undefined, d);
@@ -42,7 +45,7 @@ it("callback tardio após troca de sessão não é adotado pela rodada anterior"
 it("pausa cancela antes de usar pista tardia; retomada mesma tentativa registra", async () => {
   servidor({ get: () => lista() });
   let cancelado = false;
-  const { d } = dependencias({ cancelado: () => cancelado, esperar: async () => { await capturarItemBancario(ITEM); cancelado = true; } });
+  const { d } = dependencias({ cancelado: () => cancelado, esperar: async () => { await capturarItemBancario(ITEM, origem); cancelado = true; } });
   await conferirVolta(undefined, d);
   expect(posts()).toHaveLength(0);
   await conferirVolta(undefined, dependencias().d);
@@ -52,7 +55,7 @@ it("pista tardia removida no próximo snapshot não permite adoção", async () 
   let consultas = 0;
   servidor({ get: () => ++consultas === 1 ? lista() : lista(comEstado("removed")) });
   const { d, relogio, ultimo } = dependencias({ esperar: async () => {
-    await capturarItemBancario(ITEM);
+    await capturarItemBancario(ITEM, origem);
     relogio.t += 3_000;
   } });
   await conferirVolta(undefined, d);

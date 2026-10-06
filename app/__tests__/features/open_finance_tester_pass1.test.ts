@@ -1,12 +1,15 @@
-import { conferirRetornoOficial as conferirVolta } from "./open_finance_volta_apoio";
+import { conferirRetornoOficial } from "./open_finance_volta_apoio";
+import type { Dependencias } from "@/features/openFinance/volta";
 import { capturarItemBancario, lerTentativaBancaria } from "@/storage/secure";
 import { cofre, prepararCaso, S } from "./auth_apoio";
 import { dependencias, guardarSessaoOf, ITEM, lista, posts, servidor, VIVO } from "./open_finance_volta_apoio";
 
-beforeEach(async () => { prepararCaso(); await guardarSessaoOf(S); });
+let origem: string;
+const conferirVolta = (link: unknown, d: Dependencias) => conferirRetornoOficial(link, d, origem);
+beforeEach(async () => { prepararCaso(); await guardarSessaoOf(S); origem = (await lerTentativaBancaria(1))!.tentativa_id; });
 
 it("callback de outro banco vivo não cancela tentativa pendente do banco atual", async () => {
-  await capturarItemBancario(ITEM);
+  await capturarItemBancario(ITEM, origem);
   const original = await lerTentativaBancaria(1);
   const antigo = { ...VIVO, id: 2, provider_item_id: "banco_antigo" };
   servidor({ get: () => lista(antigo) });
@@ -16,14 +19,14 @@ it("callback de outro banco vivo não cancela tentativa pendente do banco atual"
 });
 
 it("controle positivo: callback do item corrente conclui a tentativa corrente", async () => {
-  await capturarItemBancario(ITEM);
+  await capturarItemBancario(ITEM, origem);
   servidor({ get: () => lista(VIVO) });
   await conferirVolta(ITEM, dependencias().d);
   expect(await lerTentativaBancaria(1)).toBeNull();
 });
 
 it("marcador com mais de uma hora não autoriza POST", async () => {
-  await capturarItemBancario(ITEM);
+  await capturarItemBancario(ITEM, origem);
   const t = (await lerTentativaBancaria(1))!;
   cofre.set("pb.of.tentativa", JSON.stringify({ ...t, iniciada_em: Date.now() - 60 * 60_000 - 1_000 }));
   servidor({});
@@ -49,7 +52,7 @@ it("cancelar durante GET impede registro e escrita de callback no estado", async
 
 // A concorrência é provada neste seam; navegação nativa duplicando instâncias não foi reproduzida.
 it("duas rodadas simultâneas do mesmo marcador não enviam dois POSTs", async () => {
-  await capturarItemBancario(ITEM);
+  await capturarItemBancario(ITEM, origem);
   servidor({ get: () => lista(), post: async () => { await Promise.resolve(); return lista(VIVO); } });
   await Promise.all([conferirVolta(ITEM, dependencias().d), conferirVolta(ITEM, dependencias().d)]);
   expect(posts()).toHaveLength(1);

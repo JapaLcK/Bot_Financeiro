@@ -336,10 +336,10 @@ export function lerTentativaBancaria(user_id?: number): Promise<TentativaBancari
 }
 
 /** Captura inclusive no cold start, antes da biometria liberar as rotas. */
-export function capturarItemBancario(item_id: string, tentativa_id?: string): Promise<void> {
+export function capturarItemBancario(item_id: string, tentativa_id: string | undefined): Promise<void> {
   return naFila(async () => {
     const t = await tentativaNoCofre();
-    if (!t || (tentativa_id && t.tentativa_id !== tentativa_id) || await sessaoNoCofre() !== t.sessao || (t.modo === "reconectar" && t.item_id !== item_id)) return;
+    if (!t || !tentativa_id || t.tentativa_id !== tentativa_id || await sessaoNoCofre() !== t.sessao || (t.modo === "reconectar" && t.item_id !== item_id)) return;
     if (t.modo === "nova" && t.ids_antes.includes(item_id)) return;
     // Um callback velho não toma o lugar do item já associado à tentativa.
     if (t.item_id && t.item_id !== item_id) return;

@@ -151,7 +151,9 @@ a tentativa persistida antes de emitir o token; `native-intent` captura o item
 sem cobrir o widget. A volta, fechamento e sucesso usam o mesmo controlador e
 consultam o snapshot. Só tentativa da mesma sessão pode registrar item; item
 removido é recusado pelo servidor também sob lock. Sem item conhecido, snapshot
-recupera adoção do webhook; múltiplos candidatos levam à lista de bancos.
+observa bancos da conta sem atribuir origem à tentativa: ids_antes, quantidade ou
+ordem não provam correlação. A rodada aguarda pista própria do SDK/deep link;
+no fim da janela oferece a lista se observou bancos, sem declarar conclusão.
 
 Cada widget vincula os callbacks à identidade da tentativa que o abriu. Fechar
 deduplica a navegação sem descartar um item entregue depois por sucesso ou erro.

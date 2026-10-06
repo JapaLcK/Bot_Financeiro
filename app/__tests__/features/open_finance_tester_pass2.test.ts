@@ -1,15 +1,18 @@
-import { conferirRetornoOficial as conferirVolta } from "./open_finance_volta_apoio";
+import { conferirRetornoOficial } from "./open_finance_volta_apoio";
+import type { Dependencias } from "@/features/openFinance/volta";
 import { capturarItemBancario, iniciarTentativaBancaria, lerTentativaBancaria } from "@/storage/secure";
 import { prepararCaso, S } from "./auth_apoio";
 import { dependencias, guardarSessaoOf, ITEM, lista, posts, servidor, SESSAO_OF, VIVO } from "./open_finance_volta_apoio";
 
-beforeEach(async () => { prepararCaso(); await guardarSessaoOf(S); });
+let origem: string;
+const conferirVolta = (link: unknown, d: Dependencias) => conferirRetornoOficial(link, d, origem);
+beforeEach(async () => { prepararCaso(); await guardarSessaoOf(S); origem = (await lerTentativaBancaria(1))!.tentativa_id; });
 
 it("pista recebida depois do primeiro GET sem item é usada pela rodada seguinte", async () => {
   let consultas = 0;
   servidor({ get: () => { consultas += 1; return lista(); } });
   const { d, ultimo } = dependencias({ esperar: async () => {
-    if (consultas === 1) await capturarItemBancario(ITEM);
+    if (consultas === 1) await capturarItemBancario(ITEM, origem);
     relogio.t += 3_000;
   } });
   const relogio = { t: 0 };
@@ -20,7 +23,7 @@ it("pista recebida depois do primeiro GET sem item é usada pela rodada seguinte
 });
 
 it("controle positivo: pista presente antes da conferência sem URL registra e conclui", async () => {
-  await capturarItemBancario(ITEM);
+  await capturarItemBancario(ITEM, origem);
   servidor({});
   const { d, ultimo } = dependencias();
   await conferirVolta(undefined, d);
@@ -66,7 +69,7 @@ it("sync um milissegundo anterior ao carimbo novo mantém recuperação sem repe
 });
 
 it.each(["removed", "item_missing"])("callback de outro banco %s não apaga tentativa corrente", async (state) => {
-  await capturarItemBancario(ITEM);
+  await capturarItemBancario(ITEM, origem);
   const original = await lerTentativaBancaria(1);
   servidor({ get: () => lista({ ...VIVO, id: 2, provider_item_id: "outro_banco", ui: { state, label: state } }) });
   await conferirVolta("outro_banco", dependencias().d);

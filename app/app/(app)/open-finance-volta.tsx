@@ -180,8 +180,9 @@ export default function OpenFinanceVolta() {
 
         {estado.fase === "escolher-conexao" && (
           <>
-            <Texto tom="inkMuted">Encontramos mais de uma conexão nova. Confira seus bancos para acompanhar a autorização e a sincronização de cada um.</Texto>
+            <Texto tom="inkMuted">Não conseguimos identificar o retorno desta tentativa. Confira os bancos conectados para acompanhar o estado de cada um.</Texto>
             <Button rotulo="Ver bancos conectados" onPress={() => router.replace("/conexoes")} />
+            <Button rotulo="Conferir de novo" variante="secondary" onPress={() => setRodada((n) => n + 1)} />
             {continuar}
           </>
         )}
