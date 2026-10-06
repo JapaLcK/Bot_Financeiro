@@ -244,54 +244,57 @@ def _list_installments(user_id: int, args: dict[str, Any]) -> dict[str, Any]:
 # ─── Read: forecast_next_bill ───────────────────────────────────────────────
 
 def _forecast_next_bill(user_id: int, args: dict[str, Any]) -> dict[str, Any]:
-    """Projeção da PRÓXIMA fatura — a open bill com fechamento mais próximo.
+    """Próxima fatura OBSERVADA por cartão; total não significa restante."""
+    from core.services.cashflow_contract import somar
+    from db.connection import get_conn
+    from db.cards import ler_faturas, calendario_fatura
+    from core.services.cashflow_snapshot import valores_fatura, centavos, legado
 
-    Parcelamentos já materializaram bills futuras quando a compra foi feita,
-    então a "próxima fatura" do user é a open bill com `period_end` mais
-    próximo de hoje. Lê de `list_open_bills` (já ordenada por period_end
-    asc) e pega a 1ª de cada cartão. Se filtrar por `card_name`, retorna
-    só esse cartão.
-
-    Nota: NÃO cria bills futuras pra exibição — se não há open bill, retorna
-    total=0. Pra agendar fatura inexistente, o user precisa registrar uma
-    compra naquele período.
-    """
-    card_name = (args.get("card_name") or "").strip() or None
-
-    target_card_id: int | None = None
-    if card_name:
-        cid = db.get_card_id_by_name(user_id, card_name)
-        if not cid:
-            return {"error": f"Não achei cartão com nome '{card_name}'."}
-        target_card_id = int(cid)
-
-    open_bills = db.list_open_bills(user_id)  # vem por period_end asc
-
-    items = []
-    total = 0.0
-    seen_cards: set[int] = set()
-    for b in open_bills:
-        cid = int(b["card_id"])
-        if target_card_id is not None and cid != target_card_id:
+    name = (args.get('card_name') or '').strip() or None
+    with get_conn() as conn, conn.cursor() as cur:
+        cur.execute('set transaction isolation level repeatable read, read only')
+        target = None
+        if name:
+            cur.execute('select id from credit_cards where user_id=%s and lower(name)=lower(%s)',
+                        (user_id, name))
+            row = cur.fetchone()
+            if not row:
+                conn.rollback()
+                return {'error': f"Não achei cartão com nome '{name}'."}
+            target = row['id']
+        bills = ler_faturas(cur, user_id)
+        conn.rollback()
+    items, seen, motivos, totais = [], set(), [], []
+    for b in bills:
+        if target is not None and b['card_id'] != target or b['card_id'] in seen:
             continue
-        if cid in seen_cards:
-            continue  # já pegou a próxima desse cartão (mais cedo no tempo)
-        seen_cards.add(cid)
-        amount = float(b.get("total") or 0)
-        total += amount
-        items.append({
-            "card_name": b.get("card_name"),
-            "bill_id": b.get("id"),
-            "period_start": b["period_start"].isoformat() if b.get("period_start") else None,
-            "period_end": b["period_end"].isoformat() if b.get("period_end") else None,
-            "total": amount,
-        })
-
-    return {
-        "total": round(total, 2),
-        "cards": items,
-        "count": len(items),
-    }
+        total, paid, debt, invalid_value = valores_fatura(b)
+        if b['status'] == 'paid' and not invalid_value and debt == 0:
+            continue
+        seen.add(b['card_id'])
+        due, date_quality = calendario_fatura(b)
+        known = ['cobertura_fatura_nao_comprovada']
+        if date_quality == 'presumida':
+            known.append('calendario_fatura_presumido')
+        if b['open_finance_account_id'] and b['currency'] != 'BRL':
+            total, debt = None, None
+            known.append('moeda_fatura_desconhecida')
+        if b['status'] == 'paid' or paid and paid > 0:
+            known.append('pagamento_fatura_reflexo_desconhecido')
+        if invalid_value:
+            known.append('valor_fatura_a_conferir')
+        motivos.extend(known)
+        totais.append(total)
+        items.append({'card_name': b['card_name'], 'bill_id': b['id'],
+                      'period_start': b['period_start'], 'period_end': b['period_end'],
+                      'total': centavos(total), 'restante': centavos(debt), 'estado': b['status'],
+                      'due_date': due, 'qualidade_data': date_quality,
+                      'motivos': known})
+    total = somar(totais) if items and all(b['total'] is not None for b in items) else None
+    return legado({'total': centavos(total), 'cards': items, 'count': len(items),
+                   'estado': 'a_conferir' if items else 'indisponivel',
+                   'motivos': sorted(set(motivos)) if items else ['fatura_observada_ausente'],
+                   'note': 'Total é valor observado da fatura, não caixa livre nem restante a pagar. Ausência não significa fatura zero.'})
 
 
 # ─── Write: add_credit_purchase (auto-execute) ──────────────────────────────
@@ -525,7 +528,7 @@ TOOLS: list[Tool] = [
         },
         is_write=False,
         execute=_forecast_next_bill,
-        has_side_effects=True,  # Reconcilia faturas pagas que voltaram a ter saldo.
+        has_side_effects=False,  # leitor canônico puro; não reabre status.
     ),
     Tool(
         schema={

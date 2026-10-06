@@ -1,25 +1,12 @@
-"""
-core/services/cashflow.py — projeção simples de caixa pra decisão de prazo.
-
-Responde a pergunta do dono da farmácia: "se eu aceitar pagar até o dia X
-(prazo do representante), eu fico tranquilo ou aperta?"
-
-projetado(D) = saldo_atual
-             + receitas fixas previstas em (hoje, D]
-             − gastos fixos automáticos (todas as frequências) em (hoje, D]
-             − boletos pendentes com vencimento até D
-             − (opcional) um boleto novo que ele está considerando
-
-`tranquilo` = projetado, em centavos (o valor exibido), >= 0. É uma estimativa:
-não conta gastos avulsos futuros nem receitas semanais/diárias/únicas (legado);
-a ideia é dar visão de fôlego, não fechamento contábil.
-"""
+"""Projeção condicional de caixa: motor Decimal único; dados desconhecidos ficam explícitos."""
 from __future__ import annotations
 
 import calendar
+from decimal import Decimal
 import math
 from datetime import date, timedelta
 from typing import Any
+from core.services.cashflow_snapshot import (Ocorrencia, Motivo, Snapshot, carregar, centavos, dinheiro, legado, somar)
 
 
 def _as_date(v: Any) -> date | None:
@@ -77,204 +64,82 @@ def _recurring_occurrence_dates(day: Any, freq: str, month: Any, start: date | N
     return dates
 
 
-def _open_card_bills_detail(user_id: int, until: date) -> list[dict]:
-    """Faturas de cartão com saldo a pagar (total − pago) e vencimento até
-    `until` — compromissos que o saldo em conta ainda não reflete (dívida de
-    cartão não sai do saldo). Inclui 'open' (fatura corrente) e 'closed' com saldo
-    (atrasada, ainda a pagar), mesmo critério de `list_bills_with_debt`: o
-    atrasado também sai do caixa antes do alvo, então conta como saída. Cada item:
-    `{"due_date", "remaining", "card_name"}`."""
-    from db.connection import get_conn
-    from db.cards import card_bill_due_date
-
-    items: list[dict] = []
-    with get_conn() as conn:
-        with conn.cursor() as cur:
-            cur.execute(
-                """
-                select (b.total - coalesce(b.paid_amount, 0)) as remaining,
-                       b.period_end, c.closing_day, c.due_day, c.name as card_name
-                from credit_bills b
-                join credit_cards c on c.id = b.card_id and c.user_id = b.user_id
-                where b.user_id = %s and b.status in ('open', 'closed')
-                  and b.total > coalesce(b.paid_amount, 0)
-                """,
-                (user_id,),
-            )
-            for row in cur.fetchall() or []:
-                pe = _as_date(row["period_end"])
-                if pe is None:
-                    continue
-                due = card_bill_due_date(pe, int(row["closing_day"] or 1), int(row["due_day"] or 1))
-                if due <= until:
-                    items.append({
-                        "due_date": due,
-                        "remaining": float(row["remaining"] or 0),
-                        "card_name": row["card_name"],
-                    })
-    return items
+def validar_extra(value):
+    if value is None:
+        return Decimal(0)
+    amount = dinheiro(value)
+    if (amount is None or not math.isfinite(float(amount))
+            or amount != 0 and float(amount) == 0):
+        raise ValueError("valor adicional deve ser finito e representável no contrato numérico")
+    return amount
 
 
-def _cashflow_events(user_id: int, today: date, until: date) -> list[tuple[date, str, str, float]]:
-    """Fonte ÚNICA dos compromissos da projeção, `(data, tipo, nome, valor_com_sinal)`,
-    consumida por `project` (soma até a data) e `forecast_with_trajectory` (por dia).
-    Todo filtro mora aqui — filtro fora deste gerador é uma segunda versão da regra.
-
-    - receita fixa ativa, mensal/anual, valor > 0: ocorrências em (today, until], +valor;
-    - gasto fixo ativo, autopay, qualquer frequência, valor > 0: idem, −valor;
-    - boleto pendente com vencimento até `until` (vencidos inclusive), −valor
-      com QUALQUER valor, até 0 ou negativo — regra herdada de `project`;
-    - fatura de cartão com saldo e vencimento até `until` (vencidas inclusive), −saldo.
-    """
-    from db.recurring import list_recurring_expenses
-    from db.recurring_income import list_recurring_incomes
-    from db.bills import list_bills
-
-    events: list[tuple[date, str, str, float]] = []
-    for inc in list_recurring_incomes(user_id):
-        if not inc.get("is_active"):
-            continue
-        if (inc.get("frequency") or "monthly") not in ("monthly", "annual"):
-            # Receita só aceita mensal e anual (INCOME_FREQUENCIES); once/weekly/daily
-            # são registros legados e ficam fora da previsão.
-            continue
-        amount = float(inc.get("amount") or 0)
-        if amount <= 0:
-            continue
-        nome = inc.get("name") or "Receita"
-        for d in _recurring_occurrence_dates(
-            inc.get("pay_day"), inc.get("frequency") or "monthly", inc.get("pay_month"),
-            _as_date(inc.get("start_date")), today, until,
-        ):
-            events.append((d, "receita", nome, amount))
-
-    for e in list_recurring_expenses(user_id):
-        if not e.get("is_active"):
-            continue
-        if (e.get("payment_mode") or "autopay") != "autopay":
-            continue  # 'manual' = boleto; já entra nos boletos pendentes
-        amount = float(e.get("amount") or 0)
-        if amount <= 0:
-            continue
-        nome = e.get("name") or "Gasto fixo"
-        for d in _recurring_occurrence_dates(
-            e.get("due_day"), e.get("frequency") or "monthly", e.get("due_month"),
-            _as_date(e.get("start_date")), today, until,
-        ):
-            events.append((d, "gasto_fixo", nome, -amount))
-
-    for b in list_bills(user_id, include_paid=False, limit=1000):
-        if b.get("status") != "pending":
-            continue
-        d = _as_date(b.get("due_date"))
-        if d and d <= until:
-            events.append((d, "boleto", b.get("name") or "Boleto", -float(b.get("amount") or 0)))
-
-    for fatura in _open_card_bills_detail(user_id, until):
-        events.append((fatura["due_date"], "fatura_cartao", fatura["card_name"] or "Cartão",
-                       -fatura["remaining"]))
-    return events
-
-
-def _starting_balance(user_id: int) -> dict[str, Any]:
-    """Saldo de partida da projeção: consolidado (carteira + bancos autorizados no
-    Open Finance) quando o usuário tem banco conectado e o consolidado está
-    liberado — senão a projeção de quem tem OF partiria só da carteira manual e
-    ficaria errada. Mesmo critério do dashboard/relatórios (get_consolidated_balance
-    + gate beta). Devolve `{"saldo", "balance_source", "of_bank_count",
-    "banks_excluded"}`."""
-    from db.accounts import get_balance
-
-    saldo = float(get_balance(user_id))
-    balance_source = "manual"  # carteira manual; vira "consolidated" se somar OF
-    of_bank_count = 0
-    try:
-        from db import get_consolidated_balance
-        from core.services.plan_service import consolidated_balance_enabled
-        cb = get_consolidated_balance(user_id)
-        of_bank_count = int(cb.get("of_bank_count") or 0)
-        if of_bank_count > 0 and consolidated_balance_enabled(user_id):
-            saldo = float(cb.get("consolidated") or 0)
-            balance_source = "consolidated"
-        else:
-            # Gate desligado congela a ORIGEM (carteira), não autoriza projetar
-            # a partir do cru: `cb["manual"]` é a mesma Carteira que a tela
-            # mostra, com o gasto fundido devolvido.
-            saldo = float(cb.get("manual") or 0)
-    except Exception:
-        # Falha ao consultar o consolidado (OF/gate indisponível): NÃO dá pra
-        # afirmar que a carteira manual é o saldo completo — o usuário pode ter
-        # bancos no Open Finance que não conseguimos ler agora. Marca a origem
-        # como indisponível pra a previsão não devolver um número aparentemente
-        # confiável sem aviso; o dashboard sinaliza a incerteza. Ver banks_excluded.
-        balance_source = "unavailable"
-
-    # Bancos conectados que NÃO entraram no saldo de partida (gate consolidado
-    # desligado): a projeção parte só da carteira e subestima o caixa → o
-    # dashboard mostra um aviso quando isso acontece. Quando o consolidado falha,
-    # balance_source == "unavailable" cobre o aviso (não sabemos of_bank_count).
-    banks_excluded = of_bank_count > 0 and balance_source == "manual"
-
+def _projection(today: date, sb: dict, events: list[Ocorrencia],
+                target_date: date, extra_amount=Decimal(0)) -> dict:
+    """Única soma financeira; valores completos até quantizar o resultado."""
+    extra = validar_extra(extra_amount)
+    values = {t: [] for t in ('receita', 'gasto_fixo', 'boleto', 'fatura_cartao')}
+    for event in events:
+        if event.data is not None and event.data <= target_date and event.incluida:
+            values.setdefault(event.tipo, []).append(event.assinado)
+    saldo = dinheiro(sb['saldo'])
+    sums = {t: somar(vs) for t, vs in values.items()}
+    projected = centavos(somar((saldo, *sums.values(), extra.copy_negate()))) if saldo is not None else None
+    past = target_date < today
+    if past:
+        projected = None
     return {
-        "saldo": saldo,
-        "balance_source": balance_source,
-        "of_bank_count": of_bank_count,
-        "banks_excluded": banks_excluded,
+        'today': today.isoformat(), 'target': target_date.isoformat(),
+        'saldo_atual': centavos(saldo), 'balance_source': sb['balance_source'],
+        'of_bank_count': sb['of_bank_count'], 'banks_excluded': sb['banks_excluded'],
+        'receitas_previstas': centavos(sums['receita']),
+        'gastos_fixos_previstos': centavos(sums['gasto_fixo'].copy_negate()),
+        'boletos_ate': centavos(sums['boleto'].copy_negate()), 'n_boletos': len(values['boleto']),
+        'faturas_cartao': centavos(sums['fatura_cartao'].copy_negate()), 'boleto_novo': centavos(extra),
+        'projetado': projected, 'tranquilo': projected is not None and projected >= 0,
     }
 
 
-def _projection(today: date, sb: dict[str, Any], events: list[tuple[date, str, str, float]],
-                target_date: date, extra_amount: float = 0.0) -> dict[str, Any]:
-    """Projeção até `target_date` sobre saldo e eventos já lidos. Soma só os eventos
-    com data até o alvo, então aceita os eventos de um horizonte maior."""
-    saldo = sb["saldo"]
-    balance_source = sb["balance_source"]
-    of_bank_count = sb["of_bank_count"]
-    banks_excluded = sb["banks_excluded"]
-
-    valores: dict[str, list[float]] = {"receita": [], "gasto_fixo": [], "boleto": [], "fatura_cartao": []}
-    for d, tipo, _nome, valor in events:
-        if d <= target_date:
-            valores[tipo].append(valor)
-
-    # Soma exata (`math.fsum`), arredondada só na saída: não depende da ordem nem do
-    # agrupamento, e é o que faz `forecast_with_trajectory` (que soma os mesmos eventos por
-    # dia) bater no centavo com os horizontes mesmo com fração de centavo do banco.
-    receitas = math.fsum(valores["receita"])
-    gastos_fixos = math.fsum(-v for v in valores["gasto_fixo"])
-    boletos = math.fsum(-v for v in valores["boleto"])
-    n_boletos = len(valores["boleto"])
-    faturas_cartao = math.fsum(-v for v in valores["fatura_cartao"])
-
-    extra = float(extra_amount or 0)
-    # `tranquilo` decide pelo valor em centavos, o mesmo que a resposta mostra: R$ 0,30 −
-    # 0,10 − 0,20 soma −2,8e-17 em float e é R$ 0,00. `+ 0.0` troca o −0,0 do
-    # arredondamento por 0,0, que é o que vai no JSON (tool de IA, dashboard).
-    projetado = round(math.fsum([saldo, *(v for vs in valores.values() for v in vs), -extra]), 2) + 0.0
-    return {
-        "today": today.isoformat(),
-        "target": target_date.isoformat(),
-        "saldo_atual": round(saldo, 2),
-        "balance_source": balance_source,
-        "of_bank_count": of_bank_count,
-        "banks_excluded": banks_excluded,
-        "receitas_previstas": round(receitas, 2),
-        "gastos_fixos_previstos": round(gastos_fixos, 2),
-        "boletos_ate": round(boletos, 2),
-        "n_boletos": n_boletos,
-        "faturas_cartao": round(faturas_cartao, 2),
-        "boleto_novo": round(extra, 2),
-        "projetado": projetado,
-        "tranquilo": projetado >= 0,
-    }
+def _risco(snapshot: Snapshot, target: date, extra=Decimal(0)) -> str:
+    """Aplica direções ao mesmo cálculo: risco precisa sobreviver às dúvidas."""
+    if snapshot.base['saldo'] is None or target < snapshot.hoje:
+        return 'abster'
+    if any(m.direcao_do_erro == 'ambos' or
+           m.direcao_do_erro == 'so_piora' and m.efeito_quantificado is None
+           for m in snapshot.motivos):
+        return 'abster'
+    base = dict(snapshot.base)
+    # Só ajustes da BASE, não ocorrências (saídas duvidosas saem abaixo).
+    base['saldo'] = somar((base['saldo'], *(max(m.efeito_quantificado, Decimal(0))
+                         for m in snapshot.motivos
+                         if m.codigo in ('conciliacao_a_conferir', 'declaracao_bancaria_a_conferir')
+                         and m.efeito_quantificado is not None)))
+    events = [e for e in snapshot.ocorrencias if not (e.direcao == 'saida'
+              and (e.realizacao == 'a_conferir' or
+                   any(m.direcao_do_erro in ('so_piora', 'ambos') for m in e.motivos)))]
+    projected = _projection(snapshot.hoje, base, events, target, extra)['projetado']
+    return 'risco' if projected is not None and projected < 0 else 'abster'
 
 
-def project(user_id: int, target_date: date, extra_amount: float = 0.0) -> dict[str, Any]:
-    """Projeção de caixa até `target_date`, opcionalmente considerando um boleto
-    novo de `extra_amount`. Ver docstring do módulo."""
+def project(user_id: int, target_date: date, extra_amount=0, *, percurso=False) -> dict:
     today = date.today()
-    sb = _starting_balance(user_id)
-    return _projection(today, sb, _cashflow_events(user_id, today, target_date), target_date, extra_amount)
+    extra = validar_extra(extra_amount)
+    snapshot = carregar(user_id, today, max(today, target_date))
+    result = {**_projection(today, snapshot.base, snapshot.ocorrencias, target_date, extra),
+              **snapshot.qualidade(), 'orientacao': _risco(snapshot, target_date, extra)}
+    if target_date < today:
+        result.update(estado='indisponivel', motivos=[*result['motivos'],
+                      {'codigo': 'previsao_historica_indisponivel', 'direcao_do_erro': 'ambos'}])
+    if percurso:
+        from core.services.cashflow_forecast import _trajectory
+        trajectory = _trajectory(today, snapshot.base, snapshot.ocorrencias,
+                                 max(0, (target_date - today).days), Decimal(0))
+        wd = trajectory['worst_day']
+        initial = _projection(today, snapshot.base, snapshot.ocorrencias, today)['projetado']
+        vals = [v for v in (initial, wd['saldo_projetado'] if wd else None,
+                           result['projetado']) if v is not None]
+        result['minimo_percurso'] = min(vals) if vals else None
+    return legado(result)
 
 
-__all__ = ["project"]
+__all__ = ['project']

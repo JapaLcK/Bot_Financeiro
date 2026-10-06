@@ -28,13 +28,9 @@ from .users import ensure_user
 INCOME_FREQUENCIES = ("monthly", "annual")
 
 
-def list_recurring_incomes(user_id: int, include_inactive: bool = False) -> list[dict[str, Any]]:
-    """Lista todas as receitas recorrentes do user."""
-    ensure_user(user_id)
-    with get_conn() as conn:
-        with conn.cursor() as cur:
-            cur.execute(
-                """
+def ler_receitas(cur, user_id: int, include_inactive: bool = False) -> list[dict]:
+    """Leitor puro por cursor, preservando Decimal e campos desconhecidos."""
+    cur.execute("""
                 select r.id, r.name, r.amount, r.category, r.pay_day,
                        r.is_primary, r.is_active,
                        r.last_amount, r.last_amount_changed_at,
@@ -44,10 +40,15 @@ def list_recurring_incomes(user_id: int, include_inactive: bool = False) -> list
                 where r.user_id = %s
                   and (%s::boolean = true or r.is_active = true)
                 order by r.is_primary desc, r.pay_day asc, lower(r.name) asc
-                """,
-                (user_id, include_inactive),
-            )
-            rows = cur.fetchall() or []
+                """, (user_id, include_inactive))
+    return [dict(r) for r in cur.fetchall()]
+
+
+def list_recurring_incomes(user_id: int, include_inactive: bool = False) -> list[dict[str, Any]]:
+    """Lista todas as receitas recorrentes do user."""
+    ensure_user(user_id)
+    with get_conn() as conn, conn.cursor() as cur:
+        rows = ler_receitas(cur, user_id, include_inactive)
     return [_row_to_dict(r) for r in rows]
 
 

@@ -17,6 +17,22 @@ from .accounts import add_launch_and_update_balance
 # Helpers de data/período
 # ──────────────────────────────────────────────────────────────────────────────
 
+def calendario_fatura(fatura):
+    """Data OF só vale para o ciclo correspondente; demais datas são presumidas."""
+    raw = fatura.get('account_raw')
+    credit = raw.get('creditData') if isinstance(raw, dict) else None
+    credit = credit if isinstance(credit, dict) else {}
+    def parsed(value):
+        try:
+            return date.fromisoformat(str(value)[:10])
+        except (ValueError, TypeError):
+            return None
+    close, due = parsed(credit.get('balanceCloseDate')), parsed(credit.get('balanceDueDate'))
+    if close == fatura['period_end'] and due is not None:
+        return due, 'conhecida'
+    return card_bill_due_date(fatura['period_end'], fatura['closing_day'], fatura['due_day']), 'presumida'
+
+
 def _safe_date(y: int, m: int, d: int) -> date:
     last = calendar.monthrange(y, m)[1]
     return date(y, m, min(d, last))
@@ -2411,3 +2427,20 @@ def get_installment_group_summaries(user_id: int, group_ids: list) -> dict:
         }
         for r in rows
     }
+
+
+def ler_faturas(cur, user_id: int) -> list[dict]:
+    """Faturas observadas sem reabertura/rebuild; uma fonte para previsão e IA."""
+    cur.execute("""select b.*, c.name as card_name, c.closing_day, c.due_day,
+               c.open_finance_account_id, a.currency, a.raw as account_raw,
+               oc.status as connection_status, oc.last_sync_at,
+               exists(select 1 from credit_transactions t
+                       where t.user_id=b.user_id and t.bill_id=b.id
+                         and t.source='open_finance' and t.installments_total>1) as parcelas_of
+        from credit_bills b
+        join credit_cards c on c.id=b.card_id and c.user_id=b.user_id
+        left join open_finance_accounts a on a.id=c.open_finance_account_id
+        left join open_finance_connections oc on oc.id=a.connection_id and oc.user_id=b.user_id
+        where b.user_id=%s and (c.open_finance_account_id is null or oc.user_id=b.user_id)
+        order by b.period_end,b.id""", (user_id,))
+    return [dict(r) for r in cur.fetchall()]

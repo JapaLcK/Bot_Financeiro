@@ -16,6 +16,7 @@ Fluxo:
 from __future__ import annotations
 
 import logging
+import re
 import traceback
 
 import db
@@ -58,6 +59,33 @@ _HELP_FALLBACK_MARKERS: tuple[str, ...] = (
 # `tests/test_pending_registry.py` reprova qualquer tipo que o código grave sem
 # estar nela.
 from db import sobrevive_a_audio, suprime_fallback_de_ia
+
+
+def _previsao_somente_leitura(uid: int, text: str) -> str | None:
+    """Consulta explícita de previsão antecede resolvers que abandonam perguntas."""
+    from utils_text import normalize_text
+    norm = normalize_text(text)
+    if not (re.search(r'\bprevisao\b', norm) and re.search(r'\b(saldo|caixa|dias|dia)\b', norm)
+            or re.search(r'\b(saldo|caixa)\b.*\bdaqui\b.*\bdias?\b', norm)
+            or re.search(r'\b(tranquilo|prazo)\b.*\b(ate|dia|daqui)\b', norm)):
+        return None
+    from core.services.ai_chat.tools.bills import _forecast_balance, _check_cashflow
+    days = re.search(r'\b(?:daqui|em)\s+(\d+)\s+dias?\b', norm)
+    target = re.search(r'\b(\d{4}-\d{2}-\d{2}|\d{1,2}/\d{1,2}(?:/\d{4})?)\b', text)
+    if 'boleto' in norm or 'compr' in norm:
+        return 'Para analisar um boleto ou compra, informe os dados em uma consulta própria. Sua pergunta pendente foi preservada.'
+    args = {'days': int(days.group(1))} if days else {'date': target.group(1)} if target else {}
+    result = _check_cashflow(uid, args) if args else _forecast_balance(uid, {})
+    if result.get('error'):
+        return result.get('message') or result['error']
+    if result.get('estado') == 'indisponivel':
+        return 'A previsão está indisponível para essa data ou base. Consulte uma data atual/futura e confira os dados.'
+    if 'horizons' in result:
+        values = ' · '.join(f"{n} dias: {fmt_brl(p['projetado'])}" for n, p in result['horizons'].items()
+                            if p['projetado'] is not None)
+    else:
+        values = f"{result['target']}: {fmt_brl(result['projetado'])}"
+    return f'🐷 Saldo previsto condicional — {values}. Há dados ou compromissos a conferir; isso não autoriza uma compra.'
 
 
 def _looks_like_help_fallback(response: str | None) -> bool:
@@ -988,6 +1016,11 @@ def handle_incoming(msg: IncomingMessage, *,
         if not text:
             pergunta_no_turno.set(MANTEM)
             return []
+
+        forecast_reply = _previsao_somente_leitura(uid, text)
+        if forecast_reply is not None:
+            pergunta_no_turno.set(MANTEM)
+            return [OutgoingMessage(text=format_for_platform(forecast_reply, platform))]
 
         if platform == "whatsapp":
             open_finance_reply = handle_open_finance_whatsapp_command(uid, text)

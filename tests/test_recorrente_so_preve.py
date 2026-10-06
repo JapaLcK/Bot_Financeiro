@@ -175,7 +175,9 @@ def test_tick_grava_o_aviso_do_autopay_que_vence_hoje_sem_lancar(user_id, monkey
 
     assert _avisos(user_id) == [(99.9, hoje.strftime("%Y-%m"), None, None)]
     assert _estado(user_id, "recurring_charges") == antes
-    assert forecast_with_trajectory(user_id, 90) == prev_antes
+    depois = forecast_with_trajectory(user_id, 90)
+    assert depois.pop("calculado_em") >= prev_antes.pop("calculado_em")
+    assert depois == prev_antes
 
 
 def _cria(uid, freq, start, due_day=1, due_month=None, payment_type="account", card_id=None):

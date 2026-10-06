@@ -17,6 +17,8 @@ from __future__ import annotations
 from datetime import datetime, timezone
 from decimal import Decimal
 
+from core.services.cashflow_contract import somar
+
 from .open_finance import PENDING_RECONCILIATION_SQL, actionable_pending_params, merged_wallet_delta
 from .open_finance_state import _TERMINAL
 from .patrimonio import (BANCO_VELHO, CONTAS_BANCO_SQL, desatualizada, finito, fora_do_sync,
@@ -32,30 +34,31 @@ def _sim(pares) -> list[str]:
     return [m for m, sim in pares if sim]
 
 
-def listar(cur, user_id: int) -> dict:
+def listar(cur, user_id: int, *, agora: datetime | None = None) -> dict:
     from .bank_movements import _declarations
+    from .carteira_qualidade import nao_confirmada
     from .open_finance_cash import enabled as especie_ligada
 
     cur.execute("select balance from accounts where user_id=%s", (user_id,))
     row = cur.fetchone()
-    carteira = (row["balance"] if row else Decimal(0)) + merged_wallet_delta(cur, user_id)
+    carteira = somar((row["balance"] if row else Decimal(0), merged_wallet_delta(cur, user_id)))
 
     conexoes, estados = ler_conexoes(cur, user_id)
     por_id = {c["id"]: c for c in conexoes}
     vivas = [c for c in conexoes if (c["status"] or "").upper() not in _TERMINAL]
-    limite = datetime.now(timezone.utc) - BANCO_VELHO
+    limite = (agora if agora is not None else datetime.now(timezone.utc)) - BANCO_VELHO
     ultima = ultima_geracao(cur, user_id, "open_finance_accounts")
     cur.execute(PENDING_RECONCILIATION_SQL, actionable_pending_params(cur, user_id))
     conciliacao = cur.fetchone()["pending_count"]
     motivos_carteira = _sim((
-        ("carteira_nao_confirmada", True),  # até existir a confirmação da Q37
+        ("carteira_nao_confirmada", nao_confirmada(cur, user_id, row["balance"] if row else None)),
         ("conciliacao_pendente", conciliacao > 0),
         ("movimentos_pendentes", any(not d["matched_transaction_id"]
                                      for d in _declarations(cur, user_id))),
         ("especie_incompleta", not especie_ligada() and bool(vivas)),
     ))
 
-    total, contas = carteira, []
+    saldos, contas = [carteira], []
     cur.execute(CONTAS_BANCO_SQL, (user_id,))
     for r in cur.fetchall():
         c = por_id[r["connection_id"]]
@@ -75,12 +78,12 @@ def listar(cur, user_id: int) -> dict:
                              ("outra_moeda", not em_reais),
                          )))
             if em_reais and finito(r["balance"]):
-                total += r["balance"]
+                saldos.append(r["balance"])
         contas.append(conta)
 
     vistos = set(motivos_carteira).union(*(c["motivos"] for c in contas))
     return {
-        "total": total,
+        "total": somar(saldos),
         "motivos": [m for m in MOTIVOS_CARTEIRA + MOTIVOS_CONTA if m in vistos],
         "fora_do_total": sum(not c["no_total"] for c in contas),
         "carteira": {"saldo": carteira, "motivos": motivos_carteira},

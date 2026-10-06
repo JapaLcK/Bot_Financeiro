@@ -6,16 +6,17 @@ Saldo e eventos vêm de `core/services/cashflow.py`, lidos uma vez por resposta.
 """
 from __future__ import annotations
 
-import math
+from decimal import Decimal
 from datetime import date, timedelta
 from typing import Any
 
 from core.services import cashflow
+from core.services.cashflow_snapshot import carregar, centavos, dinheiro, legado, somar, Ocorrencia
 
 HORIZONS = (30, 60, 90)
 
 
-def _horizons(today: date, sb: dict[str, Any], events: list[tuple[date, str, str, float]],
+def _horizons(today: date, sb: dict[str, Any], events: list[Ocorrencia],
               horizons: tuple[int, ...]) -> dict[str, Any]:
     hz = {str(n): cashflow._projection(today, sb, events, today + timedelta(days=n)) for n in horizons}
     # A origem do saldo é a mesma em todos os horizontes; sobe pro topo pra o
@@ -40,34 +41,42 @@ def forecast_horizons(user_id: int, horizons: tuple[int, ...] = HORIZONS) -> dic
     a mesma semântica de `project` (saldo + receitas fixas − gastos fixos −
     boletos até a data); ver docstring de `core/services/cashflow.py`."""
     today = date.today()
-    sb = cashflow._starting_balance(user_id)
-    events = cashflow._cashflow_events(user_id, today, today + timedelta(days=max(horizons, default=0)))
-    return _horizons(today, sb, events, horizons)
+    snapshot = carregar(user_id, today, today + timedelta(days=max(horizons, default=0)))
+    return legado({**_horizons(today, snapshot.base, snapshot.ocorrencias, horizons),
+                   **snapshot.qualidade()})
 
 
-def _trajectory(today: date, sb: dict[str, Any], events: list[tuple[date, str, str, float]],
+def _trajectory(today: date, sb: dict[str, Any], events: list[Ocorrencia],
                 days: int, threshold: float) -> dict[str, Any]:
     """Parte pura de `forecast_with_trajectory`: trajetória dia a dia, pior dia,
     vencidos e vencem hoje sobre saldo e eventos já lidos. Aceita tipo de evento
     que `_projection` não conhece (o simulador de decisão acrescenta os dele)."""
     days = max(0, int(days))
     horizon_end = today + timedelta(days=days)
-    threshold = round(float(threshold), 2)
+    threshold = centavos(threshold)
+    if threshold is None:
+        raise ValueError("limite deve ser um número finito")
     # Parcelas do saldo até o dia corrente; o saldo do dia é a soma exata delas,
     # a mesma conta de `project`.
-    parcelas = [sb["saldo"]]
+    parcelas = [dinheiro(sb["saldo"])]
+    available = parcelas[0] is not None
+    if not available:
+        parcelas = []
     vencidos: list[dict] = []
     vencem_hoje: list[dict] = []
     eventos_por_dia: dict[date, list[dict]] = {}
-    valores_por_dia: dict[date, list[float]] = {}
-    for d, tipo, nome, valor in events:
-        # `valor` exposto é o cadastrado; a direção vem do `tipo` (só receita entra).
-        compromisso = {"tipo": tipo, "nome": nome, "valor": round(valor if tipo == "receita" else -valor, 2)}
+    valores_por_dia: dict[date, list[Decimal]] = {}
+    for event in events:
+        d = event.data
+        compromisso = event.detalhe()
+        if d is None or d > horizon_end or not event.incluida:
+            continue
+        valor = event.assinado
         if d <= today:
             # Boleto/fatura já vencido (ou vencendo hoje): `project()` o soma em
             # qualquer horizonte, então ele pesa no saldo de partida — e é listado
             # em `vencidos` (ou `vencem_hoje`) pra não sumir da resposta. Recorrente
-            # nunca cai aqui (`_recurring_occurrence_dates` exige `after < d`).
+            # de hoje também pode cair aqui, sob hipótese de não realização.
             parcelas.append(valor)
             (vencidos if d < today else vencem_hoje).append({"date": d.isoformat(), **compromisso})
             continue
@@ -75,7 +84,7 @@ def _trajectory(today: date, sb: dict[str, Any], events: list[tuple[date, str, s
         valores_por_dia.setdefault(d, []).append(valor)
     vencidos.sort(key=lambda v: v["date"])  # mais antigo primeiro; estável no empate
 
-    saldo_projetado = round(math.fsum(parcelas), 2)
+    saldo_projetado = centavos(somar(parcelas)) if available else None
     saldos = [saldo_projetado]  # posição N = saldo no fim do dia N; 0 = partida
     worst: dict[str, Any] | None = None
     worst_i = 0
@@ -84,16 +93,16 @@ def _trajectory(today: date, sb: dict[str, Any], events: list[tuple[date, str, s
         d = today + timedelta(days=i)
         if d in valores_por_dia:  # dia sem evento repete o saldo, sem refazer a soma
             parcelas.extend(valores_por_dia[d])
-            saldo_projetado = round(math.fsum(parcelas), 2)
+            saldo_projetado = centavos(somar(parcelas)) if available else None
         item = {
             "date": d.isoformat(),
             "saldo_projetado": saldo_projetado,
-            "abaixo_do_limite": saldo_projetado < threshold,
+            "abaixo_do_limite": saldo_projetado is not None and saldo_projetado < threshold,
             "compromissos": eventos_por_dia.get(d, []),
         }
         trajectory.append(item)
         saldos.append(saldo_projetado)
-        if worst is None or saldo_projetado < worst["saldo_projetado"]:
+        if saldo_projetado is not None and (worst is None or saldo_projetado < worst["saldo_projetado"]):
             worst, worst_i = item, i
 
     worst_day = None
@@ -136,22 +145,18 @@ def forecast_with_trajectory(user_id: int, days: int = 90, threshold: float = 0.
     """Trajetória diária de saldo projetado (default 90 dias) e o "pior dia" no
     caminho, com os compromissos que levaram até ele, mais os horizontes de
     `forecast_horizons` — tudo da mesma leitura. Mesmos eventos de `project`
-    (`_cashflow_events`), distribuídos dia a dia em vez de somados no horizonte —
+    (snapshot), distribuídos dia a dia em vez de somados no horizonte —
     pensada pra achar aperto de saldo que os marcos não mostram. Feature Pro+."""
     today = date.today()
-    sb = cashflow._starting_balance(user_id)
-    events = cashflow._cashflow_events(user_id, today, today + timedelta(days=max(int(days), *HORIZONS)))
-    return {
-        **_horizons(today, sb, events, HORIZONS),
-        **_trajectory(today, sb, events, days, threshold),
-        "premises": (
-            "Estimativa dia a dia: saldo + receitas fixas (mensais e anuais) − gastos fixos "
-            "automáticos (mensais, anuais, semanais, diários e únicos, na data de cada "
-            "ocorrência) − boletos pendentes − faturas de cartão em aberto. Boletos e faturas "
-            "já vencidos ou que vencem hoje entram no saldo de partida e são listados à parte. "
-            "Não inclui gastos avulsos futuros."
-        ),
-    }
+    snapshot = carregar(user_id, today, today + timedelta(days=max(int(days), *HORIZONS)))
+    return legado({
+        **_horizons(today, snapshot.base, snapshot.ocorrencias, HORIZONS),
+        **_trajectory(today, snapshot.base, snapshot.ocorrencias, days, threshold),
+        **snapshot.qualidade(),
+        'compromissos': [e.detalhe() for e in snapshot.ocorrencias],
+        'premises': 'Projeção condicional das obrigações conhecidas; valores ou realizações desconhecidos permanecem a conferir. Não inclui estimativa variável.',
+    })
+
 
 
 __all__ = ["forecast_horizons", "forecast_with_trajectory"]

@@ -10,31 +10,13 @@ from _cashflow_helpers import _mock_sources
 
 
 def test_project_marca_unavailable_quando_consolidado_falha(monkeypatch):
-    # P1: se a consulta ao saldo consolidado (OF/gate) falha, NÃO dá pra afirmar
-    # que a carteira manual é o saldo completo. A projeção não pode devolver um
-    # número aparentemente confiável sem aviso — marca balance_source
-    # "unavailable" pro dashboard sinalizar a incerteza.
+    # Falha estrutural não produz fallback financeiro com outro conjunto de fontes.
     import core.services.cashflow as cf
-    import db, db.accounts, db.recurring, db.recurring_income, db.bills
-
-    monkeypatch.setattr(db.accounts, "get_balance", lambda uid: 100.0)
-    monkeypatch.setattr(db.recurring, "list_recurring_expenses", lambda uid: [])
-    monkeypatch.setattr(db.recurring_income, "list_recurring_incomes", lambda uid: [])
-    monkeypatch.setattr(db.bills, "list_bills",
-                        lambda uid, include_paid=False, limit=1000: [])
-    monkeypatch.setattr(cf, "_open_card_bills_detail", lambda uid, until: [])
-
-    def boom(uid):
-        raise RuntimeError("Open Finance indisponível")
-    monkeypatch.setattr(db, "get_consolidated_balance", boom, raising=False)
-
-    out = cf.project(1, date.today() + timedelta(days=30))
-
-    assert out["balance_source"] == "unavailable"
-    # sem of_bank_count confiável, banks_excluded não dispara — o aviso vem da
-    # origem "unavailable"; o saldo de partida segue a carteira manual.
-    assert out["banks_excluded"] is False
-    assert out["saldo_atual"] == 100.0
+    def boom(*args):
+        raise RuntimeError("fonte indisponível")
+    monkeypatch.setattr(cf, "carregar", boom)
+    with pytest.raises(RuntimeError, match="fonte indisponível"):
+        cf.project(1, date.today() + timedelta(days=30))
 
 
 def test_card_bill_due_date_canonica_rollover_clamp_e_mesmo_dia():
@@ -119,22 +101,15 @@ def test_previsao_e_contas_a_pagar_concordam_na_proxima_ocorrencia(freq):
 
 
 def test_cashflow_events_recorrente_nao_positivo_nao_gera_evento_boleto_gera(monkeypatch):
-    # Regra herdada de `project`: receita/gasto fixo com valor <= 0 não entra;
-    # boleto pendente entra com qualquer valor (0 e negativo inclusive).
-    cf = _mock_sources(
-        monkeypatch,
-        incomes=[{"is_active": True, "pay_day": 15, "frequency": "monthly", "amount": 0.0, "name": "R0"},
-                 {"is_active": True, "pay_day": 15, "frequency": "monthly", "amount": -50.0, "name": "Rneg"}],
-        expenses=[{"is_active": True, "payment_mode": "autopay", "frequency": "monthly",
-                   "due_day": 15, "amount": 0.0, "name": "G0"}],
-        bills=[{"status": "pending", "due_date": date(2026, 2, 1), "amount": 0.0, "name": "B0"},
-               {"status": "pending", "due_date": date(2026, 2, 2), "amount": -10.0, "name": "Bneg"}],
-    )
-    events = cf._cashflow_events(1, date(2026, 1, 1), date(2026, 3, 31))
-    assert [(d, tipo, nome, valor) for d, tipo, nome, valor in events] == [
-        (date(2026, 2, 1), "boleto", "B0", -0.0),
-        (date(2026, 2, 2), "boleto", "Bneg", 10.0),
-    ]
+    cf = _mock_sources(monkeypatch,
+        incomes=[{"is_active": True, "pay_day": 15, "frequency": "monthly", "amount": 0, "name": "R0"},
+                 {"is_active": True, "pay_day": 15, "frequency": "monthly", "amount": -50, "name": "Rneg"}],
+        expenses=[{"is_active": True, "frequency": "monthly", "due_day": 15, "amount": 0, "name": "G0"}],
+        bills=[{"status": "pending", "due_date": date(2026, 2, 1), "amount": 0, "name": "B0"},
+               {"status": "pending", "due_date": date(2026, 2, 2), "amount": -10, "name": "Bneg"}])
+    s = cf.carregar(1, date(2026, 1, 1), date(2026, 3, 31))
+    assert s.ocorrencias and all(e.valor is None and e.assinado == 0 for e in s.ocorrencias)
+    assert {m.codigo for m in s.motivos} >= {"valor_recorrente_desconhecido", "valor_boleto_desconhecido"}
 
 
 def test_project_n_boletos_conta_todo_pendente_ate_a_data(monkeypatch):
@@ -155,8 +130,9 @@ def test_project_n_boletos_conta_todo_pendente_ate_a_data(monkeypatch):
     ])
     out = cf.project(1, alvo)
 
-    assert out["n_boletos"] == 5
-    assert out["boletos_ate"] == 130.0
+    assert out["n_boletos"] == 6
+    assert out["boletos_ate"] == 210.0
+    assert "valor_boleto_desconhecido" in {m["codigo"] for m in out["motivos"]}
 
 
 def test_project_soma_as_ocorrencias_da_fonte_de_eventos(monkeypatch):
@@ -183,10 +159,10 @@ def test_open_card_bills_detail_inclui_card_name(user_id):
     db.add_credit_purchase(user_id, card_id, 250.0, "outros", "compra", date.today())
 
     until = date.today() + timedelta(days=90)
-    detail = cf._open_card_bills_detail(user_id, until)
+    detail = [e for e in cf.carregar(user_id, date.today(), until).ocorrencias if e.fonte == "fatura"]
     assert len(detail) == 1
-    assert detail[0]["card_name"] == "Nubank"
-    assert detail[0]["remaining"] == 250.0
+    assert detail[0].nome == "Nubank"
+    assert detail[0].valor == 250.0
 
 
 def test_eventos_do_maior_horizonte_filtrados_sao_os_de_cada_alvo(monkeypatch):
@@ -214,15 +190,19 @@ def test_eventos_do_maior_horizonte_filtrados_sao_os_de_cada_alvo(monkeypatch):
                {"status": "pending", "due_date": None, "amount": 80.0, "name": "Sem data"}],
         card_bills=[{"due_date": d(n), "remaining": 50.0 + n, "card_name": f"F{n}"} for n in (-1, 0, 20, 95)],
     )
-    events90 = cf._cashflow_events(1, today, d(90))
+    snapshot90 = cf.carregar(1, today, d(90))
+    events90 = snapshot90.ocorrencias
     # Controle positivo: sem os 4 tipos no conjunto maior, a igualdade abaixo passaria no vazio.
-    assert {tipo for _d, tipo, _nome, _valor in events90} == {"receita", "gasto_fixo", "boleto", "fatura_cartao"}
-    assert {"Gasto semanal", "Gasto diário", "Gasto único"} <= {nome for _d, _t, nome, _v in events90}
+    assert {e.tipo for e in events90} == {"receita", "gasto_fixo", "boleto", "fatura_cartao"}
+    assert {"Gasto semanal", "Gasto diário", "Gasto único"} <= {e.nome for e in events90}
 
-    sb = cf._starting_balance(1)
-    for n in range(-5, 91):
-        assert [e for e in events90 if e[0] <= d(n)] == cf._cashflow_events(1, today, d(n)), n
-        assert cf._projection(today, sb, events90, d(n)) == cf.project(1, d(n)), n
+    from core.services.cashflow_snapshot import legado
+    for n in range(91):
+        shorter = cf.carregar(1, today, d(n))
+        assert [e for e in events90 if e.data is None or e.data <= d(n)] == shorter.ocorrencias, n
+        numerical = legado(cf._projection(today, snapshot90.base, events90, d(n)))
+        out = cf.project(1, d(n))
+        assert all(out[k] == v for k, v in numerical.items()), n
 
 
 def test_project_boleto_novo_sai_do_projetado_alem_de_90_dias(monkeypatch):

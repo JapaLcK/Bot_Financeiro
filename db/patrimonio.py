@@ -19,6 +19,8 @@ from decimal import Decimal
 import psycopg
 from psycopg.types.json import Jsonb
 
+from core.services.cashflow_contract import somar
+
 from .connection import get_conn
 from .open_finance import (PENDING_RECONCILIATION_SQL, actionable_pending_params,
                            merged_wallet_delta)
@@ -135,11 +137,12 @@ def fora_do_sync(p, ultima: dict) -> bool:
 
 def calcular(cur, user_id: int) -> dict:
     from .bank_movements import _declarations
+    from .carteira_qualidade import nao_confirmada
     from .open_finance_cash import enabled as especie_ligada
 
     cur.execute("select balance from accounts where user_id=%s", (user_id,))
     row = cur.fetchone()
-    carteira = (row["balance"] if row else Decimal(0)) + merged_wallet_delta(cur, user_id)
+    carteira = somar((row["balance"] if row else Decimal(0), merged_wallet_delta(cur, user_id)))
 
     cur.execute(POSICOES_BANCO_SQL, (user_id,))
     fora = {"moeda": 0, "resgatada": 0, "pausada": 0}
@@ -191,7 +194,7 @@ def calcular(cur, user_id: int) -> dict:
     conciliacao = cur.fetchone()["pending_count"]
 
     motivos = [m for m, sim in (
-        ("carteira_nao_confirmada", True),  # até existir a confirmação da Q37
+        ("carteira_nao_confirmada", nao_confirmada(cur, user_id, row["balance"] if row else None)),
         ("especie_incompleta", not especie_ligada() and bool(vivas)),
         ("banco_desatualizado",
          any(desatualizada(c, estados[str(c["id"])], limite) for c in vivas)),
@@ -209,14 +212,14 @@ def calcular(cur, user_id: int) -> dict:
 
     partes = {
         "carteira": carteira,
-        "bancos": sum((r["balance"] for r in contas if finito(r["balance"])), Decimal(0)),
+        "bancos": somar(r["balance"] for r in contas if finito(r["balance"])),
         "investimentos_banco": sum((p["balance"] for p in posicoes if finito(p["balance"])),
                                    Decimal(0)),
         "caixinhas": caixinhas["s"],
         "investimentos_manuais": manuais["s"],
     }
     return {
-        "total": sum(partes.values(), Decimal(0)),
+        "total": somar(partes.values()),
         **partes,
         "base": {
             "v": 1,

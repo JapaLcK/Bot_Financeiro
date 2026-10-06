@@ -53,6 +53,16 @@ em lugar nenhum).
   com convite para conectar o banco. Na primeira vez no v2, o usuário confirma quanto da
   carteira é dinheiro vivo e revisa o que o sistema lançou sozinho no passado, para o
   antigo não contar duas vezes com o que vem do banco.
+  **Revisão do dono (2026-10-05), vigente para a coorte de lançamento:** quem terá acesso
+  ao dashboard v2 é novo, nunca usou/conectou o PigBank e não tem histórico para revisar.
+  Nessa coorte, Q37 não terá etapa, diálogo de confirmação nem gate antes da Previsão;
+  carteira nova parte de zero (padrão existente), com movimentos em dinheiro normalmente.
+  Isso substitui nesse escopo a decisão de 03/10 registrada no §8. Se houver problema,
+  a recuperação definida é Recomeçar do zero voluntário → reconectar banco → novo sync.
+  Não é reset automático, autorização para apagar usuários ou presunção de que dados
+  antigos fora dessa coorte devem ser zerados. A allowlist atual não comprova ausência de
+  histórico; o ajuste técnico do motivo hardcoded da carteira será tratado na regra
+  compartilhada da Etapa 3, preservando outras fontes de incerteza.
 - **Q38 — a caixinha manual continua**, com depositar e retirar: é dinheiro que o usuário
   separou. A caixinha do banco vem do Open Finance.
 - **Q39 — os defeitos de dinheiro do código atual achados na revisão deste plano são
@@ -125,6 +135,12 @@ que não se sabe aparece como "sem comparação", "a conferir", "desatualizado" 
   (Q37) e a transferência em espécie (Q41) funcionando com o ciclo de vida inteiro. Antes
   disso — inclusive para quem ainda não abriu o v2 — a foto é gravada, mas marcada como
   incerta; o histórico enche desde a etapa 0 sem afirmar nada que depois não se sustente.
+  **Revisão de 2026-10-05 para a coorte nova acima:** confirmação Q37 deixa de ser requisito
+  de exatidão por si só; carteira inicial zero e os movimentos registrados seguem a regra
+  normal. A flag `carteira_nao_confirmada=True` ainda existe no código e precisa ser
+  alinhada nesse escopo, com a mesma regra para contas/foto/previsão. Q41, frescor, moeda,
+  conciliação, pendências e completude continuam determinando a confiabilidade da foto;
+  não tornar usuários antigos ou outras fontes incertas exatos pela nova decisão.
 - **Rendimento × CDI** (Q35): por investimento, sem número da carteira somada. A fonte
   prevista era a rentabilidade que o banco informa pelo Open Finance, e **ela não chega
   hoje** (medição de 2026-09-29, abaixo, §7). O que já se grava a cada sincronização é a
@@ -305,7 +321,9 @@ PR de cada etapa, não soluções prontas. Cada PR confere se ainda valem, decid
 - Etapa 6: variação do período só dentro de um trecho sem quebra.
 - A tela da confirmação da carteira e da revisão dos lançamentos antigos (Q37): em que
   etapa entra e o que derruba a confirmação. O estado "não confirmado" existe desde a
-  etapa 0 (seção 4).
+  etapa 0 (seção 4). **Questão superada para a coorte nova pelo dono em 2026-10-05:**
+  não haverá essa tela/etapa nem gate para Previsão; permanece apenas o ajuste coerente da
+  flag da carteira no escopo previsto, sem apagar outros motivos ou dados antigos.
 
 **Convivência com o painel antigo (desde a etapa 0)**
 - Quem usa o v2 ainda alcança o painel antigo (links nos dois sentidos, e o app atual fica
@@ -503,6 +521,12 @@ PR de cada etapa, não soluções prontas. Cada PR confere se ainda valem, decid
   da compra; **P7** busca varre a janela inteira do plano; **P8** interno (saque em
   dinheiro, depósito em caixinha, pagamento de fatura) entra marcado, fora de todo total.
   (P4 não foi passado ao PR 1.)
+  **Revisão de P1 pelo dono (2026-10-05):** para a coorte nova do dashboard v2, sem
+  uso/conexão anterior no PigBank, Q37 deixa de ser etapa própria ou gate para a Etapa 3.
+  O registro de 03/10 acima é histórico, superado nesse escopo; P2 e demais decisões
+  continuam. Carteira inicial zero e movimentos manuais em dinheiro seguem normalmente.
+  Problema eventual usa Recomeçar do zero voluntário, reconexão do banco e novo sync;
+  não houve reset por esta decisão nem autorização para limpeza automática/usuários antigos.
   - PR 1: `GET /api/v2/lancamentos` (`db/lancamentos.py`) e `GET /api/v2/categorias`, só
     leitura (contrato em `docs/CLAUDE.md`, "API v2"). O mês sai das pernas de `TOTAIS_SQL`
     extraídas para `MES_LANCAMENTOS_SQL`/`MES_CARTAO_SQL` (o Resumo não mudou um número): a
@@ -636,5 +660,24 @@ PR de cada etapa, não soluções prontas. Cada PR confere se ainda valem, decid
     e aportes ausentes na API), filtro de cartão individual sem catálogo, busca real em
     Cmd-K, backend/schema e service worker. Validação local usa fixtures e
     bundle servido; não prova backend vivo, produção, PWA/aparelho ou callback Pluggy.
+- Etapa 3 — execução autorizada em 05/10/2026; PR1 motor concluído localmente em
+  06/10, com commit/push/PR autorizados pelo dono. Merge somente após nova
+  autorização explícita do dono. Plano executável:
+  [plano-etapa3-pr1-motor.md](plano-etapa3-pr1-motor.md). Previsão, IA e simulador
+  compartilham uma snapshot read-only e cálculo Decimal; carteira física nova dispensa
+  Q37, enquanto dados contraditórios mantêm os motivos de incerteza. Recorrências e
+  faturas usam identidade/ciclo comum, sem descontar o cartão duas vezes. Consulta
+  não cria lançamentos nem resolve pendências. PR2 será a API v2; PR3, a tela real;
+  estimativa variável continua condicionada a decisão posterior.
+  - Manager final aprovou localmente, zero bloqueios abertos. Duas passadas Tester;
+    reparos finais conferidos pelo Manager, sem terceira passada. Área final:
+    **1559 passed/2 xfailed**, nomes/status anteriores preservados; frontend:
+    **56 passed**, prova visual **12/12** em desktop/mobile, claro/escuro.
+    Controle do reparo da base: 14 verdes → 7 falhas/7 verdes sem fix → 14 verdes
+    após restauração por cópia e identidade de bytes/SHA. Conferência independente
+    final: 279 testes pertinentes e 2 reproduções aprovados.
+  - CI completo e Codex remoto no head publicável seguem pendentes. Codex local
+    foi tentado, mas a CLI recusou o modelo configurado e não produziu parecer.
+    Produção, WhatsApp real e aparelho não verificados; sem deploy/TestFlight/reset.
 - Guia do `/painel` (#728) em 2 PRs: A `GET`/`POST /api/v2/guia` + tabela `guia_painel` (contrato e consulta de medição em `docs/CLAUDE.md`, "API v2") · B a tela (Piggy, balão, Ajuda).
 - [ ] Etapa 0 · [ ] 1 · [ ] 2 · [ ] 3 · [ ] 4 · [ ] 5 · [ ] 6 · [ ] 7

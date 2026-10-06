@@ -36,28 +36,29 @@ def _row(r: Any) -> dict[str, Any]:
     }
 
 
-def list_bills(user_id: int, include_paid: bool = False, limit: int = 120) -> list[dict[str, Any]]:
-    """Contas a pagar do usuário (com nome/categoria do recorrente). Pendentes
-    primeiro, por vencimento; pagas recentes no fim se include_paid."""
-    with get_conn() as conn:
-        with conn.cursor() as cur:
-            cur.execute(
-                """
+def ler_instancias(cur, user_id: int, include_paid: bool = True, limit: int | None = None) -> list[dict]:
+    """Instâncias completas pelo cursor, sem conversão de dinheiro ou escrita."""
+    cur.execute("""
                 select b.id, b.recurring_id,
                        coalesce(b.name, r.name) as name,
                        coalesce(b.category, r.category) as category,
                        b.due_date, b.amount, b.status, b.paid_at, b.paid_amount,
                        b.launch_id, coalesce(r.variable_amount, false) as variable_amount
                 from bill_instances b
-                left join recurring_expenses r on r.id = b.recurring_id
+                left join recurring_expenses r on r.id = b.recurring_id and r.user_id = b.user_id
                 where b.user_id = %s
                   and (%s::boolean = true or b.status = 'pending')
                 order by (b.status = 'pending') desc, b.due_date asc
                 limit %s
-                """,
-                (user_id, include_paid, int(limit)),
-            )
-            rows = cur.fetchall() or []
+                """, (user_id, include_paid, limit))
+    return [dict(r) for r in cur.fetchall()]
+
+
+def list_bills(user_id: int, include_paid: bool = False, limit: int = 120) -> list[dict[str, Any]]:
+    """Contas a pagar do usuário (com nome/categoria do recorrente). Pendentes
+    primeiro, por vencimento; pagas recentes no fim se include_paid."""
+    with get_conn() as conn, conn.cursor() as cur:
+        rows = ler_instancias(cur, user_id, include_paid, int(limit))
     return [_row(r) for r in rows]
 
 

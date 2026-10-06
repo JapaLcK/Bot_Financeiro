@@ -1,3 +1,4 @@
+from _cashflow_helpers import compactar
 """Pior dia da trajetória (feature Pro) e as causas da queda até ele."""
 from datetime import date, timedelta
 
@@ -26,12 +27,12 @@ def test_worst_day_causas_inclui_todos_os_degraus_da_queda(monkeypatch):
 
     assert wd["date"] == d(12).isoformat() and wd["saldo_projetado"] == -100.0
     assert wd["desde"] == today.isoformat()
-    assert wd["causas"] == [
+    assert compactar(wd["causas"], data=True) == [
         {"date": d(5).isoformat(), "tipo": "gasto_fixo", "nome": "Aluguel", "valor": 900.0},
         {"date": d(8).isoformat(), "tipo": "fatura_cartao", "nome": "Nubank", "valor": 700.0},
         {"date": d(12).isoformat(), "tipo": "boleto", "nome": "Luz", "valor": 600.0},
     ]
-    assert wd["compromissos"] == [{"tipo": "boleto", "nome": "Luz", "valor": 600.0}]
+    assert compactar(wd["compromissos"]) == [{"tipo": "boleto", "nome": "Luz", "valor": 600.0}]
 
 
 def _cenario_pico_intermediario(monkeypatch):
@@ -55,7 +56,7 @@ def test_worst_day_causas_so_depois_do_ultimo_pico(monkeypatch):
 
     assert wd["date"] == d(10).isoformat() and wd["saldo_projetado"] == 200.0
     assert wd["desde"] == d(6).isoformat()
-    assert wd["causas"] == [{"date": d(10).isoformat(), "tipo": "boleto", "nome": "IPVA", "valor": 2500.0}]
+    assert compactar(wd["causas"], data=True) == [{"date": d(10).isoformat(), "tipo": "boleto", "nome": "IPVA", "valor": 2500.0}]
 
 
 def test_worst_day_pico_empatado_vale_o_mais_recente(monkeypatch):
@@ -145,7 +146,7 @@ def test_worst_day_sem_eventos_nao_tem_causas(monkeypatch):
 
     assert out["worst_day"]["causas"] == []
     assert out["worst_day"]["desde"] is None  # sem queda, nada a explicar
-    assert out["vencidos"] == []
+    assert compactar(out["vencidos"], data=True) == []
 
 
 def test_worst_day_sem_queda_nao_culpa_saida(monkeypatch):
@@ -161,8 +162,8 @@ def test_worst_day_sem_queda_nao_culpa_saida(monkeypatch):
     wd = forecast_with_trajectory(1, days=25)["worst_day"]
 
     assert (wd["date"], wd["saldo_projetado"]) == (d1.isoformat(), 1050.0)
-    assert wd["causas"] == [] and wd["desde"] is None
-    assert wd["compromissos"] == [{"tipo": "receita", "nome": "Salário", "valor": 1000.0},
+    assert compactar(wd["causas"], data=True) == [] and wd["desde"] is None
+    assert compactar(wd["compromissos"]) == [{"tipo": "receita", "nome": "Salário", "valor": 1000.0},
                                   {"tipo": "boleto", "nome": "Luz", "valor": 50.0}]
 
 
@@ -183,7 +184,7 @@ def test_worst_day_saida_compensada_no_meio_do_patamar_nao_e_causa(monkeypatch):
 
     assert (wd["date"], wd["saldo_projetado"]) == (d(12).isoformat(), 200.0)
     assert wd["desde"] == d(3).isoformat()
-    assert wd["causas"] == [{"date": d(12).isoformat(), "tipo": "boleto", "nome": "IPVA", "valor": 2500.0}]
+    assert compactar(wd["causas"], data=True) == [{"date": d(12).isoformat(), "tipo": "boleto", "nome": "IPVA", "valor": 2500.0}]
 
 
 def test_worst_day_saida_no_dia_do_pico_nao_e_causa(monkeypatch):
