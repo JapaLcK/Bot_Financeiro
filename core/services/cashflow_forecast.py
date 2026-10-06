@@ -69,7 +69,7 @@ def _trajectory(today: date, sb: dict[str, Any], events: list[Ocorrencia],
     for event in events:
         d = event.data
         compromisso = event.detalhe()
-        if d is None or d > horizon_end or not event.incluida:
+        if d is None or d > horizon_end or not event.incluida or event.realizacao == 'realizada':
             continue
         valor = event.assinado
         if d <= today:
@@ -153,7 +153,7 @@ def forecast_with_trajectory(user_id: int, days: int = 90, threshold: float = 0.
         **_horizons(today, snapshot.base, snapshot.ocorrencias, HORIZONS),
         **_trajectory(today, snapshot.base, snapshot.ocorrencias, days, threshold),
         **snapshot.qualidade(),
-        'compromissos': [e.detalhe() for e in snapshot.ocorrencias],
+        'compromissos': [e.detalhe() for e in snapshot.ocorrencias if e.realizacao != 'realizada'],
         'premises': 'Projeção condicional das obrigações conhecidas; valores ou realizações desconhecidos permanecem a conferir. Não inclui estimativa variável.',
     })
 

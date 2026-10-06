@@ -80,7 +80,8 @@ def _projection(today: date, sb: dict, events: list[Ocorrencia],
     extra = validar_extra(extra_amount)
     values = {t: [] for t in ('receita', 'gasto_fixo', 'boleto', 'fatura_cartao')}
     for event in events:
-        if event.data is not None and event.data <= target_date and event.incluida:
+        if (event.data is not None and event.data <= target_date and event.incluida
+                and event.realizacao != 'realizada'):
             values.setdefault(event.tipo, []).append(event.assinado)
     saldo = dinheiro(sb['saldo'])
     sums = {t: somar(vs) for t, vs in values.items()}

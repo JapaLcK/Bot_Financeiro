@@ -736,6 +736,17 @@ PR de cada etapa, não soluções prontas. Cada PR confere se ainda valem, decid
     Motor/DTO/rota intactos. CI anterior 47004b65: backend/audit aprovados,
     frontend falhou no tooltip com mesma asserção da main e fontes sem diff.
     Novo head requer CI e Codex remotos; merge só autorização humana.
+  - Sétima revisão do #842: ocorrências com realização comprovada continuam
+    na snapshot, mas saem das coleções de compromissos/causas e da contagem de
+    boletos. Apenas três guardas do motor; paid sem prova e valores incertos
+    continuam a conferir. Saldo e aritmética permanecem inalterados.
+    Reprodução real pela carteira antes da fonte: base 80 e saldo final 70 já
+    corretos; chave paga indevida e contagem 2. Controles separados retirando
+    cada guarda: três falhas discriminantes com positivos preservados.
+    Manager fresh aprovou fonte2+teste1 congelados. Área financeira:
+    **2046 passed/2 xfailed**, 103 subtests em 50 arquivos; todos os 2044
+    nomes/status anteriores preservados + 4 novos. JS/12 renders intactos.
+    Novo head exige CI/Codex remotos; merge só autorização humana.
   - CI completo e Codex remoto no head publicável seguem pendentes. Codex local
     foi tentado, mas a CLI recusou o modelo configurado e não produziu parecer.
     Produção, WhatsApp real e aparelho não verificados; sem deploy/TestFlight/reset.

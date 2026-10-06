@@ -6,7 +6,8 @@ import pytest
 from psycopg.types.json import Jsonb
 
 import db
-from core.services.cashflow import _projection, validar_extra
+from core.services.cashflow import _projection, project, validar_extra
+from core.services.cashflow_forecast import forecast_with_trajectory
 from core.services.cashflow_snapshot import Ocorrencia, centavos
 from core.services.ai_chat.tools.cards import _forecast_next_bill
 from db.bills import create_boleto, mark_bill_paid
@@ -107,6 +108,12 @@ def test_reparo_realizacao_reutiliza_composicao_e_nao_aceita_contradicoes(user_i
     assert 'carteira_nao_confirmada' in {m.codigo for m in s.motivos}
     assert any(m.codigo == 'realizacao_boleto_a_conferir' for m in e.motivos)
     assert s.base['saldo'] == D(80)
+    forecast = forecast_with_trajectory(user_id)
+    assert next(c for c in forecast['compromissos'] if c['chave'] == e.chave)['realizacao'] == 'a_conferir'
+    assert any(c['chave'] == e.chave for c in forecast['trajectory'][1]['compromissos'])
+    assert forecast['horizons']['30']['n_boletos'] == 1
+    assert forecast['horizons']['30']['boletos_ate'] == 20
+    assert forecast['horizons']['30']['projetado'] == 60
 
 
 @pytest.mark.parametrize('total,paid,status,restante', [
@@ -130,6 +137,11 @@ def test_reparo_faturas_compartilham_validacao_sem_escrever(user_id, total, paid
         assert out['cards'][0]['restante'] == restante and e.valor == (D(restante) if restante is not None else None)
         assert ('valor_fatura_a_conferir' in out['cards'][0]['motivos']) == (restante is None)
         assert ('valor_fatura_a_conferir' in {m.codigo for m in e.motivos}) == (restante is None)
+        forecast = forecast_with_trajectory(user_id)
+        detail = next(c for c in forecast['compromissos'] if c['chave'] == e.chave)
+        assert detail['realizacao'] == 'a_conferir' and detail['valor'] == restante
+        assert {m['codigo'] for m in detail['motivos']} == {m.codigo for m in e.motivos}
+        assert forecast['horizons']['90']['faturas_cartao'] == (restante or 0)
 
 
 def test_reparo_gate_aplica_predicado_real_a_todos_novos_modulos():
@@ -162,3 +174,69 @@ def test_reparo_vinculo_especie_real_e_pagamento_fisico_continuam_comprovados(us
     e = next(e for e in s.ocorrencias if e.fonte == 'instancia')
     assert s.base['saldo'] == D(80) and e.realizacao == 'realizada' and e.assinado == 0
     assert 'carteira_nao_confirmada' not in {m.codigo for m in s.motivos}
+
+
+@pytest.mark.parametrize('offset', [-1, 0, 3])
+def test_reparo_compromisso_realizado_sai_da_previsao_mas_fica_na_snapshot(user_id, offset):
+    from core.services.decision_simulator import Simulacao, simulate
+    today, future = date.today(), date.today() + timedelta(days=3)
+    due = today + timedelta(days=offset)
+    db.add_launch_and_update_balance(user_id, 'receita', 100, 'Dinheiro', None)
+    paid = create_boleto(user_id, 'Antecipado', 20, due)
+    mark_bill_paid(user_id, paid['id'], 20, metodo='carteira')
+    opened = create_boleto(user_id, 'Ainda pendente', 10, future)
+    s = snapshot(user_id)
+    realized = next(e for e in s.ocorrencias if e.origem_id == paid['id'])
+    pending = next(e for e in s.ocorrencias if e.origem_id == opened['id'])
+    assert realized.chave == f"instancia:{paid['id']}:{due.isoformat()}"
+    assert realized.valor == D(20) and realized.realizacao == 'realizada' and realized.assinado == 0
+    assert s.base['saldo'] == D(80) and len(s.ocorrencias) == 2
+    forecast = forecast_with_trajectory(user_id, days=3)
+    projected = project(user_id, future, percurso=True)
+    simulated = simulate(user_id, Simulacao(cenarios=[{'nome': 'Hipótese', 'preco': 1}]))
+    assert [d['saldo_projetado'] for d in forecast['trajectory']] == [80, 80, 70]
+    assert projected['projetado'] == projected['minimo_percurso'] == 70
+    assert projected['boletos_ate'] == 10
+    assert simulated['atual']['saldo_final_90'] == simulated['atual']['pior_dia']['saldo'] == 70
+    assert simulated['atual']['pior_dia']['date'] == future.isoformat()
+    observed = {
+        'vencidos': [c['chave'] for c in forecast['vencidos']],
+        'vencem_hoje': [c['chave'] for c in forecast['vencem_hoje']],
+        'trajectory': [c['chave'] for d in forecast['trajectory'] for c in d['compromissos']],
+        'worst_compromissos': [c['chave'] for c in forecast['worst_day']['compromissos']],
+        'worst_causas': [c['chave'] for c in forecast['worst_day']['causas']],
+        'topo': [c['chave'] for c in forecast['compromissos']],
+        'n_boletos': projected['n_boletos'],
+        'horizons_n_boletos': [h['n_boletos'] for h in forecast['horizons'].values()],
+    }
+    for field in ('vencidos', 'vencem_hoje', 'trajectory', 'worst_compromissos', 'worst_causas'):
+        assert realized.chave not in observed[field], observed
+    assert observed['trajectory'] == observed['worst_compromissos'] == observed['worst_causas'] == [pending.chave]
+    assert observed['topo'] == [pending.chave], observed
+    assert observed['n_boletos'] == 1 and observed['horizons_n_boletos'] == [1, 1, 1], observed
+    assert next(e for e in snapshot(user_id).ocorrencias if e.chave == realized.chave) == realized
+
+
+def test_reparo_previsao_preserva_desconhecido_e_excluido_sem_data(user_id):
+    due = date.today() + timedelta(days=3)
+    b = create_boleto(user_id, 'Valor desconhecido', 1, due)
+    q('update bill_instances set amount=0 where id=%s and user_id=%s', (b['id'], user_id))
+    card = db.create_card(user_id, 'Cartão', 10, 17)
+    r = create_recurring_expense(user_id, 'Cartão sem calendário', 30, 'outros', due.day,
+                                 'credit_card', card_id=card, frequency='once', start_date=due)
+    q('update recurring_expenses set frequency=%s where id=%s and user_id=%s', ('legada', r['id'], user_id))
+    s = snapshot(user_id)
+    unknown = next(e for e in s.ocorrencias if e.fonte == 'instancia' and e.origem_id == b['id'])
+    excluded = next(e for e in s.ocorrencias if e.fonte == 'gasto_recorrente' and e.origem_id == r['id'])
+    assert unknown.valor is None and unknown.assinado == 0 and unknown.realizacao == 'a_conferir'
+    assert excluded.data is None and not excluded.incluida and excluded.realizacao == 'a_conferir'
+    forecast = forecast_with_trajectory(user_id, days=3)
+    details = {c['chave']: c for c in forecast['compromissos']}
+    assert set(details) == {unknown.chave, excluded.chave}
+    assert details[unknown.chave]['valor'] is None and details[unknown.chave]['qualidade_valor'] == 'desconhecido'
+    assert {m['codigo'] for m in details[unknown.chave]['motivos']} == {m.codigo for m in unknown.motivos}
+    assert details[excluded.chave]['date'] is None and not details[excluded.chave]['incluida']
+    assert {m['codigo'] for m in details[excluded.chave]['motivos']} == {m.codigo for m in excluded.motivos}
+    assert [c['chave'] for c in forecast['trajectory'][2]['compromissos']] == [unknown.chave]
+    assert forecast['horizons']['30']['n_boletos'] == 1
+    assert forecast['horizons']['30']['boletos_ate'] == 0
