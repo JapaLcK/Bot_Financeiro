@@ -1,5 +1,5 @@
-import { router, useLocalSearchParams } from "expo-router";
-import { useEffect, useMemo, useState } from "react";
+import { router, useFocusEffect, useLocalSearchParams } from "expo-router";
+import { useCallback, useEffect, useMemo, useState } from "react";
 import { AccessibilityInfo, View } from "react-native";
 
 import { useForeground } from "@/features/openFinance/useForeground";
@@ -74,10 +74,10 @@ export default function OpenFinanceVolta() {
   const [estado, setEstado] = useState<EstadoVolta>({ fase: "esperando-trava" });
   const [rodada, setRodada] = useState(0);
 
-  // Nada de pedido com a trava na frente; se ela subir no meio, cancela, e ao
+  // Nada de pedido fora de foco ou com a trava na frente; ao pausar, cancela, e ao
   // liberar recomeça com janela nova (o GET vem primeiro: não repete POST à toa).
   // `expirou` de fora das dependências, como o Início: muda a cada troca de sessão.
-  useEffect(() => {
+  useFocusEffect(useCallback(() => {
     if (travado || !ativo) return setEstado({ fase: "esperando-trava" });
     let cancelado = false;
     const controlador = new AbortController();
@@ -93,7 +93,7 @@ export default function OpenFinanceVolta() {
       cancelado = true;
       controlador.abort();
     };
-  }, [link, origem, modo, travado, ativo, rodada]);
+  }, [link, origem, modo, travado, ativo, rodada]));
 
   const atualizando = estado.fase === "conectado" && estado.ui.state === "updating";
   const conferindo = estado.fase === "conferindo";

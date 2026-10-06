@@ -1,5 +1,5 @@
-import { router, useFocusEffect } from "expo-router";
-import { useCallback, useState } from "react";
+import { router, useFocusEffect, type Href } from "expo-router";
+import { useCallback, useRef, useState } from "react";
 import { ActivityIndicator, Pressable, View } from "react-native";
 
 import { RequisicaoSuperada, SessaoExpirada } from "@/api/client";
@@ -42,6 +42,18 @@ export default function Inicio() {
   // botão fica em carregando nesse meio. No sucesso a tela desmonta e o
   // `setSaindo(false)` nem roda.
   const [saindo, setSaindo] = useState(false);
+  const entradaEmVoo = useRef(false);
+  const [entrando, setEntrando] = useState(false);
+  useFocusEffect(useCallback(() => {
+    entradaEmVoo.current = false;
+    setEntrando(false);
+  }, []));
+  const navegar = (destino: Href) => {
+    if (entradaEmVoo.current) return;
+    entradaEmVoo.current = true; setEntrando(true);
+    try { router.push(destino); }
+    catch { entradaEmVoo.current = false; setEntrando(false); setAviso("Não conseguimos abrir a tela. Tente de novo."); }
+  };
 
   const sair = useCallback(async () => {
     setErroSaida(null);
@@ -107,7 +119,7 @@ export default function Inicio() {
           <>
             <View style={{ flexDirection: "row", alignItems: "center", justifyContent: "space-between", gap: espaco.md }}>
               <Texto variante="titulo" style={{ flex: 1 }}>Olá, {estado.nome}</Texto>
-              <Pressable accessibilityRole="button" accessibilityLabel="Configurações da conta" onPress={() => router.push("/configuracoes")}
+              <Pressable accessibilityRole="button" accessibilityLabel="Configurações da conta" disabled={entrando} accessibilityState={{ disabled: entrando }} onPress={() => navegar("/configuracoes")}
                 style={{ width: 48, height: 48, borderRadius: 24, backgroundColor: cores.surfaceRaised, alignItems: "center", justifyContent: "center" }}>
                 <Texto variante="rotulo">{estado.nome.slice(0, 2).toUpperCase()}</Texto>
               </Pressable>
@@ -121,11 +133,11 @@ export default function Inicio() {
               : estado.acesso === "sem-open-finance" ? "Seu acesso atual não permite conectar bancos."
               : estado.acesso === "senha" ? "Crie sua senha pelo link enviado por e-mail para continuar."
               : "Conecte seu banco e conclua a primeira sincronização para entrar."}</Texto>}
-            {estado.acesso === "conectar" && <Button rotulo="Conectar meu banco" onPress={() => router.push("/conectar-banco")} />}
-            {estado.pendente && <Button rotulo="Retomar conexão" onPress={() => router.push("/open-finance-volta")} />}
-            {estado.acesso === "inicio" && <Button rotulo="Bancos conectados" variante="secondary" onPress={() => router.push("/conexoes")} />}
+            {estado.acesso === "conectar" && <Button rotulo="Conectar meu banco" desativado={entrando} onPress={() => navegar("/conectar-banco")} />}
+            {estado.pendente && <Button rotulo="Retomar conexão" desativado={entrando} onPress={() => navegar("/open-finance-volta")} />}
+            {estado.acesso === "inicio" && <Button rotulo="Bancos conectados" variante="secondary" desativado={entrando} onPress={() => navegar("/conexoes")} />}
             <Button rotulo="Conferir acesso novamente" variante="ghost" onPress={() => void carregar()} />
-            <Button rotulo="Segurança" variante="secondary" icone="Lock" onPress={() => router.push("/seguranca")} />
+            <Button rotulo="Segurança" variante="secondary" icone="Lock" desativado={entrando} onPress={() => navegar("/seguranca")} />
             {erroSaida ? (
               <Banner tom="danger" mensagem={erroSaida} acao={{ rotulo: "Tentar de novo", onPress: () => void sair() }} />
             ) : null}

@@ -1,5 +1,5 @@
-import { router, useFocusEffect } from "expo-router";
-import { useCallback, useState } from "react";
+import { router, useFocusEffect, type Href } from "expo-router";
+import { useCallback, useRef, useState } from "react";
 import { View } from "react-native";
 import { RequisicaoSuperada, SessaoExpirada } from "@/api/client";
 import { useSessao } from "@/features/auth/sessao";
@@ -18,6 +18,18 @@ export default function TestePluggy() {
   const [linhas, setLinhas] = useState<string[]>([]);
   const [erro, setErro] = useState<string | null>(null);
   const [rodada, setRodada] = useState(0);
+  const entradaEmVoo = useRef(false);
+  const [entrando, setEntrando] = useState(false);
+  useFocusEffect(useCallback(() => {
+    entradaEmVoo.current = false;
+    setEntrando(false);
+  }, []));
+  const navegar = (destino: Href) => {
+    if (entradaEmVoo.current) return;
+    entradaEmVoo.current = true; setEntrando(true);
+    try { router.push(destino); }
+    catch { entradaEmVoo.current = false; setEntrando(false); setErro("Não conseguimos abrir a tela. Tente de novo."); }
+  };
   useFocusEffect(useCallback(() => {
     let ativo = true;
     const controlador = new AbortController();
@@ -45,8 +57,8 @@ export default function TestePluggy() {
     {erro && <Banner tom="danger" mensagem={erro} />}
     {linhas.map((l, i) => <Texto key={i} variante="legenda">{l}</Texto>)}
     <Button rotulo="Conferir no servidor" onPress={() => setRodada((v) => v + 1)} />
-    <Button rotulo="Conectar para testar" variante="secondary" onPress={() => router.push("/conectar-banco")} />
-    <Button rotulo="Retomar retorno do banco" variante="secondary" onPress={() => router.push("/open-finance-volta")} />
-    <Button rotulo="Ver bancos conectados" variante="ghost" onPress={() => router.push("/conexoes")} />
+    <Button rotulo="Conectar para testar" variante="secondary" desativado={entrando} onPress={() => navegar("/conectar-banco")} />
+    <Button rotulo="Retomar retorno do banco" variante="secondary" desativado={entrando} onPress={() => navegar("/open-finance-volta")} />
+    <Button rotulo="Ver bancos conectados" variante="ghost" desativado={entrando} onPress={() => navegar("/conexoes")} />
   </View></Screen>;
 }

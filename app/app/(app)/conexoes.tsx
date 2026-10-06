@@ -36,7 +36,9 @@ export default function Conexoes() {
   }, []));
   const navegar = (destino: Href, substituir = false) => {
     if (entradaEmVoo.current) return;
-    if (substituir) router.dismissTo(destino); else router.push(destino);
+    entradaEmVoo.current = true; setEntrando(true);
+    try { if (substituir) router.dismissTo(destino); else router.push(destino); }
+    catch { entradaEmVoo.current = false; setEntrando(false); setErro("Não conseguimos abrir a tela. Tente de novo."); }
   };
   const abrirAutorizacao = (itemId?: string) => {
     if (entradaEmVoo.current || remocaoEmVoo.current) return;
