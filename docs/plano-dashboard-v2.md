@@ -725,6 +725,17 @@ PR de cada etapa, não soluções prontas. Cada PR confere se ainda valem, decid
     CIe3be teve11falhas próprias de import corrigidas localmente; frontend
     falhou no tooltip com mesma asserção da main93 e fontes sem diff.
     Novo head requer CI e Codex remotos; merge só autorização humana.
+  - Sexta revisão do #842: o renderizador legado da projeção até uma data
+    prioriza disponibilidade e qualidade. Valores finitos são condicionais,
+    título/card/total neutros; campos null/ausentes/não finitos mostram
+    Indisponível, preservando números conhecidos e formulário/gates.
+    Manager fresh aprovou JS e teste de perfil congelados. Baseline frontend
+    56 nomes/status preservados + 6 casos novos: 62 passaram. Controle causal
+    da função antiga: 6 falhas; restauração exata e 62 aprovados. Medição focal
+    de 12 renders desktop/mobile, claro/escuro, sem corte ou sobreposição.
+    Motor/DTO/rota intactos. CI anterior 47004b65: backend/audit aprovados,
+    frontend falhou no tooltip com mesma asserção da main e fontes sem diff.
+    Novo head requer CI e Codex remotos; merge só autorização humana.
   - CI completo e Codex remoto no head publicável seguem pendentes. Codex local
     foi tentado, mas a CLI recusou o modelo configurado e não produziu parecer.
     Produção, WhatsApp real e aparelho não verificados; sem deploy/TestFlight/reset.
