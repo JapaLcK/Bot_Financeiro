@@ -58,8 +58,7 @@ def list_bills(user_id: int, include_paid: bool = False, limit: int = 120) -> li
     """Contas a pagar do usuário (com nome/categoria do recorrente). Pendentes
     primeiro, por vencimento; pagas recentes no fim se include_paid."""
     with get_conn() as conn, conn.cursor() as cur:
-        rows = ler_instancias(cur, user_id, include_paid, int(limit))
-    return [_row(r) for r in rows]
+        return [_row(r) for r in ler_instancias(cur, user_id, include_paid, int(limit))]
 
 
 def get_bill(user_id: int, bill_id: int) -> dict[str, Any] | None:

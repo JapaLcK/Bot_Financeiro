@@ -660,7 +660,7 @@ PR de cada etapa, não soluções prontas. Cada PR confere se ainda valem, decid
     e aportes ausentes na API), filtro de cartão individual sem catálogo, busca real em
     Cmd-K, backend/schema e service worker. Validação local usa fixtures e
     bundle servido; não prova backend vivo, produção, PWA/aparelho ou callback Pluggy.
-- Etapa 3 — execução autorizada em 05/10/2026; PR1 motor concluído localmente em
+- Etapa 3 — execução autorizada em 05/10/2026; PR1 motor (#842) concluído localmente em
   06/10, com commit/push/PR autorizados pelo dono. Merge somente após nova
   autorização explícita do dono. Plano executável:
   [plano-etapa3-pr1-motor.md](plano-etapa3-pr1-motor.md). Previsão, IA e simulador
@@ -670,12 +670,20 @@ PR de cada etapa, não soluções prontas. Cada PR confere se ainda valem, decid
   não cria lançamentos nem resolve pendências. PR2 será a API v2; PR3, a tela real;
   estimativa variável continua condicionada a decisão posterior.
   - Manager final aprovou localmente, zero bloqueios abertos. Duas passadas Tester;
-    reparos finais conferidos pelo Manager, sem terceira passada. Área final:
+    reparos finais conferidos pelo Manager, sem terceira passada. Área inicial:
     **1559 passed/2 xfailed**, nomes/status anteriores preservados; frontend:
     **56 passed**, prova visual **12/12** em desktop/mobile, claro/escuro.
     Controle do reparo da base: 14 verdes → 7 falhas/7 verdes sem fix → 14 verdes
     após restauração por cópia e identidade de bytes/SHA. Conferência independente
     final: 279 testes pertinentes e 2 reproduções aprovados.
+  - Revisão do #842 em 06/10: cenário explícito de entrada/saída passa o valor à
+    tool existente; ambiguidade pede esclarecimento e preserva a pergunta pendente.
+    Corrigidos dois gates de CI: inventário aponta a unidade SQL real e o leitor de
+    boletos mantém o teto sem variável intermediária. Manager aprovou o delta;
+    **1629 passed/2 xfailed**, com nomes anteriores preservados. Controle do cenário:
+    53 falhas/6 consultas puras verdes sem fix; restaurado e aprovado no conjunto final.
+    Primeiro CI tinha também falhas de Pix e tooltip presentes na main; comparação
+    não equivale a CI verde. O head corrigido ainda requer CI e revisão remota.
   - CI completo e Codex remoto no head publicável seguem pendentes. Codex local
     foi tentado, mas a CLI recusou o modelo configurado e não produziu parecer.
     Produção, WhatsApp real e aparelho não verificados; sem deploy/TestFlight/reset.

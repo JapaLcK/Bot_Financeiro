@@ -165,6 +165,20 @@ def test_direcao_item_a_item_nao_neta_duvidas_e_preserva_risco_legitimo():
 @pytest.mark.parametrize('prefixo',['','piggy '])
 @pytest.mark.parametrize('tipo',['bill_amount_expected','payment_method_choice','confirm_media_launch'])
 def test_handle_incoming_previsao_preserva_pendencia_financeira_outro_assunto(prefixo,tipo,monkeypatch,ia_fora):
+    _conversa_previsao_preserva_pendencia(prefixo,tipo,'previsão de saldo daqui 30 dias',monkeypatch,ia_fora)
+
+
+@pytest.mark.parametrize('prefixo',['','piggy '])
+@pytest.mark.parametrize('tipo',['bill_amount_expected','payment_method_choice','confirm_media_launch'])
+@pytest.mark.parametrize('consulta', [
+    'qual o saldo daqui 30 dias considerando uma saída de R$ 800?',
+    'qual o saldo daqui 30 dias considerando uma saída de valor desconhecido?',
+])
+def test_handle_incoming_cenario_preserva_pendencia_financeira_outro_assunto(prefixo,tipo,consulta,monkeypatch,ia_fora):
+    _conversa_previsao_preserva_pendencia(prefixo,tipo,consulta,monkeypatch,ia_fora)
+
+
+def _conversa_previsao_preserva_pendencia(prefixo,tipo,consulta,monkeypatch,ia_fora):
     from core.handle_incoming import handle_incoming
     from core.types import IncomingMessage
     uid=usuario_pagante()
@@ -191,9 +205,15 @@ def test_handle_incoming_previsao_preserva_pendencia_financeira_outro_assunto(pr
     assert db.get_pending_action(uid)['action_type'] == tipo
     before=db.get_pending_action(uid)
     count=q('select count(*) n from launches where user_id=%s',(uid,))[0]['n']
-    result=diga(prefixo+'previsão de saldo daqui 30 dias')
+    result=diga(prefixo+consulta)
     after=db.get_pending_action(uid)
-    assert result and 'condicional' in result[0].text.lower()
+    assert result
+    if 'desconhecido' in consulta:
+        assert 'cenário' in result[0].text.lower() and 'saldo previsto' not in result[0].text.lower()
+    else:
+        assert 'condicional' in result[0].text.lower()
+        if '800' in consulta:
+            assert 'saída' in result[0].text.lower() and 'R$ 800,00' in result[0].text
     assert after['action_type']==before['action_type'] and after['payload']==before['payload'] and after['created_at']==before['created_at']
     assert q('select count(*) n from launches where user_id=%s',(uid,))[0]['n']==count
     assert 'acao_financeira_pendente' in {m.codigo for m in snapshot(uid).motivos}
