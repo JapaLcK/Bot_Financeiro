@@ -125,5 +125,3 @@ class Snapshot:
                              'janela_conferencia_inicio': None,
                              'fontes_incompletas': sorted({m.codigo for m in self.motivos})},
                 'cabe_nas_premissas': False}
-
-
