@@ -190,6 +190,8 @@ def test_snapshot_repeatable_read_com_pagamento_concorrente(uid, monkeypatch):
     monkeypatch.setattr(contas_hoje, "listar", original)
     depois = ok(uid)
     assert D(depois["base"]["saldo"]) == D(80) and depois["compromissos"] == []
+    assert all(p["compromissos"] == [] for p in depois["trajetoria"])
+    assert depois["pior_dia"]["causas"] == []
 
 
 def test_get_nao_escreve_repara_expira_ou_emite_sse(uid, monkeypatch):
@@ -223,6 +225,7 @@ def test_indisponivel_e_zero_sao_distintos_uid(uid, saldo):
     c = ok(uid)
     assert c["base"]["saldo"] == saldo
     assert bool(c["compromissos"])
+    assert c["compromissos"][0]["ocorrencias"][0]["incluida_no_calculo"] is True
     assert (c["estado"] == "indisponivel") is (saldo is None)
     assert (c["pior_dia"] is None) is (saldo is None)
     assert all((p["saldo"] is None) is (saldo is None) for p in c["trajetoria"])
@@ -352,3 +355,129 @@ def test_snapshot_read_only_recusa_escrita_e_nao_oculta_falha(uid, monkeypatch):
     assert r.status_code == 500, r.text
     assert r.json()["error"]["code"] == "internal_error" and recusas == [True]
     assert q("select balance from accounts where user_id=%s", (uid,))[0]["balance"] == D(0)
+
+
+
+def test_inclusao_variavel_sem_valor_com_data_e_obrigacoes_validas(uid):
+    db.set_balance(uid, D(100))
+    recorrente(uid, "Variável desconhecida", 0, variable_amount=True)
+    recorrente(uid, "Estimativa válida", 7, variable_amount=True)
+    recorrente(uid, "Hoje", 3, offset=0)
+    create_boleto(uid, "Vencida", 2, now_tz().date() - timedelta(days=1))
+    c = ok(uid)
+    es = {e["nome"]: e for g in c["compromissos"] for e in g["ocorrencias"]}
+    sem = es["Variável desconhecida"]
+    assert sem["data"] == c["trajetoria"][0]["data"]
+    assert sem["valor"] is None and sem["qualidade_valor"] == "desconhecido"
+    assert sem["incluida_no_calculo"] is False
+    assert {m["codigo"] for m in sem["motivos"]} == {"valor_recorrente_desconhecido"}
+    estimada = es["Estimativa válida"]
+    assert estimada["valor"] == "7" and estimada["qualidade_valor"] == "estimado"
+    assert estimada["realizacao"] == "prevista" and estimada["incluida_no_calculo"] is True
+    for nome in ("Hoje", "Vencida"):
+        assert es[nome]["realizacao"] == "a_conferir" and es[nome]["incluida_no_calculo"] is True
+        assert es[nome]["data"] <= c["hoje"]
+    assert c["ancora"]["saldo"] == "95.00" and c["marcos"][0]["saldo"] == "88.00"
+    assert c["trajetoria"][0]["saldo"] == c["pior_dia"]["saldo"] == "88.00"
+    for colecao in (c["trajetoria"][0]["compromissos"], c["pior_dia"]["causas"]):
+        assert {e["chave"] for e in colecao} == {sem["chave"], estimada["chave"]}
+        assert next(e for e in colecao if e["chave"] == sem["chave"]) == sem
+        assert next(e for e in colecao if e["chave"] == estimada["chave"]) == estimada
+
+
+@pytest.mark.parametrize("fonte,valor,motivo", [
+    ("instancia", "0", "valor_boleto_desconhecido"),
+    ("instancia", "NaN", "valor_boleto_desconhecido"),
+    ("receita_recorrente", "0", "valor_recorrente_desconhecido"),
+    ("receita_recorrente", "NaN", "valor_recorrente_desconhecido"),
+    ("fatura", "-1", "valor_fatura_a_conferir"),
+])
+def test_inclusao_irmaos_sem_valor_utilizavel_com_data(uid, monkeypatch, fonte, valor, motivo):
+    from db.recurring_income import create_recurring_income
+    from tests.test_cashflow_prazo_fatura import fatura
+    due = now_tz().date() + timedelta(days=1)
+    if fonte == "instancia":
+        b = create_boleto(uid, "Irmão desconhecido", 1, due)
+        q("update bill_instances set amount=%s::numeric where id=%s and user_id=%s", (valor, b["id"], uid))
+    elif fonte == "receita_recorrente":
+        r = create_recurring_income(uid, "Irmão desconhecido", 1, "salário", due.day, start_date=due)
+        if valor == "0":
+            from db import recurring_income
+            original = recurring_income.ler_receitas
+            def sem_valor(cur, user):
+                rows = original(cur, user)
+                assert user == uid and len(rows) == 1 and rows[0]["id"] == r["id"]
+                # Writer e CHECK recusam zero; fixture na fronteira do leitor puro.
+                return [{**row, "amount": D(0)} for row in rows]
+            monkeypatch.setattr(recurring_income, "ler_receitas", sem_valor)
+        else:
+            q("update recurring_incomes set amount=%s::numeric where id=%s and user_id=%s", (valor, r["id"], uid))
+    else:
+        card = db.create_card(uid, "Irmão desconhecido", due.day, due.day)
+        fatura(uid, card, due, "open", valor)
+        from psycopg.types.json import Jsonb
+        aid = conta(conexao(uid, f"inclusao-fatura-{uid}"), "cartao", 0)
+        q("update open_finance_accounts set type='CREDIT', raw=%s where id=%s", (Jsonb({
+            "currencyCode": "BRL", "creditData": {"balanceCloseDate": due.isoformat(),
+                                                      "balanceDueDate": due.isoformat()}}), aid))
+        q("update credit_cards set open_finance_account_id=%s where id=%s and user_id=%s", (aid, card, uid))
+    recorrente(uid, "Saída válida", 2)
+    c = ok(uid)
+    e = next(e for g in c["compromissos"] for e in g["ocorrencias"] if e["fonte"] == fonte)
+    assert e["data"] == due.isoformat() and e["valor"] is None
+    assert e["qualidade_valor"] == "desconhecido" and e["incluida_no_calculo"] is False
+    assert e["qualidade_data"] == "conhecida"
+    assert motivo in {m["codigo"] for m in e["motivos"]}
+    assert c["marcos"][0]["saldo"] == "-2.00"
+    assert next(item for item in c["trajetoria"][0]["compromissos"] if item["chave"] == e["chave"]) == e
+    if fonte == "receita_recorrente":
+        assert all(item["chave"] != e["chave"] for item in c["pior_dia"]["causas"])
+    else:
+        assert next(item for item in c["pior_dia"]["causas"] if item["chave"] == e["chave"]) == e
+
+
+def test_inclusao_instancia_valor_positivo_sem_data(uid, monkeypatch):
+    from db import bills
+    b = create_boleto(uid, "Sem data", 5, now_tz().date() + timedelta(days=1))
+    original = bills.ler_instancias
+    def sem_data(cur, user):
+        rows = original(cur, user)
+        assert user == uid and len(rows) == 1 and rows[0]["id"] == b["id"]
+        # NOT NULL no DB atual: representar a row incompleta na fronteira do leitor.
+        return [{**row, "due_date": None} for row in rows]
+    monkeypatch.setattr(bills, "ler_instancias", sem_data)
+    c = ok(uid)
+    e = c["compromissos"][0]["ocorrencias"][0]
+    assert e["valor"] == "5" and e["data"] is None
+    assert e["incluida_no_calculo"] is False and e["realizacao"] == "a_conferir"
+    assert "data_boleto_desconhecida" in {m["codigo"] for m in e["motivos"]}
+    assert c["ancora"]["saldo"] == c["marcos"][0]["saldo"] == "0.00"
+    assert all(p["compromissos"] == [] for p in c["trajetoria"])
+    assert c["pior_dia"]["causas"] == []
+
+
+def test_inclusao_fatura_presumida_e_cartao_excluido(uid):
+    from tests.test_cashflow_prazo_fatura import fatura
+    due = now_tz().date() + timedelta(days=1)
+    card = db.create_card(uid, "Fatura presumida", due.day, due.day)
+    fatura(uid, card, due, "open", 11)
+    create_recurring_expense(uid, "Excluída no cartão", 7, "outros", due.day, "credit_card", card_id=card,
+                             frequency="once", start_date=due)
+    c = ok(uid)
+    es = {e["nome"]: e for g in c["compromissos"] for e in g["ocorrencias"]}
+    e = es["Fatura presumida"]
+    assert e["data"] == due.isoformat() and e["qualidade_data"] == "presumida"
+    assert e["valor"] == "11" and e["incluida_no_calculo"] is True
+    assert e["realizacao"] == "a_conferir"
+    excluida = es["Excluída no cartão"]
+    assert excluida["data"] == due.isoformat() and excluida["valor"] == "7"
+    assert excluida["incluida_no_calculo"] is False
+    assert "incorporacao_cartao_nao_comprovada" in {m["codigo"] for m in excluida["motivos"]}
+    assert c["marcos"][0]["saldo"] == "-11.00"
+    assert c["trajetoria"][0]["compromissos"] == c["pior_dia"]["causas"] == [e]
+
+
+def test_inclusao_zero_decimal_utilizavel_no_contrato():
+    from core.services.cashflow_contract import Ocorrencia
+    e = Ocorrencia("instancia", 1, "zero", now_tz().date(), "boleto", "Zero", D(0), "saida")
+    assert previsao_v2._ocorrencia(1, e)["incluida_no_calculo"] is True

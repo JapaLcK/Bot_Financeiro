@@ -28,7 +28,8 @@ def _ocorrencia(uid: int, e: Ocorrencia) -> dict:
             "fonte": e.fonte, "tipo": e.tipo, "nome": e.nome, "valor": e.valor,
             "direcao": e.direcao, "qualidade_valor": e.qualidade_valor,
             "qualidade_data": e.qualidade_data, "realizacao": e.realizacao,
-            "incluida_no_calculo": e.incluida,
+            "incluida_no_calculo": (e.incluida and e.valor is not None
+                                    and e.data is not None and e.realizacao != "realizada"),
             "motivos": _motivos([{"codigo": m.codigo, "direcao_do_erro": m.direcao_do_erro}
                                  for m in e.motivos])}
 

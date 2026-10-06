@@ -345,6 +345,8 @@ Sub-app FastAPI (`api/v2/app.py`) montado pelo monólito com `app.mount("/api/v2
   Motivos expõem somente código/direção. Compromissos usam chaves opacas estáveis
   por usuário e identidade da fonte; homônimos não se fundem. Instâncias ficam em
   grupo próprio, pois a snapshot não fornece o vínculo persistido de apresentação.
+  `incluida_no_calculo` exige valor e data utilizáveis, inclusão na snapshot e
+  ocorrência não realizada; desconhecidos e excluídos continuam na explicação.
   Base e valor da ocorrência preservam o Decimal/escala original da snapshot;
   saldos calculados mantêm a quantização do motor. Exemplo discriminante: base
   `"10.005"`, saída `"2.675"`, saldo calculado `"7.33"`. Pontos e causas resolvem as
