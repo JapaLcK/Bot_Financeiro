@@ -667,7 +667,7 @@ PR de cada etapa, não soluções prontas. Cada PR confere se ainda valem, decid
   compartilham uma snapshot read-only e cálculo Decimal; carteira física nova dispensa
   Q37, enquanto dados contraditórios mantêm os motivos de incerteza. Recorrências e
   faturas usam identidade/ciclo comum, sem descontar o cartão duas vezes. Consulta
-  não cria lançamentos nem resolve pendências. PR2 será a API v2; PR3, a tela real;
+  não cria lançamentos nem resolve pendências. PR2 entrega a API v2 abaixo; PR3 permanece a tela real;
   estimativa variável continua condicionada a decisão posterior.
   - Manager final aprovou localmente, zero bloqueios abertos. Duas passadas Tester;
     reparos finais conferidos pelo Manager, sem terceira passada. Área inicial:
@@ -764,3 +764,24 @@ PR de cada etapa, não soluções prontas. Cada PR confere se ainda valem, decid
     Produção, WhatsApp real e aparelho não verificados; sem deploy/TestFlight/reset.
 - Guia do `/painel` (#728) em 2 PRs: A `GET`/`POST /api/v2/guia` + tabela `guia_painel` (contrato e consulta de medição em `docs/CLAUDE.md`, "API v2") · B a tela (Piggy, balão, Ajuda).
 - [ ] Etapa 0 · [ ] 1 · [ ] 2 · [ ] 3 · [ ] 4 · [ ] 5 · [ ] 6 · [ ] 7
+
+### Etapa 3 — PR2: API v2 da previsão (implementação local, 06/10/2026)
+
+`GET /api/v2/previsao` adapta a snapshot/motor do PR1: sessão e plano antes da
+leitura, horizonte 30/60/90 pela política existente, base bancária canônica v2,
+uma transação repeatable read/read only. Plus recebe só marcos30; Pro recebe
+trajetória futura, âncora hoje, pior dia e compromissos conhecidos. Dinheiro fonte
+é Decimal/texto sem arredondar; somente saldos calculados seguem o motor.
+Sem escrita/sync/reparo/TTL/SSE, sem regra financeira ou orientação nova; qualidade
+e validade permanecem explícitas, estimativa variável e cabe_nas_premissas false.
+
+Tipos TS gerados e fixtures herméticas validáveis preparam PR3. Os limites são
+horizonte solicitado/autorizado (até 90 pontos, até 3 marcos) e capacidade do plano.
+Grupos/ocorrências completos, sem truncamento; **não há teto global de bytes
+comprovado ou introduzido**, e o requisito global de tamanho do esboço da Etapa3
+não é marcado como concluído. Esses limites não limitam quantidade de fontes, nomes
+ou motivos. Um teto futuro exige necessidade real de transporte/consumidor.
+
+PR2 aguarda revisão independente, CI e Codex no head. Etapa3 inteira permanece
+aberta: PR3 terá consumidor/tela/refetch temporal; simulador v2, estimativa variável,
+calendário novo e Q37 não entram nesta entrega. Merge requer autorização do dono.

@@ -23,6 +23,7 @@ from api.v2.guia import DICAS, PASSOS, Guia
 from api.v2.lancamentos import Lancamentos
 from api.v2.me import Me
 from api.v2.perfil import Perfil
+from api.v2.previsao import Previsao
 from api.v2.resumo_mes import ResumoDoMes
 from db.lancamentos import ler_cursor
 from scripts.gerar_tipos_api_v2 import CABECALHO, SAIDA, gerar
@@ -320,3 +321,19 @@ def test_gerador_traduz_literal_de_um_valor_e_get_com_post():
         'export type RotasGet = { "/a": Aa };\n'
         'export type RotasPost = { "/a": { corpo: Aa; resposta: Aa } };\n'
     )
+
+
+@pytest.mark.parametrize("nome", sorted(FIXTURES["previsao"]))
+def test_fixture_de_previsao_segue_modelo_e_precisao(nome):
+    f = FIXTURES["previsao"][nome]
+    p = Previsao.model_validate(f)
+    assert p.model_dump(mode="json") == f
+    assert p.cabe_nas_premissas is p.cobertura.inclui_estimativa_variavel is False
+    assert len(p.marcos) <= 3
+    if p.trajetoria is not None:
+        assert len(p.trajetoria) == p.dias <= 90
+        for m in p.marcos:
+            assert m.saldo == p.trajetoria[m.dias - 1].saldo
+    else:
+        assert p.capacidades == ["marcos"]
+        assert p.periodo is p.ancora is p.pior_dia is p.compromissos is None
