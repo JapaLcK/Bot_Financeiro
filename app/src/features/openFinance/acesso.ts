@@ -2,7 +2,7 @@ import { ErroDeApi, RequisicaoSuperada } from "@/api/client";
 import type { Perfil } from "@/api/schemas/auth";
 import { perfil } from "@/services/auth";
 import { limiteBancario, onboardingBancario, conexoes, pedirConnectToken } from "@/services/openFinance";
-import { iniciarTentativaBancaria, jtiDe, lerCredenciais, type Credenciais } from "@/storage/secure";
+import { descartarPreparacaoBancaria, iniciarTentativaBancaria, jtiDe, lerCredenciais, type Credenciais } from "@/storage/secure";
 
 export type AcessoBancario = { perfil: Perfil; fase: "inicio" | "conectar" | "sem-acesso" | "cobranca-pendente" | "sem-open-finance" | "senha" };
 
@@ -47,6 +47,14 @@ export async function iniciarConexaoBancaria(itemId?: string, cancelado: () => b
     snapshot.connections.flatMap((c) => c.provider_item_id ? [c.provider_item_id] : []), itemId,
     snapshot.connections.find((c) => c.provider_item_id === itemId)?.reconnected_at);
   if (!tentativa) throw new Error("Sua sessão mudou. Tente de novo.");
-  if (cancelado()) throw new RequisicaoSuperada();
-  return { ...await pedirConnectToken(p.user_id, itemId), tentativa_id: tentativa.tentativa_id };
+  try {
+    if (cancelado()) throw new RequisicaoSuperada();
+    const token = await pedirConnectToken(p.user_id, itemId, tentativa.tentativa_id);
+    await conferirSessao(credencial);
+    if (cancelado()) throw new RequisicaoSuperada();
+    return { ...token, tentativa_id: tentativa.tentativa_id };
+  } catch (e) {
+    await descartarPreparacaoBancaria(tentativa.tentativa_id);
+    throw e;
+  }
 }

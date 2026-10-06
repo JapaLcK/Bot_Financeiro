@@ -1,3 +1,4 @@
+import { origemDaTentativa } from "./open_finance_volta_apoio";
 import { act, renderRouter, screen, waitFor } from "expo-router/testing-library";
 import { widgetAberto } from "@/features/openFinance/volta";
 import { iniciarTentativaBancaria, lerTentativaBancaria } from "@/storage/secure";
@@ -39,7 +40,7 @@ it("widget oficial abre após marcador, usa OAuth navegador e onSuccess confirma
 it("callback capturado com widget aberto recupera onClose sem onSuccess; callbacks duplicados não repetem POST", async () => {
   servidor(); renderRouter("./app", { initialUrl: "/autorizando" });
   await waitFor(() => expect(screen.getByTestId("widget-pluggy")).toBeTruthy());
-  expect(redirectSystemPath({ path: `pigbank://open-finance-volta?itemId=${ITEM}`, initial: false })).toBeNull();
+  expect(redirectSystemPath({ path: `pigbank://open-finance-volta/${origemDaTentativa()}?itemId=${ITEM}`, initial: false })).toBeNull();
   expect(await lerTentativaBancaria(1)).toMatchObject({ item_id: ITEM });
   await act(async () => { mockWidget.props!.onClose(); mockWidget.props!.onError(); await drenar(); });
   await waitFor(() => expect(screen.getByText("Atualizado")).toBeTruthy());

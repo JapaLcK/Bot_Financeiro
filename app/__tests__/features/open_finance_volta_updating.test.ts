@@ -1,3 +1,4 @@
+import { conferirRetornoOficial as conferirVolta } from "./open_finance_volta_apoio";
 /**
  * `features/openFinance/volta.ts` com o item em `updating` ("Atualizando…"): o
  * servidor devolve esse estado enquanto a coleta termina (medido no iPhone,
@@ -5,7 +6,7 @@
  * consultando; visto o item nesta chamada, nunca mais POST. Numeração = N1–N11
  * do plano (N12 veio do Tester); A1–A13 = linhas da tabela estados × eventos.
  */
-import { conferirVolta, INTERVALO_MS, JANELA_MS } from "@/features/openFinance/volta";
+import { INTERVALO_MS, JANELA_MS } from "@/features/openFinance/volta";
 import { guardarSessaoOf as guardarCredenciais } from "./open_finance_volta_apoio";
 
 import { prepararCaso, resposta, rotear, S, segurar } from "./auth_apoio";

@@ -1,4 +1,4 @@
-import { conferirVolta } from "@/features/openFinance/volta";
+import { conferirRetornoOficial as conferirVolta } from "./open_finance_volta_apoio";
 import { capturarItemBancario, iniciarTentativaBancaria, lerTentativaBancaria, marcarTentativaBancariaVista } from "@/storage/secure";
 import { cofre, falharApagar, falharLeitura, prepararCaso, resposta } from "./auth_apoio";
 import { dependencias, guardarSessaoOf, ITEM, lista, posts, servidor, SESSAO_OF, VIVO } from "./open_finance_volta_apoio";

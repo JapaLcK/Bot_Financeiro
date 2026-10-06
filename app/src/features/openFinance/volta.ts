@@ -6,12 +6,12 @@ import { conexoes, registrarItem } from "@/services/openFinance";
 import { capturarItemBancario, concluirTentativaBancaria, lerTentativaBancaria, marcarTentativaBancariaVista, type TentativaBancaria } from "@/storage/secure";
 
 /**
- * A volta do OAuth do banco (`<scheme>://open-finance-volta?itemId=…`, que a
+ * A volta do OAuth do banco (`<scheme>://open-finance-volta/<uuid>?itemId=…`, que a
  * Pluggy abre depois do consentimento): confere no servidor se o item virou
  * conexão e, se não virou, registra. Sem JSX, como `features/auth/entrar.ts`:
  * o Jest exercita com os serviços reais, e a rota só desenha o estado.
  *
- * O link é ENTRADA NÃO CONFIÁVEL: só o `itemId` é lido (e validado), o `uid`
+ * O link é ENTRADA NÃO CONFIÁVEL: `itemId` e origem são validados; o `uid`
  * vem sempre de `perfil()`. O servidor é a fronteira: o `POST /pluggy-item`
  * confere o dono na Pluggy (`clientUserId`).
  *
@@ -68,6 +68,11 @@ export function itemDoLink(valor: unknown): string | null {
   return typeof valor === "string" && ID_DO_ITEM.test(valor) ? valor : null;
 }
 
+/** Originário da URI construída pelo servidor para ESTE connect-token. */
+export function tentativaDoLink(valor: unknown): string | null {
+  return typeof valor === "string" && /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/.test(valor) ? valor : null;
+}
+
 const achar = (lista: { connections: Conexao[] }, itemId: string) =>
   lista.connections.find((c) => c.provider_item_id === itemId);
 
@@ -121,19 +126,24 @@ function textoDoErro(e: unknown): string {
  * desconectado em outro aparelho); no fim da janela mostra `organizando`, e a
  * tela de Conexões mostra a verdade (a linha só some da lista por DELETE).
  */
-export async function conferirVolta(link: unknown, d: Dependencias): Promise<void> {
+export async function conferirVolta(link: unknown, d: Dependencias, origem?: unknown): Promise<void> {
   let itemId = itemDoLink(link);
   if (link !== undefined && link !== null && !itemId) return d.aoMudar({ fase: "sem-item" });
   let inicial: Awaited<ReturnType<typeof lerTentativaBancaria>>;
   try {
     inicial = await lerTentativaBancaria();
-    if (itemId && inicial) await capturarItemBancario(itemId, inicial.tentativa_id);
+    if (itemId && inicial && tentativaDoLink(origem) === inicial.tentativa_id) await capturarItemBancario(itemId, inicial.tentativa_id);
   } catch {
     if (d.cancelado()) return;
     return d.aoMudar({ fase: "erro", texto: "Não conseguimos ler o retorno do banco neste aparelho. Tente de novo." });
   }
   if (d.cancelado()) return;
   if (!itemId && !inicial) return d.aoMudar({ fase: "sem-item" });
+  const linkVinculado = !!inicial && tentativaDoLink(origem) === inicial.tentativa_id;
+  const legado = link !== undefined && link !== null && !linkVinculado;
+  // Link antigo não toma o item local da tentativa nova, nem a encerra ao
+  // observar um banco diferente. SDK/retomada ainda podem trazer sua pista.
+  if (legado && inicial) itemId = null;
   itemId ??= inicial?.item_id ?? null;
   const daRodada = (t: TentativaBancaria | null) => !!inicial && t?.tentativa_id === inicial.tentativa_id && t?.sessao === inicial.sessao;
 
@@ -167,8 +177,8 @@ export async function conferirVolta(link: unknown, d: Dependencias): Promise<voi
       const snapshot = await conexoes(uid, d.controlador);
       const candidatos = snapshot.connections.filter((c) => c.provider_item_id &&
         !tentativa?.ids_antes.includes(c.provider_item_id) && !MORTOS.has(c.ui.state));
-      if (!itemId && candidatos.length > 1 && tentativa) return d.aoMudar({ fase: "escolher-conexao" });
-      if (!itemId && candidatos.length === 1 && tentativa) {
+      if (!legado && !itemId && candidatos.length > 1 && tentativa) return d.aoMudar({ fase: "escolher-conexao" });
+      if (!legado && !itemId && candidatos.length === 1 && tentativa) {
         itemId = candidatos[0]!.provider_item_id;
         if (itemId) {
           await capturarItemBancario(itemId, tentativa.tentativa_id);

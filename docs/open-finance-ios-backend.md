@@ -29,7 +29,20 @@ no registry antes do GET remoto e novamente dentro de `pluggy_item_lock`. Retorn
 Callback não revoga lápide. Após remoção, novo consentimento deve criar item novo.
 Reconexão viva e handoff do webhook continuam válidos.
 
+`POST /open-finance/{user_id}/connect-token` aceita o campo opcional `attempt_id`
+UUID canônico em minúsculas, somente junto de `app_scheme` permitido (`pigbank`,
+`pigbank-staging`, `pigbank-dev`). O servidor monta
+`<scheme>://open-finance-volta/<attempt_id>` no campo oficial `oauthRedirectUri`;
+não aceita uma URL de retorno escolhida pelo cliente. Sem `attempt_id`, pedidos
+legados válidos mantêm a URI antiga (ou nenhum redirect, no site). `item_id` e
+ownership da reconexão continuam iguais. O nonce não vai para o registry.
+Após os gates de sessão e acesso, UUID/scheme inválidos, campos JSON repetidos
+(mesmo valor ou nome escapado), JSON malformado, mais de 4096 bytes ou corpo lento
+retornam 400 antes de qualquer chamada à Pluggy. Corpo vazio continua permitido.
+
 Validação reproduzível: testes dirigidos em `tests/test_fase4_open_finance.py` mais
 os testes existentes de onboarding, disconnect, reset, ownership, marca de remoção e
-handoff. Use o ambiente isolado descrito em `docs/ambiente.md` e na skill
+handoff; origem OAuth em `tests/test_of_connect_token_attempt.py` e contratos
+legados em `tests/test_of_connect_token_volta_app.py`. Use o ambiente isolado descrito
+em `docs/ambiente.md` e na skill
 `baseline-testes`; isso prova contratos locais, não consentimento real no aparelho.

@@ -21,6 +21,7 @@ import sys
 import time
 from datetime import datetime, timedelta, timezone
 from typing import Literal
+from uuid import UUID
 
 import psycopg
 from psycopg_pool import PoolClosed, PoolTimeout
@@ -1749,14 +1750,19 @@ async def open_finance_caixinha_bind_route(request: Request, user_id: int, body:
 # cliente quiser. O site não manda o campo.
 _APP_SCHEMES = frozenset({"pigbank", "pigbank-staging", "pigbank-dev"})
 _APP_VOLTA_OF = "open-finance-volta"
-_CORPO_MAX = 4096  # corpo legítimo tem até ~85 bytes (app_scheme + item_id); acima disso é ignorado, como se não houvesse corpo
-_CORPO_SEGUNDOS = 5  # corpo legítimo chega junto dos cabeçalhos; o que pinga devagar também é ignorado
+_CORPO_MAX = 4096
+_CORPO_SEGUNDOS = 5  # corpo legítimo chega junto dos cabeçalhos
 
 
-async def _corpo_json_limitado(request: Request) -> object | None:
-    """JSON do corpo, lido até _CORPO_MAX bytes e _CORPO_SEGUNDOS s (o código do app não
-    impõe teto de corpo; o do servidor não foi medido). Fora disso — e vazio/malformado — devolve None, "sem
-    o campo"; aninhamento fundo levanta RecursionError (não é ValueError)."""
+async def _corpo_json_limitado(request: Request, *, estrito: bool = False) -> object | None:
+    """Corpo limitado por bytes/tempo. Connect-token recusa JSON ambíguo/inválido
+    em vez de emitir token descartando a origem da tentativa; corpo vazio é legado."""
+    def campos_unicos(pares):
+        corpo = dict(pares)
+        if len(corpo) != len(pares):
+            raise ValueError("campo repetido")
+        return corpo
+
     try:
         pedacos, total = [], 0
         async with asyncio.timeout(_CORPO_SEGUNDOS):
@@ -1765,8 +1771,13 @@ async def _corpo_json_limitado(request: Request) -> object | None:
                 if total > _CORPO_MAX:
                     raise ValueError("corpo grande demais")
                 pedacos.append(p)
-        return json.loads(b"".join(pedacos))
-    except (ValueError, RecursionError, TimeoutError):
+        bruto = b"".join(pedacos)
+        if not bruto:
+            return None
+        return json.loads(bruto, object_pairs_hook=campos_unicos if estrito else dict)
+    except (ValueError, RecursionError, TimeoutError) as exc:
+        if estrito:
+            raise HTTPException(status_code=400, detail="Corpo JSON inválido ou fora dos limites.") from exc
         return None
 
 
@@ -1782,12 +1793,20 @@ async def open_finance_connect_token_route(request: Request, user_id: int):
 
     # Corpo lido à mão e só depois dos portões, pela mesma razão do mock-connect:
     # parâmetro tipado decodificaria antes da sessão. Teto de bytes e de tempo no helper.
-    corpo = await _corpo_json_limitado(request)
+    corpo = await _corpo_json_limitado(request, estrito=True)
     scheme = corpo.get("app_scheme") if isinstance(corpo, dict) else None
     # isinstance antes do `in`: lista/dict não são hasháveis (TypeError → 500).
     if scheme is not None and (not isinstance(scheme, str) or scheme not in _APP_SCHEMES):
         raise HTTPException(status_code=400, detail="app_scheme inválido.")
     volta = f"{scheme}://{_APP_VOLTA_OF}" if scheme else None
+    if isinstance(corpo, dict) and "attempt_id" in corpo:
+        attempt = corpo["attempt_id"]
+        try:
+            if not scheme or not isinstance(attempt, str) or str(UUID(attempt)) != attempt:
+                raise ValueError("origem inválida")
+        except ValueError as exc:
+            raise HTTPException(status_code=400, detail="attempt_id inválido ou sem app_scheme.") from exc
+        volta = f"{volta}/{attempt}"
 
     # Reconexão de um banco já conectado: sem o `itemId` a Pluggy recusa com
     # "already exists" (`avoidDuplicates`). Dono pelo NOSSO banco antes de tocar a

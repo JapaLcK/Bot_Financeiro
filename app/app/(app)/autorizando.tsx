@@ -6,7 +6,7 @@ import { RequisicaoSuperada, SessaoExpirada, ErroDeApi } from "@/api/client";
 import { iniciarConexaoBancaria } from "@/features/openFinance/acesso";
 import { definirWidgetAberto, itemDoLink } from "@/features/openFinance/volta";
 import { useSessao } from "@/features/auth/sessao";
-import { capturarItemBancario } from "@/storage/secure";
+import { capturarItemBancario, descartarPreparacaoBancaria } from "@/storage/secure";
 import { Banner } from "@/ui/componentes/Banner";
 import { Button } from "@/ui/componentes/Button";
 import { Screen } from "@/ui/componentes/Screen";
@@ -22,13 +22,18 @@ export default function Autorizando() {
   const ativo = useRef(true);
   const itemPendente = useRef<string | null>(null);
   useEffect(() => {
+    let cancelado = false;
     ativo.current = true;
-    void iniciarConexaoBancaria(itemId, () => !ativo.current || encerrado.current).then((t) => { if (ativo.current && !encerrado.current) { definirWidgetAberto(true); setToken(t); } }).catch((e: unknown) => {
-      if (!ativo.current || e instanceof RequisicaoSuperada) return;
+    setToken(null);
+    void iniciarConexaoBancaria(itemId, () => cancelado || !ativo.current || encerrado.current).then(async (t) => {
+      if (!cancelado && ativo.current && !encerrado.current) { definirWidgetAberto(true); setToken(t); }
+      else await descartarPreparacaoBancaria(t.tentativa_id);
+    }).catch((e: unknown) => {
+      if (cancelado || !ativo.current || e instanceof RequisicaoSuperada) return;
       if (e instanceof SessaoExpirada) sessao.expirou(e.detalhe);
       else setErro(e instanceof ErroDeApi ? e.detalhe : "Não conseguimos iniciar a conexão. Tente de novo.");
     });
-    return () => { ativo.current = false; definirWidgetAberto(false); };
+    return () => { cancelado = true; ativo.current = false; definirWidgetAberto(false); };
   }, [itemId]);
   const fechar = async (item?: string) => {
     if (item && itemDoLink(item)) itemPendente.current = item;

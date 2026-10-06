@@ -1,3 +1,5 @@
+import { redirectSystemPath } from "../../app/+native-intent";
+import { origemDaTentativa } from "./open_finance_volta_apoio";
 /**
  * A rota `open-finance-volta`: o "Sair" da demora amarrado ao `itemId` (outro
  * item recomeça os 30 s e o contador) e o estado `erro` (só "Continuar"). Pelo
@@ -46,14 +48,14 @@ beforeEach(async () => {
 describe("open-finance-volta — demora e erro", () => {
   it("D1 — OUTRO itemId depois da demora: Sair, aviso e contador recomeçam; Sair só volta 30 s depois da 2ª abertura", async () => {
     servidor(() => new Promise<never>(() => undefined));
-    renderRouter("./app", { initialUrl: `/open-finance-volta?itemId=${A}` });
+    renderRouter("./app", { initialUrl: `/open-finance-volta/${origemDaTentativa()}?itemId=${A}` });
     await waitFor(() => expect(contarGets()).toBe(1));
     await segundos(31_000);
     expect(screen.getByRole("button", { name: "Sair" })).toBeTruthy();
     expect(screen.getByText(DEMORA)).toBeTruthy();
 
     await act(async () => {
-      router.navigate(`/open-finance-volta?itemId=${B}`);
+      router.navigate(redirectSystemPath({ path: `/open-finance-volta/${origemDaTentativa()}?itemId=${B}`, initial: false })!);
       await drenar();
     });
     await waitFor(() => expect(contarGets()).toBe(2));
@@ -70,7 +72,7 @@ describe("open-finance-volta — demora e erro", () => {
 
   it("D2 — erro antes de ver o item (403): Banner e Continuar, sem Sair nem barra, e o laço para", async () => {
     servidor(() => resposta(403, { detail: "Este item não pertence a esta conta." }));
-    renderRouter("./app", { initialUrl: `/open-finance-volta?itemId=${A}` });
+    renderRouter("./app", { initialUrl: `/open-finance-volta/${origemDaTentativa()}?itemId=${A}` });
     await waitFor(() => expect(screen.getByText("Este item não pertence a esta conta.")).toBeTruthy());
     expect(screen.getByRole("button", { name: "Continuar" })).toBeTruthy();
     semSair();
@@ -89,7 +91,7 @@ describe("open-finance-volta — demora e erro", () => {
       jest.setSystemTime(Date.now() + JANELA_MS);
       return atualizando(A);
     });
-    renderRouter("./app", { initialUrl: `/open-finance-volta?itemId=${A}` });
+    renderRouter("./app", { initialUrl: `/open-finance-volta/${origemDaTentativa()}?itemId=${A}` });
     const conferirDeNovo = await screen.findByRole("button", { name: "Conferir de novo" });
     pendurar = true;
     await act(async () => {
@@ -116,7 +118,7 @@ describe("open-finance-volta — demora com a trava ligada", () => {
 
   it("D4 — esperando-trava por mais de 5 min: nem Sair nem aviso de demora; ao liberar (GET sem resolver), aparecem", async () => {
     servidor(() => new Promise<never>(() => undefined));
-    renderRouter("./app", { initialUrl: `/open-finance-volta?itemId=${A}` });
+    renderRouter("./app", { initialUrl: `/open-finance-volta/${origemDaTentativa()}?itemId=${A}` });
     await waitFor(() => expect(prompts()).toBe(1));
     await liberar();
     await waitFor(() => expect(contarGets()).toBe(1));

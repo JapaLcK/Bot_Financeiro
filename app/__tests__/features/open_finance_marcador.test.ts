@@ -1,3 +1,4 @@
+import { origemDaTentativa } from "./open_finance_volta_apoio";
 import { definirWidgetAberto } from "@/features/openFinance/volta";
 import { capturarItemBancario, concluirTentativaBancaria, guardarCredenciais, iniciarTentativaBancaria,
   lerTentativaBancaria, limparSessaoDe, trocarSe } from "@/storage/secure";
@@ -8,7 +9,7 @@ import { JWT_OF, SESSAO_OF } from "./open_finance_volta_apoio";
 beforeEach(async () => { prepararCaso(); definirWidgetAberto(false); await guardarCredenciais({ access: JWT_OF, refresh: "r1" }); });
 it("marcador sobrevive ao retorno frio e à rotação da mesma sessão", async () => {
   await iniciarTentativaBancaria(1, SESSAO_OF, []);
-  redirectSystemPath({ path: "pigbank://open-finance-volta?itemId=item_a", initial: true });
+  redirectSystemPath({ path: `pigbank://open-finance-volta/${origemDaTentativa()}?itemId=item_a`, initial: true });
   await trocarSe("r1", { access: JWT_OF, refresh: "r2" });
   expect(await lerTentativaBancaria(1)).toMatchObject({ item_id: "item_a", sessao: SESSAO_OF });
   expect(cofre.get("pb.of.tentativa")).not.toContain(JWT_OF);
@@ -17,7 +18,7 @@ it("marcador sobrevive ao retorno frio e à rotação da mesma sessão", async (
 it("deep link em widget focado captura item sem trocar rota", async () => {
   await iniciarTentativaBancaria(1, SESSAO_OF, []);
   definirWidgetAberto(true);
-  expect(redirectSystemPath({ path: "pigbank://open-finance-volta?itemId=item_a", initial: false })).toBeNull();
+  expect(redirectSystemPath({ path: `pigbank://open-finance-volta/${origemDaTentativa()}?itemId=item_a`, initial: false })).toBeNull();
   expect(await lerTentativaBancaria(1)).toMatchObject({ item_id: "item_a" });
 });
 it("outra conta/sessão não lê nem sobrescreve marcador antigo", async () => {

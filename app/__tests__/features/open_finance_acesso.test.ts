@@ -49,7 +49,7 @@ it("novo banco não abre widget se teto cheio; reconexão própria no teto funci
   await expect(iniciarConexaoBancaria()).rejects.toThrow("Limite atingido");
   expect(chamadas().some((v) => v.caminho.endsWith("connect-token"))).toBe(false);
   await expect(iniciarConexaoBancaria("item_a")).resolves.toHaveProperty("accessToken");
-  expect(chamadas().at(-1)?.corpo).toEqual({ app_scheme: "pigbank-dev", item_id: "item_a" });
+  expect(chamadas().at(-1)?.corpo).toEqual({ app_scheme: "pigbank-dev", item_id: "item_a", attempt_id: (await lerTentativaBancaria(1))!.tentativa_id });
   expect(await lerTentativaBancaria(1)).toMatchObject({ modo: "reconectar", item_id: "item_a" });
 });
 it("item alheio/inexistente não pede token de reconexão", async () => {

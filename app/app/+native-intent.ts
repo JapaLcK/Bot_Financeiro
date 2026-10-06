@@ -1,5 +1,5 @@
 import { capturarItemBancario } from "@/storage/secure";
-import { itemDoLink, widgetAberto } from "@/features/openFinance/volta";
+import { itemDoLink, tentativaDoLink, widgetAberto } from "@/features/openFinance/volta";
 
 /**
  * A rota da volta, e só ela. No iOS o expo-router entrega a URL completa:
@@ -24,10 +24,21 @@ export function redirectSystemPath({ path, initial }: { path: string; initial: b
   if (VOLTA.some((r) => r.test(path))) {
     const encontrados = [...path.matchAll(/[?&]itemId=([^&#]*)/g)];
     const valor = encontrados.length === 1 ? encontrados[0]?.[1] : undefined;
+    const segmento = path.split(/[?#]/)[0]?.match(/\/open-finance-volta\/([^/]+)$/)?.[1];
+    // Só o path configurado no token carrega a origem. Query fornecida pelo
+    // link não ganha vínculo com a tentativa atualmente no cofre.
+    const origem = /[?&](?:tentativaId|attempt_id)=/.test(path) ? null : tentativaDoLink(segmento);
+    let item: string | null = null;
     try {
-      const item = itemDoLink(valor ? decodeURIComponent(valor) : undefined);
-      if (item) void capturarItemBancario(item).catch(() => {});
+      item = itemDoLink(valor ? decodeURIComponent(valor) : undefined);
+      if (item && origem) void capturarItemBancario(item, origem).catch(() => {});
     } catch { /* Link inválido não impede abrir o app. */ }
+    if (!initial && widgetAberto()) return null;
+    const parametros = [
+      ...(encontrados.length ? [`itemId=${item ? encodeURIComponent(item) : ""}`] : []),
+      ...(origem ? [`tentativaId=${origem}`] : []),
+    ];
+    return `/open-finance-volta${parametros.length ? `?${parametros.join("&")}` : ""}`;
   }
-  return !initial && widgetAberto() && VOLTA.some((r) => r.test(path)) ? null : path;
+  return path;
 }

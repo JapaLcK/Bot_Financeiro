@@ -22,11 +22,11 @@ function schemeDoApp(): string | null {
   return typeof scheme === "string" && scheme ? scheme : null;
 }
 
-export function pedirConnectToken(uid: number, itemId?: string) {
+export function pedirConnectToken(uid: number, itemId?: string, tentativaId?: string) {
   const scheme = schemeDoApp();
   return chamar(`/open-finance/${uid}/connect-token`, connectTokenSchema, {
     metodo: "POST",
-    corpo: { ...(scheme ? { app_scheme: scheme } : {}), ...(itemId ? { item_id: itemId } : {}) },
+    corpo: { ...(scheme ? { app_scheme: scheme, ...(tentativaId ? { attempt_id: tentativaId } : {}) } : {}), ...(itemId ? { item_id: itemId } : {}) },
     sinal: comLimite(),
   });
 }

@@ -1,3 +1,4 @@
+import { conferirRetornoOficial as conferirVolta } from "./open_finance_volta_apoio";
 /**
  * `features/openFinance/volta.ts` com os serviços reais e o `fetch` dublado
  * (`rotear`), relógio injetado (ver `open_finance_volta_apoio.ts`). Numeração =
@@ -5,7 +6,7 @@
  * terminou); o item em `updating` tem os casos dele em
  * `open_finance_volta_updating.test.ts`.
  */
-import { conferirVolta, INTERVALO_MS, JANELA_MS, MAX_POSTS, SEM_SENHA } from "@/features/openFinance/volta";
+import { INTERVALO_MS, JANELA_MS, MAX_POSTS, SEM_SENHA } from "@/features/openFinance/volta";
 import { guardarSessaoOf as guardarCredenciais } from "./open_finance_volta_apoio";
 
 import { chamadas, cofre, fetchFalso, GENERICO, prepararCaso, resposta, rotear, S, segurar } from "./auth_apoio";

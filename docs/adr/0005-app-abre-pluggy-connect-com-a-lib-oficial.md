@@ -162,6 +162,14 @@ carimbo novo, o app oferece conferência posterior, sem declarar reconexão conc
 POSTs sobrepostos da mesma tentativa compartilham a chamada em voo; GETs continuam
 independentes para permitir cancelamento e retomada.
 
+O connect-token nativo envia `attempt_id` UUID canônico junto ao `app_scheme`.
+O servidor constrói `scheme://open-finance-volta/<attempt_id>` como
+`oauthRedirectUri`; a origem no path acompanha o retorno frio, sem depender de
+timing de eventos do widget. O app só associa a pista ao nonce originário; URL
+legada sem vínculo consulta o servidor, sem atribuir o banco à tentativa ativa.
+Falha/cancelamento da preparação descarta somente aquele nonce antes do widget;
+token entregue e pistas de possível autorização continuam recuperáveis.
+
 O diagnóstico `Teste Open Finance` continua em Configurações até a validação das
 telas definitivas no iPhone. Isso não adiciona modo OAuth dentro do app nem
 contorna limites/direito. Jest cobre as transições com SDK e rede simulados;

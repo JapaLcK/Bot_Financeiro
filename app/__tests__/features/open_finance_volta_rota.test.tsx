@@ -1,3 +1,4 @@
+import { origemDaTentativa } from "./open_finance_volta_apoio";
 /**
  * A rota `open-finance-volta` pelo roteador de verdade (`renderRouter("./app")`):
  * a guarda de sessão, a trava, o desmonte e a pilha. A lógica do laço tem os
@@ -42,7 +43,7 @@ beforeEach(() => {
 describe("open-finance-volta — guarda de sessão", () => {
   it("1 — sem sessão: cai em /boas-vindas, ZERO pedidos", async () => {
     servidor();
-    renderRouter("./app", { initialUrl: `/open-finance-volta?itemId=${A}` });
+    renderRouter("./app", { initialUrl: `/open-finance-volta/${origemDaTentativa()}?itemId=${A}` });
     await waitFor(() => expect(screen).toHavePathname("/boas-vindas"));
     await act(drenar);
     expect(chamadas()).toEqual([]);
@@ -54,7 +55,7 @@ describe("open-finance-volta — com sessão, trava desligada", () => {
 
   it("21 — user_id no link é ignorado: tudo vai para o uid do perfil; conecta", async () => {
     servidor();
-    renderRouter("./app", { initialUrl: `/open-finance-volta?itemId=${A}&user_id=999` });
+    renderRouter("./app", { initialUrl: `/open-finance-volta/${origemDaTentativa()}?itemId=${A}&user_id=999` });
     await waitFor(() => expect(screen.getByText("Atualizado")).toBeTruthy());
     expect(deOpenFinance().map((c) => c.caminho)).toEqual(["/open-finance/1", "/open-finance/1/pluggy-item"]);
     expect(chamadas().some((c) => c.caminho.includes("999"))).toBe(false);
@@ -62,7 +63,7 @@ describe("open-finance-volta — com sessão, trava desligada", () => {
 
   it("pilha — link frio, Continuar volta ao Início", async () => {
     servidor(() => lista(A));
-    renderRouter("./app", { initialUrl: `/open-finance-volta?itemId=${A}` });
+    renderRouter("./app", { initialUrl: `/open-finance-volta/${origemDaTentativa()}?itemId=${A}` });
     await waitFor(() => expect(screen.getByText("Atualizado")).toBeTruthy());
     expect(screen.queryByRole("button", { name: "Sair" })).toBeNull();
     titulo(false);
@@ -91,7 +92,7 @@ describe("open-finance-volta — com sessão, trava desligada", () => {
     ["com espaço", "itemId=abc%20def"],
   ])("4b — itemId %s: texto neutro, nenhum pedido de OF", async (_nome, query) => {
     servidor();
-    renderRouter("./app", { initialUrl: `/open-finance-volta?${query}` });
+    renderRouter("./app", { initialUrl: `/open-finance-volta/${origemDaTentativa()}?${query}` });
     await waitFor(() => expect(screen.getByText("Se você conectou um banco, ele aparece em instantes.")).toBeTruthy());
     await act(drenar);
     expect(deOpenFinance()).toEqual([]);
@@ -103,7 +104,7 @@ describe("open-finance-volta — com sessão, trava desligada", () => {
       await portao.promessa;
       return lista();
     });
-    renderRouter("./app", { initialUrl: `/open-finance-volta?itemId=${A}` });
+    renderRouter("./app", { initialUrl: `/open-finance-volta/${origemDaTentativa()}?itemId=${A}` });
     await waitFor(() => expect(deOpenFinance()).toHaveLength(1));
 
     await act(async () => {
@@ -131,7 +132,7 @@ describe("open-finance-volta — com sessão, trava desligada", () => {
       },
       "/open-finance/1/pluggy-item": () => lista(),
     });
-    renderRouter("./app", { initialUrl: `/open-finance-volta?itemId=${A}` });
+    renderRouter("./app", { initialUrl: `/open-finance-volta/${origemDaTentativa()}?itemId=${A}` });
     const gets = () => deOpenFinance().filter((c) => c.caminho === "/open-finance/1").length;
     const conferirDeNovo = await screen.findByRole("button", { name: "Conferir de novo" });
     expect(screen.queryByRole("button", { name: "Sair" })).toBeNull();
@@ -168,12 +169,12 @@ describe("open-finance-volta — com sessão, trava desligada", () => {
       }
       return lista(...chamadas().filter((c) => c.caminho.endsWith("/pluggy-item")).map((c) => (c.corpo as { item: { id: string } }).item.id));
     });
-    renderRouter("./app", { initialUrl: `/open-finance-volta?itemId=${A}` });
+    renderRouter("./app", { initialUrl: `/open-finance-volta/${origemDaTentativa()}?itemId=${A}` });
     await waitFor(() => expect(deOpenFinance()).toHaveLength(1));
 
     await act(async () => {
       await iniciarTentativaBancaria(1, SESSAO_OF, []);
-      router.navigate(`/open-finance-volta?itemId=${B}`);
+      router.navigate(redirectSystemPath({ path: `/open-finance-volta/${origemDaTentativa()}?itemId=${B}`, initial: false })!);
       await drenar();
     });
     await waitFor(() => expect(postsDe(B)).toHaveLength(1));
@@ -223,14 +224,14 @@ describe("open-finance-volta — link com o app aberto e o widget da Pluggy em f
     await waitFor(() => expect(deOpenFinance().filter((c) => c.caminho === "/open-finance/1")).toHaveLength(1));
   });
 
-  it("L3 — abertura fria (initial) e outro link passam sem mudança mesmo com o widget aberto", () => {
+  it("L3 — abertura fria normaliza retorno legado e preserva outras rotas mesmo com widget aberto", () => {
     definirWidgetAberto(true);
-    expect(redirectSystemPath({ path: LINK, initial: true })).toBe(LINK);
+    expect(redirectSystemPath({ path: LINK, initial: true })).toBe(`/open-finance-volta?itemId=${A}`);
     expect(redirectSystemPath({ path: "pigbank://seguranca", initial: false })).toBe("pigbank://seguranca");
     expect(redirectSystemPath({ path: "/seguranca", initial: false })).toBe("/seguranca");
   });
 
-  it.each([`pigbank-staging://open-finance-volta?itemId=${A}`, `pigbank-dev://open-finance-volta?itemId=${A}`, `exp://192.168.0.10:8081/--/open-finance-volta?itemId=${A}`, `/open-finance-volta?itemId=${A}`])(
+  it.each([`pigbank-staging://open-finance-volta?itemId=${A}`, `pigbank-dev://open-finance-volta?itemId=${A}`, `exp://192.168.0.10:8081/--/open-finance-volta?itemId=${A}`, `/open-finance-volta/${origemDaTentativa()}?itemId=${A}`])(
     "L4 — widget aberto: %s também é descartado",
     (path) => {
       definirWidgetAberto(true);
@@ -259,7 +260,7 @@ describe("open-finance-volta — trava ligada", () => {
   it("2 — link frio com sessão salva: a trava no lugar da pilha, ZERO pedidos até liberar", async () => {
     await guardarCredenciais(S);
     servidor(() => lista(A));
-    renderRouter("./app", { initialUrl: `/open-finance-volta?itemId=${A}` });
+    renderRouter("./app", { initialUrl: `/open-finance-volta/${origemDaTentativa()}?itemId=${A}` });
     await waitFor(() => expect(prompts()).toBe(1));
     expect(chamadas()).toEqual([]);
 
@@ -279,7 +280,7 @@ describe("open-finance-volta — trava ligada", () => {
         jest.advanceTimersByTime(ms);
         await drenar();
       });
-    renderRouter("./app", { initialUrl: `/open-finance-volta?itemId=${A}` });
+    renderRouter("./app", { initialUrl: `/open-finance-volta/${origemDaTentativa()}?itemId=${A}` });
     await waitFor(() => expect(prompts()).toBe(1));
     await liberar();
     await passar(10_000);
@@ -313,7 +314,7 @@ describe("open-finance-volta — trava ligada", () => {
     await waitFor(() => expect(prompts()).toBe(2));
 
     await act(async () => {
-      router.navigate(`/open-finance-volta?itemId=${A}`);
+      router.navigate(redirectSystemPath({ path: `/open-finance-volta/${origemDaTentativa()}?itemId=${A}`, initial: false })!);
       await drenar();
     });
     await waitFor(() => expect(screen).toHavePathname("/open-finance-volta"));

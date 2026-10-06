@@ -1,5 +1,6 @@
 import { z } from "zod";
 import * as SecureStore from "expo-secure-store";
+import * as Crypto from "expo-crypto";
 
 /**
  * Guarda de credencial, atrás de uma interface de um arquivo.
@@ -320,7 +321,7 @@ export function iniciarTentativaBancaria(
   return naFila(async () => {
     if (await sessaoNoCofre() !== sessao) return null;
     const t: TentativaBancaria = { user_id, sessao, ids_antes, item_id, reconnected_antes, modo: item_id ? "reconectar" : "nova",
-      iniciada_em: Date.now(), tentativa_id: `${Date.now()}-${Math.random()}` };
+      iniciada_em: Date.now(), tentativa_id: Crypto.randomUUID() };
     await SecureStore.setItemAsync(TENTATIVA_OF, JSON.stringify(t));
     return t;
   });
@@ -350,6 +351,14 @@ export function concluirTentativaBancaria(tentativa_id: string): Promise<void> {
   return naFila(async () => {
     const t = await tentativaNoCofre();
     if (t?.tentativa_id === tentativa_id && await sessaoNoCofre() === t.sessao) await SecureStore.deleteItemAsync(TENTATIVA_OF);
+  });
+}
+
+/** Falha/cancelamento antes de entregar token ao widget não deixa retomada fantasma. */
+export function descartarPreparacaoBancaria(tentativa_id: string): Promise<void> {
+  return naFila(async () => {
+    const t = await tentativaNoCofre();
+    if (t?.tentativa_id === tentativa_id && !t.autorizacao_recebida && !t.visto_no_servidor && await sessaoNoCofre() === t.sessao) await SecureStore.deleteItemAsync(TENTATIVA_OF);
   });
 }
 

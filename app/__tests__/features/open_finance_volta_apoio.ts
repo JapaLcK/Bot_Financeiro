@@ -1,8 +1,14 @@
 import { guardarCredenciais, iniciarTentativaBancaria, type Credenciais } from "@/storage/secure";
 /** Apoio dos dois arquivos da lógica de `features/openFinance/volta.ts`. */
-import { INTERVALO_MS, JANELA_MS, type Dependencias, type EstadoVolta } from "@/features/openFinance/volta";
+import { conferirVolta, INTERVALO_MS, JANELA_MS, type Dependencias, type EstadoVolta } from "@/features/openFinance/volta";
 
-import { chamadas, resposta, rotear, type Rota } from "./auth_apoio";
+import { chamadas, cofre, resposta, rotear, type Rota } from "./auth_apoio";
+
+/** Fixtures de retorno oficial carregam a origem que veio na URI do token. */
+export function origemDaTentativa(): string | undefined {
+  try { return JSON.parse(cofre.get("pb.of.tentativa") ?? "null")?.tentativa_id; } catch { return undefined; }
+}
+export const conferirRetornoOficial = (link: unknown, d: Dependencias) => conferirVolta(link, d, origemDaTentativa());
 
 export const ITEM = "c13cb883-item_1";
 const conexao = (state: string, label: string) => ({ id: 1, status: "ACTIVE", status_reason: null, last_sync_at: "2026-10-05T12:00:00Z", reconnected_at: null, provider_item_id: ITEM, institution_name: "Nubank", ui: { state, label, detail: null } });
