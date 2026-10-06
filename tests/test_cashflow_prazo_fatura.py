@@ -125,3 +125,93 @@ def test_fatura_elegibilidade_preserva_paid_incoerente_e_ausencia(user_id, statu
         assert out['total'] == total and out['cards'][0]['restante'] == restante
         assert ('valor_fatura_a_conferir' in out['cards'][0]['motivos']) == (restante is None)
     assert observadas(uid) == antes
+
+
+PEDIDOS_ATIVOS = [
+    'qual meu saldo daqui 30 dias se eu comprar bitcoin?',
+    'qual meu saldo daqui 30 dias; recomende um CDB?',
+    'previsão de saldo em 30 dias considerando uma saída de R$ 800 para comprar bitcoin?',
+    'previsão de saldo em 30 dias ou em 60 dias se eu comprar bitcoin?',
+]
+
+
+@pytest.mark.parametrize('prefixo', ['', 'piggy ', 'pergunta ', 'ia '])
+@pytest.mark.parametrize('pedido', PEDIDOS_ATIVOS)
+def test_previsao_recusa_politica_existente_antes_do_cenario(pro_small_uid, ia_fora, prefixo, pedido):
+    from core.intent_router import investment_action_refusal, INVESTMENT_ACTION_REFUSAL_MSG
+    from core.response_formatter import format_for_platform
+    uid = pro_small_uid
+    assert 'registrada' in manda(uid, 'recebi 1500 de salário em dinheiro').lower()
+    antes = q('select id,valor,efeitos from launches where user_id=%s order by id', (uid,))
+    pendente = db.get_pending_action(uid)
+    assert investment_action_refusal(prefixo+pedido) == INVESTMENT_ACTION_REFUSAL_MSG
+    resposta = manda(uid, prefixo+pedido)
+    assert resposta == format_for_platform(INVESTMENT_ACTION_REFUSAL_MSG, 'whatsapp'), resposta
+    assert q('select id,valor,efeitos from launches where user_id=%s order by id', (uid,)) == antes
+    assert db.get_pending_action(uid) == pendente and not ia_fora
+
+
+@pytest.mark.parametrize('prefixo', ['', 'piggy '])
+@pytest.mark.parametrize('tipo', ['bill_amount_expected', 'payment_method_choice', 'confirm_media_launch'])
+def test_previsao_politica_preserva_pendencia_financeira(prefixo, tipo, monkeypatch, ia_fora):
+    from core.intent_router import INVESTMENT_ACTION_REFUSAL_MSG
+    from core.response_formatter import format_for_platform
+    _conversa_previsao_preserva_pendencia(prefixo, tipo, PEDIDOS_ATIVOS[0], monkeypatch, ia_fora,
+        resposta_esperada=format_for_platform(INVESTMENT_ACTION_REFUSAL_MSG, 'whatsapp'))
+
+
+@pytest.mark.parametrize('pedido', [
+    'qual meu saldo daqui 30 dias?',
+    'qual meu saldo daqui 30 dias e o que é bitcoin?',
+    'previsão de saldo em 30 dias considerando uma saída de R$ 800?',
+])
+def test_previsao_politica_nao_bloqueia_leitura_legitima(pro_small_uid, ia_fora, pedido):
+    from core.intent_router import investment_action_refusal
+    uid = pro_small_uid
+    assert 'registrada' in manda(uid, 'recebi 1500 de salário em dinheiro').lower()
+    assert investment_action_refusal(pedido) is None
+    antes = q('select id,valor,efeitos from launches where user_id=%s order by id', (uid,))
+    resposta = manda(uid, pedido)
+    esperado = _check_cashflow(uid, {'days': 30, **({'amount': 800} if '800' in pedido else {})})
+    assert 'saldo previsto condicional' in resposta.lower(), resposta
+    assert fmt_brl(esperado['projetado']) in resposta
+    assert q('select id,valor,efeitos from launches where user_id=%s order by id', (uid,)) == antes
+    assert not ia_fora
+
+
+@pytest.mark.parametrize('pedido', [PEDIDOS_ATIVOS[0], 'qual meu saldo daqui 30 dias?'])
+def test_previsao_politica_mantem_pergunta_e_ai_pending(pro_small_uid, monkeypatch, ia_fora, pedido):
+    from core.intent_router import INVESTMENT_ACTION_REFUSAL_MSG, investment_action_refusal
+    from core.response_formatter import format_for_platform
+    from core.services.ai_chat_commands import pergunta_aberta_da_ia
+    uid = pro_small_uid
+    def pergunta(u, text, **kwargs):
+        db.ai_append_message(u, 'user', text)
+        db.ai_append_message(u, 'assistant', 'Qual o valor do orçamento?')
+        return 'Qual o valor do orçamento?'
+    with monkeypatch.context() as m:
+        m.setattr('core.services.ai_chat.chat', pergunta)
+        assert manda(uid, 'piggy quero organizar meu orçamento') == 'Qual o valor do orçamento?'
+    db.ai_set_pending_action(uid, 'create_budget', {'category': 'transporte', 'amount': 300}, 'Orçamento de transporte')
+    pergunta_antes = pergunta_aberta_da_ia(uid)
+    pending_antes = db.ai_get_pending_action(uid)
+    mensagens_antes = q('select id,role,content from ai_messages where user_id=%s order by id', (uid,))
+    resposta = manda(uid, pedido)
+    if investment_action_refusal(pedido):
+        assert resposta == format_for_platform(INVESTMENT_ACTION_REFUSAL_MSG, 'whatsapp'), resposta
+    else:
+        assert 'saldo previsto condicional' in resposta.lower(), resposta
+    assert pergunta_antes is not None and pergunta_aberta_da_ia(uid) == pergunta_antes
+    assert db.ai_get_pending_action(uid) == pending_antes
+    assert q('select id,role,content from ai_messages where user_id=%s order by id', (uid,)) == mensagens_antes
+    assert not q('select id from launches where user_id=%s', (uid,)) and not ia_fora
+
+
+def test_politica_educacao_de_ativo_continua_chegando_a_ia(pro_small_uid, ia_fora):
+    from core.intent_router import investment_action_refusal
+    uid = pro_small_uid
+    assert 'registrada' in manda(uid, 'recebi 1500 de salário em dinheiro').lower()
+    pedido = 'piggy o que é bitcoin?'
+    assert investment_action_refusal(pedido) is None
+    assert '[IA-NAO-DEVIA-SER-CHAMADA]' in manda(uid, pedido)
+    assert ia_fora == ['o que é bitcoin?']

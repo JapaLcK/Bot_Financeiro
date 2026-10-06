@@ -694,6 +694,15 @@ PR de cada etapa, não soluções prontas. Cada PR confere se ainda valem, decid
     de reutilizar os números. Sem terceira passada Tester.
     CI do head anterior: backend/audit aprovados; frontend falha no tooltip
     também vermelho na main. Novo head requer nova revisão remota e CI.
+  - Terceira revisão do #842 em 06/10: o atalho de previsão aplica a política
+    existente de investimento antes de interpretar compra/cenário. Recusa
+    canônica e MANTEM preservados; OF/billing e roteamento geral inalterados.
+    Manager fresh aprovou três arquivos congelados e controle causal
+    23 falhas/5 positivos sem o reparo. Combinado local: **1878 passed/2 xfailed**
+    em 47 arquivos, identidades anteriores e baseline de política preservadas.
+    CI do head anterior: frontend/audit aprovados; backend falha somente no
+    teste Pix de cached plan também vermelho na main. Novo head requer CI
+    e Codex remotos. Sem terceira passada Tester.
   - CI completo e Codex remoto no head publicável seguem pendentes. Codex local
     foi tentado, mas a CLI recusou o modelo configurado e não produziu parecer.
     Produção, WhatsApp real e aparelho não verificados; sem deploy/TestFlight/reset.

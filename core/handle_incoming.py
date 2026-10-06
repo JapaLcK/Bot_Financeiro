@@ -69,6 +69,9 @@ def _previsao_somente_leitura(uid: int, text: str) -> str | None:
             or re.search(r'\b(saldo|caixa)\b.*\b(daqui|em)\b.*\bdias?\b', norm)
             or re.search(r'\b(tranquilo|prazo)\b.*\b(ate|dia|daqui)\b', norm)):
         return None
+    policy_refusal = investment_action_refusal(text)
+    if policy_refusal is not None:
+        return policy_refusal
     from core.services.ai_chat.tools.bills import _forecast_balance, _check_cashflow
     days_re = re.compile(r'\b(?:daqui(?:\s+a)?|em)\s+(\d+)\s+dias?\b', re.I)
     target_re = re.compile(r'\b(\d{4}-\d{2}-\d{2}|\d{1,2}/\d{1,2}(?:/\d{4})?)\b')
