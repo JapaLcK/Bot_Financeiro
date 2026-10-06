@@ -33,7 +33,7 @@ from adapters.whatsapp.wa_commands_menu import (
     send_commands_menu,
     send_commands_section,
 )
-from core.handle_incoming import handle_incoming
+from core.handle_incoming import handle_incoming, _consulta_de_previsao
 from core.help_text import HELP_TRIGGERS
 from core.intent_classifier import contains_comparative_question
 from core.intent_router import abandona_pergunta_de_valor
@@ -1210,6 +1210,9 @@ def process_message(message: InboundMessage) -> None:
                     and pending_recat.get("action_type") in _PENDENCIAS_QUE_ESCREVEM
                     and _bloqueado_pelo_corte(uid, reply_to, message.text or "")):
                 return
+            if (pending_recat and pending_recat.get("action_type") in _PENDENCIAS_QUE_ESCREVEM
+                    and _consulta_de_previsao(message.text or "")):
+                pending_recat = None  # consulta segue ao core; a pergunta no banco permanece
             if pending_recat and pending_recat.get("action_type") == "recategorize_launch_text":
                 launch_id = (pending_recat.get("payload") or {}).get("launch_id")
                 # Porteiro: `_apply_recategorize` reescreve a categoria do

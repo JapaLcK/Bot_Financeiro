@@ -703,6 +703,18 @@ PR de cada etapa, não soluções prontas. Cada PR confere se ainda valem, decid
     CI do head anterior: frontend/audit aprovados; backend falha somente no
     teste Pix de cached plan também vermelho na main. Novo head requer CI
     e Codex remotos. Sem terceira passada Tester.
+  - Quarta revisão do #842 em 06/10: reconhecimento textual compartilhado entre
+    core e WhatsApp, uma coleta de alvos e distinção de obrigações existentes
+    versus cenário novo explícito. Calendário/dinheiro/tools canônicos mantidos.
+    Reproduções no adapter confirmaram consumo/pagamento/categoria indevidos
+    antes do core; consultas agora cedem ao core preservando a linha no banco.
+    Manager fresh aprovou os três arquivos congelados e os controles finais:
+    59 falhas core/12 adapter, 71 integral; restaurado 101 testes aprovados.
+    Área local: **1979 passed/2 xfailed** em 48 arquivos, todos os 1880
+    nomes/status anteriores preservados. Comandos/XML e freeze finais
+    correspondem à versão de ordem revalidada; sem terceira passada Tester.
+    CI do head anterior 52e6120f aprovado em todos os jobs. Novo head ainda
+    requer CI e Codex remotos. Merge exige nova autorização explícita do dono.
   - CI completo e Codex remoto no head publicável seguem pendentes. Codex local
     foi tentado, mas a CLI recusou o modelo configurado e não produziu parecer.
     Produção, WhatsApp real e aparelho não verificados; sem deploy/TestFlight/reset.
