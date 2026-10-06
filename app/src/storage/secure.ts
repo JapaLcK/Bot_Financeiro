@@ -308,8 +308,11 @@ export class TentativaBancariaPendente extends Error {
 }
 
 async function apagarSessaoNoCofre(): Promise<void> {
-  if (await SecureStore.getItemAsync(TENTATIVA_OF)) await SecureStore.deleteItemAsync(TENTATIVA_OF);
   await SecureStore.deleteItemAsync(PAR);
+  // Só depois de apagar a credencial o marcador fica obsoleto. Se PAR falhar,
+  // preserva a tentativa; sem PAR, a guarda de sessão impede adotá-la mesmo
+  // quando o cleanup falha. Essa falha não pode desfazer um logout concluído.
+  await SecureStore.deleteItemAsync(TENTATIVA_OF).catch(() => undefined);
 }
 
 async function tentativaNoCofre(): Promise<TentativaBancaria | null> {
