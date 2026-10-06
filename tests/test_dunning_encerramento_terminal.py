@@ -238,6 +238,38 @@ def test_motivo_nao_terminal_mantem_o_comportamento_de_hoje(user_id, monkeypatch
     assert has_app_access(uid) is False
 
 
+@pytest.mark.parametrize("reason,status", [
+    ("payment_failed", "unpaid"),
+    ("cancellation_requested", "canceled"),
+    (None, "canceled"),
+])
+def test_deleted_com_objeto_real_do_sdk_stripe(user_id, monkeypatch, reason, status):
+    """O SDK entrega CancellationDetails, que não oferece o .get de dict."""
+    import sys
+    import stripe
+
+    event_class = stripe.Event
+    uid, client, fake = _setup(monkeypatch, f"sdk-deleted-{user_id}")
+    _por_a_conta_em_atraso(uid, idade_do_relogio=timedelta(days=6, hours=12))
+    payload = _evento_deleted(uid, created=_epoch(timedelta()), reason=reason)
+    payload["data"]["object"]["object"] = "subscription"
+    monkeypatch.setitem(sys.modules, "stripe", stripe)
+    event = event_class.construct_from(payload, None)
+    monkeypatch.setattr(stripe.Webhook, "construct_event", lambda *args: event)
+    if reason is not None:
+        details = event["data"]["object"]["cancellation_details"]
+        assert type(details).__name__ == "CancellationDetails"
+        assert not isinstance(details, dict)
+
+    response = _post(client, fake, event)
+    assert response.status_code == 200, response.text
+    account = db.get_auth_user(uid)
+    assert account["last_payment_status"] == status
+    assert account["past_due_since"] is None
+    assert account["plan"] == "free"
+    assert has_app_access(uid) is False
+
+
 def test_deleted_sem_cancellation_details_nao_e_terminal(user_id, monkeypatch):
     """Ausente e desconhecido caem na perna que NÃO apaga dado — default seguro."""
     uid, client, fake = _setup(monkeypatch, f"ndet-{user_id}")
