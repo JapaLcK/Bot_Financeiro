@@ -17,13 +17,13 @@ beforeEach(async () => { prepararCaso(); definirWidgetAberto(false); await guard
 const posts = () => chamadas().filter((c) => c.caminho.endsWith("/pluggy-item"));
 it("redirect legado de A não atribui A à tentativa nova B", async () => {
   await iniciarTentativaBancaria(1, SESSAO_OF, []);
-  const b = await iniciarTentativaBancaria(1, SESSAO_OF, []);
+  const b = await iniciarTentativaBancaria(1, SESSAO_OF, [], undefined, undefined, (await lerTentativaBancaria(1)) ?? undefined);
   redirectSystemPath({ path: "pigbank://open-finance-volta?itemId=banco_a", initial: true });
   expect(await lerTentativaBancaria(1)).toEqual(b);
 });
 it("redirect com origem antiga A não atribui A à tentativa B mesmo com widget focado", async () => {
   const a = await iniciarTentativaBancaria(1, SESSAO_OF, []);
-  const b = await iniciarTentativaBancaria(1, SESSAO_OF, []);
+  const b = await iniciarTentativaBancaria(1, SESSAO_OF, [], undefined, undefined, (await lerTentativaBancaria(1)) ?? undefined);
   definirWidgetAberto(true);
   expect(redirectSystemPath({ path: `pigbank://open-finance-volta/${a!.tentativa_id}?itemId=banco_a`, initial: false })).toBeNull();
   expect(await lerTentativaBancaria(1)).toEqual(b);
@@ -53,7 +53,7 @@ it("cleanup de preparação A não apaga B criada enquanto o token A falha", asy
   servidor(async () => { recebeu.soltar(); await pausa.promessa; return resposta(503, { detail: "indisponível" }); });
   const preparando = iniciarConexaoBancaria();
   await recebeu.promessa;
-  const b = await iniciarTentativaBancaria(1, SESSAO_OF, []);
+  const b = await iniciarTentativaBancaria(1, SESSAO_OF, [], undefined, undefined, (await lerTentativaBancaria(1)) ?? undefined);
   pausa.soltar();
   await expect(preparando).rejects.toThrow();
   expect(await lerTentativaBancaria(1)).toEqual(b);

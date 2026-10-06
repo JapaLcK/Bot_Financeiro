@@ -1,7 +1,7 @@
 import { router } from "expo-router";
 import { act, fireEvent, renderRouter, screen, waitFor } from "expo-router/testing-library";
 import { guardarCredenciais, lerTentativaBancaria } from "@/storage/secure";
-import { chamadas, prepararCaso, resposta, rotear, S } from "./auth_apoio";
+import { cofre, chamadas, prepararCaso, resposta, rotear, S } from "./auth_apoio";
 import { guardarSessaoOf, VIVO } from "./open_finance_volta_apoio";
 import { desligarTrava, drenar } from "./open_finance_volta_rota_apoio";
 
@@ -25,7 +25,7 @@ function servidor(falharToken = false, atualizando = false) {
   });
 }
 const tokens = () => chamadas().filter((c) => c.caminho.endsWith("connect-token"));
-beforeEach(async () => { prepararCaso(); desligarTrava(); mockWidgets.length = 0; await guardarSessaoOf(S); servidor(); });
+beforeEach(async () => { prepararCaso(); desligarTrava(); mockWidgets.length = 0; await guardarSessaoOf(S); cofre.delete("pb.of.tentativa"); servidor(); });
 afterEach(() => jest.restoreAllMocks());
 it.each([
   ["/conectar-banco", "Conectar meu banco", "Conectar meu banco"],
@@ -57,6 +57,8 @@ it.each(["/conectar-banco", "/conexoes"])("%s libera entrada ao voltar e callbac
   await act(async () => { router.back(); await drenar(); });
   await waitFor(() => expect(screen.getByRole("button", { name: rotulo })).toBeEnabled());
   await act(async () => { fireEvent.press(screen.getByRole("button", { name: rotulo })); await drenar(); });
+  await waitFor(() => expect(screen.getByRole("button", { name: "Iniciar nova tentativa" })).toBeEnabled());
+  await act(async () => { fireEvent.press(screen.getByRole("button", { name: "Iniciar nova tentativa" })); await drenar(); });
   await waitFor(() => expect(mockWidgets.some((w) => w.connectToken === "token_2")).toBe(true));
   const b = mockWidgets.find((w) => w.connectToken === "token_2")!;
   const tentativaB = (await lerTentativaBancaria(1))!;

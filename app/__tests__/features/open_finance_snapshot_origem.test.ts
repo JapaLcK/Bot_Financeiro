@@ -1,9 +1,9 @@
 import { conferirVolta, JANELA_MS } from "@/features/openFinance/volta";
 import { capturarItemBancario, iniciarTentativaBancaria, lerTentativaBancaria } from "@/storage/secure";
-import { chamadas, prepararCaso, S } from "./auth_apoio";
+import { cofre, chamadas, prepararCaso, S } from "./auth_apoio";
 import { dependencias, guardarSessaoOf, lista, posts, servidor, SESSAO_OF, VIVO } from "./open_finance_volta_apoio";
 
-beforeEach(async () => { prepararCaso(); await guardarSessaoOf(S); });
+beforeEach(async () => { prepararCaso(); await guardarSessaoOf(S); cofre.delete("pb.of.tentativa"); });
 
 it.each([1, 2])("retomada sem URL com %i bancos observados não toma B nem encerra antes do SDK B", async (quantidade) => {
   // B foi criada quando A ainda não existia no snapshot.

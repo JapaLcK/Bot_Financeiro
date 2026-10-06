@@ -120,7 +120,8 @@ it("back de widget continua permitindo tentar de novo com nonce novo", async () 
   await waitFor(() => expect(screen.getByTestId("widget-pilha")).toBeTruthy());
   const a = await lerTentativaBancaria(1);
   await act(async () => { router.back(); await drenar(); });
-  await autorizar("Reconectar Nubank");
+  await apertar("Reconectar Nubank");
+  await autorizar("Iniciar nova tentativa");
   await waitFor(() => expect(screen.getByText("Atualizado")).toBeTruthy());
   expect(tokens()).toHaveLength(2);
   expect(tokens()[1]?.corpo).not.toEqual(expect.objectContaining({ attempt_id: a?.tentativa_id }));

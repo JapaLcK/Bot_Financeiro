@@ -1,6 +1,6 @@
 import { act, renderRouter, screen, waitFor } from "expo-router/testing-library";
 import { lerTentativaBancaria } from "@/storage/secure";
-import { chamadas, prepararCaso, resposta, rotear, S } from "./auth_apoio";
+import { cofre, chamadas, prepararCaso, resposta, rotear, S } from "./auth_apoio";
 import { guardarSessaoOf, ITEM, VIVO } from "./open_finance_volta_apoio";
 import { desligarTrava, drenar, umIntervalo } from "./open_finance_volta_rota_apoio";
 
@@ -10,7 +10,7 @@ jest.mock("react-native-pluggy-connect", () => ({ PluggyConnect: (props: Props) 
   mockWidget.props = props;
   return jest.requireActual("react").createElement(jest.requireActual("react-native").View, { testID: "widget-pass2" });
 } }));
-beforeEach(async () => { prepararCaso(); desligarTrava(); mockWidget.props = null; await guardarSessaoOf(S); });
+beforeEach(async () => { prepararCaso(); desligarTrava(); mockWidget.props = null; await guardarSessaoOf(S); cofre.delete("pb.of.tentativa"); });
 function servidor() {
   let registrado = false;
   rotear({ "/auth/me": () => resposta(200, { user_id: 1, app_access: true, display_name: "Ana" }),

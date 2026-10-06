@@ -3,7 +3,7 @@ import { act, fireEvent, renderRouter, screen, waitFor } from "expo-router/testi
 import { Alert } from "react-native";
 import type { Conexao } from "@/api/schemas/openFinance";
 import { lerTentativaBancaria } from "@/storage/secure";
-import { chamadas, fetchFalso, prepararCaso, resposta, rotear, S, segurar } from "./auth_apoio";
+import { cofre, chamadas, fetchFalso, prepararCaso, resposta, rotear, S, segurar } from "./auth_apoio";
 import { guardarSessaoOf, VIVO } from "./open_finance_volta_apoio";
 import { desligarTrava, drenar } from "./open_finance_volta_rota_apoio";
 
@@ -43,7 +43,7 @@ function alerta(confirmarAgora = false) {
     if (confirmarAgora) confirmar?.();
   });
 }
-beforeEach(async () => { prepararCaso(); desligarTrava(); mockWidget.props = null; confirmar = undefined; await guardarSessaoOf(S); servidor(); });
+beforeEach(async () => { prepararCaso(); desligarTrava(); mockWidget.props = null; confirmar = undefined; await guardarSessaoOf(S); cofre.delete("pb.of.tentativa"); servidor(); });
 afterEach(() => jest.restoreAllMocks());
 
 it.each(["Reconectar Nubank", "Conectar outro banco"])("%s antes de Desconectar no mesmo frame não abre Alert nem inicia DELETE", async (autorizar) => {

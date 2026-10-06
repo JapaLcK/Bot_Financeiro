@@ -31,7 +31,7 @@ it("outra conta/sessão não lê nem sobrescreve marcador antigo", async () => {
 });
 it("sair limpa marcador junto da sessão; conclusão velha não limpa tentativa nova", async () => {
   const a = (await iniciarTentativaBancaria(1, SESSAO_OF, []))!;
-  const b = (await iniciarTentativaBancaria(1, SESSAO_OF, []))!;
+  const b = (await iniciarTentativaBancaria(1, SESSAO_OF, [], undefined, undefined, (await lerTentativaBancaria(1)) ?? undefined))!;
   await concluirTentativaBancaria(a.tentativa_id);
   expect(await lerTentativaBancaria(1)).toEqual(b);
   await limparSessaoDe(JWT_OF, "r1");
@@ -52,7 +52,7 @@ it("itemId repetido/malformado no link não captura candidato arbitrário", asyn
 
 it("callback tardio do widget não captura item na tentativa seguinte da mesma sessão", async () => {
   const antiga = await iniciarTentativaBancaria(1, SESSAO_OF, []);
-  const nova = await iniciarTentativaBancaria(1, SESSAO_OF, []);
+  const nova = await iniciarTentativaBancaria(1, SESSAO_OF, [], undefined, undefined, (await lerTentativaBancaria(1)) ?? undefined);
   await capturarItemBancario("item_a", antiga!.tentativa_id);
   expect(await lerTentativaBancaria(1)).toEqual(nova);
 });

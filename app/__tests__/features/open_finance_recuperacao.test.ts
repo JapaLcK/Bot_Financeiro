@@ -78,7 +78,7 @@ it("mais de uma candidata sem item não adota por ordem da lista", async () => {
 });
 
 it.each(["updated", "partial", "error"])("reconexão não encerra com snapshot %s anterior ao consentimento atual", async (state) => {
-  await iniciarTentativaBancaria(1, SESSAO_OF, [ITEM], ITEM);
+  await iniciarTentativaBancaria(1, SESSAO_OF, [ITEM], ITEM, undefined, (await lerTentativaBancaria(1)) ?? undefined);
   servidor({ get: () => lista({ ...VIVO, ui: { ...VIVO.ui, state } }) });
   const { d, ultimo } = dependencias();
   await conferirVolta(undefined, d);
@@ -87,7 +87,7 @@ it.each(["updated", "partial", "error"])("reconexão não encerra com snapshot %
   expect(posts()).toEqual([]);
 });
 it("reconexão com callback espera carimbo atual e sync após esse carimbo", async () => {
-  const tentativa = await iniciarTentativaBancaria(1, SESSAO_OF, [ITEM], ITEM);
+  const tentativa = await iniciarTentativaBancaria(1, SESSAO_OF, [ITEM], ITEM, undefined, (await lerTentativaBancaria(1)) ?? undefined);
   await capturarItemBancario(ITEM, tentativa!.tentativa_id);
   let registrado = false;
   let consultas = 0;
@@ -102,7 +102,7 @@ it("reconexão com callback espera carimbo atual e sync após esse carimbo", asy
   expect(await lerTentativaBancaria(1)).toBeNull();
 });
 it("snapshot com carimbo mais antigo que o anterior não confirma a reconexão atual", async () => {
-  await iniciarTentativaBancaria(1, SESSAO_OF, [ITEM], ITEM, "2026-10-05T14:00:00Z");
+  await iniciarTentativaBancaria(1, SESSAO_OF, [ITEM], ITEM, "2026-10-05T14:00:00Z", (await lerTentativaBancaria(1)) ?? undefined);
   servidor({ get: () => lista({ ...VIVO, reconnected_at: "2026-10-05T11:00:00Z" }) });
   const { d, ultimo } = dependencias();
   await conferirVolta(undefined, d);

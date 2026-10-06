@@ -3,7 +3,7 @@ import { act, renderRouter, screen, waitFor } from "expo-router/testing-library"
 import { widgetAberto } from "@/features/openFinance/volta";
 import { iniciarTentativaBancaria, lerTentativaBancaria } from "@/storage/secure";
 import { redirectSystemPath } from "../../app/+native-intent";
-import { chamadas, prepararCaso, resposta, rotear, S } from "./auth_apoio";
+import { cofre, chamadas, prepararCaso, resposta, rotear, S } from "./auth_apoio";
 import { guardarSessaoOf, ITEM, SESSAO_OF, VIVO } from "./open_finance_volta_apoio";
 import { desligarTrava, drenar } from "./open_finance_volta_rota_apoio";
 
@@ -16,7 +16,7 @@ jest.mock("react-native-pluggy-connect", () => ({
     return require("react").createElement(require("react-native").View, { testID: "widget-pluggy" });
   },
 }));
-beforeEach(async () => { prepararCaso(); desligarTrava(); mockWidget.props = null; await guardarSessaoOf(S); });
+beforeEach(async () => { prepararCaso(); desligarTrava(); mockWidget.props = null; await guardarSessaoOf(S); cofre.delete("pb.of.tentativa"); });
 function servidor(acesso = true) {
   let registrado = false;
   rotear({ "/auth/me": () => resposta(200, { user_id: 1, app_access: acesso, display_name: "Ana" }),
@@ -57,7 +57,7 @@ it("sucesso tardio de widget fechado não captura item na nova tentativa da mesm
   await waitFor(() => expect(screen.getByTestId("widget-pluggy")).toBeTruthy());
   const antigo = mockWidget.props!;
   await act(async () => { antigo.onClose(); await drenar(); });
-  const nova = await iniciarTentativaBancaria(1, SESSAO_OF, []);
+  const nova = await iniciarTentativaBancaria(1, SESSAO_OF, [], undefined, undefined, (await lerTentativaBancaria(1)) ?? undefined);
   await act(async () => { antigo.onSuccess({ item: { id: ITEM } }); await drenar(); });
   expect(await lerTentativaBancaria(1)).toEqual(nova);
   expect(chamadas().some((v) => v.caminho.endsWith("pluggy-item"))).toBe(false);

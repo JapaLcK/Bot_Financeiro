@@ -298,6 +298,14 @@ const tentativaSchema = z.object({
   autorizacao_recebida: z.boolean().optional(), reconnected_antes: z.string().nullable().optional(),
 });
 export type TentativaBancaria = z.infer<typeof tentativaSchema>;
+export type SubstituicaoBancaria = Pick<TentativaBancaria, "sessao" | "tentativa_id">;
+
+export class TentativaBancariaPendente extends Error {
+  constructor(public readonly tentativa: TentativaBancaria) {
+    super("Há uma conexão bancária pendente.");
+    this.name = "TentativaBancariaPendente";
+  }
+}
 
 async function apagarSessaoNoCofre(): Promise<void> {
   if (await SecureStore.getItemAsync(TENTATIVA_OF)) await SecureStore.deleteItemAsync(TENTATIVA_OF);
@@ -317,9 +325,17 @@ async function sessaoNoCofre(): Promise<string | null> {
 
 export function iniciarTentativaBancaria(
   user_id: number, sessao: string, ids_antes: string[], item_id?: string, reconnected_antes?: string | null,
+  substituir?: SubstituicaoBancaria,
 ): Promise<TentativaBancaria | null> {
   return naFila(async () => {
     if (await sessaoNoCofre() !== sessao) return null;
+    const anterior = await tentativaNoCofre();
+    const pendente = anterior?.sessao === sessao ? anterior : null;
+    // A escolha vale somente para a sessão e o nonce mostrados no aviso.
+    // Comparar e gravar na mesma fila impede uma confirmação velha apagar B.
+    if (substituir && (substituir.sessao !== sessao || pendente?.tentativa_id !== substituir.tentativa_id)) return null;
+    if (pendente && pendente.user_id !== user_id) return null;
+    if (pendente && !substituir) throw new TentativaBancariaPendente(pendente);
     const t: TentativaBancaria = { user_id, sessao, ids_antes, item_id, reconnected_antes, modo: item_id ? "reconectar" : "nova",
       iniciada_em: Date.now(), tentativa_id: Crypto.randomUUID() };
     await SecureStore.setItemAsync(TENTATIVA_OF, JSON.stringify(t));

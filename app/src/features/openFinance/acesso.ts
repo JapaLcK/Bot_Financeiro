@@ -2,7 +2,7 @@ import { ErroDeApi, RequisicaoSuperada } from "@/api/client";
 import type { Perfil } from "@/api/schemas/auth";
 import { perfil } from "@/services/auth";
 import { limiteBancario, onboardingBancario, conexoes, pedirConnectToken } from "@/services/openFinance";
-import { descartarPreparacaoBancaria, iniciarTentativaBancaria, jtiDe, lerCredenciais, type Credenciais } from "@/storage/secure";
+import { descartarPreparacaoBancaria, iniciarTentativaBancaria, jtiDe, lerCredenciais, type Credenciais, type SubstituicaoBancaria } from "@/storage/secure";
 
 export type AcessoBancario = { perfil: Perfil; fase: "inicio" | "conectar" | "sem-acesso" | "cobranca-pendente" | "sem-open-finance" | "senha" };
 
@@ -28,10 +28,11 @@ export async function carregarAcessoBancario(): Promise<AcessoBancario> {
 }
 
 /** Nenhum widget abre sem marcador persistido e permissão do servidor. */
-export async function iniciarConexaoBancaria(itemId?: string, cancelado: () => boolean = () => false) {
+export async function iniciarConexaoBancaria(itemId?: string, cancelado: () => boolean = () => false, substituir?: SubstituicaoBancaria) {
   const credencial = await lerCredenciais();
   const sessao = credencial && jtiDe(credencial.access);
   if (!sessao) throw new Error("Não conseguimos preparar a conexão. Entre de novo.");
+  if (substituir && substituir.sessao !== sessao) throw new RequisicaoSuperada();
   const p = await perfil();
   if (p.app_access !== true) throw new Error("Sua conta não tem acesso à conexão bancária agora.");
   const snapshot = await conexoes(p.user_id);
@@ -45,7 +46,7 @@ export async function iniciarConexaoBancaria(itemId?: string, cancelado: () => b
   if (cancelado()) throw new RequisicaoSuperada();
   const tentativa = await iniciarTentativaBancaria(p.user_id, sessao,
     snapshot.connections.flatMap((c) => c.provider_item_id ? [c.provider_item_id] : []), itemId,
-    snapshot.connections.find((c) => c.provider_item_id === itemId)?.reconnected_at);
+    snapshot.connections.find((c) => c.provider_item_id === itemId)?.reconnected_at, substituir);
   if (!tentativa) throw new Error("Sua sessão mudou. Tente de novo.");
   try {
     if (cancelado()) throw new RequisicaoSuperada();

@@ -25,7 +25,7 @@ it("rodada sem item não aproveita marcador novo criado durante a espera", async
   servidor({ get: () => lista() });
   let nova: Awaited<ReturnType<typeof lerTentativaBancaria>> = null;
   const { d, relogio } = dependencias({ esperar: async () => {
-    if (!nova) { nova = await iniciarTentativaBancaria(1, SESSAO_OF, []); await capturarItemBancario(ITEM, nova!.tentativa_id); nova = await lerTentativaBancaria(1); }
+    if (!nova) { nova = await iniciarTentativaBancaria(1, SESSAO_OF, [], undefined, undefined, (await lerTentativaBancaria(1)) ?? undefined); await capturarItemBancario(ITEM, nova!.tentativa_id); nova = await lerTentativaBancaria(1); }
     relogio.t += 3_000;
   } });
   await conferirVolta(undefined, d);

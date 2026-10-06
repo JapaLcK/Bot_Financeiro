@@ -34,7 +34,7 @@ it("controle positivo: pista presente antes da conferência sem URL registra e c
 
 it.each(["updated", "partial"])("reconexão %s não conclui com carimbo igual ao baseline", async (state) => {
   const marco = "2026-10-05T13:00:00Z";
-  await iniciarTentativaBancaria(1, SESSAO_OF, [ITEM], ITEM, marco);
+  await iniciarTentativaBancaria(1, SESSAO_OF, [ITEM], ITEM, marco, (await lerTentativaBancaria(1)) ?? undefined);
   servidor({ get: () => lista({ ...VIVO, reconnected_at: marco, last_sync_at: marco, ui: { state, label: state } }) });
   const { d, ultimo } = dependencias();
   await conferirVolta(undefined, d);
@@ -46,7 +46,7 @@ it.each(["updated", "partial"])("reconexão %s não conclui com carimbo igual ao
 it.each(["updated", "partial"])("controle positivo: reconexão %s com carimbo avançado e sync igual conclui", async (state) => {
   const antigo = "2026-10-05T12:00:00Z";
   const marco = "2026-10-05T13:00:00Z";
-  await iniciarTentativaBancaria(1, SESSAO_OF, [ITEM], ITEM, antigo);
+  await iniciarTentativaBancaria(1, SESSAO_OF, [ITEM], ITEM, antigo, (await lerTentativaBancaria(1)) ?? undefined);
   const ui = { state, label: state, detail: null };
   servidor({ get: () => lista({ ...VIVO, reconnected_at: marco, last_sync_at: marco, ui }) });
   const { d, ultimo } = dependencias();
@@ -58,7 +58,7 @@ it.each(["updated", "partial"])("controle positivo: reconexão %s com carimbo av
 
 it("sync um milissegundo anterior ao carimbo novo mantém recuperação sem repetir POST", async () => {
   const marco = "2026-10-05T13:00:00.000Z";
-  await iniciarTentativaBancaria(1, SESSAO_OF, [ITEM], ITEM, null);
+  await iniciarTentativaBancaria(1, SESSAO_OF, [ITEM], ITEM, null, (await lerTentativaBancaria(1)) ?? undefined);
   servidor({ get: () => lista({ ...VIVO, reconnected_at: marco, last_sync_at: "2026-10-05T12:59:59.999Z" }) });
   const { d, estados, ultimo } = dependencias();
   await conferirVolta(undefined, d);
@@ -78,8 +78,8 @@ it.each(["removed", "item_missing"])("callback de outro banco %s não apaga tent
 });
 
 it("callback com nonce corrente captura; nonce anterior não marca autorização da reconexão nova", async () => {
-  const antiga = (await iniciarTentativaBancaria(1, SESSAO_OF, [ITEM], ITEM))!;
-  const nova = (await iniciarTentativaBancaria(1, SESSAO_OF, [ITEM], ITEM))!;
+  const antiga = (await iniciarTentativaBancaria(1, SESSAO_OF, [ITEM], ITEM, undefined, (await lerTentativaBancaria(1)) ?? undefined))!;
+  const nova = (await iniciarTentativaBancaria(1, SESSAO_OF, [ITEM], ITEM, undefined, (await lerTentativaBancaria(1)) ?? undefined))!;
   await capturarItemBancario(ITEM, antiga.tentativa_id);
   expect(await lerTentativaBancaria(1)).toEqual(nova);
   await capturarItemBancario(ITEM, nova.tentativa_id);

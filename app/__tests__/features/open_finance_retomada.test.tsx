@@ -1,9 +1,9 @@
 import { router } from "expo-router";
 import { act, fireEvent, renderRouter, screen, waitFor } from "expo-router/testing-library";
 import type { Conexao } from "@/api/schemas/openFinance";
-import { capturarItemBancario, lerTentativaBancaria } from "@/storage/secure";
+import { capturarItemBancario, iniciarTentativaBancaria, lerTentativaBancaria } from "@/storage/secure";
 import { chamadas, prepararCaso, resposta, rotear, S, segurar } from "./auth_apoio";
-import { guardarSessaoOf, VIVO } from "./open_finance_volta_apoio";
+import { guardarSessaoOf, SESSAO_OF, VIVO } from "./open_finance_volta_apoio";
 import { appVai, desligarTrava, drenar, umIntervalo } from "./open_finance_volta_rota_apoio";
 
 // Só a fronteira WebView nativa é dublada; Router, autorização e HTTP são reais.
@@ -123,7 +123,8 @@ it("Ver bancos antes de Conectar na origem não inicia autorização oculta", as
 });
 
 it("retomada sem item pausa/refoca sem adotar A visto no snapshot nem criar outro nonce", async () => {
-  await guardarSessaoOf(S); const marcador = await lerTentativaBancaria(1);
+  const anterior = (await lerTentativaBancaria(1))!;
+  const marcador = await iniciarTentativaBancaria(1, SESSAO_OF, [], undefined, undefined, anterior);
   expect(marcador!.item_id).toBeUndefined();
   servidor(); renderRouter("./app", { initialUrl: "/" }); await apertar("Retomar conexão");
   await waitFor(() => expect(gets()).toBe(1));
