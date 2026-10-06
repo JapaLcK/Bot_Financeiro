@@ -177,3 +177,16 @@ telas definitivas no iPhone. Isso não adiciona modo OAuth dentro do app nem
 contorna limites/direito. Jest cobre as transições com SDK e rede simulados;
 exportação Metro não prova consentimento bancário real. A validação real das
 builds anteriores não substitui o roteiro das novas telas no aparelho.
+
+
+Acompanhar a sincronização de um banco na lista usa modo `acompanhar` somente
+leitura. O item é validado novamente no snapshot da conta autenticada; a query
+não fornece vínculo de autorização nem confiança. Observação não lê nem altera
+marcadores de conexão, não cria token e não registra item, mesmo quando acompanha
+o mesmo banco da tentativa pendente. Item ausente/removido encerra observação;
+modo inválido ou repetido é fechado, inclusive em URI fria. Chaves e valores de
+query são decodificados uma vez por par, preservando duplicidade após decode,
+'=' dentro do valor e delimitadores codificados; fragmentos não são query.
+OAuth/SDK sem esse
+modo conservam o contrato UUID original. Assim, acompanhar B não muda A, e um
+callback próprio de A continua recuperável depois de observar B.

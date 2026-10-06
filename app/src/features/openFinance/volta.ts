@@ -126,12 +126,15 @@ function textoDoErro(e: unknown): string {
  * desconectado em outro aparelho); no fim da janela mostra `organizando`, e a
  * tela de Conexões mostra a verdade (a linha só some da lista por DELETE).
  */
-export async function conferirVolta(link: unknown, d: Dependencias, origem?: unknown): Promise<void> {
+export async function conferirVolta(link: unknown, d: Dependencias, origem?: unknown, modo?: unknown): Promise<void> {
+  // Modo vindo da URL não é confiança: acompanhar só lê o snapshot próprio.
+  const observar = modo === "acompanhar";
+  if (modo !== undefined && !observar) return d.aoMudar({ fase: "sem-item" });
   let itemId = itemDoLink(link);
-  if (link !== undefined && link !== null && !itemId) return d.aoMudar({ fase: "sem-item" });
+  if ((observar || (link !== undefined && link !== null)) && !itemId) return d.aoMudar({ fase: "sem-item" });
   let inicial: Awaited<ReturnType<typeof lerTentativaBancaria>>;
   try {
-    inicial = await lerTentativaBancaria();
+    inicial = observar ? null : await lerTentativaBancaria();
     if (itemId && inicial && tentativaDoLink(origem) === inicial.tentativa_id) await capturarItemBancario(itemId, inicial.tentativa_id);
   } catch {
     if (d.cancelado()) return;
@@ -166,9 +169,14 @@ export async function conferirVolta(link: unknown, d: Dependencias, origem?: unk
 
   for (;;) {
     try {
-      uid ??= (await perfil()).user_id;
+      if (uid === null) {
+        const p = await perfil();
+        if (d.cancelado()) return;
+        if (observar && p.app_access !== true) return d.aoMudar({ fase: "erro", texto: "Acesso indisponível. Confira sua conta no Início." });
+        uid = p.user_id;
+      }
       if (d.cancelado()) return;
-      const lida = await lerTentativaBancaria(uid);
+      const lida = observar ? null : await lerTentativaBancaria(uid);
       const tentativa = daRodada(lida) ? lida : null;
       if (d.cancelado()) return;
       if (inicial && !tentativa) return d.aoMudar({ fase: "sem-item" });
@@ -180,43 +188,50 @@ export async function conferirVolta(link: unknown, d: Dependencias, origem?: unk
       // bancos não associa nenhum deles ao widget desta rodada.
       bancosObservados = snapshot.connections.some((c) => c.provider_item_id && !MORTOS.has(c.ui.state));
       const atual = itemId ? achar(snapshot, itemId) : null;
-      const daTentativa = tentativa?.item_id === itemId ? tentativa : null;
-      const reconectando = daTentativa?.modo === "reconectar" ? daTentativa : null;
-      const atualConfirmada = !!atual && (!reconectando || carimboAtual(reconectando, atual));
-      if (d.cancelado()) return;
-      if (atual && MORTOS.has(atual.ui.state)) {
-        if (daTentativa) await concluirTentativaBancaria(daTentativa.tentativa_id);
-        return d.aoMudar({ fase: "erro", texto: "Esse banco foi desconectado. Inicie uma nova conexão." });
-      }
-      if (atual && atualConfirmada) {
-        if (daTentativa) await marcarTentativaBancariaVista(daTentativa.tentativa_id);
+      if (observar) {
         if (d.cancelado()) return;
-        const ui = reconectando && ["updated", "partial"].includes(atual.ui.state) && !syncAtual(atual)
-          ? { state: "updating", label: "Atualizando…", detail: null } : atual.ui;
-        if (parou(ui)) {
-          if (daTentativa && ["updated", "partial"].includes(ui.state)) await concluirTentativaBancaria(daTentativa.tentativa_id);
-          return;
+        if (!atual) return d.aoMudar({ fase: "sem-item" });
+        if (MORTOS.has(atual.ui.state)) return d.aoMudar({ fase: "erro", texto: "Esse banco foi desconectado. Inicie uma nova conexão." });
+        if (parou(atual.ui)) return;
+      } else {
+        const daTentativa = tentativa?.item_id === itemId ? tentativa : null;
+        const reconectando = daTentativa?.modo === "reconectar" ? daTentativa : null;
+        const atualConfirmada = !!atual && (!reconectando || carimboAtual(reconectando, atual));
+        if (d.cancelado()) return;
+        if (atual && MORTOS.has(atual.ui.state)) {
+          if (daTentativa) await concluirTentativaBancaria(daTentativa.tentativa_id);
+          return d.aoMudar({ fase: "erro", texto: "Esse banco foi desconectado. Inicie uma nova conexão." });
         }
-      }
-      // Pista de callback só pode adotar item na tentativa desta sessão.
-      // Sem isso um link antigo ressuscitaria banco removido após reinstalar.
-      const corrente = await lerTentativaBancaria(uid);
-      if (d.cancelado()) return;
-      const podeRegistrar = tentativa && corrente?.tentativa_id === tentativa.tentativa_id && itemId && tentativa.item_id === itemId &&
-        !tentativa.visto_no_servidor && (!reconectando || tentativa.autorizacao_recebida) && Date.now() - tentativa.iniciada_em <= 60 * 60_000;
-      if (tentativa && posts < MAX_POSTS && !visto && podeRegistrar) {
-        posts += 1;
-        const resposta = await registrarTentativa(uid, tentativa, itemId!, d.controlador);
-        const registrado = resposta ? achar(resposta, itemId!) : null;
-        if (d.cancelado()) return;
-        if (registrado && (!reconectando || carimboAtual(tentativa, registrado))) {
-          await marcarTentativaBancariaVista(tentativa!.tentativa_id);
+        if (atual && atualConfirmada) {
+          if (daTentativa) await marcarTentativaBancariaVista(daTentativa.tentativa_id);
           if (d.cancelado()) return;
-          const ui = reconectando && ["updated", "partial"].includes(registrado.ui.state) && !syncAtual(registrado)
-            ? { state: "updating", label: "Atualizando…", detail: null } : registrado.ui;
+          const ui = reconectando && ["updated", "partial"].includes(atual.ui.state) && !syncAtual(atual)
+            ? { state: "updating", label: "Atualizando…", detail: null } : atual.ui;
           if (parou(ui)) {
-            if (["updated", "partial"].includes(ui.state)) await concluirTentativaBancaria(tentativa!.tentativa_id);
+            if (daTentativa && ["updated", "partial"].includes(ui.state)) await concluirTentativaBancaria(daTentativa.tentativa_id);
             return;
+          }
+        }
+        // Pista de callback só pode adotar item na tentativa desta sessão.
+        // Sem isso um link antigo ressuscitaria banco removido após reinstalar.
+        const corrente = await lerTentativaBancaria(uid);
+        if (d.cancelado()) return;
+        const podeRegistrar = tentativa && corrente?.tentativa_id === tentativa.tentativa_id && itemId && tentativa.item_id === itemId &&
+          !tentativa.visto_no_servidor && (!reconectando || tentativa.autorizacao_recebida) && Date.now() - tentativa.iniciada_em <= 60 * 60_000;
+        if (tentativa && posts < MAX_POSTS && !visto && podeRegistrar) {
+          posts += 1;
+          const resposta = await registrarTentativa(uid, tentativa, itemId!, d.controlador);
+          const registrado = resposta ? achar(resposta, itemId!) : null;
+          if (d.cancelado()) return;
+          if (registrado && (!reconectando || carimboAtual(tentativa, registrado))) {
+            await marcarTentativaBancariaVista(tentativa!.tentativa_id);
+            if (d.cancelado()) return;
+            const ui = reconectando && ["updated", "partial"].includes(registrado.ui.state) && !syncAtual(registrado)
+              ? { state: "updating", label: "Atualizando…", detail: null } : registrado.ui;
+            if (parou(ui)) {
+              if (["updated", "partial"].includes(ui.state)) await concluirTentativaBancaria(tentativa!.tentativa_id);
+              return;
+            }
           }
         }
       }
@@ -228,8 +243,8 @@ export async function conferirVolta(link: unknown, d: Dependencias, origem?: unk
       if (d.cancelado()) return;
       if (e instanceof ErroDeApi && (e.corpo as { detail?: { code?: string } } | undefined)?.detail?.code === "OF_ITEM_REMOVED") {
         try {
-          const t = await lerTentativaBancaria(uid ?? undefined);
-          if (t?.item_id === itemId) await concluirTentativaBancaria(t.tentativa_id);
+          const t = observar ? null : await lerTentativaBancaria(uid ?? undefined);
+          if (!observar && t?.item_id === itemId) await concluirTentativaBancaria(t.tentativa_id);
         } catch {
           // A lápide do servidor continua válida mesmo se o cofre não permitir
           // limpar o marcador; nenhuma tentativa extra de adoção é feita aqui.

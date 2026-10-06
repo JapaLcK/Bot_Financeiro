@@ -22,21 +22,43 @@ const VOLTA = [
  */
 export function redirectSystemPath({ path, initial }: { path: string; initial: boolean }): string | null {
   if (VOLTA.some((r) => r.test(path))) {
-    const encontrados = [...path.matchAll(/[?&]itemId=([^&#]*)/g)];
-    const valor = encontrados.length === 1 ? encontrados[0]?.[1] : undefined;
+    let consulta: URLSearchParams;
+    try {
+      const semFragmento = path.split("#")[0] ?? "";
+      const separador = semFragmento.indexOf("?");
+      const query = separador < 0 ? "" : semFragmento.slice(separador + 1);
+      // O construtor string do RN trunca '='. Pares preservam valores e
+      // delimitadores codificados; decode acontece uma vez em cada parte.
+      const pares = query.split("&").filter(Boolean).map((par): [string, string] => {
+        const igual = par.indexOf("=");
+        const chave = igual < 0 ? par : par.slice(0, igual);
+        const valor = igual < 0 ? "" : par.slice(igual + 1);
+        return [decodeURIComponent(chave.replace(/\+/g, " ")), decodeURIComponent(valor.replace(/\+/g, " "))];
+      });
+      consulta = new URLSearchParams(pares);
+    } catch {
+      if (!initial && widgetAberto()) return null;
+      return "/open-finance-volta?itemId=&modo=";
+    }
+    const encontrados = consulta.getAll("itemId");
+    const valor = encontrados.length === 1 ? encontrados[0] : undefined;
+    const modos = consulta.getAll("modo");
+    const observacao = consulta.has("modo");
+    const modo = modos.length === 1 && modos[0] === "acompanhar" ? "acompanhar" : "";
     const segmento = path.split(/[?#]/)[0]?.match(/\/open-finance-volta\/([^/]+)$/)?.[1];
     // Só o path configurado no token carrega a origem. Query fornecida pelo
     // link não ganha vínculo com a tentativa atualmente no cofre.
-    const origem = /[?&](?:tentativaId|attempt_id)=/.test(path) ? null : tentativaDoLink(segmento);
+    const origem = consulta.has("tentativaId") || consulta.has("attempt_id") ? null : tentativaDoLink(segmento);
     let item: string | null = null;
     try {
-      item = itemDoLink(valor ? decodeURIComponent(valor) : undefined);
-      if (item && origem) void capturarItemBancario(item, origem).catch(() => {});
+      item = itemDoLink(valor);
+      if (item && origem && !observacao) void capturarItemBancario(item, origem).catch(() => {});
     } catch { /* Link inválido não impede abrir o app. */ }
     if (!initial && widgetAberto()) return null;
     const parametros = [
       ...(encontrados.length ? [`itemId=${item ? encodeURIComponent(item) : ""}`] : []),
-      ...(origem ? [`tentativaId=${origem}`] : []),
+      ...(origem && !observacao ? [`tentativaId=${origem}`] : []),
+      ...(observacao ? [`modo=${modo}`] : []),
     ];
     return `/open-finance-volta${parametros.length ? `?${parametros.join("&")}` : ""}`;
   }

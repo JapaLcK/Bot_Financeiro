@@ -64,9 +64,11 @@ export default function OpenFinanceVolta() {
   const { expirou } = useSessao();
   const ativo = useForeground();
   const travado = useBloqueio().estado.fase === "travado";
-  // Só o `itemId` do link é lido; `uid`/`user_id` nele são ignorados (o uid vem de `perfil()`).
+  // Parâmetros são entrada não confiável; modo só permite observar a lista própria.
+  // `uid`/`user_id` são ignorados: a conta vem de `perfil()`.
   const recebido = useLocalSearchParams().itemId;
   const origem = useLocalSearchParams().tentativaId;
+  const modo = useLocalSearchParams().modo;
   const item = itemDoLink(recebido);
   const link = item ?? (recebido === undefined ? undefined : "");
   const [estado, setEstado] = useState<EstadoVolta>({ fase: "esperando-trava" });
@@ -86,12 +88,12 @@ export default function OpenFinanceVolta() {
       cancelado: () => cancelado,
       aoMudar: setEstado,
       expirou,
-    }, origem);
+    }, origem, modo);
     return () => {
       cancelado = true;
       controlador.abort();
     };
-  }, [link, origem, travado, ativo, rodada]);
+  }, [link, origem, modo, travado, ativo, rodada]);
 
   const atualizando = estado.fase === "conectado" && estado.ui.state === "updating";
   const conferindo = estado.fase === "conferindo";

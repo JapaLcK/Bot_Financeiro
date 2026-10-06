@@ -99,7 +99,7 @@ export default function Conexoes() {
       <Texto variante="secao">{c.institution_name ?? "Seu banco"}</Texto>
       <ConnectionStatus estado={c.ui.state} label={c.ui.label} detalhe={c.ui.detail ?? undefined} />
       <Texto variante="legenda" tom="inkMuted">{c.last_sync_at ? `Última sincronização: ${new Date(c.last_sync_at).toLocaleString("pt-BR")}` : "A primeira sincronização ainda não terminou."}</Texto>
-      {c.ui.state === "updating" && c.provider_item_id && <Button rotulo="Acompanhar sincronização" variante="secondary" desativado={entrando} onPress={() => navegar({ pathname: "/open-finance-volta", params: { itemId: c.provider_item_id! } })} />}
+      {c.ui.state === "updating" && c.provider_item_id && <Button rotulo="Acompanhar sincronização" variante="secondary" desativado={entrando} onPress={() => navegar({ pathname: "/open-finance-volta", params: { itemId: c.provider_item_id!, modo: "acompanhar" } })} />}
       {c.provider_item_id && dados.permiteReconectar && !["removed", "item_missing", "paused"].includes(c.ui.state) && <Button rotulo={`Reconectar ${c.institution_name ?? "banco"}`} variante="secondary" desativado={entrando || removendo !== null} onPress={() => abrirAutorizacao(c.provider_item_id!)} />}
       <Button rotulo={`Desconectar ${c.institution_name ?? "banco"}`} variante="ghost" carregando={removendo === c.id} desativado={entrando || (removendo !== null && removendo !== c.id)} onPress={() => pedirRemocao(c)} />
     </View></Card>)}
