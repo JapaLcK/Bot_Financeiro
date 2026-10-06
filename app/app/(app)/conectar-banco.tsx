@@ -25,7 +25,7 @@ export default function ConectarBanco() {
   }, []));
   const navegar = (destino: Href, substituir = false) => {
     if (entradaEmVoo.current) return;
-    if (substituir) router.replace(destino); else router.push(destino);
+    if (substituir) router.dismissTo(destino); else router.push(destino);
   };
   const abrirAutorizacao = () => {
     if (entradaEmVoo.current) return;
