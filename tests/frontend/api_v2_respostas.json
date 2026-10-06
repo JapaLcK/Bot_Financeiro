@@ -77,6 +77,7 @@
       "proximo": "WyIyMDI2LTA5LTIwIiwgIjIwMjYtMTAtMDFUMTI6MDA6MDArMDA6MDAiLCAiYyIsIDU1XQ==",
       "motivos": ["conciliacao_pendente"]
     },
+    "segunda": {"mes": "2026-10", "itens": [{"id": "l55", "data": "2026-09-20", "hora": null, "tipo": "saida", "interno": false, "valor": "0.01", "moeda": "BRL", "descricao": "Segunda página", "mensagem": "gastei 42,90 no mercado", "categoria": "mercado", "origem": "carteira", "fundido": false, "instituicao": null, "conta_id": null, "cartao_id": null, "parcela": null, "fatura": null, "pode": ["categoria", "descricao", "data", "valor", "apagar"], "motivos": []}], "proximo": null, "motivos": []},
     "vazia": { "mes": "2026-07", "itens": [], "proximo": null, "motivos": ["inicio_do_historico"] }
   },
   "categorias": {

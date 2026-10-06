@@ -325,7 +325,7 @@ test("seletor: 6 meses reais; voltar pede o mês escolhido e os blocos de exempl
 
 const SELO = { "/": [".piggy-band-by > .selo"], "/lancamentos": ["#ledger-h > .selo"], "/piggy": ["#page-title > .selo"] };
 for (const demo of [false, true]) {
-  test(`selo "demonstração" na faixa do Piggy, no extrato e na conversa: ${demo ? "não no protótipo" : "com backend"}; no título do Resumo, nunca`, async () => {
+  test(`selo "demonstração" na faixa do Piggy, no extrato demonstrativo e na conversa: ${demo ? "não no protótipo" : "com backend"}; no título do Resumo, nunca`, async () => {
     const { ctx, page, ir } = await abrir({ demo, espera: "#page-title" });
     const r = {};
     for (const [rota, seletores] of Object.entries(SELO)) {
@@ -335,11 +335,12 @@ for (const demo of [false, true]) {
         r.titulo = [await page.locator("#page-title").textContent(), await page.locator("#page-title .selo").count()];
       }
       for (const s of seletores) r[s + " " + rota] = await page.locator(s).allTextContents();
+      if (rota === "/lancamentos" && !demo) assert.equal(await page.locator("#w-lancamentos").getAttribute("data-dado"), "real");
     }
     await ctx.close();
     const um = demo ? [] : ["demonstração"];
     const titulo = [demo ? "Resumo de setembro" : "Resumo de outubro", 0];
-    assert.deepEqual(r, { titulo, ...Object.fromEntries(Object.entries(SELO).flatMap(([rota, ss]) => ss.map((s) => [s + " " + rota, um]))) });
+    assert.deepEqual(r, { titulo, ...Object.fromEntries(Object.entries(SELO).flatMap(([rota, ss]) => ss.map((s) => [s + " " + rota, rota === "/lancamentos" ? [] : um]))) });
   });
 }
 

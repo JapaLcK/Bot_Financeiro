@@ -6,6 +6,7 @@ import type { DashState } from "./lib/types";
 import { Frame } from "./parts/Frame";
 import { Board } from "./parts/Board";
 import { DicaDaTela } from "./parts/Dica";
+import { Lancamentos } from "./parts/Lancamentos";
 import { Ledger } from "./parts/Ledger";
 import { abrirGuia } from "./parts/Guia";
 import { PiggyChat } from "./parts/PiggyChat";
@@ -155,8 +156,8 @@ function Wealthy() {
 
 function Launches({ s }: { s: DashState }) {
   return (
-    <Page path="/lancamentos" lede={isCurrentMonth(s.month) ? "Tudo o que entrou e saiu no mês, com a mensagem que você mandou ao Piggy." : "O extrato do mês escolhido na barra de cima."}>
-      <div className="span-12"><Ledger s={s} /></div>
+    <Page path="/lancamentos" lede={!DEMO ? "O extrato do mês escolhido na barra de cima, com as informações de cada origem." : isCurrentMonth(s.month) ? "Tudo o que entrou e saiu no mês, com a mensagem que você mandou ao Piggy." : "O extrato do mês escolhido na barra de cima."}>
+      <div className="span-12">{DEMO ? <Ledger s={s} /> : <Lancamentos s={s} />}</div>
     </Page>
   );
 }

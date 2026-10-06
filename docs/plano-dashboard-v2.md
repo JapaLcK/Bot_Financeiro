@@ -616,5 +616,25 @@ PR de cada etapa, não soluções prontas. Cada PR confere se ainda valem, decid
     Testes locais: `tests/test_of_identidade_e_campos_bancarios.py`, além das famílias de
     reconciliação, Open Finance, dinheiro em espécie, cartão e lançamentos v2. Não provam
     callback real da Pluggy, WhatsApp nem comportamento no aparelho após deploy.
+  - PR 4 (#836): a página de
+    Lançamentos do `/painel` consome `/api/v2/lancamentos`, categorias e contas reais,
+    com mês da barra, busca no histórico do plano, filtros do contrato e cursor opaco
+    por “Carregar mais”, sem somar páginas. Criação só na Carteira (espécie), detalhes,
+    edição e confirmação de apagar seguem `pode`; o POST leva somente campos tocados
+    desde a abertura e valores decimais em texto. Escritas não repetem automaticamente;
+    resposta perdida conserva contexto e rascunho nesta aba. A recuperação abre GET fresco
+    sem filtros no mês da data enviada ou no mês retornado pelo servidor quando a data
+    foi omitida; editar data permite conferir origem e destino, e cartão usa a fatura.
+    A guarda só libera após confirmação manual na lista, com paginação disponível.
+    Busca histórica efetiva exibe anos nos grupos e linhas. Sucesso reinicia na primeira
+    página; a conferência reinicia somente a consulta alvo. Erro de escrita relê as páginas
+    carregadas, preservando o rascunho e atualizando `pode`, sem confundir página descartada
+    com item removido. Sucesso e erro invalidam categorias, contas e todos os resumos em cache.
+    Modal reutiliza dialog/fallback Safari 14 e coordena Cmd-K. Os exemplos do chat e do
+    protótipo seguem demonstrativos; no painel real os CTAs abrem o extrato sem filtros
+    do exemplo, e Cmd-K omite lançamentos/categorias fictícios. Mantidos fora P8 (depósitos
+    e aportes ausentes na API), filtro de cartão individual sem catálogo, busca real em
+    Cmd-K, backend/schema e service worker. Validação local usa fixtures e
+    bundle servido; não prova backend vivo, produção, PWA/aparelho ou callback Pluggy.
 - Guia do `/painel` (#728) em 2 PRs: A `GET`/`POST /api/v2/guia` + tabela `guia_painel` (contrato e consulta de medição em `docs/CLAUDE.md`, "API v2") · B a tela (Piggy, balão, Ajuda).
 - [ ] Etapa 0 · [ ] 1 · [ ] 2 · [ ] 3 · [ ] 4 · [ ] 5 · [ ] 6 · [ ] 7

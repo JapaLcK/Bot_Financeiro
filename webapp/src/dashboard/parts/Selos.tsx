@@ -1,11 +1,12 @@
-import type { Contas, ResumoDoMes } from "../lib/api-v2.gen";
+import type { Contas, Lancamento, ResumoDoMes } from "../lib/api-v2.gen";
 
-export type Motivo = Contas["motivos"][number] | ResumoDoMes["motivos"][number];
+export type Motivo = Contas["motivos"][number] | ResumoDoMes["motivos"][number] | Lancamento["motivos"][number];
 
 // Por que um número da /api/v2 não é exato, em português. Código novo do servidor sai cru
 // (melhor que esconder a ressalva).
 const MOTIVO: Record<Motivo, string> = {
   carteira_nao_confirmada: "a confirmar",
+  transacao_pendente: "transação pendente",
   conciliacao_pendente: "conciliação pendente",
   movimentos_pendentes: "movimentos pendentes",
   especie_incompleta: "espécie a conferir",

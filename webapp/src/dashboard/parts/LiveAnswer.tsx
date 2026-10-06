@@ -3,6 +3,7 @@ import { ActionsContext, type Actions } from "../lib/actions";
 import { apply, get as getGlobal, set as setGlobal } from "../lib/store.js";
 import type { Block } from "../lib/topics";
 import type { DashState } from "../lib/types";
+import { DEMO } from "../lib/v2";
 import { go, href, type Path } from "../router";
 import { useDash } from "../useDash";
 import { FrameScope } from "./Frame";
@@ -67,6 +68,7 @@ export function LiveAnswer({ blocks, s0, page }: { blocks: Block[]; s0: DashStat
   // Em dois passos: o `set` zera o dia quando o mês muda no mesmo patch. A origem só vale
   // com o extrato aberto (store.js), então só vai junto para o extrato.
   const toPanel = (p: Path) => {
+    if (!DEMO) return;
     const l = ref.current;
     setGlobal({ month: l.month });
     setGlobal({ horizon: l.horizon, filter: { ...l.filter, source: p === "/lancamentos" ? l.filter.source : "todos" }, highlight: l.highlight });
@@ -104,7 +106,7 @@ export function LiveAnswer({ blocks, s0, page }: { blocks: Block[]; s0: DashStat
   return (
     <ActionsContext.Provider value={actions}>
       {nodes.map((n, i) => n && <Compact key={i} id={`${scope}b${i}`} close={i === blocks.length ? closeLedger : undefined}>{n}</Compact>)}
-      <a className="link msg-open" ref={openLink} href={href(page)} onClick={() => toPanel(page)}>Abrir no painel<i className="ph ph-arrow-right" aria-hidden="true" /></a>
+      <a className="link msg-open" ref={openLink} href={href(page)} onClick={() => toPanel(page)}>{!DEMO && page === "/lancamentos" ? "Abrir lançamentos reais" : "Abrir no painel"}<i className="ph ph-arrow-right" aria-hidden="true" /></a>
     </ActionsContext.Provider>
   );
 }
