@@ -8,6 +8,7 @@ from datetime import date, timedelta
 from decimal import Decimal, localcontext
 
 import pytest
+from core.services.cashflow_snapshot import legado
 
 from core.services.decision_simulator import (
     DIAS, Cenario, Simulacao, _decision_events, installments,
@@ -59,7 +60,7 @@ def test_installments_juros_minusculos_batem_com_a_formula_exata(pct):
 def test_compra_em_31_01_parcela_no_ultimo_dia_de_fevereiro_sem_pular_nem_duplicar():
     cen = Cenario(nome="Moto", preco=3000.0, entrada=0.0, parcelas=3, data_compra=date(2028, 1, 31))
     events, contrato = _decision_events(cen, HOJE, date(2028, 12, 31))
-    assert [e[0] for e in events] == [date(2028, 2, 29), date(2028, 3, 31), date(2028, 4, 30)]
+    assert [e.data for e in events] == [date(2028, 2, 29), date(2028, 3, 31), date(2028, 4, 30)]
     assert contrato["primeira_parcela"] == "2028-02-29"
 
 
@@ -67,7 +68,7 @@ def test_despesa_mensal_nova_comeca_um_mes_depois_e_vai_para_o_contrato():
     compra = date(2027, 1, 10)
     cen = Cenario(nome="Carro", preco=100.0, data_compra=compra, despesa_mensal_nova=450.0)
     events, contrato = _decision_events(cen, HOJE, date(2027, 4, 15))
-    despesas = [(e[0], e[3]) for e in events if "despesa mensal" in e[2]]
+    despesas = [(e.data, e.assinado) for e in events if "despesa mensal" in e.nome]
     assert despesas == [(date(2027, 2, 10), -450.0), (date(2027, 3, 10), -450.0), (date(2027, 4, 10), -450.0)]
     assert contrato["despesa_mensal_nova"] == 450.0
 
@@ -78,7 +79,7 @@ def test_contrato_nao_devolve_menos_zero():
     _, contrato = _decision_events(Cenario(nome="x", preco=100.01, entrada=0.02, parcelas=12),
                                    HOJE, date(2030, 1, 1))
     assert contrato["juros_totais"] == 0.0 and math.copysign(1, contrato["juros_totais"]) == 1
-    assert "-0.0" not in json.dumps(contrato)
+    assert "-0.0" not in json.dumps(legado(contrato))
 
 
 def test_48x_so_as_parcelas_ate_o_horizonte_e_o_resto_no_contrato():
@@ -86,22 +87,22 @@ def test_48x_so_as_parcelas_ate_o_horizonte_e_o_resto_no_contrato():
     cen = Cenario(nome="Carro", preco=180000.0, entrada=36000.0, parcelas=48,
                   juros_mensal_pct=1.49, data_compra=compra, custos_unicos=2500.0)
     events, contrato = _decision_events(cen, HOJE, compra + timedelta(days=90))
-    parcelas = [e for e in events if e[1] == "simulacao_parcela"]
-    assert [e[0] for e in parcelas] == [date(2027, 2, 10), date(2027, 3, 10), date(2027, 4, 10)]
-    assert [e[3] for e in parcelas] == [-4220.98] * 3
-    assert sorted(e[3] for e in events if e[1] == "simulacao") == [-36000.0, -2500.0]
+    parcelas = [e for e in events if e.tipo == "simulacao_parcela"]
+    assert [e.data for e in parcelas] == [date(2027, 2, 10), date(2027, 3, 10), date(2027, 4, 10)]
+    assert [e.assinado for e in parcelas] == [-Decimal("4220.98")] * 3
+    assert sorted(e.assinado for e in events if e.tipo == "simulacao") == [-36000.0, -2500.0]
     assert contrato["a_vista"] is False
     assert (contrato["entrada"], contrato["pago_na_compra"]) == (36000.0, 38500.0)  # + custos 2.500
-    assert contrato["parcelas_fora_do_horizonte"] == {"quantidade": 45, "valor": round(44 * 4220.98 + 4220.78, 2)}
+    assert contrato["parcelas_fora_do_horizonte"] == {"quantidade": 45, "valor": 44 * Decimal("4220.98") + Decimal("4220.78")}
     # total_pago = entrada + parcelas + custos únicos (R$ 2.500)
-    assert (contrato["parcela"], contrato["total_pago"], contrato["juros_totais"]) == (4220.98, 241106.84, 58606.84)
+    assert tuple(legado(contrato)[k] for k in ("parcela", "total_pago", "juros_totais")) == (4220.98, 241106.84, 58606.84)
 
 
 def test_so_o_preco_e_a_vista_e_o_contrato_ecoa_isso():
     """Só `preco`: paga o valor cheio na data da compra, sem parcela futura."""
     events, contrato = _decision_events(Cenario(nome="TV", preco=3000.0, custos_unicos=200.0),
                                        HOJE, HOJE + timedelta(days=DIAS))
-    assert [(e[0], e[2], e[3]) for e in events] == [
+    assert [(e.data, e.nome, e.assinado) for e in events] == [
         (HOJE, "TV: à vista", -3000.0), (HOJE, "TV: custos únicos", -200.0)]
     assert contrato["a_vista"] is True
     # `entrada` diz a verdade (não houve entrada); quem sai na data é `pago_na_compra`
@@ -130,8 +131,8 @@ def test_pedido_que_virou_a_meia_noite_nao_poe_a_compra_no_passado():
                                   custos_unicos=0.0, despesa_mensal_nova=60.0)
     events, contrato = _decision_events(cen, HOJE, HOJE + timedelta(days=DIAS))
     assert contrato["data_compra"] == HOJE.isoformat()
-    assert [e[0] for e in events if "à vista" in e[2]] == [HOJE]
-    assert min(e[0] for e in events) >= HOJE
+    assert [e.data for e in events if "à vista" in e.nome] == [HOJE]
+    assert min(e.data for e in events) >= HOJE
 
 
 @pytest.mark.parametrize("cen,esperado", [

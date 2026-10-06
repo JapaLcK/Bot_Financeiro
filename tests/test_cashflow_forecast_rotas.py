@@ -1,7 +1,7 @@
 """Rotas /forecast e /recurring-bills/.../projection pelo HTTP de verdade."""
 from datetime import date, timedelta
 
-from _cashflow_helpers import _mock_sources, fontes_que_mudam
+from _cashflow_helpers import _mock_sources, fontes_que_mudam, compactar
 from conftest import usuario_pagante
 from core.services.cashflow_forecast import forecast_horizons, forecast_with_trajectory
 
@@ -37,13 +37,13 @@ def test_rota_forecast_devolve_trajetoria_causas_vencidos_e_horizons_intactos(mo
     assert fc["period"] == {"start": (today + timedelta(days=1)).isoformat(),
                             "end": (today + timedelta(days=90)).isoformat()}
     assert fc["premises"] == forecast_with_trajectory(uid)["premises"]
-    assert fc["vencidos"] == [{"date": (today - timedelta(days=2)).isoformat(),
+    assert compactar(fc["vencidos"],data=True) == [{"date": (today - timedelta(days=2)).isoformat(),
                                "tipo": "boleto", "nome": "Multa", "valor": 100.0}]
     wd = fc["worst_day"]
     assert (wd["date"], wd["saldo_projetado"], wd["abaixo_do_limite"]) == (
         (today + timedelta(days=10)).isoformat(), 200.0, True)
     assert wd["desde"] == today.isoformat()
-    assert wd["causas"] == [{"date": (today + timedelta(days=10)).isoformat(),
+    assert compactar(wd["causas"],data=True) == [{"date": (today + timedelta(days=10)).isoformat(),
                              "tipo": "boleto", "nome": "Aluguel", "valor": 700.0}]
     # os horizontes da rota batem com os de `forecast_horizons` (a da tool de IA) nas mesmas fontes
     esperado = forecast_horizons(uid)
@@ -51,6 +51,8 @@ def test_rota_forecast_devolve_trajetoria_causas_vencidos_e_horizons_intactos(mo
     for campo in ("today", "balance_source", "of_bank_count", "banks_excluded"):
         assert fc[campo] == esperado[campo]
     assert fc["balance_source"] == "manual"
+    assert fc["vencidos"][0]["realizacao"]=="a_conferir" and fc["vencidos"][0]["chave"]
+    assert fc["cabe_nas_premissas"] is False
 
 
 def test_rota_forecast_recusa_threshold_nao_finito(monkeypatch):
@@ -82,7 +84,7 @@ def test_rota_forecast_horizontes_e_trajetoria_da_mesma_leitura(monkeypatch):
     for n in (30, 60, 90):
         assert fc["trajectory"][n - 1]["saldo_projetado"] == fc["horizons"][str(n)]["projetado"] == 300.0, n
     assert fc["worst_day"]["saldo_projetado"] == 300.0
-    assert leituras == dict.fromkeys(("get_consolidated_balance", "list_recurring_expenses", "list_recurring_incomes", "list_bills", "_open_card_bills_detail"), 1)
+    assert leituras == dict.fromkeys(("contas_hoje", "ler_recorrentes", "ler_receitas", "ler_instancias", "ler_faturas"), 1)
     assert set(fc) == {"today", "balance_source", "of_bank_count", "banks_excluded", "horizons",
                        "trajectory", "worst_day", "vencidos", "threshold", "period", "premises",
-                       "vencem_hoje"}
+                       "vencem_hoje", "estado", "motivos", "premissas", "cobertura", "calculado_em", "valido_ate", "cabe_nas_premissas", "compromissos"}

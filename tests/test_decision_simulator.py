@@ -130,8 +130,8 @@ def test_cada_fonte_e_lida_com_o_user_id_pedido_e_nao_com_um_id_cravado(monkeypa
                           "amount": 21.0, "name": "Luz"}])
     out = simulate(7, _sim({"nome": "TV", "preco": 100.0}))
     # as 5 fontes de `_starting_balance` + `_cashflow_events` foram lidas...
-    assert set(uids) == {"get_balance", "get_consolidated_balance", "list_recurring_expenses",
-                         "list_recurring_incomes", "list_bills", "_open_card_bills_detail"}
+    assert set(uids) == {"contas_hoje", "contas_hoje", "ler_recorrentes",
+                         "ler_receitas", "ler_instancias", "ler_faturas"}
     # ...todas com o 7, e nenhuma com outro id
     assert {u for lidos in uids.values() for u in lidos} == {7}
     # controle positivo: o número da conta do 7 é o que sai na resposta

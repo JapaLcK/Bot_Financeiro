@@ -115,7 +115,7 @@ def install_runtime_boundaries(
             return [OutgoingMessage(text="")]
         return [OutgoingMessage(text=f"harness recebeu: {incoming.text}")]
 
-    modules.install("core.handle_incoming", handle_incoming=handle_incoming)
+    modules.install("core.handle_incoming", handle_incoming=handle_incoming, _consulta_de_previsao=lambda _text: False)
 
     class RestorePending:
         def __enter__(self) -> None:

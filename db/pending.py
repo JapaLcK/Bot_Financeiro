@@ -12,6 +12,22 @@ from .connection import commits_ambiguos, get_conn
 from .users import ensure_user
 
 
+def ler_para_aviso(cur, user_id, *, ia=False):
+    """Estado anterior à escrita, para avisar só mudança de qualidade financeira."""
+    query = ('select tool_name as tipo,tool_args as payload from ai_pending_actions where user_id=%s'
+             if ia else 'select action_type as tipo,payload from pending_actions where user_id=%s')
+    cur.execute(query, (user_id,))
+    r = cur.fetchone()
+    return (r['tipo'], r['payload']) if r else None
+
+
+def avisar_mudanca_financeira(cur, user_id, anterior, novo, *, ia=False):
+    from core.services.cashflow_snapshot import pendencia_financeira
+    if any(p and pendencia_financeira(p[0], p[1], ia=ia) for p in (anterior, novo)):
+        # NOTIFY é entregue depois do commit; vale entre threads/processos.
+        cur.execute("select pg_notify('pb_escrita', %s)", (str(user_id),))
+
+
 def advance_pending_action(user_id: int, action_type: str,
                            old_payload: dict, new_payload: dict | None,
                            minutes: int = 10,
@@ -51,6 +67,7 @@ def advance_pending_action(user_id: int, action_type: str,
     extra: tuple = () if old_created_at is None else (old_created_at,)
     with get_conn() as conn:
         with conn.cursor() as cur:
+            anterior = ler_para_aviso(cur, user_id)
             if new_payload is None:
                 cur.execute(
                     "delete from pending_actions "
@@ -71,6 +88,8 @@ def advance_pending_action(user_id: int, action_type: str,
                      user_id, action_type, Jsonb(old_payload)) + extra,
                 )
             gravou = cur.rowcount == 1
+            if gravou:
+                avisar_mudanca_financeira(cur, user_id, anterior, (new_action_type or action_type, new_payload) if new_payload is not None else None)
         conn.commit()
     return gravou
 
@@ -117,12 +136,15 @@ def create_pending_action_if_absent(user_id: int, action_type: str, payload: dic
     expires_at = datetime.now(timezone.utc) + timedelta(minutes=minutes)
     with get_conn() as conn:
         with conn.cursor() as cur:
+            anterior = ler_para_aviso(cur, user_id)
             cur.execute(
                 "insert into pending_actions (user_id, action_type, payload, expires_at) "
                 "values (%s, %s, %s, %s) on conflict (user_id) do nothing",
                 (user_id, action_type, Jsonb(payload), expires_at),
             )
             criou = cur.rowcount == 1
+            if criou:
+                avisar_mudanca_financeira(cur, user_id, anterior, (action_type, payload))
         conn.commit()
     return criou
 
@@ -395,6 +417,7 @@ def set_pending_action(user_id: int, action_type: str, payload: dict, minutes: i
 
     with get_conn() as conn:
         with conn.cursor(row_factory=dict_row) as cur:
+            anterior = ler_para_aviso(cur, user_id)
             cur.execute(
                 """
                 insert into pending_actions (user_id, action_type, payload, expires_at)
@@ -407,6 +430,8 @@ def set_pending_action(user_id: int, action_type: str, payload: dict, minutes: i
                 """,
                 (user_id, action_type, Jsonb(payload), expires_at),
             )
+            if cur.rowcount:
+                avisar_mudanca_financeira(cur, user_id, anterior, (action_type, payload))
         conn.commit()
 
 
@@ -437,6 +462,8 @@ def get_pending_action(user_id: int):
                     "where user_id = %s and expires_at <= now()",
                     (user_id,),
                 )
+                if cur.rowcount:
+                    avisar_mudanca_financeira(cur, user_id, (row['action_type'], row['payload']), None)
             conn.commit()
         return None
 
@@ -446,5 +473,8 @@ def get_pending_action(user_id: int):
 def clear_pending_action(user_id: int):
     with get_conn() as conn:
         with conn.cursor() as cur:
+            anterior = ler_para_aviso(cur, user_id)
             cur.execute("delete from pending_actions where user_id = %s", (user_id,))
+            if cur.rowcount:
+                avisar_mudanca_financeira(cur, user_id, anterior, None)
         conn.commit()

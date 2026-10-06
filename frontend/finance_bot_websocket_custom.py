@@ -8816,13 +8816,12 @@ async def recurring_bill_pay_route(request: Request, user_id: int, bill_id: int,
 
 
 @app.get("/recurring-bills/{user_id}/projection")
-async def boleto_projection_route(request: Request, user_id: int, date: str, amount: float | None = None):
+async def boleto_projection_route(request: Request, user_id: int, date: str, amount: str | None = None):
     """Projeção de caixa até uma data ('tô tranquilo nesse prazo?'). `date`=alvo
     (YYYY-MM-DD), `amount`=boleto novo em consideração (opcional)."""
     _authorize_dashboard_access(request, user_id)
     _require_pro(user_id, "forecast")
     from datetime import date as _date
-    from math import isfinite
     try:
         target = _date.fromisoformat(str(date)[:10])
     except (ValueError, TypeError):
@@ -8835,12 +8834,15 @@ async def boleto_projection_route(request: Request, user_id: int, date: str, amo
                 "error": "pro_required", "feature": "forecast",
                 "message": f"Seu plano permite previsões de até {cap} dias.",
             })
-    # O parser de query aceita `nan`/`inf` num float, e o número não finito
-    # estoura na serialização JSON da resposta (500).
-    if amount is not None and not isfinite(amount):
-        raise HTTPException(status_code=400, detail="Valor inválido.")
-    from core.services.cashflow import project
-    result = await asyncio.to_thread(project, user_id, target, float(amount or 0))
+    from core.services.cashflow import project, validar_extra
+    from core.services.plan_service import plan_gate_ok
+    try:
+        extra = validar_extra(amount)
+    except ValueError:
+        raise HTTPException(status_code=400, detail="Valor inválido.") from None
+    percurso = await asyncio.to_thread(plan_gate_ok, user_id, 'cashflow')
+    result = await asyncio.to_thread(project, user_id, target, extra, percurso=percurso)
+
     return {"ok": True, "projection": result}
 
 

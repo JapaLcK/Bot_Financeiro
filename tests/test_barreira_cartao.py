@@ -149,7 +149,7 @@ def test_toda_juncao_por_card_id_tem_a_guarda_do_dono():
     assert {("db/analytics.py", "list_history"), ("db/cards.py", "list_installment_groups_detailed"),
             ("frontend/finance_bot_websocket_custom.py", "get_financial_data"),
             ("db/cards.py", "list_open_bills"), ("frontend/routes/cards.py", "pay_bill_route"),
-            ("db/recurring.py", "list_recurring_expenses")} <= com_juncao
+            ("db/recurring.py", "ler_recorrentes")} <= com_juncao
     assert not faltando, f"join credit_cards por X.card_id sem c.user_id = X.user_id: {faltando}"
 
 

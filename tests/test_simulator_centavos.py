@@ -1,3 +1,4 @@
+from decimal import Decimal
 """Dinheiro em centavos na entrada; taxas percentuais mantêm sua precisão."""
 from datetime import date, timedelta
 
@@ -40,8 +41,8 @@ def test_centavos_validos_e_taxa_precisa_preservam_contrato(taxa):
     assert contrato["total_pago"] == round(contrato["pago_na_compra"]
                                            + contrato["valor_financiado"]
                                            + contrato["juros_totais"], 2)
-    parcelas = [-e[3] for e in eventos if e[1] == "simulacao_parcela"]
+    parcelas = [-e.assinado for e in eventos if e.tipo == "simulacao_parcela"]
     assert round(sum(parcelas), 2) == round(contrato["valor_financiado"]
                                             + contrato["juros_totais"], 2)
     if taxa == 0:
-        assert (contrato["valor_financiado"], contrato["total_pago"], contrato["juros_totais"]) == (200, 200.58, 0)
+        assert (contrato["valor_financiado"], contrato["total_pago"], contrato["juros_totais"]) == (200, Decimal("200.58"), 0)

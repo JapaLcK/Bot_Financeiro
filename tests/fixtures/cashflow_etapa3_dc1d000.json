@@ -1,0 +1,64 @@
+{
+  "sha_base": "dc1d0009075f3688dc4ea80ca02da80c7f073a72",
+  "funcao_sha256": "010f938f6b5dd0f6d014f17d6183cb0ba8720c5353a8199ec115b1748ea477a6",
+  "hoje": "2026-10-05",
+  "alvo": "2026-10-06",
+  "casos": [
+    {
+      "nome": "centavos_0_3_menos_0_1_0_2",
+      "saldo": 0.3,
+      "extra": 0,
+      "referencia": 0.0,
+      "novo": 0,
+      "mudanca": "paridade"
+    },
+    {
+      "nome": "manual_futuro_sem_instancia",
+      "saldo": 100,
+      "extra": 0,
+      "referencia": 100.0,
+      "novo": 90,
+      "mudanca": "manual_futuro"
+    },
+    {
+      "nome": "cartao_recorrente_e_fatura",
+      "saldo": 100,
+      "extra": 0,
+      "referencia": 40.0,
+      "novo": 70,
+      "mudanca": "deduplicacao_cartao"
+    },
+    {
+      "nome": "boleto_negativo_desconhecido",
+      "saldo": 100,
+      "extra": 0,
+      "referencia": 110.0,
+      "novo": 100,
+      "mudanca": "desconhecido_nao_receita"
+    },
+    {
+      "nome": "obrigacao_hoje",
+      "saldo": 100,
+      "extra": 0,
+      "referencia": 100.0,
+      "novo": 20,
+      "mudanca": "hoje_sob_hipotese_nao_realizada"
+    },
+    {
+      "nome": "meio_centavo_decimal",
+      "saldo": 2.675,
+      "extra": 0,
+      "referencia": 2.67,
+      "novo": 2.68,
+      "mudanca": "precisao_HALF_EVEN_decimal"
+    },
+    {
+      "nome": "extra_negativo_assinado",
+      "saldo": 100,
+      "extra": -10,
+      "referencia": 110.0,
+      "novo": 110,
+      "mudanca": "paridade"
+    }
+  ]
+}

@@ -64,7 +64,7 @@ def test_forecast_horizons_le_as_fontes_uma_vez(monkeypatch):
     out = forecast_horizons(1)
 
     assert [out["horizons"][n]["projetado"] for n in ("30", "60", "90")] == [300.0] * 3
-    assert leituras == dict.fromkeys(("get_consolidated_balance", "list_recurring_expenses", "list_recurring_incomes", "list_bills", "_open_card_bills_detail"), 1)
+    assert leituras == dict.fromkeys(("contas_hoje", "ler_recorrentes", "ler_receitas", "ler_instancias", "ler_faturas"), 1)
 
 
 # 6) Paridade com project() nos 3 marcos (30/60/90): os dois blocos do mesmo
@@ -90,7 +90,7 @@ def test_daily_trajectory_bate_com_project_nos_tres_marcos(monkeypatch):
          "due_day": 8, "amount": 222.0, "name": "Gasto manual"},
         # sem start_date o semanal não tem âncora: fica fora (em produção o início é obrigatório)
         {"is_active": True, "payment_mode": "autopay", "frequency": "weekly",
-         "due_day": 9, "amount": 333.0, "name": "Gasto semanal sem início"},
+         "start_date": None, "due_day": 9, "amount": 333.0, "name": "Gasto semanal sem início"},
     ]
     bills = [
         {"status": "pending", "due_date": today + timedelta(days=45), "amount": 150.0, "name": "Água"},
@@ -118,8 +118,8 @@ def test_daily_trajectory_bate_com_project_nos_tres_marcos(monkeypatch):
     vistos = {c["nome"] for item in traj["trajectory"] for c in item["compromissos"]}
     vistos |= {v["nome"] for v in traj["vencidos"]}
     assert {"Salário", "13º", "Aluguel", "Água", "Multa", "Nubank", "Inter"} <= vistos
-    assert not vistos & {"Receita inativa", "Gasto inativo", "Gasto manual", "Gasto semanal sem início",
-                         "Boleto pago", "Fora do horizonte"}
+    assert {'Gasto manual', 'Boleto pago'} <= vistos  # manual futuro e paid sem prova são condicionais.
+    assert not vistos & {'Receita inativa', 'Gasto inativo', 'Gasto semanal sem início', 'Fora do horizonte'}
 
 
 def test_trajetoria_e_project_batem_com_fracao_de_centavo(monkeypatch):
@@ -169,7 +169,9 @@ def test_project_fracao_de_centavo_soma_como_o_painel(monkeypatch):
     # saldo de partida 0,004 + estorno de 0,004 = 0,008 → 0,01 (arredondando o saldo antes: 0,00)
     cf = _mock_sources(monkeypatch, saldo=0.004, bills=[
         {"status": "pending", "due_date": d(2), "amount": -0.004, "name": "Estorno"}])
-    assert cf.project(1, d(30))["projetado"] == 0.01
+    out = cf.project(1, d(30))
+    assert out['projetado'] == 0.0  # boleto negativo não fabrica receita.
+    assert any(m['codigo']=='valor_boleto_desconhecido' for m in out['motivos'])
 
 
 @pytest.mark.parametrize("tarifa, projetado, tranquilo", [

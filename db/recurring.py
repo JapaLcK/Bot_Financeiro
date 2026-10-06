@@ -55,13 +55,9 @@ def validate_frequency(frequency: Any, month: Any,
     return freq, None
 
 
-def list_recurring_expenses(user_id: int, include_inactive: bool = False) -> list[dict[str, Any]]:
-    """Lista todos os gastos fixos do user."""
-    ensure_user(user_id)
-    with get_conn() as conn:
-        with conn.cursor() as cur:
-            cur.execute(
-                """
+def ler_recorrentes(cur, user_id: int, include_inactive: bool = False) -> list[dict]:
+    """Leitor puro por cursor, preservando Decimal e campos desconhecidos."""
+    cur.execute("""
                 select r.id, r.name, r.amount, r.category, r.due_day,
                        r.payment_type, r.card_id, c.name as card_name,
                        r.is_essential, r.is_active,
@@ -73,10 +69,15 @@ def list_recurring_expenses(user_id: int, include_inactive: bool = False) -> lis
                 where r.user_id = %s
                   and (%s::boolean = true or r.is_active = true)
                 order by r.is_essential desc, r.due_day asc, lower(r.name) asc
-                """,
-                (user_id, include_inactive),
-            )
-            rows = cur.fetchall() or []
+                """, (user_id, include_inactive))
+    return [dict(r) for r in cur.fetchall()]
+
+
+def list_recurring_expenses(user_id: int, include_inactive: bool = False) -> list[dict[str, Any]]:
+    """Lista todos os gastos fixos do user."""
+    ensure_user(user_id)
+    with get_conn() as conn, conn.cursor() as cur:
+        rows = ler_recorrentes(cur, user_id, include_inactive)
     out: list[dict[str, Any]] = []
     for r in rows:
         out.append({
