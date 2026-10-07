@@ -1,6 +1,6 @@
 // Cliente da /api/v2. Os tipos saem do contrato (api-v2.gen.ts); o fetch é o global,
 // que o auth-refresh.js do /painel envolve (renova no 401 e repete).
-import { infiniteQueryOptions, useQuery } from "@tanstack/react-query";
+import { infiniteQueryOptions, queryOptions, useQuery } from "@tanstack/react-query";
 import type { ErroV2, QueryGet, RotasGet, RotasPost, RotasPut } from "./api-v2.gen";
 import { MONTHS } from "./api";
 
@@ -129,6 +129,25 @@ export const categoriasQuery = {
   queryFn: ({ signal }: { signal: AbortSignal }) => apiGet("/categorias", signal),
   ...vivo,
 };
+// A previsão por horizonte (null = o padrão do plano). `gcTime: 0`: dado privado sem tela
+// olhando sai do cache na hora (troca de horizonte, downgrade, portão caído), e a chave
+// abandonada tem o fetch abortado.
+// Reconsulta quando a resposta deixa de valer (`valido_ate`), medido no relógio do servidor.
+// ponytail: piso de 60 s contra laço; o teto é o do setTimeout (2³¹−1 ms).
+const instante = (s: string) => Date.parse(s.replace(/(\.\d{3})\d+/, "$1")); // 6 casas: NaN no Safari 14
+export const previsaoQuery = (dias: 30 | 60 | 90 | null) => queryOptions({
+  queryKey: ["previsao", dias],
+  queryFn: ({ signal }) => apiGet("/previsao", signal, dias ? { dias: String(dias) as "30" | "60" | "90" } : undefined),
+  ...vivo,
+  gcTime: 0,
+  refetchInterval: (q) => {
+    const d = q.state.data;
+    if (!d?.valido_ate) return false;
+    const ms = instante(d.valido_ate) - instante(d.calculado_em) - (Date.now() - q.state.dataUpdatedAt);
+    return Number.isFinite(ms) ? Math.min(Math.max(ms, 60_000), 2 ** 31 - 1) : false;
+  },
+});
+
 export const lancamentosQuery = (filtros: Omit<QueryGet["/lancamentos"], "cursor">) => infiniteQueryOptions({
   queryKey: ["lancamentos", filtros],
   initialPageParam: null as string | null,

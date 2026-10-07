@@ -154,6 +154,26 @@
 .bill-status { display: inline-flex; align-items: center; gap: 4px; font-size: 11.5px; font-weight: 400; }
 .bill-amt { font-size: 13px; font-weight: 600; }
 
+/* Previsão real (widgets/Previsao.tsx, Compromissos.tsx): grid, o gap vale no Safari 14. */
+.prev-corpo { display: contents; } /* os filhos seguem itens do .w-body; o gráfico cresce */
+.hero-value.hero-na { font-size: 28px; }
+.hero-facts.prev-facts { display: grid; grid-auto-flow: row; grid-template-columns: repeat(auto-fit, minmax(100px, max-content)); gap: 10px 28px; }
+.prev-base { display: grid; gap: 8px; }
+.marcos, .premissas, .prev-motivos, .ocorrencias { display: grid; gap: 6px; margin: 0; padding: 0; list-style: none; font-size: 13px; }
+.marcos { grid-template-columns: repeat(auto-fit, minmax(140px, max-content)); gap: 6px 24px; color: var(--ink-2); }
+.marcos b { margin-left: 6px; color: var(--ink); font-weight: 600; }
+.premissas, .prev-motivos { color: var(--ink-2); }
+.prev-h { margin: 4px 0 0; font-size: 12px; font-weight: 600; color: var(--ink-3); }
+.prev-hora { font-size: 12px; }
+.prev-antigo, .convite { display: grid; justify-items: start; gap: 8px; font-size: 13px; color: var(--ink-2); }
+.prev-antigo { padding: 10px 12px; border-radius: 10px; background: var(--warn-wash); }
+.grupo .ph-caret-right { font-size: 11px; transition: transform var(--t-fast) ease; }
+.grupo[aria-expanded="true"] .ph-caret-right { transform: rotate(90deg); }
+.ocorrencias { gap: 0; padding: 0 8px 6px 52px; }
+.ocorrencia { display: grid; grid-template-columns: minmax(0, 1fr) auto; gap: 4px 12px; padding: 8px 0; border-top: 1px solid var(--rule); }
+.ocorrencia > .selos, .ocorrencia > .prev-motivos { grid-column: 1 / -1; }
+.ocorrencia .selo { white-space: normal; height: auto; min-height: 22px; }
+
 /* Assinaturas (grid e não flex: o gap vale no Safari 14) */
 .sub-bill { grid-template-columns: minmax(0, 1fr) auto; }
 .subs { display: grid; }

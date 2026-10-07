@@ -1,5 +1,6 @@
 import { useSyncExternalStore } from "react";
 import { flushSync } from "react-dom";
+import { DEMO } from "./lib/v2";
 
 // Rotas por hash (#/gastos): o protótipo abre de qualquer servidor estático, e cada
 // página tem endereço próprio (voltar do navegador e link compartilhado funcionam).
@@ -22,7 +23,8 @@ export const TABBAR: Path[] = ["/", "/gastos", "/piggy", "/metas", "/lancamentos
 // O Piggy não entra no menu lateral: no desktop o acesso é a barra de conversa.
 export const RAIL: Path[] = ROUTES.map((r) => r.path).filter((p) => p !== "/piggy");
 // Páginas que mostram só o presente (ignoram o mês escolhido): o topbar esconde o seletor.
-export const NO_MONTH: Path[] = ["/assinaturas", "/simulador", "/metas", "/patrimonio", "/ferramentas", "/piggy"];
+// A previsão real é de hoje em diante; a do protótipo segue o mês escolhido.
+export const NO_MONTH: Path[] = ["/assinaturas", "/simulador", "/metas", "/patrimonio", "/ferramentas", "/piggy", ...(DEMO ? [] : ["/previsao" as const])];
 
 // Hash desconhecido (#/xyz) abre o Resumo e troca o endereço para "#/" sem criar entrada
 // no histórico; hash vazio continua valendo como Resumo.

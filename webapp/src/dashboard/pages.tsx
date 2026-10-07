@@ -21,6 +21,7 @@ import { GoalsTimeline } from "./widgets/GoalsTimeline";
 import { Hero } from "./widgets/Hero";
 import { Invoice } from "./widgets/Invoice";
 import { NetWorth } from "./widgets/NetWorth";
+import { PrevisaoPainel } from "./widgets/Previsao";
 import { Simulator } from "./widgets/Simulator";
 import { SubscriptionList } from "./widgets/Subscriptions";
 import { TrajectoryChart } from "./widgets/TrajectoryChart";
@@ -54,6 +55,7 @@ function Home({ s }: { s: DashState }) {
 }
 
 function Forecast({ s }: { s: DashState }) {
+  if (!DEMO) return <Page path="/previsao" lede="Quanto deve sobrar até o horizonte escolhido, com os compromissos que o Piggy conhece."><PrevisaoPainel /></Page>;
   return (
     <Page path="/previsao" lede="O saldo dia a dia até o horizonte escolhido, com cada conta no dia em que cai.">
       <Panel span={12}><Hero s={s} /></Panel>

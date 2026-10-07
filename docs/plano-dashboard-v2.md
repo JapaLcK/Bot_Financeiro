@@ -785,3 +785,15 @@ ou motivos. Um teto futuro exige necessidade real de transporte/consumidor.
 PR2 aguarda revisão independente, CI e Codex no head. Etapa3 inteira permanece
 aberta: PR3 terá consumidor/tela/refetch temporal; simulador v2, estimativa variável,
 calendário novo e Q37 não entram nesta entrega. Merge requer autorização do dono.
+
+### Etapa 3 — PR3: tela real da previsão (implementação local, 07/10/2026)
+
+Com backend, `/painel#/previsao` e o card "Saldo previsto" do Resumo (Q1 = a) mostram a
+`GET /api/v2/previsao` como chega: marco do horizonte, base, âncora (hoje), pior dia,
+gráfico a partir da âncora, compromissos agrupados (Q2 = a: sem total, "N × valor" ou
+"valores diferentes", ocorrências na expansão), estado, motivos com direção e
+premissas. Plus: marco de 30 dias e convite ao Pro, sem gráfico nem número atrás do
+convite. Sem faixa provável, estimativa variável nem "cabe". O protótipo não muda; o
+Cmd-K real perde os atalhos de horizonte e a `/previsao` real sai do seletor de mês.
+Pendência financeira nova sem aviso SSE fica como limite declarado (`docs/CLAUDE.md`,
+API v2); fechá-la é PR Completo à parte.

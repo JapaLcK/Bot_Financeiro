@@ -29,7 +29,10 @@ function niceTicks(lo: number, hi: number, count = 4) {
 
 const line = (pts: [number, number][]) => pts.map(([x, y], i) => `${i ? "L" : "M"}${x.toFixed(1)},${y.toFixed(1)}`).join("");
 
+const valor = (p: Point) => p.texto ?? money(p.value);
+
 function tipFor(p: Point, simOn: boolean, simTone: string) {
+  if (p.rows) return { title: `${longDate(p.date)} · ${p.real ? "saldo" : "previsto"}`, value: valor(p), rows: p.rows };
   const rows: TipRow[] = [];
   if (!p.real && p.lo != null && p.hi != null) rows.push({ label: "Faixa provável", value: `${money(p.lo)} – ${money(p.hi)}` });
   if (simOn && p.sim != null) rows.push({ label: "Com a simulação", value: moneyBig(p.sim, money), color: `var(--${simTone || "ink-2"})` });
@@ -37,7 +40,7 @@ function tipFor(p: Point, simOn: boolean, simTone: string) {
     const v = e.amount == null ? "a definir" : `${e.kind === "income" ? "+" : "−"}${money(e.amount)}`;
     rows.push({ label: e.label, value: v, color: e.kind === "income" ? "var(--gain)" : e.invoice ? "var(--warn)" : "var(--ink-3)" });
   }
-  return { title: `${longDate(p.date)} · ${p.real ? "saldo" : "previsto"}`, value: money(p.value), rows };
+  return { title: `${longDate(p.date)} · ${p.real ? "saldo" : "previsto"}`, value: valor(p), rows };
 }
 
 export function TrajectoryChart({ traj, simOn, highlight, drawKey }: {
@@ -73,12 +76,12 @@ export function TrajectoryChart({ traj, simOn, highlight, drawKey }: {
   const y = (v: number) => M.t + (1 - (v - lo) / (hi - lo)) * ih;
 
   const realN = pts.filter((p) => p.real).length;
-  const today = realN - 1;
+  const today = Math.max(0, realN - 1); // previsão real: sem ponto realizado, a âncora (hoje) é o 1º
   const future = pts.slice(today);
   const realPath = line(pts.slice(0, realN).map((p, i) => [x(i), y(p.value)]));
-  const realArea = `${realPath}L${x(today).toFixed(1)},${M.t + ih}L${x(0).toFixed(1)},${M.t + ih}Z`;
+  const realArea = realN ? `${realPath}L${x(today).toFixed(1)},${M.t + ih}L${x(0).toFixed(1)},${M.t + ih}Z` : "";
   const fcPath = future.length > 1 ? line(future.map((p, i) => [x(today + i), y(p.value)])) : "";
-  const band = future.length > 1
+  const band = future.length > 1 && future.some((p) => p.lo != null && p.hi != null)
     ? line([...future.map((p, i) => [x(today + i), y(p.hi ?? p.value)] as [number, number]), ...future.map((p, i) => [x(today + i), y(p.lo ?? p.value)] as [number, number]).reverse()]) + "Z"
     : "";
   const simPts = future.map((p, i) => [x(today + i), y(p.sim ?? p.value)] as [number, number]);
@@ -113,7 +116,7 @@ export function TrajectoryChart({ traj, simOn, highlight, drawKey }: {
   };
 
   const last = pts[n - 1];
-  const label = `Saldo dia a dia de ${dayMonth(pts[0].date)} a ${dayMonth(last.date)}. Hoje ${money(pts[today].value)}; ${last.real ? "fim" : "previsto"} ${money(last.value)}.`;
+  const label = `Saldo dia a dia de ${dayMonth(pts[0].date)} a ${dayMonth(last.date)}. Hoje ${valor(pts[today])}; ${last.real ? "fim" : "previsto"} ${valor(last)}.`;
 
   return (
     <div className="chart" ref={box}>
@@ -137,13 +140,13 @@ export function TrajectoryChart({ traj, simOn, highlight, drawKey }: {
             <text key={i} x={x(i)} y={height - 8} textAnchor={i === 0 ? "start" : "middle"} className="axis">{dayMonth(p.date)}</text>
           ))}
           <g clipPath={`url(#${clipId})`}>
-            <path d={realArea} fill={`url(#${clipId}-wash)`} />
+            {realArea && <path d={realArea} fill={`url(#${clipId}-wash)`} />}
             {band && <path d={band} className="band" />}
             {gainArea && <path d={gainArea} className={`gain-area ${simTone}`} />}
             {fcPath && <path d={fcPath} className="line forecast" />}
             {simPath && <path d={simPath} className={`line sim ${simTone}`} />}
-            <path d={realPath} className="line real" />
-            {pts.map((p, i) => p.events.length > 0 && (
+            {realPath && <path d={realPath} className="line real" />}
+            {pts.map((p, i) => (p.rows ?? p.events).length > 0 && (
               <circle key={i} cx={x(i)} cy={y(p.value)} r={3.5}
                 className={`mark ${p.events.some((e) => e.kind === "income") ? "in" : p.events.some((e) => e.invoice) ? "inv" : ""}`} />
             ))}
@@ -168,7 +171,7 @@ export function TrajectoryChart({ traj, simOn, highlight, drawKey }: {
         <caption>Saldo por semana</caption>
         <tbody>
           {pts.filter((_, i) => i % 7 === 0 || i === n - 1).map((p) => (
-            <tr key={dayKey(p.date)}><th scope="row">{dayMonth(p.date)}</th><td>{money(p.value)}{p.real ? "" : " (previsto)"}</td></tr>
+            <tr key={dayKey(p.date)}><th scope="row">{dayMonth(p.date)}</th><td>{valor(p)}{p.real ? "" : " (previsto)"}</td></tr>
           ))}
         </tbody>
       </table></div>

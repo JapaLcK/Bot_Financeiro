@@ -52,7 +52,8 @@ test("#559: sem seletor de mês nas páginas só-presente, e o mês escolhido so
   const volta = await titulo();
   await ctx.close();
   assert.notEqual(escolhido, atual);
-  assert.deepEqual(seletor, { "/simulador": 0, "/metas": 0, "/patrimonio": 0, "/previsao": 1, "/gastos": 1, "/lancamentos": 1 });
+  // a previsão real é de hoje em diante (Etapa 3 PR3); a do protótipo, com seletor, está em dashboard_v2_previsao
+  assert.deepEqual(seletor, { "/simulador": 0, "/metas": 0, "/patrimonio": 0, "/previsao": 0, "/gastos": 1, "/lancamentos": 1 });
   assert.equal(volta, escolhido);
 });
 

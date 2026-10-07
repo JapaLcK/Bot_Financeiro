@@ -1,4 +1,6 @@
 // Formas dos dados que os módulos .js produzem, para os componentes em TSX.
+import type { TipRow } from "../parts/Tip";
+
 export interface Launch {
   id?: string;
   date: Date;
@@ -21,6 +23,8 @@ export interface Point {
   sim?: number;
   lo?: number;
   hi?: number;
+  texto?: string; // saldo já formatado (previsão real: texto da API, sem float)
+  rows?: TipRow[]; // linhas do tooltip no lugar das de `events`
 }
 
 export interface Trajectory { points: Point[]; end: Point; start: number }

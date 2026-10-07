@@ -17,6 +17,20 @@ export function moneyIn(n, moeda) {
   const f = /^[A-Z]{3}$/.test(moeda) ? { style: "currency", currency: moeda } : { minimumFractionDigits: 2, maximumFractionDigits: 2 };
   return out(new Intl.NumberFormat("pt-BR", f), zero(n, 2));
 }
+// Dinheiro da /api/v2 (texto decimal) sem passar por float nem pelo Intl, que no Safari 14
+// converte a string em número: todas as casas que vierem (no mínimo 2), sem arredondar.
+// Zero sai "R$ 0,00", sem sinal. Inválido (null, "", "NaN", "Infinity") → null.
+export function moneyText(s) {
+  const m = typeof s === "string" && /^(-?)(\d+)(?:\.(\d+))?(?:[eE]([+-]?\d{1,3}))?$/.exec(s);
+  if (!m) return null;
+  let digitos = m[2] + (m[3] ?? "");
+  let ponto = m[2].length + Number(m[4] ?? 0);
+  if (!/[1-9]/.test(digitos)) return "R$ 0,00";
+  if (ponto < 0) { digitos = "0".repeat(-ponto) + digitos; ponto = 0; }
+  digitos = digitos.padEnd(ponto, "0");
+  const inteiro = (digitos.slice(0, ponto).replace(/^0+/, "") || "0").replace(/\B(?=(\d{3})+$)/g, ".");
+  return `${m[1] ? "−" : ""}R$ ${inteiro},${digitos.slice(ponto).padEnd(2, "0")}`;
+}
 export const signed = (n) => { const v = zero(n, 2); return `${sign(v)}${money(Math.abs(v))}`; };
 export const signed0 = (n) => { const v = zero(n, 0); return `${sign(v)}${money0(Math.abs(v))}`; };
 // A partir de R$ 1 milhão, "R$ 1,2 mi": o valor digitado no simulador não tem teto e não pode estourar o layout.
