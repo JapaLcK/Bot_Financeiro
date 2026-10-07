@@ -1,0 +1,564 @@
+{
+  "/api/app/me": {
+    "plan_tier": "pro"
+  },
+  "/api/app/perfil": {
+    "perfil": "padrao"
+  },
+  "/api/app/contas": {
+    "total": "9400.25",
+    "motivos": [],
+    "fora_do_total": 0,
+    "carteira": {
+      "saldo": "450.00",
+      "motivos": []
+    },
+    "contas": [
+      {
+        "id": 1,
+        "instituicao": "Nubank",
+        "nome": "Conta principal",
+        "saldo": "6250.25",
+        "moeda": "BRL",
+        "no_total": true,
+        "conexao": "conectado",
+        "sincronizado_em": "2026-10-06T12:00:00Z",
+        "motivos": []
+      },
+      {
+        "id": 2,
+        "instituicao": "Itaú",
+        "nome": "Conta corrente",
+        "saldo": "2700.00",
+        "moeda": "BRL",
+        "no_total": true,
+        "conexao": "conectado",
+        "sincronizado_em": "2026-10-06T12:00:00Z",
+        "motivos": []
+      }
+    ]
+  },
+  "/api/app/resumo-do-mes": {
+    "mes": "2026-10",
+    "ate": "2026-10-06",
+    "entrou": "7200.00",
+    "saiu": "2380.50",
+    "anterior": {
+      "mes": "2026-09",
+      "entrou": "6800.00",
+      "saiu": "4110.00"
+    },
+    "motivos": []
+  },
+  "/api/app/mes-detalhes": {
+    "mes": "2026-10",
+    "ate": "2026-10-06",
+    "entrou": "7200.00",
+    "saiu": "2380.50",
+    "categorias": [
+      {
+        "categoria": "Alimentação",
+        "valor": "980.50",
+        "quantidade": 12
+      },
+      {
+        "categoria": "Moradia",
+        "valor": "900.00",
+        "quantidade": 1
+      },
+      {
+        "categoria": "Transporte",
+        "valor": "300.00",
+        "quantidade": 5
+      },
+      {
+        "categoria": "Lazer",
+        "valor": "200.00",
+        "quantidade": 3
+      }
+    ],
+    "dias": [
+      {
+        "dia": "2026-10-01",
+        "entrou": "7200.00",
+        "saiu": "900.00"
+      },
+      {
+        "dia": "2026-10-02",
+        "entrou": "0.00",
+        "saiu": "410.00"
+      },
+      {
+        "dia": "2026-10-03",
+        "entrou": "0.00",
+        "saiu": "240.00"
+      },
+      {
+        "dia": "2026-10-04",
+        "entrou": "0.00",
+        "saiu": "300.00"
+      },
+      {
+        "dia": "2026-10-05",
+        "entrou": "0.00",
+        "saiu": "250.50"
+      },
+      {
+        "dia": "2026-10-06",
+        "entrou": "0.00",
+        "saiu": "280.00"
+      }
+    ],
+    "guardado": {
+      "aportes": "1200.00",
+      "saques": "0.00",
+      "liquido": "1200.00",
+      "cobertura": "movimentos_registrados"
+    },
+    "motivos": [],
+    "fora_do_total": 0,
+    "criterio_dias": "data_do_lancamento_ou_compra_na_fatura_do_mes"
+  },
+  "/api/app/patrimonio": {
+    "total": "26000.25",
+    "partes": {
+      "carteira": "450.00",
+      "bancos": "8950.25",
+      "investimentos_banco": "13200.00",
+      "caixinhas": "2400.00",
+      "investimentos_manuais": "1000.00"
+    },
+    "motivos": [],
+    "historico": [
+      {
+        "dia": "2026-08-01",
+        "total": "22700.00",
+        "partes": {
+          "carteira": "450.00",
+          "bancos": "8950.25",
+          "investimentos_banco": "13200.00",
+          "caixinhas": "2400.00",
+          "investimentos_manuais": "1000.00"
+        },
+        "motivos": []
+      },
+      {
+        "dia": "2026-09-01",
+        "total": "24500.00",
+        "partes": {
+          "carteira": "450.00",
+          "bancos": "8950.25",
+          "investimentos_banco": "13200.00",
+          "caixinhas": "2400.00",
+          "investimentos_manuais": "1000.00"
+        },
+        "motivos": []
+      },
+      {
+        "dia": "2026-10-06",
+        "total": "26000.25",
+        "partes": {
+          "carteira": "450.00",
+          "bancos": "8950.25",
+          "investimentos_banco": "13200.00",
+          "caixinhas": "2400.00",
+          "investimentos_manuais": "1000.00"
+        },
+        "motivos": []
+      }
+    ],
+    "historico_desde": "2026-08-01"
+  },
+  "/api/app/rendimento": {
+    "tipo": "contratado",
+    "itens": [
+      {
+        "nome": "CDB",
+        "instituicao": "Nubank",
+        "taxa": "100",
+        "tipo_taxa": "CDI",
+        "observado_em": "2026-10-06T12:00:00Z",
+        "motivos": []
+      }
+    ],
+    "motivos": []
+  },
+  "/api/app/lancamentos": {
+    "mes": "2026-10",
+    "itens": [
+      {
+        "id": "l1",
+        "data": "2026-10-01",
+        "hora": "12:00",
+        "tipo": "entrada",
+        "interno": false,
+        "valor": "7200.00",
+        "moeda": "BRL",
+        "descricao": "Salário",
+        "mensagem": null,
+        "categoria": "Renda",
+        "origem": "banco",
+        "fundido": false,
+        "instituicao": "Nubank",
+        "conta_id": 1,
+        "cartao_id": null,
+        "parcela": null,
+        "fatura": null,
+        "pode": [],
+        "motivos": []
+      },
+      {
+        "id": "l2",
+        "data": "2026-10-02",
+        "hora": "12:00",
+        "tipo": "saida",
+        "interno": false,
+        "valor": "120.00",
+        "moeda": "BRL",
+        "descricao": "Mercado",
+        "mensagem": null,
+        "categoria": "Alimentação",
+        "origem": "banco",
+        "fundido": false,
+        "instituicao": "Nubank",
+        "conta_id": 1,
+        "cartao_id": null,
+        "parcela": null,
+        "fatura": null,
+        "pode": [],
+        "motivos": []
+      },
+      {
+        "id": "l3",
+        "data": "2026-10-03",
+        "hora": "12:00",
+        "tipo": "saida",
+        "interno": false,
+        "valor": "56.50",
+        "moeda": "BRL",
+        "descricao": "Café e almoço",
+        "mensagem": null,
+        "categoria": "Alimentação",
+        "origem": "banco",
+        "fundido": false,
+        "instituicao": "Nubank",
+        "conta_id": 1,
+        "cartao_id": null,
+        "parcela": null,
+        "fatura": null,
+        "pode": [],
+        "motivos": []
+      },
+      {
+        "id": "l4",
+        "data": "2026-10-04",
+        "hora": "12:00",
+        "tipo": "saida",
+        "interno": false,
+        "valor": "80.00",
+        "moeda": "BRL",
+        "descricao": "Transporte",
+        "mensagem": null,
+        "categoria": "Transporte",
+        "origem": "banco",
+        "fundido": false,
+        "instituicao": "Nubank",
+        "conta_id": 1,
+        "cartao_id": null,
+        "parcela": null,
+        "fatura": null,
+        "pode": [],
+        "motivos": []
+      }
+    ],
+    "proximo": null,
+    "motivos": []
+  },
+  "/api/app/assinaturas": {
+    "servicos": [
+      {
+        "chave": "netflix",
+        "nome": "Netflix",
+        "categoria": "Lazer",
+        "valor": "39.90",
+        "valor_anterior": null,
+        "reajuste_em": null,
+        "dia": 15,
+        "proxima": "2026-10-15",
+        "ultima": "2026-09-15",
+        "desde": "2026-04-15",
+        "meses": 6,
+        "meio": {
+          "tipo": "cartao",
+          "nome": "Nubank",
+          "final": "1234"
+        },
+        "status": "ativa",
+        "marcada": false
+      }
+    ],
+    "outras": [],
+    "ignoradas": [],
+    "total_mensal": "39.90",
+    "total_anual": "478.80"
+  },
+  "/goals/1/status": {
+    "ok": true,
+    "goals": [
+      {
+        "id": 1,
+        "name": "Viagem",
+        "balance": 2400,
+        "target_amount": 6000,
+        "target_date": "2027-02-01",
+        "source": "manual",
+        "of_plan_active": true,
+        "is_goal": true,
+        "pct_complete": 40,
+        "monthly_pace_current": 500,
+        "monthly_pace_needed": 900,
+        "projected_months": 7.2,
+        "indicator": "tight"
+      }
+    ]
+  },
+  "/cards/1/summary": {
+    "ok": true,
+    "cards": [
+      {
+        "id": 1,
+        "name": "Nubank",
+        "last4": "1234",
+        "credit_limit": 8000,
+        "due_day": 15,
+        "closing_day": 8,
+        "credit_used": 1240.5,
+        "open_bill": {
+          "total": 1240.5,
+          "paid_amount": 0,
+          "due_amount": 1240.5,
+          "period_end": "2026-10-08"
+        }
+      }
+    ]
+  },
+  "/installments/1/list": {
+    "ok": true,
+    "installments": [
+      {
+        "group_id": "parcela1",
+        "name": "Notebook",
+        "card_name": "Nubank",
+        "installments_total": 6,
+        "parcelas": [
+          {
+            "tx_id": 1,
+            "installment_no": 1,
+            "valor": 250,
+            "is_paid": true,
+            "is_next": false,
+            "due_date": "2026-08-15",
+            "period_end": "2026-08-08"
+          },
+          {
+            "tx_id": 2,
+            "installment_no": 2,
+            "valor": 250,
+            "is_paid": true,
+            "is_next": false,
+            "due_date": "2026-09-15",
+            "period_end": "2026-09-08"
+          },
+          {
+            "tx_id": 3,
+            "installment_no": 3,
+            "valor": 250,
+            "is_paid": false,
+            "is_next": true,
+            "due_date": "2026-10-15",
+            "period_end": "2026-10-08"
+          }
+        ]
+      }
+    ]
+  },
+  "/analytics/1/evolution": {
+    "ok": true,
+    "months": 6,
+    "evolution": [
+      {
+        "month": "2026-05",
+        "income": 6200,
+        "expense": 4500,
+        "net": 1700
+      },
+      {
+        "month": "2026-06",
+        "income": 6900,
+        "expense": 4700,
+        "net": 2200
+      },
+      {
+        "month": "2026-07",
+        "income": 6400,
+        "expense": 4100,
+        "net": 2300
+      },
+      {
+        "month": "2026-08",
+        "income": 7000,
+        "expense": 4600,
+        "net": 2400
+      },
+      {
+        "month": "2026-09",
+        "income": 6800,
+        "expense": 4110,
+        "net": 2690
+      },
+      {
+        "month": "2026-10",
+        "income": 7200,
+        "expense": 2380.5,
+        "net": 4819.5
+      }
+    ]
+  },
+  "/insights/1/current": {
+    "ok": true,
+    "insights": [
+      {
+        "key": "gastos",
+        "title": "Alimentação merece atenção",
+        "message": "Confira as compras do período e escolha onde reduzir.",
+        "severity": "info",
+        "action_label": "Ver gastos",
+        "action_view": "analytics"
+      }
+    ]
+  },
+  "/ai/messages": {
+    "messages": [
+      {
+        "role": "assistant",
+        "content": "Oi! Posso ajudar a entender seus gastos e organizar suas metas.",
+        "created_at": "2026-10-06T12:00:00Z"
+      }
+    ],
+    "usage": {
+      "used": 2,
+      "limit": 100
+    }
+  },
+  "/ai/chat": {
+    "reply": "Vamos conferir os gastos por categoria deste mês antes de decidir uma mudança.",
+    "usage": {
+      "used": 3,
+      "limit": 100
+    }
+  },
+  "/api/app/previsao": {
+    "hoje": "2026-10-06",
+    "calculado_em": "2026-10-06T12:00:00Z",
+    "valido_ate": null,
+    "dias": 30,
+    "dias_permitidos": [
+      30,
+      60,
+      90
+    ],
+    "capacidades": [
+      "marcos",
+      "trajetoria",
+      "pior_dia",
+      "compromissos"
+    ],
+    "base": {
+      "saldo": "9400.25",
+      "origem": "consolidated",
+      "contas_bancarias": 2,
+      "bancos_excluidos": false,
+      "motivos": []
+    },
+    "estado": "condicional",
+    "motivos": [],
+    "premissas": [
+      "Somente compromissos conhecidos; gastos variáveis não estimados."
+    ],
+    "cobertura": {
+      "fontes_incompletas": [],
+      "janela_conferencia_inicio": null,
+      "inclui_estimativa_variavel": false
+    },
+    "cabe_nas_premissas": true,
+    "marcos": [
+      {
+        "dias": 30,
+        "data": "2026-11-05",
+        "saldo": "10459.75"
+      }
+    ],
+    "periodo": {
+      "inicio": "2026-10-06",
+      "fim": "2026-11-05"
+    },
+    "ancora": {
+      "data": "2026-10-06",
+      "saldo": "9400.25"
+    },
+    "trajetoria": [
+      {
+        "data": "2026-10-06",
+        "saldo": "9400.25",
+        "compromissos": []
+      },
+      {
+        "data": "2026-10-15",
+        "saldo": "8160.00",
+        "compromissos": []
+      },
+      {
+        "data": "2026-10-25",
+        "saldo": "7800.00",
+        "compromissos": []
+      },
+      {
+        "data": "2026-11-01",
+        "saldo": "15000.00",
+        "compromissos": []
+      },
+      {
+        "data": "2026-11-05",
+        "saldo": "10459.75",
+        "compromissos": []
+      }
+    ],
+    "pior_dia": null,
+    "compromissos": [
+      {
+        "chave": "fatura1",
+        "fonte": "fatura",
+        "nome": "Fatura Nubank",
+        "primeira_data": "2026-10-15",
+        "ultima_data": "2026-10-15",
+        "ocorrencias": [
+          {
+            "chave": "fatura1",
+            "ciclo": "2026-10",
+            "data": "2026-10-15",
+            "fonte": "fatura",
+            "tipo": "fatura_cartao",
+            "nome": "Fatura Nubank",
+            "valor": "1240.50",
+            "direcao": "saida",
+            "qualidade_valor": "conhecido",
+            "qualidade_data": "conhecida",
+            "realizacao": "prevista",
+            "incluida_no_calculo": true,
+            "motivos": []
+          }
+        ]
+      }
+    ]
+  }
+}

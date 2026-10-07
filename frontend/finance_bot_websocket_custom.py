@@ -119,6 +119,7 @@ from core.pg_text import detalhe_seguro, limpa_para_pg, recusa_veneno, tem_venen
 from core.secure_compare import constant_time_eq
 from core.limite_corpo import LimiteCorpoMiddleware, MAX_OFX_BYTES
 from api.v2 import app as api_v2_app, eventos as api_v2_eventos
+from api.nativo.app import app as api_nativo_app
 from frontend.routes.affiliates import router as affiliates_router
 from frontend.routes.billing_pix import router as billing_pix_router
 from frontend.routes.billing_bump import router as billing_bump_router
@@ -9400,6 +9401,7 @@ app.include_router(billing_bump_router)
 
 # ─── /api/v2 (dashboard v2) → api/v2/: sub-app com o envelope de erro próprio ──
 app.mount("/api/v2", api_v2_app)
+app.mount("/api/app", api_nativo_app)
 
 
 # ─── WebSocket ────────────────────────────────────────────────────────────────

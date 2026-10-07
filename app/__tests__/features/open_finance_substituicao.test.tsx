@@ -1,4 +1,4 @@
-import { router } from "expo-router";
+import { router, type Href } from "expo-router";
 import { act, fireEvent, renderRouter, screen, waitFor } from "expo-router/testing-library";
 import { iniciarConexaoBancaria } from "@/features/openFinance/acesso";
 import { definirWidgetAberto } from "@/features/openFinance/volta";
@@ -56,7 +56,7 @@ it.each(["Cancelar", "Retomar conexão"])("callback UUID A durante aviso, depois
   await apertar(acao);
   expect(tokens()).toHaveLength(0);
   if (acao === "Cancelar") {
-    await waitFor(() => expect(screen).toHavePathname("/"));
+    await waitFor(() => expect(screen).toHavePathname("/resumo"));
     expect(await lerTentativaBancaria(1)).toMatchObject({ tentativa_id: a.tentativa_id, item_id: ITEM });
     await apertar("Retomar conexão");
   }
@@ -71,11 +71,11 @@ it.each(["Cancelar", "Retomar conexão"])("callback UUID A durante aviso, depois
 it.each(["Cancelar", "Retomar conexão"])("%s sem pista conserva A; callback oficial recebido depois é recuperado", async (acao) => {
   const a = (await lerTentativaBancaria(1))!;
   await aviso(); await apertar(acao);
-  await waitFor(() => expect(screen).toHavePathname(acao === "Cancelar" ? "/" : "/open-finance-volta"));
+  await waitFor(() => expect(screen).toHavePathname(acao === "Cancelar" ? "/resumo" : "/open-finance-volta"));
   expect(await lerTentativaBancaria(1)).toEqual(a);
   await act(async () => {
     const destino = redirectSystemPath({ path: `pigbank-dev://open-finance-volta/${a.tentativa_id}?itemId=${ITEM}`, initial: false });
-    if (acao === "Cancelar") router.navigate(destino!);
+    if (acao === "Cancelar") router.navigate(destino as Href);
     await drenar();
   });
   if (acao === "Retomar conexão") {

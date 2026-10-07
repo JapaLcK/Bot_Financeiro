@@ -18,7 +18,7 @@ import { chamadas, cofre, falharApagar, me, prepararCaso, resposta, rotear, S, s
 declare const global: typeof globalThis & { __dispararAppState: (v: string) => void; __definirAppState: (v: string) => void };
 
 const TRAVA = "pb.trava.desligada";
-const OLA = "Olá, S";
+const OLA = "Bom dia, S";
 
 const drenar = async () => {
   for (let i = 0; i < 20; i++) await Promise.resolve();
@@ -145,12 +145,13 @@ async function liberado() {
 describe("trava — voltando do fundo", () => {
   it("61 s fora: a trava cobre o Início (sem desmontá-lo) e pede UMA vez", async () => {
     await liberado();
+    const leiturasAntesDoFundo = chamadas().filter((c) => c.caminho === "/auth/me").length;
     await foraPor(61_000);
 
     expect(travaNaTela()).toBe(true);
     expect(prompts()).toBe(2);
     // A pilha continua montada por baixo: nada de buscar o perfil de novo.
-    expect(chamadas().filter((c) => c.caminho === "/auth/me")).toHaveLength(1);
+    expect(chamadas().filter((c) => c.caminho === "/auth/me")).toHaveLength(leiturasAntesDoFundo);
 
     // O active que o próprio Face ID provoca ao fechar não pede em dobro.
     await appVai("inactive");
@@ -174,7 +175,7 @@ describe("trava — voltando do fundo", () => {
     expect(prompts()).toBe(1);
   });
 
-  it("trava DESLIGADA e app fora de foco: nada em JS por cima do Início, nenhum prompt", async () => {
+  it("trava DESLIGADA e app fora de foco: nenhum prompt; dados do painel aguardam foreground", async () => {
     await guardarCredenciais(S);
     cofre.set(TRAVA, "1");
     renderRouter("./app", { initialUrl: "/" });
@@ -182,7 +183,14 @@ describe("trava — voltando do fundo", () => {
 
     await appVai("inactive");
     expect(travaNaTela()).toBe(false);
-    expect(screen.getByText(OLA)).toBeTruthy();
+    expect(screen.queryByText(OLA)).toBeNull();
+    expect(screen.queryByTestId("painel-conta")).toBeNull();
+    expect(prompts()).toBe(0);
+
+    await appVai("active");
+    await waitFor(() => expect(screen.getByText(OLA)).toBeTruthy());
+    expect(screen).toHavePathname("/resumo");
+    expect(travaNaTela()).toBe(false);
     expect(prompts()).toBe(0);
   });
 
@@ -284,6 +292,7 @@ describe("trava — preferência do aparelho (decisão Q2 do dono)", () => {
     renderRouter("./app", { initialUrl: "/" });
     await waitFor(() => expect(screen.getByText(OLA)).toBeTruthy());
 
+    await tocar("Abrir minha conta");
     await tocar("Sair");
     await waitFor(() => expect(screen).toHavePathname("/boas-vindas"));
     expect(cofre.get(TRAVA)).toBe("1");

@@ -1,0 +1,318 @@
+{
+  "before": {
+    "messages": [
+      {
+        "role": "user",
+        "content": "Pergunta exclusiva enviada",
+        "created_at": null
+      },
+      {
+        "role": "assistant",
+        "content": "Resposta exclusiva enviada",
+        "created_at": null
+      },
+      {
+        "role": "user",
+        "content": "Pergunta intermediaria 0",
+        "created_at": null
+      },
+      {
+        "role": "assistant",
+        "content": "Resposta intermediaria 0",
+        "created_at": null
+      },
+      {
+        "role": "user",
+        "content": "Pergunta intermediaria 1",
+        "created_at": null
+      },
+      {
+        "role": "assistant",
+        "content": "Resposta intermediaria 1",
+        "created_at": null
+      },
+      {
+        "role": "user",
+        "content": "Pergunta intermediaria 2",
+        "created_at": null
+      },
+      {
+        "role": "assistant",
+        "content": "Resposta intermediaria 2",
+        "created_at": null
+      },
+      {
+        "role": "user",
+        "content": "Pergunta intermediaria 3",
+        "created_at": null
+      },
+      {
+        "role": "assistant",
+        "content": "Resposta intermediaria 3",
+        "created_at": null
+      },
+      {
+        "role": "user",
+        "content": "Pergunta intermediaria 4",
+        "created_at": null
+      },
+      {
+        "role": "assistant",
+        "content": "Resposta intermediaria 4",
+        "created_at": null
+      },
+      {
+        "role": "user",
+        "content": "Pergunta intermediaria 5",
+        "created_at": null
+      },
+      {
+        "role": "assistant",
+        "content": "Resposta intermediaria 5",
+        "created_at": null
+      },
+      {
+        "role": "user",
+        "content": "Pergunta intermediaria 6",
+        "created_at": null
+      },
+      {
+        "role": "assistant",
+        "content": "Resposta intermediaria 6",
+        "created_at": null
+      },
+      {
+        "role": "user",
+        "content": "Pergunta intermediaria 7",
+        "created_at": null
+      },
+      {
+        "role": "assistant",
+        "content": "Resposta intermediaria 7",
+        "created_at": null
+      },
+      {
+        "role": "user",
+        "content": "Pergunta intermediaria 8",
+        "created_at": null
+      },
+      {
+        "role": "assistant",
+        "content": "Resposta intermediaria 8",
+        "created_at": null
+      },
+      {
+        "role": "user",
+        "content": "Pergunta intermediaria 9",
+        "created_at": null
+      },
+      {
+        "role": "assistant",
+        "content": "Resposta intermediaria 9",
+        "created_at": null
+      },
+      {
+        "role": "user",
+        "content": "Pergunta intermediaria 10",
+        "created_at": null
+      },
+      {
+        "role": "assistant",
+        "content": "Resposta intermediaria 10",
+        "created_at": null
+      },
+      {
+        "role": "user",
+        "content": "Pergunta intermediaria 11",
+        "created_at": null
+      },
+      {
+        "role": "assistant",
+        "content": "Resposta intermediaria 11",
+        "created_at": null
+      },
+      {
+        "role": "user",
+        "content": "Pergunta intermediaria 12",
+        "created_at": null
+      },
+      {
+        "role": "assistant",
+        "content": "Resposta intermediaria 12",
+        "created_at": null
+      },
+      {
+        "role": "user",
+        "content": "Pergunta intermediaria 13",
+        "created_at": null
+      },
+      {
+        "role": "assistant",
+        "content": "Resposta intermediaria 13",
+        "created_at": null
+      }
+    ],
+    "usage": {
+      "used": 0,
+      "limit": 1000
+    }
+  },
+  "after": {
+    "messages": [
+      {
+        "role": "user",
+        "content": "Pergunta intermediaria 0",
+        "created_at": null
+      },
+      {
+        "role": "assistant",
+        "content": "Resposta intermediaria 0",
+        "created_at": null
+      },
+      {
+        "role": "user",
+        "content": "Pergunta intermediaria 1",
+        "created_at": null
+      },
+      {
+        "role": "assistant",
+        "content": "Resposta intermediaria 1",
+        "created_at": null
+      },
+      {
+        "role": "user",
+        "content": "Pergunta intermediaria 2",
+        "created_at": null
+      },
+      {
+        "role": "assistant",
+        "content": "Resposta intermediaria 2",
+        "created_at": null
+      },
+      {
+        "role": "user",
+        "content": "Pergunta intermediaria 3",
+        "created_at": null
+      },
+      {
+        "role": "assistant",
+        "content": "Resposta intermediaria 3",
+        "created_at": null
+      },
+      {
+        "role": "user",
+        "content": "Pergunta intermediaria 4",
+        "created_at": null
+      },
+      {
+        "role": "assistant",
+        "content": "Resposta intermediaria 4",
+        "created_at": null
+      },
+      {
+        "role": "user",
+        "content": "Pergunta intermediaria 5",
+        "created_at": null
+      },
+      {
+        "role": "assistant",
+        "content": "Resposta intermediaria 5",
+        "created_at": null
+      },
+      {
+        "role": "user",
+        "content": "Pergunta intermediaria 6",
+        "created_at": null
+      },
+      {
+        "role": "assistant",
+        "content": "Resposta intermediaria 6",
+        "created_at": null
+      },
+      {
+        "role": "user",
+        "content": "Pergunta intermediaria 7",
+        "created_at": null
+      },
+      {
+        "role": "assistant",
+        "content": "Resposta intermediaria 7",
+        "created_at": null
+      },
+      {
+        "role": "user",
+        "content": "Pergunta intermediaria 8",
+        "created_at": null
+      },
+      {
+        "role": "assistant",
+        "content": "Resposta intermediaria 8",
+        "created_at": null
+      },
+      {
+        "role": "user",
+        "content": "Pergunta intermediaria 9",
+        "created_at": null
+      },
+      {
+        "role": "assistant",
+        "content": "Resposta intermediaria 9",
+        "created_at": null
+      },
+      {
+        "role": "user",
+        "content": "Pergunta intermediaria 10",
+        "created_at": null
+      },
+      {
+        "role": "assistant",
+        "content": "Resposta intermediaria 10",
+        "created_at": null
+      },
+      {
+        "role": "user",
+        "content": "Pergunta intermediaria 11",
+        "created_at": null
+      },
+      {
+        "role": "assistant",
+        "content": "Resposta intermediaria 11",
+        "created_at": null
+      },
+      {
+        "role": "user",
+        "content": "Pergunta intermediaria 12",
+        "created_at": null
+      },
+      {
+        "role": "assistant",
+        "content": "Resposta intermediaria 12",
+        "created_at": null
+      },
+      {
+        "role": "user",
+        "content": "Pergunta intermediaria 13",
+        "created_at": null
+      },
+      {
+        "role": "assistant",
+        "content": "Resposta intermediaria 13",
+        "created_at": null
+      },
+      {
+        "role": "user",
+        "content": "Pergunta exclusiva enviada",
+        "created_at": null
+      },
+      {
+        "role": "assistant",
+        "content": "Resposta exclusiva enviada",
+        "created_at": null
+      }
+    ],
+    "usage": {
+      "used": 0,
+      "limit": 1000
+    }
+  }
+}

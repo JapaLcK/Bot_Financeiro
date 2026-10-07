@@ -6,7 +6,7 @@ import { origemDaTentativa } from "./open_finance_volta_apoio";
  * `umIntervalo()` é uma espera do laço. A lógica tem os casos dela em
  * `open_finance_volta_updating.test.ts`.
  */
-import { router } from "expo-router";
+import { router, type Href } from "expo-router";
 import { act, fireEvent, renderRouter, screen, waitFor } from "expo-router/testing-library";
 import { AccessibilityInfo } from "react-native";
 
@@ -104,7 +104,7 @@ describe("open-finance-volta — item em updating", () => {
       router.back();
       await drenar();
     });
-    await waitFor(() => expect(screen).toHavePathname("/"));
+    await waitFor(() => expect(screen).toHavePathname("/resumo"));
     const antes = contarGets();
     for (let i = 0; i < 3; i++) await umIntervalo();
     expect(contarGets()).toBe(antes);
@@ -245,7 +245,7 @@ describe("open-finance-volta — tela de espera (Organizando seus dados)", () =>
       fireEvent.press(sair());
       await drenar();
     });
-    await waitFor(() => expect(screen).toHavePathname("/"));
+    await waitFor(() => expect(screen).toHavePathname("/resumo"));
     const antes = contarGets();
     for (let i = 0; i < 3; i++) await umIntervalo();
     expect(contarGets()).toBe(antes);
@@ -283,7 +283,7 @@ describe("open-finance-volta — tela de espera (Organizando seus dados)", () =>
     renderRouter("./app", { initialUrl: `/open-finance-volta/${origemDaTentativa()}?itemId=${A}` });
     await waitFor(() => expect(sair()).toBeTruthy());
     await act(async () => {
-      router.navigate(redirectSystemPath({ path: `/open-finance-volta/${origemDaTentativa()}?itemId=${A}`, initial: false })!);
+      router.navigate(redirectSystemPath({ path: `/open-finance-volta/${origemDaTentativa()}?itemId=${A}`, initial: false }) as Href);
       await drenar();
     });
     const antes = contarGets();

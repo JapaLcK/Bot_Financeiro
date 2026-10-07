@@ -1,3 +1,4 @@
+import { voltarAoInicio } from "@/features/openFinance/navegacao";
 import { router, useFocusEffect, type Href } from "expo-router";
 import { useCallback, useRef, useState } from "react";
 import { Image, View } from "react-native";
@@ -26,7 +27,7 @@ export default function ConectarBanco() {
   const navegar = (destino: Href, substituir = false) => {
     if (entradaEmVoo.current) return;
     entradaEmVoo.current = true; setEntrando(true);
-    try { if (substituir) router.dismissTo(destino); else router.push(destino); }
+    try { if (substituir && destino === "/") voltarAoInicio(); else if (substituir) router.dismissTo(destino); else router.push(destino); }
     catch { entradaEmVoo.current = false; setEntrando(false); setErro("Não conseguimos abrir a tela. Tente de novo."); }
   };
   const abrirAutorizacao = () => {

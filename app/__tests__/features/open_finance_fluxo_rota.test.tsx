@@ -1,7 +1,7 @@
 import { act, fireEvent, renderRouter, screen, waitFor } from "expo-router/testing-library";
 import { guardarCredenciais } from "@/storage/secure";
 import { chamadas, prepararCaso, resposta, rotear, S } from "./auth_apoio";
-import { desligarTrava, drenar } from "./open_finance_volta_rota_apoio";
+import { desligarTrava, drenar, appVai } from "./open_finance_volta_rota_apoio";
 
 beforeEach(async () => { prepararCaso(); desligarTrava(); await guardarCredenciais(S); });
 const p = { user_id: 1, display_name: "Ana", app_access: true, of_banks_max: 2 };
@@ -24,15 +24,16 @@ it("Free mostra falta de acesso sem consultar nem oferecer conexão", async () =
 it("conclusão servidor mantém Início e avatar abre Configurações/Teste OF", async () => {
   servidor(p, true); renderRouter("./app", { initialUrl: "/" });
   await waitFor(() => expect(screen.getByRole("button", { name: "Bancos conectados" })).toBeTruthy());
-  await act(async () => { fireEvent.press(screen.getByRole("button", { name: "Configurações da conta" })); await drenar(); });
+  await act(async () => { fireEvent.press(screen.getByRole("button", { name: "Abrir minha conta" })); await drenar(); });
+  await act(async () => { fireEvent.press(screen.getByRole("button", { name: "Configurações" })); await drenar(); });
   await waitFor(() => expect(screen).toHavePathname("/configuracoes"));
   expect(screen.getByRole("button", { name: "Teste Open Finance" })).toBeTruthy();
 });
-it("falha transitória na rechecagem mantém Home provisória e mostra aviso", async () => {
+it("falha transitória na rechecagem protege dados e oferece recuperação", async () => {
   servidor(p, true); renderRouter("./app", { initialUrl: "/" });
   await waitFor(() => expect(screen.getByRole("button", { name: "Bancos conectados" })).toBeTruthy());
   rotear({ "/auth/me": () => resposta(503, {}) });
-  await act(async () => { fireEvent.press(screen.getByRole("button", { name: "Conferir acesso novamente" })); await drenar(); });
-  await waitFor(() => expect(screen.getByText("Tivemos um problema aqui. Tente de novo em instantes.")).toBeTruthy());
-  expect(screen.getByRole("button", { name: "Bancos conectados" })).toBeTruthy();
+  await appVai("background"); await appVai("active");
+  await waitFor(() => expect(screen.getByRole("button", { name: "Conferir acesso" })).toBeTruthy());
+  expect(screen.queryByTestId("painel-conta")).toBeNull();
 });

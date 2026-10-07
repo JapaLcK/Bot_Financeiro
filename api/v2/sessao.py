@@ -15,12 +15,17 @@ from frontend.routes.shared import (
 )
 
 
-def usuario_atual(request: Request) -> int:
+def usuario_assinante(request: Request) -> int:
     # `def` e não `async def`: tudo abaixo é banco síncrono, e o FastAPI roda
     # dependência síncrona no threadpool em vez de travar o event loop.
     uid = resolve_dashboard_user_id(request)
     raise_if_account_scheduled_for_deletion(uid)
     _enforce_subscription_gate(request, uid)
+    return uid
+
+
+def usuario_atual(request: Request) -> int:
+    uid = usuario_assinante(request)
     if not dashboard_v2_enabled(uid):
         # 404 no padrão de `_require_agents_beta`: fora da lista, a v2 não existe.
         raise HTTPException(status_code=404, detail={"error": "dashboard_v2_disabled"})

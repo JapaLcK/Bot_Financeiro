@@ -45,7 +45,7 @@ it("Retomar duplo real tem um leitor/uma Volta e back chega à Home", async () =
   const entrada = { pilha: pilha(r)?.filter((p) => p.nome === "open-finance-volta").length, gets: gets() };
   await umIntervalo(); const depois = gets();
   await act(async () => { router.back(); await drenar(); });
-  expect({ ...entrada, depois, destinoBack: r.getPathname() }).toEqual({ pilha: 1, gets: 1, depois: 2, destinoBack: "/" });
+  expect({ ...entrada, depois, destinoBack: r.getPathname() }).toEqual({ pilha: 1, gets: 1, depois: 2, destinoBack: "/resumo" });
   expect(tokens()).toHaveLength(0); expect(posts()).toHaveLength(0);
 });
 
@@ -77,17 +77,19 @@ it.each([[0, 0], [0, 1], [1, 0]])("Acompanhar %s→%s no mesmo frame guarda só 
 
 
 it.each([
-  ["Configurações da conta", true, true], ["Configurações da conta", false, true],
+  ["Configurações", true, true], ["Configurações", false, true],
   ["Bancos conectados", true, true], ["Bancos conectados", false, true],
   ["Conectar meu banco", true, false], ["Conectar meu banco", false, false],
   ["Segurança", true, true], ["Segurança", false, true],
 ])("Home Retomar × %s, recovery primeiro=%s, reserva também navegações irmãs", async (irma, recoveryPrimeiro, completo) => {
   servidor(completo); const r = renderRouter("./app", { initialUrl: "/" });
   await waitFor(() => expect(screen.getByRole("button", { name: "Retomar conexão" })).toBeEnabled());
-  const a = screen.getByRole("button", { name: "Retomar conexão" }); const b = screen.getByRole("button", { name: irma });
+  const a = screen.getByRole("button", { name: "Retomar conexão" });
+  if (completo && irma !== "Bancos conectados") await apertar("Abrir minha conta");
+  const b = screen.getByRole("button", { name: irma });
   await act(async () => { fireEvent.press(recoveryPrimeiro ? a : b); fireEvent.press(recoveryPrimeiro ? b : a); await drenar(); });
-  const destino = recoveryPrimeiro ? "open-finance-volta" : irma === "Configurações da conta" ? "configuracoes" : irma === "Bancos conectados" ? "conexoes" : irma === "Segurança" ? "seguranca" : "conectar-banco";
-  expect(pilha(r)?.map((p) => p.nome)).toEqual(["index", destino]);
+  const destino = recoveryPrimeiro ? "open-finance-volta" : irma === "Configurações" ? "configuracoes" : irma === "Bancos conectados" ? "conexoes" : irma === "Segurança" ? "seguranca" : "conectar-banco";
+  expect(pilha(r)?.map((p) => p.nome)).toEqual([completo ? "(painel)" : "index", destino]);
   expect(tokens()).toHaveLength(0); expect(posts()).toHaveLength(0);
 });
 
@@ -196,4 +198,26 @@ it.each([["/", "Retomar conexão"], ["/teste-pluggy", "Retomar retorno do banco"
   await act(async () => { fireEvent.press(screen.getAllByRole("button", { name: rotulo })[0]!); await drenar(); });
   expect(screen).toHavePathname(origem === "/conectar-banco" ? "/conexoes" : "/open-finance-volta");
   expect(posts()).toHaveLength(0); expect(tokens()).toHaveLength(0);
+});
+
+it("logo no Resumo não reserva navegação sem blur e permite Minha conta e Retomar", async () => {
+ servidor(); const r = renderRouter("./app", { initialUrl: "/resumo" }); await apertar("PigBank, abrir Resumo");
+ expect(screen).toHavePathname("/resumo"); await apertar("Abrir minha conta"); expect(screen.getByText("Minha conta")).toBeTruthy(); await apertar("Fechar");
+ await apertar("Retomar conexão"); expect(pilha(r)?.filter((p) => p.nome === "open-finance-volta")).toHaveLength(1); expect(gets()).toBe(1); expect(tokens()).toHaveLength(0); expect(posts()).toHaveLength(0);
+});
+it("navigate Piggy repetido não trava o destino nem duplica a pilha", async () => {
+ servidor(); const r = renderRouter("./app", { initialUrl: "/resumo" }); await waitFor(() => expect(screen.getByRole("button", { name: "Conversar com o Piggy" })).toBeTruthy());
+ const antes = pilha(r); const b = screen.getByRole("button", { name: "Conversar com o Piggy" }); await act(async () => { fireEvent.press(b); await drenar(); }); expect(screen).toHavePathname("/piggy");
+ await act(async () => { fireEvent.press(b); await drenar(); }); expect(screen).toHavePathname("/piggy"); expect(pilha(r)).toEqual(antes);
+ await apertar("Abrir minha conta"); expect(screen.getByText("Minha conta")).toBeTruthy(); await apertar("Fechar"); await apertar("Retomar conexão"); expect(pilha(r)?.filter((p) => p.nome === "open-finance-volta")).toHaveLength(1);
+});
+
+it.each([["Ver lançamentos", true], ["Ver lançamentos", false], ["01/10/2026", true], ["01/10/2026", false]])("Retomar × link do widget %s, recovery primeiro=%s, usa a mesma reserva", async (irma, recoveryPrimeiro) => {
+ servidor(); const r = renderRouter("./app", { initialUrl: "/" }); await waitFor(() => expect(screen.getByRole("button", { name: "Retomar conexão" })).toBeEnabled());
+ const a = screen.getByRole("button", { name: "Retomar conexão" }), b = screen.getByRole("button", { name: irma });
+ await act(async () => { fireEvent.press(recoveryPrimeiro ? a : b); fireEvent.press(recoveryPrimeiro ? b : a); await drenar(); });
+ expect(pilha(r)?.map((p) => p.nome)).toEqual(recoveryPrimeiro ? ["(painel)", "open-finance-volta"] : ["(painel)"]);
+ expect(screen).toHavePathname(recoveryPrimeiro ? "/open-finance-volta" : "/extrato");
+ if (!recoveryPrimeiro && irma !== "Ver lançamentos") expect(r.getSearchParams().dia).toBe("2026-10-01");
+ expect(tokens()).toHaveLength(0); expect(posts()).toHaveLength(0);
 });

@@ -259,12 +259,19 @@ def listar(cur, user_id: int, inicio: date, fim: date, *, origem=None, conta=Non
     if busca:
         filtros.append(busca)
         params += busca_params
+    # None é leitura completa interna, no mesmo snapshot, para agregados do mês.
+    # A rota pública de extrato continua limitando em 100.
+    limite_sql = "limit %s" if limite is not None else ""
+    if limite is not None:
+        params.append(limite + 1)
     cur.execute(f"""{_CTE_PENDENTES}
         select * from (({perna_l}) union all ({perna_c})) x
          {"where " + " and ".join(filtros) if filtros else ""}
          order by x.dia desc, x.instante desc, x.tabela desc, x.id desc
-         limit %s""", (*params, limite + 1))
+         {limite_sql}""", params)
     linhas = [dict(r) for r in cur.fetchall()]
+    if limite is None:
+        return linhas, False
     return linhas[:limite], len(linhas) > limite
 
 

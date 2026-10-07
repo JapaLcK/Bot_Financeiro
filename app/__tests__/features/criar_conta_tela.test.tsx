@@ -57,10 +57,10 @@ describe("(auth)/criar-conta — tela real", () => {
   it("T3 — com sessão, /criar-conta não abre: cai na tela autenticada", async () => {
     await guardarCredenciais(S);
     renderRouter("./app", { initialUrl: "/criar-conta" });
-    await waitFor(() => expect(screen).toHavePathname("/"));
+    await waitFor(() => expect(screen).toHavePathname("/resumo"));
   });
 
-  it("T4 — caminho feliz: register com o telefone só em dígitos, código de 6 dígitos, e 'Olá, Ana'", async () => {
+  it("T4 — caminho feliz: register com o telefone só em dígitos, código de 6 dígitos, e 'Bom dia, Ana'", async () => {
     await irAoCodigo();
     expect(screen.getByText("Enviamos um código de 6 dígitos para ana@x.com.")).toBeTruthy();
 
@@ -69,7 +69,8 @@ describe("(auth)/criar-conta — tela real", () => {
       await respirar();
     });
 
-    await waitFor(() => expect(screen.getByText(/Olá, Ana/)).toBeTruthy());
+    await waitFor(() => expect(screen.getByText(/Bom dia, Ana/)).toBeTruthy());
+    expect(screen).toHavePathname("/resumo");
     expect(registers().map((c) => c.corpo)).toEqual([CORPO]);
     expect(verifies().map((c) => c.corpo)).toEqual([{ email: "ana@x.com", code: "123456" }]);
     await expect(lerCredenciais()).resolves.toEqual({ access: "access-ana", refresh: "rt_ana" });
@@ -132,7 +133,8 @@ describe("(auth)/criar-conta — tela real", () => {
       await respirar();
     });
 
-    await waitFor(() => expect(screen.getByText(/Olá, Ana/)).toBeTruthy());
+    await waitFor(() => expect(screen.getByText(/Bom dia, Ana/)).toBeTruthy());
+    expect(screen).toHavePathname("/resumo");
     expect(verifies().map((c) => c.corpo.code)).toEqual(["123456"]);
   });
 
@@ -156,7 +158,8 @@ describe("(auth)/criar-conta — tela real", () => {
       fireEvent.changeText(campo("Código de 6 dígitos"), "123456");
       await respirar();
     });
-    await waitFor(() => expect(screen.getByText(/Olá, Ana/)).toBeTruthy());
+    await waitFor(() => expect(screen.getByText(/Bom dia, Ana/)).toBeTruthy());
+    expect(screen).toHavePathname("/resumo");
   });
 
   it("T9 — reenviar manda o corpo idêntico, com telefone; 429 no reenvio fica no código", async () => {
@@ -283,7 +286,8 @@ describe("(auth)/criar-conta — tela real", () => {
       fireEvent.changeText(campo("Código de 6 dígitos"), "123456");
       await respirar();
     });
-    await waitFor(() => expect(screen.getByText(/Olá, Ana/)).toBeTruthy());
+    await waitFor(() => expect(screen.getByText(/Bom dia, Ana/)).toBeTruthy());
+    expect(screen).toHavePathname("/resumo");
   });
 
   // Controle negativo (medido): com a falha engolida de novo, o aviso não aparece.

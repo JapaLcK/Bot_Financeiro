@@ -21,22 +21,20 @@ class _AppV2(FastAPI):
 # Documentação desligada como no app principal. `servers` deixa o `openapi()`
 # (que o contrato do PR seguinte gera) com o prefixo do mount, e não relativo.
 # `responses.default` põe o envelope de erro no contrato (os tipos TS saem daí).
-app = _AppV2(openapi_url=None, docs_url=None, redoc_url=None,
-             servers=[{"url": "/api/v2"}],
-             responses={"default": {"model": erros.ErroV2, "description": "Erro no envelope"}})
+def criar_app(prefixo: str, *, com_eventos: bool = True) -> FastAPI:
+    """Mesmos contratos e motores; cada namespace escolhe sua dependência de sessão."""
+    sub = _AppV2(openapi_url=None, docs_url=None, redoc_url=None,
+                 servers=[{"url": prefixo}],
+                 responses={"default": {"model": erros.ErroV2, "description": "Erro no envelope"}})
+    # Inclui o 404/405 do router, que é a exceção do Starlette.
+    sub.add_exception_handler(StarletteHTTPException, erros.http_erro)
+    sub.add_exception_handler(RequestValidationError, erros.validacao_erro)
+    sub.add_exception_handler(Exception, erros.erro_interno)
+    for modulo in (me, eventos, perfil, contas, assinaturas, resumo_mes, lancamentos,
+                   categorias, guia, previsao):
+        if modulo is not eventos or com_eventos:
+            sub.include_router(modulo.router)
+    return sub
 
-# StarletteHTTPException e não a do FastAPI: o 404/405 do router é a do Starlette.
-app.add_exception_handler(StarletteHTTPException, erros.http_erro)
-app.add_exception_handler(RequestValidationError, erros.validacao_erro)
-app.add_exception_handler(Exception, erros.erro_interno)
 
-app.include_router(me.router)
-app.include_router(eventos.router)
-app.include_router(perfil.router)
-app.include_router(contas.router)
-app.include_router(assinaturas.router)
-app.include_router(resumo_mes.router)
-app.include_router(lancamentos.router)
-app.include_router(categorias.router)
-app.include_router(guia.router)
-app.include_router(previsao.router)
+app = criar_app("/api/v2")

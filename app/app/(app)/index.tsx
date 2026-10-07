@@ -1,5 +1,5 @@
 import { router, useFocusEffect, type Href } from "expo-router";
-import { useCallback, useRef, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import { ActivityIndicator, Pressable, View } from "react-native";
 
 import { RequisicaoSuperada, SessaoExpirada } from "@/api/client";
@@ -96,6 +96,10 @@ export default function Inicio() {
     void carregar(() => cancelado);
     return () => { cancelado = true; };
   }, [ativo, travado]));
+
+  useEffect(() => {
+    if (estado.fase === "pronto" && estado.acesso === "inicio" && ativo && !travado) router.replace("/resumo" as Href);
+  }, [estado, ativo, travado]);
 
   return (
     <Screen>

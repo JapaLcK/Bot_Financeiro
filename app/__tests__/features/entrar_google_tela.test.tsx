@@ -81,8 +81,8 @@ describe("(auth)/entrar — Continuar com Google", () => {
     await abrirEntrar();
     await tocarGoogle();
 
-    await waitFor(() => expect(screen.getByText(/Olá, Ana/)).toBeTruthy());
-    expect(screen).toHavePathname("/");
+    await waitFor(() => expect(screen.getByText(/Bom dia, Ana/)).toBeTruthy());
+    expect(screen).toHavePathname("/resumo");
     await expect(lerCredenciais()).resolves.toEqual({ access: "access-ana", refresh: "rt_ana" });
   });
 
@@ -101,7 +101,8 @@ describe("(auth)/entrar — Continuar com Google", () => {
       fireEvent.changeText(screen.getByLabelText("Código de 6 dígitos"), "123456");
       await respirar();
     });
-    await waitFor(() => expect(screen.getByText(/Olá, Ana/)).toBeTruthy());
+    await waitFor(() => expect(screen.getByText(/Bom dia, Ana/)).toBeTruthy());
+    expect(screen).toHavePathname("/resumo");
     expect(chamadas().filter((c) => c.caminho === "/auth/mfa/verify-login").map((c) => c.corpo.challenge)).toEqual(["ch-g"]);
   });
 

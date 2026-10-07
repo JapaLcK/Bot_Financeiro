@@ -107,17 +107,17 @@ describe("_layout", () => {
       await waitFor(() => expect(screen).toHavePathname("/boas-vindas"));
     });
 
-    it("cold start com sessão no cofre: fica em /", async () => {
+    it("cold start com sessão no cofre: abre /resumo", async () => {
       await guardarCredenciais(S);
       renderRouter("./app", { initialUrl: "/" });
       // Pathname troca assim que a sessão vira "autenticado" — ANTES de
-      // `(app)/index.tsx` terminar de buscar `/auth/me`. `waitFor` no texto
+      // o portão bancário e o painel terminarem de validar o dono. `waitFor` no texto
       // final cobre as duas esperas com uma polling só.
-      await waitFor(() => expect(screen.getByText("Olá, S")).toBeTruthy());
-      expect(screen).toHavePathname("/");
+      await waitFor(() => expect(screen.getByText("Bom dia, S")).toBeTruthy());
+      expect(screen).toHavePathname("/resumo");
     });
 
-    it("login bem-sucedido troca o pathname de /entrar para /", async () => {
+    it("login bem-sucedido troca o pathname de /entrar para /resumo", async () => {
       renderRouter("./app", { initialUrl: "/entrar" });
       await waitFor(() => expect(screen).toHavePathname("/entrar"));
 
@@ -125,8 +125,8 @@ describe("_layout", () => {
       fireEvent.changeText(screen.getByLabelText("Senha"), "s3nha");
       await act(async () => fireEvent.press(screen.getByRole("button", { name: "Entrar" })));
 
-      await waitFor(() => expect(screen.getByText("Olá, Ana")).toBeTruthy());
-      expect(screen).toHavePathname("/");
+      await waitFor(() => expect(screen.getByText("Bom dia, Ana")).toBeTruthy());
+      expect(screen).toHavePathname("/resumo");
     });
 
     it("/auth/me terminal (401 + refresh 401) manda para /entrar com o aviso da sessão expirada", async () => {
@@ -143,8 +143,10 @@ describe("_layout", () => {
     it("N5 — Sair leva à /boas-vindas com o cofre vazio", async () => {
       await guardarCredenciais(S);
       renderRouter("./app", { initialUrl: "/" });
-      await waitFor(() => expect(screen.getByText("Olá, S")).toBeTruthy());
+      await waitFor(() => expect(screen.getByText("Bom dia, S")).toBeTruthy());
 
+      await act(async () => fireEvent.press(screen.getByRole("button", { name: "Abrir minha conta" })));
+      await waitFor(() => expect(screen.getByRole("button", { name: "Sair" })).toBeTruthy());
       await act(async () => fireEvent.press(screen.getByRole("button", { name: "Sair" })));
 
       await waitFor(() => expect(screen).toHavePathname("/boas-vindas"));

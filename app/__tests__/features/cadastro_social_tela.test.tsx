@@ -99,7 +99,8 @@ describe("(auth)/entrar — cadastro pelo Google (C/K)", () => {
       portao.soltar();
       await respirar();
     });
-    await waitFor(() => expect(screen.getByText(/Olá, Bia/)).toBeTruthy());
+    await waitFor(() => expect(screen.getByText(/Bom dia, Bia/)).toBeTruthy());
+    expect(screen).toHavePathname("/resumo");
     expect(cadastros().map((c) => c.corpo)).toEqual([
       { token: "gso_bia", name: "Bia S.", phone: "11999998888", accepted_terms: true },
     ]);
@@ -200,7 +201,8 @@ describe("(auth)/entrar — cadastro pela Apple (C/K)", () => {
   it("11 — Criar conta vai ao complete-signup da Apple e abre o app", async () => {
     await irAoCadastroApple();
     await criarConta();
-    await waitFor(() => expect(screen.getByText(/Olá, Leo/)).toBeTruthy());
+    await waitFor(() => expect(screen.getByText(/Bom dia, Leo/)).toBeTruthy());
+    expect(screen).toHavePathname("/resumo");
     expect(chamadas().filter((c) => c.caminho === "/auth/apple/complete-signup").map((c) => c.corpo)).toEqual([
       { token: "gso_leo", name: "Leo Lima", phone: "11999998888", accepted_terms: true },
     ]);

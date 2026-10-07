@@ -5,7 +5,7 @@ import { origemDaTentativa } from "./open_finance_volta_apoio";
  * item recomeça os 30 s e o contador) e o estado `erro` (só "Continuar"). Pelo
  * roteador de verdade, com o relógio falso do `renderRouter`.
  */
-import { router } from "expo-router";
+import { router, type Href } from "expo-router";
 import { act, fireEvent, renderRouter, screen, waitFor } from "expo-router/testing-library";
 
 import { JANELA_MS } from "@/features/openFinance/volta";
@@ -55,7 +55,7 @@ describe("open-finance-volta — demora e erro", () => {
     expect(screen.getByText(DEMORA)).toBeTruthy();
 
     await act(async () => {
-      router.navigate(redirectSystemPath({ path: `/open-finance-volta/${origemDaTentativa()}?itemId=${B}`, initial: false })!);
+      router.navigate(redirectSystemPath({ path: `/open-finance-volta/${origemDaTentativa()}?itemId=${B}`, initial: false }) as Href);
       await drenar();
     });
     await waitFor(() => expect(contarGets()).toBe(2));
